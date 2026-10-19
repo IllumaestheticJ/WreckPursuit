@@ -141,6 +141,11 @@ impl PoliceSystem {
         let ids: Vec<EntityId> = self.racers.keys().copied().collect();
         let cfg = self.cfg.heat.clone();
         for id in ids {
+            if self.held.contains(&id) {
+                // Driver dropped out: everything stays as it was (see `set_racer_held`).
+                self.recognition_s.remove(&id);
+                continue;
+            }
             let o = self.obs.get(&id).copied().unwrap_or(RacerObs {
                 nearest_unit_m: f32::INFINITY,
                 ..Default::default()
@@ -277,17 +282,56 @@ impl PoliceSystem {
         (capturer, assists)
     }
 
+    /// Credit for capturing an abandoned racer (`capture_abandoned`): only in-service ground
+    /// units assigned to it count; the nearest is the capturer (`None` if no unit was on it),
+    /// the others assists, ascending ids.
+    pub(crate) fn pursuing_credit(&self, racer: EntityId) -> (Option<UnitId>, Vec<UnitId>) {
+        let p = xy(self.racers[&racer].pos);
+        let on_racer: Vec<&crate::unit::Unit> = self
+            .units
+            .iter()
+            .filter(|u| {
+                u.kind == UnitKind::Car && !u.wrecked && u.assignment.target() == Some(racer)
+            })
+            .collect();
+        let capturer = on_racer
+            .iter()
+            .min_by(|a, b| {
+                crate::graph::dist2(a.body.pos, p)
+                    .total_cmp(&crate::graph::dist2(b.body.pos, p))
+                    .then(a.id.cmp(&b.id))
+            })
+            .map(|u| u.id);
+        let mut assists: Vec<UnitId> = on_racer
+            .iter()
+            .map(|u| u.id)
+            .filter(|id| Some(*id) != capturer)
+            .collect();
+        assists.sort();
+        (capturer, assists)
+    }
+
     /// End the pursuit of `racer` with `outcome` (rules, total loss, or captain call-off).
     pub(crate) fn end_pursuit(&mut self, racer: EntityId, outcome: PursuitOutcome) {
-        let now = self.now;
-        let cfg = self.cfg.heat.clone();
-        let was_pursued = self.racers[&racer].pursued();
-        let level_at_end = self.racers[&racer].level;
-        let (capturer, assists) = if outcome.is_capture() {
+        let credit = if outcome.is_capture() {
             self.capture_credit(racer)
         } else {
             (None, Vec::new())
         };
+        self.end_pursuit_credited(racer, outcome, credit);
+    }
+
+    /// [`Self::end_pursuit`] with the capture credit already decided.
+    pub(crate) fn end_pursuit_credited(
+        &mut self,
+        racer: EntityId,
+        outcome: PursuitOutcome,
+        (capturer, assists): (Option<UnitId>, Vec<UnitId>),
+    ) {
+        let now = self.now;
+        let cfg = self.cfg.heat.clone();
+        let was_pursued = self.racers[&racer].pursued();
+        let level_at_end = self.racers[&racer].level;
         {
             let rec = self.racers.get_mut(&racer).expect("racer");
             match outcome {
