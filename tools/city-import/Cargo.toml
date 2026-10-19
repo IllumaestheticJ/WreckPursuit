@@ -1,0 +1,22 @@
+[package]
+name = "city-import"
+description = "City data tools: OpenStreetMap importer, procedural city generator, greybox GLB writer."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+wp_world.workspace = true
+wp_math.workspace = true
+serde_json.workspace = true
+# Native-only tool (never reachable from wp_wasm). Pure Rust (flate2/miniz backend).
+osmpbf = "0.3"
+
+[[bin]]
+name = "city-import"
+path = "src/bin/city_import.rs"
+
+[[bin]]
+name = "gen-city"
+path = "src/bin/gen_city.rs"

@@ -13,6 +13,7 @@ members = [
     "crates/wp_wasm",
     "apps/server",
     "apps/simcli",
+    "tools/city-import",
 ]
 
 [workspace.package]

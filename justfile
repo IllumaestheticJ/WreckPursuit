@@ -31,6 +31,14 @@ sim scenario:
 schemas:
     cargo run -p wp_contracts --bin gen-schemas
 
+# Regenerate the procedural city (data/city/procedural_12x12.{road.bin,road.json,greybox.glb}).
+city:
+    cargo run --release -p city-import --bin gen-city -- --grid 12x12 --seed 1 --out data/city
+
+# Traffic benchmark / soak: `just traffic-bench 10` (minutes, 400 agents, noon).
+traffic-bench minutes="2":
+    cargo run --release -p wp_world --example traffic_bench -- {{minutes}} 400 12
+
 # Regenerate the debug box lattices in data/lattices/.
 lattices:
     cargo run -p wp_damage --bin gen-box-lattice -- --id debug_sedan --width 1.80 --length 4.70 --height 1.45 --wheelbase 2.70 --mass 350 --out data/lattices/debug_sedan.json
