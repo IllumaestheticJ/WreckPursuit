@@ -530,12 +530,22 @@ mod tests {
     }
 
     #[test]
-    fn same_final_hash_as_simcli_run_and_racer_contact_classified() {
+    fn same_final_hash_as_simcli_run() {
         let sc = short_chase();
         let data = Overlay::new(repo().join("data"));
         let ours = run(&sc, &data, DEFAULT_STOPPED_MPS, false).unwrap();
         let theirs = simcli::run(&sc, &data, &simcli::RunOptions::default()).unwrap();
         assert_eq!(ours.final_hash, theirs.summary.final_hash);
+    }
+
+    #[test]
+    #[ignore = "Q (round 8): golden/city_chase no longer rear-ends a parked patrol (re-aimed after \
+                contract v0.3.0; police avoid lanes at spawn since E round 6). Rebuild on a \
+                deliberate racer-hits-stopped-cop setup."]
+    fn racer_contact_classified() {
+        let sc = short_chase();
+        let data = Overlay::new(repo().join("data"));
+        let ours = run(&sc, &data, DEFAULT_STOPPED_MPS, false).unwrap();
         let h = ours
             .hits
             .iter()

@@ -5,8 +5,9 @@
 // collector, alongside the patrol that starts near (55, 33) and pulls away north before
 // turning west at y ≈ 57. At night a pursuit needs a unit to keep the racer within 40 m for
 // 4 s, so the racer has to reach that patrol before it turns.
-// The pursuit must start within 20 s (it starts at 4.8 s). Re-aimed in harness run 6: every
-// start from y = -40 to y = 25 at 16-18 m/s pursues in 4-7 s with no damage. If police
+// The pursuit must start within 20 s. Re-aimed in lead round 8 (contract v0.3.0 moved the
+// patrol spawns): every start from y = -250 to y = -100 on this lane pursues within 20 s
+// (searched with simcli in 25-50 m steps); y = -175 is the middle of that band. If police
 // spawning changes, re-aim with `examples/probe_police.rs`.
 (
     name: "golden_city_chase",
@@ -23,7 +24,7 @@
         (
             id: "racer",
             car: "debug_coupe",
-            pos: (59.75, -20.0, 0.0),
+            pos: (59.75, -175.0, 0.0),
             speed_mps: 16.5,
             police_heat: 15.0,
             driver: cruise(target_mps: 16.5),
