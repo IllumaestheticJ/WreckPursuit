@@ -3,8 +3,7 @@
 - **Workstream / prompt:** 14 — weather & road conditions (machine K)
 - **Branch:** `ws/weather`
 - **Crates / folders owned:** `crates/wp_weather`, `data/weather/`
-- **Contract version built against:** 0.1.0 (codes toward the v0.2.0 batch; nothing here needs
-  v0.2.0 to compile)
+- **Contract version built against:** 0.2.0 (main merged 2026-10-19, after lead run 3)
 
 Summary: `wp_weather` is self-contained (deps: `wp_contracts`, `wp_math`, serde/toml). Nothing
 calls it yet. The quickest path to "rain makes cars slide" is **step 1 below (lead, `wp_sim`
@@ -41,7 +40,11 @@ All in `wp_weather` (details: `crates/wp_weather/README.md`).
   WetnessGrid, fog_density, rain_mm_per_h, cloud_cover, temperature_c, road_temp_c, wind, …`.
 - `WeatherSim::{police_modifiers, traffic_modifiers, economy_modifiers, modifiers,
   sight_multiplier, render_params, puddle_cells(min_depth_mm)}`.
-- `WithWeather::new(&dyn WorldQuery, &WeatherSim)` — a `WorldQuery` (see step 1).
+- `WithWeather::new(&dyn WorldQuery, &WeatherSim)` — a `WorldQuery` (see step 1); forwards
+  `line_of_sight` unchanged (LOS stays geometric).
+- `WeatherSim::can_see(&self, world: &dyn WorldQuery, a, b, base_sight_m) -> bool` —
+  `|b − a| ≤ base_sight_m × sight_multiplier && world.line_of_sight(a, b)` (distance first, so
+  fog skips the occluder query for far targets). Night not included.
 
 **Grip (pure functions on `SurfaceTable`; `SurfaceTable::embedded()` is a `&'static`)**
 - `surface_grip_multiplier(surface: SurfaceType, wetness: f32, road_temp_c: f32) -> f32`
@@ -130,9 +133,13 @@ forwards weather (step 3). Cost: ≈ 0.04 ms per 60 Hz frame for a 1.6 km city a
   - patrol speed cap: `cap_mps = base_cap_mps * m.patrol_speed_cap_mult`
   - pursuit speed cap: `cap_mps = base_cap_mps * m.pursuit_speed_cap_mult`
   - incident/dispatch call rate: `rate *= m.crash_incident_rate_mult`
-  - LOS and roadblock sight checks: `sight_m = base_sight_m * night_mult * m.sight_multiplier`
-    (weather does **not** include night; police keeps its own night factor). After W-1, use the
-    local value: `world.weather_at(observer).sight_multiplier.min(world.weather_at(target).sight_multiplier)`.
+  - LOS and roadblock sight checks (v0.2.0 has `WorldQuery::line_of_sight`): call
+    `weather.can_see(world, observer, target, base_sight_m * night_mult)` instead of
+    `dist <= base_sight_m * night_mult && world.line_of_sight(observer, target)`. Without access
+    to the `WeatherSim`, the same result is `dist <= base * night_mult * m.sight_multiplier &&
+    world.line_of_sight(..)` (weather does **not** include night; police keeps its own factor).
+  - `wp_sim` already hands police `&self.world` (`police.step(&self.world, …)`); passing
+    `&WithWeather::new(&self.world, w)` there instead is enough for wet-grip police cars too.
 - Police cars are vehicles; they get wet grip through the sim's adapter like everyone else.
 
 ### 5. `wp_economy` (G) — table only
@@ -168,13 +175,17 @@ forwards weather (step 3). Cost: ≈ 0.04 ms per 60 Hz frame for a 1.6 km city a
 3. A, D, E, G: the hooks above, after their branches are in.
 
 ## Contract change requests
+Status after v0.2.0 (applied 2026-10-19): none of W-1…W-6 were in the batch (filed too late);
+**re-filed for v0.3.0**, unchanged. W-1 is the one that matters: without it the full grip
+model cannot reach `wp_vehicle` and the interim `WetAsphalt` remap stays in use.
+
 | # | Change (type / field / variant) | Why | Who is affected | Status |
 |---|---|---|---|---|
-| W-1 | Move `LocalConditions` (as in `wp_weather::conditions`, plain data) and `WeatherKind` into contracts; add `WorldQuery::weather_at(&self, p: [f32; 3]) -> LocalConditions` **with a default impl returning `LocalConditions::DRY`** | Vehicles need local water/temperature per wheel, police/traffic need local sight; a default method keeps every existing implementor compiling (additive → patch) | lead, A (calls it), D (forwards), E (LOS) | proposed |
-| W-2 | `SimEvent::WeatherChanged { kind: WeatherKind, intensity: f32, forced: bool }` | Audio, HUD, replays and economy (race stakes) need to see regime changes | lead, F (codec), C, 13, 16 | proposed |
-| W-3 | `SurfaceType::PaintedLine` (lane markings, zebra crossings; tires default 1.0) | Painted lines are the slipperiest common wet surface; `marking_grip_multiplier` is ready but nothing can report a marking | D (report it), A (`ffb` roughness match), H (tire data), lead | proposed (adding a variant breaks exhaustive matches → minor) |
-| W-4 | `TireDef::treaded: Option<bool>` (default `true`; `semi_slick.json` → `false`) | Slicks aquaplane much earlier; today inferred from `WetAsphalt/Asphalt < 0.6` | H, A | proposed |
-| W-5 | `ServerToClient` weather snapshot message / baseline field: `{ kind: u8, intensity: f32, prev_kind: u8, prev_intensity: f32, blend: f32, wind_heading_rad: f32, water_q8: Vec<u8> }` | Clients need the same wet roads for prediction and rendering | F, lead | proposed (fold into F's NET-1 list) |
+| W-1 | Move `LocalConditions` (as in `wp_weather::conditions`, plain data) and `WeatherKind` into contracts; add `WorldQuery::weather_at(&self, p: [f32; 3]) -> LocalConditions` **with a default impl returning `LocalConditions::DRY`** | Vehicles need local water/temperature per wheel, police/traffic need local sight; a default method keeps every existing implementor compiling (additive → patch) | lead, A (calls it), D (forwards), E (LOS) | proposed for v0.3.0 |
+| W-2 | `SimEvent::WeatherChanged { kind: WeatherKind, intensity: f32, forced: bool }` | Audio, HUD, replays and economy (race stakes) need to see regime changes | lead, F (codec), C, 13, 16 | proposed for v0.3.0 |
+| W-3 | `SurfaceType::PaintedLine` (lane markings, zebra crossings; tires default 1.0) | Painted lines are the slipperiest common wet surface; `marking_grip_multiplier` is ready but nothing can report a marking | D (report it), A (`ffb` roughness match), H (tire data), lead | proposed for v0.3.0 (adding a variant breaks exhaustive matches → minor) |
+| W-4 | `TireDef::treaded: Option<bool>` (default `true`; `semi_slick.json` → `false`) | Slicks aquaplane much earlier; today inferred from `WetAsphalt/Asphalt < 0.6` | H, A | proposed for v0.3.0 |
+| W-5 | `ServerToClient` weather snapshot message / baseline field: `{ kind: u8, intensity: f32, prev_kind: u8, prev_intensity: f32, blend: f32, wind_heading_rad: f32, water_q8: Vec<u8> }` | Clients need the same wet roads for prediction and rendering | F, lead | proposed for v0.3.0 (fold into F's NET-1 list) |
 | W-6 | `Season` into contracts | Only if 08/15 want season-dependent stakes or events; otherwise keep in `wp_weather` | lead, G, 15 | low priority |
 
 **Not a contract — scenario format request to I (10), W-7:** optional top-level field
@@ -204,6 +215,8 @@ rejects unknown fields, and a dry copy of `vehicle/sedan_brake.ron` would add no
 ## Changes outside my crates
 - `Cargo.toml` (workspace): added `crates/wp_weather` to `members` and `wp_weather` to
   `[workspace.dependencies]`.
+- Lead (run 3, contract v0.2.0) added `line_of_sight` to `WithWeather` (forwards) and to the
+  test `FlatWorld`; I kept both and added tests for them.
 - `tools/lint-determinism/src/lib.rs`: added `"wp_weather"` to `SIM_CRATES` (it runs inside the
   sim step). Lint result: 0 errors; one `f32-consts` warning (`std::f32::consts::PI` used with
   `wp_math::sin_cos`).

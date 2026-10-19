@@ -312,9 +312,41 @@ impl WorldQuery for FlatWorld {
     fn time_of_day(&self) -> TimeOfDay {
         TimeOfDay::from_hours(9.0)
     }
-    fn line_of_sight(&self, _a: [f32; 3], _b: [f32; 3]) -> bool {
-        true
+    /// A wall along x = 200 blocks every sightline that crosses it.
+    fn line_of_sight(&self, a: [f32; 3], b: [f32; 3]) -> bool {
+        (a[0] < 200.0) == (b[0] < 200.0)
     }
+}
+
+#[test]
+fn adapter_forwards_line_of_sight() {
+    let world = FlatWorld;
+    let w = sim(1, |_| {});
+    let q = WithWeather::new(&world, &w);
+    assert!(q.line_of_sight([0.0; 3], [150.0, 0.0, 0.0]));
+    assert!(!q.line_of_sight([0.0; 3], [250.0, 0.0, 0.0]));
+}
+
+#[test]
+fn fog_shortens_police_sight_and_walls_still_block() {
+    let world = FlatWorld;
+    let mut w = sim(1, |c| c.locked = true);
+    let t = TimeOfDay::from_hours(12.0);
+    w.update(1.0, t, &[]);
+    let a = [0.0, 0.0, 1.0];
+    let near = [0.0, 100.0, 1.0];
+    let mid = [0.0, 250.0, 1.0];
+    let walled = [210.0, 0.0, 1.0];
+    assert!(w.can_see(&world, a, near, 300.0));
+    assert!(w.can_see(&world, a, mid, 300.0));
+    assert!(!w.can_see(&world, a, walled, 300.0));
+    w.force(Regime::new(WeatherKind::Fog, 1.0), true);
+    w.update(1.0, t, &[]);
+    // Thick fog: visibility ~130 m → multiplier ~0.16 → 300 m base sight shrinks to ~49 m.
+    assert!(w.sight_multiplier() < 0.2);
+    assert!(!w.can_see(&world, a, near, 300.0));
+    assert!(!w.can_see(&world, a, mid, 300.0));
+    assert!(w.can_see(&world, a, [0.0, 30.0, 1.0], 300.0));
 }
 
 #[test]

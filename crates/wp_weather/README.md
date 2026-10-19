@@ -17,7 +17,7 @@ signatures: `docs/integration/weather.md`).
 | Temperature (air + road), wind, cloud, fog | `lib.rs` | diurnal curve via `wp_math::sin_cos`; clear nights cool the road (black ice in winter) |
 | `WetnessGrid` — water per 8 m cell | `grid.rs`, `surfaces.toml` | rain in, evaporation by surface / temperature / wind / sun / humidity / **traffic** (busy lanes dry first), infiltration of standing water, runoff to a per-cell cap; seeded puddle-prone cells |
 | Grip | `grip.rs`, `surfaces.toml` | `surface_grip_multiplier(surface, wetness, road_temp_c)` (wet asphalt 0.70, metal 0.40, painted lines 0.50 for the reference tire), cold + ice, tire-compound scaling, aquaplaning onset vs depth / speed / width / tread |
-| Visibility | `effects.rs`, `effects.toml` | Koschmieder visibility from fog, rain sight loss → AI sight multiplier; `RenderParams` |
+| Visibility | `effects.rs`, `effects.toml`, `lib.rs` | Koschmieder visibility from fog, rain sight loss → AI sight multiplier; `can_see(world, a, b, base_m)` = weather range + v0.2.0 `line_of_sight`; `RenderParams` |
 | Police / traffic / economy multipliers | `effects.rs`, `effects.toml` | patrol + pursuit speed caps, incident rate, traffic speed/headway/density, payout/rep (tables only — owners apply) |
 | Puddles + spray for the renderer | `grid.rs`, `effects.rs` | `puddle_cells(min_mm)`, `wetness_u8()` texture, `spray_intensity(water, speed)` |
 | `LocalConditions` / `weather_at(p)` | `conditions.rs` | payload of the requested `WorldQuery::weather_at` |
@@ -60,7 +60,7 @@ rate is zero (even with the schedule free to roll); normal cells dry within 3 h,
 longer; aquaplaning amount is non-decreasing in water depth and speed, onset falls with depth,
 slicks and wide tires plane earlier; heavy rain makes puddles; dawn favours fog; locked
 schedules never change; regime blends are smooth; winter clear nights freeze wet roads; police /
-economy / traffic multipliers move the right way; adapter remaps only wet asphalt; snapshot
+economy / traffic multipliers move the right way; adapter remaps only wet asphalt and forwards `line_of_sight`; fog shortens `can_see` and walls still block; snapshot
 round trip; disk tables == embedded tables; invalid tables are rejected.
 
 ## Performance (native, release, cloud container, 2026-10-19)

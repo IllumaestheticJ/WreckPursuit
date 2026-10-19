@@ -443,6 +443,23 @@ impl WeatherSim {
         self.modifiers.sight_multiplier
     }
 
+    /// Weather-limited sight check for police / AI: true if `b` is within
+    /// `base_sight_m × sight_multiplier` of `a` **and** `world.line_of_sight(a, b)` (v0.2.0)
+    /// is clear. The distance test runs first, so fog skips the occluder query for far targets.
+    /// Night is not included; the caller folds its own night factor into `base_sight_m`.
+    pub fn can_see(
+        &self,
+        world: &dyn WorldQuery,
+        a: [f32; 3],
+        b: [f32; 3],
+        base_sight_m: f32,
+    ) -> bool {
+        let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+        let dist2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+        let range = base_sight_m.max(0.0) * self.modifiers.sight_multiplier;
+        dist2 <= range * range && world.line_of_sight(a, b)
+    }
+
     /// All blended modifiers.
     pub fn modifiers(&self) -> &WeatherModifiers {
         &self.modifiers
