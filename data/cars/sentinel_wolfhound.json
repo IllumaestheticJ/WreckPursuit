@@ -41,7 +41,7 @@
       "AwdOnDemand": {
         "base_front_split": 0.9,
         "max_rear_split": 0.5,
-        "engage_slip": 0.05
+        "engage_slip": 0.02
       }
     },
     "gear_ratios": [4.48, 2.87, 1.84, 1.41, 1.0, 0.74],

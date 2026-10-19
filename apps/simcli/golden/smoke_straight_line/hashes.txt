@@ -1,15 +1,15 @@
-# simcli hashes scenario=smoke_straight_line systems=world,vehicle,damage,police,net hash_spec=2 contract=0.2.0
-240 d0dcbaa49e336338
-480 1ddf8b38257759fc
-720 6b353365f6556b36
-960 6d32c8c1bf21d0ba
-1200 aa5d6d6610e99966
-1440 65b6bd620475129f
-1680 eb093e5b57fcc113
-1920 3c07c17e6e0553b1
-2160 0e2f743c27b83b8f
-2400 ee9ddc68ae3cd880
-2640 311fea8898a0dd80
-2880 07dfa17feeb6348a
-3120 e8ba92cec43c8d3c
-3360 545421fce899a11d
+# simcli hashes scenario=smoke_straight_line systems=world,vehicle,damage,police,net hash_spec=3 contract=0.2.0
+240 454a52c522a3f8a7
+480 abcdd3a946297fd4
+720 1f5e785ce4f70e1f
+960 8bc6f33cbf25416a
+1200 5c5c7a5fea94f4ae
+1440 771ac8cbd8498965
+1680 8419e6b2da10c653
+1920 d6fd3fde32c1039e
+2160 e80da5d1a905d95a
+2400 ac24fa886a1f1446
+2640 8594476916308abe
+2880 6592b1c8e0d81b67
+3120 15ee4ad6eeddd2ed
+3360 f6ddaa7a6803c610

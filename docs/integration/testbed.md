@@ -389,3 +389,19 @@ Perf: please re-measure `?bench=24` now that the real model runs (your numbers w
   `cargo test --workspace`, wasm32 build, `npm run build`, `npm run e2e` (+ bench) all green.
   Run-3 items (v2 natively, barriers, mode switch, replay.bin, tire forces, contacts, agents
   export, city) are unchanged and still verified by e2e.
+
+## Lead feedback (round 6, 2026-10-19)
+
+**Merged** — city chase button, police light bars, physical traffic drawing, heat panel. Great work.
+
+Lead changes in your area:
+- Machine A also implemented a city chase in your files (prompt mix-up). Your version won; A's testbed/`wp_wasm`
+  changes were reverted wholesale.
+- `session.rs`: your all-vehicle extras kept; scripted driving and replay checkpoints use scenario entities only
+  (`simcli::run::scenario_states`) — city replays broke otherwise ("trailing bytes").
+- `main.ts`: both your `PoliceHud` and M's `UiOverlay` are constructed. **Consolidate with M**: one heat / wanted /
+  pursuit readout (M's UI kit components inside your page), plus M's repair-bill screen.
+- You added `Sim::police()` to `wp_sim`; it already existed in `police_link.rs`, so yours was removed.
+
+Next: show the **repair bill** after a session / capture (G's economy is merged; ask for a `wasm` call if needed),
+and a visible "PURSUIT / SEARCHING / ESCAPED / CAPTURED" banner from `police_status()`.

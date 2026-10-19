@@ -26,6 +26,7 @@ export const LAYERS: LayerDef[] = [
   { id: "events", key: "KeyV", label: "event feed (damage, glass, parts, violations)", default: true },
   { id: "telemetry", key: "KeyJ", label: "telemetry plots", default: true },
   { id: "inputs", key: "KeyN", label: "input display + rack torque", default: true },
+  { id: "chase", key: "KeyZ", label: "chase readout: wanted / heat / bounty / pursuit (UI kit)", default: true },
 ];
 
 const STORE_KEY = "wp.testbed.layers.v1";

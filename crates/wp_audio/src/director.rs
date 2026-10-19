@@ -20,6 +20,32 @@ use crate::spatial::{dot, len, rotate, sub, world_to_local};
 use crate::tires::{update_tires, TireAudioState};
 use crate::types::{slot, AudioCommand, Bus, Listener, Priority, VoiceId};
 
+/// Who drives a vehicle (mirrors `wp_sim::VehicleKind`; `wp_audio` does not depend on the sim).
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+pub enum DriverKind {
+    /// Human player.
+    #[default]
+    Player,
+    /// AI opponent racer.
+    AiRacer,
+    /// AI police unit: always siren-capable (Auto mode unless the car says otherwise).
+    Police,
+    /// Physical traffic: engine at `engine.traffic_gain`, low culling priority.
+    Traffic,
+}
+
 /// One vehicle's audio-relevant input for a frame.
 #[derive(Debug, Clone, Copy)]
 pub struct VehicleAudioInput<'a> {
@@ -37,6 +63,8 @@ pub struct VehicleAudioInput<'a> {
     pub siren: bool,
     /// `FfbOutput::road_rumble` if available, else 0.
     pub road_rumble: f32,
+    /// Who drives it.
+    pub kind: DriverKind,
 }
 
 /// Everything the director needs for one frame.
@@ -416,8 +444,15 @@ impl AudioDirector {
             );
             let prio = if focus {
                 Priority::Critical
+            } else if v.kind == DriverKind::Traffic {
+                Priority::Low
             } else {
                 Priority::Normal
+            };
+            let kind_gain = if v.kind == DriverKind::Traffic {
+                cfg.engine.traffic_gain
+            } else {
+                1.0
             };
             for (i, gain, pitch) in &eo.layers {
                 let l = &car.layers.layers[*i];
@@ -429,7 +464,7 @@ impl AudioDirector {
                     pos,
                     vel,
                 );
-                d.gain = *gain;
+                d.gain = *gain * kind_gain;
                 d.pitch = *pitch;
                 d.freq_hz = eo.firing_hz;
                 d.load = eo.load;
@@ -445,7 +480,7 @@ impl AudioDirector {
                     pos,
                     vel,
                 );
-                d.gain = eo.limiter;
+                d.gain = eo.limiter * kind_gain;
                 d.freq_hz = eo.firing_hz;
                 d.load = 1.0;
                 d.synth = Some(engine_synth(&car.def.engine, car.limits.rev_limit_rpm));
@@ -596,10 +631,12 @@ impl AudioDirector {
         // Siren.
         let ov = self.siren_overrides.get(&v.entity).copied();
         let on = v.siren || ov.is_some_and(|o| o.on);
-        let fitted = car.def.siren.is_some() || ov.is_some();
+        let police = v.kind == DriverKind::Police;
+        let fitted = car.def.siren.is_some() || ov.is_some() || police;
         let mode = match (ov, &car.def.siren) {
             (Some(o), _) => o.mode,
             (None, Some(sd)) => sd.default_mode,
+            (None, None) if police => SirenMode::Auto,
             (None, None) => SirenMode::Off,
         };
         if fitted {

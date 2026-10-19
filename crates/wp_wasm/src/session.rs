@@ -440,6 +440,7 @@ impl Session {
             }
             self.playback = Some(p);
         } else if self.script_running() {
+            // Scenario entities only: city runs add police / traffic cars (not scripted).
             let states = scenario_states(&self.sim, &self.ids);
             for (idx, (_, state)) in states.iter().enumerate() {
                 let input = driver_input(&self.sc, idx, tick, state, &self.last_input[idx]);
@@ -524,6 +525,7 @@ impl Session {
     }
 
     fn checkpoint(&self) -> Checkpoint {
+        // Replay checkpoints cover the scenario's own entities (the replay format's entity list).
         let states = scenario_states(&self.sim, &self.ids);
         let hashes: Vec<_> = self
             .sim
