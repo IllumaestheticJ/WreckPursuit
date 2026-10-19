@@ -161,7 +161,7 @@ Live HUD heat / wanted / bounty, pursuit status and the repair bill in the brows
 | `crates/wp_wasm/src/garage.rs` (new) | C | `repair_quote_json(entity, request_json)`: the running car's `DamageSim::repair_estimate` (economy `PriceTable` for its class/value) priced by `wp_economy::Economy::quote_repair` (shop, district, mode, wanted markup, insurance, salvage). Read-only. |
 | `crates/wp_wasm/src/lib.rs` | C | `pub mod garage;` |
 | `crates/wp_wasm/Cargo.toml` | C | `wp_economy` dependency (default features; `cargo tree --target wasm32-unknown-unknown` shows no rusqlite). |
-| `apps/testbed-web/src/ui_overlay.ts` (new) | C | Mounts the kit's `chaseHud` and `repairBill` overlays on a `createLiveModel()` fed each frame with the drained events (+ the police record when available). |
+| `apps/testbed-web/src/ui/overlay.ts` (new; all testbed-side UI-kit glue lives in `src/ui/`) | C | Mounts the kit's `chaseHud` and `repairBill` overlays on a `createLiveModel()` fed each frame with the drained events (+ the police record when available). |
 | `apps/testbed-web/src/main.ts` | C | 6 lines: construct `UiOverlay`, `ui.reset()` on session rebuild, `ui.frame(...)` after `eventsDrain()`, **F** toggles the repair bill. |
 | `apps/testbed-web/src/wasm/sim.ts` | C | `repairQuote()`, `policeStatus()` (feature-detects a `police_status_json` export; null until `Sim::police()` is wired). |
 | `apps/testbed-web/src/settings.ts`, `hud.ts` | C | Layer **Z** "chase readout"; help line mentions **F**. |

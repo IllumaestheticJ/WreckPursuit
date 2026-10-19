@@ -5,10 +5,10 @@
 //    repair_quote_json), with shop / district / option / insurance / wanted controls.
 // The kit's live model folds events with the same reducer as its mock provider, so these widgets
 // behave the same in the testbed and on the kit's demo page.
-import { billRequestJson, createLiveModel, mountOverlay, type LiveBillJson, type LiveModel, type PoliceReadout } from "../../ui-kit/src/live";
-import type { SimEvent as KitSimEvent } from "../../ui-kit/src/generated/contracts";
-import { layers } from "./settings";
-import { sim, type SimEvent } from "./wasm/sim";
+import { billRequestJson, createLiveModel, mountOverlay, type LiveBillJson, type LiveModel, type PoliceReadout } from "../../../ui-kit/src/live";
+import type { SimEvent as KitSimEvent } from "../../../ui-kit/src/generated/contracts";
+import { layers } from "../settings";
+import { sim, type SimEvent } from "../wasm/sim";
 
 export class UiOverlay {
   readonly model: LiveModel;
