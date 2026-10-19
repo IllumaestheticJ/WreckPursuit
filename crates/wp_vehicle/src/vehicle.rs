@@ -730,11 +730,13 @@ impl Vehicle {
             self.gearbox.auto_shift(&self.def.drivetrain, &inputs, dt);
         } else {
             let g = self.gearbox.gear;
+            // A destroyed gearbox (max_gear 0) has no reverse either.
+            let lowest = if max_gear >= 1 { -1 } else { 0 };
             if input.gear_up && g < max_gear {
                 self.gearbox.shift(g + 1, self.def.drivetrain.shift_time_s);
-            } else if input.gear_down && g > -1 {
+            } else if input.gear_down && g > lowest {
                 self.gearbox.shift(g - 1, self.def.drivetrain.shift_time_s);
-            } else if g > max_gear {
+            } else if g > max_gear || g < lowest {
                 self.gearbox
                     .shift(max_gear, self.def.drivetrain.shift_time_s);
             }
