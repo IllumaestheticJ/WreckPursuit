@@ -19,11 +19,70 @@ pub fn filter_pedal(current: f32, target: f32, strength: f32, dt: f32) -> f32 {
     approach(current, target, rate * dt)
 }
 
-/// Traction control: throttle-cut fraction state.
+/// Traction control: throttle cut plus brake-based traction control (the "electronic diff
+/// lock" of open-diff cars).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Tcs {
     /// Current throttle cut 0..=0.9.
     pub cut: f32,
+    /// Brake torque on each wheel from brake-based traction control, N·m (FL, FR, RL, RR).
+    pub brake: [f32; 4],
+}
+
+/// Brake-based traction control gain: brake torque on the faster driven wheel per m/s of
+/// wheel-speed difference beyond the dead band, N·m/(m/s), on top of the feed-forward
+/// ([`BtcAxle::ff`]).
+pub const BTC_GAIN: f32 = 600.0;
+/// Dead band of the left-right surface-speed difference (after removing what the cornering
+/// geometry asks for), m/s, plus [`BTC_DEADBAND_PER_MPS`] × road speed.
+pub const BTC_DEADBAND_MPS: f32 = 0.6;
+/// Speed-proportional part of the dead band, (m/s) per (m/s).
+pub const BTC_DEADBAND_PER_MPS: f32 = 0.04;
+/// How fast the brake torque may build or release, N·m/s (a hydraulic modulator).
+pub const BTC_RATE: f32 = 15000.0;
+/// Most brake torque brake-TC uses, fraction of the wheel's service-brake maximum.
+pub const BTC_MAX_FRAC: f32 = 1.0;
+
+/// Brake-TC torque on a wheel (N·m, last tick) above which the TCS throttle cut leaves that
+/// wheel's spin to the brakes and watches the slower wheel of the axle instead.
+pub const TCS_BRAKE_ACTIVE_NM: f32 = 50.0;
+/// From this fraction of brake-TC's limit up to the limit, the throttle cut blends back to
+/// watching the faster wheel (the brakes are running out, the engine has to back off).
+pub const TCS_BRAKE_HANDOFF: f32 = 0.8;
+
+/// One driven axle as brake-based traction control sees it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BtcAxle {
+    /// Left wheel index.
+    pub l: usize,
+    /// Right wheel index.
+    pub r: usize,
+    /// Left tire surface speed `ω·r`, m/s.
+    pub v_l: f32,
+    /// Right tire surface speed, m/s.
+    pub v_r: f32,
+    /// `v_l − v_r` the cornering geometry asks for (yaw rate × track, inside slower), m/s.
+    pub v_kin: f32,
+    /// Feed-forward per side (left, right): drive torque reaching the wheel minus what its tire
+    /// resists, N·m (≥ 0; last tick). The brake that holds a spinning wheel steady.
+    pub ff: [f32; 2],
+    /// Brake torque limit per wheel, N·m.
+    pub max_nm: f32,
+    /// Authority 0..=1 (rear axles fade out with speed, see [`btc_rear_authority`]).
+    pub authority: f32,
+}
+
+/// Rear-axle brake-TC fades out between these road speeds, m/s: braking one rear wheel adds
+/// yaw, so on a driven rear axle it is a launch / crawl aid (split-µ pull-away) and the
+/// throttle cut handles spin at speed. Front axles keep full authority.
+pub const BTC_REAR_FADE_START_MPS: f32 = 6.0;
+/// See [`BTC_REAR_FADE_START_MPS`].
+pub const BTC_REAR_FADE_END_MPS: f32 = 12.0;
+
+/// Brake-TC authority on a driven rear axle at road speed `speed` (m/s).
+pub fn btc_rear_authority(speed: f32) -> f32 {
+    ((BTC_REAR_FADE_END_MPS - speed.abs()) / (BTC_REAR_FADE_END_MPS - BTC_REAR_FADE_START_MPS))
+        .clamp(0.0, 1.0)
 }
 
 impl Tcs {
@@ -38,6 +97,48 @@ impl Tcs {
         let rate = if target > self.cut { 15.0 } else { 4.0 };
         self.cut = approach(self.cut, target, rate * dt);
         1.0 - self.cut
+    }
+
+    /// Brake-based traction control: on every listed axle (driven, diff not locked) brake the
+    /// wheel that spins faster than its partner by more than the cornering geometry explains,
+    /// so an open (or weakly locking) diff passes the torque to the wheel with grip. Only while
+    /// `driving` (on the throttle, off the brake); releases at [`BTC_RATE`] otherwise. Returns
+    /// the per-wheel brake torque to add, N·m.
+    pub fn update_brakes(
+        &mut self,
+        enabled: bool,
+        driving: bool,
+        axles: &[BtcAxle],
+        speed: f32,
+        dt: f32,
+    ) -> [f32; 4] {
+        if !enabled {
+            self.brake = [0.0; 4];
+            return self.brake;
+        }
+        let mut target = [0.0f32; 4];
+        let mut limit = [0.0f32; 4];
+        let band = BTC_DEADBAND_MPS + BTC_DEADBAND_PER_MPS * speed.abs();
+        for a in axles {
+            limit[a.l] = a.max_nm;
+            limit[a.r] = a.max_nm;
+            if driving {
+                let excess = (a.v_l - a.v_r) - a.v_kin;
+                let (fast, ff, e) = if excess >= 0.0 {
+                    (a.l, a.ff[0], excess)
+                } else {
+                    (a.r, a.ff[1], -excess)
+                };
+                // Feed-forward fades in across the dead band, the proportional term beyond it.
+                let hold = ff * (e / band).clamp(0.0, 1.0);
+                let push = BTC_GAIN * (e - band).max(0.0);
+                target[fast] = (a.authority * (hold + push)).clamp(0.0, a.max_nm);
+            }
+        }
+        for i in 0..4 {
+            self.brake[i] = approach(self.brake[i], target[i], BTC_RATE * dt).min(limit[i]);
+        }
+        self.brake
     }
 }
 
@@ -105,6 +206,45 @@ mod tests {
         assert_eq!(Tcs::default().update(true, 0.1, 0.1, 0.05), 1.0);
         assert!(m < 1.0);
         assert_eq!(Tcs::default().update(false, 0.5, 0.1, 0.05), 1.0);
+    }
+
+    #[test]
+    fn brake_tc_brakes_the_spinning_wheel_only() {
+        let axle = BtcAxle {
+            l: 2,
+            r: 3,
+            v_l: 12.0,
+            v_r: 4.0,
+            v_kin: 0.0,
+            ff: [0.0; 2],
+            max_nm: 1500.0,
+            authority: 1.0,
+        };
+        let mut t = Tcs::default();
+        let mut b = [0.0; 4];
+        for _ in 0..100 {
+            b = t.update_brakes(true, true, &[axle], 4.0, 0.01);
+        }
+        assert!(b[2] > 1000.0 && b[3] == 0.0, "{b:?}");
+        // A cornering speed difference is not wheelspin.
+        let corner = BtcAxle { v_kin: 8.0, ..axle };
+        let mut t = Tcs::default();
+        assert_eq!(t.update_brakes(true, true, &[corner], 4.0, 0.01), [0.0; 4]);
+        // Rear axles fade out with speed.
+        assert_eq!(btc_rear_authority(3.0), 1.0);
+        assert_eq!(btc_rear_authority(9.0), 0.5);
+        assert_eq!(btc_rear_authority(20.0), 0.0);
+        // Off the throttle: released at the modulator rate; TCS off: cleared at once.
+        let mut t = Tcs {
+            brake: [0.0, 0.0, 300.0, 0.0],
+            ..Tcs::default()
+        };
+        assert_eq!(t.update_brakes(true, false, &[axle], 4.0, 0.01)[2], 150.0);
+        let mut t = Tcs {
+            brake: [0.0, 0.0, 30.0, 0.0],
+            ..Tcs::default()
+        };
+        assert_eq!(t.update_brakes(false, true, &[axle], 4.0, 0.01), [0.0; 4]);
     }
 
     #[test]
