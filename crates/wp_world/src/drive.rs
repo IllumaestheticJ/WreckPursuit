@@ -20,6 +20,8 @@
 use wp_contracts::{VehicleDef, VehicleInput, VehicleState};
 
 use crate::geom::{self, V2, V3};
+pub use crate::leader::HOLD_BEHIND_MPS;
+use crate::leader::{find_leader, CarFollowing, Leader, LeaderParams, Obstacle};
 
 /// Tuning for [`DriveController`].
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -251,6 +253,40 @@ impl DrivePath {
         best.expect("path has segments")
     }
 
+    /// Nearest obstacle ahead of a car at `own_pos` (arc length `s` on this path, driving
+    /// `lateral_offset_m` right of it) — [`find_leader`] along this path. `skip` = ids to
+    /// ignore (the car itself, a target it means to hit).
+    pub fn leader(
+        &self,
+        own_pos: V3,
+        s: f32,
+        lateral_offset_m: f32,
+        obstacles: &[Obstacle],
+        skip: &[u32],
+        params: &LeaderParams,
+    ) -> Option<Leader> {
+        let end = if self.looped {
+            f32::INFINITY
+        } else {
+            self.length()
+        };
+        find_leader(
+            own_pos,
+            |d| {
+                // Stop the corridor at the end of an open path (no extrapolation past it).
+                let (p, t) = self.point_at((s + d).min(end));
+                let r = geom::right_of(t);
+                [
+                    p[0] + r[0] * lateral_offset_m,
+                    p[1] + r[1] * lateral_offset_m,
+                ]
+            },
+            obstacles,
+            skip,
+            params,
+        )
+    }
+
     /// `(s, lateral, distance)` of `p` against segment `i`.
     fn project_segment(&self, i: usize, p: V2) -> (f32, f32, f32) {
         let (a, b) = (geom::xy(self.pts[i]), geom::xy(self.pts[i + 1]));
@@ -324,6 +360,22 @@ pub struct FollowOutput {
     pub planned_speed_mps: f32,
     /// Open path finished: within the stop margin and (nearly) stopped.
     pub done: bool,
+    /// Vehicle followed this step ([`PathFollower::follow_behind`] only).
+    pub leader: Option<Leader>,
+}
+
+/// Other vehicles for [`PathFollower::follow_behind`].
+#[derive(Debug, Clone, Copy)]
+pub struct FollowTraffic<'a> {
+    /// Every vehicle near the car (it may include the car itself if its id is in `skip`).
+    pub obstacles: &'a [Obstacle],
+    /// Ids to ignore (own id, a target the car means to hit).
+    pub skip: &'a [u32],
+    /// Corridor shape; the look-ahead is re-scaled to speed each step
+    /// ([`LeaderParams::lookahead_for`]).
+    pub corridor: LeaderParams,
+    /// Car-following law.
+    pub following: CarFollowing,
 }
 
 /// `follow_path`: drives a vehicle along a [`DrivePath`] with the shared controller. Keep one
@@ -404,6 +456,24 @@ impl PathFollower {
         lateral_offset_m: f32,
         dt: f32,
     ) -> FollowOutput {
+        self.follow_behind(state, path, target_mps, lateral_offset_m, dt, None)
+    }
+
+    /// [`PathFollower::follow`] that also keeps its distance from vehicles ahead: looks for
+    /// the nearest of `traffic.obstacles` in the corridor along the path and caps the
+    /// commanded acceleration with the IDM law (`traffic.following`), exactly how civilian
+    /// traffic follows cars — slows behind a slower car, stops behind a stopped one at the
+    /// standstill gap. `None` traffic = plain [`PathFollower::follow`]. The leader found is
+    /// returned in [`FollowOutput::leader`].
+    pub fn follow_behind(
+        &mut self,
+        state: &VehicleState,
+        path: &DrivePath,
+        target_mps: f32,
+        lateral_offset_m: f32,
+        dt: f32,
+        traffic: Option<&FollowTraffic<'_>>,
+    ) -> FollowOutput {
         let (pos, fwd) = pose_2d(state);
         let v = state.speed_mps;
         let (s, lat, _) = path.project(pos, self.s_hint);
@@ -421,7 +491,19 @@ impl PathFollower {
         ];
         let steer = self.controller.steer(pos, fwd, target);
         let p = self.params;
-        let acc = ((planned - v) * p.speed_gain).clamp(-p.max_decel, p.max_accel);
+        let mut acc = ((planned - v) * p.speed_gain).clamp(-p.max_decel, p.max_accel);
+        let leader = traffic.and_then(|t| {
+            let lp = t.corridor.lookahead_for(v);
+            path.leader(state.pos, s, lateral_offset_m, t.obstacles, t.skip, &lp)
+        });
+        // Held behind a stopped / stopping leader: the PID releases the brake near standstill
+        // (holding it engages auto-reverse), so the car would creep into the leader.
+        let mut hold = false;
+        if let (Some(t), Some(l)) = (traffic, leader.as_ref()) {
+            let cap = t.following.leader_cap(v, Some(l));
+            acc = acc.min(cap.max(-p.max_decel));
+            hold = crate::leader::hold_behind(v, cap, l);
+        }
         let remaining = if path.looped {
             f32::INFINITY
         } else {
@@ -429,18 +511,23 @@ impl PathFollower {
         };
         let done = !path.looped && remaining <= p.stop_margin_m + 0.5 && v < 0.5;
         let (throttle, brake) = self.controller.pedals(v, acc, dt, done);
+        let mut input = VehicleInput {
+            steer,
+            throttle,
+            brake,
+            ..Default::default()
+        };
+        if hold {
+            input = crate::leader::held(input);
+        }
         FollowOutput {
-            input: VehicleInput {
-                steer,
-                throttle,
-                brake,
-                ..Default::default()
-            },
+            input,
             s,
             cross_track_m: lat - lateral_offset_m,
             remaining_m: remaining,
             planned_speed_mps: planned,
             done,
+            leader,
         }
     }
 }

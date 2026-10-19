@@ -25,6 +25,7 @@ pub mod clock;
 pub mod density;
 pub mod drive;
 pub mod geom;
+pub mod leader;
 pub mod map;
 pub mod network;
 pub mod procgen;
