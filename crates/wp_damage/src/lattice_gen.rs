@@ -1153,6 +1153,162 @@ pub fn generate_lattice(p: &LatticeParams) -> LatticeDef {
     }
 }
 
+/// Detach group of a bolt-on accessory (push bar, kit). Groups 0-7 are the generator's
+/// bumpers, hood, trunk and doors.
+pub const GROUP_ACCESSORY: u16 = 8;
+
+/// Push-bar tube section, m² (high-strength steel; not scaled by car mass).
+pub const PUSHBAR_SECTION_M2: f32 = 8.0e-4;
+/// Push-bar mount section, m² (bolted to the front bumper-beam rail nodes).
+pub const PUSHBAR_MOUNT_SECTION_M2: f32 = 6.0e-4;
+
+/// Police push bar added by [`add_push_bar`] (`gen-lattice --accessory pushbar`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PushBarOptions {
+    /// Push-bar mass, kg (added on top of the lattice mass, spread over its 4 nodes).
+    pub mass_kg: f32,
+    /// Hinge break impulse of the bar, N·s.
+    pub break_impulse_ns: f32,
+    /// Multiplier on the tube and mount sections.
+    pub section_scale: f32,
+    /// Region of the bar's nodes. `Accessory` (default) bills it as an accessory and keeps it
+    /// out of the car's health; `FrontBumper` reproduces the pre-v0.3.0 roster data.
+    pub region: BodyRegion,
+    /// Heights of the lower and upper tube, m above the ground. `None` = 0.35 / 0.80 m,
+    /// or 0.45 / 0.95 m on the truck and SUV profiles.
+    pub heights_m: Option<[f32; 2]>,
+}
+
+impl Default for PushBarOptions {
+    fn default() -> Self {
+        Self {
+            mass_kg: 25.0,
+            break_impulse_ns: 15_000.0,
+            section_scale: 1.0,
+            region: BodyRegion::Accessory,
+            heights_m: None,
+        }
+    }
+}
+
+/// Add a push bar: 4 nodes 0.10 m ahead of the frontmost node (x = ±0.32 × width), joined by
+/// 6 tubes (never detaching on their own) and bolted to the frontmost front-rail nodes of the
+/// same side by mounts in detach group [`GROUP_ACCESSORY`]. Beams are re-sorted by (a, b).
+/// Same geometry as the `police_package` step of `tools/specsheet/build_roster.py`.
+/// Returns the new node ids (lower left, lower right, upper left, upper right).
+pub fn add_push_bar(l: &mut LatticeDef, p: &LatticeParams, o: &PushBarOptions) -> [u16; 4] {
+    let rail_x = RAIL_X_FRAC * p.width_m;
+    let engine: BTreeSet<u16> = l
+        .components
+        .iter()
+        .filter(|c| c.kind == Component::Engine)
+        .flat_map(|c| c.node_ids.iter().copied())
+        .collect();
+    let ff: Vec<&LatticeNode> = l
+        .nodes
+        .iter()
+        .filter(|n| {
+            n.region == BodyRegion::FrameFront
+                && (n.pos_m[0].abs() - rail_x).abs() < 1e-3
+                && !engine.contains(&n.id)
+        })
+        .collect();
+    let y_bb = ff.iter().map(|n| n.pos_m[1]).fold(f32::MIN, f32::max);
+    let mounts: Vec<(u16, f32)> = ff
+        .iter()
+        .filter(|n| (n.pos_m[1] - y_bb).abs() < 1e-3)
+        .map(|n| (n.id, n.pos_m[0]))
+        .collect();
+    let y_bar = l.nodes.iter().map(|n| n.pos_m[1]).fold(f32::MIN, f32::max) + 0.10;
+    let zs = o.heights_m.unwrap_or(match p.profile {
+        BodyProfile::Truck | BodyProfile::Suv => [0.45, 0.95],
+        _ => [0.35, 0.80],
+    });
+    let round4 = |v: f32| (v * 1e4).round() / 1e4;
+    let mut new = [0u16; 4];
+    let mut k = 0;
+    for z in zs {
+        for x in [-0.32 * p.width_m, 0.32 * p.width_m] {
+            let id = l.nodes.len() as u16;
+            l.nodes.push(LatticeNode {
+                id,
+                pos_m: [round4(x), round4(y_bar), z],
+                mass_kg: o.mass_kg / 4.0,
+                pinned_to_chassis: false,
+                region: o.region,
+            });
+            new[k] = id;
+            k += 1;
+        }
+    }
+    let [lo_l, lo_r, hi_l, hi_r] = new;
+    let tube = PUSHBAR_SECTION_M2 * o.section_scale;
+    let mount = PUSHBAR_MOUNT_SECTION_M2 * o.section_scale;
+    for (a, b) in [
+        (lo_l, lo_r),
+        (hi_l, hi_r),
+        (lo_l, hi_l),
+        (lo_r, hi_r),
+        (lo_l, hi_r),
+        (lo_r, hi_l),
+    ] {
+        l.beams.push(LatticeBeam {
+            a: a.min(b),
+            b: a.max(b),
+            material_id: "hss".into(),
+            area_m2: tube,
+            breakable: true,
+            detach_group: None,
+        });
+    }
+    for id in new {
+        let left = l.nodes[id as usize].pos_m[0] < 0.0;
+        for &(m, mx) in &mounts {
+            if (mx < 0.0) == left {
+                l.beams.push(LatticeBeam {
+                    a: m.min(id),
+                    b: m.max(id),
+                    material_id: "hss".into(),
+                    area_m2: mount,
+                    breakable: true,
+                    detach_group: Some(GROUP_ACCESSORY),
+                });
+            }
+        }
+    }
+    l.beams.sort_by_key(|b| (b.a, b.b));
+    l.detachables.push(Detachable {
+        group: GROUP_ACCESSORY,
+        region: o.region,
+        hinge_nodes: [lo_l, lo_r],
+        break_impulse_ns: o.break_impulse_ns,
+        mass_kg: o.mass_kg,
+    });
+    new
+}
+
+/// Heavy-duty components (`gen-lattice --hd Radiator=1.5,…`): each listed component's
+/// failure and total intrusion × its factor (rounded to 0.1 mm, as the roster tool does).
+pub fn apply_heavy_duty(l: &mut LatticeDef, factors: &BTreeMap<Component, f32>) {
+    let r4 = |v: f32| (v * 1e4).round() / 1e4;
+    for c in &mut l.components {
+        if let Some(&k) = factors.get(&c.kind) {
+            c.intrusion_fail_m = r4(c.intrusion_fail_m * k);
+            c.intrusion_total_m = r4(c.intrusion_total_m * k);
+        }
+    }
+}
+
+/// Scale the detach impulse of every group of `region` except [`GROUP_ACCESSORY`]
+/// (`gen-lattice --detach-scale FrontBumper=2`; rounded to 0.1 N·s).
+pub fn scale_detach_impulse(l: &mut LatticeDef, region: BodyRegion, scale: f32) {
+    for d in &mut l.detachables {
+        if d.region == region && d.group != GROUP_ACCESSORY {
+            d.break_impulse_ns = (d.break_impulse_ns * scale * 10.0).round() / 10.0;
+        }
+    }
+}
+
 fn nearest(ys: &[f32], y: f32) -> usize {
     nearest_in(ys, y, 0, ys.len() - 1)
 }
@@ -1350,5 +1506,79 @@ mod tests {
                 p.id
             );
         }
+    }
+
+    #[test]
+    fn push_bar_heavy_duty_and_detach_scale_options() {
+        let mats = materials();
+        let p = params(BodyProfile::Cruiser);
+        let stock = generate_lattice(&p);
+        let mut l = stock.clone();
+        let o = PushBarOptions {
+            mass_kg: 40.0,
+            break_impulse_ns: 30_000.0,
+            section_scale: 1.5,
+            ..PushBarOptions::default()
+        };
+        let new = add_push_bar(&mut l, &p, &o);
+        wp_contracts::validate_lattice_def(&l).unwrap();
+        assert_eq!(l.nodes.len(), stock.nodes.len() + 4);
+        let front = stock
+            .nodes
+            .iter()
+            .map(|n| n.pos_m[1])
+            .fold(f32::MIN, f32::max);
+        for id in new {
+            let n = &l.nodes[id as usize];
+            assert_eq!(n.region, BodyRegion::Accessory);
+            assert!((n.pos_m[1] - front - 0.10).abs() < 1e-3);
+            assert_eq!(n.mass_kg, 10.0);
+        }
+        let bar = l
+            .detachables
+            .iter()
+            .find(|d| d.group == GROUP_ACCESSORY)
+            .unwrap();
+        assert_eq!(bar.break_impulse_ns, 30_000.0);
+        let mounts = l
+            .beams
+            .iter()
+            .filter(|b| b.detach_group == Some(GROUP_ACCESSORY))
+            .count();
+        assert!(mounts >= 4, "{mounts} mounts");
+        assert!(l
+            .beams
+            .windows(2)
+            .all(|w| (w[0].a, w[0].b) <= (w[1].a, w[1].b)));
+        // The model accepts it (the bar is a detachable group).
+        let m = crate::DamageModel::new(&l, &mats);
+        assert_eq!(m.health(), 1.0);
+
+        let hd: BTreeMap<Component, f32> = [(Component::Radiator, 1.5)].into_iter().collect();
+        apply_heavy_duty(&mut l, &hd);
+        let rad = |l: &LatticeDef| {
+            l.components
+                .iter()
+                .find(|c| c.kind == Component::Radiator)
+                .unwrap()
+                .intrusion_fail_m
+        };
+        assert!((rad(&l) - 1.5 * rad(&stock)).abs() < 1e-4);
+        scale_detach_impulse(&mut l, BodyRegion::FrontBumper, 2.0);
+        scale_detach_impulse(&mut l, BodyRegion::Accessory, 3.0);
+        let imp = |l: &LatticeDef, g: u16| {
+            l.detachables
+                .iter()
+                .find(|d| d.group == g)
+                .unwrap()
+                .break_impulse_ns
+        };
+        let f0 = imp(&stock, GROUP_FRONT_BUMPER);
+        assert!((imp(&l, GROUP_FRONT_BUMPER) - 2.0 * f0).abs() < 0.1);
+        assert_eq!(
+            imp(&l, GROUP_ACCESSORY),
+            30_000.0,
+            "push bar keeps its own impulse"
+        );
     }
 }
