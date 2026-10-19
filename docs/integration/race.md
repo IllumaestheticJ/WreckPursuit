@@ -22,12 +22,14 @@ let sched = Scheduler { rules: &data.schedule, stakes: &data.stakes, seed: world
 let cal: DayCalendar = sched.generate_day(day, &venues, &meet_heat);
 for ev in cal.lobbies_opening(prev_abs_s, now_abs_s) { /* broadcast lobby, RaceSignal::LobbyOpened */ }
 
-// 2. Course + judge when the lobby opens.
-let route = world.plan_route_between_pois(a, b)        // or plan_circuit / plan_route
-    .unwrap();
-world.set_active_routes(vec![bridge::active_route(route.clone(), ev)]);  // closed for sanctioned
-let course = bridge::course_from_route(&route, 3.0);
-let mut judge = RaceJudge::new(ev.id, data.rules.for_kind(ev.kind), course);
+// 2. Route + course + judge when the lobby opens.
+let race = bridge::plan_city_race(&world, start, heading, finish, 3.0)   // or plan_city_circuit
+    .unwrap();                                       // CityRace { route, course }
+// One call with every live race (set_active_routes replaces the list): Suppressed = closed
+// lanes + cones (sanctioned), Normal/Heavy = traffic focus only. Call again when races end.
+bridge::activate_race_routes(&mut world, &[(&race.route, ev.traffic)]);
+let preview = bridge::closure_preview(&world, &race.route);          // lobby map / marshals
+let mut judge = RaceJudge::new(ev.id, data.rules.for_kind(ev.kind), race.course);
 judge.set_police(&police_entities);
 
 // 3. Entries (after the lobby checks below and wp_economy::enter_race).
@@ -95,6 +97,24 @@ final variant lists. **R1 below is the final list for `RaceEvent`.**
 | R5 | `wp_economy::RaceType` keyed by the contract `RaceKind` (or `RacePayout` carries the purse from `wp_race::Stake`) | Outrun, Checkpoint, Cannonball, Delivery, TimeAttack have no economy type; legality is lost | 08 | for v0.3.0 with typed `EconomyEvent` / `RacePayout` |
 | R6 | `ClientToServer::RaceCommand { Enter { event }, Withdraw { event }, Ready }`, `ServerToClient::Race(RaceEvent)` | lobby join/leave from clients | 07, 04 | for v0.3.0, inside F's full message set |
 
+### City sprint (lead run 4 request, done on `ws/race`)
+- `bridge::{plan_city_race, plan_city_circuit, CityRace, activate_race_routes, closure_preview}`
+  put race routes into `World::set_active_routes` (closure + checkpoints → judged gates).
+- `apps/simcli/scenarios/race/city_sprint.ron`: sedan vs coupe on the procedural 7×7 city's
+  three-lane northbound arterial (x = 60.55, ~297 m). `tests/simcli_races.rs::city_sprint_on_real_roads`
+  plans the same route with `wp_world`, checks the scenario spawns sit on the judge's grid, and
+  judges the physics run: coupe wins from the second slot, both clean, `wp_world` speeding
+  violations counted.
+- `city_sprint_route_closure_through_set_active_routes`: every race lane is closed, cones appear
+  only for `Suppressed`, no civilian enters the closed route over 20 s of traffic, and clearing
+  the routes removes the cones.
+- Ask for 10 (harness): a scenario-level race block (`race: (route: plan(start, finish), closed:
+  true)`) so simcli itself can apply the closure; the scenario runs with `traffic_density: 0.0`
+  until then.
+- FYI for D: one red-light crossing emits `RedLight` on 3-4 consecutive net ticks (see the city
+  sprint's `events.jsonl`); the judge counts each, so it would help if it fired once per
+  crossing (it does not affect clean status, which only looks at `Collision`).
+
 ### v0.2.0 follow-up (done on `ws/race`)
 - `SimEvent::TrafficViolation { .., pos }`: the lead patched the judge's match and the scripted
   trace on `main`; merged.
@@ -109,7 +129,7 @@ final variant lists. **R1 below is the final list for `RaceEvent`.**
 | File | Change | Why |
 |---|---|---|
 | `Cargo.toml` (root) | `crates/wp_race` workspace member + `wp_race` workspace dependency | new crate |
-| `apps/simcli/scenarios/race/*.ron` | two new scenarios (simcli v2, no new fields) | scenario tests live there per `CLAUDE.md` |
+| `apps/simcli/scenarios/race/*.ron` | three scenarios (simcli v2, no new fields): drag, corridor DQ, city sprint | scenario tests live there per `CLAUDE.md` |
 | `apps/simcli/golden/race_*/hashes.txt` | goldens for those scenarios (`[bless]` commits; re-blessed for v0.2.0 physics) | `goldens_match` requires one per scenario |
 
 No edits to `wp_contracts`, `wp_world`, `wp_economy`, `wp_sim` or simcli code.
