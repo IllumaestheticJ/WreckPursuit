@@ -451,7 +451,7 @@ Format: `- **Lnnn** [Speaker · Pn] text`. Speakers: Dispatch, Unit, Skywatch, C
 ## 10. Line-selection rules (06 emits, 13 plays)
 
 1. 06 emits a `PoliceEvent::Radio` for every dispatch assignment and state change (06 prompt);
-   the line id (e.g. `L066`) should travel with it once `PoliceEvent` is typed (v0.2.0), so audio
+   the line id (e.g. `L066`) should travel with it once `PoliceEvent` is typed (deferred to contract v0.3.0), so audio
    and UI can look up voice/priority without parsing text.
 2. Each situation has several lines; pick with the seeded sim RNG, never the same line twice within
    the last **8** lines of the same situation, and never the same line within **60 s** overall.

@@ -4,7 +4,7 @@
 - **Branch:** `ws/design-docs`
 - **Crates / folders owned:** `docs/design/`; drafted `data/city/handmade_v0.zones.json` (05 owns
   `data/city/`; this file is a draft for 05 to adopt or regenerate)
-- **Contract version built against:** 0.1.0
+- **Contract version built against:** 0.2.0 (docs reviewed against the v0.2.0 changelog)
 
 ## Exposes
 - `docs/design/GDD.md` — the game design document.
@@ -29,14 +29,20 @@ None directly. Proposals for owners (details in `CITY.md` §9, GDD §12):
 | # | Change | Why | Who is affected | Status |
 |---|---|---|---|---|
 | C1 | Build `handmade_v0.road.*` from `CITY.md` | design target city | 05 | proposed |
-| C2 | `Zone.name` or `DistrictId` (already deferred to 05's merge in the v0.2.0 plan) | districts named across crews, heat, labour, radio, UI | lead, 05, 06, 08, 15, 16 | proposed (supports existing 08 #6) |
+| C2 | `Zone.name` or `DistrictId` | districts named across crews, heat, labour, radio, UI | lead, 05, 06, 08, 15, 16 | `DistrictId` deferred to v0.3.0 by the lead; still wanted |
 | C3 | Garage shop kind on POIs (legit / crooked) | economy already prices it | 05, 08 | proposed |
 | C4 | Dynamic world entities: drawbridge, rail crossings + trains, ferry ramp, straddle carriers | city hazards | 05 | proposed |
-| C5 | Covered-lane flag used by LOS queries (tunnels, trenches, parking structures) | helicopter/camera LOS | 05, 06 | proposed |
+| C5 | Covered-lane flag used by LOS queries (tunnels, trenches, parking structures) | helicopter/camera LOS | 05, 06 | partly: v0.2.0 added `WorldQuery::line_of_sight` (2D building footprints); a covered/tunnel flag is still needed so the helicopter loses LOS in Calloway Tunnel / Founders Cut / parking structures |
 | C6 | Surface types `Cobblestone`, `SteelGrate` (or document `Metal` covers grates) | Old Harbor, Iron Bridge | lead, 02, 14 | proposed |
 | C7 | Timed speed zones (school zone) as lane metadata | Mercer St | 05, 06 | proposed |
 | C8 | Route ids R01–R15 and the four day circuits as 15's first event data | shared names | 15, 18 | proposed |
-| C9 | Line id travels with `PoliceEvent::Radio` once typed | audio picks recorded lines, avoids repeats | 06, 13 | proposed (`POLICE_DOCTRINE.md` §10) |
+| C9 | Line id travels with `PoliceEvent::Radio` once typed | audio picks recorded lines, avoids repeats | 06, 13 | waits on typed `PoliceEvent` (deferred to v0.3.0) |
+
+## v0.2.0 review (2026-10-19)
+Docs only, so nothing broke. References updated: `WorldQuery::line_of_sight` exists (C5 narrowed to the covered-road flag); `DistrictId`, typed
+`PoliceEvent` and `BodyRegion::Accessory` are deferred to v0.3.0 (C2, C9 and the CARS_LORE
+open question now say so). `WantedLevel` moving to `wp_contracts` needs no doc change (the docs never named its crate).
+No new contract requests. Lead feedback section was empty; no items assigned.
 
 ## Changes outside my crates
 - `data/city/handmade_v0.zones.json` (new file in 05's folder): a draft, clearly labelled in its

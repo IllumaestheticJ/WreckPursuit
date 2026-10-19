@@ -331,7 +331,7 @@ tier 4 ≈ 2 500+). Mod ids follow the existing `<slot>_<name>` pattern.
 
 Open questions for 08:
 1. A two-element body-kit front (`bull_bar_a`, `tow_hook_a`) shares the `BodyKitFront` slot with
-   bumpers, so you can't run both. Is a separate `Accessory` kind wanted (pairs with the accepted
-   `BodyRegion::Accessory` in the v0.2.0 plan)?
+   bumpers, so you can't run both. Is a separate `Accessory` kind wanted (pairs with
+   `BodyRegion::Accessory`, accepted but deferred to contract v0.3.0)?
 2. Should `forged_10spoke` carry the same `wheels.mass_kg` reduction as `forged_5spoke`? If so it
    stops being purely cosmetic and needs a tradeoff line.
