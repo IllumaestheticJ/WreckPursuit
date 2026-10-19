@@ -27,6 +27,7 @@ import type { CaptainState, CityMap, DeployedTool, GarageCar, HeatHud, Incident,
 import { CARS, MODS, modBlocker } from "../data/catalog";
 import { carValue, impoundFee, insuranceQuote, marketPrice, modsPrice, quoteRepair, salePrice } from "../data/economy";
 import { FIXTURES, loadFixture } from "./fixtures";
+import { DEFAULT_BILL_REQUEST, mockBill } from "../live/bill";
 import {
   ASSIST_PRESETS,
   cityMap,
@@ -199,6 +200,7 @@ export function createMockModel(opts: MockOptions = {}): MockModel {
       markers: markersFor(run, player),
       camera: "chase",
     },
+    bill: mockBill(garage[0], DEFAULT_BILL_REQUEST, settings.damageMode, account.cash),
     notice: null,
   });
 
@@ -771,6 +773,12 @@ export function createMockModel(opts: MockOptions = {}): MockModel {
         if (!FIXTURES.some((f) => f.id === cmd.source)) return notice(`Unknown replay ${cmd.source}`);
         return loadRun(cmd.source);
 
+      case "bill.request": {
+        const car = s.garage.cars.find((c) => c.uid === s.garage.activeCar) ?? s.garage.cars[0];
+        if (!car) return notice("No car to price");
+        const request = { ...(s.bill?.request ?? DEFAULT_BILL_REQUEST), ...cmd.request };
+        return set((st) => ({ ...st, bill: mockBill(car, request, st.settings.damageMode, st.account.cash) }));
+      }
       case "notice.dismiss":
         return set((st) => ({ ...st, notice: null }));
     }

@@ -123,3 +123,12 @@ Run-4 follow-up (received as a cross-session message from the lead, 2026-10-19):
 that drives the city and flees police, `VehicleKind::AiRacer`, reuse D's controller, a simcli
 v2 scenario. Status: done as described above. D's controller is already public as
 `wp_world::drive::DriveController` (moved there by this workstream, merged in run 4).
+
+
+## Lead feedback (round 6b, 2026-10-19) — head-start tasks
+
+Contract **v0.3.0** is being applied in parallel by the lead (branch `lead/contract-v0.3.0`). Do not edit `wp_contracts`; build your work so it drops onto v0.3.0 (inherent methods / local types now, trait wiring after). Merge `origin/claude/laughing-newton-0xqr6q` (the lead branch, ahead of `main` until today's gate finishes) before starting. Goal of the project right now: the **single-player greybox demo**: drive in the city, raise heat, get chased by physical police, escape or get caught, and pay the repair bill.
+
+1. AI racers react to police: read `Sim::police()` (read-only) for unit positions, and flee or yield per wanted level. Test in a city scenario with police on: the AI racer escapes or gets caught, with no stuck cars.
+2. Draft model (your Need 5) so near-equal cars can pass.
+3. Signal timing at junctions for open-road racing (stop yielding at every busy junction).

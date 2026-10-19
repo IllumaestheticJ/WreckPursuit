@@ -21,6 +21,7 @@
 //! - [`mods`] — mod definitions, catalog, install rules, applying mods to definitions.
 //! - [`garage`] — buy/sell, floor car, install/uninstall, preview, valuation, insurance.
 //! - [`estimate`] — performance estimator and class index.
+//! - [`pursuit`] — police pursuit endings → capture / escape settlement (draft for contract v0.3.0).
 //! - [`career`] — scripted multi-night career simulation used for tuning.
 
 #![warn(missing_docs)]
@@ -34,6 +35,7 @@ pub mod garage;
 pub mod ledger;
 pub mod mods;
 pub mod payouts;
+pub mod pursuit;
 pub mod repair;
 #[cfg(feature = "native")]
 pub mod sqlite;
@@ -49,5 +51,6 @@ pub use ledger::{
 };
 pub use mods::{ModCatalog, ModDef, ModEffect, ModSlot, ToolLoadout};
 pub use payouts::{PinkSlipConsent, RaceResult, RaceSettlement, RaceSetup, RaceType};
+pub use pursuit::{PoliceSignal, PursuitEnd, PursuitResolution, PursuitSettlement, PursuitTracker};
 pub use repair::{DamageReport, RepairOption, RepairOrder, RepairQuote, ShopContext, ShopKind};
 pub use wp_contracts::WantedLevel;

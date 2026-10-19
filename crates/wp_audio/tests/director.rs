@@ -186,6 +186,11 @@ fn run_crash(seed: u64) -> (u64, usize, BTreeMap<String, usize>) {
                 horn: *id == a,
                 siren: *id == p,
                 road_rumble: 0.0,
+                kind: if *id == p {
+                    DriverKind::Police
+                } else {
+                    DriverKind::Player
+                },
             })
             .collect();
         let cmds = dir.update(&AudioFrame {
@@ -297,6 +302,7 @@ fn voice_culling_respects_limits() {
                 horn: true,
                 siren: false,
                 road_rumble: 0.5,
+                kind: DriverKind::Player,
             })
             .collect();
         // Crash events every frame too.
@@ -394,6 +400,7 @@ fn time_going_backwards_resets_and_stops_everything() {
         horn: false,
         siren: false,
         road_rumble: 0.0,
+        kind: DriverKind::Player,
     }];
     let frame = |tick| AudioFrame {
         tick,
@@ -467,6 +474,7 @@ fn step(
         horn: false,
         siren: false,
         road_rumble: 0.5,
+        kind: DriverKind::Player,
     }];
     dir.update(&AudioFrame {
         tick,
@@ -578,4 +586,95 @@ fn spike_hit_bursts_and_panel_damage_rattles() {
     // The rattle loop starts on the frame after the damage is known.
     let out2 = step(&mut dir, &s, 12, &[]);
     assert_eq!(plays(&out, "body/rattle") + plays(&out2, "body/rattle"), 1);
+}
+
+fn frame_for(
+    dir: &mut AudioDirector,
+    s: &VehicleState,
+    car_id: &str,
+    kind: DriverKind,
+    siren: bool,
+    tick: u64,
+) -> Vec<AudioCommand> {
+    let inputs = [VehicleAudioInput {
+        entity: EntityId(1),
+        car_id,
+        state: s,
+        throttle: 0.5,
+        horn: false,
+        siren,
+        road_rumble: 0.0,
+        kind,
+    }];
+    dir.update(&AudioFrame {
+        tick,
+        listener: Listener {
+            pos: [10.0, 0.0, 1.0],
+            ..Default::default()
+        },
+        focus: None,
+        vehicles: &inputs,
+        events: &[],
+    })
+}
+
+#[test]
+fn police_kind_gets_a_siren_on_any_car() {
+    // debug_sedan has no siren in its audio def; driven by police it must still siren.
+    let s = VehicleState {
+        rot: [0.0, 0.0, 0.0, 1.0],
+        engine_rpm: 2000.0,
+        speed_mps: 25.0,
+        ..Default::default()
+    };
+    let mut dir = AudioDirector::new(lib(), 1);
+    dir.register_car(&car("debug_sedan"));
+    let out = frame_for(&mut dir, &s, "debug_sedan", DriverKind::Player, true, 0);
+    assert!(!out
+        .iter()
+        .any(|c| matches!(c, AudioCommand::Play { cue, .. } if cue.starts_with("siren/"))));
+    let mut dir = AudioDirector::new(lib(), 1);
+    dir.register_car(&car("debug_sedan"));
+    let out = frame_for(&mut dir, &s, "debug_sedan", DriverKind::Police, true, 0);
+    assert!(
+        out.iter()
+            .any(|c| matches!(c, AudioCommand::Play { cue, .. } if cue == "siren/wail")),
+        "Auto at 25 m/s wails"
+    );
+}
+
+#[test]
+fn traffic_engines_are_quieter_and_low_priority() {
+    let s = VehicleState {
+        rot: [0.0, 0.0, 0.0, 1.0],
+        engine_rpm: 2500.0,
+        ..Default::default()
+    };
+    let engine_gain_and_prio = |kind| {
+        let mut dir = AudioDirector::new(lib(), 1);
+        dir.register_car(&car("debug_sedan"));
+        frame_for(&mut dir, &s, "debug_sedan", kind, false, 0)
+            .into_iter()
+            .filter_map(|c| match c {
+                AudioCommand::Play {
+                    cue,
+                    params,
+                    priority,
+                    ..
+                } if cue.starts_with("engine/") => Some((params.gain, priority)),
+                _ => None,
+            })
+            .fold((0.0f32, Priority::Critical), |(g, p), (g2, p2)| {
+                (g + g2, p.min(p2))
+            })
+    };
+    let (player, pp) = engine_gain_and_prio(DriverKind::Player);
+    let (traffic, tp) = engine_gain_and_prio(DriverKind::Traffic);
+    let ratio = lib().config.engine.traffic_gain;
+    assert!(
+        (traffic / player - ratio).abs() < 1e-4,
+        "{traffic} vs {player}"
+    );
+    assert_eq!(pp, Priority::Normal);
+    assert_eq!(tp, Priority::Low);
 }

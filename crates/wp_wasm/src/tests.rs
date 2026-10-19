@@ -209,3 +209,30 @@ fn csv_export_has_one_row_per_sample() {
     assert_eq!(rows as u64, end.div_ceil(4) + 1);
     assert!(csv.starts_with("tick,t_s,speed_mps"));
 }
+
+#[test]
+fn city_chase_speeding_player_gets_heat() {
+    let sc = crate::scenario::city_chase("debug_sedan", DamageMode::Arcade);
+    let mut s = Session::new(sc, false).unwrap();
+    let p = EntityId(1);
+    assert!(s.sim().world().agent_count() == 0 || s.has_city());
+    s.set_input(p, drive(0.7, 0.0)).unwrap();
+    let mut max_heat = 0.0f32;
+    let mut violations = 0;
+    for _ in 0..(240 * 8 / 60) {
+        s.run_ticks(60);
+        violations += s
+            .drain_events()
+            .iter()
+            .filter(|e| matches!(e, wp_contracts::SimEvent::TrafficViolation { vehicle, .. } if *vehicle == p))
+            .count();
+        max_heat = max_heat.max(crate::police::status(s.sim().police(), p).heat);
+    }
+    let st = crate::police::status(s.sim().police(), p);
+    eprintln!(
+        "violations {violations}, max heat {max_heat}, status {st:?}, units {}",
+        s.sim().police().units().len()
+    );
+    assert!(violations > 0, "speeding player produced no violations");
+    assert!(max_heat > 0.0, "violations produced no heat");
+}

@@ -12,6 +12,7 @@ Everything a persistent online game needs that is not the simulation. City serve
 | Directory | instance registration, heartbeats (population, drain, tick time), liveness, kicks + flags pushed in heartbeat replies | `directory` |
 | Matchmaking | tickets by role / mode / class bracket / region (/ city), parties (all-or-nothing), one-time join tokens, reconnect tokens | `matchmaking` |
 | Leaderboards | clean-race rating (Elo), bounty, captures, time attack per route; all-time / daily / weekly | `leaderboards` |
+| Server hook | opt-in, non-blocking `MetaWorker` for `apps/server` (`WP_META_URL` unset = standalone) | `instance` |
 | Admin | ban / unban / kick, audited economy adjustments, feature flags, board resets, audit log, health JSON + `/admin` HTML dashboard | `admin`, `routes` |
 
 API: `openapi.yaml` (also served at `GET /openapi.yaml`). Rust client: `wp_meta::client::MetaClient`
@@ -89,6 +90,8 @@ cargo test --release -p wp_meta --test perf -- --ignored --nocapture   # through
   bracket/mode/capacity gating, join-token rules, ticket/seat expiry, dead and draining
   instances, parties, feature flags, admin auth, temporary bans, leaderboard periods, crews,
   restart persistence, and "every route is in `openapi.yaml`".
+- `tests/hook.rs` — the server-side hook (`MetaWorker`) driven like a tick loop: register,
+  verify joins, presence, load/commit accounts, race report, kick via heartbeat, deregister.
 - `store::tests::account_store_contract` — the same `AccountStore` contract the economy's own
   stores satisfy.
 
