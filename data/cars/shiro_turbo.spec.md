@@ -148,6 +148,6 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 263 nodes, 1687 beams, 6 detachables, 21 component mounts.
 
 - Generated with `gen-lattice --id shiro_turbo --profile coupe --width 1.695 --length 4.445 --height 1.285 --wheelbase 2.525 --mass 286.2 --car-mass 1300.8 --clearance 0.13 --front-overhang 0.9 --strength 0.9` (22% of vehicle mass in the lattice; strength from durability class 2).
-- Era `2000s` passenger cell: 150 cabin/sill, 131 cross-member, 10 pillar, 14 roof rail → hss × 0.90 section.
+- Era `2000s` passenger cell: 138 cabin/sill, 143 cross-member, 10 pillar, 14 roof rail → hss × 0.90 section.
 - Steel hood: 105 hood beams aluminum → mild_steel.
 - Detachables: steel bumpers ×2.3 break impulse / ×4 mass; steel hood ×1.4 / ×1.6.

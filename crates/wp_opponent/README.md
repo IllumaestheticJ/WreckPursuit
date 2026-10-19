@@ -50,7 +50,10 @@ gap to the player — pace is car capability × how much of it the driver dares 
   overheating caps speed at `top × (1 − 0.35·overheating)`; `steer_pull` compensated; dead
   engine / lost wheel / health < 0.12 → `Retired`, pull to the edge and stop.
 - **Police**: `PoliceQuery::wanted_level(entity) ≥ flee_wanted_level` and
-  `RaceConfig::allow_abandon` → `Fled`: plans a route to the farthest POI and drives it.
+  `RaceConfig::allow_abandon` → `Fled`: plans a legal route to the POI farthest from the
+  police it has seen (`police_positions()`; falls back down the list until a route plans) and
+  drives it with the same perception and civilian rules. `EventHeat` feeds both from the sim's
+  `wp_police` events. Spawn racers as `VehicleKind::AiRacer`.
 - **Mistakes**: each braking zone samples a braking-point error (seconds of travel) and a line
   error; both scale with `1 + pressure × pressure_sensitivity` (pressure = a car right behind
   or alongside).
@@ -113,6 +116,8 @@ Full-sim tests (`tests/race.rs`, procedural 8×8 city, counter-clockwise arteria
 - Faster car (sports car) from the back of three sedans: gets past with > 2 m centre distance.
 - Same seed ⇒ same sim + field hash; different seed ⇒ different field hash.
 - Wanted racer abandons and flees; others keep racing.
+- Open roads + traffic: a wanted-level event read from the sim's event stream makes a racer
+  abandon and drive ≥ 250 m of a flight route ending > 300 m from the police, no contacts.
 - Open roads, 25 % traffic, 90 s: no civilian contact, no racer collision, all progress.
 - `determinism_lint`: the workspace lint over this crate.
 
@@ -133,6 +138,8 @@ Scenarios (simcli v2): `apps/simcli/scenarios/opponent/*.ron` — run today with
 - Open-road racing in traffic is safe but slow (racers yield at every busy junction; no signal
   timing; no "run the red when clear" logic). Rare low-speed racer nudges in jams.
 - Two-wide grids favour the inside column into the first corner.
+- Live pursuits don't happen in `wp_sim` yet (no police units → unwitnessed violations decay
+  faster than racers build heat); the flee path is tested with injected police events.
 - Lap timing here is the AI's own bookkeeping; official judging belongs to `wp_race::judge`
   (adapter not written yet — see `docs/integration/opponent.md`).
 - Line optimiser leaves some width unused in tight junction corners.

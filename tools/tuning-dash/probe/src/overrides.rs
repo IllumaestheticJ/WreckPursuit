@@ -206,7 +206,13 @@ pub fn apply(
         };
         for steps in locations {
             let slot = path::get_mut(doc, &steps).expect("resolved");
-            if slot.is_object() || slot.is_array() {
+            // Whole lists/objects may be replaced only in the scenario (e.g. `scenario:expect`
+            // to drop a Simulation-only expectation when a variant runs it in Arcade); data
+            // files stay scalar-only so every promote is a value edit.
+            let replace_container = t.file == SCENARIO_FILE
+                && ov.op == Op::Set
+                && (ov.value.is_array() || ov.value.is_object());
+            if (slot.is_object() || slot.is_array()) && !replace_container {
                 return Err(format!(
                     "{}: {} is not a scalar",
                     ov.target,
@@ -326,6 +332,21 @@ mod tests {
         // Only `set`, only a missing leaf: scale and missing parents still fail.
         assert!(apply(&mut m, None, &[ov("car:x:nope_s", Op::Scale)]).is_err());
         assert!(apply(&mut m, None, &[ov("car:x:a.b", Op::Set)]).is_err());
+    }
+
+    #[test]
+    fn scenario_lists_can_be_replaced_data_lists_cannot() {
+        let mut m = mem();
+        let mut sc = json!({"expect": [{"a": 1}], "mode": "Simulation"});
+        let set = |t: &str, v: Value| Override {
+            target: t.into(),
+            op: Op::Set,
+            value: v,
+            round_sig: None,
+        };
+        apply(&mut m, Some(&mut sc), &[set("scenario:expect", json!([]))]).unwrap();
+        assert_eq!(sc["expect"], json!([]));
+        assert!(apply(&mut m, None, &[set("car:x:susp", json!([]))]).is_err());
     }
 
     #[test]

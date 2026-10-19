@@ -149,6 +149,6 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 257 nodes, 1620 beams, 8 detachables, 21 component mounts.
 
 - Generated with `gen-lattice --id sperber_32 --profile sedan --width 1.78 --length 4.49 --height 1.37 --wheelbase 2.73 --mass 352.3 --car-mass 1601.5 --clearance 0.13 --front-overhang 0.85 --strength 1.0` (22% of vehicle mass in the lattice; strength from durability class 3).
-- Era `2000s` passenger cell: 162 cabin/sill, 119 cross-member, 10 pillar, 10 roof rail → hss × 0.90 section.
+- Era `2000s` passenger cell: 138 cabin/sill, 143 cross-member, 10 pillar, 10 roof rail → hss × 0.90 section.
 - Steel hood: 105 hood beams aluminum → mild_steel.
 - Detachables: steel bumpers ×2.3 break impulse / ×4 mass; steel hood ×1.4 / ×1.6.

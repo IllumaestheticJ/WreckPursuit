@@ -7,10 +7,10 @@ use std::path::PathBuf;
 
 use wp_contracts::{DamageSim, EntityId, LoadedCar, SimEvent, TimeOfDay, VehicleSim};
 use wp_opponent::{
-    CarCapability, CorridorOptions, DriverProfile, Field, GridLayout, NoPolice, OpposingLanes,
-    PoliceQuery, RaceConfig, RacerSpec, VehicleObs,
+    CarCapability, CorridorOptions, DriverProfile, EventHeat, Field, GridLayout, NoPolice,
+    OpposingLanes, PoliceQuery, RaceConfig, RacerSpec, VehicleObs,
 };
-use wp_sim::{Sim, SimConfig};
+use wp_sim::{Sim, SimConfig, VehicleKind};
 use wp_world::procgen::ProcGenConfig;
 use wp_world::{ActiveRoute, TrafficConfig, World, WorldConfig};
 
@@ -77,6 +77,12 @@ pub struct Setup {
     pub measure: bool,
     /// Grid shape.
     pub grid: GridLayout,
+    /// Feed the AI live wanted levels from the sim's police events (`EventHeat`) instead of
+    /// the `police` argument of [`run`].
+    pub live_police: bool,
+    /// Police events appended to the sim's event stream at `t_s` (tests of the pursuit path
+    /// while `wp_sim` has no police units to witness anything).
+    pub inject: Vec<(f32, wp_police::PoliceEvent)>,
 }
 
 impl Default for Setup {
@@ -92,6 +98,8 @@ impl Default for Setup {
             max_s: 600.0,
             measure: true,
             grid: GridLayout::TwoWide,
+            live_police: false,
+            inject: Vec::new(),
         }
     }
 }
@@ -114,6 +122,10 @@ pub struct Outcome {
     pub other_contacts: u32,
     /// Wall time spent inside `Field::tick` (harness measurement only), s.
     pub field_wall_s: f64,
+    /// Every police event of the run, decoded.
+    pub police_events: Vec<wp_police::PoliceEvent>,
+    /// `SimEvent::TrafficViolation`s of the run (any vehicle).
+    pub violations: u32,
 }
 
 /// Measured capability, cached per process.
@@ -213,6 +225,7 @@ pub fn run(
         let id = sim
             .spawn_vehicle(&cars[i], [pos[0], pos[1], 0.0], *yaw)
             .unwrap();
+        sim.set_vehicle_kind(id, VehicleKind::AiRacer).unwrap();
         sim.set_assists(id, wp_contracts::AssistProfile::ai())
             .unwrap();
         entities.push(id);
@@ -222,6 +235,9 @@ pub fn run(
     let mut contacts = Vec::new();
     let mut other_contacts = 0u32;
     let mut field_wall_s = 0.0f64;
+    let mut heat = EventHeat::new();
+    let mut violations = 0u32;
+    let mut police_events: Vec<wp_police::PoliceEvent> = Vec::new();
     let mut events: Vec<SimEvent> = Vec::new();
     let max_ticks = (setup.max_s * 240.0) as u64;
     while sim.tick() < max_ticks {
@@ -239,13 +255,30 @@ pub fn run(
             })
             .collect();
         let t0 = std::time::Instant::now();
-        let inputs = field.tick(sim.world(), &obs, &events, police).to_vec();
+        for (t, pe) in &setup.inject {
+            if sim.tick() == (t * 240.0) as u64 {
+                events.push(pe.to_sim_event());
+            }
+        }
+        heat.observe(&events);
+        let q: &dyn PoliceQuery = if setup.live_police { &heat } else { police };
+        let inputs = field.tick(sim.world(), &obs, &events, q).to_vec();
         field_wall_s += t0.elapsed().as_secs_f64();
         for (e, inp) in inputs {
             sim.set_input(e, inp).unwrap();
         }
         sim.step_fixed();
         events = sim.drain_events();
+        police_events.extend(
+            events
+                .iter()
+                .filter_map(wp_police::PoliceEvent::from_sim_event),
+        );
+        for e in &events {
+            if matches!(e, SimEvent::TrafficViolation { .. }) {
+                violations += 1;
+            }
+        }
         for ev in &events {
             if let SimEvent::Contact {
                 a, b, impulse_ns, ..
@@ -279,6 +312,8 @@ pub fn run(
         contacts,
         other_contacts,
         field_wall_s,
+        police_events,
+        violations,
     }
 }
 
