@@ -145,7 +145,7 @@ export class MinimapRenderer {
 
     // units (rim markers for the ones outside)
     if (p) {
-      const us = 4.2 * dpr;
+      const us = 5.2 * dpr;
       for (const u of f.units) {
         if (u.wrecked && u.state === "out") continue;
         const [sx, sy] = worldToMinimap(view, u.x, u.y);

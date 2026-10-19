@@ -25,6 +25,9 @@ export interface MapHudOptions {
   signals?: boolean;
   /** Called when the full map opens or closes (the host pauses driving input while open). */
   onOpenChange?: (open: boolean) => void;
+  /** Minimap placement override (CSS, e.g. `{ left: "8px", top: "320px", right: "auto", bottom: "auto" }`).
+   * Default: bottom-right corner. */
+  minimapPlacement?: Partial<Record<"left" | "right" | "top" | "bottom", string>>;
 }
 
 /** What both views drew (e2e). */
@@ -89,6 +92,7 @@ export class MapHud {
     this.caption = document.createElement("div");
     this.caption.className = "wp-minimap-cap wp-mono";
     this.miniEl.appendChild(this.caption);
+    Object.assign(this.miniEl.style, opts.minimapPlacement ?? {});
     root.appendChild(this.miniEl);
 
     this.fullEl = document.createElement("div");

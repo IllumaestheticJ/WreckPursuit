@@ -198,7 +198,7 @@ export class FullMapRenderer {
     }
     for (const t of f.tools) drawTool(ctx, t, m, k, pal);
     let units = 0;
-    const us = 5 * dpr;
+    const us = 7 * dpr;
     for (const u of f.units) {
       if (u.wrecked && u.state === "out") continue;
       const [sx, sy] = worldToFull(v, u.x, u.y);

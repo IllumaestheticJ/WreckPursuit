@@ -63,7 +63,7 @@ export class AudioSystem {
     const kick = () => this.start();
     window.addEventListener("pointerdown", kick);
     window.addEventListener("keydown", (e) => {
-      if (e.code === "KeyM" && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement)) this.toggleMute();
+      if (e.code === "KeyV" && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement)) this.toggleMute();
       kick();
     });
   }

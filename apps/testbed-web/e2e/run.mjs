@@ -342,6 +342,57 @@ check(
     `banner ${chase.banner ?? "none"}, ${chase.police} police vehicles + ${chase.units} other units, ` +
     `${chase.violations} violation event(s) (in feed: ${chase.inFeed}) after ${chase.simS.toFixed(1)} s sim; wait ${chaseWait}`,
 );
+// City map HUD (workstream 16): the corner minimap shows the player and the police near them;
+// M / Tab open the full city map, M / Tab / Esc close it. The player is parked in front of a
+// patrol car so at least one police dot is inside the minimap.
+{
+  const parked = await page
+    .waitForFunction(
+      () => {
+        try {
+          window.__wp.sim.debugSetHeat(window.__wp.app.player, 0);
+          window.__wp.sim.debugParkNearPolice(window.__wp.app.player, 40);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      null,
+      { timeout: 120000, polling: 100 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  await page.waitForTimeout(600);
+  const mini = await page.evaluate(() => {
+    const s = window.__wp.map.hud.stats();
+    const el = document.getElementById("wp-minimap");
+    const r = el?.getBoundingClientRect();
+    return { ...s.minimap, city: s.city, district: s.district, visible: !!r && r.width > 100 && !el.hidden, total: window.__wp.sim.mapDynamic(window.__wp.app.player)[1] };
+  });
+  await shot("map_minimap_city_chase.png");
+  check(
+    parked && mini.visible && mini.player && mini.units >= 1 && mini.city === "vesper_v2",
+    `minimap: player + ${mini.units} police dot(s) of ${mini.total} units (${mini.blinking} blinking), radius ${mini.radiusM.toFixed(0)} m, district ${mini.district ?? "?"}`,
+  );
+  const state = () => page.evaluate(() => ({ open: window.__wp.map.isOpen, shown: !document.getElementById("wp-map-full").hidden, ...window.__wp.map.hud.stats().full }));
+  await page.keyboard.press("KeyM");
+  await page.waitForTimeout(300);
+  const opened = await state();
+  await shot("map_full_city.png");
+  await page.keyboard.press("KeyM");
+  await page.waitForTimeout(100);
+  const closedM = await state();
+  await page.keyboard.press("Tab");
+  await page.waitForTimeout(100);
+  const openedTab = await state();
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(100);
+  const closedEsc = await state();
+  check(
+    opened.open && opened.shown && opened.player && opened.units >= 1 && opened.districts >= 6 && !closedM.open && !closedM.shown && openedTab.open && !closedEsc.open,
+    `full map: M opens (${opened.units} units, ${opened.districts} districts, ${opened.pois} POIs), M closes, Tab opens, Esc closes`,
+  );
+}
 // Pursuit banner + capture → repair bill, driven by a stubbed police_status() (a real capture
 // needs minutes of driving; the outcome plumbing is unit-tested in wp_wasm::police).
 {

@@ -52,7 +52,7 @@
 .wp-map-full:active {
   cursor: grabbing;
 }
-.wp-map-full canvas {
+.wp-map-full > canvas {
   position: absolute;
   inset: 0;
   width: 100%;
