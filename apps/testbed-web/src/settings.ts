@@ -22,6 +22,7 @@ export const LAYERS: LayerDef[] = [
   { id: "intents", key: "KeyI", label: "traffic/police intent arrows", default: false },
   { id: "components", key: "KeyK", label: "component health panel", default: true },
   { id: "regions", key: "KeyE", label: "region energy panel", default: false },
+  { id: "events", key: "KeyV", label: "event feed (damage, glass, parts, violations)", default: true },
   { id: "telemetry", key: "KeyJ", label: "telemetry plots", default: true },
   { id: "inputs", key: "KeyN", label: "input display + rack torque", default: true },
 ];

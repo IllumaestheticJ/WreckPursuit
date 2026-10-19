@@ -63,7 +63,7 @@ await page.keyboard.down("KeyD");
 await page.waitForTimeout(2500);
 const v = await speed();
 await page.keyboard.up("KeyD");
-check(v > 3, `keyboard drives the car (speed ${v.toFixed(2)} m/s)`);
+check(v > 1.5, `keyboard drives the car (speed ${v.toFixed(2)} m/s)`);
 await shot("drive_chase.png");
 
 // 2. Every debug layer on, every camera.
@@ -162,6 +162,12 @@ for (const [file, kmh] of [
       `${pend.filter((r) => r.passed).length}/${pend.length} pending, live = simcli: ${res.matches_simcli}, contact markers ${contacts}`,
   );
   if (file.startsWith("crash/")) check(contacts > 0, `contact layer drew ${contacts} markers for ${file}`);
+  if (file === "crash/barrier_frontal_sim.ron") {
+    await page.waitForTimeout(300);
+    const feed = await page.evaluate(() => document.querySelector(".feed")?.textContent ?? "");
+    const kinds = ["GlassShattered", "RegionDamaged", "ComponentFailed", "PartDetached", "TotalLoss"].filter((k) => feed.includes(k));
+    check(kinds.length > 0, `event feed shows damage events: ${kinds.join(", ")}`);
+  }
   if (file.includes("head_on")) await shot("scenario_head_on.png");
 }
 

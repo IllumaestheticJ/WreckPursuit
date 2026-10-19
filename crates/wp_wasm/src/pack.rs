@@ -193,15 +193,9 @@ pub fn telemetry_names() -> Vec<String> {
     n
 }
 
-/// Telemetry record (see [`telemetry_names`]). `tire_forces` are the per-wheel `(Fx, Fy)` the
-/// vehicle applied this tick (`wp_vehicle::Telemetry::fx/fy`: Fx along the wheel heading, Fy
-/// positive to the wheel's left).
-pub fn pack_telemetry(
-    s: &VehicleState,
-    input: &VehicleInput,
-    accel_local: [f32; 3],
-    tire_forces: [(f32, f32); 4],
-) -> Vec<f32> {
+/// Telemetry record (see [`telemetry_names`]). Tire forces are the contract's
+/// `WheelState::{fx_n, fy_n}` (v0.2.0): applied this tick, tire frame, Fx + forward, Fy + left.
+pub fn pack_telemetry(s: &VehicleState, input: &VehicleInput, accel_local: [f32; 3]) -> Vec<f32> {
     let g = wp_contracts::GRAVITY_MPS2;
     let steer = (s.wheel_states[0].steer_rad + s.wheel_states[1].steer_rad) * 0.5;
     let mut out = vec![
@@ -219,8 +213,7 @@ pub fn pack_telemetry(
         input.steer,
         input.handbrake,
     ];
-    for (i, w) in s.wheel_states.iter().enumerate() {
-        let (fx, fy) = tire_forces[i];
+    for w in &s.wheel_states {
         out.extend_from_slice(&[
             w.slip_angle,
             w.slip_ratio,
@@ -230,8 +223,8 @@ pub fn pack_telemetry(
             b(w.contact),
             b(w.detached),
             w.omega,
-            fx,
-            fy,
+            w.fx_n,
+            w.fy_n,
         ]);
     }
     for c in ALL_COMPONENTS {
@@ -315,12 +308,7 @@ mod tests {
 
     #[test]
     fn telemetry_names_match_record() {
-        let rec = pack_telemetry(
-            &VehicleState::default(),
-            &VehicleInput::default(),
-            [0.0; 3],
-            [(0.0, 0.0); 4],
-        );
+        let rec = pack_telemetry(&VehicleState::default(), &VehicleInput::default(), [0.0; 3]);
         assert_eq!(rec.len(), telemetry_names().len());
         assert_eq!(
             TELEMETRY_WHEEL_BASE + 4 * TELEMETRY_WHEEL_STRIDE + ALL_COMPONENTS.len(),

@@ -73,6 +73,7 @@ async function main(): Promise<void> {
     regions.clear();
     rests.clear();
     scene.clearContacts();
+    hud.clearEvents();
     plots.clear();
     syncViews();
     const ids = sim.entities();
@@ -373,7 +374,9 @@ async function main(): Promise<void> {
         focusRec = o;
       }
     }
-    scene.addEvents(sim.eventsDrain());
+    const events = sim.eventsDrain();
+    scene.addEvents(events);
+    hud.pushEvents(events, sim.worldInfo()[W.tick]);
     scene.update(dt, sim.intents());
     scene.updateAgents(sim.trafficAgents());
     const wi = sim.worldInfo();

@@ -518,15 +518,6 @@ impl Session {
         self.index(id).map(|i| self.sim.vehicles()[i].vehicle.ffb())
     }
 
-    /// Tire forces `(Fx, Fy-left)` per wheel actually applied by the vehicle last tick, N.
-    pub fn tire_forces(&self, id: EntityId) -> [(f32, f32); 4] {
-        let Some(i) = self.index(id) else {
-            return [(0.0, 0.0); 4];
-        };
-        let t = self.sim.vehicles()[i].vehicle.telemetry();
-        std::array::from_fn(|w| (t.fx[w], t.fy[w]))
-    }
-
     /// Current input of a vehicle.
     pub fn input(&self, id: EntityId) -> VehicleInput {
         self.index(id)

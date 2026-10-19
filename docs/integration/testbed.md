@@ -3,7 +3,7 @@
 - **Workstream / prompt:** 04 — browser testbed, debug visualization, telemetry & replay
 - **Branch:** `ws/testbed`
 - **Crates / folders owned:** `crates/wp_wasm`, `apps/testbed-web`, `apps/testbed-native`
-- **Contract version built against:** 0.1.0
+- **Contract version built against:** 0.2.0
 
 ```sh
 just web          # wasm-pack (release) + Vite → http://localhost:5173
@@ -130,8 +130,8 @@ Car data (`data/{cars,lattices,tires,materials,modes}`) is embedded at build tim
 | 13 + 10·w | wheel w: `slip_angle_rad, slip_ratio, load_n, surface (index into vehicle_info().surfaces), compression_m, contact, detached, omega_rad_s, fx_n, fy_left_n` |
 | 53–73 | component health, in `vehicle_info().components` order |
 
-`fx_n` / `fy_left_n` are the forces the vehicle actually applied last tick
-(`wp_vehicle::Telemetry::fx/fy`): Fx along the wheel heading, Fy positive toward the wheel's left.
+`fx_n` / `fy_left_n` are the contract's `WheelState::{fx_n, fy_n}` (v0.2.0): forces applied last
+tick in the tire frame, Fx + forward along the wheel heading, Fy + toward the wheel's left.
 
 ### Scenarios
 Only simcli format v2 (`apps/simcli/SCENARIOS.md`). The menu lists `apps/simcli/scenarios/**`
@@ -174,6 +174,7 @@ hash per tick dominate). `simcli replay file.replay.bin` verifies a browser reco
 | I | traffic / police intent arrows |
 | K | component health panel |
 | E | region energy panel |
+| V | event feed (component failures, parts, glass, region damage, total loss, violations) |
 | J | telemetry plots |
 | N | input display + rack-torque bar |
 
@@ -232,7 +233,7 @@ window (top-down car box, 10 m grid, rack-torque bar; arrows/WASD, Space, R, Esc
 ## Contract change requests
 | # | Change | Status |
 |---|---|---|
-| TB-1 | `WheelState { fx_n, fy_n }` | Accepted for v0.2.0; testbed already uses the applied forces from `wp_vehicle::Telemetry` (no estimate left). |
+| TB-1 | `WheelState { fx_n, fy_n }` | **Landed in v0.2.0**; telemetry and force arrows read it (no estimate, no `wp_vehicle` internals). |
 | TB-2 | `DamageSim::region_energy_j` / node strain | Accepted in principle; still proxies here. |
 | TB-3 | static boxes | Done (`Sim::add_static_box`); used through scenario `barriers`. |
 | TB-4 | mode switch | Done (`Sim::set_mode_table`); used live, logged as a replay op. |
@@ -267,11 +268,13 @@ page (includes the session's per-tick state hash and input logging).
 | Measurement | Browser (this machine) | Budget (browser = 2× native) |
 |---|---|---|
 | sim-only, 1 car | 0.09 ms / 60 Hz frame | vehicle + lattice 0.8 ms/car |
-| sim-only, 8 cars | 0.62 ms | 6.4 ms |
-| sim-only, 24 cars | 3.0 ms | 19.2 ms |
-| sim-only, city + 192 traffic agents, 1 car | 0.27 ms | traffic 4 ms |
-| render (JS submit), 1 / 8 / 24 cars | 0.7 / 3.4 / 9.2 ms | — |
-| fps (SwiftShader) 1 / 8 / 24 cars | 12 / 11 / 9 | — |
+| sim-only, 8 cars | 0.69 ms | 6.4 ms |
+| sim-only, 24 cars | 2.4 ms | 19.2 ms |
+| sim-only, city + 192 traffic agents, 1 car | 0.31 ms | traffic 4 ms |
+| render (JS submit), 1 / 8 / 24 cars | 0.7 / 2.9 / 8.7 ms | — |
+| fps (SwiftShader) 1 / 8 / 24 cars | 13 / 12 / 9 | — |
+
+(Re-measured 2026-10-19 on contract v0.2.0 / main `502f72e` physics.)
 
 Rendering dominates; 24 cars with every per-car layer (lattice, stress, skinned body) would want
 instancing before Checkpoint 3. The first seconds of a city session are slower (traffic
@@ -352,3 +355,18 @@ Perf: please re-measure `?bench=24` now that the real model runs (your numbers w
 6. **Contact layer — verified.** e2e counts contact markers in all three crash scenarios.
 - Run 2 asks: `traffic_agents()` export (`[x, y, z, yaw, flags]`) and the procedural city greybox
   + traffic in free drive (**city** box) — done. Perf re-measured with the real models (table above).
+
+### Response — run 4 (2026-10-19, workstream 04, contract v0.2.0)
+- Merged `main` (`502f72e`, contract v0.2.0). Conflicts only in `testbed-web/src/{main,scene}.ts`
+  (main's relative URLs for the static build) — kept run-3 code with relative URLs everywhere.
+- v0.2.0 items for 04: tire forces now come from `WheelState::{fx_n, fy_n}` (TB-1 landed; the
+  `wp_vehicle::Telemetry` dependency is gone). New `GlassShattered` / `RegionDamaged` (and every
+  other non-contact event) appear in a new **event feed** panel (hotkey V); the wasm/TS code has
+  no exhaustive `SimEvent` matches, so nothing else needed changing.
+- Crash goldens re-blessed (`[bless]`, only `apps/simcli/golden/crash_*/hashes.txt`): main's
+  physics changes (tire data, shared ground collider) moved their hashes from tick 180 on; all
+  expectations still pass unchanged.
+- Checks: fmt, clippy `-D warnings` (incl. `testbed-native --features window,ffb`),
+  `cargo test --workspace`, wasm32 build, `npm run build`, `npm run e2e` (+ bench) all green.
+  Run-3 items (v2 natively, barriers, mode switch, replay.bin, tire forces, contacts, agents
+  export, city) are unchanged and still verified by e2e.

@@ -512,12 +512,7 @@ fn telemetry_record(s: &Session, entity: u32) -> Result<Vec<f32>, String> {
     let st = state_of(s, entity)?;
     let id = EntityId(entity);
     let accel = s.extra(id).map_or([0.0; 3], |x| x.accel_local);
-    Ok(pack::pack_telemetry(
-        &st,
-        &s.input(id),
-        accel,
-        s.tire_forces(id),
-    ))
+    Ok(pack::pack_telemetry(&st, &s.input(id), accel))
 }
 
 /// JSON array of telemetry channel names.
