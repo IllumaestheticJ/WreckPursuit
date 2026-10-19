@@ -83,7 +83,8 @@ export function readInput(dt: number): { input: DriverInput; source: InputSource
   const right = any("ArrowRight", "KeyD") ? 1 : 0;
   const keyActive = left || right || any("ArrowUp", "KeyW", "ArrowDown", "KeyS", "Space");
   kb.steer = ramp(kb.steer, right - left, 4.0, 6.0, dt);
-  kb.throttle = ramp(kb.throttle, any("ArrowUp", "KeyW") ? 1 : 0, 5.0, 10.0, dt);
+  // Fast key ramp: the sim's keyboard assist preset filters the pedal again (~0.23 s).
+  kb.throttle = ramp(kb.throttle, any("ArrowUp", "KeyW") ? 1 : 0, 12.0, 12.0, dt);
   kb.brake = ramp(kb.brake, any("ArrowDown", "KeyS") ? 1 : 0, 6.0, 10.0, dt);
   const keyboard: DriverInput = {
     steer: kb.steer,

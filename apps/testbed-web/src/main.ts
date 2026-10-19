@@ -31,6 +31,11 @@ const params = new URLSearchParams(location.search);
 const regions = new Map<number, Uint8Array>();
 const rests = new Map<number, Float32Array>();
 
+/** Default car for free drive and the city chase: the quick AWD hot hatch (analog name; 0–100
+ * km/h in ~5.4 s, 80 ms dual-clutch shifts). The debug sedan (8.3 s) read as "slow" in the
+ * owner's playtest. */
+const DEFAULT_CAR = "lindwurm_4t";
+
 interface AppState {
   views: Map<number, VehicleView>;
   player: number;
@@ -133,7 +138,7 @@ async function main(): Promise<void> {
   const modeName = () => (sim.worldInfo()[W.mode] > 0.5 ? "Simulation" : "Arcade");
 
   const startFreeDrive = (
-    car = ($("car") as HTMLSelectElement).value || "debug_sedan",
+    car = ($("car") as HTMLSelectElement).value || DEFAULT_CAR,
     mode = ($("mode") as HTMLSelectElement).value,
     city = ($("city") as HTMLInputElement).checked,
   ) => {
@@ -149,7 +154,7 @@ async function main(): Promise<void> {
 
   /** City chase preset: procedural city at 23:00, police + traffic, player already speeding. */
   const startCityChase = (
-    car = ($("car") as HTMLSelectElement).value || "debug_sedan",
+    car = ($("car") as HTMLSelectElement).value || DEFAULT_CAR,
     mode = ($("mode") as HTMLSelectElement).value,
   ) => {
     app.scenarioFile = null;
@@ -371,7 +376,7 @@ async function main(): Promise<void> {
     scSel.value = scParam;
     await runScenario(scParam, Number(params.get("speed") ?? 0));
   } else {
-    startFreeDrive("debug_sedan");
+    startFreeDrive(DEFAULT_CAR);
   }
   if (params.get("bench")) startBench(Number(params.get("bench")));
   if (params.get("replay") === "last") $("rp-last").click();
