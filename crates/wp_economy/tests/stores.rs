@@ -21,6 +21,14 @@ fn exercise(store: &mut dyn AccountStore) {
     store.commit(&a, &ev).unwrap();
     let all = store.events_since(PlayerId(9), 0).unwrap();
     assert_eq!(all.len(), 2);
+    // Same account through the durable id (the ledger key carries the same number).
+    let id = a.account_id();
+    assert_eq!(id, wp_economy::AccountId(9));
+    assert_eq!(store.load_account(id).unwrap().as_ref(), Some(&a));
+    assert_eq!(store.account_events_since(id, 0).unwrap(), all);
+    assert!(all
+        .iter()
+        .all(|x| x.account_id() == id && x.to_contract().account == id));
     assert_eq!(all.iter().map(|x| x.seq).collect::<Vec<_>>(), vec![0, 1]);
     assert_eq!(store.events_since(PlayerId(9), 1).unwrap(), ev);
 

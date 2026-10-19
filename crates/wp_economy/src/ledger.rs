@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use wp_contracts::WantedLevel;
 use wp_contracts::{
-    HandlingEffects, PlayerId, RepairEstimate, SimEvent, VehicleClass, ViolationKind,
+    AccountId, HandlingEffects, PlayerId, RepairEstimate, SimEvent, VehicleClass, ViolationKind,
 };
 
 use crate::error::EconomyError;
@@ -252,7 +252,24 @@ pub struct PlayerAccount {
     pub next_event_seq: u64,
 }
 
+/// The durable account id for a ledger key. The ledger is keyed by `PlayerId` and both carry
+/// the same number (meta's account id) until the ledger moves to `AccountId`; see
+/// `docs/integration/economy.md`, request #7.
+pub fn account_id_of(player: PlayerId) -> AccountId {
+    AccountId(player.0)
+}
+
+/// The ledger key for a durable account id (inverse of [`account_id_of`]).
+pub fn player_of(account: AccountId) -> PlayerId {
+    PlayerId(account.0)
+}
+
 impl PlayerAccount {
+    /// Durable account id of this account.
+    pub fn account_id(&self) -> AccountId {
+        account_id_of(self.player)
+    }
+
     /// An empty account with no cash and no events (use [`crate::Economy::open_account`] for a
     /// real one with starting cash).
     pub fn empty(player: PlayerId) -> Self {
@@ -563,12 +580,17 @@ pub struct EconomyEvent {
 }
 
 impl EconomyEvent {
+    /// Durable account id of the account this event belongs to.
+    pub fn account_id(&self) -> AccountId {
+        account_id_of(self.player)
+    }
+
     /// The contract form (v0.3.0): `player` becomes the durable `AccountId` (same number until
     /// the economy switches to meta's account ids), reasons are renamed
     /// (`RaceEntryFee` → `StakeCharged`, `RacePurse` → `RacePayout`).
     pub fn to_contract(&self) -> wp_contracts::EconomyEvent {
         wp_contracts::EconomyEvent {
-            account: wp_contracts::AccountId(self.player.0),
+            account: self.account_id(),
             seq: self.seq,
             day: self.day,
             reason: self.reason.to_contract(),
@@ -584,7 +606,7 @@ impl EconomyEvent {
     /// Inverse of [`EconomyEvent::to_contract`].
     pub fn from_contract(e: &wp_contracts::EconomyEvent) -> Self {
         Self {
-            player: PlayerId(e.account.0),
+            player: player_of(e.account),
             seq: e.seq,
             day: e.day,
             reason: EventReason::from_contract(&e.reason),
@@ -948,6 +970,20 @@ pub trait AccountStore {
         player: PlayerId,
         from_seq: u64,
     ) -> Result<Vec<EconomyEvent>, StoreError>;
+
+    /// [`AccountStore::load`] by durable account id.
+    fn load_account(&self, account: AccountId) -> Result<Option<PlayerAccount>, StoreError> {
+        self.load(player_of(account))
+    }
+
+    /// [`AccountStore::events_since`] by durable account id.
+    fn account_events_since(
+        &self,
+        account: AccountId,
+        from_seq: u64,
+    ) -> Result<Vec<EconomyEvent>, StoreError> {
+        self.events_since(player_of(account), from_seq)
+    }
 }
 
 /// Check that `events` continue a log whose next expected sequence number is `next_stored`.
