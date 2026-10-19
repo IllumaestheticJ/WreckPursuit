@@ -126,7 +126,7 @@ The reply is `Result<(), CaptainError>` with:
 ## Perf numbers
 | Measurement | Machine | Native | Browser | Budget |
 |---|---|---|---|---|
-| `PoliceSystem::step` per 60 Hz frame, 13 patrols + reinforcements, 4 wanted racers, D's small city with exact building LOS, obstacle awareness on (`police_bench`) | Cloud Xeon 2.1 GHz, release | PERF_NOW ms (0.055 before round 6) | not measured | 0.5 ms / 1.0 ms |
+| `PoliceSystem::step` per 60 Hz frame, 13 patrols + reinforcements, 4 wanted racers, D's small city with exact building LOS, obstacle awareness on (`police_bench`) | Cloud Xeon 2.1 GHz, release | 0.074 ms (0.055 before round 6) | not measured | 0.5 ms / 1.0 ms |
 
 ## Known gaps
 - The headless kinematic body and traffic-hazard model stand in until units are physical (12).
