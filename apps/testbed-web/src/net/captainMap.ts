@@ -1,11 +1,17 @@
 // Captain map view: 2D canvas with units, suspects, incidents, heat and a command radial.
 // Left-click selects police units (shift adds), drag pans, wheel zooms, right-click opens the
-// radial at the cursor: Move / Block / Hold, or Pursue when right-clicking a suspect.
+// radial at the cursor. On a suspect: pursue / intercept (selected units), roadblock, spikes,
+// helicopter, priority, call off. On empty map: patrol / disengage (selected units), clear
+// priority. Commands are the contract's typed `CaptainCommand`s, validated by wp_police.
 // Roads come from the road graph once wp_world publishes one; until then a 50 m grid is drawn.
 import * as net from "./wasm";
-import type { CaptainMapData, MapUnit, OrderKind } from "./wasm";
+import type { CaptainCommand, CaptainMapData, MapUnit, UnitOrder } from "./wasm";
 
-const ORDER_NAMES = ["", "move", "block", "pursue", "hold"];
+const ORDER_NAMES = ["", "patrol", "pursue", "intercept", "respond", "disengage"];
+
+type Choice =
+  | "pursue" | "intercept" | "roadblock" | "spikes" | "helicopter" | "priority" | "call off"
+  | "patrol" | "disengage" | "clear priority";
 
 export class CaptainMap {
   readonly canvas = document.createElement("canvas");
@@ -88,11 +94,13 @@ export class CaptainMap {
     }
   }
 
-  private radialOptions(): OrderKind[] {
-    return this.radial?.target ? ["pursue", "hold"] : ["move", "block", "hold"];
+  private radialOptions(): Choice[] {
+    return this.radial?.target
+      ? ["pursue", "intercept", "roadblock", "spikes", "helicopter", "priority", "call off"]
+      : ["patrol", "disengage", "clear priority"];
   }
 
-  private radialChoice(sx: number, sy: number): OrderKind | null {
+  private radialChoice(sx: number, sy: number): Choice | null {
     if (!this.radial) return null;
     const opts = this.radialOptions();
     const dx = sx - this.radial.sx;
@@ -102,16 +110,34 @@ export class CaptainMap {
     return opts[Math.floor(a / (Math.PI * 2 / opts.length))];
   }
 
-  private issue(kind: OrderKind): void {
-    if (!this.radial || this.selected.size === 0) return;
-    net.captainOrder({
-      kind,
-      units: [...this.selected],
-      x: this.radial.wx,
-      y: this.radial.wy,
-      target: this.radial.target?.entity ?? 0,
-    }, performance.now());
+  private issue(choice: Choice): void {
+    if (!this.radial) return;
+    const now = performance.now();
+    const target = this.radial.target?.entity;
+    const assign = (order: UnitOrder) => {
+      for (const entity of this.selected) {
+        const unit = this.data.units.find((u) => u.entity === entity)?.unit;
+        if (unit != null) net.captainCommand({ AssignUnit: { unit, order } }, now);
+      }
+    };
+    let cmd: CaptainCommand | null = null;
+    switch (choice) {
+      case "pursue": if (target != null) assign({ Pursue: { target } }); break;
+      case "intercept": if (target != null) assign({ Intercept: { target } }); break;
+      case "patrol": assign("Patrol"); break;
+      case "disengage": assign("Disengage"); break;
+      case "roadblock": if (target != null) cmd = { RequestRoadblock: { target, road: null } }; break;
+      case "spikes": if (target != null) cmd = { RequestSpikes: { target, road: null } }; break;
+      case "helicopter": if (target != null) cmd = { RequestHelicopter: { target } }; break;
+      case "priority": if (target != null) cmd = { SetPriorityTarget: { target } }; break;
+      case "clear priority": cmd = { SetPriorityTarget: { target: null } }; break;
+      case "call off": if (target != null) cmd = { CallOff: { target } }; break;
+    }
+    if (cmd) net.captainCommand(cmd, now);
   }
+
+  /** Last captain reply, shown in the footer. */
+  lastReply = "";
 
   draw(data: CaptainMapData): void {
     this.data = data;
@@ -187,6 +213,7 @@ export class CaptainMap {
     g.fillStyle = "#9f9";
     g.font = "12px monospace";
     g.fillText(`captain map · ${data.units.length} units · selected ${[...this.selected].join(",") || "none"} · ` +
-      "click select, shift multi, right-click command, drag pan, wheel zoom", 8, c.height - 8);
+      "click select, shift multi, right-click command, drag pan, wheel zoom" +
+      (this.lastReply ? ` · last: ${this.lastReply}` : ""), 8, c.height - 8);
   }
 }

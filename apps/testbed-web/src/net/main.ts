@@ -4,7 +4,7 @@
 import * as THREE from "three";
 import initWasm from "../wasm/pkg/wp_wasm.js";
 import * as net from "./wasm";
-import type { RenderVehicle } from "./wasm";
+import type { GameEvent, RenderVehicle } from "./wasm";
 import { Connection } from "./connection";
 import { installKeyboard, readInput } from "./keyboard";
 import { renderOverlay } from "./overlay";
@@ -73,6 +73,19 @@ async function main(): Promise<void> {
     return obj;
   }
 
+  // Kinematic traffic (display only, extrapolated by the client).
+  const trafficCars = new Map<number, THREE.Mesh>();
+  const trafficGeo = new THREE.BoxGeometry(1.8, 4.5, 1.4);
+  const trafficMat = new THREE.MeshStandardMaterial({ color: COLORS.traffic });
+  const radio: string[] = [];
+  function onEvent(e: GameEvent): void {
+    if ("Police" in e && typeof e.Police === "object" && "Radio" in e.Police) {
+      const r = e.Police.Radio as { text: string };
+      radio.push(r.text);
+      while (radio.length > 3) radio.shift();
+    }
+  }
+
   let connState = "connecting";
   const conn = new Connection(url, (s) => (connState = s));
   conn.open();
@@ -119,6 +132,25 @@ async function main(): Promise<void> {
           cars.delete(e);
         }
       }
+      const agents = net.traffic(now);
+      const live = new Set<number>();
+      for (const a of agents) {
+        live.add(a.id);
+        let m = trafficCars.get(a.id);
+        if (!m) {
+          m = new THREE.Mesh(trafficGeo, trafficMat);
+          world.add(m);
+          trafficCars.set(a.id, m);
+        }
+        m.position.set(a.pos[0], a.pos[1], a.pos[2] + 0.7);
+        m.rotation.set(0, 0, a.yaw);
+      }
+      for (const [id, m] of trafficCars) {
+        if (!live.has(id)) {
+          world.remove(m);
+          trafficCars.delete(id);
+        }
+      }
       const follow = ownCar ? cars.get(ownCar.entity) : cars.values().next().value;
       if (follow) {
         const p = follow.getWorldPosition(new THREE.Vector3());
@@ -134,7 +166,10 @@ async function main(): Promise<void> {
 
     if (now - lastUi > 200) {
       lastUi = now;
-      renderOverlay(overlay, st, net.stats(), connState);
+      for (const e of net.events()) onEvent(e);
+      const reply = st.captain_replies[st.captain_replies.length - 1];
+      if (reply) captain.lastReply = `#${reply.seq} ${reply.ok ? "ok" : JSON.stringify(reply.error)}`;
+      renderOverlay(overlay, st, net.stats(), connState, radio, trafficCars.size);
       lobby.update(st);
     }
     requestAnimationFrame(frame);

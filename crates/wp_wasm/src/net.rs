@@ -7,17 +7,22 @@
 //! |---|---|
 //! | `net_create(name, input_source)` | new client (`input_source` 0 keyboard, 1 gamepad, 2 wheel) |
 //! | `net_connect(now_ms, token)` | queue `Hello` (`token` "" or a reconnect token string) |
+//! | `net_connect_join(now_ms, token, join_token)` | same, presenting a meta join token (MC-6) |
 //! | `net_receive(bytes, now_ms)` | one received frame |
 //! | `net_update(now_ms, input_json)` | predict, ping, send inputs (`VehicleInput` JSON) |
 //! | `net_take_outgoing()` | frames to send: repeated `u32 LE length, bytes` |
 //! | `net_render_json(now_ms)` | `[{entity, car_id, kind, own, pos, rot, speed_mps, gear, engine_rpm, health, body_size_m}]` |
-//! | `net_status_json()` | phase, player, token, role, vehicle, mode, offers, orders, races, account, notices |
+//! | `net_status_json()` | phase, player, token, meta token, role, vehicle, mode, offers, unit order, captain replies, wanted levels, weather, races, account, notices |
+//! | `net_traffic_json(now_ms)` | kinematic traffic `[{id, pos, yaw, speed_mps, flags, variant}]`, extrapolated |
+//! | `net_events_json()` | drain typed game events: `SimEvent` JSON (`{"Police": …}`, `{"Race": …}`, `{"Economy": …}`, `{"WeatherChanged": …}`) |
 //! | `net_stats_json()` | RTT, mispredictions, correction size, bandwidth, hash checks |
 //! | `net_captain_json()` | captain map: units, incidents, heat |
 //! | `net_request_role(role, now_ms)` | 0 racer, 1 police chase, 2 captain, 3 spectator |
-//! | `net_captain_order_json(json, now_ms)` | `{kind: move\|block\|pursue\|hold, units, x, y, target}` (m) |
+//! | `net_captain_command_json(json, now_ms)` | contract `CaptainCommand` JSON, e.g. `{"AssignUnit":{"unit":7,"order":{"Pursue":{"target":3}}}}`; returns the reply `seq` |
 //! | `net_race_create_json(json, now_ms)` | `{laps, checkpoints: [[x, y], …]}` (m) |
-//! | `net_race_join/start/leave(race, now_ms)`, `net_race_invite(race, player, now_ms)` | lobby |
+//! | `net_race_command_json(json, now_ms)` | contract `RaceCommand` JSON (`{"Enter":{"event":1}}`, `"Ready"`, …) |
+//! | `net_race_join/start/leave(race, now_ms)` | `RaceCommand` `Enter` / `Ready` / `Withdraw` |
+//! | `net_race_invite(race, player, now_ms)` | lobby invite |
 //! | `net_bye(now_ms)` | leave without a reconnect window |
 
 use std::cell::RefCell;
@@ -25,9 +30,12 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
-use wp_contracts::{DamageMode, InputSource, LoadedCar, ModeTable, VehicleInput};
+use wp_contracts::{
+    CaptainCommand, DamageMode, InputSource, LoadedCar, ModeTable, RaceCommand, RaceEventId,
+    VehicleInput,
+};
 use wp_net::client::{default_damage_factory, Client, ClientConfig, Phase};
-use wp_net::protocol::{role_from_u8, role_to_u8, CaptainOrder, ClientMsg, EntityKind, RaceState};
+use wp_net::protocol::{role_from_u8, role_to_u8, ClientMsg, EntityKind, RaceState};
 
 type Data = (BTreeMap<String, LoadedCar>, BTreeMap<DamageMode, ModeTable>);
 
@@ -123,6 +131,20 @@ pub fn net_connect(now_ms: f64, token: &str) -> Result<(), JsValue> {
     })
 }
 
+/// [`net_connect`] presenting a meta matchmaking join token (MC-6).
+#[wasm_bindgen]
+pub fn net_connect_join(now_ms: f64, token: &str, join_token: &str) -> Result<(), JsValue> {
+    let token: u64 = if token.is_empty() {
+        0
+    } else {
+        token.parse().map_err(|_| err("bad token"))?
+    };
+    with_net(|n| {
+        n.client.connect_with_join_token(now_ms, token, join_token);
+        Ok(())
+    })
+}
+
 /// Feed one received binary frame.
 #[wasm_bindgen]
 pub fn net_receive(bytes: &[u8], now_ms: f64) -> Result<(), JsValue> {
@@ -196,6 +218,21 @@ pub fn net_render_json(now_ms: f64) -> Result<String, JsValue> {
     })
 }
 
+/// Kinematic traffic to draw at `now_ms` (extrapolated along each agent's heading).
+#[wasm_bindgen]
+pub fn net_traffic_json(now_ms: f64) -> Result<String, JsValue> {
+    with_net(|n| Ok(serde_json::to_string(&n.client.render_traffic(now_ms)).expect("serializable")))
+}
+
+/// Drain typed game events received since the last call (contract `SimEvent` JSON array).
+#[wasm_bindgen]
+pub fn net_events_json() -> Result<String, JsValue> {
+    with_net(|n| {
+        let events: Vec<_> = n.client.game_events.drain(..).collect();
+        Ok(serde_json::to_string(&events).expect("serializable"))
+    })
+}
+
 #[derive(Serialize)]
 struct RaceJson {
     race: u32,
@@ -246,12 +283,19 @@ pub fn net_status_json() -> Result<String, JsValue> {
             "phase": phase,
             "player": c.player().map(|p| p.0),
             "token": c.token().to_string(),
+            "meta_reconnect_token": c.meta_reconnect_token,
             "role": role_str(c.role()),
             "vehicle": c.own_vehicle().map(|e| e.0),
             "mode": match c.mode() { DamageMode::Arcade => "arcade", DamageMode::Simulation => "sim" },
             "captain_offer": c.captain_offer,
-            "unit_order": c.unit_order.map(|o| serde_json::json!({
-                "kind": o.kind, "x": o.x_dm as f32 / 10.0, "y": o.y_dm as f32 / 10.0, "target": o.target
+            "unit_order": c.unit_order,
+            "captain_replies": c.captain_replies.iter().map(|(seq, r)| serde_json::json!({
+                "seq": seq, "ok": r.is_ok(), "error": r.err(),
+            })).collect::<Vec<_>>(),
+            "wanted": c.wanted.iter().map(|(e, l)| serde_json::json!({"racer": e, "level": l.number()})).collect::<Vec<_>>(),
+            "weather": c.weather.as_ref().map(|w| serde_json::json!({
+                "kind": w.kind, "intensity": w.intensity, "prev_kind": w.prev_kind,
+                "prev_intensity": w.prev_intensity, "blend": w.blend, "wind_heading_rad": w.wind_heading_rad,
             })),
             "races": races,
             "race_progress": c.race_progress.iter().map(|((r, p), cp)| serde_json::json!({"race": r, "player": p, "next": cp})).collect::<Vec<_>>(),
@@ -313,6 +357,7 @@ pub fn net_captain_json() -> Result<String, JsValue> {
                 "heading": u.heading as f32 / 256.0 * std::f32::consts::TAU,
                 "wanted": u.wanted,
                 "order": u.order,
+                "unit": u.unit,
             })).collect::<Vec<_>>(),
             "incidents": m.incidents.iter().map(|i| serde_json::json!({
                 "x": i.x_dm as f32 / 10.0, "y": i.y_dm as f32 / 10.0, "kind": i.kind, "age_s": i.age_s
@@ -335,46 +380,12 @@ pub fn net_request_role(role: u8, now_ms: f64) -> Result<(), JsValue> {
     })
 }
 
-#[derive(Deserialize)]
-struct OrderJson {
-    kind: String,
-    #[serde(default)]
-    units: Vec<u32>,
-    #[serde(default)]
-    x: f32,
-    #[serde(default)]
-    y: f32,
-    #[serde(default)]
-    target: u32,
-}
-
-/// Send a captain order (see the module table).
+/// Send a captain command (contract `CaptainCommand` JSON); returns the sequence number the
+/// matching `captain_replies` entry in [`net_status_json`] will carry.
 #[wasm_bindgen]
-pub fn net_captain_order_json(json: &str, now_ms: f64) -> Result<(), JsValue> {
-    let o: OrderJson = serde_json::from_str(json).map_err(err)?;
-    let (x_dm, y_dm) = ((o.x * 10.0).round() as i32, (o.y * 10.0).round() as i32);
-    let order = match o.kind.as_str() {
-        "move" => CaptainOrder::MoveTo {
-            units: o.units,
-            x_dm,
-            y_dm,
-        },
-        "block" => CaptainOrder::Block {
-            units: o.units,
-            x_dm,
-            y_dm,
-        },
-        "pursue" => CaptainOrder::Pursue {
-            units: o.units,
-            target: o.target,
-        },
-        "hold" => CaptainOrder::Hold { units: o.units },
-        k => return Err(err(format!("unknown order kind {k}"))),
-    };
-    with_net(|n| {
-        n.client.captain_order(&order, now_ms);
-        Ok(())
-    })
+pub fn net_captain_command_json(json: &str, now_ms: f64) -> Result<u32, JsValue> {
+    let command: CaptainCommand = serde_json::from_str(json).map_err(err)?;
+    with_net(|n| Ok(n.client.captain_command(command, now_ms)))
 }
 
 #[derive(Deserialize)]
@@ -408,22 +419,34 @@ fn send(msg: ClientMsg, now_ms: f64) -> Result<(), JsValue> {
     })
 }
 
-/// Join a race.
+/// Send a race lobby command (contract `RaceCommand` JSON).
+#[wasm_bindgen]
+pub fn net_race_command_json(json: &str, now_ms: f64) -> Result<(), JsValue> {
+    let cmd: RaceCommand = serde_json::from_str(json).map_err(err)?;
+    send(ClientMsg::RaceCommand(cmd), now_ms)
+}
+
+/// Join a race (`RaceCommand::Enter`).
 #[wasm_bindgen]
 pub fn net_race_join(race: u32, now_ms: f64) -> Result<(), JsValue> {
-    send(ClientMsg::RaceJoin { race }, now_ms)
+    let event = RaceEventId(race);
+    send(ClientMsg::RaceCommand(RaceCommand::Enter { event }), now_ms)
 }
 
-/// Start a race (host only).
+/// Start a race as host (`RaceCommand::Ready`).
 #[wasm_bindgen]
-pub fn net_race_start(race: u32, now_ms: f64) -> Result<(), JsValue> {
-    send(ClientMsg::RaceStart { race }, now_ms)
+pub fn net_race_start(_race: u32, now_ms: f64) -> Result<(), JsValue> {
+    send(ClientMsg::RaceCommand(RaceCommand::Ready), now_ms)
 }
 
-/// Leave a race.
+/// Leave a race (`RaceCommand::Withdraw`).
 #[wasm_bindgen]
 pub fn net_race_leave(race: u32, now_ms: f64) -> Result<(), JsValue> {
-    send(ClientMsg::RaceLeave { race }, now_ms)
+    let event = RaceEventId(race);
+    send(
+        ClientMsg::RaceCommand(RaceCommand::Withdraw { event }),
+        now_ms,
+    )
 }
 
 /// Invite a player to a race.

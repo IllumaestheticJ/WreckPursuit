@@ -8,25 +8,34 @@
 //!
 //! Per net tick: 4 physics ticks (inputs applied per tick from each player's buffer), then for
 //! every connected client: damage events for vehicles it tracks, staggered lattice hashes,
-//! requested lattice snapshots, interest enter/leave, a 2 Hz captain view for the captain, and
-//! one unreliable snapshot filled by priority up to the client's byte budget.
+//! requested lattice snapshots, typed game events (police / race / economy / weather), interest
+//! enter/leave, a 2 Hz captain view for the captain, weather when it changes, and one
+//! unreliable snapshot filled by priority up to the client's byte budget (with nearby
+//! kinematic traffic at 10 Hz).
+//!
+//! **Meta join tokens (MC-6):** with [`ServerConfig::require_join_token`] a new player's
+//! `Hello` is parked until the host verifies its `join_token` (e.g. with `wp_meta`'s
+//! `VerifyJoin`): [`ServerInstance::take_join_requests`], then
+//! [`ServerInstance::approve_join`] or [`ServerInstance::reject_join`].
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use wp_contracts::{
-    AssistProfile, EntityId, PlayerId, Role, SimEvent, VehicleInput, VehicleState, CONTRACT_VERSION,
+    AccountId, AssistProfile, CaptainCommand, CaptainError, EconomyReason, EntityId, PlayerId,
+    PoliceEvent, RaceCommand, RaceType, Role, SimEvent, TrafficAgentSnapshot, UnitId, UnitOrder,
+    VehicleInput, VehicleState, WeatherSnapshot, CONTRACT_VERSION,
 };
-use wp_economy::{AccountStore, InMemoryStore, PlayerAccount};
+use wp_economy::{AccountStore, EventReason, InMemoryStore, PlayerAccount};
 use wp_math::Rng;
 
 use crate::interest::{classify, InterestState, Subject, Viewer};
 use crate::lattice::{lattice_hash, LatticeSnapshot};
 use crate::netsim::NetSim;
 use crate::protocol::{
-    CaptainOrder, ClientMsg, DamageEvent, EntityKind, Incident, MapUnit, ServerMsg, UnitOrder,
-    PROTOCOL_VERSION,
+    unit_order_code, ClientMsg, DamageEvent, EntityKind, Incident, MapUnit, ServerMsg,
+    PLAYER_UNIT_BASE, PROTOCOL_VERSION,
 };
-use crate::quant::{QContact, QVehicle};
+use crate::quant::{QContact, QTrafficAgent, QVehicle};
 use crate::race::{RaceEvent, RaceLobby};
 use crate::roles::{RoleConfig, RoleEvent, RoleManager};
 use crate::snapshot::{DeltaVehicle, OwnState};
@@ -68,6 +77,17 @@ pub struct ServerConfig {
     pub lattice_requests_per_second: u32,
     /// Captain commands accepted per second.
     pub captain_commands_per_second: u32,
+    /// New players must present a meta join token, verified by the host (MC-6; default off).
+    pub require_join_token: bool,
+    /// Kinematic traffic within this distance of a client's car is replicated, m (default 120).
+    pub traffic_radius_m: f32,
+    /// Most kinematic traffic agents per client snapshot, nearest first (default 48).
+    pub max_traffic_agents: usize,
+    /// Net ticks between traffic updates (default 6 → 10 Hz; clients extrapolate between).
+    pub traffic_every_net_ticks: u64,
+    /// Shortest interval between weather snapshots while the regime is unchanged, ticks
+    /// (default 5 s; a regime change is sent at the next check, within 1 s).
+    pub weather_interval_ticks: u64,
 }
 
 impl Default for ServerConfig {
@@ -86,6 +106,11 @@ impl Default for ServerConfig {
             max_inputs_per_second: 300,
             lattice_requests_per_second: 4,
             captain_commands_per_second: 10,
+            require_join_token: false,
+            traffic_radius_m: 120.0,
+            max_traffic_agents: 48,
+            traffic_every_net_ticks: 6,
+            weather_interval_ticks: 5 * TICK_HZ,
         }
     }
 }
@@ -137,6 +162,12 @@ pub struct ServerStats {
     pub decode_errors: u64,
     /// Lattice snapshots sent in response to hash mismatches.
     pub lattice_resyncs: u64,
+    /// Typed game events forwarded (counted once per client that received them).
+    pub events_sent: u64,
+    /// Captain commands accepted by `wp_police` / the net layer.
+    pub captain_commands_ok: u64,
+    /// Captain commands refused (`CaptainReply` with an error).
+    pub captain_commands_refused: u64,
     /// Bytes sent to players since start, by message tag (first byte of the encoding; see
     /// the protocol table in the README).
     pub bytes_by_tag: BTreeMap<u8, u64>,
@@ -183,11 +214,30 @@ impl RateWindow {
     }
 }
 
+/// A new player's `Hello` waiting for the host to verify its meta join token (MC-6).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JoinRequest {
+    /// Connection that sent the `Hello`.
+    pub conn: ConnId,
+    /// Requested display name.
+    pub name: String,
+    /// The `join_token` presented (may be empty: the host decides).
+    pub join_token: String,
+}
+
+#[derive(Debug, Clone)]
+struct PendingJoin {
+    request: JoinRequest,
+    assists: AssistProfile,
+    handed_out: bool,
+}
+
 #[derive(Debug)]
 struct Player {
     id: PlayerId,
     name: String,
     token: u64,
+    meta_reconnect_token: String,
     conn: Option<ConnId>,
     assists: AssistProfile,
     vehicle: Option<EntityId>,
@@ -231,9 +281,19 @@ pub struct ServerInstance<S: NetSim> {
     accounts: InMemoryStore,
     /// Owner and kind of every vehicle the net layer spawned.
     owned: BTreeMap<EntityId, (PlayerId, EntityKind)>,
-    unit_orders: BTreeMap<EntityId, u8>,
+    /// Latest captain order per police vehicle (map markers; player seats follow it).
+    unit_orders: BTreeMap<EntityId, UnitOrder>,
     incidents: VecDeque<IncidentRec>,
     pending_damage: Vec<(u64, BTreeMap<EntityId, TickDamage>)>,
+    /// Typed events (police / race / economy / weather) since the last client output.
+    pending_events: Vec<(u64, SimEvent)>,
+    /// Hellos parked for join-token verification.
+    pending_joins: BTreeMap<ConnId, PendingJoin>,
+    /// Kinematic traffic of this net tick (`Some` on traffic ticks).
+    traffic_now: Option<Vec<TrafficAgentSnapshot>>,
+    /// Last weather broadcast and its tick.
+    last_weather: Option<(u64, WeatherSnapshot)>,
+    human_captain: bool,
     outgoing: Vec<Outgoing>,
     net_ticks: u64,
     stats: ServerStats,
@@ -257,6 +317,11 @@ impl<S: NetSim> ServerInstance<S> {
             unit_orders: BTreeMap::new(),
             incidents: VecDeque::new(),
             pending_damage: Vec::new(),
+            pending_events: Vec::new(),
+            pending_joins: BTreeMap::new(),
+            traffic_now: None,
+            last_weather: None,
+            human_captain: false,
             outgoing: Vec::new(),
             net_ticks: 0,
             stats: ServerStats::default(),
@@ -330,6 +395,7 @@ impl<S: NetSim> ServerInstance<S> {
 
     /// Transport closed. A joined player keeps their car for the reconnect window.
     pub fn disconnect(&mut self, conn: ConnId) {
+        self.pending_joins.remove(&conn);
         if let Some(Some(pid)) = self.conns.remove(&conn) {
             let tick = self.sim.tick();
             if let Some(p) = self.players.get_mut(&pid) {
@@ -345,6 +411,49 @@ impl<S: NetSim> ServerInstance<S> {
     /// Frames to send since the last call.
     pub fn drain_outgoing(&mut self) -> Vec<Outgoing> {
         std::mem::take(&mut self.outgoing)
+    }
+
+    /// New join requests waiting for token verification (each returned once; see the module
+    /// docs). Empty unless [`ServerConfig::require_join_token`] is set.
+    pub fn take_join_requests(&mut self) -> Vec<JoinRequest> {
+        self.pending_joins
+            .values_mut()
+            .filter(|p| !p.handed_out)
+            .map(|p| {
+                p.handed_out = true;
+                p.request.clone()
+            })
+            .collect()
+    }
+
+    /// Admit a parked join: the player joins as `display_name` (`None` keeps the requested
+    /// name) and `Welcome` carries `meta_reconnect_token`. Returns the new player, or `None`
+    /// if the connection is gone or the instance filled up meanwhile (it is then rejected).
+    pub fn approve_join(
+        &mut self,
+        conn: ConnId,
+        display_name: Option<String>,
+        meta_reconnect_token: String,
+    ) -> Option<PlayerId> {
+        let pending = self.pending_joins.remove(&conn)?;
+        if !self.conns.contains_key(&conn) {
+            return None;
+        }
+        if self.players.len() >= self.cfg.max_players {
+            let reason = "instance full".to_string();
+            self.send_conn(conn, &ServerMsg::Reject { reason }, true);
+            return None;
+        }
+        let name = display_name.unwrap_or(pending.request.name);
+        Some(self.join(conn, name, pending.assists, meta_reconnect_token))
+    }
+
+    /// Refuse a parked join: the client gets `Reject { reason }` and the connection closes.
+    pub fn reject_join(&mut self, conn: ConnId, reason: impl Into<String>) {
+        if self.pending_joins.remove(&conn).is_some() {
+            let reason = reason.into();
+            self.send_conn(conn, &ServerMsg::Reject { reason }, true);
+        }
     }
 
     fn send_conn(&mut self, conn: ConnId, msg: &ServerMsg, close: bool) {
@@ -413,6 +522,7 @@ impl<S: NetSim> ServerInstance<S> {
                     name,
                     input_source,
                     reconnect_token,
+                    join_token,
                 },
             ) => {
                 if protocol != PROTOCOL_VERSION || contract != CONTRACT_VERSION {
@@ -439,7 +549,23 @@ impl<S: NetSim> ServerInstance<S> {
                     self.send_conn(conn, &ServerMsg::Reject { reason }, true);
                     return;
                 }
-                self.join(conn, name, assists);
+                if self.cfg.require_join_token {
+                    // The host verifies the token (MC-6); a second Hello replaces the first.
+                    self.pending_joins.insert(
+                        conn,
+                        PendingJoin {
+                            request: JoinRequest {
+                                conn,
+                                name,
+                                join_token,
+                            },
+                            assists,
+                            handed_out: false,
+                        },
+                    );
+                    return;
+                }
+                self.join(conn, name, assists, String::new());
             }
             (None, _) => {} // must say Hello first
             (Some(_), ClientMsg::Hello { .. }) => {}
@@ -447,7 +573,13 @@ impl<S: NetSim> ServerInstance<S> {
         }
     }
 
-    fn join(&mut self, conn: ConnId, name: String, assists: AssistProfile) {
+    fn join(
+        &mut self,
+        conn: ConnId,
+        name: String,
+        assists: AssistProfile,
+        meta_reconnect_token: String,
+    ) -> PlayerId {
         let id = PlayerId(self.next_player);
         self.next_player += 1;
         let token = loop {
@@ -467,6 +599,7 @@ impl<S: NetSim> ServerInstance<S> {
                 id,
                 name,
                 token,
+                meta_reconnect_token,
                 conn: Some(conn),
                 assists,
                 vehicle: None,
@@ -486,6 +619,7 @@ impl<S: NetSim> ServerInstance<S> {
         self.roles.join(id, cop_rank);
         self.welcome(id);
         self.send_role(id, Role::Spectator);
+        id
     }
 
     fn reattach(&mut self, conn: ConnId, pid: PlayerId) {
@@ -507,17 +641,21 @@ impl<S: NetSim> ServerInstance<S> {
     }
 
     fn welcome(&mut self, pid: PlayerId) {
-        let token = self.players[&pid].token;
+        let p = &self.players[&pid];
         let msg = ServerMsg::Welcome {
             player: pid,
-            token,
+            token: p.token,
             server_tick: self.sim.tick(),
             mode: self.sim.damage_mode(),
             protocol: PROTOCOL_VERSION,
             time_of_day_h: self.sim.time_of_day().hours(),
+            meta_reconnect_token: p.meta_reconnect_token.clone(),
         };
         self.send(pid, &msg);
         self.send_account(pid);
+        if let Some(w) = self.sim.weather() {
+            self.send(pid, &ServerMsg::Weather(w));
+        }
     }
 
     /// The player's account, or an empty one if none is stored yet (lead adapter to
@@ -559,7 +697,15 @@ impl<S: NetSim> ServerInstance<S> {
                 let events = self.roles.request(pid, role, tick);
                 self.apply_role_events(events);
             }
-            ClientMsg::CaptainCommand(payload) => self.captain_command(pid, &payload),
+            ClientMsg::CaptainCommand { seq, command } => {
+                let result = self.captain_command(pid, command);
+                if result.is_ok() {
+                    self.stats.captain_commands_ok += 1;
+                } else {
+                    self.stats.captain_commands_refused += 1;
+                }
+                self.send(pid, &ServerMsg::CaptainReply { seq, result });
+            }
             ClientMsg::Ping { client_ms } => {
                 self.send(
                     pid,
@@ -588,16 +734,6 @@ impl<S: NetSim> ServerInstance<S> {
                     Err(e) => self.notice(pid, e),
                 }
             }
-            ClientMsg::RaceJoin { race } => {
-                if self.roles.role(pid) != Some(Role::Racer) {
-                    self.notice(pid, "only racers can join races");
-                    return;
-                }
-                match self.races.join(pid, race) {
-                    Ok(ev) => self.apply_race_events(vec![ev]),
-                    Err(e) => self.notice(pid, e),
-                }
-            }
             ClientMsg::RaceInvite { race, player } => {
                 let invitee = PlayerId(player);
                 if self.races.can_invite(pid, race) && self.players.contains_key(&invitee) {
@@ -606,15 +742,7 @@ impl<S: NetSim> ServerInstance<S> {
                     self.notice(pid, "cannot invite to that race");
                 }
             }
-            ClientMsg::RaceStart { race } => match self.races.start(pid, race, tick) {
-                Ok(ev) => self.apply_race_events(vec![ev]),
-                Err(e) => self.notice(pid, e),
-            },
-            ClientMsg::RaceLeave { race } => {
-                if let Some(ev) = self.races.leave(pid, race) {
-                    self.apply_race_events(vec![ev]);
-                }
-            }
+            ClientMsg::RaceCommand(cmd) => self.race_command(pid, cmd, tick),
             ClientMsg::Bye => self.remove_player(pid),
         }
     }
@@ -666,79 +794,94 @@ impl<S: NetSim> ServerInstance<S> {
         }
     }
 
-    fn captain_command(&mut self, pid: PlayerId, payload: &[u8]) {
+    /// Race lobby commands (contract `RaceCommand`, v0.3.0): `Enter`/`Withdraw` name the
+    /// lobby race by its id, `Ready` from the host starts the countdown.
+    fn race_command(&mut self, pid: PlayerId, cmd: RaceCommand, tick: u64) {
+        match cmd {
+            RaceCommand::Enter { event } => {
+                if self.roles.role(pid) != Some(Role::Racer) {
+                    self.notice(pid, "only racers can join races");
+                    return;
+                }
+                match self.races.join(pid, event.0) {
+                    Ok(ev) => self.apply_race_events(vec![ev]),
+                    Err(e) => self.notice(pid, e),
+                }
+            }
+            RaceCommand::Withdraw { event } => {
+                if let Some(ev) = self.races.leave(pid, event.0) {
+                    self.apply_race_events(vec![ev]);
+                }
+            }
+            RaceCommand::Ready => {
+                let Some(race) = self.races.race_of(pid) else {
+                    self.notice(pid, "not in a race");
+                    return;
+                };
+                let is_host = self.races.info(race).is_some_and(|i| i.host == pid.0);
+                if !is_host {
+                    // Members are ready by joining; the host's Ready starts the countdown.
+                    self.notice(pid, "ready; waiting for the host");
+                    return;
+                }
+                match self.races.start(pid, race, tick) {
+                    Ok(ev) => self.apply_race_events(vec![ev]),
+                    Err(e) => self.notice(pid, e),
+                }
+            }
+        }
+    }
+
+    /// Typed captain command (contract `CaptainCommand`, v0.3.0). AI units and tools go to
+    /// `wp_police` through the sim; orders for player chase seats (unit ids from
+    /// [`PLAYER_UNIT_BASE`]) are relayed to the seat's driver as [`ServerMsg::UnitOrder`].
+    fn captain_command(&mut self, pid: PlayerId, cmd: CaptainCommand) -> Result<(), CaptainError> {
         let tick = self.sim.tick();
         if self.roles.role(pid) != Some(Role::PoliceCaptain) {
             self.notice(pid, "only the captain can command units");
-            return;
+            return Err(CaptainError::Unavailable);
         }
         let limit = self.cfg.captain_commands_per_second;
-        if !self
-            .players
-            .get_mut(&pid)
-            .expect("player")
-            .command_rate
-            .allow(tick, limit)
-        {
-            self.notice(pid, "command rate exceeded");
-            return;
+        let rate = &mut self.players.get_mut(&pid).expect("player").command_rate;
+        if !rate.allow(tick, limit) {
+            let left = (rate.start_tick + TICK_HZ).saturating_sub(tick);
+            return Err(CaptainError::Cooldown {
+                remaining_s: left as f32 / TICK_HZ as f32,
+            });
         }
-        // Placeholder validation until wp_police owns the payload (NET-3).
-        let order = match CaptainOrder::decode(payload) {
-            Ok(o) => o,
-            Err(e) => {
-                self.notice(pid, format!("bad command: {e}"));
-                return;
+        if let CaptainCommand::AssignUnit { unit, order } = cmd {
+            if unit.0 >= PLAYER_UNIT_BASE {
+                return self.order_player_unit(EntityId(unit.0 - PLAYER_UNIT_BASE), order);
             }
+            self.sim.captain_command(cmd)?;
+            if let Some(e) = self.vehicle_of_unit(unit) {
+                self.unit_orders.insert(e, order);
+            }
+            return Ok(());
+        }
+        self.sim.captain_command(cmd)
+    }
+
+    fn order_player_unit(&mut self, e: EntityId, order: UnitOrder) -> Result<(), CaptainError> {
+        let Some((owner, EntityKind::PoliceChase)) = self.owned.get(&e).copied() else {
+            return Err(CaptainError::UnknownUnit);
         };
-        let live: BTreeSet<EntityId> = self.sim.vehicles().iter().map(|(e, _)| *e).collect();
-        let mut targets = Vec::new();
-        for u in order.units() {
-            let e = EntityId(*u);
-            match self.owned.get(&e) {
-                Some((owner, EntityKind::PoliceChase)) => targets.push((e, *owner)),
-                _ => {
-                    self.notice(pid, format!("unit {u} is not a police chase unit"));
-                    return;
-                }
+        if let UnitOrder::Pursue { target } | UnitOrder::Intercept { target } = order {
+            if target == e || !self.sim.vehicles().iter().any(|(v, _)| *v == target) {
+                return Err(CaptainError::UnknownTarget);
             }
         }
-        let unit_order = match &order {
-            CaptainOrder::MoveTo { x_dm, y_dm, .. } => UnitOrder {
-                kind: 1,
-                x_dm: *x_dm,
-                y_dm: *y_dm,
-                target: 0,
-            },
-            CaptainOrder::Block { x_dm, y_dm, .. } => UnitOrder {
-                kind: 2,
-                x_dm: *x_dm,
-                y_dm: *y_dm,
-                target: 0,
-            },
-            CaptainOrder::Pursue { target, .. } => {
-                if !live.contains(&EntityId(*target)) {
-                    self.notice(pid, "pursuit target does not exist");
-                    return;
-                }
-                UnitOrder {
-                    kind: 3,
-                    x_dm: 0,
-                    y_dm: 0,
-                    target: *target,
-                }
-            }
-            CaptainOrder::Hold { .. } => UnitOrder {
-                kind: 4,
-                x_dm: 0,
-                y_dm: 0,
-                target: 0,
-            },
-        };
-        for (e, owner) in targets {
-            self.unit_orders.insert(e, unit_order.kind);
-            self.send(owner, &ServerMsg::UnitOrder(unit_order));
-        }
+        self.unit_orders.insert(e, order);
+        self.send(owner, &ServerMsg::UnitOrder(order));
+        Ok(())
+    }
+
+    fn vehicle_of_unit(&self, unit: UnitId) -> Option<EntityId> {
+        self.sim
+            .vehicles()
+            .iter()
+            .map(|(e, _)| *e)
+            .find(|e| self.sim.police_unit(*e) == Some(unit))
     }
 
     // -----------------------------------------------------------------------------------------
@@ -790,6 +933,12 @@ impl<S: NetSim> ServerInstance<S> {
                     expires_tick,
                 } => self.send(player, &ServerMsg::CaptainOffer { expires_tick }),
             }
+        }
+        // Without a human captain, `wp_police`'s dispatcher places tools itself.
+        let seated = self.roles.captain().is_some();
+        if seated != self.human_captain {
+            self.human_captain = seated;
+            self.sim.set_human_captain(seated);
         }
     }
 
@@ -890,15 +1039,27 @@ impl<S: NetSim> ServerInstance<S> {
                         self.send(PlayerId(m), &msg);
                     }
                 }
-                RaceEvent::StakesCharged { charges, .. } => {
+                RaceEvent::StakesCharged { race, charges } => {
+                    let race = self.race_type(race);
                     for (p, amount) in charges {
-                        self.credit(p, -amount, 0);
+                        self.credit(p, -amount, 0, EconomyReason::StakeCharged { race });
                     }
                 }
                 RaceEvent::Finished { race, results } => {
+                    let kind = self.race_type(race);
                     for r in &results {
-                        let rep = if r.place == 1 { 10 } else { 0 };
-                        self.credit(PlayerId(r.player), r.payout, rep);
+                        let p = PlayerId(r.player);
+                        if r.payout != 0 {
+                            let reason = EconomyReason::RacePayout {
+                                race: kind,
+                                placement: r.place,
+                            };
+                            self.credit(p, r.payout, 0, reason);
+                        }
+                        if r.place == 1 {
+                            let reason = EconomyReason::RaceRep { placement: r.place };
+                            self.credit(p, 0, 10, reason);
+                        }
                     }
                     let msg = ServerMsg::RaceResults {
                         race,
@@ -912,15 +1073,45 @@ impl<S: NetSim> ServerInstance<S> {
         }
     }
 
-    /// Server-side economy: the only place money changes. Until `wp_economy` exposes a payout
-    /// API (NET-4) the net layer applies stakes and payouts to the account store directly.
-    fn credit(&mut self, pid: PlayerId, cash: i64, rep: i64) {
+    /// Economy race type of a lobby race: one lap is a sprint, more laps a circuit.
+    fn race_type(&self, race: u32) -> RaceType {
+        match self.races.info(race) {
+            Some(i) if i.laps > 1 => RaceType::Circuit,
+            _ => RaceType::Sprint,
+        }
+    }
+
+    /// Server-side economy: the only place money changes. Each change is one ledger event
+    /// (`StakeCharged` / `RacePayout` / `RaceRep`, NET-4) committed with the account and
+    /// sent to its owner as a typed `SimEvent::Economy`. Until `wp_economy`'s settlement
+    /// takes over (NET-N7) the amounts come from the lobby's stake table.
+    fn credit(&mut self, pid: PlayerId, cash: i64, rep: i64, reason: EconomyReason) {
         let mut a = self.account(pid);
+        let rep_before = a.rep;
         a.cash += cash;
-        a.rep += rep;
-        // Interim: no EconomyEvent is logged for this credit (economy's `settle_race` does
-        // that; switching to it is NET-N7). An empty event list keeps the stored sequence.
-        let _ = self.accounts.commit(&a, &[]);
+        a.rep = (a.rep + rep).max(0);
+        let event = wp_economy::EconomyEvent {
+            player: pid,
+            seq: a.next_event_seq,
+            day: a.day,
+            reason: EventReason::from_contract(&reason),
+            car: None,
+            cash_delta: cash,
+            rep_delta: a.rep - rep_before,
+            bounty_delta: 0,
+            cop_xp_delta: 0,
+            cash_after: a.cash,
+        };
+        a.next_event_seq += 1;
+        if self
+            .accounts
+            .commit(&a, std::slice::from_ref(&event))
+            .is_ok()
+        {
+            let tick = self.sim.tick();
+            self.pending_events
+                .push((tick, SimEvent::Economy(event.to_contract())));
+        }
         self.send_account(pid);
     }
 
@@ -972,6 +1163,12 @@ impl<S: NetSim> ServerInstance<S> {
             self.incidents.pop_front();
         }
 
+        self.traffic_now = self
+            .net_ticks
+            .is_multiple_of(self.cfg.traffic_every_net_ticks.max(1))
+            .then(|| self.sim.traffic_agents());
+        self.update_weather(tick);
+
         let ids: Vec<PlayerId> = self.players.keys().copied().collect();
         for pid in ids {
             if self.players[&pid].conn.is_some() {
@@ -985,6 +1182,31 @@ impl<S: NetSim> ServerInstance<S> {
             }
         }
         self.pending_damage.clear();
+        self.pending_events.clear();
+        self.traffic_now = None;
+    }
+
+    /// Broadcast weather when it changed: a new regime within a second, otherwise at most
+    /// every [`ServerConfig::weather_interval_ticks`] (the water grid creeps continuously).
+    fn update_weather(&mut self, tick: u64) {
+        if !self.net_ticks.is_multiple_of(60) {
+            return;
+        }
+        let Some(now) = self.sim.weather() else {
+            return;
+        };
+        let send = match &self.last_weather {
+            None => true,
+            Some((t, last)) => {
+                let regime = last.kind != now.kind || last.prev_kind != now.prev_kind;
+                let due = tick >= t + self.cfg.weather_interval_ticks;
+                *last != now && (regime || due)
+            }
+        };
+        if send {
+            self.broadcast(&ServerMsg::Weather(now.clone()));
+            self.last_weather = Some((tick, now));
+        }
     }
 
     fn physics_tick(&mut self) {
@@ -1042,6 +1264,13 @@ impl<S: NetSim> ServerInstance<S> {
                     (vehicle, DamageEvent::WheelDetached { wheel })
                 }
                 SimEvent::TotalLoss { vehicle } => (vehicle, DamageEvent::TotalLoss),
+                e @ (SimEvent::Police(_)
+                | SimEvent::Race(_)
+                | SimEvent::Economy(_)
+                | SimEvent::WeatherChanged { .. }) => {
+                    self.pending_events.push((t, e));
+                    continue;
+                }
                 _ => continue,
             };
             damage.entry(vehicle).or_default().events.push(d);
@@ -1120,6 +1349,30 @@ impl<S: NetSim> ServerInstance<S> {
         }
         for m in &damage_msgs {
             self.send(pid, m);
+        }
+
+        // 1b. Typed game events this client should see.
+        let police_role = matches!(role, Role::PoliceChase | Role::PoliceCaptain);
+        let events: Vec<SimEvent> = self
+            .pending_events
+            .iter()
+            .filter(|(_, e)| match e {
+                SimEvent::Police(PoliceEvent::Radio { .. }) => police_role,
+                SimEvent::Economy(ev) => ev.account == AccountId(pid.0),
+                _ => true,
+            })
+            .map(|(_, e)| e.clone())
+            .collect();
+        if !events.is_empty() {
+            let newest = self.pending_events.last().map_or(tick, |(t, _)| *t);
+            self.stats.events_sent += events.len() as u64;
+            self.send(
+                pid,
+                &ServerMsg::Events {
+                    tick: newest,
+                    events,
+                },
+            );
         }
 
         // 2. Staggered lattice hashes and requested resyncs.
@@ -1304,6 +1557,27 @@ impl<S: NetSim> ServerInstance<S> {
         // waiting lattice snapshot (≤ ~3.7 kB) on top of a second's refill and stay under it.
         let rate = (self.cfg.downlink_budget_bps * 85 / 100 / 60) as i64;
         let net_tick = self.net_ticks;
+        // Kinematic traffic near the client's car (or the spectator camera origin), nearest
+        // first. The captain works from the map and gets none.
+        let viewer = own.and_then(|e| states.get(&e)).map_or([0.0; 3], |s| s.pos);
+        let traffic = match &self.traffic_now {
+            Some(all) if self.roles.role(pid) != Some(Role::PoliceCaptain) => {
+                let r2 = self.cfg.traffic_radius_m * self.cfg.traffic_radius_m;
+                let mut near: Vec<(f32, QTrafficAgent)> = all
+                    .iter()
+                    .filter_map(|a| {
+                        let d = [a.pos[0] - viewer[0], a.pos[1] - viewer[1]];
+                        let d2 = d[0] * d[0] + d[1] * d[1];
+                        (d2 <= r2).then(|| (d2, QTrafficAgent::from_snapshot(a)))
+                    })
+                    .collect();
+                near.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.id.cmp(&b.1.id)));
+                near.truncate(self.cfg.max_traffic_agents);
+                Some(near.into_iter().map(|(_, q)| q).collect::<Vec<_>>())
+            }
+            _ => None,
+        };
+        let traffic_bytes = traffic.as_ref().map_or(0, |t| 2 + t.len() * 16);
         let p = self.players.get_mut(&pid).expect("p");
         // input ack = newest tick the server holds contiguously from now.
         let mut input_ack = tick.saturating_sub(1);
@@ -1317,7 +1591,9 @@ impl<S: NetSim> ServerInstance<S> {
             + if own_state.is_some() { 113 } else { 0 }
             + 1
             + own_full.as_ref().map_or(0, |b| b.len() + 2)
-            + 2;
+            + 2
+            + 1
+            + traffic_bytes;
         // While a lattice snapshot waits, credit may grow to its size and entity updates get
         // only the minimum, so the snapshot goes out within a few ticks.
         let waiting = p.view.lattice_wait as i64;
@@ -1361,6 +1637,7 @@ impl<S: NetSim> ServerInstance<S> {
             own: own_state,
             own_full,
             entities,
+            traffic,
         };
         self.send(pid, &msg);
         let v = &mut self.players.get_mut(&pid).expect("p").view;
@@ -1392,7 +1669,12 @@ impl<S: NetSim> ServerInstance<S> {
                     y_dm: (s.pos[1] * 10.0).round() as i32,
                     heading,
                     wanted: self.sim.wanted_level(*e),
-                    order: self.unit_orders.get(e).copied().unwrap_or(0),
+                    order: self.unit_orders.get(e).map_or(0, unit_order_code),
+                    unit: match kind {
+                        EntityKind::PoliceChase => Some(PLAYER_UNIT_BASE + e.0),
+                        EntityKind::AiPolice => self.sim.police_unit(*e).map(|u| u.0),
+                        _ => None,
+                    },
                 },
             );
         }

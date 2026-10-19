@@ -1,25 +1,43 @@
 //! Wire messages and their binary codec. Every message is one transport frame:
 //! `u8 type tag` followed by the body described on each variant (see also the README tables).
 //!
-//! These are a superset of `wp_contracts::{ClientToServer, ServerToClient}` (contract change
-//! request NET-1 asks the lead to promote them): `Inputs` carries the contract's `Input`,
-//! `RoleRequest` / `CaptainCommand` / `RoleAssigned` match one-to-one and `Snapshot` +
-//! `EntityEnter` + `LatticeSnapshot` together are the contract's `Snapshot`/`Baseline`.
+//! Since contract v0.3.0 (NET-1) this module is the source of truth for the **wire**; the
+//! contract's `wp_contracts::{ClientToServer, ServerToClient}` are the *logical* messages and
+//! map onto these: `Inputs` carries the contract's `Input`, `RoleRequest` / `RoleAssigned` /
+//! `CaptainCommand` / `CaptainReply` / `RaceCommand` / `Weather` match one-to-one, and
+//! `Snapshot` (incl. kinematic `traffic`) + `Events` + `EntityEnter` + `LatticeSnapshot`
+//! together are the contract's `Snapshot` / `Baseline`.
+//!
+//! Contract types are carried as `typed<T>` = `varint len, postcard(T)` (see
+//! [`crate::wire::ByteWriter::typed`]): police / race / economy / weather events, captain and
+//! race commands, captain replies and unit orders. Their layout follows the contract, which
+//! is why `Hello` checks `CONTRACT_VERSION` as well as [`PROTOCOL_VERSION`].
 
-use wp_contracts::{Component, DamageMode, EntityId, InputSource, PlayerId, Role, VehicleInput};
+use wp_contracts::{
+    CaptainCommand, CaptainError, Component, DamageMode, EntityId, InputSource, PlayerId,
+    RaceCommand, Role, SimEvent, UnitOrder, VehicleInput, WeatherKind, WeatherSnapshot,
+};
 
 use crate::lattice::LatticeSnapshot;
-use crate::quant::{QContact, QInput};
+use crate::quant::{QContact, QInput, QTrafficAgent};
 use crate::snapshot::{DeltaVehicle, OwnState};
 use crate::wire::{ByteReader, ByteWriter};
 use crate::NetError;
 
 /// Protocol version; bumped on any wire change. Checked in `Hello`.
-pub const PROTOCOL_VERSION: u16 = 3;
+pub const PROTOCOL_VERSION: u16 = 4;
 /// Longest accepted player name, bytes.
 pub const MAX_NAME_LEN: usize = 32;
-/// Longest accepted captain command payload, bytes.
+/// Longest accepted meta join / reconnect token, bytes (MC-6).
+pub const MAX_TOKEN_LEN: usize = 512;
+/// Longest accepted `typed<CaptainCommand>` / `typed<RaceCommand>` payload, bytes.
 pub const MAX_COMMAND_LEN: usize = 256;
+/// Longest accepted `typed<SimEvent>` payload, bytes (radio lines, race results).
+pub const MAX_EVENT_LEN: usize = 8192;
+/// Most kinematic traffic agents in one snapshot.
+pub const MAX_TRAFFIC_AGENTS: usize = 256;
+/// Most cells in a weather water grid.
+pub const MAX_WEATHER_CELLS: usize = 1 << 20;
 /// Most inputs one `Inputs` message may carry (redundancy window).
 pub const MAX_INPUTS_PER_MSG: usize = 32;
 /// Largest accepted own-vehicle snapshot blob, bytes.
@@ -238,112 +256,6 @@ impl DamageEvent {
     }
 }
 
-/// Placeholder captain command until `wp_police` defines the payload (contract request NET-3).
-/// Positions are world XY in decimetres.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CaptainOrder {
-    /// Drive to a point.
-    MoveTo {
-        /// Units addressed.
-        units: Vec<u32>,
-        /// Target, dm.
-        x_dm: i32,
-        /// Target, dm.
-        y_dm: i32,
-    },
-    /// Set up a roadblock at a point.
-    Block {
-        /// Units addressed.
-        units: Vec<u32>,
-        /// Target, dm.
-        x_dm: i32,
-        /// Target, dm.
-        y_dm: i32,
-    },
-    /// Pursue a suspect vehicle.
-    Pursue {
-        /// Units addressed.
-        units: Vec<u32>,
-        /// Suspect entity.
-        target: u32,
-    },
-    /// Hold position.
-    Hold {
-        /// Units addressed.
-        units: Vec<u32>,
-    },
-}
-
-impl CaptainOrder {
-    /// Units this order addresses.
-    pub fn units(&self) -> &[u32] {
-        match self {
-            Self::MoveTo { units, .. }
-            | Self::Block { units, .. }
-            | Self::Pursue { units, .. }
-            | Self::Hold { units } => units,
-        }
-    }
-
-    /// Encode as a `CaptainCommand` payload: `u8 kind, varint n, n×varint unit`, then
-    /// MoveTo/Block `zigzag x_dm, zigzag y_dm` or Pursue `varint target`.
-    pub fn encode(&self) -> Vec<u8> {
-        let mut w = ByteWriter::new();
-        let (kind, units) = match self {
-            Self::MoveTo { units, .. } => (1, units),
-            Self::Block { units, .. } => (2, units),
-            Self::Pursue { units, .. } => (3, units),
-            Self::Hold { units } => (4, units),
-        };
-        w.u8(kind);
-        w.varint(units.len() as u64);
-        units.iter().for_each(|u| w.varint(*u as u64));
-        match self {
-            Self::MoveTo { x_dm, y_dm, .. } | Self::Block { x_dm, y_dm, .. } => {
-                w.zigzag(*x_dm as i64);
-                w.zigzag(*y_dm as i64);
-            }
-            Self::Pursue { target, .. } => w.varint(*target as u64),
-            Self::Hold { .. } => {}
-        }
-        w.into_bytes()
-    }
-
-    /// Decode a payload (see [`CaptainOrder::encode`]).
-    pub fn decode(bytes: &[u8]) -> Result<Self, NetError> {
-        let mut r = ByteReader::new(bytes);
-        let kind = r.u8()?;
-        let n = r.len(64)?;
-        let mut units = Vec::with_capacity(n);
-        for _ in 0..n {
-            units.push(r.varint_u32()?);
-        }
-        let xy = |r: &mut ByteReader| -> Result<(i32, i32), NetError> {
-            let x = i32::try_from(r.zigzag()?).map_err(|_| NetError::Decode("x".into()))?;
-            let y = i32::try_from(r.zigzag()?).map_err(|_| NetError::Decode("y".into()))?;
-            Ok((x, y))
-        };
-        let order = match kind {
-            1 => {
-                let (x_dm, y_dm) = xy(&mut r)?;
-                Self::MoveTo { units, x_dm, y_dm }
-            }
-            2 => {
-                let (x_dm, y_dm) = xy(&mut r)?;
-                Self::Block { units, x_dm, y_dm }
-            }
-            3 => Self::Pursue {
-                units,
-                target: r.varint_u32()?,
-            },
-            4 => Self::Hold { units },
-            k => return Err(NetError::Decode(format!("captain order kind {k}"))),
-        };
-        r.finish()?;
-        Ok(order)
-    }
-}
-
 /// One marker on the captain's map.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MapUnit {
@@ -359,8 +271,29 @@ pub struct MapUnit {
     pub heading: u8,
     /// Wanted level 0..=5 (suspects).
     pub wanted: u8,
-    /// Current order kind (0 none, otherwise `CaptainOrder` kind byte) for police units.
+    /// Current order of a police unit ([`unit_order_code`]; 0 = none / not police).
     pub order: u8,
+    /// Police unit id to address in [`CaptainCommand::AssignUnit`] (`None` for non-police).
+    /// AI units use `wp_police`'s ids; player chase seats use
+    /// [`PLAYER_UNIT_BASE`]` + entity`.
+    pub unit: Option<u32>,
+}
+
+/// First police unit id of player-driven chase seats: the captain addresses seat `entity` as
+/// `UnitId(PLAYER_UNIT_BASE + entity)`. `wp_police` allocates AI unit ids from 1 upwards, so
+/// the ranges never meet in practice.
+pub const PLAYER_UNIT_BASE: u32 = 0x8000_0000;
+
+/// One-byte code of a unit order for map markers: 1 patrol, 2 pursue, 3 intercept,
+/// 4 respond, 5 disengage (0 = none).
+pub fn unit_order_code(o: &UnitOrder) -> u8 {
+    match o {
+        UnitOrder::Patrol => 1,
+        UnitOrder::Pursue { .. } => 2,
+        UnitOrder::Intercept { .. } => 3,
+        UnitOrder::Respond { .. } => 4,
+        UnitOrder::Disengage => 5,
+    }
 }
 
 /// An incident marker (crash, violation) on the captain's map.
@@ -374,19 +307,6 @@ pub struct Incident {
     pub kind: u8,
     /// Seconds since it happened (saturating).
     pub age_s: u8,
-}
-
-/// Unit order delivered to a player chase unit.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct UnitOrder {
-    /// Order kind (`CaptainOrder` kind byte).
-    pub kind: u8,
-    /// Target X, dm (MoveTo/Block).
-    pub x_dm: i32,
-    /// Target Y, dm.
-    pub y_dm: i32,
-    /// Target entity (Pursue), 0 otherwise.
-    pub target: u32,
 }
 
 /// State of a race in the instance lobby.
@@ -440,7 +360,7 @@ pub struct RaceResultEntry {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ClientMsg {
     /// `0x01` First message: `u16 protocol, string contract_version, string name,
-    /// u8 input_source, u64 reconnect_token (0 = new player)`.
+    /// u8 input_source, u64 reconnect_token (0 = new player), string join_token`.
     Hello {
         /// [`PROTOCOL_VERSION`] the client speaks.
         protocol: u16,
@@ -452,6 +372,9 @@ pub enum ClientMsg {
         input_source: InputSource,
         /// Token from an earlier `Welcome` to reclaim a player within the reconnect window.
         reconnect_token: u64,
+        /// Meta matchmaking join token (MC-6; empty = none). Required for new players when
+        /// the server runs with meta ([`crate::server::ServerConfig::require_join_token`]).
+        join_token: String,
     },
     /// `0x02` Inputs for consecutive physics ticks starting at `first_tick` (redundant window),
     /// plus the newest snapshot tick received (delta baseline ack): `varint ack_snapshot_tick,
@@ -469,8 +392,14 @@ pub enum ClientMsg {
         /// Requested role.
         role: Role,
     },
-    /// `0x04` `bytes payload` (≤ 256), validated by the police layer.
-    CaptainCommand(Vec<u8>),
+    /// `0x04` `varint seq, typed<CaptainCommand>` (≤ 256 bytes). Validated by `wp_police`;
+    /// answered by [`ServerMsg::CaptainReply`] with the same `seq`.
+    CaptainCommand {
+        /// Client-chosen sequence number echoed in the reply.
+        seq: u32,
+        /// The command.
+        command: CaptainCommand,
+    },
     /// `0x05` `u32 client_ms` (client clock, wrapping).
     Ping {
         /// Client send time, ms.
@@ -488,11 +417,6 @@ pub enum ClientMsg {
         /// Checkpoints, dm.
         checkpoints: Vec<[i32; 2]>,
     },
-    /// `0x08` `varint race`.
-    RaceJoin {
-        /// Race.
-        race: u32,
-    },
     /// `0x09` `varint race, varint player`.
     RaceInvite {
         /// Race.
@@ -500,25 +424,19 @@ pub enum ClientMsg {
         /// Invitee.
         player: u32,
     },
-    /// `0x0A` `varint race` (host only).
-    RaceStart {
-        /// Race.
-        race: u32,
-    },
-    /// `0x0B` `varint race`.
-    RaceLeave {
-        /// Race.
-        race: u32,
-    },
     /// `0x0C` Graceful disconnect (no reconnect window).
     Bye,
+    /// `0x0D` `typed<RaceCommand>`: `Enter { event }` joins lobby race `event.0`,
+    /// `Withdraw { event }` leaves it (DNF once running), `Ready` from the host starts the
+    /// countdown. (Replaces v3's `0x08` join, `0x0A` start and `0x0B` leave.)
+    RaceCommand(RaceCommand),
 }
 
 /// Messages the server sends. "R" = reliable channel, "U" = unreliable.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ServerMsg {
     /// `0x81` R. `varint player, u64 token, varint server_tick, u8 mode, u16 protocol,
-    /// f32 time_of_day_h`.
+    /// f32 time_of_day_h, string meta_reconnect_token`.
     Welcome {
         /// Assigned player id.
         player: PlayerId,
@@ -532,6 +450,9 @@ pub enum ServerMsg {
         protocol: u16,
         /// In-game time, hours.
         time_of_day_h: f32,
+        /// Meta reconnect token for rejoining after the reconnect window (MC-6; empty when
+        /// the server runs without meta).
+        meta_reconnect_token: String,
     },
     /// `0x82` R. `string reason`; the connection is closed after it.
     Reject {
@@ -572,7 +493,9 @@ pub enum ServerMsg {
         entity: u32,
     },
     /// `0x87` U. `varint tick, varint input_ack, u8 has_own, [OwnState], u8 has_full,
-    /// [bytes own_full], varint n, n × DeltaVehicle`.
+    /// [bytes own_full], varint n, n × DeltaVehicle, u8 has_traffic, [varint k,
+    /// k × QTrafficAgent]`; an agent is `varint id, 3 × zigzag cm, u16 yaw, varint cm/s,
+    /// u8 flags, u8 variant`.
     Snapshot {
         /// Server physics tick of the state.
         tick: u64,
@@ -584,6 +507,10 @@ pub enum ServerMsg {
         own_full: Option<Vec<u8>>,
         /// Interest-filtered, prioritised, delta-encoded vehicles.
         entities: Vec<DeltaVehicle>,
+        /// Kinematic traffic near the client (10 Hz, nearest first). `Some` replaces the client's whole traffic set (agents absent
+        /// from it are gone); `None` keeps the previous set. Physical (promoted) agents are
+        /// ordinary vehicles in `entities`.
+        traffic: Option<Vec<QTrafficAgent>>,
     },
     /// `0x88` R. Contacts applied to `vehicle` at physics tick `tick`, plus resulting events:
     /// `varint vehicle, varint tick, varint n, n × QContact, varint m, m × DamageEvent`.
@@ -642,7 +569,7 @@ pub enum ServerMsg {
         /// Heat map cells `(cell_x, cell_y, heat)` of 100 m cells (always complete).
         heat: Vec<(i16, i16, u8)>,
     },
-    /// `0x8D` R. Order from the captain for this chase unit.
+    /// `0x8D` R. `typed<UnitOrder>`: order from the captain for this chase unit.
     UnitOrder(UnitOrder),
     /// `0x8E` R. Race created/changed.
     RaceUpdate(RaceInfo),
@@ -685,6 +612,29 @@ pub enum ServerMsg {
         /// Text.
         text: String,
     },
+    /// `0x94` R. Typed game events since the last net tick: `varint tick, varint n,
+    /// n × typed<SimEvent>`. Carries `SimEvent::{Police, Race, Economy, WeatherChanged}`
+    /// (damage travels in [`ServerMsg::Damage`]). Police radio lines go to police roles only;
+    /// economy events only to the account's owner.
+    Events {
+        /// Physics tick of the newest event.
+        tick: u64,
+        /// Events in emission order.
+        events: Vec<SimEvent>,
+    },
+    /// `0x95` R. `varint seq, typed<Result<(), CaptainError>>`: reply to the captain command
+    /// with the same `seq`.
+    CaptainReply {
+        /// Sequence number of the command.
+        seq: u32,
+        /// `wp_police`'s verdict.
+        result: Result<(), CaptainError>,
+    },
+    /// `0x96` R. Weather (W-5), on join and when it changes (≤ 0.2 Hz unless the regime
+    /// changes): `u8 kind, f32 intensity, u8 prev_kind, f32 prev_intensity, f32 blend,
+    /// f32 wind_heading_rad, varint cells, varint runs, runs × (varint len, u8 water_q8)`
+    /// (the water grid is run-length encoded; kinds are `WeatherKind::code`).
+    Weather(WeatherSnapshot),
 }
 
 impl ServerMsg {
@@ -721,6 +671,7 @@ impl ClientMsg {
                 name,
                 input_source,
                 reconnect_token,
+                join_token,
             } => {
                 w.u8(0x01);
                 w.u16(*protocol);
@@ -728,6 +679,7 @@ impl ClientMsg {
                 w.string(name);
                 w.u8(source_to_u8(*input_source));
                 w.u64(*reconnect_token);
+                w.string(join_token);
             }
             Self::Inputs {
                 ack_snapshot_tick,
@@ -752,9 +704,10 @@ impl ClientMsg {
                 w.u8(0x03);
                 w.u8(role_to_u8(*role));
             }
-            Self::CaptainCommand(payload) => {
+            Self::CaptainCommand { seq, command } => {
                 w.u8(0x04);
-                w.bytes(payload);
+                w.varint(*seq as u64);
+                w.typed(command);
             }
             Self::Ping { client_ms } => {
                 w.u8(0x05);
@@ -772,24 +725,16 @@ impl ClientMsg {
                     .iter()
                     .for_each(|c| write_xy(&mut w, c[0], c[1]));
             }
-            Self::RaceJoin { race } => {
-                w.u8(0x08);
-                w.varint(*race as u64);
-            }
             Self::RaceInvite { race, player } => {
                 w.u8(0x09);
                 w.varint(*race as u64);
                 w.varint(*player as u64);
             }
-            Self::RaceStart { race } => {
-                w.u8(0x0A);
-                w.varint(*race as u64);
-            }
-            Self::RaceLeave { race } => {
-                w.u8(0x0B);
-                w.varint(*race as u64);
-            }
             Self::Bye => w.u8(0x0C),
+            Self::RaceCommand(cmd) => {
+                w.u8(0x0D);
+                w.typed(cmd);
+            }
         }
         w.into_bytes()
     }
@@ -804,6 +749,7 @@ impl ClientMsg {
                 name: r.string(MAX_NAME_LEN)?,
                 input_source: source_from_u8(r.u8()?)?,
                 reconnect_token: r.u64()?,
+                join_token: r.string(MAX_TOKEN_LEN)?,
             },
             0x02 => {
                 let ack_snapshot_tick = r.varint()?;
@@ -833,7 +779,10 @@ impl ClientMsg {
             0x03 => Self::RoleRequest {
                 role: role_from_u8(r.u8()?)?,
             },
-            0x04 => Self::CaptainCommand(r.bytes(MAX_COMMAND_LEN)?),
+            0x04 => Self::CaptainCommand {
+                seq: r.varint_u32()?,
+                command: r.typed(MAX_COMMAND_LEN)?,
+            },
             0x05 => Self::Ping {
                 client_ms: r.u32()?,
             },
@@ -849,20 +798,12 @@ impl ClientMsg {
                 }
                 Self::RaceCreate { laps, checkpoints }
             }
-            0x08 => Self::RaceJoin {
-                race: r.varint_u32()?,
-            },
             0x09 => Self::RaceInvite {
                 race: r.varint_u32()?,
                 player: r.varint_u32()?,
             },
-            0x0A => Self::RaceStart {
-                race: r.varint_u32()?,
-            },
-            0x0B => Self::RaceLeave {
-                race: r.varint_u32()?,
-            },
             0x0C => Self::Bye,
+            0x0D => Self::RaceCommand(r.typed(MAX_COMMAND_LEN)?),
             t => {
                 return Err(NetError::Decode(format!(
                     "unknown client message 0x{t:02x}"
@@ -907,6 +848,87 @@ fn read_contact(r: &mut ByteReader) -> Result<QContact, NetError> {
     Ok(c)
 }
 
+fn write_traffic(w: &mut ByteWriter, a: &QTrafficAgent) {
+    w.varint(a.id as u64);
+    a.pos.iter().for_each(|v| w.zigzag(*v as i64));
+    w.u16(a.yaw);
+    w.varint(a.speed_cms as u64);
+    w.u8(a.flags);
+    w.u8(a.variant);
+}
+
+fn read_traffic(r: &mut ByteReader) -> Result<QTrafficAgent, NetError> {
+    Ok(QTrafficAgent {
+        id: r.varint_u32()?,
+        pos: [read_i32(r)?, read_i32(r)?, read_i32(r)?],
+        yaw: r.u16()?,
+        speed_cms: r.varint_u32()?,
+        flags: r.u8()?,
+        variant: r.u8()?,
+    })
+}
+
+fn weather_kind(code: u8) -> Result<WeatherKind, NetError> {
+    WeatherKind::from_code(code).ok_or_else(|| NetError::Decode(format!("weather kind {code}")))
+}
+
+fn write_weather(w: &mut ByteWriter, s: &WeatherSnapshot) {
+    w.u8(s.kind.code());
+    w.f32(s.intensity);
+    w.u8(s.prev_kind.code());
+    w.f32(s.prev_intensity);
+    w.f32(s.blend);
+    w.f32(s.wind_heading_rad);
+    // Run-length encode the water grid: dry or evenly wet cities are a handful of runs.
+    let mut runs: Vec<(u64, u8)> = Vec::new();
+    for v in s.water_q8.iter().take(MAX_WEATHER_CELLS) {
+        match runs.last_mut() {
+            Some((n, last)) if *last == *v => *n += 1,
+            _ => runs.push((1, *v)),
+        }
+    }
+    w.varint(s.water_q8.len().min(MAX_WEATHER_CELLS) as u64);
+    w.varint(runs.len() as u64);
+    for (n, v) in runs {
+        w.varint(n);
+        w.u8(v);
+    }
+}
+
+fn read_weather(r: &mut ByteReader) -> Result<WeatherSnapshot, NetError> {
+    let kind = weather_kind(r.u8()?)?;
+    let intensity = r.f32()?;
+    let prev_kind = weather_kind(r.u8()?)?;
+    let prev_intensity = r.f32()?;
+    let blend = r.f32()?;
+    let wind_heading_rad = r.f32()?;
+    let cells = r.len(MAX_WEATHER_CELLS)?;
+    let runs = r.len(cells)?;
+    let mut water_q8 = Vec::with_capacity(cells);
+    for _ in 0..runs {
+        let n = r.len(cells - water_q8.len())?;
+        if n == 0 {
+            return Err(NetError::Decode("empty weather run".into()));
+        }
+        let v = r.u8()?;
+        water_q8.extend(std::iter::repeat_n(v, n));
+    }
+    if water_q8.len() != cells {
+        return Err(NetError::Decode(
+            "weather runs do not cover the grid".into(),
+        ));
+    }
+    Ok(WeatherSnapshot {
+        kind,
+        intensity,
+        prev_kind,
+        prev_intensity,
+        blend,
+        wind_heading_rad,
+        water_q8,
+    })
+}
+
 fn race_state_u8(s: RaceState) -> u8 {
     match s {
         RaceState::Lobby => 0,
@@ -943,6 +965,7 @@ impl ServerMsg {
                 mode,
                 protocol,
                 time_of_day_h,
+                meta_reconnect_token,
             } => {
                 w.u8(0x81);
                 w.varint(player.0 as u64);
@@ -951,6 +974,7 @@ impl ServerMsg {
                 w.u8(mode_to_u8(*mode));
                 w.u16(*protocol);
                 w.f32(*time_of_day_h);
+                w.string(meta_reconnect_token);
             }
             Self::Reject { reason } => {
                 w.u8(0x82);
@@ -994,6 +1018,7 @@ impl ServerMsg {
                 own,
                 own_full,
                 entities,
+                traffic,
             } => {
                 w.u8(0x87);
                 w.varint(*tick);
@@ -1014,6 +1039,15 @@ impl ServerMsg {
                 }
                 w.varint(entities.len() as u64);
                 entities.iter().for_each(|e| e.write(w));
+                match traffic {
+                    Some(list) => {
+                        w.u8(1);
+                        let n = list.len().min(MAX_TRAFFIC_AGENTS);
+                        w.varint(n as u64);
+                        list.iter().take(n).for_each(|a| write_traffic(w, a));
+                    }
+                    None => w.u8(0),
+                }
             }
             Self::Damage {
                 vehicle,
@@ -1078,6 +1112,7 @@ impl ServerMsg {
                     w.u8(u.heading);
                     w.u8(u.wanted);
                     w.u8(u.order);
+                    opt_u32(w, u.unit);
                 }
                 w.varint(removed.len() as u64);
                 removed.iter().for_each(|e| w.varint(*e as u64));
@@ -1096,9 +1131,7 @@ impl ServerMsg {
             }
             Self::UnitOrder(o) => {
                 w.u8(0x8D);
-                w.u8(o.kind);
-                write_xy(w, o.x_dm, o.y_dm);
-                w.varint(o.target as u64);
+                w.typed(o);
             }
             Self::RaceUpdate(info) => {
                 w.u8(0x8E);
@@ -1157,6 +1190,21 @@ impl ServerMsg {
                 w.u8(0x93);
                 w.string(text);
             }
+            Self::Events { tick, events } => {
+                w.u8(0x94);
+                w.varint(*tick);
+                w.varint(events.len() as u64);
+                events.iter().for_each(|e| w.typed(e));
+            }
+            Self::CaptainReply { seq, result } => {
+                w.u8(0x95);
+                w.varint(*seq as u64);
+                w.typed(result);
+            }
+            Self::Weather(snap) => {
+                w.u8(0x96);
+                write_weather(w, snap);
+            }
         }
     }
 
@@ -1171,6 +1219,7 @@ impl ServerMsg {
                 mode: mode_from_u8(r.u8()?)?,
                 protocol: r.u16()?,
                 time_of_day_h: r.f32()?,
+                meta_reconnect_token: r.string(MAX_TOKEN_LEN)?,
             },
             0x82 => Self::Reject {
                 reason: r.string(256)?,
@@ -1211,12 +1260,23 @@ impl ServerMsg {
                 for _ in 0..n {
                     entities.push(DeltaVehicle::read(&mut r)?);
                 }
+                let traffic = if r.bool()? {
+                    let k = r.len(MAX_TRAFFIC_AGENTS)?;
+                    let mut list = Vec::with_capacity(k);
+                    for _ in 0..k {
+                        list.push(read_traffic(&mut r)?);
+                    }
+                    Some(list)
+                } else {
+                    None
+                };
                 Self::Snapshot {
                     tick,
                     input_ack,
                     own,
                     own_full,
                     entities,
+                    traffic,
                 }
             }
             0x88 => {
@@ -1268,6 +1328,7 @@ impl ServerMsg {
                         heading: r.u8()?,
                         wanted: r.u8()?,
                         order: r.u8()?,
+                        unit: read_opt_u32(&mut r)?,
                     });
                 }
                 let m = r.len(4096)?;
@@ -1299,12 +1360,7 @@ impl ServerMsg {
                     heat,
                 }
             }
-            0x8D => Self::UnitOrder(UnitOrder {
-                kind: r.u8()?,
-                x_dm: read_i32(&mut r)?,
-                y_dm: read_i32(&mut r)?,
-                target: r.varint_u32()?,
-            }),
+            0x8D => Self::UnitOrder(r.typed(MAX_COMMAND_LEN)?),
             0x8E => {
                 let race = r.varint_u32()?;
                 let host = r.varint_u32()?;
@@ -1365,6 +1421,20 @@ impl ServerMsg {
             0x93 => Self::Notice {
                 text: r.string(512)?,
             },
+            0x94 => {
+                let tick = r.varint()?;
+                let n = r.len(4096)?;
+                let mut events = Vec::with_capacity(n);
+                for _ in 0..n {
+                    events.push(r.typed(MAX_EVENT_LEN)?);
+                }
+                Self::Events { tick, events }
+            }
+            0x95 => Self::CaptainReply {
+                seq: r.varint_u32()?,
+                result: r.typed(MAX_COMMAND_LEN)?,
+            },
+            0x96 => Self::Weather(read_weather(&mut r)?),
             t => {
                 return Err(NetError::Decode(format!(
                     "unknown server message 0x{t:02x}"
@@ -1406,6 +1476,7 @@ mod tests {
             name: "bot-7".into(),
             input_source: InputSource::Gamepad,
             reconnect_token: 0xDEAD_BEEF,
+            join_token: "mm-join-abc".into(),
         });
         rt_client(ClientMsg::Inputs {
             ack_snapshot_tick: 1000,
@@ -1423,24 +1494,43 @@ mod tests {
         rt_client(ClientMsg::RoleRequest {
             role: Role::PoliceCaptain,
         });
-        rt_client(ClientMsg::CaptainCommand(
-            CaptainOrder::Pursue {
-                units: vec![3, 4],
-                target: 9,
-            }
-            .encode(),
-        ));
+        for command in [
+            CaptainCommand::AssignUnit {
+                unit: wp_contracts::UnitId(3),
+                order: UnitOrder::Pursue {
+                    target: EntityId(9),
+                },
+            },
+            CaptainCommand::RequestRoadblock {
+                target: EntityId(9),
+                road: Some(wp_contracts::RoadEdgeId(12)),
+            },
+            CaptainCommand::RequestSpikes {
+                target: EntityId(9),
+                road: None,
+            },
+            CaptainCommand::RequestHelicopter {
+                target: EntityId(2),
+            },
+            CaptainCommand::SetPriorityTarget { target: None },
+            CaptainCommand::CallOff {
+                target: EntityId(2),
+            },
+        ] {
+            rt_client(ClientMsg::CaptainCommand { seq: 41, command });
+        }
         rt_client(ClientMsg::Ping { client_ms: 123456 });
         rt_client(ClientMsg::LatticeRequest { vehicle: 12 });
         rt_client(ClientMsg::RaceCreate {
             laps: 2,
             checkpoints: vec![[0, 0], [1000, -2000]],
         });
-        rt_client(ClientMsg::RaceJoin { race: 1 });
         rt_client(ClientMsg::RaceInvite { race: 1, player: 5 });
-        rt_client(ClientMsg::RaceStart { race: 1 });
-        rt_client(ClientMsg::RaceLeave { race: 1 });
         rt_client(ClientMsg::Bye);
+        let event = wp_contracts::RaceEventId(1);
+        rt_client(ClientMsg::RaceCommand(RaceCommand::Enter { event }));
+        rt_client(ClientMsg::RaceCommand(RaceCommand::Withdraw { event }));
+        rt_client(ClientMsg::RaceCommand(RaceCommand::Ready));
     }
 
     #[test]
@@ -1452,6 +1542,7 @@ mod tests {
             mode: DamageMode::Simulation,
             protocol: PROTOCOL_VERSION,
             time_of_day_h: 22.5,
+            meta_reconnect_token: "meta-rt-xyz".into(),
         });
         rt_server(ServerMsg::Reject {
             reason: "full".into(),
@@ -1484,6 +1575,25 @@ mod tests {
                 DeltaVehicle::encode(1, &q, None),
                 DeltaVehicle::encode(2, &q, Some((8, &QVehicle::default()))),
             ],
+            traffic: Some(vec![
+                QTrafficAgent {
+                    id: 300,
+                    pos: [-12_345, 67_890, 12],
+                    yaw: 40_000,
+                    speed_cms: 1_250,
+                    flags: 0b10_0001,
+                    variant: 2,
+                },
+                QTrafficAgent::default(),
+            ]),
+        });
+        rt_server(ServerMsg::Snapshot {
+            tick: 4001,
+            input_ack: 0,
+            own: None,
+            own_full: None,
+            entities: vec![],
+            traffic: None,
         });
         rt_server(ServerMsg::Damage {
             vehicle: 2,
@@ -1539,6 +1649,7 @@ mod tests {
                 heading: 64,
                 wanted: 0,
                 order: 3,
+                unit: Some(PLAYER_UNIT_BASE + 3),
             }],
             removed: vec![8],
             incidents: vec![Incident {
@@ -1549,12 +1660,10 @@ mod tests {
             }],
             heat: vec![(1, -2, 200)],
         });
-        rt_server(ServerMsg::UnitOrder(UnitOrder {
-            kind: 1,
-            x_dm: 100,
-            y_dm: -100,
-            target: 0,
+        rt_server(ServerMsg::UnitOrder(UnitOrder::Intercept {
+            target: EntityId(5),
         }));
+        rt_server(ServerMsg::UnitOrder(UnitOrder::Disengage));
         rt_server(ServerMsg::RaceUpdate(RaceInfo {
             race: 1,
             host: 3,
@@ -1587,6 +1696,97 @@ mod tests {
             bounty: 0,
         });
         rt_server(ServerMsg::Notice { text: "hi".into() });
+        rt_server(ServerMsg::Events {
+            tick: 4004,
+            events: sample_events(),
+        });
+        rt_server(ServerMsg::CaptainReply {
+            seq: 7,
+            result: Ok(()),
+        });
+        rt_server(ServerMsg::CaptainReply {
+            seq: 8,
+            result: Err(CaptainError::Cooldown { remaining_s: 4.5 }),
+        });
+        rt_server(ServerMsg::CaptainReply {
+            seq: 9,
+            result: Err(CaptainError::Site(wp_contracts::SiteError::BlindCorner)),
+        });
+        let mut water_q8 = vec![0u8; 500];
+        water_q8[100..140].fill(9);
+        water_q8[499] = 200;
+        rt_server(ServerMsg::Weather(WeatherSnapshot {
+            kind: WeatherKind::HeavyRain,
+            intensity: 0.75,
+            prev_kind: WeatherKind::Clear,
+            prev_intensity: 0.0,
+            blend: 0.4,
+            wind_heading_rad: -1.25,
+            water_q8,
+        }));
+        rt_server(ServerMsg::Weather(WeatherSnapshot {
+            kind: WeatherKind::Clear,
+            intensity: 0.0,
+            prev_kind: WeatherKind::Clear,
+            prev_intensity: 0.0,
+            blend: 1.0,
+            wind_heading_rad: 0.0,
+            water_q8: vec![],
+        }));
+    }
+
+    /// One typed event of every kind the server forwards.
+    fn sample_events() -> Vec<SimEvent> {
+        use wp_contracts::*;
+        vec![
+            SimEvent::Police(PoliceEvent::Radio {
+                unit: Some(UnitId(4)),
+                text: "Unit 4 in pursuit, heading north.".into(),
+            }),
+            SimEvent::Police(PoliceEvent::PursuitEnded {
+                racer: EntityId(1),
+                outcome: PursuitOutcome::Captured,
+                level: WantedLevel::L3,
+                capturer: Some(UnitId(4)),
+                assists: vec![UnitId(5), UnitId(9)],
+            }),
+            SimEvent::Police(PoliceEvent::SpikesPlaced {
+                tool: ToolId(2),
+                racer: EntityId(1),
+                a: [1.0, 2.0, 0.0],
+                b: [5.0, 2.0, 0.0],
+                sight_m: 80.5,
+            }),
+            SimEvent::Race(RaceEvent::Countdown {
+                event: RaceEventId(3),
+                green_tick: 99_000,
+            }),
+            SimEvent::Race(RaceEvent::RacerDnf {
+                event: RaceEventId(3),
+                racer: EntityId(1),
+                reason: DnfReason::Fled,
+            }),
+            SimEvent::Economy(EconomyEvent {
+                account: AccountId(1),
+                seq: 4,
+                day: 2,
+                reason: EconomyReason::RacePayout {
+                    race: RaceType::Circuit,
+                    placement: 1,
+                },
+                car: None,
+                cash_delta: 1_400,
+                rep_delta: 10,
+                bounty_delta: 0,
+                cop_xp_delta: 0,
+                cash_after: 2_000,
+            }),
+            SimEvent::WeatherChanged {
+                kind: WeatherKind::LightRain,
+                intensity: 0.5,
+                forced: false,
+            },
+        ]
     }
 
     #[test]
@@ -1601,7 +1801,33 @@ mod tests {
         // Oversized captain command.
         let mut w = ByteWriter::new();
         w.u8(0x04);
+        w.varint(1);
         w.bytes(&[0u8; MAX_COMMAND_LEN + 1]);
         assert!(ClientMsg::decode(&w.into_bytes()).is_err());
+        // A typed payload with an unknown variant, or with trailing bytes inside its length.
+        let mut w = ByteWriter::new();
+        w.u8(0x0D);
+        w.bytes(&[0x7F]);
+        assert!(ClientMsg::decode(&w.into_bytes()).is_err());
+        let mut w = ByteWriter::new();
+        w.u8(0x0D);
+        w.bytes(&[2, 0]); // `Ready` + one stray byte
+        assert!(ClientMsg::decode(&w.into_bytes()).is_err());
+        // Retired v3 lobby tags are unknown now.
+        assert!(ClientMsg::decode(&[0x08, 1]).is_err());
+        // A weather grid whose runs overflow the cell count.
+        let mut w = ByteWriter::new();
+        w.u8(0x96);
+        w.u8(0);
+        w.f32(0.0);
+        w.u8(0);
+        w.f32(0.0);
+        w.f32(1.0);
+        w.f32(0.0);
+        w.varint(4);
+        w.varint(1);
+        w.varint(5);
+        w.u8(1);
+        assert!(ServerMsg::decode(&w.into_bytes()).is_err());
     }
 }

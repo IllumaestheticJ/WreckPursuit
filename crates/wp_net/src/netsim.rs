@@ -8,13 +8,17 @@
 //! - **despawn**: `Sim::despawn_vehicle` (ids are never reused);
 //! - **AI vehicles**: police units and physical traffic are ordinary sim vehicles; their
 //!   `wp_sim::VehicleKind` becomes the replicated [`EntityKind`], and wanted levels come from
-//!   the sim's police system.
+//!   the sim's police system;
+//! - **captain**: typed `CaptainCommand`s go to `wp_police` through `Sim::captain_command`;
+//! - **v0.3.0 replication**: kinematic traffic agents (`TrafficAgentSnapshot`) and an optional
+//!   server-side `wp_weather::WeatherSim` (snapshots + `SimEvent::WeatherChanged`).
 
 use std::collections::BTreeMap;
 
 use wp_contracts::{
-    AssistProfile, ContactImpulse, DamageMode, DamageSim, EntityId, LoadedCar, SimEvent, TimeOfDay,
-    VehicleInput, VehicleState, WorldQuery,
+    AssistProfile, CaptainCommand, CaptainError, ContactImpulse, DamageMode, DamageSim, EntityId,
+    LoadedCar, SimEvent, TimeOfDay, TrafficAgentSnapshot, UnitId, VehicleInput, VehicleState,
+    WeatherKind, WeatherSnapshot, WorldQuery, PHYSICS_DT,
 };
 use wp_sim::{Sim, SimConfig, VehicleKind};
 
@@ -80,6 +84,25 @@ pub trait NetSim {
     /// Tell the sim who drives a vehicle the net layer spawned (racer seat or police seat).
     /// Default: ignored.
     fn set_owned_kind(&mut self, _id: EntityId, _kind: EntityKind) {}
+    /// Kinematic (not physical) traffic agents, ascending id. Physical agents are vehicles.
+    /// Default: none.
+    fn traffic_agents(&self) -> Vec<TrafficAgentSnapshot> {
+        Vec::new()
+    }
+    /// Current weather for clients (W-5). Default: none (clients assume clear).
+    fn weather(&self) -> Option<WeatherSnapshot> {
+        None
+    }
+    /// Execute a human captain's command (validated by `wp_police`). Default: unavailable.
+    fn captain_command(&mut self, _cmd: CaptainCommand) -> Result<(), CaptainError> {
+        Err(CaptainError::Unavailable)
+    }
+    /// Seat or unseat a human captain. Default: ignored.
+    fn set_human_captain(&mut self, _seated: bool) {}
+    /// `wp_police` unit embodied by an AI police vehicle. Default: none.
+    fn police_unit(&self, _id: EntityId) -> Option<UnitId> {
+        None
+    }
 }
 
 /// [`NetSim`] over the real `wp_sim::Sim`.
@@ -89,6 +112,10 @@ pub struct WpSim {
     mode: DamageMode,
     /// Damage steps run per live vehicle (see [`NetSim::damage_steps`]).
     damage_steps: BTreeMap<EntityId, u64>,
+    /// Server-side weather and the clock ratio it runs at (see [`WpSim::set_weather`]).
+    weather: Option<(wp_weather::WeatherSim, f32)>,
+    /// `WeatherChanged` events not yet drained.
+    weather_events: Vec<SimEvent>,
 }
 
 impl WpSim {
@@ -109,7 +136,66 @@ impl WpSim {
             sim,
             cars,
             damage_steps,
+            weather: None,
+            weather_events: Vec::new(),
         }
+    }
+
+    /// Run weather on the server: stepped with the sim (every net tick), replicated to clients
+    /// as `ServerMsg::Weather` and `SimEvent::WeatherChanged`. `time_ratio` is the world
+    /// clock's in-game seconds per sim second (`SimConfig::time_ratio`). Grip on the server is
+    /// not affected yet (`wp_vehicle` does not read `weather_at`; machine A's step).
+    pub fn set_weather(&mut self, weather: wp_weather::WeatherSim, time_ratio: f32) {
+        self.weather = Some((weather, time_ratio));
+    }
+
+    /// [`WpSim::set_weather`] with [`city_weather`] over this sim's world, starting in `start`
+    /// at `intensity` with the season schedule running (seeded from `seed`).
+    pub fn enable_weather(
+        &mut self,
+        seed: u64,
+        start: WeatherKind,
+        intensity: f32,
+        time_ratio: f32,
+    ) {
+        let cfg = wp_weather::WeatherConfig {
+            seed,
+            start: wp_weather::Regime::new(start, intensity),
+            ..Default::default()
+        };
+        let weather = city_weather(self.sim.world(), cfg);
+        self.set_weather(weather, time_ratio);
+    }
+
+    /// The server-side weather, if any.
+    pub fn weather_sim(&self) -> Option<&wp_weather::WeatherSim> {
+        self.weather.as_ref().map(|(w, _)| w)
+    }
+
+    /// The server-side weather, mutably (admin tools, tests forcing a regime).
+    pub fn weather_sim_mut(&mut self) -> Option<&mut wp_weather::WeatherSim> {
+        self.weather.as_mut().map(|(w, _)| w)
+    }
+
+    fn step_weather(&mut self) {
+        let Some((weather, ratio)) = self.weather.as_mut() else {
+            return;
+        };
+        // Once per net tick is plenty (internal updates run every `update_interval_s`).
+        let every = crate::TICKS_PER_NET_TICK;
+        if !self.sim.tick().is_multiple_of(every) {
+            return;
+        }
+        let time = self.sim.world().time_of_day();
+        let moving: Vec<[f32; 3]> = self
+            .sim
+            .vehicle_states()
+            .iter()
+            .map(|(_, s)| s.pos)
+            .collect();
+        weather.step(PHYSICS_DT * every as f32, time, *ratio, &moving);
+        self.weather_events
+            .extend(weather.drain_changes().iter().map(|c| c.to_sim_event()));
     }
 
     /// A city instance: `Sim` with the world, AI police cars and physical traffic installed
@@ -169,6 +255,18 @@ pub fn server_world_config(config: &SimConfig) -> wp_world::WorldConfig {
         },
         parked_cars: false,
     }
+}
+
+/// Server weather over a city: an 8 m wetness grid covering the road network plus 50 m, with
+/// `wp_weather`'s embedded tables (the layout `wp_weather`'s `weather_in_sim` example uses).
+/// Pass it to [`WpSim::set_weather`].
+pub fn city_weather(
+    world: &wp_world::World,
+    cfg: wp_weather::WeatherConfig,
+) -> wp_weather::WeatherSim {
+    let grid =
+        wp_weather::GridSpec::around(world.network().nodes.iter().map(|n| &n.pos), 50.0, 8.0);
+    wp_weather::WeatherSim::from_world(wp_weather::WeatherData::embedded(), cfg, grid, world)
 }
 
 /// Up to `n` spawn poses on the city's through lanes: one per lane, from lanes at least 60 m
@@ -245,6 +343,7 @@ impl NetSim for WpSim {
 
     fn step(&mut self) {
         self.sim.step_fixed();
+        self.step_weather();
         // Count damage steps. Vehicles that existed before the tick all ran one. Vehicles the
         // sim spawned during the tick: physical traffic is embodied before the damage step
         // (`apply_traffic_lod` runs with the world step), police cars after it
@@ -280,7 +379,9 @@ impl NetSim for WpSim {
     }
 
     fn drain_events(&mut self) -> Vec<SimEvent> {
-        self.sim.drain_events()
+        let mut events = self.sim.drain_events();
+        events.append(&mut self.weather_events);
+        events
     }
 
     fn vehicle_snapshot(&self, id: EntityId) -> Option<Vec<u8>> {
@@ -339,6 +440,40 @@ impl NetSim for WpSim {
             VehicleKind::Player
         };
         let _ = self.sim.set_vehicle_kind(id, k);
+    }
+
+    fn traffic_agents(&self) -> Vec<TrafficAgentSnapshot> {
+        self.sim
+            .world()
+            .agents()
+            .filter(|a| a.lod == wp_world::traffic::Lod::Kinematic)
+            .map(|a| TrafficAgentSnapshot::from(&a))
+            .collect()
+    }
+
+    fn weather(&self) -> Option<WeatherSnapshot> {
+        let snap = self.weather_sim()?.snapshot();
+        Some(WeatherSnapshot {
+            kind: WeatherKind::from_code(snap.kind)?,
+            intensity: snap.intensity,
+            prev_kind: WeatherKind::from_code(snap.prev_kind)?,
+            prev_intensity: snap.prev_intensity,
+            blend: snap.blend,
+            wind_heading_rad: snap.wind_heading_rad,
+            water_q8: snap.water_q8,
+        })
+    }
+
+    fn captain_command(&mut self, cmd: CaptainCommand) -> Result<(), CaptainError> {
+        self.sim.captain_command(cmd)
+    }
+
+    fn set_human_captain(&mut self, seated: bool) {
+        self.sim.set_human_captain(seated);
+    }
+
+    fn police_unit(&self, id: EntityId) -> Option<UnitId> {
+        self.slot(id).and_then(|v| v.police_unit)
     }
 }
 

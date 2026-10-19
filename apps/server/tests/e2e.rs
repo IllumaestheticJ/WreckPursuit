@@ -9,7 +9,7 @@ use wp_net::client::{default_damage_factory, Client, ClientConfig, Phase};
 use wp_net::native::connect_ws;
 use wp_net::testkit::{load_data, repo_data_dir};
 use wp_net::Transport;
-use wp_server::{null_log, run, AppConfig};
+use wp_server::{null_log, parse_weather, run, AppConfig};
 
 fn test_config() -> AppConfig {
     AppConfig {
@@ -129,23 +129,63 @@ fn config_from_flags_and_toml() {
     assert_eq!(cfg.mode, "sim");
     assert_eq!(cfg.bots, 3);
     assert!(AppConfig::from_args(&["--wat".into()]).is_err());
+    let w = AppConfig::from_args(&["--weather".into(), "heavy_rain".into()]).unwrap();
+    assert_eq!(w.weather.as_deref(), Some("heavy_rain"));
+    assert_eq!(
+        parse_weather("Light-Rain"),
+        Ok(wp_contracts::WeatherKind::LightRain)
+    );
+    assert!(parse_weather("snow").is_err());
     assert!(AppConfig::from_args(&["--port".into()]).is_err());
 }
 
-/// `--city` loads a road file, adds traffic and AI police, and players spawn on its lanes.
+/// `--city` loads a road file, adds traffic and AI police, and players spawn on its lanes;
+/// `--weather` runs server weather, which a websocket racer receives on join (protocol v4;
+/// kinematic traffic replication is checked exactly in `wp_net`'s `city_v03` test).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn city_flag_runs_bots_in_a_police_city() {
     let city = repo_data_dir().join("city/procedural_12x12.road.bin");
     let cfg = AppConfig {
         bots: 4,
         city: Some(city.display().to_string()),
+        weather: Some("heavy_rain".into()),
         ..test_config()
     };
     let running = run(cfg, null_log()).await.unwrap();
-    tokio::time::sleep(Duration::from_millis(4000)).await;
+    let (cars, modes) = load_data(&repo_data_dir()).unwrap();
+    let mut t = connect_ws(&format!("ws://{}", running.ws_addr))
+        .await
+        .unwrap();
+    let mut client = Client::new(ClientConfig {
+        name: "rain".into(),
+        input_source: wp_contracts::InputSource::Keyboard,
+        cars,
+        modes,
+        damage_factory: default_damage_factory,
+    });
+    let start = Instant::now();
+    client.connect(0.0, 0);
+    let mut requested = false;
+    while start.elapsed() < Duration::from_secs(4) {
+        tokio::time::sleep(Duration::from_millis(16)).await;
+        let now = start.elapsed().as_secs_f64() * 1000.0;
+        while let Some(f) = t.poll().unwrap() {
+            client.receive(&f, now).unwrap();
+        }
+        if !requested && *client.phase() == Phase::Joined {
+            client.request_role(Role::Racer, now);
+            requested = true;
+        }
+        client.update(now, &VehicleInput::default());
+        for (ch, b) in client.drain_outgoing() {
+            t.send(ch, &b).unwrap();
+        }
+    }
+    let w = client.weather.as_ref().expect("weather sent on join");
+    assert_eq!(w.kind, wp_contracts::WeatherKind::HeavyRain);
     let j = body_json(&http_get(running.admin_addr, "/status").await);
-    assert_eq!(j["players"], 4, "{j}");
-    assert_eq!(j["connected"], 4, "{j}");
+    assert_eq!(j["players"], 5, "{j}");
+    assert_eq!(j["connected"], 5, "{j}");
     assert!(j["tick"].as_u64().unwrap() > 0, "{j}");
     assert!(j["downlink_bps_max"].as_f64().unwrap() <= 40_000.0, "{j}");
     let missing = AppConfig {
@@ -153,4 +193,12 @@ async fn city_flag_runs_bots_in_a_police_city() {
         ..test_config()
     };
     assert!(run(missing, null_log()).await.is_err());
+    let flat_weather = AppConfig {
+        weather: Some("fog".into()),
+        ..test_config()
+    };
+    assert!(
+        run(flat_weather, null_log()).await.is_err(),
+        "--weather needs --city"
+    );
 }

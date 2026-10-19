@@ -19,6 +19,11 @@ wp_damage.workspace = true
 wp_world.workspace = true
 wp_economy.workspace = true
 wp_sim.workspace = true
+wp_weather.workspace = true
+serde.workspace = true
+# Typed contract payloads on the wire (v0.3.0 events / commands); pure Rust, wasm-clean,
+# same version and features as wp_world / wp_wasm.
+postcard = { version = "1", default-features = false, features = ["alloc"] }
 thiserror.workspace = true
 tokio = { workspace = true, optional = true }
 tokio-tungstenite = { workspace = true, optional = true }

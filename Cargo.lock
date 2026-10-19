@@ -4305,6 +4305,8 @@ name = "wp_net"
 version = "0.1.0"
 dependencies = [
  "futures-util",
+ "postcard",
+ "serde",
  "thiserror 2.0.21",
  "tokio",
  "tokio-tungstenite",
@@ -4315,6 +4317,7 @@ dependencies = [
  "wp_police",
  "wp_sim",
  "wp_vehicle",
+ "wp_weather",
  "wp_world",
 ]
 

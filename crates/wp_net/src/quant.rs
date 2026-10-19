@@ -13,12 +13,15 @@
 //! | contact impulses | zigzag varint | 0.1 N·s |
 //! | lattice hash input | node displacement from rest | 1 mm |
 //! | lattice snapshot | displaced nodes only (bitmap), exact `f32` | lossless |
+//! | kinematic traffic position | zigzag varint per axis | 1 cm |
+//! | kinematic traffic yaw | `u16` per turn | ≈0.0055° |
+//! | kinematic traffic speed | varint | 1 cm/s, ≥ 0 |
 //!
 //! **Determinism rule:** the authority must apply the *dequantised* value of anything a client
 //! re-simulates from (inputs, contacts), so both sides feed bit-identical values into
 //! `wp_vehicle` / `wp_damage`. [`quantize_input`] and [`QContact::round_trip`] give that value.
 
-use wp_contracts::{ContactImpulse, EntityId, VehicleInput, VehicleState};
+use wp_contracts::{ContactImpulse, EntityId, TrafficAgentSnapshot, VehicleInput, VehicleState};
 
 /// Positions: steps per metre (1 cm).
 pub const POS_SCALE: f32 = 100.0;
@@ -396,9 +399,78 @@ impl QContact {
     }
 }
 
+/// A kinematic traffic agent on the wire (`wp_contracts::TrafficAgentSnapshot`, v0.3.0):
+/// display-only, so positions are 1 cm and yaw 1/65536 turn. About 14–16 bytes in a city.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct QTrafficAgent {
+    /// `wp_world` agent id.
+    pub id: u32,
+    /// Position, cm.
+    pub pos: [i32; 3],
+    /// Yaw, 65536 steps per turn (0 = +Y, counter-clockwise).
+    pub yaw: u16,
+    /// Speed along the heading, cm/s (negative speeds clamp to 0).
+    pub speed_cms: u32,
+    /// [`wp_contracts::traffic_flags`] bits.
+    pub flags: u8,
+    /// Visual variant.
+    pub variant: u8,
+}
+
+impl QTrafficAgent {
+    /// Quantise a contract snapshot.
+    pub fn from_snapshot(a: &TrafficAgentSnapshot) -> Self {
+        let turn = std::f32::consts::TAU;
+        let yaw = (a.yaw / turn).rem_euclid(1.0) * 65536.0;
+        Self {
+            id: a.id,
+            pos: a.pos.map(q_pos),
+            yaw: (yaw.round() as u32 & 0xFFFF) as u16,
+            speed_cms: round_clamp(a.speed_mps, VEL_SCALE, 0.0, u32::MAX as f32) as u32,
+            flags: a.flags,
+            variant: a.variant,
+        }
+    }
+
+    /// Back to a contract snapshot (yaw in `[0, 2π)`).
+    pub fn to_snapshot(&self) -> TrafficAgentSnapshot {
+        TrafficAgentSnapshot {
+            id: self.id,
+            pos: self.pos.map(dq_pos),
+            yaw: self.yaw as f32 / 65536.0 * std::f32::consts::TAU,
+            speed_mps: self.speed_cms as f32 / VEL_SCALE,
+            flags: self.flags,
+            variant: self.variant,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn traffic_agent_round_trip_is_close() {
+        let a = TrafficAgentSnapshot {
+            id: 77,
+            pos: [-312.456, 1022.004, 0.31],
+            yaw: -2.5,
+            speed_mps: 13.37,
+            flags: wp_contracts::traffic_flags::BRAKE | wp_contracts::traffic_flags::HEADLIGHTS,
+            variant: 3,
+        };
+        let q = QTrafficAgent::from_snapshot(&a);
+        let b = q.to_snapshot();
+        assert_eq!((b.id, b.flags, b.variant), (a.id, a.flags, a.variant));
+        for k in 0..3 {
+            assert!((a.pos[k] - b.pos[k]).abs() <= 0.005, "{a:?} {b:?}");
+        }
+        let dyaw = (b.yaw - a.yaw).rem_euclid(std::f32::consts::TAU);
+        assert!(dyaw.min(std::f32::consts::TAU - dyaw) < 1e-3, "{a:?} {b:?}");
+        assert!((a.speed_mps - b.speed_mps).abs() <= 0.005);
+        // Quantising the dequantised value again is stable.
+        assert_eq!(QTrafficAgent::from_snapshot(&b), q);
+    }
 
     fn quat_angle(a: [f32; 4], b: [f32; 4]) -> f32 {
         let d = (a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3]).abs();

@@ -60,6 +60,7 @@ pub fn build_snapshot(
         own: states.first().map(|(_, s)| OwnState::from_state(s)),
         own_full: None,
         entities,
+        traffic: None,
     }
 }
 

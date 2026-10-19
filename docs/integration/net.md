@@ -3,7 +3,7 @@
 - **Workstream / prompt:** 07 — multiplayer netcode
 - **Branch:** `ws/net`
 - **Crates / folders owned:** `crates/wp_net`, `apps/server`, `apps/testbed-web/src/net/` (+ `net.html`)
-- **Contract version built against:** 0.2.0 (lead branch `claude/laughing-newton-0xqr6q` @ a3bf2c3, round 6b); nothing here depends on v0.3.0 yet
+- **Contract version built against:** 0.3.0 (`main`, lead round 8); wire protocol `PROTOCOL_VERSION = 4`
 
 ## Exposes
 
@@ -11,21 +11,33 @@
 - `server::ServerInstance<S: NetSim>` — sans-IO authoritative instance:
   `new(ServerConfig, S)`, `connect() -> ConnId`, `receive(ConnId, &[u8])`, `disconnect(ConnId)`,
   `net_tick()` (4 physics ticks + output), `drain_outgoing() -> Vec<Outgoing>`, `stats()`,
-  `roles()`, `accounts_mut()`, `vehicle_of(PlayerId)`.
+  `roles()`, `accounts_mut()`, `vehicle_of(PlayerId)`; **meta join gate (MC-6)**:
+  `ServerConfig::require_join_token`, `take_join_requests() -> Vec<JoinRequest>`,
+  `approve_join(conn, display_name, meta_reconnect_token)`, `reject_join(conn, reason)`.
+  Forwards typed `SimEvent::{Police, Race, Economy, WeatherChanged}`; lobby money changes are
+  ledger `EconomyEvent`s (`StakeCharged` / `RacePayout` / `RaceRep`).
 - `netsim::NetSim` — what the server needs from a simulation (spawn/despawn, per-tick input,
   step, states, lattice nodes/rest, events, **applied contacts**, time of day, mode, AI kind,
   wanted level, damage step count, owned-vehicle kind). `netsim::WpSim` implements it over
   `wp_sim::Sim`: contact quantiser + applied-contact drain (NET-N1), real despawn (N3),
-  `VehicleKind` → `EntityKind`, wanted level from `Sim::police()`.
+  `VehicleKind` → `EntityKind`, wanted level from `Sim::police()`; **v0.3.0**: kinematic
+  `traffic_agents()` (`TrafficAgentSnapshot`), optional server `weather()` (W-5) with
+  `WeatherChanged` events, `captain_command` / `set_human_captain` into `wp_police`,
+  `police_unit(EntityId)`.
   `WpSim::with_city(config, cars, CitySetup { world, police_car, traffic_car })`,
-  `netsim::{server_world_config, lane_spawn_points}`.
+  `WpSim::{set_weather, enable_weather, weather_sim, weather_sim_mut}`,
+  `netsim::{server_world_config, lane_spawn_points, city_weather}`.
 - `lattice::damage_relevant(contacts, tuning, mode)` — contacts `wp_damage` would act on.
-- `client::Client` — sans-IO client: `connect`, `receive`, `update(now_ms, &VehicleInput)`,
-  `drain_outgoing`, `render(now_ms)`, `request_role`, `captain_order`, `send_reliable`, `bye`,
-  `stats()`, lobby/captain/account state.
+- `client::Client` — sans-IO client: `connect`, `connect_with_join_token`, `receive`,
+  `update(now_ms, &VehicleInput)`, `drain_outgoing`, `render(now_ms)`, `render_traffic(now_ms)`,
+  `traffic()`, `request_role`, `captain_command(CaptainCommand) -> seq`,
+  `race_command(RaceCommand)`, `send_reliable`, `bye`, `stats()`; state: `game_events`
+  (typed `SimEvent`s to drain), `wanted`, `captain_replies`, `weather`,
+  `meta_reconnect_token`, `unit_order` (contract `UnitOrder`), lobby/captain/account.
 - `predict::{Predictor, PredictedVehicle, RigVehicle}`, `interp::StateBuffer`,
   `timesync::TimeSync`, `interest::*`, `roles::RoleManager`, `race::RaceLobby`.
-- `protocol::{ClientMsg, ServerMsg, …}` + codec, `quant::*`, `snapshot::*`,
+- `protocol::{ClientMsg, ServerMsg, PLAYER_UNIT_BASE, unit_order_code, …}` + codec (contract
+  types as `typed<T>` = postcard), `quant::{…, QTrafficAgent}`, `snapshot::*`,
   `lattice::{lattice_hash, LatticeSnapshot, ReplicaDamage}` (impl for `wp_damage::DamageModel`).
 - `sim_link` (netem-style test transport), `bot::BotDriver`, `testkit::{ArenaSim, ToyLattice,
   load_data}`.
@@ -41,9 +53,11 @@ mode, `--bots N`, `--arena R`, data dir), `GET /status` admin JSON, JSON-lines l
 API `wp_server::{run, AppConfig, json_log, null_log, status_json}` for tests/tools.
 
 ### `wp_wasm` functions added (in a separate module, `crates/wp_wasm/src/net.rs`)
-`net_create, net_connect, net_receive, net_update, net_take_outgoing, net_render_json,
-net_status_json, net_stats_json, net_captain_json, net_request_role, net_captain_order_json,
-net_race_create_json, net_race_join, net_race_start, net_race_leave, net_race_invite, net_bye`.
+`net_create, net_connect, net_connect_join, net_receive, net_update, net_take_outgoing,
+net_render_json, net_traffic_json, net_events_json, net_status_json, net_stats_json,
+net_captain_json, net_request_role, net_captain_command_json (contract CaptainCommand JSON →
+seq), net_race_create_json, net_race_command_json, net_race_join, net_race_start,
+net_race_leave, net_race_invite, net_bye` (round 8: `net_captain_order_json` removed).
 Table with signatures in the module docs. `ws/testbed` (04) is active and rewrote
 `wp_wasm/src/lib.rs`; to keep the merge trivial my only edits to shared files are
 `pub mod net;` in `lib.rs`, one doc line, and `wp_net.workspace = true` in `Cargo.toml`.
@@ -53,7 +67,11 @@ Table with signatures in the module docs. `ws/testbed` (04) is active and rewrot
 `net.html` + `src/net/{main,wasm,connection,keyboard,overlay,rolePicker,captainMap}.ts`:
 connect + reconnect-with-token, role picker, captain-offer prompt, race lobby, captain map
 (2D canvas: units, incidents, heat, right-click command radial), debug overlay (RTT,
-misprediction count, correction magnitude, bandwidth, lattice hash stats). Separate page so
+misprediction count, correction magnitude, bandwidth, lattice hash stats; round 8: weather,
+wanted levels, typed unit order, police radio lines, traffic count), grey boxes for kinematic
+traffic, captain radial sending typed commands (pursue / intercept / roadblock / spikes /
+helicopter / priority / call off / patrol / disengage) with the last reply shown, and
+`?join=<token>` for a meta join token. Separate page so
 04's `main.ts` is untouched; `vite.config.ts` gained a `rollupOptions.input` entry for
 `net.html`. Screenshots: `docs/media/net_racer.png`, `docs/media/net_captain_order.png`.
 
@@ -69,29 +87,34 @@ misprediction count, correction magnitude, bandwidth, lattice hash stats). Separ
 | NET-N9 | `wp_sim` (lead) | A kind for **player-driven police seats** that drives the traffic spawn ring (like `Player`) but is not a racer for `wp_police` (e.g. `VehicleKind::PlayerPolice`). | `WpSim` marks police seats `VehicleKind::Police` so AI police do not chase them; that also removes them from `racer_views` *and* from the traffic ring (`TrackedVehicle::player` is `kind == Player`). | `VehicleKind::Police` (no traffic spawns around a lone player cop). |
 | NET-N10 | `wp_damage` (03) | A public, pure `DamageModel::contacts_have_effect(&[ContactImpulse], &ModeTable) -> bool` (or per-contact filter) next to `add_contacts`. | `wp_net::lattice::damage_relevant` mirrors `contact.rs` (speed / impulse / group-energy thresholds) to skip replicating no-op contacts; a B-owned predicate keeps the two from drifting. | Mirror + guard test `lattice::tests::dropped_contacts_are_noops` (fails if B's thresholds change semantics). |
 | NET-N11 | `wp_vehicle` (02) | `Rig` obstacles: `Rig::set_obstacles(&[(pos, rot, half_extents, vel)])` as kinematic cuboids (or a collider list) so the client can predict contacts with nearby cars. | Police rams / traffic hits are corrected one RTT late: chase RMS correction 0.12–0.39 m (max 3 m) vs 0.11 m in the contact-free test. | Corrections + 100 ms visual smoothing; chase budget 0.5 m RMS in `city_e2e`. |
-| NET-N6 | `wp_police` (06) | Captain API: command payload type + validation, heat grid, pursuit pairs (typed `CaptainCommand` in v0.3.0). | `CaptainView`, `UnitOrder`, interest "pursuit" category. | AI police units and per-racer wanted levels now come from the real `wp_police` via `wp_sim` (round 6b). Captain payload is still the placeholder `protocol::CaptainOrder`; heat = crash density; pursuit = police within 300 m of a racer. |
-| NET-N7 | `wp_economy` (08) | Payout API: `race_payout(results, stakes) -> Vec<(PlayerId, i64)>`, stake tables (day/night), persistent account store keyed by a durable player identity. | All economy stays on the server; the net layer should only call it. | Stake `500 × (1 + night_factor)`, split 70/30 or 60/30/10, applied to an in-memory `InMemoryStore` keyed by per-instance `PlayerId`. |
+| NET-N6 | `wp_police` (06) | Heat grid and incident list for the captain map (e.g. from `PoliceSystem::captain_view`), pursuit pairs. | `CaptainView`, interest "pursuit" category. | **Commands done (round 8)**: typed `CaptainCommand` → `Sim::captain_command` → `wp_police`, replies on the wire. Heat = crash density; pursuit = police within 300 m of a racer. |
+| NET-N7 | `wp_economy` (08) | Payout API: `race_payout(results, stakes) -> Vec<(PlayerId, i64)>`, stake tables (day/night), persistent account store keyed by a durable player identity. | All economy stays on the server; the net layer should only call it. | Stake `500 × (1 + night_factor)`, split 70/30 or 60/30/10; since round 8 each change is a committed ledger `EconomyEvent` (`StakeCharged` / `RacePayout` / `RaceRep`) sent typed to its owner. In-memory `InMemoryStore` keyed by per-instance `PlayerId`. |
+| NET-N12 | lead (`wp_sim`) + K (weather) | Weather inside `wp_sim` (K's `WeatherLink` plan: `Sim::set_weather`, vehicles and police read `weather_at`), so server grip and police sight follow the weather the clients are shown. | Today `WpSim` steps a `WeatherSim` next to the sim for replication only. | `WpSim::set_weather` / `enable_weather`; `WpSim` will switch to the sim's weather when it exists (one adapter change). |
+| NET-N13 | D (world) | `AgentView` headlights flag (contract `traffic_flags::HEADLIGHTS`). | Night traffic in the browser. | Bit never set; clients may light every agent at night. |
 | NET-N8 | `wp_world` (05) | Route helper for races, road polylines for the captain map. | Prompt 07 captain map. | `--city` now loads `.road.json`/`.road.bin`/`procedural` (round 6b). Races take client checkpoints; captain map draws a grid. |
 
 ## Contract change requests
 
 | # | Change (type / field / variant) | Why | Who is affected | Status |
 |---|---|---|---|---|
-| NET-1 | Replace `ClientToServer` / `ServerToClient` with the full message sets in `wp_net::protocol` (`Hello, Inputs{ack_snapshot_tick, first_tick, inputs}, RoleRequest, CaptainCommand, Ping, LatticeRequest, Race*, Bye` / `Welcome, Reject, RoleAssigned{car_id}, CaptainOffer, EntityEnter/Leave, Snapshot{input_ack, own, entities}, Damage, LatticeHash, LatticeSnapshot, Pong, CaptainView, UnitOrder, Race*, Account, Notice`), or delete the contract skeletons and declare `wp_net::protocol` the source of truth. | The skeleton has no join handshake, acks, time sync, damage replication, lobby or captain messages; nobody else encodes these. | 07 only (04 if it wants a network mode). | accepted in principle; **final list (round 6b)** = `wp_net::protocol` at `PROTOCOL_VERSION = 3`, byte layouts in `crates/wp_net/README.md` § Protocol. Changes since v2: `EntityKind` 4 = `AiRacer`; `LatticeSnapshot` + `opt damage_steps`. Kinematic traffic will add one message for v0.3.0 `TrafficAgentSnapshot`. |
+| NET-1 | Replace `ClientToServer` / `ServerToClient` with the full message sets in `wp_net::protocol` (`Hello, Inputs{ack_snapshot_tick, first_tick, inputs}, RoleRequest, CaptainCommand, Ping, LatticeRequest, Race*, Bye` / `Welcome, Reject, RoleAssigned{car_id}, CaptainOffer, EntityEnter/Leave, Snapshot{input_ack, own, entities}, Damage, LatticeHash, LatticeSnapshot, Pong, CaptainView, UnitOrder, Race*, Account, Notice`), or delete the contract skeletons and declare `wp_net::protocol` the source of truth. | The skeleton has no join handshake, acks, time sync, damage replication, lobby or captain messages; nobody else encodes these. | 07 only (04 if it wants a network mode). | **done (v0.3.0)**: `wp_net::protocol` is the wire source of truth, now `PROTOCOL_VERSION = 4` (typed events, `CaptainReply`, `RaceCommand`, traffic in `Snapshot`, `Weather`, MC-6 tokens); byte layouts in `crates/wp_net/README.md` § Protocol. |
 | NET-2 | Add quantised wire types to contracts if other crates must produce them: `QInput`, `QContact`, `QVehicle`, smallest-three rotation, `LatticeSnapshot` (exact f32 of displaced nodes). | Determinism rule "authority applies dequantised values" spans `wp_sim` (contacts) and the client (inputs). Alternative: keep them in `wp_net` and give `wp_sim` a filter hook (NET-N1). | lead, 03 | proposed (either option works for 07) |
-| NET-3 | Concrete `CaptainCommand` payload (owned by 06) and a `UnitOrder` type. | Opaque `Vec<u8>` today. | 06, 07 | proposed |
-| NET-4 | `EconomyEvent` kinds for `StakeCharged`, `RacePayout` so economy changes are visible to replays/logs. | Payouts currently bypass `SimEvent`. | 08, 07 | proposed |
-| NET-5 | `PlayerId` allocation: durable identity (account id) separate from the per-instance slot. | Accounts/cop rank must survive instances. | 08, 07 | proposed |
+| NET-3 | Concrete `CaptainCommand` payload (owned by 06) and a `UnitOrder` type. | Opaque `Vec<u8>` before. | 06, 07 | **done (v0.3.0)**, used on the wire (round 8) |
+| NET-4 | `EconomyEvent` kinds for `StakeCharged`, `RacePayout` so economy changes are visible to replays/logs. | Payouts bypassed `SimEvent`. | 08, 07 | **done (v0.3.0)**, emitted by the lobby (round 8) |
+| NET-5 | `PlayerId` allocation: durable identity (account id) separate from the per-instance slot. | Accounts/cop rank must survive instances. | 08, 07 | **done (v0.3.0)** as `AccountId`; the server still maps `AccountId(player.0)` until G's ledger switches |
+| NET-6 | None new this round. | — | — | — |
 
 ## Changes outside my crates
 | File | Change | Reason |
 |---|---|---|
 | `crates/wp_vehicle/src/rig.rs` | `Rig::set_state(&VehicleState)` (additive: vehicle + rigid body rewind) | Client rewind on the real model (NET-N2). `Vehicle::set_state` itself is the lead's. |
 | `crates/wp_damage/src/lib.rs` | `DamageModel::restore_node_positions` (additive) | Lattice resync (NET-N5). |
+| `crates/wp_sim/src/police_link.rs` | `Sim::captain_command(CaptainCommand) -> Result<(), CaptainError>`, `Sim::set_human_captain(bool)` (additive, forward to `PoliceSystem`) | Typed captain commands from the wire (round 8). Lead: keep or replace with your own API. |
+| `apps/simcli/src/net.rs` | `traffic: None` in the round-trip snapshot | Compile fix for protocol v4's `Snapshot.traffic` (owner I). |
 | `crates/wp_wasm/Cargo.toml`, `src/lib.rs`, new `src/net.rs` | `wp_net` dependency, `pub mod net;`, `net_*` functions | Browser client. |
 | `apps/testbed-web/vite.config.ts`, `README.md`, new `net.html`, `src/net/` | build input for `net.html`, README section | Browser client page. |
 | `justfile` | `server` comment, new `server-bots` recipe | Load testing. |
-| `Cargo.lock` | `wp_world` dependency of `wp_server`, `wp_police` dev-dependency of `wp_net` (round 6b) | `--city` loading; the city test sets starting heat. |
+| `Cargo.lock` | `wp_world` dependency of `wp_server`, `wp_police` dev-dependency of `wp_net` (round 6b); `wp_weather`, `serde`, `postcard` dependencies of `wp_net` (round 8; postcard 1.1.3 already locked for `wp_world`/`wp_wasm`, all wasm-clean) | `--city` loading; typed payloads; server weather. |
 
 ## Perf numbers
 | Measurement | Machine | Native (release) | Browser | Budget |
@@ -107,6 +130,12 @@ misprediction count, correction magnitude, bandwidth, lattice hash stats). Separ
 | City e2e: lattice hashes | in-process | 63/2386 mismatched, 0 on contact-only replicas (rest: NET-N5) | — | — |
 | City e2e: prediction during a chase | in-process | RMS 0.17–0.39 m, max 3.0 m, 0 resets (rams not predicted, NET-N11) | — | 0.5 m |
 
+| **Round 8 (protocol v4)** city e2e down-link incl. kinematic traffic | in-process | mean 15.6–17.4 kB/s, worst second ≤ 24.5 kB/s | — | 40 kB/s |
+| Round 8 city e2e net tick / lattice hashes | in-process | avg 1.61 ms, p99 5.9 ms / 0 of 2116 mismatched | — | 16.7 ms |
+| Round 8 kinematic traffic replication (`city_v03`) | in-process | 27 465 agent states checked, 0 differ; ≤ 48 per client | — | exact |
+| Round 8 weather message (13 689 cells, run-length) | in-process | 25 B uniform grid; bound 2 B/cell + 30 B | — | — |
+| Round 8 browser smoke (`net.html`, debug wasm, `wp-server --city procedural --weather heavy_rain --bots 2`) | headless Chromium | joined, weather shown, traffic drawn, captain command reply `ok`, down 9 kB/s | — | — |
+
 Measured on the integrated build with the real vehicle (A) and damage (B) models. The browser
 figures from run 1 (stub) have not been re-measured.
 
@@ -116,14 +145,52 @@ figures from run 1 (stub) have not been re-measured.
 - Rewinds are bit-exact only at the 5 Hz snapshot ticks (`set_state` in between); collisions
   with city geometry and other cars are corrected, not predicted (NET-N11).
 - Own-car predicted contacts are not applied; own damage is server-driven, one RTT late.
-- Kinematic far traffic is not replicated (waits for v0.3.0 `TrafficAgentSnapshot`).
+- Kinematic traffic is display-only and straight-line extrapolated between 10 Hz updates.
+- Server weather does not change server grip yet (NET-N12).
+- The in-instance lobby keeps its own `RaceUpdate`/`RaceProgress`/`RaceResults`; contract
+  `RaceEvent`s are forwarded only when the sim emits them (no `wp_race` in `wp_sim` yet).
+- The `wp_meta` worker is not wired into `apps/server` (gate + protocol fields are).
 - Player police seats are `VehicleKind::Police` in the sim: no traffic spawns around a lone
   player cop (NET-N9).
-- Placeholders: captain payload, heat grid, stakes/payout split, in-memory accounts.
+- Placeholders: heat grid, stakes/payout split, in-memory accounts.
 - WebSocket only; both channels reliable. No auth beyond the reconnect token.
 - `--arena` + browser clients: the browser uses `wp_damage` replicas, the arena uses the toy
   lattice, so browser hash checks mismatch and resync after every crash (by design of the
   test mode).
+
+## Response to lead feedback (round 8)
+Merged `origin/main` (contract v0.3.0, clean). Item 1 — the v0.3.0 net items, all in
+`wp_net::protocol`, now `PROTOCOL_VERSION = 4` (tables in `crates/wp_net/README.md`):
+- **Typed events on the wire**: `ServerMsg::Events` (0x94) carries `SimEvent::{Police, Race,
+  Economy, WeatherChanged}` as `typed<SimEvent>` (postcard of the contract type), once per net
+  tick; radio lines only to police roles, economy events only to the account's owner. The
+  lobby's money changes are now real ledger `EconomyEvent`s (`StakeCharged` / `RacePayout` /
+  `RaceRep`, NET-4) committed to the store and sent typed.
+- **Typed `CaptainCommand` + `CaptainReply`**: `{seq, typed<CaptainCommand>}` → `wp_police`
+  via a small additive `Sim::captain_command` (listed above); orders for player chase seats
+  use unit ids `0x8000_0000 + entity` (shown on the captain map) and reach the driver as a
+  typed `UnitOrder`; every command is answered with `Result<(), CaptainError>`. Seating a
+  captain calls `set_human_captain`. The placeholder `CaptainOrder` is gone.
+- **`RaceCommand`** (0x0D): `Enter` / `Withdraw` / `Ready` replace the v3 join/start/leave
+  messages.
+- **`TrafficAgentSnapshot`**: `Snapshot.traffic`, 10 Hz, nearest ≤ 48 kinematic agents within
+  120 m, 1 cm / 1/65536-turn quantisation (`QTrafficAgent`), complete-set semantics; clients
+  extrapolate ≤ 0.5 s. Checked exactly against the server in `tests/city_v03.rs`.
+- **Weather (W-5)**: `ServerMsg::Weather` (0x96) on join and on change (new regime within
+  1 s, else ≤ every 5 s), water grid run-length encoded (25 B for a 13.7k-cell city). Server
+  weather: `WpSim::set_weather` / `enable_weather`, `wp-server --city … --weather heavy_rain`.
+- **MC-6**: `Hello.join_token`, `Welcome.meta_reconnect_token`; with
+  `ServerConfig::require_join_token` the server parks new players until the host approves or
+  rejects (`take_join_requests` / `approve_join` / `reject_join`). Meta (O): MC-6 can be
+  marked done; the `wp_meta` worker hookup in `apps/server` is the remaining step.
+- Browser client (`net.html`) and `wp_wasm` net functions updated (typed captain radial,
+  traffic boxes, weather / radio / wanted in the overlay, `?join=`); smoke-tested in headless
+  Chromium against a live `wp-server --city procedural --weather heavy_rain --bots 2`.
+
+Round-6b items were all done last round (see below). Checks (round 8): fmt, clippy
+`--workspace --all-targets -D warnings` clean; `cargo test --workspace` 720 passed, 0 failed,
+15 ignored (the parked tests); wasm build passes (no tokio/tungstenite in `wp_wasm`'s tree);
+testbed `tsc --noEmit` clean against bindings from `wasm-bindgen` 0.2.129.
 
 ## Response to lead feedback (round 6b)
 Merged `origin/main` and the lead branch `origin/claude/laughing-newton-0xqr6q` (clean).

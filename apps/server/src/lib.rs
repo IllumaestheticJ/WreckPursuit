@@ -31,7 +31,7 @@ pub const USAGE: &str = "\
 usage: wp-server [--config FILE.toml] [--port N] [--admin-port N] [--bind ADDR]
                  [--max-players N] [--city FILE] [--seed N] [--time-ratio X]
                  [--time-of-day H] [--mode arcade|sim] [--bots N] [--arena RADIUS_M]
-                 [--data DIR]
+                 [--weather KIND] [--data DIR]
 
   --port         websocket port (default 8080; 0 = any)
   --admin-port   admin HTTP port, GET /status (default 8081; 0 = any)
@@ -45,6 +45,8 @@ usage: wp-server [--config FILE.toml] [--port N] [--admin-port N] [--bind ADDR]
   --bots N       connect N scripted websocket clients (load testing)
   --arena R      crash-arena sim of radius R m (contacts + toy lattice damage) instead of
                  the plain wp_sim world; use with --bots for damage-replication load tests
+  --weather      with --city: run server weather starting in KIND (clear, overcast,
+                 light_rain, heavy_rain, fog; schedule runs), replicated to clients
   --data         data directory (default data)
 A TOML file may set the same keys (snake_case, e.g. admin_port = 9000); flags win.";
 
@@ -74,6 +76,8 @@ pub struct AppConfig {
     pub bots: usize,
     /// Crash-arena radius; `None` = plain `wp_sim` world.
     pub arena_radius_m: Option<f32>,
+    /// Starting weather for a city instance (`None` = no weather); see [`parse_weather`].
+    pub weather: Option<String>,
     /// Data directory.
     pub data_dir: String,
 }
@@ -92,6 +96,7 @@ impl Default for AppConfig {
             mode: "arcade".into(),
             bots: 0,
             arena_radius_m: None,
+            weather: None,
             data_dir: "data".into(),
         }
     }
@@ -131,6 +136,7 @@ impl AppConfig {
                 "--mode" => cfg.mode = parse(flag, v)?,
                 "--bots" => cfg.bots = parse(flag, v)?,
                 "--arena" => cfg.arena_radius_m = Some(parse(flag, v)?),
+                "--weather" => cfg.weather = Some(parse(flag, v)?),
                 "--data" => cfg.data_dir = parse(flag, v)?,
                 other => return Err(format!("unknown flag {other}")),
             }
@@ -200,6 +206,10 @@ pub async fn run(cfg: AppConfig, log: LogFn) -> Result<Running, String> {
         seed: cfg.seed,
         ..Default::default()
     };
+    let weather = cfg.weather.as_deref().map(parse_weather).transpose()?;
+    if weather.is_some() && cfg.city.is_none() {
+        return Err("--weather needs --city".into());
+    }
     let world = match &cfg.city {
         Some(city) => {
             let world = load_city(city, &sim_cfg)?;
@@ -261,7 +271,13 @@ pub async fn run(cfg: AppConfig, log: LogFn) -> Result<Running, String> {
                                 police_car: cars.get(AI_POLICE_CAR).cloned(),
                                 traffic_car: cars.get(TRAFFIC_CAR).cloned(),
                             };
-                            WpSim::with_city(sim_cfg, cars, city)
+                            let ratio = sim_cfg.time_ratio;
+                            let seed = sim_cfg.seed;
+                            let mut sim = WpSim::with_city(sim_cfg, cars, city);
+                            if let Some(kind) = weather {
+                                sim.enable_weather(seed, kind, 0.7, ratio);
+                            }
+                            sim
                         }
                         None => WpSim::new(sim_cfg, cars),
                     };
@@ -311,6 +327,16 @@ pub async fn run(cfg: AppConfig, log: LogFn) -> Result<Running, String> {
         admin_addr,
         status,
     })
+}
+
+/// Parse a weather kind name: `clear`, `overcast`, `light_rain`, `heavy_rain`, `fog`
+/// (case and `_` / `-` ignored).
+pub fn parse_weather(name: &str) -> Result<wp_contracts::WeatherKind, String> {
+    let norm = |s: &str| s.to_lowercase().replace(['_', '-'], "");
+    wp_contracts::WeatherKind::ALL
+        .into_iter()
+        .find(|k| norm(&format!("{k:?}")) == norm(name))
+        .ok_or_else(|| format!("unknown weather {name}"))
 }
 
 /// Load a city for the server: `procedural` (the 12×12 procedural city) or a road file.

@@ -30,6 +30,40 @@ export interface RenderVehicle {
 
 export type RoleName = "racer" | "police_chase" | "police_captain" | "spectator";
 
+/** Contract `UnitOrder` (serde JSON). */
+export type UnitOrder =
+  | "Patrol"
+  | "Disengage"
+  | { Pursue: { target: number } }
+  | { Intercept: { target: number } }
+  | { Respond: { incident: number } };
+
+/** Contract `CaptainCommand` (serde JSON); unit ids come from `MapUnit.unit`. */
+export type CaptainCommand =
+  | { AssignUnit: { unit: number; order: UnitOrder } }
+  | { RequestRoadblock: { target: number; road: number | null } }
+  | { RequestSpikes: { target: number; road: number | null } }
+  | { RequestHelicopter: { target: number } }
+  | { SetPriorityTarget: { target: number | null } }
+  | { CallOff: { target: number } };
+
+/** Contract `TrafficAgentSnapshot` (kinematic traffic, display only). */
+export interface TrafficAgent {
+  id: number;
+  pos: [number, number, number];
+  yaw: number;
+  speed_mps: number;
+  flags: number;
+  variant: number;
+}
+
+/** Contract `SimEvent` JSON of the typed events the server forwards. */
+export type GameEvent =
+  | { Police: Record<string, unknown> | string }
+  | { Race: Record<string, unknown> | string }
+  | { Economy: Record<string, unknown> }
+  | { WeatherChanged: { kind: string; intensity: number; forced: boolean } };
+
 export interface RaceInfo {
   race: number;
   host: number;
@@ -45,11 +79,22 @@ export interface NetStatus {
   phase: string;
   player: number | null;
   token: string;
+  meta_reconnect_token: string;
   role: RoleName;
   vehicle: number | null;
   mode: "arcade" | "sim";
   captain_offer: number | null;
-  unit_order: { kind: number; x: number; y: number; target: number } | null;
+  unit_order: UnitOrder | null;
+  captain_replies: { seq: number; ok: boolean; error: unknown }[];
+  wanted: { racer: number; level: number }[];
+  weather: {
+    kind: string;
+    intensity: number;
+    prev_kind: string;
+    prev_intensity: number;
+    blend: number;
+    wind_heading_rad: number;
+  } | null;
   races: RaceInfo[];
   race_progress: { race: number; player: number; next: number }[];
   race_results: {
@@ -89,7 +134,10 @@ export interface MapUnit {
   y: number;
   heading: number;
   wanted: number;
+  /** 0 none, 1 patrol, 2 pursue, 3 intercept, 4 respond, 5 disengage. */
   order: number;
+  /** Police unit id for `AssignUnit` (null for non-police). */
+  unit: number | null;
 }
 
 export interface CaptainMapData {
@@ -99,7 +147,6 @@ export interface CaptainMapData {
   heat: { x: number; y: number; size: number; heat: number }[];
 }
 
-export type OrderKind = "move" | "block" | "pursue" | "hold";
 
 export const ROLE_CODE: Record<RoleName, number> = {
   racer: 0,
@@ -109,7 +156,8 @@ export const ROLE_CODE: Record<RoleName, number> = {
 };
 
 export const create = (name: string, inputSource = 0): void => wasm.net_create(name, inputSource);
-export const connect = (nowMs: number, token = ""): void => wasm.net_connect(nowMs, token);
+export const connect = (nowMs: number, token = "", joinToken = ""): void =>
+  joinToken ? wasm.net_connect_join(nowMs, token, joinToken) : wasm.net_connect(nowMs, token);
 export const receive = (bytes: Uint8Array, nowMs: number): void => wasm.net_receive(bytes, nowMs);
 export const update = (nowMs: number, input: NetInput): void =>
   wasm.net_update(nowMs, JSON.stringify(input));
@@ -117,12 +165,14 @@ export const render = (nowMs: number): RenderVehicle[] => JSON.parse(wasm.net_re
 export const status = (): NetStatus => JSON.parse(wasm.net_status_json());
 export const stats = (): NetStats => JSON.parse(wasm.net_stats_json());
 export const captainMap = (): CaptainMapData => JSON.parse(wasm.net_captain_json());
+export const traffic = (nowMs: number): TrafficAgent[] => JSON.parse(wasm.net_traffic_json(nowMs));
+/** Drain typed game events (police radio, wanted levels, race, economy, weather). */
+export const events = (): GameEvent[] => JSON.parse(wasm.net_events_json());
 export const requestRole = (role: RoleName, nowMs: number): void =>
   wasm.net_request_role(ROLE_CODE[role], nowMs);
-export const captainOrder = (
-  order: { kind: OrderKind; units: number[]; x?: number; y?: number; target?: number },
-  nowMs: number,
-): void => wasm.net_captain_order_json(JSON.stringify(order), nowMs);
+/** Send a captain command; returns the `seq` its `captain_replies` entry will carry. */
+export const captainCommand = (cmd: CaptainCommand, nowMs: number): number =>
+  wasm.net_captain_command_json(JSON.stringify(cmd), nowMs);
 export const raceCreate = (laps: number, checkpoints: [number, number][], nowMs: number): void =>
   wasm.net_race_create_json(JSON.stringify({ laps, checkpoints }), nowMs);
 export const raceJoin = (race: number, nowMs: number): void => wasm.net_race_join(race, nowMs);
