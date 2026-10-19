@@ -414,6 +414,22 @@ impl WeatherSim {
         self.refresh_modifiers();
     }
 
+    /// Flood the cells whose centres lie in the XY box `min..max` with `water_mm` of
+    /// standing water (scenario setup: a puddle to aquaplane on; see
+    /// [`WetnessGrid::flood_rect`]). Returns the number of cells flooded.
+    pub fn flood_rect(&mut self, min: [f32; 2], max: [f32; 2], water_mm: f32) -> usize {
+        let n = self
+            .state
+            .wetness_by_cell
+            .flood_rect(min, max, water_mm, &self.data.surfaces);
+        self.state.mean_road_wetness = self
+            .state
+            .wetness_by_cell
+            .mean_road_wetness(&self.data.surfaces);
+        self.refresh_modifiers();
+        n
+    }
+
     /// The full state.
     pub fn state(&self) -> &WeatherState {
         &self.state

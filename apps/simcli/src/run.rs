@@ -323,6 +323,15 @@ pub fn build_sim(
         }
         None => false,
     };
+    // Weather after the city (the wetness grid covers its road network).
+    if let Some(w) = &sc.weather {
+        sim.set_weather(w.config(sc.seed));
+        if let Some(ws) = sim.weather_mut() {
+            for p in &w.puddles {
+                ws.flood_rect(p.min, p.max, p.water_mm);
+            }
+        }
+    }
     // Hilly cities: every entity sits on the ground under its (x, y) (z = a hint for which
     // level at grade separations), pitched to the slope. Flat cities keep `pos` exactly.
     if sim.has_terrain() {
@@ -1026,6 +1035,23 @@ pub fn run_with_hook(
             probes.insert((idx, tick_of(*t_s)), f32::NAN);
         }
     }
+    // Probe ticks for `travel_between`: path length at each end.
+    let mut travel: BTreeMap<(usize, u64), f32> = BTreeMap::new();
+    for x in sc.expect.iter().chain(&sc.expect_pending) {
+        if let Expect::TravelBetween {
+            entity,
+            from_s,
+            to_s,
+            ..
+        } = x
+        {
+            let idx = sc
+                .entity_index(entity.as_ref())
+                .map_err(|e| RunError::Scenario(sc.name.clone(), e))?;
+            travel.insert((idx, tick_of(*from_s)), f32::NAN);
+            travel.insert((idx, tick_of(*to_s)), f32::NAN);
+        }
+    }
 
     let ticks = sc.ticks();
     let sample_every = sc.sample_every();
@@ -1157,6 +1183,9 @@ pub fn run_with_hook(
             }
             if let Some(slot) = probes.get_mut(&(idx, now)) {
                 *slot = s.speed_mps;
+            }
+            if let Some(slot) = travel.get_mut(&(idx, now)) {
+                *slot = tr.summary.path_length_m;
             }
             if sc.panels {
                 let panels = sim.vehicles()[idx].damage.panel_states();
@@ -1297,6 +1326,7 @@ pub fn run_with_hook(
         sc,
         summary: &summary,
         probes: &probes,
+        travel: &travel,
         police_first: &police_first,
         event_counts: &event_counts,
         ids: &ids,
@@ -1331,6 +1361,7 @@ struct EvalCtx<'a> {
     sc: &'a Scenario,
     summary: &'a RunSummary,
     probes: &'a BTreeMap<(usize, u64), f32>,
+    travel: &'a BTreeMap<(usize, u64), f32>,
     police_first: &'a BTreeMap<u16, u64>,
     event_counts: &'a [(&'static str, Vec<EntityId>)],
     ids: &'a [EntityId],
@@ -1370,6 +1401,25 @@ impl EvalCtx<'_> {
                 match self.probes.get(&(idx, tick_of(*t_s))) {
                     Some(v) if !v.is_nan() => range(*v, *min, *max),
                     _ => (format!("t_s {t_s} is outside the run"), false),
+                }
+            }
+            Expect::TravelBetween {
+                entity,
+                from_s,
+                to_s,
+                min,
+                max,
+            } => {
+                let (idx, _) = self.ent(entity.as_ref());
+                let at = |t: f32| {
+                    self.travel
+                        .get(&(idx, tick_of(t)))
+                        .copied()
+                        .filter(|v| !v.is_nan())
+                };
+                match (at(*from_s), at(*to_s)) {
+                    (Some(a), Some(b)) => range(b - a, *min, *max),
+                    _ => (format!("{from_s}..{to_s} s is outside the run"), false),
                 }
             }
             Expect::MaxLateralG { entity, min, max } => {

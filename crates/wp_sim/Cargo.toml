@@ -14,5 +14,6 @@ wp_damage.workspace = true
 wp_world.workspace = true
 wp_police.workspace = true
 wp_economy.workspace = true
+wp_weather.workspace = true
 rapier3d.workspace = true
 thiserror.workspace = true

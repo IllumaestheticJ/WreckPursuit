@@ -456,3 +456,58 @@ fn scenarios_md_example_parses_and_passes() {
     let out = simcli::run(&sc, &data(), &RunOptions::default()).unwrap();
     assert!(out.summary.passed(), "{:?}", out.summary.failures);
 }
+
+/// Run 0 of a scenario from the shared pass, by scenario name.
+fn shared_summary(name: &str) -> &'static simcli::run::RunSummary {
+    let r = shared_runs()
+        .iter()
+        .find(|r| r.scenario.name == name)
+        .unwrap_or_else(|| panic!("scenario {name} not in the shared pass"));
+    &r.runs[0].as_ref().expect("run").summary
+}
+
+/// First-pursuit time from a `pursuit_started_before` result ("first at 1.900 s").
+fn first_pursuit_s(summary: &simcli::run::RunSummary) -> f32 {
+    let e = summary
+        .expectations
+        .iter()
+        .find(|e| e.expect.starts_with("pursuit_started_before"))
+        .expect("pursuit_started_before expectation");
+    e.actual
+        .trim_start_matches("first at ")
+        .trim_end_matches(" s")
+        .parse()
+        .unwrap_or(f32::INFINITY)
+}
+
+/// Weather twins (lead, weather in the game): the same layout with and without weather must
+/// differ in the direction physics and police doctrine say.
+#[test]
+fn fog_delays_the_pursuit() {
+    let clear = first_pursuit_s(shared_summary("weather_fog_pursuit_clear"));
+    let fog = first_pursuit_s(shared_summary("weather_fog_pursuit"));
+    assert!(fog > clear + 0.5, "fog {fog} s vs clear {clear} s");
+}
+
+#[test]
+fn flooded_road_aquaplanes_and_wet_road_brakes_longer() {
+    let yaw = |n: &str| shared_summary(n).entities[0].max_yaw_rate_rps;
+    let (flood, control) = (
+        yaw("weather_aquaplane_puddle"),
+        yaw("weather_aquaplane_control"),
+    );
+    assert!(flood < 0.75 * control, "yaw {flood} vs {control}");
+    let travel = |n: &str| {
+        let e = shared_summary(n)
+            .expectations
+            .iter()
+            .find(|e| e.expect.starts_with("travel_between"))
+            .expect("travel_between expectation");
+        e.actual.parse::<f32>().expect("metres")
+    };
+    let (wet, dry) = (
+        travel("weather_wet_brake_100_0"),
+        travel("weather_dry_brake_100_0"),
+    );
+    assert!(wet > 1.15 * dry, "wet {wet} m vs dry {dry} m");
+}
