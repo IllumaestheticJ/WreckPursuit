@@ -58,31 +58,31 @@ Frontal area A = 0.84·W·H = 1.95 m²; Cd = 0.33 → **CdA = 0.644 m²**. Lift 
 
 ## Engine
 
-1.6 L DOHC 16-valve I4, naturally aspirated, two-stage variable cam (crossover ~5300 rpm). Class-typical specific output for a late-90s non-flagship high-rev 1.6 (~61 kW/L); the torque step at the cam crossover is the signature of owner dyno sheets for this engine family.
+1.6 L DOHC 16-valve I4, naturally aspirated, two-stage variable cam (crossover ~5300 rpm). Class-typical specific output for a late-90s high-rev 1.6 (~64 kW/L); the torque step at the cam crossover is the signature of owner dyno sheets for this engine family.
 
 | rpm | N·m | kW |
 |---|---|---|
-| 1000 | 93 | 9.7 |
-| 1500 | 106 | 16.7 |
-| 2000 | 117 | 24.5 |
-| 2500 | 124 | 32.5 |
-| 3000 | 129 | 40.5 |
-| 3500 | 132 | 48.4 |
-| 4000 | 134 | 56.1 |
-| 4500 | 135 | 63.6 |
-| 5000 | 134 | 70.2 |
-| 5500 | 142 | 81.8 |
-| 6000 | 144 | 90.5 |
-| 6500 | 141 | 96.0 |
-| 7000 | 133 | 97.5 |
-| 7600 | 118 | 93.9 |
-| 7900 | 104 | 86.0 |
+| 1000 | 98 | 10.3 |
+| 1500 | 112 | 17.6 |
+| 2000 | 123 | 25.8 |
+| 2500 | 131 | 34.3 |
+| 3000 | 136 | 42.7 |
+| 3500 | 139 | 50.9 |
+| 4000 | 141 | 59.1 |
+| 4500 | 142 | 66.9 |
+| 5000 | 141 | 73.8 |
+| 5500 | 150 | 86.4 |
+| 6000 | 152 | 95.5 |
+| 6500 | 148 | 100.7 |
+| 7000 | 140 | 102.6 |
+| 7600 | 124 | 98.7 |
+| 7900 | 110 | 91.0 |
 
-Peak **97 kW @ 7000 rpm**, **144 N·m @ 6000 rpm**. Idle 800 / redline 7600 / limiter 7900 rpm. Rotating inertia 0.10 kg·m² (class: 0.10 small four … 0.30 big-block). Engine braking 12% of peak torque = 17 N·m. Power-to-weight 87 kW/t.
+Peak **103 kW @ 7000 rpm**, **152 N·m @ 6000 rpm**. Idle 800 / redline 7600 / limiter 7900 rpm. Rotating inertia 0.10 kg·m² (class: 0.10 small four … 0.30 big-block). Engine braking 12% of peak torque = 18 N·m. Power-to-weight 91 kW/t.
 
 ## Drivetrain
 
-5-speed manual, open front differential. Layout **FWD**; front diff: open; rear diff: open. Clutch capacity 1.40 × peak torque = 200 N·m. Shift time 0.25 s.
+5-speed manual, open front differential. Layout **FWD**; front diff: open; rear diff: open. Clutch capacity 1.40 × peak torque = 210 N·m. Shift time 0.25 s.
 
 | Gear | Ratio | Overall | km/h @ redline |
 |---|---|---|---|
@@ -123,33 +123,29 @@ Full-pedal line pressure 100 bar.
 - Front: 262 mm disc, pistons per side 54 mm → A = 22.9 cm², r_eff = D/2 − 25 mm = 106 mm, pad μ = 0.38: T = 2·μ·p·A·r_eff = 2·0.38·100 bar·22.9 cm²·0.106 m = **1845 N·m**
 - Rear: 239 mm disc, pistons per side 34 mm → A = 9.1 cm², r_eff = D/2 − 25 mm = 94 mm, pad μ = 0.38: T = 2·μ·p·A·r_eff = 2·0.38·100 bar·9.1 cm²·0.095 m = **652 N·m**
 
-Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 1292 N·m/wheel (capacity 1.43×), rear needs 301 N·m/wheel (capacity 2.16×). `bias_front` = f + 0.9·h/L = 0.78 (ideal distribution at 0.9 g, clamped 0.55-0.78). Handbrake 600 N·m per rear wheel.
+Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 1292 N·m/wheel (capacity 1.43×), rear needs 301 N·m/wheel (capacity 2.16×).
+
+`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 432 N·m), never boosted above its caliper capacity. Rear capacity exceeds that, so `bias_front` = T_r/(T_r + ideal) = **0.601** → delivered 1850 N·m front / 432 N·m rear per wheel at full pedal. Handbrake 600 N·m per rear wheel.
 
 ## Steering
 
 Ratio 15.0:1. Kerb-to-kerb turning circle 10.0 m → outer-front path radius 4.90 m, rear-axle-centre radius 3.41 m → mean road-wheel lock δ = atan(L/R) = **0.656 rad (37.6°)** (outer 32.3°, inner 44.5° at full Ackermann; `ackermann_frac` 0.70). Rack speed 1.5 rad/s.
 
-## Estimated performance
+## Performance
 
-From `tools/specsheet/estimate.py` (point-mass model, intended tire compound; see `data/cars/VALIDATION.md` for the sim results and class targets).
+Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of the last run); estimate = `tools/specsheet/estimate.py` (point-mass model). Class targets and explanations of any miss: `data/cars/VALIDATION.md`.
 
-| 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
-|---|---|---|---|---|
-| 8.6 s | 209 km/h | 39.2 m | 0.95 g | 464 |
+|  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
+|---|---|---|---|---|---|
+| sim | 9.3 s | 206 km/h | 40.1 m | 0.90 g | — |
+| estimate | 8.1 s | 213 km/h | 37.5 m | 0.95 g | 477 |
 
 ## Damage lattice (`data/lattices/vireo_xs.json`)
 
-120 nodes, 704 beams, 3 detachables, 21 component mounts.
+271 nodes, 1778 beams, 8 detachables, 21 component mounts.
 
-- Generated with `gen-box-lattice --id vireo_xs --width 1.695 --length 4.18 --height 1.37 --wheelbase 2.62 --mass 247.5 --clearance 0.14` (22% of vehicle mass).
-- Shaped top layer to the `hatch` profile (hood/deck/bumper tops dropped to beltline, greenhouse narrowed to 86% width).
-- Beams: pillars + roof rails → hss 3.0e-04 m² (34 beams).
-- Beams: cabin cell → hss 3.5e-04 m² (88 beams).
-- Beams: sills → hss 4.0e-04 m² (6 beams).
-- Beams: crumple (outer) rail segments → hss 3.0e-04 m² (36 beams).
-- Beams: inner rail segments / firewall → hss 4.0e-04 m² (36 beams).
-- Beams: hood → mild_steel 1.5e-04 m² (16 beams).
-- Beams: outer panels → mild_steel 1.5e-04 m² (284 beams).
-- Components: radiator at row 8 ahead of the engine (fails first), transverse engine at row 7 with the gearbox on its left end, fuel tank under the rear seat.
-- Detachables: FrontBumper 3000 N·s / 6 kg, RearBumper 3000 N·s / 6 kg, Hood 5000 N·s / 15 kg.
-- Node mass: engine-mount nodes ×2.5, renormalised to 248 kg total.
+- Generated with `gen-lattice --id vireo_xs --profile hatch --width 1.695 --length 4.18 --height 1.37 --wheelbase 2.62 --mass 247.5 --car-mass 1125.0 --clearance 0.14 --front-overhang 0.85 --strength 0.9` (22% of vehicle mass in the lattice; strength from durability class 2).
+- Era `90s` passenger cell: 178 cabin/sill, 132 cross-member, 10 pillar, 20 roof rail → hss × 0.75 section.
+- Steel hood: 105 hood beams aluminum → mild_steel.
+- Detachables: steel bumpers ×2.3 break impulse / ×4 mass; steel hood ×1.4 / ×1.6.
+- Transverse engine: gearbox mounted on the left end of the engine block (gen-lattice places it in the tunnel at the firewall, as for FR).

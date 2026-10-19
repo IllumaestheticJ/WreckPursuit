@@ -58,7 +58,7 @@
       "radius_m": 0.353,
       "width_m": 0.225,
       "mass_kg": 26.0,
-      "tire_id": "street",
+      "tire_id": "police_pursuit",
       "steerable": true,
       "max_steer_rad": 0.631,
       "ackermann_frac": 0.6,
@@ -71,7 +71,7 @@
       "radius_m": 0.353,
       "width_m": 0.225,
       "mass_kg": 26.0,
-      "tire_id": "street",
+      "tire_id": "police_pursuit",
       "steerable": true,
       "max_steer_rad": 0.631,
       "ackermann_frac": 0.6,
@@ -84,7 +84,7 @@
       "radius_m": 0.353,
       "width_m": 0.225,
       "mass_kg": 28.0,
-      "tire_id": "street",
+      "tire_id": "police_pursuit",
       "steerable": false,
       "max_steer_rad": 0.0,
       "ackermann_frac": 0.0,
@@ -97,7 +97,7 @@
       "radius_m": 0.353,
       "width_m": 0.225,
       "mass_kg": 28.0,
-      "tire_id": "street",
+      "tire_id": "police_pursuit",
       "steerable": false,
       "max_steer_rad": 0.0,
       "ackermann_frac": 0.0,
@@ -145,9 +145,9 @@
     }
   ],
   "brakes": {
-    "max_torque_front_nm": 5770.0,
-    "max_torque_rear_nm": 1790.0,
-    "bias_front": 0.69,
+    "max_torque_front_nm": 4110.0,
+    "max_torque_rear_nm": 1280.0,
+    "bias_front": 0.5,
     "handbrake_rear_nm": 1440.0
   },
   "steering": {

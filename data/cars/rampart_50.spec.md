@@ -102,7 +102,7 @@ Final drive 3.55, reverse 3.53. Speeds use the driven-wheel loaded radius 0.341 
 | Front | 255/40R19 | 255 mm | 0.3433 m | 0.333 m | 26 kg |
 | Rear | 275/40R19 | 275 mm | 0.3513 m | 0.341 m | 28 kg |
 
-Unloaded r = rim/2 + width·aspect; loaded r = 0.97 × unloaded (static deflection). Compound: intended compound **`sport`** — no `data/tires/sport.json` yet, so the JSON uses `street`; re-run the build when the file lands.
+Unloaded r = rim/2 + width·aspect; loaded r = 0.97 × unloaded (static deflection). Compound: `sport`.
 
 ## Suspension
 
@@ -124,33 +124,28 @@ Full-pedal line pressure 100 bar.
 - Front: 380 mm disc, pistons per side 46 mm + 40 mm + 36 mm → A = 39.4 cm², r_eff = D/2 − 25 mm = 165 mm, pad μ = 0.42: T = 2·μ·p·A·r_eff = 2·0.42·100 bar·39.4 cm²·0.165 m = **5456 N·m**
 - Rear: 330 mm disc, pistons per side 45 mm → A = 15.9 cm², r_eff = D/2 − 25 mm = 140 mm, pad μ = 0.4: T = 2·μ·p·A·r_eff = 2·0.4·100 bar·15.9 cm²·0.140 m = **1781 N·m**
 
-Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 2099 N·m/wheel (capacity 2.60×), rear needs 819 N·m/wheel (capacity 2.17×). `bias_front` = f + 0.9·h/L = 0.71 (ideal distribution at 0.9 g, clamped 0.55-0.78). Handbrake 1430 N·m per rear wheel.
+ABS ceiling: caliper capacity 5456 / 1781 N·m exceeds 1.5 × the front lock torque on this car's tire (peak μ 1.20), which `wp_vehicle`'s ABS cannot modulate (it releases to a fraction of the commanded torque, so an oversized caliper keeps the wheel locked). Both axles scaled by 0.69 → **3780 / 1230 N·m**. Remove when 02's ABS modulates relative to lock torque.
+
+Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 2099 N·m/wheel (capacity 1.80×), rear needs 819 N·m/wheel (capacity 1.50×).
+
+`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 1476 N·m), never boosted above its caliper capacity. Rear capacity is below that (hardware-limited rear), so `bias_front` = **0.5**: both axles get full caliper torque → delivered 3780 N·m front / 1230 N·m rear per wheel at full pedal. Handbrake 1430 N·m per rear wheel.
 
 ## Steering
 
 Ratio 15.7:1. Kerb-to-kerb turning circle 11.6 m → outer-front path radius 5.67 m, rear-axle-centre radius 4.19 m → mean road-wheel lock δ = atan(L/R) = **0.576 rad (33.0°)** (outer 28.7°, inner 38.7° at full Ackermann; `ackermann_frac` 0.60). Rack speed 1.4 rad/s.
 
-## Estimated performance
+## Performance
 
-From `tools/specsheet/estimate.py` (point-mass model, intended tire compound; see `data/cars/VALIDATION.md` for the sim results and class targets).
+Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of the last run); estimate = `tools/specsheet/estimate.py` (point-mass model). Class targets and explanations of any miss: `data/cars/VALIDATION.md`.
 
-| 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
-|---|---|---|---|---|
-| 5.6 s | 275 km/h | 37.3 m | 0.96 g | 606 |
+|  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
+|---|---|---|---|---|---|
+| sim | 5.9 s | 271 km/h | 39.0 m | 0.87 g | — |
+| estimate | 5.4 s | 276 km/h | 36.1 m | 0.96 g | 616 |
 
 ## Damage lattice (`data/lattices/rampart_50.json`)
 
-120 nodes, 704 beams, 3 detachables, 21 component mounts.
+276 nodes, 1768 beams, 6 detachables, 21 component mounts.
 
-- Generated with `gen-box-lattice --id rampart_50 --width 1.92 --length 4.78 --height 1.38 --wheelbase 2.72 --mass 390.5 --clearance 0.13` (22% of vehicle mass).
-- Shaped top layer to the `coupe` profile (hood/deck/bumper tops dropped to beltline, greenhouse narrowed to 86% width).
-- Beams: pillars + roof rails → hss 7.0e-04 m² (34 beams).
-- Beams: cabin cell → hss 6.5e-04 m² (88 beams).
-- Beams: sills → hss 6.0e-04 m² (6 beams).
-- Beams: crumple (outer) rail segments → hss 2.0e-04 m² (36 beams).
-- Beams: inner rail segments / firewall → hss 5.0e-04 m² (36 beams).
-- Beams: hood → aluminum 1.5e-4 m² (16 beams).
-- Beams: outer panels → mild_steel 1.5e-04 m² (284 beams).
-- Components: radiator at row 8 ahead of the engine (fails first), longitudinal engine at row 7, gearbox in the tunnel, prop shaft to the rear axle, fuel tank ahead of the rear axle.
-- Detachables: FrontBumper 3000 N·s / 6 kg, RearBumper 3000 N·s / 6 kg, Hood 3500 N·s / 9 kg.
-- Node mass: engine-mount nodes ×2.5, renormalised to 390 kg total.
+- Generated with `gen-lattice --id rampart_50 --profile coupe --width 1.92 --length 4.78 --height 1.38 --wheelbase 2.72 --mass 390.5 --car-mass 1775.0 --clearance 0.13 --front-overhang 0.95 --strength 1.0` (22% of vehicle mass in the lattice; strength from durability class 3).
+- Era `2010s`: gen-lattice's default HSS passenger cell kept as is.

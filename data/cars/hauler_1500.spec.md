@@ -121,40 +121,31 @@ Full-pedal line pressure 100 bar.
 - Front: 330 mm disc, pistons per side 54 mm + 54 mm → A = 45.8 cm², r_eff = D/2 − 25 mm = 140 mm, pad μ = 0.4: T = 2·μ·p·A·r_eff = 2·0.4·100 bar·45.8 cm²·0.140 m = **5130 N·m**
 - Rear: 345 mm disc, pistons per side 54 mm → A = 22.9 cm², r_eff = D/2 − 25 mm = 148 mm, pad μ = 0.4: T = 2·μ·p·A·r_eff = 2·0.4·100 bar·22.9 cm²·0.147 m = **2702 N·m**
 
-Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 3591 N·m/wheel (capacity 1.43×), rear needs 1087 N·m/wheel (capacity 2.48×). `bias_front` = f + 0.9·h/L = 0.75 (ideal distribution at 0.9 g, clamped 0.55-0.78). Handbrake 1620 N·m per rear wheel.
+Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 3591 N·m/wheel (capacity 1.43×), rear needs 1087 N·m/wheel (capacity 2.48×).
+
+`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 1554 N·m), never boosted above its caliper capacity. Rear capacity exceeds that, so `bias_front` = T_r/(T_r + ideal) = **0.635** → delivered 5130 N·m front / 1552 N·m rear per wheel at full pedal. Handbrake 1620 N·m per rear wheel.
 
 ## Steering
 
 Ratio 17.5:1. Kerb-to-kerb turning circle 14.0 m → outer-front path radius 6.87 m, rear-axle-centre radius 4.95 m → mean road-wheel lock δ = atan(L/R) = **0.635 rad (36.4°)** (outer 32.1°, inner 41.8° at full Ackermann; `ackermann_frac` 0.70). Rack speed 1.2 rad/s.
 
-## Estimated performance
+## Performance
 
-From `tools/specsheet/estimate.py` (point-mass model, intended tire compound; see `data/cars/VALIDATION.md` for the sim results and class targets).
+Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of the last run); estimate = `tools/specsheet/estimate.py` (point-mass model). Class targets and explanations of any miss: `data/cars/VALIDATION.md`.
 
-| 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
-|---|---|---|---|---|
-| 8.4 s | 221 km/h | 48.7 m | 0.70 g | 429 |
+|  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
+|---|---|---|---|---|---|
+| sim | 9.0 s | 204 km/h | 43.9 m | 0.67 g | — |
+| estimate | 8.1 s | 221 km/h | 46.6 m | 0.70 g | 436 |
 
 ## Damage lattice (`data/lattices/hauler_1500.json`)
 
-120 nodes, 704 beams, 3 detachables, 21 component mounts.
+303 nodes, 1857 beams, 6 detachables, 21 component mounts.
 
-- Generated with `gen-box-lattice --id hauler_1500 --width 2.03 --length 5.85 --height 1.88 --wheelbase 3.645 --mass 544.5 --clearance 0.22` (22% of vehicle mass).
-- Shaped top layer to the `truck` profile (hood/deck/bumper tops dropped to beltline, greenhouse narrowed to 86% width).
-- Pickup: rows 1-3 above the frame relabelled as the bed (Trunk = bed + tailgate, quarters = bed sides); cab is rows 4-6.
-- Body-on-frame: the two inner bottom node lines (rows 1-8) are the ladder frame (FrameLeft / FrameRight).
-- Beams: pillars + roof rails → hss 7.0e-04 m² (18 beams).
-- Beams: cabin cell → hss 6.5e-04 m² (41 beams).
-- Beams: sills → hss 6.0e-04 m² (30 beams).
-- Beams: crumple (outer) rail segments → hss 2.0e-04 m² (5 beams).
-- Beams: inner rail segments / firewall → hss 5.0e-04 m² (5 beams).
-- Beams: ladder frame rails → hss 1.2e-03 m² (14 beams).
-- Beams: ladder cross-members → hss 6.0e-04 m² (8 beams).
-- Beams: ladder diagonals → hss 4.0e-04 m² (14 beams).
-- Beams: bumpers → mild_steel 4.0e-04 m² (steel bumpers) (150 beams).
-- Beams: hood → mild_steel 1.5e-04 m² (16 beams).
-- Beams: outer panels → mild_steel 1.5e-04 m² (294 beams).
-- Components: radiator ahead of the engine, longitudinal engine, gearbox in the tunnel, prop shaft to the rear axle, side-saddle fuel tank outboard of the left frame rail.
-- Frame-mounted suspension: mounts tolerate 0.08 m before failing (vs 0.05).
-- Detachables: FrontBumper 9000 N·s / 30 kg, RearBumper 9000 N·s / 30 kg, Hood 7000 N·s / 28 kg.
-- Node mass: engine-mount nodes ×2.5, renormalised to 544 kg total.
+- Generated with `gen-lattice --id hauler_1500 --profile truck --width 2.03 --length 5.85 --height 1.88 --wheelbase 3.645 --mass 544.5 --car-mass 2475.0 --clearance 0.22 --front-overhang 0.95 --strength 1.3` (22% of vehicle mass in the lattice; strength from durability class 5).
+- Era `2010s`: gen-lattice's default HSS passenger cell kept as is.
+- Steel hood: 159 hood beams aluminum → mild_steel.
+- Chrome steel bumpers: 180 bumper beams pp_bumper → mild_steel.
+- Detachables: steel bumpers ×2.3 break impulse / ×4 mass; steel hood ×1.4 / ×1.6.
+- Body-on-frame: 16 cab-floor rail nodes relabelled FrameLeft/FrameRight; 14 under-cab rail beams → hss 3.91e-04 m² so the ladder frame runs bumper to bumper.
+- Side-saddle fuel tank outboard of the left frame rail between cab and rear axle.

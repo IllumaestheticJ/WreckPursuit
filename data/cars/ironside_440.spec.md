@@ -119,35 +119,31 @@ Full-pedal line pressure 65 bar.
 - Front: 279 mm disc, pistons per side 70 mm → A = 38.5 cm², r_eff = D/2 − 25 mm = 115 mm, pad μ = 0.3: T = 2·μ·p·A·r_eff = 2·0.3·65 bar·38.5 cm²·0.115 m = **1719 N·m**
 - Rear: 279 mm leading/trailing drum, wheel cylinder 22.2 mm → A = 3.87 cm², drum radius 140 mm, brake factor 1.8 (includes lining μ): T = BF·p·A·r = **632 N·m**
 
-Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 2175 N·m/wheel (capacity 0.79×), rear needs 739 N·m/wheel (capacity 0.85×). `bias_front` = f + 0.9·h/L = 0.73 (ideal distribution at 0.9 g, clamped 0.55-0.78). Handbrake 600 N·m per rear wheel.
+Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 2175 N·m/wheel (capacity 0.79×), rear needs 739 N·m/wheel (capacity 0.85×).
+
+`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 584 N·m), never boosted above its caliper capacity. Rear capacity exceeds that, so `bias_front` = T_r/(T_r + ideal) = **0.519** → delivered 1720 N·m front / 584 N·m rear per wheel at full pedal. Handbrake 600 N·m per rear wheel.
 
 ## Steering
 
 Ratio 19.0:1. Kerb-to-kerb turning circle 12.8 m → outer-front path radius 6.28 m, rear-axle-centre radius 4.79 m → mean road-wheel lock δ = atan(L/R) = **0.552 rad (31.6°)** (outer 28.0°, inner 36.2° at full Ackermann; `ackermann_frac` 0.80). Rack speed 1.0 rad/s.
 
-## Estimated performance
+## Performance
 
-From `tools/specsheet/estimate.py` (point-mass model, intended tire compound; see `data/cars/VALIDATION.md` for the sim results and class targets).
+Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of the last run); estimate = `tools/specsheet/estimate.py` (point-mass model). Class targets and explanations of any miss: `data/cars/VALIDATION.md`.
 
-| 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
-|---|---|---|---|---|
-| 7.9 s | 221 km/h | 50.5 m | 0.74 g | 450 |
+|  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
+|---|---|---|---|---|---|
+| sim | 7.2 s | 212 km/h | 52.5 m | 0.74 g | — |
+| estimate | 7.6 s | 221 km/h | 49.7 m | 0.74 g | 459 |
 
 ## Damage lattice (`data/lattices/ironside_440.json`)
 
-120 nodes, 704 beams, 3 detachables, 21 component mounts.
+302 nodes, 1930 beams, 6 detachables, 21 component mounts.
 
-- Generated with `gen-box-lattice --id ironside_440 --width 1.95 --length 5.2 --height 1.35 --wheelbase 2.95 --mass 414.0 --clearance 0.15` (24% of vehicle mass).
-- Shaped top layer to the `coupe` profile (hood/deck/bumper tops dropped to beltline, greenhouse narrowed to 86% width).
-- Beams: pillars + roof rails → mild_steel 2.0e-04 m² (34 beams).
-- Beams: cabin cell → mild_steel 2.5e-04 m² (88 beams).
-- Beams: sills → mild_steel 3.0e-04 m² (6 beams).
-- Beams: crumple (outer) rail segments → mild_steel 4.0e-04 m² (36 beams).
-- Beams: inner rail segments / firewall → mild_steel 4.0e-04 m² (36 beams).
-- Beams: bumpers → mild_steel 4.0e-04 m² (steel bumpers) (150 beams).
-- Beams: hood → mild_steel 2.2e-04 m² (16 beams).
-- Beams: outer panels → mild_steel 2.2e-04 m² (284 beams).
-- Components: radiator ahead of the engine, longitudinal front engine, gearbox in the tunnel, prop shaft to the live axle, period fuel tank behind the rear axle under the trunk floor (fails early in rear hits).
-- Live axle: rear suspension mounts fail at 0.03 m intrusion and rear wheels detach at 0.06 m (spring hangers tear out of the floor).
-- Detachables: FrontBumper 7000 N·s / 22 kg, RearBumper 7000 N·s / 22 kg, Hood 7000 N·s / 28 kg.
-- Node mass: engine-mount nodes ×2.5, renormalised to 414 kg total.
+- Generated with `gen-lattice --id ironside_440 --profile coupe --width 1.95 --length 5.2 --height 1.35 --wheelbase 2.95 --mass 414.0 --car-mass 1725.0 --clearance 0.15 --front-overhang 1.0 --strength 1.15` (24% of vehicle mass in the lattice; strength from durability class 4).
+- Era `70s` passenger cell: 150 cabin/sill, 131 cross-member, 12 door beam, 10 pillar, 14 roof rail → mild_steel × 1.00 section (no door intrusion beams: × 0.5).
+- Steel hood: 159 hood beams aluminum → mild_steel.
+- Chrome steel bumpers: 180 bumper beams pp_bumper → mild_steel.
+- Detachables: steel bumpers ×2.3 break impulse / ×4 mass; steel hood ×1.4 / ×1.6.
+- Period fuel tank behind the rear axle under the trunk floor (fails at 0.08 m).
+- Live axle: rear suspension mounts fail at 0.04 m (vs 0.09) and rear wheels detach at 0.07 m (vs 0.15) — spring hangers tear out of the floor.

@@ -60,7 +60,7 @@
       "radius_m": 0.32,
       "width_m": 0.225,
       "mass_kg": 23.0,
-      "tire_id": "street",
+      "tire_id": "sport",
       "steerable": true,
       "max_steer_rad": 0.612,
       "ackermann_frac": 0.55,
@@ -73,7 +73,7 @@
       "radius_m": 0.32,
       "width_m": 0.225,
       "mass_kg": 23.0,
-      "tire_id": "street",
+      "tire_id": "sport",
       "steerable": true,
       "max_steer_rad": 0.612,
       "ackermann_frac": 0.55,
@@ -86,7 +86,7 @@
       "radius_m": 0.321,
       "width_m": 0.255,
       "mass_kg": 25.0,
-      "tire_id": "street",
+      "tire_id": "sport",
       "steerable": false,
       "max_steer_rad": 0.0,
       "ackermann_frac": 0.0,
@@ -99,7 +99,7 @@
       "radius_m": 0.321,
       "width_m": 0.255,
       "mass_kg": 25.0,
-      "tire_id": "street",
+      "tire_id": "sport",
       "steerable": false,
       "max_steer_rad": 0.0,
       "ackermann_frac": 0.0,
@@ -147,9 +147,9 @@
     }
   ],
   "brakes": {
-    "max_torque_front_nm": 3270.0,
-    "max_torque_rear_nm": 1540.0,
-    "bias_front": 0.66,
+    "max_torque_front_nm": 3130.0,
+    "max_torque_rear_nm": 1480.0,
+    "bias_front": 0.503,
     "handbrake_rear_nm": 1230.0
   },
   "steering": {

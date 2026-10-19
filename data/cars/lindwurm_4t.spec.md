@@ -100,7 +100,7 @@ Final drive 3.65, reverse 3.00. Speeds use the driven-wheel loaded radius 0.309 
 | Front | 225/40R18 | 225 mm | 0.3186 m | 0.309 m | 22 kg |
 | Rear | 225/40R18 | 225 mm | 0.3186 m | 0.309 m | 22 kg |
 
-Unloaded r = rim/2 + width·aspect; loaded r = 0.97 × unloaded (static deflection). Compound: intended compound **`sport`** — no `data/tires/sport.json` yet, so the JSON uses `street`; re-run the build when the file lands.
+Unloaded r = rim/2 + width·aspect; loaded r = 0.97 × unloaded (static deflection). Compound: `sport`.
 
 ## Suspension
 
@@ -122,33 +122,31 @@ Full-pedal line pressure 100 bar.
 - Front: 340 mm disc, pistons per side 60 mm → A = 28.3 cm², r_eff = D/2 − 25 mm = 145 mm, pad μ = 0.42: T = 2·μ·p·A·r_eff = 2·0.42·100 bar·28.3 cm²·0.145 m = **3444 N·m**
 - Rear: 310 mm disc, pistons per side 41 mm → A = 13.2 cm², r_eff = D/2 − 25 mm = 130 mm, pad μ = 0.4: T = 2·μ·p·A·r_eff = 2·0.4·100 bar·13.2 cm²·0.130 m = **1373 N·m**
 
-Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 1905 N·m/wheel (capacity 1.81×), rear needs 483 N·m/wheel (capacity 2.84×). `bias_front` = f + 0.9·h/L = 0.78 (ideal distribution at 0.9 g, clamped 0.55-0.78). Handbrake 1100 N·m per rear wheel.
+ABS ceiling: caliper capacity 3444 / 1373 N·m exceeds 1.5 × the front lock torque on this car's tire (peak μ 1.20), which `wp_vehicle`'s ABS cannot modulate (it releases to a fraction of the commanded torque, so an oversized caliper keeps the wheel locked). Both axles scaled by 1.00 → **3430 / 1370 N·m**. Remove when 02's ABS modulates relative to lock torque.
+
+Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 1905 N·m/wheel (capacity 1.80×), rear needs 483 N·m/wheel (capacity 2.84×).
+
+`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 870 N·m), never boosted above its caliper capacity. Rear capacity exceeds that, so `bias_front` = T_r/(T_r + ideal) = **0.612** → delivered 3430 N·m front / 869 N·m rear per wheel at full pedal. Handbrake 1100 N·m per rear wheel.
 
 ## Steering
 
 Ratio 13.6:1. Kerb-to-kerb turning circle 10.9 m → outer-front path radius 5.34 m, rear-axle-centre radius 3.88 m → mean road-wheel lock δ = atan(L/R) = **0.596 rad (34.2°)** (outer 29.5°, inner 40.2° at full Ackermann; `ackermann_frac` 0.60). Rack speed 1.7 rad/s.
 
-## Estimated performance
+## Performance
 
-From `tools/specsheet/estimate.py` (point-mass model, intended tire compound; see `data/cars/VALIDATION.md` for the sim results and class targets).
+Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of the last run); estimate = `tools/specsheet/estimate.py` (point-mass model). Class targets and explanations of any miss: `data/cars/VALIDATION.md`.
 
-| 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
-|---|---|---|---|---|
-| 5.3 s | 258 km/h | 37.3 m | 0.97 g | 616 |
+|  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
+|---|---|---|---|---|---|
+| sim | 5.4 s | 260 km/h | 37.5 m | 0.93 g | — |
+| estimate | 5.3 s | 258 km/h | 36.1 m | 0.97 g | 616 |
 
 ## Damage lattice (`data/lattices/lindwurm_4t.json`)
 
-120 nodes, 704 beams, 3 detachables, 21 component mounts.
+271 nodes, 1778 beams, 8 detachables, 21 component mounts.
 
-- Generated with `gen-box-lattice --id lindwurm_4t --width 1.8 --length 4.28 --height 1.44 --wheelbase 2.63 --mass 346.5 --clearance 0.13` (22% of vehicle mass).
-- Shaped top layer to the `hatch` profile (hood/deck/bumper tops dropped to beltline, greenhouse narrowed to 86% width).
-- Beams: pillars + roof rails → hss 7.0e-04 m² (34 beams).
-- Beams: cabin cell → hss 6.5e-04 m² (88 beams).
-- Beams: sills → hss 6.0e-04 m² (6 beams).
-- Beams: crumple (outer) rail segments → hss 2.0e-04 m² (36 beams).
-- Beams: inner rail segments / firewall → hss 5.0e-04 m² (36 beams).
-- Beams: hood → mild_steel 1.5e-04 m² (16 beams).
-- Beams: outer panels → mild_steel 1.5e-04 m² (284 beams).
-- Components: radiator at row 8 ahead of the engine (fails first), transverse engine at row 7 with the gearbox on its left end, fuel tank under the rear seat; prop shaft to the rear coupling under the floor.
-- Detachables: FrontBumper 3000 N·s / 6 kg, RearBumper 3000 N·s / 6 kg, Hood 5000 N·s / 15 kg.
-- Node mass: engine-mount nodes ×2.5, renormalised to 346 kg total.
+- Generated with `gen-lattice --id lindwurm_4t --profile hatch --width 1.8 --length 4.28 --height 1.44 --wheelbase 2.63 --mass 346.5 --car-mass 1575.0 --clearance 0.13 --front-overhang 0.9 --strength 1.0` (22% of vehicle mass in the lattice; strength from durability class 3).
+- Era `2010s`: gen-lattice's default HSS passenger cell kept as is.
+- Steel hood: 105 hood beams aluminum → mild_steel.
+- Detachables: steel bumpers ×2.3 break impulse / ×4 mass; steel hood ×1.4 / ×1.6.
+- Transverse engine: gearbox mounted on the left end of the engine block (gen-lattice places it in the tunnel at the firewall, as for FR).

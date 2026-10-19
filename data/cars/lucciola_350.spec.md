@@ -102,7 +102,7 @@ Final drive 4.30, reverse 2.92. Speeds use the driven-wheel loaded radius 0.325 
 | Front | 225/40R18 | 225 mm | 0.3186 m | 0.309 m | 20 kg |
 | Rear | 265/40R18 | 265 mm | 0.3346 m | 0.325 m | 24 kg |
 
-Unloaded r = rim/2 + width·aspect; loaded r = 0.97 × unloaded (static deflection). Compound: intended compound **`sport`** — no `data/tires/sport.json` yet, so the JSON uses `street`; re-run the build when the file lands.
+Unloaded r = rim/2 + width·aspect; loaded r = 0.97 × unloaded (static deflection). Compound: `sport`.
 
 ## Suspension
 
@@ -124,35 +124,30 @@ Full-pedal line pressure 100 bar.
 - Front: 330 mm disc, pistons per side 40 mm + 40 mm → A = 25.1 cm², r_eff = D/2 − 25 mm = 140 mm, pad μ = 0.45: T = 2·μ·p·A·r_eff = 2·0.45·100 bar·25.1 cm²·0.140 m = **3167 N·m**
 - Rear: 310 mm disc, pistons per side 36 mm + 36 mm → A = 20.4 cm², r_eff = D/2 − 25 mm = 130 mm, pad μ = 0.42: T = 2·μ·p·A·r_eff = 2·0.42·100 bar·20.4 cm²·0.130 m = **2223 N·m**
 
-Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 1224 N·m/wheel (capacity 2.59×), rear needs 903 N·m/wheel (capacity 2.46×). `bias_front` = f + 0.9·h/L = 0.57 (ideal distribution at 0.9 g, clamped 0.55-0.78). Handbrake 1330 N·m per rear wheel.
+ABS ceiling: caliper capacity 3167 / 2223 N·m exceeds 1.5 × the front lock torque on this car's tire (peak μ 1.20), which `wp_vehicle`'s ABS cannot modulate (it releases to a fraction of the commanded torque, so an oversized caliper keeps the wheel locked). Both axles scaled by 0.70 → **2200 / 1550 N·m**. Remove when 02's ABS modulates relative to lock torque.
+
+Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 1224 N·m/wheel (capacity 1.80×), rear needs 903 N·m/wheel (capacity 1.72×).
+
+`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 1623 N·m), never boosted above its caliper capacity. Rear capacity is below that (hardware-limited rear), so `bias_front` = **0.5**: both axles get full caliper torque → delivered 2200 N·m front / 1550 N·m rear per wheel at full pedal. Handbrake 1330 N·m per rear wheel.
 
 ## Steering
 
 Ratio 16.0:1. Kerb-to-kerb turning circle 11.8 m → outer-front path radius 5.79 m, rear-axle-centre radius 4.49 m → mean road-wheel lock δ = atan(L/R) = **0.500 rad (28.6°)** (outer 25.0°, inner 33.3° at full Ackermann; `ackermann_frac` 0.50). Rack speed 1.6 rad/s.
 
-## Estimated performance
+## Performance
 
-From `tools/specsheet/estimate.py` (point-mass model, intended tire compound; see `data/cars/VALIDATION.md` for the sim results and class targets).
+Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of the last run); estimate = `tools/specsheet/estimate.py` (point-mass model). Class targets and explanations of any miss: `data/cars/VALIDATION.md`.
 
-| 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
-|---|---|---|---|---|
-| 4.5 s | 297 km/h | 35.3 m | 1.02 g | 697 |
+|  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
+|---|---|---|---|---|---|
+| sim | 4.7 s | 291 km/h | 36.4 m | 0.95 g | — |
+| estimate | 4.4 s | 297 km/h | 34.0 m | 1.01 g | 709 |
 
 ## Damage lattice (`data/lattices/lucciola_350.json`)
 
-120 nodes, 704 beams, 3 detachables, 21 component mounts.
+263 nodes, 1691 beams, 6 detachables, 21 component mounts.
 
-- Generated with `gen-box-lattice --id lucciola_350 --width 1.9 --length 4.25 --height 1.17 --wheelbase 2.45 --mass 275.0 --clearance 0.11` (20% of vehicle mass).
-- Shaped top layer to the `mr` profile (hood/deck/bumper tops dropped to beltline, greenhouse narrowed to 86% width).
-- Mid-engine: rows 2-3 between the rails relabelled FrameRear (engine bay behind the firewall); cabin is rows 4-6 only.
-- Beams: pillars + roof rails → hss 3.0e-04 m² (26 beams).
-- Beams: cabin cell → hss 3.5e-04 m² (64 beams).
-- Beams: sills → hss 4.0e-04 m² (6 beams).
-- Beams: crumple (outer) rail segments → hss 3.0e-04 m² (18 beams).
-- Beams: inner rail segments / firewall → hss 4.0e-04 m² (18 beams).
-- Beams: rear subframe / engine bay → aluminum 2.5e-4 m² (sacrificial) (54 beams).
-- Beams: hood → aluminum 1.5e-4 m² (16 beams).
-- Beams: outer panels → aluminum 2.0e-4 m² (286 beams).
-- Components: engine + gearbox behind the cabin (rows 1-3), radiators and battery in the nose, side fuel tanks behind the seats; engine/gearbox fail early (0.12 / 0.08 m) — the rear is sacrificial.
-- Detachables: FrontBumper 3000 N·s / 6 kg, RearBumper 3000 N·s / 6 kg, Hood 3500 N·s / 9 kg.
-- Node mass: engine-mount nodes ×2.5, renormalised to 275 kg total.
+- Generated with `gen-lattice --id lucciola_350 --profile coupe --width 1.9 --length 4.25 --height 1.17 --wheelbase 2.45 --mass 275.0 --car-mass 1375.0 --clearance 0.11 --front-overhang 0.85 --strength 0.8` (20% of vehicle mass in the lattice; strength from durability class 1).
+- Era `90s` passenger cell: 150 cabin/sill, 131 cross-member, 10 pillar, 14 roof rail → hss × 0.75 section.
+- Aluminium body: 584 outer-panel beams mild_steel → aluminum.
+- Mid-engine: engine block moved behind the cabin bulkhead (y -0.92…-1.57 m), mounted to the rear rails and the bulkhead; 10 nodes behind the bulkhead relabelled FrameRear (engine bay, not cabin); 166 rear-subframe beams → aluminum ×1.5 section (sacrificial); gearbox and half-shafts at the rear axle, side fuel tanks at the sills behind the seats; engine fails at 0.12 m, gearbox 0.08 m.

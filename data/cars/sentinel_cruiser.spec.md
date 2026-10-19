@@ -99,7 +99,7 @@ Final drive 3.07, reverse 3.16. Speeds use the driven-wheel loaded radius 0.353 
 | Front | 225/60R18 | 225 mm | 0.3636 m | 0.353 m | 26 kg |
 | Rear | 225/60R18 | 225 mm | 0.3636 m | 0.353 m | 28 kg |
 
-Unloaded r = rim/2 + width·aspect; loaded r = 0.97 × unloaded (static deflection). Compound: intended compound **`police_pursuit`** — no `data/tires/police_pursuit.json` yet, so the JSON uses `street`; re-run the build when the file lands.
+Unloaded r = rim/2 + width·aspect; loaded r = 0.97 × unloaded (static deflection). Compound: `police_pursuit`.
 
 ## Suspension
 
@@ -121,34 +121,31 @@ Full-pedal line pressure 100 bar.
 - Front: 350 mm disc, pistons per side 54 mm + 54 mm → A = 45.8 cm², r_eff = D/2 − 25 mm = 150 mm, pad μ = 0.42: T = 2·μ·p·A·r_eff = 2·0.42·100 bar·45.8 cm²·0.150 m = **5771 N·m**
 - Rear: 345 mm disc, pistons per side 44 mm → A = 15.2 cm², r_eff = D/2 − 25 mm = 148 mm, pad μ = 0.4: T = 2·μ·p·A·r_eff = 2·0.4·100 bar·15.2 cm²·0.147 m = **1794 N·m**
 
-Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 2405 N·m/wheel (capacity 2.40×), rear needs 1012 N·m/wheel (capacity 1.77×). `bias_front` = f + 0.9·h/L = 0.69 (ideal distribution at 0.9 g, clamped 0.55-0.78). Handbrake 1440 N·m per rear wheel.
+ABS ceiling: caliper capacity 5771 / 1794 N·m exceeds 1.5 × the front lock torque on this car's tire (peak μ 1.14), which `wp_vehicle`'s ABS cannot modulate (it releases to a fraction of the commanded torque, so an oversized caliper keeps the wheel locked). Both axles scaled by 0.71 → **4110 / 1280 N·m**. Remove when 02's ABS modulates relative to lock torque.
+
+Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 2405 N·m/wheel (capacity 1.71×), rear needs 1012 N·m/wheel (capacity 1.26×).
+
+`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 1730 N·m), never boosted above its caliper capacity. Rear capacity is below that (hardware-limited rear), so `bias_front` = **0.5**: both axles get full caliper torque → delivered 4110 N·m front / 1280 N·m rear per wheel at full pedal. Handbrake 1440 N·m per rear wheel.
 
 ## Steering
 
 Ratio 16.5:1. Kerb-to-kerb turning circle 11.9 m → outer-front path radius 5.84 m, rear-axle-centre radius 4.18 m → mean road-wheel lock δ = atan(L/R) = **0.631 rad (36.1°)** (outer 31.5°, inner 42.1° at full Ackermann; `ackermann_frac` 0.60). Rack speed 1.3 rad/s.
 
-## Estimated performance
+## Performance
 
-From `tools/specsheet/estimate.py` (point-mass model, intended tire compound; see `data/cars/VALIDATION.md` for the sim results and class targets).
+Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of the last run); estimate = `tools/specsheet/estimate.py` (point-mass model). Class targets and explanations of any miss: `data/cars/VALIDATION.md`.
 
-| 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
-|---|---|---|---|---|
-| 8.0 s | 241 km/h | 39.9 m | 0.89 g | 481 |
+|  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
+|---|---|---|---|---|---|
+| sim | 8.7 s | 236 km/h | 40.1 m | 0.83 g | — |
+| estimate | 8.0 s | 241 km/h | 37.4 m | 0.92 g | 486 |
 
 ## Damage lattice (`data/lattices/sentinel_cruiser.json`)
 
-124 nodes, 714 beams, 4 detachables, 21 component mounts.
+304 nodes, 1923 beams, 9 detachables, 21 component mounts.
 
-- Generated with `gen-box-lattice --id sentinel_cruiser --width 1.91 --length 5.08 --height 1.48 --wheelbase 3.05 --mass 434.5 --clearance 0.14` (22% of vehicle mass).
-- Shaped top layer to the `sedan` profile (hood/deck/bumper tops dropped to beltline, greenhouse narrowed to 86% width).
-- Beams: pillars + roof rails → hss 7.0e-04 m² (34 beams).
-- Beams: cabin cell → hss 6.5e-04 m² (88 beams).
-- Beams: sills → hss 6.0e-04 m² (6 beams).
-- Beams: crumple (outer) rail segments → hss 2.0e-04 m² (36 beams).
-- Beams: inner rail segments / firewall → hss 5.0e-04 m² (36 beams).
-- Beams: hood → mild_steel 1.5e-04 m² (16 beams).
-- Beams: outer panels → mild_steel 1.5e-04 m² (284 beams).
-- Components: radiator at row 8 ahead of the engine (fails first), longitudinal engine at row 7, gearbox in the tunnel, prop shaft to the rear axle, fuel tank ahead of the rear axle.
-- Detachables: FrontBumper 3000 N·s / 6 kg, RearBumper 3000 N·s / 6 kg, Hood 5000 N·s / 15 kg.
-- Push bar: 4 extra FrontBumper nodes 0.10 m ahead of the bumper (z 0.35/0.8 m), hss 8.0e-04 m² tubes, bolted to the row-8 rail nodes through the bumper; detachable group 3 breaks at 15000 N·s (25 kg).
-- Node mass: engine-mount nodes ×2.5, renormalised to 460 kg total.
+- Generated with `gen-lattice --id sentinel_cruiser --profile cruiser --width 1.91 --length 5.08 --height 1.48 --wheelbase 3.05 --mass 434.5 --car-mass 1975.0 --clearance 0.14 --front-overhang 1.0 --strength 1.15` (22% of vehicle mass in the lattice; strength from durability class 4).
+- Era `2010s`: gen-lattice's default HSS passenger cell kept as is.
+- Steel hood: 132 hood beams aluminum → mild_steel.
+- Detachables: steel bumpers ×2.3 break impulse / ×4 mass; steel hood ×1.4 / ×1.6.
+- Push bar: 4 extra FrontBumper nodes 0.10 m ahead of the bumper (z 0.35/0.8 m), hss 8.0e-04 m² tubes bolted to the bumper-beam rail nodes; detachable group 8, 15000 N·s, 25 kg.
