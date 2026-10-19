@@ -212,15 +212,18 @@ class EndToEnd(unittest.TestCase):
         sp = parse({
             "name": "e2e_pursuit",
             "data": str(self.data),
-            "probe": {"kind": "pursuit", "file": "apps/simcli/scenarios/golden/city_chase.ron"},
-            "overrides": [{"target": "scenario:duration_s", "value": 0.5}],
+            "probe": {
+                "kind": "pursuit",
+                "file": "tools/tuning-dash/scenarios/racer_into_stopped_cop.ron",
+                "police_entities": ["cop"],
+            },
             "params": [{"target": "police:pursuit:patrol_speed_factor", "values": [0.9]}],
         })
         d = runner.run(sp, build=False, out_root=self.out)
         p = json.loads((d / "sweep.json").read_text())["points"][0]
         self.assertTrue(p["ok"], p.get("error"))
         self.assertIn("police/pursuit.toml", [a["file"] for a in p["applied"]])
-        # The racer rear-ends the parked patrol car at 0.1 s.
+        # The racer rear-ends the stand-in police car held stopped (~1.24 s).
         self.assertEqual(p["metrics"]["hits_moving_scenario"], 1)
         self.assertTrue(p["frames"])
 

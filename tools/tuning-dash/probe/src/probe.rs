@@ -92,6 +92,10 @@ pub enum Probe {
         /// Struck cars below this speed count as stopped, m/s (default 1).
         #[serde(default)]
         stopped_mps: Option<f32>,
+        /// Scenario entity ids treated as police cars (stand-ins, not AI-driven); see
+        /// [`crate::pursuit`].
+        #[serde(default)]
+        police_entities: Vec<String>,
     },
     /// Repeated identical barrier-harness hits until total loss, plus the lowest single-hit
     /// total-loss speed ([`crate::survival`]).
@@ -444,7 +448,11 @@ fn run_inner(job: &Job, root: &Path) -> Result<PointResult, String> {
             );
             res.passed = Some(report.failures.is_empty());
         }
-        Probe::Pursuit { file, stopped_mps } => {
+        Probe::Pursuit {
+            file,
+            stopped_mps,
+            police_entities,
+        } => {
             let sc = simcli::load_scenario(file).map_err(|e| e.to_string())?;
             let mut sc_val = serde_json::to_value(&sc).map_err(|e| e.to_string())?;
             res.applied = overrides::apply(&mut data, Some(&mut sc_val), &job.overrides)?;
@@ -457,6 +465,7 @@ fn run_inner(job: &Job, root: &Path) -> Result<PointResult, String> {
                 &data,
                 stopped_mps.unwrap_or(pursuit::DEFAULT_STOPPED_MPS),
                 job.out.is_some(),
+                police_entities,
             )?;
             res.metrics = std::mem::take(&mut run.metrics);
             res.info = pursuit::info(&run);

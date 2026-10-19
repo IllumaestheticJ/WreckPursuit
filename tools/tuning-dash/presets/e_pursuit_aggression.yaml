@@ -1,7 +1,9 @@
 # Study for workstream 07 (E, police), round 6b: pursuit aggression vs collateral. Two cases:
-#  - chase: golden/city_chase re-aimed so the racer drives away from the parked patrol (north
-#    lane, noon, starting heat 55 = L3): a pursuit starts at once. "Physical" = the police make
-#    contact with the moving racer (PIT attempts, hits on it) without wrecking it.
+#  - chase: golden/city_chase from its own start (re-aimed by the lead in round 8: x = 59.75,
+#    y = -175, northbound) at noon with starting heat 55 = L3: a pursuit starts at once.
+#    "Physical" = the police make contact with the moving racer (PIT attempts, hits on it)
+#    without wrecking it. (Round 6b used a start at (56.75, 40) next to a parked patrol; after
+#    v0.3.0 moved the spawns no unit ever saw the racer there, so every knob was inert.)
 #  - wanted, stopped: the observer soak car parked with heat 55. The police should stop it, not
 #    ram it, and should not wreck stopped traffic or each other on the way.
 # Knobs: pursuit speed margin over the target, the top racer speed PIT is allowed at (Arcade
@@ -19,8 +21,6 @@ variants:
   - name: chase
     probe: {file: apps/simcli/scenarios/golden/city_chase.ron}
     set:
-      - {target: "scenario:entities[0].pos", value: [56.75, 40.0, 0.0]}
-      - {target: "scenario:entities[0].yaw", value: 0.0}
       - {target: "scenario:entities[0].police_heat", value: 55}
       - {target: "scenario:time_of_day_h", value: 12.0}
       - {target: "scenario:duration_s", value: 30}

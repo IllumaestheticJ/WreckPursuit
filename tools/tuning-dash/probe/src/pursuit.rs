@@ -11,6 +11,11 @@
 //! gap longer than [`HIT_GAP_TICKS`]. Each hit records both speeds just before it, the
 //! largest closing speed during it, and what the police unit was doing (assignment, tactic).
 //! The struck body counts as **stopped** below `stopped_mps`.
+//!
+//! `police_entities` marks scenario entities as police cars (`Sim::set_vehicle_kind`, no
+//! physics change, no AI): a deliberate stand-in such as a cop held on the brakes, for fixtures
+//! like `tools/tuning-dash/scenarios/racer_into_stopped_cop.ron`. Their contacts count as police
+//! hits with an empty assignment and tactic.
 
 use std::collections::BTreeMap;
 
@@ -142,11 +147,13 @@ fn variant_name<T: std::fmt::Debug>(v: &T) -> String {
 }
 
 /// Run `sc` against `data` (police tables included). `frames`: take top-down frames.
+/// `police_entities`: scenario entity ids to treat as police cars (see the module docs).
 pub fn run(
     sc: &simcli::Scenario,
     data: &Overlay,
     stopped_mps: f32,
     frames: bool,
+    police_entities: &[String],
 ) -> Result<PursuitRun, String> {
     let cfg = police_config(data, sc)?;
     let built = simcli::run::build_sim(sc, data, &simcli::RunOptions::default())
@@ -180,6 +187,15 @@ pub fn run(
             }
         }
         sim.set_police(police);
+    }
+    for name in police_entities {
+        let i = sc
+            .entities
+            .iter()
+            .position(|e| &e.id == name)
+            .ok_or_else(|| format!("police_entities: no scenario entity {name:?}"))?;
+        sim.set_vehicle_kind(ids[i], VehicleKind::Police)
+            .map_err(|e| e.to_string())?;
     }
 
     let n = ids.len();
@@ -520,7 +536,7 @@ mod tests {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..")
     }
 
-    /// golden/city_chase cut to 0.5 s: the racer rear-ends the parked patrol car at 0.1 s.
+    /// golden/city_chase cut to 0.5 s.
     fn short_chase() -> simcli::Scenario {
         let mut sc =
             simcli::load_scenario(&repo().join("apps/simcli/scenarios/golden/city_chase.ron"))
@@ -533,30 +549,47 @@ mod tests {
     fn same_final_hash_as_simcli_run() {
         let sc = short_chase();
         let data = Overlay::new(repo().join("data"));
-        let ours = run(&sc, &data, DEFAULT_STOPPED_MPS, false).unwrap();
+        let ours = run(&sc, &data, DEFAULT_STOPPED_MPS, false, &[]).unwrap();
         let theirs = simcli::run(&sc, &data, &simcli::RunOptions::default()).unwrap();
         assert_eq!(ours.final_hash, theirs.summary.final_hash);
     }
 
+    /// Tuning-dash fixture: the racer rear-ends a stand-in police car held on the brakes.
+    fn racer_into_stopped_cop() -> simcli::Scenario {
+        simcli::load_scenario(
+            &repo().join("tools/tuning-dash/scenarios/racer_into_stopped_cop.ron"),
+        )
+        .unwrap()
+    }
+
     #[test]
-    #[ignore = "Q (round 8): golden/city_chase no longer rear-ends a parked patrol (re-aimed after \
-                contract v0.3.0; police avoid lanes at spawn since E round 6). Rebuild on a \
-                deliberate racer-hits-stopped-cop setup."]
     fn racer_contact_classified() {
-        let sc = short_chase();
+        let sc = racer_into_stopped_cop();
         let data = Overlay::new(repo().join("data"));
-        let ours = run(&sc, &data, DEFAULT_STOPPED_MPS, false).unwrap();
-        let h = ours
+        let ours = run(&sc, &data, DEFAULT_STOPPED_MPS, false, &["cop".into()]).unwrap();
+        let racer_hits: Vec<&Hit> = ours
             .hits
             .iter()
-            .find(|h| h.struck == Struck::Scenario("racer".into()))
-            .expect("the racer hits the parked patrol car");
-        // The racer is the moving one; the police car was parked.
+            .filter(|h| h.struck == Struck::Scenario("racer".into()))
+            .collect();
+        assert_eq!(racer_hits.len(), 1, "{:?}", ours.hits);
+        let h = racer_hits[0];
+        // The racer is the moving one; the police car was held stopped.
         assert!(
-            !h.stopped && h.struck_mps > 15.0 && h.police_mps < 1.0,
+            !h.stopped && h.struck_mps > 15.0 && h.police_mps < 1.0 && h.closing_mps > 10.0,
             "{h:?}"
         );
+        assert!(h.t_s > 1.0 && h.t_s < 2.0, "{h:?}");
         assert_eq!(ours.metrics["hits_moving_scenario"], Some(1.0));
+        assert_eq!(ours.metrics["hits_stopped_scenario"], Some(0.0));
+    }
+
+    #[test]
+    fn unknown_police_entity_is_an_error() {
+        let sc = racer_into_stopped_cop();
+        let data = Overlay::new(repo().join("data"));
+        let err = run(&sc, &data, DEFAULT_STOPPED_MPS, false, &["nobody".into()]).unwrap_err();
+        assert!(err.contains("nobody"), "{err}");
     }
 
     #[test]

@@ -24,6 +24,9 @@
 - Probe kinds (round 6b): `pursuit` (city scenario with `data/police/*.toml` from the data root,
   targets `police:pursuit:…`; police contacts grouped into hits; same final hash as `simcli run`)
   and `survival` (repeated barrier-harness hits to total loss + single-hit total-loss speed).
+- `pursuit` probe option `police_entities` (round 8): scenario entities treated as police cars
+  (stand-ins held by their scripted inputs, no AI), and the fixture
+  `tools/tuning-dash/scenarios/racer_into_stopped_cop.ron` (racer rear-ends a cop held stopped).
 - Top-down SVG frames for `scenario` / `pursuit` points (`points/pNNNN/frames/fNN.svg`: first
   hard contact + 4 evenly spaced); the dashboard thumbnails and point detail use them.
 
@@ -57,7 +60,9 @@ None. Everything goes through existing public APIs (`wp_contracts::parse_*`, `si
 | `barrier` point, 5 speeds | cloud container | 0.1 s | — | — |
 | `tire_lateral_bcde`, 40 points, 4 workers | cloud container | 2.7 s | — | — |
 | `pursuit` point, 60 s observer soak (400 traffic agents, 13–18 police cars) | cloud container | 12 s | — | — |
-| `e_idle_ram_patrol`, 27 points, 4 workers | cloud container | 2 min 43 s | — | — |
+| `e_idle_ram_patrol`, 27 points, 4 workers | cloud container | 2 min 43 s (round 6b) → 45 s (round 8) | — | — |
+| `e_pursuit_aggression`, 36 points, 4 workers (round 8) | cloud container | 45 s | — | — |
+| `mode_hits_to_total_loss`, 76 points, 4 workers (round 8) | cloud container | 13 s | — | — |
 | `e_pursuit_aggression`, 36 points, 4 workers | cloud container | 1 min 16 s | — | — |
 | `mode_hits_to_total_loss`, 64 points, 4 workers | cloud container | 10.9 s | — | — |
 
@@ -422,3 +427,153 @@ shows the strip with captions (`info.frames`). The two images above are frames f
 ## Lead feedback (round 8, 2026-10-19)
 1. **Restore `pursuit::tests::racer_contact_classified`**, which the lead marked `#[ignore]` in round 8. `golden/city_chase` was re-aimed after contract v0.3.0 moved patrol spawns, and since E round 6 police no longer stop in the racer lane, so the 0.5 s rear-end no longer happens. Build a deliberate setup (your own scenario in `tools/tuning-dash`, for example a racer driving into a police unit held stopped) and un-ignore the test.
 2. Re-run your pursuit and damage sweeps on the merged `main`, which now has H's cruiser package, B's Arcade split, E's avoidance and radio throttling. Report what changed.
+
+## Round 8 (machine Q): done
+
+Merged `origin/main` (clean). Both items are done. No other workstream's code or data was changed;
+the findings below are for their owners. Reproduce with `tools/tuning-dash/tune.py sweep
+tools/tuning-dash/presets/<preset>.yaml` and browse with `tune.py serve`.
+
+### 1. `pursuit::tests::racer_contact_classified` restored (un-ignored)
+
+The test now runs on a deliberate fixture, `tools/tuning-dash/scenarios/racer_into_stopped_cop.ron`:
+same city and lane as `golden/city_chase`, no AI police, traffic or parked cars, a racer cruising
+at 16.5 m/s and a `sentinel_cruiser` 25 m ahead held on brake + handbrake. The racer brakes after the
+hit so it does not keep pushing. The new probe option `police_entities: ["cop"]` marks that entity
+as a police car (`Sim::set_vehicle_kind`, which changes no physics and adds no AI). The test checks
+that there is exactly one hit, at about 1.24 s, with the racer at > 15 m/s, the police car at < 1 m/s,
+classified as `hits_moving_scenario = 1` and `hits_stopped_scenario = 0`. A second test checks that an
+unknown `police_entities` id is an error. The Python end-to-end pursuit test moved to the same fixture.
+`same_final_hash_as_simcli_run` still runs on `golden/city_chase`.
+
+### 2. Sweeps re-run on merged `main` (H cruiser package, B Arcade split, E avoidance, radio throttling)
+
+#### Police ramming stopped cars (`e_idle_ram_patrol`, for E): fixed
+
+| patrol_speed_factor | brake_mps2 | hits on the stopped observer | hits on stopped traffic | max closing on a stopped car | police↔police | units disabled |
+|---|---|---|---|---|---|---|
+| 0.6 | 4.5 / 6.5 / 9.0 | 0 / 0 / 0 | 0 / 0.33 / 0.33 | 0.1 m/s | 0 | 0 |
+| 0.8 | 4.5 / 6.5 / 9.0 | 0 / 0 / 0 | 0 / 0 / 0 | 0 | 0 | 0 |
+| 1.0 (file) | 4.5 / 6.5 (file) / 9.0 | 0 / 0 / 0 | 0 / 0 / 0 | 0 | 0 | 0 |
+
+- **At the file values, all 3 seeds pass the done-check** (0 hits on stopped cars). Round 6b had
+  1.3 hits on the observer, 12.3 on stopped traffic, up to 24.6 m/s closing, 6 police↔police hits
+  and 3–4 units disabled per run. The only remaining "stopped" contacts are two 0.1 m/s touches at
+  `patrol_speed_factor` 0.6. The stop-gap of 0.6–0.7 suggested in round 6b is no longer needed:
+  keep 1.0.
+- What is left is 1–5 **world contacts per run at 0.3–4.4 m/s**, all patrols in `Shadow`: kerbs or
+  props on corners. They are minor, but they are the next thing to look at if patrols should be
+  clean.
+- The sweep is 3.6× faster (45 s, was 2 min 43 s): far fewer contacts to resolve.
+
+#### Pursuit aggression (`e_pursuit_aggression`, for E)
+
+The chase case is **re-aimed**. Round 6b started the racer at (56.75, 40) next to a parked patrol.
+After v0.3.0 moved the spawns, no unit saw the racer there (the closest pursuer stayed 116 m away), so
+units drove at the 10 m/s floor of `pursuit_speed_cap` and every knob did nothing. The preset now uses
+the golden's own start (x = 59.75, y = -175, northbound) at noon with heat 55.
+
+| case | any margin / pit_max_kmh / pit_straight_m | PIT attempts | closest pursuer after 3 s | contacts with the target | hits on stopped cars | police↔police | world | units disabled | target health |
+|---|---|---|---|---|---|---|---|---|---|
+| chase | identical for all 18 points | 0 | 3.7 m | 3 (max 12.1 m/s) | 1 (traffic, 14.7 m/s) | 0 | 0 | 1 | 0.84 |
+| wanted, stopped | identical for all 18 points | 0 | 7.9 m | 0 | 3 (police cars) | 3 | 8 | 1 | 1.00 |
+
+![chase, 7.5 s: the racer rear-ends a pursuer that has stopped in its lane](../media/tuning/e_r8_chase_racer_into_stopped_pursuer.svg)
+
+- **Wanted, stopped: much better.** 0 hits on stopped traffic (was 31), 3 police↔police (was 11),
+  1 unit disabled (was 6). The suspect is still not rammed: pursuers stop about 8 m away. Its
+  done-check (closing on the suspect ≤ 5 m/s) passes. The hits on stopped police cars are units
+  bumping into each other while they park around the suspect.
+- **Chase: the police now reach the racer, but the contact is the wrong way round.** At 7.5 s the
+  racer (16.3 m/s) rear-ends a unit that is on `Pursue`/`Shadow` and **stopped dead in the racer's
+  lane** (0 m/s). That unit is disabled. Likely cause, from `pursuit.rs` (Shadow branch): the speed
+  is `sp = v_r + 0.6 * (gap - want_gap)`, with `want_gap` = 32.5 m (the middle of `shadow_m`) and
+  clamped at 0. A unit within about 5 m of the racer along the track (alongside or just ahead) gets
+  `sp ≤ 0` and brakes to a stop in front of the racer to "drop back". Suggestion: when `gap < want_gap`,
+  limit the drop-back to some fraction below `v_r` (for example `max(sp, 0.7 * v_r)`), or move the
+  unit sideways out of the lane, instead of stopping it.
+- **A disabled unit reverses at 14.6 m/s into stopped traffic.** At 13.7 s the unit that was disabled at
+  7.5 s (assignment `OutOfService`) hits a stopped traffic car closing at 14.7 m/s, with its own
+  speed at **−14.6 m/s (driving backwards)**. Out-of-service units should stop and hold (or the car
+  should get zero throttle once the unit is disabled). Reproduce: `e_pursuit_aggression` point
+  `p0008`, `info.hits`.
+- **Still no PIT, box-in or rolling block, and every knob is inert in both cases** (one final hash for
+  all 18 points per case). `target_speed_margin` only feeds the cap, and a Shadow unit's own
+  speed stays below it. PIT is never chosen at any `pit_max_kmh` or straight length. Possible
+  contributor next to the gates listed in round 6b: `active` is sorted by ascending gap, so `rank == 0`
+  goes to the unit furthest *ahead* of or level with the racer, not to the one behind it that could
+  PIT. The pursuit lasts 7.2 s of 30 (the only pursuer is disabled at 7.5 s).
+
+#### Damage modes (`mode_hits_to_total_loss`, for B and H)
+
+Now 19 cars: H's `drayman_cargo` (Truck), `furrow_24` (Truck) and `tansy_13` (Compact) were added to
+the preset. Cell format as in round 6b: single-hit total-loss speed (km/h) / hits to total loss at
+40 / 56 / 80 km/h / health after one 56 km/h hit; "—" means never (within 200 km/h or 12 hits);
+✕ marks a failed check.
+
+| car | class | Arcade frontal | Simulation frontal | Arcade side | Simulation side |
+|---|---|---|---|---|---|
+| debug_coupe | Sport | — / — / — / 5 / 0.75 ✕ | 54 / 2 / 1 / 1 / 0.18 | — / — / — / — / 0.84 | 51 / 2 / 1 / 1 / 0.58 |
+| debug_sedan | Compact | 190 / — / — / 6 / 0.76 ✕ | 55 / 2 / 1 / 1 / 0.20 | — / — / — / — / 0.84 | 47 / 2 / 1 / 1 / 0.59 |
+| hakone_gt | Sport | — / — / 9 / 3 / 0.71 ✕ | 51 / 2 / 1 / 1 / 0.20 | — / — / — / — / 0.82 | 50 / 2 / 1 / 1 / 0.52 |
+| hauler_1500 | Truck | — / — / 12 / 6 / 0.70 ✕ | 51 / 2 / 1 / 1 / 0.15 | — / — / — / — / 0.82 | 56 / 2 / 1 / 1 / 0.52 |
+| ironside_440 | Muscle | — / — / 8 / 9 / 0.71 ✕ | 52 / 2 / 1 / 1 / 0.21 | 183 / — / — / — / 0.83 | 50 / 2 / 1 / 1 / 0.54 |
+| junkyard_beater | Beater | 123 / — / 6 / 3 / 0.68 | 50 / 2 / 1 / 1 / 0.10 | 185 / — / — / — / 0.81 | 47 / 2 / 1 / 1 / 0.56 |
+| kestrel_ts | Sport | 126 / — / 6 / 3 / 0.74 | 51 / 2 / 1 / 1 / 0.15 | 197 / — / — / — / 0.81 | 46 / 2 / 1 / 1 / 0.55 |
+| lindwurm_4t | Sport | 120 / — / 6 / 3 / 0.68 | 48 / 2 / 1 / 1 / 0.10 | — / — / — / — / 0.82 | 49 / 2 / 1 / 1 / 0.52 |
+| lucciola_350 | Exotic | — / — / 8 / 4 / 0.59 ✕ | 50 / 2 / 1 / 1 / 0.19 | 192 / — / — / — / 0.79 | 45 / 2 / 1 / 1 / 0.47 |
+| rampart_50 | Muscle | — / — / 7 / 4 / 0.72 ✕ | 52 / 2 / 1 / 1 / 0.19 | — / — / — / — / 0.82 | 48 / 2 / 1 / 1 / 0.52 |
+| sentinel_bastion | PoliceSuv | — / — / — / 6 / 0.69 ✕ | 52 / 2 / 1 / 1 / 0.22 | 199 / — / — / — / 0.82 | 51 / 2 / 1 / 1 / 0.54 |
+| sentinel_cruiser | PoliceCruiser | — / — / — / 7 / 0.79 ✕ | **62 / 3 / 2 / 1 / 0.37 ✕** | — / — / — / — / 0.85 | 55 / 2 / 1 / 1 / 0.61 |
+| sentinel_wolfhound | PoliceInterceptor | — / — / 12 / 8 / 0.74 ✕ | 56 / 2 / 1 / 1 / 0.25 | — / — / — / — / 0.82 | 52 / 2 / 1 / 1 / 0.55 |
+| shiro_turbo | Sport | — / — / 10 / 7 / 0.71 ✕ | 51 / 2 / 1 / 1 / 0.16 | — / — / — / — / 0.82 | 49 / 2 / 1 / 1 / 0.54 |
+| sperber_32 | Sport | — / — / 10 / 7 / 0.71 ✕ | 51 / 2 / 1 / 1 / 0.12 | 198 / — / — / — / 0.81 | 46 / 2 / 1 / 1 / 0.54 |
+| vireo_xs | Compact | 115 / — / 6 / 2 / 0.70 | 48 / 2 / 1 / 1 / 0.10 | 190 / — / — / — / 0.82 | 48 / 2 / 1 / 1 / 0.54 |
+| drayman_cargo | Truck | 189 / — / 8 / 7 / 0.67 ✕ | 51 / 2 / 1 / 1 / 0.20 | — / — / — / — / 0.81 | 47 / 2 / 1 / 1 / 0.55 |
+| furrow_24 | Truck | 184 / — / 9 / 4 / 0.66 ✕ | 49 / 2 / 1 / 1 / 0.15 | 194 / — / — / — / 0.82 | 53 / 2 / 1 / 1 / 0.52 |
+| tansy_13 | Compact | 127 / — / 6 / 2 / 0.68 | 47 / 2 / 1 / 1 / 0.10 | — / — / — / — / 0.82 | 49 / 2 / 1 / 1 / 0.54 |
+
+What changed since round 6b:
+- **Simulation: H's tougher cruiser breaks "one hard hit at speed is a total loss".**
+  `sentinel_cruiser` now keeps 0.37 health after a 56 km/h frontal (was 0.23), needs 2 hits, and
+  its single-hit total-loss speed is 62 km/h (was 54). Every other car still totals in one 56 km/h
+  hit (47–56 km/h). For H and B: if the cruiser is meant to be tougher than civilian cars in
+  Simulation, CLAUDE.md's rule needs a "police cars excepted" note. Otherwise the package should
+  keep the Simulation 56 km/h hit fatal (for example by toughening only the Arcade side of it).
+- **Simulation side impacts are now one-hit total losses for every car** (side total-loss speed
+  45–56 km/h, was 47–65; in round 6b 10 of 16 cars needed two same-mass side hits at 56 km/h).
+- **Arcade (B's split): 40 km/h hits are now cosmetic for every car**, which is B's intent (no car
+  is ever totalled by 40 km/h hits; round 6b's light cars ended in 8–10). One 56 km/h hit still
+  only degrades (health 0.59–0.79). "Several hits end the car" still fails at 56 km/h for **14 of
+  19 cars** (round 6b: 12 of 16). Ten of them end in 7–12 hits (ironside and lucciola newly so;
+  they never ended before), while coupe, sedan, bastion and cruiser never end at 56 km/h. The five
+  lightest (Beater, Kestrel, Lindwurm, Vireo, Tansy) now take 6 hits (was 4–5).
+- `ironside_440` Arcade is **non-monotonic**: 8 hits at 56 km/h but 9 at 80 km/h. Worth a look by B
+  (the 80 km/h hits may saturate the same front lattice region sooner).
+- Arcade side impacts still never total any car (health levels off around 0.8).
+
+**`b_arcade_total_loss_health`** (Arcade only). Cells: hits to total loss at 40 / 56 / 80 km/h
+(single-hit total-loss speed). Health after one 56 km/h hit does not depend on the threshold (sedan 0.76,
+ironside 0.71, hauler 0.70, cruiser 0.79).
+
+| car / impact | 0.10 (file) | 0.15 | 0.20 | 0.25 | 0.30 |
+|---|---|---|---|---|---|
+| debug_sedan frontal | — / — / 6 (190) | — / 6 / 3 (128) | — / 4 / 2 (102) | — / 3 / 2 (90) | — / 3 / 2 (88) |
+| ironside_440 frontal | — / 8 / 9 (—) | — / 6 / 3 (129) | — / 4 / 3 (110) | — / 4 / 2 (95) | — / 3 / 2 (83) |
+| hauler_1500 frontal | — / 12 / 6 (—) | — / 6 / 3 (135) | — / 4 / 2 (100) | — / 3 / 2 (82) | — / 3 / 1 (80) |
+| sentinel_cruiser frontal | — / — / 7 (—) | — / 10 / 5 (162) | — / 7 / 3 (134) | — / 6 / 3 (111) | — / 4 / 2 (93) |
+| debug_sedan side | never | never | never | never | never (189) |
+| ironside_440 side | never (183) | never (183) | never (183) | never (140) | never (132) |
+
+For B: the 0.23 that B proposes (blocked on G's career proxy) still fits. At 0.20–0.25, sedan,
+Muscle and Truck end in 3–4 hard hits and survive one 80 km/h hit. The cruiser needs 6–7 hits at
+0.20–0.25 and only falls inside "2–6" at 0.30. That is the Arcade side of the same cruiser
+toughness question. 40 km/h hits never total any car at any threshold, which matches the split.
+
+### Session checks (round 8)
+`cargo fmt --all --check` and `cargo clippy --workspace --all-targets -- -D warnings` are clean.
+`cargo test --workspace --no-fail-fast` passes with 0 failures; the 14 ignored tests all belong to
+other workstreams. `tuning-probe` has no ignored tests left (`cargo test -p tuning-probe -- --ignored`
+runs 0). `python3 -m unittest discover -s tools/tuning-dash/tests` passes (10 tests). All four sweeps
+ran with no point errors. This branch changes only `tools/tuning-dash`, `docs/integration/tuning-dash.md`
+and one SVG in `docs/media/tuning/`. Nothing here is reachable from `wp_wasm`.
