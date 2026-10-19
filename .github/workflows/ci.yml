@@ -99,7 +99,9 @@ jobs:
         run: |
           cargo build --release -p simcli
           ./target/release/simcli goldens
-      - name: run all scenarios and keep their outputs
+      # Release build: this is where `slow: true` and soak/ scenarios get their expectations
+      # checked (debug `cargo test` skips them; see the harness report job's list).
+      - name: run all scenarios (incl. slow + soak), gate expectations, keep outputs
         if: always()
         run: ./target/release/simcli run apps/simcli/scenarios --out out
       - uses: actions/upload-artifact@v4
