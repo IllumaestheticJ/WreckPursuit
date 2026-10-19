@@ -414,3 +414,15 @@ Machine R (`ws/panels`, prompt 21) owns `crates/wp_damage/src/panels.rs` (hinged
 ## Lead note (round 6 gate, 2026-10-19)
 - `e2e/run.mjs` city chase check is timing-flaky: it holds W for 5 s of wall time and needs a speeding violation in that window (failed once and passed on rerun, same build). Make it wait for a condition, e.g. poll up to 15 s for `TrafficViolation` in the feed, instead of a fixed sleep.
 - Lead removed a duplicate `policeStatus` key in `src/wasm/sim.ts` (M had added a second one returning null, which overrode yours, so the heat panel showed "null"). Keep one accessor.
+
+## Lead helper note (`lead/playtest-feel`, 2026-10-19) — perf + feel
+
+- HUD: real-time factor (`src/rtf.ts`) with an amber slow-motion warning below 0.95×; frame
+  breakdown sim / views / render, also on `window.__wp.app.perf`.
+- Frame catch-up cap 0.1 → 0.25 s (= `MAX_TICKS_PER_STEP`); slow frames no longer drop sim time.
+- `VehicleView` rebuilds the lattice wireframe / skin only when the nodes change (allocation-free,
+  fixed bounding sphere); skin normals on every rebuild.
+- Default car `lindwurm_4t` (free drive + city chase); keyboard throttle ramp 0.2 → 0.08 s.
+- New tools: `e2e/chase_perf.mjs` (sim ms + RTF in headless Chromium; `VIEWPORT=480x270`),
+  `e2e/cpu_profile.mjs`, `cargo run --release -p wp_wasm --example chase_bench`.
+Numbers: `docs/PLAYTEST_LOG.md` rows 3–4.

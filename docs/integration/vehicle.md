@@ -344,3 +344,13 @@ Contract **v0.3.0** is being applied in parallel by the lead (branch `lead/contr
 2. Torque converter for automatic gearboxes (H's deferred request 3). Data fields already exist in the car files.
 3. Measure vehicle-only cost per car (native release, 24 cars) and record it in your README.
 Stay in `crates/wp_vehicle` and `data/tires`.
+
+## Lead helper note (`lead/playtest-feel`, 2026-10-19) — automatic gearbox rework
+
+Owner playtest: "the transmission is sloppy". Changed in `wp_vehicle` (shift scheduling and
+clutch logic only; the converter model and its under-power blend are untouched):
+`Gearbox::auto_shift(def, &ShiftInputs, dt)` (load schedule, anti-hunting band, kickdown,
+corner hold, braking hold), clutch shifts in three phases with rev-matching, `filter_pedal`
+full strength 0.6 → 0.3 s, snapshot format 3. Details, numbers and the two test bounds that
+moved: `docs/integration/playtest-feel.md` and the README's "Automatic gearbox" section. When
+you merge your converter work, `auto_shift` now takes `&ShiftInputs`.

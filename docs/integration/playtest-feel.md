@@ -77,6 +77,8 @@ Snapshot format 2 → 3 (gearbox shift length, load, last direction, brake hold)
 - `crates/wp_math/src/hash.rs`: `quantize` rounds without `f64::round` (same values).
 - `apps/simcli/golden/*`: blessed in one `[bless]` commit (reasons in its message; 8 of the
   moves predate this branch and come from the ws/vehicle merge).
+- `apps/simcli/SCENARIOS.md`: the braking example's "stopped" check accepts −0.5 m/s (the held
+  brake engages auto-reverse a moment sooner now).
 
 ## Requests
 
@@ -87,4 +89,5 @@ Snapshot format 2 → 3 (gearbox shift length, load, last direction, brake hold)
 - **A (vehicle):** your converter work can keep its own shift blend; `Gearbox::auto_shift`
   now takes `&ShiftInputs` (adds `lateral_usage`), and `Gearbox` has new fields in the
   snapshot (format 3). The engagement phases only apply to non-converter cars.
-- **H (cars):** please re-run `collect_results.py`; 0–100 moved by −0.1…+0.25 s (see below).
+- **H (cars):** please re-run `collect_results.py`; 0–100 moved by −0.1…+0.25 s (table in
+  `docs/PLAYTEST_LOG.md`). No car data was changed.
