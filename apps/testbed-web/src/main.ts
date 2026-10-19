@@ -7,11 +7,13 @@
 // city chase.
 import { loadWasm, sim, type DriverInput, type Scenario, type ScenarioResult } from "./wasm/sim";
 import { META_STRIDE, STATE_STRIDE, S, T, VEHICLE_KIND, W } from "./wasm/layout";
+import { POLICE_PAINT, TRAFFIC_PALETTE } from "./render/fleet";
 import { installKeyboard, isHeld, readInput, toggleHeadlights, type InputSource } from "./input";
 import { layers, store, bytesToBase64, base64ToBytes } from "./settings";
 import { SceneView } from "./scene";
 import { VehicleView } from "./vehicle_view";
-import { clearDebris, panelEvents, stepDebris } from "./render/panels";
+import { clearDebris, meshTimings, panelEvents, preloadCarMeshes, stepDebris } from "./render/panels";
+import { LodDirector } from "./render/lod";
 import { CameraRig, CAMERA_MODES, cameraLabel, type CameraMode } from "./cameras";
 import { Hud } from "./hud";
 import { TelemetryPlots } from "./telemetry";
@@ -84,6 +86,9 @@ async function main(): Promise<void> {
   const plots = new TelemetryPlots(overlay);
   const audio = new AudioSystem(scene.world, overlay);
   const ui = new UiOverlay(overlay);
+  // Traffic / police at every LOD: instanced fleet + hand-over to full views (render/lod.ts).
+  const lod = new LodDirector();
+  scene.world.add(lod.fleet.group);
   // End-of-run panel (lead): capture / wreck → result + "Repair & continue" / "Restart".
   const runEndEl = document.createElement("div");
   runEndEl.id = "ui-run-end";
@@ -113,6 +118,11 @@ async function main(): Promise<void> {
     plots.clear();
     ui.reset();
     runEnd.reset();
+    // Every model the session can show (player, traffic, police) starts loading now, so cars
+    // that appear later never wait for their mesh (playtest row 25).
+    lod.models = sim.sessionCarModels();
+    void preloadCarMeshes(lod.models.cars);
+    lod.log.reset(0);
     syncViews();
     const ids = sim.entities();
     app.player = ids[0] ?? 1;
@@ -134,8 +144,9 @@ async function main(): Promise<void> {
   };
 
   /** One view per sim vehicle — scenario cars plus whatever the sim spawns itself (police
-   * units, promoted traffic) — created and disposed as vehicles come and go. */
-  const syncViews = (meta: Float32Array = sim.vehicleMeta()) => {
+   * units, promoted traffic) — created and disposed as vehicles come and go. Promoted traffic
+   * keeps the livery it had as an instanced agent (`trafficPaint`: entity → colour). */
+  const syncViews = (meta: Float32Array = sim.vehicleMeta(), trafficPaint: Map<number, number> = new Map()) => {
     const live = new Set<number>();
     for (let o = 0; o < meta.length; o += META_STRIDE) {
       const id = meta[o];
@@ -143,7 +154,11 @@ async function main(): Promise<void> {
       if (app.views.has(id)) continue;
       const kind = meta[o + 1];
       const colour =
-        kind === VEHICLE_KIND.police ? 0xe9ebf0 : kind === VEHICLE_KIND.traffic ? 0x7a8a99 : COLOURS[(id - 1) % COLOURS.length];
+        kind === VEHICLE_KIND.police
+          ? POLICE_PAINT
+          : kind === VEHICLE_KIND.traffic
+            ? (trafficPaint.get(id) ?? TRAFFIC_PALETTE[0])
+            : COLOURS[(id - 1) % COLOURS.length];
       const v = new VehicleView(id, colour);
       scene.world.add(v.root);
       scene.world.add(v.velocity);
@@ -427,6 +442,9 @@ async function main(): Promise<void> {
     startFreeDrive(DEFAULT_CAR);
   }
   if (params.get("bench")) startBench(Number(params.get("bench")));
+  // First frame only once the session's car meshes are in (bounded: a slow or missing file
+  // falls back to the proxy and swaps in when it arrives).
+  await Promise.race([preloadCarMeshes(lod.models.cars), new Promise((r) => setTimeout(r, 5000))]);
   if (params.get("replay") === "last") $("rp-last").click();
 
   // ----- frame loop -----------------------------------------------------------------------
@@ -462,13 +480,11 @@ async function main(): Promise<void> {
     rtf.push(wallDt, sim.worldInfo()[W.tick], !app.paused && !replay && !app.bench);
 
     const meta = sim.vehicleMeta();
-    syncViews(meta);
-    let physicalTraffic = false;
+    const trafficDraw = sim.trafficDraw();
+    const policeDraw = sim.policeDraw();
+    syncViews(meta, lod.paintOfEntity(trafficDraw));
     const tS = sim.worldInfo()[W.tick] / 240;
-    for (let o = 0; o < meta.length; o += META_STRIDE) {
-      app.views.get(meta[o])?.setMeta(meta[o + 2], tS);
-      physicalTraffic ||= meta[o + 1] === VEHICLE_KIND.traffic;
-    }
+    for (let o = 0; o < meta.length; o += META_STRIDE) app.views.get(meta[o])?.setMeta(meta[o + 2], tS);
     const cur = sim.states();
     const prev = sim.statesPrev();
     let focusTel: Float32Array | null = null;
@@ -479,6 +495,7 @@ async function main(): Promise<void> {
       if (!view) continue;
       // vehicle_states_prev() lists the same entities in the same (ascending) order.
       const tel = sim.telemetry(id);
+      view.focused = id === app.focus;
       view.update(cur, o, prev.length > o ? prev : cur, o, app.alpha, tel, app.paused && !replay ? 0 : dt);
       if (id === app.focus) {
         focusTel = tel;
@@ -500,9 +517,7 @@ async function main(): Promise<void> {
       if (!replay) runEnd.update(sim.runResult(), now);
     }
     scene.update(dt, sim.intents());
-    // Promoted (physical) agents are drawn as sim vehicles once the sim spawns them.
-    scene.updateAgents(sim.trafficAgents(), physicalTraffic);
-    scene.updatePoliceUnits(sim.policeUnits(), tS);
+    scene.updateHelicopters(policeDraw, tS);
     const wi = sim.worldInfo();
     scene.setTimeOfDay(wi[W.night]);
     scene.signals.update(sim.signalStates(), wi[W.night]);
@@ -522,6 +537,8 @@ async function main(): Promise<void> {
       rig.mode === "cinematic" ? nearestPolice(focusView) : null,
     );
     audio.update(rig.camera, events, app.paused && !replay ? 0 : dt, app.focus);
+    // Traffic and police after the camera moved: the fleet picks mesh detail by camera distance.
+    lod.update(trafficDraw, policeDraw, app.views, rig.camera, app.views.get(app.player)?.root.position ?? null, tS);
 
     const r0 = performance.now();
     scene.render(rig.camera);
@@ -687,6 +704,10 @@ async function main(): Promise<void> {
     runEnd,
     restartRun,
     lookFrom: (eye: [number, number, number], target: [number, number, number]) => rig.lookFrom(eye, target),
+    /** LOD director: `lod.log.start()` records per-frame draw states, `lod.log.summary()`. */
+    lod,
+    /** Car mesh fetch + parse times (performance.now() ms) per car id. */
+    meshTimings,
   };
   requestAnimationFrame(frame);
 }
