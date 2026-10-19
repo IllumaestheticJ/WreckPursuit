@@ -1,6 +1,7 @@
 //! End to end: a real car (`wp_vehicle::rig::Rig`, the same model `wp_sim` steps) on a
-//! weathered world. Wetness reaches the tires through `WorldQuery::surface_at` (the interim
-//! `WetAsphalt` remap), so this is exactly what the game gets once `wp_sim` wraps its world.
+//! weathered world. Since W-1 `wp_vehicle` reads `WorldQuery::weather_at` per wheel; the
+//! interim `WetAsphalt` remap in `surface_at` is still on by default and the vehicle skips its
+//! own wet term on `WetAsphalt`, so wet grip is not counted twice either way.
 
 use wp_contracts::{
     load_car, AssistProfile, SurfaceType, TimeOfDay, VehicleInput, WorldQuery, PHYSICS_DT,
@@ -81,14 +82,32 @@ fn soaked_road_lengthens_braking_and_dry_weather_changes_nothing() {
 }
 
 #[test]
-fn damp_road_below_threshold_is_still_dry_grip() {
-    // Interim limitation, pinned so it is noticed when W-1 replaces the remap: a light film
-    // (wetness < interim_wet_threshold) does not reach the tires yet.
+fn damp_road_below_threshold_now_costs_grip() {
+    // Before W-1 a light film (wetness < interim_wet_threshold) did not reach the tires. Now
+    // `wp_vehicle` reads `weather_at`, so a damp road brakes a little longer than a dry one.
     let d = WeatherData::embedded();
     let damp_mm = d.surfaces.film_mm * (d.surfaces.interim_wet_threshold * 0.5);
     let (dry, _) = brake_from(FlatWorld::default(), 20.0);
     let (damp, _) = brake_from(weathered(WeatherKind::LightRain, damp_mm), 20.0);
-    assert_eq!(dry, damp);
+    assert!(
+        damp > dry && damp < 1.3 * dry,
+        "dry {dry:.2} m, damp {damp:.2} m"
+    );
+}
+
+#[test]
+fn interim_remap_off_gives_the_same_wet_stop() {
+    // What the lead switches to once weather is wired into `wp_sim`: no remap, the vehicle's
+    // own wet model alone. The street tire's wet ratio is 0.70 either way.
+    let v0 = 27.8;
+    let (remap, _) = brake_from(weathered(WeatherKind::HeavyRain, 1.5), v0);
+    let mut w = weathered(WeatherKind::HeavyRain, 1.5);
+    w.interim_surface = false;
+    let (own, _) = brake_from(w, v0);
+    assert!(
+        (own / remap - 1.0).abs() < 0.05,
+        "remap {remap:.1} m, weather_at only {own:.1} m"
+    );
 }
 
 /// Speed `after_s` seconds into a full ABS stop from `v0`.

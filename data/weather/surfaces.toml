@@ -47,7 +47,8 @@ ice_factor = 0.18
 # Below this wetness a freezing road is just cold, not icy.
 ice_min_wetness = 0.2
 
-# Painted lane markings / zebra crossings (no SurfaceType yet; see contract request W-3).
+# Painted lane markings / zebra crossings: grip factors used by `marking_grip_multiplier`
+# (the `[surfaces.PaintedLine]` row below carries the same wet loss).
 marking_dry_factor = 0.97
 marking_wet_factor = 0.50
 
@@ -126,3 +127,13 @@ film_capacity_mm = 0.6
 dry_mm_per_h = 0.9
 infiltration_mm_per_h = 0.0
 puddle_weight = 0.0
+
+# Painted lane markings / zebra crossings (contract v0.3.0 `SurfaceType::PaintedLine`, W-3).
+# Sealed paint on the road: wet loss matches `marking_wet_factor`, a thin film that drains and
+# dries like a kerb, no infiltration. Puddles collect on it like the asphalt around it.
+[surfaces.PaintedLine]
+wet_factor = 0.50
+film_capacity_mm = 0.8
+dry_mm_per_h = 0.8
+infiltration_mm_per_h = 0.0
+puddle_weight = 1.0
