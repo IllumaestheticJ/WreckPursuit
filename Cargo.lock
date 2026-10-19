@@ -1530,12 +1530,16 @@ name = "wp_net"
 version = "0.1.0"
 dependencies = [
  "futures-util",
- "serde",
- "serde_json",
  "thiserror",
  "tokio",
  "tokio-tungstenite",
  "wp_contracts",
+ "wp_damage",
+ "wp_economy",
+ "wp_math",
+ "wp_sim",
+ "wp_vehicle",
+ "wp_world",
 ]
 
 [[package]]
