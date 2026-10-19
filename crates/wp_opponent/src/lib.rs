@@ -37,8 +37,8 @@ pub use corridor::{
 };
 pub use field::{
     Debug, Field, GridLayout, OpponentEvent, RaceConfig, RacerSpec, RacerStatus, SpeedLimit,
-    Standing, Tactic, VehicleObs, AI_CONTACT_IMPULSE_NS,
+    Standing, Tactic, VehicleObs, AI_CONTACT_IMPULSE_NS, YIELD_AFTER_S, YIELD_RADIUS_M,
 };
 pub use line::{LineParams, RacingLine, SpeedProfile, Usage};
 pub use profile::{DriverParams, DriverProfile};
-pub use pursuit::{EventHeat, FixedHeat, NoPolice, PoliceQuery};
+pub use pursuit::{EventHeat, FixedHeat, NoPolice, PoliceQuery, SimPolice};

@@ -8,7 +8,7 @@ mod common;
 use std::collections::BTreeMap;
 
 use common::Setup;
-use wp_contracts::EntityId;
+use wp_contracts::{EntityId, VehicleSim};
 use wp_opponent::{
     DriverProfile, FixedHeat, GridLayout, OpponentEvent, RacerStatus, AI_CONTACT_IMPULSE_NS,
 };
@@ -314,9 +314,18 @@ fn wanted_ai_racer_flees_police_through_the_city() {
         .any(|e| matches!(e, OpponentEvent::Disqualified { .. })));
     let st = field.standings();
     let fled = st.iter().find(|s| s.entity == EntityId(1)).unwrap();
-    assert_eq!(fled.status, RacerStatus::Fled);
+    // The sim's own police patrol the city too and may catch it on the way.
+    assert!(
+        matches!(fled.status, RacerStatus::Fled | RacerStatus::Busted),
+        "{:?}",
+        fled.status
+    );
     for s in st.iter().filter(|s| s.entity != EntityId(1)) {
-        assert_eq!(s.status, RacerStatus::Racing);
+        assert!(
+            matches!(s.status, RacerStatus::Racing | RacerStatus::Busted),
+            "{:?}",
+            s.status
+        );
     }
     // Its flight route ends far from the unit, and it made real progress along it (traffic
     // and junctions included) in the minute after the call.
@@ -331,6 +340,115 @@ fn wanted_ai_racer_flees_police_through_the_city() {
     assert!(
         covered > 250.0,
         "covered only {covered:.0} m of the flight route"
+    );
+    let hard = out
+        .contacts
+        .iter()
+        .filter(|c| c.3 >= AI_CONTACT_IMPULSE_NS)
+        .count();
+    assert_eq!(hard, 0, "{:?}", out.contacts);
+}
+
+#[test]
+fn live_police_chase_ends_in_escape_or_capture_without_stuck_cars() {
+    // Open roads, traffic, and the sim's own police: physical patrol cars on D's road graph
+    // that witness violations, recognise wanted cars and chase them. The AI reads
+    // `Sim::police()` directly (`SimPolice`).
+    //  - racer 1 starts at L3 (above its flee level 2): abandons the race and runs;
+    //  - racer 2 starts at L1 (below it): keeps racing, pulls over if a unit sits on it;
+    //  - racer 3 is clean (but may earn heat of its own on the way).
+    let setup = Setup {
+        seed: 4,
+        laps: 2,
+        drivers: eight_drivers()[..3].to_vec(),
+        closed_roads: false,
+        traffic: 0.25,
+        grid: GridLayout::SingleFile,
+        sim_police: Some("sentinel_cruiser".into()),
+        heat: vec![(EntityId(1), 55.0), (EntityId(2), 15.0)],
+        run_full: true,
+        max_s: 150.0,
+        ..Setup::default()
+    };
+    let mut speeds = [0.0f32; 3];
+    let out = common::run(&setup, &wp_opponent::NoPolice, &mut |sim, _| {
+        for (k, v) in sim.vehicles().iter().take(3).enumerate() {
+            speeds[k] = v.vehicle.state().speed_mps;
+        }
+    });
+    let mut field = out.field;
+    let events = field.drain_events();
+    let st = field.standings();
+    let summary: Vec<_> = events
+        .iter()
+        .filter(|e| {
+            !matches!(
+                e,
+                OpponentEvent::LapCompleted { .. } | OpponentEvent::Overtook { .. }
+            )
+        })
+        .collect();
+    let info = format!("{summary:?}\n{st:?}\nstuck {:?}", out.max_stuck_s);
+    assert!(out.police_vehicles > 0, "no physical police: {info}");
+    // Racer 1 runs, and the chase ends either way (caught, or still running / escaped).
+    assert!(
+        events.iter().any(
+            |e| matches!(e, OpponentEvent::Abandoned { entity, wanted_level: 3 } if *entity == EntityId(1))
+        ),
+        "{info}"
+    );
+    // Racer 2 never runs at L1: it yields (and is booked) or races on.
+    assert!(
+        !events.iter().any(
+            |e| matches!(e, OpponentEvent::Abandoned { entity, wanted_level: 1 } if *entity == EntityId(2))
+        ),
+        "{info}"
+    );
+    for s in &st {
+        match s.status {
+            RacerStatus::Busted => {
+                // A booked car stays put.
+                let k = (s.entity.0 - 1) as usize;
+                assert!(
+                    speeds[k].abs() < 1.0,
+                    "busted {:?} still moving {:.1} m/s",
+                    s.entity,
+                    speeds[k]
+                );
+            }
+            RacerStatus::Fled | RacerStatus::Racing | RacerStatus::Finished { .. } => {}
+            other => panic!("{:?} ended {other:?}: {info}", s.entity),
+        }
+    }
+    // Every busted racer was announced; escapes only for racers that fled.
+    for s in st.iter().filter(|s| s.status == RacerStatus::Busted) {
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, OpponentEvent::Busted { entity, .. } if *entity == s.entity)));
+    }
+    // No stuck cars: nobody stands still for long while it wants to move (junction waits
+    // for crossing traffic included).
+    for (k, t) in out.max_stuck_s.iter().enumerate() {
+        assert!(*t < 40.0, "racer {} stood still {t:.0} s: {info}", k + 1);
+    }
+    // Racers that are not caught keep making progress round the circuit.
+    let free = st
+        .iter()
+        .filter(|s| matches!(s.status, RacerStatus::Racing | RacerStatus::Finished { .. }))
+        .collect::<Vec<_>>();
+    for s in &free {
+        assert!(
+            s.progress_m > 400.0,
+            "{:?} only {:.0} m: {info}",
+            s.entity,
+            s.progress_m
+        );
+    }
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, OpponentEvent::Disqualified { .. })),
+        "{info}"
     );
     let hard = out
         .contacts

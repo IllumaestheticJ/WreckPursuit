@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use wp_contracts::{DamageSim, EntityId, LoadedCar, SimEvent, TimeOfDay, VehicleSim};
 use wp_opponent::{
     CarCapability, CorridorOptions, DriverProfile, EventHeat, Field, GridLayout, NoPolice,
-    OpposingLanes, PoliceQuery, RaceConfig, RacerSpec, VehicleObs,
+    OpposingLanes, PoliceQuery, RaceConfig, RacerSpec, SimPolice, Tactic, VehicleObs,
 };
 use wp_sim::{Sim, SimConfig, VehicleKind};
 use wp_world::procgen::ProcGenConfig;
@@ -83,6 +83,13 @@ pub struct Setup {
     /// Police events appended to the sim's event stream at `t_s` (tests of the pursuit path
     /// while `wp_sim` has no police units to witness anything).
     pub inject: Vec<(f32, wp_police::PoliceEvent)>,
+    /// Live police: the AI reads `Sim::police()` through `SimPolice`, and police units are
+    /// physical cars of this model (e.g. `sentinel_cruiser`).
+    pub sim_police: Option<String>,
+    /// Starting heat per racer (police system rebuilt with it before the first tick).
+    pub heat: Vec<(EntityId, f32)>,
+    /// Keep running to `max_s` after every racer has left the race (chases).
+    pub run_full: bool,
 }
 
 impl Default for Setup {
@@ -100,6 +107,9 @@ impl Default for Setup {
             grid: GridLayout::TwoWide,
             live_police: false,
             inject: Vec::new(),
+            sim_police: None,
+            heat: Vec::new(),
+            run_full: false,
         }
     }
 }
@@ -126,6 +136,11 @@ pub struct Outcome {
     pub police_events: Vec<wp_police::PoliceEvent>,
     /// `SimEvent::TrafficViolation`s of the run (any vehicle).
     pub violations: u32,
+    /// Longest continuous time each racer (grid order) stood still (< 0.5 m/s) while it
+    /// wanted to move (not parked / yielding), s.
+    pub max_stuck_s: Vec<f32>,
+    /// Police vehicles alive at the end.
+    pub police_vehicles: usize,
 }
 
 /// Measured capability, cached per process.
@@ -220,6 +235,24 @@ pub fn run(
         time_ratio: 10.0,
     });
     sim.set_world(world);
+    if let Some(pc) = &setup.sim_police {
+        sim.set_police_car(car(pc));
+    }
+    if !setup.heat.is_empty() {
+        let mut police = wp_police::PoliceSystem::for_world(
+            wp_police::PoliceConfig::builtin(),
+            sim.world(),
+            wp_police::PoliceSetup {
+                seed: setup.seed ^ 0x0090_11CE,
+                internal_driving: true,
+                ..Default::default()
+            },
+        );
+        for (e, h) in &setup.heat {
+            police.set_heat(*e, *h);
+        }
+        sim.set_police(police);
+    }
     let mut entities = Vec::new();
     for (i, (pos, yaw)) in slots.iter().enumerate() {
         let id = sim
@@ -239,6 +272,8 @@ pub fn run(
     let mut violations = 0u32;
     let mut police_events: Vec<wp_police::PoliceEvent> = Vec::new();
     let mut events: Vec<SimEvent> = Vec::new();
+    let mut stuck_s = vec![0.0f32; entities.len()];
+    let mut max_stuck_s = vec![0.0f32; entities.len()];
     let max_ticks = (setup.max_s * 240.0) as u64;
     while sim.tick() < max_ticks {
         let obs: Vec<VehicleObs> = sim
@@ -261,7 +296,14 @@ pub fn run(
             }
         }
         heat.observe(&events);
-        let q: &dyn PoliceQuery = if setup.live_police { &heat } else { police };
+        let live = SimPolice(sim.police());
+        let q: &dyn PoliceQuery = if setup.sim_police.is_some() {
+            &live
+        } else if setup.live_police {
+            &heat
+        } else {
+            police
+        };
         let inputs = field.tick(sim.world(), &obs, &events, q).to_vec();
         field_wall_s += t0.elapsed().as_secs_f64();
         for (e, inp) in inputs {
@@ -298,8 +340,20 @@ pub fn run(
                 }
             }
         }
+        for (k, e) in entities.iter().enumerate() {
+            let Some(v) = sim.vehicles().iter().find(|v| v.id == *e) else {
+                continue;
+            };
+            let idle = matches!(field.tactic_of(k), Tactic::Park | Tactic::Yield);
+            if v.vehicle.state().speed_mps.abs() < 0.5 && !idle {
+                stuck_s[k] += 1.0 / 240.0;
+                max_stuck_s[k] = max_stuck_s[k].max(stuck_s[k]);
+            } else {
+                stuck_s[k] = 0.0;
+            }
+        }
         each_tick(&sim, &field);
-        if field.race_over() {
+        if field.race_over() && !setup.run_full {
             break;
         }
     }
@@ -314,6 +368,12 @@ pub fn run(
         field_wall_s,
         police_events,
         violations,
+        max_stuck_s,
+        police_vehicles: sim
+            .vehicles()
+            .iter()
+            .filter(|v| v.kind == VehicleKind::Police)
+            .count(),
     }
 }
 
