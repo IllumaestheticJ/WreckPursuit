@@ -1,0 +1,15 @@
+{
+  "id": "debug_coupe",
+  "engine": {
+    "cylinders": 6,
+    "layout": "Inline",
+    "firing": "Even",
+    "induction_exhaust_balance": 0.4,
+    "turbo": false,
+    "supercharger": false,
+    "gain": 1.0
+  },
+  "engine_pack": "engine_proc_i6",
+  "world_pack": "world_proc",
+  "horn_cue": "horn/standard"
+}
