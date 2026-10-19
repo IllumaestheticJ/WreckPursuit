@@ -2,8 +2,33 @@
 
 - **Workstream / prompt:** 09 — car roster data
 - **Branch:** `ws/cars`
-- **Crates / folders owned:** `data/cars/` (roster files), `data/lattices/` (roster car files, not the generator), `tools/specsheet/`
-- **Contract version built against:** 0.2.0
+- **Crates / folders owned:** `data/cars/` (roster files), `data/lattices/` (roster car files, not the generator), `tools/specsheet/`; round 8: `data/tires/` edits the lead assigned to H (`PaintedLine`, `treaded`)
+- **Contract version built against:** 0.3.0
+
+## Response to lead feedback round 8 (2026-10-19)
+
+Merged `origin/main` at `d3effad` (contract v0.3.0) into `ws/cars`; no conflicts.
+
+| Item | Done |
+|---|---|
+| Lead's changes to my civilian cars | **Kept, and moved into the source of truth** (`roster_inputs.py`): `tansy_13` 7 000 + `shift_time_s` 0.25, `drayman_cargo` 20 000, `furrow_24` 21 000. `build_roster.py` now regenerates byte-identical car JSON and lattices to `main`; spec sheets / ROSTER.md show the new prices. Re-run with the new shift: Tansy 0-100 13.3 s (band 11.5-13.5), unchanged within 0.1 s. Panel meshes (`data/car-assets`, R) not touched. |
+| 1 `semi_slick.json` `treaded: false` (W-4) | Done. Every other compound stays treaded (`None`), the drag radial too (DOT street tire with shallow tread). |
+| 2 Tire data for `PaintedLine` | Done on all 8 compounds: **dry** tire-on-paint multiplier 0.92-0.96 (street / police 0.95, wet-biased 0.96, sport / all-terrain 0.94, vintage bias 0.93, semi-slick / drag radial 0.92). Paint fills the asphalt macrotexture, so the hysteresis share of grip drops; compounds that rely on it most lose most. Reasoning + a `paint` column in `data/tires/README.md`. **Wet** paint grip stays in the conditions model (see request below: do not stack a second *dry* paint factor). |
+| v0.3.0 checklist: push bar → `Accessory` | Done in `build_roster.py`: the 4 push-bar nodes and detach group 8 of `sentinel_cruiser`, `sentinel_wolfhound`, `sentinel_bastion` are `BodyRegion::Accessory` (was `FrontBumper`). `ram-probe` on all three, both modes, 4 ram kinds × 3 speeds × 6 rams: **health, disengage ram and total-loss ram identical** to before; barrier verdicts identical. Only the crush *metrics* changed (request to B below). |
+| Validation re-collected on `main` | `collect_results.py`, `specsheet.py`, `nameplate_check.py` (69 files, 0 problems), `smoke_sim.py` (17 cars × 2 modes deterministic), `pursuit_probe.py --chase`, `ram-probe`. Main's vehicle changes (A's faster pedal filter `880753b`, save-the-car steering) shortened stops ≈ 1-2 m roster-wide and moved two cars across a band edge: **Vireo 100-0 37.9 m** (band 38-44) and **Lindwurm 0-100 5.42 s** (band ≤ 5.4). Both explained in VALIDATION.md, not retuned (rounding-level, caused by the vehicle model). Cruiser now 0-100 6.4 s, 0-144 11.65 s; it still reaches the day pursuit cap before every traffic and cheap car. Barrier sweep unchanged: 135/136, the one miss is the known Wolfhound offset near miss. |
+
+**Checks (round 8, cloud container):** `cargo fmt --check`, `cargo clippy --workspace -- -D
+warnings`, `cargo build --target wasm32-unknown-unknown -p wp_wasm`, `cargo test --workspace`
+(result below), plus the tool chain above.
+
+### New requests (round 8)
+
+| To | Request |
+|---|---|
+| 03 damage (B) | `DamageModel::structural_crush_m` and `max_displacement_along` skip glass and bumpers but not `Accessory`, so a crushed push bar now reads as structural crush (cruiser frontal 25 km/h 0.24 → 0.44 m; health unchanged). Add `BodyRegion::Accessory` to both exclusion lists (2 lines). Also: a detached `Accessory` group adds the generic 0.04 drag in `handling_effects`; 0 or the bumper 0.03 fits a push bar better. |
+| 08 economy (G) | `wp_economy::data::ALL_REGIONS` (20) and `data/economy/prices.toml` have no `Accessory` row, so a lost or bent push bar bills 0. Suggest ≈ 350 (bar) with the bumper's labour factor. |
+| lead (`wp_wasm`) | `wp_wasm::pack::ALL_REGIONS` (20) has no `Accessory`; `region_index` falls back to 0, so push-bar damage shows as front-bumper damage in the testbed. Harmless today; append it when the region arrays are next touched. |
+| 02 vehicle (A) + 14 weather (N) | `surface_multipliers[PaintedLine]` is now the **dry** tire-on-paint grip (0.92-0.96). When a wheel's surface *is* `PaintedLine`, do not also apply `PAINT_DRY_FACTOR` (0.95, `wp_vehicle::surface`) / `marking_dry_factor` (0.97, `surfaces.toml`), or dry paint is counted twice. The wet loss (`PAINT_WET_FACTOR`, `marking_wet_factor`, or a `PaintedLine` `wet_loss_scale` ≈ 1.6) stays with you. The `painted_line` flag on a non-paint surface is unaffected. |
 
 ## Response to lead feedback round 6b (2026-10-19)
 
@@ -217,7 +242,7 @@ Decisions are in "Lead feedback" below; status updated here.
 | 4 | `BrakeDef` doc | applied in v0.2.0; roster data already matches |
 | 5 | Solid axle | deferred |
 | 6 | Roll centre height | deferred |
-| 7 | `BodyRegion::Accessory` (push bar) | deferred to v0.3.0; push bar uses `FrontBumper` + detach group 8 until then |
+| 7 | `BodyRegion::Accessory` (push bar) | applied in v0.3.0; push bars on the three police cars use it since round 8 |
 | 8 | `fuel_capacity_l` | applied in v0.2.0; set on all 17 cars |
 | 9 | `VehicleClass::Van` (and/or a `Civilian` flag) — the cargo van and the compact pickup are traffic cars filed as `Truck`; economy/race class brackets and traffic selection should not treat them like the Hauler. | **new (round 6b)** |
 
@@ -288,7 +313,10 @@ would help:
 - The ABS ceiling and the `SEC` mirror are workarounds (see Needs).
 - Automatics' converter is data-only until A implements it; live axles and drum fade are
   approximated (deferred requests 3, 5).
-- Prices and durability classes are first-pass; 08 should tune prices against the economy.
+- Prices and durability classes are first-pass; 08 should tune prices against the economy
+  (the lead set the three civilian cars' prices in round 8; mirrored in `roster_inputs.py`).
+- Police barrier/ram crush figures include the push-bar tubes until B excludes `Accessory`
+  from the crush metrics (round 8 request); health and verdicts are unaffected.
 
 ## Lead feedback (2026-10-19)
 
