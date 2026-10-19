@@ -40,6 +40,10 @@ pub mod cues {
     pub const SQUEAL: &str = "tire/squeal";
     /// Loose-surface scrub loop.
     pub const SCRUB: &str = "tire/scrub_loose";
+    /// Driven-wheel spin loop on paved surfaces (launch, burnout, power-on exit).
+    pub const SPIN: &str = "tire/spin";
+    /// Driven-wheel spin loop on loose surfaces (gravel roost, dirt / grass churn).
+    pub const SPIN_LOOSE: &str = "tire/spin_loose";
     /// Surface rolling loops, indexed like `wp_contracts::SurfaceType` declaration order.
     pub const SURFACES: [&str; 8] = [
         "surface/asphalt",
@@ -93,6 +97,8 @@ pub mod cues {
         let mut v = vec![
             SQUEAL,
             SCRUB,
+            SPIN,
+            SPIN_LOOSE,
             THUMP,
             LAND,
             THUD,
@@ -124,9 +130,9 @@ pub mod cues {
 }
 
 /// Synth names the procedural backend implements (`apps/testbed-web/src/audio/synth.ts`).
-pub const KNOWN_SYNTHS: [&str; 15] = [
+pub const KNOWN_SYNTHS: [&str; 16] = [
     "engine", "noise", "tone", "siren", "horn", "impact", "glass", "thump", "squeal", "whine",
-    "blowoff", "pop", "squelch", "clatter", "hiss",
+    "blowoff", "pop", "squelch", "clatter", "hiss", "spin",
 ];
 
 // ----- config ------------------------------------------------------------------------------
@@ -230,6 +236,26 @@ pub struct TireMix {
     pub land_airtime_s: f32,
     /// Minimum time between thumps on one wheel, s.
     pub thump_debounce_s: f32,
+    /// Wheelspin: positive (driving) slip ratio where spin starts / is full. Squeal and loose
+    /// scrub only hear the braking (negative) part of the slip ratio plus slip angle, so a
+    /// spinning driven wheel has its own sound.
+    pub spin_ratio_onset: f32,
+    /// See `spin_ratio_onset`.
+    pub spin_ratio_full: f32,
+    /// Slip speed `ω·r − vx` (m/s) where spin starts (gripping hard at speed stays silent).
+    pub spin_speed_onset_mps: f32,
+    /// Slip speed where pitch and intensity reach full, m/s.
+    pub spin_speed_ref_mps: f32,
+    /// Paved spin gain.
+    pub spin_gain: f32,
+    /// Spin multiplier on wet asphalt (hiss, less howl).
+    pub wet_spin_scale: f32,
+    /// Loose-surface spin (roost) gain.
+    pub loose_spin_gain: f32,
+    /// Spin level rise time constant, s.
+    pub spin_attack_s: f32,
+    /// Spin level release time constant, s.
+    pub spin_release_s: f32,
 }
 
 /// Collision tuning. Speeds are the contact's closing speed (`rel_speed`).

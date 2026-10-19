@@ -331,6 +331,44 @@ function squeal(ctx: BaseAudioContext, s: Params, p: VoiceParams): SynthVoice {
   return v;
 }
 
+/**
+ * Wheelspin: a low rough howl (band-passed saw, lower than cornering squeal) chopped by the tread
+ * "chirp" at a rate rising with slip speed, plus smoke / scrub hiss. `pitch` and `load` come from
+ * the director (slip speed and spin intensity).
+ */
+function spin(ctx: BaseAudioContext, s: Params, p: VoiceParams): SynthVoice {
+  const out = gain(ctx, 1);
+  const base = s.freq_hz ?? 620;
+  const chirpHz = s.chirp_hz ?? 34;
+  const am = gain(ctx, 0.65);
+  am.connect(out);
+  const chirp = osc(ctx, "square", chirpHz);
+  const chirpDepth = gain(ctx, 0.35);
+  chirp.connect(chirpDepth).connect(am.gain);
+  const o = osc(ctx, "sawtooth", base);
+  const bp = filter(ctx, "bandpass", base * 1.3, 4);
+  const og = gain(ctx, 0.4);
+  o.connect(bp).connect(og).connect(am);
+  const nz = noise(ctx);
+  const nbp = filter(ctx, "bandpass", 2500, 0.8);
+  const ng = gain(ctx, 0.3);
+  nz.connect(nbp).connect(ng).connect(out);
+  const v: SynthVoice = {
+    output: out,
+    update(p2, t) {
+      const pitch = Math.min(3, Math.max(0.3, p2.pitch));
+      smooth(o.frequency, clampF(base * pitch), t);
+      smooth(bp.frequency, clampF(base * 1.3 * pitch), t);
+      smooth(chirp.frequency, chirpHz * pitch, t);
+      smooth(og.gain, 0.25 + 0.5 * p2.load, t);
+      smooth(ng.gain, (s.hiss ?? 0.7) * (0.3 + 0.7 * p2.load), t);
+    },
+    stop: (t) => stopAll([o, chirp, nz], t),
+  };
+  v.update(p, ctx.currentTime);
+  return v;
+}
+
 /** Horn: two detuned square tones (the classic dissonant car horn interval). */
 function horn(ctx: BaseAudioContext, s: Params): SynthVoice {
   const out = gain(ctx, 1);
@@ -570,6 +608,8 @@ export function makeSynth(
       return whine(ctx, params, p);
     case "squeal":
       return squeal(ctx, params, p);
+    case "spin":
+      return spin(ctx, params, p);
     case "horn":
       return horn(ctx, params);
     case "hiss":

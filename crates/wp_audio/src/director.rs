@@ -106,6 +106,8 @@ struct CarAudio {
     world: WorldCues,
     materials: MaterialMap,
     static_load_n: f32,
+    /// Loaded wheel radii FL, FR, RL, RR, m (wheelspin slip speed).
+    wheel_radius_m: [f32; 4],
 }
 
 /// Cues of one world pack.
@@ -113,6 +115,8 @@ struct CarAudio {
 struct WorldCues {
     squeal: CueRef,
     scrub: CueRef,
+    spin: CueRef,
+    spin_loose: CueRef,
     surfaces: [CueRef; 8],
     thump: CueRef,
     land: CueRef,
@@ -143,6 +147,8 @@ impl WorldCues {
         Self {
             squeal: t.get(pack, cues::SQUEAL, true),
             scrub: t.get(pack, cues::SCRUB, true),
+            spin: t.get(pack, cues::SPIN, true),
+            spin_loose: t.get(pack, cues::SPIN_LOOSE, true),
             surfaces: cues::SURFACES.map(|c| t.get(pack, c, true)),
             thump: t.get(pack, cues::THUMP, false),
             land: t.get(pack, cues::LAND, false),
@@ -306,6 +312,7 @@ impl AudioDirector {
             world: WorldCues::new(t, &def.world_pack),
             materials: MaterialMap::from_lattice(&car.lattice, &car.materials),
             static_load_n: car.def.mass_kg * GRAVITY_MPS2 * 0.25,
+            wheel_radius_m: car.def.wheels.each_ref().map(|w| w.radius_m),
             layers,
             def,
         };
@@ -556,6 +563,7 @@ impl AudioDirector {
             &cfg.tires,
             s,
             car.static_load_n,
+            car.wheel_radius_m,
             v.road_rumble,
             tick,
             dt,
@@ -573,6 +581,25 @@ impl AudioDirector {
             d.pitch = pitch;
             d.load = k;
             out.push(d);
+        }
+        for (slot_code, cue, spin) in [
+            (slot::SPIN, car.world.spin, to.spin),
+            (slot::SPIN_LOOSE, car.world.spin_loose, to.spin_loose),
+        ] {
+            if let Some((gain, pitch, k)) = spin {
+                let mut d = Desire::new(
+                    VoiceId::new(e, slot_code),
+                    Bus::World,
+                    cue,
+                    up(Priority::Normal),
+                    pos,
+                    vel,
+                );
+                d.gain = gain;
+                d.pitch = pitch;
+                d.load = k;
+                out.push(d);
+            }
         }
         if let Some((gain, k)) = to.scrub {
             let mut d = Desire::new(

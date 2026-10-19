@@ -62,7 +62,16 @@
     "thump_rate_mps": 0.7,
     "thump_rate_ref_mps": 2.5,
     "land_airtime_s": 0.18,
-    "thump_debounce_s": 0.12
+    "thump_debounce_s": 0.12,
+    "spin_ratio_onset": 0.15,
+    "spin_ratio_full": 0.45,
+    "spin_speed_onset_mps": 0.6,
+    "spin_speed_ref_mps": 14.0,
+    "spin_gain": 0.6,
+    "wet_spin_scale": 0.55,
+    "loose_spin_gain": 0.65,
+    "spin_attack_s": 0.03,
+    "spin_release_s": 0.08
   },
   "impacts": {
     "min_speed_mps": 0.6,

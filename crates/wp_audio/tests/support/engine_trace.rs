@@ -68,9 +68,10 @@ pub struct Frame {
     pub gear: i8,
     /// Speed, km/h.
     pub kmh: f32,
-    /// Engine voices by slot: layers (`ENGINE_LAYER + i`), limiter, turbo, supercharger.
+    /// The car's looped voices by slot (any bus): engine layers (`ENGINE_LAYER + i`),
+    /// limiter, turbo, supercharger, tire squeal / spin / scrub, surface, …
     pub voices: BTreeMap<u32, VoiceView>,
-    /// Engine-bus one-shots started this frame (blow-off, pops): `(cue, gain)`.
+    /// One-shots started this frame (blow-off, pops, thumps): `(cue, gain)`.
     pub one_shots: Vec<(String, f32)>,
     /// Engine voices that were stopped this frame.
     pub stopped: Vec<u32>,
@@ -78,6 +79,8 @@ pub struct Frame {
     pub commands: Vec<AudioCommand>,
     /// Listener (chase camera) this frame.
     pub listener: Listener,
+    /// Wheel states (FL, FR, RL, RR) this frame.
+    pub wheels: [wp_contracts::WheelState; 4],
 }
 
 impl Frame {
@@ -176,6 +179,7 @@ pub fn run(car_id: &str, script: &[Segment], assists: Option<AssistProfile>) -> 
                 rpm: st.engine_rpm,
                 gear: st.gear,
                 kmh: st.speed_mps * 3.6,
+                wheels: st.wheel_states,
                 ..Default::default()
             };
             f.commands = cmds.clone();
@@ -184,7 +188,6 @@ pub fn run(car_id: &str, script: &[Segment], assists: Option<AssistProfile>) -> 
                 match c {
                     AudioCommand::Play {
                         voice,
-                        bus: Bus::Engine,
                         cue,
                         looped,
                         params,
@@ -246,6 +249,26 @@ pub fn standard_script() -> Vec<Segment> {
         seg(6.0, 0.35, 0.0),  // cruise
         seg(5.0, 1.0, 0.0),   // kickdown
     ]
+}
+
+/// Standstill burnout (brakes hold the fronts), release, full-throttle launch, light cruise.
+/// Run it with TCS off (`burnout_assists`).
+pub fn burnout_script() -> Vec<Segment> {
+    vec![
+        seg(1.0, 0.0, 0.0),
+        seg(3.0, 1.0, 0.4),
+        seg(1.0, 0.0, 0.0),
+        seg(4.0, 1.0, 0.0),
+        seg(4.0, 0.3, 0.0),
+    ]
+}
+
+/// The metric assists with TCS off (wheelspin traces).
+pub fn burnout_assists() -> wp_contracts::AssistProfile {
+    wp_contracts::AssistProfile {
+        tcs: false,
+        ..metric_assists()
+    }
 }
 
 /// CSV of a trace (one row per frame; layer columns by slot).
