@@ -19,14 +19,15 @@ let parts = dm.take_detached_parts();    // → part.to_rapier(..) debris bodies
 if dm.hull_version() != last { rebuild_collider(dm.convex_hull_outer()) }
 let bill = dm.repair_estimate(&mode, &prices);
 let glass = dm.glass_broken_this_tick();  // panels that shattered in this apply_contacts call
-let snap = dm.save_state();              // DamageSnapshot (serde) → garage / impound / net
-dm.restore_state(&snap)?;                // bit-exact; Err on another lattice
-dm.apply_repair(&items, false);          // pay line items (true = full repair)
+let snap = dm.save_state();              // contract DamageSnapshot → garage / impound / net
+dm.restore_state(&snap)?;                // Err on another lattice / bad arrays
+let full = dm.save_full();               // + DamageSnapshotExt: bit-exact round trip
+dm.restore_full(&full)?;
+dm.apply_repair(&items);                 // pay line items (dm.reset() = full repair)
 let s = dm.summary();                    // DamageSummary { health, total_loss, counts }
 ```
-`save_state` / `restore_state` / `apply_repair` / `summary` and `DamageSnapshot` /
-`DamageSummary` are inherent and local until contract v0.3.0 moves them onto `DamageSim`
-(`persist.rs`).
+The `DamageSim` methods (contract v0.3.0) are in `snapshot.rs`. `DamageSnapshotExt` holds what
+the contract snapshot lacks (contract request #9); `FullDamageSnapshot` is both, serde.
 
 ## The model
 
@@ -139,19 +140,23 @@ component (1 − health). Severity ≥ 0.6 bills the full part price, below it 3
 (straightening); labour = `labour_hours_per_item × severity` (min 0.1). All × `repair_cost_scale`.
 `default_price_table()` is a placeholder until `wp_economy` supplies prices.
 
-### Persistence and repair (`persist.rs`)
-`save_state()` captures a settled car: node positions, beam rest lengths / plastic strains /
+### Persistence and repair (`snapshot.rs`)
+`save_full()` (contract `DamageSnapshot` + `DamageSnapshotExt`) captures a settled car: node positions, beam rest lengths / plastic strains /
 energy / broken+buckled flags, the energy ledger, cracked and shattered regions, component
 health (+ last reported health and time since failure, so the radiator ramp and event thresholds
 carry over), detached groups, lost wheels, steer-pull bias, health and total loss. Restoring it
 into a fresh model of the same lattice gives the same `state_hash` (once call counters match)
 and identical results for later crashes. A crash in progress (impactors, velocities) is not
-saved; the damage log and pending debris are session-only.
+saved; the damage log and pending debris are session-only; panels (workstream R) restart
+latched. The contract-only `save_state`/`restore_state` keeps health, bill, geometry and events
+identical; compressive strain, beam energy, Arcade cosmetic state and hinge impulse restart at
+zero (the next crash can differ slightly).
 
-`apply_repair(items, full)`: `Region(r)` puts `r`'s nodes back to rest, restores every beam
+`apply_repair(items)` (full repair = `reset()`): `Region(r)` puts `r`'s nodes back to rest, restores every beam
 touching them, zeroes `r`'s ledger and un-shatters glass; `DetachedPart(r)` re-attaches the
 group and repairs region `r` (the estimate bills the part instead of the region); `Component(c)`
-restores health and its mount nodes (a new part on a crushed mount would fail at once); `Wheel*`
+restores health and its mount nodes (a new part on a crushed mount would fail at once) and
+clears its Arcade cosmetic offsets (also when a repaired region holds its mount); `Wheel*`
 gives the wheel back. Afterwards every intact beam takes its current length as rest length
 (stress relief), so a partial repair never makes the car creep; health, total loss and effects
 are recomputed with the last mode passed to `apply_contacts`; the hull is rebuilt.
@@ -168,6 +173,11 @@ keeps it awake ~0.38 s).
 cargo run -p wp_damage --bin gen-lattice -- --id my_car --profile coupe --width 1.8 \
     --length 4.4 --height 1.3 --wheelbase 2.6 --mass 340 --car-mass 1350 \
     [--clearance 0.15] [--front-overhang 0.95] [--strength 1.0] --out data/lattices/my_car.json
+# police package: push bar (group 8, Accessory region by default), heavy-duty components,
+# tougher bumper fixings — same output as tools/specsheet's police_package step
+    --accessory pushbar --pushbar-mass 40 --pushbar-impulse 30000 --pushbar-section-scale 1.5 \
+    [--pushbar-region accessory|front-bumper] [--pushbar-z 0.45,0.95] \
+    --hd Radiator=1.5,SteeringRack=1.5,WheelFL=1.4 --detach-scale FrontBumper=2
 just lattices   # regenerate the debug lattices (a test fails if they are stale)
 ```
 Profiles `sedan | coupe | hatch | truck | suv | cruiser`; 260–300 nodes, ~1600–1950 beams. The

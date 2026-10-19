@@ -29,9 +29,9 @@
     `cracked_regions()`, `shattered_regions()`, `detached_groups()`, `wheels_lost()`,
     `log()` (`DamageLogEntry` timeline), `state_hash()`, `reset()`, `is_awake()`.
   - `repair_estimate(&ModeTable, &PriceTable)`; `wp_damage::default_price_table()` placeholder.
-  - v0.3.0 items, inherent until the contract lands (`persist.rs`): `save_state() ->
-    DamageSnapshot`, `restore_state(&DamageSnapshot) -> Result<(), String>`,
-    `apply_repair(&[RepairItem], full: bool)`, `summary() -> DamageSummary`.
+  - v0.3.0 `DamageSim::{save_state, restore_state, apply_repair, summary}` (`snapshot.rs`);
+    lossless `save_full() -> FullDamageSnapshot` / `restore_full` with `DamageSnapshotExt`
+    until contract request #9; full repair = `reset()`.
   - `glass_broken_this_tick() -> &[GlassBreak { region, centroid_m, nodes }]` — glass panels
     that shattered during the last `apply_contacts` call (audio/VFX positioning).
   - Debug: `set_emit_lattice_events(true)` → `SimEvent::LatticeDeformed` (never replicate),
@@ -62,11 +62,12 @@
 | 1 | `SimEvent::GlassShattered { vehicle: EntityId, region: BodyRegion }` | Prompt 03 asks for a shatter event; the renderer/audio and net clients need it (today only in `DamageModel::log()`). | 03 emits; 04, 07 consume | accepted for v0.2.0 |
 | 2 | `PriceTable` refinements: optional per-item labour hours (`BTreeMap<RepairItem, f32>`) and a `repair_parts_fraction` (repair-vs-replace split, now `wp_damage::repair::REPAIR_PARTS_FRACTION = 0.3`, `REPLACE_SEVERITY = 0.6`). `PriceTable` itself was already promoted in 0.1.0. | Let economy own pricing policy. | 03, 08 | accepted for v0.2.0 (labour map + optional field) |
 | 3 | `SimEvent::RegionDamaged { vehicle, region, severity }` (thresholded like `ComponentDamaged`) | HUD damage silhouette and police "visibly wrecked car" heuristics without reading lattice state. | 03 emits; 04, 06 consume | **applied v0.2.0, emitted** |
-| 4 | `DamageSnapshot` + `DamageSim::{save_state, restore_state}` (final shape below) | Garage persistence, impound, net late-join baselines. | 03, 08, 07 | for v0.3.0 |
-| 5 | `DamageSim::apply_repair(&mut self, items: &[RepairItem])` | Economy bills and repairs line items, not just "full reset". | 03, 08 | for v0.3.0 |
-| 6 | `DamageSummary` + `DamageSim::summary()` | Economy/police/HUD read health without the whole model. | 03, 08, 06, 04 | for v0.3.0 |
-| 7 | `BodyRegion::Accessory` (push bars, kits) | Mods and the cruiser push bar as detachable, billable parts. | 03, 08, 09, 04 | for v0.3.0 |
+| 4 | `DamageSnapshot` + `DamageSim::{save_state, restore_state}` (final shape below) | Garage persistence, impound, net late-join baselines. | 03, 08, 07 | **applied v0.3.0** |
+| 5 | `DamageSim::apply_repair(&mut self, items: &[RepairItem])` | Economy bills and repairs line items, not just "full reset". | 03, 08 | **applied v0.3.0** |
+| 6 | `DamageSummary` + `DamageSim::summary()` | Economy/police/HUD read health without the whole model. | 03, 08, 06, 04 | **applied v0.3.0** |
+| 7 | `BodyRegion::Accessory` (push bars, kits) | Mods and the cruiser push bar as detachable, billable parts. | 03, 08, 09, 04 | **applied v0.3.0**; `gen-lattice --accessory pushbar` uses it (round 8) |
 | 8 | `ModeTable::{mechanical_min_closing_mps: f32, cosmetic_health_share: f32, settle_fraction: f32, settle_s: f32}` (Sim: 0, 1, 0, any; Arcade: 11.5, 0.25, 0.3, 20) | Owner playtest #10: Arcade light hits must be cosmetic; the knobs belong in `data/modes/*.toml`, not code. Today they are `DamageTuning::arcade_*` gated on `ModeTable::mode` | 03 (reads), lead (schema), 10 (tables) | requested |
+| 9 | `DamageSnapshot` gains the fields of `wp_damage::DamageSnapshotExt`: `beam_comp_plastic_strain: Vec<f32>`, `beam_energy_j: Vec<f32>`, `region_injected_j`, `region_reported_severity: BTreeMap<BodyRegion, f32>`, `cracked: BTreeSet<BodyRegion>`, `component_reported_health`, `component_failed_age_s: BTreeMap<Component, f32>`, `detach_impulse_ns: BTreeMap<u16, f32>`, `component_cosmetic: BTreeMap<Component, [f32; 3]>`, `region_cosmetic_j: BTreeMap<BodyRegion, f32>`, `since_hard_hit_s: f32`, `steer_pull_bias: f32` — all `#[serde(default)]` so v0.3.0 saves still load | Without them a save → restore is not bit-exact: buckling history, the Arcade cosmetic split (playtest #10), radiator overheat ramp and hinge fatigue reset, so the next crash of a restored car differs (and peers desync on late join). Today: `DamageModel::save_full() -> FullDamageSnapshot { snapshot, ext }` / `restore_full`; the trait methods use the contract part only and derive defaults. | 03; 08 (garage store should save `FullDamageSnapshot` until then), 07 (late-join baselines) | requested (round 8) |
 
 ### Final shapes for the v0.3.0 damage items (#4–#7)
 ```rust
@@ -422,3 +423,53 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
 2. Restore the tests the lead removed while merging: `save_restore_round_trip_is_bit_exact`, `summary_counts_damage`, `repairing_every_billed_item_restores_the_car`, `partial_repair_fixes_only_the_paid_items`, `cosmetic_state_survives_save_restore_and_repair_clears_it`, and `restore_rejects_another_lattice_and_bad_arrays`. They are in your branch history (`git show origin/ws/damage~N:crates/wp_damage/src/tests.rs`).
 3. The lead also patched `raw_health` (snapshot.rs) to subtract `region_cosmetic_j`. Check it matches your `update_health`.
 4. gen-lattice options for H's push bar / heavy-duty component factors (H's request).
+
+## Response to round 8 — machine B, 2026-10-19
+
+1. **Persistence ported onto the contract types** (`snapshot.rs`; `persist.rs` stays gone).
+   `DamageSim::{save_state, restore_state, apply_repair, summary}` use the contract
+   `DamageSnapshot` / `DamageSummary`. What the contract lacks lives in the opaque extension
+   `wp_damage::DamageSnapshotExt` (compressive plastic strain, per-beam energy, energy ledger,
+   reported severities / component health, cracked set, failure age, hinge impulse, Arcade
+   `component_cosmetic` + `region_cosmetic_j`, time since the last hard hit, steer-pull bias).
+   `DamageModel::save_full() -> FullDamageSnapshot { snapshot, ext: Option<_> }` and
+   `restore_full` give the bit-exact round trip; **contract request #9** asks to fold the
+   extension into `DamageSnapshot`. A contract-only restore derives defaults: ledger = plastic
+   energy, reported severities recomputed from geometry (no re-emitted events), cracked =
+   regions with a broken attached beam + shattered glass, failed components "just failed",
+   Arcade settle complete; compressive strain / energy / cosmetic / hinge impulse = 0.
+   - Restore now starts from `reset()` (as the lead's version did) but keeps the call counter,
+     clock, break scale and hull version, so the hull version still changes and the state hash
+     matches a peer with the same call count. Panels (R) are re-attached latched; their swing
+     state is not persisted (gap; R can add it to the extension).
+   - `apply_repair` is my fuller version (component mount nodes restored, stress relief so a
+     partial repair never creeps, cosmetic cleared), with the lead's no-mode-yet health path.
+     New fix: a component whose mount sits in a repaired region loses its Arcade cosmetic
+     offsets (before, they turned into negative toe/camber after the mount was put back).
+     Full repair is `reset()` (the trait has no `full` flag).
+2. **Tests restored**: `save_restore_round_trip_is_bit_exact` (now on `save_full`),
+   `summary_counts_damage`, `repairing_every_billed_item_restores_the_car`,
+   `partial_repair_fixes_only_the_paid_items`, `cosmetic_state_survives_save_restore_and_repair_clears_it`
+   (also checks a billed repair clears cosmetic state), `restore_rejects_another_lattice_and_bad_arrays`
+   (+ a bad extension array). New: `contract_only_restore_keeps_health_and_bill`. The lead's
+   `snapshot_round_trips_into_a_fresh_model` and `summary_counts_failures_and_detachments` kept.
+3. **`raw_health` checked**: same formula as my `update_health` (region energy minus
+   `region_cosmetic_j`, clamped at 0, weighted; components weighted; structural share only when
+   `global_health_from_intrusion`). `update_health` calls it, so they cannot drift. Made
+   `update_health` `pub(crate)` again (repair needs it).
+4. **gen-lattice options for H** (`lattice_gen::{add_push_bar, apply_heavy_duty,
+   scale_detach_impulse}`): `--accessory pushbar [--pushbar-mass] [--pushbar-impulse]
+   [--pushbar-section-scale] [--pushbar-region accessory|front-bumper] [--pushbar-z lo,hi]`,
+   `--hd Component=factor,…`, `--detach-scale Region=factor,…`. Ported from `build_roster.py`
+   steps 6–7: with `--pushbar-region front-bumper` and the cruiser's `police_package` values the
+   output matches `data/lattices/sentinel_cruiser.json` node-for-node, component-for-component
+   and on every push-bar beam / detachable; the only diff is the steel hood (H's separate
+   `hood="steel"` step, not part of this request). Default region is `Accessory` (contract
+   v0.3.0): billed as an accessory, health weight 0 — **H: switching the cruiser to it changes
+   its health/bill calibration, so it is your call**; `front-bumper` reproduces today's data.
+   Not done: `--accessory kit` (no consumer yet), `van` profile (truck/SUV bar heights are
+   picked by profile; pass `--pushbar-z 0.45,0.95` for H's van).
+
+Requests: contract #9 (lead); 08 — store `FullDamageSnapshot` for garage/impound until #9;
+H — optional move of the police package to the new flags; R — panel state in the extension if
+hanging/unlatched panels must survive a save.

@@ -44,5 +44,6 @@ pub use panels::{
     DeriveOptions, PanelDef, PanelError, PanelKind, PanelSpec, PanelState, PanelStatus,
 };
 pub use repair::default_price_table;
+pub use snapshot::{DamageSnapshotExt, FullDamageSnapshot};
 pub use tuning::DamageTuning;
 pub use wp_contracts::{HandlingEffects, ModeTable, PriceTable, RepairEstimate};

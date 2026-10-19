@@ -719,6 +719,168 @@ fn crash_and_settle(
 }
 
 #[test]
+fn save_restore_round_trip_is_bit_exact() {
+    let car = sedan();
+    let mode = sim_mode();
+    let mut a = DamageModel::new(&car.lattice, &car.materials);
+    crash_and_settle(&mut a, &car, ImpactKind::Frontal, 60.0, &mode);
+    assert!(!a.is_awake());
+    assert!(a.health() < 0.9);
+    let snap = a.save_full();
+
+    // JSON round trip is lossless.
+    let json = serde_json::to_string(&snap).unwrap();
+    let back: crate::FullDamageSnapshot = serde_json::from_str(&json).unwrap();
+    assert_eq!(back, snap);
+
+    // A fresh model with the same call count, restored, is the same car.
+    let mut b = DamageModel::new(&car.lattice, &car.materials);
+    for _ in 0..a.calls {
+        b.apply_contacts(&[], &mode, PHYSICS_DT, &mut Vec::new());
+    }
+    b.restore_full(&back).unwrap();
+    assert_eq!(b.save_full(), snap);
+    assert_eq!(b.state_hash(), a.state_hash());
+    assert_eq!(b.summary(), a.summary());
+    assert!(!b.is_awake());
+
+    // And it keeps behaving identically: same second crash, same state and events.
+    let ea = crash_and_settle(&mut a, &car, ImpactKind::Side, 40.0, &mode);
+    let eb = crash_and_settle(&mut b, &car, ImpactKind::Side, 40.0, &mode);
+    assert_eq!(a.state_hash(), b.state_hash());
+    assert_eq!(ea, eb);
+    assert_eq!(a.handling_effects(), b.handling_effects());
+}
+
+#[test]
+fn restore_rejects_another_lattice_and_bad_arrays() {
+    let car = sedan();
+    let mut m = DamageModel::new(&car.lattice, &car.materials);
+    let mut snap = m.save_state();
+    snap.lattice_id = "something_else".into();
+    assert!(m.restore_state(&snap).is_err());
+    let mut snap = m.save_state();
+    snap.beam_flags.pop();
+    assert!(m.restore_state(&snap).is_err());
+    let mut snap = m.save_state();
+    snap.detached_groups.insert(999);
+    assert!(m.restore_state(&snap).is_err());
+    let mut full = m.save_full();
+    full.ext.as_mut().unwrap().beam_energy_j.pop();
+    assert!(m.restore_full(&full).is_err());
+    assert_eq!(
+        m.save_state(),
+        DamageModel::new(&car.lattice, &car.materials).save_state()
+    );
+}
+
+#[test]
+fn summary_counts_damage() {
+    let car = sedan();
+    let fresh = DamageModel::new(&car.lattice, &car.materials);
+    let s = fresh.summary();
+    assert_eq!(
+        s,
+        wp_contracts::DamageSummary {
+            health: 1.0,
+            total_loss: false,
+            components_failed: 0,
+            parts_detached: 0,
+            wheels_lost: 0
+        }
+    );
+    let (m, _) = run_barrier(&car, &sim_mode(), ImpactKind::Frontal, 80.0, 0.0, 0.5, 1);
+    let s = m.summary();
+    assert!(s.total_loss && s.health < 0.5);
+    assert!(s.components_failed >= 2, "{s:?}");
+    assert_eq!(s.parts_detached as usize, m.detached_groups().len());
+}
+
+#[test]
+fn repairing_every_billed_item_restores_the_car() {
+    let car = sedan();
+    let mode = sim_mode();
+    let prices = default_price_table();
+    let mut m = DamageModel::new(&car.lattice, &car.materials);
+    crash_and_settle(&mut m, &car, ImpactKind::Frontal, 56.0, &mode);
+    let before = m.repair_estimate(&mode, &prices);
+    assert!(m.is_total_loss() && before.total > 0.0);
+    let items: Vec<_> = before.lines.iter().map(|l| l.item).collect();
+    let v0 = m.hull_version();
+    m.apply_repair(&items);
+    let after = m.repair_estimate(&mode, &prices);
+    assert!(
+        after.total < 0.05 * before.total,
+        "{} -> {}",
+        before.total,
+        after.total
+    );
+    assert!(m.health() > 0.97, "health {}", m.health());
+    assert!(!m.is_total_loss());
+    assert!(m.detached_groups().is_empty());
+    assert_eq!(m.wheels_lost(), [false; 4]);
+    assert!(m.structural_crush_m() < 0.02);
+    assert_ne!(m.hull_version(), v0, "collider rebuilt");
+    assert!(!m.handling_effects().engine_dead);
+
+    // The repaired car crashes like a new one (no hidden pre-stress).
+    let mut fresh = DamageModel::new(&car.lattice, &car.materials);
+    crash_and_settle(&mut fresh, &car, ImpactKind::Side, 40.0, &mode);
+    crash_and_settle(&mut m, &car, ImpactKind::Side, 40.0, &mode);
+    let (cf, cm) = (fresh.structural_crush_m(), m.structural_crush_m());
+    assert!((cm - cf).abs() < 0.3 * cf, "fresh {cf} repaired {cm}");
+}
+
+#[test]
+fn partial_repair_fixes_only_the_paid_items() {
+    let car = sedan();
+    let mode = sim_mode();
+    let mut m = DamageModel::new(&car.lattice, &car.materials);
+    crash_and_settle(&mut m, &car, ImpactKind::Frontal, 40.0, &mode);
+    let health = m.health();
+    assert!(m.region_plastic_energy_j(BodyRegion::FrontBumper) > 0.0);
+    let hood = m.region_plastic_energy_j(BodyRegion::Hood)
+        + m.region_plastic_energy_j(BodyRegion::FrameFront);
+    assert!(hood > 0.0);
+    m.apply_repair(&[wp_contracts::RepairItem::Region(BodyRegion::FrontBumper)]);
+    assert_eq!(m.region_plastic_energy_j(BodyRegion::FrontBumper), 0.0);
+    assert!(!m.cracked_regions().contains(&BodyRegion::FrontBumper));
+    let hood_after = m.region_plastic_energy_j(BodyRegion::Hood)
+        + m.region_plastic_energy_j(BodyRegion::FrameFront);
+    assert_eq!(hood_after, hood, "unpaid regions keep their damage");
+    assert!(m.health() >= health);
+    for i in 0..car.lattice.nodes.len() {
+        if car.lattice.nodes[i].region == BodyRegion::FrontBumper && !m.node_detached(i) {
+            assert_eq!(m.node_positions()[i], m.rest_position(i));
+        }
+    }
+    // A failed component can be replaced on its own.
+    let failed: Vec<Component> = m.component_health_map().keys().copied().collect();
+    for c in failed {
+        m.apply_repair(&[wp_contracts::RepairItem::Component(c)]);
+        assert_eq!(m.component_health(c), 1.0);
+        assert!(!m.component_failed(c));
+    }
+    // Waking the partially repaired lattice does not make it move by itself.
+    let p = m.node_positions().to_vec();
+    m.awake = true;
+    run(&mut m, &mode, 0.5);
+    let drift = p
+        .iter()
+        .zip(m.node_positions())
+        .map(|(a, b)| crate::vec3::length(crate::vec3::sub(*a, *b)))
+        .fold(0.0, f32::max);
+    assert!(
+        drift < 0.005,
+        "partial repair left the lattice pre-stressed: {drift} m"
+    );
+    // Full repair is a reset.
+    m.reset();
+    let fresh = DamageModel::new(&car.lattice, &car.materials);
+    assert_eq!(m.save_state(), fresh.save_state());
+}
+
+#[test]
 fn glass_breaks_are_readable_for_the_tick_they_happen() {
     let car = sedan();
     let mode = sim_mode();
@@ -942,4 +1104,71 @@ fn summary_counts_failures_and_detachments() {
     let fresh = DamageModel::new(&car.lattice, &car.materials);
     assert_eq!(fresh.summary().health, 1.0);
     assert_eq!(fresh.summary().components_failed, 0);
+}
+
+#[test]
+fn cosmetic_state_survives_save_restore_and_repair_clears_it() {
+    let car = sedan();
+    let mode = arcade_mode();
+    let mut a = DamageModel::new(&car.lattice, &car.materials);
+    crash_and_settle(&mut a, &car, ImpactKind::Side, 30.0, &mode);
+    let snap = a.save_full();
+    let ext = snap.ext.as_ref().unwrap();
+    assert!(!ext.component_cosmetic.is_empty() || !ext.region_cosmetic_j.is_empty());
+    let mut b = DamageModel::new(&car.lattice, &car.materials);
+    b.restore_full(&snap).unwrap();
+    assert_eq!(b.save_full(), snap);
+    // A later hard hit only counts its own intrusion in both.
+    crash_and_settle(&mut a, &car, ImpactKind::Frontal, 56.0, &mode);
+    crash_and_settle(&mut b, &car, ImpactKind::Frontal, 56.0, &mode);
+    assert_eq!(a.component_health_map(), b.component_health_map());
+    let items: Vec<_> = a
+        .repair_estimate(&mode, &default_price_table())
+        .lines
+        .iter()
+        .map(|l| l.item)
+        .collect();
+    a.apply_repair(&items);
+    let ext = a.snapshot_ext();
+    assert!(
+        ext.component_cosmetic.is_empty(),
+        "{:?}",
+        ext.component_cosmetic
+    );
+    assert!(
+        ext.region_cosmetic_j.is_empty(),
+        "{:?}",
+        ext.region_cosmetic_j
+    );
+    a.reset();
+    assert!(a.snapshot_ext().component_cosmetic.is_empty());
+}
+
+#[test]
+fn contract_only_restore_keeps_health_and_bill() {
+    // Older saves / peers without the extension: health, summary, bill and geometry match,
+    // and the restored car does not re-emit damage events.
+    let car = sedan();
+    let mode = arcade_mode();
+    let prices = default_price_table();
+    let mut a = DamageModel::new(&car.lattice, &car.materials);
+    crash_and_settle(&mut a, &car, ImpactKind::Side, 30.0, &mode);
+    crash_and_settle(&mut a, &car, ImpactKind::Frontal, 45.0, &mode);
+    let mut b = DamageModel::new(&car.lattice, &car.materials);
+    b.restore_state(&a.save_state()).unwrap();
+    assert_eq!(b.save_state(), a.save_state());
+    assert_eq!(b.summary(), a.summary());
+    assert_eq!(b.node_positions(), a.node_positions());
+    assert_eq!(b.cracked_regions(), a.cracked_regions());
+    let (ea, eb) = (
+        a.repair_estimate(&mode, &prices),
+        b.repair_estimate(&mode, &prices),
+    );
+    assert_eq!(ea.lines.len(), eb.lines.len());
+    assert!((ea.total - eb.total).abs() < 0.01 * ea.total.max(1.0));
+    let mut events = Vec::new();
+    for _ in 0..240 {
+        b.apply_contacts(&[], &mode, PHYSICS_DT, &mut events);
+    }
+    assert!(events.is_empty(), "{events:?}");
 }

@@ -1382,7 +1382,7 @@ impl DamageModel {
         }
     }
 
-    fn update_health(&mut self, mode: &ModeTable, out: &mut Vec<SimEvent>) {
+    pub(crate) fn update_health(&mut self, mode: &ModeTable, out: &mut Vec<SimEvent>) {
         let raw = self.raw_health(mode.global_health_from_intrusion);
         if raw < self.health {
             self.health = raw.max(0.0);
