@@ -15,13 +15,15 @@ use crate::wire::{ByteReader, ByteWriter};
 use crate::NetError;
 
 /// Protocol version; bumped on any wire change. Checked in `Hello`.
-pub const PROTOCOL_VERSION: u16 = 1;
+pub const PROTOCOL_VERSION: u16 = 2;
 /// Longest accepted player name, bytes.
 pub const MAX_NAME_LEN: usize = 32;
 /// Longest accepted captain command payload, bytes.
 pub const MAX_COMMAND_LEN: usize = 256;
 /// Most inputs one `Inputs` message may carry (redundancy window).
 pub const MAX_INPUTS_PER_MSG: usize = 32;
+/// Largest accepted own-vehicle snapshot blob, bytes.
+pub const MAX_VEHICLE_SNAPSHOT: usize = 4096;
 /// Most checkpoints in one race.
 pub const MAX_CHECKPOINTS: usize = 64;
 
@@ -561,8 +563,8 @@ pub enum ServerMsg {
         /// Entity.
         entity: u32,
     },
-    /// `0x87` U. `varint tick, varint input_ack, u8 has_own, [OwnState], varint n,
-    /// n × DeltaVehicle`.
+    /// `0x87` U. `varint tick, varint input_ack, u8 has_own, [OwnState], u8 has_full,
+    /// [bytes own_full], varint n, n × DeltaVehicle`.
     Snapshot {
         /// Server physics tick of the state.
         tick: u64,
@@ -570,6 +572,8 @@ pub enum ServerMsg {
         input_ack: u64,
         /// Own vehicle at full precision (every other snapshot).
         own: Option<OwnState>,
+        /// Own vehicle's bit-exact `wp_vehicle::VehicleSnapshot` bytes (5 Hz, with `own`).
+        own_full: Option<Vec<u8>>,
         /// Interest-filtered, prioritised, delta-encoded vehicles.
         entities: Vec<DeltaVehicle>,
     },
@@ -977,6 +981,7 @@ impl ServerMsg {
                 tick,
                 input_ack,
                 own,
+                own_full,
                 entities,
             } => {
                 w.u8(0x87);
@@ -986,6 +991,13 @@ impl ServerMsg {
                     Some(o) => {
                         w.u8(1);
                         o.write(w);
+                    }
+                    None => w.u8(0),
+                }
+                match own_full {
+                    Some(b) => {
+                        w.u8(1);
+                        w.bytes(b);
                     }
                     None => w.u8(0),
                 }
@@ -1176,6 +1188,11 @@ impl ServerMsg {
                 } else {
                     None
                 };
+                let own_full = if r.bool()? {
+                    Some(r.bytes(MAX_VEHICLE_SNAPSHOT)?)
+                } else {
+                    None
+                };
                 let n = r.len(4096)?;
                 let mut entities = Vec::with_capacity(n);
                 for _ in 0..n {
@@ -1185,6 +1202,7 @@ impl ServerMsg {
                     tick,
                     input_ack,
                     own,
+                    own_full,
                     entities,
                 }
             }
@@ -1447,6 +1465,7 @@ mod tests {
             tick: 4000,
             input_ack: 4010,
             own: Some(OwnState::default()),
+            own_full: Some(vec![1, 2, 3, 250]),
             entities: vec![
                 DeltaVehicle::encode(1, &q, None),
                 DeltaVehicle::encode(2, &q, Some((8, &QVehicle::default()))),

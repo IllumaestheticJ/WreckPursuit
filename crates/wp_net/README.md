@@ -58,10 +58,11 @@ Real vehicle (A) and damage (B) models on the integrated build (lead run 2 merge
 
 | Measurement | Machine | Native (release) | Budget |
 |---|---|---|---|
-| Server net tick, 32 clients (4 physics ticks of 32 Rapier cars + all output), in-process | cloud container | avg 4.2 ms, p99 10.7 ms | 16.7 ms frame (asserted < 8 ms avg) |
-| Down-link per client, 32 bots, 120 m arena (all within interest) | in-process | mean 31.5 kB/s, worst second 38.1 kB/s | 40 kB/s |
-| Prediction at 120 ms RTT / 2 % loss / ±30 ms jitter, 3 other cars (real collisions) | in-process | RMS 0.11 m, max 0.44 m, 193 corrections in 2629 reconciles | < 0.3 m RMS |
-| Same link, alone | in-process | RMS 0.12 m, 13 corrections in 2634 reconciles | < 2 % mispredict |
+| Server net tick, 32 clients (4 physics ticks of 32 Rapier cars + all output), in-process | cloud container | avg 3.4 ms, p99 9.0 ms | 16.7 ms frame (asserted < 8 ms avg) |
+| Down-link per client, 32 bots, 120 m arena (all within interest), incl. 5 Hz own snapshots | in-process | mean 29.7 kB/s, worst second 33.9 kB/s | 40 kB/s |
+| Prediction at 120 ms RTT / 2 % loss / ±30 ms jitter, 3 other cars (real collisions) | in-process | RMS 0.11 m, max 0.92 m, 260 corrections in 2631 reconciles | < 0.3 m RMS |
+| Same link, alone | in-process | RMS 0.15 m, 4 corrections in 2634 reconciles | < 2 % mispredict |
+| Snapshot rewind + 10-tick replay vs server `Rig` | unit test | 0.0 m (bit-exact); `set_state` fallback ≈1.4 cm | exact |
 | Lattice hash checks (4 clients, 2 min) | in-process | 1 mismatch in 992 (the injected one), resynced in 16 ticks | < 1 %, < 2 s |
 
 Earlier numbers on the kinematic stub (run 1): net tick 0.39 ms, worst client 33 kB/s,
@@ -99,8 +100,14 @@ Ping (U) ⇄ Pong (U) → TimeSync (server tick estimate, RTT, jitter)
 The client runs the same `wp_vehicle` code on its own single-car Rapier world
 (`predict::RigVehicle`, stepped like `wp_sim`), keeps 240 ticks of **inputs** (plus the pose after
 each, only to measure error) and, on each `OwnState` (30 Hz, full `f32`), compares the
-prediction for that tick. Beyond 5 cm / 0.02 rad it sets the vehicle to the server state and
-re-simulates the stored inputs; the visual jump is absorbed by a render offset that decays
+prediction for that tick. Beyond 5 cm / 0.02 rad it rewinds to the server state and
+re-simulates the stored inputs. Every 12th net tick (5 Hz) the snapshot also carries the own
+car's bit-exact `wp_vehicle::VehicleSnapshot` (`own_full`, ≈0.9 kB); with it the rewind is
+lossless (`Rig::restore`, replay reproduces the server bit for bit), without it the rewind
+uses `set_state` (≈1 cm off after 10 ticks: filters, clutch, tire relaxation are not in
+`VehicleState`). The first own state with a snapshot also initialises the predictor
+exactly. The down-link budget is a per-client byte bucket (refill 95 % of 40 kB/s, burst one
+tick), so the snapshot spike is repaid by the following ticks. The visual jump is absorbed by a render offset that decays
 with a 100 ms time constant. Inputs are quantised (`quant::quantize_input`) **before** the
 client simulates them, so both sides simulate identical values.
 
@@ -148,7 +155,7 @@ reputation changes happen on the server; captain commands are role-checked, rate
 One transport frame = one message: `u8 tag` + body. Integers in bodies are little-endian
 fixed width or LEB128 `varint`; `zz` = zigzag varint; `str`/`bytes` = varint length + data;
 `opt` = varint, 0 = none, else value + 1. Decoders reject unknown tags, oversize lengths
-and trailing bytes. `PROTOCOL_VERSION = 1`; `Hello` must match it and the contract version.
+and trailing bytes. `PROTOCOL_VERSION = 2`; `Hello` must match it and the contract version.
 
 ### Client → server
 
@@ -184,7 +191,7 @@ u8 clutch×255, u8 buttons (1 gear up, 2 gear down, 4 horn, 8 headlights, 16 sir
 | 0x84 | `CaptainOffer` | R | `varint expires_tick` |
 | 0x85 | `EntityEnter` | R | `varint entity, str car_id, u8 kind (0 racer, 1 police chase, 2 AI police, 3 traffic), opt owner` |
 | 0x86 | `EntityLeave` | R | `varint entity` |
-| 0x87 | `Snapshot` | U | `varint tick, varint input_ack, u8 has_own, [OwnState], varint n, n × DeltaVehicle` |
+| 0x87 | `Snapshot` | U | `varint tick, varint input_ack, u8 has_own, [OwnState], u8 has_full, [bytes own_full ≤4096: wp_vehicle::VehicleSnapshot], varint n, n × DeltaVehicle` |
 | 0x88 | `Damage` | R | `varint vehicle, varint tick, varint n, n × QContact, varint m, m × DamageEvent` |
 | 0x89 | `LatticeHash` | R | `varint vehicle, varint tick, u32 hash` |
 | 0x8A | `LatticeSnapshot` | R | `varint vehicle, varint tick, LatticeSnapshot` |
@@ -241,11 +248,10 @@ for R. `sim_link` already tests the protocol under that model.
 - `wp_sim` does not extract contacts or offer a contact-quantisation hook, so on the real
   stack no damage is replicated yet (NET-N1); `testkit::ArenaSim` exercises the path.
 - `Sim` has no despawn: `WpSim` parks and reuses vehicles (MAX_VEHICLES = 64 limits churn).
-- Prediction steps the real vehicle (`predict::RigVehicle`: own Rapier body on a flat slab,
-  as `wp_vehicle::rig::Rig`), but the rewind is not lossless: `VehicleState` omits input
-  filters, clutch and tire relaxation (≈1.4 cm after 10 replayed ticks), and the client has no
-  city geometry, surface map or other cars, so collisions are corrected, not predicted
-  (NET-N2).
+- Prediction steps the real vehicle (`predict::RigVehicle` over `wp_vehicle::rig::Rig`,
+  bit-identical to `wp_sim` for a lone car on flat ground). Rewinds are exact at the 5 Hz
+  snapshot ticks only; in between they use `set_state`. The client has no city geometry,
+  surface map or other cars, so collisions are corrected, not predicted.
 - Local-car *predicted* contacts are not applied; the own car's damage is server-driven
   (arrives one RTT late) and resynced by the same hash path.
 - No traffic/AI police exist yet; `NetSim::ai_kind` defaults to traffic.

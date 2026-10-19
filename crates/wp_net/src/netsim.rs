@@ -62,6 +62,11 @@ pub trait NetSim {
     fn wanted_level(&self, _id: EntityId) -> u8 {
         0
     }
+    /// Bit-exact full state of a vehicle (`wp_vehicle::VehicleSnapshot` bytes) for the owning
+    /// client's prediction rewind. Default: none (clients fall back to `set_state`).
+    fn vehicle_snapshot(&self, _id: EntityId) -> Option<Vec<u8>> {
+        None
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -197,6 +202,17 @@ impl NetSim for WpSim {
 
     fn drain_events(&mut self) -> Vec<SimEvent> {
         self.sim.drain_events()
+    }
+
+    fn vehicle_snapshot(&self, id: EntityId) -> Option<Vec<u8>> {
+        if self.parked.contains(&id) {
+            return None;
+        }
+        self.sim
+            .vehicles()
+            .iter()
+            .find(|v| v.id == id)
+            .map(|v| v.vehicle.snapshot().as_bytes().to_vec())
     }
 
     fn drain_applied_contacts(&mut self) -> Vec<(EntityId, Vec<ContactImpulse>)> {

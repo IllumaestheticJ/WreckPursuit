@@ -279,6 +279,10 @@ impl NetSim for ArenaSim {
     fn ai_kind(&self, _id: EntityId) -> EntityKind {
         EntityKind::Traffic
     }
+
+    fn vehicle_snapshot(&self, id: EntityId) -> Option<Vec<u8>> {
+        self.inner.vehicle_snapshot(id)
+    }
 }
 
 /// Cars by id and mode tables by mode, as the net layer consumes them.

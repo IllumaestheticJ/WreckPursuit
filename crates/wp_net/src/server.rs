@@ -33,6 +33,9 @@ use crate::snapshot::{DeltaVehicle, OwnState};
 use crate::wire::ByteWriter;
 use crate::{Channel, DOWNLINK_BUDGET_BPS, TICKS_PER_NET_TICK, TICK_HZ};
 
+/// Net ticks between bit-exact own-vehicle snapshots (12 → 5 Hz).
+pub const OWN_FULL_EVERY_NET_TICKS: u64 = 12;
+
 /// Transport-level connection handle chosen by the instance.
 pub type ConnId = u32;
 
@@ -149,6 +152,9 @@ struct View {
     captain_synced: bool,
     bytes_this_tick: usize,
     bytes_window: VecDeque<usize>,
+    /// Down-link byte credit (token bucket): refilled per net tick, spent by everything sent,
+    /// so a large frame (own-vehicle snapshot) is repaid by the following ticks.
+    credit: i64,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -1221,7 +1227,15 @@ impl<S: NetSim> ServerInstance<S> {
         } else {
             None
         };
-        let budget = self.cfg.downlink_budget_bps / 60;
+        // Bit-exact rewind state for the client's predictor, 5 Hz (≈0.9 kB each).
+        let own_full =
+            if own_state.is_some() && self.net_ticks.is_multiple_of(OWN_FULL_EVERY_NET_TICKS) {
+                own.and_then(|e| self.sim.vehicle_snapshot(e))
+            } else {
+                None
+            };
+        // 5 % headroom so any 1 s window stays under budget despite the burst cap and debt.
+        let rate = (self.cfg.downlink_budget_bps * 95 / 100 / 60) as i64;
         let net_tick = self.net_ticks;
         let p = self.players.get_mut(&pid).expect("p");
         // input ack = newest tick the server holds contiguously from now.
@@ -1229,9 +1243,17 @@ impl<S: NetSim> ServerInstance<S> {
         while p.inputs.contains_key(&(input_ack + 1)) {
             input_ack += 1;
         }
-        let header = 1 + 10 + 10 + 1 + if own_state.is_some() { 113 } else { 0 } + 2;
-        let used_reliable = p.view.bytes_this_tick;
-        let allowance = budget.saturating_sub(used_reliable + header).max(96);
+        let header = 1
+            + 10
+            + 10
+            + 1
+            + if own_state.is_some() { 113 } else { 0 }
+            + 1
+            + own_full.as_ref().map_or(0, |b| b.len() + 2)
+            + 2;
+        p.view.credit = (p.view.credit + rate).min(rate);
+        let used_reliable = p.view.bytes_this_tick as i64;
+        let allowance = (p.view.credit - used_reliable - header as i64).max(96) as usize;
         let mut used = 0;
         let mut entities = Vec::new();
         let mut sent = Vec::new();
@@ -1263,9 +1285,12 @@ impl<S: NetSim> ServerInstance<S> {
             tick,
             input_ack,
             own: own_state,
+            own_full,
             entities,
         };
         self.send(pid, &msg);
+        let v = &mut self.players.get_mut(&pid).expect("p").view;
+        v.credit -= v.bytes_this_tick as i64;
     }
 
     fn captain_view(

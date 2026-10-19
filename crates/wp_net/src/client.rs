@@ -553,6 +553,7 @@ impl Client {
                 tick,
                 input_ack,
                 own,
+                own_full,
                 entities,
             } => {
                 self.stats.snapshots += 1;
@@ -581,7 +582,7 @@ impl Client {
                     }
                 }
                 if let Some(own) = own {
-                    self.on_own_state(tick, &own.to_state());
+                    self.on_own_state(tick, &own.to_state(), own_full.as_deref());
                 }
             }
             ServerMsg::Damage {
@@ -697,18 +698,22 @@ impl Client {
         Ok(())
     }
 
-    fn on_own_state(&mut self, tick: u64, state: &VehicleState) {
+    fn on_own_state(&mut self, tick: u64, state: &VehicleState, exact: Option<&[u8]>) {
         let effects = self.own_effects();
         let assists = self.assists();
         let time = self.time_of_day;
         let Some(pred) = self.predictor.as_mut() else {
             if let Some(car) = self.cfg.cars.get(&self.own_car) {
-                self.predictor = Some(Predictor::new(car, assists, state, tick, time));
+                let mut pred = Predictor::new(car, assists, state, tick, time);
+                if let Some(bytes) = exact {
+                    pred.restore_exact(bytes);
+                }
+                self.predictor = Some(pred);
             }
             return;
         };
         let before = pred.state().pos;
-        match pred.reconcile(tick, state, &effects) {
+        match pred.reconcile(tick, state, exact, &effects) {
             Reconcile::InSync { .. } => self.stats.reconciles += 1,
             Reconcile::Corrected { correction_m, .. } => {
                 self.stats.reconciles += 1;

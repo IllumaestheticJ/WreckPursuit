@@ -10,6 +10,7 @@ use wp_contracts::{
     AssistProfile, HandlingEffects, LoadedCar, TimeOfDay, VehicleInput, VehicleState,
 };
 use wp_vehicle::rig::Rig;
+use wp_vehicle::VehicleSnapshot;
 
 /// Inputs kept for replay: 1 s at 240 Hz.
 pub const INPUT_RING: usize = 240;
@@ -55,8 +56,12 @@ pub trait PredictedVehicle: Send {
     fn step(&mut self, input: &VehicleInput, effects: &HandlingEffects);
     /// Current state.
     fn state(&self) -> VehicleState;
-    /// Rewind to a server state.
+    /// Rewind to a server state (approximate: `VehicleState` omits filters, clutch, …).
     fn set_state(&mut self, s: &VehicleState);
+    /// Rewind bit-exactly to a server `wp_vehicle::VehicleSnapshot` (bytes). Returns false if
+    /// the snapshot cannot be used (wrong car, bad bytes); the caller falls back to
+    /// [`PredictedVehicle::set_state`].
+    fn restore(&mut self, snapshot: &[u8]) -> bool;
 }
 
 /// [`PredictedVehicle`] over the real `wp_vehicle` model: the car's own Rapier chassis body on
@@ -99,6 +104,12 @@ impl PredictedVehicle for RigVehicle {
 
     fn set_state(&mut self, s: &VehicleState) {
         self.rig.set_state(s);
+    }
+
+    fn restore(&mut self, snapshot: &[u8]) -> bool {
+        self.rig
+            .restore(&VehicleSnapshot::from_bytes(snapshot.to_vec()))
+            .is_ok()
     }
 }
 
@@ -182,15 +193,23 @@ impl Predictor {
             .filter(|f| f.tick == tick)
     }
 
-    /// Compare with the server's state at `server_tick` and correct if needed.
+    /// Overwrite the current state with an exact server snapshot (no tick change).
+    pub fn restore_exact(&mut self, snapshot: &[u8]) -> bool {
+        self.vehicle.restore(snapshot)
+    }
+
+    /// Compare with the server's state at `server_tick` and correct if needed. With `exact`
+    /// (the server's bit-exact vehicle snapshot for `server_tick`) the rewind is lossless;
+    /// otherwise it falls back to [`PredictedVehicle::set_state`].
     pub fn reconcile(
         &mut self,
         server_tick: u64,
         server: &VehicleState,
+        exact: Option<&[u8]>,
         effects: &HandlingEffects,
     ) -> Reconcile {
         if server_tick > self.tick {
-            self.vehicle.set_state(server);
+            self.rewind_to(server, exact);
             self.tick = server_tick;
             return Reconcile::Reset;
         }
@@ -200,7 +219,7 @@ impl Predictor {
         let Some(pred) = self.frame(server_tick - 1).copied() else {
             if self.tick - server_tick >= INPUT_RING as u64 {
                 // We are more than a second ahead of the server: give up on history.
-                self.vehicle.set_state(server);
+                self.rewind_to(server, exact);
                 self.tick = server_tick;
                 return Reconcile::Reset;
             }
@@ -214,7 +233,7 @@ impl Predictor {
         }
         let before = self.vehicle.state().pos;
         let now = self.tick;
-        self.vehicle.set_state(server);
+        self.rewind_to(server, exact);
         self.tick = server_tick;
         for t in server_tick..now {
             let input = self.input_at(t).unwrap_or_default();
@@ -223,6 +242,12 @@ impl Predictor {
         Reconcile::Corrected {
             error_m,
             correction_m: dist(before, self.vehicle.state().pos),
+        }
+    }
+
+    fn rewind_to(&mut self, server: &VehicleState, exact: Option<&[u8]>) {
+        if !exact.is_some_and(|b| self.vehicle.restore(b)) {
+            self.vehicle.set_state(server);
         }
     }
 }
@@ -244,51 +269,80 @@ mod tests {
         Rig::new(&car()).state()
     }
 
-    #[test]
-    fn identical_inputs_stay_in_sync_and_divergence_is_replayed() {
+    /// Client predicts 2 s in lock-step with a server `Rig` (exactly how `wp_sim` steps the
+    /// car), then the server applies different input for 0.5 s. Returns the client after its
+    /// 130 diverged ticks, the server rig at tick 600 and the client's inputs.
+    fn diverge() -> (Predictor, Rig, AssistProfile) {
         let c = car();
         let fx = HandlingEffects::NEUTRAL;
         let assists = AssistProfile::default();
         let noon = TimeOfDay::from_hours(12.0);
-        let mut client = Predictor::new(&c, assists, &start(), 0, noon);
-        let mut server = Predictor::new(&c, assists, &start(), 0, noon);
+        let mut server = Rig::new(&c);
+        let mut client = Predictor::new(&c, assists, &server.state(), 0, noon);
+        // As on join: the first own-state carries the exact snapshot.
+        assert!(client.restore_exact(server.snapshot().as_bytes()));
         let throttle = quantize_input(&VehicleInput {
             throttle: 1.0,
             steer: 0.2,
             ..Default::default()
         });
-        // 2 s of identical driving: bit-identical.
         for _ in 0..480 {
             client.step(throttle, &fx);
-            server.step(throttle, &fx);
+            server.step(&throttle, &assists);
         }
         assert!(matches!(
-            client.reconcile(480, &server.state(), &fx),
+            client.reconcile(480, &server.state(), None, &fx),
             Reconcile::InSync { error_m } if error_m == 0.0
         ));
-        // The server applied different input for 0.5 s (e.g. lost packets) → correction.
         let other = quantize_input(&VehicleInput {
             steer: -1.0,
             brake: 1.0,
             ..Default::default()
         });
         for _ in 0..120 {
-            server.step(other, &fx);
+            server.step(&other, &assists);
         }
         for _ in 0..130 {
             client.step(throttle, &fx);
         }
-        let r = client.reconcile(600, &server.state(), &fx);
+        (client, server, assists)
+    }
+
+    fn replay_gap(
+        mut client: Predictor,
+        mut server: Rig,
+        assists: AssistProfile,
+        exact: bool,
+    ) -> f32 {
+        let fx = HandlingEffects::NEUTRAL;
+        let snap = server.snapshot();
+        let bytes = exact.then(|| snap.as_bytes().to_vec());
+        let r = client.reconcile(600, &server.state(), bytes.as_deref(), &fx);
         assert!(matches!(r, Reconcile::Corrected { .. }), "{r:?}");
         assert_eq!(client.tick(), 610);
-        // After replay the client agrees with a server that then receives the client's inputs.
+        // The server then receives the client's inputs for the replayed ticks.
         for t in 600..610 {
-            server.step(client.input_at(t).unwrap(), &fx);
+            server.step(&client.input_at(t).unwrap(), &assists);
         }
-        let d = dist(server.state().pos, client.state().pos);
-        // Not bit-exact: `VehicleState` omits input filters, clutch and tire relaxation, so a
-        // rewind leaves ≈1 cm after 10 ticks (measured 0.014 m). Lossless needs NET-N2.
-        assert!(d < 0.05, "{d}");
+        dist(server.state().pos, client.state().pos)
+    }
+
+    #[test]
+    fn exact_snapshot_rewind_replays_bit_for_bit() {
+        let (client, server, assists) = diverge();
+        let d = replay_gap(client, server, assists, true);
+        assert_eq!(
+            d, 0.0,
+            "snapshot rewind + replay must reproduce the server exactly"
+        );
+    }
+
+    #[test]
+    fn state_rewind_fallback_is_close() {
+        let (client, server, assists) = diverge();
+        let d = replay_gap(client, server, assists, false);
+        // `VehicleState` omits filters, clutch and tire relaxation: ≈1 cm after 10 ticks.
+        assert!(d > 0.0 && d < 0.05, "{d}");
     }
 
     #[test]
@@ -302,7 +356,7 @@ mod tests {
             TimeOfDay::default(),
         );
         assert_eq!(
-            p.reconcile(500, &start(), &HandlingEffects::NEUTRAL),
+            p.reconcile(500, &start(), None, &HandlingEffects::NEUTRAL),
             Reconcile::Reset
         );
         assert_eq!(p.tick(), 500);
