@@ -16,12 +16,8 @@ import type {
   VehicleClass,
 } from "../generated/contracts";
 import type { InputBindings } from "./bindings";
-import type {
-  PoliceTool,
-  PoliceUnitKind,
-  PoliceUnitStatus,
-  WantedLevel,
-} from "./proposed";
+import type { WantedLevel } from "../generated/contracts";
+import type { District, PursuitStatus, ToolReadiness, UnitKind, UnitOrder } from "./police";
 
 /** Every screen the kit can show. */
 export type ScreenId =
@@ -94,8 +90,12 @@ export interface HeatHud {
   level: WantedLevel;
   /** Heat 0..=1 within the current level. */
   heat: number;
+  /** `clear`/`noticed`/`pursuit`/`cooldown` ↔ `wp_police::PursuitStatus` Clear/Wanted/Pursuit/Searching. */
   state: "clear" | "noticed" | "pursuit" | "cooldown";
-  /** Cooldown progress 0..=1 (1 = escaped), only meaningful in `cooldown`. */
+  /**
+   * Cooldown progress 0..=1 (1 = escaped), only meaningful in `cooldown`:
+   * time without line of sight ÷ escape time for the level and day phase.
+   */
   cooldown: number;
   /** Units actively chasing the player. */
   unitsInPursuit: number;
@@ -406,61 +406,89 @@ export interface PoliceCareer {
   assignment: string | null;
 }
 
-/** A police unit on the captain map. */
+/** A police unit on the captain map (from `wp_police::captain::UnitView`). */
 export interface PoliceUnit {
   id: number;
   callsign: string;
-  kind: PoliceUnitKind;
-  status: PoliceUnitStatus;
+  kind: UnitKind;
+  /** `Assignment::name()`: idle, patrol, respond, pursue, intercept, roadblock, spikes, helo-track, out-of-service. */
+  assignment: string;
   pos: Vec2;
   headingRad: number;
+  speedMps: number;
   /** Player-driven chase unit (vs AI). */
   human: boolean;
-  /** Target assigned by the captain. */
-  target: { kind: "racer"; id: number } | { kind: "point"; pos: Vec2 } | { kind: "incident"; id: number } | null;
+  /** Racer the unit is on (pursue / intercept / helo-track). */
+  target: number | null;
+  /** Incident the unit responds to. */
+  incident: number | null;
+  /** Pursuit tactic (shadow, box-in, pit, rolling-block). */
+  tactic: string | null;
+  /** Suggested order (player units). */
+  suggestion: UnitOrder | null;
   health: number;
+  /** Order the captain sent that the source has not reflected yet (recorded runs only). */
+  pendingOrder: UnitOrder | null;
+  /** Mock only: point a patrolling toy unit drives to. */
+  patrolPoint?: Vec2;
 }
 
-/** A suspect on the captain map. */
+/** A suspect on the captain map (from `wp_police::captain::RacerSighting`). */
 export interface Suspect {
   id: number;
   name: string;
+  /** Last known position (what the captain sees). */
   pos: Vec2;
   headingRad: number;
   speedMps: number;
   level: WantedLevel;
-  /** Last confirmed sighting (the captain sees this, not the true position, when not visible). */
-  visible: boolean;
-  priority: number;
+  /** Heat points 0..100. */
+  heat: number;
+  status: PursuitStatus;
+  /** Seconds since `pos` was current (0 = in sight). */
+  stalenessS: number | null;
+  bounty: number;
+  unitsAssigned: number;
 }
 
-/** An incident (violation, crash, sighting). */
+/** An incident (police report / crash from wp_police; violations in non-police runs). */
 export interface Incident {
   id: number;
-  kind: "Speeding" | "RedLight" | "Crash" | "Sighting" | "Reckless" | "WrongWay";
+  kind: "Report" | "Speeding" | "RedLight" | "Crash" | "Sighting" | "Reckless" | "WrongWay" | "Collision";
   pos: Vec2;
   tS: number;
   suspect: number | null;
+  /** Unit sent to it, if any. */
+  unit: number | null;
 }
 
-/** A deployed tool (spikes, roadblock...). */
+/** A placed tool (roadblock / spike strip; `wp_police::captain::ToolView`). */
 export interface DeployedTool {
   id: number;
-  tool: PoliceTool;
+  tool: "Roadblock" | "SpikeStrip";
   pos: Vec2;
-  headingRad: number;
+  /** Spike strip ends, when known. */
+  a?: Vec2;
+  b?: Vec2;
+  remainingS: number | null;
 }
 
-/** Captain map (owner: wp_police captain tools; map from wp_world). */
+/** Captain map (owner: wp_police `CaptainView`; map from the run or wp_world). */
 export interface CaptainState {
+  /** Where the data comes from: a recorded `wp_police` run, or the UI's toy police. */
+  source: "wp_police" | "mock";
   units: PoliceUnit[];
   suspects: Suspect[];
   incidents: Incident[];
   tools: DeployedTool[];
-  /** Heat sources: position + weight 0..=1 (owner: wp_police heat map). */
+  /** Heat sources for the heat layer: position + weight 0..=1. */
   heat: { pos: Vec2; weight: number }[];
-  /** Tool charges left. */
-  charges: Record<PoliceTool, number>;
+  /** `CaptainView::heat_by_district`. */
+  heatByDistrict: [District, number][];
+  /** Tool cooldowns and budgets (`ToolReadiness`). */
+  readiness: ToolReadiness;
+  /** Racer whose reinforcements go first. */
+  priorityTarget: number | null;
 }
 
 /** Static map geometry (owner: wp_world `RoadNetwork`). */
@@ -468,7 +496,8 @@ export interface CityMap {
   id: string;
   boundsMin: Vec2;
   boundsMax: Vec2;
-  roads: { id: number; points: Vec2[]; speedLimitMps: number }[];
+  /** Road polylines; `id` is the police `SegmentId` on police maps. */
+  roads: { id: number; points: Vec2[]; speedLimitMps: number; district?: District }[];
   zones: { id: number; kind: string; polygon: Vec2[] }[];
   pois: { kind: string; name: string; pos: Vec2 }[];
 }

@@ -1,13 +1,14 @@
 // Writes fixtures/runs/synthetic_pursuit/{events.jsonl,metrics.csv,summary.json}.
 //
-// A hand-scripted 90 s night pursuit in the procedural city, in exactly the simcli output
-// formats. It exists because the real sim emits no police events yet (machine E has not landed):
-// the HUD heat meter, scanner feed and captain map need something to replay.
+// A hand-scripted 90 s night race + pursuit in the data/city map, in exactly the simcli output
+// formats. It covers what no real run has yet: damage *and* police *and* a race in one stream
+// (`police_pursuit` is the recorded wp_police run; the simcli runs are crashes only).
 //
 // - Car motion is a simple kinematic drive along grid roads (not physics).
-// - Police events are `SimEvent::PoliceEvent { kind, payload }` with payload = UTF-8 JSON bytes of
-//   the UI's proposed typed event (src/model/proposed.ts, request UI-1).
-// - Region damage uses the v0.2.0-planned `RegionDamaged` / `GlassShattered` variants.
+// - Police events are real `wp_police::PoliceEvent` shapes (src/model/police.ts) in
+//   `SimEvent::PoliceEvent { kind, payload }`, payload = UTF-8 JSON, kind = wp_police::events::kind.
+// - Damage uses the contract v0.2.0 `RegionDamaged` / `GlassShattered` variants;
+//   `TrafficViolation` carries `pos`.
 // - The economy event is a real `wp_economy::EconomyEvent` JSON payload.
 //
 //   node scripts/gen-synthetic.mjs
@@ -88,57 +89,63 @@ const posAt = (samples, t) => {
   return [Math.round(s.x * 10) / 10, Math.round(s.y * 10) / 10, 0];
 };
 const bytes = (obj) => [...Buffer.from(JSON.stringify(obj), "utf8")];
-const KIND = { HeatChanged: 1, Spotted: 2, PursuitStarted: 3, LostVisual: 4, CooldownStarted: 5, Escaped: 6, Busted: 7, UnitDispatched: 8, UnitStatus: 9, ToolDeployed: 10, Radio: 11 };
-const police = (t, payload) => {
-  const kind = KIND[Object.keys(payload)[0]];
-  at(t, { PoliceEvent: { kind, payload: bytes(payload) } });
-};
+// wp_police::events::kind
+const KIND = { Radio: 1, WantedLevelChanged: 2, PursuitStarted: 3, PursuitEnded: 4, UnitSpawned: 5, UnitDespawned: 6, UnitDisabled: 7, RoadblockPlaced: 8, SpikesPlaced: 9, ToolRemoved: 10, SpikeHit: 11, HeloLaunched: 12, PitAttempt: 13 };
+const police = (t, payload) => at(t, { PoliceEvent: { kind: KIND[Object.keys(payload)[0]], payload: bytes(payload) } });
 const radio = (t, unit, text) => police(t, { Radio: { unit, text } });
+const level = (t, l) => police(t, { WantedLevelChanged: { racer: PLAYER, level: l } });
+const spawn = (t, unit, kind, p) => police(t, { UnitSpawned: { unit, kind, pos: p, heading: [0, 1] } });
+const violation = (t, vehicle, kind, samples) => at(t, { TrafficViolation: { vehicle, kind, pos: posAt(samples, t) } });
+const off = (p, dx, dy) => [p[0] + dx, p[1] + dy, 0];
 
-at(3.0, { TrafficViolation: { vehicle: PLAYER, kind: { Speeding: { over_mps: 12.4 } } } });
-at(3.4, { TrafficViolation: { vehicle: RIVAL, kind: { Speeding: { over_mps: 10.1 } } } });
-police(6.0, { Spotted: { racer: PLAYER, unit: 10, pos: posAt(player, 6) } });
-police(6.0, { HeatChanged: { racer: PLAYER, heat: 0.35, level: "L1" } });
-radio(6.2, 10, "Adam-10, visual on a light coupe eastbound on 4th, speeding.");
-police(8.0, { UnitDispatched: { unit: 11, kind: "Cruiser", target: posAt(player, 8) } });
-police(8.1, { UnitDispatched: { unit: 12, kind: "Interceptor", target: posAt(player, 8) } });
-radio(8.3, null, "All units, 10-80 in progress, two street racers heading north.");
-police(10.0, { PursuitStarted: { racer: PLAYER, unit: 10 } });
-police(10.0, { HeatChanged: { racer: PLAYER, heat: 0.6, level: "L1" } });
-at(14.2, { TrafficViolation: { vehicle: PLAYER, kind: "RedLight" } });
-at(15.0, { TrafficViolation: { vehicle: PLAYER, kind: "WrongWay" } });
-police(18.0, { HeatChanged: { racer: PLAYER, heat: 0.2, level: "L2" } });
-radio(18.2, 12, "Lincoln-12 joining, I have the lead car.");
+spawn(0.1, 1, "Car", [-220, 340, 0]);
+spawn(0.1, 2, "Car", [-180, 300, 0]);
+spawn(0.1, 3, "Car", [380, -60, 0]);
+radio(0.1, 1, "Unit 1 resuming patrol, Core.");
+radio(0.1, 3, "Unit 3 resuming patrol, Industrial.");
+violation(3.0, PLAYER, { Speeding: { over_mps: 12.4 } }, player);
+violation(3.4, RIVAL, { Speeding: { over_mps: 10.1 } }, rival);
+level(4.0, "L1");
+radio(4.2, null, "Dispatch: caller reports two street racers, Core.");
+level(9.0, "L2");
+police(10.0, { PursuitStarted: { racer: PLAYER, unit: 3 } });
+radio(10.0, 3, "Unit 3 in pursuit of racer #1 northbound in Core.");
+radio(10.1, null, "Dispatch: copy, sending unit 1 of 3 on racer #1.");
+violation(14.2, PLAYER, "RedLight", player);
+violation(15.0, PLAYER, "WrongWay", player);
+spawn(18.0, 4, "Car", off(posAt(player, 18), 400, 200));
+radio(18.1, 4, "Unit 4 moving to intercept racer #1 eastbound in Core.");
 // Clip a traffic car (entity 50).
 const p22 = posAt(player, 22);
 at(22.0, { Contact: { a: PLAYER, b: 50, point: [p22[0], p22[1] + 2.1, 0.5], normal: [0, 1, 0], impulse_ns: 6200, rel_speed: 9.5 } });
-at(22.0, { TrafficViolation: { vehicle: PLAYER, kind: "Collision" } });
+violation(22.0, PLAYER, "Collision", player);
 at(22.01, { RegionDamaged: { vehicle: PLAYER, region: "FrontBumper", severity: 0.42 } });
 at(22.01, { RegionDamaged: { vehicle: PLAYER, region: "Hood", severity: 0.18 } });
 at(22.02, { ComponentDamaged: { vehicle: PLAYER, component: "Lights", health: 0.55 } });
 at(22.02, { ComponentDamaged: { vehicle: PLAYER, component: "Radiator", health: 0.81 } });
-police(26.0, { ToolDeployed: { unit: 12, tool: "SpikeStrip", pos: posAt(player, 31) } });
-radio(26.2, 12, "Spikes down at 9th and Harbor.");
-police(28.0, { HeatChanged: { racer: PLAYER, heat: 0.55, level: "L2" } });
-// Side swipe by unit 11.
+spawn(26.0, 5, "Car", posAt(player, 31));
+radio(26.0, 5, "Unit 5 deploying spikes on segment 120.");
+const sp = posAt(player, 31);
+police(26.0, { SpikesPlaced: { tool: 1, racer: PLAYER, a: off(sp, -3.5, 0), b: off(sp, 3.5, 0), sight_m: 140 } });
+level(28.0, "L3");
+// Side swipe by unit 4, which attempted a PIT.
+police(29.6, { PitAttempt: { unit: 4, target: PLAYER } });
+radio(29.6, 4, "Unit 4 attempting PIT on racer #1.");
 const p30 = posAt(player, 30);
-at(30.0, { Contact: { a: 11, b: PLAYER, point: [p30[0] - 0.9, p30[1], 0.6], normal: [1, 0, 0], impulse_ns: 9800, rel_speed: 7.1 } });
+at(30.0, { Contact: { a: 1004, b: PLAYER, point: [p30[0] - 0.9, p30[1], 0.6], normal: [1, 0, 0], impulse_ns: 9800, rel_speed: 7.1 } });
 at(30.01, { RegionDamaged: { vehicle: PLAYER, region: "LeftDoorF", severity: 0.55 } });
 at(30.01, { RegionDamaged: { vehicle: PLAYER, region: "FrontLeftFender", severity: 0.4 } });
 at(30.02, { GlassShattered: { vehicle: PLAYER, region: "LeftDoorF" } });
 at(30.03, { ComponentDamaged: { vehicle: PLAYER, component: "SuspensionFL", health: 0.62 } });
 at(30.03, { ComponentDamaged: { vehicle: PLAYER, component: "SteeringRack", health: 0.78 } });
-police(34.0, { HeatChanged: { racer: PLAYER, heat: 0.1, level: "L3" } });
-radio(34.1, null, "Suspect rammed a unit. Authorised to use PIT. Air unit requested.");
-police(40.0, { UnitDispatched: { unit: 13, kind: "Helicopter", target: posAt(player, 40) } });
-police(42.0, { HeatChanged: { racer: PLAYER, heat: 0.45, level: "L3" } });
-police(45.0, { LostVisual: { racer: PLAYER, unit: 10 } });
-police(47.0, { CooldownStarted: { racer: PLAYER, seconds: 20 } });
-radio(47.2, 10, "Lost him behind the warehouses, last seen southbound.");
-police(52.0, { Spotted: { racer: PLAYER, unit: 13, pos: posAt(player, 52) } });
-police(52.0, { PursuitStarted: { racer: PLAYER, unit: 13 } });
-radio(52.1, 13, "Air-13, I have him. Southbound on Ring Road, lighting him up.");
-police(55.0, { ToolDeployed: { unit: 13, tool: "Spotlight", pos: posAt(player, 55) } });
+police(31.0, { UnitDisabled: { unit: 4, cause: "RacerContact" } });
+radio(31.0, 4, "Unit 4 out of service.");
+police(40.0, { HeloLaunched: { unit: 6, target: PLAYER } });
+spawn(40.0, 6, "Helicopter", off(posAt(player, 40), -500, -500));
+radio(40.1, null, "Dispatch: air unit requested, ETA 20 s.");
+level(42.0, "L4");
+police(56.0, { ToolRemoved: { tool: 1 } });
+radio(56.0, 5, "Unit 5 out of service.");
 // Hard hit on a barrier.
 const p60 = posAt(player, 60);
 at(60.0, { Contact: { a: PLAYER, b: 4294967295, point: [p60[0], p60[1], 0.5], normal: [0, -1, 0], impulse_ns: 15200, rel_speed: 13.2 } });
@@ -149,17 +156,16 @@ at(60.02, { ComponentDamaged: { vehicle: PLAYER, component: "Radiator", health: 
 at(60.02, { ComponentDamaged: { vehicle: PLAYER, component: "Engine", health: 0.72 } });
 at(60.03, { ComponentFailed: { vehicle: PLAYER, component: "Lights" } });
 at(60.2, { PartDetached: { vehicle: PLAYER, group: 1 } });
-police(61.0, { HeatChanged: { racer: PLAYER, heat: 0.8, level: "L3" } });
-police(68.0, { HeatChanged: { racer: PLAYER, heat: 0.15, level: "L4" } });
-radio(68.1, null, "All units, suspect is now level four. Roadblocks authorised.");
-police(69.0, { ToolDeployed: { unit: 11, tool: "Roadblock", pos: posAt(player, 80) } });
-police(72.0, { LostVisual: { racer: PLAYER, unit: 13 } });
-police(72.5, { CooldownStarted: { racer: PLAYER, seconds: 15 } });
-radio(73.0, 13, "Lost visual in the tunnel. Searching.");
+level(68.0, "L5");
+spawn(69.0, 7, "Car", off(posAt(player, 80), 0, 0));
+spawn(69.0, 8, "Car", off(posAt(player, 80), 4, 0));
+police(69.0, { RoadblockPlaced: { tool: 2, racer: PLAYER, pos: posAt(player, 80), sight_m: 150 } });
+radio(69.0, 7, "Unit 7 setting up roadblock on segment 88.");
 at(76.0, { ComponentDamaged: { vehicle: PLAYER, component: "Engine", health: 0.66 } });
-police(87.5, { Escaped: { racer: PLAYER } });
-police(87.5, { HeatChanged: { racer: PLAYER, heat: 0.0, level: "None" } });
-radio(87.6, null, "All units, suspect evaded. Resume patrol.");
+police(87.5, { PursuitEnded: { racer: PLAYER, outcome: "Escaped" } });
+level(87.5, "None");
+radio(87.6, null, "Dispatch: racer #1 lost. All units resume patrol.");
+police(88.0, { ToolRemoved: { tool: 2 } });
 const econ = { player: 1, seq: 42, day: 7, reason: "BountyGained", car: 1, cash_delta: 0, rep_delta: 120, bounty_delta: 2500, cop_xp_delta: 0, cash_after: 12850 };
 at(88.0, { EconomyEvent: { kind: 34, payload: bytes(econ) } });
 events.sort((a, b) => a.tick - b.tick);

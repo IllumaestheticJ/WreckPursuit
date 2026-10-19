@@ -2,3 +2,5 @@ dist/
 tools/gen-runtime-schemas/Cargo.lock
 tools/gen-runtime-schemas/target/
 e2e/out/
+tools/record-police/Cargo.lock
+tools/record-police/target/

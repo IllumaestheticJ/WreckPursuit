@@ -1,15 +1,16 @@
 /**
- * Captain map: a 2D canvas command view.
+ * Captain map: a 2D canvas command view over `wp_police`'s captain model.
  *
- * - Layers: districts, roads, heat map, incidents, tools, suspects, units (toggle each).
+ * - Layers: districts / buildings, roads, heat map, incidents, tools, suspects, units.
  * - Pan: drag empty space. Zoom: mouse wheel (around the cursor) or +/-.
- * - Select a unit by clicking it (or 1-9). Drag a unit onto a suspect / incident / spot to assign
- *   it (Pursue / Respond / Hold). Right-click opens the command radial (tools, recall, priority).
- * - Every action is a `captain` UiCommand carrying the proposed typed `CaptainCommand` (UI-2).
+ * - Select a unit by clicking it (or 1-9). Drag a unit onto a suspect to send it (Shift = intercept)
+ *   or onto an incident to respond. Right-click opens the command radial.
+ * - Every action is a `captain` UiCommand carrying `wp_police::CaptainCommand` (mirrored in
+ *   `model/police.ts`). Tools target a racer, optionally on a road segment, exactly as E's API.
  */
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { useSend, useSlice } from "../../model/GameModel";
-import type { CaptainCommand, PoliceTool } from "../../model/proposed";
+import type { CaptainCommand, UnitOrder } from "../../model/police";
 import type { CaptainState, CityMap, Incident, PoliceUnit, Suspect, Vec2 } from "../../model/types";
 import { Badge, Button, Panel, useEscape } from "../../ui/kit";
 import { mmss, words } from "../../ui/format";
@@ -26,7 +27,11 @@ interface Camera {
   z: number;
 }
 
-type Hit = { kind: "unit"; unit: PoliceUnit } | { kind: "suspect"; suspect: Suspect } | { kind: "incident"; incident: Incident } | { kind: "ground"; pos: Vec2 };
+type Hit =
+  | { kind: "unit"; unit: PoliceUnit }
+  | { kind: "suspect"; suspect: Suspect }
+  | { kind: "incident"; incident: Incident }
+  | { kind: "ground"; pos: Vec2; road: number | null };
 
 interface Radial {
   x: number;
@@ -57,7 +62,38 @@ const ZONE_TINT: Record<string, string> = {
   Suburb: "rgba(230,239,233,0.015)",
   Industrial: "rgba(255,178,30,0.04)",
   Port: "rgba(255,178,30,0.06)",
+  Building: "rgba(230,239,233,0.05)",
 };
+
+const ASSIGNMENT_TONE: Record<string, "danger" | "warn" | "info" | "dim"> = {
+  pursue: "danger",
+  intercept: "danger",
+  "helo-track": "danger",
+  respond: "warn",
+  roadblock: "info",
+  spikes: "info",
+  "out-of-service": "dim",
+};
+
+/** Nearest road (id) to a world point, within `maxM`. */
+function nearestRoad(map: CityMap, p: Vec2, maxM: number): number | null {
+  let best: number | null = null;
+  let bestD = maxM;
+  for (const r of map.roads) {
+    for (let i = 0; i + 1 < r.points.length; i++) {
+      const [a, b] = [r.points[i], r.points[i + 1]];
+      const abx = b[0] - a[0];
+      const aby = b[1] - a[1];
+      const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * abx + (p[1] - a[1]) * aby) / Math.max(abx * abx + aby * aby, 1e-6)));
+      const d = Math.hypot(a[0] + abx * t - p[0], a[1] + aby * t - p[1]);
+      if (d < bestD) {
+        bestD = d;
+        best = r.id;
+      }
+    }
+  }
+  return best;
+}
 
 /** Captain map screen. */
 export function CaptainMap() {
@@ -77,7 +113,7 @@ export function CaptainMap() {
   const [radial, setRadial] = useState<Radial | null>(null);
   const [follow, setFollow] = useState(false);
   const panRef = useRef<{ x: number; y: number; cam: Camera } | null>(null);
-  const fitted = useRef(false);
+  const fittedFor = useRef<string | null>(null);
 
   useEscape(() => {
     if (radial) setRadial(null);
@@ -97,11 +133,10 @@ export function CaptainMap() {
     return () => ro.disconnect();
   }, []);
 
-  // Fit the city once we know the size.
+  // Fit the road network once per map (the zone polygons can extend well past it).
   useEffect(() => {
-    if (fitted.current || size.w <= 200) return;
-    fitted.current = true;
-    // Fit the road network (the zone polygons extend well past it).
+    if (fittedFor.current === map.id || size.w <= 200) return;
+    fittedFor.current = map.id;
     const pts = map.roads.flatMap((r) => r.points);
     const xs = pts.map((p) => p[0]);
     const ys = pts.map((p) => p[1]);
@@ -109,12 +144,12 @@ export function CaptainMap() {
     setCam({ cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, z: Math.min(size.w / (x1 - x0), size.h / (y1 - y0)) * 0.92 });
   }, [size.w, size.h, map]);
 
-  // Follow the highest-priority visible suspect.
+  const top = topSuspect(captain);
+
+  // Follow the priority (or most wanted) suspect.
   useEffect(() => {
-    if (!follow) return;
-    const s = [...captain.suspects].sort((a, b) => b.priority - a.priority)[0];
-    if (s) setCam((c) => ({ ...c, cx: s.pos[0], cy: s.pos[1] }));
-  }, [follow, captain.suspects]);
+    if (follow && top) setCam((c) => ({ ...c, cx: top.pos[0], cy: top.pos[1] }));
+  }, [follow, top?.pos[0], top?.pos[1]]);
 
   const toScreen = (p: Vec2): [number, number] => [(p[0] - cam.cx) * cam.z + size.w / 2, -(p[1] - cam.cy) * cam.z + size.h / 2];
   const toWorld = (x: number, y: number): Vec2 => [(x - size.w / 2) / cam.z + cam.cx, -(y - size.h / 2) / cam.z + cam.cy];
@@ -128,7 +163,8 @@ export function CaptainMap() {
     if (layers.includes("units")) for (const u of captain.units) if (near(u.pos)) return { kind: "unit", unit: u };
     if (layers.includes("suspects")) for (const s of captain.suspects) if (near(s.pos)) return { kind: "suspect", suspect: s };
     if (layers.includes("incidents")) for (const i of [...captain.incidents].reverse()) if (near(i.pos)) return { kind: "incident", incident: i };
-    return { kind: "ground", pos: toWorld(x, y) };
+    const pos = toWorld(x, y);
+    return { kind: "ground", pos, road: nearestRoad(map, pos, 20 / cam.z + 10) };
   };
 
   const roadPath = useMemo(() => buildRoadPath(map), [map]);
@@ -143,9 +179,10 @@ export function CaptainMap() {
     if (c.height !== Math.round(size.h * dpr)) c.height = Math.round(size.h * dpr);
     const ctx = c.getContext("2d");
     if (!ctx) return;
-    const col = themeColors(wrap.current);
-    draw(ctx, dpr, size, cam, map, captain, roadPath, heatCanvas, layers, selected, drag, col, nowS);
+    draw(ctx, dpr, size, cam, map, captain, roadPath, heatCanvas, layers, selected, drag, themeColors(wrap.current), nowS);
   });
+
+  const order = (unit: number, o: UnitOrder) => send({ type: "captain", command: { AssignUnit: { unit, order: o } } });
 
   const onPointerDown = (e: PointerEvent) => {
     if (e.button !== 0) return;
@@ -181,16 +218,11 @@ export function CaptainMap() {
     if (drag) {
       const unit = captain.units.find((u) => u.id === drag.unit);
       const [ux, uy] = unit ? toScreen(unit.pos) : [x, y];
-      const moved = Math.hypot(x - ux, y - uy) > 18;
-      if (moved && unit) {
+      if (unit && Math.hypot(x - ux, y - uy) > 18) {
         const hit = hitTest(x, y);
-        const cmd: CaptainCommand =
-          hit.kind === "suspect"
-            ? { Assign: { unit: unit.id, target: { Pursue: { racer: hit.suspect.id } } } }
-            : hit.kind === "incident"
-              ? { Assign: { unit: unit.id, target: { Incident: { id: hit.incident.id } } } }
-              : { Assign: { unit: unit.id, target: { Hold: { pos: toWorld(x, y) } } } };
-        send({ type: "captain", command: cmd });
+        if (hit.kind === "suspect") order(unit.id, e.shiftKey ? { Intercept: { target: hit.suspect.id } } : { Pursue: { target: hit.suspect.id } });
+        else if (hit.kind === "incident") order(unit.id, { Respond: { incident: hit.incident.id } });
+        else setRadial({ x, y, hit });
       }
       setDrag(null);
     }
@@ -214,13 +246,14 @@ export function CaptainMap() {
     setRadial({ x, y, hit: hitTest(x, y) });
   };
 
-  // Keyboard: 1-9 select unit, R recall, +/- zoom.
+  // Keyboard: 1-9 select unit, D disengage, P patrol, +/- zoom.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement)?.tagName === "INPUT") return;
       const n = Number(e.key);
       if (n >= 1 && n <= 9 && captain.units[n - 1]) setSelected(captain.units[n - 1].id);
-      else if ((e.key === "r" || e.key === "R") && selected !== null) send({ type: "captain", command: { Recall: { unit: selected } } });
+      else if ((e.key === "d" || e.key === "D") && selected !== null) order(selected, "Disengage");
+      else if ((e.key === "p" || e.key === "P") && selected !== null) order(selected, "Patrol");
       else if (e.key === "+" || e.key === "=") setCam((c) => ({ ...c, z: Math.min(8, c.z * 1.25) }));
       else if (e.key === "-") setCam((c) => ({ ...c, z: Math.max(0.15, c.z / 1.25) }));
     };
@@ -229,12 +262,15 @@ export function CaptainMap() {
   }, [captain.units, selected]);
 
   const sel = captain.units.find((u) => u.id === selected) ?? null;
+  const rd = captain.readiness;
 
   return (
     <div class="wp-screen wp-captain">
       <div class="wp-captain-top">
         <div>
-          <div class="wp-mono wp-captain-kicker">// METRO PD · CAPTAIN'S DESK · {mmss(nowS)}</div>
+          <div class="wp-mono wp-captain-kicker">
+            // METRO PD · CAPTAIN'S DESK · {mmss(nowS)} · {captain.source === "wp_police" ? "RECORDED wp_police" : "MOCK POLICE"}
+          </div>
           <h1 class="wp-captain-title">Command map</h1>
         </div>
         <div class="wp-row">
@@ -263,35 +299,39 @@ export function CaptainMap() {
           data-dragging={drag ? "true" : undefined}
         >
           <canvas ref={canvas} style={{ width: `${size.w}px`, height: `${size.h}px` }} aria-label="Captain map: drag units to assign, right-click for commands" role="img" />
-          {radial && <RadialMenu radial={radial} captain={captain} selected={sel} onClose={() => setRadial(null)} toWorld={toWorld} />}
-          <div class="wp-captain-hint wp-mono">drag unit → target · right-click: commands · wheel: zoom · 1-9 select · R recall</div>
+          {radial && <RadialMenu radial={radial} captain={captain} selected={sel} onClose={() => setRadial(null)} />}
+          <div class="wp-captain-hint wp-mono">drag unit → suspect (shift: intercept) / incident · right-click: commands · wheel: zoom · 1-9 select · D disengage · P patrol</div>
         </div>
         <aside class="wp-captain-side">
-          <Panel title="Units" tag={`${captain.units.length}`}>
+          <Panel title="Units" tag={`${captain.units.filter((u) => u.assignment !== "out-of-service").length}/${captain.units.length}`}>
             <ul class="wp-unit-list">
               {captain.units.map((u, i) => (
                 <li key={u.id}>
-                  <button type="button" class="wp-unit-row" aria-pressed={u.id === selected} onClick={() => setSelected(u.id)}>
+                  <button type="button" class="wp-unit-row" aria-pressed={u.id === selected} onClick={() => setSelected(u.id)} data-off={u.assignment === "out-of-service"}>
                     <span class="wp-mono wp-dim">{i + 1}</span>
                     <span>
                       <b>{u.callsign}</b> {u.human && <Badge tone="info">Player</Badge>}
                       <div class="wp-mono wp-dim" style={{ fontSize: "0.75em" }}>
-                        {u.kind} · {describeTarget(u, captain)}
+                        {u.kind === "Helicopter" ? "air" : "car"} · {describeUnit(u, captain)}
+                        {u.pendingOrder && <span class="wp-warn"> · sent: {describeOrder(u.pendingOrder)}</span>}
                       </div>
                     </span>
-                    <Badge tone={u.status === "Pursuit" ? "danger" : u.status === "Responding" ? "warn" : u.status === "Roadblock" ? "info" : "dim"}>{u.status}</Badge>
+                    <Badge tone={ASSIGNMENT_TONE[u.assignment] ?? "dim"}>{u.assignment}</Badge>
                   </button>
                 </li>
               ))}
             </ul>
             {sel && (
               <div class="wp-row" style={{ marginTop: "0.5em" }}>
-                <Button size="sm" onClick={() => send({ type: "captain", command: { Recall: { unit: sel.id } } })}>
-                  Recall
+                <Button size="sm" onClick={() => order(sel.id, "Patrol")}>
+                  Patrol
                 </Button>
-                {captain.suspects[0] && (
-                  <Button size="sm" variant="danger" onClick={() => send({ type: "captain", command: { Assign: { unit: sel.id, target: { Pursue: { racer: topSuspect(captain)!.id } } } } })}>
-                    Pursue top suspect
+                <Button size="sm" onClick={() => order(sel.id, "Disengage")}>
+                  Disengage
+                </Button>
+                {top && (
+                  <Button size="sm" variant="danger" onClick={() => order(sel.id, { Pursue: { target: top.id } })}>
+                    Pursue {top.name}
                   </Button>
                 )}
               </div>
@@ -304,28 +344,43 @@ export function CaptainMap() {
                 <div>
                   <b>{s.name}</b> <span class="wp-mono wp-dim">#{s.id}</span>
                   <div class="wp-mono wp-dim" style={{ fontSize: "0.75em" }}>
-                    {Math.round(s.speedMps * 3.6)} km/h · {s.visible ? <span class="wp-danger">VISUAL</span> : "last known"}
+                    {words(s.status).toUpperCase()} · {s.stalenessS === null ? "never seen" : s.stalenessS < 0.5 ? <span class="wp-danger">VISUAL</span> : `seen ${s.stalenessS.toFixed(0)} s ago`} · {s.unitsAssigned} units
+                    {s.bounty > 0 && ` · bounty ${Math.round(s.bounty)}`}
                   </div>
                 </div>
                 <Badge tone={s.level === "None" ? "dim" : "danger"}>{s.level === "None" ? "—" : s.level}</Badge>
-                <span class="wp-row" style={{ gap: "0.2em" }}>
-                  {[1, 2, 3].map((p) => (
-                    <Button key={p} size="sm" pressed={s.priority === p} onClick={() => send({ type: "captain", command: { SetPriority: { racer: s.id, priority: p } } })} title={`Priority ${p}`}>
-                      P{p}
-                    </Button>
-                  ))}
-                </span>
+                <Button size="sm" pressed={captain.priorityTarget === s.id} onClick={() => send({ type: "captain", command: { SetPriorityTarget: { target: captain.priorityTarget === s.id ? null : s.id } } })} title="Priority target">
+                  ★
+                </Button>
               </div>
             ))}
           </Panel>
           <Panel title="Tools">
-            <div class="wp-row">
-              {(Object.keys(captain.charges) as PoliceTool[]).map((t) => (
-                <Badge key={t} tone={captain.charges[t] > 0 ? "info" : "dim"}>
-                  {words(t)} ×{captain.charges[t]}
-                </Badge>
-              ))}
+            <div class="wp-tool-grid wp-mono">
+              <span>Roadblock</span>
+              <span>
+                {rd.roadblocks[0]}/{rd.roadblocks[1]}
+              </span>
+              <span class={rd.roadblock_s > 0 ? "wp-warn" : "wp-ok"}>{rd.roadblock_s > 0 ? `${rd.roadblock_s.toFixed(0)} s` : "ready"}</span>
+              <span>Spikes</span>
+              <span>
+                {rd.spikes[0]}/{rd.spikes[1]}
+              </span>
+              <span class={rd.spikes_s > 0 ? "wp-warn" : "wp-ok"}>{rd.spikes_s > 0 ? `${rd.spikes_s.toFixed(0)} s` : "ready"}</span>
+              <span>Air unit</span>
+              <span>—</span>
+              <span class={rd.helo_s > 0 ? "wp-warn" : "wp-ok"}>{rd.helo_s > 0 ? `${rd.helo_s.toFixed(0)} s` : "ready"}</span>
             </div>
+            {captain.heatByDistrict.length > 0 && (
+              <div class="wp-row wp-mono" style={{ marginTop: "0.6em", fontSize: "0.8em" }}>
+                <span class="wp-dim">HEAT</span>
+                {captain.heatByDistrict.map(([d, h]) => (
+                  <Badge key={d} tone={h > 50 ? "danger" : h > 10 ? "warn" : "dim"}>
+                    {d} {h.toFixed(0)}
+                  </Badge>
+                ))}
+              </div>
+            )}
           </Panel>
           <Panel title="Incidents" tag={`${captain.incidents.length}`}>
             <ul class="wp-feed" style={{ maxHeight: "10em" }}>
@@ -333,7 +388,7 @@ export function CaptainMap() {
                 <li key={i.id} style={{ gridTemplateColumns: "3.4em 1fr" }}>
                   <span class="wp-dim">{mmss(i.tS)}</span>
                   <span>
-                    {words(i.kind)} {i.suspect !== null && <span class="wp-dim">· #{i.suspect}</span>}
+                    {words(i.kind)} {i.suspect !== null && <span class="wp-dim">· #{i.suspect}</span>} {i.unit !== null && <span class="wp-dim">· unit {i.unit}</span>}
                   </span>
                 </li>
               ))}
@@ -345,60 +400,95 @@ export function CaptainMap() {
   );
 }
 
+/** The suspect commands default to: the priority target, else the most wanted. */
 function topSuspect(c: CaptainState): Suspect | undefined {
-  return [...c.suspects].sort((a, b) => b.priority - a.priority || (b.visible ? 1 : 0) - (a.visible ? 1 : 0))[0];
+  const p = c.suspects.find((s) => s.id === c.priorityTarget);
+  if (p) return p;
+  return [...c.suspects].sort((a, b) => b.heat - a.heat || a.level.localeCompare(b.level))[0];
 }
 
-function describeTarget(u: PoliceUnit, c: CaptainState): string {
-  const t = u.target;
-  if (!t) return u.status === "Returning" ? "returning to base" : "patrolling";
-  if (t.kind === "racer") return `pursuing ${c.suspects.find((s) => s.id === t.id)?.name ?? `#${t.id}`}`;
-  if (t.kind === "incident") return `responding to incident #${t.id}`;
-  return `holding ${t.pos.map((v) => v.toFixed(0)).join(", ")}`;
+function describeOrder(o: UnitOrder): string {
+  if (typeof o === "string") return o.toLowerCase();
+  if ("Pursue" in o) return `pursue #${o.Pursue.target}`;
+  if ("Intercept" in o) return `intercept #${o.Intercept.target}`;
+  return `respond #${o.Respond.incident}`;
+}
+
+function describeUnit(u: PoliceUnit, c: CaptainState): string {
+  const racer = (id: number | null) => c.suspects.find((s) => s.id === id)?.name ?? `#${id}`;
+  switch (u.assignment) {
+    case "pursue":
+      return `pursuing ${racer(u.target)}${u.tactic ? ` (${u.tactic})` : ""}`;
+    case "intercept":
+      return `intercepting ${racer(u.target)}`;
+    case "helo-track":
+      return `tracking ${racer(u.target)}`;
+    case "respond":
+      return u.incident !== null ? `responding to #${u.incident}` : "responding";
+    case "roadblock":
+      return "manning a roadblock";
+    case "spikes":
+      return "laying spikes";
+    case "out-of-service":
+      return "out of service";
+    case "idle":
+      return "available";
+    default:
+      return "patrolling";
+  }
 }
 
 // ------------------------------------------------------------------ radial menu
 
-function RadialMenu(props: { radial: Radial; captain: CaptainState; selected: PoliceUnit | null; onClose: () => void; toWorld: (x: number, y: number) => Vec2 }) {
+function RadialMenu(props: { radial: Radial; captain: CaptainState; selected: PoliceUnit | null; onClose: () => void }) {
   const send = useSend();
   const { x, y, hit } = props.radial;
-  const pos = hit.kind === "ground" ? hit.pos : hit.kind === "unit" ? hit.unit.pos : hit.kind === "suspect" ? hit.suspect.pos : hit.incident.pos;
-  const cmd = (c: CaptainCommand) => {
-    send({ type: "captain", command: c });
+  const c = props.captain;
+  const cmd = (command: CaptainCommand) => {
+    send({ type: "captain", command });
     props.onClose();
   };
-  const nearestFree = [...props.captain.units]
-    .filter((u) => u.kind !== "Helicopter" && u.status !== "Disabled")
+  const top = topSuspect(c);
+  const pos = hit.kind === "ground" ? hit.pos : hit.kind === "unit" ? hit.unit.pos : hit.kind === "suspect" ? hit.suspect.pos : hit.incident.pos;
+  const nearestCar = [...c.units]
+    .filter((u) => u.kind === "Car" && !["out-of-service", "roadblock", "spikes"].includes(u.assignment))
     .sort((a, b) => Math.hypot(a.pos[0] - pos[0], a.pos[1] - pos[1]) - Math.hypot(b.pos[0] - pos[0], b.pos[1] - pos[1]))[0];
-  const heli = props.captain.units.find((u) => u.kind === "Helicopter");
+  const sendUnit = props.selected && props.selected.kind === "Car" ? props.selected : nearestCar;
+  const rd = c.readiness;
   const items: { label: string; disabled?: boolean; run: () => void }[] = [];
-  const deploy = (tool: PoliceTool) => ({
-    label: `${words(tool)} (${props.captain.charges[tool]})`,
-    disabled: props.captain.charges[tool] <= 0,
-    run: () => cmd({ Deploy: { tool, pos, heading_rad: 0 } }),
-  });
   if (hit.kind === "unit") {
-    items.push({ label: "Recall", run: () => cmd({ Recall: { unit: hit.unit.id } }) });
-    const s = topSuspect(props.captain);
-    if (s) items.push({ label: `Pursue ${s.name}`, run: () => cmd({ Assign: { unit: hit.unit.id, target: { Pursue: { racer: s.id } } } }) });
-    items.push({ label: "Hold here", run: () => cmd({ Assign: { unit: hit.unit.id, target: { Hold: { pos } } } }) });
-    items.push({ label: "Patrol area", run: () => cmd({ Assign: { unit: hit.unit.id, target: { Patrol: { center: pos, radius_m: 200 } } } }) });
+    const u = hit.unit;
+    items.push({ label: "Patrol", run: () => cmd({ AssignUnit: { unit: u.id, order: "Patrol" } }) });
+    items.push({ label: "Disengage", run: () => cmd({ AssignUnit: { unit: u.id, order: "Disengage" } }) });
+    if (top) {
+      items.push({ label: `Pursue ${top.name}`, run: () => cmd({ AssignUnit: { unit: u.id, order: { Pursue: { target: top.id } } } }) });
+      items.push({ label: `Intercept ${top.name}`, run: () => cmd({ AssignUnit: { unit: u.id, order: { Intercept: { target: top.id } } } }) });
+    }
   } else if (hit.kind === "suspect") {
-    items.push({ label: "Priority 1", run: () => cmd({ SetPriority: { racer: hit.suspect.id, priority: 3 } }) });
-    if (nearestFree) items.push({ label: `Send ${nearestFree.callsign}`, run: () => cmd({ Assign: { unit: nearestFree.id, target: { Pursue: { racer: hit.suspect.id } } } }) });
-    if (heli) items.push({ label: "Air unit", run: () => cmd({ Assign: { unit: heli.id, target: { Pursue: { racer: hit.suspect.id } } } }) });
-    items.push(deploy("Pit"));
-  } else {
-    items.push(deploy("Roadblock"), deploy("SpikeStrip"), deploy("Spotlight"));
-    if (props.selected) items.push({ label: `Send ${props.selected.callsign}`, run: () => cmd({ Assign: { unit: props.selected!.id, target: hit.kind === "incident" ? { Incident: { id: hit.incident.id } } : { Hold: { pos } } } }) });
-    else if (nearestFree) items.push({ label: `Send ${nearestFree.callsign}`, run: () => cmd({ Assign: { unit: nearestFree.id, target: hit.kind === "incident" ? { Incident: { id: hit.incident.id } } : { Hold: { pos } } } }) });
+    const s = hit.suspect;
+    items.push({ label: c.priorityTarget === s.id ? "Clear priority" : "Priority target", run: () => cmd({ SetPriorityTarget: { target: c.priorityTarget === s.id ? null : s.id } }) });
+    if (sendUnit) items.push({ label: `Send ${sendUnit.callsign}`, run: () => cmd({ AssignUnit: { unit: sendUnit.id, order: { Pursue: { target: s.id } } } }) });
+    items.push({ label: `Roadblock ahead${rd.roadblock_s > 0 ? ` (${rd.roadblock_s.toFixed(0)}s)` : ""}`, run: () => cmd({ RequestRoadblock: { target: s.id, segment: null } }) });
+    items.push({ label: `Spikes ahead${rd.spikes_s > 0 ? ` (${rd.spikes_s.toFixed(0)}s)` : ""}`, run: () => cmd({ RequestSpikes: { target: s.id, segment: null } }) });
+    items.push({ label: "Air unit", run: () => cmd({ RequestHelicopter: { target: s.id } }) });
+    items.push({ label: "Call off", run: () => cmd({ CallOff: { target: s.id } }) });
+  } else if (hit.kind === "incident") {
+    const inc = hit.incident;
+    if (sendUnit) items.push({ label: `Send ${sendUnit.callsign}`, run: () => cmd({ AssignUnit: { unit: sendUnit.id, order: { Respond: { incident: inc.id } } } }) });
+  } else if (top) {
+    // Ground: tools on this road segment, aimed at the priority / most wanted racer.
+    const seg = hit.road;
+    items.push({ label: `Roadblock here (${top.name})`, disabled: seg === null, run: () => cmd({ RequestRoadblock: { target: top.id, segment: seg } }) });
+    items.push({ label: `Spikes here (${top.name})`, disabled: seg === null, run: () => cmd({ RequestSpikes: { target: top.id, segment: seg } }) });
   }
   items.push({ label: "Cancel", run: props.onClose });
   // Items sit on an ellipse (labels are wide, so spread them more horizontally).
   const R = 70 + items.length * 6;
   return (
     <div class="wp-radial" style={{ left: `${x}px`, top: `${y}px` }} role="menu" onPointerDown={(e) => e.stopPropagation()} onContextMenu={(e) => e.preventDefault()}>
-      <div class="wp-radial-hub wp-mono">{hit.kind === "unit" ? hit.unit.callsign : hit.kind === "suspect" ? `#${hit.suspect.id}` : hit.kind === "incident" ? words(hit.incident.kind) : "HERE"}</div>
+      <div class="wp-radial-hub wp-mono">
+        {hit.kind === "unit" ? hit.unit.callsign : hit.kind === "suspect" ? `#${hit.suspect.id}` : hit.kind === "incident" ? words(hit.incident.kind) : hit.road !== null ? `SEG ${hit.road}` : "NO ROAD"}
+      </div>
       {items.map((it, i) => {
         const a = (i / items.length) * Math.PI * 2 - Math.PI / 2;
         return (
@@ -451,7 +541,7 @@ function useHeatCanvas(heat: { pos: Vec2; weight: number }[], map: CityMap, enab
     const img = ctx.createImageData(N, N);
     const [x0, y0] = map.boundsMin;
     const [x1, y1] = map.boundsMax;
-    const sigma = 140;
+    const sigma = Math.max(x1 - x0, y1 - y0) / 13;
     for (let j = 0; j < N; j++) {
       for (let i = 0; i < N; i++) {
         const wx = x0 + ((i + 0.5) / N) * (x1 - x0);
@@ -531,11 +621,12 @@ function draw(
     ctx.lineWidth = Math.max(1.2 * px, 1.5);
     ctx.stroke(roads);
   }
-  // POIs (stations) as small squares.
-  ctx.fillStyle = col.polB;
+  // POIs: stations / safehouses / cameras as small squares.
   for (const p of map.pois) {
-    if (p.kind !== "PoliceStation") continue;
-    ctx.fillRect(p.pos[0] - 6 * px, p.pos[1] - 6 * px, 12 * px, 12 * px);
+    const c = p.kind === "PoliceStation" ? col.polB : p.kind === "Safehouse" || p.kind === "SafehouseCandidate" ? col.scan : p.kind === "Camera" ? col.warn : null;
+    if (!c) continue;
+    ctx.fillStyle = c;
+    ctx.fillRect(p.pos[0] - 5 * px, p.pos[1] - 5 * px, 10 * px, 10 * px);
   }
 
   // Screen-space overlays (constant pixel size).
@@ -553,16 +644,10 @@ function draw(
         ctx.beginPath();
         for (let i = -3; i <= 3; i++) ctx.lineTo(x + i * 4, y + (i % 2 ? -4 : 4));
         ctx.stroke();
-      } else if (t.tool === "Roadblock") {
-        ctx.fillRect(x - 12, y - 3, 24, 6);
       } else {
-        ctx.beginPath();
-        ctx.arc(x, y, 12, 0, Math.PI * 2);
-        ctx.globalAlpha = 0.25;
-        ctx.fill();
-        ctx.globalAlpha = 1;
+        ctx.fillRect(x - 12, y - 3, 24, 6);
       }
-      if (on("labels")) ctx.fillText(words(t.tool), x + 14, y);
+      if (on("labels")) ctx.fillText(`${t.tool === "SpikeStrip" ? "Spikes" : "Roadblock"}${t.remainingS !== null ? ` ${t.remainingS.toFixed(0)}s` : ""}`, x + 14, y);
     }
   }
 
@@ -572,7 +657,7 @@ function draw(
       if (age < 0 || age > 90) continue;
       const [x, y] = screenOf(i.pos);
       ctx.globalAlpha = Math.max(0.25, 1 - age / 90);
-      ctx.fillStyle = i.kind === "Crash" ? col.danger : i.kind === "Sighting" ? col.polA : col.warn;
+      ctx.fillStyle = i.kind === "Crash" ? col.danger : i.kind === "Report" || i.kind === "Sighting" ? col.polA : col.warn;
       ctx.beginPath();
       ctx.moveTo(x, y - 7);
       ctx.lineTo(x + 6, y + 5);
@@ -583,16 +668,16 @@ function draw(
     }
   }
 
-  // Assignment lines.
+  // Assignment lines (solid = current, dashed = order sent, not yet reflected).
   if (on("units")) {
-    ctx.setLineDash([4, 4]);
     ctx.lineWidth = 1.2;
     for (const u of cap.units) {
       const t = targetPos(u, cap.suspects, cap.incidents);
       if (!t) continue;
       const [ax, ay] = screenOf(u.pos);
       const [bx, by] = screenOf(t);
-      ctx.strokeStyle = u.id === selected ? col.ink : "rgba(59,125,255,0.6)";
+      ctx.setLineDash(u.pendingOrder ? [4, 4] : []);
+      ctx.strokeStyle = u.id === selected ? col.ink : "rgba(59,125,255,0.55)";
       ctx.beginPath();
       ctx.moveTo(ax, ay);
       ctx.lineTo(bx, by);
@@ -618,7 +703,8 @@ function draw(
       ctx.closePath();
       ctx.fill();
       ctx.restore();
-      if (!s.visible) {
+      // A stale sighting shows as a dashed "last known" ring.
+      if ((s.stalenessS ?? 0) > 1) {
         ctx.strokeStyle = c;
         ctx.setLineDash([3, 3]);
         ctx.beginPath();
@@ -626,9 +712,15 @@ function draw(
         ctx.stroke();
         ctx.setLineDash([]);
       }
+      if (s.id === cap.priorityTarget) {
+        ctx.strokeStyle = col.ink;
+        ctx.beginPath();
+        ctx.arc(x, y, 13, 0, Math.PI * 2);
+        ctx.stroke();
+      }
       if (on("labels")) {
         ctx.fillStyle = col.ink;
-        ctx.fillText(`${s.name}${lvl ? ` L${lvl}` : ""}${s.priority > 1 ? ` P${s.priority}` : ""}`, x + 12, y - 10);
+        ctx.fillText(`${s.name}${lvl ? ` L${lvl}` : ""}${s.status === "Searching" ? " (searching)" : ""}`, x + 12, y - 10);
       }
     }
   }
@@ -637,7 +729,9 @@ function draw(
     for (const u of cap.units) {
       const [x, y] = screenOf(u.pos);
       const isSel = u.id === selected;
+      const off = u.assignment === "out-of-service";
       ctx.save();
+      ctx.globalAlpha = off ? 0.35 : 1;
       ctx.translate(x, y);
       if (u.kind === "Helicopter") {
         ctx.strokeStyle = col.polA;
@@ -651,7 +745,7 @@ function draw(
         ctx.stroke();
       } else {
         ctx.rotate(u.headingRad);
-        ctx.fillStyle = u.status === "Pursuit" ? col.polA : col.polB;
+        ctx.fillStyle = u.assignment === "pursue" || u.assignment === "intercept" ? col.polA : col.polB;
         ctx.fillRect(-4.5, -8, 9, 16);
         ctx.fillStyle = "#fff";
         ctx.fillRect(-4.5, -3, 9, 2);
@@ -668,7 +762,7 @@ function draw(
         ctx.fillStyle = col.info;
         ctx.fillRect(x - 2, y - 16, 4, 4);
       }
-      if (on("labels")) {
+      if (on("labels") && !off) {
         ctx.fillStyle = isSel ? col.ink : "rgba(230,239,233,0.75)";
         ctx.fillText(u.callsign, x + 12, y + 8);
       }

@@ -235,6 +235,29 @@ export type SimEvent =
   | {
       TrafficViolation: {
         kind: ViolationKind;
+        /**
+         * Where it happened, world m (v0.2.0; police witnesses / cameras).
+         *
+         * @minItems 3
+         * @maxItems 3
+         */
+        pos: [number, number, number];
+        vehicle: EntityId;
+      };
+    }
+  | {
+      GlassShattered: {
+        region: BodyRegion;
+        vehicle: EntityId;
+      };
+    }
+  | {
+      RegionDamaged: {
+        region: BodyRegion;
+        /**
+         * Damage severity 0 (cosmetic) ..= 1 (destroyed).
+         */
+        severity: number;
         vehicle: EntityId;
       };
     }
@@ -304,6 +327,14 @@ export type SurfaceType = "Asphalt" | "WetAsphalt" | "Concrete" | "Gravel" | "Gr
  */
 export type PlayerId = number;
 /**
+ * Police wanted level of a racer, derived from heat by `wp_police` (v0.2.0: moved here from
+ * `wp_police` so economy, net and UI share it).
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "WantedLevel".
+ */
+export type WantedLevel = "None" | "L1" | "L2" | "L3" | "L4" | "L5";
+/**
  * Mechanical behaviour family of a material.
  *
  * This interface was referenced by `WpContractsBundle`'s JSON-Schema
@@ -359,6 +390,22 @@ export type DriveLayout =
          */
         front_split: number;
       };
+    }
+  | {
+      AwdOnDemand: {
+        /**
+         * Front torque fraction with the coupling open, 0..1 (typically 0.9-1.0).
+         */
+        base_front_split: number;
+        /**
+         * Front-over-rear wheel-speed slip ratio at which the coupling starts to close.
+         */
+        engage_slip: number;
+        /**
+         * Maximum fraction sent to the rear with the coupling closed, 0..1.
+         */
+        max_rear_split: number;
+      };
     };
 
 /**
@@ -377,6 +424,7 @@ export interface WpContractsBundle {
   TimeOfDay?: TimeOfDay;
   VehicleInput?: VehicleInput;
   VehicleState?: VehicleState;
+  WantedLevel?: WantedLevel;
   LatticeDef?: LatticeDef;
   MaterialDef?: MaterialDef;
   ModeTable?: ModeTable;
@@ -541,11 +589,11 @@ export interface RepairEstimate {
 export interface RepairLine {
   item: RepairItem;
   /**
-   * Labour hours.
+   * Labour hours, **unscaled**.
    */
   labour_hours: number;
   /**
-   * Parts cost.
+   * Parts cost, **unscaled** (v0.2.0 clarification: the mode's `repair_cost_scale` is not in it).
    */
   parts_cost: number;
   /**
@@ -553,7 +601,7 @@ export interface RepairLine {
    */
   severity: number;
   /**
-   * Line total (parts + labour), already including the mode's `repair_cost_scale`.
+   * Line total (parts + labour), the only figure that includes the mode's `repair_cost_scale`.
    */
   total: number;
 }
@@ -642,6 +690,14 @@ export interface WheelState {
    * Whether the wheel has been torn off.
    */
   detached: boolean;
+  /**
+   * Longitudinal tire force actually applied this tick, tire frame, N (v0.2.0; + = forward).
+   */
+  fx_n?: number;
+  /**
+   * Lateral tire force actually applied this tick, tire frame, N (v0.2.0; + = left).
+   */
+  fy_n?: number;
   /**
    * Vertical tire load, N.
    */
@@ -1121,6 +1177,11 @@ export interface VehicleDef {
    */
   front_weight_frac: number;
   /**
+   * Fuel tank capacity, litres (v0.2.0). `mass_kg` includes fuel at 50 % fill. `None` = not
+   * modelled (fuel leaks from `HandlingEffects::fuel_leak_rate` then never run dry).
+   */
+  fuel_capacity_l?: number | null;
+  /**
    * Unique id; must equal the file stem (`data/cars/<id>.json`).
    */
   id: string;
@@ -1180,6 +1241,12 @@ export interface VehicleDef {
 /**
  * Brake system.
  *
+ * How it is read (v0.2.0 clarification, as implemented by `wp_vehicle`): `max_torque_*` are
+ * per-wheel **capacities** and `bias_front` is the pedal-force split. At full pedal, with
+ * `norm = max(bias, 1 − bias)`: front torque per wheel = `max_torque_front_nm · bias / norm`,
+ * rear = `max_torque_rear_nm · (1 − bias) / norm`. The biased axle gets its full capacity, the
+ * other is scaled down. Example: bias 0.65, front 2000, rear 1100 → 2000 and 592 N·m per wheel.
+ *
  * This interface was referenced by `WpContractsBundle`'s JSON-Schema
  * via the `definition` "BrakeDef".
  */
@@ -1193,11 +1260,11 @@ export interface BrakeDef {
    */
   handbrake_rear_nm: number;
   /**
-   * Maximum brake torque per front wheel at full pedal and `bias_front = 1`, N·m.
+   * Brake torque capacity per front wheel, N·m (see the type docs for how bias applies).
    */
   max_torque_front_nm: number;
   /**
-   * Maximum brake torque per rear wheel at full pedal and `bias_front = 0`, N·m.
+   * Brake torque capacity per rear wheel, N·m.
    */
   max_torque_rear_nm: number;
 }
@@ -1215,6 +1282,11 @@ export interface DrivetrainDef {
   diff_front: DiffDef;
   diff_rear: DiffDef;
   /**
+   * Gearbox + final drive mechanical efficiency for drive torque, 0..1 (v0.2.0).
+   * `None` = 0.85.
+   */
+  efficiency?: number | null;
+  /**
    * Final drive ratio.
    */
   final_drive: number;
@@ -1231,6 +1303,30 @@ export interface DrivetrainDef {
    * Time a gear change takes (torque interrupted), s.
    */
   shift_time_s: number;
+  /**
+   * Torque converter for automatics (v0.2.0). `None` = manual / dual-clutch (friction clutch).
+   */
+  torque_converter?: TorqueConverterDef | null;
+}
+/**
+ * Automatic gearbox torque converter (v0.2.0).
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "TorqueConverterDef".
+ */
+export interface TorqueConverterDef {
+  /**
+   * Engine speed above which the converter couples 1:1 (lock-up), rpm.
+   */
+  coupling_rpm: number;
+  /**
+   * Engine speed at full throttle with the output held still, rpm.
+   */
+  stall_rpm: number;
+  /**
+   * Torque multiplication at stall (output/input), typically 1.8-2.5.
+   */
+  stall_torque_ratio: number;
 }
 /**
  * Engine definition.
@@ -1340,6 +1436,11 @@ export interface WheelDef {
    * Caster angle, rad (positive = steering axis top leans rearward).
    */
   caster_rad: number;
+  /**
+   * Spin inertia of wheel + tire + hub about the axle, kg·m² (v0.2.0).
+   * `None` = `0.7 · mass_kg · radius_m²`.
+   */
+  inertia_kgm2?: number | null;
   /**
    * Unsprung mass of wheel + tire + hub, kg.
    */

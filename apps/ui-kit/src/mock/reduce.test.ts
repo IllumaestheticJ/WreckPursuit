@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CARS } from "../data/catalog";
 import { loadFixture } from "./fixtures";
-import { applyEvent, combineSeverity, contactSeverity, cooldownAt, emptyPlayback, markersFor, regionAt, type Playback, type ReduceContext } from "./reduce";
+import { applyEvent, combineSeverity, contactSeverity, emptyPlayback, markersFor, regionAt, type Playback, type ReduceContext } from "./reduce";
 import type { Run } from "./runs";
 
 function ctxFor(run: Run, player: number): ReduceContext {
@@ -61,32 +61,43 @@ describe("replaying real simcli runs", () => {
   });
 });
 
-describe("synthetic pursuit", () => {
+describe("synthetic pursuit (wp_police event shapes)", () => {
   const run = loadFixture("synthetic_pursuit");
 
-  it("raises heat to level 4, then clears on escape", () => {
-    expect(foldAll(run, 1, 70 * 240).heat.level).toBe("L4");
+  it("raises the wanted level to L5, then clears on escape", () => {
+    expect(foldAll(run, 1, 70 * 240).heat.level).toBe("L5");
     const end = foldAll(run, 1);
     expect(end.heat.level).toBe("None");
     expect(end.heat.state).toBe("clear");
   });
 
-  it("tracks pursuit and cooldown", () => {
-    expect(foldAll(run, 1, 12 * 240).heat.state).toBe("pursuit");
-    const cd = foldAll(run, 1, 50 * 240);
-    expect(cd.heat.state).toBe("cooldown");
-    // 20 s cooldown started at 47 s: 3 s in = 15 %.
-    expect(cooldownAt(cd, 50 * 240)).toBeCloseTo(0.15, 2);
+  it("tracks pursuit start / end and disabled units", () => {
+    const mid = foldAll(run, 1, 35 * 240);
+    expect(mid.heat.state).toBe("pursuit");
+    expect(mid.units.find((u) => u.unit === 4)?.disabled).toBe(true);
+    expect(foldAll(run, 1).pursued).toEqual([]);
   });
 
   it("uses RegionDamaged directly (no inferred damage) and decodes radio + economy payloads", () => {
     const p = foldAll(run, 1);
-    expect(p.regions.FrontBumper).toBeGreaterThan(0.85);
+    expect(p.regions.FrontBumper).toBeCloseTo(0.85, 5);
     expect(p.regions.LeftDoorF).toBeCloseTo(0.55, 5);
-    expect(p.scanner.some((s) => s.channel === "unit" && s.text.includes("Spikes down"))).toBe(true);
+    // wp_police radio text is shown as-is.
+    expect(p.scanner.some((s) => s.channel === "unit" && s.text === "Unit 5 deploying spikes on segment 120.")).toBe(true);
     expect(p.economy[0]?.bounty_delta).toBe(2500);
-    expect(p.tools.map((t) => t.tool)).toEqual(["SpikeStrip", "Spotlight", "Roadblock"]);
-    expect(p.dispatched.map((d) => d.kind)).toContain("Helicopter");
+    // Tools were placed and removed again.
+    expect(p.tools).toEqual([]);
+    expect(foldAll(run, 1, 50 * 240).tools.map((t) => t.tool)).toEqual(["SpikeStrip"]);
+    expect(p.units.find((u) => u.unit === 6)?.kind).toBe("Helicopter");
+  });
+
+  it("puts violations on the map at their contract position", () => {
+    const p = foldAll(run, 1, 16 * 240);
+    const red = p.incidents.find((i) => i.kind === "RedLight");
+    expect(red).toBeDefined();
+    const ev = run.events.find((l) => "TrafficViolation" in l.event && l.event.TrafficViolation.kind === "RedLight")!;
+    const v = (ev.event as Extract<typeof ev.event, { TrafficViolation: unknown }>).TrafficViolation;
+    expect(red!.pos).toEqual([v.pos[0], v.pos[1]]);
   });
 
   it("produces timeline markers", () => {
@@ -94,5 +105,33 @@ describe("synthetic pursuit", () => {
     expect(kinds).toContain("contact");
     expect(kinds).toContain("police");
     expect(kinds).toContain("violation");
+  });
+});
+
+describe("recorded wp_police run", () => {
+  const run = loadFixture("police_pursuit");
+
+  it("decodes every police payload into a known wp_police variant", () => {
+    const known = ["Radio", "WantedLevelChanged", "PursuitStarted", "PursuitEnded", "UnitSpawned", "UnitDespawned", "UnitDisabled", "RoadblockPlaced", "SpikesPlaced", "ToolRemoved", "SpikeHit", "HeloLaunched", "PitAttempt"];
+    const ctx = ctxFor(run, 1);
+    let n = 0;
+    for (const l of run.events) {
+      if (!("PoliceEvent" in l.event)) continue;
+      n++;
+      const p = applyEvent(emptyPlayback(), l, ctx);
+      expect(p.scanner.every((s) => !s.text.startsWith("Police event #"))).toBe(true);
+      const body = JSON.parse(new TextDecoder().decode(new Uint8Array(l.event.PoliceEvent.payload)));
+      expect(known).toContain(Object.keys(body)[0]);
+    }
+    expect(n).toBeGreaterThan(20);
+  });
+
+  it("has a pursuit, spike hits and captain views", () => {
+    const p = foldAll(run, 1);
+    expect(p.scanner.some((s) => s.text.startsWith("Pursuit:"))).toBe(true);
+    expect(p.scanner.some((s) => s.text.startsWith("Spikes!"))).toBe(true);
+    expect(run.captain.length).toBeGreaterThan(50);
+    expect(run.captain[0].view.units.length).toBeGreaterThan(0);
+    expect(run.map?.roads.length).toBeGreaterThan(50);
   });
 });

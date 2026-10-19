@@ -141,3 +141,12 @@
     grid-template-columns: 1fr;
   }
 }
+.wp-unit-row[data-off="true"] {
+  opacity: 0.45;
+}
+.wp-tool-grid {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 0.25em 1em;
+  font-size: 0.85em;
+}

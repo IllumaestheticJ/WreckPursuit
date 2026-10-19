@@ -10,12 +10,20 @@
  * moves on `advance(seconds)` (tests, or a host that owns the frame loop). The sim tick is
  * derived from the replay position, never from the wall clock.
  */
-import type { DamageMode, RepairEstimate, Role } from "../generated/contracts";
+import type { DamageMode, DayPhase, RepairEstimate, Role } from "../generated/contracts";
 import { bind, unbind } from "../model/bindings";
 import type { UiCommand } from "../model/commands";
 import { Store, type GameModel } from "../model/GameModel";
-import type { CaptainCommand } from "../model/proposed";
-import type { GarageCar, MapBlip, RaceHud, Suspect, UiState } from "../model/types";
+import {
+  captainErrorText,
+  escapeTimeS,
+  heatWithinLevel,
+  type CaptainCommand,
+  type CaptainView,
+  type RacerSighting,
+  type UnitOrder,
+} from "../model/police";
+import type { CaptainState, CityMap, DeployedTool, GarageCar, HeatHud, Incident, MapBlip, PoliceUnit, RaceHud, Suspect, UiState, Vec2 } from "../model/types";
 import { CARS, MODS, modBlocker } from "../data/catalog";
 import { carValue, impoundFee, insuranceQuote, marketPrice, modsPrice, quoteRepair, salePrice } from "../data/economy";
 import { FIXTURES, loadFixture } from "./fixtures";
@@ -34,9 +42,9 @@ import {
   mockShops,
   presetOf,
 } from "./mockData";
-import { heatSources, initialCharges, initialUnits, stepUnits } from "./police";
-import { applyEvent, callsign, cooldownAt, emptyPlayback, entityPose, markersFor, type Playback, type ReduceContext } from "./reduce";
-import type { Run } from "./runs";
+import { heatSources, initialReadiness, initialUnits, stepUnits, tickTools, toyCaptainCommand, type ToyCaptain } from "./police";
+import { applyEvent, callsign, emptyPlayback, entityPose, markersFor, type Playback, type ReduceContext } from "./reduce";
+import { captainAt, type Run } from "./runs";
 
 /** Options for [`createMockModel`]. */
 export interface MockOptions {
@@ -65,16 +73,53 @@ export interface MockModel extends GameModel {
 }
 
 const SCANNER_KEEP = 200;
+const START_CLOCK_S = 23 * 3600 + 14 * 60;
+
+const STATUS_TO_STATE: Record<RacerSighting["status"], HeatHud["state"]> = {
+  Clear: "clear",
+  Wanted: "noticed",
+  Pursuit: "pursuit",
+  Searching: "cooldown",
+};
+
+/** Same unit order? (to clear a pending order once the recording shows it). */
+function orderMatches(u: PoliceUnit, o: UnitOrder): boolean {
+  if (o === "Patrol") return u.assignment === "patrol" || u.assignment === "idle";
+  if (o === "Disengage") return u.assignment === "out-of-service";
+  if ("Respond" in o) return u.assignment === "respond" && u.incident === o.Respond.incident;
+  if ("Pursue" in o) return u.assignment === "pursue" && u.target === o.Pursue.target;
+  return u.assignment === "intercept" && u.target === o.Intercept.target;
+}
+
+/** Centroid of each district's road midpoints (heat layer anchors on police maps). */
+function districtCentroids(map: CityMap): Map<string, Vec2> {
+  const acc = new Map<string, [number, number, number]>();
+  for (const r of map.roads) {
+    if (!r.district || r.points.length < 2) continue;
+    const [a, b] = [r.points[0], r.points[r.points.length - 1]];
+    const v = acc.get(r.district) ?? [0, 0, 0];
+    acc.set(r.district, [v[0] + (a[0] + b[0]) / 2, v[1] + (a[1] + b[1]) / 2, v[2] + 1]);
+  }
+  return new Map([...acc].map(([k, [x, y, n]]) => [k, [x / n, y / n] as Vec2]));
+}
 
 /** Create a mock `GameModel`. */
 export function createMockModel(opts: MockOptions = {}): MockModel {
-  const map = cityMap();
+  const defaultMap = cityMap();
   let run = loadFixture(opts.run ?? "synthetic_pursuit");
   let player = run.entities[0]?.entity ?? 1;
   let playback: Playback = emptyPlayback();
   let tickF = 0; // fractional tick
   let noticeId = 1;
   const loop = opts.loop ?? true;
+  const mapOf = (r: Run) => r.map ?? defaultMap;
+  let centroids = districtCentroids(mapOf(run));
+  // Toy police (runs without recorded wp_police data).
+  const freshToy = (): ToyCaptain => ({ units: initialUnits(mapOf(run)), tools: [], readiness: initialReadiness(), priorityTarget: null, nextToolId: 1000 });
+  let toy = freshToy();
+  // Recorded runs: orders the captain sent that the recording cannot reflect, and a local priority.
+  let pending = new Map<number, UnitOrder>();
+  let localPriority: number | null | undefined;
 
   const ctx = (): ReduceContext => ({
     run,
@@ -88,13 +133,24 @@ export function createMockModel(opts: MockOptions = {}): MockModel {
       if (e === 4294967295) return "barrier";
       const ent = run.entities.find((x) => x.entity === e);
       if (ent) return `${CARS[ent.car]?.display_name ?? ent.car} (${ent.id})`;
-      return e >= 10 && e < 50 ? callsign(e) : `traffic #${e}`;
+      return `traffic #${e}`;
     },
   });
 
   const account = mockAccount();
   const garage = mockGarage();
   const settings = defaultSettings();
+  const emptyCaptain = (): CaptainState => ({
+    source: run.captain.length ? "wp_police" : "mock",
+    units: run.captain.length ? [] : toy.units,
+    suspects: [],
+    incidents: [],
+    tools: [],
+    heat: [],
+    heatByDistrict: [],
+    readiness: initialReadiness(),
+    priorityTarget: null,
+  });
   const store = new Store<UiState>({
     screen: opts.screen ?? "hud",
     previousScreen: null,
@@ -119,7 +175,7 @@ export function createMockModel(opts: MockOptions = {}): MockModel {
       race: null,
       assists: settings.assists,
       damageMode: settings.damageMode,
-      timeOfDayS: 23 * 3600 + 14 * 60,
+      timeOfDayS: START_CLOCK_S,
     },
     scanner: [],
     settings,
@@ -129,10 +185,10 @@ export function createMockModel(opts: MockOptions = {}): MockModel {
     lobby: mockLobby(),
     results: mockResults(),
     impound: mockImpound(garage, account.day),
-    crew: mockCrews(map),
+    crew: mockCrews(defaultMap),
     police: mockPoliceCareer(account.copXp),
-    captain: { units: initialUnits(map), suspects: [], incidents: [], tools: [], heat: [], charges: initialCharges() },
-    map,
+    captain: emptyCaptain(),
+    map: mapOf(run),
     replay: {
       source: run.id,
       playing: opts.autoplay ?? true,
@@ -162,24 +218,138 @@ export function createMockModel(opts: MockOptions = {}): MockModel {
     playback = { ...playback, tick };
   }
 
-  function suspectsAt(tick: number, prev: Suspect[]): Suspect[] {
-    return run.entities.flatMap((e) => {
+  const carName = (entity: number) => {
+    const e = run.entities.find((x) => x.entity === entity);
+    return e ? (CARS[e.car]?.display_name ?? e.car) : `Racer #${entity}`;
+  };
+
+  /** Captain state from a recorded `CaptainView`, interpolated toward the next sample. */
+  function recordedCaptain(tick: number, prev: CaptainState): { captain: CaptainState; sighting: RacerSighting | null; phase: DayPhase } {
+    const i = Math.max(0, captainAt(run.captain, tick));
+    const a = run.captain[i];
+    const b = run.captain[i + 1];
+    const f = b ? Math.max(0, Math.min(1, (tick - a.tick) / (b.tick - a.tick))) : 0;
+    const view: CaptainView = a.view;
+    const lerp = (p: Vec2, q: Vec2 | undefined): Vec2 => (q ? [p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f] : p);
+    const units: PoliceUnit[] = view.units.map((u) => {
+      const next = b?.view.units.find((x) => x.unit === u.unit);
+      const unit: PoliceUnit = {
+        id: u.unit,
+        callsign: callsign(u.unit, u.kind),
+        kind: u.kind,
+        assignment: u.assignment,
+        pos: lerp(u.pos, next?.pos),
+        headingRad: Math.atan2(u.heading[0], u.heading[1]),
+        speedMps: u.speed_mps,
+        human: u.player_driven,
+        target: u.target,
+        incident: null,
+        tactic: u.tactic,
+        suggestion: u.suggestion,
+        health: u.health,
+        pendingOrder: null,
+      };
+      const p = pending.get(u.unit);
+      if (p && orderMatches(unit, p)) pending.delete(u.unit);
+      unit.pendingOrder = pending.get(u.unit) ?? null;
+      return unit;
+    });
+    // Responding units: the incident list names the unit.
+    for (const inc of view.incidents) {
+      const u = units.find((x) => x.id === inc.unit);
+      if (u && u.assignment === "respond") u.incident = inc.id;
+    }
+    const suspects: Suspect[] = view.racers.map((r) => {
+      const next = b?.view.racers.find((x) => x.racer === r.racer);
+      const pose = entityPose(run, r.racer, tick);
+      const pos = r.last_known ? lerp(r.last_known, next?.last_known ?? undefined) : (pose?.pos ?? [0, 0]);
+      return {
+        id: r.racer,
+        name: carName(r.racer),
+        pos,
+        headingRad: pose?.heading ?? 0,
+        speedMps: pose?.speed ?? 0,
+        level: r.level,
+        heat: r.heat,
+        status: r.status,
+        stalenessS: r.staleness_s,
+        bounty: r.bounty,
+        unitsAssigned: r.units_assigned,
+      };
+    });
+    const incidents: Incident[] = view.incidents.map((inc) => ({
+      id: inc.id,
+      kind: inc.kind === "Crash" ? "Crash" : "Report",
+      pos: inc.pos,
+      tS: inc.created_s,
+      suspect: inc.kind === "Crash" ? null : inc.kind.Report.racer,
+      unit: inc.unit,
+    }));
+    const tools: DeployedTool[] = view.tools.map((t) => {
+      const known = playback.tools.find((x) => x.id === t.tool);
+      return { id: t.tool, tool: t.roadblock ? "Roadblock" : "SpikeStrip", pos: t.pos, a: known?.a, b: known?.b, remainingS: t.remaining_s };
+    });
+    const heat = [
+      ...view.heat_by_district.flatMap(([d, h]) => {
+        const c = centroids.get(d);
+        return c && h > 0 ? [{ pos: c, weight: Math.min(1, h / 100) }] : [];
+      }),
+      ...heatSources(incidents, [], view.time_s),
+    ];
+    const captain: CaptainState = {
+      ...prev,
+      source: "wp_police",
+      units,
+      suspects,
+      incidents,
+      tools,
+      heat,
+      heatByDistrict: view.heat_by_district,
+      readiness: view.readiness,
+      priorityTarget: localPriority !== undefined ? localPriority : view.priority_target,
+    };
+    return { captain, sighting: view.racers.find((r) => r.racer === player) ?? null, phase: view.phase };
+  }
+
+  /** Captain state from the toy police (non-police runs). */
+  function toyCaptainState(tick: number, dtS: number, prev: CaptainState): CaptainState {
+    const suspects: Suspect[] = run.entities.flatMap((e) => {
       const pose = entityPose(run, e.entity, tick);
       if (!pose) return [];
-      const old = prev.find((s) => s.id === e.entity);
-      return [
-        {
-          id: e.entity,
-          name: `${CARS[e.car]?.display_name ?? e.car}`,
-          pos: pose.pos,
-          headingRad: pose.heading,
-          speedMps: pose.speed,
-          level: playback.levels[e.entity] ?? "None",
-          visible: playback.visible.includes(e.entity),
-          priority: old?.priority ?? 1,
-        },
-      ];
+      const level = playback.levels[e.entity] ?? "None";
+      const status = playback.pursued.includes(e.entity) ? "Pursuit" : level !== "None" ? "Wanted" : "Clear";
+      return [{ id: e.entity, name: carName(e.entity), pos: pose.pos, headingRad: pose.heading, speedMps: pose.speed, level, heat: 0, status, stalenessS: 0, bounty: 0, unitsAssigned: 0 }];
     });
+    // Units the event stream spawned join the roster; units chasing the player follow it.
+    let units = toy.units;
+    for (const u of playback.units) {
+      if (!units.some((x) => x.id === u.unit)) {
+        units = [...units, { id: u.unit, callsign: callsign(u.unit, u.kind), kind: u.kind, assignment: "patrol", pos: u.pos, headingRad: u.headingRad, speedMps: 0, human: false, target: null, incident: null, tactic: null, suggestion: null, health: 1, pendingOrder: null }];
+      }
+    }
+    units = units
+      .filter((u) => playback.units.some((x) => x.unit === u.id) || toy.units.some((x) => x.id === u.id))
+      .map((u) => {
+        const ev = playback.units.find((x) => x.unit === u.id);
+        if (ev?.disabled) return { ...u, assignment: "out-of-service", target: null };
+        if (playback.pursuing.includes(u.id) && u.assignment === "patrol") return { ...u, assignment: "pursue", target: player, tactic: "shadow" };
+        return u;
+      });
+    toy = tickTools({ ...toy, units: stepUnits(units, suspects, playback.incidents, dtS) }, dtS);
+    for (const s of suspects) s.unitsAssigned = toy.units.filter((u) => u.target === s.id).length;
+    const nowS = tick / run.ticksPerSecond;
+    return {
+      ...prev,
+      source: "mock",
+      units: toy.units,
+      suspects,
+      incidents: playback.incidents.filter((i) => i.kind !== "Speeding" || nowS - i.tS < 30),
+      tools: [...playback.tools, ...toy.tools],
+      heat: heatSources(playback.incidents, suspects, nowS),
+      heatByDistrict: [],
+      readiness: toy.readiness,
+      priorityTarget: toy.priorityTarget,
+    };
   }
 
   function raceHud(tick: number): RaceHud | null {
@@ -223,24 +393,37 @@ export function createMockModel(opts: MockOptions = {}): MockModel {
       const rows = ent ? run.metrics[ent.id] : undefined;
       let row = rows?.[0];
       if (rows) for (const r of rows) if (r.tick <= tick) row = r; else break;
-      const suspects = suspectsAt(tick, s.captain.suspects);
-      // Units that the event stream dispatched join the captain's roster.
-      let units = s.captain.units;
-      for (const d of playback.dispatched) {
-        if (!units.some((u) => u.id === d.unit)) {
-          units = [...units, { id: d.unit, callsign: callsign(d.unit, d.kind), kind: d.kind, status: "Responding", pos: [d.target[0] + 300, d.target[1] - 300], headingRad: 0, human: false, target: { kind: "racer", id: player }, health: 1 }];
+      const nowS = tick / run.ticksPerSecond;
+
+      let captain: CaptainState;
+      let heat: HeatHud = { ...playback.heat, bounty: s.account.bounty + playback.heat.bounty };
+      if (run.captain.length) {
+        const rec = recordedCaptain(tick, s.captain);
+        captain = rec.captain;
+        const sg = rec.sighting;
+        if (sg) {
+          const state = STATUS_TO_STATE[sg.status];
+          heat = {
+            level: sg.level,
+            heat: heatWithinLevel(sg.heat, sg.level),
+            state,
+            cooldown: state === "cooldown" ? Math.min(1, (sg.staleness_s ?? 0) / escapeTimeS(sg.level, rec.phase)) : 0,
+            unitsInPursuit: sg.units_assigned,
+            bounty: s.account.bounty + Math.round(sg.bounty),
+          };
         }
+      } else {
+        captain = toyCaptainState(tick, dtS, s.captain);
       }
-      // AI units in pursuit follow the player unless the captain gave them another target.
-      units = units.map((u) => (playback.pursuing.includes(u.id) && !u.target ? { ...u, target: { kind: "racer", id: player } } : u));
-      units = stepUnits(units, suspects, playback.incidents, dtS);
+
       const blips: MapBlip[] = [
-        ...suspects.filter((x) => x.id !== player).map((x) => ({ id: x.id, kind: "racer" as const, pos: x.pos, headingRad: x.headingRad })),
-        ...units.map((u) => ({ id: u.id, kind: u.kind === "Helicopter" ? ("helicopter" as const) : ("police" as const), pos: u.pos, headingRad: u.headingRad })),
+        ...captain.suspects.filter((x) => x.id !== player).map((x) => ({ id: x.id, kind: "racer" as const, pos: x.pos, headingRad: x.headingRad })),
+        ...captain.units
+          .filter((u) => u.assignment !== "out-of-service")
+          .map((u) => ({ id: u.id, kind: u.kind === "Helicopter" ? ("helicopter" as const) : ("police" as const), pos: u.pos, headingRad: u.headingRad })),
       ];
       const race = raceHud(tick);
       if (race) blips.push({ id: -1, kind: "checkpoint", pos: race.nextCheckpoint });
-      const nowS = tick / run.ticksPerSecond;
       // playback.scanner only changes when events are folded or the run resets.
       const pb = playback.scanner;
       const same = s.scanner.length === Math.min(pb.length, SCANNER_KEEP) && s.scanner[s.scanner.length - 1]?.id === pb[pb.length - 1]?.id;
@@ -261,23 +444,16 @@ export function createMockModel(opts: MockOptions = {}): MockModel {
           failed: playback.failed,
           wheelsDetached: playback.wheelsDetached,
           totalLoss: playback.totalLoss,
-          heat: { ...playback.heat, cooldown: cooldownAt(playback, tick), bounty: s.account.bounty + playback.heat.bounty },
+          heat,
           pos: pose?.pos ?? s.hud.pos,
           headingRad: pose?.heading ?? s.hud.headingRad,
           blips,
           race,
-          timeOfDayS: (23 * 3600 + 14 * 60 + nowS) % 86400,
+          timeOfDayS: (START_CLOCK_S + nowS) % 86400,
         },
         scanner,
         police: s.police.orders === orders ? s.police : { ...s.police, orders },
-        captain: {
-          ...s.captain,
-          units,
-          suspects,
-          incidents: playback.incidents,
-          tools: [...playback.tools, ...s.captain.tools.filter((t) => t.id < 0)],
-          heat: heatSources(playback.incidents, suspects, nowS),
-        },
+        captain,
         replay: { ...s.replay, tick },
       };
     });
@@ -302,16 +478,21 @@ export function createMockModel(opts: MockOptions = {}): MockModel {
 
   function resetRunState(): void {
     playback = emptyPlayback();
-    set((s) => ({ ...s, scanner: [], captain: { ...s.captain, units: initialUnits(map), tools: [], charges: initialCharges() } }));
+    toy = freshToy();
+    pending = new Map();
+    localPriority = undefined;
+    set((s) => ({ ...s, scanner: [], captain: emptyCaptain() }));
   }
 
   function loadRun(id: string): void {
     run = loadFixture(id);
     player = run.entities[0]?.entity ?? 1;
+    centroids = districtCentroids(mapOf(run));
     tickF = 0;
     resetRunState();
     set((s) => ({
       ...s,
+      map: mapOf(run),
       hud: { ...s.hud, redlineRpm: CARS[run.entities[0]?.car]?.engine.redline_rpm ?? 7000 },
       replay: { ...s.replay, source: id, tick: 0, totalTicks: run.totalTicks, ticksPerSecond: run.ticksPerSecond, markers: markersFor(run, player) },
     }));
@@ -334,40 +515,28 @@ export function createMockModel(opts: MockOptions = {}): MockModel {
     return Math.max(0.05, 1 - remaining.reduce((a, l) => a + l.severity * 0.12, 0));
   }
 
+  /** Execute a captain command with wp_police's rules (toy runs) or validate + queue it (recorded runs). */
   function captain(cmd: CaptainCommand): void {
     const s = store.get();
-    if ("Assign" in cmd) {
-      const { unit, target } = cmd.Assign;
-      const t =
-        "Pursue" in target
-          ? ({ kind: "racer", id: target.Pursue.racer } as const)
-          : "Incident" in target
-            ? ({ kind: "incident", id: target.Incident.id } as const)
-            : "Hold" in target
-              ? ({ kind: "point", pos: target.Hold.pos } as const)
-              : ({ kind: "point", pos: target.Patrol.center } as const);
-      set((st) => ({
-        ...st,
-        captain: { ...st.captain, units: st.captain.units.map((u) => (u.id === unit ? { ...u, target: t, status: "Responding" } : u)) },
-        police: unit === 10 ? { ...st.police, assignment: describeTarget(t) } : st.police,
-      }));
-    } else if ("Deploy" in cmd) {
-      const { tool, pos, heading_rad } = cmd.Deploy;
-      if ((s.captain.charges[tool] ?? 0) <= 0) return notice(`No ${tool} charges left`);
-      set((st) => ({
-        ...st,
-        captain: {
-          ...st.captain,
-          charges: { ...st.captain.charges, [tool]: st.captain.charges[tool] - 1 },
-          tools: [...st.captain.tools, { id: -(st.captain.tools.length + 1), tool, pos, headingRad: heading_rad }],
-        },
-      }));
-    } else if ("Recall" in cmd) {
-      set((st) => ({ ...st, captain: { ...st.captain, units: st.captain.units.map((u) => (u.id === cmd.Recall.unit ? { ...u, target: null, status: "Returning" } : u)) } }));
-    } else if ("SetPriority" in cmd) {
-      const { racer, priority } = cmd.SetPriority;
-      set((st) => ({ ...st, captain: { ...st.captain, suspects: st.captain.suspects.map((x) => (x.id === racer ? { ...x, priority } : x)) } }));
+    const phase: DayPhase = run.captain.length ? run.captain[Math.max(0, captainAt(run.captain, s.replay.tick))].view.phase : "Night";
+    const cctx = { suspects: s.captain.suspects, incidents: s.captain.incidents, map: s.map, phase, pursued: playback.pursued };
+    if (run.captain.length) {
+      // Same validation against the recorded state; the recording itself cannot change.
+      const probe: ToyCaptain = { units: s.captain.units, tools: s.captain.tools, readiness: s.captain.readiness, priorityTarget: s.captain.priorityTarget, nextToolId: 0 };
+      const r = toyCaptainCommand(probe, cmd, cctx);
+      if (typeof r === "string" || !("units" in r)) return notice(captainErrorText(r));
+      if ("AssignUnit" in cmd) pending.set(cmd.AssignUnit.unit, cmd.AssignUnit.order);
+      if ("SetPriorityTarget" in cmd) localPriority = cmd.SetPriorityTarget.target;
+      notice(`Sent to wp_police: ${describeCommand(cmd)} (recorded run: units keep their recorded paths)`, "info");
+      return render(0);
     }
+    const r = toyCaptainCommand(toy, cmd, cctx);
+    if (typeof r === "string" || !("units" in r)) return notice(captainErrorText(r));
+    toy = r;
+    if ("AssignUnit" in cmd && s.captain.units.find((u) => u.id === cmd.AssignUnit.unit)?.human) {
+      set((st) => ({ ...st, police: { ...st.police, assignment: describeCommand(cmd) } }));
+    }
+    render(0);
   }
 
   function send(cmd: UiCommand): void {
@@ -637,8 +806,16 @@ export function createMockModel(opts: MockOptions = {}): MockModel {
   };
 }
 
-function describeTarget(t: { kind: string; id?: number; pos?: [number, number] }): string {
-  if (t.kind === "racer") return `Pursue suspect #${t.id}`;
-  if (t.kind === "incident") return `Respond to incident #${t.id}`;
-  return `Hold position ${t.pos?.map((v) => v.toFixed(0)).join(", ")}`;
+/** Short text for a captain command (notices, police orders). */
+export function describeCommand(c: CaptainCommand): string {
+  if ("AssignUnit" in c) {
+    const o = c.AssignUnit.order;
+    const what = typeof o === "string" ? o.toLowerCase() : "Pursue" in o ? `pursue racer #${o.Pursue.target}` : "Intercept" in o ? `intercept racer #${o.Intercept.target}` : `respond to incident #${o.Respond.incident}`;
+    return `Unit ${c.AssignUnit.unit} → ${what}`;
+  }
+  if ("RequestRoadblock" in c) return `roadblock on racer #${c.RequestRoadblock.target}${c.RequestRoadblock.segment !== null ? ` (segment ${c.RequestRoadblock.segment})` : ""}`;
+  if ("RequestSpikes" in c) return `spikes on racer #${c.RequestSpikes.target}${c.RequestSpikes.segment !== null ? ` (segment ${c.RequestSpikes.segment})` : ""}`;
+  if ("RequestHelicopter" in c) return `air unit on racer #${c.RequestHelicopter.target}`;
+  if ("SetPriorityTarget" in c) return c.SetPriorityTarget.target === null ? "priority cleared" : `priority racer #${c.SetPriorityTarget.target}`;
+  return `call off racer #${c.CallOff.target}`;
 }

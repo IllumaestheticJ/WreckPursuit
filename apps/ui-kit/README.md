@@ -22,7 +22,7 @@ monospace accents, grime + scanlines on menus, hard text shadows on the HUD for 
 cd apps/ui-kit
 npm install
 npm run demo        # http://localhost:5180 — every screen, mock playback, a11y toggles
-npm test            # vitest: parsing, event reduction, economy/estimator ports, mock provider (39 tests)
+npm test            # vitest: parsing, event reduction, economy/estimator ports, mock provider (43 tests)
 npm run typecheck
 npm run e2e         # builds, serves, visits every screen in headless Chromium, screenshots → e2e/out/
 ```
@@ -97,8 +97,11 @@ commands into economy calls / `ClientToServer` messages.
 - Garage, market, mod tree, impound and lobby commands run against a local mock economy that
   mirrors `wp_economy`'s rules and numbers (`src/data/economy.ts`, `src/data/estimate.ts` — the
   estimator and class index are line-by-line ports of `crates/wp_economy/src/estimate.rs`).
-- Captain commands drive a toy police sim (`src/mock/police.ts`): units drive Manhattan-style to
-  their target, helicopters fly straight.
+- **Police:** a run recorded from E's real `wp_police` (`police_pursuit`) drives the captain map from
+  its `CaptainView` samples (interpolated) and the HUD heat from the player's `RacerSighting`.
+  Captain commands are validated with E's rules and shown as pending (a recording cannot react).
+  Other runs use a toy police (`src/mock/police.ts`) with E's unit assignments and E's command
+  rules (NotPursued, Locked, Cooldown, Budget, from `data/police/*.toml`), which does react.
 - Car and mod data are the real `data/cars/*.json` and `data/mods/*.json`; maps are the real
   `data/city` road network.
 
@@ -106,14 +109,16 @@ commands into economy calls / `ClientToServer` messages.
 
 | Run | Source | What it shows |
 |---|---|---|
-| `synthetic_pursuit` | `scripts/gen-synthetic.mjs` (hand-scripted, **not** sim output) | 90 s night pursuit: violations, heat L1→L4, cooldowns, escape, spikes, region damage, a bounty `EconomyEvent` |
+| `synthetic_pursuit` | `scripts/gen-synthetic.mjs` (hand-scripted, **not** sim output) | 90 s night race + pursuit: violations, L1→L5, PIT, spikes, roadblock, helicopter, escape, region damage, a bounty `EconomyEvent` (wp_police event shapes) |
+| `police_pursuit` | `npm run gen:police` (`tools/record-police`: E's real `PoliceSystem` + a scripted racer) | 240 s pursuit in E's police city: real `PoliceEvent`s, `captain.jsonl` (`CaptainView` at 0.5 Hz), the city as `map.json` |
 | `golden_frontal_56kmh` | `simcli run` | real frontal crash: contact, component damage, failed lights, detached parts |
 | `golden_tbone` | `simcli run` | real side impact |
 | `city/procedural_12x12.map.json` | derived from `data/city/procedural_12x12.road.json` | roads (one polyline per road), zones, POIs |
 
 `npm run gen:fixtures` re-runs simcli and re-derives the map; `node scripts/gen-synthetic.mjs`
-rewrites the synthetic run. The synthetic run exists because the sim emits no police events until
-machine E (06) lands; its police payloads follow the UI's proposed typed events.
+rewrites the synthetic run; `npm run gen:police` re-records the police run. A run directory may
+carry `captain.jsonl` and `map.json` in addition to the simcli files. simcli itself emits no police
+events yet (police is not wired into `wp_sim`), hence the recorder.
 
 ## Contract types
 
@@ -130,8 +135,9 @@ npm run gen:types -- --skip-cargo # only the TypeScript step
    normalises draft 2020-12 tuples for json-schema-to-typescript, and writes one
    `src/generated/contracts.ts` (committed, so consumers do not need cargo).
 
-Types the contract does not have yet live in `src/model/proposed.ts`, each tied to a v0.2.0 plan
-entry or a request in `docs/integration/ui.md`; they are deleted when the contract lands.
+Police types are a hand mirror of `wp_police` in `src/model/police.ts` (the contract carries them
+as opaque JSON payloads until v0.3.0); `src/model/proposed.ts` keeps only the economy event mirror.
+Both are replaced by generated types when v0.3.0 lands.
 
 ## Accessibility
 
@@ -149,11 +155,12 @@ entry or a request in `docs/integration/ui.md`; they are deleted when the contra
 | Screen | Frames in 3 s | Frame p50 / p95 | Long tasks |
 |---|---|---|---|
 | HUD (minimap + silhouette, re-render every frame) | 181 | 16.7 / 16.7 ms | 0 |
-| Captain map (canvas redraw every frame, heat map rebuilt at 4 Hz) | 181 | 16.7 / 16.8 ms | 0 |
+| Captain map (canvas redraw every frame, heat map rebuilt at 4 Hz) | 181 | 16.7 / 16.7 ms | 0 |
 | Main menu | 181 | 16.7 / 16.7 ms | 0 |
 
-Bundle (demo, incl. inlined fixtures, roster, mod catalog and city map): 618 kB JS / 145 kB gzip,
-30 kB CSS. The kit code alone is a small fraction; fixtures and data dominate.
+Bundle (demo, incl. inlined fixtures, roster, mod catalog and city maps): 1.42 MB JS / 256 kB gzip,
+30 kB CSS. Fixtures and data dominate (the recorded `captain.jsonl` alone is 410 kB); a host that
+only mounts the kit with a real provider would not bundle them.
 
 ## Layout
 
@@ -170,15 +177,17 @@ demo/                 the demo page (npm run demo)
 e2e/smoke.mjs         headless smoke test + perf probe
 scripts/              gen-types, gen-fixtures, gen-synthetic
 tools/gen-runtime-schemas   Rust: runtime contract schemas
+tools/record-police         Rust: records a real wp_police run as a fixture
 ```
 
 ## Known gaps
 
-- **Mock data where the contract is silent**: police (units, heat map, typed events), race
-  progress, crews/territory, lobby roles, results. Shapes are the UI's proposals (see
-  `docs/integration/ui.md`).
+- **Mock data where nothing is wired yet**: race progress, crews/territory, lobby roles, results.
+  Police is real in `police_pursuit` (E's own city, since E has not moved to D's road network) and
+  a toy elsewhere. See `docs/integration/ui.md`.
 - Region damage for real runs is **inferred** from contact geometry (contact point vs. car pose
-  from metrics) until `SimEvent::RegionDamaged` (v0.2.0) is emitted. `PartDetached` group ids are
+  from metrics) when a stream has no `RegionDamaged` (contract v0.2.0; `wp_damage` does not emit
+  it yet). `PartDetached` group ids are
   mapped with a guess (debug lattices: 1 = front, 2 = rear).
 - simcli `metrics.csv` has no heading column; heading is derived from motion (wrong for a moment
   when a car reverses after a crash).

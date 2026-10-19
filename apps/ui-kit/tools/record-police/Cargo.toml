@@ -1,0 +1,15 @@
+# Standalone (own workspace): records a real wp_police run for the UI kit's mock provider.
+# Reads wp_police / wp_contracts / wp_math, never modifies them.
+[package]
+name = "ui-record-police"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+wp_contracts = { path = "../../../../crates/wp_contracts" }
+wp_police = { path = "../../../../crates/wp_police" }
+wp_math = { path = "../../../../crates/wp_math" }
+serde_json = "1"

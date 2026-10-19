@@ -18,19 +18,29 @@ export interface FixtureInfo {
 }
 
 const LABELS: Record<string, string> = {
+  police_pursuit: "Police pursuit (recorded wp_police)",
   synthetic_pursuit: "Night pursuit (synthetic script)",
   golden_frontal_56kmh: "Frontal 56 km/h into a parked car (simcli)",
   golden_tbone: "T-bone, coupe into sedan (simcli)",
 };
 
-function filesOf(id: string): { events: string; metrics: string; summary: string } {
+function filesOf(id: string): { events: string; metrics: string; summary: string; captain?: string; map?: string } {
   const get = (name: string) => files[`../../fixtures/runs/${id}/${name}`] ?? "";
-  return { events: get("events.jsonl"), metrics: get("metrics.csv"), summary: get("summary.json") || '{"ticks":0,"entities":[]}' };
+  return {
+    events: get("events.jsonl"),
+    metrics: get("metrics.csv"),
+    summary: get("summary.json") || '{"ticks":0,"entities":[]}',
+    captain: get("captain.jsonl") || undefined,
+    map: get("map.json") || undefined,
+  };
 }
 
-const ids = [...new Set(Object.keys(files).map((k) => k.split("/")[4]))].sort((a, b) =>
-  a === "synthetic_pursuit" ? -1 : b === "synthetic_pursuit" ? 1 : a.localeCompare(b),
-);
+const ORDER = ["synthetic_pursuit", "police_pursuit"];
+const ids = [...new Set(Object.keys(files).map((k) => k.split("/")[4]))].sort((a, b) => {
+  const ia = ORDER.indexOf(a);
+  const ib = ORDER.indexOf(b);
+  return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b);
+});
 
 /** Every bundled run. */
 export const FIXTURES: FixtureInfo[] = ids.map((id) => {

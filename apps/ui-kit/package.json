@@ -16,7 +16,8 @@
     "test": "vitest run",
     "e2e": "node e2e/smoke.mjs",
     "gen:types": "node scripts/gen-types.mjs",
-    "gen:fixtures": "node scripts/gen-fixtures.mjs"
+    "gen:fixtures": "node scripts/gen-fixtures.mjs",
+    "gen:police": "cp ../../Cargo.lock tools/record-police/Cargo.lock && CARGO_TARGET_DIR=../../target/ui-tools cargo run --release --quiet --manifest-path tools/record-police/Cargo.toml"
   },
   "dependencies": {
     "preact": "10.27.2"

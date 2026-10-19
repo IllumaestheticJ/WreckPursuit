@@ -27,7 +27,13 @@ function run(cmd, args, opts = {}) {
 }
 
 await run("npx", ["vite", "build", "--logLevel", "warn"]);
-const server = spawn("npx", ["vite", "preview", "--port", String(PORT), "--strictPort"], { cwd: pkg, stdio: "pipe" });
+// Own process group, so the whole npx → vite tree can be stopped at the end.
+const server = spawn("npx", ["vite", "preview", "--port", String(PORT), "--strictPort"], { cwd: pkg, stdio: "pipe", detached: true });
+const stopServer = () => {
+  try {
+    process.kill(-server.pid, "SIGTERM");
+  } catch {}
+};
 await new Promise((ok) => {
   server.stdout.on("data", (d) => String(d).includes(String(PORT)) && ok());
   setTimeout(ok, 5000);
@@ -104,23 +110,39 @@ await page.getByRole("button", { name: /^Install/ }).click();
 const mods = await page.evaluate(() => window.wpModel.get().garage.cars.find((c) => c.uid === 1).mods);
 check(mods.includes("engine_intake_2"), `modTree: installed engine_intake_2 (${mods.join(",")})`);
 
-// Captain: drag a unit somewhere and check it got a target; open the radial.
-await page.goto(`${BASE}/?screen=captain&chrome=0&paused=1`);
+// Captain (synthetic run, toy police, pursuit at L4): order a unit from the side panel, open the
+// radial on a road, place spikes there.
+await page.goto(`${BASE}/?screen=captain&t=62&chrome=0&paused=1`);
 await page.waitForTimeout(400);
-const box = await page.locator(".wp-captain-canvas").boundingBox();
-const unitScreen = await page.evaluate(() => {
-  const u = window.wpModel.get().captain.units[1];
-  return { id: u.id, pos: u.pos };
-});
-// Project the unit like the map does (fit-to-bounds camera), via the canvas hit test instead:
-// select from the list, then use the radial "Hold here" on empty ground near the centre.
 await page.locator(".wp-unit-row").nth(1).click();
-await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: "right" });
+const unitId = await page.evaluate(() => window.wpModel.get().captain.units[1].id);
+await page.getByRole("button", { name: /^Pursue / }).click();
+const assignment = await page.evaluate((id) => window.wpModel.get().captain.units.find((u) => u.id === id).assignment, unitId);
+check(assignment === "pursue", `captain: unit ordered to pursue (${assignment})`);
+// Right-click on a road near the racer: project the racer's position like the map does.
+const box = await page.locator(".wp-captain-canvas").boundingBox();
+await page.locator(".wp-suspect-row").first().getByRole("button", { name: "★" }).click();
+await page.getByRole("button", { name: "Follow" }).click();
+await page.waitForTimeout(300);
+await page.mouse.click(box.x + box.width / 2 + 4, box.y + box.height / 2, { button: "right" });
 await page.waitForSelector(".wp-radial", { state: "attached" });
 await page.screenshot({ path: join(out, "captain-radial.png") });
-await page.locator(".wp-radial-item", { hasText: /^Send / }).click();
-const target = await page.evaluate((id) => window.wpModel.get().captain.units.find((u) => u.id === id).target, unitScreen.id);
-check(target !== null, `captain: unit assigned via radial (${JSON.stringify(target)})`);
+const spikesBefore = await page.evaluate(() => window.wpModel.get().captain.readiness.spikes[0]);
+const item = page.locator(".wp-radial-item", { hasText: /^Spikes/ });
+await item.click();
+const spikesAfter = await page.evaluate(() => window.wpModel.get().captain.readiness.spikes[0]);
+check(spikesAfter === spikesBefore + 1, `captain: spikes placed from the radial (${spikesBefore} → ${spikesAfter})`);
+
+// Recorded wp_police run on the captain map.
+errors.length = 0;
+await page.goto(`${BASE}/?screen=captain&run=police_pursuit&t=135&chrome=0&paused=1`);
+await page.waitForTimeout(500);
+const src = await page.evaluate(() => window.wpModel.get().captain.source);
+check(src === "wp_police" && errors.length === 0, `captain: recorded wp_police run renders (${src}) ${errors.join(" | ")}`);
+await page.screenshot({ path: join(out, "captain-wp_police.png") });
+await page.goto(`${BASE}/?screen=hud&run=police_pursuit&t=135&chrome=0&paused=1`);
+await page.waitForTimeout(300);
+await page.screenshot({ path: join(out, "hud-wp_police.png") });
 
 // Replay: seek via the slider and check the tick moved.
 await page.goto(`${BASE}/?screen=replay&chrome=0&paused=1`);
@@ -166,9 +188,10 @@ for (const s of ["hud", "captain", "mainMenu"]) {
 }
 
 await browser.close();
-server.kill();
+stopServer();
 if (failures) {
   console.error(`${failures} failure(s); screenshots in e2e/out/`);
   process.exit(1);
 }
 console.log(`all good; screenshots in e2e/out/`);
+process.exit(0);
