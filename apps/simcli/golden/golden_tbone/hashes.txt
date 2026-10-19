@@ -1,4 +1,4 @@
-# simcli hashes scenario=golden_tbone systems=world,vehicle,damage,police,net hash_spec=1 contract=0.1.0
+# simcli hashes scenario=golden_tbone systems=world,vehicle,damage,police,net hash_spec=1 contract=0.2.0
 24 42b0b3f5e96f30a8
 48 cd424519c75708a0
 72 bebb067f38bc7ad9
