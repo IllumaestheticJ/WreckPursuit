@@ -72,6 +72,7 @@ fn kind_str(k: EntityKind) -> &'static str {
         EntityKind::PoliceChase => "police",
         EntityKind::AiPolice => "ai_police",
         EntityKind::Traffic => "traffic",
+        EntityKind::AiRacer => "ai_racer",
     }
 }
 

@@ -26,3 +26,4 @@ futures-util = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
+wp_police.workspace = true

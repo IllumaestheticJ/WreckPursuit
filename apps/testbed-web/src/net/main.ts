@@ -16,6 +16,7 @@ const COLORS: Record<string, number> = {
   police: 0x2a5ad0,
   ai_police: 0x4a7ad0,
   traffic: 0x8a8a8a,
+  ai_racer: 0xd08a2a,
 };
 
 async function main(): Promise<void> {

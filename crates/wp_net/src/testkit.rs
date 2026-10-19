@@ -178,6 +178,8 @@ impl NetSim for ArenaSim {
 
     fn step(&mut self) {
         self.inner.step();
+        // The inner sim's own (Rapier) contacts are not what the arena replicates.
+        let _ = self.inner.drain_applied_contacts();
         let states = self.inner.vehicles();
         let mut contacts: BTreeMap<EntityId, Vec<ContactImpulse>> = BTreeMap::new();
         for (e, s) in &states {

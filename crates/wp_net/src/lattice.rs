@@ -130,6 +130,49 @@ impl LatticeSnapshot {
     }
 }
 
+/// The contacts of one vehicle's damage step that can change its lattice, or nothing when the
+/// whole batch is a no-op for `wp_damage::DamageModel::apply_contacts`.
+///
+/// Real Rapier contacts arrive every physics tick while cars lean on each other; replicating
+/// all of them costs more than the snapshots. `wp_damage` skips a contact whose closing speed
+/// is below `min_contact_speed_mps` or whose impulse is not positive, and skips a contact
+/// group whose energy is below `min_contact_energy_j`, without touching any state. Dropping
+/// those therefore leaves the replica bit-identical; the authority still applies everything.
+/// The group test uses an upper bound (all contacts in one group, the largest closing share)
+/// with a 1 % margin against float rounding. Mirrors `wp_damage/src/contact.rs`
+/// (`add_contacts`); `tests::dropped_contacts_are_noops` fails if that logic changes.
+pub fn damage_relevant(
+    contacts: &[ContactImpulse],
+    tuning: &wp_damage::DamageTuning,
+    mode: &ModeTable,
+) -> Vec<ContactImpulse> {
+    let scale = mode.impulse_to_lattice_scale;
+    let kept: Vec<ContactImpulse> = contacts
+        .iter()
+        .filter(|c| {
+            let closing = c.rel_speed_mps.abs();
+            let j = c.impulse_ns.max(0.0) * scale;
+            closing.is_finite()
+                && closing >= tuning.min_contact_speed_mps
+                && j.is_finite()
+                && j > 0.0
+        })
+        .copied()
+        .collect();
+    let share = 1.0f32
+        .max(tuning.dynamic_closing_share)
+        .max(tuning.dynamic_closing_share_side);
+    let energy_bound: f32 = kept
+        .iter()
+        .map(|c| 0.5 * c.impulse_ns.max(0.0) * scale * c.rel_speed_mps.abs() * share)
+        .sum();
+    if energy_bound < 0.99 * tuning.min_contact_energy_j {
+        Vec::new()
+    } else {
+        kept
+    }
+}
+
 /// What the client needs from a damage model to replicate it. Implemented for
 /// `wp_damage::DamageModel`; tests use [`crate::testkit::ToyLattice`].
 pub trait ReplicaDamage: Send {
@@ -149,6 +192,11 @@ pub trait ReplicaDamage: Send {
     fn restore_nodes(&mut self, nodes: &[[f32; 3]]);
     /// Current damage → handling effects.
     fn handling_effects(&self) -> HandlingEffects;
+    /// The model's internal solver runs once every this many steps; a replica must be at the
+    /// same step count modulo this as the server's model. Default 1 (every step).
+    fn solver_period(&self) -> u64 {
+        1
+    }
 }
 
 impl ReplicaDamage for wp_damage::DamageModel {
@@ -177,11 +225,106 @@ impl ReplicaDamage for wp_damage::DamageModel {
     fn handling_effects(&self) -> HandlingEffects {
         wp_contracts::DamageSim::handling_effects(self)
     }
+
+    fn solver_period(&self) -> u64 {
+        self.tuning().solver_divider.max(1) as u64
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Random contact batches, many of them gentle: applying only [`damage_relevant`] gives
+    /// bit-identical lattices to applying everything.
+    #[test]
+    fn dropped_contacts_are_noops() {
+        use wp_contracts::DamageSim as D;
+        let dir = crate::testkit::repo_data_dir();
+        let car = wp_contracts::load_car(dir.join("cars/debug_sedan.json")).unwrap();
+        let mode = wp_contracts::load_mode_table(dir.join("modes/arcade.toml")).unwrap();
+        let mut full = wp_damage::DamageModel::new(&car.lattice, &car.materials);
+        let mut filtered = wp_damage::DamageModel::new(&car.lattice, &car.materials);
+        let tuning = full.tuning().clone();
+        let mut rng = wp_math::Rng::new(5);
+        let (mut dropped, mut kept_batches) = (0, 0);
+        let mut sink = Vec::new();
+        for tick in 0..2400 {
+            let n = if tick % 3 == 0 {
+                rng.range_f32(0.0, 4.0) as usize
+            } else {
+                0
+            };
+            let batch: Vec<ContactImpulse> = (0..n)
+                .map(|_| {
+                    // Mostly resting / scraping contacts, now and then a real hit.
+                    let hard = rng.range_f32(0.0, 1.0) < 0.03;
+                    let speed = if hard {
+                        rng.range_f32(3.0, 15.0)
+                    } else {
+                        rng.range_f32(0.0, 1.6)
+                    };
+                    let impulse = if hard {
+                        rng.range_f32(2_000.0, 20_000.0)
+                    } else {
+                        rng.range_f32(-5.0, 400.0)
+                    };
+                    crate::quant::QContact::round_trip(&ContactImpulse {
+                        point_local_m: [
+                            rng.range_f32(-0.9, 0.9),
+                            rng.range_f32(-2.2, 2.2),
+                            rng.range_f32(0.2, 1.2),
+                        ],
+                        normal_local: if rng.range_f32(0.0, 1.0) < 0.5 {
+                            [0.0, -1.0, 0.0]
+                        } else {
+                            [1.0, 0.0, 0.0]
+                        },
+                        impulse_ns: impulse,
+                        tangent_impulse_local_ns: [rng.range_f32(-50.0, 50.0), 0.0, 0.0],
+                        rel_speed_mps: speed,
+                        other: None,
+                        other_mass_kg: if rng.range_f32(0.0, 1.0) < 0.5 {
+                            0.0
+                        } else {
+                            1400.0
+                        },
+                    })
+                })
+                .collect();
+            let relevant = damage_relevant(&batch, &tuning, &mode);
+            dropped += batch.len() - relevant.len();
+            kept_batches += usize::from(!relevant.is_empty());
+            D::apply_contacts(
+                &mut full,
+                &batch,
+                &mode,
+                wp_contracts::PHYSICS_DT,
+                &mut sink,
+            );
+            D::apply_contacts(
+                &mut filtered,
+                &relevant,
+                &mode,
+                wp_contracts::PHYSICS_DT,
+                &mut sink,
+            );
+        }
+        assert!(dropped > 500, "test should drop many contacts ({dropped})");
+        assert!(kept_batches > 5, "and keep some hits ({kept_batches})");
+        assert_ne!(
+            D::node_positions(&full),
+            car.lattice
+                .nodes
+                .iter()
+                .map(|n| n.pos_m)
+                .collect::<Vec<_>>()
+                .as_slice(),
+            "the kept hits dent the car"
+        );
+        assert_eq!(D::node_positions(&full), D::node_positions(&filtered));
+        assert_eq!(D::handling_effects(&full), D::handling_effects(&filtered));
+    }
 
     #[test]
     fn snapshot_restore_hashes_identically() {

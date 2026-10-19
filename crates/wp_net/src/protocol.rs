@@ -15,7 +15,7 @@ use crate::wire::{ByteReader, ByteWriter};
 use crate::NetError;
 
 /// Protocol version; bumped on any wire change. Checked in `Hello`.
-pub const PROTOCOL_VERSION: u16 = 2;
+pub const PROTOCOL_VERSION: u16 = 3;
 /// Longest accepted player name, bytes.
 pub const MAX_NAME_LEN: usize = 32;
 /// Longest accepted captain command payload, bytes.
@@ -38,6 +38,8 @@ pub enum EntityKind {
     AiPolice = 2,
     /// Civilian traffic.
     Traffic = 3,
+    /// AI opponent racer (`wp_sim::VehicleKind::AiRacer`).
+    AiRacer = 4,
 }
 
 impl EntityKind {
@@ -47,6 +49,7 @@ impl EntityKind {
             1 => Self::PoliceChase,
             2 => Self::AiPolice,
             3 => Self::Traffic,
+            4 => Self::AiRacer,
             _ => return Err(NetError::Decode(format!("entity kind {v}"))),
         })
     }
@@ -54,6 +57,11 @@ impl EntityKind {
     /// True for police (player or AI).
     pub fn is_police(self) -> bool {
         matches!(self, Self::PoliceChase | Self::AiPolice)
+    }
+
+    /// True for racers (player or AI).
+    pub fn is_racer(self) -> bool {
+        matches!(self, Self::Racer | Self::AiRacer)
     }
 }
 
@@ -599,7 +607,7 @@ pub enum ServerMsg {
         hash: u32,
     },
     /// `0x8A` R. `varint vehicle, varint tick, LatticeSnapshot` (node bitmap + exact f32
-    /// positions of displaced nodes).
+    /// positions of displaced nodes), `varint damage_steps + 1` (0 = unknown).
     LatticeSnapshot {
         /// Vehicle.
         vehicle: u32,
@@ -607,6 +615,9 @@ pub enum ServerMsg {
         tick: u64,
         /// Displacements.
         snapshot: LatticeSnapshot,
+        /// Damage steps the server's model has run (`None` = unknown). Lets a replica match
+        /// the server's solver phase (`wp_damage` solves every `solver_divider` steps).
+        damage_steps: Option<u64>,
     },
     /// `0x8B` U. `u32 client_ms, varint server_tick`.
     Pong {
@@ -1032,11 +1043,13 @@ impl ServerMsg {
                 vehicle,
                 tick,
                 snapshot,
+                damage_steps,
             } => {
                 w.u8(0x8A);
                 w.varint(*vehicle as u64);
                 w.varint(*tick);
                 snapshot.encode(w);
+                w.varint(damage_steps.map_or(0, |s| s + 1));
             }
             Self::Pong {
                 client_ms,
@@ -1235,6 +1248,7 @@ impl ServerMsg {
                 vehicle: r.varint_u32()?,
                 tick: r.varint()?,
                 snapshot: LatticeSnapshot::decode(&mut r)?,
+                damage_steps: r.varint()?.checked_sub(1),
             },
             0x8B => Self::Pong {
                 client_ms: r.u32()?,
@@ -1508,6 +1522,7 @@ mod tests {
                 node_count: 3,
                 displaced: vec![(1, [0.5, -0.25, 0.125])],
             },
+            damage_steps: Some(12_345),
         });
         rt_server(ServerMsg::Pong {
             client_ms: 42,
