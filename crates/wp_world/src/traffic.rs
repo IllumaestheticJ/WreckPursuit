@@ -698,7 +698,9 @@ impl Traffic {
         let assists = AssistProfile::ai();
         for a in &mut self.agents {
             if let Some(pa) = a.physical.as_deref_mut() {
-                pa.vehicle.step(&pa.input, &assists, map, dt, out);
+                // Flat ground until wp_sim promotes agents into its Rapier scene (lead, D #3).
+                let ground = wp_vehicle::FlatGround::default();
+                pa.vehicle.step(&pa.input, &assists, map, &ground, dt, out);
             }
         }
     }

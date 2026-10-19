@@ -1,7 +1,7 @@
 # Status
 
-_Last updated: lead integration run 3, 2026-10-19. Contract v0.1.0 (v0.2.0 planned, see
-`docs/CONTRACT_CHANGELOG.md`; next lead run)._
+_Last updated: lead integration run 3, 2026-10-19. Contract **v0.2.0** (applied in run 3, see
+`docs/CONTRACT_CHANGELOG.md`; v0.3.0 = typed police/economy/net events)._
 
 Machines are named by letter: **A–I = prompts 02–10**, **J–Q = prompts 13–20** (started 2026-10-19 as
 cloud sessions: J audio `ws/audio`, K weather `ws/weather`, L race/crews `ws/race`, M UI kit `ws/ui`,
@@ -29,7 +29,7 @@ dashboard `ws/tuning-dash`).
 | O | 18 | Meta services | `ws/meta` | merged run 3 (in progress) | `apps/meta` accounts/matchmaking/leaderboards API | one flaky test under load (`twenty_bots_…` heartbeat) |
 | P | 19 | Design docs | `ws/design-docs` | merged run 3 | GDD, city zones, feature backlog (`docs/design/`) | — |
 | Q | 20 | Tuning dashboard | `ws/tuning-dash` | merged run 3 (in progress) | sweep runner + presets (`tools/tuning-dash`) | integration doc |
-| Lead | 12 | Integration | `main` | — | Contacts → damage, debris, hull, static boxes, city loading | **v0.2.0 contract bump**, police units as sim vehicles, F's `wp_sim` hooks, physical traffic |
+| Lead | 12 | Integration | `main` | — | Contacts → damage, debris, hull, static boxes, city loading; contract v0.2.0 | police units as sim vehicles, F's `wp_sim` hooks, physical traffic, v0.3.0 |
 
 ## What you can play right now
 Published testbed (private link, owner): https://claude.ai/artifact/EJWFJePAQyuPts6NY8XACL — or

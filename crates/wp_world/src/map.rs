@@ -535,6 +535,67 @@ fn curve_speed(pts: &[V3], length: f32, limit: f32) -> f32 {
     (2.8 * r).sqrt().clamp(3.0, limit)
 }
 
+impl CityMap {
+    /// Whether the segment `a`→`b` clears every building (contract v0.2.0 line of sight; added
+    /// by the lead, workstream D owns it). A building blocks when the 2D segment crosses or
+    /// enters its footprint and the segment's height there is below the roof. Linear in the
+    /// building count; D may index it with a grid.
+    pub fn line_of_sight(&self, a: [f32; 3], b: [f32; 3]) -> bool {
+        let (pa, pb) = ([a[0], a[1]], [b[0], b[1]]);
+        let d = geom::sub(pb, pa);
+        for bld in &self.net.buildings {
+            let fp = &bld.footprint;
+            if fp.len() < 3 {
+                continue;
+            }
+            // Smallest segment parameter at which the 2D segment touches the footprint.
+            let mut t_hit: Option<f32> = if point_in_polygon(pa, fp) {
+                Some(0.0)
+            } else {
+                None
+            };
+            for i in 0..fp.len() {
+                let (e0, e1) = (fp[i], fp[(i + 1) % fp.len()]);
+                let e = geom::sub(e1, e0);
+                let den = geom::cross(d, e);
+                if den.abs() < 1e-9 {
+                    continue;
+                }
+                let w = geom::sub(e0, pa);
+                let t = geom::cross(w, e) / den;
+                let u = geom::cross(w, d) / den;
+                if (0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u) {
+                    t_hit = Some(t_hit.map_or(t, |h: f32| h.min(t)));
+                }
+            }
+            if let Some(t) = t_hit {
+                let z = a[2] + (b[2] - a[2]) * t;
+                if z < bld.height_m {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+}
+
+/// Even-odd point-in-polygon test.
+fn point_in_polygon(p: geom::V2, poly: &[geom::V2]) -> bool {
+    let mut inside = false;
+    let n = poly.len();
+    let mut j = n - 1;
+    for i in 0..n {
+        let (pi, pj) = (poly[i], poly[j]);
+        if (pi[1] > p[1]) != (pj[1] > p[1])
+            && p[0] < (pj[0] - pi[0]) * (p[1] - pi[1]) / (pj[1] - pi[1]) + pi[0]
+        {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
+}
+
 impl WorldQuery for CityMap {
     fn surface_at(&self, p: [f32; 3]) -> SurfaceType {
         if self.net.lanes.is_empty() {
@@ -614,5 +675,9 @@ impl WorldQuery for CityMap {
 
     fn time_of_day(&self) -> TimeOfDay {
         self.time
+    }
+
+    fn line_of_sight(&self, a: [f32; 3], b: [f32; 3]) -> bool {
+        CityMap::line_of_sight(self, a, b)
     }
 }

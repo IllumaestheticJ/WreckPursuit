@@ -157,3 +157,10 @@ if the server should send its full state), or the approximate `Vehicle::set_stat
 `WorldQuery` type as the server so surfaces match. Not covered: contacts with other bodies
 (cars, boxes, city colliders) — reconcile those from server snapshots.
 
+
+### Run 3 (2026-10-19)
+- Contract **v0.2.0** is on `main` (see `docs/CONTRACT_CHANGELOG.md`): `VehicleSim::step` takes a
+  `ground: &dyn GroundQuery` — your prediction stepper can pass A's `RapierGround` / `Rig` ground.
+  `lead/net-merge` predates it: merge `main` after merging `lead/net-merge`.
+- A delivered NET-N2: bit-exact `Vehicle` snapshot/restore, fuller `set_state`, and `Rig` matching
+  `wp_sim`'s world (`crates/wp_sim/tests/rig_parity.rs`). Build prediction on that.

@@ -40,17 +40,24 @@ fn line(
     let parts = if severity >= REPLACE_SEVERITY {
         replace_cost
     } else {
-        replace_cost * REPAIR_PARTS_FRACTION * severity / REPLACE_SEVERITY
+        let fraction = p.repair_parts_fraction.unwrap_or(REPAIR_PARTS_FRACTION);
+        replace_cost * fraction * severity / REPLACE_SEVERITY
     };
-    let hours = p.labour_hours_per_item * severity.max(MIN_LABOUR_FRACTION);
-    let parts_cost = parts * mode.repair_cost_scale;
-    let labour_cost = hours * p.labour_per_hour * mode.repair_cost_scale;
+    // Contract v0.2.0: per-item labour hours when the table has them; `parts_cost` and
+    // `labour_hours` stay unscaled, only `total` carries the mode's `repair_cost_scale`.
+    let full_hours = p
+        .labour_hours
+        .get(&item)
+        .copied()
+        .unwrap_or(p.labour_hours_per_item);
+    let hours = full_hours * severity.max(MIN_LABOUR_FRACTION);
+    let total = (parts + hours * p.labour_per_hour) * mode.repair_cost_scale;
     RepairLine {
         item,
         severity,
-        parts_cost,
+        parts_cost: parts,
         labour_hours: hours,
-        total: parts_cost + labour_cost,
+        total,
     }
 }
 
@@ -170,5 +177,7 @@ pub fn default_price_table() -> PriceTable {
         component_replace_cost: components.into_iter().collect(),
         labour_per_hour: 60.0,
         labour_hours_per_item: 3.0,
+        labour_hours: BTreeMap::new(),
+        repair_parts_fraction: None,
     }
 }

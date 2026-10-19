@@ -100,6 +100,7 @@ impl ViolationTracker {
                 out.push(SimEvent::TrafficViolation {
                     vehicle: t.entity,
                     kind,
+                    pos: t.pos,
                 })
             };
             let q = geom::xy(t.pos);

@@ -312,6 +312,9 @@ impl WorldQuery for FlatWorld {
     fn time_of_day(&self) -> TimeOfDay {
         TimeOfDay::from_hours(9.0)
     }
+    fn line_of_sight(&self, _a: [f32; 3], _b: [f32; 3]) -> bool {
+        true
+    }
 }
 
 #[test]
