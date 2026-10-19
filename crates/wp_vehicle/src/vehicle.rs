@@ -19,6 +19,7 @@ use crate::ffb::{self, FfbWheel};
 use crate::ground::WheelCaster;
 use crate::math::{arr, sin_cos, v3, yaw_quat, Quat, V3};
 use crate::steering::{ackermann, body_slip, torque_steer, update_center_angle, SteerInput};
+use crate::surface::{conditions_grip, SurfaceConditions, TireWetProfile};
 use crate::suspension::{arb_force, static_compression, strut_force};
 use crate::tire::{
     combined_forces, load_sensitive_mu, low_speed_lateral, pneumatic_trail, relax, slip_angle,
@@ -99,6 +100,7 @@ pub(crate) struct Corner {
     pub toe: f32,
     pub caster: f32,
     pub tire: TireDef,
+    pub wet: TireWetProfile,
     pub left: bool,
 }
 
@@ -158,6 +160,9 @@ pub struct Telemetry {
     pub engine_heat: f32,
     /// Fuel remaining 0..=1.
     pub fuel: f32,
+    /// Per-wheel aquaplaning 0 (full contact) … 1 (riding on water), from
+    /// [`Vehicle::set_surface_conditions`].
+    pub aquaplane: [f32; 4],
 }
 
 /// One simulated vehicle. See the crate docs for the integration contract with Rapier.
@@ -191,6 +196,7 @@ pub struct Vehicle {
     pub(crate) ffb: FfbOutput,
     pub(crate) telemetry: Telemetry,
     pub(crate) entity: EntityId,
+    pub(crate) conditions: [SurfaceConditions; 4],
 }
 
 impl Vehicle {
@@ -239,6 +245,7 @@ impl Vehicle {
                     .get(&w.tire_id)
                     .unwrap_or_else(|| panic!("tire {:?} not in TireDb", w.tire_id))
                     .clone(),
+                wet: TireWetProfile::new(&tires[&w.tire_id], w.width_m),
                 left: i % 2 == 0,
             }
         });
@@ -293,6 +300,7 @@ impl Vehicle {
             ffb: FfbOutput::default(),
             telemetry: Telemetry::default(),
             entity: EntityId(0),
+            conditions: [SurfaceConditions::DRY; 4],
             corners,
         };
         v.converter = def
@@ -312,6 +320,26 @@ impl Vehicle {
                 ..Wheel::default()
             };
         }
+    }
+
+    /// Set the road conditions under each wheel (FL, FR, RL, RR) — the weather hook. They are an
+    /// input, like the driver's: they stay until changed, are not part of
+    /// [`Vehicle::snapshot`], and should be set before each step from the world's weather
+    /// (after contract v0.3.0: `WorldQuery::weather_at` at each contact point). Default: dry.
+    pub fn set_surface_conditions(&mut self, conditions: [SurfaceConditions; 4]) {
+        self.conditions = conditions;
+    }
+
+    /// Set the road conditions under one wheel (0 FL, 1 FR, 2 RL, 3 RR; others ignored).
+    pub fn set_wheel_conditions(&mut self, wheel: usize, conditions: SurfaceConditions) {
+        if let Some(c) = self.conditions.get_mut(wheel) {
+            *c = conditions;
+        }
+    }
+
+    /// The road conditions currently set per wheel.
+    pub fn surface_conditions(&self) -> &[SurfaceConditions; 4] {
+        &self.conditions
     }
 
     /// The definition this vehicle was built from.
@@ -666,12 +694,13 @@ impl Vehicle {
         let driven_corner = (0..4).find(|i| base_split[*i] > 0.0).unwrap_or(0);
         let ratio_now = self.gearbox.total_ratio(&self.def.drivetrain);
         self.auto_clutch = assists.auto_clutch;
-        self.clutch = if self.gearbox.shifting() {
-            0.0
-        } else if self.converter.is_some() {
+        self.clutch = if self.converter.is_some() {
             // Torque-converter automatic: the converter replaces the launch clutch; the clutch
-            // value is the lock-up clutch's availability.
+            // value is the lock-up clutch's availability. Shifts happen under power (the
+            // lock-up clutch opens for the shift, see `substep`).
             1.0
+        } else if self.gearbox.shifting() {
+            0.0
         } else if assists.auto_clutch {
             auto_clutch_update(
                 self.clutch,
@@ -775,7 +804,8 @@ impl Vehicle {
         }
 
         // --- Contact frames ---------------------------------------------------------------
-        for i in 0..4 {
+        let mut aquaplane = [0.0f32; 4];
+        for (i, planing_out) in aquaplane.iter_mut().enumerate() {
             let c = &self.corners[i];
             let w = &mut self.wheels[i];
             let (s, co) = sin_cos(w.steer);
@@ -794,7 +824,11 @@ impl Vehicle {
             w.r_eff = c.radius * (1.0 - 0.3 * p);
             let camber = c.camber + eff.camber_delta[i];
             let camber_grip = (1.0 - (camber.abs() - 0.03).max(0.0)).clamp(0.6, 1.0);
+            let (cond_grip, planing) =
+                conditions_grip(&self.conditions[i], w.surface, w.vx, &c.wet);
+            *planing_out = if w.contact { planing } else { 0.0 };
             w.grip = surface_grip(&c.tire, w.surface)
+                * cond_grip
                 * eff.grip_scale[i].max(0.0)
                 * (1.0 - 0.5 * p)
                 * camber_grip;
@@ -908,6 +942,7 @@ impl Vehicle {
             fy: std::array::from_fn(|i| self.wheels[i].fy),
             engine_heat: self.heat,
             fuel: self.fuel,
+            aquaplane,
         };
     }
 
@@ -1005,7 +1040,7 @@ impl Vehicle {
         // The automatic clutch only locks when fully engaged (otherwise it is launching); the
         // converter's lock-up clutch only above (90% of) its coupling rpm.
         let may_lock = match converter {
-            Some(c) => self.engine.rpm() >= 0.9 * c.def.coupling_rpm,
+            Some(c) => !self.gearbox.shifting() && self.engine.rpm() >= 0.9 * c.def.coupling_rpm,
             None => !self.auto_clutch || self.clutch >= 0.99,
         };
         if !connected || !may_lock {
@@ -1151,7 +1186,11 @@ impl Vehicle {
             self.engine.omega += h * (t_e - t_clutch) / (i_e + h * conv_engine_k);
             let new_in = ratio * self.axle_omega(split);
             let sr = new_in / self.engine.omega.max(1e-3);
-            if self.engine.rpm() >= c.def.coupling_rpm && sr >= 0.92 && cap >= t_e.abs() {
+            if !self.gearbox.shifting()
+                && self.engine.rpm() >= c.def.coupling_rpm
+                && sr >= 0.92
+                && cap >= t_e.abs()
+            {
                 self.clutch_locked = true;
                 self.engine.omega = new_in;
             }

@@ -1,4 +1,5 @@
-//! Gearbox (manual / automatic with kickdown and auto-reverse), clutch engagement, and
+//! Gearbox (manual / automatic with kickdown and auto-reverse; power-on shifts behind a torque
+//! converter), clutch engagement, torque converter, and
 //! differential torque transfer (open, clutch-type LSD, locked).
 
 use wp_contracts::{DiffDef, DrivetrainDef};
@@ -36,7 +37,8 @@ impl Gearbox {
         self.cooldown = 0.0;
     }
 
-    /// True while a shift is in progress (drive torque interrupted).
+    /// True while a shift is in progress (drive torque interrupted, except on a torque-converter
+    /// automatic, see [`Gearbox::total_ratio`]).
     pub fn shifting(&self) -> bool {
         self.shift_timer > 0.0
     }
@@ -72,13 +74,27 @@ impl Gearbox {
         }
     }
 
-    /// Total ratio engine:wheel including final drive, 0 while shifting or in neutral.
+    /// Total ratio engine:wheel including final drive; 0 in neutral.
+    ///
+    /// While shifting: 0 (torque cut) for a clutch gearbox. A torque-converter automatic
+    /// (`def.torque_converter` set) shifts between forward gears under power instead —
+    /// clutch-to-clutch, like a real planetary automatic: the effective ratio moves from the
+    /// old gear to the new one over the shift (the inertia phase pulls the engine to its new
+    /// speed), the lock-up clutch stays open and the converter carries the torque. Shifts into
+    /// neutral or reverse still interrupt drive.
     pub fn total_ratio(&self, def: &DrivetrainDef) -> f32 {
-        if self.shifting() {
-            0.0
-        } else {
-            Self::ratio_of(def, self.gear) * def.final_drive
+        if !self.shifting() {
+            return Self::ratio_of(def, self.gear) * def.final_drive;
         }
+        if def.torque_converter.is_none() || self.gear < 1 || self.target < 1 {
+            return 0.0;
+        }
+        let progress = (1.0 - self.shift_timer / def.shift_time_s.max(1e-3)).clamp(0.0, 1.0);
+        lerp(
+            Self::ratio_of(def, self.gear),
+            Self::ratio_of(def, self.target),
+            progress,
+        ) * def.final_drive
     }
 
     /// Automatic shifting. `axle_omega` = weighted driven-wheel speed (rad/s), `throttle` =
