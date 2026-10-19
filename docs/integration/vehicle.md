@@ -460,3 +460,99 @@ you merge your converter work, `auto_shift` now takes `&ShiftInputs`.
 `smoke_coupe_circle`, `vehicle_coupe_slalom`) — caused only by the slide-gyro gravity fix
 (keyboard help while sliding); with that commit reverted 0 goldens fail, so the `weather_at`
 wiring is bit-identical on every scenario. All scenario range expectations pass.
+
+
+## Handling balance (lead helper `lead/handling-balance`, playtest row 28, 2026-10-19)
+
+Owner: "all cars understeer too much". Commits: `wp_vehicle` code + tests, then a `[bless]`
+commit for goldens. No contract change, no car/tyre data change, `drivetrain.rs` untouched
+(A's LSD work).
+
+**Measured first** (`cargo run --release -p wp_vehicle --example handling -- --causes`, new
+`wp_vehicle::handling` module; every roster car × keyboard / gamepad / wheel preset, plus
+keyboard with one assist switched off). Tests: ramp steer at 80 km/h (road-wheel angle ramped
+0.6°/s, then full input held), 40 m and 80 m constant radius (speed ramped), step steer at
+80 km/h (full key; analog: the input for 0.4 g), 18 m slalom, a 90° 15 m-radius city corner at
+35 km/h (following driver, and key held). Keyboard driver = sigma-delta key tapper (≥ 50 ms per
+press/release); analog driver knows the input→angle mapping. Where the understeer came from:
+
+| Cause | Finding |
+|---|---|
+| (a) speed-sensitive lock | Not too little lock: too much. Full input = fixed lock fraction (100 % → 25 %, 30–150 km/h) ≈ 0.4 rad at 80 km/h, ~3× the slip the front tyres can use. A held key made only **72–91 %** of the car's grip (wheel preset at full lock: 57–87 %). Keyboard with the lock reduction switched off: worse (61–86 %). |
+| (b) rack rate / filtering | Not a cause: keyboard full-key yaw rise 0.12–0.19 s vs 0.16–0.31 s for the analog presets. |
+| (c) ESC | Yes. Reference car had 3.7°/g understeer (K = 0.0025), more than any roster car, so normal cornering read as oversteer: outer-front braking ∝ the whole yaw rate + half throttle in **38–69 %** of the city corner (keyboard), +0.3–0.5° of steer needed at 0.6 g in a smooth ramp. A tapped key also tripped it both ways (Tansy could not accelerate past 73 km/h on the 80 m circle). |
+| (d) tyres | Not a cause: every car runs the same compound front and rear; peak slip 0.109–0.209 rad, load sensitivity 0.10–0.14. |
+| (e) setup | Not a cause: chassis gradient (wheel preset) **0.3–0.8 deg/g** (trucks / bias-ply muscle 0.8–1.75), i.e. close to neutral. Front −40 % / rear +40 % anti-roll bar on rampart_50, shiro_turbo, hakone_gt (and −20/+20 % on kestrel_ts): gradient −0.01 deg/g, limit balance −0.05 to −0.24. At the limit every car is front-limited (front slip/peak ÷ rear slip/peak ≈ 1.8–2.4), mostly from the diffs pushing the inner driven wheel (lucciola_350 at 0.93 g: inner rear +986 N drive, outer +108 N): a drivetrain matter, flagged for A's LSD work below. |
+
+**Fixes** (details in `crates/wp_vehicle/README.md` → "Keyboard/gamepad steering and ESC"):
+slip-targeted lock for keyboard/gamepad (`L·μ·g/v²` + front peak slip × 1.1 / 1.27, capped by the
+car's lock), rack covers it in 0.16 s × sensitivity (never faster than the car's rack); ESC
+reference ≈ 1°/g, capped at μ·g/v, lagged 0.2 s, braking proportional to the excess. Wheel
+preset and metric runs bit-identical (slide_control's recorded wheel hashes still match;
+VALIDATION skidpad / 0–100 / 100–0 unchanged, so not re-collected).
+
+**Before → after** (`before` = `main` b1c06b7; δ = centre road-wheel angle; "limit" = the
+car's ramp max g, wheel preset):
+
+| Car | Class | US gradient deg/g, keyboard (wheel = chassis) | δ at 0.6 g, deg: keyboard taps, R80 | δ at 0.6 g, deg: gamepad / wheel, ramp | Held key g at 80 km/h (limit) | Full stick g (gamepad) | Turn-in rise s: full key / gamepad 0.4 g | City corner ESC share (keyboard) |
+|---|---|---|---|---|---|---|---|---|
+| vireo_xs | Compact FWD | 0.49 → **0.46** (0.46) | 3.51 → **2.91** | 2.17 → **2.17** / 2.17 | 0.79 → **0.85** (0.87) | 0.78 → **0.85** | 0.17 → **0.15** / 0.20 → **0.20** | 0.59 → **0.05** |
+| kestrel_ts | Sport FWD | 0.78 → **0.78** (0.78) | 3.33 → **3.61** | 2.45 → **2.45** / 2.45 | 0.84 → **0.91** (0.93) | 0.83 → **0.90** | 0.17 → **0.16** / 0.20 → **0.20** | 0.60 → **0.19** |
+| shiro_turbo | Sport RWD | 0.61 → **0.61** (0.61) | 3.29 → **2.99** | 2.15 → **2.15** / 2.15 | 0.75 → **0.91** (0.95) | 0.72 → **0.90** | 0.13 → **0.15** / 0.17 → **0.17** | 0.64 → **0.18** |
+| hakone_gt | Sport RWD | 0.60 → **0.60** (0.60) | 3.29 → **3.14** | 2.17 → **2.17** / 2.17 | 0.74 → **0.87** (0.91) | 0.71 → **0.86** | 0.13 → **0.15** / 0.18 → **0.18** | 0.63 → **0.20** |
+| rampart_50 | Muscle RWD | 0.58 → **0.58** (0.58) | 3.55 → **3.43** | 2.32 → **2.32** / 2.32 | 0.71 → **0.84** (0.88) | 0.68 → **0.83** | 0.14 → **0.15** / 0.20 → **0.19** | 0.58 → **0.24** |
+| ironside_440 | Muscle RWD | 1.23 → **1.23** (1.23) | 6.74 → **—** | 4.27 → **4.25** / 4.16 | 0.44 → **0.56** (0.61) | 0.40 → **0.53** | 0.17 → **0.16** / 0.33 → **0.33** | 0.53 → **0.44** |
+| sperber_32 | Sport RWD | 0.46 → **0.46** (0.45) | 3.48 → **3.25** | 2.23 → **2.23** / 2.23 | 0.73 → **0.88** (0.92) | 0.70 → **0.87** | 0.12 → **0.14** / 0.17 → **0.17** | 0.63 → **0.29** |
+| lindwurm_4t | Sport AWD | 0.41 → **0.33** (0.33) | 3.39 → **2.94** | 2.09 → **2.09** / 2.09 | 0.82 → **0.90** (0.94) | 0.81 → **0.89** | 0.15 → **0.15** / 0.18 → **0.18** | 0.64 → **0.14** |
+| lucciola_350 | Exotic RWD | 0.46 → **0.46** (0.46) | 3.41 → **2.97** | 2.02 → **2.02** / 2.02 | 0.78 → **0.92** (0.96) | 0.75 → **0.90** | 0.12 → **0.13** / 0.17 → **0.17** | 0.69 → **0.20** |
+| hauler_1500 | Truck RWD | 1.75 → **1.75** (1.74) | 6.48 → **5.83** | 4.70 → **4.70** / 4.69 | 0.57 → **0.62** (0.64) | 0.55 → **0.60** | 0.19 → **0.18** / 0.28 → **0.28** | 0.41 → **0.44** |
+| sentinel_cruiser | PoliceCruiser RWD | 0.49 → **0.47** (0.47) | 3.67 → **3.71** | 2.52 → **2.52** / 2.52 | 0.70 → **0.81** (0.85) | 0.68 → **0.80** | 0.16 → **0.16** / 0.21 → **0.20** | 0.49 → **0.09** |
+| sentinel_wolfhound | PoliceInterceptor AWD | 0.41 → **0.31** (0.32) | 3.33 → **3.23** | 2.30 → **2.30** / 2.30 | 0.76 → **0.82** (0.85) | 0.75 → **0.81** | 0.17 → **0.16** / 0.24 → **0.23** | 0.48 → **0.05** |
+| sentinel_bastion | PoliceSuv RWD | 0.64 → **0.49** (0.49) | 3.87 → **3.93** | 2.62 → **2.62** / 2.62 | 0.62 → **0.70** (0.72) | 0.60 → **0.68** | 0.15 → **0.14** / 0.23 → **0.23** | 0.44 → **0.08** |
+| junkyard_beater | Beater FWD | 0.60 → **0.58** (0.58) | — → **3.06** | 2.22 → **2.22** / 2.22 | 0.72 → **0.79** (0.81) | 0.71 → **0.78** | 0.18 → **0.14** / 0.20 → **0.20** | 0.55 → **0.01** |
+| tansy_13 | Compact FWD | 0.64 → **0.63** (0.63) | — → **3.08** | 2.22 → **2.22** / 2.22 | 0.72 → **0.77** (0.79) | 0.71 → **0.77** | 0.16 → **0.13** / 0.18 → **0.18** | 0.57 → **0.08** |
+| drayman_cargo | Truck RWD | 0.78 → **0.78** (0.78) | 6.94 → **5.51** | 3.37 → **3.37** / 3.37 | 0.57 → **0.63** (0.66) | 0.54 → **0.62** | 0.16 → **0.15** / 0.23 → **0.23** | 0.38 → **0.32** |
+| furrow_24 | Truck RWD | 0.57 → **0.54** (0.54) | 3.57 → **3.56** | 2.54 → **2.54** / 2.54 | 0.62 → **0.70** (0.73) | 0.60 → **0.69** | 0.16 → **0.15** / 0.22 → **0.22** | 0.39 → **0.13** |
+
+Gamepad / wheel δ at 0.6 g is the chassis (the analog driver steers to the angle it wants); what
+changed for the gamepad is the stick: 0.6 g now needs 17–35 % stick instead of 7–19 % (more resolution), and a
+full stick makes 87–98 % of the grip (was 66–90 %).
+
+**Tests added:** `tests/handling_balance.rs` (per-class gradient ranges: FWD 0.3–1.1, RWD
+0.2–0.85, AWD 0.1–0.6, heavy 0.35–2.2 with the pickup ≥ 0.5 above a sports car; held key ≥ 90 %
+/ full stick ≥ 85 % of the limit; keyboard ESC adds < 0.15 deg/g; held key makes the city
+corner within 1.5 m), unit tests for the lock, rack rate and ESC (ordinary cornering untouched,
+taps ignored). `tests/slide_control.rs` unchanged and passing (no spin past 90°, catches at
+110/130 km/h).
+
+**Snapshot:** format 3 → 4 (adds `Esc::reference`). `set_state` seeds it from the restored
+steer; `tests/snapshot.rs` `set_state` drift bound 0.5 → 1.0 m (the contract state has no pedal
+filter / auto-box / ESC state; the scripted keyboard turn now runs at the limit, 0.27 → 0.68 m).
+
+**Checks:** fmt, clippy `-D warnings`, wasm build, determinism lint (0 errors), `compare.sh`
+(native == wasm, all scenarios), `npm run wasm && npm run e2e` (all checks passed), `simcli
+goldens` 45/45 after the `[bless]` (22 moved: keyboard/gamepad-driven scenarios, and AI-driven
+ones because `AssistProfile::ai()` has ESC on). `cargo test --workspace --no-fail-fast`: 118
+binaries pass, **3 tests fail outside my crates** (deterministic, trajectory-dependent; not
+weakened or skipped):
+- `wp_net` `city_e2e::four_players_in_a_police_city` and
+  `lockstep::four_clients_replicate_damage_deterministically`: one lattice replica built only
+  from contacts mismatches the server (lockstep: vehicle 1, tick 14876, after 14848 contact
+  steps from a pristine snapshot at tick 28). Replicas consume only the server's contacts, so
+  vehicle code cannot change them directly; the new driving produces a different crash
+  sequence that exposes it. Ruled out: hinged panels (`set_chassis_motion` off: identical),
+  resets/repairs (none), contact quantisation (server applies the same round trip). Needs F
+  (wp_net) / B (wp_damage).
+- `wp_opponent` `race::live_police_chase_ends_in_escape_or_capture_without_stuck_cars`: racer 3
+  waits 93 s (limit 90) queued behind a stopped civilian (agent 1000081), then a police unit
+  (entity 9) — a traffic jam, not a handling failure. Needs K/D.
+
+**Notes for others:**
+- A (vehicle, LSDs): the front-limited limit balance above is mostly the diff pushing the inner
+  wheel; worth checking when the LSD models land (`handling --causes` prints the balance).
+- Lead / F: `wp_sim` spawns vehicles with `AssistProfile::default()` (= keyboard) and
+  `wp_net::bot` drives with it; `wp_world::DriveController` maps angle → input as
+  `δ / max_steer`, which is only right for sensitivity 0. AI that drives through a keyboard
+  preset now gets a smaller angle at speed (it already got 25–100 % before). AI/traffic/police
+  set `AssistProfile::ai()` and are unaffected by the lock change.
+- H (cars): no data change needed; numbers above for the record (`docs/integration/cars.md`).

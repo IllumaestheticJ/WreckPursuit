@@ -114,4 +114,26 @@ the schedule could hunt (1→2→1). New automatic (`crates/wp_vehicle/README.md
 | 25 | Some cars load their LOD too slowly (pop-in) | helper `lead/fix-lod-popin` (C testbed meshes + D traffic LOD) | dispatched |
 | 26 | Simulate LSDs in certain cars | A (vehicle) + H (car data) | dispatched |
 | 27 | Audio for wheelspin | J (audio) | dispatched |
-| 28 | All cars understeer too much | helper `lead/handling-balance`: measure understeer per car and assist profile (lock reduction, steer filter, ESC, tyres, setup), fix at the root, keep the wheel profile raw | dispatched |
+| 28 | All cars understeer too much | helper `lead/handling-balance`: measure understeer per car and assist profile (lock reduction, steer filter, ESC, tyres, setup), fix at the root, keep the wheel profile raw | done on `lead/handling-balance` (numbers below): chassis was already near neutral; keyboard/gamepad lock was ~3× too big at speed (fronts washed out) and ESC braked in ordinary corners. Held key now 92–98 % of grip (was 72–91 %). Wheel preset unchanged. 3 trajectory-sensitive tests outside `wp_vehicle` fail (wp_net ×2, wp_opponent ×1), see `docs/integration/vehicle.md` |
+
+Numbers for 28 (`cargo run --release -p wp_vehicle --example handling`; `before` = main b1c06b7, 80 km/h unless noted; δ = road-wheel angle; "limit" = the car's max g, wheel preset). Causes, per-test method and the 3 failing tests: `docs/integration/vehicle.md` → "Handling balance".
+
+| Car | Class | US gradient deg/g, keyboard (wheel = chassis) | δ at 0.6 g, deg: keyboard taps, R80 | δ at 0.6 g, deg: gamepad / wheel, ramp | Held key g at 80 km/h (limit) | Full stick g (gamepad) | Turn-in rise s: full key / gamepad 0.4 g | City corner ESC share (keyboard) |
+|---|---|---|---|---|---|---|---|---|
+| vireo_xs | Compact FWD | 0.49 → **0.46** (0.46) | 3.51 → **2.91** | 2.17 → **2.17** / 2.17 | 0.79 → **0.85** (0.87) | 0.78 → **0.85** | 0.17 → **0.15** / 0.20 → **0.20** | 0.59 → **0.05** |
+| kestrel_ts | Sport FWD | 0.78 → **0.78** (0.78) | 3.33 → **3.61** | 2.45 → **2.45** / 2.45 | 0.84 → **0.91** (0.93) | 0.83 → **0.90** | 0.17 → **0.16** / 0.20 → **0.20** | 0.60 → **0.19** |
+| shiro_turbo | Sport RWD | 0.61 → **0.61** (0.61) | 3.29 → **2.99** | 2.15 → **2.15** / 2.15 | 0.75 → **0.91** (0.95) | 0.72 → **0.90** | 0.13 → **0.15** / 0.17 → **0.17** | 0.64 → **0.18** |
+| hakone_gt | Sport RWD | 0.60 → **0.60** (0.60) | 3.29 → **3.14** | 2.17 → **2.17** / 2.17 | 0.74 → **0.87** (0.91) | 0.71 → **0.86** | 0.13 → **0.15** / 0.18 → **0.18** | 0.63 → **0.20** |
+| rampart_50 | Muscle RWD | 0.58 → **0.58** (0.58) | 3.55 → **3.43** | 2.32 → **2.32** / 2.32 | 0.71 → **0.84** (0.88) | 0.68 → **0.83** | 0.14 → **0.15** / 0.20 → **0.19** | 0.58 → **0.24** |
+| ironside_440 | Muscle RWD | 1.23 → **1.23** (1.23) | 6.74 → **—** | 4.27 → **4.25** / 4.16 | 0.44 → **0.56** (0.61) | 0.40 → **0.53** | 0.17 → **0.16** / 0.33 → **0.33** | 0.53 → **0.44** |
+| sperber_32 | Sport RWD | 0.46 → **0.46** (0.45) | 3.48 → **3.25** | 2.23 → **2.23** / 2.23 | 0.73 → **0.88** (0.92) | 0.70 → **0.87** | 0.12 → **0.14** / 0.17 → **0.17** | 0.63 → **0.29** |
+| lindwurm_4t | Sport AWD | 0.41 → **0.33** (0.33) | 3.39 → **2.94** | 2.09 → **2.09** / 2.09 | 0.82 → **0.90** (0.94) | 0.81 → **0.89** | 0.15 → **0.15** / 0.18 → **0.18** | 0.64 → **0.14** |
+| lucciola_350 | Exotic RWD | 0.46 → **0.46** (0.46) | 3.41 → **2.97** | 2.02 → **2.02** / 2.02 | 0.78 → **0.92** (0.96) | 0.75 → **0.90** | 0.12 → **0.13** / 0.17 → **0.17** | 0.69 → **0.20** |
+| hauler_1500 | Truck RWD | 1.75 → **1.75** (1.74) | 6.48 → **5.83** | 4.70 → **4.70** / 4.69 | 0.57 → **0.62** (0.64) | 0.55 → **0.60** | 0.19 → **0.18** / 0.28 → **0.28** | 0.41 → **0.44** |
+| sentinel_cruiser | PoliceCruiser RWD | 0.49 → **0.47** (0.47) | 3.67 → **3.71** | 2.52 → **2.52** / 2.52 | 0.70 → **0.81** (0.85) | 0.68 → **0.80** | 0.16 → **0.16** / 0.21 → **0.20** | 0.49 → **0.09** |
+| sentinel_wolfhound | PoliceInterceptor AWD | 0.41 → **0.31** (0.32) | 3.33 → **3.23** | 2.30 → **2.30** / 2.30 | 0.76 → **0.82** (0.85) | 0.75 → **0.81** | 0.17 → **0.16** / 0.24 → **0.23** | 0.48 → **0.05** |
+| sentinel_bastion | PoliceSuv RWD | 0.64 → **0.49** (0.49) | 3.87 → **3.93** | 2.62 → **2.62** / 2.62 | 0.62 → **0.70** (0.72) | 0.60 → **0.68** | 0.15 → **0.14** / 0.23 → **0.23** | 0.44 → **0.08** |
+| junkyard_beater | Beater FWD | 0.60 → **0.58** (0.58) | — → **3.06** | 2.22 → **2.22** / 2.22 | 0.72 → **0.79** (0.81) | 0.71 → **0.78** | 0.18 → **0.14** / 0.20 → **0.20** | 0.55 → **0.01** |
+| tansy_13 | Compact FWD | 0.64 → **0.63** (0.63) | — → **3.08** | 2.22 → **2.22** / 2.22 | 0.72 → **0.77** (0.79) | 0.71 → **0.77** | 0.16 → **0.13** / 0.18 → **0.18** | 0.57 → **0.08** |
+| drayman_cargo | Truck RWD | 0.78 → **0.78** (0.78) | 6.94 → **5.51** | 3.37 → **3.37** / 3.37 | 0.57 → **0.63** (0.66) | 0.54 → **0.62** | 0.16 → **0.15** / 0.23 → **0.23** | 0.38 → **0.32** |
+| furrow_24 | Truck RWD | 0.57 → **0.54** (0.54) | 3.57 → **3.56** | 2.54 → **2.54** / 2.54 | 0.62 → **0.70** (0.73) | 0.60 → **0.69** | 0.16 → **0.15** / 0.22 → **0.22** | 0.39 → **0.13** |

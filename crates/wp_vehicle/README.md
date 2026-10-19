@@ -18,13 +18,14 @@ with assists and unfiltered on a wheel. Deterministic, 240 Hz with 2 sub-steps.
 | `engine.rs` | torque curve, idle controller, soft rev limiter, engine braking, turbo lag (`EngineExtras`) |
 | `drivetrain.rs` | gearbox (manual/auto: load-based schedule, kickdown, corner hold, rev-matched clutch shifts, auto-reverse), automatic clutch / launch control, open/LSD/locked diff transfer |
 | `brakes.rs` | bias, ABS (~15 Hz release cycle) |
-| `steering.rs` | speed-sensitive lock/rate, countersteer help, Ackermann, toe, damage pull, FWD torque steer |
-| `assists.rs` | pedal filters, TCS, ESC |
+| `steering.rs` | slip-targeted lock + rack rate (keyboard/gamepad), countersteer help, Ackermann, toe, damage pull, FWD torque steer |
+| `assists.rs` | pedal filters, TCS, ESC (lagged ~1°/g reference) |
 | `aero.rs` | drag, axle lift/downforce |
 | `ffb.rs` | rack torque (aligning torque + caster trail), road rumble, damper |
 | `rig.rs` | single-car Rapier test rig (same per-tick sequence as `wp_sim`) |
 | `slide.rs` | slide-control assists for keyboard/gamepad: car slide class, gyro yaw damper, slide throttle |
 | `metrics.rs` | 0–100, 100–0, skidpad + understeer gradient, step steer, lift-off, power-on, power-oversteer onset, power-oversteer exit, top speed |
+| `handling.rs` | driver-facing handling tests through a real `AssistProfile`: ramp steer, constant radius, step steer, slalom, city corner; keyboard tapping / analog drivers |
 | `math.rs` | deterministic `atan`/`atan2`/`tan` (polynomial), glam helpers |
 
 **Chassis = one Rapier dynamic body.** Mass, CG (`front_weight_frac`, `cg_height_m`) and
@@ -138,7 +139,7 @@ purist" presets are bit-identical to the plain model (tested against hashes from
   `help + (1 − help)·help·class`. With help on, the rack also *unwinds* toward centre at the
   fast rate (like self-aligning torque spinning the wheel back), which stops the tank-slapper a
   slow unwind caused at 130 km/h.
-- *Save-the-car lock*: while sliding, the speed-sensitive lock (down to 25% at 150 km/h) opens
+- *Save-the-car lock*: while sliding, the slip-targeted lock (see "Keyboard/gamepad steering") opens
   toward 1.3 × the rear-axle slip angle, scaled by how much the rear slides; grip driving is
   unchanged.
 - *Gyro*: a yaw torque `−gain·I_zz·(yaw rate − path rate − k·β)` while the rear slides, gain up
@@ -176,6 +177,35 @@ model. A parked car settles with < 1 cm drift and no jitter (tested).
 **Determinism:** no `f32::sin/cos/atan` in sim code (polynomial versions in `math.rs` /
 `wp_math`); glam runs in scalar mode via Rapier's `enhanced-determinism`; no maps iterated, no
 threads. Identical runs give identical hashes (tested here and by `apps/simcli`).
+
+## Keyboard/gamepad steering and ESC (playtest row 28)
+
+Owner: "all cars understeer too much". Measured first (`handling` module): the chassis is close
+to neutral (wheel preset, 1:1: 0.3–0.8 road-wheel deg/g, trucks and the bias-ply muscle car
+0.8–1.75); bigger anti-roll-bar shifts (front −40 %, rear +40 %) move it < 0.02 deg/g. The
+understeer was in the input layer:
+
+- *Lock*: full input used to ask for a fixed fraction of full lock (100 % → 25 % from 30 to
+  150 km/h). At 80 km/h that is ~0.4 rad, ~3× the slip angle the front tyres can use, so a
+  held key washed the fronts out: 72–91 % of the car's grip. Now (`steer_speed_sensitivity
+  > 0`) full input asks for `L·μ·g/v²` (the angle a neutral car needs at its grip limit) plus
+  the front tyres' peak slip angle × 1.1 (keyboard; gamepad 1.27 = `1.1 + 0.4·(1 − s)/s`),
+  never more than the car's lock; μ = front tyre peak × the front wheels' current grip
+  (surface, weather, damage), so on wet or gravel the lock is smaller. A held key now makes
+  92–98 % of the grip at any speed, and at parking speeds the car's full lock is available.
+- *Rate*: the rack covers that lock in 0.16 s × sensitivity, never faster than the car's
+  `rack_speed_rad_per_s` (so low-speed steering is unchanged).
+- *ESC*: the reference car had 3.7°/g of understeer, more than any roster car, so ordinary
+  cornering read as oversteer: outer-front braking (brake torque proportional to the whole yaw
+  rate) and half throttle in 40–70 % of a 0.64 g city corner. Now: reference ≈ 1°/g
+  (`ESC_REFERENCE_K`), capped at front μ·g/v, lagged 0.2 s (`ESC_REFERENCE_LAG_S`, so keyboard
+  taps don't read as alternating under/oversteer), oversteer threshold 0.1 rad/s + 15 % of the
+  reference, braking proportional to the excess over it. State `Esc::reference` is in the
+  snapshot (format 4); `set_state` seeds it from the restored steer.
+- The wheel preset (sensitivity 0, help 0, ESC off) is bit-identical; so are the metric runs
+  (VALIDATION numbers unchanged).
+
+Before/after per car: `docs/integration/vehicle.md` → "Handling balance".
 
 ## Brakes: how `BrakeDef` is read (worked example)
 
@@ -238,7 +268,12 @@ rewind. Not covered: contacts with anything but the ground (other cars, boxes, c
 cargo test -p wp_vehicle                                   # unit + behaviour + metric ranges
 cargo run --release -p wp_vehicle --example metrics        # print metrics for every car
 cargo run --release -p wp_vehicle --example bench          # per-car cost
+cargo run --release -p wp_vehicle --example handling       # roster × keyboard/gamepad/wheel handling table
+cargo run --release -p wp_vehicle --example handling -- --causes   # + one-assist-off keyboard variants
 ```
+
+`tests/handling_balance.rs` holds the per-class understeer-gradient ranges and the "held key
+reaches the grip limit" / "ESC adds no understeer" checks (playtest row 28).
 
 `tests/metrics.rs` asserts the prompt-02 ranges; `tests/behaviour.rs` covers parked
 stability, determinism, torque steer, ABS, handbrake, assists-off driving, manual gearbox,
