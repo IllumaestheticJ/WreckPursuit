@@ -17,6 +17,7 @@ members = [
     "tools/lint-determinism",
     "tools/bench",
     "apps/testbed-native",
+    "tools/city-import",
 ]
 
 [workspace.package]

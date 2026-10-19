@@ -374,6 +374,20 @@ impl Vehicle {
         self.torque = V3::ZERO;
     }
 
+    /// Teleport to `pos`/`yaw` already moving forward (chassis +Y) at `speed_mps`, wheels and
+    /// engine matched. Used by `wp_world` to promote kinematic traffic to a physical vehicle
+    /// without a jolt. (Added by the integration lead for workstream D; when the vehicle has a
+    /// Rapier body, use [`Vehicle::place_body`] instead.)
+    pub fn set_pose_and_speed(&mut self, pos: [f32; 3], yaw: f32, speed_mps: f32) {
+        self.reset(pos, yaw);
+        let mut ch = *self.chassis();
+        ch.lin_vel = ch.rot * V3::Y * speed_mps;
+        self.set_chassis(ch);
+        if speed_mps != 0.0 {
+            self.set_rolling(speed_mps);
+        }
+    }
+
     /// Spin wheels and engine to match a forward `speed` (m/s) in a sensible gear, clutch
     /// locked. Used for rolling starts in tests and when teleporting a moving car.
     pub fn set_rolling(&mut self, speed: f32) {

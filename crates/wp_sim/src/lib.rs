@@ -95,6 +95,7 @@ pub struct Sim {
     systems: Systems,
     last_tick_events: usize,
     static_boxes: usize,
+    props: usize,
     debris: Vec<rapier3d::prelude::RigidBodyHandle>,
 }
 
@@ -115,6 +116,7 @@ impl Sim {
             systems: Systems::ALL,
             last_tick_events: 0,
             static_boxes: 0,
+            props: 0,
             debris: Vec::new(),
         }
     }
@@ -176,6 +178,41 @@ impl Sim {
             collider_floor_z,
         });
         Ok(id)
+    }
+
+    /// Replace the world (city, traffic, clock) — e.g. `World::load` or `World::procedural`
+    /// from `wp_world`. Call before spawning or the first tick. Every `static_props()` entry
+    /// (parked cars, cones) becomes a dynamic Rapier box with its mass. The city road surface
+    /// is the flat ground slab at z = 0 (cities are flat in phase 1).
+    pub fn set_world(&mut self, world: World) {
+        use rapier3d::math::Rotation;
+        use rapier3d::prelude::{ColliderBuilder, Pose, RigidBodyBuilder, Vector};
+        for prop in world.static_props() {
+            let (s, c) = wp_math::sin_cos(prop.yaw * 0.5);
+            let pose = Pose::from_parts(
+                Vector::from_array(prop.pos),
+                Rotation::from_xyzw(0.0, 0.0, s, c),
+            );
+            let body = self
+                .physics
+                .bodies
+                .insert(RigidBodyBuilder::dynamic().pose(pose).build());
+            let [hx, hy, hz] = prop.half_extents;
+            let col = ColliderBuilder::cuboid(hx, hy, hz)
+                .mass(prop.mass_kg.max(1.0))
+                .friction(0.6)
+                .build();
+            self.physics
+                .colliders
+                .insert_with_parent(col, body, &mut self.physics.bodies);
+            self.props += 1;
+        }
+        self.world = world;
+    }
+
+    /// Number of city props turned into physics bodies by [`Sim::set_world`].
+    pub fn prop_count(&self) -> usize {
+        self.props
     }
 
     /// Number of detached-part debris bodies in the world.
@@ -319,6 +356,21 @@ impl Sim {
         let sys = self.systems;
         let mut out = Vec::new();
         if sys.world {
+            // Every vehicle is "tracked" (violations, siren reactions, traffic LOD ring). All
+            // are treated as human players until AI racers/police get their own flag.
+            let tracked: Vec<wp_world::TrackedVehicle> = self
+                .vehicles
+                .iter()
+                .map(|v| {
+                    wp_world::TrackedVehicle::from_state(
+                        v.id,
+                        &v.vehicle.state(),
+                        v.input.siren,
+                        true,
+                    )
+                })
+                .collect();
+            self.world.set_tracked_vehicles(&tracked);
             self.world.step(dt, &mut out);
         }
         if sys.vehicle {
@@ -677,6 +729,41 @@ mod tests {
             })
             .fold(0.0f32, f32::max);
         assert!(crush > 0.1, "max node displacement {crush} m");
+    }
+
+    #[test]
+    fn procedural_city_loads_props_and_steps() {
+        let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+        let mk = || {
+            let mut sim = Sim::new(SimConfig {
+                seed: 9,
+                mode: mode.clone(),
+                time_of_day: TimeOfDay::from_hours(12.0),
+                time_ratio: 10.0,
+            });
+            let world = World::procedural(
+                &wp_world::procgen::ProcGenConfig::default(),
+                wp_world::WorldConfig::default(),
+            );
+            sim.set_world(world);
+            let id = sim.spawn_vehicle(&car, [0.0, 0.0, 0.0], 0.0).unwrap();
+            sim.set_input(
+                id,
+                VehicleInput {
+                    throttle: 0.5,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            for _ in 0..60 {
+                sim.step_fixed();
+            }
+            sim
+        };
+        let a = mk();
+        assert!(a.prop_count() > 0, "procedural city has no props");
+        assert_eq!(a.state_hash(), mk().state_hash());
     }
 
     #[test]
