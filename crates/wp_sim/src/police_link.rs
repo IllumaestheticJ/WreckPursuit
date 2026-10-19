@@ -45,6 +45,20 @@ impl Sim {
         &self.police
     }
 
+    /// Validate and execute a human captain's command (`wp_police` decides; added by 07 for
+    /// typed `ClientToServer::CaptainCommand`, v0.3.0). Takes effect from the next tick.
+    pub fn captain_command(
+        &mut self,
+        cmd: wp_contracts::CaptainCommand,
+    ) -> Result<(), wp_contracts::CaptainError> {
+        self.police.captain_command(cmd)
+    }
+
+    /// Seat or unseat a human captain (without one the dispatcher places tools itself).
+    pub fn set_human_captain(&mut self, seated: bool) {
+        self.police.set_human_captain(seated);
+    }
+
     /// Before the vehicle step: AI police drivers set their cars' inputs.
     pub(crate) fn drive_police_units(&mut self) {
         // Obstacle awareness (E, round 6): every vehicle and kinematic traffic car, so units

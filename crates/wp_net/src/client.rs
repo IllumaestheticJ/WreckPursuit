@@ -16,12 +16,16 @@ use crate::interp::{StateBuffer, INTERP_DELAY_TICKS};
 use crate::lattice::{lattice_hash, ReplicaDamage};
 use crate::predict::{Predictor, Reconcile};
 use crate::protocol::{
-    CaptainOrder, ClientMsg, DamageEvent, EntityKind, Incident, MapUnit, RaceInfo, RaceResultEntry,
-    ServerMsg, UnitOrder, PROTOCOL_VERSION,
+    ClientMsg, DamageEvent, EntityKind, Incident, MapUnit, RaceInfo, RaceResultEntry, ServerMsg,
+    PROTOCOL_VERSION,
 };
 use crate::quant::{quantize_input, QInput, RemoteState};
 use crate::timesync::TimeSync;
 use crate::{Channel, NetError, TICK_HZ};
+use wp_contracts::{
+    CaptainCommand, CaptainError, PoliceEvent, RaceCommand, TrafficAgentSnapshot, UnitOrder,
+    WantedLevel, WeatherSnapshot,
+};
 
 /// Most inputs re-sent per `Inputs` message (covers ≈100 ms of loss).
 pub const INPUT_REDUNDANCY: u64 = 24;
@@ -32,6 +36,10 @@ pub const MAX_STEPS_PER_UPDATE: u64 = 32;
 /// the replica's solver phase against the server's. Tracked vehicles get a lattice hash every
 /// 2 s, so real gaps are ≤ 480 steps; this only bounds a pathological jump.
 pub const MAX_EMPTY_CATCHUP: u64 = 60 * TICK_HZ;
+/// Longest a kinematic traffic agent is extrapolated past its last update, s.
+pub const MAX_TRAFFIC_EXTRAPOLATION_S: f32 = 0.5;
+/// Most typed game events kept for the caller to drain.
+pub const MAX_PENDING_EVENTS: usize = 512;
 
 /// Builds a damage replica for a car.
 pub type DamageFactory = fn(&LoadedCar) -> Box<dyn ReplicaDamage>;
@@ -221,6 +229,21 @@ pub struct Client {
     pub captain: CaptainMap,
     /// Latest order for this chase unit.
     pub unit_order: Option<UnitOrder>,
+    /// Typed game events received (police / race / economy / weather), oldest first, at most
+    /// [`MAX_PENDING_EVENTS`]; drained by the caller (HUD, audio, radio log).
+    pub game_events: VecDeque<SimEvent>,
+    /// Wanted level per racer vehicle, from `PoliceEvent::WantedLevelChanged`.
+    pub wanted: BTreeMap<u32, WantedLevel>,
+    /// Replies to captain commands `(seq, result)`, newest last (at most 20).
+    pub captain_replies: VecDeque<(u32, Result<(), CaptainError>)>,
+    /// Latest weather from the server (`None` = clear / not sent).
+    pub weather: Option<WeatherSnapshot>,
+    /// Meta reconnect token from the last `Welcome` (MC-6; empty without meta).
+    pub meta_reconnect_token: String,
+    /// Kinematic traffic near us as of `traffic_tick` (server physics tick).
+    traffic: Vec<TrafficAgentSnapshot>,
+    traffic_tick: u64,
+    next_command_seq: u32,
     /// Known races.
     pub races: BTreeMap<u32, RaceInfo>,
     /// Race progress `(race, player) → next checkpoint`.
@@ -266,6 +289,14 @@ impl Client {
             captain_offer: None,
             captain: CaptainMap::default(),
             unit_order: None,
+            game_events: VecDeque::new(),
+            wanted: BTreeMap::new(),
+            captain_replies: VecDeque::new(),
+            weather: None,
+            meta_reconnect_token: String::new(),
+            traffic: Vec::new(),
+            traffic_tick: 0,
+            next_command_seq: 1,
             races: BTreeMap::new(),
             race_progress: BTreeMap::new(),
             race_results: None,
@@ -374,6 +405,12 @@ impl Client {
 
     /// Start the handshake (transport is open). `reconnect_token` 0 = new player.
     pub fn connect(&mut self, now_ms: f64, reconnect_token: u64) {
+        self.connect_with_join_token(now_ms, reconnect_token, "");
+    }
+
+    /// [`Client::connect`] presenting a meta matchmaking join token (MC-6), as returned by
+    /// `GET /v1/matchmaking/status` (`assignment.join_token`).
+    pub fn connect_with_join_token(&mut self, now_ms: f64, reconnect_token: u64, join_token: &str) {
         self.phase = Phase::Connecting;
         let msg = ClientMsg::Hello {
             protocol: PROTOCOL_VERSION,
@@ -381,6 +418,7 @@ impl Client {
             name: self.cfg.name.clone(),
             input_source: self.cfg.input_source,
             reconnect_token,
+            join_token: join_token.to_string(),
         };
         self.send(&msg, Channel::Reliable, now_ms);
     }
@@ -391,13 +429,23 @@ impl Client {
         self.send(&ClientMsg::RoleRequest { role }, Channel::Reliable, now_ms);
     }
 
-    /// Send a captain order.
-    pub fn captain_order(&mut self, order: &CaptainOrder, now_ms: f64) {
+    /// Send a captain command; returns the sequence number its
+    /// [`Client::captain_replies`] entry will carry.
+    pub fn captain_command(&mut self, command: CaptainCommand, now_ms: f64) -> u32 {
+        let seq = self.next_command_seq;
+        self.next_command_seq = self.next_command_seq.wrapping_add(1).max(1);
         self.send(
-            &ClientMsg::CaptainCommand(order.encode()),
+            &ClientMsg::CaptainCommand { seq, command },
             Channel::Reliable,
             now_ms,
         );
+        seq
+    }
+
+    /// Send a race lobby command (`Enter` / `Withdraw` a lobby race by id, `Ready` to start
+    /// as host).
+    pub fn race_command(&mut self, command: RaceCommand, now_ms: f64) {
+        self.send(&ClientMsg::RaceCommand(command), Channel::Reliable, now_ms);
     }
 
     /// Send any lobby/other client message on the reliable channel.
@@ -507,11 +555,14 @@ impl Client {
                 token,
                 mode,
                 time_of_day_h,
+                meta_reconnect_token,
                 ..
             } => {
                 self.phase = Phase::Joined;
                 self.player = Some(player);
                 self.token = token;
+                self.meta_reconnect_token = meta_reconnect_token;
+                self.traffic.clear();
                 self.mode = mode;
                 self.time_of_day = TimeOfDay::from_hours(time_of_day_h);
                 // A (re)join starts from a clean slate; the server re-sends everything.
@@ -576,8 +627,16 @@ impl Client {
                 own,
                 own_full,
                 entities,
+                traffic,
             } => {
                 self.stats.snapshots += 1;
+                // Unreliable: only a newer traffic set replaces the current one.
+                if let Some(list) = traffic {
+                    if tick >= self.traffic_tick {
+                        self.traffic = list.iter().map(|q| q.to_snapshot()).collect();
+                        self.traffic_tick = tick;
+                    }
+                }
                 self.last_snapshot_tick = self.last_snapshot_tick.max(tick);
                 self.input_ack = self.input_ack.max(input_ack);
                 for d in entities {
@@ -717,6 +776,24 @@ impl Client {
                     self.notices.pop_front();
                 }
             }
+            ServerMsg::Events { events, .. } => {
+                for e in events {
+                    if let SimEvent::Police(PoliceEvent::WantedLevelChanged { racer, level }) = &e {
+                        self.wanted.insert(racer.0, *level);
+                    }
+                    self.game_events.push_back(e);
+                }
+                while self.game_events.len() > MAX_PENDING_EVENTS {
+                    self.game_events.pop_front();
+                }
+            }
+            ServerMsg::CaptainReply { seq, result } => {
+                self.captain_replies.push_back((seq, result));
+                while self.captain_replies.len() > 20 {
+                    self.captain_replies.pop_front();
+                }
+            }
+            ServerMsg::Weather(w) => self.weather = Some(w),
         }
         Ok(())
     }
@@ -853,6 +930,37 @@ impl Client {
             }
         }
         out
+    }
+
+    /// Kinematic traffic as last received (server positions at [`Client::traffic_tick`]).
+    pub fn traffic(&self) -> &[TrafficAgentSnapshot] {
+        &self.traffic
+    }
+
+    /// Server physics tick of the last traffic update (0 = none yet).
+    pub fn traffic_tick(&self) -> u64 {
+        self.traffic_tick
+    }
+
+    /// Kinematic traffic to draw at `now_ms`: each agent moved along its heading at its speed
+    /// from the update tick to the interpolation tick (≤ [`MAX_TRAFFIC_EXTRAPOLATION_S`]).
+    /// Display only; agents are straight-line extrapolated, so they cut corners slightly.
+    pub fn render_traffic(&self, now_ms: f64) -> Vec<TrafficAgentSnapshot> {
+        let dt = self.time.server_tick(now_ms).map_or(0.0, |est| {
+            let ticks = est - INTERP_DELAY_TICKS - self.traffic_tick as f64;
+            (ticks / TICK_HZ as f64).clamp(0.0, MAX_TRAFFIC_EXTRAPOLATION_S as f64) as f32
+        });
+        self.traffic
+            .iter()
+            .map(|a| {
+                // Display only (not simulation): std trig is fine. Yaw 0 = +Y, CCW positive.
+                let (sn, cs) = a.yaw.sin_cos();
+                let mut out = *a;
+                out.pos[0] -= sn * a.speed_mps * dt;
+                out.pos[1] += cs * a.speed_mps * dt;
+                out
+            })
+            .collect()
     }
 
     /// Entities with an outstanding resync request.

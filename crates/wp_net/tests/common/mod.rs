@@ -115,6 +115,22 @@ impl<S: NetSim> Harness<S> {
         i
     }
 
+    /// [`Harness::add_peer`] presenting a meta join token in `Hello` (MC-6).
+    pub fn add_peer_with_join_token(
+        &mut self,
+        name: &str,
+        join_token: &str,
+        up: LinkConfig,
+        down: LinkConfig,
+    ) -> usize {
+        let i = self.add_peer(name, up, down);
+        // Replace the plain Hello queued by `add_peer` with one carrying the token.
+        let p = &mut self.peers[i];
+        p.client.drain_outgoing();
+        p.client.connect_with_join_token(self.now_ms, 0, join_token);
+        i
+    }
+
     /// (Re)connect peer `i` with a reconnect token.
     pub fn connect(&mut self, i: usize, token: u64) {
         let conn = self.server.connect();

@@ -12,14 +12,16 @@ export class Connection {
 
   constructor(private url: string, private onState: (s: ConnState) => void) {}
 
-  /** Open the socket; `token` reclaims our player within the server's 30 s window. */
+  /** Open the socket; `token` reclaims our player within the server's 30 s window. A meta
+   * matchmaking join token (MC-6) can be passed as `?join=<token>` in the page URL. */
   open(token = ""): void {
+    const joinToken = token ? "" : new URLSearchParams(location.search).get("join") ?? "";
     const ws = new WebSocket(this.url);
     ws.binaryType = "arraybuffer";
     this.ws = ws;
     this.setState("connecting");
     ws.onopen = () => {
-      net.connect(performance.now(), token);
+      net.connect(performance.now(), token, joinToken);
       this.setState("open");
       this.flush();
     };

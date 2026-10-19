@@ -103,6 +103,16 @@ impl ByteWriter {
     pub fn string(&mut self, v: &str) {
         self.bytes(v.as_bytes());
     }
+
+    /// Write a contract type as a length-prefixed postcard encoding (`typed<T>` in the README
+    /// tables). Used for the v0.3.0 typed payloads (events, captain / race commands, weather),
+    /// so the wire follows the contract types without a hand-written codec per variant.
+    pub fn typed<T: serde::Serialize>(&mut self, v: &T) {
+        // Serialising plain data into a Vec cannot fail (no maps with non-string keys, no
+        // I/O); an empty payload would be rejected by the reader, never misread.
+        let bytes = postcard::to_allocvec(v).unwrap_or_default();
+        self.bytes(&bytes);
+    }
 }
 
 /// Cursor over received bytes with typed readers. Every reader fails with
@@ -219,6 +229,19 @@ impl<'a> ByteReader<'a> {
     /// Read a length-prefixed UTF-8 string of at most `max` bytes.
     pub fn string(&mut self, max: usize) -> Result<String, NetError> {
         String::from_utf8(self.bytes(max)?).map_err(|_| NetError::Decode("invalid utf-8".into()))
+    }
+
+    /// Read a `typed<T>` payload of at most `max` bytes (see [`ByteWriter::typed`]). The
+    /// postcard body must be consumed exactly.
+    pub fn typed<T: serde::de::DeserializeOwned>(&mut self, max: usize) -> Result<T, NetError> {
+        let n = self.len(max)?;
+        let body = self.take(n)?;
+        let (v, rest) = postcard::take_from_bytes::<T>(body)
+            .map_err(|e| NetError::Decode(format!("typed payload: {e}")))?;
+        if !rest.is_empty() {
+            return Err(NetError::Decode("typed payload: trailing bytes".into()));
+        }
+        Ok(v)
     }
 
     /// Fail unless every byte was consumed.
