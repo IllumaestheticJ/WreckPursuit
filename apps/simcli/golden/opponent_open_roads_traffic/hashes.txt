@@ -1,15 +1,3 @@
-<<<<<<< HEAD
-# simcli hashes scenario=opponent_open_roads_traffic systems=world,vehicle,damage,police,net hash_spec=2 contract=0.2.0
-2400 e2d1b43dbc61ebca
-4800 2543f4f7c3c6c0e7
-7200 cd6a63f22affe28b
-9600 c2760489c50c3560
-12000 e9de43a58056e18a
-14400 fd5caf61299dc6de
-16800 4b889dadbc3b0418
-19200 9520bab8987a4b41
-21600 beb23b57086cdee4
-=======
 # simcli hashes scenario=opponent_open_roads_traffic systems=world,vehicle,damage,police,net hash_spec=3 contract=0.2.0
 2400 29639ede9b8e9234
 4800 7a0071918307e014
@@ -20,4 +8,3 @@
 16800 5743616f29c36ea5
 19200 e763a4709fdf4554
 21600 e4c51abf0a999c3d
->>>>>>> origin/claude/laughing-newton-0xqr6q
