@@ -3,7 +3,7 @@
 //!
 //! [`VehicleSnapshot`] is an opaque little-endian byte blob (~0.9 kB): every field that carries
 //! over from one tick to the next (chassis, wheels, engine, gearbox timers, clutch, input
-//! filters, TCS/ABS state, damage-derived heat/fuel and the applied `HandlingEffects`).
+//! filters, TCS/ABS state, AWD coupling, damage-derived heat/fuel and the applied `HandlingEffects`).
 //! Restoring a snapshot and stepping with the same inputs reproduces the original run exactly.
 //! The static definition is not included; a fingerprint guards against restoring into a
 //! different car.
@@ -14,7 +14,7 @@ use wp_contracts::{HandlingEffects, SurfaceType};
 use crate::math::{Quat, V3};
 use crate::vehicle::{Chassis, Vehicle, Wheel};
 
-const FORMAT: u8 = 1;
+const FORMAT: u8 = 2;
 
 /// Opaque full-state snapshot of one [`Vehicle`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -192,7 +192,7 @@ impl Vehicle {
             self.tcs.cut,
         ]);
         w.fs(&self.abs.release);
-        w.fs(&[self.heat, self.heat_reported, self.fuel]);
+        w.fs(&[self.heat, self.heat_reported, self.fuel, self.awd_coupling]);
         w.v(self.force);
         w.v(self.torque);
         let e = &self.effects;
@@ -284,7 +284,7 @@ impl Vehicle {
         let auto_clutch = r.b()?;
         let misc = r.f4()?;
         let abs = r.f4()?;
-        let heat = [r.f()?, r.f()?, r.f()?];
+        let heat = r.f4()?;
         let force = r.v()?;
         let torque = r.v()?;
         let mut e = HandlingEffects {
@@ -334,7 +334,7 @@ impl Vehicle {
             self.tcs.cut,
         ] = misc;
         self.abs.release = abs;
-        [self.heat, self.heat_reported, self.fuel] = heat;
+        [self.heat, self.heat_reported, self.fuel, self.awd_coupling] = heat;
         self.force = force;
         self.torque = torque;
         self.effects = e;

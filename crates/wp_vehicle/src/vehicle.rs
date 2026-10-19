@@ -13,7 +13,7 @@ use wp_contracts::{
 use crate::aero::aero_forces;
 use crate::assists::{esc, filter_pedal, Tcs};
 use crate::brakes::{service_torques, Abs};
-use crate::drivetrain::{auto_clutch_update, diff_transfer, Gearbox};
+use crate::drivetrain::{auto_clutch_update, diff_transfer, Converter, Gearbox};
 use crate::engine::{Engine, EngineExtras, RPM_PER_RADPS};
 use crate::ffb::{self, FfbWheel};
 use crate::ground::WheelCaster;
@@ -173,6 +173,8 @@ pub struct Vehicle {
     pub(crate) clutch: f32,
     pub(crate) auto_clutch: bool,
     pub(crate) launch_torque_ratio: f32,
+    pub(crate) converter: Option<Converter>,
+    pub(crate) awd_coupling: f32,
     pub(crate) center_steer: f32,
     pub(crate) throttle_f: f32,
     pub(crate) brake_f: f32,
@@ -267,6 +269,8 @@ impl Vehicle {
                     .fold(0.0, f32::max)
                 / def.drivetrain.clutch_max_nm)
                 .min(1.0),
+            converter: None,
+            awd_coupling: 0.0,
             center_steer: 0.0,
             throttle_f: 0.0,
             brake_f: 0.0,
@@ -291,6 +295,10 @@ impl Vehicle {
             entity: EntityId(0),
             corners,
         };
+        v.converter = def
+            .drivetrain
+            .torque_converter
+            .map(|tc| Converter::new(tc, v.engine.curve_torque(tc.stall_rpm)));
         v.reset_wheels();
         v
     }
@@ -480,20 +488,46 @@ impl Vehicle {
             DriveLayout::AwdOnDemand {
                 base_front_split,
                 max_rear_split,
-                engage_slip,
+                ..
             } => {
-                // Lead's first cut (contract v0.2.0); workstream A owns the tuning. The coupling
-                // closes linearly as the front axle out-spins the rear by `engage_slip`..2×.
-                let front = (self.wheels[0].omega + self.wheels[1].omega) * 0.5;
-                let rear = (self.wheels[2].omega + self.wheels[3].omega) * 0.5;
-                let slip = (front - rear) / rear.abs().max(1.0);
-                let e = ((slip - engage_slip) / engage_slip.max(1e-3)).clamp(0.0, 1.0);
-                let rear_split =
-                    (1.0 - base_front_split) + e * (max_rear_split - (1.0 - base_front_split));
-                let f = 1.0 - rear_split.clamp(0.0, 1.0);
-                [f * 0.5, f * 0.5, (1.0 - f) * 0.5, (1.0 - f) * 0.5]
+                // Coupling state (0 open … 1 closed) is updated once per tick in
+                // `update_awd_coupling`; the rear share moves from the base to the maximum.
+                let base_rear = 1.0 - base_front_split;
+                let rear =
+                    (base_rear + self.awd_coupling * (max_rear_split - base_rear)).clamp(0.0, 1.0);
+                let f = 1.0 - rear;
+                [f * 0.5, f * 0.5, rear * 0.5, rear * 0.5]
             }
         }
+    }
+
+    /// On-demand AWD coupling (contract `DriveLayout::AwdOnDemand`): closes when the front axle
+    /// out-runs the rear by more than `engage_slip` (fully at 2×), pre-loads at launch
+    /// (60% of throttle below 5 m/s), closes fast (10/s) and opens slowly (2/s) like a
+    /// hydraulic clutch pack, so it does not chatter as the slip it cures disappears.
+    fn update_awd_coupling(&mut self, throttle: f32, speed: f32, dt: f32) {
+        let DriveLayout::AwdOnDemand { engage_slip, .. } = self.def.drivetrain.layout else {
+            self.awd_coupling = 0.0;
+            return;
+        };
+        let lin = |i: usize| (self.wheels[i].omega * self.corners[i].radius).abs();
+        let front = 0.5 * (lin(0) + lin(1));
+        let rear = 0.5 * (lin(2) + lin(3));
+        let slip = (front - rear) / rear.max(1.0);
+        let engage = engage_slip.max(1e-3);
+        let from_slip = ((slip - engage) / engage).clamp(0.0, 1.0);
+        let preload = if speed.abs() < 5.0 {
+            0.6 * throttle
+        } else {
+            0.0
+        };
+        let target = from_slip.max(preload);
+        let rate = if target > self.awd_coupling {
+            10.0
+        } else {
+            2.0
+        };
+        self.awd_coupling += (target - self.awd_coupling).clamp(-rate * dt, rate * dt);
     }
 
     fn drive_split(&self, handbrake: f32) -> [f32; 4] {
@@ -598,6 +632,7 @@ impl Vehicle {
         let handbrake = input.handbrake.clamp(0.0, 1.0);
 
         // --- Gearbox ------------------------------------------------------------------------
+        self.update_awd_coupling(thr_in, v_fwd, dt);
         let base_split = self.drive_split(0.0);
         let axle_omega = self.axle_omega(&base_split);
         let max_gear = self.max_gear();
@@ -631,6 +666,10 @@ impl Vehicle {
         self.auto_clutch = assists.auto_clutch;
         self.clutch = if self.gearbox.shifting() {
             0.0
+        } else if self.converter.is_some() {
+            // Torque-converter automatic: the converter replaces the launch clutch; the clutch
+            // value is the lock-up clutch's availability.
+            1.0
         } else if assists.auto_clutch {
             auto_clutch_update(
                 self.clutch,
@@ -664,7 +703,7 @@ impl Vehicle {
         let esc_out = esc(assists.esc, yaw_rate, self.center_steer, v_fwd, wheelbase);
         // TCS acts on engine torque once the clutch is locked; during an automatic-clutch
         // launch (slipping) wheel torque equals clutch torque, so TCS trims the clutch instead.
-        let launching = self.auto_clutch && !self.clutch_locked;
+        let launching = self.auto_clutch && !self.clutch_locked && self.converter.is_none();
         let throttle =
             self.throttle_f * esc_out.throttle_scale * if launching { 1.0 } else { tcs_mult };
         let clutch_trim = if launching { tcs_mult } else { 1.0 };
@@ -954,18 +993,45 @@ impl Vehicle {
         let omega_in = ratio * axle;
         let idle_w = self.def.engine.idle_rpm / RPM_PER_RADPS;
         let anti_stall = ((self.engine.omega - 0.6 * idle_w) / (0.4 * idle_w)).clamp(0.0, 1.0);
-        let cap = self.def.drivetrain.clutch_max_nm * self.clutch * anti_stall * clutch_trim;
+        let converter = self.converter;
+        let cap = if converter.is_some() {
+            self.def.drivetrain.clutch_max_nm * self.clutch
+        } else {
+            self.def.drivetrain.clutch_max_nm * self.clutch * anti_stall * clutch_trim
+        };
         let connected = ratio != 0.0 && s_sum > 0.0 && cap > 1.0;
-        // The automatic clutch only locks when fully engaged (otherwise it is launching).
-        let may_lock = !self.auto_clutch || self.clutch >= 0.99;
+        // The automatic clutch only locks when fully engaged (otherwise it is launching); the
+        // converter's lock-up clutch only above (90% of) its coupling rpm.
+        let may_lock = match converter {
+            Some(c) => self.engine.rpm() >= 0.9 * c.def.coupling_rpm,
+            None => !self.auto_clutch || self.clutch >= 0.99,
+        };
         if !connected || !may_lock {
             self.clutch_locked = false;
         }
         let i_e = self.def.engine.inertia_kgm2;
         let t_e = self.engine.torque(throttle, power_scale, h);
 
+        // Converter in fluid mode: torques plus their stiffness wrt engine and turbine speed,
+        // treated semi-implicitly (engine side below, wheel side via `conv_damp`).
+        let mut conv_engine_k = 0.0;
+        let mut conv_damp = 0.0;
         let (wheel_side, reflected, t_clutch) = if connected && self.clutch_locked {
             (t_e * ratio, i_e * ratio * ratio, t_e)
+        } else if let (true, Some(c)) = (connected, converter) {
+            let w_e = self.engine.omega;
+            let (t_p, t_t) = c.torques(w_e, omega_in);
+            let eps = 0.5;
+            conv_engine_k = ((c.torques(w_e + eps, omega_in).0 - c.torques(w_e - eps, omega_in).0)
+                / (2.0 * eps))
+                .max(0.0);
+            // d(turbine torque)/d(turbine speed) is ≤ 0: a damper on the wheels, × ratio².
+            conv_damp = (-(c.torques(w_e, omega_in + eps).1 - c.torques(w_e, omega_in - eps).1)
+                / (2.0 * eps))
+                .max(0.0)
+                * ratio
+                * ratio;
+            (t_t * ratio, 0.0, t_p)
         } else if connected {
             let d = self.engine.omega - omega_in;
             let tc = if d.abs() < 1e-4 {
@@ -1023,12 +1089,8 @@ impl Vehicle {
                 w.fy = 0.0;
                 continue;
             }
-            let inertia = c.inertia
-                + if s_sum > 0.0 {
-                    reflected * split[i] / s_sum
-                } else {
-                    0.0
-                };
+            let share = if s_sum > 0.0 { split[i] / s_sum } else { 0.0 };
+            let inertia = c.inertia + reflected * share + h * conv_damp * share;
             if !w.contact {
                 let mut om = w.omega + h * drive[i] / inertia;
                 let db = h * w.brake / inertia;
@@ -1082,6 +1144,14 @@ impl Vehicle {
             self.engine.omega = w_e;
             if tc.abs() > cap * 1.05 || w_e < 0.6 * idle_w {
                 self.clutch_locked = false;
+            }
+        } else if let (true, Some(c)) = (connected, converter) {
+            self.engine.omega += h * (t_e - t_clutch) / (i_e + h * conv_engine_k);
+            let new_in = ratio * self.axle_omega(split);
+            let sr = new_in / self.engine.omega.max(1e-3);
+            if self.engine.rpm() >= c.def.coupling_rpm && sr >= 0.92 && cap >= t_e.abs() {
+                self.clutch_locked = true;
+                self.engine.omega = new_in;
             }
         } else if connected {
             let d0 = self.engine.omega - omega_in;

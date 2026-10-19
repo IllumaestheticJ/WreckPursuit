@@ -117,6 +117,24 @@ pedals swap; press throttle to return to first.
 See `crates/wp_vehicle/README.md` → Known gaps (ray probe not shape-cast, no stall/tire
 temperature/wear, fixed AWD split, trait `step` needs Rapier access).
 
+## Contract v0.2.0 follow-up (A, after lead run 3)
+
+- **Torque converter implemented** (`drivetrain::Converter`, used when
+  `DrivetrainDef::torque_converter` is set): stall speed = `stall_rpm` by construction, torque
+  multiplication `stall_torque_ratio` → 1 at SR 0.85, lock-up above `coupling_rpm`, over-run
+  engine braking, semi-implicit stiffness. Tested: stall test, creep, lock-up, 0–100 in range
+  (`tests/behaviour.rs`). **H (09): you can now set it on the 5 automatics**; suggested starting
+  values: `stall_rpm` ≈ peak-torque rpm − 500…1000 (2000–2600 for V8s), `stall_torque_ratio`
+  1.9–2.2, `coupling_rpm` ≈ 1500–1900. With a converter the auto-clutch launch logic is bypassed.
+- **`AwdOnDemand` tuned:** the lead's first cut was stateless (rear share recomputed from the same
+  tick's slip), which switches the rear on and off as the slip it cures disappears. Now a coupling
+  state with launch pre-load, 10/s close / 2/s open. Debug-sedan-as-AWD: rear ≈ 30% at launch,
+  ≈ 0 at cruise, 0–100 7.6 s vs 8.1 s FWD (tested). Snapshot format → 2 (includes the coupling).
+- Reviewed the lead's v0.2.0 edits in `wp_vehicle` (`inertia_kgm2`, `efficiency`,
+  `ContractGround`, `fx_n`/`fy_n`): all kept.
+- `GroundQuery` is a ray; I don't need a shape-cast in contracts yet (kerb sampling stays a known gap).
+- No car in `data/` uses the converter or on-demand AWD yet, so goldens are unchanged.
+
 ## Responses to lead feedback (02, run 2 follow-up)
 
 - **Tires (item 1):** added `all_terrain` (≈ 0.9 × street, soft, +33% rolling resistance, best

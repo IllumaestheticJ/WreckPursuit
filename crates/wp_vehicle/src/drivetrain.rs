@@ -190,6 +190,52 @@ pub fn auto_clutch_update(
     }
 }
 
+/// Hydrodynamic torque converter (contract `TorqueConverterDef`). The impeller (engine) absorbs
+/// `C·ω_e²·f(SR)`, with `C` chosen so the engine absorbs exactly its full-throttle torque at
+/// `stall_rpm` with the turbine held still, and `f(SR)` = 1 up to the coupling point
+/// (speed ratio 0.85) falling linearly to 0 at SR = 1. The turbine delivers that torque times
+/// `TR(SR)` = `stall_torque_ratio` at stall falling linearly to 1 at the coupling point. When the
+/// turbine over-runs the impeller (coasting) torque flows back 1:1 (engine braking). The lock-up
+/// clutch itself is handled by the vehicle's clutch model above `coupling_rpm`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Converter {
+    /// The definition.
+    pub def: wp_contracts::TorqueConverterDef,
+    /// Capacity constant `C`, N·m/(rad/s)².
+    pub capacity: f32,
+}
+
+/// Speed ratio at the coupling point.
+pub const CONVERTER_COUPLING_SR: f32 = 0.85;
+
+impl Converter {
+    /// Build from the definition and the engine's full-load torque at `stall_rpm` (N·m).
+    pub fn new(def: wp_contracts::TorqueConverterDef, torque_at_stall_nm: f32) -> Self {
+        let w = def.stall_rpm / crate::engine::RPM_PER_RADPS;
+        Self {
+            def,
+            capacity: torque_at_stall_nm / (w * w).max(1.0),
+        }
+    }
+
+    /// `(impeller load on the engine, turbine output torque)` in N·m for engine speed `w_e`
+    /// and turbine speed `w_t` (rad/s, both in the engine's rotation sense).
+    pub fn torques(&self, w_e: f32, w_t: f32) -> (f32, f32) {
+        let w_e = w_e.max(0.0);
+        if w_t > w_e {
+            // Over-run: the wheels drive the engine.
+            let t = -self.capacity * (w_t * w_t - w_e * w_e);
+            return (t, t);
+        }
+        let sr = (w_t.max(0.0) / w_e.max(1e-3)).clamp(0.0, 1.0);
+        let f = ((1.0 - sr) / (1.0 - CONVERTER_COUPLING_SR)).clamp(0.0, 1.0);
+        let t_p = self.capacity * w_e * w_e * f;
+        let tr = self.def.stall_torque_ratio
+            + (1.0 - self.def.stall_torque_ratio) * (sr / CONVERTER_COUPLING_SR).min(1.0);
+        (t_p, t_p * tr)
+    }
+}
+
 /// Differential torque transfer `X` for one axle: the left wheel receives `share_l − X`, the
 /// right `share_r + X`. `axle_torque` is the torque entering the diff (for ramp selection),
 /// `k_eq` the equalising gain (N·m per rad/s) that would lock the pair in a few steps.
@@ -267,6 +313,24 @@ mod tests {
             auto_clutch_update(1.0, 500.0, 900.0, 800.0, 6500.0, 0.0, 0.7, dt),
             0.0
         );
+    }
+
+    #[test]
+    fn converter_stall_and_coupling() {
+        let tc = wp_contracts::TorqueConverterDef {
+            stall_rpm: 2400.0,
+            stall_torque_ratio: 2.0,
+            coupling_rpm: 2000.0,
+        };
+        let c = Converter::new(tc, 250.0);
+        let w = 2400.0 / crate::engine::RPM_PER_RADPS;
+        let (tp, tt) = c.torques(w, 0.0);
+        assert!((tp - 250.0).abs() < 0.5, "stall load {tp}");
+        assert!((tt - 500.0).abs() < 1.0, "stall multiplication {tt}");
+        let (tp, tt) = c.torques(w, w * 0.9);
+        assert!(tt <= tp * 1.0001 && tp < 250.0);
+        let (tp, tt) = c.torques(w, w * 1.1);
+        assert!(tp < 0.0 && tt == tp, "over-run brakes the engine");
     }
 
     #[test]

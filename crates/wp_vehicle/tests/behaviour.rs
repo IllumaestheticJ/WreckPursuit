@@ -429,3 +429,107 @@ fn surface_changes_grip() {
         stop(wp_contracts::SurfaceType::Grass) > 1.6 * stop(wp_contracts::SurfaceType::Asphalt)
     );
 }
+
+fn converter_sedan() -> LoadedCar {
+    let mut c = car("debug_sedan");
+    c.def.drivetrain.torque_converter = Some(wp_contracts::TorqueConverterDef {
+        stall_rpm: 2400.0,
+        stall_torque_ratio: 2.0,
+        coupling_rpm: 1800.0,
+    });
+    c
+}
+
+#[test]
+fn torque_converter_stall_creep_and_lockup() {
+    let c = converter_sedan();
+    let a = AssistProfile::keyboard_default();
+    // Stall test: full throttle against the brakes holds the engine at the stall speed.
+    let mut rig = Rig::new(&c);
+    run(
+        &mut rig,
+        VehicleInput {
+            throttle: 1.0,
+            brake: 1.0,
+            ..Default::default()
+        },
+        &a,
+        2.0,
+    );
+    let rpm = rig.state().engine_rpm;
+    assert!((rpm - 2400.0).abs() < 150.0, "stall rpm {rpm}");
+    // Idle in gear: the car creeps at walking pace, the engine keeps idling.
+    let mut rig = Rig::new(&c);
+    run(&mut rig, VehicleInput::default(), &a, 5.0);
+    let s = rig.state();
+    assert!((0.3..3.0).contains(&s.speed_mps), "creep {}", s.speed_mps);
+    assert!(s.engine_rpm > 700.0);
+    // Full throttle: converter launch, then lock-up (engine tied to the wheels).
+    let mut rig = Rig::new(&c);
+    run(&mut rig, throttle(1.0), &a, 2.5);
+    assert!(rig.vehicle.telemetry().clutch_locked, "lock-up engaged");
+    let t = wp_vehicle::metrics::zero_to_100(&c).expect("reaches 100");
+    assert!((7.0..10.0).contains(&t), "0-100 with converter {t}");
+}
+
+#[test]
+fn awd_on_demand_couples_at_launch_and_opens_at_cruise() {
+    let mut c = car("debug_sedan");
+    c.def.drivetrain.layout = wp_contracts::DriveLayout::AwdOnDemand {
+        base_front_split: 0.95,
+        max_rear_split: 0.5,
+        engage_slip: 0.05,
+    };
+    let a = AssistProfile::keyboard_default();
+    let mut rig = Rig::new(&c);
+    run(&mut rig, throttle(1.0), &a, 1.0);
+    let w = rig.state().wheel_states;
+    assert!(w[2].fx_n > 0.2 * w[0].fx_n, "rear drives at launch {w:?}");
+    run(&mut rig, throttle(0.3), &a, 8.0);
+    let w = rig.state().wheel_states;
+    assert!(
+        w[2].fx_n.abs() < 0.1 * w[0].fx_n.abs().max(100.0),
+        "coupling open at cruise {w:?}"
+    );
+    let awd = wp_vehicle::metrics::zero_to_100(&c).unwrap();
+    let fwd = wp_vehicle::metrics::zero_to_100(&car("debug_sedan")).unwrap();
+    assert!(awd < fwd, "AWD launch {awd} should beat FWD {fwd}");
+}
+
+#[test]
+fn snapshot_covers_converter_and_awd_state() {
+    let mut c = converter_sedan();
+    c.def.drivetrain.layout = wp_contracts::DriveLayout::AwdOnDemand {
+        base_front_split: 0.9,
+        max_rear_split: 0.5,
+        engage_slip: 0.05,
+    };
+    let a = AssistProfile::keyboard_default();
+    let mut rig = Rig::new(&c);
+    run(&mut rig, throttle(1.0), &a, 1.0);
+    let snap = rig.snapshot();
+    run(
+        &mut rig,
+        VehicleInput {
+            throttle: 0.7,
+            steer: 0.4,
+            ..Default::default()
+        },
+        &a,
+        3.0,
+    );
+    let truth = rig.state();
+    let mut again = Rig::new(&c);
+    again.restore(&snap).unwrap();
+    run(
+        &mut again,
+        VehicleInput {
+            throttle: 0.7,
+            steer: 0.4,
+            ..Default::default()
+        },
+        &a,
+        3.0,
+    );
+    assert_eq!(again.state(), truth);
+}
