@@ -163,6 +163,7 @@ with 06 in v0.2.0, so the provisional `PURSUIT_STARTED_KIND` goes away. H2 (`Sys
   machine D's time accumulators (temporary).
 - simcli `net` round trip and `tools/bench` snapshot benches now JSON-encode `ServerToClient` themselves
   (F removed `wp_net::{encode,decode}_server`). Switch them to F's snapshot codec once F re-lands.
+- New (run 3): `Sim::despawn_vehicle`, `set_vehicle_kind`, contact filter + `drain_applied_contacts`.
 - New: `Sim::set_world(World)` → please make `city: procedural(...)` / `file(...)` real (no warning)
   and add D's traffic soak scenario (0 civilian collisions, ≥ 380 agents, ≥ 50 % moving).
 - Question from B's tuning: should `golden_frontal_56kmh` (into a *parked sedan*) be a TotalLoss? A
