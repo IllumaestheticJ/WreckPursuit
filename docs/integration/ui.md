@@ -159,14 +159,16 @@ Live HUD heat / wanted / bounty, pursuit status and the repair bill in the brows
 | File | Owner | Change |
 |---|---|---|
 | `crates/wp_wasm/src/garage.rs` (new) | C | `repair_quote_json(entity, request_json)`: the running car's `DamageSim::repair_estimate` (economy `PriceTable` for its class/value) priced by `wp_economy::Economy::quote_repair` (shop, district, mode, wanted markup, insurance, salvage). Read-only. |
-| `crates/wp_wasm/src/police_status.rs` (new, after lead run 5) | C | `police_status_json(entity)`: the player's `RacerRecord` from `Sim::police()` (level, heat, status, bounty, staleness, `los_lost_s` escape timer, escape time for level + day phase, units assigned) in the kit's `PoliceReadout` shape; `"null"` before the police know the racer. Read-only. |
-| `crates/wp_wasm/src/lib.rs` | C | `pub mod garage;`, `pub mod police_status;` |
-| `crates/wp_wasm/Cargo.toml` | C | `wp_economy` dependency (default features; `cargo tree --target wasm32-unknown-unknown` shows no rusqlite); `wp_police` (already reachable through `wp_sim`). |
-| `apps/testbed-web/src/ui/overlay.ts` (new; all testbed-side UI-kit glue lives in `src/ui/`) | C | Mounts the kit's `chaseHud` and `repairBill` overlays on a `createLiveModel()` fed each frame with the drained events (+ the police record when available). |
-| `apps/testbed-web/src/main.ts` | C | 6 lines: construct `UiOverlay`, `ui.reset()` on session rebuild, `ui.frame(...)` after `eventsDrain()`, **F** toggles the repair bill. |
-| `apps/testbed-web/src/wasm/sim.ts` | C | `repairQuote()`, `policeStatus()` (calls `police_status_json`; feature-detected, so an older wasm build returns null). |
-| `apps/testbed-web/src/settings.ts`, `hud.ts` | C | Layer **Z** "chase readout"; help line mentions **F**. |
-| `apps/testbed-web/e2e/run.mjs` | C | One check after `crash/head_on.ron`: F opens a live, itemised bill; the chase readout is mounted; `police_status_json` is well-formed. |
+| `crates/wp_wasm/src/police.rs` (C's, round 6) | C | **Round 6 consolidation:** my `police_status.rs` / `police_status_json` are gone; C's `police::PoliceStatus` gained four additive fields — `staleness_s`, `search_s` (`los_lost_s`), `escape_s` (level + day phase), `phase` — so one wasm call (`police_status`) feeds the one readout. Unit test extended. |
+| `crates/wp_wasm/src/lib.rs` | C | `pub mod garage;` |
+| `crates/wp_wasm/Cargo.toml` | C | `wp_economy` dependency (default features; `cargo tree --target wasm32-unknown-unknown` shows no rusqlite). |
+| `apps/testbed-web/src/ui/overlay.ts` (new; all testbed-side UI-kit glue lives in `src/ui/`) | C | Mounts the kit's `chaseHud` and `repairBill` overlays on a `createLiveModel()` fed each frame with the drained events + `police_status`. Opens the bill by itself when a chase ends (kit's `ChaseEndDetector`); `ui.lastChaseEnd` records how. |
+| `apps/testbed-web/src/ui/police.ts` (new, round 6) | C | `PoliceStatus` type for `police_status` JSON + `toReadout()` onto the kit's `PoliceReadout`. |
+| `apps/testbed-web/src/police_hud.tsx` | C | **Removed** (round 6): it was a second heat panel; the kit's chase HUD is now the only one. Its CSS in `index.html` removed too. |
+| `apps/testbed-web/src/main.ts` | C | Construct `UiOverlay`, `ui.reset()` on session rebuild, `ui.frame(...)` after `eventsDrain()`, **F** toggles the repair bill, `ui` on `window.__wp`; `PoliceHud` lines removed. |
+| `apps/testbed-web/src/wasm/sim.ts` | C | `repairQuote()`; one `policeStatus()` (calls `police_status`, typed by `src/ui/police.ts`). The duplicate `police_status_json` wrapper is gone. |
+| `apps/testbed-web/src/settings.ts`, `hud.ts` | C | Layer **Z** "chase readout"; help line mentions **F**. C's "police" layer (also on **Z**) removed. |
+| `apps/testbed-web/e2e/run.mjs` | C | After `crash/head_on.ron`: F opens a live, itemised bill; the chase readout is mounted; `police_status` has `escape_s`. City chase: exactly one heat panel (`#ui-chase`). |
 | `apps/testbed-web/{package.json,tsconfig.json,vite.config.ts}` | C | `preact` dependency; JSX + `vite/client` types; `resolve.dedupe: ["preact"]`; dev server may serve the repo (the kit imports `../ui-kit` and `data/`). |
 
 The testbed imports `apps/ui-kit/src/live` only (not the kit's index), so no fixtures or mock data
@@ -184,6 +186,17 @@ stays CLEAR / L0, which is correct for that data. **For D / E:** speeding at 150
 the police should probably reach L1 (10 heat) within a few seconds; either the world emits too few
 `Speeding` violations or the witnessed-heat value is small. Needs C's city-chase preset (night,
 police car model set) to see a pursuit in the browser.
+
+**Round 6 — one readout + end-of-chase bill (2026-10-19):** C's heat panel and mine were both on
+screen (and both on **Z**). Now there is one: the kit's chase HUD (`HeatPanel` + pursuit status,
+bounty, escape bar, police radio), fed by C's `police_status`, which carries the extra fields my
+readout used. The repair bill is priced live by G's `Economy::quote_repair` (`repair_quote_json`,
+unchanged) and opens on its own the frame a chase ends — `Pursuit`/`Searching` → `Clear`/`Wanted`
+(escaped) or a total loss mid-chase (wrecked) — with the wanted-level markup defaulted to the
+current level. `apps/ui-kit/src/live/chaseEnd.ts` holds the detector (3 vitest cases).
+**For E:** busted is not detectable yet — `PursuitStatus` has no `Busted`/arrest state and no
+police event for it reaches the client; when E adds one, `ChaseEndDetector` should report
+`"busted"` and the bill should show impound instead.
 
 ## Perf numbers
 
@@ -210,6 +223,11 @@ police car model set) to see a pursuit in the browser.
 (Written by the integration lead: failing tests, expected vs actual.)
 
 ## Lead feedback (round 6, 2026-10-19)
+
+**Done (M, 2026-10-19):** consolidated with C into one readout (kit components, `src/ui/`), bill
+wired to G's `quote_repair` and opened at the end of a chase. Details under "Changes outside my
+crates" → "Round 6".
+
 
 **Merged** (UI-kit glue in `apps/testbed-web/src/ui/`).
 
