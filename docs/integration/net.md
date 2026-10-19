@@ -164,3 +164,8 @@ if the server should send its full state), or the approximate `Vehicle::set_stat
   `lead/net-merge` predates it: merge `main` after merging `lead/net-merge`.
 - A delivered NET-N2: bit-exact `Vehicle` snapshot/restore, fuller `set_state`, and `Rig` matching
   `wp_sim`'s world (`crates/wp_sim/tests/rig_parity.rs`). Build prediction on that.
+- **Your `wp_sim` needs are done** (on `main`): NET-N1 `Sim::set_contact_filter(Some(fn(&mut ContactImpulse)))`
+  (applied before damage; pass `QContact::round_trip`) + `set_record_applied_contacts(true)` /
+  `drain_applied_contacts() -> Vec<(EntityId, Vec<ContactImpulse>)>`; NET-N3 `Sim::despawn_vehicle(id)`
+  (ids never reused) and `place_vehicle(id, pos, yaw, speed)`; NET-N4 `Sim::mode_table()` and
+  `Sim::set_vehicle_kind(id, VehicleKind::{Player, AiRacer, Police, Traffic})` / `SimVehicle::kind`.

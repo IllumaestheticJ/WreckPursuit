@@ -54,6 +54,26 @@ pub struct SimConfig {
     pub time_ratio: f32,
 }
 
+/// Who drives a vehicle. Decides how other systems treat it (traffic sight ring, net
+/// interest); does not change physics. Default [`VehicleKind::Player`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum VehicleKind {
+    /// Human player (racer or police seat).
+    #[default]
+    Player,
+    /// AI opponent racer.
+    AiRacer,
+    /// AI police unit.
+    Police,
+    /// Physical (promoted) traffic agent.
+    Traffic,
+}
+
+/// Hook run on every contact before damage applies it (e.g. the server quantising contacts
+/// so clients can replay them bit-identically, see `wp_net`). Plain function pointer:
+/// deterministic and `wp_sim` does not depend on the caller's crate.
+pub type ContactFilter = fn(&mut wp_contracts::ContactImpulse);
+
 /// One vehicle slot in the simulation.
 pub struct SimVehicle {
     /// Entity id.
@@ -70,6 +90,8 @@ pub struct SimVehicle {
     pub assists: AssistProfile,
     /// Rapier handles of the chassis.
     pub body: VehicleBody,
+    /// Who drives it (see [`Sim::set_vehicle_kind`]).
+    pub kind: VehicleKind,
     spawn: ([f32; 3], f32),
     /// Wheel radius / width (m) for debris cylinders when a wheel tears off.
     wheel_size: (f32, f32),
@@ -96,6 +118,9 @@ pub struct Sim {
     last_tick_events: usize,
     static_boxes: usize,
     props: usize,
+    contact_filter: Option<ContactFilter>,
+    record_contacts: bool,
+    applied_contacts: Vec<(EntityId, Vec<wp_contracts::ContactImpulse>)>,
     debris: Vec<rapier3d::prelude::RigidBodyHandle>,
 }
 
@@ -117,6 +142,9 @@ impl Sim {
             last_tick_events: 0,
             static_boxes: 0,
             props: 0,
+            contact_filter: None,
+            record_contacts: false,
+            applied_contacts: Vec::new(),
             debris: Vec::new(),
         }
     }
@@ -172,6 +200,7 @@ impl Sim {
             damage,
             input: VehicleInput::default(),
             assists: AssistProfile::default(),
+            kind: VehicleKind::Player,
             spawn: (pos, yaw),
             wheel_size: (car.def.wheels[0].radius_m, car.def.wheels[0].width_m),
             hull_version,
@@ -261,6 +290,45 @@ impl Sim {
                 }
             }
         }
+    }
+
+    /// Set who drives a vehicle (player / AI racer / police / traffic).
+    pub fn set_vehicle_kind(&mut self, id: EntityId, kind: VehicleKind) -> Result<(), SimError> {
+        self.slot_mut(id)?.kind = kind;
+        Ok(())
+    }
+
+    /// Remove a vehicle and its physics body. Its id is never reused. Debris it already shed
+    /// stays in the world.
+    pub fn despawn_vehicle(&mut self, id: EntityId) -> Result<(), SimError> {
+        let i = self
+            .vehicles
+            .iter()
+            .position(|v| v.id == id)
+            .ok_or(SimError::UnknownEntity(id))?;
+        let slot = self.vehicles.remove(i);
+        self.physics.remove_body(slot.body.body);
+        Ok(())
+    }
+
+    /// Install (or clear) the [`ContactFilter`] applied to every contact before damage.
+    pub fn set_contact_filter(&mut self, filter: Option<ContactFilter>) {
+        self.contact_filter = filter;
+    }
+
+    /// Start or stop recording the contacts damage actually applied (after the filter).
+    pub fn set_record_applied_contacts(&mut self, on: bool) {
+        self.record_contacts = on;
+        if !on {
+            self.applied_contacts.clear();
+        }
+    }
+
+    /// Contacts damage applied since the last drain, per vehicle per tick in step order
+    /// (empty unless [`Sim::set_record_applied_contacts`] is on). Only vehicles that had
+    /// contacts appear.
+    pub fn drain_applied_contacts(&mut self) -> Vec<(EntityId, Vec<wp_contracts::ContactImpulse>)> {
+        std::mem::take(&mut self.applied_contacts)
     }
 
     /// Teleport a vehicle to `pos`/`yaw`, rolling forward at `speed_mps` (wheels and engine
@@ -356,8 +424,8 @@ impl Sim {
         let sys = self.systems;
         let mut out = Vec::new();
         if sys.world {
-            // Every vehicle is "tracked" (violations, siren reactions, traffic LOD ring). All
-            // are treated as human players until AI racers/police get their own flag.
+            // Every vehicle is "tracked" (violations, siren reactions); only players drive the
+            // traffic spawn ring / physical LOD.
             let tracked: Vec<wp_world::TrackedVehicle> = self
                 .vehicles
                 .iter()
@@ -366,7 +434,7 @@ impl Sim {
                         v.id,
                         &v.vehicle.state(),
                         v.input.siren,
-                        true,
+                        v.kind == VehicleKind::Player,
                     )
                 })
                 .collect();
@@ -409,13 +477,18 @@ impl Sim {
             })
             .collect();
         self.physics.step();
-        let tick_contacts = contacts::collect(
+        let mut tick_contacts = contacts::collect(
             self.physics.narrow_phase(),
             &self.physics.bodies,
             &self.physics.colliders,
             &infos,
         );
-        out.extend(tick_contacts.events);
+        out.extend(std::mem::take(&mut tick_contacts.events));
+        if let Some(filter) = self.contact_filter {
+            for c in tick_contacts.per_vehicle.iter_mut().flatten() {
+                filter(c);
+            }
+        }
         if sys.vehicle {
             for slot in &mut self.vehicles {
                 slot.vehicle.read_body(&self.physics.bodies[slot.body.body]);
@@ -425,6 +498,9 @@ impl Sim {
             for (slot, contacts) in self.vehicles.iter_mut().zip(&tick_contacts.per_vehicle) {
                 slot.damage
                     .apply_contacts(contacts, &self.config.mode, dt, &mut out);
+                if self.record_contacts && !contacts.is_empty() {
+                    self.applied_contacts.push((slot.id, contacts.clone()));
+                }
                 let effects = slot.damage.handling_effects();
                 slot.vehicle.apply_damage_effects(&effects);
             }
@@ -764,6 +840,48 @@ mod tests {
         let a = mk();
         assert!(a.prop_count() > 0, "procedural city has no props");
         assert_eq!(a.state_hash(), mk().state_hash());
+    }
+
+    fn quantise(c: &mut wp_contracts::ContactImpulse) {
+        c.impulse_ns = (c.impulse_ns * 16.0).round() / 16.0;
+    }
+
+    #[test]
+    fn contact_filter_recording_and_despawn() {
+        let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
+        let mut sim = Sim::new(SimConfig {
+            seed: 5,
+            mode,
+            time_of_day: TimeOfDay::from_hours(12.0),
+            time_ratio: 10.0,
+        });
+        let a = sim.spawn_vehicle(&car, [0.0; 3], 0.0).unwrap();
+        let b = sim
+            .spawn_vehicle(&car, [0.0, 30.0, 0.0], std::f32::consts::PI)
+            .unwrap();
+        sim.set_vehicle_kind(b, VehicleKind::Traffic).unwrap();
+        sim.place_vehicle(a, [0.0; 3], 0.0, 10.0).unwrap();
+        sim.place_vehicle(b, [0.0, 30.0, 0.0], std::f32::consts::PI, 10.0)
+            .unwrap();
+        sim.set_contact_filter(Some(quantise));
+        sim.set_record_applied_contacts(true);
+        for _ in 0..480 {
+            sim.step_fixed();
+        }
+        let applied = sim.drain_applied_contacts();
+        assert!(!applied.is_empty(), "head-on recorded no contacts");
+        assert!(applied
+            .iter()
+            .flat_map(|(_, c)| c)
+            .all(|c| (c.impulse_ns * 16.0).fract() == 0.0));
+        assert!(sim.drain_applied_contacts().is_empty());
+        sim.despawn_vehicle(b).unwrap();
+        assert_eq!(sim.vehicles().len(), 1);
+        assert_eq!(sim.despawn_vehicle(b), Err(SimError::UnknownEntity(b)));
+        for _ in 0..60 {
+            sim.step_fixed();
+        }
     }
 
     #[test]
