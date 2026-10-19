@@ -187,6 +187,7 @@ pub struct CityMap {
     seg_grid: Grid,
     ix_grid: Grid,
     zone_grid: Grid,
+    building_grid: Grid,
 }
 
 impl CityMap {
@@ -337,6 +338,11 @@ impl CityMap {
             }
             zone_grid.insert_box(zlo, zhi, i as u32);
         }
+        let mut building_grid = Grid::new(lo, hi);
+        for (i, b) in net.buildings.iter().enumerate() {
+            let (blo, bhi) = bbox2(&b.footprint);
+            building_grid.insert_box(blo, bhi, i as u32);
+        }
         let mut map = Self {
             zone_lane_km: vec![0.0; net.zones.len()],
             net,
@@ -347,6 +353,7 @@ impl CityMap {
             seg_grid,
             ix_grid,
             zone_grid,
+            building_grid,
         };
         // Drivable lane-km per zone (sampled every 10 m).
         for i in 0..nl {
@@ -535,65 +542,130 @@ fn curve_speed(pts: &[V3], length: f32, limit: f32) -> f32 {
     (2.8 * r).sqrt().clamp(3.0, limit)
 }
 
-impl CityMap {
-    /// Whether the segment `a`→`b` clears every building (contract v0.2.0 line of sight; added
-    /// by the lead, workstream D owns it). A building blocks when the 2D segment crosses or
-    /// enters its footprint and the segment's height there is below the roof. Linear in the
-    /// building count; D may index it with a grid.
-    pub fn line_of_sight(&self, a: [f32; 3], b: [f32; 3]) -> bool {
-        let (pa, pb) = ([a[0], a[1]], [b[0], b[1]]);
-        let d = geom::sub(pb, pa);
-        for bld in &self.net.buildings {
-            let fp = &bld.footprint;
-            if fp.len() < 3 {
-                continue;
+impl Grid {
+    /// Cells crossed by the segment `a`→`b` (2D DDA), in order; cells outside the grid are
+    /// skipped.
+    fn cells_on_segment(&self, a: V2, b: V2, out: &mut Vec<usize>) {
+        let to_cell = |v: f32, o: f32| ((v - o) / CELL_M).floor();
+        let (mut cx, mut cy) = (to_cell(a[0], self.origin[0]), to_cell(a[1], self.origin[1]));
+        let (ex, ey) = (to_cell(b[0], self.origin[0]), to_cell(b[1], self.origin[1]));
+        let d = geom::sub(b, a);
+        let step_x = if d[0] > 0.0 { 1.0 } else { -1.0 };
+        let step_y = if d[1] > 0.0 { 1.0 } else { -1.0 };
+        // Parameter t at which the segment crosses the next cell boundary in x / y.
+        let boundary =
+            |c: f32, step: f32, o: f32| o + (c + if step > 0.0 { 1.0 } else { 0.0 }) * CELL_M;
+        let mut t_max_x = if d[0] != 0.0 {
+            (boundary(cx, step_x, self.origin[0]) - a[0]) / d[0]
+        } else {
+            f32::INFINITY
+        };
+        let mut t_max_y = if d[1] != 0.0 {
+            (boundary(cy, step_y, self.origin[1]) - a[1]) / d[1]
+        } else {
+            f32::INFINITY
+        };
+        let t_dx = if d[0] != 0.0 {
+            CELL_M / d[0].abs()
+        } else {
+            f32::INFINITY
+        };
+        let t_dy = if d[1] != 0.0 {
+            CELL_M / d[1].abs()
+        } else {
+            f32::INFINITY
+        };
+        let max_steps = (ex - cx).abs() as usize + (ey - cy).abs() as usize + 1;
+        for _ in 0..=max_steps {
+            if cx >= 0.0 && cy >= 0.0 && cx < self.nx as f32 && cy < self.ny as f32 {
+                out.push(cy as usize * self.nx + cx as usize);
             }
-            // Smallest segment parameter at which the 2D segment touches the footprint.
-            let mut t_hit: Option<f32> = if point_in_polygon(pa, fp) {
-                Some(0.0)
+            if cx == ex && cy == ey {
+                break;
+            }
+            if t_max_x < t_max_y {
+                cx += step_x;
+                t_max_x += t_dx;
             } else {
-                None
-            };
-            for i in 0..fp.len() {
-                let (e0, e1) = (fp[i], fp[(i + 1) % fp.len()]);
-                let e = geom::sub(e1, e0);
-                let den = geom::cross(d, e);
-                if den.abs() < 1e-9 {
-                    continue;
-                }
-                let w = geom::sub(e0, pa);
-                let t = geom::cross(w, e) / den;
-                let u = geom::cross(w, d) / den;
-                if (0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u) {
-                    t_hit = Some(t_hit.map_or(t, |h: f32| h.min(t)));
-                }
-            }
-            if let Some(t) = t_hit {
-                let z = a[2] + (b[2] - a[2]) * t;
-                if z < bld.height_m {
-                    return false;
-                }
+                cy += step_y;
+                t_max_y += t_dy;
             }
         }
-        true
     }
 }
 
-/// Even-odd point-in-polygon test.
-fn point_in_polygon(p: geom::V2, poly: &[geom::V2]) -> bool {
-    let mut inside = false;
-    let n = poly.len();
-    let mut j = n - 1;
-    for i in 0..n {
-        let (pi, pj) = (poly[i], poly[j]);
-        if (pi[1] > p[1]) != (pj[1] > p[1])
-            && p[0] < (pj[0] - pi[0]) * (p[1] - pi[1]) / (pj[1] - pi[1]) + pi[0]
-        {
-            inside = !inside;
-        }
-        j = i;
+fn bbox2(poly: &[V2]) -> (V2, V2) {
+    let mut lo = [f32::INFINITY; 2];
+    let mut hi = [f32::NEG_INFINITY; 2];
+    for p in poly {
+        lo = [lo[0].min(p[0]), lo[1].min(p[1])];
+        hi = [hi[0].max(p[0]), hi[1].max(p[1])];
     }
-    inside
+    (lo, hi)
+}
+
+/// Whether the 3D segment `a`→`b` passes through an extruded footprint (ground to `height`).
+/// The segment's XY span inside the footprint is `[t_in, t_out]`; since its height is linear
+/// in `t`, it is below the roof somewhere in that span iff it is at one of the two ends.
+fn segment_hits_building(a: V3, b: V3, fp: &[V2], height: f32) -> bool {
+    let (pa, pb) = (geom::xy(a), geom::xy(b));
+    let d = geom::sub(pb, pa);
+    let mut t_in = f32::INFINITY;
+    let mut t_out = f32::NEG_INFINITY;
+    let mut note = |t: f32| {
+        t_in = t_in.min(t);
+        t_out = t_out.max(t);
+    };
+    if geom::point_in_polygon(pa, fp) {
+        note(0.0);
+    }
+    if geom::point_in_polygon(pb, fp) {
+        note(1.0);
+    }
+    for i in 0..fp.len() {
+        let (e0, e1) = (fp[i], fp[(i + 1) % fp.len()]);
+        let e = geom::sub(e1, e0);
+        let den = geom::cross(d, e);
+        if den.abs() < 1e-9 {
+            continue;
+        }
+        let w = geom::sub(e0, pa);
+        let t = geom::cross(w, e) / den;
+        let u = geom::cross(w, d) / den;
+        if (0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u) {
+            note(t);
+        }
+    }
+    if t_in > t_out {
+        return false;
+    }
+    let z = |t: f32| a[2] + (b[2] - a[2]) * t;
+    z(t_in).min(z(t_out)) < height
+}
+
+impl CityMap {
+    /// Whether the segment `a`→`b` clears every building (contract v0.2.0 line of sight).
+    /// Buildings are extruded footprints from the ground to their height; the segment is
+    /// blocked if any part of it inside a footprint is below the roof. Only buildings in grid
+    /// cells the segment crosses are tested. Roads, parked cars and traffic do not occlude.
+    pub fn line_of_sight(&self, a: V3, b: V3) -> bool {
+        if self.net.buildings.is_empty() {
+            return true;
+        }
+        let mut cells = Vec::new();
+        self.building_grid
+            .cells_on_segment(geom::xy(a), geom::xy(b), &mut cells);
+        let mut cands: Vec<u32> = cells
+            .iter()
+            .flat_map(|c| self.building_grid.cells[*c].iter().copied())
+            .collect();
+        cands.sort_unstable();
+        cands.dedup();
+        !cands.iter().any(|&i| {
+            let bld = &self.net.buildings[i as usize];
+            bld.footprint.len() >= 3 && segment_hits_building(a, b, &bld.footprint, bld.height_m)
+        })
+    }
 }
 
 impl WorldQuery for CityMap {
@@ -679,5 +751,78 @@ impl WorldQuery for CityMap {
 
     fn line_of_sight(&self, a: [f32; 3], b: [f32; 3]) -> bool {
         CityMap::line_of_sight(self, a, b)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::network::Building;
+
+    fn city_with(buildings: Vec<Building>) -> CityMap {
+        let mut net = crate::procgen::generate(&crate::procgen::ProcGenConfig::small());
+        net.buildings = buildings;
+        CityMap::new(net)
+    }
+
+    fn block(x0: f32, y0: f32, x1: f32, y1: f32, h: f32) -> Building {
+        Building {
+            footprint: vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1]],
+            height_m: h,
+        }
+    }
+
+    /// Brute force over every building (reference for the grid walk).
+    fn los_brute(map: &CityMap, a: V3, b: V3) -> bool {
+        !map.net
+            .buildings
+            .iter()
+            .any(|bl| segment_hits_building(a, b, &bl.footprint, bl.height_m))
+    }
+
+    #[test]
+    fn line_of_sight_cases() {
+        let map = city_with(vec![block(100.0, 100.0, 140.0, 140.0, 20.0)]);
+        // Straight through at eye height: blocked. Beside it: clear.
+        assert!(!map.line_of_sight([80.0, 120.0, 1.5], [160.0, 120.0, 1.5]));
+        assert!(map.line_of_sight([80.0, 150.0, 1.5], [160.0, 150.0, 1.5]));
+        // High above the roof: clear.
+        assert!(map.line_of_sight([80.0, 120.0, 30.0], [160.0, 120.0, 30.0]));
+        // Enters above the roof but descends into it (helicopter to a car behind it): blocked.
+        assert!(!map.line_of_sight([90.0, 120.0, 25.0], [130.0, 120.0, 1.0]));
+        // Endpoint inside the building: blocked; both endpoints inside but above: clear.
+        assert!(!map.line_of_sight([120.0, 120.0, 1.0], [200.0, 120.0, 1.0]));
+        assert!(map.line_of_sight([110.0, 110.0, 25.0], [130.0, 130.0, 25.0]));
+        // Diagonal clipping a corner.
+        assert!(!map.line_of_sight([90.0, 130.0, 1.0], [110.0, 145.0, 1.0]));
+        assert!(map.line_of_sight([90.0, 135.0, 1.0], [110.0, 150.0, 1.0]));
+        // No buildings: always clear.
+        assert!(city_with(vec![]).line_of_sight([0.0; 3], [500.0, 500.0, 0.0]));
+    }
+
+    #[test]
+    fn grid_walk_matches_brute_force() {
+        let map = CityMap::new(crate::procgen::generate(
+            &crate::procgen::ProcGenConfig::default(),
+        ));
+        let mut rng = wp_math::Rng::new(5);
+        let mut blocked = 0;
+        for _ in 0..3000 {
+            let mut p = || {
+                [
+                    rng.range_f32(-800.0, 800.0),
+                    rng.range_f32(-800.0, 800.0),
+                    rng.range_f32(0.5, 30.0),
+                ]
+            };
+            let (a, b) = (p(), p());
+            let los = map.line_of_sight(a, b);
+            assert_eq!(los, los_brute(&map, a, b), "{a:?} -> {b:?}");
+            blocked += usize::from(!los);
+        }
+        assert!(
+            blocked > 1000,
+            "city buildings should block most long sight lines"
+        );
     }
 }
