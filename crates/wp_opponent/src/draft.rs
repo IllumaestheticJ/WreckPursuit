@@ -113,7 +113,7 @@ pub fn reduction(follower: &DraftBody, leader: &DraftBody, p: &DraftParams) -> f
 }
 
 /// Drag multiplier (1 = no draft, `1 − max_reduction` = full draft) for every body, in input
-/// order. O(n²); n is the number of vehicles near each other (24 cars ≈ 0.01 ms).
+/// order. O(n²) in the number of vehicles passed in.
 pub fn drag_scales(bodies: &[DraftBody], p: &DraftParams) -> Vec<f32> {
     bodies
         .iter()

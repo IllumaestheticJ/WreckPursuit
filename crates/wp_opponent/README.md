@@ -29,7 +29,11 @@ gap to the player — pace is car capability × how much of it the driver dares 
   side into the corner longer than `side_by_side_s` while behind, or when oncoming traffic
   appears in the lane (open roads).
 - **Slipstream/tow**: held up on a straight → tuck in behind at half the time gap before pulling
-  out (positioning only — `wp_vehicle` has no draft model yet).
+  out. With `RaceConfig::draft` (only when the sim loop applies `draft::drag_scales`, see
+  below): 0.3 s behind racers outside braking zones (so the corner exit doesn't open a gap the
+  wake can't bridge), flat out in the wake down to the minimum gap on straights (the
+  braking-distance cap still holds), and a tow-built run (> 0.8 m/s closing within 12 m) or a
+  gap under 8 m counts as a pass chance.
 - **Defend**: one move per straight toward an attacker's side, never into a car alongside,
   never in braking zones or the start phase.
 - **Side constraints** (always on): never command a lateral position toward a car that overlaps
@@ -44,16 +48,40 @@ gap to the player — pace is car capability × how much of it the driver dares 
 - **Civilians**: obstacles with a margin that grows with my speed (0.4 m at a crawl, full
   `civilian_margin_m` at 15 m/s+), crossing traffic extrapolated 3 s, **junction awareness**
   (stay able to stop before a junction box while a civilian is heading into or is inside it).
-  Touching a civilian while moving into it = `Disqualified` (the car then drives on at
-  cool-down pace — a car parked on the road would gridlock traffic).
+  Touching a civilian while driving into it (throttle on, moving toward it) = `Disqualified`
+  (the car then drives on at cool-down pace — a car parked on the road would gridlock
+  traffic). A car shoved into a civilian (by police) is not at fault.
+- **Signals** (`RaceConfig::signals`, open roads): the corridor records the lane each junction
+  is entered from (`Corridor::junction_lanes`); the field reads `CityMap::lane_signal` for the
+  next one. A green lasting until I'm through = cross traffic is held, so only civilians moving
+  inside the box count (no more yielding to cars waiting at their red). Red on arrival (or a
+  yellow / short green I can stop for): drivers with `risk < RED_LIGHT_RISK` (0.35) stop at
+  the line (`SpeedLimit::Signal`); the rest, and anyone fleeing police, go only when nobody is
+  heading in. **Stand-off breaker**: after 3 s held by civilians that are standing still in the
+  box (each waiting for the other), stop counting them and creep through.
+- **Pulled-over cars** (retired, busted, yielding racers) are fixed obstacles: anyone may pass
+  them, also in the start phase, using the opposing lanes where the corridor allows overtaking
+  there, needing room only until past them; nobody backs away from a stopped car. Cars told to
+  stop hold on the handbrake (the shared controller releases the brake pedal near a standstill
+  because a held brake selects reverse; without this they idle forward at ~0.6 m/s).
 - **Damage**: profile rebuilt from `CarCapability::damaged` when effects change by > 5 %;
   overheating caps speed at `top × (1 − 0.35·overheating)`; `steer_pull` compensated; dead
   engine / lost wheel / health < 0.12 → `Retired`, pull to the edge and stop.
-- **Police**: `PoliceQuery::wanted_level(entity) ≥ flee_wanted_level` and
-  `RaceConfig::allow_abandon` → `Fled`: plans a legal route to the POI farthest from the
-  police it has seen (`police_positions()`; falls back down the list until a route plans) and
-  drives it with the same perception and civilian rules. `EventHeat` feeds both from the sim's
-  `wp_police` events. Spawn racers as `VehicleKind::AiRacer`.
+- **Police** (`PoliceQuery`; use `SimPolice(sim.police())` for live data, `EventHeat` when only
+  events are available). Spawn racers as `VehicleKind::AiRacer`.
+  - wanted ≥ `flee_wanted_level` and `RaceConfig::allow_abandon` → `Fled`: plans a legal route
+    to the POI farthest from the police (`police_positions()`: live ground units + roadblocks
+    with `SimPolice`; falls back down the list until a route plans) and drives it with the same
+    perception and civilian rules, ignoring red lights. **Re-plans** when police wait within
+    35 m of the next 160 m of the route (units ahead only — a chaser behind is beaten by
+    driving on; at most every 6 s) or the route is about to end while still wanted.
+  - wanted but below the flee level → keeps racing; if a chasing unit stays within
+    `YIELD_RADIUS_M` (30 m) for `YIELD_AFTER_S` (2 s) → `Tactic::Yield`: rolls on at ≤ 6 m/s
+    to the kerb, clear of junctions, then stops (`Yielded` event); released back into the race
+    if the pursuit ends without a capture.
+  - `PursuitEnded { Captured | CapturedTotalLoss }` for a racer (from the tick's events) →
+    `RacerStatus::Busted`, parked (`Busted` event). A fleeing racer no longer wanted or chased
+    → `Escaped` event, cool-down pace to the end of its route, parks.
 - **Mistakes**: each braking zone samples a braking-point error (seconds of travel) and a line
   error; both scale with `1 + pressure × pressure_sensitivity` (pressure = a car right behind
   or alongside).
@@ -79,20 +107,33 @@ gap to the player — pace is car capability × how much of it the driver dares 
 | `civilian_headway_s` | 1.6 → 0.9 s | risk |
 | `flee_wanted_level` | 1 → 4 | risk |
 | uses opposing lanes to pass (open roads) | risk ≥ 0.5 | risk |
+| stops for red lights (open roads) | risk < 0.35 | risk |
 | `perception_ahead_m` | 60 → 130 m | awareness |
 | `mirror_range_m` | 12 → 45 m | awareness |
 | junction watch radius | 25 → 45 m | awareness |
 
 Field-level: `RaceConfig { laps, decision_ticks (4 = 60 Hz), allow_abandon,
-civilian_contact_dq, cooldown_speed_mps, seed, line: LineParams, corridor: CorridorOptions }`,
-`AI_CONTACT_IMPULSE_NS = 400` (racer–racer collision threshold).
+civilian_contact_dq, cooldown_speed_mps, seed, line: LineParams, corridor: CorridorOptions,
+signals (default on; off for closed courses), draft (default off; on only if the sim applies
+slipstream) }`, `AI_CONTACT_IMPULSE_NS = 400` (racer–racer collision threshold),
+`YIELD_RADIUS_M`, `YIELD_AFTER_S`, `RED_LIGHT_RISK`.
+
+### Slipstream model (`draft`)
+`draft::drag_scales(&[DraftBody], &DraftParams) -> Vec<f32>`: a drag multiplier per vehicle
+for the sim loop to apply (`effects.drag_scale *= scale` before `apply_damage_effects`).
+35 % less drag bumper to bumper, linear to nothing at 25 m behind the leader's rear bumper,
+fading quadratically to the edge of a wake one leader-width wide (+50 % over the range);
+leader ≥ 10 m/s, follower travelling within ~25° of it; strongest leader wins, no stacking.
+O(n²), deterministic. Physical size of the effect: at 25–35 m/s a sedan (CdA 0.66 m², 1.4 t)
+gains 0.06–0.13 m/s² — a few metres per straight; it matters because it removes the gap the
+corners open, not as a straight-line rocket.
 
 ## Using it
 ```rust
 let field = Field::from_route(&world, &route, &specs, RaceConfig { laps: 5, ..Default::default() });
 let grid = field.grid_slots(specs.len(), car_len, car_width, GridLayout::TwoWide); // spawn there
 // every physics tick:
-let inputs = field.tick(sim.world(), &vehicle_obs, &tick_events, &police);
+let inputs = field.tick(sim.world(), &vehicle_obs, &tick_events, &SimPolice(sim.police()));
 for (entity, input) in inputs { sim.set_input(*entity, *input)?; }
 ```
 `VehicleObs` = entity, `VehicleState`, `HandlingEffects` (`DamageSim::handling_effects`) and
@@ -118,7 +159,25 @@ Full-sim tests (`tests/race.rs`, procedural 8×8 city, counter-clockwise arteria
 - Wanted racer abandons and flees; others keep racing.
 - Open roads + traffic: a wanted-level event read from the sim's event stream makes a racer
   abandon and drive ≥ 250 m of a flight route ending > 300 m from the police, no contacts.
-- Open roads, 25 % traffic, 90 s: no civilian contact, no racer collision, all progress.
+- Open roads, 25 % traffic, 90 s: no civilian contact, no racer collision, all progress, nobody
+  stuck (< 8 s standing with nothing in the way), no queue longer than 90 s.
+- **Live police** (`live_police_chase_ends_in_escape_or_capture_without_stuck_cars`): open
+  roads, traffic, the sim's own physical police cars (`sentinel_cruiser`), the AI reading
+  `SimPolice`. Racer at L3 runs; racer at L1 never runs (yields → booked, or races on); booked
+  cars stay put; no stuck cars; no civilian contact; no AI collision. (Seed 4 today: both
+  wanted racers are caught, the clean one races on.)
+- Signal unit tests: careful driver stops for a red / short green, a risk-taker doesn't; a
+  lasting green ignores cross traffic held at its red but not a car moving inside the box.
+- Draft unit tests (wake geometry) and, with `--features sim-draft-hook` (needs
+  `Sim::set_drag_scale`, requested from the lead), `draft_lets_a_faster_driver_in_the_same_car_pass`:
+  same sedan, a 0.8-skill driver behind three 0.35s, 4 laps, seeds 1–4 — with slipstream it
+  gains places in every seed (finishes 1st/2nd/3rd/2nd), without it finishes last every time;
+  zero AI contacts.
+- Ignored sweep `sweep_open_roads_progress` (8 seeds): reading signals raised total open-road
+  progress from 15.9 km to 18.0 km (+13 %), no civilian contact, no AI collision.
+
+Debugging: `WP_TRACE=<grid index>` prints that racer 4× per second (position, speed, speed
+target, what limits it, tactic, lateral position / command, gap ahead).
 - `determinism_lint`: the workspace lint over this crate.
 
 Scenarios (simcli v2): `apps/simcli/scenarios/opponent/*.ron` — run today with warnings
@@ -133,13 +192,19 @@ Scenarios (simcli v2): `apps/simcli/scenarios/opponent/*.ron` — run today with
 | Whole sim, 8 cars + city + AI | 0.09 ms per physics tick | — |
 
 ## Known gaps
-- **Passing between near-equal cars is rare**: without a slipstream model a same-car pass
-  needs a corner-speed advantage; a faster car passes reliably. Draft physics requested from 02.
-- Open-road racing in traffic is safe but slow (racers yield at every busy junction; no signal
-  timing; no "run the red when clear" logic). Rare low-speed racer nudges in jams.
+- **Same-car passes need the slipstream hook in `wp_sim`** (`Sim::set_drag_scale`, one line;
+  patch in `docs/integration/opponent.md`). Until it lands `RaceConfig::draft` must stay off and
+  near-equal cars rarely pass. Even with it, two drivers within ~0.1 skill in the same car
+  don't catch each other (the pace difference is smaller than the gap). Late-braking passes
+  (the other real-world lever) are not implemented.
+- Open-road racing: racers wait out long reds (the arterial corner's red is ~45 s) — correct,
+  but it caps pace; progress ≈ 0.5–0.8 km per 90 s with 25 % traffic. Rare low-speed nudges in
+  jams.
 - Two-wide grids favour the inside column into the first corner.
-- Live pursuits don't happen in `wp_sim` yet (no police units → unwitnessed violations decay
-  faster than racers build heat); the flee path is tested with injected police events.
+- Live police: the sim's patrols are effective — in the test seeds most wanted racers are
+  caught rather than escaping (they are boxed in at junction queues). Escape is implemented
+  (route re-planning, no red lights) but not yet demonstrated in a test seed. A busted car can
+  be nudged by the police car that caught it (it holds on the handbrake).
 - Lap timing here is the AI's own bookkeeping; official judging belongs to `wp_race::judge`
   (adapter not written yet — see `docs/integration/opponent.md`).
 - Line optimiser leaves some width unused in tight junction corners.
