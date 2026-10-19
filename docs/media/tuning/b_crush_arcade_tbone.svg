@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 358" width="760" height="358" font-family="system-ui, -apple-system, Segoe UI, sans-serif">
+<rect width="760" height="358" fill="#fcfcfb"/>
+<text x="4" y="22" font-size="13" font-weight="600" fill="#0b0b0b">Golden T-bone victim crush, Arcade</text>
+<text x="4" y="38" font-size="11" fill="#52514e">hollow = an Arcade/Sim guardrail fails at that point</text>
+<line x1="44" x2="428" y1="286.0" y2="286.0" stroke="#e1e0d9"/>
+<text x="38" y="290.0" font-size="11" text-anchor="end" fill="#52514e">0</text>
+<line x1="44" x2="428" y1="212.0" y2="212.0" stroke="#e1e0d9"/>
+<text x="38" y="216.0" font-size="11" text-anchor="end" fill="#52514e">0.1</text>
+<line x1="44" x2="428" y1="138.0" y2="138.0" stroke="#e1e0d9"/>
+<text x="38" y="142.0" font-size="11" text-anchor="end" fill="#52514e">0.2</text>
+<line x1="44" x2="428" y1="64.0" y2="64.0" stroke="#e1e0d9"/>
+<text x="38" y="68.0" font-size="11" text-anchor="end" fill="#52514e">0.3</text>
+<line x1="44" x2="428" y1="286" y2="286" stroke="#c3c2b7"/>
+<text x="62.9" y="301" font-size="11" text-anchor="middle" fill="#52514e">0.45</text>
+<text x="125.8" y="301" font-size="11" text-anchor="middle" fill="#52514e">0.55</text>
+<text x="188.8" y="301" font-size="11" text-anchor="middle" fill="#52514e">0.65</text>
+<text x="251.7" y="301" font-size="11" text-anchor="middle" fill="#52514e">0.75</text>
+<text x="314.7" y="301" font-size="11" text-anchor="middle" fill="#52514e">0.85</text>
+<text x="409.1" y="301" font-size="11" text-anchor="middle" fill="#52514e">1</text>
+<text x="236.0" y="322" font-size="11" text-anchor="middle" fill="#52514e">Arcade impulse_to_lattice_scale (current 0.45)</text>
+<rect x="44" y="64" width="384" height="111.0" fill="#1baf7a" fill-opacity="0.08"/>
+<line x1="44" x2="428" y1="175.0" y2="175.0" stroke="#52514e" stroke-dasharray="0"/>
+<text x="48" y="170.0" font-size="11" fill="#52514e">target ≥ 0.15 m</text>
+<path d="M62.9,216.5 L125.8,205.4 L188.8,194.9 L251.7,186.7 L314.7,175.0 L409.1,161.7" fill="none" stroke="#2a78d6" stroke-width="2" stroke-linejoin="round"/>
+<circle cx="62.9" cy="216.5" r="4" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"/>
+<circle cx="125.8" cy="205.4" r="4" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"/>
+<circle cx="188.8" cy="194.9" r="4" fill="#fcfcfb" stroke="#2a78d6" stroke-width="2"/>
+<circle cx="251.7" cy="186.7" r="4" fill="#fcfcfb" stroke="#2a78d6" stroke-width="2"/>
+<circle cx="314.7" cy="175.0" r="4" fill="#fcfcfb" stroke="#2a78d6" stroke-width="2"/>
+<circle cx="409.1" cy="161.7" r="4" fill="#fcfcfb" stroke="#2a78d6" stroke-width="2"/>
+<path d="M62.9,214.4 L125.8,202.7 L188.8,192.2" fill="none" stroke="#eb6834" stroke-width="2" stroke-linejoin="round"/>
+<circle cx="62.9" cy="214.4" r="4" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
+<circle cx="125.8" cy="202.7" r="4" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
+<circle cx="188.8" cy="192.2" r="4" fill="#fcfcfb" stroke="#eb6834" stroke-width="2"/>
+<path d="M62.9,207.6 L125.8,194.5 L188.8,181.8" fill="none" stroke="#1baf7a" stroke-width="2" stroke-linejoin="round"/>
+<circle cx="62.9" cy="207.6" r="4" fill="#fcfcfb" stroke="#1baf7a" stroke-width="2"/>
+<circle cx="125.8" cy="194.5" r="4" fill="#fcfcfb" stroke="#1baf7a" stroke-width="2"/>
+<circle cx="188.8" cy="181.8" r="4" fill="#fcfcfb" stroke="#1baf7a" stroke-width="2"/>
+<path d="M62.9,194.3 L125.8,175.9 L188.8,164.5" fill="none" stroke="#6250d6" stroke-width="2" stroke-linejoin="round"/>
+<circle cx="62.9" cy="194.3" r="4" fill="#fcfcfb" stroke="#6250d6" stroke-width="2"/>
+<circle cx="125.8" cy="175.9" r="4" fill="#fcfcfb" stroke="#6250d6" stroke-width="2"/>
+<circle cx="188.8" cy="164.5" r="4" fill="#fcfcfb" stroke="#6250d6" stroke-width="2"/>
+<text x="454" y="22" font-size="13" font-weight="600" fill="#0b0b0b">Frontal barrier crush @ 80 km/h, Arcade</text>
+<text x="454" y="38" font-size="11" fill="#52514e">binding guardrail (debug_sedan, cross-member ×1.0)</text>
+<line x1="494" x2="748" y1="286.0" y2="286.0" stroke="#e1e0d9"/>
+<text x="488" y="290.0" font-size="11" text-anchor="end" fill="#52514e">0.4</text>
+<line x1="494" x2="748" y1="241.6" y2="241.6" stroke="#e1e0d9"/>
+<text x="488" y="245.6" font-size="11" text-anchor="end" fill="#52514e">0.6</text>
+<line x1="494" x2="748" y1="197.2" y2="197.2" stroke="#e1e0d9"/>
+<text x="488" y="201.2" font-size="11" text-anchor="end" fill="#52514e">0.8</text>
+<line x1="494" x2="748" y1="152.8" y2="152.8" stroke="#e1e0d9"/>
+<text x="488" y="156.8" font-size="11" text-anchor="end" fill="#52514e">1</text>
+<line x1="494" x2="748" y1="108.4" y2="108.4" stroke="#e1e0d9"/>
+<text x="488" y="112.4" font-size="11" text-anchor="end" fill="#52514e">1.2</text>
+<line x1="494" x2="748" y1="64.0" y2="64.0" stroke="#e1e0d9"/>
+<text x="488" y="68.0" font-size="11" text-anchor="end" fill="#52514e">1.4</text>
+<line x1="494" x2="748" y1="286" y2="286" stroke="#c3c2b7"/>
+<text x="506.5" y="301" font-size="11" text-anchor="middle" fill="#52514e">0.45</text>
+<text x="548.1" y="301" font-size="11" text-anchor="middle" fill="#52514e">0.55</text>
+<text x="589.8" y="301" font-size="11" text-anchor="middle" fill="#52514e">0.65</text>
+<text x="631.4" y="301" font-size="11" text-anchor="middle" fill="#52514e">0.75</text>
+<text x="673.0" y="301" font-size="11" text-anchor="middle" fill="#52514e">0.85</text>
+<text x="735.5" y="301" font-size="11" text-anchor="middle" fill="#52514e">1</text>
+<text x="621.0" y="322" font-size="11" text-anchor="middle" fill="#52514e">Arcade impulse_to_lattice_scale (current 0.45)</text>
+<line x1="494" x2="748" y1="208.3" y2="208.3" stroke="#52514e"/>
+<text x="748" y="223.3" font-size="11" text-anchor="end" fill="#52514e">limit 0.75 m</text>
+<path d="M506.5,250.5 L548.1,225.4 L589.8,202.1 L631.4,169.4 L673.0,130.7 L735.5,77.8" fill="none" stroke="#2a78d6" stroke-width="2"/>
+<circle cx="506.5" cy="250.5" r="4" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"/>
+<circle cx="548.1" cy="225.4" r="4" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"/>
+<circle cx="589.8" cy="202.1" r="4" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"/>
+<circle cx="631.4" cy="169.4" r="4" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"/>
+<circle cx="673.0" cy="130.7" r="4" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"/>
+<circle cx="735.5" cy="77.8" r="4" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"/>
+<line x1="8" x2="24" y1="346" y2="346" stroke="#2a78d6" stroke-width="2"/>
+<text x="30" y="350" font-size="11" fill="#52514e">cross-member ×1.0 (current)</text>
+<line x1="227" x2="243" y1="346" y2="346" stroke="#eb6834" stroke-width="2"/>
+<text x="249" y="350" font-size="11" fill="#52514e">cross-member ×0.67</text>
+<line x1="383" x2="399" y1="346" y2="346" stroke="#1baf7a" stroke-width="2"/>
+<text x="405" y="350" font-size="11" fill="#52514e">cross-member ×0.5</text>
+<line x1="532" x2="548" y1="346" y2="346" stroke="#6250d6" stroke-width="2"/>
+<text x="554" y="350" font-size="11" fill="#52514e">cross-member ×0.33</text>
+</svg>

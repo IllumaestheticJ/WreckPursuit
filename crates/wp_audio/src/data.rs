@@ -181,6 +181,8 @@ pub struct EngineMix {
     pub pop_min_redline_frac: f32,
     /// Turbo / supercharger loop gain.
     pub forced_induction_gain: f32,
+    /// Engine gain multiplier for physical traffic (`DriverKind::Traffic`).
+    pub traffic_gain: f32,
 }
 
 /// Tire, surface and suspension tuning.

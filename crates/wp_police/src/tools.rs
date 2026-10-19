@@ -87,14 +87,14 @@ pub fn check_point(
     Ok(sight)
 }
 
-/// Find the first valid site on the racer's predicted path. When `only_segment` is given, the
-/// site must be on that segment (captain request).
+/// Find the first valid site on the racer's predicted path. When `only_road` (a
+/// `RoadSegment::edge` id) is given, the site must be on that road (captain request).
 pub fn plan_site(
     g: &RoadGraph,
     racer_pos: [f32; 2],
     racer_vel: [f32; 2],
     rules: &SiteRules,
-    only_segment: Option<SegmentId>,
+    only_road: Option<u32>,
 ) -> Result<ToolSite, SiteError> {
     let path = g.predict_path(racer_pos, racer_vel, rules.max_ahead_m + 50.0);
     let mut s = rules.min_ahead_m;
@@ -105,7 +105,7 @@ pub fn plan_site(
             break;
         };
         let leg = path.legs[i];
-        if only_segment.is_some_and(|o| o != leg.segment) {
+        if only_road.is_some_and(|o| g.segment(leg.segment).edge != Some(o)) {
             s += 10.0;
             continue;
         }
@@ -130,7 +130,7 @@ pub fn plan_site(
         }
         s += 10.0;
     }
-    if only_segment.is_some() && !seen_segment {
+    if only_road.is_some() && !seen_segment {
         return Err(SiteError::NotOnPath);
     }
     Err(last_err)
@@ -383,7 +383,7 @@ pub fn compass(dir: [f32; 2]) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::{lerp2, procedural_city, CityParams};
+    use crate::graph::lerp2;
 
     fn rules() -> SiteRules {
         SiteRules {
@@ -396,7 +396,7 @@ mod tests {
 
     #[test]
     fn sites_respect_sight_and_distance_everywhere() {
-        let g = procedural_city(&CityParams::default());
+        let g = crate::city::procedural(&crate::city::ProcGenConfig::small()).0;
         let mut placed = 0;
         let mut rejected_blind = 0;
         for (i, seg) in g.segments.iter().enumerate() {

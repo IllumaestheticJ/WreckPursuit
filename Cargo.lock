@@ -4203,6 +4203,7 @@ dependencies = [
  "criterion",
  "serde",
  "serde_json",
+ "simcli",
  "wp_contracts",
  "wp_damage",
  "wp_net",
@@ -4246,6 +4247,7 @@ dependencies = [
  "wp_contracts",
  "wp_damage",
  "wp_math",
+ "wp_police",
 ]
 
 [[package]]
@@ -4300,6 +4302,7 @@ dependencies = [
  "wp_contracts",
  "wp_damage",
  "wp_math",
+ "wp_police",
  "wp_sim",
  "wp_vehicle",
  "wp_world",
@@ -4385,8 +4388,10 @@ dependencies = [
  "wasm-bindgen",
  "wp_audio",
  "wp_contracts",
+ "wp_economy",
  "wp_math",
  "wp_net",
+ "wp_police",
  "wp_sim",
  "wp_world",
 ]

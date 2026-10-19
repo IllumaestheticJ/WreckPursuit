@@ -20,7 +20,10 @@ Parsing uses RON with `implicit_some`, so optional fields are written plainly
     mode: Simulation,                // Arcade | Simulation      (default Arcade) → data/modes/{arcade,sim}.toml
     assists: ai,                     // default assists: keyboard | gamepad | wheel | ai | off | custom((abs: true, …))
     traffic_density: 0.3,            // optional traffic density multiplier (1 = city default, 0 = none)
-    police_presence: 1.0,            // optional override 0..=1
+    police_presence: 1.0,            // optional patrol multiplier on data/police/presence.toml (1 = default, 0 = none)
+    traffic_cars: true,              // moving civilian traffic (default true)
+    parked_cars: true,               // parked cars along parking lanes, as physics bodies (default true)
+    police_cars: true,               // AI police units patrolling the city (default true)
     systems: "vehicle,damage,world", // optional; default all. --systems overrides. "net" adds the snapshot round trip
     barriers: [(pos: (0.0, 20.0, 0.75), size: (8.0, 1.0, 1.5), yaw: 0.0)],  // static boxes (rigid walls)
     entities: [ … ],                 // spawn order = entity id order (1, 2, 3, …); may be empty
@@ -45,6 +48,19 @@ With a city, the world is seeded from the scenario `seed`, parked cars become ph
 traffic is pre-populated around the spawned cars (or the whole city when `entities: []`), and
 civilian-collision diagnostics are on so `world_metric(name: "civilian_collisions", …)` works.
 
+Police: with a city, `wp_police` runs on the city's road graph (units drive with
+`wp_police`'s built-in kinematic driver; they are not physics bodies yet). Patrol counts come
+from `data/police/presence.toml` per district and day phase, scaled by `police_presence`.
+Heat comes from violations a unit witnesses. A pursuit starts when a unit keeps a wanted
+racer in recognition range long enough, which at night means 40 m for 4 s, so night police
+scenarios must bring the racer close to a patrol (`examples/probe_police.rs` prints unit
+positions). On the flat world police has no roads: heat and wanted levels work but no units
+exist.
+
+Opt-outs (`traffic_cars`, `parked_cars`, `police_cars` set to `false`) leave only the road
+network, which is useful for physics tests in the city. `police_cars: false` keeps heat and
+wanted levels.
+
 `barriers` are static boxes (`Sim::add_static_box`): centre `pos`, full `size` `[x, y, z]`,
 `yaw` about +Z. Contacts with them reach damage as static world geometry.
 
@@ -61,6 +77,7 @@ failures.
     pos: (-40.0, 0.0, 0.0),         // world m (default origin)
     yaw: -1.5708,                   // rad about +Z, 0 = facing +Y (default 0)
     speed_mps: 13.9,                // start rolling forward at this speed (default 0, at rest)
+    police_heat: 15.0,              // starting police heat (L1 from 10, L2 from 30, …; default 0)
     assists: off,                   // optional per-entity override
     driver: cruise(target_mps: 13.9, from_s: 0.0, until_s: 5.0),
     inputs: [
@@ -107,7 +124,8 @@ World metrics for `world_metric(...)` (all 0 on the flat world): `traffic_agents
 `traffic_agents_min` (fewest agents at any tick after a 10 s warm-up), `traffic_moving_frac_final`
 and `traffic_moving_frac_min` (fraction of agents above 0.5 m/s; the min is over 1 Hz samples
 after the warm-up), `civilian_collisions`, `traffic_spawned`, `traffic_stuck_recycled`, `props`
-(parked cars and cones turned into bodies), `static_boxes`.
+(parked cars and cones turned into bodies), `static_boxes`, `police_units_max` (most police
+units alive at once), `police_units_final`.
 
 Use ranges, never exact numbers: the hash goldens already pin exact behaviour, and ranges
 describe what "correct" means so they survive tuning.

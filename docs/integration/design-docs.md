@@ -65,3 +65,12 @@ Not applicable (docs only).
 
 ## Lead feedback
 (Written by the integration lead.)
+
+
+## Lead feedback (round 6b, 2026-10-19) — head-start tasks
+
+Contract **v0.3.0** is being applied in parallel by the lead (branch `lead/contract-v0.3.0`). Do not edit `wp_contracts`; build your work so it drops onto v0.3.0 (inherent methods / local types now, trait wiring after). Merge `origin/claude/laughing-newton-0xqr6q` (the lead branch, ahead of `main` until today's gate finishes) before starting. Goal of the project right now: the **single-player greybox demo**: drive in the city, raise heat, get chased by physical police, escape or get caught, and pay the repair bill.
+
+1. Write `docs/design/DEMO_GREYBOX.md`: the 5-minute single-player greybox demo script. Cover start location, controls, how heat rises, what police do at each heat level, escape and capture rules, the repair bill screen, what "done" looks like, and a per-machine checklist of what is still missing (cross-check `docs/STATUS.md` and the integration docs).
+2. A playtest feedback form (`docs/design/PLAYTEST.md`) the owner can fill after playing the published testbed.
+3. Measure the `CITY.md` §6 route lengths once D's graph is on `main` (procedural city for now), or mark what blocks it.

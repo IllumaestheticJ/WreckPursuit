@@ -6,14 +6,18 @@ use std::path::{Path, PathBuf};
 
 use simcli::{load_scenario, run_with_hook, FsData, RunOptions, Scenario};
 use wp_contracts::{load_car, DayPhase, EntityId};
-use wp_race::bridge::{course_from_route, safehouses_from_map, venues_from_map};
+use wp_race::bridge::{
+    activate_race_routes, closure_preview, course_from_route, plan_city_race, safehouses_from_map,
+    venues_from_map, CityRace,
+};
+use wp_race::schedule::TrafficMode;
 use wp_race::trace::{simulate, ScriptedRacer};
 use wp_race::{
     Course, DqReason, EventId, MeetHeat, RaceData, RaceJudge, RaceKind, RacerEntry, RacerResult,
     RacerSample, RacerStatus, Scheduler,
 };
 use wp_world::procgen::ProcGenConfig;
-use wp_world::{World, WorldConfig};
+use wp_world::{PropKind, World, WorldConfig};
 
 fn repo() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -189,4 +193,108 @@ fn world_bridge_on_the_procedural_city() {
     };
     let cal = sched.generate_day(0, &venues, &MeetHeat::default());
     assert!(cal.events.iter().any(|e| e.phase == DayPhase::Night));
+}
+
+/// The procedural city the `race_city_sprint` scenario runs in.
+fn sprint_city(traffic: bool) -> World {
+    let pg = ProcGenConfig {
+        nx: 7,
+        ny: 7,
+        spacing_m: 110.0,
+        seed: 1,
+        ..Default::default()
+    };
+    let mut cfg = WorldConfig::default();
+    cfg.traffic.enabled = traffic;
+    World::procedural(&pg, cfg)
+}
+
+fn plan_sprint(world: &World) -> CityRace {
+    plan_city_race(
+        world,
+        [60.55, -437.0, 0.0],
+        [0.0, 1.0],
+        [60.55, -140.0, 0.0],
+        3.0,
+    )
+    .expect("arterial sprint route")
+}
+
+#[test]
+fn city_sprint_on_real_roads() {
+    let race = plan_sprint(&sprint_city(false));
+    let len = race.course.length_m();
+    assert!((280.0..310.0).contains(&len), "route length {len}");
+    let r = judge_scenario("city_sprint.ron", RaceKind::Sprint, race.course.clone());
+    // The coupe starts half a row back on the right and still wins.
+    assert_eq!(r[0].racer, EntityId(2), "{r:#?}");
+    assert!(r.iter().all(|x| x.status == RacerStatus::Finished));
+    assert!(r
+        .iter()
+        .all(|x| x.gates_passed as usize == race.course.gates.len()));
+    // wp_world reports speeding on the 24.6 m/s arterial; speeding alone keeps a race clean.
+    assert!(r[0].violations[0] >= 1, "{:?}", r[0].violations);
+    assert!(r.iter().all(|x| x.clean));
+}
+
+#[test]
+fn city_sprint_route_closure_through_set_active_routes() {
+    let mut world = sprint_city(true);
+    let race = plan_sprint(&world);
+    let preview = closure_preview(&world, &race.route);
+    assert!(!preview.closed_lanes.is_empty());
+    // Every lane the race drives is closed.
+    for l in &race.route.lanes {
+        assert!(preview.closed_lanes.contains(l), "lane {l} not closed");
+    }
+    let cones_before = world
+        .static_props()
+        .filter(|p| p.kind == PropKind::Cone)
+        .count();
+    assert_eq!(cones_before, 0);
+
+    // Night meet: open route, focus only.
+    activate_race_routes(&mut world, &[(&race.route, TrafficMode::Normal)]);
+    assert_eq!(world.active_routes().len(), 1);
+    assert!(!world.active_routes()[0].closed);
+    assert_eq!(
+        world
+            .static_props()
+            .filter(|p| p.kind == PropKind::Cone)
+            .count(),
+        0
+    );
+
+    // Sanctioned event: closed, cones placed, no civilian traffic on the race lanes.
+    activate_race_routes(&mut world, &[(&race.route, TrafficMode::Suppressed)]);
+    assert!(world.active_routes()[0].closed);
+    let cones = world
+        .static_props()
+        .filter(|p| p.kind == PropKind::Cone)
+        .count();
+    assert_eq!(cones, preview.cones.len());
+    world.populate();
+    let mut ev = Vec::new();
+    for _ in 0..240 * 20 {
+        world.step(wp_contracts::PHYSICS_DT, &mut ev);
+    }
+    assert!(world.agent_count() > 0, "the city still has traffic");
+    for a in world.agents() {
+        let on_race = race.course.project(a.pos, None);
+        let inside = on_race.off_m < 5.5
+            && on_race.along_m > 5.0
+            && on_race.along_m < race.course.length_m() - 5.0;
+        assert!(!inside, "civilian {:?} on the closed race route", a.pos);
+    }
+
+    // Race over: routes cleared, cones gone.
+    activate_race_routes(&mut world, &[]);
+    assert!(world.active_routes().is_empty());
+    assert_eq!(
+        world
+            .static_props()
+            .filter(|p| p.kind == PropKind::Cone)
+            .count(),
+        0
+    );
 }
