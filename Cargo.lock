@@ -4345,6 +4345,9 @@ dependencies = [
  "wp_contracts",
  "wp_economy",
  "wp_math",
+ "wp_opponent",
+ "wp_police",
+ "wp_sim",
  "wp_world",
 ]
 

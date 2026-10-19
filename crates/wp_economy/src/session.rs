@@ -228,7 +228,7 @@ impl EconomySession {
             SimEvent::TotalLoss { vehicle } => {
                 self.total_loss.insert(*vehicle);
             }
-            SimEvent::PoliceEvent { .. } => {
+            SimEvent::Police(_) => {
                 if let Some(sig) = PoliceSignal::from_sim_event(ev) {
                     self.observe_police(&sig);
                 }

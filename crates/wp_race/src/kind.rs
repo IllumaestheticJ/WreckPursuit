@@ -20,8 +20,133 @@ pub use wp_contracts::VenueId;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct RacerAccount(pub u64);
 
+<<<<<<< HEAD
 /// Race kind and legality (contract types since v0.3.0, with their `key` helpers).
 pub use wp_contracts::{Legality, RaceKind};
+=======
+/// What kind of race this is, with the parameters that change its rules.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum RaceKind {
+    /// Point to point along a fixed corridor; first across the finish wins.
+    Sprint,
+    /// Closed loop; first to complete `laps` wins.
+    Circuit {
+        /// Laps to complete (≥ 1).
+        laps: u8,
+    },
+    /// 1v1 gap race in open traffic: whoever leads by `lead_m` wins outright; otherwise the
+    /// leader when the time limit runs out wins.
+    Outrun {
+        /// Lead that wins the race, m, measured along the leader's own trail (straight line
+        /// when the chaser left that trail).
+        lead_m: f32,
+    },
+    /// Open route: pass every checkpoint in order by any path, within the time limit.
+    Checkpoint,
+    /// Cross-city point to point, any path, through heavy traffic.
+    Cannonball,
+    /// Point to point with cargo; cargo damage costs money, destroyed cargo is a DNF.
+    Delivery {
+        /// Cargo mass added to the car, kg.
+        cargo_kg: f32,
+        /// Cargo value, money units (charged in proportion to cargo damage).
+        cargo_value: i64,
+    },
+    /// Straight-line pass from a standing start; reaction and shift timing are scored.
+    Drag,
+    /// Each racer on their own clock from the start gate; best elapsed time wins.
+    TimeAttack,
+}
+
+impl RaceKind {
+    /// Stable lower-case key used in data files (`stakes.toml`, `rules.toml`, `schedule.toml`).
+    pub fn key(&self) -> &'static str {
+        match self {
+            RaceKind::Sprint => "sprint",
+            RaceKind::Circuit { .. } => "circuit",
+            RaceKind::Outrun { .. } => "outrun",
+            RaceKind::Checkpoint => "checkpoint",
+            RaceKind::Cannonball => "cannonball",
+            RaceKind::Delivery { .. } => "delivery",
+            RaceKind::Drag => "drag",
+            RaceKind::TimeAttack => "time_attack",
+        }
+    }
+
+    /// Every kind key, in declaration order.
+    pub const KEYS: [&'static str; 8] = [
+        "sprint",
+        "circuit",
+        "outrun",
+        "checkpoint",
+        "cannonball",
+        "delivery",
+        "drag",
+        "time_attack",
+    ];
+
+    /// A representative value of the kind for a key (default parameters).
+    pub fn from_key(key: &str) -> Option<RaceKind> {
+        Some(match key {
+            "sprint" => RaceKind::Sprint,
+            "circuit" => RaceKind::Circuit { laps: 3 },
+            "outrun" => RaceKind::Outrun { lead_m: 250.0 },
+            "checkpoint" => RaceKind::Checkpoint,
+            "cannonball" => RaceKind::Cannonball,
+            "delivery" => RaceKind::Delivery {
+                cargo_kg: 150.0,
+                cargo_value: 4000,
+            },
+            "drag" => RaceKind::Drag,
+            "time_attack" => RaceKind::TimeAttack,
+            _ => return None,
+        })
+    }
+
+    /// Racers must pass checkpoints in order and stay inside the route corridor.
+    pub fn uses_corridor(&self) -> bool {
+        matches!(
+            self,
+            RaceKind::Sprint
+                | RaceKind::Circuit { .. }
+                | RaceKind::Drag
+                | RaceKind::TimeAttack
+                | RaceKind::Delivery { .. }
+        )
+    }
+
+    /// Exactly two racers.
+    pub fn is_head_to_head(&self) -> bool {
+        matches!(self, RaceKind::Outrun { .. } | RaceKind::Drag)
+    }
+}
+
+/// Legal status of an event; drives police presence and the stake risk premium.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default,
+)]
+pub enum Legality {
+    /// Sanctioned daytime event on a closed route: traffic suppressed, cones, marshals,
+    /// no police interest.
+    Sanctioned,
+    /// Ordinary illegal street race (night meets, crew challenges).
+    #[default]
+    Street,
+    /// Rare illegal race in broad daylight: very high purse, police presence forced to max.
+    IllegalDaytime,
+}
+
+impl Legality {
+    /// Stable key used in data files.
+    pub fn key(&self) -> &'static str {
+        match self {
+            Legality::Sanctioned => "sanctioned",
+            Legality::Street => "street",
+            Legality::IllegalDaytime => "illegal_daytime",
+        }
+    }
+}
+>>>>>>> origin/ws/race
 
 /// Lobby class bracket from the performance `class_index` computed by `wp_economy`
 /// (`Economy::class_index`). Boundaries live in `data/events/progression.toml` and must match

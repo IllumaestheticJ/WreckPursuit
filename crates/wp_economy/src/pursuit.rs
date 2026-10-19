@@ -55,46 +55,6 @@ pub const POLICE_KIND_WANTED_LEVEL: u16 = 2;
 /// `wp_police::events::kind::PURSUIT_ENDED`).
 pub const POLICE_KIND_PURSUIT_ENDED: u16 = 4;
 
-/// The two `wp_police::PoliceEvent` variants the economy reads, with the same serde shape
-/// (externally tagged, field names as in `wp_police`). Unknown extra fields are ignored, so
-/// police adding `level` / `capturer` to `PursuitEnded` does not break decoding.
-#[derive(Deserialize)]
-enum WirePoliceEvent {
-    WantedLevelChanged {
-        racer: EntityId,
-        level: WantedLevel,
-    },
-    PursuitEnded {
-        racer: EntityId,
-        outcome: PursuitEnd,
-    },
-}
-
-impl PoliceSignal {
-    /// Decode the police facts the economy needs from a contract v0.2.0 event
-    /// (`SimEvent::PoliceEvent { kind, payload }` with `wp_police`'s JSON payload). `None` for
-    /// every other event, other police kinds and malformed payloads.
-    ///
-    /// This is the **only** place that knows the opaque police encoding: when contract v0.3.0
-    /// types police events, this becomes a plain `match` on the typed variant.
-    pub fn from_sim_event(ev: &SimEvent) -> Option<Self> {
-        let SimEvent::PoliceEvent { kind, payload } = ev else {
-            return None;
-        };
-        if *kind != POLICE_KIND_WANTED_LEVEL && *kind != POLICE_KIND_PURSUIT_ENDED {
-            return None;
-        }
-        match serde_json::from_slice::<WirePoliceEvent>(payload).ok()? {
-            WirePoliceEvent::WantedLevelChanged { racer, level } => {
-                Some(PoliceSignal::WantedLevelChanged { racer, level })
-            }
-            WirePoliceEvent::PursuitEnded { racer, outcome } => {
-                Some(PoliceSignal::PursuitEnded { racer, outcome })
-            }
-        }
-    }
-}
-
 /// A pursuit that ended, with what the economy needs to settle it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PursuitResolution {
@@ -198,7 +158,15 @@ impl PursuitTracker {
             } => {
                 let t = self.racers.entry(racer).or_default();
                 // The event's level covers heat set without a `WantedLevelChanged` (v0.3.0).
-                let at_end = t.level.max(level);
+                let captured = matches!(
+                    outcome,
+                    PursuitEnd::Captured | PursuitEnd::CapturedTotalLoss
+                );
+                // Police only capture wanted racers: bill at least L1 for a capture.
+                let mut at_end = t.level.max(level);
+                if captured {
+                    at_end = at_end.max(WantedLevel::L1);
+                }
                 let res = PursuitResolution {
                     racer,
                     outcome,

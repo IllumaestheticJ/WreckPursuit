@@ -12,6 +12,9 @@ wp_math.workspace = true
 # Read-only bridges: route geometry/POIs/zones from wp_world, payout inputs for wp_economy.
 wp_world.workspace = true
 wp_economy.workspace = true
+# AI entrants (wp_opponent field) and race → police reports (wp_police input events).
+wp_opponent.workspace = true
+wp_police.workspace = true
 serde.workspace = true
 toml.workspace = true
 thiserror.workspace = true
@@ -21,5 +24,7 @@ proptest = { version = "1.12", default-features = false, features = ["std"] }
 serde_json.workspace = true
 # Integration tests judge simcli v2 scenario runs (apps/simcli/scenarios/race/).
 simcli = { path = "../../apps/simcli" }
+# Vehicle kinds (police / traffic) in judged simcli runs.
+wp_sim.workspace = true
 # Self-check with the repo's determinism lint until wp_race joins its SIM_CRATES list.
 lint-determinism = { path = "../../tools/lint-determinism" }

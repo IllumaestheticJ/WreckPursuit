@@ -511,6 +511,38 @@ fn outrun_time_limit_and_survivor() {
     assert_eq!(out.results[0].status, RacerStatus::Finished);
 }
 
+#[test]
+fn outrun_gap_is_measured_along_the_road() {
+    // A switchback: 150 m legs, 30 m apart. The straight-line gap between the two cars never
+    // exceeds ~155 m, but the leader pulls 250 m ahead along the road and wins on the gap well
+    // before the 300 s limit. (Measured in a straight line it would go to the time limit.)
+    let mut pts = Vec::new();
+    for k in 0..40 {
+        let x = k as f32 * 30.0;
+        if k % 2 == 0 {
+            pts.push([x, 0.0, 0.0]);
+            pts.push([x, 150.0, 0.0]);
+        } else {
+            pts.push([x, 150.0, 0.0]);
+            pts.push([x, 0.0, 0.0]);
+        }
+    }
+    let switchback = Course::new(pts, Vec::new(), false, 12.0);
+    let kind = RaceKind::Outrun { lead_m: 250.0 };
+    let racers = [
+        ScriptedRacer::new(1, 5.0, 25.0),
+        ScriptedRacer::new(2, 5.0, 20.0),
+    ];
+    let out = run(kind, switchback, &racers, 4);
+    assert_eq!(out.results[0].racer, EntityId(1));
+    assert_eq!(
+        by_racer(&out.results, 2).status,
+        RacerStatus::Dnf(DnfReason::Outrun)
+    );
+    // 250 m at 5 m/s closing ≈ 50 s after both top out.
+    assert!(out.ticks < 240 * 120, "took {} s", out.ticks / 240);
+}
+
 // ---------------------------------------------------------------- time attack
 
 #[test]

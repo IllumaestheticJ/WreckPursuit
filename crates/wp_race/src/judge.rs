@@ -21,6 +21,7 @@ use crate::result::{
 };
 use crate::rules::RaceRules;
 use crate::signals::RaceSignal;
+use crate::trail::Trail;
 
 /// One racer's state as the server sees it this tick.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -125,6 +126,8 @@ struct Track {
     last_gear: i8,
     last_rpm: f32,
     last_vel: [f32; 3],
+    /// Where the racer drove (Outrun only: the gap is measured along the leader's trail).
+    trail: Trail,
 }
 
 impl Track {
@@ -252,6 +255,10 @@ impl RaceJudge {
             last_gear: 0,
             last_rpm: 0.0,
             last_vel: [0.0; 3],
+            trail: Trail::new(match self.rules.kind {
+                RaceKind::Outrun { lead_m } => lead_m + 100.0,
+                _ => 0.0,
+            }),
         });
         Ok(slot)
     }
@@ -697,6 +704,8 @@ impl RaceJudge {
         } else {
             self.course.start().1
         };
+        self.tracks[self.leader].trail.push(v2::xy(pl));
+        self.tracks[1 - self.leader].trail.push(v2::xy(pc));
         let rel = v2::sub(v2::xy(pc), v2::xy(pl));
         if v2::dot(rel, heading) > self.rules.outrun.overtake_margin_m {
             self.leader = 1 - self.leader;
@@ -704,8 +713,11 @@ impl RaceJudge {
                 event: self.event,
                 leader: self.tracks[self.leader].entry.racer,
             });
+            return;
         }
-        if v2::len(rel) >= lead_m {
+        // Gap along the road the leader drove (straight line if the chaser left it).
+        let gap = self.tracks[self.leader].trail.gap_m(v2::xy(pl), v2::xy(pc));
+        if gap >= lead_m {
             self.outrun_decide(tick);
         }
     }

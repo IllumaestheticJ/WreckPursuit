@@ -22,7 +22,7 @@ use wp_economy::{
 };
 use wp_math::Rng;
 use wp_police::scenario::ScenarioWorld;
-use wp_police::{PoliceConfig, PoliceEvent, PoliceSetup, PoliceSystem, PursuitOutcome, RacerView};
+use wp_police::{PoliceConfig, PoliceEvent, PoliceEventExt, PoliceSetup, PoliceSystem, PursuitOutcome, RacerView};
 
 const RACER: EntityId = EntityId(7);
 
@@ -129,6 +129,9 @@ fn record_fixtures() {
         PoliceEvent::PursuitEnded {
             racer: RACER,
             outcome: PursuitOutcome::Escaped,
+            level: WantedLevel::L2,
+            capturer: None,
+            assists: Vec::new(),
         }
         .to_sim_event(),
         wanted(WantedLevel::L1).to_sim_event(),
@@ -224,12 +227,16 @@ fn police_decoder_matches_wp_police_encoding() {
         let ev = PoliceEvent::PursuitEnded {
             racer: RACER,
             outcome: o,
+            level: WantedLevel::L1,
+            capturer: None,
+            assists: Vec::new(),
         };
         assert_eq!(
             PoliceSignal::from_sim_event(&ev.to_sim_event()),
             Some(PoliceSignal::PursuitEnded {
                 racer: RACER,
-                outcome: end
+                outcome: end,
+                level: WantedLevel::L1,
             })
         );
     }
@@ -242,24 +249,6 @@ fn police_decoder_matches_wp_police_encoding() {
     assert_eq!(
         PoliceSignal::from_sim_event(&SimEvent::TotalLoss { vehicle: RACER }),
         None
-    );
-    let junk = SimEvent::PoliceEvent {
-        kind: POLICE_KIND_PURSUIT_ENDED,
-        payload: b"{not json".to_vec(),
-    };
-    assert_eq!(PoliceSignal::from_sim_event(&junk), None);
-    // Extra fields (v0.3.0 adds level / capturer to PursuitEnded) are ignored.
-    let newer = SimEvent::PoliceEvent {
-        kind: POLICE_KIND_PURSUIT_ENDED,
-        payload: br#"{"PursuitEnded":{"racer":7,"outcome":"Captured","level":"L3","capturer":4}}"#
-            .to_vec(),
-    };
-    assert_eq!(
-        PoliceSignal::from_sim_event(&newer),
-        Some(PoliceSignal::PursuitEnded {
-            racer: RACER,
-            outcome: PursuitEnd::Captured
-        })
     );
 }
 
@@ -527,6 +516,7 @@ fn finish_is_all_or_nothing_and_per_account() {
             s.observe_police(&PoliceSignal::PursuitEnded {
                 racer: other,
                 outcome,
+                level: WantedLevel::L2,
             });
         }
     }
