@@ -25,6 +25,35 @@ let preview = econ.preview(&vehicle_def, &lattice_def, &mods, Some(mode))?;
 store.commit(&acct, &events)?;                     // AccountStore: in-memory or SQLite
 ```
 
+**From the game loop**, use `EconomySession` instead of calling these one by one: feed it every
+drained `SimEvent`, give it each car's `DamageReport` at the end of the run, and it settles
+damage, towing, race payouts, captures (fine, bail, impound / seizure / destruction), escapes
+and the repair bill in one step:
+
+```rust
+let mut session = EconomySession::new(SessionConfig::new(mode));
+session.bind(vehicle_entity, acct.player, car);           // at spawn
+for ev in sim.drain_events() { session.observe(&ev); }    // every tick
+session.set_day_phase(phase);                             // when the clock changes phase
+if session.is_captured(vehicle_entity) { /* end the run */ }
+let result = session.finish(&econ, &mut acct, &[damage_report], &mut rng)?;  // run over
+store.commit(&acct, &result.events)?;
+// result: cash before/after, payouts, fines, bail, towing, repairs paid, rep/bounty deltas,
+// per car: status (Garage / Impounded / Seized / Destroyed), repair quote + order, pound status
+```
+
+`finish` order: record each damage report (OR-ing in what the session saw: wanted during the
+run, `TotalLoss`; an uncaptured total loss is towed and charged) → races → pursuit endings in
+the order they happened → `RepairAll` quote for each damaged car still in the garage, paid under
+`RepairPolicy::PayIfAffordable` (the default; `QuoteOnly` leaves it to the garage UI). It is
+all-or-nothing and per account: other players' bound vehicles stay pending for their own
+`finish`. Police events are decoded by `PoliceSignal::from_sim_event` (the only code that knows
+today's opaque `wp_police` JSON; with typed v0.3.0 events it becomes a `match`).
+
+**Impound**: a capture records the damage first, then impounds the car; `impound_status` gives
+the fee today, its daily growth and the days left before auction; `retrieve_from_impound` pays
+the fee and returns the car with exactly the damage it went in with, to be repaired as usual.
+
 - **All-or-nothing.** Every operation runs on a copy of the account and only writes back on
   success. A refused operation (`EconomyError`) never changes anything.
 - **Auditable.** Each change is an `EconomyEvent { seq, day, reason, car, cash/rep/bounty/xp
@@ -43,7 +72,8 @@ store.commit(&acct, &events)?;                     // AccountStore: in-memory or
 | `sqlite` (`native`) | `SqliteStore`: `accounts` + append-only `events` tables, one transaction per commit |
 | `repair` | `price_table` (→ contract `PriceTable` for `wp_damage`), `DamageReport`, `RepairOption`, shops, insurance claims, scrap, `reference_estimate` |
 | `capture` | fines, bail, rep loss, impound/seizure/destruction, escapes, pound fees + auction, daily tick, cop XP + rewards |
-| `pursuit` | `PursuitTracker` + `settle_pursuit`: police pursuit endings → capture / escape settlement (no `wp_police` dependency; adapter in `tests/pursuit_wiring.rs`) |
+| `pursuit` | `PoliceSignal::from_sim_event` (decodes today's police events), `PursuitTracker` + `settle_pursuit`: pursuit endings → capture / escape settlement (no `wp_police` dependency) |
+| `session` | `EconomySession`: the end-of-run glue for `wp_sim` (sim events + damage reports → `RunResult`) |
 | `payouts` | purses, buy-ins, clean bonus, rep, bounty while wanted, debt rules, pink slips, informants |
 | `mods` | `ModDef`/`ModEffect`, catalog validation, install/uninstall rules, `apply_mods` → modified `VehicleDef` + `LatticeDef` |
 | `garage` | accounts, buy/sell, floor car, install/uninstall, `preview`, valuation, insurance |
@@ -150,6 +180,59 @@ debug coupe = 559 (B). Monotone in power and in lower mass (property-tested).
 | `debt.max_entry_fee`, `race_types.Meet` | stakes.toml | debt is a slow grind out, not a game over |
 | `starting_cash`, `floor_car`, `class_bands`, `condition`, resale fractions | market.toml | always a way back onto the street |
 
+### Prices against the car roster
+
+`tests/roster_prices.rs` checks the feel targets on every `data/cars` file (09's 10 street cars
+and 3 police cars) and prints this table (`-- --nocapture`). Simulation, night 5 km Sprint:
+
+| Car | Class | Value | PI | Full wreck / value | Medium front hit | / win purse | Scrape | Win purse | Buy-in | Pound fee |
+|---|---|---|---|---|---|---|---|---|---|---|
+| junkyard_beater | Beater | 3 000 | 214 | 5.08 | 882 | 0.95 | 35 | 932 | 83 | 150 |
+| vireo_xs | Compact | 7 500 | 297 | 3.18 | 1 384 | 0.74 | 55 | 1 863 | 166 | 400 |
+| kestrel_ts | Sport | 22 000 | 427 | 1.97 | 2 592 | 0.82 | 95 | 3 167 | 282 | 700 |
+| shiro_turbo | Sport | 28 000 | 460 | 1.82 | 3 090 | 0.98 | 110 | 3 167 | 282 | 700 |
+| lindwurm_4t | Sport | 34 000 | 465 | 1.73 | 3 587 | 1.13 | 125 | 3 167 | 282 | 700 |
+| sperber_32 | Sport | 36 000 | 500 | 1.70 | 3 752 | 1.18 | 130 | 3 167 | 282 | 700 |
+| hakone_gt | Sport | 48 000 | 494 | 1.60 | 4 746 | 1.50 | 159 | 3 167 | 282 | 700 |
+| ironside_440 | Muscle | 38 000 | 330 | 1.59 | 3 723 | 1.25 | 126 | 2 981 | 265 | 650 |
+| rampart_50 | Muscle | 42 000 | 569 | 1.56 | 4 045 | 1.36 | 136 | 2 981 | 265 | 650 |
+| hauler_1500 | Truck | 32 000 | 321 | 1.66 | 3 256 | 1.59 | 112 | 2 049 | 182 | 500 |
+| lucciola_350 | Exotic | 120 000 | 619 | 1.49 | 11 201 | 1.50 | 363 | 7 452 | 662 | 2 500 |
+
+Asserted for every non-police car: full wreck ≥ 60 % of value; scrape < buy-in; medium front
+hit 0.5–1.6× a win in Simulation (0.3–1.0× in Arcade, which halves repairs and pays 1/1.2 of
+the purse); pound base fee 1–8 % of value; every price × condition inside its class band
+(`roster_prices_sit_inside_their_class_bands`); the floor car file matches `market.toml`; a car
+costing ≥ 25 % more than another street car is not slower (`pricier_cars_are_not_slower`,
+known outliers `hakone_gt` and `ironside_440`, sent to 09).
+
+Changes this round: class bands widened (Compact min 9 000 → 4 000, Sport 25 000 → 12 000,
+Muscle 22 000 → 14 000, Exotic 90 000 → 60 000, Truck 15 000 → 12 000) because they were
+clamping Vireo XS and Kestrel TS up and erasing their Used / Worn discount; Sport
+`parts_scale` 1.9 → 1.75 and Truck 1.5 → 1.3 (Hakone GT and Hauler front hits were 1.6–1.8× a
+win); Muscle `reference_value` 34 000 → 40 000 (the roster's Muscle cars are 38–42 k). The
+debug sedan career below does not move (none of these touch a Compact at 18 000).
+
+Career on each roster car (`twenty_nights_on_roster_cars`, 32 seeds, same scripted racer):
+
+| Car | Arcade median vs start | Simulation median vs start |
+|---|---|---|
+| vireo_xs | +358 % | +209 % |
+| kestrel_ts | +279 % | +71 % |
+| shiro_turbo | +216 % | −10 % |
+| lindwurm_4t | +170 % | −32 % |
+| sperber_32 | +157 % | −34 % |
+| ironside_440 | +136 % | −44 % |
+| rampart_50 | +118 % | −51 % |
+| hakone_gt | +103 % | −62 % |
+| lucciola_350 | +106 % | −70 % |
+
+Arcade is solvent on every car (asserted: median ≥ 1.2× start). Simulation climbs fast in a
+cheap car and loses money in an expensive one. Part of that is intended (cheap starter cars get
+you off the beater quickly; an expensive car in Simulation is a risk), but part is the career
+model: its win rate does not depend on the car, so a faster car never wins more. Revisit when
+race results come from real races.
+
 ### Tuning results (20-night scenario)
 
 `tests/career.rs`: a mid-skill racer (wins ≈ 22 %, podium ≈ 80 %, contact in 45 % of races,
@@ -191,12 +274,21 @@ cargo test -p wp_economy --test career -- --nocapture   # print the tuning numbe
 - `tests/data_tables.rs`: data completeness, embedded copy == `data/`, every mod applies.
 - `tests/stores.rs`: in-memory + SQLite stores, sequence conflicts, `SimEvent` round trip.
 - `tests/pursuit_wiring.rs`: a real `PoliceSystem` capture settled through the economy (both modes), escape / safehouse / called-off settlement, tracker event-order rules.
-- `tests/career.rs`: the 20-night scenario + determinism.
+- `tests/session.rs`: `EconomySession` replaying event lists recorded from a real
+  `PoliceSystem` (`tests/fixtures/*.json`; re-record with `-- --ignored record_fixtures`):
+  capture → fine → impound → pound fee grows → release with the same damage → repair bill;
+  total-loss capture by mode; escape → bounty → repair paid; unaffordable / quote-only repairs;
+  uncaptured total loss towed; races; all-or-nothing and per-account `finish`; auction
+  countdown; the police decoder against `wp_police`'s encoder (every level and outcome); a live
+  police run settles like its recording.
+- `tests/roster_prices.rs`: feel targets on every roster car (table above).
+- `tests/career.rs`: the 20-night scenario + determinism + the roster sweep.
 
 ## Performance
 
 Not on the per-frame path (called on race end, garage visits, captures), so the per-frame
-budgets in `CLAUDE.md` do not apply. Measured on the cloud session container, native release
+budgets in `CLAUDE.md` do not apply — except `EconomySession::observe`, which sees every
+drained event (it only matches the event and decodes police wanted / pursuit-ended payloads). Measured on the cloud session container, native release
 build (`cargo test -p wp_economy --release --test perf -- --ignored --nocapture`):
 
 | Operation | Time |
@@ -207,6 +299,8 @@ build (`cargo test -p wp_economy --release --test perf -- --ignored --nocapture`
 | `handle_capture` | 0.2 µs |
 | `quote_repair` | 0.1 µs |
 | full 20-night career (60 races) | 168 µs |
+| `EconomySession::observe` (recorded capture stream, per event; runs in the sim's event drain) | 0.03 µs |
+| `EconomySession::finish` (capture + impound) | 1.3 µs |
 
 Browser numbers not measured yet (expect ~2× native).
 
@@ -214,7 +308,7 @@ Browser numbers not measured yet (expect ~2× native).
 - Lattice-state blobs and partial repairs need `DamageSim::{save_state, restore_state,
   apply_repair}` (contract v0.3.0). Until the sim calls `record_damage` with real estimates, the
   career scenario uses `reference_estimate` (same pricing as `wp_damage`, synthetic severities).
-- The floor car `junkyard_beater` needs a car file from the roster (workstream 09).
+- The career's win rate does not depend on the car (see the roster sweep).
 - No `wp_vehicle::metrics` yet, so `preview` uses the built-in estimator (comparative, not
   lap-time accurate).
 - Body-kit pieces only become detachable where the lattice already has a detachable group for the

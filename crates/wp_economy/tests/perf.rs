@@ -10,7 +10,8 @@ use wp_contracts::{DamageMode, DayPhase, VehicleClass};
 use wp_economy::capture::CaptureContext;
 use wp_economy::career::{simulate_career, CareerConfig};
 use wp_economy::{
-    RaceResult, RaceSetup, RaceType, RepairOption, ShopContext, ViolationCounts, WantedLevel,
+    EconomySession, RaceResult, RaceSetup, RaceType, RepairOption, SessionConfig, ShopContext,
+    ViolationCounts, WantedLevel,
 };
 use wp_math::Rng;
 
@@ -91,6 +92,38 @@ fn perf() {
             )
             .unwrap(),
         );
+    });
+    // Session: `observe` runs inside the sim's event drain, so it is the per-tick cost.
+    let events: Vec<wp_contracts::SimEvent> = serde_json::from_str(
+        &std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/capture_stationary.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let n = events.len() as f64;
+    let t = Instant::now();
+    for _ in 0..2000 {
+        let mut s = EconomySession::new(SessionConfig::new(DamageMode::Arcade));
+        for ev in &events {
+            s.observe(ev);
+        }
+        std::hint::black_box(s);
+    }
+    println!(
+        "session observe (recorded capture, mostly police events): {:.3} µs/event",
+        t.elapsed().as_secs_f64() * 1e6 / (2000.0 * n)
+    );
+    let entity = wp_contracts::EntityId(7);
+    time("session finish (capture + impound)", 5000, || {
+        let mut a = a0.clone();
+        let mut s = EconomySession::new(SessionConfig::new(DamageMode::Arcade));
+        s.bind(entity, a.player, car);
+        for ev in &events {
+            s.observe(ev);
+        }
+        std::hint::black_box(s.finish(&e, &mut a, &[], &mut rng).unwrap());
     });
     time("20-night career", 200, || {
         std::hint::black_box(simulate_career(
