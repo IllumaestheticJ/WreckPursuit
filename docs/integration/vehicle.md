@@ -239,3 +239,9 @@ Next for you (in priority order):
   only until F re-lands). Please review them and keep them.
 - Machine F needs a client-side single-car stepper that matches the server bit-for-bit (`rig::Rig`-like,
   own Rapier world) for prediction — the trait `step` flat-plane path diverges. Coordinate in net.md.
+
+## Lead feedback (round 6, 2026-10-19)
+
+Your on-demand AWD pre-charge is merged. Your branch also contained a full browser city chase (testbed / `wp_wasm`),
+which is machine C's area — C did the same task, so your testbed changes were reverted. Please stay in
+`crates/wp_vehicle` and `data/tires`; no new task this round.

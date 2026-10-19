@@ -181,3 +181,20 @@ optional, later.
 - Timeline with `cargo run --release -p wp_sim --example police_probe` (small city, 22:00, speeding coupe):
   13 cars on patrol, 11 violations by 5 s, pursuit at ≈ 10 s, searching at ≈ 20 s.
 - Not yet: `static_colliders()` (roadblock barriers) as physics boxes — next lead run.
+
+## Lead feedback (round 6, 2026-10-19)
+
+**Merged.** Units on D's roads and D's `DriveController` work in the sim (your new `bind_unit_entity(unit, id, geometry)` /
+`unit_input(unit, dt)` are wired in `crates/wp_sim/src/police_link.rs`).
+
+**Top priority — police cars ram stopped cars.** Since run 5 AI police cars are real Rapier vehicles. In
+`soak/traffic_soak_observer` (player car parked at the city core, 12:00) a patrol car drives into it at 10.8 m/s at
+35.5 s and another at 47 s (`Contact` a=1, b=10 / b=31). With `police_cars: false` the same run has no hits, so it is
+the units, not traffic. Units need obstacle awareness on their track: slow / stop behind any vehicle ahead (players,
+traffic, other units — `wp_sim` vehicle states, or ask D for a leader query in the shared controller), and pass or
+wait sensibly. Also: spawn units clear of other vehicles (in `golden/city_chase` a unit sits 5 m ahead of the racer).
+Done = `soak/traffic_soak_observer` passes with `police_cars: true` (lead will flip it back), and the
+`golden/city_chase` pursuit happens without a collision.
+
+Also: send your final typed `PoliceEvent` + `CaptainCommand` variant lists for contract v0.3.0 (if not already in
+this doc's contract section).

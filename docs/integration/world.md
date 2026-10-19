@@ -273,3 +273,12 @@ Contract requests: #1 teleport — **kept as the inherent method** (no trait cha
   traffic is physical (real braking, nudges from parked-car props). The gate there is ≤ 3 for now; zero is
   `expect_pending`. Your `collision_log` has the pair and tick. The no-player soak still gates zero.
 - Still open: debris hazards (#5), race routes (#6, with L).
+
+## Lead feedback (round 6, 2026-10-19)
+
+**Merged** (PathFollower / `follow_path`, debris hazards, integer ticks).
+
+Police units drive with your shared controller but have no obstacle sensing, so they ram stopped vehicles (see
+police.md round 6). Please expose a **leader / obstacle query** E can use from the controller: nearest vehicle ahead
+on the path within a look-ahead (players, physical traffic, other units — `wp_sim` vehicle states can be passed in),
+returning gap and speed, so units do the same car-following your traffic does. Coordinate the API with E in your doc.

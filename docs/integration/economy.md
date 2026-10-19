@@ -245,3 +245,8 @@ Contract requests (decisions; implemented together in v0.2.0 unless noted):
 Other needs routed: floor car `junkyard_beater` → 09 (in cars.md); tire files → 02 (in vehicle.md);
 CI line → 10 (in harness.md). Call sites (race results, session-end `DamageReport`, capture) come
 when 07 (server) and 06 (police) merge — nothing to do now.
+
+## Lead feedback (round 6, 2026-10-19)
+
+**Merged** — typed event list, price-table fill, pursuit wiring draft (`PursuitTracker`, `settle_pursuit`). The lead
+wires capture / escape into the sim and the testbed next round, once E's typed events land in contract v0.3.0.

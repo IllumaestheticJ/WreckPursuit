@@ -203,3 +203,11 @@ feature-detects it).
 
 ## Lead feedback
 (Written by the integration lead: failing tests, expected vs actual.)
+
+## Lead feedback (round 6, 2026-10-19)
+
+**Merged** (UI-kit glue in `apps/testbed-web/src/ui/`).
+
+C also built a heat panel (`src/police_hud.tsx`); both are in `main.ts` now. **Consolidate with C**: one heat / wanted
+/ pursuit readout using your components, and wire your repair-bill screen to G's economy (`quote_repair`) for the
+demo's end-of-chase moment. Keep your code in `src/ui/`.
