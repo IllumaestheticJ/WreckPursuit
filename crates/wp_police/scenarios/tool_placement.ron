@@ -1,0 +1,14 @@
+// High wanted level: the AI captain places spikes and roadblocks ahead of the predicted path.
+// Never on a segment with less than 120 m approach sight distance.
+(
+    name: "police_tool_placement",
+    seed: 300,
+    time_of_day_h: 12.0,
+    duration_s: 180.0,
+    runs: 5,
+    racers: [(district: Core, speed_factor: 1.8, initial_heat: 75.0, stay_in_district: false)],
+    expect: [
+        (metric: "tools_placed", min: 2.0, max: 1000.0),
+        (metric: "min_tool_sight_m", min: 120.0, max: 10000.0),
+    ],
+)

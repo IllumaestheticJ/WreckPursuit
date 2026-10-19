@@ -1,0 +1,225 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VehicleState",
+  "description": "Snapshot of a vehicle's dynamic state. World space unless noted.",
+  "type": "object",
+  "properties": {
+    "ang_vel": {
+      "description": "Angular velocity in world space, rad/s.",
+      "type": "array",
+      "items": {
+        "type": "number",
+        "format": "float"
+      },
+      "maxItems": 3,
+      "minItems": 3
+    },
+    "component_health": {
+      "description": "Per-component health 0..=1. Components absent from the map are at 1.0.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "number",
+        "format": "float"
+      }
+    },
+    "engine_rpm": {
+      "description": "Engine speed, rpm.",
+      "type": "number",
+      "format": "float"
+    },
+    "gear": {
+      "description": "Current gear: -1 reverse, 0 neutral, 1.. forward.",
+      "type": "integer",
+      "format": "int8",
+      "maximum": 127,
+      "minimum": -128
+    },
+    "health": {
+      "description": "Global vehicle health, 0 (wrecked) ..= 1 (pristine).",
+      "type": "number",
+      "format": "float"
+    },
+    "lin_vel": {
+      "description": "Linear velocity in world space, m/s.",
+      "type": "array",
+      "items": {
+        "type": "number",
+        "format": "float"
+      },
+      "maxItems": 3,
+      "minItems": 3
+    },
+    "mode": {
+      "description": "Damage mode in effect.",
+      "$ref": "#/$defs/DamageMode"
+    },
+    "pos": {
+      "description": "Chassis reference-point position in world space, m.",
+      "type": "array",
+      "items": {
+        "type": "number",
+        "format": "float"
+      },
+      "maxItems": 3,
+      "minItems": 3
+    },
+    "rot": {
+      "description": "Chassis orientation as a unit quaternion `[x, y, z, w]`.",
+      "type": "array",
+      "items": {
+        "type": "number",
+        "format": "float"
+      },
+      "maxItems": 4,
+      "minItems": 4
+    },
+    "speed_mps": {
+      "description": "Forward speed (signed, along chassis +Y), m/s.",
+      "type": "number",
+      "format": "float"
+    },
+    "wheel_states": {
+      "description": "Wheels, ordered FL, FR, RL, RR.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/WheelState"
+      },
+      "maxItems": 4,
+      "minItems": 4
+    }
+  },
+  "required": [
+    "pos",
+    "rot",
+    "lin_vel",
+    "ang_vel",
+    "wheel_states",
+    "engine_rpm",
+    "gear",
+    "speed_mps",
+    "health",
+    "component_health",
+    "mode"
+  ],
+  "$defs": {
+    "DamageMode": {
+      "description": "Damage mode. Both modes run the same code path with different [`crate::ModeTable`]s.",
+      "oneOf": [
+        {
+          "description": "Punishing but survivable; one hard hit degrades, several end the car.",
+          "type": "string",
+          "const": "Arcade"
+        },
+        {
+          "description": "Real-world-ish; one hard hit at speed is a total loss.",
+          "type": "string",
+          "const": "Simulation"
+        }
+      ]
+    },
+    "SurfaceType": {
+      "description": "Road/ground surface classification returned by [`crate::WorldQuery::surface_at`].",
+      "oneOf": [
+        {
+          "description": "Dry asphalt (reference surface, multiplier 1.0).",
+          "type": "string",
+          "const": "Asphalt"
+        },
+        {
+          "description": "Wet asphalt.",
+          "type": "string",
+          "const": "WetAsphalt"
+        },
+        {
+          "description": "Concrete.",
+          "type": "string",
+          "const": "Concrete"
+        },
+        {
+          "description": "Loose gravel.",
+          "type": "string",
+          "const": "Gravel"
+        },
+        {
+          "description": "Grass.",
+          "type": "string",
+          "const": "Grass"
+        },
+        {
+          "description": "Packed dirt.",
+          "type": "string",
+          "const": "Dirt"
+        },
+        {
+          "description": "Kerb / curb.",
+          "type": "string",
+          "const": "Curb"
+        },
+        {
+          "description": "Metal plates, rails, bridge joints.",
+          "type": "string",
+          "const": "Metal"
+        }
+      ]
+    },
+    "WheelState": {
+      "description": "Per-wheel runtime state.",
+      "type": "object",
+      "properties": {
+        "compression_m": {
+          "description": "Suspension compression from full droop, m.",
+          "type": "number",
+          "format": "float"
+        },
+        "contact": {
+          "description": "Whether the tire touches the ground.",
+          "type": "boolean"
+        },
+        "detached": {
+          "description": "Whether the wheel has been torn off.",
+          "type": "boolean"
+        },
+        "fz_n": {
+          "description": "Vertical tire load, N.",
+          "type": "number",
+          "format": "float"
+        },
+        "omega": {
+          "description": "Wheel angular velocity about its axle, rad/s (positive = rolling forward).",
+          "type": "number",
+          "format": "float"
+        },
+        "slip_angle": {
+          "description": "Tire slip angle, rad.",
+          "type": "number",
+          "format": "float"
+        },
+        "slip_ratio": {
+          "description": "Tire longitudinal slip ratio, dimensionless.",
+          "type": "number",
+          "format": "float"
+        },
+        "steer_rad": {
+          "description": "Current road-wheel steer angle, rad (positive = left, right-handed about +Z).",
+          "type": "number",
+          "format": "float"
+        },
+        "surface": {
+          "description": "Surface under the contact patch.",
+          "$ref": "#/$defs/SurfaceType"
+        }
+      },
+      "required": [
+        "omega",
+        "steer_rad",
+        "compression_m",
+        "slip_angle",
+        "slip_ratio",
+        "fz_n",
+        "surface",
+        "contact",
+        "detached"
+      ]
+    }
+  }
+}

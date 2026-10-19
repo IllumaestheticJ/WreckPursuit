@@ -73,51 +73,8 @@ pub fn dir_of_yaw(yaw: f32) -> V2 {
     [-s, c]
 }
 
-/// Deterministic `atan(x)` (max abs error ≈ 1e-5 rad).
-pub fn atan(x: f32) -> f32 {
-    let ax = x.abs();
-    let (t, flip) = if ax > 1.0 {
-        (1.0 / ax, true)
-    } else {
-        (ax, false)
-    };
-    let t2 = t * t;
-    let p = t
-        * (0.999_977_3
-            + t2 * (-0.332_623_5
-                + t2 * (0.193_543_5
-                    + t2 * (-0.116_432_9 + t2 * (0.052_653_3 - t2 * 0.011_721_2)))));
-    let r = if flip {
-        std::f32::consts::FRAC_PI_2 - p
-    } else {
-        p
-    };
-    if x < 0.0 {
-        -r
-    } else {
-        r
-    }
-}
-
-/// Deterministic `atan2(y, x)`.
-pub fn atan2(y: f32, x: f32) -> f32 {
-    use std::f32::consts::{FRAC_PI_2, PI};
-    if x > 0.0 {
-        atan(y / x)
-    } else if x < 0.0 {
-        if y >= 0.0 {
-            atan(y / x) + PI
-        } else {
-            atan(y / x) - PI
-        }
-    } else if y > 0.0 {
-        FRAC_PI_2
-    } else if y < 0.0 {
-        -FRAC_PI_2
-    } else {
-        0.0
-    }
-}
+// `atan`/`atan2` moved to `wp_math` (contract v0.2.0, lead); re-exported for existing callers.
+pub use wp_math::{atan, atan2};
 
 /// Pseudo-angle in `[0, 4)` that orders directions counter-clockwise from +X like `atan2`
 /// would, without any trigonometry. Used for deterministic angular sorting.
@@ -344,6 +301,31 @@ pub fn polyline_distance(a: &[V3], b: &[V3]) -> f32 {
         }
     }
     best
+}
+
+/// Whether two polylines come within `d` of each other (2D); stops at the first close pair.
+pub fn polylines_within(a: &[V3], b: &[V3], d: f32) -> bool {
+    for wa in a.windows(2) {
+        let (a0, a1) = (xy(wa[0]), xy(wa[1]));
+        let (alo, ahi) = (
+            [a0[0].min(a1[0]) - d, a0[1].min(a1[1]) - d],
+            [a0[0].max(a1[0]) + d, a0[1].max(a1[1]) + d],
+        );
+        for wb in b.windows(2) {
+            let (b0, b1) = (xy(wb[0]), xy(wb[1]));
+            if b0[0].max(b1[0]) < alo[0]
+                || b0[0].min(b1[0]) > ahi[0]
+                || b0[1].max(b1[1]) < alo[1]
+                || b0[1].min(b1[1]) > ahi[1]
+            {
+                continue;
+            }
+            if segment_distance(a0, a1, b0, b1) < d {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Even-odd point-in-polygon test.

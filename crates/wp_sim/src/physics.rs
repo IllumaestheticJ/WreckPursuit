@@ -31,11 +31,8 @@ impl PhysicsWorld {
             ..Default::default()
         };
         let mut colliders = ColliderSet::new();
-        colliders.insert(
-            ColliderBuilder::cuboid(5000.0, 5000.0, 0.5)
-                .translation(Vector::new(0.0, 0.0, -0.5))
-                .build(),
-        );
+        // Shared with `wp_vehicle::rig::Rig` so the client prediction stepper matches exactly.
+        colliders.insert(wp_vehicle::rig::ground_collider());
         let mut world = Self {
             gravity: Vector::new(0.0, 0.0, -wp_contracts::GRAVITY_MPS2),
             params,
@@ -64,6 +61,20 @@ impl PhysicsWorld {
             &self.colliders,
             filter,
         )
+    }
+
+    /// Remove a rigid body and its colliders (despawn). Deterministic: Rapier frees the
+    /// handle; later insertions may reuse the slot with a new generation.
+    pub fn remove_body(&mut self, body: RigidBodyHandle) {
+        self.bodies.remove(
+            body,
+            &mut self.islands,
+            &mut self.colliders,
+            &mut self.impulse_joints,
+            &mut self.multibody_joints,
+            &mut self.soft_bodies,
+            true,
+        );
     }
 
     /// The narrow phase (contact pairs of the last step).

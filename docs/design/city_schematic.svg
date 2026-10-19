@@ -1,0 +1,245 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 7700 6000" width="1240" height="966" font-family="monospace">
+<rect width="7700" height="6000" fill="#14171c"/>
+<rect x="5300" y="0" width="700" height="3400" fill="#1d3550"/>
+<rect x="5800" y="3400" width="200" height="2600" fill="#1d3550"/>
+<rect x="0" y="3400" width="6000" height="120" fill="#1d3550"/>
+<path d="M2700,3400 L4200,3400 L4200,2200 L2700,2200 L2700,3400" fill="#6b3b4a" stroke="#14171c" stroke-width="14"/>
+<text x="3750" y="3170" fill="#e6e6e6" font-size="88" text-anchor="middle">Lantern Row</text>
+<text x="3750" y="3260" fill="#9aa4ad" font-size="64" text-anchor="middle">Core</text>
+<path d="M1500,3400 L2700,3400 L2700,2200 L1500,2200 L1500,3400" fill="#5a4a6e" stroke="#14171c" stroke-width="14"/>
+<text x="1850" y="2420" fill="#e6e6e6" font-size="88" text-anchor="middle">Midtown</text>
+<text x="1850" y="2510" fill="#9aa4ad" font-size="64" text-anchor="middle">Commercial</text>
+<path d="M2700,2200 L4200,2200 L4200,1200 L2700,1200 L2700,2200" fill="#5a4a6e" stroke="#14171c" stroke-width="14"/>
+<text x="3800" y="1370" fill="#e6e6e6" font-size="88" text-anchor="middle">Uptown</text>
+<text x="3800" y="1460" fill="#9aa4ad" font-size="64" text-anchor="middle">Commercial</text>
+<path d="M4200,3400 L5300,3400 L5300,1900 L4200,1900 L4200,3400" fill="#5a4a6e" stroke="#14171c" stroke-width="14"/>
+<text x="4830" y="3070" fill="#e6e6e6" font-size="88" text-anchor="middle">Old Harbor</text>
+<text x="4830" y="3160" fill="#9aa4ad" font-size="64" text-anchor="middle">Commercial</text>
+<path d="M1500,2200 L2700,2200 L2700,1200 L1500,1200 L1500,2200" fill="#3f5560" stroke="#14171c" stroke-width="14"/>
+<text x="1800" y="1370" fill="#e6e6e6" font-size="88" text-anchor="middle">Mercer</text>
+<text x="1800" y="1460" fill="#9aa4ad" font-size="64" text-anchor="middle">Residential</text>
+<path d="M4200,1900 L5300,1900 L5300,1200 L4200,1200 L4200,1900" fill="#3f5560" stroke="#14171c" stroke-width="14"/>
+<text x="4830" y="1320" fill="#e6e6e6" font-size="88" text-anchor="middle">Eastgate</text>
+<text x="4830" y="1410" fill="#9aa4ad" font-size="64" text-anchor="middle">Residential</text>
+<path d="M0,3400 L1500,3400 L1500,2200 L0,2200 L0,3400" fill="#55503a" stroke="#14171c" stroke-width="14"/>
+<text x="750" y="3220" fill="#e6e6e6" font-size="88" text-anchor="middle">Westline Yards</text>
+<text x="750" y="3310" fill="#9aa4ad" font-size="64" text-anchor="middle">Industrial</text>
+<path d="M0,2200 L1500,2200 L1500,1200 L0,1200 L0,2200" fill="#3a5243" stroke="#14171c" stroke-width="14"/>
+<text x="750" y="1370" fill="#e6e6e6" font-size="88" text-anchor="middle">Larkspur</text>
+<text x="750" y="1460" fill="#9aa4ad" font-size="64" text-anchor="middle">Suburb</text>
+<path d="M0,1200 L2000,1200 L2000,0 L0,0 L0,1200" fill="#3f5560" stroke="#14171c" stroke-width="14"/>
+<text x="850" y="970" fill="#e6e6e6" font-size="88" text-anchor="middle">Hollins Heights</text>
+<text x="850" y="1060" fill="#9aa4ad" font-size="64" text-anchor="middle">Residential</text>
+<path d="M2000,1200 L4000,1200 L4000,0 L2000,0 L2000,1200" fill="#3a5243" stroke="#14171c" stroke-width="14"/>
+<text x="2400" y="220" fill="#e6e6e6" font-size="88" text-anchor="middle">Northfield</text>
+<text x="2400" y="310" fill="#9aa4ad" font-size="64" text-anchor="middle">Suburb</text>
+<path d="M4000,1200 L5300,1200 L5300,0 L4000,0 L4000,1200" fill="#3f5560" stroke="#14171c" stroke-width="14"/>
+<text x="4600" y="870" fill="#e6e6e6" font-size="88" text-anchor="middle">Bayview Bluffs</text>
+<text x="4600" y="960" fill="#9aa4ad" font-size="64" text-anchor="middle">Residential</text>
+<path d="M0,4700 L1500,4700 L1500,3520 L0,3520 L0,4700" fill="#3f5560" stroke="#14171c" stroke-width="14"/>
+<text x="750" y="4370" fill="#e6e6e6" font-size="88" text-anchor="middle">Ferris Park</text>
+<text x="750" y="4460" fill="#9aa4ad" font-size="64" text-anchor="middle">Residential</text>
+<path d="M1500,4700 L3400,4700 L3400,3520 L1500,3520 L1500,4700" fill="#55503a" stroke="#14171c" stroke-width="14"/>
+<text x="2550" y="4470" fill="#e6e6e6" font-size="88" text-anchor="middle">Canal Flats</text>
+<text x="2550" y="4560" fill="#9aa4ad" font-size="64" text-anchor="middle">Industrial</text>
+<path d="M3400,4700 L5800,4700 L5800,3520 L3400,3520 L3400,4700" fill="#4a4036" stroke="#14171c" stroke-width="14"/>
+<text x="3950" y="3720" fill="#e6e6e6" font-size="88" text-anchor="middle">Gantry Row</text>
+<text x="3950" y="3810" fill="#9aa4ad" font-size="64" text-anchor="middle">Port</text>
+<path d="M0,6000 L1500,6000 L1500,4700 L0,4700 L0,6000" fill="#3a5243" stroke="#14171c" stroke-width="14"/>
+<text x="750" y="5320" fill="#e6e6e6" font-size="88" text-anchor="middle">Southmoor</text>
+<text x="750" y="5410" fill="#9aa4ad" font-size="64" text-anchor="middle">Suburb</text>
+<path d="M1500,6000 L3400,6000 L3400,4700 L1500,4700 L1500,6000" fill="#3f5560" stroke="#14171c" stroke-width="14"/>
+<text x="1950" y="4920" fill="#e6e6e6" font-size="88" text-anchor="middle">Dunmore</text>
+<text x="1950" y="5010" fill="#9aa4ad" font-size="64" text-anchor="middle">Residential</text>
+<path d="M3400,6000 L5800,6000 L5800,4700 L3400,4700 L3400,6000" fill="#4a4036" stroke="#14171c" stroke-width="14"/>
+<text x="4700" y="5870" fill="#e6e6e6" font-size="88" text-anchor="middle">Vesper Container Terminal</text>
+<text x="4700" y="5960" fill="#9aa4ad" font-size="64" text-anchor="middle">Port</text>
+<rect x="5300" y="2670" width="200" height="60" fill="#4a4036"/>
+<rect x="5300" y="2270" width="200" height="60" fill="#4a4036"/>
+<rect x="5300" y="1970" width="200" height="60" fill="#4a4036"/>
+<circle cx="650" cy="380" r="250" fill="none" stroke="#7d8a6a" stroke-width="8" stroke-dasharray="30 30"/>
+<circle cx="650" cy="380" r="550" fill="none" stroke="#7d8a6a" stroke-width="8" stroke-dasharray="30 30"/>
+<circle cx="650" cy="380" r="850" fill="none" stroke="#7d8a6a" stroke-width="8" stroke-dasharray="30 30"/>
+<text x="650" y="400" fill="#b7c49e" font-size="60" text-anchor="middle">Hollins Knob 140 m</text>
+<line x1="5300" y1="0" x2="5300" y2="1200" stroke="#c9b27a" stroke-width="18" stroke-dasharray="60 30"/>
+<text x="5350" y="300" fill="#c9b27a" font-size="56" transform="rotate(90 5350 300)">cliffs 35-55 m</text>
+<path d="M5700,4300 L3400,4300 L2100,4050 L1300,3700 L1300,3000 L0,3000" fill="none" stroke="#c8c8c8" stroke-width="10" stroke-dasharray="50 25"/>
+<path d="M3400,0 L3400,6000" fill="none" stroke="#d9d2b0" stroke-width="22"/>
+<path d="M4500,1200 L4500,6000" fill="none" stroke="#d9d2b0" stroke-width="22"/>
+<path d="M5150,1200 L5150,3380" fill="none" stroke="#d9d2b0" stroke-width="22"/>
+<path d="M1500,2850 L5300,2850" fill="none" stroke="#d9d2b0" stroke-width="22"/>
+<path d="M0,1700 L5300,1700" fill="none" stroke="#d9d2b0" stroke-width="22"/>
+<path d="M0,4000 L5800,4000" fill="none" stroke="#d9d2b0" stroke-width="22"/>
+<path d="M1500,5400 L5800,5400" fill="none" stroke="#d9d2b0" stroke-width="22"/>
+<path d="M100,5900 L2500,3500 L3300,2700" fill="none" stroke="#d9d2b0" stroke-width="22"/>
+<path d="M500,6000 L500,2200" fill="none" stroke="#d9d2b0" stroke-width="22"/>
+<path d="M2400,6000 L2400,3520" fill="none" stroke="#d9d2b0" stroke-width="22"/>
+<path d="M2100,3400 L2100,1200" fill="none" stroke="#d9d2b0" stroke-width="22"/>
+<path d="M4000,50 L4500,150 L4900,350 L5200,650 L5250,1000 L5150,1200" fill="none" stroke="#e0a85a" stroke-width="20"/>
+<path d="M1950,1100 L1650,950 L1800,750 L1450,650 L1550,450 L1150,500 L1000,250 L750,300 L650,380" fill="none" stroke="#e0a85a" stroke-width="20"/>
+<path d="M4400,5100 L4478,5092 L4553,5070 L4622,5033 L4683,4983 L4733,4922 L4770,4853 L4792,4778 L4800,4700 L4800,1500 L4792,1422 L4770,1347 L4733,1278 L4683,1217 L4622,1167 L4553,1130 L4478,1108 L4400,1100 L1400,1100 L1322,1108 L1247,1130 L1178,1167 L1117,1217 L1067,1278 L1030,1347 L1008,1422 L1000,1500 L1000,4700 L1008,4778 L1030,4853 L1067,4922 L1117,4983 L1178,5033 L1247,5070 L1322,5092 L1400,5100 L4400,5100" fill="none" stroke="#f2c14e" stroke-width="44" stroke-linejoin="round"/>
+<path d="M1000,2700 L0,2700" fill="none" stroke="#f2c14e" stroke-width="44" stroke-linejoin="round"/>
+<path d="M2800,1100 L2800,0" fill="none" stroke="#f2c14e" stroke-width="44" stroke-linejoin="round"/>
+<path d="M4200,5100 L4200,5700 L5200,5700" fill="none" stroke="#f2c14e" stroke-width="44" stroke-linejoin="round"/>
+<path d="M4800,3000 L4800,3900" fill="none" stroke="#14171c" stroke-width="22" stroke-dasharray="40 30"/>
+<text x="3430" y="300" fill="#ffffff" font-size="52" transform="rotate(90 3430 300)">Meridian Ave</text>
+<text x="4530" y="1450" fill="#ffffff" font-size="52" transform="rotate(90 4530 1450)">Kettle St</text>
+<text x="5180" y="1500" fill="#ffffff" font-size="52" transform="rotate(90 5180 1500)">Harbor Blvd</text>
+<text x="1700" y="2810" fill="#ffffff" font-size="52" transform="rotate(0 1700 2810)">Lantern Way</text>
+<text x="100" y="1660" fill="#ffffff" font-size="52" transform="rotate(0 100 1660)">Founders Pkwy</text>
+<text x="100" y="3960" fill="#ffffff" font-size="52" transform="rotate(0 100 3960)">Canal St</text>
+<text x="1700" y="5360" fill="#ffffff" font-size="52" transform="rotate(0 1700 5360)">Terminal Ave</text>
+<text x="700" y="5200" fill="#ffffff" font-size="52" transform="rotate(-45 700 5200)">Old Post Rd</text>
+<text x="530" y="5800" fill="#ffffff" font-size="52" transform="rotate(90 530 5800)">Westline Ave</text>
+<text x="2430" y="5900" fill="#ffffff" font-size="52" transform="rotate(90 2430 5900)">Dunmore Ave</text>
+<text x="2130" y="1400" fill="#ffffff" font-size="52" transform="rotate(90 2130 1400)">Mercer St</text>
+<text x="1050" y="1550" fill="#ffffff" font-size="52" transform="rotate(90 1050 1550)">LOOP 9</text>
+<text x="50" y="2660" fill="#ffffff" font-size="52" transform="rotate(0 50 2660)">Rt 40 W</text>
+<text x="2830" y="50" fill="#ffffff" font-size="52" transform="rotate(90 2830 50)">Rt 40 N</text>
+<text x="4250" y="5650" fill="#ffffff" font-size="52" transform="rotate(0 4250 5650)">Port Conn.</text>
+<text x="4350" y="200" fill="#ffffff" font-size="52" transform="rotate(-15 4350 200)">Bluff Rd</text>
+<text x="1500" y="850" fill="#ffffff" font-size="52" transform="rotate(0 1500 850)">Hollins Dr</text>
+<text x="4000" y="4260" fill="#ffffff" font-size="52" transform="rotate(0 4000 4260)">rail</text>
+<text x="4830" y="3850" fill="#ffffff" font-size="52" transform="rotate(90 4830 3850)">Calloway Tunnel</text>
+<text x="1030" y="3900" fill="#ffffff" font-size="52" transform="rotate(90 1030 3900)">Westline Viaduct</text>
+<text x="100" y="3440" fill="#ffffff" font-size="52" transform="rotate(0 100 3440)">Vesper River</text>
+<text x="4530" y="3500" fill="#ffffff" font-size="52" transform="rotate(0 4530 3500)">Kettle drawbridge</text>
+<text x="2520" y="3500" fill="#ffffff" font-size="52" transform="rotate(0 2520 3500)">Iron Bridge</text>
+<path d="M4500,3405 L4550,3495 L4450,3495 Z" fill="#ff7a1a" stroke="#14171c" stroke-width="8"/>
+<path d="M4800,3395 L4850,3485 L4750,3485 Z" fill="#ff7a1a" stroke="#14171c" stroke-width="8"/>
+<path d="M3450,1645 L3500,1735 L3400,1735 Z" fill="#ff7a1a" stroke="#14171c" stroke-width="8"/>
+<path d="M3400,2795 L3450,2885 L3350,2885 Z" fill="#ff7a1a" stroke="#14171c" stroke-width="8"/>
+<path d="M4500,4245 L4550,4335 L4450,4335 Z" fill="#ff7a1a" stroke="#14171c" stroke-width="8"/>
+<path d="M3400,4245 L3450,4335 L3350,4335 Z" fill="#ff7a1a" stroke="#14171c" stroke-width="8"/>
+<path d="M2400,4055 L2450,4145 L2350,4145 Z" fill="#ff7a1a" stroke="#14171c" stroke-width="8"/>
+<path d="M1994,3948 L2044,4038 L1944,4038 Z" fill="#ff7a1a" stroke="#14171c" stroke-width="8"/>
+<path d="M500,2945 L550,3035 L450,3035 Z" fill="#ff7a1a" stroke="#14171c" stroke-width="8"/>
+<path d="M5700,4045 L5750,4135 L5650,4135 Z" fill="#ff7a1a" stroke="#14171c" stroke-width="8"/>
+<path d="M4800,5145 L4850,5235 L4750,5235 Z" fill="#ff7a1a" stroke="#14171c" stroke-width="8"/>
+<path d="M5250,3295 L5300,3385 L5200,3385 Z" fill="#ff7a1a" stroke="#14171c" stroke-width="8"/>
+<path d="M5200,595 L5250,685 L5150,685 Z" fill="#ff7a1a" stroke="#14171c" stroke-width="8"/>
+<path d="M1500,545 L1550,635 L1450,635 Z" fill="#ff7a1a" stroke="#14171c" stroke-width="8"/>
+<circle cx="4900" cy="4200" r="62" fill="#7cf29a" stroke="#14171c" stroke-width="10"/>
+<text x="4900" y="4222" fill="#14171c" font-size="62" font-weight="bold" text-anchor="middle">01</text>
+<circle cx="5200" cy="2300" r="62" fill="#7cf29a" stroke="#14171c" stroke-width="10"/>
+<text x="5200" y="2322" fill="#14171c" font-size="62" font-weight="bold" text-anchor="middle">02</text>
+<circle cx="3600" cy="2600" r="62" fill="#7cf29a" stroke="#14171c" stroke-width="10"/>
+<text x="3600" y="2622" fill="#14171c" font-size="62" font-weight="bold" text-anchor="middle">03</text>
+<circle cx="1900" cy="1900" r="62" fill="#7cf29a" stroke="#14171c" stroke-width="10"/>
+<text x="1900" y="1922" fill="#14171c" font-size="62" font-weight="bold" text-anchor="middle">04</text>
+<circle cx="700" cy="2600" r="62" fill="#7cf29a" stroke="#14171c" stroke-width="10"/>
+<text x="700" y="2622" fill="#14171c" font-size="62" font-weight="bold" text-anchor="middle">05</text>
+<circle cx="700" cy="450" r="62" fill="#7cf29a" stroke="#14171c" stroke-width="10"/>
+<text x="700" y="472" fill="#14171c" font-size="62" font-weight="bold" text-anchor="middle">06</text>
+<circle cx="3300" cy="600" r="62" fill="#7cf29a" stroke="#14171c" stroke-width="10"/>
+<text x="3300" y="622" fill="#14171c" font-size="62" font-weight="bold" text-anchor="middle">07</text>
+<circle cx="4700" cy="500" r="62" fill="#7cf29a" stroke="#14171c" stroke-width="10"/>
+<text x="4700" y="522" fill="#14171c" font-size="62" font-weight="bold" text-anchor="middle">08</text>
+<circle cx="2700" cy="3800" r="62" fill="#7cf29a" stroke="#14171c" stroke-width="10"/>
+<text x="2700" y="3822" fill="#14171c" font-size="62" font-weight="bold" text-anchor="middle">09</text>
+<circle cx="700" cy="4100" r="62" fill="#7cf29a" stroke="#14171c" stroke-width="10"/>
+<text x="700" y="4122" fill="#14171c" font-size="62" font-weight="bold" text-anchor="middle">10</text>
+<circle cx="2000" cy="5300" r="62" fill="#7cf29a" stroke="#14171c" stroke-width="10"/>
+<text x="2000" y="5322" fill="#14171c" font-size="62" font-weight="bold" text-anchor="middle">11</text>
+<circle cx="600" cy="5500" r="62" fill="#7cf29a" stroke="#14171c" stroke-width="10"/>
+<text x="600" y="5522" fill="#14171c" font-size="62" font-weight="bold" text-anchor="middle">12</text>
+<circle cx="3300" cy="1900" r="62" fill="#5fb8ff" stroke="#14171c" stroke-width="10"/>
+<text x="3300" y="1922" fill="#14171c" font-size="62" font-weight="bold" text-anchor="middle">G</text>
+<circle cx="4700" cy="2500" r="62" fill="#5fb8ff" stroke="#14171c" stroke-width="10"/>
+<text x="4700" y="2522" fill="#14171c" font-size="62" font-weight="bold" text-anchor="middle">G</text>
+<circle cx="2400" cy="800" r="62" fill="#5fb8ff" stroke="#14171c" stroke-width="10"/>
+<text x="2400" y="822" fill="#14171c" font-size="62" font-weight="bold" text-anchor="middle">G</text>
+<circle cx="2100" cy="4300" r="62" fill="#ff5fa2" stroke="#14171c" stroke-width="10"/>
+<text x="2100" y="4322" fill="#14171c" font-size="62" font-weight="bold" text-anchor="middle">C</text>
+<circle cx="4100" cy="5600" r="62" fill="#ff5fa2" stroke="#14171c" stroke-width="10"/>
+<text x="4100" y="5622" fill="#14171c" font-size="62" font-weight="bold" text-anchor="middle">C</text>
+<circle cx="1100" cy="2400" r="62" fill="#ff5fa2" stroke="#14171c" stroke-width="10"/>
+<text x="1100" y="2422" fill="#14171c" font-size="62" font-weight="bold" text-anchor="middle">C</text>
+<circle cx="3100" cy="2400" r="62" fill="#4d7cff" stroke="#14171c" stroke-width="10"/>
+<text x="3100" y="2422" fill="#14171c" font-size="62" font-weight="bold" text-anchor="middle">P</text>
+<circle cx="4900" cy="2100" r="62" fill="#4d7cff" stroke="#14171c" stroke-width="10"/>
+<text x="4900" y="2122" fill="#14171c" font-size="62" font-weight="bold" text-anchor="middle">P</text>
+<circle cx="3000" cy="700" r="62" fill="#4d7cff" stroke="#14171c" stroke-width="10"/>
+<text x="3000" y="722" fill="#14171c" font-size="62" font-weight="bold" text-anchor="middle">P</text>
+<circle cx="2700" cy="5200" r="62" fill="#4d7cff" stroke="#14171c" stroke-width="10"/>
+<text x="2700" y="5222" fill="#14171c" font-size="62" font-weight="bold" text-anchor="middle">P</text>
+<circle cx="800" cy="2100" r="62" fill="#4d7cff" stroke="#14171c" stroke-width="10"/>
+<text x="800" y="2122" fill="#14171c" font-size="62" font-weight="bold" text-anchor="middle">P</text>
+<circle cx="4300" cy="5150" r="62" fill="#4d7cff" stroke="#14171c" stroke-width="10"/>
+<text x="4300" y="5172" fill="#14171c" font-size="62" font-weight="bold" text-anchor="middle">P</text>
+<circle cx="5150" cy="3250" r="62" fill="#ffffff" stroke="#14171c" stroke-width="10"/>
+<text x="5150" y="3272" fill="#14171c" font-size="62" font-weight="bold" text-anchor="middle">H</text>
+<rect x="4740" y="2355" width="120" height="90" fill="#ffd400" stroke="#14171c" stroke-width="8"/>
+<text x="4800" y="2420" fill="#14171c" font-size="58" font-weight="bold" text-anchor="middle">1</text>
+<rect x="2690" y="2805" width="120" height="90" fill="#ffd400" stroke="#14171c" stroke-width="8"/>
+<text x="2750" y="2870" fill="#14171c" font-size="58" font-weight="bold" text-anchor="middle">2</text>
+<rect x="4440" y="1255" width="120" height="90" fill="#ffd400" stroke="#14171c" stroke-width="8"/>
+<text x="4500" y="1320" fill="#14171c" font-size="58" font-weight="bold" text-anchor="middle">3</text>
+<rect x="1890" y="1055" width="120" height="90" fill="#ffd400" stroke="#14171c" stroke-width="8"/>
+<text x="1950" y="1120" fill="#14171c" font-size="58" font-weight="bold" text-anchor="middle">4</text>
+<rect x="590" y="335" width="120" height="90" fill="#ffd400" stroke="#14171c" stroke-width="8"/>
+<text x="650" y="400" fill="#14171c" font-size="58" font-weight="bold" text-anchor="middle">5</text>
+<rect x="3940" y="5" width="120" height="90" fill="#ffd400" stroke="#14171c" stroke-width="8"/>
+<text x="4000" y="70" fill="#14171c" font-size="58" font-weight="bold" text-anchor="middle">6</text>
+<rect x="1740" y="3955" width="120" height="90" fill="#ffd400" stroke="#14171c" stroke-width="8"/>
+<text x="1800" y="4020" fill="#14171c" font-size="58" font-weight="bold" text-anchor="middle">7</text>
+<rect x="2740" y="5355" width="120" height="90" fill="#ffd400" stroke="#14171c" stroke-width="8"/>
+<text x="2800" y="5420" fill="#14171c" font-size="58" font-weight="bold" text-anchor="middle">8</text>
+<rect x="5340" y="4855" width="120" height="90" fill="#ffd400" stroke="#14171c" stroke-width="8"/>
+<text x="5400" y="4920" fill="#14171c" font-size="58" font-weight="bold" text-anchor="middle">9</text>
+<rect x="1840" y="1705" width="120" height="90" fill="#ffd400" stroke="#14171c" stroke-width="8"/>
+<text x="1900" y="1770" fill="#14171c" font-size="58" font-weight="bold" text-anchor="middle">10</text>
+<rect x="540" y="5555" width="120" height="90" fill="#ffd400" stroke="#14171c" stroke-width="8"/>
+<text x="600" y="5620" fill="#14171c" font-size="58" font-weight="bold" text-anchor="middle">11</text>
+<rect x="940" y="4455" width="120" height="90" fill="#ffd400" stroke="#14171c" stroke-width="8"/>
+<text x="1000" y="4520" fill="#14171c" font-size="58" font-weight="bold" text-anchor="middle">12</text>
+<rect x="2640" y="1655" width="120" height="90" fill="#ffd400" stroke="#14171c" stroke-width="8"/>
+<text x="2700" y="1720" fill="#14171c" font-size="58" font-weight="bold" text-anchor="middle">13</text>
+<rect x="5090" y="1955" width="120" height="90" fill="#ffd400" stroke="#14171c" stroke-width="8"/>
+<text x="5150" y="2020" fill="#14171c" font-size="58" font-weight="bold" text-anchor="middle">14</text>
+<rect x="4140" y="5255" width="120" height="90" fill="#ffd400" stroke="#14171c" stroke-width="8"/>
+<text x="4200" y="5320" fill="#14171c" font-size="58" font-weight="bold" text-anchor="middle">15</text>
+<path d="M5800,120 L5850,260 L5750,260 Z" fill="#ffffff"/><text x="5800" y="330" fill="#fff" font-size="70" text-anchor="middle">N</text>
+<rect x="150" y="5850" width="1000" height="30" fill="#ffffff"/><text x="150" y="5820" fill="#fff" font-size="60">0</text><text x="1150" y="5820" fill="#fff" font-size="60" text-anchor="end">1 km</text>
+<text x="6080" y="160" fill="#ffffff" font-size="96" font-weight="bold">PORT VESPER</text>
+<text x="6080" y="250" fill="#9aa4ad" font-size="56">handmade_v0 schematic</text>
+<text x="6080" y="320" fill="#9aa4ad" font-size="56">6 x 6 km, +Y north</text>
+<rect x="6080" y="400" width="90" height="60" fill="#6b3b4a"/>
+<text x="6200" y="450" fill="#e6e6e6" font-size="56">Core</text>
+<rect x="6080" y="510" width="90" height="60" fill="#5a4a6e"/>
+<text x="6200" y="560" fill="#e6e6e6" font-size="56">Commercial</text>
+<rect x="6080" y="620" width="90" height="60" fill="#3f5560"/>
+<text x="6200" y="670" fill="#e6e6e6" font-size="56">Residential</text>
+<rect x="6080" y="730" width="90" height="60" fill="#55503a"/>
+<text x="6200" y="780" fill="#e6e6e6" font-size="56">Industrial</text>
+<rect x="6080" y="840" width="90" height="60" fill="#4a4036"/>
+<text x="6200" y="890" fill="#e6e6e6" font-size="56">Port</text>
+<rect x="6080" y="950" width="90" height="60" fill="#3a5243"/>
+<text x="6200" y="1000" fill="#e6e6e6" font-size="56">Suburb</text>
+<rect x="6080" y="1060" width="90" height="60" fill="#1d3550"/>
+<text x="6200" y="1110" fill="#e6e6e6" font-size="56">Water</text>
+<line x1="6080" y1="1200" x2="6170" y2="1200" stroke="#f2c14e" stroke-width="24"/>
+<text x="6200" y="1220" fill="#e6e6e6" font-size="56">Highway (Loop 9, Rt 40)</text>
+<line x1="6080" y1="1310" x2="6170" y2="1310" stroke="#d9d2b0" stroke-width="24"/>
+<text x="6200" y="1330" fill="#e6e6e6" font-size="56">Arterial</text>
+<line x1="6080" y1="1420" x2="6170" y2="1420" stroke="#e0a85a" stroke-width="24"/>
+<text x="6200" y="1440" fill="#e6e6e6" font-size="56">Scenic / touge</text>
+<line x1="6080" y1="1530" x2="6170" y2="1530" stroke="#c8c8c8" stroke-width="24" stroke-dasharray="30 15"/>
+<text x="6200" y="1550" fill="#e6e6e6" font-size="56">Freight rail</text>
+<circle cx="6125" cy="1640" r="34" fill="#7cf29a"/>
+<text x="6200" y="1660" fill="#e6e6e6" font-size="56">Safehouse (01-12)</text>
+<circle cx="6125" cy="1750" r="34" fill="#5fb8ff"/>
+<text x="6200" y="1770" fill="#e6e6e6" font-size="56">G  Legit garage</text>
+<circle cx="6125" cy="1860" r="34" fill="#ff5fa2"/>
+<text x="6200" y="1880" fill="#e6e6e6" font-size="56">C  Crooked garage</text>
+<circle cx="6125" cy="1970" r="34" fill="#4d7cff"/>
+<text x="6200" y="1990" fill="#e6e6e6" font-size="56">P  Police station</text>
+<circle cx="6125" cy="2080" r="34" fill="#ffffff"/>
+<text x="6200" y="2100" fill="#e6e6e6" font-size="56">H  Helipad</text>
+<rect x="6090" y="2160" width="70" height="60" fill="#ffd400"/>
+<text x="6200" y="2210" fill="#e6e6e6" font-size="56">Route start (R01-R15)</text>
+<path d="M6125,2260 L6165,2330 L6085,2330 Z" fill="#ff7a1a"/>
+<text x="6200" y="2320" fill="#e6e6e6" font-size="56">Hazard</text>
+<text x="6080" y="2490" fill="#9aa4ad" font-size="48">Schematic, not to lane scale.</text>
+<text x="6080" y="2550" fill="#9aa4ad" font-size="48">Source: docs/design/CITY.md</text>
+</svg>

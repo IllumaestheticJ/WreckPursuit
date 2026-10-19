@@ -1,0 +1,23 @@
+[package]
+name = "wp_race"
+description = "Race types and rules, server-side judging, event scheduler, crews, territory and progression gates."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+wp_contracts.workspace = true
+wp_math.workspace = true
+# Read-only bridges: route geometry/POIs/zones from wp_world, payout inputs for wp_economy.
+wp_world.workspace = true
+wp_economy.workspace = true
+serde.workspace = true
+toml.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest = { version = "1.12", default-features = false, features = ["std"] }
+serde_json.workspace = true
+# Integration tests judge simcli v2 scenario runs (apps/simcli/scenarios/race/).
+simcli = { path = "../../apps/simcli" }

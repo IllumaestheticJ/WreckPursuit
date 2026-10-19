@@ -108,7 +108,7 @@ async function main(): Promise<void> {
   };
 
   const runScenario = async (file: string, speedKmh?: number) => {
-    const text = await (await fetch(`/scenarios/${file}`)).text();
+    const text = await (await fetch(`scenarios/${file}`)).text();
     const sc = sim.scenarioFromRon(text);
     if (speedKmh && speedKmh > 0) {
       if (sc.cruise_kmh != null) sc.cruise_kmh = speedKmh;
@@ -174,7 +174,7 @@ async function main(): Promise<void> {
 
   const scSel = $("sc-select") as HTMLSelectElement;
   try {
-    const files: string[] = await (await fetch("/scenarios/index.json")).json();
+    const files: string[] = await (await fetch("scenarios/index.json")).json();
     for (const f of files) scSel.add(new Option(f, f));
   } catch {
     scSel.add(new Option("(scenario folder not served)", ""));
