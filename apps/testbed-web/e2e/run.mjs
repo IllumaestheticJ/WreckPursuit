@@ -345,8 +345,10 @@ check(
 );
 // LOD hand-over (playtest row 25): in a fresh chase, every traffic agent / police unit / sim
 // vehicle is drawn with its real mesh on every frame after the first second (no placeholder,
-// no gap); promotions and demotions (instanced fleet <-> full VehicleView) keep the pose (< 0.5 m
-// off the car's own motion); traffic never appears or vanishes within 300 m of the player.
+// no gap); promotions and demotions (instanced fleet <-> full VehicleView) keep the pose: the
+// drawn car moves < 0.5 m relative to its sim pose at the swap (frame-rate independent; the sim
+// pose's own tick-by-tick continuity is wp_wasm's lod::tests); traffic never appears or vanishes
+// within 300 m of the player.
 {
   await page.evaluate(() => {
     window.__wp.startCityChase("debug_sedan", "Arcade");
@@ -375,7 +377,7 @@ check(
   );
   check(
     lodWait === "ready" && lod.swaps >= 2 && lod.maxSwapJump < 0.5,
-    `LOD: ${lod.swaps} promotion/demotion swaps in ${lod.simS.toFixed(1)} s sim, max pose jump ${lod.maxSwapJump.toFixed(3)} m` +
+    `LOD: ${lod.swaps} promotion/demotion swaps in ${lod.simS.toFixed(1)} s sim, max hand-over jump (drawn vs sim pose) ${lod.maxSwapJump.toFixed(3)} m` +
       (worst ? ` (${worst.key} ${worst.from}→${worst.to})` : "") + `; wait ${lodWait}`,
   );
   check(

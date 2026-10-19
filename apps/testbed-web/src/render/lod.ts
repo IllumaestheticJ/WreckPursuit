@@ -31,6 +31,9 @@ export interface DrawState {
   entity: number;
   /** Drawn position, sim space (m). */
   pos: [number, number, number];
+  /** Where the car is in the sim this tick (its draw record; the view itself for other sim
+   * vehicles), m. `pos - truth` is the drawer's own offset (a view lags by its interpolation). */
+  truth: [number, number, number];
   /** Distance from the camera, m. */
   dist: number;
 }
@@ -117,7 +120,7 @@ export class LodDirector {
     for (const [id, v] of views) {
       if (claimed.has(id)) continue;
       const p = v.root.position;
-      states.push({ key: `v${id}`, mode: "view", fallback: !v.panels.ready && layers.on("panels") && layers.on("body"), entity: id, pos: [p.x, p.y, p.z], dist: dist(p.x, p.y, p.z) });
+      states.push({ key: `v${id}`, mode: "view", fallback: !v.panels.ready && layers.on("panels") && layers.on("body"), entity: id, pos: [p.x, p.y, p.z], truth: [p.x, p.y, p.z], dist: dist(p.x, p.y, p.z) });
     }
     this.fleet.end();
     this.states = states;
@@ -138,18 +141,19 @@ export class LodDirector {
     // fleet draws the car (no placeholder box, no empty frame).
     const ready = view?.drawable ?? false;
     if (view) view.root.visible = ready;
-    if (view && ready) {
-      const p = view.root.position;
-      return { key, mode: "view", fallback: false, entity, pos: [p.x, p.y, p.z], dist: dist(p.x, p.y, p.z) };
-    }
     const x = rec[o + D.pos];
     const y = rec[o + D.pos + 1];
     const z = rec[o + D.pos + 2];
+    const truth: [number, number, number] = [x, y, z];
+    if (view && ready) {
+      const p = view.root.position;
+      return { key, mode: "view", fallback: false, entity, pos: [p.x, p.y, p.z], truth, dist: dist(p.x, p.y, p.z) };
+    }
     const d = dist(x, y, z);
-    if (!model) return { key, mode: "none", fallback: false, entity, pos: [x, y, z], dist: d };
+    if (!model) return { key, mode: "none", fallback: false, entity, pos: truth, truth, dist: d };
     const [paint, tail, bar] = look();
     const mode = this.fleet.add(model, rec, o + D.pos, d, paint, tail, bar);
-    return { key, mode, fallback: mode === "proxy" && d < FULL_LOD_M && !model.full, entity, pos: [x, y, z], dist: d };
+    return { key, mode, fallback: mode === "proxy" && d < FULL_LOD_M && !model.full, entity, pos: truth, truth, dist: d };
   }
 }
 
@@ -161,6 +165,7 @@ export interface LogRow {
   fallback: boolean;
   entity: number;
   pos: [number, number, number];
+  truth: [number, number, number];
 }
 
 /** A drawer change (view ↔ fleet) of one car. */
@@ -170,7 +175,12 @@ export interface Swap {
   t: number;
   from: LodMode;
   to: LodMode;
-  /** Drawn position minus where the car was heading (last frame + last frame's velocity), m. */
+  /**
+   * How far the drawn car moves relative to the car itself at the swap: the change of
+   * (drawn − sim pose) from the frame before to the swap frame, m. Frame-rate independent (at
+   * 4 fps a car moves metres per frame). The sim pose's own continuity through promotions is
+   * checked tick by tick in wp_wasm (`lod::tests`).
+   */
   jump: number;
   /** Rows from 3 frames before to 3 frames after. */
   rows: LogRow[];
@@ -231,7 +241,7 @@ export class LodLog {
     const settled = t - this.t0 > 1;
     for (const s of states) {
       seen.add(s.key);
-      const row: LogRow = { frame: this.frame, t, mode: s.mode, fallback: s.fallback, entity: s.entity, pos: s.pos };
+      const row: LogRow = { frame: this.frame, t, mode: s.mode, fallback: s.fallback, entity: s.entity, pos: s.pos, truth: s.truth };
       const tr = this.tracks.get(s.key);
       if (settled && (s.mode === "none" || s.fallback)) {
         this.missing++;
@@ -246,13 +256,10 @@ export class LodLog {
       const prev = tr.rows[tr.rows.length - 1];
       const drawer = (m: LodMode) => (m === "view" ? "view" : m === "none" ? "none" : "fleet");
       if (drawer(prev.mode) !== drawer(s.mode)) {
-        // Where the car was heading: last position + its mean velocity over the last few
-        // frames (kinematic agents move in traffic steps, so one frame's velocity is jerky).
-        const older = tr.rows.find((r) => r.t < prev.t);
-        const span = older ? prev.t - older.t : 0;
-        const k = span > 0 ? (t - prev.t) / span : 0;
-        const pred = older ? prev.pos.map((p, i) => p + (p - older.pos[i]) * k) : prev.pos;
-        const jump = Math.hypot(s.pos[0] - pred[0], s.pos[1] - pred[1], s.pos[2] - pred[2]);
+        const off = (r: { pos: number[]; truth: number[] }) => r.pos.map((p, i) => p - r.truth[i]);
+        const a = off(prev);
+        const b = off(s);
+        const jump = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
         const swap: Swap = { key: s.key, frame: this.frame, t, from: prev.mode, to: s.mode, jump, rows: [...tr.rows.slice(-3), row] };
         this.swaps.push(swap);
         this.open.push({ swap, left: 3 });
