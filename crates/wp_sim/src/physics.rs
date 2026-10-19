@@ -97,11 +97,9 @@ impl PhysicsWorld {
     /// probes see them on the next tick without a physics step. Call once, before the first
     /// tick (scenario setup).
     pub fn set_city_ground(&mut self, map: &wp_world::CityMap) -> CityColliders {
-        let net = &map.net;
-        let Some(t) = &net.terrain else {
+        let Some((colliders, out)) = city_ground_colliders(map) else {
             return CityColliders::default();
         };
-        let mut out = CityColliders::default();
         let mut added: Vec<ColliderHandle> = Vec::new();
         // Park the slab.
         let hz = wp_vehicle::rig::GROUND_HALF_EXTENTS[2];
@@ -110,118 +108,9 @@ impl PhysicsWorld {
             c.set_collision_groups(terrain_groups());
         }
         added.push(self.ground);
-
-        // Terrain, in tiles of TILE_CELLS × TILE_CELLS cells (neighbours share their edge
-        // vertices) so a body only pairs with the ground around it. Parry heightfields are Y-up
-        // (rows along local z, columns along local x); rotating +90° about X maps local y →
-        // world z and local z → world −y, so tile row r is the world row j1 − r.
-        const TILE_CELLS: u32 = 64;
-        let half = core::f32::consts::FRAC_1_SQRT_2;
-        let mut j0 = 0;
-        while j0 + 1 < t.ny {
-            let j1 = (j0 + TILE_CELLS).min(t.ny - 1);
-            let mut i0 = 0;
-            while i0 + 1 < t.nx {
-                let i1 = (i0 + TILE_CELLS).min(t.nx - 1);
-                let (nc, nr) = ((i1 - i0 + 1) as usize, (j1 - j0 + 1) as usize);
-                let mut heights = rapier3d::parry::utils::Array2::zeros(nr, nc);
-                for r in 0..nr {
-                    for c in 0..nc {
-                        heights[(r, c)] = t.at(i0 + c as u32, j1 - r as u32);
-                    }
-                }
-                let (sx, sy) = ((nc - 1) as f32 * t.cell_m, (nr - 1) as f32 * t.cell_m);
-                let lo = t.vertex_pos(i0, j0);
-                let pose = Pose::from_parts(
-                    Vector::new(lo[0] + sx * 0.5, lo[1] + sy * 0.5, 0.0),
-                    rapier3d::math::Rotation::from_xyzw(half, 0.0, 0.0, half),
-                );
-                let hf = ColliderBuilder::heightfield(heights, Vector::new(sx, 1.0, sy))
-                    .position(pose)
-                    .collision_groups(terrain_groups())
-                    .build();
-                added.push(self.colliders.insert(hf));
-                i0 = i1;
-            }
-            j0 = j1;
+        for c in colliders {
+            added.push(self.colliders.insert(c));
         }
-        out.terrain_vertices = (t.nx * t.ny) as usize;
-
-        // Roads: one triangle mesh per 256 m cell (by triangle centroid).
-        const ROAD_TILE_M: f32 = 256.0;
-        let mesh = wp_world::surface::road_mesh(map);
-        out.road_triangles = mesh.indices.len();
-        let mut tiles: std::collections::BTreeMap<(i32, i32), Vec<[u32; 3]>> =
-            std::collections::BTreeMap::new();
-        for tri in &mesh.indices {
-            let c = tri.iter().fold([0.0f32; 2], |acc, i| {
-                let p = mesh.positions[*i as usize];
-                [acc[0] + p[0] / 3.0, acc[1] + p[1] / 3.0]
-            });
-            let key = (
-                (c[0] / ROAD_TILE_M).floor() as i32,
-                (c[1] / ROAD_TILE_M).floor() as i32,
-            );
-            tiles.entry(key).or_default().push(*tri);
-        }
-        for tris in tiles.values() {
-            let mut remap: std::collections::BTreeMap<u32, u32> = std::collections::BTreeMap::new();
-            let mut verts: Vec<Vector> = Vec::new();
-            let mut idx: Vec<[u32; 3]> = Vec::with_capacity(tris.len());
-            for tri in tris {
-                let mut out_tri = [0u32; 3];
-                for (k, i) in tri.iter().enumerate() {
-                    out_tri[k] = *remap.entry(*i).or_insert_with(|| {
-                        verts.push(Vector::from_array(mesh.positions[*i as usize]));
-                        (verts.len() - 1) as u32
-                    });
-                }
-                idx.push(out_tri);
-            }
-            match ColliderBuilder::trimesh(verts, idx) {
-                Ok(b) => added.push(self.colliders.insert(b.build())),
-                Err(e) => eprintln!("road tile trimesh failed: {e:?}"),
-            }
-        }
-
-        // Buildings: extruded footprints as convex hulls (footprints are convex lots).
-        for b in &net.buildings {
-            let mut pts: Vec<Vector> = Vec::with_capacity(b.footprint.len() * 2);
-            for q in &b.footprint {
-                pts.push(Vector::new(q[0], q[1], b.base_z_m));
-                pts.push(Vector::new(q[0], q[1], b.roof_z()));
-            }
-            if let Some(cb) = ColliderBuilder::convex_hull(&pts) {
-                added.push(self.colliders.insert(cb.friction(0.6).build()));
-                out.buildings += 1;
-            }
-        }
-
-        // Guard rails along decks: 0.3 m wide, 0.9 m tall boxes on each paved edge.
-        for (a, b) in wp_world::surface::deck_rails(net) {
-            let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
-            let len = (d[0] * d[0] + d[1] * d[1]).sqrt();
-            if len < 0.05 {
-                continue;
-            }
-            let yaw = wp_math::atan2(-d[0], d[1]);
-            let (s, c) = wp_math::sin_cos(yaw * 0.5);
-            let mid = Vector::new(
-                (a[0] + b[0]) * 0.5,
-                (a[1] + b[1]) * 0.5,
-                (a[2] + b[2]) * 0.5 + 0.45,
-            );
-            let col = ColliderBuilder::cuboid(0.15, len * 0.5 + 0.05, 0.45 + d[2].abs() * 0.5)
-                .position(Pose::from_parts(
-                    mid,
-                    rapier3d::math::Rotation::from_xyzw(0.0, 0.0, s, c),
-                ))
-                .friction(0.4)
-                .build();
-            added.push(self.colliders.insert(col));
-            out.rails += 1;
-        }
-
         for h in added {
             let aabb = self.colliders[h].compute_aabb();
             self.broad_phase.set_aabb(&self.params, h, aabb);
@@ -283,4 +172,139 @@ impl Default for PhysicsWorld {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// The static colliders of a city with terrain (Port Vesper v2), in the order
+/// [`PhysicsWorld::set_city_ground`] inserts them: terrain heightfield tiles, road triangle
+/// meshes, buildings, deck guard rails. `None` for flat cities (they keep the slab). Shared
+/// with the client prediction stepper (`wp_vehicle::rig::Rig::set_city_ground`, used by
+/// `wp_net`) so a predicted car drives on exactly the server's ground.
+pub fn city_ground_colliders(map: &wp_world::CityMap) -> Option<(Vec<Collider>, CityColliders)> {
+    let net = &map.net;
+    let t = net.terrain.as_ref()?;
+    let mut out = CityColliders::default();
+    let mut added: Vec<Collider> = Vec::new();
+
+    // Terrain, in tiles of TILE_CELLS × TILE_CELLS cells (neighbours share their edge
+    // vertices) so a body only pairs with the ground around it. Parry heightfields are Y-up
+    // (rows along local z, columns along local x); rotating +90° about X maps local y →
+    // world z and local z → world −y, so tile row r is the world row j1 − r.
+    const TILE_CELLS: u32 = 64;
+    let half = core::f32::consts::FRAC_1_SQRT_2;
+    let mut j0 = 0;
+    while j0 + 1 < t.ny {
+        let j1 = (j0 + TILE_CELLS).min(t.ny - 1);
+        let mut i0 = 0;
+        while i0 + 1 < t.nx {
+            let i1 = (i0 + TILE_CELLS).min(t.nx - 1);
+            let (nc, nr) = ((i1 - i0 + 1) as usize, (j1 - j0 + 1) as usize);
+            let mut heights = rapier3d::parry::utils::Array2::zeros(nr, nc);
+            for r in 0..nr {
+                for c in 0..nc {
+                    heights[(r, c)] = t.at(i0 + c as u32, j1 - r as u32);
+                }
+            }
+            let (sx, sy) = ((nc - 1) as f32 * t.cell_m, (nr - 1) as f32 * t.cell_m);
+            let lo = t.vertex_pos(i0, j0);
+            let pose = Pose::from_parts(
+                Vector::new(lo[0] + sx * 0.5, lo[1] + sy * 0.5, 0.0),
+                rapier3d::math::Rotation::from_xyzw(half, 0.0, 0.0, half),
+            );
+            let hf = ColliderBuilder::heightfield(heights, Vector::new(sx, 1.0, sy))
+                .position(pose)
+                .collision_groups(terrain_groups())
+                .build();
+            added.push(hf);
+            i0 = i1;
+        }
+        j0 = j1;
+    }
+    out.terrain_vertices = (t.nx * t.ny) as usize;
+
+    // Roads: one triangle mesh per 256 m cell (by triangle centroid).
+    const ROAD_TILE_M: f32 = 256.0;
+    let mesh = wp_world::surface::road_mesh(map);
+    out.road_triangles = mesh.indices.len();
+    let mut tiles: std::collections::BTreeMap<(i32, i32), Vec<[u32; 3]>> =
+        std::collections::BTreeMap::new();
+    for tri in &mesh.indices {
+        let c = tri.iter().fold([0.0f32; 2], |acc, i| {
+            let p = mesh.positions[*i as usize];
+            [acc[0] + p[0] / 3.0, acc[1] + p[1] / 3.0]
+        });
+        let key = (
+            (c[0] / ROAD_TILE_M).floor() as i32,
+            (c[1] / ROAD_TILE_M).floor() as i32,
+        );
+        tiles.entry(key).or_default().push(*tri);
+    }
+    for tris in tiles.values() {
+        let mut remap: std::collections::BTreeMap<u32, u32> = std::collections::BTreeMap::new();
+        let mut verts: Vec<Vector> = Vec::new();
+        let mut idx: Vec<[u32; 3]> = Vec::with_capacity(tris.len());
+        for tri in tris {
+            let mut out_tri = [0u32; 3];
+            for (k, i) in tri.iter().enumerate() {
+                out_tri[k] = *remap.entry(*i).or_insert_with(|| {
+                    verts.push(Vector::from_array(mesh.positions[*i as usize]));
+                    (verts.len() - 1) as u32
+                });
+            }
+            idx.push(out_tri);
+        }
+        match ColliderBuilder::trimesh(verts, idx) {
+            Ok(b) => added.push(b.build()),
+            Err(e) => eprintln!("road tile trimesh failed: {e:?}"),
+        }
+    }
+
+    // Buildings: extruded footprints as convex hulls (footprints are convex lots).
+    for b in &net.buildings {
+        let mut pts: Vec<Vector> = Vec::with_capacity(b.footprint.len() * 2);
+        for q in &b.footprint {
+            pts.push(Vector::new(q[0], q[1], b.base_z_m));
+            pts.push(Vector::new(q[0], q[1], b.roof_z()));
+        }
+        if let Some(cb) = ColliderBuilder::convex_hull(&pts) {
+            added.push(cb.friction(0.6).build());
+            out.buildings += 1;
+        }
+    }
+
+    // Guard rails along decks: 0.3 m wide, 0.9 m tall boxes on each paved edge.
+    for (a, b) in wp_world::surface::deck_rails(net) {
+        let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+        let len = (d[0] * d[0] + d[1] * d[1]).sqrt();
+        if len < 0.05 {
+            continue;
+        }
+        let yaw = wp_math::atan2(-d[0], d[1]);
+        let (s, c) = wp_math::sin_cos(yaw * 0.5);
+        let mid = Vector::new(
+            (a[0] + b[0]) * 0.5,
+            (a[1] + b[1]) * 0.5,
+            (a[2] + b[2]) * 0.5 + 0.45,
+        );
+        let col = ColliderBuilder::cuboid(0.15, len * 0.5 + 0.05, 0.45 + d[2].abs() * 0.5)
+            .position(Pose::from_parts(
+                mid,
+                rapier3d::math::Rotation::from_xyzw(0.0, 0.0, s, c),
+            ))
+            .friction(0.4)
+            .build();
+        added.push(col);
+        out.rails += 1;
+    }
+
+    Some((added, out))
+}
+
+/// The flat slab as [`PhysicsWorld::set_city_ground`] parks it under a city with terrain (a
+/// safety floor at [`SAFETY_FLOOR_Z`] in the terrain group). For client prediction rigs.
+pub fn parked_slab_collider() -> Collider {
+    let hz = wp_vehicle::rig::GROUND_HALF_EXTENTS[2];
+    let mut c = wp_vehicle::rig::ground_collider();
+    c.set_translation(Vector::new(0.0, 0.0, SAFETY_FLOOR_Z - hz));
+    c.set_collision_groups(terrain_groups());
+    c
 }

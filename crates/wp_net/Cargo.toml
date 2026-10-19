@@ -20,6 +20,8 @@ wp_world.workspace = true
 wp_economy.workspace = true
 wp_sim.workspace = true
 wp_weather.workspace = true
+# Static city colliders for client prediction on terrain (already in the tree via wp_vehicle).
+rapier3d.workspace = true
 serde.workspace = true
 # Typed contract payloads on the wire (v0.3.0 events / commands); pure Rust, wasm-clean,
 # same version and features as wp_world / wp_wasm.

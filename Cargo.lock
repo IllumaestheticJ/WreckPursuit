@@ -4308,6 +4308,7 @@ version = "0.1.0"
 dependencies = [
  "futures-util",
  "postcard",
+ "rapier3d",
  "serde",
  "thiserror 2.0.21",
  "tokio",
@@ -4381,6 +4382,7 @@ dependencies = [
  "tokio",
  "toml",
  "wp_contracts",
+ "wp_meta",
  "wp_net",
  "wp_sim",
  "wp_world",

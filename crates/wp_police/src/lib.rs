@@ -414,6 +414,23 @@ impl PoliceSystem {
             && world.line_of_sight([a[0], a[1], EYE_HEIGHT_M], [b[0], b[1], EYE_HEIGHT_M])
     }
 
+    /// [`PoliceSystem::sees`] between two vehicles at their heights (`az`, `bz`: chassis
+    /// z, m): eyes sit at [`EYE_HEIGHT_M`] on flat ground and follow the car up on terrain
+    /// (Port Vesper v2's downtown is ~5 m above z = 0, where a fixed 1.3 m sightline runs
+    /// through the ground). Identical to `sees` for cars below z = 1 m. (Fixed by 07.)
+    pub(crate) fn sees_at(
+        &self,
+        world: &dyn WorldQuery,
+        a: [f32; 2],
+        az: f32,
+        b: [f32; 2],
+        bz: f32,
+    ) -> bool {
+        let eye = |z: f32| EYE_HEIGHT_M + (z - 1.0).max(0.0);
+        self.graph.line_of_sight(a, b)
+            && world.line_of_sight([a[0], a[1], eye(az)], [b[0], b[1], eye(bz)])
+    }
+
     pub(crate) fn unit_index(&self, id: UnitId) -> Option<usize> {
         self.units.binary_search_by_key(&id, |u| u.id).ok()
     }
@@ -749,6 +766,25 @@ impl PoliceSystem {
         u.internal = false;
         self.units.push(u);
         id
+    }
+
+    /// Remove a player-driven chase unit (the player left or changed role). Assignments,
+    /// incidents and tools that referenced it are released. Returns false for unknown ids and
+    /// AI units (those are retired by the dispatcher). Added by 07 (net) for player cop seats.
+    pub fn remove_player_unit(&mut self, unit: UnitId) -> bool {
+        let Some(i) = self.unit_index(unit) else {
+            return false;
+        };
+        if self.units[i].player.is_none() {
+            return false;
+        }
+        self.units.remove(i);
+        for inc in &mut self.incidents {
+            if inc.unit == Some(unit) {
+                inc.unit = None;
+            }
+        }
+        true
     }
 
     /// Report the physical state of an externally driven unit.

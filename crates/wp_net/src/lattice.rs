@@ -7,7 +7,9 @@
 //! The hash quantises displacements to 1 mm so float noise below that never counts as a
 //! mismatch; snapshots are exact so a resync is bit-exact.
 
+use serde::{Deserialize, Serialize};
 use wp_contracts::{ContactImpulse, HandlingEffects, ModeTable, SimEvent};
+use wp_damage::FullDamageSnapshot;
 use wp_math::StateHasher;
 
 use crate::quant::LATTICE_SCALE;
@@ -130,6 +132,119 @@ impl LatticeSnapshot {
     }
 }
 
+/// Sparse full damage state (NET-N5): `wp_damage`'s lossless [`FullDamageSnapshot`] with
+/// every per-beam array reduced to the entries that differ (bitwise) from the pristine car,
+/// and node positions left out (they travel in the [`LatticeSnapshot`] next to it). The
+/// per-beam plastic-work ledger (`beam_energy_j`) is left out too: it only feeds the
+/// diagnostic `total_plastic_energy_j`, never node motion, health or effects, and it is the
+/// largest array of a dented car (a quarter of the bytes).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct SparseDamageState {
+    beam_rest_m: Vec<(u32, f32)>,
+    beam_plastic_strain: Vec<(u32, f32)>,
+    beam_flags: Vec<(u32, u8)>,
+    beam_comp_plastic_strain: Vec<(u32, f32)>,
+    beam_energy_j: Vec<(u32, f32)>,
+    /// Everything else (maps, sets, scalars); its large arrays are empty.
+    base: FullDamageSnapshot,
+}
+
+fn diff_f32(a: &[f32], pristine: &[f32]) -> Vec<(u32, f32)> {
+    a.iter()
+        .zip(pristine)
+        .enumerate()
+        .filter(|(_, (x, p))| x.to_bits() != p.to_bits())
+        .map(|(i, (x, _))| (i as u32, *x))
+        .collect()
+}
+
+fn apply_f32(out: &mut [f32], diff: &[(u32, f32)]) -> Result<(), NetError> {
+    for (i, v) in diff {
+        *out.get_mut(*i as usize)
+            .ok_or_else(|| NetError::Decode("damage state index".into()))? = *v;
+    }
+    Ok(())
+}
+
+/// Encode `state` sparsely against `pristine` (the same lattice, undamaged): postcard of the
+/// per-beam differences plus the small remainder. A settled dent of a few hundred beams costs
+/// a few kB; the server only sends it with lattice snapshots of damaged cars. The per-beam
+/// energy ledger is not carried (see `SparseDamageState`): a decoded state has the pristine
+/// (zero) ledger.
+pub fn encode_damage_state(state: &FullDamageSnapshot, pristine: &FullDamageSnapshot) -> Vec<u8> {
+    let (s, p) = (&state.snapshot, &pristine.snapshot);
+    let (comp, energy) = match (&state.ext, &pristine.ext) {
+        (Some(x), Some(px)) => (
+            diff_f32(&x.beam_comp_plastic_strain, &px.beam_comp_plastic_strain),
+            Vec::new(),
+        ),
+        _ => (Vec::new(), Vec::new()),
+    };
+    let mut base = state.clone();
+    base.snapshot.node_pos_m.clear();
+    base.snapshot.beam_rest_m.clear();
+    base.snapshot.beam_plastic_strain.clear();
+    base.snapshot.beam_flags.clear();
+    if let Some(x) = base.ext.as_mut() {
+        x.beam_comp_plastic_strain.clear();
+        x.beam_energy_j.clear();
+    }
+    let sparse = SparseDamageState {
+        beam_rest_m: diff_f32(&s.beam_rest_m, &p.beam_rest_m),
+        beam_plastic_strain: diff_f32(&s.beam_plastic_strain, &p.beam_plastic_strain),
+        beam_flags: s
+            .beam_flags
+            .iter()
+            .zip(&p.beam_flags)
+            .enumerate()
+            .filter(|(_, (a, b))| a != b)
+            .map(|(i, (a, _))| (i as u32, *a))
+            .collect(),
+        beam_comp_plastic_strain: comp,
+        beam_energy_j: energy,
+        base,
+    };
+    postcard::to_allocvec(&sparse).expect("damage state serializes")
+}
+
+/// Decode [`encode_damage_state`] bytes against the same `pristine` state, with the node
+/// positions from the accompanying [`LatticeSnapshot`].
+pub fn decode_damage_state(
+    bytes: &[u8],
+    pristine: &FullDamageSnapshot,
+    nodes: &[[f32; 3]],
+) -> Result<FullDamageSnapshot, NetError> {
+    let sparse: SparseDamageState =
+        postcard::from_bytes(bytes).map_err(|e| NetError::Decode(format!("damage state: {e}")))?;
+    let mut out = sparse.base;
+    let p = &pristine.snapshot;
+    out.snapshot.node_pos_m = nodes.to_vec();
+    out.snapshot.beam_rest_m = p.beam_rest_m.clone();
+    apply_f32(&mut out.snapshot.beam_rest_m, &sparse.beam_rest_m)?;
+    out.snapshot.beam_plastic_strain = p.beam_plastic_strain.clone();
+    apply_f32(
+        &mut out.snapshot.beam_plastic_strain,
+        &sparse.beam_plastic_strain,
+    )?;
+    out.snapshot.beam_flags = p.beam_flags.clone();
+    for (i, v) in &sparse.beam_flags {
+        *out.snapshot
+            .beam_flags
+            .get_mut(*i as usize)
+            .ok_or_else(|| NetError::Decode("damage state index".into()))? = *v;
+    }
+    if let (Some(x), Some(px)) = (out.ext.as_mut(), pristine.ext.as_ref()) {
+        x.beam_comp_plastic_strain = px.beam_comp_plastic_strain.clone();
+        apply_f32(
+            &mut x.beam_comp_plastic_strain,
+            &sparse.beam_comp_plastic_strain,
+        )?;
+        x.beam_energy_j = px.beam_energy_j.clone();
+        apply_f32(&mut x.beam_energy_j, &sparse.beam_energy_j)?;
+    }
+    Ok(out)
+}
+
 /// The contacts of one vehicle's damage step that can change its lattice, or nothing when the
 /// whole batch is a no-op for `wp_damage::DamageModel::apply_contacts`.
 ///
@@ -197,6 +312,23 @@ pub trait ReplicaDamage: Send {
     fn solver_period(&self) -> u64 {
         1
     }
+    /// Full internal damage state for a resync ([`encode_damage_state`] bytes), or `None`
+    /// when the model has none beyond node positions or is undamaged. Default: `None`.
+    fn save_state(&self) -> Option<Vec<u8>> {
+        None
+    }
+    /// Restore [`ReplicaDamage::save_state`] bytes, with `nodes` from the lattice snapshot.
+    /// Returns false when unsupported or the bytes do not fit this model. Default: false.
+    fn restore_state(&mut self, _bytes: &[u8], _nodes: &[[f32; 3]]) -> bool {
+        false
+    }
+}
+
+/// The undamaged state of `m`'s lattice (same counters, all damage reset).
+fn pristine_of(m: &wp_damage::DamageModel) -> FullDamageSnapshot {
+    let mut p = m.clone();
+    p.reset();
+    p.save_full()
 }
 
 impl ReplicaDamage for wp_damage::DamageModel {
@@ -228,6 +360,23 @@ impl ReplicaDamage for wp_damage::DamageModel {
 
     fn solver_period(&self) -> u64 {
         self.tuning().solver_divider.max(1) as u64
+    }
+
+    fn save_state(&self) -> Option<Vec<u8>> {
+        let pristine = pristine_of(self);
+        let full = self.save_full();
+        if full == pristine {
+            return None;
+        }
+        Some(encode_damage_state(&full, &pristine))
+    }
+
+    fn restore_state(&mut self, bytes: &[u8], nodes: &[[f32; 3]]) -> bool {
+        let pristine = pristine_of(self);
+        match decode_damage_state(bytes, &pristine, nodes) {
+            Ok(full) => self.restore_full(&full).is_ok(),
+            Err(_) => false,
+        }
     }
 }
 

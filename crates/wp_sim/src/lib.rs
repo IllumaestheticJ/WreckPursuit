@@ -19,7 +19,9 @@ mod traffic_link;
 mod weather_link;
 
 pub use contacts::CONTACT_EVENT_MIN_IMPULSE_NS;
-pub use physics::{CityColliders, PhysicsWorld, SAFETY_FLOOR_Z};
+pub use physics::{
+    city_ground_colliders, parked_slab_collider, CityColliders, PhysicsWorld, SAFETY_FLOOR_Z,
+};
 pub use police_link::POLICE_SLOT_RESERVE;
 pub use systems::{SystemId, Systems};
 pub use traffic_link::TRAFFIC_SLOT_RESERVE;
@@ -99,11 +101,13 @@ pub struct SimVehicle {
     pub body: VehicleBody,
     /// Who drives it (see [`Sim::set_vehicle_kind`]).
     pub kind: VehicleKind,
-    /// The `wp_police` unit this car embodies (AI police cars only).
+    /// The `wp_police` unit this car embodies (AI police cars and player cop seats).
     pub police_unit: Option<wp_police::UnitId>,
     /// The `wp_world` traffic agent this car embodies (physical traffic only).
     pub traffic_agent: Option<wp_world::AgentId>,
     spawn: ([f32; 3], f32),
+    /// Player driving this police seat (`Sim::bind_player_police`).
+    player_police: Option<wp_contracts::PlayerId>,
     /// Wheel radius / width (m) for debris cylinders when a wheel tears off.
     wheel_size: (f32, f32),
     /// `DamageModel::hull_version` the chassis collider was last built from.
@@ -267,6 +271,7 @@ impl Sim {
             police_unit: None,
             traffic_agent: None,
             spawn: (pos, yaw),
+            player_police: None,
             wheel_size: (car.def.wheels[0].radius_m, car.def.wheels[0].width_m),
             hull_version,
             collider_floor_z,
@@ -504,6 +509,10 @@ impl Sim {
             .position(|v| v.id == id)
             .ok_or(SimError::UnknownEntity(id))?;
         let slot = self.vehicles.remove(i);
+        if let Some(unit) = slot.police_unit {
+            // Player cop seats (`bind_player_police`); AI units are retired by `wp_police`.
+            self.police.remove_player_unit(unit);
+        }
         self.physics.remove_body(slot.body.body);
         Ok(())
     }

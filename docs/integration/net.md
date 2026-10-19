@@ -3,7 +3,7 @@
 - **Workstream / prompt:** 07 — multiplayer netcode
 - **Branch:** `ws/net`
 - **Crates / folders owned:** `crates/wp_net`, `apps/server`, `apps/testbed-web/src/net/` (+ `net.html`)
-- **Contract version built against:** 0.3.0 (`main`, lead round 8); wire protocol `PROTOCOL_VERSION = 4`
+- **Contract version built against:** 0.3.0 (`main`, step 2); wire protocol `PROTOCOL_VERSION = 5`
 
 ## Exposes
 
@@ -13,7 +13,10 @@
   `net_tick()` (4 physics ticks + output), `drain_outgoing() -> Vec<Outgoing>`, `stats()`,
   `roles()`, `accounts_mut()`, `vehicle_of(PlayerId)`; **meta join gate (MC-6)**:
   `ServerConfig::require_join_token`, `take_join_requests() -> Vec<JoinRequest>`,
-  `approve_join(conn, display_name, meta_reconnect_token)`, `reject_join(conn, reason)`.
+  `approve_join(conn, display_name, meta_reconnect_token)`, `reject_join(conn, reason)`;
+  **step 2 host hooks**: `assign_role(pid, role)`, `kick(pid, reason)`,
+  `connected_players()`, `owner_of(entity)`, `player_of_unit(UnitId)`,
+  `set_event_tap(on)` / `take_tapped_events()`.
   Forwards typed `SimEvent::{Police, Race, Economy, WeatherChanged}`; lobby money changes are
   ledger `EconomyEvent`s (`StakeCharged` / `RacePayout` / `RaceRep`).
 - `netsim::NetSim` — what the server needs from a simulation (spawn/despawn, per-tick input,
@@ -24,17 +27,23 @@
   `traffic_agents()` (`TrafficAgentSnapshot`), optional server `weather()` (W-5) with
   `WeatherChanged` events, `captain_command` / `set_human_captain` into `wp_police`,
   `police_unit(EntityId)`.
+  **Step 2**: player police seats become `wp_police` player units (`set_owned_kind(id, kind,
+  player)`); spawns settle on terrain; `damage_settled` / `damage_state` (full damage state
+  for resyncs, NET-N5) / `bounty`.
   `WpSim::with_city(config, cars, CitySetup { world, police_car, traffic_car })`,
   `WpSim::{set_weather, enable_weather, weather_sim, weather_sim_mut}`,
-  `netsim::{server_world_config, lane_spawn_points, city_weather}`.
-- `lattice::damage_relevant(contacts, tuning, mode)` — contacts `wp_damage` would act on.
+  `netsim::{server_world_config, lane_spawn_points, city_weather, city_ground}`.
+- `lattice::damage_relevant(contacts, tuning, mode)` — contacts `wp_damage` would act on;
+  `lattice::{encode_damage_state, decode_damage_state}` (sparse `FullDamageSnapshot`).
 - `client::Client` — sans-IO client: `connect`, `connect_with_join_token`, `receive`,
   `update(now_ms, &VehicleInput)`, `drain_outgoing`, `render(now_ms)`, `render_traffic(now_ms)`,
   `traffic()`, `request_role`, `captain_command(CaptainCommand) -> seq`,
   `race_command(RaceCommand)`, `send_reliable`, `bye`, `stats()`; state: `game_events`
   (typed `SimEvent`s to drain), `wanted`, `captain_replies`, `weather`,
   `meta_reconnect_token`, `unit_order` (contract `UnitOrder`), lobby/captain/account.
-- `predict::{Predictor, PredictedVehicle, RigVehicle}`, `interp::StateBuffer`,
+- `predict::{Predictor, PredictedVehicle, RigVehicle, CityGround}` (`Predictor::on_ground`:
+  prediction on the server's static city colliders; `ClientConfig::city_ground`),
+  `Client::{replica_rest, replica_ids}`, `interp::StateBuffer`,
   `timesync::TimeSync`, `interest::*`, `roles::RoleManager`, `race::RaceLobby`.
 - `protocol::{ClientMsg, ServerMsg, PLAYER_UNIT_BASE, unit_order_code, …}` + codec (contract
   types as `typed<T>` = postcard), `quant::{…, QTrafficAgent}`, `snapshot::*`,
@@ -44,20 +53,24 @@
 - Protocol spec with byte layouts: `crates/wp_net/README.md`.
 
 ### `wp_net` feature `native` (tokio — never from `wp_wasm`)
-`native::{spawn_game_loop, serve_ws, connect_ws, WsTransport, StatusReport, IoEvent, OutFrame}`.
+`native::{spawn_game_loop, spawn_game_loop_with (per-tick host hook), serve_ws, connect_ws,
+WsTransport, StatusReport, IoEvent, OutFrame}`.
 
 ### `apps/server` (`wp-server`)
-Flags/TOML config (port, admin port, instance size, `--city FILE|procedural` (loads the road
+Flags/TOML config (port, admin port, instance size, `--city FILE|procedural|vesper_v2` (loads the road
 network, physical traffic, AI police; players spawn on lanes), seed, time ratio, time of day,
 mode, `--bots N`, `--arena R`, data dir), `GET /status` admin JSON, JSON-lines logs. Library
-API `wp_server::{run, AppConfig, json_log, null_log, status_json}` for tests/tools.
+API `wp_server::{run, run_with, MetaVars, AppConfig, json_log, null_log, status_json}` for
+tests/tools. **Meta link** (`WP_META_URL`, `src/meta.rs`): register, join-token verification
+(name, reserved role, meta reconnect token), presence heartbeats, kicks, pursuit reports.
 
 ### `wp_wasm` functions added (in a separate module, `crates/wp_wasm/src/net.rs`)
 `net_create, net_connect, net_connect_join, net_receive, net_update, net_take_outgoing,
 net_render_json, net_traffic_json, net_events_json, net_status_json, net_stats_json,
 net_captain_json, net_request_role, net_captain_command_json (contract CaptainCommand JSON →
 seq), net_race_create_json, net_race_command_json, net_race_join, net_race_start,
-net_race_leave, net_race_invite, net_bye` (round 8: `net_captain_order_json` removed).
+net_race_leave, net_race_invite, net_bye, net_damage_json, net_lattice_nodes` (round 8:
+`net_captain_order_json` removed; step 2: the last two, for damage display and the e2e).
 Table with signatures in the module docs. `ws/testbed` (04) is active and rewrote
 `wp_wasm/src/lib.rs`; to keep the merge trivial my only edits to shared files are
 `pub mod net;` in `lib.rs`, one doc line, and `wp_net.workspace = true` in `Cargo.toml`.
@@ -71,7 +84,9 @@ misprediction count, correction magnitude, bandwidth, lattice hash stats; round 
 wanted levels, typed unit order, police radio lines, traffic count), grey boxes for kinematic
 traffic, captain radial sending typed commands (pursue / intercept / roadblock / spikes /
 helicopter / priority / call off / patrol / disengage) with the last reply shown, and
-`?join=<token>` for a meta join token. Separate page so
+`?join=<token>` for a meta join token; step 2: each car's replicated damage lattice drawn
+inside a translucent body, `?role=racer|police_chase|…`, `window.__wpNet` test hook,
+`e2e/net_two_tabs.mjs` (`npm run e2e:net`, `just web-e2e-net`). Separate page so
 04's `main.ts` is untouched; `vite.config.ts` gained a `rollupOptions.input` entry for
 `net.html`. Screenshots: `docs/media/net_racer.png`, `docs/media/net_captain_order.png`.
 
@@ -83,7 +98,7 @@ helicopter / priority / call off / patrol / disengage) with the last reply shown
 | NET-N2 | `wp_vehicle` (02) | Full-state rewind of one vehicle for client prediction: `Vehicle::set_state(&VehicleState)` (added to the stub on this branch) or better an opaque `snapshot() -> Vec<u8>` / `restore(&[u8])` covering engine, clutch, wheel spin, filters; plus a client-side single-car stepper (like 02's `rig::Rig`: own Rapier world, flat ground) to implement `wp_net::predict::PredictedVehicle`. | Rewind-and-replay must reproduce the server exactly. `ws/vehicle` moves the chassis into Rapier, so `set_state` must also place the body. | **Done (run 4)** on A's delivery: `predict::RigVehicle` over `Rig`, exact rewind via `Rig::restore(VehicleSnapshot)` sent 5 Hz as `Snapshot.own_full`; `Rig::set_state` (mine, additive) is the fallback between snapshots. |
 | NET-N3 | `wp_sim` (lead) | `Sim::despawn_vehicle`, `place_vehicle`. | Players leave/switch roles. | **Done (round 6b)**: `WpSim` despawns for real (no more parking). |
 | NET-N4 | `wp_sim` (lead) | `Sim::mode_table()`, per-vehicle kind. | Welcome mode; interest needs AI kinds. | **Done (round 6b)**: `VehicleKind` → `EntityKind` (`AiPolice`, `Traffic`, new `AiRacer`). |
-| NET-N5 | `wp_damage` (03) | Full `DamageModel::snapshot() -> Vec<u8>` / `restore(&[u8])` (positions **and** prev/vel, beam rest lengths / plastic strain, broken beams, impactors, groups, components, `calls`, `time_s`, awake/quiet). Smaller alternative: a public `step_count()` and a restore that also takes beam rest lengths. | Today a lattice snapshot restores node positions only. Measured in `city_e2e`: **every** remaining hash mismatch (63 of 2386 checks) is on a replica restored from a dented snapshot (a car that entered a client's view already damaged, or after a resync); replicas built from contacts alone never mismatch. With a full restore the remaining mismatches go to 0 and a resync becomes final. | Mismatches are detected by the 2 s hash and resynced (max 80 ticks); `WpSim` counts damage steps itself so a new replica starts in the server's solver phase (verified against `DamageModel::state_hash`). |
+| NET-N5 | `wp_damage` (03) | Full damage snapshot/restore. | Replicas restored from a dented snapshot diverged on the next hit. | **Done (step 2)** on B's v0.3.0 `save_full` / `restore_full`: dented-car lattice snapshots carry the sparse full state; snapshots of an unsettled model are provisional and followed up. Vesper e2e: 0 / 3844 mismatches. Left: node velocities / impactors of a crash in progress (hence provisional). |
 | NET-N9 | `wp_sim` (lead) | A kind for **player-driven police seats** that drives the traffic spawn ring (like `Player`) but is not a racer for `wp_police` (e.g. `VehicleKind::PlayerPolice`). | `WpSim` marks police seats `VehicleKind::Police` so AI police do not chase them; that also removes them from `racer_views` *and* from the traffic ring (`TrackedVehicle::player` is `kind == Player`). | `VehicleKind::Police` (no traffic spawns around a lone player cop). |
 | NET-N10 | `wp_damage` (03) | A public, pure `DamageModel::contacts_have_effect(&[ContactImpulse], &ModeTable) -> bool` (or per-contact filter) next to `add_contacts`. | `wp_net::lattice::damage_relevant` mirrors `contact.rs` (speed / impulse / group-energy thresholds) to skip replicating no-op contacts; a B-owned predicate keeps the two from drifting. | Mirror + guard test `lattice::tests::dropped_contacts_are_noops` (fails if B's thresholds change semantics). |
 | NET-N11 | `wp_vehicle` (02) | `Rig` obstacles: `Rig::set_obstacles(&[(pos, rot, half_extents, vel)])` as kinematic cuboids (or a collider list) so the client can predict contacts with nearby cars. | Police rams / traffic hits are corrected one RTT late: chase RMS correction 0.12–0.39 m (max 3 m) vs 0.11 m in the contact-free test. | Corrections + 100 ms visual smoothing; chase budget 0.5 m RMS in `city_e2e`. |
@@ -91,6 +106,7 @@ helicopter / priority / call off / patrol / disengage) with the last reply shown
 | NET-N7 | `wp_economy` (08) | Payout API: `race_payout(results, stakes) -> Vec<(PlayerId, i64)>`, stake tables (day/night), persistent account store keyed by a durable player identity. | All economy stays on the server; the net layer should only call it. | Stake `500 × (1 + night_factor)`, split 70/30 or 60/30/10; since round 8 each change is a committed ledger `EconomyEvent` (`StakeCharged` / `RacePayout` / `RaceRep`) sent typed to its owner. In-memory `InMemoryStore` keyed by per-instance `PlayerId`. |
 | NET-N12 | lead (`wp_sim`) + K (weather) | Weather inside `wp_sim` (K's `WeatherLink` plan: `Sim::set_weather`, vehicles and police read `weather_at`), so server grip and police sight follow the weather the clients are shown. | Today `WpSim` steps a `WeatherSim` next to the sim for replication only. | `WpSim::set_weather` / `enable_weather`; `WpSim` will switch to the sim's weather when it exists (one adapter change). |
 | NET-N13 | D (world) | `AgentView` headlights flag (contract `traffic_flags::HEADLIGHTS`). | Night traffic in the browser. | Bit never set; clients may light every agent at night. |
+| NET-N14 | `wp_police` (06) | Roadblock / spike sites in grid districts: the 120 m approach-sight rule treats every side street as a blind corner, so no site exists in downtown Port Vesper (100 m blocks); also `sees` used a fixed 1.3 m eye height (fixed here, see below — please review). | Captain / chase-unit tools are refused (`BlindCorner`) wherever the city is a grid. | The e2e's racer 0 laps the port block (Gantry Row, the one 470 m straight near the centre). |
 | NET-N8 | `wp_world` (05) | Route helper for races, road polylines for the captain map. | Prompt 07 captain map. | `--city` now loads `.road.json`/`.road.bin`/`procedural` (round 6b). Races take client checkpoints; captain map draws a grid. |
 
 ## Contract change requests
@@ -110,11 +126,17 @@ helicopter / priority / call off / patrol / disengage) with the last reply shown
 | `crates/wp_vehicle/src/rig.rs` | `Rig::set_state(&VehicleState)` (additive: vehicle + rigid body rewind) | Client rewind on the real model (NET-N2). `Vehicle::set_state` itself is the lead's. |
 | `crates/wp_damage/src/lib.rs` | `DamageModel::restore_node_positions` (additive) | Lattice resync (NET-N5). |
 | `crates/wp_sim/src/police_link.rs` | `Sim::captain_command(CaptainCommand) -> Result<(), CaptainError>`, `Sim::set_human_captain(bool)` (additive, forward to `PoliceSystem`) | Typed captain commands from the wire (round 8). Lead: keep or replace with your own API. |
+| `crates/wp_sim/src/police_link.rs`, `lib.rs` | **Step 2**: `Sim::bind_player_police(id, PlayerId) -> UnitId` / `unbind_player_police(id)` (a player-driven police car becomes a `wp_police` player unit; synced like AI cars, never driven by `wp_police`); `despawn_vehicle` removes a bound player unit; a private `SimVehicle::player_police` so a seat whose unit vanished (new police system installed) is re-registered instead of despawned | Player cop can spot, pursue, capture and take orders. No change for AI units; goldens unaffected (no player police in scenarios) |
+| `crates/wp_sim/src/physics.rs` | **Step 2**: the city ground collider building moved into `pub fn city_ground_colliders(&CityMap)` (same colliders, same insertion order; `set_city_ground` calls it) + `pub fn parked_slab_collider()` | Client prediction on Port Vesper drives on the server's own ground |
+| `crates/wp_vehicle/src/rig.rs` | **Step 2**: `Rig::set_city_ground(colliders)` (additive: replaces the slab) | Same |
+| `crates/wp_police/src/lib.rs`, `pursuit.rs` | **Step 2**: `PoliceSystem::remove_player_unit(UnitId)`; `sees_at(world, a, az, b, bz)` used for unit→racer sight (recognition, joining a chase): eye height follows the car up on terrain (`1.3 m + max(0, z − 1 m)`), identical to `sees` below z = 1 m | Police never recognised anyone in downtown Port Vesper (≈5 m up: the fixed 1.3 m sightline ran through the terrain). E: please review / take over |
 | `apps/simcli/src/net.rs` | `traffic: None` in the round-trip snapshot | Compile fix for protocol v4's `Snapshot.traffic` (owner I). |
 | `crates/wp_wasm/Cargo.toml`, `src/lib.rs`, new `src/net.rs` | `wp_net` dependency, `pub mod net;`, `net_*` functions | Browser client. |
 | `apps/testbed-web/vite.config.ts`, `README.md`, new `net.html`, `src/net/` | build input for `net.html`, README section | Browser client page. |
-| `justfile` | `server` comment, new `server-bots` recipe | Load testing. |
-| `Cargo.lock` | `wp_world` dependency of `wp_server`, `wp_police` dev-dependency of `wp_net` (round 6b); `wp_weather`, `serde`, `postcard` dependencies of `wp_net` (round 8; postcard 1.1.3 already locked for `wp_world`/`wp_wasm`, all wasm-clean) | `--city` loading; typed payloads; server weather. |
+| `justfile` | `server` comment, new `server-bots` recipe; step 2: `web-e2e-net` | Load testing; two-tab browser check. |
+| `apps/server/Cargo.toml` | `wp_meta` dependency (native only) | Meta link. `apps/server/tests/meta_link.rs` includes `apps/meta/tests/common/mod.rs` (meta's in-process test service) by path |
+| `apps/testbed-web/package.json` | `e2e:net` script | Two-tab browser check. |
+| `Cargo.lock` | step 2: `rapier3d` dependency of `wp_net` (already in the tree via `wp_vehicle`, wasm-clean), `wp_meta` of `wp_server`; `wp_world` dependency of `wp_server`, `wp_police` dev-dependency of `wp_net` (round 6b); `wp_weather`, `serde`, `postcard` dependencies of `wp_net` (round 8; postcard 1.1.3 already locked for `wp_world`/`wp_wasm`, all wasm-clean) | `--city` loading; typed payloads; server weather. |
 
 ## Perf numbers
 | Measurement | Machine | Native (release) | Browser | Budget |
@@ -136,27 +158,81 @@ helicopter / priority / call off / patrol / disengage) with the last reply shown
 | Round 8 weather message (13 689 cells, run-length) | in-process | 25 B uniform grid; bound 2 B/cell + 30 B | — | — |
 | Round 8 browser smoke (`net.html`, debug wasm, `wp-server --city procedural --weather heavy_rain --bots 2`) | headless Chromium | joined, weather shown, traffic drawn, captain command reply `ok`, down 9 kB/s | — | — |
 
+| **Step 2 Vesper e2e** (Port Vesper v2, 4 clients, 3 min, ≤ 26 vehicles): server net tick | in-process | avg 1.77 ms, p99 4.59 ms, max 12.2 ms | — | 16.7 ms |
+| Step 2: down-link per client (racer / racer reconnecting / cop / captain) | in-process | mean 10.5 / 12.1 / 9.8 / 1.0 kB/s, worst second 13.0 / 34.9 / 11.9 / 1.2 kB/s | — | 40 kB/s |
+| Step 2: vehicle states / kinematic traffic / captain map vs server | in-process | 14 124 / 1858 / 4248 compared, 0 differ | — | exact |
+| Step 2: lattice hashes / replicas after settling | in-process | 0 / 3844 mismatched / 46 checked (39 dented), 0 differ | — | — |
+| Step 2: prediction on terrain | in-process | RMS 0.03–0.12 m, max 1.24 m, 0 resets (+1 on reconnect) | — | 0.5 m |
+| Step 2 browser two tabs (`just web-e2e-net`, release wasm, local server) | headless Chromium | both see 2 cars, crash dents both on both pages (equal hashes), reconnect keeps the car, ~9 kB/s down | — | — |
+
 Measured on the integrated build with the real vehicle (A) and damage (B) models. The browser
 figures from run 1 (stub) have not been re-measured.
 
 ## Known gaps
-- Replicas restored from a *dented* lattice snapshot (car entered view already damaged, or a
-  resync) hold node positions only and can diverge on the next hit, then resync (NET-N5).
-- Rewinds are bit-exact only at the 5 Hz snapshot ticks (`set_state` in between); collisions
-  with city geometry and other cars are corrected, not predicted (NET-N11).
+- Lattice snapshots of a car with a crash in progress are provisional (no node velocities /
+  impactors in `FullDamageSnapshot`) and are followed up once it settles.
+- Prediction rewinds are bit-exact only at the 5 Hz snapshot ticks (`set_state` in between);
+  collisions with other cars are corrected, not predicted (NET-N11). On terrain cities the
+  client drives on the server's static ground; surfaces other than asphalt are not predicted.
 - Own-car predicted contacts are not applied; own damage is server-driven, one RTT late.
 - Kinematic traffic is display-only and straight-line extrapolated between 10 Hz updates.
 - Server weather does not change server grip yet (NET-N12).
 - The in-instance lobby keeps its own `RaceUpdate`/`RaceProgress`/`RaceResults`; contract
   `RaceEvent`s are forwarded only when the sim emits them (no `wp_race` in `wp_sim` yet).
-- The `wp_meta` worker is not wired into `apps/server` (gate + protocol fields are).
+- Meta link: economy write-through (meta step 5) and race reports (step 6) are not wired;
+  accounts stay in memory per instance.
 - Player police seats are `VehicleKind::Police` in the sim: no traffic spawns around a lone
-  player cop (NET-N9).
-- Placeholders: heat grid, stakes/payout split, in-memory accounts.
-- WebSocket only; both channels reliable. No auth beyond the reconnect token.
+  player cop (NET-N9). Roadblocks / spikes are refused in grid districts (NET-N14).
+- Placeholders: heat grid, stakes/payout split.
+- WebSocket only; both channels reliable.
 - `--arena` + browser clients: the browser uses `wp_damage` replicas, the arena uses the toy
   lattice, so browser hash checks mismatch and resync after every crash (by design of the
   test mode).
+
+## Response to step 2 (2026-10-19): asymmetric multiplayer on the real game
+Merged `origin/main` (step 2 start, clean). All three items:
+
+1. **Headless 4-client end-to-end on Port Vesper v2** — `crates/wp_net/tests/vesper_e2e.rs`
+   (3 min, ≈ 42 s debug): the server runs the real `wp_sim` with Port Vesper v2, physical
+   and kinematic traffic and AI police; 2 racer bots, a player cop bot (steers from what its
+   own client sees, calls in a roadblock and spikes) and a captain (orders the cop onto
+   racer 0, sets the priority target); racer 1 drops and reconnects. Asserts and numbers in
+   the perf table above and in `crates/wp_net/README.md`: no desync beyond the correction
+   budget, every client holds exactly the server's states for every vehicle kind, kinematic
+   traffic and the captain map match, damage replicas equal the server after settling, the
+   player cop starts the pursuit and captures racer 0 and every client sees the capture,
+   bandwidth and tick time within budget.
+2. **Browser path** — `net.html?role=racer` joins a local `wp-server`; `e2e/net_two_tabs.mjs`
+   (`just web-e2e-net`) starts the server, opens two tabs, each sees 2 player cars, tab B
+   steers into tab A, both cars deform on both pages with identical lattice hashes, and a
+   dropped socket reconnects with its token and keeps its car. The page draws each car's
+   replicated lattice. Screenshots `docs/media/net_two_tabs_{a,b}.png`.
+3. **What it flushed out (fixed)**:
+   - player cop seats were not police units → `Sim::bind_player_police` glue (listed above);
+     chase units may now call in roadblock / spikes / helicopter (orders stay captain-only);
+   - police sight used a fixed 1.3 m eye height, blind on terrain → `wp_police::sees_at`;
+   - client prediction ran on the flat slab on terrain → prediction on the server's own
+     city colliders (`wp_sim::city_ground_colliders`, `Rig::set_city_ground`);
+   - snapshot baseline deadlock: an entity whose first deltas beat its `EntityEnter` froze
+     for that client for good (the player cop was frozen for every other player) →
+     protocol v5 `Inputs.missing`;
+   - damage replication on the real sim (NET-N1/N5): dented-car snapshots now carry the full
+     damage state; snapshots of an unsettled model are provisional with a follow-up (a
+     traffic car hit in its first tick diverged before); lattice queue and snapshot
+     allowance respect a sliding 1 s window (a reconnect burst reached 39.7 kB/s);
+   - `join_token` flow: `wp-server` now links to meta (`WP_META_URL`): registration, token
+     verification, reserved role, meta reconnect token, presence, kicks, pursuit reports —
+     tested against the real service in-process (`apps/server/tests/meta_link.rs`);
+   - reconnect: covered in-process (Vesper e2e) and in the browser (two-tab e2e);
+   - `wp-server --city vesper_v2`; spawns settle on terrain.
+   - Police/traffic replication needed no fix beyond the baseline deadlock: all kinds agree
+     exactly with the server.
+
+Checks (step 2): `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`
+clean; `cargo test --workspace` 787 passed, 0 failed, 15 ignored (the parked tests; goldens
+unchanged); wasm build passes (no tokio / tungstenite / rusqlite / wp_meta in `wp_wasm`'s
+tree); testbed `tsc --noEmit` clean; `just web-e2e` all checks passed; `just web-e2e-net`
+all checks passed; `vesper_e2e` passes in debug (42 s) and release (30 s).
 
 ## Response to lead feedback (round 8)
 Merged `origin/main` (contract v0.3.0, clean). Item 1 — the v0.3.0 net items, all in

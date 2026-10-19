@@ -15,6 +15,9 @@ wp_contracts.workspace = true
 wp_sim.workspace = true
 wp_world.workspace = true
 wp_net = { workspace = true, features = ["native"] }
+# Meta-service link (accounts, matchmaking join tokens, reports). Native only, never reachable
+# from wp_wasm; inactive unless WP_META_URL is set.
+wp_meta = { path = "../meta" }
 tokio = { workspace = true, features = ["io-util"] }
 serde.workspace = true
 serde_json.workspace = true
