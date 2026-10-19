@@ -187,6 +187,7 @@ fn gear_change_plays_the_recorded_shift_clunk_once() {
             car_id: "debug_sedan",
             state: &s,
             throttle: 0.5,
+            throttle_applied: None,
             horn: false,
             siren: false,
             road_rumble: 0.0,
