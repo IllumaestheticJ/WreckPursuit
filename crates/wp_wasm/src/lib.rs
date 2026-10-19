@@ -105,6 +105,15 @@ pub fn free_drive_json(car: &str, mode: &str, city: bool) -> Result<String, JsVa
     Ok(json(&scenario::free_drive(car, mode, city)))
 }
 
+/// City-chase preset JSON: procedural city at night, full traffic and police presence, the
+/// live `car` ("player") starting on the race grid already at 90 km/h (see
+/// [`scenario::city_chase`]). Start it with `init(seed, json, false)`.
+#[wasm_bindgen]
+pub fn city_chase_json(car: &str, mode: &str) -> Result<String, JsValue> {
+    let mode = data::parse_mode(mode).map_err(err)?;
+    Ok(json(&scenario::city_chase(car, mode)))
+}
+
 /// Parse a `.ron` scenario (simcli format v2) into JSON for `init`.
 #[wasm_bindgen]
 pub fn scenario_from_ron(text: &str) -> Result<String, JsValue> {
@@ -203,6 +212,61 @@ pub fn entities() -> Result<Vec<u32>, JsValue> {
     get(|s| s.entities().iter().map(|e| e.0).collect())
 }
 
+/// Every vehicle in the sim — scenario entities *and* vehicles the sim spawned itself (police
+/// units, promoted traffic) — as `[entity, kind]` pairs, ascending by entity. Kind: 0 player,
+/// 1 AI racer, 2 police, 3 traffic.
+#[wasm_bindgen]
+pub fn live_vehicles() -> Result<Vec<f32>, JsValue> {
+    get(|s| {
+        let mut out = Vec::new();
+        for v in s.sim().vehicles() {
+            out.push(v.id.0 as f32);
+            out.push(kind_code(v.kind) as f32);
+        }
+        out
+    })
+}
+
+/// Debug: set who drives a vehicle (0 player, 1 AI racer, 2 police, 3 traffic), e.g. to look at
+/// police visuals before police units spawn on their own. Refused while recording / replaying.
+#[wasm_bindgen]
+pub fn set_vehicle_kind(entity: u32, kind: u8) -> Result<(), JsValue> {
+    let k = match kind {
+        0 => wp_sim::VehicleKind::Player,
+        1 => wp_sim::VehicleKind::AiRacer,
+        2 => wp_sim::VehicleKind::Police,
+        3 => wp_sim::VehicleKind::Traffic,
+        _ => return Err(err(format!("unknown vehicle kind {kind}"))),
+    };
+    with(|s| s.set_kind(EntityId(entity), k))
+}
+
+fn kind_code(k: wp_sim::VehicleKind) -> u8 {
+    match k {
+        wp_sim::VehicleKind::Player => 0,
+        wp_sim::VehicleKind::AiRacer => 1,
+        wp_sim::VehicleKind::Police => 2,
+        wp_sim::VehicleKind::Traffic => 3,
+    }
+}
+
+fn kind_name(k: wp_sim::VehicleKind) -> &'static str {
+    match k {
+        wp_sim::VehicleKind::Player => "player",
+        wp_sim::VehicleKind::AiRacer => "ai_racer",
+        wp_sim::VehicleKind::Police => "police",
+        wp_sim::VehicleKind::Traffic => "traffic",
+    }
+}
+
+/// The player's police heat as the UI kit's `HeatHud` JSON
+/// (`{level, heat, state, cooldown, unitsInPursuit, bounty}`), or `null` when the sim exposes no
+/// police state for the player yet. **Placeholder** until `Sim::police()` lands (lead run 5).
+#[wasm_bindgen]
+pub fn police_hud_json() -> Result<String, JsValue> {
+    get(|_s| "null".to_string())
+}
+
 /// Floats per vehicle record in `vehicle_states()` ([`pack::STATE_STRIDE`]).
 #[wasm_bindgen]
 pub fn state_stride() -> u32 {
@@ -252,6 +316,8 @@ struct WheelInfo {
 #[derive(Serialize)]
 struct VehicleInfo {
     entity: u32,
+    /// `player` / `ai_racer` / `police` / `traffic`.
+    kind: &'static str,
     name: String,
     car_id: String,
     display_name: String,
@@ -278,14 +344,23 @@ struct VehicleInfo {
 #[wasm_bindgen]
 pub fn vehicle_info(entity: u32) -> Result<String, JsValue> {
     with(|s| {
-        let spec = s
-            .spec(EntityId(entity))
+        let kind = s
+            .kind_of(EntityId(entity))
             .ok_or_else(|| format!("unknown entity {entity}"))?;
         let car = car_of(s, entity)?;
         let d = &car.def;
+        // Sim-spawned vehicles (police, traffic) have no scenario spec.
+        let (name, spawn_pos) = match s.spec(EntityId(entity)) {
+            Some(spec) => (spec.id.clone(), spec.pos),
+            None => (
+                format!("{}_{entity}", kind_name(kind)),
+                state_of(s, entity)?.pos,
+            ),
+        };
         Ok(json(&VehicleInfo {
             entity,
-            name: spec.id.clone(),
+            kind: kind_name(kind),
+            name,
             car_id: d.id.clone(),
             display_name: d.display_name.clone(),
             body_size_m: d.body_size_m,
@@ -327,7 +402,7 @@ pub fn vehicle_info(entity: u32) -> Result<String, JsValue> {
                 .map(|c| pack::variant_name(&c.kind))
                 .collect(),
             surfaces: pack::ALL_SURFACES.iter().map(pack::variant_name).collect(),
-            spawn_pos: spec.pos,
+            spawn_pos,
         }))
     })
 }
