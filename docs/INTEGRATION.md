@@ -1,7 +1,7 @@
 # WreckPursuit — Integration Guide
 
 Read this and `docs/CONTRACT_CHANGELOG.md` at the start of every session (see `CLAUDE.md`).
-Contract version: **0.1.0**.
+Contract version: **0.2.0**.
 
 ## Crate map & ownership
 

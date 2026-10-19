@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "InputSource",
+  "description": "Physical device the input originates from. Selects assist presets and filtering.",
+  "oneOf": [
+    {
+      "description": "Digital keyboard (needs heavy filtering).",
+      "type": "string",
+      "const": "Keyboard"
+    },
+    {
+      "description": "Analog gamepad.",
+      "type": "string",
+      "const": "Gamepad"
+    },
+    {
+      "description": "Steering wheel + pedals (no filtering, FFB capable on native).",
+      "type": "string",
+      "const": "Wheel"
+    }
+  ]
+}

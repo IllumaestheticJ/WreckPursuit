@@ -381,6 +381,7 @@ fn total_loss_while_wanted_is_a_capture_and_violations_need_witnesses() {
     let speeding = SimEvent::TrafficViolation {
         vehicle: RACER,
         kind: ViolationKind::RedLight,
+        pos: [0.0; 3],
     };
     h.run(0.1, &[speeding]);
     let heat = h.police.racer(RACER).unwrap().heat;

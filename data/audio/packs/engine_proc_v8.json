@@ -1,0 +1,237 @@
+{
+  "id": "engine_proc_v8",
+  "kind": "Engine",
+  "description": "Procedural placeholder: V8. Deep fundamental; cross-plane burble comes from the car's `uneven`.",
+  "engine_layers": [
+    {
+      "cue": "engine/idle",
+      "anchor": "Idle",
+      "throttle": "Both"
+    },
+    {
+      "cue": "engine/low_on",
+      "anchor": {
+        "RedlineFrac": 0.3
+      },
+      "throttle": "On"
+    },
+    {
+      "cue": "engine/mid_on",
+      "anchor": {
+        "RedlineFrac": 0.55
+      },
+      "throttle": "On"
+    },
+    {
+      "cue": "engine/high_on",
+      "anchor": {
+        "RedlineFrac": 0.85
+      },
+      "throttle": "On"
+    },
+    {
+      "cue": "engine/low_off",
+      "anchor": {
+        "RedlineFrac": 0.35
+      },
+      "throttle": "Off"
+    },
+    {
+      "cue": "engine/high_off",
+      "anchor": {
+        "RedlineFrac": 0.78
+      },
+      "throttle": "Off"
+    }
+  ],
+  "cues": {
+    "engine/idle": {
+      "source": {
+        "Synth": {
+          "synth": "engine",
+          "params": {
+            "h1": 1.0,
+            "h2": 0.8,
+            "h3": 0.45,
+            "h4": 0.25,
+            "noise": 0.1,
+            "drive": 0.5,
+            "bright": 0.2,
+            "off": 0.0
+          }
+        }
+      },
+      "gain": 1.0,
+      "looped": true
+    },
+    "engine/low_on": {
+      "source": {
+        "Synth": {
+          "synth": "engine",
+          "params": {
+            "h1": 1.0,
+            "h2": 0.8,
+            "h3": 0.45,
+            "h4": 0.25,
+            "noise": 0.1,
+            "drive": 0.5,
+            "bright": 0.4,
+            "off": 0.0
+          }
+        }
+      },
+      "gain": 1.0,
+      "looped": true
+    },
+    "engine/mid_on": {
+      "source": {
+        "Synth": {
+          "synth": "engine",
+          "params": {
+            "h1": 1.0,
+            "h2": 0.8,
+            "h3": 0.45,
+            "h4": 0.25,
+            "noise": 0.1,
+            "drive": 0.5,
+            "bright": 0.65,
+            "off": 0.0
+          }
+        }
+      },
+      "gain": 1.0,
+      "looped": true
+    },
+    "engine/high_on": {
+      "source": {
+        "Synth": {
+          "synth": "engine",
+          "params": {
+            "h1": 1.0,
+            "h2": 0.8,
+            "h3": 0.45,
+            "h4": 0.25,
+            "noise": 0.1,
+            "drive": 0.5,
+            "bright": 0.9,
+            "off": 0.0
+          }
+        }
+      },
+      "gain": 1.0,
+      "looped": true
+    },
+    "engine/low_off": {
+      "source": {
+        "Synth": {
+          "synth": "engine",
+          "params": {
+            "h1": 1.0,
+            "h2": 0.8,
+            "h3": 0.45,
+            "h4": 0.25,
+            "noise": 0.15000000000000002,
+            "drive": 0.5,
+            "bright": 0.3,
+            "off": 1.0
+          }
+        }
+      },
+      "gain": 0.8,
+      "looped": true
+    },
+    "engine/high_off": {
+      "source": {
+        "Synth": {
+          "synth": "engine",
+          "params": {
+            "h1": 1.0,
+            "h2": 0.8,
+            "h3": 0.45,
+            "h4": 0.25,
+            "noise": 0.15000000000000002,
+            "drive": 0.5,
+            "bright": 0.6,
+            "off": 1.0
+          }
+        }
+      },
+      "gain": 0.8,
+      "looped": true
+    },
+    "engine/limiter": {
+      "source": {
+        "Synth": {
+          "synth": "engine",
+          "params": {
+            "h1": 1.0,
+            "h2": 0.8,
+            "h3": 0.45,
+            "h4": 0.25,
+            "noise": 0.1,
+            "drive": 0.5,
+            "bright": 1.0,
+            "off": 0.0,
+            "chop_hz": 18.0
+          }
+        }
+      },
+      "gain": 0.9,
+      "looped": true
+    },
+    "turbo/whistle": {
+      "source": {
+        "Synth": {
+          "synth": "whine",
+          "params": {
+            "freq_hz": 2800.0,
+            "noise": 0.15
+          }
+        }
+      },
+      "gain": 0.6,
+      "looped": true
+    },
+    "supercharger/whine": {
+      "source": {
+        "Synth": {
+          "synth": "whine",
+          "params": {
+            "freq_hz": 1400.0,
+            "noise": 0.05
+          }
+        }
+      },
+      "gain": 0.6,
+      "looped": true
+    },
+    "turbo/blowoff": {
+      "source": {
+        "Synth": {
+          "synth": "blowoff",
+          "params": {
+            "decay_s": 0.45,
+            "lowpass_hz": 4000.0
+          }
+        }
+      },
+      "gain": 1.0,
+      "looped": false,
+      "duration_s": 0.6
+    },
+    "exhaust/pop": {
+      "source": {
+        "Synth": {
+          "synth": "pop",
+          "params": {
+            "decay_s": 0.08,
+            "freq_hz": 90.0
+          }
+        }
+      },
+      "gain": 1.0,
+      "looped": false,
+      "duration_s": 0.25
+    }
+  }
+}

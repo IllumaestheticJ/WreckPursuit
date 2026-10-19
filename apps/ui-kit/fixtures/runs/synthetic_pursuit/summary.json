@@ -1,0 +1,19 @@
+{
+  "name": "synthetic_pursuit",
+  "synthetic": true,
+  "note": "Hand-scripted by apps/ui-kit/scripts/gen-synthetic.mjs; not simulation output.",
+  "contract_version": "0.1.0",
+  "ticks": 21600,
+  "entities": [
+    {
+      "id": "racer",
+      "entity": 1,
+      "car": "shiro_turbo"
+    },
+    {
+      "id": "rival",
+      "entity": 2,
+      "car": "kestrel_ts"
+    }
+  ]
+}

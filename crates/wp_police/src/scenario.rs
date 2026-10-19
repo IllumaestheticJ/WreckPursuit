@@ -182,6 +182,10 @@ impl WorldQuery for ScenarioWorld {
     fn time_of_day(&self) -> TimeOfDay {
         self.time
     }
+    fn line_of_sight(&self, _a: [f32; 3], _b: [f32; 3]) -> bool {
+        // Occlusion in these scenarios comes from the police road graph's own occluders.
+        true
+    }
 }
 
 struct ScriptedRacer {
@@ -376,6 +380,7 @@ fn run_once(sc: &PoliceScenario, seed: u64, cfg: &PoliceConfig) -> RunNumbers {
                     kind: ViolationKind::Speeding {
                         over_mps: r.body.body.speed - r.body.limit_mps,
                     },
+                    pos: [r.body.body.pos[0], r.body.body.pos[1], 0.0],
                 });
             }
         }

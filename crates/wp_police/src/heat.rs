@@ -11,55 +11,8 @@ use crate::config::HeatFile;
 use crate::graph::District;
 use crate::time::SimTime;
 
-/// Wanted level derived from heat.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
-)]
-pub enum WantedLevel {
-    /// Not wanted.
-    #[default]
-    None,
-    /// Level 1.
-    L1,
-    /// Level 2.
-    L2,
-    /// Level 3.
-    L3,
-    /// Level 4.
-    L4,
-    /// Level 5.
-    L5,
-}
-
-impl WantedLevel {
-    /// 0 for `None`, 1..=5 otherwise.
-    pub fn number(self) -> u8 {
-        self as u8
-    }
-
-    /// Level for heat given ascending thresholds for L1..L5.
-    pub fn from_heat(heat: f32, thresholds: &[f32; 5]) -> Self {
-        const LEVELS: [WantedLevel; 5] = [
-            WantedLevel::L1,
-            WantedLevel::L2,
-            WantedLevel::L3,
-            WantedLevel::L4,
-            WantedLevel::L5,
-        ];
-        let mut level = WantedLevel::None;
-        for (i, t) in thresholds.iter().enumerate() {
-            if heat >= *t {
-                level = LEVELS[i];
-            }
-        }
-        level
-    }
-
-    /// Index 0..=4 into per-level tables (`None` maps to L1's entry).
-    pub fn table_index(self) -> usize {
-        (self.number().max(1) - 1) as usize
-    }
-}
+/// Wanted level derived from heat (moved to `wp_contracts` in v0.2.0; re-exported here).
+pub use wp_contracts::WantedLevel;
 
 /// Where a racer stands with the police.
 #[derive(

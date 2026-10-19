@@ -1,0 +1,22 @@
+# Progression gates. Owned by workstream 15 (wp_race). Loaded by wp_race::ProgressionTable.
+
+# Class brackets by wp_economy class_index. Must match data/economy/market.toml
+# [class_index.brackets] (a wp_race test checks it).
+brackets = [
+    { letter = "D", min = 100 },
+    { letter = "C", min = 300 },
+    { letter = "B", min = 450 },
+    { letter = "A", min = 600 },
+    { letter = "S", min = 750 },
+    { letter = "X", min = 900 },
+]
+
+# Licence tiers unlocked by clean races (finished, no contact over the threshold, no civilian
+# hits). Tier index is what EntryRequirements.min_licence refers to.
+licences = [
+    { name = "Rookie", clean_races = 0 },
+    { name = "Street", clean_races = 5 },
+    { name = "Pro", clean_races = 15 },
+    { name = "Elite", clean_races = 40 },
+    { name = "Legend", clean_races = 100 },
+]
