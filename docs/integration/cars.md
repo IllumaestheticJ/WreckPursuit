@@ -3,7 +3,21 @@
 - **Workstream / prompt:** 09 — car roster data
 - **Branch:** `ws/cars`
 - **Crates / folders owned:** `data/cars/` (roster files), `data/lattices/` (roster car files, not the generator), `tools/specsheet/`
-- **Contract version built against:** 0.1.0
+- **Contract version built against:** 0.2.0
+
+## Response to contract v0.2.0 (lead run 3)
+
+| v0.2.0 item for 09 | Done |
+|---|---|
+| `fuel_capacity_l` (fuel in `mass_kg` at 50 %) | Set on all 14 cars (45-98 L, class-typical). `mass_kg` is now curb (full tank, as curb figures are quoted) − half a tank (0.745 kg/L) + driver, so every car is 17-37 kg lighter than before; springs, dampers, bars and inertias were re-derived from the new mass. |
+| `torque_converter` on the 5 automatics | Ironside (stall 2200 rpm, 2.1×, couples 2800), Hauler (2200, 2.0×, 2600), Cruiser (2400, 2.0×, 2800), Wolfhound (2600, 1.9×, 3000), Bastion (2200, 2.0×, 2600). `wp_vehicle` ignores the field until A implements it; their 0-100 misses are marked "B" in VALIDATION.md until then. |
+| `AwdOnDemand` for Lindwurm / Wolfhound | Lindwurm 95 % front / up to 50 % rear / engage at 5 % front slip; Wolfhound 90 / 50 / 5 %. Sim: Lindwurm 0-100 5.37 → 5.44 s, Wolfhound 6.35 → 6.40 s (lead's first-cut coupling; A tunes). |
+| `BrakeDef` doc | Matches what the roster already assumed since run 2 (capacity per wheel, favoured axle full, other × (1−b)/b) — no data change. |
+| `WheelDef::inertia_kgm2`, `DrivetrainDef::efficiency` | Left at the defaults (0.7·m·r², 0.85). |
+| Tires | 02 added `all_terrain` and `vintage_bias`: Hauler and Ironside switched automatically. On them the Hauler skids 0.63 g and the Ironside 0.62 g, both below period/class figures (0.68-0.76 / 0.70-0.75) — see Needs. |
+
+All 14 cars validate against the v0.2.0 schemas; `collect_results.py` re-run on the merged build
+(VALIDATION.md); barrier sweep unchanged at 109/112 (the 03 two-box rear finding).
 
 ## Response to lead feedback (run 2)
 
@@ -38,7 +52,8 @@
 |---|---|---|
 | 02 vehicle | **ABS should modulate relative to the wheel's lock torque** (or reduce pressure until slip recovers), not release to a fixed 45 % of commanded torque. Any car whose caliper exceeds ~1.6× its lock torque stops 7-15 m long. | ABS ceiling in the car data (`ABS_CEILING = 1.5` in `build_roster.py`); remove when fixed. |
 | 02 vehicle | Launch/TCS for powerful RWD cars is conservative (Rampart 5.9 s; debug coupe 5.2 s at 200 kW/t vs ≈ 4.6 s class). Sim also stops ≈ 1-2 m longer than road tests. | Explained in VALIDATION.md (cause "A"); car data not inflated. |
-| 02 vehicle | `all_terrain` (Hauler) and `vintage_bias` (Ironside) compounds. | `street`. |
+| 02 vehicle | Re-tune `all_terrain` / `vintage_bias` together: on them the Hauler skids 0.63 g (class 0.68-0.76) and the Ironside 0.62 g (period 0.70-0.75). Chassis setup moves it < 1 % (measured), so it is the compound's peak or cornering stiffness. | Accepted as is; explained in VALIDATION.md. |
+| 02 vehicle (A) | Implement `torque_converter` (contract v0.2.0); the 5 automatics carry data for it. | 0-100 misses on Hauler / Cruiser / Ironside marked "B". |
 | 02 / lead | Lucciola skidpad 0.95 g on `sport` vs prompt-09 target ≥ 1.0 g (1.09 g on `semi_slick`, measured). Decide: stickier `sport`, semi-slicks on the Lucciola, or accept 0.95 (realistic for the archetype). | Left on `sport`. |
 | 03 damage | **Two-box rear structure**: on the hatch and SUV profiles the passenger cell runs to the tailgate, so a 40 km/h rear barrier gives 0.22-0.33 m cabin intrusion and a total loss (Vireo, Lindwurm, Bastion). Sedans/coupes are fine. | Reported only; not patched in car data. |
 | 03 damage | `gen-lattice` options for what is still hand-applied (list below), `uhss` material. | `adjust_lattice` in `build_roster.py`. |
@@ -52,14 +67,14 @@ Decisions are in "Lead feedback" below; status updated here.
 
 | # | Change | Status |
 |---|---|---|
-| 1 | `DrivetrainDef::torque_converter` | accepted (v0.2.0) — Hauler/Cruiser 0-100 misses wait on it |
-| 2 | On-demand AWD | accepted (merged with 02 #5) |
+| 1 | `DrivetrainDef::torque_converter` | applied in v0.2.0; data set on the 5 automatics, waiting on A's implementation |
+| 2 | On-demand AWD | applied in v0.2.0; Lindwurm and Wolfhound switched |
 | 3 | Rear drum + fade | deferred |
-| 4 | `BrakeDef` doc | accepted (doc only); roster re-derived for 02's semantics (above) |
+| 4 | `BrakeDef` doc | applied in v0.2.0; roster data already matches |
 | 5 | Solid axle | deferred |
 | 6 | Roll centre height | deferred |
-| 7 | `BodyRegion::Accessory` (push bar) | accepted in principle; push bar now uses detach group 8 until then |
-| 8 | `fuel_capacity_l` | accepted; values ready to add once the field exists (tank sizes are class-typical: 45-70 L cars, 90-100 L truck/SUV) |
+| 7 | `BodyRegion::Accessory` (push bar) | deferred to v0.3.0; push bar uses `FrontBumper` + detach group 8 until then |
+| 8 | `fuel_capacity_l` | applied in v0.2.0; set on all 14 cars |
 
 Non-contract data request: `data/materials/uhss.json` (03) — 2010s cabins still use gen-lattice's HSS.
 
@@ -88,7 +103,11 @@ would help:
 
 ## Changes outside my crates
 
-- None. `tools/specsheet/smoke_sim.py` (mine) has the lead's format-v2 update.
+- `data/audio/cars/junkyard_beater.json` (audio workstream's folder): `wp_audio`'s
+  `shipped_data_is_valid_and_complete` test requires a sound definition for every car in
+  `data/cars`. Added a plain NA inline-four definition (same packs as the other small fours,
+  gain 0.9); the audio owner may retune it.
+- `tools/specsheet/smoke_sim.py` (mine) has the lead's format-v2 update.
 
 ## Perf numbers
 
@@ -105,7 +124,8 @@ would help:
   Rampart 0-100 and skidpad, Lucciola skidpad (decision above), automatics' 0-100 (torque
   converter pending), three tire-limited skidpads 0.01-0.02 g under.
 - The ABS ceiling and the `SEC` mirror are workarounds (see Needs).
-- AWD on-demand, automatics, live axles, drum fade are approximated (contract requests 1-3, 5).
+- Automatics' converter is data-only until A implements it; live axles and drum fade are
+  approximated (deferred requests 3, 5).
 - Prices and durability classes are first-pass; 08 should tune prices against the economy.
 
 ## Lead feedback (2026-10-19)
