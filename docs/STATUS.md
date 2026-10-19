@@ -3,7 +3,10 @@
 _Last updated: lead integration run 2, 2026-10-19. Contract v0.1.0 (v0.2.0 planned, see
 `docs/CONTRACT_CHANGELOG.md`; waits on machine E)._
 
-Machines are named by letter: **A–I = prompts 02–10**. Prompts 13–20 run as new workstreams.
+Machines are named by letter: **A–I = prompts 02–10**, **J–Q = prompts 13–20** (started 2026-10-19 as
+cloud sessions: J audio `ws/audio`, K weather `ws/weather`, L race/crews `ws/race`, M UI kit `ws/ui`,
+N opponent AI `ws/opponent`, O meta services `ws/meta`, P design docs `ws/design-docs`, Q tuning
+dashboard `ws/tuning-dash`).
 
 ## Workstreams
 
