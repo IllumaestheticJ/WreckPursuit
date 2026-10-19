@@ -665,6 +665,11 @@ def adjust_lattice(lat: dict, c: dict, mass: float) -> list[str]:
 
     # 6. Police push bar: detachable tube frame ahead of the bumper, bolted to the bumper beam.
     if lt.get("pushbar"):
+        pkg = lt.get("police_package", {})
+        pb_kg = pkg.get("pushbar_kg", PUSHBAR_MASS_KG)
+        pb_imp = pkg.get("pushbar_impulse_ns", 15000.0)
+        pb_sec = PUSHBAR[1] * pkg.get("pushbar_section_scale", 1.0)
+        pb_mount = PUSHBAR_MOUNT[1] * pkg.get("pushbar_section_scale", 1.0)
         ff = [n["id"] for n in nodes if n["region"] == "FrameFront" and is_rail_x(n["id"])
               and n["id"] not in engine]
         y_bb = max(pos(i)[1] for i in ff)
@@ -677,22 +682,22 @@ def adjust_lattice(lat: dict, c: dict, mass: float) -> list[str]:
             for x in (-0.32 * w, 0.32 * w):
                 nid = len(nodes)
                 nodes.append({"id": nid, "pos_m": [round(x, 4), round(y_bar, 4), z],
-                              "mass_kg": PUSHBAR_MASS_KG / 4, "pinned_to_chassis": False,
+                              "mass_kg": pb_kg / 4, "pinned_to_chassis": False,
                               "region": "FrontBumper"})
                 new.append(nid)
         lo_l, lo_r, hi_l, hi_r = new
         for a_, b_ in ((lo_l, lo_r), (hi_l, hi_r), (lo_l, hi_l), (lo_r, hi_r), (lo_l, hi_r), (lo_r, hi_l)):
-            beams.append({"a": a_, "b": b_, "material_id": PUSHBAR[0], "area_m2": PUSHBAR[1],
+            beams.append({"a": a_, "b": b_, "material_id": PUSHBAR[0], "area_m2": pb_sec,
                           "breakable": True, "detach_group": None})
         for nid in new:
             side = [m for m in mounts if (pos(m)[0] < 0) == (pos(nid)[0] < 0)]
             for m in side:
                 beams.append({"a": m, "b": nid, "material_id": PUSHBAR_MOUNT[0],
-                              "area_m2": PUSHBAR_MOUNT[1], "breakable": True,
+                              "area_m2": pb_mount, "breakable": True,
                               "detach_group": GROUP_PUSHBAR})
         lat["detachables"].append({"group": GROUP_PUSHBAR, "region": "FrontBumper",
-                                   "hinge_nodes": [lo_l, lo_r], "break_impulse_ns": 15000.0,
-                                   "mass_kg": PUSHBAR_MASS_KG})
+                                   "hinge_nodes": [lo_l, lo_r], "break_impulse_ns": pb_imp,
+                                   "mass_kg": pb_kg})
         extra = ""
         if gen_profile(c) != "cruiser" and lt.get("reinforce_bumper_beam"):
             n = 0
@@ -703,9 +708,27 @@ def adjust_lattice(lat: dict, c: dict, mass: float) -> list[str]:
                     n += 1
             extra = f" Front bumper beam ×2 ({n} beams), as gen-lattice's cruiser profile does."
         log.append(f"Push bar: 4 extra FrontBumper nodes 0.10 m ahead of the bumper (z {zs[0]}/"
-                   f"{zs[1]} m), {PUSHBAR[0]} {PUSHBAR[1]:.1e} m² tubes bolted to the bumper-beam "
-                   f"rail nodes; detachable group {GROUP_PUSHBAR}, 15000 N·s, "
-                   f"{PUSHBAR_MASS_KG:.0f} kg.{extra}")
+                   f"{zs[1]} m), {PUSHBAR[0]} {pb_sec:.1e} m² tubes bolted to the bumper-beam "
+                   f"rail nodes with {pb_mount:.1e} m² mounts; detachable group {GROUP_PUSHBAR}, "
+                   f"{pb_imp:.0f} N·s, {pb_kg:.0f} kg.{extra}")
+
+    # 7. Police package (heavy-duty cooling / suspension / steering, tougher bumper fixings):
+    # component failure intrusions × the given factors, front bumper detach impulse scaled.
+    pkg = lt.get("police_package")
+    if pkg:
+        hd = pkg.get("hd_components", {})
+        for cm in lat["components"]:
+            k = hd.get(cm["kind"])
+            if k:
+                cm["intrusion_fail_m"] = round(cm["intrusion_fail_m"] * k, 4)
+                cm["intrusion_total_m"] = round(cm["intrusion_total_m"] * k, 4)
+        bk = pkg.get("bumper_impulse_scale", 1.0)
+        for dt in lat["detachables"]:
+            if dt["region"] == "FrontBumper" and dt["group"] != GROUP_PUSHBAR:
+                dt["break_impulse_ns"] = round(dt["break_impulse_ns"] * bk, 1)
+        log.append("Police package: heavy-duty components fail at × the stock intrusion ("
+                   + ", ".join(f"{k} ×{v}" for k, v in sorted(hd.items()))
+                   + f"); front bumper fixings ×{bk} detach impulse.")
 
     # Keep beam order canonical (a < b, sorted) and node ids == index.
     for bm in beams:

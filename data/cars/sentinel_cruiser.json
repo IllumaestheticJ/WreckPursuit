@@ -4,13 +4,13 @@
   "class": "PoliceCruiser",
   "analog_of": "2010s American full-size RWD police sedan, 5.7 L pushrod V8, pursuit package",
   "body_size_m": [1.91, 5.08, 1.48],
-  "mass_kg": 2008.2,
-  "front_weight_frac": 0.54,
+  "mass_kg": 2048.2,
+  "front_weight_frac": 0.55,
   "wheelbase_m": 3.05,
   "track_front_m": 1.6,
   "track_rear_m": 1.62,
   "cg_height_m": 0.53,
-  "inertia_kgm2": [780.0, 4310.0, 4630.0],
+  "inertia_kgm2": [800.0, 4400.0, 4730.0],
   "drag_cd_a_m2": 0.857,
   "lift_front": 0.1,
   "lift_rear": 0.12,
@@ -67,7 +67,7 @@
       "steerable": true,
       "max_steer_rad": 0.631,
       "ackermann_frac": 0.6,
-      "camber_rad": -0.0087,
+      "camber_rad": -0.0175,
       "toe_rad": 0.0,
       "caster_rad": 0.1047
     },
@@ -80,7 +80,7 @@
       "steerable": true,
       "max_steer_rad": 0.631,
       "ackermann_frac": 0.6,
-      "camber_rad": -0.0087,
+      "camber_rad": -0.0175,
       "toe_rad": 0.0,
       "caster_rad": 0.1047
     },
@@ -113,45 +113,45 @@
   ],
   "suspension": [
     {
-      "spring_n_per_m": 37100.0,
-      "damper_bump_ns_per_m": 2630.0,
-      "damper_rebound_ns_per_m": 3940.0,
+      "spring_n_per_m": 44600.0,
+      "damper_bump_ns_per_m": 3130.0,
+      "damper_rebound_ns_per_m": 4700.0,
       "travel_m": 0.17,
       "preload_m": 0.02,
-      "arb_n_per_m": 15100.0,
-      "bump_stop_n_per_m": 170000.0
+      "arb_n_per_m": 12300.0,
+      "bump_stop_n_per_m": 190000.0
     },
     {
-      "spring_n_per_m": 37100.0,
-      "damper_bump_ns_per_m": 2630.0,
-      "damper_rebound_ns_per_m": 3940.0,
+      "spring_n_per_m": 44600.0,
+      "damper_bump_ns_per_m": 3130.0,
+      "damper_rebound_ns_per_m": 4700.0,
       "travel_m": 0.17,
       "preload_m": 0.02,
-      "arb_n_per_m": 15100.0,
-      "bump_stop_n_per_m": 170000.0
+      "arb_n_per_m": 12300.0,
+      "bump_stop_n_per_m": 190000.0
     },
     {
-      "spring_n_per_m": 36000.0,
-      "damper_bump_ns_per_m": 2370.0,
-      "damper_rebound_ns_per_m": 3560.0,
+      "spring_n_per_m": 41100.0,
+      "damper_bump_ns_per_m": 2700.0,
+      "damper_rebound_ns_per_m": 4050.0,
       "travel_m": 0.18,
       "preload_m": 0.02,
-      "arb_n_per_m": 2100.0,
-      "bump_stop_n_per_m": 170000.0
+      "arb_n_per_m": 4900.0,
+      "bump_stop_n_per_m": 190000.0
     },
     {
-      "spring_n_per_m": 36000.0,
-      "damper_bump_ns_per_m": 2370.0,
-      "damper_rebound_ns_per_m": 3560.0,
+      "spring_n_per_m": 41100.0,
+      "damper_bump_ns_per_m": 2700.0,
+      "damper_rebound_ns_per_m": 4050.0,
       "travel_m": 0.18,
       "preload_m": 0.02,
-      "arb_n_per_m": 2100.0,
-      "bump_stop_n_per_m": 170000.0
+      "arb_n_per_m": 4900.0,
+      "bump_stop_n_per_m": 190000.0
     }
   ],
   "brakes": {
-    "max_torque_front_nm": 4240.0,
-    "max_torque_rear_nm": 1320.0,
+    "max_torque_front_nm": 4390.0,
+    "max_torque_rear_nm": 1360.0,
     "bias_front": 0.5,
     "handbrake_rear_nm": 1440.0
   },
@@ -163,6 +163,6 @@
   "aero_downforce_coeffs": [0.0, 0.0],
   "lattice_id": "sentinel_cruiser",
   "base_price": 30000,
-  "durability_class": 4,
+  "durability_class": 5,
   "fuel_capacity_l": 72.0
 }

@@ -677,9 +677,9 @@ CARS = [
         analog_of="2010s American full-size RWD police sedan, 5.7 L pushrod V8, pursuit package",
         era="2010s",
         profile="sedan",
-        curb_kg=1960.0,
+        curb_kg=2000.0,
         fuel_l=72,
-        front_frac=0.54,
+        front_frac=0.55,
         wheelbase=3.05,
         track_f=1.60,
         track_r=1.62,
@@ -712,9 +712,9 @@ CARS = [
             diff_f="Open", diff_r=dict(preload=40.0, power=0.30, coast=0.15), clutch_factor=1.6,
         ),
         tires=dict(front="225/60R18", rear="225/60R18", compound="police_pursuit", unsprung=(26.0, 28.0)),
-        susp=dict(hz=(1.35, 1.45), zeta=0.30, travel=(0.17, 0.18), roll_grad_deg_g=3.5,
-                  roll_front_share=0.62, bump_stop=170000.0, preload=0.02),
-        align=dict(camber_deg=(-0.5, -0.8), toe_deg=(0.0, 0.15), caster_deg=6.0),
+        susp=dict(hz=(1.45, 1.55), zeta=0.32, travel=(0.17, 0.18), roll_grad_deg_g=3.2,
+                  roll_front_share=0.57, bump_stop=190000.0, preload=0.02),
+        align=dict(camber_deg=(-1.0, -0.8), toe_deg=(0.0, 0.15), caster_deg=6.0),
         brakes=dict(
             front=dict(kind="disc", d_mm=350, pistons_mm=[54, 54], pad_mu=0.42),
             rear=dict(kind="disc", d_mm=345, pistons_mm=[44], pad_mu=0.40),
@@ -722,7 +722,7 @@ CARS = [
         ),
         steer=dict(ratio=16.5, turn_circle_m=11.9, ackermann=0.6, rack_speed=1.3),
         price=30000,
-        durability=4,
+        durability=5,
         note=("The everyday patrol car: rear-drive, heavy and planted, with pursuit-rated tires, "
               "big brakes and the V8 pursuit package. It gets to pursuit speed before anything "
               "ordinary (traffic, beaters, hatches, trucks, old muscle, FF sport sedans) but "
@@ -736,7 +736,13 @@ CARS = [
         sources=["fleet spec-class data for 2010s full-size RWD police sedans",
                  "owner/fleet dyno averages for 5.7 L pushrod V8s",
                  "engineering tables (tire radius, ride frequency, caliper hydraulics)"],
-        lattice=dict(mass_frac=0.22, bumper="plastic", hood="steel", pushbar=True),
+        lattice=dict(mass_frac=0.25, bumper="plastic", hood="steel", pushbar=True,
+                     police_package=dict(
+                         pushbar_kg=40.0, pushbar_impulse_ns=30000.0, pushbar_section_scale=1.5,
+                         bumper_impulse_scale=2.0,
+                         hd_components=dict(Radiator=1.5, SteeringRack=1.5, SuspensionFL=1.5,
+                                            SuspensionFR=1.5, WheelFL=1.4, WheelFR=1.4,
+                                            BrakeFL=1.3, BrakeFR=1.3, Engine=1.2, Battery=1.3))),
     ),
     # ------------------------------------------------------------------ 12
     dict(

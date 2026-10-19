@@ -200,21 +200,21 @@
   },
   "sentinel_cruiser": {
     "barrier": {
-      "frontal 15 km/h": "PASS: crush 0.06 m, cabin 0.00 m, health 0.95",
-      "frontal 25 km/h": "PASS: crush 0.24 m, cabin 0.00 m, health 0.85",
-      "frontal 40 km/h": "PASS: crush 0.36 m, cabin 0.00 m, health 0.67",
-      "frontal 56 km/h": "PASS: crush 0.60 m, cabin 0.17 m, health 0.24, TotalLoss; failed Radiator",
-      "frontal 80 km/h": "PASS: crush 1.28 m, cabin 0.26 m, health 0.12, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
-      "offset 40% 56 km/h": "FAIL: crush 0.83 m, cabin 0.04 m, health 0.17, TotalLoss; failed Engine, Radiator, Battery, SteeringRack (struck-side corner intact)",
-      "rear 40 km/h": "PASS: crush 0.53 m, cabin 0.00 m, health 0.55",
-      "side (T-bone) 40 km/h": "PASS: crush 0.18 m, cabin 0.17 m, health 0.73; failed SuspensionFL, WheelFL, BrakeFL"
+      "frontal 15 km/h": "PASS: crush 0.04 m, cabin 0.00 m, health 0.96",
+      "frontal 25 km/h": "PASS: crush 0.20 m, cabin 0.00 m, health 0.87",
+      "frontal 40 km/h": "PASS: crush 0.35 m, cabin 0.00 m, health 0.72",
+      "frontal 56 km/h": "PASS: crush 0.53 m, cabin 0.07 m, health 0.37",
+      "frontal 80 km/h": "PASS: crush 1.12 m, cabin 0.27 m, health 0.13, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
+      "offset 40% 56 km/h": "PASS: crush 0.81 m, cabin 0.30 m, health 0.21, TotalLoss; failed Radiator, Battery, SteeringRack, Gearbox\u2026",
+      "rear 40 km/h": "PASS: crush 0.45 m, cabin 0.00 m, health 0.60",
+      "side (T-bone) 40 km/h": "PASS: crush 0.16 m, cabin 0.16 m, health 0.78; failed SuspensionFL, BrakeFL"
     },
-    "brake_100_0_m": 40.0279,
-    "skidpad_g": 0.8256316,
-    "t0100_s": 6.829167,
-    "understeer_deg_per_g": 0.45739818,
+    "brake_100_0_m": 40.06742,
+    "skidpad_g": 0.8504631,
+    "t0100_s": 6.9208336,
+    "understeer_deg_per_g": 0.44166347,
     "vmax_converged": false,
-    "vmax_kmh": 259.6
+    "vmax_kmh": 259.9
   },
   "sentinel_wolfhound": {
     "barrier": {
