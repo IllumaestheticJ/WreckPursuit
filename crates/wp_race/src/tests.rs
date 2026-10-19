@@ -174,6 +174,39 @@ fn entry_and_start_rules() {
     assert_eq!(j.start(200), Err(StartError::AlreadyStarted));
 }
 
+#[test]
+fn server_reset_is_not_a_teleport() {
+    use crate::judge::RacerSample;
+    let mut j = judge(RaceKind::Sprint, sprint_course());
+    for id in [1, 2] {
+        j.enter(RacerEntry {
+            racer: EntityId(id),
+            redline_rpm: 0.0,
+        })
+        .unwrap();
+    }
+    let green = j.start(0).unwrap();
+    let sample = |id, y: f32| RacerSample {
+        racer: EntityId(id),
+        pos: [0.0, y, 0.0],
+        vel: [0.0, 20.0, 0.0],
+        speed_mps: 20.0,
+        throttle: 1.0,
+        gear: 3,
+        engine_rpm: 5000.0,
+    };
+    j.observe(green, &[sample(1, 50.0), sample(2, 50.0)], &[]);
+    // Racer 1 is reset 40 m back by the server; racer 2 "moves" 40 m on its own.
+    j.relocate(EntityId(1), [0.0, 10.0, 0.0], green + 1);
+    j.observe(green + 1, &[sample(1, 10.0), sample(2, 90.0)], &[]);
+    let r = j.results();
+    assert_eq!(by_racer(&r, 1).status, RacerStatus::Running);
+    assert_eq!(
+        by_racer(&r, 2).status,
+        RacerStatus::Dq(DqReason::ImplausibleMovement)
+    );
+}
+
 // ---------------------------------------------------------------- circuit
 
 #[test]

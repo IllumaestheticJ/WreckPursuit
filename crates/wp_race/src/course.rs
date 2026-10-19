@@ -342,6 +342,26 @@ impl Course {
         search(0, nseg)
     }
 
+    /// Marshal posts for a sanctioned event: `n` spots spread evenly along the course (skipping
+    /// the start), standing `side_m` outside the corridor on alternating sides, facing the road.
+    /// Returns `(position, facing)`; `wp_sim` places them as static entities.
+    pub fn marshal_spots(&self, n: usize, side_m: f32) -> Vec<([f32; 3], [f32; 2])> {
+        let len = self.length_m();
+        (0..n)
+            .map(|i| {
+                let along = len * (i as f32 + 1.0) / (n as f32 + 1.0);
+                let (c, d) = self.point_at(along);
+                let r = v2::right(d);
+                let sign = if i % 2 == 0 { 1.0 } else { -1.0 };
+                let off = (self.corridor_half_width_m + side_m) * sign;
+                (
+                    [c[0] + r[0] * off, c[1] + r[1] * off, c[2]],
+                    [-r[0] * sign, -r[1] * sign],
+                )
+            })
+            .collect()
+    }
+
     /// Start-grid slots for `n` cars behind the start line (pole = slot 0).
     pub fn grid(&self, layout: GridLayout, n: usize) -> Vec<GridSlot> {
         let (p0, d) = self.start();
@@ -432,6 +452,19 @@ mod tests {
         assert_eq!(c.polyline.len(), 5);
         assert!((c.length_m() - 400.0).abs() < 1e-3);
         assert_eq!(c.finish_gate(), c.gates.first());
+    }
+
+    #[test]
+    fn marshals_stand_outside_the_corridor() {
+        let c = Course::straight([0.0, 0.0, 0.0], [0.0, 1.0], 1000.0, 200.0, 10.0);
+        let m = c.marshal_spots(6, 2.0);
+        assert_eq!(m.len(), 6);
+        for (p, facing) in &m {
+            let pr = c.project(*p, None);
+            assert!(pr.off_m > c.corridor_half_width_m, "{p:?}");
+            // Facing the centreline.
+            assert!(facing[0] * -p[0].signum() > 0.9);
+        }
     }
 
     #[test]

@@ -325,6 +325,18 @@ impl RaceJudge {
         self.tracks.iter().position(|t| t.entry.racer == racer)
     }
 
+    /// The server moved a racer on purpose (reset to track after a crash, respawn): the next
+    /// sample is measured from `pos` so the move is not judged as a teleport. Progress and gates
+    /// are kept; a reset never counts as passing a gate.
+    pub fn relocate(&mut self, racer: EntityId, pos: [f32; 3], tick: u64) {
+        if let Some(i) = self.index_of(racer) {
+            let t = &mut self.tracks[i];
+            t.last = Some((tick, pos));
+            t.seg_hint = None;
+            t.out_ticks = 0;
+        }
+    }
+
     /// Declare a racer DNF (police capture, disconnect, retire). Ignored if they are no longer
     /// running.
     pub fn dnf(&mut self, racer: EntityId, reason: DnfReason, tick: u64) {

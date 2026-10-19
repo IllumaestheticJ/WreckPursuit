@@ -3632,6 +3632,7 @@ dependencies = [
 name = "wp_race"
 version = "0.1.0"
 dependencies = [
+ "lint-determinism",
  "proptest",
  "serde",
  "serde_json",
