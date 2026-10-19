@@ -46,8 +46,8 @@ PVPD General Order 41 ("Vehicle Pursuits"), condensed. Each principle is a mecha
 
 ### 3.1 Heat and levels
 
-Each racer has `heat` 0–100 mapped to `WantedLevel` (`None`, `L1`–`L5`). Proposed thresholds
-*(06 table)*: L1 ≥ 10, L2 ≥ 25, L3 ≥ 45, L4 ≥ 65, L5 ≥ 85. Heat decays only while no unit has line
+Each racer has `heat` 0–100 mapped to `WantedLevel` (`None`, `L1`–`L5`). Thresholds
+*(06 table, `data/police/heat.toml` on `main`)*: L1 ≥ 10, L2 ≥ 30, L3 ≥ 50, L4 ≥ 70, L5 ≥ 90. Heat decays only while no unit has line
 of sight; decay is faster at night and in Suburb / Industrial districts.
 
 | Level | In-fiction name | Typical trigger (witnessed) | Example |
@@ -121,7 +121,7 @@ decay starts only when no unit has LOS.
 ### 4.4 Escape, safehouse, capture (end states)
 | Outcome | Rule | In-fiction |
 |---|---|---|
-| **Escape** | No unit (or helicopter) has LOS for `escape_time(level, phase)` *(06 table; proposal: L1 10/8 s, L2 20/15 s, L3 35/25 s, L4 50/40 s, L5 70/55 s, day/night)*. | "All units, suspect lost, resume patrol." |
+| **Escape** | No unit (or helicopter) has LOS for `escape_time(level, phase)` *(06 table, `data/police/heat.toml`: base 12 / 16 / 22 / 30 / 40 s for L1–L5, × 0.7 at night, × 0.9 dawn/dusk)*. | "All units, suspect lost, resume patrol." |
 | **Safehouse** | Racer inside a safehouse POI for 10 s with no unit within 150 m. | "Lost him somewhere in {district}. Mark it." (Dispatch notes the area; using one safehouse often makes it known — design hook for heat decay, not v1.) |
 | **Capture** | Racer below 2 m/s for 4 s with a unit within 15 m, or `TotalLoss` while wanted. | "Suspect in custody." → fine, impound, bail (08). |
 
