@@ -397,6 +397,17 @@ so less plasticity now means slightly *more* crush. That broke an old tuning-das
 sweeps `impulse_to_lattice_scale` instead. It fits the saturation reported in "Findings from the
 presets".
 
+### Session checks (round 6b)
+`cargo fmt`, `cargo clippy --workspace --all-targets -D warnings` are clean. `cargo test
+-p tuning-probe` passes (22 tests), and `python3 -m unittest discover -s tools/tuning-dash/tests`
+passes (10 tests). `cargo test --workspace --no-fail-fast`: 578 passed, **2 failed, both outside
+this workstream and already failing on the merged lead/main state** (this branch changes only
+`tools/tuning-dash`, docs, and tuning-probe's `Cargo.lock` entry):
+- `wp_economy` `tests/pursuit_wiring.rs::real_police_capture_settles_through_the_economy` (line 130)
+- `wp_race` `tests/simcli_races.rs::city_sprint_on_real_roads` (line 28)
+
+One workspace test binary takes about 55 minutes in a debug build on this 4-core container.
+
 ### 3. Thumbnails as frames (known gap): done
 
 `scenario` and `pursuit` points now write top-down SVG frames: one at the first hard contact of a
