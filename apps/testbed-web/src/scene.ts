@@ -8,6 +8,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { Barrier, SimEvent } from "./wasm/sim";
 import { AGENT_FLAG, AGENT_STRIDE, INTENT_STRIDE } from "./wasm/layout";
 import { layers } from "./settings";
+import { SignalView } from "./signals_view";
 
 const DAY_SKY = new THREE.Color(0x8fb8de);
 const NIGHT_SKY = new THREE.Color(0x070a14);
@@ -46,6 +47,8 @@ export class SceneView {
   );
 
   private debugGrid!: THREE.GridHelper;
+  /** Traffic signal heads and stop lines (signals_view.ts). */
+  readonly signals = new SignalView();
 
   constructor(parent: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
@@ -79,7 +82,7 @@ export class SceneView {
     axes.position.z = 0.02;
     this.agentMesh.count = 0;
     this.agentMesh.frustumCulled = false;
-    this.world.add(axes, this.barriers, this.intentGroup, this.agentMesh);
+    this.world.add(axes, this.barriers, this.intentGroup, this.agentMesh, this.signals.group);
   }
 
   /**

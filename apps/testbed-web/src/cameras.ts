@@ -202,10 +202,24 @@ export class CameraRig {
     this.choose(CAMERA_MODES[(i + step + n) % n], target);
   }
 
+  /** Orbit camera pinned to a world spot by [`lookFrom`] (does not follow the car). */
+  private pinned = false;
+
+  /** Debug/e2e: orbit camera at world `eye` looking at `target` (sim coordinates), pinned. */
+  lookFrom(eye: [number, number, number], target: [number, number, number]): void {
+    this.setMode("orbit");
+    this.pinned = true;
+    // Sim (x, y, z) → Three (x, z, -y): the sim world group is rotated -90° about X.
+    this.orbit.target.set(target[0], target[2], -target[1]);
+    this.camera.position.set(eye[0], eye[2], -eye[1]);
+    this.camera.lookAt(this.orbit.target);
+  }
+
   /** Switch camera without remembering it (presets, replays, benches, automation).
    * `orbitOffset` (vehicle-local metres) places a fresh orbit camera. */
   setMode(mode: CameraMode, target?: THREE.Object3D, orbitOffset: [number, number, number] = [-7, -9, 6]): void {
     this.mode = mode;
+    this.pinned = false;
     this.orbit.enabled = mode === "orbit";
     if (mode === "orbit" && target) {
       target.updateWorldMatrix(true, false);
@@ -238,7 +252,7 @@ export class CameraRig {
     pursuer: THREE.Object3D | null = null,
   ): void {
     this.pollPad(dt);
-    if (!target) {
+    if (!target || (this.pinned && this.mode === "orbit")) {
       this.orbit.update();
       return;
     }

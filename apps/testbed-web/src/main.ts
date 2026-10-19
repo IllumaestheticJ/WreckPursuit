@@ -99,6 +99,7 @@ async function main(): Promise<void> {
     scene.setBarriers(sc.barriers ?? []);
     const city = sim.worldInfo()[W.city] > 0.5;
     void scene.setCity(city ? CITY_ID : null);
+    scene.signals.setHeads(sim.signalHeads());
     ($("city") as HTMLInputElement).checked = city;
     ($("mode") as HTMLSelectElement).value = modeName();
     const first = app.views.get(app.player);
@@ -141,12 +142,16 @@ async function main(): Promise<void> {
     car = ($("car") as HTMLSelectElement).value || DEFAULT_CAR,
     mode = ($("mode") as HTMLSelectElement).value,
     city = ($("city") as HTMLInputElement).checked,
+    hour?: number,
   ) => {
     app.scenarioFile = null;
     app.scenario = null;
     app.result = null;
     app.bench = null;
-    sim.init(1, sim.freeDriveJson(car, mode, city), false);
+    let json = sim.freeDriveJson(car, mode, city);
+    // Optional start hour (automation: day/night screenshots).
+    if (hour !== undefined) json = JSON.stringify({ ...JSON.parse(json), time_of_day_h: hour });
+    sim.init(1, json, false);
     app.scenario = null;
     rebuildViews();
     applyAssistPreset(app.source);
@@ -457,6 +462,7 @@ async function main(): Promise<void> {
     scene.updatePoliceUnits(sim.policeUnits(), tS);
     const wi = sim.worldInfo();
     scene.setTimeOfDay(wi[W.night]);
+    scene.signals.update(sim.signalStates(), wi[W.night]);
 
     const focusView = app.views.get(app.focus) ?? null;
     if (focusTel) {
@@ -628,6 +634,7 @@ async function main(): Promise<void> {
     rig,
     toggleLayer: (id: string) => layers.toggle(id),
     ui,
+    lookFrom: (eye: [number, number, number], target: [number, number, number]) => rig.lookFrom(eye, target),
   };
   requestAnimationFrame(frame);
 }

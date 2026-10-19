@@ -87,7 +87,7 @@ export class Hud {
       `<b>Slide control</b> (keyboard/gamepad assists): the car catches power slides itself — ` +
       `centre the steering and it straightens up; steer into the turn to hold a drift, ` +
       `countersteer to straighten faster. Strongest on powerful RWD cars; off on wheel.<br><br>` +
-      LAYERS.map((l) => `${l.key.replace("Key", "")} — ${l.label}`).join("<br>");
+      LAYERS.map((l) => `${l.key.replace(/^(Key|Digit)/, "")} — ${l.label}`).join("<br>");
   }
 
   /** Append notable sim events (damage, detachment, violations) to the event feed. */

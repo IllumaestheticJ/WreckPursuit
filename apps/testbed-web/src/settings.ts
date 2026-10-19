@@ -20,6 +20,7 @@ export const LAYERS: LayerDef[] = [
   { id: "contacts", key: "F2", label: "contact points & impulses", default: true },
   { id: "cgVelocity", key: "KeyG", label: "CG + velocity vector", default: true },
   { id: "traffic", key: "KeyX", label: "civilian traffic agents", default: true },
+  { id: "signals", key: "Digit6", label: "traffic signals + stop lines", default: true },
   { id: "intents", key: "KeyI", label: "traffic/police intent arrows", default: false },
   { id: "components", key: "KeyK", label: "component health panel", default: true },
   { id: "regions", key: "KeyE", label: "region energy panel", default: false },

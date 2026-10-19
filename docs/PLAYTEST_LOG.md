@@ -45,3 +45,4 @@ Numbers for 8–9 (`cargo run --release -p wp_vehicle --example slide`; scripted
   hashes the same. Nothing re-blessed here; E or the lead blesses with the police merge.
 - `web-e2e`: everything passes except "city chase … speeding violations in the feed" (heat stays 0). It fails
   the same way on the merge commit without the radio change.
+| 16 | Traffic lights not visible | helper `lead/playtest-signals`: `signal_heads()`/`signal_states()` wasm exports; mast-arm + far-side heads, stop lines, night glow (layer key 6); screenshots `docs/media/signals/` | fixed on `lead/playtest-signals` (not on the link yet) |

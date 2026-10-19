@@ -157,6 +157,10 @@ export const sim = {
   info: (entity: number): VehicleInfo => JSON.parse(wasm.vehicle_info(entity)),
   worldInfo: (): Float32Array => wasm.world_info(),
   trafficAgents: (): Float32Array => wasm.traffic_agents(),
+  /** Static signal heads of the city (layout.ts SH, SIGNAL_HEAD_STRIDE); fetch once per session. */
+  signalHeads: (): Float32Array => wasm.signal_heads(),
+  /** One state byte per signal head (layout.ts SIGNAL), same order as signalHeads(). */
+  signalStates: (): Uint8Array => wasm.signal_states(),
   /** [entity, kind, flags] per sim vehicle (layout.ts META_*), same order as states(). */
   vehicleMeta: (): Float32Array => wasm.vehicle_meta(),
   /** Wanted level / heat for a racer, or null when the session has no police. */

@@ -76,6 +76,13 @@ export const INPUT_FLAG = {
 /** world_info() offsets. */
 export const W = { tick: 0, hours: 1, night: 2, mode: 3, replay: 4, recording: 5, city: 6, scripted: 7 } as const;
 
+/** Floats per head in signal_heads() (crates/wp_wasm/src/signals.rs). */
+export const SIGNAL_HEAD_STRIDE = 10;
+/** Offsets inside one signal_heads() record. */
+export const SH = { x: 0, y: 1, z: 2, yaw: 3, left: 4, right: 5, radius: 6, centreZ: 7, intersection: 8, group: 9 } as const;
+/** signal_states() codes, one byte per head. */
+export const SIGNAL = { off: 0, red: 1, yellow: 2, green: 3 } as const;
+
 /** Floats per agent in traffic_agents(): [x, y, z, yaw, flags]. */
 export const AGENT_STRIDE = 5;
 /** traffic_agents() flag bits (variant in bits 8+). */
