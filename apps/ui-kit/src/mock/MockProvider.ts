@@ -228,7 +228,7 @@ export function createMockModel(opts: MockOptions = {}): MockModel {
       let units = s.captain.units;
       for (const d of playback.dispatched) {
         if (!units.some((u) => u.id === d.unit)) {
-          units = [...units, { id: d.unit, callsign: callsign(d.unit), kind: d.kind, status: "Responding", pos: [d.target[0] + 300, d.target[1] - 300], headingRad: 0, human: false, target: { kind: "racer", id: player }, health: 1 }];
+          units = [...units, { id: d.unit, callsign: callsign(d.unit, d.kind), kind: d.kind, status: "Responding", pos: [d.target[0] + 300, d.target[1] - 300], headingRad: 0, human: false, target: { kind: "racer", id: player }, health: 1 }];
         }
       }
       // AI units in pursuit follow the player unless the captain gave them another target.

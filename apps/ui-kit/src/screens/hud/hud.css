@@ -1,0 +1,256 @@
+/* HUD overlay. Transparent; text gets a hard shadow so it reads over a bright scene. */
+.wp-hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  font-family: var(--font-display);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+}
+.wp-hud > div {
+  position: absolute;
+}
+.wp-hud-small {
+  font-size: 0.72em;
+  letter-spacing: 0.06em;
+}
+.wp-hud-tl {
+  top: 1.2em;
+  left: 1.4em;
+}
+.wp-hud-tr {
+  top: 1.2em;
+  right: 1.4em;
+  display: flex;
+  gap: 1em;
+  align-items: flex-start;
+}
+.wp-hud-l {
+  left: 1.4em;
+  bottom: 9em;
+  width: min(30em, 38vw);
+}
+.wp-hud-r {
+  right: 1.4em;
+  bottom: 1.4em;
+}
+.wp-hud-b {
+  left: 50%;
+  bottom: 1.2em;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5em;
+}
+
+/* race */
+.wp-hud-race {
+  display: flex;
+  gap: 1em;
+  align-items: flex-start;
+}
+.wp-hud-pos {
+  font-weight: 700;
+  line-height: 0.85;
+}
+.wp-hud-pos b {
+  font-size: 4.2em;
+  color: var(--ink);
+}
+.wp-hud-pos span {
+  font-size: 1.6em;
+  color: var(--ink-3);
+}
+.wp-hud-race-rows {
+  font-size: 0.85em;
+  display: grid;
+  gap: 0.15em;
+  border-left: 2px solid var(--scan);
+  padding-left: 0.7em;
+}
+
+/* heat */
+.wp-hud-heat {
+  width: 13em;
+  background: rgba(5, 8, 7, 0.72);
+  border: 1px solid var(--edge);
+  padding: 0.5em 0.7em;
+  display: grid;
+  gap: 0.35em;
+}
+.wp-hud-heat-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.wp-hud-heat-state {
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--ink-3);
+}
+.wp-hud-heat[data-state="noticed"] .wp-hud-heat-state {
+  color: var(--warn);
+}
+.wp-hud-heat[data-state="pursuit"] {
+  border-color: var(--police-a);
+}
+.wp-hud-heat[data-state="pursuit"] .wp-hud-heat-state {
+  animation: wp-lightbar 0.5s steps(1) infinite;
+}
+.wp-hud-heat[data-state="cooldown"] .wp-hud-heat-state {
+  color: var(--info);
+}
+.wp-hud-stars {
+  display: flex;
+  gap: 0.18em;
+}
+.wp-hud-stars i {
+  width: 0.8em;
+  height: 0.8em;
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+  background: rgba(255, 255, 255, 0.12);
+}
+.wp-hud-stars i[data-on="true"] {
+  background: var(--warn);
+  box-shadow: 0 0 0.4em var(--warn);
+}
+.wp-hud-heat[data-state="pursuit"] .wp-hud-stars i[data-on="true"] {
+  background: var(--danger);
+}
+.wp-hud-minimap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2em;
+}
+
+/* alerts */
+.wp-hud-alerts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25em;
+  font-family: var(--font-mono);
+  font-size: 0.8em;
+}
+.wp-hud-alerts li {
+  background: rgba(5, 8, 7, 0.7);
+  border-left: 3px solid var(--ink-3);
+  padding: 0.25em 0.6em;
+}
+.wp-hud-alerts li[data-sev="warn"] {
+  border-left-color: var(--warn);
+}
+.wp-hud-alerts li[data-sev="alert"] {
+  border-left-color: var(--danger);
+  color: #fff;
+}
+.wp-hud-alerts li[data-ch="dispatch"],
+.wp-hud-alerts li[data-ch="unit"] {
+  color: var(--scan);
+}
+.wp-hud-alert-ch {
+  color: var(--ink-3);
+  margin-right: 0.6em;
+  font-size: 0.85em;
+}
+.wp-ui[data-large-scanner="true"] .wp-hud-alerts {
+  font-size: 1em;
+}
+
+/* damage */
+.wp-hud-damage {
+  display: grid;
+  grid-template-columns: auto 9.5em;
+  grid-template-rows: auto 1fr;
+  gap: 0.3em 0.8em;
+  background: rgba(5, 8, 7, 0.72);
+  border: 1px solid var(--edge);
+  padding: 0.6em 0.7em;
+}
+.wp-hud-damage > .wp-spread {
+  grid-column: 1 / -1;
+}
+.wp-hud-components {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: 0.72em;
+  align-self: center;
+}
+.wp-hud-components li {
+  display: flex;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  padding: 0.15em 0;
+}
+.wp-hud-components li[data-failed="true"] {
+  animation: wp-blink 1s steps(1) infinite;
+}
+
+/* speedo */
+.wp-hud-speedo {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.wp-hud-rpm {
+  display: flex;
+  gap: 2px;
+  height: 0.7em;
+}
+.wp-hud-rpm i {
+  width: 0.55em;
+  background: rgba(255, 255, 255, 0.1);
+  transform: skewX(-20deg);
+}
+.wp-hud-rpm i[data-on="true"] {
+  background: var(--scan);
+}
+.wp-hud-rpm i[data-red="true"] {
+  background: rgba(255, 61, 61, 0.25);
+}
+.wp-hud-rpm i[data-red="true"][data-on="true"] {
+  background: var(--danger);
+}
+.wp-hud-speed-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.6em;
+}
+.wp-hud-speed {
+  font-size: 4em;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  min-width: 2.3em;
+  text-align: right;
+}
+.wp-hud-speed small {
+  font-size: 0.25em;
+  font-weight: 400;
+  color: var(--ink-3);
+  margin-left: 0.3em;
+  font-family: var(--font-mono);
+}
+.wp-hud-gear {
+  font-size: 2.2em;
+  font-weight: 700;
+  border: 2px solid var(--scan);
+  color: var(--scan);
+  width: 1.5em;
+  text-align: center;
+  line-height: 1.3;
+  margin-bottom: 0.15em;
+}
+.wp-hud-gear[data-shift="true"] {
+  border-color: var(--danger);
+  color: var(--danger);
+  animation: wp-blink 0.2s steps(1) infinite;
+}
+.wp-hud-assists {
+  justify-content: center;
+}

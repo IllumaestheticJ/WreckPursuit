@@ -18,9 +18,11 @@ export const UNIT_SPEED: Record<PoliceUnitKind, number> = {
 /** Starting units, parked around the police POIs of the map. */
 export function initialUnits(map: CityMap): PoliceUnit[] {
   const stations = map.pois.filter((p) => p.kind === "PoliceStation");
+  // Park units around the stations, 55 m apart so they read as separate icons.
   const at = (i: number): Vec2 => {
     const s = stations[i % Math.max(stations.length, 1)];
-    return s ? [s.pos[0] + 12 * (i + 1), s.pos[1]] : [0, 0];
+    const k = Math.floor(i / Math.max(stations.length, 1));
+    return s ? [s.pos[0] + 55 * (k + 1) * (i % 2 ? -1 : 1), s.pos[1] + 55 * k] : [0, 0];
   };
   const mk = (id: number, kind: PoliceUnitKind, i: number, human = false): PoliceUnit => ({
     id,

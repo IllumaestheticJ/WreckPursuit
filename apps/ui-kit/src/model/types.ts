@@ -150,6 +150,17 @@ export interface Settings {
   assists: AssistProfile;
   damageMode: DamageMode;
   units: "metric" | "imperial";
+  /** Analog input shaping, applied by the host before building `VehicleInput`. */
+  input: {
+    /** Steering deadzone 0..=0.3 (fraction of travel). */
+    steerDeadzone: number;
+    /** Steering response exponent 1 (linear) ..= 3. */
+    steerLinearity: number;
+    /** Physical wheel rotation lock-to-lock, degrees (wheel only). */
+    wheelRotationDeg: number;
+    /** Throttle and brake share one axis (older pedal sets / triggers). */
+    combinedPedals: boolean;
+  };
   accessibility: {
     palette: Palette;
     /** CSS scale factor for the whole UI, 0.75..=1.5. */

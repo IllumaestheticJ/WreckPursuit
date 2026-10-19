@@ -364,7 +364,7 @@ function applyPolice(p: Playback, line: EventLine, ev: PoliceEventPayload, ctx: 
     case "UnitDispatched": {
       const d = (ev as Extract<PoliceEventPayload, { UnitDispatched: unknown }>).UnitDispatched;
       p.dispatched = [...p.dispatched.filter((x) => x.unit !== d.unit), { unit: d.unit, kind: d.kind, target: [d.target[0], d.target[1]] }];
-      say(p, line, "dispatch", "info", `${callsign(d.unit)} (${d.kind.toLowerCase()}) dispatched`);
+      say(p, line, "dispatch", "info", `${callsign(d.unit, d.kind)} (${d.kind.toLowerCase()}) dispatched`);
       break;
     }
     case "UnitStatus":
@@ -378,16 +378,21 @@ function applyPolice(p: Playback, line: EventLine, ev: PoliceEventPayload, ctx: 
     }
     case "Radio": {
       const r = (ev as Extract<PoliceEventPayload, { Radio: unknown }>).Radio;
-      say(p, line, r.unit === null ? "dispatch" : "unit", "info", `${unitName(r.unit)}: ${r.text}`);
+      // Radio text is the unit speaking: prefix the callsign unless the line already starts with it.
+      const name = unitName(r.unit);
+      say(p, line, r.unit === null ? "dispatch" : "unit", "info", r.text.startsWith(name) ? r.text : `${name}: ${r.text}`);
       break;
     }
   }
 }
 
-/** Radio callsign for a police unit entity (mock naming). */
-export function callsign(unit: number): string {
-  const words = ["Adam", "Lincoln", "Mary", "Air", "Boy", "David", "Edward", "Frank"];
-  return `${words[unit % words.length]}-${unit}`;
+const CALLSIGN_WORDS: Record<number, string> = { 10: "Adam", 11: "Mary", 12: "Lincoln", 13: "Air", 14: "Boy" };
+const FALLBACK_WORDS = ["Charles", "David", "Edward", "Frank", "George", "Henry"];
+
+/** Radio callsign for a police unit entity (mock naming; helicopters are always "Air"). */
+export function callsign(unit: number, kind?: PoliceUnitKind): string {
+  if (kind === "Helicopter") return `Air-${unit}`;
+  return `${CALLSIGN_WORDS[unit] ?? FALLBACK_WORDS[unit % FALLBACK_WORDS.length]}-${unit}`;
 }
 
 /** Cooldown progress at `tick` (0..=1). */
