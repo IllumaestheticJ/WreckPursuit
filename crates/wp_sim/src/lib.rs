@@ -71,6 +71,13 @@ pub struct SimVehicle {
     /// Rapier handles of the chassis.
     pub body: VehicleBody,
     spawn: ([f32; 3], f32),
+    /// Wheel radius / width (m) for debris cylinders when a wheel tears off.
+    wheel_size: (f32, f32),
+    /// `DamageModel::hull_version` the chassis collider was last built from.
+    hull_version: u32,
+    /// Lowest chassis-space z of the spawn collider; the damaged hull is clamped to it so a
+    /// crushed car never drags its collider on the road (the wheels carry it).
+    collider_floor_z: f32,
 }
 
 /// A complete simulation instance. Deterministic given the same config, spawns and inputs.
@@ -88,6 +95,7 @@ pub struct Sim {
     systems: Systems,
     last_tick_events: usize,
     static_boxes: usize,
+    debris: Vec<rapier3d::prelude::RigidBodyHandle>,
 }
 
 impl Sim {
@@ -107,6 +115,7 @@ impl Sim {
             systems: Systems::ALL,
             last_tick_events: 0,
             static_boxes: 0,
+            debris: Vec::new(),
         }
     }
 
@@ -144,17 +153,77 @@ impl Sim {
         vehicle.set_entity(id);
         let body = vehicle.build_body(&mut self.physics.bodies, &mut self.physics.colliders);
         self.physics.bodies[body.body].set_enabled(self.systems.vehicle);
+        let mut damage = DamageModel::new(&car.lattice, &car.materials);
+        damage.set_entity(id);
+        let collider_floor_z = {
+            let col = &self.physics.colliders[body.collider];
+            let rb = &self.physics.bodies[body.body];
+            let aabb = col.compute_aabb();
+            aabb.mins.z - rb.translation().z
+        };
+        let hull_version = damage.hull_version();
         self.vehicles.push(SimVehicle {
             id,
             car_id: car.def.id.clone(),
             body,
             vehicle,
-            damage: DamageModel::new(&car.lattice, &car.materials),
+            damage,
             input: VehicleInput::default(),
             assists: AssistProfile::default(),
             spawn: (pos, yaw),
+            wheel_size: (car.def.wheels[0].radius_m, car.def.wheels[0].width_m),
+            hull_version,
+            collider_floor_z,
         });
         Ok(id)
+    }
+
+    /// Number of detached-part debris bodies in the world.
+    pub fn debris_count(&self) -> usize {
+        self.debris.len()
+    }
+
+    /// After damage: spawn debris for torn-off parts and rebuild a chassis collider whose
+    /// hull changed. Slot order, deterministic.
+    fn sync_damage_to_physics(&mut self) {
+        use rapier3d::prelude::{Pose, SharedShape, Vector};
+        for slot in &mut self.vehicles {
+            let parts = slot.damage.take_detached_parts();
+            let hull_changed = slot.damage.hull_version() != slot.hull_version;
+            if parts.is_empty() && !hull_changed {
+                continue;
+            }
+            let rb = &self.physics.bodies[slot.body.body];
+            let pos = rb.translation().to_array();
+            let r = *rb.rotation();
+            let rot = [r.x, r.y, r.z, r.w];
+            let vel = rb.linvel().to_array();
+            for part in parts {
+                let (radius, width) = slot.wheel_size;
+                if let Some((body, col)) = part.to_rapier(pos, rot, vel, radius, width) {
+                    let h = self.physics.bodies.insert(body);
+                    self.physics
+                        .colliders
+                        .insert_with_parent(col, h, &mut self.physics.bodies);
+                    self.debris.push(h);
+                }
+            }
+            if hull_changed {
+                slot.hull_version = slot.damage.hull_version();
+                let floor = slot.collider_floor_z;
+                let pts: Vec<Vector> = slot
+                    .damage
+                    .convex_hull_outer()
+                    .iter()
+                    .map(|p| Vector::new(p[0], p[1], p[2].max(floor)))
+                    .collect();
+                if let Some(shape) = SharedShape::convex_hull(&pts) {
+                    let col = &mut self.physics.colliders[slot.body.collider];
+                    col.set_shape(shape);
+                    col.set_position_wrt_parent(Pose::IDENTITY);
+                }
+            }
+        }
     }
 
     /// Teleport a vehicle to `pos`/`yaw`, rolling forward at `speed_mps` (wheels and engine
@@ -307,6 +376,7 @@ impl Sim {
                 let effects = slot.damage.handling_effects();
                 slot.vehicle.apply_damage_effects(&effects);
             }
+            self.sync_damage_to_physics();
         }
         if sys.police {
             let racers: Vec<RacerView> = self
@@ -367,6 +437,7 @@ impl Sim {
             .map(|v| {
                 let mut s = v.vehicle.state();
                 s.health = v.damage.health();
+                s.component_health = v.damage.component_health_map();
                 s.mode = self.config.mode.mode;
                 (v.id, s)
             })
@@ -591,6 +662,21 @@ mod tests {
         });
         let speed = hit.expect("no world Contact event");
         assert!((12.0..=17.0).contains(&speed), "closing speed {speed}");
+        // 54 km/h into a rigid wall in Simulation: the car is damaged, the nose crushed.
+        assert!(
+            s.health < 1.0,
+            "health {} after a 54 km/h barrier hit",
+            s.health
+        );
+        let v = &sim.vehicles[0];
+        let crush = (0..v.damage.node_positions().len())
+            .map(|i| {
+                let p = v.damage.node_positions()[i];
+                let r = v.damage.rest_position(i);
+                ((p[0] - r[0]).powi(2) + (p[1] - r[1]).powi(2) + (p[2] - r[2]).powi(2)).sqrt()
+            })
+            .fold(0.0f32, f32::max);
+        assert!(crush > 0.1, "max node displacement {crush} m");
     }
 
     #[test]

@@ -3373,6 +3373,7 @@ name = "wp_damage"
 version = "0.1.0"
 dependencies = [
  "rapier3d",
+ "ron",
  "serde",
  "serde_json",
  "wp_contracts",

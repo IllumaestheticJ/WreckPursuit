@@ -1,17 +1,27 @@
 # Simulation damage table — the calibrated reference. Arcade (arcade.toml) is derived from
 # these numbers with documented multipliers. Owned by workstream 03 (damage) for tuning.
-# Calibration targets (prompt 03): 56 km/h full frontal into a rigid barrier => ~0.6 m frame
-# crush and TotalLoss; 25 km/h bumper tap => cracked bumper cover; 40 km/h T-bone => struck-side
-# suspension + door destroyed. Values below are v0.1 placeholders pending that calibration.
+#
+# Calibration (debug_sedan, 1400 kg, `cargo run --release -p wp_damage --bin damage-barrier
+# -- --sweep`; asserted by apps/simcli/scenarios/damage/*_sim.ron):
+#   56 km/h full frontal, rigid barrier  -> ~0.57 m frame crush, radiator failed, TotalLoss
+#                                           (health ~0.21 < total_loss_health)
+#   25 km/h frontal bumper tap           -> cover dented (severity ~0.65) and cracked,
+#                                           ~0.16 m crush, radiator/engine intact
+#   40 km/h T-bone by a 1400 kg car      -> struck-side front suspension failed, front door
+#                                           destroyed (severity ~0.6), ~0.17 m cabin intrusion
+#   failures progress with speed: bumper cracks (15-25) -> radiator (56) -> engine (80)
+# Crush depth itself comes from the lattice (beam sections in wp_damage::lattice_gen and
+# data/materials), not from this table: with all scales at 1.0 the lattice absorbs the full
+# collision energy 1/2*J*v as plastic work.
 mode = "Simulation"
-impulse_to_lattice_scale = 1.0
-plasticity_scale = 1.0
-beam_break_scale = 1.0
-component_damage_scale = 1.0
-component_fail_threshold_scale = 1.0
-total_loss_health = 0.25
-cabin_intrusion_total_loss_m = 0.25
+impulse_to_lattice_scale = 1.0         # full collision energy reaches the lattice
+plasticity_scale = 1.0                 # over-yield strain becomes permanent set at the base rate
+beam_break_scale = 1.0                 # material failure strains as in data/materials
+component_damage_scale = 1.0           # health = 1 - intrusion / intrusion_total_m
+component_fail_threshold_scale = 1.0   # components fail at their mount's intrusion_fail_m
+total_loss_health = 0.25               # one hard hit at speed is a total loss
+cabin_intrusion_total_loss_m = 0.25    # survival-space intrusion that totals the car
 repair_cost_scale = 1.0
-wheel_detach_scale = 1.0
+wheel_detach_scale = 1.0               # wheel mount fails at intrusion_fail_m / 1.0
 engine_kill_on_total_loss = true
-global_health_from_intrusion = true
+global_health_from_intrusion = true    # health = 0.7 structural (plastic energy) + 0.3 components

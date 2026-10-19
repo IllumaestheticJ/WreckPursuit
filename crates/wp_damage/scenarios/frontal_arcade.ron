@@ -1,0 +1,24 @@
+// Full-width rigid barrier, Arcade: same code, arcade.toml scalars. One hard hit degrades,
+// it takes several to end the car.
+(
+    name: "frontal_arcade",
+    car: "debug_sedan",
+    mode: Arcade,
+    impact: Frontal,
+    other_mass_kg: 0.0,
+    duration_s: 0.5,
+    seed: 1,
+    monotone: ["crush_m", "plastic_energy_kj", "damage"],
+    runs: [
+        (speed_kmh: 15.0, expect: [(metric: "crush_m", min: 0.0, max: 0.05), (metric: "health", min: 0.95, max: 1.0)],
+            intact: [Radiator, Engine], total_loss: Some(false)),
+        (speed_kmh: 25.0, expect: [(metric: "crush_m", min: 0.0, max: 0.15)],
+            intact: [Radiator, Engine], total_loss: Some(false)),
+        (speed_kmh: 40.0, expect: [(metric: "crush_m", min: 0.08, max: 0.3)],
+            intact: [Radiator, Engine], cracked: [FrontBumper], total_loss: Some(false)),
+        (speed_kmh: 56.0, expect: [(metric: "crush_m", min: 0.2, max: 0.45), (metric: "health", min: 0.55, max: 0.9)],
+            intact: [Engine], total_loss: Some(false)),
+        (speed_kmh: 80.0, expect: [(metric: "crush_m", min: 0.3, max: 0.75), (metric: "health", min: 0.2, max: 0.7)],
+            intact: [Engine], total_loss: Some(false)),
+    ],
+)

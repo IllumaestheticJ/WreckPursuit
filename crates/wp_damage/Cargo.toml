@@ -12,7 +12,16 @@ wp_math.workspace = true
 rapier3d.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+ron.workspace = true
 
 [[bin]]
-name = "gen-box-lattice"
-path = "src/bin/gen_box_lattice.rs"
+name = "gen-lattice"
+path = "src/bin/gen_lattice.rs"
+
+[[bin]]
+name = "damage-barrier"
+path = "src/bin/damage_barrier.rs"
+
+[[bin]]
+name = "damage-bench"
+path = "src/bin/damage_bench.rs"

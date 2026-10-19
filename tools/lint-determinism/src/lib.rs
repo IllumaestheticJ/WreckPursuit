@@ -198,6 +198,11 @@ fn is_ident(c: char) -> bool {
 
 fn matches(line: &str, p: &Pattern) -> bool {
     match p {
+        // A float method always takes an argument or none; `x.log()` with no argument is never
+        // `f32::log(self, base)`, so `name(` patterns skip an immediate `)` for `.log(`.
+        Pattern::Text(t) if *t == ".log(" => line
+            .match_indices(t)
+            .any(|(i, _)| !line[i + t.len()..].starts_with(')')),
         Pattern::Text(t) => line.contains(t),
         Pattern::Word(w) => line.match_indices(w).any(|(i, _)| {
             let before = line[..i].chars().next_back();
@@ -358,6 +363,13 @@ pub fn unused_allows<'a>(repo: &Path, crates: &[&str], allow: &'a [Allow]) -> Ve
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn zero_arg_log_method_is_not_a_logarithm() {
+        let log = Pattern::Text(".log(");
+        assert!(!matches("    log: m.log().to_vec(),", &log));
+        assert!(matches("let y = x.log(2.0);", &log));
+    }
 
     fn rules(src: &str) -> Vec<&'static str> {
         lint_source("x.rs", src)

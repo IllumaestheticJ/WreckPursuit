@@ -70,10 +70,13 @@ pub(crate) fn collect(
                 pair.collider1
             };
             let other = infos.iter().find(|o| o.collider == other_col);
-            let other_mass_kg = match other {
-                Some(o) => bodies.get(o.body).map_or(0.0, |b| b.mass()),
-                None => 0.0,
-            };
+            // Mass of whatever body owns the other collider (vehicle or debris); 0 = static.
+            let other_mass_kg = colliders
+                .get(other_col)
+                .and_then(|c| c.parent())
+                .and_then(|h| bodies.get(h))
+                .filter(|b| b.is_dynamic())
+                .map_or(0.0, |b| b.mass());
             let Some(col1) = colliders.get(pair.collider1) else {
                 continue;
             };

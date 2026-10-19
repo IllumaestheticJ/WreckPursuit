@@ -1,8 +1,12 @@
 # Arcade damage table = Simulation (sim.toml) x the multipliers noted on each line.
 # Same code path, different numbers. Owned by workstream 03 (damage) for tuning.
+#
+# Result (debug_sedan, apps/simcli/scenarios/damage/*_arcade.ron): punishing but survivable.
+#   56 km/h frontal -> ~0.32 m crush, health ~0.75, drivable;  80 km/h -> health ~0.43.
+#   Two or three hard hits end the car (total_loss_health 0.10).
 mode = "Arcade"
-impulse_to_lattice_scale = 0.45        # sim x 0.45  — less energy reaches the lattice
-plasticity_scale = 0.8                 # sim x 0.8   — dents set a little less
+impulse_to_lattice_scale = 0.45        # sim x 0.45  — 45 % of the collision energy deforms the car
+plasticity_scale = 0.8                 # sim x 0.8   — dents set a little less (more springback)
 beam_break_scale = 1.5                 # sim x 1.5   — beams/parts tougher before breaking
 component_damage_scale = 0.6           # sim x 0.6   — components lose health slower
 component_fail_threshold_scale = 1.8   # sim x 1.8   — components tolerate more intrusion

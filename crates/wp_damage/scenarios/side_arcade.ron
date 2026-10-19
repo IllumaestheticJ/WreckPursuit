@@ -1,0 +1,17 @@
+(
+    name: "side_arcade",
+    car: "debug_sedan",
+    mode: Arcade,
+    impact: Side,
+    other_mass_kg: 1400.0,
+    duration_s: 0.5,
+    seed: 1,
+    monotone: ["crush_m", "cabin_intrusion_m", "plastic_energy_kj", "damage"],
+    runs: [
+        (speed_kmh: 15.0, expect: [(metric: "crush_m", min: 0.0, max: 0.05)], intact: [SuspensionFL], total_loss: Some(false)),
+        (speed_kmh: 25.0, expect: [(metric: "crush_m", min: 0.0, max: 0.1)], intact: [SuspensionFL], total_loss: Some(false)),
+        (speed_kmh: 40.0, expect: [(metric: "crush_m", min: 0.04, max: 0.18)], intact: [SuspensionFL], total_loss: Some(false)),
+        (speed_kmh: 56.0, expect: [(metric: "crush_m", min: 0.08, max: 0.25)], total_loss: Some(false)),
+        (speed_kmh: 80.0, expect: [(metric: "crush_m", min: 0.15, max: 0.4), (metric: "health", min: 0.4, max: 0.9)], total_loss: Some(false)),
+    ],
+)

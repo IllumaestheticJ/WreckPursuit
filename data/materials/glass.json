@@ -1,1 +1,1 @@
-{ "id": "glass", "density_kg_m3": 2500.0, "young_mpa": 70000.0, "yield_mpa": 50.0, "plastic_modulus_mpa": 0.0, "failure_strain": 0.001, "restitution": 0.1, "friction": 0.4, "kind": "Glass" }
+{ "id": "glass", "density_kg_m3": 2500.0, "young_mpa": 70000.0, "yield_mpa": 50.0, "plastic_modulus_mpa": 0.0, "failure_strain": 0.008, "restitution": 0.1, "friction": 0.4, "kind": "Glass" }
