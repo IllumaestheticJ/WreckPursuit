@@ -89,7 +89,16 @@ export class SceneView {
     this.cities.set(cityId, holder);
     this.scene.add(holder);
     try {
-      const gltf = await new GLTFLoader().loadAsync(`data/city/${cityId}.greybox.glb`);
+      // The published (artifact) build cannot serve binary files, so it ships the same bytes
+      // base64-encoded as `<id>.greybox.b64.txt`.
+      let gltf;
+      try {
+        gltf = await new GLTFLoader().loadAsync(`data/city/${cityId}.greybox.glb`);
+      } catch {
+        const b64 = await (await fetch(`data/city/${cityId}.greybox.b64.txt`)).text();
+        const bytes = Uint8Array.from(atob(b64.trim()), (c) => c.charCodeAt(0));
+        gltf = await new GLTFLoader().parseAsync(bytes.buffer, "");
+      }
       // glTF is +Y up, same as Three: add to the scene, not the Z-up world group.
       holder.add(gltf.scene);
     } catch (e) {
