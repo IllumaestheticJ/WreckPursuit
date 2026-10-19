@@ -179,6 +179,20 @@ workstreams" below).
    inputs): **0.019–0.021 ms/car/frame** dry, 0.45–0.50 ms/frame for all 24 (budget 0.15
    ms/car); the weather terms cost nothing measurable. Recorded in the README.
 
+### Checks (round 6b)
+
+`cargo fmt`, `cargo clippy --workspace --all-targets -D warnings` clean; wasm32 build of
+`wp_wasm` OK; `cargo test --release --workspace --no-fail-fast`: all green except two tests that
+**fail identically on the lead branch with the lead's `wp_vehicle`** (verified by swapping my
+`src/` out) — not mine, for their owners / the lead:
+- `wp_economy` `tests/pursuit_wiring.rs::real_police_capture_settles_through_the_economy` —
+  "level at capture, not after the reset" (`res.level` is `None` at `PursuitEnded`).
+- `wp_race` `tests/simcli_races.rs::city_sprint_on_real_roads` — index out of bounds in
+  `throttle_at` (len 2, index 2): the test expects more entities than
+  `scenarios/race/city_sprint.ron` now has.
+(Debug-profile `cargo test --workspace` exceeds the session's 10-minute command limit in the
+simcli scenario suite, so I ran it in release.)
+
 ### Requests to other workstreams (from my reverted browser work)
 
 - **C (`wp_wasm`):** `pack::unpack_input` should read non-finite values as 0
