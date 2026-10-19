@@ -40,8 +40,12 @@ All in `wp_weather` (details: `crates/wp_weather/README.md`).
   WetnessGrid, fog_density, rain_mm_per_h, cloud_cover, temperature_c, road_temp_c, wind, …`.
 - `WeatherSim::{police_modifiers, traffic_modifiers, economy_modifiers, modifiers,
   sight_multiplier, render_params, puddle_cells(min_depth_mm)}`.
-- `WithWeather::new(&dyn WorldQuery, &WeatherSim)` — a `WorldQuery` (see step 1); forwards
-  `line_of_sight` unchanged (LOS stays geometric).
+- `WithWeather::new(&dyn WorldQuery, &WeatherSim)` — a `WorldQuery` (see step 1): wet asphalt
+  → `WetAsphalt`; `line_of_sight(a, b)` = `|b − a| ≤ sight_range_m() && world.line_of_sight(a, b)`
+  (`weather_los = false` for the geometric test alone). `Weathered<W>` is the owning variant
+  (e.g. `wp_vehicle::rig::Rig<Weathered<FlatWorld>>`).
+- `WeatherSim::sight_range_m() -> f32` — 800 m × sight multiplier (800 clear, ~130 thick fog).
+- `GridSpec::around(points, margin_m, cell_m)` — grid over a point set's bbox (road nodes).
 - `WeatherSim::can_see(&self, world: &dyn WorldQuery, a, b, base_sight_m) -> bool` —
   `|b − a| ≤ base_sight_m × sight_multiplier && world.line_of_sight(a, b)` (distance first, so
   fog skips the occluder query for far targets). Night not included.
@@ -68,32 +72,115 @@ rejected.
 
 ## Hook points (exact calls each owner should make)
 
-### 1. `wp_sim` (lead) — works today, no contract change
-```rust
-// SimConfig gains `weather: Option<wp_weather::WeatherConfig>` (None = no weather, today's behaviour).
-// After the world is built / set_world():
-let grid = GridSpec::covering([min_x - 50.0, min_y - 50.0], [max_x + 50.0, max_y + 50.0], 8.0); // road network bbox
-self.weather = cfg.weather.map(|c| WeatherSim::from_world(WeatherData::embedded(), c, grid, &self.world));
+### 1. `wp_sim` (lead) — makes weather reach tires and police end to end; no contract change
+What it gets you (measured on the real `debug_sedan` through `wp_vehicle::rig::Rig`, the same
+model `wp_sim` steps — `crates/wp_weather/tests/vehicle_grip.rs`): 100→0 km/h **42.9 m / 3.09 s
+dry vs 54.1 m / 3.93 s on a soaked road**; dry weather is bit-for-bit the old dry world. Police
+sight: thick fog cuts `line_of_sight` at ~130 m (800 m in clear air, longer than any police
+range, so clear-weather behaviour is unchanged).
 
-// step_fixed(), right after `self.world.step(dt, &mut out)`:
-if let Some(w) = &mut self.weather {
-    self.scratch_positions.clear();
-    self.scratch_positions.extend(self.vehicles.iter().map(|v| v.vehicle.state().pos));
-    self.scratch_positions.extend(self.world.agents().map(|a| a.pos));
-    w.step(dt, self.world.time_of_day(), self.world.clock.ratio, &self.scratch_positions);
+`crates/wp_sim/Cargo.toml`: `wp_weather.workspace = true` (wasm-clean: contracts, math, serde, toml).
+
+`crates/wp_sim/src/lib.rs`:
+```rust
+use wp_contracts::WorldQuery; // not imported in lib.rs today
+use wp_weather::{GridSpec, WeatherConfig, WeatherData, WeatherSim, WithWeather};
+
+// struct Sim — two new fields:
+weather: Option<(WeatherConfig, WeatherSim)>,   // None = no weather (today's behaviour)
+weather_positions: Vec<[f32; 3]>,               // scratch, reused every tick
+
+/// Turn weather on (or reconfigure it). Builds the wetness grid over the current world's road
+/// network; `set_world` rebuilds it with the same config, so call order does not matter.
+pub fn set_weather(&mut self, cfg: WeatherConfig) {
+    let grid = GridSpec::around(self.world.network().nodes.iter().map(|n| &n.pos), 50.0, 8.0);
+    let w = WeatherSim::from_world(WeatherData::embedded(), cfg.clone(), grid, &self.world);
+    self.weather = Some((cfg, w));
 }
-// vehicle loop: pass the adapter instead of &self.world
-let q: &dyn WorldQuery = match &self.weather {
-    Some(w) => &WithWeather::new(&self.world, w),   // interim_surface = true until W-1 + A's hook
-    None => &self.world,
-};
-slot.vehicle.step_with_ground(&slot.input, &slot.assists, q, &ground, dt, &mut out);
-// Sim::state_hash(): `if let Some(w) = &self.weather { w.hash_into(&mut h) }`
-// (adds to the hash only when weather is configured, so existing goldens are untouched).
+/// The weather, if enabled (renderer, HUD, economy read it).
+pub fn weather(&self) -> Option<&WeatherSim> { self.weather.as_ref().map(|(_, w)| w) }
+/// Mutable weather (debug UI / scenario setup: `force`, `set_all_water_mm`).
+pub fn weather_mut(&mut self) -> Option<&mut WeatherSim> { self.weather.as_mut().map(|(_, w)| w) }
+
+// set_world(), at the end:
+if let Some((cfg, _)) = self.weather.take() { self.set_weather(cfg); }
+
+// step_fixed(), right after the `if sys.world { … self.world.step(dt, &mut out); }` block:
+if let Some((_, w)) = &mut self.weather {
+    self.weather_positions.clear();
+    self.weather_positions.extend(self.vehicles.iter().map(|v| v.vehicle.state().pos));
+    self.weather_positions.extend(self.world.agents().map(|a| a.pos));
+    w.step(dt, self.world.time_of_day(), self.world.clock.ratio, &self.weather_positions);
+}
+
+// step_fixed(), vehicle loop (`if sys.vehicle`): build the query once, before `for slot in …`
+let wx = self.weather.as_ref().map(|(_, w)| WithWeather::new(&self.world, w));
+let world_q: &dyn WorldQuery = match &wx { Some(q) => q, None => &self.world };
+//   …and pass `world_q` instead of `&self.world` to `slot.vehicle.step_with_ground(..)`.
+//   (Disjoint field borrows: self.world / self.weather shared, self.vehicles mutable — compiles.)
+
+// step_fixed(), police (`if sys.police`): same adapter so LOS gets the fog/rain range
+let wx = self.weather.as_ref().map(|(_, w)| WithWeather::new(&self.world, w));
+let world_q: &dyn WorldQuery = match &wx { Some(q) => q, None => &self.world };
+self.police.step(world_q, &racers, &tick_events, dt, &mut out);
+
+// state_hash(): after the world hash
+if let Some((_, w)) = &self.weather { w.hash_into(&mut h); }
 ```
-The traffic agents' own `wp_vehicle` steps inside `wp_world` keep the dry world until D
-forwards weather (step 3). Cost: ≈ 0.04 ms per 60 Hz frame for a 1.6 km city and 24 cars
-(README → Performance).
+Hashes change only for sims that call `set_weather`, so no existing golden moves. Traffic
+agents' own vehicles inside `wp_world` stay on the dry world until D forwards weather (step 3).
+Cost ≈ 0.04 ms per 60 Hz frame (README → Performance). Interim limits: wetness below
+`interim_wet_threshold` (0.5) does not reach the tires, and ice / markings / aquaplaning need
+W-1 + step 2.
+
+### 1b. simcli (lead, on behalf of I) — scenario field W-7
+`apps/simcli/src/scenario.rs`, `Scenario` gains
+```rust
+/// Weather (workstream 14). None = no weather system (dry, clear: today's behaviour).
+#[serde(default, skip_serializing_if = "Option::is_none")]
+pub weather: Option<WeatherSpec>,
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WeatherSpec {
+    pub kind: wp_weather::WeatherKind,           // Clear | Overcast | LightRain | HeavyRain | Fog
+    #[serde(default = "one")] pub intensity: f32, // 0..=1, default 1
+    #[serde(default)] pub water_mm: f32,          // start water on every cell (0 = dry road)
+    #[serde(default = "yes")] pub locked: bool,   // default true: scenarios want fixed weather
+    #[serde(default)] pub season: wp_weather::Season, // default Autumn
+    #[serde(default)] pub seed: Option<u64>,      // default: the scenario seed
+}
+```
+(`WeatherKind` / `Season` derive `Serialize`/`Deserialize` as unit variants.) In
+`apps/simcli/src/run.rs::build_sim`, after the `has_city` block (so the grid covers the city):
+```rust
+if let Some(w) = &sc.weather {
+    sim.set_weather(wp_weather::WeatherConfig {
+        seed: w.seed.unwrap_or(sc.seed),
+        season: w.season,
+        start: wp_weather::Regime::new(w.kind, w.intensity),
+        start_water_mm: w.water_mm,
+        locked: w.locked,
+        ..Default::default()
+    });
+}
+```
+`apps/simcli/Cargo.toml`: `wp_weather.workspace = true`. Two `Scenario { .. }` struct literals
+need `weather: None`: `apps/simcli/src/fuzz.rs` (`gen_case`, after `barriers,`) and
+`crates/wp_wasm/src/scenario.rs` (`free_drive`, after `barriers: Vec::new(),`). Replays need
+nothing extra (they embed the scenario RON). SCENARIOS.md top-level block:
+`weather: (kind: HeavyRain, intensity: 1.0, water_mm: 1.5, locked: true), // optional; see wp_weather`.
+Then **rename `apps/simcli/scenarios/weather/wet_brake_100_0.ron.pending` →
+`wet_brake_100_0.ron`** and bless only it:
+`cd apps/simcli && cargo run --release -p simcli -- run scenarios/weather/wet_brake_100_0.ron --bless`
+(commit with `[bless]`). In my patched copy every existing golden still matched; the only
+`goldens_match` failures were the two new weather scenarios' missing goldens.
+
+**Verified (2026-10-19, machine K):** I applied exactly steps 1 + 1b to a throwaway copy of
+the repo (never committed): it compiles, and simcli gives `weather_dry_brake_100_0` PASS
+(−0.05 m/s at 17.2 s) and `weather_wet_brake_100_0` PASS (**4.60 m/s at 17.2 s**, −0.05 m/s
+at 18.0 s). `wp_weather`'s `pending_wet_scenario_ranges_hold_on_the_real_vehicle` checks the
+same ranges on the rig on every `cargo test` (dry −0.05, wet 4.90 m/s).
 
 ### 2. `wp_vehicle` (A) — after W-1 lands
 - Cache per wheel at construction: `TireProfile::from_tire_def(&tire_def, wheel_def.width_m)`.
@@ -128,19 +215,27 @@ forwards weather (step 3). Cost: ≈ 0.04 ms per 60 Hz frame for a 1.6 km city a
   (lane markings, zebras) until W-3.
 - Day/night temperature uses `TimeOfDay::night_factor()` and `phase()` only; no clock change.
 
-### 4. `wp_police` (E) — E has no branch yet; spec for when it lands
-- `Police::set_weather(&mut self, m: &wp_weather::PoliceWeatherModifiers)` once per tick:
-  - patrol speed cap: `cap_mps = base_cap_mps * m.patrol_speed_cap_mult`
-  - pursuit speed cap: `cap_mps = base_cap_mps * m.pursuit_speed_cap_mult`
-  - incident/dispatch call rate: `rate *= m.crash_incident_rate_mult`
-  - LOS and roadblock sight checks (v0.2.0 has `WorldQuery::line_of_sight`): call
-    `weather.can_see(world, observer, target, base_sight_m * night_mult)` instead of
-    `dist <= base_sight_m * night_mult && world.line_of_sight(observer, target)`. Without access
-    to the `WeatherSim`, the same result is `dist <= base * night_mult * m.sight_multiplier &&
-    world.line_of_sight(..)` (weather does **not** include night; police keeps its own factor).
-  - `wp_sim` already hands police `&self.world` (`police.step(&self.world, …)`); passing
-    `&WithWeather::new(&self.world, w)` there instead is enough for wet-grip police cars too.
-- Police cars are vehicles; they get wet grip through the sim's adapter like everyone else.
+### 4. `wp_police` (E)
+- **Sight / LOS — nothing to change.** Once `wp_sim` passes `WithWeather` (step 1), every
+  `world.line_of_sight(..)` in `pursuit.rs` (cars at line 87 via `sees`, helicopter at line 102,
+  cameras) is false beyond `weather.sight_range_m()`: ≈ 130 m in thick fog, ≈ 480 m in a
+  16 mm/h downpour, 800 m clear (no change). The phase-keyed ranges at `pursuit.rs:64–67`
+  (`los_range_m`, `witness_range_m`, `recognition_range_m`) stay as they are; weather caps them
+  from outside.
+- **Speed caps and incident rate** need a setter (E's code):
+  ```rust
+  // PoliceSystem
+  weather: wp_weather::PoliceWeatherModifiers,   // default: all 1.0
+  pub fn set_weather(&mut self, m: wp_weather::PoliceWeatherModifiers) { self.weather = m; }
+  // pursuit.rs:457  self.units[i].cmd.speed_mps = lim * p.patrol_speed_factor * self.weather.patrol_speed_cap_mult;
+  // pursuit.rs:623  pass `cap * self.weather.pursuit_speed_cap_mult` as pursuit_speed_cap's `cap` argument
+  // dispatch: multiply the incident / crash call rate by self.weather.crash_incident_rate_mult
+  ```
+  and `wp_sim` calls `self.police.set_weather(w.police_modifiers())` right before
+  `self.police.step(..)`. (`wp_police` → `wp_weather` dependency has no cycle; or copy the four
+  `f32`s into a police-owned struct.)
+- `WeatherSim::can_see(world, a, b, base_sight_m)` remains for callers that hold the
+  `WeatherSim` directly (AI racers, tools).
 
 ### 5. `wp_economy` (G) — table only
 - `RaceSetup` gains `weather_payout_mult: f32` and `weather_rep_mult: f32` (default 1.0), filled
@@ -169,10 +264,11 @@ forwards weather (step 3). Cost: ≈ 0.04 ms per 60 Hz frame for a 1.6 km city a
 - Races can lock weather: `WeatherConfig { locked: true, start: Regime::new(kind, i) }`.
 
 ## Needs
-1. Lead: step 1 wiring in `wp_sim` (+ a `SimConfig::weather` field). Workaround: none needed
-   for this crate's tests.
-2. I (10): scenario field for weather (W-7 below) so wet/dry pairs can be compared in simcli.
-3. A, D, E, G: the hooks above, after their branches are in.
+1. Lead: step 1 (`wp_sim`) and step 1b (simcli `weather:` field + rename the pending wet
+   scenario). Both are exact above; nothing else is required for weather to change grip and
+   police sight in the game.
+2. v0.3.0: W-1 (`WorldQuery::weather_at`) + A's step 2 for the full grip model.
+3. E: the speed-cap / incident setter (step 4). D, G: steps 3 and 5.
 
 ## Contract change requests
 Status after v0.2.0 (applied 2026-10-19): none of W-1…W-6 were in the batch (filed too late);
@@ -188,31 +284,25 @@ model cannot reach `wp_vehicle` and the interim `WetAsphalt` remap stays in use.
 | W-5 | `ServerToClient` weather snapshot message / baseline field: `{ kind: u8, intensity: f32, prev_kind: u8, prev_intensity: f32, blend: f32, wind_heading_rad: f32, water_q8: Vec<u8> }` | Clients need the same wet roads for prediction and rendering | F, lead | proposed for v0.3.0 (fold into F's NET-1 list) |
 | W-6 | `Season` into contracts | Only if 08/15 want season-dependent stakes or events; otherwise keep in `wp_weather` | lead, G, 15 | low priority |
 
-**Not a contract — scenario format request to I (10), W-7:** optional top-level field
-```ron
-weather: (kind: HeavyRain, intensity: 0.8, water_mm: 1.5, locked: true, season: Autumn, seed: 3),
-```
-(`seed` defaults to the scenario seed; `water_mm` = `set_all_water_mm` before tick 0). Plus,
-once W-1 + A's hook land, a metric `min_grip_mult`. First scenarios I would add under
-`apps/simcli/scenarios/weather/`:
-```ron
-(
-    name: "weather_wet_brake_100_0",
-    seed: 1,
-    assists: ai,
-    weather: (kind: HeavyRain, intensity: 1.0, water_mm: 1.5, locked: true),
-    entities: [(id: "car", car: "debug_sedan", driver: cruise(target_mps: 27.8, until_s: 14.0),
-                inputs: [(t_s: 14.0, input: (brake: 1.0)), (t_s: 19.0, input: ())])],
-    duration_s: 20.0,
-    // dry twin (vehicle_brake_100_0) stops within 3 s; wet asphalt (0.70) needs ~1.4× the distance
-    expect: [speed_at(t_s: 17.0, min: 3.0, max: 15.0), speed_at(t_s: 19.0, min: 0.0, max: 2.0)],
-)
-```
-and `weather_puddle_aquaplane` (one car at 30 m/s through a soaked straight: lateral grip loss),
-`weather_fog_pursuit` (police sight, once E lands). I did not add scenario files: the v2 parser
-rejects unknown fields, and a dry copy of `vehicle/sedan_brake.ron` would add nothing.
+**Not a contract — scenario field W-7:** exact spec in step 1b above. Scenario files (owned
+by me, `apps/simcli/scenarios/weather/`):
+- `dry_brake_100_0.ron` — active control: `debug_sedan`, cruise to 27.8 m/s, full brake
+  14.0–18.0 s (released at 18.0 because a brake held at standstill selects reverse); expects
+  ≤ 1.0 m/s at 17.2 s (passes: stops at ~17.1 s).
+- `wet_brake_100_0.ron.pending` — the same car, inputs and timing with
+  `weather: (kind: HeavyRain, intensity: 1.0, water_mm: 1.5, locked: true)`; expects 3–12 m/s
+  at 17.2 s and −1…1.5 m/s at 18.0 s. Non-`.ron` extension so today's parser (unknown fields are
+  errors) skips it; rename when W-7 lands.
+Later: `weather_puddle_aquaplane` (needs W-1 + A's hook) and `weather_fog_pursuit` (pursuit
+starts later / is lost sooner in fog).
 
 ## Changes outside my crates
+- `apps/simcli/scenarios/weather/` (new folder, scenario files only — allowed by the lead):
+  `dry_brake_100_0.ron`, `wet_brake_100_0.ron.pending`. No simcli code touched.
+- `apps/simcli/golden/weather_dry_brake_100_0/hashes.txt` — new golden for the new dry
+  scenario (`goldens_match` requires one per scenario), blessed alone with
+  `simcli run scenarios/weather/dry_brake_100_0.ron --bless`; commit tagged `[bless]`. No
+  existing golden changed.
 - `Cargo.toml` (workspace): added `crates/wp_weather` to `members` and `wp_weather` to
   `[workspace.dependencies]`.
 - Lead (run 3, contract v0.2.0) added `line_of_sight` to `WithWeather` (forwards) and to the
@@ -231,9 +321,11 @@ rejects unknown fields, and a dry copy of `vehicle/sedan_brake.ron` would add no
 `cargo run --release -p wp_weather --example weather_bench`.
 
 ## Known gaps
-- Nothing is wired: no `wp_sim`, vehicle, world, police or economy call sites yet (hooks above).
-- No vehicle-level wet test: `wp_vehicle::rig::Rig` uses a fixed `FlatWorld`, and simcli
-  cannot set weather (W-7).
+- Nothing is wired in the game yet: `wp_sim` (steps 1/1b), police caps (4), world (3), economy (5).
+- The wet simcli scenario is pending on step 1/1b; the effect is proven today on the real
+  vehicle via `Rig<Weathered<FlatWorld>>` (`tests/vehicle_grip.rs`).
+- Interim grip path: only wetness ≥ 0.5 reaches tires (as `WetAsphalt`); damp roads, ice,
+  painted lines and aquaplaning wait for W-1 + A's hook.
 - Sky state is uniform over the map (no fog banks, no moving rain cells); only road water is
   local. No snow. Tire temperature out of scope.
 - Grid cells take the surface at their centre (8 m cells); kerbs/markings are sub-cell.
