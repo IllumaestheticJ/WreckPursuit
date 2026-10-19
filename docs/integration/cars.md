@@ -5,6 +5,40 @@
 - **Crates / folders owned:** `data/cars/` (roster files), `data/lattices/` (roster car files, not the generator), `tools/specsheet/`; round 8: `data/tires/` edits the lead assigned to H (`PaintedLine`, `treaded`)
 - **Contract version built against:** 0.3.0
 
+## Response to lead feedback round 12b (2026-10-19) — junkyard beater (B06)
+
+Merged `origin/lead/round12` at `05f92f8` into `ws/cars` (not main, per the brief); no conflicts.
+`junkyard_beater` already existed (round 6b, as the economy floor) but missed the new brief
+(sim 0-100 13.8 s, Vmax 164 km/h, 5-speed, new `street` tyres). Retuned in `roster_inputs.py`
+and regenerated (car JSON, spec sheet, lattice), validated, and given scenarios.
+
+| Item | Done |
+|---|---|
+| 1 Car file | `data/cars/junkyard_beater.json`: 1980s FF 1.6 SOHC carb four-door, **1048 kg** (curb 990), **65 kW @ 5500 / 124 N·m @ 4000** (worn, soft midrange), redline 5800 / limiter 6000, **4-speed manual** (3.17 / 1.84 / 1.26 / 0.97, final 4.33, 0.55 s shift), **open diff**, worn drivetrain `efficiency` 0.78. **Soft worn suspension**: ride 1.15 / 1.25 Hz, ζ 0.14, roll gradient 6.5 °/g, +1 cm travel. **Old tyres**: `vintage_bias` (≈ 0.85 × street grip, strong fall-off past the peak = early, long squeal; see request to A + G for a proper aged-radial compound). Durability 2, base price 3 000 (= `market.toml [floor_car]`, floor price 1 500 untouched; `roster_prices::floor_car_is_in_the_roster_with_matching_data` passes). The 3-speed automatic: one drivetrain per `VehicleDef`, so the car ships as the 4-speed manual and the auto is a request to G (below). Lore line in `docs/design/CARS_LORE.md` (no longer "proposed"/"no car file"). Nameplate check clean. |
+| 2 Lattice + panel mesh | Reused the existing generated sedan body: `gen-lattice --profile sedan`, same dims/strength 0.9. Only node masses changed (car 10 kg lighter): node positions, beams, detachables and skin binding are identical, so R's `data/panels/junkyard_beater.json` and its mesh fit unchanged — no new mesh needed. |
+| 3 Validation band, tests, testbed | `VALIDATION.md` band: 0-100 **14-16 s**, skidpad 0.68-0.78 g, 100-0 42-48 m and a new optional **top-speed band 140-160 km/h** (`specsheet.py`, only the beater uses it). Sim: **0-100 14.7 s ✓, Vmax 146 km/h ✓, 100-0 45.5 m ✓, skidpad 0.72 g ✓**, mild understeer +0.19 °/g; barriers 8/8. Tests: new scenario group `apps/simcli/scenarios/cars/` (`beater_accel` 0-100 between 14 and 16 s, `beater_top_speed` 140-160 km/h, `beater_hard_turn` full lock at 60 km/h: 0.5-0.85 g, never airborne, keeps moving); they run in `cargo test -p simcli`'s scenario suite. **Testbed car list**: nothing to add — `wp_wasm` embeds every `data/cars/*.json` (`build.rs`) and the car dropdown is built from `car_ids()`; `wp_wasm`'s `every_embedded_car_resolves` covers it. |
+
+Pursuit probe (`pursuit_probe.py --chase`): beater 0-144 km/h 35.5 s; the cruiser catches it in
+5.1 s at the day cap (12.6 s with the +10 % margin). Validation re-collected on the round-12
+base: the other cars moved only at rounding level (A's round-12 vehicle changes), barrier sweep
+unchanged (the known Wolfhound offset near miss).
+
+Tool changes (`tools/specsheet/`, mine): `build_roster.py` writes an optional
+`drivetrain.efficiency` (and explains it in the spec sheet) when a car states one;
+`estimate.py` uses it; `specsheet.py` checks the optional top-speed band.
+
+### Changes outside my folders (round 12b)
+- `docs/design/CARS_LORE.md` (P's design docs): the beater entry — the lead asked for the lore line.
+- `apps/simcli/scenarios/cars/` (new group, I's harness folder; CLAUDE.md puts scenario tests there).
+
+### New requests (round 12b)
+
+| To | Request |
+|---|---|
+| 02 vehicle (A) + 08 economy (G) | An **`aged_radial`** compound for old, hardened radials (the beater; later traffic/props). `vintage_bias` stands in today but is a 70s bias-ply (half the cornering stiffness, lazy). Proposal: street's shape with lateral `d` 0.82, `e` −0.5 (earlier, louder fall-off), longitudinal `d` 0.95, relaxation 0.40 m, rolling resistance 0.014, wet 0.55, paint 0.93 (peak slips computed from the curves). It needs a `market.tire_grip` row too (`wp_economy`'s `every_tire_file_has_a_grip_factor`), which is why I did not add the file. I switch the beater with one line in `roster_inputs.py` once it exists. |
+| 08 economy (G) | A **3-speed automatic** option for the beater (the brief's "4-speed manual / 3-speed auto"): a gearbox-swap mod, or a second def `junkyard_beater_auto` if you prefer a used-market variant. Data for it: ratios 2.84 / 1.60 / 1.00, final 3.70, torque converter stall 2200 rpm ×2.0, couples 2600 rpm, shift 0.6 s — I add the def on request. |
+| 19 design docs (P) | `FEATURE_BACKLOG.md` B06 can be closed. |
+
 ## Response to lead feedback round 8 (2026-10-19)
 
 Merged `origin/main` at `d3effad` (contract v0.3.0) into `ws/cars`; no conflicts.
