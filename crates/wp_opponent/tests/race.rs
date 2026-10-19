@@ -225,3 +225,42 @@ fn wanted_racer_abandons_the_race_and_runs() {
         assert_eq!(s.status, RacerStatus::Racing);
     }
 }
+
+#[test]
+fn open_roads_with_traffic_no_civilian_contact() {
+    // An illegal street race on open roads: civilian traffic, junctions, signals. Pace is
+    // slow (racers yield at busy junctions); what matters is that nobody touches a civilian
+    // and nobody hits another racer.
+    let setup = Setup {
+        seed: 7,
+        laps: 1,
+        drivers: eight_drivers()[..4].to_vec(),
+        closed_roads: false,
+        traffic: 0.25,
+        grid: GridLayout::SingleFile,
+        max_s: 90.0,
+        ..Setup::default()
+    };
+    let out = common::run_plain(&setup);
+    let mut field = out.field;
+    let events = field.drain_events();
+    let dq: Vec<_> = events
+        .iter()
+        .filter(|e| matches!(e, OpponentEvent::Disqualified { .. }))
+        .collect();
+    assert!(dq.is_empty(), "civilian contacts: {dq:?}");
+    let hard = out
+        .contacts
+        .iter()
+        .filter(|c| c.3 >= AI_CONTACT_IMPULSE_NS)
+        .count();
+    assert_eq!(hard, 0, "{:?}", out.contacts);
+    for s in field.standings() {
+        assert!(
+            s.progress_m > 250.0,
+            "{:?} stuck at {:.0} m",
+            s.entity,
+            s.progress_m
+        );
+    }
+}

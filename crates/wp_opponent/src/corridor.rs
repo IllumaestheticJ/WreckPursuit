@@ -14,11 +14,23 @@ use wp_world::Route;
 /// Resampling step, m.
 pub const CORRIDOR_STEP_M: f32 = 2.0;
 
+/// Whether racers may use the opposing lanes of two-way roads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpposingLanes {
+    /// Never (law-abiding events).
+    Never,
+    /// Only to overtake, when no oncoming traffic is in the way (open-road street races;
+    /// drivers with `risk` ≥ 0.5).
+    ForOvertaking,
+    /// Always part of the track (closed-road events).
+    Always,
+}
+
 /// How the corridor is derived from the road.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CorridorOptions {
-    /// Allow the opposing lanes of two-way roads (closed-road events only).
-    pub use_opposing_lanes: bool,
+    /// Use of the opposing lanes of two-way roads.
+    pub opposing: OpposingLanes,
     /// Extra width kept clear of every kerb, m.
     pub kerb_margin_m: f32,
 }
@@ -26,7 +38,7 @@ pub struct CorridorOptions {
 impl Default for CorridorOptions {
     fn default() -> Self {
         Self {
-            use_opposing_lanes: false,
+            opposing: OpposingLanes::Never,
             kerb_margin_m: 0.3,
         }
     }
@@ -39,8 +51,12 @@ pub struct CorridorSample {
     pub pos: V3,
     /// Unit travel direction.
     pub tangent: V2,
-    /// Drivable width to the left of the centreline (positive), m.
+    /// Drivable width to the left of the centreline (positive), m — the racing width (own
+    /// direction, plus the opposing lanes with [`OpposingLanes::Always`]).
     pub left_m: f32,
+    /// Width to the left usable for overtaking (includes the opposing lanes unless
+    /// [`OpposingLanes::Never`]), m.
+    pub left_pass_m: f32,
     /// Drivable width to the right of the centreline (positive), m.
     pub right_m: f32,
     /// Inside a junction box.
@@ -81,9 +97,12 @@ pub struct Corridor {
     pub closed: bool,
     /// Total length, m.
     pub length_m: f32,
+    /// Use of the opposing lanes this corridor was built with.
+    pub opposing: OpposingLanes,
 }
 
-fn lane_extents(map: &CityMap, lane: u32, opts: &CorridorOptions) -> (f32, f32) {
+/// `(left racing, left for overtaking, right)` extents of a lane, kerb margin applied.
+fn lane_extents(map: &CityMap, lane: u32, opts: &CorridorOptions) -> (f32, f32, f32) {
     let lanes = &map.net.lanes;
     let me = &lanes[lane as usize];
     let mut left = me.width_m * 0.5;
@@ -100,7 +119,8 @@ fn lane_extents(map: &CityMap, lane: u32, opts: &CorridorOptions) -> (f32, f32) 
         right += lanes[c as usize].width_m;
         cur = lanes[c as usize].right;
     }
-    if opts.use_opposing_lanes && !lanes[leftmost as usize].edge_left {
+    let mut left_pass = left;
+    if opts.opposing != OpposingLanes::Never && !lanes[leftmost as usize].edge_left {
         // Opposing driving lanes of the same road (all of them sit left of our leftmost lane
         // in right-hand traffic).
         let road = me.road;
@@ -115,11 +135,16 @@ fn lane_extents(map: &CityMap, lane: u32, opts: &CorridorOptions) -> (f32, f32) 
             })
             .map(|(_, l)| l.width_m)
             .sum();
-        left += opp;
+        left_pass += opp;
+        if opts.opposing == OpposingLanes::Always {
+            left += opp;
+        }
     }
+    let k = opts.kerb_margin_m;
     (
-        (left - opts.kerb_margin_m).max(0.5),
-        (right - opts.kerb_margin_m).max(0.5),
+        (left - k).max(0.5),
+        (left_pass - k).max(0.5),
+        (right - k).max(0.5),
     )
 }
 
@@ -166,7 +191,8 @@ impl Corridor {
             .filter(|p| p.b - p.a > 1e-3)
             .collect();
         // Extents per lane piece (connectors get NaN and are blended afterwards).
-        let mut pts: Vec<(V3, V2, f32, f32, bool)> = Vec::new();
+        // (pos, tangent, left, left_pass, right, junction)
+        let mut pts: Vec<(V3, V2, f32, f32, f32, bool)> = Vec::new();
         let mut carry = 0.0f32;
         for p in &pieces {
             let seg = map.seg(p.seg);
@@ -177,8 +203,8 @@ impl Corridor {
             let mut s = p.a + carry;
             while s < p.b {
                 let (pos, t) = seg.point_at(s);
-                let (l, r) = ext.unwrap_or((f32::NAN, f32::NAN));
-                pts.push((pos, t, l, r, ext.is_none()));
+                let (l, lp, r) = ext.unwrap_or((f32::NAN, f32::NAN, f32::NAN));
+                pts.push((pos, t, l, lp, r, ext.is_none()));
                 s += CORRIDOR_STEP_M;
             }
             carry = s - p.b;
@@ -187,11 +213,12 @@ impl Corridor {
             let lp = pieces.last().unwrap();
             let seg = map.seg(lp.seg);
             let (pos, t) = seg.point_at(lp.b);
-            let ext = seg
-                .lane()
-                .map(|l| lane_extents(map, l, opts))
-                .unwrap_or((f32::NAN, f32::NAN));
-            pts.push((pos, t, ext.0, ext.1, seg.is_connector()));
+            let ext = seg.lane().map(|l| lane_extents(map, l, opts)).unwrap_or((
+                f32::NAN,
+                f32::NAN,
+                f32::NAN,
+            ));
+            pts.push((pos, t, ext.0, ext.1, ext.2, seg.is_connector()));
         }
         // Blend connector extents between the neighbouring lane samples.
         let m = pts.len();
@@ -221,23 +248,27 @@ impl Corridor {
             } else {
                 None
             };
-            let fallback = (3.0, 3.0);
-            let eb = before.map(|k| (pts[k].2, pts[k].3)).unwrap_or(fallback);
-            let ea = after.map(|k| (pts[k].2, pts[k].3)).unwrap_or(eb);
+            let fallback = (3.0, 3.0, 3.0);
+            let eb = before
+                .map(|k| (pts[k].2, pts[k].3, pts[k].4))
+                .unwrap_or(fallback);
+            let ea = after.map(|k| (pts[k].2, pts[k].3, pts[k].4)).unwrap_or(eb);
             let eb = if before.is_none() { ea } else { eb };
             let len = (end - start + 1) as f32;
             for (j, p) in pts[start..end].iter_mut().enumerate() {
                 let t = (j + 1) as f32 / len;
                 p.2 = eb.0 + (ea.0 - eb.0) * t;
                 p.3 = eb.1 + (ea.1 - eb.1) * t;
+                p.4 = eb.2 + (ea.2 - eb.2) * t;
             }
         }
         let samples: Vec<CorridorSample> = pts
             .into_iter()
-            .map(|(pos, tangent, l, r, j)| CorridorSample {
+            .map(|(pos, tangent, l, lp, r, j)| CorridorSample {
                 pos,
                 tangent,
                 left_m: l,
+                left_pass_m: lp,
                 right_m: r,
                 junction: j,
             })
@@ -251,6 +282,7 @@ impl Corridor {
             samples,
             closed,
             length_m,
+            opposing: opts.opposing,
         }
     }
 
@@ -341,6 +373,21 @@ impl Corridor {
         let b = self.sample(i + 1);
         (
             a.left_m + (b.left_m - a.left_m) * t,
+            a.right_m + (b.right_m - a.right_m) * t,
+        )
+    }
+
+    /// Left/right widths usable for overtaking at `s` (left includes the opposing lanes
+    /// unless [`OpposingLanes::Never`]).
+    pub fn pass_bounds(&self, s: f32) -> (f32, f32) {
+        let s = self.wrap_s(s);
+        let x = s / CORRIDOR_STEP_M;
+        let i = x.floor() as isize;
+        let t = x - i as f32;
+        let a = self.sample(i);
+        let b = self.sample(i + 1);
+        (
+            a.left_pass_m + (b.left_pass_m - a.left_pass_m) * t,
             a.right_m + (b.right_m - a.right_m) * t,
         )
     }
@@ -441,11 +488,13 @@ mod tests {
                 pos: [0.0, i as f32 * CORRIDOR_STEP_M, 0.0],
                 tangent: [0.0, 1.0],
                 left_m: 3.0,
+                left_pass_m: 3.0,
                 right_m: 3.0,
                 junction: false,
             })
             .collect::<Vec<_>>();
         Corridor {
+            opposing: OpposingLanes::Never,
             length_m: if closed {
                 n as f32 * CORRIDOR_STEP_M
             } else {

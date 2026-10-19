@@ -81,6 +81,24 @@ fn main() {
                 .replace("BackOut(", "Back")
                 .replace(')', "");
             }
+            let states = sim.vehicle_states();
+            for a in sim.world().agents() {
+                if states.iter().any(|(_, s)| {
+                    let dx = s.pos[0] - a.pos[0];
+                    let dy = s.pos[1] - a.pos[1];
+                    dx * dx + dy * dy < 900.0
+                }) {
+                    traj += &format!(
+                        "{:.2},c{},{:.2},{:.2},Civ,{:.1},{:.3},yaw,0,0,0\n",
+                        sim.tick() as f32 / 240.0,
+                        a.id,
+                        a.pos[0],
+                        a.pos[1],
+                        a.speed_mps,
+                        a.yaw
+                    );
+                }
+            }
         }
         if sim.tick() >= last_print + 240 * 10 {
             last_print = sim.tick();
@@ -133,6 +151,12 @@ fn main() {
             out.field.passes_by(gi)
         );
         println!("    pass checks {:?}", out.field.debug_of(gi).pass_checks);
+    }
+    let mut field = out.field.clone();
+    for ev in field.drain_events() {
+        if !matches!(ev, wp_opponent::OpponentEvent::LapCompleted { .. }) {
+            println!("event {ev:?}");
+        }
     }
     let big: Vec<_> = out
         .contacts

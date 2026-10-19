@@ -7,8 +7,8 @@ use std::path::PathBuf;
 
 use wp_contracts::{DamageSim, EntityId, LoadedCar, SimEvent, TimeOfDay, VehicleSim};
 use wp_opponent::{
-    CarCapability, CorridorOptions, DriverProfile, Field, GridLayout, NoPolice, PoliceQuery,
-    RaceConfig, RacerSpec, VehicleObs,
+    CarCapability, CorridorOptions, DriverProfile, Field, GridLayout, NoPolice, OpposingLanes,
+    PoliceQuery, RaceConfig, RacerSpec, VehicleObs,
 };
 use wp_sim::{Sim, SimConfig};
 use wp_world::procgen::ProcGenConfig;
@@ -174,7 +174,11 @@ pub fn run(
         laps: setup.laps,
         seed: setup.seed,
         corridor: CorridorOptions {
-            use_opposing_lanes: setup.closed_roads,
+            opposing: if setup.closed_roads {
+                OpposingLanes::Always
+            } else {
+                OpposingLanes::ForOvertaking
+            },
             ..CorridorOptions::default()
         },
         ..RaceConfig::default()

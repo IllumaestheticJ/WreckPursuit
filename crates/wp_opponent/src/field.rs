@@ -25,7 +25,7 @@ use wp_world::traffic::{CAR_LENGTH_M, CAR_WIDTH_M};
 use wp_world::World;
 
 use crate::capability::CarCapability;
-use crate::corridor::{Corridor, CorridorOptions, CORRIDOR_STEP_M};
+use crate::corridor::{Corridor, CorridorOptions, OpposingLanes, CORRIDOR_STEP_M};
 use crate::line::{LineParams, RacingLine, SpeedProfile};
 use crate::profile::{DriverParams, DriverProfile};
 use crate::pursuit::PoliceQuery;
@@ -175,6 +175,8 @@ pub enum OpponentEvent {
         entity: EntityId,
         /// Civilian agent id.
         civilian: u32,
+        /// Race time, s.
+        time_s: f32,
     },
     /// Car too damaged to continue.
     Retired {
@@ -687,12 +689,13 @@ impl Field {
             let dt = self.config.decision_ticks.max(1) as f32 * PHYSICS_DT;
             self.observe(world, vehicles, police, dt);
             let snapshot = self.perceive_all(world, vehicles);
+            let civs = self.civilians_near(world);
             for k in 0..self.racers.len() {
                 let obstacles = match &self.racers[k].flight {
                     None => snapshot.clone(),
                     Some(f) => self.perceive_on(&f.corridor, k, world, vehicles),
                 };
-                self.decide(k, &obstacles, dt);
+                self.decide(k, &obstacles, &civs, dt);
             }
             self.outputs = self.racers.iter().map(|r| (r.entity, r.input)).collect();
         } else {
@@ -941,14 +944,27 @@ impl Field {
                         hl: 0.5 * CAR_LENGTH_M,
                         hw: 0.5 * CAR_WIDTH_M,
                     };
-                    if geom::obb_overlap(&me, &other) {
+                    // The racer's fault only if it is moving into the civilian (kinematic
+                    // traffic can drive into a stopped racer; that is traffic's failure).
+                    let toward = {
+                        let st = &vehicles.iter().find(|v| v.entity == r.entity);
+                        st.map(|v| {
+                            let d = geom::normalize(geom::sub(c, r.pos));
+                            geom::dot([v.state.lin_vel[0], v.state.lin_vel[1]], d)
+                        })
+                        .unwrap_or(0.0)
+                    };
+                    if geom::obb_overlap(&me, &other) && toward > 0.5 {
                         let r = &mut self.racers[k];
                         if r.status == RacerStatus::Racing {
+                            // Out of the race; drives on at cool-down pace (a car parked on
+                            // the road would block traffic and the field).
                             r.status = RacerStatus::Disqualified;
-                            r.tactic = Tactic::Park;
+                            r.v_cap = self.config.cooldown_speed_mps;
                             self.events.push(OpponentEvent::Disqualified {
                                 entity: r.entity,
                                 civilian: a.id,
+                                time_s: self.tick as f32 * PHYSICS_DT,
                             });
                         }
                         break;
@@ -1042,7 +1058,19 @@ impl Field {
     }
 
     /// Step 3 + 4 for racer `k`.
-    fn decide(&mut self, k: usize, obstacles: &[Obstacle], dt: f32) {
+    /// Civilians near any racer, as `(id, position, velocity)` (junction awareness).
+    fn civilians_near(&self, world: &World) -> Vec<(u32, V2, V2)> {
+        let mut out = Vec::new();
+        for a in world.agents() {
+            let p = geom::xy(a.pos);
+            if self.racers.iter().any(|r| geom::dist(p, r.pos) < 160.0) {
+                out.push((a.id, p, geom::scale(geom::dir_of_yaw(a.yaw), a.speed_mps)));
+            }
+        }
+        out
+    }
+
+    fn decide(&mut self, k: usize, obstacles: &[Obstacle], civs: &[(u32, V2, V2)], dt: f32) {
         // Take the racer's own track data out while it is mutated.
         let flight = self.racers[k].flight.take();
         let speed = std::mem::replace(
@@ -1060,6 +1088,7 @@ impl Field {
         };
         decide_racer(
             &mut self.racers[k],
+            civs,
             k,
             corridor,
             line,
@@ -1094,6 +1123,7 @@ impl Field {
 #[allow(clippy::too_many_arguments)]
 fn decide_racer(
     r: &mut Racer,
+    civs: &[(u32, V2, V2)],
     k: usize,
     corridor: &Corridor,
     line: &RacingLine,
@@ -1108,14 +1138,24 @@ fn decide_racer(
         let hl = 0.5 * r.cap.length_m;
         let v = r.v.max(0.0);
         let line_n = |s: f32| corridor.interp(&line.offset, s);
-        let limits = |s: f32| {
-            let (l, rr) = corridor.bounds(s);
+        let to_limits = |(l, rr): (f32, f32)| {
             let lo = -l + hw + 0.25;
             let hi = rr - hw - 0.25;
             if lo <= hi {
                 (lo, hi)
             } else {
                 (0.5 * (lo + hi), 0.5 * (lo + hi))
+            }
+        };
+        let limits = |s: f32| to_limits(corridor.bounds(s));
+        // Overtaking may use the opposing lanes on open roads (risk-takers only).
+        let may_use_opposing =
+            corridor.opposing == OpposingLanes::ForOvertaking && r.profile.risk >= 0.5;
+        let pass_limits = |s: f32| {
+            if may_use_opposing {
+                to_limits(corridor.pass_bounds(s))
+            } else {
+                limits(s)
             }
         };
         let v_line = |s: f32| corridor.interp(&profile.v, s);
@@ -1179,16 +1219,16 @@ fn decide_racer(
 
         // ---- Tactical state machine ----
         let (lim_lo, lim_hi) = limits(r.s);
+        let (pass_lo, pass_hi) = pass_limits(r.s);
         r.tactic_ticks += 1;
-        let parked = matches!(r.status, RacerStatus::Disqualified | RacerStatus::Retired)
-            || r.tactic == Tactic::Park;
+        let parked = r.status == RacerStatus::Retired || r.tactic == Tactic::Park;
         if parked {
             r.tactic = Tactic::Park;
         } else {
             // Off the corridor / facing the wrong way → rejoin.
             let t = corridor.samples[r.hint].tangent;
             let heading_cos = geom::dot(r.fwd, t);
-            let off = r.n < lim_lo - 1.0 || r.n > lim_hi + 1.0;
+            let off = r.n < pass_lo - 1.0 || r.n > pass_hi + 1.0;
             if r.tactic != Tactic::Reverse
                 && r.tactic != Tactic::Rejoin
                 && (off || heading_cos < 0.5)
@@ -1239,8 +1279,15 @@ fn decide_racer(
                             // still behind: back out.
                             let lost = x.ds > 0.0 && r.alongside_s > p.side_by_side_s;
                             let gone = x.gap > 30.0;
+                            // Something coming the other way in my lane: tuck back in.
+                            let oncoming = rel.iter().any(|q| {
+                                q.ds > 0.0
+                                    && q.o.v_s < -1.0
+                                    && (q.o.n - r.n_goal).abs() < hw + q.o.half_w + 1.0
+                                    && q.gap / (v + -q.o.v_s).max(1.0) < 3.5
+                            });
                             let stale = r.tactic_ticks as f32 * dt > 15.0;
-                            too_late || lost || gone || stale
+                            too_late || lost || gone || stale || oncoming
                         }
                     }
                     None => true,
@@ -1293,9 +1340,12 @@ fn decide_racer(
             let hi = o.n.max(o.n + drift) + o.half_w + margin;
             band.0 < hi && band.1 > lo
         };
+        // Civilian clearance grows with my speed: creep past a stopped car with 0.4 m, pass
+        // at 15 m/s or more with the full margin.
+        let civ_margin = 0.4 + (p.civilian_margin_m - 0.4) * (v / 15.0).clamp(0.0, 1.0);
         let margin_for = |o: &Obstacle| -> f32 {
             let base = if matches!(o.who, Who::Civilian(_)) {
-                p.civilian_margin_m
+                civ_margin
             } else {
                 LAT_MARGIN_M
             };
@@ -1347,7 +1397,7 @@ fn decide_racer(
                         v,
                         margin: margin_for(&x.o),
                     };
-                    let plan = plan_pass(r, x, &rel, &ctx, &limits);
+                    let plan = plan_pass(r, x, &rel, &ctx, &pass_limits);
                     let slot = match plan {
                         Ok(_) => 0,
                         Err(e) => e as usize,
@@ -1402,7 +1452,7 @@ fn decide_racer(
                 let side = (r.n_goal - x.o.n).signum();
                 let need = hw + x.o.half_w + margin_for(&x.o) + p.overtake_margin_m;
                 let want = x.o.n + side * need;
-                let (lo, hi) = limits(r.s + x.ds.max(0.0));
+                let (lo, hi) = pass_limits(r.s + x.ds.max(0.0));
                 if want < lo - 0.05 || want > hi + 0.05 {
                     if x.ds > 0.0 && x.gap > 0.0 {
                         r.tactic = Tactic::Follow;
@@ -1457,7 +1507,12 @@ fn decide_racer(
         if r.n_cmd.is_nan() {
             r.n_cmd = r.n;
         }
-        let mut n_cmd = approach(r.n_cmd, desired.clamp(lim_lo, lim_hi), rate * dt);
+        let (act_lo, act_hi) = if r.tactic == Tactic::Overtake {
+            (pass_lo, pass_hi)
+        } else {
+            (lim_lo, lim_hi)
+        };
+        let mut n_cmd = approach(r.n_cmd, desired.clamp(act_lo, act_hi), rate * dt);
 
         // Hard side constraints: never move toward a car that overlaps me longitudinally.
         let mut lo = lim_lo.min(r.n);
@@ -1471,11 +1526,7 @@ fn decide_racer(
             if !alongside && !arriving {
                 continue;
             }
-            let civ_extra = if is_civ(&x.o) {
-                p.civilian_margin_m
-            } else {
-                0.0
-            };
+            let civ_extra = if is_civ(&x.o) { civ_margin } else { 0.0 };
             let need = hw + x.o.half_w + SIDE_GAP_M + civ_extra;
             // Lateral closing speed (either car drifting toward the other) eats clearance.
             if x.o.n >= r.n {
@@ -1557,6 +1608,58 @@ fn decide_racer(
                     cap_to(&mut v_target, cap, SpeedLimit::Mode);
                 }
                 x += 2.0 * CORRIDOR_STEP_M;
+            }
+        }
+        // Junction awareness: while a civilian is heading into (or is inside) the next
+        // junction box, keep the ability to stop before entering it.
+        if !civs.is_empty() {
+            let i0 = corridor.wrap((r.s / CORRIDOR_STEP_M) as isize);
+            let horizon = (v * v / (2.0 * a_brk) + 30.0).min(130.0);
+            let steps = (horizon / CORRIDOR_STEP_M) as isize;
+            let in_junction = corridor.samples[i0].junction;
+            // Already in a junction box: its remaining part counts, entry distance 0.
+            let entry = if in_junction {
+                Some(0)
+            } else {
+                (1..steps).find(|&j| corridor.sample(i0 as isize + j).junction)
+            };
+            if let Some(j) = entry {
+                let mut j_end = j;
+                while j_end < j + 60 && corridor.sample(i0 as isize + j_end + 1).junction {
+                    j_end += 1;
+                }
+                let c_j = geom::xy(corridor.sample(i0 as isize + (j + j_end) / 2).pos);
+                let radius = ((j_end - j) as f32 * CORRIDOR_STEP_M * 0.5).max(8.0);
+                let d_entry = j as f32 * CORRIDOR_STEP_M;
+                let t_dir = corridor.sample(i0 as isize + (j + j_end) / 2).tangent;
+                let watch = 25.0 + 20.0 * r.profile.awareness;
+                for (id, pos, vel) in civs {
+                    let to = geom::sub(c_j, *pos);
+                    let d = geom::len(to);
+                    if d > radius + watch {
+                        continue;
+                    }
+                    let speed = geom::len(*vel);
+                    // Travelling with me through the junction: handled as a car ahead.
+                    if speed > 0.5 && geom::dot(geom::scale(*vel, 1.0 / speed), t_dir) > 0.7 {
+                        continue;
+                    }
+                    // Stopped civilians inside are waiting for me once I'm in the box
+                    // myself (avoid a stand-off); moving ones always count.
+                    let inside = d < radius && (speed > 0.5 || !in_junction);
+                    let heading_in = speed > 0.5
+                        && geom::dot(*vel, to) > 0.5 * speed * d
+                        && (d - radius) / speed < 4.0;
+                    if inside || heading_in {
+                        let free = if in_junction {
+                            0.0
+                        } else {
+                            (d_entry - 3.0).max(0.0)
+                        };
+                        let cap = (2.0 * a_brk * 0.8 * free).sqrt();
+                        cap_to(&mut v_target, cap, SpeedLimit::Obstacle(1_000_000 + id));
+                    }
+                }
             }
         }
         // Obstacle caps: anything ahead in the band I'm driving through.
@@ -1645,7 +1748,11 @@ fn decide_racer(
         // ---- Controls ----
         let ld = r.ctrl.lookahead(v);
         let s_t = r.s + ld;
-        let (t_lo, t_hi) = limits(s_t);
+        let (t_lo, t_hi) = if r.tactic == Tactic::Overtake {
+            pass_limits(s_t)
+        } else {
+            limits(s_t)
+        };
         let n_t = (n_cmd + follow_w * (line_n(s_t) - line_n(r.s)))
             .clamp(t_lo.min(n_cmd), t_hi.max(n_cmd));
         let target = corridor.point(s_t, n_t);
@@ -1895,6 +2002,11 @@ fn plan_pass(
                 why = PassReject::LaneAhead;
                 continue 'side;
             }
+            // Oncoming traffic in that lane: it covers the distance too.
+            if q.ds > 0.0 && q.o.v_s < -1.0 && q.ds < pass_dist + (-q.o.v_s) * t_clear + 30.0 {
+                why = PassReject::LaneAhead;
+                continue 'side;
+            }
             if q.ds <= 0.0 && q.gap < 12.0 && q.o.v_s > v - 2.0 {
                 why = PassReject::LaneBehind;
                 continue 'side;
@@ -1940,4 +2052,171 @@ fn plan_flight(world: &World, r: &Racer, config: &RaceConfig) -> Option<Flight> 
         line,
         profile,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::corridor::{CorridorSample, OpposingLanes};
+    use crate::pursuit::NoPolice;
+    use wp_contracts::TimeOfDay;
+
+    /// A straight 400 m corridor along +Y, 5 m each side.
+    fn straight() -> Corridor {
+        let n = 200;
+        Corridor {
+            samples: (0..n)
+                .map(|i| CorridorSample {
+                    pos: [0.0, i as f32 * CORRIDOR_STEP_M, 0.0],
+                    tangent: [0.0, 1.0],
+                    left_m: 5.0,
+                    left_pass_m: 5.0,
+                    right_m: 5.0,
+                    junction: false,
+                })
+                .collect(),
+            closed: false,
+            length_m: (n - 1) as f32 * CORRIDOR_STEP_M,
+            opposing: OpposingLanes::Never,
+        }
+    }
+
+    fn cap() -> CarCapability {
+        CarCapability {
+            max_lat_g: 0.9,
+            brake_g: 1.0,
+            accel_mps2: 4.0,
+            top_speed_mps: 50.0,
+            wheelbase_m: 2.7,
+            max_steer_rad: 0.6,
+            length_m: 4.6,
+            width_m: 1.8,
+        }
+    }
+
+    fn obs(entity: u32, y: f32, speed: f32, effects: HandlingEffects) -> VehicleObs {
+        VehicleObs {
+            entity: EntityId(entity),
+            state: VehicleState {
+                pos: [0.0, y, 0.0],
+                rot: [0.0, 0.0, 0.0, 1.0],
+                lin_vel: [0.0, speed, 0.0],
+                speed_mps: speed,
+                health: 1.0,
+                ..Default::default()
+            },
+            effects,
+            size_m: [1.8, 4.6],
+        }
+    }
+
+    fn field(n: usize) -> Field {
+        let specs: Vec<RacerSpec> = (0..n)
+            .map(|i| RacerSpec {
+                entity: EntityId(i as u32 + 1),
+                profile: DriverProfile::default(),
+                capability: cap(),
+            })
+            .collect();
+        Field::new(straight(), &specs, RaceConfig::default())
+    }
+
+    #[test]
+    fn grip_damage_rebuilds_a_slower_profile() {
+        let mut f = field(1);
+        let world = World::flat(TimeOfDay::from_hours(12.0), 1.0);
+        f.tick(
+            &world,
+            &[obs(1, 20.0, 10.0, HandlingEffects::NEUTRAL)],
+            &[],
+            &NoPolice,
+        );
+        let before = f.speed_profile_of(0).a_lat;
+        let hurt = HandlingEffects {
+            grip_scale: [0.6, 1.0, 1.0, 1.0],
+            overheating: 0.5,
+            ..HandlingEffects::NEUTRAL
+        };
+        for _ in 0..4 {
+            f.tick(&world, &[obs(1, 21.0, 10.0, hurt)], &[], &NoPolice);
+        }
+        let after = f.speed_profile_of(0);
+        assert!(after.a_lat < before * 0.7, "{before} → {}", after.a_lat);
+        // Overheating caps the speed below the car's top speed.
+        assert!(after
+            .v
+            .iter()
+            .all(|v| *v <= 50.0 * (1.0 - 0.35 * 0.5) + 1e-3));
+    }
+
+    #[test]
+    fn dead_engine_retires_and_parks() {
+        let mut f = field(1);
+        let world = World::flat(TimeOfDay::from_hours(12.0), 1.0);
+        let dead = HandlingEffects {
+            engine_dead: true,
+            ..HandlingEffects::NEUTRAL
+        };
+        f.tick(&world, &[obs(1, 20.0, 5.0, dead)], &[], &NoPolice);
+        assert_eq!(f.standings()[0].status, RacerStatus::Retired);
+        assert_eq!(f.tactic_of(0), Tactic::Park);
+        assert!(f
+            .drain_events()
+            .iter()
+            .any(|e| matches!(e, OpponentEvent::Retired { .. })));
+    }
+
+    #[test]
+    fn follower_brakes_for_a_slower_car_ahead_and_never_steers_into_it() {
+        let mut f = field(2);
+        let world = World::flat(TimeOfDay::from_hours(12.0), 1.0);
+        // Racer 2 is 12 m behind racer 1 and 15 m/s faster, both on the centreline.
+        let cars = [
+            obs(1, 160.0, 10.0, HandlingEffects::NEUTRAL),
+            obs(2, 148.0, 25.0, HandlingEffects::NEUTRAL),
+        ];
+        let mut braked = false;
+        for _ in 0..8 {
+            let inputs = f.tick(&world, &cars, &[], &NoPolice).to_vec();
+            braked |= inputs[1].1.brake > 0.5;
+        }
+        assert!(braked, "follower did not brake: {:?}", f.debug_of(1));
+        assert!(matches!(f.debug_of(1).limit, SpeedLimit::Obstacle(100)));
+        // Side by side, overlapping: neither steers toward the other.
+        let mut f = field(2);
+        let side = [
+            obs(1, 100.0, 20.0, HandlingEffects::NEUTRAL),
+            VehicleObs {
+                state: VehicleState {
+                    pos: [2.6, 101.0, 0.0],
+                    ..side_state()
+                },
+                ..obs(2, 101.0, 20.0, HandlingEffects::NEUTRAL)
+            },
+        ];
+        for _ in 0..40 {
+            f.tick(&world, &side, &[], &NoPolice);
+            // Neither moves toward the other (they start 2.6 m apart, need 1.8 + 0.6).
+            assert!(f.debug_of(0).n_cmd <= 1e-3, "{:?}", f.debug_of(0));
+            assert!(f.debug_of(1).n_cmd >= 2.6 - 1e-3, "{:?}", f.debug_of(1));
+        }
+    }
+
+    fn side_state() -> VehicleState {
+        VehicleState {
+            rot: [0.0, 0.0, 0.0, 1.0],
+            lin_vel: [0.0, 20.0, 0.0],
+            speed_mps: 20.0,
+            health: 1.0,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn no_rubber_banding_pace_ignores_position() {
+        // The same driver alone or last in a field gets the same speed profile.
+        let a = field(1);
+        let b = field(4);
+        assert_eq!(a.speed_profile_of(0).v, b.speed_profile_of(3).v);
+    }
 }

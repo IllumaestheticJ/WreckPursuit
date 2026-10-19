@@ -373,6 +373,7 @@ mod tests {
                 pos,
                 tangent: t,
                 left_m: 4.0,
+                left_pass_m: 4.0,
                 right_m: 4.0,
                 junction: false,
             });
@@ -380,6 +381,7 @@ mod tests {
         }
         let n = samples.len();
         Corridor {
+            opposing: crate::corridor::OpposingLanes::Never,
             samples,
             closed: false,
             length_m: (n - 1) as f32 * CORRIDOR_STEP_M,
