@@ -683,3 +683,81 @@ fn glass_and_region_events_are_emitted_once_per_threshold() {
     assert!(last.contains_key(&BodyRegion::FrontBumper), "{last:?}");
     assert!(last.len() <= crate::REGION_COUNT);
 }
+
+#[test]
+fn snapshot_round_trips_into_a_fresh_model() {
+    let car = sedan();
+    let (m, _) = run_barrier(&car, &sim_mode(), ImpactKind::Frontal, 56.0, 0.0, 0.3, 1);
+    let s = m.save_state();
+    assert!(s.health < 1.0);
+    let mut fresh = DamageModel::new(&car.lattice, &car.materials);
+    fresh.restore_state(&s).unwrap();
+    assert_eq!(fresh.save_state(), s);
+    assert_eq!(fresh.node_positions(), m.node_positions());
+    assert_eq!(fresh.summary(), m.summary());
+    assert!(!fresh.is_awake());
+    // A settled restored model stays put when stepped without contacts.
+    let before = fresh.node_positions().to_vec();
+    run(&mut fresh, &sim_mode(), 0.5);
+    assert_eq!(fresh.node_positions(), &before[..]);
+    // Another lattice / wrong sizes are refused and leave the model untouched.
+    let mut other = s.clone();
+    other.lattice_id = "nope".into();
+    assert!(fresh.restore_state(&other).is_err());
+    let mut short = s.clone();
+    short.beam_flags.pop();
+    assert!(fresh.restore_state(&short).is_err());
+    assert_eq!(fresh.save_state(), s);
+}
+
+#[test]
+fn summary_counts_failures_and_detachments() {
+    let car = sedan();
+    let (m, _) = run_barrier(&car, &sim_mode(), ImpactKind::Frontal, 80.0, 0.0, 0.5, 1);
+    let sum = m.summary();
+    let s = m.save_state();
+    assert_eq!(sum.health, m.health());
+    assert!(sum.total_loss);
+    assert_eq!(sum.components_failed as usize, s.components_failed.len());
+    assert_eq!(sum.parts_detached as usize, s.detached_groups.len());
+    assert_eq!(
+        sum.wheels_lost as usize,
+        s.wheels_lost.iter().filter(|w| **w).count()
+    );
+    let fresh = DamageModel::new(&car.lattice, &car.materials);
+    assert_eq!(fresh.summary().health, 1.0);
+    assert_eq!(fresh.summary().components_failed, 0);
+}
+
+#[test]
+fn repairing_every_billed_item_restores_the_car() {
+    let car = sedan();
+    let mode = arcade_mode();
+    let (mut m, _) = run_barrier(&car, &mode, ImpactKind::Frontal, 56.0, 0.0, 0.3, 1);
+    let prices = default_price_table();
+    let est = m.repair_estimate(&mode, &prices);
+    assert!(!est.lines.is_empty());
+    let health_before = m.health();
+    assert!(health_before < 1.0);
+    let items: Vec<wp_contracts::RepairItem> = est.lines.iter().map(|l| l.item).collect();
+    m.apply_repair(&items);
+    assert!(m.health() > health_before, "{} -> {}", health_before, m.health());
+    let after = m.repair_estimate(&mode, &prices);
+    assert!(
+        after.total < est.total * 0.2,
+        "estimate {} -> {}",
+        est.total,
+        after.total
+    );
+    // Components on the bill are as new.
+    for it in &items {
+        if let wp_contracts::RepairItem::Component(c) = it {
+            assert_eq!(m.component_health(*c), 1.0);
+            assert!(!m.component_failed(*c));
+        }
+    }
+    // Repairing nothing changes nothing.
+    let s = m.save_state();
+    m.apply_repair(&[]);
+    assert_eq!(m.save_state(), s);
+}
