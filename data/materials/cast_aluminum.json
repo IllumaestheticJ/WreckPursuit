@@ -1,0 +1,1 @@
+{ "id": "cast_aluminum", "density_kg_m3": 2680.0, "young_mpa": 71000.0, "yield_mpa": 180.0, "plastic_modulus_mpa": 0.0, "failure_strain": 0.03, "restitution": 0.15, "friction": 0.5, "kind": "Cast" }

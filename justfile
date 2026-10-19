@@ -31,7 +31,14 @@ sim scenario:
 schemas:
     cargo run -p wp_contracts --bin gen-schemas
 
-# Regenerate the debug box lattices in data/lattices/.
+# Regenerate the debug lattices in data/lattices/ (gen-lattice sedan/coupe profiles).
 lattices:
-    cargo run -p wp_damage --bin gen-box-lattice -- --id debug_sedan --width 1.80 --length 4.70 --height 1.45 --wheelbase 2.70 --mass 350 --out data/lattices/debug_sedan.json
-    cargo run -p wp_damage --bin gen-box-lattice -- --id debug_coupe --width 1.85 --length 4.50 --height 1.32 --wheelbase 2.65 --mass 375 --out data/lattices/debug_coupe.json
+    cargo run -p wp_damage --bin gen-lattice -- --debug
+
+# Crash-barrier calibration table for a car (default debug_sedan).
+barrier car="debug_sedan":
+    cargo run --release -p wp_damage --bin damage-barrier -- --sweep {{car}}
+
+# Damage perf benchmark (24 lattices).
+damage-bench:
+    cargo run --release -p wp_damage --bin damage-bench

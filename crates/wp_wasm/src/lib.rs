@@ -28,7 +28,7 @@ const SEDAN: &str = include_str!("../../../data/cars/debug_sedan.json");
 const SEDAN_LATTICE: &str = include_str!("../../../data/lattices/debug_sedan.json");
 const STREET_TIRE: &str = include_str!("../../../data/tires/street.json");
 const ARCADE: &str = include_str!("../../../data/modes/arcade.toml");
-const MATERIALS: [(&str, &str); 5] = [
+const MATERIALS: [(&str, &str); 6] = [
     (
         "mild_steel",
         include_str!("../../../data/materials/mild_steel.json"),
@@ -43,6 +43,10 @@ const MATERIALS: [(&str, &str); 5] = [
         include_str!("../../../data/materials/pp_bumper.json"),
     ),
     ("glass", include_str!("../../../data/materials/glass.json")),
+    (
+        "cast_aluminum",
+        include_str!("../../../data/materials/cast_aluminum.json"),
+    ),
 ];
 
 struct App {
