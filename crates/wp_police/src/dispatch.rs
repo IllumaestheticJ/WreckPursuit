@@ -20,7 +20,7 @@ use crate::time::SimTime;
 use crate::tools::{
     compass, plan_site, roadblock_barriers, roadblock_unit_spots, Roadblock, SiteRules, SpikeStrip,
 };
-use crate::unit::{Assignment, DriveCommand, Unit, UnitRole, LANE_OFFSET_M};
+use crate::unit::{Assignment, DriveCommand, Tactic, Unit, UnitRole, LANE_OFFSET_M};
 use crate::PoliceSystem;
 
 /// Road half width used for tool layout, m.
@@ -60,6 +60,33 @@ pub struct Incident {
     pub unit: Option<UnitId>,
     /// Crash scene: the unit is released at this time.
     pub scene_until: Option<SimTime>,
+}
+
+/// One racer–unit contact as police sees it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct RacerHit {
+    /// Closing speed, m/s.
+    pub(crate) rel_speed: f32,
+    /// Normal impulse of this contact, N·s (physical units).
+    pub(crate) impulse_ns: f32,
+    /// Headless contact: no impulse, estimate it from `rel_speed`.
+    pub(crate) estimated: bool,
+}
+
+/// Contacts between one racer and one unit that belong together (closer than
+/// `heat.assault.episode_s`), summed to tell a deliberate hit from a nudge.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+pub(crate) struct ContactEpisode {
+    /// Latest contact.
+    pub(crate) last: Option<SimTime>,
+    /// Summed normal impulse, N·s.
+    pub(crate) impulse_ns: f32,
+    /// Highest closing speed, m/s.
+    pub(crate) closing_mps: f32,
+    /// Highest racer speed, m/s.
+    pub(crate) racer_speed_mps: f32,
+    /// Latest contact that counted as an assault.
+    pub(crate) assault_at: Option<SimTime>,
 }
 
 /// Pending reinforcement.
@@ -173,14 +200,29 @@ impl PoliceSystem {
         }
     }
 
-    pub(crate) fn on_contact(&mut self, a: EntityId, b: EntityId, point: [f32; 3], rel_speed: f32) {
+    /// A `SimEvent::Contact` between `a` and `b`: a racer hitting a unit (see
+    /// [`PoliceSystem::unit_racer_contact`]) or a civilian–civilian crash scene.
+    pub(crate) fn on_contact(
+        &mut self,
+        world: &dyn WorldQuery,
+        a: EntityId,
+        b: EntityId,
+        point: [f32; 3],
+        rel_speed: f32,
+        impulse_ns: f32,
+    ) {
         let ua = self.unit_index_by_entity(a);
         let ub = self.unit_index_by_entity(b);
         let ra = self.racers.contains_key(&a);
         let rb = self.racers.contains_key(&b);
+        let hit = RacerHit {
+            rel_speed,
+            impulse_ns,
+            estimated: false,
+        };
         match (ua, ub, ra, rb) {
-            (Some(i), _, _, true) => self.unit_racer_contact(i, b, rel_speed, false),
-            (_, Some(i), true, _) => self.unit_racer_contact(i, a, rel_speed, false),
+            (Some(i), _, _, true) => self.unit_racer_contact(world, i, b, hit, false),
+            (_, Some(i), true, _) => self.unit_racer_contact(world, i, a, hit, false),
             // Civilian–civilian crash (not a car hitting a wall).
             (None, None, false, false)
                 if rel_speed >= self.cfg.presence.crash_incident_min_speed_mps
@@ -194,13 +236,18 @@ impl PoliceSystem {
 
     /// Record a racer contact on unit `i`. `apply_damage` is used by the built-in driver
     /// (physical units get damage from `wp_damage` via `sync_unit`).
+    ///
+    /// Every contact also feeds the pair's contact episode; a hard enough one is an assault on
+    /// an officer ([`PoliceSystem::on_assault`]).
     pub(crate) fn unit_racer_contact(
         &mut self,
+        world: &dyn WorldQuery,
         i: usize,
         racer: EntityId,
-        rel_speed: f32,
+        hit: RacerHit,
         apply_damage: bool,
     ) {
+        self.track_assault(world, i, racer, hit);
         let key = (self.units[i].id, racer);
         let now = self.now;
         if self
@@ -219,8 +266,138 @@ impl PoliceSystem {
         u.racer_contact = true;
         u.risk -= cost;
         if apply_damage {
-            u.health = (u.health - coef * rel_speed * rel_speed / 1000.0).max(0.0);
+            let v = hit.rel_speed;
+            u.health = (u.health - coef * v * v / 1000.0).max(0.0);
         }
+    }
+
+    /// Accumulate one racer–unit contact into the pair's episode and fire
+    /// [`PoliceSystem::on_assault`] when the episode crosses the `heat.assault` thresholds.
+    fn track_assault(&mut self, world: &dyn WorldQuery, i: usize, racer: EntityId, hit: RacerHit) {
+        let a = self.cfg.heat.heat.assault.clone();
+        let now = self.now;
+        let u = &self.units[i];
+        // A unit making contact on purpose (PIT, box-in, rolling block on this racer) is
+        // doing its job, not being assaulted.
+        if u.assignment.target() == Some(racer)
+            && matches!(
+                u.tactic,
+                Tactic::Pit | Tactic::BoxIn(_) | Tactic::RollingBlock
+            )
+        {
+            return;
+        }
+        let r = &self.racers[&racer];
+        let racer_speed = (r.vel[0] * r.vel[0] + r.vel[1] * r.vel[1]).sqrt();
+        let uv = u.body.vel();
+        let rel = [r.vel[0] - uv[0], r.vel[1] - uv[1]];
+        let closing = hit
+            .rel_speed
+            .max((rel[0] * rel[0] + rel[1] * rel[1]).sqrt());
+        let impulse = if hit.estimated {
+            a.headless_mass_kg * hit.rel_speed
+        } else {
+            hit.impulse_ns
+        };
+        let key = (u.id, racer);
+        let ep = self.contact_episodes.entry(key).or_default();
+        if ep.last.is_none_or(|t| now.since(t) > a.episode_s) {
+            ep.impulse_ns = 0.0;
+            ep.closing_mps = 0.0;
+            ep.racer_speed_mps = 0.0;
+        }
+        ep.last = Some(now);
+        // Physical contacts arrive once per tick with that tick's impulse (sum them); the
+        // headless estimate repeats every tick while the bodies overlap (keep the largest).
+        ep.impulse_ns = if hit.estimated {
+            ep.impulse_ns.max(impulse)
+        } else {
+            ep.impulse_ns + impulse
+        };
+        ep.closing_mps = ep.closing_mps.max(closing);
+        ep.racer_speed_mps = ep.racer_speed_mps.max(racer_speed);
+        let hard = ep.impulse_ns >= a.min_impulse_ns
+            && ep.closing_mps >= a.min_closing_mps
+            && ep.racer_speed_mps >= a.min_racer_speed_mps;
+        let fresh = ep
+            .assault_at
+            .is_none_or(|t| now.since(t) >= a.repeat_cooldown_s);
+        if hard && fresh {
+            ep.assault_at = Some(now);
+            self.on_assault(world, i, racer);
+        }
+    }
+
+    /// Racer `racer` hit unit `i` hard enough to count as assaulting an officer: heat to at
+    /// least `heat.assault.min_level`, the unit (and nearby units that see it) recognise the
+    /// racer at once, and a pursuit starts now, day or night.
+    pub(crate) fn on_assault(&mut self, world: &dyn WorldQuery, i: usize, racer: EntityId) {
+        let now = self.now;
+        let cfg = self.cfg.heat.clone();
+        let a = &cfg.heat.assault;
+        let unit = self.units[i].id;
+        let p = xy(self.racers[&racer].pos);
+        self.stats.assaults += 1;
+        let (before, after) = {
+            let rec = self.racers.get_mut(&racer).expect("racer exists");
+            let before = rec.level;
+            let floor = cfg.heat.level_thresholds[(a.min_level.clamp(1, 5) - 1) as usize];
+            rec.add_heat(a.heat.max(floor - rec.heat), &cfg);
+            // The officer saw exactly who hit them.
+            rec.last_seen = Some(now);
+            rec.last_known = Some(p);
+            (before, rec.level)
+        };
+        if after != before {
+            self.pending.push(PoliceEvent::WantedLevelChanged {
+                racer,
+                level: after,
+            });
+        }
+        let desc = self.racer_desc(racer);
+        self.radio(RadioCue::new(
+            RadioTier::Critical,
+            Some(unit),
+            format!(
+                "Unit {}: I've been hit! {desc} rammed my unit, assault on an officer.",
+                unit.0
+            ),
+        ));
+        // Who can act on it: the hit unit unless it is out of action, else the closest
+        // in-service unit nearby that sees the racer.
+        let able = |u: &Unit| {
+            u.kind == UnitKind::Car && !u.wrecked && u.assignment != Assignment::OutOfService
+        };
+        let mut spotter = able(&self.units[i]).then_some(unit);
+        let mut best = f32::INFINITY;
+        for u in &self.units {
+            if u.id == unit || !able(u) {
+                continue;
+            }
+            let d = dist(u.body.pos, p);
+            if d <= a.nearby_units_m && self.sees(world, u.body.pos, p) {
+                // Nearby units recognise the racer straight away too.
+                if spotter.is_none() && d < best {
+                    best = d;
+                    spotter = Some(u.id);
+                }
+            }
+        }
+        if !self.racers[&racer].pursued() {
+            // No recognition_time_s wait: start the pursuit now. A unit put out of action by
+            // the hit still radios it in (the pursuit starts with nobody assigned yet).
+            self.start_pursuit(racer, spotter.unwrap_or(unit));
+        } else if let Some(s) = spotter {
+            // Already pursued: the unit that was hit joins in (dispatch keeps the unit cap).
+            if let Some(k) = self.unit_index(s) {
+                let u = &self.units[k];
+                if u.player.is_none() && u.assignment.target() != Some(racer) {
+                    self.assign(k, Assignment::Pursue { target: racer });
+                }
+            }
+        }
+        // `start_pursuit` clears the contact flag; this unit was just hit by this racer.
+        self.units[i].racer_contact = true;
     }
 
     /// A crash scene (e.g. prompt 05's civilian pile-up) needs a unit. Scenes within 60 m of an

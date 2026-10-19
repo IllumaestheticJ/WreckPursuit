@@ -17,6 +17,26 @@ pursuit_heat_per_s = 0.25
 # Disabling a police unit by contact.
 cop_disabled_heat = 15.0
 
+# Hitting a police car is assaulting an officer (owner playtest row 24): heat jumps to at least
+# `min_level` and the hit unit, plus units within `nearby_units_m` that can see the racer,
+# recognise it at once (no recognition_time_s wait), so a pursuit starts immediately, day or night.
+# A racer-unit contact counts when, within one episode (contacts closer than `episode_s`), the
+# summed impulse and the closing speed reach these and the racer itself was moving. Measured on
+# physical cars (debug_sedan vs sentinel_cruiser, wp_sim): sideswipes at 30-50 km/h give
+# 2,500-12,500 N·s and 2.7-13.8 m/s closing; a 5 km/h parking bump 860 N·s / 0.9 m/s, 8 km/h
+# 1,900 N·s / 2.0 m/s.
+[heat.assault]
+min_impulse_ns = 1500.0
+min_closing_mps = 2.2
+min_racer_speed_mps = 2.5
+episode_s = 0.5
+repeat_cooldown_s = 3.0
+heat = 20.0
+min_level = 2
+nearby_units_m = 60.0
+# Headless (internally driven) units have no physics contact: impulse = this × relative speed.
+headless_mass_kg = 800.0
+
 [heat.violation]
 speeding_base = 2.0
 speeding_per_mps = 0.4

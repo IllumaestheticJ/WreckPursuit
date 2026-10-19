@@ -11,7 +11,7 @@ use wp_police::graph::{dist, District, RoadClass, RoadGraph, RoadPath};
 use wp_police::scenario::ScenarioWorld;
 use wp_police::{
     Assignment, PoliceConfig, PoliceEvent, PoliceSetup, PoliceSystem, PursuitOutcome,
-    PursuitStatus, RacerView, SteerGeometry, UnitKind, UnitSync, WantedLevel,
+    PursuitStatus, RacerView, SteerGeometry, Tactic, UnitKind, UnitSync, WantedLevel,
 };
 
 const RACER: EntityId = EntityId(7);
@@ -614,4 +614,245 @@ fn camera_flagged_parked_racer_is_found_and_captured() {
         }
     }
     assert!(captured, "parked racer never captured");
+}
+
+/// Playtest row 24: a racer sideswiping a patrol car is assaulting an officer. The hit unit
+/// recognises the racer at once (no recognition window, day or night), heat goes to at least
+/// L2 and the pursuit starts within a second. Thresholds from `heat.assault`; contact numbers
+/// as measured on physical cars in `wp_sim` (sideswipe 30 km/h ≈ 6,700 N·s / 7.5 m/s,
+/// 50 km/h ≈ 12,000 N·s / 13 m/s; 5 km/h parking bump ≈ 860 N·s / 0.9 m/s).
+#[test]
+fn hitting_a_police_car_is_assault_and_starts_a_pursuit_at_once() {
+    struct Case {
+        hour: f32,
+        racer_kmh: f32,
+        impulse_ns: f32,
+        closing_mps: f32,
+        assault: bool,
+    }
+    let cases = [
+        // Sideswipes, day and night.
+        Case {
+            hour: 12.0,
+            racer_kmh: 30.0,
+            impulse_ns: 6700.0,
+            closing_mps: 7.5,
+            assault: true,
+        },
+        Case {
+            hour: 12.0,
+            racer_kmh: 50.0,
+            impulse_ns: 12000.0,
+            closing_mps: 13.0,
+            assault: true,
+        },
+        Case {
+            hour: 23.0,
+            racer_kmh: 30.0,
+            impulse_ns: 6700.0,
+            closing_mps: 7.5,
+            assault: true,
+        },
+        Case {
+            hour: 3.0,
+            racer_kmh: 50.0,
+            impulse_ns: 12000.0,
+            closing_mps: 13.0,
+            assault: true,
+        },
+        // A slow overtaking scrape of a moving patrol (30 vs 20 km/h): still counts.
+        Case {
+            hour: 23.0,
+            racer_kmh: 30.0,
+            impulse_ns: 2600.0,
+            closing_mps: 2.7,
+            assault: true,
+        },
+        // 5 km/h parking-lot bump: nothing.
+        Case {
+            hour: 12.0,
+            racer_kmh: 5.0,
+            impulse_ns: 860.0,
+            closing_mps: 0.93,
+            assault: false,
+        },
+        Case {
+            hour: 23.0,
+            racer_kmh: 5.0,
+            impulse_ns: 860.0,
+            closing_mps: 0.93,
+            assault: false,
+        },
+        // Hard contact but the racer is standing still (the patrol car hit it): not assault.
+        Case {
+            hour: 12.0,
+            racer_kmh: 0.0,
+            impulse_ns: 6000.0,
+            closing_mps: 7.0,
+            assault: false,
+        },
+    ];
+    for c in cases {
+        let label = format!("{}:00, {} km/h", c.hour, c.racer_kmh);
+        let mut h = Harness::new(c.hour, 7);
+        h.run(0.5, &[]);
+        assert_eq!(h.police.wanted_level(RACER), WantedLevel::None, "{label}");
+        // Put a patrol car (bound to a physical body) right beside the racer.
+        let ai = h
+            .police
+            .units()
+            .iter()
+            .find(|u| u.kind == UnitKind::Car && u.player.is_none() && !u.wrecked)
+            .unwrap()
+            .id;
+        let cop = EntityId(901);
+        h.police.bind_unit_entity(ai, cop, SteerGeometry::default());
+        h.speed = c.racer_kmh / 3.6;
+        let r = h.racer_view();
+        let d = h.path.dir_at(h.s).unwrap();
+        h.police.sync_unit(
+            ai,
+            UnitSync {
+                pos: [r.pos[0] - d[1] * 2.0, r.pos[1] + d[0] * 2.0, 0.0],
+                vel: [0.0; 3],
+                heading: d,
+                health: 1.0,
+                effects: HandlingEffects::NEUTRAL,
+            },
+        );
+        h.events.clear();
+        let hit = SimEvent::Contact {
+            a: RACER,
+            b: cop,
+            point: r.pos,
+            normal: [1.0, 0.0, 0.0],
+            impulse_ns: c.impulse_ns,
+            rel_speed: c.closing_mps,
+        };
+        h.run(1.0, &[hit]);
+        let rec = h.police.racer(RACER).unwrap();
+        let started = h.events.iter().find_map(|e| match e {
+            PoliceEvent::PursuitStarted { racer, unit } if *racer == RACER => Some(*unit),
+            _ => None,
+        });
+        let radio = h.events.iter().any(|e| {
+            matches!(e, PoliceEvent::Radio { text, .. } if text.contains("assault on an officer"))
+        });
+        assert_eq!(h.police.stats().assaults, c.assault as u32, "{label}");
+        if c.assault {
+            assert!(rec.level >= WantedLevel::L2, "{label}: {:?}", rec.level);
+            assert!(rec.pursued(), "{label}: {:?}", rec.status);
+            assert_eq!(started, Some(Some(ai)), "{label}: the hit unit starts it");
+            assert!(radio, "{label}: no radio line");
+            let u = h.police.units().iter().find(|u| u.id == ai).unwrap();
+            assert_eq!(
+                u.assignment,
+                Assignment::Pursue { target: RACER },
+                "{label}"
+            );
+            assert!(h.events.iter().any(|e| matches!(
+                e,
+                PoliceEvent::WantedLevelChanged { level, .. } if *level >= WantedLevel::L2
+            )));
+        } else {
+            assert_eq!(rec.level, WantedLevel::None, "{label}");
+            assert!(started.is_none(), "{label}");
+            assert!(!radio, "{label}");
+        }
+    }
+}
+
+/// A second hit inside one contact episode or the repeat cooldown is the same assault; a
+/// unit doing a PIT on its target is not being assaulted.
+#[test]
+fn assault_counts_once_per_episode_and_not_for_police_contact_tactics() {
+    let mut h = Harness::new(12.0, 7);
+    h.run(0.5, &[]);
+    let ai = h
+        .police
+        .units()
+        .iter()
+        .find(|u| u.kind == UnitKind::Car && u.player.is_none() && !u.wrecked)
+        .unwrap()
+        .id;
+    let cop = EntityId(901);
+    h.police.bind_unit_entity(ai, cop, SteerGeometry::default());
+    h.speed = 10.0;
+    let r = h.racer_view();
+    h.police.sync_unit(
+        ai,
+        UnitSync {
+            pos: [r.pos[0] + 2.0, r.pos[1], 0.0],
+            vel: [0.0; 3],
+            heading: [0.0, 1.0],
+            health: 1.0,
+            effects: HandlingEffects::NEUTRAL,
+        },
+    );
+    // A sideswipe arrives as several per-tick contacts that only add up past the threshold.
+    let scrape = |imp: f32| SimEvent::Contact {
+        a: cop,
+        b: RACER,
+        point: r.pos,
+        normal: [1.0, 0.0, 0.0],
+        impulse_ns: imp,
+        rel_speed: 3.0,
+    };
+    h.run(PHYSICS_DT, &[scrape(600.0)]);
+    assert_eq!(h.police.stats().assaults, 0);
+    h.run(PHYSICS_DT, &[scrape(600.0)]);
+    assert_eq!(h.police.stats().assaults, 0);
+    h.run(PHYSICS_DT, &[scrape(600.0)]);
+    assert_eq!(h.police.stats().assaults, 1, "1,800 N·s within one episode");
+    let heat = h.police.racer(RACER).unwrap().heat;
+    h.run(PHYSICS_DT, &[scrape(5000.0)]);
+    h.run(1.0, &[scrape(5000.0)]);
+    assert_eq!(h.police.stats().assaults, 1, "inside the repeat cooldown");
+    assert!(h.police.racer(RACER).unwrap().heat >= heat);
+    h.run(3.0, &[]);
+    // The hit unit now pursues, here with a PIT: its own contact is not an assault.
+    let u = h.police.units().iter().find(|u| u.id == ai).unwrap();
+    assert_eq!(u.assignment, Assignment::Pursue { target: RACER });
+    let tactic = u.tactic;
+    if matches!(
+        tactic,
+        Tactic::Pit | Tactic::BoxIn(_) | Tactic::RollingBlock
+    ) {
+        h.run(PHYSICS_DT, &[scrape(5000.0)]);
+        assert_eq!(h.police.stats().assaults, 1, "{tactic:?} contact");
+    }
+    // Ramming another patrol car after the cooldown escalates.
+    let other = h
+        .police
+        .units()
+        .iter()
+        .find(|u| u.kind == UnitKind::Car && u.id != ai && !u.wrecked && u.entity.is_none())
+        .unwrap()
+        .id;
+    let cop2 = EntityId(902);
+    h.police
+        .bind_unit_entity(other, cop2, SteerGeometry::default());
+    let r = h.racer_view();
+    h.police.sync_unit(
+        other,
+        UnitSync {
+            pos: [r.pos[0] + 2.0, r.pos[1], 0.0],
+            vel: [0.0; 3],
+            heading: [0.0, 1.0],
+            health: 1.0,
+            effects: HandlingEffects::NEUTRAL,
+        },
+    );
+    let heat = h.police.racer(RACER).unwrap().heat;
+    let ram = SimEvent::Contact {
+        a: RACER,
+        b: cop2,
+        point: r.pos,
+        normal: [1.0, 0.0, 0.0],
+        impulse_ns: 5000.0,
+        rel_speed: 6.0,
+    };
+    h.run(PHYSICS_DT, &[ram]);
+    assert_eq!(h.police.stats().assaults, 2, "a second unit rammed");
+    assert!(h.police.racer(RACER).unwrap().heat >= heat + 19.0);
 }
