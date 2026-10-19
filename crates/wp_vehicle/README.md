@@ -72,9 +72,13 @@ the car keeps pulling through every upshift (tested: min. acceleration through t
 drive. Roster effect on 0–100 (release): Wolfhound 6.55 → 5.55 s, Cruiser 8.36 → 7.82,
 Bastion 8.55 → 7.98, Hauler 8.98 → 8.09, Ironside 8.71 → 8.15; non-automatics unchanged.
 
-**Road conditions (weather hook):** `Vehicle::set_surface_conditions([SurfaceConditions; 4])`
-— per wheel `water_depth_mm`, `temperature_c` (road surface), `painted_line`. Default = dry,
-20 °C, no paint, which leaves grip bit-identical (tested). Model (`surface.rs`), multiplied onto
+**Road conditions (weather hook):** by default every wheel in contact reads
+`WorldQuery::weather_at(contact point)` each step (contract v0.3.0, W-1;
+`SurfaceConditions::from_local`: `water_mm` → water depth, `road_temp_c` → temperature).
+Worlds without weather answer `LocalConditions::DRY`, which leaves grip bit-identical (tested).
+`Vehicle::set_surface_conditions([SurfaceConditions; 4])` overrides them by hand
+(`ConditionsSource::Manual`; `use_world_weather()` switches back) — per wheel
+`water_depth_mm`, `temperature_c` (road surface), `painted_line`. Model (`surface.rs`), multiplied onto
 the tire's dry `surface_multipliers[surface]`:
 - *Wet:* the tire's own `WetAsphalt/Asphalt` ratio, reached at 0.5 mm of water (a damp 0.15 mm
   film already costs most of it), scaled per surface (metal 1.6×, curb 1.3×, grass 1.3×,
@@ -82,13 +86,16 @@ the tire's dry `surface_multipliers[surface]`:
   (no double counting with the interim `WithWeather` adapter).
 - *Cold / ice:* −0.6 %/°C below 7 °C (floor 0.9); a wet road between +1 and −1 °C turns to ice
   (×0.15).
-- *Painted line:* ×0.95 dry, ×0.65 of the wet road when wet.
+- *Painted line* (`SurfaceType::PaintedLine` contact, or `painted_line` set): ×0.95 dry, ×0.65
+  of the wet road when wet. The tire's dry grip there is its `PaintedLine` entry, else its
+  `Asphalt` entry.
 - *Aquaplaning:* standing water ≥ 1 mm; onset ≈ 90 km/h for a 205 mm treaded tire in 3 mm,
-  `∝ √(3 mm/depth) · √(0.205 m/width)`, slicks (wet ratio < 0.6) at ≈ 58 km/h; fully planing at
+  `∝ √(3 mm/depth) · √(0.205 m/width)`, slicks (`treaded: false`, or wet ratio < 0.6 when
+  unset) at ≈ 58 km/h; fully planing at
   1.3× onset, up to 85 % grip loss (stronger in deeper water). The aligning torque falls with
   the lateral force, so the steering goes light. Per-wheel amount in `Telemetry::aquaplane`.
-Conditions are an input (not in snapshots): set them before each step. After contract
-v0.3.0 the lead fills them from `WorldQuery::weather_at` at each contact point.
+Conditions are not in snapshots: in World mode they are re-read every step, in Manual mode
+they are an input like the driver's.
 
 **On-demand AWD** (`DriveLayout::AwdOnDemand`): a coupling state 0..1 moves the rear share from
 `1 − base_front_split` to `max_rear_split`. It closes when the front axle's wheel speed out-runs
@@ -270,9 +277,10 @@ Browser not measured yet (expect ~2×; budget 0.30 ms).
   (`wear_rate` unused); no camber change with suspension travel.
 - AWD on-demand is front-biased only (couples the rear when the front slips).
 - `VehicleSim::step` (trait) cannot reach Rapier; `wp_sim` calls `step_with_ground`.
-- Road conditions are set by the caller (`set_surface_conditions`); nothing binds them to the
-  world's weather until contract v0.3.0. Tread depth is not modelled (treaded / slick is
-  inferred from the tire's wet ratio). Automatic shifts are a ratio blend, not a two-clutch
+- Tread depth is not modelled (treaded / slick only). `wp_weather` has its own grip model
+  (`grip.rs`) with slightly different constants; the vehicle uses `surface.rs`. Automatic shifts are a ratio blend, not a two-clutch
   torque/inertia-phase model; no shift-time torque reduction.
 - Slide control: on gamepad presets (help 0.3) a centred stick with full throttle holds a power
-  drift rather than straightening; the per-car slide class has no data field yet (request 7).
+  drift rather than straightening (gamepad with TCS off recovers only 2–3 of 6 power-exit
+  cases in `examples/slide`); with help on, the rack always unwinds ~2.5× faster (also on grip:
+  keyboard flicks are quicker); the per-car slide class has no data field yet (request 7).
