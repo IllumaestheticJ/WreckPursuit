@@ -662,3 +662,27 @@ applied:
 | `src/scene.ts` | Agent boxes removed; `updateHelicopters(police_draw())` keeps the helicopter boxes. |
 | `e2e/run.mjs` | LOD check (fresh city chase, ≥ 12 s sim, ≥ 2 swaps): no car without its mesh after the first second; swap pose jump < 0.5 m; traffic appears / vanishes ≥ 300 m from the player. |
 | `e2e/lod_shots.mjs` (new) | Before/after strips + frame logs into `docs/media/lod/` (runs against an older testbed too: `node e2e/lod_shots.mjs <out> before <main-worktree>/apps/testbed-web`). |
+
+### Measurements (headless Chromium, SwiftShader, cloud 4 vCPU)
+
+| | `main` | this branch |
+|---|---|---|
+| Closest traffic pop-in / pop-out from the player (`lod_shots.mjs`, chase) | 226 m / 226 m | 359 m / 462 m |
+| Promotion: drawer change | grey/red box → `#7a8a99` debug_sedan + debug arrows | same model, livery and lamps (`*_promotion_strip.png`) |
+| Frames with a car drawn without its mesh (after 1 s) | n/a (placeholder until fetched) | 0 |
+| Car mesh fetch (local) | on first appearance of a model (5–25 ms + 1 frame) | at session start, before the first frame |
+| Swap pose jump, browser log / wasm records | — | 0.30 m (velocity-predicted, 1/60 s steps) / 0.06 m |
+| City chase frame (`chase_perf.mjs`, 20 s) | 899 ms, render 13.8 ms, 541k tris, 622 calls | 920 ms, render 26.6 ms, 627k tris, 470 calls |
+
+SwiftShader frame time is dominated by rasterising the city and is unchanged; renderer CPU time
+roughly doubles (instance buffers of the full-mesh fleet: up to 192 instances × ~4k triangles per
+model within 250 m). On a real GPU this is a handful of instanced draws; if it shows up in a
+browser profile, lower `FULL_LOD_M` (render/fleet.ts) to ~150 m.
+
+### Known gaps
+- Proxy → full instanced mesh switches at 250 m from the camera (a small far-LOD change, by design).
+- Damage done while physical is lost on demotion (the instanced mesh is undented); traffic
+  demotes 100 m+ away, so it is rarely visible.
+- Kinematic poses are carried forward between traffic steps, not interpolated by the frame's
+  alpha (≤ 1 physics tick, 0.125 m at 30 m/s).
+- Bench / car-selector cars outside the session list still load on demand (with the proxy).

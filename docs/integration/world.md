@@ -651,5 +651,6 @@ at 480 m, which is why the active radius is 440 m).
   where nobody else is sees the street fill from 320 m out instead of 150 m. If that reads empty
   in multiplayer playtests, a per-player warm start (populate around a newly tracked player,
   outside any other player's sight) would fix it.
-- Kinematic agents move in 60 Hz traffic steps and are not interpolated by the browser; at
-  40+ fps that is a slight judder on the instanced far LOD (it was there with the boxes too).
+- Kinematic agents move in 60 Hz traffic steps; `wp_wasm::lod::traffic_draw` carries them
+  forward along their heading between steps (read-only), so the browser no longer judders.
+  A `World` accessor for "time since the last traffic step" would let it stop recomputing that.
