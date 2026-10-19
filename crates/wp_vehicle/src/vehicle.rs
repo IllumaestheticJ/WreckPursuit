@@ -22,7 +22,7 @@ use crate::slide::{gyro_yaw_torque, slide_class, slide_throttle, GyroInput};
 use crate::steering::{
     ackermann, body_slip, rear_axle_slip, torque_steer, update_center_angle, SteerInput,
 };
-use crate::surface::{conditions_grip, SurfaceConditions, TireWetProfile};
+use crate::surface::{conditions_grip, ConditionsSource, SurfaceConditions, TireWetProfile};
 use crate::suspension::{arb_force, static_compression, strut_force};
 use crate::tire::{
     combined_forces, load_sensitive_mu, low_speed_lateral, pneumatic_trail, relax, slip_angle,
@@ -204,6 +204,7 @@ pub struct Vehicle {
     pub(crate) telemetry: Telemetry,
     pub(crate) entity: EntityId,
     pub(crate) conditions: [SurfaceConditions; 4],
+    pub(crate) conditions_source: ConditionsSource,
 }
 
 impl Vehicle {
@@ -309,6 +310,7 @@ impl Vehicle {
             telemetry: Telemetry::default(),
             entity: EntityId(0),
             conditions: [SurfaceConditions::DRY; 4],
+            conditions_source: ConditionsSource::World,
             corners,
         };
         v.converter = def
@@ -330,19 +332,33 @@ impl Vehicle {
         }
     }
 
-    /// Set the road conditions under each wheel (FL, FR, RL, RR) — the weather hook. They are an
-    /// input, like the driver's: they stay until changed, are not part of
-    /// [`Vehicle::snapshot`], and should be set before each step from the world's weather
-    /// (after contract v0.3.0: `WorldQuery::weather_at` at each contact point). Default: dry.
+    /// Set the road conditions under each wheel (FL, FR, RL, RR) by hand and switch to
+    /// [`ConditionsSource::Manual`]: the world's weather (`WorldQuery::weather_at`) is ignored
+    /// until [`Vehicle::use_world_weather`]. They are an input, like the driver's: they stay until
+    /// changed and are not part of [`Vehicle::snapshot`].
     pub fn set_surface_conditions(&mut self, conditions: [SurfaceConditions; 4]) {
         self.conditions = conditions;
+        self.conditions_source = ConditionsSource::Manual;
     }
 
-    /// Set the road conditions under one wheel (0 FL, 1 FR, 2 RL, 3 RR; others ignored).
+    /// Set the road conditions under one wheel (0 FL, 1 FR, 2 RL, 3 RR; others ignored) and
+    /// switch to [`ConditionsSource::Manual`] (see [`Vehicle::set_surface_conditions`]).
     pub fn set_wheel_conditions(&mut self, wheel: usize, conditions: SurfaceConditions) {
         if let Some(c) = self.conditions.get_mut(wheel) {
             *c = conditions;
+            self.conditions_source = ConditionsSource::Manual;
         }
+    }
+
+    /// Go back to reading the world's weather (`WorldQuery::weather_at` at each contact point,
+    /// every step) — the default for a new vehicle.
+    pub fn use_world_weather(&mut self) {
+        self.conditions_source = ConditionsSource::World;
+    }
+
+    /// Where the road conditions come from (world weather by default).
+    pub fn conditions_source(&self) -> ConditionsSource {
+        self.conditions_source
     }
 
     /// The road conditions currently set per wheel.
@@ -844,6 +860,12 @@ impl Vehicle {
         // --- Ground probe + suspension ------------------------------------------------------
         for i in 0..4 {
             self.probe_wheel(i, &ch, up, ground, world);
+            // Weather under the contact patch (W-1). Off the ground the last value stays; it
+            // has no effect there (no grip, planing reported as 0).
+            if self.conditions_source == ConditionsSource::World && self.wheels[i].contact {
+                let local = world.weather_at(arr(self.wheels[i].point));
+                self.conditions[i] = SurfaceConditions::from_local(&local);
+            }
         }
         for (l, r) in [(0usize, 1usize), (2, 3)] {
             let f = arb_force(

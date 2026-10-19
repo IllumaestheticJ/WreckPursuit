@@ -35,12 +35,16 @@ pub fn load_sensitive_mu(d: f32, ls: f32, fz: f32, fz0: f32) -> f32 {
     (d * (1.0 - ls * (fz / fz0 - 1.0))).max(0.3 * d)
 }
 
-/// Grip multiplier for a surface (missing entries = 1.0).
+/// Grip multiplier for a surface (missing entries = 1.0). A tire without a `PaintedLine` entry
+/// uses its `Asphalt` entry there (paint sits on the road; the paint loss itself is a
+/// conditions term, see `crate::surface`).
 pub fn surface_grip(def: &TireDef, surface: SurfaceType) -> f32 {
-    def.surface_multipliers
-        .get(&surface)
-        .copied()
-        .unwrap_or(1.0)
+    let get = |s| def.surface_multipliers.get(&s).copied();
+    match get(surface) {
+        Some(m) => m,
+        None if surface == SurfaceType::PaintedLine => get(SurfaceType::Asphalt).unwrap_or(1.0),
+        None => 1.0,
+    }
 }
 
 /// Combined-slip tire forces (no aligning torque). `kappa` = slip ratio, `alpha` = slip angle

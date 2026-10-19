@@ -9,8 +9,8 @@
 
 use rapier3d::prelude::*;
 use wp_contracts::{
-    AssistProfile, HandlingEffects, LoadedCar, SignalState, SimEvent, SurfaceType, TimeOfDay,
-    VehicleInput, VehicleSim, VehicleState, WorldQuery, GRAVITY_MPS2, PHYSICS_DT,
+    AssistProfile, HandlingEffects, LoadedCar, LocalConditions, SignalState, SimEvent, SurfaceType,
+    TimeOfDay, VehicleInput, VehicleSim, VehicleState, WorldQuery, GRAVITY_MPS2, PHYSICS_DT,
 };
 
 use crate::body::VehicleBody;
@@ -18,13 +18,15 @@ use crate::ground::RapierGround;
 use crate::snapshot::{SnapshotError, VehicleSnapshot};
 use crate::vehicle::{Vehicle, VehicleExtras};
 
-/// Flat world with one surface type, no limits or signals.
+/// Flat world with one surface type and uniform weather, no limits or signals.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FlatWorld {
     /// Surface everywhere.
     pub surface: SurfaceType,
     /// Fixed time of day.
     pub time: TimeOfDay,
+    /// Weather everywhere (`WorldQuery::weather_at`). Default: dry.
+    pub weather: LocalConditions,
 }
 
 impl Default for FlatWorld {
@@ -32,6 +34,7 @@ impl Default for FlatWorld {
         Self {
             surface: SurfaceType::Asphalt,
             time: TimeOfDay::from_hours(12.0),
+            weather: LocalConditions::DRY,
         }
     }
 }
@@ -51,6 +54,9 @@ impl WorldQuery for FlatWorld {
     }
     fn line_of_sight(&self, _a: [f32; 3], _b: [f32; 3]) -> bool {
         true
+    }
+    fn weather_at(&self, _p: [f32; 3]) -> LocalConditions {
+        self.weather
     }
 }
 
