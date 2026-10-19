@@ -4196,6 +4196,7 @@ dependencies = [
 name = "wp_opponent"
 version = "0.1.0"
 dependencies = [
+ "lint-determinism",
  "serde",
  "wp_contracts",
  "wp_damage",
