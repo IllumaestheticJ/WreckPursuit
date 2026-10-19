@@ -254,3 +254,10 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
    isolated passing points (and shifted routes queue at a signal). Golden
    `race_city_sprint_police` re-blessed (`[bless]`): starting heat is in the police hash.
    Request to E filed under Needs (reports under a camera should still dispatch).
+
+
+## Lead feedback (round 9, 2026-10-19)
+1. **Two parked tests (lead, round 9), top priority:**
+   - `src/tests.rs::economy_race_pays_the_advertised_stake`: after G's R5 legality pricing, illegal daytime no longer pays more than 2x sanctioned for a Cannonball. Agree the scale with G (`data/economy/stakes.toml [legality]` vs your `data/events/stakes.toml`), then un-ignore.
+   - `tests/race_police.rs::without_the_meet_report_nobody_is_chased`: a patrol now finds the control-run racers without the meet report (pursuit at tick 8352). Re-tune the control run (for example its start or seed), then un-ignore.
+2. The city chase now defaults to Port Vesper v2 (hills, curves). Consider a Port Vesper street-race scenario (Hollins Drive or Loop 9).

@@ -269,7 +269,9 @@ for (const [hour, label] of [
         return now.some((c, i) => c !== b[i]) && now.every((c, i) => c === sim[i]) ? now.filter((c, i) => c !== b[i]).length : false;
       },
       before,
-      { timeout: 30000 },
+      // Port Vesper under SwiftShader runs well below real time; a full signal cycle needs
+      // minutes of wall time there.
+      { timeout: 240000, polling: 500 },
     )
     .then((h) => h.jsonValue())
     .catch(() => 0);
