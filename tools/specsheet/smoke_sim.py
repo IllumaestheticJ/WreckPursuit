@@ -3,8 +3,8 @@
 
 For each car and damage mode a throwaway scenario (full throttle 6 s, full brake to 11 s,
 coast to 14 s) is written to a temp dir and run twice; the state hashes must match. This
-proves the data loads end to end through the sim, not that it drives realistically (on the
-prompt-01 stubs it cannot). Nothing is written to the repo.
+proves the data loads end to end through the sim; handling and crash numbers come from
+`collect_results.py`. Nothing is written to the repo.
 
     cargo build --release -p simcli
     python3 tools/specsheet/smoke_sim.py

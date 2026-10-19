@@ -154,8 +154,12 @@ class Car:
         self.kroll_f = s[0]["spring_n_per_m"] * self.tf**2 / 2 + s[0]["arb_n_per_m"] * self.tf**2
         self.kroll_r = s[2]["spring_n_per_m"] * self.tr**2 / 2 + s[2]["arb_n_per_m"] * self.tr**2
         b = car["brakes"]
-        self.tb_f = b["max_torque_front_nm"]
-        self.tb_r = b["max_torque_rear_nm"]
+        # Delivered torque at full pedal with wp_vehicle's bias normalisation: the favoured
+        # axle gets its full max_torque_*, the other is scaled by (1 - b)/b.
+        bias = b["bias_front"]
+        norm = max(bias, 1.0 - bias)
+        self.tb_f = b["max_torque_front_nm"] * bias / norm
+        self.tb_r = b["max_torque_rear_nm"] * (1.0 - bias) / norm
 
     # Driven-wheel radius (rear for RWD; front for FWD; mean for AWD).
     def drive_radius(self) -> float:

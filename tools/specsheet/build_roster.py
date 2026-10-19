@@ -4,12 +4,12 @@
 For every car this writes
 - `data/cars/<id>.json`       VehicleDef (validated by `cargo test -p wp_contracts`)
 - `data/cars/<id>.spec.md`    spec sheet with every derivation written out
-- `data/lattices/<id>.json`   LatticeDef: `gen-box-lattice` output + the documented hand
+- `data/lattices/<id>.json`   LatticeDef: `gen-lattice` output + the documented hand
                               adjustments in `adjust_lattice()` below
 
 Usage (from the repo root):
 
-    cargo build --release -p wp_damage --bin gen-box-lattice
+    cargo build --release -p wp_damage --bin gen-lattice
     python3 tools/specsheet/build_roster.py [--only <id>]
 
 Deterministic: same inputs → byte-identical outputs. Tire assignment: each car names an
@@ -89,6 +89,19 @@ def brake_torque(spec: dict, bar: float):
                f"→ A = {area * 1e4:.2f} cm², drum radius {r_d * 1000:.0f} mm, brake factor "
                f"{spec['brake_factor']} (includes lining μ): T = BF·p·A·r = **{t:.0f} N·m**")
     return t, txt
+
+
+ABS_CEILING = 1.5  # max delivered front brake torque / front lock torque on the car's tire
+
+
+def tire_peak_mu(c: dict) -> float:
+    """Peak longitudinal μ of the tire the car JSON will use (intended compound if present,
+    else street scaled to the intended compound as the estimator does)."""
+    comp = c["tires"]["compound"]
+    tid = tire_id_for(comp)
+    with open(os.path.join(DATA, "tires", tid + ".json")) as f:
+        d = json.load(f)["longitudinal"]["d"]
+    return d if tid == comp else d * estimate.COMPOUND_SCALE[comp]
 
 
 def diff_json(d):
@@ -186,14 +199,30 @@ def derive(c: dict) -> tuple[dict, dict]:
     b = c["brakes"]
     tbf, txt_f = brake_torque(b["front"], b["bar"])
     tbr, txt_r = brake_torque(b["rear"], b["bar"])
-    decel_ref = 0.9  # g, bias reference
-    bias = min(0.78, max(0.55, c["front_frac"] + decel_ref * c["cg"] / L))
     fz_f = m * G * (c["front_frac"] + c["cg"] / L) / 2.0  # per front wheel at 1 g
     fz_r = m * G * (1 - c["front_frac"] - c["cg"] / L) / 2.0
     lock_f = fz_f * tl_f  # μ = 1
-    lock_r = max(0.0, fz_r * tl_r)
-    d["brakes"] = dict(tf=rr(tbf, 10), tr=rr(tbr, 10), txt_f=txt_f, txt_r=txt_r, bias=r(bias, 2),
-                       lock_f=lock_f, lock_r=lock_r,
+    lock_r = max(1.0, fz_r * tl_r)
+    # wp_vehicle (02) semantics: the axle bias favours gets its full `max_torque_*`, the other
+    # is scaled by (1 − b)/b. `max_torque_*` = caliper capacity per wheel; `bias_front` plays
+    # the proportioning valve: rear trimmed to the front's lock margin, never boosted.
+    # ABS ceiling: wp_vehicle's ABS releases to a fixed fraction of the *commanded* torque, so
+    # a caliper far stronger than the tire can use keeps the wheel locked through the release
+    # (measured: 47 m vs 40 m 100-0 on the Wolfhound). Until 02's ABS modulates relative to the
+    # lock torque, cap the front at ABS_CEILING × its lock torque on the car's own tire and
+    # scale the rear by the same factor (keeps the hardware balance).
+    tire_mu = tire_peak_mu(c)
+    cap_f = ABS_CEILING * lock_f * tire_mu
+    k_abs = min(1.0, cap_f / tbf)
+    tf_r, tr_r = rr(tbf * k_abs, 10), rr(tbr * k_abs, 10)
+    rear_ideal = tf_r * lock_r / lock_f
+    bias = tr_r / (tr_r + rear_ideal) if tr_r > rear_ideal else 0.5
+    bias = round(bias, 3)
+    rear_delivered = tr_r * (1 - bias) / max(bias, 1 - bias)
+    d["brakes"] = dict(tf=tf_r, tr=tr_r, txt_f=txt_f, txt_r=txt_r, bias=bias,
+                       raw_f=tbf, raw_r=tbr, k_abs=k_abs, tire_mu=tire_mu,
+                       lock_f=lock_f, lock_r=lock_r, rear_ideal=rear_ideal,
+                       rear_delivered=rear_delivered,
                        hb=rr(max(600.0, b["handbrake_frac"] * tbr), 10))
 
     # Steering: lock from the kerb-to-kerb turning circle.
@@ -308,329 +337,328 @@ def derive(c: dict) -> tuple[dict, dict]:
 
 
 # ----------------------------------------------------------------------------- lattice
+#
+# Lattices come from workstream 03's `gen-lattice` (body profile, stations, crumple rails,
+# pillars, doors, engine block, all 21 component mounts, sections scaled by car mass and
+# `--strength`). `adjust_lattice` then applies only what the generator cannot express yet;
+# each adjustment is listed in the car's spec sheet and in docs/integration/cars.md.
 
-NX, NY, NZ = 4, 10, 3  # gen-box-lattice grid (see wp_damage::box_lattice)
+# gen-lattice profile per roster profile. Mid-engine has no profile: coupe + MR adjustments.
+GEN_PROFILE = {"hatch": "hatch", "sedan": "sedan", "coupe": "coupe", "mr": "coupe",
+               "truck": "truck", "suv": "suv"}
 
+# `--strength` from durability class (section multiplier on every structural member).
+STRENGTH = {1: 0.80, 2: 0.90, 3: 1.00, 4: 1.15, 5: 1.30}
 
-def idx(i, j, k):
-    return (k * NY + j) * NX + i
-
-
-def ijk(n):
-    return n % NX, (n // NX) % NY, n // (NX * NY)
-
-
-# Top-layer node height by row j (0 = rear … 9 = front) as a fraction of body height, per
-# body profile. `None` keeps the generator's roof height. Rows 3-5 are always roof.
-PROFILE_TOP = {
-    #          j=0   j=1   j=2   j=3  j=4  j=5  j=6   j=7   j=8   j=9
-    "sedan": [0.55, 0.66, None, None, None, None, None, 0.68, 0.64, 0.52],
-    "coupe": [0.55, 0.64, None, None, None, None, None, 0.66, 0.62, 0.50],
-    "hatch": [0.55, 0.88, None, None, None, None, None, 0.68, 0.64, 0.52],
-    "mr":    [0.58, 0.68, 0.74, None, None, None, None, 0.62, 0.56, 0.48],
-    "truck": [0.48, 0.62, 0.62, 0.62, None, None, None, 0.70, 0.68, 0.55],
-    "suv":   [0.52, 0.95, None, None, None, None, None, 0.72, 0.66, 0.52],
-}
-GREENHOUSE_X_SCALE = 0.86  # roof/glass rows are narrower than the beltline (tumblehome)
-
-# Structural beam material/area by era: (material_id, area m²).
+# Passenger-cell era: (material, section multiplier) applied to cabin members, sills,
+# pillars, roof rails and cabin cross-members. gen-lattice's defaults are a modern HSS cell.
 ERA = {
-    "70s": dict(cabin=("mild_steel", 2.5e-4), pillar=("mild_steel", 2.0e-4),
-                rail_soft=("mild_steel", 4.0e-4), rail_hard=("mild_steel", 4.0e-4),
-                sill=("mild_steel", 3.0e-4), panel=("mild_steel", 2.2e-4)),
-    "90s": dict(cabin=("hss", 3.5e-4), pillar=("hss", 3.0e-4),
-                rail_soft=("hss", 3.0e-4), rail_hard=("hss", 4.0e-4),
-                sill=("hss", 4.0e-4), panel=("mild_steel", 1.5e-4)),
-    "2000s": dict(cabin=("hss", 4.5e-4), pillar=("hss", 4.5e-4),
-                  rail_soft=("hss", 2.5e-4), rail_hard=("hss", 4.5e-4),
-                  sill=("hss", 5.0e-4), panel=("mild_steel", 1.5e-4)),
-    "2010s": dict(cabin=("hss", 6.5e-4), pillar=("hss", 7.0e-4),
-                  rail_soft=("hss", 2.0e-4), rail_hard=("hss", 5.0e-4),
-                  sill=("hss", 6.0e-4), panel=("mild_steel", 1.5e-4)),
+    "70s": ("mild_steel", 1.00),
+    "80s": ("hss", 0.65),
+    "90s": ("hss", 0.75),
+    "2000s": ("hss", 0.90),
+    "2010s": ("hss", 1.00),
 }
-LADDER_RAIL = ("hss", 1.2e-3)
-LADDER_CROSS = ("hss", 6.0e-4)
-LADDER_DIAG = ("hss", 4.0e-4)
-STEEL_BUMPER = ("mild_steel", 4.0e-4)
+
+# gen-lattice DEFAULT_SECTIONS (m², for a 1400 kg car at strength 1), used to recognise beam
+# roles in the generated file. Keep in sync with crates/wp_damage/src/lattice_gen.rs.
+SEC = dict(cover=1.2e-4, cabin=3.0e-4, cross_member=0.15e-4, rail_hard=0.9e-4,
+           bumper_beam=2.0e-4, sill=3.0e-4, pillar=2.0e-4, roof_rail=1.5e-4, door_beam=1.5e-4,
+           engine_mount=0.6e-4, engine_firewall=1.2e-4, structural=0.25e-4)
+RAIL_X_FRAC = 0.30
+TRUCK_RAIL_SCALE = {"truck": 1.35, "suv": 1.2}
+
 PUSHBAR = ("hss", 8.0e-4)
 PUSHBAR_MOUNT = ("hss", 6.0e-4)
-GROUP_PUSHBAR = 3
+PUSHBAR_MASS_KG = 25.0
+# Detach group for the push bar: gen-lattice uses 0-7 (bumpers, hood, trunk, four doors).
+GROUP_PUSHBAR = 8
 
-STRUCT = {"FrameFront", "FrameRear", "FrameLeft", "FrameRight", "Cabin"}
+DOORS = {"LeftDoorF", "LeftDoorR", "RightDoorF", "RightDoorR"}
+
+
+def gen_profile(c: dict) -> str:
+    """gen-lattice profile: police sedans use `cruiser` (reinforced rails, double bumper beam)."""
+    if c["profile"] == "sedan" and c["lattice"].get("pushbar"):
+        return "cruiser"
+    return GEN_PROFILE[c["profile"]]
+
+
+def gen_lattice_args(c: dict, mass: float) -> list[str]:
+    w, l, h = c["body"]
+    lat_mass = mass * c["lattice"]["mass_frac"]
+    return ["--id", c["id"], "--profile", gen_profile(c), "--width", str(w),
+            "--length", str(l), "--height", str(h), "--wheelbase", str(c["wheelbase"]),
+            "--mass", f"{lat_mass:.1f}", "--car-mass", f"{mass:.1f}",
+            "--clearance", str(c["clearance"]), "--front-overhang", str(c["front_overhang"]),
+            "--strength", str(STRENGTH[c["durability"]])]
 
 
 def run_generator(c: dict, mass: float, out_path: str) -> None:
-    w, l, h = c["body"]
-    exe = os.path.join(REPO, "target", "release", "gen-box-lattice")
+    exe = os.path.join(REPO, "target", "release", "gen-lattice")
     if not os.path.exists(exe):
-        sys.exit("build the generator first: cargo build --release -p wp_damage --bin gen-box-lattice")
-    subprocess.run(
-        [exe, "--id", c["id"], "--width", str(w), "--length", str(l), "--height", str(h),
-         "--wheelbase", str(c["wheelbase"]), "--mass", f"{mass:.1f}",
-         "--clearance", str(c["clearance"]), "--out", out_path],
-        check=True, capture_output=True)
+        sys.exit("build the generator first: cargo build --release -p wp_damage --bin gen-lattice")
+    subprocess.run([exe] + gen_lattice_args(c, mass) + ["--out", out_path],
+                   check=True, capture_output=True)
 
 
-def adjust_lattice(lat: dict, c: dict) -> list[str]:
-    """Apply the documented hand adjustments in place. Returns a change log for the spec."""
+def close(a: float, b: float, tol: float = 1e-3) -> bool:
+    return abs(a - b) <= tol * max(abs(a), abs(b), 1e-9)
+
+
+def adjust_lattice(lat: dict, c: dict, mass: float) -> list[str]:
+    """Apply the hand adjustments gen-lattice cannot express. Returns a change log."""
     log: list[str] = []
     nodes, beams = lat["nodes"], lat["beams"]
     w, l, h = c["body"]
     prof = c["profile"]
-    era = ERA[c["era"]]
     lt = c["lattice"]
-    total_mass = sum(n["mass_kg"] for n in nodes)
+    ms = max(mass / 1400.0, 0.2) * STRENGTH[c["durability"]]
+    rail_x = RAIL_X_FRAC * w
+    floor_z = min(n["pos_m"][2] for n in nodes)
+    comps = {cm["kind"]: cm for cm in lat["components"]}
+    engine = set(comps["Engine"]["node_ids"])
 
-    # 1. Body shape: drop hood/deck/bumper top nodes to beltline, pull the greenhouse in.
-    tops = PROFILE_TOP[prof]
-    for n in nodes:
-        i, j, k = ijk(n["id"])
-        if k != NZ - 1:
-            continue
-        z_mid = nodes[idx(i, j, 1)]["pos_m"][2]
-        if tops[j] is not None:
-            n["pos_m"][2] = round(max(tops[j] * h, z_mid + 0.08), 4)
-        else:
-            n["pos_m"][0] = round(n["pos_m"][0] * GREENHOUSE_X_SCALE, 4)
-    log.append(f"Shaped top layer to the `{prof}` profile (hood/deck/bumper tops dropped to "
-               f"beltline, greenhouse narrowed to {GREENHOUSE_X_SCALE:.0%} width).")
+    def reg(i):
+        return nodes[i]["region"]
 
-    # 2. Region relabels.
-    def setr(i, j, k, region):
-        nodes[idx(i, j, k)]["region"] = region
+    def pos(i):
+        return nodes[i]["pos_m"]
 
-    if prof == "mr":
-        for j in (2, 3):
-            for i in (1, 2):
-                for k in (0, 1):
-                    setr(i, j, k, "FrameRear")
-        log.append("Mid-engine: rows 2-3 between the rails relabelled FrameRear (engine bay "
-                   "behind the firewall); cabin is rows 4-6 only.")
-    if prof == "truck":
-        for j in (1, 2, 3):
-            for i in range(NX):
-                side = i in (0, NX - 1)
-                setr(i, j, 2, ("RearLeftQuarter" if i == 0 else "RearRightQuarter") if side else "Trunk")
-                if side:
-                    setr(i, j, 1, "RearLeftQuarter" if i == 0 else "RearRightQuarter")
-                else:
-                    setr(i, j, 1, "Trunk")
-        log.append("Pickup: rows 1-3 above the frame relabelled as the bed (Trunk = bed + "
-                   "tailgate, quarters = bed sides); cab is rows 4-6.")
-    if prof == "suv":
-        for i in range(NX):
-            setr(i, 2, 2, "Roof")
-            setr(i, 1, 2, "RearGlass")
-        for i in (1, 2):
-            setr(i, 2, 1, "Cabin")
-        log.append("SUV: long roof to row 2, tailgate glass at row 1, cabin extended over the "
-                   "rear axle (third row).")
-    if lt.get("ladder_frame"):
-        for j in range(1, NY - 1):
-            setr(1, j, 0, "FrameLeft")
-            setr(2, j, 0, "FrameRight")
-        log.append("Body-on-frame: the two inner bottom node lines (rows 1-8) are the ladder "
-                   "frame (FrameLeft / FrameRight).")
+    def is_rail_x(i):
+        return abs(abs(pos(i)[0]) - rail_x) < 1e-3
 
-    # 3. Beam materials.
-    def mat(beam, spec):
-        beam["material_id"], beam["area_m2"] = spec[0], spec[1]
+    def nearest(cands, y, k=1):
+        return sorted(cands, key=lambda i: (abs(pos(i)[1] - y), pos(i)[0]))[:k]
 
     counts: dict[str, int] = {}
+
+    def bump(key):
+        counts[key] = counts.get(key, 0) + 1
+
+    # 1. Era of the passenger cell (material + section multiplier).
+    era_mat, era_k = ERA[c["era"]]
     for bm in beams:
-        a, b = nodes[bm["a"]], nodes[bm["b"]]
-        ra, rb = a["region"], b["region"]
-        (ia, ja, ka), (ib, jb, kb) = ijk(bm["a"]), ijk(bm["b"])
-        regions = {ra, rb}
-        cat = None
-        side = ia == ib and ia in (0, NX - 1)
-        if (side and max(ka, kb) == NZ - 1 and 2 <= min(ja, jb) and max(ja, jb) <= 6
-                and not (prof == "truck" and min(ja, jb) < 4)
-                and not (prof == "mr" and min(ja, jb) < 3)):
-            cat = "pillar"
-        elif lt.get("ladder_frame") and regions <= {"FrameLeft", "FrameRight"} and ka == kb == 0 \
-                and ia in (1, 2) and ib in (1, 2):
-            cat = "ladder_rail" if ia == ib else ("ladder_cross" if ja == jb else "ladder_diag")
-        elif regions == {"Cabin"} or (regions <= {"Cabin", "FrameLeft", "FrameRight"} and "Cabin" in regions):
-            cat = "cabin"
-        elif regions == {"FrameLeft"} or regions == {"FrameRight"}:
-            cat = "sill"
-        elif regions <= {"FrameFront", "Cabin"} and "FrameFront" in regions:
-            cat = "rail_soft" if max(ja, jb) >= 8 and regions == {"FrameFront"} else "rail_hard"
-        elif regions <= {"FrameRear", "Cabin"} and "FrameRear" in regions:
-            if prof == "mr":
-                cat = "rear_alu"
-            else:
-                cat = "rail_soft" if min(ja, jb) <= 1 and regions == {"FrameRear"} else "rail_hard"
-        elif bm["material_id"] == "pp_bumper" and lt["bumper"] == "steel":
-            cat = "steel_bumper"
-        elif bm["material_id"] == "aluminum" or (regions == {"Hood"}):
-            cat = "hood"
-        elif bm["material_id"] == "mild_steel":
-            cat = "panel"
-        if cat is None:
+        if bm["material_id"] != "hss" or bm["a"] in engine or bm["b"] in engine:
             continue
-        counts[cat] = counts.get(cat, 0) + 1
-        if cat in ("pillar", "cabin", "sill", "rail_soft", "rail_hard"):
-            mat(bm, era[cat])
-        elif cat == "ladder_rail":
-            mat(bm, LADDER_RAIL)
-        elif cat == "ladder_cross":
-            mat(bm, LADDER_CROSS)
-        elif cat == "ladder_diag":
-            mat(bm, LADDER_DIAG)
-        elif cat == "rear_alu":
-            mat(bm, ("aluminum", 2.5e-4))
-        elif cat == "steel_bumper":
-            mat(bm, STEEL_BUMPER)
-        elif cat == "hood":
-            mat(bm, ("aluminum", 1.5e-4) if lt["hood"] == "aluminum" else ("mild_steel", era["panel"][1]))
-        elif cat == "panel":
-            mat(bm, ("aluminum", 2.0e-4) if prof == "mr" else era["panel"])
-    pretty = {
-        "pillar": f"pillars + roof rails → {era['pillar'][0]} {era['pillar'][1]:.1e} m²",
-        "cabin": f"cabin cell → {era['cabin'][0]} {era['cabin'][1]:.1e} m²",
-        "sill": f"sills → {era['sill'][0]} {era['sill'][1]:.1e} m²",
-        "rail_soft": f"crumple (outer) rail segments → {era['rail_soft'][0]} {era['rail_soft'][1]:.1e} m²",
-        "rail_hard": f"inner rail segments / firewall → {era['rail_hard'][0]} {era['rail_hard'][1]:.1e} m²",
-        "ladder_rail": f"ladder frame rails → {LADDER_RAIL[0]} {LADDER_RAIL[1]:.1e} m²",
-        "ladder_cross": f"ladder cross-members → {LADDER_CROSS[0]} {LADDER_CROSS[1]:.1e} m²",
-        "ladder_diag": f"ladder diagonals → {LADDER_DIAG[0]} {LADDER_DIAG[1]:.1e} m²",
-        "rear_alu": "rear subframe / engine bay → aluminum 2.5e-4 m² (sacrificial)",
-        "steel_bumper": f"bumpers → {STEEL_BUMPER[0]} {STEEL_BUMPER[1]:.1e} m² (steel bumpers)",
-        "hood": "hood → " + ("aluminum 1.5e-4 m²" if lt["hood"] == "aluminum" else f"mild_steel {era['panel'][1]:.1e} m²"),
-        "panel": "outer panels → " + ("aluminum 2.0e-4 m²" if prof == "mr" else f"{era['panel'][0]} {era['panel'][1]:.1e} m²"),
-    }
-    for cat in pretty:
-        if cat in counts:
-            log.append(f"Beams: {pretty[cat]} ({counts[cat]} beams).")
-
-    # 4. Component mounts by layout.
-    comps = {cm["kind"]: cm for cm in lat["components"]}
-
-    def mount(kind, ids, fail=None, total=None):
-        cm = comps[kind]
-        cm["node_ids"] = [idx(*t) for t in ids]
-        if fail is not None:
-            cm["intrusion_fail_m"], cm["intrusion_total_m"] = fail, total
-
-    layout = c["trans"]["layout"]
-    lay = layout if isinstance(layout, str) else "Awd"
-    if prof == "mr":
-        mount("Engine", [(1, 2, 1), (2, 2, 1), (1, 3, 1), (2, 3, 1)], 0.12, 0.25)
-        mount("Gearbox", [(1, 1, 0), (2, 1, 0)], 0.08, 0.18)
-        mount("Driveshaft", [(1, 2, 0), (2, 2, 0)], 0.08, 0.18)
-        mount("Radiator", [(1, 8, 1), (2, 8, 1)], 0.06, 0.12)
-        mount("Battery", [(1, 8, 0)])
-        mount("FuelTank", [(0, 3, 0), (3, 3, 0)], 0.10, 0.22)
-        mount("Exhaust", [(1, 0, 1), (2, 0, 1)])
-        log.append("Components: engine + gearbox behind the cabin (rows 1-3), radiators and "
-                   "battery in the nose, side fuel tanks behind the seats; engine/gearbox fail "
-                   "early (0.12 / 0.08 m) — the rear is sacrificial.")
-    elif lay == "Fwd" or (lay == "Awd" and c["front_frac"] >= 0.58):
-        mount("Engine", [(1, 7, 1), (2, 7, 1), (2, 7, 0)], 0.22, 0.38)
-        mount("Gearbox", [(0, 7, 0), (1, 7, 0)])
-        mount("Radiator", [(1, 8, 1), (2, 8, 1)])
-        drv = [(1, 7, 0), (2, 7, 0)]
-        if lay == "Awd":
-            drv += [(1, 4, 0), (2, 4, 0)]
-        mount("Driveshaft", drv)
-        mount("FuelTank", [(1, 3, 0), (2, 3, 0)])
-        log.append("Components: radiator at row 8 ahead of the engine (fails first), transverse "
-                   "engine at row 7 with the gearbox on its left end, fuel tank "
-                   "under the rear seat" + ("; prop shaft to the rear coupling under the floor." if lay == "Awd" else "."))
+        ra, rb = reg(bm["a"]), reg(bm["b"])
+        regions = {ra, rb}
+        area = bm["area_m2"]
+        role = None
+        if close(area, SEC["cabin"] * ms) and regions <= {"Cabin", "FrameLeft", "FrameRight"}:
+            role = "cabin/sill"
+        elif close(area, SEC["pillar"] * ms) and not regions & {"FrameFront", "FrameRear"}:
+            role = "pillar"
+        elif close(area, SEC["roof_rail"] * ms) and not regions & DOORS:
+            role = "roof rail"
+        elif close(area, SEC["cross_member"] * ms) and regions == {"Cabin"}:
+            role = "cross-member"
+        elif close(area, SEC["door_beam"] * ms) and regions & DOORS and c["era"] == "70s":
+            role = "door beam"
+        if role is None:
+            continue
+        k = 0.5 if role == "door beam" else era_k
+        if (era_mat, k) != ("hss", 1.0):
+            bm["material_id"], bm["area_m2"] = era_mat, area * k
+            bump(role)
+    if counts:
+        log.append(f"Era `{c['era']}` passenger cell: " + ", ".join(
+            f"{v} {k}" for k, v in sorted(counts.items()))
+            + f" → {era_mat} × {era_k:.2f} section" + (" (no door intrusion beams: × 0.5)" if c["era"] == "70s" else "") + ".")
     else:
-        mount("Engine", [(1, 7, 0), (2, 7, 0), (1, 7, 1), (2, 7, 1)])
-        mount("Radiator", [(1, 8, 1), (2, 8, 1)])
-        mount("Gearbox", [(1, 6, 0), (2, 6, 0)])
-        mount("Driveshaft", [(1, 4, 0), (2, 4, 0), (1, 2, 0)])
-        if prof == "truck":
-            mount("FuelTank", [(0, 3, 0), (1, 3, 0)], 0.10, 0.22)
-            mount("Exhaust", [(2, 2, 0)])
-            log.append("Components: radiator ahead of the engine, longitudinal engine, gearbox "
-                       "in the tunnel, prop shaft to the rear axle, side-saddle fuel tank outboard of the left frame rail.")
-        elif c["era"] == "70s":
-            mount("FuelTank", [(1, 1, 0), (2, 1, 0)], 0.08, 0.18)
-            log.append("Components: radiator ahead of the engine, longitudinal front engine, "
-                       "gearbox in the tunnel, prop shaft to the live axle, period fuel tank behind the rear axle under the trunk "
-                       "floor (fails early in rear hits).")
-        else:
-            mount("FuelTank", [(1, 2, 0), (2, 2, 0)])
-            log.append("Components: radiator at row 8 ahead of the engine (fails first), "
-                       "longitudinal engine at row 7, gearbox in the tunnel, prop shaft to the "
-                       "rear axle, fuel tank ahead of the rear axle.")
-    if c["id"] == "ironside_440":
-        mount("SuspensionRL", [tuple(ijk(x)) for x in comps["SuspensionRL"]["node_ids"]], 0.03, 0.07)
-        mount("SuspensionRR", [tuple(ijk(x)) for x in comps["SuspensionRR"]["node_ids"]], 0.03, 0.07)
-        mount("WheelRL", [tuple(ijk(x)) for x in comps["WheelRL"]["node_ids"]], 0.06, 0.10)
-        mount("WheelRR", [tuple(ijk(x)) for x in comps["WheelRR"]["node_ids"]], 0.06, 0.10)
-        log.append("Live axle: rear suspension mounts fail at 0.03 m intrusion and rear wheels "
-                   "detach at 0.06 m (spring hangers tear out of the floor).")
-    if lt.get("ladder_frame"):
-        for kind in ("SuspensionFL", "SuspensionFR", "SuspensionRL", "SuspensionRR"):
-            comps[kind]["intrusion_fail_m"], comps[kind]["intrusion_total_m"] = 0.08, 0.18
-        log.append("Frame-mounted suspension: mounts tolerate 0.08 m before failing (vs 0.05).")
+        log.append("Era `2010s`: gen-lattice's default HSS passenger cell kept as is.")
 
-    # 5. Detachables: impulse and mass by construction.
+    # 2. Panels, hood, bumpers.
+    n_hood = n_panel = n_bump = 0
+    for bm in beams:
+        regions = {reg(bm["a"]), reg(bm["b"])}
+        if lt["hood"] == "steel" and bm["material_id"] == "aluminum" and "Hood" in regions:
+            bm["material_id"] = "mild_steel"
+            n_hood += 1
+        elif prof == "mr" and bm["material_id"] == "mild_steel" and "Hood" not in regions:
+            bm["material_id"] = "aluminum"
+            n_panel += 1
+        elif lt["bumper"] == "steel" and bm["material_id"] == "pp_bumper":
+            bm["material_id"] = "mild_steel"
+            n_bump += 1
+    if n_hood:
+        log.append(f"Steel hood: {n_hood} hood beams aluminum → mild_steel.")
+    if n_panel:
+        log.append(f"Aluminium body: {n_panel} outer-panel beams mild_steel → aluminum.")
+    if n_bump:
+        log.append(f"Chrome steel bumpers: {n_bump} bumper beams pp_bumper → mild_steel.")
     for dt in lat["detachables"]:
-        if dt["region"] in ("FrontBumper", "RearBumper"):
-            if lt["bumper"] == "steel":
-                dt["break_impulse_ns"], dt["mass_kg"] = (9000.0, 30.0) if lt.get("ladder_frame") else (7000.0, 22.0)
-            else:
-                dt["break_impulse_ns"], dt["mass_kg"] = 3000.0, 6.0
-        if dt["region"] == "Hood":
-            if lt["hood"] == "aluminum":
-                dt["break_impulse_ns"], dt["mass_kg"] = 3500.0, 9.0
-            else:
-                dt["break_impulse_ns"] = 7000.0 if c["era"] == "70s" or lt.get("ladder_frame") else 5000.0
-                dt["mass_kg"] = 28.0 if c["era"] == "70s" or lt.get("ladder_frame") else 15.0
-    log.append("Detachables: " + ", ".join(
-        f"{d['region']} {d['break_impulse_ns']:.0f} N·s / {d['mass_kg']:.0f} kg" for d in lat["detachables"]) + ".")
+        if dt["region"] in ("FrontBumper", "RearBumper") and lt["bumper"] == "steel":
+            dt["break_impulse_ns"] = round(dt["break_impulse_ns"] * 2.3, 1)
+            dt["mass_kg"] = round(dt["mass_kg"] * 4.0, 2)
+        if dt["region"] == "Hood" and lt["hood"] == "steel":
+            dt["break_impulse_ns"] = round(dt["break_impulse_ns"] * 1.4, 1)
+            dt["mass_kg"] = round(dt["mass_kg"] * 1.6, 2)
+    if lt["bumper"] == "steel" or lt["hood"] == "steel":
+        log.append("Detachables: steel bumpers ×2.3 break impulse / ×4 mass; steel hood ×1.4 / ×1.6.")
 
-    # 6. Police push bar: four nodes ahead of the bumper, bolted through to the front rails.
+    # 3. Ladder frame: continue the rails under the cab as FrameLeft/FrameRight.
+    if lt.get("ladder_frame"):
+        rail_nodes = [n["id"] for n in nodes if n["region"] == "Cabin" and is_rail_x(n["id"])
+                      and abs(n["pos_m"][2] - floor_z) < 1e-3]
+        for i in rail_nodes:
+            nodes[i]["region"] = "FrameLeft" if pos(i)[0] < 0 else "FrameRight"
+        rail_set = set(rail_nodes)
+        area = SEC["rail_hard"] * TRUCK_RAIL_SCALE[prof] * ms * 1.4
+        n = 0
+        for bm in beams:
+            if bm["a"] in rail_set and bm["b"] in rail_set and abs(pos(bm["a"])[0] - pos(bm["b"])[0]) < 1e-3:
+                bm["material_id"], bm["area_m2"] = "hss", area
+                n += 1
+        log.append(f"Body-on-frame: {len(rail_nodes)} cab-floor rail nodes relabelled FrameLeft/"
+                   f"FrameRight; {n} under-cab rail beams → hss {area:.2e} m² so the ladder "
+                   f"frame runs bumper to bumper.")
+
+    # 4. Mid-engine: move the engine block behind the cabin and rewire its mounts.
+    if prof == "mr":
+        cabin_floor = [n["id"] for n in nodes if n["region"] == "Cabin" and is_rail_x(n["id"])
+                       and abs(n["pos_m"][2] - floor_z) < 1e-3]
+        y_bulk = min(pos(i)[1] for i in cabin_floor)
+        eng = sorted(engine)
+        eng_z_low = min(pos(i)[2] for i in eng)
+        ys = sorted({pos(i)[1] for i in eng})
+        y_new = {ys[0]: y_bulk - 0.12, ys[1]: y_bulk - 0.12 - (ys[1] - ys[0])}
+        for i in eng:
+            pos(i)[1] = round(y_new[pos(i)[1]], 4)
+            nodes[i]["region"] = "FrameRear"
+        lat["beams"] = beams = [bm for bm in beams if not ((bm["a"] in engine) ^ (bm["b"] in engine))]
+        rails = [n["id"] for n in nodes if n["id"] not in engine and n["region"] == "FrameRear"
+                 and is_rail_x(n["id"])]
+        bulk = [i for i in cabin_floor if abs(pos(i)[1] - y_bulk) < 1e-3]
+        bulk += [n["id"] for n in nodes if n["region"] == "Cabin" and is_rail_x(n["id"])
+                 and abs(n["pos_m"][1] - y_bulk) < 1e-3 and n["id"] not in bulk]
+        for i in eng:
+            side = [j for j in rails if (pos(j)[0] < 0) == (pos(i)[0] < 0)]
+            low = pos(i)[2] < eng_z_low + 1e-3
+            same_layer = [j for j in side if (abs(pos(j)[2] - floor_z) < 1e-3) == low]
+            for j in nearest(same_layer or side, pos(i)[1], 2):
+                beams.append({"a": min(i, j), "b": max(i, j), "material_id": "hss",
+                              "area_m2": SEC["engine_mount"] * ms, "breakable": True, "detach_group": None})
+            if abs(pos(i)[1] - (y_bulk - 0.12)) < 1e-3:
+                for j in [b for b in bulk if (pos(b)[0] < 0) == (pos(i)[0] < 0)]:
+                    beams.append({"a": min(i, j), "b": max(i, j), "material_id": "hss",
+                                  "area_m2": SEC["engine_firewall"] * ms, "breakable": True, "detach_group": None})
+        # Engine bay behind the bulkhead is not passenger cell.
+        n_rel = 0
+        for n in nodes:
+            if n["region"] == "Cabin" and n["pos_m"][1] < y_bulk - 1e-3:
+                n["region"] = "FrameRear"
+                n_rel += 1
+        # Sacrificial aluminium rear subframe.
+        n_alu = 0
+        for bm in beams:
+            if (bm["material_id"] == "hss" and reg(bm["a"]) == "FrameRear" and reg(bm["b"]) == "FrameRear"
+                    and bm["a"] not in engine and bm["b"] not in engine):
+                bm["material_id"], bm["area_m2"] = "aluminum", bm["area_m2"] * 1.5
+                n_alu += 1
+        rear_floor = [n["id"] for n in nodes if n["region"] == "FrameRear" and is_rail_x(n["id"])
+                      and abs(n["pos_m"][2] - floor_z) < 1e-3 and n["id"] not in engine]
+        y_ra = -c["wheelbase"] / 2
+        comps["Engine"]["intrusion_fail_m"], comps["Engine"]["intrusion_total_m"] = 0.12, 0.25
+        comps["Gearbox"]["node_ids"] = sorted(nearest(rear_floor, y_new[ys[1]] - 0.15, 2))
+        comps["Gearbox"]["intrusion_fail_m"], comps["Gearbox"]["intrusion_total_m"] = 0.08, 0.18
+        comps["Driveshaft"]["node_ids"] = sorted(nearest(rear_floor, y_ra, 2))
+        sills = [n["id"] for n in nodes if n["region"] in ("FrameLeft", "FrameRight")]
+        left = nearest([i for i in sills if pos(i)[0] < 0], y_bulk)
+        right = nearest([i for i in sills if pos(i)[0] > 0], y_bulk)
+        comps["FuelTank"]["node_ids"] = sorted(left + right)
+        comps["FuelTank"]["intrusion_fail_m"], comps["FuelTank"]["intrusion_total_m"] = 0.10, 0.22
+        log.append(f"Mid-engine: engine block moved behind the cabin bulkhead (y {y_bulk - 0.12:.2f}"
+                   f"…{y_new[ys[1]]:.2f} m), mounted to the rear rails and the bulkhead; "
+                   f"{n_rel} nodes behind the bulkhead relabelled FrameRear (engine bay, not cabin); "
+                   f"{n_alu} rear-subframe beams → aluminum ×1.5 section (sacrificial); gearbox "
+                   f"and half-shafts at the rear axle, side fuel tanks at the sills behind the "
+                   f"seats; engine fails at 0.12 m, gearbox 0.08 m.")
+
+    # 5. Layout-specific component placement.
+    lay = c["trans"]["layout"]
+    lay = lay if isinstance(lay, str) else "Awd"
+    y_ra = -c["wheelbase"] / 2
+    if prof != "mr" and (lay == "Fwd" or (lay == "Awd" and c["front_frac"] >= 0.58)):
+        eng_left_low = [i for i in engine if pos(i)[0] < 0 and pos(i)[2] < min(pos(j)[2] for j in engine) + 1e-3]
+        comps["Gearbox"]["node_ids"] = sorted(eng_left_low)
+        log.append("Transverse engine: gearbox mounted on the left end of the engine block "
+                   "(gen-lattice places it in the tunnel at the firewall, as for FR).")
+    if c["era"] == "70s":
+        floor_inner = [n["id"] for n in nodes if is_rail_x(n["id"]) and abs(n["pos_m"][2] - floor_z) < 1e-3]
+        comps["FuelTank"]["node_ids"] = sorted(nearest(floor_inner, y_ra - 0.5, 2))
+        comps["FuelTank"]["intrusion_fail_m"], comps["FuelTank"]["intrusion_total_m"] = 0.08, 0.18
+        log.append("Period fuel tank behind the rear axle under the trunk floor (fails at 0.08 m).")
+    if prof == "truck":
+        y_tank = 0.5 * (y_ra + min(pos(n["id"])[1] for n in nodes if n["region"] in ("FrameLeft", "Cabin")))
+        floor_left = [n["id"] for n in nodes if n["pos_m"][0] < -1e-3 and abs(n["pos_m"][2] - floor_z) < 1e-3]
+        comps["FuelTank"]["node_ids"] = sorted(nearest(floor_left, y_tank, 2))
+        comps["FuelTank"]["intrusion_fail_m"], comps["FuelTank"]["intrusion_total_m"] = 0.10, 0.22
+        log.append("Side-saddle fuel tank outboard of the left frame rail between cab and rear axle.")
+    if c["id"] == "ironside_440":
+        for kind in ("SuspensionRL", "SuspensionRR"):
+            comps[kind]["intrusion_fail_m"], comps[kind]["intrusion_total_m"] = 0.04, 0.09
+        for kind in ("WheelRL", "WheelRR"):
+            comps[kind]["intrusion_fail_m"], comps[kind]["intrusion_total_m"] = 0.07, 0.12
+        log.append("Live axle: rear suspension mounts fail at 0.04 m (vs 0.09) and rear wheels "
+                   "detach at 0.07 m (vs 0.15) — spring hangers tear out of the floor.")
+
+    # 6. Police push bar: detachable tube frame ahead of the bumper, bolted to the bumper beam.
     if lt.get("pushbar"):
+        ff = [n["id"] for n in nodes if n["region"] == "FrameFront" and is_rail_x(n["id"])
+              and n["id"] not in engine]
+        y_bb = max(pos(i)[1] for i in ff)
+        mounts = sorted([i for i in ff if abs(pos(i)[1] - y_bb) < 1e-3], key=lambda i: (pos(i)[2], pos(i)[0]))
+        y_bar = max(n["pos_m"][1] for n in nodes) + 0.10
         tall = prof in ("truck", "suv")
         zs = (0.45, 0.95) if tall else (0.35, 0.80)
-        y = l / 2 + 0.10
-        bar_mass = 25.0
         new = []
         for z in zs:
             for x in (-0.32 * w, 0.32 * w):
                 nid = len(nodes)
-                nodes.append({"id": nid, "pos_m": [round(x, 4), round(y, 4), z],
-                              "mass_kg": bar_mass / 4, "pinned_to_chassis": False,
+                nodes.append({"id": nid, "pos_m": [round(x, 4), round(y_bar, 4), z],
+                              "mass_kg": PUSHBAR_MASS_KG / 4, "pinned_to_chassis": False,
                               "region": "FrontBumper"})
                 new.append(nid)
         lo_l, lo_r, hi_l, hi_r = new
         for a_, b_ in ((lo_l, lo_r), (hi_l, hi_r), (lo_l, hi_l), (lo_r, hi_r), (lo_l, hi_r), (lo_r, hi_l)):
             beams.append({"a": a_, "b": b_, "material_id": PUSHBAR[0], "area_m2": PUSHBAR[1],
                           "breakable": True, "detach_group": None})
-        for nid, (i, k) in zip(new, ((1, 0), (2, 0), (1, 1), (2, 1))):
-            beams.append({"a": nid, "b": idx(i, NY - 2, k), "material_id": PUSHBAR_MOUNT[0],
-                          "area_m2": PUSHBAR_MOUNT[1], "breakable": True, "detach_group": GROUP_PUSHBAR})
+        for nid in new:
+            side = [m for m in mounts if (pos(m)[0] < 0) == (pos(nid)[0] < 0)]
+            for m in side:
+                beams.append({"a": m, "b": nid, "material_id": PUSHBAR_MOUNT[0],
+                              "area_m2": PUSHBAR_MOUNT[1], "breakable": True,
+                              "detach_group": GROUP_PUSHBAR})
         lat["detachables"].append({"group": GROUP_PUSHBAR, "region": "FrontBumper",
                                    "hinge_nodes": [lo_l, lo_r], "break_impulse_ns": 15000.0,
-                                   "mass_kg": bar_mass})
+                                   "mass_kg": PUSHBAR_MASS_KG})
+        extra = ""
+        if gen_profile(c) != "cruiser" and lt.get("reinforce_bumper_beam"):
+            n = 0
+            for bm in beams:
+                if (bm["material_id"] == "hss" and close(bm["area_m2"], SEC["bumper_beam"] * ms)
+                        and abs(pos(bm["a"])[1] - y_bb) < 1e-3 and abs(pos(bm["b"])[1] - y_bb) < 1e-3):
+                    bm["area_m2"] *= 2.0
+                    n += 1
+            extra = f" Front bumper beam ×2 ({n} beams), as gen-lattice's cruiser profile does."
         log.append(f"Push bar: 4 extra FrontBumper nodes 0.10 m ahead of the bumper (z {zs[0]}/"
-                   f"{zs[1]} m), {PUSHBAR[0]} {PUSHBAR[1]:.1e} m² tubes, bolted to the row-8 rail "
-                   f"nodes through the bumper; detachable group {GROUP_PUSHBAR} breaks at "
-                   f"15000 N·s ({bar_mass:.0f} kg).")
+                   f"{zs[1]} m), {PUSHBAR[0]} {PUSHBAR[1]:.1e} m² tubes bolted to the bumper-beam "
+                   f"rail nodes; detachable group {GROUP_PUSHBAR}, 15000 N·s, "
+                   f"{PUSHBAR_MASS_KG:.0f} kg.{extra}")
 
-    # 7. Mass: concentrate lattice mass at the engine mounts (x2.5), keep the total.
-    eng = set(comps["Engine"]["node_ids"])
-    for n in nodes:
-        if n["id"] in eng:
-            n["mass_kg"] *= 2.5
-    target = total_mass + (25.0 if lt.get("pushbar") else 0.0)
-    scale = target / sum(n["mass_kg"] for n in nodes)
-    for n in nodes:
-        n["mass_kg"] = round(n["mass_kg"] * scale, 4)
-    log.append(f"Node mass: engine-mount nodes ×2.5, renormalised to {target:.0f} kg total.")
+    # Keep beam order canonical (a < b, sorted) and node ids == index.
+    for bm in beams:
+        if bm["a"] > bm["b"]:
+            bm["a"], bm["b"] = bm["b"], bm["a"]
+    lat["beams"] = sorted(beams, key=lambda bm: (bm["a"], bm["b"]))
+    for cm in lat["components"]:
+        cm["node_ids"] = [int(i) for i in cm["node_ids"]]
     return log
 
 
 def lattice_json_lines(lat: dict) -> str:
-    """Same one-item-per-line layout as `wp_damage::box_lattice::lattice_to_json_lines`."""
+    """Same one-item-per-line layout as `wp_damage::lattice_gen::lattice_to_json_lines`."""
     def item(x):
         return json.dumps(x, separators=(",", ":"))
 
@@ -650,21 +678,28 @@ def lattice_json_lines(lat: dict) -> str:
 
 
 def build_lattice(c: dict, mass: float) -> tuple[dict, list[str]]:
-    lat_mass = mass * c["lattice"]["mass_frac"]
     with tempfile.TemporaryDirectory() as td:
         p = os.path.join(td, c["id"] + ".json")
-        run_generator(c, lat_mass, p)
+        run_generator(c, mass, p)
         with open(p) as f:
             lat = json.load(f)
-    log = [f"Generated with `gen-box-lattice --id {c['id']} --width {c['body'][0]} --length "
-           f"{c['body'][1]} --height {c['body'][2]} --wheelbase {c['wheelbase']} --mass "
-           f"{lat_mass:.1f} --clearance {c['clearance']}` ({c['lattice']['mass_frac']:.0%} of "
-           f"vehicle mass)."]
-    log += adjust_lattice(lat, c)
+    log = ["Generated with `gen-lattice " + " ".join(gen_lattice_args(c, mass)) + "` "
+           f"({c['lattice']['mass_frac']:.0%} of vehicle mass in the lattice; strength from "
+           f"durability class {c['durability']})."]
+    log += adjust_lattice(lat, c, mass)
     return lat, log
 
 
 # ----------------------------------------------------------------------------- spec sheet
+
+
+def load_results() -> dict:
+    """Measured sim results written by collect_results.py (empty if never run)."""
+    path = os.path.join(HERE, "validation_results.json")
+    if not os.path.exists(path):
+        return {}
+    with open(path) as f:
+        return json.load(f)
 
 
 def fmt_table(head, rows):
@@ -796,11 +831,27 @@ def spec_md(c: dict, j: dict, d: dict, est: dict, lat_log: list[str], lat: dict)
     o.append(f"Full-pedal line pressure {bb['bar']:.0f} bar.\n")
     o.append(f"- Front: {b['txt_f']}")
     o.append(f"- Rear: {b['txt_r']}")
+    if b["k_abs"] < 1.0:
+        o.append(f"\nABS ceiling: caliper capacity {b['raw_f']:.0f} / {b['raw_r']:.0f} N·m exceeds "
+                 f"{ABS_CEILING:.1f} × the front lock torque on this car's tire (peak μ "
+                 f"{b['tire_mu']:.2f}), which `wp_vehicle`'s ABS cannot modulate (it releases to a "
+                 f"fraction of the commanded torque, so an oversized caliper keeps the wheel "
+                 f"locked). Both axles scaled by {b['k_abs']:.2f} → **{b['tf']:.0f} / "
+                 f"{b['tr']:.0f} N·m**. Remove when 02's ABS modulates relative to lock torque.")
     o.append(f"\nLock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs "
              f"{b['lock_f']:.0f} N·m/wheel (capacity {b['tf'] / b['lock_f']:.2f}×), rear needs "
-             f"{b['lock_r']:.0f} N·m/wheel (capacity {b['tr'] / max(b['lock_r'], 1):.2f}×). "
-             f"`bias_front` = f + 0.9·h/L = {b['bias']:.2f} (ideal distribution at 0.9 g, "
-             f"clamped 0.55-0.78). Handbrake {b['hb']:.0f} N·m per rear wheel.\n")
+             f"{b['lock_r']:.0f} N·m/wheel (capacity {b['tr'] / b['lock_r']:.2f}×).\n")
+    o.append("`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales "
+             "the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and "
+             "`bias_front` acts as the proportioning valve: the rear is trimmed to the same lock "
+             "margin as the front (ideal rear = T_f · lock_r/lock_f = "
+             f"{b['rear_ideal']:.0f} N·m), never boosted above its caliper capacity. "
+             + (f"Rear capacity exceeds that, so `bias_front` = T_r/(T_r + ideal) = **{b['bias']:.3f}**"
+                if b["bias"] > 0.5 else
+                "Rear capacity is below that (hardware-limited rear), so `bias_front` = **0.5**: "
+                "both axles get full caliper torque")
+             + f" → delivered {b['tf']:.0f} N·m front / {b['rear_delivered']:.0f} N·m rear per "
+             f"wheel at full pedal. Handbrake {b['hb']:.0f} N·m per rear wheel.\n")
 
     o.append("## Steering\n")
     o.append(f"Ratio {c['steer']['ratio']:.1f}:1. Kerb-to-kerb turning circle "
@@ -811,12 +862,18 @@ def spec_md(c: dict, j: dict, d: dict, est: dict, lat_log: list[str], lat: dict)
              f"Ackermann; `ackermann_frac` {c['steer']['ackermann']:.2f}). Rack speed "
              f"{c['steer']['rack_speed']:.1f} rad/s.\n")
 
-    o.append("## Estimated performance\n")
-    o.append("From `tools/specsheet/estimate.py` (point-mass model, intended tire compound; see "
-             "`data/cars/VALIDATION.md` for the sim results and class targets).\n")
-    o.append(fmt_table(["0-100 km/h", "Top speed", "100-0 km/h", "Skidpad", "Class index (est.)"], [[
-        f"{est['t0100_s']:.1f} s", f"{est['vmax_kmh']:.0f} km/h", f"{est['brake_100_0_m']:.1f} m",
-        f"{est['skidpad_g']:.2f} g", f"{est['class_index']}"]]))
+    o.append("## Performance\n")
+    o.append("Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of the last "
+             "run); estimate = `tools/specsheet/estimate.py` (point-mass model). Class targets and "
+             "explanations of any miss: `data/cars/VALIDATION.md`.\n")
+    rows = []
+    sim = load_results().get(c["id"], {})
+    if sim.get("t0100_s") is not None:
+        rows.append(["sim", f"{sim['t0100_s']:.1f} s", f"{sim['vmax_kmh']:.0f} km/h",
+                     f"{sim['brake_100_0_m']:.1f} m", f"{sim['skidpad_g']:.2f} g", "—"])
+    rows.append(["estimate", f"{est['t0100_s']:.1f} s", f"{est['vmax_kmh']:.0f} km/h",
+                 f"{est['brake_100_0_m']:.1f} m", f"{est['skidpad_g']:.2f} g", f"{est['class_index']}"])
+    o.append(fmt_table(["", "0-100 km/h", "Top speed", "100-0 km/h", "Skidpad", "Class index (est.)"], rows))
 
     o.append("\n## Damage lattice (`data/lattices/" + c["id"] + ".json`)\n")
     o.append(f"{len(lat['nodes'])} nodes, {len(lat['beams'])} beams, "
