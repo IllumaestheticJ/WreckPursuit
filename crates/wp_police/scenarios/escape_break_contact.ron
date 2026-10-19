@@ -1,0 +1,14 @@
+// A fast racer at night out-corners capped pursuers, breaks line of sight behind buildings and
+// escapes after escape_time(level, Night).
+(
+    name: "police_escape_break_contact",
+    seed: 600,
+    time_of_day_h: 22.0,
+    duration_s: 300.0,
+    runs: 3,
+    stop_after_first_pursuit: true,
+    racers: [(district: Core, speed_factor: 2.6, cornering_g: 0.95, initial_heat: 15.0, stay_in_district: false)],
+    expect: [
+        (metric: "escapes", min: 1.0, max: 3.0),
+    ],
+)

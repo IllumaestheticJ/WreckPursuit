@@ -1,0 +1,19 @@
+{
+  "id": "sentinel_cruiser",
+  "engine": {
+    "cylinders": 6,
+    "layout": "V",
+    "firing": "Even",
+    "induction_exhaust_balance": 0.35,
+    "turbo": false,
+    "supercharger": false,
+    "gain": 1.0
+  },
+  "engine_pack": "engine_proc_v6",
+  "world_pack": "world_proc",
+  "horn_cue": "horn/standard",
+  "siren": {
+    "pack": "siren_proc",
+    "default_mode": "Auto"
+  }
+}

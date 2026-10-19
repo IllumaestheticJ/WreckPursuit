@@ -288,6 +288,8 @@ pub fn event_name(e: &SimEvent) -> &'static str {
         SimEvent::WheelDetached { .. } => "WheelDetached",
         SimEvent::TotalLoss { .. } => "TotalLoss",
         SimEvent::TrafficViolation { .. } => "TrafficViolation",
+        SimEvent::GlassShattered { .. } => "GlassShattered",
+        SimEvent::RegionDamaged { .. } => "RegionDamaged",
         SimEvent::PoliceEvent { .. } => "PoliceEvent",
         SimEvent::EconomyEvent { .. } => "EconomyEvent",
     }
@@ -303,7 +305,9 @@ pub fn event_entities(e: &SimEvent) -> Vec<EntityId> {
         | SimEvent::ComponentFailed { vehicle, .. }
         | SimEvent::WheelDetached { vehicle, .. }
         | SimEvent::TotalLoss { vehicle }
-        | SimEvent::TrafficViolation { vehicle, .. } => vec![*vehicle],
+        | SimEvent::TrafficViolation { vehicle, .. }
+        | SimEvent::GlassShattered { vehicle, .. }
+        | SimEvent::RegionDamaged { vehicle, .. } => vec![*vehicle],
         SimEvent::PoliceEvent { .. } | SimEvent::EconomyEvent { .. } => Vec::new(),
     }
 }

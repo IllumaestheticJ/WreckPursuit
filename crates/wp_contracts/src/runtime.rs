@@ -184,6 +184,12 @@ pub struct WheelState {
     pub contact: bool,
     /// Whether the wheel has been torn off.
     pub detached: bool,
+    /// Longitudinal tire force actually applied this tick, tire frame, N (v0.2.0; + = forward).
+    #[serde(default)]
+    pub fx_n: f32,
+    /// Lateral tire force actually applied this tick, tire frame, N (v0.2.0; + = left).
+    #[serde(default)]
+    pub fy_n: f32,
 }
 
 /// Snapshot of a vehicle's dynamic state. World space unless noted.
@@ -321,4 +327,66 @@ pub enum SignalState {
     Red,
     /// Signal dark / flashing; treat as all-way stop.
     Off,
+}
+
+/// Police wanted level of a racer, derived from heat by `wp_police` (v0.2.0: moved here from
+/// `wp_police` so economy, net and UI share it).
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Default,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
+pub enum WantedLevel {
+    /// Not wanted.
+    #[default]
+    None,
+    /// Level 1.
+    L1,
+    /// Level 2.
+    L2,
+    /// Level 3.
+    L3,
+    /// Level 4.
+    L4,
+    /// Level 5.
+    L5,
+}
+
+impl WantedLevel {
+    /// 0 for `None`, 1..=5 otherwise.
+    pub fn number(self) -> u8 {
+        self as u8
+    }
+
+    /// Level for heat given ascending thresholds for L1..L5.
+    pub fn from_heat(heat: f32, thresholds: &[f32; 5]) -> Self {
+        const LEVELS: [WantedLevel; 5] = [
+            WantedLevel::L1,
+            WantedLevel::L2,
+            WantedLevel::L3,
+            WantedLevel::L4,
+            WantedLevel::L5,
+        ];
+        let mut level = WantedLevel::None;
+        for (i, t) in thresholds.iter().enumerate() {
+            if heat >= *t {
+                level = LEVELS[i];
+            }
+        }
+        level
+    }
+
+    /// Index 0..=4 into per-level tables (`None` maps to L1's entry).
+    pub fn table_index(self) -> usize {
+        (self.number().max(1) - 1) as usize
+    }
 }

@@ -1,0 +1,322 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RepairEstimate",
+  "description": "Full repair estimate for one vehicle.",
+  "type": "object",
+  "properties": {
+    "lines": {
+      "description": "Line items in deterministic order.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/RepairLine"
+      }
+    },
+    "total": {
+      "description": "Sum of all line totals.",
+      "type": "number",
+      "format": "float"
+    }
+  },
+  "required": [
+    "lines",
+    "total"
+  ],
+  "$defs": {
+    "BodyRegion": {
+      "description": "Body region a lattice node belongs to. Used for damage accounting, repair billing,\ndetachable groups and the HUD damage silhouette.",
+      "oneOf": [
+        {
+          "description": "Front bumper cover and beam.",
+          "type": "string",
+          "const": "FrontBumper"
+        },
+        {
+          "description": "Hood / bonnet.",
+          "type": "string",
+          "const": "Hood"
+        },
+        {
+          "description": "Front-left fender.",
+          "type": "string",
+          "const": "FrontLeftFender"
+        },
+        {
+          "description": "Front-right fender.",
+          "type": "string",
+          "const": "FrontRightFender"
+        },
+        {
+          "description": "Left front door.",
+          "type": "string",
+          "const": "LeftDoorF"
+        },
+        {
+          "description": "Left rear door (or rear half of the left side on 2-door cars).",
+          "type": "string",
+          "const": "LeftDoorR"
+        },
+        {
+          "description": "Right front door.",
+          "type": "string",
+          "const": "RightDoorF"
+        },
+        {
+          "description": "Right rear door.",
+          "type": "string",
+          "const": "RightDoorR"
+        },
+        {
+          "description": "Roof panel.",
+          "type": "string",
+          "const": "Roof"
+        },
+        {
+          "description": "Rear-left quarter panel.",
+          "type": "string",
+          "const": "RearLeftQuarter"
+        },
+        {
+          "description": "Rear-right quarter panel.",
+          "type": "string",
+          "const": "RearRightQuarter"
+        },
+        {
+          "description": "Trunk / boot lid / tailgate.",
+          "type": "string",
+          "const": "Trunk"
+        },
+        {
+          "description": "Rear bumper cover and beam.",
+          "type": "string",
+          "const": "RearBumper"
+        },
+        {
+          "description": "Windshield.",
+          "type": "string",
+          "const": "Windshield"
+        },
+        {
+          "description": "Rear window.",
+          "type": "string",
+          "const": "RearGlass"
+        },
+        {
+          "description": "Front frame rails / crumple zone.",
+          "type": "string",
+          "const": "FrameFront"
+        },
+        {
+          "description": "Rear frame rails / crumple zone.",
+          "type": "string",
+          "const": "FrameRear"
+        },
+        {
+          "description": "Left sill / side frame.",
+          "type": "string",
+          "const": "FrameLeft"
+        },
+        {
+          "description": "Right sill / side frame.",
+          "type": "string",
+          "const": "FrameRight"
+        },
+        {
+          "description": "Passenger cell (pillars, floor, firewall). Intrusion here drives total loss.",
+          "type": "string",
+          "const": "Cabin"
+        }
+      ]
+    },
+    "Component": {
+      "description": "Mechanical component that can be damaged by intrusion.",
+      "oneOf": [
+        {
+          "description": "Engine block.",
+          "type": "string",
+          "const": "Engine"
+        },
+        {
+          "description": "Radiator / cooling pack.",
+          "type": "string",
+          "const": "Radiator"
+        },
+        {
+          "description": "Battery.",
+          "type": "string",
+          "const": "Battery"
+        },
+        {
+          "description": "Fuel tank.",
+          "type": "string",
+          "const": "FuelTank"
+        },
+        {
+          "description": "Steering rack.",
+          "type": "string",
+          "const": "SteeringRack"
+        },
+        {
+          "description": "Front-left suspension mount / arms.",
+          "type": "string",
+          "const": "SuspensionFL"
+        },
+        {
+          "description": "Front-right suspension mount / arms.",
+          "type": "string",
+          "const": "SuspensionFR"
+        },
+        {
+          "description": "Rear-left suspension mount / arms.",
+          "type": "string",
+          "const": "SuspensionRL"
+        },
+        {
+          "description": "Rear-right suspension mount / arms.",
+          "type": "string",
+          "const": "SuspensionRR"
+        },
+        {
+          "description": "Front-left wheel / hub attachment.",
+          "type": "string",
+          "const": "WheelFL"
+        },
+        {
+          "description": "Front-right wheel / hub attachment.",
+          "type": "string",
+          "const": "WheelFR"
+        },
+        {
+          "description": "Rear-left wheel / hub attachment.",
+          "type": "string",
+          "const": "WheelRL"
+        },
+        {
+          "description": "Rear-right wheel / hub attachment.",
+          "type": "string",
+          "const": "WheelRR"
+        },
+        {
+          "description": "Gearbox.",
+          "type": "string",
+          "const": "Gearbox"
+        },
+        {
+          "description": "Driveshaft / half-shafts.",
+          "type": "string",
+          "const": "Driveshaft"
+        },
+        {
+          "description": "Front-left brake.",
+          "type": "string",
+          "const": "BrakeFL"
+        },
+        {
+          "description": "Front-right brake.",
+          "type": "string",
+          "const": "BrakeFR"
+        },
+        {
+          "description": "Rear-left brake.",
+          "type": "string",
+          "const": "BrakeRL"
+        },
+        {
+          "description": "Rear-right brake.",
+          "type": "string",
+          "const": "BrakeRR"
+        },
+        {
+          "description": "Exhaust system.",
+          "type": "string",
+          "const": "Exhaust"
+        },
+        {
+          "description": "Head and tail lights (cosmetic + night visibility).",
+          "type": "string",
+          "const": "Lights"
+        }
+      ]
+    },
+    "RepairItem": {
+      "description": "What a repair line item fixes.",
+      "oneOf": [
+        {
+          "description": "Body region (panel straightening / replacement).",
+          "type": "object",
+          "properties": {
+            "Region": {
+              "$ref": "#/$defs/BodyRegion"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Region"
+          ]
+        },
+        {
+          "description": "Mechanical component.",
+          "type": "object",
+          "properties": {
+            "Component": {
+              "$ref": "#/$defs/Component"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Component"
+          ]
+        },
+        {
+          "description": "Re-attach / replace a detached part group.",
+          "type": "object",
+          "properties": {
+            "DetachedPart": {
+              "$ref": "#/$defs/BodyRegion"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "DetachedPart"
+          ]
+        }
+      ]
+    },
+    "RepairLine": {
+      "description": "One line on a repair estimate.",
+      "type": "object",
+      "properties": {
+        "item": {
+          "description": "What is repaired.",
+          "$ref": "#/$defs/RepairItem"
+        },
+        "labour_hours": {
+          "description": "Labour hours.",
+          "type": "number",
+          "format": "float"
+        },
+        "parts_cost": {
+          "description": "Parts cost.",
+          "type": "number",
+          "format": "float"
+        },
+        "severity": {
+          "description": "Damage severity 0 (cosmetic) ..= 1 (replace).",
+          "type": "number",
+          "format": "float"
+        },
+        "total": {
+          "description": "Line total (parts + labour), already including the mode's `repair_cost_scale`.",
+          "type": "number",
+          "format": "float"
+        }
+      },
+      "required": [
+        "item",
+        "severity",
+        "parts_cost",
+        "labour_hours",
+        "total"
+      ]
+    }
+  }
+}

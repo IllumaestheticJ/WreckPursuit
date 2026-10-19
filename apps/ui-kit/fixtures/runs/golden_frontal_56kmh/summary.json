@@ -1,0 +1,91 @@
+{
+  "name": "golden_frontal_56kmh",
+  "contract_version": "0.1.0",
+  "hash_spec": 1,
+  "systems": "world,vehicle,damage,police,net",
+  "seed": 103,
+  "ticks": 1920,
+  "final_hash": "ab8077868b900e7c",
+  "entities": [
+    {
+      "id": "car",
+      "entity": 1,
+      "car": "debug_sedan",
+      "final_speed_mps": 14.5498,
+      "max_speed_mps": 15.27965,
+      "distance_m": 80.32777,
+      "path_length_m": 81.0082,
+      "final_health": 0.6011721,
+      "max_lateral_g": 3.0467618,
+      "max_long_g": 55.914883,
+      "max_yaw_rate_rps": 1.308365,
+      "crush_depth_m": 0.64207554,
+      "components_failed": 1,
+      "parts_detached": 1,
+      "wheels_detached": 0,
+      "total_loss": false,
+      "min_z_m": -0.019568741
+    },
+    {
+      "id": "barrier",
+      "entity": 2,
+      "car": "debug_sedan",
+      "final_speed_mps": -3.206584,
+      "max_speed_mps": 0.0,
+      "distance_m": 15.213144,
+      "path_length_m": 15.270646,
+      "final_health": 0.6062925,
+      "max_lateral_g": 3.6424303,
+      "max_long_g": 55.907036,
+      "max_yaw_rate_rps": 0.6140454,
+      "crush_depth_m": 0.64355624,
+      "components_failed": 1,
+      "parts_detached": 1,
+      "wheels_detached": 0,
+      "total_loss": false,
+      "min_z_m": -0.0352813
+    }
+  ],
+  "events_total": 17,
+  "max_events_per_tick": 4,
+  "net": {
+    "snapshots": 480,
+    "bytes": 1154673
+  },
+  "warnings": [],
+  "expectations": [
+    {
+      "expect": "speed_at(entity:\"car\",t_s:4.0,min:15.0,max:16.1)",
+      "actual": "15.046534",
+      "passed": true
+    }
+  ],
+  "pending": [
+    {
+      "expect": "metric(name:\"distance_m\",entity:\"barrier\",min:0.5,max:25.0)",
+      "actual": "15.213144",
+      "passed": true
+    },
+    {
+      "expect": "crush_depth(entity:\"car\",min:0.25,max:0.8)",
+      "actual": "0.64207554",
+      "passed": true
+    },
+    {
+      "expect": "total_loss(entity:\"car\",expected:true)",
+      "actual": "false",
+      "passed": false
+    },
+    {
+      "expect": "components_failed(entity:\"car\",min:1,max:20)",
+      "actual": "1",
+      "passed": true
+    },
+    {
+      "expect": "event_count(event:\"Contact\",entity:\"car\",min:1,max:100000)",
+      "actual": "1",
+      "passed": true
+    }
+  ],
+  "failures": []
+}

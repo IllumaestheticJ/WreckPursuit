@@ -40,6 +40,7 @@ for agent in world.agents() { /* render / replicate AgentView */ }
 
 ```sh
 cargo test -p wp_world                                   # unit + integration (~15 s debug)
+cargo run -p wp_world --example load_profile             # city build/load timings
 cargo test -p wp_world --release -- --ignored --nocapture  # 10-min soak ×2 + perf budget
 cargo run --release -p wp_world --example traffic_bench -- 10 400 12 1 0.05
                                          # minutes agents hour seed aggressive_fraction
@@ -200,9 +201,12 @@ polygon's vertices in order and closes the loop), checkpoints at every turn and 
 route and puts 3 cones across every side-street stop line). `World::set_active_routes` makes
 routes LOD/spawn focus areas and applies closures.
 
-**Determinism**: no wall clock, `BTreeMap`/`Vec` only, a single seeded `wp_math::Rng` used in
-a fixed order, polynomial `atan`/`sin_cos`, IEEE `sqrt` only; `World::state_hash` covers clock,
-signal time and every agent (pinned by `determinism_hash`).
+**Determinism**: no wall clock, no `f64`, `BTreeMap`/`Vec` only, a single seeded
+`wp_math::Rng` used in a fixed order, polynomial `atan`/`sin_cos`, IEEE `sqrt` only. Time is
+integer ticks: the world counts physics ticks (`World::tick`, signals use it via
+`signals::group_state(sc, group, tick)`), traffic and violations count 60 Hz traffic steps
+(`TICKS_PER_TRAFFIC_STEP` = 4). `World::state_hash` covers clock, tick and every agent (pinned
+by `determinism_hash`).
 
 ## Perf
 Release, cloud container (4 vCPU), procedural 12×12, 400 agents at saturation
@@ -212,8 +216,8 @@ Release, cloud container (4 vCPU), procedural 12×12, 400 agents at saturation
 |---|---|---|---|
 | Traffic + signals + violations per 60 Hz frame (4 × `World::step`) | avg 0.06 ms, p99 0.15 ms, p99.9 0.3 ms, max ≈ 1.4 ms (noise) | not measured | 2 ms (browser 4 ms) |
 | Same with civilian-collision diagnostics on | avg 0.20 ms | — | — |
-| `World::load` of `procedural_12x12.road.bin` (decode + `CityMap::new` + parked cars) | ≈ 60 ms | — | — |
-| 10-min soak, 9 seeds × {0 %, 5 %} aggressive | 0 civilian–civilian collisions; 0–9 agents recycled after being stuck > 120 s (starved permissive lefts / minor approaches in saturated flow) | — | < 1 % |
+| `World::load` of `procedural_12x12.road.bin` (decode + `CityMap::new` + parked cars) | ≈ 17 ms (debug build ≈ 0.2 s; `ProcGenConfig::small()` ≈ 5 ms / 0.06 s) | — | — |
+| 10-min soak, 9 seeds × {0 %, 5 %} aggressive | 0 civilian–civilian collisions; 0–11 agents recycled after being stuck > 120 s (starved permissive lefts / minor approaches in saturated flow) | — | < 1 % |
 
 Physical agents use the `wp_vehicle` stub (negligible); re-measure when prompt 02 lands.
 

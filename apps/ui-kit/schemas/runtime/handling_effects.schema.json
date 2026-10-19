@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HandlingEffects",
+  "description": "The **entire** interface from damage to handling. Produced by `DamageSim::handling_effects`,\nconsumed by `VehicleSim::apply_damage_effects`. Arrays are per wheel, ordered FL, FR, RL, RR.\n[`HandlingEffects::default`] is the undamaged (neutral) state.",
+  "type": "object",
+  "properties": {
+    "brake_scale": {
+      "description": "Per-wheel brake effectiveness multiplier.",
+      "type": "array",
+      "items": {
+        "type": "number",
+        "format": "float"
+      },
+      "maxItems": 4,
+      "minItems": 4
+    },
+    "camber_delta": {
+      "description": "Camber change added to static camber, rad.",
+      "type": "array",
+      "items": {
+        "type": "number",
+        "format": "float"
+      },
+      "maxItems": 4,
+      "minItems": 4
+    },
+    "drag_scale": {
+      "description": "Multiplier on aerodynamic drag (torn panels, open hood).",
+      "type": "number",
+      "format": "float"
+    },
+    "engine_dead": {
+      "description": "Engine is dead (failed or total loss with `engine_kill_on_total_loss`).",
+      "type": "boolean"
+    },
+    "fuel_leak_rate": {
+      "description": "Fuel leak rate as fraction of tank per second; the vehicle cuts the engine when empty.",
+      "type": "number",
+      "format": "float"
+    },
+    "gearbox_health": {
+      "description": "Gearbox health 0..=1; the vehicle decides which gears are lost below thresholds.",
+      "type": "number",
+      "format": "float"
+    },
+    "grip_scale": {
+      "description": "Per-wheel grip multiplier (rubbing arches, bent rims).",
+      "type": "array",
+      "items": {
+        "type": "number",
+        "format": "float"
+      },
+      "maxItems": 4,
+      "minItems": 4
+    },
+    "lights_broken": {
+      "description": "Headlights/taillights broken (cosmetic + visibility to police at night).",
+      "type": "boolean"
+    },
+    "overheating": {
+      "description": "Cooling failure severity 0..=1; the vehicle ramps power down over time while > 0.",
+      "type": "number",
+      "format": "float"
+    },
+    "power_scale": {
+      "description": "Multiplier on engine torque (1 = intact, 0 = dead).",
+      "type": "number",
+      "format": "float"
+    },
+    "steer_pull": {
+      "description": "Constant steering offset from a bent rack/arms, as fraction of full lock (-1..=1, + = right).",
+      "type": "number",
+      "format": "float"
+    },
+    "steer_ratio_scale": {
+      "description": "Multiplier on steering ratio responsiveness (1 = intact, <1 = sluggish rack).",
+      "type": "number",
+      "format": "float"
+    },
+    "tire_puncture": {
+      "description": "Per-wheel tire deflation 0 (inflated) ..= 1 (flat). Spike strips and rim damage.",
+      "type": "array",
+      "items": {
+        "type": "number",
+        "format": "float"
+      },
+      "maxItems": 4,
+      "minItems": 4
+    },
+    "toe_delta": {
+      "description": "Toe change added to static toe, rad (positive = toe-in).",
+      "type": "array",
+      "items": {
+        "type": "number",
+        "format": "float"
+      },
+      "maxItems": 4,
+      "minItems": 4
+    },
+    "wheel_lost": {
+      "description": "Per-wheel \"wheel is gone\" flag; the corner drops onto a hub contact.",
+      "type": "array",
+      "items": {
+        "type": "boolean"
+      },
+      "maxItems": 4,
+      "minItems": 4
+    }
+  },
+  "required": [
+    "toe_delta",
+    "camber_delta",
+    "steer_pull",
+    "steer_ratio_scale",
+    "power_scale",
+    "overheating",
+    "brake_scale",
+    "wheel_lost",
+    "drag_scale",
+    "grip_scale",
+    "tire_puncture",
+    "gearbox_health",
+    "fuel_leak_rate",
+    "engine_dead",
+    "lights_broken"
+  ]
+}

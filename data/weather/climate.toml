@@ -1,0 +1,127 @@
+# Weather schedule (Markov chain) and per-regime parameters. Owned by workstream 14 (wp_weather).
+#
+# Time here is IN-GAME seconds (sim seconds × the world clock's time_ratio), so a 30-minute
+# shower lasts 3 real minutes at the default ratio of 10.
+#
+# Every `roll_interval_game_s` the schedule may move to a new regime (or re-roll the intensity of
+# the current one). A regime is held for at least its `min_duration_game_s`. The row weights in
+# `seasons.<Season>.transitions.<From>` are multiplied by `phase_bias.<DayPhase>.<To>` (global)
+# and by the optional `seasons.<Season>.phase_bias.<DayPhase>.<To>`, then normalised.
+#
+# Per-regime parameters are `[at intensity 0, at intensity 1]` pairs; intensity is drawn
+# uniformly from `intensity` when the regime is entered. Moving between regimes blends every
+# derived quantity linearly over `blend_game_s`.
+
+id = "climate"
+roll_interval_game_s = 900.0
+blend_game_s = 600.0
+# Max change of the wind heading per roll, rad.
+wind_heading_step_rad = 0.35
+# Road surface temperature = air + sun_gain · (1 − cloud) · (1 − night) − sky_cooling · (1 − cloud) · night.
+road_sun_gain_c = 9.0
+road_sky_cooling_c = 3.5
+
+[kinds.Clear]
+intensity = [0.2, 1.0]
+rain_mm_per_h = [0.0, 0.0]
+fog_per_m = [0.0, 0.0]
+cloud_cover = [0.25, 0.0]
+wind_mps = [0.5, 4.0]
+temp_offset_c = 0.0
+min_duration_game_s = 2700.0
+
+[kinds.Overcast]
+intensity = [0.3, 1.0]
+rain_mm_per_h = [0.0, 0.0]
+fog_per_m = [0.0, 0.0006]
+cloud_cover = [0.6, 1.0]
+wind_mps = [1.0, 6.0]
+temp_offset_c = -1.0
+min_duration_game_s = 1800.0
+
+[kinds.LightRain]
+intensity = [0.3, 1.0]
+rain_mm_per_h = [0.5, 2.5]
+fog_per_m = [0.0003, 0.0012]
+cloud_cover = [0.85, 1.0]
+wind_mps = [1.0, 7.0]
+temp_offset_c = -2.0
+min_duration_game_s = 1200.0
+
+[kinds.HeavyRain]
+intensity = [0.3, 1.0]
+rain_mm_per_h = [4.0, 16.0]
+fog_per_m = [0.001, 0.003]
+cloud_cover = [1.0, 1.0]
+wind_mps = [3.0, 12.0]
+temp_offset_c = -3.0
+min_duration_game_s = 900.0
+
+[kinds.Fog]
+intensity = [0.3, 1.0]
+rain_mm_per_h = [0.0, 0.2]
+# Extinction coefficient; meteorological visibility = 3.912 / fog_per_m (≈ 650 m … 130 m).
+fog_per_m = [0.006, 0.03]
+cloud_cover = [0.5, 1.0]
+wind_mps = [0.0, 1.5]
+temp_offset_c = -1.0
+min_duration_game_s = 1800.0
+
+# Global time-of-day bias on the TARGET regime of a transition.
+[phase_bias.Dawn]
+Fog = 4.0
+[phase_bias.Day]
+Fog = 0.3
+HeavyRain = 1.2
+[phase_bias.Dusk]
+Fog = 1.2
+[phase_bias.Night]
+Fog = 1.6
+Clear = 1.1
+
+[seasons.Spring]
+mean_temp_c = 13.0
+diurnal_amplitude_c = 6.0
+[seasons.Spring.transitions]
+Clear = { Clear = 0.70, Overcast = 0.20, LightRain = 0.06, HeavyRain = 0.01, Fog = 0.03 }
+Overcast = { Clear = 0.25, Overcast = 0.45, LightRain = 0.20, HeavyRain = 0.05, Fog = 0.05 }
+LightRain = { Clear = 0.05, Overcast = 0.30, LightRain = 0.45, HeavyRain = 0.15, Fog = 0.05 }
+HeavyRain = { Clear = 0.02, Overcast = 0.20, LightRain = 0.45, HeavyRain = 0.33, Fog = 0.00 }
+Fog = { Clear = 0.30, Overcast = 0.30, LightRain = 0.05, HeavyRain = 0.00, Fog = 0.35 }
+
+[seasons.Summer]
+mean_temp_c = 22.0
+diurnal_amplitude_c = 8.0
+[seasons.Summer.transitions]
+Clear = { Clear = 0.82, Overcast = 0.12, LightRain = 0.03, HeavyRain = 0.02, Fog = 0.01 }
+Overcast = { Clear = 0.40, Overcast = 0.35, LightRain = 0.12, HeavyRain = 0.12, Fog = 0.01 }
+LightRain = { Clear = 0.15, Overcast = 0.35, LightRain = 0.30, HeavyRain = 0.20, Fog = 0.00 }
+HeavyRain = { Clear = 0.15, Overcast = 0.35, LightRain = 0.30, HeavyRain = 0.20, Fog = 0.00 }
+Fog = { Clear = 0.60, Overcast = 0.20, LightRain = 0.00, HeavyRain = 0.00, Fog = 0.20 }
+# Summer storms are an afternoon thing.
+[seasons.Summer.phase_bias.Day]
+HeavyRain = 1.5
+[seasons.Summer.phase_bias.Night]
+HeavyRain = 0.6
+
+[seasons.Autumn]
+mean_temp_c = 11.0
+diurnal_amplitude_c = 5.0
+[seasons.Autumn.transitions]
+Clear = { Clear = 0.55, Overcast = 0.25, LightRain = 0.10, HeavyRain = 0.03, Fog = 0.07 }
+Overcast = { Clear = 0.15, Overcast = 0.45, LightRain = 0.25, HeavyRain = 0.07, Fog = 0.08 }
+LightRain = { Clear = 0.03, Overcast = 0.25, LightRain = 0.50, HeavyRain = 0.17, Fog = 0.05 }
+HeavyRain = { Clear = 0.02, Overcast = 0.15, LightRain = 0.48, HeavyRain = 0.35, Fog = 0.00 }
+Fog = { Clear = 0.20, Overcast = 0.30, LightRain = 0.08, HeavyRain = 0.00, Fog = 0.42 }
+
+[seasons.Winter]
+mean_temp_c = 3.0
+diurnal_amplitude_c = 4.0
+[seasons.Winter.transitions]
+Clear = { Clear = 0.60, Overcast = 0.25, LightRain = 0.07, HeavyRain = 0.01, Fog = 0.07 }
+Overcast = { Clear = 0.15, Overcast = 0.50, LightRain = 0.20, HeavyRain = 0.05, Fog = 0.10 }
+LightRain = { Clear = 0.05, Overcast = 0.30, LightRain = 0.50, HeavyRain = 0.10, Fog = 0.05 }
+HeavyRain = { Clear = 0.02, Overcast = 0.20, LightRain = 0.50, HeavyRain = 0.28, Fog = 0.00 }
+Fog = { Clear = 0.15, Overcast = 0.30, LightRain = 0.05, HeavyRain = 0.00, Fog = 0.50 }
+[seasons.Winter.phase_bias.Dawn]
+Fog = 1.5

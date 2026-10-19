@@ -1,0 +1,46 @@
+{
+  "id": "radio_proc",
+  "kind": "Radio",
+  "description": "Scanner squelch and static. Speech itself is browser speechSynthesis behind a radio EQ for now.",
+  "cues": {
+    "radio/squelch_on": {
+      "source": {
+        "Synth": {
+          "synth": "squelch",
+          "params": {
+            "decay_s": 0.08
+          }
+        }
+      },
+      "gain": 1.0,
+      "looped": false,
+      "duration_s": 0.12
+    },
+    "radio/squelch_off": {
+      "source": {
+        "Synth": {
+          "synth": "squelch",
+          "params": {
+            "decay_s": 0.2
+          }
+        }
+      },
+      "gain": 1.0,
+      "looped": false,
+      "duration_s": 0.25
+    },
+    "radio/static": {
+      "source": {
+        "Synth": {
+          "synth": "hiss",
+          "params": {
+            "lowpass_hz": 3200.0,
+            "highpass_hz": 400.0
+          }
+        }
+      },
+      "gain": 0.25,
+      "looped": true
+    }
+  }
+}

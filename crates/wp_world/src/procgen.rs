@@ -50,6 +50,16 @@ impl Default for ProcGenConfig {
 }
 
 impl ProcGenConfig {
+    /// Small 6×6 city for fast tests (all features: arterials, highway, diagonals, ring, alleys,
+    /// signals, priority and all-way junctions; ~650 lanes vs 1734, ~520 parked cars vs 3190).
+    pub fn small() -> Self {
+        Self {
+            nx: 6,
+            ny: 6,
+            ..Self::default()
+        }
+    }
+
     /// City id used for file names, e.g. `procedural_12x12`.
     pub fn city_id(&self) -> String {
         format!("procedural_{}x{}", self.nx, self.ny)
@@ -752,6 +762,22 @@ mod tests {
         });
         assert_ne!(a.buildings, c.buildings);
         assert_eq!(a.lanes, c.lanes);
+    }
+
+    #[test]
+    fn small_city_has_every_feature() {
+        let net = generate(&ProcGenConfig::small());
+        net.validate().unwrap();
+        for k in [
+            LaneKind::Highway,
+            LaneKind::Bus,
+            LaneKind::Parking,
+            LaneKind::Alley,
+        ] {
+            assert!(net.lanes.iter().any(|l| l.kind == k), "no {k:?} lanes");
+        }
+        assert!(!net.signals.is_empty());
+        assert!(net.lanes.len() < 800, "{}", net.lanes.len());
     }
 
     #[test]

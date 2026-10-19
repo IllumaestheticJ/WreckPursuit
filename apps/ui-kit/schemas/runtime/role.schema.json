@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Role",
+  "description": "Role a human player holds in an instance.",
+  "oneOf": [
+    {
+      "description": "Street racer driving their own car.",
+      "type": "string",
+      "const": "Racer"
+    },
+    {
+      "description": "The single police captain: map view, dispatch, tools. Does not drive.",
+      "type": "string",
+      "const": "PoliceCaptain"
+    },
+    {
+      "description": "Player-driven police chase unit.",
+      "type": "string",
+      "const": "PoliceChase"
+    },
+    {
+      "description": "Observer with no vehicle.",
+      "type": "string",
+      "const": "Spectator"
+    }
+  ]
+}
