@@ -273,11 +273,13 @@ scaled down so the active area never exceeds `max_agents` (400). `f_distance =
 max(0.2, 1 / (1 + (d/600 m)²))`; `f_time` = hourly piecewise-linear curves with commute
 bumps (07–09, 16–18) for Residential/Commercial/Suburb, shift peaks for Industrial, a deep
 01:00–05:00 trough, and Core nightlife until ~02:00 (noon/03:00 = 10×). The active area is
-400 m around each player and around active route samples; with no players and no routes the
+440 m around each player and around active route samples; with no players and no routes the
 whole map is active (headless tests). Every 0.25 s: despawn out-of-area, closed-lane, stuck
 (> 120 s) and surplus agents (district total > target + 4 % or zone > 1.5× target), spawn into
 zones with deficits on free lane spots (≥ 12 m gaps). **Sightline rule (prototype)**: nothing
-spawns or despawns within 150 m of a player's current position or of where it will be in 1 s.
+spawns or despawns within 320 m of a player's current position or of where it will be in 1 s
+(was 150 m / 400 m active until the LOD pop-in fix, playtest row 25: cars popped in and out
+in plain view on Port Vesper's highway and hill sightlines; `tests/lod_draw.rs` measures it).
 
 **Violations** (tracked vehicles, 60 Hz): speeding = over the limit by more than
 max(2.24 m/s, 10 %) for > 1 s (re-emitted every 5 s); red light = crossing the stop line of the

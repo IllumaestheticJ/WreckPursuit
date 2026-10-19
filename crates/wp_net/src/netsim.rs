@@ -504,7 +504,7 @@ mod tests {
             seed: 1,
             ..Default::default()
         };
-        sim.set_world(wp_world::World::procedural(
+        let mut world = wp_world::World::procedural(
             &pg,
             wp_world::WorldConfig {
                 seed: 3,
@@ -516,12 +516,26 @@ mod tests {
                 },
                 parked_cars: false,
             },
-        ));
+        );
+        // Fill the streets around the spawn point before the first tick, as simcli does (live
+        // spawns keep wp_world's sightline radius, 320 m, so traffic would take a while to
+        // drive into promotion range).
+        let spawn = [53.25, 300.0, 0.0];
+        world.set_tracked_vehicles(&[wp_world::TrackedVehicle {
+            entity: wp_contracts::EntityId(1),
+            pos: spawn,
+            vel: [0.0; 3],
+            forward: [0.0, -1.0],
+            siren: false,
+            player: true,
+        }]);
+        world.populate();
+        sim.set_world(world);
         sim.set_police_car(police);
         sim.set_traffic_car(cars["debug_sedan"].clone());
         let mut net = WpSim::from_sim(sim, cars.clone());
         let me = net
-            .spawn("debug_coupe", [53.25, 300.0, 0.0], std::f32::consts::PI)
+            .spawn("debug_coupe", spawn, std::f32::consts::PI)
             .unwrap();
         for _ in 0..3 {
             net.step();
