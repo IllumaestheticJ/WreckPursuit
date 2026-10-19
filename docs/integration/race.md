@@ -3,7 +3,7 @@
 - **Workstream / prompt:** 15 — race types, event scheduler, crews & territory (machine L)
 - **Branch:** `ws/race`
 - **Crates / folders owned:** `crates/wp_race`, `data/events/`, `apps/simcli/scenarios/race/`
-- **Contract version built against:** 0.3.0 (merged `main` at round 8, 2026-10-19).
+- **Contract version built against:** 0.3.0 (merged `main` at step 2, 2026-10-19).
 
 Design write-up: `crates/wp_race/README.md`. Data: `data/events/README.md`.
 
@@ -108,6 +108,115 @@ Other entry points: `Course::{straight, closed, new, grid, marshal_spots, projec
 | 17 opponent AI (N) | (round 9) (f) a crest-aware following gap: on Hollins Drive the last AI follows ~1 s behind over the blind summit crest and rear-ends a car braking for the bend just past it (`race_vesper_hollins_sprint`, seed 16) | hill races on Port Vesper | `tests/race_vesper.rs` allows one such incident |
 | 07 `wp_net` (F) | spawn AI entrants at `ScheduledEvent::spawn_s`, call `AiEntrants::tick` before each physics step and `report_to` after the judge | populated meets on the server | `tests/race_police.rs` runs the same loop |
 
+## Step 2 — races in the browser (machine L, 2026-10-19)
+
+**Play it:** testbed → **races** (or `?race=hollins_sprint`). Pick a race, the session starts
+on the grid with a 3 s countdown (you are held on the handbrake until green), race the AI
+field, read the results and the payout. `?race=<id>&autopilot=1` lets the AI drive your car.
+
+### The picker (`wp_race::catalog`)
+| Id | Race | City | Kind | Legality | Hour | Length | AI field | Notes |
+|---|---|---|---|---|---|---|---|---|
+| `hollins_sprint` | Hollins Drive hill sprint | Port Vesper v2 | Sprint | street | 23:00 | 1.0 km | Mara, Vic, Juno | six hairpins to the Knob lot |
+| `loop9_circuit` | Loop 9 circuit | Port Vesper v2 | Circuit, 1 lap | street | 01:00 | 10.1 km | Vic, Mara, Dez, Juno, Tito | hot meet: a patrol is called at the green light |
+| `lantern_checkpoint` | Lantern Row checkpoint run | Port Vesper v2 | Checkpoint | **illegal daytime** | 14:00 | 0.67 km | Juno, Dez, Tito | police presence Max (×2), hot meet, stake heat 5+ |
+| `grid_highway_sprint` | Grid highway sprint | grid 12×12 | Sprint | street | 23:00 | 0.75 km | Vic, Juno, Tito | the short one (tests, e2e) |
+
+AI drivers (named personalities over N's `DriverProfile`): **Vic Marlowe** aggressive
+(kestrel_ts), **Juno Park** clean, backs off from cops (shiro_turbo), **Dez Okafor** hothead,
+runs from sirens (rampart_50), **Mara Lindqvist** veteran (hakone_gt), **Tito Ruiz** rookie
+(sperber_32). They react to police through N's `SimPolice` (flee at their flee level, pull
+over below it); `Abandoned` → `Dnf(Fled)`, `Retired` → `Dnf(Retired)`, a capture of any racer
+→ `Dnf(Captured)`.
+
+### How it runs (`wp_race::live::LiveRace`, `wp_wasm::race::RaceRun`)
+- A race session is a simcli v2 scenario named `race_<id>`: the player (entity 1) on the
+  last grid slot, the AI field on the judge's slots ahead, `assists: ai` for the AI (the testbed
+  applies the player's own preset), traffic density per race (0.2–0.3: late-night / thin
+  daytime traffic; daytime downtown at 0.5 gridlocks the junction boxes), `time_ratio` 1.
+- Before each tick the `wp_opponent` field drives the AI (inputs **logged**, so recordings
+  replay); after each tick the judge reads the drained events and the racers' states
+  (**outside** the deterministic step), and `SimEvent::Race(RaceEvent)` joins the session's
+  event buffer (`events_drain`). Non-race scenarios and every golden are unchanged.
+- Police: at the green light a hot meet (`prior_meets ≥ 2`) emits `PatrolAttracted`, and
+  `wp_race::police` delivers one `Reckless` report per racer to the sim's `PoliceSystem` (heat
+  + a civilian call that dispatches a patrol to the grid); illegal races then add the stake's
+  heat to every racer (`Stake::heat`: 5+ for the daytime checkpoint run). This is the only sim
+  mutation, once per race; replay playback rebuilds the race from the scenario name and does
+  the same at the same tick, so browser playback verifies with no drift (tested).
+- Economy (R5 scale as agreed with G): the buy-in is charged at the start
+  (`Economy::enter_race` with `Economy::race_setup(kind, legality, class, length, phase, mode)`,
+  so G prices kind and legality), the result is paid when the field is done
+  (`Economy::settle_race` with `bridge::economy_result`, wanted level from the player's run).
+  The picker advertises our stake (`bridge::economy_race`), which matches G's payout within the
+  agreed 0.75–1.33 band (tested for the winner). Ledger lines go to the player's account, which
+  carries over restarts like the city chase.
+- A police capture mid-race: the racer is `Dnf(Captured)`, the existing end-of-run panel
+  (lead) takes over (`handoff_run_end`); "Restart" restarts the race.
+
+### Exports (`wp_wasm`)
+| Export | Returns |
+|---|---|
+| `race_list(car, mode)` | picker JSON: id, name, blurb, city, kind, laps, legality, hour, length, police, hot meet, drivers (name, style, car), advertised purse and buy-in for that car |
+| `race_start(id, car, mode, autopilot)` | starts the race session (the account carries over); entity ids, player first |
+| `race_info()` | `[phase (0 countdown, 1 running, 2 finished), countdown_s, elapsed_s, laps, gates, player, racers, closed_loop, length_m, autopilot, kind, player_done]`, empty without a race |
+| `race_standings()` | live standings, 10 floats per racer in position order: `[entity, position, status (0 running, 1 fin, 2 DNF, 3 DQ), lap, next_gate, gates_passed, progress_m, gap_ahead_s, gap_behind_s, elapsed_s]` (gaps are time gaps from a 4 Hz progress history; −1 = none) |
+| `race_course()` | `[gates, (x, y, z, dir_x, dir_y, width) × gates, (x, y, z) × route points]` (static) |
+| `race_result_json()` | once the player is done: rows (position, name, car, status, DNF/DQ reason, time, gap, best lap, clean, contacts), `final_results`, advertised stake, G's `payout` (buy-in, purse, clean bonus, rep, bounty, cash after, ledger lines), `economy_error`, `handoff_run_end` |
+
+### HUD (`apps/testbed-web/src/ui/race.tsx`)
+Countdown (3-2-1-GO), a race panel (position, lap or run length, checkpoint `n/N`, gap ahead
+and behind, a gate arrow relative to the car's heading, live standings) with **M's UI-kit
+`Minimap`** showing the route, the next checkpoint, the AI racers and police; the next gate
+as a glowing arch (gold for the finish) plus the route line in the 3D world
+(`src/race_marker.ts`); a results panel with the classification and G's payout (Race again /
+Races… / Free drive).
+
+### Fixes found on the way (in `wp_race`)
+- `entrants::run_off_route` re-planned the *whole* route to a point past the finish; on a grid
+  the shortest path can take a parallel street, so the AI drove past every gate (downtown
+  checkpoint run: all cars stuck at gate 1). It now appends a run-off leg to the judged route.
+  `race_police.rs` / `race_vesper.rs` results are unchanged.
+- Picker courses widen every gate to the legal corridor (+2 m): on Loop 9's 3+3 highway an AI
+  overtaking in the outer lane missed a gate and was never credited with the lap.
+
+### Tests
+- `wp_wasm` (`src/race_tests.rs`): grid sprint start → finish with AI on autopilot, results and
+  G's payout (cash = before − buy-in + purse + bonus; winner's purse within the R5 band);
+  player held on the grid until green, AI drives off; race replay plays back with no drift and
+  the same standings; a capture mid-race (downtown run) is `DNF Captured` with the end-of-run
+  hand-off; the scenario files match the catalog (`WP_RACE_WRITE_SCENARIOS=1` regenerates).
+- `wp_race` (`tests/race_picker.rs`): every picker race raced to the finish from its scenario
+  file with AI in every seat, the browser's glue (meet report, stake heat), expectation
+  ranges: grid sprint winner 15–60 s (57.7 s, 4/4 finish), Hollins 40–110 s (63.0 s, 4/4),
+  Loop 9 150–420 s (209.9 s, 5/6, one AI retired after a contact), downtown checkpoint
+  40–170 s (112.8 s, 3/4; patrol called, every racer ≥ 4 heat after green); grid sprint run
+  twice → same hash and results.
+- e2e (`apps/testbed-web/e2e/race.mjs`, part of `npm run e2e`): the races button opens the
+  picker with all four races; picking the grid sprint starts it (countdown, HUD, player held
+  on the grid, gate marker in the world, minimap); AI racers move after green; on autopilot
+  (fast-forwarded) a results table with a payout appears; `SimEvent::Race` events reach the
+  page; no page errors.
+
+### Needs (new this round)
+| From | What | Why |
+|---|---|---|
+| 10 harness (I) | `simcli replay` / scenario-level race block, so race replays (AI kinds, meet report) verify headlessly too | browser playback verifies race replays; `simcli replay` of a race replay drifts from the meet report on |
+| 06 police (E) + 05 world (D) | (repeats N's round-8 report) a stopped police car with its siren on freezes yielding civilians for minutes; with Max presence downtown this gridlocked the original Lantern Run course (racers queued behind a frozen civilian) | daytime downtown races |
+| 17 opponent AI (N) | the AI jams at the Lantern Way turn by Central Precinct (contacts with the kerb/buildings even with no traffic); the picker starts the downtown run on the centre avenue instead | a downtown course from the Lantern Run grid |
+| 17 opponent AI (N) | with `CarCapability::geometry_only` (55 m/s top, 4 m/s²) the AI does not use a sport car's real pace; a cached `measure` table per car id (request (e) above) would make the picker's AI faster | race pace |
+| 06 police (E) | illegal-daytime heat (meet report + stake heat ≈ 5–8) stays below L1, so no pursuit starts during the 2-minute run unless a unit witnesses violations | "illegal daytime = every cop in town" could feel stronger; a race-report heat weight in police data would be the knob |
+
+### Known gaps (step 2)
+- Reset (R) in a race puts the car back on its grid slot (logged replay op); progress and gates
+  are kept, so you drive back. A reset onto the course at your progress needs a non-logged
+  placement or a new replay op (I).
+- Race routes are not closed and get no cones (street races; `activate_race_routes` is not
+  called); traffic focus follows the player as usual.
+- Loop 9 is one lap of 10.1 km (≈ 3.5 min); no shorter highway circuit exists on Port Vesper.
+- The results panel waits up to the finish window (60–90 s) for the AI field before the payout;
+  the player's own result shows as soon as they finish (provisional).
+
 ## Contract change requests
 
 None of these landed in v0.2.0; the lead deferred the event payloads to v0.3.0 and asked for
@@ -192,12 +301,15 @@ release is fine.
 | File | Change | Why |
 |---|---|---|
 | `Cargo.toml` (root) | `crates/wp_race` workspace member + `wp_race` workspace dependency | new crate |
-| `apps/simcli/scenarios/race/*.ron` | four scenarios (simcli v2, no new fields): drag, corridor DQ, city sprint, city sprint with police (round 6b) | scenario tests live there per `CLAUDE.md` |
-| `apps/simcli/golden/race_*/hashes.txt` | goldens for those scenarios (`[bless]` commits; re-blessed for v0.2.0 physics; `race_city_sprint_police` added in round 6b) | `goldens_match` requires one per scenario |
+| `apps/simcli/scenarios/race/*.ron` | four scenarios (simcli v2, no new fields): drag, corridor DQ, city sprint, city sprint with police (round 6b); Hollins sprint (round 9); **step 2:** `pick_{hollins_sprint,loop9_circuit,lantern_checkpoint,grid_highway_sprint}.ron`, generated from `wp_race::catalog` | scenario tests live there per `CLAUDE.md` |
+| `apps/simcli/golden/race_*/hashes.txt` | goldens for those scenarios (`[bless]` commits; **step 2:** four new goldens only, no existing golden changed) | `goldens_match` requires one per scenario |
+| **step 2** `crates/wp_wasm` (authorized glue, C owns it) | `Cargo.toml`: + `wp_race`, `wp_opponent`. New `src/race.rs` (race scenarios, `RaceRun` session glue, picker cards, reports) and `src/race_tests.rs`. `src/lib.rs`: exports `race_list`, `race_start`, `race_info`, `race_standings`, `race_standing_stride`, `race_course`, `race_result_json`. `src/session.rs`: optional `race` field attached for scenarios named `race_<id>` (live and playback, not scripted), AI inputs logged before each tick, judge after each tick (outside the step), `set_input` refused while the race holds the player, reset/debug park tell the judge (`relocate`), new `debug_park_in_front_of`. `src/run.rs`: `PlayerRun::{economy, wanted_level, enter_race, settle_race}` + `RacePayout` | races playable in the browser |
+| **step 2** `apps/testbed-web` (authorized, C owns it) | `index.html`: **races** button + `.wp-race-*` styles. New `src/ui/race.tsx` (picker, HUD, results), `src/race_marker.ts` (next-gate arch + route line). `src/main.ts`: `startRace`, `resetRace`, `raceFrame`, `?race=<id>&autopilot=1`, restart of a race, `__wp.{startRace, raceView, raceMarker}`. `src/wasm/sim.ts` + `layout.ts`: race wrappers, `RACE_STRIDE`/`RS`/`RI`. `package.json`: `e2e` also runs `e2e/race.mjs`; `e2e:race`. `src/render/panels.ts` (R): the async panel-mesh build tolerates a car that despawned before its mesh loaded (found by the race e2e: `unknown entity` from a promoted traffic car) | race menu + HUD; the panels fix is 8 lines, FYI R |
 
 No edits to `wp_contracts`, `wp_world`, `wp_economy`, `wp_opponent`, `wp_police`, `wp_sim` or
-simcli code. `wp_race` now depends (read-only) on `wp_opponent` and `wp_police`; neither is new
-to the workspace and `wp_race` is not reachable from `wp_wasm`.
+simcli code. `wp_race` (with `wp_opponent`, `toml`, `thiserror`) is now reachable from
+`wp_wasm`; all pure Rust (`cargo build --target wasm32-unknown-unknown -p wp_wasm` passes, no
+native build steps).
 
 ## Perf numbers
 
@@ -205,6 +317,7 @@ to the workspace and `wp_race` is not reachable from `wp_wasm`.
 |---|---|---|---|---|
 | Judge, 12 cars, every physics tick (`--example judge_bench`) | cloud container | 0.195 µs/car/tick ≈ 0.0008 ms/car/frame | not measured | none set (police: 0.5 ms) |
 | Calendar generation, 24 venues | cloud container | 2.0 µs/day | not measured | — |
+| Step 2: picker race glue (`LiveRace::pre_step` + `post_step`: AI field + judge + standings history), per physics tick (`WP_RACE_TIME=1 cargo test --release -p wp_race --test race_picker`) | cloud container | Hollins 4.7 µs, grid sprint 9.4–10.2 µs, Loop 9 (6 cars) 9.6 µs, downtown 17.1 µs ⇒ 0.02–0.07 ms per 60 Hz frame | not measured separately (the browser's sim is ~27 ms/frame on SwiftShader, dominated by physics + rendering) | none set (police: 0.5 ms) |
 
 ## Known gaps
 

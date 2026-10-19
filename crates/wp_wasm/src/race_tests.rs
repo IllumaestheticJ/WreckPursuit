@@ -34,7 +34,7 @@ fn run_to_final(s: &mut Session, max_s: u64) -> (RaceReport, Vec<RaceEvent>) {
         if let Some(r) = s.race_report().filter(|r| r.final_results) {
             return (r, race_events);
         }
-        if std::env::var("WP_RACE_TRACE").is_ok() && s.tick() % (240 * 5) == 0 {
+        if std::env::var("WP_RACE_TRACE").is_ok() && s.tick().is_multiple_of(240 * 5) {
             for st in s.race().unwrap().standings() {
                 eprintln!(
                     "t={} {:?} P{} {:?} gates {} prog {:.0} pos {:?}",

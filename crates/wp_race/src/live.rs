@@ -138,6 +138,7 @@ impl LiveRace {
     /// Set up the race and start its countdown at `tick`. `ai` are the AI cars in
     /// `def.ai` order (pole first), `player` starts behind them. `abs_s`: in-game time of
     /// the start, s (meet heat). `autopilot`: the AI drives the player's car too.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         def: &RaceDef,
         world: &World,

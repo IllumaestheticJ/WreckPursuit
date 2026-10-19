@@ -58,8 +58,7 @@ pub fn run_off_route(world: &World, route: &wp_world::Route) -> Option<wp_world:
     }
     // Join on the shared segment (the leg starts on the lane the race finishes on).
     let skip_seg = usize::from(leg.segs.first() == route.segs.last());
-    let skip_lane =
-        usize::from(leg.lanes.first().is_some() && leg.lanes.first() == route.lanes.last());
+    let skip_lane = usize::from(!leg.lanes.is_empty() && leg.lanes.first() == route.lanes.last());
     let mut out = route.clone();
     out.segs.extend_from_slice(&leg.segs[skip_seg..]);
     out.lanes.extend_from_slice(&leg.lanes[skip_lane..]);

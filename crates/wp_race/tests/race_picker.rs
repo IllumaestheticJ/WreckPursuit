@@ -138,7 +138,12 @@ fn run_race(id: &str, max_s: u64) -> Raced {
     let mut pursuits = 0;
     let mut heat_after_green = Vec::new();
     let mut finished_tick = None;
+    // `WP_RACE_TIME=1`: wall time spent in the race glue (AI field + judge), for the README.
+    let timing = std::env::var("WP_RACE_TIME").is_ok();
+    let mut glue = std::time::Duration::ZERO;
+    let mut glue_ticks = 0u32;
     while sim.tick() < 240 * max_s {
+        let t0 = timing.then(std::time::Instant::now);
         let inputs = live.pre_step(
             sim.tick(),
             sim.world(),
@@ -146,6 +151,9 @@ fn run_race(id: &str, max_s: u64) -> Raced {
             &events,
             &SimPolice(sim.police()),
         );
+        if let Some(t0) = t0 {
+            glue += t0.elapsed();
+        }
         for (e, inp) in inputs {
             sim.set_input(e, inp).unwrap();
         }
@@ -170,7 +178,12 @@ fn run_race(id: &str, max_s: u64) -> Raced {
             .filter(|v| v.kind == VehicleKind::Police)
             .map(|v| v.id)
             .collect();
+        let t1 = timing.then(std::time::Instant::now);
         let out = live.post_step(sim.tick(), &samples, &events, &police);
+        if let Some(t1) = t1 {
+            glue += t1.elapsed();
+            glue_ticks += 1;
+        }
         if !out.reports.is_empty() {
             let views: Vec<wp_police::RacerView> = samples
                 .iter()
@@ -270,6 +283,14 @@ fn run_race(id: &str, max_s: u64) -> Raced {
             x.gates_passed,
             x.contacts,
             x.civilian_hits
+        );
+    }
+    if timing && glue_ticks > 0 {
+        eprintln!(
+            "{id}: race glue {:.1} µs/tick ({:.3} ms per 60 Hz frame) for {} racers",
+            glue.as_secs_f64() * 1e6 / glue_ticks as f64,
+            glue.as_secs_f64() * 4e3 / glue_ticks as f64,
+            racers.len()
         );
     }
     eprintln!(

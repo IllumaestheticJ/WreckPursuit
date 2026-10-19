@@ -26,7 +26,12 @@ cargo build --target wasm32-unknown-unknown -p wp_wasm  # wasm check
 cd apps/testbed-web && npm run wasm                     # wasm-pack release package into src/wasm/pkg
 ```
 
-Dependencies are wasm32-clean: `simcli` (lib), `wp_world`, `postcard` (no_std + alloc), `serde_json`, `wasm-bindgen`.
+Dependencies are wasm32-clean: `simcli` (lib), `wp_world`, `wp_race` + `wp_opponent` (street races, `src/race.rs`), `postcard` (no_std + alloc), `serde_json`, `wasm-bindgen`.
+
+Street races (workstream 15): `race_list`, `race_start`, `race_info`, `race_standings`,
+`race_course`, `race_result_json`; a scenario named `race_<id>` gets a `race::RaceRun` (AI field
+before each tick, judge after it, buy-in/payout on the player's run). See
+`docs/integration/race.md` → Step 2.
 
 ## Perf
 Real vehicle + damage, headless Chromium (SwiftShader), release wasm: 0.09 / 0.62 / 3.0 ms of
@@ -36,5 +41,5 @@ sim per 60 Hz frame at 1 / 8 / 24 cars; 0.27 ms in the 12×12 city with ~190 tra
 ## Known gaps
 - The end-of-run economy (`run.rs`) keeps the account in memory only (lost on reload); the lattice blob in `DamageReport` is empty (the live sim keeps the dents).
 - Region energy / strain are proxies until contract request TB-2 lands; `intents()` is empty (TB-5).
-- `simcli replay` cannot verify city recordings until the CLI turns on `RunOptions::load_city`.
+- `simcli replay` cannot verify city recordings until the CLI turns on `RunOptions::load_city`; race recordings also need the race (AI kinds, meet report) re-applied, which only the browser's playback does.
 - `cargo test -p wp_wasm` takes ~2 min in debug (real physics).
