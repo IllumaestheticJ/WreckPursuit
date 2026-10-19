@@ -24,7 +24,8 @@ Flags (or the same keys in a TOML file passed with `--config`, flags win):
 | `--admin-port` | `admin_port` | 8081 | admin HTTP port, `GET /status` |
 | `--bind` | `bind` | 0.0.0.0 | bind address |
 | `--max-players` | `max_players` | 32 | instance size |
-| `--city` | `city` | — | city file; checked to exist, not consumed until `wp_world` has a loader |
+| `--city` | `city` | — | city: a `.road.json` / `.road.bin` file or `procedural`; physical + kinematic traffic, AI police, players spawn on lanes |
+| `--weather KIND` | `weather` | — | with `--city`: server weather starting in `clear` / `overcast` / `light_rain` / `heavy_rain` / `fog` (schedule runs), sent to clients on join and on change (protocol v4) |
 | `--seed` | `seed` | 1 | instance seed (sim RNG, reconnect tokens, bots) |
 | `--time-ratio` | `time_ratio` | 10 | in-game seconds per real second |
 | `--time-of-day` | `time_of_day_h` | 21 | start hour (night races cost more) |

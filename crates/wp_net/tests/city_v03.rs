@@ -194,6 +194,27 @@ fn traffic_weather_events_and_captain_on_the_real_sim() {
     assert!(forced_at.is_some());
     let server_w = h.server.sim().weather().expect("weather");
     assert_eq!(server_w.kind, WeatherKind::HeavyRain);
+    let bytes = wp_net::protocol::ServerMsg::Weather(server_w.clone())
+        .encode()
+        .len();
+    println!(
+        "weather: {} cells, message {bytes} B after 10 s of heavy rain; 0x94 events {} B, \
+         0x96 weather {} B in total",
+        server_w.water_q8.len(),
+        h.server
+            .stats()
+            .bytes_by_tag
+            .get(&0x94)
+            .copied()
+            .unwrap_or(0),
+        h.server
+            .stats()
+            .bytes_by_tag
+            .get(&0x96)
+            .copied()
+            .unwrap_or(0),
+    );
+    assert!(bytes < 16 * 1024, "weather message {bytes} B");
     for (i, p) in h.peers.iter().enumerate() {
         let w = p.client.weather.as_ref().expect("weather");
         assert_eq!(w.kind, WeatherKind::HeavyRain, "peer {i}");

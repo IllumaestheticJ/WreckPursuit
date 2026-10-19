@@ -149,6 +149,24 @@ impl WpSim {
         self.weather = Some((weather, time_ratio));
     }
 
+    /// [`WpSim::set_weather`] with [`city_weather`] over this sim's world, starting in `start`
+    /// at `intensity` with the season schedule running (seeded from `seed`).
+    pub fn enable_weather(
+        &mut self,
+        seed: u64,
+        start: WeatherKind,
+        intensity: f32,
+        time_ratio: f32,
+    ) {
+        let cfg = wp_weather::WeatherConfig {
+            seed,
+            start: wp_weather::Regime::new(start, intensity),
+            ..Default::default()
+        };
+        let weather = city_weather(self.sim.world(), cfg);
+        self.set_weather(weather, time_ratio);
+    }
+
     /// The server-side weather, if any.
     pub fn weather_sim(&self) -> Option<&wp_weather::WeatherSim> {
         self.weather.as_ref().map(|(w, _)| w)
