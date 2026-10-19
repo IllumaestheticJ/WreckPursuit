@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tuning Dashboard</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="bar">
+  <h1>Tuning dashboard</h1>
+  <label>Sweep <select id="sweep-select"></select></label>
+  <span class="spacer"></span>
+  <label>Preset <select id="preset-select"></select></label>
+  <label class="check"><input type="checkbox" id="run-force"> re-run all</label>
+  <button id="run-btn">Run sweep</button>
+  <span id="job-status" class="muted" role="status"></span>
+</header>
+
+<main>
+  <section id="overview" class="panel">
+    <div id="sweep-head"></div>
+    <div id="tiles" class="tiles"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Metrics vs parameter</h2>
+    <div id="plot-controls" class="controls"></div>
+    <div id="metric-picker" class="chips"></div>
+    <div id="legend" class="legend"></div>
+    <p id="plot-note" class="muted small"></p>
+    <div id="charts" class="charts"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Points</h2>
+    <p class="muted small">Click a row to inspect and promote it. <b>A</b>/<b>B</b> pick the two sides of the comparison.</p>
+    <div class="table-wrap"><table id="points-table"></table></div>
+  </section>
+
+  <div class="two-col">
+    <section class="panel" id="detail">
+      <h2>Point</h2>
+      <div id="detail-body" class="muted">Select a point.</div>
+    </section>
+    <section class="panel" id="compare">
+      <h2>Compare A / B</h2>
+      <div id="compare-body" class="muted">Pick A and B in the points table.</div>
+    </section>
+  </div>
+
+  <section class="panel" id="diff">
+    <h2>Data file diff</h2>
+    <div class="controls">
+      <label>A <select id="diff-a"></select></label>
+      <label>B <select id="diff-b"></select></label>
+      <button id="diff-btn">Diff</button>
+      <button class="ghost" data-diff="modes/arcade.toml|modes/sim.toml">arcade vs sim</button>
+      <button class="ghost" data-diff="cars/debug_sedan.json|cars/debug_coupe.json">sedan vs coupe</button>
+      <button class="ghost" data-diff="tires/street.json|tires/sport.json">street vs sport tire</button>
+    </div>
+    <div id="diff-body"></div>
+  </section>
+</main>
+
+<div id="tooltip" class="tooltip" hidden></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

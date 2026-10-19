@@ -1,0 +1,15 @@
+# Contract v0.2.0 optional fields, absent from most car files: `set` creates them for the
+# sweep (and promote inserts them). Defaults when absent: efficiency 0.85, wheel inertia
+# 0.7·m·r² (≈1.6 kg·m² on the debug cars).
+description: v0.2.0 drivetrain efficiency and wheel inertia (one at a time) → 0–100, top speed
+probe:
+  kind: vehicle_metrics
+  metrics: [zero_to_100, braking, top_speed]
+params:
+  - {target: "car:{car}:drivetrain.efficiency", label: drivetrain efficiency, values: [0.75, 0.8, 0.85, 0.9, 0.95]}
+  - {target: "car:{car}:wheels[*].inertia_kgm2", label: wheel inertia, values: [1.0, 1.6, 2.2, 2.8]}
+combine: each
+variants:
+  - {name: sedan (FWD), probe: {car: debug_sedan}}
+  - {name: coupe (RWD), probe: {car: debug_coupe}}
+plots: [zero_to_100_s, top_speed_kmh, braking_100_0_m]

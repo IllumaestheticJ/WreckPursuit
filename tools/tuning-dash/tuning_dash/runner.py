@@ -171,7 +171,9 @@ def run(
                 "id": p.id,
                 "variant": p.variant,
                 "params": p.params,
-                "is_base": p.is_base,
+                # Base = the data files' own values (no override changed anything).
+                "is_base": p.is_base
+                or (bool(res.get("ok")) and all(a["old"] == a["new"] for a in res.get("applied") or [])),
                 "overrides": p.job["overrides"],
                 "reused": reused,
                 "ok": bool(res.get("ok")),

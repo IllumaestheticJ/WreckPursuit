@@ -93,6 +93,7 @@ fn same(a: &Value, b: &Value) -> bool {
 
 fn short(v: &Value) -> String {
     match v {
+        Value::Null => "(unset)".into(),
         Value::String(s) => s.clone(),
         other => other.to_string(),
     }
@@ -135,8 +136,29 @@ fn promote_inner(req: &Request, data_root: &Path) -> Result<Outcome, String> {
         let mut parts = Vec::new();
         for c in changes {
             let doc = parse_file(rel, &text)?;
-            let steps = path::parse_pointer(&doc, &c.pointer).map_err(|e| format!("{rel}: {e}"))?;
-            let current = path::get(&doc, &steps).expect("pointer resolved").clone();
+            // A missing last key is an optional field the sweep added (`set` creates it).
+            let (steps, missing) = match path::parse_pointer(&doc, &c.pointer) {
+                Ok(s) => (s, false),
+                Err(e) => {
+                    let (parent, key) = c
+                        .pointer
+                        .rsplit_once('/')
+                        .ok_or_else(|| format!("{rel}: {e}"))?;
+                    let mut ps =
+                        path::parse_pointer(&doc, parent).map_err(|_| format!("{rel}: {e}"))?;
+                    let key = key.replace("~1", "/").replace("~0", "~");
+                    if !path::get(&doc, &ps).is_some_and(Value::is_object) {
+                        return Err(format!("{rel}: {e}"));
+                    }
+                    ps.push(path::Step::Key(key));
+                    (ps, true)
+                }
+            };
+            let current = if missing {
+                Value::Null
+            } else {
+                path::get(&doc, &steps).expect("pointer resolved").clone()
+            };
             if let Some(old) = &c.old {
                 if !same(old, &current) && !req.force {
                     return Err(format!(
@@ -146,10 +168,11 @@ fn promote_inner(req: &Request, data_root: &Path) -> Result<Outcome, String> {
                     ));
                 }
             }
-            text = if rel.ends_with(".toml") {
-                textedit::set_toml(&text, &steps, &c.new)?
-            } else {
-                textedit::set_json(&text, &steps, &c.new)?
+            text = match (rel.ends_with(".toml"), missing) {
+                (true, false) => textedit::set_toml(&text, &steps, &c.new)?,
+                (false, false) => textedit::set_json(&text, &steps, &c.new)?,
+                (true, true) => textedit::insert_toml(&text, &steps, &c.new)?,
+                (false, true) => textedit::insert_json(&text, &steps, &c.new)?,
             };
             parts.push(format!(
                 "`{}` {} → {}",
