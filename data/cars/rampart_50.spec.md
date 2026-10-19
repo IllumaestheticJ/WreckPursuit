@@ -141,7 +141,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 5.9 s | 269 km/h | 38.9 m | 0.87 g | — |
+| sim | 5.9 s | 268 km/h | 38.9 m | 0.87 g | — |
 | estimate | 5.4 s | 276 km/h | 36.0 m | 0.96 g | 618 |
 
 ## Damage lattice (`data/lattices/rampart_50.json`)

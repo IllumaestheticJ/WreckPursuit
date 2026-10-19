@@ -1,0 +1,162 @@
+{
+  "id": "drayman_cargo",
+  "display_name": "Drayman Cargo",
+  "class": "Truck",
+  "analog_of": "2000s American full-size RWD cargo van, 4.8 L OHV V8, body-on-frame, solid rear axle",
+  "body_size_m": [2.01, 5.69, 2.08],
+  "mass_kg": 2481.4,
+  "front_weight_frac": 0.56,
+  "wheelbase_m": 3.43,
+  "track_front_m": 1.73,
+  "track_rear_m": 1.72,
+  "cg_height_m": 0.78,
+  "inertia_kgm2": [1470.0, 7210.0, 7300.0],
+  "drag_cd_a_m2": 1.335,
+  "lift_front": 0.15,
+  "lift_rear": 0.12,
+  "engine": {
+    "torque_curve_nm": [
+      [800, 300],
+      [1200, 330],
+      [1600, 350],
+      [2000, 365],
+      [2500, 378],
+      [3000, 388],
+      [3500, 395],
+      [4000, 399],
+      [4400, 400],
+      [4800, 393],
+      [5200, 380],
+      [5600, 350],
+      [5900, 320]
+    ],
+    "idle_rpm": 600.0,
+    "redline_rpm": 5600.0,
+    "rev_limit_rpm": 5900.0,
+    "inertia_kgm2": 0.24,
+    "engine_brake_nm": 48.0
+  },
+  "drivetrain": {
+    "layout": "Rwd",
+    "gear_ratios": [3.06, 1.63, 1.0, 0.7],
+    "final_drive": 3.42,
+    "reverse_ratio": 2.29,
+    "diff_front": "Open",
+    "diff_rear": "Open",
+    "clutch_max_nm": 640.0,
+    "shift_time_s": 0.35,
+    "torque_converter": {
+      "stall_rpm": 2000.0,
+      "stall_torque_ratio": 2.0,
+      "coupling_rpm": 2400.0
+    }
+  },
+  "wheels": [
+    {
+      "position_m": [-0.865, 1.715, 0.371],
+      "radius_m": 0.371,
+      "width_m": 0.245,
+      "mass_kg": 40.0,
+      "tire_id": "street",
+      "steerable": true,
+      "max_steer_rad": 0.626,
+      "ackermann_frac": 0.7,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0017,
+      "caster_rad": 0.0698
+    },
+    {
+      "position_m": [0.865, 1.715, 0.371],
+      "radius_m": 0.371,
+      "width_m": 0.245,
+      "mass_kg": 40.0,
+      "tire_id": "street",
+      "steerable": true,
+      "max_steer_rad": 0.626,
+      "ackermann_frac": 0.7,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0017,
+      "caster_rad": 0.0698
+    },
+    {
+      "position_m": [-0.86, -1.715, 0.371],
+      "radius_m": 0.371,
+      "width_m": 0.245,
+      "mass_kg": 60.0,
+      "tire_id": "street",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0,
+      "caster_rad": 0.0
+    },
+    {
+      "position_m": [0.86, -1.715, 0.371],
+      "radius_m": 0.371,
+      "width_m": 0.245,
+      "mass_kg": 60.0,
+      "tire_id": "street",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0,
+      "caster_rad": 0.0
+    }
+  ],
+  "suspension": [
+    {
+      "spring_n_per_m": 40400.0,
+      "damper_bump_ns_per_m": 2780.0,
+      "damper_rebound_ns_per_m": 4170.0,
+      "travel_m": 0.2,
+      "preload_m": 0.03,
+      "arb_n_per_m": 20300.0,
+      "bump_stop_n_per_m": 300000.0
+    },
+    {
+      "spring_n_per_m": 40400.0,
+      "damper_bump_ns_per_m": 2780.0,
+      "damper_rebound_ns_per_m": 4170.0,
+      "travel_m": 0.2,
+      "preload_m": 0.03,
+      "arb_n_per_m": 20300.0,
+      "bump_stop_n_per_m": 300000.0
+    },
+    {
+      "spring_n_per_m": 46100.0,
+      "damper_bump_ns_per_m": 2560.0,
+      "damper_rebound_ns_per_m": 3840.0,
+      "travel_m": 0.22,
+      "preload_m": 0.03,
+      "arb_n_per_m": 0.0,
+      "bump_stop_n_per_m": 300000.0
+    },
+    {
+      "spring_n_per_m": 46100.0,
+      "damper_bump_ns_per_m": 2560.0,
+      "damper_rebound_ns_per_m": 3840.0,
+      "travel_m": 0.22,
+      "preload_m": 0.03,
+      "arb_n_per_m": 0.0,
+      "bump_stop_n_per_m": 300000.0
+    }
+  ],
+  "brakes": {
+    "max_torque_front_nm": 5610.0,
+    "max_torque_rear_nm": 2570.0,
+    "bias_front": 0.629,
+    "handbrake_rear_nm": 1540.0
+  },
+  "steering": {
+    "ratio": 18.0,
+    "rack_speed_rad_per_s": 1.2,
+    "ffb_scale": 1.0
+  },
+  "aero_downforce_coeffs": [0.0, 0.0],
+  "lattice_id": "drayman_cargo",
+  "base_price": 9000,
+  "durability_class": 4,
+  "fuel_capacity_l": 117.0
+}

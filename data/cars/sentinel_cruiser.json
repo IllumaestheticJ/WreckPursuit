@@ -2,39 +2,39 @@
   "id": "sentinel_cruiser",
   "display_name": "Sentinel Cruiser",
   "class": "PoliceCruiser",
-  "analog_of": "2010s American full-size RWD police sedan, 3.7 L V6, pursuit package",
+  "analog_of": "2010s American full-size RWD police sedan, 5.7 L pushrod V8, pursuit package",
   "body_size_m": [1.91, 5.08, 1.48],
-  "mass_kg": 1948.2,
-  "front_weight_frac": 0.53,
+  "mass_kg": 2008.2,
+  "front_weight_frac": 0.54,
   "wheelbase_m": 3.05,
   "track_front_m": 1.6,
   "track_rear_m": 1.62,
   "cg_height_m": 0.53,
-  "inertia_kgm2": [760.0, 4180.0, 4490.0],
+  "inertia_kgm2": [780.0, 4310.0, 4630.0],
   "drag_cd_a_m2": 0.857,
   "lift_front": 0.1,
   "lift_rear": 0.12,
   "engine": {
     "torque_curve_nm": [
-      [800, 240],
-      [1200, 265],
-      [1600, 285],
-      [2000, 300],
-      [2500, 315],
-      [3000, 328],
-      [3500, 340],
-      [4000, 350],
-      [4800, 360],
-      [5500, 352],
-      [6000, 340],
-      [6350, 331],
-      [6600, 310]
+      [800, 400],
+      [1200, 440],
+      [1600, 470],
+      [2000, 490],
+      [2500, 505],
+      [3000, 515],
+      [3500, 525],
+      [4000, 533],
+      [4400, 535],
+      [4800, 528],
+      [5200, 505],
+      [5600, 470],
+      [5900, 440]
     ],
-    "idle_rpm": 650.0,
-    "redline_rpm": 6400.0,
-    "rev_limit_rpm": 6600.0,
-    "inertia_kgm2": 0.17,
-    "engine_brake_nm": 36.0
+    "idle_rpm": 600.0,
+    "redline_rpm": 5800.0,
+    "rev_limit_rpm": 5900.0,
+    "inertia_kgm2": 0.24,
+    "engine_brake_nm": 54.0
   },
   "drivetrain": {
     "layout": "Rwd",
@@ -49,12 +49,12 @@
         "ramp_coast": 0.15
       }
     },
-    "clutch_max_nm": 580.0,
+    "clutch_max_nm": 860.0,
     "shift_time_s": 0.3,
     "torque_converter": {
-      "stall_rpm": 2400.0,
+      "stall_rpm": 2300.0,
       "stall_torque_ratio": 2.0,
-      "coupling_rpm": 2800.0
+      "coupling_rpm": 2700.0
     }
   },
   "wheels": [
@@ -113,45 +113,45 @@
   ],
   "suspension": [
     {
-      "spring_n_per_m": 35300.0,
-      "damper_bump_ns_per_m": 2500.0,
-      "damper_rebound_ns_per_m": 3750.0,
+      "spring_n_per_m": 37100.0,
+      "damper_bump_ns_per_m": 2630.0,
+      "damper_rebound_ns_per_m": 3940.0,
       "travel_m": 0.17,
       "preload_m": 0.02,
-      "arb_n_per_m": 15000.0,
+      "arb_n_per_m": 15100.0,
       "bump_stop_n_per_m": 170000.0
     },
     {
-      "spring_n_per_m": 35300.0,
-      "damper_bump_ns_per_m": 2500.0,
-      "damper_rebound_ns_per_m": 3750.0,
+      "spring_n_per_m": 37100.0,
+      "damper_bump_ns_per_m": 2630.0,
+      "damper_rebound_ns_per_m": 3940.0,
       "travel_m": 0.17,
       "preload_m": 0.02,
-      "arb_n_per_m": 15000.0,
+      "arb_n_per_m": 15100.0,
       "bump_stop_n_per_m": 170000.0
     },
     {
-      "spring_n_per_m": 35700.0,
-      "damper_bump_ns_per_m": 2350.0,
-      "damper_rebound_ns_per_m": 3520.0,
+      "spring_n_per_m": 36000.0,
+      "damper_bump_ns_per_m": 2370.0,
+      "damper_rebound_ns_per_m": 3560.0,
       "travel_m": 0.18,
       "preload_m": 0.02,
-      "arb_n_per_m": 1700.0,
+      "arb_n_per_m": 2100.0,
       "bump_stop_n_per_m": 170000.0
     },
     {
-      "spring_n_per_m": 35700.0,
-      "damper_bump_ns_per_m": 2350.0,
-      "damper_rebound_ns_per_m": 3520.0,
+      "spring_n_per_m": 36000.0,
+      "damper_bump_ns_per_m": 2370.0,
+      "damper_rebound_ns_per_m": 3560.0,
       "travel_m": 0.18,
       "preload_m": 0.02,
-      "arb_n_per_m": 1700.0,
+      "arb_n_per_m": 2100.0,
       "bump_stop_n_per_m": 170000.0
     }
   ],
   "brakes": {
-    "max_torque_front_nm": 4060.0,
-    "max_torque_rear_nm": 1260.0,
+    "max_torque_front_nm": 4240.0,
+    "max_torque_rear_nm": 1320.0,
     "bias_front": 0.5,
     "handbrake_rear_nm": 1440.0
   },

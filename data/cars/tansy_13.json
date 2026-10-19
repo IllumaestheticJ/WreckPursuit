@@ -1,0 +1,157 @@
+{
+  "id": "tansy_13",
+  "display_name": "Tansy 1.3",
+  "class": "Compact",
+  "analog_of": "2000s European/Japanese FF supermini hatch, 1.3 L DOHC I4, five-door",
+  "body_size_m": [1.67, 3.85, 1.5],
+  "mass_kg": 1058.2,
+  "front_weight_frac": 0.62,
+  "wheelbase_m": 2.46,
+  "track_front_m": 1.44,
+  "track_rear_m": 1.43,
+  "cg_height_m": 0.52,
+  "inertia_kgm2": [360.0, 1360.0, 1430.0],
+  "drag_cd_a_m2": 0.694,
+  "lift_front": 0.1,
+  "lift_rear": 0.12,
+  "engine": {
+    "torque_curve_nm": [
+      [800, 80],
+      [1200, 92],
+      [1600, 100],
+      [2000, 106],
+      [2500, 112],
+      [3000, 116],
+      [3500, 119],
+      [4000, 121],
+      [4500, 120],
+      [5000, 117],
+      [5500, 112],
+      [6000, 105],
+      [6400, 95]
+    ],
+    "idle_rpm": 750.0,
+    "redline_rpm": 6200.0,
+    "rev_limit_rpm": 6500.0,
+    "inertia_kgm2": 0.1,
+    "engine_brake_nm": 15.0
+  },
+  "drivetrain": {
+    "layout": "Fwd",
+    "gear_ratios": [3.55, 1.9, 1.28, 0.97, 0.78],
+    "final_drive": 4.06,
+    "reverse_ratio": 3.31,
+    "diff_front": "Open",
+    "diff_rear": "Open",
+    "clutch_max_nm": 160.0,
+    "shift_time_s": 0.3
+  },
+  "wheels": [
+    {
+      "position_m": [-0.72, 1.23, 0.283],
+      "radius_m": 0.283,
+      "width_m": 0.175,
+      "mass_kg": 15.0,
+      "tire_id": "street",
+      "steerable": true,
+      "max_steer_rad": 0.608,
+      "ackermann_frac": 0.7,
+      "camber_rad": -0.0087,
+      "toe_rad": 0.0,
+      "caster_rad": 0.0524
+    },
+    {
+      "position_m": [0.72, 1.23, 0.283],
+      "radius_m": 0.283,
+      "width_m": 0.175,
+      "mass_kg": 15.0,
+      "tire_id": "street",
+      "steerable": true,
+      "max_steer_rad": 0.608,
+      "ackermann_frac": 0.7,
+      "camber_rad": -0.0087,
+      "toe_rad": 0.0,
+      "caster_rad": 0.0524
+    },
+    {
+      "position_m": [-0.715, -1.23, 0.283],
+      "radius_m": 0.283,
+      "width_m": 0.175,
+      "mass_kg": 14.0,
+      "tire_id": "street",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": -0.0175,
+      "toe_rad": 0.0026,
+      "caster_rad": 0.0
+    },
+    {
+      "position_m": [0.715, -1.23, 0.283],
+      "radius_m": 0.283,
+      "width_m": 0.175,
+      "mass_kg": 14.0,
+      "tire_id": "street",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": -0.0175,
+      "toe_rad": 0.0026,
+      "caster_rad": 0.0
+    }
+  ],
+  "suspension": [
+    {
+      "spring_n_per_m": 22500.0,
+      "damper_bump_ns_per_m": 1430.0,
+      "damper_rebound_ns_per_m": 2140.0,
+      "travel_m": 0.15,
+      "preload_m": 0.01,
+      "arb_n_per_m": 2500.0,
+      "bump_stop_n_per_m": 120000.0
+    },
+    {
+      "spring_n_per_m": 22500.0,
+      "damper_bump_ns_per_m": 1430.0,
+      "damper_rebound_ns_per_m": 2140.0,
+      "travel_m": 0.15,
+      "preload_m": 0.01,
+      "arb_n_per_m": 2500.0,
+      "bump_stop_n_per_m": 120000.0
+    },
+    {
+      "spring_n_per_m": 16600.0,
+      "damper_bump_ns_per_m": 950.0,
+      "damper_rebound_ns_per_m": 1420.0,
+      "travel_m": 0.16,
+      "preload_m": 0.01,
+      "arb_n_per_m": 200.0,
+      "bump_stop_n_per_m": 120000.0
+    },
+    {
+      "spring_n_per_m": 16600.0,
+      "damper_bump_ns_per_m": 950.0,
+      "damper_rebound_ns_per_m": 1420.0,
+      "travel_m": 0.16,
+      "preload_m": 0.01,
+      "arb_n_per_m": 200.0,
+      "bump_stop_n_per_m": 120000.0
+    }
+  ],
+  "brakes": {
+    "max_torque_front_nm": 1790.0,
+    "max_torque_rear_nm": 440.0,
+    "bias_front": 0.548,
+    "handbrake_rear_nm": 600.0
+  },
+  "steering": {
+    "ratio": 16.0,
+    "rack_speed_rad_per_s": 1.1,
+    "ffb_scale": 1.0
+  },
+  "aero_downforce_coeffs": [0.0, 0.0],
+  "lattice_id": "tansy_13",
+  "base_price": 4500,
+  "durability_class": 2,
+  "fuel_capacity_l": 45.0
+}

@@ -2,11 +2,12 @@
 """Run the real sim metrics and crash barriers for every roster car and write
 `tools/specsheet/validation_results.json` (read by `specsheet.py` for VALIDATION.md).
 
-    cargo build --release -p wp_vehicle --example metrics -p wp_damage --bin damage-barrier
+    cargo build --release -p wp_vehicle --example metrics -p wp_damage --bin damage-barrier -p ram-probe
     python3 tools/specsheet/collect_results.py
     python3 tools/specsheet/specsheet.py
 
-- Handling: `wp_vehicle`'s metrics example (0-100, 100-0, 50 m skidpad, top speed).
+- Handling: `wp_vehicle`'s metrics example (0-100, 100-0, 50 m skidpad); top speed from
+  `vmax-trace` (`ram_probe` crate: the same run, stopped before the rig's ground slab ends).
 - Crashes: `damage-barrier --sweep <car>` (frontal / offset / side / rear × 15-80 km/h × both
   modes). Each barrier row of VALIDATION.md is checked here against its expectation; the cell
   reads "PASS: …" or "FAIL: …" with the Simulation-mode numbers (crush, cabin intrusion,
@@ -28,6 +29,7 @@ from roster_inputs import CARS  # noqa: E402
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 METRICS = os.path.join(REPO, "target", "release", "examples", "metrics")
 BARRIER = os.path.join(REPO, "target", "release", "damage-barrier")
+VMAX = os.path.join(REPO, "target", "release", "vmax-trace")
 
 
 def run_metrics() -> dict:
@@ -51,6 +53,24 @@ def run_metrics() -> dict:
             "vmax_kmh": num(r"top_speed_kmh: ([\d.]+)"),
         }
     return res
+
+
+def run_vmax(res: dict) -> None:
+    """Replace the metric's top speed with `vmax-trace`'s (same run, stops at the slab edge).
+
+    `wp_vehicle::metrics::top_speed_kmh` keeps going until the car stops gaining speed; a slow
+    car is still gaining when it reaches the edge of the rig's 10 km ground slab and the metric
+    then reports its free-fall speed (the van: 295 km/h). Reported to 02 in cars.md.
+    """
+    paths = [os.path.join(REPO, "data", "cars", c["id"] + ".json") for c in CARS]
+    out = subprocess.run([VMAX] + paths, check=True, capture_output=True, text=True).stdout
+    for line in out.splitlines():
+        cid, kmh, how = line.split()
+        r = res.setdefault(cid, {})
+        if r.get("vmax_kmh") is not None and abs(r["vmax_kmh"] - float(kmh)) > 1.0:
+            r["vmax_metric_kmh"] = r["vmax_kmh"]
+        r["vmax_kmh"] = float(kmh)
+        r["vmax_converged"] = how == "converged"
 
 
 def run_barrier(car_id: str) -> dict:
@@ -95,8 +115,11 @@ def check(car: dict, rows: dict) -> dict:
     r = rows[("sim", "Frontal", 15)]
     cell("frontal 15 km/h", not r["tl"] and set(r["failed"]) <= {"Lights"}, r, "components failed")
     r = rows[("sim", "Frontal", 25)]
-    cell("frontal 25 km/h", not r["tl"] and not {"Radiator", "Engine"} & set(r["failed"]), r,
-         "radiator/engine failed")
+    # Mid-engine: the radiators sit right behind the nose with no engine bay in front of them,
+    # so a 25 km/h nose hit may take the radiator (as on real MR cars); the engine must survive.
+    kill = {"Engine"} if car["profile"] == "mr" else {"Radiator", "Engine"}
+    cell("frontal 25 km/h", not r["tl"] and not kill & set(r["failed"]), r,
+         "radiator/engine failed" if car["profile"] != "mr" else "engine failed")
     r = rows[("sim", "Frontal", 40)]
     cell("frontal 40 km/h", r["crush"] >= 0.2 and not r["tl"], r,
          "crumple zone not engaged or total loss")
@@ -125,11 +148,12 @@ def check(car: dict, rows: dict) -> dict:
 
 
 def main() -> int:
-    for exe in (METRICS, BARRIER):
+    for exe in (METRICS, BARRIER, VMAX):
         if not os.path.exists(exe):
             sys.exit("build first: cargo build --release -p wp_vehicle --example metrics "
-                     "-p wp_damage --bin damage-barrier")
+                     "-p wp_damage --bin damage-barrier -p ram-probe")
     results = run_metrics()
+    run_vmax(results)
     for c in CARS:
         results.setdefault(c["id"], {})["barrier"] = check(c, run_barrier(c["id"]))
     with open(os.path.join(HERE, "validation_results.json"), "w") as f:

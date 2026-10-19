@@ -159,7 +159,7 @@ def derive(c: dict) -> tuple[dict, dict]:
     w, l, h = c["body"]
     L = c["wheelbase"]
     tf, tr = c["track_f"], c["track_r"]
-    truck = c["profile"] in ("truck", "suv")
+    truck = c["profile"] in ("truck", "suv", "van")
     d["m"] = m
 
     # Inertia (box approximation scaled by mass-concentration factors).
@@ -361,7 +361,7 @@ def derive(c: dict) -> tuple[dict, dict]:
 
 # gen-lattice profile per roster profile. Mid-engine has no profile: coupe + MR adjustments.
 GEN_PROFILE = {"hatch": "hatch", "sedan": "sedan", "coupe": "coupe", "mr": "coupe",
-               "truck": "truck", "suv": "suv"}
+               "truck": "truck", "suv": "suv", "van": "suv"}
 
 # `--strength` from durability class (section multiplier on every structural member).
 STRENGTH = {1: 0.80, 2: 0.90, 3: 1.00, 4: 1.15, 5: 1.30}
@@ -382,7 +382,8 @@ SEC = dict(cover=1.2e-4, cabin=3.0e-4, cross_member=0.06e-4, rail_hard=0.9e-4,
            bumper_beam=2.0e-4, sill=3.0e-4, pillar=2.0e-4, roof_rail=1.5e-4, door_beam=1.5e-4,
            engine_mount=0.6e-4, engine_firewall=1.2e-4, structural=0.25e-4)
 RAIL_X_FRAC = 0.30
-TRUCK_RAIL_SCALE = {"truck": 1.35, "suv": 1.2}
+REAR_RAIL_FACTOR = 1.6  # lattice_gen::REAR_RAIL_FACTOR
+TRUCK_RAIL_SCALE = {"truck": 1.35, "suv": 1.2, "van": 1.2}
 
 PUSHBAR = ("hss", 8.0e-4)
 PUSHBAR_MOUNT = ("hss", 6.0e-4)
@@ -530,6 +531,36 @@ def adjust_lattice(lat: dict, c: dict, mass: float) -> list[str]:
                    f"FrameRight; {n} under-cab rail beams → hss {area:.2e} m² so the ladder "
                    f"frame runs bumper to bumper.")
 
+    # 3b. Cargo van: the passenger cell ends at the seat partition behind the front doors; the
+    # cargo box behind it is not cabin (gen-lattice's suv profile runs the cabin to the
+    # tailgate, which makes every rear hit a cabin intrusion).
+    if lt.get("cargo_box"):
+        y_part = min(pos(n["id"])[1] for n in nodes if n["region"] in ("LeftDoorF", "RightDoorF")) - 0.05
+        n_rel = 0
+        for n in nodes:
+            if n["region"] == "Cabin" and n["pos_m"][1] < y_part:
+                n["region"] = "FrameRear"
+                n_rel += 1
+        log.append(f"Cargo box: {n_rel} Cabin nodes behind the seat partition (y < {y_part:.2f} m, "
+                   f"just behind the front doors) relabelled FrameRear — the passenger cell is "
+                   f"the cab only, so cargo-box hits are body damage, not cabin intrusion.")
+
+    # 3c. Two-box bodies (hatch, SUV): the passenger cell ends at the rear seatback; the
+    # luggage bay behind it is rear structure. gen-lattice's hatch/suv profiles run the cabin to
+    # the tailgate, so a 40 km/h rear hit counted luggage-bay crush as cabin intrusion (total
+    # loss). Seatback: just ahead of the rear axle on a hatch, behind it on an SUV.
+    if prof in ("hatch", "suv") and not lt.get("cargo_box"):
+        y_ra = -c["wheelbase"] / 2
+        y_seat = y_ra + (0.10 if prof == "hatch" else -0.10)
+        n_rel = 0
+        for n in nodes:
+            if n["region"] == "Cabin" and n["pos_m"][1] < y_seat:
+                n["region"] = "FrameRear"
+                n_rel += 1
+        log.append(f"Luggage bay: {n_rel} Cabin nodes behind the rear seatback (y < {y_seat:.2f} m, "
+                   f"rear axle {'+0.10' if prof == 'hatch' else '−0.10'} m) relabelled FrameRear — "
+                   f"the passenger cell ends at the seatback, as on a real two-box body.")
+
     # 4. Mid-engine: move the engine block behind the cabin and rewire its mounts.
     if prof == "mr":
         cabin_floor = [n["id"] for n in nodes if n["region"] == "Cabin" and is_rail_x(n["id"])
@@ -572,6 +603,17 @@ def adjust_lattice(lat: dict, c: dict, mass: float) -> list[str]:
                     and bm["a"] not in engine and bm["b"] not in engine):
                 bm["material_id"], bm["area_m2"] = "aluminum", bm["area_m2"] * 1.5
                 n_alu += 1
+        # Front rails: with the engine gone from the nose they are the only frontal load path,
+        # so give them gen-lattice's rear-rail factor (the generator makes the rear rails
+        # REAR_RAIL_FACTOR stronger for exactly this reason: no engine block behind them).
+        n_fr = 0
+        for bm in beams:
+            a_, b_ = bm["a"], bm["b"]
+            if (bm["material_id"] == "hss" and reg(a_) == "FrameFront" and reg(b_) == "FrameFront"
+                    and is_rail_x(a_) and is_rail_x(b_) and close(pos(a_)[0], pos(b_)[0])
+                    and abs(pos(a_)[1] - pos(b_)[1]) > 1e-3 and close(pos(a_)[2], pos(b_)[2])):
+                bm["area_m2"] *= REAR_RAIL_FACTOR
+                n_fr += 1
         rear_floor = [n["id"] for n in nodes if n["region"] == "FrameRear" and is_rail_x(n["id"])
                       and abs(n["pos_m"][2] - floor_z) < 1e-3 and n["id"] not in engine]
         y_ra = -c["wheelbase"] / 2
@@ -587,6 +629,8 @@ def adjust_lattice(lat: dict, c: dict, mass: float) -> list[str]:
         log.append(f"Mid-engine: engine block moved behind the cabin bulkhead (y {y_bulk - 0.12:.2f}"
                    f"…{y_new[ys[1]]:.2f} m), mounted to the rear rails and the bulkhead; "
                    f"{n_rel} nodes behind the bulkhead relabelled FrameRear (engine bay, not cabin); "
+                   f"{n_fr} front-rail beams × {REAR_RAIL_FACTOR} (no engine block in the nose: "
+                   f"they get gen-lattice's rear-rail factor); "
                    f"{n_alu} rear-subframe beams → aluminum ×1.5 section (sacrificial); gearbox "
                    f"and half-shafts at the rear axle, side fuel tanks at the sills behind the "
                    f"seats; engine fails at 0.12 m, gearbox 0.08 m.")
@@ -626,7 +670,7 @@ def adjust_lattice(lat: dict, c: dict, mass: float) -> list[str]:
         y_bb = max(pos(i)[1] for i in ff)
         mounts = sorted([i for i in ff if abs(pos(i)[1] - y_bb) < 1e-3], key=lambda i: (pos(i)[2], pos(i)[0]))
         y_bar = max(n["pos_m"][1] for n in nodes) + 0.10
-        tall = prof in ("truck", "suv")
+        tall = prof in ("truck", "suv", "van")
         zs = (0.45, 0.95) if tall else (0.35, 0.80)
         new = []
         for z in zs:

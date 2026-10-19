@@ -148,4 +148,5 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 - Steel hood: 132 hood beams aluminum → mild_steel.
 - Detachables: steel bumpers ×2.3 break impulse / ×4 mass; steel hood ×1.4 / ×1.6.
 - Body-on-frame: 16 cab-floor rail nodes relabelled FrameLeft/FrameRight; 14 under-cab rail beams → hss 3.70e-04 m² so the ladder frame runs bumper to bumper.
+- Luggage bay: 11 Cabin nodes behind the rear seatback (y < -1.58 m, rear axle −0.10 m) relabelled FrameRear — the passenger cell ends at the seatback, as on a real two-box body.
 - Push bar: 4 extra FrontBumper nodes 0.10 m ahead of the bumper (z 0.45/0.95 m), hss 8.0e-04 m² tubes bolted to the bumper-beam rail nodes; detachable group 8, 15000 N·s, 25 kg. Front bumper beam ×2 (2 beams), as gen-lattice's cruiser profile does.

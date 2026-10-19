@@ -13,17 +13,21 @@ Plain Python 3 (standard library only, 3.9+). Nothing here is reachable from the
 | `specsheet.py` | Renders `data/cars/ROSTER.md` (roster table) and `data/cars/VALIDATION.md` from the car JSON and `validation_results.json`. |
 | `nameplate_check.py` | Fails if a real maker/model/badge/trademarked tech name appears in roster files. Denylist stored as hashes. |
 | `smoke_sim.py` | Spawns every roster car in `wp_sim` via `simcli` (scenario format v2) in both damage modes, twice, and checks the state hashes match. |
+| `pursuit_probe.py` | Police pursuit numbers through `simcli`: every car's 0-100 / 0-cap / 80-144 km/h times and a straight-line chase model against the cruiser (`--chase`, with `wp_police`'s speed cap and target margin). |
+| `ram_probe/` (crate `ram-probe`) | `ram-probe [car…]`: repeated rams (frontal / offset by the car, side / rear taken) on **one** damage model in both modes — health after each ram, the ram that drops it below `wp_police`'s disengage health (0.4) and the first total-loss ram. `vmax-trace`: `wp_vehicle`'s top-speed run stopped before the rig's 10 km ground slab ends (the metric's own run falls off the world on slow cars); `collect_results.py` takes Vmax from it. |
 
 ## Typical loop
 
 ```sh
-cargo build --release -p wp_damage --bins -p wp_vehicle --example metrics -p simcli
+cargo build --release -p wp_damage --bins -p wp_vehicle --example metrics -p simcli -p ram-probe
 # edit tools/specsheet/roster_inputs.py, then:
 python3 tools/specsheet/build_roster.py          # cars, spec sheets, lattices
 python3 tools/specsheet/collect_results.py       # sim metrics + barrier sweeps → validation_results.json
 python3 tools/specsheet/specsheet.py             # ROSTER.md + VALIDATION.md
 python3 tools/specsheet/nameplate_check.py       # naming policy
 python3 tools/specsheet/smoke_sim.py             # loads + determinism through the sim
+python3 tools/specsheet/pursuit_probe.py --chase # police cruiser vs every car (acceleration / chase)
+./target/release/ram-probe sentinel_cruiser      # cruiser durability under repeated rams
 cargo test -p wp_contracts                       # schema + loader validation of all data
 ```
 
