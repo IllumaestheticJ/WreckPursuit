@@ -992,14 +992,17 @@ impl Vehicle {
             force += f;
             torque += (p - ch.com).cross(f);
         }
-        // Slide gyro (keyboard/gamepad help only; 0 with countersteer help off).
+        // Slide gyro (keyboard/gamepad help only; 0 with countersteer help off). The path rate
+        // needs the net force: Rapier adds gravity later, so add it here (else the tires'
+        // uphill force on a side slope, or body roll, reads as the path curving).
+        let net = force - V3::Z * (self.def.mass_kg * GRAVITY_MPS2);
         let gyro = gyro_yaw_torque(
             &GyroInput {
                 v_fwd,
                 v_left,
                 yaw_rate,
-                force_left: -force.dot(right),
-                force_fwd: force.dot(fwd),
+                force_left: -net.dot(right),
+                force_fwd: net.dot(fwd),
                 rear_axle_slip: rear_axle,
                 mass: self.def.mass_kg,
                 yaw_inertia: self.def.inertia_kgm2[2],
