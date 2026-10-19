@@ -168,7 +168,21 @@ for (const [file, kmh] of [
     const kinds = ["GlassShattered", "RegionDamaged", "ComponentFailed", "PartDetached", "TotalLoss"].filter((k) => feed.includes(k));
     check(kinds.length > 0, `event feed shows damage events: ${kinds.join(", ")}`);
   }
-  if (file.includes("head_on")) await shot("scenario_head_on.png");
+  if (file.includes("head_on")) {
+    await shot("scenario_head_on.png");
+    // UI-kit overlays (workstream 16): live repair bill (F) for the crashed car + chase readout.
+    await page.keyboard.press("KeyF");
+    await page.waitForTimeout(400);
+    const bill = await page.evaluate(() => ({
+      lines: document.querySelectorAll("#ui-bill .wp-bill tbody tr").length,
+      total: document.querySelector("#ui-bill .wp-bill-total")?.textContent ?? "",
+      live: document.querySelector("#ui-bill .wp-panel-title b")?.textContent ?? "",
+      chase: !!document.querySelector("#ui-chase .wp-hud-heat"),
+    }));
+    check(bill.lines > 0 && /\$[1-9]/.test(bill.total) && bill.live.includes("LIVE") && bill.chase, `repair bill priced live after the crash (${bill.lines} lines, ${bill.total}); chase readout mounted`);
+    await shot("repair_bill.png");
+    await page.keyboard.press("KeyF");
+  }
 }
 
 // City free drive: greybox + traffic agents.

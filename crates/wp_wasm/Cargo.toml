@@ -15,6 +15,9 @@ wp_math.workspace = true
 wp_sim.workspace = true
 wp_police.workspace = true
 wp_world.workspace = true
+# Repair billing for the testbed's garage overlay (workstream 16); default features only — never
+# `native` (SQLite).
+wp_economy.workspace = true
 # Multiplayer client (workstream F); default features only — never `native`.
 wp_net.workspace = true
 # Audio director (workstream J); pure logic, wasm32-clean. Used only by src/audio.rs.

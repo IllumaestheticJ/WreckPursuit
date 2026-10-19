@@ -14,7 +14,11 @@
     "isolatedModules": true,
     "jsx": "react-jsx",
     "jsxImportSource": "preact",
+    "types": [
+      "vite/client"
+    ],
     "resolveJsonModule": true,
+    "baseUrl": ".",
     "paths": {
       "preact": [
         "./node_modules/preact"

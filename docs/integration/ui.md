@@ -42,9 +42,9 @@ Status: **live** = in the contract and emitted today · **v0.2** = accepted in t
 | HUD | speed, rpm, gear, health, pos, rot | `wp_vehicle` via `VehicleState` (snapshot) | live | `metrics.csv` |
 | HUD | redline rpm | `VehicleDef.engine.redline_rpm` (data) | live | `data/cars` |
 | HUD | component health / failures, wheel lost, total loss | `wp_damage` → `ComponentDamaged`, `ComponentFailed`, `WheelDetached`, `TotalLoss` | live | events |
-| HUD | damage silhouette by `BodyRegion` | `wp_damage` → `RegionDamaged` | contract v0.2.0 ✓, **not emitted by B yet** | inferred from `Contact` geometry when a stream has no `RegionDamaged` |
+| HUD | damage silhouette by `BodyRegion` | `wp_damage` → `RegionDamaged` | contract v0.2.0 ✓, emitted by B (seen in the testbed feed, run 4) | inferred from `Contact` geometry only for older streams without it |
 | HUD | detached parts by region | `wp_damage` → `PartDetached` | live, but group ids not mappable → UI-7 | guess (1 front, 2 rear) |
-| HUD | glass | `wp_damage` → `GlassShattered` | contract v0.2.0 ✓, not emitted yet (B logs it internally) | synthetic run |
+| HUD | glass | `wp_damage` → `GlassShattered` | contract v0.2.0 ✓ | synthetic run |
 | HUD | wanted level, pursuit start/end | `wp_police::PoliceEvent::{WantedLevelChanged, PursuitStarted, PursuitEnded}` | live in E (opaque in contract until v0.3.0) | recorded `police_pursuit` + synthetic |
 | HUD | heat within level, searching/cooldown progress, units on me | `wp_police` `RacerSighting` (`heat`, `status`, `staleness_s`, `units_assigned`) — today only in `CaptainView` | UI-1 (local racer's sighting for the HUD) | recorded `captain.jsonl` |
 | HUD | bounty | `wp_economy` `PlayerAccount.bounty` + `BountyGained` | v0.2 (typed EconomyEvent) | mock account + event |
@@ -129,7 +129,7 @@ I ask that E's current variant lists go in as they are, plus the additions below
 | UI-4 | ~~Heat field for the captain~~ | Withdrawn: `CaptainView.heat_by_district` is enough (drawn at district centroids). | — | withdrawn |
 | UI-5 | (wasm surface, not contract) `wp_wasm` exports for the garage: `economy_preview(def_id, mods, mode) → Preview`, `quote_repair(...)`, `current_value`, `sale_price`, `retrieval_fee`, `market_price` (JSON in/out) | Lets the UI drop its ports of `estimate.rs` and the billing rules. | 04, 08 | open (for 04 / 08) |
 | UI-6 | Race events into the contract with L's shapes: `RaceSignal::{CheckpointPassed, LapCompleted, LeadChanged, RacerFinished, RacerDnf, RacerDq, RaceFinished { results: Vec<RacerResult> }}`; plus a live standings accessor in `wp_race` (`RaceJudge::standings() -> Vec<{racer, position, progress_m, gap_ahead_s}>`) | HUD race panel (position, gaps) and results screen. L has the data; there is no live position/gap API and nothing reaches the client. | 15, 07 | open (for L) |
-| UI-7 | Damage event refinements: `PartDetached` gains `region: BodyRegion`; B starts emitting `RegionDamaged` / `GlassShattered` (contract v0.2.0) | Group ids are lattice-specific, so the silhouette cannot map them. Until B emits `RegionDamaged`, real-run region damage is inferred from contact geometry. | 03 | open |
+| UI-7 | `PartDetached` gains `region: BodyRegion` | Group ids are lattice-specific, so the silhouette cannot map them. (`RegionDamaged` is now emitted by B, seen in the testbed feed.) | 03 | open |
 | UI-8 | Typed `EconomyEvent` (v0.3.0, G #1): keep `EventReason` names stable incl. `RaceEntryFee`, `RacePurse`, `CleanRaceBonus`, `RaceRep`, `BountyGained` | Results payout lines map 1:1 to reasons. | 08 | note on an accepted item |
 | UI-9 | `ServerToClient::Snapshot` gains `time_of_day: TimeOfDay` (or a low-rate message) | HUD clock. | 05, 07 | open |
 | UI-10 | `DistrictId` (deferred to v0.3.0) shared between D's zones and L's `wp_race::DistrictId`, plus a territory view from L: `Vec<{ district, owner: Option<CrewId>, points: BTreeMap<CrewId, u32> }>` and `Crew { id, name, rep, members }` | Crews & territory map (today: data/city zone index + mock owners). | 05, 15, 08 | open |
@@ -152,9 +152,33 @@ limit; `apps/ui-kit/fixtures/runs/police_pursuit/`) shows two things worth a loo
 
 ## Changes outside my crates
 
-None. `apps/ui-kit` is new. It reads (never writes) `data/`, `schemas/`, `crates/wp_contracts`
-(via the standalone schema tool, which has its own `[workspace]` so the root workspace is
-untouched) and runs `simcli` to produce fixtures.
+Live HUD heat / wanted / bounty, pursuit status and the repair bill in the browser testbed
+(owner request, 2026-10-19: "wire them into apps/testbed-web with C"). Kept minimal and additive;
+**C and the lead, please review**:
+
+| File | Owner | Change |
+|---|---|---|
+| `crates/wp_wasm/src/garage.rs` (new) | C | `repair_quote_json(entity, request_json)`: the running car's `DamageSim::repair_estimate` (economy `PriceTable` for its class/value) priced by `wp_economy::Economy::quote_repair` (shop, district, mode, wanted markup, insurance, salvage). Read-only. |
+| `crates/wp_wasm/src/lib.rs` | C | `pub mod garage;` |
+| `crates/wp_wasm/Cargo.toml` | C | `wp_economy` dependency (default features; `cargo tree --target wasm32-unknown-unknown` shows no rusqlite). |
+| `apps/testbed-web/src/ui/overlay.ts` (new; all testbed-side UI-kit glue lives in `src/ui/`) | C | Mounts the kit's `chaseHud` and `repairBill` overlays on a `createLiveModel()` fed each frame with the drained events (+ the police record when available). |
+| `apps/testbed-web/src/main.ts` | C | 6 lines: construct `UiOverlay`, `ui.reset()` on session rebuild, `ui.frame(...)` after `eventsDrain()`, **F** toggles the repair bill. |
+| `apps/testbed-web/src/wasm/sim.ts` | C | `repairQuote()`, `policeStatus()` (feature-detects a `police_status_json` export; null until `Sim::police()` is wired). |
+| `apps/testbed-web/src/settings.ts`, `hud.ts` | C | Layer **Z** "chase readout"; help line mentions **F**. |
+| `apps/testbed-web/e2e/run.mjs` | C | One check after `crash/head_on.ron`: F opens a live, itemised bill; the chase readout is mounted. |
+| `apps/testbed-web/{package.json,tsconfig.json,vite.config.ts}` | C | `preact` dependency; JSX + `vite/client` types; `resolve.dedupe: ["preact"]`; dev server may serve the repo (the kit imports `../ui-kit` and `data/`). |
+
+The testbed imports `apps/ui-kit/src/live` only (not the kit's index), so no fixtures or mock data
+reach its bundle (testbed main chunk 237 kB).
+
+**Verified in the browser (headless Chromium, `npm run e2e` + a manual drive):** after the head-on
+crash the bill lists 16 priced lines ($1,868 at a legit shop, more at a crooked one), live from
+`wp_economy`. **Heat does not build in city free drive yet:** 24 s at up to 148 km/h produced one
+`Speeding` violation, and with no police units (no `Sim::police()` road graph until lead run 5)
+nothing witnesses it, so unwitnessed heat stays under L1 (10). The readout correctly shows CLEAR.
+For D: one speeding violation per long stretch seems low; for the lead: heat/bounty in the readout
+switch to the real `RacerRecord` as soon as wasm exports `police_status_json(entity)` (the testbed
+feature-detects it).
 
 ## Perf numbers
 
