@@ -316,9 +316,9 @@ fn city_sprint_pulls_in_police() {
         .signals
         .iter()
         .any(|s| matches!(s, RaceSignal::PatrolAttracted { .. })));
-    // (Entrants start at 3.0 heat, see the scenario header.)
+    // (Entrants start at 3.75 heat, see the scenario header.)
     assert!(
-        r.heat_after_report.iter().all(|h| *h > 3.0),
+        r.heat_after_report.iter().all(|h| *h > 3.75),
         "{:?}",
         r.heat_after_report
     );
@@ -346,10 +346,9 @@ fn city_sprint_pulls_in_police() {
 }
 
 #[test]
-#[ignore = "L (round 9): after the round-8/9 police changes a patrol finds the control-run racers without the meet report (pursuit at tick 8352); re-tune the control run and un-ignore."]
 fn without_the_meet_report_nobody_is_chased() {
     // Control run: same race, same seed, but nobody calls the hot meet in. The racers still
-    // speed and pick up some heat on top of their starting 3.0, but stay below wanted level 1,
+    // speed and pick up some heat on top of their starting 3.75, but stay below wanted level 1,
     // so no pursuit starts in the same window. The meet report is what tips it.
     // (Tuning-sensitive by design: if police or traffic tuning changes, re-check both runs.)
     let r = run_police_race(false);
