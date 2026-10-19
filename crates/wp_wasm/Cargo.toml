@@ -13,6 +13,8 @@ crate-type = ["cdylib", "rlib"]
 wp_contracts.workspace = true
 wp_math.workspace = true
 wp_sim.workspace = true
+# Audio director (workstream 13); pure logic, wasm32-clean. Used only by src/audio.rs.
+wp_audio.workspace = true
 # Canonical scenario format v2 parser (simcli lib is wasm32-clean; see tools/wasm-determinism).
 simcli = { path = "../../apps/simcli" }
 serde.workspace = true

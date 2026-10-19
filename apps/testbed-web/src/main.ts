@@ -13,6 +13,7 @@ import { VehicleView } from "./vehicle_view";
 import { CameraRig, CAMERA_MODES, type CameraMode } from "./cameras";
 import { Hud } from "./hud";
 import { TelemetryPlots } from "./telemetry";
+import { AudioSystem } from "./audio";
 
 const LAST_REPLAY_KEY = "wp.testbed.lastReplay.v1";
 const COLOURS = [0xd04a2a, 0x2a7fd0, 0x3fb950, 0xd0a92a, 0x9b59b6, 0x1abc9c];
@@ -57,6 +58,7 @@ async function main(): Promise<void> {
   const rig = new CameraRig(scene.renderer.domElement);
   const hud = new Hud(overlay);
   const plots = new TelemetryPlots(overlay);
+  const audio = new AudioSystem(scene.world, overlay);
 
   // ----- session management --------------------------------------------------------------
 
@@ -361,7 +363,8 @@ async function main(): Promise<void> {
         focusRec = o;
       }
     }
-    scene.addEvents(sim.eventsDrain());
+    const events = sim.eventsDrain();
+    scene.addEvents(events);
     scene.update(dt, sim.intents());
     const wi = sim.worldInfo();
     scene.setTimeOfDay(wi[W.night]);
@@ -373,6 +376,7 @@ async function main(): Promise<void> {
     }
     plots.canvas.style.display = layers.on("telemetry") ? "" : "none";
     rig.update(focusView?.root ?? null, focusView?.info.body_size_m ?? [2, 4.5, 1.4], focusRec >= 0 ? cur[focusRec + S.speed] : 0, dt);
+    audio.update(rig.camera, events, app.paused && !replay ? 0 : dt, app.focus);
 
     const r0 = performance.now();
     scene.render(rig.camera);

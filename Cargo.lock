@@ -3684,6 +3684,7 @@ dependencies = [
  "serde_json",
  "simcli",
  "wasm-bindgen",
+ "wp_audio",
  "wp_contracts",
  "wp_math",
  "wp_sim",
