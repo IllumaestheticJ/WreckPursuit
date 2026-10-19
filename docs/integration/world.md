@@ -72,6 +72,10 @@ All in `wp_world` (details and format spec: `crates/wp_world/README.md`).
   - Verified on the real `wp_vehicle` model in its Rapier rig: city route 866 m stays on the
     road, stops at the end, ≤ 1.7 m off line; circuit lap pursuit 192 s vs civilian 274 s,
     ≤ 1.4 m off line.
+- **Leader / obstacle query** (`wp_world::leader`, round 6): `find_leader(own_pos, centreline,
+  &[Obstacle], skip, &LeaderParams) -> Option<Leader { id, gap_m, speed_mps, .. }>`,
+  `Obstacle::{from_state, from_agent}`, `CarFollowing::{CIVILIAN, PURSUIT}::leader_cap` (traffic's
+  IDM), `hold_behind` / `held`; `DrivePath::leader`, `PathFollower::follow_behind`.
 - **Debris hazards**: `World::set_hazards(&[Hazard::new(pos, radius)])` (or with `vel`).
   Small debris is swerved around within the lane (≤ 1.5 m, held until the rear clears);
   lane-blocking debris → lane change if the neighbour lane is free, else stop; debris in a
@@ -100,6 +104,10 @@ From the sim loop (`wp_sim`, integration lead) — none of these are wired yet:
    per agent).
 8. **simcli scenarios** (10): a traffic soak scenario once the sim loads cities (expected
    ranges: 0 civilian collisions, ≥ 380 agents, ≥ 50 % moving).
+9. **Leader query inputs for police** (round 6): each tick, the state of every vehicle near an
+   AI unit as `wp_world::leader::Obstacle`s (players, physical traffic, other units; kinematic
+   traffic via `Obstacle::from_agent`) handed to `wp_police` (E's API) — see "Response from D
+   (round 6)".
 
 ## Contract change requests
 | # | Change (type / field / variant) | Why | Who is affected | Status |
@@ -282,3 +290,60 @@ Police units drive with your shared controller but have no obstacle sensing, so 
 police.md round 6). Please expose a **leader / obstacle query** E can use from the controller: nearest vehicle ahead
 on the path within a look-ahead (players, physical traffic, other units — `wp_sim` vehicle states can be passed in),
 returning gap and speed, so units do the same car-following your traffic does. Coordinate the API with E in your doc.
+
+### Response from D (round 6)
+**Leader / obstacle query — done** (`wp_world::leader`, commit on `ws/world`). Pure geometry on
+data the caller passes in, so it works for police units, AI racers and anything else that is
+not lane-bound traffic:
+
+```rust
+use wp_world::leader::{find_leader, hold_behind, held, CarFollowing, LeaderParams, Obstacle};
+
+// 1. Every vehicle near the unit (wp_sim vehicle states; kinematic traffic via AgentView).
+let obstacles: Vec<Obstacle> = states.iter().map(|(id, st)| Obstacle::from_state(*id, st))
+    .chain(world.agents().map(|a| Obstacle::from_agent(&a))).collect();
+// 2. Nearest one in a ±1.2 m corridor along the unit's own track (any path: a closure giving
+//    the point `d` m ahead, lane offset included). `skip` = own id, + the suspect when ramming.
+let lp = LeaderParams::CAR.lookahead_for(v);
+let leader = find_leader(pos, |d| lane_point(&track, s + d, lane_offset), &obstacles, &[own], &lp);
+// 3. Same IDM law as traffic: cap the commanded acceleration.
+let cap = CarFollowing::PURSUIT.leader_cap(v, leader.as_ref());
+let acc = acc.min(cap.max(-max_brake));
+let mut input = /* controller.steer + controller.pedals(v, acc, dt, disabled) as today */;
+// 4. Stopped behind it: hold on the handbrake (pedals releases the foot brake < 0.6 m/s
+//    because holding it engages auto-reverse — the car would idle forward into the leader).
+if let Some(l) = &leader { if hold_behind(v, cap, l) { input = held(input); } }
+```
+
+- `Leader { id, gap_m (bumper to bumper), speed_mps (along the path, negative = oncoming),
+  along_m, lateral_m }`. Obstacles are oriented boxes, so a car stopped sideways across the lane
+  counts by its footprint; neighbour/oncoming lanes (≥ 3 m away) do not. Ties break on id
+  (order-independent, deterministic).
+- `CarFollowing::PURSUIT` = headway 0.8 s, standstill gap 2.5 m, a 4 m/s², b 5 m/s²;
+  `CIVILIAN` = traffic's middle values. Traffic's own `idm` now delegates to
+  `CarFollowing::idm` (same arithmetic; all traffic tests and the soaks unchanged).
+- `DrivePath` users get it in one call: `PathFollower::follow_behind(state, path, target,
+  offset, dt, Some(&FollowTraffic { obstacles, skip, corridor, following }))` (racers / N).
+- Verified on the real vehicle (`tests/drive.rs`): from 25 m/s with `FollowParams::PURSUIT`
+  it stops **2.5 m behind a stopped car** (no contact) and settles ≈ 9 m behind an 8 m/s car.
+- Cost: 60 m look-ahead = 30 corridor samples; each obstacle is one circle reject or a
+  30-segment projection — microseconds for 24 vehicles + nearby traffic.
+
+**Coordination with E (police):** the call site is `PoliceSystem::unit_input` (it already uses
+my `DriveController`; steps 2–4 above slot in around its `acc`). E needs the obstacle list from
+`wp_sim`: proposed `PoliceSystem::set_obstacles(&[wp_world::leader::Obstacle])` (or a
+`unit_input(unit, dt, &obstacles)` argument), filled by `police_link.rs` each tick from every
+`wp_sim` vehicle (players, physical traffic, other units) plus kinematic `AgentView`s within
+~150 m. When a unit means to ram/PIT the suspect it puts the suspect's id in `skip`; while
+following or boxing it keeps it in. Spawn clearance (golden/city_chase unit 5 m ahead of the
+racer) is E's/lead's; `find_leader` from the spawn pose with a 0 m/s look-ahead tells whether a
+spot is clear.
+
+**Physical traffic creep — fixed on my side too.** Same cause: a physical civilian stopped in
+a queue or at a stop line had its foot brake released below 0.6 m/s and idled forward. It is
+now held on the handbrake while its IDM acceleration is negative (or it is disabled) and it is
+below 1 m/s. `soak/traffic_soak_observer`: 0 civilian collisions before and after (the pending
+zero gate passes; you can promote it). Goldens: see below.
+
+Needs added for this round: **9.** `wp_sim` / E: pass vehicle states to the police controller
+for the leader query (above).

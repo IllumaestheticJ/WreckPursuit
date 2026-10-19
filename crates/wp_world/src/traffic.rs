@@ -484,27 +484,16 @@ pub struct Traffic {
     car: Option<(VehicleDef, TireDb)>,
 }
 
-/// IDM acceleration with an IIDM-style free term above the desired speed.
+/// IDM acceleration with an IIDM-style free term above the desired speed (the shared law in
+/// [`crate::leader::CarFollowing::idm`], so police / racers follow cars the same way).
 fn idm(v: f32, v0: f32, gap: f32, v_lead: f32, p: &DriverParams) -> f32 {
-    let v0 = v0.max(0.1);
-    // x⁴ by multiplies: `powi` is not guaranteed bit-identical across targets.
-    let pow4 = |x: f32| {
-        let x2 = x * x;
-        x2 * x2
-    };
-    let free = if v <= v0 {
-        p.max_accel * (1.0 - pow4(v / v0))
-    } else {
-        -p.comfort_decel * (1.0 - pow4(v0 / v))
-    };
-    if !gap.is_finite() {
-        return free;
+    crate::leader::CarFollowing {
+        headway_s: p.headway_s,
+        min_gap_m: p.min_gap_m,
+        max_accel: p.max_accel,
+        comfort_decel: p.comfort_decel,
     }
-    let dv = v - v_lead;
-    let s_star = p.min_gap_m
-        + (v * p.headway_s + v * dv / (2.0 * (p.max_accel * p.comfort_decel).sqrt())).max(0.0);
-    let g = gap.max(0.05);
-    free - p.max_accel * (s_star / g) * (s_star / g)
+    .idm(v, v0, gap, v_lead)
 }
 
 /// Unit forward (XY) of a chassis quaternion `[x, y, z, w]` (chassis +Y rotated).
@@ -1752,6 +1741,11 @@ impl Traffic {
                 headlights: map.time.night_factor() > 0.5,
                 ..Default::default()
             };
+            // Stopped (queue, stop line, wreck): hold on the handbrake. The PID releases the
+            // foot brake near standstill (auto-reverse), which would let the car idle forward.
+            if (acc < 0.0 || disabled) && v < crate::leader::HOLD_BEHIND_MPS {
+                pa.input = crate::leader::held(pa.input);
+            }
         }
     }
 
