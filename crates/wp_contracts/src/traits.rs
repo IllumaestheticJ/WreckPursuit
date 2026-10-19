@@ -2,8 +2,9 @@
 //! against each other's interfaces in parallel.
 
 use crate::{
-    AssistProfile, ContactImpulse, FfbOutput, HandlingEffects, ModeTable, PriceTable,
-    RepairEstimate, SignalState, SimEvent, SurfaceType, TimeOfDay, VehicleInput, VehicleState,
+    AssistProfile, ContactImpulse, DamageSnapshot, DamageSummary, FfbOutput, HandlingEffects,
+    LocalConditions, ModeTable, PriceTable, RepairEstimate, RepairItem, SignalState, SimEvent,
+    SurfaceType, TimeOfDay, VehicleInput, VehicleState,
 };
 
 /// A drivable vehicle simulation (implemented by `wp_vehicle`).
@@ -44,6 +45,19 @@ pub trait DamageSim {
     fn node_positions(&self) -> &[[f32; 3]];
     /// Repair estimate for the current damage.
     fn repair_estimate(&self, mode: &ModeTable, price_table: &PriceTable) -> RepairEstimate;
+    /// Cheap health read (v0.3.0).
+    fn summary(&self) -> DamageSummary;
+    /// Serialisable full damage state (v0.3.0).
+    fn save_state(&self) -> DamageSnapshot;
+    /// Restore a [`DamageSnapshot`] (v0.3.0). `Err` if the lattice id or array lengths do not
+    /// match this lattice. Leaves the model asleep.
+    fn restore_state(&mut self, s: &DamageSnapshot) -> Result<(), String>;
+    /// Repair the given items (v0.3.0). `Region(r)`: nodes and beams of `r` back to rest, its
+    /// energy ledger zeroed, glass un-shattered; `DetachedPart(r)`: group re-attached (nodes
+    /// back to rest); `Component(c)`: health 1 and not failed (`Wheel*` also clears the lost
+    /// wheel). Health and total loss are recomputed from what is left. Items not damaged are
+    /// ignored.
+    fn apply_repair(&mut self, items: &[RepairItem]);
 }
 
 /// A ray hit on world geometry (v0.2.0).
@@ -78,4 +92,9 @@ pub trait WorldQuery {
     /// Whether the straight segment from `a` to `b` is unobstructed by buildings / terrain
     /// (v0.2.0; police sightlines). Worlds without occluders return `true`.
     fn line_of_sight(&self, a: [f32; 3], b: [f32; 3]) -> bool;
+    /// Weather at a world-space point (v0.3.0, weather W-1). Default: dry, for worlds without
+    /// weather.
+    fn weather_at(&self, _p: [f32; 3]) -> LocalConditions {
+        LocalConditions::DRY
+    }
 }

@@ -156,6 +156,11 @@
           "description": "Passenger cell (pillars, floor, firewall). Intrusion here drives total loss.",
           "type": "string",
           "const": "Cabin"
+        },
+        {
+          "description": "Bolt-on accessory ahead of / around the body: push bar, body kit (v0.3.0). Its own\ndetach group; no `HandlingEffects`; billed via `PriceTable::region_replace_cost`.",
+          "type": "string",
+          "const": "Accessory"
         }
       ]
     },
