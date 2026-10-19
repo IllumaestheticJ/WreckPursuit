@@ -226,9 +226,10 @@ fn wanted_racer_abandons_the_race_and_runs() {
 
 #[test]
 fn open_roads_with_traffic_no_civilian_contact() {
-    // An illegal street race on open roads: civilian traffic, junctions, signals. Pace is
-    // slow (racers yield at busy junctions); what matters is that nobody touches a civilian
-    // and nobody hits another racer.
+    // An illegal street race on open roads: civilian traffic, junctions, signals. Racers read
+    // the signals (a lasting green means cross traffic is held), wait out reds when cross
+    // traffic is moving, and break junction stand-offs. Nobody touches a civilian, nobody
+    // hits another racer, nobody is stuck.
     let setup = Setup {
         seed: 7,
         laps: 1,
@@ -253,6 +254,12 @@ fn open_roads_with_traffic_no_civilian_contact() {
         .filter(|c| c.3 >= AI_CONTACT_IMPULSE_NS)
         .count();
     assert_eq!(hard, 0, "{:?}", out.contacts);
+    for (k, t) in out.max_stuck_s.iter().enumerate() {
+        assert!(*t < 8.0, "racer {} stuck {t:.0} s", k + 1);
+    }
+    for (k, t) in out.max_wait_s.iter().enumerate() {
+        assert!(*t < 90.0, "racer {} waited {t:.0} s", k + 1);
+    }
     for s in field.standings() {
         assert!(
             s.progress_m > 250.0,
@@ -388,7 +395,10 @@ fn live_police_chase_ends_in_escape_or_capture_without_stuck_cars() {
             )
         })
         .collect();
-    let info = format!("{summary:?}\n{st:?}\nstuck {:?}", out.max_stuck_s);
+    let info = format!(
+        "{summary:?}\n{st:?}\nstuck {:?} wait {:?}",
+        out.max_stuck_s, out.max_wait_s
+    );
     assert!(out.police_vehicles > 0, "no physical police: {info}");
     // Racer 1 runs, and the chase ends either way (caught, or still running / escaped).
     assert!(
@@ -426,10 +436,13 @@ fn live_police_chase_ends_in_escape_or_capture_without_stuck_cars() {
             .iter()
             .any(|e| matches!(e, OpponentEvent::Busted { entity, .. } if *entity == s.entity)));
     }
-    // No stuck cars: nobody stands still for long while it wants to move (junction waits
-    // for crossing traffic included).
+    // No stuck cars: nobody stands still with nothing in its way, and no queue (behind a
+    // car, a civilian or a red light: this corner's red lasts ~45 s) outlasts 1.5 cycles.
     for (k, t) in out.max_stuck_s.iter().enumerate() {
-        assert!(*t < 40.0, "racer {} stood still {t:.0} s: {info}", k + 1);
+        assert!(*t < 8.0, "racer {} stuck {t:.0} s: {info}", k + 1);
+    }
+    for (k, t) in out.max_wait_s.iter().enumerate() {
+        assert!(*t < 90.0, "racer {} waited {t:.0} s: {info}", k + 1);
     }
     // Racers that are not caught keep making progress round the circuit.
     let free = st
@@ -456,4 +469,46 @@ fn live_police_chase_ends_in_escape_or_capture_without_stuck_cars() {
         .filter(|c| c.3 >= AI_CONTACT_IMPULSE_NS)
         .count();
     assert_eq!(hard, 0, "{:?}", out.contacts);
+}
+
+#[test]
+#[ignore]
+fn sweep_open_roads_progress() {
+    let mut total = 0.0;
+    let mut worst = 0.0f32;
+    for seed in 1..=8u64 {
+        let setup = Setup {
+            seed,
+            laps: 1,
+            drivers: eight_drivers()[..4].to_vec(),
+            closed_roads: false,
+            traffic: 0.25,
+            grid: GridLayout::SingleFile,
+            max_s: 90.0,
+            ..Setup::default()
+        };
+        let out = common::run_plain(&setup);
+        let mut field = out.field;
+        let p: Vec<i32> = field
+            .standings()
+            .iter()
+            .map(|s| s.progress_m as i32)
+            .collect();
+        let dq = field
+            .drain_events()
+            .iter()
+            .filter(|e| matches!(e, OpponentEvent::Disqualified { .. }))
+            .count();
+        let hard = out
+            .contacts
+            .iter()
+            .filter(|c| c.3 >= AI_CONTACT_IMPULSE_NS)
+            .count();
+        total += p.iter().sum::<i32>() as f32;
+        let st = out.max_stuck_s.iter().fold(0.0f32, |m, x| m.max(*x));
+        let wt = out.max_wait_s.iter().fold(0.0f32, |m, x| m.max(*x));
+        worst = worst.max(wt);
+        eprintln!("seed {seed}: {p:?} stuck {st:.0} wait {wt:.0} dq {dq} hard {hard}");
+    }
+    eprintln!("TOTAL {total:.0} longest wait {worst:.0}");
 }

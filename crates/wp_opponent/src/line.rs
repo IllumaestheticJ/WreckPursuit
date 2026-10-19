@@ -385,6 +385,7 @@ mod tests {
             samples,
             closed: false,
             length_m: (n - 1) as f32 * CORRIDOR_STEP_M,
+            junction_lanes: Vec::new(),
         }
     }
 

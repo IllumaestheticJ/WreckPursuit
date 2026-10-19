@@ -17,7 +17,9 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use wp_contracts::{EntityId, HandlingEffects, SimEvent, VehicleInput, VehicleState, PHYSICS_DT};
+use wp_contracts::{
+    EntityId, HandlingEffects, SignalState, SimEvent, VehicleInput, VehicleState, PHYSICS_DT,
+};
 use wp_math::{Rng, StateHasher};
 use wp_world::drive::{forward_of, DriveController, DriveGains};
 use wp_world::geom::{self, Obb, V2, V3};
@@ -55,6 +57,9 @@ pub struct RaceConfig {
     pub line: LineParams,
     /// Corridor derivation.
     pub corridor: CorridorOptions,
+    /// Read traffic signals at junctions (open roads): a lasting green means cross traffic
+    /// is held; careful drivers stop at reds. Off for closed courses.
+    pub signals: bool,
 }
 
 impl Default for RaceConfig {
@@ -68,6 +73,7 @@ impl Default for RaceConfig {
             seed: 1,
             line: LineParams::default(),
             corridor: CorridorOptions::default(),
+            signals: true,
         }
     }
 }
@@ -228,6 +234,17 @@ pub enum OpponentEvent {
     },
 }
 
+/// The signal governing the next junction entry on a racer's track.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct SignalAhead {
+    /// Distance to the junction entry, m.
+    d_entry: f32,
+    /// Current state for my approach.
+    state: SignalState,
+    /// Seconds until that state ends.
+    remaining_s: f32,
+}
+
 /// Who an obstacle is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Who {
@@ -344,6 +361,8 @@ struct Racer {
     replan_s: f32,
     /// Fleeing racer that lost the police.
     escaped: bool,
+    /// Seconds held at a junction by civilians that are not moving (deadlock breaker).
+    junction_wait_s: f32,
 }
 
 /// Why a racer is doing what it does (last decision), for overlays and tuning.
@@ -382,6 +401,8 @@ pub enum SpeedLimit {
     Unstable,
     /// Rejoin / park / cool-down caps.
     Mode,
+    /// Stopping for a red light (careful drivers on open roads).
+    Signal,
 }
 
 /// Standing of one racer.
@@ -442,6 +463,14 @@ const FLIGHT_THREAT_M: f32 = 35.0;
 const FLIGHT_LOOKAHEAD_M: f32 = 160.0;
 /// Minimum time between flight re-plans, s.
 const FLIGHT_REPLAN_S: f32 = 6.0;
+/// Drivers below this risk stop for red lights on open roads; the others go through a red
+/// only when the junction is clear.
+pub const RED_LIGHT_RISK: f32 = 0.35;
+/// Signals are looked up this far ahead, m.
+const SIGNAL_LOOKAHEAD_M: f32 = 150.0;
+/// After waiting this long at a junction for civilians that are standing still (each waiting
+/// for the other), a racer stops counting them and creeps through, s.
+const JUNCTION_DEADLOCK_S: f32 = 3.0;
 
 impl Field {
     /// Build a field on `corridor`. Lines are optimised once per distinct car width.
@@ -532,6 +561,7 @@ impl Field {
                 yield_s: 0.0,
                 replan_s: 0.0,
                 escaped: false,
+                junction_wait_s: 0.0,
                 running_wide: false,
                 start_n: 0.0,
                 last_pass: None,
@@ -750,7 +780,8 @@ impl Field {
                     None => snapshot.clone(),
                     Some(f) => self.perceive_on(&f.corridor, k, world, vehicles),
                 };
-                self.decide(k, &obstacles, &civs, dt);
+                let signal = self.signal_ahead(k, world);
+                self.decide(k, &obstacles, &civs, signal, dt);
             }
             self.outputs = self.racers.iter().map(|r| (r.entity, r.input)).collect();
         } else {
@@ -1035,7 +1066,10 @@ impl Field {
                         })
                         .unwrap_or(0.0)
                     };
-                    if geom::obb_overlap(&me, &other) && toward > 0.5 {
+                    // ... and only while driving: a car shoved into a civilian (by police,
+                    // say) with its foot off the throttle did nothing wrong.
+                    let driving = r.throttle > 0.05;
+                    if geom::obb_overlap(&me, &other) && toward > 0.5 && driving {
                         let r = &mut self.racers[k];
                         if r.status == RacerStatus::Racing {
                             // Out of the race; drives on at cool-down pace (a car parked on
@@ -1276,7 +1310,36 @@ impl Field {
         out
     }
 
-    fn decide(&mut self, k: usize, obstacles: &[Obstacle], civs: &[(u32, V2, V2)], dt: f32) {
+    /// Signal state of the next junction entry on racer `k`'s track (None: unsignalised,
+    /// too far, or signals ignored by the race rules).
+    fn signal_ahead(&self, k: usize, world: &World) -> Option<SignalAhead> {
+        if !self.config.signals {
+            return None;
+        }
+        let r = &self.racers[k];
+        let corridor = match &r.flight {
+            Some(f) => &f.corridor,
+            None => &self.corridor,
+        };
+        let i0 = corridor.wrap((r.s / CORRIDOR_STEP_M) as isize);
+        let steps = (SIGNAL_LOOKAHEAD_M / CORRIDOR_STEP_M) as usize;
+        let (ahead, lane) = corridor.next_junction_lane(i0, steps)?;
+        let (state, remaining_s) = world.map().lane_signal(lane)?;
+        Some(SignalAhead {
+            d_entry: ahead as f32 * CORRIDOR_STEP_M,
+            state,
+            remaining_s,
+        })
+    }
+
+    fn decide(
+        &mut self,
+        k: usize,
+        obstacles: &[Obstacle],
+        civs: &[(u32, V2, V2)],
+        signal: Option<SignalAhead>,
+        dt: f32,
+    ) {
         // Take the racer's own track data out while it is mutated.
         let flight = self.racers[k].flight.take();
         let speed = std::mem::replace(
@@ -1295,6 +1358,7 @@ impl Field {
         decide_racer(
             &mut self.racers[k],
             civs,
+            signal,
             k,
             corridor,
             line,
@@ -1348,6 +1412,7 @@ impl Field {
 fn decide_racer(
     r: &mut Racer,
     civs: &[(u32, V2, V2)],
+    signal: Option<SignalAhead>,
     k: usize,
     corridor: &Corridor,
     line: &RacingLine,
@@ -1855,8 +1920,12 @@ fn decide_racer(
             }
         }
         // Junction awareness: while a civilian is heading into (or is inside) the next
-        // junction box, keep the ability to stop before entering it.
-        if !civs.is_empty() {
+        // junction box, keep the ability to stop before entering it. With a green that lasts
+        // until I am through, cross traffic is held at its red: only civilians already moving
+        // inside the box count. At a red, careful drivers stop at the line; the rest go
+        // through only when nobody is heading in.
+        let mut held_by_stopped = false;
+        if !civs.is_empty() || signal.is_some() {
             let i0 = corridor.wrap((r.s / CORRIDOR_STEP_M) as isize);
             let horizon = (v * v / (2.0 * a_brk) + 30.0).min(130.0);
             let steps = (horizon / CORRIDOR_STEP_M) as isize;
@@ -1877,6 +1946,29 @@ fn decide_racer(
                 let d_entry = j as f32 * CORRIDOR_STEP_M;
                 let t_dir = corridor.sample(i0 as isize + (j + j_end) / 2).tangent;
                 let watch = 25.0 + 20.0 * r.profile.awareness;
+                // The signal belongs to this junction only if its entry is this entry.
+                let sig = signal.filter(|g| {
+                    !in_junction && (g.d_entry - d_entry).abs() <= 2.5 * CORRIDOR_STEP_M
+                });
+                let v_app = v.max(4.0);
+                let t_arrive = d_entry / v_app;
+                let t_through = t_arrive + (j_end - j) as f32 * CORRIDOR_STEP_M / v_app + 1.0;
+                let stop_dist = v * v / (2.0 * a_brk);
+                let can_stop = stop_dist < d_entry - 2.0;
+                let protected =
+                    sig.is_some_and(|g| g.state == SignalState::Green && g.remaining_s > t_through);
+                let red_on_arrival = sig.is_some_and(|g| match g.state {
+                    SignalState::Red => g.remaining_s > t_arrive - 0.5,
+                    SignalState::Yellow => can_stop,
+                    SignalState::Green => g.remaining_s < t_arrive && can_stop,
+                    SignalState::Off => false,
+                });
+                // Nobody stops for a red with the police behind them.
+                if red_on_arrival && can_stop && !fleeing && r.profile.risk < RED_LIGHT_RISK {
+                    let free = (d_entry - 4.0).max(0.0);
+                    let cap = (2.0 * a_brk * 0.8 * free).sqrt();
+                    cap_to(&mut v_target, cap, SpeedLimit::Signal);
+                }
                 for (id, pos, vel) in civs {
                     let to = geom::sub(c_j, *pos);
                     let d = geom::len(to);
@@ -1890,11 +1982,19 @@ fn decide_racer(
                     }
                     // Stopped civilians inside are waiting for me once I'm in the box
                     // myself (avoid a stand-off); moving ones always count.
-                    let inside = d < radius && (speed > 0.5 || !in_junction);
-                    let heading_in = speed > 0.5
+                    // A stopped car in the box that has not moved while I waited is waiting
+                    // for me: stop counting it (no stand-off).
+                    let waited_out = r.junction_wait_s > JUNCTION_DEADLOCK_S;
+                    let inside =
+                        d < radius && (speed > 0.5 || (!in_junction && !protected && !waited_out));
+                    let heading_in = !protected
+                        && speed > 0.5
                         && geom::dot(*vel, to) > 0.5 * speed * d
                         && (d - radius) / speed < 4.0;
                     if inside || heading_in {
+                        if speed <= 0.5 {
+                            held_by_stopped = true;
+                        }
                         let free = if in_junction {
                             0.0
                         } else {
@@ -1905,6 +2005,11 @@ fn decide_racer(
                     }
                 }
             }
+        }
+        if held_by_stopped && v < 1.5 {
+            r.junction_wait_s += dt;
+        } else if v > 3.0 {
+            r.junction_wait_s = 0.0;
         }
         // Obstacle caps: anything ahead in the band I'm driving through.
         let band = my_band(r.n, n_cmd);
@@ -2353,6 +2458,7 @@ mod tests {
             closed: false,
             length_m: (n - 1) as f32 * CORRIDOR_STEP_M,
             opposing: OpposingLanes::Never,
+            junction_lanes: Vec::new(),
         }
     }
 
@@ -2394,6 +2500,80 @@ mod tests {
             })
             .collect();
         Field::new(straight(), &specs, RaceConfig::default())
+    }
+
+    /// One racer of `risk` at y = 70 m doing 15 m/s on a straight with a junction box at
+    /// y = 100..120 m; returns its debug after one decision with `signal` and `civs`.
+    fn junction_decision(risk: f32, signal: Option<SignalAhead>, civs: &[(u32, V2, V2)]) -> Debug {
+        let mut corridor = straight();
+        for smp in &mut corridor.samples[50..60] {
+            smp.junction = true;
+        }
+        let spec = RacerSpec {
+            entity: EntityId(1),
+            profile: DriverProfile {
+                risk,
+                ..DriverProfile::default()
+            },
+            capability: cap(),
+        };
+        let mut f = Field::new(corridor, &[spec], RaceConfig::default());
+        let world = World::flat(TimeOfDay::from_hours(12.0), 1.0);
+        // Past the start-discipline zone, so only the junction rules apply.
+        f.racers[0].laps_done = 1;
+        f.tick(
+            &world,
+            &[obs(1, 70.0, 15.0, HandlingEffects::NEUTRAL)],
+            &[],
+            &NoPolice,
+        );
+        f.decide(0, &[], civs, signal, 4.0 * PHYSICS_DT);
+        f.debug_of(0)
+    }
+
+    #[test]
+    fn careful_driver_stops_for_a_red_and_a_risk_taker_does_not() {
+        let red = Some(SignalAhead {
+            d_entry: 30.0,
+            state: SignalState::Red,
+            remaining_s: 20.0,
+        });
+        let careful = junction_decision(0.1, red, &[]);
+        assert_eq!(careful.limit, SpeedLimit::Signal);
+        // Capped to the stopping envelope for the line (4 m before the box).
+        assert!(careful.v_target * careful.v_target < 2.0 * 12.0 * 26.0);
+        let bold = junction_decision(0.6, red, &[]);
+        assert_ne!(bold.limit, SpeedLimit::Signal);
+        // A green that turns red before arrival counts as a red for the careful driver.
+        let stale = junction_decision(
+            0.1,
+            Some(SignalAhead {
+                d_entry: 30.0,
+                state: SignalState::Green,
+                remaining_s: 1.0,
+            }),
+            &[],
+        );
+        assert_eq!(stale.limit, SpeedLimit::Signal);
+    }
+
+    #[test]
+    fn lasting_green_ignores_cross_traffic_held_at_its_red() {
+        // A civilian stopped at the edge of the junction box (cross street).
+        let civ = [(7u32, [8.0f32, 110.0f32], [0.0f32, 0.0f32])];
+        let unsignalised = junction_decision(0.4, None, &civ);
+        assert_eq!(unsignalised.limit, SpeedLimit::Obstacle(1_000_007));
+        let green = Some(SignalAhead {
+            d_entry: 30.0,
+            state: SignalState::Green,
+            remaining_s: 30.0,
+        });
+        let protected = junction_decision(0.4, green, &civ);
+        assert_ne!(protected.limit, SpeedLimit::Obstacle(1_000_007));
+        // A civilian still moving inside the box counts even on green.
+        let moving = [(7u32, [4.0f32, 110.0f32], [-6.0f32, 0.0f32])];
+        let busy = junction_decision(0.4, green, &moving);
+        assert_eq!(busy.limit, SpeedLimit::Obstacle(1_000_007));
     }
 
     #[test]
