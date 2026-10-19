@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TireDef",
+  "description": "Tire compound definition.",
+  "type": "object",
+  "properties": {
+    "fz0_n": {
+      "description": "Nominal vertical load the coefficients were fitted at, N.",
+      "type": "number",
+      "format": "float"
+    },
+    "id": {
+      "description": "Unique id; must equal the file stem (`data/tires/<id>.json`).",
+      "type": "string"
+    },
+    "lateral": {
+      "description": "Lateral (slip-angle driven) Magic Formula coefficients.",
+      "$ref": "#/$defs/MagicFormula"
+    },
+    "load_sensitivity": {
+      "description": "Load sensitivity `ls`: effective `D = d · (1 − ls · (Fz/Fz0 − 1))`, dimensionless.",
+      "type": "number",
+      "format": "float"
+    },
+    "longitudinal": {
+      "description": "Longitudinal (slip-ratio driven) Magic Formula coefficients.",
+      "$ref": "#/$defs/MagicFormula"
+    },
+    "peak_slip_angle_rad": {
+      "description": "Slip angle at peak lateral force, rad (informational / for assists).",
+      "type": "number",
+      "format": "float"
+    },
+    "peak_slip_ratio": {
+      "description": "Slip ratio at peak longitudinal force, dimensionless (for ABS/TCS targets).",
+      "type": "number",
+      "format": "float"
+    },
+    "relaxation_length_m": {
+      "description": "Relaxation length for the first-order slip lag, m.",
+      "type": "number",
+      "format": "float"
+    },
+    "rolling_resistance": {
+      "description": "Rolling resistance coefficient (force = coeff · Fz), dimensionless.",
+      "type": "number",
+      "format": "float"
+    },
+    "surface_multipliers": {
+      "description": "Grip multiplier per surface. Missing surfaces default to 1.0.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "number",
+        "format": "float"
+      }
+    },
+    "wear_rate": {
+      "description": "Tread wear per metre of sliding distance at nominal load, fraction of tread (0..1) per m.",
+      "type": "number",
+      "format": "float"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "lateral",
+    "longitudinal",
+    "load_sensitivity",
+    "fz0_n",
+    "relaxation_length_m",
+    "rolling_resistance",
+    "peak_slip_angle_rad",
+    "peak_slip_ratio",
+    "surface_multipliers",
+    "wear_rate"
+  ],
+  "$defs": {
+    "MagicFormula": {
+      "description": "Simplified Pacejka Magic Formula coefficients for one axis:\n`F = D · sin(C · atan(B·x − E·(B·x − atan(B·x))))`, with `D` a friction coefficient\n(force = `D · Fz` before load sensitivity).",
+      "type": "object",
+      "properties": {
+        "b": {
+          "description": "Stiffness factor B, dimensionless (per rad for lateral, per unit slip ratio for longitudinal).",
+          "type": "number",
+          "format": "float"
+        },
+        "c": {
+          "description": "Shape factor C, dimensionless.",
+          "type": "number",
+          "format": "float"
+        },
+        "d": {
+          "description": "Peak factor D as a friction coefficient at `fz0_n`, dimensionless.",
+          "type": "number",
+          "format": "float"
+        },
+        "e": {
+          "description": "Curvature factor E, dimensionless.",
+          "type": "number",
+          "format": "float"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "b",
+        "c",
+        "d",
+        "e"
+      ]
+    }
+  }
+}

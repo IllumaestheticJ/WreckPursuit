@@ -1,0 +1,492 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LatticeDef",
+  "description": "Complete damage lattice for one car.",
+  "type": "object",
+  "properties": {
+    "beams": {
+      "description": "Beams.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/LatticeBeam"
+      }
+    },
+    "components": {
+      "description": "Mechanical component mounts.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ComponentMount"
+      }
+    },
+    "detachables": {
+      "description": "Detachable part groups.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Detachable"
+      }
+    },
+    "id": {
+      "description": "Unique id; must equal the file stem (`data/lattices/<id>.json`).",
+      "type": "string"
+    },
+    "nodes": {
+      "description": "Mass nodes; `nodes[i].id == i`.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/LatticeNode"
+      }
+    },
+    "skin_binding": {
+      "description": "Visual-mesh skin binding. May be empty for debug cars.",
+      "type": "array",
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/SkinBind"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "nodes",
+    "beams",
+    "detachables",
+    "components"
+  ],
+  "$defs": {
+    "BodyRegion": {
+      "description": "Body region a lattice node belongs to. Used for damage accounting, repair billing,\ndetachable groups and the HUD damage silhouette.",
+      "oneOf": [
+        {
+          "description": "Front bumper cover and beam.",
+          "type": "string",
+          "const": "FrontBumper"
+        },
+        {
+          "description": "Hood / bonnet.",
+          "type": "string",
+          "const": "Hood"
+        },
+        {
+          "description": "Front-left fender.",
+          "type": "string",
+          "const": "FrontLeftFender"
+        },
+        {
+          "description": "Front-right fender.",
+          "type": "string",
+          "const": "FrontRightFender"
+        },
+        {
+          "description": "Left front door.",
+          "type": "string",
+          "const": "LeftDoorF"
+        },
+        {
+          "description": "Left rear door (or rear half of the left side on 2-door cars).",
+          "type": "string",
+          "const": "LeftDoorR"
+        },
+        {
+          "description": "Right front door.",
+          "type": "string",
+          "const": "RightDoorF"
+        },
+        {
+          "description": "Right rear door.",
+          "type": "string",
+          "const": "RightDoorR"
+        },
+        {
+          "description": "Roof panel.",
+          "type": "string",
+          "const": "Roof"
+        },
+        {
+          "description": "Rear-left quarter panel.",
+          "type": "string",
+          "const": "RearLeftQuarter"
+        },
+        {
+          "description": "Rear-right quarter panel.",
+          "type": "string",
+          "const": "RearRightQuarter"
+        },
+        {
+          "description": "Trunk / boot lid / tailgate.",
+          "type": "string",
+          "const": "Trunk"
+        },
+        {
+          "description": "Rear bumper cover and beam.",
+          "type": "string",
+          "const": "RearBumper"
+        },
+        {
+          "description": "Windshield.",
+          "type": "string",
+          "const": "Windshield"
+        },
+        {
+          "description": "Rear window.",
+          "type": "string",
+          "const": "RearGlass"
+        },
+        {
+          "description": "Front frame rails / crumple zone.",
+          "type": "string",
+          "const": "FrameFront"
+        },
+        {
+          "description": "Rear frame rails / crumple zone.",
+          "type": "string",
+          "const": "FrameRear"
+        },
+        {
+          "description": "Left sill / side frame.",
+          "type": "string",
+          "const": "FrameLeft"
+        },
+        {
+          "description": "Right sill / side frame.",
+          "type": "string",
+          "const": "FrameRight"
+        },
+        {
+          "description": "Passenger cell (pillars, floor, firewall). Intrusion here drives total loss.",
+          "type": "string",
+          "const": "Cabin"
+        }
+      ]
+    },
+    "Component": {
+      "description": "Mechanical component that can be damaged by intrusion.",
+      "oneOf": [
+        {
+          "description": "Engine block.",
+          "type": "string",
+          "const": "Engine"
+        },
+        {
+          "description": "Radiator / cooling pack.",
+          "type": "string",
+          "const": "Radiator"
+        },
+        {
+          "description": "Battery.",
+          "type": "string",
+          "const": "Battery"
+        },
+        {
+          "description": "Fuel tank.",
+          "type": "string",
+          "const": "FuelTank"
+        },
+        {
+          "description": "Steering rack.",
+          "type": "string",
+          "const": "SteeringRack"
+        },
+        {
+          "description": "Front-left suspension mount / arms.",
+          "type": "string",
+          "const": "SuspensionFL"
+        },
+        {
+          "description": "Front-right suspension mount / arms.",
+          "type": "string",
+          "const": "SuspensionFR"
+        },
+        {
+          "description": "Rear-left suspension mount / arms.",
+          "type": "string",
+          "const": "SuspensionRL"
+        },
+        {
+          "description": "Rear-right suspension mount / arms.",
+          "type": "string",
+          "const": "SuspensionRR"
+        },
+        {
+          "description": "Front-left wheel / hub attachment.",
+          "type": "string",
+          "const": "WheelFL"
+        },
+        {
+          "description": "Front-right wheel / hub attachment.",
+          "type": "string",
+          "const": "WheelFR"
+        },
+        {
+          "description": "Rear-left wheel / hub attachment.",
+          "type": "string",
+          "const": "WheelRL"
+        },
+        {
+          "description": "Rear-right wheel / hub attachment.",
+          "type": "string",
+          "const": "WheelRR"
+        },
+        {
+          "description": "Gearbox.",
+          "type": "string",
+          "const": "Gearbox"
+        },
+        {
+          "description": "Driveshaft / half-shafts.",
+          "type": "string",
+          "const": "Driveshaft"
+        },
+        {
+          "description": "Front-left brake.",
+          "type": "string",
+          "const": "BrakeFL"
+        },
+        {
+          "description": "Front-right brake.",
+          "type": "string",
+          "const": "BrakeFR"
+        },
+        {
+          "description": "Rear-left brake.",
+          "type": "string",
+          "const": "BrakeRL"
+        },
+        {
+          "description": "Rear-right brake.",
+          "type": "string",
+          "const": "BrakeRR"
+        },
+        {
+          "description": "Exhaust system.",
+          "type": "string",
+          "const": "Exhaust"
+        },
+        {
+          "description": "Head and tail lights (cosmetic + night visibility).",
+          "type": "string",
+          "const": "Lights"
+        }
+      ]
+    },
+    "ComponentMount": {
+      "description": "Mechanical component attached to a set of lattice nodes.",
+      "type": "object",
+      "properties": {
+        "intrusion_fail_m": {
+          "description": "Intrusion at which the component fails, m.",
+          "type": "number",
+          "format": "float"
+        },
+        "intrusion_total_m": {
+          "description": "Intrusion at which component health reaches 0, m.",
+          "type": "number",
+          "format": "float"
+        },
+        "kind": {
+          "description": "Which component.",
+          "$ref": "#/$defs/Component"
+        },
+        "node_ids": {
+          "description": "Lattice nodes whose displacement measures this component's intrusion.",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "node_ids",
+        "intrusion_fail_m",
+        "intrusion_total_m"
+      ]
+    },
+    "Detachable": {
+      "description": "A part that can tear off (bumper, hood, door...).",
+      "type": "object",
+      "properties": {
+        "break_impulse_ns": {
+          "description": "Accumulated hinge impulse at which the part detaches, N·s.",
+          "type": "number",
+          "format": "float"
+        },
+        "group": {
+          "description": "Group id referenced by `LatticeBeam::detach_group`. Unique within the lattice.",
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "hinge_nodes": {
+          "description": "Two node ids forming the hinge / attachment line.",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0
+          },
+          "maxItems": 2,
+          "minItems": 2
+        },
+        "mass_kg": {
+          "description": "Mass of the detached part, kg.",
+          "type": "number",
+          "format": "float"
+        },
+        "region": {
+          "description": "Body region of the part.",
+          "$ref": "#/$defs/BodyRegion"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "group",
+        "region",
+        "hinge_nodes",
+        "break_impulse_ns",
+        "mass_kg"
+      ]
+    },
+    "LatticeBeam": {
+      "description": "One beam between two nodes.",
+      "type": "object",
+      "properties": {
+        "a": {
+          "description": "First node id.",
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "area_m2": {
+          "description": "Effective cross-section area, m².",
+          "type": "number",
+          "format": "float"
+        },
+        "b": {
+          "description": "Second node id.",
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "breakable": {
+          "description": "Whether the beam may break at the material's failure strain.",
+          "type": "boolean"
+        },
+        "detach_group": {
+          "description": "If set, this beam is a hinge/attachment beam of detachable group `detach_group`.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "material_id": {
+          "description": "Material id in `data/materials/<material_id>.json`.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "a",
+        "b",
+        "material_id",
+        "area_m2",
+        "breakable"
+      ]
+    },
+    "LatticeNode": {
+      "description": "One lattice mass node.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Node id; must equal its index in `LatticeDef::nodes`.",
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "mass_kg": {
+          "description": "Lumped mass, kg.",
+          "type": "number",
+          "format": "float"
+        },
+        "pinned_to_chassis": {
+          "description": "If true the node is kinematic in chassis space (carries the rigid body's motion).",
+          "type": "boolean"
+        },
+        "pos_m": {
+          "description": "Rest position in chassis space, m.",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "float"
+          },
+          "maxItems": 3,
+          "minItems": 3
+        },
+        "region": {
+          "description": "Body region for accounting.",
+          "$ref": "#/$defs/BodyRegion"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "pos_m",
+        "mass_kg",
+        "pinned_to_chassis",
+        "region"
+      ]
+    },
+    "SkinBind": {
+      "description": "Binds one visual-mesh vertex to up to four lattice nodes (linear blend).",
+      "type": "object",
+      "properties": {
+        "node_ids": {
+          "description": "Bound lattice node ids.",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0
+          },
+          "maxItems": 4,
+          "minItems": 4
+        },
+        "vertex_index": {
+          "description": "Vertex index in the car's visual mesh.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "weights": {
+          "description": "Blend weights, summing to 1.",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "float"
+          },
+          "maxItems": 4,
+          "minItems": 4
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "vertex_index",
+        "node_ids",
+        "weights"
+      ]
+    }
+  }
+}

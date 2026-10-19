@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MaterialDef",
+  "description": "Material properties used to derive lattice beam stiffness, yield and failure.",
+  "type": "object",
+  "properties": {
+    "density_kg_m3": {
+      "description": "Density, kg/m³.",
+      "type": "number",
+      "format": "float"
+    },
+    "failure_strain": {
+      "description": "Engineering strain at which a beam of this material breaks, dimensionless.",
+      "type": "number",
+      "format": "float"
+    },
+    "friction": {
+      "description": "Coulomb friction coefficient for contacts.",
+      "type": "number",
+      "format": "float"
+    },
+    "id": {
+      "description": "Unique id; must equal the file stem (`data/materials/<id>.json`).",
+      "type": "string"
+    },
+    "kind": {
+      "description": "Behaviour family.",
+      "$ref": "#/$defs/MaterialKind"
+    },
+    "plastic_modulus_mpa": {
+      "description": "Plastic (tangent) modulus after yield, MPa.",
+      "type": "number",
+      "format": "float"
+    },
+    "restitution": {
+      "description": "Coefficient of restitution for contacts, 0..1.",
+      "type": "number",
+      "format": "float"
+    },
+    "yield_mpa": {
+      "description": "Yield strength, MPa.",
+      "type": "number",
+      "format": "float"
+    },
+    "young_mpa": {
+      "description": "Young's modulus, MPa.",
+      "type": "number",
+      "format": "float"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "density_kg_m3",
+    "young_mpa",
+    "yield_mpa",
+    "plastic_modulus_mpa",
+    "failure_strain",
+    "restitution",
+    "friction",
+    "kind"
+  ],
+  "$defs": {
+    "MaterialKind": {
+      "description": "Mechanical behaviour family of a material.",
+      "oneOf": [
+        {
+          "description": "Thin body panel: dents easily, plastic.",
+          "type": "string",
+          "const": "Panel"
+        },
+        {
+          "description": "Structural member (rails, pillars, crossmembers): high yield, hardening, buckles.",
+          "type": "string",
+          "const": "Structural"
+        },
+        {
+          "description": "Brittle; no plastic range, shatters.",
+          "type": "string",
+          "const": "Glass"
+        },
+        {
+          "description": "Polymer (bumper covers): low stiffness, large failure strain, cracks and detaches.",
+          "type": "string",
+          "const": "Plastic"
+        },
+        {
+          "description": "Cast metal (knuckles, hubs): stiff, brittle failure.",
+          "type": "string",
+          "const": "Cast"
+        }
+      ]
+    }
+  }
+}

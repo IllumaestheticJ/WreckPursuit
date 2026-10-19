@@ -1,0 +1,623 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VehicleDef",
+  "description": "Complete static description of a drivable vehicle. One JSON file per car in `data/cars/`.",
+  "type": "object",
+  "properties": {
+    "aero_downforce_coeffs": {
+      "description": "Additional aero devices (wings, splitters; typically from mods) as downforce coefficients\n`[front, rear]`, m² (Cl·A, positive = downforce). Added on top of `lift_front/rear`.",
+      "type": "array",
+      "items": {
+        "type": "number",
+        "format": "float"
+      },
+      "maxItems": 2,
+      "minItems": 2
+    },
+    "analog_of": {
+      "description": "Free-text description of the real-world archetype, no trademarks\n(e.g. \"late-90s Japanese FR coupe\").",
+      "type": "string"
+    },
+    "base_price": {
+      "description": "Base purchase price in whole in-game currency units.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "body_size_m": {
+      "description": "Overall body size in metres `[width (X), length (Y), height (Z)]`. Used for the debug box,\nlattice generation and the fallback chassis collider.",
+      "type": "array",
+      "items": {
+        "type": "number",
+        "format": "float"
+      },
+      "maxItems": 3,
+      "minItems": 3
+    },
+    "brakes": {
+      "description": "Brakes.",
+      "$ref": "#/$defs/BrakeDef"
+    },
+    "cg_height_m": {
+      "description": "Centre-of-gravity height above ground at static ride height, m.",
+      "type": "number",
+      "format": "float"
+    },
+    "class": {
+      "description": "Gameplay class.",
+      "$ref": "#/$defs/VehicleClass"
+    },
+    "display_name": {
+      "description": "Human-readable analog name (no licensed names, see `data/cars/README.md`).",
+      "type": "string"
+    },
+    "drag_cd_a_m2": {
+      "description": "Drag coefficient × frontal area (Cd·A), m². Drag force = 0.5·ρ·CdA·v².",
+      "type": "number",
+      "format": "float"
+    },
+    "drivetrain": {
+      "description": "Clutch, gearbox, differentials.",
+      "$ref": "#/$defs/DrivetrainDef"
+    },
+    "durability_class": {
+      "description": "Durability class 1 (fragile) ..= 5 (battering ram). Informational for UI and pricing.",
+      "type": "integer",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0
+    },
+    "engine": {
+      "description": "Engine.",
+      "$ref": "#/$defs/EngineDef"
+    },
+    "front_weight_frac": {
+      "description": "Fraction of static weight on the front axle, 0..1.",
+      "type": "number",
+      "format": "float"
+    },
+    "id": {
+      "description": "Unique id; must equal the file stem (`data/cars/<id>.json`).",
+      "type": "string"
+    },
+    "inertia_kgm2": {
+      "description": "Principal moments of inertia about the CG `[roll, pitch, yaw]`, kg·m².\nOrder is roll, pitch, yaw: roll about the longitudinal (Y) axis, pitch about the lateral\n(X) axis, yaw about the vertical (Z) axis.",
+      "type": "array",
+      "items": {
+        "type": "number",
+        "format": "float"
+      },
+      "maxItems": 3,
+      "minItems": 3
+    },
+    "lattice_id": {
+      "description": "Id of the damage lattice in `data/lattices/<lattice_id>.json`.",
+      "type": "string"
+    },
+    "lift_front": {
+      "description": "Front body lift coefficient × area (Cl·A), m². Positive = lift, negative = downforce.",
+      "type": "number",
+      "format": "float"
+    },
+    "lift_rear": {
+      "description": "Rear body lift coefficient × area (Cl·A), m². Positive = lift, negative = downforce.",
+      "type": "number",
+      "format": "float"
+    },
+    "mass_kg": {
+      "description": "Curb mass including driver, kg.",
+      "type": "number",
+      "format": "float"
+    },
+    "steering": {
+      "description": "Steering system.",
+      "$ref": "#/$defs/SteeringDef"
+    },
+    "suspension": {
+      "description": "Suspension corners, ordered FL, FR, RL, RR.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/SuspensionDef"
+      },
+      "maxItems": 4,
+      "minItems": 4
+    },
+    "track_front_m": {
+      "description": "Front track width (wheel centre to wheel centre), m.",
+      "type": "number",
+      "format": "float"
+    },
+    "track_rear_m": {
+      "description": "Rear track width, m.",
+      "type": "number",
+      "format": "float"
+    },
+    "wheelbase_m": {
+      "description": "Wheelbase (front axle to rear axle), m.",
+      "type": "number",
+      "format": "float"
+    },
+    "wheels": {
+      "description": "Wheels, ordered FL, FR, RL, RR.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/WheelDef"
+      },
+      "maxItems": 4,
+      "minItems": 4
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "display_name",
+    "class",
+    "analog_of",
+    "body_size_m",
+    "mass_kg",
+    "front_weight_frac",
+    "wheelbase_m",
+    "track_front_m",
+    "track_rear_m",
+    "cg_height_m",
+    "inertia_kgm2",
+    "drag_cd_a_m2",
+    "lift_front",
+    "lift_rear",
+    "engine",
+    "drivetrain",
+    "wheels",
+    "suspension",
+    "brakes",
+    "steering",
+    "aero_downforce_coeffs",
+    "lattice_id",
+    "base_price",
+    "durability_class"
+  ],
+  "$defs": {
+    "BrakeDef": {
+      "description": "Brake system.",
+      "type": "object",
+      "properties": {
+        "bias_front": {
+          "description": "Brake bias toward the front, 0..1.",
+          "type": "number",
+          "format": "float"
+        },
+        "handbrake_rear_nm": {
+          "description": "Handbrake torque per rear wheel, N·m.",
+          "type": "number",
+          "format": "float"
+        },
+        "max_torque_front_nm": {
+          "description": "Maximum brake torque per front wheel at full pedal and `bias_front = 1`, N·m.",
+          "type": "number",
+          "format": "float"
+        },
+        "max_torque_rear_nm": {
+          "description": "Maximum brake torque per rear wheel at full pedal and `bias_front = 0`, N·m.",
+          "type": "number",
+          "format": "float"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "max_torque_front_nm",
+        "max_torque_rear_nm",
+        "bias_front",
+        "handbrake_rear_nm"
+      ]
+    },
+    "DiffDef": {
+      "description": "Differential type for one axle.",
+      "oneOf": [
+        {
+          "description": "Open differential (equal torque, free speed difference).",
+          "type": "string",
+          "const": "Open"
+        },
+        {
+          "description": "Clutch-type limited-slip differential.",
+          "type": "object",
+          "properties": {
+            "Lsd": {
+              "type": "object",
+              "properties": {
+                "preload_nm": {
+                  "description": "Static locking preload torque, N·m.",
+                  "type": "number",
+                  "format": "float"
+                },
+                "ramp_coast": {
+                  "description": "Locking fraction under coast (engine braking) torque, 0..1.",
+                  "type": "number",
+                  "format": "float"
+                },
+                "ramp_power": {
+                  "description": "Locking fraction under drive (power) torque, 0..1.",
+                  "type": "number",
+                  "format": "float"
+                }
+              },
+              "required": [
+                "preload_nm",
+                "ramp_power",
+                "ramp_coast"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Lsd"
+          ]
+        },
+        {
+          "description": "Fully locked / welded / spool.",
+          "type": "string",
+          "const": "Locked"
+        }
+      ]
+    },
+    "DriveLayout": {
+      "description": "Which axles receive drive torque.",
+      "oneOf": [
+        {
+          "description": "Front-wheel drive.",
+          "type": "string",
+          "const": "Fwd"
+        },
+        {
+          "description": "Rear-wheel drive.",
+          "type": "string",
+          "const": "Rwd"
+        },
+        {
+          "description": "All-wheel drive with a fixed centre split.",
+          "type": "object",
+          "properties": {
+            "Awd": {
+              "type": "object",
+              "properties": {
+                "front_split": {
+                  "description": "Fraction of drive torque sent to the front axle, 0..1.",
+                  "type": "number",
+                  "format": "float"
+                }
+              },
+              "required": [
+                "front_split"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Awd"
+          ]
+        }
+      ]
+    },
+    "DrivetrainDef": {
+      "description": "Clutch, gearbox and differentials.",
+      "type": "object",
+      "properties": {
+        "clutch_max_nm": {
+          "description": "Maximum torque the clutch can transmit, N·m.",
+          "type": "number",
+          "format": "float"
+        },
+        "diff_front": {
+          "description": "Front differential. Ignored for RWD.",
+          "$ref": "#/$defs/DiffDef"
+        },
+        "diff_rear": {
+          "description": "Rear differential. Ignored for FWD.",
+          "$ref": "#/$defs/DiffDef"
+        },
+        "final_drive": {
+          "description": "Final drive ratio.",
+          "type": "number",
+          "format": "float"
+        },
+        "gear_ratios": {
+          "description": "Forward gear ratios, 1st gear first (e.g. `[3.5, 2.1, 1.4, 1.0, 0.8]`).",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "float"
+          }
+        },
+        "layout": {
+          "description": "Driven axles.",
+          "$ref": "#/$defs/DriveLayout"
+        },
+        "reverse_ratio": {
+          "description": "Reverse gear ratio (positive number; direction handled by the drivetrain).",
+          "type": "number",
+          "format": "float"
+        },
+        "shift_time_s": {
+          "description": "Time a gear change takes (torque interrupted), s.",
+          "type": "number",
+          "format": "float"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "layout",
+        "gear_ratios",
+        "final_drive",
+        "reverse_ratio",
+        "diff_front",
+        "diff_rear",
+        "clutch_max_nm",
+        "shift_time_s"
+      ]
+    },
+    "EngineDef": {
+      "description": "Engine definition.",
+      "type": "object",
+      "properties": {
+        "engine_brake_nm": {
+          "description": "Engine braking torque at redline with closed throttle, N·m (positive number).",
+          "type": "number",
+          "format": "float"
+        },
+        "idle_rpm": {
+          "description": "Idle speed, rpm.",
+          "type": "number",
+          "format": "float"
+        },
+        "inertia_kgm2": {
+          "description": "Rotating inertia of the engine + flywheel, kg·m².",
+          "type": "number",
+          "format": "float"
+        },
+        "redline_rpm": {
+          "description": "Redline (shift light / auto-shift point), rpm.",
+          "type": "number",
+          "format": "float"
+        },
+        "rev_limit_rpm": {
+          "description": "Hard rev limiter (fuel cut), rpm. Must be ≥ `redline_rpm`.",
+          "type": "number",
+          "format": "float"
+        },
+        "torque_curve_nm": {
+          "description": "Full-throttle torque curve as `(rpm, Nm)` pairs, strictly increasing in rpm.\nInterpolated linearly; 10–15 points recommended.",
+          "type": "array",
+          "items": {
+            "type": "array",
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "number",
+                "format": "float"
+              },
+              {
+                "type": "number",
+                "format": "float"
+              }
+            ]
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "torque_curve_nm",
+        "idle_rpm",
+        "redline_rpm",
+        "rev_limit_rpm",
+        "inertia_kgm2",
+        "engine_brake_nm"
+      ]
+    },
+    "SteeringDef": {
+      "description": "Steering system.",
+      "type": "object",
+      "properties": {
+        "ffb_scale": {
+          "description": "Force-feedback output scale, dimensionless (1 = nominal).",
+          "type": "number",
+          "format": "float"
+        },
+        "rack_speed_rad_per_s": {
+          "description": "Maximum rack speed expressed as road-wheel angle rate, rad/s.",
+          "type": "number",
+          "format": "float"
+        },
+        "ratio": {
+          "description": "Steering ratio (steering-wheel angle / road-wheel angle), dimensionless.",
+          "type": "number",
+          "format": "float"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "ratio",
+        "rack_speed_rad_per_s",
+        "ffb_scale"
+      ]
+    },
+    "SuspensionDef": {
+      "description": "One suspension corner.",
+      "type": "object",
+      "properties": {
+        "arb_n_per_m": {
+          "description": "Anti-roll bar stiffness for this corner's axle, N/m (duplicated on both corners of an axle).",
+          "type": "number",
+          "format": "float"
+        },
+        "bump_stop_n_per_m": {
+          "description": "Bump-stop stiffness engaged at the end of travel, N/m.",
+          "type": "number",
+          "format": "float"
+        },
+        "damper_bump_ns_per_m": {
+          "description": "Damping coefficient in bump (compression), N·s/m.",
+          "type": "number",
+          "format": "float"
+        },
+        "damper_rebound_ns_per_m": {
+          "description": "Damping coefficient in rebound (extension), N·s/m.",
+          "type": "number",
+          "format": "float"
+        },
+        "preload_m": {
+          "description": "Spring preload expressed as static compression at zero load, m.",
+          "type": "number",
+          "format": "float"
+        },
+        "spring_n_per_m": {
+          "description": "Wheel-rate spring stiffness, N/m.",
+          "type": "number",
+          "format": "float"
+        },
+        "travel_m": {
+          "description": "Total wheel travel from full droop to bump stop, m.",
+          "type": "number",
+          "format": "float"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "spring_n_per_m",
+        "damper_bump_ns_per_m",
+        "damper_rebound_ns_per_m",
+        "travel_m",
+        "preload_m",
+        "arb_n_per_m",
+        "bump_stop_n_per_m"
+      ]
+    },
+    "VehicleClass": {
+      "description": "Gameplay class of a vehicle. Used for matchmaking brackets, pricing and police roles.",
+      "oneOf": [
+        {
+          "description": "Cheap, worn-out car; the economy floor.",
+          "type": "string",
+          "const": "Beater"
+        },
+        {
+          "description": "Small hatch/sedan.",
+          "type": "string",
+          "const": "Compact"
+        },
+        {
+          "description": "Sports car / sport sedan.",
+          "type": "string",
+          "const": "Sport"
+        },
+        {
+          "description": "American-style muscle car.",
+          "type": "string",
+          "const": "Muscle"
+        },
+        {
+          "description": "Mid/rear-engine exotic.",
+          "type": "string",
+          "const": "Exotic"
+        },
+        {
+          "description": "Pickup truck.",
+          "type": "string",
+          "const": "Truck"
+        },
+        {
+          "description": "Standard police patrol sedan.",
+          "type": "string",
+          "const": "PoliceCruiser"
+        },
+        {
+          "description": "High-performance police pursuit vehicle.",
+          "type": "string",
+          "const": "PoliceInterceptor"
+        },
+        {
+          "description": "Police SUV.",
+          "type": "string",
+          "const": "PoliceSuv"
+        }
+      ]
+    },
+    "WheelDef": {
+      "description": "One wheel + tire.",
+      "type": "object",
+      "properties": {
+        "ackermann_frac": {
+          "description": "Ackermann fraction 0 (parallel) ..= 1 (full Ackermann).",
+          "type": "number",
+          "format": "float"
+        },
+        "camber_rad": {
+          "description": "Static camber, rad (negative = top of wheel leans inward).",
+          "type": "number",
+          "format": "float"
+        },
+        "caster_rad": {
+          "description": "Caster angle, rad (positive = steering axis top leans rearward).",
+          "type": "number",
+          "format": "float"
+        },
+        "mass_kg": {
+          "description": "Unsprung mass of wheel + tire + hub, kg.",
+          "type": "number",
+          "format": "float"
+        },
+        "max_steer_rad": {
+          "description": "Maximum road-wheel steer angle at full lock, rad.",
+          "type": "number",
+          "format": "float"
+        },
+        "position_m": {
+          "description": "Hub (wheel centre) position at static ride height in chassis space, m.",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "float"
+          },
+          "maxItems": 3,
+          "minItems": 3
+        },
+        "radius_m": {
+          "description": "Loaded tire radius, m.",
+          "type": "number",
+          "format": "float"
+        },
+        "steerable": {
+          "description": "Whether this wheel is steered.",
+          "type": "boolean"
+        },
+        "tire_id": {
+          "description": "Id of the tire in `data/tires/<tire_id>.json`.",
+          "type": "string"
+        },
+        "toe_rad": {
+          "description": "Static toe, rad (positive = toe-in).",
+          "type": "number",
+          "format": "float"
+        },
+        "width_m": {
+          "description": "Tire section width, m.",
+          "type": "number",
+          "format": "float"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "position_m",
+        "radius_m",
+        "width_m",
+        "mass_kg",
+        "tire_id",
+        "steerable",
+        "max_steer_rad",
+        "ackermann_frac",
+        "camber_rad",
+        "toe_rad",
+        "caster_rad"
+      ]
+    }
+  }
+}

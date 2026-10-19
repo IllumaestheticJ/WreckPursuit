@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ModeTable",
+  "description": "Scalars that turn the single damage code path into Arcade or Simulation behaviour.",
+  "type": "object",
+  "properties": {
+    "beam_break_scale": {
+      "description": "Multiplier on beam failure strain and detachable break impulses (higher = tougher).",
+      "type": "number",
+      "format": "float"
+    },
+    "cabin_intrusion_total_loss_m": {
+      "description": "Cabin intrusion that forces a total loss regardless of health, m.",
+      "type": "number",
+      "format": "float"
+    },
+    "component_damage_scale": {
+      "description": "Multiplier on component health loss per metre of intrusion.",
+      "type": "number",
+      "format": "float"
+    },
+    "component_fail_threshold_scale": {
+      "description": "Multiplier on `ComponentMount::intrusion_fail_m` (higher = components survive longer).",
+      "type": "number",
+      "format": "float"
+    },
+    "engine_kill_on_total_loss": {
+      "description": "If true the engine is killed when the vehicle becomes a total loss.",
+      "type": "boolean"
+    },
+    "global_health_from_intrusion": {
+      "description": "If true global health is derived from structural intrusion (in addition to components).",
+      "type": "boolean"
+    },
+    "impulse_to_lattice_scale": {
+      "description": "Multiplier from rigid-body contact impulse to impulse injected into the lattice.",
+      "type": "number",
+      "format": "float"
+    },
+    "mode": {
+      "description": "Which mode this table describes.",
+      "$ref": "#/$defs/DamageMode"
+    },
+    "plasticity_scale": {
+      "description": "Multiplier on plastic flow (how much permanent set a given over-yield strain produces).",
+      "type": "number",
+      "format": "float"
+    },
+    "repair_cost_scale": {
+      "description": "Multiplier on repair bills.",
+      "type": "number",
+      "format": "float"
+    },
+    "total_loss_health": {
+      "description": "Global health (0..1) below which the vehicle is a total loss.",
+      "type": "number",
+      "format": "float"
+    },
+    "wheel_detach_scale": {
+      "description": "Wheel-detach susceptibility: the wheel mount failure threshold is divided by this\n(lower = wheels stay on longer).",
+      "type": "number",
+      "format": "float"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "mode",
+    "impulse_to_lattice_scale",
+    "plasticity_scale",
+    "beam_break_scale",
+    "component_damage_scale",
+    "component_fail_threshold_scale",
+    "total_loss_health",
+    "cabin_intrusion_total_loss_m",
+    "repair_cost_scale",
+    "wheel_detach_scale",
+    "engine_kill_on_total_loss",
+    "global_health_from_intrusion"
+  ],
+  "$defs": {
+    "DamageMode": {
+      "description": "Damage mode. Both modes run the same code path with different [`crate::ModeTable`]s.",
+      "oneOf": [
+        {
+          "description": "Punishing but survivable; one hard hit degrades, several end the car.",
+          "type": "string",
+          "const": "Arcade"
+        },
+        {
+          "description": "Real-world-ish; one hard hit at speed is a total loss.",
+          "type": "string",
+          "const": "Simulation"
+        }
+      ]
+    }
+  }
+}
