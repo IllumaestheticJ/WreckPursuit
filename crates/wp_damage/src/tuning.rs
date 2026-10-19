@@ -95,6 +95,20 @@ pub struct DamageTuning {
     pub fuel_leak_damaged_per_s: f32,
     /// Mass of a detached wheel debris body, kg.
     pub wheel_debris_mass_kg: f32,
+    /// Arcade only: closing speed (before the car-to-car share) from which a hit causes
+    /// lasting mechanical damage, m/s. A crash episode (wake → sleep) whose contacts all stay
+    /// below it is cosmetic: the lattice dents, but component health, alignment and steering
+    /// pull keep their pre-crash values. Simulation: every hit is mechanical. Stop-gap until
+    /// `ModeTable::mechanical_min_closing_mps` exists (contract request #8).
+    pub arcade_mechanical_min_closing_mps: f32,
+    /// Arcade only: fraction of a cosmetic episode's plastic energy that still counts toward
+    /// global health (dents are not free, but light hits never end a car).
+    pub arcade_cosmetic_health_share: f32,
+    /// Arcade only: fraction of lost (not failed) component health and alignment that comes
+    /// back after a hard hit ("limp-mode settle"), reached after `arcade_settle_s`.
+    pub arcade_settle_fraction: f32,
+    /// Arcade only: time for the limp-mode settle to complete, s.
+    pub arcade_settle_s: f32,
 }
 
 impl Default for DamageTuning {
@@ -140,6 +154,10 @@ impl Default for DamageTuning {
             fuel_leak_failed_per_s: 0.01,
             fuel_leak_damaged_per_s: 0.001,
             wheel_debris_mass_kg: 22.0,
+            arcade_mechanical_min_closing_mps: 11.5,
+            arcade_cosmetic_health_share: 0.25,
+            arcade_settle_fraction: 0.3,
+            arcade_settle_s: 20.0,
         }
     }
 }

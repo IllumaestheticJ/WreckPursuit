@@ -63,6 +63,13 @@ pub struct DamageSnapshot {
     pub shattered: BTreeSet<BodyRegion>,
     /// Wheels FL, FR, RL, RR that came off.
     pub wheels_lost: [bool; 4],
+    /// Arcade cosmetic offsets per component: `[intrusion m, toe rad, camber rad]` added by
+    /// light hits and ignored by handling (only non-zero entries).
+    pub component_cosmetic: BTreeMap<Component, [f32; 3]>,
+    /// Arcade: plastic energy per region from light hits, discounted from health, J.
+    pub region_cosmetic_j: BTreeMap<BodyRegion, f32>,
+    /// Seconds since the last hard hit ended (Arcade limp-mode settle).
+    pub since_hard_hit_s: f32,
     /// Signed steering-pull bias of a bent rack (seeded at construction).
     pub steer_pull_bias: f32,
     /// Global health 0 ..= 1.
@@ -158,6 +165,14 @@ impl DamageModel {
                 .map(|g| (g.group, g.impulse_ns))
                 .collect(),
             shattered: self.shattered.clone(),
+            component_cosmetic: self
+                .components
+                .iter()
+                .filter(|c| c.cos_intrusion != 0.0 || c.cos_toe != 0.0 || c.cos_camber != 0.0)
+                .map(|c| (c.kind, [c.cos_intrusion, c.cos_toe, c.cos_camber]))
+                .collect(),
+            region_cosmetic_j: nonzero_regions(&self.region_cosmetic_j),
+            since_hard_hit_s: (self.time_s - self.last_hard_end_s).max(0.0),
             wheels_lost: self.wheel_lost,
             steer_pull_bias: self.steer_pull_bias,
             health: self.health,
@@ -222,7 +237,9 @@ impl DamageModel {
             self.region_plastic_j[r as usize] = get(&s.region_plastic_j, r);
             self.region_injected_j[r as usize] = get(&s.region_injected_j, r);
             self.region_event_severity[r as usize] = get(&s.region_reported_severity, r);
+            self.region_cosmetic_j[r as usize] = get(&s.region_cosmetic_j, r);
         }
+        self.last_hard_end_s = self.time_s - s.since_hard_hit_s;
         self.cracked.clone_from(&s.cracked);
         self.shattered.clone_from(&s.shattered);
         for c in &mut self.components {
@@ -232,6 +249,14 @@ impl DamageModel {
                 .get(&c.kind)
                 .copied()
                 .unwrap_or(1.0);
+            let [ci, ct, cc] = s
+                .component_cosmetic
+                .get(&c.kind)
+                .copied()
+                .unwrap_or([0.0; 3]);
+            c.cos_intrusion = ci;
+            c.cos_toe = ct;
+            c.cos_camber = cc;
             match s.components_failed.get(&c.kind) {
                 Some(age) => {
                     c.failed = true;
@@ -302,6 +327,7 @@ impl DamageModel {
                     self.region_plastic_j[ri] = 0.0;
                     self.region_injected_j[ri] = 0.0;
                     self.region_event_severity[ri] = 0.0;
+                    self.region_cosmetic_j[ri] = 0.0;
                     self.cracked.remove(&r);
                     self.shattered.remove(&r);
                 }
@@ -314,6 +340,9 @@ impl DamageModel {
                             comp.last_event_health = 1.0;
                             comp.toe = 0.0;
                             comp.camber = 0.0;
+                            comp.cos_intrusion = 0.0;
+                            comp.cos_toe = 0.0;
+                            comp.cos_camber = 0.0;
                             for &i in &comp.nodes {
                                 fix_node[i as usize] = true;
                             }
@@ -436,31 +465,22 @@ impl DamageModel {
             self.beams[bi].update_break_lengths(h, scale, &self.tuning);
         }
         for ci in 0..self.components.len() {
-            let nodes = self.components[ci].nodes.clone();
-            let intrusion = nodes
-                .iter()
-                .map(|&i| self.node_intrusion(i as usize))
-                .sum::<f32>()
-                / nodes.len().max(1) as f32;
-            let (toe, camber) = if corner_of(self.components[ci].kind).is_some() {
-                self.alignment_change(&nodes)
-            } else {
-                (0.0, 0.0)
-            };
+            let (raw, toe, camber) = self.component_raw(ci);
             let c = &mut self.components[ci];
-            c.intrusion_m = intrusion;
-            let is_susp = matches!(
+            c.intrusion_m = raw;
+            if matches!(
                 c.kind,
                 Component::SuspensionFL
                     | Component::SuspensionFR
                     | Component::SuspensionRL
                     | Component::SuspensionRR
-            );
-            if is_susp {
-                c.toe = toe;
-                c.camber = camber;
+            ) {
+                c.toe = toe - c.cos_toe;
+                c.camber = camber - c.cos_camber;
             }
         }
+        self.episode_active = false;
+        self.episode_hard = false;
         self.glass_broken_tick.clear();
         self.awake = false;
         self.quiet_ticks = 0;

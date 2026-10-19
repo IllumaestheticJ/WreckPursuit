@@ -150,7 +150,7 @@ pub struct BarrierResult {
     /// direction, see [`DamageModel::structural_crush_m`]), `health`, `damage` (1 - health), `cabin_intrusion_m`, `plastic_energy_kj`,
     /// `injected_energy_kj`, `broken_beams`, `detached_parts`, `failed_components`,
     /// `repair_total`, `power_scale`, `steer_ratio_scale`, `grip_min`, `camber_abs_max`,
-    /// `toe_abs_max`, `total_loss` (0/1), `health:<Component>` / `intrusion:<Component>`
+    /// `toe_abs_max`, `steer_pull_abs`, `total_loss` (0/1), `health:<Component>` / `intrusion:<Component>`
     /// for every component and `severity:<BodyRegion>` (repair severity 0..=1) for every
     /// damaged region.
     pub metrics: BTreeMap<String, f32>,
@@ -306,6 +306,7 @@ pub fn measure(
     );
     put("power_scale", eff.power_scale);
     put("steer_ratio_scale", eff.steer_ratio_scale);
+    put("steer_pull_abs", eff.steer_pull.abs());
     put(
         "grip_min",
         eff.grip_scale.iter().copied().fold(1.0, f32::min),

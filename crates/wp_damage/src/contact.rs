@@ -86,6 +86,8 @@ struct ContactGroup {
     mass: f32,
     energy: f32,
     tangent_momentum: V3,
+    /// Largest closing speed of the group's contacts (before the car-to-car share), m/s.
+    max_closing: f32,
 }
 
 impl DamageModel {
@@ -142,6 +144,7 @@ impl DamageModel {
                         mass: 0.0,
                         energy: 0.0,
                         tangent_momentum: [0.0; 3],
+                        max_closing: 0.0,
                     });
                     groups.last_mut().expect("just pushed")
                 }
@@ -157,7 +160,9 @@ impl DamageModel {
             g.mass += j / v;
             g.energy += 0.5 * j * v;
             g.tangent_momentum = vec3::add(g.tangent_momentum, tan);
+            g.max_closing = g.max_closing.max(closing);
         }
+        let hard_from = self.mechanical_min_closing(mode);
         for g in groups {
             if g.energy < t.min_contact_energy_j {
                 continue;
@@ -165,6 +170,13 @@ impl DamageModel {
             let Some(n) = vec3::normalize(g.normal_sum) else {
                 continue;
             };
+            // Crash episodes (Arcade cosmetic vs mechanical damage, see `model.rs`).
+            if !self.episode_active {
+                self.begin_episode();
+            }
+            if g.max_closing >= hard_from {
+                self.episode_hard = true;
+            }
             self.add_manifold(g, n);
         }
     }

@@ -12,8 +12,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use wp_contracts::{
-    BodyRegion, Component, ContactImpulse, DamageSim, EntityId, HandlingEffects, LatticeDef,
-    MaterialDef, MaterialKind, ModeTable, PriceTable, RepairEstimate, SimEvent,
+    BodyRegion, Component, ContactImpulse, DamageMode, DamageSim, EntityId, HandlingEffects,
+    LatticeDef, MaterialDef, MaterialKind, ModeTable, PriceTable, RepairEstimate, SimEvent,
 };
 use wp_math::{Rng, StateHasher};
 
@@ -96,6 +96,16 @@ pub fn is_structural_region(r: BodyRegion) -> bool {
             | BodyRegion::FrameLeft
             | BodyRegion::FrameRight
             | BodyRegion::Cabin
+    )
+}
+
+fn is_suspension(c: Component) -> bool {
+    matches!(
+        c,
+        Component::SuspensionFL
+            | Component::SuspensionFR
+            | Component::SuspensionRL
+            | Component::SuspensionRR
     )
 }
 
@@ -263,9 +273,19 @@ pub(crate) struct ComponentState {
     pub failed_at_s: f32,
     pub last_event_health: f32,
     pub intrusion_m: f32,
-    /// Suspension only: toe / camber change from mount displacement, rad.
+    /// Suspension only: toe / camber change from mount displacement, rad (effective, i.e.
+    /// minus the cosmetic offsets below).
     pub toe: f32,
     pub camber: f32,
+    /// Arcade cosmetic offsets: intrusion / toe / camber added by cosmetic crash episodes,
+    /// subtracted before health and alignment are derived.
+    pub cos_intrusion: f32,
+    pub cos_toe: f32,
+    pub cos_camber: f32,
+    /// Raw intrusion / toe / camber when the current crash episode started.
+    pub ep_intrusion: f32,
+    pub ep_toe: f32,
+    pub ep_camber: f32,
 }
 
 /// Damage state for one vehicle. Implements [`DamageSim`].
@@ -335,6 +355,17 @@ pub struct DamageModel {
     pub(crate) last_mode: Option<ModeTable>,
     /// Glass panels that shattered during the current `apply_contacts` call.
     pub(crate) glass_broken_tick: Vec<GlassBreak>,
+    /// A crash episode (model woken by contacts, until it sleeps again) is in progress.
+    pub(crate) episode_active: bool,
+    /// The current episode had a hit at or above the mode's mechanical threshold.
+    pub(crate) episode_hard: bool,
+    /// Region plastic energy when the current episode started, J.
+    pub(crate) ep_region_plastic_j: [f32; REGION_COUNT],
+    /// Plastic energy per region that came from Arcade cosmetic episodes and is discounted
+    /// from global health (by `1 - arcade_cosmetic_health_share`), J.
+    pub(crate) region_cosmetic_j: [f32; REGION_COUNT],
+    /// Damage-model time at which the last hard episode ended (limp-mode settle), s.
+    pub(crate) last_hard_end_s: f32,
 }
 
 impl DamageModel {
@@ -499,6 +530,12 @@ impl DamageModel {
                 intrusion_m: 0.0,
                 toe: 0.0,
                 camber: 0.0,
+                cos_intrusion: 0.0,
+                cos_toe: 0.0,
+                cos_camber: 0.0,
+                ep_intrusion: 0.0,
+                ep_toe: 0.0,
+                ep_camber: 0.0,
             })
             .collect();
 
@@ -560,6 +597,11 @@ impl DamageModel {
             last_emitted_pos: rest_pos,
             last_mode: None,
             glass_broken_tick: Vec::new(),
+            episode_active: false,
+            episode_hard: false,
+            ep_region_plastic_j: [0.0; REGION_COUNT],
+            region_cosmetic_j: [0.0; REGION_COUNT],
+            last_hard_end_s: 0.0,
         };
         model.recompute_hull();
         model
@@ -1107,44 +1149,55 @@ impl DamageModel {
         }
     }
 
+    /// Raw (un-offset) intrusion, toe and camber of component `ci` from the current nodes.
+    pub(crate) fn component_raw(&self, ci: usize) -> (f32, f32, f32) {
+        let c = &self.components[ci];
+        let mut intrusion = 0.0;
+        for &i in &c.nodes {
+            intrusion += self.node_intrusion(i as usize);
+        }
+        intrusion /= c.nodes.len().max(1) as f32;
+        let (toe, camber) = if is_suspension(c.kind) {
+            self.alignment_change(&c.nodes)
+        } else {
+            (0.0, 0.0)
+        };
+        (intrusion, toe, camber)
+    }
+
+    /// True while an Arcade crash episode is cosmetic (no hit has reached the mode's
+    /// mechanical threshold yet): components keep their pre-crash state.
+    pub(crate) fn cosmetic_episode(&self) -> bool {
+        self.episode_active && !self.episode_hard
+    }
+
     fn update_components(&mut self, mode: &ModeTable, out: &mut Vec<SimEvent>) {
         let t = self.tuning.clone();
+        let frozen = self.cosmetic_episode();
         for ci in 0..self.components.len() {
             let kind = self.components[ci].kind;
             let nodes = self.components[ci].nodes.clone();
-            let mut intrusion = 0.0;
-            let mut any_detached = false;
-            for &i in &nodes {
-                if self.detached[i as usize] {
-                    any_detached = true;
-                }
-                intrusion += self.node_intrusion(i as usize);
-            }
-            intrusion /= nodes.len().max(1) as f32;
+            let (raw, raw_toe, raw_camber) = self.component_raw(ci);
+            let any_detached = nodes.iter().any(|&i| self.detached[i as usize]);
             // A wheel whose hub node lost every beam is gone, whatever its intrusion.
             let mount_broken = is_wheel(kind)
                 && self.node_beams[nodes[0] as usize]
                     .iter()
                     .all(|&b| self.hot[b as usize].broken);
-            if corner_of(kind).is_some()
-                && matches!(
-                    kind,
-                    Component::SuspensionFL
-                        | Component::SuspensionFR
-                        | Component::SuspensionRL
-                        | Component::SuspensionRR
-                )
-            {
-                let (toe, camber) = self.alignment_change(&nodes);
-                let c = &mut self.components[ci];
-                c.toe = toe;
-                c.camber = camber;
-            }
             let c = &mut self.components[ci];
-            c.intrusion_m = intrusion;
+            c.intrusion_m = raw;
+            if frozen {
+                // Cosmetic episode: dents only; health, alignment and failures wait.
+                continue;
+            }
+            if is_suspension(kind) {
+                c.toe = raw_toe - c.cos_toe;
+                c.camber = raw_camber - c.cos_camber;
+            }
             if c.failed {
                 continue;
             }
+            let intrusion = (raw - c.cos_intrusion).max(0.0);
             let mut fail = c.fail_m * mode.component_fail_threshold_scale;
             if is_wheel(kind) {
                 fail /= mode.wheel_detach_scale;
@@ -1190,6 +1243,65 @@ impl DamageModel {
                     health: c.health,
                 });
             }
+        }
+    }
+
+    /// A crash episode starts: remember the raw component values and region energies so a
+    /// cosmetic episode can be discounted when it ends.
+    pub(crate) fn begin_episode(&mut self) {
+        self.episode_active = true;
+        self.episode_hard = false;
+        self.ep_region_plastic_j = self.region_plastic_j;
+        for ci in 0..self.components.len() {
+            let (raw, toe, camber) = self.component_raw(ci);
+            let c = &mut self.components[ci];
+            c.ep_intrusion = raw;
+            c.ep_toe = toe;
+            c.ep_camber = camber;
+        }
+    }
+
+    /// The lattice went to sleep. A cosmetic episode's deformation becomes cosmetic offsets
+    /// (components keep their pre-crash state for good) and most of its plastic energy is
+    /// discounted from health; a hard episode starts the limp-mode settle clock.
+    fn end_episode(&mut self) {
+        if !self.episode_active {
+            return;
+        }
+        self.episode_active = false;
+        if self.episode_hard {
+            self.last_hard_end_s = self.time_s;
+            return;
+        }
+        for ci in 0..self.components.len() {
+            let (raw, toe, camber) = self.component_raw(ci);
+            let c = &mut self.components[ci];
+            c.cos_intrusion += (raw - c.ep_intrusion).max(0.0);
+            c.cos_toe += toe - c.ep_toe;
+            c.cos_camber += camber - c.ep_camber;
+        }
+        let keep = 1.0 - self.tuning.arcade_cosmetic_health_share;
+        for r in 0..REGION_COUNT {
+            let added = (self.region_plastic_j[r] - self.ep_region_plastic_j[r]).max(0.0);
+            self.region_cosmetic_j[r] += added * keep;
+        }
+    }
+
+    /// Arcade limp-mode settle fraction now (0 in Simulation and during a crash episode).
+    fn settle_fraction(&self, mode: &ModeTable) -> f32 {
+        if mode.mode != DamageMode::Arcade || self.episode_active {
+            return 0.0;
+        }
+        let t = self.tuning.arcade_settle_s.max(1e-3);
+        self.tuning.arcade_settle_fraction
+            * ((self.time_s - self.last_hard_end_s) / t).clamp(0.0, 1.0)
+    }
+
+    /// Mechanical threshold of `mode` (closing speed, m/s): 0 = every hit is mechanical.
+    pub(crate) fn mechanical_min_closing(&self, mode: &ModeTable) -> f32 {
+        match mode.mode {
+            DamageMode::Arcade => self.tuning.arcade_mechanical_min_closing_mps,
+            DamageMode::Simulation => 0.0,
         }
     }
 
@@ -1258,7 +1370,9 @@ impl DamageModel {
     pub(crate) fn update_health(&mut self, mode: &ModeTable, out: &mut Vec<SimEvent>) {
         let mut weighted = 0.0;
         for r in ALL_REGIONS {
-            weighted += region_health_weight(r) * self.region_plastic_j[r as usize];
+            let e =
+                (self.region_plastic_j[r as usize] - self.region_cosmetic_j[r as usize]).max(0.0);
+            weighted += region_health_weight(r) * e;
         }
         let e_ref = (self.tuning.total_loss_energy_per_kg * self.lattice_mass_kg).max(1.0);
         let structural = 1.0 - (weighted / e_ref).clamp(0.0, 1.0);
@@ -1293,8 +1407,16 @@ impl DamageModel {
     pub(crate) fn compute_effects(&self, mode: &ModeTable) -> HandlingEffects {
         let mut e = HandlingEffects::NEUTRAL;
         let mut power = 1.0f32;
+        let settle = self.settle_fraction(mode);
         for c in &self.components {
-            let h = c.health;
+            // Arcade limp-mode settle: part of the lost health / alignment of components that
+            // still work comes back over time after a hard hit (effects only; the repair bill
+            // and stored health are unchanged).
+            let h = if c.failed {
+                c.health
+            } else {
+                c.health + settle * (1.0 - c.health)
+            };
             match c.kind {
                 Component::Engine => {
                     if c.failed {
@@ -1320,8 +1442,8 @@ impl DamageModel {
                 | Component::SuspensionRL
                 | Component::SuspensionRR => {
                     let w = corner_of(c.kind).unwrap_or(0);
-                    e.toe_delta[w] = c.toe;
-                    e.camber_delta[w] = c.camber;
+                    e.toe_delta[w] = c.toe * (1.0 - settle);
+                    e.camber_delta[w] = c.camber * (1.0 - settle);
                     e.grip_scale[w] *= if c.failed { 0.6 } else { 1.0 - 0.3 * (1.0 - h) };
                 }
                 Component::WheelFL
@@ -1440,10 +1562,15 @@ impl DamageSim for DamageModel {
                 self.solve(t, mode, out);
                 self.check_groups(mode, out);
                 self.dirty = true;
+                if !self.awake {
+                    self.end_episode();
+                }
             }
             if self.dirty {
                 self.update_components(mode, out);
-                self.update_health(mode, out);
+                if !self.cosmetic_episode() {
+                    self.update_health(mode, out);
+                }
                 self.emit_region_events(out);
                 if self.emit_lattice_events {
                     self.emit_lattice_deformed(out);

@@ -929,3 +929,142 @@ fn glass_breaks_are_readable_for_the_tick_they_happen() {
     );
     assert!(m.glass_broken_this_tick().is_empty());
 }
+
+fn handling_is_neutral_except_drag(e: &HandlingEffects) -> bool {
+    let mut n = *e;
+    n.drag_scale = 1.0;
+    n == HandlingEffects::NEUTRAL
+}
+
+#[test]
+fn arcade_light_and_medium_hits_are_cosmetic() {
+    let car = sedan();
+    for (kind, kmh) in [
+        (ImpactKind::Frontal, 25.0),
+        (ImpactKind::Frontal, 40.0),
+        (ImpactKind::Side, 25.0),
+        (ImpactKind::Side, 40.0),
+        (ImpactKind::Offset, 40.0),
+    ] {
+        let mut m = DamageModel::new(&car.lattice, &car.materials);
+        crash_and_settle(&mut m, &car, kind, kmh, &arcade_mode());
+        assert!(
+            m.structural_crush_m() > 0.03,
+            "{kind:?} {kmh}: the car is dented"
+        );
+        let e = m.handling_effects();
+        assert!(handling_is_neutral_except_drag(&e), "{kind:?} {kmh}: {e:?}");
+        assert!(m.component_health_map().is_empty(), "{kind:?} {kmh}");
+        assert!(m.health() > 0.95, "{kind:?} {kmh}: health {}", m.health());
+        // The dent is still billed.
+        assert!(
+            m.repair_estimate(&arcade_mode(), &default_price_table())
+                .total
+                > 0.0
+        );
+        // The same hit in Simulation is mechanical.
+        let mut s = DamageModel::new(&car.lattice, &car.materials);
+        crash_and_settle(&mut s, &car, kind, kmh, &sim_mode());
+        assert!(
+            !handling_is_neutral_except_drag(&s.handling_effects()),
+            "{kind:?} {kmh} sim"
+        );
+    }
+}
+
+#[test]
+fn arcade_hard_hits_degrade_and_several_end_the_car() {
+    let car = sedan();
+    let mode = arcade_mode();
+    let mut m = DamageModel::new(&car.lattice, &car.materials);
+    crash_and_settle(&mut m, &car, ImpactKind::Frontal, 56.0, &mode);
+    let e = m.handling_effects();
+    assert!(!m.is_total_loss());
+    assert!(
+        m.health() < 0.85,
+        "one hard hit noticeably degrades: {}",
+        m.health()
+    );
+    assert!(!handling_is_neutral_except_drag(&e));
+    let kinds = [
+        ImpactKind::Side,
+        ImpactKind::Rear,
+        ImpactKind::Offset,
+        ImpactKind::Frontal,
+    ];
+    let mut hits = 1;
+    for k in kinds {
+        if m.is_total_loss() {
+            break;
+        }
+        crash_and_settle(&mut m, &car, k, 56.0, &mode);
+        hits += 1;
+    }
+    assert!(
+        m.is_total_loss(),
+        "several hard hits end the car (health {})",
+        m.health()
+    );
+    assert!(hits >= 3, "but not two: ended after {hits}");
+}
+
+#[test]
+fn arcade_many_light_hits_never_end_the_car() {
+    let car = sedan();
+    let mode = arcade_mode();
+    let mut m = DamageModel::new(&car.lattice, &car.materials);
+    for k in [
+        ImpactKind::Frontal,
+        ImpactKind::Side,
+        ImpactKind::Rear,
+        ImpactKind::Offset,
+    ] {
+        for _ in 0..3 {
+            crash_and_settle(&mut m, &car, k, 30.0, &mode);
+        }
+    }
+    assert!(!m.is_total_loss());
+    assert!(m.health() > 0.7, "health {}", m.health());
+    assert!(handling_is_neutral_except_drag(&m.handling_effects()));
+}
+
+#[test]
+fn arcade_limp_mode_settles_partially_and_sim_does_not() {
+    let car = sedan();
+    for (mode, settles) in [(arcade_mode(), true), (sim_mode(), false)] {
+        let mut m = DamageModel::new(&car.lattice, &car.materials);
+        crash_and_settle(&mut m, &car, ImpactKind::Side, 56.0, &mode);
+        let toe0: f32 = m.handling_effects().toe_delta.iter().map(|t| t.abs()).sum();
+        assert!(toe0 > 0.0);
+        run(&mut m, &mode, 30.0);
+        let toe1: f32 = m.handling_effects().toe_delta.iter().map(|t| t.abs()).sum();
+        if settles {
+            let f = 1.0 - m.tuning().arcade_settle_fraction;
+            assert!(
+                (toe1 - f * toe0).abs() < 1e-3 * toe0.max(1.0),
+                "{toe0} -> {toe1}"
+            );
+        } else {
+            assert_eq!(toe0, toe1);
+        }
+    }
+}
+
+#[test]
+fn cosmetic_state_survives_save_restore_and_repair_clears_it() {
+    let car = sedan();
+    let mode = arcade_mode();
+    let mut a = DamageModel::new(&car.lattice, &car.materials);
+    crash_and_settle(&mut a, &car, ImpactKind::Side, 30.0, &mode);
+    let snap = a.save_state();
+    assert!(!snap.component_cosmetic.is_empty() || !snap.region_cosmetic_j.is_empty());
+    let mut b = DamageModel::new(&car.lattice, &car.materials);
+    b.restore_state(&snap).unwrap();
+    assert_eq!(b.save_state(), snap);
+    // A later hard hit only counts its own intrusion in both.
+    crash_and_settle(&mut a, &car, ImpactKind::Frontal, 56.0, &mode);
+    crash_and_settle(&mut b, &car, ImpactKind::Frontal, 56.0, &mode);
+    assert_eq!(a.component_health_map(), b.component_health_map());
+    a.apply_repair(&[], true);
+    assert!(a.save_state().component_cosmetic.is_empty());
+}
