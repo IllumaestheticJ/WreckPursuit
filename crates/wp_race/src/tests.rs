@@ -759,7 +759,7 @@ fn illegal_daytime_races_are_rare_and_rich() {
     let p = d.schedule.illegal_daytime.chance_per_day;
     let expect = (p * 1000.0) as i32;
     assert!(
-        (days_with as i32 - expect).abs() < 30,
+        (days_with - expect).abs() < 30,
         "{days_with} days with an illegal daytime race (expected ~{expect})"
     );
     assert!(min_illegal > 0);

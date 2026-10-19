@@ -208,7 +208,7 @@ pub fn simulate(
                 st.pos = [st.pos[0] + delta[0] * k, st.pos[1] + delta[1] * k, want[2]];
             }
         }
-        if tick % sample_every == 0 || !events.is_empty() {
+        if tick.is_multiple_of(sample_every) || !events.is_empty() {
             let samples: Vec<RacerSample> = racers
                 .iter()
                 .zip(states.iter())

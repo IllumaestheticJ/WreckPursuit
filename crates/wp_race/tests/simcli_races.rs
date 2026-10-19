@@ -24,8 +24,7 @@ fn throttle_at(sc: &Scenario, i: usize, t_s: f32) -> f32 {
     sc.entities[i]
         .inputs
         .iter()
-        .filter(|k| k.t_s <= t_s)
-        .last()
+        .rfind(|k| k.t_s <= t_s)
         .map_or(0.0, |k| k.input.throttle)
 }
 
