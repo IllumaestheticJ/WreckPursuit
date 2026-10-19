@@ -162,6 +162,8 @@ pub struct ServerStats {
     pub decode_errors: u64,
     /// Lattice snapshots sent in response to hash mismatches.
     pub lattice_resyncs: u64,
+    /// Final lattice snapshots sent after a provisional one (model settled since).
+    pub lattice_followups: u64,
     /// Typed game events forwarded (counted once per client that received them).
     pub events_sent: u64,
     /// Captain commands accepted by `wp_police` / the net layer.
@@ -192,6 +194,9 @@ struct View {
     /// Lattice snapshots owed to this client (entities entering interest, resync requests),
     /// sent oldest first as the byte credit allows.
     lattice_queue: VecDeque<EntityId>,
+    /// Vehicles whose last lattice snapshot to this client was provisional (the model was
+    /// hit and had not settled): re-sent once it has.
+    unsettled: BTreeSet<EntityId>,
     /// Encoded size of the queued lattice snapshot the credit is being saved for (0 = none).
     lattice_wait: usize,
 }
@@ -689,8 +694,14 @@ impl<S: NetSim> ServerInstance<S> {
                 ack_snapshot_tick,
                 first_tick,
                 inputs,
+                missing,
             } => {
                 self.ack_snapshot(pid, ack_snapshot_tick);
+                // The client lacks these baselines: next update goes out in full.
+                let acked = &mut self.players.get_mut(&pid).expect("player").view.acked;
+                for e in missing {
+                    acked.remove(&EntityId(e));
+                }
                 self.accept_inputs(pid, first_tick, &ClientMsg::inputs_dequantised(&inputs));
             }
             ClientMsg::RoleRequest { role } => {
@@ -832,12 +843,26 @@ impl<S: NetSim> ServerInstance<S> {
         }
     }
 
-    /// Typed captain command (contract `CaptainCommand`, v0.3.0). AI units and tools go to
+    /// Typed captain command (contract `CaptainCommand`, v0.3.0); player chase units may send
+    /// the tool requests (roadblock / spikes / helicopter) too. AI units and tools go to
     /// `wp_police` through the sim; orders for player chase seats (unit ids from
     /// [`PLAYER_UNIT_BASE`]) are relayed to the seat's driver as [`ServerMsg::UnitOrder`].
     fn captain_command(&mut self, pid: PlayerId, cmd: CaptainCommand) -> Result<(), CaptainError> {
         let tick = self.sim.tick();
-        if self.roles.role(pid) != Some(Role::PoliceCaptain) {
+        // Chase units may call in tools on the radio (roadblock, spikes, helicopter); unit
+        // orders, priority and call-off stay with the captain.
+        let field_request = matches!(
+            cmd,
+            CaptainCommand::RequestRoadblock { .. }
+                | CaptainCommand::RequestSpikes { .. }
+                | CaptainCommand::RequestHelicopter { .. }
+        );
+        let allowed = match self.roles.role(pid) {
+            Some(Role::PoliceCaptain) => true,
+            Some(Role::PoliceChase) => field_request,
+            _ => false,
+        };
+        if !allowed {
             self.notice(pid, "only the captain can command units");
             return Err(CaptainError::Unavailable);
         }
@@ -853,11 +878,16 @@ impl<S: NetSim> ServerInstance<S> {
             if unit.0 >= PLAYER_UNIT_BASE {
                 return self.order_player_unit(EntityId(unit.0 - PLAYER_UNIT_BASE), order);
             }
-            self.sim.captain_command(cmd)?;
             if let Some(e) = self.vehicle_of_unit(unit) {
+                if let Some((_, EntityKind::PoliceChase)) = self.owned.get(&e) {
+                    // A player seat named by its `wp_police` unit id: same as its wire id.
+                    return self.order_player_unit(e, order);
+                }
+                self.sim.captain_command(cmd)?;
                 self.unit_orders.insert(e, order);
+                return Ok(());
             }
-            return Ok(());
+            return self.sim.captain_command(cmd);
         }
         self.sim.captain_command(cmd)
     }
@@ -870,6 +900,12 @@ impl<S: NetSim> ServerInstance<S> {
             if target == e || !self.sim.vehicles().iter().any(|(v, _)| *v == target) {
                 return Err(CaptainError::UnknownTarget);
             }
+        }
+        // Seats bound to a `wp_police` player unit (the real sim): police validate the order
+        // and assign the unit, so it counts as "on the racer" for capture credit.
+        if let Some(unit) = self.sim.police_unit(e) {
+            self.sim
+                .captain_command(CaptainCommand::AssignUnit { unit, order })?;
         }
         self.unit_orders.insert(e, order);
         self.send(owner, &ServerMsg::UnitOrder(order));
@@ -954,7 +990,7 @@ impl<S: NetSim> ServerInstance<S> {
         };
         if let (Some(v), Some((car, kind))) = (current, &wanted) {
             if *car == current_car {
-                self.sim.set_owned_kind(v, *kind);
+                self.sim.set_owned_kind(v, *kind, pid);
                 self.owned.insert(v, (pid, *kind));
                 return;
             }
@@ -979,7 +1015,7 @@ impl<S: NetSim> ServerInstance<S> {
                 Ok(v) => {
                     let assists = self.players[&pid].assists;
                     self.sim.set_assists(v, assists);
-                    self.sim.set_owned_kind(v, kind);
+                    self.sim.set_owned_kind(v, kind, pid);
                     self.owned.insert(v, (pid, kind));
                     new_vehicle = Some(v);
                     new_car = car;
@@ -1309,17 +1345,60 @@ impl<S: NetSim> ServerInstance<S> {
         else {
             return None;
         };
+        let snapshot = LatticeSnapshot::capture(&nodes, &rest);
+        // Full damage state only for dented cars: an undented replica built fresh and padded
+        // to the server's solver phase already equals the server's model exactly (a restore
+        // would also put it to sleep while the server's model may still be awake).
+        let state = if snapshot.is_pristine() {
+            None
+        } else {
+            self.sim.damage_state(e)
+        };
         Some(ServerMsg::LatticeSnapshot {
             vehicle: e.0,
             tick: self.sim.tick(),
-            snapshot: LatticeSnapshot::capture(&nodes, &rest),
+            snapshot,
             damage_steps: self.sim.damage_steps(e),
+            state,
+            provisional: !self.sim.damage_settled(e),
         })
+    }
+
+    /// Send a lattice snapshot; a provisional one is followed up once the model settles.
+    fn send_lattice_msg(&mut self, pid: PlayerId, e: EntityId, msg: &ServerMsg) {
+        if let ServerMsg::LatticeSnapshot { provisional, .. } = msg {
+            let v = &mut self.players.get_mut(&pid).expect("p").view;
+            if *provisional {
+                v.unsettled.insert(e);
+            } else {
+                v.unsettled.remove(&e);
+            }
+        }
+        self.send(pid, msg);
+    }
+
+    /// Queue a final snapshot for every provisional one whose model has settled since.
+    fn follow_up_unsettled(&mut self, pid: PlayerId) {
+        let v = &self.players[&pid].view;
+        let mut done = Vec::new();
+        for e in &v.unsettled {
+            if !v.tracked.contains(e) || self.sim.damage_settled(*e) {
+                done.push(*e);
+            }
+        }
+        for e in done {
+            let v = &mut self.players.get_mut(&pid).expect("p").view;
+            v.unsettled.remove(&e);
+            if v.tracked.contains(&e) {
+                self.stats.lattice_followups += 1;
+                self.queue_lattice(pid, e);
+            }
+        }
     }
 
     fn send_lattice(&mut self, pid: PlayerId, e: EntityId) {
         if let Some(msg) = self.lattice_msg(e) {
-            self.send(pid, &msg);
+            self.send_lattice_msg(pid, e, &msg);
         }
     }
 
@@ -1392,6 +1471,7 @@ impl<S: NetSim> ServerInstance<S> {
                 self.send(pid, &msg);
             }
         }
+        self.follow_up_unsettled(pid);
         let requests =
             std::mem::take(&mut self.players.get_mut(&pid).expect("p").view.lattice_requests);
         for e in requests {
@@ -1520,18 +1600,31 @@ impl<S: NetSim> ServerInstance<S> {
             }
             let msg = self.lattice_msg(e);
             let size = msg.as_ref().map_or(0, |m| m.encode().len());
+            // Also keep the sliding 1 s window under budget: a dented car with its full
+            // damage state is up to ~10 kB, and several entering together (a reconnect)
+            // would otherwise land in one second.
+            let window_room = self.window_room(pid);
             let v = &mut self.players.get_mut(&pid).expect("p").view;
-            if size as i64 > available {
+            if size as i64 > available || size as i64 > window_room {
                 v.lattice_wait = size;
                 return;
             }
             v.lattice_queue.pop_front();
             v.lattice_wait = 0;
             if let Some(m) = msg {
-                self.send(pid, &m);
+                self.send_lattice_msg(pid, e, &m);
             }
         }
         self.players.get_mut(&pid).expect("p").view.lattice_wait = 0;
+    }
+
+    /// Bytes client `pid` may still receive this tick without its last 60 ticks (1 s)
+    /// exceeding 95 % of the down-link budget; a margin covers this tick's snapshot header.
+    fn window_room(&self, pid: PlayerId) -> i64 {
+        let v = &self.players[&pid].view;
+        let recent: usize = v.bytes_window.iter().rev().take(59).sum();
+        let cap = (self.cfg.downlink_budget_bps * 95 / 100) as i64;
+        cap - recent as i64 - v.bytes_this_tick as i64 - 400
     }
 
     fn snapshot(
@@ -1596,13 +1689,17 @@ impl<S: NetSim> ServerInstance<S> {
             + traffic_bytes;
         // While a lattice snapshot waits, credit may grow to its size and entity updates get
         // only the minimum, so the snapshot goes out within a few ticks.
+        let window_room = self.window_room(pid);
+        let p = self.players.get_mut(&pid).expect("p");
         let waiting = p.view.lattice_wait as i64;
         p.view.credit = (p.view.credit + rate).min(rate.max(waiting + rate));
         let used_reliable = p.view.bytes_this_tick as i64;
         let allowance = if waiting > 0 {
             96
         } else {
-            (p.view.credit - used_reliable - header as i64).max(96) as usize
+            (p.view.credit - used_reliable - header as i64)
+                .min(window_room + 400 - header as i64)
+                .max(96) as usize
         };
         let mut used = 0;
         let mut entities = Vec::new();

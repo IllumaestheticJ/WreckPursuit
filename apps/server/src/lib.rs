@@ -36,7 +36,8 @@ usage: wp-server [--config FILE.toml] [--port N] [--admin-port N] [--bind ADDR]
   --port         websocket port (default 8080; 0 = any)
   --admin-port   admin HTTP port, GET /status (default 8081; 0 = any)
   --max-players  instance size (default 32)
-  --city         city: a .road.json / .road.bin file, or `procedural` (12x12 blocks);
+  --city         city: a .road.json / .road.bin file, `procedural` (12x12 blocks) or
+                 `vesper_v2` (Port Vesper v2, terrain + elevation);
                  adds physical traffic and AI police cars, players spawn on its lanes
   --seed         instance seed (default 1)
   --time-ratio   in-game seconds per real second (default 10)
@@ -62,7 +63,8 @@ pub struct AppConfig {
     pub bind: String,
     /// Instance size.
     pub max_players: usize,
-    /// City: a `.road.json` / `.road.bin` path or `procedural`; `None` = flat world.
+    /// City: a `.road.json` / `.road.bin` path, `procedural` or `vesper_v2`; `None` = flat
+    /// world.
     pub city: Option<String>,
     /// Instance seed.
     pub seed: u64,
@@ -230,6 +232,8 @@ pub async fn run(cfg: AppConfig, log: LogFn) -> Result<Running, String> {
         }
         None => None,
     };
+    // Bots predict on the city's own ground (cities with terrain).
+    let city_ground = world.as_ref().and_then(wp_net::netsim::city_ground);
     // Bots drive around the first spawn point (the origin without a city).
     let bot_center = server_cfg
         .spawn_points
@@ -307,6 +311,7 @@ pub async fn run(cfg: AppConfig, log: LogFn) -> Result<Running, String> {
     for i in 0..cfg.bots {
         let bot = BotSpec {
             index: i,
+            city_ground: city_ground.clone(),
             seed: cfg.seed.wrapping_mul(1000) + i as u64,
             route_center: bot_center,
             route_radius: cfg
@@ -339,9 +344,16 @@ pub fn parse_weather(name: &str) -> Result<wp_contracts::WeatherKind, String> {
         .ok_or_else(|| format!("unknown weather {name}"))
 }
 
-/// Load a city for the server: `procedural` (the 12×12 procedural city) or a road file.
+/// Load a city for the server: `procedural` (the 12×12 procedural city), `vesper_v2` (Port
+/// Vesper v2: curves, elevation, terrain) or a road file.
 pub fn load_city(city: &str, sim_cfg: &SimConfig) -> Result<wp_world::World, String> {
     let wcfg = server_world_config(sim_cfg);
+    if city == wp_world::vesper::CITY_ID || city == "vesper" {
+        return Ok(wp_world::World::vesper(
+            &wp_world::vesper::VesperConfig::default(),
+            wcfg,
+        ));
+    }
     if city == "procedural" {
         let pg = wp_world::procgen::ProcGenConfig::default();
         return Ok(wp_world::World::procedural(&pg, wcfg));
@@ -408,6 +420,7 @@ async fn serve_admin(listener: TcpListener, status: Arc<Mutex<StatusReport>>) {
 
 struct BotSpec {
     index: usize,
+    city_ground: Option<wp_net::predict::CityGround>,
     seed: u64,
     route_center: [f32; 2],
     route_radius: f32,
@@ -441,6 +454,7 @@ async fn run_bot(
         } else {
             default_damage_factory
         },
+        city_ground: spec.city_ground.clone(),
     });
     let mut driver = BotDriver::new(
         spec.seed,

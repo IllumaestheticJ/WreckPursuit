@@ -112,6 +112,7 @@ pub fn net_create(name: &str, input_source: u8) -> Result<(), JsValue> {
         cars,
         modes,
         damage_factory: default_damage_factory,
+        city_ground: None,
     });
     NET.with(|n| *n.borrow_mut() = Some(NetApp { client, body_sizes }));
     Ok(())

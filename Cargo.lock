@@ -4306,6 +4306,7 @@ version = "0.1.0"
 dependencies = [
  "futures-util",
  "postcard",
+ "rapier3d",
  "serde",
  "thiserror 2.0.21",
  "tokio",

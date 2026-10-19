@@ -76,6 +76,7 @@ impl PoliceSystem {
         let ids: Vec<EntityId> = self.racers.keys().copied().collect();
         for id in ids {
             let p = xy(self.racers[&id].pos);
+            let pz = self.racers[&id].pos[2];
             let mut o = RacerObs {
                 nearest_unit_m: f32::INFINITY,
                 ..Default::default()
@@ -92,7 +93,7 @@ impl PoliceSystem {
                         if u.assignment == Assignment::OutOfService {
                             continue;
                         }
-                        if d <= los_range && self.sees(world, u.body.pos, p) {
+                        if d <= los_range && self.sees_at(world, u.body.pos, u.body.alt_m, p, pz) {
                             // Recognition (pursuit start) and witnessing (full violation heat)
                             // have their own ranges inside line-of-sight range.
                             o.seen = true;
@@ -608,7 +609,10 @@ impl PoliceSystem {
                     let u = &self.units[i];
                     // Join the chase only once on the racer's line and behind it (hysteresis with
                     // the off-trail check in coordinate_pursuits).
-                    if seen && dist(u.body.pos, rp) < 120.0 && self.sees(world, u.body.pos, rp) {
+                    if seen
+                        && dist(u.body.pos, rp) < 120.0
+                        && self.sees_at(world, u.body.pos, u.body.alt_m, rp, rec.pos[2])
+                    {
                         let joins = self.pursuit_track(target).is_some_and(|(tr, racer_s)| {
                             let (s_u, lat) = tr.project(u.body.pos, racer_s, 200.0);
                             lat < 12.0 && s_u <= racer_s + 5.0
