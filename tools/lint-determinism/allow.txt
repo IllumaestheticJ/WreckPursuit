@@ -1,3 +1,10 @@
 # File-level suppressions for lint-determinism: `<repo-relative path> <rule> <reason>`.
 # Every entry needs a reason; entries that match nothing fail the lint (delete them).
 crates/wp_math/src/hash.rs f64 quantize() widens f32 to f64 for an exact multiply-and-round; IEEE f64 ops are bit-identical on every target
+crates/wp_police/src/captain.rs f64 simulation-time timestamps only (exact IEEE add/compare/fmod, identical on wasm32); lead 2026-10-19, E to move to integer ticks
+crates/wp_police/src/dispatch.rs f64 simulation-time timestamps only (exact IEEE add/compare/fmod, identical on wasm32); lead 2026-10-19, E to move to integer ticks
+crates/wp_police/src/heat.rs f64 simulation-time timestamps only (exact IEEE add/compare/fmod, identical on wasm32); lead 2026-10-19, E to move to integer ticks
+crates/wp_police/src/lib.rs f64 simulation-time timestamps only (exact IEEE add/compare/fmod, identical on wasm32); lead 2026-10-19, E to move to integer ticks
+crates/wp_police/src/pursuit.rs f64 simulation-time timestamps only (exact IEEE add/compare/fmod, identical on wasm32); lead 2026-10-19, E to move to integer ticks
+crates/wp_police/src/tools.rs f64 simulation-time timestamps only (exact IEEE add/compare/fmod, identical on wasm32); lead 2026-10-19, E to move to integer ticks
+crates/wp_police/src/unit.rs f64 simulation-time timestamps only (exact IEEE add/compare/fmod, identical on wasm32); lead 2026-10-19, E to move to integer ticks

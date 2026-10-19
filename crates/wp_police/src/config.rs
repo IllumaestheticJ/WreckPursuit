@@ -1,0 +1,656 @@
+//! Tuning tables loaded from `data/police/*.toml`.
+//!
+//! Every number that differs between day and night is a [`PhaseTable`]; every number that
+//! differs between districts is a [`DistrictTable`]. Code never branches on `DayPhase` itself,
+//! it only looks values up here. See the crate README for what each table means.
+
+use std::path::Path;
+
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+use wp_contracts::{DamageMode, DayPhase};
+
+use crate::graph::District;
+
+/// One value per [`DayPhase`].
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PhaseTable<T> {
+    /// 05:00–07:00.
+    pub dawn: T,
+    /// 07:00–18:00.
+    pub day: T,
+    /// 18:00–20:00.
+    pub dusk: T,
+    /// 20:00–05:00.
+    pub night: T,
+}
+
+impl<T: Copy> PhaseTable<T> {
+    /// Value for `phase`.
+    pub fn get(&self, phase: DayPhase) -> T {
+        match phase {
+            DayPhase::Dawn => self.dawn,
+            DayPhase::Day => self.day,
+            DayPhase::Dusk => self.dusk,
+            DayPhase::Night => self.night,
+        }
+    }
+}
+
+/// One value per [`District`].
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DistrictTable<T> {
+    /// Dense downtown.
+    pub core: T,
+    /// Residential ring.
+    pub suburb: T,
+    /// Warehouses, docks, wide roads.
+    pub industrial: T,
+}
+
+impl<T: Copy> DistrictTable<T> {
+    /// Value for `district`.
+    pub fn get(&self, district: District) -> T {
+        match district {
+            District::Core => self.core,
+            District::Suburb => self.suburb,
+            District::Industrial => self.industrial,
+        }
+    }
+}
+
+/// One value per [`DamageMode`].
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModeValue<T> {
+    /// Arcade damage mode.
+    pub arcade: T,
+    /// Simulation damage mode.
+    pub simulation: T,
+}
+
+impl<T: Copy> ModeValue<T> {
+    /// Value for `mode`.
+    pub fn get(&self, mode: DamageMode) -> T {
+        match mode {
+            DamageMode::Arcade => self.arcade,
+            DamageMode::Simulation => self.simulation,
+        }
+    }
+}
+
+/// Inclusive `[min, max]` range.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Range {
+    /// Lower bound.
+    pub min: f32,
+    /// Upper bound.
+    pub max: f32,
+}
+
+// ---------------------------------------------------------------------------------------------
+// heat.toml
+// ---------------------------------------------------------------------------------------------
+
+/// Heat added per violation (before the witness factor).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ViolationWeights {
+    /// Heat per speeding event, flat part.
+    pub speeding_base: f32,
+    /// Heat per speeding event per m/s over the limit.
+    pub speeding_per_mps: f32,
+    /// Red-light run.
+    pub red_light: f32,
+    /// Wrong-way driving.
+    pub wrong_way: f32,
+    /// Collision with a road user / property.
+    pub collision: f32,
+    /// Reckless driving / near misses.
+    pub reckless: f32,
+}
+
+/// Heat accumulation, decay and wanted levels.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HeatConfig {
+    /// Heat ceiling.
+    pub max_heat: f32,
+    /// Heat at which L1..L5 begin (ascending, 5 entries).
+    pub level_thresholds: [f32; 5],
+    /// Fraction of a violation's heat that counts when no unit or camera saw it ("reports").
+    pub unseen_factor: f32,
+    /// Same violation kind from the same racer is counted at most once per this many seconds.
+    pub repeat_cooldown_s: f32,
+    /// Heat per violation kind.
+    pub violation: ViolationWeights,
+    /// Range within which a unit with line of sight witnesses a violation, m.
+    pub witness_range_m: PhaseTable<f32>,
+    /// Range within which a unit with line of sight recognises a wanted car and starts a
+    /// pursuit, m. Much shorter in the dark.
+    pub recognition_range_m: PhaseTable<f32>,
+    /// Seconds of continuous recognition-range line of sight needed before a pursuit starts
+    /// (a glimpse at night is not enough).
+    pub recognition_time_s: PhaseTable<f32>,
+    /// Heat decay per second while unseen and not pursued.
+    pub decay_per_s: PhaseTable<f32>,
+    /// Multiplier on decay by the district the racer is in.
+    pub decay_district_scale: DistrictTable<f32>,
+    /// Seconds after the last sighting before decay starts.
+    pub decay_grace_s: f32,
+    /// Heat added per second while actively pursued (long chases escalate).
+    pub pursuit_heat_per_s: f32,
+    /// Heat added when the racer disables (total-losses) a police unit by contact.
+    pub cop_disabled_heat: f32,
+}
+
+/// Escape (breaking contact) rule.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EscapeConfig {
+    /// Seconds without line of sight needed to escape, per wanted level L1..L5.
+    pub base_s: [f32; 5],
+    /// Multiplier on `base_s` by phase (night is easier).
+    pub phase_scale: PhaseTable<f32>,
+}
+
+/// Capture rule.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CaptureConfig {
+    /// Racer counts as stopped below this speed, m/s.
+    pub stop_speed_mps: f32,
+    /// Seconds stopped needed for a capture.
+    pub stop_time_s: f32,
+    /// A unit must be within this distance, m.
+    pub unit_radius_m: f32,
+}
+
+/// Safehouse rule.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SafehouseConfig {
+    /// Seconds inside the safehouse needed.
+    pub dwell_s: f32,
+    /// No unit may be within this distance, m.
+    pub clear_radius_m: f32,
+    /// Heat is multiplied by this when a safehouse escape succeeds.
+    pub heat_scale_on_enter: f32,
+}
+
+/// Bounty formula and payouts.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BountyConfig {
+    /// Bounty per "heat-second" (heat/100 integrated over seconds while wanted).
+    pub per_heat_second: f32,
+    /// Bounty per race won while wanted.
+    pub per_race_won_wanted: f32,
+    /// Bounty per police unit disabled.
+    pub per_cop_disabled: f32,
+    /// Multiplier on race payouts / stakes by phase (night pays more).
+    pub payout_scale: PhaseTable<f32>,
+    /// Bounty at which a racer gets maximum reinforcement priority.
+    pub max_priority_bounty: f32,
+}
+
+/// Contents of `data/police/heat.toml`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HeatFile {
+    /// Heat model.
+    pub heat: HeatConfig,
+    /// Escape rule.
+    pub escape: EscapeConfig,
+    /// Capture rule.
+    pub capture: CaptureConfig,
+    /// Safehouse rule.
+    pub safehouse: SafehouseConfig,
+    /// Bounty.
+    pub bounty: BountyConfig,
+}
+
+// ---------------------------------------------------------------------------------------------
+// presence.toml
+// ---------------------------------------------------------------------------------------------
+
+/// Reinforcement dispatch.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReinforcementConfig {
+    /// Response-time range per phase, s (uniformly sampled).
+    pub response_s: PhaseTable<Range>,
+    /// Max fractional reduction of response time for a max-priority (high bounty) racer.
+    pub priority_max_reduction: f32,
+    /// Ground units wanted on a racer per wanted level L1..L5.
+    pub units_per_level: [u32; 5],
+    /// Reinforcements spawn at least this far from the racer, m.
+    pub spawn_min_distance_m: f32,
+    /// Delay before a civilian report (unseen violations) gets a unit dispatched, s.
+    pub report_dispatch_delay_s: PhaseTable<f32>,
+}
+
+/// Helicopter availability.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HeloAvailability {
+    /// Helicopters available.
+    pub count: PhaseTable<u32>,
+    /// Time from request to on-station launch, s.
+    pub launch_s: PhaseTable<f32>,
+    /// Chance a request finds the helicopter unavailable (rolled per request).
+    pub unavailable_chance: PhaseTable<f32>,
+    /// Lowest wanted level (1..=5) at which the AI captain requests a helicopter.
+    pub min_level: u8,
+}
+
+/// Wanted level (1..=5) at which each tool unlocks.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolUnlocks {
+    /// Spike strips.
+    pub spikes_level: u8,
+    /// Roadblocks.
+    pub roadblock_level: u8,
+    /// PIT manoeuvre.
+    pub pit_level: u8,
+    /// Box-in.
+    pub boxin_level: u8,
+    /// Rolling block.
+    pub rolling_block_level: u8,
+}
+
+/// Contents of `data/police/presence.toml`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PresenceFile {
+    /// Patrol unit count per district per phase.
+    pub patrols: DistrictTable<PhaseTable<u32>>,
+    /// Hard cap on simultaneously existing ground units (patrol + reinforcement + tools).
+    pub max_ground_units: u32,
+    /// Reinforcements.
+    pub reinforcement: ReinforcementConfig,
+    /// Helicopter.
+    pub helicopter: HeloAvailability,
+    /// Tool unlocks by wanted level.
+    pub unlocks: ToolUnlocks,
+    /// How long a crash scene keeps a unit busy, s.
+    pub crash_scene_s: PhaseTable<f32>,
+    /// Minimum closing speed of a civilian-civilian contact that creates a crash incident, m/s.
+    pub crash_incident_min_speed_mps: f32,
+}
+
+// ---------------------------------------------------------------------------------------------
+// pursuit.toml
+// ---------------------------------------------------------------------------------------------
+
+/// Unit vehicle capabilities for the built-in kinematic driver.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UnitDynamics {
+    /// Max acceleration, m/s².
+    pub accel_mps2: f32,
+    /// Comfortable braking used for planning, m/s².
+    pub brake_mps2: f32,
+    /// Absolute tire grip limit, g. Demands above this lose the car.
+    pub grip_g: f32,
+    /// Off-road distance from the lane centre at which the car hits something, m.
+    pub crash_offset_m: f32,
+    /// Health lost per (impact m/s)² / 1000 in a self-crash, per mode.
+    pub crash_health_per_kmps2: ModeValue<f32>,
+    /// Health lost per (contact closing m/s)² / 1000 in a racer contact, per mode.
+    pub contact_health_per_kmps2: ModeValue<f32>,
+    /// A unit at or below this health is a total loss, per mode.
+    pub total_loss_health: ModeValue<f32>,
+}
+
+/// Risk budget: spent by dangerous driving; when exhausted the unit only shadows.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RiskConfig {
+    /// Budget per unit.
+    pub budget: f32,
+    /// Lateral acceleration above which time is charged, g.
+    pub lateral_g: f32,
+    /// Cost per second above `lateral_g`.
+    pub cost_per_s_lateral: f32,
+    /// Cost per near miss.
+    pub cost_near_miss: f32,
+    /// Cost per collision.
+    pub cost_collision: f32,
+    /// Regeneration per second while not pursuing.
+    pub regen_per_s: f32,
+}
+
+/// Background traffic hazards for the built-in kinematic driver (stand-in for real traffic
+/// until prompt 05's agents are physical). Probabilities per km driven.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HazardConfig {
+    /// Near misses per km at the speed limit, by phase (traffic density).
+    pub near_miss_per_km: PhaseTable<f32>,
+    /// Integer exponent on (speed / limit) for the near-miss rate.
+    pub speed_exponent: u32,
+    /// Chance a near miss becomes a collision at 2× the limit (scales linearly with excess).
+    pub collision_chance_at_2x: f32,
+    /// Closing speed of a traffic collision as a fraction of own speed (uniformly sampled:
+    /// glancing swipe … T-bone).
+    pub collision_speed_fraction: Range,
+}
+
+/// Tactic parameters.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TacticConfig {
+    /// Shadow distance band behind the racer, m.
+    pub shadow_m: Range,
+    /// Box-in only below this racer speed, km/h.
+    pub boxin_max_kmh: f32,
+    /// Lateral/longitudinal offset of box-in slots, m.
+    pub boxin_offset_m: [f32; 2],
+    /// PIT only below this racer speed, km/h, per mode.
+    pub pit_max_kmh: ModeValue<f32>,
+    /// PIT only with at least this much straight road ahead of the racer, m.
+    pub pit_min_straight_m: f32,
+    /// PIT starts from within this distance behind the racer, m.
+    pub pit_engage_m: f32,
+    /// Seconds between PIT attempts per unit.
+    pub pit_cooldown_s: f32,
+    /// Rolling block sits this far in front of the racer, m.
+    pub rolling_block_lead_m: f32,
+    /// Rolling block speed as a fraction of the racer's speed.
+    pub rolling_block_speed_factor: f32,
+    /// Intercept prediction horizon, s.
+    pub intercept_horizon_s: Range,
+    /// Units further than this behind the racer try to intercept instead of following, m.
+    pub intercept_min_gap_m: f32,
+    /// Disengage below this health.
+    pub disengage_health: f32,
+    /// Pull over when any |toe delta| exceeds this (bent wheel), rad.
+    pub bent_wheel_toe_rad: f32,
+    /// Pull over when any tire puncture exceeds this.
+    pub puncture_pull_over: f32,
+}
+
+/// Contents of `data/police/pursuit.toml`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PursuitFile {
+    /// AI decision rate, Hz (driving integrates every tick).
+    pub think_hz: f32,
+    /// Patrol speed as a fraction of the limit.
+    pub patrol_speed_factor: f32,
+    /// Responding (lights, no pursuit) speed as a fraction of the limit.
+    pub respond_speed_factor: f32,
+    /// Absolute pursuit speed cap, m/s.
+    pub pursuit_cap_mps: PhaseTable<f32>,
+    /// Pursuers may go this fraction faster than the target.
+    pub target_speed_margin: f32,
+    /// Lateral acceleration the AI plans corners with, g, while patrolling.
+    pub patrol_cornering_g: f32,
+    /// Lateral acceleration the AI plans corners with, g, while pursuing (budget left).
+    pub pursuit_cornering_g: f32,
+    /// Lateral acceleration the AI plans corners with, g, when the risk budget is spent.
+    pub shadow_cornering_g: f32,
+    /// Ground unit line-of-sight range, m.
+    pub los_range_m: PhaseTable<f32>,
+    /// Unit dynamics.
+    pub unit: UnitDynamics,
+    /// Risk budget.
+    pub risk: RiskConfig,
+    /// Traffic hazards.
+    pub hazard: HazardConfig,
+    /// Tactics.
+    pub tactics: TacticConfig,
+}
+
+// ---------------------------------------------------------------------------------------------
+// tools.toml
+// ---------------------------------------------------------------------------------------------
+
+/// Roadblock tool.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RoadblockConfig {
+    /// Placed at least this far ahead on the predicted path, m.
+    pub min_ahead_m: f32,
+    /// Placed at most this far ahead, m.
+    pub max_ahead_m: f32,
+    /// Required straight approach sight distance, m.
+    pub min_sight_m: f32,
+    /// Parked units per roadblock `[min, max]`.
+    pub units: [u32; 2],
+    /// Barrier half extents `[x, y, z]`, m.
+    pub barrier_half_extents_m: [f32; 3],
+    /// Barrier mass, kg.
+    pub barrier_mass_kg: f32,
+    /// Parked unit mass, kg.
+    pub unit_mass_kg: f32,
+    /// Lifetime, s.
+    pub lifetime_s: f32,
+    /// Roadblocks are never placed on highways when the wanted level is above this (1..=5).
+    pub highway_max_level: u8,
+    /// Cooldown between roadblocks, s.
+    pub cooldown_s: PhaseTable<f32>,
+    /// Max roadblocks active at once.
+    pub max_active: u32,
+}
+
+/// Spike strip tool.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SpikeConfig {
+    /// Placed at least this far ahead, m.
+    pub min_ahead_m: f32,
+    /// Placed at most this far ahead, m.
+    pub max_ahead_m: f32,
+    /// Required straight approach sight distance, m.
+    pub min_sight_m: f32,
+    /// Strip length across the road, m.
+    pub length_m: f32,
+    /// Seconds for a punctured tire to go fully flat.
+    pub deflate_s: f32,
+    /// Lifetime, s.
+    pub lifetime_s: f32,
+    /// Cooldown between strips, s.
+    pub cooldown_s: PhaseTable<f32>,
+    /// Max strips active at once.
+    pub max_active: u32,
+}
+
+/// Helicopter entity.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HeloConfig {
+    /// Cruise speed, m/s.
+    pub speed_mps: f32,
+    /// Altitude, m.
+    pub altitude_m: f32,
+    /// Horizontal range within which the helicopter keeps visual, m.
+    pub los_range_m: PhaseTable<f32>,
+    /// Spotlight cone half angle, rad.
+    pub spotlight_half_angle_rad: f32,
+    /// Max time on a single track before returning to refuel, s.
+    pub max_track_s: f32,
+}
+
+/// Racer-side gadgets.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GadgetConfig {
+    /// Radar detector range per tier (index = tier), m.
+    pub radar_range_m: Vec<f32>,
+    /// Scanner delay per tier (index = tier), s.
+    pub scanner_delay_s: Vec<f32>,
+    /// Radio log length kept for scanners and the captain.
+    pub radio_log_len: usize,
+}
+
+/// Contents of `data/police/tools.toml`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolsFile {
+    /// Roadblocks.
+    pub roadblock: RoadblockConfig,
+    /// Spike strips.
+    pub spikes: SpikeConfig,
+    /// Helicopter.
+    pub helicopter: HeloConfig,
+    /// Radar / scanner.
+    pub gadgets: GadgetConfig,
+    /// Captain tool cooldown for helicopter requests, s.
+    pub helo_request_cooldown_s: f32,
+    /// How long a captain's unit order overrides the AI, s.
+    pub captain_order_hold_s: f32,
+}
+
+// ---------------------------------------------------------------------------------------------
+
+/// The complete police tuning.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PoliceConfig {
+    /// `heat.toml`.
+    pub heat: HeatFile,
+    /// `presence.toml`.
+    pub presence: PresenceFile,
+    /// `pursuit.toml`.
+    pub pursuit: PursuitFile,
+    /// `tools.toml`.
+    pub tools: ToolsFile,
+}
+
+/// Error loading police tables.
+#[derive(Debug, Error)]
+pub enum ConfigError {
+    /// File unreadable.
+    #[error("{0}: {1}")]
+    Io(String, std::io::Error),
+    /// TOML malformed or a field missing / unknown.
+    #[error("{0}: {1}")]
+    Parse(String, toml::de::Error),
+    /// Values parse but make no sense.
+    #[error("invalid police config: {0}")]
+    Invalid(String),
+}
+
+const BUILTIN_HEAT: &str = include_str!("../../../data/police/heat.toml");
+const BUILTIN_PRESENCE: &str = include_str!("../../../data/police/presence.toml");
+const BUILTIN_PURSUIT: &str = include_str!("../../../data/police/pursuit.toml");
+const BUILTIN_TOOLS: &str = include_str!("../../../data/police/tools.toml");
+
+fn parse_one<T: for<'de> Deserialize<'de>>(name: &str, text: &str) -> Result<T, ConfigError> {
+    toml::from_str(text).map_err(|e| ConfigError::Parse(name.to_string(), e))
+}
+
+impl PoliceConfig {
+    /// Parse from the four TOML texts (heat, presence, pursuit, tools).
+    pub fn parse(
+        heat: &str,
+        presence: &str,
+        pursuit: &str,
+        tools: &str,
+    ) -> Result<Self, ConfigError> {
+        let cfg = Self {
+            heat: parse_one("heat.toml", heat)?,
+            presence: parse_one("presence.toml", presence)?,
+            pursuit: parse_one("pursuit.toml", pursuit)?,
+            tools: parse_one("tools.toml", tools)?,
+        };
+        cfg.validate()?;
+        Ok(cfg)
+    }
+
+    /// Load from a directory containing `heat.toml`, `presence.toml`, `pursuit.toml`, `tools.toml`.
+    pub fn load(dir: impl AsRef<Path>) -> Result<Self, ConfigError> {
+        let dir = dir.as_ref();
+        let read = |name: &str| {
+            let p = dir.join(name);
+            std::fs::read_to_string(&p).map_err(|e| ConfigError::Io(p.display().to_string(), e))
+        };
+        Self::parse(
+            &read("heat.toml")?,
+            &read("presence.toml")?,
+            &read("pursuit.toml")?,
+            &read("tools.toml")?,
+        )
+    }
+
+    /// The tables in `data/police/` as compiled into the crate (used by the browser build and
+    /// by [`crate::PoliceSystem::new`]).
+    pub fn builtin() -> Self {
+        Self::parse(
+            BUILTIN_HEAT,
+            BUILTIN_PRESENCE,
+            BUILTIN_PURSUIT,
+            BUILTIN_TOOLS,
+        )
+        .expect("data/police/*.toml compiled into wp_police must be valid")
+    }
+
+    /// Sanity checks that would otherwise show up as odd behaviour.
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        let bad = |m: &str| Err(ConfigError::Invalid(m.to_string()));
+        let t = &self.heat.heat.level_thresholds;
+        if t.windows(2).any(|w| w[0] >= w[1]) || t[0] <= 0.0 || t[4] > self.heat.heat.max_heat {
+            return bad("heat.level_thresholds must ascend within (0, max_heat]");
+        }
+        if !(0.0..=1.0).contains(&self.heat.heat.unseen_factor) {
+            return bad("heat.unseen_factor must be in 0..=1");
+        }
+        if self.pursuit.think_hz <= 0.0 {
+            return bad("pursuit.think_hz must be > 0");
+        }
+        for r in [
+            self.presence.reinforcement.response_s.dawn,
+            self.presence.reinforcement.response_s.day,
+            self.presence.reinforcement.response_s.dusk,
+            self.presence.reinforcement.response_s.night,
+        ] {
+            if r.min > r.max || r.min < 0.0 {
+                return bad("reinforcement.response_s ranges must have 0 <= min <= max");
+            }
+        }
+        if self.tools.roadblock.units[0] == 0
+            || self.tools.roadblock.units[0] > self.tools.roadblock.units[1]
+        {
+            return bad("roadblock.units must be [min>=1, max>=min]");
+        }
+        if self.tools.gadgets.radar_range_m.is_empty()
+            || self.tools.gadgets.scanner_delay_s.is_empty()
+        {
+            return bad("gadgets tiers must not be empty");
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builtin_tables_parse_and_validate() {
+        let c = PoliceConfig::builtin();
+        assert_eq!(c.presence.patrols.core.day, 8);
+        assert_eq!(c.presence.patrols.suburb.night, 1);
+        // The data dir on disk matches the compiled-in copy.
+        let disk =
+            PoliceConfig::load(concat!(env!("CARGO_MANIFEST_DIR"), "/../../data/police")).unwrap();
+        assert_eq!(c, disk);
+    }
+
+    #[test]
+    fn phase_lookup() {
+        let t = PhaseTable {
+            dawn: 1,
+            day: 2,
+            dusk: 3,
+            night: 4,
+        };
+        assert_eq!(t.get(DayPhase::Night), 4);
+        assert_eq!(t.get(DayPhase::Day), 2);
+    }
+}

@@ -58,3 +58,12 @@ jsonschema = { version = "0.59", default-features = false }
 
 [profile.release]
 debug = 1
+
+# wp_police's headless scenario tests simulate hours of pursuits; unoptimised they take minutes.
+# (Added by workstream 06; see docs/integration/police.md.)
+[profile.dev.package.wp_police]
+opt-level = 2
+
+# wp_world's procedural city + 400-agent traffic is slow unoptimised (lead, same reason).
+[profile.dev.package.wp_world]
+opt-level = 2
