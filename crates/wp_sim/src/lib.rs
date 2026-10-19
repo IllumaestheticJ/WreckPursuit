@@ -13,6 +13,7 @@
 mod contacts;
 mod physics;
 mod police_link;
+mod props;
 mod systems;
 mod traffic_link;
 
@@ -125,7 +126,7 @@ pub struct Sim {
     systems: Systems,
     last_tick_events: usize,
     static_boxes: usize,
-    props: usize,
+    props: props::Props,
     contact_filter: Option<ContactFilter>,
     police_car: Option<LoadedCar>,
     traffic_car: Option<LoadedCar>,
@@ -151,7 +152,7 @@ impl Sim {
             systems: Systems::ALL,
             last_tick_events: 0,
             static_boxes: 0,
-            props: 0,
+            props: props::Props::default(),
             contact_filter: None,
             police_car: None,
             traffic_car: None,
@@ -225,8 +226,9 @@ impl Sim {
 
     /// Replace the world (city, traffic, clock) — e.g. `World::load` or `World::procedural`
     /// from `wp_world`. Call before spawning or the first tick. Every `static_props()` entry
-    /// (parked cars, cones) becomes a dynamic Rapier box with its mass. The city road surface
-    /// is the flat ground slab at z = 0 (cities are flat in phase 1).
+    /// (parked cars, cones) becomes a Rapier box with its mass: fixed while nothing is near,
+    /// dynamic once a vehicle or debris body comes within reach (see `props.rs`). The city
+    /// road surface is the flat ground slab at z = 0 (cities are flat in phase 1).
     pub fn set_world(&mut self, world: World) {
         use rapier3d::math::Rotation;
         use rapier3d::prelude::{ColliderBuilder, Pose, RigidBodyBuilder, Vector};
@@ -239,7 +241,7 @@ impl Sim {
             let body = self
                 .physics
                 .bodies
-                .insert(RigidBodyBuilder::dynamic().pose(pose).build());
+                .insert(RigidBodyBuilder::fixed().pose(pose).build());
             let [hx, hy, hz] = prop.half_extents;
             let col = ColliderBuilder::cuboid(hx, hy, hz)
                 .mass(prop.mass_kg.max(1.0))
@@ -248,7 +250,8 @@ impl Sim {
             self.physics
                 .colliders
                 .insert_with_parent(col, body, &mut self.physics.bodies);
-            self.props += 1;
+            let radius = (hx * hx + hy * hy + hz * hz).sqrt();
+            self.props.add(body, prop.pos, radius);
         }
         self.world = world;
         self.rebuild_police();
@@ -263,7 +266,13 @@ impl Sim {
 
     /// Number of city props turned into physics bodies by [`Sim::set_world`].
     pub fn prop_count(&self) -> usize {
-        self.props
+        self.props.len()
+    }
+
+    /// Number of city props currently simulated as dynamic bodies (near a vehicle or still
+    /// settling after a hit); the rest are fixed until something comes near.
+    pub fn active_prop_count(&self) -> usize {
+        self.props.active_count()
     }
 
     /// Number of detached-part debris bodies in the world.
@@ -503,6 +512,7 @@ impl Sim {
                 }
             })
             .collect();
+        self.wake_props();
         self.physics.step();
         let mut tick_contacts = contacts::collect(
             self.physics.narrow_phase(),
@@ -551,6 +561,29 @@ impl Sim {
         self.last_tick_events = out.len();
         self.events.extend(out);
         self.tick += 1;
+    }
+
+    /// Make props within reach of a vehicle or debris body dynamic (and far, asleep ones
+    /// fixed again) before the physics step.
+    fn wake_props(&mut self) {
+        if self.props.is_empty() {
+            return;
+        }
+        let bodies = &self.physics.bodies;
+        let mover = |h: rapier3d::prelude::RigidBodyHandle| {
+            let rb = &bodies[h];
+            props::Mover {
+                pos: rb.translation().to_array(),
+                vel: rb.linvel().to_array(),
+            }
+        };
+        let movers: Vec<props::Mover> = self
+            .vehicles
+            .iter()
+            .map(|v| mover(v.body.body))
+            .chain(self.debris.iter().map(|h| mover(*h)))
+            .collect();
+        self.props.update(&mut self.physics.bodies, &movers);
     }
 
     /// Add `frame_dt` seconds of wall time (supplied by the caller), run the whole ticks it
@@ -647,7 +680,8 @@ impl Sim {
     /// compression (1e-5 m), detached flag; node count and every damage node position (1e-4 m).
     /// Used by the harness to name the entity that diverged first.
     pub fn entity_hashes(&self) -> Vec<(EntityId, u64)> {
-        self.vehicles
+        let mut hashers: Vec<StateHasher> = self
+            .vehicles
             .iter()
             .map(|v| {
                 let mut s = v.vehicle.state();
@@ -672,16 +706,42 @@ impl Sim {
                     h.write_f32_q(w.compression_m, 1e5);
                     h.write_bytes(&[w.detached as u8]);
                 }
-                let nodes = v.damage.node_positions();
-                h.write_u32(nodes.len() as u32);
-                for n in nodes {
-                    for x in n {
-                        h.write_f32_q(*x, 1e4);
-                    }
-                }
-                (v.id, h.finish())
+                h.write_u32(v.damage.node_positions().len() as u32);
+                h
             })
+            .collect();
+        // Lattice nodes are most of the work (the testbed hashes every tick for its replay
+        // log). Each hasher is one serial FNV chain, so hash four cars' nodes in lockstep to
+        // let the CPU overlap the chains; the result is the same as one car at a time.
+        let nodes: Vec<&[[f32; 3]]> = self
+            .vehicles
+            .iter()
+            .map(|v| v.damage.node_positions())
+            .collect();
+        for (hs, ns) in hashers.chunks_mut(4).zip(nodes.chunks(4)) {
+            hash_nodes_lockstep(hs, ns);
+        }
+        self.vehicles
+            .iter()
+            .zip(hashers)
+            .map(|(v, h)| (v.id, h.finish()))
             .collect()
+    }
+}
+
+/// Feed `nodes[k]` (quantised to 0.1 mm) into `hashers[k]`, all lists advancing together.
+/// Equivalent to `for n in nodes[k] { for x in n { hashers[k].write_f32_q(*x, 1e4) } }` per
+/// `k`, but independent chains interleave.
+fn hash_nodes_lockstep(hashers: &mut [StateHasher], nodes: &[&[[f32; 3]]]) {
+    let longest = nodes.iter().map(|n| n.len()).max().unwrap_or(0);
+    for i in 0..longest {
+        for (h, list) in hashers.iter_mut().zip(nodes) {
+            if let Some(n) = list.get(i) {
+                for x in n {
+                    h.write_f32_q(*x, 1e4);
+                }
+            }
+        }
     }
 }
 
@@ -874,6 +934,49 @@ mod tests {
         let a = mk();
         assert!(a.prop_count() > 0, "procedural city has no props");
         assert_eq!(a.state_hash(), mk().state_hash());
+    }
+
+    #[test]
+    fn props_are_fixed_until_a_car_comes_and_get_knocked() {
+        let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+        let mut sim = Sim::new(SimConfig {
+            seed: 9,
+            mode,
+            time_of_day: TimeOfDay::from_hours(12.0),
+            time_ratio: 1.0,
+        });
+        let world = World::procedural(
+            &wp_world::procgen::ProcGenConfig::default(),
+            wp_world::WorldConfig::default(),
+        );
+        let target = *world.static_props().next().unwrap();
+        sim.set_world(world);
+        assert_eq!(sim.active_prop_count(), 0, "props start fixed");
+        // Approach the first prop from 20 m away at 12 m/s, from its side.
+        let (s, c) = wp_math::sin_cos(target.yaw);
+        let side = [c, s];
+        let start = [
+            target.pos[0] + side[0] * 20.0,
+            target.pos[1] + side[1] * 20.0,
+            0.0,
+        ];
+        let (dx, dy) = (target.pos[0] - start[0], target.pos[1] - start[1]);
+        let yaw = wp_math::atan2(-dx, dy);
+        let id = sim.spawn_vehicle(&car, start, yaw).unwrap();
+        sim.place_vehicle(id, start, yaw, 12.0).unwrap();
+        let h = sim.props.bodies[0];
+        let p0 = sim.physics.bodies[h].translation();
+        for _ in 0..480 {
+            sim.step_fixed();
+        }
+        let p1 = sim.physics.bodies[h].translation();
+        assert!(
+            (p1 - p0).length() > 0.1,
+            "the prop was not knocked: moved {} m",
+            (p1 - p0).length()
+        );
+        assert!(sim.active_prop_count() < 40, "only nearby props wake");
     }
 
     fn quantise(c: &mut wp_contracts::ContactImpulse) {
