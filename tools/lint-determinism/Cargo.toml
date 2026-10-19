@@ -1,0 +1,9 @@
+[package]
+name = "lint-determinism"
+description = "Grep-style lint flagging non-deterministic constructs (f64, libm transcendentals, HashMap, wall clock, threads, unseeded RNG) in simulation crates."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
