@@ -13,6 +13,38 @@ Everything is a method on `wp_economy::Economy` (immutable data bundle). Mutatin
 `&mut PlayerAccount` and return `Result<(T, Vec<EconomyEvent>), EconomyError>`; a refused call
 never changes the account. Persist with `AccountStore::commit(&account, &events)`.
 
+### Browser career (step 2) — `wp_wasm::career` + `wp_economy::profile`
+A single-player career that persists between runs in the browser. The career owns the account
+between runs; during a run the session's `PlayerRun` holds it and the career takes it back when
+the run ends.
+
+| wasm export | Notes |
+|---|---|
+| `career_new(mode)`, `career_load_json(text)`, `career_save_json()`, `career_exists()` | save = `CareerProfile` JSON (versioned; `migrate` refuses newer saves). During a run `career_save_json` includes the live account and the car's current damage |
+| `career_view_json()` | `CareerView`: cash / debt / rep / bounty / net worth, carried heat + level, cars (condition, value, sale + scrap price, mods, insurance, `RepairAll` quote, priced repair lines, pound status, PI / mass / 0–100 / top speed), dealer (street roster, New/Used/Worn prices), floor car, insurance tiers, district labour, stats, ledger tail |
+| `career_mods_json(uid)` | mod tree for the car's class and mode: installed, allowed + reason, same-line replacement, stats after the change |
+| `career_start_run(scenario_json)` | any live scenario (free drive, city chase, a race): entity 0 becomes the active car with its mods (overlay data, same car id), saved lattice restored, career mode, carried heat as `police_heat`; ends a career run in progress first |
+| `career_end_run()` | `RunClose { end: Free/Captured/Wrecked, carried_heat, cash, ledger }`; stores the car's damage, applies carry-over, one night passes. Replacing the session (`init`, another start) also ends it |
+| `career_run_active()` | |
+| `career_buy_car(def, cond)`, `career_floor_car()`, `career_sell_car(uid)`, `career_set_active(uid)` | dealer = roster minus `debug_*` and police |
+| `career_install_mod(uid, id)`, `career_uninstall_mod(uid, id)` | a mod that changes the lattice structure (cages) is refused while the body is dented |
+| `career_quote_json(uid, req)`, `career_repair(uid, req)` | `req = { option?: RepairAll / {RepairSelected:[items]} / Scrap, district?: DistrictId, shop?: Legit/Crooked }`; the stored lattice is repaired with `DamageSim::apply_repair` (full repair = pristine body); a legit shop reporting a wanted car raises carried heat |
+| `career_release(uid)`, `career_next_night()` | pound release; a night without driving (auction countdown, premiums) |
+| `career_insure(uid, tier)` | `"basic"`, `"full"`, `""` = drop the policy |
+
+Rules: each finished run is a night; capture / wreck clears heat; a free end carries heat × 0.5
+(≤ 45, < 5 forgotten); bounty, rep, debt and the pound clock live in the account. Career runs
+keep the career's damage mode (`set_damage_mode` is refused). Lattice blobs are
+`wp_damage::FullDamageSnapshot` JSON text per car uid (exact round trip).
+
+Testbed (`apps/testbed-web`): `garage` button and a `career` box (on by default) in the
+controls: with it, **free drive** and **city chase** start career runs; the car selector and
+`window.__wp.startFreeDrive(car, …)` / `startCityChase(car, …)` stay sandbox runs. Saved to
+`localStorage["wp.career.v1"]` (try/catch everywhere; an unreadable save is kept under
+`wp.career.v1.unreadable`) after every garage action, every settlement and every 20 s of a run;
+export / import as a file from the garage. The end-of-run panel gets a **Garage** button on
+career runs.
+
 ### End-of-run glue for `wp_sim` (`wp_economy::session`) — round 6b
 | Call | Notes |
 |---|---|
@@ -152,6 +184,13 @@ per seed). `apps/simcli` (workstream 10) may wrap it as an economy scenario.
 | 15 race (L) | **R5 agreed mapping (round 8):** the economy prices every `RaceKind` itself from `stakes.toml [race_kinds]` (same type mapping as your `bridge::economy_race_type`: Outrun → Touge, TimeAttack → Circuit, Checkpoint / Cannonball / Delivery → Sprint; multipliers keep your `data/events/stakes.toml [kinds]` purse ratios within 15 %, checked by `tests/race_kinds.rs`, which reads your file) and `[legality]` (sanctioned ×0.8 purse / ×1.2 buy-in, illegal daytime ×4.5 ≈ 2.5× a night street race). Your `Stake.purse` stays the lobby's advertised number; the payout is the economy's. I added `kind: Some(kind), legality` to the `RaceSetup` literal in `bridge::economy_setup` (compile fix); you may replace the body with `econ.race_setup(..)` if you have an `Economy` there. If you change the kind → race type mapping or the relative `base_purse`s, `race_kinds.rs` fails: tell me and I retune. Still open from R5: charge `cargo_damage_cost` and apply `CrewCut` at the call site (server) — economy calls exist (`Adjustment` / a new reason if you want one: say which). | — |
 | 10 harness | CI line `cargo test -p wp_economy --features native` so the SQLite store is tested in CI | run locally |
 
+### Needs (step 2)
+| From | What | Workaround now |
+|---|---|---|
+| I (harness) / lead | A replay of a career run whose car has mods or started damaged does not verify (replay rebuilds the stock, pristine car). Proposal: scenario `EntitySpec` gains optional `car_def` / `lattice_def` overrides and an initial `damage: FullDamageSnapshot`, applied by `build_sim`; or a replay op | stock, undamaged career cars replay fine; documented |
+| L (race menu) | Start races from the menu with `career_start_run(scenario_json)` when the career is on, so races use the career car; race payouts then flow through the run's `PlayerRun` (needs a race-result call there, lead) | free drive / city chase only |
+| B (damage) | Contract request #9 (`DamageSnapshotExt` into `DamageSnapshot`) would let the career store the contract type instead of `FullDamageSnapshot` | `FullDamageSnapshot` JSON |
+
 ## Contract change requests
 | # | Change (type / field / variant) | Why | Who is affected | Status |
 |---|---|---|---|---|
@@ -222,6 +261,22 @@ Police / net consumers: `InformantTip`, `ShopReported`, `BountyCleared` change h
 `CarImpounded`/`CarSeized`/`CarDestroyed` mean the car must not spawn.
 
 ## Changes outside my crates
+**Step 2 (career), authorized minimal glue:**
+- `crates/wp_wasm` (C): new `src/career.rs` + `src/career_tests.rs` (mine); `session.rs`:
+  `Session::new_with_data` (cars read through a data overlay), `is_career` / `begin_career` /
+  `end_career` / `sim_before_start_mut`, `set_mode` refused in career runs; `lib.rs`: `install`
+  ends a replaced career run (`career::absorb`), `with_session_opt`, module lines; `run.rs`
+  (lead): `PlayerRun::for_career_car`, `was_wanted`, `car`, `RunReport::escape_cash`;
+  `run_tests.rs`: the escape test now expects escape cash; `Cargo.toml`: `wp_damage` (already in
+  the tree via `wp_sim`).
+- `apps/testbed-web` (C): `index.html` (`career` box, `garage` button), `main.ts` (career
+  load/save, garage mount, career runs, autosave, `__wp.{garage, careerApi, openGarage,
+  startCareerRun, persistCareer}`), `wasm/sim.ts` (`career*` wrappers), `ui/runEnd.tsx`
+  (Garage button, escape cash in the toast), `e2e/run.mjs` (career loop check).
+- `apps/ui-kit` (M): new files only, `src/garage/{CareerGarage.tsx, types.ts, store.ts,
+  garage.css}`; they use `ui/kit.tsx`, `ui/format.ts` and `ui/theme.css`, nothing else.
+
+
 **By the lead in `wp_economy` (`lead/demo-endrun`, 2026-10-19):** `EconomySession::set_mode(mode)` (the testbed switches damage mode mid-run; `finish` and quotes use it). Additive, no behaviour change. The demo calls the session from `crates/wp_wasm/src/run.rs` with `RepairPolicy::QuoteOnly`, then `retrieve_from_impound` + `repair(RepairAll)` on "Repair & continue".
 
 Round 8 (minimal compile fixes for new fields, nothing else):
@@ -375,3 +430,42 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
 Gate on `ws/economy` after merging `origin/main` (round 8): `cargo fmt --check`, workspace clippy
 `--all-targets -D warnings`, `cargo test --workspace` (all green, no failures),
 `cargo test -p wp_economy --features native`, wasm build of `wp_wasm` (no `rusqlite` in its tree).
+
+
+## Step 2 response (economy, 2026-10-19) — persistent career in the browser
+
+1. **Persistence:** cash, ledger (last 200 lines), owned cars with full lattice damage
+   (`FullDamageSnapshot` via `save_full`/`restore_full`), mods, insurance, impound status,
+   carried heat, bounty / rep / debt, career and lifetime stats. `localStorage` (versioned key,
+   try/catch, unreadable saves kept aside, migration stub in `store.ts` for keys and in
+   `wp_economy::profile::migrate` for the JSON) plus export / import as a file. Free drive and
+   city chase start career runs with the career car, its mods and its saved damage; the
+   end-of-run settlement goes into the career.
+2. **Garage screen** (`apps/ui-kit/src/garage/CareerGarage.tsx`, the testbed's `garage` button):
+   car list with condition and value; repair all or per item at a district (labour ×) legit or
+   crooked shop, scrap; dealer with New / Used / Worn prices in the class bands and the floor
+   beater; sell; mod tree (performance / durability / tool / cosmetic) with PI, mass, 0–100, top
+   speed, grip and brake deltas, install / swap / remove; pound with fee, fee per night and
+   auction countdown, release or "let a night pass"; insurance none / basic / full; ledger and
+   stats; new career (Arcade / Simulation).
+3. **Economy sanity** (`tests/browser_career.rs`, `cargo test -p wp_economy --test browser_career -- --nocapture`):
+   start cash 4 000 → **4 500**; worn beater 1 800 leaves 2 700 ≥ three busted L1 nights in it
+   (≈ 736 each; L2 ≈ 1 096). New `[bounty.escape_cash]`: night escape L1 455 / L2 1 040 /
+   L3 2 080. Arcade busts: Sport L2 1 806, Sport L3 2 586; Simulation Sport L3 4 413. So one L2
+   escape out-earns an L1 beater bust, but a bust in a real car costs more than the escape at the
+   same level. 20-night career still solvent in Arcade (median 63 447 from 22 000, 0/64 in debt)
+   and marginal in Simulation (median 23 782).
+4. **Tests:** `crates/wp_wasm/src/career_tests.rs` (10, native): a run uses the career car and
+   carries its damage over (restored model == saved); save → load → same profile and stable
+   re-save (also through the wasm exports); full repair → pristine body bit-for-bit in the next
+   run; partial repair == `apply_repair(items)` on the saved model, the rest one by one ends
+   pristine; buy / sell / mod flows (prices, refunds, stat deltas as promised, modded car driven,
+   cage refused while dented, durability adds mass and beams); floor car; capture → garage →
+   pound fee grows a night → release → repair → new run with the repaired car; auction; heat
+   carry; mode lock. Browser e2e (`apps/testbed-web/e2e/run.mjs`, "career:" lines): garage →
+   buy beater → city chase → busted → Garage → saved → reload → release → repair all → free
+   drive with the repaired car → export/import round trip.
+
+Known gaps: replays of modded / pre-damaged career runs (Needs → I); races in the career (L's
+menu); escape payouts are the only career income until races land; the dealer's car names come
+from `display_name` (analog names); the in-run HUD shows the run account, not net worth.

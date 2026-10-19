@@ -216,7 +216,33 @@ export const sim = {
   debugSetHeat: (entity: number, heat: number): void => wasm.debug_set_heat(entity, heat),
   /** Debug / e2e: park `entity` stopped `aheadM` in front of the first police car (throws if none yet). */
   debugParkNearPolice: (entity: number, aheadM: number): number => wasm.debug_park_near_police(entity, aheadM),
+
+  // ----- career (machine G; crates/wp_wasm/src/career.rs). Every call throws on refusal. ---
+  careerNew: (mode: string): CareerView => JSON.parse(wasm.career_new(mode)),
+  careerLoad: (text: string): CareerView => JSON.parse(wasm.career_load_json(text)),
+  careerSave: (): string => wasm.career_save_json(),
+  careerExists: (): boolean => wasm.career_exists(),
+  careerView: (): CareerView => JSON.parse(wasm.career_view_json()),
+  careerMods: (uid: number): ModTreeView => JSON.parse(wasm.career_mods_json(uid)),
+  careerRunActive: (): boolean => wasm.career_run_active(),
+  /** Start a career run of a scenario (the first entity becomes the career car). */
+  careerStartRun: (scenarioJson: string): number[] => Array.from(wasm.career_start_run(scenarioJson)),
+  /** End the career run (back to the garage; one night passes). */
+  careerEndRun: (): RunClose | null => JSON.parse(wasm.career_end_run()),
+  careerBuy: (defId: string, condition: string): CareerView => JSON.parse(wasm.career_buy_car(defId, condition)),
+  careerFloorCar: (): CareerView => JSON.parse(wasm.career_floor_car()),
+  careerSell: (uid: number): CareerView => JSON.parse(wasm.career_sell_car(uid)),
+  careerSetActive: (uid: number): CareerView => JSON.parse(wasm.career_set_active(uid)),
+  careerInstall: (uid: number, modId: string): CareerView => JSON.parse(wasm.career_install_mod(uid, modId)),
+  careerUninstall: (uid: number, modId: string): CareerView => JSON.parse(wasm.career_uninstall_mod(uid, modId)),
+  careerQuote: (uid: number, req: ShopRequest): RepairQuote => JSON.parse(wasm.career_quote_json(uid, JSON.stringify(req))),
+  careerRepair: (uid: number, req: ShopRequest): CareerView => JSON.parse(wasm.career_repair(uid, JSON.stringify(req))),
+  careerRelease: (uid: number): CareerView => JSON.parse(wasm.career_release(uid)),
+  careerInsure: (uid: number, tier: string): CareerView => JSON.parse(wasm.career_insure(uid, tier)),
+  careerNextNight: (): CareerView => JSON.parse(wasm.career_next_night()),
 };
+
+import type { CareerView, ModTreeView, RepairQuote, RunClose, ShopRequest } from "../../../ui-kit/src/garage/types";
 
 export type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
 import type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
