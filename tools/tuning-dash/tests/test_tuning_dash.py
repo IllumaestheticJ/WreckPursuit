@@ -110,7 +110,7 @@ class EndToEnd(unittest.TestCase):
             "name": "e2e",
             "data": str(self.data),
             "probe": {"kind": "barrier", "car": "debug_sedan", "mode": "Simulation", "impact": "Frontal", "speeds_kmh": [25, 56]},
-            "params": [{"target": "mode:sim:plasticity_scale", "values": [0.8, 1.0]}],
+            "params": [{"target": "mode:sim:impulse_to_lattice_scale", "values": [0.8, 1.0]}],
             "expect": [{"metric": "crush_m@56", "min": 0.0, "max": 5.0}],
         })
         d = runner.run(sp, build=False, out_root=self.out, workers=2)
@@ -120,9 +120,10 @@ class EndToEnd(unittest.TestCase):
         self.assertTrue(p1["ok"] and p2["ok"], (p1.get("error"), p2.get("error")))
         self.assertTrue(p1["passed"])
         self.assertEqual(p1["series"]["x"], [25.0, 56.0])
-        # Less plasticity → less permanent crush at 56 km/h.
+        # Less impulse into the lattice → less crush at 56 km/h. (plasticity_scale is not
+        # monotonic in crush any more after round 6b's damage merge; see the integration doc.)
         self.assertLess(p1["metrics"]["crush_m@56"], p2["metrics"]["crush_m@56"])
-        self.assertEqual(p1["applied"][0]["pointer"], "/plasticity_scale")
+        self.assertEqual(p1["applied"][0]["pointer"], "/impulse_to_lattice_scale")
 
         # Second run reuses both points.
         d = runner.run(sp, build=False, out_root=self.out)
@@ -137,13 +138,13 @@ class EndToEnd(unittest.TestCase):
         after = sim.read_text()
         diff = [(a, b) for a, b in zip(before.splitlines(), after.splitlines()) if a != b]
         self.assertEqual(len(diff), 1)
-        self.assertTrue(diff[0][1].startswith("plasticity_scale = 0.8"))
+        self.assertTrue(diff[0][1].startswith("impulse_to_lattice_scale = 0.8"))
         log = (self.data / "TUNING_CHANGELOG.md").read_text()
-        self.assertIn("`modes/sim.toml`: `/plasticity_scale` 1.0 → 0.8 · from sweep `e2e` point p0001", log)
+        self.assertIn("`modes/sim.toml`: `/impulse_to_lattice_scale` 1.0 → 0.8 · from sweep `e2e` point p0001", log)
         self.assertIn("e2e test", log)
 
         # The sweep now started from a value the file no longer holds: refused unless forced.
-        sim.write_text(after.replace("plasticity_scale = 0.8", "plasticity_scale = 0.9"))
+        sim.write_text(after.replace("impulse_to_lattice_scale = 0.8", "impulse_to_lattice_scale = 0.9"))
         o = actions.promote_point("e2e", "p0001", root=self.out)
         self.assertFalse(o["ok"])
         self.assertIn("stale", o["error"])

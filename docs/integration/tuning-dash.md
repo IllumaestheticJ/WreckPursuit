@@ -391,6 +391,12 @@ survivable at 0.20 (2–3 hits). The single-hit total-loss speed falls from ~190
 That is B's call and B's commit (`[bless]`, since the goldens may move). The Arcade **side**
 result needs a model or lattice look; no threshold below 0.3 fixes it.
 
+Also for B: after this round's damage merge, Simulation `plasticity_scale` is no longer
+monotonic in crush. For the debug_sedan 56 km/h frontal, 0.8 gives 0.639 m and 1.0 gives 0.634 m,
+so less plasticity now means slightly *more* crush. That broke an old tuning-dash test, which now
+sweeps `impulse_to_lattice_scale` instead. It fits the saturation reported in "Findings from the
+presets".
+
 ### 3. Thumbnails as frames (known gap): done
 
 `scenario` and `pursuit` points now write top-down SVG frames: one at the first hard contact of a
