@@ -12,11 +12,15 @@
 
 mod contacts;
 mod physics;
+mod police_link;
 mod systems;
+mod traffic_link;
 
 pub use contacts::CONTACT_EVENT_MIN_IMPULSE_NS;
 pub use physics::PhysicsWorld;
+pub use police_link::POLICE_SLOT_RESERVE;
 pub use systems::{SystemId, Systems};
+pub use traffic_link::TRAFFIC_SLOT_RESERVE;
 
 use rapier3d::prelude::QueryFilter;
 use thiserror::Error;
@@ -26,7 +30,7 @@ use wp_contracts::{
 };
 use wp_damage::DamageModel;
 use wp_math::{FixedStep, Rng, StateHasher};
-use wp_police::{PoliceSystem, RacerView};
+use wp_police::PoliceSystem;
 use wp_vehicle::{RapierGround, Vehicle, VehicleBody};
 use wp_world::World;
 
@@ -92,6 +96,10 @@ pub struct SimVehicle {
     pub body: VehicleBody,
     /// Who drives it (see [`Sim::set_vehicle_kind`]).
     pub kind: VehicleKind,
+    /// The `wp_police` unit this car embodies (AI police cars only).
+    pub police_unit: Option<wp_police::UnitId>,
+    /// The `wp_world` traffic agent this car embodies (physical traffic only).
+    pub traffic_agent: Option<wp_world::AgentId>,
     spawn: ([f32; 3], f32),
     /// Wheel radius / width (m) for debris cylinders when a wheel tears off.
     wheel_size: (f32, f32),
@@ -119,6 +127,8 @@ pub struct Sim {
     static_boxes: usize,
     props: usize,
     contact_filter: Option<ContactFilter>,
+    police_car: Option<LoadedCar>,
+    traffic_car: Option<LoadedCar>,
     record_contacts: bool,
     applied_contacts: Vec<(EntityId, Vec<wp_contracts::ContactImpulse>)>,
     debris: Vec<rapier3d::prelude::RigidBodyHandle>,
@@ -143,6 +153,8 @@ impl Sim {
             static_boxes: 0,
             props: 0,
             contact_filter: None,
+            police_car: None,
+            traffic_car: None,
             record_contacts: false,
             applied_contacts: Vec::new(),
             debris: Vec::new(),
@@ -201,6 +213,8 @@ impl Sim {
             input: VehicleInput::default(),
             assists: AssistProfile::default(),
             kind: VehicleKind::Player,
+            police_unit: None,
+            traffic_agent: None,
             spawn: (pos, yaw),
             wheel_size: (car.def.wheels[0].radius_m, car.def.wheels[0].width_m),
             hull_version,
@@ -237,6 +251,7 @@ impl Sim {
             self.props += 1;
         }
         self.world = world;
+        self.rebuild_police();
     }
 
     /// Number of city props turned into physics bodies by [`Sim::set_world`].
@@ -440,6 +455,11 @@ impl Sim {
                 .collect();
             self.world.set_tracked_vehicles(&tracked);
             self.world.step(dt, &mut out);
+            self.apply_traffic_lod();
+            self.drive_traffic();
+        }
+        if sys.police {
+            self.drive_police_units();
         }
         if sys.vehicle {
             for slot in &mut self.vehicles {
@@ -501,27 +521,25 @@ impl Sim {
                 if self.record_contacts && !contacts.is_empty() {
                     self.applied_contacts.push((slot.id, contacts.clone()));
                 }
-                let effects = slot.damage.handling_effects();
+                let mut effects = slot.damage.handling_effects();
+                // Spike strips (wp_police) deflate tires on top of damage.
+                let spikes = self.police.tire_puncture(slot.id);
+                for (t, s) in effects.tire_puncture.iter_mut().zip(spikes) {
+                    *t = t.max(s);
+                }
                 slot.vehicle.apply_damage_effects(&effects);
             }
             self.sync_damage_to_physics();
         }
+        if sys.vehicle {
+            self.sync_traffic();
+        }
         if sys.police {
-            let racers: Vec<RacerView> = self
-                .vehicles
-                .iter()
-                .map(|v| {
-                    let s = v.vehicle.state();
-                    RacerView {
-                        entity: v.id,
-                        pos: s.pos,
-                        vel: s.lin_vel,
-                    }
-                })
-                .collect();
+            let racers = self.racer_views();
             let tick_events = out.clone();
             self.police
                 .step(&self.world, &racers, &tick_events, dt, &mut out);
+            self.reconcile_police_units();
         }
         self.last_tick_events = out.len();
         self.events.extend(out);
@@ -895,6 +913,112 @@ mod tests {
         for _ in 0..60 {
             sim.step_fixed();
         }
+    }
+
+    /// Small procedural city with police cars; the player speeds down the first road.
+    fn police_city_run(ticks: u32) -> Sim {
+        let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
+        let cop = wp_contracts::load_car(data("cars/sentinel_cruiser.json")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+        let mut sim = Sim::new(SimConfig {
+            seed: 11,
+            mode,
+            time_of_day: TimeOfDay::from_hours(22.0),
+            time_ratio: 10.0,
+        });
+        sim.set_police_car(cop);
+        sim.set_world(World::procedural(
+            &wp_world::procgen::ProcGenConfig::small(),
+            wp_world::WorldConfig::default(),
+        ));
+        let id = sim.spawn_vehicle(&car, [0.0, 0.0, 0.0], 0.0).unwrap();
+        sim.set_input(
+            id,
+            VehicleInput {
+                throttle: 1.0,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        for _ in 0..ticks {
+            sim.step_fixed();
+        }
+        sim
+    }
+
+    #[test]
+    fn police_units_become_driven_vehicles() {
+        let sim = police_city_run(2400);
+        let cops: Vec<_> = sim
+            .vehicles()
+            .iter()
+            .filter(|v| v.kind == VehicleKind::Police)
+            .collect();
+        assert!(!cops.is_empty(), "no police cars spawned in 10 s");
+        assert!(cops.iter().all(|v| v.police_unit.is_some()));
+        // Every police car is bound to a live unit, and at least one is moving.
+        let bound = sim
+            .police()
+            .units()
+            .iter()
+            .filter(|u| u.entity.is_some())
+            .count();
+        assert_eq!(bound, cops.len());
+        assert!(
+            cops.iter().any(|v| v.vehicle.state().speed_mps.abs() > 1.0),
+            "police cars never move"
+        );
+        assert_eq!(sim.state_hash(), police_city_run(2400).state_hash());
+    }
+
+    #[test]
+    fn traffic_near_the_player_becomes_physical() {
+        let run = || {
+            let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
+            let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+            let mut sim = Sim::new(SimConfig {
+                seed: 12,
+                mode,
+                time_of_day: TimeOfDay::from_hours(12.0),
+                time_ratio: 10.0,
+            });
+            let mut world = World::procedural(
+                &wp_world::procgen::ProcGenConfig::small(),
+                wp_world::WorldConfig::default(),
+            );
+            let id = sim.spawn_vehicle(&car, [0.0, 0.0, 0.0], 0.0).unwrap();
+            let tracked: Vec<_> = sim
+                .vehicle_states()
+                .iter()
+                .map(|(e, s)| wp_world::TrackedVehicle::from_state(*e, s, false, true))
+                .collect();
+            world.set_tracked_vehicles(&tracked);
+            world.populate();
+            sim.set_world(world);
+            sim.set_traffic_car(car.clone());
+            sim.set_input(
+                id,
+                VehicleInput {
+                    throttle: 0.4,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let mut max_traffic = 0;
+            for _ in 0..1440 {
+                sim.step_fixed();
+                let n = sim
+                    .vehicles()
+                    .iter()
+                    .filter(|v| v.kind == VehicleKind::Traffic)
+                    .count();
+                max_traffic = max_traffic.max(n);
+            }
+            (sim.state_hash(), max_traffic)
+        };
+        let (h, n) = run();
+        assert!(n > 0, "no traffic car became physical near the player");
+        assert_eq!(h, run().0, "physical traffic must be deterministic");
     }
 
     #[test]
