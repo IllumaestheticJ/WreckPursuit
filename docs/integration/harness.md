@@ -20,7 +20,7 @@
 | `Sim::entity_hashes() -> Vec<(EntityId, u64)>` | per-entity hash, ascending entity order (names the entity that diverged) |
 | `Sim::state_hash()` (changed) + `wp_sim::HASH_SPEC_VERSION = 1` | hash spec below |
 
-### Hash function spec (v2)
+### Hash function spec (v3)
 
 All hashing is FNV-1a 64 (`wp_math::StateHasher`, little-endian integer encoding). Floats are
 **quantised** before hashing: `round(v as f64 × scale) as i64` (`wp_math::quantize`; NaN →
@@ -31,6 +31,7 @@ identical on every target.
 state_hash = FNV( u32 HASH_SPEC_VERSION, u64 tick,
                   q(clock seconds_since_midnight, 1e3),
                   u64 World::state_hash()        // v2: signals + traffic (wp_world's own spec)
+                  u64 PoliceSystem::state_hash() // v3: units, heat, pursuits (wp_police's own spec)
                   u32 debris_count, q(debris body translation, 1e-3 m) in spawn order,   // v2
                   u32 vehicle_count,
                   u64 entity_hash(v) for v in vehicles ascending by EntityId )
@@ -45,7 +46,9 @@ entity_hash(v) = FNV( u32 entity id,
                       u32 node_count, q(node.xyz, 1e4) for every damage node in id order )
 ```
 
-v1 → v2 (run 3): added the world/traffic hash and debris bodies; every golden was re-blessed.
+v1 → v2 (run 3): added the world/traffic hash and debris bodies. v2 → v3 (run 5): added the
+police hash, because police units are not vehicles and would otherwise drift unnoticed. Every
+golden was re-blessed both times.
 City props (parked cars, cones) are physics bodies but are not hashed yet (the sim keeps only
 their count); a prop knocked differently shows up through the vehicles it touches.
 
@@ -128,6 +131,47 @@ Cloud container, Intel Xeon @ 2.10 GHz, 4 cores, release, real vehicle + damage 
   `wasm-determinism` module could host one).
 - The lint is line-based: it can miss a transcendental called through a function pointer or a
   macro, and it stops at the first `#[cfg(test)]` in a file.
+
+## Run 5 — city chase, opt-outs, F's codec (2026-10-19)
+
+- **Police in cities.** `wp_sim` gained `Sim::set_police(PoliceSystem)` / `Sim::police()`
+  (test-surface hook, like `set_world`). With a city, simcli installs
+  `PoliceSystem::for_world(cfg, &world, setup)` with E's kinematic unit driver, seeded from the
+  scenario. Until now `wp_sim` always used `PoliceSystem::new()`, which has no road graph and
+  so no units. **For the lead:** if run 5 wires police into `Sim::set_world` itself, simcli's
+  call becomes redundant and can go.
+- **`police_presence` is applied:** it scales `presence.toml`'s patrol counts (district ×
+  phase). New per-entity `police_heat`; new world metrics `police_units_max` / `police_units_final`.
+- **Opt-outs:** `traffic_cars`, `parked_cars`, `police_cars` (all default `true`).
+  `smoke/city_opt_out.ron` checks all three; without them the same city has 198 agents, 1322
+  parked cars and 5 units.
+- **`golden_city_chase`:** 23:00, 12×12 city, a speeder at 22 m/s (limit 13.4 m/s) comes up
+  behind the patrol that starts on the x = 55 collector. Pursuit starts at 5.0 s (expect ≤ 20 s),
+  with no starting heat. **For E:** night recognition (40 m for 4 s) means a speeder passing
+  a patrol head-on, or on a crossing street, is never recognised. In my probes a unit never
+  converged on an unseen L2/L3 racer within 25 s, even at 3× presence. That matches
+  "a glimpse at night is not enough", but it makes night chases depend on where the racer
+  meets a patrol, so a scenario has to be aimed (`examples/probe_police.rs`).
+- **F's codec.** The simcli net round trip and the `snapshot/*` benches use `wp_net`'s wire
+  codec (`QVehicle` quantise → `DeltaVehicle` vs the previous net tick, absolute every 60 net
+  ticks → `ServerMsg::Snapshot` with the first vehicle as `OwnState` → encode → decode →
+  re-apply). Checks: re-encode equality, exact delta reconstruction, position error ≤ 5.1 mm.
+  Typical size: 130–150 B per snapshot for 1–2 cars, 420 B for 24.
+  **For F:** `DeltaVehicle::encode` keeps `rot`/`misc` values its mask omits, while `read`
+  leaves them at their defaults. So `decode(encode(m)) != m` field-wise, though the wire
+  meaning is identical. simcli compares re-encoded bytes instead; zeroing omitted fields in
+  `encode` would make the struct round-trip exact.
+- **Hash spec v3:** the state hash now includes `PoliceSystem::state_hash()`. Every golden was
+  re-blessed (`[bless]`).
+- **Perf:** re-blessed `claude-cloud.json` and appended to `docs/PERF.md`. `snapshot/encode_24` went
+  from 40 to 3.3 µs and `decode_24` from 53 to 1.6 µs (F's binary codec vs JSON). The sim benches
+  were 22–71 % slower than the run-3 baseline, but noisy: `sim_only/64` read 3.38 ms, then
+  2.46 ms on a re-run. None of the harness changes touch the step these benches measure. **For
+  the lead:** the remaining rise most likely comes from the run-4 merges (A's torque converter
+  and AWD coupling, B's new damage events, F's contact filter); worth a look if the nightly
+  gate on `gha-ubuntu-latest` agrees.
+- Minimal edits outside my crates: `crates/wp_sim` (`set_police`, `police`), and
+  `crates/wp_wasm/src/scenario.rs` (new `Scenario`/`EntitySpec` fields in its literals).
 
 ## Run 4 — contract v0.2.0 merge (2026-10-19)
 
@@ -246,3 +290,17 @@ with 06 in v0.2.0, so the provisional `PURSUIT_STARTED_KIND` goes away. H2 (`Sys
   entities only); fuzz names extra vehicles "city vehicle". City goldens re-blessed.
 - `soak/traffic_soak_observer`: `civilian_collisions` gate 0 → ≤ 3, zero moved to `expect_pending`
   (physical traffic; D is investigating). Consider scenario fields to opt out of police / traffic.
+
+## Lead feedback (round 6, 2026-10-19)
+
+**Merged** (city chase golden, police/traffic/parked opt-outs, starting heat, F's snapshot codec in the bench).
+
+Lead fixes in your area this round:
+- `build_sim` installed your `police_for_city` **before** `set_world`, which rebuilds police on the city and threw
+  your config / starting heat away. Now: `set_world` first, then `set_police(police_for_city(..))`; police car only
+  with `police_cars`, physical traffic only with `traffic_cars`; `police_cars: false` = presence 0, heat kept.
+- `golden/city_chase`: police cars are solid now and the racer starts 5 m behind a stopped patrol car at 22 m/s, so it
+  rear-ends it at t = 0.11 s. Its checks moved to `expect_pending`. **Re-aim it** (start further back / adjacent
+  lane, or wait for E's obstacle-aware units) and move the checks back to `expect`.
+- `soak/traffic_soak_observer`: `police_cars: false` for now (police ram the parked observer; E's task). Flip it back
+  once E lands obstacle awareness.

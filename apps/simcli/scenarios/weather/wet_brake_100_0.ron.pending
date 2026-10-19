@@ -1,0 +1,28 @@
+// PENDING — enable by renaming to `wet_brake_100_0.ron` once simcli accepts the top-level
+// `weather:` field (request W-7 in docs/integration/weather.md) and wp_sim wraps its world in
+// wp_weather::WithWeather. Until then simcli would reject the unknown field, so the file
+// carries a non-.ron extension and the harness skips it.
+//
+// Wet twin of weather/dry_brake_100_0.ron: same car, inputs and timing on a soaked road
+// (1.5 mm of water, heavy rain held). Ranges come from the rig measurement in
+// crates/wp_weather/tests/vehicle_grip.rs (dry ~3.1 s / ~43 m, soaked ~3.9 s / ~54 m), widened
+// for the cruise controller and tuning. Verified 2026-10-19 by applying the integration-doc
+// spec to a scratch copy: wet 4.60 m/s at 17.2 s, -0.05 m/s at 18.0 s (dry: -0.05 at 17.2 s).
+(
+    name: "weather_wet_brake_100_0",
+    seed: 1,
+    assists: ai,
+    weather: (kind: HeavyRain, intensity: 1.0, water_mm: 1.5, locked: true),
+    entities: [(id: "car", car: "debug_sedan", driver: cruise(target_mps: 27.8, until_s: 14.0),
+                inputs: [(t_s: 14.0, input: (brake: 1.0)), (t_s: 18.0, input: ())])],
+    duration_s: 20.0,
+    expect: [
+        // Water does not slow a car cruising at constant speed (the cruise controller holds it).
+        speed_at(t_s: 13.9, min: 27.0, max: 28.6),
+        // Where the dry twin has stopped, the wet car is still moving…
+        speed_at(t_s: 17.2, min: 3.0, max: 12.0),
+        // …and it does stop, about 0.8 s later. The pedal is released at 18.0 s in both files:
+        // a brake held at standstill selects reverse.
+        speed_at(t_s: 18.0, min: -1.0, max: 1.5),
+    ],
+)

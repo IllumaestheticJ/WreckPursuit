@@ -21,7 +21,7 @@ signatures: `docs/integration/weather.md`).
 | Police / traffic / economy multipliers | `effects.rs`, `effects.toml` | patrol + pursuit speed caps, incident rate, traffic speed/headway/density, payout/rep (tables only — owners apply) |
 | Puddles + spray for the renderer | `grid.rs`, `effects.rs` | `puddle_cells(min_mm)`, `wetness_u8()` texture, `spray_intensity(water, speed)` |
 | `LocalConditions` / `weather_at(p)` | `conditions.rs` | payload of the requested `WorldQuery::weather_at` |
-| `WithWeather` adapter | `adapter.rs` | wraps any `WorldQuery`; reports wet `Asphalt` as `WetAsphalt` so rain costs grip **now**, before any contract change |
+| `WithWeather` / `Weathered<W>` adapters | `adapter.rs` | wrap any `WorldQuery`: wet `Asphalt` → `WetAsphalt` so rain costs grip **now**; `line_of_sight` cut at the fog/rain sight range (`sight_range_m`) |
 | Snapshot | `lib.rs` | `snapshot()` / `apply_snapshot()`: regime + `u8` water per cell (0.05 mm steps) |
 
 Time: weather runs in **in-game seconds** (`dt × time_ratio`), like the clock. At the default
@@ -63,6 +63,13 @@ schedules never change; regime blends are smooth; winter clear nights freeze wet
 economy / traffic multipliers move the right way; adapter remaps only wet asphalt and forwards `line_of_sight`; fog shortens `can_see` and walls still block; snapshot
 round trip; disk tables == embedded tables; invalid tables are rejected.
 
+## End-to-end result (real vehicle)
+
+`tests/vehicle_grip.rs` drives `debug_sedan` through `wp_vehicle::rig::Rig<Weathered<FlatWorld>>`:
+100→0 km/h with ABS **42.9 m / 3.09 s dry, 54.1 m / 3.93 s soaked** (1.26×); a dry road under
+the adapter is bit-for-bit the plain dry world. simcli pair: `apps/simcli/scenarios/weather/`
+(`dry_brake_100_0.ron` active; `wet_brake_100_0.ron.pending` until the `weather:` field lands).
+
 ## Performance (native, release, cloud container, 2026-10-19)
 
 | Measurement | Value | Budget |
@@ -76,8 +83,8 @@ Browser: not measured yet (expected ≤ 2× native; the update is one linear pas
 
 ## Known gaps
 
-- No vehicle-level wet test yet: `wp_vehicle::rig::Rig` hard-codes its flat world, and simcli
-  scenarios cannot set weather (request W-7). Grip is tested as multipliers only.
+- The wet simcli scenario waits for `wp_sim`/simcli wiring (integration doc steps 1/1b); only
+  wetness ≥ 0.5 reaches tires until W-1 (no damp-road loss, ice, markings or aquaplaning in game).
 - Painted markings have no `SurfaceType` (W-3); `marking_grip_multiplier` exists but nothing
   calls it with `on_marking = true` yet.
 - Tread flag is inferred from the compound's wet ratio (W-4).

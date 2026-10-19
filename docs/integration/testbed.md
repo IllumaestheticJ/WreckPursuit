@@ -56,6 +56,7 @@ Car data (`data/{cars,lattices,tires,materials,modes}`) is embedded at build tim
 |---|---|---|---|
 | `init` | `seed: u32`, `scenario_json`, `scripted: bool` | `Uint32Array` entity ids | Fresh live session from a v2 scenario as JSON. `seed` 0 = scenario's. `scripted` = drive entities by their scenario drivers until `duration_s`, then entity 1 is live. |
 | `free_drive_json` | `car`, `mode`, `city: bool` | scenario JSON | Free-drive scenario (city = procedural 12×12 with traffic). |
+| `city_chase_json` | `car`, `mode` | scenario JSON | "City chase" preset (live): procedural city at 23:00, `police_presence: 1.0`, traffic, player starts on the race grid at 30 m/s (`EntitySpec::speed_mps`). Seed 23. |
 | `scenario_from_ron` | `text` | scenario JSON | simcli format v2 (`apps/simcli/SCENARIOS.md`). |
 | `scenario_with_speed` | `json`, `target_mps` | scenario JSON | Overrides every `cruise` driver's target (the speed box). |
 | `step` | `dt_seconds: f32` | `f32` alpha | Runs the whole 240 Hz ticks covered (max 60/call); leftover interpolation alpha between `vehicle_states_prev()` and `vehicle_states()`. Replays scale `dt` by the playback speed. |
@@ -68,13 +69,16 @@ Car data (`data/{cars,lattices,tires,materials,modes}`) is embedded at build tim
 | `assist_preset` | `"Keyboard"`\|`"Gamepad"`\|`"Wheel"` | JSON | `AssistProfile::for_source`. |
 | `assist_profile` | `entity` | JSON | Current assists. |
 | `reset_vehicle` | `entity` | – | Spawn pose, pristine. Logged op. |
-| `entities` | – | `Uint32Array` | Scenario order. |
+| `entities` | – | `Uint32Array` | Scenario entities, scenario order (vehicles the sim spawns itself — police units, promoted traffic — are not listed; see `vehicle_meta`). |
 | `state_stride` | – | `50` | |
-| `vehicle_states` | – | `Float32Array` (layout **S**) × vehicles | Scenario order. |
+| `vehicle_states` | – | `Float32Array` (layout **S**) × vehicles | **Every** sim vehicle, ascending entity (scenario cars, then sim-spawned police / traffic as they appear and disappear). |
+| `vehicle_meta` | – | `Float32Array` 3 × vehicles | Same order as `vehicle_states`: `[entity, kind (0 player, 1 AI racer, 2 police, 3 physical traffic), flags]`, flags 1 siren, 2 headlights, 4 braking, 8 horn (from the input the vehicle drives with). |
 | `vehicle_states_prev` | – | same | State before the last tick of the latest `step()`. |
-| `vehicle_info` | `entity` | JSON | Scenario `name`, `body_size_m`, wheels, `cg_m`, redline, lattice sizes, name tables `regions` / `components` / `surfaces`, `mounted_components`, `spawn_pos`. |
+| `vehicle_info` | `entity` | JSON | `kind`, scenario `name` (sim-spawned: `police7`, `traffic12`), `body_size_m`, wheels, `cg_m`, redline, lattice sizes, name tables `regions` / `components` / `surfaces`, `mounted_components`, `spawn_pos`. |
 | `world_info` | – | `Float32Array[8]` | `[tick, time_of_day_h, night_factor, mode (0/1 Sim), replay, recording, city, scripted]`. |
 | `state_hash` | – | 16 hex digits | `Sim::state_hash()` (hash spec v1: includes lattice nodes). |
+| `police_status` | `entity` | JSON or `null` | From `Sim::police()`: `{level ("None"/"L1".."L5"), heat, heat_in_level 0..1, status (Clear/Wanted/Pursuit/Searching), cooldown 0..1 (escape progress while Searching), units_in_pursuit, bounty, units_total}`; `null` when the police system is off. Mapped onto the UI kit's `HeatHud`. |
+| `police_units` | – | `Float32Array` 6 × units | Police units that are **not** sim vehicles (internally driven cars, helicopters): `[x, y, z, yaw, speed_mps, flags]`, flags 1 helicopter, 2 pursuing/intercepting. |
 | `traffic_agents` | – | `Float32Array` 5 × agents | `[x, y, z, yaw, flags]`; flags 1 physical LOD, 2 brake lights, 4 hazards, 8 yielding to siren, 16 / 32 turn signal L / R, 64 aggressive, `variant << 8`. Empty on the flat world. |
 | `lattice_nodes` | `entity` | `Float32Array` xyz × nodes | Current, chassis space (`Sim::node_positions`). |
 | `lattice_rest` | `entity` | `Float32Array` xyz × nodes | Rest pose. |
@@ -170,7 +174,8 @@ hash per tick dominate). `simcli replay file.replay.bin` verifies a browser reco
 | Y | slip-angle wheel colouring |
 | C | contact points & impulses (fading) |
 | G | CG + velocity vector |
-| X | civilian traffic agents (grey; red = braking, yellow = physical LOD, blue = yielding) |
+| X | civilian traffic agents (grey; red = braking, yellow = physical LOD, blue = yielding); promoted agents are drawn as sim vehicles instead |
+| Z | wanted level / heat panel (UI kit `HeatPanel`) |
 | I | traffic / police intent arrows |
 | K | component health panel |
 | E | region energy panel |
@@ -182,7 +187,7 @@ Gamepad (standard mapping): left stick steer, RT/LT throttle/brake, A or X handb
 gears, Y horn; deadzones 0.12 stick / 0.05 trigger. Switching device logs an assists op with
 `AssistProfile::gamepad_default` / `keyboard_default`.
 
-Controls panel: scenario menu + speed box, damage mode (live switch), car, **city** (free drive
+Controls panel: scenario menu + speed box, **city chase** preset, damage mode (live switch), car, **city** (free drive
 in the procedural 12×12 city: greybox `data/city/procedural_12x12.greybox.glb` + traffic),
 bench 1/8/24, assists, replay (record / stop / load last / file / download `.replay.bin` / CSV /
 exit), timeline scrubber + speed + frame step.
@@ -213,6 +218,16 @@ gear shift, handbrake, reset) → `simcli replay` verifies the file → page rel
 matches every tick hash and the final hash; scrub back/forward; CSV; the three crash scenarios
 and a smoke scenario pass with `matches_simcli` and draw contact markers; city free drive shows
 traffic. `BENCH=1` adds perf, `SHOTS=dir` screenshots.
+
+### City chase
+**city chase** (button, `__wp.startCityChase()`): the procedural 12×12 city at 23:00 with
+traffic and full police presence; the player starts on the race grid already doing ~110 km/h,
+so speeding violations (event feed) start the heat. Police cars (`VehicleKind::Police` sim
+vehicles, or `police_units()` for internally driven units) are white with a red/blue light bar
+that strobes while their siren is on (plus a point light); physical traffic
+(`VehicleKind::Traffic`) is grey; every car has head/tail lights (headlights: O). The wanted
+level / heat readout is M's UI-kit `HeatPanel` (`apps/ui-kit`, Preact, imported from source;
+`src/police_hud.tsx`), fed by `police_status()`.
 
 ## Native testbed stub (`apps/testbed-native`)
 Default build = headless smoke run printing FFB (the only thing CI builds); it now runs the
@@ -256,6 +271,10 @@ review:
   (moved back from `apps/testbed-web/scenarios/`, converted to v2) and their new goldens
   `apps/simcli/golden/crash_*/hashes.txt` (commit tagged `[bless]`; no existing golden changed).
 - `simcli` depends on `wp_world` (for `build_city`).
+
+Run 5 (2026-10-19): `wp_sim`: read-only `Sim::police() -> &PoliceSystem` (one accessor; lead,
+replace with yours). `apps/testbed-web` imports M's `apps/ui-kit` sources (`HeatPanel`, theme)
+and depends on `preact` 10.27.2 (same version as the kit; Vite `dedupe`).
 
 Earlier: workspace member `apps/testbed-native`; `justfile` recipes `web-e2e`, `native`.
 
@@ -370,3 +389,28 @@ Perf: please re-measure `?bench=24` now that the real model runs (your numbers w
   `cargo test --workspace`, wasm32 build, `npm run build`, `npm run e2e` (+ bench) all green.
   Run-3 items (v2 natively, barriers, mode switch, replay.bin, tire forces, contacts, agents
   export, city) are unchanged and still verified by e2e.
+
+## Lead feedback (round 6, 2026-10-19)
+
+**Merged** — city chase button, police light bars, physical traffic drawing, heat panel. Great work.
+
+Lead changes in your area:
+- Machine A also implemented a city chase in your files (prompt mix-up). Your version won; A's testbed/`wp_wasm`
+  changes were reverted wholesale.
+- `session.rs`: your all-vehicle extras kept; scripted driving and replay checkpoints use scenario entities only
+  (`simcli::run::scenario_states`) — city replays broke otherwise ("trailing bytes").
+- `main.ts`: both your `PoliceHud` and M's `UiOverlay` are constructed. **Consolidate with M**: one heat / wanted /
+  pursuit readout (M's UI kit components inside your page), plus M's repair-bill screen.
+- You added `Sim::police()` to `wp_sim`; it already existed in `police_link.rs`, so yours was removed.
+
+Next: show the **repair bill** after a session / capture (G's economy is merged; ask for a `wasm` call if needed),
+and a visible "PURSUIT / SEARCHING / ESCAPED / CAPTURED" banner from `police_status()`.
+
+
+## Lead note (2026-10-19): new machine R (panels)
+Machine R (`ws/panels`, prompt 21) owns `crates/wp_damage/src/panels.rs` (hinged panel swing / unlatch / hang states), `data/panels/`, `tools/assets/` and `apps/testbed-web/src/render/`. Expect small hooks from R in your files; coordinate through `docs/integration/panels.md`.
+
+
+## Lead note (round 6 gate, 2026-10-19)
+- `e2e/run.mjs` city chase check is timing-flaky: it holds W for 5 s of wall time and needs a speeding violation in that window (failed once and passed on rerun, same build). Make it wait for a condition, e.g. poll up to 15 s for `TrafficViolation` in the feed, instead of a fixed sleep.
+- Lead removed a duplicate `policeStatus` key in `src/wasm/sim.ts` (M had added a second one returning null, which overrode yours, so the heat panel showed "null"). Keep one accessor.

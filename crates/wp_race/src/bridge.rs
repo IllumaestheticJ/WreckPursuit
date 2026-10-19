@@ -1,10 +1,12 @@
-//! Read-only bridges to `wp_world` (routes, venues, districts, safehouses) and `wp_economy`
-//! (payout inputs). Neither crate is modified; these functions only translate types.
+//! Bridges to `wp_world` (city race planning, race-route activation, venues, districts,
+//! safehouses) and `wp_economy` (payout inputs). Neither crate's code is modified; the only
+//! world mutation is `activate_race_routes` through `World::set_active_routes`.
 
 use wp_contracts::{DamageMode, DayPhase, VehicleClass, WantedLevel};
 use wp_economy::{RaceResult as EconResult, RaceSetup, RaceType, ViolationCounts};
 use wp_world::network::{DistrictKind, PoiKind};
-use wp_world::{ActiveRoute, CityMap, Route};
+use wp_world::routes::closure_for_route;
+use wp_world::{ActiveRoute, CityMap, Route, RouteClosure, World};
 
 use crate::course::{Course, Gate};
 use crate::kind::{DistrictId, Legality, RaceKind, VenueId};
@@ -48,6 +50,63 @@ pub fn active_route(route: Route, event: &ScheduledEvent) -> ActiveRoute {
         route,
         closed: event.traffic == TrafficMode::Suppressed,
     }
+}
+
+/// A race planned on city roads: the lane-legal `wp_world` route (what the world closes and
+/// focuses traffic on) and the judged course built from its checkpoints.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CityRace {
+    /// The route (`World::set_active_routes` input).
+    pub route: Route,
+    /// The course the `RaceJudge` uses (gates = the route's checkpoints).
+    pub course: Course,
+}
+
+/// Plan a point-to-point race (sprint, checkpoint, cannonball, delivery, drag) on city roads
+/// from `start` (facing `heading`, unit XY) to `finish`. The corridor is half the widest
+/// carriageway plus `extra_margin_m`.
+pub fn plan_city_race(
+    world: &World,
+    start: [f32; 3],
+    heading: [f32; 2],
+    finish: [f32; 3],
+    extra_margin_m: f32,
+) -> Option<CityRace> {
+    let route = world.plan_route(start, Some(heading), finish)?;
+    let course = course_from_route(&route, extra_margin_m);
+    Some(CityRace { route, course })
+}
+
+/// Plan a circuit through `polygon` vertices (driving order) on city roads.
+pub fn plan_city_circuit(
+    world: &World,
+    polygon: &[[f32; 2]],
+    extra_margin_m: f32,
+) -> Option<CityRace> {
+    let route = world.plan_circuit(polygon)?;
+    let course = course_from_route(&route, extra_margin_m);
+    Some(CityRace { route, course })
+}
+
+/// Hand every live race route to the world in one call (`set_active_routes` replaces the
+/// list). Routes with `TrafficMode::Suppressed` (sanctioned events) are closed: their lanes
+/// get no civilian traffic and cones go across side-street approaches. All routes become
+/// traffic/physics focus areas. Call it whenever a race opens or ends.
+pub fn activate_race_routes(world: &mut World, races: &[(&Route, TrafficMode)]) {
+    let routes = races
+        .iter()
+        .map(|(r, mode)| ActiveRoute {
+            route: (*r).clone(),
+            closed: *mode == TrafficMode::Suppressed,
+        })
+        .collect();
+    world.set_active_routes(routes);
+}
+
+/// What closing `route` would do (closed lanes, cones), without touching the world: for the
+/// lobby preview and for placing marshals.
+pub fn closure_preview(world: &World, route: &Route) -> RouteClosure {
+    closure_for_route(world.map(), route)
 }
 
 /// District of a world point (zone index).

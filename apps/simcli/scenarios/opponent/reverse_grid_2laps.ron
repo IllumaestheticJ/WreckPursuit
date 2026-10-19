@@ -1,5 +1,5 @@
-// Opponent AI (workstream 17). Runs today on the flat world with a warning: simcli does not
-// yet load procedural cities or drive `follow_route` entities. Once machine I wires
+// Opponent AI (workstream 17). The city loads; simcli does not drive `follow_route` entities
+// yet (warning: they sit on the grid). Once machine I wires
 // `follow_route` to `wp_opponent::Field` (request in docs/integration/opponent.md), the
 // pending expectations become the real check. Entity ids name the driver's skill
 // (`skillNN` = DriverProfile { skill: 0.NN, ..default }); `target_speed: 0.0` = race pace.
@@ -7,7 +7,7 @@
 (
     name: "opponent_reverse_grid_2laps",
     seed: 3,
-    city: procedural(seed: 1, blocks_x: 7, blocks_y: 7, block_m: 110.0),
+    city: procedural(seed: 1, blocks_x: 8, blocks_y: 8, block_m: 110.0),
     mode: Arcade,
     assists: ai,
     traffic_density: 0.0,

@@ -11,6 +11,7 @@ wp_contracts.workspace = true
 wp_math.workspace = true
 wp_vehicle.workspace = true
 wp_world.workspace = true
+wp_police.workspace = true
 serde.workspace = true
 
 [dev-dependencies]

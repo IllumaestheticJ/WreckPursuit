@@ -51,12 +51,8 @@ impl Sim {
             let Some(unit) = slot.police_unit else {
                 continue;
             };
-            let def = slot.vehicle.def();
-            let geom = SteerGeometry {
-                wheelbase_m: def.wheelbase_m,
-                max_steer_rad: def.wheels[0].max_steer_rad,
-            };
-            if let Some(input) = self.police.unit_input(unit, geom) {
+            // wp_police drives with D's shared controller; steering geometry was given at bind.
+            if let Some(input) = self.police.unit_input(unit, wp_contracts::PHYSICS_DT) {
                 slot.input = input;
             }
         }
@@ -117,7 +113,11 @@ impl Sim {
                     slot.kind = VehicleKind::Police;
                     slot.police_unit = Some(unit);
                 }
-                self.police.bind_unit_entity(unit, id);
+                let geom = SteerGeometry {
+                    wheelbase_m: car.def.wheelbase_m,
+                    max_steer_rad: car.def.wheels[0].max_steer_rad,
+                };
+                self.police.bind_unit_entity(unit, id, geom);
             }
         }
 

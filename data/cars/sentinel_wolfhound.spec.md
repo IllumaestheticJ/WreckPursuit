@@ -81,7 +81,7 @@ Peak **272 kW @ 5500 rpm**, **495 N·m @ 2500 rpm**. Idle 650 / redline 6000 / l
 
 ## Drivetrain
 
-6-speed automatic with torque converter, on-demand AWD (90 % front until the fronts slip 5 %, then up to 50 % rear), open diffs. Layout **on-demand AWD, 90 % front with the coupling open, up to 50 % rear once the fronts out-spin the rears by 5 %**; front diff: open; rear diff: open. Torque converter: stall 2600 rpm, 1.9× at stall, couples 1:1 from 3000 rpm (class-typical for the gearbox). Clutch capacity 1.60 × peak torque = 790 N·m. Shift time 0.30 s.
+6-speed automatic with torque converter, on-demand AWD tuned for launches (90 % front until the fronts slip 2 %, then up to 50 % rear), open diffs. Layout **on-demand AWD, 90 % front with the coupling open, up to 50 % rear once the fronts out-spin the rears by 2 %**; front diff: open; rear diff: open. Torque converter: stall 2600 rpm, 1.9× at stall, couples 1:1 from 3000 rpm (class-typical for the gearbox). Clutch capacity 1.60 × peak torque = 790 N·m. Shift time 0.30 s.
 
 | Gear | Ratio | Overall | km/h @ redline |
 |---|---|---|---|
@@ -139,7 +139,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 6.4 s | 242 km/h | 39.8 m | 0.85 g | — |
+| sim | 6.5 s | 242 km/h | 40.3 m | 0.85 g | — |
 | estimate | 6.1 s | 255 km/h | 38.1 m | 0.91 g | 558 |
 
 ## Damage lattice (`data/lattices/sentinel_wolfhound.json`)

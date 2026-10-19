@@ -907,7 +907,8 @@ impl Field {
                     entity: r.entity,
                     wanted_level: lvl,
                 });
-                let flight = plan_flight(world, &self.racers[k], &self.config);
+                let police_at = police.police_positions();
+                let flight = plan_flight(world, &self.racers[k], &self.config, &police_at);
                 let r = &mut self.racers[k];
                 match flight {
                     Some(f) => {
@@ -1127,6 +1128,11 @@ impl Field {
     pub fn race_profile_of(&self, k: usize) -> &SpeedProfile {
         let r = &self.racers[k];
         r.race_speed.as_ref().unwrap_or(&r.speed)
+    }
+
+    /// Racer `k`'s flight route (corridor) while fleeing, if any.
+    pub fn flight_of(&self, k: usize) -> Option<&Corridor> {
+        self.racers[k].flight.as_ref().map(|f| &f.corridor)
     }
 
     /// Who racer `k` (spec order) has passed on the road (debug / tests).
@@ -2034,28 +2040,37 @@ fn plan_pass(
     Err(why)
 }
 
-/// Plan a flight route from the racer's position to the POI farthest away.
-fn plan_flight(world: &World, r: &Racer, config: &RaceConfig) -> Option<Flight> {
+/// Plan a flight route to the POI that is farthest from the known police (from the racer
+/// itself when no police position is known), at least 150 m away.
+fn plan_flight(world: &World, r: &Racer, config: &RaceConfig, police_at: &[V2]) -> Option<Flight> {
     let pois = &world.network().pois;
     let here = r.pos;
-    let best = pois
+    let threat: Vec<V2> = if police_at.is_empty() {
+        vec![here]
+    } else {
+        police_at.to_vec()
+    };
+    let score = |p: V2| {
+        threat
+            .iter()
+            .fold(f32::INFINITY, |m, t| m.min(geom::dist(p, *t)))
+    };
+    // Best destination first; fall back down the list until a legal route plans.
+    let mut order: Vec<(f32, usize)> = pois
         .iter()
         .enumerate()
-        .max_by(|a, b| {
-            geom::dist(geom::xy(a.1.pos), here)
-                .total_cmp(&geom::dist(geom::xy(b.1.pos), here))
-                .then(b.0.cmp(&a.0))
-        })?
-        .1
-        .pos;
-    let route = world.plan_route([here[0], here[1], 0.0], Some(r.fwd), best)?;
-    if route.polyline.len() < 2 {
-        return None;
-    }
-    let corridor = Corridor::from_route(world.map(), &route, &config.corridor);
-    if corridor.len() < 5 {
-        return None;
-    }
+        .filter(|(_, poi)| geom::dist(geom::xy(poi.pos), here) > 150.0)
+        .map(|(i, poi)| (score(geom::xy(poi.pos)), i))
+        .collect();
+    order.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+    let corridor = order.iter().find_map(|&(_, i)| {
+        let route = world.plan_route([here[0], here[1], 0.0], Some(r.fwd), pois[i].pos)?;
+        if route.polyline.len() < 2 {
+            return None;
+        }
+        let c = Corridor::from_route(world.map(), &route, &config.corridor);
+        (c.len() >= 25).then_some(c)
+    })?;
     let line = RacingLine::constant(&corridor, 0.0);
     let profile = SpeedProfile::build(
         &corridor,

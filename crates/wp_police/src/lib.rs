@@ -46,11 +46,11 @@ use wp_contracts::{
 };
 use wp_math::{Rng, StateHasher};
 
-pub use captain::{CaptainCommand, CaptainError, CaptainView, UnitOrder};
+pub use captain::{CaptainCommand, CaptainError, CaptainView, RoadEdgeId, UnitOrder};
 pub use config::PoliceConfig;
 pub use dispatch::{Incident, IncidentKind};
 pub use events::{DisableCause, IncidentId, PoliceEvent, PursuitOutcome, ToolId, UnitId, UnitKind};
-pub use graph::{procedural_city, CityParams, District, RoadGraph};
+pub use graph::{District, RoadGraph};
 pub use heat::{BountyRecord, PursuitStatus, RacerRecord, WantedLevel};
 pub use time::SimTime;
 pub use tools::{HeloView, RadarBlip, RadioLine, Roadblock, SpikeStrip, StaticCollider};
@@ -512,10 +512,19 @@ impl PoliceSystem {
             .racers
             .entry(racer)
             .or_insert_with(|| RacerRecord::new(racer));
+        let before = r.level;
         r.heat = 0.0;
         r.add_heat(heat, &cfg);
         if r.status == PursuitStatus::Clear && r.level > WantedLevel::None {
             r.status = PursuitStatus::Wanted;
+        }
+        let after = r.level;
+        // Listeners (economy, HUD) track the level from events, so report the change.
+        if after != before {
+            self.pending.push(PoliceEvent::WantedLevelChanged {
+                racer,
+                level: after,
+            });
         }
     }
 
@@ -556,13 +565,17 @@ impl PoliceSystem {
     // wp_sim integration for physical units
     // -----------------------------------------------------------------------------------------
 
-    /// Bind a unit to the vehicle entity `wp_sim` spawned for it. From then on the unit is
-    /// driven externally (`wp_sim` applies [`PoliceSystem::unit_input`] and reports back with
-    /// [`PoliceSystem::sync_unit`]).
-    pub fn bind_unit_entity(&mut self, unit: UnitId, entity: EntityId) {
+    /// Bind a unit to the vehicle entity `wp_sim` spawned for it, with that car's steering
+    /// geometry (`VehicleDef::wheelbase_m`, front `WheelDef::max_steer_rad`). From then on the
+    /// unit is driven externally: `wp_sim` applies [`PoliceSystem::unit_input`] and reports back
+    /// with [`PoliceSystem::sync_unit`].
+    pub fn bind_unit_entity(&mut self, unit: UnitId, entity: EntityId, geometry: SteerGeometry) {
         if let Some(i) = self.unit_index(unit) {
-            self.units[i].entity = Some(entity);
-            self.units[i].internal = false;
+            let u = &mut self.units[i];
+            u.entity = Some(entity);
+            u.internal = false;
+            u.geometry = geometry;
+            u.controller = None;
         }
     }
 
@@ -607,22 +620,50 @@ impl PoliceSystem {
         }
     }
 
-    /// Driver input for an externally driven AI unit with steering geometry `geom` (from the
-    /// unit's `VehicleDef`). `None` for player units and unknown ids.
-    pub fn unit_input(&self, unit: UnitId, geom: unit::SteerGeometry) -> Option<VehicleInput> {
-        let u = &self.units[self.unit_index(unit)?];
+    /// Driver input for an externally driven AI unit, from `wp_world`'s shared
+    /// [`DriveController`](wp_world::drive::DriveController): pure-pursuit steering toward the
+    /// unit's track and PID pedals toward its planned speed. Call once per physics tick with
+    /// that tick's `dt`, after [`PoliceSystem::sync_unit`]. `None` for player units and unknown ids.
+    pub fn unit_input(&mut self, unit: UnitId, dt: f32) -> Option<VehicleInput> {
+        let i = self.unit_index(unit)?;
+        let (accel, brake) = (
+            self.cfg.pursuit.unit.accel_mps2,
+            self.cfg.pursuit.unit.brake_mps2,
+        );
+        let u = &mut self.units[i];
         if u.player.is_some() {
             return None;
         }
-        Some(unit::drive_input(
-            u.body.pos,
-            u.body.heading,
-            u.body.speed,
-            &u.cmd,
-            u.track_s,
-            u.planned_speed,
-            geom,
-        ))
+        let v = u.body.speed;
+        if !u.cmd.track.is_drivable() {
+            let (_, b) = u.controller().pedals(v, -brake, dt, true);
+            return Some(VehicleInput {
+                brake: b,
+                siren: u.cmd.siren,
+                headlights: true,
+                ..Default::default()
+            });
+        }
+        let (s, _) = u.cmd.track.project_ahead(u.body.pos, u.track_s, 3.0, 40.0);
+        u.track_s = s;
+        let look = u.controller().lookahead(v);
+        let target = unit::lane_point(&u.cmd.track, s + look, u.cmd.lane_offset_m);
+        let (pos, heading) = (u.body.pos, u.body.heading);
+        let want = u.cmd.speed_mps.min(u.planned_speed);
+        let acc = (want - v).clamp(-brake, accel);
+        let disabled = u.wrecked || u.assignment == Assignment::OutOfService;
+        let siren = u.cmd.siren;
+        let ctl = u.controller();
+        let steer = ctl.steer(pos, heading, [target[0], target[1], 0.0]);
+        let (throttle, brake) = ctl.pedals(v, acc, dt, disabled);
+        Some(VehicleInput {
+            steer,
+            throttle,
+            brake,
+            siren,
+            headlights: true,
+            ..Default::default()
+        })
     }
 
     pub(crate) fn alloc_unit_id(&mut self) -> UnitId {
