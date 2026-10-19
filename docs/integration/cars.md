@@ -10,18 +10,18 @@
 "All cars understeer too much" was the keyboard/gamepad steering mapping and ESC, not car
 data (fixed in `wp_vehicle`, see `docs/integration/vehicle.md` → "Handling balance"). For the
 record, so H can judge setup changes against measurements (`cargo run --release -p wp_vehicle
---example handling`, wheel preset = chassis):
+--example handling`, wheel preset = chassis, with A's differentials):
 
-- Chassis understeer gradient at 80 km/h: FWD 0.46–0.78 deg/g, RWD sports 0.45–0.61, AWD
-  0.32–0.33, trucks / bias-ply muscle 0.54–1.75; regression ranges per class are in
+- Chassis understeer gradient at 80 km/h: RWD 0.07–0.35 deg/g, AWD 0.32–0.33, FWD 0.35–0.63
+  (junkyard_beater 1.42), heavy 0.49–1.77. Regression ranges per class are in
   `crates/wp_vehicle/tests/handling_balance.rs` (a setup change that leaves them fails there).
-- Anti-roll bars are a weak lever here: front −40 % / rear +40 % on rampart_50, shiro_turbo,
-  hakone_gt (−20/+20 % on kestrel_ts) moved the gradient ≤ 0.01 deg/g and the limit balance
-  (front slip/peak ÷ rear) from 2.09–2.35 to 1.85–2.30. RWD and FWD cars sit at the same limit
-  balance (≈ 2), mostly from the diffs pushing the inner driven wheel — A's LSD work is the
-  place for "RWD rotates more at the limit", not bars.
-- VALIDATION skidpad / 0-100 / 100-0 are unchanged (metric runs are bit-identical), so not
-  re-collected.
+- Anti-roll bars are a weak lever here (measured on main before the diffs): front −40 % / rear
+  +40 % on rampart_50, shiro_turbo, hakone_gt (−20/+20 % on kestrel_ts) moved the gradient
+  ≤ 0.01 deg/g and the limit balance (front slip/peak ÷ rear) from 2.09–2.35 to 1.85–2.30. The
+  diff model did more (RWD gradient 0.45–0.61 → 0.07–0.35), so `differentials.toml` is the
+  knob for "RWD rotates at the limit", not bars.
+- VALIDATION skidpad / 0-100 / 100-0 are not changed by this branch (metric runs are
+  bit-identical), so not re-collected here.
 
 ## Response to lead feedback round 8 (2026-10-19)
 

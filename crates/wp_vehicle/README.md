@@ -182,18 +182,18 @@ threads. Identical runs give identical hashes (tested here and by `apps/simcli`)
 ## Keyboard/gamepad steering and ESC (playtest row 28)
 
 Owner: "all cars understeer too much". Measured first (`handling` module): the chassis is close
-to neutral (wheel preset, 1:1: 0.3–0.8 road-wheel deg/g, trucks and the bias-ply muscle car
-0.8–1.75); bigger anti-roll-bar shifts (front −40 %, rear +40 %) move it < 0.02 deg/g. The
-understeer was in the input layer:
+to neutral (wheel preset, 1:1, with A's differentials: RWD 0.07–0.35 road-wheel deg/g, FWD
+0.35–0.63, AWD 0.33, trucks / bias-ply big-block / beater up to 1.77); big anti-roll-bar shifts
+(front −40 %, rear +40 %) move it < 0.02 deg/g. The understeer was in the input layer:
 
 - *Lock*: full input used to ask for a fixed fraction of full lock (100 % → 25 % from 30 to
   150 km/h). At 80 km/h that is ~0.4 rad, ~3× the slip angle the front tyres can use, so a
-  held key washed the fronts out: 72–91 % of the car's grip. Now (`steer_speed_sensitivity
+  held key washed the fronts out: 70–92 % of the car's grip. Now (`steer_speed_sensitivity
   > 0`) full input asks for `L·μ·g/v²` (the angle a neutral car needs at its grip limit) plus
   the front tyres' peak slip angle × 1.1 (keyboard; gamepad 1.27 = `1.1 + 0.4·(1 − s)/s`),
   never more than the car's lock; μ = front tyre peak × the front wheels' current grip
   (surface, weather, damage), so on wet or gravel the lock is smaller. A held key now makes
-  92–98 % of the grip at any speed, and at parking speeds the car's full lock is available.
+  90–100 % of the grip at any speed, and at parking speeds the car's full lock is available.
 - *Rate*: the rack covers that lock in 0.16 s × sensitivity, never faster than the car's
   `rack_speed_rad_per_s` (so low-speed steering is unchanged).
 - *ESC*: the reference car had 3.7°/g of understeer, more than any roster car, so ordinary
