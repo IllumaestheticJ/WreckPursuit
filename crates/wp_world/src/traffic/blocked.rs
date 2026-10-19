@@ -48,7 +48,7 @@ pub const PASS_MPS: f32 = 4.0;
 /// A lane someone turned around in counts as blocked for this long, s.
 pub const BLOCKED_LANE_MEMORY_S: f32 = 90.0;
 /// Reversing speed back to the junction, m/s.
-pub const REVERSE_MPS: f32 = 1.8;
+pub const REVERSE_MPS: f32 = 2.5;
 /// A pass ends at least this far before the junction ahead, m.
 pub const PASS_JUNCTION_CLEAR_M: f32 = 20.0;
 /// Longest obstruction (cluster of stopped cars) a driver passes in the oncoming lane, m.
@@ -202,10 +202,11 @@ impl Manoeuvre {
         }
     }
 
-    /// Connector held while reversing through it.
+    /// Connector held while reversing through it (not while still waiting to start: holding
+    /// it then would stop cross traffic that the car it waits for is yielding to).
     pub(super) fn holds_connector(&self) -> Option<SegId> {
         match self {
-            Manoeuvre::Reverse(r) => Some(r.via),
+            Manoeuvre::Reverse(r) if r.waiting_s.is_none() => Some(r.via),
             _ => None,
         }
     }
@@ -957,7 +958,12 @@ impl Traffic {
         }
         let others = |s: SegId| self.lists[s as usize].iter().any(|e| e.agent as usize != i);
         let entering = !ls.is_connector() && ls.prev.iter().any(|&c| others(c));
-        if entering {
+        // One car at a time backs into the same spot.
+        let spot_claimed = self
+            .agents
+            .iter()
+            .any(|b| matches!(b.manoeuvre.as_deref(), Some(Manoeuvre::Reverse(r)) if r.to == to));
+        if entering || spot_claimed {
             return false;
         }
         let drv = if a.physical.is_some() {

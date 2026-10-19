@@ -84,6 +84,19 @@ All in `wp_world` (details and format spec: `crates/wp_world/README.md`).
   on centre/lane/edge lines, separators, stop lines and zebra crosswalks; `marking_at(&map, p)
   -> Option<MarkingKind>` + public geometry constants for the renderer (C).
 - `RoadNetworkIndex` (contract `RoadNetworkQuery`): grid-indexed `nearest_on_road` (0.6 µs).
+- **Blocked-vehicle behaviour** (round 9, playtest row 32; details in "Response from D (round 9)"):
+  traffic goes around or turns around when a stationary vehicle blocks its lane.
+  `AgentView` is unchanged (passing/turning cars indicate; reversing cars show hazards).
+  New `TrafficStats` fields (serde default): `go_around_lane_changes`, `oncoming_passes`,
+  `pass_aborts`, `turnarounds`, `turnarounds_completed`, `reverses`, `reroutes`.
+  `traffic::Agent::{wait: Wait, patience_s}` (why a car waits; how long it waits).
+- **Manoeuvres** (`wp_world::manoeuvre`, for traffic and any other AI driver):
+  `plan_turn(&CarShape, &RoadCorridor, obstacles, rear, forward, goal) -> Option<TurnPlan>`
+  (U-turn or k-point turn inside the paved width, clear of obstacle boxes), `TurnDriver`
+  (closed-loop turn for a physical `wp_vehicle`, reverse gear via the automatic box),
+  `ReverseDriver` (reverse along a path), `Crawl` (creep / hold / gear selection at walking
+  pace), `sight_clear` (crest / bend check), map helpers `road_corridor(&map, pos, forward)`,
+  `lane_profile`, `overtake_sight_clear(&map, pos, forward, dist)`.
 - `wp_world::geom::{atan, atan2}` re-export `wp_math::{atan, atan2}` (moved in v0.2.0).
 
 ## Needs
@@ -179,6 +192,10 @@ Suburb }` — exactly `wp_world::network::DistrictKind` (moved to contracts, re-
 `ZoneId(u32)` alongside.
 
 ## Changes outside my crates
+- `apps/simcli/src/run.rs` + `SCENARIOS.md` (owned by I, round 9): world metrics
+  `traffic_go_arounds` and `traffic_turnarounds` (from the new `TrafficStats` fields);
+  scenarios `scenarios/city/blocked_parked_player_{grid,vesper}.ron`; goldens re-blessed for the
+  city scenarios whose traffic meets stopped tracked vehicles (see round 9 gate note).
 - `apps/simcli/golden/*`: re-blessed city goldens for `PaintedLine` (round 8, see gate note).
 - `Cargo.toml` (workspace): added member `tools/city-import`.
 - `Cargo.lock`: `postcard` (wp_world), `osmpbf` (city-import only).
@@ -592,3 +609,108 @@ when convenient.
   SwiftShader; prop wake-ups); `vesper_v2.greybox.b64.txt` is 9.1 MB on the published link.
 **Contract change requests:** none needed (no `wp_contracts` change). Optional for v0.3.0: the
 `TrafficAgentSnapshot` pitch/roll above.
+
+## Response from D (round 9: playtest row 32, "AI cars, when impeded, should try to turn around or go around the stationary vehicle")
+Traffic (and anything driving with the shared controller) no longer queues forever behind a
+stopped or wrecked car, a parked player, a stopped police car or debris. Kinematic and physical
+(promoted) agents alike. Code: `crates/wp_world/src/traffic/blocked.rs` (traffic state machine)
+and `crates/wp_world/src/manoeuvre.rs` (shared manoeuvres); write-up in the crate README
+("Blocked vehicles").
+
+**Detect.** Each decision records which constraint set the car's acceleration; from it a
+stopped car's `wait` is `Line` (red light, stop line, junction rules, siren, pulling-away
+delay), `Queue` (the car ahead waits for one of those) or `Obstructed` (the car ahead is
+disabled or itself obstructed; a stationary tracked vehicle not at, or queued before, the stop
+line; debris). Cars stop 6 m further back from an obstruction than from a queue, so there is
+room to pull out. A driver acts when the obstruction has been stationary for its patience
+(law-abiding 4.5–8 s, casual 3.5–6 s, aggressive 3–4 s; derived from id + traffic seed, so no
+extra RNG draws and unchanged hashes when nothing is blocked) and it has stood behind it ≥ 1 s.
+
+**Go around.** Multi-lane: forced MOBIL lane change (threshold lowered, safety criterion kept;
+never into a lane with a stopped car or parked tracked vehicle within 40 m; physical agents too).
+Two-lane: slow pass (4 m/s) in the oncoming lane — only when the obstruction is ≤ 30 m long and
+leaves the oncoming lane free, the pass ends ≥ 20 m before the junction, the road up to the
+junction is visible (no crest hiding a car, no bend > 20°: Port Vesper's hills), and the oncoming
+lane is clear for the pass time at 1.25 × its limit (≤ 160 m, including cars in the junction and
+on lanes about to turn in, and tracked vehicles). Left indicator out, right back; the passer
+holds an entry in the oncoming lane (oncoming cars stop for it), gives way to anything there,
+and goes back behind the obstruction if an oncoming car appears before it is alongside or it
+stalls 4 s. Physical passers creep (1.5 m/s, aiming 0.6 m wider) until the body is clear.
+No shoulder / kerb mounting: the shoulders in both cities are parking lanes with parked cars.
+
+**Turn around** otherwise: `manoeuvre::plan_turn` finds a U-turn (wide roads) or k-point turn
+(a 1+1 street: 5 legs, ≈ 17 s for the real car) inside the paved driving lanes, clear of every
+nearby car, tracked vehicle and debris; it starts when oncoming traffic can stop for it. Or
+**reverse** back to the last junction (single-lane one-way, no room to turn, or stuck inside a
+junction connector): the last car first claims the spot at the end of the lane it came from,
+starts once that spot and the junction are clear, holds its connector while reversing. Then
+**re-route**: the lane is remembered as blocked for 90 s — nobody plans into it while there is an
+alternative, and cars about to enter it re-plan (giving up a permit they can still stop for).
+
+**Police (E).** Patrols drive with `wp_police::avoid`, which already passes a stopped vehicle in
+the other lane (and pursuit avoidance is untouched — nothing in `wp_police` changed). What
+patrols lack compared with traffic is the turn-around and the crest / junction rule. Request to
+E (no contract change needed; all in `wp_world::manoeuvre`):
+1. Before `avoid` commits to a pass without lights, require
+   `overtake_sight_clear(&map, pos, forward, need + oncoming_clear_m)` (same crest / 20° bend
+   rule as traffic).
+2. When a patrol has waited behind a stopped vehicle for `pass_wait_s + 15 s` (no gap / pass
+   impossible): `road_corridor(&map, pos, forward)` → `plan_turn(&CarShape::from_def(&def), …,
+   goal = -lane direction)`; if `Some`, drive it with a `TurnDriver` (`set_obstacles` each tick
+   with nearby vehicles as `geom::Obb`), then re-route the patrol from the opposing lane.
+   `TurnDriver::step(&state, dt) -> (VehicleInput, ManoeuvreStatus)` is closed loop on the real
+   car (verified in the Rapier rig: `tests/drive.rs`).
+
+**Coordination with `lead/fix-lod-popin`.** Not on the remote yet. My change to LOD: agents in
+the middle of a turn-around or reverse are neither promoted nor demoted (`Traffic::lod_locked`
+in `update_lod`; a kinematic turn cannot be handed to a physical car mid-leg). Please keep that
+skip if you change `TrafficConfig::physical_radius_m` / the demotion hysteresis (+20 m) —
+radii are config values, `traffic/blocked.rs` needs no change for them.
+
+**Tests** (`crates/wp_world/tests/blocked.rs`, all with civilian-collision diagnostics on):
+
+| Case (density 4, 150 s unless noted) | Result |
+|---|---|
+| Grid 1+1 street, stopped car in one lane | 0 contacts with it, 0 civilian collisions; 3 cars held up, all got away (2 oncoming passes + 1 reverse), longest wait 13 s |
+| Grid 1+1, car parked **across** the lane (reaches over the centre line) | 0 / 0; 6 held up, 5 got away (3 turn-arounds done, 1 reverse), longest wait 21 s |
+| Grid 2+2 arterial, stopped car in the right lane (120 s) | 0 / 0; 9 go-around lane changes, **0** oncoming passes |
+| Single-lane one-way in a 3×2 ladder town (density 1.5, 240 s) | 0 / 0; no passes or turns (no room), 2 reverses to the junction + re-route, 1 recycled after 120 s (third in line, reversing one at a time) |
+| Port Vesper 1+1 street near downtown | 0 / 0; turned around (1) |
+| Real car (`tests/drive.rs`, Rapier rig): `TurnDriver` on a 7 m street with a car 7 m ahead | 5 legs, 16.7 s, never outside the kerbs, never touching it |
+| Real car: `ReverseDriver` 40 m with a kink | ≤ 0.13 m off the path, stops at the end |
+
+**simcli scenarios** (`apps/simcli/scenarios/city/blocked_parked_player_{grid,vesper}.ron`): a
+player car parked across one lane of a two-lane street (nose 0.3 m towards the kerb), 120 s,
+near-player traffic physical (Rapier). Seeds 3/5/7/9/11:
+
+| | grid (police on) | Port Vesper |
+|---|---|---|
+| civilian collisions | 0 (all seeds) | 0 (all seeds) |
+| parked car: health / moved | 1.0 / 0.0 m (all seeds) | 1.0 / ≤ 0.001 m |
+| go-arounds (passes + lane changes) | 1–4 | 0–1 |
+| turn-arounds + reverses | 0–1 | 1–2 |
+| stuck recycled | 0 | 0 |
+
+Ranges in the scenarios: collisions 0, health ≥ 0.99, moved ≤ 0.5 m, stuck ≤ 3, grid
+go-arounds ≥ 1, Vesper turn-arounds ≥ 1, moving fraction ≥ 0.4 (city-wide incl. red lights;
+measured 0.45–0.64).
+
+**Soaks / regressions.** 10-min soaks, 400 agents, 12×12 grid, {0 %, 5 %} aggressive: 0
+civilian collisions, stats bit-identical to round 6 (847 / 912 lane changes, 3 / 1 stuck) —
+normal traffic is unchanged. Port Vesper 10-min soaks × 3 seeds × {0 %, 5 %}: 0 collisions.
+simcli `soak/traffic_soak_observer` (police on), `traffic_soak`, `traffic_soak_vesper`,
+`traffic_soak_vesper_observer`: 0 civilian collisions, all expectations pass.
+
+**Perf** (release, 4 vCPU): 400 agents 0.075 ms per 60 Hz frame without blockers, **0.091 ms**
+with 12 blockers and passes / lane changes / turns / reverses running (budget 2 ms).
+
+**Determinism.** f32 only, `BTreeMap`s, patience from an integer hash of id + seed, no new RNG
+draws; `World::state_hash` adds manoeuvre state only for agents in a manoeuvre.
+
+**Known gaps.** No shoulder use (parking lanes have parked cars). One pass at a time per
+obstruction (the queue passes in turn). The k-point planner assumes a locally straight road (the
+physical driver stops a leg early near an edge). A long queue reversing out of a one-way street
+goes one car at a time, so its front car may still be recycled after 120 s.
+
+**Contract change requests:** none.
+

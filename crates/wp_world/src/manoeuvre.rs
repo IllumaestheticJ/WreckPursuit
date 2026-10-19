@@ -316,6 +316,69 @@ pub fn sight_clear(profile: &[(V3, V2)], max_bend_rad: f32) -> bool {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Map helpers (for drivers outside `traffic`, e.g. police patrols)
+// ---------------------------------------------------------------------------------------------
+
+/// The paved driving width around a car at `pos` facing `forward`, as a corridor along the lane
+/// it is in (reference line = that lane's centre, lateral + right): every driving lane of the
+/// same road in both directions (parking lanes excluded, bus lanes included). `None` off the
+/// road or inside a junction. Feed it to [`plan_turn`] / [`TurnDriver`].
+pub fn road_corridor(map: &crate::CityMap, pos: V3, forward: V2) -> Option<RoadCorridor> {
+    let loc = map.locate(pos, Some(forward), 1.0, false, false)?;
+    let lane = map.seg(loc.seg).lane()?;
+    let (p, t) = map.seg(loc.seg).point_at(loc.s);
+    let origin = geom::xy(p);
+    let right = geom::right_of(t);
+    let road = map.net.lanes[lane as usize].road;
+    let (mut lo, mut hi) = (f32::INFINITY, f32::NEG_INFINITY);
+    for (i, l) in map.net.lanes.iter().enumerate() {
+        if l.road != road || l.kind == crate::network::LaneKind::Parking {
+            continue;
+        }
+        let ls = map.seg(i as crate::SegId);
+        let pr = ls.project(origin);
+        if pr.dist > 16.0 {
+            continue;
+        }
+        let (pl, _) = ls.point_at(pr.s);
+        let d = geom::dot(geom::sub(geom::xy(pl), origin), right);
+        lo = lo.min(d - ls.width * 0.5);
+        hi = hi.max(d + ls.width * 0.5);
+    }
+    lo.is_finite().then_some(RoadCorridor {
+        origin,
+        dir: t,
+        lat_min: lo,
+        lat_max: hi,
+    })
+}
+
+/// Points and tangents every 5 m along the lane a car at `pos` facing `forward` is in, from the
+/// car up to `dist` metres or the end of the lane (the junction). Empty off the road.
+pub fn lane_profile(map: &crate::CityMap, pos: V3, forward: V2, dist: f32) -> Vec<(V3, V2)> {
+    let Some(loc) = map.locate(pos, Some(forward), 1.0, false, false) else {
+        return Vec::new();
+    };
+    let seg = map.seg(loc.seg);
+    let end = (loc.s + dist).min(seg.length);
+    let mut out = Vec::new();
+    let mut s = loc.s;
+    while s <= end {
+        out.push(seg.point_at(s));
+        s += 5.0;
+    }
+    out
+}
+
+/// Whether a car at `pos` facing `forward` may overtake in the oncoming lane as far as sight
+/// goes: the road ahead (up to `dist` m or the next junction) has no crest hiding oncoming cars
+/// and no bend sharper than 20°. (Traffic's own rule; police patrols should use it too.)
+pub fn overtake_sight_clear(map: &crate::CityMap, pos: V3, forward: V2, dist: f32) -> bool {
+    let profile = lane_profile(map, pos, forward, dist);
+    !profile.is_empty() && sight_clear(&profile, 0.35)
+}
+
+// ---------------------------------------------------------------------------------------------
 // Physical execution
 // ---------------------------------------------------------------------------------------------
 

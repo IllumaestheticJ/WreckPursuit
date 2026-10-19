@@ -399,3 +399,101 @@ fn port_vesper_two_lane_street_gets_around_a_stopped_car() {
     assert!(r.resolved * 2 >= r.queued, "{r:?}");
     assert!(r.still_waiting <= 3, "{r:?}");
 }
+
+#[test]
+fn map_helpers_for_other_drivers_give_the_street_width_and_a_turn() {
+    use wp_world::manoeuvre::{overtake_sight_clear, plan_turn, road_corridor, CarShape};
+    let w = World::procedural(&ProcGenConfig::default(), cfg(0.0));
+    let net = w.network();
+    let lane = two_lane_streets(net, 90.0)[0];
+    let pts = &net.lanes[lane].polyline;
+    let cum = geom::cumulative(pts);
+    let (p, t) = geom::point_at(pts, &cum, len_of(net, lane) * 0.5);
+    let road = road_corridor(w.map(), p, t).expect("on the road");
+    // A 1+1 street: 7 m of driving lanes, the car's lane on the right.
+    assert!((road.lat_max - 1.75).abs() < 0.1, "{road:?}");
+    assert!((road.lat_min + 5.25).abs() < 0.1, "{road:?}");
+    let shape = CarShape::CIVILIAN;
+    let plan = plan_turn(
+        &shape,
+        &road,
+        &[],
+        shape.rear(geom::xy(p), t),
+        t,
+        [-t[0], -t[1]],
+    );
+    assert!(plan.is_some_and(|p| p.legs.len() >= 2));
+    // Flat, straight grid street: visible.
+    assert!(overtake_sight_clear(w.map(), p, t, 100.0));
+    // Inside a building block, away from any lane: no corridor.
+    let off = geom::add(geom::xy(p), geom::scale(geom::right_of(t), 30.0));
+    assert!(road_corridor(w.map(), [off[0], off[1], 0.0], t).is_none());
+}
+
+#[test]
+#[ignore = "perf: run with --release"]
+fn perf_400_agents_with_blockers_under_budget() {
+    let mut w = World::procedural(
+        &ProcGenConfig::default(),
+        WorldConfig {
+            traffic: TrafficConfig {
+                density_scale: 4.0,
+                sight_radius_m: 0.0,
+                ..Default::default()
+            },
+            ..cfg(4.0)
+        },
+    );
+    let net = w.network().clone();
+    let mut blockers: Vec<TrackedVehicle> = two_lane_streets(&net, 90.0)
+        .into_iter()
+        .step_by(7)
+        .take(8)
+        .enumerate()
+        .map(|(k, l)| {
+            let mut b = blocker_on(&net, l, len_of(&net, l) * 0.6, k % 2 == 1, false);
+            b.entity = EntityId(100 + k as u32);
+            b
+        })
+        .collect();
+    let arterial = net
+        .lanes
+        .iter()
+        .enumerate()
+        .filter(|(i, l)| l.left.is_some() && l.right.is_none() && len_of(&net, *i) > 90.0)
+        .map(|(i, _)| i)
+        .step_by(11)
+        .take(4);
+    for (k, l) in arterial.enumerate() {
+        let mut b = blocker_on(&net, l, len_of(&net, l) * 0.6, false, false);
+        b.entity = EntityId(200 + k as u32);
+        blockers.push(b);
+    }
+    w.set_tracked_vehicles(&blockers);
+    w.populate();
+    let mut ev = Vec::new();
+    // Warm up 20 s (queues form, manoeuvres start), then time 60 s.
+    for _ in 0..(20.0 / PHYSICS_DT) as usize {
+        w.step(PHYSICS_DT, &mut ev);
+    }
+    let t0 = std::time::Instant::now();
+    let frames = 60 * 60;
+    for _ in 0..frames * 4 {
+        w.step(PHYSICS_DT, &mut ev);
+    }
+    let ms = t0.elapsed().as_secs_f64() * 1000.0 / frames as f64;
+    let s = w.traffic_stats();
+    println!(
+        "{} agents, {} blockers: {ms:.3} ms per 60 Hz frame; passes {}, go-around lane changes {}, \
+         turnarounds {}, reverses {}, reroutes {}",
+        w.agent_count(),
+        blockers.len(),
+        s.oncoming_passes,
+        s.go_around_lane_changes,
+        s.turnarounds,
+        s.reverses,
+        s.reroutes
+    );
+    assert!(w.agent_count() >= 390);
+    assert!(ms < 2.0, "{ms} ms per frame over the 2 ms budget");
+}
