@@ -54,14 +54,18 @@ cargo test -p wp_server                   # real websockets end-to-end, admin en
 
 | Measurement | Machine | Native (release) | Budget |
 |---|---|---|---|
-| Server net tick, 32 clients (4 physics ticks + all output), in-process | cloud container | avg 0.39 ms, p99 0.61 ms | 16.7 ms frame (asserted < 8 ms) |
-| Server net tick, 32 websocket bots in the same process | cloud container | avg 0.94 ms, max 4.2 ms, 60.0 Hz | — |
-| Down-link per client, 32 bots, 120 m arena (all within interest) | in-process | mean 26.2 kB/s, worst second 33.0 kB/s | 40 kB/s |
-| Down-link per client, 32 websocket bots | real sockets | worst 26 kB/s | 40 kB/s |
-| Prediction at 120 ms RTT / 2 % loss / ±30 ms jitter | in-process | 2 corrections in 2632 reconciles, RMS 0.14 m | < 0.3 m RMS |
+Real vehicle (A) and damage (B) models on the integrated build (lead run 2 merge):
+
+| Measurement | Machine | Native (release) | Budget |
+|---|---|---|---|
+| Server net tick, 32 clients (4 physics ticks of 32 Rapier cars + all output), in-process | cloud container | avg 4.2 ms, p99 10.7 ms | 16.7 ms frame (asserted < 8 ms avg) |
+| Down-link per client, 32 bots, 120 m arena (all within interest) | in-process | mean 31.5 kB/s, worst second 38.1 kB/s | 40 kB/s |
+| Prediction at 120 ms RTT / 2 % loss / ±30 ms jitter, 3 other cars (real collisions) | in-process | RMS 0.11 m, max 0.44 m, 193 corrections in 2629 reconciles | < 0.3 m RMS |
+| Same link, alone | in-process | RMS 0.12 m, 13 corrections in 2634 reconciles | < 2 % mispredict |
 | Lattice hash checks (4 clients, 2 min) | in-process | 1 mismatch in 992 (the injected one), resynced in 16 ticks | < 1 %, < 2 s |
 
-The physics in these numbers is the kinematic `wp_vehicle` stub; re-measure when 02/03 land.
+Earlier numbers on the kinematic stub (run 1): net tick 0.39 ms, worst client 33 kB/s,
+RMS correction 0.14 m.
 
 ## Architecture
 
@@ -92,7 +96,8 @@ Ping (U) ⇄ Pong (U) → TimeSync (server tick estimate, RTT, jitter)
 - The server never reads a clock. The reconnect window, offers and races count ticks.
 
 ### Prediction and reconciliation
-The client runs the same `wp_vehicle` code, keeps 240 ticks of **inputs** (plus the pose after
+The client runs the same `wp_vehicle` code on its own single-car Rapier world
+(`predict::RigVehicle`, stepped like `wp_sim`), keeps 240 ticks of **inputs** (plus the pose after
 each, only to measure error) and, on each `OwnState` (30 Hz, full `f32`), compares the
 prediction for that tick. Beyond 5 cm / 0.02 rad it sets the vehicle to the server state and
 re-simulates the stored inputs; the visual jump is absorbed by a render offset that decays
@@ -236,8 +241,11 @@ for R. `sim_link` already tests the protocol under that model.
 - `wp_sim` does not extract contacts or offer a contact-quantisation hook, so on the real
   stack no damage is replicated yet (NET-N1); `testkit::ArenaSim` exercises the path.
 - `Sim` has no despawn: `WpSim` parks and reuses vehicles (MAX_VEHICLES = 64 limits churn).
-- Prediction uses the kinematic `wp_vehicle` stub; the Rapier-bodied vehicle needs a
-  `PredictedVehicle` impl with a full-state rewind (NET-N2).
+- Prediction steps the real vehicle (`predict::RigVehicle`: own Rapier body on a flat slab,
+  as `wp_vehicle::rig::Rig`), but the rewind is not lossless: `VehicleState` omits input
+  filters, clutch and tire relaxation (≈1.4 cm after 10 replayed ticks), and the client has no
+  city geometry, surface map or other cars, so collisions are corrected, not predicted
+  (NET-N2).
 - Local-car *predicted* contacts are not applied; the own car's damage is server-driven
   (arrives one RTT late) and resynced by the same hash path.
 - No traffic/AI police exist yet; `NetSim::ai_kind` defaults to traffic.

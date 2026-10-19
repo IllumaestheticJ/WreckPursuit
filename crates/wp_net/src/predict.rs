@@ -7,11 +7,9 @@
 //! state and every stored input from `T` on is re-simulated.
 
 use wp_contracts::{
-    AssistProfile, HandlingEffects, LoadedCar, SimEvent, TimeOfDay, VehicleInput, VehicleSim,
-    VehicleState, PHYSICS_DT,
+    AssistProfile, HandlingEffects, LoadedCar, TimeOfDay, VehicleInput, VehicleState,
 };
-use wp_vehicle::Vehicle;
-use wp_world::World;
+use wp_vehicle::rig::Rig;
 
 /// Inputs kept for replay: 1 s at 240 Hz.
 pub const INPUT_RING: usize = 240;
@@ -50,11 +48,8 @@ pub enum Reconcile {
 }
 
 /// The vehicle model a [`Predictor`] drives. It must run exactly the code the server runs
-/// for one physics tick, and must be rewindable to a server state.
-///
-/// [`StubVehicle`] covers the current kinematic `wp_vehicle`. The Rapier-bodied vehicle from
-/// workstream 02 needs its own impl (a single-car Rapier world on a flat ground, as its
-/// `rig::Rig` does) plus a full-state rewind — see `docs/integration/net.md`, NET-N2.
+/// for one physics tick, and must be rewindable to a server state. [`RigVehicle`] is the
+/// production impl.
 pub trait PredictedVehicle: Send {
     /// One physics tick with `input` under `effects`.
     fn step(&mut self, input: &VehicleInput, effects: &HandlingEffects);
@@ -64,14 +59,18 @@ pub trait PredictedVehicle: Send {
     fn set_state(&mut self, s: &VehicleState);
 }
 
-/// [`PredictedVehicle`] over `wp_vehicle::Vehicle` on a flat world.
-pub struct StubVehicle {
-    vehicle: Vehicle,
-    world: World,
+/// [`PredictedVehicle`] over the real `wp_vehicle` model: the car's own Rapier chassis body on
+/// a flat ground slab, probed with `RapierGround` and stepped exactly like `wp_sim` steps it
+/// (`wp_vehicle::rig::Rig`). Rewind sets both the vehicle and the rigid body.
+///
+/// Differences from the server that reconciliation absorbs: the client has no city geometry
+/// or other cars (collisions are not predicted) and no surface map (asphalt everywhere).
+pub struct RigVehicle {
+    rig: Rig,
     assists: AssistProfile,
 }
 
-impl StubVehicle {
+impl RigVehicle {
     /// Build `car` at `state`.
     pub fn new(
         car: &LoadedCar,
@@ -79,30 +78,27 @@ impl StubVehicle {
         state: &VehicleState,
         time: TimeOfDay,
     ) -> Self {
-        let mut vehicle = Vehicle::new(&car.def, &car.tires, state.pos, 0.0);
-        vehicle.set_state(state);
-        Self {
-            vehicle,
-            world: World::flat(time, 0.0),
-            assists,
-        }
+        let mut rig = Rig::new(car);
+        rig.world.time = time;
+        rig.set_state(state);
+        Self { rig, assists }
     }
 }
 
-impl PredictedVehicle for StubVehicle {
+impl PredictedVehicle for RigVehicle {
     fn step(&mut self, input: &VehicleInput, effects: &HandlingEffects) {
-        self.vehicle.apply_damage_effects(effects);
-        let mut events: Vec<SimEvent> = Vec::new();
-        self.vehicle
-            .step(input, &self.assists, &self.world, PHYSICS_DT, &mut events);
+        self.rig.set_effects(effects);
+        self.rig.step(input, &self.assists);
+        // Events (FFB, surface) are the server's business; do not let them pile up.
+        self.rig.events.clear();
     }
 
     fn state(&self) -> VehicleState {
-        self.vehicle.state()
+        self.rig.state()
     }
 
     fn set_state(&mut self, s: &VehicleState) {
-        self.vehicle.set_state(s);
+        self.rig.set_state(s);
     }
 }
 
@@ -133,7 +129,7 @@ impl Predictor {
         tick: u64,
         time: TimeOfDay,
     ) -> Self {
-        Self::with_vehicle(Box::new(StubVehicle::new(car, assists, state, time)), tick)
+        Self::with_vehicle(Box::new(RigVehicle::new(car, assists, state, time)), tick)
     }
 
     /// Predict with any [`PredictedVehicle`] whose state is at `tick`.
@@ -245,8 +241,7 @@ mod tests {
     }
 
     fn start() -> VehicleState {
-        let c = car();
-        Vehicle::new(&c.def, &c.tires, [0.0; 3], 0.0).state()
+        Rig::new(&car()).state()
     }
 
     #[test]
@@ -262,35 +257,38 @@ mod tests {
             steer: 0.2,
             ..Default::default()
         });
-        for _ in 0..100 {
+        // 2 s of identical driving: bit-identical.
+        for _ in 0..480 {
             client.step(throttle, &fx);
             server.step(throttle, &fx);
         }
         assert!(matches!(
-            client.reconcile(100, &server.state(), &fx),
+            client.reconcile(480, &server.state(), &fx),
             Reconcile::InSync { error_m } if error_m == 0.0
         ));
-        // Server applied different input for 50 ticks (e.g. lost packets) → correction.
+        // The server applied different input for 0.5 s (e.g. lost packets) → correction.
         let other = quantize_input(&VehicleInput {
             steer: -1.0,
-            throttle: 1.0,
+            brake: 1.0,
             ..Default::default()
         });
-        for _ in 0..50 {
+        for _ in 0..120 {
             server.step(other, &fx);
         }
-        for _ in 0..60 {
+        for _ in 0..130 {
             client.step(throttle, &fx);
         }
-        let r = client.reconcile(150, &server.state(), &fx);
+        let r = client.reconcile(600, &server.state(), &fx);
         assert!(matches!(r, Reconcile::Corrected { .. }), "{r:?}");
-        assert_eq!(client.tick(), 160);
+        assert_eq!(client.tick(), 610);
         // After replay the client agrees with a server that then receives the client's inputs.
-        for t in 150..160 {
+        for t in 600..610 {
             server.step(client.input_at(t).unwrap(), &fx);
         }
         let d = dist(server.state().pos, client.state().pos);
-        assert!(d < 1e-3, "{d}");
+        // Not bit-exact: `VehicleState` omits input filters, clutch and tire relaxation, so a
+        // rewind leaves ≈1 cm after 10 ticks (measured 0.014 m). Lossless needs NET-N2.
+        assert!(d < 0.05, "{d}");
     }
 
     #[test]

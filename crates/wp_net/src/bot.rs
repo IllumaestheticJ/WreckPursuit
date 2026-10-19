@@ -117,8 +117,8 @@ impl BotDriver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wp_contracts::{AssistProfile, VehicleSim, PHYSICS_DT};
-    use wp_world::World;
+    use wp_contracts::AssistProfile;
+    use wp_vehicle::rig::Rig;
 
     #[test]
     fn bot_reaches_waypoints() {
@@ -127,21 +127,32 @@ mod tests {
             "/../../data/cars/debug_sedan.json"
         );
         let car = wp_contracts::load_car(p).unwrap();
-        let mut v = wp_vehicle::Vehicle::new(&car.def, &car.tires, [0.0; 3], 0.0);
+        // The real vehicle model, stepped exactly as wp_sim steps it.
+        let mut rig = Rig::new(&car);
         let mut bot = BotDriver::new(1, circle_route([0.0, 0.0], 50.0, 8));
         bot.crash_chance_per_s = 0.0;
-        let world = World::default();
-        let mut ev = Vec::new();
+        let mut max_idx = 0;
+        let mut laps_idx = 0;
+        let mut last = 0;
         for _ in 0..240 * 30 {
-            let i = bot.input(&v.state(), 1);
-            v.step(&i, &AssistProfile::default(), &world, PHYSICS_DT, &mut ev);
+            let i = bot.input(&rig.state(), 1);
+            rig.step(&i, &AssistProfile::default());
+            if bot.idx != last {
+                laps_idx += 1;
+                last = bot.idx;
+            }
+            max_idx = max_idx.max(bot.idx);
         }
-        assert!(
-            bot.idx > 3 || bot.route.len() < 4,
-            "advanced to waypoint {}",
-            bot.idx
+        let s = rig.state();
+        println!(
+            "waypoints passed {laps_idx}, speed {:.1} m/s, pos {:?}",
+            s.speed_mps, s.pos
         );
-        let r = (v.state().pos[0].powi(2) + v.state().pos[1].powi(2)).sqrt();
+        assert!(
+            laps_idx >= 4,
+            "passed {laps_idx} waypoints (max index {max_idx})"
+        );
+        let r = (s.pos[0].powi(2) + s.pos[1].powi(2)).sqrt();
         assert!(r < 80.0, "stays near the route, r = {r}");
     }
 }
