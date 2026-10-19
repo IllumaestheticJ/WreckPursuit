@@ -8,9 +8,8 @@ Every session reads this file at start.
 ## v0.2.0 — plan (not applied yet; decided 2026-10-19 by the lead)
 
 **Still v0.1.0 on the branch.** These are the decisions on every request filed so far, published
-early so running workstreams can code toward them. They land in **one** bump once machine E (06,
-police) has merged — B (damage), D (world) and F (net) requests are in the table now; E's (police
-events, LOS query, `tire_puncture` use, captain command payload) complete the batch. Requests filed by 05/07/13/14/15
+early so running workstreams can code toward them. All requesting workstreams (A–I) have now
+reported; the bump is the next lead run's first job. Requests filed by 05/07/13/14/15
 before then join it.
 
 | Change | From | Decision | Who must update |
@@ -43,6 +42,9 @@ before then join it.
 | `StakeCharged` / `RacePayout` economy events | F NET-4 | accepted (inside typed `EconomyEvent`) | G, F |
 | Quantised wire types in contracts | F NET-2 | rejected for now (stay in `wp_net`) | — |
 | `VehicleSim::teleport` | D #1 | rejected: inherent `Vehicle::set_pose_and_speed` is enough | — |
+| Typed `PoliceEvent` + `CaptainCommand` (from `wp_police`; no JSON payloads) | E #2, #3, F NET-3, I H1 | accepted | E, F, G, I |
+| `WorldQuery::line_of_sight(a, b) -> bool` | E #4 | accepted (D implements) | D, E |
+| Shared read-only road-network trait | E #5 | accepted in principle; shape from D + E | D, E |
 | Rear drum brakes + fade inputs | 09 #3 | deferred (post Checkpoint 1) | — |
 | Solid axles; roll-centre heights | 09 #5, #6 | deferred (post Checkpoint 2) | — |
 | `VehicleState::ffb` | 02 #6 | rejected (FFB is local-only; keep `VehicleSim::ffb`) | — |
