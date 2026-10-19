@@ -4,5 +4,9 @@ import { defineConfig } from "vite";
 // (or `just web`, which does it for you) before `npm run dev`.
 export default defineConfig({
   server: { port: 5173 },
-  build: { target: "es2022" },
+  build: {
+    target: "es2022",
+    // net.html: multiplayer client (workstream 07).
+    rollupOptions: { input: { main: "index.html", net: "net.html" } },
+  },
 });
