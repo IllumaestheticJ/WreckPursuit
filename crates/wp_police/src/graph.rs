@@ -2,8 +2,9 @@
 //! POIs, plus what the police compute on it (legal routing, predicted paths, approach sight
 //! distance, nearest-road lookup).
 //!
-//! The roads themselves come from `wp_world` (machine D): [`RoadGraph::from_view`] /
-//! [`RoadGraph::from_city`] in [`crate::city`] build this from D's `RoadGraphView`. Line of
+//! The roads themselves come from the contract road network (`wp_contracts::RoadNetworkQuery`,
+//! D's `wp_world::RoadNetworkIndex`): [`RoadGraph::from_network`] / [`RoadGraph::from_city`] in
+//! [`crate::city`] build this routing index from it. Line of
 //! sight is `WorldQuery::line_of_sight`; the optional [`Occluder`] boxes here are for
 //! hand-built test graphs only.
 //!
@@ -81,7 +82,8 @@ pub struct RoadSegment {
     pub district: District,
     /// One-way `a → b` only.
     pub oneway: bool,
-    /// Source road in D's `RoadGraphView::edges` (`None` for hand-built graphs). Captain
+    /// Source road: edge id in the contract road network (`RoadNetworkQuery`, = `RoadEdgeId`;
+    /// `None` for hand-built graphs). Captain
     /// commands name roads by this id.
     #[serde(default)]
     pub edge: Option<u32>,
