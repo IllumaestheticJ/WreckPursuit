@@ -4,13 +4,13 @@
   "class": "Sport",
   "analog_of": "2000s German FR sport sedan, 3.2 L high-revving naturally aspirated I6",
   "body_size_m": [1.78, 4.49, 1.37],
-  "mass_kg": 1625.0,
+  "mass_kg": 1601.5,
   "front_weight_frac": 0.51,
   "wheelbase_m": 2.73,
   "track_front_m": 1.51,
   "track_rear_m": 1.52,
   "cg_height_m": 0.47,
-  "inertia_kgm2": [550.0, 2630.0, 2840.0],
+  "inertia_kgm2": [540.0, 2590.0, 2800.0],
   "drag_cd_a_m2": 0.655,
   "lift_front": 0.05,
   "lift_rear": 0.06,
@@ -110,36 +110,36 @@
   ],
   "suspension": [
     {
-      "spring_n_per_m": 50100.0,
-      "damper_bump_ns_per_m": 2830.0,
-      "damper_rebound_ns_per_m": 4240.0,
+      "spring_n_per_m": 49300.0,
+      "damper_bump_ns_per_m": 2790.0,
+      "damper_rebound_ns_per_m": 4180.0,
       "travel_m": 0.14,
       "preload_m": 0.02,
-      "arb_n_per_m": 14100.0,
+      "arb_n_per_m": 13900.0,
       "bump_stop_n_per_m": 170000.0
     },
     {
-      "spring_n_per_m": 50100.0,
-      "damper_bump_ns_per_m": 2830.0,
-      "damper_rebound_ns_per_m": 4240.0,
+      "spring_n_per_m": 49300.0,
+      "damper_bump_ns_per_m": 2790.0,
+      "damper_rebound_ns_per_m": 4180.0,
       "travel_m": 0.14,
       "preload_m": 0.02,
-      "arb_n_per_m": 14100.0,
+      "arb_n_per_m": 13900.0,
       "bump_stop_n_per_m": 170000.0
     },
     {
-      "spring_n_per_m": 56000.0,
-      "damper_bump_ns_per_m": 2930.0,
-      "damper_rebound_ns_per_m": 4400.0,
+      "spring_n_per_m": 55100.0,
+      "damper_bump_ns_per_m": 2880.0,
+      "damper_rebound_ns_per_m": 4320.0,
       "travel_m": 0.15,
       "preload_m": 0.02,
       "arb_n_per_m": 0.0,
       "bump_stop_n_per_m": 170000.0
     },
     {
-      "spring_n_per_m": 56000.0,
-      "damper_bump_ns_per_m": 2930.0,
-      "damper_rebound_ns_per_m": 4400.0,
+      "spring_n_per_m": 55100.0,
+      "damper_bump_ns_per_m": 2880.0,
+      "damper_rebound_ns_per_m": 4320.0,
       "travel_m": 0.15,
       "preload_m": 0.02,
       "arb_n_per_m": 0.0,
@@ -147,8 +147,8 @@
     }
   ],
   "brakes": {
-    "max_torque_front_nm": 3130.0,
-    "max_torque_rear_nm": 1480.0,
+    "max_torque_front_nm": 3090.0,
+    "max_torque_rear_nm": 1460.0,
     "bias_front": 0.503,
     "handbrake_rear_nm": 1230.0
   },
@@ -160,5 +160,6 @@
   "aero_downforce_coeffs": [0.0, 0.0],
   "lattice_id": "sperber_32",
   "base_price": 36000,
-  "durability_class": 3
+  "durability_class": 3,
+  "fuel_capacity_l": 63.0
 }

@@ -4,13 +4,13 @@
   "class": "Sport",
   "analog_of": "2010s German AWD hot hatch, 2.0 L turbocharged I4, on-demand clutch-pack AWD, dual-clutch gearbox",
   "body_size_m": [1.8, 4.28, 1.44],
-  "mass_kg": 1575.0,
+  "mass_kg": 1554.5,
   "front_weight_frac": 0.6,
   "wheelbase_m": 2.63,
   "track_front_m": 1.535,
   "track_rear_m": 1.51,
   "cg_height_m": 0.52,
-  "inertia_kgm2": [560.0, 2410.0, 2600.0],
+  "inertia_kgm2": [550.0, 2380.0, 2570.0],
   "drag_cd_a_m2": 0.719,
   "lift_front": 0.06,
   "lift_rear": 0.04,
@@ -38,8 +38,10 @@
   },
   "drivetrain": {
     "layout": {
-      "Awd": {
-        "front_split": 0.65
+      "AwdOnDemand": {
+        "base_front_split": 0.95,
+        "max_rear_split": 0.5,
+        "engage_slip": 0.05
       }
     },
     "gear_ratios": [3.46, 2.15, 1.45, 1.1, 0.87, 0.71],
@@ -106,45 +108,45 @@
   ],
   "suspension": [
     {
-      "spring_n_per_m": 57600.0,
-      "damper_bump_ns_per_m": 3060.0,
-      "damper_rebound_ns_per_m": 4590.0,
+      "spring_n_per_m": 56800.0,
+      "damper_bump_ns_per_m": 3020.0,
+      "damper_rebound_ns_per_m": 4530.0,
       "travel_m": 0.15,
       "preload_m": 0.02,
-      "arb_n_per_m": 11000.0,
+      "arb_n_per_m": 10900.0,
       "bump_stop_n_per_m": 170000.0
     },
     {
-      "spring_n_per_m": 57600.0,
-      "damper_bump_ns_per_m": 3060.0,
-      "damper_rebound_ns_per_m": 4590.0,
+      "spring_n_per_m": 56800.0,
+      "damper_bump_ns_per_m": 3020.0,
+      "damper_rebound_ns_per_m": 4530.0,
       "travel_m": 0.15,
       "preload_m": 0.02,
-      "arb_n_per_m": 11000.0,
+      "arb_n_per_m": 10900.0,
       "bump_stop_n_per_m": 170000.0
     },
     {
-      "spring_n_per_m": 41800.0,
-      "damper_bump_ns_per_m": 2100.0,
-      "damper_rebound_ns_per_m": 3150.0,
+      "spring_n_per_m": 41200.0,
+      "damper_bump_ns_per_m": 2070.0,
+      "damper_rebound_ns_per_m": 3100.0,
       "travel_m": 0.16,
       "preload_m": 0.02,
-      "arb_n_per_m": 12800.0,
+      "arb_n_per_m": 12600.0,
       "bump_stop_n_per_m": 170000.0
     },
     {
-      "spring_n_per_m": 41800.0,
-      "damper_bump_ns_per_m": 2100.0,
-      "damper_rebound_ns_per_m": 3150.0,
+      "spring_n_per_m": 41200.0,
+      "damper_bump_ns_per_m": 2070.0,
+      "damper_rebound_ns_per_m": 3100.0,
       "travel_m": 0.16,
       "preload_m": 0.02,
-      "arb_n_per_m": 12800.0,
+      "arb_n_per_m": 12600.0,
       "bump_stop_n_per_m": 170000.0
     }
   ],
   "brakes": {
-    "max_torque_front_nm": 3430.0,
-    "max_torque_rear_nm": 1370.0,
+    "max_torque_front_nm": 3380.0,
+    "max_torque_rear_nm": 1350.0,
     "bias_front": 0.612,
     "handbrake_rear_nm": 1100.0
   },
@@ -156,5 +158,6 @@
   "aero_downforce_coeffs": [0.0, 0.0],
   "lattice_id": "lindwurm_4t",
   "base_price": 34000,
-  "durability_class": 3
+  "durability_class": 3,
+  "fuel_capacity_l": 55.0
 }

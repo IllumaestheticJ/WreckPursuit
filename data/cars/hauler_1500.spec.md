@@ -26,9 +26,10 @@ All values are class-typical figures for the archetype, rounded; no single real 
 
 | Quantity | Value | Derivation |
 |---|---|---|
-| Curb mass | 2400 kg | class spec data |
-| `mass_kg` | 2475 kg | curb + 75 kg driver |
-| Front weight | 0.570 | axle loads 1411 / 1064 kg |
+| Curb mass | 2400 kg | class spec data (full tank) |
+| Fuel tank | 98 L | `fuel_capacity_l`; half a tank = 37 kg at 0.745 kg/L |
+| `mass_kg` | 2438 kg | curb − half tank + 75 kg driver (contract: fuel at 50 %) |
+| Front weight | 0.570 | axle loads 1390 / 1049 kg |
 | Wheelbase | 3.645 m | spec |
 | Track F / R | 1.745 / 1.710 m | spec |
 | Body W × L × H | 2.030 × 5.850 × 1.880 m | spec |
@@ -48,9 +49,9 @@ I_yaw   = k_y · m·(W² + L²)/12
 
 | Axis | Box (kg·m²) | k | `inertia_kgm2` |
 |---|---|---|---|
-| roll | 1579 | 0.85 | 1340 |
-| pitch | 7787 | 0.95 | 7400 |
-| yaw | 7908 | 0.97 | 7670 |
+| roll | 1556 | 0.85 | 1320 |
+| pitch | 7673 | 0.95 | 7290 |
+| yaw | 7792 | 0.97 | 7560 |
 
 ## Aerodynamics
 
@@ -75,11 +76,11 @@ Frontal area A = 0.82·W·H = 3.13 m²; Cd = 0.44 → **CdA = 1.377 m²**. Lift 
 | 5600 | 452 | 265.1 |
 | 6000 | 410 | 257.6 |
 
-Peak **265 kW @ 5600 rpm**, **519 N·m @ 4100 rpm**. Idle 600 / redline 5800 / limiter 6000 rpm. Rotating inertia 0.25 kg·m² (class: 0.10 small four … 0.30 big-block). Engine braking 12% of peak torque = 62 N·m. Power-to-weight 107 kW/t.
+Peak **265 kW @ 5600 rpm**, **519 N·m @ 4100 rpm**. Idle 600 / redline 5800 / limiter 6000 rpm. Rotating inertia 0.25 kg·m² (class: 0.10 small four … 0.30 big-block). Engine braking 12% of peak torque = 62 N·m. Power-to-weight 109 kW/t.
 
 ## Drivetrain
 
-6-speed automatic (modelled with 0.30 s shifts), automatic-locking rear diff modelled as high-preload LSD; 4WD transfer case is a mod. Layout **RWD**; front diff: open; rear diff: clutch LSD, preload 150 N·m, power ramp 0.60, coast ramp 0.20. Clutch capacity 1.60 × peak torque = 830 N·m. Shift time 0.30 s.
+6-speed automatic with lock-up torque converter, automatic-locking rear diff modelled as high-preload LSD; 4WD transfer case is a mod. Layout **RWD**; front diff: open; rear diff: clutch LSD, preload 150 N·m, power ramp 0.60, coast ramp 0.20. Torque converter: stall 2200 rpm, 2.0× at stall, couples 1:1 from 2600 rpm (class-typical for the gearbox). Clutch capacity 1.60 × peak torque = 830 N·m. Shift time 0.30 s.
 
 | Gear | Ratio | Overall | km/h @ redline |
 |---|---|---|---|
@@ -99,7 +100,7 @@ Final drive 3.42, reverse 3.06. Speeds use the driven-wheel loaded radius 0.385 
 | Front | 265/70R17 | 265 mm | 0.4014 m | 0.385 m | 40 kg |
 | Rear | 265/70R17 | 265 mm | 0.4014 m | 0.385 m | 55 kg |
 
-Unloaded r = rim/2 + width·aspect; loaded r = 0.96 × unloaded (static deflection). Compound: intended compound **`all_terrain`** — no `data/tires/all_terrain.json` yet, so the JSON uses `street`; re-run the build when the file lands.
+Unloaded r = rim/2 + width·aspect; loaded r = 0.96 × unloaded (static deflection). Compound: `all_terrain`.
 
 ## Suspension
 
@@ -107,10 +108,10 @@ Springs from ride frequency, `k = m_s·(2πf)²` with sprung corner mass `m_s = 
 
 | Axle | m_s | f | Wheel rate k | Bump c | Rebound c | Travel |
 |---|---|---|---|---|---|---|
-| Front | 665 kg | 1.20 Hz | 37800 N/m | 2810 N·s/m | 4220 N·s/m | 0.24 m |
-| Rear | 477 kg | 1.45 Hz | 39600 N/m | 2430 N·s/m | 3640 N·s/m | 0.26 m |
+| Front | 655 kg | 1.20 Hz | 37200 N/m | 2770 N·s/m | 4160 N·s/m | 0.24 m |
+| Rear | 469 kg | 1.45 Hz | 39000 N/m | 2390 N·s/m | 3580 N·s/m | 0.26 m |
 
-Anti-roll bars from a roll-gradient target of 4.5°/g with 75% of roll stiffness at the front. Roll arm h − h_rc = 0.623 m (roll centres 0.08 m F / 0.12 m R). Required total K_φ = m·g·arm/φ = 192532 N·m/rad; springs give k·t²/2 = 57590 F / 57902 R N·m/rad; bars supply the rest as `arb_n_per_m = K_bar/t²` = **28500 F / 0 R N/m** (clamped at ≥ 0). Resulting gradient 4.3°/g, front share 71%. Bump stops 300000 N/m.
+Anti-roll bars from a roll-gradient target of 4.5°/g with 75% of roll stiffness at the front. Roll arm h − h_rc = 0.623 m (roll centres 0.08 m F / 0.12 m R). Required total K_φ = m·g·arm/φ = 189692 N·m/rad; springs give k·t²/2 = 56690 F / 56949 R N·m/rad; bars supply the rest as `arb_n_per_m = K_bar/t²` = **28100 F / 0 R N/m** (clamped at ≥ 0). Resulting gradient 4.3°/g, front share 71%. Bump stops 300000 N/m.
 
 Alignment: camber -0.2° F / +0.0° R, toe +0.10° F / +0.00° R (+ = in), caster 4.0°.
 
@@ -121,7 +122,7 @@ Full-pedal line pressure 100 bar.
 - Front: 330 mm disc, pistons per side 54 mm + 54 mm → A = 45.8 cm², r_eff = D/2 − 25 mm = 140 mm, pad μ = 0.4: T = 2·μ·p·A·r_eff = 2·0.4·100 bar·45.8 cm²·0.140 m = **5130 N·m**
 - Rear: 345 mm disc, pistons per side 54 mm → A = 22.9 cm², r_eff = D/2 − 25 mm = 148 mm, pad μ = 0.4: T = 2·μ·p·A·r_eff = 2·0.4·100 bar·22.9 cm²·0.147 m = **2702 N·m**
 
-Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 3591 N·m/wheel (capacity 1.43×), rear needs 1087 N·m/wheel (capacity 2.48×).
+Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 3538 N·m/wheel (capacity 1.45×), rear needs 1071 N·m/wheel (capacity 2.52×).
 
 `wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 1554 N·m), never boosted above its caliper capacity. Rear capacity exceeds that, so `bias_front` = T_r/(T_r + ideal) = **0.635** → delivered 5130 N·m front / 1552 N·m rear per wheel at full pedal. Handbrake 1620 N·m per rear wheel.
 
@@ -135,17 +136,17 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 9.0 s | 204 km/h | 43.9 m | 0.67 g | — |
-| estimate | 8.1 s | 221 km/h | 46.6 m | 0.70 g | 436 |
+| sim | 9.5 s | 203 km/h | 44.8 m | 0.63 g | — |
+| estimate | 8.0 s | 221 km/h | 45.1 m | 0.71 g | 440 |
 
 ## Damage lattice (`data/lattices/hauler_1500.json`)
 
 303 nodes, 1857 beams, 6 detachables, 21 component mounts.
 
-- Generated with `gen-lattice --id hauler_1500 --profile truck --width 2.03 --length 5.85 --height 1.88 --wheelbase 3.645 --mass 544.5 --car-mass 2475.0 --clearance 0.22 --front-overhang 0.95 --strength 1.3` (22% of vehicle mass in the lattice; strength from durability class 5).
+- Generated with `gen-lattice --id hauler_1500 --profile truck --width 2.03 --length 5.85 --height 1.88 --wheelbase 3.645 --mass 536.5 --car-mass 2438.5 --clearance 0.22 --front-overhang 0.95 --strength 1.3` (22% of vehicle mass in the lattice; strength from durability class 5).
 - Era `2010s`: gen-lattice's default HSS passenger cell kept as is.
 - Steel hood: 159 hood beams aluminum → mild_steel.
 - Chrome steel bumpers: 180 bumper beams pp_bumper → mild_steel.
 - Detachables: steel bumpers ×2.3 break impulse / ×4 mass; steel hood ×1.4 / ×1.6.
-- Body-on-frame: 16 cab-floor rail nodes relabelled FrameLeft/FrameRight; 14 under-cab rail beams → hss 3.91e-04 m² so the ladder frame runs bumper to bumper.
+- Body-on-frame: 16 cab-floor rail nodes relabelled FrameLeft/FrameRight; 14 under-cab rail beams → hss 3.85e-04 m² so the ladder frame runs bumper to bumper.
 - Side-saddle fuel tank outboard of the left frame rail between cab and rear axle.

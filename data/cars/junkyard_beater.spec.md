@@ -26,9 +26,10 @@ All values are class-typical figures for the archetype, rounded; no single real 
 
 | Quantity | Value | Derivation |
 |---|---|---|
-| Curb mass | 1000 kg | class spec data |
-| `mass_kg` | 1075 kg | curb + 75 kg driver |
-| Front weight | 0.620 | axle loads 666 / 408 kg |
+| Curb mass | 1000 kg | class spec data (full tank) |
+| Fuel tank | 45 L | `fuel_capacity_l`; half a tank = 17 kg at 0.745 kg/L |
+| `mass_kg` | 1058 kg | curb − half tank + 75 kg driver (contract: fuel at 50 %) |
+| Front weight | 0.620 | axle loads 656 / 402 kg |
 | Wheelbase | 2.500 m | spec |
 | Track F / R | 1.430 / 1.420 m | spec |
 | Body W × L × H | 1.660 × 4.300 × 1.380 m | spec |
@@ -48,9 +49,9 @@ I_yaw   = k_y · m·(W² + L²)/12
 
 | Axis | Box (kg·m²) | k | `inertia_kgm2` |
 |---|---|---|---|
-| roll | 417 | 0.80 | 330 |
-| pitch | 1827 | 0.90 | 1640 |
-| yaw | 1903 | 0.92 | 1750 |
+| roll | 411 | 0.80 | 330 |
+| pitch | 1799 | 0.90 | 1620 |
+| yaw | 1874 | 0.92 | 1720 |
 
 ## Aerodynamics
 
@@ -76,7 +77,7 @@ Frontal area A = 0.84·W·H = 1.92 m²; Cd = 0.38 → **CdA = 0.731 m²**. Lift 
 | 6000 | 95 | 59.7 |
 | 6300 | 86 | 56.7 |
 
-Peak **61 kW @ 5500 rpm**, **125 N·m @ 3500 rpm**. Idle 850 / redline 6000 / limiter 6300 rpm. Rotating inertia 0.11 kg·m² (class: 0.10 small four … 0.30 big-block). Engine braking 12% of peak torque = 15 N·m. Power-to-weight 57 kW/t.
+Peak **61 kW @ 5500 rpm**, **125 N·m @ 3500 rpm**. Idle 850 / redline 6000 / limiter 6300 rpm. Rotating inertia 0.11 kg·m² (class: 0.10 small four … 0.30 big-block). Engine braking 12% of peak torque = 15 N·m. Power-to-weight 58 kW/t.
 
 ## Drivetrain
 
@@ -107,10 +108,10 @@ Springs from ride frequency, `k = m_s·(2πf)²` with sprung corner mass `m_s = 
 
 | Axle | m_s | f | Wheel rate k | Bump c | Rebound c | Travel |
 |---|---|---|---|---|---|---|
-| Front | 318 kg | 1.30 Hz | 21200 N/m | 940 N·s/m | 1410 N·s/m | 0.15 m |
-| Rear | 190 kg | 1.45 Hz | 15800 N/m | 620 N·s/m | 930 N·s/m | 0.16 m |
+| Front | 313 kg | 1.30 Hz | 20900 N/m | 920 N·s/m | 1380 N·s/m | 0.15 m |
+| Rear | 187 kg | 1.45 Hz | 15500 N/m | 610 N·s/m | 920 N·s/m | 0.16 m |
 
-Anti-roll bars from a roll-gradient target of 5.0°/g with 60% of roll stiffness at the front. Roll arm h − h_rc = 0.405 m (roll centres 0.08 m F / 0.12 m R). Required total K_φ = m·g·arm/φ = 48918 N·m/rad; springs give k·t²/2 = 21710 F / 15921 R N·m/rad; bars supply the rest as `arb_n_per_m = K_bar/t²` = **3700 F / 1800 R N/m** (clamped at ≥ 0). Resulting gradient 5.0°/g, front share 60%. Bump stops 120000 N/m.
+Anti-roll bars from a roll-gradient target of 5.0°/g with 60% of roll stiffness at the front. Roll arm h − h_rc = 0.405 m (roll centres 0.08 m F / 0.12 m R). Required total K_φ = m·g·arm/φ = 48155 N·m/rad; springs give k·t²/2 = 21355 F / 15654 R N·m/rad; bars supply the rest as `arb_n_per_m = K_bar/t²` = **3700 F / 1800 R N/m** (clamped at ≥ 0). Resulting gradient 5.0°/g, front share 60%. Bump stops 120000 N/m.
 
 Alignment: camber -0.2° F / -0.5° R, toe +0.00° F / +0.10° R (+ = in), caster 2.0°.
 
@@ -121,7 +122,7 @@ Full-pedal line pressure 100 bar.
 - Front: 240 mm disc, pistons per side 51 mm → A = 20.4 cm², r_eff = D/2 − 25 mm = 95 mm, pad μ = 0.35: T = 2·μ·p·A·r_eff = 2·0.35·100 bar·20.4 cm²·0.095 m = **1358 N·m**
 - Rear: 200 mm leading/trailing drum, wheel cylinder 17.5 mm → A = 2.41 cm², drum radius 100 mm, brake factor 1.8 (includes lining μ): T = BF·p·A·r = **433 N·m**
 
-Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 1206 N·m/wheel (capacity 1.13×), rear needs 265 N·m/wheel (capacity 1.62×).
+Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 1187 N·m/wheel (capacity 1.15×), rear needs 261 N·m/wheel (capacity 1.65×).
 
 `wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 299 N·m), never boosted above its caliper capacity. Rear capacity exceeds that, so `bias_front` = T_r/(T_r + ideal) = **0.590** → delivered 1360 N·m front / 299 N·m rear per wheel at full pedal. Handbrake 600 N·m per rear wheel.
 
@@ -135,14 +136,14 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 14.0 s | 163 km/h | 39.1 m | 0.83 g | — |
-| estimate | 12.5 s | 169 km/h | 37.4 m | 0.94 g | 380 |
+| sim | 13.8 s | 163 km/h | 39.2 m | 0.80 g | — |
+| estimate | 12.3 s | 169 km/h | 37.3 m | 0.90 g | 377 |
 
 ## Damage lattice (`data/lattices/junkyard_beater.json`)
 
 244 nodes, 1539 beams, 8 detachables, 21 component mounts.
 
-- Generated with `gen-lattice --id junkyard_beater --profile sedan --width 1.66 --length 4.3 --height 1.38 --wheelbase 2.5 --mass 236.5 --car-mass 1075.0 --clearance 0.14 --front-overhang 0.9 --strength 0.9` (22% of vehicle mass in the lattice; strength from durability class 2).
+- Generated with `gen-lattice --id junkyard_beater --profile sedan --width 1.66 --length 4.3 --height 1.38 --wheelbase 2.5 --mass 232.8 --car-mass 1058.2 --clearance 0.14 --front-overhang 0.9 --strength 0.9` (22% of vehicle mass in the lattice; strength from durability class 2).
 - Era `80s` passenger cell: 170 cabin/sill, 115 cross-member, 10 pillar, 10 roof rail → hss × 0.65 section.
 - Steel hood: 105 hood beams aluminum → mild_steel.
 - Detachables: steel bumpers ×2.3 break impulse / ×4 mass; steel hood ×1.4 / ×1.6.

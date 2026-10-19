@@ -4,13 +4,13 @@
   "class": "Beater",
   "analog_of": "late-80s compact FF sedan, 1.6 L SOHC I4, high mileage (tired engine, worn dampers)",
   "body_size_m": [1.66, 4.3, 1.38],
-  "mass_kg": 1075.0,
+  "mass_kg": 1058.2,
   "front_weight_frac": 0.62,
   "wheelbase_m": 2.5,
   "track_front_m": 1.43,
   "track_rear_m": 1.42,
   "cg_height_m": 0.5,
-  "inertia_kgm2": [330.0, 1640.0, 1750.0],
+  "inertia_kgm2": [330.0, 1620.0, 1720.0],
   "drag_cd_a_m2": 0.731,
   "lift_front": 0.12,
   "lift_rear": 0.14,
@@ -102,36 +102,36 @@
   ],
   "suspension": [
     {
-      "spring_n_per_m": 21200.0,
-      "damper_bump_ns_per_m": 940.0,
-      "damper_rebound_ns_per_m": 1410.0,
+      "spring_n_per_m": 20900.0,
+      "damper_bump_ns_per_m": 920.0,
+      "damper_rebound_ns_per_m": 1380.0,
       "travel_m": 0.15,
       "preload_m": 0.01,
       "arb_n_per_m": 3700.0,
       "bump_stop_n_per_m": 120000.0
     },
     {
-      "spring_n_per_m": 21200.0,
-      "damper_bump_ns_per_m": 940.0,
-      "damper_rebound_ns_per_m": 1410.0,
+      "spring_n_per_m": 20900.0,
+      "damper_bump_ns_per_m": 920.0,
+      "damper_rebound_ns_per_m": 1380.0,
       "travel_m": 0.15,
       "preload_m": 0.01,
       "arb_n_per_m": 3700.0,
       "bump_stop_n_per_m": 120000.0
     },
     {
-      "spring_n_per_m": 15800.0,
-      "damper_bump_ns_per_m": 620.0,
-      "damper_rebound_ns_per_m": 930.0,
+      "spring_n_per_m": 15500.0,
+      "damper_bump_ns_per_m": 610.0,
+      "damper_rebound_ns_per_m": 920.0,
       "travel_m": 0.16,
       "preload_m": 0.01,
       "arb_n_per_m": 1800.0,
       "bump_stop_n_per_m": 120000.0
     },
     {
-      "spring_n_per_m": 15800.0,
-      "damper_bump_ns_per_m": 620.0,
-      "damper_rebound_ns_per_m": 930.0,
+      "spring_n_per_m": 15500.0,
+      "damper_bump_ns_per_m": 610.0,
+      "damper_rebound_ns_per_m": 920.0,
       "travel_m": 0.16,
       "preload_m": 0.01,
       "arb_n_per_m": 1800.0,
@@ -152,5 +152,6 @@
   "aero_downforce_coeffs": [0.0, 0.0],
   "lattice_id": "junkyard_beater",
   "base_price": 3000,
-  "durability_class": 2
+  "durability_class": 2,
+  "fuel_capacity_l": 45.0
 }

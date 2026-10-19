@@ -4,13 +4,13 @@
   "class": "Exotic",
   "analog_of": "90s Italian mid-engine exotic coupe, 3.5 L flat-plane V8, transverse-mounted gearbox behind the engine",
   "body_size_m": [1.9, 4.25, 1.17],
-  "mass_kg": 1375.0,
+  "mass_kg": 1344.5,
   "front_weight_frac": 0.42,
   "wheelbase_m": 2.45,
   "track_front_m": 1.51,
   "track_rear_m": 1.615,
   "cg_height_m": 0.41,
-  "inertia_kgm2": [440.0, 1670.0, 1860.0],
+  "inertia_kgm2": [440.0, 1630.0, 1820.0],
   "drag_cd_a_m2": 0.602,
   "lift_front": -0.05,
   "lift_rear": -0.12,
@@ -110,36 +110,36 @@
   ],
   "suspension": [
     {
-      "spring_n_per_m": 42400.0,
-      "damper_bump_ns_per_m": 2160.0,
-      "damper_rebound_ns_per_m": 3240.0,
+      "spring_n_per_m": 41400.0,
+      "damper_bump_ns_per_m": 2110.0,
+      "damper_rebound_ns_per_m": 3160.0,
       "travel_m": 0.12,
       "preload_m": 0.02,
-      "arb_n_per_m": 11300.0,
+      "arb_n_per_m": 11100.0,
       "bump_stop_n_per_m": 200000.0
     },
     {
-      "spring_n_per_m": 42400.0,
-      "damper_bump_ns_per_m": 2160.0,
-      "damper_rebound_ns_per_m": 3240.0,
+      "spring_n_per_m": 41400.0,
+      "damper_bump_ns_per_m": 2110.0,
+      "damper_rebound_ns_per_m": 3160.0,
       "travel_m": 0.12,
       "preload_m": 0.02,
-      "arb_n_per_m": 11300.0,
+      "arb_n_per_m": 11100.0,
       "bump_stop_n_per_m": 200000.0
     },
     {
-      "spring_n_per_m": 68400.0,
-      "damper_bump_ns_per_m": 3240.0,
-      "damper_rebound_ns_per_m": 4860.0,
+      "spring_n_per_m": 66800.0,
+      "damper_bump_ns_per_m": 3160.0,
+      "damper_rebound_ns_per_m": 4740.0,
       "travel_m": 0.13,
       "preload_m": 0.02,
       "arb_n_per_m": 0.0,
       "bump_stop_n_per_m": 200000.0
     },
     {
-      "spring_n_per_m": 68400.0,
-      "damper_bump_ns_per_m": 3240.0,
-      "damper_rebound_ns_per_m": 4860.0,
+      "spring_n_per_m": 66800.0,
+      "damper_bump_ns_per_m": 3160.0,
+      "damper_rebound_ns_per_m": 4740.0,
       "travel_m": 0.13,
       "preload_m": 0.02,
       "arb_n_per_m": 0.0,
@@ -147,8 +147,8 @@
     }
   ],
   "brakes": {
-    "max_torque_front_nm": 2200.0,
-    "max_torque_rear_nm": 1550.0,
+    "max_torque_front_nm": 2150.0,
+    "max_torque_rear_nm": 1510.0,
     "bias_front": 0.5,
     "handbrake_rear_nm": 1330.0
   },
@@ -160,5 +160,6 @@
   "aero_downforce_coeffs": [0.0, 0.0],
   "lattice_id": "lucciola_350",
   "base_price": 120000,
-  "durability_class": 1
+  "durability_class": 1,
+  "fuel_capacity_l": 82.0
 }
