@@ -1,240 +1,309 @@
 {
+  "drayman_cargo": {
+    "barrier": {
+      "frontal 15 km/h": "PASS: crush 0.06 m, cabin 0.00 m, health 0.95",
+      "frontal 25 km/h": "PASS: crush 0.13 m, cabin 0.00 m, health 0.85",
+      "frontal 40 km/h": "PASS: crush 0.32 m, cabin 0.01 m, health 0.57; failed Radiator",
+      "frontal 56 km/h": "PASS: crush 0.62 m, cabin 0.31 m, health 0.20, TotalLoss; failed Radiator, Battery, SteeringRack",
+      "frontal 80 km/h": "PASS: crush 1.17 m, cabin 0.35 m, health 0.11, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
+      "offset 40% 56 km/h": "PASS: crush 0.88 m, cabin 0.27 m, health 0.11, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
+      "rear 40 km/h": "PASS: crush 0.41 m, cabin 0.00 m, health 0.59",
+      "side (T-bone) 40 km/h": "PASS: crush 0.20 m, cabin 0.19 m, health 0.74"
+    },
+    "brake_100_0_m": 43.685905,
+    "skidpad_g": 0.65711296,
+    "t0100_s": 11.558334,
+    "understeer_deg_per_g": 0.65753454,
+    "vmax_converged": false,
+    "vmax_kmh": 200.8,
+    "vmax_metric_kmh": 295.23404
+  },
+  "furrow_24": {
+    "barrier": {
+      "frontal 15 km/h": "PASS: crush 0.04 m, cabin 0.00 m, health 0.96",
+      "frontal 25 km/h": "PASS: crush 0.11 m, cabin 0.00 m, health 0.86",
+      "frontal 40 km/h": "PASS: crush 0.27 m, cabin 0.01 m, health 0.58",
+      "frontal 56 km/h": "PASS: crush 0.68 m, cabin 0.18 m, health 0.15, TotalLoss; failed Radiator, Battery, SteeringRack, Driveshaft\u2026",
+      "frontal 80 km/h": "PASS: crush 1.25 m, cabin 0.26 m, health 0.10, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
+      "offset 40% 56 km/h": "PASS: crush 0.84 m, cabin 0.17 m, health 0.13, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
+      "rear 40 km/h": "PASS: crush 0.62 m, cabin 0.00 m, health 0.59; failed Exhaust",
+      "side (T-bone) 40 km/h": "PASS: crush 0.17 m, cabin 0.17 m, health 0.75"
+    },
+    "brake_100_0_m": 41.41526,
+    "skidpad_g": 0.72860223,
+    "t0100_s": 10.766667,
+    "understeer_deg_per_g": 0.43936673,
+    "vmax_converged": true,
+    "vmax_kmh": 178.5
+  },
   "hakone_gt": {
     "barrier": {
       "frontal 15 km/h": "PASS: crush 0.03 m, cabin 0.00 m, health 0.95",
-      "frontal 25 km/h": "PASS: crush 0.16 m, cabin 0.00 m, health 0.85",
-      "frontal 40 km/h": "PASS: crush 0.37 m, cabin 0.02 m, health 0.56",
-      "frontal 56 km/h": "PASS: crush 0.72 m, cabin 0.08 m, health 0.13, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
-      "frontal 80 km/h": "PASS: crush 1.62 m, cabin 0.33 m, health 0.11, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
-      "offset 40% 56 km/h": "PASS: crush 1.31 m, cabin 0.07 m, health 0.13, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
-      "rear 40 km/h": "PASS: crush 0.51 m, cabin 0.12 m, health 0.54",
-      "side (T-bone) 40 km/h": "PASS: crush 0.15 m, cabin 0.15 m, health 0.85; failed SuspensionFL"
+      "frontal 25 km/h": "PASS: crush 0.17 m, cabin 0.00 m, health 0.85",
+      "frontal 40 km/h": "PASS: crush 0.37 m, cabin 0.04 m, health 0.60",
+      "frontal 56 km/h": "PASS: crush 0.70 m, cabin 0.13 m, health 0.20, TotalLoss; failed Radiator, Battery, SteeringRack, BrakeFL",
+      "frontal 80 km/h": "PASS: crush 1.54 m, cabin 0.29 m, health 0.10, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
+      "offset 40% 56 km/h": "PASS: crush 1.30 m, cabin 0.12 m, health 0.13, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
+      "rear 40 km/h": "PASS: crush 0.49 m, cabin 0.12 m, health 0.53",
+      "side (T-bone) 40 km/h": "PASS: crush 0.19 m, cabin 0.19 m, health 0.73; failed SuspensionFL, WheelFL, BrakeFL"
     },
     "brake_100_0_m": 38.692345,
     "skidpad_g": 0.90572524,
     "t0100_s": 5.841667,
     "understeer_deg_per_g": 0.3810598,
-    "vmax_kmh": 282.2816
+    "vmax_converged": false,
+    "vmax_kmh": 281.8
   },
   "hauler_1500": {
     "barrier": {
-      "frontal 15 km/h": "PASS: crush 0.08 m, cabin 0.00 m, health 0.95",
-      "frontal 25 km/h": "PASS: crush 0.19 m, cabin 0.00 m, health 0.84",
-      "frontal 40 km/h": "PASS: crush 0.36 m, cabin 0.01 m, health 0.64",
-      "frontal 56 km/h": "PASS: crush 0.70 m, cabin 0.10 m, health 0.17, TotalLoss; failed Radiator, Battery, SteeringRack, Driveshaft\u2026",
-      "frontal 80 km/h": "PASS: crush 1.04 m, cabin 0.13 m, health 0.11, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
-      "offset 40% 56 km/h": "PASS: crush 0.82 m, cabin 0.11 m, health 0.14, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
-      "rear 40 km/h": "PASS: crush 0.67 m, cabin 0.00 m, health 0.57; failed Exhaust, SuspensionRR",
-      "side (T-bone) 40 km/h": "PASS: crush 0.14 m, cabin 0.13 m, health 0.86"
+      "frontal 15 km/h": "PASS: crush 0.06 m, cabin 0.00 m, health 0.95",
+      "frontal 25 km/h": "PASS: crush 0.11 m, cabin 0.00 m, health 0.87",
+      "frontal 40 km/h": "PASS: crush 0.37 m, cabin 0.01 m, health 0.64",
+      "frontal 56 km/h": "PASS: crush 0.79 m, cabin 0.23 m, health 0.15, TotalLoss; failed Radiator, Battery, SteeringRack, Driveshaft\u2026",
+      "frontal 80 km/h": "PASS: crush 1.13 m, cabin 0.29 m, health 0.10, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
+      "offset 40% 56 km/h": "PASS: crush 0.85 m, cabin 0.26 m, health 0.14, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
+      "rear 40 km/h": "PASS: crush 0.67 m, cabin 0.00 m, health 0.61; failed Exhaust",
+      "side (T-bone) 40 km/h": "PASS: crush 0.16 m, cabin 0.15 m, health 0.74"
     },
     "brake_100_0_m": 44.7172,
     "skidpad_g": 0.6335724,
     "t0100_s": 8.983334,
     "understeer_deg_per_g": 1.4548187,
-    "vmax_kmh": 202.9137
+    "vmax_converged": true,
+    "vmax_kmh": 202.9
   },
   "ironside_440": {
     "barrier": {
-      "frontal 15 km/h": "PASS: crush 0.06 m, cabin 0.00 m, health 0.96",
-      "frontal 25 km/h": "PASS: crush 0.18 m, cabin 0.00 m, health 0.85",
-      "frontal 40 km/h": "PASS: crush 0.36 m, cabin 0.01 m, health 0.65",
-      "frontal 56 km/h": "PASS: crush 0.62 m, cabin 0.20 m, health 0.20, TotalLoss; failed Radiator, Battery, SteeringRack",
-      "frontal 80 km/h": "PASS: crush 1.20 m, cabin 0.14 m, health 0.11, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
-      "offset 40% 56 km/h": "PASS: crush 0.92 m, cabin 0.04 m, health 0.18, TotalLoss; failed Radiator, Battery, SteeringRack, SuspensionFL\u2026",
-      "rear 40 km/h": "PASS: crush 0.43 m, cabin 0.13 m, health 0.59; failed FuelTank, Exhaust, SuspensionRL, SuspensionRR",
-      "side (T-bone) 40 km/h": "PASS: crush 0.15 m, cabin 0.15 m, health 0.86; failed SuspensionFL"
+      "frontal 15 km/h": "PASS: crush 0.07 m, cabin 0.00 m, health 0.96",
+      "frontal 25 km/h": "PASS: crush 0.19 m, cabin 0.00 m, health 0.86",
+      "frontal 40 km/h": "PASS: crush 0.35 m, cabin 0.01 m, health 0.63",
+      "frontal 56 km/h": "PASS: crush 0.49 m, cabin 0.24 m, health 0.21, TotalLoss; failed Radiator, Battery, SteeringRack",
+      "frontal 80 km/h": "PASS: crush 1.21 m, cabin 0.29 m, health 0.11, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
+      "offset 40% 56 km/h": "PASS: crush 0.87 m, cabin 0.29 m, health 0.12, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
+      "rear 40 km/h": "PASS: crush 0.41 m, cabin 0.11 m, health 0.61; failed FuelTank, Exhaust, SuspensionRL, SuspensionRR",
+      "side (T-bone) 40 km/h": "PASS: crush 0.19 m, cabin 0.19 m, health 0.75; failed SuspensionRL"
     },
     "brake_100_0_m": 52.451813,
     "skidpad_g": 0.6153283,
     "t0100_s": 8.712501,
     "understeer_deg_per_g": 1.1689218,
-    "vmax_kmh": 210.4424
+    "vmax_converged": true,
+    "vmax_kmh": 210.4
   },
   "junkyard_beater": {
     "barrier": {
       "frontal 15 km/h": "PASS: crush 0.01 m, cabin 0.00 m, health 0.96",
-      "frontal 25 km/h": "PASS: crush 0.12 m, cabin 0.00 m, health 0.84",
-      "frontal 40 km/h": "PASS: crush 0.33 m, cabin 0.01 m, health 0.55",
-      "frontal 56 km/h": "PASS: crush 0.64 m, cabin 0.07 m, health 0.13, TotalLoss; failed Radiator, Battery, SteeringRack, Gearbox\u2026",
-      "frontal 80 km/h": "PASS: crush 1.39 m, cabin 0.40 m, health 0.09, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
-      "offset 40% 56 km/h": "PASS: crush 0.89 m, cabin 0.13 m, health 0.11, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
-      "rear 40 km/h": "PASS: crush 0.45 m, cabin 0.00 m, health 0.55; failed Exhaust",
-      "side (T-bone) 40 km/h": "PASS: crush 0.15 m, cabin 0.15 m, health 0.86; failed SuspensionFL"
+      "frontal 25 km/h": "PASS: crush 0.10 m, cabin 0.00 m, health 0.85",
+      "frontal 40 km/h": "PASS: crush 0.31 m, cabin 0.06 m, health 0.56",
+      "frontal 56 km/h": "PASS: crush 0.74 m, cabin 0.21 m, health 0.10, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
+      "frontal 80 km/h": "PASS: crush 1.47 m, cabin 0.27 m, health 0.09, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
+      "offset 40% 56 km/h": "PASS: crush 1.00 m, cabin 0.23 m, health 0.11, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
+      "rear 40 km/h": "PASS: crush 0.45 m, cabin 0.00 m, health 0.54; failed Exhaust",
+      "side (T-bone) 40 km/h": "PASS: crush 0.21 m, cabin 0.20 m, health 0.74; failed SuspensionFL, WheelFL, BrakeFL"
     },
     "brake_100_0_m": 39.20551,
     "skidpad_g": 0.8026481,
     "t0100_s": 13.758334,
     "understeer_deg_per_g": 0.4572632,
-    "vmax_kmh": 162.68892
+    "vmax_converged": true,
+    "vmax_kmh": 162.7
   },
   "kestrel_ts": {
     "barrier": {
-      "frontal 15 km/h": "PASS: crush 0.04 m, cabin 0.00 m, health 0.96",
-      "frontal 25 km/h": "PASS: crush 0.16 m, cabin 0.00 m, health 0.85",
-      "frontal 40 km/h": "PASS: crush 0.38 m, cabin 0.02 m, health 0.56",
-      "frontal 56 km/h": "PASS: crush 0.72 m, cabin 0.04 m, health 0.13, TotalLoss; failed Radiator, Battery, SteeringRack, Gearbox\u2026",
-      "frontal 80 km/h": "PASS: crush 1.56 m, cabin 0.39 m, health 0.09, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
-      "offset 40% 56 km/h": "PASS: crush 1.05 m, cabin 0.13 m, health 0.11, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
-      "rear 40 km/h": "PASS: crush 0.50 m, cabin 0.00 m, health 0.56",
-      "side (T-bone) 40 km/h": "PASS: crush 0.16 m, cabin 0.16 m, health 0.85; failed SuspensionFL"
+      "frontal 15 km/h": "PASS: crush 0.04 m, cabin 0.00 m, health 0.95",
+      "frontal 25 km/h": "PASS: crush 0.17 m, cabin 0.00 m, health 0.85",
+      "frontal 40 km/h": "PASS: crush 0.39 m, cabin 0.07 m, health 0.59",
+      "frontal 56 km/h": "PASS: crush 0.69 m, cabin 0.20 m, health 0.15, TotalLoss; failed Radiator, Battery, SteeringRack, Gearbox\u2026",
+      "frontal 80 km/h": "PASS: crush 1.51 m, cabin 0.30 m, health 0.09, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
+      "offset 40% 56 km/h": "PASS: crush 0.96 m, cabin 0.11 m, health 0.12, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
+      "rear 40 km/h": "PASS: crush 0.54 m, cabin 0.00 m, health 0.55",
+      "side (T-bone) 40 km/h": "PASS: crush 0.21 m, cabin 0.21 m, health 0.73; failed SuspensionFL, WheelFL, BrakeFL"
     },
     "brake_100_0_m": 38.82943,
     "skidpad_g": 0.930079,
     "t0100_s": 7.141667,
     "understeer_deg_per_g": 0.5978237,
-    "vmax_kmh": 247.98987
+    "vmax_converged": false,
+    "vmax_kmh": 247.8
   },
   "lindwurm_4t": {
     "barrier": {
       "frontal 15 km/h": "PASS: crush 0.03 m, cabin 0.00 m, health 0.96",
-      "frontal 25 km/h": "PASS: crush 0.18 m, cabin 0.00 m, health 0.84",
-      "frontal 40 km/h": "PASS: crush 0.36 m, cabin 0.01 m, health 0.51; failed Radiator",
-      "frontal 56 km/h": "PASS: crush 0.73 m, cabin 0.03 m, health 0.10, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
-      "frontal 80 km/h": "PASS: crush 1.32 m, cabin 0.34 m, health 0.09, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
-      "offset 40% 56 km/h": "PASS: crush 1.13 m, cabin 0.22 m, health 0.11, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
-      "rear 40 km/h": "FAIL: crush 0.50 m, cabin 0.33 m, health 0.55, TotalLoss (total loss from a 40 km/h rear hit)",
-      "side (T-bone) 40 km/h": "PASS: crush 0.14 m, cabin 0.13 m, health 0.85; failed SuspensionFL"
+      "frontal 25 km/h": "PASS: crush 0.14 m, cabin 0.00 m, health 0.84",
+      "frontal 40 km/h": "PASS: crush 0.32 m, cabin 0.04 m, health 0.54",
+      "frontal 56 km/h": "PASS: crush 0.71 m, cabin 0.14 m, health 0.10, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
+      "frontal 80 km/h": "PASS: crush 1.44 m, cabin 0.30 m, health 0.09, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
+      "offset 40% 56 km/h": "PASS: crush 1.14 m, cabin 0.32 m, health 0.11, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
+      "rear 40 km/h": "PASS: crush 0.51 m, cabin 0.00 m, health 0.57",
+      "side (T-bone) 40 km/h": "PASS: crush 0.19 m, cabin 0.19 m, health 0.73; failed SuspensionFL, WheelFL, BrakeFL"
     },
-    "brake_100_0_m": 37.805008,
+    "brake_100_0_m": 37.790203,
     "skidpad_g": 0.93111145,
-    "t0100_s": 5.391667,
+    "t0100_s": 5.3958335,
     "understeer_deg_per_g": 0.35897157,
-    "vmax_kmh": 259.776
+    "vmax_converged": false,
+    "vmax_kmh": 259.5
   },
   "lucciola_350": {
     "barrier": {
-      "frontal 15 km/h": "PASS: crush 0.01 m, cabin 0.00 m, health 0.96",
-      "frontal 25 km/h": "PASS: crush 0.21 m, cabin 0.00 m, health 0.82",
-      "frontal 40 km/h": "PASS: crush 0.79 m, cabin 0.00 m, health 0.53; failed Radiator, Battery",
-      "frontal 56 km/h": "PASS: crush 1.22 m, cabin 0.01 m, health 0.19, TotalLoss; failed Radiator, Battery, SteeringRack, SuspensionFL\u2026",
-      "frontal 80 km/h": "PASS: crush 1.86 m, cabin 0.29 m, health 0.18, TotalLoss; failed Radiator, Battery, SteeringRack, SuspensionFL\u2026",
-      "offset 40% 56 km/h": "PASS: crush 1.52 m, cabin 0.31 m, health 0.18, TotalLoss; failed Radiator, Battery, SteeringRack, SuspensionFL\u2026",
-      "rear 40 km/h": "PASS: crush 0.62 m, cabin 0.00 m, health 0.47; failed Gearbox",
-      "side (T-bone) 40 km/h": "PASS: crush 0.17 m, cabin 0.17 m, health 0.84; failed SuspensionFL"
+      "frontal 15 km/h": "PASS: crush 0.01 m, cabin 0.00 m, health 0.95",
+      "frontal 25 km/h": "PASS: crush 0.21 m, cabin 0.00 m, health 0.81; failed Radiator",
+      "frontal 40 km/h": "PASS: crush 0.85 m, cabin 0.01 m, health 0.48; failed Radiator, Battery, SteeringRack, SuspensionFL",
+      "frontal 56 km/h": "PASS: crush 1.26 m, cabin 0.10 m, health 0.19, TotalLoss; failed Radiator, Battery, SteeringRack, SuspensionFL\u2026",
+      "frontal 80 km/h": "PASS: crush 1.70 m, cabin 0.34 m, health 0.18, TotalLoss; failed Radiator, Battery, SteeringRack, SuspensionFL\u2026",
+      "offset 40% 56 km/h": "PASS: crush 1.69 m, cabin 0.36 m, health 0.17, TotalLoss; failed Radiator, Battery, SteeringRack, SuspensionFL\u2026",
+      "rear 40 km/h": "PASS: crush 0.65 m, cabin 0.01 m, health 0.47; failed Engine, Gearbox, Exhaust",
+      "side (T-bone) 40 km/h": "PASS: crush 0.21 m, cabin 0.21 m, health 0.70; failed FuelTank, SuspensionFL, WheelFL, BrakeFL"
     },
     "brake_100_0_m": 36.154385,
     "skidpad_g": 0.95554954,
     "t0100_s": 4.566667,
     "understeer_deg_per_g": 0.26071993,
-    "vmax_kmh": 290.5178
+    "vmax_converged": true,
+    "vmax_kmh": 290.5
   },
   "rampart_50": {
     "barrier": {
-      "frontal 15 km/h": "PASS: crush 0.06 m, cabin 0.00 m, health 0.95",
-      "frontal 25 km/h": "PASS: crush 0.18 m, cabin 0.00 m, health 0.84",
-      "frontal 40 km/h": "PASS: crush 0.36 m, cabin 0.03 m, health 0.56",
-      "frontal 56 km/h": "PASS: crush 0.70 m, cabin 0.10 m, health 0.13, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
-      "frontal 80 km/h": "PASS: crush 1.56 m, cabin 0.12 m, health 0.11, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
-      "offset 40% 56 km/h": "PASS: crush 1.30 m, cabin 0.04 m, health 0.12, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
-      "rear 40 km/h": "PASS: crush 0.43 m, cabin 0.14 m, health 0.55; failed Exhaust",
-      "side (T-bone) 40 km/h": "PASS: crush 0.15 m, cabin 0.15 m, health 0.85; failed SuspensionFL"
+      "frontal 15 km/h": "PASS: crush 0.05 m, cabin 0.00 m, health 0.95",
+      "frontal 25 km/h": "PASS: crush 0.18 m, cabin 0.00 m, health 0.85",
+      "frontal 40 km/h": "PASS: crush 0.37 m, cabin 0.04 m, health 0.61",
+      "frontal 56 km/h": "PASS: crush 0.66 m, cabin 0.17 m, health 0.19, TotalLoss; failed Radiator, Battery, SteeringRack, SuspensionFL\u2026",
+      "frontal 80 km/h": "PASS: crush 1.34 m, cabin 0.24 m, health 0.12, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
+      "offset 40% 56 km/h": "PASS: crush 1.07 m, cabin 0.10 m, health 0.14, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
+      "rear 40 km/h": "PASS: crush 0.44 m, cabin 0.13 m, health 0.53; failed Exhaust",
+      "side (T-bone) 40 km/h": "PASS: crush 0.20 m, cabin 0.19 m, health 0.73; failed SuspensionFL, WheelFL, BrakeFL"
     },
     "brake_100_0_m": 38.89752,
     "skidpad_g": 0.8719779,
     "t0100_s": 5.925,
     "understeer_deg_per_g": 0.47834784,
-    "vmax_kmh": 268.7883
+    "vmax_converged": false,
+    "vmax_kmh": 268.4
   },
   "sentinel_bastion": {
     "barrier": {
       "frontal 15 km/h": "PASS: crush 0.04 m, cabin 0.00 m, health 0.96",
-      "frontal 25 km/h": "PASS: crush 0.20 m, cabin 0.00 m, health 0.83",
-      "frontal 40 km/h": "PASS: crush 0.43 m, cabin 0.00 m, health 0.61",
-      "frontal 56 km/h": "PASS: crush 0.71 m, cabin 0.07 m, health 0.20, TotalLoss; failed Radiator, Battery, SteeringRack",
-      "frontal 80 km/h": "PASS: crush 1.43 m, cabin 0.30 m, health 0.11, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
-      "offset 40% 56 km/h": "PASS: crush 0.87 m, cabin 0.08 m, health 0.14, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
-      "rear 40 km/h": "FAIL: crush 0.39 m, cabin 0.22 m, health 0.59, TotalLoss (total loss from a 40 km/h rear hit)",
-      "side (T-bone) 40 km/h": "PASS: crush 0.14 m, cabin 0.14 m, health 0.86; failed SuspensionFL"
+      "frontal 25 km/h": "PASS: crush 0.24 m, cabin 0.00 m, health 0.84",
+      "frontal 40 km/h": "PASS: crush 0.45 m, cabin 0.00 m, health 0.60",
+      "frontal 56 km/h": "PASS: crush 0.61 m, cabin 0.18 m, health 0.22, TotalLoss; failed Radiator, Battery, SteeringRack",
+      "frontal 80 km/h": "PASS: crush 1.26 m, cabin 0.28 m, health 0.12, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
+      "offset 40% 56 km/h": "PASS: crush 0.94 m, cabin 0.17 m, health 0.13, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
+      "rear 40 km/h": "PASS: crush 0.40 m, cabin 0.10 m, health 0.61",
+      "side (T-bone) 40 km/h": "PASS: crush 0.19 m, cabin 0.18 m, health 0.73; failed SuspensionFL, WheelFL, BrakeFL"
     },
     "brake_100_0_m": 42.800705,
     "skidpad_g": 0.7170939,
     "t0100_s": 8.545834,
     "understeer_deg_per_g": 0.46034527,
-    "vmax_kmh": 213.05147
+    "vmax_converged": true,
+    "vmax_kmh": 213.1
   },
   "sentinel_cruiser": {
     "barrier": {
-      "frontal 15 km/h": "PASS: crush 0.07 m, cabin 0.00 m, health 0.94",
-      "frontal 25 km/h": "PASS: crush 0.20 m, cabin 0.00 m, health 0.84",
-      "frontal 40 km/h": "PASS: crush 0.37 m, cabin 0.00 m, health 0.65",
-      "frontal 56 km/h": "PASS: crush 0.67 m, cabin 0.04 m, health 0.23, TotalLoss; failed Radiator, SteeringRack",
-      "frontal 80 km/h": "PASS: crush 1.16 m, cabin 0.10 m, health 0.12, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
-      "offset 40% 56 km/h": "PASS: crush 0.85 m, cabin 0.02 m, health 0.14, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
-      "rear 40 km/h": "PASS: crush 0.50 m, cabin 0.00 m, health 0.53",
-      "side (T-bone) 40 km/h": "PASS: crush 0.14 m, cabin 0.14 m, health 0.86; failed SuspensionFL"
+      "frontal 15 km/h": "PASS: crush 0.04 m, cabin 0.00 m, health 0.96",
+      "frontal 25 km/h": "PASS: crush 0.20 m, cabin 0.00 m, health 0.87",
+      "frontal 40 km/h": "PASS: crush 0.35 m, cabin 0.00 m, health 0.72",
+      "frontal 56 km/h": "PASS: crush 0.53 m, cabin 0.07 m, health 0.37",
+      "frontal 80 km/h": "PASS: crush 1.12 m, cabin 0.27 m, health 0.13, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
+      "offset 40% 56 km/h": "PASS: crush 0.81 m, cabin 0.30 m, health 0.21, TotalLoss; failed Radiator, Battery, SteeringRack, Gearbox\u2026",
+      "rear 40 km/h": "PASS: crush 0.45 m, cabin 0.00 m, health 0.60",
+      "side (T-bone) 40 km/h": "PASS: crush 0.16 m, cabin 0.16 m, health 0.78; failed SuspensionFL, BrakeFL"
     },
-    "brake_100_0_m": 39.787605,
-    "skidpad_g": 0.8286096,
-    "t0100_s": 8.3625,
-    "understeer_deg_per_g": 0.42441988,
-    "vmax_kmh": 247.23956
+    "brake_100_0_m": 40.06742,
+    "skidpad_g": 0.8504631,
+    "t0100_s": 6.9208336,
+    "understeer_deg_per_g": 0.44166347,
+    "vmax_converged": false,
+    "vmax_kmh": 259.9
   },
   "sentinel_wolfhound": {
     "barrier": {
-      "frontal 15 km/h": "PASS: crush 0.04 m, cabin 0.00 m, health 0.96",
-      "frontal 25 km/h": "PASS: crush 0.20 m, cabin 0.00 m, health 0.84",
-      "frontal 40 km/h": "PASS: crush 0.42 m, cabin 0.02 m, health 0.60",
-      "frontal 56 km/h": "PASS: crush 0.63 m, cabin 0.04 m, health 0.22, TotalLoss; failed Radiator, SteeringRack",
-      "frontal 80 km/h": "PASS: crush 1.19 m, cabin 0.11 m, health 0.12, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
-      "offset 40% 56 km/h": "PASS: crush 0.85 m, cabin 0.03 m, health 0.14, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
-      "rear 40 km/h": "PASS: crush 0.49 m, cabin 0.00 m, health 0.60; failed Exhaust",
-      "side (T-bone) 40 km/h": "PASS: crush 0.14 m, cabin 0.14 m, health 0.86; failed SuspensionFL"
+      "frontal 15 km/h": "PASS: crush 0.05 m, cabin 0.00 m, health 0.95",
+      "frontal 25 km/h": "PASS: crush 0.23 m, cabin 0.00 m, health 0.85",
+      "frontal 40 km/h": "PASS: crush 0.42 m, cabin 0.02 m, health 0.62",
+      "frontal 56 km/h": "PASS: crush 0.60 m, cabin 0.17 m, health 0.25, TotalLoss; failed Radiator",
+      "frontal 80 km/h": "PASS: crush 1.24 m, cabin 0.29 m, health 0.12, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
+      "offset 40% 56 km/h": "FAIL: crush 0.82 m, cabin 0.05 m, health 0.20, TotalLoss; failed Engine, Radiator, Battery (struck-side corner intact)",
+      "rear 40 km/h": "PASS: crush 0.49 m, cabin 0.01 m, health 0.63; failed Exhaust",
+      "side (T-bone) 40 km/h": "PASS: crush 0.18 m, cabin 0.17 m, health 0.74; failed SuspensionFL, WheelFL, BrakeFL"
     },
     "brake_100_0_m": 40.30482,
     "skidpad_g": 0.8471097,
     "t0100_s": 6.470834,
     "understeer_deg_per_g": 0.33683637,
-    "vmax_kmh": 241.93584
+    "vmax_converged": true,
+    "vmax_kmh": 241.9
   },
   "shiro_turbo": {
     "barrier": {
-      "frontal 15 km/h": "PASS: crush 0.01 m, cabin 0.00 m, health 0.96",
-      "frontal 25 km/h": "PASS: crush 0.13 m, cabin 0.00 m, health 0.84",
-      "frontal 40 km/h": "PASS: crush 0.31 m, cabin 0.01 m, health 0.56",
-      "frontal 56 km/h": "PASS: crush 0.66 m, cabin 0.10 m, health 0.14, TotalLoss; failed Radiator, Battery, SteeringRack, Driveshaft\u2026",
-      "frontal 80 km/h": "PASS: crush 1.45 m, cabin 0.32 m, health 0.11, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
-      "offset 40% 56 km/h": "PASS: crush 1.19 m, cabin 0.07 m, health 0.12, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
-      "rear 40 km/h": "PASS: crush 0.49 m, cabin 0.12 m, health 0.56",
-      "side (T-bone) 40 km/h": "PASS: crush 0.14 m, cabin 0.14 m, health 0.85; failed SuspensionFL"
+      "frontal 15 km/h": "PASS: crush 0.02 m, cabin 0.00 m, health 0.96",
+      "frontal 25 km/h": "PASS: crush 0.12 m, cabin 0.00 m, health 0.85",
+      "frontal 40 km/h": "PASS: crush 0.30 m, cabin 0.04 m, health 0.57",
+      "frontal 56 km/h": "PASS: crush 0.61 m, cabin 0.21 m, health 0.16, TotalLoss; failed Radiator, Battery, SteeringRack, Driveshaft\u2026",
+      "frontal 80 km/h": "PASS: crush 1.42 m, cabin 0.30 m, health 0.10, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
+      "offset 40% 56 km/h": "PASS: crush 1.11 m, cabin 0.21 m, health 0.13, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
+      "rear 40 km/h": "PASS: crush 0.50 m, cabin 0.12 m, health 0.55",
+      "side (T-bone) 40 km/h": "PASS: crush 0.20 m, cabin 0.19 m, health 0.74; failed SuspensionFL, WheelFL, BrakeFL"
     },
     "brake_100_0_m": 37.481808,
     "skidpad_g": 0.9544003,
     "t0100_s": 6.3,
     "understeer_deg_per_g": 0.40401378,
-    "vmax_kmh": 258.4901
+    "vmax_converged": true,
+    "vmax_kmh": 258.5
   },
   "sperber_32": {
     "barrier": {
       "frontal 15 km/h": "PASS: crush 0.03 m, cabin 0.00 m, health 0.96",
       "frontal 25 km/h": "PASS: crush 0.14 m, cabin 0.00 m, health 0.84",
-      "frontal 40 km/h": "PASS: crush 0.31 m, cabin 0.01 m, health 0.55",
-      "frontal 56 km/h": "PASS: crush 0.63 m, cabin 0.06 m, health 0.13, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
-      "frontal 80 km/h": "PASS: crush 1.36 m, cabin 0.34 m, health 0.11, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
-      "offset 40% 56 km/h": "PASS: crush 1.09 m, cabin 0.08 m, health 0.12, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
-      "rear 40 km/h": "PASS: crush 0.53 m, cabin 0.00 m, health 0.56",
-      "side (T-bone) 40 km/h": "PASS: crush 0.15 m, cabin 0.15 m, health 0.85; failed SuspensionFL"
+      "frontal 40 km/h": "PASS: crush 0.29 m, cabin 0.06 m, health 0.57",
+      "frontal 56 km/h": "PASS: crush 0.76 m, cabin 0.23 m, health 0.12, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
+      "frontal 80 km/h": "PASS: crush 1.34 m, cabin 0.29 m, health 0.09, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
+      "offset 40% 56 km/h": "PASS: crush 0.97 m, cabin 0.25 m, health 0.11, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
+      "rear 40 km/h": "PASS: crush 0.69 m, cabin 0.00 m, health 0.56; failed Exhaust",
+      "side (T-bone) 40 km/h": "PASS: crush 0.21 m, cabin 0.21 m, health 0.73; failed SuspensionFL, WheelFL, BrakeFL"
     },
     "brake_100_0_m": 37.495625,
     "skidpad_g": 0.9141765,
     "t0100_s": 6.0625005,
     "understeer_deg_per_g": 0.356383,
-    "vmax_kmh": 272.84988
+    "vmax_converged": false,
+    "vmax_kmh": 272.4
+  },
+  "tansy_13": {
+    "barrier": {
+      "frontal 15 km/h": "PASS: crush 0.02 m, cabin 0.00 m, health 0.96",
+      "frontal 25 km/h": "PASS: crush 0.16 m, cabin 0.00 m, health 0.84",
+      "frontal 40 km/h": "PASS: crush 0.41 m, cabin 0.04 m, health 0.48; failed Radiator, Battery, SteeringRack, Gearbox",
+      "frontal 56 km/h": "PASS: crush 0.89 m, cabin 0.23 m, health 0.10, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
+      "frontal 80 km/h": "PASS: crush 1.54 m, cabin 0.28 m, health 0.09, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
+      "offset 40% 56 km/h": "PASS: crush 1.20 m, cabin 0.39 m, health 0.09, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
+      "rear 40 km/h": "PASS: crush 0.51 m, cabin 0.00 m, health 0.57",
+      "side (T-bone) 40 km/h": "PASS: crush 0.20 m, cabin 0.20 m, health 0.73; failed SuspensionFL, WheelFL, BrakeFL"
+    },
+    "brake_100_0_m": 39.91985,
+    "skidpad_g": 0.78757113,
+    "t0100_s": 13.225,
+    "understeer_deg_per_g": 0.5211851,
+    "vmax_converged": true,
+    "vmax_kmh": 167.8
   },
   "vireo_xs": {
     "barrier": {
-      "frontal 15 km/h": "PASS: crush 0.01 m, cabin 0.00 m, health 0.96",
-      "frontal 25 km/h": "PASS: crush 0.13 m, cabin 0.00 m, health 0.84",
-      "frontal 40 km/h": "PASS: crush 0.35 m, cabin 0.01 m, health 0.51; failed Radiator, SteeringRack",
-      "frontal 56 km/h": "PASS: crush 0.74 m, cabin 0.05 m, health 0.10, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
-      "frontal 80 km/h": "PASS: crush 1.35 m, cabin 0.24 m, health 0.09, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
-      "offset 40% 56 km/h": "PASS: crush 1.08 m, cabin 0.26 m, health 0.10, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
-      "rear 40 km/h": "FAIL: crush 0.48 m, cabin 0.32 m, health 0.57, TotalLoss (total loss from a 40 km/h rear hit)",
-      "side (T-bone) 40 km/h": "PASS: crush 0.14 m, cabin 0.14 m, health 0.85; failed SuspensionFL"
+      "frontal 15 km/h": "PASS: crush 0.02 m, cabin 0.00 m, health 0.96",
+      "frontal 25 km/h": "PASS: crush 0.12 m, cabin 0.00 m, health 0.84",
+      "frontal 40 km/h": "PASS: crush 0.33 m, cabin 0.07 m, health 0.55",
+      "frontal 56 km/h": "PASS: crush 0.79 m, cabin 0.16 m, health 0.10, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
+      "frontal 80 km/h": "PASS: crush 1.50 m, cabin 0.28 m, health 0.09, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
+      "offset 40% 56 km/h": "PASS: crush 1.28 m, cabin 0.39 m, health 0.09, TotalLoss; failed Engine, Radiator, Battery, SteeringRack\u2026",
+      "rear 40 km/h": "PASS: crush 0.49 m, cabin 0.00 m, health 0.59",
+      "side (T-bone) 40 km/h": "PASS: crush 0.20 m, cabin 0.20 m, health 0.73; failed SuspensionFL, WheelFL, BrakeFL"
     },
     "brake_100_0_m": 39.742264,
     "skidpad_g": 0.8639302,
     "t0100_s": 9.195834,
     "understeer_deg_per_g": 0.36621475,
-    "vmax_kmh": 206.50783
+    "vmax_converged": true,
+    "vmax_kmh": 206.5
   }
 }

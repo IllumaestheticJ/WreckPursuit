@@ -70,9 +70,16 @@ inputs, not the outputs. Overview table: `ROSTER.md`; validation: `VALIDATION.md
 | `lindwurm_4t` | Lindwurm 4T | Sport | 2010s AWD 2.0 T hot hatch, dual-clutch |
 | `lucciola_350` | Lucciola 350 | Exotic | 90s mid-engine 3.5 V8 |
 | `hauler_1500` | Hauler 1500 | Truck | 2010s half-ton 5.3 V8 pickup, ladder frame |
-| `sentinel_cruiser` | Sentinel Cruiser | PoliceCruiser | RWD 3.7 V6 police sedan, push bar |
+| `sentinel_cruiser` | Sentinel Cruiser | PoliceCruiser | RWD 5.7 V8 police sedan (pursuit package), push bar |
 | `sentinel_wolfhound` | Sentinel Wolfhound | PoliceInterceptor | AWD 3.5 TT V6 pursuit sedan, push bar |
 | `sentinel_bastion` | Sentinel Bastion | PoliceSuv | RWD 5.3 V8 police SUV, ladder frame, push bar |
 | `junkyard_beater` | Junkyard Beater | Beater | late-80s FF 1.6 SOHC sedan, worn — economy floor (3 000) |
+| `tansy_13` | Tansy 1.3 | Compact | 2000s FF 1.3 supermini hatch — traffic / parked |
+| `drayman_cargo` | Drayman Cargo | Truck | 2000s RWD 4.8 V8 full-size cargo van, body-on-frame — traffic / parked |
+| `furrow_24` | Furrow 2.4 | Truck | 90s RWD 2.4 I4 compact pickup, body-on-frame — traffic / parked |
+
+The last three are civilian traffic cars (round 6b): cheap, slow, validated like the rest.
+There is no `Van`/`Civilian` class yet, so the van and pickup use `Truck` (requested in
+`docs/integration/cars.md`).
 
 Naming check: `python3 tools/specsheet/nameplate_check.py` (exit 1 on any hit).

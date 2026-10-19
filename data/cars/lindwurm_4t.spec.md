@@ -150,4 +150,5 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 - Era `2010s`: gen-lattice's default HSS passenger cell kept as is.
 - Steel hood: 105 hood beams aluminum → mild_steel.
 - Detachables: steel bumpers ×2.3 break impulse / ×4 mass; steel hood ×1.4 / ×1.6.
+- Luggage bay: 13 Cabin nodes behind the rear seatback (y < -1.21 m, rear axle +0.10 m) relabelled FrameRear — the passenger cell ends at the seatback, as on a real two-box body.
 - Transverse engine: gearbox mounted on the left end of the engine block (gen-lattice places it in the tunnel at the firewall, as for FR).

@@ -13,7 +13,7 @@ ISO metric code `width/aspect R rim` (a size, not a brand).
 Per-car keys
 ------------
 id, display_name, cls, analog_of, era ('70s' | '80s' | '90s' | '2000s' | '2010s'), profile
-('hatch' | 'sedan' | 'coupe' | 'mr' | 'truck' | 'suv'), curb_kg, front_frac, wheelbase,
+('hatch' | 'sedan' | 'coupe' | 'mr' | 'truck' | 'suv' | 'van'), curb_kg, front_frac, wheelbase,
 track_f, track_r, body (w, l, h), fuel_l (tank, L), clearance, front_overhang (front axle → bumper face, m), cg (m), cg_why, inertia_k (roll, pitch, yaw
 scale on the box formula), cd, area_k (frontal area = area_k·w·h), extra_cda (lightbar etc.),
 lift (front, rear Cl·A), engine{...}, trans{...}, tires{...}, susp{...}, align{...},
@@ -674,12 +674,12 @@ CARS = [
         id="sentinel_cruiser",
         display_name="Sentinel Cruiser",
         cls="PoliceCruiser",
-        analog_of="2010s American full-size RWD police sedan, 3.7 L V6, pursuit package",
+        analog_of="2010s American full-size RWD police sedan, 5.7 L pushrod V8, pursuit package",
         era="2010s",
         profile="sedan",
-        curb_kg=1900.0,
+        curb_kg=2000.0,
         fuel_l=72,
-        front_frac=0.53,
+        front_frac=0.55,
         wheelbase=3.05,
         track_f=1.60,
         track_r=1.62,
@@ -694,24 +694,27 @@ CARS = [
         extra_cda=0.05,
         lift=(0.10, 0.12),
         engine=dict(
-            desc="3.7 L DOHC V6, naturally aspirated, pursuit calibration",
-            curve=[(800, 240), (1200, 265), (1600, 285), (2000, 300), (2500, 315), (3000, 328),
-                   (3500, 340), (4000, 350), (4800, 360), (5500, 352), (6000, 340), (6350, 331),
-                   (6600, 310)],
-            idle=650, redline=6400, limit=6600, inertia=0.17, brake_frac=0.10,
-            why="Class-typical 2010s 3.6-3.7 L police V6 (~59 kW/L) per fleet spec-class data.",
+            desc="5.7 L OHV 16-valve V8, naturally aspirated, pursuit calibration (no cylinder deactivation)",
+            curve=[(800, 400), (1200, 440), (1600, 470), (2000, 490), (2500, 505), (3000, 515),
+                   (3500, 525), (4000, 533), (4400, 535), (4800, 528), (5200, 505), (5600, 470),
+                   (5900, 440)],
+            idle=600, redline=5800, limit=5900, inertia=0.24, brake_frac=0.10,
+            why=("Class-typical 2010s 5.7 L pushrod police V8 (~48 kW/L, 276 kW at 5200 rpm, "
+                 "~535 N·m at 4400) per fleet spec-class data and owner dynos. Pursuit tuning "
+                 "(round 6b): the V6 cruiser could not catch the traffic sedan to the 144 km/h "
+                 "pursuit cap; the V8 package is the period-correct fix."),
         ),
         trans=dict(
-            desc="5-speed automatic with torque converter, mild rear LSD (pursuit package)",
+            desc="5-speed automatic with torque converter, mild rear LSD (pursuit package, V8 final drive)",
             layout="Rwd",
             gears=[3.59, 2.19, 1.41, 1.00, 0.83], final=3.07, reverse=3.16, shift=0.30,
-            torque_converter=dict(stall_rpm=2400, ratio=2.0, coupling_rpm=2800),
+            torque_converter=dict(stall_rpm=2300, ratio=2.0, coupling_rpm=2700),
             diff_f="Open", diff_r=dict(preload=40.0, power=0.30, coast=0.15), clutch_factor=1.6,
         ),
         tires=dict(front="225/60R18", rear="225/60R18", compound="police_pursuit", unsprung=(26.0, 28.0)),
-        susp=dict(hz=(1.35, 1.45), zeta=0.30, travel=(0.17, 0.18), roll_grad_deg_g=3.5,
-                  roll_front_share=0.62, bump_stop=170000.0, preload=0.02),
-        align=dict(camber_deg=(-0.5, -0.8), toe_deg=(0.0, 0.15), caster_deg=6.0),
+        susp=dict(hz=(1.45, 1.55), zeta=0.32, travel=(0.17, 0.18), roll_grad_deg_g=3.2,
+                  roll_front_share=0.57, bump_stop=190000.0, preload=0.02),
+        align=dict(camber_deg=(-1.0, -0.8), toe_deg=(0.0, 0.15), caster_deg=6.0),
         brakes=dict(
             front=dict(kind="disc", d_mm=350, pistons_mm=[54, 54], pad_mu=0.42),
             rear=dict(kind="disc", d_mm=345, pistons_mm=[44], pad_mu=0.40),
@@ -719,20 +722,27 @@ CARS = [
         ),
         steer=dict(ratio=16.5, turn_circle_m=11.9, ackermann=0.6, rack_speed=1.3),
         price=30000,
-        durability=4,
-        note=("The everyday patrol car: rear-drive, heavy and planted, with pursuit-rated tires and "
-              "big brakes but only a V6. It cannot out-run a sports car on a straight, so its "
-              "job is boxing in, PIT manoeuvres and holding the perimeter. The push bar makes "
-              "the nose a weapon."),
+        durability=5,
+        note=("The everyday patrol car: rear-drive, heavy and planted, with pursuit-rated tires, "
+              "big brakes and the V8 pursuit package. It gets to pursuit speed before anything "
+              "ordinary (traffic, beaters, hatches, trucks, old muscle, FF sport sedans) but "
+              "not before a modern sports car or exotic — those are the interceptor's job. "
+              "Boxing in, PIT manoeuvres and the push bar do the rest."),
         breaks=("Modern full-size unibody with UHSS cabin, plus a reinforced push bar bolted "
                 "through to the front rails: nose-to-tail shunts at pursuit speed mostly bend the "
                 "bar and the bumper cover before the radiator. Hard enough hits rip the bar off, "
                 "after which the front is as soft as any sedan's. Long rear overhang crumples in "
                 "rear-enders."),
         sources=["fleet spec-class data for 2010s full-size RWD police sedans",
-                 "owner/fleet dyno averages for 3.6-3.7 L V6s",
+                 "owner/fleet dyno averages for 5.7 L pushrod V8s",
                  "engineering tables (tire radius, ride frequency, caliper hydraulics)"],
-        lattice=dict(mass_frac=0.22, bumper="plastic", hood="steel", pushbar=True),
+        lattice=dict(mass_frac=0.25, bumper="plastic", hood="steel", pushbar=True,
+                     police_package=dict(
+                         pushbar_kg=40.0, pushbar_impulse_ns=30000.0, pushbar_section_scale=1.5,
+                         bumper_impulse_scale=2.0,
+                         hd_components=dict(Radiator=1.5, SteeringRack=1.5, SuspensionFL=1.5,
+                                            SuspensionFR=1.5, WheelFL=1.4, WheelFR=1.4,
+                                            BrakeFL=1.3, BrakeFR=1.3, Engine=1.2, Battery=1.3))),
     ),
     # ------------------------------------------------------------------ 12
     dict(
@@ -923,5 +933,193 @@ CARS = [
                  "owner dyno sheets for high-mileage 1.6 SOHC engines",
                  "engineering tables (tire radius, ride frequency, disc/drum brake hydraulics)"],
         lattice=dict(mass_frac=0.22, bumper="plastic", hood="steel", pushbar=False),
+    ),
+    # ------------------------------------------------------------------ 15 (traffic)
+    dict(
+        id="tansy_13",
+        display_name="Tansy 1.3",
+        cls="Compact",
+        analog_of="2000s European/Japanese FF supermini hatch, 1.3 L DOHC I4, five-door",
+        era="2000s",
+        profile="hatch",
+        curb_kg=1000.0,
+        fuel_l=45,
+        front_frac=0.62,
+        wheelbase=2.46,
+        track_f=1.44,
+        track_r=1.43,
+        body=(1.67, 3.85, 1.50),
+        clearance=0.14,
+        front_overhang=0.75,
+        cg=0.52,
+        cg_why="tall-roofed supermini (1.50 m) with a short wheelbase; top of the 0.45-0.52 m car band",
+        inertia_k=(0.80, 0.90, 0.92),
+        cd=0.33,
+        area_k=0.84,
+        extra_cda=0.0,
+        lift=(0.10, 0.12),
+        engine=dict(
+            desc="1.3 L DOHC 16-valve I4, port injection",
+            curve=[(800, 80), (1200, 92), (1600, 100), (2000, 106), (2500, 112), (3000, 116),
+                   (3500, 119), (4000, 121), (4500, 120), (5000, 117), (5500, 112), (6000, 105),
+                   (6400, 95)],
+            idle=750, redline=6200, limit=6500, inertia=0.10, brake_frac=0.12,
+            why="Class-typical 2000s 1.3 L supermini engine (~50 kW/L, 66 kW at 6000 rpm, ~121 N·m at 4000) per manufacturer spec-class data.",
+        ),
+        trans=dict(
+            desc="5-speed manual, open front differential",
+            layout="Fwd",
+            gears=[3.55, 1.90, 1.28, 0.97, 0.78], final=4.06, reverse=3.31, shift=0.30,
+            diff_f="Open", diff_r="Open", clutch_factor=1.35,
+        ),
+        tires=dict(front="175/65R14", rear="175/65R14", compound="street", unsprung=(15.0, 14.0)),
+        susp=dict(hz=(1.35, 1.50), zeta=0.27, travel=(0.15, 0.16), roll_grad_deg_g=5.5,
+                  roll_front_share=0.62, bump_stop=120000.0, preload=0.01),
+        align=dict(camber_deg=(-0.5, -1.0), toe_deg=(0.0, 0.15), caster_deg=3.0),
+        brakes=dict(
+            front=dict(kind="disc", d_mm=256, pistons_mm=[54], pad_mu=0.38),
+            rear=dict(kind="drum", d_mm=203, wheel_cyl_mm=17.5, brake_factor=1.8),
+            bar=P_MODERN, handbrake_frac=1.0,
+        ),
+        steer=dict(ratio=16.0, turn_circle_m=10.0, ackermann=0.7, rack_speed=1.1),
+        price=4500,
+        durability=2,
+        note=("The city's most common car: a five-door supermini that fills traffic queues and "
+              "parking bays. Light, upright and lazy above 100 km/h, it leans hard, understeers "
+              "safely and is easy to shove aside — a moving obstacle more than a rival."),
+        breaks=("A modern small-car shell: short crumple zones and a decent HSS cell for its "
+                "size, but there is little car in front of the cabin, so frontals reach the "
+                "firewall early and a heavier car's nose goes deep into the doors. Plastic "
+                "bumpers and thin panels crumple at parking-lot speeds."),
+        sources=["manufacturer spec-class data for 2000s 1.3 L FF superminis",
+                 "road-test figures for the class (0-100, braking, skidpad)",
+                 "engineering tables (tire radius, ride frequency, disc/drum brake hydraulics)"],
+        lattice=dict(mass_frac=0.22, bumper="plastic", hood="steel", pushbar=False),
+    ),
+    # ------------------------------------------------------------------ 16 (traffic)
+    dict(
+        id="drayman_cargo",
+        display_name="Drayman Cargo",
+        cls="Truck",
+        analog_of="2000s American full-size RWD cargo van, 4.8 L OHV V8, body-on-frame, solid rear axle",
+        era="2000s",
+        profile="van",
+        curb_kg=2450.0,
+        fuel_l=117,
+        front_frac=0.56,
+        wheelbase=3.43,
+        track_f=1.73,
+        track_r=1.72,
+        body=(2.01, 5.69, 2.08),
+        clearance=0.20,
+        front_overhang=0.90,
+        cg=0.78,
+        cg_why="empty full-size van: tall body-on-frame box (2.08 m) with the mass low on the frame; just above the 0.65-0.75 m truck/SUV band",
+        inertia_k=(0.85, 0.95, 0.97),
+        cd=0.38,
+        area_k=0.84,
+        extra_cda=0.0,
+        lift=(0.15, 0.12),
+        engine=dict(
+            desc="4.8 L OHV 16-valve V8, naturally aspirated, truck calibration",
+            curve=[(800, 300), (1200, 330), (1600, 350), (2000, 365), (2500, 378), (3000, 388),
+                   (3500, 395), (4000, 399), (4400, 400), (4800, 393), (5200, 380), (5600, 350),
+                   (5900, 320)],
+            idle=600, redline=5600, limit=5900, inertia=0.24, brake_frac=0.12,
+            why="Class-typical 2000s 4.8 L van/truck V8 (~43 kW/L, ~207 kW at 5200 rpm, ~400 N·m at 4400) per manufacturer spec-class data.",
+        ),
+        trans=dict(
+            desc="4-speed automatic with lock-up torque converter, open rear differential",
+            layout="Rwd",
+            gears=[3.06, 1.63, 1.00, 0.70], final=3.42, reverse=2.29, shift=0.35,
+            torque_converter=dict(stall_rpm=2000, ratio=2.0, coupling_rpm=2400),
+            diff_f="Open", diff_r="Open", clutch_factor=1.6,
+        ),
+        tires=dict(front="245/75R16", rear="245/75R16", compound="street", unsprung=(40.0, 60.0)),
+        susp=dict(hz=(1.25, 1.55), zeta=0.27, travel=(0.20, 0.22), roll_grad_deg_g=5.5,
+                  roll_front_share=0.70, bump_stop=300000.0, preload=0.03),
+        align=dict(camber_deg=(0.0, 0.0), toe_deg=(0.1, 0.0), caster_deg=4.0),
+        brakes=dict(
+            front=dict(kind="disc", d_mm=325, pistons_mm=[57, 57], pad_mu=0.40),
+            rear=dict(kind="disc", d_mm=330, pistons_mm=[54], pad_mu=0.40),
+            bar=P_MODERN, handbrake_frac=0.6,
+        ),
+        steer=dict(ratio=18.0, turn_circle_m=13.4, ackermann=0.7, rack_speed=1.2),
+        price=9000,
+        durability=4,
+        note=("The delivery van that is always double-parked. Heavy, tall and soft, it leans "
+              "like a boat, brakes long and gets out of breath above 150 km/h — but at "
+              "city speeds it is a two-and-a-half-tonne wall that wins most shoves."),
+        breaks=("Body-on-frame: full-length frame rails take frontal and rear hits, so bumpers "
+                "and the short nose crumple while the frame stays straight. The cargo box "
+                "behind the seat partition is thin sheet on light hoops — side and rear hits "
+                "dent it deeply without touching the cab. The high, flat side is an easy target "
+                "and the high CG tips it in hard swerves."),
+        sources=["manufacturer spec-class data for 2000s full-size cargo vans",
+                 "owner dyno averages for 4.8 L truck V8s",
+                 "engineering tables (truck tire radius, leaf/coil ride frequency, caliper hydraulics)"],
+        lattice=dict(mass_frac=0.22, bumper="steel", hood="steel", pushbar=False, ladder_frame=True,
+                     cargo_box=True),
+    ),
+    # ------------------------------------------------------------------ 17 (traffic)
+    dict(
+        id="furrow_24",
+        display_name="Furrow 2.4",
+        cls="Truck",
+        analog_of="90s compact RWD pickup, 2.4 L SOHC I4, regular cab, body-on-frame, leaf-sprung live axle",
+        era="90s",
+        profile="truck",
+        curb_kg=1320.0,
+        fuel_l=60,
+        front_frac=0.58,
+        wheelbase=2.85,
+        track_f=1.43,
+        track_r=1.41,
+        body=(1.69, 4.75, 1.60),
+        clearance=0.20,
+        front_overhang=0.80,
+        cg=0.65,
+        cg_why="small body-on-frame pickup with an empty bed; bottom of the 0.65-0.75 m truck band (lower and lighter than a full-size)",
+        inertia_k=(0.85, 0.95, 0.97),
+        cd=0.45,
+        area_k=0.84,
+        extra_cda=0.0,
+        lift=(0.15, 0.15),
+        engine=dict(
+            desc="2.4 L SOHC 8-valve I4, multi-point injection, truck calibration",
+            curve=[(800, 150), (1200, 170), (1600, 185), (2000, 196), (2500, 205), (3000, 212),
+                   (3500, 216), (4000, 218), (4500, 213), (5000, 203), (5400, 190), (5800, 170)],
+            idle=700, redline=5500, limit=5800, inertia=0.15, brake_frac=0.12,
+            why="Class-typical 90s 2.4 L compact-truck four (~44 kW/L, ~106 kW at 5000 rpm, ~218 N·m at 4000) per manufacturer spec-class data.",
+        ),
+        trans=dict(
+            desc="5-speed manual, open rear differential on a leaf-sprung live axle",
+            layout="Rwd",
+            gears=[3.83, 2.22, 1.40, 1.00, 0.86], final=4.10, reverse=3.83, shift=0.35,
+            diff_f="Open", diff_r="Open", clutch_factor=1.35,
+        ),
+        tires=dict(front="215/70R14", rear="215/70R14", compound="street", unsprung=(30.0, 50.0)),
+        susp=dict(hz=(1.30, 1.60), zeta=0.25, travel=(0.18, 0.20), roll_grad_deg_g=5.5,
+                  roll_front_share=0.72, bump_stop=200000.0, preload=0.02),
+        align=dict(camber_deg=(0.0, 0.0), toe_deg=(0.1, 0.0), caster_deg=3.0),
+        brakes=dict(
+            front=dict(kind="disc", d_mm=274, pistons_mm=[60], pad_mu=0.38),
+            rear=dict(kind="drum", d_mm=254, wheel_cyl_mm=22.0, brake_factor=1.8),
+            bar=P_MODERN, handbrake_frac=1.0,
+        ),
+        steer=dict(ratio=18.5, turn_circle_m=11.4, ackermann=0.7, rack_speed=1.0),
+        price=6500,
+        durability=4,
+        note=("The tradesman's truck: a small, light pickup with a light rear end that steps "
+              "out in the wet and a gearbox that likes to be rowed. Slow, but honest, cheap "
+              "and hard to kill — every other driveway in the suburbs has one."),
+        breaks=("Separate ladder frame and steel bumpers shrug off low-speed knocks, and the "
+                "bed is just bent sheet. The 90s regular cab is the weak point: thin pillars "
+                "and no real crumple zone ahead of a short nose, so hard frontals and anything "
+                "above frame height go into the cab."),
+        sources=["manufacturer spec-class data for 90s compact pickups",
+                 "road-test figures for the class (0-100, braking, skidpad)",
+                 "engineering tables (truck tire radius, leaf-spring ride frequency, disc/drum brake hydraulics)"],
+        lattice=dict(mass_frac=0.22, bumper="steel", hood="steel", pushbar=False, ladder_frame=True),
     ),
 ]

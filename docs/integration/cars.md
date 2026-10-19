@@ -5,6 +5,127 @@
 - **Crates / folders owned:** `data/cars/` (roster files), `data/lattices/` (roster car files, not the generator), `tools/specsheet/`
 - **Contract version built against:** 0.2.0
 
+## Response to lead feedback round 6b (2026-10-19)
+
+| Item | Done |
+|---|---|
+| 1 Cruiser pursuit tuning | **V8 pursuit package**: `sentinel_cruiser` is now a 5.7 L pushrod V8 (276 kW, 535 N·m, 2008 kg incl. driver/half tank). Sim: 0-100 **8.4 → 6.8 s**, 0-144 km/h (the day pursuit cap) **16.2 → 12.5 s**, 80-144 **10.1 → 7.2 s**, Vmax 260, 100-0 40.0 m, skidpad 0.83 g. It now reaches the cap before every Beater/Compact/Truck/70s-muscle car and the FF sport sedan, and close behind the sport cars (table below). Durability: superseded by the police package (section "Lead follow-up: cop cars too fragile"). |
+| 2 Traffic variety | 3 civilian cars, full pipeline (VehicleDef + spec sheet + lattice + audio def, validated, smoke-simmed): **`tansy_13`** Tansy 1.3 — 2000s FF 1.3 supermini hatch (Compact, 4 500); **`drayman_cargo`** Drayman Cargo — 2000s RWD 4.8 V8 full-size cargo van, body-on-frame (Truck, 9 000); **`furrow_24`** Furrow 2.4 — 90s RWD 2.4 I4 compact pickup, body-on-frame (Truck, 6 500). Sim: 13.2 / 11.6 / 10.8 s 0-100, 0.79 / 0.66 / 0.73 g, 39.9 / 43.7 / 41.4 m, 168 / 201 / 178 km/h — all in their class bands except van and pickup stopping 0.3-0.6 m *shorter* than their bands (car-type `street` tires on light trucks). Barriers 8/8 each. Nameplate check clean. |
+| 3 `gen-lattice` pass | All 17 roster lattices regenerated on B's current generator (`ab6970d`: rail bracing, side attachments). **Folded back what I can without touching `wp_damage`**: every remaining hand adjustment is now listed with the exact `gen-lattice` option it should become (section "Proposed gen-lattice options" below, ready to implement 1:1). Two new adjustments fix generator findings in car data: the **luggage bay / cargo box** behind the seatback is no longer passenger cell (fixes the two-box rear total loss on Vireo, Lindwurm, Bastion and the new Tansy — 4 barrier misses gone), and **mid-engine front rails** get the rear-rail factor (Lucciola 56 km/h crush 1.47 → 1.26 m). Barrier sweep: **134/136** (2 near misses: police offset, below). |
+
+**Checks (round 6b, cloud container):** fmt, clippy `-D warnings`, wasm build of `wp_wasm` (the
+new tool crate is not reachable from it), `nameplate_check.py` (68 files, 0 problems),
+`smoke_sim.py` (17 cars × 2 modes deterministic), `collect_results.py`. `cargo test --workspace`
+(run with `--release`: the debug simcli scenario suite exceeded the 30-min tool limit): **all
+pass** after merging the lead branch at `f92bf16` (the two failures seen earlier,
+`pursuit_wiring::real_police_capture_settles_through_the_economy` and
+`simcli_races::city_sprint_on_real_roads`, failed on the base branch too and are fixed there).
+**8 city goldens
+re-blessed** in separate `[bless]` commits (V8 cruiser, then the police package): simcli spawns `sentinel_cruiser` as the city police
+car, so every city run with police changed; with the old data all 35 goldens match, all 8 still
+pass their expectations.
+
+### Pursuit numbers (`python3 tools/specsheet/pursuit_probe.py --chase`, full sim, Arcade)
+
+| car | 0-100 s | 0-144 s | 80-144 s | caught (+10 % margin, day cap) | caught (cap only) |
+|---|---|---|---|---|---|
+| **sentinel_cruiser** (police package) | **6.97** | **12.75** | **7.38** | — | — |
+| sentinel_wolfhound | 6.48 | 11.98 | 7.63 | no | no |
+| tansy_13 / junkyard_beater | 13.2 / 13.8 | 30.9 / 34.4 | 22.3 / 25.1 | 12.3 s / 12.5 s | 6.4 s / 6.2 s |
+| drayman_cargo / furrow_24 | 11.6 / 10.8 | 24.0 / 24.4 | 16.1 / 17.0 | 12.2 s / 12.1 s | 7.0 s / 7.1 s |
+| vireo_xs | 9.20 | 18.12 | 11.63 | 11.4 s | 8.7 s |
+| debug_sedan (traffic) | 8.13 | 15.17 | 9.32 | no | no |
+| hauler_1500 / ironside_440 | 8.98 / 8.72 | 16.65 / 15.15 | 10.10 / 8.35 | no | no |
+| kestrel_ts | 7.15 | 13.02 | 7.92 | no | no |
+| sport cars / exotic | 4.6-6.3 | 8.2-11.5 | 4.6-6.7 | no | no |
+
+Chase model: target 30 m ahead, both leave a corner at 15 m/s at full throttle, caught if the
+gap closes before the target has covered 400 m. **What stops the cruiser catching the traffic
+sedan, the Hauler, the Ironside or the Kestrel on a straight is `wp_police`'s speed limit, not
+the car**: pursuit speed is `min(target × 1.10, cap)` with a 40 m/s day cap (32 at night), and
+every car except the Beater tops out above 150 km/h, so a full-throttle target pulls away once
+the cop sits on the cap. With a 50 m/s cap and 800 m the current cruiser also catches the
+traffic sedan, Hauler and Ironside (measured with the same model); the Kestrel and every sport
+car still need the Wolfhound. Making the cruiser itself catch those would make it faster than
+the interceptor. → request to E/lead below.
+
+### Durability under repeated hits — superseded by the police package below
+
+The first round-6b numbers (damage-model `ram-probe` only) are replaced by the full-sim
+sequence in "Lead follow-up: cop cars too fragile".
+
+## Lead follow-up: "cop cars too fragile" (playtest row 12, 2026-10-19)
+
+**`sentinel_cruiser` police package** (all in `roster_inputs.py` → car JSON + lattice):
+
+| What | Change |
+|---|---|
+| Durability class | 4 → **5** (`gen-lattice --strength` 1.15 → 1.30: every structural section +13 %) |
+| Mass | curb 1960 → 2000 kg (+40 kg: heavier push bar, HD cooling/suspension), front share 0.54 → 0.55 — the extra mass sits on the nose |
+| Lattice | 25 % of vehicle mass (was 22 %): reinforced structure + push bar |
+| Push bar | 25 → 40 kg, tube and mount sections × 1.5, detach impulse 15 000 → 30 000 N·s (it bends before it comes off) |
+| Front bumper fixings | detach impulse × 2 |
+| Heavy-duty components | failure intrusion × 1.5 radiator (HD cooling), steering rack, front suspension; × 1.4 front wheel mounts; × 1.3 front brakes, battery; × 1.2 engine |
+| HD suspension | ride 1.45 / 1.55 Hz (was 1.35 / 1.45), ζ 0.32, roll gradient 3.2 °/g, front roll share 0.57, front camber −1.0° — keeps the heavier nose from pushing |
+
+Handling stays credible: 0-100 6.97 s (band 6.2-7.2), 100-0 40.1 m, skidpad 0.85 g (band
+0.85-0.92), 0-144 km/h 12.75 s (was 12.5). Barrier sweep 8/8 for the cruiser (the offset near
+miss is gone; frontal 56 km/h is no longer a Simulation total loss, which the sweep allows for
+durability ≥ 4).
+
+**Proof — full-sim ram sequence** (`python3 tools/specsheet/ram_sequence.py --cop <car>`):
+the police car is parked (handbrake) and 1400 kg strikers (`debug_sedan`) hit it one after
+another through `simcli` (Rapier contacts → damage, exactly the game's path), each on its own
+approach line, timed 8 s apart, aimed at where the car actually is after the previous hits;
+every hit is confirmed from `events.jsonl`. A striker into the parked cop's nose at v loads the
+cop like the cop ramming a stopped car at v; the corner hits are the cop's side of a PIT.
+Health 1.5 s after each hit:
+
+| # | hit (closing speed measured) | Cruiser Arcade | Cruiser Sim | civilian sedan Arcade | civilian sedan Sim |
+|---|---|---|---|---|---|
+| 1 | ram, nose, 54 km/h | 0.96 | 0.87 | 0.95 | 0.81 |
+| 2 | PIT, left front corner, 59 km/h | 0.90 | 0.68 | 0.83 | 0.42 |
+| 3 | PIT, right front corner, 64 km/h | 0.81 | 0.48 | 0.70 | 0.12 **TL** |
+| 4 | ram, nose, 69 km/h | 0.74 | 0.34 | 0.61 | **TL** |
+| 5 | PIT, left front corner, 59 km/h | 0.66 | 0.20 **TL** | 0.47 | **TL** |
+| 6 | hard hit, right side (T-bone), 84 km/h | **0.42** | TL | 0.22 | TL |
+| 7 | hard hit, rear, 84 km/h | 0.33 | TL | 0.21 | TL |
+
+- **Arcade: meets the bar.** 5 rams/PITs at 55-70 km/h and 2 hard hits at 85 km/h, never a
+  total loss. It stays in the pursuit (health above `wp_police`'s disengage 0.4) through all 5
+  rams and the first hard hit; the second hard hit retires it (0.33). Before the package (same
+  run, previous cruiser data): 0.63 after the 5 rams and **0.30 after the T-bone** — retired by
+  the first hard hit, like the civilian sedan (0.22).
+- **Simulation: clearly tougher than the civilian sedan, still realistic.** Total loss on the 5th
+  hit (after 4 rams/PITs at 55-70 km/h); before the package on the 4th (out of the chase after
+  the 3rd); the sedan is a total loss on the 3rd. One 85 km/h
+  T-bone on its own still ends either car.
+- Arcade never reaches `TotalLoss` for *any* car here: Arcade health levels off ≈ 0.2-0.3 (the
+  0.3 component share keeps it there) and the Arcade total-loss health is 0.1. So in Arcade the
+  gameplay limit is `wp_police`'s disengage health (0.4), not the damage model — see Needs.
+- Damage-model cross-check (`./target/release/ram-probe sentinel_cruiser`, 6 rams each, Arcade):
+  frontal push-bar rams 60 km/h 0.95 → 0.74, 80 km/h 0.90 → 0.51; side hits taken 80 km/h
+  0.77 / 0.55 / 0.39 (3rd retires it).
+
+## Proposed gen-lattice options (for 03 / B — what `adjust_lattice` still does by hand)
+
+Each is a self-contained step in `tools/specsheet/build_roster.py::adjust_lattice` with the
+exact node/beam selection; each car's spec sheet lists what was applied. Proposed flag → what
+it does → cars:
+
+| Proposed flag / `LatticeParams` field | Hand adjustment it replaces | Cars |
+|---|---|---|
+| `--era 70s\|80s\|90s\|2000s\|2010s` | Passenger-cell members (cabin, sills, pillars, roof rails, cabin cross-members): 70s mild steel × 1.0 (+ door beams × 0.5), 80s HSS × 0.65, 90s × 0.75, 2000s × 0.90, 2010s as generated. Needs the generator's beam roles — today matched by section area (`SEC` mirror, fragile). | all |
+| `--cabin-end seatback\|partition` (or fix in the `hatch`/`suv` profiles) | Cabin nodes behind the rear seatback (hatch: rear axle + 0.10 m, SUV: − 0.10 m) or behind the front-seat partition (van) relabelled `FrameRear`. **New this round**; without it a 40 km/h rear hit totals every two-box car. | Vireo, Lindwurm, Bastion, Tansy (seatback); Drayman (partition) |
+| profile `van` | Today `suv` + the partition above + ladder frame. | Drayman |
+| `--engine mid` | Engine block behind the cabin bulkhead on rear rails + bulkhead, rear-of-bulkhead nodes `FrameRear`, aluminium rear subframe ×1.5 section, gearbox/half-shafts at the rear axle, side fuel tanks at the sills, **front rails × `REAR_RAIL_FACTOR`** (new: no engine block in the nose). | Lucciola |
+| `--frame ladder` | Cab-floor rail nodes `FrameLeft/Right`, under-cab rail beams at rail section so the frame runs bumper to bumper. | Hauler, Bastion, Drayman, Furrow |
+| `--accessory pushbar` (B's proposal) | 4 `FrontBumper` nodes 0.10 m ahead of the bumper, HSS tubes to the bumper-beam rail nodes, detach group 8, 15 000 N·s, 25 kg; × 2 bumper beam on non-`cruiser` bodies. | Cruiser, Wolfhound, Bastion |
+| `--hood steel`, `--bumpers steel`, `--panels aluminium` | Material swaps (+ detach impulse/mass scaling for steel bumpers/hood). | many |
+| `--gearbox transverse` | FF/transverse AWD: gearbox component on the engine's left end, not in the tunnel. | FF cars, Lindwurm |
+| `--fuel-tank rear\|saddle\|sides` | 70s tank behind the rear axle, truck side-saddle tank, MR side tanks. | Ironside; Hauler, Furrow; Lucciola |
+| `--rear-axle live` | Rear suspension mounts fail 0.04 m, wheels 0.07 m. | Ironside |
+
 ## Update after lead run 4
 
 - Re-measured on A's torque converter and stateful on-demand coupling. Converter slip costs the
@@ -41,16 +162,20 @@ All 14 cars validate against the v0.2.0 schemas; `collect_results.py` re-run on 
 
 ## Exposes
 
-- 14 cars, each `data/cars/<id>.json` (VehicleDef) + `data/cars/<id>.spec.md` + `data/lattices/<id>.json`:
+- 17 cars, each `data/cars/<id>.json` (VehicleDef) + `data/cars/<id>.spec.md` + `data/lattices/<id>.json`:
   racers `vireo_xs`, `kestrel_ts`, `shiro_turbo`, `hakone_gt`, `rampart_50`, `ironside_440`,
   `sperber_32`, `lindwurm_4t`, `lucciola_350`, `hauler_1500`; police `sentinel_cruiser`
   (PoliceCruiser), `sentinel_wolfhound` (PoliceInterceptor), `sentinel_bastion` (PoliceSuv);
-  economy floor `junkyard_beater` (Beater, 3 000). All load via `wp_contracts::load_car`.
+  economy floor `junkyard_beater` (Beater, 3 000); civilian traffic `tansy_13` (hatch),
+  `drayman_cargo` (van), `furrow_24` (pickup). All load via `wp_contracts::load_car`.
 - `data/cars/ROSTER.md` — roster table; `data/cars/VALIDATION.md` — sim + estimate vs class
   targets and the barrier matrix, with every miss explained.
 - `tools/specsheet/` — `build_roster.py`, `collect_results.py` (sim metrics + barriers →
   `validation_results.json`), `specsheet.py`, `estimate.py`, `nameplate_check.py`,
-  `smoke_sim.py` (simcli format v2). See `tools/specsheet/README.md`.
+  `smoke_sim.py` (simcli format v2), `pursuit_probe.py` (police acceleration/chase),
+  `ram_sequence.py` (full-sim ram/PIT/T-bone sequence on a parked car), and the
+  `ram_probe` crate (`ram-probe`: repeated rams; `vmax-trace`: slab-safe top speed). See
+  `tools/specsheet/README.md`.
 - Police push bar: 4 extra `FrontBumper` nodes ahead of the bumper, detachable **group 8**
   (moved from 3: gen-lattice uses 0-7 for bumpers, hood, trunk and doors), 15 000 N·s, 25 kg.
   Cruiser and Wolfhound also get gen-lattice's `cruiser` profile (reinforced rails, ×2 bumper
@@ -65,7 +190,16 @@ All 14 cars validate against the v0.2.0 schemas; `collect_results.py` re-run on 
 | 02 vehicle | Re-tune `all_terrain` / `vintage_bias` together: on them the Hauler skids 0.63 g (class 0.68-0.76) and the Ironside 0.62 g (period 0.70-0.75). Chassis setup moves it < 1 % (measured), so it is the compound's peak or cornering stiffness. | Accepted as is; explained in VALIDATION.md. |
 | 02 vehicle (A) | Implement `torque_converter` (contract v0.2.0); the 5 automatics carry data for it. | 0-100 misses on Hauler / Cruiser / Ironside marked "B". |
 | 02 / lead | Lucciola skidpad 0.95 g on `sport` vs prompt-09 target ≥ 1.0 g (1.09 g on `semi_slick`, measured). Decide: stickier `sport`, semi-slicks on the Lucciola, or accept 0.95 (realistic for the archetype). | Left on `sport`. |
-| 03 damage | **Two-box rear structure**: on the hatch and SUV profiles the passenger cell runs to the tailgate, so a 40 km/h rear barrier gives 0.22-0.33 m cabin intrusion and a total loss (Vireo, Lindwurm, Bastion). Sedans/coupes are fine. | Reported only; not patched in car data. |
+| 03 damage | **Two-box rear structure**: on the hatch and SUV profiles the passenger cell runs to the tailgate, so a 40 km/h rear barrier gave 0.22-0.37 m cabin intrusion and a total loss (Vireo, Lindwurm, Bastion, Tansy). | Since round 6b: luggage bay relabelled `FrameRear` in car data (`--cabin-end` proposal above); all 4 now pass. |
+| 03 damage | `gen-lattice` options for the hand adjustments (table "Proposed gen-lattice options"), a `van` profile. | `adjust_lattice` in `build_roster.py`. |
+| 03 damage | Police offset 56 km/h near miss: on the `cruiser` profile + push bar the struck-side suspension reaches 0.084 m vs its 0.09 m failure threshold (appeared with `ab6970d`). Fine by me (total loss anyway) — flagging in case the calibration expects a failure. | Accepted; explained in VALIDATION.md. |
+| 06 police / lead | **Pursuit speed limit**: `pursuit_cap_mps` (day 40) with `target_speed_margin` 0.10 means no police car can catch a full-throttle target on a straight once the target passes 144 km/h. For "catch every street car at heat 3+", raise the cap at L3+ (≥ 50 m/s measured enough for the traffic sedan, Hauler, Ironside within 800 m) and/or margin ≥ 0.25. | Cruiser data tuned to reach the cap first (above). |
+| 06 police / 03 damage / lead | **Arcade cop retirement**: in Arcade the damage model never totals a car under repeated rams (health levels off ≈ 0.2-0.3, total-loss health 0.1), so when a cop leaves the chase is decided by `wp_police`'s `disengage_health` 0.4. With the police package that is after 5 rams + 1 hard hit. If playtests still find cops fragile, lower the Arcade disengage health (e.g. 0.3) rather than toughening the car further. B's Arcade cosmetic/mechanical split (row 10) will raise every car's Arcade health. | Car data tuned against 0.4. |
+| 03 damage | `gen-lattice --accessory pushbar` with mass / section / detach-impulse options, and per-component heavy-duty factors (`--hd radiator=1.5,…`), so the police package is generator output. | `police_package` step in `adjust_lattice`. |
+| 06 police / lead | **Unit mix by heat**: `Sim::set_police_car` takes one model. At L3+ dispatch should mix in `sentinel_wolfhound` (catches sport cars) and `sentinel_bastion` (roadblocks), e.g. a per-level car list. | All units are cruisers. |
+| 05 world / lead | **Traffic car pool**: `World::set_traffic_car` / simcli `TRAFFIC_CAR` use one car (`debug_sedan`). Use `tansy_13`, `drayman_cargo`, `furrow_24` (+ `junkyard_beater`, `debug_sedan`) as a weighted pool for moving and parked traffic, picked by the world's seeded RNG — e.g. 45 % hatch, 25 % sedan, 15 % pickup, 10 % van, 5 % beater. | Cars exist and validate; not wired. |
+| 02 vehicle | `metrics::top_speed_kmh` drives off the rig's 10 km ground slab on slow cars (still gaining speed at ~95 s) and reports the free-fall speed (the van: 295 km/h). Stop at the slab edge or teleport back. | `vmax-trace` (`ram_probe` crate) used for Vmax in `collect_results.py`. |
+| 02 vehicle | A light-truck tire compound (`lt_highway`): van and pickup stop 0.3-0.6 m shorter than their bands on car `street` tires. | Accepted; explained. |
 | 03 damage | `gen-lattice` options for what is still hand-applied (list below), `uhss` material. | `adjust_lattice` in `build_roster.py`. |
 | 03 damage | `SEC` in `build_roster.py` mirrors `lattice_gen::DEFAULT_SECTIONS` to recognise beam roles; if those sections change, the era adjustment silently stops matching. A role tag per beam (or exporting the sections) would remove the coupling. | Keep in sync by hand. |
 | 08 economy | Mods: Kestrel AWD conversion, Hauler 4WD (should land its 0-100 in band), Ironside LSD + disc-brake conversion, tire upgrades. | Not created (data/mods is 08's). |
@@ -84,7 +218,8 @@ Decisions are in "Lead feedback" below; status updated here.
 | 5 | Solid axle | deferred |
 | 6 | Roll centre height | deferred |
 | 7 | `BodyRegion::Accessory` (push bar) | deferred to v0.3.0; push bar uses `FrontBumper` + detach group 8 until then |
-| 8 | `fuel_capacity_l` | applied in v0.2.0; set on all 14 cars |
+| 8 | `fuel_capacity_l` | applied in v0.2.0; set on all 17 cars |
+| 9 | `VehicleClass::Van` (and/or a `Civilian` flag) — the cargo van and the compact pickup are traffic cars filed as `Truck`; economy/race class brackets and traffic selection should not treat them like the Hauler. | **new (round 6b)** |
 
 Non-contract data request: `data/materials/uhss.json` (03) — 2010s cabins still use gen-lattice's HSS.
 
@@ -110,6 +245,10 @@ would help:
    it in the FR tunnel), 70s fuel tank behind the rear axle, truck side-saddle tank, Ironside
    live-axle mounts (rear suspension fail 0.04 m, wheel 0.07 m).
 7. Crew cab: the Hauler is a crew-cab pickup but the truck profile is two-door (not adjusted).
+8. **Passenger-cell end** (round 6b): luggage bay behind the rear seatback (hatch, SUV) and the
+   van's cargo box behind the seat partition relabelled `FrameRear`.
+9. **Mid-engine front rails** (round 6b): × `REAR_RAIL_FACTOR` (1.6), mirroring the
+   generator's own reason for stronger rear rails.
 
 ## Changes outside my crates
 
@@ -118,17 +257,30 @@ would help:
   `data/cars`. Added a plain NA inline-four definition (same packs as the other small fours,
   gain 0.9); the audio owner may retune it.
 - `tools/specsheet/smoke_sim.py` (mine) has the lead's format-v2 update.
+- Round 6b: `data/audio/cars/{tansy_13,drayman_cargo,furrow_24}.json` (new cars need an audio
+  def, same reason as the Beater) and `data/audio/cars/sentinel_cruiser.json` switched from the
+  V6 pack to `engine_proc_v8` / 8-cylinder cross-plane (the cruiser is a V8 now). Audio owner
+  may retune.
+- Round 6b: root `Cargo.toml` — one workspace member line, `tools/specsheet/ram_probe` (a tool
+  crate like `tools/tuning-dash/probe`; not reachable from `wp_wasm`).
 
 ## Perf numbers
 
 | Measurement | Machine | Native | Browser | Budget |
 |---|---|---|---|---|
 | Lattice size per roster car | — | 244-304 nodes, 1539-1988 beams | same | prompt 03: 0.25 ms/car lattice step (03's `damage-bench` covers it) |
-| `build_roster.py` (14 cars incl. gen-lattice runs) | cloud container | 0.8 s | — | — |
-| `collect_results.py` (metrics + 14 barrier sweeps) | cloud container, release | ≈ 15 s | — | — |
+| `build_roster.py` (17 cars incl. gen-lattice runs) | cloud container | 1.0 s | — | — |
+| `collect_results.py` (metrics + Vmax + 17 barrier sweeps) | cloud container, release | ≈ 20 s | — | — |
+| `pursuit_probe.py --chase` (19 cars × 40 s through simcli) | cloud container, release | ≈ 1 s | — | — |
+| `ram-probe sentinel_cruiser` (2 modes × 4 kinds × 3 speeds × 6 rams) | cloud container, release | ≈ 2 s | — | — |
 
 ## Known gaps
 
+- Pursuit: the cruiser cannot catch a full-throttle Kestrel or any sport car on a straight;
+  with today's police speed cap it cannot catch anything above 150 km/h top speed (request above).
+- The ram sequence hits a *parked* police car (strikers do the moving); a cop ramming at speed
+  while driving is the same closing speed but not bit-identical. Wolfhound and Bastion did not
+  get the police package (only the cruiser is spawned by the sim); same inputs apply if wanted.
 - Sim misses (VALIDATION.md, all explained): small "sim conservative" overruns (Kestrel,
   Hakone, Sperber 0-100 by 0.02-0.3 s; Hakone/Sperber/Lindwurm/Rampart 100-0 by 0.5-1 m),
   Rampart 0-100 and skidpad, Lucciola skidpad (decision above), automatics' 0-100 (torque

@@ -43,17 +43,20 @@ TARGETS = {
     "lindwurm_4t": dict(t0100=(4.6, 5.4), lat=(0.90, 1.00), brake=(33, 37), why="2010s AWD 2.0 T hot hatch road tests (dual-clutch)"),
     "lucciola_350": dict(t0100=(4.3, 5.0), lat=(1.00, 1.10), brake=(32, 37), why="prompt 09 target (skidpad >= 1.0 g); 90s 3.5 V8 MR road tests"),
     "hauler_1500": dict(t0100=(7.0, 8.0), lat=(0.68, 0.76), brake=(42, 50), why="prompt 09 target (~7.5 s); 2010s half-ton 5.3 V8 pickup tests"),
-    "sentinel_cruiser": dict(t0100=(7.0, 8.5), lat=(0.85, 0.92), brake=(38, 43), why="fleet evaluation figures for RWD V6 police sedans"),
+    "sentinel_cruiser": dict(t0100=(6.2, 7.2), lat=(0.85, 0.92), brake=(38, 43), why="fleet evaluation figures for RWD 5.7 V8 police sedans (pursuit package, round 6b)"),
     "sentinel_wolfhound": dict(t0100=(5.5, 6.5), lat=(0.85, 0.92), brake=(38, 43), why="fleet evaluation figures for AWD TT V6 pursuit vehicles"),
     "sentinel_bastion": dict(t0100=(7.5, 9.0), lat=(0.72, 0.80), brake=(40, 46), why="fleet evaluation figures for RWD 5.3 V8 police SUVs"),
     "junkyard_beater": dict(t0100=(12.0, 15.0), lat=(0.75, 0.88), brake=(38, 46), why="period road tests of late-80s 1.6 L economy sedans, derated for wear"),
+    "tansy_13": dict(t0100=(11.5, 13.5), lat=(0.78, 0.88), brake=(38, 45), why="road tests of 2000s 1.3 L superminis"),
+    "drayman_cargo": dict(t0100=(9.5, 12.0), lat=(0.64, 0.74), brake=(44, 52), why="road tests of 2000s full-size V8 cargo vans (empty)"),
+    "furrow_24": dict(t0100=(10.0, 12.5), lat=(0.70, 0.80), brake=(42, 50), why="period road tests of 90s compact 2.4 L pickups (manual)"),
 }
 
 # Barrier matrix (prompt 03). Expected outcome per durability class in Simulation mode; Arcade
 # applies the mode-table scaling (≈ 0.45 × lattice impulse) and must be strictly milder.
 BARRIERS = [
     ("frontal 15 km/h", "bumper scuff, no component damage"),
-    ("frontal 25 km/h", "bumper damage only: radiator and engine intact, not a total loss"),
+    ("frontal 25 km/h", "bumper damage only: radiator and engine intact, not a total loss (mid-engine: nose radiator may go, engine intact)"),
     ("frontal 40 km/h", "crumple zone engaged (≥ 0.2 m crush), not a total loss (prompt 03 calibration: radiator goes at 56)"),
     ("frontal 56 km/h", "≈0.6 m frame crush (0.35-1.3 m), TotalLoss in Simulation (durability ≥ 4 may survive), Arcade milder"),
     ("frontal 80 km/h", "TotalLoss in Simulation"),
@@ -277,16 +280,16 @@ SIM_NOTES = {
     ("Ironside 440", "skidpad"): "C — 02's `vintage_bias` (≈ 0.85 × street, half the cornering stiffness, as requested) on a soft, 0.55 m-CG chassis gives 0.62 g; period road tests put the archetype at 0.70-0.75 g. Joint re-tune with 02.",
     ("Lindwurm 4T", "0-100"): "0.04 s over after switching to on-demand AWD (`AwdOnDemand` 95 % front, up to 50 % rear at 5 % front slip — the lead's first-cut coupling, which A tunes); the fixed 65/35 split ran 5.37 s.",
     ("Sentinel Wolfhound", "skidpad"): "C — 0.848 g, 0.002 under the band on `police_pursuit` (rounds to 0.85); on-demand AWD changed it by < 0.01 g.",
-    ("Sentinel Cruiser", "0-100"): "B — 0.2 s over.",
     ("Sentinel Wolfhound", "0-100"): "B — converter slip; coupling already set to engage at 2 % front slip.",
-    ("Sentinel Cruiser", "skidpad"): "C — 0.02 g under on `police_pursuit`.",
+    ("Sentinel Cruiser", "skidpad"): "C — 0.02 g under on `police_pursuit`; the V8 pursuit package (round 6b) put 60 kg more on the nose (0.81 → 0.83 g after re-deriving bars for the new mass).",
+    ("Drayman Cargo", "100-0"): "0.3 m short of the band: an empty van on car-type `street` tires (no light-truck compound) with the 1.5 × lock-torque ABS ceiling stops slightly better than road tests of laden-sensitive LT tires. Tire-limited; an `lt_highway` compound (02) would land it in band.",
+    ("Furrow 2.4", "100-0"): "0.6 m short of the band: same cause as the van — an empty light pickup on car-type `street` tires stops a little better than period road tests on 90s LT tires.",
     ("Sentinel Bastion", "skidpad"): "C — ≤ 0.01 g under; tall body-on-frame SUV.",
 }
 
 BARRIER_NOTES = {
-    ("Vireo XS", "rear 40 km/h"): "gen-lattice's hatch profile runs the passenger cell to the tailgate, so a 40 km/h rear hit measures 0.32 m cabin intrusion and totals the car. Same on the Lindwurm and the SUV. Reported to workstream 03 (two-box rear crumple zone); not patched in car data.",
-    ("Lindwurm 4T", "rear 40 km/h"): "same two-box rear-structure finding as the Vireo (0.33 m cabin intrusion) — workstream 03.",
-    ("Sentinel Bastion", "rear 40 km/h"): "same two-box rear-structure finding (SUV profile, 0.22 m cabin intrusion) — workstream 03.",
+    ("Sentinel Cruiser", "offset 40% 56 km/h"): "near miss: struck-side front suspension intrusion 0.084 m vs its 0.09 m failure threshold (health 0.51; wheel mount 0.078 m) — the `cruiser` profile's reinforced rails and double bumper beam plus the push bar spread the offset load. Total loss anyway (engine, radiator, battery, rack failed). Appeared with B's ab6970d generator (rail bracing); not patched.",
+    ("Sentinel Wolfhound", "offset 40% 56 km/h"): "same near miss as the Cruiser (same `cruiser` profile + push bar); total loss anyway.",
 }
 
 
