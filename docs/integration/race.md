@@ -157,6 +157,16 @@ final variant lists. **R1 below is the final list for `RaceEvent`.**
    test where straight-line never reaches the lead). Delivery cargo is real mass
    (`cargo::load_cargo`: mass, CG, inertia; `tests/cargo_physics.rs`).
 
+**Checks (round 6b, cloud container):** fmt, clippy `--workspace --all-targets -D warnings`,
+wasm builds of `wp_wasm` and `wp_race`, `goldens_match` (incl. the new golden) all pass.
+`cargo test --workspace --release --no-fail-fast`: everything passes except
+`wp_economy::pursuit_wiring::real_police_capture_settles_through_the_economy` ("level at
+capture, not after the reset"), which also fails on the lead branch: this branch has no diff
+there (`wp_economy`, `wp_police`, `wp_contracts`, `wp_world`, `data/police`, `data/economy`).
+FYI G / E. The debug-mode workspace run exceeds an hour because simcli's
+`all_scenarios_pass_and_are_deterministic_in_process` runs every scenario twice unoptimised;
+release is fine.
+
 ### Drops onto v0.3.0
 - `RaceSignal` → `RaceEvent` (R1) is a rename + `From` impl; `DnfReason::Fled` is the only new
   variant since the R1 list.
