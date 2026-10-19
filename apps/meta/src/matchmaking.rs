@@ -211,6 +211,14 @@ pub fn process(conn: &mut Connection, cfg: &Config, now: UnixMs) -> ApiResult<()
         params![now - 2 * cfg.join_ttl_ms],
     )?;
 
+    // Joined players the instance never lists in a heartbeat stop holding a seat after a while
+    // (the population it reports is then authoritative).
+    tx.execute(
+        "UPDATE tickets SET reported = 1
+         WHERE state = 'joined' AND reported = 0 AND joined_ms < ?1",
+        params![now - directory::UNREPORTED_JOIN_HOLD_MS],
+    )?;
+
     let mut candidates = Vec::new();
     for info in directory::list(&tx, false, now)? {
         if info.state != InstanceState::Up {
@@ -413,8 +421,9 @@ pub fn verify_join(
     })?;
     auth::check_not_banned(conn, account_id, now)?;
     conn.execute(
-        "UPDATE tickets SET state = 'joined', join_token_hash = NULL WHERE id = ?1",
-        params![ticket],
+        "UPDATE tickets SET state = 'joined', join_token_hash = NULL, joined_ms = ?2, reported = 0
+         WHERE id = ?1",
+        params![ticket, now],
     )?;
     let reconnect_token = token::generate(token::prefix::RECONNECT);
     let reconnect_expires_ms = now + cfg.reconnect_ttl_ms;

@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::thread;
 
 use common::*;
-use wp_contracts::{DamageMode, DayPhase, PlayerId, Role, VehicleClass};
+use wp_contracts::{DamageMode, DayPhase, PlayerId, Role, VehicleClass, WantedLevel};
 use wp_economy::{AccountStore, Economy, RaceResult, RaceSetup, RaceType, ViolationCounts};
 use wp_meta::api::*;
 use wp_meta::client::{MetaClient, RemoteAccountStore};
@@ -247,7 +247,7 @@ fn twenty_bots_signup_matchmake_results_leaderboard() {
             &PursuitReport {
                 report_key: "p-1".into(),
                 racer_id: victim,
-                max_wanted: 3,
+                max_wanted: WantedLevel::L3,
                 bounty: 4_200,
                 outcome: PursuitOutcome::Captured,
                 captured_by: Some(cop),
@@ -261,7 +261,7 @@ fn twenty_bots_signup_matchmake_results_leaderboard() {
             &PursuitReport {
                 report_key: "p-2".into(),
                 racer_id: a1_racers[1],
-                max_wanted: 4,
+                max_wanted: WantedLevel::L4,
                 bounty: 9_000,
                 outcome: PursuitOutcome::Escaped,
                 captured_by: None,

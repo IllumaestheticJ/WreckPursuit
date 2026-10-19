@@ -217,9 +217,6 @@ pub fn report_pursuit(
     now: UnixMs,
 ) -> ApiResult<PursuitReportResponse> {
     validate_key(&report.report_key)?;
-    if report.max_wanted > 5 {
-        return Err(ApiError::bad_request("max_wanted is 0..=5"));
-    }
     if report.outcome == PursuitOutcome::Escaped && report.captured_by.is_some() {
         return Err(ApiError::bad_request("an escape has no captured_by"));
     }
@@ -253,7 +250,7 @@ pub fn report_pursuit(
             report.report_key,
             instance,
             report.racer_id,
-            report.max_wanted,
+            report.max_wanted.number(),
             report.bounty,
             outcome,
             report.captured_by,

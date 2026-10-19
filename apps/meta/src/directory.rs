@@ -18,6 +18,10 @@ pub const MISSED_HEARTBEATS_DOWN: i64 = 3;
 /// Undelivered kicks older than this are dropped (the player is gone; bans block rejoin).
 pub const KICK_TTL_MS: i64 = 3_600_000;
 
+/// How long a joined player who never appears in a heartbeat's `players` list keeps holding
+/// a seat. Longer than several heartbeat intervals.
+pub const UNREPORTED_JOIN_HOLD_MS: i64 = 120_000;
+
 /// Valid bracket names (`open` accepts every bracket).
 pub const BRACKETS: &[&str] = &["D", "C", "B", "A", "S", "open"];
 
@@ -159,6 +163,12 @@ pub fn heartbeat(
         ],
     )?;
     for p in &req.players {
+        // The reported population now covers this player: release the join hold.
+        conn.execute(
+            "UPDATE tickets SET reported = 1
+             WHERE account_id = ?1 AND instance_id = ?2 AND state = 'joined' AND reported = 0",
+            params![p, id],
+        )?;
         conn.execute(
             "UPDATE reconnect_tokens SET expires_ms = ?3
              WHERE account_id = ?1 AND instance_id = ?2",
@@ -285,15 +295,17 @@ fn instance_from_row(r: &Row<'_>) -> rusqlite::Result<InstanceInfo> {
     })
 }
 
-/// Seats promised to assigned (not yet joined) tickets, per role.
+/// Seats held by matched players the instance's reported population does not cover yet:
+/// assigned tickets (not connected yet) and joined tickets no heartbeat has listed yet.
 pub fn reserved(conn: &Connection, id: InstanceId) -> ApiResult<RoleCounts> {
     Ok(reserved_all(conn)?.remove(&id).unwrap_or_default())
 }
 
-/// Reserved seats of every instance that has any, in one query.
+/// [`reserved`] for every instance that has any, in one query.
 pub fn reserved_all(conn: &Connection) -> ApiResult<BTreeMap<InstanceId, RoleCounts>> {
     let mut stmt = conn.prepare(
-        "SELECT instance_id, role, COUNT(*) FROM tickets WHERE state = 'assigned'
+        "SELECT instance_id, role, COUNT(*) FROM tickets
+         WHERE state = 'assigned' OR (state = 'joined' AND reported = 0)
          GROUP BY instance_id, role",
     )?;
     let rows = stmt.query_map([], |r| {

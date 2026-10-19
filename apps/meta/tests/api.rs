@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use common::*;
 use serde_json::json;
-use wp_contracts::{DamageMode, PlayerId, Role};
+use wp_contracts::{DamageMode, PlayerId, Role, WantedLevel};
 use wp_economy::{AccountStore, Economy, StoreError};
 use wp_meta::api::*;
 use wp_meta::client::RemoteAccountStore;
@@ -548,7 +548,7 @@ fn leaderboard_periods_roll_and_reset() {
                 &PursuitReport {
                     report_key: key.into(),
                     racer_id: racer,
-                    max_wanted: 2,
+                    max_wanted: WantedLevel::L2,
                     bounty,
                     outcome: PursuitOutcome::Escaped,
                     captured_by: None,
@@ -596,7 +596,7 @@ fn leaderboard_periods_roll_and_reset() {
             &PursuitReport {
                 report_key: "c".into(),
                 racer_id: stranger,
-                max_wanted: 1,
+                max_wanted: WantedLevel::L1,
                 bounty: 1,
                 outcome: PursuitOutcome::Escaped,
                 captured_by: None,
@@ -738,4 +738,66 @@ fn only_the_current_host_touches_an_account() {
     assert!(old_store.load(PlayerId(id)).is_err());
     let new_store = RemoteAccountStore::new(new.client.clone(), new.id);
     assert!(new_store.load(PlayerId(id)).unwrap().is_some());
+}
+
+/// Regression (lead run 3 flake): a verified join must hold its seat until a heartbeat
+/// reports the player, or the matcher overbooks the instance in between.
+#[test]
+fn joined_players_hold_their_seat_until_reported() {
+    let srv = TestServer::start();
+    let inst = FakeInstance::register(&srv, "tiny", DamageMode::Arcade, "open", racer_slots(1));
+    let (first, a) = player(&srv, "first");
+    matchmake(
+        &a,
+        Some(&prefs(Role::Racer, DamageMode::Arcade, "D")),
+        &[Arc::clone(&inst)],
+    );
+    // No heartbeat yet: the reported population is still 0.
+    let (_, b) = player(&srv, "second");
+    let st = b
+        .queue(&prefs(Role::Racer, DamageMode::Arcade, "D"))
+        .unwrap();
+    assert_eq!(
+        st.state,
+        TicketState::Queued,
+        "seat still held by the joined player"
+    );
+    inst.heartbeat();
+    assert_eq!(b.ticket_status().unwrap().state, TicketState::Queued);
+    let health = srv.admin().admin_health().unwrap();
+    assert_eq!(health.instances[0].population.racer, 1);
+    assert_eq!(
+        health.instances[0].reserved.total(),
+        0,
+        "hold released once reported"
+    );
+    // The first player leaves; the next heartbeat frees the seat.
+    inst.disconnect(first);
+    inst.heartbeat();
+    assert_eq!(b.ticket_status().unwrap().state, TicketState::Assigned);
+}
+
+/// An instance that never lists players stops holding seats after the hold period.
+#[test]
+fn unreported_join_holds_expire() {
+    let srv = TestServer::start();
+    let inst = FakeInstance::register(&srv, "quiet", DamageMode::Arcade, "open", racer_slots(1));
+    let (joined, a) = player(&srv, "joined");
+    matchmake(
+        &a,
+        Some(&prefs(Role::Racer, DamageMode::Arcade, "D")),
+        &[Arc::clone(&inst)],
+    );
+    inst.disconnect(joined);
+    let (_, b) = player(&srv, "waiter");
+    assert_eq!(
+        b.queue(&prefs(Role::Racer, DamageMode::Arcade, "D"))
+            .unwrap()
+            .state,
+        TicketState::Queued
+    );
+    srv.advance(wp_meta::directory::UNREPORTED_JOIN_HOLD_MS + 1);
+    // Heartbeat with an empty player list keeps the instance alive.
+    inst.heartbeat();
+    assert_eq!(b.ticket_status().unwrap().state, TicketState::Assigned);
 }
