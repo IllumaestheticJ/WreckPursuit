@@ -10,7 +10,8 @@
 //!   harness against the overlay and returns flat metrics, series and checks.
 //! - [`diff`]: field diff of two data files.
 //! - [`promote`] + [`textedit`]: write chosen values back with one-line text edits, validate
-//!   with the contract loaders, append to `data/TUNING_CHANGELOG.md`.
+//!   with the contract loaders, append a changelog line (`tune.py` uses
+//!   `docs/TUNING_CHANGELOG.md`).
 //!
 //! Not part of the simulation: nothing here is reachable from `wp_wasm`.
 

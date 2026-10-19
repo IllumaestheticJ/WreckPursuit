@@ -76,7 +76,9 @@ def promote_point(
         source += f" [{point['variant']}]"
     if point.get("params"):
         source += f" ({describe_params(point['params'])})"
+    data_root = data or sweep.get("data") or "data"
     req = {
+        "log": str(changelog_path(data_root)),
         "changes": list(last.values()),
         "note": note,
         "source": source,
@@ -84,7 +86,15 @@ def promote_point(
         "force": force,
         "dry_run": dry_run,
     }
-    return _probe_json(["promote", "-"], json.dumps(req), data or sweep.get("data") or "data", build)
+    return _probe_json(["promote", "-"], json.dumps(req), data_root, build)
+
+
+def changelog_path(data_root: str) -> Path:
+    """`docs/TUNING_CHANGELOG.md` for the repo's own data/, else next to a custom data root."""
+    root = (REPO / data_root).resolve()
+    if root == (REPO / "data").resolve():
+        return REPO / "docs" / "TUNING_CHANGELOG.md"
+    return root / "TUNING_CHANGELOG.md"
 
 
 def diff_files(a: str, b: str, *, data: str = "data", limit: int = 2000, build: bool = False) -> dict[str, Any]:

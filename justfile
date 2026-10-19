@@ -95,3 +95,18 @@ bench class="local":
 # Everything CI runs for the harness, locally.
 ci: check lint-det determinism goldens
     tools/ci/data_coverage.sh
+
+# --- Tuning dashboard (workstream 20, see docs/TUNING.md) ---
+
+# Run a parameter sweep: a preset name (`just tune spring_damper`) or a spec path.
+tune spec:
+    python3 tools/tuning-dash/tune.py sweep {{spec}}
+
+# Tuning dashboard at http://127.0.0.1:8765 (sweeps, plots, compare, diff, promote).
+tune-dash port="8765":
+    python3 tools/tuning-dash/tune.py serve --port {{port}}
+
+# Tuning tool tests (Rust probe + Python sweep/promote end to end).
+tune-test:
+    cargo test -p tuning-probe
+    python3 -m unittest discover -s tools/tuning-dash/tests

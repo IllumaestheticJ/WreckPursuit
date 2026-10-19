@@ -598,7 +598,7 @@ function renderDetail() {
     <div class="promote">
       <b>Promote these values into the data files</b>
       ${files.length ? `<div class="row">${files.map((f) => `<label class="check"><input type="checkbox" class="pf" value="${esc(f)}" checked> <code>${esc(f)}</code></label>`).join("")}</div>
-      <input type="text" id="promote-note" placeholder="Why (goes into data/TUNING_CHANGELOG.md)">
+      <input type="text" id="promote-note" placeholder="Why (goes into docs/TUNING_CHANGELOG.md)">
       <div class="row"><button id="promote-preview">Preview</button><button class="primary" id="promote-go">Promote</button>
       <label class="check"><input type="checkbox" id="promote-force"> even if the file changed since the sweep</label></div>` : '<span class="muted small">Nothing to promote: this point uses the data files\' values' + (changed.some((a) => a.file === "scenario") ? " (scenario overrides are never promoted)" : "") + ".</span>"}
       <div id="promote-result"></div>
