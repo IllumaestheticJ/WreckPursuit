@@ -15,6 +15,9 @@ wp_math.workspace = true
 wp_sim.workspace = true
 wp_police.workspace = true
 wp_world.workspace = true
+# Career garage (machine G): repairs the stored lattice of a car between runs
+# (`DamageModel::restore_full` / `apply_repair`). Pure Rust, already reachable via wp_sim.
+wp_damage.workspace = true
 # Repair billing for the testbed's garage overlay (workstream 16); default features only — never
 # `native` (SQLite).
 wp_economy.workspace = true

@@ -511,6 +511,98 @@ check(
     `"Repair & continue": health ${after.health}, cash $${before.cashAfter} → $${after.cash} (paid $${before.cost}), panel closed`,
   );
 }
+// Career (machine G): garage → buy a beater → city chase with the career car → busted → garage
+// (car in the pound, saved to localStorage) → reload (the career survives) → release → repair
+// all → a new run uses the repaired car.
+{
+  const G = '[data-testid="career-garage"]';
+  const fresh = await page.evaluate(() => window.__wp.careerApi.newCareer("Arcade"));
+  await page.click("#sc-garage");
+  const opened = await page.waitForSelector(G, { timeout: 10000 }).then(() => true).catch(() => false);
+  await page.click(`${G} button[role="tab"]:has-text("Dealer")`);
+  await page.click(`${G} tr[data-car="junkyard_beater"] td:last-child button`);
+  const bought = await page.evaluate(() => window.__wp.careerApi.view());
+  await shot("career_garage_bought.png");
+  await page.click(`${G} button:has-text("City chase")`);
+  const run = await page.evaluate(() => {
+    const wp = window.__wp;
+    return { active: wp.sim.careerRunActive(), car: wp.sim.scenario().entities[0].car, open: wp.garage.open };
+  });
+  check(
+    opened && fresh.cash > 0 && bought.cars.length === 1 && bought.cash === fresh.cash - bought.dealer.find((d) => d.def_id === "junkyard_beater").price_worn &&
+      run.active && run.car === "junkyard_beater" && !run.open,
+    `career: garage opens, beater bought ($${fresh.cash} → $${bought.cash}), city chase runs the career car (${run.car})`,
+  );
+  const parked = await page
+    .waitForFunction(
+      () => {
+        const wp = window.__wp;
+        try {
+          wp.sim.debugParkNearPolice(wp.app.player, 14);
+          wp.sim.debugSetHeat(wp.app.player, 30);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      null,
+      { timeout: 120000, polling: 100 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  const busted = await page
+    .waitForFunction(
+      () => window.__wp.runEnd.open && [...document.querySelectorAll("#ui-run-end button")].some((b) => b.textContent.includes("Garage")),
+      null,
+      { timeout: 240000, polling: 250 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  await page.click('#ui-run-end button:has-text("Garage")').catch(() => {});
+  await page.waitForSelector(G, { timeout: 10000 }).catch(() => {});
+  const stored = await page.evaluate(() => {
+    const p = JSON.parse(localStorage.getItem("wp.career.v1") ?? "null");
+    return { location: p?.account?.garage?.[0]?.location ?? null, captures: p?.account?.heat_history?.captures ?? 0, version: p?.version };
+  });
+  await shot("career_garage_after_bust.png");
+  check(
+    parked && busted && stored.version === 1 && stored.captures === 1 && stored.location && typeof stored.location === "object" && "Impound" in stored.location,
+    `career: busted → garage, saved (v${stored.version}): captures ${stored.captures}, car ${JSON.stringify(stored.location)}`,
+  );
+
+  await page.reload();
+  await ready();
+  await page.click("#sc-garage");
+  await page.waitForSelector(G, { timeout: 10000 }).catch(() => {});
+  const reloaded = await page.evaluate(() => window.__wp.careerApi.view());
+  await page.click(`${G} button[role="tab"]:has-text("Pound")`);
+  await page.click(`${G} button:has-text("Pay & release")`);
+  await page.click(`${G} button[role="tab"]:has-text("Cars")`);
+  const released = await page.evaluate(() => window.__wp.careerApi.view());
+  await page.click(`${G} button:has-text("Repair all")`).catch(() => {});
+  const repaired = await page.evaluate(() => window.__wp.careerApi.view());
+  check(
+    reloaded.cars[0]?.location === "Impound" && released.cars[0]?.location === "Garage" && released.cash < reloaded.cash &&
+      (repaired.cars[0]?.repair_lines.length ?? 1) === 0 && repaired.cars[0]?.health === 1 && repaired.can_start,
+    `career: survives a reload (car ${reloaded.cars[0]?.location}), released ($${reloaded.cash} → $${released.cash}), repaired (health ${repaired.cars[0]?.health})`,
+  );
+  await page.click(`${G} button:has-text("Free drive")`);
+  await page.waitForTimeout(500);
+  const again = await page.evaluate(() => {
+    const wp = window.__wp;
+    const out = { active: wp.sim.careerRunActive(), car: wp.sim.scenario().entities[0].car, health: wp.sim.states()[17] };
+    wp.openGarage();
+    const save = wp.sim.careerSave();
+    const view = wp.careerApi.view();
+    const back = wp.careerApi.importSave(save);
+    return { ...out, reimported: back.cash === view.cash && back.day === view.day && wp.sim.careerSave() === save };
+  });
+  check(
+    again.active && again.car === "junkyard_beater" && again.health === 1 && again.reimported,
+    `career: new run with the repaired car (${again.car}, health ${again.health}); export → import keeps the career`,
+  );
+  await page.evaluate(() => window.__wp.careerApi.close());
+}
 // The selector keeps the old flat grid: the chase restarts there.
 await page.evaluate(() => {
   const sel = document.getElementById("city-map");

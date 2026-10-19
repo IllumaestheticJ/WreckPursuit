@@ -21,6 +21,7 @@
 //! | run (lead) | `run_result_json()`, `run_ledger_json()`, `run_account_json()`, `run_repair_continue()`, `debug_set_heat(entity, heat)`, `debug_park_near_police(entity, ahead_m)` — see [`run`] |
 //! | map (16) | `map_static_json()` once per city, `map_dynamic(player)` per frame — see [`map`] |
 //! | weather (lead) | `weather_choices()`, `scenario_with_weather(json, choice)`, `scenario_weather_choice(json)`, `city_chase_rain_json(car, mode, city_id)`, `weather_info()`, `weather_grid_meta()`, `weather_grid()`, `weather_spray()` — see [`weather`] |
+//! | career (G) | `career_new(mode)`, `career_load_json`, `career_save_json`, `career_view_json`, `career_mods_json(uid)`, `career_start_run(scenario_json)`, `career_end_run`, `career_run_active`, `career_buy_car`, `career_floor_car`, `career_sell_car`, `career_set_active`, `career_install_mod`, `career_uninstall_mod`, `career_quote_json`, `career_repair`, `career_release`, `career_insure`, `career_next_night` — see [`career`] |
 //! | audio (13) | `audio_library()`, `audio_frame(listener, events_json, focus)`, `audio_set_siren`, `audio_set_scanner_tier`, `audio_radio`, `audio_reset()` — see [`audio`] |
 
 #![warn(missing_docs)]
@@ -29,6 +30,7 @@
 pub mod net;
 
 pub mod audio;
+pub mod career;
 pub mod data;
 pub mod garage;
 pub mod map;
@@ -40,6 +42,8 @@ pub mod session;
 pub mod signals;
 pub mod weather;
 
+#[cfg(test)]
+mod career_tests;
 #[cfg(test)]
 mod run_tests;
 
@@ -66,6 +70,11 @@ fn with<T>(f: impl FnOnce(&mut Session) -> Result<T, String>) -> Result<T, JsVal
     })
 }
 
+/// Run `f` with the current session, if any (career glue: works with no session too).
+fn with_session_opt<T, E>(f: impl FnOnce(Option<&mut Session>) -> Result<T, E>) -> Result<T, E> {
+    SESSION.with(|s| f(s.borrow_mut().as_mut()))
+}
+
 fn get<T>(f: impl FnOnce(&mut Session) -> T) -> Result<T, JsValue> {
     with(|s| Ok(f(s)))
 }
@@ -74,9 +83,16 @@ fn install(mut session: Session) -> Vec<u32> {
     let ids = session.entities().iter().map(|e| e.0).collect();
     SESSION.with(|s| {
         let mut slot = s.borrow_mut();
-        // The player's account (cash, garage, ledger) carries over a restart.
-        if let Some(prev) = slot.as_mut().and_then(Session::take_run) {
-            session.adopt_account(prev);
+        if let Some(prev) = slot.as_mut() {
+            if prev.is_career() {
+                // A career run being replaced ends: the career absorbs it (machine G).
+                career::absorb(prev);
+            } else if let Some(run) = prev.take_run() {
+                // The player's account (cash, garage, ledger) carries over a restart.
+                if !session.is_career() {
+                    session.adopt_account(run);
+                }
+            }
         }
         *slot = Some(session);
     });

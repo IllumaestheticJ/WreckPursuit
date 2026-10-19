@@ -19,6 +19,9 @@ import { AudioSystem } from "./audio";
 import { UiOverlay } from "./ui/overlay";
 import { MapOverlay } from "./ui/map";
 import { RunEndView } from "./ui/runEnd";
+import { CareerGarageView } from "../../ui-kit/src/garage/CareerGarage";
+import { downloadText, keepUnreadable, loadCareerText, saveCareerText, saveFileName } from "../../ui-kit/src/garage/store";
+import type { CareerApi, CareerView, RunKind } from "../../ui-kit/src/garage/types";
 import { RealTimeMeter } from "./rtf";
 import { WeatherView } from "./render/weather";
 
@@ -97,6 +100,7 @@ async function main(): Promise<void> {
     restart: () => restartRun(),
     onOpen: () => ui.setBill(true),
     onClose: () => ui.setBill(false),
+    garage: () => (sim.careerRunActive() ? () => openGarage() : null),
   });
   const weather = new WeatherView(scene.scene, scene.renderer, overlay);
   weather.attachMaterial(scene.groundMaterial);
@@ -107,6 +111,77 @@ async function main(): Promise<void> {
   if (weatherParam && [...weatherSel.options].some((o) => o.value === weatherParam)) weatherSel.value = weatherParam;
   /** Scenario JSON with the selector's weather ("scenario" keeps the scenario's own). */
   const withWeather = (json: string) => (weatherSel.value === "auto" ? json : sim.scenarioWithWeather(json, weatherSel.value));
+
+  // ----- career (machine G): persistent account between runs, garage screen ---------------
+  // The career lives in wp_wasm (`career_*`); this file stores it (localStorage, versioned)
+  // and starts runs with the career car. See docs/integration/economy.md.
+  const persistCareer = () => {
+    try {
+      saveCareerText(sim.careerSave());
+    } catch (e) {
+      console.warn("career not saved", e);
+    }
+  };
+  {
+    const text = loadCareerText();
+    let loaded = false;
+    if (text) {
+      try {
+        sim.careerLoad(text);
+        loaded = true;
+      } catch (e) {
+        console.warn("career save unreadable; kept aside, starting a new career", e);
+        keepUnreadable(text);
+      }
+    }
+    if (!loaded) {
+      sim.careerNew("Arcade");
+      persistCareer();
+    }
+  }
+  const garageEl = document.createElement("div");
+  garageEl.id = "ui-garage";
+  garageEl.style.cssText = "position:absolute;inset:0;pointer-events:none;";
+  overlay.appendChild(garageEl);
+  const act = (f: () => CareerView): CareerView => {
+    const v = f();
+    persistCareer();
+    return v;
+  };
+  const careerApi: CareerApi = {
+    view: () => sim.careerView(),
+    mods: (uid) => sim.careerMods(uid),
+    quote: (uid, req) => sim.careerQuote(uid, req),
+    buy: (id, c) => act(() => sim.careerBuy(id, c)),
+    floorCar: () => act(() => sim.careerFloorCar()),
+    sell: (uid) => act(() => sim.careerSell(uid)),
+    setActive: (uid) => act(() => sim.careerSetActive(uid)),
+    install: (uid, id) => act(() => sim.careerInstall(uid, id)),
+    uninstall: (uid, id) => act(() => sim.careerUninstall(uid, id)),
+    repair: (uid, req) => act(() => sim.careerRepair(uid, req)),
+    release: (uid) => act(() => sim.careerRelease(uid)),
+    insure: (uid, tier) => act(() => sim.careerInsure(uid, tier)),
+    nextNight: () => act(() => sim.careerNextNight()),
+    newCareer: (mode) => act(() => sim.careerNew(mode)),
+    exportSave: () => downloadText(saveFileName(sim.careerView().day), sim.careerSave()),
+    importSave: (text) => act(() => sim.careerLoad(text)),
+    startRun: (kind) => void startCareerRun(kind),
+    close: () => {
+      garage.hide();
+      app.paused = false;
+    },
+  };
+  const garage = new CareerGarageView(garageEl, careerApi);
+  /** Garage: ends a career run in progress (its result goes into the career), pauses. */
+  const openGarage = (message: string | null = null) => {
+    if (sim.careerRunActive()) sim.careerEndRun();
+    persistCareer();
+    runEnd.reset();
+    app.paused = true;
+    garage.show(message);
+  };
+  let careerSavedSeq = -1;
+  let careerSavedAt = 0;
   const citySel = $("city-map") as HTMLSelectElement;
   const cityParam = params.get("city");
   if (cityParam && CITY_IDS.includes(cityParam)) citySel.value = cityParam;
@@ -215,9 +290,38 @@ async function main(): Promise<void> {
     rig.setMode(rig.preferred, app.views.get(app.focus)?.root);
   };
 
+  /** A career run: the city chase or a free drive (city box) with the career car, its saved
+   * damage and mods. Opens the garage instead when the car cannot go out. */
+  const startCareerRun = (kind: RunKind): boolean => {
+    const json =
+      kind === "chase"
+        ? sim.cityChaseCityJson(DEFAULT_CAR, "Arcade", citySel.value)
+        : ($("city") as HTMLInputElement).checked
+          ? sim.freeDriveCityJson(DEFAULT_CAR, "Arcade", citySel.value)
+          : sim.freeDriveJson(DEFAULT_CAR, "Arcade", false);
+    app.scenarioFile = null;
+    app.scenario = null;
+    app.result = null;
+    app.bench = null;
+    try {
+      sim.careerStartRun(withWeather(json));
+    } catch (e) {
+      openGarage(String(e).replace(/^(Error: )?wp_wasm: /, ""));
+      return false;
+    }
+    garage.hide();
+    app.paused = false;
+    persistCareer();
+    rebuildViews();
+    applyAssistPreset(app.source);
+    if (kind === "chase") rig.setMode(rig.preferred, app.views.get(app.focus)?.root);
+    return true;
+  };
+
   /** "Restart" on the end-of-run panel: the same session again (the account carries over). */
   const restartRun = () => {
     const sc = sim.scenario();
+    if (sim.careerRunActive()) return void startCareerRun(sc.name === "city_chase" ? "chase" : "free");
     const car = sc.entities[0]?.car;
     if (sc.name === "city_chase") startCityChase(car, sc.mode);
     else if (sc.name === "city_chase_rainy_night") startCityChase(car, sc.mode, true);
@@ -315,14 +419,23 @@ async function main(): Promise<void> {
   weatherSel.onchange = () => {
     if (isReplay()) return;
     const name = sim.scenario()?.name;
-    if (app.scenarioFile) void runScenario(app.scenarioFile);
+    if (sim.careerRunActive()) {
+      sim.careerEndRun();
+      void startCareerRun(name === "city_chase" ? "chase" : "free");
+    } else if (app.scenarioFile) void runScenario(app.scenarioFile);
     else if (name === "city_chase") startCityChase();
     else if (name === "city_chase_rainy_night") startCityChase(undefined, undefined, true);
     else startFreeDrive();
   };
+  const careerOn = () => ($("career") as HTMLInputElement).checked;
+  $("sc-free").onclick = () => (careerOn() ? startCareerRun("free") : startFreeDrive());
+  $("sc-chase").onclick = () => (careerOn() ? startCareerRun("chase") : startCityChase());
+  $("sc-garage").onclick = () => openGarage();
+  addEventListener("pagehide", persistCareer);
   ($("mode") as HTMLSelectElement).onchange = (e) => {
     // Live switch (Sim::set_mode_table), logged as a replay op; existing damage is kept.
-    if (isReplay()) return void (($("mode") as HTMLSelectElement).value = modeName());
+    // A career run keeps the career's mode (pick it with "New career" in the garage).
+    if (isReplay() || sim.careerRunActive()) return void (($("mode") as HTMLSelectElement).value = modeName());
     sim.setDamageMode((e.target as HTMLSelectElement).value);
   };
   ($("city") as HTMLInputElement).onchange = () => startFreeDrive();
@@ -550,6 +663,15 @@ async function main(): Promise<void> {
       ui.frame(w[W.tick], app.player, events, w[W.hours], modeName());
       map.frame(app.player, now);
       if (!replay) runEnd.update(sim.runResult(), now);
+      // Career autosave: after each settlement (bust, escape, wreck) and every 20 s of a run.
+      if (!replay && sim.careerRunActive()) {
+        const seq = runEnd.report?.seq ?? 0;
+        if (seq !== careerSavedSeq || now - careerSavedAt > 20000) {
+          careerSavedSeq = seq;
+          careerSavedAt = now;
+          persistCareer();
+        }
+      }
     }
     scene.update(dt, sim.intents());
     // Promoted (physical) agents are drawn as sim vehicles once the sim spawns them.
@@ -757,6 +879,11 @@ async function main(): Promise<void> {
     ui,
     runEnd,
     restartRun,
+    garage,
+    careerApi,
+    openGarage,
+    startCareerRun,
+    persistCareer,
     lookFrom: (eye: [number, number, number], target: [number, number, number]) => rig.lookFrom(eye, target),
   };
   requestAnimationFrame(frame);

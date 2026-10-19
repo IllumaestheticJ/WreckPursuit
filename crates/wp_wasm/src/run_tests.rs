@@ -193,7 +193,9 @@ fn escape_pays_bounty_and_the_run_goes_on() {
     assert_eq!(r.fines, 0);
     assert_eq!(r.car_status, CarStatus::Garage);
     assert_eq!(r.impound_fee, None);
-    assert_eq!(r.cash_after, r.cash_before, "escapes pay bounty, not cash");
+    // Escapes pay bounty and cash (`stakes.toml [bounty.escape_cash]`, machine G).
+    assert!(r.escape_cash > 0, "{r:?}");
+    assert_eq!(r.cash_after, r.cash_before + r.escape_cash);
     assert!(r.ledger.iter().any(|l| l.reason == "Escape"));
     assert!(!s.held(PLAYER));
     assert!(s.repair_and_continue().is_err(), "nothing to continue from");
