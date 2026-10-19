@@ -164,8 +164,15 @@ Not done / blocked:
   `WantedLevel::None`). Fails alone too. It comes in with the lead branch (my `crates/` diff
   against it is one doc comment in `wp_sim`); likely the run-6 police changes resetting the
   level before the capture event is read. Not fixed here (not my crate).
+- **For the lead / race workstream:** `wp_race` `tests/simcli_races.rs::city_sprint_on_real_roads`
+  panics at line 28 (`index out of bounds: the len is 2 but the index is 2`). The tick hook
+  enumerates `v.sim.vehicle_states()`, which since lead run 5 also holds the city's police and
+  traffic cars, and indexes `sc.entities[i]` with it. Scenario entities get the lowest ids, so
+  the one-line fix in the hook is `.iter().take(sc.entities.len())` before `.enumerate()`
+  (or filter by the ids, as `simcli::run::scenario_states` does). Not fixed here (not my crate).
+  Every other test in the workspace passes (`cargo test --workspace --no-fail-fast`).
 
-Checks: `cargo fmt`, `cargo clippy --workspace -D warnings`, `cargo test --workspace` (one upstream failure, below),
+Checks: `cargo fmt`, `cargo clippy --workspace -D warnings`, `cargo test --workspace` (two upstream failures, below),
 `simcli run apps/simcli/scenarios` (35/35 pass), `simcli goldens` (all match), wasm build of
 `wp_wasm`.
 
