@@ -13,6 +13,8 @@ members = [
     "crates/wp_wasm",
     "apps/server",
     "apps/simcli",
+    "tools/wasm-determinism",
+    "tools/lint-determinism",
 ]
 
 [workspace.package]
