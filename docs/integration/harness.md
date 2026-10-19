@@ -163,6 +163,13 @@ Cloud container, Intel Xeon @ 2.10 GHz, 4 cores, release, real vehicle + damage 
   `encode` would make the struct round-trip exact.
 - **Hash spec v3:** the state hash now includes `PoliceSystem::state_hash()`. Every golden was
   re-blessed (`[bless]`).
+- **Perf:** re-blessed `claude-cloud.json` and appended to `docs/PERF.md`. `snapshot/encode_24` went
+  from 40 to 3.3 µs and `decode_24` from 53 to 1.6 µs (F's binary codec vs JSON). The sim benches
+  were 22–71 % slower than the run-3 baseline, but noisy: `sim_only/64` read 3.38 ms, then
+  2.46 ms on a re-run. None of the harness changes touch the step these benches measure. **For
+  the lead:** the remaining rise most likely comes from the run-4 merges (A's torque converter
+  and AWD coupling, B's new damage events, F's contact filter); worth a look if the nightly
+  gate on `gha-ubuntu-latest` agrees.
 - Minimal edits outside my crates: `crates/wp_sim` (`set_police`, `police`), and
   `crates/wp_wasm/src/scenario.rs` (new `Scenario`/`EntitySpec` fields in its literals).
 
