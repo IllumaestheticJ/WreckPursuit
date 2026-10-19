@@ -133,6 +133,18 @@ pub enum DamageLogKind {
     TotalLoss,
 }
 
+/// One glass panel that shattered during an `apply_contacts` call (audio / VFX positioning).
+/// Read with [`DamageModel::glass_broken_this_tick`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GlassBreak {
+    /// The glass region (`Windshield` or `RearGlass`).
+    pub region: BodyRegion,
+    /// Centroid of the panel's nodes when it broke, chassis space, m.
+    pub centroid_m: [f32; 3],
+    /// Number of lattice nodes in the panel (a size cue for the sound / particle count).
+    pub nodes: u16,
+}
+
 /// "No detachable group" marker in [`BeamHot::group`].
 pub(crate) const NO_GROUP: u16 = u16::MAX;
 
@@ -319,6 +331,10 @@ pub struct DamageModel {
     pub(crate) log: Vec<DamageLogEntry>,
     pub(crate) emit_lattice_events: bool,
     pub(crate) last_emitted_pos: Vec<V3>,
+    /// Mode passed to the last `apply_contacts` (health recompute after a repair).
+    pub(crate) last_mode: Option<ModeTable>,
+    /// Glass panels that shattered during the current `apply_contacts` call.
+    pub(crate) glass_broken_tick: Vec<GlassBreak>,
 }
 
 impl DamageModel {
@@ -542,6 +558,8 @@ impl DamageModel {
             log: Vec::new(),
             emit_lattice_events: false,
             last_emitted_pos: rest_pos,
+            last_mode: None,
+            glass_broken_tick: Vec::new(),
         };
         model.recompute_hull();
         model
@@ -555,6 +573,13 @@ impl DamageModel {
     /// Entity id used in emitted events.
     pub fn entity(&self) -> EntityId {
         self.entity
+    }
+
+    /// Glass panels that shattered during the most recent `apply_contacts` call (empty on
+    /// almost every tick). Cleared at the start of each call, so the sim reads it right after
+    /// stepping the car. Each panel appears at most once per car (until repaired).
+    pub fn glass_broken_this_tick(&self) -> &[GlassBreak] {
+        &self.glass_broken_tick
     }
 
     /// Enable debug `SimEvent::LatticeDeformed` events (never replicate these).
@@ -981,6 +1006,19 @@ impl DamageModel {
             return;
         }
         self.push_log(DamageLogKind::GlassShattered(r));
+        let mut centroid = [0.0; 3];
+        let mut count = 0u16;
+        for i in 0..self.pos.len() {
+            if self.node_region[i] == r && !self.detached[i] {
+                centroid = vec3::add(centroid, self.pos[i]);
+                count = count.saturating_add(1);
+            }
+        }
+        self.glass_broken_tick.push(GlassBreak {
+            region: r,
+            centroid_m: vec3::scale(centroid, 1.0 / f32::from(count.max(1))),
+            nodes: count,
+        });
         out.push(SimEvent::GlassShattered {
             vehicle: self.entity,
             region: r,
@@ -1158,7 +1196,7 @@ impl DamageModel {
     /// Toe and camber change (rad) of a suspension corner from the actual displacement of its
     /// mount nodes: the upper node moving inward relative to the lower one tilts the top in
     /// (negative camber); a mount pushed inward or set back toward the axle centre toes out.
-    fn alignment_change(&self, nodes: &[u32]) -> (f32, f32) {
+    pub(crate) fn alignment_change(&self, nodes: &[u32]) -> (f32, f32) {
         if nodes.is_empty() {
             return (0.0, 0.0);
         }
@@ -1217,7 +1255,7 @@ impl DamageModel {
         }
     }
 
-    fn update_health(&mut self, mode: &ModeTable, out: &mut Vec<SimEvent>) {
+    pub(crate) fn update_health(&mut self, mode: &ModeTable, out: &mut Vec<SimEvent>) {
         let mut weighted = 0.0;
         for r in ALL_REGIONS {
             weighted += region_health_weight(r) * self.region_plastic_j[r as usize];
@@ -1252,7 +1290,7 @@ impl DamageModel {
         }
     }
 
-    fn compute_effects(&self, mode: &ModeTable) -> HandlingEffects {
+    pub(crate) fn compute_effects(&self, mode: &ModeTable) -> HandlingEffects {
         let mut e = HandlingEffects::NEUTRAL;
         let mut power = 1.0f32;
         for c in &self.components {
@@ -1383,6 +1421,10 @@ impl DamageSim for DamageModel {
         dt: f32,
         out: &mut Vec<SimEvent>,
     ) {
+        self.glass_broken_tick.clear();
+        if self.last_mode.as_ref() != Some(mode) {
+            self.last_mode = Some(mode.clone());
+        }
         if !contacts.is_empty() {
             self.add_contacts(contacts, mode);
         }

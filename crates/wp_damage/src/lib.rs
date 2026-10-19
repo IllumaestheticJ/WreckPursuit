@@ -24,6 +24,7 @@ pub mod debris;
 pub mod hull;
 pub mod lattice_gen;
 mod model;
+pub mod persist;
 pub mod repair;
 mod solver;
 #[cfg(test)]
@@ -34,8 +35,9 @@ pub mod vec3;
 pub use debris::{DetachedKind, DetachedPart};
 pub use model::{
     component_health_weight, region_health_weight, DamageLogEntry, DamageLogKind, DamageModel,
-    ALL_REGIONS, REGION_COUNT,
+    GlassBreak, ALL_REGIONS, REGION_COUNT,
 };
+pub use persist::{DamageSnapshot, DamageSummary};
 pub use repair::default_price_table;
 pub use tuning::DamageTuning;
 pub use wp_contracts::{HandlingEffects, ModeTable, PriceTable, RepairEstimate};
