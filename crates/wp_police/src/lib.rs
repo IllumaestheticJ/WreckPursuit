@@ -512,10 +512,19 @@ impl PoliceSystem {
             .racers
             .entry(racer)
             .or_insert_with(|| RacerRecord::new(racer));
+        let before = r.level;
         r.heat = 0.0;
         r.add_heat(heat, &cfg);
         if r.status == PursuitStatus::Clear && r.level > WantedLevel::None {
             r.status = PursuitStatus::Wanted;
+        }
+        let after = r.level;
+        // Listeners (economy, HUD) track the level from events, so report the change.
+        if after != before {
+            self.pending.push(PoliceEvent::WantedLevelChanged {
+                racer,
+                level: after,
+            });
         }
     }
 
