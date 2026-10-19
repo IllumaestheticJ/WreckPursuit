@@ -139,7 +139,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 5.4 s | 260 km/h | 37.6 m | 0.93 g | — |
+| sim | 5.4 s | 260 km/h | 37.8 m | 0.93 g | — |
 | estimate | 5.3 s | 259 km/h | 36.1 m | 0.97 g | 620 |
 
 ## Damage lattice (`data/lattices/lindwurm_4t.json`)

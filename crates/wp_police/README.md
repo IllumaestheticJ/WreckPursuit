@@ -78,11 +78,17 @@ Assignments: `Patrol`, `Respond(incident)`, `Pursue(target)`, `Intercept(point)`
 - **Disengage**: health < `disengage_health`, a bent wheel (`|toe| > bent_wheel_toe_rad`), a flat
   or a lost wheel, or a dead engine → pull over. Total loss at `total_loss_health[mode]`.
 
-The **built-in driver** (`step_ground`) is a point mass that keeps right
-(`LANE_OFFSET_M`), uses pure-pursuit steering, saturates at a grip limit, crashes when it runs
-wide and has a background traffic-hazard model. It stands in until physical police cars exist.
-For physical units, `drive_input(.., SteerGeometry)` converts a `DriveCommand` into `VehicleInput`.
-It uses the same pure-pursuit steering law as `wp_world`'s physical traffic cars.
+**Driving** uses `wp_world::drive::DriveController`, the controller civilian traffic and opponent
+racers share. Each unit owns one, created with its `SteerGeometry` (wheelbase, full-lock angle):
+- **Physical units** (`bind_unit_entity(unit, entity, geometry)`): `unit_input(unit, dt)` returns
+  the controller's pure-pursuit steer toward the unit's track, and its PID pedals toward the
+  planned speed.
+- **Headless units**: `step_ground` steers with the same controller, then moves a kinematic bicycle
+  body. The body keeps right (`LANE_OFFSET_M`), saturates at a grip limit, crashes when it runs
+  wide and has a background traffic-hazard model. Track progress only moves forward
+  (`Track::project_ahead`), so hairpins and U-turns don't snap back.
+
+Police keep only the speed planning (corner speeds, caps, tactics).
 
 ### Tools & gadgets (`tools.rs`)
 - `plan_site` puts a tool on the predicted path between `min_ahead_m` and `max_ahead_m`, never
@@ -116,33 +122,36 @@ Player chase units get `unit_order()` **suggestions** only.
 The tables are compiled in (`PoliceConfig::builtin()`) and can be loaded from disk with
 `PoliceConfig::load(dir)`. A test checks that both copies match.
 
-## Cities
-- **`wp_world`'s city**: `PoliceSystem::for_world(cfg, &world, setup)` or
-  `RoadGraph::from_city(&CityMap)` (`city.rs`). It converts D's lane network: node ids are kept;
-  curved lanes become chains of one-way segments; straight two-way roads become a single segment;
-  districts map Core/Commercial → Core, Residential/Suburb → Suburb, Industrial/Port → Industrial.
-  Line of sight comes from `WorldQuery::line_of_sight` (building footprints).
-- **Police grid city**: `procedural_city(&CityParams)` is the self-contained test city, with its
-  own AABB occluders.
+## Roads
+Roads come from `wp_world` (machine D). Build police with `PoliceSystem::for_world(cfg, &world,
+setup)`, or with `RoadGraph::from_view(&RoadGraphView)` / `from_city(&CityMap)` (`city.rs`). The
+mapping is 1:1 from D's road-level view, with one segment (or a chain of them on curved roads) per
+`RoadEdge`:
+- **Ids:** node ids are kept. `RoadSegment::edge` remembers D's edge id, and captains name roads
+  by it (`RoadEdgeId`).
+- **Classes:** Collector/Local/Alley → Local.
+- **Districts:** Core/Commercial → Core, Residential/Suburb → Suburb, Industrial/Port → Industrial.
+- **Line of sight:** `WorldQuery::line_of_sight`, which uses D's building footprints.
 
-Scenarios pick the city with `world_city: true|false`.
+`RoadGraph` is only the police index on top: legal routing, predicted paths, approach sight
+distance and nearest road. Tests, scenarios and tools use `city::procedural(&ProcGenConfig)`.
 
-## Measured behaviour (`crates/wp_police/scenarios`, police grid city unless noted)
+## Measured behaviour (`crates/wp_police/scenarios`, D's `ProcGenConfig::small()` city)
 | Scenario | Result |
 |---|---|
 | Patrol presence (4 phases) | Exact table counts after warm-up |
-| Day speeder, Core, 2× limit (5 runs) | Pursuit at 4.5 s mean (≤ 20 s every run); reinforcement 30 s |
-| Night speeder, 03:00 (8 runs) | Pursuit at 171 s mean (3 of 8 runs < 60 s: the racer passed a cop); reinforcement 110 s |
-| Cop self-wreck, Simulation (20 pursuits) | 4.1% of engaged units; a reckless config (no budget, high caps) does measurably worse |
-| Tool placement (5 runs, L4) | 40 tools, minimum sight 120.1 m |
-| Escape / capture / safehouse / total loss | Each rule fires in its scripted case |
-| `wp_world` city: day / night speeder (5 runs each) | Pursuit at 9.5 s / 240 s mean (≤ 14 s by day); reinforcement 30 s / 101 s |
-| `wp_world` city: cop self-wreck, Simulation (20 pursuits) | 2.0% |
+| Day speeder, Core, 2× limit (5 runs) | Pursuit at 8.6 s mean (≤ 13.3 s every run); reinforcement 30 s |
+| Night speeder, 03:00 (8 runs) | Pursuit at 114 s mean (4 of 8 runs < 60 s: the racer passed a cop); reinforcement 101 s |
+| Cop self-wreck, Simulation (20 pursuits) | 1.3% of engaged units; a reckless config (no budget, high caps) does measurably worse |
+| Tool placement (5 runs, L4) | 35 tools, minimum sight 120.1 m |
+| Escape (dusk, below helicopter level) | 2 of 3 runs escape |
+| Capture / safehouse (12×12 city) / total loss | Each rule fires in its scripted case |
 
 ## Perf
 `cargo run --release -p wp_police --example police_bench`: 13 patrols + reinforcements, 4 wanted
-racers → **0.030 ms per 60 Hz frame** (native, release, cloud Xeon 2.1 GHz). Budget 0.5 ms
-native / 1.0 ms browser. Browser not measured yet.
+racers on D's small city, with exact building line of sight → **0.055 ms per 60 Hz frame**
+(native, release, cloud Xeon 2.1 GHz). Budget 0.5 ms native / 1.0 ms browser. Browser not
+measured yet.
 
 ## Determinism
 Absolute time is integer `SimTime` microseconds (`src/time.rs`); durations are `f32` seconds.
@@ -159,9 +168,9 @@ cargo run --release -p wp_police --example police_scenario -- <file.ron> [--tabl
 ```
 
 ## Known gaps
-- `RoadGraph::from_city` ignores per-lane turn restrictions, and puts cameras at every third
-  signalised junction (the network has none). It becomes the shared road-network trait in v0.3.0.
-- The built-in kinematic driver and its traffic-hazard model stand in for physical cars and real traffic.
+- The police graph ignores per-lane turn restrictions, and puts cameras at every third signalised
+  junction (the network has none). `RoadGraphView` becomes the shared road-network trait in v0.3.0.
+- The headless kinematic body and its traffic-hazard model stand in for physical cars and real traffic.
 - `PoliceSystem::new()` (used by `wp_sim` today) has no road network, so it tracks heat but spawns no units.
 - Scripted racers don't react to PIT or box-ins; physics resolves those in the real game.
 - Captain-command events are emitted on the next `step`.

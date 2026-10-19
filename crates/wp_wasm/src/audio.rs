@@ -12,12 +12,14 @@
 //! | `audio_reset()` | stop everything and forget transient state |
 
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 use wp_audio::{
-    AudioCommand, AudioDirector, AudioFrame, AudioLibrary, DirectorStats, Listener, RadioLine,
-    RadioPriority, ScannerTier, SirenMode, SirenOverride, SirenPattern, VehicleAudioInput,
+    AudioCommand, AudioDirector, AudioFrame, AudioLibrary, DirectorStats, DriverKind, Listener,
+    RadioLine, RadioPriority, ScannerTier, SirenMode, SirenOverride, SirenPattern,
+    VehicleAudioInput,
 };
 use wp_contracts::{EntityId, SimEvent};
 
@@ -85,14 +87,12 @@ pub fn audio_frame(listener: &[f32], events_json: &str, focus: u32) -> Result<St
     };
     with(|s| {
         let s = &*s;
-        let states = s.sim().vehicle_states();
-        let mut car_ids = Vec::with_capacity(states.len());
-        for (id, _) in &states {
-            let car = s
-                .car(*id)
-                .ok_or_else(|| format!("unknown entity {}", id.0))?;
-            car_ids.push(car.def.id.clone());
-        }
+        let sim = s.sim();
+        let states = sim.vehicle_states();
+        // Applied input and driver kind come from the sim vehicle itself, so AI racers, police
+        // units and physical traffic (spawned by the sim, not the session) are heard truthfully.
+        let vehicles: BTreeMap<EntityId, &wp_sim::SimVehicle> =
+            sim.vehicles().iter().map(|v| (v.id, v)).collect();
         AUDIO.with(|a| -> Result<String, String> {
             let mut a = a.borrow_mut();
             if a.is_none() {
@@ -100,28 +100,32 @@ pub fn audio_frame(listener: &[f32], events_json: &str, focus: u32) -> Result<St
                 *a = Some(AudioDirector::new(lib, AUDIO_SEED));
             }
             let d = a.as_mut().expect("just created");
-            for (id, _) in &states {
-                let car = s.car(*id).expect("checked above");
-                if !d.has_car(&car.def.id) {
-                    d.register_car(car);
-                }
-            }
-            let inputs: Vec<VehicleAudioInput> = states
-                .iter()
-                .zip(&car_ids)
-                .map(|((id, st), car_id)| {
-                    let input = s.input(*id);
-                    VehicleAudioInput {
-                        entity: *id,
-                        car_id,
-                        state: st,
-                        throttle: input.throttle,
-                        horn: input.horn,
-                        siren: input.siren,
-                        road_rumble: s.ffb(*id).map(|f| f.road_rumble).unwrap_or(0.0),
+            let mut inputs: Vec<VehicleAudioInput> = Vec::with_capacity(states.len());
+            for (id, st) in &states {
+                let Some(v) = vehicles.get(id) else {
+                    continue;
+                };
+                if !d.has_car(&v.car_id) {
+                    match s.car(*id) {
+                        Some(car) => d.register_car(car),
+                        None => match crate::data::load_car(&v.car_id) {
+                            Ok(car) => d.register_car(&car),
+                            // Unknown car: skip it rather than silencing everything.
+                            Err(_) => continue,
+                        },
                     }
-                })
-                .collect();
+                }
+                inputs.push(VehicleAudioInput {
+                    entity: *id,
+                    car_id: &v.car_id,
+                    state: st,
+                    throttle: v.input.throttle,
+                    horn: v.input.horn,
+                    siren: v.input.siren,
+                    road_rumble: s.ffb(*id).map(|f| f.road_rumble).unwrap_or(0.0),
+                    kind: driver_kind(v.kind),
+                });
+            }
             let commands = d.update(&AudioFrame {
                 tick: s.tick(),
                 listener: lis,
@@ -201,4 +205,13 @@ pub fn audio_reset() -> Result<String, JsValue> {
         d.reset(&mut out);
         Ok(json(&out))
     })
+}
+
+fn driver_kind(k: wp_sim::VehicleKind) -> DriverKind {
+    match k {
+        wp_sim::VehicleKind::Player => DriverKind::Player,
+        wp_sim::VehicleKind::AiRacer => DriverKind::AiRacer,
+        wp_sim::VehicleKind::Police => DriverKind::Police,
+        wp_sim::VehicleKind::Traffic => DriverKind::Traffic,
+    }
 }

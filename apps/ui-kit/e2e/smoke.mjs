@@ -46,7 +46,7 @@ const errors = [];
 page.on("console", (m) => m.type() === "error" && errors.push(`console: ${m.text()}`));
 page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
 
-const SCREENS = ["hud", "replay", "mainMenu", "pause", "settings", "garage", "modTree", "market", "lobby", "results", "impound", "crewMap", "police", "captain", "scanner"];
+const SCREENS = ["hud", "replay", "chaseHud", "repairBill", "mainMenu", "pause", "settings", "garage", "modTree", "market", "lobby", "results", "impound", "crewMap", "police", "captain", "scanner"];
 let failures = 0;
 const check = (cond, msg) => {
   if (!cond) {

@@ -9,10 +9,9 @@
 //! self-wreck rates can be exercised headless.
 
 use serde::{Deserialize, Serialize};
-use wp_contracts::{
-    DamageMode, DayPhase, EntityId, HandlingEffects, PlayerId, VehicleInput, GRAVITY_MPS2,
-};
-use wp_math::{atan, sin_cos, Rng};
+use wp_contracts::{DamageMode, DayPhase, EntityId, HandlingEffects, PlayerId, GRAVITY_MPS2};
+use wp_math::{sin_cos, Rng};
+use wp_world::drive::{DriveController, DriveGains};
 
 use crate::config::PursuitFile;
 use crate::events::{IncidentId, ToolId, UnitId, UnitKind};
@@ -82,31 +81,37 @@ impl Track {
     /// Project `p` onto the track, searching legs around arc length `hint` (±`window` m).
     /// Returns `(s, lateral distance)`.
     pub fn project(&self, p: [f32; 2], hint: f32, window: f32) -> (f32, f32) {
+        self.project_ahead(p, hint, window, window)
+    }
+
+    /// Project `p` onto the track within `[hint - behind, hint + ahead]` (progress tracking:
+    /// a small `behind` keeps hairpins and U-turns from snapping back onto the earlier leg).
+    /// Returns `(s, lateral distance)`; searches the whole track if nothing lies in the window.
+    pub fn project_ahead(&self, p: [f32; 2], hint: f32, behind: f32, ahead: f32) -> (f32, f32) {
         if self.pts.len() < 2 {
             return (0.0, self.pts.first().map(|q| dist(*q, p)).unwrap_or(0.0));
         }
+        let (from, to) = (hint - behind, hint + ahead);
         let mut best = (0.0f32, f32::INFINITY);
-        // Legs overlapping [hint - window, hint + window] (cum is ascending).
-        let lo = self
-            .cum
-            .partition_point(|c| *c < hint - window)
-            .saturating_sub(1);
+        // Legs overlapping [from, to] (cum is ascending).
+        let lo = self.cum.partition_point(|c| *c < from).saturating_sub(1);
         let hi = self
             .cum
-            .partition_point(|c| *c <= hint + window)
+            .partition_point(|c| *c <= to)
             .min(self.pts.len() - 1);
         for i in lo..hi.max(lo) {
-            if self.cum[i + 1] < hint - window || self.cum[i] > hint + window {
+            if self.cum[i + 1] < from || self.cum[i] > to {
                 continue;
             }
-            let (t, q) = crate::graph::closest_on_segment(self.pts[i], self.pts[i + 1], p);
-            let d = dist(q, p);
+            let (t, _) = crate::graph::closest_on_segment(self.pts[i], self.pts[i + 1], p);
+            let s = (self.cum[i] + t * (self.cum[i + 1] - self.cum[i])).max(from);
+            let d = dist(self.point_at(s), p);
             if d < best.1 {
-                best = (self.cum[i] + t * (self.cum[i + 1] - self.cum[i]), d);
+                best = (s, d);
             }
         }
         if best.1.is_infinite() {
-            return self.project(p, hint, f32::INFINITY);
+            return self.project_ahead(p, hint, f32::INFINITY, f32::INFINITY);
         }
         best
     }
@@ -365,6 +370,11 @@ pub struct Unit {
     pub pit_ready: SimTime,
     /// Whether this unit ever pursued (for statistics).
     pub engaged: bool,
+    /// Steering geometry of the unit's car.
+    pub geometry: SteerGeometry,
+    /// `wp_world`'s shared driving controller (pure pursuit + PID), created on first use.
+    #[serde(skip)]
+    pub controller: Option<DriveController>,
 }
 
 impl Unit {
@@ -407,7 +417,17 @@ impl Unit {
             captain_hold_until: SimTime::ZERO,
             pit_ready: SimTime::ZERO,
             engaged: false,
+            geometry: SteerGeometry::default(),
+            controller: None,
         }
+    }
+
+    /// The unit's driving controller (created with its geometry on first use).
+    pub fn controller(&mut self) -> &mut DriveController {
+        let (g, v) = (self.geometry, self.body.speed);
+        self.controller.get_or_insert_with(|| {
+            DriveController::new(DriveGains::TRAFFIC, g.wheelbase_m, g.max_steer_rad, v)
+        })
     }
 
     /// Available for a new job (not busy with a tool, not out of service).
@@ -554,6 +574,9 @@ pub fn step_ground(
     let mut rep = StepReport::default();
     let dynm = &cfg.unit;
     let grip_scale = u.grip_scale();
+    let geom = u.geometry;
+    let speed = u.body.speed;
+    let look = u.controller().lookahead(speed);
     let track = &u.cmd.track;
     let b = &mut u.body;
     if !track.is_drivable() || u.wrecked {
@@ -562,31 +585,41 @@ pub fn step_ground(
         b.lat_g = 0.0;
         return rep;
     }
-    let (s, lateral) = track.project(b.pos, u.track_s, 40.0);
+    let (s, lateral) = track.project_ahead(b.pos, u.track_s, 3.0, 40.0);
     u.track_s = s;
     if lateral < 2.0 {
         u.on_track = true;
     }
 
-    // Steering: pure pursuit toward a lookahead point.
-    let look = (b.speed * 0.6).max(6.0);
+    // Steering: wp_world's shared controller (pure pursuit) toward a lookahead point, then a
+    // kinematic bicycle (curvature = tan(road-wheel angle) / wheelbase).
     let target = lane_point(track, s + look, u.cmd.lane_offset_m);
     let to = sub(target, b.pos);
-    let ld = len(to).max(1.0);
-    let sin_alpha = cross(b.heading, to) / ld;
-    let mut a_lat = 2.0 * b.speed * b.speed * sin_alpha / ld;
+    let mut steer = u
+        .controller
+        .as_ref()
+        .expect("controller created above")
+        .steer(b.pos, b.heading, [target[0], target[1], 0.0]);
+    // Target behind: pure pursuit degenerates (lateral offset → 0), so turn at full lock.
+    if dot(b.heading, to) < 0.0 {
+        steer = if cross(b.heading, to) >= 0.0 {
+            -1.0
+        } else {
+            1.0
+        };
+    }
+    let delta = -steer * geom.max_steer_rad; // + = left
+    let (sd, cd) = sin_cos(delta);
+    let curvature = sd / cd.max(1e-3) / geom.wheelbase_m.max(0.5);
+    let mut a_lat = b.speed * b.speed * curvature;
     let grip = dynm.grip_g * GRAVITY_MPS2 * grip_scale;
     if a_lat.abs() > grip {
         a_lat = a_lat.signum() * grip;
     }
-    // Target behind: pure pursuit degenerates (sin α → 0), so turn at the grip limit.
-    if dot(b.heading, to) < 0.0 {
-        a_lat = if sin_alpha >= 0.0 { grip } else { -grip };
-    }
     let yaw_rate = if b.speed > 0.5 {
         a_lat / b.speed
     } else {
-        2.0 * sin_alpha
+        curvature // turning on the spot at ~1 m/s while nearly stopped
     };
     let (sn, cs) = sin_cos(yaw_rate * dt);
     b.heading = normalize([
@@ -684,56 +717,6 @@ impl Default for SteerGeometry {
     }
 }
 
-/// Converts a [`DriveCommand`] plus the vehicle's actual state into a [`VehicleInput`] for
-/// physical police cars. Steering is the same pure-pursuit law `wp_world`'s traffic uses for
-/// its physical cars (look-ahead `4 + 0.6·v` clamped to 5–25 m, `δ = atan(L·κ)`); speed is a
-/// stateless proportional throttle/brake. `wp_world` keeps its controller private, so this is a
-/// port until it exposes one (requested in `docs/integration/police.md`).
-pub fn drive_input(
-    pos: [f32; 2],
-    heading: [f32; 2],
-    speed: f32,
-    cmd: &DriveCommand,
-    track_s: f32,
-    planned_speed: f32,
-    geom: SteerGeometry,
-) -> VehicleInput {
-    if !cmd.track.is_drivable() {
-        return VehicleInput {
-            brake: 1.0,
-            siren: cmd.siren,
-            headlights: true,
-            ..Default::default()
-        };
-    }
-    let look = (4.0 + 0.6 * speed.abs()).clamp(5.0, 25.0);
-    let target = lane_point(&cmd.track, track_s + look, cmd.lane_offset_m);
-    let d = sub(target, pos);
-    let right = [heading[1], -heading[0]];
-    let long = dot(d, heading);
-    let latd = dot(d, right);
-    let l2 = (long * long + latd * latd).max(1.0);
-    // Positive curvature = left turn; positive steer = right in the contract.
-    let curvature = -2.0 * latd / l2;
-    let delta = atan(geom.wheelbase_m * curvature);
-    let steer = (-delta / geom.max_steer_rad.max(0.1)).clamp(-1.0, 1.0);
-    let want = cmd.speed_mps.min(planned_speed);
-    let err = want - speed;
-    let (throttle, brake) = if err > 0.0 {
-        ((err * 0.3).clamp(0.0, 1.0), 0.0)
-    } else {
-        (0.0, (-err * 0.25).clamp(0.0, 1.0))
-    };
-    VehicleInput {
-        steer,
-        throttle,
-        brake,
-        siren: cmd.siren,
-        headlights: true,
-        ..Default::default()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -804,27 +787,5 @@ mod tests {
             assert!(!r.crashed, "crashed at tick {i} pos {:?}", u.body.pos);
         }
         assert!(u.body.pos[0] > 150.0, "{:?}", u.body.pos);
-    }
-
-    #[test]
-    fn drive_input_steers_toward_track() {
-        let cmd = DriveCommand {
-            track: Track::new(vec![[0.0, 0.0], [20.0, 20.0]]),
-            speed_mps: 10.0,
-            cornering_g: 0.5,
-            siren: false,
-            lane_offset_m: 0.0,
-        };
-        // Facing +Y, the track goes up-right: steer right (positive).
-        let i = drive_input(
-            [0.0, 0.0],
-            [0.0, 1.0],
-            5.0,
-            &cmd,
-            0.0,
-            10.0,
-            SteerGeometry::default(),
-        );
-        assert!(i.steer > 0.0 && i.throttle > 0.0);
     }
 }

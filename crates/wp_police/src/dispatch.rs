@@ -751,11 +751,11 @@ impl PoliceSystem {
         Some((p, [r.vel[0], r.vel[1]]))
     }
 
-    /// Place a roadblock ahead of `racer` (optionally on a specific segment).
+    /// Place a roadblock ahead of `racer` (optionally on a specific road).
     pub(crate) fn place_roadblock(
         &mut self,
         racer: EntityId,
-        segment: Option<crate::graph::SegmentId>,
+        road: Option<crate::captain::RoadEdgeId>,
     ) -> Result<ToolId, CaptainError> {
         let now = self.now;
         let rec = self.racers.get(&racer).ok_or(CaptainError::UnknownTarget)?;
@@ -783,7 +783,8 @@ impl PoliceSystem {
             min_sight_m: rb.min_sight_m,
             highway_ok: level <= rb.highway_max_level,
         };
-        let site = plan_site(&self.graph, p, v, &rules, segment).map_err(CaptainError::Site)?;
+        let site =
+            plan_site(&self.graph, p, v, &rules, road.map(|r| r.0)).map_err(CaptainError::Site)?;
         let n = rb.units[0] + self.rng.below(rb.units[1] - rb.units[0] + 1);
         let barriers = roadblock_barriers(
             &site,
@@ -827,11 +828,11 @@ impl PoliceSystem {
         Ok(id)
     }
 
-    /// Place a spike strip ahead of `racer` (optionally on a specific segment).
+    /// Place a spike strip ahead of `racer` (optionally on a specific road).
     pub(crate) fn place_spikes(
         &mut self,
         racer: EntityId,
-        segment: Option<crate::graph::SegmentId>,
+        road: Option<crate::captain::RoadEdgeId>,
     ) -> Result<ToolId, CaptainError> {
         let now = self.now;
         let rec = self.racers.get(&racer).ok_or(CaptainError::UnknownTarget)?;
@@ -859,7 +860,8 @@ impl PoliceSystem {
             min_sight_m: sc.min_sight_m,
             highway_ok: true,
         };
-        let site = plan_site(&self.graph, p, v, &rules, segment).map_err(CaptainError::Site)?;
+        let site =
+            plan_site(&self.graph, p, v, &rules, road.map(|r| r.0)).map_err(CaptainError::Site)?;
         let (length, lifetime, cooldown) =
             (sc.length_m, sc.lifetime_s, sc.cooldown_s.get(self.phase));
         let id = ToolId(self.next_tool);

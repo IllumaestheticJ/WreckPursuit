@@ -195,7 +195,10 @@ impl World {
         self.tracked.extend_from_slice(tracked);
     }
 
-    /// Debris / obstacles civilians should avoid.
+    /// Debris / obstacles civilians should avoid: every loose body near the road each tick
+    /// (detached parts, wheels, knocked props). Lane-blocking debris makes drivers change
+    /// lanes or stop; small debris is swerved around within the lane; debris in a junction
+    /// box blocks the connectors through it.
     pub fn set_hazards(&mut self, hazards: &[traffic::Hazard]) {
         self.hazards.clear();
         self.hazards.extend_from_slice(hazards);

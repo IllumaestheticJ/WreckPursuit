@@ -168,7 +168,21 @@ for (const [file, kmh] of [
     const kinds = ["GlassShattered", "RegionDamaged", "ComponentFailed", "PartDetached", "TotalLoss"].filter((k) => feed.includes(k));
     check(kinds.length > 0, `event feed shows damage events: ${kinds.join(", ")}`);
   }
-  if (file.includes("head_on")) await shot("scenario_head_on.png");
+  if (file.includes("head_on")) {
+    await shot("scenario_head_on.png");
+    // UI-kit overlays (workstream 16): live repair bill (F) for the crashed car + chase readout.
+    await page.keyboard.press("KeyF");
+    await page.waitForTimeout(400);
+    const bill = await page.evaluate(() => ({
+      lines: document.querySelectorAll("#ui-bill .wp-bill tbody tr").length,
+      total: document.querySelector("#ui-bill .wp-bill-total")?.textContent ?? "",
+      live: document.querySelector("#ui-bill .wp-panel-title b")?.textContent ?? "",
+      chase: !!document.querySelector("#ui-chase .wp-hud-heat"),
+    }));
+    check(bill.lines > 0 && /\$[1-9]/.test(bill.total) && bill.live.includes("LIVE") && bill.chase, `repair bill priced live after the crash (${bill.lines} lines, ${bill.total}); chase readout mounted`);
+    await shot("repair_bill.png");
+    await page.keyboard.press("KeyF");
+  }
 }
 
 // City free drive: greybox + traffic agents.
@@ -181,6 +195,25 @@ await page.waitForTimeout(4000);
 const agents = await page.evaluate(() => window.__wp.sim.trafficAgents().length / 5);
 await shot("city_traffic.png");
 check(agents > 10, `city free drive: ${agents} traffic agents rendered`);
+// City chase preset: night city, police + traffic, speeding player; heat panel from the UI kit.
+await page.evaluate(() => window.__wp.startCityChase("debug_sedan", "Arcade"));
+await page.keyboard.down("KeyW");
+await page.waitForTimeout(5000);
+await page.keyboard.up("KeyW");
+const chase = await page.evaluate(() => ({
+  hour: window.__wp.sim.worldInfo()[1],
+  status: window.__wp.sim.policeStatus(window.__wp.app.player),
+  panel: document.querySelector(".police-hud .wp-hud-heat")?.getAttribute("aria-label") ?? null,
+  police: Array.from(window.__wp.sim.vehicleMeta()).filter((_, i, a) => i % 3 === 1 && a[i] === 2).length,
+  units: window.__wp.sim.policeUnits().length / 6,
+  violations: document.querySelector(".feed")?.textContent?.includes("TrafficViolation") ?? false,
+}));
+await shot("city_chase.png");
+check(
+  chase.hour >= 23 && chase.status !== null && chase.panel !== null && chase.violations,
+  `city chase: ${chase.hour.toFixed(2)} h, heat panel "${chase.panel}", heat ${chase.status?.heat.toFixed(2)}, ` +
+    `${chase.police} police vehicles + ${chase.units} other units, speeding violations in the feed`,
+);
 await page.evaluate(() => {
   document.getElementById("city").checked = false;
   window.__wp.startFreeDrive("debug_sedan", "Arcade", false);

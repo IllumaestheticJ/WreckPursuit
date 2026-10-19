@@ -20,7 +20,13 @@ All in `wp_opponent` (details, tuning table, perf: `crates/wp_opponent/README.md
 - `RacerSpec { entity, profile: DriverProfile, capability: CarCapability }`;
   `CarCapability::measure(&LoadedCar)` (wp_vehicle::metrics; cache per car id).
 - `DriverProfile { skill, aggression, consistency, risk, awareness }` → `DriverParams`.
-- `PoliceQuery` trait (`wanted_level(entity) -> u8`), `NoPolice`, `FixedHeat`.
+- `PoliceQuery` trait (`wanted_level(entity) -> u8`, `police_positions() -> Vec<[f32; 2]>`),
+  `NoPolice`, `FixedHeat`, and `EventHeat`: tracks wanted levels, pursuits and police
+  sightings (unit spawns, roadblocks) from the sim's `SimEvent::PoliceEvent`s — call
+  `heat.observe(&tick_events)` then pass `&heat` to `Field::tick`. A fleeing racer drives to
+  the POI farthest from the police it has seen.
+- Racers must be spawned as `Sim::set_vehicle_kind(id, VehicleKind::AiRacer)` (done in the
+  test harness).
 - `Corridor`, `CorridorOptions { opposing: OpposingLanes::{Never, ForOvertaking, Always}, .. }`,
   `RacingLine`, `SpeedProfile`.
 - `AI_CONTACT_IMPULSE_NS = 400.0` (racer–racer collision threshold used by tests).
@@ -41,8 +47,16 @@ All in `wp_opponent` (details, tuning table, perf: `crates/wp_opponent/README.md
    `skillNN`); (d) add `wp_opponent` to `lint-determinism::SIM_CRATES` (my
    `tests/determinism_lint.rs` runs it on this crate meanwhile). Scenarios waiting on this:
    `apps/simcli/scenarios/opponent/{circuit_8x5,reverse_grid_2laps,open_roads_traffic}.ron`.
-3. **Machine E (police)**: implement `wp_opponent::PoliceQuery` for `PoliceSystem`
-   (`wanted_level(e) as u8`), or I add the adapter once `wp_police` tracks heat.
+3. **Lead (`wp_sim`) + machine E (police)**: AI racers are `VehicleKind::AiRacer` and are
+   reported (≈1,300 `TrafficViolation`s in a 75 s open-road run), but `wp_sim` builds
+   `PoliceSystem::new()` (no road graph, no units), so every violation is unwitnessed
+   (× `unseen_factor` 0.2) and decays at 0.35–0.56 heat/s while racers wait at junctions:
+   nobody reaches L1 in practice. Live pursuits need police units in the sim
+   (`PoliceSystem::for_world`). Optional: `Sim::police() -> &PoliceSystem` so callers can
+   query `wanted_level` directly; `EventHeat` works without it. The flee path is tested by
+   injecting real `PoliceEvent`s into the event stream
+   (`wanted_ai_racer_flees_police_through_the_city`); `scenarios/opponent/flee_police.ron`
+   holds the live expectations as pending.
 4. **Prompt 15 (`wp_race`, now on main)**: official judging stays in `wp_race::judge`; the
    field's laps/finish are the AI's own bookkeeping. Next step on my side: build `RaceConfig` +
    grid from `wp_race::{RaceRules, Course}` and forward civilian-contact DQs to the judge. Ask:
@@ -71,8 +85,11 @@ No other contract change needed: `WantedLevel` (now in contracts) maps to `Polic
   D's controller rather than write a second one. wp_world tests unchanged and green; physical
   traffic is not instantiated in `wp_sim` yet, so no golden is affected.
 - `Cargo.toml` (workspace): member `crates/wp_opponent`, `wp_opponent` workspace dependency.
-- `apps/simcli/scenarios/opponent/*.ron`: three new v2 scenarios (pass today with warnings;
-  race expectations are `expect_pending`).
+- `apps/simcli/scenarios/opponent/*.ron`: four v2 scenarios (circuit 8×5, reverse grid, open
+  roads with traffic, flee police; pass today with warnings; race/pursuit expectations are
+  `expect_pending`) and their goldens (blessed in `[bless]` commits; only these goldens).
+- `Cargo.lock`: `wp_opponent` now depends on `wp_police` (decoding police events) and dev-
+  depends on `lint-determinism`.
 
 ## Perf numbers
 | Measurement | Machine | Native | Browser | Budget |
@@ -94,6 +111,24 @@ No other contract change needed: `WantedLevel` (now in contracts) maps to `Polic
   (corner junctions lack the right turn) — reported for D; tests run counter-clockwise.
 - simcli scenarios do not exercise the AI until Need 2 is done; the Rust tests in
   `crates/wp_opponent/tests/race.rs` are the real gate.
+- Police: wanted levels only come from events today (see Need 3); flight routes avoid the last
+  *known* police positions (spawn/roadblock events) because unit positions are not streamed.
+  Flight routes are the planner's fastest legal path, so they can bend back past the police
+  before heading away.
 
 ## Lead feedback
 (Written by the integration lead: failing tests, expected vs actual.)
+
+Run-4 follow-up (received as a cross-session message from the lead, 2026-10-19): AI racer
+that drives the city and flees police, `VehicleKind::AiRacer`, reuse D's controller, a simcli
+v2 scenario. Status: done as described above. D's controller is already public as
+`wp_world::drive::DriveController` (moved there by this workstream, merged in run 4).
+
+
+## Lead feedback (round 6b, 2026-10-19) — head-start tasks
+
+Contract **v0.3.0** is being applied in parallel by the lead (branch `lead/contract-v0.3.0`). Do not edit `wp_contracts`; build your work so it drops onto v0.3.0 (inherent methods / local types now, trait wiring after). Merge `origin/claude/laughing-newton-0xqr6q` (the lead branch, ahead of `main` until today's gate finishes) before starting. Goal of the project right now: the **single-player greybox demo**: drive in the city, raise heat, get chased by physical police, escape or get caught, and pay the repair bill.
+
+1. AI racers react to police: read `Sim::police()` (read-only) for unit positions, and flee or yield per wanted level. Test in a city scenario with police on: the AI racer escapes or gets caught, with no stuck cars.
+2. Draft model (your Need 5) so near-equal cars can pass.
+3. Signal timing at junctions for open-road racing (stop yielding at every busy junction).

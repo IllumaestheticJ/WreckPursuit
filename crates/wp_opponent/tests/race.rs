@@ -262,3 +262,80 @@ fn open_roads_with_traffic_no_civilian_contact() {
         );
     }
 }
+
+#[test]
+fn wanted_ai_racer_flees_police_through_the_city() {
+    // Open roads with traffic. At 20 s the police report racer 1 at wanted level 3 and a
+    // unit at the start line; the AI reads it from the sim's event stream (`EventHeat`),
+    // abandons the race and drives a flight route away from that unit.
+    use wp_contracts::WantedLevel;
+    use wp_police::{PoliceEvent, UnitId, UnitKind};
+    let unit_at = [-100.0f32, -166.75];
+    let setup = Setup {
+        seed: 4,
+        laps: 2,
+        drivers: eight_drivers()[..3].to_vec(),
+        closed_roads: false,
+        traffic: 0.25,
+        grid: GridLayout::SingleFile,
+        live_police: true,
+        inject: vec![
+            (
+                20.0,
+                PoliceEvent::UnitSpawned {
+                    unit: UnitId(1),
+                    kind: UnitKind::Car,
+                    pos: [unit_at[0], unit_at[1], 0.0],
+                    heading: [1.0, 0.0],
+                },
+            ),
+            (
+                20.0,
+                PoliceEvent::WantedLevelChanged {
+                    racer: EntityId(1),
+                    level: WantedLevel::L3,
+                },
+            ),
+        ],
+        max_s: 80.0,
+        ..Setup::default()
+    };
+    let out = common::run(&setup, &wp_opponent::NoPolice, &mut |_, _| {});
+    let mut field = out.field;
+    let events = field.drain_events();
+    assert!(
+        events.iter().any(
+            |e| matches!(e, OpponentEvent::Abandoned { entity, wanted_level: 3 } if *entity == EntityId(1))
+        ),
+        "{events:?}"
+    );
+    assert!(!events
+        .iter()
+        .any(|e| matches!(e, OpponentEvent::Disqualified { .. })));
+    let st = field.standings();
+    let fled = st.iter().find(|s| s.entity == EntityId(1)).unwrap();
+    assert_eq!(fled.status, RacerStatus::Fled);
+    for s in st.iter().filter(|s| s.entity != EntityId(1)) {
+        assert_eq!(s.status, RacerStatus::Racing);
+    }
+    // Its flight route ends far from the unit, and it made real progress along it (traffic
+    // and junctions included) in the minute after the call.
+    let flight = field.flight_of(0).expect("no flight route");
+    let end = flight.samples[flight.len() - 1].pos;
+    let d_dest = ((end[0] - unit_at[0]).powi(2) + (end[1] - unit_at[1]).powi(2)).sqrt();
+    assert!(
+        d_dest > 300.0,
+        "flight destination only {d_dest:.0} m from the unit"
+    );
+    let covered = field.debug_of(0).s;
+    assert!(
+        covered > 250.0,
+        "covered only {covered:.0} m of the flight route"
+    );
+    let hard = out
+        .contacts
+        .iter()
+        .filter(|c| c.3 >= AI_CONTACT_IMPULSE_NS)
+        .count();
+    assert_eq!(hard, 0, "{:?}", out.contacts);
+}
