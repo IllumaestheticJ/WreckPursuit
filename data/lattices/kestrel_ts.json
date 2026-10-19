@@ -1,5 +1,5 @@
 {
-  "id": "kestrel_ralli",
+  "id": "kestrel_ts",
   "nodes": [
     {"id":0,"pos_m":[-0.885,-2.3,0.14],"mass_kg":2.6064,"pinned_to_chassis":false,"region":"RearBumper"},
     {"id":1,"pos_m":[-0.29500002,-2.3,0.14],"mass_kg":2.6064,"pinned_to_chassis":false,"region":"RearBumper"},

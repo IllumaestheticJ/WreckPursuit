@@ -12,7 +12,7 @@ Big V8 noise and big straight-line pace for the money. It is traction-limited of
 
 ## How this car breaks
 
-Modern crash structure: UHSS cabin, long crumple rails, so it absorbs a hard frontal and the cabin stays intact even in Simulation at moderate speed. That safety costs the front clip — radiator, intercooler-free but big cooling pack and the low splitter are toast after any nose hit. Wide doors dent easily.
+Modern crash structure: UHSS cabin, long crumple rails, so it absorbs a hard frontal and the cabin stays intact even in Simulation at moderate speed. That safety costs the front clip — the big cooling pack and low splitter are toast after any nose hit. Wide doors dent easily.
 
 ## Sources (type)
 

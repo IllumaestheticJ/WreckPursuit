@@ -1,6 +1,6 @@
 {
-  "id": "sentinel_vanguard",
-  "display_name": "Sentinel Vanguard",
+  "id": "sentinel_wolfhound",
+  "display_name": "Sentinel Wolfhound",
   "class": "PoliceInterceptor",
   "analog_of": "2010s American AWD police pursuit sedan, 3.5 L twin-turbo V6",
   "body_size_m": [1.94, 5.05, 1.55],
@@ -154,7 +154,7 @@
     "ffb_scale": 1.0
   },
   "aero_downforce_coeffs": [0.0, 0.0],
-  "lattice_id": "sentinel_vanguard",
+  "lattice_id": "sentinel_wolfhound",
   "base_price": 45000,
   "durability_class": 4
 }

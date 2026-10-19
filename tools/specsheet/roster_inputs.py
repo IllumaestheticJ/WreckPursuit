@@ -92,8 +92,8 @@ CARS = [
     ),
     # ------------------------------------------------------------------ 2
     dict(
-        id="kestrel_ralli",
-        display_name="Kestrel Ralli",
+        id="kestrel_ts",
+        display_name="Kestrel TS",
         cls="Sport",
         analog_of="mid-2000s Japanese FF sport sedan, 2.0 L turbocharged I4 (AWD variant via mod)",
         era="2000s",
@@ -141,7 +141,7 @@ CARS = [
         note=("A sleeper sedan with a big turbo hit: lazy below 2500 rpm, then a wall of torque "
               "that tugs the wheel. Front-drive in stock form, so it is about managing torque "
               "steer and wheelspin out of junctions; the drivetrain mod converts it to the "
-              "all-wheel-drive rally-bred variant the name hints at."),
+              "all-wheel-drive rally-bred variant."),
         breaks=("Mid-2000s HSS cabin with decent front rails: it survives a 56 km/h frontal with "
                 "the cabin intact but the intercooler and radiator are first in line, so a "
                 "moderate nose hit leaves it limping on overheat. Four doors means four weak "
@@ -326,8 +326,8 @@ CARS = [
               "into a corner, then snaps loose if you stab the throttle to fix it."),
         breaks=("Modern crash structure: UHSS cabin, long crumple rails, so it absorbs a hard "
                 "frontal and the cabin stays intact even in Simulation at moderate speed. That "
-                "safety costs the front clip — radiator, intercooler-free but big cooling pack "
-                "and the low splitter are toast after any nose hit. Wide doors dent easily."),
+                "safety costs the front clip — the big cooling pack and low splitter are toast "
+                "after any nose hit. Wide doors dent easily."),
         sources=["manufacturer spec-class data for 2010s 5.0 V8 muscle coupes",
                  "owner dyno averages for modern NA 5.0 DOHC V8s",
                  "engineering tables (tire radius, ride frequency, multi-piston caliper hydraulics)"],
@@ -708,8 +708,8 @@ CARS = [
     ),
     # ------------------------------------------------------------------ 12
     dict(
-        id="sentinel_vanguard",
-        display_name="Sentinel Vanguard",
+        id="sentinel_wolfhound",
+        display_name="Sentinel Wolfhound",
         cls="PoliceInterceptor",
         analog_of="2010s American AWD police pursuit sedan, 3.5 L twin-turbo V6",
         era="2010s",

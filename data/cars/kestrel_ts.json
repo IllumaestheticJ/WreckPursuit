@@ -1,6 +1,6 @@
 {
-  "id": "kestrel_ralli",
-  "display_name": "Kestrel Ralli",
+  "id": "kestrel_ts",
+  "display_name": "Kestrel TS",
   "class": "Sport",
   "analog_of": "mid-2000s Japanese FF sport sedan, 2.0 L turbocharged I4 (AWD variant via mod)",
   "body_size_m": [1.77, 4.6, 1.45],
@@ -156,7 +156,7 @@
     "ffb_scale": 1.0
   },
   "aero_downforce_coeffs": [0.0, 0.0],
-  "lattice_id": "kestrel_ralli",
+  "lattice_id": "kestrel_ts",
   "base_price": 22000,
   "durability_class": 3
 }

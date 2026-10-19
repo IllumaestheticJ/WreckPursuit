@@ -1,5 +1,5 @@
 {
-  "id": "sentinel_vanguard",
+  "id": "sentinel_wolfhound",
   "nodes": [
     {"id":0,"pos_m":[-0.97,-2.525,0.15],"mass_kg":3.632,"pinned_to_chassis":false,"region":"RearBumper"},
     {"id":1,"pos_m":[-0.32333332,-2.525,0.15],"mass_kg":3.632,"pinned_to_chassis":false,"region":"RearBumper"},
