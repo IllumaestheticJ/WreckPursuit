@@ -6,8 +6,8 @@ use std::fmt::Write as _;
 
 use serde::Serialize;
 use wp_contracts::{
-    Component, EntityId, ServerToClient, SimEvent, TimeOfDay, VehicleInput, VehicleState,
-    GRAVITY_MPS2, PHYSICS_DT, PHYSICS_TICKS_PER_NET_TICK,
+    Component, EntityId, SimEvent, TimeOfDay, VehicleInput, VehicleState, GRAVITY_MPS2, PHYSICS_DT,
+    PHYSICS_TICKS_PER_NET_TICK,
 };
 use wp_sim::{Sim, SimConfig, Systems};
 
@@ -25,7 +25,7 @@ pub const PURSUIT_STARTED_KIND: u16 = wp_police::events::kind::PURSUIT_STARTED;
 pub struct Selection {
     /// Systems stepped by the sim.
     pub sim: Systems,
-    /// Encode → decode a `ServerToClient::Snapshot` through `wp_net` every net tick and check
+    /// Round-trip a snapshot through `wp_net`'s wire codec every net tick ([`crate::net`]) and check
     /// it round-trips.
     pub net: bool,
 }
@@ -325,13 +325,17 @@ pub struct ExpectResult {
     pub passed: bool,
 }
 
-/// Harness-side net statistics.
+/// Harness-side net statistics (see [`crate::net`]).
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize)]
 pub struct NetStats {
     /// Snapshots round-tripped.
     pub snapshots: u64,
     /// Total encoded bytes.
     pub bytes: u64,
+    /// Entity updates sent as deltas against a baseline.
+    pub deltas: u64,
+    /// Worst dequantised position error, m.
+    pub max_pos_err_m: f32,
 }
 
 /// World and traffic results.
@@ -777,8 +781,7 @@ pub fn run_with_hook(
     let mut max_events_per_tick = 0u64;
     let mut police_first: BTreeMap<u16, u64> = BTreeMap::new();
     let mut event_counts: Vec<(&'static str, Vec<EntityId>)> = Vec::new();
-    let mut net = NetStats::default();
-    let mut net_events: Vec<SimEvent> = Vec::new();
+    let mut net_rt = crate::net::NetRoundTrip::default();
     let mut failures = Vec::new();
     let mut track_cursor = 0usize;
 
@@ -938,28 +941,10 @@ pub fn run_with_hook(
             }
         }
 
-        // Net round trip.
-        if selection.net {
-            net_events.extend(events.iter().cloned());
-            if now.is_multiple_of(PHYSICS_TICKS_PER_NET_TICK as u64) {
-                let msg = ServerToClient::Snapshot {
-                    tick: now,
-                    vehicles: states.clone(),
-                    events: std::mem::take(&mut net_events),
-                };
-                // Contract-message JSON round trip (the old wp_net stub codec). Workstream F
-                // replaced it with its own snapshot protocol; moving this check onto
-                // `wp_net::snapshot` is on I's list.
-                let bytes = serde_json::to_vec(&msg).expect("ServerToClient serializes");
-                net.snapshots += 1;
-                net.bytes += bytes.len() as u64;
-                match serde_json::from_slice::<ServerToClient>(&bytes) {
-                    Ok(back) if back == msg => {}
-                    Ok(_) => {
-                        failures.push(format!("net: snapshot at tick {now} did not round-trip"))
-                    }
-                    Err(e) => failures.push(format!("net: snapshot at tick {now}: {e}")),
-                }
+        // Net round trip on wp_net's wire codec.
+        if selection.net && now.is_multiple_of(PHYSICS_TICKS_PER_NET_TICK as u64) {
+            if let Err(e) = net_rt.snapshot(now, &states) {
+                failures.push(format!("net: snapshot at tick {now}: {e}"));
             }
         }
 
@@ -995,7 +980,12 @@ pub fn run_with_hook(
         entities,
         events_total,
         max_events_per_tick,
-        net,
+        net: NetStats {
+            snapshots: net_rt.snapshots,
+            bytes: net_rt.bytes,
+            deltas: net_rt.deltas,
+            max_pos_err_m: net_rt.max_pos_err_m,
+        },
         world: world_tr.finish(
             sim.world(),
             &sc.city,

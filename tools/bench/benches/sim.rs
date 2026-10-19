@@ -56,20 +56,24 @@ fn lattice(c: &mut Criterion) {
 }
 
 fn snapshots(c: &mut Criterion) {
-    let sim = wp_bench::sim_with_vehicles(24);
-    let msg = wp_bench::snapshot(&sim);
-    // Contract-message JSON (the old wp_net stub codec); F's real snapshot codec is
-    // `wp_net::snapshot` — switching this bench to it is on I's list.
-    let bytes = serde_json::to_vec(&msg).expect("serializes");
+    // wp_net's wire codec (workstream F): quantise + delta-encode 24 cars against the previous
+    // net tick and encode the `ServerMsg::Snapshot`; decode = parse + re-apply the deltas.
+    let mut sim = wp_bench::sim_with_vehicles(24);
+    let pair = wp_bench::snapshot_pair(&mut sim);
     let mut g = c.benchmark_group("snapshot");
     g.bench_function("encode_24", |b| {
-        b.iter(|| black_box(serde_json::to_vec(&msg).expect("serializes")))
+        b.iter(|| {
+            let mut sent = pair.sender_baseline.clone();
+            let msg = simcli::net::build_snapshot(pair.tick, &pair.states, &mut sent, false);
+            black_box(msg.encode())
+        })
     });
     g.bench_function("decode_24", |b| {
         b.iter(|| {
-            black_box(
-                serde_json::from_slice::<wp_contracts::ServerToClient>(&bytes).expect("decodes"),
-            )
+            black_box(wp_bench::decode_snapshot(
+                &pair.delta_bytes,
+                &pair.client_baseline,
+            ))
         })
     });
     g.finish();
