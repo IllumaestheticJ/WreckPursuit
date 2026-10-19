@@ -374,10 +374,64 @@ impl Vehicle {
         self.torque = V3::ZERO;
     }
 
+    /// Overwrite the dynamic state from a [`VehicleState`] (`VehicleSim::state` output):
+    /// chassis pose and velocities, gear, engine rpm, and per wheel spin, steer, slip,
+    /// compression and load; the clutch is treated as locked when engine and wheel speeds
+    /// agree. Approximate: input filters, ABS/TCS state, shift timers and turbo boost are not
+    /// in `VehicleState` and keep their values — for bit-exact rewind use
+    /// [`Vehicle::snapshot`] / [`Vehicle::restore`]. With a Rapier body, call
+    /// [`Vehicle::write_chassis_to_body`] afterwards. (Added by the integration lead for
+    /// workstream F; extended by 02.)
+    pub fn set_state(&mut self, s: &wp_contracts::VehicleState) {
+        let rot = Quat::from_xyzw(s.rot[0], s.rot[1], s.rot[2], s.rot[3]);
+        let pos = v3(s.pos);
+        self.chassis = Chassis {
+            pos,
+            rot,
+            lin_vel: v3(s.lin_vel),
+            ang_vel: v3(s.ang_vel),
+            com: pos + rot * self.com_local,
+        };
+        for (w, ws) in self.wheels.iter_mut().zip(&s.wheel_states) {
+            w.omega = ws.omega;
+            w.steer = ws.steer_rad;
+            w.alpha_lag = ws.slip_angle;
+            w.kappa = ws.slip_ratio;
+            w.x = ws.compression_m;
+            w.fz = ws.fz_n;
+            w.contact = ws.contact;
+            w.surface = ws.surface;
+        }
+        // Centre angle: mean of the steered wheels with their toe removed.
+        let mut sum = 0.0;
+        let mut n = 0;
+        for i in 0..4 {
+            let c = &self.corners[i];
+            if c.steerable {
+                let toe = c.toe + self.effects.toe_delta[i];
+                sum += s.wheel_states[i].steer_rad - if c.left { -toe } else { toe };
+                n += 1;
+            }
+        }
+        if n > 0 {
+            self.center_steer = sum / n as f32;
+        }
+        self.gearbox.set(s.gear);
+        self.engine.omega = s.engine_rpm / RPM_PER_RADPS;
+        let split = self.drive_split(0.0);
+        let ratio = self.gearbox.total_ratio(&self.def.drivetrain);
+        let w_in = ratio * self.axle_omega(&split);
+        self.clutch_locked = ratio != 0.0 && (self.engine.omega - w_in).abs() < 1.0;
+        if self.clutch_locked {
+            self.clutch = 1.0;
+        }
+    }
+
     /// Teleport to `pos`/`yaw` already moving forward (chassis +Y) at `speed_mps`, wheels and
     /// engine matched. Used by `wp_world` to promote kinematic traffic to a physical vehicle
-    /// without a jolt. (Added by the integration lead for workstream D; when the vehicle has a
-    /// Rapier body, use [`Vehicle::place_body`] instead.)
+    /// without a jolt. Forward speeds only (a negative speed spins the wheels backwards in
+    /// first gear). (Added by the integration lead for workstream D; reviewed by 02. When the
+    /// vehicle has a Rapier body, use [`Vehicle::place_body`] instead.)
     pub fn set_pose_and_speed(&mut self, pos: [f32; 3], yaw: f32, speed_mps: f32) {
         self.reset(pos, yaw);
         let mut ch = *self.chassis();

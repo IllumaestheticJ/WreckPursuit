@@ -10,11 +10,14 @@ the coefficients, not hand-typed).
 
 | id | lat D | long D | peak α | peak κ | wet | Use |
 |---|---|---|---|---|---|---|
-| `street` | 1.00 | 1.10 | 7.6° | 0.115 | 0.70 | all-season touring, default |
+| `street` | 0.96 | 1.10 | 7.6° | 0.115 | 0.70 | all-season touring, default (debug sedan 0.82 g) |
 | `sport` | 1.10 | 1.20 | 6.2° | 0.101 | 0.62 | summer performance |
 | `semi_slick` | 1.28 | 1.36 | 4.7° | 0.080 | 0.50 | track-day, edgy past the peak |
 | `wet_biased` | 0.96 | 1.03 | 8.0° | 0.134 | 0.86 | rain / winter-ish, forgiving |
 | `police_pursuit` | 1.04 | 1.14 | 7.0° | 0.108 | 0.72 | heavy-duty pursuit, low wear, higher Fz0 |
+| `all_terrain` | 0.86 | 0.98 | 12.0° | 0.158 | 0.72 | pickups/SUVs: ≈ 0.9 × street, soft (low cornering stiffness), +33% rolling resistance, best on gravel/dirt (0.82–0.84) |
+| `vintage_bias` | 0.81 | 0.93 | 8.3° | 0.132 | 0.60 | 70s bias-ply: ≈ 0.85 × street, ~half street's cornering stiffness, strong fall-off past the peak (85% at 2× peak slip), long relaxation length (lazy) |
+| `drag_radial` | 0.98 | 1.45 | 11.5° | 0.130 | 0.45 | street-legal drag tire: huge straight-line traction, soft sidewall (weak cornering response), terrible in the wet, fast wear |
 
 ## Source reasoning
 
@@ -32,6 +35,8 @@ the coefficients, not hand-typed).
   sidewalls. Also the keyboard-friendliness knob.
 - **Surfaces:** wet asphalt keeps 60–85% of dry grip depending on tread; loose surfaces
   ~0.45–0.68; grass lowest.
-- Rolling resistance 0.010–0.013; `wear_rate` is a placeholder (wear not simulated yet).
+- `street` lateral D = 0.96 (was 1.0): all-season car-level grip is 0.82–0.92 g (09's class
+  band); 1.0 read like a summer tire.
+- Rolling resistance 0.010–0.016; `wear_rate` is a placeholder (wear not simulated yet).
 
 All coefficient sets are generic engineering approximations, not fitted to any branded tire.

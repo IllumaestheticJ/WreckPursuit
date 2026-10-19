@@ -1,6 +1,11 @@
-//! Standalone single-vehicle test rig: a Rapier world with a ground slab (top at z = 0) and
-//! one vehicle, stepped exactly like `wp_sim` does. Used by [`crate::metrics`], tests and the
-//! benchmark.
+//! Standalone single-vehicle stepper: a Rapier world with a ground slab (top at z = 0) and one
+//! vehicle, configured and stepped **exactly** like `wp_sim` (same slab, same priming, same
+//! per-tick order), so a lone car on flat ground produces bit-identical states in both — this
+//! is the client-side prediction stepper for `wp_net` (NET-N2), and backs [`crate::metrics`],
+//! tests and the benchmark. Rewind with [`Rig::snapshot`] / [`Rig::restore`].
+//!
+//! Bit-exactness holds while the car touches nothing but the ground plane: other cars, static
+//! boxes or city colliders on the server are not in the rig's world.
 
 use rapier3d::prelude::*;
 use wp_contracts::{
@@ -10,6 +15,7 @@ use wp_contracts::{
 
 use crate::body::VehicleBody;
 use crate::ground::RapierGround;
+use crate::snapshot::{SnapshotError, VehicleSnapshot};
 use crate::vehicle::{Vehicle, VehicleExtras};
 
 /// Flat world with one surface type, no limits or signals.
@@ -45,12 +51,24 @@ impl WorldQuery for FlatWorld {
     }
 }
 
-/// One vehicle in its own Rapier world.
-pub struct Rig {
+/// Half extents of the ground slab (identical to `wp_sim::PhysicsWorld`), m.
+pub const GROUND_HALF_EXTENTS: [f32; 3] = [5000.0, 5000.0, 0.5];
+
+/// The static ground collider used by `wp_sim` and the rig: a slab whose top face is z = 0.
+pub fn ground_collider() -> Collider {
+    let [x, y, z] = GROUND_HALF_EXTENTS;
+    ColliderBuilder::cuboid(x, y, z)
+        .translation(Vector::new(0.0, 0.0, -z))
+        .build()
+}
+
+/// One vehicle in its own Rapier world. `W` supplies surfaces, limits and time of day
+/// (default: [`FlatWorld`]; pass the same world type the server uses for exact parity).
+pub struct Rig<W: WorldQuery = FlatWorld> {
     /// The vehicle.
     pub vehicle: Vehicle,
     /// World queries.
-    pub world: FlatWorld,
+    pub world: W,
     /// Events emitted so far.
     pub events: Vec<SimEvent>,
     handles: VehicleBody,
@@ -68,7 +86,7 @@ pub struct Rig {
     ticks: u64,
 }
 
-impl Rig {
+impl Rig<FlatWorld> {
     /// Rig with the car at rest at the origin facing +Y.
     pub fn new(car: &LoadedCar) -> Self {
         Self::with_extras(car, VehicleExtras::default())
@@ -76,42 +94,90 @@ impl Rig {
 
     /// [`Rig::new`] with vehicle extras.
     pub fn with_extras(car: &LoadedCar, extras: VehicleExtras) -> Self {
-        let vehicle = Vehicle::with_extras(&car.def, &car.tires, [0.0; 3], 0.0, extras);
+        Self::with_world(car, extras, FlatWorld::default(), [0.0; 3], 0.0)
+    }
+}
+
+impl<W: WorldQuery> Rig<W> {
+    /// Rig with a custom world, spawning the car at `pos`/`yaw` (same sequence as
+    /// `wp_sim::Sim::new` + `spawn_vehicle`: prime the empty world, then add the body).
+    pub fn with_world(
+        car: &LoadedCar,
+        extras: VehicleExtras,
+        world: W,
+        pos: [f32; 3],
+        yaw: f32,
+    ) -> Self {
         let mut bodies = RigidBodySet::new();
         let mut colliders = ColliderSet::new();
-        colliders.insert(
-            ColliderBuilder::cuboid(20_000.0, 20_000.0, 0.5)
-                .translation(Vector::new(0.0, 0.0, -0.5))
-                .friction(0.8)
-                .build(),
+        colliders.insert(ground_collider());
+        let mut pipeline = PhysicsPipeline::new();
+        let mut islands = IslandManager::new();
+        let mut broad_phase = BroadPhaseBvh::new();
+        let mut narrow_phase = NarrowPhase::new();
+        let mut impulse_joints = ImpulseJointSet::new();
+        let mut multibody_joints = MultibodyJointSet::new();
+        let mut soft_bodies = SoftBodySet::new();
+        let mut ccd = CCDSolver::new();
+        let params = IntegrationParameters {
+            dt: PHYSICS_DT,
+            ..Default::default()
+        };
+        // Prime the broad phase (empty world) so the first wheel probes see the ground.
+        pipeline.step(
+            Vector::new(0.0, 0.0, -GRAVITY_MPS2),
+            &params,
+            &mut islands,
+            &mut broad_phase,
+            &mut narrow_phase,
+            &mut bodies,
+            &mut colliders,
+            &mut impulse_joints,
+            &mut multibody_joints,
+            &mut soft_bodies,
+            &mut ccd,
+            &(),
+            &(),
         );
+        let vehicle = Vehicle::with_extras(&car.def, &car.tires, pos, yaw, extras);
         let handles = vehicle.build_body(&mut bodies, &mut colliders);
-        let mut rig = Self {
+        Self {
             vehicle,
-            world: FlatWorld::default(),
+            world,
             events: Vec::new(),
             handles,
             bodies,
             colliders,
-            pipeline: PhysicsPipeline::new(),
-            islands: IslandManager::new(),
-            broad_phase: BroadPhaseBvh::new(),
-            narrow_phase: NarrowPhase::new(),
-            impulse_joints: ImpulseJointSet::new(),
-            multibody_joints: MultibodyJointSet::new(),
-            soft_bodies: SoftBodySet::new(),
-            ccd: CCDSolver::new(),
-            params: IntegrationParameters {
-                dt: PHYSICS_DT,
-                ..Default::default()
-            },
+            pipeline,
+            islands,
+            broad_phase,
+            narrow_phase,
+            impulse_joints,
+            multibody_joints,
+            soft_bodies,
+            ccd,
+            params,
             ticks: 0,
-        };
-        // Prime the broad phase so the first wheel probes see the ground, then restore.
-        rig.physics_step();
-        rig.teleport([0.0; 3], 0.0, 0.0, 0.0);
-        rig.ticks = 0;
-        rig
+        }
+    }
+
+    /// Full dynamic state of the car (see [`crate::snapshot`]). Rapier's own caches are not
+    /// included; with the car touching only the ground they carry no state between ticks.
+    pub fn snapshot(&self) -> VehicleSnapshot {
+        self.vehicle.snapshot()
+    }
+
+    /// Rewind to a snapshot: restores the vehicle and puts the chassis body back.
+    pub fn restore(&mut self, snap: &VehicleSnapshot) -> Result<(), SnapshotError> {
+        self.vehicle.restore(snap)?;
+        self.vehicle
+            .write_chassis_to_body(&mut self.bodies[self.handles.body]);
+        Ok(())
+    }
+
+    /// Set the tick counter (e.g. to the server tick after a restore).
+    pub fn set_ticks(&mut self, ticks: u64) {
+        self.ticks = ticks;
     }
 
     fn physics_step(&mut self) {
