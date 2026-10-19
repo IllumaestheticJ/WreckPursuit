@@ -105,6 +105,20 @@ pub struct BuiltSim {
     pub has_city: bool,
 }
 
+/// States of the scenario's own entities, in scenario order. City runs add police and traffic
+/// vehicles (spawned later, so higher ids); expectations and metrics ignore those.
+pub fn scenario_states(sim: &Sim, ids: &[EntityId]) -> Vec<(EntityId, wp_contracts::VehicleState)> {
+    sim.vehicle_states()
+        .into_iter()
+        .filter(|(id, _)| ids.contains(id))
+        .collect()
+}
+
+/// Car model for AI police units in city scenarios.
+pub const POLICE_CAR: &str = "sentinel_cruiser";
+/// Car model for physical (near-player) traffic in city scenarios.
+pub const TRAFFIC_CAR: &str = "debug_sedan";
+
 /// The `wp_world` settings a scenario implies (seed, clock, traffic density override).
 pub fn world_config(sc: &Scenario) -> wp_world::WorldConfig {
     let density = sc.traffic_density.unwrap_or(1.0);
@@ -192,6 +206,9 @@ pub fn build_sim(
             world.set_tracked_vehicles(&tracked);
             world.populate();
             sim.set_world(world);
+            // City runs get real police cars and physical near-player traffic (lead, run 5).
+            sim.set_police_car(load_car(data, POLICE_CAR)?);
+            sim.set_traffic_car(load_car(data, TRAFFIC_CAR)?);
             true
         }
         None => false,
@@ -810,7 +827,7 @@ pub fn run_with_hook(
                 track_cursor += 1;
             }
         } else {
-            let states = sim.vehicle_states();
+            let states = scenario_states(&sim, &ids);
             for (idx, id) in ids.iter().enumerate() {
                 let input = driver_input(sc, idx, tick, &states[idx].1, &last_inputs[idx]);
                 if input != last_inputs[idx] {
@@ -873,7 +890,7 @@ pub fn run_with_hook(
         }
 
         // Metrics.
-        let states = sim.vehicle_states();
+        let states = scenario_states(&sim, &ids);
         let sample = now.is_multiple_of(sample_every);
         for (idx, (id, s)) in states.iter().enumerate() {
             let tr = &mut trackers[idx];
@@ -973,7 +990,7 @@ pub fn run_with_hook(
     replay.ticks = ticks;
 
     // Final per-entity values.
-    let states = sim.vehicle_states();
+    let states = scenario_states(&sim, &ids);
     let mut entities = Vec::new();
     for (tr, (_, s)) in trackers.iter_mut().zip(&states) {
         tr.summary.final_speed_mps = s.speed_mps;
