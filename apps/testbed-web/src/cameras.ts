@@ -40,6 +40,8 @@ export class CameraRig {
   private cineTimer = 0;
   private cineShot = 0;
   private readonly cineAnchor = new THREE.Vector3();
+  /** Set by `lookAt`: the orbit pivot stays put instead of following the car. */
+  private pinned = false;
 
   constructor(dom: HTMLElement) {
     this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 3000);
@@ -53,9 +55,26 @@ export class CameraRig {
     });
   }
 
+  /**
+   * Orbit camera placed in world coordinates (+Z up, metres): at `from`, looking at `to`
+   * (automation / docs screenshots). The pivot stays there until the next `setMode`.
+   */
+  lookAt(from: [number, number, number], to: [number, number, number]): void {
+    this.mode = "orbit";
+    this.pinned = true;
+    this.orbit.enabled = true;
+    this.camera.fov = 60;
+    this.camera.updateProjectionMatrix();
+    // The world group is Z-up rotated into Three's Y-up: (x, y, z) → (x, z, −y).
+    this.camera.position.set(from[0], from[2], -from[1]);
+    this.orbit.target.set(to[0], to[2], -to[1]);
+    this.orbit.update();
+  }
+
   /** Switch camera. `orbitOffset` (vehicle-local metres) places a fresh orbit camera. */
   setMode(mode: CameraMode, target?: THREE.Object3D, orbitOffset: [number, number, number] = [-7, -9, 6]): void {
     this.mode = mode;
+    this.pinned = false;
     this.orbit.enabled = mode === "orbit";
     this.camera.fov = mode === "hood" || mode === "bumper" ? 75 : 60;
     this.camera.updateProjectionMatrix();
@@ -100,7 +119,9 @@ export class CameraRig {
         break;
       case "orbit":
         // Follow the car with the orbit pivot; the user controls angle and distance.
-        {
+        if (this.pinned) {
+          this.orbit.update();
+        } else {
           const p = target.getWorldPosition(new THREE.Vector3());
           const delta = p.clone().sub(this.orbit.target);
           this.orbit.target.add(delta);

@@ -3,7 +3,8 @@
 //
 // URL parameters (handy for automation): ?scenario=crash/head_on.ron&speed=60 runs a scenario,
 // ?bench=24 spawns a 24-car benchmark, ?cam=orbit picks a camera, ?replay=last plays the last
-// stored replay.
+// stored replay, ?city=procedural_12x12 picks the city (default vesper_v2), ?chase=1 starts the
+// city chase.
 import { loadWasm, sim, type DriverInput, type Scenario, type ScenarioResult } from "./wasm/sim";
 import { META_STRIDE, STATE_STRIDE, S, T, VEHICLE_KIND, W } from "./wasm/layout";
 import { installKeyboard, readInput, toggleHeadlights, type InputSource } from "./input";
@@ -19,8 +20,8 @@ import { UiOverlay } from "./ui/overlay";
 
 // v2: canonical simcli replay.bin (v1 held the retired WPR\x01 format).
 const LAST_REPLAY_KEY = "wp.testbed.lastReplay.v2";
-/** City the free-drive "city" box loads (matches data/city/procedural_12x12.*). */
-const CITY_ID = "procedural_12x12";
+/** Cities the selector offers (data/city/<id>.greybox.glb); the first is the default. */
+const CITY_IDS = ["vesper_v2", "procedural_12x12"];
 const COLOURS = [0xd04a2a, 0x2a7fd0, 0x3fb950, 0xd0a92a, 0x9b59b6, 0x1abc9c];
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -70,6 +71,9 @@ async function main(): Promise<void> {
   const audio = new AudioSystem(scene.world, overlay);
   const policeHud = new PoliceHud(overlay);
   const ui = new UiOverlay(overlay);
+  const citySel = $("city-map") as HTMLSelectElement;
+  const cityParam = params.get("city");
+  if (cityParam && CITY_IDS.includes(cityParam)) citySel.value = cityParam;
 
   // ----- session management --------------------------------------------------------------
 
@@ -89,7 +93,9 @@ async function main(): Promise<void> {
     const sc = sim.scenario();
     scene.setBarriers(sc.barriers ?? []);
     const city = sim.worldInfo()[W.city] > 0.5;
-    void scene.setCity(city ? CITY_ID : null);
+    const cityId = city ? sim.cityId() : "";
+    void scene.setCity(cityId || null);
+    if (cityId && CITY_IDS.includes(cityId)) citySel.value = cityId;
     ($("city") as HTMLInputElement).checked = city;
     ($("mode") as HTMLSelectElement).value = modeName();
     const first = app.views.get(app.player);
@@ -137,7 +143,7 @@ async function main(): Promise<void> {
     app.scenario = null;
     app.result = null;
     app.bench = null;
-    sim.init(1, sim.freeDriveJson(car, mode, city), false);
+    sim.init(1, city ? sim.freeDriveCityJson(car, mode, citySel.value) : sim.freeDriveJson(car, mode, false), false);
     app.scenario = null;
     rebuildViews();
     applyAssistPreset(app.source);
@@ -152,7 +158,7 @@ async function main(): Promise<void> {
     app.scenario = null;
     app.result = null;
     app.bench = null;
-    sim.init(0, sim.cityChaseJson(car, mode), false);
+    sim.init(0, sim.cityChaseCityJson(car, mode, citySel.value), false);
     rebuildViews();
     applyAssistPreset(app.source);
     rig.setMode("chase", app.views.get(app.focus)?.root);
@@ -236,6 +242,10 @@ async function main(): Promise<void> {
     sim.setDamageMode((e.target as HTMLSelectElement).value);
   };
   ($("city") as HTMLInputElement).onchange = () => startFreeDrive();
+  citySel.onchange = () => {
+    if (sim.scenario()?.name === "city_chase") startCityChase();
+    else if (($("city") as HTMLInputElement).checked) startFreeDrive();
+  };
   document.querySelectorAll<HTMLInputElement>("#assist-row input").forEach((cb) => {
     cb.onchange = () => {
       if (isReplay()) return;
@@ -366,6 +376,8 @@ async function main(): Promise<void> {
   if (scParam) {
     scSel.value = scParam;
     await runScenario(scParam, Number(params.get("speed") ?? 0));
+  } else if (params.get("chase")) {
+    startCityChase("debug_sedan");
   } else {
     startFreeDrive("debug_sedan");
   }
@@ -575,6 +587,13 @@ async function main(): Promise<void> {
     startCityChase,
     startBench,
     setCamera: (m: CameraMode, offset?: [number, number, number]) => rig.setMode(m, app.views.get(app.focus)?.root, offset),
+    lookAt: (from: [number, number, number], to: [number, number, number]) => rig.lookAt(from, to),
+    /** Camera near/far planes, m (docs overview shots; default 0.1 / 3000). */
+    setClip: (near: number, far: number) => {
+      rig.camera.near = near;
+      rig.camera.far = far;
+      rig.camera.updateProjectionMatrix();
+    },
     toggleLayer: (id: string) => layers.toggle(id),
   };
   requestAnimationFrame(frame);

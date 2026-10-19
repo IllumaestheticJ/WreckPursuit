@@ -236,3 +236,29 @@ fn city_chase_speeding_player_gets_heat() {
     assert!(violations > 0, "speeding player produced no violations");
     assert!(max_heat > 0.0, "violations produced no heat");
 }
+
+#[test]
+fn vesper_free_drive_stays_on_the_ground_with_traffic() {
+    let sc = crate::scenario::free_drive_in(
+        "debug_sedan",
+        DamageMode::Arcade,
+        crate::scenario::city_spec("vesper_v2"),
+    );
+    let mut s = Session::new(sc, false).unwrap();
+    assert!(s.has_city());
+    for _ in 0..4 {
+        s.run_ticks(240);
+        let st = s.sim().vehicle_states()[0].1.clone();
+        let ground = s
+            .sim()
+            .world()
+            .map()
+            .ground_height([st.pos[0], st.pos[1]], Some(st.pos[2]));
+        assert!(
+            (st.pos[2] - ground).abs() < 0.5,
+            "player {} m off the ground",
+            st.pos[2] - ground
+        );
+    }
+    assert!(s.sim().world().agent_count() > 10, "traffic spawned");
+}
