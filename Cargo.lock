@@ -4246,6 +4246,7 @@ dependencies = [
  "wp_contracts",
  "wp_damage",
  "wp_math",
+ "wp_police",
 ]
 
 [[package]]
