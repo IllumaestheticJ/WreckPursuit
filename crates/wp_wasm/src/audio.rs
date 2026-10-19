@@ -265,7 +265,8 @@ mod tests {
             for v in sim.vehicles() {
                 if v.kind == wp_sim::VehicleKind::Police {
                     police_ids.insert(v.id.0);
-                    police_siren_on |= v.input.siren;
+                    // The bridge's rule: lights and siren follow the unit's assignment.
+                    police_siren_on |= crate::police::siren_on(sim, v);
                 }
             }
             // Listener rides with the player, like the chase camera.
@@ -313,7 +314,10 @@ mod tests {
             }
         }
         assert!(!police_ids.is_empty(), "police units became sim vehicles");
-        assert!(police_siren_on, "a pursuing unit drives with its siren on");
+        assert!(
+            police_siren_on,
+            "a responding / pursuing unit has its siren on"
+        );
         assert!(siren_voice, "police sirens get voices on the police bus");
         assert!(
             traffic_engine,
