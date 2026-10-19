@@ -69,6 +69,7 @@
 | From | What | Workaround now |
 |---|---|---|
 | Harness (I) | A negative police expectation for simcli, e.g. `no_pursuit_before(t_s)` (or `pursuit_started_before` with `expected: false`), so a 5 km/h parking-bump city scenario can assert "no pursuit" (row 24) | Covered by `wp_sim/tests/police_assault.rs` and `crates/wp_police/scenarios/parking_bump.ron` |
+| Lead (`wp_wasm`) | A captured / wrecked car is held with brake 1.0. At a standstill that engages `wp_vehicle`'s auto-reverse (brake > 0.5 for 0.25 s), and in reverse the pedals swap, so a held car can drive itself backwards. Hold with brake 0.4 + handbrake, as police units do. Found via the capture test above, where it is masked because the racer is pinned against the police car | — |
 | ui-kit / lead (`wp_wasm`) | Optional: the HUD banner sub-line could say why a pursuit started ("assault on an officer"); `police_status()` would need the last offence. The PURSUIT banner and the radio line in the event feed already show it | — |
 | Harness (I) | Promote the `soak/traffic_soak_observer` gate: it now runs with `police_cars: true` and meets its pending `civilian_collisions = 0` (round 8) | — |
 | Economy (G) | Remove `#[ignore]` from `wp_economy/tests/session.rs::live_police_run_settles_like_the_recording`: it passes with `--ignored` since round 8 (see "Response to round 8"). Re-record the fixtures if you want them from today's police | Test still ignored |
@@ -142,6 +143,10 @@ The reply is `Result<(), CaptainError>` with:
     contact → `on_contact` → unit-entity path already worked).
   - `apps/simcli/scenarios/police/sideswipe_patrol_{day,night}.ron`: new city scenarios, with
     their goldens in `apps/simcli/golden/` (`[bless]` commit).
+  - `crates/wp_wasm/src/run_tests.rs` (lead's): `capture_bills_holds_the_car_and_repair_continue_restores_it`
+    asserted the capture at exactly L2. Its "parked" racer holds full brake, which at a standstill
+    engages `wp_vehicle`'s auto-reverse, so it backs into the police car at about 27 km/h (6,800 N·s):
+    now an assault, L3. The assertion is `>= L2` with a comment; nothing else changed.
   - `apps/simcli/golden/race_city_sprint/` re-blessed: at 15.2 s the coupe, already pursued for
     speeding, rams police unit 3 (8,600 N·s, 8.7 m/s). That is now an assault (L1 → L2), so the
     hashes change from tick 3840. Its expectations still pass.
@@ -207,9 +212,10 @@ Telling a hit from a nudge (measured with physical cars, `wp_sim` and simcli):
 
 A glancing swipe has little normal closing speed, so the rule uses the cars' relative speed
 (`min_rel_speed_mps` = 2.5) plus a small impulse floor (`min_impulse_ns` = 150, feather touches)
-and racer speed ≥ 2.5 m/s (a standing car is the one being hit). Speeds are taken before and
-after the hit: a head-on hit stops the racer within the tick that reports it, which first hid a
-10,700 N·s hit. The unit's own PIT / box-in / rolling-block contact on its target is not an assault.
+and racer speed ≥ 2.5 m/s (a standing car is the one being hit). Speeds are the racer's just
+before the episode's first contact: a head-on hit stops the racer within the tick that reports
+it (reading the speed after the hit first hid a 10,700 N·s hit), and a patrol car nudging a
+parked racer shoves it (which must not make the parked racer the attacker). The unit's own PIT / box-in / rolling-block contact on its target is not an assault.
 
 Tests:
 - `wp_sim/tests/police_assault.rs`: real Rapier cars, patrol car paused at its post. Glancing

@@ -217,8 +217,8 @@ pub struct PoliceSystem {
     pub(crate) recognition_s: BTreeMap<EntityId, f32>,
     pub(crate) trails: BTreeMap<EntityId, unit::Track>,
     pub(crate) prev_pos: BTreeMap<EntityId, [f32; 2]>,
-    /// Racer velocity reported on the previous step, m/s (before this tick's contacts: a hard
-    /// hit has already slowed the racer by the time it is reported).
+    /// Racer velocity reported on the previous step, m/s: how the racer came into this tick's
+    /// contacts (by the time a contact is reported, the hit has already changed its velocity).
     pub(crate) prev_vel: BTreeMap<EntityId, [f32; 3]>,
     pub(crate) units: Vec<Unit>,
     pub(crate) next_unit: u32,

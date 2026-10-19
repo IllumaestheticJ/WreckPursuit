@@ -292,29 +292,29 @@ impl PoliceSystem {
         {
             return;
         }
-        // Racer velocity now (after this tick's physics) and on the previous step (before the
-        // hit: a head-on stops the racer within the tick that reports it).
-        let now_vel = self.racers[&racer].vel;
-        let before = self.prev_vel.get(&racer).copied().unwrap_or(now_vel);
-        let uv = u.body.vel();
-        let (mut racer_speed, mut rel_speed) = (0.0f32, hit.rel_speed);
-        for v in [now_vel, before] {
-            racer_speed = racer_speed.max((v[0] * v[0] + v[1] * v[1]).sqrt());
-            let rel = [v[0] - uv[0], v[1] - uv[1]];
-            rel_speed = rel_speed.max((rel[0] * rel[0] + rel[1] * rel[1]).sqrt());
-        }
         let key = (u.id, racer);
+        let uv = u.body.vel();
+        // The racer's velocity on the previous step, i.e. just before this tick's contact (by the
+        // time a contact is reported, a head-on hit has stopped the racer and a unit driving
+        // into a parked racer has shoved it).
+        let before = self
+            .prev_vel
+            .get(&racer)
+            .copied()
+            .unwrap_or(self.racers[&racer].vel);
         let ep = self.contact_episodes.entry(key).or_default();
         if ep.last.is_none_or(|t| now.since(t) > a.episode_s) {
+            // A new episode: judge the racer by how it came into the first contact; later
+            // contacts of the episode only add impulse and normal closing speed.
+            let rel = [before[0] - uv[0], before[1] - uv[1]];
             ep.impulse_ns = 0.0;
-            ep.rel_speed_mps = 0.0;
-            ep.racer_speed_mps = 0.0;
+            ep.rel_speed_mps = (rel[0] * rel[0] + rel[1] * rel[1]).sqrt();
+            ep.racer_speed_mps = (before[0] * before[0] + before[1] * before[1]).sqrt();
         }
         ep.last = Some(now);
         // Contacts arrive once per tick with that tick's impulse: a scrape adds up.
         ep.impulse_ns += hit.impulse_ns;
-        ep.rel_speed_mps = ep.rel_speed_mps.max(rel_speed);
-        ep.racer_speed_mps = ep.racer_speed_mps.max(racer_speed);
+        ep.rel_speed_mps = ep.rel_speed_mps.max(hit.rel_speed);
         let hard = ep.impulse_ns >= a.min_impulse_ns
             && ep.rel_speed_mps >= a.min_rel_speed_mps
             && ep.racer_speed_mps >= a.min_racer_speed_mps;

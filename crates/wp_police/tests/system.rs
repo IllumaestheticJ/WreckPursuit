@@ -666,6 +666,8 @@ fn hitting_a_police_car_is_assault_and_starts_a_pursuit_at_once() {
         let cop = EntityId(901);
         h.police.bind_unit_entity(ai, cop, SteerGeometry::default());
         h.speed = c.racer_kmh / 3.6;
+        // One step at speed: police judge the racer by its speed before the contact.
+        h.run(PHYSICS_DT, &[]);
         let r = h.racer_view();
         let d = h.path.dir_at(h.s).unwrap();
         h.police.sync_unit(
@@ -736,6 +738,7 @@ fn assault_counts_once_per_episode_and_not_for_police_contact_tactics() {
     let cop = EntityId(901);
     h.police.bind_unit_entity(ai, cop, SteerGeometry::default());
     h.speed = 10.0;
+    h.run(PHYSICS_DT, &[]);
     let r = h.racer_view();
     h.police.sync_unit(
         ai,

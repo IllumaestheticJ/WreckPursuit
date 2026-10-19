@@ -40,8 +40,9 @@ Pure Rust, no renderer, builds for `wasm32-unknown-unknown`.
   Physics contacts (`SimEvent::Contact`) between a racer and a unit's entity are summed into a
   contact episode (contacts less than `episode_s` apart). It counts when the episode's impulse
   reaches `min_impulse_ns`, the cars' relative speed `min_rel_speed_mps`, and the racer's own
-  speed `min_racer_speed_mps`. Speeds are taken before and after the hit, because a head-on
-  hit has already stopped the racer by the time it is reported. Then heat rises by `heat`, to at
+  speed `min_racer_speed_mps`. Speeds are the racer's just before the episode's first
+  contact (by the time a contact is reported, a head-on hit has stopped the racer, and a patrol
+  car nudging a parked racer has shoved it). Then heat rises by `heat`, to at
   least `min_level` (L2), the radio says "Unit N: I've been hit! … assault on an officer.", and
   the pursuit starts in the same tick with the hit unit (or the closest unit within
   `nearby_units_m` that sees the racer, if the hit unit is out of action), day or night: no
