@@ -162,6 +162,9 @@ cargo run --release -p wp_race --example judge_bench
   on): four `wp_opponent` AI entrants race a judged sprint, the hot venue's `PatrolAttracted`
   is called in through `police`, and a pursuit starts; a control run without the report has no
   pursuit; the run is deterministic.
+- `tests/race_vesper.rs` — `apps/simcli/scenarios/race/vesper_hollins_sprint.ron`: four AI
+  entrants race the Port Vesper v2 hill route up Hollins Drive (~1 km, hairpins, summit crest)
+  to the Knob Observatory Lot; at least three finish, nobody is wrecked; deterministic.
 - `tests/cargo_physics.rs` — Delivery cargo slows the car in the real `wp_sim` loop.
 - `tests/determinism_lint.rs` — runs `tools/lint-determinism` over `wp_race/src`.
 
@@ -189,9 +192,9 @@ police budget (0.5 ms/frame).
   changes inertia, not the CG (the contract has no lateral CG).
 - Race → police goes through a cloned `PoliceSystem` (`police::deliver` + `Sim::set_police`)
   until `wp_sim` queues external events into its police step.
-- Purses: until `wp_economy` applies `bridge::economy_race`'s scales (R5), a settled race pays
-  the economy's own number, which differs from the advertised stake for every kind except a
-  street sprint near 9 km.
+- Purses: the economy pays its own table (R5, agreed with G: it prices kinds and legality
+  itself). The two tables agree within a third at every kind × legality × phase the calendar
+  schedules (tested); off-calendar combinations (e.g. a street race at noon) can differ ~2×.
 - Signals are crate-local until the contract carries a typed race event (request R1).
 - Crews/territory are in-memory; persistence belongs to the server's account store.
 - AI entrants (`entrants`) are wired in tests only; `wp_net`'s server must spawn them at
