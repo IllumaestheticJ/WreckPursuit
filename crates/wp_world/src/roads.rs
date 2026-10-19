@@ -189,6 +189,87 @@ mod tests {
     use super::*;
     use crate::procgen::{generate, ProcGenConfig};
 
+    /// The old linear scan (lead's first cut), kept as the reference answer.
+    fn nearest_brute(view: &RoadGraphView, p: V2) -> Option<(u32, f32, V2, f32)> {
+        let mut best: Option<(u32, f32, V2, f32)> = None;
+        for (i, e) in view.edges.iter().enumerate() {
+            let pts: Vec<[f32; 3]> = e.polyline.iter().map(|q| [q[0], q[1], 0.0]).collect();
+            let cum = geom::cumulative(&pts);
+            let len = cum[cum.len() - 1];
+            let pr = geom::project(&pts, &cum, p);
+            if best.is_none_or(|b| pr.dist < b.3) {
+                let s = pr.s.clamp(0.0, len);
+                let (q, _) = geom::point_at(&pts, &cum, s);
+                let frac = if len > 0.0 { s / len } else { 0.0 };
+                best = Some((i as u32, frac, geom::xy(q), pr.dist));
+            }
+        }
+        best
+    }
+
+    #[test]
+    fn nearest_on_road_matches_linear_scan() {
+        use wp_contracts::RoadNetworkQuery;
+        let map = CityMap::new(generate(&ProcGenConfig::small()));
+        let idx = RoadNetworkIndex::new(&map);
+        let (lo, hi) = (map.net.bounds_min, map.net.bounds_max);
+        let mut rng = wp_math::Rng::new(7);
+        for k in 0..4000 {
+            // Mostly inside the city, some well outside it.
+            let m = if k % 10 == 0 { 400.0 } else { 0.0 };
+            let p = [
+                lo[0] - m + rng.next_f32() * (hi[0] - lo[0] + 2.0 * m),
+                lo[1] - m + rng.next_f32() * (hi[1] - lo[1] + 2.0 * m),
+            ];
+            let a = idx.nearest_on_road(p).unwrap();
+            let b = nearest_brute(idx.view(), p).unwrap();
+            assert!((a.3 - b.3).abs() < 1e-3, "{p:?}: {a:?} vs {b:?}");
+            if (a.3 - b.3).abs() < 1e-6 && a.0 != b.0 {
+                // Equidistant from two roads (a shared junction centre): either is right.
+                continue;
+            }
+            assert_eq!(a.0, b.0, "{p:?}: {a:?} vs {b:?}");
+            assert!((a.1 - b.1).abs() < 1e-3, "{p:?}: {a:?} vs {b:?}");
+            assert!(geom::dist(a.2, b.2) < 1e-2, "{p:?}: {a:?} vs {b:?}");
+        }
+    }
+
+    /// `cargo test -p wp_world --release --lib nearest_on_road_timing -- --ignored --nocapture`
+    #[test]
+    #[ignore = "timing report, run in release"]
+    fn nearest_on_road_timing() {
+        use wp_contracts::RoadNetworkQuery;
+        let map = CityMap::new(generate(&ProcGenConfig::default()));
+        let idx = RoadNetworkIndex::new(&map);
+        let (lo, hi) = (map.net.bounds_min, map.net.bounds_max);
+        let mut rng = wp_math::Rng::new(3);
+        let pts: Vec<V2> = (0..20_000)
+            .map(|_| {
+                [
+                    lo[0] + rng.next_f32() * (hi[0] - lo[0]),
+                    lo[1] + rng.next_f32() * (hi[1] - lo[1]),
+                ]
+            })
+            .collect();
+        let t0 = std::time::Instant::now();
+        let mut acc = 0.0;
+        for p in &pts {
+            acc += idx.nearest_on_road(*p).unwrap().3;
+        }
+        let grid = t0.elapsed().as_secs_f64() / pts.len() as f64;
+        let t0 = std::time::Instant::now();
+        for p in pts.iter().take(500) {
+            acc += nearest_brute(idx.view(), *p).unwrap().3;
+        }
+        let brute = t0.elapsed().as_secs_f64() / 500.0;
+        println!(
+            "{} edges: grid {:.2} us/query, linear scan {:.1} us/query ({acc:.0})",
+            idx.edge_count(),
+            grid * 1e6,
+            brute * 1e6
+        );
+    }
+
     #[test]
     fn road_network_index_implements_the_contract_trait() {
         use wp_contracts::RoadNetworkQuery;
@@ -282,6 +363,148 @@ pub struct RoadNetworkIndex<'a> {
     view: RoadGraphView,
     out: Vec<Vec<u32>>,
     pois: Vec<wp_contracts::PoiInfo>,
+    near: EdgeGrid,
+}
+
+/// Uniform grid over every edge's polyline pieces, for [`RoadNetworkIndex`]'s
+/// `nearest_on_road` (rings searched outwards until no closer piece can exist).
+#[derive(Debug, Clone)]
+struct EdgeGrid {
+    origin: V2,
+    nx: i32,
+    ny: i32,
+    /// `(edge, piece)` pairs per cell, ascending.
+    cells: Vec<Vec<(u32, u32)>>,
+    /// Cumulative arc length per edge polyline point.
+    cum: Vec<Vec<f32>>,
+}
+
+/// Edge grid cell size, m.
+const EDGE_CELL_M: f32 = 32.0;
+
+impl EdgeGrid {
+    fn new(edges: &[RoadEdge]) -> Self {
+        let mut lo = [f32::INFINITY; 2];
+        let mut hi = [f32::NEG_INFINITY; 2];
+        for e in edges {
+            for p in &e.polyline {
+                lo = [lo[0].min(p[0]), lo[1].min(p[1])];
+                hi = [hi[0].max(p[0]), hi[1].max(p[1])];
+            }
+        }
+        if lo[0] > hi[0] {
+            lo = [0.0; 2];
+            hi = [0.0; 2];
+        }
+        let nx = (((hi[0] - lo[0]) / EDGE_CELL_M).floor() as i32 + 1).max(1);
+        let ny = (((hi[1] - lo[1]) / EDGE_CELL_M).floor() as i32 + 1).max(1);
+        let mut g = Self {
+            origin: lo,
+            nx,
+            ny,
+            cells: vec![Vec::new(); (nx * ny) as usize],
+            cum: Vec::with_capacity(edges.len()),
+        };
+        for (ei, e) in edges.iter().enumerate() {
+            let mut c = Vec::with_capacity(e.polyline.len());
+            let mut acc = 0.0;
+            c.push(0.0);
+            for (k, w) in e.polyline.windows(2).enumerate() {
+                acc += geom::dist(w[0], w[1]);
+                c.push(acc);
+                let (x0, y0) = g.cell_xy([w[0][0].min(w[1][0]), w[0][1].min(w[1][1])]);
+                let (x1, y1) = g.cell_xy([w[0][0].max(w[1][0]), w[0][1].max(w[1][1])]);
+                for cy in y0..=y1 {
+                    for cx in x0..=x1 {
+                        g.cells[(cy * nx + cx) as usize].push((ei as u32, k as u32));
+                    }
+                }
+            }
+            g.cum.push(c);
+        }
+        g
+    }
+
+    /// Cell coordinates of `p`, clamped to the grid.
+    fn cell_xy(&self, p: V2) -> (i32, i32) {
+        let cx = ((p[0] - self.origin[0]) / EDGE_CELL_M).floor() as i32;
+        let cy = ((p[1] - self.origin[1]) / EDGE_CELL_M).floor() as i32;
+        (cx.clamp(0, self.nx - 1), cy.clamp(0, self.ny - 1))
+    }
+
+    /// Closest point on any edge: `(edge, fraction from a, point, distance)`. Ties go to the
+    /// lowest edge id, then the lowest piece (the same answer as a linear scan).
+    fn nearest(&self, edges: &[RoadEdge], p: V2) -> Option<(u32, f32, V2, f32)> {
+        if edges.is_empty() {
+            return None;
+        }
+        let (cx, cy) = self.cell_xy(p);
+        // (dist, edge, piece, t)
+        let mut best: Option<(f32, u32, u32, f32)> = None;
+        let max_r = self.nx.max(self.ny);
+        for r in 0..=max_r {
+            for y in (cy - r)..=(cy + r) {
+                if y < 0 || y >= self.ny {
+                    continue;
+                }
+                let on_row_edge = y == cy - r || y == cy + r;
+                let mut x = cx - r;
+                while x <= cx + r {
+                    if x >= 0 && x < self.nx {
+                        for &(e, k) in &self.cells[(y * self.nx + x) as usize] {
+                            let pl = &edges[e as usize].polyline;
+                            let (a, b) = (pl[k as usize], pl[k as usize + 1]);
+                            let ab = geom::sub(b, a);
+                            let l2 = geom::dot(ab, ab);
+                            let t = if l2 < 1e-12 {
+                                0.0
+                            } else {
+                                (geom::dot(geom::sub(p, a), ab) / l2).clamp(0.0, 1.0)
+                            };
+                            let d = geom::dist(p, geom::add(a, geom::scale(ab, t)));
+                            let better = match best {
+                                None => true,
+                                Some((bd, be, bk, _)) => d < bd || (d == bd && (e, k) < (be, bk)),
+                            };
+                            if better {
+                                best = Some((d, e, k, t));
+                            }
+                        }
+                    }
+                    // Interior rows only visit the ring's two side columns.
+                    x += if on_row_edge || r == 0 || x == cx + r {
+                        1
+                    } else {
+                        2 * r
+                    };
+                }
+            }
+            // Everything not yet visited is outside the box of rings 0..=r.
+            let bx0 = self.origin[0] + (cx - r) as f32 * EDGE_CELL_M;
+            let by0 = self.origin[1] + (cy - r) as f32 * EDGE_CELL_M;
+            let bx1 = self.origin[0] + (cx + r + 1) as f32 * EDGE_CELL_M;
+            let by1 = self.origin[1] + (cy + r + 1) as f32 * EDGE_CELL_M;
+            let covered =
+                cx - r <= 0 && cy - r <= 0 && cx + r >= self.nx - 1 && cy + r >= self.ny - 1;
+            let inner = (p[0] - bx0).min(bx1 - p[0]).min(p[1] - by0).min(by1 - p[1]);
+            if covered || best.is_some_and(|b| b.0 <= inner) {
+                break;
+            }
+        }
+        let (d, e, k, t) = best?;
+        let cum = &self.cum[e as usize];
+        let len = cum[cum.len() - 1];
+        let pl = &edges[e as usize].polyline;
+        let (a, b) = (pl[k as usize], pl[k as usize + 1]);
+        let q = geom::add(a, geom::scale(geom::sub(b, a), t));
+        let s = cum[k as usize] + (cum[k as usize + 1] - cum[k as usize]) * t;
+        let frac = if len > 0.0 {
+            (s / len).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        Some((e, frac, q, d))
+    }
 }
 
 impl<'a> RoadNetworkIndex<'a> {
@@ -331,11 +554,13 @@ impl<'a> RoadNetworkIndex<'a> {
                 });
             }
         }
+        let near = EdgeGrid::new(&view.edges);
         Self {
             map,
             view,
             out,
             pois,
+            near,
         }
     }
 
@@ -381,20 +606,7 @@ impl wp_contracts::RoadNetworkQuery for RoadNetworkIndex<'_> {
     }
 
     fn nearest_on_road(&self, p: [f32; 2]) -> Option<(u32, f32, [f32; 2], f32)> {
-        let mut best: Option<(u32, f32, [f32; 2], f32)> = None;
-        for (i, e) in self.view.edges.iter().enumerate() {
-            let pts: Vec<[f32; 3]> = e.polyline.iter().map(|q| [q[0], q[1], 0.0]).collect();
-            let cum = geom::cumulative(&pts);
-            let len = cum[cum.len() - 1];
-            let pr = geom::project(&pts, &cum, p);
-            if best.is_none_or(|b| pr.dist < b.3) {
-                let s = pr.s.clamp(0.0, len);
-                let (q, _) = geom::point_at(&pts, &cum, s);
-                let frac = if len > 0.0 { s / len } else { 0.0 };
-                best = Some((i as u32, frac, geom::xy(q), pr.dist));
-            }
-        }
-        best
+        self.near.nearest(&self.view.edges, p)
     }
 
     fn district_at(&self, p: [f32; 2]) -> Option<wp_contracts::DistrictId> {
