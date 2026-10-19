@@ -35,6 +35,8 @@ pub struct CityColliders {
     pub buildings: usize,
     /// Guard-rail boxes along bridge decks.
     pub rails: usize,
+    /// Wall and roof boxes of covered roads (tunnels).
+    pub tunnel_boxes: usize,
 }
 
 /// The flat ground slab is parked this far below the city when terrain replaces it (a safety
@@ -176,7 +178,7 @@ impl Default for PhysicsWorld {
 
 /// The static colliders of a city with terrain (Port Vesper v2), in the order
 /// [`PhysicsWorld::set_city_ground`] inserts them: terrain heightfield tiles, road triangle
-/// meshes, buildings, deck guard rails. `None` for flat cities (they keep the slab). Shared
+/// meshes, buildings, deck guard rails, tunnel walls and roofs. `None` for flat cities (they keep the slab). Shared
 /// with the client prediction stepper (`wp_vehicle::rig::Rig::set_city_ground`, used by
 /// `wp_net`) so a predicted car drives on exactly the server's ground.
 pub fn city_ground_colliders(map: &wp_world::CityMap) -> Option<(Vec<Collider>, CityColliders)> {
@@ -294,6 +296,58 @@ pub fn city_ground_colliders(map: &wp_world::CityMap) -> Option<(Vec<Collider>, 
             .build();
         added.push(col);
         out.rails += 1;
+    }
+
+    // Covered roads: a wall box along each side (inner face at the span's half width, from
+    // below the banked road edge up to the ceiling) and the roof deck, per centreline segment.
+    for span in &net.covered {
+        let shape = wp_world::covered::CoverShape::new(span);
+        let c = &span.centre;
+        let deck_half = shape.deck_half_width();
+        let wall = wp_world::covered::WALL_M;
+        let roof = wp_world::covered::ROOF_M;
+        for k in 0..c.len().saturating_sub(1) {
+            let (a, b) = (c[k], c[k + 1]);
+            let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+            let len = (d[0] * d[0] + d[1] * d[1]).sqrt();
+            if len < 0.05 {
+                continue;
+            }
+            let yaw = wp_math::atan2(-d[0], d[1]);
+            let (s, co) = wp_math::sin_cos(yaw * 0.5);
+            let rot = rapier3d::math::Rotation::from_xyzw(0.0, 0.0, s, co);
+            let right = [d[1] / len, -d[0] / len];
+            let mid = [
+                (a[0] + b[0]) * 0.5,
+                (a[1] + b[1]) * 0.5,
+                (a[2] + b[2]) * 0.5,
+            ];
+            let slope = d[2].abs() * 0.5;
+            // Walls: 1 m below the centreline (banked edges) up to the ceiling.
+            let (z0, z1) = (mid[2] - 1.0, mid[2] + span.clearance_m);
+            for side in [-1.0f32, 1.0] {
+                let off = side * (span.half_width_m + wall * 0.5);
+                let centre = Vector::new(
+                    mid[0] + right[0] * off,
+                    mid[1] + right[1] * off,
+                    (z0 + z1) * 0.5,
+                );
+                let col =
+                    ColliderBuilder::cuboid(wall * 0.5, len * 0.5 + 0.05, (z1 - z0) * 0.5 + slope)
+                        .position(Pose::from_parts(centre, rot))
+                        .friction(0.5)
+                        .build();
+                added.push(col);
+                out.tunnel_boxes += 1;
+            }
+            let roof_mid = Vector::new(mid[0], mid[1], mid[2] + span.clearance_m + roof * 0.5);
+            let col = ColliderBuilder::cuboid(deck_half, len * 0.5 + 0.05, roof * 0.5 + slope)
+                .position(Pose::from_parts(roof_mid, rot))
+                .friction(0.6)
+                .build();
+            added.push(col);
+            out.tunnel_boxes += 1;
+        }
     }
 
     Some((added, out))

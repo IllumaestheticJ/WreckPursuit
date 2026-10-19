@@ -101,6 +101,7 @@ fn city_ground_colliders_are_built() {
     assert!(c.road_triangles > 10_000, "{c:?}");
     assert!(c.buildings > 2000, "{c:?}");
     assert!(c.rails > 10, "{c:?}");
+    assert!(c.tunnel_boxes > 60, "{c:?}");
     assert!(s.has_terrain());
     // A flat city keeps the slab.
     assert_eq!(
@@ -223,5 +224,55 @@ fn parked_cars_rest_asleep_on_the_road_mesh() {
         "{} of {} props left the resting group",
         sim.prop_count() - sim.resting_prop_count(),
         sim.prop_count()
+    );
+}
+
+/// A car driven at a tunnel wall stops at it: the Founders Cut walls are solid, and the car
+/// inside rests on the road under the deck (not on the roof).
+#[test]
+fn tunnel_walls_hold_a_car_inside() {
+    let c = net()
+        .covered
+        .iter()
+        .find(|c| c.name == "Founders Cut")
+        .unwrap();
+    let shape = wp_world::covered::CoverShape::new(c);
+    let (mid, dir) = wp_world::geom::point_at(&c.centre, &shape.cum, shape.length() * 0.5);
+    let car = load_car(data("cars/debug_sedan.json")).unwrap();
+    let mut s = sim(true);
+    // Facing the right-hand wall (yaw of the right normal), 4 m from the centreline.
+    let right = [dir[1], -dir[0]];
+    let xy = [mid[0] + right[0] * 4.0, mid[1] + right[1] * 4.0];
+    let yaw = wp_math::atan2(-right[0], right[1]);
+    let id = s.spawn_vehicle(&car, [xy[0], xy[1], 0.0], yaw).unwrap();
+    s.place_on_ground(id, xy, yaw, 0.0, Some(mid[2])).unwrap();
+    s.set_input(
+        id,
+        VehicleInput {
+            throttle: 1.0,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let mut max_lat = 0.0f32;
+    for _ in 0..(4.0 * 240.0) as usize {
+        s.step_fixed();
+        let p = s.vehicle_states()[0].1.pos;
+        max_lat = max_lat.max(shape.locate([p[0], p[1]]).lateral.abs());
+        assert!(
+            p[2] < mid[2] + 3.0,
+            "car on the roof: z {} road {}",
+            p[2],
+            mid[2]
+        );
+    }
+    assert!(
+        max_lat < c.half_width_m,
+        "through the wall: {max_lat} m (wall face at {} m)",
+        c.half_width_m
+    );
+    assert!(
+        max_lat > c.half_width_m - 3.0,
+        "never reached the wall: {max_lat} m"
     );
 }

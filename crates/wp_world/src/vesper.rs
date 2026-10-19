@@ -32,7 +32,7 @@ use std::collections::BTreeMap;
 use wp_math::Rng;
 
 use crate::builder::{self, BuildOptions, Built, NodeSpec, RoadClass, RoadSpec};
-use crate::covered::{CoverShape, ROOF_M, WALL_M};
+use crate::covered::{CoverShape, DECK_OVERHANG_M, ROOF_M, WALL_M};
 use crate::density::default_density_base;
 use crate::geom::{self, Obb, V2, V3};
 use crate::network::*;
@@ -218,9 +218,6 @@ struct CoverPlan {
 pub const TUNNEL_CLEARANCE_HIGHWAY_M: f32 = 6.5;
 /// Ceiling height over other covered roads, m.
 pub const TUNNEL_CLEARANCE_M: f32 = 6.0;
-/// How far the roof deck reaches past the outer wall face on each side (over the carved
-/// trench shoulder, out to the backfill), m.
-pub const ROOF_OVERHANG_M: f32 = 8.5;
 
 /// A planned grade separation.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1475,7 +1472,7 @@ fn covered_spans(g: &Gen, built: &Built) -> Vec<CoveredSpan> {
 fn backfill_covers(hf: &mut Heightfield, nat: &Natural, spans: &[CoveredSpan]) {
     for span in spans {
         let shape = CoverShape::new(span);
-        let inner = span.half_width_m + WALL_M + ROOF_OVERHANG_M - 1.0;
+        let inner = span.half_width_m + WALL_M + DECK_OVERHANG_M - 1.0;
         let reach = span.half_width_m + 45.0;
         let (lo, hi) = (shape.bounds[0], shape.bounds[1]);
         let cell = hf.cell_m;
@@ -1508,7 +1505,7 @@ fn backfill_covers(hf: &mut Heightfield, nat: &Natural, spans: &[CoveredSpan]) {
 /// Whether a building footprint would stand in a covered span's trench (inside the deck).
 fn in_cover_corridor(shapes: &[CoverShape], fp: &[V2]) -> bool {
     shapes.iter().any(|sh| {
-        let r = sh.span.half_width_m + WALL_M + ROOF_OVERHANG_M + 1.0;
+        let r = sh.span.half_width_m + WALL_M + DECK_OVERHANG_M + 1.0;
         let mut c = [0.0f32; 2];
         for q in fp {
             c = [c[0] + q[0] / fp.len() as f32, c[1] + q[1] / fp.len() as f32];
@@ -2216,6 +2213,29 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
                 heading_rad: yaw,
                 lane: Some(lane),
             });
+        }
+    }
+    // Route ends either side of each covered road (drive-through and pursuit scenarios):
+    // "<name> entry" sits before the first portal in the forward direction, "<name> exit"
+    // after the second.
+    let tunnel_ends: [(&str, f32, f32); 2] = [
+        ("Hollins Tunnel", 950.0, -1100.0),
+        ("Founders Cut", 40.0, -40.0),
+    ];
+    for (name, s0, s1) in tunnel_ends {
+        let Some(c) = covered.iter().find(|c| c.name == name) else {
+            continue;
+        };
+        for (suffix, s) in [("entry", s0), ("exit", s1)] {
+            if let Some((p, yaw, lane)) = lane_pose(&built, c.road as usize, s, true) {
+                pois.push(Poi {
+                    kind: PoiKind::RaceStartGrid,
+                    name: format!("{name} {suffix}"),
+                    pos: p,
+                    heading_rad: yaw,
+                    lane: Some(lane),
+                });
+            }
         }
     }
     let mut block_poi = |kind: PoiKind, name: &str, p: V2| {

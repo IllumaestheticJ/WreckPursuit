@@ -23,6 +23,9 @@ pub use crate::network::CoverKind;
 pub const WALL_M: f32 = 0.6;
 /// Roof slab thickness, m.
 pub const ROOF_M: f32 = 0.8;
+/// How far the roof deck reaches past the outer wall face on each side (over the carved
+/// shoulder of the cut, out to the backfilled ground), m.
+pub const DECK_OVERHANG_M: f32 = 8.5;
 /// How far below the road surface a point still counts as inside, m (eye heights are
 /// approximate on slopes; nothing else is down there).
 pub const BELOW_ROAD_M: f32 = 3.0;
@@ -163,6 +166,11 @@ impl CoverShape {
             }
         }
         false
+    }
+
+    /// Half width of the roof deck (centreline to deck edge), m.
+    pub fn deck_half_width(&self) -> f32 {
+        self.span.half_width_m + WALL_M + DECK_OVERHANG_M
     }
 
     /// Wall-face lines at road level `[left, right]` along the span (inner faces).
