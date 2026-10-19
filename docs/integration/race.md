@@ -198,6 +198,16 @@ Races… / Free drive).
   (fast-forwarded) a results table with a payout appears; `SimEvent::Race` events reach the
   page; no page errors.
 
+### Checks (step 2, cloud container)
+`cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
+`cargo test --workspace` (all pass), `cargo build --target wasm32-unknown-unknown -p wp_wasm`,
+`tools/wasm-determinism/compare.sh` (49/49 scenarios native == wasm, the four new ones
+included), `npx tsc --noEmit`, `e2e/race.mjs` (all race checks pass).
+`e2e/run.mjs` (C's): every check passes up to the lead's end-of-run capture section, where the
+headless Chromium tab crashes ("Target crashed", no OS kill, wasm ~70 MB / JS heap ~105 MB).
+**Pre-existing:** the same crash at the same point on an untouched `origin/main` worktree
+(main: 1 pass, 2 crashes in three runs; this branch: 2 crashes in two runs). FYI lead / C.
+
 ### Needs (new this round)
 | From | What | Why |
 |---|---|---|
