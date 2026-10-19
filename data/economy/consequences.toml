@@ -93,3 +93,13 @@ L2 = 40
 L3 = 70
 L4 = 120
 L5 = 200
+
+# Single-player career (browser): what one run leaves for the next (wp_economy::profile).
+# A capture or a wreck clears heat (the bounty is cleared at capture). A run that ends free
+# (escaped, or the player drives back to the garage while still wanted) carries part of the
+# heat into the next night: the police still remember the car, but a night off cools them.
+[career]
+heat_carry_frac = 0.5    # heat × 0.5 for the next run
+heat_carry_max = 45.0    # never start a night above L2 (L3 starts at 50)
+heat_carry_min = 5.0     # below this the police have forgotten (L1 starts at 10)
+ledger_keep = 200        # ledger lines kept in the saved profile
