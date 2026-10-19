@@ -1,11 +1,12 @@
-// Scene: renderer, lights, sky colour from TimeOfDay, ground + 10 m grid, optional city .glb
-// greybox (data/city/*.glb, prompt 05), barriers, fading contact markers and intent arrows.
+// Scene: renderer, lights, sky colour from TimeOfDay, ground + 10 m grid, the city greybox
+// (data/city/<id>.greybox.glb, prompt 05) and its traffic agents, barriers, fading contact
+// markers and intent arrows.
 // Sim space is +Z up / +Y forward; Three.js is +Y up, so `world` is rotated -90° about X and
 // every sim-space object is parented under it.
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { Barrier, SimEvent } from "./wasm/sim";
-import { INTENT_STRIDE } from "./wasm/layout";
+import { AGENT_FLAG, AGENT_STRIDE, INTENT_STRIDE } from "./wasm/layout";
 import { layers } from "./settings";
 
 const DAY_SKY = new THREE.Color(0x8fb8de);
@@ -17,6 +18,11 @@ interface ContactMarker {
 }
 
 const CONTACT_LIFETIME_S = 1.5;
+/** Instanced traffic capacity. */
+const MAX_AGENTS = 1024;
+/** Traffic car box size [w, l, h], m. */
+const AGENT_SCALE = new THREE.Vector3(1.8, 4.4, 1.4);
+const tmpAgentColour = new THREE.Color();
 
 export class SceneView {
   readonly renderer: THREE.WebGLRenderer;
@@ -26,7 +32,15 @@ export class SceneView {
   private readonly sun: THREE.DirectionalLight;
   private readonly barriers = new THREE.Group();
   private readonly contacts: ContactMarker[] = [];
+  /** Contact markers created since the page loaded (for automation). */
+  contactsSeen = 0;
   private readonly intentGroup = new THREE.Group();
+  private readonly cities = new Map<string, THREE.Object3D>();
+  private readonly agentMesh = new THREE.InstancedMesh(
+    new THREE.BoxGeometry(1, 1, 1),
+    new THREE.MeshStandardMaterial({ color: 0xffffff }),
+    MAX_AGENTS,
+  );
 
   constructor(parent: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
@@ -55,29 +69,59 @@ export class SceneView {
     // Axis hint at the origin: +X red, +Y (forward) green.
     const axes = new THREE.AxesHelper(3);
     axes.position.z = 0.02;
-    this.world.add(axes, this.barriers, this.intentGroup);
+    this.agentMesh.count = 0;
+    this.agentMesh.frustumCulled = false;
+    this.world.add(axes, this.barriers, this.intentGroup, this.agentMesh);
   }
 
-  /** Load every data/city/*.glb listed by the dev server (none until prompt 05). */
-  async loadCity(): Promise<number> {
-    let files: string[] = [];
+  /**
+   * Show the greybox mesh for `cityId` (`data/city/<id>.greybox.glb`, prompt 05), loading it on
+   * first use; `null` hides every city. The greybox is only shown when the session loaded that
+   * city, so flat-world sessions are not drawn inside buildings.
+   */
+  async setCity(cityId: string | null): Promise<void> {
+    for (const [id, obj] of this.cities) obj.visible = id === cityId;
+    if (!cityId || this.cities.has(cityId)) return;
+    const holder = new THREE.Group();
+    this.cities.set(cityId, holder);
+    this.scene.add(holder);
     try {
-      const r = await fetch("data/city/index.json");
-      if (r.ok) files = await r.json();
-    } catch {
-      return 0;
+      const gltf = await new GLTFLoader().loadAsync(`data/city/${cityId}.greybox.glb`);
+      // glTF is +Y up, same as Three: add to the scene, not the Z-up world group.
+      holder.add(gltf.scene);
+    } catch (e) {
+      console.warn("city greybox not available", cityId, e);
     }
-    const loader = new GLTFLoader();
-    for (const f of files) {
-      try {
-        const gltf = await loader.loadAsync(`data/city/${f}`);
-        // glTF is +Y up, same as Three: add to the scene, not the Z-up world group.
-        this.scene.add(gltf.scene);
-      } catch (e) {
-        console.warn("city load failed", f, e);
-      }
+  }
+
+  /** Draw civilian traffic from traffic_agents() ([x, y, z, yaw, flags] per agent). */
+  updateAgents(agents: Float32Array): void {
+    const n = Math.min(agents.length / AGENT_STRIDE, MAX_AGENTS);
+    const show = layers.on("traffic");
+    this.agentMesh.visible = show && n > 0;
+    if (!this.agentMesh.visible) return;
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const zAxis = new THREE.Vector3(0, 0, 1);
+    for (let i = 0; i < n; i++) {
+      const o = i * AGENT_STRIDE;
+      q.setFromAxisAngle(zAxis, agents[o + 3]);
+      m.compose(new THREE.Vector3(agents[o], agents[o + 1], agents[o + 2] + 0.7), q, AGENT_SCALE);
+      this.agentMesh.setMatrixAt(i, m);
+      const flags = agents[o + 4];
+      const c =
+        flags & AGENT_FLAG.yielding
+          ? 0x3399ff
+          : flags & AGENT_FLAG.brake
+            ? 0xff5040
+            : flags & AGENT_FLAG.physical
+              ? 0xffd040
+              : 0xb8bcc4;
+      this.agentMesh.setColorAt(i, tmpAgentColour.setHex(c));
     }
-    return files.length;
+    this.agentMesh.count = n;
+    this.agentMesh.instanceMatrix.needsUpdate = true;
+    if (this.agentMesh.instanceColor) this.agentMesh.instanceColor.needsUpdate = true;
   }
 
   /** Sky + light colour from the night factor (0 noon … 1 midnight). */
@@ -124,6 +168,7 @@ export class SceneView {
       g.renderOrder = 6;
       this.world.add(g);
       this.contacts.push({ obj: g, age: 0 });
+      this.contactsSeen++;
     }
   }
 

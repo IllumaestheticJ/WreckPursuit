@@ -1,23 +1,27 @@
 //! [`Session`]: the pure-Rust core behind the wasm-bindgen surface (natively testable).
 //!
-//! A session owns one [`wp_sim::Sim`] and drives it tick by tick with its own
-//! [`wp_math::FixedStep`]. Every mutation (spawn, input change, reset, assists) goes through
-//! [`Session::push_op`], which stamps it with the current tick, applies it and appends it to
-//! the session log. That log plus the header *is* the replay; playback feeds the log back in
-//! instead of live calls.
-
-use std::collections::BTreeMap;
+//! A session is a simcli scenario (format v2) being run interactively. The sim is built by
+//! `simcli::run::build_sim` and scripted entities are driven by `simcli::run::driver_input`, so
+//! a scripted session ticks exactly like `simcli run`. Every input change and op (reset,
+//! assists, mode switch) is logged with its tick into a `simcli::replay::Replay`, together with
+//! the state hash after every tick: [`Session::record_stop`] returns canonical `replay.bin`
+//! bytes that `simcli replay` verifies headlessly. Playback re-simulates that log and compares
+//! every tick hash.
 
 use wp_contracts::{
-    AssistProfile, DamageMode, DamageSim, EntityId, FfbOutput, LoadedCar, SimEvent, TimeOfDay,
-    VehicleInput, VehicleSim, VehicleState, CONTRACT_VERSION, GRAVITY_MPS2, PHYSICS_DT,
+    AssistProfile, DamageMode, EntityId, FfbOutput, LoadedCar, SimEvent, VehicleInput, VehicleSim,
+    VehicleState, PHYSICS_DT,
 };
 use wp_math::FixedStep;
-use wp_sim::{Sim, SimConfig};
+use wp_sim::Sim;
 
-use crate::data;
-use crate::replay::{Op, Replay, SessionHeader, TickOp, HASH_INTERVAL_TICKS};
-use crate::scenario::{evaluate, CheckResult, InputScript, Scenario, VehicleMetrics};
+use simcli::replay::{Checkpoint, EntityCheckpoint, InputEvent, OpEvent, OpKind, Replay};
+use simcli::run::{apply_op, build_city, build_sim, driver_input, BuiltSim, RunOptions, Selection};
+use simcli::scenario::{CitySpec, EntitySpec};
+use simcli::{RunSummary, Scenario};
+
+use crate::data::mem_data;
+use crate::scenario::entity;
 
 /// At most this many ticks run per `step()` call (0.25 s of sim time).
 pub const MAX_TICKS_PER_STEP: u32 = 60;
@@ -25,21 +29,16 @@ pub const MAX_TICKS_PER_STEP: u32 = 60;
 /// Event buffer cap; oldest events are dropped if the renderer stops draining.
 const MAX_BUFFERED_EVENTS: usize = 4096;
 
-/// Per-vehicle bookkeeping the sim does not keep.
-#[derive(Debug, Clone)]
-pub struct VehicleExtra {
-    /// Resolved car data (for static info, lattice topology, tire estimates).
-    pub car: LoadedCar,
-    /// Spawn position (for distance metrics).
-    pub spawn_pos: [f32; 3],
+/// Drift ticks kept in the playback report.
+const MAX_DRIFT_TICKS: usize = 64;
+
+/// Per-entity bookkeeping the sim does not keep.
+#[derive(Debug, Clone, Default)]
+pub struct EntityExtra {
     /// Chassis-space acceleration over the last tick `[x, y, z]`, m/s² (gravity excluded).
     pub accel_local: [f32; 3],
     /// State before the last tick of the latest `step()` (render interpolation source).
     pub prev_state: Option<VehicleState>,
-    /// Scenario input script, if scripted.
-    pub script: Option<InputScript>,
-    /// Scenario metrics.
-    pub metrics: VehicleMetrics,
 }
 
 /// Replay playback state.
@@ -47,48 +46,46 @@ pub struct VehicleExtra {
 pub struct Playback {
     /// The replay being played.
     pub replay: Replay,
-    /// Index of the next op to apply.
-    pub cursor: usize,
+    input_cursor: usize,
+    op_cursor: usize,
     /// Playback speed multiplier (0 = paused).
     pub speed: f32,
-    /// Stored hashes that matched during re-simulation.
-    pub verified: u32,
-    /// Ticks whose hash did not match.
+    /// Ticks whose recorded hash matched.
+    pub verified: u64,
+    /// First ticks whose hash did not match (at most 64 kept).
     pub drift_ticks: Vec<u64>,
-    /// Stored hashes by tick.
-    hashes: BTreeMap<u64, u64>,
-}
-
-/// Scenario progress.
-#[derive(Debug, Clone)]
-struct ScenarioRun {
-    scenario: Scenario,
-    end_tick: u64,
-    done: bool,
+    /// Total mismatching ticks.
+    pub drift_count: u64,
 }
 
 /// One simulation session (live or replay).
 pub struct Session {
-    header: SessionHeader,
+    sc: Scenario,
+    scripted: bool,
+    script_end: u64,
+    load_city: bool,
+    systems: Selection,
     sim: Sim,
+    ids: Vec<EntityId>,
+    cars: Vec<LoadedCar>,
+    extras: Vec<EntityExtra>,
+    last_input: Vec<VehicleInput>,
     fixed: FixedStep,
-    extras: BTreeMap<EntityId, VehicleExtra>,
-    log: Vec<TickOp>,
-    hashes: Vec<(u64, u64)>,
-    last_input: BTreeMap<EntityId, VehicleInput>,
+    log: Replay,
+    recording: bool,
     events: Vec<SimEvent>,
-    record_start: Option<u64>,
     playback: Option<Playback>,
-    scenario: Option<ScenarioRun>,
+    mode: DamageMode,
+    live_end_hash: Option<u64>,
+    outcome: Option<RunSummary>,
 }
 
-fn sim_for(header: &SessionHeader) -> Result<Sim, String> {
-    Ok(Sim::new(SimConfig {
-        seed: header.seed,
-        mode: data::mode_table(header.mode)?,
-        time_of_day: TimeOfDay::from_hours(header.time_of_day_h),
-        time_ratio: header.time_ratio,
-    }))
+fn opts(load_city: bool, systems: Option<Selection>) -> RunOptions {
+    RunOptions {
+        systems,
+        load_city,
+        ..Default::default()
+    }
 }
 
 /// Rotate a world vector into chassis space with the inverse of unit quaternion `q` `[x,y,z,w]`.
@@ -113,81 +110,95 @@ pub fn world_to_local(q: [f32; 4], v: [f32; 3]) -> [f32; 3] {
 }
 
 impl Session {
-    fn empty(header: SessionHeader) -> Result<Self, String> {
+    fn build(
+        sc: Scenario,
+        scripted: bool,
+        systems: Option<Selection>,
+        playback: Option<Replay>,
+    ) -> Result<Self, String> {
+        let load_city = sc.city != CitySpec::Flat;
+        let BuiltSim {
+            sim,
+            ids,
+            cars,
+            selection,
+            ..
+        } = build_sim(&sc, mem_data(), &opts(load_city, systems)).map_err(|e| e.to_string())?;
+        let per_entity: Vec<LoadedCar> = sc.entities.iter().map(|e| cars[&e.car].clone()).collect();
+        let log = Replay::new(&sc, &selection.to_string(), ids.len());
+        let n = ids.len();
         Ok(Self {
-            sim: sim_for(&header)?,
-            header,
+            script_end: if scripted { sc.ticks() } else { 0 },
+            mode: sc.mode,
+            sc,
+            scripted,
+            load_city,
+            systems: selection,
+            sim,
+            ids,
+            cars: per_entity,
+            extras: vec![EntityExtra::default(); n],
+            last_input: vec![VehicleInput::default(); n],
             fixed: FixedStep::new(PHYSICS_DT, MAX_TICKS_PER_STEP),
-            extras: BTreeMap::new(),
-            log: Vec::new(),
-            hashes: Vec::new(),
-            last_input: BTreeMap::new(),
+            log,
+            recording: false,
             events: Vec::new(),
-            record_start: None,
-            playback: None,
-            scenario: None,
+            playback: playback.map(|replay| Playback {
+                replay,
+                input_cursor: 0,
+                op_cursor: 0,
+                speed: 1.0,
+                verified: 0,
+                drift_ticks: Vec::new(),
+                drift_count: 0,
+            }),
+            live_end_hash: None,
+            outcome: None,
         })
     }
 
-    /// New live session from a scenario. `seed` overrides the scenario seed when non-zero.
-    /// Spawns vehicle 1 at the origin (facing +Y) plus `others`, and installs scripts when the
-    /// scenario is scripted.
-    pub fn from_scenario(seed: u64, mut sc: Scenario) -> Result<Self, String> {
-        if seed != 0 {
-            sc.seed = seed;
-        }
-        let mut s = Self::empty(SessionHeader {
-            contract_version: CONTRACT_VERSION.to_string(),
-            seed: sc.seed,
-            mode: sc.mode,
-            time_of_day_h: sc.time_of_day_h,
-            time_ratio: 10.0,
-            scenario: sc.name.clone(),
-        })?;
-        let first = s.spawn(&sc.car, [0.0; 3], 0.0)?;
-        let mut scripted = vec![(first, sc.inputs.clone(), sc.cruise_kmh)];
-        for o in &sc.others {
-            let id = s.spawn(&o.car, o.pos, o.yaw)?;
-            scripted.push((id, o.inputs.clone(), o.cruise_kmh));
-        }
-        if sc.is_scripted() {
-            for (id, keys, cruise) in scripted {
-                if let Some(x) = s.extras.get_mut(&id) {
-                    x.script = Some(InputScript {
-                        keys,
-                        cruise_mps: cruise.map(|k| k / 3.6),
-                    });
+    /// Live session. `scripted` = drive every entity by its scenario driver until
+    /// `duration_s` (menu scenarios); otherwise every entity is live-controlled (free drive).
+    /// A free-drive city session spawns the first entity on the city's race start grid.
+    pub fn new(mut sc: Scenario, scripted: bool) -> Result<Self, String> {
+        sc.validate()?;
+        if !scripted && sc.city != CitySpec::Flat {
+            if let Some(world) = build_city(&sc, mem_data()).map_err(|e| e.to_string())? {
+                let grid = world
+                    .network()
+                    .pois
+                    .iter()
+                    .find(|p| p.kind == wp_world::network::PoiKind::RaceStartGrid);
+                if let (Some(p), Some(e)) = (grid, sc.entities.first_mut()) {
+                    e.pos = p.pos;
+                    e.yaw = p.heading_rad;
                 }
             }
-            s.scenario = Some(ScenarioRun {
-                end_tick: (sc.duration_s / PHYSICS_DT).round() as u64,
-                scenario: sc,
-                done: false,
-            });
         }
-        Ok(s)
+        Self::build(sc, scripted, None, None)
     }
 
-    /// New playback session for a replay; fast-forwards to `view_start_tick`.
+    /// Playback session for `replay.bin` bytes.
+    pub fn from_replay_bytes(bytes: &[u8]) -> Result<Self, String> {
+        let replay = Replay::decode(bytes).map_err(|e| e.to_string())?;
+        Self::from_replay(replay)
+    }
+
+    /// Playback session for a decoded replay.
     pub fn from_replay(replay: Replay) -> Result<Self, String> {
-        let mut s = Self::empty(replay.header.clone())?;
-        let start = replay.view_start_tick;
-        s.playback = Some(Playback {
-            hashes: replay.hashes.iter().copied().collect(),
-            replay,
-            cursor: 0,
-            speed: 1.0,
-            verified: 0,
-            drift_ticks: Vec::new(),
-        });
-        s.apply_due_ops();
-        s.run_ticks(start);
-        Ok(s)
+        let sc = replay.scenario().map_err(|e| e.to_string())?;
+        let systems = Selection::parse(&replay.systems)?;
+        Self::build(sc, false, Some(systems), Some(replay))
     }
 
-    /// Session header (seed, mode, clock).
-    pub fn header(&self) -> &SessionHeader {
-        &self.header
+    /// The scenario this session runs (entities include tick-0 spawns).
+    pub fn scenario(&self) -> &Scenario {
+        &self.sc
+    }
+
+    /// Whether entities are script-driven (menu scenario).
+    pub fn scripted(&self) -> bool {
+        self.scripted
     }
 
     /// The simulation.
@@ -195,17 +206,32 @@ impl Session {
         &self.sim
     }
 
-    /// Per-vehicle extras.
-    pub fn extra(&self, id: EntityId) -> Option<&VehicleExtra> {
-        self.extras.get(&id)
+    /// Entity ids in scenario order.
+    pub fn entities(&self) -> &[EntityId] {
+        &self.ids
     }
 
-    /// Entity ids in ascending order.
-    pub fn entities(&self) -> Vec<EntityId> {
-        self.sim.vehicles().iter().map(|v| v.id).collect()
+    /// Scenario index of an entity.
+    pub fn index(&self, id: EntityId) -> Option<usize> {
+        self.ids.iter().position(|x| *x == id)
     }
 
-    /// Whether this session is playing a replay.
+    /// Scenario entity spec of an entity.
+    pub fn spec(&self, id: EntityId) -> Option<&EntitySpec> {
+        self.index(id).map(|i| &self.sc.entities[i])
+    }
+
+    /// Resolved car of an entity.
+    pub fn car(&self, id: EntityId) -> Option<&LoadedCar> {
+        self.index(id).map(|i| &self.cars[i])
+    }
+
+    /// Per-entity extras.
+    pub fn extra(&self, id: EntityId) -> Option<&EntityExtra> {
+        self.index(id).map(|i| &self.extras[i])
+    }
+
+    /// Playback state, if this is a replay.
     pub fn playback(&self) -> Option<&Playback> {
         self.playback.as_ref()
     }
@@ -215,118 +241,121 @@ impl Session {
         self.sim.tick()
     }
 
-    // ----- ops ---------------------------------------------------------------------------
-
-    fn apply(&mut self, op: &Op) -> Result<(), String> {
-        match op {
-            Op::Spawn {
-                entity,
-                car_id,
-                pos,
-                yaw,
-            } => {
-                let car = data::load_car(car_id)?;
-                let id = self
-                    .sim
-                    .spawn_vehicle(&car, *pos, *yaw)
-                    .map_err(|e| e.to_string())?;
-                if id.0 != *entity {
-                    return Err(format!("replay spawn allocated {id:?}, log says {entity}"));
-                }
-                self.extras.insert(
-                    id,
-                    VehicleExtra {
-                        car,
-                        spawn_pos: *pos,
-                        accel_local: [0.0; 3],
-                        prev_state: None,
-                        script: None,
-                        metrics: VehicleMetrics::new(),
-                    },
-                );
-            }
-            Op::Input { entity, input } => {
-                let id = EntityId(*entity);
-                self.sim.set_input(id, *input).map_err(|e| e.to_string())?;
-                self.last_input.insert(id, *input);
-            }
-            Op::Reset { entity } => {
-                self.sim
-                    .reset_vehicle(EntityId(*entity))
-                    .map_err(|e| e.to_string())?;
-            }
-            Op::Assists { entity, profile } => {
-                self.sim
-                    .set_assists(EntityId(*entity), *profile)
-                    .map_err(|e| e.to_string())?;
-            }
-        }
-        Ok(())
+    /// Damage mode in effect.
+    pub fn mode(&self) -> DamageMode {
+        self.mode
     }
 
-    /// Stamp `op` with the current tick, apply it and log it. Refused during playback.
-    pub fn push_op(&mut self, op: Op) -> Result<(), String> {
+    /// Whether the scenario's city was loaded.
+    pub fn has_city(&self) -> bool {
+        self.load_city
+    }
+
+    // ----- live control ------------------------------------------------------------------
+
+    fn live_check(&self) -> Result<(), String> {
         if self.playback.is_some() {
             return Err("session is playing a replay; live control is disabled".into());
         }
-        self.apply(&op)?;
-        self.log.push(TickOp {
-            tick: self.sim.tick(),
-            op,
-        });
         Ok(())
     }
 
-    /// Spawn a car (logged). Returns the new entity.
-    pub fn spawn(&mut self, car_id: &str, pos: [f32; 3], yaw: f32) -> Result<EntityId, String> {
-        let entity = EntityId(
-            self.sim
-                .vehicles()
-                .iter()
-                .map(|v| v.id.0)
-                .max()
-                .unwrap_or(0)
-                + 1,
-        );
-        self.push_op(Op::Spawn {
-            entity: entity.0,
-            car_id: car_id.to_string(),
-            pos,
-            yaw,
-        })?;
-        Ok(entity)
+    fn idx(&self, id: EntityId) -> Result<usize, String> {
+        self.index(id)
+            .ok_or_else(|| format!("unknown entity {id:?}"))
     }
 
-    /// Set live input for a vehicle. Ignored (returns `Ok(false)`) for script-driven vehicles
-    /// while their scenario runs, and when unchanged.
-    pub fn set_input(&mut self, id: EntityId, input: VehicleInput) -> Result<bool, String> {
-        if self.extras.get(&id).is_some_and(|x| x.script.is_some()) {
-            return Ok(false);
+    fn log_input(&mut self, idx: usize, input: VehicleInput) {
+        if self.last_input[idx] == input {
+            return;
         }
-        if !self.extras.contains_key(&id) {
-            return Err(format!("unknown entity {id:?}"));
-        }
-        if self.last_input.get(&id) == Some(&input) {
-            return Ok(false);
-        }
-        self.push_op(Op::Input {
-            entity: id.0,
+        // `set_input` cannot fail for an id from `ids`.
+        let _ = self.sim.set_input(self.ids[idx], input);
+        self.last_input[idx] = input;
+        self.log.inputs.push(InputEvent {
+            tick: self.sim.tick(),
+            entity: idx as u16,
             input,
-        })?;
+        });
+    }
+
+    fn log_op(&mut self, idx: usize, op: OpKind) -> Result<(), String> {
+        let ev = OpEvent {
+            tick: self.sim.tick(),
+            entity: idx as u16,
+            op,
+        };
+        apply_op(&mut self.sim, &self.ids, mem_data(), &ev).map_err(|e| e.to_string())?;
+        self.log.ops.push(ev);
+        Ok(())
+    }
+
+    /// Spawn a car. Only before the first tick: the spawn becomes part of the scenario setup
+    /// (entity id `car<N>`, scenario-default assists), so replays stay canonical.
+    pub fn spawn(&mut self, car_id: &str, pos: [f32; 3], yaw: f32) -> Result<EntityId, String> {
+        self.live_check()?;
+        if self.sim.tick() != 0 {
+            return Err("vehicles can only be spawned before the first tick".into());
+        }
+        let car = simcli::data::load_car(mem_data(), car_id).map_err(|e| e.to_string())?;
+        let id = self
+            .sim
+            .spawn_vehicle(&car, pos, yaw)
+            .map_err(|e| e.to_string())?;
+        self.sim
+            .set_assists(id, self.sc.assists.profile())
+            .map_err(|e| e.to_string())?;
+        let mut n = self.ids.len() + 1;
+        while self.sc.entities.iter().any(|e| e.id == format!("car{n}")) {
+            n += 1;
+        }
+        self.sc
+            .entities
+            .push(entity(&format!("car{n}"), car_id, pos, yaw));
+        self.ids.push(id);
+        self.cars.push(car);
+        self.extras.push(EntityExtra::default());
+        self.last_input.push(VehicleInput::default());
+        self.log.entities = self.ids.len() as u32;
+        Ok(id)
+    }
+
+    /// Set live input. Ignored (`Ok(false)`) while a scripted scenario is running, and when
+    /// unchanged. `gear_up`/`gear_down` are one-tick edges (cleared after the next tick).
+    pub fn set_input(&mut self, id: EntityId, input: VehicleInput) -> Result<bool, String> {
+        self.live_check()?;
+        let idx = self.idx(id)?;
+        if self.script_running() || self.last_input[idx] == input {
+            return Ok(false);
+        }
+        self.log_input(idx, input);
         Ok(true)
     }
 
-    /// Reset a vehicle to its spawn pose (logged).
-    pub fn reset_vehicle(&mut self, id: EntityId) -> Result<(), String> {
-        self.push_op(Op::Reset { entity: id.0 })
+    fn script_running(&self) -> bool {
+        self.scripted && self.sim.tick() < self.script_end
     }
 
-    /// Set a vehicle's assists (logged).
+    /// Reset a vehicle to its spawn pose, pristine (logged op).
+    pub fn reset_vehicle(&mut self, id: EntityId) -> Result<(), String> {
+        self.live_check()?;
+        let idx = self.idx(id)?;
+        self.log_op(idx, OpKind::Reset)
+    }
+
+    /// Set a vehicle's assists (logged op).
     pub fn set_assists(&mut self, id: EntityId, profile: AssistProfile) -> Result<(), String> {
-        self.push_op(Op::Assists {
-            entity: id.0,
-            profile,
-        })
+        self.live_check()?;
+        let idx = self.idx(id)?;
+        self.log_op(idx, OpKind::Assists(profile))
+    }
+
+    /// Switch the damage mode without restarting (logged op; existing damage is kept).
+    pub fn set_mode(&mut self, mode: DamageMode) -> Result<(), String> {
+        self.live_check()?;
+        self.log_op(0, OpKind::Mode(mode))?;
+        self.mode = mode;
+        Ok(())
     }
 
     // ----- stepping ----------------------------------------------------------------------
@@ -337,7 +366,7 @@ impl Session {
         let scale = self.playback.as_ref().map_or(1.0, |p| p.speed);
         let mut ticks = self.fixed.advance(frame_dt * scale) as u64;
         if let Some(p) = &self.playback {
-            ticks = ticks.min(p.replay.end_tick.saturating_sub(self.sim.tick()));
+            ticks = ticks.min(p.replay.ticks.saturating_sub(self.sim.tick()));
         }
         self.run_ticks(ticks);
         if self.at_replay_end() {
@@ -349,7 +378,7 @@ impl Session {
     fn at_replay_end(&self) -> bool {
         self.playback
             .as_ref()
-            .is_some_and(|p| self.sim.tick() >= p.replay.end_tick)
+            .is_some_and(|p| self.sim.tick() >= p.replay.ticks)
     }
 
     /// Run exactly `n` ticks (stops at the end of a replay).
@@ -358,155 +387,122 @@ impl Session {
             if self.at_replay_end() {
                 break;
             }
-            let last = i + 1 == n;
-            self.run_tick(last);
+            self.run_tick(i + 1 == n);
         }
     }
 
     fn run_tick(&mut self, capture_prev: bool) {
         let tick = self.sim.tick();
-        // 1. Ops for this tick: from the replay log, or from scenario scripts.
-        if self.playback.is_some() {
-            self.apply_due_ops();
-        } else {
-            self.apply_scripts(tick);
-        }
-
-        // 2. Snapshot pre-tick state for interpolation and acceleration.
-        let before: Vec<(EntityId, VehicleState)> = self.sim.vehicle_states();
-        if capture_prev {
-            for (id, s) in &before {
-                if let Some(x) = self.extras.get_mut(id) {
-                    x.prev_state = Some(s.clone());
+        // 1. Inputs for this tick: replay track, scenario drivers, or (live) already applied.
+        if let Some(mut p) = self.playback.take() {
+            let r = &p.replay;
+            while p.op_cursor < r.ops.len() && r.ops[p.op_cursor].tick <= tick {
+                let ev = r.ops[p.op_cursor];
+                if apply_op(&mut self.sim, &self.ids, mem_data(), &ev).is_err() {
+                    p.drift_count += 1;
+                } else if let OpKind::Mode(m) = ev.op {
+                    self.mode = m;
                 }
+                p.op_cursor += 1;
+            }
+            while p.input_cursor < r.inputs.len() && r.inputs[p.input_cursor].tick <= tick {
+                let ev = r.inputs[p.input_cursor];
+                if let Some(id) = self.ids.get(ev.entity as usize) {
+                    let _ = self.sim.set_input(*id, ev.input);
+                    self.last_input[ev.entity as usize] = ev.input;
+                }
+                p.input_cursor += 1;
+            }
+            self.playback = Some(p);
+        } else if self.script_running() {
+            let states = self.sim.vehicle_states();
+            for (idx, (_, state)) in states.iter().enumerate() {
+                let input = driver_input(&self.sc, idx, tick, state, &self.last_input[idx]);
+                self.log_input(idx, input);
             }
         }
 
-        // 3. Step.
+        // 2. Step, keeping the pre-tick state for interpolation and acceleration.
+        let before = self.sim.vehicle_states();
+        if capture_prev {
+            for (x, (_, s)) in self.extras.iter_mut().zip(&before) {
+                x.prev_state = Some(s.clone());
+            }
+        }
         self.sim.step_fixed();
-        let new_events = self.sim.drain_events();
-        self.events.extend(new_events);
+        self.events.extend(self.sim.drain_events());
         if self.events.len() > MAX_BUFFERED_EVENTS {
             let excess = self.events.len() - MAX_BUFFERED_EVENTS;
             self.events.drain(..excess);
         }
-
-        // 4. Derived per-vehicle data.
         let after = self.sim.vehicle_states();
-        for (id, s) in &after {
-            let Some(x) = self.extras.get_mut(id) else {
-                continue;
-            };
-            let prev_vel = before
-                .iter()
-                .find(|(b, _)| b == id)
-                .map_or(s.lin_vel, |(_, b)| b.lin_vel);
-            let a_world = [
-                (s.lin_vel[0] - prev_vel[0]) / PHYSICS_DT,
-                (s.lin_vel[1] - prev_vel[1]) / PHYSICS_DT,
-                (s.lin_vel[2] - prev_vel[2]) / PHYSICS_DT,
+        for ((x, (_, b)), (_, s)) in self.extras.iter_mut().zip(&before).zip(&after) {
+            let a = [
+                (s.lin_vel[0] - b.lin_vel[0]) / PHYSICS_DT,
+                (s.lin_vel[1] - b.lin_vel[1]) / PHYSICS_DT,
+                (s.lin_vel[2] - b.lin_vel[2]) / PHYSICS_DT,
             ];
-            x.accel_local = world_to_local(s.rot, a_world);
-            if self.scenario.as_ref().is_some_and(|r| !r.done) {
-                let decel_g = (-x.accel_local[1] * s.speed_mps.signum()) / GRAVITY_MPS2;
-                x.metrics.update(s, x.spawn_pos, decel_g);
-            }
+            x.accel_local = world_to_local(s.rot, a);
         }
 
-        // 5. Edge-triggered inputs (gear up/down) last exactly one tick (live sessions only;
-        //    the clearing op is logged, so playback reproduces it).
-        if self.playback.is_none() {
-            let edges: Vec<(EntityId, VehicleInput)> = self
-                .last_input
-                .iter()
-                .filter(|(_, i)| i.gear_up || i.gear_down)
-                .map(|(id, i)| {
-                    (
-                        *id,
-                        VehicleInput {
-                            gear_up: false,
-                            gear_down: false,
-                            ..*i
-                        },
-                    )
-                })
-                .collect();
-            for (id, input) in edges {
-                let _ = self.push_op(Op::Input {
-                    entity: id.0,
-                    input,
-                });
-            }
-        }
-
-        // 6. Scenario end.
+        // 3. Hashes: logged every tick live (replay.bin stores one per tick), compared in
+        //    playback.
         let now = self.sim.tick();
-        if let Some(run) = &mut self.scenario {
-            if !run.done && now >= run.end_tick {
-                run.done = true;
-                for x in self.extras.values_mut() {
-                    x.script = None;
-                }
-            }
-        }
-
-        // 7. Hashes: stored every HASH_INTERVAL_TICKS live; checked against every stored
-        //    tick (including the final one) in playback.
+        let hash = self.sim.state_hash();
         match &mut self.playback {
-            None => {
-                if now.is_multiple_of(HASH_INTERVAL_TICKS) {
-                    self.hashes.push((now, self.sim.state_hash()));
-                }
-            }
-            Some(p) => {
-                if let Some(expected) = p.hashes.get(&now) {
-                    if *expected == self.sim.state_hash() {
-                        p.verified += 1;
-                    } else {
+            Some(p) => match p.replay.tick_hashes.get(now as usize - 1) {
+                Some(h) if *h == hash => p.verified += 1,
+                Some(_) => {
+                    p.drift_count += 1;
+                    if p.drift_ticks.len() < MAX_DRIFT_TICKS {
                         p.drift_ticks.push(now);
+                    }
+                }
+                None => {}
+            },
+            None => {
+                self.log.tick_hashes.push(hash);
+                if now.is_multiple_of(self.sc.hash_every) {
+                    self.log.checkpoints.push(self.checkpoint());
+                }
+                if self.scripted && now == self.script_end {
+                    self.live_end_hash = Some(hash);
+                }
+                // Live edge inputs (gear up/down) last exactly one tick.
+                if !self.script_running() {
+                    for idx in 0..self.ids.len() {
+                        let i = self.last_input[idx];
+                        if i.gear_up || i.gear_down {
+                            self.log_input(
+                                idx,
+                                VehicleInput {
+                                    gear_up: false,
+                                    gear_down: false,
+                                    ..i
+                                },
+                            );
+                        }
                     }
                 }
             }
         }
-        self.apply_due_ops();
     }
 
-    /// Playback: apply every logged op stamped at or before the current tick. Ops are applied
-    /// as soon as their tick is reached (so a freshly loaded replay shows its tick-0 spawns),
-    /// which is equivalent to live sessions applying them on the call.
-    fn apply_due_ops(&mut self) {
-        let tick = self.sim.tick();
-        let Some(mut p) = self.playback.take() else {
-            return;
-        };
-        while p.cursor < p.replay.ops.len() && p.replay.ops[p.cursor].tick <= tick {
-            let op = p.replay.ops[p.cursor].op.clone();
-            if self.apply(&op).is_err() {
-                // A broken log is drift; keep going so the UI can show where.
-                p.drift_ticks.push(tick);
-            }
-            p.cursor += 1;
-        }
-        self.playback = Some(p);
-    }
-
-    fn apply_scripts(&mut self, tick: u64) {
-        let t = tick as f32 * PHYSICS_DT;
+    fn checkpoint(&self) -> Checkpoint {
         let states = self.sim.vehicle_states();
-        let mut changes = Vec::new();
-        for (id, s) in &states {
-            if let Some(script) = self.extras.get(id).and_then(|x| x.script.as_ref()) {
-                let input = script.input_at(t, s.speed_mps);
-                if self.last_input.get(id) != Some(&input) {
-                    changes.push((*id, input));
-                }
-            }
-        }
-        for (id, input) in changes {
-            let _ = self.push_op(Op::Input {
-                entity: id.0,
-                input,
-            });
+        let hashes = self.sim.entity_hashes();
+        Checkpoint {
+            tick: self.sim.tick(),
+            entities: states
+                .iter()
+                .zip(&hashes)
+                .map(|((_, s), (_, hash))| EntityCheckpoint {
+                    hash: *hash,
+                    pos: s.pos,
+                    lin_vel: s.lin_vel,
+                    health: s.health,
+                })
+                .collect(),
         }
     }
 
@@ -519,117 +515,107 @@ impl Session {
 
     /// Force-feedback output of a vehicle.
     pub fn ffb(&self, id: EntityId) -> Option<FfbOutput> {
-        self.sim
-            .vehicles()
-            .iter()
-            .find(|v| v.id == id)
-            .map(|v| v.vehicle.ffb())
-    }
-
-    /// Current lattice node positions (chassis space) of a vehicle.
-    pub fn lattice_nodes(&self, id: EntityId) -> Option<&[[f32; 3]]> {
-        self.sim
-            .vehicles()
-            .iter()
-            .find(|v| v.id == id)
-            .map(|v| v.damage.node_positions())
+        self.index(id).map(|i| self.sim.vehicles()[i].vehicle.ffb())
     }
 
     /// Current input of a vehicle.
     pub fn input(&self, id: EntityId) -> VehicleInput {
-        self.last_input.get(&id).copied().unwrap_or_default()
+        self.index(id)
+            .map(|i| self.last_input[i])
+            .unwrap_or_default()
     }
 
     /// Assists of a vehicle.
     pub fn assists(&self, id: EntityId) -> Option<AssistProfile> {
-        self.sim
-            .vehicles()
-            .iter()
-            .find(|v| v.id == id)
-            .map(|v| v.assists)
+        self.index(id).map(|i| self.sim.vehicles()[i].assists)
     }
 
-    /// Damage mode in effect.
-    pub fn mode(&self) -> DamageMode {
-        self.header.mode
-    }
+    // ----- scenario outcome --------------------------------------------------------------
 
-    /// Scenario result: `None` without a scripted scenario.
-    pub fn scenario_result(&self) -> Option<ScenarioResult> {
-        let run = self.scenario.as_ref()?;
-        let metrics: Vec<VehicleMetrics> = self.extras.values().map(|x| x.metrics).collect();
-        let mut checks = evaluate(&run.scenario.expect, &metrics, false);
-        checks.extend(evaluate(&run.scenario.pending_expect, &metrics, true));
+    /// Scripted-scenario progress / outcome; `None` for free drive and replays. Once the
+    /// scripted duration has elapsed, the scenario is re-run headless through `simcli::run`
+    /// (once, cached) for its full expectation report, and the live end-of-script hash is
+    /// compared with simcli's final hash.
+    pub fn scenario_result(&mut self) -> Option<ScenarioResult> {
+        if !self.scripted || self.playback.is_some() {
+            return None;
+        }
+        let done = self.sim.tick() >= self.script_end;
+        if done && self.outcome.is_none() {
+            self.outcome = simcli::run(
+                &self.sc,
+                mem_data(),
+                &opts(self.load_city, Some(self.systems)),
+            )
+            .ok()
+            .map(|o| o.summary);
+        }
+        let live_hash = self.live_end_hash.map(|h| format!("{h:016x}"));
         Some(ScenarioResult {
-            name: run.scenario.name.clone(),
-            done: run.done,
+            name: self.sc.name.clone(),
+            done,
             tick: self.sim.tick(),
-            end_tick: run.end_tick,
-            pass: run.done && checks.iter().all(|c| c.pass || c.pending),
-            metrics,
-            checks,
-            state_hash: self.sim.state_hash(),
+            end_tick: self.script_end,
+            pass: self.outcome.as_ref().is_some_and(RunSummary::passed),
+            matches_simcli: match (&self.outcome, &live_hash) {
+                (Some(o), Some(h)) => Some(&o.final_hash == h),
+                _ => None,
+            },
+            live_hash,
+            summary: self.outcome.clone(),
         })
-    }
-
-    /// The scenario this session was built from (scripted scenarios only).
-    pub fn scenario(&self) -> Option<&Scenario> {
-        self.scenario.as_ref().map(|r| &r.scenario)
     }
 
     // ----- recording & playback ----------------------------------------------------------
 
-    /// Start recording: marks the view start. The op log always covers the whole session.
+    /// Mark recording as active (the log always covers the whole session from tick 0).
     pub fn record_start(&mut self) {
-        self.record_start = Some(self.sim.tick());
+        self.recording = true;
     }
 
     /// Whether `record_start` is active.
     pub fn recording(&self) -> bool {
-        self.record_start.is_some()
+        self.recording
     }
 
-    /// Stop recording and return the replay (session log from tick 0, viewed from the
-    /// `record_start` tick). Works without `record_start` (views from tick 0).
-    pub fn record_stop(&mut self) -> Replay {
+    /// Stop recording and return the session as a canonical `replay.bin` (whole session from
+    /// tick 0; the header scenario's duration is the recorded length).
+    pub fn record_stop(&mut self) -> Result<Replay, String> {
+        self.recording = false;
         let now = self.sim.tick();
-        let mut hashes = self.hashes.clone();
-        if hashes.last().map(|h| h.0) != Some(now) {
-            hashes.push((now, self.sim.state_hash()));
+        if now == 0 {
+            return Err("nothing recorded yet (no ticks run)".into());
         }
-        Replay {
-            header: self.header.clone(),
-            ops: self.log.clone(),
-            hashes,
-            view_start_tick: self.record_start.take().unwrap_or(0).min(now),
-            end_tick: now,
+        let mut sc = self.sc.clone();
+        sc.duration_s = now as f32 * PHYSICS_DT;
+        let mut r = self.log.clone();
+        r.scenario_ron = sc.to_ron();
+        r.ticks = now;
+        r.entities = self.ids.len() as u32;
+        if r.checkpoints.last().map(|c| c.tick) != Some(now) {
+            r.checkpoints.push(self.checkpoint());
         }
+        Ok(r)
     }
 
     /// Seek a replay to `tick` (re-simulates from 0 when seeking backwards).
     pub fn replay_seek(&mut self, tick: u64) -> Result<(), String> {
-        let Some(p) = &self.playback else {
-            return Err("no replay loaded".into());
-        };
-        let target = tick.min(p.replay.end_tick);
+        let p = self.playback.as_ref().ok_or("no replay loaded")?;
+        let target = tick.min(p.replay.ticks);
         if target < self.sim.tick() {
-            let mut p = self.playback.take().expect("checked");
-            p.cursor = 0;
-            p.verified = 0;
-            p.drift_ticks.clear();
-            self.sim = sim_for(&self.header)?;
-            self.extras.clear();
-            self.last_input.clear();
-            self.events.clear();
-            self.playback = Some(p);
-            self.apply_due_ops();
+            let speed = p.speed;
+            let replay = p.replay.clone();
+            *self = Self::from_replay(replay)?;
+            if let Some(p) = &mut self.playback {
+                p.speed = speed;
+            }
         }
         let n = target - self.sim.tick();
         self.run_ticks(n);
         Ok(())
     }
 
-    /// Set replay playback speed (0 = pause).
+    /// Set replay playback speed (0 = pause, max 16).
     pub fn replay_play(&mut self, speed: f32) -> Result<(), String> {
         let p = self.playback.as_mut().ok_or("no replay loaded")?;
         p.speed = speed.clamp(0.0, 16.0);
@@ -641,22 +627,23 @@ impl Session {
         let p = self.playback.as_ref()?;
         Some(ReplayStatus {
             tick: self.sim.tick(),
-            start_tick: p.replay.view_start_tick,
-            end_tick: p.replay.end_tick,
+            end_tick: p.replay.ticks,
             speed: p.speed,
-            verified_hashes: p.verified,
-            stored_hashes: p.replay.hashes.len() as u32,
+            verified_ticks: p.verified,
+            drift_count: p.drift_count,
             drift_ticks: p.drift_ticks.clone(),
             state_hash: format!("{:016x}", self.sim.state_hash()),
-            recorded_final_hash: p.replay.final_hash().map(|h| format!("{h:016x}")),
-            scenario: self.header.scenario.clone(),
-            mode: self.header.mode,
+            recorded_final_hash: p.replay.tick_hashes.last().map(|h| format!("{h:016x}")),
+            scenario: self.sc.name.clone(),
+            mode: self.mode,
+            contract_version: p.replay.contract_version.clone(),
+            hash_spec: p.replay.hash_spec,
         })
     }
 }
 
-/// Scenario progress / outcome (serialized to JSON for the UI).
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+/// Scripted-scenario progress / outcome (serialized to JSON for the UI).
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct ScenarioResult {
     /// Scenario name.
     pub name: String,
@@ -664,16 +651,16 @@ pub struct ScenarioResult {
     pub done: bool,
     /// Current tick.
     pub tick: u64,
-    /// Tick the scenario ends at.
+    /// Tick the script ends at.
     pub end_tick: u64,
-    /// All gating checks pass (pending checks ignored). Only meaningful when `done`.
+    /// simcli's verdict (all `expect` pass). Only meaningful when `done`.
     pub pass: bool,
-    /// Per-vehicle metrics (index 0 = vehicle 1).
-    pub metrics: Vec<VehicleMetrics>,
-    /// Gating and pending checks.
-    pub checks: Vec<CheckResult>,
-    /// Current state hash.
-    pub state_hash: u64,
+    /// Live state hash at `end_tick`.
+    pub live_hash: Option<String>,
+    /// Whether the live run reached the same final hash as the headless simcli run.
+    pub matches_simcli: Option<bool>,
+    /// The headless simcli run summary (expectations, pending, metrics), once done.
+    pub summary: Option<RunSummary>,
 }
 
 /// Replay progress (serialized to JSON for the UI).
@@ -681,17 +668,15 @@ pub struct ScenarioResult {
 pub struct ReplayStatus {
     /// Current tick.
     pub tick: u64,
-    /// First viewable tick.
-    pub start_tick: u64,
     /// Last tick.
     pub end_tick: u64,
     /// Playback speed.
     pub speed: f32,
-    /// Stored hashes matched so far.
-    pub verified_hashes: u32,
-    /// Hashes stored in the replay.
-    pub stored_hashes: u32,
-    /// Ticks where the hash did not match (drift).
+    /// Ticks whose hash matched the recording so far.
+    pub verified_ticks: u64,
+    /// Ticks whose hash did not match.
+    pub drift_count: u64,
+    /// First mismatching ticks (at most 64).
     pub drift_ticks: Vec<u64>,
     /// Current state hash (hex).
     pub state_hash: String,
@@ -699,6 +684,10 @@ pub struct ReplayStatus {
     pub recorded_final_hash: Option<String>,
     /// Scenario name.
     pub scenario: String,
-    /// Damage mode.
+    /// Damage mode in effect.
     pub mode: DamageMode,
+    /// Contract version at record time.
+    pub contract_version: String,
+    /// Hash spec at record time.
+    pub hash_spec: u32,
 }

@@ -1,11 +1,10 @@
 //! Packed `f32`/`u32` layouts handed to JavaScript as typed arrays, plus the debug-only
-//! derived quantities (tire force estimate, beam strain, region energy). Layouts are
+//! derived quantities (beam strain, region energy). Layouts are
 //! documented in `docs/integration/testbed.md` and mirrored in
 //! `apps/testbed-web/src/wasm/layout.ts`.
 
 use wp_contracts::{
-    BodyRegion, Component, LatticeDef, LoadedCar, MaterialDef, SurfaceType, TireDef, VehicleInput,
-    VehicleState,
+    BodyRegion, Component, LatticeDef, MaterialDef, SurfaceType, VehicleInput, VehicleState,
 };
 
 /// Floats per vehicle in `vehicle_states()`.
@@ -182,8 +181,8 @@ pub fn telemetry_names() -> Vec<String> {
             "contact",
             "detached",
             "omega_rad_s",
-            "fx_est_n",
-            "fy_est_n",
+            "fx_n",
+            "fy_left_n",
         ] {
             n.push(format!("{w}_{f}"));
         }
@@ -194,50 +193,9 @@ pub fn telemetry_names() -> Vec<String> {
     n
 }
 
-/// Magic Formula `D·sin(C·atan(Bx − E(Bx − atan Bx)))`. Debug read-out only (not sim code).
-fn magic(mf: &wp_contracts::MagicFormula, x: f32) -> f32 {
-    let bx = mf.b * x;
-    mf.d * (mf.c * (bx - mf.e * (bx - bx.atan())).atan()).sin()
-}
-
-/// Estimated tire forces `(Fx, Fy)` in N from slip, load and the tire's Magic Formula with a
-/// friction-ellipse cap. **Estimate**: the contract does not expose tire forces yet
-/// (contract change request TB-1).
-pub fn estimate_tire_force(
-    tire: &TireDef,
-    slip_ratio: f32,
-    slip_angle: f32,
-    fz: f32,
-    surface: SurfaceType,
-) -> (f32, f32) {
-    if fz <= 0.0 {
-        return (0.0, 0.0);
-    }
-    let mu_surface = tire
-        .surface_multipliers
-        .get(&surface)
-        .copied()
-        .unwrap_or(1.0);
-    let ls = 1.0 - tire.load_sensitivity * (fz / tire.fz0_n - 1.0);
-    let scale = fz * mu_surface * ls.max(0.1);
-    let mut fx = magic(&tire.longitudinal, slip_ratio) * scale;
-    let mut fy = -magic(&tire.lateral, slip_angle) * scale;
-    let cap = tire.lateral.d.max(tire.longitudinal.d) * scale;
-    let mag = (fx * fx + fy * fy).sqrt();
-    if mag > cap && mag > 0.0 {
-        fx *= cap / mag;
-        fy *= cap / mag;
-    }
-    (fx, fy)
-}
-
-/// Telemetry record (see [`telemetry_names`]).
-pub fn pack_telemetry(
-    car: &LoadedCar,
-    s: &VehicleState,
-    input: &VehicleInput,
-    accel_local: [f32; 3],
-) -> Vec<f32> {
+/// Telemetry record (see [`telemetry_names`]). Tire forces are the contract's
+/// `WheelState::{fx_n, fy_n}` (v0.2.0): applied this tick, tire frame, Fx + forward, Fy + left.
+pub fn pack_telemetry(s: &VehicleState, input: &VehicleInput, accel_local: [f32; 3]) -> Vec<f32> {
     let g = wp_contracts::GRAVITY_MPS2;
     let steer = (s.wheel_states[0].steer_rad + s.wheel_states[1].steer_rad) * 0.5;
     let mut out = vec![
@@ -255,17 +213,7 @@ pub fn pack_telemetry(
         input.steer,
         input.handbrake,
     ];
-    for (i, w) in s.wheel_states.iter().enumerate() {
-        let (fx, fy) = car
-            .tires
-            .get(&car.def.wheels[i].tire_id)
-            .map_or((0.0, 0.0), |t| {
-                if w.contact {
-                    estimate_tire_force(t, w.slip_ratio, w.slip_angle, w.fz_n, w.surface)
-                } else {
-                    (0.0, 0.0)
-                }
-            });
+    for w in &s.wheel_states {
         out.extend_from_slice(&[
             w.slip_angle,
             w.slip_ratio,
@@ -275,8 +223,8 @@ pub fn pack_telemetry(
             b(w.contact),
             b(w.detached),
             w.omega,
-            fx,
-            fy,
+            w.fx_n,
+            w.fy_n,
         ]);
     }
     for c in ALL_COMPONENTS {
@@ -360,13 +308,7 @@ mod tests {
 
     #[test]
     fn telemetry_names_match_record() {
-        let car = crate::data::load_car("debug_sedan").unwrap();
-        let rec = pack_telemetry(
-            &car,
-            &VehicleState::default(),
-            &VehicleInput::default(),
-            [0.0; 3],
-        );
+        let rec = pack_telemetry(&VehicleState::default(), &VehicleInput::default(), [0.0; 3]);
         assert_eq!(rec.len(), telemetry_names().len());
         assert_eq!(
             TELEMETRY_WHEEL_BASE + 4 * TELEMETRY_WHEEL_STRIDE + ALL_COMPONENTS.len(),

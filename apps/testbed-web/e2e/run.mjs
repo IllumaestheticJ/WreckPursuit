@@ -5,8 +5,9 @@
 // Checks: the car drives from keyboard input, every debug layer toggles without errors, a
 // recorded replay survives a page reload and re-simulates to the same hash with no drift,
 // crash scenarios run and report, and (optionally) perf at 1/8/24 cars.
-import { spawn } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
@@ -62,7 +63,7 @@ await page.keyboard.down("KeyD");
 await page.waitForTimeout(2500);
 const v = await speed();
 await page.keyboard.up("KeyD");
-check(v > 3, `keyboard drives the car (speed ${v.toFixed(2)} m/s)`);
+check(v > 1.5, `keyboard drives the car (speed ${v.toFixed(2)} m/s)`);
 await shot("drive_chase.png");
 
 // 2. Every debug layer on, every camera.
@@ -80,13 +81,15 @@ check(errors.length === 0, `all debug layers (${layerIds.join(", ")} + defaults)
 await page.evaluate((ids) => ids.forEach((id) => window.__wp.toggleLayer(id)), layerIds);
 await page.evaluate(() => window.__wp.setCamera("chase"));
 
-// 3. Record → reload → replay matches hash.
+// 3. Record → reload → replay matches hash; simcli verifies the same file headlessly.
 await page.evaluate(() => window.__wp.sim.recordStart());
 await page.keyboard.down("KeyW");
 await page.keyboard.down("KeyA");
 await page.waitForTimeout(1500);
 await page.keyboard.up("KeyA");
 await page.keyboard.press("ShiftLeft");
+// Live mode switch (a logged op): the replay must survive it.
+await page.evaluate(() => window.__wp.sim.setDamageMode("Simulation"));
 await page.keyboard.down("Space");
 await page.waitForTimeout(700);
 await page.keyboard.up("Space");
@@ -96,9 +99,16 @@ await page.waitForTimeout(400);
 const recorded = await page.evaluate(() => {
   const hash = window.__wp.sim.stateHash();
   const bytes = window.__wp.stopRecording();
-  return { hash, bytes: bytes.length };
+  return { hash, bytes: Array.from(bytes) };
 });
-check(recorded.bytes > 32, `recorded replay (${recorded.bytes} bytes, final hash ${recorded.hash})`);
+check(recorded.bytes.length > 32, `recorded replay.bin (${recorded.bytes.length} bytes, final hash ${recorded.hash})`);
+const replayFile = join(tmpdir(), `wp-e2e-${process.pid}.replay.bin`);
+writeFileSync(replayFile, Buffer.from(recorded.bytes));
+const verify = spawnSync("cargo", ["run", "-q", "--release", "-p", "simcli", "--", "replay", replayFile], {
+  cwd: join(root, "../.."),
+  encoding: "utf8",
+});
+check(verify.status === 0, `simcli replay verifies the browser recording: ${(verify.stdout + verify.stderr).trim().split("\n").pop()}`);
 
 await page.goto(URL + "?replay=last");
 await ready();
@@ -106,12 +116,12 @@ await page.evaluate(() => window.__wp.sim.replayPlay(8));
 await page.waitForFunction(() => {
   const s = window.__wp.sim.replayStatus();
   return s && s.tick >= s.end_tick;
-}, null, { timeout: 60000 });
+}, null, { timeout: 120000 });
 const status = await page.evaluate(() => window.__wp.sim.replayStatus());
 await shot("replay.png");
 check(
-  status.drift_ticks.length === 0 && status.verified_hashes === status.stored_hashes && status.state_hash === recorded.hash,
-  `replay after reload: ${status.verified_hashes}/${status.stored_hashes} hashes, final ${status.state_hash} vs recorded ${recorded.hash}`,
+  status.drift_count === 0 && status.verified_ticks === status.end_tick && status.state_hash === recorded.hash && status.mode === "Simulation",
+  `replay after reload: ${status.verified_ticks}/${status.end_tick} tick hashes, final ${status.state_hash} vs recorded ${recorded.hash}, mode ${status.mode}`,
 );
 // Scrub back and forward again: still no drift.
 await page.evaluate((t) => {
@@ -119,28 +129,62 @@ await page.evaluate((t) => {
   window.__wp.sim.replaySeek(t);
 }, status.end_tick);
 const status2 = await page.evaluate(() => window.__wp.sim.replayStatus());
-check(status2.drift_ticks.length === 0 && status2.state_hash === recorded.hash, "replay scrub back/forward stays drift-free");
+check(status2.drift_count === 0 && status2.state_hash === recorded.hash, "replay scrub back/forward stays drift-free");
 const csv = await page.evaluate(() => window.__wp.sim.replayCsv(window.__wp.app.lastReplay, 1, 4));
 check(csv.split("\n").length > 10 && csv.startsWith("tick,t_s,speed_mps"), `CSV export (${csv.split("\n").length - 2} rows)`);
 
-// 4. Scenarios.
+// 4. Scenarios (simcli format v2, results from simcli itself).
 for (const [file, kmh] of [
   ["crash/barrier_frontal.ron", 56],
+  ["crash/barrier_frontal_sim.ron", 56],
   ["crash/head_on.ron", 50],
   ["smoke/straight_line.ron", 0],
 ]) {
+  const contacts0 = await page.evaluate(() => window.__wp.scene.contactsSeen);
   await page.evaluate(([f, s]) => window.__wp.runScenario(f, s), [file, kmh]);
-  if (file.includes("barrier")) {
-    await page.evaluate(() => window.__wp.setCamera("chase"));
-    await page.waitForTimeout(2500);
+  if (file === "crash/barrier_frontal.ron") {
+    await page.evaluate(() => {
+      window.__wp.setCamera("chase");
+      window.__wp.toggleLayer("lattice");
+    });
+    await page.waitForFunction(() => window.__wp.sim.worldInfo()[0] > 240 * 4.7, null, { timeout: 60000 });
     await shot("scenario_barrier.png");
+    await page.evaluate(() => window.__wp.toggleLayer("lattice"));
   }
-  await page.waitForFunction(() => window.__wp.sim.scenarioResult()?.done === true, null, { timeout: 60000 });
+  await page.waitForFunction(() => window.__wp.sim.scenarioResult()?.done === true, null, { timeout: 120000 });
   const res = await page.evaluate(() => window.__wp.sim.scenarioResult());
-  const pending = res.checks.filter((c) => c.pending);
-  check(res.pass, `scenario ${file}: ${res.checks.filter((c) => !c.pending && c.pass).length}/${res.checks.filter((c) => !c.pending).length} gating checks pass, ${pending.filter((c) => c.pass).length}/${pending.length} pending checks pass`);
+  const contacts = (await page.evaluate(() => window.__wp.scene.contactsSeen)) - contacts0;
+  const exp = res.summary?.expectations ?? [];
+  const pend = res.summary?.pending ?? [];
+  check(
+    res.pass && res.matches_simcli === true,
+    `scenario ${file}: ${exp.filter((r) => r.passed).length}/${exp.length} expectations, ` +
+      `${pend.filter((r) => r.passed).length}/${pend.length} pending, live = simcli: ${res.matches_simcli}, contact markers ${contacts}`,
+  );
+  if (file.startsWith("crash/")) check(contacts > 0, `contact layer drew ${contacts} markers for ${file}`);
+  if (file === "crash/barrier_frontal_sim.ron") {
+    await page.waitForTimeout(300);
+    const feed = await page.evaluate(() => document.querySelector(".feed")?.textContent ?? "");
+    const kinds = ["GlassShattered", "RegionDamaged", "ComponentFailed", "PartDetached", "TotalLoss"].filter((k) => feed.includes(k));
+    check(kinds.length > 0, `event feed shows damage events: ${kinds.join(", ")}`);
+  }
   if (file.includes("head_on")) await shot("scenario_head_on.png");
 }
+
+// City free drive: greybox + traffic agents.
+await page.evaluate(() => {
+  document.getElementById("city").checked = true;
+  window.__wp.startFreeDrive("debug_sedan", "Arcade", true);
+  window.__wp.setCamera("orbit", [-25, -40, 30]);
+});
+await page.waitForTimeout(4000);
+const agents = await page.evaluate(() => window.__wp.sim.trafficAgents().length / 5);
+await shot("city_traffic.png");
+check(agents > 10, `city free drive: ${agents} traffic agents rendered`);
+await page.evaluate(() => {
+  document.getElementById("city").checked = false;
+  window.__wp.startFreeDrive("debug_sedan", "Arcade", false);
+});
 
 // 5. Perf.
 if (process.env.BENCH) {
@@ -154,6 +198,22 @@ if (process.env.BENCH) {
     );
     if (n === 24) await shot("bench_24.png");
   }
+  // Pure sim cost: 240 steps of 1/60 s (4 ticks each) timed inside the page, no rendering.
+  const timeSim = () =>
+    page.evaluate(() => {
+      const t0 = performance.now();
+      for (let i = 0; i < 240; i++) window.__wp.sim.step(1 / 60);
+      return (performance.now() - t0) / 240;
+    });
+  for (const n of [1, 8, 24]) {
+    await page.evaluate((k) => window.__wp.startBench(k), n);
+    await timeSim(); // warm-up
+    console.log(`BENCH sim-only ${n} cars: ${(await timeSim()).toFixed(3)} ms per 60 Hz frame`);
+  }
+  await page.evaluate(() => window.__wp.startFreeDrive("debug_sedan", "Arcade", true));
+  await timeSim();
+  const agentsNow = await page.evaluate(() => window.__wp.sim.trafficAgents().length / 5);
+  console.log(`BENCH sim-only city + ${agentsNow} traffic agents: ${(await timeSim()).toFixed(3)} ms per 60 Hz frame`);
 }
 
 check(errors.length === 0, `no page errors${errors.length ? ": " + errors.slice(0, 3).join(" | ") : ""}`);

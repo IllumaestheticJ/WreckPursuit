@@ -15,6 +15,22 @@ fn files(kind: &'static str) -> impl Iterator<Item = (&'static str, &'static str
         .map(|(_, id, text)| (*id, *text))
 }
 
+/// Every embedded file as a simcli data bundle (`cars/<id>.json`, `modes/arcade.toml`, …), so
+/// scenarios are built by exactly the code `simcli` uses.
+pub fn mem_data() -> &'static simcli::MemData {
+    static DATA: std::sync::OnceLock<simcli::MemData> = std::sync::OnceLock::new();
+    DATA.get_or_init(|| {
+        let files = EMBEDDED
+            .iter()
+            .map(|(kind, id, text)| {
+                let ext = if *kind == "modes" { "toml" } else { "json" };
+                (format!("{kind}/{id}.{ext}"), text.to_string())
+            })
+            .collect();
+        simcli::MemData { files }
+    })
+}
+
 /// Ids of every embedded car (`data/cars/*.json`), sorted.
 pub fn car_ids() -> Vec<String> {
     files("cars").map(|(id, _)| id.to_string()).collect()
@@ -77,6 +93,13 @@ mod tests {
         for id in ids {
             load_car(&id).unwrap_or_else(|e| panic!("{id}: {e}"));
         }
+    }
+
+    #[test]
+    fn mem_data_loads_through_simcli() {
+        let car = simcli::data::load_car(mem_data(), "debug_coupe").unwrap();
+        assert_eq!(car.def.id, "debug_coupe");
+        simcli::data::load_mode(mem_data(), DamageMode::Simulation).unwrap();
     }
 
     #[test]

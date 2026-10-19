@@ -1,0 +1,26 @@
+// Testbed crash test (workstream 04): two-car head-on. Sedan from the origin heading +Y, coupe
+// from 60 m ahead heading -Y, both holding 50 km/h. The testbed's speed box overrides both.
+(
+    name: "crash_head_on",
+    seed: 12,
+    mode: Arcade,
+    assists: ai,
+    entities: [
+        (id: "sedan", car: "debug_sedan", driver: cruise(target_mps: 13.89)),
+        (id: "coupe", car: "debug_coupe", pos: (0.0, 60.0, 0.0), yaw: 3.14159265, driver: cruise(target_mps: 13.89)),
+    ],
+    duration_s: 6.0,
+    hash_every: 60,
+    expect: [
+        speed_at(entity: "sedan", t_s: 3.0, min: 11.0, max: 14.5),
+        speed_at(entity: "coupe", t_s: 3.0, min: 12.5, max: 15.0),
+        metric(entity: "sedan", name: "distance_m", min: 18.0, max: 30.0),
+        metric(entity: "coupe", name: "distance_m", min: 28.0, max: 40.0),
+        metric(entity: "sedan", name: "final_health", min: 0.2, max: 0.8),
+        metric(entity: "coupe", name: "final_health", min: 0.2, max: 0.8),
+        crush_depth(entity: "sedan", min: 0.3, max: 1.2),
+        total_loss(entity: "sedan", expected: false),
+        event_count(event: "Contact", entity: "sedan", min: 1, max: 100000),
+    ],
+    expect_pending: [],
+)

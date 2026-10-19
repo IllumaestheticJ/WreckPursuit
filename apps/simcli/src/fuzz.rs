@@ -115,6 +115,7 @@ pub fn gen_case(cfg: &FuzzConfig, index: u64) -> Scenario {
         barriers,
         seed: rng.next_u64(),
         city: Default::default(),
+        barriers: Vec::new(),
         time_of_day_h: rng.range_f32(0.0, 24.0),
         time_ratio: 10.0,
         mode: if rng.chance(0.5) {

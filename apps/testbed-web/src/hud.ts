@@ -1,7 +1,7 @@
 // DOM/canvas HUD: speed, rpm bar, gear, mode + assist badges, perf, damage silhouette,
 // component health, region energy, input display with rack-torque bar, help overlay.
 import { T } from "./wasm/layout";
-import type { AssistProfile, DriverInput, VehicleInfo } from "./wasm/sim";
+import type { AssistProfile, DriverInput, SimEvent, VehicleInfo } from "./wasm/sim";
 import { layers, LAYERS } from "./settings";
 import { heat, healthColour } from "./vehicle_view";
 
@@ -52,6 +52,8 @@ export class Hud {
   private readonly main: HTMLElement;
   private readonly comps: HTMLElement;
   private readonly regions: HTMLElement;
+  private readonly feed: HTMLElement;
+  private readonly feedLines: string[] = [];
   private readonly inputs: HTMLElement;
   private readonly help: HTMLElement;
   private readonly silhouette: HTMLCanvasElement;
@@ -67,6 +69,7 @@ export class Hud {
     right.appendChild(this.silhouette);
     this.comps = el("div", "panel comps", right);
     this.regions = el("div", "panel regions", right);
+    this.feed = el("div", "panel feed", right);
     this.inputs = el("div", "panel inputs", left);
     this.help = el("div", "panel help hidden", root);
     this.help.innerHTML =
@@ -75,6 +78,26 @@ export class Hud {
       `R reset · O headlights · Q horn · 1 chase · 2 hood · 3 bumper · 4 orbit · 5 cinematic<br>` +
       `F1 or ? this help · P pause · . frame step (replay) · [ / ] replay speed<br><br>` +
       LAYERS.map((l) => `${l.key.replace("Key", "")} — ${l.label}`).join("<br>");
+  }
+
+  /** Append notable sim events (damage, detachment, violations) to the event feed. */
+  pushEvents(events: SimEvent[], tick: number): void {
+    for (const ev of events) {
+      const [kind, body] = Object.entries(ev)[0] ?? [];
+      if (!kind || kind === "Contact" || kind === "LatticeDeformed") continue;
+      const b = (body ?? {}) as Record<string, unknown>;
+      const who = b.vehicle !== undefined ? `#${b.vehicle}` : "";
+      const detail = Object.entries(b)
+        .filter(([k]) => k !== "vehicle" && k !== "pos" && k !== "payload")
+        .map(([k, v]) => `${k}=${typeof v === "number" ? Number(v.toFixed(2)) : JSON.stringify(v)}`)
+        .join(" ");
+      this.feedLines.unshift(`${(tick / 240).toFixed(2)}s ${kind} ${who} ${detail}`);
+    }
+    this.feedLines.length = Math.min(this.feedLines.length, 12);
+  }
+
+  clearEvents(): void {
+    this.feedLines.length = 0;
   }
 
   toggleHelp(): void {
@@ -124,6 +147,12 @@ export class Hud {
         f.info.regions
           .map((r, i) => `<div>${r.padEnd(17, " ")}${f.energy![i].toFixed(0).padStart(6, " ")}</div>`)
           .join("");
+    }
+
+    this.feed.style.display = layers.on("events") && this.feedLines.length ? "" : "none";
+    if (layers.on("events")) {
+      this.feed.innerHTML =
+        "<b>events</b>" + this.feedLines.map((l) => `<div>${l.replace(/</g, "&lt;")}</div>`).join("");
     }
 
     this.inputs.style.display = layers.on("inputs") ? "" : "none";

@@ -138,7 +138,7 @@ impl App {
         cv.buf.fill(0x0020_2428);
 
         let (_, st) = self.session.sim().vehicle_states()[0].clone();
-        let def = &self.session.extra(PLAYER).expect("player").car.def;
+        let def = &self.session.car(PLAYER).expect("player").def;
         let (cx, cy) = (cv.w as f32 / 2.0, cv.h as f32 / 2.0);
         // World → screen, camera centred on the car, +Y up on screen.
         let to_screen =

@@ -182,6 +182,7 @@ fn cmd_run(args: &Args) -> Result<bool, String> {
         record: !args.has("--no-write"),
         input_track: None,
         strict: args.has("--strict"),
+        ..Default::default()
     };
     if args.get("--compare").is_some() && paths.len() != 1 {
         return Err("--compare takes exactly one scenario".into());

@@ -213,11 +213,12 @@ export class VehicleView {
       if (slip) heat(Math.abs(cur[wb + SW.slipAngle]) / SLIP_RED, w.material.color);
       else w.material.color.setHex(0x222222);
 
-      const fx = tel[tb + TW.fxEst];
-      const fy = tel[tb + TW.fyEst];
+      // Applied tire forces in the steered wheel frame: Fx along +Y, Fy toward the wheel's left (-X).
+      const fx = tel[tb + TW.fx];
+      const fy = tel[tb + TW.fyLeft];
       for (const [arrow, f, dir] of [
         [w.fx, fx, new THREE.Vector3(0, 1, 0)],
-        [w.fy, fy, new THREE.Vector3(1, 0, 0)],
+        [w.fy, fy, new THREE.Vector3(-1, 0, 0)],
       ] as const) {
         const len = Math.abs(f) * FORCE_SCALE;
         arrow.visible = forces && len > 0.02;

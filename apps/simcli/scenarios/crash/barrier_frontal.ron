@@ -1,0 +1,24 @@
+// Testbed crash test (workstream 04): debug sedan holds 56 km/h into a rigid barrier, Arcade.
+// The testbed's speed box overrides `target_mps`. Arcade: one hard hit degrades the car.
+(
+    name: "crash_barrier_frontal",
+    seed: 11,
+    mode: Arcade,
+    assists: ai,
+    barriers: [(pos: (0.0, 45.0, 0.75), size: (8.0, 1.0, 1.5))],
+    entities: [
+        (id: "car", car: "debug_sedan", driver: cruise(target_mps: 15.56)),
+    ],
+    duration_s: 7.0,
+    hash_every: 60,
+    expect: [
+        speed_at(entity: "car", t_s: 4.0, min: 14.5, max: 16.5),
+        metric(entity: "car", name: "distance_m", min: 38.0, max: 44.5),
+        metric(entity: "car", name: "final_speed_mps", min: -3.0, max: 3.0),
+        crush_depth(entity: "car", min: 0.3, max: 1.2),
+        metric(entity: "car", name: "final_health", min: 0.4, max: 0.95),
+        total_loss(entity: "car", expected: false),
+        event_count(event: "Contact", entity: "car", min: 1, max: 100000),
+    ],
+    expect_pending: [],
+)

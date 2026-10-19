@@ -1,9 +1,12 @@
-//! Native tests of the session / replay core behind the wasm surface.
+//! Native tests of the session core behind the wasm surface: replays are canonical
+//! `replay.bin` that `simcli replay` verifies, scripted sessions match `simcli run`.
 
-use wp_contracts::{EntityId, VehicleInput};
+use wp_contracts::{AssistProfile, DamageMode, EntityId, VehicleInput};
 
-use crate::replay::Replay;
-use crate::scenario::Scenario;
+use simcli::replay::{self, Replay};
+
+use crate::data::mem_data;
+use crate::scenario::{free_drive, from_ron, with_cruise_speed};
 use crate::session::Session;
 
 fn drive(throttle: f32, steer: f32) -> VehicleInput {
@@ -14,126 +17,126 @@ fn drive(throttle: f32, steer: f32) -> VehicleInput {
     }
 }
 
-/// A live session with a scripted-by-hand input sequence, stepped with irregular frame times.
-fn live_session(frame_dts: &[f32]) -> Session {
-    let mut s = Session::from_scenario(7, Scenario::default()).unwrap();
+fn scenario_file(rel: &str) -> simcli::Scenario {
+    let path = format!(
+        "{}/../../apps/simcli/scenarios/{rel}",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    from_ron(&std::fs::read_to_string(path).unwrap()).unwrap()
+}
+
+/// A free-drive session with a second car, inputs, a gear edge, a reset, an assists change
+/// and a mode switch, stepped with irregular frame times.
+fn live_session(frames: usize) -> Session {
+    let mut s = Session::new(free_drive("debug_sedan", DamageMode::Arcade, false), false).unwrap();
     let p = EntityId(1);
     let second = s.spawn("debug_coupe", [6.0, 0.0, 0.0], 0.3).unwrap();
-    for (i, dt) in frame_dts.iter().enumerate() {
+    for i in 0..frames {
         let steer = if (i / 20) % 2 == 0 { 0.4 } else { -0.3 };
         s.set_input(p, drive(1.0, steer)).unwrap();
         s.set_input(second, drive(0.6, -steer)).unwrap();
-        if i == 50 {
-            s.set_input(
-                p,
-                VehicleInput {
-                    gear_up: true,
-                    ..drive(1.0, steer)
-                },
-            )
-            .unwrap();
+        match i {
+            30 => {
+                s.set_input(
+                    p,
+                    VehicleInput {
+                        gear_up: true,
+                        ..drive(1.0, steer)
+                    },
+                )
+                .unwrap();
+            }
+            50 => s.set_assists(p, AssistProfile::gamepad_default()).unwrap(),
+            70 => s.set_mode(DamageMode::Simulation).unwrap(),
+            90 => s.reset_vehicle(second).unwrap(),
+            _ => {}
         }
-        if i == 90 {
-            s.reset_vehicle(second).unwrap();
-        }
-        s.step(*dt);
+        s.step(if i % 3 == 0 { 1.0 / 30.0 } else { 1.0 / 60.0 });
     }
     s
 }
 
-fn frames(n: usize, dt: f32) -> Vec<f32> {
-    vec![dt; n]
-}
-
 #[test]
 fn free_drive_moves_the_player() {
-    let mut s = Session::from_scenario(1, Scenario::default()).unwrap();
+    let mut s = Session::new(free_drive("debug_sedan", DamageMode::Arcade, false), false).unwrap();
     s.set_input(EntityId(1), drive(1.0, 0.0)).unwrap();
     for _ in 0..60 {
         s.step(1.0 / 60.0);
     }
     assert_eq!(s.tick(), 240);
-    let (_, st) = &s.sim().vehicle_states()[0];
-    assert!(st.speed_mps > 1.0);
+    assert!(s.sim().vehicle_states()[0].1.speed_mps > 1.0);
 }
 
 #[test]
-fn replay_round_trip_matches_every_hash() {
-    let mut live = live_session(&frames(150, 1.0 / 60.0));
+fn recording_is_a_canonical_replay_that_simcli_verifies() {
+    let mut live = live_session(120);
     let live_hash = live.sim().state_hash();
-    let bytes = live.record_stop().to_bytes();
-
-    let replay = Replay::from_bytes(&bytes).unwrap();
-    let end = replay.end_tick;
-    assert_eq!(replay.final_hash(), Some(live_hash));
-    let mut play = Session::from_replay(replay).unwrap();
-    play.replay_seek(end).unwrap();
-    let st = play.replay_status().unwrap();
-    assert!(st.drift_ticks.is_empty(), "drift at {:?}", st.drift_ticks);
-    assert_eq!(st.verified_hashes, st.stored_hashes);
-    assert_eq!(play.sim().state_hash(), live_hash);
+    let bytes = live.record_stop().unwrap().encode();
+    let golden = Replay::decode(&bytes).unwrap();
+    assert_eq!(golden.tick_hashes.last(), Some(&live_hash));
+    assert_eq!(golden.ops.len(), 3, "assists, mode, reset");
+    let report = replay::verify(&golden, mem_data()).unwrap();
+    assert!(report.matched, "{}", report.to_text());
 }
 
 #[test]
-fn replay_plays_back_through_step_at_any_speed() {
-    let mut live = live_session(&frames(120, 1.0 / 60.0));
-    let replay = live.record_stop();
-    let end = replay.end_tick;
-    let live_hash = replay.final_hash().unwrap();
-    let mut play = Session::from_replay(replay).unwrap();
+fn browser_playback_matches_every_tick() {
+    let mut live = live_session(120);
+    let live_hash = live.sim().state_hash();
+    let bytes = live.record_stop().unwrap().encode();
+    let mut play = Session::from_replay_bytes(&bytes).unwrap();
     play.replay_play(3.0).unwrap();
-    for _ in 0..200 {
+    for _ in 0..400 {
         play.step(1.0 / 60.0);
     }
-    assert_eq!(play.tick(), end);
+    let st = play.replay_status().unwrap();
+    assert_eq!(st.tick, st.end_tick);
+    assert_eq!(st.drift_count, 0, "drift at {:?}", st.drift_ticks);
+    assert_eq!(st.verified_ticks, st.end_tick);
     assert_eq!(play.sim().state_hash(), live_hash);
-    assert!(play.replay_status().unwrap().drift_ticks.is_empty());
-}
-
-#[test]
-fn live_sessions_are_deterministic() {
-    let a = live_session(&frames(100, 1.0 / 60.0)).sim().state_hash();
-    let b = live_session(&frames(100, 1.0 / 60.0)).sim().state_hash();
-    assert_eq!(a, b);
+    assert_eq!(play.mode(), DamageMode::Simulation, "mode op replayed");
 }
 
 #[test]
 fn backward_seek_resimulates_identically() {
-    let mut live = live_session(&frames(120, 1.0 / 60.0));
-    let replay = live.record_stop();
-    let mut play = Session::from_replay(replay).unwrap();
+    let mut live = live_session(100);
+    let bytes = live.record_stop().unwrap().encode();
+    let mut play = Session::from_replay_bytes(&bytes).unwrap();
     play.replay_seek(300).unwrap();
     let h300 = play.sim().state_hash();
     play.replay_seek(400).unwrap();
     play.replay_seek(300).unwrap();
     assert_eq!(play.sim().state_hash(), h300);
-    assert_eq!(play.tick(), 300);
+    assert_eq!(play.replay_status().unwrap().drift_count, 0);
 }
 
 #[test]
-fn record_start_sets_view_start() {
-    let mut s = live_session(&frames(30, 1.0 / 60.0));
-    let t0 = s.tick();
-    s.record_start();
-    for _ in 0..30 {
-        s.step(1.0 / 60.0);
+fn simcli_golden_replays_play_back_in_the_browser_core() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../apps/simcli/golden");
+    for name in ["golden_frontal_56kmh", "golden_tbone"] {
+        let bytes = std::fs::read(format!("{dir}/{name}.replay.bin")).unwrap();
+        let mut play = Session::from_replay_bytes(&bytes).unwrap();
+        let end = play.playback().unwrap().replay.ticks;
+        play.replay_seek(end).unwrap();
+        let st = play.replay_status().unwrap();
+        assert_eq!(st.drift_count, 0, "{name}: drift at {:?}", st.drift_ticks);
+        assert_eq!(st.verified_ticks, end);
     }
-    let r = s.record_stop();
-    assert_eq!(r.view_start_tick, t0);
-    let play = Session::from_replay(r).unwrap();
-    assert_eq!(play.tick(), t0);
 }
 
 #[test]
-fn live_control_is_refused_during_playback() {
-    let mut live = live_session(&frames(10, 1.0 / 60.0));
-    let mut play = Session::from_replay(live.record_stop()).unwrap();
+fn live_control_is_refused_during_playback_and_spawn_after_start() {
+    let mut live = live_session(10);
+    assert!(live.spawn("debug_sedan", [0.0; 3], 0.0).is_err());
+    let bytes = live.record_stop().unwrap().encode();
+    let mut play = Session::from_replay_bytes(&bytes).unwrap();
     assert!(play.set_input(EntityId(1), drive(1.0, 0.0)).is_err());
+    assert!(play.reset_vehicle(EntityId(1)).is_err());
 }
 
 #[test]
 fn gear_up_is_a_one_tick_edge() {
-    let mut s = Session::from_scenario(1, Scenario::default()).unwrap();
+    let mut s = Session::new(free_drive("debug_sedan", DamageMode::Arcade, false), false).unwrap();
     s.set_input(
         EntityId(1),
         VehicleInput {
@@ -147,39 +150,62 @@ fn gear_up_is_a_one_tick_edge() {
 }
 
 #[test]
-fn barrier_and_head_on_scenarios_run_and_report() {
-    let dir = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../apps/testbed-web/scenarios/crash"
-    );
-    for name in ["barrier_frontal.ron", "head_on.ron"] {
-        let text = std::fs::read_to_string(format!("{dir}/{name}")).unwrap();
-        let sc = Scenario::from_ron(&text).unwrap();
-        let end = (sc.duration_s * 240.0).round() as u64;
-        let mut s = Session::from_scenario(0, sc).unwrap();
-        // Scripted vehicles ignore live input while the scenario runs.
+fn scripted_crash_scenarios_match_simcli_and_pass() {
+    for rel in [
+        "crash/barrier_frontal.ron",
+        "crash/barrier_frontal_sim.ron",
+        "crash/head_on.ron",
+    ] {
+        let sc = scenario_file(rel);
+        let ticks = sc.ticks();
+        let mut s = Session::new(sc, true).unwrap();
+        // Scripted entities ignore live input while the scenario runs.
         assert!(!s.set_input(EntityId(1), drive(0.0, 1.0)).unwrap());
-        s.run_ticks(end);
+        s.run_ticks(ticks);
         let r = s.scenario_result().unwrap();
-        assert!(r.done, "{name}");
-        assert!(
-            r.checks.iter().all(|c| c.pass || c.pending),
-            "{name}: {:?}",
-            r.checks
+        assert!(r.done, "{rel}");
+        assert_eq!(
+            r.matches_simcli,
+            Some(true),
+            "{rel}: live run differs from simcli"
         );
-        assert!(r.pass);
-        // Vehicles approach at the cruise speed.
-        assert!(r.metrics[0].max_speed_mps > 10.0, "{name}: {:?}", r.metrics);
+        assert!(r.pass, "{rel}: {:?}", r.summary.map(|x| x.failures));
+        // Live input works after the script ends.
+        assert!(s.set_input(EntityId(1), drive(0.0, 1.0)).unwrap());
     }
 }
 
 #[test]
+fn speed_override_reaches_the_cruise_target() {
+    let sc = with_cruise_speed(scenario_file("crash/barrier_frontal.ron"), 10.0);
+    let mut s = Session::new(sc, true).unwrap();
+    s.run_ticks(240 * 3);
+    let v = s.sim().vehicle_states()[0].1.speed_mps;
+    assert!((9.0..11.0).contains(&v), "speed {v}");
+}
+
+#[test]
+fn city_free_drive_has_traffic_and_replays_in_the_browser_core() {
+    let mut s = Session::new(free_drive("debug_sedan", DamageMode::Arcade, true), false).unwrap();
+    assert!(s.has_city());
+    let spawn = s.spec(EntityId(1)).unwrap().pos;
+    assert!(spawn != [0.0; 3], "player spawned on the race grid");
+    s.set_input(EntityId(1), drive(0.5, 0.0)).unwrap();
+    s.run_ticks(240 * 3);
+    assert!(s.sim().world().agent_count() > 10, "traffic spawned");
+    let bytes = s.record_stop().unwrap().encode();
+    let mut play = Session::from_replay_bytes(&bytes).unwrap();
+    play.replay_seek(240 * 3).unwrap();
+    assert_eq!(play.replay_status().unwrap().drift_count, 0);
+}
+
+#[test]
 fn csv_export_has_one_row_per_sample() {
-    let mut live = live_session(&frames(60, 1.0 / 60.0));
-    let replay = live.record_stop();
-    let end = replay.end_tick;
-    let csv = crate::export_csv(replay, 1, 4).unwrap();
+    let mut live = live_session(60);
+    let r = live.record_stop().unwrap();
+    let end = r.ticks;
+    let csv = crate::export_csv(&r.encode(), 1, 4).unwrap();
     let rows = csv.lines().count() - 1;
-    assert_eq!(rows as u64, end / 4 + 1);
+    assert_eq!(rows as u64, end.div_ceil(4) + 1);
     assert!(csv.starts_with("tick,t_s,speed_mps"));
 }
