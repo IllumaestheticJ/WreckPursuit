@@ -328,22 +328,40 @@ pub fn status(
     cfg: &Config,
     now: UnixMs,
 ) -> ApiResult<TicketStatus> {
-    type Row = (u32, String, Option<u32>, Option<InstanceId>, String);
+    type Row = (
+        u32,
+        String,
+        Option<u32>,
+        Option<InstanceId>,
+        String,
+        Option<i64>,
+    );
     let row: Option<Row> = conn
         .query_row(
-            "SELECT id, state, party_id, instance_id, role FROM tickets
+            "SELECT id, state, party_id, instance_id, role, assigned_ms FROM tickets
              WHERE account_id = ?1 ORDER BY id DESC LIMIT 1",
             params![account],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                ))
+            },
         )
         .optional()?;
-    let (ticket_id, state, party_id, instance_id, role) =
+    let (ticket_id, state, party_id, instance_id, role, assigned_ms) =
         row.ok_or_else(|| ApiError::not_found("no ticket"))?;
     let state = TicketState::parse(&state).ok_or_else(|| ApiError::internal("bad ticket state"))?;
     let mut assignment = None;
     if let (TicketState::Assigned, Some(inst)) = (state, instance_id) {
         let join_token = token::generate(token::prefix::JOIN);
-        let join_expires_ms = now + cfg.join_ttl_ms;
+        // Never valid past the point where `process` releases the reserved seat.
+        let seat_released_ms = assigned_ms.unwrap_or(now) + 2 * cfg.join_ttl_ms;
+        let join_expires_ms = (now + cfg.join_ttl_ms).min(seat_released_ms);
         conn.execute(
             "UPDATE tickets SET join_token_hash = ?2, join_expires_ms = ?3 WHERE id = ?1",
             params![ticket_id, token::hash(&join_token), join_expires_ms],

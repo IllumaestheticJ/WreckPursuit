@@ -714,3 +714,28 @@ fn every_route_is_in_the_openapi_spec() {
         );
     }
 }
+
+#[test]
+fn only_the_current_host_touches_an_account() {
+    let srv = TestServer::start();
+    let old = FakeInstance::register(&srv, "old", DamageMode::Arcade, "D", racer_slots(2));
+    let (id, c) = player(&srv, "mover");
+    matchmake(
+        &c,
+        Some(&prefs(Role::Racer, DamageMode::Arcade, "D")),
+        &[Arc::clone(&old)],
+    );
+    let old_store = RemoteAccountStore::new(old.client.clone(), old.id);
+    assert!(old_store.load(PlayerId(id)).unwrap().is_some());
+
+    // The player moves to another server; the old one loses access.
+    let new = FakeInstance::register(&srv, "new", DamageMode::Simulation, "D", racer_slots(2));
+    matchmake(
+        &c,
+        Some(&prefs(Role::Racer, DamageMode::Simulation, "D")),
+        &[Arc::clone(&new)],
+    );
+    assert!(old_store.load(PlayerId(id)).is_err());
+    let new_store = RemoteAccountStore::new(new.client.clone(), new.id);
+    assert!(new_store.load(PlayerId(id)).unwrap().is_some());
+}
