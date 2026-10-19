@@ -13,6 +13,19 @@
 | 2 Traffic variety | 3 civilian cars, full pipeline (VehicleDef + spec sheet + lattice + audio def, validated, smoke-simmed): **`tansy_13`** Tansy 1.3 — 2000s FF 1.3 supermini hatch (Compact, 4 500); **`drayman_cargo`** Drayman Cargo — 2000s RWD 4.8 V8 full-size cargo van, body-on-frame (Truck, 9 000); **`furrow_24`** Furrow 2.4 — 90s RWD 2.4 I4 compact pickup, body-on-frame (Truck, 6 500). Sim: 13.2 / 11.6 / 10.8 s 0-100, 0.79 / 0.66 / 0.73 g, 39.9 / 43.7 / 41.4 m, 168 / 201 / 178 km/h — all in their class bands except van and pickup stopping 0.3-0.6 m *shorter* than their bands (car-type `street` tires on light trucks). Barriers 8/8 each. Nameplate check clean. |
 | 3 `gen-lattice` pass | All 17 roster lattices regenerated on B's current generator (`ab6970d`: rail bracing, side attachments). **Folded back what I can without touching `wp_damage`**: every remaining hand adjustment is now listed with the exact `gen-lattice` option it should become (section "Proposed gen-lattice options" below, ready to implement 1:1). Two new adjustments fix generator findings in car data: the **luggage bay / cargo box** behind the seatback is no longer passenger cell (fixes the two-box rear total loss on Vireo, Lindwurm, Bastion and the new Tansy — 4 barrier misses gone), and **mid-engine front rails** get the rear-rail factor (Lucciola 56 km/h crush 1.47 → 1.26 m). Barrier sweep: **134/136** (2 near misses: police offset, below). |
 
+**Checks (round 6b, cloud container):** fmt, clippy `-D warnings`, wasm build of `wp_wasm` (the
+new tool crate is not reachable from it), `nameplate_check.py` (68 files, 0 problems),
+`smoke_sim.py` (17 cars × 2 modes deterministic), `collect_results.py`. `cargo test --workspace`
+(run with `--release`: the debug simcli scenario suite exceeded the 30-min tool limit): all pass
+except **two that fail identically on the base branch with the old car data** (not caused by
+this work): `wp_economy` `pursuit_wiring::real_police_capture_settles_through_the_economy`
+("level at capture, not after the reset") and `wp_race`
+`simcli_races::city_sprint_on_real_roads` (index out of bounds at line 28 — the judge indexes
+scenario entities by vehicle order, and city police cars are vehicles too). **8 city goldens
+re-blessed** in a separate `[bless]` commit: simcli spawns `sentinel_cruiser` as the city police
+car, so every city run with police changed; with the old data all 35 goldens match, all 8 still
+pass their expectations.
+
 ### Pursuit numbers (`python3 tools/specsheet/pursuit_probe.py --chase`, full sim, Arcade)
 
 | car | 0-100 s | 0-144 s | 80-144 s | caught (+10 % margin, day cap) | caught (cap only) |
