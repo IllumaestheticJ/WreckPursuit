@@ -72,6 +72,9 @@ function repoFiles(): Plugin {
 
 export default defineConfig({
   plugins: [repoFiles()],
+  // M's UI kit (apps/ui-kit, Preact + TSX) is imported from source; one Preact copy for both.
+  esbuild: { jsx: "automatic", jsxImportSource: "preact" },
+  resolve: { dedupe: ["preact"] },
   server: { port: 5173 },
   preview: { port: 4173 },
   build: {
