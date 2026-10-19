@@ -26,6 +26,7 @@ clock. Implements `wp_contracts::WorldQuery`. No renderer dependency; compiles f
 | `drive` | Shared AI driving: `DriveController` (pure pursuit + PID) and `PathFollower` (`follow_path` along any `DrivePath`) for traffic, police and racers |
 | `leader` | Leader / obstacle query (`find_leader`) + shared IDM (`CarFollowing`) so police and racers follow and stop behind vehicles like traffic does |
 | `roads` | Road-level graph view (`RoadGraphView`) for police routing / minimaps; `RoadNetworkIndex` (contract `RoadNetworkQuery`, grid-indexed `nearest_on_road`) |
+| `manoeuvre` | Low-speed manoeuvres: k-point turn planner (`plan_turn`), closed-loop `TurnDriver` / `ReverseDriver` for physical cars (reverse gear through the automatic box), `sight_clear` (crest / bend check), map helpers `road_corridor` / `overtake_sight_clear` |
 | `markings` | Painted markings derived from the lane layout (`marking_at` / `painted_at`): `WorldQuery::surface_at` reports `SurfaceType::PaintedLine` on them |
 
 City data lives in `data/city/` (see its README); importer and generator in
@@ -64,6 +65,13 @@ runs, see Perf); density per district within 15 % of target after warm-up; noon 
 car and yielding to sirens; head-on emergency braking; speeding, wrong-way, red-light,
 collision violations; seamless LOD promotion/demotion (pose jump < 0.6 m, speed continuous,
 physical cars stay on the road); routes, circuits and closures; parked cars.
+
+Blocked vehicles (`tests/blocked.rs`, playtest row 32): a stopped car in one lane of a 1+1
+street is passed in the oncoming lane (or turned away from) with no contact; a car parked across
+the lane; a 2+2 arterial (lane changes, never the oncoming lane); a single-lane one-way street
+(followers reverse to the junction and re-route); a Port Vesper street; the map helpers; an
+ignored perf run with 12 blockers. `tests/drive.rs` drives the real car (Rapier rig) through a
+5-leg turn on a 7 m street and a 40 m reverse.
 
 ## Road format (`data/city/<city>.road.bin` + `.road.json`)
 
@@ -307,6 +315,52 @@ for `DrivePath` users. Real-vehicle tests (`tests/drive.rs`): from 25 m/s with p
 settings it stops 2.5 m behind a stopped car and settles ≈ 9 m behind an 8 m/s car. Physical
 traffic uses the same hold when stopped.
 
+**Blocked vehicles** (owner playtest row 32; `traffic/blocked.rs`, `manoeuvre.rs`). Every
+decision records which constraint set the acceleration and from that why a stopped car waits
+(`Agent::wait`): `Line` (stop line, signal, siren, junction rules, pulling-away delay), `Queue`
+(the car ahead waits for one of those) or `Obstructed` (the car ahead is disabled or itself
+obstructed; a stationary tracked vehicle — parked player, stopped police car — that is not at
+or queued before the stop line; debris). Obstructions are stopped behind with 6 m extra room
+(`OBSTACLE_GAP_M`). A driver acts once the obstruction has stood still for its **patience**
+(law-abiding 4.5–8 s, casual 3.5–6 s, aggressive 3–4 s; derived from id + seed, no RNG draw)
+and it has stood behind it ≥ 1 s:
+- **Multi-lane road**: a forced MOBIL lane change (incentive threshold lowered, safety
+  criterion unchanged; the target lane must not hold a stopped car or a parked tracked vehicle
+  within 40 m). Physical agents may lane-change for this too. After patience + 8 s without a
+  change the alternatives below are tried.
+- **Two-lane road — pass in the oncoming lane** (first car behind the obstruction only): the
+  obstruction (plus stopped cars right in front of it) ≤ 30 m long, its box clear of the
+  oncoming lane, the pass ends ≥ 20 m before the junction, the road up to the junction visible
+  (`sight_clear`: no crest hiding a 1.1 m object from a 1.1 m eye, no bend > 20°), and the
+  oncoming lane clear for `pass + v_limit × 1.25 × t_pass + 20 m` (≤ 160 m) including cars in the
+  junction / on lanes about to turn into it, and no tracked vehicle coming. The pass is slow
+  (4 m/s), indicated (left out, right back), keeps clear of the obstruction's box (creeps at
+  1.5 m/s aiming 0.6 m wider until the body is clear; stops if it would touch), gives way to
+  anything in the oncoming lane (IDM against it) and goes back behind the obstruction if an
+  oncoming car appears before it is alongside, or if it stalls 4 s. While in the oncoming lane
+  it has an entry in that lane's list, so oncoming traffic stops for it like for any car.
+- **Turn around** otherwise (two-way road, ≥ 6 m from the junction ends): `plan_turn` finds a
+  U-turn or k-point turn within the paved driving lanes (parking lanes excluded) clear of every
+  nearby car / tracked vehicle / debris; it starts when oncoming traffic can stop for it
+  (`v² / 6 + 25 m` clear) and the lanes crossed have nobody arriving. Kinematic agents follow the
+  planned legs at ≤ 1.2 m/s (0.7 s between legs, re-checking each leg's sweep); physical agents
+  run `TurnDriver` (re-plans before every leg from the measured pose, engages reverse through the
+  automatic box). The car holds entries in its own lane (3 m behind it) and the oncoming lane
+  while turning, then drives off in the opposing lane.
+- **Reverse to the last junction** (one-way street, no room to turn, or the car is stuck in a
+  junction connector): only the last car in the lane; it first claims the spot at the end of the
+  lane it came from (an entry there makes approaching cars hold back), starts once that spot,
+  the junction across its path and the diverging connectors are clear (one car per spot; gives
+  up after 40 s), holds its connector while backing through it at ≤ 2.5 m/s, and stops at the
+  previous lane's stop line, from where it re-plans.
+- **Re-route**: a lane someone turned around in, reversed out of, or found impassable is
+  remembered as blocked for 90 s: `choose_next` avoids it while alternatives exist, and cars
+  planning into it re-plan (giving up a permit they can still comfortably stop for).
+
+Police patrols (`wp_police::avoid`, workstream 06) pass stopped vehicles with their own logic;
+`manoeuvre::{road_corridor, plan_turn, TurnDriver, overtake_sight_clear}` let them add the
+turn-around and the crest / bend rule (request in `docs/integration/world.md`).
+
 **Road graph** (`World::road_graph()`, `roads::RoadGraphView`): one edge per road with class,
 limit, lanes each way, district; nodes with district and signal flag; POIs; building bounds.
 
@@ -342,6 +396,13 @@ Release, cloud container (4 vCPU), procedural 12×12, 400 agents at saturation
 
 Physical agents use the `wp_vehicle` stub (negligible); re-measure when prompt 02 lands.
 
+Blocked vehicles (round 9, playtest row 32): the 400-agent perf test 0.075 ms per frame (no
+blocker; the 10-min soaks give bit-identical stats to before: normal traffic is unchanged);
+**0.091 ms** with 12 blockers (8 two-lane, 4 arterial) and passes / lane changes / turns /
+reverses running (`perf_400_agents_with_blockers_under_budget`, ignored). Per decision the
+added work is the binding-constraint bookkeeping; manoeuvre checks run only for obstructed cars
+(once per second) and for the few cars in a manoeuvre.
+
 Port Vesper v2, same settings (`CITY=vesper_v2 just traffic-bench`): avg 0.061 ms, p99 0.16 ms
 per 60 Hz frame (0.27 ms avg with collision diagnostics); 10-min soaks × 3 seeds × {0 %, 5 %}
 aggressive: 0 civilian–civilian collisions (`tests/city_v2.rs`, ignored).
@@ -354,6 +415,11 @@ aggressive: 0 civilian–civilian collisions (`tests/city_v2.rs`, ignored).
   recycled when unseen. No protected-left phases yet.
 - Spawning uses one traffic car definition (no per-district vehicle mix yet).
 - Agents do not react to other civilians' hazards (only tracked vehicles and debris).
+- Blocked vehicles: no use of shoulders / parking lanes (parked cars live there); passes are
+  one car at a time (followers queue up and pass in turn); a k-point turn assumes the road is
+  locally straight (it plans in a straight corridor; the physical driver stops a leg early if
+  the body nears an edge); several cars reversing out of a long one-way street go one after
+  another, so the last of a long queue may still be recycled as stuck after 120 s.
 - Sightline rule is distance-only (no building occlusion).
 - Lane change across a solid line / bus lane rules not modelled; buses not simulated.
 - Elevation: kinematic agents follow the lanes' 3D polylines; un-embodied physical agents

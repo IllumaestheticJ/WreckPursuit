@@ -26,6 +26,7 @@ pub mod density;
 pub mod drive;
 pub mod geom;
 pub mod leader;
+pub mod manoeuvre;
 pub mod map;
 pub mod markings;
 pub mod network;
