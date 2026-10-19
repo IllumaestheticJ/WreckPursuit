@@ -356,3 +356,6 @@ For machine I (repeat of the run-2 request): `simcli::run::crush_depth` should u
 
 **Checks:** see the commit; fmt, clippy `-D warnings`, `cargo test --workspace`, wasm build,
 `crates/wp_damage/scenarios/*` and `simcli goldens` (results below).
+
+## Lead note (2026-10-19): new machine R (panels)
+Machine R (`ws/panels`, prompt 21) owns `crates/wp_damage/src/panels.rs` (hinged panel swing / unlatch / hang states), `data/panels/`, `tools/assets/` and `apps/testbed-web/src/render/`. Expect small hooks from R in your files; coordinate through `docs/integration/panels.md`.

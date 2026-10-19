@@ -42,7 +42,7 @@ export class CameraRig {
   private readonly cineAnchor = new THREE.Vector3();
 
   constructor(dom: HTMLElement) {
-    this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.05, 5000);
+    this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 3000);
     this.camera.position.set(0, 6, -12);
     this.orbit = new OrbitControls(this.camera, dom);
     this.orbit.enabled = false;
