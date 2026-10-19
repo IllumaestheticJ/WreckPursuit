@@ -1,72 +1,396 @@
 //! # wp_world
 //!
-//! City, road network, signals, civilian traffic and the day/night clock (owned by
-//! workstream 05). **Current state: stub** — an infinite flat asphalt plane with no speed
-//! limits or signals, plus a working [`WorldClock`].
+//! City, road network, signals, civilian traffic and the day/night clock (workstream 05).
+//!
+//! - [`network`]: the road file format (`data/city/<city>.road.bin` + `.road.json`).
+//! - [`builder`]: lane-graph builder from an abstract road graph (used by [`procgen`] and the
+//!   OSM importer in `tools/city-import`).
+//! - [`procgen`]: procedural fallback city (`gen-city --grid 12x12 --seed N`).
+//! - [`map`]: runtime map (connectors, conflicts, spatial grid) implementing
+//!   [`WorldQuery`].
+//! - [`traffic`]: civilian agents (IDM, MOBIL, junction right of way, hazards, density
+//!   spawning, kinematic/physical LOD).
+//! - [`density`], [`signals`], [`clock`], [`violations`], [`routes`], [`props`].
+//!
+//! [`World`] composes them. The sim loop calls [`World::set_tracked_vehicles`] (players,
+//! police, sirens) and then [`World::step`] once per physics tick; traffic AI runs at 60 Hz
+//! inside, physical traffic vehicles step every tick.
 
 #![warn(missing_docs)]
 
-use serde::{Deserialize, Serialize};
-use wp_contracts::{SignalState, SimEvent, SurfaceType, TimeOfDay, WorldQuery};
+pub mod builder;
+pub mod clock;
+pub mod density;
+pub mod geom;
+pub mod map;
+pub mod network;
+pub mod procgen;
+pub mod props;
+pub mod routes;
+pub mod signals;
+pub mod traffic;
+pub mod violations;
 
-/// In-game clock advanced by simulation time only.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct WorldClock {
-    /// Current time of day.
-    pub time: TimeOfDay,
-    /// In-game seconds per simulated second (default 10: 1 real minute = 10 game minutes).
-    pub ratio: f32,
+use std::path::Path;
+
+use wp_contracts::{
+    HandlingEffects, LoadedCar, SignalState, SimEvent, SurfaceType, TimeOfDay, WorldQuery,
+};
+use wp_math::StateHasher;
+
+pub use clock::{sun_direction, WorldClock, DEFAULT_TIME_RATIO};
+pub use map::{CityMap, SegId};
+pub use network::{RoadError, RoadNetwork};
+pub use props::{PropKind, StaticProp};
+pub use routes::{ActiveRoute, Checkpoint, Route, RouteClosure};
+pub use traffic::{
+    AgentId, AgentView, Hazard, Lod, LodChange, PhysicalAgent, TrackedVehicle, TrafficConfig,
+    TrafficStats, TRAFFIC_DT,
+};
+pub use violations::{ViolationConfig, ViolationTracker};
+
+use traffic::{Traffic, TrafficInputs};
+
+/// World construction parameters.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WorldConfig {
+    /// Seed for traffic and parked cars.
+    pub seed: u64,
+    /// Starting time of day.
+    pub start_time: TimeOfDay,
+    /// Clock ratio (in-game seconds per simulated second).
+    pub time_ratio: f32,
+    /// Traffic tuning.
+    pub traffic: TrafficConfig,
+    /// Generate parked cars along parking lanes.
+    pub parked_cars: bool,
 }
 
-impl Default for WorldClock {
+impl Default for WorldConfig {
     fn default() -> Self {
         Self {
-            time: TimeOfDay::from_hours(12.0),
-            ratio: 10.0,
+            seed: 1,
+            start_time: TimeOfDay::from_hours(12.0),
+            time_ratio: DEFAULT_TIME_RATIO,
+            traffic: TrafficConfig::default(),
+            parked_cars: true,
         }
     }
 }
 
-impl WorldClock {
-    /// Advance by `dt` simulated seconds.
-    pub fn step(&mut self, dt: f32) {
-        self.time = self.time.advanced(dt * self.ratio);
-    }
-}
-
-/// The world: road network, traffic and clock.
-#[derive(Debug, Clone, Default)]
+/// The world: road network, signals, traffic, violations and clock.
+#[derive(Debug, Clone)]
 pub struct World {
     /// Day/night clock.
     pub clock: WorldClock,
+    map: CityMap,
+    traffic: Traffic,
+    violations: ViolationTracker,
+    tracked: Vec<TrackedVehicle>,
+    hazards: Vec<traffic::Hazard>,
+    routes: Vec<ActiveRoute>,
+    route_focus: Vec<geom::V2>,
+    closed: Vec<bool>,
+    cones: Vec<StaticProp>,
+    parked: Vec<StaticProp>,
+    sim_time: f64,
+    traffic_acc: f64,
+}
+
+impl Default for World {
+    fn default() -> Self {
+        Self::flat(TimeOfDay::from_hours(12.0), DEFAULT_TIME_RATIO)
+    }
+}
+
+fn empty_network() -> RoadNetwork {
+    RoadNetwork {
+        format_version: network::ROAD_FORMAT_VERSION,
+        id: "flat".into(),
+        source: "empty".into(),
+        attribution: None,
+        bounds_min: [0.0; 2],
+        bounds_max: [0.0; 2],
+        core: [0.0; 2],
+        nodes: Vec::new(),
+        lanes: Vec::new(),
+        intersections: Vec::new(),
+        signals: Vec::new(),
+        zones: Vec::new(),
+        pois: Vec::new(),
+        buildings: Vec::new(),
+    }
 }
 
 impl World {
-    /// An empty flat world (stub) starting at `time` with clock `ratio`.
+    /// An empty flat world (infinite asphalt, no limits/signals/traffic) starting at `time`.
     pub fn flat(time: TimeOfDay, ratio: f32) -> Self {
+        Self::new(
+            empty_network(),
+            WorldConfig {
+                start_time: time,
+                time_ratio: ratio,
+                ..Default::default()
+            },
+        )
+    }
+
+    /// World over a road network.
+    pub fn new(net: RoadNetwork, cfg: WorldConfig) -> Self {
+        let mut map = CityMap::new(net);
+        map.time = cfg.start_time;
+        let traffic = Traffic::new(&map, cfg.traffic.clone(), cfg.seed);
+        let parked = if cfg.parked_cars {
+            props::parked_cars(&map, cfg.seed)
+        } else {
+            Vec::new()
+        };
+        let n_lanes = map.n_lanes();
         Self {
-            clock: WorldClock { time, ratio },
+            clock: WorldClock::new(cfg.start_time, cfg.time_ratio),
+            map,
+            traffic,
+            violations: ViolationTracker::default(),
+            tracked: Vec::new(),
+            hazards: Vec::new(),
+            routes: Vec::new(),
+            route_focus: Vec::new(),
+            closed: vec![false; n_lanes],
+            cones: Vec::new(),
+            parked,
+            sim_time: 0.0,
+            traffic_acc: 0.0,
         }
     }
 
-    /// Advance clock, signals and traffic by `dt` seconds. Pushes events
-    /// (e.g. `TrafficViolation`) into `out`.
-    pub fn step(&mut self, dt: f32, _out: &mut Vec<SimEvent>) {
+    /// Load a `.road.bin` / `.road.json` city.
+    pub fn load(path: impl AsRef<Path>, cfg: WorldConfig) -> Result<Self, RoadError> {
+        Ok(Self::new(RoadNetwork::load(path)?, cfg))
+    }
+
+    /// Load from `.road.bin` bytes (browser / embedded data).
+    pub fn from_bin(bytes: &[u8], cfg: WorldConfig) -> Result<Self, RoadError> {
+        Ok(Self::new(RoadNetwork::from_bin(bytes)?, cfg))
+    }
+
+    /// Generate the procedural city in memory.
+    pub fn procedural(pg: &procgen::ProcGenConfig, cfg: WorldConfig) -> Self {
+        Self::new(procgen::generate(pg), cfg)
+    }
+
+    /// Car used for physical (near-LOD) traffic. Without one, traffic stays kinematic.
+    pub fn set_traffic_car(&mut self, car: &LoadedCar) {
+        self.traffic
+            .set_traffic_car(car.def.clone(), car.tires.clone());
+    }
+
+    /// Vehicles the world must know about this tick: players, police, AI racers.
+    pub fn set_tracked_vehicles(&mut self, tracked: &[TrackedVehicle]) {
+        self.tracked.clear();
+        self.tracked.extend_from_slice(tracked);
+    }
+
+    /// Debris / obstacles civilians should avoid.
+    pub fn set_hazards(&mut self, hazards: &[traffic::Hazard]) {
+        self.hazards.clear();
+        self.hazards.extend_from_slice(hazards);
+    }
+
+    /// Active race routes: focus areas for spawning and physical LOD; `closed` ones suppress
+    /// traffic on their roads and add cones.
+    pub fn set_active_routes(&mut self, routes: Vec<ActiveRoute>) {
+        self.closed.iter_mut().for_each(|c| *c = false);
+        self.cones.clear();
+        self.route_focus.clear();
+        for r in &routes {
+            let cum = geom::cumulative(&r.route.polyline);
+            let len = *cum.last().unwrap_or(&0.0);
+            let mut d = 0.0;
+            while d <= len && !r.route.polyline.is_empty() {
+                let (p, _) = geom::point_at(&r.route.polyline, &cum, d);
+                self.route_focus.push(geom::xy(p));
+                d += 40.0;
+            }
+            if r.closed {
+                let c = routes::closure_for_route(&self.map, &r.route);
+                for l in c.closed_lanes {
+                    self.closed[l as usize] = true;
+                }
+                self.cones.extend(c.cones);
+            }
+        }
+        self.routes = routes;
+    }
+
+    /// Fill the active area to its density targets immediately (call after setting tracked
+    /// vehicles; the sightline rule still applies).
+    pub fn populate(&mut self) {
+        let inp = TrafficInputs {
+            tracked: &self.tracked,
+            hazards: &self.hazards,
+            route_focus: &self.route_focus,
+            closed: &self.closed,
+        };
+        self.traffic.populate(&self.map, &inp);
+    }
+
+    /// Advance clock, signals and traffic by `dt` seconds (normally `PHYSICS_DT`). Pushes
+    /// `TrafficViolation` events (and any vehicle events from physical traffic) into `out`.
+    pub fn step(&mut self, dt: f32, out: &mut Vec<SimEvent>) {
         self.clock.step(dt);
+        self.sim_time += dt as f64;
+        self.map.signal_time_s = self.sim_time;
+        self.map.time = self.clock.time;
+        if self.map.segs.is_empty() {
+            return;
+        }
+        self.traffic.step_physics(&self.map, dt, out);
+        self.traffic_acc += dt as f64;
+        while self.traffic_acc >= TRAFFIC_DT as f64 - 1e-6 {
+            self.traffic_acc -= TRAFFIC_DT as f64;
+            let inp = TrafficInputs {
+                tracked: &self.tracked,
+                hazards: &self.hazards,
+                route_focus: &self.route_focus,
+                closed: &self.closed,
+            };
+            self.traffic.step(&self.map, &inp, out);
+            self.violations.update(
+                &self.map,
+                &self.tracked,
+                &self.traffic,
+                TRAFFIC_DT,
+                self.sim_time,
+                out,
+            );
+        }
+    }
+
+    /// Runtime map (segments, spatial queries).
+    pub fn map(&self) -> &CityMap {
+        &self.map
+    }
+
+    /// Road network data.
+    pub fn network(&self) -> &RoadNetwork {
+        &self.map.net
+    }
+
+    /// Simulation seconds since the world started (signal clock).
+    pub fn sim_time_s(&self) -> f64 {
+        self.sim_time
+    }
+
+    /// Renderer / netcode view of every civilian agent, ordered by id.
+    pub fn agents(&self) -> impl Iterator<Item = AgentView> + '_ {
+        self.traffic.views(&self.map)
+    }
+
+    /// Number of civilian agents.
+    pub fn agent_count(&self) -> usize {
+        self.traffic.agents().len()
+    }
+
+    /// Physical agents' vehicles (for the sim loop to attach rigid bodies and damage).
+    pub fn physical_agents_mut(&mut self) -> impl Iterator<Item = (AgentId, &mut PhysicalAgent)> {
+        self.traffic.physical_mut()
+    }
+
+    /// LOD transitions since the last call.
+    pub fn drain_lod_changes(&mut self) -> Vec<LodChange> {
+        self.traffic.drain_lod_changes()
+    }
+
+    /// Record the sim-loop entity id of a (physical) agent.
+    pub fn set_agent_entity(&mut self, agent: AgentId, entity: Option<wp_contracts::EntityId>) {
+        self.traffic.set_entity(agent, entity);
+    }
+
+    /// Push damage effects to a physical agent (a dead engine / lost wheel disables it).
+    pub fn apply_agent_damage(&mut self, agent: AgentId, effects: &HandlingEffects) {
+        self.traffic.apply_damage(agent, effects);
+    }
+
+    /// Static colliders: parked cars and route-closure cones.
+    pub fn static_props(&self) -> impl Iterator<Item = &StaticProp> + '_ {
+        self.parked.iter().chain(self.cones.iter())
+    }
+
+    /// Active routes.
+    pub fn active_routes(&self) -> &[ActiveRoute] {
+        &self.routes
+    }
+
+    /// Traffic counters.
+    pub fn traffic_stats(&self) -> &TrafficStats {
+        self.traffic.stats()
+    }
+
+    /// Traffic configuration (mutable: density scale, caps, diagnostics).
+    pub fn traffic_config_mut(&mut self) -> &mut TrafficConfig {
+        &mut self.traffic.config
+    }
+
+    /// Violation thresholds (mutable).
+    pub fn violation_config_mut(&mut self) -> &mut ViolationConfig {
+        &mut self.violations.config
+    }
+
+    /// Per-zone density targets and current counts, for debugging overlays and tests.
+    pub fn zone_density(&self) -> (Vec<f32>, Vec<u32>) {
+        let inp = TrafficInputs {
+            tracked: &self.tracked,
+            hazards: &self.hazards,
+            route_focus: &self.route_focus,
+            closed: &self.closed,
+        };
+        (
+            self.traffic.zone_targets(&self.map, &inp),
+            self.traffic.zone_counts(&self.map),
+        )
+    }
+
+    /// Plan a lane-legal route between two POIs.
+    pub fn plan_route_between_pois(&self, start_poi: usize, finish_poi: usize) -> Option<Route> {
+        routes::plan_route_between_pois(&self.map, start_poi, finish_poi)
+    }
+
+    /// Plan a lane-legal route between two points.
+    pub fn plan_route(
+        &self,
+        start: [f32; 3],
+        heading: Option<[f32; 2]>,
+        finish: [f32; 3],
+    ) -> Option<Route> {
+        routes::plan_route(&self.map, start, heading, finish)
+    }
+
+    /// Plan a closed circuit through polygon vertices.
+    pub fn plan_circuit(&self, polygon: &[[f32; 2]]) -> Option<Route> {
+        routes::plan_circuit(&self.map, polygon)
+    }
+
+    /// Deterministic hash of clock, signals and traffic.
+    pub fn state_hash(&self) -> u64 {
+        let mut h = StateHasher::new();
+        h.write_f32_q(self.clock.time.seconds_since_midnight, 1e2);
+        h.write_u64(self.sim_time.to_bits());
+        self.traffic.hash_into(&mut h);
+        h.finish()
     }
 }
 
 impl WorldQuery for World {
-    fn surface_at(&self, _p: [f32; 3]) -> SurfaceType {
-        SurfaceType::Asphalt
+    fn surface_at(&self, p: [f32; 3]) -> SurfaceType {
+        self.map.surface_at(p)
     }
 
-    fn speed_limit_at(&self, _p: [f32; 3]) -> Option<f32> {
-        None
+    fn speed_limit_at(&self, p: [f32; 3]) -> Option<f32> {
+        self.map.speed_limit_at(p)
     }
 
-    fn signal_state_ahead(&self, _p: [f32; 3], _heading: [f32; 3]) -> Option<SignalState> {
-        None
+    fn signal_state_ahead(&self, p: [f32; 3], heading: [f32; 3]) -> Option<SignalState> {
+        self.map.signal_state_ahead(p, heading)
     }
 
     fn time_of_day(&self) -> TimeOfDay {
@@ -79,14 +403,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn clock_advances_with_ratio_and_wraps() {
+    fn flat_world_matches_old_stub() {
         let mut w = World::flat(TimeOfDay::from_hours(23.5), 10.0);
         let mut ev = Vec::new();
-        // 360 sim seconds * 10 = 1 game hour.
         for _ in 0..360 {
             w.step(1.0, &mut ev);
         }
         assert!((w.time_of_day().hours() - 0.5).abs() < 1e-3);
         assert_eq!(w.surface_at([0.0; 3]), SurfaceType::Asphalt);
+        assert_eq!(w.speed_limit_at([0.0; 3]), None);
+        assert_eq!(w.signal_state_ahead([0.0; 3], [0.0, 1.0, 0.0]), None);
+        assert_eq!(w.agent_count(), 0);
+        assert!(ev.is_empty());
     }
 }
