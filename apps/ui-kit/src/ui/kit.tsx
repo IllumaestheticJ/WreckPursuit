@@ -3,7 +3,7 @@
  * theme.css. No component holds game state.
  */
 import type { ComponentChildren, JSX } from "preact";
-import { useEffect } from "preact/hooks";
+import { useEffect, useRef } from "preact/hooks";
 import { useSend, useSlice } from "../model/GameModel";
 import type { ScreenId } from "../model/types";
 
@@ -197,16 +197,18 @@ export function ChoiceField<T extends string>(props: { label: string; hint?: str
 
 /** Modal dialog; Escape closes. */
 export function Modal(props: { title: string; onClose: () => void; children?: ComponentChildren }) {
+  const onClose = useRef(props.onClose);
+  onClose.current = props.onClose;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
-        props.onClose();
+        onClose.current();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [props.onClose]);
+  }, []);
   return (
     <div class="wp-modal-back" onClick={(e) => e.target === e.currentTarget && props.onClose()}>
       <Panel title={props.title} class="wp-modal">
@@ -249,11 +251,14 @@ export function ScreenHead(props: { kicker: string; title: string; back?: Screen
 
 /** Escape key → handler (for screens with a back action). */
 export function useEscape(handler: () => void): void {
+  // Latest handler via a ref, so the listener is attached once (screens re-render every frame).
+  const ref = useRef(handler);
+  ref.current = handler;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !document.querySelector(".wp-modal-back")) handler();
+      if (e.key === "Escape" && !document.querySelector(".wp-modal-back")) ref.current();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [handler]);
+  }, []);
 }

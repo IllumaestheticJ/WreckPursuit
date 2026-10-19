@@ -121,7 +121,7 @@ function CarDetail({ car, active }: { car: GarageCar; active: boolean }) {
           </div>
         </div>
       </Panel>
-      {!inImpound && <RepairPanel car={car} />}
+      {!inImpound && <RepairPanel key={car.uid} car={car} />}
       {!inImpound && <InsurancePanel car={car} />}
     </div>
   );
