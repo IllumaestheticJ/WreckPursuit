@@ -716,9 +716,7 @@ impl RaceJudge {
             return;
         }
         // Gap along the road the leader drove (straight line if the chaser left it).
-        let gap = self.tracks[self.leader]
-            .trail
-            .gap_m(v2::xy(pl), v2::xy(pc));
+        let gap = self.tracks[self.leader].trail.gap_m(v2::xy(pl), v2::xy(pc));
         if gap >= lead_m {
             self.outrun_decide(tick);
         }

@@ -26,6 +26,7 @@
 #![warn(missing_docs)]
 
 pub mod bridge;
+pub mod cargo;
 pub mod course;
 pub mod crew;
 pub mod data;
