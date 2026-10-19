@@ -18,7 +18,7 @@
 - `client::Client` — sans-IO client: `connect`, `receive`, `update(now_ms, &VehicleInput)`,
   `drain_outgoing`, `render(now_ms)`, `request_role`, `captain_order`, `send_reliable`, `bye`,
   `stats()`, lobby/captain/account state.
-- `predict::{Predictor, PredictedVehicle, StubVehicle}`, `interp::StateBuffer`,
+- `predict::{Predictor, PredictedVehicle, RigVehicle}`, `interp::StateBuffer`,
   `timesync::TimeSync`, `interest::*`, `roles::RoleManager`, `race::RaceLobby`.
 - `protocol::{ClientMsg, ServerMsg, …}` + codec, `quant::*`, `snapshot::*`,
   `lattice::{lattice_hash, LatticeSnapshot, ReplicaDamage}` (impl for `wp_damage::DamageModel`).
@@ -56,7 +56,7 @@ misprediction count, correction magnitude, bandwidth, lattice hash stats). Separ
 | # | From | What | Why | Workaround now |
 |---|---|---|---|---|
 | NET-N1 | `wp_sim` (lead) | Per-tick **applied contacts** per vehicle, and a hook to quantise each `ContactImpulse` *before* `DamageSim::apply_contacts` (e.g. `Sim::set_contact_filter(fn(&mut ContactImpulse))` + `Sim::drain_applied_contacts() -> Vec<(EntityId, Vec<ContactImpulse>)>`). `wp_sim` cannot depend on `wp_net`, so the filter is a function pointer the server installs (`wp_net::quant::QContact::round_trip`). | Clients re-run the server's contacts; bit-identical replicas require the authority to apply the same quantised values. | `WpSim` reports no contacts (damage is not replicated on the real stack); `testkit::ArenaSim` implements the contract and the tests use it. |
-| NET-N2 | `wp_vehicle` (02) | Full-state rewind of one vehicle for client prediction: `Vehicle::set_state(&VehicleState)` (added to the stub on this branch) or better an opaque `snapshot() -> Vec<u8>` / `restore(&[u8])` covering engine, clutch, wheel spin, filters; plus a client-side single-car stepper (like 02's `rig::Rig`: own Rapier world, flat ground) to implement `wp_net::predict::PredictedVehicle`. | Rewind-and-replay must reproduce the server exactly. `ws/vehicle` moves the chassis into Rapier, so `set_state` must also place the body. | Kinematic stub + `Vehicle::set_state` (yaw recovered with `atan2`, client-only). |
+| NET-N2 | `wp_vehicle` (02) | Full-state rewind of one vehicle for client prediction: `Vehicle::set_state(&VehicleState)` (added to the stub on this branch) or better an opaque `snapshot() -> Vec<u8>` / `restore(&[u8])` covering engine, clutch, wheel spin, filters; plus a client-side single-car stepper (like 02's `rig::Rig`: own Rapier world, flat ground) to implement `wp_net::predict::PredictedVehicle`. | Rewind-and-replay must reproduce the server exactly. `ws/vehicle` moves the chassis into Rapier, so `set_state` must also place the body. | `predict::RigVehicle` over `wp_vehicle::rig::Rig` + lead's `Vehicle::set_state` + `Rig::set_state` (added, run 3). Still wanted: lossless `snapshot()/restore()`. |
 | NET-N3 | `wp_sim` (lead) | `Sim::despawn_vehicle(EntityId)` and `Sim::teleport_vehicle(EntityId, pos, yaw)`. | Players leave/switch roles; spawn points vary. | `WpSim` parks vehicles (reset + brake, hidden) and reuses them for the same car at the same spawn point. |
 | NET-N4 | `wp_sim` (lead) | `Sim::mode()` / `config()` accessor and per-vehicle `kind` for AI vehicles (traffic vs AI police). | Welcome carries the mode; interest needs AI kinds. | Mode remembered by `WpSim`; AI kind defaults to traffic. |
 | NET-N5 | `wp_damage` (03) | `DamageModel::restore_node_positions(&[[f32;3]])` (added to the stub on this branch) — and, if the real model has state beyond node positions (velocities, plastic strain, detached groups), a full `snapshot()/restore()` so a `LatticeSnapshot` resync is exact. Also: running `apply_contacts(&[], …)` on a settled lattice must be a no-op (replicas skip > 240 empty steps). | Desync recovery. | Stub has only node positions. |
@@ -77,7 +77,7 @@ misprediction count, correction magnitude, bandwidth, lattice hash stats). Separ
 ## Changes outside my crates
 | File | Change | Reason |
 |---|---|---|
-| `crates/wp_vehicle/src/lib.rs` | `Vehicle::set_state(&VehicleState)` (additive) | Client rewind (NET-N2). Will conflict with `ws/vehicle`'s rewrite: keep an equivalent there. |
+| `crates/wp_vehicle/src/rig.rs` | `Rig::set_state(&VehicleState)` (additive: vehicle + rigid body rewind) | Client rewind on the real model (NET-N2). `Vehicle::set_state` itself is the lead's. |
 | `crates/wp_damage/src/lib.rs` | `DamageModel::restore_node_positions` (additive) | Lattice resync (NET-N5). |
 | `crates/wp_wasm/Cargo.toml`, `src/lib.rs`, new `src/net.rs` | `wp_net` dependency, `pub mod net;`, `net_*` functions | Browser client. |
 | `apps/testbed-web/vite.config.ts`, `README.md`, new `net.html`, `src/net/` | build input for `net.html`, README section | Browser client page. |
@@ -86,17 +86,19 @@ misprediction count, correction magnitude, bandwidth, lattice hash stats). Separ
 ## Perf numbers
 | Measurement | Machine | Native (release) | Browser | Budget |
 |---|---|---|---|---|
-| Server net tick, 32 clients, in-process (4 physics ticks + output) | cloud container | avg 0.39 ms, p99 0.61 ms | — | 16.7 ms |
-| Server net tick, 32 websocket bots (same process) | cloud container | avg 0.94 ms, max 4.2 ms @ 60.0 Hz | — | 16.7 ms |
-| Down-link per client, 32 bots in a 120 m arena | in-process | mean 26.2 kB/s, worst 1 s 33.0 kB/s | — | 40 kB/s |
-| Prediction, 120 ms RTT / 2 % loss / ±30 ms jitter | in-process | RMS correction 0.14 m (2 in 2632 reconciles) | headless Chromium vs local server: 1 in 177, 0.06 m | < 0.3 m RMS |
+| Server net tick, 32 clients, in-process (4 physics ticks + output) | cloud container | avg 4.2 ms, p99 10.7 ms (real vehicle) | — | 16.7 ms |
+| Down-link per client, 32 bots in a 120 m arena | in-process | mean 31.5 kB/s, worst 1 s 38.1 kB/s | — | 40 kB/s |
+| Prediction, 120 ms RTT / 2 % loss / ±30 ms jitter, 3 other cars | in-process | RMS correction 0.11 m (193 / 2629 reconciles; most from collisions) | — | < 0.3 m RMS |
+| Prediction, same link, alone | in-process | RMS 0.12 m (13 / 2634) | — | < 2 % mispredict |
 | Lattice hash checks, 4 clients × 2 min | in-process | 1 mismatch / 992 (injected), resynced in 16 ticks | — | < 1 %, < 2 s |
 
-Physics is the kinematic stub; re-measure after 02/03 land.
+Measured on the integrated build with the real vehicle (A) and damage (B) models. The browser
+figures from run 1 (stub) have not been re-measured.
 
 ## Known gaps
 - No damage replication on the real `wp_sim` until NET-N1; tests use `ArenaSim`.
-- Client prediction is built on the kinematic `wp_vehicle` stub (NET-N2).
+- Client rewind is not lossless (`VehicleState` omits filters/clutch/tire relaxation, ≈1.4 cm
+  per 10 replayed ticks) and collisions are not predicted (NET-N2).
 - Own-car predicted contacts are not applied; own damage is server-driven, one RTT late.
 - No AI traffic/police to replicate yet; interest/captain code paths for them are exercised
   only through the `NetSim` defaults.
@@ -105,6 +107,21 @@ Physics is the kinematic stub; re-measure after 02/03 land.
 - `--arena` + browser clients: the browser uses `wp_damage` replicas, the arena uses the toy
   lattice, so browser hash checks mismatch and resync after every crash (by design of the
   test mode).
+
+## Response to lead feedback (run 3)
+Merged `origin/lead/net-merge` (kept all its drift fixes) and then `origin/main` into `ws/net`.
+1. `predict` test: prediction now steps the real vehicle through `predict::RigVehicle`
+   (`wp_vehicle::rig::Rig` + new `Rig::set_state`); the test drives 2 s before diverging so
+   the real (slower, filtered) car actually separates. Replay agrees within 5 cm (measured
+   1.4 cm; not bit-exact, see NET-N2).
+2. `bot` test: steps the bot on `Rig` instead of the flat-plane `VehicleSim::step`; no tuning
+   was needed (8 waypoints in 30 s). Bots in tests and `wp-server --bots` drive through the
+   client's predictor, i.e. the same Rig.
+3. `prediction.rs`: RMS correction 0.11 m (was 0.64 m on the flat-plane step). Split into the
+   spec bound with traffic and a solo test (< 2 % mispredictions): with traffic most
+   corrections come from real Rapier collisions, which the client does not predict.
+4. `wp_wasm::net`: embedded data now comes from 04's generated `crate::data`
+   (all cars, both modes), no hand list.
 
 ## Lead feedback (2026-10-19, run 2)
 
