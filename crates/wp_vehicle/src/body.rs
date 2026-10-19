@@ -76,6 +76,17 @@ impl Vehicle {
         rb.add_torque(t, true);
     }
 
+    /// Push the vehicle's chassis state (pose, velocities) into the body and clear its
+    /// accumulated forces — after [`Vehicle::restore`] / [`Vehicle::set_state`].
+    pub fn write_chassis_to_body(&self, rb: &mut RigidBody) {
+        let ch = self.chassis();
+        rb.set_position(Pose::from_parts(ch.pos, ch.rot), true);
+        rb.set_linvel(ch.lin_vel, true);
+        rb.set_angvel(ch.ang_vel, true);
+        rb.reset_forces(true);
+        rb.reset_torques(true);
+    }
+
     /// Teleport body and vehicle to `pos`/`yaw` moving forward at `speed` (m/s) with yaw rate
     /// `yaw_rate` (rad/s); wheels and engine are spun up to match (see `set_rolling`).
     pub fn place_body(

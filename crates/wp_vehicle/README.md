@@ -61,6 +61,42 @@ model. A parked car settles with < 1 cm drift and no jitter (tested).
 `wp_math`); glam runs in scalar mode via Rapier's `enhanced-determinism`; no maps iterated, no
 threads. Identical runs give identical hashes (tested here and by `apps/simcli`).
 
+## Brakes: how `BrakeDef` is read (worked example)
+
+Torque per wheel at full pedal: `norm = max(bias, 1 − bias)`;
+`front = max_torque_front_nm · bias / norm`, `rear = max_torque_rear_nm · (1 − bias) / norm`.
+The biased axle gets its **full** `max_torque_*` (the contract's "at bias 1" value); the other
+axle is scaled down by the bias ratio. `max_torque_*` are per-wheel **capacities**, `bias` is the
+pedal-force split.
+
+Example — `bias_front = 0.65`, `max_torque_front_nm = 2000`, `max_torque_rear_nm = 1100`:
+
+| | per wheel | axle | share |
+|---|---|---|---|
+| front | 2000 · 0.65 / 0.65 = **2000 N·m** | 4000 N·m | 77 % |
+| rear | 1100 · 0.35 / 0.65 = **592 N·m** | 1185 N·m | 23 % |
+
+So the effective split is the bias only when both axles have the **same per-wheel capacity**:
+`max_torque_front_nm = max_torque_rear_nm = 2000` at bias 0.65 → 2000 / 1077 N·m per wheel =
+65/35. With different capacities (as above) the split is `bias·front : (1−bias)·rear` = 77/23.
+Damage `brake_scale` and ABS then modulate per wheel; the handbrake adds
+`handbrake_rear_nm` to each rear wheel.
+
+## Snapshots and client prediction
+
+`Vehicle::snapshot()` / `restore()` capture the **full** dynamic state as an opaque ~0.9 kB
+byte blob (`VehicleSnapshot::as_bytes` / `from_bytes`): chassis, wheels, engine, gearbox timers,
+clutch, input filters, TCS/ABS, heat/fuel and the applied `HandlingEffects`. Restore + same
+inputs = bit-identical replay (tested). `Vehicle::set_state(&VehicleState)` is the approximate
+version for when only the public state is available (< 0.5 m drift after 1 s in tests).
+
+`rig::Rig` is the client-side stepper: its own Rapier world built with the same ground
+collider (`rig::ground_collider`, also used by `wp_sim`), the same priming order and per-tick
+sequence, so a lone car on flat ground matches `wp_sim` **bit-for-bit**
+(`crates/wp_sim/tests/rig_parity.rs`). `Rig::with_world(car, extras, world, pos, yaw)` takes any
+`WorldQuery` (use the server's world type for surfaces), `Rig::snapshot/restore/set_ticks`
+rewind. Not covered: contacts with anything but the ground (other cars, boxes, city colliders).
+
 ## Damage feedback (`apply_damage_effects`)
 
 | `HandlingEffects` field | Effect |
@@ -97,12 +133,12 @@ rev limiter, every damage effect, FFB and surfaces. Scenarios live in
 | Metric | debug_sedan (FWD) | debug_coupe (RWD) | Target |
 |---|---|---|---|
 | 0–100 km/h | 8.1 s | 5.2 s | 8–10 / 5–6 |
-| 100–0 km/h (ABS) | 42.9 m | 42.5 m | plausible |
-| Skidpad, 50 m radius | 0.89 g | 0.95 g | ~0.85 / ~0.95 |
-| Understeer gradient | +0.35 °/g | +0.29 °/g | positive (road-wheel deg per g) |
+| 100–0 km/h (ABS) | 42.8 m | 42.3 m | plausible |
+| Skidpad, 50 m radius | 0.82 g | 0.95 g | ~0.85 / ~0.95 |
+| Understeer gradient | +0.38 °/g | +0.29 °/g | positive (road-wheel deg per g) |
 | Step steer 80 km/h, overshoot | 0.0 % | 0.1 % | (well damped at 80 km/h) |
-| Lift-off at 0.7 g, 40 m: curvature ratio after 1 s | 1.08 | 1.07 | > 1 = tucks in |
-| Power-on at 0.4 g, 40 m: curvature ratio | 0.67 (pushes wide) | spins | FWD < 1 |
+| Lift-off at 0.7 g, 40 m: curvature ratio after 1 s | 1.09 | 1.07 | > 1 = tucks in |
+| Power-on at 0.4 g, 40 m: curvature ratio | 0.65 (pushes wide) | spins | FWD < 1 |
 | Power-oversteer onset, 40 m | none | 52 % throttle | RWD < 70 % |
 | Top speed | 234 km/h | 290 km/h | |
 

@@ -10,10 +10,10 @@ use crate::math::lerp;
 pub struct Gearbox {
     /// Currently engaged gear (the old gear while a shift is in progress).
     pub gear: i8,
-    target: i8,
-    shift_timer: f32,
-    cooldown: f32,
-    reverse_hold: f32,
+    pub(crate) target: i8,
+    pub(crate) shift_timer: f32,
+    pub(crate) cooldown: f32,
+    pub(crate) reverse_hold: f32,
 }
 
 impl Gearbox {

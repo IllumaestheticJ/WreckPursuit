@@ -180,8 +180,8 @@ pub struct CityMap {
     pub approach: Vec<Option<Approach>>,
     /// Drivable lane length per zone, km.
     pub zone_lane_km: Vec<f32>,
-    /// Simulation seconds the signal controllers have run.
-    pub signal_time_s: f64,
+    /// Physics ticks (`PHYSICS_DT`) the signal controllers have run.
+    pub signal_tick: u64,
     /// Current time of day (mirrors the world clock).
     pub time: TimeOfDay,
     seg_grid: Grid,
@@ -250,6 +250,24 @@ impl CityMap {
                 by_node[node as usize].push(i as SegId);
             }
         }
+        // Bounding boxes reject most pairs before the polyline distance test.
+        let bbox: Vec<(V2, V2)> = segs
+            .iter()
+            .map(|s| {
+                let mut lo = [f32::INFINITY; 2];
+                let mut hi = [f32::NEG_INFINITY; 2];
+                for p in &s.pts {
+                    lo = [lo[0].min(p[0]), lo[1].min(p[1])];
+                    hi = [hi[0].max(p[0]), hi[1].max(p[1])];
+                }
+                (lo, hi)
+            })
+            .collect();
+        let near = |a: u32, b: u32, m: f32| {
+            let (la, ha) = bbox[a as usize];
+            let (lb, hb) = bbox[b as usize];
+            la[0] - m <= hb[0] && lb[0] - m <= ha[0] && la[1] - m <= hb[1] && lb[1] - m <= ha[1]
+        };
         for list in &by_node {
             for (a_i, &a) in list.iter().enumerate() {
                 for &b in &list[a_i + 1..] {
@@ -263,8 +281,12 @@ impl CityMap {
                         continue;
                     }
                     let conflict = ta == tb
-                        || geom::polyline_distance(&segs[a as usize].pts, &segs[b as usize].pts)
-                            < 2.4;
+                        || (near(a, b, 2.4)
+                            && geom::polylines_within(
+                                &segs[a as usize].pts,
+                                &segs[b as usize].pts,
+                                2.4,
+                            ));
                     if conflict {
                         segs[a as usize].conflicts.push(b);
                         segs[b as usize].conflicts.push(a);
@@ -320,7 +342,7 @@ impl CityMap {
             net,
             segs,
             approach,
-            signal_time_s: 0.0,
+            signal_tick: 0,
             time: TimeOfDay::from_hours(12.0),
             seg_grid,
             ix_grid,
@@ -434,7 +456,7 @@ impl CityMap {
             IntersectionControl::Signal { controller } => Some(signals::group_state(
                 &self.net.signals[controller as usize],
                 ap.group,
-                self.signal_time_s,
+                self.signal_tick,
             )),
             _ => None,
         }
@@ -511,6 +533,67 @@ fn curve_speed(pts: &[V3], length: f32, limit: f32) -> f32 {
     }
     let r = length / angle;
     (2.8 * r).sqrt().clamp(3.0, limit)
+}
+
+impl CityMap {
+    /// Whether the segment `a`→`b` clears every building (contract v0.2.0 line of sight; added
+    /// by the lead, workstream D owns it). A building blocks when the 2D segment crosses or
+    /// enters its footprint and the segment's height there is below the roof. Linear in the
+    /// building count; D may index it with a grid.
+    pub fn line_of_sight(&self, a: [f32; 3], b: [f32; 3]) -> bool {
+        let (pa, pb) = ([a[0], a[1]], [b[0], b[1]]);
+        let d = geom::sub(pb, pa);
+        for bld in &self.net.buildings {
+            let fp = &bld.footprint;
+            if fp.len() < 3 {
+                continue;
+            }
+            // Smallest segment parameter at which the 2D segment touches the footprint.
+            let mut t_hit: Option<f32> = if point_in_polygon(pa, fp) {
+                Some(0.0)
+            } else {
+                None
+            };
+            for i in 0..fp.len() {
+                let (e0, e1) = (fp[i], fp[(i + 1) % fp.len()]);
+                let e = geom::sub(e1, e0);
+                let den = geom::cross(d, e);
+                if den.abs() < 1e-9 {
+                    continue;
+                }
+                let w = geom::sub(e0, pa);
+                let t = geom::cross(w, e) / den;
+                let u = geom::cross(w, d) / den;
+                if (0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u) {
+                    t_hit = Some(t_hit.map_or(t, |h: f32| h.min(t)));
+                }
+            }
+            if let Some(t) = t_hit {
+                let z = a[2] + (b[2] - a[2]) * t;
+                if z < bld.height_m {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+}
+
+/// Even-odd point-in-polygon test.
+fn point_in_polygon(p: geom::V2, poly: &[geom::V2]) -> bool {
+    let mut inside = false;
+    let n = poly.len();
+    let mut j = n - 1;
+    for i in 0..n {
+        let (pi, pj) = (poly[i], poly[j]);
+        if (pi[1] > p[1]) != (pj[1] > p[1])
+            && p[0] < (pj[0] - pi[0]) * (p[1] - pi[1]) / (pj[1] - pi[1]) + pi[0]
+        {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
 }
 
 impl WorldQuery for CityMap {
@@ -592,5 +675,9 @@ impl WorldQuery for CityMap {
 
     fn time_of_day(&self) -> TimeOfDay {
         self.time
+    }
+
+    fn line_of_sight(&self, a: [f32; 3], b: [f32; 3]) -> bool {
+        CityMap::line_of_sight(self, a, b)
     }
 }

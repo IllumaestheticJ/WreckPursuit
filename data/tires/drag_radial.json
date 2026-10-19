@@ -1,0 +1,22 @@
+{
+  "id": "drag_radial",
+  "lateral": { "b": 11.0, "c": 1.35, "d": 0.98, "e": -0.1 },
+  "longitudinal": { "b": 13.0, "c": 1.6, "d": 1.45, "e": 0.3 },
+  "load_sensitivity": 0.12,
+  "fz0_n": 4000.0,
+  "relaxation_length_m": 0.5,
+  "rolling_resistance": 0.014,
+  "peak_slip_angle_rad": 0.201,
+  "peak_slip_ratio": 0.13,
+  "surface_multipliers": {
+    "Asphalt": 1.0,
+    "WetAsphalt": 0.45,
+    "Concrete": 0.97,
+    "Gravel": 0.5,
+    "Grass": 0.35,
+    "Dirt": 0.5,
+    "Curb": 0.85,
+    "Metal": 0.55
+  },
+  "wear_rate": 4e-05
+}

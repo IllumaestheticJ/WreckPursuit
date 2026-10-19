@@ -1,4 +1,4 @@
-# simcli hashes scenario=vehicle_coupe_slalom systems=world,vehicle,damage,police,net hash_spec=1 contract=0.1.0
+# simcli hashes scenario=vehicle_coupe_slalom systems=world,vehicle,damage,police,net hash_spec=1 contract=0.2.0
 240 6665e35a3a7fd246
 480 74fb88cd50fc42a5
 720 287a2e4bb5057143

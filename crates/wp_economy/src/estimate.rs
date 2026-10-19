@@ -149,7 +149,7 @@ pub fn estimate(def: &VehicleDef, grip: f32) -> PerfMetrics {
         let n_driven = match def.drivetrain.layout {
             DriveLayout::Fwd => m * g * def.front_weight_frac - transfer,
             DriveLayout::Rwd => m * g * (1.0 - def.front_weight_frac) + transfer,
-            DriveLayout::Awd { .. } => m * g,
+            DriveLayout::Awd { .. } | DriveLayout::AwdOnDemand { .. } => m * g,
         };
         f = f.min(mu * n_driven.max(0.0));
         let a = (f - 0.5 * RHO * cda * vel * vel - roll) / (m * 1.04);
