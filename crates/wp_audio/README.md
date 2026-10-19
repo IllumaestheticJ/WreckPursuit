@@ -47,14 +47,25 @@ functions. Same frames in → byte-identical commands out (tested on real physic
 ## Models
 
 - **Engine** (`engine.rs`): per-car `EngineAudioDef` (cylinders, layout, firing feel,
-  induction/exhaust balance, turbo, supercharger) + an engine pack's layers. Layers of the
-  on-throttle set (and separately the off-throttle set) are sorted by root rpm; the two that
-  bracket the current rpm are crossfaded with an equal-power curve; on/off sets mix by smoothed
-  load (`sqrt(load)` / `sqrt(1-load)`), so squared weights always sum to 1. Each layer plays at
-  `pitch = rpm / root_rpm`. Limiter layer fades in over the last `limiter_window_rpm` on
-  throttle. Turbo boost spools with throttle × rpm (whistle loop, one blow-off per lift above
-  `blowoff_min_boost`); supercharger whine follows rpm; overrun pops are Poisson via the seeded
-  rng. Engine sound stops when `Component::Engine` health is 0; radiator damage adds a hiss.
+  induction/exhaust balance, turbo, supercharger) + an engine pack's layers. Inputs per frame:
+  the crank rpm (`VehicleState::engine_rpm`, never a wheel-derived speed), the pedal and the
+  **applied throttle** (`VehicleAudioInput::throttle_applied` = `wp_vehicle::Telemetry::throttle`:
+  after the pedal filter, TCS and the gearbox's shift cut; the wasm bridge fills it).
+  Layers of the on-throttle set (and separately the off-throttle set) are sorted by root rpm;
+  the two that bracket the current rpm are crossfaded with an equal-power curve; the on/off
+  sets split the energy by `on_share = smoothstep(0, on_full_load, load)` of the smoothed load,
+  so part throttle (≥ ~30 %) sounds on-load and only a closed throttle sounds like overrun;
+  squared weights always sum to 1. Each layer plays at `pitch = rpm / root_rpm`.
+  **Shift note** from the smoothed rpm rate (works for clutch, DCT and converter boxes alike):
+  rpm falling faster than `shift_rate_onset_rpm_s` under throttle dips the load by up to
+  `shift_dip_depth` (dip, then re-rise as the new gear pulls); rpm rising that fast with the
+  throttle closed (the gearbox rev-matching a downshift) raises it toward `blip_load` (blip).
+  Limiter layer fades in over the last `limiter_window_rpm` with the pedal held. Turbo boost
+  spools with applied throttle × rpm (whistle loop, one blow-off per lift above
+  `blowoff_min_boost`, including a shift's throttle cut — lifts are seen over 0.15 s);
+  supercharger whine follows rpm; overrun pops are Poisson via the seeded rng. Inputs are
+  NaN-safe and decaying state is flushed to 0 below 1e-6 (no denormals). Engine sound stops
+  when `Component::Engine` health is 0; radiator damage adds a hiss.
 - **Tires** (`tires.rs`): combined slip `sqrt((κ/κ_peak)² + (α/α_peak)²)`; squeal above
   `squeal_threshold`, scaled by `sqrt(Fz / static Fz)` (loudest wheel + 25 % of the others),
   quieter on wet asphalt; gravel/dirt/grass scrub instead. Rolling noise per dominant
@@ -153,7 +164,9 @@ one-shots peak −1 dBFS; balance between cues with `gain`, overall mix lives in
 **Procedural synths** (`Synth { synth, params }`, implemented in
 `apps/testbed-web/src/audio/synth.ts`): `engine` (h1..h4 harmonic amps at orders ½,1,2,3,
 `noise`, `drive`, `bright`, `off`, `chop_hz`; car adds `cylinders`, `uneven`, `balance`,
-`root_rpm`), `noise` (`lowpass_hz`, `highpass_hz`, `bandpass_hz`, `rumble`, `crackle`,
+`root_rpm`; the backend plays all `engine`-synth layers and the limiter of one car as **one**
+instrument — gain `sqrt(Σ gain²)`, timbre blended by energy — because separate synths at the
+same firing frequency interfere; sample layers stay separate voices), `noise` (`lowpass_hz`, `highpass_hz`, `bandpass_hz`, `rumble`, `crackle`,
 `ripple_hz`), `whine`/`tone` (`freq_hz`, `noise`), `squeal` (`freq_hz`, `wobble_hz`), `horn`
 (`f1`, `f2`), `hiss`, `siren` (`wave`; cadence comes from the director), `impact` (`freq_hz`,
 `decay_s`, `noise`, `crack`, `ring`), `glass` (`decay_s`, `tinkles`), `thump` (`freq_hz`,
@@ -174,6 +187,21 @@ focused engine is never culled); **engine layer selection monotone in rpm** for 
 (band position and dominant layer never go down, weights energy-preserving); reset on time
 going backwards; the crate passes `lint-determinism`.
 
+`tests/engine_shift.rs` (owner playtest #19, "2nd gear onwards doesn't sound right") drives five
+cars — I4 sedan, V8 muscle car, turbo clutch car, turbo DCT, converter automatic — on the flat
+`wp_vehicle` rig through idle, WOT 1→5, lift, brake, a 35 % cruise and a kickdown, runs the
+director at 60 Hz and checks the dumped engine voices: values finite, normal (no NaN/denormal)
+and within limits; synth frequency and sample pitch follow the crank rpm every frame; no level
+jumps, layers start/stop at their band edges; every WOT upshift dips 1.2–9 dB and is back
+within 1 dB 0.5 s later; rev-matched downshifts blip ≥ 2 dB; part throttle on-load / overrun
+off-load; every layer audible and only leading near its root; turbo cars blow off on upshifts.
+Same signals as a table/CSV (and the command stream for an offline browser render):
+
+```
+cargo run --release -p wp_audio --example engine_trace -- <car_id> [out.csv [render.json]]
+node apps/testbed-web/e2e/engine_render.mjs render.json [out.wav] [report.json]
+```
+
 ## Perf
 
 Measured with the culling stress test's setup (40 cars, all voices wanted, 10 contacts/frame),
@@ -190,5 +218,8 @@ nodes) for material lookup.
 - No music system; the Music bus exists so the scanner can duck it.
 - TTS (`speechSynthesis`) bypasses the Web Audio radio EQ (browser limitation); recorded line
   packs will go through it.
-- Throttle comes from `VehicleInput` (pre-assist); TCS cuts are not audible until `VehicleState`
-  carries the applied throttle.
+- The applied throttle reaches audio through the wasm bridge (`Telemetry::throttle`); a
+  networked client only sees the replicated `VehicleInput` until `VehicleState` carries it (A-5).
+- Rev-matched downshift blips are inferred from the rpm rate (`wp_vehicle` rev-matches
+  kinematically, its telemetry throttle stays 0); converter automatics downshift without a
+  blip.
