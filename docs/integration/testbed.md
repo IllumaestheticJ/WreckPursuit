@@ -594,3 +594,30 @@ says so instead of being swallowed.
 25/25 (1 min 18 s; city chase ready after 1.0 s of sim time — that run counted 2 violations
 while the feed, redrawn every 6th frame, did not show them yet: the race the old check had),
 `playtest_chase.mjs` at 1400×860 and 1280×720 all pass.
+
+## Lead helper note (`lead/demo-endrun`, 2026-10-19) — end of run
+
+New wasm exports (`crates/wp_wasm/src/run.rs`, `lib.rs`; native tests in `run_tests.rs`):
+
+| Export | Returns |
+|---|---|
+| `run_result_json()` | `RunReport` or `null`: `seq` (one per settlement), `outcome` (`Escaped` / `Safehouse` / `Captured` / `CapturedTotalLoss` / `TotalLoss`), `run_over`, `level`, `mode`, `bounty_payout`, `rep_delta`, `fines`, `bail`, `towing`, `car_status`, `impound_fee`, `impound_fee_per_day`, `days_until_auction`, `repair` (G's `RepairQuote`), `repair_cost`, `health`, `total_loss`, `cash_before`, `cash_after`, `continue_cost`, `can_continue`, `ledger` |
+| `run_ledger_json()` | every ledger line of the player's account (`seq, day, reason, detail, cash_delta, rep_delta, bounty_delta, cash_after`) |
+| `run_account_json()` | `{ cash, rep, bounty, debt }` |
+| `run_repair_continue()` | pays impound + `RepairAll` from the ledger, repairs the car in place (replay op `Repair`), releases the brakes; throws when refused |
+| `debug_set_heat(entity, heat)`, `debug_park_near_police(entity, ahead_m)` | e2e / debug only, not in replays |
+
+Behaviour: live sessions with police get a `PlayerRun` (not replays or scripted scenarios). It reads
+the drained events after each tick (outside the sim step: hashes and goldens unchanged). A capture
+or a wreck holds the player's car on full brake (logged inputs, so recordings replay) until
+"Repair & continue" or a restart; `set_input` returns `false` meanwhile. The account carries over
+`init()` restarts. `vehicle_meta` flag 1 and the audio siren of police cars follow the unit's
+assignment (`police::siren_on`).
+
+Testbed: `src/ui/runEnd.tsx` (`RunEndView`, kit `Panel` / `Button` / `Money` / `Stat` / `Badge`) in
+`#ui-run-end`: on a capture or wreck it opens next to the bill with the result and
+**Repair & continue** / **Restart**; an escape shows a 5 s bounty toast. `main.ts`: construct it,
+`runEnd.update(sim.runResult(), now)` each frame after `ui.frame`, `runEnd.reset()` on rebuild,
+`restartRun()`, both on `window.__wp`. `e2e/run.mjs`: a real capture (player parked in front of a
+patrol car at heat 30) → panel + bill → click **Repair & continue** → health 1.0, cash = after −
+cost, panel closed. C: the stubbed banner check and `ChaseEndDetector` are untouched.

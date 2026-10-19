@@ -616,6 +616,19 @@ impl Sim {
         Ok(())
     }
 
+    /// Repair a vehicle in place: its damage model goes back to pristine (dents, broken parts,
+    /// mechanical damage and handling effects), its pose and velocity are kept. The "Repair &
+    /// continue" step after a paid repair bill (replay op `Repair`).
+    pub fn repair_vehicle(&mut self, id: EntityId) -> Result<(), SimError> {
+        let slot = self
+            .vehicles
+            .iter_mut()
+            .find(|v| v.id == id)
+            .ok_or(SimError::UnknownEntity(id))?;
+        slot.damage.reset();
+        Ok(())
+    }
+
     /// Run exactly one fixed physics tick.
     pub fn step_fixed(&mut self) {
         let dt = PHYSICS_DT;

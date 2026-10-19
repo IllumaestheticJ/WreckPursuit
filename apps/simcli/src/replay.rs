@@ -61,6 +61,8 @@ pub enum OpKind {
     Assists(AssistProfile),
     /// `Sim::set_mode_table` with the mode's table.
     Mode(DamageMode),
+    /// `Sim::repair_vehicle` (full repair in place, after a paid repair bill).
+    Repair,
 }
 
 /// An op applied before tick `tick`'s inputs.
@@ -196,6 +198,7 @@ impl Replay {
                         DamageMode::Simulation => 1,
                     });
                 }
+                OpKind::Repair => w.push(3),
             }
         }
         put_u64(&mut w, self.tick_hashes.len() as u64);
@@ -291,6 +294,7 @@ impl Replay {
                         1 => DamageMode::Simulation,
                         m => return Err(RunError::Replay(format!("bad mode {m}"))),
                     }),
+                    3 => OpKind::Repair,
                     k => return Err(RunError::Replay(format!("bad op kind {k}"))),
                 };
                 ops.push(OpEvent { tick, entity, op });
@@ -609,6 +613,11 @@ mod tests {
                     tick: 2,
                     entity: 0,
                     op: OpKind::Mode(DamageMode::Simulation),
+                },
+                OpEvent {
+                    tick: 2,
+                    entity: 0,
+                    op: OpKind::Repair,
                 },
             ],
             tick_hashes: vec![1, 3],

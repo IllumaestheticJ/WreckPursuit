@@ -108,6 +108,34 @@ pub fn status(p: &PoliceSystem, racer: EntityId) -> PoliceStatus {
     }
 }
 
+/// Whether a sim vehicle's siren and light bar are on. A police car bound to a unit follows
+/// the unit's assignment: on while responding, pursuing, intercepting or parked at a roadblock
+/// / spike strip; off on patrol, idle or out of service. Other vehicles: their input's siren.
+/// Presentation only (sim input and state hashes are untouched).
+pub fn siren_on(sim: &wp_sim::Sim, v: &wp_sim::SimVehicle) -> bool {
+    match v.police_unit {
+        Some(unit) => sim
+            .police()
+            .units()
+            .iter()
+            .find(|u| u.id == unit)
+            .is_some_and(|u| assignment_has_siren(&u.assignment)),
+        None => v.input.siren,
+    }
+}
+
+/// Assignments that run with lights and siren.
+pub fn assignment_has_siren(a: &Assignment) -> bool {
+    matches!(
+        a,
+        Assignment::Respond { .. }
+            | Assignment::Pursue { .. }
+            | Assignment::Intercept { .. }
+            | Assignment::RoadblockAt { .. }
+            | Assignment::SpikeAt { .. }
+    )
+}
+
 /// Floats per unit in [`units`].
 pub const UNIT_STRIDE: usize = 6;
 

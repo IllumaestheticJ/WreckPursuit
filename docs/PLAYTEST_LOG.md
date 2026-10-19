@@ -100,3 +100,8 @@ the schedule could hunt (1→2→1). New automatic (`crates/wp_vehicle/README.md
 | 14 | NPC cars need variance: lane changes, dynamic driving, different speeds | D (world): per-driver personality, MOBIL lane changes | dispatched (D round 6 follow-up) |
 | 15 | City needs to be more dynamic: curves and elevation | helper `lead/city-v2`: Port Vesper-style procedural city, heightfield, curved/hill roads, terrain colliders | done on `lead/city-v2` (not merged): Port Vesper v2 is the city-chase default (selector keeps the grid) — downtown grid, organic districts, Hollins Drive switchbacks + Ridge Road crests (≈ 110 m hill), banked Loop 9 with an overpass and an underpass; terrain/road/building colliders; hill and loop scenarios at the limit pass (on road, never airborne); screenshots in `docs/media/city-v2/` |
 | 17 | (lead helper, city v2) Port Vesper v2 needs a playtest on the published link: hills at speed, the Loop crest, the overpass/underpass, buildings now solid | owner → lead | to playtest (`?city=procedural_12x12` keeps the old grid) |
+
+## 2026-10-19 — greybox demo end of run (lead helper `lead/demo-endrun`)
+| # | Item | Owner | Status |
+|---|---|---|---|
+| 18 | Captured but nothing happens; no fine / impound / bounty; sirens not tied to the chase | lead (`wp_wasm::run`, testbed `src/ui/runEnd.tsx`) | done on `lead/demo-endrun`: capture / wreck holds the car, opens the result panel (fine, bail, impound fee, G's repair quote, cash before → after, ledger lines) + the bill; **Repair & continue** pays from the ledger and restores the car; escape → bounty toast; sirens/light bars follow unit assignment. Goldens unchanged. To playtest on the link |

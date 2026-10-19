@@ -22,7 +22,8 @@ thread_local! {
     static ECONOMY: RefCell<Option<Economy>> = const { RefCell::new(None) };
 }
 
-fn with_economy<T>(f: impl FnOnce(&Economy) -> T) -> T {
+/// Run `f` with the embedded economy tables (parsed once per thread).
+pub(crate) fn with_economy<T>(f: impl FnOnce(&Economy) -> T) -> T {
     ECONOMY.with(|e| {
         let mut e = e.borrow_mut();
         f(e.get_or_insert_with(Economy::embedded))

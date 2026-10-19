@@ -26,6 +26,7 @@ use simcli::scenario::{CitySpec, EntitySpec};
 use simcli::{RunSummary, Scenario};
 
 use crate::data::mem_data;
+use crate::run::{ContinueReport, PlayerCar, PlayerRun};
 use crate::scenario::entity;
 
 /// At most this many ticks run per `step()` call (0.25 s of sim time).
@@ -87,6 +88,8 @@ pub struct Session {
     mode: DamageMode,
     live_end_hash: Option<u64>,
     outcome: Option<RunSummary>,
+    /// The player's economy (live sessions with police; see [`crate::run`]).
+    run: Option<PlayerRun>,
 }
 
 fn opts(systems: Option<Selection>) -> RunOptions {
@@ -134,7 +137,25 @@ impl Session {
         } = build_sim(&sc, mem_data(), &opts(systems)).map_err(|e| e.to_string())?;
         let log = Replay::new(&sc, &selection.to_string(), ids.len());
         let n = ids.len();
+        // The player's economy: live (not replayed, not scripted) sessions with police.
+        let run = match (ids.first(), &sc.entities.first()) {
+            (Some(&player), Some(spec))
+                if playback.is_none() && !scripted && sim.systems().police =>
+            {
+                cars.get(&spec.car).map(|car| {
+                    let car = PlayerCar {
+                        def_id: car.def.id.clone(),
+                        class: car.def.class,
+                        base_price: car.def.base_price,
+                    };
+                    let econ = crate::garage::with_economy(|e| e.clone());
+                    PlayerRun::new(econ, player, &car, sc.mode, sc.seed)
+                })
+            }
+            _ => None,
+        };
         Ok(Self {
+            run,
             script_end: if scripted { sc.ticks() } else { 0 },
             mode: sc.mode,
             sc,
@@ -350,7 +371,7 @@ impl Session {
     pub fn set_input(&mut self, id: EntityId, input: VehicleInput) -> Result<bool, String> {
         self.live_check()?;
         let idx = self.idx(id)?;
-        if self.script_running() || self.last_input[idx] == input {
+        if self.script_running() || self.last_input[idx] == input || self.held(id) {
             return Ok(false);
         }
         self.log_input(idx, input);
@@ -380,7 +401,113 @@ impl Session {
         self.live_check()?;
         self.log_op(0, OpKind::Mode(mode))?;
         self.mode = mode;
+        if let Some(r) = &mut self.run {
+            r.set_mode(mode);
+        }
         Ok(())
+    }
+
+    // ----- end of run (lead; see `crate::run`) ------------------------------------------
+
+    /// The player's economy run, if this session has one.
+    pub fn run(&self) -> Option<&PlayerRun> {
+        self.run.as_ref()
+    }
+
+    /// Take the run (its account carries over to the next session).
+    pub fn take_run(&mut self) -> Option<PlayerRun> {
+        self.run.take()
+    }
+
+    /// Continue the account of a previous session's run (restart): cash and the ledger carry
+    /// over; this session's car is bound to it.
+    pub fn adopt_account(&mut self, previous: PlayerRun) {
+        let Some(run) = &self.run else {
+            return;
+        };
+        let player = run.player();
+        let Some(car) = self.car(player).map(|c| PlayerCar {
+            def_id: c.def.id.clone(),
+            class: c.def.class,
+            base_price: c.def.base_price,
+        }) else {
+            return;
+        };
+        let (acct, ledger) = previous.into_account();
+        let econ = crate::garage::with_economy(|e| e.clone());
+        self.run = Some(PlayerRun::with_account(
+            econ,
+            acct,
+            ledger,
+            player,
+            &car,
+            self.mode,
+            self.sc.seed,
+        ));
+    }
+
+    /// Mutable sim for debug tools (`debug_set_heat`) and tests. Live sessions only; changes
+    /// made here are not in the replay log.
+    pub fn debug_sim_mut(&mut self) -> Result<&mut Sim, String> {
+        self.live_check()?;
+        Ok(&mut self.sim)
+    }
+
+    /// Debug / e2e: park vehicle `id` (stopped) `ahead_m` in front of the first police car, in
+    /// its lane. Returns the police car's entity, or an error when there is none yet. Not in
+    /// the replay log.
+    pub fn debug_park_near_police(
+        &mut self,
+        id: EntityId,
+        ahead_m: f32,
+    ) -> Result<EntityId, String> {
+        self.live_check()?;
+        let cop = self
+            .sim
+            .vehicles()
+            .iter()
+            .find(|v| v.kind == wp_sim::VehicleKind::Police)
+            .map(|v| (v.id, v.vehicle.state()))
+            .ok_or("no police car yet")?;
+        let (cop, st) = (cop.0, cop.1);
+        let q = st.rot;
+        // Chassis +Y in world (XY), then yaw about +Z with 0 = +Y.
+        let fx = 2.0 * (q[0] * q[1] - q[3] * q[2]);
+        let fy = 1.0 - 2.0 * (q[0] * q[0] + q[2] * q[2]);
+        let yaw = wp_math::atan2(-fx, fy);
+        let (sn, cs) = wp_math::sin_cos(yaw);
+        let xy = [st.pos[0] - sn * ahead_m, st.pos[1] + cs * ahead_m];
+        self.sim
+            .place_on_ground(id, xy, yaw, 0.0, Some(st.pos[2]))
+            .map_err(|e| e.to_string())?;
+        Ok(cop)
+    }
+
+    /// The vehicle is held on the brakes because its run is over (capture or wreck).
+    pub fn held(&self, id: EntityId) -> bool {
+        self.run
+            .as_ref()
+            .is_some_and(|r| r.is_over() && r.player() == id)
+    }
+
+    /// "Repair & continue": pay the impound fee and the repair from the ledger, repair the car
+    /// in place (logged replay op) and give control back.
+    pub fn repair_and_continue(&mut self) -> Result<ContinueReport, String> {
+        self.live_check()?;
+        let run = self.run.as_mut().ok_or("no economy run in this session")?;
+        let player = run.player();
+        let report = run.repair_and_continue()?;
+        let idx = self.idx(player)?;
+        self.log_op(idx, OpKind::Repair)?;
+        let keep = self.last_input[idx];
+        self.log_input(
+            idx,
+            VehicleInput {
+                headlights: keep.headlights,
+                ..Default::default()
+            },
+        );
+        Ok(report)
     }
 
     // ----- stepping ----------------------------------------------------------------------
@@ -439,6 +566,23 @@ impl Session {
                 p.input_cursor += 1;
             }
             self.playback = Some(p);
+        } else if let Some(idx) = self
+            .run
+            .as_ref()
+            .filter(|r| r.is_over())
+            .and_then(|r| self.index(r.player()))
+        {
+            // The run is over: the player's car brakes to a halt and stays there.
+            let keep = self.last_input[idx];
+            self.log_input(
+                idx,
+                VehicleInput {
+                    brake: 1.0,
+                    handbrake: 1.0,
+                    headlights: keep.headlights,
+                    ..Default::default()
+                },
+            );
         } else if self.script_running() {
             // Scenario entities only: city runs add police / traffic cars (not scripted).
             let states = scenario_states(&self.sim, &self.ids);
@@ -459,7 +603,9 @@ impl Session {
         }
         self.sim.step_fixed();
         self.sync_cars();
-        self.events.extend(self.sim.drain_events());
+        let drained = self.sim.drain_events();
+        self.observe_run(&drained);
+        self.events.extend(drained);
         if self.events.len() > MAX_BUFFERED_EVENTS {
             let excess = self.events.len() - MAX_BUFFERED_EVENTS;
             self.events.drain(..excess);
@@ -522,6 +668,32 @@ impl Session {
                 }
             }
         }
+    }
+
+    /// Feed one tick's events to the player's economy (read-only on the sim) and settle a
+    /// chase that just ended.
+    fn observe_run(&mut self, events: &[SimEvent]) {
+        let Some(run) = &mut self.run else {
+            return;
+        };
+        let tick = self.sim.tick();
+        let Some(outcome) = run.observe(tick, events, self.sim.police().phase()) else {
+            return;
+        };
+        let player = run.player();
+        let damage = self
+            .sim
+            .vehicles()
+            .iter()
+            .find(|v| v.id == player)
+            .map(|v| {
+                (
+                    &v.damage as &dyn wp_contracts::DamageSim,
+                    self.sim.mode_table(),
+                )
+            });
+        // A refused settlement leaves the account unchanged; the run simply goes on.
+        let _ = run.settle(tick, outcome, damage);
     }
 
     fn checkpoint(&self) -> Checkpoint {

@@ -222,6 +222,8 @@ Police / net consumers: `InformantTip`, `ShopReported`, `BountyCleared` change h
 `CarImpounded`/`CarSeized`/`CarDestroyed` mean the car must not spawn.
 
 ## Changes outside my crates
+**By the lead in `wp_economy` (`lead/demo-endrun`, 2026-10-19):** `EconomySession::set_mode(mode)` (the testbed switches damage mode mid-run; `finish` and quotes use it). Additive, no behaviour change. The demo calls the session from `crates/wp_wasm/src/run.rs` with `RepairPolicy::QuoteOnly`, then `retrieve_from_impound` + `repair(RepairAll)` on "Repair & continue".
+
 Round 8 (minimal compile fixes for new fields, nothing else):
 - `crates/wp_race/src/bridge.rs` (L): `economy_setup` fills `RaceSetup { kind: Some(kind), legality, .. }` (the `_legality` parameter is now used) and its doc line.
 - `apps/meta/tests/bots.rs` (O): `RaceSetup` literal gets `kind: None, legality: Default::default()`.

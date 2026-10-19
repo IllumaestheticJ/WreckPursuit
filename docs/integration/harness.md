@@ -93,6 +93,8 @@ Systems should not add fields to the hash themselves — ask here, so the spec s
 | H2 | Consider moving `Systems` into `wp_contracts` if `wp_net`/server need to toggle systems too | keep one registry | 07, 12 | rejected for now |
 
 ## Changes outside my crates
+**By the lead in `apps/simcli` (`lead/demo-endrun`, 2026-10-19):** replay op `OpKind::Repair` (byte tag 3) → `Sim::repair_vehicle` (in-place full repair after a paid bill), plus its case in the encode/decode round-trip test. Old replays decode unchanged; goldens unchanged.
+
 
 - `crates/wp_sim` (test surface, which this workstream owns per prompt 10): new
   `src/systems.rs`; `Sim` gains `set_systems`, `systems`, `last_tick_event_count`,
