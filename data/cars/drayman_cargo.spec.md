@@ -4,7 +4,7 @@
 
 | Class | Archetype | Durability | Base price |
 |---|---|---|---|
-| Truck | 2000s American full-size RWD cargo van, 4.8 L OHV V8, body-on-frame, solid rear axle | 4 / 5 | 9,000 |
+| Truck | 2000s American full-size RWD cargo van, 4.8 L OHV V8, body-on-frame, solid rear axle | 4 / 5 | 20,000 |
 
 ## Design note
 

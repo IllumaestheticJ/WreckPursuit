@@ -4,7 +4,7 @@
 
 | Class | Archetype | Durability | Base price |
 |---|---|---|---|
-| Compact | 2000s European/Japanese FF supermini hatch, 1.3 L DOHC I4, five-door | 2 / 5 | 4,500 |
+| Compact | 2000s European/Japanese FF supermini hatch, 1.3 L DOHC I4, five-door | 2 / 5 | 7,000 |
 
 ## Design note
 
@@ -81,7 +81,7 @@ Peak **66 kW @ 6000 rpm**, **121 N·m @ 4000 rpm**. Idle 750 / redline 6200 / li
 
 ## Drivetrain
 
-5-speed manual, open front differential. Layout **FWD**; front diff: open; rear diff: open. Clutch capacity 1.35 × peak torque = 160 N·m. Shift time 0.30 s.
+5-speed manual, open front differential. Layout **FWD**; front diff: open; rear diff: open. Clutch capacity 1.35 × peak torque = 160 N·m. Shift time 0.25 s.
 
 | Gear | Ratio | Overall | km/h @ redline |
 |---|---|---|---|
@@ -137,7 +137,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
 | sim | 13.2 s | 168 km/h | 39.9 m | 0.79 g | — |
-| estimate | 11.7 s | 176 km/h | 37.4 m | 0.90 g | 386 |
+| estimate | 11.6 s | 176 km/h | 37.4 m | 0.90 g | 388 |
 
 ## Damage lattice (`data/lattices/tansy_13.json`)
 

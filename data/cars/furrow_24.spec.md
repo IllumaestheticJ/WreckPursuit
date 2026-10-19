@@ -4,7 +4,7 @@
 
 | Class | Archetype | Durability | Base price |
 |---|---|---|---|
-| Truck | 90s compact RWD pickup, 2.4 L SOHC I4, regular cab, body-on-frame, leaf-sprung live axle | 4 / 5 | 6,500 |
+| Truck | 90s compact RWD pickup, 2.4 L SOHC I4, regular cab, body-on-frame, leaf-sprung live axle | 4 / 5 | 21,000 |
 
 ## Design note
 
