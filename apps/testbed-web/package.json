@@ -13,9 +13,7 @@
     "e2e": "node e2e/run.mjs"
   },
   "dependencies": {
-    "three": "0.180.0",
-    "@wreckpursuit/ui-kit": "file:../ui-kit",
-    "preact": "10.27.2"
+    "three": "0.180.0"
   },
   "devDependencies": {
     "@types/three": "0.180.0",

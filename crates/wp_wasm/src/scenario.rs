@@ -38,9 +38,6 @@ pub fn free_drive(car: &str, mode: DamageMode, city: bool) -> Scenario {
         assists: AssistSpec::Keyboard,
         traffic_density: None,
         police_presence: None,
-        traffic_cars: true,
-        parked_cars: true,
-        police_cars: true,
         systems: None,
         barriers: Vec::new(),
         entities: vec![entity("player", car, [0.0; 3], 0.0)],
@@ -52,24 +49,6 @@ pub fn free_drive(car: &str, mode: DamageMode, city: bool) -> Scenario {
     }
 }
 
-/// City chase preset: the live `car` ("player") starts on the procedural city's race grid at
-/// night (23:00) already doing 90 km/h — far over the city limits — with full traffic and police
-/// presence, so violations, heat and a pursuit follow as soon as the player keeps speeding.
-pub fn city_chase(car: &str, mode: DamageMode) -> Scenario {
-    let mut sc = free_drive(car, mode, true);
-    sc.name = "city_chase".into();
-    sc.time_of_day_h = 23.0;
-    // Real-time-ish clock so the night lasts the whole chase.
-    sc.time_ratio = 1.0;
-    sc.traffic_density = Some(1.0);
-    sc.police_presence = Some(1.0);
-    sc.entities[0].speed_mps = CITY_CHASE_START_MPS;
-    sc
-}
-
-/// Start speed of the city-chase player, m/s (90 km/h).
-pub const CITY_CHASE_START_MPS: f32 = 25.0;
-
 /// A plainly scripted entity (no keyframes) at a pose.
 pub fn entity(id: &str, car: &str, pos: [f32; 3], yaw: f32) -> EntitySpec {
     EntitySpec {
@@ -78,7 +57,6 @@ pub fn entity(id: &str, car: &str, pos: [f32; 3], yaw: f32) -> EntitySpec {
         pos,
         yaw,
         speed_mps: 0.0,
-        police_heat: 0.0,
         assists: None,
         driver: Driver::Scripted,
         inputs: Vec::new(),
@@ -103,15 +81,6 @@ pub fn with_cruise_speed(mut sc: Scenario, target: f32) -> Scenario {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn city_chase_is_a_valid_night_city_scenario() {
-        let sc = city_chase("debug_coupe", DamageMode::Arcade);
-        sc.validate().unwrap();
-        assert_ne!(sc.city, CitySpec::Flat);
-        assert!(sc.time_of_day_h >= 20.0);
-        assert_eq!(sc.entities[0].speed_mps, CITY_CHASE_START_MPS);
-    }
 
     #[test]
     fn every_simcli_scenario_parses() {

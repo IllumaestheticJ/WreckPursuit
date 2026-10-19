@@ -27,8 +27,6 @@ export interface WheelInfo {
 /** vehicle_info(entity) JSON. */
 export interface VehicleInfo {
   entity: number;
-  /** `player` / `ai_racer` / `police` / `traffic`. */
-  kind: "player" | "ai_racer" | "police" | "traffic";
   /** Scenario-local entity name. */
   name: string;
   car_id: string;
@@ -137,22 +135,6 @@ export const sim = {
   init: (seed: number, scenarioJson: string, scripted: boolean): number[] =>
     Array.from(wasm.init(seed, scenarioJson, scripted)),
   freeDriveJson: (car: string, mode: string, city: boolean): string => wasm.free_drive_json(car, mode, city),
-  cityChaseJson: (car: string, mode: string): string => wasm.city_chase_json(car, mode),
-  /** Every sim vehicle incl. sim-spawned police/traffic as `[entity, kindCode]` pairs. */
-  liveVehicles: (): Float32Array => wasm.live_vehicles(),
-  /** Debug: 0 player, 1 AI racer, 2 police, 3 traffic (refused while recording/replaying). */
-  setVehicleKind: (entity: number, kind: number): void => wasm.set_vehicle_kind(entity, kind),
-  /** Player's police heat (UI-kit `HeatHud` JSON) from `police_hud_json()`, or null when the
-   * wasm build / sim does not provide it yet. */
-  policeHud: (): import("@wreckpursuit/ui-kit").HeatHud | null => {
-    const f = (wasm as unknown as Record<string, unknown>)["police_hud_json"];
-    if (typeof f !== "function") return null;
-    try {
-      return JSON.parse((f as () => string)()) as import("@wreckpursuit/ui-kit").HeatHud | null;
-    } catch {
-      return null;
-    }
-  },
   scenarioFromRon: (text: string): string => wasm.scenario_from_ron(text),
   scenarioWithSpeed: (json: string, mps: number): string => wasm.scenario_with_speed(json, mps),
   step: (dt: number): number => wasm.step(dt),
