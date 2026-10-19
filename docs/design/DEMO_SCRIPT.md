@@ -104,49 +104,6 @@ demo is on the lead's list.
 
 ## Playtest checklist
 
-Use this when you (or friends) play the demo. You don't need to explain *why* something feels
-wrong; describe what happened and when. A short screen recording or the replay file helps a lot.
-
-Rate each line **1–5** (1 = broken, 3 = fine, 5 = great) and add a comment for anything at 3 or below.
-
-### Handling feel (does the car feel like a car?)
-- [ ] Does the car feel heavy, or does it feel like a toy?
-- [ ] Does it turn when you expect, without snapping sideways for no reason?
-- [ ] Can you tell when the tires are about to lose grip (sound, the car starting to slide)?
-- [ ] Does braking hard feel strong and controllable?
-- [ ] With assists off, is it hard but learnable, or just frustrating?
-- [ ] Do different cars feel different (try a heavy truck and a light hatchback)?
-- [ ] Keyboard vs gamepad: is either one unpleasant?
-
-### Crash feel (does damage look and feel right?)
-- [ ] Does a small bump do small damage and a big hit do big damage?
-- [ ] Do dents appear where you hit, and stay there?
-- [ ] After a crash, does the car drive differently (pulls, wobbles, loses power) in a way you can understand?
-- [ ] Do bits fall off when they should, and not when they shouldn't?
-- [ ] Did anything feel unfair: a gentle touch that wrecked the car, or a huge hit that did nothing?
-- [ ] Is the repair bill about what you expected for the damage you saw?
-
-### Police fairness (do the cops play fair?)
-- [ ] When you got wanted, did you understand why?
-- [ ] Did the police ever appear out of nowhere right next to you?
-- [ ] Did they ever drive impossibly fast or never crash?
-- [ ] Could you tell how to escape (break line of sight, hide)?
-- [ ] When you escaped, did you feel you earned it?
-- [ ] When you were caught, did you feel it was your fault?
-- [ ] At night, did it feel like fewer police than you'd expect in the day?
-
-### The city
-- [ ] Did traffic behave like real drivers (stopping, turning, pulling over for sirens)?
-- [ ] Did any civilian car do something silly (stuck, driving through others, crashing into each other)?
-- [ ] Could you find your way around?
-
-### General
-- [ ] Did the game ever stutter, freeze or slow down? When?
-- [ ] Was anything on screen confusing?
-- [ ] What was the most fun moment? The most annoying?
-- [ ] Would you play another round?
-
-### How to report
-For each problem write: **time of day in game, car, what you were doing, what happened, what you
-expected.** Example: *"Night, Shiro Turbo, 80 km/h into a parked car, front barely dented and
-the car drove perfectly. Expected a bent wheel."*
+Moved to [`PLAYTEST.md`](PLAYTEST.md): a fill-in form covering this script and the 5-minute
+greybox demo ([`DEMO_GREYBOX.md`](DEMO_GREYBOX.md)), with the same questions plus a per-beat
+"did it happen?" list and a problem log.

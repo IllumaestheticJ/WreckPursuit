@@ -256,6 +256,14 @@ night unless noted.
 
 TimeAttack can run on any route; leaderboards (18) are kept per route id `R01`–`R15`.
 
+**Measured lengths: blocked (2026-10-19).** The lengths above are still targets. They can only
+be measured on a Port Vesper road graph (`data/city/handmade_v0.road.*`, request C1 to 05), and
+none exists yet: the only graph on `main` is `procedural_12x12`, which has none of these
+streets. For the greybox demo the procedural city was measured instead (`DEMO_GREYBOX.md` §1):
+ring road 5.58 km per lap, central highway 1.49 km, 36.6 km of local streets (node-to-node,
+one direction). When 05 builds the handmade graph, measure each route along its lanes and
+replace the targets here.
+
 Illegal **daytime** street races (15's rare high-heat events, `police_presence_override: max`)
 use R02, R03, R11 or R14: the routes where daytime traffic and patrol density make it a spectacle.
 

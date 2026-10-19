@@ -11,7 +11,9 @@ Docs only: no code. Other workstreams read these; changes go through 19 (or the 
 | `../../data/city/handmade_v0.zones.json` | Zones + POIs in the `wp_world` format (draft, no road graph yet) | 05 |
 | [`POLICE_DOCTRINE.md`](POLICE_DOCTRINE.md) | In-fiction pursuit policy the AI tables encode, call signs, 150 radio line templates | 06 police, 13 audio, 16 UI |
 | [`CARS_LORE.md`](CARS_LORE.md) | One paragraph of fiction per roster car, invented maker houses, body-kit/vinyl themes | 08 economy, 16 UI, 11 art |
-| [`DEMO_SCRIPT.md`](DEMO_SCRIPT.md) | 3-minute single-player night-chase demo, moment by moment, plus a plain-language playtest checklist | owner, lead, playtesters |
+| [`DEMO_SCRIPT.md`](DEMO_SCRIPT.md) | 3-minute presenter's script for a live night-chase demo | owner, lead |
+| [`DEMO_GREYBOX.md`](DEMO_GREYBOX.md) | 5-minute single-player greybox demo: setup, controls, heat, police per level, escape/capture, bill, what "done" means, per-machine gap list | owner, lead, every machine on Checkpoint 2 |
+| [`PLAYTEST.md`](PLAYTEST.md) | Fill-in playtest feedback form for the published testbed | owner, playtesters, lead |
 | [`FEATURE_BACKLOG.md`](FEATURE_BACKLOG.md) | Proposed but unscheduled features, prioritised, plus rejected ideas | lead |
 
 Conventions: numbers marked **(code)** are quoted from data files on `main`; everything else is
