@@ -38,6 +38,8 @@ pub struct Harness<S: NetSim = ArenaSim> {
     pub cars: BTreeMap<String, LoadedCar>,
     pub modes: BTreeMap<DamageMode, ModeTable>,
     pub factory: DamageFactory,
+    /// Wall time of each `server.net_tick()` in `step`, ms (test measurement only).
+    pub server_ms: Vec<f64>,
 }
 
 pub fn data() -> (BTreeMap<String, LoadedCar>, BTreeMap<DamageMode, ModeTable>) {
@@ -62,6 +64,7 @@ impl Harness<ArenaSim> {
             cars,
             modes,
             factory: ToyLattice::factory,
+            server_ms: Vec::new(),
         }
     }
 }
@@ -83,6 +86,7 @@ impl<S: NetSim> Harness<S> {
             cars,
             modes,
             factory,
+            server_ms: Vec::new(),
         }
     }
 
@@ -156,7 +160,9 @@ impl<S: NetSim> Harness<S> {
                 }
             }
         }
+        let t0 = std::time::Instant::now();
         self.server.net_tick();
+        self.server_ms.push(t0.elapsed().as_secs_f64() * 1000.0);
         for out in self.server.drain_outgoing() {
             if let Some(p) = self.peers.iter_mut().find(|p| p.conn == Some(out.conn)) {
                 p.down.send(now, out.channel, out.bytes);

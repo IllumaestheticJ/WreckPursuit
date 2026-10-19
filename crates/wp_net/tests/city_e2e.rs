@@ -307,6 +307,17 @@ fn four_players_in_a_police_city() {
         assert!(p.client.pending_resyncs().len() <= 2, "p{i} stuck resyncs");
     }
     let stats = h.server.stats();
+    let mut ms = h.server_ms[h.server_ms.len() - (secs * 60) as usize..].to_vec();
+    ms.sort_by(f64::total_cmp);
+    let avg = ms.iter().sum::<f64>() / ms.len() as f64;
+    let p99 = ms[ms.len() * 99 / 100];
+    println!(
+        "server net tick (4 physics ticks + output for 4 clients): avg {avg:.3} ms, p99 \
+         {p99:.3} ms"
+    );
+    if !cfg!(debug_assertions) {
+        assert!(avg < 8.0, "server net tick avg {avg} ms");
+    }
     println!(
         "server: police cars max {max_police}, physical traffic max {max_traffic}, max wanted \
          {max_wanted}, dented cars {server_dented} (dented replicas on clients \

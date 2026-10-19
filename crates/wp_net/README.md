@@ -22,13 +22,13 @@ threads, no sockets — so the same code runs in the native server, in the brows
 | `interest` | interest categories, priority accumulators, byte budget |
 | `roles` | `RoleManager`: police ratio, single captain, captain-seat offers |
 | `race` | `RaceLobby`: create/invite/join, countdown, checkpoints, results, payouts |
-| `netsim` | `NetSim` trait (what the server needs from a sim) + `WpSim` adapter over `wp_sim::Sim` |
+| `netsim` | `NetSim` trait (what the server needs from a sim) + `WpSim` adapter over `wp_sim::Sim` (`with_city`: city + AI police + physical traffic, `lane_spawn_points`) |
 | `server` | `ServerInstance<S: NetSim>`: the authoritative instance |
 | `client` | `Client`: prediction, interpolation, damage replicas, time sync, lobby state |
 | `predict`, `interp`, `timesync` | client building blocks |
 | `sim_link` | in-memory netem-style link (latency, jitter, loss) implementing `Transport` |
 | `bot` | scripted driver (`wp-server --bots`, tests) |
-| `testkit` | `ArenaSim` crash arena + `ToyLattice` (damage traffic while `wp_sim`/`wp_damage` are stubs) |
+| `testkit` | `ArenaSim` crash arena + `ToyLattice` (cheap damage traffic for load tests), `load_data` |
 | `native` (feature) | tokio game-loop thread, websocket acceptor, websocket client `Transport` |
 
 The `native` feature (tokio, tungstenite) must never be enabled by anything reachable from
@@ -37,13 +37,14 @@ The `native` feature (tokio, tungstenite) must never be enabled by anything reac
 ## Tests
 
 ```sh
-cargo test -p wp_net                      # unit + integration (≈25 s debug)
+cargo test -p wp_net                      # unit + integration (≈4 min debug; city_e2e ≈90 s)
 cargo test -p wp_net --release -- --nocapture   # prints bandwidth / timing / hash numbers
 cargo test -p wp_server                   # real websockets end-to-end, admin endpoint, --bots
 ```
 
 | test | asserts |
 |---|---|
+| `tests/city_e2e.rs` | **real `wp_sim`**: procedural city at 23:00 with physical traffic and AI police cars, 3 wanted racers + 1 police seat (bots, 20–60 ms links, 1 % loss) for 60 s: every client holding an AI police unit's state holds exactly the server's quantised state, police within 60 m of a client are known to it, replicas built from contacts never mismatch, overall lattice mismatches < 5 % (all after dented-snapshot restores, NET-N5), prediction RMS < 0.5 m with no resets (rams are not predicted), worst second ≤ 40 kB/s per client |
 | `tests/lockstep.rs` | server + 4 clients, 2 min scripted driving/crashing in the arena: < 1 % of lattice-hash checks mismatch, every mismatch resynced within 2 s, all replicas equal the server at the end (one desync is injected deliberately) |
 | `tests/prediction.rs` | 120 ms RTT, 2 % loss, ±30 ms jitter: correction RMS < 0.3 m, < 5 % of reconciles mispredict |
 | `tests/bandwidth.rs` | 32 bots: every client's worst second ≤ 40 kB/s, police cap = 12 of 32, net tick < 8 ms (release) |
@@ -64,6 +65,22 @@ Real vehicle (A) and damage (B) models on the integrated build (lead run 2 merge
 | Same link, alone | in-process | RMS 0.15 m, 4 corrections in 2634 reconciles | < 2 % mispredict |
 | Snapshot rewind + 10-tick replay vs server `Rig` | unit test | 0.0 m (bit-exact); `set_state` fallback ≈1.4 cm | exact |
 | Lattice hash checks (4 clients, 2 min) | in-process | 1 mismatch in 992 (the injected one), resynced in 16 ticks | < 1 %, < 2 s |
+
+**4-player city test on the real `wp_sim`** (`tests/city_e2e.rs`, round 6b; release and
+debug give identical numbers — the run is deterministic): 8×8-block procedural city at
+23:00, up to 16 physical traffic cars and 9 AI police cars, 3 racers starting at wanted
+level 3 (reached 5) + 1 player police seat, links 20/40/60/35 ms one-way, ±10 ms jitter,
+1 % loss, 60 s.
+
+| Measurement | Native (release) | Budget |
+|---|---|---|
+| Server net tick (4 physics ticks of ~30 vehicles + output for 4 clients) | avg 2.34 ms, p99 7.7 ms | 16.7 ms (asserted < 8 ms avg) |
+| Down-link per client | mean 13.9–16.0 kB/s, worst second 20.6–21.4 kB/s | 40 kB/s |
+| Of all down-link bytes: snapshots / lattice snapshots / damage contacts | 3.5 MB / 0.22 MB / 19 kB | — |
+| Damage contacts before `damage_relevant` (same run) | 6.5 MB (2/3 of all bytes; worst second 87 kB/s) | — |
+| AI police states held by clients vs server (same tick) | 2261 compared, 0 differ; 127/127 police within 60 m known | exact |
+| Lattice hash checks | 63 / 2386 mismatched (2.6 %), **0 on contact-only replicas**; all resynced, max 80 ticks | contact-only = 0 |
+| Prediction (chase: rams and traffic hits are not predicted) | RMS 0.17 / 0.39 / 0.30 / 0.32 m, max 3.0 m, 3–7 % of reconciles, 0 resets | < 0.5 m RMS |
 
 Earlier numbers on the kinematic stub (run 1): net tick 0.39 ms, worst client 33 kB/s,
 RMS correction 0.14 m.
@@ -106,8 +123,11 @@ car's bit-exact `wp_vehicle::VehicleSnapshot` (`own_full`, ≈0.9 kB); with it t
 lossless (`Rig::restore`, replay reproduces the server bit for bit), without it the rewind
 uses `set_state` (≈1 cm off after 10 ticks: filters, clutch, tire relaxation are not in
 `VehicleState`). The first own state with a snapshot also initialises the predictor
-exactly. The down-link budget is a per-client byte bucket (refill 95 % of 40 kB/s, burst one
-tick), so the snapshot spike is repaid by the following ticks. The visual jump is absorbed by a render offset that decays
+exactly. The down-link budget is a per-client byte bucket (refill 85 % of 40 kB/s, burst one
+tick), so the snapshot spike is repaid by the following ticks. Lattice snapshots (up to
+≈3.7 kB for a dented car) queue behind the bucket: while one waits, entity updates shrink to
+the minimum and the credit may grow to its size, so a 1 s window stays under budget.
+Collisions with other cars are not predicted (the client's rig holds only its own car). The visual jump is absorbed by a render offset that decays
 with a 100 ms time constant. Inputs are quantised (`quant::quantize_input`) **before** the
 client simulates them, so both sides simulate identical values.
 
@@ -116,8 +136,14 @@ Node positions never travel in normal play. Per physics tick the server reports 
 applied to each vehicle's damage model (`NetSim::drain_applied_contacts`). Contacts are
 quantised in chassis space (`QContact`) and the authority **applies the dequantised value**,
 so a client re-running `apply_contacts` with the same contacts at the same tick gets the
-same lattice. Replicas run empty steps for ticks without contacts (capped at 240 catch-up
-steps). Every 2 s per tracked vehicle the server sends a 32-bit hash of node displacements
+same lattice. On the real sim, `WpSim` installs `QContact::round_trip` as `wp_sim`'s contact
+filter and drains `Sim::drain_applied_contacts`. Contacts `wp_damage` provably ignores
+(closing speed under `min_contact_speed_mps`, no impulse, or a whole tick below
+`min_contact_energy_j`) are not sent (`lattice::damage_relevant`; a unit test checks they
+are no-ops): resting contacts between cars come every tick and were 2/3 of all down-link
+bytes in a city chase. Replicas run every empty step for ticks without contacts
+(`wp_damage` solves every 2nd step, so skipping steps would shift the phase), and lattice
+snapshots carry the server model's step count so a new replica starts in phase. Every 2 s per tracked vehicle the server sends a 32-bit hash of node displacements
 quantised to 1 mm; a client that disagrees requests a `LatticeSnapshot` of that vehicle only.
 Snapshots carry exact `f32` positions of displaced nodes (bitmap-delta against the rest
 pose), because a rounded restore drifts again on the next contact (measured: 9 mismatches
@@ -155,7 +181,7 @@ reputation changes happen on the server; captain commands are role-checked, rate
 One transport frame = one message: `u8 tag` + body. Integers in bodies are little-endian
 fixed width or LEB128 `varint`; `zz` = zigzag varint; `str`/`bytes` = varint length + data;
 `opt` = varint, 0 = none, else value + 1. Decoders reject unknown tags, oversize lengths
-and trailing bytes. `PROTOCOL_VERSION = 2`; `Hello` must match it and the contract version.
+and trailing bytes. `PROTOCOL_VERSION = 3`; `Hello` must match it and the contract version.
 
 ### Client → server
 
@@ -189,12 +215,12 @@ u8 clutch×255, u8 buttons (1 gear up, 2 gear down, 4 horn, 8 headlights, 16 sir
 | 0x82 | `Reject` | R | `str reason` — connection closed after it |
 | 0x83 | `RoleAssigned` | R | `varint player, u8 role, opt vehicle, str car_id` |
 | 0x84 | `CaptainOffer` | R | `varint expires_tick` |
-| 0x85 | `EntityEnter` | R | `varint entity, str car_id, u8 kind (0 racer, 1 police chase, 2 AI police, 3 traffic), opt owner` |
+| 0x85 | `EntityEnter` | R | `varint entity, str car_id, u8 kind (0 racer, 1 police chase, 2 AI police, 3 traffic, 4 AI racer), opt owner` |
 | 0x86 | `EntityLeave` | R | `varint entity` |
 | 0x87 | `Snapshot` | U | `varint tick, varint input_ack, u8 has_own, [OwnState], u8 has_full, [bytes own_full ≤4096: wp_vehicle::VehicleSnapshot], varint n, n × DeltaVehicle` |
 | 0x88 | `Damage` | R | `varint vehicle, varint tick, varint n, n × QContact, varint m, m × DamageEvent` |
 | 0x89 | `LatticeHash` | R | `varint vehicle, varint tick, u32 hash` |
-| 0x8A | `LatticeSnapshot` | R | `varint vehicle, varint tick, LatticeSnapshot` |
+| 0x8A | `LatticeSnapshot` | R | `varint vehicle, varint tick, LatticeSnapshot, opt damage_steps` |
 | 0x8B | `Pong` | U | `u32 client_ms, varint server_tick` |
 | 0x8C | `CaptainView` | R | `varint tick, u8 full, varint n, n × MapUnit, varint m, m × varint removed, varint k, k × Incident, varint h, h × (i16 cell_x, i16 cell_y, u8 heat)` |
 | 0x8D | `UnitOrder` | R | `u8 kind, zz x_dm, zz y_dm, varint target` |
@@ -245,16 +271,20 @@ implementation only has to provide unordered datagrams for U and an ordered reli
 for R. `sim_link` already tests the protocol under that model.
 
 ## Known gaps
-- `wp_sim` does not extract contacts or offer a contact-quantisation hook, so on the real
-  stack no damage is replicated yet (NET-N1); `testkit::ArenaSim` exercises the path.
-- `Sim` has no despawn: `WpSim` parks and reuses vehicles (MAX_VEHICLES = 64 limits churn).
+- A lattice snapshot restores node positions only (`DamageModel::restore_node_positions`),
+  not beam plastic state, velocities or impactors, so a replica restored from a *dented*
+  snapshot (entering interest already damaged, or after a resync) can diverge on the next hit
+  and is resynced again (NET-N5). Replicas built from contacts alone are exact.
+- Kinematic (far) traffic is not replicated; it waits for v0.3.0 `TrafficAgentSnapshot`.
+  Physical traffic, AI police and AI racers are ordinary entities with their kind.
+- Player police seats are `VehicleKind::Police` in the sim (so `wp_police` does not treat
+  them as racers); that also takes them out of the traffic spawn ring (NET-N9).
 - Prediction steps the real vehicle (`predict::RigVehicle` over `wp_vehicle::rig::Rig`,
   bit-identical to `wp_sim` for a lone car on flat ground). Rewinds are exact at the 5 Hz
   snapshot ticks only; in between they use `set_state`. The client has no city geometry,
   surface map or other cars, so collisions are corrected, not predicted.
 - Local-car *predicted* contacts are not applied; the own car's damage is server-driven
   (arrives one RTT late) and resynced by the same hash path.
-- No traffic/AI police exist yet; `NetSim::ai_kind` defaults to traffic.
 - Captain command payload, wanted levels, heat and stakes are placeholders until
   `wp_police`/`wp_economy` expose them (NET-3, NET-4). Accounts are per instance, in memory.
 - WebSocket only (both channels reliable). No encryption/auth beyond the reconnect token.
