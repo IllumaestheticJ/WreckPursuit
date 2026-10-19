@@ -5,121 +5,107 @@
 - **Crates / folders owned:** `data/cars/` (roster files), `data/lattices/` (roster car files, not the generator), `tools/specsheet/`
 - **Contract version built against:** 0.1.0
 
+## Response to lead feedback (run 2)
+
+| Item | Done |
+|---|---|
+| 1 Tires | Rebuilt: 10 cars now on their intended compound (`sport` ×7, `police_pursuit` ×3). Hauler (`all_terrain`), Ironside (`vintage_bias`) and the two `street` cars stay on `street`. Sim columns of `VALIDATION.md` filled from `tools/specsheet/validation_results.json`, written by the new `collect_results.py` (runs `wp_vehicle`'s metrics example + `damage-barrier --sweep`). |
+| 2 Rampart / Wolfhound / Ironside | **Wolfhound 100-0: 61.7 → 39.9 m** (in band), Rampart 55.6 → 39.0 m, Cruiser 57.0 → 40.1 m — two causes, below. **Rampart 0-100: 6.3 → 5.9 s**, still over 4.5-5.0: it is not only traction (semi-slicks only reach 5.5 s; final drive, CG, LSD each ≤ 0.03 s) — `wp_vehicle`'s launch is conservative for powerful RWD (its debug coupe at 200 kW/t runs 5.2 s). Not fixed by inflating power; flagged to 02. Ironside 52.5 m: intended "scary brakes", in its band. |
+| 3 Brake semantics | Re-derived for 02's model ("favoured axle full `max_torque_*`, other × (1−b)/b"). `max_torque_*` = caliper capacity per wheel; `bias_front` is now the proportioning valve: 0.5 when the rear caliper is the limit (both axles full), above 0.5 only to trim an oversized rear to the front's lock margin. Old data (b ≈ 0.7) starved the rear to ~40 %. Plus an **ABS ceiling**: delivered front ≤ 1.5 × front lock torque on the car's own tire (rear scaled with it) because 02's ABS releases to 45 % of the *commanded* torque — an oversized caliper keeps the wheel locked (measured on the Wolfhound: 5770 N·m → 47.3 m, 4500 N·m → 39.9 m). Spec sheets show raw capacity, the cap and delivered torques. |
+| 4 `junkyard_beater` | Added: Beater, base price 3 000, late-80s FF 1.6 SOHC sedan, worn (tired engine, 0.18 damping ratio, slow synchro). Sim: 14.0 s 0-100, 0.83 g, 39.1 m, 163 km/h. |
+| 5 / run 2 gen-lattice | All 14 lattices regenerated with `gen-lattice` (profile, real car mass, `--strength` from durability class 1-5 → 0.80/0.90/1.00/1.15/1.30, front overhang per car). The box-grid adjustments it covers are dropped (shaping, crumple rows, pillars, radiator/engine separation, doors, bed, node mass). What is still applied on top is listed below and in each spec sheet. Barrier sweep run on all 14 (VALIDATION.md): 109/112 checks pass; the 3 misses are one damage-model finding for 03 (two-box rear). |
+
 ## Exposes
 
-- 13 cars, each `data/cars/<id>.json` (VehicleDef) + `data/cars/<id>.spec.md` + `data/lattices/<id>.json`:
+- 14 cars, each `data/cars/<id>.json` (VehicleDef) + `data/cars/<id>.spec.md` + `data/lattices/<id>.json`:
   racers `vireo_xs`, `kestrel_ts`, `shiro_turbo`, `hakone_gt`, `rampart_50`, `ironside_440`,
   `sperber_32`, `lindwurm_4t`, `lucciola_350`, `hauler_1500`; police `sentinel_cruiser`
-  (PoliceCruiser), `sentinel_wolfhound` (PoliceInterceptor), `sentinel_bastion` (PoliceSuv).
-  All load via `wp_contracts::load_car` and validate against `schemas/`.
-- `data/cars/ROSTER.md` — roster table (mass, power, kW/t, est. 0-100 / Vmax / skidpad, class
-  index estimate, durability, price) for design docs.
-- `data/cars/VALIDATION.md` — class targets, estimates, pass/fail, sim columns (pending), barrier matrix.
-- `tools/specsheet/` — `build_roster.py` (regenerate everything from `roster_inputs.py`),
-  `specsheet.py` (tables), `estimate.py` (point-mass estimator), `nameplate_check.py`
-  (naming policy, exit 1 on hit), `smoke_sim.py` (every car through `simcli`, both modes,
-  determinism). See `tools/specsheet/README.md`.
-- Police push bar convention: extra `FrontBumper` nodes ahead of the bumper, detachable
-  **group 3** (`break_impulse_ns` 15000, 25 kg). Economy/repair can identify it by group id.
+  (PoliceCruiser), `sentinel_wolfhound` (PoliceInterceptor), `sentinel_bastion` (PoliceSuv);
+  economy floor `junkyard_beater` (Beater, 3 000). All load via `wp_contracts::load_car`.
+- `data/cars/ROSTER.md` — roster table; `data/cars/VALIDATION.md` — sim + estimate vs class
+  targets and the barrier matrix, with every miss explained.
+- `tools/specsheet/` — `build_roster.py`, `collect_results.py` (sim metrics + barriers →
+  `validation_results.json`), `specsheet.py`, `estimate.py`, `nameplate_check.py`,
+  `smoke_sim.py` (simcli format v2). See `tools/specsheet/README.md`.
+- Police push bar: 4 extra `FrontBumper` nodes ahead of the bumper, detachable **group 8**
+  (moved from 3: gen-lattice uses 0-7 for bumpers, hood, trunk and doors), 15 000 N·s, 25 kg.
+  Cruiser and Wolfhound also get gen-lattice's `cruiser` profile (reinforced rails, ×2 bumper
+  beam); the Bastion (SUV) gets the ×2 bumper beam by hand.
 
 ## Needs
 
 | From | What | Workaround now |
 |---|---|---|
-| 02 vehicle | `data/tires/sport.json`, `police_pursuit.json` (planned in prompt 02) | Cars name the intended compound; JSON uses `street` until the file exists. Re-run `build_roster.py` after it lands — it switches automatically. |
-| 02 vehicle | Two more compounds: **`all_terrain`** (Hauler; ≈ 0.90 × street peak μ, softer, more rolling resistance) and **`vintage_bias`** (Ironside; ≈ 0.85 × street, low cornering stiffness, early falloff) | Same fallback to `street`. |
-| 02 vehicle | `street.json` lateral `d = 1.0` reads like a summer tire: the light Vireo estimates 0.95 g on it (class: 0.82-0.92). Consider `d ≈ 0.90` for street, with `sport` ≈ 1.0-1.1. | None; noted in VALIDATION.md. |
-| 02 vehicle | Metric scenarios (0-100, 100-0, skidpad, top speed) + `wp_vehicle::metrics` | `estimate.py`; VALIDATION.md sim columns read "pending". |
-| 03 damage | `gen-lattice` with body profiles (see below), barrier scenarios, `uhss` material | `gen-box-lattice` + scripted hand adjustments; UHSS emulated with larger `hss` beam areas. |
-| 08 economy | Mods: Kestrel AWD conversion (`layout → Awd{front_split: 0.6}` + centre diff), Hauler 4WD (`Awd{0.4}`), Ironside clutch LSD + disc-brake conversion, Rampart/others' tire upgrades. | Not created (data/mods is 08's). |
-| 10 harness / lead | Run the roster through the metric + barrier scenarios on the integrated build; write results to `tools/specsheet/validation_results.json` (format in VALIDATION.md); run `nameplate_check.py` in CI. | `smoke_sim.py` proves load + determinism on the stubs. |
+| 02 vehicle | **ABS should modulate relative to the wheel's lock torque** (or reduce pressure until slip recovers), not release to a fixed 45 % of commanded torque. Any car whose caliper exceeds ~1.6× its lock torque stops 7-15 m long. | ABS ceiling in the car data (`ABS_CEILING = 1.5` in `build_roster.py`); remove when fixed. |
+| 02 vehicle | Launch/TCS for powerful RWD cars is conservative (Rampart 5.9 s; debug coupe 5.2 s at 200 kW/t vs ≈ 4.6 s class). Sim also stops ≈ 1-2 m longer than road tests. | Explained in VALIDATION.md (cause "A"); car data not inflated. |
+| 02 vehicle | `all_terrain` (Hauler) and `vintage_bias` (Ironside) compounds. | `street`. |
+| 02 / lead | Lucciola skidpad 0.95 g on `sport` vs prompt-09 target ≥ 1.0 g (1.09 g on `semi_slick`, measured). Decide: stickier `sport`, semi-slicks on the Lucciola, or accept 0.95 (realistic for the archetype). | Left on `sport`. |
+| 03 damage | **Two-box rear structure**: on the hatch and SUV profiles the passenger cell runs to the tailgate, so a 40 km/h rear barrier gives 0.22-0.33 m cabin intrusion and a total loss (Vireo, Lindwurm, Bastion). Sedans/coupes are fine. | Reported only; not patched in car data. |
+| 03 damage | `gen-lattice` options for what is still hand-applied (list below), `uhss` material. | `adjust_lattice` in `build_roster.py`. |
+| 03 damage | `SEC` in `build_roster.py` mirrors `lattice_gen::DEFAULT_SECTIONS` to recognise beam roles; if those sections change, the era adjustment silently stops matching. A role tag per beam (or exporting the sections) would remove the coupling. | Keep in sync by hand. |
+| 08 economy | Mods: Kestrel AWD conversion, Hauler 4WD (should land its 0-100 in band), Ironside LSD + disc-brake conversion, tire upgrades. | Not created (data/mods is 08's). |
+| 10 harness / lead | Run `nameplate_check.py` in CI. | Run by hand before each push. |
 
 ## Contract change requests
 
-| # | Change (type / field / variant) | Why | Who is affected | Status |
-|---|---|---|---|---|
-| 1 | `DrivetrainDef::torque_converter: Option<TorqueConverterDef { stall_rpm, stall_torque_ratio, coupling_rpm }>` (None = manual/DCT clutch) | 5 of 13 cars are automatics (Ironside, Hauler, all three police). Without converter multiplication their launches are 0.5-1 s slow (Hauler estimate 8.4 s vs ≈ 7.5 s class figure) and they stall-launch like manuals. | 02, 08 (gearbox mods), 06 (AI launch) | proposed |
-| 2 | `DriveLayout::AwdOnDemand { base_front_split, max_rear_split, engage_slip }` (or a `coupling` field on `Awd`) | On-demand clutch-pack AWD (Lindwurm, Wolfhound) is front-drive until the front slips; a fixed split misses the lift-off/power-on character. Using fixed 65/35 and 55/45 meanwhile. | 02, 08 | proposed |
-| 3 | `BrakeDef::rear_kind: Disc \| Drum` and a thermal/fade model input (`thermal_mass_kg`, `fade_start_c` per axle) | Ironside's "scary brakes" are only partly expressible: low capacity is modelled (0.79× front lock torque), drum fade is not. Also useful for police pursuit fatigue. | 02, 08 (brake mods) | proposed |
-| 4 | Clarify `BrakeDef` semantics in the doc comment: are `max_torque_front/rear_nm` hydraulic capacities at full pedal (what the roster assumes), with `bias_front` the pedal split, or are they pre-scaled by bias? | The current wording ("at full pedal and `bias_front = 1`") lets 02 implement it two ways; the roster data assumes capacity-per-wheel and bias = pedal force split. | 02 | proposed (doc only) |
-| 5 | `SuspensionDef::axle: Independent \| Solid` (per axle) | Live/solid rear axles (Ironside, Hauler, Bastion) couple left/right wheels (axle tramp, roll steer, high unsprung mass). Currently modelled as independent corners with high unsprung mass. | 02, 03 (axle tear-off) | proposed |
-| 6 | `VehicleDef::roll_center_height_m: [f32; 2]` | ARB rates were derived assuming 0.08/0.12 m roll centres; without geometry the sim's roll response differs from the spec sheets' roll gradients. | 02 | proposed (low) |
-| 7 | `BodyRegion::PushBar` (or a generic `Accessory`) | Push bar currently uses `FrontBumper`, so HUD/repair cannot show or bill it separately (group 3 is the only handle). Prompt 08's body-kit pieces need the same. | 03, 08, 04 | proposed |
-| 8 | `VehicleDef::fuel_capacity_l` (+ fuel mass in `mass_kg` at a stated fill) | Fuel-leak effects (`HandlingEffects::fuel_leak_rate`) need a tank size to drain. | 02, 03, 08 | proposed (low) |
+Decisions are in "Lead feedback" below; status updated here.
 
-Non-contract data requests: `data/materials/uhss.json` (03: yield ≈ 1000-1200 MPa, failure strain ≈ 0.08) — the 2010s cabins currently use `hss` with 1.4-1.6× area.
+| # | Change | Status |
+|---|---|---|
+| 1 | `DrivetrainDef::torque_converter` | accepted (v0.2.0) — Hauler/Cruiser 0-100 misses wait on it |
+| 2 | On-demand AWD | accepted (merged with 02 #5) |
+| 3 | Rear drum + fade | deferred |
+| 4 | `BrakeDef` doc | accepted (doc only); roster re-derived for 02's semantics (above) |
+| 5 | Solid axle | deferred |
+| 6 | Roll centre height | deferred |
+| 7 | `BodyRegion::Accessory` (push bar) | accepted in principle; push bar now uses detach group 8 until then |
+| 8 | `fuel_capacity_l` | accepted; values ready to add once the field exists (tank sizes are class-typical: 45-70 L cars, 90-100 L truck/SUV) |
 
-## What `gen-lattice` should learn (for prompt 03's owner)
+Non-contract data request: `data/materials/uhss.json` (03) — 2010s cabins still use gen-lattice's HSS.
 
-Every item below is a hand adjustment `tools/specsheet/build_roster.py::adjust_lattice` makes
-to `gen-box-lattice` output today. Each spec sheet ends with the exact list applied to that car.
+## Hand adjustments still applied on top of gen-lattice (for 03)
 
-1. **Body profiles** — top-layer heights per row (hood/cowl/deck at beltline, greenhouse at
-   roof height) and tumblehome (roof rows ≈ 86 % width). Profiles used: sedan, coupe, hatch,
-   mr, truck, suv (`PROFILE_TOP`). The box grid has the hood at roof height, which makes nose
-   crush and bonnet-over-bumper geometry wrong.
-2. **Pillars are structure, not glass.** The box generator classes side-door↔windshield beams as
-   glass, so the A-pillar is a 1e-4 m² glass beam. Pillar/roof-rail beams need their own
-   material class.
-3. **Era presets** for cabin / pillar / rail / sill material and area (70s mild steel, 90s,
-   2000s, 2010s UHSS-ish). Table `ERA` — this is what makes Simulation lethality differ by era.
-4. **Crumple resolution.** Only two node rows (7-8) sit between bumper and firewall, so a rail
-   gets one soft and one hard segment. Need ≥ 3-4 rows in the nose and tail for a believable
-   soft→hard crush curve and the 0.6 m @ 56 km/h calibration.
-5. **Separate radiator and engine nodes.** The box generator mounts both on row 8, so they
-   fail together; the bumper → radiator → engine ordering test needs them on different rows.
-6. **Layout-aware component placement**: FF transverse (engine + gearbox side by side), FR
-   longitudinal (gearbox in the tunnel, prop shaft), MR (engine bay behind the cabin, radiators
-   in the nose, side fuel tanks), truck (side-saddle tank outboard of the frame rail), 70s
-   (tank behind the rear axle). Engine-node mass concentration (×2.5 here).
-7. **Mid-engine regions**: engine bay rows behind the firewall must not be `Cabin` (otherwise a
-   rear hit counts as cabin intrusion and totals the car immediately).
-8. **Ladder frame** (truck/SUV profiles): two full-length inner bottom node lines as
-   `FrameLeft`/`FrameRight` with large-area rails (1.2e-3 m²), cross-members (6e-4) and
-   diagonals; frame-mounted suspension tolerates more intrusion (0.08 m vs 0.05).
-9. **Pickup bed** regions (bed floor/tailgate as `Trunk`, bed sides as quarters) and a cab
-   that ends at the bed.
-10. **Accessories / detachable extras**: push bar = extra nodes 0.10 m ahead of the bumper,
-    bolted through to the rail nodes, own detach group. Body-kit pieces (prompt 08) need the
-    same hook: a `--accessory pushbar` style option with a group id convention.
-11. **Doors as detachables**: there are only 1-2 nodes per door region, so doors cannot hinge
-    or detach; needs ≥ 2×2 nodes per door and hinge lines on the A/B pillars.
-12. **Per-car overrides** that should be generator parameters: steel vs plastic bumpers
-    (impulse 7000-9000 vs 3000 N·s), aluminium vs steel hood/panels, live-axle mount weakness
-    (rear suspension fail 0.03 m, wheel 0.06 m), sacrificial aluminium rear subframe (MR).
-13. Suggested CLI: `gen-lattice --profile <p> --era <e> --layout <ff|fr|mr|awd> --frame
-    <unibody|ladder> --bumpers <plastic|steel> --pushbar --dims W L H --wheelbase --clearance
-    --mass`.
+Each spec sheet ends with the exact list for that car. In order of how much a generator option
+would help:
+
+1. **Era of the passenger cell** — cabin members, sills, pillars, roof rails and cabin
+   cross-members: 70s → mild steel × 1.0 section (+ door beams × 0.5), 80s HSS × 0.65,
+   90s × 0.75, 2000s × 0.90, 2010s unchanged. This is what makes Simulation lethality differ by era.
+2. **Mid-engine** (no gen-lattice profile): coupe body, engine block moved behind the cabin
+   bulkhead and remounted to the rear rails + bulkhead, rear-of-bulkhead nodes relabelled
+   `FrameRear`, aluminium rear subframe (sacrificial), gearbox/half-shafts at the rear axle,
+   side fuel tanks at the sills.
+3. **Ladder frame** for truck/SUV: cab-floor rail nodes relabelled `FrameLeft/Right` and the
+   under-cab rail beams given rail sections so the frame runs bumper to bumper.
+4. **Push bar** as a detachable accessory (group 8); ×2 bumper beam for police bodies that are
+   not the `cruiser` profile (SUV).
+5. **Material options**: steel hood (gen-lattice always uses aluminium), chrome steel bumpers
+   (pp → mild steel, detach impulse ×2.3), all-aluminium panels (MR).
+6. **Component placement**: transverse FF gearbox on the engine's left end (gen-lattice puts
+   it in the FR tunnel), 70s fuel tank behind the rear axle, truck side-saddle tank, Ironside
+   live-axle mounts (rear suspension fail 0.04 m, wheel 0.07 m).
+7. Crew cab: the Hauler is a crew-cab pickup but the truck profile is two-door (not adjusted).
 
 ## Changes outside my crates
 
-- `data/cars/README.md` "Current files" section updated with the roster (I own `data/cars/`).
-- No code changes to any crate. Nothing added to `wp_contracts`, `schemas/`, `data/tires/`,
-  `data/materials/`, `data/mods/`, `apps/simcli/` or the justfile.
+- None. `tools/specsheet/smoke_sim.py` (mine) has the lead's format-v2 update.
 
 ## Perf numbers
 
 | Measurement | Machine | Native | Browser | Budget |
 |---|---|---|---|---|
-| Lattice size per roster car | — | 120-124 nodes, 704-714 beams | same | prompt 03: 0.25 ms/car lattice step |
-| `build_roster.py` (13 cars incl. generator runs) | cloud container | 0.44 s | — | — |
-| `simcli` smoke run per car (stub sim, 14 s simulated) | cloud container, release | < 0.1 s | — | — |
+| Lattice size per roster car | — | 244-304 nodes, 1539-1988 beams | same | prompt 03: 0.25 ms/car lattice step (03's `damage-bench` covers it) |
+| `build_roster.py` (14 cars incl. gen-lattice runs) | cloud container | 0.8 s | — | — |
+| `collect_results.py` (metrics + 14 barrier sweeps) | cloud container, release | ≈ 15 s | — | — |
 
 ## Known gaps
 
-- **Sim validation pending.** `wp_vehicle`/`wp_damage` are stubs on this branch; metric and
-  barrier columns in VALIDATION.md read "pending". The Arcade and Simulation smoke hashes are
-  identical because the stub damage does nothing.
-- **Estimate misses** (point-mass model, see VALIDATION.md): Rampart 0-100 5.6 s vs 4.5-5.0
-  (traction-limited; depends on `sport` longitudinal μ), Hauler 0-100 8.4 s vs 7.0-8.0 (no
-  torque converter, 2WD), Vireo/Kestrel/Shiro skidpad above band (street/sport μ
-  assumptions), Lindwurm 100-0 0.3 m over. Car data was deliberately not bent to fit the
-  estimator.
-- Intended tire compounds not yet available → all cars run on `street`.
+- Sim misses (VALIDATION.md, all explained): small "sim conservative" overruns (Kestrel,
+  Hakone, Sperber 0-100 by 0.02-0.3 s; Hakone/Sperber/Lindwurm/Rampart 100-0 by 0.5-1 m),
+  Rampart 0-100 and skidpad, Lucciola skidpad (decision above), automatics' 0-100 (torque
+  converter pending), three tire-limited skidpads 0.01-0.02 g under.
+- The ABS ceiling and the `SEC` mirror are workarounds (see Needs).
 - AWD on-demand, automatics, live axles, drum fade are approximated (contract requests 1-3, 5).
-- Lattices are 120-node grids; damage *detail* (door hinges, multi-stage crumple) waits for
-  `gen-lattice`. When it lands, swap the generator call in `build_roster.py::run_generator`
-  and drop the adjustments it covers.
 - Prices and durability classes are first-pass; 08 should tune prices against the economy.
 
 ## Lead feedback (2026-10-19)

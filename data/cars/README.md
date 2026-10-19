@@ -73,5 +73,6 @@ inputs, not the outputs. Overview table: `ROSTER.md`; validation: `VALIDATION.md
 | `sentinel_cruiser` | Sentinel Cruiser | PoliceCruiser | RWD 3.7 V6 police sedan, push bar |
 | `sentinel_wolfhound` | Sentinel Wolfhound | PoliceInterceptor | AWD 3.5 TT V6 pursuit sedan, push bar |
 | `sentinel_bastion` | Sentinel Bastion | PoliceSuv | RWD 5.3 V8 police SUV, ladder frame, push bar |
+| `junkyard_beater` | Junkyard Beater | Beater | late-80s FF 1.6 SOHC sedan, worn — economy floor (3 000) |
 
 Naming check: `python3 tools/specsheet/nameplate_check.py` (exit 1 on any hit).

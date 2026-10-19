@@ -4,21 +4,22 @@
 
 | Car | Id | Class | Layout | Mass kg | Power kW | kW/t | 0-100 est. s | Vmax est. km/h | Skidpad est. g | Class idx est. | Dur. | Price | Tire |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| Vireo XS | `vireo_xs` | Compact | FWD | 1125 | 97 | 87 | 8.6 | 209 | 0.95 | 464 | 2 | 7,500 | street |
-| Kestrel TS | `kestrel_ts` | Sport | FWD | 1475 | 181 | 123 | 6.7† | 255 | 0.98† | 546† | 3 | 22,000 | sport (→ street) |
-| Shiro Turbo | `shiro_turbo` | Sport | RWD | 1325 | 182 | 138 | 6.2† | 270 | 1.01† | 581† | 2 | 28,000 | sport (→ street) |
-| Hakone GT | `hakone_gt` | Sport | RWD | 1625 | 242 | 149 | 5.7† | 288 | 0.98† | 608† | 3 | 48,000 | sport (→ street) |
-| Rampart 5.0 | `rampart_50` | Muscle | RWD | 1775 | 319 | 180 | 5.6† | 275 | 0.96† | 606† | 3 | 42,000 | sport (→ street) |
-| Ironside 440 | `ironside_440` | Muscle | RWD | 1725 | 216 | 125 | 7.9† | 221 | 0.74† | 450† | 4 | 38,000 | vintage_bias (→ street) |
-| Sperber 32 | `sperber_32` | Sport | RWD | 1625 | 248 | 153 | 5.7† | 279 | 0.99† | 603† | 3 | 36,000 | sport (→ street) |
-| Lindwurm 4T | `lindwurm_4t` | Sport | AWD 65/35 | 1575 | 220 | 140 | 5.3† | 258 | 0.97† | 616† | 3 | 34,000 | sport (→ street) |
-| Lucciola 350 | `lucciola_350` | Exotic | RWD | 1375 | 278 | 202 | 4.5† | 297 | 1.02† | 697† | 1 | 120,000 | sport (→ street) |
-| Hauler 1500 | `hauler_1500` | Truck | RWD | 2475 | 265 | 107 | 8.4† | 221 | 0.70† | 429† | 5 | 32,000 | all_terrain (→ street) |
-| Sentinel Cruiser | `sentinel_cruiser` | PoliceCruiser | RWD | 1975 | 220 | 111 | 8.0† | 241 | 0.89† | 481† | 4 | 30,000 | police_pursuit (→ street) |
-| Sentinel Wolfhound | `sentinel_wolfhound` | PoliceInterceptor | AWD 55/45 | 2075 | 272 | 131 | 6.2† | 255 | 0.88† | 550† | 4 | 45,000 | police_pursuit (→ street) |
-| Sentinel Bastion | `sentinel_bastion` | PoliceSuv | RWD | 2675 | 265 | 99 | 7.7† | 224 | 0.76† | 461† | 5 | 48,000 | police_pursuit (→ street) |
-| Debug Coupe | `debug_coupe` | Sport | RWD | 1500 | 303 | 202 | 5.7 | 299 | 0.92 | 602 | 3 | 52,000 | street |
-| Debug Sedan | `debug_sedan` | Compact | FWD | 1400 | 151 | 108 | 7.4 | 241 | 0.90 | 502 | 3 | 18,000 | street |
+| Vireo XS | `vireo_xs` | Compact | FWD | 1125 | 103 | 91 | 8.1 | 213 | 0.95 | 477 | 2 | 7,500 | street |
+| Kestrel TS | `kestrel_ts` | Sport | FWD | 1475 | 181 | 123 | 6.6 | 255 | 0.98 | 550 | 3 | 22,000 | sport |
+| Shiro Turbo | `shiro_turbo` | Sport | RWD | 1325 | 182 | 138 | 6.0 | 271 | 1.01 | 588 | 2 | 28,000 | sport |
+| Hakone GT | `hakone_gt` | Sport | RWD | 1625 | 242 | 149 | 5.5 | 289 | 0.98 | 616 | 3 | 48,000 | sport |
+| Rampart 5.0 | `rampart_50` | Muscle | RWD | 1775 | 319 | 180 | 5.4 | 276 | 0.96 | 616 | 3 | 42,000 | sport |
+| Ironside 440 | `ironside_440` | Muscle | RWD | 1725 | 216 | 125 | 7.6† | 221 | 0.74† | 459† | 4 | 38,000 | vintage_bias (→ street) |
+| Sperber 32 | `sperber_32` | Sport | RWD | 1625 | 248 | 153 | 5.6 | 279 | 0.98 | 611 | 3 | 36,000 | sport |
+| Lindwurm 4T | `lindwurm_4t` | Sport | AWD 65/35 | 1575 | 220 | 140 | 5.3 | 258 | 0.97 | 616 | 3 | 34,000 | sport |
+| Lucciola 350 | `lucciola_350` | Exotic | RWD | 1375 | 278 | 202 | 4.4 | 297 | 1.01 | 709 | 1 | 120,000 | sport |
+| Hauler 1500 | `hauler_1500` | Truck | RWD | 2475 | 265 | 107 | 8.1† | 221 | 0.70† | 436† | 5 | 32,000 | all_terrain (→ street) |
+| Sentinel Cruiser | `sentinel_cruiser` | PoliceCruiser | RWD | 1975 | 220 | 111 | 8.0 | 241 | 0.92 | 486 | 4 | 30,000 | police_pursuit |
+| Sentinel Wolfhound | `sentinel_wolfhound` | PoliceInterceptor | AWD 55/45 | 2075 | 272 | 131 | 6.2 | 255 | 0.90 | 555 | 4 | 45,000 | police_pursuit |
+| Sentinel Bastion | `sentinel_bastion` | PoliceSuv | RWD | 2675 | 265 | 99 | 7.7 | 224 | 0.80 | 469 | 5 | 48,000 | police_pursuit |
+| Junkyard Beater | `junkyard_beater` | Beater | FWD | 1075 | 61 | 57 | 12.5 | 169 | 0.94 | 380 | 2 | 3,000 | street |
+| Debug Coupe | `debug_coupe` | Sport | RWD | 1500 | 303 | 202 | 4.9 | 299 | 1.00 | 667 | 3 | 52,000 | sport |
+| Debug Sedan | `debug_sedan` | Compact | FWD | 1400 | 151 | 108 | 7.2 | 241 | 0.90 | 507 | 3 | 18,000 | street |
 
 Estimates come from `tools/specsheet/estimate.py` (point-mass model; see its docstring).
 † = the intended tire compound has no file in `data/tires/` yet: the car JSON uses `street`
