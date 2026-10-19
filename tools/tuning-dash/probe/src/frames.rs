@@ -293,7 +293,20 @@ pub fn render_svg(frame: &Frame, scenery: &Scenery, w: u32, h: u32, min_span_m: 
         );
     }
     for (line, width) in &scenery.roads {
-        if !line.iter().any(|p| in_view(*p, 60.0)) {
+        // Bounding-box overlap, so a long straight road with both ends off-screen still draws.
+        let (mut lmin, mut lmax) = ([f32::MAX; 2], [f32::MIN; 2]);
+        for p in line {
+            for k in 0..2 {
+                lmin[k] = lmin[k].min(p[k]);
+                lmax[k] = lmax[k].max(p[k]);
+            }
+        }
+        let m = 0.5 * width;
+        if lmax[0] + m < x0
+            || lmin[0] - m > x0 + span_x
+            || lmax[1] + m < y0
+            || lmin[1] - m > y0 + span_y
+        {
             continue;
         }
         let pts: Vec<String> = line
