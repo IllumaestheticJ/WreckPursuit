@@ -75,6 +75,39 @@ capture), `CarImpounded/CarSeized/CarDestroyed` (despawn / do not spawn that car
 | `retrieval_fee`, `retrieve_from_impound` | fee grows daily; auction after 10 days |
 | `award_cop(&mut acct, CopAction)`, `cop_level(xp)` | captures, assists, clean minutes, civilian hits, self-wrecks, risk-budget overspend |
 
+### Pursuit wiring (draft, drops in when police events are typed in v0.3.0)
+`wp_economy::pursuit` turns a police pursuit ending into the capture / escape calls above
+without depending on `wp_police`:
+
+```rust
+// once per instance, next to the sim's event drain (wp_sim or the server)
+let mut tracker = wp_economy::PursuitTracker::new();
+for ev in sim.drain_events() {
+    tracker.observe_sim_event(&ev);                       // counts TrafficViolation per vehicle
+    if let Some(sig) = PoliceEvent::from_sim_event(&ev).as_ref().and_then(police_signal) {
+        if let Some(res) = tracker.observe_police(&sig) { // a pursuit ended
+            if let Some((acct, car)) = owner_of(res.racer) {   // EntityId -> account + CarUid
+                let (settled, events) = econ.settle_pursuit(acct, car, &res, mode, phase, &mut rng)?;
+                store.commit(acct, &events)?;
+            }
+        }
+    }
+}
+```
+
+- `police_signal` is the 15-line adapter in `crates/wp_economy/tests/pursuit_wiring.rs`
+  (`WantedLevelChanged` / `PursuitEnded` → `PoliceSignal`, exhaustive over `PursuitOutcome`).
+  With typed contract events it becomes a plain match.
+- Settlement: `Captured` → `handle_capture`; `CapturedTotalLoss` → `handle_capture` with
+  `total_loss` (Simulation: car destroyed; Arcade: impounded wrecked); `Escaped` / `Safehouse` →
+  `handle_escape` × the day phase's bounty multiplier; `CalledOff`, or ending with no wanted
+  level → nothing.
+- The level used is the level **at** the end: `wp_police` emits `PursuitEnded` before the
+  `WantedLevelChanged` that resets it, and the tracker relies on that order.
+- Fines count the racer's `TrafficViolation`s since their last capture.
+- Tested end to end against a real `PoliceSystem` (heat → wanted → total loss →
+  `CapturedTotalLoss` → settled, both modes).
+
 ### Tuning harness
 `career::simulate_career(&Economy, &CareerConfig)` — scripted multi-night career (deterministic
 per seed). `apps/simcli` (workstream 10) may wrap it as an economy scenario.
@@ -84,7 +117,7 @@ per seed). `apps/simcli` (workstream 10) may wrap it as an economy scenario.
 | From | What | Workaround now |
 |---|---|---|
 | 07 net / 12 lead | Call sites: race results (`RaceSetup` + `RaceResult` per racer, server-validated), session end `DamageReport`s, capture/escape, garage UI messages; persist with `SqliteStore` (enable `wp_economy/native` in `apps/server` only) | tests drive the API directly |
-| 06 police | Capture event payload with: racer, wanted level, total-loss flag, session violation counts; escape event with level. Consume `InformantTip` / `ShopReported` / `BountyCleared`. Feed the risk-budget overspend for `CopAction::RiskBudgetOverspent`. Read `ToolLoadout` (radar/scanner/fake plates) | `CaptureContext` built by hand in tests |
+| 06 police | ~~Capture/escape payload~~ covered by `PursuitEnded` + `WantedLevelChanged` (pursuit wiring above). **New for v0.3.0:** `PursuitEnded` should name the capturing unit and assisting units (`capturer: Option<UnitId>, assists: Vec<UnitId>`) so `award_cop` can pay player cops; and the event order (ended before the level reset) should stay as it is or carry `level` in the event. Consume `InformantTip` / `ShopReported` / `BountyCleared`. Feed the risk-budget overspend for `CopAction::RiskBudgetOverspent`. Read `ToolLoadout` (radar/scanner/fake plates) | `CaptureContext` built by hand in tests |
 | 03 damage | (a) ~~unscaled `parts_cost` / `labour_hours`~~ done in v0.2.0; (b) an API to serialize / restore lattice state (`Vec<u8>`) and to apply a `RepairOrder` (restore listed items / full reset); (c) `gen-lattice` extension: create detachable groups for body-kit `DetachableRequest`s | `reference_estimate`; lattice blob stays empty |
 | 02 vehicle | ~~Tire files~~ landed; `market.tire_grip` is now each file's `lateral.d` / street's (a test requires an entry per `data/tires/` file). Optionally `wp_vehicle::metrics` to replace the estimator; consume `ToolLoadout.run_flat`, `reinforced_cooling`, `nitrous` | estimator + grip table |
 | 09 cars | A Beater car file `junkyard_beater` (base price 3 000) for the economy floor (`market.toml [floor_car]`); keep `base_price`s inside the `market.toml` class bands | floor car is economy-only data |
@@ -146,6 +179,10 @@ pub struct EconomyEvent {
 | 63 / 64 | `ModInstalled` / `ModRemoved` | `mod_id: String` |
 | 70–73 | `InsurancePurchased` / `InsurancePremium` / `InsuranceLapsed` / `InsuranceVoided` | `tier` / — |
 | 999 | `Adjustment` | `note: String` (admin / harness only) |
+
+Police side, same bump: move `PursuitOutcome` into contracts (economy mirrors it as
+`wp_economy::PursuitEnd` today) and add `level: WantedLevel`, `capturer: Option<UnitId>`,
+`assists: Vec<UnitId>` to `PursuitEnded`.
 
 Also needed in contracts for this: `RaceType { Sprint, Circuit, Drag, Touge, Meet }` (today in
 `wp_economy::payouts`; 15 `wp_race` already uses it), `CarUid(u32)`, `CopXpReason`. When the bump
