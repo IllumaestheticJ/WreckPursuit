@@ -9,9 +9,13 @@ use wp_contracts::{BodyRegion, LatticeDef, VehicleDef};
 use crate::profile::BodyProfile;
 
 /// Mesh file format version (`CarMesh::format`).
-pub const MESH_FORMAT: u32 = 1;
+pub const MESH_FORMAT: u32 = 2;
 /// Station spacing of the loft, m.
 pub const STATION_STEP_M: f32 = 0.06;
+/// How far a light lens stands proud of the nose / tail face, m.
+pub const LIGHT_PROUD_M: f32 = 0.015;
+/// How deep a light lens is sunk into the body behind the nose / tail face, m.
+pub const LIGHT_DEPTH_M: f32 = 0.05;
 /// Triangle budget (prompt 11).
 pub const TRI_BUDGET: (u32, u32) = (3000, 6000);
 
@@ -88,6 +92,37 @@ pub struct MeshPart {
     /// 4 weights per vertex in 1/255 (`bind-skin`); empty for wheel parts.
     #[serde(default)]
     pub skin_weights: Vec<u8>,
+    /// Sheet buckling of a hood / trunk lid (`bind-skin`, format 2): lattice node pairs from
+    /// the hinge row to the latch row, sorted by rest x. The length one of them loses in a
+    /// crash (beyond [`FOLD_DEAD_ZONE_M`]) becomes a fold height ([`fold_height`]). Empty for
+    /// every other part.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fold_chords: Vec<[u16; 2]>,
+    /// 2 fold weights per vertex in 1/255 (`bind-skin`): the crease shape (peak and a second
+    /// crease) and the rear-edge lift used once the panel is unlatched. Empty without
+    /// `fold_chords`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fold_weights: Vec<u8>,
+}
+
+/// Lost chord length a hood / trunk absorbs in-plane before it buckles, m.
+pub const FOLD_DEAD_ZONE_M: f32 = 0.015;
+/// Largest fold height, m.
+pub const FOLD_MAX_M: f32 = 0.3;
+/// Share of the fold height the rear edge lifts by once the panel is unlatched.
+pub const FOLD_REAR_LIFT: f32 = 0.45;
+
+/// Fold height (m) of a sheet whose hinge→latch chord measured `rest_m` and now measures
+/// `now_m`: an inextensible strip pushed together rises into a tent of that height. The
+/// browser (`render/panels.ts`) uses the same formula.
+pub fn fold_height(rest_m: f32, now_m: f32) -> f32 {
+    if rest_m <= 1e-3 {
+        return 0.0;
+    }
+    let lost = (rest_m - now_m - FOLD_DEAD_ZONE_M).max(0.0);
+    let c = (lost / rest_m).min(0.5);
+    let k = 1.0 - c;
+    (0.5 * rest_m * (1.0 - k * k).sqrt()).min(FOLD_MAX_M)
 }
 
 impl MeshPart {
@@ -596,41 +631,39 @@ pub fn generate(def: &VehicleDef, lattice: &LatticeDef) -> CarMesh {
         }
     }
 
-    // Lights (bound to the fenders / quarters so a hanging bumper leaves them in place).
+    // Lights: lenses on the outer surface of the nose / tail face, LIGHT_PROUD_M proud of the
+    // paint and facing out, sunk LIGHT_DEPTH_M into the body. Their region is the front /
+    // rear frame (never a free panel); `bind-skin` binds them to the nearest bumper, hood /
+    // trunk, fender / quarter and frame nodes so they crush with the end of the car.
     let hl_z = p.belt(p.y_nose - 0.05) - 0.07;
     let tl_z = p.belt(p.y_tail + 0.05) - 0.08;
     for right in [false, true] {
         let sx = if right { 1.0 } else { -1.0 };
-        let wf = p.half_width(p.y_nose - 0.04);
-        let x0 = sx * (wf - 0.08);
-        let x1 = sx * (wf - 0.40);
-        let (fl, rl) = if right {
-            (BodyRegion::FrontRightFender, BodyRegion::RearRightQuarter)
-        } else {
-            (BodyRegion::FrontLeftFender, BodyRegion::RearLeftQuarter)
-        };
+        let wf = p.half_width(p.y_nose);
+        let x0 = sx * (wf - 0.07);
+        let x1 = sx * (wf - 0.42);
         b.cube(
             &(
                 side_name("headlight", right),
-                Some(fl),
+                Some(BodyRegion::FrameFront),
                 PartKind::Light,
                 MaterialSlot::Headlight,
             ),
-            [x0.min(x1), p.y_nose - 0.07, hl_z - 0.05],
-            [x0.max(x1), p.y_nose + 0.005, hl_z + 0.05],
+            [x0.min(x1), p.y_nose - LIGHT_DEPTH_M, hl_z - 0.06],
+            [x0.max(x1), p.y_nose + LIGHT_PROUD_M, hl_z + 0.06],
         );
-        let wt = p.half_width(p.y_tail + 0.04);
+        let wt = p.half_width(p.y_tail);
         let t0 = sx * (wt - 0.06);
-        let t1 = sx * (wt - 0.36);
+        let t1 = sx * (wt - 0.38);
         b.cube(
             &(
                 side_name("taillight", right),
-                Some(rl),
+                Some(BodyRegion::FrameRear),
                 PartKind::Light,
                 MaterialSlot::Taillight,
             ),
-            [t0.min(t1), p.y_tail - 0.005, tl_z - 0.05],
-            [t0.max(t1), p.y_tail + 0.07, tl_z + 0.05],
+            [t0.min(t1), p.y_tail - LIGHT_PROUD_M, tl_z - 0.06],
+            [t0.max(t1), p.y_tail + LIGHT_DEPTH_M, tl_z + 0.06],
         );
         // Mirror on the front door, just behind its hinge at the belt.
         let door = if right {
@@ -700,6 +733,8 @@ pub fn generate(def: &VehicleDef, lattice: &LatticeDef) -> CarMesh {
             indices: idx,
             skin_nodes: Vec::new(),
             skin_weights: Vec::new(),
+            fold_chords: Vec::new(),
+            fold_weights: Vec::new(),
         });
     }
     parts.sort_by(|a, b| a.name.cmp(&b.name));
@@ -760,6 +795,8 @@ fn wheel_parts(index: u8, radius: f32, width: f32) -> Vec<MeshPart> {
         indices: idx,
         skin_nodes: Vec::new(),
         skin_weights: Vec::new(),
+        fold_chords: Vec::new(),
+        fold_weights: Vec::new(),
     };
     // Rim: 10-point star on both faces at the sidewall inner radius.
     let mut rpos: Vec<[f32; 3]> = Vec::new();
@@ -796,6 +833,8 @@ fn wheel_parts(index: u8, radius: f32, width: f32) -> Vec<MeshPart> {
         indices: ridx,
         skin_nodes: Vec::new(),
         skin_weights: Vec::new(),
+        fold_chords: Vec::new(),
+        fold_weights: Vec::new(),
     };
     vec![tire, rim]
 }

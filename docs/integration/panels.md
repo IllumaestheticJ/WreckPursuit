@@ -24,6 +24,23 @@
   the lattice allows, front doors, rear doors on 4-door lattices, fenders as synthetic groups).
 - **Meshes**: `data/panels/meshes/<car>.json` for all 16 cars, 3.5k–4.6k tris, ~36 parts (one per
   region + glass, lights, mirrors, interior, underbody, wheels), skinned region-aware to the lattice.
+- **Hood crumple (playtest row 31)**: hood and trunk lids buckle. The lattice hood is a flat
+  3×5 node sheet that shortens and slides back in a frontal but never folds, so the mesh used to
+  slide back flat. The mesh now carries a fold binding (format 2: hinge→latch node chords +
+  per-vertex crease / rear-lift weights); the renderer turns each chord's lost length into a fold
+  height (inextensible tent, 1.5 cm dead zone, ≤ 0.3 m): a peak a little ahead of mid-hood with a
+  diagonal skew and a second crease toward the latch, plus a raised rear edge once the hood is
+  unlatched. 56 km/h full-width frontal (real sim, Rapier barrier): hood vertices move 0.33–0.48 m,
+  fold 0.22 m (debug_sedan, sentinel_cruiser); 40 km/h Arcade: 0.19 m / 0.16 m. A parked car's hood
+  is exactly flat.
+- **Lights (playtest rows 22, 31)**: head/tail lenses sit on the outer surface of the nose / tail
+  face (15 mm proud, facing out) and are skinned to the nearest bumper, hood/trunk, same-side
+  fender/quarter and frame nodes, so they crush and move with the bumper and hood. A lens breaks
+  (dark, no glow; stateless, so a repaired car gets it back) once the crush pushes it 5 cm or a
+  panel it is bound to hangs or falls off. They keep the shared head/tail materials, so headlight
+  and brake glow work. Root cause of "lights never show": the lens geometry had no normals and the
+  shared materials are not flat-shaded, so the lenses rendered black (glow included); they now
+  get normals. The lead's lamp markers are hidden on panel bodies (still on the debug box body).
 - **Browser**: `render/panels.ts` draws the parts (flat-shaded low-poly), dents follow the lattice,
   free panels swing rigidly about their hinge, detached panels fly off as visual debris, shattered
   glass disappears. Layer toggle **0** = "panel meshes / lattice view".
@@ -74,6 +91,8 @@
 | `apps/testbed-web/src/vehicle_view.ts` | create a `PanelBody`, parent its wheel parts under the wheel spin groups, show it instead of box/lamps/tires when layer `panels` is on | C's file |
 | `apps/testbed-web/src/settings.ts` | layer `panels` (key `0`; M is audio mute) | toggle |
 | `apps/testbed-web/src/main.ts` | `panelEvents(events)`, `stepDebris(dt)`, `clearDebris()` | glass shatter + debris |
+| `apps/testbed-web/src/vehicle_view.ts` (round 2, lead-authorised) | removed the lamp-marker relocation in `whenReady`; lamp markers show only with the debug box body (`bodyOn && !panelsOn`) | panel lenses carry the head/brake glow now |
+| `apps/simcli/scenarios/panels/frontal_56_hood.ron` + `golden/panels_frontal_56_hood` | new scenario (56 km/h full-width frontal, `panels_unlatched ≥ 1`), golden blessed (only this one) | hood buckle / headlight break browser check and shots |
 | `Cargo.toml` (workspace) | member `tools/assets` | new crate |
 
 ## Perf numbers
@@ -85,7 +104,7 @@ release; per car; ms/frame = 4 physics steps):
 | Idle car, panels attached vs none | cloud 4 vCPU | 0.51 vs 0.44 µs/step (0.002 ms/frame) | — | — |
 | 40 km/h side hit + 2 s swing (2.4 s avg), panels vs none | cloud 4 vCPU | 24.7 vs 17.9 µs/step (0.099 vs 0.072 ms/frame) | — | 0.25 ms/car (lattice) |
 | Swing only (3 panels swinging per car, lattice asleep) | cloud 4 vCPU | 2.7 µs/step (0.011 ms/frame) | — | 0.25 ms/car |
-| Panel mesh skinning in JS (≈3k vertices + `panel_states`, per car per frame) | cloud, headless Chromium (SwiftShader) | — | 0.21 ms | — |
+| Panel mesh skinning in JS (≈3k vertices + `panel_states`, per car per frame) | cloud, headless Chromium (SwiftShader) | — | 0.21 ms (round 2 with fold + light checks: 0.15–0.18 ms) | — |
 
 Panels add ~0.03 ms/frame per crashing car on top of the lattice and ~0.01 ms/frame per car with
 swinging panels; both inside the 0.25 ms/car lattice budget.
@@ -98,6 +117,9 @@ except **city chase** ("speeding violations in the feed" false) — it fails ide
 turned off in the presets, so it is pre-existing on current `main` (C / lead: please look).
 
 ## Known gaps
+- The hood/trunk fold is visual (renderer): the lattice nodes, hull collider and repair bill see
+  the crushed-but-flat hood. Lens breaking is visual too and per lens; the sim's
+  `HandlingEffects::lights_broken` (`Component::Lights`) is separate and not drawn yet.
 - A swinging panel is rigid: dents taken before it unlatched stay, new contacts push it about the
   hinge but no longer dent it.
 - Panel inertia/aero use estimated real panel sizes; the lattice door region is narrow, so the
@@ -115,3 +137,24 @@ New workstream. Do everything in `prompts/21_car_models_panels.md`.
 
 ## Lead feedback (2026-10-19, owner playtest)
 - Brake/head lights did not show: the panel meshes' `headlight`/`taillight` parts sit inside the body shell, so they are never visible. The lead keeps the old lamp markers on, placed at the panel body nose and tail (`vehicle_view.ts`). Please move the light parts onto the outer surface in `tools/assets` (slightly proud of the panel, facing out), and then the lead can drop the markers.
+
+## Round 2 (2026-10-19): owner playtest rows 22 + 31 (hood crumple, headlights)
+Done on `ws/panels`:
+- **Hood doesn't crumple** — diagnosed with `cargo run --release -p car-assets --example hood_probe`
+  (56 km/h barrier): skin binding was right (hood vertices bound to the 15 hood nodes) and the
+  hood nodes do take plastic set (5 kJ), but they move almost rigidly (back 0.23–0.34 m, up
+  0.15–0.20 m, only 0.11 m shorter): a flat node sheet does not buckle. The hinged-panel transform
+  keeps dents (rigid frame fit, dent in the panel frame). Fix: fold binding + renderer fold (above).
+- **Headlights stay in place** — lenses were 5 mm proud, skinned to the fender nodes (which sit
+  far behind the nose) and rendered black (no normals). Fixed as above; lead lamp markers removed
+  from panel bodies.
+- Tests (`tools/assets/tests/assets.rs`): `hood_buckles_in_a_56_kmh_frontal` (real sim run, hood
+  vertices ≥ 10 cm, fold ≥ 8–10 cm; 40 km/h Arcade ≥ 4 cm), `a_parked_car_has_a_flat_hood`,
+  `lights_sit_outside_the_shell` (every car: rays from outside at the centre and four corners of
+  each lens hit the lens first), `lights_move_with_the_front_and_rear_structure` (lens follows a
+  20 cm crush of its end exactly; the other side's fender does not drag it).
+- Browser (`node tools/assets/panels_shots.mjs`): 56 km/h frontal → hood disp ≥ 0.1 m, fold ≥ 0.08 m
+  (measured 0.48 / 0.22), both headlights broken; free drive braking → taillight lenses visible,
+  unbroken, red glow, no lamp markers.
+- Shots: `docs/media/panels/before_frontal_56_hood.png` → `frontal_56_hood_buckled.png`,
+  `before_brake_lights.png` (lead markers) → `brake_lights_on.png` (panel lenses).
