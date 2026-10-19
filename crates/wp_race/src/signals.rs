@@ -1,7 +1,7 @@
 //! Events `wp_race` emits for other systems (`wp_net` lobby/HUD, `wp_economy`, `wp_police`).
 //!
-//! These stay crate-local until contract v0.2.0 adds a typed `SimEvent::Race(RaceEvent)`
-//! (request R1 in `docs/integration/race.md`); the variants below are the proposed payload.
+//! [`RaceSignal`] carries the full judge results; [`RaceSignal::to_event`] reduces it to the
+//! contract `RaceEvent` for `SimEvent::Race` (v0.3.0, request R1).
 
 use serde::{Deserialize, Serialize};
 use wp_contracts::EntityId;
@@ -9,18 +9,8 @@ use wp_contracts::EntityId;
 use crate::kind::{CrewId, DistrictId, EventId, Legality, RaceKind, VenueId};
 use crate::result::{DnfReason, DqReason, RacerResult};
 
-/// Police presence requested for an event (`wp_police` maps it onto its dispatch tables).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum PolicePresence {
-    /// Police ignore the event (sanctioned, marshals on site).
-    None,
-    /// Normal patrol behaviour for the area and time.
-    Normal,
-    /// Elevated: extra patrols near the venue.
-    Elevated,
-    /// Maximum: illegal daytime races (`police_presence_override: max`).
-    Max,
-}
+/// Police presence requested for an event (contract type since v0.3.0).
+pub use wp_contracts::PolicePresence;
 
 /// Everything `wp_race` tells the rest of the game.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -136,4 +126,98 @@ pub enum RaceSignal {
         /// New controller.
         crew: Option<CrewId>,
     },
+}
+
+impl RaceSignal {
+    /// The contract event for `SimEvent::Race` (results reduced to `RaceResultRow`s).
+    pub fn to_event(&self) -> wp_contracts::RaceEvent {
+        use wp_contracts::RaceEvent as E;
+        match self.clone() {
+            RaceSignal::LobbyOpened {
+                event,
+                venue,
+                pos,
+                kind,
+                legality,
+                police,
+            } => E::LobbyOpened {
+                event,
+                venue,
+                pos,
+                kind,
+                legality,
+                police,
+            },
+            RaceSignal::Countdown { event, green_tick } => E::Countdown { event, green_tick },
+            RaceSignal::Green { event, tick } => E::Green { event, tick },
+            RaceSignal::CheckpointPassed {
+                event,
+                racer,
+                gate,
+                lap,
+                tick,
+            } => E::CheckpointPassed {
+                event,
+                racer,
+                gate,
+                lap,
+                tick,
+            },
+            RaceSignal::LapCompleted {
+                event,
+                racer,
+                lap,
+                lap_subticks,
+            } => E::LapCompleted {
+                event,
+                racer,
+                lap,
+                lap_subticks,
+            },
+            RaceSignal::LeadChanged { event, leader } => E::LeadChanged { event, leader },
+            RaceSignal::RacerFinished {
+                event,
+                racer,
+                elapsed_subticks,
+            } => E::RacerFinished {
+                event,
+                racer,
+                elapsed_subticks,
+            },
+            RaceSignal::RacerDnf {
+                event,
+                racer,
+                reason,
+            } => E::RacerDnf {
+                event,
+                racer,
+                reason,
+            },
+            RaceSignal::RacerDq {
+                event,
+                racer,
+                reason,
+            } => E::RacerDq {
+                event,
+                racer,
+                reason,
+            },
+            RaceSignal::RaceFinished { event, results } => E::RaceFinished {
+                event,
+                results: results.iter().map(Into::into).collect(),
+            },
+            RaceSignal::PatrolAttracted { venue, pos, heat } => {
+                E::PatrolAttracted { venue, pos, heat }
+            }
+            RaceSignal::TerritoryChanged { district, crew } => E::TerritoryChanged {
+                zone: district,
+                crew,
+            },
+        }
+    }
+
+    /// Wrap as `SimEvent::Race`.
+    pub fn to_sim_event(&self) -> wp_contracts::SimEvent {
+        wp_contracts::SimEvent::Race(self.to_event())
+    }
 }

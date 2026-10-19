@@ -125,6 +125,21 @@ fn sprint_faster_car_wins_and_signals_flow() {
     assert_eq!(kinds[1], "green");
     assert_eq!(kinds.iter().filter(|k| **k == "cp").count(), 10);
     assert_eq!(*kinds.last().unwrap(), "race");
+    // Contract v0.3.0: every signal converts to `SimEvent::Race`, results reduced to rows.
+    for sig in &out.signals {
+        let ev = sig.to_event();
+        assert!(matches!(sig.to_sim_event(), wp_contracts::SimEvent::Race(ref e) if *e == ev));
+    }
+    match out.signals.last().unwrap().to_event() {
+        wp_contracts::RaceEvent::RaceFinished { results, .. } => {
+            assert_eq!(results.len(), r.len());
+            for (row, full) in results.iter().zip(r) {
+                assert_eq!(*row, wp_contracts::RaceResultRow::from(full));
+                assert_eq!(row.position, full.position);
+            }
+        }
+        other => panic!("expected RaceFinished, got {other:?}"),
+    }
 }
 
 #[test]
