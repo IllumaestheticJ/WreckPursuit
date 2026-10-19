@@ -114,6 +114,15 @@ weigh 1.0, panels 0.6, bumpers 0.3, glass 0.1). `TotalLoss` when health <
 `total_loss_health` or cabin intrusion (worst non-pinned `Cabin` node) >
 `cabin_intrusion_total_loss_m`; with `engine_kill_on_total_loss` the engine dies.
 
+### Arcade cosmetic vs mechanical damage
+A crash episode (wake → sleep) whose contacts all close below
+`DamageTuning::arcade_mechanical_min_closing_mps` (11.5 m/s) is cosmetic in Arcade: nodes dent
+as usual, but component health/failures and alignment are frozen during it and its deformation
+becomes per-component offsets afterwards; only `arcade_cosmetic_health_share` (25 %) of its
+plastic energy counts toward health. After a hard episode, `arcade_settle_fraction` (30 %) of the
+lost handling of working components returns over `arcade_settle_s` (20 s). Simulation: every hit
+is mechanical, no settle. Gated on `ModeTable::mode` until `ModeTable` gets the fields.
+
 ### Repair estimate (`repair.rs`)
 Line per damaged region (severity = plastic energy / energy to strain all its beams by
 `region_replace_strain`; shattered glass = 1), per detached part (severity 1) and per

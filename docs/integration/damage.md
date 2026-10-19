@@ -66,6 +66,7 @@
 | 5 | `DamageSim::apply_repair(&mut self, items: &[RepairItem])` | Economy bills and repairs line items, not just "full reset". | 03, 08 | for v0.3.0 |
 | 6 | `DamageSummary` + `DamageSim::summary()` | Economy/police/HUD read health without the whole model. | 03, 08, 06, 04 | for v0.3.0 |
 | 7 | `BodyRegion::Accessory` (push bars, kits) | Mods and the cruiser push bar as detachable, billable parts. | 03, 08, 09, 04 | for v0.3.0 |
+| 8 | `ModeTable::{mechanical_min_closing_mps: f32, cosmetic_health_share: f32, settle_fraction: f32, settle_s: f32}` (Sim: 0, 1, 0, any; Arcade: 11.5, 0.25, 0.3, 20) | Owner playtest #10: Arcade light hits must be cosmetic; the knobs belong in `data/modes/*.toml`, not code. Today they are `DamageTuning::arcade_*` gated on `ModeTable::mode` | 03 (reads), lead (schema), 10 (tables) | requested |
 
 ### Final shapes for the v0.3.0 damage items (#4–#7)
 ```rust
@@ -359,3 +360,49 @@ For machine I (repeat of the run-2 request): `simcli::run::crush_depth` should u
 
 ## Lead note (2026-10-19): new machine R (panels)
 Machine R (`ws/panels`, prompt 21) owns `crates/wp_damage/src/panels.rs` (hinged panel swing / unlatch / hang states), `data/panels/`, `tools/assets/` and `apps/testbed-web/src/render/`. Expect small hooks from R in your files; coordinate through `docs/integration/panels.md`.
+
+## Owner playtest #10 — Arcade cosmetic vs mechanical damage (machine B, 2026-10-19)
+
+"The damage may be a little too aggressive in arcade mode — permanent damage after one hit."
+
+**What changed (Arcade only; Simulation is bit-identical — no Sim golden moved):**
+- A *crash episode* runs from the first contact that wakes the lattice until it sleeps again. If
+  no contact in it closes at ≥ **11.5 m/s (~41 km/h)** (before the car-to-car share), it is
+  **cosmetic**: the lattice dents (visible, collider follows, billed by `repair_estimate`), but
+  component health, failures, toe/camber, steer pull and rack ratio keep their pre-crash values
+  for good (the dent becomes a per-component cosmetic offset), and only 25 % of its plastic
+  energy counts toward global health. Any harder contact makes the episode mechanical exactly as
+  before. A later hard hit counts only its own intrusion on top of earlier dents.
+- **Limp-mode settle:** after a hard hit, 30 % of the lost health / alignment of components that
+  still work returns over 20 s (handling effects only; the bill and stored health do not change).
+  Never in Simulation.
+- `data/modes/arcade.toml`: `total_loss_health` 0.10 → **0.23** (still < Sim's 0.25). Arcade health
+  plateaus ≈ 0.22 after three 56 km/h hits (structure saturates, components degrade slowly at
+  `component_damage_scale` 0.6), so 0.10 was never reached; now the 4th hard hit ends the car.
+- Knobs: `DamageTuning::{arcade_mechanical_min_closing_mps, arcade_cosmetic_health_share,
+  arcade_settle_fraction, arcade_settle_s}` until contract request #8 moves them into `ModeTable`.
+  Snapshot gained `component_cosmetic`, `region_cosmetic_j`, `since_hard_hit_s`; repairs clear
+  the offsets of what they fix.
+
+**Before → after** (barrier harness, debug_sedan, Arcade, 1400 kg / rigid wall as in
+`crates/wp_damage/scenarios`; pull = |steer_pull|, toe = max |toe_delta| rad, grip = min grip_scale):
+
+| Hit | health | rack ratio | pull | toe | grip | power | failed | crush (unchanged) |
+|---|---|---|---|---|---|---|---|---|
+| Frontal 25 km/h | 0.952 → **0.989** | 0.995 → **1** | 0.001 → **0** | 0 → 0 | 0.997 → **1** | 0.992 → **1** | 0 | 0.05 m |
+| Frontal 40 km/h | 0.867 → **0.968** | 0.985 → **1** | 0.003 → **0** | 0 → 0 | 0.993 → **1** | 0.986 → **1** | 0 | 0.17 m |
+| Frontal 56 km/h (hard) | 0.761 → 0.761 | 0.984 | 0.004 | 0.021 | 0.986 | 0.968 | 1 | 0.34 m |
+| Side 25 km/h | 0.966 → **0.995** | 0.957 → **1** | 0.009 → **0** | 0.060 → **0** | 0.953 → **1** | 0.959 → **1** | 0 | 0.04 m |
+| Side 40 km/h | 0.916 → **0.985** | 0.945 → **1** | 0.012 → **0** | 0.134 → **0** | 0.908 → **1** | 0.945 → **1** | 0 | 0.10 m |
+| Offset 40 km/h | 0.874 → **0.970** | 0.983 → **1** | 0.004 → **0** | 0.006 → **0** | 0.985 → **1** | 0.977 → **1** | 0 | 0.30 m |
+
+Side swipe (simcli `audio_sideswipe_scrape`, Arcade): health 0.994 / 0.995 → 0.999 / 1.000, no
+handling effects. `golden_tbone` (50 km/h, a hard hit): victim 0.846 → 0.850, crush 0.169 m and
+1 failed component unchanged. Several hits: 56 km/h frontal → side → rear → offset gives health
+0.76 → 0.41 → 0.24 → 0.22 = TotalLoss on the 4th; twelve 30 km/h hits leave health > 0.7 and
+no handling effects. Simulation rows unchanged (e.g. Sim frontal 25: health 0.87, rack 0.98).
+
+Tests: `arcade_light_and_medium_hits_are_cosmetic`, `arcade_hard_hits_degrade_and_several_end_the_car`,
+`arcade_many_light_hits_never_end_the_car`, `arcade_limp_mode_settles_partially_and_sim_does_not`,
+`cosmetic_state_survives_save_restore_and_repair_clears_it`. Goldens: 12 Arcade scenarios
+re-blessed in `[bless]` commit 10ae2b6 (numbers in its message); all expectations pass.
