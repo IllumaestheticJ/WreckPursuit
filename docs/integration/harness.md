@@ -177,6 +177,11 @@ Checks: `cargo fmt`, `cargo clippy --workspace -D warnings`, `cargo test --works
   (`police_heat: 15`, L1). Pursuit starts at 6.7 s, no damage. All 12 nearby lane/speed/start
   variants pursue in 5–9 s. Without starting heat a clean pass is never recognised at
   night: heat only builds once the patrol has witnessed the speeding.
+- **Debug test time.** After run 5, `cargo test -p simcli` passed the 1 h mark: the three
+  `opponent/` races (90–330 s in a full city, now with physical police and traffic) take
+  190–300+ s each in a debug build, and the suite runs each scenario about 5 times. New
+  scenario flag `slow: true`: debug `cargo test` skips it, like `soak/`. I set it on the three
+  opponent scenarios (one line each, for workstream 17). The release CI jobs still run them.
 - **For the lead (run-5 police driver):** unit 1 (starts at (55, −21) on the x = 55 collector)
   drives a slow circle about 14 m across at 3.8 m/s around (40, −17) for 12+ s instead of
   patrolling (`examples/probe_police.rs` on `golden_city_chase` with the racer moved away shows
