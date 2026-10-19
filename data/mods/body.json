@@ -1,0 +1,17 @@
+{
+  "id": "body",
+  "mods": [
+    {"id": "body_front_lip", "name": "Front Lip", "slot": "BodyFront", "line": "front_kit", "tier": 1, "price": 700, "effects": [{"Cosmetic": {"kind": "BodyKitFront", "value": "lip_a"}}], "tradeoff": "Cosmetic; tears off in front hits."},
+    {"id": "body_front_widebody", "name": "Widebody Front Bumper", "slot": "BodyFront", "line": "front_kit", "tier": 2, "price": 2500, "effects": [{"Cosmetic": {"kind": "BodyKitFront", "value": "wide_a"}}], "tradeoff": "Cosmetic; tears off in front hits."},
+    {"id": "body_front_aggressive", "name": "Aggressive Front Bumper", "slot": "BodyFront", "line": "front_kit", "tier": 3, "price": 1600, "effects": [{"Cosmetic": {"kind": "BodyKitFront", "value": "aggro_a"}}], "tradeoff": "Cosmetic; tears off in front hits."},
+    {"id": "body_light_covers", "name": "Smoked Light Covers", "slot": "BodyFront", "line": "lights", "tier": 1, "price": 300, "effects": [{"Cosmetic": {"kind": "Lights", "value": "smoked"}}], "tradeoff": "Cosmetic."},
+    {"id": "body_side_skirts", "name": "Side Skirts", "slot": "BodySides", "line": "side_kit", "tier": 1, "price": 600, "effects": [{"Cosmetic": {"kind": "BodyKitSide", "value": "skirt_a"}}], "tradeoff": "Cosmetic; scraped off by kerbs and side hits."},
+    {"id": "body_side_widebody", "name": "Widebody Arches", "slot": "BodySides", "line": "side_kit", "tier": 2, "price": 2200, "requires": ["body_front_widebody"], "effects": [{"Cosmetic": {"kind": "BodyKitSide", "value": "wide_a"}}], "tradeoff": "Cosmetic; needs the widebody front."},
+    {"id": "body_rear_bumper", "name": "Sport Rear Bumper", "slot": "BodyRear", "line": "rear_kit", "tier": 1, "price": 650, "effects": [{"Cosmetic": {"kind": "BodyKitRear", "value": "rear_a"}}], "tradeoff": "Cosmetic; tears off in rear hits."},
+    {"id": "body_rear_widebody", "name": "Widebody Rear Bumper", "slot": "BodyRear", "line": "rear_kit", "tier": 2, "price": 1900, "requires": ["body_side_widebody"], "effects": [{"Cosmetic": {"kind": "BodyKitRear", "value": "wide_a"}}], "tradeoff": "Cosmetic; needs the widebody arches."},
+    {"id": "body_hood_vented", "name": "Vented Hood", "slot": "Hood", "line": "hood_style", "tier": 1, "price": 900, "effects": [{"Cosmetic": {"kind": "HoodStyle", "value": "vented"}}], "tradeoff": "Cosmetic."},
+    {"id": "body_hood_scoop", "name": "Scooped Hood", "slot": "Hood", "line": "hood_style", "tier": 2, "price": 1100, "effects": [{"Cosmetic": {"kind": "HoodStyle", "value": "scoop"}}], "tradeoff": "Cosmetic."},
+    {"id": "body_roof_scoop", "name": "Roof Scoop", "slot": "Roof", "line": "roof_style", "tier": 1, "price": 500, "effects": [{"Cosmetic": {"kind": "RoofStyle", "value": "scoop"}}], "tradeoff": "Cosmetic."},
+    {"id": "body_roof_rack", "name": "Roof Rack", "slot": "Roof", "line": "roof_style", "tier": 2, "price": 400, "effects": [{"Cosmetic": {"kind": "RoofStyle", "value": "rack"}}], "tradeoff": "Cosmetic."}
+  ]
+}

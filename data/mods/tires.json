@@ -1,0 +1,11 @@
+{
+  "id": "tires",
+  "mods": [
+    {"id": "tires_sport", "name": "Sport Tires", "slot": "Tires", "line": "compound", "tier": 1, "price": 1000, "effects": [{"Vehicle": {"param": "wheels.tire_id", "op": "Set", "value": "sport"}}], "tradeoff": "Wear faster (flavour)."},
+    {"id": "tires_semi_slick", "name": "Semi-slick Tires", "slot": "Tires", "line": "compound", "tier": 2, "price": 2400, "effects": [{"Vehicle": {"param": "wheels.tire_id", "op": "Set", "value": "semi_slick"}}], "tradeoff": "Poor in the wet and cold."},
+    {"id": "tires_drag_radial", "name": "Drag Radials", "slot": "Tires", "line": "compound", "tier": 3, "price": 1600, "effects": [{"Vehicle": {"param": "wheels.tire_id", "op": "Set", "value": "drag_radial"}}], "tradeoff": "Great launch traction, vague lateral grip."},
+    {"id": "tires_all_terrain", "name": "All-terrain Tires", "slot": "Tires", "line": "compound", "tier": 4, "price": 900, "class_whitelist": ["Truck", "Beater", "Compact", "PoliceSuv"], "effects": [{"Vehicle": {"param": "wheels.tire_id", "op": "Set", "value": "all_terrain"}}], "tradeoff": "Less grip on tarmac."},
+    {"id": "tires_wide", "name": "Wider Tires", "slot": "Tires", "line": "width", "tier": 1, "price": 800, "effects": [{"Vehicle": {"param": "wheels.width_m", "op": "Add", "value": 0.02}}, {"Vehicle": {"param": "body.drag_scale", "op": "Mul", "value": 1.01}}], "tradeoff": "Slightly more drag."},
+    {"id": "tires_runflat", "name": "Run-flat Inserts", "slot": "Tires", "line": "runflat", "tier": 1, "price": 1400, "effects": [{"Tool": {"kind": "RunFlat", "tier": 1}}, {"Vehicle": {"param": "wheels.mass_kg", "op": "Add", "value": 1.5}}], "tradeoff": "+1.5 kg unsprung per corner."}
+  ]
+}

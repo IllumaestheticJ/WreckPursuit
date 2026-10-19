@@ -1,0 +1,10 @@
+{
+  "id": "brakes",
+  "mods": [
+    {"id": "brakes_pads_1", "name": "Performance Pads", "slot": "Brakes", "line": "pads", "tier": 1, "price": 500, "effects": [{"Vehicle": {"param": "brakes.torque_scale", "op": "Mul", "value": 1.12}}], "tradeoff": "Squeal and dust (flavour)."},
+    {"id": "brakes_kit_1", "name": "Big Brake Kit", "slot": "Brakes", "line": "brake_kit", "tier": 1, "price": 2200, "effects": [{"Vehicle": {"param": "brakes.torque_scale", "op": "Mul", "value": 1.25}}, {"Vehicle": {"param": "wheels.mass_kg", "op": "Add", "value": 1.0}}], "tradeoff": "+1 kg unsprung per corner."},
+    {"id": "brakes_kit_2", "name": "Race Brake Kit", "slot": "Brakes", "line": "brake_kit", "tier": 2, "price": 4800, "requires": ["brakes_pads_1"], "effects": [{"Vehicle": {"param": "brakes.torque_scale", "op": "Mul", "value": 1.45}}, {"Vehicle": {"param": "wheels.mass_kg", "op": "Add", "value": 1.5}}], "tradeoff": "+1.5 kg unsprung per corner; needs performance pads."},
+    {"id": "brakes_bias_valve", "name": "Brake Bias Valve", "slot": "Brakes", "line": "bias", "tier": 1, "price": 350, "effects": [{"Vehicle": {"param": "brakes.bias_front", "op": "Set", "value": 0.6}}], "tradeoff": "Rear locks earlier under hard braking."},
+    {"id": "brakes_hydro_handbrake", "name": "Hydraulic Handbrake", "slot": "Brakes", "line": "handbrake", "tier": 1, "price": 400, "effects": [{"Vehicle": {"param": "brakes.handbrake_scale", "op": "Mul", "value": 1.6}}], "tradeoff": "Easy to spin when used at speed."}
+  ]
+}

@@ -1,0 +1,148 @@
+# Repair, towing, scrap and insurance prices. Owned by workstream 08 (economy).
+# Consumed by wp_economy::Economy::price_table (-> wp_contracts::PriceTable for wp_damage) and
+# by repair billing. All money in whole in-game currency units.
+#
+# Parts cost of a region / component = reference cost below × class.parts_scale × value factor,
+# value factor = clamp(car value / class.reference_value, value_factor_clamp).
+# Labour = labour_hours_per_item × severity × class.labour_per_hour × district × shop markup.
+# The bill is then × the damage mode's repair_cost_scale (data/modes: Sim 1.0, Arcade 0.5).
+#
+# Feel target: a fully wrecked car (every line at severity 1) costs ~2× its value in
+# Simulation (>= 60% is the hard floor, checked by tests); a bumper scrape costs less than a
+# buy-in; a medium front-end hit costs about one race win in Simulation (half in Arcade).
+
+labour_hours_per_item = 2.0
+value_factor_clamp = [0.4, 2.5]
+
+# Parts cost on the reference Compact (value 18 000).
+[region_parts]
+FrontBumper = 450
+Hood = 600
+FrontLeftFender = 380
+FrontRightFender = 380
+LeftDoorF = 700
+LeftDoorR = 650
+RightDoorF = 700
+RightDoorR = 650
+Roof = 1200
+RearLeftQuarter = 900
+RearRightQuarter = 900
+Trunk = 550
+RearBumper = 420
+Windshield = 450
+RearGlass = 300
+FrameFront = 1600
+FrameRear = 1300
+FrameLeft = 1100
+FrameRight = 1100
+Cabin = 2500
+
+[component_parts]
+Engine = 3800
+Radiator = 450
+Battery = 180
+FuelTank = 400
+SteeringRack = 650
+SuspensionFL = 420
+SuspensionFR = 420
+SuspensionRL = 420
+SuspensionRR = 420
+WheelFL = 260
+WheelFR = 260
+WheelRL = 260
+WheelRR = 260
+Gearbox = 2200
+Driveshaft = 500
+BrakeFL = 180
+BrakeFR = 180
+BrakeRL = 180
+BrakeRR = 180
+Exhaust = 450
+Lights = 400
+
+# reference_value: typical car value in the class (parts scale with value / this).
+[class.Beater]
+reference_value = 4000
+parts_scale = 0.35
+labour_per_hour = 55
+towing = 120
+
+[class.Compact]
+reference_value = 18000
+parts_scale = 1.0
+labour_per_hour = 85
+towing = 150
+
+[class.Sport]
+reference_value = 40000
+parts_scale = 1.9
+labour_per_hour = 110
+towing = 200
+
+[class.Muscle]
+reference_value = 34000
+parts_scale = 1.7
+labour_per_hour = 95
+towing = 220
+
+[class.Exotic]
+reference_value = 160000
+parts_scale = 7.0
+labour_per_hour = 180
+towing = 450
+
+[class.Truck]
+reference_value = 30000
+parts_scale = 1.5
+labour_per_hour = 90
+towing = 300
+
+[class.PoliceCruiser]
+reference_value = 32000
+parts_scale = 1.4
+labour_per_hour = 90
+towing = 200
+
+[class.PoliceInterceptor]
+reference_value = 55000
+parts_scale = 2.4
+labour_per_hour = 110
+towing = 220
+
+[class.PoliceSuv]
+reference_value = 45000
+parts_scale = 2.0
+labour_per_hour = 100
+towing = 280
+
+# Labour multiplier by district (prompt 05 district ids; unknown ids use "default").
+[district_labour]
+default = 1.0
+Core = 1.25
+Suburb = 1.0
+Industrial = 0.85
+Docks = 0.8
+Hills = 1.1
+
+[shop]
+crooked_markup = 1.15          # crooked shop, car not wanted
+crooked_wanted_markup = 1.6    # crooked shop, wanted car: no questions asked, pay for it
+legit_reports_at = "L2"        # legit shops call it in at wanted level 2+
+
+# Salvage = base × (min_frac + health_frac × health) + mods_frac × installed mods price.
+[scrap]
+min_frac = 0.08
+health_frac = 0.32
+mods_frac = 0.3
+
+# Insurance: premium per day as a fraction of car value; covers `coverage` of the bill after
+# the deductible. Voided when captured while wanted; damage sustained while wanted is not paid.
+[insurance.basic]
+premium_per_day_frac = 0.0025
+coverage = 0.5
+deductible = 500
+
+[insurance.full]
+premium_per_day_frac = 0.005
+coverage = 0.8
+deductible = 250

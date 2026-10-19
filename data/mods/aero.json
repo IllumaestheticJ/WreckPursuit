@@ -1,0 +1,10 @@
+{
+  "id": "aero",
+  "mods": [
+    {"id": "aero_splitter", "name": "Front Splitter", "slot": "Aero", "line": "front_aero", "tier": 1, "price": 1200, "effects": [{"Vehicle": {"param": "aero.downforce_front", "op": "Add", "value": 0.12}}, {"Vehicle": {"param": "body.drag_scale", "op": "Mul", "value": 1.02}}], "tradeoff": "Scrapes on ramps; slight drag."},
+    {"id": "aero_lowdrag", "name": "Low-drag Front Kit", "slot": "Aero", "line": "front_aero", "tier": 2, "price": 1800, "effects": [{"Vehicle": {"param": "body.drag_scale", "op": "Mul", "value": 0.93}}, {"Vehicle": {"param": "aero.downforce_front", "op": "Add", "value": -0.05}}], "tradeoff": "Less front grip at speed."},
+    {"id": "aero_wing_1", "name": "Street Wing", "slot": "Aero", "line": "rear_aero", "tier": 1, "price": 1500, "effects": [{"Vehicle": {"param": "aero.downforce_rear", "op": "Add", "value": 0.25}}, {"Vehicle": {"param": "body.drag_scale", "op": "Mul", "value": 1.05}}, {"Vehicle": {"param": "body.mass_kg", "op": "Add", "value": 4.0}}], "tradeoff": "Drag costs top speed."},
+    {"id": "aero_wing_2", "name": "GT Wing", "slot": "Aero", "line": "rear_aero", "tier": 2, "price": 3500, "requires": ["aero_splitter"], "effects": [{"Vehicle": {"param": "aero.downforce_rear", "op": "Add", "value": 0.45}}, {"Vehicle": {"param": "body.drag_scale", "op": "Mul", "value": 1.09}}, {"Vehicle": {"param": "body.mass_kg", "op": "Add", "value": 6.0}}], "tradeoff": "Big drag hit; needs the splitter to balance."},
+    {"id": "aero_diffuser", "name": "Rear Diffuser", "slot": "Aero", "line": "diffuser", "tier": 1, "price": 2000, "effects": [{"Vehicle": {"param": "aero.downforce_rear", "op": "Add", "value": 0.1}}, {"Vehicle": {"param": "body.drag_scale", "op": "Mul", "value": 0.99}}], "tradeoff": "Fragile; first thing to go in a rear hit (flavour)."}
+  ]
+}

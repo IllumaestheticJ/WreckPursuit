@@ -1,0 +1,8 @@
+{
+  "id": "interior",
+  "mods": [
+    {"id": "interior_bucket_seats", "name": "Bucket Seats", "slot": "Interior", "line": "seats", "tier": 1, "price": 900, "effects": [{"Vehicle": {"param": "body.mass_kg", "op": "Add", "value": -12.0}}], "tradeoff": "Harder to get in and out (flavour)."},
+    {"id": "interior_tint", "name": "Window Tint", "slot": "Interior", "line": "tint", "tier": 1, "price": 250, "effects": [{"Cosmetic": {"kind": "WindowTint", "value": "dark"}}], "tradeoff": "Cosmetic."},
+    {"id": "interior_trim", "name": "Custom Interior Trim", "slot": "Interior", "line": "trim", "tier": 1, "price": 600, "effects": [{"Cosmetic": {"kind": "Interior", "value": "suede_look"}}], "tradeoff": "Cosmetic."}
+  ]
+}
