@@ -404,7 +404,6 @@ fn key_for(region: BodyRegion, kind: PartKind) -> Key {
             name.push_str("_glass");
             MaterialSlot::Glass
         }
-        (BodyRegion::FrameLeft | BodyRegion::FrameRight, _) => MaterialSlot::Trim,
         _ => material_of(kind),
     };
     (name, Some(region), kind, material)

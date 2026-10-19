@@ -340,6 +340,9 @@ struct PanelRt {
     hang_pivot: u32,
     /// Kinematic nodes and their offsets from the pivot at `angle = 0`.
     moving: Vec<(u32, V3)>,
+    /// Angle at which `moving` offsets were captured (Unlatched: the dented pose measured
+    /// from the rest closed pose; HangingByOne: 0).
+    capture_angle: f32,
     /// Unit axis at capture (sign chosen so `+angle` opens).
     axis: V3,
     /// Pivot at the last placement.
@@ -365,6 +368,8 @@ const AIR_DENSITY: f32 = 1.2;
 const PANEL_CD: f32 = 1.1;
 /// Angular speed a freshly unlatched panel pops open with, rad/s.
 const UNLATCH_KICK_RAD_S: f32 = 0.8;
+/// Closed stop of an unlatched panel, rad.
+const AJAR_RAD: f32 = 0.03;
 /// Largest hinge speed a contact can push a panel to, rad/s.
 const MAX_PUSH_RAD_S: f32 = 10.0;
 /// Nodes this close to the hinge line stay lattice nodes (they are on the axis), m.
@@ -440,6 +445,7 @@ impl DamageModel {
                 state: PanelState::Attached,
                 angle: 0.0,
                 omega: 0.0,
+                capture_angle: 0.0,
                 hinge_line: Vec::new(),
                 hang_pivot: 0,
                 moving: Vec::new(),
@@ -774,22 +780,39 @@ impl DamageModel {
         if moving.is_empty() {
             return;
         }
-        let com = moving
-            .iter()
-            .fold([0.0; 3], |a, m| vec3::add(a, perp(m.1, u0)));
-        let com_dir = vec3::normalize(com).unwrap_or([0.0, 1.0, 0.0]);
+        // Angles are measured from the undamaged closed pose (rest positions), so a door
+        // dented inward before its latch popped still has its centre of mass outboard of the
+        // hinge line and opens under braking like any other.
+        let rp0 = self.rest_pos[h0];
+        let ru = vec3::normalize(vec3::sub(self.rest_pos[h1], rp0)).unwrap_or(u0);
+        let com_rest = moving.iter().fold([0.0; 3], |a, m| {
+            vec3::add(a, perp(vec3::sub(self.rest_pos[m.0 as usize], rp0), ru))
+        });
+        let com_dir = vec3::normalize(perp(com_rest, u0)).unwrap_or([0.0, 1.0, 0.0]);
         // +angle must move the panel toward its opening direction.
         let axis = if vec3::dot(vec3_cross(u0, com_dir), def.open_dir) >= 0.0 {
             u0
         } else {
             vec3::scale(u0, -1.0)
         };
+        // Current (dented) pose relative to that closed pose.
+        let com_now = moving
+            .iter()
+            .fold([0.0; 3], |a, m| vec3::add(a, perp(m.1, u0)));
+        let capture = match vec3::normalize(com_now) {
+            Some(d) => wp_math::atan2(
+                vec3::dot(vec3_cross(com_dir, d), axis),
+                vec3::dot(com_dir, d),
+            ),
+            None => 0.0,
+        };
         let moving_ids: Vec<u32> = moving.iter().map(|m| m.0).collect();
         self.free_nodes(&moving_ids, &hinge_line);
         let set = self.panels.as_mut().expect("panels");
         let p = &mut set.panels[k];
         p.state = PanelState::Unlatched;
-        p.angle = 0.0;
+        p.capture_angle = capture;
+        p.angle = capture.clamp(AJAR_RAD, def.max_angle_rad);
         p.omega = UNLATCH_KICK_RAD_S;
         p.hinge_line = hinge_line;
         p.moving = moving;
@@ -851,6 +874,7 @@ impl DamageModel {
         let p = &mut set.panels[k];
         p.state = PanelState::HangingByOne;
         p.angle = 0.0;
+        p.capture_angle = 0.0;
         // Keep the swing speed about the old axis as far as it projects on the new one.
         p.omega *= vec3::dot(p.axis, axis);
         p.hang_pivot = pivot;
@@ -905,7 +929,9 @@ impl DamageModel {
         }
         let inertia = (p.def.mass_kg * p.def.gyration_m * p.def.gyration_m).max(1e-3);
         let (lo, hi) = match p.state {
-            PanelState::Unlatched => (0.0, p.def.max_angle_rad),
+            // With the latch gone the panel rests a little ajar, never exactly flush (where
+            // a load along the panel would have no lever at all).
+            PanelState::Unlatched => (AJAR_RAD, p.def.max_angle_rad),
             _ => (-p.def.hang_limit_rad, p.def.hang_limit_rad),
         };
         let lever = p.def.lever_m;
@@ -948,7 +974,7 @@ impl DamageModel {
         if slam > 0.1 * p.def.hinge_break_impulse_ns {
             p.hinge_load_ns += slam;
         }
-        let (s, c) = wp_math::sin_cos(p.angle);
+        let (s, c) = wp_math::sin_cos(p.angle - p.capture_angle);
         let (pivot, axis, omega) = (p.pivot, p.axis, p.omega);
         for &(i, q) in &p.moving {
             let r = rotate(q, axis, s, c);

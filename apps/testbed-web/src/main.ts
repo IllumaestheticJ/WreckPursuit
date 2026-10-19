@@ -10,6 +10,7 @@ import { installKeyboard, readInput, toggleHeadlights, type InputSource } from "
 import { layers, store, bytesToBase64, base64ToBytes } from "./settings";
 import { SceneView } from "./scene";
 import { VehicleView } from "./vehicle_view";
+import { clearDebris, panelEvents, stepDebris } from "./render/panels";
 import { CameraRig, CAMERA_MODES, type CameraMode } from "./cameras";
 import { Hud } from "./hud";
 import { TelemetryPlots } from "./telemetry";
@@ -76,6 +77,7 @@ async function main(): Promise<void> {
   const rebuildViews = () => {
     for (const v of app.views.values()) v.dispose();
     app.views.clear();
+    clearDebris();
     regions.clear();
     rests.clear();
     scene.clearContacts();
@@ -425,6 +427,8 @@ async function main(): Promise<void> {
     }
     const events = sim.eventsDrain();
     scene.addEvents(events);
+    panelEvents(events);
+    stepDebris(app.paused && !replay ? 0 : dt);
     hud.pushEvents(events, sim.worldInfo()[W.tick]);
     {
       const w = sim.worldInfo();

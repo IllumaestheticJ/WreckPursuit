@@ -11,9 +11,25 @@ fn main() {
         root: car_assets::repo_root().join("data"),
     };
     let opts = simcli::RunOptions::default();
+    let trace = std::env::var("TRACE").is_ok();
     let mut last: BTreeMap<(u32, usize), (wp_damage::PanelState, f32)> = BTreeMap::new();
     let mut hook = |v: &simcli::TickView| -> Result<(), String> {
         let t = v.sim.tick() as f32 * wp_contracts::PHYSICS_DT;
+        // TRACE=1: every free panel's angle each 0.1 s.
+        if trace && v.sim.tick() % 24 == 0 {
+            for (i, veh) in v.sim.vehicles().iter().enumerate() {
+                for p in veh.damage.panel_states() {
+                    if p.state != wp_damage::PanelState::Attached
+                        && p.state != wp_damage::PanelState::Detached
+                    {
+                        println!(
+                            "  t={t:5.2} {:8} {:?} {:.2}",
+                            v.names[i], p.region, p.angle_rad
+                        );
+                    }
+                }
+            }
+        }
         for (i, veh) in v.sim.vehicles().iter().enumerate() {
             for (k, p) in veh.damage.panel_states().iter().enumerate() {
                 let e = last

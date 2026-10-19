@@ -11,6 +11,7 @@ export interface LayerDef {
 
 export const LAYERS: LayerDef[] = [
   { id: "body", key: "KeyB", label: "body box / skinned body", default: true },
+  { id: "panels", key: "Digit0", label: "panel meshes / lattice view (car models, workstream R)", default: true },
   { id: "lattice", key: "KeyL", label: "lattice wireframe", default: false },
   { id: "stress", key: "KeyH", label: "lattice stress heat-map", default: false },
   { id: "tireForces", key: "KeyT", label: "tire force arrows (applied Fx/Fy)", default: true },
