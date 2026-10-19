@@ -6,7 +6,7 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let car = args.get(1).cloned().unwrap_or("debug_sedan".into());
     let kmh: f32 = args.get(2).map_or(56.0, |s| s.parse().unwrap());
-    let panels = args.get(3).map_or(true, |s| s != "0");
+    let panels = args.get(3).is_none_or(|s| s != "0");
     let ron = format!(
         "(name: \"hood_probe\", seed: 7, mode: Simulation, assists: ai, panels: {panels},
           barriers: [(pos: (0.0, 8.0, 0.75), size: (6.0, 1.0, 1.5))],
