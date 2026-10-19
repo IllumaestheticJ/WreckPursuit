@@ -267,8 +267,11 @@ for (const [hour, label] of [
   await page.evaluate(() => (document.getElementById("overlay").style.visibility = ""));
   check(changed > 0, `signal lamps change over time and match the sim (${changed} heads changed)`);
   await page.keyboard.press("Digit6");
-  await page.waitForTimeout(200);
-  const hidden = await page.evaluate(() => !window.__wp.scene.signals.group.visible);
+  // Software GL frames take a few hundred ms: wait for the next frame to apply the toggle.
+  const hidden = await page
+    .waitForFunction(() => !window.__wp.scene.signals.group.visible, null, { timeout: 10000 })
+    .then(() => true)
+    .catch(() => false);
   await page.keyboard.press("Digit6");
   const help = await page.evaluate(() => document.querySelector(".help")?.textContent ?? "");
   check(hidden && help.includes("traffic signals"), "6 hides the signals layer; F1 help lists it");
