@@ -89,14 +89,20 @@ impl Sim {
             let _ = self.despawn_vehicle(id);
         }
 
-        if let Some(car) = self.police_car.clone() {
-            let wanted: Vec<(UnitId, [f32; 2], [f32; 2], f32)> = self
-                .police
-                .units()
-                .iter()
-                .filter(|u| u.kind == UnitKind::Car && u.player.is_none() && u.entity.is_none())
-                .map(|u| (u.id, u.body.pos, u.body.heading, u.body.speed))
-                .collect();
+        let wanted: Vec<(UnitId, [f32; 2], [f32; 2], f32)> = self
+            .police
+            .units()
+            .iter()
+            .filter(|u| u.kind == UnitKind::Car && u.player.is_none() && u.entity.is_none())
+            .map(|u| (u.id, u.body.pos, u.body.heading, u.body.speed))
+            .collect();
+        // Clone the car model (lattice and all) only when a unit actually needs a body.
+        let car = if wanted.is_empty() {
+            None
+        } else {
+            self.police_car.clone()
+        };
+        if let Some(car) = car {
             for (unit, pos, heading, speed) in wanted {
                 if self.vehicles.len() + POLICE_SLOT_RESERVE >= MAX_VEHICLES {
                     break;

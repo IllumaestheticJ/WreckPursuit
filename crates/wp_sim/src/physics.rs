@@ -41,6 +41,24 @@ pub struct CityColliders {
 /// floor for anything that falls through the world).
 pub const SAFETY_FLOOR_Z: f32 = -60.0;
 
+/// Collision group of the terrain heightfield tiles and the safety floor (cities with
+/// terrain). Resting props leave it out of their filter (see `Sim::set_world`).
+pub const TERRAIN_GROUP: Group = Group::GROUP_2;
+
+/// Interaction groups of terrain colliders.
+pub fn terrain_groups() -> InteractionGroups {
+    InteractionGroups::new(TERRAIN_GROUP, Group::ALL, InteractionTestMode::And)
+}
+
+/// Interaction groups of a resting prop: everything but the terrain (it sits on the road mesh).
+pub fn resting_prop_groups() -> InteractionGroups {
+    InteractionGroups::new(
+        Group::ALL,
+        Group::ALL.difference(TERRAIN_GROUP),
+        InteractionTestMode::And,
+    )
+}
+
 impl PhysicsWorld {
     /// New world with a static ground slab whose top face is the plane z = 0.
     pub fn new() -> Self {
@@ -89,41 +107,81 @@ impl PhysicsWorld {
         let hz = wp_vehicle::rig::GROUND_HALF_EXTENTS[2];
         if let Some(c) = self.colliders.get_mut(self.ground) {
             c.set_translation(Vector::new(0.0, 0.0, SAFETY_FLOOR_Z - hz));
+            c.set_collision_groups(terrain_groups());
         }
         added.push(self.ground);
 
-        // Terrain: parry heightfields are Y-up (rows along local z, columns along local x);
-        // rotating +90° about X maps local y → world z and local z → world −y, so row r is the
-        // world row j = ny − 1 − r.
-        let (nx, ny) = (t.nx as usize, t.ny as usize);
-        let mut heights = rapier3d::parry::utils::Array2::zeros(ny, nx);
-        for r in 0..ny {
-            for c in 0..nx {
-                heights[(r, c)] = t.at(c as u32, (ny - 1 - r) as u32);
-            }
-        }
-        let (sx, sy) = ((nx - 1) as f32 * t.cell_m, (ny - 1) as f32 * t.cell_m);
+        // Terrain, in tiles of TILE_CELLS × TILE_CELLS cells (neighbours share their edge
+        // vertices) so a body only pairs with the ground around it. Parry heightfields are Y-up
+        // (rows along local z, columns along local x); rotating +90° about X maps local y →
+        // world z and local z → world −y, so tile row r is the world row j1 − r.
+        const TILE_CELLS: u32 = 64;
         let half = core::f32::consts::FRAC_1_SQRT_2;
-        let pose = Pose::from_parts(
-            Vector::new(t.origin[0] + sx * 0.5, t.origin[1] + sy * 0.5, 0.0),
-            rapier3d::math::Rotation::from_xyzw(half, 0.0, 0.0, half),
-        );
-        let hf = ColliderBuilder::heightfield(heights, Vector::new(sx, 1.0, sy))
-            .position(pose)
-            .build();
-        added.push(self.colliders.insert(hf));
-        out.terrain_vertices = nx * ny;
+        let mut j0 = 0;
+        while j0 + 1 < t.ny {
+            let j1 = (j0 + TILE_CELLS).min(t.ny - 1);
+            let mut i0 = 0;
+            while i0 + 1 < t.nx {
+                let i1 = (i0 + TILE_CELLS).min(t.nx - 1);
+                let (nc, nr) = ((i1 - i0 + 1) as usize, (j1 - j0 + 1) as usize);
+                let mut heights = rapier3d::parry::utils::Array2::zeros(nr, nc);
+                for r in 0..nr {
+                    for c in 0..nc {
+                        heights[(r, c)] = t.at(i0 + c as u32, j1 - r as u32);
+                    }
+                }
+                let (sx, sy) = ((nc - 1) as f32 * t.cell_m, (nr - 1) as f32 * t.cell_m);
+                let lo = t.vertex_pos(i0, j0);
+                let pose = Pose::from_parts(
+                    Vector::new(lo[0] + sx * 0.5, lo[1] + sy * 0.5, 0.0),
+                    rapier3d::math::Rotation::from_xyzw(half, 0.0, 0.0, half),
+                );
+                let hf = ColliderBuilder::heightfield(heights, Vector::new(sx, 1.0, sy))
+                    .position(pose)
+                    .collision_groups(terrain_groups())
+                    .build();
+                added.push(self.colliders.insert(hf));
+                i0 = i1;
+            }
+            j0 = j1;
+        }
+        out.terrain_vertices = (t.nx * t.ny) as usize;
 
-        // Roads.
+        // Roads: one triangle mesh per 256 m cell (by triangle centroid).
+        const ROAD_TILE_M: f32 = 256.0;
         let mesh = wp_world::surface::road_mesh(map);
         out.road_triangles = mesh.indices.len();
-        let verts: Vec<Vector> = mesh
-            .positions
-            .iter()
-            .map(|p| Vector::from_array(*p))
-            .collect();
-        if let Ok(b) = ColliderBuilder::trimesh(verts, mesh.indices.clone()) {
-            added.push(self.colliders.insert(b.build()));
+        let mut tiles: std::collections::BTreeMap<(i32, i32), Vec<[u32; 3]>> =
+            std::collections::BTreeMap::new();
+        for tri in &mesh.indices {
+            let c = tri.iter().fold([0.0f32; 2], |acc, i| {
+                let p = mesh.positions[*i as usize];
+                [acc[0] + p[0] / 3.0, acc[1] + p[1] / 3.0]
+            });
+            let key = (
+                (c[0] / ROAD_TILE_M).floor() as i32,
+                (c[1] / ROAD_TILE_M).floor() as i32,
+            );
+            tiles.entry(key).or_default().push(*tri);
+        }
+        for tris in tiles.values() {
+            let mut remap: std::collections::BTreeMap<u32, u32> = std::collections::BTreeMap::new();
+            let mut verts: Vec<Vector> = Vec::new();
+            let mut idx: Vec<[u32; 3]> = Vec::with_capacity(tris.len());
+            for tri in tris {
+                let mut out_tri = [0u32; 3];
+                for (k, i) in tri.iter().enumerate() {
+                    out_tri[k] = *remap.entry(*i).or_insert_with(|| {
+                        verts.push(Vector::from_array(mesh.positions[*i as usize]));
+                        (verts.len() - 1) as u32
+                    });
+                }
+                idx.push(out_tri);
+            }
+            match ColliderBuilder::trimesh(verts, idx) {
+                Ok(b) => added.push(self.colliders.insert(b.build())),
+                Err(e) => eprintln!("road tile trimesh failed: {e:?}"),
+            }
         }
 
         // Buildings: extruded footprints as convex hulls (footprints are convex lots).

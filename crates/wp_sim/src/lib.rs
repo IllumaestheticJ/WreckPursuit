@@ -110,6 +110,39 @@ pub struct SimVehicle {
     collider_floor_z: f32,
 }
 
+/// Props settle for this many ticks (1 s) after `set_world` before motion counts as a hit.
+const PROP_SETTLE_TICKS: u64 = 240;
+
+/// Sleep threshold (farthest-point speed, m/s) for parked cars and cones in hilly cities.
+const PROP_SLEEP_THRESHOLD_MPS: f32 = 0.25;
+
+/// Pose on the city's drivable ground at `xy` facing `yaw`: height from the road nearest
+/// `near_z` (or the terrain), rotation pitched and rolled to the surface normal (sampled a
+/// metre around).
+fn ground_pose(
+    map: &wp_world::CityMap,
+    xy: [f32; 2],
+    yaw: f32,
+    near_z: Option<f32>,
+) -> ([f32; 3], rapier3d::math::Rotation) {
+    use rapier3d::math::{Mat3, Rotation, Vector};
+    let z = map.ground_height(xy, near_z);
+    let e = 1.0;
+    let dx = map.ground_height([xy[0] + e, xy[1]], Some(z))
+        - map.ground_height([xy[0] - e, xy[1]], Some(z));
+    let dy = map.ground_height([xy[0], xy[1] + e], Some(z))
+        - map.ground_height([xy[0], xy[1] - e], Some(z));
+    let n = Vector::new(-dx / (2.0 * e), -dy / (2.0 * e), 1.0).normalize();
+    let (sy, cy) = wp_math::sin_cos(yaw);
+    let f0 = Vector::new(-sy, cy, 0.0);
+    let f = (f0 - n * f0.dot(n)).normalize();
+    let r = f.cross(n);
+    (
+        [xy[0], xy[1], z],
+        Rotation::from_mat3(&Mat3::from_cols(r, f, n)),
+    )
+}
+
 /// A complete simulation instance. Deterministic given the same config, spawns and inputs.
 pub struct Sim {
     config: SimConfig,
@@ -133,6 +166,14 @@ pub struct Sim {
     applied_contacts: Vec<(EntityId, Vec<wp_contracts::ContactImpulse>)>,
     debris: Vec<rapier3d::prelude::RigidBodyHandle>,
     city_colliders: CityColliders,
+    /// Tick until which new props settle (their first contacts take a few ticks; drops during
+    /// that time are not hits).
+    props_settle_until: u64,
+    /// Hilly cities: props still resting (not colliding with terrain), in creation order.
+    resting_props: Vec<(
+        rapier3d::prelude::RigidBodyHandle,
+        rapier3d::prelude::ColliderHandle,
+    )>,
 }
 
 impl Sim {
@@ -160,6 +201,8 @@ impl Sim {
             applied_contacts: Vec::new(),
             debris: Vec::new(),
             city_colliders: CityColliders::default(),
+            resting_props: Vec::new(),
+            props_settle_until: 0,
         }
     }
 
@@ -237,28 +280,97 @@ impl Sim {
         }
         use rapier3d::math::Rotation;
         use rapier3d::prelude::{ColliderBuilder, Pose, RigidBodyBuilder, Vector};
+        let hilly = world.network().terrain.is_some();
         for prop in world.static_props() {
             let (s, c) = wp_math::sin_cos(prop.yaw * 0.5);
-            let pose = Pose::from_parts(
+            let mut pose = Pose::from_parts(
                 Vector::from_array(prop.pos),
                 Rotation::from_xyzw(0.0, 0.0, s, c),
             );
-            let body = self
-                .physics
-                .bodies
-                .insert(RigidBodyBuilder::dynamic().pose(pose).build());
+            if hilly {
+                // Flush with the (sloped, banked) surface under it and asleep until something
+                // hits it: thousands of parked cars otherwise keep settling on the road mesh.
+                let (pos, rot) = ground_pose(
+                    world.map(),
+                    [prop.pos[0], prop.pos[1]],
+                    prop.yaw,
+                    Some(prop.pos[2] - prop.half_extents[2]),
+                );
+                let up = rot * Vector::Z;
+                pose = Pose::from_parts(Vector::from_array(pos) + up * prop.half_extents[2], rot);
+            }
+            let body = self.physics.bodies.insert(
+                RigidBodyBuilder::dynamic()
+                    .pose(pose)
+                    .sleeping(hilly)
+                    .build(),
+            );
+            if hilly {
+                // Resting on overlapping road / junction / terrain meshes they jitter at about
+                // 1–2 cm/s (contact corrections), just over Rapier's 5 cm/s farthest-point
+                // threshold; a parked car that slow is at rest.
+                self.physics.bodies[body]
+                    .activation_mut()
+                    .normalized_linear_threshold = PROP_SLEEP_THRESHOLD_MPS;
+            }
             let [hx, hy, hz] = prop.half_extents;
-            let col = ColliderBuilder::cuboid(hx, hy, hz)
+            let mut col = ColliderBuilder::cuboid(hx, hy, hz)
                 .mass(prop.mass_kg.max(1.0))
                 .friction(0.6)
                 .build();
-            self.physics
+            if hilly {
+                // Resting on the road mesh: no pairs with the terrain tiles under it (thousands
+                // of them otherwise cost ~0.6 ms per frame); restored when it wakes.
+                col.set_collision_groups(physics::resting_prop_groups());
+            }
+            let ch = self
+                .physics
                 .colliders
                 .insert_with_parent(col, body, &mut self.physics.bodies);
+            if hilly {
+                self.resting_props.push((body, ch));
+            }
             self.props += 1;
         }
+        self.props_settle_until = self.tick + PROP_SETTLE_TICKS;
         self.world = world;
         self.rebuild_police();
+    }
+
+    /// Props still resting on the road mesh without terrain pairs (hilly cities; diagnostics).
+    pub fn resting_prop_count(&self) -> usize {
+        self.resting_props.len()
+    }
+
+    /// Rigid bodies currently awake (perf diagnostics: resting props should be asleep).
+    pub fn awake_body_count(&self) -> usize {
+        self.physics
+            .bodies
+            .iter()
+            .filter(|(_, b)| b.is_dynamic() && !b.is_sleeping())
+            .count()
+    }
+
+    /// Props set in motion (hit, pushed: faster than 0.5 m/s, well above the settling jitter
+    /// on the road mesh) collide with the terrain again, so a parked car
+    /// knocked off the road lands on the ground. In creation order: deterministic.
+    fn wake_props(&mut self) {
+        if self.resting_props.is_empty() || self.tick < self.props_settle_until {
+            return;
+        }
+        let bodies = &self.physics.bodies;
+        let colliders = &mut self.physics.colliders;
+        self.resting_props.retain(|(b, c)| {
+            let awake = bodies
+                .get(*b)
+                .is_some_and(|rb| !rb.is_sleeping() && rb.linvel().length() > 0.5);
+            if awake {
+                if let Some(col) = colliders.get_mut(*c) {
+                    col.set_collision_groups(rapier3d::prelude::InteractionGroups::all());
+                }
+            }
+            !awake
+        });
     }
 
     /// Colliders built for the current city's ground (all zero for flat cities).
@@ -287,22 +399,9 @@ impl Sim {
         if !self.has_terrain() {
             return self.place_vehicle(id, [xy[0], xy[1], 0.0], yaw, speed_mps);
         }
-        use rapier3d::math::{Mat3, Rotation, Vector};
-        let map = self.world.map();
-        let z = map.ground_height(xy, near_z);
-        // Surface normal from the same query a metre around.
-        let e = 1.0;
-        let dx = map.ground_height([xy[0] + e, xy[1]], Some(z))
-            - map.ground_height([xy[0] - e, xy[1]], Some(z));
-        let dy = map.ground_height([xy[0], xy[1] + e], Some(z))
-            - map.ground_height([xy[0], xy[1] - e], Some(z));
-        let n = Vector::new(-dx / (2.0 * e), -dy / (2.0 * e), 1.0).normalize();
-        let (sy, cy) = wp_math::sin_cos(yaw);
-        let f0 = Vector::new(-sy, cy, 0.0);
-        let f = (f0 - n * f0.dot(n)).normalize();
-        let r = f.cross(n);
-        let rot = Rotation::from_mat3(&Mat3::from_cols(r, f, n));
-        let pos = [xy[0], xy[1], z];
+        use rapier3d::math::Vector;
+        let (pos, rot) = ground_pose(self.world.map(), xy, yaw, near_z);
+        let f = rot * Vector::Y;
         self.place_vehicle(id, pos, yaw, speed_mps)?;
         let slot = self
             .vehicles
@@ -569,6 +668,7 @@ impl Sim {
                 }
             })
             .collect();
+        self.wake_props();
         self.physics.step();
         let mut tick_contacts = contacts::collect(
             self.physics.narrow_phase(),

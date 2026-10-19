@@ -1,7 +1,7 @@
 //! Port Vesper v2 in the sim loop: terrain, road, building and deck-rail colliders replace the
 //! flat slab; cars spawned anywhere settle on the surface under them (hill road, banked
-//! highway, bridge deck, the road under it, a junction, open terrain) and the run is
-//! deterministic.
+//! highway, bridge deck, the road under it, a junction, open terrain), parked cars rest asleep
+//! and the run is deterministic.
 
 use std::sync::OnceLock;
 
@@ -76,7 +76,12 @@ fn spots() -> Vec<(&'static str, [f32; 2], Option<f32>)> {
         .find(|p| p.name == "Hollins Ascent")
         .unwrap()
         .pos;
-    let loop_grid = &n.pois[0].pos;
+    let loop_grid = &n
+        .pois
+        .iter()
+        .find(|p| p.name == "Loop 9 sprint")
+        .unwrap()
+        .pos;
     let junction = n.nodes[n.intersections[0].node as usize].pos;
     vec![
         ("hill road", [hollins[0], hollins[1]], Some(hollins[2])),
@@ -181,4 +186,42 @@ fn hilly_city_run_is_deterministic() {
         s.state_hash()
     };
     assert_eq!(run(), run());
+}
+
+#[test]
+#[ignore = "3800 parked cars in unoptimised Rapier (~80 s): cargo test --release -p wp_sim --test city_v2 -- --ignored"]
+fn parked_cars_rest_asleep_on_the_road_mesh() {
+    let mode = load_mode_table(data("modes/arcade.toml")).unwrap();
+    let mut sim = Sim::new(SimConfig {
+        seed: 4,
+        mode,
+        time_of_day: TimeOfDay::from_hours(12.0),
+        time_ratio: 10.0,
+    });
+    sim.set_world(World::new(
+        net().clone(),
+        WorldConfig {
+            traffic: TrafficConfig {
+                enabled: false,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    ));
+    assert!(sim.prop_count() > 3000);
+    for _ in 0..480 {
+        sim.step_fixed();
+    }
+    // Thousands of parked cars on sloped, banked roads must not keep the solver busy.
+    assert!(
+        sim.awake_body_count() < 10,
+        "{} bodies awake",
+        sim.awake_body_count()
+    );
+    assert!(
+        sim.resting_prop_count() + 5 >= sim.prop_count(),
+        "{} of {} props left the resting group",
+        sim.prop_count() - sim.resting_prop_count(),
+        sim.prop_count()
+    );
 }
