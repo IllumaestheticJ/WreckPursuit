@@ -11,7 +11,7 @@ use wp_contracts::{
 };
 
 use crate::aero::aero_forces;
-use crate::assists::{esc, filter_pedal, Tcs};
+use crate::assists::{esc_reference, filter_pedal, Esc, Tcs};
 use crate::brakes::{service_torques, Abs};
 use crate::drivetrain::{auto_clutch_update, diff_transfer, Converter, Gearbox, ShiftInputs};
 use crate::engine::{Engine, EngineExtras, RPM_PER_RADPS};
@@ -20,7 +20,8 @@ use crate::ground::WheelCaster;
 use crate::math::{arr, sin_cos, v3, yaw_quat, Quat, V3};
 use crate::slide::{gyro_yaw_torque, slide_class, slide_throttle, GyroInput};
 use crate::steering::{
-    ackermann, body_slip, rear_axle_slip, torque_steer, update_center_angle, SteerInput,
+    ackermann, body_slip, rear_axle_slip, steer_target, torque_steer, update_center_angle,
+    SteerInput,
 };
 use crate::surface::{conditions_grip, ConditionsSource, SurfaceConditions, TireWetProfile};
 use crate::suspension::{arb_force, static_compression, strut_force};
@@ -191,6 +192,7 @@ pub struct Vehicle {
     pub(crate) throttle_f: f32,
     pub(crate) brake_f: f32,
     pub(crate) tcs: Tcs,
+    pub(crate) esc: Esc,
     pub(crate) abs: Abs,
     pub(crate) effects: HandlingEffects,
     pub(crate) heat: f32,
@@ -291,6 +293,7 @@ impl Vehicle {
             throttle_f: 0.0,
             brake_f: 0.0,
             tcs: Tcs::default(),
+            esc: Esc::default(),
             abs: Abs::default(),
             effects: HandlingEffects::NEUTRAL,
             heat: 0.0,
@@ -428,6 +431,7 @@ impl Vehicle {
         self.throttle_f = 0.0;
         self.brake_f = 0.0;
         self.tcs = Tcs::default();
+        self.esc = Esc::default();
         self.abs = Abs::default();
         self.heat = 0.0;
         self.heat_reported = 0.0;
@@ -478,6 +482,14 @@ impl Vehicle {
         if n > 0 {
             self.center_steer = sum / n as f32;
         }
+        // ESC reference (not in the contract state): assume it had caught up with the steering.
+        let v_fwd = self.chassis.lin_vel.dot(self.chassis.rot * V3::Y);
+        self.esc.reference = esc_reference(
+            self.center_steer,
+            v_fwd,
+            self.def.wheelbase_m,
+            self.front_mu(),
+        );
         self.gearbox.set(s.gear);
         self.engine.omega = s.engine_rpm / RPM_PER_RADPS;
         let split = self.drive_split(0.0);
@@ -596,6 +608,55 @@ impl Vehicle {
             s[3] = 0.0;
         }
         s
+    }
+
+    /// Steering-model inputs for driver steer `driver` in the current state.
+    fn steer_input(&self, driver: f32, v_fwd: f32, v_left: f32, rear_axle: f32) -> SteerInput {
+        let eff = self.effects;
+        SteerInput {
+            driver,
+            speed: v_fwd,
+            body_slip: body_slip(v_fwd, v_left),
+            rear_slip: 0.5 * (self.wheels[2].alpha_lag + self.wheels[3].alpha_lag),
+            rear_axle_slip: rear_axle,
+            slide_class: self.slide_class,
+            pull: eff.steer_pull,
+            ratio_scale: eff.steer_ratio_scale.max(0.05),
+            wheelbase: self.def.wheelbase_m,
+            front_mu: self.front_mu(),
+            front_peak_slip: self.corners[0].tire.peak_slip_angle_rad,
+        }
+    }
+
+    /// Front tyres' available friction: lateral peak μ × the mean front grip multiplier from
+    /// the last tick (surface, weather, damage), floored at 0.1.
+    fn front_mu(&self) -> f32 {
+        let grip = 0.5 * (self.wheels[0].grip + self.wheels[1].grip);
+        (self.corners[0].tire.lateral.d * grip).max(0.1)
+    }
+
+    fn max_steer(&self) -> f32 {
+        self.corners[0].max_steer.max(self.corners[1].max_steer)
+    }
+
+    /// Peak slip angle of wheel `i`'s tire, rad.
+    pub fn tire_peak_slip(&self, i: usize) -> f32 {
+        self.corners[i].tire.peak_slip_angle_rad
+    }
+
+    /// Centre road-wheel angle (rad, + = left) the steering would head for if the driver
+    /// held steer input `driver` (-1..=1) now, under `assists` (see
+    /// [`crate::steering::steer_target`]). For tools and test drivers that need to know what
+    /// an input does; it does not change the vehicle.
+    pub fn steer_target_for(&self, driver: f32, assists: &AssistProfile) -> f32 {
+        let ch = self.chassis;
+        let up = ch.rot * V3::Z;
+        let v_fwd = ch.lin_vel.dot(ch.rot * V3::Y);
+        let v_left = -ch.lin_vel.dot(ch.rot * V3::X);
+        let cg_to_rear = self.com_local.y - self.def.wheels[2].position_m[1];
+        let rear_axle = rear_axle_slip(v_fwd, v_left, ch.ang_vel.dot(up), cg_to_rear);
+        let inp = self.steer_input(driver, v_fwd, v_left, rear_axle);
+        steer_target(self.center_steer, &inp, assists, self.max_steer()).angle
     }
 
     fn axle_omega(&self, split: &[f32; 4]) -> f32 {
@@ -791,7 +852,16 @@ impl Vehicle {
             .unwrap_or(0.1);
         let tcs_mult = self.tcs.update(assists.tcs, driven_slip, peak_slip, dt);
         let yaw_rate = ch.ang_vel.dot(up);
-        let esc_out = esc(assists.esc, yaw_rate, self.center_steer, v_fwd, wheelbase);
+        let front_mu = self.front_mu();
+        let esc_out = self.esc.update(
+            assists.esc,
+            yaw_rate,
+            self.center_steer,
+            v_fwd,
+            wheelbase,
+            front_mu,
+            dt,
+        );
         // TCS acts on engine torque once the clutch is locked; during an automatic-clutch
         // launch (slipping) wheel torque equals clutch torque, so TCS trims the clutch instead.
         let launching = self.auto_clutch && !self.clutch_locked && self.converter.is_none();
@@ -812,17 +882,8 @@ impl Vehicle {
         let clutch_trim = if launching { tcs_mult } else { 1.0 };
 
         // --- Steering ---------------------------------------------------------------------
-        let steer_in = SteerInput {
-            driver: input.steer,
-            speed: v_fwd,
-            body_slip: body_slip(v_fwd, v_left),
-            rear_slip: 0.5 * (self.wheels[2].alpha_lag + self.wheels[3].alpha_lag),
-            rear_axle_slip: rear_axle,
-            slide_class: self.slide_class,
-            pull: eff.steer_pull,
-            ratio_scale: eff.steer_ratio_scale.max(0.05),
-        };
-        let max_steer = self.corners[0].max_steer.max(self.corners[1].max_steer);
+        let steer_in = self.steer_input(input.steer, v_fwd, v_left, rear_axle);
+        let max_steer = self.max_steer();
         self.center_steer = update_center_angle(
             self.center_steer,
             &steer_in,

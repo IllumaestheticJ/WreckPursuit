@@ -115,5 +115,9 @@ fn set_state_is_a_close_approximation() {
         .map(|i| (s.pos[i] - truth.pos[i]).powi(2))
         .sum::<f32>()
         .sqrt();
-    assert!(d < 0.5, "set_state drift after 1 s: {d} m");
+    // The contract `VehicleState` has no pedal-filter, auto-box timer or ESC-reference state,
+    // so the restored car re-ramps its throttle from 0. Since playtest row 28 the scripted
+    // keyboard turn at 3.3 s runs at the grip limit (~1 g, instead of washing out at ~0.6 g),
+    // where that throttle difference moves the car more: 0.27 m → 0.68 m after 1 s.
+    assert!(d < 1.0, "set_state drift after 1 s: {d} m");
 }
