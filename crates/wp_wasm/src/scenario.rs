@@ -22,16 +22,36 @@ pub fn procedural_city() -> CitySpec {
     }
 }
 
-/// Free drive: one live-driven `car` (entity id `"player"`) with keyboard assists.
+/// City by id for the testbed's selector: `"vesper_v2"` (Port Vesper v2, the default city),
+/// `"procedural_12x12"` (the old grid); anything else is the flat world.
+pub fn city_spec(city_id: &str) -> CitySpec {
+    match city_id {
+        wp_world::vesper::CITY_ID => CitySpec::vesper(),
+        "procedural_12x12" => procedural_city(),
+        _ => CitySpec::Flat,
+    }
+}
+
+/// Free drive: one live-driven `car` (entity id `"player"`) with keyboard assists; `city` =
+/// the old procedural grid.
 pub fn free_drive(car: &str, mode: DamageMode, city: bool) -> Scenario {
-    Scenario {
-        name: "free_drive".into(),
-        seed: 1,
-        city: if city {
+    free_drive_in(
+        car,
+        mode,
+        if city {
             procedural_city()
         } else {
             CitySpec::Flat
         },
+    )
+}
+
+/// Free drive in `city` (spawned on its first race start grid when it has one).
+pub fn free_drive_in(car: &str, mode: DamageMode, city: CitySpec) -> Scenario {
+    Scenario {
+        name: "free_drive".into(),
+        seed: 1,
+        city,
         time_of_day_h: 12.0,
         time_ratio: 10.0,
         mode,
@@ -55,12 +75,17 @@ pub fn free_drive(car: &str, mode: DamageMode, city: bool) -> Scenario {
 /// Speed the city-chase player starts at, m/s (~110 km/h: well over the city limits).
 pub const CITY_CHASE_SPEED_MPS: f32 = 30.0;
 
-/// "City chase" preset: the procedural 12×12 city at 23:00 with full police presence and
-/// traffic; the live player starts on the race grid already speeding
-/// ([`CITY_CHASE_SPEED_MPS`]), which the world reports as violations and the police turn into
-/// heat. Same seed every time, so chases are reproducible and replayable.
+/// "City chase" preset: Port Vesper v2 (hills, curves, highway loop) at 23:00 with full
+/// police presence and traffic; the live player starts on the race grid (Loop 9) already
+/// speeding ([`CITY_CHASE_SPEED_MPS`]), which the world reports as violations and the police
+/// turn into heat. Same seed every time, so chases are reproducible and replayable.
 pub fn city_chase(car: &str, mode: DamageMode) -> Scenario {
-    let mut sc = free_drive(car, mode, true);
+    city_chase_in(car, mode, CitySpec::vesper())
+}
+
+/// [`city_chase`] in another city (the testbed keeps the old grid selectable).
+pub fn city_chase_in(car: &str, mode: DamageMode, city: CitySpec) -> Scenario {
+    let mut sc = free_drive_in(car, mode, city);
     sc.name = "city_chase".into();
     sc.seed = 23;
     sc.time_of_day_h = 23.0;

@@ -79,7 +79,7 @@ pub const UNIT_STRIDE: usize = 6;
 /// Police units that are **not** sim vehicles (bound units are drawn from `vehicle_states()`),
 /// 6 floats each: `[x, y, z, yaw, speed_mps, flags]`, flags 1 helicopter, 2 pursuing /
 /// intercepting (lights on). Yaw is about +Z with 0 = +Y.
-pub fn units(p: &PoliceSystem) -> Vec<f32> {
+pub fn units(p: &PoliceSystem, ground: &dyn Fn([f32; 2]) -> f32) -> Vec<f32> {
     let mut out = Vec::new();
     for u in p.units().iter().filter(|u| u.entity.is_none()) {
         let b = &u.body;
@@ -91,7 +91,9 @@ pub fn units(p: &PoliceSystem) -> Vec<f32> {
         // Heading (hx, hy) → yaw with 0 = +Y, positive counter-clockwise.
         let yaw = wp_math::atan2(-b.heading[0], b.heading[1]);
         let flags = heli as u32 | (chasing as u32) << 1;
-        out.extend_from_slice(&[b.pos[0], b.pos[1], b.alt_m, yaw, b.speed, flags as f32]);
+        // Altitude is above the ground under the unit (hilly cities).
+        let z = ground(b.pos) + b.alt_m;
+        out.extend_from_slice(&[b.pos[0], b.pos[1], z, yaw, b.speed, flags as f32]);
     }
     out
 }
@@ -107,6 +109,6 @@ mod tests {
         assert_eq!(s.level, WantedLevel::None);
         assert_eq!(s.status, "Clear");
         assert_eq!(s.heat_in_level, 0.0);
-        assert!(units(&p).is_empty());
+        assert!(units(&p, &|_| 0.0).is_empty());
     }
 }

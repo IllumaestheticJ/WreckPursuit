@@ -11,7 +11,7 @@
 //!
 //! | group | functions |
 //! |---|---|
-//! | session | `init(seed, scenario_json, scripted)`, `free_drive_json(car, mode, city)`, `scenario_from_ron(text)`, `scenario_with_speed(json, mps)`, `step(dt) -> alpha`, `set_damage_mode(str)`, `car_ids()` |
+//! | session | `init(seed, scenario_json, scripted)`, `free_drive_json(car, mode, city)`, `free_drive_city_json(car, mode, city_id)`, `city_chase_city_json(car, mode, city_id)`, `city_id()`, `scenario_from_ron(text)`, `scenario_with_speed(json, mps)`, `step(dt) -> alpha`, `set_damage_mode(str)`, `car_ids()` |
 //! | control | `spawn_vehicle(car_id, pos, yaw)`, `set_input(entity, f32[])`, `set_assist_profile(entity, json)`, `assist_preset(source)`, `reset_vehicle(entity)` |
 //! | state | `entities()`, `vehicle_states()`, `vehicle_states_prev()`, `vehicle_info(entity)`, `world_info()`, `state_hash()`, `traffic_agents()` |
 //! | damage | `lattice_nodes`, `lattice_rest`, `lattice_beams`, `lattice_node_regions`, `lattice_strain`, `region_energy`, `skin_binding_indices`, `skin_binding_weights` |
@@ -107,12 +107,48 @@ pub fn free_drive_json(car: &str, mode: &str, city: bool) -> Result<String, JsVa
     Ok(json(&scenario::free_drive(car, mode, city)))
 }
 
-/// "City chase" preset JSON (live): procedural city at night, full police presence, traffic,
+/// "City chase" preset JSON (live): Port Vesper v2 at night, full police presence, traffic,
 /// the player already speeding on the race grid.
 #[wasm_bindgen]
 pub fn city_chase_json(car: &str, mode: &str) -> Result<String, JsValue> {
     let mode = data::parse_mode(mode).map_err(err)?;
     Ok(json(&scenario::city_chase(car, mode)))
+}
+
+/// Free drive in a chosen city: `city_id` = `"vesper_v2"` (Port Vesper v2) or
+/// `"procedural_12x12"` (the old grid); anything else = flat world.
+#[wasm_bindgen]
+pub fn free_drive_city_json(car: &str, mode: &str, city_id: &str) -> Result<String, JsValue> {
+    let mode = data::parse_mode(mode).map_err(err)?;
+    Ok(json(&scenario::free_drive_in(
+        car,
+        mode,
+        scenario::city_spec(city_id),
+    )))
+}
+
+/// City chase in a chosen city (`city_id` as in [`free_drive_city_json`]).
+#[wasm_bindgen]
+pub fn city_chase_city_json(car: &str, mode: &str, city_id: &str) -> Result<String, JsValue> {
+    let mode = data::parse_mode(mode).map_err(err)?;
+    Ok(json(&scenario::city_chase_in(
+        car,
+        mode,
+        scenario::city_spec(city_id),
+    )))
+}
+
+/// Id of the session's city (`vesper_v2`, `procedural_12x12`, a file stem) or `""` on the
+/// flat world: the testbed loads `data/city/<id>.greybox.glb`.
+#[wasm_bindgen]
+pub fn city_id() -> Result<String, JsValue> {
+    get(|s| {
+        if s.has_city() {
+            s.sim().world().network().id.clone()
+        } else {
+            String::new()
+        }
+    })
 }
 
 /// Parse a `.ron` scenario (simcli format v2) into JSON for `init`.
@@ -434,7 +470,10 @@ pub fn police_status(entity: u32) -> Result<String, JsValue> {
 /// vehicles of kind Police and come through `vehicle_states()` / `vehicle_meta()`.
 #[wasm_bindgen]
 pub fn police_units() -> Result<Vec<f32>, JsValue> {
-    get(|s| police::units(s.sim().police()))
+    get(|s| {
+        let world = s.sim().world();
+        police::units(s.sim().police(), &|p| world.map().ground_height(p, None))
+    })
 }
 
 /// Floats per agent in `traffic_agents()`.
