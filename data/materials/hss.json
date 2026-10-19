@@ -1,0 +1,1 @@
+{ "id": "hss", "density_kg_m3": 7850.0, "young_mpa": 205000.0, "yield_mpa": 550.0, "plastic_modulus_mpa": 2500.0, "failure_strain": 0.18, "restitution": 0.15, "friction": 0.6, "kind": "Structural" }

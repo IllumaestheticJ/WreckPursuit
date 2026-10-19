@@ -1,0 +1,22 @@
+{
+  "id": "street",
+  "lateral": { "b": 16.0, "c": 1.35, "d": 1.0, "e": -0.2 },
+  "longitudinal": { "b": 14.0, "c": 1.6, "d": 1.05, "e": 0.2 },
+  "load_sensitivity": 0.12,
+  "fz0_n": 4000.0,
+  "relaxation_length_m": 0.35,
+  "rolling_resistance": 0.012,
+  "peak_slip_angle_rad": 0.13,
+  "peak_slip_ratio": 0.115,
+  "surface_multipliers": {
+    "Asphalt": 1.0,
+    "WetAsphalt": 0.7,
+    "Concrete": 0.95,
+    "Gravel": 0.6,
+    "Grass": 0.45,
+    "Dirt": 0.6,
+    "Curb": 0.85,
+    "Metal": 0.7
+  },
+  "wear_rate": 0.00001
+}

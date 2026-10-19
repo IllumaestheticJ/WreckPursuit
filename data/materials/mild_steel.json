@@ -1,0 +1,1 @@
+{ "id": "mild_steel", "density_kg_m3": 7850.0, "young_mpa": 200000.0, "yield_mpa": 250.0, "plastic_modulus_mpa": 1500.0, "failure_strain": 0.3, "restitution": 0.2, "friction": 0.6, "kind": "Panel" }

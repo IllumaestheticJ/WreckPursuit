@@ -1,0 +1,17 @@
+# Simulation damage table — the calibrated reference. Arcade (arcade.toml) is derived from
+# these numbers with documented multipliers. Owned by workstream 03 (damage) for tuning.
+# Calibration targets (prompt 03): 56 km/h full frontal into a rigid barrier => ~0.6 m frame
+# crush and TotalLoss; 25 km/h bumper tap => cracked bumper cover; 40 km/h T-bone => struck-side
+# suspension + door destroyed. Values below are v0.1 placeholders pending that calibration.
+mode = "Simulation"
+impulse_to_lattice_scale = 1.0
+plasticity_scale = 1.0
+beam_break_scale = 1.0
+component_damage_scale = 1.0
+component_fail_threshold_scale = 1.0
+total_loss_health = 0.25
+cabin_intrusion_total_loss_m = 0.25
+repair_cost_scale = 1.0
+wheel_detach_scale = 1.0
+engine_kill_on_total_loss = true
+global_health_from_intrusion = true

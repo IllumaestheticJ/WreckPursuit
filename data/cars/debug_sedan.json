@@ -1,0 +1,156 @@
+{
+  "id": "debug_sedan",
+  "display_name": "Debug Sedan",
+  "class": "Compact",
+  "analog_of": "generic 2010s mid-size FF family sedan, 2.0 L turbo four",
+  "body_size_m": [1.8, 4.7, 1.45],
+  "mass_kg": 1400.0,
+  "front_weight_frac": 0.61,
+  "wheelbase_m": 2.7,
+  "track_front_m": 1.55,
+  "track_rear_m": 1.54,
+  "cg_height_m": 0.52,
+  "inertia_kgm2": [550.0, 2600.0, 2800.0],
+  "drag_cd_a_m2": 0.66,
+  "lift_front": 0.05,
+  "lift_rear": 0.08,
+  "engine": {
+    "torque_curve_nm": [
+      [1000, 150],
+      [1500, 190],
+      [2000, 225],
+      [2500, 250],
+      [3000, 262],
+      [3500, 270],
+      [4000, 272],
+      [4500, 268],
+      [5000, 262],
+      [5500, 252],
+      [6000, 240],
+      [6500, 220],
+      [7000, 195]
+    ],
+    "idle_rpm": 800.0,
+    "redline_rpm": 6500.0,
+    "rev_limit_rpm": 6800.0,
+    "inertia_kgm2": 0.18,
+    "engine_brake_nm": 45.0
+  },
+  "drivetrain": {
+    "layout": "Fwd",
+    "gear_ratios": [3.45, 1.95, 1.3, 0.97, 0.78, 0.65],
+    "final_drive": 4.1,
+    "reverse_ratio": 3.3,
+    "diff_front": "Open",
+    "diff_rear": "Open",
+    "clutch_max_nm": 450.0,
+    "shift_time_s": 0.25
+  },
+  "wheels": [
+    {
+      "position_m": [-0.775, 1.35, 0.325],
+      "radius_m": 0.325,
+      "width_m": 0.215,
+      "mass_kg": 22.0,
+      "tire_id": "street",
+      "steerable": true,
+      "max_steer_rad": 0.62,
+      "ackermann_frac": 0.6,
+      "camber_rad": -0.012,
+      "toe_rad": 0.001,
+      "caster_rad": 0.1
+    },
+    {
+      "position_m": [0.775, 1.35, 0.325],
+      "radius_m": 0.325,
+      "width_m": 0.215,
+      "mass_kg": 22.0,
+      "tire_id": "street",
+      "steerable": true,
+      "max_steer_rad": 0.62,
+      "ackermann_frac": 0.6,
+      "camber_rad": -0.012,
+      "toe_rad": 0.001,
+      "caster_rad": 0.1
+    },
+    {
+      "position_m": [-0.77, -1.35, 0.325],
+      "radius_m": 0.325,
+      "width_m": 0.215,
+      "mass_kg": 22.0,
+      "tire_id": "street",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": -0.017,
+      "toe_rad": 0.002,
+      "caster_rad": 0.0
+    },
+    {
+      "position_m": [0.77, -1.35, 0.325],
+      "radius_m": 0.325,
+      "width_m": 0.215,
+      "mass_kg": 22.0,
+      "tire_id": "street",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": -0.017,
+      "toe_rad": 0.002,
+      "caster_rad": 0.0
+    }
+  ],
+  "suspension": [
+    {
+      "spring_n_per_m": 31300.0,
+      "damper_bump_ns_per_m": 2140.0,
+      "damper_rebound_ns_per_m": 3210.0,
+      "travel_m": 0.18,
+      "preload_m": 0.02,
+      "arb_n_per_m": 18000.0,
+      "bump_stop_n_per_m": 150000.0
+    },
+    {
+      "spring_n_per_m": 31300.0,
+      "damper_bump_ns_per_m": 2140.0,
+      "damper_rebound_ns_per_m": 3210.0,
+      "travel_m": 0.18,
+      "preload_m": 0.02,
+      "arb_n_per_m": 18000.0,
+      "bump_stop_n_per_m": 150000.0
+    },
+    {
+      "spring_n_per_m": 22300.0,
+      "damper_bump_ns_per_m": 1420.0,
+      "damper_rebound_ns_per_m": 2130.0,
+      "travel_m": 0.2,
+      "preload_m": 0.02,
+      "arb_n_per_m": 9000.0,
+      "bump_stop_n_per_m": 150000.0
+    },
+    {
+      "spring_n_per_m": 22300.0,
+      "damper_bump_ns_per_m": 1420.0,
+      "damper_rebound_ns_per_m": 2130.0,
+      "travel_m": 0.2,
+      "preload_m": 0.02,
+      "arb_n_per_m": 9000.0,
+      "bump_stop_n_per_m": 150000.0
+    }
+  ],
+  "brakes": {
+    "max_torque_front_nm": 1600.0,
+    "max_torque_rear_nm": 900.0,
+    "bias_front": 0.68,
+    "handbrake_rear_nm": 1200.0
+  },
+  "steering": {
+    "ratio": 15.0,
+    "rack_speed_rad_per_s": 1.4,
+    "ffb_scale": 1.0
+  },
+  "aero_downforce_coeffs": [0.0, 0.0],
+  "lattice_id": "debug_sedan",
+  "base_price": 18000,
+  "durability_class": 3
+}

@@ -1,0 +1,1 @@
+{ "id": "pp_bumper", "density_kg_m3": 905.0, "young_mpa": 1500.0, "yield_mpa": 25.0, "plastic_modulus_mpa": 100.0, "failure_strain": 0.5, "restitution": 0.4, "friction": 0.5, "kind": "Plastic" }

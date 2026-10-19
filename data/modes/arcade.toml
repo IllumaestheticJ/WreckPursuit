@@ -1,0 +1,14 @@
+# Arcade damage table = Simulation (sim.toml) x the multipliers noted on each line.
+# Same code path, different numbers. Owned by workstream 03 (damage) for tuning.
+mode = "Arcade"
+impulse_to_lattice_scale = 0.45        # sim x 0.45  — less energy reaches the lattice
+plasticity_scale = 0.8                 # sim x 0.8   — dents set a little less
+beam_break_scale = 1.5                 # sim x 1.5   — beams/parts tougher before breaking
+component_damage_scale = 0.6           # sim x 0.6   — components lose health slower
+component_fail_threshold_scale = 1.8   # sim x 1.8   — components tolerate more intrusion
+total_loss_health = 0.1                # sim 0.25 -> 0.10 — more hits before the car is done
+cabin_intrusion_total_loss_m = 0.5     # sim x 2.0   — 0.25 m -> 0.5 m
+repair_cost_scale = 0.5                # sim x 0.5   — cheaper repairs
+wheel_detach_scale = 0.5               # sim x 0.5   — wheels stay on twice as long
+engine_kill_on_total_loss = true       # same
+global_health_from_intrusion = true    # same
