@@ -1,0 +1,22 @@
+{
+  "id": "police_pursuit",
+  "lateral": { "b": 16.0, "c": 1.38, "d": 1.04, "e": -0.25 },
+  "longitudinal": { "b": 14.5, "c": 1.62, "d": 1.14, "e": 0.2 },
+  "load_sensitivity": 0.11,
+  "fz0_n": 4500.0,
+  "relaxation_length_m": 0.33,
+  "rolling_resistance": 0.012,
+  "peak_slip_angle_rad": 0.122,
+  "peak_slip_ratio": 0.108,
+  "surface_multipliers": {
+    "Asphalt": 1.0,
+    "WetAsphalt": 0.72,
+    "Concrete": 0.95,
+    "Gravel": 0.62,
+    "Grass": 0.46,
+    "Dirt": 0.62,
+    "Curb": 0.88,
+    "Metal": 0.72
+  },
+  "wear_rate": 7e-06
+}

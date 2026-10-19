@@ -1,0 +1,10 @@
+// FWD debug sedan, full throttle: must reach 100 km/h (27.78 m/s) within 10 s.
+(
+    name: "vehicle_sedan_accel_by_10s",
+    car: "debug_sedan",
+    mode: Arcade,
+    seed: 1,
+    duration_s: 10.0,
+    inputs: [(t_s: 0.0, input: (throttle: 1.0))],
+    expect: [(metric: "max_speed_mps", min: 27.78, max: 36.0)],
+)

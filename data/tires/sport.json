@@ -1,0 +1,22 @@
+{
+  "id": "sport",
+  "lateral": { "b": 17.0, "c": 1.4, "d": 1.1, "e": -0.3 },
+  "longitudinal": { "b": 15.0, "c": 1.65, "d": 1.2, "e": 0.2 },
+  "load_sensitivity": 0.13,
+  "fz0_n": 4000.0,
+  "relaxation_length_m": 0.3,
+  "rolling_resistance": 0.011,
+  "peak_slip_angle_rad": 0.109,
+  "peak_slip_ratio": 0.101,
+  "surface_multipliers": {
+    "Asphalt": 1.0,
+    "WetAsphalt": 0.62,
+    "Concrete": 0.95,
+    "Gravel": 0.55,
+    "Grass": 0.4,
+    "Dirt": 0.55,
+    "Curb": 0.85,
+    "Metal": 0.65
+  },
+  "wear_rate": 1.6e-05
+}

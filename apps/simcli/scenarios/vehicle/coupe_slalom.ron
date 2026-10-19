@@ -1,0 +1,22 @@
+// Slalom at part throttle: steering alternates every second. Must stay upright and moving.
+(
+    name: "vehicle_coupe_slalom",
+    car: "debug_coupe",
+    mode: Arcade,
+    seed: 5,
+    duration_s: 12.0,
+    inputs: [
+        (t_s: 0.0, input: (throttle: 0.6)),
+        (t_s: 3.0, input: (throttle: 0.4, steer: 0.5)),
+        (t_s: 4.0, input: (throttle: 0.4, steer: -0.5)),
+        (t_s: 5.0, input: (throttle: 0.4, steer: 0.5)),
+        (t_s: 6.0, input: (throttle: 0.4, steer: -0.5)),
+        (t_s: 7.0, input: (throttle: 0.4, steer: 0.5)),
+        (t_s: 8.0, input: (throttle: 0.4, steer: -0.5)),
+        (t_s: 9.0, input: (throttle: 0.4)),
+    ],
+    expect: [
+        (metric: "final_speed_mps", min: 10.0, max: 45.0),
+        (metric: "distance_m", min: 80.0, max: 400.0),
+    ],
+)

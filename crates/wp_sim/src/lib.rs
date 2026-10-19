@@ -3,9 +3,9 @@
 //! The fixed-step game loop (owned by the integration lead). Each physics tick
 //! ([`wp_contracts::PHYSICS_DT`]) it: applies inputs, steps the world clock/traffic, steps
 //! every vehicle, feeds contacts to damage, pushes handling effects back to vehicles, steps
-//! police, and collects events. **Current state:** vehicles are `wp_vehicle` kinematic stubs,
-//! contacts are not yet extracted from Rapier (no vehicle bodies exist yet), police and
-//! economy are stubs.
+//! police, and collects events. **Current state:** vehicles are `wp_vehicle` rigid bodies
+//! (wheel probes via the Rapier query pipeline); contacts are not yet extracted from Rapier
+//! into damage; police and economy are stubs.
 
 #![warn(missing_docs)]
 
@@ -13,6 +13,7 @@ mod physics;
 
 pub use physics::PhysicsWorld;
 
+use rapier3d::prelude::QueryFilter;
 use thiserror::Error;
 use wp_contracts::{
     AssistProfile, DamageSim, EntityId, LoadedCar, ModeTable, SimEvent, TimeOfDay, VehicleInput,
@@ -21,7 +22,7 @@ use wp_contracts::{
 use wp_damage::DamageModel;
 use wp_math::{FixedStep, Rng, StateHasher};
 use wp_police::{PoliceSystem, RacerView};
-use wp_vehicle::Vehicle;
+use wp_vehicle::{RapierGround, Vehicle, VehicleBody};
 use wp_world::World;
 
 /// Errors from simulation control calls.
@@ -62,6 +63,8 @@ pub struct SimVehicle {
     pub input: VehicleInput,
     /// Assists in effect.
     pub assists: AssistProfile,
+    /// Rapier handles of the chassis.
+    pub body: VehicleBody,
     spawn: ([f32; 3], f32),
 }
 
@@ -108,10 +111,14 @@ impl Sim {
         }
         let id = EntityId(self.next_entity);
         self.next_entity += 1;
+        let mut vehicle = Vehicle::new(&car.def, &car.tires, pos, yaw);
+        vehicle.set_entity(id);
+        let body = vehicle.build_body(&mut self.physics.bodies, &mut self.physics.colliders);
         self.vehicles.push(SimVehicle {
             id,
             car_id: car.def.id.clone(),
-            vehicle: Vehicle::new(&car.def, &car.tires, pos, yaw),
+            body,
+            vehicle,
             damage: DamageModel::new(&car.lattice, &car.materials),
             input: VehicleInput::default(),
             assists: AssistProfile::default(),
@@ -141,9 +148,14 @@ impl Sim {
 
     /// Return a vehicle to its spawn pose, pristine.
     pub fn reset_vehicle(&mut self, id: EntityId) -> Result<(), SimError> {
-        let slot = self.slot_mut(id)?;
+        let slot = self
+            .vehicles
+            .iter_mut()
+            .find(|v| v.id == id)
+            .ok_or(SimError::UnknownEntity(id))?;
         let (pos, yaw) = slot.spawn;
-        slot.vehicle.reset(pos, yaw);
+        let rb = &mut self.physics.bodies[slot.body.body];
+        slot.vehicle.place_body(rb, pos, yaw, 0.0, 0.0);
         slot.damage.reset();
         Ok(())
     }
@@ -154,10 +166,27 @@ impl Sim {
         let mut out = Vec::new();
         self.world.step(dt, &mut out);
         for slot in &mut self.vehicles {
+            let filter = QueryFilter::default().exclude_rigid_body(slot.body.body);
+            let ground = RapierGround {
+                query: self.physics.query_pipeline(filter),
+            };
+            slot.vehicle.step_with_ground(
+                &slot.input,
+                &slot.assists,
+                &self.world,
+                &ground,
+                dt,
+                &mut out,
+            );
+        }
+        for slot in &self.vehicles {
             slot.vehicle
-                .step(&slot.input, &slot.assists, &self.world, dt, &mut out);
+                .write_body(&mut self.physics.bodies[slot.body.body]);
         }
         self.physics.step();
+        for slot in &mut self.vehicles {
+            slot.vehicle.read_body(&self.physics.bodies[slot.body.body]);
+        }
         for slot in &mut self.vehicles {
             // Contacts will come from Rapier manifolds once vehicles are rigid bodies.
             slot.damage

@@ -1,0 +1,10 @@
+// RWD debug coupe, full throttle: must reach 100 km/h within 6 s.
+(
+    name: "vehicle_coupe_accel_by_6s",
+    car: "debug_coupe",
+    mode: Arcade,
+    seed: 1,
+    duration_s: 6.0,
+    inputs: [(t_s: 0.0, input: (throttle: 1.0))],
+    expect: [(metric: "max_speed_mps", min: 27.78, max: 36.0)],
+)

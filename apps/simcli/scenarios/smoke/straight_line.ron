@@ -1,5 +1,5 @@
-// Smoke test: full throttle for 6 s, full brake until 11 s, then coast to the end. Ranges are loose (kinematic stub);
-// workstream 02 tightens them once real vehicle dynamics land.
+// Smoke test: full throttle for 6 s, full brake until 8 s, then hold the handbrake to a stop
+// (holding the brake pedal at a standstill would engage auto-reverse).
 (
     name: "smoke_straight_line",
     car: "debug_sedan",
@@ -9,12 +9,12 @@
     inputs: [
         (t_s: 0.0, input: (throttle: 1.0)),
         (t_s: 6.0, input: (brake: 1.0)),
-        (t_s: 11.0, input: ()),
+        (t_s: 8.0, input: (handbrake: 1.0)),
     ],
     expect: [
-        (metric: "max_speed_mps", min: 15.0, max: 60.0),
-        (metric: "final_speed_mps", min: 0.0, max: 1.0),
-        (metric: "distance_m", min: 40.0, max: 500.0),
+        (metric: "max_speed_mps", min: 15.0, max: 30.0),
+        (metric: "final_speed_mps", min: -0.2, max: 0.2),
+        (metric: "distance_m", min: 60.0, max: 150.0),
         (metric: "final_health", min: 1.0, max: 1.0),
     ],
 )
