@@ -3,13 +3,18 @@
 
 use crate::math::approach;
 
+/// Full 0→1 pedal ramp time at filter strength 1, s. Keyboard drivers (strength 0.7) get a
+/// ~0.23 s throttle ramp: enough to keep a digital key from spinning the tires, short enough
+/// not to feel like lag (it was 0.62 s, which the owner's playtest read as "slow").
+pub const PEDAL_RAMP_AT_FULL_S: f32 = 0.3;
+
 /// Pedal filter: ramps toward the target, releasing 3× faster than it applies.
-/// `strength` 0 = raw input, 1 = ~0.6 s full ramp.
+/// `strength` 0 = raw input, 1 = [`PEDAL_RAMP_AT_FULL_S`] (+ 0.02 s) full ramp.
 pub fn filter_pedal(current: f32, target: f32, strength: f32, dt: f32) -> f32 {
     if strength <= 0.0 {
         return target;
     }
-    let rate = 1.0 / (0.02 + 0.6 * strength);
+    let rate = 1.0 / (0.02 + PEDAL_RAMP_AT_FULL_S * strength);
     let rate = if target < current { rate * 3.0 } else { rate };
     approach(current, target, rate * dt)
 }

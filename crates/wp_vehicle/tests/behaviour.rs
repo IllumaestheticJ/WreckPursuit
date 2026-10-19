@@ -177,7 +177,8 @@ fn all_assists_off_still_drives() {
     };
     let mut rig = Rig::new(&car("debug_sedan"));
     run(&mut rig, throttle(0.6), &off, 6.0);
-    assert!(rig.state().speed_mps > 15.0);
+    // ~50 km/h: at 60% pedal the automatic short-shifts (≈ 72% of redline).
+    assert!(rig.state().speed_mps > 12.0);
 }
 
 #[test]

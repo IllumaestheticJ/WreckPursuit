@@ -14,7 +14,7 @@ use wp_contracts::{HandlingEffects, SurfaceType};
 use crate::math::{Quat, V3};
 use crate::vehicle::{Chassis, Vehicle, Wheel};
 
-const FORMAT: u8 = 2;
+const FORMAT: u8 = 3;
 
 /// Opaque full-state snapshot of one [`Vehicle`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -181,7 +181,15 @@ impl Vehicle {
         let g = &self.gearbox;
         w.u8(g.gear as u8);
         w.u8(g.target as u8);
-        w.fs(&[g.shift_timer, g.cooldown, g.reverse_hold]);
+        w.fs(&[
+            g.shift_timer,
+            g.cooldown,
+            g.reverse_hold,
+            g.shift_total,
+            g.load,
+            g.brake_hold,
+        ]);
+        w.u8(g.last_dir as u8);
         w.b(self.clutch_locked);
         w.f(self.clutch);
         w.b(self.auto_clutch);
@@ -278,7 +286,8 @@ impl Vehicle {
         let boost = r.f()?;
         let gear = r.u8()? as i8;
         let target = r.u8()? as i8;
-        let timers = [r.f()?, r.f()?, r.f()?];
+        let timers = [r.f()?, r.f()?, r.f()?, r.f()?, r.f()?, r.f()?];
+        let last_dir = r.u8()? as i8;
         let clutch_locked = r.b()?;
         let clutch = r.f()?;
         let auto_clutch = r.b()?;
@@ -323,7 +332,11 @@ impl Vehicle {
             self.gearbox.shift_timer,
             self.gearbox.cooldown,
             self.gearbox.reverse_hold,
+            self.gearbox.shift_total,
+            self.gearbox.load,
+            self.gearbox.brake_hold,
         ] = timers;
+        self.gearbox.last_dir = last_dir;
         self.clutch_locked = clutch_locked;
         self.clutch = clutch;
         self.auto_clutch = auto_clutch;

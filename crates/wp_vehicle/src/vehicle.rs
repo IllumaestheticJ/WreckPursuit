@@ -13,7 +13,7 @@ use wp_contracts::{
 use crate::aero::aero_forces;
 use crate::assists::{esc, filter_pedal, Tcs};
 use crate::brakes::{service_torques, Abs};
-use crate::drivetrain::{auto_clutch_update, diff_transfer, Converter, Gearbox};
+use crate::drivetrain::{auto_clutch_update, diff_transfer, Converter, Gearbox, ShiftInputs};
 use crate::engine::{Engine, EngineExtras, RPM_PER_RADPS};
 use crate::ffb::{self, FfbWheel};
 use crate::ground::WheelCaster;
@@ -587,6 +587,23 @@ impl Vehicle {
             / sum
     }
 
+    /// How much of the tires' lateral grip is in use, 0..1 (`Σ|Fy| / Σ μ·Fz·grip` over wheels
+    /// in contact, last tick). The automatic box holds its gear above ~0.75.
+    fn lateral_usage(&self) -> f32 {
+        let (mut used, mut cap) = (0.0f32, 0.0f32);
+        for (w, c) in self.wheels.iter().zip(&self.corners) {
+            if w.contact {
+                used += w.fy.abs();
+                cap += c.tire.lateral.d * w.fz.max(0.0) * w.grip;
+            }
+        }
+        if cap > 1.0 {
+            (used / cap).min(1.0)
+        } else {
+            0.0
+        }
+    }
+
     fn max_gear(&self) -> i8 {
         let n = self.def.drivetrain.gear_ratios.len() as i8;
         let gh = self.effects.gearbox_health;
@@ -667,16 +684,16 @@ impl Vehicle {
         let axle_omega = self.axle_omega(&base_split);
         let max_gear = self.max_gear();
         if assists.auto_gears {
-            self.gearbox.auto_shift(
-                &self.def.drivetrain,
-                self.def.engine.redline_rpm,
+            let inputs = ShiftInputs {
+                redline_rpm: self.def.engine.redline_rpm,
                 axle_omega,
-                raw_thr,
-                raw_brk,
-                v_fwd,
+                throttle: raw_thr,
+                brake: raw_brk,
+                speed: v_fwd,
                 max_gear,
-                dt,
-            );
+                lateral_usage: self.lateral_usage(),
+            };
+            self.gearbox.auto_shift(&self.def.drivetrain, &inputs, dt);
         } else {
             let g = self.gearbox.gear;
             if input.gear_up && g < max_gear {
@@ -700,7 +717,14 @@ impl Vehicle {
             // lock-up clutch opens for the shift, see `substep`).
             1.0
         } else if self.gearbox.shifting() {
-            0.0
+            // Clutch shift: the clutch releases, the box goes through neutral (engine
+            // rev-matched in `substep`) and re-engages already in sync.
+            let phase = self.gearbox.shift_engagement();
+            if assists.auto_clutch {
+                phase
+            } else {
+                phase.min(1.0 - input.clutch.clamp(0.0, 1.0))
+            }
         } else if assists.auto_clutch {
             auto_clutch_update(
                 self.clutch,
@@ -735,8 +759,20 @@ impl Vehicle {
         // TCS acts on engine torque once the clutch is locked; during an automatic-clutch
         // launch (slipping) wheel torque equals clutch torque, so TCS trims the clutch instead.
         let launching = self.auto_clutch && !self.clutch_locked && self.converter.is_none();
-        let throttle =
-            self.throttle_f * esc_out.throttle_scale * if launching { 1.0 } else { tcs_mult };
+        // Upshift on a clutch gearbox: ignition cut while the clutch is open, so the engine
+        // drops toward the new gear instead of flaring.
+        let shift_cut = if self.converter.is_none()
+            && self.gearbox.shifting()
+            && self.gearbox.target() > self.gearbox.gear
+        {
+            self.gearbox.shift_engagement()
+        } else {
+            1.0
+        };
+        let throttle = self.throttle_f
+            * esc_out.throttle_scale
+            * shift_cut
+            * if launching { 1.0 } else { tcs_mult };
         let clutch_trim = if launching { tcs_mult } else { 1.0 };
 
         // --- Steering ---------------------------------------------------------------------
@@ -1041,7 +1077,8 @@ impl Vehicle {
         // converter's lock-up clutch only above (90% of) its coupling rpm.
         let may_lock = match converter {
             Some(c) => !self.gearbox.shifting() && self.engine.rpm() >= 0.9 * c.def.coupling_rpm,
-            None => !self.auto_clutch || self.clutch >= 0.99,
+            // While a clutch shift re-engages, the clutch may lock as soon as it is in sync.
+            None => !self.auto_clutch || self.clutch >= 0.99 || self.gearbox.shifting(),
         };
         if !connected || !may_lock {
             self.clutch_locked = false;
@@ -1203,6 +1240,19 @@ impl Vehicle {
                 self.clutch_locked = true;
                 self.engine.omega = new_in;
             }
+        } else if let (true, Some(left)) = (
+            self.auto_clutch && converter.is_none(),
+            self.gearbox.neutral_time_left(),
+        ) {
+            // Neutral phase of an automated clutch shift: the ECU rev-matches the engine to
+            // the new gear (throttle cut on upshifts, blip on downshifts) before re-engaging.
+            let target = Gearbox::ratio_of(&self.def.drivetrain, self.gearbox.target())
+                * self.def.drivetrain.final_drive
+                * self.axle_omega(split);
+            let limit = self.def.engine.rev_limit_rpm / RPM_PER_RADPS;
+            let target = target.abs().clamp(idle_w, limit);
+            let k = (h / left.max(h)).min(1.0);
+            self.engine.omega += (target - self.engine.omega) * k;
         } else {
             self.engine.omega += h * t_e / i_e;
         }
