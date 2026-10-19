@@ -36,6 +36,10 @@ fn city() -> &'static (RoadGraph, Arc<wp_world::CityMap>) {
 
 impl Harness {
     fn new(hour: f32, seed: u64) -> Self {
+        Self::with_mode(hour, seed, DamageMode::Arcade)
+    }
+
+    fn with_mode(hour: f32, seed: u64, mode: DamageMode) -> Self {
         let (graph, map) = city().clone();
         // Racer path: from the middle of a Core arterial, straight-most continuation.
         let seg = graph
@@ -50,7 +54,7 @@ impl Harness {
         let path = graph.predict_path(start, [b[0] - a[0], b[1] - a[1]], 3000.0);
         let setup = PoliceSetup {
             seed,
-            mode: DamageMode::Arcade,
+            mode,
             internal_driving: true,
             hazards: false,
         };
@@ -391,6 +395,47 @@ fn player_units_get_suggestions_and_external_units_pull_over() {
     h.run(0.2, &[]);
     let u = h.police.units().iter().find(|u| u.id == ai).unwrap();
     assert_eq!(u.assignment, Assignment::OutOfService);
+}
+
+/// Lead round 8: Arcade health levels off around 0.2–0.3 under repeated hits, so an Arcade
+/// unit at 0.3 stays in service while a Simulation unit at the same health pulls over.
+#[test]
+fn disengage_health_depends_on_damage_mode() {
+    for (mode, health, out) in [
+        (DamageMode::Arcade, 0.3, false),
+        (DamageMode::Arcade, 0.1, true),
+        (DamageMode::Simulation, 0.3, true),
+    ] {
+        let mut h = Harness::with_mode(12.0, 7, mode);
+        h.run(0.5, &[]);
+        let ai = h
+            .police
+            .units()
+            .iter()
+            .find(|u| u.kind == UnitKind::Car && u.player.is_none() && !u.wrecked)
+            .unwrap();
+        let (ai, pos, heading) = (ai.id, ai.body.pos, ai.body.heading);
+        h.police
+            .bind_unit_entity(ai, EntityId(901), SteerGeometry::default());
+        h.police.sync_unit(
+            ai,
+            UnitSync {
+                pos: [pos[0], pos[1], 0.0],
+                vel: [0.0; 3],
+                heading,
+                health,
+                effects: HandlingEffects::NEUTRAL,
+            },
+        );
+        h.run(0.2, &[]);
+        let u = h.police.units().iter().find(|u| u.id == ai).unwrap();
+        assert_eq!(
+            u.assignment == Assignment::OutOfService,
+            out,
+            "{mode:?} at health {health}: {:?}",
+            u.assignment
+        );
+    }
 }
 
 #[test]

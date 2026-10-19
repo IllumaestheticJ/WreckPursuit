@@ -78,7 +78,7 @@ Assignments: `Patrol`, `Respond(incident)`, `Pursue(target)`, `Intercept(point)`
   - `Shadow`: hold 25–40 m back, 12 m more per extra unit; close to 8 m when the racer stops.
   - `Intercept`: units off the trail or far behind take the lane-legal fastest route to the
     racer's predicted position 10–20 s out.
-- **Disengage**: health < `disengage_health`, a bent wheel (`|toe| > bent_wheel_toe_rad`), a flat
+- **Disengage**: health < `disengage_health` (per mode: Arcade 0.15, Simulation 0.4), a bent wheel (`|toe| > bent_wheel_toe_rad`), a flat
   or a lost wheel, or a dead engine → pull over. Total loss at `total_loss_health[mode]`.
 
 **Driving** uses `wp_world::drive::DriveController`, the controller civilian traffic and opponent

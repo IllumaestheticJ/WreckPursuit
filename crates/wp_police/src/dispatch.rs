@@ -1157,7 +1157,13 @@ impl PoliceSystem {
             if u.assignment == Assignment::OutOfService || u.player.is_some() {
                 continue;
             }
-            let damaged = u.health < self.cfg.pursuit.tactics.disengage_health;
+            let damaged = u.health
+                < self
+                    .cfg
+                    .pursuit
+                    .tactics
+                    .disengage_health
+                    .get(self.setup.mode);
             let bent = u.must_pull_over(&self.cfg.pursuit);
             if damaged || bent {
                 let id = u.id;
