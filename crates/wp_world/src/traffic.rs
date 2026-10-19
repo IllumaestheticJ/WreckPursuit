@@ -414,10 +414,15 @@ pub struct Traffic {
 /// IDM acceleration with an IIDM-style free term above the desired speed.
 fn idm(v: f32, v0: f32, gap: f32, v_lead: f32, p: &DriverParams) -> f32 {
     let v0 = v0.max(0.1);
+    // x⁴ by multiplies: `powi` is not guaranteed bit-identical across targets.
+    let pow4 = |x: f32| {
+        let x2 = x * x;
+        x2 * x2
+    };
     let free = if v <= v0 {
-        p.max_accel * (1.0 - (v / v0).powi(4))
+        p.max_accel * (1.0 - pow4(v / v0))
     } else {
-        -p.comfort_decel * (1.0 - (v0 / v).powi(4))
+        -p.comfort_decel * (1.0 - pow4(v0 / v))
     };
     if !gap.is_finite() {
         return free;
