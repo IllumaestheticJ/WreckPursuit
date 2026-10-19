@@ -124,7 +124,12 @@ fn follows_a_route_between_pois_and_stops_at_the_end() {
 fn pursuit_params_lap_a_circuit_faster_than_civilian() {
     let w = world();
     let route = w
-        .plan_circuit(&[[-220.0, -220.0], [220.0, -220.0], [220.0, 220.0], [-220.0, 220.0]])
+        .plan_circuit(&[
+            [-220.0, -220.0],
+            [220.0, -220.0],
+            [220.0, 220.0],
+            [-220.0, 220.0],
+        ])
         .unwrap();
     let path = DrivePath::from_route(&route);
     assert!(path.looped());

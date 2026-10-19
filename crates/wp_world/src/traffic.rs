@@ -191,13 +191,79 @@ impl TrackedVehicle {
     }
 }
 
-/// Debris or another static obstacle on the road.
+/// Debris or another obstacle on the road (detached parts, wheels, knocked props). The sim
+/// loop passes every loose body each tick with [`crate::World::set_hazards`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Hazard {
     /// Position, m.
     pub pos: V3,
-    /// Radius, m.
+    /// Radius of the obstacle's footprint, m.
     pub radius_m: f32,
+    /// Velocity (rolling wheels, sliding panels), m/s; drivers extrapolate up to 2 s.
+    pub vel: V3,
+}
+
+impl Hazard {
+    /// A resting obstacle.
+    pub fn new(pos: V3, radius_m: f32) -> Self {
+        Self {
+            pos,
+            radius_m,
+            vel: [0.0; 3],
+        }
+    }
+
+    /// Where the obstacle will be after `t` seconds (extrapolation capped at 2 s).
+    pub fn pos_after(&self, t: f32) -> V2 {
+        let t = t.clamp(0.0, 2.0);
+        [self.pos[0] + self.vel[0] * t, self.pos[1] + self.vel[1] * t]
+    }
+}
+
+/// How a hazard ahead affects a car keeping a lane-relative lateral offset.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum HazardEffect {
+    /// Pass at this lane-relative lateral offset (+ right), m.
+    Swerve(f32),
+    /// Cannot pass in this lane: stop `gap` metres before it.
+    Blocked(f32),
+}
+
+/// Largest sideways shift within the lane drivers make for debris, m.
+const MAX_SWERVE_M: f32 = 1.5;
+
+/// Effect of hazard `h` on a car at `q` facing `f` (lane centre at lateral offset `-lat` from
+/// the car) travelling at `v`; `None` if it is not in the way within 40 m.
+fn hazard_effect(h: &Hazard, q: V2, f: V2, lat: f32, v: f32) -> Option<HazardEffect> {
+    let r0 = geom::sub(geom::xy(h.pos), q);
+    let t = geom::dot(r0, f).max(0.0) / v.max(1.0);
+    let r = geom::sub(h.pos_after(t), q);
+    let long = geom::dot(r, f);
+    // Keep reacting until the rear bumper is past it.
+    if !(-(HALF_L + h.radius_m + 0.3)..40.0).contains(&long) {
+        return None;
+    }
+    // Hazard offset from the lane centre, and the clearance a car body needs.
+    let h_lat = geom::dot(r, geom::right_of(f)) + lat;
+    let clear = h.radius_m + CAR_WIDTH_M * 0.5 + 0.3;
+    if h_lat.abs() >= clear {
+        return None;
+    }
+    // Pass on whichever side needs the smaller shift.
+    let left = h_lat - clear;
+    let right = h_lat + clear;
+    let shift = if left.abs() <= right.abs() {
+        left
+    } else {
+        right
+    };
+    if shift.abs() <= MAX_SWERVE_M {
+        Some(HazardEffect::Swerve(shift))
+    } else if long > 0.0 {
+        Some(HazardEffect::Blocked(long - h.radius_m - HALF_L))
+    } else {
+        None // already alongside: braking cannot help
+    }
 }
 
 /// Traffic tuning.
@@ -653,7 +719,7 @@ impl Traffic {
         self.sync_physical(map, inp);
         self.rebuild_lists();
         self.compute_poses(map);
-        self.compute_tv_blocks(map, inp.tracked);
+        self.compute_tv_blocks(map, inp.tracked, inp.hazards);
         self.decide(map, inp);
         self.lane_changes(map, inp);
         self.drive_physical(map);
@@ -774,13 +840,18 @@ impl Traffic {
         }
     }
 
-    fn compute_tv_blocks(&mut self, map: &CityMap, tracked: &[TrackedVehicle]) {
+    /// Mark junction connectors occupied by tracked vehicles or debris (nobody may enter them).
+    fn compute_tv_blocks(&mut self, map: &CityMap, tracked: &[TrackedVehicle], hazards: &[Hazard]) {
         for &s in &self.tv_block_list {
             self.tv_block[s as usize] = false;
         }
         self.tv_block_list.clear();
-        for t in tracked {
-            let q = geom::xy(t.pos);
+        let obstacles = tracked.iter().map(|t| (geom::xy(t.pos), 3.0)).chain(
+            hazards
+                .iter()
+                .map(|h| (geom::xy(h.pos), h.radius_m + CAR_WIDTH_M * 0.5 + 0.2)),
+        );
+        for (q, reach) in obstacles {
             if map.intersection_at(q).is_none() {
                 continue;
             }
@@ -789,7 +860,7 @@ impl Traffic {
                 if !sg.is_connector() {
                     continue;
                 }
-                if sg.project(q).dist < 3.0 && !self.tv_block[sid as usize] {
+                if sg.project(q).dist < reach && !self.tv_block[sid as usize] {
                     self.tv_block[sid as usize] = true;
                     self.tv_block_list.push(sid);
                 }
@@ -1219,32 +1290,34 @@ impl Traffic {
                 }
             }
 
-            // Debris.
+            // Debris: swerve within the lane (planned in the lane frame so it holds the
+            // offset while passing), or stop if it blocks the lane.
             for h in inp.hazards {
-                let r = geom::sub(geom::xy(h.pos), q);
-                let long = geom::dot(r, pose.f);
-                if !(0.0..30.0).contains(&long) {
-                    continue;
-                }
-                let latd = geom::dot(r, right);
-                let clear = h.radius_m + CAR_WIDTH_M * 0.5 + 0.3;
-                if latd.abs() < clear {
-                    let shift = if latd > 0.0 {
-                        latd - clear
-                    } else {
-                        latd + clear
-                    };
-                    if shift.abs() <= 1.5 && !seg.is_connector() {
-                        lat_target = a.lat + shift;
+                match hazard_effect(h, q, pose.f, a.lat, v) {
+                    Some(HazardEffect::Swerve(shift)) if !seg.is_connector() => {
+                        if lat_target == 0.0 || shift.abs() > lat_target.abs() {
+                            lat_target = shift;
+                        }
                         v0 = v0.min(seg.speed_limit * 0.6);
-                    } else {
-                        acc = acc.min(idm(
-                            v,
-                            v0,
-                            long - h.radius_m - HALF_L + p.min_gap_m,
-                            0.0,
-                            &p,
-                        ));
+                    }
+                    Some(HazardEffect::Swerve(_)) => {
+                        v0 = v0.min(seg.speed_limit * 0.6);
+                    }
+                    Some(HazardEffect::Blocked(gap)) => {
+                        acc = acc.min(idm(v, v0, gap + p.min_gap_m, 0.0, &p));
+                    }
+                    None => {}
+                }
+                // Mid lane change the body still overlaps the old lane: do not reach debris
+                // there before the sideways slide (1.3 m/s) has cleared it.
+                if a.ghost.is_some() {
+                    if let Some(HazardEffect::Blocked(gap)) = hazard_effect(h, q, pose.f, 0.0, v) {
+                        let side = geom::dot(geom::sub(geom::xy(h.pos), q), right).abs();
+                        let clear = h.radius_m + CAR_WIDTH_M * 0.5 + 0.3;
+                        let t_side = (clear - side).max(0.0) / 1.3;
+                        if gap / v.max(0.1) < t_side + 0.5 {
+                            acc = acc.min(idm(v, v0, gap + p.min_gap_m, 0.0, &p));
+                        }
                     }
                 }
             }
@@ -1339,13 +1412,26 @@ impl Traffic {
             let l = &map.net.lanes[lane as usize];
             let seg = map.seg(a.seg);
             let d_end = seg.length - a.s;
-            if a.s < 15.0
-                || d_end < 60.0
-                || a.v < 3.0
-                || a.lat.abs() > 0.3
-                || steps_to_s(self.step_count - a.last_lane_change) < 6.0
-                || a.yielding
+            // Debris blocking this lane forces a change (if a neighbour is free) regardless of
+            // speed, timers and the junction distance.
+            let pose = self.poses[i];
+            let blocked = inp.hazards.iter().any(|h| {
+                matches!(
+                    hazard_effect(h, geom::xy(pose.p), pose.f, a.lat, a.v),
+                    Some(HazardEffect::Blocked(_))
+                )
+            });
+            if !blocked
+                && (a.s < 15.0
+                    || d_end < 60.0
+                    || a.v < 3.0
+                    || a.lat.abs() > 0.3
+                    || steps_to_s(self.step_count - a.last_lane_change) < 6.0
+                    || a.yielding)
             {
+                continue;
+            }
+            if blocked && (d_end < 15.0 || a.yielding) {
                 continue;
             }
             let p = a.params;
@@ -1377,8 +1463,21 @@ impl Traffic {
                     continue;
                 }
                 let s2 = a.s * cs.length / seg.length.max(1e-3);
-                if cs.length - s2 < 60.0 {
+                if cs.length - s2 < if blocked { 15.0 } else { 60.0 } {
                     continue;
+                }
+                // The target lane must not be blocked by debris too.
+                if blocked {
+                    let (cp, ct) = cs.point_at(s2);
+                    let target_blocked = inp.hazards.iter().any(|h| {
+                        matches!(
+                            hazard_effect(h, geom::xy(cp), ct, 0.0, a.v),
+                            Some(HazardEffect::Blocked(_))
+                        )
+                    });
+                    if target_blocked {
+                        continue;
+                    }
                 }
                 let list = &self.lists[c as usize];
                 let lead = list.iter().find(|e| e.s > s2);
@@ -1412,7 +1511,9 @@ impl Traffic {
                     None => idm(a.v, v0, f32::INFINITY, 0.0, &p),
                 };
                 let bias = if to_right { 0.3 } else { -0.3 };
-                let incentive = a_c2 - a_c + p.politeness * (a_n2 - a_n + a_o2 - a_o) + bias;
+                let forced = if blocked { 10.0 } else { 0.0 };
+                let incentive =
+                    a_c2 - a_c + p.politeness * (a_n2 - a_n + a_o2 - a_o) + bias + forced;
                 if incentive > 0.25 && best.is_none_or(|b| incentive > b.0) {
                     best = Some((incentive, c, s2, to_right));
                 }
@@ -1943,11 +2044,15 @@ impl Traffic {
                     continue;
                 }
             }
-            // Do not spawn on top of a tracked vehicle.
+            // Do not spawn on top of a tracked vehicle or next to debris.
             if inp
                 .tracked
                 .iter()
                 .any(|t| geom::dist(geom::xy(t.pos), smp.pos) < 10.0)
+                || inp
+                    .hazards
+                    .iter()
+                    .any(|h| geom::dist(geom::xy(h.pos), smp.pos) < h.radius_m + 30.0)
             {
                 continue;
             }

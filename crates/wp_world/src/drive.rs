@@ -168,7 +168,9 @@ impl DrivePath {
                 pts.push(*p);
             }
         }
-        if looped && pts.len() > 2 && geom::dist(geom::xy(pts[0]), geom::xy(pts[pts.len() - 1])) > 0.01
+        if looped
+            && pts.len() > 2
+            && geom::dist(geom::xy(pts[0]), geom::xy(pts[pts.len() - 1])) > 0.01
         {
             pts.push(pts[0]);
         }
@@ -228,7 +230,9 @@ impl DrivePath {
             for i in 0..n {
                 let (c0, c1) = (self.cum[i], self.cum[i + 1]);
                 let hit = if self.looped {
-                    [-len, 0.0, len].iter().any(|o| c1 + o >= lo && c0 + o <= hi)
+                    [-len, 0.0, len]
+                        .iter()
+                        .any(|o| c1 + o >= lo && c0 + o <= hi)
                 } else {
                     c1 >= lo && c0 <= hi
                 };
@@ -346,7 +350,11 @@ impl PathFollower {
     /// Follower for a car definition (wheelbase and full-lock angle from `def`) currently at
     /// `speed_mps`, with traffic gains.
     pub fn for_vehicle(def: &VehicleDef, params: FollowParams, speed_mps: f32) -> Self {
-        let max_steer = def.wheels.iter().map(|w| w.max_steer_rad).fold(0.0, f32::max);
+        let max_steer = def
+            .wheels
+            .iter()
+            .map(|w| w.max_steer_rad)
+            .fold(0.0, f32::max);
         Self::new(
             DriveController::new(DriveGains::TRAFFIC, def.wheelbase_m, max_steer, speed_mps),
             params,
@@ -480,7 +488,7 @@ mod tests {
         assert!((q[0] - 10.0).abs() < 1e-4 && q[1].abs() < 1e-4);
         // Hint keeps the projection on the nearby stretch.
         let (s, _, _) = p.project([2.0, 1.0], Some(395.0));
-        assert!(s > 390.0 || s < 5.0, "{s}");
+        assert!(!(5.0..=390.0).contains(&s), "{s}");
         let open = DrivePath::new(&sq, false);
         assert_eq!(open.length(), 300.0);
     }
@@ -491,7 +499,10 @@ mod tests {
             DriveController::new(DriveGains::TRAFFIC, 2.7, 0.6, 0.0),
             FollowParams::CIVILIAN,
         );
-        let l = DrivePath::new(&[[0.0, 0.0, 0.0], [0.0, 200.0, 0.0], [200.0, 200.0, 0.0]], false);
+        let l = DrivePath::new(
+            &[[0.0, 0.0, 0.0], [0.0, 200.0, 0.0], [200.0, 200.0, 0.0]],
+            false,
+        );
         // Far from the corner: target speed. Near the 90° corner: much slower.
         assert!((f.planned_speed(&l, 0.0, 15.0, 15.0) - 15.0).abs() < 1e-3);
         assert!(f.planned_speed(&l, 195.0, 15.0, 15.0) < 8.0);
