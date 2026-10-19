@@ -9,6 +9,8 @@ publish.workspace = true
 [dependencies]
 wp_contracts.workspace = true
 wp_math.workspace = true
+# Decodes PoliceEvent payloads (Radio, SpikeHit, pursuits) until v0.3.0 types them in contracts.
+wp_police.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
@@ -17,3 +19,5 @@ serde_json.workspace = true
 wp_sim.workspace = true
 # Run the determinism lint over this crate (it is not in lint-determinism's SIM_CRATES yet).
 lint-determinism = { path = "../../tools/lint-determinism" }
+# Reads data/police/tools.toml in a test (scanner delays must match).
+toml.workspace = true

@@ -4189,8 +4189,10 @@ dependencies = [
  "lint-determinism",
  "serde",
  "serde_json",
+ "toml",
  "wp_contracts",
  "wp_math",
+ "wp_police",
  "wp_sim",
 ]
 
@@ -4381,6 +4383,7 @@ dependencies = [
  "serde_json",
  "simcli",
  "wasm-bindgen",
+ "wp_audio",
  "wp_contracts",
  "wp_math",
  "wp_net",

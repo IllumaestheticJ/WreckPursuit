@@ -8,14 +8,15 @@ use wp_contracts::{
     BodyRegion, Component, EntityId, LoadedCar, SimEvent, VehicleState, GRAVITY_MPS2, PHYSICS_DT,
 };
 use wp_math::{clamp01, Rng};
+use wp_police::PoliceEvent;
 
 use crate::collision::{impact_gain, impact_layers, pair_key, ImpactLayer, MaterialMap, PairState};
 use crate::data::{cues, AudioLibrary, CarAudioDef};
 use crate::engine::{engine_synth, update_engine, EngineAudioState, EngineLayers, EngineLimits};
 use crate::mixer::{CueRef, CueTable, Desire, MixerStats, VoiceMixer};
-use crate::scanner::{RadioLine, Scanner, ScannerTier};
+use crate::scanner::{RadioLine, RadioPriority, Scanner, ScannerTier};
 use crate::siren::{update_siren, SirenMode, SirenPattern, SirenState};
-use crate::spatial::{dot, len, sub, world_to_local};
+use crate::spatial::{dot, len, rotate, sub, world_to_local};
 use crate::tires::{update_tires, TireAudioState};
 use crate::types::{slot, AudioCommand, Bus, Listener, Priority, VoiceId};
 
@@ -87,6 +88,8 @@ struct WorldCues {
     wheel_off: CueRef,
     engine_fail: CueRef,
     steam: CueRef,
+    tire_burst: CueRef,
+    rattle: CueRef,
 }
 
 impl WorldCues {
@@ -115,6 +118,8 @@ impl WorldCues {
             wheel_off: t.get(pack, cues::WHEEL_OFF, false),
             engine_fail: t.get(pack, cues::ENGINE_FAIL, false),
             steam: t.get(pack, cues::STEAM_HISS, true),
+            tire_burst: t.get(pack, cues::TIRE_BURST, false),
+            rattle: t.get(pack, cues::BODY_RATTLE, true),
         }
     }
 }
@@ -127,6 +132,8 @@ struct VehicleRuntime {
     tires: TireAudioState,
     siren: SirenState,
     broken_glass: BTreeSet<BodyRegion>,
+    /// Worst `RegionDamaged` severity among body panels (drives the rattle loop).
+    panel_damage: f32,
 }
 
 /// Testbed / gameplay override of a vehicle's siren.
@@ -175,6 +182,10 @@ pub struct AudioDirector {
     rng: Rng,
     seed: u64,
     last_tick: Option<u64>,
+    /// Once `SimEvent::GlassShattered` has been seen, glass is no longer inferred from contacts.
+    glass_events_seen: bool,
+    /// Racers currently in a police pursuit (radio priority heuristic).
+    pursuits: BTreeSet<EntityId>,
     one_shot_seq: u32,
     stats: DirectorStats,
 }
@@ -200,6 +211,8 @@ impl AudioDirector {
             rng: Rng::new(seed),
             seed,
             last_tick: None,
+            glass_events_seen: false,
+            pursuits: BTreeSet::new(),
             one_shot_seq: 0,
             stats: DirectorStats::default(),
         }
@@ -297,6 +310,7 @@ impl AudioDirector {
         self.scanner.clear(out);
         self.vehicles.clear();
         self.pairs.clear();
+        self.pursuits.clear();
         self.last_tick = None;
         self.one_shot_seq = 0;
         self.rng = Rng::new(self.seed);
@@ -549,6 +563,23 @@ impl AudioDirector {
             out.push(d);
         }
         let thumps = to.thumps;
+        // Damaged panels rattle with speed and road texture.
+        if rt.panel_damage > 0.1 {
+            let g =
+                0.35 * rt.panel_damage * clamp01(len(vel) / 20.0) * (0.5 + clamp01(v.road_rumble));
+            let mut d = Desire::new(
+                VoiceId::new(e, slot::BODY_RATTLE),
+                Bus::World,
+                car.world.rattle,
+                up(Priority::Low),
+                pos,
+                vel,
+            );
+            d.gain = g;
+            d.load = rt.panel_damage;
+            d.pitch = 0.8 + 0.4 * clamp01(len(vel) / 30.0);
+            out.push(d);
+        }
         // Horn.
         if v.horn {
             let mut d = Desire::new(
@@ -685,10 +716,11 @@ impl AudioDirector {
                         }
                         let mut shattered = Vec::new();
                         for (ent, kind, region) in &sides {
-                            let intact = !self
-                                .vehicles
-                                .get(ent)
-                                .is_some_and(|r| r.broken_glass.contains(region));
+                            let intact = !self.glass_events_seen
+                                && !self
+                                    .vehicles
+                                    .get(ent)
+                                    .is_some_and(|r| r.broken_glass.contains(region));
                             let ls = impact_layers(&mix, *kind, *rel_speed, intact);
                             if ls.contains(&ImpactLayer::GlassShatter) {
                                 shattered.push((*ent, *region));
@@ -740,10 +772,103 @@ impl AudioDirector {
                     1.2,
                     out,
                 ),
-                // PoliceEvent payloads are opaque until contract v0.2.0 (request A-2); glass
-                // events (B #1) are not emitted yet.
+                SimEvent::GlassShattered { vehicle, region } => {
+                    self.glass_events_seen = true;
+                    self.glass_shattered(by_id, *vehicle, *region, out);
+                }
+                SimEvent::RegionDamaged {
+                    vehicle,
+                    region,
+                    severity,
+                } => {
+                    if is_panel(*region) {
+                        if let Some(r) = self.vehicles.get_mut(vehicle) {
+                            r.panel_damage = r.panel_damage.max(clamp01(*severity));
+                        }
+                    }
+                }
+                SimEvent::PoliceEvent { .. } => self.police_event(ev, by_id, tick, out),
                 _ => {}
             }
+        }
+    }
+
+    /// Glass of `region` broke (damage event): shatter at the region, once.
+    fn glass_shattered(
+        &mut self,
+        by_id: &BTreeMap<EntityId, &VehicleAudioInput>,
+        vehicle: EntityId,
+        region: BodyRegion,
+        out: &mut Vec<Desire>,
+    ) {
+        let Some(v) = by_id.get(&vehicle) else {
+            return;
+        };
+        let Some(car) = self.cars.get(v.car_id) else {
+            return;
+        };
+        if let Some(r) = self.vehicles.get_mut(&vehicle) {
+            if !r.broken_glass.insert(region) {
+                return;
+            }
+        }
+        let local = car.materials.region_centroid(region).unwrap_or([0.0; 3]);
+        let o = rotate(v.state.rot, local);
+        let p = v.state.pos;
+        let point = [p[0] + o[0], p[1] + o[1], p[2] + o[2]];
+        let cue = car.world.impacts[&ImpactLayer::GlassShatter];
+        let id = self.next_one_shot(vehicle.0);
+        let mut d = Desire::new(
+            id,
+            Bus::World,
+            cue,
+            Priority::Critical,
+            point,
+            v.state.lin_vel,
+        );
+        d.gain = self.lib.config.impacts.impact_gain;
+        d.pitch = self.rng.range_f32(0.92, 1.08);
+        out.push(d);
+    }
+
+    /// `wp_police` events: radio lines into the scanner, pursuit tracking, spike blow-outs.
+    fn police_event(
+        &mut self,
+        ev: &SimEvent,
+        by_id: &BTreeMap<EntityId, &VehicleAudioInput>,
+        tick: u64,
+        out: &mut Vec<Desire>,
+    ) {
+        let Some(pe) = PoliceEvent::from_sim_event(ev) else {
+            return;
+        };
+        match pe {
+            PoliceEvent::Radio { unit, text } => {
+                let priority = match unit {
+                    None => RadioPriority::Dispatch,
+                    Some(_) if !self.pursuits.is_empty() => RadioPriority::Pursuit,
+                    Some(_) => RadioPriority::Routine,
+                };
+                let line = RadioLine {
+                    unit: unit.map(|u| u.0).unwrap_or(0),
+                    text,
+                    priority,
+                    emitted_tick: tick,
+                };
+                self.scanner.push(&self.lib.config.scanner, line);
+            }
+            PoliceEvent::PursuitStarted { racer, .. } => {
+                self.pursuits.insert(racer);
+            }
+            PoliceEvent::PursuitEnded { racer, .. } => {
+                self.pursuits.remove(&racer);
+            }
+            PoliceEvent::SpikeHit { vehicle, wheels } => {
+                for _ in wheels.iter().filter(|w| **w) {
+                    self.vehicle_one_shot(by_id, vehicle, |w| w.tire_burst, 1.0, out);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -827,4 +952,18 @@ impl AudioDirector {
             out.push(d);
         }
     }
+}
+
+/// Outer body panels (they rattle when damaged; structure and glass do not).
+fn is_panel(r: BodyRegion) -> bool {
+    !matches!(
+        r,
+        BodyRegion::Windshield
+            | BodyRegion::RearGlass
+            | BodyRegion::FrameFront
+            | BodyRegion::FrameRear
+            | BodyRegion::FrameLeft
+            | BodyRegion::FrameRight
+            | BodyRegion::Cabin
+    )
 }

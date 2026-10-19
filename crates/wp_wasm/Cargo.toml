@@ -16,6 +16,8 @@ wp_sim.workspace = true
 wp_world.workspace = true
 # Multiplayer client (workstream F); default features only — never `native`.
 wp_net.workspace = true
+# Audio director (workstream J); pure logic, wasm32-clean. Used only by src/audio.rs.
+wp_audio.workspace = true
 # Canonical scenario format v2, sim setup (`build_sim`), drivers, expectations and replay.bin
 # (simcli lib is wasm32-clean; see tools/wasm-determinism).
 simcli = { path = "../../apps/simcli" }

@@ -387,6 +387,38 @@
       },
       "gain": 0.8,
       "looped": true
+    },
+    "tire/burst": {
+      "source": {
+        "Synth": {
+          "synth": "impact",
+          "params": {
+            "freq_hz": 160.0,
+            "decay_s": 0.25,
+            "noise": 1.0,
+            "crack": 1.0,
+            "ring": 0.0
+          }
+        }
+      },
+      "gain": 1.0,
+      "looped": false,
+      "duration_s": 0.5
+    },
+    "body/rattle": {
+      "source": {
+        "Synth": {
+          "synth": "noise",
+          "params": {
+            "lowpass_hz": 2500.0,
+            "highpass_hz": 300.0,
+            "crackle": 1.5,
+            "ripple_hz": 11.0
+          }
+        }
+      },
+      "gain": 0.7,
+      "looped": true
     }
   }
 }

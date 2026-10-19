@@ -1,0 +1,213 @@
+// Web Audio backend for wp_audio (workstream 13). The Rust AudioDirector (via wp_wasm's
+// audio_frame) decides everything that plays; this module turns its commands into Web Audio
+// nodes. Usage from main.ts:
+//
+//   const audio = new AudioSystem(scene.world, overlay);
+//   ...each frame: audio.update(rig.camera, events, dt, app.focus);
+//
+// The AudioContext starts on the first click / key press (browser autoplay rules). On start
+// the director is reset so it re-issues every looped voice.
+
+import * as THREE from "three";
+import { audioBridge } from "./bridge";
+import { AudioPanel } from "./panel";
+import { ScannerPlayer } from "./scanner";
+import { AudioMixer, setListener, VoicePool } from "./voices";
+import type { AudioCommand, AudioLibrary, Bus, DirectorStats, RadioPriority } from "./types";
+
+const TEST_LINES: Record<string, string[]> = {
+  Routine: ["Unit fourteen, respond to a fender bender on Harbor and Fifth.", "Copy dispatch, fourteen en route."],
+  Pursuit: ["Twelve in pursuit, grey coupe northbound on the expressway, speeds over one twenty.", "Suspect vehicle took the off ramp, heading downtown."],
+  Urgent: ["All units, air one has visual on the suspect, deploy spikes at the bridge.", "Officer needs assistance, Fifth and Market!"],
+};
+
+export class AudioSystem {
+  private ctx: AudioContext | null = null;
+  private mixer: AudioMixer | null = null;
+  private pool: VoicePool | null = null;
+  private scanner: ScannerPlayer | null = null;
+  private lib: AudioLibrary | null = null;
+  private panel: AudioPanel;
+  private lastPos: THREE.Vector3 | null = null;
+  private vel = new THREE.Vector3();
+  private muted = false;
+  private failed = false;
+  private focus = 0;
+  private lineNo = 0;
+  private lastStats: DirectorStats | null = null;
+  private readonly listenerArr = new Float32Array(12);
+  /** Smoothed cost of one audio frame (director in wasm + JSON + Web Audio calls), ms. */
+  frameMs = 0;
+  /** Smoothed cost of the wasm director call alone (incl. JSON), ms. */
+  directorMs = 0;
+  /** Smoothed cost of applying the commands to Web Audio, ms. */
+  applyMs = 0;
+  /** Audio frames run (one per rendered frame while running). */
+  frames = 0;
+  /** Plays per cue since start (e2e checks and debugging). */
+  readonly cueCounts: Record<string, number> = {};
+
+  constructor(private worldFrame: THREE.Object3D, parent: HTMLElement) {
+    this.panel = new AudioPanel(parent, {
+      start: () => this.start(),
+      setMaster: (v) => this.mixer?.master.gain.setTargetAtTime(this.muted ? 0 : v, this.ctx!.currentTime, 0.02),
+      setBus: (b, v) => this.mixer?.setUserGain(b, v),
+      setTier: (t) => this.safe(() => audioBridge.setScannerTier(t)),
+      setTts: (on) => {
+        if (this.scanner) this.scanner.tts = on;
+      },
+      setSiren: (m) => this.setSiren(m),
+      testRadio: (p) => this.testRadio(p),
+    });
+    (window as unknown as { __wpAudio?: AudioSystem }).__wpAudio = this;
+    const kick = () => this.start();
+    window.addEventListener("pointerdown", kick);
+    window.addEventListener("keydown", (e) => {
+      if (e.code === "KeyM" && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement)) this.toggleMute();
+      kick();
+    });
+  }
+
+  private safe(f: () => void): void {
+    try {
+      f();
+    } catch (e) {
+      console.warn("audio:", e);
+    }
+  }
+
+  /** Create / resume the AudioContext (must run inside a user gesture). */
+  start(): void {
+    if (this.failed) return;
+    if (this.ctx) {
+      if (this.ctx.state === "suspended") void this.ctx.resume();
+      return;
+    }
+    try {
+      this.lib = audioBridge.library();
+    } catch (e) {
+      this.failed = true;
+      this.panel.setStatus(`audio unavailable: ${e}`);
+      return;
+    }
+    this.ctx = new AudioContext({ latencyHint: "interactive" });
+    this.mixer = new AudioMixer(this.ctx);
+    this.pool = new VoicePool(this.ctx, this.mixer, this.lib);
+    this.scanner = new ScannerPlayer(this.pool);
+    const s = this.panel.settings;
+    this.mixer.master.gain.value = s.master;
+    for (const [b, v] of Object.entries(s.buses)) this.mixer.setUserGain(b as Bus, v);
+    this.scanner.tts = s.tts;
+    this.safe(() => audioBridge.setScannerTier(s.tier));
+    // Forget anything the director thinks is playing: it re-plays every loop next frame.
+    this.safe(() => void audioBridge.reset());
+    this.panel.setStatus(`${this.ctx.sampleRate} Hz · max ${this.lib.config.max_voices} voices`);
+  }
+
+  toggleMute(): void {
+    this.muted = !this.muted;
+    if (this.mixer && this.ctx) {
+      this.mixer.master.gain.setTargetAtTime(this.muted ? 0 : this.panel.settings.master, this.ctx.currentTime, 0.02);
+    }
+    this.panel.setStatus(this.muted ? "muted (M)" : "unmuted");
+  }
+
+  /** Siren mode for the focused car: "Default" | "Off" | "Auto" | "Wail" | "Yelp" | "Phaser" | "HiLo". */
+  setSiren(mode: string): void {
+    this.safe(() => audioBridge.setSiren(this.focus, mode === "Default" ? "" : mode));
+  }
+
+  /** Scanner tier: "None" | "Basic" | "Pro" | "Elite" (wp_police tiers 0/1/2). */
+  setTier(tier: string): void {
+    this.safe(() => audioBridge.setScannerTier(tier));
+  }
+
+  /** Whether the AudioContext is running. */
+  running(): boolean {
+    return this.ctx?.state === "running";
+  }
+
+  /** Recent scanner lines, newest first. */
+  radioLog(): unknown[] {
+    return this.scanner?.log ?? [];
+  }
+
+  /** Queue a canned test line of priority `p` as if police said it now. */
+  testRadio(p: RadioPriority): void {
+    const lines = TEST_LINES[p] ?? TEST_LINES.Routine;
+    const text = lines[this.lineNo++ % lines.length];
+    this.safe(() => audioBridge.radio(12 + (this.lineNo % 3), p, text));
+  }
+
+  /** Per-frame update. `events` = this frame's drained SimEvents (as decoded JSON). */
+  update(camera: THREE.Camera, events: unknown[], dt: number, focus: number): void {
+    this.focus = focus;
+    const ctx = this.ctx;
+    if (!ctx || ctx.state !== "running" || !this.pool || !this.mixer || !this.scanner) return;
+    // Camera → sim world space (the scene's world group is rotated Z-up → Y-up).
+    const camPos = camera.getWorldPosition(new THREE.Vector3());
+    const pos = this.worldFrame.worldToLocal(camPos.clone());
+    const fwdW = camera.getWorldDirection(new THREE.Vector3());
+    const upW = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.getWorldQuaternion(new THREE.Quaternion()));
+    const fwd = this.worldFrame.worldToLocal(camPos.clone().add(fwdW)).sub(pos).normalize();
+    const up = this.worldFrame.worldToLocal(camPos.clone().add(upW)).sub(pos).normalize();
+    if (this.lastPos && dt > 0) {
+      const v = pos.clone().sub(this.lastPos).divideScalar(dt);
+      // Camera cuts teleport: ignore absurd speeds instead of a Doppler squawk.
+      if (v.length() < 120) this.vel.lerp(v, 0.3);
+      else this.vel.set(0, 0, 0);
+    }
+    this.lastPos = pos.clone();
+    const a = this.listenerArr;
+    a.set([pos.x, pos.y, pos.z, this.vel.x, this.vel.y, this.vel.z, fwd.x, fwd.y, fwd.z, up.x, up.y, up.z]);
+    setListener(ctx, [pos.x, pos.y, pos.z], [fwd.x, fwd.y, fwd.z], [up.x, up.y, up.z]);
+
+    const t0 = performance.now();
+    let out;
+    try {
+      out = audioBridge.frame(a, events.length ? JSON.stringify(events) : "", focus);
+    } catch (e) {
+      this.failed = true;
+      this.panel.setStatus(`audio stopped: ${e}`);
+      this.pool.stopAll();
+      return;
+    }
+    const t1 = performance.now();
+    this.directorMs += (t1 - t0 - this.directorMs) * 0.1;
+    this.apply(out.commands);
+    const t2 = performance.now();
+    this.applyMs += (t2 - t1 - this.applyMs) * 0.1;
+    this.pool.collect();
+    this.frameMs += (performance.now() - t0 - this.frameMs) * 0.1;
+    this.frames++;
+    this.lastStats = out.stats;
+    this.panel.update(out.stats, this.pool.size, this.scanner.log);
+  }
+
+  private apply(cmds: AudioCommand[]): void {
+    const pool = this.pool!;
+    for (const c of cmds) {
+      if ("Play" in c) {
+        const p = c.Play;
+        this.cueCounts[p.cue] = (this.cueCounts[p.cue] ?? 0) + 1;
+        pool.play(p.voice, p.bus, p.pack, p.cue, p.looped, p.params, p.synth);
+      } else if ("Set" in c) {
+        pool.set(c.Set.voice, c.Set.params);
+      } else if ("Stop" in c) {
+        pool.stop(c.Stop.voice, c.Stop.fade_s);
+      } else if ("Duck" in c) {
+        this.mixer!.duck(c.Duck.bus, c.Duck.gain, c.Duck.fade_s);
+      } else if ("RadioSay" in c) {
+        const r = c.RadioSay;
+        this.scanner!.say(r.line, r.unit, r.text, r.priority, r.voice_pitch);
+      } else if ("RadioEnd" in c) {
+        this.scanner!.end(c.RadioEnd.line, c.RadioEnd.interrupted);
+      }
+    }
+  }
+
+  /** Last director counters (e2e / HUD). */
+  stats(): DirectorStats | null {
+    return this.lastStats;
+  }
+}

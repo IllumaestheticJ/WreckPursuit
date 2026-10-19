@@ -13,6 +13,7 @@ import { VehicleView } from "./vehicle_view";
 import { CameraRig, CAMERA_MODES, type CameraMode } from "./cameras";
 import { Hud } from "./hud";
 import { TelemetryPlots } from "./telemetry";
+import { AudioSystem } from "./audio";
 
 // v2: canonical simcli replay.bin (v1 held the retired WPR\x01 format).
 const LAST_REPLAY_KEY = "wp.testbed.lastReplay.v2";
@@ -64,6 +65,7 @@ async function main(): Promise<void> {
   const rig = new CameraRig(scene.renderer.domElement);
   const hud = new Hud(overlay);
   const plots = new TelemetryPlots(overlay);
+  const audio = new AudioSystem(scene.world, overlay);
 
   // ----- session management --------------------------------------------------------------
 
@@ -389,6 +391,7 @@ async function main(): Promise<void> {
     }
     plots.canvas.style.display = layers.on("telemetry") ? "" : "none";
     rig.update(focusView?.root ?? null, focusView?.info.body_size_m ?? [2, 4.5, 1.4], focusRec >= 0 ? cur[focusRec + S.speed] : 0, dt);
+    audio.update(rig.camera, events, app.paused && !replay ? 0 : dt, app.focus);
 
     const r0 = performance.now();
     scene.render(rig.camera);

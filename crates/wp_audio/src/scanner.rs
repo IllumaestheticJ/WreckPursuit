@@ -3,10 +3,11 @@
 //! time, and duck the music bus while a line plays. A more urgent line chops a less urgent
 //! one mid-sentence.
 //!
-//! Lines come from `PoliceEvent::Radio { unit, text }` once `wp_police` defines that payload
-//! (contract request A-2 in `docs/integration/audio.md`); until then callers push
-//! [`RadioLine`]s directly ([`crate::AudioDirector::push_radio_line`]). The tier comes from
-//! `wp_police`'s scanner query; until it exists the caller sets it.
+//! Lines come from `wp_police::PoliceEvent::Radio { unit, text }` (decoded from
+//! `SimEvent::PoliceEvent` by the director) or [`crate::AudioDirector::push_radio_line`]. The
+//! police payload has no priority yet (request A-2): the director uses Dispatch for dispatch
+//! lines, Pursuit while any pursuit is active, Routine otherwise. The listener's tier is set by
+//! the caller (the item lives with the player's gadgets).
 
 use serde::{Deserialize, Serialize};
 use wp_contracts::PHYSICS_DT;
@@ -31,33 +32,37 @@ pub enum RadioPriority {
     Urgent,
 }
 
-/// Scanner quality owned by the listener (from `wp_police` / `wp_economy` once they expose it).
+/// Scanner quality owned by the listener. `Basic`/`Pro`/`Elite` are `wp_police`'s scanner tiers
+/// 0/1/2 (`data/police/tools.toml` `scanner_delay_s`; the audio config mirrors those delays and a
+/// test keeps them equal).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum ScannerTier {
     /// No scanner: lines are not heard.
     None,
-    /// Cheapest scanner (longest delay).
+    /// Police tier 0 (longest delay).
     Basic,
-    /// Mid scanner.
-    Improved,
-    /// Good scanner.
+    /// Police tier 1.
     Pro,
-    /// Best scanner (shortest delay).
+    /// Police tier 2 (shortest delay).
     Elite,
 }
 
 impl ScannerTier {
-    /// Parse `"None" | "Basic" | "Improved" | "Pro" | "Elite"`.
+    /// Parse `"None" | "Basic" | "Pro" | "Elite"`.
     pub fn parse(s: &str) -> Option<Self> {
-        [
-            Self::None,
-            Self::Basic,
-            Self::Improved,
-            Self::Pro,
-            Self::Elite,
-        ]
-        .into_iter()
-        .find(|t| format!("{t:?}") == s)
+        [Self::None, Self::Basic, Self::Pro, Self::Elite]
+            .into_iter()
+            .find(|t| format!("{t:?}") == s)
+    }
+
+    /// `wp_police` tier index (`PoliceSystem::scanner(tier, ..)`), `None` without a scanner.
+    pub fn police_index(self) -> Option<usize> {
+        match self {
+            ScannerTier::None => None,
+            ScannerTier::Basic => Some(0),
+            ScannerTier::Pro => Some(1),
+            ScannerTier::Elite => Some(2),
+        }
     }
 }
 
@@ -65,8 +70,8 @@ impl ScannerTier {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ScannerConfig {
-    /// Delay before a line is heard for Basic, Improved, Pro, Elite, s.
-    pub tier_delay_s: [f32; 4],
+    /// Delay before a line is heard for Basic, Pro, Elite, s (= `wp_police` `scanner_delay_s`).
+    pub tier_delay_s: [f32; 3],
     /// Maximum queued lines; the lowest-priority oldest is dropped beyond this.
     pub max_queue: usize,
     /// A released line not spoken within this time is dropped (stale), s.
@@ -88,13 +93,7 @@ pub struct ScannerConfig {
 impl ScannerConfig {
     /// Delay for a tier, s (`None` for no scanner).
     pub fn delay_s(&self, tier: ScannerTier) -> Option<f32> {
-        match tier {
-            ScannerTier::None => None,
-            ScannerTier::Basic => Some(self.tier_delay_s[0]),
-            ScannerTier::Improved => Some(self.tier_delay_s[1]),
-            ScannerTier::Pro => Some(self.tier_delay_s[2]),
-            ScannerTier::Elite => Some(self.tier_delay_s[3]),
-        }
+        tier.police_index().map(|i| self.tier_delay_s[i])
     }
 }
 
@@ -299,7 +298,7 @@ mod tests {
 
     fn cfg() -> ScannerConfig {
         ScannerConfig {
-            tier_delay_s: [10.0, 7.0, 5.0, 3.0],
+            tier_delay_s: [10.0, 6.0, 3.0],
             max_queue: 4,
             stale_after_s: 20.0,
             words_per_s: 2.5,
@@ -333,8 +332,7 @@ mod tests {
     fn delay_by_tier() {
         for (tier, delay) in [
             (ScannerTier::Basic, 10.0),
-            (ScannerTier::Improved, 7.0),
-            (ScannerTier::Pro, 5.0),
+            (ScannerTier::Pro, 6.0),
             (ScannerTier::Elite, 3.0),
         ] {
             let c = cfg();

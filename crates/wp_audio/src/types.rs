@@ -88,6 +88,8 @@ pub mod slot {
     pub const SUPERCHARGER: u32 = 0x0000_0191;
     /// Cooling-damage steam hiss loop.
     pub const STEAM: u32 = 0x0000_01A0;
+    /// Loose / damaged body panels rattling over bumps.
+    pub const BODY_RATTLE: u32 = 0x0000_01A1;
     /// Tire squeal loop (paved surfaces).
     pub const SQUEAL: u32 = 0x0000_0200;
     /// Loose-surface scrub loop (gravel, dirt, grass).

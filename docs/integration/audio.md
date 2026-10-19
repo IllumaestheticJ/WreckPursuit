@@ -1,0 +1,115 @@
+# Audio integration notes
+
+- **Workstream / prompt:** 13 — audio (machine J)
+- **Branch:** `ws/audio`
+- **Crates / folders owned:** `crates/wp_audio`, `data/audio/`, `apps/testbed-web/src/audio/`
+- **Contract version built against:** 0.2.0
+
+## Exposes
+
+**`wp_audio`** (pure logic, depends only on `wp_contracts`, `wp_math`, `serde`, `serde_json`;
+wasm32-clean). Details: `crates/wp_audio/README.md`.
+
+- `AudioLibrary::{embedded(), load_dir(path), validate()}` — config, per-car defs, packs.
+- `AudioDirector::new(lib, seed)`, `register_car(&LoadedCar)` (idempotent),
+  `update(&AudioFrame) -> Vec<AudioCommand>`, `set_siren_override(entity, Option<SirenOverride>)`,
+  `set_scanner_tier(ScannerTier)`, `push_radio_line(RadioLine)`, `reset(&mut out)`, `stats()`.
+- `AudioFrame { tick, listener: Listener, focus: Option<EntityId>, vehicles: &[VehicleAudioInput], events: &[SimEvent] }`
+  with `VehicleAudioInput { entity, car_id, state: &VehicleState, throttle, horn, siren, road_rumble }`.
+  Call once per rendered frame with the events drained since the previous call. Time comes
+  only from `tick`; a tick going backwards (new session, replay seek) resets and stops all.
+- `AudioCommand` = `Play | Set | Stop | Duck | RadioSay | RadioEnd` (serde, externally tagged).
+  Same frames in → byte-identical commands out. Gains include distance attenuation; pitch and
+  `freq_hz` include Doppler; backends only pan.
+- Building blocks reusable elsewhere: `collision::MaterialMap` (lattice nearest-node material
+  lookup), `siren::SirenCadence::freq_at_phase`, `spatial::{distance_gain, doppler}`.
+
+**Data contract** (sound designers): `data/audio/audio_config.json`,
+`data/audio/cars/<car_id>.json` (`CarAudioDef`), `data/audio/packs/<id>.json` (`SamplePack`,
+spec in the README). Every shipped car has a def; procedural placeholder packs
+(`engine_proc_{i4,i6,v6,v8}`, `world_proc`, `siren_proc`, `radio_proc`) make every car audible
+today.
+
+**wasm surface** (`crates/wp_wasm/src/audio.rs`, additive): `audio_library()`,
+`audio_frame(listener[12], events_json, focus) -> {commands, stats}`, `audio_set_siren(entity, mode)`,
+`audio_set_scanner_tier(tier)`, `audio_radio(unit, priority, text)`, `audio_reset()`.
+
+**Browser backend** (`apps/testbed-web/src/audio/`): `AudioSystem(worldFrame, overlay)` +
+`update(camera, events, dt, focus)`. Voice pool with one panner per voice, listener from the
+camera (converted to sim space through `scene.world`), buses Engine / World / Police / Ui /
+Music with user + duck gain, radio EQ chain, procedural synths for every cue, sample loading
+from `/data/audio/packs/<pack>/<file>` when a pack uses `Samples`. Debug panel bottom-right
+(click to unfold): master + bus sliders, **M** mutes, scanner tier, TTS toggle, siren mode for
+the focused car, test radio lines, voice/culling counters, radio log. `window.__wpAudio` for
+tests. Check: `node apps/testbed-web/e2e/audio.mjs` (after the wasm build).
+
+## Needs
+
+| From | What | Why | Workaround now |
+|---|---|---|---|
+| E (06, police) | a priority on `PoliceEvent::Radio` (A-2, for v0.3.0's typed `PoliceEvent`) | scanner ordering / chop | **Radio lines are decoded now** (`wp_police::PoliceEvent::from_sim_event`); priority = Dispatch / Pursuit-while-pursuing / Routine heuristic |
+| E (06) / G (08) | which scanner tier the player owns (A-3) | tier delay | caller sets the tier; delays equal `data/police/tools.toml` `scanner_delay_s` (test-enforced) |
+| E (06) | police AI sets `VehicleInput::siren` (and a pattern, A-6) | sirens on AI units | testbed override per entity; `SirenMode::Auto` picks wail/yelp by speed |
+| Lead (`wp_sim`) | contacts while sliding (A-4) | scrape loops | scrapes play from the few events above 50 N·s; the sideswipe scenario keeps the expectation pending |
+| B (03) | start emitting `GlassShattered` / `RegionDamaged` (v0.2.0) | exact glass timing, panel rattle | both handled; until B emits, glass is inferred from contacts and nothing rattles |
+| D (05) | traffic agents in a snapshot (`TrafficAgentSnapshot`, D #3) | traffic engine/tire sound | none: kinematic traffic is silent; physical traffic cars that are `Sim` vehicles are heard |
+| I (10) | add `wp_audio` to `lint-determinism::SIM_CRATES` | CI determinism lint | `tests/director.rs::passes_determinism_lint` runs the lint on this crate |
+| C (04) | keep the 3-line hook in `main.ts` when refactoring; maybe a layer toggle for the audio panel | — | — |
+
+## Contract change requests
+| # | Change (type / field / variant) | Why | Who is affected | Status |
+|---|---|---|---|---|
+| A-1 | `ContactImpulse::material_kind: MaterialKind` (+ `region: Option<BodyRegion>`), and on `SimEvent::Contact` `material_a/material_b: Option<MaterialKind>`, `region_a/region_b: Option<BodyRegion>` | collision layers by material (plastic crack vs steel dent vs glass) without every consumer repeating a lattice lookup; the damage model already knows the nodes it hit. `wp_audio::collision::MaterialMap` is the reference implementation `wp_sim` can reuse | lead (`wp_sim` fills), 03, 04 (contact layer colours), 07 (replicated event size) | requested |
+| A-2 | in v0.3.0's typed `PoliceEvent`: `Radio { unit, text, priority: RadioPriority }` with `RadioPriority { Chatter, Routine, Dispatch, Pursuit, Urgent }` (+ P's C9 line id) | scanner orders and chops by priority; captain UI can colour lines | 06, 13, 04, 07 | requested for v0.3.0 (Radio itself exists in `wp_police` and is consumed) |
+| A-3 | the player's scanner tier as data (economy gadget or `RacerView` field), tier index = `wp_police` scanner tier | tier delay per player | 06, 08, 13 | requested (delays already shared: audio config == `tools.toml`) |
+| A-4 | `SimEvent::Contact` emitted for every touching tick (or every net tick) regardless of `CONTACT_EVENT_MIN_IMPULSE_NS`, or a new `SimEvent::ContactSustained { a, b, point, slide_mps }` at 60 Hz | a 0.5 s sideswipe currently yields 3 events (`apps/simcli/scenarios/audio/sideswipe_scrape.ron`), so scrape loops cannot be sustained | lead (`wp_sim`), 10 (event counts in goldens), 07 (event volume — could stay local, not replicated) | requested |
+| A-5 | `VehicleState::throttle_applied: f32` (after TCS/launch control) and optionally `boost: f32` | engine load from the applied throttle (TCS cuts, rev-matching blips audible); real boost from the vehicle model instead of the audio estimate | 02, 07 | requested |
+| A-6 | `VehicleInput::siren_pattern: u8` (0 = auto, 1 wail, 2 yelp, 3 phaser, 4 hi-lo) | police players/AI choose patterns and it must replicate | 06, 07, 04 | requested |
+
+## Changes outside my crates
+- `Cargo.toml` (root): `crates/wp_audio` workspace member + `wp_audio` workspace dependency.
+- `crates/wp_wasm/Cargo.toml`: `wp_audio` dependency. `crates/wp_wasm/src/lib.rs`: `pub mod audio;`
+  and one row in the module doc table. `crates/wp_wasm/src/audio.rs`: new, the audio surface
+  (only uses `with_app`/`json`/`err` from `lib.rs`; nothing else depends on it).
+- `apps/testbed-web/src/main.ts`: import `AudioSystem`, construct it after the HUD, keep the
+  drained events in a local and call `audio.update(rig.camera, events, dt, app.focus)` after the
+  camera update.
+- `apps/testbed-web/e2e/audio.mjs`: new audio end-to-end check (the existing `e2e/run.mjs` is
+  unchanged and still passes).
+- `apps/simcli/scenarios/audio/sideswipe_scrape.ron`: new scenario (format v2) documenting
+  request A-4 (gating: approach speed + ≥ 1 contact; pending: sustained contacts — 7 events on
+  v0.2.0 `main`), golden `apps/simcli/golden/audio_sideswipe_scrape/` (new, `[bless]` commit).
+- `wp_audio` now depends on `wp_police` (pure, wasm-clean) to decode `PoliceEvent` payloads.
+
+## v0.2.0 update (lead run 3)
+- Merged `main` (contract 0.2.0). New `SimEvent::GlassShattered` → glass one-shot at the region
+  (disables contact-inferred glass), `SimEvent::RegionDamaged` → `body/rattle` loop on damaged
+  outer panels. `PoliceEvent::Radio` / `PursuitStarted` / `PursuitEnded` / `SpikeHit` decoded
+  (`tire/burst`). Scanner tiers aligned with `wp_police` (Basic/Pro/Elite = 10/6/3 s).
+- No Lead feedback was filed for audio in run 3; STATUS's "integration doc; hook into testbed"
+  are both done (testbed hook landed in this branch).
+
+## Perf numbers
+| Measurement | Machine | Native | Browser | Budget |
+|---|---|---|---|---|
+| `AudioDirector::update`, 24 cars, 8 contacts/frame (`tests/perf.rs`, release) | cloud container | 0.089 ms/frame (0.0037 ms/car) | — | proposed 0.5 ms native / 1 ms browser |
+| `audio_frame` in wasm incl. JSON, `?bench=24` | cloud container, headless Chromium, software GL at ~5 fps (≈ 45 ticks per frame) | — | 0.4–0.7 ms per frame | proposed 1 ms |
+| Web Audio command application, `?bench=24` | same | — | ≈ 12 ms of main-thread time per second (≈ 0.2 ms per 60 Hz frame equivalent; ~0.01 ms per `Set`, ~0.4 ms per engine `Play`) | — |
+| Voices, `?bench=24` | same | — | 24–30 looped + 5–10 one-shots of 40, ~110 desires culled per frame | `max_voices` 40 |
+
+## Known gaps
+- Contact material comes from the lattice (A-1); glass shatters on inferred glass contacts, not
+  from a damage event (B #1 pending).
+- Scrapes are thin until A-4: sliding contacts under 50 N·s per tick emit no events.
+- No occlusion by buildings, no tunnel/underpass reverb, no interior camera filtering.
+- Kinematic traffic is silent (needs D #3 snapshot); police AI does not switch sirens on yet
+  (no police system).
+- TTS via `speechSynthesis` bypasses the Web Audio radio EQ (browser limitation); squelch and
+  static go through it. Recorded line packs will use the EQ.
+- No music player; the Music bus exists and is ducked by the scanner.
+- Procedural packs are placeholders: recognisably engine-like (firing frequency, harmonics,
+  cross-plane burble, limiter chop), not realistic. Recorded packs plug in by changing
+  `source` to `Samples` — no code change.
+
+## Lead feedback
+(Written by the integration lead: failing tests, expected vs actual.)
