@@ -18,8 +18,9 @@ use wp_math::smoothstep;
 use crate::conditions::LocalConditions;
 use crate::data::SurfaceTable;
 
-/// Tire properties the weather model needs. Built from a [`TireDef`] until the contract has
-/// width/tread fields (request W-4 in `docs/integration/weather.md`).
+/// Tire properties the weather model needs. Width comes from `WheelDef::width_m`; the tread
+/// flag is inferred from the [`TireDef`] until the contract has one (request W-4 in
+/// `docs/integration/weather.md`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TireProfile {
     /// Tread width, m (wider tires aquaplane earlier).
@@ -42,7 +43,7 @@ impl Default for TireProfile {
 }
 
 impl TireProfile {
-    /// Derive a profile from a tire definition. `wet_ratio` comes from the tire's surface table
+    /// Derive a profile from a tire definition and the wheel's `WheelDef::width_m`. `wet_ratio` comes from the tire's surface table
     /// (`WetAsphalt / Asphalt`, missing entries = 1.0 as in `wp_vehicle`); `treaded` is inferred
     /// as `wet_ratio >= 0.6` (semi-slicks and slicks fall below) until the contract has a tread
     /// field.
