@@ -3043,6 +3043,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "tuning-probe"
+version = "0.1.0"
+dependencies = [
+ "ron",
+ "serde",
+ "serde_json",
+ "simcli",
+ "toml",
+ "wp_contracts",
+ "wp_damage",
+ "wp_vehicle",
+]
+
+[[package]]
 name = "typeid"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
