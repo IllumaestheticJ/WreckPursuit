@@ -1,6 +1,7 @@
 // Golden "feel" case: night pursuit escape. 23:00 in the procedural city, a racer speeds past a
-// patrol car which starts a pursuit; the racer must break line of sight and escape (prompts
-// 05/06). Until the city and police land this runs on the flat world with warnings.
+// patrol car parked at the kerb which starts a pursuit; the racer (northbound lane of the x = 60
+// collector) kills its lights and must break line of sight and escape (prompts
+// 05/06). The city and traffic are real (procedural 8×8); police is still pending.
 (
     name: "golden_night_pursuit_escape",
     seed: 106,
@@ -13,19 +14,23 @@
     entities: [
         (
             id: "racer",
+            pos: (61.5, -400.0, 0.0),
             car: "debug_coupe",
+            speed_mps: 35.0,
             driver: cruise(target_mps: 35.0),
-            inputs: [(t_s: 0.0, input: (headlights: true)), (t_s: 10.0, input: (headlights: false, steer: 0.4)), (t_s: 11.0, input: ())],
+            inputs: [(t_s: 0.0, input: (headlights: true)), (t_s: 6.0, input: (headlights: false))],
         ),
-        (id: "patrol", car: "debug_sedan", pos: (8.0, 200.0, 0.0), inputs: [(t_s: 0.0, input: (headlights: true))]),
+        (id: "patrol", car: "debug_sedan", pos: (70.0, -200.0, 0.0), inputs: [(t_s: 0.0, input: (headlights: true))]),
     ],
-    duration_s: 17.0,
+    duration_s: 12.0,
     hash_every: 24,
     expect: [
-        speed_at(entity: "racer", t_s: 9.5, min: 30.0, max: 40.0),
+        speed_at(entity: "racer", t_s: 5.5, min: 30.0, max: 40.0),
+        // Stays in its lane: no crash into parked cars or traffic.
+        metric(entity: "racer", name: "final_health", min: 0.8, max: 1.0),
     ],
     expect_pending: [
-        pursuit_started_before(t_s: 9.0),
-        police_event_before(kind: 3, t_s: 17.0),
+        pursuit_started_before(t_s: 6.0),
+        police_event_before(kind: 3, t_s: 12.0),
     ],
 )

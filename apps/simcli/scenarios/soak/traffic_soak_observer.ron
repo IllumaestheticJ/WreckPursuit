@@ -1,0 +1,26 @@
+// World soak with a player car parked at the city core (the sim tracks it, so the sightline
+// spawn rule applies). Same city and density as `world_traffic_soak`. The population dips to
+// ≈ 360 while the spawn ring churns around the player (reported to 05); the floor here is 350.
+(
+    name: "world_traffic_soak_observer",
+    seed: 5,
+    city: procedural(seed: 1, blocks_x: 12, blocks_y: 12, block_m: 110.0),
+    time_of_day_h: 12.0,
+    time_ratio: 1.0,
+    traffic_density: 4.0,
+    assists: ai,
+    entities: [
+        (id: "observer", car: "debug_sedan", pos: (0.0, 0.0, 0.0)),
+    ],
+    duration_s: 60.0,
+    expect: [
+        world_metric(name: "civilian_collisions", min: 0.0, max: 0.0),
+        world_metric(name: "traffic_agents_min", min: 350.0, max: 400.0),
+        world_metric(name: "traffic_moving_frac_min", min: 0.5, max: 1.0),
+        metric(name: "distance_m", min: 0.0, max: 0.5),
+    ],
+    expect_pending: [
+        // 05's target with a player present.
+        world_metric(name: "traffic_agents_min", min: 380.0, max: 400.0),
+    ],
+)

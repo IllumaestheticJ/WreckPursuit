@@ -9,19 +9,20 @@
         (
             id: "coupe",
             car: "debug_coupe",
-            driver: cruise(target_mps: 12.0, until_s: 5.0),
+            speed_mps: 12.0,
+            driver: cruise(target_mps: 12.0, until_s: 1.0),
             inputs: [
                 (t_s: 0.0, input: ()),
-                (t_s: 5.0, input: (throttle: 1.0, steer: -1.0)),
-                (t_s: 6.5, input: (throttle: 0.7, steer: 0.4)),
-                (t_s: 9.0, input: ()),
+                (t_s: 1.0, input: (throttle: 1.0, steer: -1.0)),
+                (t_s: 2.5, input: (throttle: 0.7, steer: 0.4)),
+                (t_s: 5.0, input: ()),
             ],
         ),
     ],
-    duration_s: 10.0,
+    duration_s: 6.0,
     hash_every: 24,
     expect: [
-        speed_at(t_s: 4.9, min: 10.0, max: 14.0),
+        speed_at(t_s: 0.9, min: 10.0, max: 14.0),
     ],
     expect_pending: [
         max_lateral_g(min: 0.7, max: 1.4),
