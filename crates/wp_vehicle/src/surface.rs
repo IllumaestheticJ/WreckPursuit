@@ -1,9 +1,17 @@
 //! Per-wheel road conditions under the contact patch (weather hook, K's W-1).
 //!
-//! [`SurfaceConditions`] is an *input* set from outside the vehicle model — today by whoever
-//! owns the vehicle (`Vehicle::set_surface_conditions`), after contract v0.3.0 by the lead from
-//! `WorldQuery::weather_at`. Its default is a dry road at 20 °C, which leaves grip untouched
-//! (bit-for-bit), so cars without a weather system behave exactly as before.
+//! [`SurfaceConditions`] come from one of two places ([`ConditionsSource`]):
+//! - **World** (the default): every step, each wheel in contact reads
+//!   `WorldQuery::weather_at(contact point)` (contract v0.3.0, W-1) and converts it with
+//!   [`SurfaceConditions::from_local`]. Worlds without weather answer `LocalConditions::DRY`,
+//!   which converts to a neutral dry road, so they stay bit-for-bit as before.
+//! - **Manual**: whoever owns the vehicle calls `Vehicle::set_surface_conditions` (tests,
+//!   benches, tuning tools); the world's weather is then ignored until
+//!   `Vehicle::use_world_weather`.
+//!
+//! **Painted lines**: a contact on [`SurfaceType::PaintedLine`] (or conditions with
+//! `painted_line` set) gets the paint factor below. Its dry tire-vs-surface grip is the tire's
+//! `PaintedLine` entry if it has one, else its `Asphalt` entry (`crate::tire::surface_grip`).
 //!
 //! The tire's grip on a wheel becomes
 //!
@@ -24,7 +32,7 @@
 //! with depth and tire width (≈ 90 km/h for a 205 mm treaded tire in 3 mm of water; slicks ≈ 35 %
 //! earlier). Above the onset the tire rides on the water and keeps only a fraction of its grip.
 
-use wp_contracts::{SurfaceType, TireDef};
+use wp_contracts::{LocalConditions, SurfaceType, TireDef};
 use wp_math::smoothstep;
 
 /// Road conditions under one wheel. `Default` = dry, 20 °C, no paint (no effect on grip).
@@ -57,6 +65,30 @@ impl SurfaceConditions {
     pub fn wetness(&self) -> f32 {
         (self.water_depth_mm / FULL_WET_DEPTH_MM).clamp(0.0, 1.0)
     }
+}
+
+impl SurfaceConditions {
+    /// Convert the world's weather at a contact point (`WorldQuery::weather_at`): water film +
+    /// standing water → `water_depth_mm`, road temperature → `temperature_c`. Paint comes from
+    /// the contact's surface type, not from the weather, so `painted_line` is false.
+    /// `LocalConditions::DRY` converts to a neutral road ([`SurfaceConditions::is_neutral`]).
+    pub fn from_local(local: &LocalConditions) -> Self {
+        Self {
+            water_depth_mm: local.water_mm.max(0.0),
+            temperature_c: local.road_temp_c,
+            painted_line: false,
+        }
+    }
+}
+
+/// Where a vehicle's [`SurfaceConditions`] come from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ConditionsSource {
+    /// Read `WorldQuery::weather_at` at each wheel's contact point every step (default).
+    #[default]
+    World,
+    /// Use the values last given to `Vehicle::set_surface_conditions` / `set_wheel_conditions`.
+    Manual,
 }
 
 impl Default for SurfaceConditions {
@@ -107,8 +139,8 @@ pub struct TireWetProfile {
     pub width_m: f32,
     /// The compound's `WetAsphalt / Asphalt` ratio (0..1).
     pub wet_ratio: f32,
-    /// Has drainage grooves. Inferred as `wet_ratio >= 0.6` (semi-slicks fall below) until the
-    /// contract has a tread field.
+    /// Has drainage grooves: `TireDef::treaded` (v0.3.0) when the tire file sets it, else
+    /// inferred as `wet_ratio >= 0.6` (slicks fall below), like `wp_weather::TireProfile`.
     pub treaded: bool,
 }
 
@@ -121,7 +153,7 @@ impl TireWetProfile {
         Self {
             width_m,
             wet_ratio,
-            treaded: wet_ratio >= 0.6,
+            treaded: def.treaded.unwrap_or(wet_ratio >= 0.6),
         }
     }
 }
@@ -130,7 +162,7 @@ impl TireWetProfile {
 /// is measured on asphalt).
 pub fn wet_loss_scale(surface: SurfaceType) -> f32 {
     match surface {
-        SurfaceType::Asphalt | SurfaceType::WetAsphalt => 1.0,
+        SurfaceType::Asphalt | SurfaceType::WetAsphalt | SurfaceType::PaintedLine => 1.0,
         SurfaceType::Concrete => 1.1,
         SurfaceType::Curb => 1.3,
         SurfaceType::Metal => 1.6,
@@ -188,14 +220,17 @@ pub fn aquaplane_amount(depth_mm: f32, speed_mps: f32, tire: &TireWetProfile) ->
 }
 
 /// The per-wheel conditions grip multiplier and the aquaplaning amount `(grip, planing)`.
-/// Exactly `(1.0, 0.0)` for neutral conditions. `speed_mps` = the wheel's forward speed.
+/// Exactly `(1.0, 0.0)` for neutral conditions off paint. `speed_mps` = the wheel's forward
+/// speed. Paint applies when `cond.painted_line` is set or `surface` is
+/// [`SurfaceType::PaintedLine`].
 pub fn conditions_grip(
     cond: &SurfaceConditions,
     surface: SurfaceType,
     speed_mps: f32,
     tire: &TireWetProfile,
 ) -> (f32, f32) {
-    if cond.is_neutral() {
+    let on_paint = cond.painted_line || surface == SurfaceType::PaintedLine;
+    if cond.is_neutral() && !on_paint {
         return (1.0, 0.0);
     }
     let wetness = cond.wetness();
@@ -207,7 +242,7 @@ pub fn conditions_grip(
         let loss = ((1.0 - tire.wet_ratio) * wet_loss_scale(surface)).clamp(0.0, 0.95);
         1.0 - loss * shape
     };
-    let paint = if cond.painted_line {
+    let paint = if on_paint {
         wp_math::lerp(PAINT_DRY_FACTOR, PAINT_WET_FACTOR, shape)
     } else {
         1.0
@@ -285,6 +320,40 @@ mod tests {
     }
 
     #[test]
+    fn painted_line_surface_counts_as_paint() {
+        let t = street();
+        let dry = conditions_grip(&SurfaceConditions::DRY, SurfaceType::PaintedLine, 20.0, &t).0;
+        assert!((dry - PAINT_DRY_FACTOR).abs() < 1e-6, "{dry}");
+        // Wet paint surface == wet asphalt with the painted flag (no double paint factor).
+        let flagged = SurfaceConditions {
+            painted_line: true,
+            ..wet(0.8)
+        };
+        let a = conditions_grip(&wet(0.8), SurfaceType::PaintedLine, 20.0, &t).0;
+        let b = conditions_grip(&flagged, SurfaceType::Asphalt, 20.0, &t).0;
+        let c = conditions_grip(&flagged, SurfaceType::PaintedLine, 20.0, &t).0;
+        assert!((a - b).abs() < 1e-6 && (a - c).abs() < 1e-6, "{a} {b} {c}");
+        assert!(a < 0.5, "wet paint is slippery: {a}");
+    }
+
+    #[test]
+    fn from_local_dry_is_neutral_and_maps_water_and_temperature() {
+        assert!(SurfaceConditions::from_local(&LocalConditions::DRY).is_neutral());
+        let rain = LocalConditions {
+            water_mm: 2.0,
+            wetness: 1.0,
+            standing_water_mm: 1.5,
+            road_temp_c: 4.0,
+            ..LocalConditions::DRY
+        };
+        let c = SurfaceConditions::from_local(&rain);
+        assert_eq!(c.water_depth_mm, 2.0);
+        assert_eq!(c.temperature_c, 4.0);
+        assert!(!c.painted_line);
+        assert_eq!(c.wetness(), 1.0);
+    }
+
+    #[test]
     fn cold_and_ice() {
         let cold_dry = SurfaceConditions {
             temperature_c: -10.0,
@@ -342,5 +411,18 @@ mod tests {
         let def = wp_contracts::load_tire_def(p).unwrap();
         let prof = TireWetProfile::new(&def, 0.205);
         assert!((prof.wet_ratio - 0.7).abs() < 1e-6 && prof.treaded);
+        // The v0.3.0 `treaded` field wins over the wet-ratio inference.
+        let slick = wp_contracts::TireDef {
+            treaded: Some(false),
+            ..def.clone()
+        };
+        assert!(!TireWetProfile::new(&slick, 0.205).treaded);
+        let p = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../data/tires/semi_slick.json"
+        );
+        let semi = wp_contracts::load_tire_def(p).unwrap();
+        assert_eq!(semi.treaded, Some(false));
+        assert!(!TireWetProfile::new(&semi, 0.245).treaded);
     }
 }

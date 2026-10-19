@@ -591,6 +591,97 @@ fn surface_conditions_wet_ice_and_dry_default() {
     assert_eq!(a.state_hash(), b.state_hash());
 }
 
+/// Brake from `speed` on a flat world with `surface` and `weather` (world-weather source).
+fn brake_in_world(
+    c: &LoadedCar,
+    speed: f32,
+    surface: wp_contracts::SurfaceType,
+    weather: wp_contracts::LocalConditions,
+) -> f32 {
+    use wp_vehicle::rig::FlatWorld;
+    let world = FlatWorld {
+        surface,
+        weather,
+        ..FlatWorld::default()
+    };
+    let mut rig = Rig::with_world(c, Default::default(), world, [0.0; 3], 0.0);
+    rig.teleport([0.0; 3], 0.0, speed, 0.0);
+    let mut furthest = 0.0f32;
+    for _ in 0..(240 * 10) {
+        rig.step(
+            &VehicleInput {
+                brake: 1.0,
+                ..Default::default()
+            },
+            &metric_assists(),
+        );
+        furthest = furthest.max(rig.state().pos[1]);
+    }
+    furthest
+}
+
+#[test]
+fn world_weather_reaches_the_wheels() {
+    use wp_contracts::{LocalConditions, SurfaceType};
+    use wp_vehicle::{ConditionsSource, SurfaceConditions};
+    let c = car("debug_sedan");
+    let rain = LocalConditions {
+        water_mm: 0.6,
+        wetness: 1.0,
+        standing_water_mm: 0.1,
+        ..LocalConditions::DRY
+    };
+    let dry = brake_in_world(&c, 20.0, SurfaceType::Asphalt, LocalConditions::DRY);
+    let wet = brake_in_world(&c, 20.0, SurfaceType::Asphalt, rain);
+    // Same answer as setting the conditions by hand.
+    let manual = brake_from(&c, 20.0, SurfaceConditions::from_local(&rain));
+    assert!((1.2 * dry..1.7 * dry).contains(&wet), "dry {dry} wet {wet}");
+    assert!((wet - manual).abs() < 1e-3, "world {wet} manual {manual}");
+    // A dry world is bit-identical to the old manual-dry path.
+    assert_eq!(dry, brake_from(&c, 20.0, SurfaceConditions::DRY));
+
+    // Manual conditions override the world until `use_world_weather`.
+    let world = wp_vehicle::rig::FlatWorld {
+        weather: rain,
+        ..Default::default()
+    };
+    let mut rig = Rig::with_world(&c, Default::default(), world, [0.0; 3], 0.0);
+    assert_eq!(rig.vehicle.conditions_source(), ConditionsSource::World);
+    rig.vehicle
+        .set_surface_conditions([SurfaceConditions::DRY; 4]);
+    assert_eq!(rig.vehicle.conditions_source(), ConditionsSource::Manual);
+    run(&mut rig, throttle(0.3), &metric_assists(), 0.5);
+    assert_eq!(rig.vehicle.surface_conditions()[0], SurfaceConditions::DRY);
+    rig.vehicle.use_world_weather();
+    run(&mut rig, throttle(0.3), &metric_assists(), 0.5);
+    assert_eq!(rig.vehicle.surface_conditions()[0].water_depth_mm, 0.6);
+}
+
+#[test]
+fn painted_line_grip_dry_and_wet() {
+    use wp_contracts::{LocalConditions, SurfaceType};
+    let c = car("debug_sedan");
+    let rain = LocalConditions {
+        water_mm: 0.6,
+        wetness: 1.0,
+        standing_water_mm: 0.1,
+        ..LocalConditions::DRY
+    };
+    let road = brake_in_world(&c, 20.0, SurfaceType::Asphalt, LocalConditions::DRY);
+    let paint = brake_in_world(&c, 20.0, SurfaceType::PaintedLine, LocalConditions::DRY);
+    let wet_road = brake_in_world(&c, 20.0, SurfaceType::Asphalt, rain);
+    let wet_paint = brake_in_world(&c, 20.0, SurfaceType::PaintedLine, rain);
+    // Dry paint: a few percent longer. Wet paint: much longer than the wet road.
+    assert!(
+        paint > road && paint < 1.1 * road,
+        "road {road} paint {paint}"
+    );
+    assert!(
+        wet_paint > 1.3 * wet_road,
+        "wet road {wet_road} wet paint {wet_paint}"
+    );
+}
+
 #[test]
 fn aquaplaning_in_standing_water_at_speed() {
     use wp_vehicle::SurfaceConditions;

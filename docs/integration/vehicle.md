@@ -3,7 +3,7 @@
 - **Workstream / prompt:** 02 — vehicle dynamics
 - **Branch:** `ws/vehicle`
 - **Crates / folders owned:** `crates/wp_vehicle`, `data/tires/`
-- **Contract version built against:** 0.2.0 (round 6b work is inherent API, ready for v0.3.0)
+- **Contract version built against:** 0.3.0 (round 8: `weather_at`, `PaintedLine`, `TireDef::treaded`)
 
 ## Exposes
 
@@ -99,6 +99,17 @@ For prompt 04, the two calls worth exposing are `sim.vehicles()[i].vehicle.telem
   `golden_night_pursuit_escape` replay, `regression_grid_24`, `smoke_straight_line`,
   `smoke_subset_systems`, `vehicle_sedan_*`) because `street` lateral D went 1.0 → 0.96. All
   scenario expectations still pass; coupe/sport-tire goldens are unchanged.
+
+- (Round 8, lead item 2) `data/weather/surfaces.toml` (K's file): `[surfaces.PaintedLine]` row
+  (wet_factor 0.50 = `marking_wet_factor`, film 0.8 mm, dries/drains like a kerb, no
+  infiltration, puddle weight 1.0) and the stale "no SurfaceType yet" comment. K: please review
+  the numbers. `SurfaceTable::surface` doc in `wp_weather/src/data.rs` still says PaintedLine
+  falls back to asphalt — K's code, left alone.
+- (Round 8) `crates/wp_weather/tests/vehicle_grip.rs` (K's test): the pinned interim limitation
+  `damp_road_below_threshold_is_still_dry_grip` failed exactly as intended once W-1 landed →
+  renamed `damp_road_below_threshold_now_costs_grip` (damp > dry, < 1.3× dry), plus
+  `interim_remap_off_gives_the_same_wet_stop` (remap on vs `interim_surface = false`: within
+  5 %).
 
 ## Perf numbers
 
@@ -405,3 +416,47 @@ corner hold, braking hold), clutch shifts in three phases with rev-matching, `fi
 full strength 0.6 → 0.3 s, snapshot format 3. Details, numbers and the two test bounds that
 moved: `docs/integration/playtest-feel.md` and the README's "Automatic gearbox" section. When
 you merge your converter work, `auto_shift` now takes `&ShiftInputs`.
+### Round 8 — done (A, 2026-10-19)
+1. **`weather_at` per wheel.** Vehicles read `WorldQuery::weather_at(contact point)` for every
+   wheel in contact, every step, by default (`ConditionsSource::World`;
+   `SurfaceConditions::from_local`: `water_mm` → water depth, `road_temp_c` → temperature).
+   `set_surface_conditions` / `set_wheel_conditions` switch to `Manual` (tests, benches,
+   tools); `use_world_weather()` switches back. Dry worlds (every world without weather) are
+   bit-identical (tested: `world_weather_reaches_the_wheels`). No double counting with the
+   interim `WetAsphalt` remap (the vehicle skips its wet term on `WetAsphalt`); with the remap
+   off, the 100–0 wet stop is within 5 % of the remap result (`wp_weather` test), so **the lead
+   can set `interim_surface = false` when wiring `Weathered`/`WithWeather` into `wp_sim`**; a
+   damp road below the remap threshold now costs grip too. `rig::FlatWorld` has a `weather`
+   field (default `DRY`). Cost: one `weather_at` call per wheel per tick (a grid lookup in
+   `wp_weather`).
+   **`PaintedLine`**: a contact on it gets the paint factor (×0.95 dry, ×0.65 of the wet road),
+   and its dry tire grip falls back to the tire's `Asphalt` entry (no tire lists
+   `PaintedLine`). Test `painted_line_grip_dry_and_wet`. Also: `TireDef::treaded` (v0.3.0) is
+   honoured (`semi_slick`, `drag_radial` set `treaded: false`; unset = inferred as before).
+2. **`surfaces.toml` `PaintedLine` row** — added (see "Changes outside my crates").
+3. **Review of the lead helpers' code** — I own `drivetrain.rs` shift logic
+   (`lead/playtest-feel`) and `slide.rs` + steering slide help (`lead/playtest-drift`) now.
+   Read in full; structure, snapshot coverage (format 3 carries every new gearbox field) and
+   determinism are fine. Fixed:
+   - **Destroyed gearbox leaked drive** (bug): with `gearbox_health ≤ 0` (`max_gear` 0) and
+     the throttle held, the automatic cycled neutral → 1st → neutral (the reverse/first
+     handling ran before the damage check), giving drive in every re-engage phase; a box
+     destroyed in reverse stayed in reverse. Now neutral and stays there (test
+     `destroyed_gearbox_stays_in_neutral_under_throttle`). Manual box: no shifting into
+     reverse with a destroyed gearbox either.
+   - **Slide gyro on slopes**: the gyro's path-rate estimate used the chassis force sum, which
+     excludes gravity (Rapier adds it), so on a side slope the tires' uphill force (and body
+     roll) read as the path curving (≈ g·sinθ/v, 0.05 rad/s on a 10 % camber at 72 km/h). Now
+     gravity is included. `examples/slide` before → after: worst slip 1–3° lower in most
+     rows (e.g. rampart_50 keyboard TCS/ESC off 26° → 23°), recovery counts and every
+     high-speed catch unchanged; wheel preset unaffected (help 0).
+   Kept as designed, noted in the README known gaps: with help on the rack always unwinds
+   ~2.5× faster, also on grip (keyboard flicks are quicker); gamepad with TCS off recovers
+   only 2–3 of 6 power-exit cases (help 0.3 is light by design; TCS on recovers 6/6).
+#### Checks (round 8)
+`cargo fmt --check`, `clippy --workspace --all-targets -D warnings`, `cargo test --workspace
+--no-fail-fast` (115 test binaries, 0 failures), `cargo build --target wasm32-unknown-unknown
+-p wp_wasm`: pass. Scenarios / goldens: 3 goldens re-blessed `[bless]` (`regression_grid_24`,
+`smoke_coupe_circle`, `vehicle_coupe_slalom`) — caused only by the slide-gyro gravity fix
+(keyboard help while sliding); with that commit reverted 0 goldens fail, so the `weather_at`
+wiring is bit-identical on every scenario. All scenario range expectations pass.

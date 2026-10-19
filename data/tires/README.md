@@ -37,6 +37,12 @@ the coefficients, not hand-typed).
   ~0.45–0.68; grass lowest.
 - `street` lateral D = 0.96 (was 1.0): all-season car-level grip is 0.82–0.92 g (09's class
   band); 1.0 read like a summer tire.
+- **`treaded`** (contract v0.3.0): `false` on `semi_slick` and `drag_radial` (no drainage
+  grooves: they aquaplane at ≈ 0.65× the treaded onset speed). Omitted = inferred from the wet
+  ratio (`≥ 0.6` → treaded), which matches every other compound here.
+- **`PaintedLine`**: no tire lists it; the vehicle uses the tire's `Asphalt` entry there and
+  applies the paint factor itself (`wp_vehicle::surface`: ×0.95 dry, ×0.65 of the wet road).
+  Add a `PaintedLine` entry only for a compound that should differ on paint when dry.
 - Rolling resistance 0.010–0.016; `wear_rate` is a placeholder (wear not simulated yet).
 
 All coefficient sets are generic engineering approximations, not fitted to any branded tire.

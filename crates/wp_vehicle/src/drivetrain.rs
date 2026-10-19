@@ -274,6 +274,12 @@ impl Gearbox {
             return;
         }
         let t = def.shift_time_s;
+        // Destroyed gearbox (no usable gear): neutral, and stay there — checked before the
+        // reverse handling, which would otherwise pick 1st or reverse again every shift.
+        if inp.max_gear < 1 {
+            self.shift(0, t);
+            return;
+        }
         // Reverse handling.
         if self.gear >= 1 {
             if inp.speed.abs() < 0.5 && inp.brake > 0.5 && thr < 0.05 {
@@ -290,10 +296,6 @@ impl Gearbox {
             if thr > 0.05 && inp.speed > -0.5 {
                 self.shift(1, t);
             }
-            return;
-        }
-        if inp.max_gear < 1 {
-            self.shift(0, t);
             return;
         }
         if self.gear > inp.max_gear {
@@ -685,6 +687,32 @@ mod tests {
         assert_eq!(h.gear, 3, "upshifted right after braking");
         hold(&mut h, &d, &coasting, 1.0);
         assert!(h.gear > 3, "light-load upshifts once the hold is over");
+    }
+
+    #[test]
+    fn destroyed_gearbox_stays_in_neutral_under_throttle() {
+        // Gearbox health 0 → max_gear 0: the box must drop to neutral and stay there, not
+        // cycle neutral → 1st → neutral (each cycle would leak drive through the re-engage
+        // phase).
+        let d = dt();
+        let mut g = Gearbox::new();
+        g.set(2);
+        let broken = ShiftInputs {
+            max_gear: 0,
+            ..inputs(axle_at(&d, 2, 0.4), 1.0)
+        };
+        hold(&mut g, &d, &broken, 0.5);
+        assert_eq!(g.gear, 0);
+        // Reverse is lost too.
+        let mut r = Gearbox::new();
+        r.set(-1);
+        hold(&mut r, &d, &broken, 0.5);
+        assert_eq!(r.gear, 0);
+        for _ in 0..300 {
+            g.auto_shift(&d, &broken, 0.01);
+            g.update(0.01);
+            assert_eq!(g.total_ratio(&d), 0.0, "drive leaked in gear {}", g.gear);
+        }
     }
 
     #[test]
