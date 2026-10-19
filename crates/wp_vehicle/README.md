@@ -53,6 +53,21 @@ throttle-dependent launch rpm; TCS trims *clutch* torque while slipping, engine 
 locked). An anti-stall term stops the clutch dragging the engine below 60% of idle (no stall
 model).
 
+**Torque converter** (`DrivetrainDef::torque_converter`, contract v0.2.0): replaces the launch
+clutch on automatics. The impeller absorbs `C·ω_e²·f(SR)` with `C` set so the engine absorbs its
+full-throttle torque exactly at `stall_rpm` with the output held (stall test reads `stall_rpm`);
+the turbine multiplies by `stall_torque_ratio` at stall falling to 1:1 at the coupling point
+(speed ratio 0.85); coasting flows back 1:1 (engine braking). The lock-up clutch (capacity
+`clutch_max_nm`) closes above `coupling_rpm` at speed ratio ≥ 0.92 and opens below 90% of it.
+The converter's stiffness is applied semi-implicitly on both engine and wheels (it is stiff in
+first gear). Idle in gear creeps at walking pace; TCS cuts throttle (no clutch to trim).
+
+**On-demand AWD** (`DriveLayout::AwdOnDemand`): a coupling state 0..1 moves the rear share from
+`1 − base_front_split` to `max_rear_split`. It closes when the front axle's wheel speed out-runs
+the rear by `engage_slip` (fully at 2×) and pre-loads at launch (60% of throttle below 5 m/s);
+it closes at 10/s and opens at 2/s (hydraulic clutch pack), so it does not chatter. Part of the
+snapshot. (Reworked from the lead's stateless first cut, which toggled every tick.)
+
 **Low-speed guards:** slip ratio and slip angle use `max(|vx|, 3 m/s)` denominators, slip
 angle has a relaxation-length lag, and below 1 m/s the lateral force blends into a viscous
 model. A parked car settles with < 1 cm drift and no jitter (tested).
@@ -85,8 +100,9 @@ Damage `brake_scale` and ABS then modulate per wheel; the handbrake adds
 ## Snapshots and client prediction
 
 `Vehicle::snapshot()` / `restore()` capture the **full** dynamic state as an opaque ~0.9 kB
+(format 2)
 byte blob (`VehicleSnapshot::as_bytes` / `from_bytes`): chassis, wheels, engine, gearbox timers,
-clutch, input filters, TCS/ABS, heat/fuel and the applied `HandlingEffects`. Restore + same
+clutch, input filters, TCS/ABS, AWD coupling, heat/fuel and the applied `HandlingEffects`. Restore + same
 inputs = bit-identical replay (tested). `Vehicle::set_state(&VehicleState)` is the approximate
 version for when only the public state is available (< 0.5 m drift after 1 s in tests).
 
@@ -173,6 +189,5 @@ Browser not measured yet (expect ~2×; budget 0.30 ms).
 - Probe is a ray, not a swept shape (kerbs/edges are point-sampled); shape-cast later.
 - No engine stall model (anti-stall slip instead); no tire temperature or wear yet
   (`wear_rate` unused); no camber change with suspension travel.
-- AWD has a fixed centre split (no on-demand coupling yet — 09's "Haldex-style" car needs a
-  contract field).
+- AWD on-demand is front-biased only (couples the rear when the front slips).
 - `VehicleSim::step` (trait) cannot reach Rapier; `wp_sim` calls `step_with_ground`.
