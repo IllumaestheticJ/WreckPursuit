@@ -6,6 +6,7 @@ Layout::
       sweep.json                  spec, points, results, timing (what the dashboard reads)
       points/p0001/job.json       the probe job
       points/p0001/result.json    the probe result (+ simcli outputs for scenario probes)
+      points/p0001/frames/*.svg   top-down frames (scenario and pursuit probes)
 
 A point whose job.json is unchanged and has a result.json is reused (pass `force` to re-run),
 so editing one param of a spec and re-running only measures the new points.
@@ -32,6 +33,9 @@ REPO = Path(__file__).resolve().parents[3]
 
 SWEEPS = REPO / "out" / "sweeps"
 """Where sweeps are written."""
+
+OUTPUT_KINDS = ("scenario", "pursuit")
+"""Probe kinds that write files (simcli outputs, frames) into the point folder."""
 
 
 def probe_binary(build: bool = True) -> Path:
@@ -139,8 +143,8 @@ def run(
     def job(p: specmod.Point) -> None:
         nonlocal done
         pj = dict(p.job)
-        if pj["probe"].get("kind") == "scenario":
-            pj["out"] = str(pdirs / p.id)  # simcli outputs land next to result.json
+        if pj["probe"].get("kind") in OUTPUT_KINDS:
+            pj["out"] = str(pdirs / p.id)  # simcli outputs + frames land next to result.json
         res_reused = _run_point(exe, pdirs / p.id, pj, force)
         with lock:
             results[p.id] = res_reused
@@ -186,6 +190,8 @@ def run(
                 "info": res.get("info") or {},
                 "thumb": res.get("thumb") or {},
                 "artifacts": [f"points/{p.id}/{a}" for a in res.get("artifacts") or []],
+                # Top-down frames (SVG), in time order; the dashboard's thumbnails.
+                "frames": [f"points/{p.id}/{a}" for a in res.get("artifacts") or [] if a.startswith("frames/")],
                 "wall_s": res.get("wall_s"),
             }
         )

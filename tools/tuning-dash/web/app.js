@@ -501,20 +501,42 @@ function thumbSvg(thumb, w = 64, h = 40) {
   return `<svg class="thumb" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-label="top-down path">${paths}</svg>`;
 }
 
+// ---------- frames ----------
+function artifactUrl(a) {
+  return `/api/artifact/${encodeURIComponent(S.sweep.name)}/${a.split("/").map(encodeURIComponent).join("/")}`;
+}
+
+// The frame that tells the story: the first hit if there was one, else the last frame.
+function keyFrame(p) {
+  const fr = p.frames || [];
+  if (!fr.length) return null;
+  const hit = ((p.info || {}).frames || []).findIndex((n) => String(n).includes("first hit"));
+  return hit >= 0 && hit < fr.length ? fr[hit] : fr[fr.length - 1];
+}
+
+function frameImg(a, w, h) {
+  return `<img class="frame" src="${artifactUrl(a)}" width="${w}" height="${h}" alt="top-down frame ${esc(a.split("/").pop())}" loading="lazy">`;
+}
+
+function thumbCell(p) {
+  const k = keyFrame(p);
+  return k ? frameImg(k, 96, 60) : thumbSvg(p.thumb);
+}
+
 function renderTable() {
   const t = $("#points-table");
   const sw = S.sweep;
   const params = paramDefs().map((p) => p.label);
   const mkeys = tableMetricKeys();
   const showVar = sw.variants.length > 1;
-  const showThumb = sw.points.some((p) => Object.keys(p.thumb || {}).length);
+  const showThumb = sw.points.some((p) => Object.keys(p.thumb || {}).length || (p.frames || []).length);
   const cols = [
     { k: "ab", h: "", num: false },
     { k: "id", h: "point" },
     ...(showVar ? [{ k: "variant", h: "variant" }] : []),
     ...params.map((p) => ({ k: "param:" + p, h: p, num: true })),
     { k: "status", h: "checks" },
-    ...(showThumb ? [{ k: "thumb", h: "path" }] : []),
+    ...(showThumb ? [{ k: "thumb", h: "frame" }] : []),
     ...mkeys.map((m) => ({ k: "m:" + m, h: m, num: true })),
   ];
   const val = (p, k) => {
@@ -537,7 +559,7 @@ function renderTable() {
       .map((c) => {
         if (c.k === "ab") return `<td><button class="ab" data-ab="A" aria-pressed="${S.A === p.id}">A</button> <button class="ab" data-ab="B" aria-pressed="${S.B === p.id}">B</button></td>`;
         if (c.k === "status") return `<td>${statusHtml(p)}</td>`;
-        if (c.k === "thumb") return `<td>${thumbSvg(p.thumb)}</td>`;
+        if (c.k === "thumb") return `<td>${thumbCell(p)}</td>`;
         const v = val(p, c.k);
         return `<td class="${c.num ? "num" : ""}">${esc(c.k.startsWith("param:") && v === undefined ? "base" : fmt(v))}</td>`;
       })
@@ -578,18 +600,24 @@ function renderDetail() {
   const checks = p.checks.map((c) => `<div>${c.passed ? '<span class="status pass"><span class="ic">✓</span></span>' : c.pending ? '<span class="status none">pending</span>' : '<span class="status fail"><span class="ic">✕</span></span>'} <code>${esc(c.name)}</code> ${c.actual ? `<span class="muted">→ ${esc(c.actual)}</span>` : ""}</div>`).join("") || '<span class="muted">none</span>';
   const appliedRows = changed.slice(0, 40).map((a) => `<tr><td><code>${esc(a.file)}</code></td><td><code>${esc(a.pointer)}</code></td><td class="num">${esc(fmt(a.old))}</td><td class="num">${esc(fmt(a.new))}</td></tr>`).join("");
   const infoVal = (v) => {
-    if (Array.isArray(v)) return v.length ? v.map(esc).join(", ") : "—";
+    if (Array.isArray(v) && v.length && v.every((x) => x && typeof x === "object" && !Array.isArray(x))) {
+      // A list of records (pursuit hits): a small table.
+      const keys = [...new Set(v.flatMap((x) => Object.keys(x)))];
+      return `<div class="table-wrap" style="max-height:220px"><table><thead><tr>${keys.map((k) => `<th>${esc(k)}</th>`).join("")}</tr></thead><tbody>${v.map((x) => `<tr>${keys.map((k) => `<td class="${typeof x[k] === "number" ? "num" : ""}">${esc(typeof x[k] === "object" ? JSON.stringify(x[k]) : fmt(x[k]))}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+    }
+    if (Array.isArray(v)) return v.length ? v.map((x) => esc(typeof x === "object" ? JSON.stringify(x) : x)).join(", ") : "—";
     if (v && typeof v === "object") return Object.entries(v).map(([k, x]) => `${esc(k)}: ${infoVal(x)}`).join("<br>");
     return esc(v);
   };
   const info = Object.entries(p.info || {}).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${infoVal(v)}</dd>`).join("");
-  const arts = p.artifacts.map((a) => `<a href="/api/artifact/${encodeURIComponent(S.sweep.name)}/${a.split("/").map(encodeURIComponent).join("/")}" target="_blank">${esc(a.split("/").pop())}</a>`).join(" · ");
+  const arts = p.artifacts.filter((a) => !(p.frames || []).includes(a)).map((a) => `<a href="${artifactUrl(a)}" target="_blank">${esc(a.split("/").pop())}</a>`).join(" · ");
+  const frames = (p.frames || []).map((a) => `<a href="${artifactUrl(a)}" target="_blank">${frameImg(a, 240, 150)}</a>`).join("");
   body.innerHTML = `
     <dl class="kv"><dt>point</dt><dd><b>${esc(p.id)}</b> ${S.sweep.variants.length > 1 ? "· " + esc(p.variant) : ""}</dd>
     <dt>params</dt><dd>${params}</dd><dt>checks</dt><dd>${statusHtml(p)}</dd>
     ${p.wall_s ? `<dt>probe time</dt><dd>${esc(p.wall_s)} s${p.reused ? " (cached)" : ""}</dd>` : ""}
     ${p.error ? `<dt>error</dt><dd>${esc(p.error)}</dd>` : ""}</dl>
-    ${Object.keys(p.thumb || {}).length ? `<h3>Path (top-down)</h3>${thumbSvg(p.thumb, 220, 140)}` : ""}
+    ${frames ? `<h3>Frames (top-down)</h3><div class="frames">${frames}</div>` : Object.keys(p.thumb || {}).length ? `<h3>Path (top-down)</h3>${thumbSvg(p.thumb, 220, 140)}` : ""}
     <h3>Checks</h3>${checks}
     <h3>Values this point changes (${changed.length})</h3>
     ${changed.length ? `<div class="table-wrap" style="max-height:220px"><table><thead><tr><th>file</th><th>pointer</th><th class="num">file</th><th class="num">point</th></tr></thead><tbody>${appliedRows}</tbody></table></div>${changed.length > 40 ? `<div class="muted small">…and ${changed.length - 40} more</div>` : ""}` : '<span class="muted">none (base values)</span>'}

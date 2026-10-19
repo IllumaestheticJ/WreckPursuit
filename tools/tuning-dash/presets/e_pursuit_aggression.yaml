@@ -1,0 +1,35 @@
+# Study for workstream 07 (E, police), round 6b: pursuit aggression vs collateral. Two cases:
+#  - chase: golden/city_chase re-aimed so the racer drives away from the parked patrol (north
+#    lane, noon, starting heat 55 = L3): a pursuit starts at once. "Physical" = the police make
+#    contact with the moving racer (PIT attempts, hits on it) without wrecking it.
+#  - wanted, stopped: the observer soak car parked with heat 55. The police should stop it, not
+#    ram it, and should not wreck stopped traffic or each other on the way.
+# Knobs: pursuit speed margin over the target, PIT engage distance and the straight-road
+# length PIT needs (60 m by default; city blocks are 110 m). E's data is not changed.
+description: Pursuit margin × PIT engage × PIT straight vs racer contact and collateral (chase / wanted-stopped)
+probe:
+  kind: pursuit
+params:
+  - {target: "police:pursuit:target_speed_margin", label: margin, values: [0.0, 0.1, 0.25]}
+  - {target: "police:pursuit:tactics.pit_engage_m", label: pit_engage_m, values: [12.0, 25.0]}
+  - {target: "police:pursuit:tactics.pit_min_straight_m", label: pit_straight_m, values: [25.0, 60.0]}
+variants:
+  - name: chase
+    probe: {file: apps/simcli/scenarios/golden/city_chase.ron}
+    set:
+      - {target: "scenario:entities[0].pos", value: [56.75, 40.0, 0.0]}
+      - {target: "scenario:entities[0].yaw", value: 0.0}
+      - {target: "scenario:entities[0].police_heat", value: 55}
+      - {target: "scenario:time_of_day_h", value: 12.0}
+      - {target: "scenario:duration_s", value: 30}
+    expect:
+      - {metric: racer.final_health, min: 0.3, max: 1.0}
+  - name: wanted stopped
+    probe: {file: apps/simcli/scenarios/soak/traffic_soak_observer.ron}
+    set:
+      - {target: "scenario:police_cars", value: true}
+      - {target: "scenario:entities[0].police_heat", value: 55}
+    expect:
+      - {metric: max_closing_scenario_mps, min: 0, max: 5}
+workers: 4
+plots: [pit_attempts, hits_moving_scenario, max_closing_scenario_mps, hits_stopped_any, units_disabled, racer.final_health]

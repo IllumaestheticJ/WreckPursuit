@@ -15,9 +15,12 @@ A sweep never edits `data/`; only an explicit **promote** does, one reviewed lin
 | crush / damage vs speed, both modes | `barrier` | `barrier_speeds` |
 | does a change still pass the calibration checks | `barrier_scenario`, `scenario` | `damage_scenarios_plasticity`, `sedan_brakes` |
 | how two cars (or modes) differ | any, with `variants` | `compare_sedan_coupe`, `barrier_speeds` |
+| hits to total loss, single-hit total-loss speed, per mode and car | `survival` | `mode_hits_to_total_loss`, `b_arcade_total_loss_health` |
+| police driving / pursuit tables (`data/police/*.toml`) vs contacts | `pursuit` | `e_idle_ram_patrol`, `e_pursuit_aggression` |
 
-`tools/tuning-dash/tune.py presets` lists them with point counts. Every preset runs in a few
-seconds on a laptop-class CPU.
+`tools/tuning-dash/tune.py presets` lists them with point counts. Most presets run in a few
+seconds on a laptop-class CPU; the `pursuit` ones run full city simulations (≈ 12 s per 60 s
+scenario point) and take a few minutes.
 
 ## 2. Write (or copy) a sweep spec
 
@@ -58,10 +61,11 @@ spec edit only measures new or changed points.
   (crush vs speed, one line per parameter value) and pick which speed the flat metrics use.
   Pin a dimension when more than eight lines would show. Hollow markers fail a check; hover
   for values, click to select the point.
-- **Points**: every point with its values, pass/fail (with the failing checks), path
-  thumbnails for scenario probes; sortable.
+- **Points**: every point with its values, pass/fail (with the failing checks), a top-down
+  frame thumbnail for scenario and pursuit probes (the first hard contact, else the end);
+  sortable.
 - **Point**: what the point changes (file, pointer, file value → point value), each check,
-  simcli outputs, and the promote form.
+  the frame strip, `info` (pursuit hits as a table), simcli outputs, and the promote form.
 - **Compare A / B**: two points side by side (default: the base points of the first two
   variants, i.e. two cars or two modes), every metric with the delta, plus an overlay of
   the metric vs speed for barrier probes.

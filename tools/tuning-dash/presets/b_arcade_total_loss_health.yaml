@@ -1,0 +1,23 @@
+# Follow-up to mode_hits_to_total_loss (round 6b): repeated Arcade hits level off just above
+# total_loss_health (0.10), so "several hits end the car" fails at 56 km/h. How does the
+# Arcade threshold move hits-to-total-loss? Only modes/arcade.toml:total_loss_health changes;
+# Simulation is untouched. For B (owner of data/modes) to decide; nothing is promoted here.
+description: Arcade total_loss_health 0.10–0.30 vs hits to total loss (frontal and side), four car classes
+probe:
+  kind: survival
+  mode: Arcade
+  speeds_kmh: [40, 56, 80]
+params:
+  - {target: "mode:arcade:total_loss_health", label: tl_health, values: [0.10, 0.15, 0.20, 0.25, 0.30]}
+variants:
+  - {name: debug_sedan frontal, probe: {car: debug_sedan, impact: Frontal}}
+  - {name: ironside_440 frontal, probe: {car: ironside_440, impact: Frontal}}
+  - {name: hauler_1500 frontal, probe: {car: hauler_1500, impact: Frontal}}
+  - {name: sentinel_cruiser frontal, probe: {car: sentinel_cruiser, impact: Frontal}}
+  - {name: debug_sedan side, probe: {car: debug_sedan, impact: Side}}
+  - {name: ironside_440 side, probe: {car: ironside_440, impact: Side}}
+expect:
+  - {metric: "hits_to_total_loss@56", min: 2, max: 6}
+  - {metric: "health_after_1@56", min: 0, max: 0.9}
+workers: 4
+plots: ["hits_to_total_loss@56", "hits_to_total_loss@80", "hits_to_total_loss@40", total_loss_speed_kmh]

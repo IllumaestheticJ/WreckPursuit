@@ -10,6 +10,7 @@
 //! | `lattice:debug_sedan` | `lattices/debug_sedan.json` |
 //! | `material:hss` | `materials/hss.json` |
 //! | `mode:sim` / `mode:arcade` | `modes/sim.toml` / `modes/arcade.toml` |
+//! | `police:pursuit` (`heat`, `presence`, `tools`) | `police/pursuit.toml` (read by the `pursuit` probe) |
 //! | `scenario` | the probe's simcli scenario itself (in memory only, never promoted) |
 //!
 //! The field path is dot-separated keys, each optionally followed by selectors in brackets:
@@ -72,6 +73,14 @@ pub fn expand_file(file: &str) -> Result<String, String> {
             "tire" => "tires",
             "lattice" => "lattices",
             "material" => "materials",
+            "police" => {
+                return match id {
+                    "heat" | "presence" | "pursuit" | "tools" => Ok(format!("police/{id}.toml")),
+                    _ => Err(format!(
+                        "unknown police table {id:?} (heat | presence | pursuit | tools)"
+                    )),
+                }
+            }
             "mode" => {
                 return match id {
                     "sim" | "simulation" | "Simulation" => Ok("modes/sim.toml".into()),
@@ -338,6 +347,11 @@ mod tests {
             "cars/debug_sedan.json"
         );
         assert_eq!(expand_file("mode:arcade").unwrap(), "modes/arcade.toml");
+        assert_eq!(
+            expand_file("police:pursuit").unwrap(),
+            "police/pursuit.toml"
+        );
+        assert!(expand_file("police:nope").is_err());
         assert_eq!(
             expand_file("tires/street.json").unwrap(),
             "tires/street.json"

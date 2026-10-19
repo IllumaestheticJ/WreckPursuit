@@ -97,7 +97,7 @@ class EndToEnd(unittest.TestCase):
         cls.exe = runner.probe_binary(build=True)
         cls.tmp = Path(tempfile.mkdtemp(prefix="tuning-dash-test-"))
         cls.data = cls.tmp / "data"
-        for sub in ("cars", "tires", "lattices", "materials", "modes"):
+        for sub in ("cars", "tires", "lattices", "materials", "modes", "police", "city"):
             shutil.copytree(runner.REPO / "data" / sub, cls.data / sub)
         cls.out = cls.tmp / "sweeps"
 
@@ -185,8 +185,43 @@ class EndToEnd(unittest.TestCase):
         self.assertIn("car.distance_m", p["metrics"])
         self.assertTrue(p["thumb"]["car"])
         self.assertTrue((d / p["artifacts"][0]).exists())
+        # Top-down frames: evenly spaced, the last one at the end of the run.
+        self.assertTrue(p["frames"])
+        self.assertTrue(all((d / f).exists() for f in p["frames"]))
+        self.assertIn("end", p["info"]["frames"][-1])
         df = actions.diff_files("mode:arcade", "mode:sim", data=str(self.data))
         self.assertGreater(df["count"], 3)
+
+    def test_survival_probe(self):
+        sp = parse({
+            "name": "e2e_surv",
+            "data": str(self.data),
+            "probe": {"kind": "survival", "car": "debug_sedan", "impact": "Frontal", "speeds_kmh": [56]},
+            "variants": [{"name": "arc", "probe": {"mode": "Arcade"}}, {"name": "sim", "probe": {"mode": "Simulation"}}],
+        })
+        d = runner.run(sp, build=False, out_root=self.out)
+        pts = {p["variant"]: p for p in json.loads((d / "sweep.json").read_text())["points"]}
+        for p in pts.values():
+            self.assertTrue(p["ok"], p.get("error"))
+        # Simulation: one hard hit at 56 km/h is a total loss.
+        self.assertEqual(pts["sim"]["metrics"]["hits_to_total_loss@56"], 1)
+        self.assertGreater(pts["arc"]["metrics"]["health_after_1@56"], pts["sim"]["metrics"]["health_after_1@56"])
+
+    def test_pursuit_probe_reads_police_overrides(self):
+        sp = parse({
+            "name": "e2e_pursuit",
+            "data": str(self.data),
+            "probe": {"kind": "pursuit", "file": "apps/simcli/scenarios/golden/city_chase.ron"},
+            "overrides": [{"target": "scenario:duration_s", "value": 0.5}],
+            "params": [{"target": "police:pursuit:patrol_speed_factor", "values": [0.9]}],
+        })
+        d = runner.run(sp, build=False, out_root=self.out)
+        p = json.loads((d / "sweep.json").read_text())["points"][0]
+        self.assertTrue(p["ok"], p.get("error"))
+        self.assertIn("police/pursuit.toml", [a["file"] for a in p["applied"]])
+        # The racer rear-ends the parked patrol car at 0.1 s.
+        self.assertEqual(p["metrics"]["hits_moving_scenario"], 1)
+        self.assertTrue(p["frames"])
 
 
 if __name__ == "__main__":
