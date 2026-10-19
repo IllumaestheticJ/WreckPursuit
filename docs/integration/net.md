@@ -418,3 +418,19 @@ Contract **v0.3.0** is being applied in parallel by the lead (branch `lead/contr
 Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snapshot/summary, road-network trait, weather `LocalConditions`; see `docs/CONTRACT_CHANGELOG.md`). Workspace tests now take about 3.5 minutes (`lead/test-speed`). Owner playtest items are tracked in `docs/PLAYTEST_LOG.md`.
 
 1. v0.3.0 net items: typed events on the wire, `TrafficAgentSnapshot`, weather snapshot (W-5), `RaceCommand`, and meta's `join_token` (MC-6) in `wp_net::protocol`.
+
+## Lead feedback (round 12, 2026-10-19)
+
+**Base for this round: `lead/round12`, not `main`.** Round 12 merged ten branches (J, J2, A, D, E, R, M,
+weather, G, F) onto `lead/round12`; everything passes except the item below, so `main` stays
+where it was until it is fixed. Merge `origin/lead/round12` into your branch (not main), fix,
+run the full gate there, push your `ws/*` branch, and the lead merges it.
+
+1. **`crates/wp_net/tests/vesper_e2e.rs` (`four_clients_three_minutes_in_port_vesper`) fails after the
+   merge**: the player cop starts the pursuit (unit 6 at step 185) and racer 0 gives up at step
+   3185, but every client sees `Escaped` instead of `Captured`. Everything else in the test passes
+   (agreement 0 differ, lattice hashes 0/3949 mismatched). Likely causes: E's new police changes
+   (assault heat, capture/search rules) or A's differentials changing how the giving-up racer stops
+   and how the cop car reaches it. Find the cause; fix the test's cop/racer behaviour (e.g. the
+   giving-up racer must actually come to a stop near the cop, the cop must close in) or report a
+   real police bug to E in your integration doc. Do not weaken the Captured assertion.

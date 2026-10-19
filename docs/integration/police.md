@@ -433,3 +433,20 @@ answers `visibility_m` if you want the explicit cap on `witness_range_m` /
 step 4). Observation: in the golden city-chase layout with heavy rain on a soaked road no
 pursuit starts within 20 s (patrols on the wet road miss the night 40 m / 4 s window); worth a
 look when tuning wet-road pursuit.
+
+## Lead feedback (round 12, 2026-10-19)
+
+**Base for this round: `lead/round12`, not `main`.** Round 12 merged ten branches (J, J2, A, D, E, R, M,
+weather, G, F) onto `lead/round12`; everything passes except the item below, so `main` stays
+where it was until it is fixed. Merge `origin/lead/round12` into your branch (not main), fix,
+run the full gate there, push your `ws/*` branch, and the lead merges it.
+
+1. **`apps/simcli/scenarios/police/sideswipe_patrol_night.ron` fails after the merge**: the racer
+   never touches the patrol car (`Contact` count 0), so no assault / pursuit before 13.1 s. It
+   passed on `ws/police`; on `lead/round12` it fails from the first merge that contains A's
+   differential rework (`ws/vehicle`) and D's traffic changes. The scripted racer path probably
+   no longer meets the cruiser (different launch / cornering with real diffs, or the cruiser's
+   path changed). Make the scenario robust: steer the racer *at* the cruiser (target-seeking
+   rather than a fixed script) or re-time it, and check the day variant still passes. Keep the
+   assault → pursuit behaviour itself unchanged. Re-bless only what your change moves, in a
+   `[bless]` commit with the reason.

@@ -738,3 +738,20 @@ exists, but nothing global), so please add one (no contract change):
   `WeatherSim::traffic_modifiers()` (heavy rain 0.85–0.75 × speed / 1.4–1.8 × headway; fog
   0.85–0.70 / 1.3–1.6, by intensity; `data/weather/effects.toml`).
 - Keep the default 1.0 bit-identical, so traffic goldens do not move.
+
+## Lead feedback (round 12, 2026-10-19)
+
+**Base for this round: `lead/round12`, not `main`.** Round 12 merged ten branches (J, J2, A, D, E, R, M,
+weather, G, F) onto `lead/round12`; everything passes except the item below, so `main` stays
+where it was until it is fixed. Merge `origin/lead/round12` into your branch (not main), fix,
+run the full gate there, push your `ws/*` branch, and the lead merges it.
+
+1. **`apps/simcli/scenarios/city/blocked_parked_player_vesper.ron` fails after the merge**:
+   `traffic_turnarounds` = 0 (expected 1–30). It passes on `main + ws/world` alone (hash
+   33efc120…), and fails as soon as A's differential rework (`ws/vehicle`, `[bless]` 04cd217) is in
+   (hash fd3b599a…). Find what changed for the scenario (traffic car drivetrains now have real
+   diffs; launch/creep behaviour, the parked player's own diff/handbrake, or speed thresholds in
+   the go-around / turnaround logic) and fix it in `wp_world` (or tune the scenario only if the
+   behaviour is still right and the expectation was too tight; explain which). Don't loosen the
+   range to hide a real regression. Re-bless only the goldens your fix changes, in a `[bless]`
+   commit with the reason.
