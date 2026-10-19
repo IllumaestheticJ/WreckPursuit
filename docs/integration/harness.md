@@ -304,3 +304,7 @@ Lead fixes in your area this round:
   lane, or wait for E's obstacle-aware units) and move the checks back to `expect`.
 - `soak/traffic_soak_observer`: `police_cars: false` for now (police ram the parked observer; E's task). Flip it back
   once E lands obstacle awareness.
+
+
+## Lead note (2026-10-19, from machine B)
+- `simcli::run::crush_depth` should use `DamageModel::structural_crush_m()`. The any-node max counts shattered glass (0.58 vs 0.39 m in golden_tbone_sim). Please switch it, and re-bless only if expectations move, in a `[bless]` commit.

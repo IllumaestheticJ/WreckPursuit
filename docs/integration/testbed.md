@@ -405,3 +405,12 @@ Lead changes in your area:
 
 Next: show the **repair bill** after a session / capture (G's economy is merged; ask for a `wasm` call if needed),
 and a visible "PURSUIT / SEARCHING / ESCAPED / CAPTURED" banner from `police_status()`.
+
+
+## Lead note (2026-10-19): new machine R (panels)
+Machine R (`ws/panels`, prompt 21) owns `crates/wp_damage/src/panels.rs` (hinged panel swing / unlatch / hang states), `data/panels/`, `tools/assets/` and `apps/testbed-web/src/render/`. Expect small hooks from R in your files; coordinate through `docs/integration/panels.md`.
+
+
+## Lead note (round 6 gate, 2026-10-19)
+- `e2e/run.mjs` city chase check is timing-flaky: it holds W for 5 s of wall time and needs a speeding violation in that window (failed once and passed on rerun, same build). Make it wait for a condition, e.g. poll up to 15 s for `TrafficViolation` in the feed, instead of a fixed sleep.
+- Lead removed a duplicate `policeStatus` key in `src/wasm/sim.ts` (M had added a second one returning null, which overrode yours, so the heat panel showed "null"). Keep one accessor.

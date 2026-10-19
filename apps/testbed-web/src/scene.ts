@@ -45,6 +45,8 @@ export class SceneView {
     MAX_AGENTS,
   );
 
+  private debugGrid!: THREE.GridHelper;
+
   constructor(parent: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -64,11 +66,14 @@ export class SceneView {
       new THREE.PlaneGeometry(4000, 4000),
       new THREE.MeshStandardMaterial({ color: 0x3a3f44 }),
     );
+    // Below the city's zone ground (-0.05 m) and roads (0 m), so they never z-fight with it.
+    ground.position.z = -0.2;
     this.world.add(ground);
     // 10 m grid (GridHelper lives in Three's XZ plane, i.e. the ground).
     const grid = new THREE.GridHelper(2000, 200, 0xb0b0b0, 0x5c6268);
     grid.position.y = 0.01;
     this.scene.add(grid);
+    this.debugGrid = grid;
     // Axis hint at the origin: +X red, +Y (forward) green.
     const axes = new THREE.AxesHelper(3);
     axes.position.z = 0.02;
@@ -84,13 +89,38 @@ export class SceneView {
    */
   async setCity(cityId: string | null): Promise<void> {
     for (const [id, obj] of this.cities) obj.visible = id === cityId;
+    // The debug grid sits on the road surface and flickers through it; hide it in the city.
+    this.debugGrid.visible = !cityId;
     if (!cityId || this.cities.has(cityId)) return;
     const holder = new THREE.Group();
     this.cities.set(cityId, holder);
     this.scene.add(holder);
     try {
-      const gltf = await new GLTFLoader().loadAsync(`data/city/${cityId}.greybox.glb`);
+      // The published (artifact) build cannot serve binary files, so it ships the same bytes
+      // base64-encoded as `<id>.greybox.b64.txt`.
+      let gltf;
+      try {
+        gltf = await new GLTFLoader().loadAsync(`data/city/${cityId}.greybox.glb`);
+      } catch {
+        const b64 = await (await fetch(`data/city/${cityId}.greybox.b64.txt`)).text();
+        const bytes = Uint8Array.from(atob(b64.trim()), (c) => c.charCodeAt(0));
+        gltf = await new GLTFLoader().parseAsync(bytes.buffer, "");
+      }
       // glTF is +Y up, same as Three: add to the scene, not the Z-up world group.
+      // Layers that share a plane in the greybox (bus lanes and parking painted on asphalt,
+      // sidewalks on zone ground) draw over the layer below instead of flickering.
+      const layer: Record<string, number> = { bus_lane: 2, parking: 2, sidewalk: 1, asphalt: 1, highway_concrete: 1 };
+      gltf.scene.traverse((o) => {
+        const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
+        for (const mat of m ? (Array.isArray(m) ? m : [m]) : []) {
+          const l = layer[mat.name] ?? 0;
+          if (l > 0) {
+            mat.polygonOffset = true;
+            mat.polygonOffsetFactor = -l;
+            mat.polygonOffsetUnits = -4 * l;
+          }
+        }
+      });
       holder.add(gltf.scene);
     } catch (e) {
       console.warn("city greybox not available", cityId, e);
