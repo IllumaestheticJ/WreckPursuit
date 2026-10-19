@@ -216,3 +216,12 @@ Contract **v0.3.0** is being applied in parallel by the lead (branch `lead/contr
 
 Nothing outside `apps/meta` changed except the `just meta` line. The single-player greybox
 demo does not need meta (the server runs standalone when `WP_META_URL` is unset).
+
+Checks on this branch (`main` + lead branch merged): fmt and clippy `-D warnings` are clean;
+`cargo test -p wp_meta` passes; `cargo test --workspace --exclude simcli --no-fail-fast`: 91
+binaries pass, 2 tests fail **outside meta, in code identical to the lead branch**:
+`wp_economy` `pursuit_wiring::real_police_capture_settles_through_the_economy` ("level at
+capture, not after the reset") and `wp_race` `simcli_races::city_sprint_on_real_roads`
+(index out of bounds, `simcli_races.rs:28`). `simcli`'s debug `scenarios` test ran past 30 min
+on this container and was stopped, so it is not covered by this run.
+
