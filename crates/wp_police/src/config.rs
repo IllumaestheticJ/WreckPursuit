@@ -367,8 +367,9 @@ pub struct TacticConfig {
     pub intercept_horizon_s: Range,
     /// Units further than this behind the racer try to intercept instead of following, m.
     pub intercept_min_gap_m: f32,
-    /// Disengage below this health.
-    pub disengage_health: f32,
+    /// Disengage below this health, per mode. Arcade health levels off around 0.2–0.3 under
+    /// repeated hits (H, round 8), so Arcade units stay in until they are properly wrecked.
+    pub disengage_health: ModeValue<f32>,
     /// Pull over when any |toe delta| exceeds this (bent wheel), rad.
     pub bent_wheel_toe_rad: f32,
     /// Pull over when any tire puncture exceeds this.

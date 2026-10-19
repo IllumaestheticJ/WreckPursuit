@@ -3,7 +3,7 @@
 - **Workstream / prompt:** 06 — police & pursuit AI
 - **Branch:** `ws/police`
 - **Crates / folders owned:** `crates/wp_police`, `data/police/`, `crates/wp_police/scenarios/`
-- **Contract version built against:** 0.2.0
+- **Contract version built against:** 0.3.0
 
 ## Exposes
 - `PoliceSystem::step(world: &dyn WorldQuery, racers: &[RacerView], events: &[SimEvent], dt, out)`.
@@ -15,9 +15,11 @@
     city. Call `step` with the same `World` as `world`.
   - `PoliceSystem::new()`: built-in tables, no road network, heat only. This is what `wp_sim` uses today.
   - `PoliceSystem::with_city(cfg, RoadGraph, setup)`.
-- Roads come from D's `wp_world::roads::RoadGraphView`:
-  - **`RoadGraph::from_view(&RoadGraphView)` / `RoadGraph::from_city(&CityMap)`** map it 1:1:
-    node ids are kept, and `RoadSegment::edge` holds the source edge id.
+- Roads come from the contract road network **`wp_contracts::RoadNetworkQuery`** (v0.3.0; D's
+  `wp_world::RoadNetworkIndex`):
+  - **`RoadGraph::from_network(&dyn RoadNetworkQuery, signalised: &[u32])` / `RoadGraph::from_city(&CityMap)`**
+    map it 1:1: node ids are kept, and `RoadSegment::edge` holds the edge id (`RoadEdgeId`).
+    `RoadGraph` is only the police routing index over it, rebuilt from the trait, never edited.
   - `wp_police::city::procedural(&ProcGenConfig) -> (RoadGraph, CityMap)` builds both for tests and tools.
   - `RoadGraph` keeps only police algorithms: routing, prediction, sight distance and nearest road.
 - Driving uses D's **`wp_world::drive::DriveController`**, one per unit:
@@ -61,11 +63,13 @@
 ## Needs
 | From | What | Workaround now |
 |---|---|---|
-| Lead | Flip `soak/traffic_soak_observer` back to `police_cars: true` | Passes locally with it on |
+| Harness (I) | Promote the `soak/traffic_soak_observer` gate: it now runs with `police_cars: true` and meets its pending `civilian_collisions = 0` (round 8) | — |
+| Economy (G) | Remove `#[ignore]` from `wp_economy/tests/session.rs::live_police_run_settles_like_the_recording`: it passes with `--ignored` since round 8 (see "Response to round 8"). Re-record the fixtures if you want them from today's police | Test still ignored |
+| Specsheet (H) | `tools/specsheet/ram_probe` hard-codes `DISENGAGE_HEALTH = 0.4`; it is now per mode (Arcade 0.15, Simulation 0.4) | Its "off" column is wrong for Arcade |
 | Harness (I) | Re-aim `golden/city_chase` (see "Response to round 6") | Collision-free, but no pursuit within 20 s |
 | `wp_world` (05) | Optional: parked cars / cones near a point (spatial query), for police obstacle awareness | Units see vehicles only |
 | `wp_world` (05) | Kinematic traffic should treat tracked vehicles (police cars) as leaders: it drives into stopped police cars (3 of 4 patrol overlaps, 8 of 11 in pursuit) | None on my side |
-| `wp_world` (05) / lead | `RoadGraphView` as the shared road-network trait (v0.3.0) | Police build from the struct directly |
+| Lead | Contract request #7: signalised flag on `RoadNetworkQuery` nodes | `from_city` reads it from D's map |
 | `wp_world` (05) | Optional: per-node turn restrictions in `RoadGraphView`; traffic cameras as a `PoiKind` | Any legal outgoing road may be taken; cameras at every third signalised node |
 | `wp_net` (07) | Player roles (captain / chase seats) → `set_human_captain`, `add_player_unit`; replicate `CaptainView` | None |
 | ui-kit (`apps/ui-kit`) | Rename `segment` → `road` (a `RoadEdgeId`) in `RequestRoadblock` / `RequestSpikes` | `wp_police` still decodes `segment` as an alias |
@@ -85,7 +89,8 @@
 | 2 | Typed `PoliceEvent` (final list below) | Replaces the `{kind, payload}` bytes | 07, 08, 10, 04, J (audio) | **Final list** for v0.3.0 |
 | 3 | Typed `CaptainCommand` + `CaptainError` (final lists below) | Captain client | 07, ui-kit | **Final list** for v0.3.0 |
 | 4 | `WorldQuery::line_of_sight` | Police LOS on the real city | — | Landed in v0.2.0; used |
-| 5 | Shared road-network trait = D's `RoadGraphView` (+ `RoadEdgeId`) | One road model | 05, 06 | Police now consume it; ready to promote |
+| 5 | Shared road-network trait = D's `RoadGraphView` (+ `RoadEdgeId`) | One road model | 05, 06 | Landed in v0.3.0 (`RoadNetworkQuery`); police build from it (round 8) |
+| 7 | `RoadNetworkQuery::node_signalised(n: u32) -> bool` (additive) | Police stop at red lights only at signalised junctions and must know which ones are; the trait lacks it, so `RoadGraph::from_network` takes the list separately | 05 (implements, already has `RoadNode::signalised`), 06 | Proposed (round 8) |
 | 6 | JSON Schema for `data/police/*.toml` | Data validation parity | Lead | Optional, later |
 
 ### Final `PoliceEvent` variant list (contract v0.3.0)
@@ -117,7 +122,7 @@ Kind codes are stable (`wp_police::events::kind`). `UnitId(u32)`, `ToolId(u32)` 
 | `SetPriorityTarget` | `target: Option<EntityId>` |
 | `CallOff` | `target: EntityId` |
 
-`RoadEdgeId(u32)` is an index into `wp_world::roads::RoadGraphView::edges`.
+`RoadEdgeId(u32)` is an edge index of `wp_contracts::RoadNetworkQuery` (= `wp_world::roads::RoadGraphView::edges`).
 
 The reply is `Result<(), CaptainError>` with:
 - `UnknownUnit`, `UnknownTarget`, `UnknownIncident`, `NotPursued`, `Unavailable`, `UnitUnavailable`, `Malformed`;
@@ -125,6 +130,8 @@ The reply is `Result<(), CaptainError>` with:
 - `Site(SiteError { NoSite, NotOnPath, BlindCorner, Highway })`.
 
 ## Changes outside my crates
+- **`apps/simcli/scenarios/soak/traffic_soak_observer.ron`** (round 8, at the lead's request):
+  `police_cars: true` and its comment. Nothing else changed.
 - **`apps/simcli/examples/police_traffic_contacts.rs`** (round 6): new measurement example
   (police↔civilian contacts, patrol and hot pursuit). Read-only use of simcli and `wp_sim`.
 - **`crates/wp_sim/src/police_link.rs`** (round 6, minimal): `drive_police_units` first calls
@@ -155,6 +162,45 @@ The reply is `Result<(), CaptainError>` with:
 - Night pursuit start varies per seed (4 of 8 runs under 60 s, mean 114 s); the tests assert means and ratios.
 
 ## Response to lead feedback
+**Round 8, all done:**
+1. **`RoadNetworkQuery`:** `RoadGraph::from_network(&dyn RoadNetworkQuery, signalised)` builds the
+   police routing index from the v0.3.0 trait (D's `RoadNetworkIndex`); `from_view(&RoadGraphView)`
+   is gone. Districts come from `district_at`, cameras / safehouses / helipads / stations from
+   `pois()`. The trait has no signalised-junction flag, so `from_city` reads those from D's map
+   (contract request #7). The graph is identical to before: every golden hash and police test is
+   unchanged. A test builds a graph from a hand-made `RoadNetworkQuery` (not D's).
+2. **Arcade `disengage_health`:** now per mode, `{ arcade = 0.15, simulation = 0.4 }` in
+   `data/police/pursuit.toml`. H measured Arcade health levelling off at 0.2–0.3 and bottoming out
+   at 0.10–0.23, so Arcade units stay until properly wrecked; Simulation is unchanged. Test
+   `disengage_health_depends_on_damage_mode` (Arcade 0.3 stays, Arcade 0.1 and Simulation 0.3 leave).
+   H's `ram_probe` still hard-codes 0.4 (request above).
+3. **Playtest row 11, 5-minute city chase** (`cargo run --release -p simcli --example
+   police_traffic_contacts -- patrol|pursuit 300`, 12×12 city at noon, density 4, physical police,
+   round-8 `main`):
+
+   | Case | Police↔traffic contacts (physical) | Overlaps with kinematic traffic, police moving | Traffic into a stopped police car | Target |
+   |---|---|---|---|---|
+   | Patrol, 300 s, nobody wanted | **0** | 1 | 6 | ≤ 1 per 5 min: **met** |
+   | Hot pursuit, 338 s pursued (seeds 101–105) | **3**, all lights on, ≤ 0.5 m/s (touches) | 6, all lights off (units not in the pursuit), 2–7 m/s | 6 | ≤ 3 per 5 min: **2.7 contacts met; with moving overlaps 8.0 per 5 min, not met** |
+
+   No police contact above 0.5 m/s anywhere (row 11 was 20+ at up to 25 m/s). Compared with round
+   6 (0 contacts, 3 moving overlaps per 362 s), pursuit is slightly worse on today's `main`; the
+   remaining moving overlaps are lights-off units at low speed against kinematic traffic, which
+   only becomes physical near a player. Traffic driving into stopped police cars is D's request
+   (kinematic traffic does not treat tracked vehicles as leaders).
+4. **`soak/traffic_soak_observer`** now runs with `police_cars: true` and passes: observer
+   `distance_m` 0.008, `civilian_collisions` 0 (its pending zero target is met too),
+   `traffic_agents_min` 362 (pending 380 still D's). **I: please promote the gate.**
+5. **Parked test (G):** not intended; it was a bug. The stationary racer's violations sat inside
+   a traffic camera's radius, so they counted as *witnessed*: full heat, but no report incident,
+   and only a report sends a unit when nobody has seen the racer. A racer that never moves was
+   never found. Now any violation no unit saw opens a report (camera or civilian;
+   radio "traffic camera flagged a vehicle"), so a unit is sent after the report delay. The
+   parked racer is pursued at 123 s and captured at 127 s (`cargo run --release -p wp_police
+   --example parked_racer`). `live_police_run_settles_like_the_recording` **passes with
+   `--ignored`**; G can drop the `#[ignore]` (I didn't edit `wp_economy`). New test
+   `camera_flagged_parked_racer_is_found_and_captured`.
+
 **Run 2, all done:**
 - **Integer ticks:** police time is `SimTime` (u64 µs); there are no allow-list entries.
 - **D's road network:** units drive, route, predict and place tools on D's roads. `RoadGraph` is

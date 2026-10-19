@@ -18,7 +18,7 @@
 //! - `Shadow` — everyone else: hold 25–40 m back (further for each extra unit).
 //! - `Intercept` (assignment) — units off the trail or far behind route over the road graph to
 //!   the racer's predicted position 10–20 s out (lane-legal shortest path).
-//! - Disengage — health below `disengage_health` or a bent wheel / flat: pull over
+//! - Disengage — health below `disengage_health[mode]` or a bent wheel / flat: pull over
 //!   (handled in `dispatch`).
 
 use crate::radio::{RadioCue, RadioTier};

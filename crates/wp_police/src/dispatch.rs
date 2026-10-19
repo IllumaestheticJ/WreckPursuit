@@ -121,9 +121,11 @@ impl PoliceSystem {
                 level: after,
             });
         }
-        if !witnessed && !self.racers[&racer].pursued() && !self.graph.nodes.is_empty() {
-            // A civilian calls it in at the violation's position. One open report per racer;
-            // later calls update the position.
+        if !obs.witnessed && !self.racers[&racer].pursued() && !self.graph.nodes.is_empty() {
+            // No unit saw it: a civilian calls it in, or a traffic camera flags it, at the
+            // violation's position, so a unit is sent to look (a camera alone never sends
+            // anyone otherwise, and a racer that stays put would never be found). One open
+            // report per racer; later calls update the position.
             let district = self.graph.district_at(at);
             if let Some(inc) = self
                 .incidents
@@ -151,11 +153,15 @@ impl PoliceSystem {
                     unit: None,
                     scene_until: None,
                 });
-                self.radio(RadioCue::new(
-                    RadioTier::Tactical,
-                    None,
-                    format!("Dispatch: caller reports reckless driver, {:?}.", district),
-                ));
+                let text = if camera {
+                    format!(
+                        "Dispatch: traffic camera flagged a vehicle, {:?}.",
+                        district
+                    )
+                } else {
+                    format!("Dispatch: caller reports reckless driver, {:?}.", district)
+                };
+                self.radio(RadioCue::new(RadioTier::Tactical, None, text));
             }
         }
     }
@@ -1157,7 +1163,13 @@ impl PoliceSystem {
             if u.assignment == Assignment::OutOfService || u.player.is_some() {
                 continue;
             }
-            let damaged = u.health < self.cfg.pursuit.tactics.disengage_health;
+            let damaged = u.health
+                < self
+                    .cfg
+                    .pursuit
+                    .tactics
+                    .disengage_health
+                    .get(self.setup.mode);
             let bent = u.must_pull_over(&self.cfg.pursuit);
             if damaged || bent {
                 let id = u.id;

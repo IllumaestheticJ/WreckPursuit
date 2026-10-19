@@ -21,7 +21,8 @@ Pure Rust, no renderer, builds for `wasm32-unknown-unknown`.
 
 1. **Racers** are synced (position/velocity); spike strip crossings are checked per wheel.
 2. **Events**: `TrafficViolation` adds heat (full if a unit/camera *witnessed* it, 20% otherwise
-   as a civilian *report*); `TotalLoss` of a wanted racer is a capture; `Contact` between a unit
+   as a civilian *report*). If no unit saw it (only a camera, or nobody), a report incident opens
+   at the violation and the nearest free unit is sent after the report delay; `TotalLoss` of a wanted racer is a capture; `Contact` between a unit
    and a racer marks the unit, civilian–civilian contacts above a speed create crash incidents.
 3. **Driving** (every tick): internally driven units integrate with the built-in kinematic driver.
 4. **Think** (`think_hz`, default 10 Hz): line of sight → rules (heat decay, escape, capture,
@@ -78,7 +79,7 @@ Assignments: `Patrol`, `Respond(incident)`, `Pursue(target)`, `Intercept(point)`
   - `Shadow`: hold 25–40 m back, 12 m more per extra unit; close to 8 m when the racer stops.
   - `Intercept`: units off the trail or far behind take the lane-legal fastest route to the
     racer's predicted position 10–20 s out.
-- **Disengage**: health < `disengage_health`, a bent wheel (`|toe| > bent_wheel_toe_rad`), a flat
+- **Disengage**: health < `disengage_health` (per mode: Arcade 0.15, Simulation 0.4), a bent wheel (`|toe| > bent_wheel_toe_rad`), a flat
   or a lost wheel, or a dead engine → pull over. Total loss at `total_loss_health[mode]`.
 
 **Driving** uses `wp_world::drive::DriveController`, the controller civilian traffic and opponent
@@ -166,10 +167,11 @@ The tables are compiled in (`PoliceConfig::builtin()`) and can be loaded from di
 `PoliceConfig::load(dir)`. A test checks that both copies match.
 
 ## Roads
-Roads come from `wp_world` (machine D). Build police with `PoliceSystem::for_world(cfg, &world,
-setup)`, or with `RoadGraph::from_view(&RoadGraphView)` / `from_city(&CityMap)` (`city.rs`). The
-mapping is 1:1 from D's road-level view, with one segment (or a chain of them on curved roads) per
-`RoadEdge`:
+Roads come from the contract road network (`wp_contracts::RoadNetworkQuery`, v0.3.0; D's
+`wp_world::RoadNetworkIndex`). Build police with `PoliceSystem::for_world(cfg, &world, setup)`, or
+with `RoadGraph::from_network(&dyn RoadNetworkQuery, &signalised_nodes)` / `from_city(&CityMap)`
+(`city.rs`). `RoadGraph` is the police routing index over that network, not a second road model.
+The mapping is 1:1, with one segment (or a chain of them on curved roads) per edge:
 - **Ids:** node ids are kept. `RoadSegment::edge` remembers D's edge id, and captains name roads
   by it (`RoadEdgeId`).
 - **Classes:** Collector/Local/Alley → Local.
@@ -213,8 +215,9 @@ cargo run --release -p wp_police --example police_scenario -- <file.ron> [--tabl
 ```
 
 ## Known gaps
-- The police graph ignores per-lane turn restrictions, and puts cameras at every third signalised
-  junction (the network has none). `RoadGraphView` becomes the shared road-network trait in v0.3.0.
+- The police graph ignores per-lane turn restrictions. Cameras come from the network's POIs (D
+  places one at every third signalised junction). `RoadNetworkQuery` has no signalised-junction
+  flag yet, so `from_network` takes the list separately (contract request #7).
 - The headless kinematic body and its traffic-hazard model stand in for physical cars and real traffic.
 - Obstacle awareness sees vehicles only: parked cars and cones (`wp_world` static props) are not
   in the list, so a unit off its lane can still clip one. Passing assumes the other lane exists.
