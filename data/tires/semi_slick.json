@@ -1,0 +1,22 @@
+{
+  "id": "semi_slick",
+  "lateral": { "b": 20.0, "c": 1.45, "d": 1.28, "e": -0.4 },
+  "longitudinal": { "b": 17.0, "c": 1.7, "d": 1.36, "e": 0.1 },
+  "load_sensitivity": 0.15,
+  "fz0_n": 4000.0,
+  "relaxation_length_m": 0.25,
+  "rolling_resistance": 0.01,
+  "peak_slip_angle_rad": 0.082,
+  "peak_slip_ratio": 0.08,
+  "surface_multipliers": {
+    "Asphalt": 1.0,
+    "WetAsphalt": 0.5,
+    "Concrete": 0.93,
+    "Gravel": 0.45,
+    "Grass": 0.32,
+    "Dirt": 0.45,
+    "Curb": 0.85,
+    "Metal": 0.55
+  },
+  "wear_rate": 3e-05
+}
