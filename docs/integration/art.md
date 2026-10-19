@@ -33,6 +33,18 @@ palette and post.
    `docs/art/ART_BIBLE.md` (short).
 6. No `wp_contracts` / Rust edits.
 
+## Checks (2026-10-19, cloud container, ws/art = lead/round12 + this work)
+- `cargo fmt --check`, `cargo clippy --workspace -D warnings`, wasm build of `wp_wasm`: pass.
+- `npx tsc --noEmit`: pass. `just web-e2e`: all PASS, including the new art-style check and
+  `e2e/weather.mjs`.
+- `cargo test --workspace --no-fail-fast`: 2 targets fail, **both already failing on
+  `origin/lead/round12`** (this branch has no Rust, data or scenario changes):
+  `simcli --test scenarios` (`goldens_match`, `all_scenarios_pass…`: hash mismatches in
+  `city/blocked_parked_player_{grid,vesper}`, `golden/city_chase`,
+  `golden/night_pursuit_escape`, `panels/frontal_56_hood`; vesper `traffic_turnarounds` 0)
+  and `wp_net --test vesper_e2e` (`four_clients_three_minutes_in_port_vesper`). These look
+  like the round-12 cross-merge failures in the lead's feedback (D, E, F).
+
 ## Perf numbers
 `node apps/testbed-web/e2e/art_perf.mjs` (night city chase, Port Vesper, headless Chromium on
 SwiftShader = a software GPU; relative numbers only).
