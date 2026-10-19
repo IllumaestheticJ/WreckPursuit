@@ -33,8 +33,8 @@ pub mod pursuit;
 pub use capability::CarCapability;
 pub use corridor::{Corridor, CorridorOptions, CorridorPos, CorridorSample, CORRIDOR_STEP_M};
 pub use field::{
-    Debug, Field, OpponentEvent, RaceConfig, RacerSpec, RacerStatus, SpeedLimit, Standing, Tactic,
-    VehicleObs, AI_CONTACT_IMPULSE_NS,
+    Debug, Field, GridLayout, OpponentEvent, RaceConfig, RacerSpec, RacerStatus, SpeedLimit,
+    Standing, Tactic, VehicleObs, AI_CONTACT_IMPULSE_NS,
 };
 pub use line::{LineParams, RacingLine, SpeedProfile, Usage};
 pub use profile::{DriverParams, DriverProfile};

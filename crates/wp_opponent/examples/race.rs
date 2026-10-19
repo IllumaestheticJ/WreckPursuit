@@ -33,11 +33,28 @@ fn main() {
         traffic,
         closed_roads: traffic == 0.0,
         max_s: 120.0 * laps as f32 + 60.0,
+        grid: if std::env::var("WP_SINGLE").is_ok() {
+            wp_opponent::GridLayout::SingleFile
+        } else {
+            wp_opponent::GridLayout::TwoWide
+        },
+        cars: std::env::var("WP_CARS")
+            .map(|v| v.split(',').map(String::from).collect())
+            .unwrap_or_default(),
         ..Default::default()
     };
     let t0 = std::time::Instant::now();
-    let cap = common::capability(&common::car(&setup.car), true);
-    println!("capability {cap:?} ({:.1} s)", t0.elapsed().as_secs_f32());
+    for i in 0..n {
+        let id = setup.cars.get(i).unwrap_or(&setup.car);
+        let cap = common::capability(&common::car(id), true);
+        if i == 0 || setup.cars.get(i).is_some() {
+            println!("{id}: {cap:?}");
+        }
+    }
+    println!(
+        "capabilities measured in {:.1} s",
+        t0.elapsed().as_secs_f32()
+    );
     let t1 = std::time::Instant::now();
     let mut last_print = 0u64;
     let dump = std::env::var("WP_DUMP").ok();

@@ -7,8 +7,8 @@ use std::path::PathBuf;
 
 use wp_contracts::{DamageSim, EntityId, LoadedCar, SimEvent, TimeOfDay, VehicleSim};
 use wp_opponent::{
-    CarCapability, CorridorOptions, DriverProfile, Field, NoPolice, PoliceQuery, RaceConfig,
-    RacerSpec, VehicleObs,
+    CarCapability, CorridorOptions, DriverProfile, Field, GridLayout, NoPolice, PoliceQuery,
+    RaceConfig, RacerSpec, VehicleObs,
 };
 use wp_sim::{Sim, SimConfig};
 use wp_world::procgen::ProcGenConfig;
@@ -65,6 +65,8 @@ pub struct Setup {
     pub drivers: Vec<DriverProfile>,
     /// Car id for every racer.
     pub car: String,
+    /// Per-racer car ids (grid order); overrides `car` where given.
+    pub cars: Vec<String>,
     /// Close the circuit's roads to traffic (and allow opposing lanes).
     pub closed_roads: bool,
     /// Traffic density scale (0 = none).
@@ -73,6 +75,8 @@ pub struct Setup {
     pub max_s: f32,
     /// Measure the car (slow in debug builds) instead of using generic limits.
     pub measure: bool,
+    /// Grid shape.
+    pub grid: GridLayout,
 }
 
 impl Default for Setup {
@@ -82,10 +86,12 @@ impl Default for Setup {
             laps: 2,
             drivers: vec![DriverProfile::default(); 4],
             car: "debug_sedan".into(),
+            cars: Vec::new(),
             closed_roads: true,
             traffic: 0.0,
             max_s: 600.0,
             measure: true,
+            grid: GridLayout::TwoWide,
         }
     }
 }
@@ -151,8 +157,11 @@ pub fn run(
     police: &dyn PoliceQuery,
     each_tick: &mut dyn FnMut(&Sim, &Field),
 ) -> Outcome {
-    let car = car(&setup.car);
-    let cap = capability(&car, setup.measure);
+    let cars: Vec<LoadedCar> = (0..setup.drivers.len())
+        .map(|i| car(setup.cars.get(i).unwrap_or(&setup.car)))
+        .collect();
+    let caps: Vec<CarCapability> = cars.iter().map(|c| capability(c, setup.measure)).collect();
+    let cap = caps[0];
     let mut world = world(setup);
     let route = world
         .plan_circuit(&arterial_square())
@@ -178,11 +187,13 @@ pub fn run(
         .map(|(i, p)| RacerSpec {
             entity: EntityId(i as u32 + 1),
             profile: *p,
-            capability: cap,
+            capability: caps[i],
         })
         .collect();
     let mut field = Field::from_route(&world, &route, &specs, config);
-    let slots = field.grid_slots(specs.len(), cap.length_m, cap.width_m);
+    let max_len = caps.iter().fold(0.0f32, |m, c| m.max(c.length_m));
+    let max_w = caps.iter().fold(0.0f32, |m, c| m.max(c.width_m));
+    let slots = field.grid_slots(specs.len(), max_len, max_w, setup.grid);
     let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
     let mut sim = Sim::new(SimConfig {
         seed: setup.seed,
@@ -192,16 +203,16 @@ pub fn run(
     });
     sim.set_world(world);
     let mut entities = Vec::new();
-    for (pos, yaw) in &slots {
+    for (i, (pos, yaw)) in slots.iter().enumerate() {
         let id = sim
-            .spawn_vehicle(&car, [pos[0], pos[1], 0.0], *yaw)
+            .spawn_vehicle(&cars[i], [pos[0], pos[1], 0.0], *yaw)
             .unwrap();
         sim.set_assists(id, wp_contracts::AssistProfile::ai())
             .unwrap();
         entities.push(id);
     }
     assert_eq!(entities, specs.iter().map(|s| s.entity).collect::<Vec<_>>());
-    let size = [cap.width_m, cap.length_m];
+    let _ = cap;
     let mut contacts = Vec::new();
     let mut other_contacts = 0u32;
     let mut events: Vec<SimEvent> = Vec::new();
@@ -214,7 +225,10 @@ pub fn run(
                 entity: v.id,
                 state: v.vehicle.state(),
                 effects: v.damage.handling_effects(),
-                size_m: size,
+                size_m: [
+                    v.vehicle.def().body_size_m[0],
+                    v.vehicle.def().body_size_m[1],
+                ],
             })
             .collect();
         let inputs = field.tick(sim.world(), &obs, &events, police).to_vec();
