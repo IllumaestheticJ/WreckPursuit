@@ -3,6 +3,7 @@
 import { T } from "./wasm/layout";
 import type { AssistProfile, DriverInput, SimEvent, VehicleInfo } from "./wasm/sim";
 import { layers, LAYERS } from "./settings";
+import { CAMERA_HELP } from "./cameras";
 import { heat, healthColour } from "./vehicle_view";
 
 /** Region energy (J) shown as fully red in the silhouette / panel. */
@@ -75,7 +76,8 @@ export class Hud {
     this.help.innerHTML =
       `<b>WreckPursuit testbed — keys</b><br>` +
       `W/S or ↑/↓ throttle/brake · A/D or ←/→ steer · Space handbrake · Shift/Ctrl gear up/down<br>` +
-      `R reset · O headlights · Q horn · 1 chase · 2 hood · 3 bumper · 4 orbit · 5 cinematic<br>` +
+      `R reset · O headlights · Q horn · M mute<br>` +
+      `<b>Cameras</b> ${CAMERA_HELP}<br>` +
       `F1 or ? this help · P pause · . frame step (replay) · [ / ] replay speed · F repair bill<br><br>` +
       LAYERS.map((l) => `${l.key.replace("Key", "")} — ${l.label}`).join("<br>");
   }

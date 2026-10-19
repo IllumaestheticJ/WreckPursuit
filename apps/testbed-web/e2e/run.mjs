@@ -70,14 +70,15 @@ await shot("drive_chase.png");
 const layerIds = await page.evaluate(() =>
   ["lattice", "stress", "suspension", "regions", "intents"].map((id) => (window.__wp.toggleLayer(id), id)),
 );
-for (const cam of ["chase", "hood", "bumper", "orbit", "cinematic"]) {
+const cams = await page.evaluate(() => window.__wp.cameraModes);
+for (const cam of cams) {
   await page.evaluate((c) => window.__wp.setCamera(c), cam);
   await page.waitForTimeout(400);
   if (cam === "orbit") await shot("debug_layers_orbit.png");
   if (cam === "hood") await shot("camera_hood.png");
 }
 await page.keyboard.up("KeyW");
-check(errors.length === 0, `all debug layers (${layerIds.join(", ")} + defaults) and 5 cameras render without errors`);
+check(errors.length === 0, `all debug layers (${layerIds.join(", ")} + defaults) and ${cams.length} cameras render without errors`);
 await page.evaluate((ids) => ids.forEach((id) => window.__wp.toggleLayer(id)), layerIds);
 await page.evaluate(() => window.__wp.setCamera("chase"));
 

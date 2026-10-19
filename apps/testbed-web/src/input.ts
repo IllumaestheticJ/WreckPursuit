@@ -21,6 +21,9 @@ export function installKeyboard(onKey: (e: KeyboardEvent) => void): void {
   window.addEventListener("blur", () => held.clear());
 }
 
+/** Is this key (KeyboardEvent.code) held right now? (Camera look-back.) */
+export const isHeld = (code: string): boolean => held.has(code);
+
 const any = (...codes: string[]) => codes.some((c) => held.has(c));
 const edge = (...codes: string[]) => codes.some((c) => pressedEdges.has(c));
 

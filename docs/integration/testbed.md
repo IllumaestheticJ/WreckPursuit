@@ -160,7 +160,10 @@ hash per tick dominate). `simcli replay file.replay.bin` verifies a browser reco
 | Shift / Ctrl | gear up / down |
 | R | reset player car |
 | O / Q | headlights / horn |
-| 1 2 3 4 5 | camera: chase (spring-damped), hood, bumper, free orbit, replay cinematic |
+| C | next camera (remembered per viewer in localStorage `wp.testbed.camera.v1`) |
+| 1–8 | camera: near chase (default), far chase, hood, bumper, cockpit, side tracking, TV / cinematic, orbit / free (debug) |
+| V (hold) | look back |
+| mouse drag | look around (springs back on release; right stick on a pad) |
 | Tab | cycle focused vehicle (camera, HUD, telemetry) |
 | P | pause (replay: play/pause) |
 | . / , | replay frame step forward / back (4 ticks) |
@@ -172,19 +175,19 @@ hash per tick dominate). `simcli replay file.replay.bin` verifies a browser reco
 | T | tire force arrows (applied Fx green, Fy red) |
 | U | suspension travel bars |
 | Y | slip-angle wheel colouring |
-| C | contact points & impulses (fading) |
+| F2 | contact points & impulses (fading) — was C, now the camera key |
 | G | CG + velocity vector |
 | X | civilian traffic agents (grey; red = braking, yellow = physical LOD, blue = yielding); promoted agents are drawn as sim vehicles instead |
 | Z | wanted level / heat panel (UI kit `HeatPanel`) |
 | I | traffic / police intent arrows |
 | K | component health panel |
 | E | region energy panel |
-| V | event feed (component failures, parts, glass, region damage, total loss, violations) |
+| F4 | event feed — was V, now look-back — (component failures, parts, glass, region damage, total loss, violations) |
 | J | telemetry plots |
 | N | input display + rack-torque bar |
 
 Gamepad (standard mapping): left stick steer, RT/LT throttle/brake, A or X handbrake, RB/LB
-gears, Y horn; deadzones 0.12 stick / 0.05 trigger. Switching device logs an assists op with
+gears, Y horn, View/Back next camera, right stick look around, R3 (hold) look back; deadzones 0.12 stick / 0.05 trigger. Switching device logs an assists op with
 `AssistProfile::gamepad_default` / `keyboard_default`.
 
 Controls panel: scenario menu + speed box, **city chase** preset, damage mode (live switch), car, **city** (free drive
@@ -414,3 +417,31 @@ Machine R (`ws/panels`, prompt 21) owns `crates/wp_damage/src/panels.rs` (hinged
 ## Lead note (round 6 gate, 2026-10-19)
 - `e2e/run.mjs` city chase check is timing-flaky: it holds W for 5 s of wall time and needs a speeding violation in that window (failed once and passed on rerun, same build). Make it wait for a condition, e.g. poll up to 15 s for `TrafficViolation` in the feed, instead of a fixed sleep.
 - Lead removed a duplicate `policeStatus` key in `src/wasm/sim.ts` (M had added a second one returning null, which overrode yours, so the heat panel showed "null"). Keep one accessor.
+
+## Lead helper note (2026-10-19): cameras (`lead/playtest-camera`, playtest row 7)
+
+Owner feedback: "the camera zooms way too far out", "need more angles". Changes, all in
+`src/cameras.ts` plus small wiring (`main.ts` keys/pursuer/HUD label, `input.ts` `isHeld`,
+`settings.ts` key moves, `hud.ts` help line, `e2e/run.mjs` camera list, new `e2e/cameras.mjs`):
+
+- **Why it zoomed out:** the old chase cam sprung the camera's *world* position (ω = 5), which
+  trails a moving car by ≈ 2v/ω — about 12 m extra at the 30 m/s city-chase start speed, on top
+  of a 6–8.4 m base. The city chase preset itself set `chase` (not far / orbit).
+- **New chase:** car-relative offset from a smoothed heading; only the offset is sprung, so speed
+  never adds lag. Near chase 5.6 m back / 1.8 m up (+≤1.2 m pull-back toward 50 m/s, FOV 62→70
+  for speed feel); far chase 8.5 m / 2.9 m (+≤1.5 m). Look target leads along the real body
+  heading (into turns) and blends toward the travel direction in slides. Springs use the exact
+  critically-damped step (stable at any frame time; the Euler step diverged at SwiftShader frame
+  times). Measured in city chase at ~115 km/h: 6.4 m back, 1.78–1.81 m up.
+- **Angles:** near chase, far chase, hood, bumper, cockpit (own car hidden via Three layer 1, a
+  placeholder dash / A-pillars / wheel), side tracking, TV / cinematic (roadside spots planted
+  ahead of the car, cut once it passes; every third cut a heli or low follow shot; long lens;
+  frames the nearest police car within 45 m), orbit / free. Hold V to look back.
+- Presets (city chase) return to the viewer's chosen angle; replays still switch chase → TV.
+- `npm run e2e:cameras` checks distance/height, C cycling, V look-back and persistence, and writes
+  `docs/media/cameras/*.png`.
+- Gaps: no camera collision with buildings (the near chase rarely clips; far/side can at
+  corners); cockpit dash is a placeholder until real car interiors (R).
+- `just web-e2e` on this branch: all checks pass except "city chase … speeding violations in the
+  feed" (heat stays 0.00, no TrafficViolation in the feed). It fails the same way on unmodified
+  `origin/main` (612e036) in this container, so it is pre-existing and not camera-related.
