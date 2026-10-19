@@ -18,6 +18,7 @@
 //! | io | `events_drain() -> postcard`, `events_decode(bytes)`, `telemetry(entity)`, `telemetry_names()`, `ffb(entity)`, `intents()` |
 //! | replay | `record_start()`, `record_stop()`, `recording()`, `replay_load(bytes)`, `replay_seek(tick)`, `replay_play(speed)`, `replay_status()`, `replay_export_csv(bytes, entity, every)` |
 //! | scenario | `scenario_json()`, `scenario_result()` |
+//! | race (15) | `race_list(car, mode)`, `race_start(id, car, mode, autopilot)`, `race_info()`, `race_standings()`, `race_course()`, `race_result_json()` — see [`race`] |
 //! | run (lead) | `run_result_json()`, `run_ledger_json()`, `run_account_json()`, `run_repair_continue()`, `debug_set_heat(entity, heat)`, `debug_park_near_police(entity, ahead_m)` — see [`run`] |
 //! | audio (13) | `audio_library()`, `audio_frame(listener, events_json, focus)`, `audio_set_siren`, `audio_set_scanner_tier`, `audio_radio`, `audio_reset()` — see [`audio`] |
 
@@ -31,11 +32,14 @@ pub mod data;
 pub mod garage;
 pub mod pack;
 pub mod police;
+pub mod race;
 pub mod run;
 pub mod scenario;
 pub mod session;
 pub mod signals;
 
+#[cfg(test)]
+mod race_tests;
 #[cfg(test)]
 mod run_tests;
 
@@ -531,6 +535,82 @@ pub fn run_account_json() -> Result<String, JsValue> {
 #[wasm_bindgen]
 pub fn run_repair_continue() -> Result<String, JsValue> {
     with(|s| s.repair_and_continue().map(|r| json(&r)))
+}
+
+// ----- races (workstream 15) ----------------------------------------------------------------
+
+fn parse_mode(mode: &str) -> Result<DamageMode, String> {
+    match mode {
+        "Simulation" => Ok(DamageMode::Simulation),
+        "Arcade" | "" => Ok(DamageMode::Arcade),
+        other => Err(format!("unknown damage mode {other:?}")),
+    }
+}
+
+/// The race picker as JSON ([`race::RaceCard`] array): every race with its city, kind, laps,
+/// legality, hour, length, police presence, AI drivers (name, personality, car) and the
+/// advertised purse / buy-in for a player in `car` in `mode`.
+#[wasm_bindgen]
+pub fn race_list(car: &str, mode: &str) -> Result<String, JsValue> {
+    let mode = parse_mode(mode).map_err(err)?;
+    let car = simcli::data::load_car(data::mem_data(), car).ok();
+    Ok(json(&race::race_cards(car.as_ref(), mode)))
+}
+
+/// Start race `id` with the player in `car` (`mode` `"Arcade"` | `"Simulation"`): a new live
+/// session on the race's grid, countdown running, AI field on the slots ahead. `autopilot`
+/// hands the player's car to the AI (tests / e2e). The account carries over like a restart.
+/// Returns the entity ids (player first).
+#[wasm_bindgen]
+pub fn race_start(id: &str, car: &str, mode: &str, autopilot: bool) -> Result<Vec<u32>, JsValue> {
+    let def = wp_race::catalog::race(id).ok_or_else(|| err(format!("unknown race {id:?}")))?;
+    let sc =
+        race::race_scenario(&def, car, parse_mode(mode).map_err(err)?, autopilot).map_err(err)?;
+    Ok(install(Session::new(sc, false).map_err(err)?))
+}
+
+/// Live race state, or an empty array without a race: see [`race::RaceRun::info`]
+/// (`[phase, countdown_s, elapsed_s, laps, gates, player, racers, closed_loop, length_m,
+/// autopilot, kind, player_done]`).
+#[wasm_bindgen]
+pub fn race_info() -> Result<Vec<f32>, JsValue> {
+    get(|s| s.race().map(|r| r.info(s.tick())).unwrap_or_default())
+}
+
+/// Live standings, position order, [`race::STANDING_STRIDE`] floats per racer (see
+/// [`race::RaceRun::standings_packed`]); empty without a race.
+#[wasm_bindgen]
+pub fn race_standings() -> Result<Vec<f32>, JsValue> {
+    get(|s| {
+        s.race()
+            .map(race::RaceRun::standings_packed)
+            .unwrap_or_default()
+    })
+}
+
+/// Floats per racer in `race_standings()`.
+#[wasm_bindgen]
+pub fn race_standing_stride() -> u32 {
+    race::STANDING_STRIDE as u32
+}
+
+/// Gates and route of the current race (static; see [`race::RaceRun::course_packed`]).
+#[wasm_bindgen]
+pub fn race_course() -> Result<Vec<f32>, JsValue> {
+    get(|s| {
+        s.race()
+            .map(race::RaceRun::course_packed)
+            .unwrap_or_default()
+    })
+}
+
+/// Results panel JSON ([`race::RaceReport`]) once the player is no longer racing (finished,
+/// DNF or DQ), `null` before or without a race. `final_results` turns true when the whole
+/// field is done; `payout` (G's settlement) arrives then. `handoff_run_end`: the police caught
+/// the player, the end-of-run panel owns the screen.
+#[wasm_bindgen]
+pub fn race_result_json() -> Result<String, JsValue> {
+    get(|s| json(&s.race_report()))
 }
 
 /// Debug / e2e: set a racer's police heat (`PoliceSystem::set_heat`). Changes the run and is

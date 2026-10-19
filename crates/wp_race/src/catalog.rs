@@ -93,6 +93,8 @@ pub struct RaceDef {
     pub legality: Legality,
     /// In-game start hour.
     pub time_of_day_h: f32,
+    /// Civilian traffic density scale (`Scenario::traffic_density`; 1 = the city's normal).
+    pub traffic_density: f32,
     /// Course on the city's roads.
     pub course: CourseSpec,
     /// Planned course length, m (for the picker, checked against the planner in tests).
@@ -225,6 +227,7 @@ pub fn races() -> Vec<RaceDef> {
             kind: RaceKind::Sprint,
             legality: Legality::Street,
             time_of_day_h: 23.0,
+            traffic_density: 0.3,
             course: CourseSpec::PoiRoute {
                 start: "Hollins Ascent",
                 finish: "Knob Observatory Lot",
@@ -242,6 +245,7 @@ pub fn races() -> Vec<RaceDef> {
             kind: RaceKind::Circuit { laps: 1 },
             legality: Legality::Street,
             time_of_day_h: 1.0,
+            traffic_density: 0.3,
             course: CourseSpec::Circuit { polygon: LOOP9 },
             length_hint_m: 10132.0,
             ai: &[VIC, MARA, DEZ, JUNO, TITO],
@@ -256,6 +260,7 @@ pub fn races() -> Vec<RaceDef> {
             kind: RaceKind::Checkpoint,
             legality: Legality::IllegalDaytime,
             time_of_day_h: 14.0,
+            traffic_density: 0.5,
             course: CourseSpec::PoiToPoint {
                 start: "Lantern Run",
                 finish: [250.0, -350.0, 0.0],
@@ -273,6 +278,7 @@ pub fn races() -> Vec<RaceDef> {
             kind: RaceKind::Sprint,
             legality: Legality::Street,
             time_of_day_h: 23.0,
+            traffic_density: 0.3,
             course: CourseSpec::PoiToPoint {
                 start: "Highway sprint",
                 finish: [9.2, 400.0, 0.0],
@@ -345,7 +351,9 @@ mod tests {
     fn picker_covers_sprint_circuit_checkpoint_on_both_cities() {
         let all = races();
         let has = |f: &dyn Fn(&RaceDef) -> bool| all.iter().any(f);
-        assert!(has(&|r| r.kind == RaceKind::Sprint && r.city == RaceCity::Vesper));
+        assert!(has(
+            &|r| r.kind == RaceKind::Sprint && r.city == RaceCity::Vesper
+        ));
         assert!(has(&|r| matches!(r.kind, RaceKind::Circuit { .. })));
         assert!(has(&|r| r.kind == RaceKind::Checkpoint));
         assert!(has(&|r| r.city == RaceCity::Grid));

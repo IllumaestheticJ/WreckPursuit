@@ -26,6 +26,7 @@ use simcli::scenario::{CitySpec, EntitySpec};
 use simcli::{RunSummary, Scenario};
 
 use crate::data::mem_data;
+use crate::race::RaceRun;
 use crate::run::{ContinueReport, PlayerCar, PlayerRun};
 use crate::scenario::entity;
 
@@ -90,6 +91,8 @@ pub struct Session {
     outcome: Option<RunSummary>,
     /// The player's economy (live sessions with police; see [`crate::run`]).
     run: Option<PlayerRun>,
+    /// A picker race (scenario `race_<id>`, live or replayed; see [`crate::race`]).
+    race: Option<RaceRun>,
 }
 
 fn opts(systems: Option<Selection>) -> RunOptions {
@@ -129,7 +132,7 @@ impl Session {
     ) -> Result<Self, String> {
         let load_city = sc.city != CitySpec::Flat;
         let BuiltSim {
-            sim,
+            mut sim,
             ids,
             cars,
             selection,
@@ -138,7 +141,7 @@ impl Session {
         let log = Replay::new(&sc, &selection.to_string(), ids.len());
         let n = ids.len();
         // The player's economy: live (not replayed, not scripted) sessions with police.
-        let run = match (ids.first(), &sc.entities.first()) {
+        let mut run = match (ids.first(), &sc.entities.first()) {
             (Some(&player), Some(spec))
                 if playback.is_none() && !scripted && sim.systems().police =>
             {
@@ -154,7 +157,21 @@ impl Session {
             }
             _ => None,
         };
+        // A picker race: judged next to the sim, live and in playback (not scripted menu runs).
+        let race = match crate::race::race_for_scenario(&sc.name) {
+            Some((def, autopilot)) if !scripted => Some(RaceRun::new(
+                &def,
+                autopilot,
+                &mut sim,
+                &ids,
+                &cars,
+                &sc,
+                run.as_mut(),
+            )?),
+            _ => None,
+        };
         Ok(Self {
+            race,
             run,
             script_end: if scripted { sc.ticks() } else { 0 },
             mode: sc.mode,
@@ -190,7 +207,9 @@ impl Session {
     /// A free-drive city session spawns the first entity on the city's race start grid.
     pub fn new(mut sc: Scenario, scripted: bool) -> Result<Self, String> {
         sc.validate()?;
-        if !scripted && sc.city != CitySpec::Flat {
+        // Race scenarios already stand on their grid.
+        let race = crate::race::race_for_scenario(&sc.name).is_some();
+        if !scripted && !race && sc.city != CitySpec::Flat {
             let city = simcli::data::load_world(mem_data(), &sc.city, world_config(&sc))
                 .map_err(|e| e.to_string())?;
             if let Some(world) = city {
@@ -371,11 +390,33 @@ impl Session {
     pub fn set_input(&mut self, id: EntityId, input: VehicleInput) -> Result<bool, String> {
         self.live_check()?;
         let idx = self.idx(id)?;
-        if self.script_running() || self.last_input[idx] == input || self.held(id) {
+        if self.script_running()
+            || self.last_input[idx] == input
+            || self.held(id)
+            || self.race_holds(id)
+        {
             return Ok(false);
         }
         self.log_input(idx, input);
         Ok(true)
+    }
+
+    /// The race holds this car's input (the player during the countdown, or on autopilot).
+    fn race_holds(&self, id: EntityId) -> bool {
+        self.race
+            .as_ref()
+            .is_some_and(|r| r.live().player() == id && r.holds_player(self.sim.tick()))
+    }
+
+    /// The picker race attached to this session, if any.
+    pub fn race(&self) -> Option<&RaceRun> {
+        self.race.as_ref()
+    }
+
+    /// The race's results panel (once the player is no longer racing).
+    pub fn race_report(&self) -> Option<crate::race::RaceReport> {
+        let over = self.run.as_ref().is_some_and(PlayerRun::is_over);
+        self.race.as_ref().and_then(|r| r.report(over))
     }
 
     fn script_running(&self) -> bool {
@@ -386,7 +427,21 @@ impl Session {
     pub fn reset_vehicle(&mut self, id: EntityId) -> Result<(), String> {
         self.live_check()?;
         let idx = self.idx(id)?;
-        self.log_op(idx, OpKind::Reset)
+        self.log_op(idx, OpKind::Reset)?;
+        self.relocate_racer(id);
+        Ok(())
+    }
+
+    /// Tell the race (if any) that `id` was moved on purpose, so the judge does not read the
+    /// jump as a teleport.
+    fn relocate_racer(&mut self, id: EntityId) {
+        let tick = self.sim.tick();
+        if let (Some(race), Some(v)) = (
+            &mut self.race,
+            self.sim.vehicles().iter().find(|v| v.id == id),
+        ) {
+            race.relocate(id, v.vehicle.state().pos, tick);
+        }
     }
 
     /// Set a vehicle's assists (logged op).
@@ -444,6 +499,10 @@ impl Session {
             self.mode,
             self.sc.seed,
         ));
+        // The race's buy-in was charged on the fresh account: charge the adopted one instead.
+        if let (Some(race), Some(run)) = (&mut self.race, &mut self.run) {
+            race.reenter(run);
+        }
     }
 
     /// Mutable sim for debug tools (`debug_set_heat`) and tests. Live sessions only; changes
@@ -467,9 +526,25 @@ impl Session {
             .vehicles()
             .iter()
             .find(|v| v.kind == wp_sim::VehicleKind::Police)
-            .map(|v| (v.id, v.vehicle.state()))
+            .map(|v| v.id)
             .ok_or("no police car yet")?;
-        let (cop, st) = (cop.0, cop.1);
+        self.debug_park_in_front_of(id, cop, ahead_m)?;
+        Ok(cop)
+    }
+
+    /// Debug / e2e: park vehicle `id` (stopped) `ahead_m` in front of vehicle `other`, in its
+    /// lane. Not in the replay log; a race (if any) is told the car was moved on purpose.
+    pub fn debug_park_in_front_of(
+        &mut self,
+        id: EntityId,
+        other: EntityId,
+        ahead_m: f32,
+    ) -> Result<(), String> {
+        self.live_check()?;
+        let st = self
+            .vehicle(other)
+            .map(|v| v.vehicle.state())
+            .ok_or_else(|| format!("unknown vehicle {other:?}"))?;
         let q = st.rot;
         // Chassis +Y in world (XY), then yaw about +Z with 0 = +Y.
         let fx = 2.0 * (q[0] * q[1] - q[3] * q[2]);
@@ -480,7 +555,8 @@ impl Session {
         self.sim
             .place_on_ground(id, xy, yaw, 0.0, Some(st.pos[2]))
             .map_err(|e| e.to_string())?;
-        Ok(cop)
+        self.relocate_racer(id);
+        Ok(())
     }
 
     /// The vehicle is held on the brakes because its run is over (capture or wreck).
@@ -592,6 +668,21 @@ impl Session {
             }
         }
 
+        // 1b. Race: the AI field drives its cars (and the player's grid hold). In playback the
+        //     field still runs (its decisions feed the judge) but the log supplies the inputs.
+        if let Some(inputs) = self.race.as_mut().map(|r| r.pre_step(&self.sim)) {
+            if self.playback.is_none() {
+                for (e, input) in inputs {
+                    if self.held(e) {
+                        continue;
+                    }
+                    if let Some(idx) = self.index(e) {
+                        self.log_input(idx, input);
+                    }
+                }
+            }
+        }
+
         // 2. Step, keeping the pre-tick state for interpolation and acceleration.
         // All sim vehicles (city police / traffic cars are drawn and interpolated too);
         // scripting and replay checkpoints use scenario entities only.
@@ -605,7 +696,18 @@ impl Session {
         self.sync_cars();
         let drained = self.sim.drain_events();
         self.observe_run(&drained);
+        // Race judging, outside the step: SimEvent::Race signals (and the police events of a
+        // delivered meet report) join this tick's events.
+        let extra = match &mut self.race {
+            Some(race) => race.post_step(&mut self.sim, &drained),
+            None => Vec::new(),
+        };
+        self.observe_run(&extra);
+        if let Some(race) = &mut self.race {
+            race.settle(self.run.as_mut());
+        }
         self.events.extend(drained);
+        self.events.extend(extra);
         if self.events.len() > MAX_BUFFERED_EVENTS {
             let excess = self.events.len() - MAX_BUFFERED_EVENTS;
             self.events.drain(..excess);

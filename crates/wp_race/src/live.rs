@@ -117,7 +117,11 @@ pub struct LiveRace {
 /// The grid for `def` on `race`: slot per judge entry, AI field first (pole), the player last.
 pub fn grid(def: &RaceDef, race: &CityRace) -> Vec<crate::course::GridSlot> {
     let data = RaceData::embedded();
-    let mut judge = RaceJudge::new(EventId(0), data.rules.for_kind(def.kind), race.course.clone());
+    let mut judge = RaceJudge::new(
+        EventId(0),
+        data.rules.for_kind(def.kind),
+        race.course.clone(),
+    );
     (0..def.entrants())
         .map(|i| {
             judge
@@ -287,6 +291,11 @@ impl LiveRace {
             ));
         }
         out
+    }
+
+    /// The server moved a racer on purpose (reset, respawn): not judged as a teleport.
+    pub fn relocate(&mut self, racer: EntityId, pos: [f32; 3], tick: u64) {
+        self.judge.relocate(racer, pos, tick);
     }
 
     /// The race has not gone green yet at `tick` (cars must stay on the grid).
