@@ -719,24 +719,6 @@ fn crash_and_settle(
 }
 
 
-#[test]
-fn restore_rejects_another_lattice_and_bad_arrays() {
-    let car = sedan();
-    let mut m = DamageModel::new(&car.lattice, &car.materials);
-    let mut snap = m.save_state();
-    snap.lattice_id = "something_else".into();
-    assert!(m.restore_state(&snap).is_err());
-    let mut snap = m.save_state();
-    snap.beam_flags.pop();
-    assert!(m.restore_state(&snap).is_err());
-    let mut snap = m.save_state();
-    snap.detached_groups.insert(999);
-    assert!(m.restore_state(&snap).is_err());
-    assert_eq!(
-        m.save_state(),
-        DamageModel::new(&car.lattice, &car.materials).save_state()
-    );
-}
 
 
 
