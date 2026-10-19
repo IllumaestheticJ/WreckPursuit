@@ -2,6 +2,9 @@
 //! `wp_world`'s own physical traffic:
 //! - [`road_mesh`]: one triangle mesh of every paved surface — road ribbons (banked), junction
 //!   discs and the connector ribbons through bends;
+//! - [`sidewalk_mesh`]: raised sidewalks (3 m wide, 0.15 m kerb) along every edge lane that
+//!   is not a highway, with the vertical kerb faces — the greybox draws exactly these
+//!   triangles and `wp_sim` collides with exactly these triangles;
 //! - [`deck_rails`]: guard-rail lines along bridge decks;
 //! - [`MapGround`]: a wheel ground probe over roads and terrain without a physics engine.
 
@@ -9,7 +12,15 @@ use wp_vehicle::{GroundHit, WheelCaster};
 
 use crate::geom::{self, V2, V3};
 use crate::map::{CityMap, SegKind};
-use crate::network::{RoadNetwork, RoadSurface};
+use std::collections::BTreeMap;
+
+use crate::network::{Lane, LaneKind, RoadNetwork, RoadSurface};
+
+/// Sidewalk width beyond the kerb line (the paved edge of an edge lane), m.
+pub const SIDEWALK_W_M: f32 = 3.0;
+
+/// Kerb height: the sidewalk top sits this far above the road edge, m.
+pub const KERB_H_M: f32 = 0.15;
 
 /// Indexed triangle mesh, world space (+Z up), counter-clockwise seen from above.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -21,7 +32,8 @@ pub struct TriMesh {
 }
 
 impl TriMesh {
-    fn quad(&mut self, a: V3, b: V3, c: V3, d: V3) {
+    /// Append quad `a b c d` (counter-clockwise seen from the side it faces).
+    pub fn quad(&mut self, a: V3, b: V3, c: V3, d: V3) {
         let i = self.positions.len() as u32;
         self.positions.extend_from_slice(&[a, b, c, d]);
         self.indices.push([i, i + 1, i + 2]);
@@ -34,6 +46,26 @@ impl TriMesh {
             // Travel along the strip, right edge first, so triangles face up.
             self.quad(right[k], right[k + 1], left[k + 1], left[k]);
         }
+    }
+
+    /// Append a vertical strip hanging from `top[k]` down to `bottom[k]` (same xy), facing the
+    /// right of the `top` polyline's direction.
+    pub fn strip_vertical(&mut self, top: &[V3], bottom: &[V3]) {
+        for k in 0..top.len().saturating_sub(1) {
+            self.quad(top[k], bottom[k], bottom[k + 1], top[k + 1]);
+        }
+    }
+
+    /// Append another mesh.
+    pub fn append(&mut self, other: &TriMesh) {
+        let base = self.positions.len() as u32;
+        self.positions.extend_from_slice(&other.positions);
+        self.indices.extend(
+            other
+                .indices
+                .iter()
+                .map(|t| [t[0] + base, t[1] + base, t[2] + base]),
+        );
     }
 
     /// Append a flat convex polygon (fan) at its own vertex heights.
@@ -57,6 +89,70 @@ pub fn surface_edges(s: &RoadSurface) -> (Vec<V3>, Vec<V3>) {
     (left, right)
 }
 
+/// Sides of a junction disc polygon.
+pub const JUNCTION_SIDES: usize = 16;
+
+/// The paved disc of a junction of radius `r` at `c`: a [`JUNCTION_SIDES`]-gon that encloses
+/// the circle (its edges touch it), so the trimmed road ribbons, whose corners lie on the
+/// circle, never leave an unpaved sliver at the junction mouth. Counter-clockwise.
+pub fn junction_polygon(c: V2, r: f32) -> Vec<V2> {
+    let n = JUNCTION_SIDES as f32;
+    let (_, cos_half) = wp_math::sin_cos(std::f32::consts::PI / n);
+    let rv = r / cos_half;
+    (0..JUNCTION_SIDES)
+        .map(|k| {
+            let (sn, cs) = wp_math::sin_cos(k as f32 / n * std::f32::consts::TAU);
+            [c[0] + cs * rv, c[1] + sn * rv]
+        })
+        .collect()
+}
+
+/// Paved radius of every junction (index = intersection id): at least its `radius_m`, and
+/// far enough to reach the corners of every road ribbon trimmed at it (a ribbon of half
+/// width `w` ending `d` from the centre has its corners at `sqrt(d² + w²)`), so no unpaved
+/// crescent is left at the junction mouth. `radius_m` itself (lane trimming, junction logic)
+/// is unchanged.
+pub fn junction_paved_radii(net: &RoadNetwork) -> Vec<f32> {
+    let mut radii: Vec<f32> = net.intersections.iter().map(|ix| ix.radius_m).collect();
+    // Nodes at either end of each road (from its lanes).
+    let mut road_nodes: BTreeMap<u32, [u32; 2]> = BTreeMap::new();
+    for l in &net.lanes {
+        road_nodes.entry(l.road).or_insert([l.from_node, l.to_node]);
+    }
+    for sfc in &net.surfaces {
+        let Some(nodes) = road_nodes.get(&sfc.road) else {
+            continue;
+        };
+        let (left, right) = surface_edges(sfc);
+        let n = sfc.centre.len();
+        if n < 2 {
+            continue;
+        }
+        for node in nodes {
+            let nd = &net.nodes[*node as usize];
+            let Some(ix) = nd.intersection else {
+                continue;
+            };
+            let c = geom::xy(nd.pos);
+            // The surface end at this node.
+            let k = if geom::dist(geom::xy(sfc.centre[0]), c)
+                <= geom::dist(geom::xy(sfc.centre[n - 1]), c)
+            {
+                0
+            } else {
+                n - 1
+            };
+            let reach = geom::dist(geom::xy(left[k]), c).max(geom::dist(geom::xy(right[k]), c));
+            let r = &mut radii[ix as usize];
+            // Only ribbons trimmed at this junction (not a far end that happens to share it).
+            if geom::dist(geom::xy(sfc.centre[k]), c) <= *r + 1.0 {
+                *r = r.max(reach + 0.05);
+            }
+        }
+    }
+    radii
+}
+
 /// Every paved surface of a city as one mesh: road ribbons, junction discs (16-gons) and the
 /// connector ribbons through bend nodes (degree-2 nodes have no junction disc).
 pub fn road_mesh(map: &CityMap) -> TriMesh {
@@ -66,13 +162,12 @@ pub fn road_mesh(map: &CityMap) -> TriMesh {
         let (l, r) = surface_edges(s);
         m.strip(&l, &r);
     }
-    for ix in &net.intersections {
+    let radii = junction_paved_radii(net);
+    for (ix, r) in net.intersections.iter().zip(&radii) {
         let c = net.nodes[ix.node as usize].pos;
-        let poly: Vec<V3> = (0..16)
-            .map(|k| {
-                let (sn, cs) = wp_math::sin_cos(k as f32 / 16.0 * std::f32::consts::TAU);
-                [c[0] + cs * ix.radius_m, c[1] + sn * ix.radius_m, c[2]]
-            })
+        let poly: Vec<V3> = junction_polygon(geom::xy(c), *r)
+            .iter()
+            .map(|q| [q[0], q[1], c[2]])
             .collect();
         m.fan(&poly);
     }
@@ -87,6 +182,678 @@ pub fn road_mesh(map: &CityMap) -> TriMesh {
         }
     }
     m
+}
+
+/// Cross slope of `lane` at each polyline point (dz per metre to the right of the lane's
+/// direction), from its road surface; empty when the lane does not follow the surface point
+/// for point (OSM imports, flat cities: no bank).
+pub fn lane_bank(net: &RoadNetwork, lane: &Lane) -> Vec<f32> {
+    let Some(s) = net.surfaces.get(lane.road as usize) else {
+        return Vec::new();
+    };
+    let n = s.centre.len();
+    if s.road != lane.road || n != lane.polyline.len() {
+        return Vec::new();
+    }
+    let p0 = geom::xy(lane.polyline[0]);
+    let fwd = geom::dist(p0, geom::xy(s.centre[0])) <= geom::dist(p0, geom::xy(s.centre[n - 1]));
+    if fwd {
+        s.bank.clone()
+    } else {
+        s.bank.iter().rev().map(|b| -b).collect()
+    }
+}
+
+/// Whether `lane` has a raised sidewalk on its left / right edge.
+pub fn lane_sidewalks(lane: &Lane) -> [bool; 2] {
+    let on = lane.kind != LaneKind::Highway;
+    [on && lane.edge_left, on && lane.edge_right]
+}
+
+/// Raised sidewalks: the walkable tops and the kerb faces between them and the road.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SidewalkMesh {
+    /// Sidewalk tops, facing up: from the kerb line out to [`SIDEWALK_W_M`], [`KERB_H_M`]
+    /// above the road edge and continuing the road's bank.
+    pub tops: TriMesh,
+    /// Vertical kerb faces from the road edge up to the sidewalk top.
+    pub kerbs: TriMesh,
+}
+
+/// Every raised sidewalk of a city ([`lane_sidewalks`]): a top strip and a kerb strip along
+/// each sidewalk edge of a lane, following the lane polyline and its bank. Where a sidewalk
+/// would run onto pavement — the crossing road or junction disc at a tight or skewed corner —
+/// it is trimmed in [`TRIM_CELL_M`] cells, so no kerb step ever sits inside a roadway. Used by
+/// the greybox (drawn) and by `wp_sim` (collided), so the two always agree.
+pub fn sidewalk_mesh(map: &CityMap) -> SidewalkMesh {
+    let net = &map.net;
+    let paved = PavedIndex::new(&road_mesh(map));
+    let mut out = SidewalkMesh::default();
+    let mut ends: BTreeMap<u32, Vec<WalkEnd>> = BTreeMap::new();
+    for l in &net.lanes {
+        let [left, right] = lane_sidewalks(l);
+        if !(left || right) {
+            continue;
+        }
+        let half = l.width_m * 0.5;
+        let bank = lane_bank(net, l);
+        let b = |k: usize| bank.get(k).copied().unwrap_or(0.0);
+        // Polyline offset by `lat` (+ right), on the banked plane, lifted by `dz`.
+        let line = |lat: f32, dz: f32| -> Vec<V3> {
+            let mut e = geom::offset_polyline(&l.polyline, lat);
+            for (k, p) in e.iter_mut().enumerate() {
+                p[2] += b(k) * lat + dz;
+            }
+            e
+        };
+        for (on, side) in [(right, 1.0f32), (left, -1.0)] {
+            if !on {
+                continue;
+            }
+            let side_walk = SideWalk {
+                kerb_top: line(side * half, KERB_H_M),
+                outer: line(side * (half + SIDEWALK_W_M), KERB_H_M),
+                kerb_foot: line(side * half, 0.0),
+                // Tops face up: the strip's left edge must be on the left of its direction.
+                outer_is_left: side < 0.0,
+            };
+            side_walk.emit(&paved, &mut out);
+            for (node, at_start) in [(l.from_node, true), (l.to_node, false)] {
+                if let Some(e) = side_walk.end(l.road, at_start) {
+                    ends.entry(node).or_default().push(e);
+                }
+            }
+        }
+    }
+    let strips = PavedIndex::new(&out.tops);
+    for (node, es) in &ends {
+        fill_corners(map, *node, es, &paved, &strips, &mut out);
+    }
+    out
+}
+
+/// The end of one sidewalk strip at a node: kerb-line point, outer point and the direction
+/// of the strip away from the node.
+#[derive(Debug, Clone, Copy)]
+struct WalkEnd {
+    road: u32,
+    inner: V3,
+    outer: V3,
+    /// Unit direction along the strip, pointing away from the node.
+    dir: V2,
+}
+
+/// Fill the gaps between the sidewalk ends at one node — junction corners, the top of a T,
+/// the outside of a bend — with sidewalk at kerb height: the area bounded by the two
+/// strips' kerb and outer lines (extended to where they meet), in [`TRIM_CELL_M`] cells,
+/// leaving out pavement and what the strips already cover. Kerb faces line the cells that
+/// border pavement.
+fn fill_corners(
+    map: &CityMap,
+    node: u32,
+    ends: &[WalkEnd],
+    paved: &PavedIndex,
+    strips: &PavedIndex,
+    out: &mut SidewalkMesh,
+) {
+    let net = &map.net;
+    let c = geom::xy(net.nodes[node as usize].pos);
+    let angle = |p: V2| {
+        let d = geom::sub(p, c);
+        wp_math::atan2(d[1], d[0])
+    };
+    // Road axes at this node (mean of its sidewalk ends), so no patch spans a road.
+    let mut axes: BTreeMap<u32, (V2, f32)> = BTreeMap::new();
+    for e in ends {
+        let a = axes.entry(e.road).or_insert(([0.0, 0.0], 0.0));
+        a.0 = geom::add(a.0, geom::xy(e.inner));
+        a.1 += 1.0;
+    }
+    let tau = std::f32::consts::TAU;
+    let axis_angles: Vec<f32> = axes
+        .values()
+        .map(|(sum, n)| angle(geom::scale(*sum, 1.0 / n)))
+        .collect();
+    // Roads without sidewalks (highways) through this node count as axes too.
+    let mut lane_axes: Vec<f32> = Vec::new();
+    for l in &net.lanes {
+        if l.from_node == node || l.to_node == node {
+            let p = if l.from_node == node {
+                l.polyline[0]
+            } else {
+                l.polyline[l.polyline.len() - 1]
+            };
+            lane_axes.push(angle(geom::xy(p)));
+        }
+    }
+    let mut order: Vec<(f32, usize)> = ends
+        .iter()
+        .enumerate()
+        .map(|(i, e)| {
+            (
+                angle(geom::scale(
+                    geom::add(geom::xy(e.inner), geom::xy(e.outer)),
+                    0.5,
+                )),
+                i,
+            )
+        })
+        .collect();
+    order.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+    let ccw = |from: f32, to: f32| (to - from).rem_euclid(tau);
+    for k in 0..order.len() {
+        let (a1, i1) = order[k];
+        let (a2, i2) = order[(k + 1) % order.len()];
+        if order.len() < 2 || i1 == i2 {
+            continue;
+        }
+        let (e1, e2) = (&ends[i1], &ends[i2]);
+        let gap = ccw(a1, a2);
+        if e1.road == e2.road && gap < 1.0 {
+            // Two strips of the same road side by side (e.g. lanes split at the node).
+            continue;
+        }
+        let between = |x: f32| {
+            let t = ccw(a1, x);
+            t > 1e-3 && t < gap - 1e-3
+        };
+        if axis_angles.iter().chain(&lane_axes).any(|x| between(*x)) || gap > 4.4 {
+            continue;
+        }
+        if (e1.inner[2] - e2.inner[2]).abs() > 1.0
+            || geom::dist(geom::xy(e1.inner), geom::xy(e2.inner)) > 30.0
+        {
+            continue;
+        }
+        fill_patch(c, e1, e2, paved, strips, out);
+    }
+}
+
+/// Where the lines `p1 + s d1` and `p2 + u d2` cross (None when nearly parallel).
+fn line_cross(p1: V2, d1: V2, p2: V2, d2: V2) -> Option<V2> {
+    let den = geom::cross(d1, d2);
+    if den.abs() < 0.34 {
+        return None;
+    }
+    let s = geom::cross(geom::sub(p2, p1), d2) / den;
+    Some(geom::add(p1, geom::scale(d1, s)))
+}
+
+/// One corner patch between the sidewalk ends `e1` and `e2` around node centre `c`.
+fn fill_patch(
+    c: V2,
+    e1: &WalkEnd,
+    e2: &WalkEnd,
+    paved: &PavedIndex,
+    strips: &PavedIndex,
+    out: &mut SidewalkMesh,
+) {
+    let (i1, o1, i2, o2) = (
+        geom::xy(e1.inner),
+        geom::xy(e1.outer),
+        geom::xy(e2.inner),
+        geom::xy(e2.outer),
+    );
+    let near = |p: Option<V2>| p.filter(|q| geom::dist(*q, c) < 25.0);
+    let poly: Vec<V2> = match (
+        near(line_cross(i1, e1.dir, i2, e2.dir)),
+        near(line_cross(o1, e1.dir, o2, e2.dir)),
+    ) {
+        (Some(k), Some(apex)) => vec![k, i1, o1, apex, o2, i2],
+        _ => vec![i1, o1, o2, i2],
+    };
+    // Kerb-top plane through the four end points (least squares; flat when degenerate).
+    let pts = [e1.inner, e1.outer, e2.inner, e2.outer];
+    let plane = fit_plane(&pts, c);
+    let z_at = |p: V2| plane[0] + plane[1] * (p[0] - c[0]) + plane[2] * (p[1] - c[1]);
+    let cell = TRIM_CELL_M;
+    let lo = poly
+        .iter()
+        .fold([f32::INFINITY; 2], |a, p| [a[0].min(p[0]), a[1].min(p[1])]);
+    let hi = poly.iter().fold([f32::NEG_INFINITY; 2], |a, p| {
+        [a[0].max(p[0]), a[1].max(p[1])]
+    });
+    let (ix0, ix1) = ((lo[0] / cell).floor() as i32, (hi[0] / cell).ceil() as i32);
+    let (iy0, iy1) = ((lo[1] / cell).floor() as i32, (hi[1] / cell).ceil() as i32);
+    let centre = |ix: i32, iy: i32| [(ix as f32 + 0.5) * cell, (iy as f32 + 0.5) * cell];
+    let is_paved = |ix: i32, iy: i32| {
+        let q = centre(ix, iy);
+        paved.covers(q, z_at(q) - KERB_H_M)
+    };
+    let keep = |ix: i32, iy: i32| {
+        let q = centre(ix, iy);
+        geom::point_in_polygon(q, &poly) && !is_paved(ix, iy) && !strips.covers(q, z_at(q))
+    };
+    let corner = |x: f32, y: f32| [x, y, z_at([x, y])];
+    // Kerb edges towards paved neighbours, collected per grid line and merged into runs:
+    // horizontal lines keyed by (y line, facing ±y) → cell columns, vertical by (x line,
+    // facing ±x) → cell rows.
+    let mut h_edges: BTreeMap<(i32, i8), Vec<i32>> = BTreeMap::new();
+    let mut v_edges: BTreeMap<(i32, i8), Vec<i32>> = BTreeMap::new();
+    for iy in iy0..iy1 {
+        let (y0, y1) = (iy as f32 * cell, (iy + 1) as f32 * cell);
+        let mut ix = ix0;
+        while ix < ix1 {
+            if !keep(ix, iy) {
+                ix += 1;
+                continue;
+            }
+            let run0 = ix;
+            while ix < ix1 && keep(ix, iy) {
+                if is_paved(ix, iy - 1) {
+                    h_edges.entry((iy, -1)).or_default().push(ix);
+                }
+                if is_paved(ix, iy + 1) {
+                    h_edges.entry((iy + 1, 1)).or_default().push(ix);
+                }
+                if is_paved(ix - 1, iy) {
+                    v_edges.entry((ix, -1)).or_default().push(iy);
+                }
+                if is_paved(ix + 1, iy) {
+                    v_edges.entry((ix + 1, 1)).or_default().push(iy);
+                }
+                ix += 1;
+            }
+            let (xa, xb) = (run0 as f32 * cell, ix as f32 * cell);
+            // Counter-clockwise from above: faces up.
+            out.tops.quad(
+                corner(xa, y0),
+                corner(xb, y0),
+                corner(xb, y1),
+                corner(xa, y1),
+            );
+        }
+    }
+    // Kerb faces: vertical quads from the top down by the kerb height, facing the pavement.
+    let mut kerb = |a: V2, b: V2| {
+        let (ta, tb) = (corner(a[0], a[1]), corner(b[0], b[1]));
+        let foot = |t: V3| [t[0], t[1], t[2] - KERB_H_M];
+        out.kerbs.strip_vertical(&[ta, tb], &[foot(ta), foot(tb)]);
+    };
+    for ((line, facing), cols) in &mut h_edges {
+        cols.sort_unstable();
+        let y = *line as f32 * cell;
+        for (c0, c1) in runs(cols) {
+            let (xa, xb) = (c0 as f32 * cell, c1 as f32 * cell);
+            // A face's outward normal is the right of its top edge's direction.
+            if *facing < 0 {
+                kerb([xa, y], [xb, y]);
+            } else {
+                kerb([xb, y], [xa, y]);
+            }
+        }
+    }
+    for ((line, facing), rows) in &mut v_edges {
+        rows.sort_unstable();
+        let x = *line as f32 * cell;
+        for (r0, r1) in runs(rows) {
+            let (ya, yb) = (r0 as f32 * cell, r1 as f32 * cell);
+            if *facing < 0 {
+                kerb([x, yb], [x, ya]);
+            } else {
+                kerb([x, ya], [x, yb]);
+            }
+        }
+    }
+}
+
+/// Runs of consecutive integers in sorted `v`, as half-open `(start, end)` ranges.
+fn runs(v: &[i32]) -> Vec<(i32, i32)> {
+    let mut out: Vec<(i32, i32)> = Vec::new();
+    for &x in v {
+        match out.last_mut() {
+            Some(last) if last.1 == x => last.1 = x + 1,
+            _ => out.push((x, x + 1)),
+        }
+    }
+    out
+}
+
+/// Least-squares plane `z = a + b (x - c.x) + d (y - c.y)` through `pts`, as `[a, b, d]`
+/// (a flat plane at the mean height when the points are collinear).
+fn fit_plane(pts: &[V3], c: V2) -> [f32; 3] {
+    let n = pts.len() as f32;
+    let mean_z = pts.iter().map(|p| p[2]).sum::<f32>() / n;
+    let (mut sx, mut sy, mut sxx, mut syy, mut sxy, mut sz, mut sxz, mut syz) = (
+        0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32,
+    );
+    for p in pts {
+        let (x, y, z) = (p[0] - c[0], p[1] - c[1], p[2]);
+        sx += x;
+        sy += y;
+        sxx += x * x;
+        syy += y * y;
+        sxy += x * y;
+        sz += z;
+        sxz += x * z;
+        syz += y * z;
+    }
+    // Solve [[n sx sy][sx sxx sxy][sy sxy syy]] [a b d] = [sz sxz syz] (Cramer).
+    let m = [[n, sx, sy], [sx, sxx, sxy], [sy, sxy, syy]];
+    let det3 = |m: [[f32; 3]; 3]| {
+        m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+            - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+            + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
+    };
+    let det = det3(m);
+    if det.abs() < 1e-3 {
+        return [mean_z, 0.0, 0.0];
+    }
+    let r = [sz, sxz, syz];
+    let col = |k: usize| {
+        let mut mk = m;
+        for (row, rv) in mk.iter_mut().zip(r) {
+            row[k] = rv;
+        }
+        det3(mk) / det
+    };
+    let plane = [col(0), col(1), col(2)];
+    // Corner patches are small; a slope steeper than the steepest road means a bad fit.
+    if plane[1].abs() > 0.2 || plane[2].abs() > 0.2 {
+        return [mean_z, 0.0, 0.0];
+    }
+    plane
+}
+
+/// Trim resolution of [`sidewalk_mesh`] where a sidewalk meets pavement, m (along the lane;
+/// across, the sidewalk is split in `SIDEWALK_W_M / TRIM_CELL_M` cells).
+pub const TRIM_CELL_M: f32 = 0.5;
+
+/// One sidewalk strip along a lane edge.
+struct SideWalk {
+    kerb_top: Vec<V3>,
+    outer: Vec<V3>,
+    kerb_foot: Vec<V3>,
+    outer_is_left: bool,
+}
+
+impl SideWalk {
+    /// The strip's end at its start (`at_start`) or finish.
+    fn end(&self, road: u32, at_start: bool) -> Option<WalkEnd> {
+        let n = self.kerb_top.len();
+        if n < 2 {
+            return None;
+        }
+        let (k, k2) = if at_start { (0, 1) } else { (n - 1, n - 2) };
+        Some(WalkEnd {
+            road,
+            inner: self.kerb_top[k],
+            outer: self.outer[k],
+            dir: geom::normalize(geom::sub(
+                geom::xy(self.kerb_top[k2]),
+                geom::xy(self.kerb_top[k]),
+            )),
+        })
+    }
+
+    fn emit(&self, paved: &PavedIndex, out: &mut SidewalkMesh) {
+        let across = (SIDEWALK_W_M / TRIM_CELL_M).round().max(1.0) as usize;
+        let lerp = |a: V3, b: V3, t: f32| -> V3 {
+            [
+                a[0] + (b[0] - a[0]) * t,
+                a[1] + (b[1] - a[1]) * t,
+                a[2] + (b[2] - a[2]) * t,
+            ]
+        };
+        for k in 0..self.kerb_top.len().saturating_sub(1) {
+            let (i0, i1) = (self.kerb_top[k], self.kerb_top[k + 1]);
+            let (o0, o1) = (self.outer[k], self.outer[k + 1]);
+            let (f0, f1) = (self.kerb_foot[k], self.kerb_foot[k + 1]);
+            let len =
+                geom::dist(geom::xy(i0), geom::xy(i1)).max(geom::dist(geom::xy(o0), geom::xy(o1)));
+            let rows = ((len / TRIM_CELL_M).ceil() as usize).max(1);
+            // Pavement that reaches past the kerb line onto this stretch of sidewalk (the
+            // lane's own road ends at the kerb line, so it never counts).
+            let quad = [geom::xy(i0), geom::xy(i1), geom::xy(o1), geom::xy(o0)];
+            let near = paved.reaching_into(&quad, (i0[2] + i1[2]) * 0.5 - KERB_H_M);
+            // Cell (row, col) centre on pavement → dropped.
+            let on_paved = |r: usize, c: usize| {
+                if near.is_empty() {
+                    return false;
+                }
+                let t = (r as f32 + 0.5) / rows as f32;
+                let u = (c as f32 + 0.5) / across as f32;
+                let p = lerp(lerp(i0, i1, t), lerp(o0, o1, t), u);
+                paved.covers_among(&near, geom::xy(p), p[2] - KERB_H_M)
+            };
+            let kept: Vec<Vec<bool>> = (0..rows)
+                .map(|r| (0..across).map(|c| !on_paved(r, c)).collect())
+                .collect();
+            let at = |r: usize| r as f32 / rows as f32;
+            // Tops: runs of clean rows become one quad (exactly the plain strip when the
+            // whole segment is clean); a trimmed row gets one quad per run of kept cells.
+            let mut r = 0;
+            while r < rows {
+                if kept[r].iter().all(|k| *k) {
+                    let r0 = r;
+                    while r < rows && kept[r].iter().all(|k| *k) {
+                        r += 1;
+                    }
+                    let (t0, t1) = (at(r0), at(r));
+                    self.quad(
+                        out,
+                        lerp(i0, i1, t0),
+                        lerp(i0, i1, t1),
+                        lerp(o0, o1, t0),
+                        lerp(o0, o1, t1),
+                    );
+                    continue;
+                }
+                let (t0, t1) = (at(r), at(r + 1));
+                let (a0, a1) = (lerp(i0, i1, t0), lerp(i0, i1, t1));
+                let (b0, b1) = (lerp(o0, o1, t0), lerp(o0, o1, t1));
+                let cols: Vec<i32> = (0..across)
+                    .filter(|c| kept[r][*c])
+                    .map(|c| c as i32)
+                    .collect();
+                for (c0, c1) in runs(&cols) {
+                    let (u0, u1) = (c0 as f32 / across as f32, c1 as f32 / across as f32);
+                    self.quad(
+                        out,
+                        lerp(a0, b0, u0),
+                        lerp(a1, b1, u0),
+                        lerp(a0, b0, u1),
+                        lerp(a1, b1, u1),
+                    );
+                }
+                r += 1;
+            }
+            // Kerb faces wherever the cell against the kerb line is kept, one per run.
+            let inner: Vec<i32> = (0..rows)
+                .filter(|r| kept[*r][0])
+                .map(|r| r as i32)
+                .collect();
+            for (r0, r1) in runs(&inner) {
+                let (t0, t1) = (at(r0 as usize), at(r1 as usize));
+                self.kerb(
+                    out,
+                    [lerp(i0, i1, t0), lerp(i0, i1, t1)],
+                    [lerp(f0, f1, t0), lerp(f0, f1, t1)],
+                );
+            }
+        }
+    }
+
+    /// Kerb face along the kerb line `top` (in strip direction) down to `foot`, facing the
+    /// road (the outward normal of [`TriMesh::strip_vertical`] is the right of its top edge).
+    fn kerb(&self, out: &mut SidewalkMesh, top: [V3; 2], foot: [V3; 2]) {
+        if self.outer_is_left {
+            // Road on the right of the strip direction.
+            out.kerbs.strip_vertical(&top, &foot);
+        } else {
+            out.kerbs
+                .strip_vertical(&[top[1], top[0]], &[foot[1], foot[0]]);
+        }
+    }
+
+    /// Top quad from the inner edge (`in0` → `in1`) to the outer edge (`out0` → `out1`).
+    fn quad(&self, out: &mut SidewalkMesh, in0: V3, in1: V3, out0: V3, out1: V3) {
+        if self.outer_is_left {
+            out.tops.strip(&[out0, out1], &[in0, in1]);
+        } else {
+            out.tops.strip(&[in0, in1], &[out0, out1]);
+        }
+    }
+}
+
+/// Triangles ([`road_mesh`], or sidewalk tops) bucketed by xy on a dense grid, for "is this
+/// point on pavement?".
+struct PavedIndex {
+    tris: Vec<[V3; 3]>,
+    /// Bucket of (0, 0), in buckets.
+    origin: (i32, i32),
+    /// Buckets along x and y.
+    size: (i32, i32),
+    /// Triangle ids per bucket, row-major.
+    cells: Vec<Vec<u32>>,
+}
+
+impl PavedIndex {
+    const BUCKET_M: f32 = 8.0;
+
+    fn key(p: V2) -> (i32, i32) {
+        (
+            (p[0] / Self::BUCKET_M).floor() as i32,
+            (p[1] / Self::BUCKET_M).floor() as i32,
+        )
+    }
+
+    fn new(m: &TriMesh) -> Self {
+        let tris: Vec<[V3; 3]> = m
+            .indices
+            .iter()
+            .map(|t| t.map(|i| m.positions[i as usize]))
+            .collect();
+        let bounds = |v: &[V3; 3]| {
+            (
+                Self::key([
+                    v[0][0].min(v[1][0]).min(v[2][0]),
+                    v[0][1].min(v[1][1]).min(v[2][1]),
+                ]),
+                Self::key([
+                    v[0][0].max(v[1][0]).max(v[2][0]),
+                    v[0][1].max(v[1][1]).max(v[2][1]),
+                ]),
+            )
+        };
+        let (mut lo, mut hi) = ((i32::MAX, i32::MAX), (i32::MIN, i32::MIN));
+        for v in &tris {
+            let (a, b) = bounds(v);
+            lo = (lo.0.min(a.0), lo.1.min(a.1));
+            hi = (hi.0.max(b.0), hi.1.max(b.1));
+        }
+        if tris.is_empty() {
+            return Self {
+                tris,
+                origin: (0, 0),
+                size: (0, 0),
+                cells: Vec::new(),
+            };
+        }
+        let size = (hi.0 - lo.0 + 1, hi.1 - lo.1 + 1);
+        let mut cells = vec![Vec::new(); (size.0 * size.1) as usize];
+        for (id, v) in tris.iter().enumerate() {
+            let (a, b) = bounds(v);
+            for by in a.1..=b.1 {
+                for bx in a.0..=b.0 {
+                    cells[((by - lo.1) * size.0 + (bx - lo.0)) as usize].push(id as u32);
+                }
+            }
+        }
+        Self {
+            tris,
+            origin: lo,
+            size,
+            cells,
+        }
+    }
+
+    fn bucket(&self, p: V2) -> &[u32] {
+        let (bx, by) = Self::key(p);
+        let (x, y) = (bx - self.origin.0, by - self.origin.1);
+        if x < 0 || y < 0 || x >= self.size.0 || y >= self.size.1 {
+            return &[];
+        }
+        &self.cells[(y * self.size.0 + x) as usize]
+    }
+
+    /// Triangles within 1.5 m of height `z` that reach strictly inside the convex
+    /// quadrilateral `quad` (its first edge is the kerb line; a triangle must have a vertex
+    /// more than 5 cm past it) — sorted ids, no duplicates.
+    fn reaching_into(&self, quad: &[V2; 4], z: f32) -> Vec<u32> {
+        let lo = quad
+            .iter()
+            .fold([f32::INFINITY; 2], |a, p| [a[0].min(p[0]), a[1].min(p[1])]);
+        let hi = quad.iter().fold([f32::NEG_INFINITY; 2], |a, p| {
+            [a[0].max(p[0]), a[1].max(p[1])]
+        });
+        let (k0, k1) = (Self::key(lo), Self::key(hi));
+        // Unit normal of the kerb line pointing into the quad.
+        let d = geom::normalize(geom::sub(quad[1], quad[0]));
+        let mut n = geom::right_of(d);
+        if geom::dot(geom::sub(quad[3], quad[0]), n) < 0.0 {
+            n = geom::scale(n, -1.0);
+        }
+        let mut out: Vec<u32> = Vec::new();
+        for by in k0.1..=k1.1 {
+            for bx in k0.0..=k1.0 {
+                let p = [
+                    (bx as f32 + 0.5) * Self::BUCKET_M,
+                    (by as f32 + 0.5) * Self::BUCKET_M,
+                ];
+                for &id in self.bucket(p) {
+                    let v = &self.tris[id as usize];
+                    let tlo = [
+                        v[0][0].min(v[1][0]).min(v[2][0]),
+                        v[0][1].min(v[1][1]).min(v[2][1]),
+                    ];
+                    let thi = [
+                        v[0][0].max(v[1][0]).max(v[2][0]),
+                        v[0][1].max(v[1][1]).max(v[2][1]),
+                    ];
+                    let overlaps =
+                        tlo[0] <= hi[0] && thi[0] >= lo[0] && tlo[1] <= hi[1] && thi[1] >= lo[1];
+                    let past_kerb = v
+                        .iter()
+                        .any(|q| geom::dot(geom::sub(geom::xy(*q), quad[0]), n) > 0.05);
+                    let level = v.iter().any(|q| (q[2] - z).abs() < 1.5);
+                    if overlaps && past_kerb && level {
+                        out.push(id);
+                    }
+                }
+            }
+        }
+        out.sort_unstable();
+        out.dedup();
+        out
+    }
+
+    /// [`PavedIndex::covers`] over the triangles `ids` only.
+    fn covers_among(&self, ids: &[u32], p: V2, z: f32) -> bool {
+        ids.iter().any(|&id| self.tri_covers(id, p, z))
+    }
+
+    /// Whether a paved triangle within 1.5 m of height `z` lies under `p`.
+    fn covers(&self, p: V2, z: f32) -> bool {
+        self.bucket(p).iter().any(|&id| self.tri_covers(id, p, z))
+    }
+
+    /// Whether triangle `id` lies under `p` within 1.5 m of height `z`.
+    fn tri_covers(&self, id: u32, p: V2, z: f32) -> bool {
+        let v = &self.tris[id as usize];
+        let (x1, y1, x2, y2, x3, y3) = (v[0][0], v[0][1], v[1][0], v[1][1], v[2][0], v[2][1]);
+        let d = (y2 - y3) * (x1 - x3) + (x3 - x2) * (y1 - y3);
+        if d.abs() < 1e-9 {
+            return false;
+        }
+        let l1 = ((y2 - y3) * (p[0] - x3) + (x3 - x2) * (p[1] - y3)) / d;
+        let l2 = ((y3 - y1) * (p[0] - x3) + (x1 - x3) * (p[1] - y3)) / d;
+        let l3 = 1.0 - l1 - l2;
+        l1 >= 0.0
+            && l2 >= 0.0
+            && l3 >= 0.0
+            && (l1 * v[0][2] + l2 * v[1][2] + l3 * v[2][2] - z).abs() < 1.5
+    }
 }
 
 /// Whether the whole cross-section of `s` at point `k` is more than `gap` metres above
@@ -186,5 +953,148 @@ impl wp_contracts::GroundQuery for MapGround<'_> {
             point: h.point.to_array(),
             normal: h.normal.to_array(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Points across every drivable lane and junction turning path (`margin` inside its
+    /// edges) where a sidewalk top lies over it: a kerb step inside the roadway.
+    fn sidewalk_on_roadway(map: &CityMap, margin: f32) -> (usize, usize, Vec<V2>) {
+        let tops = PavedIndex::new(&sidewalk_mesh(map).tops);
+        let (mut n, mut bad, mut examples) = (0, 0, Vec::new());
+        for s in map.segs.iter().filter(|s| s.drivable) {
+            let half = s.width * 0.5 - margin;
+            if half <= 0.0 {
+                continue;
+            }
+            let mut d = 0.25;
+            while d < s.length {
+                let (p, dir) = s.point_at(d);
+                let r = geom::right_of(dir);
+                let mut lat = -half;
+                while lat <= half {
+                    let q = geom::add(geom::xy(p), geom::scale(r, lat));
+                    n += 1;
+                    if tops.covers(q, p[2] + KERB_H_M) {
+                        bad += 1;
+                        if examples.len() < 8 {
+                            examples.push(q);
+                        }
+                    }
+                    lat += 0.5;
+                }
+                d += 1.0;
+            }
+        }
+        (n, bad, examples)
+    }
+
+    #[test]
+    fn sidewalks_stay_off_the_roadway() {
+        for (name, net) in [
+            (
+                "vesper_v2",
+                crate::vesper::generate(&crate::vesper::VesperConfig::default()),
+            ),
+            (
+                "grid",
+                crate::procgen::generate(&crate::procgen::ProcGenConfig::default()),
+            ),
+        ] {
+            let map = CityMap::new(net);
+            let (n, bad, examples) = sidewalk_on_roadway(&map, 0.3);
+            assert!(n > 100_000, "{name}: {n} samples");
+            assert_eq!(
+                bad, 0,
+                "{name}: {bad} of {n} roadway points under a sidewalk, e.g. {examples:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn kerb_faces_and_tops_meet_and_face_out() {
+        let map = CityMap::new(crate::procgen::generate(
+            &crate::procgen::ProcGenConfig::default(),
+        ));
+        let w = sidewalk_mesh(&map);
+        assert!(!w.tops.indices.is_empty() && !w.kerbs.indices.is_empty());
+        let normal = |m: &TriMesh, t: &[u32; 3]| {
+            let [a, b, c] = t.map(|i| m.positions[i as usize]);
+            let (u, v) = (
+                [b[0] - a[0], b[1] - a[1], b[2] - a[2]],
+                [c[0] - a[0], c[1] - a[1], c[2] - a[2]],
+            );
+            [
+                u[1] * v[2] - u[2] * v[1],
+                u[2] * v[0] - u[0] * v[2],
+                u[0] * v[1] - u[1] * v[0],
+            ]
+        };
+        // Tops face up; kerb faces are vertical, KERB_H_M tall.
+        for t in &w.tops.indices {
+            assert!(normal(&w.tops, t)[2] > 0.0, "top facing down: {t:?}");
+        }
+        for t in &w.kerbs.indices {
+            let n = normal(&w.kerbs, t);
+            assert!(
+                n[2].abs() < 1e-3 * (n[0].abs() + n[1].abs()),
+                "kerb face not vertical"
+            );
+            let zs = t.map(|i| w.kerbs.positions[i as usize][2]);
+            let span = zs.iter().fold(f32::NEG_INFINITY, |a, z| a.max(*z))
+                - zs.iter().fold(f32::INFINITY, |a, z| a.min(*z));
+            assert!(
+                span > KERB_H_M - 0.02 && span < KERB_H_M + 0.05,
+                "kerb span {span}"
+            );
+        }
+        // On the flat grid every kerb face looks at pavement (z = 0) half a trim cell out from
+        // its middle (corner-patch kerbs follow the pavement in TRIM_CELL_M steps).
+        let paved = PavedIndex::new(&road_mesh(&map));
+        let mut looking_at_road = 0;
+        for t in w.kerbs.indices.chunks(2) {
+            let tri = &t[0];
+            let n = normal(&w.kerbs, tri);
+            let l = (n[0] * n[0] + n[1] * n[1]).sqrt();
+            let [a, b, c] = tri.map(|i| w.kerbs.positions[i as usize]);
+            let mid = [(a[0] + b[0] + c[0]) / 3.0, (a[1] + b[1] + c[1]) / 3.0];
+            let out = TRIM_CELL_M * 0.5 + 0.01;
+            let q = [mid[0] + n[0] / l * out, mid[1] + n[1] / l * out];
+            if paved.covers(q, 0.0) {
+                looking_at_road += 1;
+            }
+        }
+        let total = w.kerbs.indices.len() / 2;
+        assert!(
+            looking_at_road * 100 >= total * 98,
+            "{looking_at_road} of {total} kerb faces face the road"
+        );
+    }
+}
+
+#[cfg(test)]
+mod timing {
+    #[test]
+    #[ignore = "timing report, run in release"]
+    fn sidewalk_mesh_timing() {
+        let map = crate::CityMap::new(crate::vesper::generate(
+            &crate::vesper::VesperConfig::default(),
+        ));
+        let t = std::time::Instant::now();
+        let r = super::road_mesh(&map);
+        let t_road = t.elapsed();
+        let t = std::time::Instant::now();
+        let w = super::sidewalk_mesh(&map);
+        println!(
+            "road_mesh {:?} ({} tris), sidewalk_mesh {:?} ({} + {} tris)",
+            t_road,
+            r.indices.len(),
+            t.elapsed(),
+            w.tops.indices.len(),
+            w.kerbs.indices.len()
+        );
     }
 }

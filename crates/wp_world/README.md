@@ -13,7 +13,7 @@ clock. Implements `wp_contracts::WorldQuery`. No renderer dependency; compiles f
 | `procgen` | Procedural fallback city (grid + ring + highway spine + 2 diagonals), flat |
 | `vesper` | Port Vesper v2 (`vesper_v2`): curved streets, hills, terrain, banked highway loop, grade separations |
 | `terrain` | `Heightfield` (stored with the network), value noise, bumps |
-| `surface` | Road trimesh for physics/greybox, deck rails, `MapGround` wheel probe |
+| `surface` | Road trimesh, raised sidewalks + kerbs (`sidewalk_mesh`), junction discs, deck rails — one geometry for physics and the greybox; `MapGround` wheel probe |
 | `map` | Runtime map: connector curves, conflict sets, uniform-grid index, `WorldQuery` (incl. building line of sight) |
 | `signals` | Fixed-time controller evaluation |
 | `traffic` | Civilian agents: IDM, MOBIL, junction permits, hazards, spawning, LOD |
@@ -191,6 +191,26 @@ After `docs/design/CITY.md`, scaled to ≈ 3.3 × 2.9 km (`MAP_LO..MAP_HI`), 5 m
 ≈ 10 ms. `cargo run --release -p wp_world --example vesper_stats` prints grades, crest/sag g
 at the limit and banks per road.
 
+### Sidewalks, kerbs and junction discs (`surface`, playtest #20)
+Physics (`wp_sim`) and the greybox (`tools/city-import`) build these from the same functions,
+so what you see is what you drive on (`tools/city-import/tests/surface_match.rs` checks it):
+- **Sidewalks** (`sidewalk_mesh`): along every edge lane that is not a highway
+  (`lane_sidewalks`), from the kerb line out to `SIDEWALK_W_M` = 3 m, `KERB_H_M` = 0.15 m above
+  the road edge, continuing the road's bank; vertical kerb faces from the road edge up,
+  facing the road. Where a strip would run onto pavement (the crossing road or junction disc
+  at a tight/skewed corner) it is trimmed in `TRIM_CELL_M` = 0.5 m cells.
+- **Corner and bend fills:** the gaps between sidewalk ends at a node — junction corners, the
+  top of a T, the outside of a bend — are filled at kerb height (the area between the two
+  strips' kerb and outer lines, extended to where they meet; a least-squares plane through
+  the four end points), minus pavement and what the strips cover, with kerb faces towards
+  the pavement. Corner kerbs follow the junction disc in 0.5 m steps.
+- **Junction discs** (`junction_polygon`, `junction_paved_radii`): a 16-gon whose edges touch
+  the circle (not its corners), with a paved radius large enough to reach the corners of
+  every road ribbon trimmed at the junction (`sqrt(d² + w²)`). `Intersection::radius_m`
+  (lane trimming, junction logic) is unchanged.
+- Sizes: Port Vesper 28 k top + 28 k kerb triangles (≈ 46 ms to build, release), the grid
+  9.5 k + 11 k.
+
 ## Traffic AI
 
 **Agents** live on segments (lanes or junction connectors) with arc length `s` (car centre),
@@ -361,3 +381,7 @@ aggressive: 0 civilian–civilian collisions (`tests/city_v2.rs`, ignored).
   slopes; the testbed draws kinematic cars level).
 - City v2: `WorldQuery::surface_at` and `CityMap::ground_height` project onto whole lane
   polylines (≈ 0.5 µs on the curved city); terrain LOS samples every 8 m.
+- `CityMap::ground_height` / `MapGround` do not know the raised sidewalks (roads, junctions,
+  terrain only); `wp_sim` lifts spawns onto a sidewalk top under them. Corner fills and trims
+  follow pavement in 0.5 m steps (a sidewalk edge can overhang the outer rim of a junction
+  disc by up to ~0.35 m; never a lane or turning path — tested).
