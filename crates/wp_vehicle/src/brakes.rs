@@ -21,7 +21,7 @@ pub fn service_torques(def: &BrakeDef, pedal: f32) -> [f32; 4] {
 /// Per-wheel ABS state machine. Call once per tick.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Abs {
-    release: [f32; 4],
+    pub(crate) release: [f32; 4],
 }
 
 impl Abs {
