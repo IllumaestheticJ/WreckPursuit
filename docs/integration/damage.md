@@ -406,3 +406,8 @@ Tests: `arcade_light_and_medium_hits_are_cosmetic`, `arcade_hard_hits_degrade_an
 `arcade_many_light_hits_never_end_the_car`, `arcade_limp_mode_settles_partially_and_sim_does_not`,
 `cosmetic_state_survives_save_restore_and_repair_clears_it`. Goldens: 12 Arcade scenarios
 re-blessed in `[bless]` commit 10ae2b6 (numbers in its message); all expectations pass.
+
+**Lead decision on round-6b item 2 (2026-10-19): option (b).** Keep the run-5 calibration and
+`golden_tbone_sim` (Simulation totals a car in a 50 km/h T-bone; 0.27–0.32 m is within the real
+range at the soft end). No lattice hardening, no Arcade floor change. Contract request #8 is
+queued for the v0.3.x batch; the `crush_depth` → `structural_crush_m` request goes to machine I.
