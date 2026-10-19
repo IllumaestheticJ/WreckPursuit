@@ -469,3 +469,14 @@ Gate on `ws/economy` after merging `origin/main` (round 8): `cargo fmt --check`,
 Known gaps: replays of modded / pre-damaged career runs (Needs → I); races in the career (L's
 menu); escape payouts are the only career income until races land; the dealer's car names come
 from `display_name` (analog names); the in-run HUD shows the run account, not net worth.
+
+Gate on `ws/economy` (step 2, after merging `origin/main`): `cargo fmt --check`, workspace clippy
+`--all-targets -D warnings`, `cargo test --workspace` (all green, determinism lint 0 errors),
+`cargo build --target wasm32-unknown-unknown -p wp_wasm`, wasm-pack release build, `tsc` in
+`apps/testbed-web` and `apps/ui-kit`. **web-e2e:** every check up to "pursuit banner" passes,
+then headless Chromium's renderer crashes ("Target crashed") at the lead's end-of-run block —
+**the same crash on unmodified `origin/main` in this container** (SwiftShader, after many sessions
+in one page; for C / lead). Run on a fresh page, the lead's end-of-run block and all four
+"career:" checks pass (capture → Repair & continue; beater bought $4 500 → $2 700, chase with the
+career car; busted → garage, saved v1 with the car impounded; reload → release $2 340 → $2 150 →
+repair, health 1; new run with the repaired car, export → import identical).
