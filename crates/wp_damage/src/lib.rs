@@ -52,6 +52,15 @@ impl DamageModel {
         &self.materials
     }
 
+    /// Overwrite the current node positions (chassis space, indexed by node id), e.g. from a
+    /// network lattice snapshot. Extra entries are ignored; missing ones keep their value.
+    /// Added by workstream 07 (`wp_net` desync recovery); keep it when replacing the stub.
+    pub fn restore_node_positions(&mut self, nodes: &[[f32; 3]]) {
+        for (dst, src) in self.node_positions.iter_mut().zip(nodes) {
+            *dst = *src;
+        }
+    }
+
     /// Restore the pristine state (full repair).
     pub fn reset(&mut self) {
         self.node_positions = self.lattice.nodes.iter().map(|n| n.pos_m).collect();
