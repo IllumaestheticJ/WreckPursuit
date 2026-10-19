@@ -134,7 +134,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 8.7 s | 210 km/h | 52.5 m | 0.62 g | — |
+| sim | 8.1 s | 210 km/h | 51.6 m | 0.62 g | — |
 | estimate | 7.7 s | 220 km/h | 49.9 m | 0.71 g | 450 |
 
 ## Damage lattice (`data/lattices/ironside_440.json`)

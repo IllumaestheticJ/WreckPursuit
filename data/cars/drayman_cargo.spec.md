@@ -135,7 +135,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 11.6 s | 201 km/h | 43.7 m | 0.66 g | — |
+| sim | 10.9 s | 201 km/h | 43.3 m | 0.66 g | — |
 | estimate | 10.9 s | 207 km/h | 42.6 m | 0.74 g | 381 |
 
 ## Damage lattice (`data/lattices/drayman_cargo.json`)

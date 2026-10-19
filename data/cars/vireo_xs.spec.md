@@ -138,7 +138,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 9.2 s | 206 km/h | 39.7 m | 0.86 g | — |
+| sim | 9.4 s | 206 km/h | 37.9 m | 0.86 g | — |
 | estimate | 8.0 s | 213 km/h | 37.4 m | 0.91 g | 474 |
 
 ## Damage lattice (`data/lattices/vireo_xs.json`)

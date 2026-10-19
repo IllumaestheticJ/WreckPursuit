@@ -288,10 +288,10 @@
     {"id":284,"pos_m":[0.4268,1.9849999,0.27],"mass_kg":5.7980704,"pinned_to_chassis":false,"region":"FrameFront"},
     {"id":285,"pos_m":[-0.4268,1.9849999,0.651],"mass_kg":5.7980704,"pinned_to_chassis":false,"region":"FrameFront"},
     {"id":286,"pos_m":[0.4268,1.9849999,0.651],"mass_kg":5.7980704,"pinned_to_chassis":false,"region":"FrameFront"},
-    {"id":287,"pos_m":[-0.6208,2.535,0.35],"mass_kg":6.25,"pinned_to_chassis":false,"region":"FrontBumper"},
-    {"id":288,"pos_m":[0.6208,2.535,0.35],"mass_kg":6.25,"pinned_to_chassis":false,"region":"FrontBumper"},
-    {"id":289,"pos_m":[-0.6208,2.535,0.8],"mass_kg":6.25,"pinned_to_chassis":false,"region":"FrontBumper"},
-    {"id":290,"pos_m":[0.6208,2.535,0.8],"mass_kg":6.25,"pinned_to_chassis":false,"region":"FrontBumper"}
+    {"id":287,"pos_m":[-0.6208,2.535,0.35],"mass_kg":6.25,"pinned_to_chassis":false,"region":"Accessory"},
+    {"id":288,"pos_m":[0.6208,2.535,0.35],"mass_kg":6.25,"pinned_to_chassis":false,"region":"Accessory"},
+    {"id":289,"pos_m":[-0.6208,2.535,0.8],"mass_kg":6.25,"pinned_to_chassis":false,"region":"Accessory"},
+    {"id":290,"pos_m":[0.6208,2.535,0.8],"mass_kg":6.25,"pinned_to_chassis":false,"region":"Accessory"}
   ],
   "beams": [
     {"a":0,"b":1,"material_id":"pp_bumper","area_m2":0.00012,"breakable":true,"detach_group":null},
@@ -2146,7 +2146,7 @@
     {"group":5,"region":"RightDoorF","hinge_nodes":[179,183],"break_impulse_ns":13464.199,"mass_kg":28.54092},
     {"group":6,"region":"LeftDoorR","hinge_nodes":[116,120],"break_impulse_ns":13464.199,"mass_kg":28.54092},
     {"group":7,"region":"RightDoorR","hinge_nodes":[119,123],"break_impulse_ns":13464.199,"mass_kg":28.54092},
-    {"group":8,"region":"FrontBumper","hinge_nodes":[287,288],"break_impulse_ns":15000.0,"mass_kg":25.0}
+    {"group":8,"region":"Accessory","hinge_nodes":[287,288],"break_impulse_ns":15000.0,"mass_kg":25.0}
   ],
   "components": [
     {"kind":"Engine","node_ids":[279,280,281,282,283,284,285,286],"intrusion_fail_m":0.25,"intrusion_total_m":0.45},

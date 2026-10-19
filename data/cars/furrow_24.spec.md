@@ -135,7 +135,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 10.8 s | 178 km/h | 41.4 m | 0.73 g | — |
+| sim | 10.8 s | 178 km/h | 41.8 m | 0.73 g | — |
 | estimate | 10.1 s | 183 km/h | 38.4 m | 0.83 g | 401 |
 
 ## Damage lattice (`data/lattices/furrow_24.json`)

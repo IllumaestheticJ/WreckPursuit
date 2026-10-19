@@ -138,7 +138,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 6.9 s | 260 km/h | 40.1 m | 0.85 g | — |
+| sim | 6.4 s | 260 km/h | 40.0 m | 0.85 g | — |
 | estimate | 6.2 s | 267 km/h | 37.8 m | 0.91 g | 559 |
 
 ## Damage lattice (`data/lattices/sentinel_cruiser.json`)
@@ -149,5 +149,5 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 - Era `2010s`: gen-lattice's default HSS passenger cell kept as is.
 - Steel hood: 132 hood beams aluminum → mild_steel.
 - Detachables: steel bumpers ×2.3 break impulse / ×4 mass; steel hood ×1.4 / ×1.6.
-- Push bar: 4 extra FrontBumper nodes 0.10 m ahead of the bumper (z 0.35/0.8 m), hss 1.2e-03 m² tubes bolted to the bumper-beam rail nodes with 9.0e-04 m² mounts; detachable group 8, 30000 N·s, 40 kg.
+- Push bar: 4 extra Accessory-region nodes 0.10 m ahead of the bumper (z 0.35/0.8 m), hss 1.2e-03 m² tubes bolted to the bumper-beam rail nodes with 9.0e-04 m² mounts; detachable group 8, 30000 N·s, 40 kg.
 - Police package: heavy-duty components fail at × the stock intrusion (Battery ×1.3, BrakeFL ×1.3, BrakeFR ×1.3, Engine ×1.2, Radiator ×1.5, SteeringRack ×1.5, SuspensionFL ×1.5, SuspensionFR ×1.5, WheelFL ×1.4, WheelFR ×1.4); front bumper fixings ×2.0 detach impulse.

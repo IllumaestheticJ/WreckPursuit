@@ -301,10 +301,10 @@
     {"id":297,"pos_m":[0.4488,1.9975,0.34],"mass_kg":7.1666665,"pinned_to_chassis":false,"region":"FrameFront"},
     {"id":298,"pos_m":[-0.4488,1.9975,0.78129995],"mass_kg":7.1666665,"pinned_to_chassis":false,"region":"FrameFront"},
     {"id":299,"pos_m":[0.4488,1.9975,0.78129995],"mass_kg":7.1666665,"pinned_to_chassis":false,"region":"FrameFront"},
-    {"id":300,"pos_m":[-0.6528,2.525,0.45],"mass_kg":6.25,"pinned_to_chassis":false,"region":"FrontBumper"},
-    {"id":301,"pos_m":[0.6528,2.525,0.45],"mass_kg":6.25,"pinned_to_chassis":false,"region":"FrontBumper"},
-    {"id":302,"pos_m":[-0.6528,2.525,0.95],"mass_kg":6.25,"pinned_to_chassis":false,"region":"FrontBumper"},
-    {"id":303,"pos_m":[0.6528,2.525,0.95],"mass_kg":6.25,"pinned_to_chassis":false,"region":"FrontBumper"}
+    {"id":300,"pos_m":[-0.6528,2.525,0.45],"mass_kg":6.25,"pinned_to_chassis":false,"region":"Accessory"},
+    {"id":301,"pos_m":[0.6528,2.525,0.45],"mass_kg":6.25,"pinned_to_chassis":false,"region":"Accessory"},
+    {"id":302,"pos_m":[-0.6528,2.525,0.95],"mass_kg":6.25,"pinned_to_chassis":false,"region":"Accessory"},
+    {"id":303,"pos_m":[0.6528,2.525,0.95],"mass_kg":6.25,"pinned_to_chassis":false,"region":"Accessory"}
   ],
   "beams": [
     {"a":0,"b":1,"material_id":"pp_bumper","area_m2":0.00012,"breakable":true,"detach_group":null},
@@ -2305,7 +2305,7 @@
     {"group":5,"region":"RightDoorF","hinge_nodes":[192,196],"break_impulse_ns":19600.285,"mass_kg":34.4357},
     {"group":6,"region":"LeftDoorR","hinge_nodes":[129,133],"break_impulse_ns":19600.285,"mass_kg":34.4357},
     {"group":7,"region":"RightDoorR","hinge_nodes":[132,136],"break_impulse_ns":19600.285,"mass_kg":34.4357},
-    {"group":8,"region":"FrontBumper","hinge_nodes":[300,301],"break_impulse_ns":15000.0,"mass_kg":25.0}
+    {"group":8,"region":"Accessory","hinge_nodes":[300,301],"break_impulse_ns":15000.0,"mass_kg":25.0}
   ],
   "components": [
     {"kind":"Engine","node_ids":[292,293,294,295,296,297,298,299],"intrusion_fail_m":0.25,"intrusion_total_m":0.45},
