@@ -113,6 +113,16 @@ For prompt 04, the two calls worth exposing are `sim.vehicles()[i].vehicle.telem
   `interim_remap_off_gives_the_same_wet_stop` (remap on vs `interim_surface = false`: within
   5 %).
 
+- (Differentials, 2026-10-19) `data/cars/differentials.toml` — new file in H's folder, H owns
+  it from now on (see "Differentials" below). `apps/simcli/scenarios/race/city_sprint.ron`
+  (L's scenario): `police_cars: false`. A police patrol crossed the junction at y ≈ −108 in
+  front of the coupe at ~170 km/h; whether the coupe survived the clip was a coin toss (on the
+  old code a coupe brake time of 14.0 s already failed, on the new code 15.0 s did). With
+  police off it passes on old and new code for brake times 14.0–15.5 s; the police variant is
+  `city_sprint_police.ron`. **L / I:** please review; revert if the patrol was intended.
+  `[bless]` 04cd217: 38 goldens + the slide-control wheel-profile hashes (reasons in the
+  commit message).
+
 ## Perf numbers
 
 | Measurement | Machine | Native | Browser | Budget |
@@ -120,6 +130,7 @@ For prompt 04, the two calls worth exposing are `sim.vehicles()[i].vehicle.telem
 | Vehicle model, per car | cloud container, release | 4.1 µs/tick = 0.016 ms/frame | not measured | 0.15 ms native / 0.30 browser |
 | Vehicle model, 24-car field (roster cycled), round 6b | same | 0.019–0.021 ms/car/frame (0.45–0.50 ms for 24); wet + puddles 0.016–0.018 | not measured | 0.15 ms/car |
 | Vehicle + Rapier step, 1-car rig | same | 9.7 µs/tick = 0.039 ms/frame | not measured | — |
+| Vehicle model with differentials + brake-TC (2026-10-19) | same | 5.1 µs/tick = 0.021 ms/frame; 24-car field 0.019 (dry) / 0.021 (wet) ms/car/frame (was 0.018 / 0.018 in the same run) | not measured | 0.15 ms/car |
 
 ## Recommended `AssistProfile` presets
 
@@ -566,3 +577,13 @@ Honest caveats: with **TCS on but no slide help** (wheel/AI-style, analog follow
 cars with an LSD still rotate a lot on a full-throttle hairpin exit (shiro 33°), exactly as
 before (the old near-locked LSD: 33°); TCS only cuts on wheelspin, not on yaw. The open-diff
 version stays straight (4°) because its inside wheel flares and TCS cuts.
+
+### Checks (differentials)
+`cargo fmt`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace
+--no-fail-fast` (only the golden-hash tests and `race_city_sprint` failed before the
+`[bless]` / scenario commits; re-run green after), `cargo build --target
+wasm32-unknown-unknown -p wp_wasm`, `cargo run -p lint-determinism` (0 errors, no
+`wp_vehicle` findings), all 45 simcli scenarios pass in release (same "pending" list as the
+old code), goldens re-blessed, `tools/wasm-determinism/compare.sh` 45/45 native == wasm,
+`simcli determinism apps/simcli/scenarios` 45/45 deterministic. Nameplate check run by hand
+over the new files: clean.
