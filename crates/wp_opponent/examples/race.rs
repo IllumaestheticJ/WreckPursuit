@@ -132,6 +132,7 @@ fn main() {
                 .collect::<Vec<_>>(),
             out.field.passes_by(gi)
         );
+        println!("    pass checks {:?}", out.field.debug_of(gi).pass_checks);
     }
     let big: Vec<_> = out
         .contacts

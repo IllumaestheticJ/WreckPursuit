@@ -219,6 +219,8 @@ struct Obstacle {
     half_len: f32,
     half_w: f32,
     unstable: bool,
+    /// A racer that is itself overtaking (never pass it: no three-wide).
+    passing: bool,
 }
 
 /// An obstacle relative to one racer: arc distance ahead (`ds` < 0 = behind) and the
@@ -296,6 +298,9 @@ struct Racer {
     running_wide: bool,
     /// Lateral position on the grid (held during the start).
     start_n: f32,
+    /// Pass evaluations: [accepted, no run, too late, no room, slow line, lane ahead, lane
+    /// behind, target busy passing].
+    pass_checks: [u32; 8],
     /// Held up by this car and no pass possible yet: drop back through the next corner to
     /// get a run at it on the following straight.
     get_run: Option<Who>,
@@ -316,6 +321,9 @@ pub struct Debug {
     pub n: f32,
     /// Distance to the next braking point, m.
     pub brake_dist: f32,
+    /// Pass evaluations so far: [accepted, no run, too late, no room, slower line, lane
+    /// taken ahead, lane taken behind, target busy passing someone].
+    pub pass_checks: [u32; 8],
 }
 
 /// What limits a racer's speed target.
@@ -472,6 +480,7 @@ impl Field {
                 get_run: None,
                 running_wide: false,
                 start_n: 0.0,
+                pass_checks: [0; 8],
             });
         }
         Self {
@@ -975,6 +984,7 @@ impl Field {
                             half_len: r.ext.0,
                             half_w: r.ext.1,
                             unstable,
+                            passing: r.tactic == Tactic::Overtake,
                         });
                         continue;
                     }
@@ -1146,8 +1156,11 @@ fn decide_racer(
             r.defended = false;
         }
 
-        // Distance to the next braking point (profile drops 4 m/s below now), m.
-        let brake_dist = {
+        // Distance to the next braking point (profile drops 4 m/s below now), m; 0 while
+        // braking for a corner.
+        let brake_dist = if r.in_brake_zone {
+            0.0
+        } else {
             let mut d = f32::INFINITY;
             let here = v_line(r.s).min(v.max(5.0));
             let mut x = 0.0;
@@ -1320,7 +1333,12 @@ fn decide_racer(
                 if held && !is_civ(&x.o) && brake_dist > v * 2.0 && x.gap < 25.0 {
                     tuck = Some(x.o.n);
                 }
-                if r.blocked_s > p.overtake_patience_s && x.o.v_s > -1.0 && !start_phase {
+                // Patience when stuck behind; none needed when arriving with a real run.
+                let momentum = v - x.o.v_s > 2.5 && x.gap < 30.0 && brake_dist > v * 1.5;
+                if (r.blocked_s > p.overtake_patience_s || momentum)
+                    && x.o.v_s > -1.0
+                    && !start_phase
+                {
                     let ctx = PassCtx {
                         corridor,
                         line,
@@ -1329,7 +1347,13 @@ fn decide_racer(
                         v,
                         margin: margin_for(&x.o),
                     };
-                    if let Some(n_pass) = plan_pass(r, x, &rel, &ctx, &limits) {
+                    let plan = plan_pass(r, x, &rel, &ctx, &limits);
+                    let slot = match plan {
+                        Ok(_) => 0,
+                        Err(e) => e as usize,
+                    };
+                    r.pass_checks[slot] += 1;
+                    if let Ok(n_pass) = plan {
                         r.tactic = Tactic::Overtake;
                         r.tactic_ticks = 0;
                         r.alongside_s = 0.0;
@@ -1516,12 +1540,16 @@ fn decide_racer(
         // Off the racing line (passing, defending, squeezed): the path at constant offset
         // `n_cmd` has its own curvature — slow for it (inside lines are tighter).
         let a_brk = profile.a_brake.max(3.0) * 0.85;
-        if (n_cmd - line_n(r.s)).abs() > 1.0 {
+        // Check both the commanded offset and where the car actually is.
+        for n_path in [n_cmd, r.n] {
+            if (n_path - line_n(r.s)).abs() <= 1.0 {
+                continue;
+            }
             let mut x = 0.0;
             let horizon = (v * v / (2.0 * a_brk) + 20.0).min(150.0);
             while x <= horizon {
                 let kc = corridor.centre_curvature(r.s + x);
-                let den = (1.0 - kc * n_cmd).max(0.2);
+                let den = (1.0 - kc * n_path).max(0.2);
                 let k = (kc / den).abs();
                 if k > 1e-4 {
                     let v_off = (profile.a_lat / k).sqrt();
@@ -1549,22 +1577,25 @@ fn decide_racer(
             let in_corner = r.in_brake_zone
                 || line.curvature[corridor.wrap((r.s / CORRIDOR_STEP_M) as isize)].abs()
                     > 1.0 / 80.0;
-            let run_gap = if r.get_run == Some(o.who) && in_corner {
-                0.8
-            } else {
-                0.0
-            };
+            // Held up on a straight with pace in hand: close up to a tow position (short
+            // gap) before pulling out. Without a draft model in `wp_vehicle`, dropping back
+            // to get a run only loses ground, so `get_run` only ever shortens the gap.
+            let towing = r.get_run == Some(o.who) && !in_corner && brake_dist > v * 2.0;
             let headway = if civ {
                 p.civilian_headway_s
+            } else if towing {
+                (p.headway_s * 0.5).max(0.3)
             } else {
-                p.headway_s + run_gap
+                p.headway_s
             } * if o.unstable { 1.6 } else { 1.0 };
             let min_gap = if civ { MIN_GAP_M + 2.0 } else { MIN_GAP_M };
             let vo = o.v_s.max(0.0);
             // Hold a time gap behind it (closing it over ~1.2 s), and never more speed than
             // can be shed before reaching the minimum gap if it brakes as hard as I can.
             let desired = min_gap + headway * vo;
-            let v_follow = vo + (x.gap - desired) / 1.2;
+            // Opening a gap is gradual (at most 3 m/s slower than it); the hard limit below
+            // takes care of real emergencies.
+            let v_follow = (vo + (x.gap - desired) / 1.2).max(vo - 3.0);
             let free = x.gap - min_gap;
             let v_brake = (vo * vo + 2.0 * a_brk * free.max(0.0)).sqrt();
             let cap = if free <= 0.0 {
@@ -1653,6 +1684,7 @@ fn decide_racer(
             s: r.s,
             n: r.n,
             brake_dist,
+            pass_checks: r.pass_checks,
         };
     }
 }
@@ -1693,6 +1725,7 @@ fn vehicle_obstacle(
         half_len: 0.5 * (len * ca + w * sa),
         half_w: 0.5 * (w * ca + len * sa),
         unstable: v_long > 8.0 && v_lat.abs() > 0.2 * v_long,
+        passing: false,
     })
 }
 
@@ -1736,9 +1769,22 @@ fn civilians_on(
             half_len: 0.5 * (CAR_LENGTH_M * ca + CAR_WIDTH_M * sa),
             half_w: 0.5 * (CAR_WIDTH_M * ca + CAR_LENGTH_M * sa),
             unstable: false,
+            passing: false,
         });
     }
     out
+}
+
+/// Why [`plan_pass`] said no (counted per racer in [`Debug::pass_checks`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PassReject {
+    NoRun = 1,
+    TooLate = 2,
+    NoRoom = 3,
+    SlowLine = 4,
+    LaneAhead = 5,
+    LaneBehind = 6,
+    TargetBusy = 7,
 }
 
 /// Context for [`plan_pass`].
@@ -1760,25 +1806,38 @@ fn plan_pass(
     rel: &[Rel],
     ctx: &PassCtx,
     limits: &dyn Fn(f32) -> (f32, f32),
-) -> Option<f32> {
+) -> Result<f32, PassReject> {
     let p = &r.params;
     let o = target.o;
     let v = ctx.v;
     let hw = 0.5 * r.cap.width_m;
     let hl = 0.5 * r.cap.length_m;
-    // Look ~3 s ahead: the pass runs side by side for a while (into the next corner if the
-    // road is wide enough), it does not have to be done before the braking point.
-    let pass_dist = (v * 3.0).max(40.0);
-    // A pass needs a run (closing speed) unless already right on its bumper with a
-    // straight ahead.
-    let closing = v - o.v_s;
-    let tow = target.gap < 4.0 && ctx.brake_dist > v * 2.0;
+    // Room needed: until clear of it at the current closing speed (at most 4 s), side by
+    // side into the next corner if the road is wide enough.
+    let clear_len = target.gap.max(0.0) + 2.0 * hl + 2.0 * o.half_len + 3.0;
+    let potential = ctx.corridor.interp(&ctx.profile.v, r.s + v) - o.v_s;
+    let t_clear = (clear_len / (v - o.v_s).max(0.6 * potential).max(1.0)).min(4.0);
+    let pass_dist = (v * t_clear).max(40.0);
+    // No three-wide: never pass a car that is passing, nor start a pass while a car is
+    // alongside me.
+    let engaged = rel.iter().any(|q| {
+        q.o.who != o.who && !matches!(q.o.who, Who::Civilian(_)) && q.ds <= 0.0 && q.gap < 3.0
+    });
+    if o.passing || engaged {
+        return Err(PassReject::TargetBusy);
+    }
+    // A pass needs a run: closing speed now, or pace I'm being denied (my own speed profile
+    // a second ahead vs its speed) with a straight ahead, or sitting right on its bumper.
+    let potential = ctx.corridor.interp(&ctx.profile.v, r.s + v) - o.v_s;
+    let straight = ctx.brake_dist > v * 2.0;
+    let closing = (v - o.v_s).max(if straight { 0.6 * potential } else { 0.0 });
+    let tow = target.gap < 4.0 && straight;
     if closing < 0.5 && !tow {
-        return None;
+        return Err(PassReject::NoRun);
     }
     // No lunges from far back at the last moment.
     if ctx.brake_dist < v * 0.6 && target.gap > 2.0 {
-        return None;
+        return Err(PassReject::TooLate);
     }
     let need = hw + o.half_w + ctx.margin + p.overtake_margin_m;
     // Prefer the inside of the next corner (sign of the line curvature ahead, + = right).
@@ -1794,6 +1853,7 @@ fn plan_pass(
     } else {
         [-1.0, 1.0]
     };
+    let mut why = PassReject::NoRoom;
     'side: for side in sides {
         let n_pass = o.n + side * need;
         // Room for the whole pass.
@@ -1801,6 +1861,7 @@ fn plan_pass(
         while x <= pass_dist.max(10.0) {
             let (lo, hi) = limits(r.s + x);
             if n_pass < lo || n_pass > hi {
+                why = PassReject::NoRoom;
                 continue 'side;
             }
             x += CORRIDOR_STEP_M * 2.0;
@@ -1815,6 +1876,7 @@ fn plan_pass(
             if k > 1e-4 {
                 let v_off = (ctx.profile.a_lat / k).sqrt();
                 if (v_off * v_off + 2.0 * a_brk * x).sqrt() < o.v_s.min(v) - 0.5 {
+                    why = PassReject::SlowLine;
                     continue 'side;
                 }
             }
@@ -1830,15 +1892,17 @@ fn plan_pass(
                 continue;
             }
             if q.ds > 0.0 && q.ds < target.ds + 2.0 * hl + 6.0 {
+                why = PassReject::LaneAhead;
                 continue 'side;
             }
             if q.ds <= 0.0 && q.gap < 12.0 && q.o.v_s > v - 2.0 {
+                why = PassReject::LaneBehind;
                 continue 'side;
             }
         }
-        return Some(n_pass);
+        return Ok(n_pass);
     }
-    None
+    Err(why)
 }
 
 /// Plan a flight route from the racer's position to the POI farthest away.
