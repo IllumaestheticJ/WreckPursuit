@@ -1,7 +1,7 @@
 // Typed wrapper over the wp_wasm surface. Per-frame calls return typed arrays (see layout.ts);
 // JSON only for rare structured data.
 import initWasm, * as wasm from "./pkg/wp_wasm.js";
-import type { PoliceStatus } from "../police_hud";
+import type { PoliceStatus } from "../police";
 
 /** Driver input in the testbed (packed to Float32Array for set_input). */
 export interface DriverInput {

@@ -3,10 +3,14 @@
 //    the drained SimEvents and, when the sim exposes it, the player's police record;
 //  - repair bill (F): the running car's wp_damage estimate priced by wp_economy (wasm
 //    repair_quote_json), with shop / district / option / insurance / wanted controls.
+//  - pursuit banner (centre): PURSUIT / SEARCHING / ESCAPED / CAPTURED from `police_status()`;
+//    a capture opens the repair bill, as does the end of a scripted scenario.
 // The kit's live model folds events with the same reducer as its mock provider, so these widgets
-// behave the same in the testbed and on the kit's demo page.
-import { billRequestJson, createLiveModel, mountOverlay, type LiveBillJson, type LiveModel, type PoliceReadout } from "../../../ui-kit/src/live";
+// behave the same in the testbed and on the kit's demo page. This is the testbed's only police
+// readout (the old standalone heat panel was folded in here, round 6).
+import { billRequestJson, createLiveModel, mountOverlay, type LiveBillJson, type LiveModel } from "../../../ui-kit/src/live";
 import type { SimEvent as KitSimEvent } from "../../../ui-kit/src/generated/contracts";
+import { bannerFor, isCapture, OUTCOME_BANNER_S, toReadout, type Banner, type PoliceStatus } from "../police";
 import { layers } from "../settings";
 import { sim, type SimEvent } from "../wasm/sim";
 
@@ -14,7 +18,17 @@ export class UiOverlay {
   readonly model: LiveModel;
   private readonly chaseEl: HTMLElement;
   private readonly billEl: HTMLElement;
+  private readonly bannerEl: HTMLElement;
   private billOpen = false;
+  /** The open bill was opened automatically (capture / scenario end), not by the user. */
+  private billAuto = false;
+  private bannerKey = "";
+  /** Tick the last pursuit ended on (so each outcome is acted on once). */
+  private outcomeTick = -1;
+  /** Bill already shown automatically for this session's scripted end. */
+  private endBillShown = false;
+  /** Latest police status of the player (null = no police in this session). */
+  status: PoliceStatus | null = null;
 
   constructor(parent: HTMLElement) {
     this.model = createLiveModel({
@@ -34,30 +48,80 @@ export class UiOverlay {
     this.billEl.classList.add("hidden");
     mountOverlay(this.chaseEl, this.model, "chaseHud");
     mountOverlay(this.billEl, this.model, "repairBill");
+    this.bannerEl = document.createElement("div");
+    this.bannerEl.id = "pursuit-banner";
+    this.bannerEl.className = "hidden";
+    parent.appendChild(this.bannerEl);
   }
 
   /** Feed one frame (call after draining events). */
   frame(tick: number, player: number, events: SimEvent[], hours: number, mode: string): void {
-    this.chaseEl.classList.toggle("hidden", !layers.on("chase"));
+    const chase = layers.on("chase");
+    this.chaseEl.classList.toggle("hidden", !chase);
+    const status = sim.policeStatus(player);
+    this.status = status;
+    this.showBanner(chase ? bannerFor(status) : null);
+    // A capture ends the run: show what the damage costs.
+    if (status?.last_outcome && status.outcome_age_s !== null) {
+      const endTick = tick - Math.round(status.outcome_age_s * 240);
+      if (Math.abs(endTick - this.outcomeTick) > 1) {
+        this.outcomeTick = endTick;
+        const fresh = status.outcome_age_s < OUTCOME_BANNER_S;
+        if (fresh && isCapture(status.last_outcome) && !this.billOpen) this.autoBill();
+      }
+    }
     this.model.push({
       tick,
       player,
       events: events as unknown as KitSimEvent[],
-      police: sim.policeStatus(player) as PoliceReadout | null,
+      police: status ? toReadout(status) : null,
       damageMode: mode === "Simulation" ? "Simulation" : "Arcade",
       timeOfDayS: hours * 3600,
     });
   }
 
-  /** New session: forget heat and the old bill. */
+  /** A scripted scenario finished: show the bill once per session. */
+  sessionEnded(): void {
+    if (this.endBillShown) return;
+    this.endBillShown = true;
+    if (!this.billOpen) this.autoBill();
+  }
+
+  private autoBill(): void {
+    this.setBill(true);
+    this.billAuto = true;
+  }
+
+  /** New session: forget heat, the old bill and the banner. A bill the user opened stays open
+   * (re-priced for the new car); one that popped up automatically closes. */
   reset(): void {
     this.model.reset();
-    if (this.billOpen) this.model.openBill();
+    this.outcomeTick = -1;
+    this.endBillShown = false;
+    this.showBanner(null);
+    if (this.billAuto) this.setBill(false);
+    else if (this.billOpen) this.model.openBill();
+  }
+
+  private showBanner(b: Banner | null): void {
+    const key = b ? `${b.text}|${b.sub}` : "";
+    if (key === this.bannerKey) return;
+    this.bannerKey = key;
+    this.bannerEl.classList.toggle("hidden", !b);
+    if (!b) return;
+    this.bannerEl.dataset.kind = b.kind;
+    this.bannerEl.innerHTML = "";
+    const head = document.createElement("b");
+    head.textContent = b.text;
+    const sub = document.createElement("span");
+    sub.textContent = b.sub;
+    this.bannerEl.append(head, sub);
   }
 
   /** Show / hide the repair bill (re-priced on open). */
   setBill(open: boolean): void {
     this.billOpen = open;
+    this.billAuto = false;
     this.billEl.classList.toggle("hidden", !open);
     if (open) this.model.openBill();
   }

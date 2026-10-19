@@ -449,6 +449,8 @@ impl Session {
         }
 
         // 2. Step, keeping the pre-tick state for interpolation and acceleration.
+        // All sim vehicles (city police / traffic cars are drawn and interpolated too);
+        // scripting and replay checkpoints use scenario entities only.
         let before = self.sim.vehicle_states();
         if capture_prev {
             for (id, s) in &before {

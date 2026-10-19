@@ -175,7 +175,8 @@ hash per tick dominate). `simcli replay file.replay.bin` verifies a browser reco
 | C | contact points & impulses (fading) |
 | G | CG + velocity vector |
 | X | civilian traffic agents (grey; red = braking, yellow = physical LOD, blue = yielding); promoted agents are drawn as sim vehicles instead |
-| Z | wanted level / heat panel (UI kit `HeatPanel`) |
+| Z | chase readout (UI kit `ChaseHud`: wanted / heat / bounty / radio) + pursuit banner |
+| F | repair bill (UI kit `RepairBill`, priced by `wp_economy`); opens by itself on capture or scenario end |
 | I | traffic / police intent arrows |
 | K | component health panel |
 | E | region energy panel |
@@ -226,8 +227,12 @@ so speeding violations (event feed) start the heat. Police cars (`VehicleKind::P
 vehicles, or `police_units()` for internally driven units) are white with a red/blue light bar
 that strobes while their siren is on (plus a point light); physical traffic
 (`VehicleKind::Traffic`) is grey; every car has head/tail lights (headlights: O). The wanted
-level / heat readout is M's UI-kit `HeatPanel` (`apps/ui-kit`, Preact, imported from source;
-`src/police_hud.tsx`), fed by `police_status()`.
+level / heat readout is M's UI-kit chase HUD (`apps/ui-kit/src/live`, mounted by
+`src/ui/overlay.ts`), fed by `police_status()` mapped onto the kit's `PoliceReadout`
+(`src/police.ts`). A centre banner shows **PURSUIT** / **SEARCHING** (escape %) while chased and
+**ESCAPED** / **CAPTURED** for 6 s after a pursuit ends (`last_outcome`, `outcome_age_s`). A
+capture, or the end of a scripted scenario, pops up the repair bill; a bill that popped up
+closes on the next session, one the user opened (F) stays.
 
 ## Native testbed stub (`apps/testbed-native`)
 Default build = headless smoke run printing FFB (the only thing CI builds); it now runs the
@@ -414,3 +419,31 @@ Machine R (`ws/panels`, prompt 21) owns `crates/wp_damage/src/panels.rs` (hinged
 ## Lead note (round 6 gate, 2026-10-19)
 - `e2e/run.mjs` city chase check is timing-flaky: it holds W for 5 s of wall time and needs a speeding violation in that window (failed once and passed on rerun, same build). Make it wait for a condition, e.g. poll up to 15 s for `TrafficViolation` in the feed, instead of a fixed sleep.
 - Lead removed a duplicate `policeStatus` key in `src/wasm/sim.ts` (M had added a second one returning null, which overrode yours, so the heat panel showed "null"). Keep one accessor.
+### Response — round 6 (2026-10-19, workstream 04)
+- Merged `origin/main` + lead branch. One conflict in `wp_wasm/src/session.rs`, resolved like the
+  lead (all-vehicle extras, scenario-only scripting / checkpoints).
+- **One police readout.** `PoliceHud` (`police_hud.tsx`) deleted; M's chase HUD in `ui/overlay.ts`
+  is the only heat / wanted / pursuit readout. Fixed on the way: (a) `sim.ts` had two
+  `policeStatus` entries — M's looked for a non-existent `police_status_json` export, shadowed the
+  real one and broke `tsc`; (b) the overlay cast wasm JSON straight to `PoliceReadout`, so units
+  and escape cooldown were undefined — now mapped in `src/police.ts`; (c) layers `police` and
+  `chase` both used Z — `police` removed.
+- **Pursuit banner** PURSUIT / SEARCHING / ESCAPED / CAPTURED. `police_status()` gained
+  `staleness_s`, `escape_s`, `last_outcome`, `outcome_age_s` (from `PoliceSystem::stats()`;
+  unit test drives a total-loss capture).
+- **Repair bill** after capture and at scripted-scenario end (M's `RepairBill`, G's pricing via
+  the existing `repair_quote_json`; no new wasm call needed). F still toggles it.
+- e2e: bill auto-opens after a scenario, exactly one heat panel in the city chase, and the banner
+  sequence + capture→bill (stubbed `policeStatus`, since a real capture takes minutes).
+- Request (lead / E): a test-only way to force a capture in a `wp_sim` session
+  (e.g. `Sim::police_mut()` or a `PoliceSystem::set_heat` passthrough) so e2e can run the real
+  capture path instead of a stub.
+- Checks (this container): fmt, clippy `-D warnings`, wasm32 build, `tsc`, `npm run e2e` 21/21
+  (city chase now waits on sim time: SwiftShader ran the city at ~0.3× real time and the old
+  fixed 5 s wait saw no violation), crash scenarios pass and match their goldens.
+  `cargo test --workspace`: simcli green (release), everything else 546 passed, **2 failed, both
+  already on the lead branch** (code identical, not in my crates) — lead / owners please look:
+  - `wp_economy` `tests/pursuit_wiring.rs:130` `real_police_capture_settles_through_the_economy`
+    ("level at capture, not after the reset");
+  - `wp_race` `tests/simcli_races.rs:28` `city_sprint_on_real_roads` (index out of bounds,
+    len 2 index 2 — probably counts sim vehicles now that city runs add police/traffic).
