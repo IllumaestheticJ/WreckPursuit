@@ -26,6 +26,7 @@ pub mod map;
 pub mod network;
 pub mod procgen;
 pub mod props;
+pub mod roads;
 pub mod routes;
 pub mod signals;
 pub mod traffic;
@@ -43,6 +44,7 @@ pub use clock::{sun_direction, WorldClock, DEFAULT_TIME_RATIO};
 pub use map::{CityMap, SegId};
 pub use network::{RoadError, RoadNetwork};
 pub use props::{PropKind, StaticProp};
+pub use roads::{RoadEdge, RoadGraphView};
 pub use routes::{ActiveRoute, Checkpoint, Route, RouteClosure};
 pub use traffic::{
     AgentId, AgentView, Hazard, Lod, LodChange, PhysicalAgent, TrackedVehicle, TrafficConfig,
@@ -276,6 +278,12 @@ impl World {
     /// Road network data.
     pub fn network(&self) -> &RoadNetwork {
         &self.map.net
+    }
+
+    /// Road-level graph (nodes, roads with class/limit/one-way/district, POIs, building
+    /// bounds) for police routing and minimaps. Built on each call; cache it.
+    pub fn road_graph(&self) -> RoadGraphView {
+        RoadGraphView::from_map(&self.map)
     }
 
     /// Physics ticks since the world started (signal clock).

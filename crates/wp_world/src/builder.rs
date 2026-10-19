@@ -15,7 +15,9 @@ use crate::geom::{self, V2, V3};
 use crate::network::*;
 
 /// Functional road class. Drives defaults (speed, lane width, signal timing, junction control).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum RoadClass {
     /// Limited-access highway.
     Highway,
