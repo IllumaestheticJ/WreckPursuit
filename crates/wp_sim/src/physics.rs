@@ -36,7 +36,7 @@ impl PhysicsWorld {
                 .translation(Vector::new(0.0, 0.0, -0.5))
                 .build(),
         );
-        Self {
+        let mut world = Self {
             gravity: Vector::new(0.0, 0.0, -wp_contracts::GRAVITY_MPS2),
             params,
             bodies: RigidBodySet::new(),
@@ -49,7 +49,21 @@ impl PhysicsWorld {
             multibody_joints: MultibodyJointSet::new(),
             soft_bodies: SoftBodySet::new(),
             ccd: CCDSolver::new(),
-        }
+        };
+        // Prime the broad phase so ground queries work on the very first tick.
+        world.step();
+        world
+    }
+
+    /// Scene query pipeline over the current colliders (as of the last step), with `filter`
+    /// (e.g. excluding a vehicle's own body for its wheel probes).
+    pub fn query_pipeline<'a>(&'a self, filter: QueryFilter<'a>) -> QueryPipeline<'a> {
+        self.broad_phase.as_query_pipeline(
+            self.narrow_phase.query_dispatcher(),
+            &self.bodies,
+            &self.colliders,
+            filter,
+        )
     }
 
     /// Advance one fixed step.
