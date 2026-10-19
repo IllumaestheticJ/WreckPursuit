@@ -34,7 +34,7 @@ cargo run -p simcli -- bundle > bundle.json                       # data root fo
 | `src/determinism.rs` | in-process repeat check |
 | `src/fuzz.rs` | random cases + invariants (NaN, node bounds, below ground, event floods) |
 | `src/data.rs` | one loader path for disk and in-memory (WASM) data |
-| `scenarios/` | scenario library (`smoke/`, `regression/`, `golden/`) |
+| `scenarios/` | scenario library (`smoke/`, `regression/`, `vehicle/`, `golden/`, `soak/`) |
 | `golden/` | `<name>/hashes.txt` for every scenario, `<name>.replay.bin` for `scenarios/golden/*` |
 
 ## Tests
@@ -55,11 +55,12 @@ recording on the cloud container (Xeon 2.1 GHz). Fuzz: ≈ 20 simulated seconds 
 
 ## Known gaps
 
-- Vehicles are not Rapier bodies yet (`wp_sim`), so crash/T-bone/spike goldens only check the
-  approach; their physics targets sit in `expect_pending` until prompts 02/03/06/12 land.
-- `procedural`/`file` cities, traffic/police overrides, `follow_route` and `ai_driver` warn and
-  fall back (need prompts 05/06 APIs).
+- Police is still a stub, so the spike-strip and pursuit targets sit in `expect_pending`
+  (prompt 06). The T-bone victim's crush/failure targets are pending too (03 tuning).
+- Police presence override, `follow_route` and `ai_driver` warn and fall back (need prompt
+  05/06 APIs). Traffic in scenarios is kinematic (no rigid bodies for physical-LOD agents yet).
 - `pursuit_started_before` uses a provisional police kind code (`PURSUIT_STARTED_KIND = 1`)
-  until `wp_police` exports one.
+  until the typed `PoliceEvent` (contract v0.2.0) lands.
+- City props (parked cars) are physics bodies but are not part of the state hash.
 - Golden replays are recorded from scripted scenarios; the testbed (prompt 04) should record
   real-driver replays in the same format (`src/replay.rs`).
