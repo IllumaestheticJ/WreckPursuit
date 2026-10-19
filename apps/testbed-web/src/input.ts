@@ -17,8 +17,27 @@ export function installKeyboard(onKey: (e: KeyboardEvent) => void): void {
     if (e.code.startsWith("Arrow") || e.code === "Space" || e.code.startsWith("Control")) e.preventDefault();
     onKey(e);
   });
-  window.addEventListener("keyup", (e) => held.delete(e.code));
-  window.addEventListener("blur", () => held.clear());
+  window.addEventListener("keyup", (e) => {
+    held.delete(e.code);
+    // macOS sends no keyup for keys released while Cmd is down: drop everything with it.
+    if (e.key === "Meta") held.clear();
+  });
+  // Anything that can swallow a keyup releases every key instead of leaving one stuck down:
+  // losing focus, switching tabs, a context menu, or focus moving into a form control.
+  const releaseAll = () => held.clear();
+  window.addEventListener("blur", releaseAll);
+  document.addEventListener("visibilitychange", releaseAll);
+  window.addEventListener("contextmenu", releaseAll);
+  // A clicked button keeps keyboard focus, so Space (handbrake) or Enter would press it again
+  // (restart the chase, re-run a scenario...). Hand focus back to the page after every click.
+  window.addEventListener("click", (e) => {
+    const el = (e.target as HTMLElement)?.closest?.("button");
+    if (el instanceof HTMLButtonElement) el.blur();
+  });
+  window.addEventListener("focusin", (e) => {
+    const tag = (e.target as HTMLElement)?.tagName;
+    if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") releaseAll();
+  });
 }
 
 /** Is this key (KeyboardEvent.code) held right now? (Camera look-back.) */

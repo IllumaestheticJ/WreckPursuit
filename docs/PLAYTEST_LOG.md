@@ -108,3 +108,9 @@ the schedule could hunt (1→2→1). New automatic (`crates/wp_vehicle/README.md
 | 19 | Engine sound from 2nd gear onwards doesn't work well | J (audio): reproduce with dumped rpm/gear/load/layer signals after the new gearbox; fix and add regression tests | dispatched |
 | 20 | Car can fall into / through the sidewalk | helper `lead/fix-sidewalk-fall`: match colliders to the visual sidewalk/kerb surface (Port Vesper v2), kerb steps, seam sweep test | dispatched |
 | 21 | Need a game map HUD with police | M (UI kit): rotating minimap with police dots, sight cones and search zone, plus a full city map (M/Tab) | dispatched |
+| 22 | Brake lights stopped working | lead: the panel meshes hide their own light parts inside the shell; lamp markers kept on, placed at the panel body nose/tail (R to fix light parts in the mesh generator) | fixed on link v12 |
+| 23 | Keys get stuck (a key stays "held") / buttons re-trigger | lead: release all keys on tab switch, context menu, focus into form controls, Cmd (macOS); clicked buttons give focus back, so Space/Enter no longer re-press them | fixed on link v12 |
+| 24 | Sideswiped a cop and no chase started | E (police) | dispatched |
+| 25 | Some cars load their LOD too slowly (pop-in) | helper `lead/fix-lod-popin` (C testbed meshes + D traffic LOD) | dispatched |
+| 26 | Simulate LSDs in certain cars | A (vehicle) + H (car data) | dispatched |
+| 27 | Audio for wheelspin | J (audio) | dispatched |
