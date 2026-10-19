@@ -13,6 +13,8 @@ crate-type = ["cdylib", "rlib"]
 wp_contracts.workspace = true
 wp_math.workspace = true
 wp_sim.workspace = true
+# Multiplayer client (workstream F); default features only — never `native`.
+wp_net.workspace = true
 # Canonical scenario format v2 parser (simcli lib is wasm32-clean; see tools/wasm-determinism).
 simcli = { path = "../../apps/simcli" }
 serde.workspace = true

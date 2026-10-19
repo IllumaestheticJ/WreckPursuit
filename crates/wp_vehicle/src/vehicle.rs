@@ -374,6 +374,29 @@ impl Vehicle {
         self.torque = V3::ZERO;
     }
 
+    /// Overwrite the dynamic state from a full [`VehicleState`] (`VehicleSim::state` output):
+    /// chassis pose and velocities, gear, engine rpm, wheel spin and steer. Used by `wp_net`
+    /// client reconciliation (rewind, then re-simulate inputs). Filters, clutch and boost are
+    /// not part of `VehicleState` and keep their values. When the vehicle has a Rapier body,
+    /// mirror the chassis into it afterwards. (Added by the integration lead for workstream F.)
+    pub fn set_state(&mut self, s: &wp_contracts::VehicleState) {
+        let rot = crate::math::Quat::from_xyzw(s.rot[0], s.rot[1], s.rot[2], s.rot[3]);
+        let pos = v3(s.pos);
+        self.chassis = Chassis {
+            pos,
+            rot,
+            lin_vel: v3(s.lin_vel),
+            ang_vel: v3(s.ang_vel),
+            com: pos + rot * self.com_local,
+        };
+        for (w, ws) in self.wheels.iter_mut().zip(&s.wheel_states) {
+            w.omega = ws.omega;
+            w.steer = ws.steer_rad;
+        }
+        self.gearbox.set(s.gear);
+        self.engine.omega = s.engine_rpm / crate::engine::RPM_PER_RADPS;
+    }
+
     /// Teleport to `pos`/`yaw` already moving forward (chassis +Y) at `speed_mps`, wheels and
     /// engine matched. Used by `wp_world` to promote kinematic traffic to a physical vehicle
     /// without a jolt. (Added by the integration lead for workstream D; when the vehicle has a

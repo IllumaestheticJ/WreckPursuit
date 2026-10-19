@@ -42,3 +42,13 @@ Re-measure in desktop Chrome with a GPU once 02/03 land.
 ## Known gaps
 See `docs/integration/testbed.md` → Known gaps (crash scenarios can't crash until vehicles are
 Rapier bodies; tire forces / region energy are proxies; no GIF yet).
+
+## Multiplayer page (workstream 07)
+`net.html` + `src/net/` is the multiplayer client: start `just server` (or
+`just server-bots`), then open `http://localhost:5173/net.html?server=ws://localhost:8080&name=me`.
+It runs `wp_net::client::Client` through the `net_*` functions in `crates/wp_wasm/src/net.rs`
+(prediction of the own car, 100 ms interpolation of the rest), with a role picker, race lobby,
+captain map (2D canvas: units, incidents, heat, right-click command radial) and a debug overlay
+(RTT, mispredictions, correction size, bandwidth, lattice hashes). Keys: arrows/WASD drive,
+Space handbrake, L lights, Q siren, H horn. Kept separate from the testbed page on purpose so
+the two evolve independently.

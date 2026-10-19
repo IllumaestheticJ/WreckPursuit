@@ -710,10 +710,13 @@ pub fn run_with_hook(
                     vehicles: states.clone(),
                     events: std::mem::take(&mut net_events),
                 };
-                let bytes = wp_net::encode_server(&msg);
+                // Contract-message JSON round trip (the old wp_net stub codec). Workstream F
+                // replaced it with its own snapshot protocol; moving this check onto
+                // `wp_net::snapshot` is on I's list.
+                let bytes = serde_json::to_vec(&msg).expect("ServerToClient serializes");
                 net.snapshots += 1;
                 net.bytes += bytes.len() as u64;
-                match wp_net::decode_server(&bytes) {
+                match serde_json::from_slice::<ServerToClient>(&bytes) {
                     Ok(back) if back == msg => {}
                     Ok(_) => {
                         failures.push(format!("net: snapshot at tick {now} did not round-trip"))

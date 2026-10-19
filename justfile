@@ -27,9 +27,13 @@ web-e2e: wasm
 native:
     cargo run --release -p testbed-native --features window
 
-# Headless server (websocket on the given port, default 8080).
+# Headless server (websocket on the given port, default 8080; admin on 8081).
 server port="8080":
     cargo run -p wp_server --bin wp-server -- --port {{port}}
+
+# Server load test: N scripted websocket bots in the crash arena (see apps/server/README.md).
+server-bots n="32":
+    cargo run --release -p wp_server --bin wp-server -- --bots {{n}} --arena 120
 
 # Run one headless scenario, e.g. `just sim apps/simcli/scenarios/smoke/straight_line.ron`.
 sim scenario:

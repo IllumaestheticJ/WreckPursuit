@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WreckPursuit Multiplayer</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #111; }
+      #overlay {
+        position: fixed; top: 8px; left: 8px; color: #9f9; font: 12px/1.4 monospace;
+        background: rgba(0, 0, 0, 0.55); padding: 6px 8px; white-space: pre; pointer-events: none;
+      }
+      #panel {
+        position: fixed; top: 8px; right: 8px; max-width: 420px; color: #ddd;
+        font: 12px/1.5 sans-serif; background: rgba(0, 0, 0, 0.6); padding: 6px 8px;
+      }
+      #panel button { margin: 2px; font: 12px sans-serif; }
+      #panel button.active { background: #3a6; color: #fff; }
+      .captain-map { position: fixed; inset: 0; width: 100%; height: 100%; }
+    </style>
+  </head>
+  <body>
+    <div id="overlay">loading wasm…</div>
+    <div id="panel"></div>
+    <script type="module" src="/src/net/main.ts"></script>
+  </body>
+</html>

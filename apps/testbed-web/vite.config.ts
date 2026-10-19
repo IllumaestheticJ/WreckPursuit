@@ -77,5 +77,9 @@ export default defineConfig({
   plugins: [repoFiles()],
   server: { port: 5173 },
   preview: { port: 4173 },
-  build: { target: "es2022" },
+  build: {
+    target: "es2022",
+    // net.html: multiplayer client (workstream F).
+    rollupOptions: { input: { main: "index.html", net: "net.html" } },
+  },
 });

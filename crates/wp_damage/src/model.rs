@@ -752,6 +752,22 @@ impl DamageModel {
         self.quiet_ticks = 0;
     }
 
+    /// Overwrite node positions (chassis space, by node id), e.g. from a network lattice
+    /// snapshot; node velocities are zeroed and the model is woken. Extra entries are ignored,
+    /// missing ones keep their value. Plastic strain / broken beams are not restored (a full
+    /// `save_state`/`restore_state` comes with contract v0.2.0). Added by the integration lead
+    /// for workstream F (`wp_net` desync recovery).
+    pub fn restore_node_positions(&mut self, nodes: &[[f32; 3]]) {
+        for (i, src) in nodes.iter().enumerate().take(self.pos.len()) {
+            self.pos[i] = *src;
+            self.prev[i] = *src;
+            self.tick_start[i] = *src;
+            self.vel[i] = [0.0; 3];
+        }
+        self.awake = true;
+        self.dirty = true;
+    }
+
     /// Restore the pristine state (full repair). Keeps entity id, tuning and seed.
     pub fn reset(&mut self) {
         let entity = self.entity;
