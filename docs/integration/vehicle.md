@@ -449,5 +449,10 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
    only 2–3 of 6 power-exit cases (help 0.3 is light by design; TCS on recovers 6/6).
 
 #### Checks (round 8)
-CHECKS_PLACEHOLDER
+`cargo fmt --check`, `clippy --workspace --all-targets -D warnings`, `cargo test --workspace
+--no-fail-fast` (115 test binaries, 0 failures), `cargo build --target wasm32-unknown-unknown
+-p wp_wasm`: pass. Scenarios / goldens: 3 goldens re-blessed `[bless]` (`regression_grid_24`,
+`smoke_coupe_circle`, `vehicle_coupe_slalom`) — caused only by the slide-gyro gravity fix
+(keyboard help while sliding); with that commit reverted 0 goldens fail, so the `weather_at`
+wiring is bit-identical on every scenario. All scenario range expectations pass.
 
