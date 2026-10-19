@@ -436,8 +436,18 @@ function siren(ctx: BaseAudioContext, s: Params, p: VoiceParams): SynthVoice {
         const t = scheduledUntil + (seg * i) / (n - 1);
         curve[i] = sirenFreqAtPhase(s, phase0 + (t - t0) / cycle) * doppler;
       }
-      for (const node of [o, o2]) node.frequency.setValueCurveAtTime(curve, scheduledUntil, seg);
-      scheduledUntil += seg;
+      // Back-to-back curves must not overlap: float rounding in `scheduledUntil += seg` can put
+      // a start a hair before the previous curve's end, which throws NotSupportedError and stops
+      // the frame loop. Leave a 1 ms gap and never let one bad curve break the page.
+      const start = scheduledUntil + 0.001;
+      for (const node of [o, o2]) {
+        try {
+          node.frequency.setValueCurveAtTime(curve, start, seg);
+        } catch {
+          node.frequency.cancelScheduledValues(start);
+        }
+      }
+      scheduledUntil = start + seg;
     }
   };
   schedule(ctx.currentTime);

@@ -111,3 +111,7 @@ turned off in the presets, so it is pre-existing on current `main` (C / lead: pl
 
 ## Lead feedback (round 6b, 2026-10-19)
 New workstream. Do everything in `prompts/21_car_models_panels.md`.
+
+
+## Lead feedback (2026-10-19, owner playtest)
+- Brake/head lights did not show: the panel meshes' `headlight`/`taillight` parts sit inside the body shell, so they are never visible. The lead keeps the old lamp markers on, placed at the panel body nose and tail (`vehicle_view.ts`). Please move the light parts onto the outer surface in `tools/assets` (slightly proud of the panel, facing out), and then the lead can drop the markers.

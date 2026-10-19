@@ -217,10 +217,23 @@ async function main(): Promise<void> {
     rebuildViews();
   };
 
+  // Owner default (playtest row 29): TCS, ESC and automatic gears start OFF; any assist box the
+  // viewer ticks or unticks is remembered (localStorage) and wins over the preset.
+  const ASSIST_KEY = "wp.assistOverrides";
+  const assistOverrides = (): Record<string, boolean> => {
+    const base: Record<string, boolean> = { tcs: false, esc: false, auto_gears: false };
+    try {
+      return { ...base, ...(JSON.parse(store.get(ASSIST_KEY) ?? "{}") as Record<string, boolean>) };
+    } catch {
+      return base;
+    }
+  };
   const applyAssistPreset = (source: InputSource) => {
     if (isReplay()) return;
     try {
-      sim.setAssists(app.player, sim.assistPreset(source));
+      const preset = sim.assistPreset(source) as unknown as Record<string, unknown>;
+      Object.assign(preset, assistOverrides());
+      sim.setAssists(app.player, preset as never);
       syncAssistBoxes();
     } catch (e) {
       console.warn(e);
@@ -293,6 +306,9 @@ async function main(): Promise<void> {
       const a = sim.assists(app.player) as unknown as Record<string, unknown>;
       a[cb.dataset.a!] = cb.checked;
       sim.setAssists(app.player, a as never);
+      const o = assistOverrides();
+      o[cb.dataset.a!] = cb.checked;
+      store.set(ASSIST_KEY, JSON.stringify(o));
     };
   });
   document.querySelectorAll<HTMLButtonElement>(".bench").forEach((b) => {
