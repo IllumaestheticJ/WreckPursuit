@@ -43,6 +43,8 @@ export interface PoliceReadout {
   bounty: number;
   /** Seconds since the police last saw the player (null = never). */
   stalenessS: number | null;
+  /** Seconds since line of sight was lost: the escape timer while `Searching` (`RacerRecord::los_lost_s`). */
+  searchS?: number;
   /** Escape time for the level and phase, s (null = compute from `phase`). */
   escapeS?: number | null;
   phase?: DayPhase;
@@ -121,7 +123,7 @@ export function createLiveModel(opts: LiveOptions = {}): LiveModel {
       level: p.level,
       heat: heatWithinLevel(p.heat, p.level),
       state,
-      cooldown: state === "cooldown" && escape ? Math.min(1, (p.stalenessS ?? 0) / escape) : 0,
+      cooldown: state === "cooldown" && escape ? Math.min(1, (p.searchS ?? p.stalenessS ?? 0) / escape) : 0,
       unitsInPursuit: p.unitsAssigned,
       bounty: Math.round(p.bounty),
       heatKnown: true,

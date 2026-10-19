@@ -78,3 +78,19 @@ describe("live model", () => {
     expect(closed).toBe(true);
   });
 });
+
+describe("live police readout (wp_wasm::police_status_json)", () => {
+  it("drives level, bounty, units and the escape bar from the record", () => {
+    const m = createLiveModel();
+    const readout = { level: "L2" as const, heat: 40, status: "Searching" as const, bounty: 1234.4, stalenessS: 9, searchS: 6, escapeS: 12, phase: "Night" as const, unitsAssigned: 3 };
+    m.push({ tick: 240, player: 1, events: [], police: readout });
+    const h = m.get().hud.heat;
+    expect(h.level).toBe("L2");
+    expect(h.state).toBe("cooldown");
+    expect(h.bounty).toBe(1234);
+    expect(h.unitsInPursuit).toBe(3);
+    expect(h.cooldown).toBeCloseTo(0.5);
+    expect(h.heatKnown).toBe(true);
+    expect(h.bountyKnown).toBe(true);
+  });
+});
