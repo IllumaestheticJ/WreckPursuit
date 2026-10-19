@@ -673,6 +673,9 @@ impl WorldQuery for CityMap {
         if self.net.lanes.is_empty() {
             return SurfaceType::Asphalt;
         }
+        if crate::markings::painted_at(self, p) {
+            return SurfaceType::PaintedLine;
+        }
         let q = geom::xy(p);
         if self.intersection_at(q).is_some() {
             return SurfaceType::Asphalt;
