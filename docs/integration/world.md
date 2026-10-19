@@ -714,3 +714,14 @@ goes one car at a time, so its front car may still be recycled after 120 s.
 
 **Contract change requests:** none.
 
+### Gate note (round 9): goldens re-blessed
+Traffic now behaves differently around stationary tracked vehicles (players, police units):
+6 m extra standstill gap behind an obstruction, body-aware "in my path" test, go-around /
+turn-around. Re-blessed (`simcli goldens --bless`, commit tagged `[bless]`): `golden_city_chase`
+(+ replay), `golden_night_pursuit_escape` (+ replay), `opponent_{flee_police,
+open_roads_traffic}`, `race_city_sprint_police`, `world_traffic_soak{,_observer,_vesper,
+_vesper_observer}`; new: `city_blocked_parked_player_{grid,vesper}`. Non-city goldens and the
+city scenarios without tracked vehicles in traffic's path are unchanged. `simcli run
+apps/simcli/scenarios`: 47/47 pass. fmt, `clippy --workspace --all-targets -D warnings`,
+`cargo test --workspace`, wasm32 build of `wp_wasm`: pass.
+
