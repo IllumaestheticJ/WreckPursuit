@@ -1,6 +1,6 @@
 # Status
 
-_Last updated: lead integration run 3, 2026-10-19. Contract **v0.2.0** (applied in run 3, see
+_Last updated: lead integration run 4, 2026-10-19. Contract **v0.2.0** (applied in run 3, see
 `docs/CONTRACT_CHANGELOG.md`; v0.3.0 = typed police/economy/net events)._
 
 Machines are named by letter: **A–I = prompts 02–10**, **J–Q = prompts 13–20** (started 2026-10-19 as
@@ -17,18 +17,18 @@ dashboard `ws/tuning-dash`).
 | C | 04 | Testbed | `ws/testbed` | merged | Debug layers, cameras, replay, scenario menu; shows real deformation | scenario v2 natively, barriers, mode switch, traffic agents layer |
 | D | 05 | World | `ws/world` | **merged run 2** | Procedural city + traffic + signals run inside `wp_sim` (`set_world`), props are physical | integer ticks instead of f64 time; procgen speed |
 | E | 06 | Police | `ws/police` | **merged run 2** | Heat/bounty, dispatch, pursuit AI, tools, captain; own scenarios pass | switch to D's road network + AI controller; integer ticks; `wp_sim` unit wiring (lead) |
-| F | 07 | Net | `ws/net` | **parked** (`lead/net-merge`) | (echo server on `main`) | 4 tests fail against real physics — feedback in `docs/integration/net.md` |
+| F | 07 | Net | `ws/net` | **merged run 4** | Binary protocol, authoritative server, prediction + bots on the real vehicle, browser net client (`net.html`) | 4-player end-to-end test |
 | G | 08 | Economy | `ws/economy` | merged | Ledger, garage, mods, repair quotes, payouts, impound | call sites when E/F land |
 | H | 09 | Cars | `ws/cars` | merged | 13 cars drive deterministically | new tires, `gen-lattice` regeneration, VALIDATION sim columns |
 | I | 10 | Harness | `ws/harness` | merged | 17 scenarios, goldens, lint, native-vs-wasm, benches, CI | `barriers`/speed in scenarios, real cities, traffic soak, F codec |
-| J | 13 | Audio | `ws/audio` | merged run 3 (in progress) | `wp_audio` director crate + procedural packs (not wired to the browser yet) | integration doc; hook into testbed |
-| K | 14 | Weather | `ws/weather` | merged run 3 (in progress) | `wp_weather` crate: schedule, wetness, grip/aquaplaning | integration doc; feed grip to vehicle via contracts |
-| L | 15 | Race/crews | `ws/race` | merged run 3 (in progress) | `wp_race` rules, scheduler, stakes, crews; `data/events/` | integration doc |
-| M | 16 | UI kit | `ws/ui` | merged run 3 (in progress) | `apps/ui-kit` against mock data | integration doc |
-| N | 17 | Opponent AI | `ws/opponent` | no branch yet | — | — |
-| O | 18 | Meta services | `ws/meta` | merged run 3 (in progress) | `apps/meta` accounts/matchmaking/leaderboards API | one flaky test under load (`twenty_bots_…` heartbeat) |
+| J | 13 | Audio | `ws/audio` | merged (run 3–4) | `wp_audio` director crate + procedural packs (not wired to the browser yet) | integration doc; hook into testbed |
+| K | 14 | Weather | `ws/weather` | merged (run 3–4) | `wp_weather` crate: schedule, wetness, grip/aquaplaning | integration doc; feed grip to vehicle via contracts |
+| L | 15 | Race/crews | `ws/race` | merged (run 3–4) | `wp_race` rules, scheduler, stakes, crews; `data/events/` | integration doc |
+| M | 16 | UI kit | `ws/ui` | merged (run 3–4) | `apps/ui-kit` against mock data | integration doc |
+| N | 17 | Opponent AI | `ws/opponent` | merged run 4 | AI racers on D's controller; circuit / traffic scenarios | — |
+| O | 18 | Meta services | `ws/meta` | merged (run 3–4) | `apps/meta` accounts/matchmaking/leaderboards API | one flaky test under load (`twenty_bots_…` heartbeat) |
 | P | 19 | Design docs | `ws/design-docs` | merged run 3 | GDD, city zones, feature backlog (`docs/design/`) | — |
-| Q | 20 | Tuning dashboard | `ws/tuning-dash` | merged run 3 (in progress) | sweep runner + presets (`tools/tuning-dash`) | integration doc |
+| Q | 20 | Tuning dashboard | `ws/tuning-dash` | merged (run 3–4) | sweep runner + presets (`tools/tuning-dash`) | integration doc |
 | Lead | 12 | Integration | `main` | — | Contacts → damage, debris, hull, static boxes, city loading; contract v0.2.0 | police units as sim vehicles, F's `wp_sim` hooks, physical traffic, v0.3.0 |
 
 ## What you can play right now
@@ -56,10 +56,12 @@ determinism lint (0 errors), native == wasm on every scenario, `just web-e2e` al
   - [x] replay round-trips
   - [~] determinism suite green — locally yes; GitHub CI runs once `main` is pushed
 - [ ] Checkpoint 2 (Greybox): city + traffic ✓ partly (D merged, traffic kinematic); police (E) merged, not yet wired to sim vehicles;
-      heat/escape/capture ✗; repair billing (G ✓, wiring ✗); 4-player server test (F parked).
+      heat/escape/capture ✗; repair billing (G ✓, wiring ✗); 4-player server test (F merged; end-to-end test pending).
 - [ ] Checkpoint 3 (Low-poly playable).
 
 ## Owner actions
-1. Resume machine E with its Lead feedback (`docs/integration/police.md`).
-2. Resume machine F with the paste prompt in `docs/integration/net.md` → Lead feedback.
-3. Enable branch protection on `main`; delete `claude/youthful-mayer-73fdu7`.
+None pending (branch protection on, stale branch deleted, all machines resumed for v0.2.0).
+
+## Next lead run (toward the single-player greybox demo)
+Police units as real `wp_sim` vehicles (E's unit API), physical traffic on LOD promotion (D #3),
+heat/escape/capture → economy wiring, then republish the testbed.
