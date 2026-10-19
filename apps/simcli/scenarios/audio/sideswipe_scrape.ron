@@ -1,0 +1,25 @@
+// Audio input check (workstream 13): a sideswipe must give the audio director what it needs —
+// one sharp first contact (impact one-shot) followed by many ticks of sustained contact while
+// both cars keep moving (scrape loop). Two sedans run side by side at 15 m/s; the left one
+// steers into the right one for half a second at 6 s (after both reach speed), then both hold straight.
+(
+    name: "audio_sideswipe_scrape",
+    seed: 1301,
+    mode: Arcade,
+    assists: ai,
+    entities: [
+        (id: "left", car: "debug_sedan", pos: (0.0, 0.0, 0.0), driver: cruise(target_mps: 15.0),
+            inputs: [(t_s: 6.0, input: (steer: 0.25)), (t_s: 6.5, input: ())]),
+        (id: "right", car: "debug_sedan", pos: (2.6, 0.0, 0.0), driver: cruise(target_mps: 15.0)),
+    ],
+    duration_s: 9.0,
+    hash_every: 24,
+    expect: [
+        speed_at(entity: "left", t_s: 5.9, min: 13.5, max: 16.0),
+        event_count(event: "Contact", entity: "left", min: 1, max: 100000),
+    ],
+    expect_pending: [
+        // Sustained contact: at 240 Hz a 0.25 s scrape is ≥ 60 contact ticks.
+        event_count(event: "Contact", entity: "right", min: 60, max: 100000),
+    ],
+)

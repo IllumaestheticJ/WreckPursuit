@@ -79,13 +79,21 @@ function filter(ctx: BaseAudioContext, type: BiquadFilterType, f: number, q = 0.
   return b;
 }
 
+/** Soft-clip curves, cached per drive amount (building one costs ~1000 tanh calls). */
+const curves = new Map<number, Float32Array<ArrayBuffer>>();
+
 function shaper(ctx: BaseAudioContext, drive: number): WaveShaperNode {
-  const n = 1024;
-  const curve = new Float32Array(n);
-  const k = 1 + drive * 8;
-  for (let i = 0; i < n; i++) {
-    const x = (i / (n - 1)) * 2 - 1;
-    curve[i] = Math.tanh(k * x) / Math.tanh(k);
+  const key = Math.round(drive * 100);
+  let curve = curves.get(key);
+  if (!curve) {
+    const n = 1024;
+    curve = new Float32Array(n);
+    const k = 1 + (key / 100) * 8;
+    for (let i = 0; i < n; i++) {
+      const x = (i / (n - 1)) * 2 - 1;
+      curve[i] = Math.tanh(k * x) / Math.tanh(k);
+    }
+    curves.set(key, curve);
   }
   const s = ctx.createWaveShaper();
   s.curve = curve;

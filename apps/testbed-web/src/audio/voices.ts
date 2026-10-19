@@ -80,7 +80,14 @@ interface Voice {
   panner: PannerNode;
   /** Audio time after which the voice is disconnected (one-shots and stopped loops). */
   endTime: number;
+  /** Parameters last applied (skip automation calls when nothing changed). */
+  last: VoiceParams;
 }
+
+/** Relative change above which a parameter is re-automated. */
+const EPS = 0.004;
+const changed = (a: number, b: number) => Math.abs(a - b) > EPS * Math.max(Math.abs(a), Math.abs(b), 1e-3);
+const moved = (a: number[], b: number[]) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]) > 0.03;
 
 /** Executes voice commands. */
 export class VoicePool {
@@ -183,7 +190,7 @@ export class VoicePool {
       syn.output.connect(gain);
     }
     const dur = def?.duration_s ?? 1;
-    this.voices.set(key, { synth: syn, src, gain, lp, panner, endTime: looped ? Infinity : t + dur + 0.5 });
+    this.voices.set(key, { synth: syn, src, gain, lp, panner, endTime: looped ? Infinity : t + dur + 0.5, last: params });
     this.created++;
   }
 
@@ -191,11 +198,18 @@ export class VoicePool {
     const v = this.voices.get(voiceKey(voice));
     if (!v) return;
     const t = this.ctx.currentTime;
-    v.gain.gain.setTargetAtTime(params.gain, t, 0.02);
-    v.lp.frequency.setTargetAtTime(Math.min(params.lowpass_hz || 18000, 18000), t, 0.05);
-    this.setPanner(v.panner, params.pos, t, true);
-    if (v.src) v.src.playbackRate.setTargetAtTime(params.pitch, t, 0.02);
-    v.synth?.update(params, t);
+    const l = v.last;
+    if (changed(params.gain, l.gain)) v.gain.gain.setTargetAtTime(params.gain, t, 0.02);
+    if (changed(params.lowpass_hz, l.lowpass_hz)) {
+      v.lp.frequency.setTargetAtTime(Math.min(params.lowpass_hz || 18000, 18000), t, 0.05);
+    }
+    if (moved(params.pos, l.pos)) this.setPanner(v.panner, params.pos, t, true);
+    if (v.src && changed(params.pitch, l.pitch)) v.src.playbackRate.setTargetAtTime(params.pitch, t, 0.02);
+    // Sirens follow their own clock and must see every phase; others only on change.
+    const synthChanged =
+      changed(params.freq_hz, l.freq_hz) || changed(params.pitch, l.pitch) || changed(params.load, l.load) || params.phase !== l.phase;
+    if (v.synth && synthChanged) v.synth.update(params, t);
+    v.last = params;
   }
 
   stop(voice: VoiceId, fadeS: number): void {

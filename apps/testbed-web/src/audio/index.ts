@@ -36,6 +36,14 @@ export class AudioSystem {
   private lineNo = 0;
   private lastStats: DirectorStats | null = null;
   private readonly listenerArr = new Float32Array(12);
+  /** Smoothed cost of one audio frame (director in wasm + JSON + Web Audio calls), ms. */
+  frameMs = 0;
+  /** Smoothed cost of the wasm director call alone (incl. JSON), ms. */
+  directorMs = 0;
+  /** Smoothed cost of applying the commands to Web Audio, ms. */
+  applyMs = 0;
+  /** Audio frames run (one per rendered frame while running). */
+  frames = 0;
   /** Plays per cue since start (e2e checks and debugging). */
   readonly cueCounts: Record<string, number> = {};
 
@@ -154,6 +162,7 @@ export class AudioSystem {
     a.set([pos.x, pos.y, pos.z, this.vel.x, this.vel.y, this.vel.z, fwd.x, fwd.y, fwd.z, up.x, up.y, up.z]);
     setListener(ctx, [pos.x, pos.y, pos.z], [fwd.x, fwd.y, fwd.z], [up.x, up.y, up.z]);
 
+    const t0 = performance.now();
     let out;
     try {
       out = audioBridge.frame(a, events.length ? JSON.stringify(events) : "", focus);
@@ -163,8 +172,14 @@ export class AudioSystem {
       this.pool.stopAll();
       return;
     }
+    const t1 = performance.now();
+    this.directorMs += (t1 - t0 - this.directorMs) * 0.1;
     this.apply(out.commands);
+    const t2 = performance.now();
+    this.applyMs += (t2 - t1 - this.applyMs) * 0.1;
     this.pool.collect();
+    this.frameMs += (performance.now() - t0 - this.frameMs) * 0.1;
+    this.frames++;
     this.lastStats = out.stats;
     this.panel.update(out.stats, this.pool.size, this.scanner.log);
   }

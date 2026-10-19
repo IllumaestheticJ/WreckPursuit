@@ -99,6 +99,21 @@ st = await stats();
 check(st.looped + st.one_shots <= 40, `voice count within max_voices (${st.looped}+${st.one_shots})`);
 console.log("cue counts:", JSON.stringify(c));
 
+// 5. Cost with 24 cars (informational; recorded in docs/integration/audio.md).
+await page.goto(URL + "?bench=24");
+await page.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 30000 });
+await page.keyboard.press("KeyX");
+await page.waitForFunction(() => window.__wpAudio?.running(), null, { timeout: 10000 });
+const plays0 = Object.values(await counts()).reduce((a, b) => a + b, 0);
+const frames0 = await page.evaluate(() => window.__wpAudio.frames);
+await page.waitForTimeout(6000);
+const plays = Object.values(await counts()).reduce((a, b) => a + b, 0) - plays0;
+const fps = ((await page.evaluate(() => window.__wpAudio.frames)) - frames0) / 6;
+console.log(`      24 cars: ${plays} plays in 6 s at ${fps.toFixed(1)} fps (headless, software GL)`);
+const perf = await page.evaluate(() => ({ ms: window.__wpAudio.frameMs, dir: window.__wpAudio.directorMs, app: window.__wpAudio.applyMs, st: window.__wpAudio.stats() }));
+console.log(`      24 cars: audio frame ${perf.ms.toFixed(3)} ms (director ${perf.dir.toFixed(3)} ms, apply ${perf.app.toFixed(3)} ms), voices ${perf.st.looped}+${perf.st.one_shots}, culled ${perf.st.culled}`);
+check(perf.st.looped + perf.st.one_shots <= 40, "24-car bench stays within max_voices");
+
 check(errors.length === 0, `no page errors${errors.length ? ": " + errors.slice(0, 5).join(" | ") : ""}`);
 await browser.close();
 process.exit(failures ? 1 : 0);
