@@ -1,0 +1,161 @@
+{
+  "id": "hauler_1500",
+  "display_name": "Hauler 1500",
+  "class": "Truck",
+  "analog_of": "2010s American full-size half-ton crew-cab pickup, 5.3 L pushrod V8, body-on-frame, solid rear axle",
+  "body_size_m": [2.03, 5.85, 1.88],
+  "mass_kg": 2475.0,
+  "front_weight_frac": 0.57,
+  "wheelbase_m": 3.645,
+  "track_front_m": 1.745,
+  "track_rear_m": 1.71,
+  "cg_height_m": 0.72,
+  "inertia_kgm2": [1340.0, 7400.0, 7670.0],
+  "drag_cd_a_m2": 1.377,
+  "lift_front": 0.2,
+  "lift_rear": 0.15,
+  "engine": {
+    "torque_curve_nm": [
+      [800, 360],
+      [1200, 400],
+      [1600, 440],
+      [2000, 465],
+      [2500, 485],
+      [3000, 500],
+      [3500, 512],
+      [4100, 519],
+      [4500, 510],
+      [5000, 485],
+      [5600, 452],
+      [6000, 410]
+    ],
+    "idle_rpm": 600.0,
+    "redline_rpm": 5800.0,
+    "rev_limit_rpm": 6000.0,
+    "inertia_kgm2": 0.25,
+    "engine_brake_nm": 62.0
+  },
+  "drivetrain": {
+    "layout": "Rwd",
+    "gear_ratios": [4.03, 2.36, 1.53, 1.15, 0.85, 0.67],
+    "final_drive": 3.42,
+    "reverse_ratio": 3.06,
+    "diff_front": "Open",
+    "diff_rear": {
+      "Lsd": {
+        "preload_nm": 150.0,
+        "ramp_power": 0.6,
+        "ramp_coast": 0.2
+      }
+    },
+    "clutch_max_nm": 830.0,
+    "shift_time_s": 0.3
+  },
+  "wheels": [
+    {
+      "position_m": [-0.873, 1.823, 0.385],
+      "radius_m": 0.385,
+      "width_m": 0.265,
+      "mass_kg": 40.0,
+      "tire_id": "street",
+      "steerable": true,
+      "max_steer_rad": 0.635,
+      "ackermann_frac": 0.7,
+      "camber_rad": -0.0035,
+      "toe_rad": 0.0017,
+      "caster_rad": 0.0698
+    },
+    {
+      "position_m": [0.873, 1.823, 0.385],
+      "radius_m": 0.385,
+      "width_m": 0.265,
+      "mass_kg": 40.0,
+      "tire_id": "street",
+      "steerable": true,
+      "max_steer_rad": 0.635,
+      "ackermann_frac": 0.7,
+      "camber_rad": -0.0035,
+      "toe_rad": 0.0017,
+      "caster_rad": 0.0698
+    },
+    {
+      "position_m": [-0.855, -1.823, 0.385],
+      "radius_m": 0.385,
+      "width_m": 0.265,
+      "mass_kg": 55.0,
+      "tire_id": "street",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0,
+      "caster_rad": 0.0
+    },
+    {
+      "position_m": [0.855, -1.823, 0.385],
+      "radius_m": 0.385,
+      "width_m": 0.265,
+      "mass_kg": 55.0,
+      "tire_id": "street",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0,
+      "caster_rad": 0.0
+    }
+  ],
+  "suspension": [
+    {
+      "spring_n_per_m": 37800.0,
+      "damper_bump_ns_per_m": 2810.0,
+      "damper_rebound_ns_per_m": 4220.0,
+      "travel_m": 0.24,
+      "preload_m": 0.03,
+      "arb_n_per_m": 28500.0,
+      "bump_stop_n_per_m": 300000.0
+    },
+    {
+      "spring_n_per_m": 37800.0,
+      "damper_bump_ns_per_m": 2810.0,
+      "damper_rebound_ns_per_m": 4220.0,
+      "travel_m": 0.24,
+      "preload_m": 0.03,
+      "arb_n_per_m": 28500.0,
+      "bump_stop_n_per_m": 300000.0
+    },
+    {
+      "spring_n_per_m": 39600.0,
+      "damper_bump_ns_per_m": 2430.0,
+      "damper_rebound_ns_per_m": 3640.0,
+      "travel_m": 0.26,
+      "preload_m": 0.03,
+      "arb_n_per_m": 0.0,
+      "bump_stop_n_per_m": 300000.0
+    },
+    {
+      "spring_n_per_m": 39600.0,
+      "damper_bump_ns_per_m": 2430.0,
+      "damper_rebound_ns_per_m": 3640.0,
+      "travel_m": 0.26,
+      "preload_m": 0.03,
+      "arb_n_per_m": 0.0,
+      "bump_stop_n_per_m": 300000.0
+    }
+  ],
+  "brakes": {
+    "max_torque_front_nm": 5130.0,
+    "max_torque_rear_nm": 2700.0,
+    "bias_front": 0.75,
+    "handbrake_rear_nm": 1620.0
+  },
+  "steering": {
+    "ratio": 17.5,
+    "rack_speed_rad_per_s": 1.2,
+    "ffb_scale": 1.0
+  },
+  "aero_downforce_coeffs": [0.0, 0.0],
+  "lattice_id": "hauler_1500",
+  "base_price": 32000,
+  "durability_class": 5
+}
