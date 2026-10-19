@@ -1,0 +1,76 @@
+name: Nightly
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  # Baselines are per runner class; see tools/bench/README.md.
+  WP_RUNNER_CLASS: gha-ubuntu-latest
+
+jobs:
+  bench:
+    name: benchmarks + perf gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.97.0
+      - uses: Swatinem/rust-cache@v2
+      - name: criterion
+        run: cargo bench -p wp_bench
+      - name: perf gate (> 20% vs tools/bench/baselines/gha-ubuntu-latest.json fails)
+        run: cargo run --release -p wp_bench --bin perf-gate -- check --append docs/PERF.md
+      - name: baseline candidate (commit it with [bless] to accept these numbers)
+        if: always()
+        run: cargo run --release -p wp_bench --bin perf-gate -- bless --baseline out/gha-ubuntu-latest.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: perf
+          path: |
+            docs/PERF.md
+            out/gha-ubuntu-latest.json
+            target/criterion/
+          retention-days: 30
+
+  soak:
+    name: 10-minute soak (32 bots)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.97.0
+      - uses: Swatinem/rust-cache@v2
+      - name: soak
+        run: |
+          cargo build --release -p wp_server -p simcli
+          if grep -q -- '--bots' apps/server/src/main.rs; then
+            # Prompt 07's server: procedural city with 32 bots for 10 minutes.
+            ./target/release/wp-server --bots 32 --minutes 10 --port 8080
+          else
+            echo "::notice::wp-server has no --bots yet (prompt 07); soaking with simcli fuzz instead"
+            ./target/release/simcli fuzz --minutes 10 --max-vehicles 32 --case-seconds 60 --seed ${{ github.run_number }}
+          fi
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: soak-repro
+          path: out/fuzz/
+
+  fuzz:
+    name: fuzz (5 minutes)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.97.0
+      - uses: Swatinem/rust-cache@v2
+      - run: |
+          cargo build --release -p simcli
+          ./target/release/simcli --fuzz --minutes 5 --seed $((${{ github.run_number }} * 7919))
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: fuzz-repro
+          path: out/fuzz/
