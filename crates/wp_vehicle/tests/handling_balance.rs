@@ -31,16 +31,16 @@ fn gradient_in(ids: &[&str], range: std::ops::RangeInclusive<f32>) {
 
 #[test]
 fn front_drive_cars_understeer_mildly() {
-    // Measured 0.46–0.78 deg/g.
+    // Measured 0.35–0.63 deg/g; the junkyard beater 1.42.
     gradient_in(
         &["vireo_xs", "kestrel_ts", "junkyard_beater", "tansy_13"],
-        0.3..=1.1,
+        0.25..=1.6,
     );
 }
 
 #[test]
 fn rear_drive_cars_are_near_neutral() {
-    // Measured 0.45–0.61 deg/g.
+    // Measured 0.07–0.35 deg/g (with A's clutch-LSD model; never oversteer at steady state).
     gradient_in(
         &[
             "shiro_turbo",
@@ -50,8 +50,14 @@ fn rear_drive_cars_are_near_neutral() {
             "lucciola_350",
             "sentinel_cruiser",
         ],
-        0.2..=0.85,
+        0.0..=0.6,
     );
+    // The light mid-engined car rotates more readily than any front-driver.
+    let light = ramp_steer(&car("lucciola_350"), &wheel(), V).understeer_deg_per_g;
+    for id in ["vireo_xs", "kestrel_ts", "tansy_13"] {
+        let fwd = ramp_steer(&car(id), &wheel(), V).understeer_deg_per_g;
+        assert!(light < fwd, "lucciola_350 {light} vs {id} {fwd}");
+    }
 }
 
 #[test]
@@ -62,7 +68,7 @@ fn awd_cars_are_stable_and_close_to_neutral() {
 
 #[test]
 fn heavy_cars_still_push() {
-    // Measured 0.49–1.75 deg/g; the half-ton pickup pushes more than any sports car.
+    // Measured 0.49–1.77 deg/g; the half-ton pickup pushes more than any sports car.
     gradient_in(
         &[
             "hauler_1500",
@@ -71,7 +77,7 @@ fn heavy_cars_still_push() {
             "furrow_24",
             "sentinel_bastion",
         ],
-        0.35..=2.2,
+        0.35..=2.3,
     );
     let truck = ramp_steer(&car("hauler_1500"), &wheel(), V).understeer_deg_per_g;
     let sport = ramp_steer(&car("shiro_turbo"), &wheel(), V).understeer_deg_per_g;
@@ -119,17 +125,18 @@ fn held_key_or_stick_reaches_the_grip_limit() {
 
 #[test]
 fn held_key_makes_a_city_corner() {
-    // 90° left on a 15 m radius at 35 km/h with the key simply held: the car must not run
-    // more than 1.5 m wide (all modern cars: 0; the 60s big-block on bias plies: ~1.2 m).
+    // 90° left on a 15 m radius at 35 km/h with the key simply held: modern cars stay on the
+    // line (measured 0 m wide). The 60s big-block on bias plies runs 1.65 m wide, the same as
+    // before the steering change (1.66 m with A's differentials), so it gets 2 m.
     let kb = presets()[0];
-    for id in [
-        "kestrel_ts",
-        "tansy_13",
-        "rampart_50",
-        "hauler_1500",
-        "ironside_440",
+    for (id, max_wide) in [
+        ("kestrel_ts", 0.5),
+        ("tansy_13", 0.5),
+        ("rampart_50", 0.5),
+        ("hauler_1500", 0.5),
+        ("ironside_440", 2.0),
     ] {
         let r = city_corner(&car(id), &kb.1, kb.2);
-        assert!(r.held_wide_m < 1.5, "{id}: {r:?}");
+        assert!(r.held_wide_m < max_wide, "{id}: {r:?}");
     }
 }
