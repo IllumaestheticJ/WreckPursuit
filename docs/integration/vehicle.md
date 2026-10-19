@@ -124,8 +124,8 @@ Asked for directly by the owner. Additive changes outside my crates:
   police 1.0, player on the race grid at 90 km/h); `live_vehicles()` (`[entity, kind]` for every
   sim vehicle incl. sim-spawned police/traffic); `vehicle_info` works for sim-spawned vehicles and
   reports `kind`; `Session::car()` resolves their cars (cache by car id); debug
-  `set_vehicle_kind(entity, code)` (refused while recording/replaying); `police_hud_json()` —
-  **placeholder returning `null` until `Sim::police()` lands (lead run 5)**.
+  `set_vehicle_kind(entity, code)` (refused while recording/replaying); `police_hud_json()`
+  (real since lead run 5, below).
 - `apps/testbed-web`: "city chase" button / `?preset=chase[&car=…][&police=N]`; views follow
   `live_vehicles()` (spawn + despawn); police livery + flashing red/blue light bar with point
   lights at night + `Auto` siren via J's audio bridge; traffic in muted colours; heat panel =
@@ -133,6 +133,27 @@ Asked for directly by the owner. Additive changes outside my crates:
 - `apps/ui-kit/package.json`: new subpath export `"./hud"` (the HUD module, without the eager
   1.2 MB fixtures the package index pulls in). Testbed consumes the kit as source
   (`file:../ui-kit`, `preact`, esbuild JSX, `resolve.dedupe`).
+
+### City chase on lead run 5 (A, check-in after run 5 landed)
+
+- Merged `main` (lead run 5) into `ws/vehicle`: clean. simcli's `build_sim` already sets the
+  police / traffic car models for city runs, so the browser gets real police cars and physical
+  traffic through `live_vehicles()` with no extra wiring (seen: 5 police, up to 16 physical
+  traffic among ~200 agents).
+- `police_hud_json()` is now real: `Session::police_hud()` builds the UI kit's `HeatHud` from
+  `Sim::police()` (level, heat within the level from `level_thresholds`, `PursuitStatus` →
+  clear/noticed/pursuit/cooldown, escape progress `los_lost_s / escape_time_s`, units with
+  `Assignment::Pursue` on the player, bounty rounded to whole dollars). Test
+  `city_chase_reports_heat_and_police_vehicles` (native: L1 at 10 s, L2 by 15 s; browser matches).
+  `wp_wasm` now depends on `wp_police` (workspace crate, already under `wp_sim`; wasm-safe).
+- `pack::unpack_input`: non-finite values read as 0 (a JS `undefined` packed as NaN poisoned the
+  car's physics for good — steering rack NaN, car stuck at 0 km/h). Test added.
+- **For J (audio):** `audio/synth.ts` siren — Chrome intermittently rejects a
+  `setValueCurveAtTime` segment as overlapping the previous one (seen with several police
+  sirens at once, e.g. `…(19.6438, 0.2) overlaps …(19.4467, 0.2)`), which threw out of the frame.
+  Minimal guard: the segment is skipped (try/catch). Root cause not found; please take a look.
+- Converter / AWD re-checked on the merged tree: `wp_vehicle` tests green, roster unchanged
+  (Cruiser 8.36 s, Lindwurm 5.40, Bastion 8.55, Hauler 8.98, Ironside 8.71, Wolfhound 6.55).
 
 ## Roster check with the converter + on-demand AWD (A, after lead run 4)
 
