@@ -166,6 +166,65 @@ pub fn set_json(text: &str, steps: &[Step], new: &Value) -> Result<String, Strin
     ))
 }
 
+/// Add a new member `steps.last()` (a key) with `new` to the JSON object at `steps[..n-1]`,
+/// as its last member, matching the object's layout (one member per line or inline).
+pub fn insert_json(text: &str, steps: &[Step], new: &Value) -> Result<String, String> {
+    let Some((Step::Key(key), parent)) = steps.split_last() else {
+        return Err("insert needs a key".into());
+    };
+    let (s, e) = json_span(text, parent)?;
+    let obj = &text[s..e];
+    if !obj.starts_with('{') {
+        return Err(format!("{} is not an object", crate::path::pointer(parent)));
+    }
+    let member = format!(
+        "{}: {}",
+        serde_json::to_string(key).expect("key"),
+        format_like("", new)
+    );
+    let close = e - 1;
+    let inner = &text[s + 1..close];
+    let last_nonws = inner.trim_end().len();
+    let at = s + 1 + last_nonws;
+    let insert = if inner.trim().is_empty() {
+        member
+    } else if let Some(nl) = inner.find('\n') {
+        // Indentation of the first member line.
+        let indent: String = inner[nl + 1..]
+            .chars()
+            .take_while(|c| *c == ' ' || *c == '\t')
+            .collect();
+        format!(",\n{indent}{member}")
+    } else {
+        format!(", {member}")
+    };
+    Ok(format!("{}{}{}", &text[..at], insert, &text[at..]))
+}
+
+/// Add `key = value` to the top-level table of TOML `text` (before the first `[table]`).
+pub fn insert_toml(text: &str, steps: &[Step], new: &Value) -> Result<String, String> {
+    let [Step::Key(key)] = steps else {
+        return Err("TOML insert supports top-level keys only".into());
+    };
+    let line = format!("{key} = {}\n", format_like("", new));
+    let mut pos = text.len();
+    let mut off = 0;
+    for l in text.split_inclusive('\n') {
+        if l.trim_start().starts_with('[') {
+            pos = off;
+            break;
+        }
+        off += l.len();
+    }
+    let mut out = text[..pos].to_string();
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str(&line);
+    out.push_str(&text[pos..]);
+    Ok(out)
+}
+
 /// Replace the value of `key` (top level, or `[table]` → key for two steps) in TOML `text`,
 /// keeping the line's indentation and trailing comment.
 pub fn set_toml(text: &str, steps: &[Step], new: &Value) -> Result<String, String> {
@@ -255,6 +314,21 @@ mod tests {
         assert_eq!(v["w"], json!(2e-5));
         assert!(set_json(text, &[k("nope")], &json!(1)).is_err());
         assert!(set_json(text, &[k("s"), Step::Index(5), k("k")], &json!(1)).is_err());
+    }
+
+    #[test]
+    fn json_insert_matches_layout() {
+        let text = "{\n  \"id\": \"x\",\n  \"d\": { \"a\": 1.0 },\n  \"w\": [ {\"k\": 1} ]\n}\n";
+        let out = insert_json(text, &[k("efficiency")], &json!(0.9)).unwrap();
+        assert_eq!(out, text.replace("]\n}", "],\n  \"efficiency\": 0.9\n}"));
+        let out = insert_json(text, &[k("d"), k("b")], &json!(2.0)).unwrap();
+        assert!(out.contains("{ \"a\": 1.0, \"b\": 2.0 }"));
+        let out = insert_json(text, &[k("w"), Step::Index(0), k("i")], &json!(0.5)).unwrap();
+        assert!(out.contains("{\"k\": 1, \"i\": 0.5}"));
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["w"][0]["i"], json!(0.5));
+        let out = insert_toml("a = 1\n[t]\nb = 2\n", &[k("c")], &json!(0.5)).unwrap();
+        assert_eq!(out, "a = 1\nc = 0.5\n[t]\nb = 2\n");
     }
 
     #[test]

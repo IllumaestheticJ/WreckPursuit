@@ -10,6 +10,7 @@ A sweep never edits `data/`; only an explicit **promote** does, one reviewed lin
 |---|---|---|
 | tire grip / balance (Magic Formula B, C, D, E) | `vehicle_metrics` (skidpad, step steer, lift-off) | `tire_lateral_bcde`, `tire_longitudinal_bcde` |
 | ride / transient response (springs, dampers, ARBs) | `vehicle_metrics` | `spring_damper`, `arb_balance` |
+| drivetrain losses, wheel inertia (optional v0.2.0 fields) | `vehicle_metrics` | `drivetrain_options` |
 | how hard a crash bites (mode tables) | `barrier` | `impulse_to_lattice_scale`, `plasticity_scale` |
 | crush / damage vs speed, both modes | `barrier` | `barrier_speeds` |
 | does a change still pass the calibration checks | `barrier_scenario`, `scenario` | `damage_scenarios_plasticity`, `sedan_brakes` |

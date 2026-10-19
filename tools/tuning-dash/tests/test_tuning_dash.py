@@ -148,6 +148,29 @@ class EndToEnd(unittest.TestCase):
         self.assertFalse(o["ok"])
         self.assertIn("stale", o["error"])
 
+    def test_optional_field_created_and_promoted(self):
+        sp = parse({
+            "name": "e2e_opt",
+            "data": str(self.data),
+            "probe": {"kind": "vehicle_metrics", "car": "debug_sedan", "metrics": ["zero_to_100"]},
+            "params": [{"target": "car:debug_sedan:drivetrain.efficiency", "values": [0.85, 0.95]}],
+        })
+        d = runner.run(sp, build=False, out_root=self.out)
+        pts = json.loads((d / "sweep.json").read_text())["points"]
+        self.assertTrue(all(p["ok"] for p in pts), [p.get("error") for p in pts])
+        self.assertIsNone(pts[0]["applied"][0]["old"])
+        # Higher efficiency → quicker 0-100.
+        self.assertLess(pts[1]["metrics"]["zero_to_100_s"], pts[0]["metrics"]["zero_to_100_s"])
+        car = self.data / "cars" / "debug_sedan.json"
+        before = car.read_text()
+        o = actions.promote_point("e2e_opt", pts[1]["id"], root=self.out)
+        self.assertTrue(o["ok"], o)
+        doc = json.loads(car.read_text())
+        self.assertEqual(doc["drivetrain"]["efficiency"], 0.95)
+        added = [l for l in car.read_text().splitlines() if l not in before.splitlines()]
+        self.assertTrue(any('"efficiency": 0.95' in l for l in added), added)
+        car.write_text(before)
+
     def test_scenario_probe_and_diff(self):
         sp = parse({
             "name": "e2e_scn",

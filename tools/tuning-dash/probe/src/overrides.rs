@@ -195,8 +195,15 @@ pub fn apply(
             }
             docs.get_mut(&t.file).expect("inserted")
         };
-        let locations: Vec<Vec<Step>> =
-            path::resolve(doc, &t.segments).map_err(|e| format!("{}: {e}", ov.target))?;
+        let locations: Vec<Vec<Step>> = match path::resolve(doc, &t.segments) {
+            Ok(l) => l,
+            // `set` may create a missing optional leaf (e.g. v0.2.0's `drivetrain.efficiency`);
+            // the contract loader rejects it if the field does not exist in the schema.
+            Err(e) => match create_missing_leaf(doc, &t.segments, ov.op) {
+                Some(l) => l,
+                None => return Err(format!("{}: {e}", ov.target)),
+            },
+        };
         for steps in locations {
             let slot = path::get_mut(doc, &steps).expect("resolved");
             if slot.is_object() || slot.is_array() {
@@ -221,6 +228,33 @@ pub fn apply(
         data.files.insert(rel, text);
     }
     Ok(applied)
+}
+
+/// For `set` on a path whose last key is missing: add the key (as null, filled by the caller)
+/// to every parent object the rest of the path selects. None when that does not apply.
+fn create_missing_leaf(
+    doc: &mut Value,
+    segments: &[path::Segment],
+    op: Op,
+) -> Option<Vec<Vec<Step>>> {
+    let (last, parents) = segments.split_last()?;
+    if op != Op::Set || last.key.is_empty() || !last.selectors.is_empty() {
+        return None;
+    }
+    let parent_locs = if parents.is_empty() {
+        vec![Vec::new()]
+    } else {
+        path::resolve(doc, parents).ok()?
+    };
+    let mut out = Vec::new();
+    for steps in parent_locs {
+        let obj = path::get_mut(doc, &steps)?.as_object_mut()?;
+        obj.entry(last.key.clone()).or_insert(Value::Null);
+        let mut s = steps;
+        s.push(Step::Key(last.key.clone()));
+        out.push(s);
+    }
+    Some(out)
 }
 
 #[cfg(test)]
@@ -273,6 +307,25 @@ mod tests {
         assert_eq!(car["susp"][2]["k"], json!(22300.0));
         let mode = parse_file("modes/sim.toml", &m.files["modes/sim.toml"]).unwrap();
         assert_eq!(mode["plasticity_scale"], json!(1.25));
+    }
+
+    #[test]
+    fn set_creates_missing_optional_leaf() {
+        let mut m = mem();
+        let ov = |t: &str, op| Override {
+            target: t.into(),
+            op,
+            value: json!(0.9),
+            round_sig: None,
+        };
+        let a = apply(&mut m, None, &[ov("car:x:susp[*].inertia", Op::Set)]).unwrap();
+        assert_eq!(a.len(), 4);
+        assert_eq!(a[0].old, Value::Null);
+        let car: Value = serde_json::from_str(&m.files["cars/x.json"]).unwrap();
+        assert_eq!(car["susp"][3]["inertia"], json!(0.9));
+        // Only `set`, only a missing leaf: scale and missing parents still fail.
+        assert!(apply(&mut m, None, &[ov("car:x:nope_s", Op::Scale)]).is_err());
+        assert!(apply(&mut m, None, &[ov("car:x:a.b", Op::Set)]).is_err());
     }
 
     #[test]

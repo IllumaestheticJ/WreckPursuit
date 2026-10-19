@@ -69,7 +69,10 @@ workers: 4                      # parallel probes (default: CPU count, max 8)
 own simcli scenario, e.g. `scenario:entities[*].car`; never promoted). Field path: dotted keys
 with selectors `[2]`, `[0,1]`, `[*]`, `[field=value]`, e.g.
 `car:debug_sedan:suspension[0,1].spring_n_per_m` (front axle),
-`lattice:debug_sedan:beams[material_id=hss].area_m2`. Integer fields stay integers.
+`lattice:debug_sedan:beams[material_id=hss].area_m2`. Integer fields stay integers. `op: set`
+on a missing last key creates it, so optional contract fields that a file leaves out (v0.2.0:
+`drivetrain.efficiency`, `wheels[*].inertia_kgm2`, `fuel_capacity_l`) can be swept and
+promoted (promote inserts the member); other ops and missing parents are errors.
 `tuning-probe resolve <target>` lists what a target selects before you sweep it.
 
 ## Outputs
@@ -114,6 +117,7 @@ temporary copy of `data/` and promotes into that copy.
 | `barrier_speeds` (17 speeds × 8 variants) | 8 | 0.8 s |
 | `impulse_to_lattice_scale` | 12 | 0.3 s |
 | `sedan_brakes` (simcli scenario, recorded) | 6 | 0.13 s |
+| `drivetrain_options` (v0.2.0 optional fields, 2 cars) | 18 | 0.8 s |
 
 One `vehicle_metrics` point with every manoeuvre but top speed ≈ 0.3 s; a barrier point at
 five speeds ≈ 0.1 s. Process start-up and data loading are a few ms per point.
