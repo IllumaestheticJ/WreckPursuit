@@ -262,3 +262,14 @@ Contract requests: #1 teleport — **kept as the inherent method** (no trait cha
   are above (#6–#8). As a no-contract step, `World::road_graph()` exposes the road-level graph
   E needs now.
 
+### Lead run 5 (2026-10-19)
+- **Your need #3 is done:** with `Sim::set_traffic_car(car)` (simcli city runs use `debug_sedan`), every
+  `LodChange::Promoted` agent becomes a `wp_sim` vehicle (`VehicleKind::Traffic`, Rapier body + damage);
+  your controller's `pa.input` drives it; its real state goes back with `Vehicle::set_state` and damage
+  with `apply_agent_damage`; `Demoted` / `Despawned` remove it. `crates/wp_sim/src/traffic_link.rs`.
+- One-line change in your crate: `Traffic::step_physics` skips agents that have an entity (wp_sim steps
+  them). Keep it.
+- **Please look:** `soak/traffic_soak_observer` now sees **1 civilian collision** in 60 s once near-player
+  traffic is physical (real braking, nudges from parked-car props). The gate there is ≤ 3 for now; zero is
+  `expect_pending`. Your `collision_log` has the pair and tick. The no-player soak still gates zero.
+- Still open: debris hazards (#5), race routes (#6, with L).
