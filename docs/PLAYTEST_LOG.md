@@ -106,4 +106,13 @@ the schedule could hunt (1→2→1). New automatic (`crates/wp_vehicle/README.md
 |---|---|---|---|
 | 18 | Captured but nothing happens; no fine / impound / bounty; sirens not tied to the chase | lead (`wp_wasm::run`, testbed `src/ui/runEnd.tsx`) | done on `lead/demo-endrun`: capture / wreck holds the car, opens the result panel (fine, bail, impound fee, G's repair quote, cash before → after, ledger lines) + the bill; **Repair & continue** pays from the ledger and restores the car; escape → bounty toast; sirens/light bars follow unit assignment. Goldens unchanged. To playtest on the link |
 | 19 | Engine sound from 2nd gear onwards doesn't work well | J (audio): reproduce with dumped rpm/gear/load/layer signals after the new gearbox; fix and add regression tests | dispatched |
-| 20 | Car can fall into / through the sidewalk | helper `lead/fix-sidewalk-fall`: match colliders to the visual sidewalk/kerb surface (Port Vesper v2), kerb steps, seam sweep test | dispatched |
+| 20 | Car can fall into / through the sidewalk | helper `lead/fix-sidewalk-fall`: match colliders to the visual sidewalk/kerb surface (Port Vesper v2), kerb steps, seam sweep test | **done on `lead/fix-sidewalk-fall`** (+ [bless]): sidewalks had **no collider** — wheels sank 0.27 m (Vesper; 0.15 m grid) and on fills/deck approaches fell metres; junction discs didn't reach the road ribbons' corners (unpaved crescents at every junction mouth); pits at junction corners/bends. Now one shared mesh for greybox + physics (sidewalks, 0.15 m kerbs, corner fills, full junction discs); visual vs physics sweep 294 k → 0 samples off; 96 kerb mounts at 15/40 km/h, worst tire −2.3 cm (was −34 cm). Details below and `docs/integration/world.md`. To playtest on the link |
+
+### Row 20 detail — sidewalk fall (lead helper `lead/fix-sidewalk-fall`)
+| What was wrong | Where | Fix |
+|---|---|---|
+| Sidewalks/kerbs drawn, never collided: physics under them was terrain 12 cm below the road (Vesper) or the slab (grid) | every street | sidewalk tops + kerb faces as colliders (`wp_world::surface::sidewalk_mesh`, same triangles as the greybox) |
+| Sidewalk on fills / deck approaches floated over natural ground up to 21 m below | Vesper embankments, ramps | same (collider at the visual height) |
+| Junction disc smaller than the ribbon corners: unpaved crescents ≤ 1.7 m in each junction mouth | every junction | paved disc reaches every ribbon corner, polygon encloses its circle |
+| No sidewalk between streets at corners / outside bends (15–27 cm pits; the next sidewalk's edge stopped cars) | junction corners, bends | corner / T / bend fills at kerb height |
+| Chassis box (floor at kerb height) snagged on the kerb while straddling it | anywhere | upright cars: chassis ignores sidewalks, the wheels climb |
