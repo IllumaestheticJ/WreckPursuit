@@ -11,7 +11,7 @@ clock. Implements `wp_contracts::WorldQuery`. No renderer dependency; compiles f
 | `network` | The road file format (`.road.bin` / `.road.json`), validation |
 | `builder` | Abstract road graph → lanes, connections, junction control, signal plans |
 | `procgen` | Procedural fallback city (grid + ring + highway spine + 2 diagonals) |
-| `map` | Runtime map: connector curves, conflict sets, uniform-grid index, `WorldQuery` |
+| `map` | Runtime map: connector curves, conflict sets, uniform-grid index, `WorldQuery` (incl. building line of sight) |
 | `signals` | Fixed-time controller evaluation |
 | `traffic` | Civilian agents: IDM, MOBIL, junction permits, hazards, spawning, LOD |
 | `density` | Density model (`f_time`, `f_distance`, district bases) |
@@ -19,7 +19,8 @@ clock. Implements `wp_contracts::WorldQuery`. No renderer dependency; compiles f
 | `routes` | Lane-legal race routes, circuits, checkpoints, closures |
 | `props` | Parked cars and cones (static colliders) |
 | `clock` | `WorldClock`, `sun_direction` |
-| `geom` | Deterministic geometry (`atan2` polynomial, polylines, OBB, Bézier) |
+| `geom` | Deterministic geometry (polylines, OBB, Bézier; re-exports `wp_math::{atan, atan2}`) |
+| `roads` | Road-level graph view (`RoadGraphView`) for police routing / minimaps |
 
 City data lives in `data/city/` (see its README); importer and generator in
 `tools/city-import/`.
@@ -194,6 +195,15 @@ your way) above 3 m/s for > 1.5 s; reckless = 3 near misses (boxes within 1.5 m 
 relative) within 10 s; collision = box overlap with a civilian. Emitted as
 `SimEvent::TrafficViolation`.
 
+**Line of sight** (`WorldQuery::line_of_sight`, contract v0.2.0): buildings are footprints
+extruded from the ground to `height_m`; a sight line is blocked if any part of it inside a
+footprint is below the roof (checked at both ends of the inside span — height is linear along
+the line). Buildings are indexed in the 32 m grid and only cells the line crosses (2D DDA) are
+tested. Roads, parked cars and traffic do not occlude.
+
+**Road graph** (`World::road_graph()`, `roads::RoadGraphView`): one edge per road with class,
+limit, lanes each way, district; nodes with district and signal flag; POIs; building bounds.
+
 **Routes**: `plan_route` / `plan_route_between_pois` (A* over lanes and connectors, travel
 time at the limit, start snapped to a lane facing the POI heading), `plan_circuit` (visits a
 polygon's vertices in order and closes the loop), checkpoints at every turn and every 200 m
@@ -216,6 +226,7 @@ Release, cloud container (4 vCPU), procedural 12×12, 400 agents at saturation
 |---|---|---|---|
 | Traffic + signals + violations per 60 Hz frame (4 × `World::step`) | avg 0.06 ms, p99 0.15 ms, p99.9 0.3 ms, max ≈ 1.4 ms (noise) | not measured | 2 ms (browser 4 ms) |
 | Same with civilian-collision diagnostics on | avg 0.20 ms | — | — |
+| `line_of_sight`, random 300 m sight lines at eye height | ≈ 1.1 µs/query | — | — |
 | `World::load` of `procedural_12x12.road.bin` (decode + `CityMap::new` + parked cars) | ≈ 17 ms (debug build ≈ 0.2 s; `ProcGenConfig::small()` ≈ 5 ms / 0.06 s) | — | — |
 | 10-min soak, 9 seeds × {0 %, 5 %} aggressive | 0 civilian–civilian collisions; 0–11 agents recycled after being stuck > 120 s (starved permissive lefts / minor approaches in saturated flow) | — | < 1 % |
 

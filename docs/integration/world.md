@@ -3,7 +3,7 @@
 - **Workstream / prompt:** 05 — city, road network, signals & civilian traffic
 - **Branch:** `ws/world`
 - **Crates / folders owned:** `crates/wp_world`, `data/city/`, `tools/city-import/`
-- **Contract version built against:** 0.1.0
+- **Contract version built against:** 0.2.0
 
 ## Exposes
 All in `wp_world` (details and format spec: `crates/wp_world/README.md`).
@@ -51,7 +51,15 @@ All in `wp_world` (details and format spec: `crates/wp_world/README.md`).
 **Data & tools**
 - `data/city/procedural_12x12.{road.bin,road.json,greybox.glb}` (`just city`).
 - `tools/city-import`: `gen-city --grid WxH --seed N`, `city-import extract.osm.pbf --id X`.
-- `wp_world::geom::{atan, atan2}` — deterministic polynomial versions (proposed for `wp_math`).
+- `WorldQuery::line_of_sight(a, b)` (contract v0.2.0) on `World`/`CityMap`: buildings are
+  extruded footprints; blocked if any part of the sight line inside a footprint is below the
+  roof; grid-indexed (≈ 1.1 µs per 300 m query, release).
+- `World::road_graph() -> RoadGraphView` (`wp_world::roads`): road-level graph — nodes (pos,
+  district, signalised), one `RoadEdge` per road (`a`, `b`, centreline, length, limit, class,
+  lanes each way / one-way, district), POIs, building bounds. Maps 1:1 onto
+  `wp_police::RoadGraph::{add_node, add_segment}`; proposed shape for the v0.3.0 shared trait.
+- `ProcGenConfig::small()` — 6×6 test city with every feature.
+- `wp_world::geom::{atan, atan2}` re-export `wp_math::{atan, atan2}` (moved in v0.2.0).
 
 ## Needs
 From the sim loop (`wp_sim`, integration lead) — none of these are wired yet:
@@ -78,11 +86,67 @@ From the sim loop (`wp_sim`, integration lead) — none of these are wired yet:
 ## Contract change requests
 | # | Change (type / field / variant) | Why | Who is affected | Status |
 |---|---|---|---|---|
-| 1 | `VehicleSim::teleport(&mut self, pos, rot, lin_vel, ang_vel)` (or keep `wp_vehicle::Vehicle::set_pose_and_speed`) | Seamless kinematic → physical traffic promotion needs to set velocity; the stub only had `reset` (zero speed) | 02 (implements), 05/06 (use it for traffic and police spawns) | proposed; interim inherent method added to `wp_vehicle` |
-| 2 | `SimEvent::TrafficViolation { …, pos: [f32; 3] }` | Police dispatch needs where the violation happened (camera / witness position) | 06, 07 (replication) | proposed |
-| 3 | `TrafficAgentSnapshot { id: u32, pos: [f32; 3], yaw: f32, speed: f32, flags: u8, variant: u8 }` in `wp_contracts::net` (+ `ServerToClient` snapshot field) | Replicate kinematic traffic cheaply; physical agents replicate as vehicles | 07, 04 | proposed |
-| 4 | `wp_math::atan2` (move `wp_world::geom::{atan, atan2}`) | Deterministic `atan2` needed by 02/06 too (wp_math README lists it as a gap) | 12 | proposed |
-| 5 | `SimConfig::city: Option<CitySource>` | Choose the city per instance | 12, 07 | proposed |
+| 1 | ~~`VehicleSim::teleport(&mut self, pos, rot, lin_vel, ang_vel)` (or keep `wp_vehicle::Vehicle::set_pose_and_speed`)~~ | Seamless kinematic → physical traffic promotion needs to set velocity; the stub only had `reset` (zero speed) | 02 (implements), 05/06 (use it for traffic and police spawns) | rejected in v0.2.0: inherent `Vehicle::set_pose_and_speed` kept |
+| 2 | `SimEvent::TrafficViolation { …, pos: [f32; 3] }` | Police dispatch needs where the violation happened (camera / witness position) | 06, 07 (replication) | **applied v0.2.0** (D emits `pos` = tracked vehicle position) |
+| 3 | `TrafficAgentSnapshot { id: u32, pos: [f32; 3], yaw: f32, speed: f32, flags: u8, variant: u8 }` in `wp_contracts::net` (+ `ServerToClient` snapshot field) | Replicate kinematic traffic cheaply; physical agents replicate as vehicles | 07, 04 | accepted, deferred to v0.3.0 — final shape below (#6) |
+| 4 | `wp_math::atan2` (move `wp_world::geom::{atan, atan2}`) | Deterministic `atan2` needed by 02/06 too (wp_math README lists it as a gap) | 12 | **applied v0.2.0** |
+| 5 | `SimConfig::city: Option<CitySource>` | Choose the city per instance | 12, 07 | done without contract change (`Sim::set_world`) |
+
+| 6 | v0.3.0 `TrafficAgentSnapshot` final shape (below) | Traffic replication | 07 (F), 04 (C) | proposed for v0.3.0 |
+| 7 | v0.3.0 shared road-network trait (below) | Police, traffic, minimap share one network (E #5) | 06 (E), 12, 16 | proposed for v0.3.0 |
+| 8 | v0.3.0 `DistrictId` (below) | Economy/police per-district tables (G #6, E districts) | 06, 08 | proposed for v0.3.0 |
+
+### v0.3.0 proposals (D)
+
+**#6 `TrafficAgentSnapshot`** (in `wp_contracts::net`, one per kinematic agent in a client's
+interest set; physical agents replicate as normal vehicles):
+```rust
+pub struct TrafficAgentSnapshot {
+    pub id: u32,            // wp_world::AgentId, stable for the agent's life
+    pub pos: [f32; 3],      // m (F may quantise on the wire, e.g. cm)
+    pub yaw: f32,           // rad, 0 = +Y
+    pub speed_mps: f32,     // for client-side extrapolation along the heading
+    pub flags: u8,          // bit0 brake lights, bit1 hazards, bit2 left signal,
+                            // bit3 right signal, bit4 headlights, bit5 yielding to siren
+    pub variant: u8,        // visual variant (car model / colour), 0..8 today
+}
+```
+Produced by `wp_world::AgentView` → snapshot (a `From` impl lives in `wp_world` once the type
+exists). Despawns are implicit (absent id); `LodChange::Promoted/Demoted` tells the server when
+an id moves between this list and the vehicle list.
+
+**#7 Shared road-network trait** (read-only; `wp_world::CityMap` implements it, `wp_police`
+consumes it instead of its own `RoadGraph`; ids are plain `u32`):
+```rust
+pub enum RoadClass { Highway, Arterial, Collector, Local, Alley }
+pub struct RoadEdgeInfo { pub a: u32, pub b: u32, pub length_m: f32, pub speed_limit_mps: f32,
+                          pub class: RoadClass, pub lanes_ab: u8, pub lanes_ba: u8,
+                          pub district: Option<DistrictId> }
+pub trait RoadNetworkQuery {
+    fn node_count(&self) -> u32;
+    fn node_pos(&self, n: u32) -> [f32; 2];
+    fn edge_count(&self) -> u32;
+    fn edge(&self, e: u32) -> RoadEdgeInfo;
+    fn edge_polyline(&self, e: u32) -> &[[f32; 2]];
+    /// Edges leaving `n` that may be driven away from `n` (respects one-way), ascending ids.
+    fn edges_from(&self, n: u32) -> &[u32];
+    /// Closest point on any edge: (edge, fraction from `a`, point, distance).
+    fn nearest_on_road(&self, p: [f32; 2]) -> Option<(u32, f32, [f32; 2], f32)>;
+    fn district_at(&self, p: [f32; 2]) -> Option<DistrictId>;
+    fn pois(&self) -> &[PoiInfo];   // kind (Safehouse, Garage, RaceStartGrid, PoliceStation,
+                                    // Helipad, Camera), pos, heading, radius
+}
+```
+Line of sight stays on `WorldQuery`. E's `RoadGraph` keeps its routing/prediction code on top
+of the trait. Today the same data is available as `wp_world::World::road_graph()`
+(`RoadGraphView`), so `wp_sim` can already build E's graph with `add_node`/`add_segment`
+(district mapping: Core/Commercial → Core, Residential/Suburb → Suburb, Industrial/Port →
+Industrial).
+
+**#8 `DistrictId`**: `pub enum DistrictId { Core, Commercial, Residential, Industrial, Port,
+Suburb }` — exactly `wp_world::network::DistrictKind` (moved to contracts, re-exported by
+`wp_world`). Per-zone identity is not needed by G or E; if it becomes needed, add
+`ZoneId(u32)` alongside.
 
 ## Changes outside my crates
 - `Cargo.toml` (workspace): added member `tools/city-import`.
@@ -100,6 +164,7 @@ From the sim loop (`wp_sim`, integration lead) — none of these are wired yet:
 | Same with collision diagnostics | same | avg 0.20 ms | — | — |
 | `World::load` procedural_12x12 | same | ≈ 17 ms (debug ≈ 0.2 s) | — | — |
 | `World::procedural(ProcGenConfig::small())` (6×6, 650 lanes, 521 parked cars) | same | ≈ 5 ms (debug ≈ 0.06 s) | — | — |
+| `line_of_sight`, random 300 m sight lines at 1.5 m, procedural_12x12 | same | 1.1 µs/query | — | — |
 | 10-min soak × 18 (9 seeds × 0 / 5 % aggressive) | same | 0 civilian–civilian collisions | — | < 1 % with aggressive |
 
 ## Known gaps
@@ -108,7 +173,8 @@ From the sim loop (`wp_sim`, integration lead) — none of these are wired yet:
   `tools/city-import/README.md`.
 - In saturated flow a few permissive left / minor-road cars starve > 2 min and get recycled
   when unseen (0–11 per 10 min with 400 agents); no protected-left phases yet.
-- One civilian car model; no buses; sightline rule is distance-only.
+- One civilian car model; no buses; sightline rule is distance-only (LOS exists now; spawning
+  could use it — kept distance-only for determinism of spawn tests).
 - Kinematic traffic is not replicated yet (contract request 3).
 
 ## Lead feedback (2026-10-19, run 2)
@@ -162,4 +228,19 @@ Contract requests: #1 teleport — **kept as the inherent method** (no trait cha
   `ProcGenConfig::small()` in that test, and create parked-car bodies asleep
   (`RigidBodyBuilder::dynamic().sleeping(true)`) or fixed until hit, which also matters in
   release with ~3000 props.
+
+### Response from D (contract v0.2.0, lead run 3)
+- Merged `main` (v0.2.0) into `ws/world`; the lead's first-cut changes in `wp_world` compile and
+  pass (`GroundQuery` → `FlatGround` for physical traffic until `wp_sim` gives it the Rapier
+  ground; violation `pos`; `atan`/`atan2` from `wp_math`).
+- **Line of sight — taken over.** Building grid + 2D DDA over the cells the sight line crosses
+  (only those buildings are tested; 1.1 µs per 300 m query, release). Fixed a case in the first
+  cut: it tested the height only where the line *enters* a footprint, so a line from above the
+  roof down to a point behind/inside the building (helicopter → car) was wrongly clear; now the
+  lowest point of the line inside the footprint is checked (both ends of the span, since height
+  is linear). Tests: hand cases (through, beside, over, descending into, endpoint inside,
+  corner clip) and 3000 random lines against brute force.
+- **v0.3.0 shapes** for `TrafficAgentSnapshot`, the shared road-network trait and `DistrictId`
+  are above (#6–#8). As a no-contract step, `World::road_graph()` exposes the road-level graph
+  E needs now.
 
