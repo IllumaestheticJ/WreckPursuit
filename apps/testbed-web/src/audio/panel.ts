@@ -92,7 +92,7 @@ export class AudioPanel {
       this.body.append(r);
       return r;
     };
-    const tier = this.select(["None", "Basic", "Improved", "Pro", "Elite"], this.settings.tier, (v) => {
+    const tier = this.select(["None", "Basic", "Pro", "Elite"], this.settings.tier, (v) => {
       this.settings.tier = v;
       h.setTier(v);
     });

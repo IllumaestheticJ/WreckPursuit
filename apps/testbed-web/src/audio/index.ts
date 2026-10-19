@@ -117,7 +117,7 @@ export class AudioSystem {
     this.safe(() => audioBridge.setSiren(this.focus, mode === "Default" ? "" : mode));
   }
 
-  /** Scanner tier: "None" | "Basic" | "Improved" | "Pro" | "Elite". */
+  /** Scanner tier: "None" | "Basic" | "Pro" | "Elite" (wp_police tiers 0/1/2). */
   setTier(tier: string): void {
     this.safe(() => audioBridge.setScannerTier(tier));
   }

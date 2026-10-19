@@ -7,7 +7,7 @@
 //! | `audio_library()` | JSON `{ config, packs }` (the backend needs pack cue definitions) |
 //! | `audio_frame(listener, events_json, focus)` | JSON `{ commands, stats }` for this frame |
 //! | `audio_set_siren(entity, mode)` | `""` (default) / `"Off"` / `"Auto"` / `"Wail"` / `"Yelp"` / `"Phaser"` / `"HiLo"` |
-//! | `audio_set_scanner_tier(tier)` | `"None"` / `"Basic"` / `"Improved"` / `"Pro"` / `"Elite"` |
+//! | `audio_set_scanner_tier(tier)` | `"None"` / `"Basic"` / `"Pro"` / `"Elite"` (wp_police tiers 0/1/2) |
 //! | `audio_radio(unit, priority, text)` | queue a scanner line (debug until `PoliceEvent::Radio` exists) |
 //! | `audio_reset()` | stop everything and forget transient state |
 

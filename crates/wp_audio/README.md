@@ -68,12 +68,18 @@ functions. Same frames in → byte-identical commands out (tested on real physic
   much harder hit arrives. Sustained contact with tangential speed > `scrape_min_speed_mps` is
   a scrape loop (metal or plastic) that releases over `scrape_release_s`. `PartDetached`,
   `WheelDetached`, `ComponentFailed(Engine)` and `TotalLoss` add one-shots.
+  `SimEvent::GlassShattered` (v0.2.0) shatters at the region's centroid, once per region; after
+  the first such event glass is no longer inferred from contacts. `SimEvent::RegionDamaged` on
+  outer panels drives a `body/rattle` loop (severity × speed × road texture).
+- **Police events** (`wp_police::PoliceEvent`, decoded from `SimEvent::PoliceEvent`): `Radio`
+  lines go to the scanner (priority: Dispatch for dispatch, Pursuit while a pursuit is active,
+  else Routine); `PursuitStarted/Ended` track that; `SpikeHit` plays a `tire/burst` per wheel.
 - **Sirens** (`siren.rs`): wail (≈650→1500 Hz, 4.6 s), yelp (same range, 0.33 s), phaser
   (0.1 s), hi-lo (770/960 Hz, 0.55 s each) — cadences in `audio_config.json`. `Auto` wails above
   16 m/s and yelps below 9 m/s with hysteresis. Phase is computed from ticks, the procedural
   synth runs the cadence itself phase-locked to it. Horn from `VehicleInput::horn`.
 - **Scanner** (`scanner.rs`): lines queued by `RadioPriority`, released after the tier delay
-  (Basic 10 s, Improved 7, Pro 5, Elite 3; `None` = no scanner), one at a time, stale lines
+  (Basic 10 s, Pro 6, Elite 3 — `wp_police` tiers 0/1/2, same numbers as `data/police/tools.toml`; `None` = no scanner), one at a time, stale lines
   dropped, queue capped (lowest priority dropped first). Pursuit/Urgent lines chop lower ones.
   Music is ducked while a line plays. Duration is estimated from word count (deterministic).
 
@@ -140,7 +146,7 @@ one-shots peak −1 dBFS; balance between cues with `gain`, overall mix lives in
 | kind | cues |
 |---|---|
 | Engine | the layers above, `engine/limiter`, `turbo/whistle`, `turbo/blowoff`, `supercharger/whine`, `exhaust/pop` |
-| World | `tire/squeal`, `tire/scrub_loose`, `surface/{asphalt,wet_asphalt,concrete,gravel,grass,dirt,curb,metal}`, `suspension/{thump,land}`, `impact/{thud,plastic_crack,panel_dent,structural_crunch,glass_shatter,cast_clank}`, `scrape/{metal,plastic}`, `debris/{part_tear,wheel_off}`, `mech/{engine_fail,steam_hiss}`, `horn/{standard,truck}` |
+| World | `tire/squeal`, `tire/burst`, `body/rattle`, `tire/scrub_loose`, `surface/{asphalt,wet_asphalt,concrete,gravel,grass,dirt,curb,metal}`, `suspension/{thump,land}`, `impact/{thud,plastic_crack,panel_dent,structural_crunch,glass_shatter,cast_clank}`, `scrape/{metal,plastic}`, `debris/{part_tear,wheel_off}`, `mech/{engine_fail,steam_hiss}`, `horn/{standard,truck}` |
 | Siren | `siren/{wail,yelp,phaser,hilo}` — seamless loops of one cadence cycle (or several), started in phase with the director's `phase` |
 | Radio | `radio/squelch_on`, `radio/squelch_off`, `radio/static` |
 
@@ -178,9 +184,8 @@ nodes) for material lookup.
 ## Known gaps
 
 - Contact material is inferred from the lattice; contract request A-1 asks for it on the event.
-- `PoliceEvent` is opaque until v0.2.0: radio lines are pushed via `push_radio_line` (A-2), the
-  scanner tier is set by the caller (A-3). `SimEvent::GlassShattered` (planned, B #1) will
-  replace glass inference once emitted.
+- `PoliceEvent::Radio` has no priority yet (A-2): priority is a heuristic. The scanner tier is
+  set by the caller. Until B emits `GlassShattered`, glass is inferred from contacts.
 - No occlusion (buildings) or interior/exterior filtering yet; no reverb zones (tunnels).
 - No music system; the Music bus exists so the scanner can duck it.
 - TTS (`speechSynthesis`) bypasses the Web Audio radio EQ (browser limitation); recorded line

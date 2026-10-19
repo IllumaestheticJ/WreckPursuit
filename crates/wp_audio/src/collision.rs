@@ -79,6 +79,19 @@ impl MaterialMap {
         Self { nodes }
     }
 
+    /// Mean rest position (chassis space) of the nodes of `region`, if it has any.
+    pub fn region_centroid(&self, region: BodyRegion) -> Option<[f32; 3]> {
+        let mut sum = [0.0f32; 3];
+        let mut n = 0u32;
+        for node in self.nodes.iter().filter(|x| x.region == region) {
+            for k in 0..3 {
+                sum[k] += node.pos[k];
+            }
+            n += 1;
+        }
+        (n > 0).then(|| [sum[0] / n as f32, sum[1] / n as f32, sum[2] / n as f32])
+    }
+
     /// Material kind and region nearest to chassis-space point `p` (ties: lowest node id).
     /// `None` for an empty lattice.
     pub fn at(&self, p: [f32; 3]) -> Option<(MaterialKind, BodyRegion)> {

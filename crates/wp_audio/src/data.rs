@@ -79,6 +79,10 @@ pub mod cues {
     pub const ENGINE_FAIL: &str = "mech/engine_fail";
     /// Cooling damage hiss loop.
     pub const STEAM_HISS: &str = "mech/steam_hiss";
+    /// Tire blow-out one-shot (spike strips).
+    pub const TIRE_BURST: &str = "tire/burst";
+    /// Damaged body panels rattle loop.
+    pub const BODY_RATTLE: &str = "body/rattle";
     /// Passenger-car horn loop.
     pub const HORN_STANDARD: &str = "horn/standard";
     /// Truck / SUV horn loop.
@@ -105,6 +109,8 @@ pub mod cues {
             STEAM_HISS,
             HORN_STANDARD,
             HORN_TRUCK,
+            TIRE_BURST,
+            BODY_RATTLE,
         ];
         v.extend_from_slice(&SURFACES);
         v

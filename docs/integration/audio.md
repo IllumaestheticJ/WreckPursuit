@@ -3,8 +3,7 @@
 - **Workstream / prompt:** 13 — audio (machine J)
 - **Branch:** `ws/audio`
 - **Crates / folders owned:** `crates/wp_audio`, `data/audio/`, `apps/testbed-web/src/audio/`
-- **Contract version built against:** 0.1.0 (codes toward the v0.2.0 plan: typed `PoliceEvent`,
-  `GlassShattered`)
+- **Contract version built against:** 0.2.0
 
 ## Exposes
 
@@ -48,11 +47,11 @@ tests. Check: `node apps/testbed-web/e2e/audio.mjs` (after the wasm build).
 
 | From | What | Why | Workaround now |
 |---|---|---|---|
-| E (06, police) | `PoliceEvent::Radio { unit, text, priority }` in the typed `PoliceEvent` (A-2) | scanner input | `AudioDirector::push_radio_line` + testbed buttons |
-| E (06) / G (08) | scanner tier query (A-3) | 3–10 s delay by tier | caller sets the tier (testbed panel, default Pro) |
+| E (06, police) | a priority on `PoliceEvent::Radio` (A-2, for v0.3.0's typed `PoliceEvent`) | scanner ordering / chop | **Radio lines are decoded now** (`wp_police::PoliceEvent::from_sim_event`); priority = Dispatch / Pursuit-while-pursuing / Routine heuristic |
+| E (06) / G (08) | which scanner tier the player owns (A-3) | tier delay | caller sets the tier; delays equal `data/police/tools.toml` `scanner_delay_s` (test-enforced) |
 | E (06) | police AI sets `VehicleInput::siren` (and a pattern, A-6) | sirens on AI units | testbed override per entity; `SirenMode::Auto` picks wail/yelp by speed |
 | Lead (`wp_sim`) | contacts while sliding (A-4) | scrape loops | scrapes play from the few events above 50 N·s; the sideswipe scenario keeps the expectation pending |
-| B (03) | `SimEvent::GlassShattered` (v0.2.0, B #1) | exact glass timing | glass inferred from lattice material at the contact, once per glass region |
+| B (03) | start emitting `GlassShattered` / `RegionDamaged` (v0.2.0) | exact glass timing, panel rattle | both handled; until B emits, glass is inferred from contacts and nothing rattles |
 | D (05) | traffic agents in a snapshot (`TrafficAgentSnapshot`, D #3) | traffic engine/tire sound | none: kinematic traffic is silent; physical traffic cars that are `Sim` vehicles are heard |
 | I (10) | add `wp_audio` to `lint-determinism::SIM_CRATES` | CI determinism lint | `tests/director.rs::passes_determinism_lint` runs the lint on this crate |
 | C (04) | keep the 3-line hook in `main.ts` when refactoring; maybe a layer toggle for the audio panel | — | — |
@@ -61,8 +60,8 @@ tests. Check: `node apps/testbed-web/e2e/audio.mjs` (after the wasm build).
 | # | Change (type / field / variant) | Why | Who is affected | Status |
 |---|---|---|---|---|
 | A-1 | `ContactImpulse::material_kind: MaterialKind` (+ `region: Option<BodyRegion>`), and on `SimEvent::Contact` `material_a/material_b: Option<MaterialKind>`, `region_a/region_b: Option<BodyRegion>` | collision layers by material (plastic crack vs steel dent vs glass) without every consumer repeating a lattice lookup; the damage model already knows the nodes it hit. `wp_audio::collision::MaterialMap` is the reference implementation `wp_sim` can reuse | lead (`wp_sim` fills), 03, 04 (contact layer colours), 07 (replicated event size) | requested |
-| A-2 | typed `PoliceEvent::Radio { unit: EntityId, text: String, priority: RadioPriority }` with `RadioPriority { Chatter, Routine, Dispatch, Pursuit, Urgent }` in contracts | scanner queue orders and chops by priority; captain UI can colour lines | 06, 13, 04, 07 | requested (fits the planned typed `PoliceEvent`) |
-| A-3 | `ScannerTier { None, Basic, Improved, Pro, Elite }` in contracts + a `wp_police` query `scanner_tier(racer)` (or economy-owned item) | the 3–10 s delay per tier (`audio_config.json` `scanner.tier_delay_s`) | 06, 08, 13 | requested |
+| A-2 | in v0.3.0's typed `PoliceEvent`: `Radio { unit, text, priority: RadioPriority }` with `RadioPriority { Chatter, Routine, Dispatch, Pursuit, Urgent }` (+ P's C9 line id) | scanner orders and chops by priority; captain UI can colour lines | 06, 13, 04, 07 | requested for v0.3.0 (Radio itself exists in `wp_police` and is consumed) |
+| A-3 | the player's scanner tier as data (economy gadget or `RacerView` field), tier index = `wp_police` scanner tier | tier delay per player | 06, 08, 13 | requested (delays already shared: audio config == `tools.toml`) |
 | A-4 | `SimEvent::Contact` emitted for every touching tick (or every net tick) regardless of `CONTACT_EVENT_MIN_IMPULSE_NS`, or a new `SimEvent::ContactSustained { a, b, point, slide_mps }` at 60 Hz | a 0.5 s sideswipe currently yields 3 events (`apps/simcli/scenarios/audio/sideswipe_scrape.ron`), so scrape loops cannot be sustained | lead (`wp_sim`), 10 (event counts in goldens), 07 (event volume — could stay local, not replicated) | requested |
 | A-5 | `VehicleState::throttle_applied: f32` (after TCS/launch control) and optionally `boost: f32` | engine load from the applied throttle (TCS cuts, rev-matching blips audible); real boost from the vehicle model instead of the audio estimate | 02, 07 | requested |
 | A-6 | `VehicleInput::siren_pattern: u8` (0 = auto, 1 wail, 2 yelp, 3 phaser, 4 hi-lo) | police players/AI choose patterns and it must replicate | 06, 07, 04 | requested |
@@ -78,7 +77,17 @@ tests. Check: `node apps/testbed-web/e2e/audio.mjs` (after the wasm build).
 - `apps/testbed-web/e2e/audio.mjs`: new audio end-to-end check (the existing `e2e/run.mjs` is
   unchanged and still passes).
 - `apps/simcli/scenarios/audio/sideswipe_scrape.ron`: new scenario (format v2) documenting
-  request A-4 (gating: approach speed + ≥ 1 contact; pending: sustained contacts).
+  request A-4 (gating: approach speed + ≥ 1 contact; pending: sustained contacts — 7 events on
+  v0.2.0 `main`), golden `apps/simcli/golden/audio_sideswipe_scrape/` (new, `[bless]` commit).
+- `wp_audio` now depends on `wp_police` (pure, wasm-clean) to decode `PoliceEvent` payloads.
+
+## v0.2.0 update (lead run 3)
+- Merged `main` (contract 0.2.0). New `SimEvent::GlassShattered` → glass one-shot at the region
+  (disables contact-inferred glass), `SimEvent::RegionDamaged` → `body/rattle` loop on damaged
+  outer panels. `PoliceEvent::Radio` / `PursuitStarted` / `PursuitEnded` / `SpikeHit` decoded
+  (`tire/burst`). Scanner tiers aligned with `wp_police` (Basic/Pro/Elite = 10/6/3 s).
+- No Lead feedback was filed for audio in run 3; STATUS's "integration doc; hook into testbed"
+  are both done (testbed hook landed in this branch).
 
 ## Perf numbers
 | Measurement | Machine | Native | Browser | Budget |

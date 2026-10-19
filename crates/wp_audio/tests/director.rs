@@ -426,3 +426,156 @@ fn passes_determinism_lint() {
         .collect();
     assert!(errors.is_empty(), "{}", errors.join("\n"));
 }
+
+#[test]
+fn scanner_delays_match_police_tools_toml() {
+    let text = std::fs::read_to_string(repo().join("data/police/tools.toml")).unwrap();
+    let v: toml::Value = toml::from_str(&text).unwrap();
+    let police: Vec<f32> = v["gadgets"]["scanner_delay_s"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|x| x.as_float().unwrap() as f32)
+        .collect();
+    assert_eq!(police, lib().config.scanner.tier_delay_s.to_vec(), "audio_config scanner.tier_delay_s must equal data/police/tools.toml gadgets.scanner_delay_s");
+}
+
+fn one_car_dir() -> (AudioDirector, VehicleState) {
+    let mut dir = AudioDirector::new(lib(), 5);
+    dir.register_car(&car("sentinel_cruiser"));
+    let s = VehicleState {
+        rot: [0.0, 0.0, 0.0, 1.0],
+        lin_vel: [0.0, 15.0, 0.0],
+        speed_mps: 15.0,
+        engine_rpm: 2500.0,
+        ..Default::default()
+    };
+    (dir, s)
+}
+
+fn step(
+    dir: &mut AudioDirector,
+    s: &VehicleState,
+    tick: u64,
+    events: &[SimEvent],
+) -> Vec<AudioCommand> {
+    let inputs = [VehicleAudioInput {
+        entity: EntityId(1),
+        car_id: "sentinel_cruiser",
+        state: s,
+        throttle: 0.3,
+        horn: false,
+        siren: false,
+        road_rumble: 0.5,
+    }];
+    dir.update(&AudioFrame {
+        tick,
+        listener: Listener::default(),
+        focus: Some(EntityId(1)),
+        vehicles: &inputs,
+        events,
+    })
+}
+
+fn plays(cmds: &[AudioCommand], cue_name: &str) -> usize {
+    cmds.iter()
+        .filter(|c| matches!(c, AudioCommand::Play { cue, .. } if cue == cue_name))
+        .count()
+}
+
+#[test]
+fn police_radio_events_reach_the_scanner_with_tier_delay() {
+    use wp_police::{PoliceEvent, UnitId};
+    let (mut dir, s) = one_car_dir();
+    dir.set_scanner_tier(ScannerTier::Pro); // 6 s
+    let ev = [
+        PoliceEvent::PursuitStarted {
+            racer: EntityId(1),
+            unit: Some(UnitId(4)),
+        }
+        .to_sim_event(),
+        PoliceEvent::Radio {
+            unit: Some(UnitId(4)),
+            text: "four in pursuit northbound".into(),
+        }
+        .to_sim_event(),
+    ];
+    step(&mut dir, &s, 0, &ev);
+    let mut said = Vec::new();
+    for f in 1..=400u64 {
+        for c in step(&mut dir, &s, f * 4, &[]) {
+            if let AudioCommand::RadioSay {
+                text,
+                priority,
+                unit,
+                ..
+            } = c
+            {
+                said.push((f * 4, text, priority, unit));
+            }
+        }
+    }
+    assert_eq!(said.len(), 1, "{said:?}");
+    let (t, text, priority, unit) = &said[0];
+    assert_eq!(*t, 6 * 240, "released exactly after the Pro delay");
+    assert_eq!(text, "four in pursuit northbound");
+    assert_eq!(
+        *priority,
+        RadioPriority::Pursuit,
+        "unit line during a pursuit"
+    );
+    assert_eq!(*unit, 4);
+}
+
+#[test]
+fn glass_event_shatters_once_and_disables_contact_inference() {
+    use wp_contracts::BodyRegion;
+    let (mut dir, s) = one_car_dir();
+    step(&mut dir, &s, 0, &[]);
+    let ev = SimEvent::GlassShattered {
+        vehicle: EntityId(1),
+        region: BodyRegion::Windshield,
+    };
+    let out = step(&mut dir, &s, 4, std::slice::from_ref(&ev));
+    assert_eq!(plays(&out, "impact/glass_shatter"), 1);
+    let out = step(&mut dir, &s, 8, std::slice::from_ref(&ev));
+    assert_eq!(
+        plays(&out, "impact/glass_shatter"),
+        0,
+        "same region shatters once"
+    );
+    // A hard hit on the (inferred) rear glass no longer shatters by itself.
+    let lattice_glass = SimEvent::Contact {
+        a: EntityId(1),
+        b: wp_contracts::WORLD_ENTITY,
+        point: [0.0, -2.0, 1.1],
+        normal: [0.0, -1.0, 0.0],
+        impulse_ns: 8000.0,
+        rel_speed: 15.0,
+    };
+    let out = step(&mut dir, &s, 200, &[lattice_glass]);
+    assert_eq!(plays(&out, "impact/glass_shatter"), 0);
+}
+
+#[test]
+fn spike_hit_bursts_and_panel_damage_rattles() {
+    use wp_contracts::BodyRegion;
+    use wp_police::PoliceEvent;
+    let (mut dir, s) = one_car_dir();
+    step(&mut dir, &s, 0, &[]);
+    let spikes = PoliceEvent::SpikeHit {
+        vehicle: EntityId(1),
+        wheels: [true, true, false, false],
+    }
+    .to_sim_event();
+    assert_eq!(plays(&step(&mut dir, &s, 4, &[spikes]), "tire/burst"), 2);
+    let dmg = SimEvent::RegionDamaged {
+        vehicle: EntityId(1),
+        region: BodyRegion::Hood,
+        severity: 0.7,
+    };
+    let out = step(&mut dir, &s, 8, &[dmg]);
+    // The rattle loop starts on the frame after the damage is known.
+    let out2 = step(&mut dir, &s, 12, &[]);
+    assert_eq!(plays(&out, "body/rattle") + plays(&out2, "body/rattle"), 1);
+}
