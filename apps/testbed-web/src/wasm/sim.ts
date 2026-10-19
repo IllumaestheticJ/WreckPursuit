@@ -145,6 +145,22 @@ export const sim = {
   /** Id of the session's city ("" on the flat world): data/city/<id>.greybox.glb. */
   cityId: (): string => wasm.city_id(),
   scenarioFromRon: (text: string): string => wasm.scenario_from_ron(text),
+  /** Weather selector choices `[id, label]` (wp_wasm::weather::CHOICES). */
+  weatherChoices: (): [string, string][] => JSON.parse(wasm.weather_choices()),
+  /** Scenario JSON with a selector choice's weather ("none", "clear", …, "dynamic"). */
+  scenarioWithWeather: (json: string, choice: string): string => wasm.scenario_with_weather(json, choice),
+  /** The selector choice matching a scenario's weather ("none", a choice id or "custom"). */
+  scenarioWeatherChoice: (json: string): string => wasm.scenario_weather_choice(json),
+  /** "Rainy night" city chase JSON (downpour, soaked road). */
+  cityChaseRainJson: (car: string, mode: string, cityId: string): string => wasm.city_chase_rain_json(car, mode, cityId),
+  /** Per-frame weather state (render/weather.ts WX offsets). */
+  weatherInfo: (): Float32Array => wasm.weather_info(),
+  /** Wetness grid placement [origin_x, origin_y, cell_m, nx, ny] (empty without weather). */
+  weatherGridMeta: (): Float32Array => wasm.weather_grid_meta(),
+  /** Wetness grid, 2 bytes per cell: wetness × 255, standing water mm × 40. ~1 Hz. */
+  weatherGrid: (): Uint8Array => wasm.weather_grid(),
+  /** Spray 0..1 per sim vehicle, same order as states(). */
+  weatherSpray: (): Float32Array => wasm.weather_spray(),
   scenarioWithSpeed: (json: string, mps: number): string => wasm.scenario_with_speed(json, mps),
   step: (dt: number): number => wasm.step(dt),
   setDamageMode: (mode: string): void => wasm.set_damage_mode(mode),

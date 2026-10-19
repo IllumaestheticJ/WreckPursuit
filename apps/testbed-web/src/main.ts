@@ -4,7 +4,7 @@
 // URL parameters (handy for automation): ?scenario=crash/head_on.ron&speed=60 runs a scenario,
 // ?bench=24 spawns a 24-car benchmark, ?cam=orbit picks a camera, ?replay=last plays the last
 // stored replay, ?city=procedural_12x12 picks the city (default vesper_v2), ?chase=1 starts the
-// city chase.
+// city chase (?chase=rain the rainy night), ?weather=heavy_rain picks the weather.
 import { loadWasm, sim, type DriverInput, type Scenario, type ScenarioResult } from "./wasm/sim";
 import { META_STRIDE, STATE_STRIDE, S, T, VEHICLE_KIND, W } from "./wasm/layout";
 import { installKeyboard, isHeld, readInput, toggleHeadlights, type InputSource } from "./input";
@@ -19,6 +19,7 @@ import { AudioSystem } from "./audio";
 import { UiOverlay } from "./ui/overlay";
 import { RunEndView } from "./ui/runEnd";
 import { RealTimeMeter } from "./rtf";
+import { WeatherView } from "./render/weather";
 
 // v2: canonical simcli replay.bin (v1 held the retired WPR\x01 format).
 const LAST_REPLAY_KEY = "wp.testbed.lastReplay.v2";
@@ -95,6 +96,15 @@ async function main(): Promise<void> {
     onOpen: () => ui.setBill(true),
     onClose: () => ui.setBill(false),
   });
+  const weather = new WeatherView(scene.scene, scene.renderer, overlay);
+  weather.attachMaterial(scene.groundMaterial);
+  scene.onCityLoaded = (root) => weather.attachCity(root);
+  const weatherSel = $("weather") as HTMLSelectElement;
+  for (const [id, label] of sim.weatherChoices()) weatherSel.add(new Option(label, id));
+  const weatherParam = params.get("weather");
+  if (weatherParam && [...weatherSel.options].some((o) => o.value === weatherParam)) weatherSel.value = weatherParam;
+  /** Scenario JSON with the selector's weather ("scenario" keeps the scenario's own). */
+  const withWeather = (json: string) => (weatherSel.value === "auto" ? json : sim.scenarioWithWeather(json, weatherSel.value));
   const citySel = $("city-map") as HTMLSelectElement;
   const cityParam = params.get("city");
   if (cityParam && CITY_IDS.includes(cityParam)) citySel.value = cityParam;
@@ -113,6 +123,7 @@ async function main(): Promise<void> {
     plots.clear();
     ui.reset();
     runEnd.reset();
+    weather.reset();
     syncViews();
     const ids = sim.entities();
     app.player = ids[0] ?? 1;
@@ -175,22 +186,26 @@ async function main(): Promise<void> {
     let json = city ? sim.freeDriveCityJson(car, mode, citySel.value) : sim.freeDriveJson(car, mode, false);
     // Optional start hour (automation: day/night screenshots).
     if (hour !== undefined) json = JSON.stringify({ ...JSON.parse(json), time_of_day_h: hour });
-    sim.init(1, json, false);
+    sim.init(1, withWeather(json), false);
     app.scenario = null;
     rebuildViews();
     applyAssistPreset(app.source);
   };
 
-  /** City chase preset: procedural city at 23:00, police + traffic, player already speeding. */
+  /** City chase preset: procedural city at 23:00, police + traffic, player already speeding.
+   * `rain` = the rainy-night variant (downpour, soaked road; the weather selector can still
+   * override it). */
   const startCityChase = (
     car = ($("car") as HTMLSelectElement).value || DEFAULT_CAR,
     mode = ($("mode") as HTMLSelectElement).value,
+    rain = false,
   ) => {
     app.scenarioFile = null;
     app.scenario = null;
     app.result = null;
     app.bench = null;
-    sim.init(0, sim.cityChaseCityJson(car, mode, citySel.value), false);
+    const json = rain ? sim.cityChaseRainJson(car, mode, citySel.value) : sim.cityChaseCityJson(car, mode, citySel.value);
+    sim.init(0, withWeather(json), false);
     rebuildViews();
     applyAssistPreset(app.source);
     // Back to the viewer's own angle (near chase unless they picked another one).
@@ -202,6 +217,7 @@ async function main(): Promise<void> {
     const sc = sim.scenario();
     const car = sc.entities[0]?.car;
     if (sc.name === "city_chase") startCityChase(car, sc.mode);
+    else if (sc.name === "city_chase_rainy_night") startCityChase(car, sc.mode, true);
     else startFreeDrive(car, sc.mode);
   };
 
@@ -212,7 +228,7 @@ async function main(): Promise<void> {
     app.scenarioFile = file;
     app.result = null;
     app.bench = null;
-    sim.init(0, json, true);
+    sim.init(0, withWeather(json), true);
     app.scenario = sim.scenario();
     rebuildViews();
   };
@@ -290,6 +306,17 @@ async function main(): Promise<void> {
   $("sc-run").onclick = () => scSel.value && runScenario(scSel.value, Number(($("sc-speed") as HTMLInputElement).value));
   $("sc-free").onclick = () => startFreeDrive();
   $("sc-chase").onclick = () => startCityChase();
+  $("sc-chase-rain").onclick = () => startCityChase(undefined, undefined, true);
+  /** Restart whatever is running with the selected weather (weather is part of the scenario,
+   * so replays carry it). */
+  weatherSel.onchange = () => {
+    if (isReplay()) return;
+    const name = sim.scenario()?.name;
+    if (app.scenarioFile) void runScenario(app.scenarioFile);
+    else if (name === "city_chase") startCityChase();
+    else if (name === "city_chase_rainy_night") startCityChase(undefined, undefined, true);
+    else startFreeDrive();
+  };
   ($("mode") as HTMLSelectElement).onchange = (e) => {
     // Live switch (Sim::set_mode_table), logged as a replay op; existing damage is kept.
     if (isReplay()) return void (($("mode") as HTMLSelectElement).value = modeName());
@@ -438,7 +465,7 @@ async function main(): Promise<void> {
     scSel.value = scParam;
     await runScenario(scParam, Number(params.get("speed") ?? 0));
   } else if (params.get("chase")) {
-    startCityChase("debug_sedan");
+    startCityChase("debug_sedan", undefined, params.get("chase") === "rain");
   } else {
     startFreeDrive(DEFAULT_CAR);
   }
@@ -520,7 +547,18 @@ async function main(): Promise<void> {
     scene.updateAgents(sim.trafficAgents(), physicalTraffic);
     scene.updatePoliceUnits(sim.policeUnits(), tS);
     const wi = sim.worldInfo();
-    scene.setTimeOfDay(wi[W.night]);
+    const wx = sim.weatherInfo();
+    scene.setTimeOfDay(wi[W.night], wx[0] > 0.5 ? wx[7] : 1);
+    weather.update(
+      app.paused && !replay ? 0 : dt,
+      rig.camera,
+      wx,
+      wi[W.night],
+      () => ({ meta: sim.weatherGridMeta(), bytes: sim.weatherGrid() }),
+      cur,
+      sim.weatherSpray(),
+      rig.mode === "hood" || rig.mode === "bumper" || rig.mode === "cockpit",
+    );
     scene.signals.update(sim.signalStates(), wi[W.night]);
 
     const focusView = app.views.get(app.focus) ?? null;
@@ -688,6 +726,12 @@ async function main(): Promise<void> {
     startFreeDrive,
     startCityChase,
     startBench,
+    weather,
+    /** Pick a weather choice and restart the session with it (automation, docs shots). */
+    setWeather: (choice: string) => {
+      weatherSel.value = choice;
+      weatherSel.dispatchEvent(new Event("change"));
+    },
     setCamera: (m: CameraMode, offset?: [number, number, number]) => rig.setMode(m, app.views.get(app.focus)?.root, offset),
     cameraModes: CAMERA_MODES,
     rig,

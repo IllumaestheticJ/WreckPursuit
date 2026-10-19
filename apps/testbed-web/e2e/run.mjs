@@ -6,6 +6,7 @@
 // recorded replay survives a page reload and re-simulates to the same hash with no drift,
 // crash scenarios run and report, the city (Port Vesper v2 by default, the old grid via the
 // selector) loads with traffic, signals (day/night, lamps change over time) and the city chase,
+// weather (e2e/weather.mjs: selector, rain, wet roads, spray, fog, wipers, rainy-night chase)
 // and (optionally) perf at 1/8/24 cars.
 import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -504,5 +505,15 @@ if (process.env.BENCH) {
 check(errors.length === 0, `no page errors${errors.length ? ": " + errors.slice(0, 3).join(" | ") : ""}`);
 await browser.close();
 stopServer();
+
+// 6. Weather (lead): selector, rain, wet roads, spray, fog, wipers, rainy-night chase, a rainy
+// replay verified by simcli (e2e/weather.mjs, its own server and browser).
+const wx = spawnSync("node", [join(here, "weather.mjs")], {
+  cwd: root,
+  encoding: "utf8",
+  env: { ...process.env, WEATHER_SHOTS: shots ? join(shots, "weather") : "" },
+});
+process.stdout.write(wx.stdout);
+check(wx.status === 0, `weather checks (e2e/weather.mjs)${wx.status === 0 ? "" : ": " + (wx.stderr || "").trim().split("\n").pop()}`);
 console.log(failures ? `${failures} check(s) failed` : "all checks passed");
 process.exit(failures ? 1 : 0);

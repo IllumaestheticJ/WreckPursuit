@@ -49,6 +49,10 @@ export class SceneView {
   private debugGrid!: THREE.GridHelper;
   /** Traffic signal heads and stop lines (signals_view.ts). */
   readonly signals = new SignalView();
+  /** The flat world's ground material (the weather view makes it wet-capable). */
+  readonly groundMaterial = new THREE.MeshStandardMaterial({ color: 0x3a3f44 });
+  /** Called once with each city's glTF scene when it has loaded (wet road materials). */
+  onCityLoaded: ((root: THREE.Object3D) => void) | null = null;
 
   constructor(parent: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
@@ -65,10 +69,7 @@ export class SceneView {
 
     this.world.rotation.x = -Math.PI / 2;
     this.scene.add(this.world);
-    const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(4000, 4000),
-      new THREE.MeshStandardMaterial({ color: 0x3a3f44 }),
-    );
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(4000, 4000), this.groundMaterial);
     // Below the city's zone ground (-0.05 m) and roads (0 m), so they never z-fight with it.
     ground.position.z = -0.2;
     this.world.add(ground);
@@ -128,6 +129,7 @@ export class SceneView {
         }
       });
       holder.add(gltf.scene);
+      this.onCityLoaded?.(gltf.scene);
     } catch (e) {
       console.warn("city greybox not available", cityId, e);
     }
@@ -201,11 +203,12 @@ export class SceneView {
     if (this.agentMesh.instanceColor) this.agentMesh.instanceColor.needsUpdate = true;
   }
 
-  /** Sky + light colour from the night factor (0 noon … 1 midnight). */
-  setTimeOfDay(night: number): void {
+  /** Sky + light colour from the night factor (0 noon … 1 midnight); `sunDimming` (weather
+   * clouds, 0..1, default 1) dims the sun and part of the sky light. */
+  setTimeOfDay(night: number, sunDimming = 1): void {
     (this.scene.background as THREE.Color).copy(DAY_SKY).lerp(NIGHT_SKY, night);
-    this.hemi.intensity = 2.0 * (1 - 0.8 * night);
-    this.sun.intensity = 1.5 * (1 - night);
+    this.hemi.intensity = 2.0 * (1 - 0.8 * night) * (0.55 + 0.45 * sunDimming);
+    this.sun.intensity = 1.5 * (1 - night) * sunDimming;
   }
 
   setBarriers(list: Barrier[]): void {
