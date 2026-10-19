@@ -1,8 +1,7 @@
 //! Pursuit → economy wiring against today's `wp_police` events.
 //!
-//! `police_signal` below is the adapter `wp_sim` / the server should use until contract v0.3.0
-//! types police events (copy it next to the event drain; afterwards it becomes a match on the
-//! typed contract event).
+//! `police_signal` below is the hand-written adapter from the typed contract `PoliceEvent`
+//! (v0.3.0); the test checks it agrees with `PoliceSignal::from_sim_event`.
 
 mod common;
 
@@ -26,7 +25,7 @@ fn police_signal(ev: &PoliceEvent) -> Option<PoliceSignal> {
                 level: *level,
             })
         }
-        PoliceEvent::PursuitEnded { racer, outcome } => Some(PoliceSignal::PursuitEnded {
+        PoliceEvent::PursuitEnded { racer, outcome, .. } => Some(PoliceSignal::PursuitEnded {
             racer: *racer,
             outcome: pursuit_end(*outcome),
         }),
@@ -82,10 +81,12 @@ fn police_capture_run(mode: DamageMode) -> (Option<wp_economy::PursuitResolution
         police.step(world, &[view], inputs, PHYSICS_DT, &mut out);
         for ev in &out {
             tracker.observe_sim_event(ev);
-            if let Some(sig) = PoliceEvent::from_sim_event(ev)
-                .as_ref()
-                .and_then(police_signal)
-            {
+            let decoded = match ev {
+                SimEvent::Police(p) => police_signal(p),
+                _ => None,
+            };
+            assert_eq!(decoded, PoliceSignal::from_sim_event(ev));
+            if let Some(sig) = decoded {
                 if let Some(r) = tracker.observe_police(&sig) {
                     resolution = Some(r);
                 }
