@@ -10,8 +10,10 @@
 #![warn(missing_docs)]
 
 mod physics;
+mod systems;
 
 pub use physics::PhysicsWorld;
+pub use systems::{SystemId, Systems};
 
 use thiserror::Error;
 use wp_contracts::{
@@ -77,6 +79,8 @@ pub struct Sim {
     police: PoliceSystem,
     vehicles: Vec<SimVehicle>,
     events: Vec<SimEvent>,
+    systems: Systems,
+    last_tick_events: usize,
 }
 
 impl Sim {
@@ -93,7 +97,22 @@ impl Sim {
             next_entity: 1,
             vehicles: Vec::new(),
             events: Vec::new(),
+            systems: Systems::ALL,
+            last_tick_events: 0,
         }
+    }
+
+    /// Choose which systems [`Sim::step_fixed`] runs (harness hook; default [`Systems::ALL`]).
+    /// A disabled system keeps its state frozen: a disabled vehicle system leaves every car where
+    /// it is, a disabled damage system feeds no contacts and pushes no handling effects, a
+    /// disabled world freezes the clock, a disabled police system sees nothing.
+    pub fn set_systems(&mut self, systems: Systems) {
+        self.systems = systems;
+    }
+
+    /// Systems currently stepped.
+    pub fn systems(&self) -> Systems {
+        self.systems
     }
 
     /// Spawn a car at world position `pos` with heading `yaw` (rad about +Z, 0 = +Y).
@@ -151,35 +170,45 @@ impl Sim {
     /// Run exactly one fixed physics tick.
     pub fn step_fixed(&mut self) {
         let dt = PHYSICS_DT;
+        let sys = self.systems;
         let mut out = Vec::new();
-        self.world.step(dt, &mut out);
-        for slot in &mut self.vehicles {
-            slot.vehicle
-                .step(&slot.input, &slot.assists, &self.world, dt, &mut out);
+        if sys.world {
+            self.world.step(dt, &mut out);
+        }
+        if sys.vehicle {
+            for slot in &mut self.vehicles {
+                slot.vehicle
+                    .step(&slot.input, &slot.assists, &self.world, dt, &mut out);
+            }
         }
         self.physics.step();
-        for slot in &mut self.vehicles {
-            // Contacts will come from Rapier manifolds once vehicles are rigid bodies.
-            slot.damage
-                .apply_contacts(&[], &self.config.mode, dt, &mut out);
-            let effects = slot.damage.handling_effects();
-            slot.vehicle.apply_damage_effects(&effects);
+        if sys.damage {
+            for slot in &mut self.vehicles {
+                // Contacts will come from Rapier manifolds once vehicles are rigid bodies.
+                slot.damage
+                    .apply_contacts(&[], &self.config.mode, dt, &mut out);
+                let effects = slot.damage.handling_effects();
+                slot.vehicle.apply_damage_effects(&effects);
+            }
         }
-        let racers: Vec<RacerView> = self
-            .vehicles
-            .iter()
-            .map(|v| {
-                let s = v.vehicle.state();
-                RacerView {
-                    entity: v.id,
-                    pos: s.pos,
-                    vel: s.lin_vel,
-                }
-            })
-            .collect();
-        let tick_events = out.clone();
-        self.police
-            .step(&self.world, &racers, &tick_events, dt, &mut out);
+        if sys.police {
+            let racers: Vec<RacerView> = self
+                .vehicles
+                .iter()
+                .map(|v| {
+                    let s = v.vehicle.state();
+                    RacerView {
+                        entity: v.id,
+                        pos: s.pos,
+                        vel: s.lin_vel,
+                    }
+                })
+                .collect();
+            let tick_events = out.clone();
+            self.police
+                .step(&self.world, &racers, &tick_events, dt, &mut out);
+        }
+        self.last_tick_events = out.len();
         self.events.extend(out);
         self.tick += 1;
     }
@@ -232,29 +261,83 @@ impl Sim {
         std::mem::take(&mut self.events)
     }
 
-    /// Stable hash of the simulation state: tick, then per vehicle in entity order the
-    /// quantised pose (0.1 mm / 1e-5), velocities (0.1 mm/s), rpm, gear and health.
+    /// Number of events emitted by the most recent [`Sim::step_fixed`] (harness hook: event
+    /// flood detection without draining).
+    pub fn last_tick_event_count(&self) -> usize {
+        self.last_tick_events
+    }
+
+    /// Damage-model node positions (chassis space) of a vehicle, indexed by node id.
+    pub fn node_positions(&self, id: EntityId) -> Result<&[[f32; 3]], SimError> {
+        self.vehicles
+            .iter()
+            .find(|v| v.id == id)
+            .map(|v| v.damage.node_positions())
+            .ok_or(SimError::UnknownEntity(id))
+    }
+
+    /// Stable hash of the whole simulation state (hash spec v1, see `docs/integration/harness.md`):
+    /// FNV-1a 64 over `HASH_SPEC_VERSION`, tick, in-game clock (1 ms), vehicle count, then every
+    /// [`Sim::entity_hashes`] value in ascending entity order.
     pub fn state_hash(&self) -> u64 {
         let mut h = StateHasher::new();
+        h.write_u32(HASH_SPEC_VERSION);
         h.write_u64(self.tick);
-        for (id, s) in self.vehicle_states() {
-            h.write_u32(id.0);
-            for v in s.pos {
-                h.write_f32_q(v, 1e4);
-            }
-            for v in s.rot {
-                h.write_f32_q(v, 1e5);
-            }
-            for v in s.lin_vel.iter().chain(s.ang_vel.iter()) {
-                h.write_f32_q(*v, 1e4);
-            }
-            h.write_f32_q(s.engine_rpm, 1.0);
-            h.write_i64(s.gear as i64);
-            h.write_f32_q(s.health, 1e4);
+        h.write_f32_q(self.world.clock.time.seconds_since_midnight, 1e3);
+        h.write_u32(self.vehicles.len() as u32);
+        for (_, eh) in self.entity_hashes() {
+            h.write_u64(eh);
         }
         h.finish()
     }
+
+    /// Per-vehicle state hashes in ascending entity order. Each is FNV-1a 64 over: entity id;
+    /// quantised pos (1e-4 m), rot (1e-5), linear and angular velocity (1e-4); rpm (1 rpm);
+    /// gear; health (1e-4); per wheel (FL, FR, RL, RR) omega (1e-3 rad/s), steer (1e-5 rad),
+    /// compression (1e-5 m), detached flag; node count and every damage node position (1e-4 m).
+    /// Used by the harness to name the entity that diverged first.
+    pub fn entity_hashes(&self) -> Vec<(EntityId, u64)> {
+        self.vehicles
+            .iter()
+            .map(|v| {
+                let mut s = v.vehicle.state();
+                s.health = v.damage.health();
+                let mut h = StateHasher::new();
+                h.write_u32(v.id.0);
+                for x in s.pos {
+                    h.write_f32_q(x, 1e4);
+                }
+                for x in s.rot {
+                    h.write_f32_q(x, 1e5);
+                }
+                for x in s.lin_vel.iter().chain(s.ang_vel.iter()) {
+                    h.write_f32_q(*x, 1e4);
+                }
+                h.write_f32_q(s.engine_rpm, 1.0);
+                h.write_i64(s.gear as i64);
+                h.write_f32_q(s.health, 1e4);
+                for w in &s.wheel_states {
+                    h.write_f32_q(w.omega, 1e3);
+                    h.write_f32_q(w.steer_rad, 1e5);
+                    h.write_f32_q(w.compression_m, 1e5);
+                    h.write_bytes(&[w.detached as u8]);
+                }
+                let nodes = v.damage.node_positions();
+                h.write_u32(nodes.len() as u32);
+                for n in nodes {
+                    for x in n {
+                        h.write_f32_q(*x, 1e4);
+                    }
+                }
+                (v.id, h.finish())
+            })
+            .collect()
+    }
 }
+
+/// Version of the [`Sim::state_hash`] layout. Bump when the hashed fields change; every golden
+/// must then be re-blessed.
+pub const HASH_SPEC_VERSION: u32 = 1;
 
 #[cfg(test)]
 mod tests {
@@ -293,6 +376,49 @@ mod tests {
     #[test]
     fn deterministic_hash() {
         assert_eq!(run(7).0, run(7).0);
+    }
+
+    #[test]
+    fn disabled_vehicle_system_freezes_cars() {
+        let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+        let mut sim = Sim::new(SimConfig {
+            seed: 1,
+            mode,
+            time_of_day: TimeOfDay::from_hours(12.0),
+            time_ratio: 10.0,
+        });
+        let id = sim.spawn_vehicle(&car, [0.0; 3], 0.0).unwrap();
+        sim.set_systems(Systems::parse("damage,world,police").unwrap());
+        let input = VehicleInput {
+            throttle: 1.0,
+            ..Default::default()
+        };
+        sim.set_input(id, input).unwrap();
+        for _ in 0..240 {
+            sim.step_fixed();
+        }
+        assert_eq!(sim.vehicle_states()[0].1.pos, [0.0; 3]);
+        assert_eq!(sim.last_tick_event_count(), 0);
+        assert_eq!(sim.entity_hashes().len(), 1);
+    }
+
+    #[test]
+    fn hash_changes_with_state() {
+        let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/arcade.toml")).unwrap();
+        let mut sim = Sim::new(SimConfig {
+            seed: 7,
+            mode,
+            time_of_day: TimeOfDay::from_hours(12.0),
+            time_ratio: 10.0,
+        });
+        sim.spawn_vehicle(&car, [0.0; 3], 0.0).unwrap();
+        let before = (sim.state_hash(), sim.entity_hashes()[0].1);
+        sim.reset_vehicle(EntityId(1)).unwrap();
+        assert_eq!(before, (sim.state_hash(), sim.entity_hashes()[0].1));
+        sim.step_fixed();
+        assert_ne!(before.0, sim.state_hash());
     }
 
     #[test]

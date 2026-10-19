@@ -1,15 +1,18 @@
-// Smoke test: RWD coupe holding half throttle and steady steer in Simulation mode.
+// Smoke: RWD coupe holding half throttle and steady steer at night in Simulation mode.
 (
     name: "smoke_coupe_circle",
-    car: "debug_coupe",
-    mode: Simulation,
     seed: 2,
-    duration_s: 8.0,
+    mode: Simulation,
     time_of_day_h: 23.0,
-    inputs: [
-        (t_s: 0.0, input: (throttle: 0.5, steer: 0.4)),
+    assists: gamepad,
+    entities: [
+        (id: "coupe", car: "debug_coupe", inputs: [(t_s: 0.0, input: (throttle: 0.5, steer: 0.4))]),
     ],
+    duration_s: 8.0,
     expect: [
-        (metric: "max_speed_mps", min: 5.0, max: 90.0),
+        metric(name: "max_speed_mps", min: 5.0, max: 90.0),
+        // The kinematic stub has no grip limit, so lateral g is high; prompt 02 tightens this.
+        max_lateral_g(min: 0.1, max: 10.0),
+        metric(name: "max_yaw_rate_rps", min: 0.0, max: 5.0),
     ],
 )

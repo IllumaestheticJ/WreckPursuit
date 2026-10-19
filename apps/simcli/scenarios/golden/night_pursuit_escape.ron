@@ -1,0 +1,31 @@
+// Golden "feel" case: night pursuit escape. 23:00 in the procedural city, a racer speeds past a
+// patrol car which starts a pursuit; the racer must break line of sight and escape (prompts
+// 05/06). Until the city and police land this runs on the flat world with warnings.
+(
+    name: "golden_night_pursuit_escape",
+    seed: 106,
+    city: procedural(seed: 7, blocks_x: 8, blocks_y: 8, block_m: 120.0),
+    time_of_day_h: 23.0,
+    mode: Arcade,
+    assists: keyboard,
+    police_presence: 1.0,
+    traffic_density: 0.3,
+    entities: [
+        (
+            id: "racer",
+            car: "debug_coupe",
+            driver: cruise(target_mps: 35.0),
+            inputs: [(t_s: 0.0, input: (headlights: true)), (t_s: 5.0, input: (headlights: false, steer: 0.4)), (t_s: 6.0, input: ())],
+        ),
+        (id: "patrol", car: "debug_sedan", pos: (8.0, 40.0, 0.0), inputs: [(t_s: 0.0, input: (headlights: true))]),
+    ],
+    duration_s: 12.0,
+    hash_every: 24,
+    expect: [
+        speed_at(entity: "racer", t_s: 6.0, min: 30.0, max: 40.0),
+    ],
+    expect_pending: [
+        pursuit_started_before(t_s: 4.0),
+        police_event_before(kind: 3, t_s: 12.0),
+    ],
+)

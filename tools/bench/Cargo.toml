@@ -1,0 +1,26 @@
+[package]
+name = "wp_bench"
+description = "Criterion benchmarks (sim, traffic, lattice, snapshots) and the perf gate that appends docs/PERF.md and fails on >20% regressions."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+wp_contracts.workspace = true
+wp_damage.workspace = true
+wp_net.workspace = true
+wp_sim.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "sim"
+harness = false
+
+[[bin]]
+name = "perf-gate"
+path = "src/bin/perf_gate.rs"

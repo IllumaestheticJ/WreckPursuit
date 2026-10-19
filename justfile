@@ -35,3 +35,39 @@ schemas:
 lattices:
     cargo run -p wp_damage --bin gen-box-lattice -- --id debug_sedan --width 1.80 --length 4.70 --height 1.45 --wheelbase 2.70 --mass 350 --out data/lattices/debug_sedan.json
     cargo run -p wp_damage --bin gen-box-lattice -- --id debug_coupe --width 1.85 --length 4.50 --height 1.32 --wheelbase 2.65 --mass 375 --out data/lattices/debug_coupe.json
+
+# --- Test harness (workstream 10, see docs/TESTING.md) ---
+
+# Run every scenario, write out/<scenario>/*, fail on expectations.
+scenarios:
+    cargo run --release -p simcli -- run apps/simcli/scenarios
+
+# Compare every scenario with its golden hashes / golden replay (diff report on failure).
+goldens:
+    cargo run --release -p simcli -- goldens
+
+# Regenerate all goldens after an intended physics change; commit with [bless] in the message.
+bless:
+    cargo run --release -p simcli -- goldens --bless
+
+# Determinism: twice in-process + fresh process, then native vs wasm32 under Node.
+determinism:
+    cargo run --release -p simcli -- determinism apps/simcli/scenarios
+    tools/wasm-determinism/compare.sh
+
+# Grep-based determinism lint over the simulation crates.
+lint-det:
+    cargo run -p lint-determinism
+
+# Random-input soak with invariant checks (default 5 minutes).
+fuzz minutes="5":
+    cargo run --release -p simcli -- fuzz --minutes {{minutes}}
+
+# Criterion benches, then append docs/PERF.md and gate against the local baseline.
+bench class="local":
+    cargo bench -p wp_bench
+    cargo run --release -p wp_bench --bin perf-gate -- check --class {{class}} --append docs/PERF.md
+
+# Everything CI runs for the harness, locally.
+ci: check lint-det determinism goldens
+    tools/ci/data_coverage.sh

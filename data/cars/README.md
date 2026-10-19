@@ -48,5 +48,30 @@ All units SI. Chassis space: origin at the middle of the wheelbase on the ground
 | `durability_class` | 1 (fragile) … 5 (battering ram) |
 
 ## Current files
+
+Debug cars (integration lead):
 - `debug_sedan.json` — 1400 kg FWD sedan, ≈150 kW (generic test car).
 - `debug_coupe.json` — 1500 kg RWD coupe, ≈300 kW, clutch LSD (generic test car).
+
+Roster (workstream 09). Each car has `<id>.json`, a spec sheet `<id>.spec.md` (every
+derivation written out) and a lattice `data/lattices/<id>.json`. All three are **generated**
+by `tools/specsheet/build_roster.py` from `tools/specsheet/roster_inputs.py` — edit the
+inputs, not the outputs. Overview table: `ROSTER.md`; validation: `VALIDATION.md`.
+
+| Id | Name | Class | Archetype (short) |
+|---|---|---|---|
+| `vireo_xs` | Vireo XS | Compact | late-90s FF 1.6 NA hot hatch — beater-tier hero |
+| `kestrel_ts` | Kestrel TS | Sport | mid-2000s FF 2.0 T sedan (AWD via mod) |
+| `shiro_turbo` | Shiro Turbo | Sport | early-2000s FR 2.0 T coupe, LSD |
+| `hakone_gt` | Hakone GT | Sport | 90s FR 3.0 TT grand tourer |
+| `rampart_50` | Rampart 5.0 | Muscle | 2010s 5.0 V8 muscle coupe |
+| `ironside_440` | Ironside 440 | Muscle | early-70s 7.2 L big-block, live axle, scary brakes |
+| `sperber_32` | Sperber 32 | Sport | 2000s FR 3.2 I6 sport sedan |
+| `lindwurm_4t` | Lindwurm 4T | Sport | 2010s AWD 2.0 T hot hatch, dual-clutch |
+| `lucciola_350` | Lucciola 350 | Exotic | 90s mid-engine 3.5 V8 |
+| `hauler_1500` | Hauler 1500 | Truck | 2010s half-ton 5.3 V8 pickup, ladder frame |
+| `sentinel_cruiser` | Sentinel Cruiser | PoliceCruiser | RWD 3.7 V6 police sedan, push bar |
+| `sentinel_wolfhound` | Sentinel Wolfhound | PoliceInterceptor | AWD 3.5 TT V6 pursuit sedan, push bar |
+| `sentinel_bastion` | Sentinel Bastion | PoliceSuv | RWD 5.3 V8 police SUV, ladder frame, push bar |
+
+Naming check: `python3 tools/specsheet/nameplate_check.py` (exit 1 on any hit).

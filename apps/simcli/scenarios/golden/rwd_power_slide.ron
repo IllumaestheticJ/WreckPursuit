@@ -1,0 +1,30 @@
+// Golden "feel" case: RWD power slide. Coupe at ~12 m/s, full lock and full throttle with no
+// assists: the rear should break away and hold a controllable slide (prompt 02).
+(
+    name: "golden_rwd_power_slide",
+    seed: 102,
+    mode: Arcade,
+    assists: off,
+    entities: [
+        (
+            id: "coupe",
+            car: "debug_coupe",
+            driver: cruise(target_mps: 12.0, until_s: 3.0),
+            inputs: [
+                (t_s: 0.0, input: ()),
+                (t_s: 3.0, input: (throttle: 1.0, steer: -1.0)),
+                (t_s: 4.5, input: (throttle: 0.7, steer: 0.4)),
+                (t_s: 7.0, input: ()),
+            ],
+        ),
+    ],
+    duration_s: 8.0,
+    hash_every: 24,
+    expect: [
+        speed_at(t_s: 2.9, min: 10.0, max: 14.0),
+    ],
+    expect_pending: [
+        max_lateral_g(min: 0.7, max: 1.4),
+        metric(name: "max_yaw_rate_rps", min: 0.8, max: 3.0),
+    ],
+)

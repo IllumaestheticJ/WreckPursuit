@@ -1,0 +1,23 @@
+// Golden "feel" case: T-bone. A coupe at 50 km/h (13.9 m/s) along +X hits the driver side of a
+// sedan crossing along +Y at 8 m/s. Needs rigid-body contacts + damage (prompts 02/03/12).
+(
+    name: "golden_tbone",
+    seed: 104,
+    mode: Arcade,
+    assists: ai,
+    entities: [
+        (id: "victim", car: "debug_sedan", pos: (0.0, -24.0, 0.0), driver: cruise(target_mps: 8.0)),
+        (id: "striker", car: "debug_coupe", pos: (-40.0, 0.0, 0.0), yaw: -1.5708, driver: cruise(target_mps: 13.9)),
+    ],
+    duration_s: 6.0,
+    hash_every: 24,
+    expect: [
+        speed_at(entity: "striker", t_s: 2.5, min: 12.0, max: 15.0),
+        speed_at(entity: "victim", t_s: 2.5, min: 7.0, max: 9.0),
+    ],
+    expect_pending: [
+        crush_depth(entity: "victim", min: 0.15, max: 0.6),
+        components_failed(entity: "victim", min: 1, max: 20),
+        total_loss(entity: "victim", expected: false),
+    ],
+)

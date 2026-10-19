@@ -1,0 +1,191 @@
+//! Data access for the runner: the same loading code path for the filesystem (native) and an
+//! in-memory bundle (WASM, where there is no filesystem).
+
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
+use wp_contracts::{DamageMode, LoadError, LoadedCar, ModeTable};
+
+use crate::RunError;
+
+/// Somewhere data files (`cars/x.json`, `modes/arcade.toml`, …) can be read from.
+pub trait DataSource {
+    /// Read a file by its path relative to the data root, using `/` separators.
+    fn read(&self, rel: &str) -> Result<String, RunError>;
+}
+
+/// A data root on disk (normally the repo's `data/`).
+#[derive(Debug, Clone)]
+pub struct FsData {
+    /// Root directory.
+    pub root: PathBuf,
+}
+
+impl FsData {
+    /// Data root at `root`.
+    pub fn new(root: impl Into<PathBuf>) -> Self {
+        Self { root: root.into() }
+    }
+}
+
+impl DataSource for FsData {
+    fn read(&self, rel: &str) -> Result<String, RunError> {
+        let path = self.root.join(rel);
+        std::fs::read_to_string(&path).map_err(|source| {
+            RunError::Load(LoadError::Io {
+                path: path.clone(),
+                source,
+            })
+        })
+    }
+}
+
+/// An in-memory data root: relative path → file text. Serialized as a JSON object for the WASM
+/// determinism runner.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct MemData {
+    /// Files by relative path.
+    pub files: BTreeMap<String, String>,
+}
+
+impl MemData {
+    /// Snapshot every `.json`/`.toml` file under `root` (recursively).
+    pub fn from_dir(root: &Path) -> Result<Self, RunError> {
+        fn walk(
+            root: &Path,
+            dir: &Path,
+            out: &mut BTreeMap<String, String>,
+        ) -> std::io::Result<()> {
+            for entry in std::fs::read_dir(dir)? {
+                let p = entry?.path();
+                if p.is_dir() {
+                    walk(root, &p, out)?;
+                } else if matches!(
+                    p.extension().and_then(|e| e.to_str()),
+                    Some("json" | "toml")
+                ) {
+                    let rel = p.strip_prefix(root).expect("under root");
+                    let rel = rel
+                        .components()
+                        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                        .collect::<Vec<_>>()
+                        .join("/");
+                    out.insert(rel, std::fs::read_to_string(&p)?);
+                }
+            }
+            Ok(())
+        }
+        let mut files = BTreeMap::new();
+        walk(root, root, &mut files).map_err(|source| {
+            RunError::Load(LoadError::Io {
+                path: root.to_path_buf(),
+                source,
+            })
+        })?;
+        Ok(Self { files })
+    }
+}
+
+impl DataSource for MemData {
+    fn read(&self, rel: &str) -> Result<String, RunError> {
+        self.files.get(rel).cloned().ok_or_else(|| {
+            RunError::Load(LoadError::Io {
+                path: PathBuf::from(rel),
+                source: std::io::Error::new(std::io::ErrorKind::NotFound, "not in data bundle"),
+            })
+        })
+    }
+}
+
+fn check_id(rel: &str, id: &str) -> Result<(), RunError> {
+    let stem = rel.rsplit('/').next().unwrap_or(rel);
+    let stem = stem.split('.').next().unwrap_or(stem);
+    if stem != id {
+        return Err(RunError::Load(LoadError::IdMismatch {
+            path: PathBuf::from(rel),
+            expected: stem.to_string(),
+            found: id.to_string(),
+        }));
+    }
+    Ok(())
+}
+
+/// Load a car and everything it references (tires, lattice, materials) through `src`, with the
+/// same validation as [`wp_contracts::load_car`].
+pub fn load_car(src: &dyn DataSource, car_id: &str) -> Result<LoadedCar, RunError> {
+    let rel = format!("cars/{car_id}.json");
+    let def = wp_contracts::parse_vehicle_def(&rel, &src.read(&rel)?)?;
+    check_id(&rel, &def.id)?;
+    let mut tires = BTreeMap::new();
+    for wheel in &def.wheels {
+        if !tires.contains_key(&wheel.tire_id) {
+            let rel = format!("tires/{}.json", wheel.tire_id);
+            let tire = wp_contracts::parse_tire_def(&rel, &src.read(&rel)?)?;
+            check_id(&rel, &tire.id)?;
+            tires.insert(tire.id.clone(), tire);
+        }
+    }
+    let rel = format!("lattices/{}.json", def.lattice_id);
+    let lattice = wp_contracts::parse_lattice_def(&rel, &src.read(&rel)?)?;
+    check_id(&rel, &lattice.id)?;
+    let mut materials = BTreeMap::new();
+    for beam in &lattice.beams {
+        if !materials.contains_key(&beam.material_id) {
+            let rel = format!("materials/{}.json", beam.material_id);
+            let mat = wp_contracts::parse_material_def(&rel, &src.read(&rel)?)?;
+            check_id(&rel, &mat.id)?;
+            materials.insert(mat.id.clone(), mat);
+        }
+    }
+    Ok(wp_contracts::resolve_car(
+        def,
+        &tires,
+        &[lattice],
+        &materials,
+    )?)
+}
+
+/// Load the mode table for a damage mode.
+pub fn load_mode(src: &dyn DataSource, mode: DamageMode) -> Result<ModeTable, RunError> {
+    let rel = match mode {
+        DamageMode::Arcade => "modes/arcade.toml",
+        DamageMode::Simulation => "modes/sim.toml",
+    };
+    Ok(wp_contracts::parse_mode_table(rel, &src.read(rel)?)?)
+}
+
+/// Car ids available under `cars/` in an on-disk data root, sorted.
+pub fn car_ids(root: &Path) -> Vec<String> {
+    let mut ids: Vec<String> = std::fs::read_dir(root.join("cars"))
+        .map(|rd| {
+            rd.filter_map(|e| e.ok().map(|e| e.path()))
+                .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("json"))
+                .filter_map(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned()))
+                .collect()
+        })
+        .unwrap_or_default();
+    ids.sort();
+    ids
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data")
+    }
+
+    #[test]
+    fn fs_and_memory_load_identically() {
+        let fs = FsData::new(root());
+        let mem = MemData::from_dir(&root()).unwrap();
+        let a = load_car(&fs, "debug_sedan").unwrap();
+        let b = load_car(&mem, "debug_sedan").unwrap();
+        assert_eq!(a.def, b.def);
+        assert_eq!(a.lattice, b.lattice);
+        let reference = wp_contracts::load_car(root().join("cars/debug_sedan.json")).unwrap();
+        assert_eq!(a.def, reference.def);
+        assert!(car_ids(&root()).contains(&"debug_coupe".to_string()));
+    }
+}

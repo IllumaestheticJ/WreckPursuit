@@ -1,6 +1,6 @@
 [package]
 name = "simcli"
-description = "Headless scenario runner: loads a .ron scenario, runs the sim, prints a state hash and summary stats."
+description = "Headless scenario runner: scenarios, determinism suite, golden hashes/replays, fuzz/soak."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,6 +8,8 @@ publish.workspace = true
 
 [dependencies]
 wp_contracts.workspace = true
+wp_math.workspace = true
+wp_net.workspace = true
 wp_sim.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -1,0 +1,32 @@
+// Golden "feel" case: FWD lift-off oversteer. Sedan cruises at 25 m/s, turns in, then lifts
+// completely mid-corner. With real tires (prompt 02) the rear should step out on lift-off.
+(
+    name: "golden_fwd_liftoff",
+    seed: 101,
+    mode: Arcade,
+    assists: off,
+    entities: [
+        (
+            id: "sedan",
+            car: "debug_sedan",
+            driver: cruise(target_mps: 25.0, until_s: 6.0),
+            inputs: [
+                (t_s: 0.0, input: ()),
+                (t_s: 4.0, input: (steer: 0.35)),
+                (t_s: 6.0, input: (steer: 0.35)),
+                (t_s: 8.0, input: ()),
+            ],
+        ),
+    ],
+    duration_s: 10.0,
+    hash_every: 24,
+    expect: [
+        speed_at(t_s: 3.9, min: 22.0, max: 28.0),
+        metric(name: "final_health", min: 1.0, max: 1.0),
+    ],
+    expect_pending: [
+        // Lift-off rotation: yaw rate should spike after 6 s (prompt 02).
+        metric(name: "max_yaw_rate_rps", min: 0.4, max: 2.0),
+        max_lateral_g(min: 0.6, max: 1.2),
+    ],
+)
