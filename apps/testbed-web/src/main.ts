@@ -4,7 +4,8 @@
 // URL parameters (handy for automation): ?scenario=crash/head_on.ron&speed=60 runs a scenario,
 // ?bench=24 spawns a 24-car benchmark, ?cam=orbit picks a camera, ?replay=last plays the last
 // stored replay, ?city=procedural_12x12 picks the city (default vesper_v2), ?chase=1 starts the
-// city chase (?chase=rain the rainy night), ?weather=heavy_rain picks the weather.
+// city chase (?chase=rain the rainy night), ?weather=heavy_rain picks the weather,
+// ?style=greybox|lowpoly the art style (default low-poly dark, render/style.ts).
 import { loadWasm, sim, type DriverInput, type Scenario, type ScenarioResult } from "./wasm/sim";
 import { META_STRIDE, STATE_STRIDE, S, T, VEHICLE_KIND, W } from "./wasm/layout";
 import { installKeyboard, isHeld, readInput, toggleHeadlights, type InputSource } from "./input";
@@ -24,6 +25,7 @@ import { downloadText, keepUnreadable, loadCareerText, saveCareerText, saveFileN
 import type { CareerApi, CareerView, RunKind } from "../../ui-kit/src/garage/types";
 import { RealTimeMeter } from "./rtf";
 import { WeatherView } from "./render/weather";
+import { ArtStyle, STYLE_LABELS, type StyleId } from "./render/style";
 
 // v2: canonical simcli replay.bin (v1 held the retired WPR\x01 format).
 const LAST_REPLAY_KEY = "wp.testbed.lastReplay.v2";
@@ -104,7 +106,23 @@ async function main(): Promise<void> {
   });
   const weather = new WeatherView(scene.scene, scene.renderer, overlay);
   weather.attachMaterial(scene.groundMaterial);
-  scene.onCityLoaded = (root) => weather.attachCity(root);
+  // Art style (machine S): low-poly dark by default; the selector / ?style= switch to greybox.
+  const STYLE_KEY = "wp.testbed.style.v1";
+  const styleSel = $("style") as HTMLSelectElement;
+  for (const [id, label] of Object.entries(STYLE_LABELS)) styleSel.add(new Option(label, id));
+  const styleParam = params.get("style") ?? store.get(STYLE_KEY);
+  const style = new ArtStyle(scene, styleParam === "greybox" ? "greybox" : "lowpoly");
+  styleSel.value = style.id;
+  const setStyle = (id: StyleId) => {
+    style.set(id);
+    styleSel.value = id;
+    store.set(STYLE_KEY, id);
+  };
+  styleSel.onchange = () => setStyle(styleSel.value as StyleId);
+  scene.onCityLoaded = (root, cityId) => {
+    weather.attachCity(root);
+    style.attachCity(root, cityId);
+  };
   const weatherSel = $("weather") as HTMLSelectElement;
   for (const [id, label] of sim.weatherChoices()) weatherSel.add(new Option(label, id));
   const weatherParam = params.get("weather");
@@ -715,6 +733,10 @@ async function main(): Promise<void> {
     );
     audio.update(rig.camera, events, app.paused && !replay ? 0 : dt, app.focus);
 
+    const inCity = wi[W.city] > 0.5;
+    const cityId = inCity ? sim.cityId() : null;
+    if (cityId) style.ensureCity(cityId, () => sim.mapStaticJson());
+    style.update(dt, wi[W.hours], wi[W.night], wx[0] > 0.5 ? wx[7] : 1, { on: wx[0] > 0.5, cloud: wx[6] }, rig.camera, cityId);
     const r0 = performance.now();
     scene.render(rig.camera);
     const r1 = performance.now();
@@ -867,6 +889,10 @@ async function main(): Promise<void> {
     startCityChase,
     startBench,
     weather,
+    /** Art style (render/style.ts): `style.id`, `style.baseFogDensity`, `style.lampCount(city)`. */
+    style,
+    /** Switch the art style ("greybox" | "lowpoly"; automation, docs shots). */
+    setStyle,
     /** Pick a weather choice and restart the session with it (automation, docs shots). */
     setWeather: (choice: string) => {
       weatherSel.value = choice;

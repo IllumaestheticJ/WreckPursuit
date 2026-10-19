@@ -31,8 +31,8 @@ export class SceneView {
   readonly renderer: THREE.WebGLRenderer;
   readonly scene = new THREE.Scene();
   readonly world = new THREE.Group();
-  private readonly hemi: THREE.HemisphereLight;
-  private readonly sun: THREE.DirectionalLight;
+  readonly hemi: THREE.HemisphereLight;
+  readonly sun: THREE.DirectionalLight;
   private readonly barriers = new THREE.Group();
   private readonly contacts: ContactMarker[] = [];
   /** Contact markers created since the page loaded (for automation). */
@@ -40,11 +40,15 @@ export class SceneView {
   private readonly intentGroup = new THREE.Group();
   private readonly cities = new Map<string, THREE.Object3D>();
   private readonly policeUnits: { obj: THREE.Group; red: THREE.MeshStandardMaterial; blue: THREE.MeshStandardMaterial }[] = [];
-  private readonly agentMesh = new THREE.InstancedMesh(
-    new THREE.BoxGeometry(1, 1, 1),
-    new THREE.MeshStandardMaterial({ color: 0xffffff }),
-    MAX_AGENTS,
-  );
+  /** Traffic agent boxes' material (render/style.ts recolours it). */
+  readonly agentMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff });
+  private readonly agentMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), this.agentMaterial, MAX_AGENTS);
+  /** Agent colour override (flags, agent index) → hex (art style); null = debug colours. */
+  agentColour: ((flags: number, index: number) => number) | null = null;
+  /** Light-bar glow multiplier for the non-vehicle police units (art style). */
+  policeGlow = 1;
+  /** Replaces renderer.render in render() (art style post stack); null = plain render. */
+  renderOverride: ((camera: THREE.Camera) => void) | null = null;
 
   private debugGrid!: THREE.GridHelper;
   /** Traffic signal heads and stop lines (signals_view.ts). */
@@ -52,7 +56,7 @@ export class SceneView {
   /** The flat world's ground material (the weather view makes it wet-capable). */
   readonly groundMaterial = new THREE.MeshStandardMaterial({ color: 0x3a3f44 });
   /** Called once with each city's glTF scene when it has loaded (wet road materials). */
-  onCityLoaded: ((root: THREE.Object3D) => void) | null = null;
+  onCityLoaded: ((root: THREE.Object3D, cityId: string) => void) | null = null;
 
   constructor(parent: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
@@ -129,7 +133,7 @@ export class SceneView {
         }
       });
       holder.add(gltf.scene);
-      this.onCityLoaded?.(gltf.scene);
+      this.onCityLoaded?.(gltf.scene, cityId);
     } catch (e) {
       console.warn("city greybox not available", cityId, e);
     }
@@ -167,6 +171,7 @@ export class SceneView {
       const phase = (timeS * 2.5 + i * 0.17) % 1;
       u.red.emissive.setHex(chasing && phase < 0.5 ? 0xff2040 : 0x000000);
       u.blue.emissive.setHex(chasing && phase >= 0.5 ? 0x2060ff : 0x000000);
+      u.red.emissiveIntensity = u.blue.emissiveIntensity = this.policeGlow;
     });
   }
 
@@ -188,8 +193,9 @@ export class SceneView {
       m.compose(new THREE.Vector3(agents[o], agents[o + 1], agents[o + 2] + 0.7), q, AGENT_SCALE);
       this.agentMesh.setMatrixAt(i, m);
       const flags = agents[o + 4];
-      const c =
-        flags & AGENT_FLAG.yielding
+      const c = this.agentColour
+        ? this.agentColour(flags, a)
+        : flags & AGENT_FLAG.yielding
           ? 0x3399ff
           : flags & AGENT_FLAG.brake
             ? 0xff5040
@@ -292,6 +298,7 @@ export class SceneView {
   }
 
   render(camera: THREE.Camera): void {
-    this.renderer.render(this.scene, camera);
+    if (this.renderOverride) this.renderOverride(camera);
+    else this.renderer.render(this.scene, camera);
   }
 }

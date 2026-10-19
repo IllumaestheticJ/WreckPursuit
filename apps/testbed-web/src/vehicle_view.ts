@@ -8,6 +8,8 @@ import { sim } from "./wasm/sim";
 import { layers } from "./settings";
 import { autoHullSkin, SkinnedBody, skinFromBinding } from "./skin";
 import { PanelBody } from "./render/panels";
+import { artStyle, makeHeadlightPool, vehiclePaint } from "./render/style";
+import { PALETTE } from "./render/palette";
 
 /** Newtons per metre of tire-force arrow. */
 const FORCE_SCALE = 1 / 4000;
@@ -77,11 +79,18 @@ export class VehicleView {
   /** Per-panel car mesh (workstream R, render/panels.ts); replaces box, lamps and tires once loaded. */
   readonly panels: PanelBody;
   private readonly lamps: THREE.Mesh[] = [];
+  /** Greybox paint (the colour the view was created with). */
+  private readonly greyPaint: THREE.Color;
+  /** Art-style version last applied (render/style.ts `artStyle`). */
+  private styleVersion = -1;
+  /** Headlight pool on the road ahead (low-poly dark at night). */
+  private readonly headPool: THREE.Mesh;
 
   constructor(readonly entity: number, colour: number) {
     this.info = sim.info(entity);
     const [w, l, h] = this.info.body_size_m;
     const police = this.info.kind === "Police";
+    this.greyPaint = new THREE.Color(colour);
 
     const bodyMat = new THREE.MeshStandardMaterial({ color: colour, transparent: true, opacity: 1, side: THREE.DoubleSide });
     this.box = new THREE.Mesh(new THREE.BoxGeometry(w, l, h * 0.9), bodyMat);
@@ -188,6 +197,13 @@ export class VehicleView {
       this.root.add(pivot);
       this.wheels.push({ pivot, spin, tire, material, angle: 0, fx, fy, susp });
     }
+
+    // Headlight pool: on the road just ahead of the front bumper.
+    const wheel0 = this.info.wheels[0];
+    this.headPool = makeHeadlightPool(w * 2.6, 18);
+    this.headPool.position.set(0, l / 2 - 0.2, wheel0 ? wheel0.position_m[2] - wheel0.radius_m + 0.04 : 0.04);
+    this.headPool.visible = false;
+    this.root.add(this.headPool);
 
     // Per-panel mesh: its wheel parts spin with the wheel groups above.
     this.panels = new PanelBody(entity, this.info.car_id, colour, this.headMat, this.tailMat);
@@ -360,9 +376,19 @@ export class VehicleView {
 
   /** Lights from `vehicle_meta()` flags; `timeS` drives the siren flash pattern. */
   setMeta(flags: number, timeS: number): void {
+    if (this.styleVersion !== artStyle.version) this.applyStyle();
+    const lowpoly = artStyle.lowpoly;
     const headlights = (flags & META_FLAG.headlights) !== 0;
+    const brake = (flags & META_FLAG.brake) !== 0;
     this.headMat.emissive.setHex(headlights ? 0xfff2c0 : 0x000000);
-    this.tailMat.emissive.setHex(flags & META_FLAG.brake ? 0xff1010 : headlights ? 0x400000 : 0x000000);
+    this.tailMat.emissive.setHex(brake ? 0xff1010 : headlights ? 0x400000 : 0x000000);
+    // Low-poly dark: HDR lamp glow so lit lenses reach the bloom pass (running tail lights at
+    // a quarter of the brake glow, which is already ×4 in the hex above).
+    this.headMat.emissiveIntensity = lowpoly ? PALETTE.headlightGlow : 1;
+    this.tailMat.emissiveIntensity = lowpoly ? PALETTE.brakeGlow : 1;
+    const pool = lowpoly && headlights && artStyle.night > 0.2;
+    this.headPool.visible = pool;
+    if (pool) (this.headPool.material as THREE.ShaderMaterial).uniforms.uStrength.value = 0.35 * Math.min(1, (artStyle.night - 0.2) * 2.5);
     if (!this.lightBar) return;
     const siren = (flags & META_FLAG.siren) !== 0;
     // Alternating red/blue at 2.5 Hz with a double strobe on each side.
@@ -372,8 +398,30 @@ export class VehicleView {
     const blueOn = siren && phase >= 0.5 && strobe;
     this.barRed!.emissive.setHex(redOn ? 0xff2040 : 0x000000);
     this.barBlue!.emissive.setHex(blueOn ? 0x2060ff : 0x000000);
+    // The brightest thing in the frame at night (palette.ts policeRedGlow / policeBlueGlow).
+    this.barRed!.emissiveIntensity = lowpoly ? PALETTE.policeRedGlow : 1;
+    this.barBlue!.emissiveIntensity = lowpoly ? PALETTE.policeBlueGlow : 1;
     this.sirenLight!.color.setHex(redOn ? 0xff2040 : 0x2060ff);
     this.sirenLight!.intensity = redOn || blueOn ? 25 : 0;
+  }
+
+  /** Re-colour for the current art style (paint, lamp lenses, light bar, flat shading). */
+  private applyStyle(): void {
+    this.styleVersion = artStyle.version;
+    const lowpoly = artStyle.lowpoly;
+    const kind = this.info.kind === "Police" ? "police" : this.info.kind === "Traffic" ? "traffic" : "player";
+    const paint = lowpoly ? new THREE.Color(vehiclePaint(kind, this.entity)) : this.greyPaint;
+    const bodyMat = this.box.material as THREE.MeshStandardMaterial;
+    bodyMat.color.copy(paint);
+    bodyMat.flatShading = lowpoly;
+    bodyMat.needsUpdate = true;
+    this.panels.applyStyle(lowpoly, paint);
+    this.headMat.color.setHex(lowpoly ? PALETTE.headlight : 0xfff6d0);
+    this.tailMat.color.setHex(lowpoly ? 0x5a1414 : 0x550000);
+    if (this.barRed && this.barBlue) {
+      this.barRed.color.setHex(lowpoly ? 0x5a1418 : 0x661018);
+      this.barBlue.color.setHex(lowpoly ? 0x141e5a : 0x102266);
+    }
   }
 
   dispose(): void {

@@ -14,6 +14,7 @@
 import * as THREE from "three";
 import * as wasm from "../wasm/pkg/wp_wasm.js";
 import { sim } from "../wasm/sim";
+import { PALETTE } from "./palette";
 
 /** Floats per panel in wasm `panel_states()` (mirrors crates/wp_wasm PANEL_STRIDE). */
 export const PANEL_STRIDE = 10;
@@ -195,6 +196,8 @@ export class PanelBody {
   private readonly spawned = new Set<number>();
   private readonly mats: Record<MeshPartJson["material"], THREE.Material>;
   private onReady: (() => void) | null = null;
+  /** Greybox material values, saved the first time a style is applied. */
+  private greyLook: Map<THREE.Material, { color: THREE.Color; roughness: number; metalness: number; opacity: number }> | null = null;
 
   constructor(
     readonly entity: number,
@@ -225,6 +228,43 @@ export class PanelBody {
   whenReady(fn: () => void): void {
     if (this.ready) fn();
     else this.onReady = fn;
+  }
+
+  /**
+   * Art style (render/style.ts): low-poly dark takes paint, glass, trim, tire, rim and interior
+   * colours from the palette and makes every part matte; greybox restores the values above.
+   * Head/tail lamps are the VehicleView's shared materials and are styled there.
+   */
+  applyStyle(lowpoly: boolean, paint: THREE.Color): void {
+    if (!this.greyLook) {
+      this.greyLook = new Map();
+      for (const [k, m] of Object.entries(this.mats)) {
+        if (!(m instanceof THREE.MeshStandardMaterial) || k === "headlight" || k === "taillight") continue;
+        this.greyLook.set(m, { color: m.color.clone(), roughness: m.roughness, metalness: m.metalness, opacity: m.opacity });
+      }
+      const b = this.brokenLamp as THREE.MeshStandardMaterial;
+      this.greyLook.set(b, { color: b.color.clone(), roughness: b.roughness, metalness: b.metalness, opacity: b.opacity });
+    }
+    const lp: Partial<Record<MeshPartJson["material"], number>> = {
+      glass: PALETTE.glass,
+      trim: PALETTE.trim,
+      rubber: PALETTE.tire,
+      metal: PALETTE.rim,
+      interior: PALETTE.interior,
+    };
+    for (const [k, m] of Object.entries(this.mats) as [MeshPartJson["material"], THREE.Material][]) {
+      const g = this.greyLook.get(m);
+      if (!g || !(m instanceof THREE.MeshStandardMaterial)) continue;
+      if (k === "paint") m.color.copy(lowpoly ? paint : g.color);
+      else m.color.copy(lowpoly && lp[k] !== undefined ? new THREE.Color(lp[k]) : g.color);
+      m.roughness = lowpoly ? (k === "glass" ? 0.35 : 0.85) : g.roughness;
+      m.metalness = lowpoly ? (k === "paint" ? 0.15 : 0) : g.metalness;
+      // Low-poly glass is darker and less see-through (picker: near-opaque blue-black).
+      if (k === "glass") m.opacity = lowpoly ? 0.82 : g.opacity;
+    }
+    const b = this.brokenLamp as THREE.MeshStandardMaterial;
+    const bg = this.greyLook.get(b)!;
+    b.color.copy(lowpoly ? new THREE.Color(PALETTE.brokenLight) : bg.color);
   }
 
   /** Paint material (livery colour). */
