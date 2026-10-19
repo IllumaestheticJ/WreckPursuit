@@ -302,9 +302,11 @@ fn left_front_hit_bends_left_front_corner_only() {
     );
     let far = e.camber_delta[fr].abs() + e.toe_delta[fr].abs();
     let near = e.camber_delta[fl].abs() + e.toe_delta[fl].abs();
+    // The rail bracing carries a front-axle side hit across the subframe, so the far wheel
+    // toes a little too — but much less than the struck one.
     assert!(
-        far < 0.3 * near,
-        "far corner barely moves: near {near} far {far} {e:?}"
+        far < 0.5 * near,
+        "far corner moves much less: near {near} far {far} {e:?}"
     );
     assert!(e.grip_scale[fl] < e.grip_scale[fr]);
 }

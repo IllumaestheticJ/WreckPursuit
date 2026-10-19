@@ -39,7 +39,8 @@
     "blowoff_min_boost": 0.45,
     "pop_rate_per_s": 1.5,
     "pop_min_redline_frac": 0.55,
-    "forced_induction_gain": 0.22
+    "forced_induction_gain": 0.22,
+    "traffic_gain": 0.6
   },
   "tires": {
     "slip_ratio_peak": 0.1,

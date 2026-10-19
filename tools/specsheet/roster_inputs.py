@@ -767,8 +767,8 @@ CARS = [
             why="Class-typical 2010s 3.5 TT V6 (~78 kW/L), boost plateau from 2500 rpm per fleet spec-class data and owner dynos.",
         ),
         trans=dict(
-            desc="6-speed automatic with torque converter, on-demand AWD (90 % front until the fronts slip 5 %, then up to 50 % rear), open diffs",
-            layout=("AwdOnDemand", 0.90, 0.50, 0.05),
+            desc="6-speed automatic with torque converter, on-demand AWD tuned for launches (90 % front until the fronts slip 2 %, then up to 50 % rear), open diffs",
+            layout=("AwdOnDemand", 0.90, 0.50, 0.02),
             gears=[4.48, 2.87, 1.84, 1.41, 1.00, 0.74], final=3.16, reverse=2.88, shift=0.30,
             torque_converter=dict(stall_rpm=2600, ratio=1.9, coupling_rpm=3000),
             diff_f="Open", diff_r="Open", clutch_factor=1.6,

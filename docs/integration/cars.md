@@ -5,6 +5,16 @@
 - **Crates / folders owned:** `data/cars/` (roster files), `data/lattices/` (roster car files, not the generator), `tools/specsheet/`
 - **Contract version built against:** 0.2.0
 
+## Update after lead run 4
+
+- Re-measured on A's torque converter and stateful on-demand coupling. Converter slip costs the
+  automatics ≈ 0.2 s where traction is not the limit (Wolfhound 6.38 → 6.57 s, measured with and
+  without), and helps where it is (Hauler 9.45 → 8.98 s, Cruiser 8.61 → 8.36 s, now in band).
+  Wolfhound coupling now engages at 2 % front slip (was 5 %): 6.47 s, back in its band.
+- B changed `DEFAULT_SECTIONS.cross_member` (0.15e-4 → 0.06e-4); `build_roster.py`'s `SEC` mirror
+  updated so the era adjustment still finds the cabin cross-members (see the coupling note in Needs).
+  Lattices regenerated on B's current `gen-lattice`; barrier sweep still 109/112 (03's two-box rear).
+
 ## Response to contract v0.2.0 (lead run 3)
 
 | v0.2.0 item for 09 | Done |
@@ -183,3 +193,12 @@ Contract requests (decisions; implemented together in v0.2.0 unless noted):
 - Machine B's `gen-lattice` is merged (profiles, eras, crumple rows, pillars). B asks you to regenerate
   every roster lattice with it (profile, real mass, `--strength` for durability class) and drop the
   hand adjustments it now covers — see `crates/wp_damage/README.md`.
+
+
+## Lead feedback (round 6b, 2026-10-19) — head-start tasks
+
+Contract **v0.3.0** is being applied in parallel by the lead (branch `lead/contract-v0.3.0`). Do not edit `wp_contracts`; build your work so it drops onto v0.3.0 (inherent methods / local types now, trait wiring after). Merge `origin/claude/laughing-newton-0xqr6q` (the lead branch, ahead of `main` until today's gate finishes) before starting. Goal of the project right now: the **single-player greybox demo**: drive in the city, raise heat, get chased by physical police, escape or get caught, and pay the repair bill.
+
+1. Police cruiser (`sentinel_cruiser`) pursuit tuning: it must catch every street car in the city at heat 3+ on straights within reason, and survive about 3 rams in Arcade. It has a push-bar accessory (front lattice stiffer).
+2. Traffic variety: add 3 cheap civilian analog cars (hatch, van, pickup) with lattices, for traffic and parked cars. Analog names only, per `data/cars/README.md`. Validate them as usual.
+3. `gen-lattice` regeneration pass; fold the hand adjustments back into the generator where possible.

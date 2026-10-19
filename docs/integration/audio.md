@@ -49,10 +49,10 @@ tests. Check: `node apps/testbed-web/e2e/audio.mjs` (after the wasm build).
 |---|---|---|---|
 | E (06, police) | a priority on `PoliceEvent::Radio` (A-2, for v0.3.0's typed `PoliceEvent`) | scanner ordering / chop | **Radio lines are decoded now** (`wp_police::PoliceEvent::from_sim_event`); priority = Dispatch / Pursuit-while-pursuing / Routine heuristic |
 | E (06) / G (08) | which scanner tier the player owns (A-3) | tier delay | caller sets the tier; delays equal `data/police/tools.toml` `scanner_delay_s` (test-enforced) |
-| E (06) | police AI sets `VehicleInput::siren` (and a pattern, A-6) | sirens on AI units | testbed override per entity; `SirenMode::Auto` picks wail/yelp by speed |
+| Lead (run 5) / E (06) | police units as sim vehicles with `VehicleKind::Police` and `VehicleInput::siren` from the unit's command (pattern: A-6) | sirens on AI units | ready: the bridge reads each sim vehicle's own input + kind; `DriverKind::Police` makes any car siren-capable (Auto) |
 | Lead (`wp_sim`) | contacts while sliding (A-4) | scrape loops | scrapes play from the few events above 50 N·s; the sideswipe scenario keeps the expectation pending |
 | B (03) | start emitting `GlassShattered` / `RegionDamaged` (v0.2.0) | exact glass timing, panel rattle | both handled; until B emits, glass is inferred from contacts and nothing rattles |
-| D (05) | traffic agents in a snapshot (`TrafficAgentSnapshot`, D #3) | traffic engine/tire sound | none: kinematic traffic is silent; physical traffic cars that are `Sim` vehicles are heard |
+| D (05) | traffic agents in a snapshot (`TrafficAgentSnapshot`, D #3) | far (kinematic) traffic sound | near-player physical traffic (`VehicleKind::Traffic` sim vehicles) is heard at `engine.traffic_gain` and Low priority; kinematic agents stay silent |
 | I (10) | add `wp_audio` to `lint-determinism::SIM_CRATES` | CI determinism lint | `tests/director.rs::passes_determinism_lint` runs the lint on this crate |
 | C (04) | keep the 3-line hook in `main.ts` when refactoring; maybe a layer toggle for the audio panel | — | — |
 
@@ -88,6 +88,17 @@ tests. Check: `node apps/testbed-web/e2e/audio.mjs` (after the wasm build).
   (`tire/burst`). Scanner tiers aligned with `wp_police` (Basic/Pro/Elite = 10/6/3 s).
 - No Lead feedback was filed for audio in run 3; STATUS's "integration doc; hook into testbed"
   are both done (testbed hook landed in this branch).
+
+## Run 4/5 follow-up (police units + physical traffic)
+- `VehicleAudioInput::kind: DriverKind { Player, AiRacer, Police, Traffic }` (mirrors
+  `wp_sim::VehicleKind`). Police → siren fitted on any car (default `Auto`), driven by the
+  vehicle's `VehicleInput::siren`. Traffic → engine × `engine.traffic_gain` (0.6), Low priority
+  so traffic loses voices before racers and police.
+- wasm bridge (`crates/wp_wasm/src/audio.rs`) now reads throttle/horn/siren from each
+  `wp_sim::SimVehicle::input` (not the session's player input) plus `SimVehicle::kind`, and
+  registers cars the session did not spawn (police / traffic) from embedded data
+  (`wp_wasm::data::load_car`); an unknown car is skipped instead of failing the whole frame.
+- Police radio: already decoded from `SimEvent::PoliceEvent` (`Radio`, pursuits, `SpikeHit`).
 
 ## Perf numbers
 | Measurement | Machine | Native | Browser | Budget |

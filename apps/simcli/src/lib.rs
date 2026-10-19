@@ -10,6 +10,7 @@
 //! - [`determinism`]: in-process repeat checks (the fresh-process and WASM checks drive the
 //!   binary and `tools/wasm-determinism`).
 //! - [`fuzz`]: random-input/random-collision soak with invariant checks.
+//! - [`net`]: snapshot round trip on `wp_net`'s wire codec.
 //! - [`data`]: one loading code path for disk and in-memory (WASM) data.
 //!
 //! Nothing in here reads the wall clock; the CLI owns time limits.
@@ -20,6 +21,7 @@ pub mod data;
 pub mod determinism;
 pub mod fuzz;
 pub mod golden;
+pub mod net;
 pub mod output;
 pub mod replay;
 pub mod run;

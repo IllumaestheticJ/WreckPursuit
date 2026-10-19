@@ -30,6 +30,66 @@ session token, gets a fresh join token for the same instance and connects again 
 verifies it like any join). Keep listing connected players in heartbeats — that keeps their
 reconnect tokens alive (10 min after they vanish).
 
+### Server hookup (for F — `apps/server` / `wp_net`; meta does not edit these)
+
+Decided with the lead (run 4): meta ships an opt-in hook, F wires it. The hook is
+`wp_meta::instance` and is tested against the real service in `apps/meta/tests/hook.rs`, which plays
+the server's side step by step and is the reference for the wiring.
+
+| Item | Use |
+|---|---|
+| `MetaLinkConfig::from_env(mode, slots, default_address) -> Option<Result<..>>` | `None` when `WP_META_URL` is unset → **run standalone exactly as today**. Also reads `WP_META_INSTANCE_KEY` (required with the URL), `WP_META_INSTANCE_NAME`, `WP_META_REGION`, `WP_META_CITY`, `WP_META_BRACKET`, `WP_META_PUBLIC_ADDRESS` |
+| `MetaWorker::start(&cfg)` | registers (blocking, once at startup; fail loudly) and starts a background thread |
+| `worker.set_presence(HeartbeatRequest { population, players, draining, tick_ms })` | never blocks; the worker heartbeats on its own every 5 s with the latest presence |
+| `worker.send(MetaRequest::…)` | never blocks: `VerifyJoin { tag, join_token }`, `LoadAccount`, `Commit`, `Race`, `Pursuit`, `Territory` |
+| `worker.poll() -> Vec<MetaReply>` | drain once per tick: `Joined`, `AccountLoaded`, `Committed`, `Heartbeat` (kicks, flags), `RaceReported`, … |
+| `worker.shutdown()` | finishes queued work, deregisters |
+| `instance::ticks_to_ms(ticks)` | race times for `RaceEntry::finish_time_ms` |
+| `MetaLink` | the same calls, blocking (tools, tests) |
+
+Steps, keyed to F's current code:
+
+1. **Startup** (`apps/server` `run` / `AppConfig`): `if let Some(cfg) = MetaLinkConfig::from_env(mode,
+   slots, &public_ws_url)` → `MetaWorker::start(&cfg?)`. `slots` from `ServerConfig::max_players`
+   and `RoleConfig` (`racer`, `police_chase`, `police_captain` ≤ 1, `spectator`). Add `wp_meta` as a
+   dependency of `apps/server` only (native; never reachable from `wp_wasm`).
+2. **Handshake** (`Server::receive`, `ClientMsg::Hello` arm): with the hook on, a new player
+   (`reconnect_token == 0`) must present a meta join token. Needs **MC-6** (below): `Hello` gains
+   `join_token: String`. Instead of calling `join` directly, park the connection and
+   `send(VerifyJoin { tag: conn, join_token })`; on `MetaReply::Joined { tag: conn, result }`:
+   `Ok(v)` → `join(conn, v.display_name, assists)`, remember `PlayerId → v.account_id`, start the
+   player in `v.role` (`RoleManager`), keep `v.party_id` members' spawns together, and send
+   `v.reconnect_token` to the client (MC-6: `Welcome` gains `meta_reconnect_token: String`);
+   `Err(e)` → `ServerMsg::Reject { reason: e.to_string() }`. Hook off → today's path unchanged.
+   F's own u64 in-window reattach (`reconnect_token != 0`) stays as is; the meta reconnect token
+   is for after that window (client calls `POST /v1/matchmaking/reconnect`, gets a new join token).
+3. **Presence** (on join, `disconnect`, role change; or once per second): `set_presence` with
+   per-role population from `RoleManager` and `players` = meta account ids of **connected**
+   players. Listing players matters: a verified join holds its matchmaking seat until a
+   heartbeat lists it (that is the overbooking fix).
+4. **Heartbeat replies**: for each `MetaReply::Heartbeat(Ok(h))`: `h.kicks` → find the player by
+   account id, send `Reject { reason }`, drop the connection (no reconnect window); store `h.flags`
+   (e.g. `illegal_day_race_frequency` for 15's race scheduler). `Err` → log; the worker retries next
+   beat (3 missed = meta marks the instance down and re-queues unclaimed seats).
+5. **Accounts** (`Server::account`, `credit`, `accounts: InMemoryStore`): keep the in-memory store as
+   the tick-time cache, keyed `PlayerId(account_id)` until MC-1 lands. On `Joined` send
+   `LoadAccount { account }`; on `AccountLoaded` put it in the cache. After each economy operation
+   (`settle_race`, capture consequences, … — NET-N7) commit locally **and**
+   `send(Commit { account, events })`. `Committed` with code `seq_conflict` → reload and redo.
+   Today's `credit()` commits with no events; with meta on, switch to the `wp_economy` calls so
+   the events exist (meta's archive is the audit log).
+6. **Race results** (`RaceEvent::Finished`): after the economy commits, `send(Race(RaceReport {
+   report_key: format!("{instance_id}-{race}"), route_id, race_type, mode, bracket, entries }))`
+   with one `RaceEntry { account_id, position: place, finish_time_ms: Some(ticks_to_ms(time_ticks))
+   (None for DNF, position 0), clean }` per racer. `clean` = `wp_economy::RaceResult::is_clean()`
+   (no contacts, no non-speeding violations): F's race layer needs to track contacts/violations per
+   racer (not a contract change). Resending after an error is safe (`report_key` dedupes).
+7. **Pursuits** (when E's capture/escape events reach the server): `send(Pursuit(PursuitReport {
+   report_key, racer_id, max_wanted: WantedLevel, bounty, outcome, captured_by, assists }))` with
+   meta account ids.
+8. **Territory** (when D/15 decide district control): `send(Territory(TerritoryReport { .. }))`.
+9. **Shutdown**: `set_presence(.. draining: true ..)` to stop new matches, then `worker.shutdown()`.
+
 ### For clients (testbed / UI, workstreams 04 / 16)
 Signup/login → session token; `GET /v1/me`, `/v1/me/economy`, `/v1/me/events?from_seq=`;
 parties (`POST /v1/parties`, `/v1/parties/{id}/join {code}`); `POST /v1/matchmaking/queue
@@ -46,7 +106,7 @@ in-process `AccountStore` over the meta DB.
 
 | From | What | Workaround now |
 |---|---|---|
-| F (07, net) | handshake carries the meta `join_token`; server calls verify + heartbeat + `RemoteAccountStore`, reports race/pursuit results | `tests/common/mod.rs::FakeInstance` shows the exact sequence; `meta-cli smoke` exercises it against a deployment |
+| F (07, net) | wire the hook: "Server hookup" steps 1–9 above; MC-6 protocol fields; per-racer `clean` tracking in races | `apps/meta/tests/hook.rs` plays the server side against the real service; `meta-cli smoke` checks a deployment |
 | F / lead | per-instance `PlayerId` vs durable id (MC-1) | meta's `account_id` is used as `PlayerId` for economy accounts |
 | E (06, police) | capture/escape events with the capturing cop's identity | instances fill `PursuitReport` themselves |
 | 15 (race events) | which `race_type` ids exist; route ids | free strings; `time_attack` special-cased |
@@ -57,6 +117,7 @@ in-process `AccountStore` over the meta DB.
 | MC-1 | `AccountId(u32)` in `wp_contracts::ids` — the durable identity allocated by meta (signup), distinct from the per-instance `PlayerId` slot. `wp_economy::PlayerAccount::player` and `EconomyEvent::player` become `AccountId`; the server keeps a `PlayerId → AccountId` map from join verification. Same as F's NET-5 (accepted for v0.2.0) — this names meta as the allocator. | accounts, cop rank, leaderboards must survive instances; today `PlayerId(account_id)` is overloaded | lead, G (08), F (07) | accepted as NET-5, not in v0.2.0 applied — waiting; meta keeps `PlayerId(account_id)` |
 | MC-2 | Typed `RaceEvent` (race finished: route, type, mode, bracket, per-racer position / time / clean) next to the planned typed `PoliceEvent` / `EconomyEvent` | the prompt asks for an append-only `RaceEvent` archive; today meta defines `wp_meta::api::RaceReport` itself. With a contract type, `apps/server` emits it once and meta archives it as-is | lead, 15, F, meta | proposed — not in v0.2.0; please add to the v0.3.0 batch with typed `EconomyEvent` |
 | MC-3 | `WantedLevel` in contracts (already accepted, G #5) — meta would then use it in `PursuitReport` instead of `u8` | one wanted scale everywhere | E, F, G, meta | **done** — `PursuitReport.max_wanted` is `wp_contracts::WantedLevel` since v0.2.0 (JSON `"None"`, `"L1"`..`"L5"`) |
+| MC-6 | Net protocol (v0.3.0 batch, F's list): `ClientMsg::Hello` gains `join_token: String` (empty = none; required for new players when the server runs with meta) and `ServerMsg::Welcome` gains `meta_reconnect_token: String` (empty when meta is off) | step 2 of the server hookup: the server must check the matchmaking join token before admitting a player, and hand the client the token for rejoining after the in-window reattach expires | F (protocol + client), C/04 (testbed client), meta | proposed — for F's v0.3.0 protocol list; wp_net untouched by meta |
 | MC-4 | `ClassBracket` (`D, C, B, A, S`) or a doc note that bracket names are `data/economy/market.toml` `class_index.brackets[].name` | matchmaking, instances and race reports exchange brackets as strings | G, F, meta | proposed (low priority) |
 | MC-5 | `DistrictId` (G #6, deferred to 05) — territory uses `district_id: String` until then | crews/territory | D, G, meta | waiting |
 
@@ -107,3 +168,21 @@ in-process `AccountStore` over the meta DB.
   this merge.
 - v0.2.0: switched `PursuitReport.max_wanted` to `wp_contracts::WantedLevel` (MC-3). Nothing else
   in v0.2.0 touches `apps/meta`.
+
+### Response (machine O, lead run 4 follow-up)
+- Server hookup: per the lead, meta-side only. Added `wp_meta::instance` (`MetaLinkConfig`,
+  `MetaLink`, non-blocking `MetaWorker`) + `tests/hook.rs`, and the "Server hookup" steps for F
+  above. `apps/server` and `wp_net` are untouched; the protocol fields are requested as MC-6.
+- The bots test: the run-3 failure predates the seat-hold fix (lead confirmed). One confirming
+  full-workspace run on the run-4 `main` merge (`cargo test --workspace`, all crates in
+  parallel): all 94 test binaries pass, `twenty_bots_signup_matchmake_results_leaderboard` and
+  `server_hook_end_to_end` included; fmt, clippy `-D warnings`, wasm build clean.
+
+
+## Lead feedback (round 6b, 2026-10-19) — head-start tasks
+
+Contract **v0.3.0** is being applied in parallel by the lead (branch `lead/contract-v0.3.0`). Do not edit `wp_contracts`; build your work so it drops onto v0.3.0 (inherent methods / local types now, trait wiring after). Merge `origin/claude/laughing-newton-0xqr6q` (the lead branch, ahead of `main` until today's gate finishes) before starting. Goal of the project right now: the **single-player greybox demo**: drive in the city, raise heat, get chased by physical police, escape or get caught, and pay the repair bill.
+
+1. Fix the flaky `twenty_bots_…` heartbeat test under load (root cause, not retries).
+2. CORS (same-origin proxy or `tower-http` CORS) so the browser testbed can call meta. Add a small `docs` example.
+3. Use the stored clean rating in matchmaking (skill brackets).

@@ -72,7 +72,11 @@ function repoFiles(): Plugin {
 
 export default defineConfig({
   plugins: [repoFiles()],
-  server: { port: 5173 },
+  // UI-kit overlays (apps/ui-kit, Preact): JSX, one preact copy (from this package), and the dev
+  // server may serve ../ui-kit and the data/ files the kit imports.
+  esbuild: { jsx: "automatic", jsxImportSource: "preact" },
+  resolve: { dedupe: ["preact"] },
+  server: { port: 5173, fs: { allow: [repo] } },
   preview: { port: 4173 },
   build: {
     target: "es2022",

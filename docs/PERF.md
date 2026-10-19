@@ -76,3 +76,20 @@ stubs and these numbers only prove the harness works.
 | `sim_only/8` | 36.87 µs | 0.0184 ms/car/frame | 0.40 ms/car (vehicle 0.15 + lattice 0.25) | -26.1% |
 | `snapshot/decode_24` | 52.94 µs | 0.0529 ms/snapshot | — | -18.8% |
 | `snapshot/encode_24` | 40.17 µs | 0.0402 ms/snapshot | — | -15.9% |
+
+## 2026-10-19 — `867d9b5` @ claude-cloud
+
+- runner class: `claude-cloud`
+- cpu: Intel(R) Xeon(R) Processor @ 2.10GHz (4 logical cores), linux-x86_64
+- rustc 1.97.0 (2d8144b78 2026-07-07)
+
+| bench | median / iter | per frame (60 Hz) | budget (native) | vs baseline |
+|---|---|---|---|---|
+| `city/24v_400traffic` | 562.46 µs | 2.2498 ms/frame | 11.6 ms (24 × 0.40 + traffic 2.0) | +43.6% |
+| `lattice/solver_8_contacts` | 168.72 µs | 0.6749 ms/car/frame | 0.25 ms/car | +16.0% |
+| `sim_only/1` | 8.72 µs | 0.0349 ms/car/frame | 0.40 ms/car (vehicle 0.15 + lattice 0.25) | +38.2% |
+| `sim_only/24` | 418.41 µs | 0.0697 ms/car/frame | 0.40 ms/car (vehicle 0.15 + lattice 0.25) | +9.4% |
+| `sim_only/64` | 3.25 ms | 0.2034 ms/car/frame | 0.40 ms/car (vehicle 0.15 + lattice 0.25) | +17.6% |
+| `sim_only/8` | 47.18 µs | 0.0236 ms/car/frame | 0.40 ms/car (vehicle 0.15 + lattice 0.25) | +28.0% |
+| `snapshot/decode_24` | 1.59 µs | 0.0016 ms/snapshot | — | -97.0% |
+| `snapshot/encode_24` | 3.27 µs | 0.0033 ms/snapshot | — | -91.9% |
