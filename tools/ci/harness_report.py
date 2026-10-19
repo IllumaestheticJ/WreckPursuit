@@ -120,7 +120,7 @@ def main():
     missing = sum(1 for r in rows if r[3] is None)
     print("## Harness report\n")
     print(f"### Ignored tests ({len(rows)}, {missing} without a reason)\n")
-    print("Run one with `cargo test -p <crate> --release -- --ignored <name>`.\n")
+    print("Run one with `cargo test -p <crate> --release -- --ignored <name>`. Doc-test code blocks marked ` ```ignore ` are examples, not parked tests, and are not listed.\n")
     print("| Crate | Test | Reason | Where |")
     print("|---|---|---|---|")
     for path, line, test, reason, doc in rows:

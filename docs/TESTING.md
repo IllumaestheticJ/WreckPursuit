@@ -13,6 +13,7 @@ How every workstream proves its work with the shared harness (workstream 10). Sh
 | `ci.yml` → `determinism-lint` | `f64`, libm transcendentals, `HashMap`, wall clock, threads or unseeded RNG in sim crates |
 | `ci.yml` → `determinism` | a scenario whose hashes differ between two in-process runs, a fresh process, or **native vs wasm32** (Node) |
 | `ci.yml` → `goldens` | a scenario whose `hashes.txt` or golden replay differs from `apps/simcli/golden/` (prints first divergent tick, entity, magnitude) |
+| `ci.yml` → `harness-report` | never fails; writes to the job summary every `#[ignore]`d test with its reason (bare `#[ignore]` flagged "no reason given") and every release-only scenario (`soak/`, `slow: true`). Locally: `just report` |
 | `ci.yml` → `bless-guard` (PRs) | golden or perf-baseline files changed without a `[bless]` commit |
 | `ci.yml` → `fuzz` | any invariant break in 1 minute of random scenarios |
 | `contract-guard.yml` (PRs) | `crates/wp_contracts/` or `schemas/` changed without a `CONTRACT_VERSION` bump and a `## v<version>` entry in `docs/CONTRACT_CHANGELOG.md` |
@@ -25,7 +26,10 @@ Run it all locally with `just ci` (or the individual `just` recipes below).
 1. Pick a folder under `apps/simcli/scenarios/` (`vehicle/`, `damage/`, `world/`, `police/`, …;
    `golden/` is reserved for the "feel" library, see below; anything that simulates more than
    ~20 s of a full city goes in `soak/`, or sets `slow: true` if it belongs in another folder;
-   debug `cargo test` skips both and the release CI jobs run them). File name = what it tests.
+   debug `cargo test` skips both and the release CI jobs run them, including expectations, in
+   `goldens`). File name = what it tests.
+   Parking a Rust test? Use `#[ignore = "<who> (<round>): why, and what un-ignores it"]`, never a
+   bare `#[ignore]`: the harness report lists the reason in CI so parked tests stay visible.
 2. Write it (format: `apps/simcli/SCENARIOS.md`). Rules:
    - **Ranges, not exact numbers** (`speed_at(t_s: 5.0, min: 20.0, max: 24.0)`). Exact behaviour
      is already pinned by the golden hash; the ranges say what is *physically right*.
