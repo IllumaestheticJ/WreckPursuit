@@ -228,7 +228,11 @@ Merged `origin/main` (step 2 start, clean). All three items:
    - Police/traffic replication needed no fix beyond the baseline deadlock: all kinds agree
      exactly with the server.
 
-Checks (step 2): see the end of this section once run.
+Checks (step 2): `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`
+clean; `cargo test --workspace` 787 passed, 0 failed, 15 ignored (the parked tests; goldens
+unchanged); wasm build passes (no tokio / tungstenite / rusqlite / wp_meta in `wp_wasm`'s
+tree); testbed `tsc --noEmit` clean; `just web-e2e` all checks passed; `just web-e2e-net`
+all checks passed; `vesper_e2e` passes in debug (42 s) and release (30 s).
 
 ## Response to lead feedback (round 8)
 Merged `origin/main` (contract v0.3.0, clean). Item 1 — the v0.3.0 net items, all in
