@@ -218,7 +218,7 @@ await shot("city_chase.png");
 check(
   chase.hour >= 23 && chase.status !== null && chase.panel !== null && chase.panels === 1 && chase.violations,
   `city chase: ${chase.hour.toFixed(2)} h, one heat panel (${chase.panels}) "${chase.panel}", heat ${chase.status?.heat.toFixed(2)}, ` +
-    `${chase.police} police vehicles + ${chase.units} other units, speeding violations in the feed`,
+    `${chase.police} police vehicles + ${chase.units} other units, speeding violations in the feed: ${chase.violations}`,
 );
 await page.evaluate(() => {
   document.getElementById("city").checked = false;
