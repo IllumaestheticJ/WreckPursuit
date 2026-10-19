@@ -5,6 +5,7 @@
 // Prints one PASS/FAIL line per check and exits non-zero on failure.
 import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
@@ -12,7 +13,7 @@ import { chromium } from "playwright-core";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = 5197;
 const URL = `http://localhost:${PORT}/`;
-const [out = join(root, "playtest-shots"), size = "1400x860"] = process.argv.slice(2);
+const [out = join(tmpdir(), "wp-playtest"), size = "1400x860"] = process.argv.slice(2);
 const [W, H] = size.split("x").map(Number);
 mkdirSync(out, { recursive: true });
 
