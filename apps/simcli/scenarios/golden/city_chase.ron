@@ -1,11 +1,13 @@
-// Golden "feel" case: city chase. 23:00 in the 12×12 procedural city with traffic, parked cars
-// and police patrols (wp_police on the city's road graph). The racer does 22 m/s (79 km/h, the
-// collector's limit is 48 km/h) south down the x = 55 collector, coming up behind the patrol
-// unit that starts there. Speeding in front of a patrol builds heat (witness range 70 m at
-// night), and keeping the racer within recognition range (40 m for 4 s at night) starts a
-// pursuit, which must happen within 20 s. No starting heat: this is a plain speeder.
-// If police spawning changes and no patrol starts on this street, re-aim the racer
-// (`apps/simcli/examples/probe_police.rs` prints unit positions).
+// Golden "feel" case: city chase. 23:00 in the 12×12 procedural city with physical traffic and
+// police cars (wp_police on the city graph, units driven as real vehicles since lead run 5).
+// A known speeder (starting heat 15 = wanted level L1, e.g. from an earlier report) does
+// 16.5 m/s (59 km/h; the collector's limit is 48 km/h) north up the outer lane of the x = 55
+// collector, alongside the patrol that starts near (55, 33) and pulls away north before
+// turning west at y ≈ 57. At night a pursuit needs a unit to keep the racer within 40 m for
+// 4 s, so the racer has to reach that patrol before it turns.
+// The pursuit must start within 20 s (it starts at 4.8 s). Re-aimed in harness run 6: every
+// start from y = -40 to y = 25 at 16-18 m/s pursues in 4-7 s with no damage. If police
+// spawning changes, re-aim with `examples/probe_police.rs`.
 (
     name: "golden_city_chase",
     seed: 108,
@@ -21,21 +23,17 @@
         (
             id: "racer",
             car: "debug_coupe",
-            pos: (53.25, 40.0, 0.0),
-            yaw: 3.14159,
-            speed_mps: 22.0,
-            driver: cruise(target_mps: 22.0),
+            pos: (59.75, -20.0, 0.0),
+            speed_mps: 16.5,
+            police_heat: 15.0,
+            driver: cruise(target_mps: 16.5),
             inputs: [(t_s: 0.0, input: (headlights: true))],
         ),
     ],
     duration_s: 20.0,
     hash_every: 24,
-    // Lead run 6: police cars are physical now and the racer starts 5 m behind a stopped patrol
-    // car, so it rear-ends it at 22 m/s. Checks are pending until I re-aims the run (lane offset
-    // or longer approach) and E's units avoid obstacles.
-    expect: [],
-    expect_pending: [
-        speed_at(entity: "racer", t_s: 2.0, min: 20.0, max: 24.0),
+    expect: [
+        speed_at(entity: "racer", t_s: 2.0, min: 15.0, max: 18.0),
         event_count(event: "TrafficViolation", entity: "racer", min: 1, max: 100000),
         world_metric(name: "police_units_max", min: 1.0, max: 100.0),
         pursuit_started_before(t_s: 20.0),

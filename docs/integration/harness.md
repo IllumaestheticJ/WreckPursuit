@@ -132,6 +132,75 @@ Cloud container, Intel Xeon @ 2.10 GHz, 4 cores, release, real vehicle + damage 
 - The lint is line-based: it can miss a transcendental called through a function pointer or a
   macro, and it stops at the first `#[cfg(test)]` in a file.
 
+## Run 6 — response to lead feedback round 6 (2026-10-19)
+
+Merged `main` and the lead branch (run 6 + round 6/6b docs) into `ws/harness`. The lead's
+round 6 was written against the pre-5b harness, so items 1 and 2 overlapped with run 5b:
+
+1. **`build_sim` police order** — already `set_world` first, then `set_police` (run 5b). Merge
+   conflict resolved to the lead's version: `police_cars: false` now means presence 0 with heat
+   and wanted levels kept (run 5b used `PoliceSystem::new()`). `smoke/city_opt_out` still passes
+   (0 units).
+2. **`golden_city_chase` re-aimed (again) and checks back in `expect`.** Run 5b's aim (outer
+   northbound lane of x = 55 from y = −100) no longer pursues after the run-6 merges: unit 1 now
+   starts near (55, 33), pulls away north and turns west at y ≈ 57 by 5 s, before the racer
+   arrives. The racer now starts at (59.75, −20), 16.5 m/s, `police_heat: 15`: pursuit at
+   4.8 s, no damage. Robustness sweep with seed 108: every start from y = −40 to y = 25 at
+   16 / 16.5 / 18 m/s passes (pursuit 4.0–6.9 s, health ≥ 0.95); y = −60 is too late; 15 m/s
+   is under the violation threshold (no `TrafficViolation`). Other seeds spawn patrols
+   elsewhere and are not expected to pass (this golden is aimed at seed 108's layout).
+   Re-blessed (`[bless]`, only this golden changed; every other golden matched the lead's).
+3. **`soak/traffic_soak_observer`** keeps `police_cars: false`. E's obstacle awareness is not on
+   `main` yet; flip it back to `true` when it lands.
+
+Not done / blocked:
+- **W-7 (weather scenario field, request from K).** The spec in `weather.md` step 1b calls
+  `Sim::set_weather`, which does not exist in `wp_sim` yet (needs W-1, after v0.3.0). The
+  parser half is small and ready to add with it; `wet_brake_100_0.ron.pending` stays pending.
+- Test-build speed is the lead helper's (`lead/test-speed`); nothing changed here for it.
+- **For the lead / 08:** `cargo test --workspace` fails one test outside my crates,
+  `wp_economy` `tests/pursuit_wiring.rs::real_police_capture_settles_through_the_economy`
+  (line 130, "level at capture, not after the reset": the `PursuitEnded` resolution reports
+  `WantedLevel::None`). Fails alone too. It comes in with the lead branch (my `crates/` diff
+  against it is one doc comment in `wp_sim`); likely the run-6 police changes resetting the
+  level before the capture event is read. Not fixed here (not my crate).
+- **For the lead / race workstream:** `wp_race` `tests/simcli_races.rs::city_sprint_on_real_roads`
+  panics at line 28 (`index out of bounds: the len is 2 but the index is 2`). The tick hook
+  enumerates `v.sim.vehicle_states()`, which since lead run 5 also holds the city's police and
+  traffic cars, and indexes `sc.entities[i]` with it. Scenario entities get the lowest ids, so
+  the one-line fix in the hook is `.iter().take(sc.entities.len())` before `.enumerate()`
+  (or filter by the ids, as `simcli::run::scenario_states` does). Not fixed here (not my crate).
+  Every other test in the workspace passes (`cargo test --workspace --no-fail-fast`).
+
+Checks: `cargo fmt`, `cargo clippy --workspace -D warnings`, `cargo test --workspace` (two upstream failures, below),
+`simcli run apps/simcli/scenarios` (35/35 pass), `simcli goldens` (all match), wasm build of
+`wp_wasm`.
+
+## Run 5b — lead run 5 merged (2026-10-19)
+
+- **Reconciled with the lead's police/traffic vehicles.** `Sim::set_world` now builds police
+  itself, so simcli calls `set_police(police_for_city(..))` *after* `set_world`. That carries
+  `police_presence` and `police_heat`. With neither set it builds exactly what `set_world`
+  does (same seed salt, mode and driving), so default goldens match the lead's. My duplicate
+  `Sim::police()` was dropped in favour of `police_link.rs`'s. The opt-outs gate run 5's cars:
+  `police_cars: false` → `PoliceSystem::new()` and no `set_police_car`; `traffic_cars: false` →
+  no `set_traffic_car`.
+- **`golden_city_chase` re-aimed.** With real police cars, the racer rear-ended the patrol it
+  was aimed at. It now passes in the outer northbound lane at 16.5 m/s, as a known speeder
+  (`police_heat: 15`, L1). Pursuit starts at 6.7 s, no damage. All 12 nearby lane/speed/start
+  variants pursue in 5–9 s. Without starting heat a clean pass is never recognised at
+  night: heat only builds once the patrol has witnessed the speeding.
+- **Debug test time.** After run 5, `cargo test -p simcli` passed the 1 h mark: the three
+  `opponent/` races (90–330 s in a full city, now with physical police and traffic) take
+  190–300+ s each in a debug build, and the suite runs each scenario about 5 times. New
+  scenario flag `slow: true`: debug `cargo test` skips it, like `soak/`. I set it on the three
+  opponent scenarios (one line each, for workstream 17). The release CI jobs still run them.
+- **For the lead (run-5 police driver):** unit 1 (starts at (55, −21) on the x = 55 collector)
+  drives a slow circle about 14 m across at 3.8 m/s around (40, −17) for 12+ s instead of
+  patrolling (`examples/probe_police.rs` on `golden_city_chase` with the racer moved away shows
+  it). The loop cuts into the southbound lanes, which is where my racer kept hitting it. It
+  looks like `unit_input` steering never converging on its target.
+
 ## Run 5 — city chase, opt-outs, F's codec (2026-10-19)
 
 - **Police in cities.** `wp_sim` gained `Sim::set_police(PoliceSystem)` / `Sim::police()`

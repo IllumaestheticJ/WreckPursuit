@@ -46,6 +46,11 @@ pub struct Scenario {
     /// counts (1 = default, 0 = no patrols); `None` = 1. Needs a city.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub police_presence: Option<f32>,
+    /// Expensive to simulate (minutes of a full city): debug `cargo test` skips it, as it skips
+    /// `scenarios/soak/`; the release CI jobs (`simcli goldens`, `simcli determinism`, the
+    /// wasm compare) still run it.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub slow: bool,
     /// Systems to step (`"vehicle,damage,world,police,net"`); `None` = all. `--systems` overrides.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub systems: Option<String>,
@@ -77,6 +82,10 @@ fn yes() -> bool {
 
 fn is_true(v: &bool) -> bool {
     *v
+}
+
+fn is_false(v: &bool) -> bool {
+    !*v
 }
 
 fn is_zero(v: &f32) -> bool {

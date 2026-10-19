@@ -57,11 +57,10 @@ recording on the cloud container (Xeon 2.1 GHz). Fuzz: ≈ 20 simulated seconds 
 
 ## Known gaps
 
-- Police units are `wp_police`'s internal kinematic cars (no physics bodies), so PIT/ramming
-  and spike strips don't touch the player's physics yet. The spike-strip golden runs on the
-  flat world (no police), and the night-pursuit golden's racer passes its "patrol" (a plain
-  parked car) too fast to be recognised. Both keep their police targets in `expect_pending`.
-  `golden_city_chase` is the working pursuit golden.
+- The spike-strip golden runs on the flat world (no police), and the night-pursuit golden's
+  "patrol" is a plain parked car, so both keep their police targets in `expect_pending`.
+  `golden_city_chase` is the working pursuit golden. It is aimed at the patrol that starts on
+  its street; re-aim it with `examples/probe_police.rs` if police spawning changes.
 - `follow_route` and `ai_driver` warn and fall back. Traffic in scenarios is kinematic.
 - `pursuit_started_before` uses a provisional police kind code (`PURSUIT_STARTED_KIND = 1`)
   until the typed `PoliceEvent` (contract v0.2.0) lands.

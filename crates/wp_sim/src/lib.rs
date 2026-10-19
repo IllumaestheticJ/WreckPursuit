@@ -254,9 +254,9 @@ impl Sim {
         self.rebuild_police();
     }
 
-    /// Replace the police system, e.g. `PoliceSystem::for_world(cfg, &world, setup)` so units
-    /// patrol the city's road graph (the default `PoliceSystem::new()` has no road network and
-    /// therefore no units). Call before the first tick so replays match.
+    /// Replace the police system built by [`Sim::set_world`], e.g. with scaled patrol tables or
+    /// starting heat (`PoliceSystem::for_world(cfg, self.world(), setup)`). Call after
+    /// `set_world` (which rebuilds police) and before the first tick so replays match.
     pub fn set_police(&mut self, police: PoliceSystem) {
         self.police = police;
     }

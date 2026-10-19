@@ -24,6 +24,7 @@ Parsing uses RON with `implicit_some`, so optional fields are written plainly
     traffic_cars: true,              // moving civilian traffic (default true)
     parked_cars: true,               // parked cars along parking lanes, as physics bodies (default true)
     police_cars: true,               // AI police units patrolling the city (default true)
+    slow: false,                     // true = minutes of a full city: debug `cargo test` skips it (release CI runs it)
     systems: "vehicle,damage,world", // optional; default all. --systems overrides. "net" adds the snapshot round trip
     barriers: [(pos: (0.0, 20.0, 0.75), size: (8.0, 1.0, 1.5), yaw: 0.0)],  // static boxes (rigid walls)
     entities: [ … ],                 // spawn order = entity id order (1, 2, 3, …); may be empty
@@ -48,8 +49,10 @@ With a city, the world is seeded from the scenario `seed`, parked cars become ph
 traffic is pre-populated around the spawned cars (or the whole city when `entities: []`), and
 civilian-collision diagnostics are on so `world_metric(name: "civilian_collisions", …)` works.
 
-Police: with a city, `wp_police` runs on the city's road graph (units drive with
-`wp_police`'s built-in kinematic driver; they are not physics bodies yet). Patrol counts come
+Police: with a city, `wp_police` runs on the city's road graph and every AI ground unit is a
+real police car (`sentinel_cruiser`, kind `Police`); near-player traffic is physical too
+(`debug_sedan`, kind `Traffic`). Metrics and expectations only look at the scenario's own
+entities. Patrol counts come
 from `data/police/presence.toml` per district and day phase, scaled by `police_presence`.
 Heat comes from violations a unit witnesses. A pursuit starts when a unit keeps a wanted
 racer in recognition range long enough, which at night means 40 m for 4 s, so night police
@@ -58,8 +61,9 @@ positions). On the flat world police has no roads: heat and wanted levels work b
 exist.
 
 Opt-outs (`traffic_cars`, `parked_cars`, `police_cars` set to `false`) leave only the road
-network, which is useful for physics tests in the city. `police_cars: false` keeps heat and
-wanted levels.
+network, which is useful for physics tests in the city. `police_cars: false` means no police
+system at all on the city (no units, no heat); `traffic_cars: false` removes both the
+kinematic traffic and its physical near-player cars.
 
 `barriers` are static boxes (`Sim::add_static_box`): centre `pos`, full `size` `[x, y, z]`,
 `yaw` about +Z. Contacts with them reach damage as static world geometry.
