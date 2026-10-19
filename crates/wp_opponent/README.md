@@ -59,9 +59,12 @@ gap to the player — pace is car capability × how much of it the driver dares 
   the line (`SpeedLimit::Signal`); the rest, and anyone fleeing police, go only when nobody is
   heading in. **Stand-off breaker**: after 3 s held by civilians that are standing still in the
   box (each waiting for the other), stop counting them and creep through.
-- **Pulled-over cars** (retired, busted, yielding racers) are fixed obstacles: anyone may pass
-  them, also in the start phase, using the opposing lanes where the corridor allows overtaking
-  there, needing room only until past them; nobody backs away from a stopped car. Cars told to
+- **Pulled-over cars** (retired, busted, yielding racers; civilians stopped while yielding to a
+  siren or with hazards on) are fixed obstacles: anyone may pass them, also in the start phase,
+  using the opposing lanes where the corridor allows overtaking there, needing room only until
+  past them; nobody backs away from a stopped car. A racer already stopped right behind one
+  creeps (≤ 2.5 m/s, stopping 1 m short) while steering out, since a stopped car cannot move
+  sideways. Cars told to
   stop hold on the handbrake (the shared controller releases the brake pedal near a standstill
   because a held brake selects reverse; without this they idle forward at ~0.6 m/s).
 - **Damage**: profile rebuilt from `CarCapability::damaged` when effects change by > 5 %;
@@ -200,6 +203,9 @@ Scenarios (simcli v2): `apps/simcli/scenarios/opponent/*.ron` — run today with
 - Open-road racing: racers wait out long reds (the arterial corner's red is ~45 s) — correct,
   but it caps pace; progress ≈ 0.5–0.8 km per 90 s with 25 % traffic. Rare low-speed nudges in
   jams.
+- A police car parked with its siren on freezes nearby junctions (civilians within 60 m never
+  enter them). Racers now pass the pulled-over queue on the opposing lanes, but cross traffic
+  stuck inside the box can still hold them for tens of seconds (reported to D / E).
 - Two-wide grids favour the inside column into the first corner.
 - Live police: the sim's patrols are effective — in the test seeds most wanted racers are
   caught rather than escaping (they are boxed in at junction queues). Escape is implemented
