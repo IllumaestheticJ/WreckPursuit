@@ -54,11 +54,11 @@ struct VState {
     lane: Option<SegId>,
     last_s: f32,
     over_s: f32,
-    last_speeding: Option<f64>,
+    last_speeding: Option<u64>,
     wrong_s: f32,
-    last_wrong: Option<f64>,
-    near_misses: Vec<f64>,
-    near_miss_seen: BTreeMap<AgentId, f64>,
+    last_wrong: Option<u64>,
+    near_misses: Vec<u64>,
+    near_miss_seen: BTreeMap<AgentId, u64>,
     touching: BTreeSet<AgentId>,
 }
 
@@ -71,17 +71,19 @@ pub struct ViolationTracker {
 }
 
 impl ViolationTracker {
-    /// Update every tracked vehicle; `now` is simulation seconds.
+    /// Update every tracked vehicle; `now` is the traffic step count (steps of `dt`).
     pub fn update(
         &mut self,
         map: &CityMap,
         tracked: &[TrackedVehicle],
         traffic: &Traffic,
         dt: f32,
-        now: f64,
+        now: u64,
         out: &mut Vec<SimEvent>,
     ) {
         let cfg = self.config.clone();
+        // Seconds since an earlier step.
+        let since = |t0: u64| now.saturating_sub(t0) as f32 * dt;
         let live: BTreeSet<EntityId> = tracked.iter().map(|t| t.entity).collect();
         self.states.retain(|e, _| live.contains(e));
         let civ: Vec<(AgentId, Obb, f32, [f32; 2])> = traffic
@@ -141,9 +143,7 @@ impl ViolationTracker {
                     if speed > lim + cfg.speeding_margin_mps.max(lim * cfg.speeding_ratio) =>
                 {
                     st.over_s += dt;
-                    let due = st
-                        .last_speeding
-                        .is_none_or(|t0| now - t0 >= cfg.repeat_s as f64);
+                    let due = st.last_speeding.is_none_or(|t0| since(t0) >= cfg.repeat_s);
                     if st.over_s >= cfg.speeding_hold_s && due {
                         emit(ViolationKind::Speeding {
                             over_mps: speed - lim,
@@ -162,9 +162,7 @@ impl ViolationTracker {
                     .is_some_and(|l| geom::dot(l.tangent, fwd) < -0.5);
             if against {
                 st.wrong_s += dt;
-                let due = st
-                    .last_wrong
-                    .is_none_or(|t0| now - t0 >= cfg.repeat_s as f64);
+                let due = st.last_wrong.is_none_or(|t0| since(t0) >= cfg.repeat_s);
                 if st.wrong_s >= cfg.wrong_way_hold_s && due {
                     emit(ViolationKind::WrongWay);
                     st.last_wrong = Some(now);
@@ -197,16 +195,16 @@ impl ViolationTracker {
                     }
                 } else if geom::obb_overlap(&near, obb)
                     && geom::len(geom::sub(vel, *cv)) > cfg.near_miss_rel_speed
-                    && st.near_miss_seen.get(id).is_none_or(|t0| now - t0 > 3.0)
+                    && st.near_miss_seen.get(id).is_none_or(|t0| since(*t0) > 3.0)
                 {
                     st.near_miss_seen.insert(*id, now);
                     st.near_misses.push(now);
                 }
             }
             st.touching = touching;
-            let window = cfg.reckless_window_s as f64;
-            st.near_misses.retain(|t0| now - t0 <= window);
-            st.near_miss_seen.retain(|_, t0| now - *t0 <= window);
+            let window = cfg.reckless_window_s;
+            st.near_misses.retain(|t0| since(*t0) <= window);
+            st.near_miss_seen.retain(|_, t0| since(*t0) <= window);
             if st.near_misses.len() >= cfg.near_misses_for_reckless {
                 emit(ViolationKind::Reckless);
                 st.near_misses.clear();

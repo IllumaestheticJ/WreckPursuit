@@ -180,8 +180,8 @@ pub struct CityMap {
     pub approach: Vec<Option<Approach>>,
     /// Drivable lane length per zone, km.
     pub zone_lane_km: Vec<f32>,
-    /// Simulation seconds the signal controllers have run.
-    pub signal_time_s: f64,
+    /// Physics ticks (`PHYSICS_DT`) the signal controllers have run.
+    pub signal_tick: u64,
     /// Current time of day (mirrors the world clock).
     pub time: TimeOfDay,
     seg_grid: Grid,
@@ -250,6 +250,24 @@ impl CityMap {
                 by_node[node as usize].push(i as SegId);
             }
         }
+        // Bounding boxes reject most pairs before the polyline distance test.
+        let bbox: Vec<(V2, V2)> = segs
+            .iter()
+            .map(|s| {
+                let mut lo = [f32::INFINITY; 2];
+                let mut hi = [f32::NEG_INFINITY; 2];
+                for p in &s.pts {
+                    lo = [lo[0].min(p[0]), lo[1].min(p[1])];
+                    hi = [hi[0].max(p[0]), hi[1].max(p[1])];
+                }
+                (lo, hi)
+            })
+            .collect();
+        let near = |a: u32, b: u32, m: f32| {
+            let (la, ha) = bbox[a as usize];
+            let (lb, hb) = bbox[b as usize];
+            la[0] - m <= hb[0] && lb[0] - m <= ha[0] && la[1] - m <= hb[1] && lb[1] - m <= ha[1]
+        };
         for list in &by_node {
             for (a_i, &a) in list.iter().enumerate() {
                 for &b in &list[a_i + 1..] {
@@ -263,8 +281,12 @@ impl CityMap {
                         continue;
                     }
                     let conflict = ta == tb
-                        || geom::polyline_distance(&segs[a as usize].pts, &segs[b as usize].pts)
-                            < 2.4;
+                        || (near(a, b, 2.4)
+                            && geom::polylines_within(
+                                &segs[a as usize].pts,
+                                &segs[b as usize].pts,
+                                2.4,
+                            ));
                     if conflict {
                         segs[a as usize].conflicts.push(b);
                         segs[b as usize].conflicts.push(a);
@@ -320,7 +342,7 @@ impl CityMap {
             net,
             segs,
             approach,
-            signal_time_s: 0.0,
+            signal_tick: 0,
             time: TimeOfDay::from_hours(12.0),
             seg_grid,
             ix_grid,
@@ -434,7 +456,7 @@ impl CityMap {
             IntersectionControl::Signal { controller } => Some(signals::group_state(
                 &self.net.signals[controller as usize],
                 ap.group,
-                self.signal_time_s,
+                self.signal_tick,
             )),
             _ => None,
         }

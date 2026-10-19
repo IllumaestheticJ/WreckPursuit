@@ -1,8 +1,3 @@
 # File-level suppressions for lint-determinism: `<repo-relative path> <rule> <reason>`.
 # Every entry needs a reason; entries that match nothing fail the lint (delete them).
 crates/wp_math/src/hash.rs f64 quantize() widens f32 to f64 for an exact multiply-and-round; IEEE f64 ops are bit-identical on every target
-crates/wp_world/src/lib.rs f64 simulation-time accumulators only (+ and compare are exact IEEE ops, identical on every target incl. wasm32); lead 2026-10-19, D to move to integer ticks
-crates/wp_world/src/map.rs f64 signal_time_s mirrors the f64 sim clock; lead 2026-10-19, D to move to integer ticks
-crates/wp_world/src/signals.rs f64 signal phase from the f64 sim clock (rem_euclid on f64 is exact); lead 2026-10-19
-crates/wp_world/src/traffic.rs f64 timestamps (time_s, stopped_since, lane-change, collision log); lead 2026-10-19, D to move to integer ticks
-crates/wp_world/src/violations.rs f64 timestamps for repeat windows; lead 2026-10-19, D to move to integer ticks
