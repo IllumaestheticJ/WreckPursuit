@@ -3,7 +3,7 @@
 - **Workstream / prompt:** 02 — vehicle dynamics
 - **Branch:** `ws/vehicle`
 - **Crates / folders owned:** `crates/wp_vehicle`, `data/tires/`
-- **Contract version built against:** 0.1.0
+- **Contract version built against:** 0.2.0 (round 6b work is inherent API, ready for v0.3.0)
 
 ## Exposes
 
@@ -33,6 +33,13 @@ VehicleSnapshot::{as_bytes, from_bytes}          // wire form
 vehicle.set_state(&VehicleState)                 // approximate (public state only)
 vehicle.write_chassis_to_body(&mut RigidBody)    // after restore / set_state
 vehicle.set_pose_and_speed(pos, yaw, speed)      // traffic promotion (lead-added, kept)
+
+// Weather hook (round 6b) — an input, set before each step; default dry = no change
+vehicle.set_surface_conditions([SurfaceConditions; 4])   // FL, FR, RL, RR
+vehicle.set_wheel_conditions(i, SurfaceConditions)
+SurfaceConditions { water_depth_mm, temperature_c /* road */, painted_line }  // ::DRY / Default
+telemetry().aquaplane: [f32; 4]                          // 0 contact … 1 planing
+wp_vehicle::surface::{conditions_grip, aquaplane_onset_mps, TireWetProfile}   // the model
 
 // Tools
 wp_vehicle::rig::Rig            // client-side single-car stepper, bit-identical to wp_sim (flat ground)
@@ -97,6 +104,7 @@ For prompt 04, the two calls worth exposing are `sim.vehicles()[i].vehicle.telem
 | Measurement | Machine | Native | Browser | Budget |
 |---|---|---|---|---|
 | Vehicle model, per car | cloud container, release | 4.1 µs/tick = 0.016 ms/frame | not measured | 0.15 ms native / 0.30 browser |
+| Vehicle model, 24-car field (roster cycled), round 6b | same | 0.019–0.021 ms/car/frame (0.45–0.50 ms for 24); wet + puddles 0.016–0.018 | not measured | 0.15 ms/car |
 | Vehicle + Rapier step, 1-car rig | same | 9.7 µs/tick = 0.039 ms/frame | not measured | — |
 
 ## Recommended `AssistProfile` presets
@@ -115,17 +123,96 @@ pedals swap; press throttle to return to first.
 ## Known gaps
 
 See `crates/wp_vehicle/README.md` → Known gaps (ray probe not shape-cast, no stall/tire
-temperature/wear, fixed AWD split, trait `step` needs Rapier access).
+temperature/wear, trait `step` needs Rapier access). Road conditions are a `wp_vehicle` input
+until the lead binds them to `WorldQuery::weather_at` (v0.3.0); no tread-depth field yet
+(treaded is inferred from the wet ratio, as in `wp_weather`).
 
-## City chase in the browser (A, on request; touches C's / M's areas)
+## Round 6b (A, 2026-10-19) — weather grip hook, automatic gearbox, 24-car cost
+
+Merged `origin/main` and the lead branch. My earlier `wp_wasm` / testbed city-chase work was
+reverted by the lead (C's area); I took the lead's versions of `crates/wp_wasm` and
+`apps/testbed-web` wholesale (incl. leftovers the revert missed: a duplicate `wp_police` line in
+`wp_wasm/Cargo.toml`, my NaN guard and the siren guard). Nothing outside `crates/wp_vehicle`
+changed this round. Two fixes from that work are now requests (see "Requests to other
+workstreams" below).
+
+1. **Weather grip hook (K's W-1)** — `wp_vehicle::SurfaceConditions { water_depth_mm,
+   temperature_c, painted_line }` per wheel, `Vehicle::set_surface_conditions` /
+   `set_wheel_conditions`, dry default (bit-identical to before, tested). Wet grip from the
+   tire's own wet ratio, per-surface wet scaling, cold/black ice, painted lines, aquaplaning
+   onset by depth / width / tread, `Telemetry::aquaplane`. Model and numbers in
+   `crates/wp_vehicle/README.md` → "Road conditions". No `wp_weather` dependency (same shape of
+   model as K's `grip.rs`, own constants).
+   **For the lead (binding after v0.3.0):** before each `step_with_ground`, per wheel
+   `water_depth_mm = local.water_mm` (or `standing_water_mm` + film), `temperature_c =
+   local.road_temp_c`, `painted_line = marking_at(contact)` (false until W-3), from
+   `world.weather_at(contact point)`; and set `WithWeather::interim_surface = false` in the
+   same merge. (If the interim adapter still reports `WetAsphalt`, my wet term is skipped, so
+   there is no double counting either way.) Same call in `Rig` for F's prediction.
+   **For K:** your `wheel_grip_multiplier` is not called from `wp_vehicle`; if you want your
+   `surfaces.toml` numbers to drive the vehicle instead of my constants, propose a
+   `SurfaceConditions`-shaped payload in v0.3.0 and I'll read per-surface factors from it.
+2. **Torque converter for automatics** — the converter itself has been in since lead run 4
+   (stall, multiplication, lock-up, creep; H's 5 automatics use it). What was still missing for
+   an *automatic gearbox*: shifts cut drive like a manual. Now converter cars **shift under
+   power** (ratio blends over `shift_time_s`, lock-up open, converter carries torque; neutral /
+   reverse still cut). Test `converter_automatic_shifts_under_power`. 0–100 (release):
+   | Car | Before | Now | Band |
+   |---|---|---|---|
+   | Sentinel Wolfhound | 6.55 | 5.55 | 5.5–6.5 ✓ (edge; reference 6.1) |
+   | Sentinel Cruiser | 8.36 | 7.82 | 7.0–8.5 ✓ |
+   | Sentinel Bastion | 8.55 | 7.98 | 7.5–9.0 ✓ |
+   | Hauler 1500 | 8.98 | 8.09 | 7.0–8.0 ✗ by 0.09 (traction) |
+   | Ironside 440 | 8.71 | 8.15 | 6.5–8.0 ✗ by 0.15 (traction) |
+   **For H (09):** please re-run `collect_results.py`; Hauler / Ironside are now near their
+   bands; Wolfhound sits at the fast edge — a 0.4–0.5 s `shift_time_s` or `stall_torque_ratio`
+   1.8 would move it toward its 6.1 s reference. Non-converter cars are unchanged (debug sedan
+   8.13 s, coupe 5.23 s).
+   **Goldens re-blessed `[bless]`** (`apps/simcli/golden/`, outside my crate): `golden_city_chase`
+   and `golden_night_pursuit_escape` (+ replays), `opponent_circuit_8x5`, `opponent_flee_police`,
+   `opponent_open_roads_traffic`, `opponent_reverse_grid_2laps`, `race_city_sprint`,
+   `world_traffic_soak` — every scenario with converter automatics (police, AI, traffic). All
+   other goldens (crash, vehicle, smoke, weather) are unchanged. Verified the cause: with
+   power-on shifts disabled, `race_city_sprint` matches its old golden. Scenario expectations
+   all still pass.
+3. **24-car cost** — `--example bench` now steps a 24-car field (whole roster cycled, varied
+   inputs): **0.019–0.021 ms/car/frame** dry, 0.45–0.50 ms/frame for all 24 (budget 0.15
+   ms/car); the weather terms cost nothing measurable. Recorded in the README.
+
+### Checks (round 6b)
+
+`cargo fmt`, `cargo clippy --workspace --all-targets -D warnings` clean; wasm32 build of
+`wp_wasm` OK; `cargo test --release --workspace --no-fail-fast`: all green except two tests that
+**fail identically on the lead branch with the lead's `wp_vehicle`** (verified by swapping my
+`src/` out) — not mine, for their owners / the lead:
+- `wp_economy` `tests/pursuit_wiring.rs::real_police_capture_settles_through_the_economy` —
+  "level at capture, not after the reset" (`res.level` is `None` at `PursuitEnded`).
+- `wp_race` `tests/simcli_races.rs::city_sprint_on_real_roads` — index out of bounds in
+  `throttle_at` (len 2, index 2): the test expects more entities than
+  `scenarios/race/city_sprint.ron` now has.
+(Debug-profile `cargo test --workspace` exceeds the session's 10-minute command limit in the
+simcli scenario suite, so I ran it in release.)
+
+### Requests to other workstreams (from my reverted browser work)
+
+- **C (`wp_wasm`):** `pack::unpack_input` should read non-finite values as 0
+  (`a.get(i).copied().filter(|v| v.is_finite()).unwrap_or(0.0)`). A JS `undefined` packs as NaN;
+  a NaN steer/throttle poisons the car's state for good (steering rack NaN, car stuck). The
+  vehicle model does not sanitise inputs itself; say if you'd rather it did.
+- **J (audio):** `audio/synth.ts` siren — Chrome intermittently rejects a
+  `setValueCurveAtTime` segment as overlapping the previous one with several sirens at once
+  (e.g. `…(19.6438, 0.2) overlaps …(19.4467, 0.2)`), which throws out of the frame. A try/catch
+  around the call (skip the segment) stopped it; root cause not found.
+
+## City chase in the browser (A, on request; touches C's / M's areas) — reverted by the lead in run 6
 
 Asked for directly by the owner. Additive changes outside my crates:
 - `crates/wp_wasm`: `city_chase_json(car, mode)` preset (procedural city, 23:00, traffic 1.0,
   police 1.0, player on the race grid at 90 km/h); `live_vehicles()` (`[entity, kind]` for every
   sim vehicle incl. sim-spawned police/traffic); `vehicle_info` works for sim-spawned vehicles and
   reports `kind`; `Session::car()` resolves their cars (cache by car id); debug
-  `set_vehicle_kind(entity, code)` (refused while recording/replaying); `police_hud_json()` —
-  **placeholder returning `null` until `Sim::police()` lands (lead run 5)**.
+  `set_vehicle_kind(entity, code)` (refused while recording/replaying); `police_hud_json()`
+  (real since lead run 5, below).
 - `apps/testbed-web`: "city chase" button / `?preset=chase[&car=…][&police=N]`; views follow
   `live_vehicles()` (spawn + despawn); police livery + flashing red/blue light bar with point
   lights at night + `Auto` siren via J's audio bridge; traffic in muted colours; heat panel =
@@ -133,6 +220,27 @@ Asked for directly by the owner. Additive changes outside my crates:
 - `apps/ui-kit/package.json`: new subpath export `"./hud"` (the HUD module, without the eager
   1.2 MB fixtures the package index pulls in). Testbed consumes the kit as source
   (`file:../ui-kit`, `preact`, esbuild JSX, `resolve.dedupe`).
+
+### City chase on lead run 5 (A, check-in after run 5 landed)
+
+- Merged `main` (lead run 5) into `ws/vehicle`: clean. simcli's `build_sim` already sets the
+  police / traffic car models for city runs, so the browser gets real police cars and physical
+  traffic through `live_vehicles()` with no extra wiring (seen: 5 police, up to 16 physical
+  traffic among ~200 agents).
+- `police_hud_json()` is now real: `Session::police_hud()` builds the UI kit's `HeatHud` from
+  `Sim::police()` (level, heat within the level from `level_thresholds`, `PursuitStatus` →
+  clear/noticed/pursuit/cooldown, escape progress `los_lost_s / escape_time_s`, units with
+  `Assignment::Pursue` on the player, bounty rounded to whole dollars). Test
+  `city_chase_reports_heat_and_police_vehicles` (native: L1 at 10 s, L2 by 15 s; browser matches).
+  `wp_wasm` now depends on `wp_police` (workspace crate, already under `wp_sim`; wasm-safe).
+- `pack::unpack_input`: non-finite values read as 0 (a JS `undefined` packed as NaN poisoned the
+  car's physics for good — steering rack NaN, car stuck at 0 km/h). Test added.
+- **For J (audio):** `audio/synth.ts` siren — Chrome intermittently rejects a
+  `setValueCurveAtTime` segment as overlapping the previous one (seen with several police
+  sirens at once, e.g. `…(19.6438, 0.2) overlaps …(19.4467, 0.2)`), which threw out of the frame.
+  Minimal guard: the segment is skipped (try/catch). Root cause not found; please take a look.
+- Converter / AWD re-checked on the merged tree: `wp_vehicle` tests green, roster unchanged
+  (Cruiser 8.36 s, Lindwurm 5.40, Bastion 8.55, Hauler 8.98, Ironside 8.71, Wolfhound 6.55).
 
 ## Roster check with the converter + on-demand AWD (A, after lead run 4)
 
