@@ -21,7 +21,7 @@
   `CaptainCommand::{to_bytes, from_bytes}` (JSON; the payload of `ClientToServer::CaptainCommand`),
   `captain_view() -> CaptainView`, `set_human_captain(bool)`.
 - Racer gadgets (for prompts 07/08 to gate by tier): `radar(pos, tier) -> Vec<RadarBlip>`,
-  `scanner(tier, since_s) -> Vec<RadioLine>`, `radio_log()`.
+  `scanner(tier, since: Option<SimTime>) -> Vec<RadioLine>`, `radio_log()`.
 - Crash scenes (for prompt 05): `report_crash_scene(pos)`. Civilian–civilian `SimEvent::Contact`s also create crash scenes automatically.
 - `SimEvent::PoliceEvent { kind, payload }`: `kind` = `wp_police::events::kind::*`, `payload` =
   the JSON of `wp_police::PoliceEvent`. Decode with `PoliceEvent::from_sim_event`. Variants:
@@ -68,6 +68,16 @@
 - `wp_sim` still uses `PoliceSystem::new()`, so the browser testbed has no police units until 12 wires `with_city`.
 - Scripted racers don't react to PIT or box-ins; physics resolves those.
 - Night pursuit start varies: 3 of 8 runs under 60 s. The mean is 171 s, and the test asserts the mean and the ratio.
+
+## Response to lead feedback
+- **Integer ticks (done):** police timestamps are now `wp_police::SimTime` (integer `u64`
+  microseconds); the seven `crates/wp_police/*` entries in `tools/lint-determinism/allow.txt`
+  are deleted. API changes: time fields lose their `_s` suffix (`PursuitRecord::{start, end}`,
+  `RacerRecord::last_seen`, `Incident::created`, `RadioLine::time`, `CaptainView::time`, …);
+  `PoliceSystem::time_s()` became `now() -> SimTime`; `scanner(tier, since)` takes
+  `Option<SimTime>`.
+- Still to do: D's road network and AI controller, typed `PoliceEvent` / `CaptainCommand`
+  variant list for v0.2.0.
 
 ## Lead feedback (2026-10-19, run 2)
 

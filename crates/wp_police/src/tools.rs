@@ -15,6 +15,7 @@ use crate::events::{ToolId, UnitId};
 use crate::graph::{
     add, cross, dist, len, perp_left, scale, sub, NodeId, RoadClass, RoadGraph, SegmentId,
 };
+use crate::time::SimTime;
 
 /// Distance kept clear of intersections when placing tools, m.
 pub const NODE_CLEARANCE_M: f32 = 15.0;
@@ -161,8 +162,8 @@ pub struct Roadblock {
     pub units: Vec<UnitId>,
     /// Barrier colliders.
     pub barriers: Vec<StaticCollider>,
-    /// Removed at, s.
-    pub expires_s: f64,
+    /// Removed at.
+    pub expires: SimTime,
 }
 
 /// A spike strip: a line across the road.
@@ -180,8 +181,8 @@ pub struct SpikeStrip {
     pub b: [f32; 2],
     /// Unit that deployed it.
     pub unit: Option<UnitId>,
-    /// Removed at, s.
-    pub expires_s: f64,
+    /// Removed at.
+    pub expires: SimTime,
 }
 
 impl SpikeStrip {
@@ -192,7 +193,7 @@ impl SpikeStrip {
         site: ToolSite,
         length_m: f32,
         unit: Option<UnitId>,
-        expires_s: f64,
+        expires: SimTime,
     ) -> Self {
         let half = scale(perp_left(site.dir), length_m * 0.5);
         Self {
@@ -202,7 +203,7 @@ impl SpikeStrip {
             a: add(site.pos, half),
             b: sub(site.pos, half),
             unit,
-            expires_s,
+            expires,
         }
     }
 
@@ -240,28 +241,28 @@ pub fn segments_intersect(p: [f32; 2], q: [f32; 2], a: [f32; 2], b: [f32; 2]) ->
 /// Tire deflation state of one vehicle.
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 pub struct Puncture {
-    /// Time each wheel was punctured, s.
-    pub since_s: [Option<f64>; 4],
+    /// Time each wheel was punctured.
+    pub since: [Option<SimTime>; 4],
 }
 
 impl Puncture {
     #[allow(clippy::needless_range_loop)]
     /// Flag wheels as punctured at `now_s` (already punctured wheels keep their time).
-    pub fn hit(&mut self, wheels: [bool; 4], now_s: f64) {
+    pub fn hit(&mut self, wheels: [bool; 4], now: SimTime) {
         for i in 0..4 {
-            if wheels[i] && self.since_s[i].is_none() {
-                self.since_s[i] = Some(now_s);
+            if wheels[i] && self.since[i].is_none() {
+                self.since[i] = Some(now);
             }
         }
     }
 
     #[allow(clippy::needless_range_loop)]
     /// Deflation per wheel 0..=1 (`HandlingEffects::tire_puncture`), linear over `deflate_s`.
-    pub fn level(&self, now_s: f64, deflate_s: f32) -> [f32; 4] {
+    pub fn level(&self, now: SimTime, deflate_s: f32) -> [f32; 4] {
         let mut out = [0.0; 4];
         for i in 0..4 {
-            if let Some(t) = self.since_s[i] {
-                out[i] = (((now_s - t) as f32) / deflate_s.max(1e-3)).clamp(0.0, 1.0);
+            if let Some(t) = self.since[i] {
+                out[i] = (now.since(t) / deflate_s.max(1e-3)).clamp(0.0, 1.0);
             }
         }
         out
@@ -338,8 +339,8 @@ pub struct RadarBlip {
 /// One radio-log line as seen through a scanner.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RadioLine {
-    /// Sim time spoken, s.
-    pub time_s: f64,
+    /// Sim time spoken.
+    pub time: SimTime,
     /// Speaking unit (`None` = dispatch).
     pub unit: Option<UnitId>,
     /// Text.
@@ -436,7 +437,14 @@ mod tests {
             sight_m: 200.0,
             ahead_m: 300.0,
         };
-        let s = SpikeStrip::across(ToolId(1), EntityId(1), site, 7.0, None, 100.0);
+        let s = SpikeStrip::across(
+            ToolId(1),
+            EntityId(1),
+            site,
+            7.0,
+            None,
+            SimTime::from_secs(100.0),
+        );
         assert_eq!(s.wheels_crossing([0.0, 40.0], [0.0, 60.0], 0.8), [true; 4]);
         // Only the right-hand wheels clip the strip's end.
         let hit = s.wheels_crossing([-4.0, 40.0], [-4.0, 60.0], 0.8);
@@ -446,10 +454,10 @@ mod tests {
             [false; 4]
         );
         let mut p = Puncture::default();
-        p.hit([true, false, false, false], 10.0);
-        let l = p.level(12.5, 5.0);
+        p.hit([true, false, false, false], SimTime::from_secs(10.0));
+        let l = p.level(SimTime::from_secs(12.5), 5.0);
         assert!((l[0] - 0.5).abs() < 1e-5 && l[1] == 0.0);
-        assert_eq!(p.level(20.0, 5.0)[0], 1.0);
+        assert_eq!(p.level(SimTime::from_secs(20.0), 5.0)[0], 1.0);
     }
 
     #[test]

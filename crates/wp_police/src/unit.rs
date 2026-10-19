@@ -19,6 +19,7 @@ use crate::events::{IncidentId, ToolId, UnitId, UnitKind};
 use crate::graph::{
     add, cross, dist, dist2, dot, len, lerp2, normalize, scale, sub, District, NodeId, SegmentId,
 };
+use crate::time::SimTime;
 
 /// A polyline the unit drives along, with cumulative arc length.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -356,12 +357,12 @@ pub struct Unit {
     pub racer_contact: bool,
     /// Total loss.
     pub wrecked: bool,
-    /// Sim time when the current assignment began, s.
-    pub assigned_s: f64,
-    /// A captain order overrides the AI until this time, s.
-    pub captain_hold_until_s: f64,
-    /// Next PIT allowed at, s.
-    pub pit_ready_s: f64,
+    /// Sim time when the current assignment began.
+    pub assigned: SimTime,
+    /// A captain order overrides the AI until this time.
+    pub captain_hold_until: SimTime,
+    /// Next PIT allowed at.
+    pub pit_ready: SimTime,
     /// Whether this unit ever pursued (for statistics).
     pub engaged: bool,
 }
@@ -402,9 +403,9 @@ impl Unit {
             effects: HandlingEffects::NEUTRAL,
             racer_contact: false,
             wrecked: false,
-            assigned_s: 0.0,
-            captain_hold_until_s: f64::NEG_INFINITY,
-            pit_ready_s: 0.0,
+            assigned: SimTime::ZERO,
+            captain_hold_until: SimTime::ZERO,
+            pit_ready: SimTime::ZERO,
             engaged: false,
         }
     }

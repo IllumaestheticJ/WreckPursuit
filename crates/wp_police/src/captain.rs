@@ -16,6 +16,7 @@ use crate::dispatch::Incident;
 use crate::events::{IncidentId, PursuitOutcome, ToolId, UnitId, UnitKind};
 use crate::graph::{District, SegmentId};
 use crate::heat::{PursuitStatus, WantedLevel};
+use crate::time::SimTime;
 use crate::tools::SiteError;
 use crate::unit::{Assignment, Tactic, UnitRole};
 use crate::PoliceSystem;
@@ -212,8 +213,8 @@ pub struct ToolView {
 /// Everything the captain screen needs.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CaptainView {
-    /// Sim time, s.
-    pub time_s: f64,
+    /// Sim time.
+    pub time: SimTime,
     /// Day phase.
     pub phase: DayPhase,
     /// A human captain is seated.
@@ -343,8 +344,8 @@ impl PoliceSystem {
             }
             UnitOrder::Disengage => Assignment::OutOfService,
         };
-        let hold = self.cfg.tools.captain_order_hold_s as f64;
-        self.units[i].captain_hold_until_s = self.time_s + hold;
+        let hold = self.cfg.tools.captain_order_hold_s;
+        self.units[i].captain_hold_until = self.now.plus(hold);
         self.assign(i, a);
         Ok(())
     }
@@ -363,7 +364,7 @@ impl PoliceSystem {
 
     /// Build the captain view.
     pub fn captain_view(&self) -> CaptainView {
-        let now = self.time_s;
+        let now = self.now;
         let units = self
             .units
             .iter()
@@ -402,7 +403,7 @@ impl PoliceSystem {
                 heat: r.heat,
                 status: r.status,
                 last_known: r.last_known,
-                staleness_s: r.last_seen_s.map(|t| (now - t) as f32),
+                staleness_s: r.last_seen.map(|t| now.since(t)),
                 bounty: r.bounty.bounty(&self.cfg.heat),
                 units_assigned: self.units_on(r.entity),
             })
@@ -414,18 +415,18 @@ impl PoliceSystem {
                 tool: r.id,
                 roadblock: true,
                 pos: r.site.pos,
-                remaining_s: (r.expires_s - now) as f32,
+                remaining_s: r.expires.since(now),
             })
             .collect();
         tools.extend(self.spikes.iter().map(|s| ToolView {
             tool: s.id,
             roadblock: false,
             pos: s.site.pos,
-            remaining_s: (s.expires_s - now) as f32,
+            remaining_s: s.expires.since(now),
         }));
-        let left = |t: f64| ((t - now) as f32).max(0.0);
+        let left = |t: SimTime| t.since(now);
         CaptainView {
-            time_s: now,
+            time: now,
             phase: self.phase,
             human_captain: self.captain.human,
             priority_target: self.captain.priority,
@@ -435,9 +436,9 @@ impl PoliceSystem {
             racers,
             tools,
             readiness: ToolReadiness {
-                roadblock_s: left(self.captain.roadblock_ready_s),
-                spikes_s: left(self.captain.spikes_ready_s),
-                helo_s: left(self.captain.helo_ready_s),
+                roadblock_s: left(self.captain.roadblock_ready),
+                spikes_s: left(self.captain.spikes_ready),
+                helo_s: left(self.captain.helo_ready),
                 roadblocks: [
                     self.roadblocks.len() as u32,
                     self.cfg.tools.roadblock.max_active,

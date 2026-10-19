@@ -33,6 +33,7 @@ pub mod graph;
 pub mod heat;
 pub mod pursuit;
 pub mod scenario;
+pub mod time;
 pub mod tools;
 pub mod unit;
 
@@ -50,6 +51,7 @@ pub use dispatch::{Incident, IncidentKind};
 pub use events::{DisableCause, IncidentId, PoliceEvent, PursuitOutcome, ToolId, UnitId, UnitKind};
 pub use graph::{procedural_city, CityParams, District, RoadGraph};
 pub use heat::{BountyRecord, PursuitStatus, RacerRecord, WantedLevel};
+pub use time::SimTime;
 pub use tools::{HeloView, RadarBlip, RadioLine, Roadblock, SpikeStrip, StaticCollider};
 pub use unit::{Assignment, DriveCommand, Tactic, Unit};
 
@@ -113,10 +115,10 @@ pub struct UnitSync {
 pub struct PursuitRecord {
     /// Racer.
     pub racer: EntityId,
-    /// Start, s.
-    pub start_s: f64,
-    /// End, s.
-    pub end_s: Option<f64>,
+    /// Start.
+    pub start: SimTime,
+    /// End.
+    pub end: Option<SimTime>,
     /// Outcome.
     pub outcome: Option<PursuitOutcome>,
 }
@@ -165,9 +167,9 @@ pub struct PoliceStats {
 pub(crate) struct CaptainState {
     pub(crate) human: bool,
     pub(crate) priority: Option<EntityId>,
-    pub(crate) roadblock_ready_s: f64,
-    pub(crate) spikes_ready_s: f64,
-    pub(crate) helo_ready_s: f64,
+    pub(crate) roadblock_ready: SimTime,
+    pub(crate) spikes_ready: SimTime,
+    pub(crate) helo_ready: SimTime,
 }
 
 /// Per-think observation of a racer.
@@ -191,7 +193,7 @@ pub struct PoliceSystem {
     pub(crate) setup: PoliceSetup,
     pub(crate) rng: Rng,
     pub(crate) tick: u64,
-    pub(crate) time_s: f64,
+    pub(crate) now: SimTime,
     pub(crate) think_accum: f32,
     pub(crate) phase: DayPhase,
     pub(crate) warmed_up: bool,
@@ -213,7 +215,7 @@ pub struct PoliceSystem {
     pub(crate) radio: VecDeque<RadioLine>,
     pub(crate) captain: CaptainState,
     pub(crate) stats: PoliceStats,
-    pub(crate) contact_cooldown: BTreeMap<(UnitId, EntityId), f64>,
+    pub(crate) contact_cooldown: BTreeMap<(UnitId, EntityId), SimTime>,
     pub(crate) pending: Vec<PoliceEvent>,
 }
 
@@ -243,7 +245,7 @@ impl PoliceSystem {
             setup,
             rng: Rng::new(setup.seed),
             tick: 0,
-            time_s: 0.0,
+            now: SimTime::ZERO,
             think_accum: 0.0,
             phase: DayPhase::Day,
             warmed_up: false,
@@ -266,9 +268,9 @@ impl PoliceSystem {
             captain: CaptainState {
                 human: false,
                 priority: None,
-                roadblock_ready_s: 0.0,
-                spikes_ready_s: 0.0,
-                helo_ready_s: 0.0,
+                roadblock_ready: SimTime::ZERO,
+                spikes_ready: SimTime::ZERO,
+                helo_ready: SimTime::ZERO,
             },
             stats: PoliceStats::default(),
             contact_cooldown: BTreeMap::new(),
@@ -290,7 +292,7 @@ impl PoliceSystem {
         out: &mut Vec<SimEvent>,
     ) {
         self.tick += 1;
-        self.time_s += dt as f64;
+        self.now = self.now.plus(dt);
         self.phase = world.time_of_day().phase();
         self.sync_racers(racers);
         self.process_events(events);
@@ -307,7 +309,7 @@ impl PoliceSystem {
     }
 
     fn sync_racers(&mut self, racers: &[RacerView]) {
-        let now = self.time_s;
+        let now = self.now;
         for r in racers {
             let rec = self
                 .racers
@@ -372,7 +374,7 @@ impl PoliceSystem {
     /// Emit a radio line (event + scanner log).
     pub(crate) fn radio(&mut self, unit: Option<UnitId>, text: String) {
         self.radio.push_back(RadioLine {
-            time_s: self.time_s,
+            time: self.now,
             unit,
             text: text.clone(),
         });
@@ -421,9 +423,9 @@ impl PoliceSystem {
         &self.stats
     }
 
-    /// Simulation time seen by the police, s.
-    pub fn time_s(&self) -> f64 {
-        self.time_s
+    /// Simulation time seen by the police.
+    pub fn now(&self) -> SimTime {
+        self.now
     }
 
     /// Current day phase (as of the last step).
@@ -443,7 +445,7 @@ impl PoliceSystem {
     pub fn tire_puncture(&self, vehicle: EntityId) -> [f32; 4] {
         self.punctures
             .get(&vehicle)
-            .map(|p| p.level(self.time_s, self.cfg.tools.spikes.deflate_s))
+            .map(|p| p.level(self.now, self.cfg.tools.spikes.deflate_s))
             .unwrap_or([0.0; 4])
     }
 
@@ -647,14 +649,13 @@ impl PoliceSystem {
         v
     }
 
-    /// Scanner: radio lines spoken after `since_s`, delayed by the tier's delay.
-    pub fn scanner(&self, tier: usize, since_s: f64) -> Vec<RadioLine> {
+    /// Scanner: radio lines spoken after `since` (all if `None`), delayed by the tier's delay.
+    pub fn scanner(&self, tier: usize, since: Option<SimTime>) -> Vec<RadioLine> {
         let delays = &self.cfg.tools.gadgets.scanner_delay_s;
-        let delay = delays[tier.min(delays.len() - 1)] as f64;
-        let horizon = self.time_s - delay;
+        let delay = delays[tier.min(delays.len() - 1)];
         self.radio
             .iter()
-            .filter(|l| l.time_s > since_s && l.time_s <= horizon)
+            .filter(|l| since.is_none_or(|s| l.time > s) && self.now.since(l.time) >= delay)
             .cloned()
             .collect()
     }

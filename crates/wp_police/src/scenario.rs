@@ -396,14 +396,13 @@ fn run_once(sc: &PoliceScenario, seed: u64, cfg: &PoliceConfig) -> RunNumbers {
         for r in &racers {
             nums.max_level = nums.max_level.max(police.wanted_level(r.entity).number());
         }
-        if sc.stop_after_first_pursuit && police.stats().pursuits.iter().any(|p| p.end_s.is_some())
-        {
+        if sc.stop_after_first_pursuit && police.stats().pursuits.iter().any(|p| p.end.is_some()) {
             break;
         }
     }
     let st = police.stats();
-    nums.pursuit_start_s = st.pursuits.first().map(|p| p.start_s as f32);
-    nums.pursuit_end_s = st.pursuits.iter().find_map(|p| p.end_s).map(|t| t as f32);
+    nums.pursuit_start_s = st.pursuits.first().map(|p| p.start.secs());
+    nums.pursuit_end_s = st.pursuits.iter().find_map(|p| p.end).map(|t| t.secs());
     nums.reinforcement_delays = st.reinforcement_delays_s.clone();
     for p in &st.pursuits {
         match p.outcome {
@@ -417,7 +416,7 @@ fn run_once(sc: &PoliceScenario, seed: u64, cfg: &PoliceConfig) -> RunNumbers {
     nums.pursuits = st
         .pursuits
         .iter()
-        .filter(|p| p.end_s != Some(p.start_s))
+        .filter(|p| p.end != Some(p.start))
         .count() as u32;
     nums.units_engaged = st.units_engaged;
     nums.self_wrecks = st.self_wrecks;

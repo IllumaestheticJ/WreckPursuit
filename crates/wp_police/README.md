@@ -93,7 +93,7 @@ wide and has a background traffic-hazard model. It stands in until physical poli
 - **Spike strip**: a line collider. Wheels that cross it deflate linearly over `deflate_s` (5 s)
   → `tire_puncture(entity)` for `HandlingEffects::tire_puncture`.
 - **Radar detector** `radar(pos, tier)`: units in Patrol/Pursue state within `radar_range_m[tier]`.
-- **Scanner** `scanner(tier, since_s)`: radio lines delayed by `scanner_delay_s[tier]` (10/6/3 s).
+- **Scanner** `scanner(tier, since: Option<SimTime>)`: radio lines delayed by `scanner_delay_s[tier]` (10/6/3 s).
 
 ### Captain (`captain.rs`)
 `CaptainCommand` (assign unit, roadblock, spikes, helicopter, priority target, call off) is
@@ -129,6 +129,12 @@ The tables are compiled in (`PoliceConfig::builtin()`) and can be loaded from di
 `cargo run --release -p wp_police --example police_bench`: 13 patrols + reinforcements, 4 wanted
 racers → **0.030 ms per 60 Hz frame** (native, release, cloud Xeon 2.1 GHz). Budget 0.5 ms
 native / 1.0 ms browser. Browser not measured yet.
+
+## Determinism
+Absolute time is integer `SimTime` microseconds (`src/time.rs`); durations are `f32` seconds.
+The crate uses no `f64`, no `HashMap` iteration and no libm transcendentals (only `wp_math::sin_cos`
+and repeated multiplication). The RNG is seeded via `PoliceSetup::seed`. `lint-determinism` reports
+no errors for this crate and needs no allow-list entries.
 
 ## Tests
 ```sh

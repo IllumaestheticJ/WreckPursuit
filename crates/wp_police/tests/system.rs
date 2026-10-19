@@ -266,11 +266,11 @@ fn radar_and_scanner() {
         .all(|b| b.distance_m <= cfg.tools.gadgets.radar_range_m[2]));
     assert!(far.windows(2).all(|w| w[0].distance_m <= w[1].distance_m));
     // Scanner tier 2 (3 s delay) shows lines tier 0 (10 s delay) does not yet.
-    let t2 = h.police.scanner(2, -1.0).len();
-    let t0 = h.police.scanner(0, -1.0).len();
+    let t2 = h.police.scanner(2, None).len();
+    let t0 = h.police.scanner(0, None).len();
     assert!(t2 > 0 && t0 == 0, "t2 {t2} t0 {t0}");
     h.run(8.0, &[]);
-    assert!(!h.police.scanner(0, -1.0).is_empty());
+    assert!(!h.police.scanner(0, None).is_empty());
 }
 
 #[test]
@@ -299,7 +299,7 @@ fn crash_scene_draws_a_unit() {
     h.run(120.0, &[]);
     let u = h.police.units().iter().find(|u| u.id == responder).unwrap();
     assert!(dist(u.body.pos, p) < 30.0, "responder not at the scene");
-    assert!(h.police.incidents()[0].scene_until_s.is_some());
+    assert!(h.police.incidents()[0].scene_until.is_some());
 }
 
 #[test]
