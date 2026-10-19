@@ -117,6 +117,23 @@ pedals swap; press throttle to return to first.
 See `crates/wp_vehicle/README.md` → Known gaps (ray probe not shape-cast, no stall/tire
 temperature/wear, fixed AWD split, trait `step` needs Rapier access).
 
+## City chase in the browser (A, on request; touches C's / M's areas)
+
+Asked for directly by the owner. Additive changes outside my crates:
+- `crates/wp_wasm`: `city_chase_json(car, mode)` preset (procedural city, 23:00, traffic 1.0,
+  police 1.0, player on the race grid at 90 km/h); `live_vehicles()` (`[entity, kind]` for every
+  sim vehicle incl. sim-spawned police/traffic); `vehicle_info` works for sim-spawned vehicles and
+  reports `kind`; `Session::car()` resolves their cars (cache by car id); debug
+  `set_vehicle_kind(entity, code)` (refused while recording/replaying); `police_hud_json()` —
+  **placeholder returning `null` until `Sim::police()` lands (lead run 5)**.
+- `apps/testbed-web`: "city chase" button / `?preset=chase[&car=…][&police=N]`; views follow
+  `live_vehicles()` (spawn + despawn); police livery + flashing red/blue light bar with point
+  lights at night + `Auto` siren via J's audio bridge; traffic in muted colours; heat panel =
+  M's `HeatPanel` (UI kit) mounted in a `.wp-ui` overlay, with police/traffic counts.
+- `apps/ui-kit/package.json`: new subpath export `"./hud"` (the HUD module, without the eager
+  1.2 MB fixtures the package index pulls in). Testbed consumes the kit as source
+  (`file:../ui-kit`, `preact`, esbuild JSX, `resolve.dedupe`).
+
 ## Roster check with the converter + on-demand AWD (A, after lead run 4)
 
 09's automatics and on-demand AWD cars now run on the real converter and coupling (0–100,
