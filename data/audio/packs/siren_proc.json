@@ -1,0 +1,55 @@
+{
+  "id": "siren_proc",
+  "kind": "Siren",
+  "description": "Procedural electronic siren; the cadence comes from audio_config.json via the voice's synth params.",
+  "cues": {
+    "siren/wail": {
+      "source": {
+        "Synth": {
+          "synth": "siren",
+          "params": {
+            "wave": 1.0
+          }
+        }
+      },
+      "gain": 1.0,
+      "looped": true
+    },
+    "siren/yelp": {
+      "source": {
+        "Synth": {
+          "synth": "siren",
+          "params": {
+            "wave": 1.0
+          }
+        }
+      },
+      "gain": 1.0,
+      "looped": true
+    },
+    "siren/phaser": {
+      "source": {
+        "Synth": {
+          "synth": "siren",
+          "params": {
+            "wave": 1.0
+          }
+        }
+      },
+      "gain": 1.0,
+      "looped": true
+    },
+    "siren/hilo": {
+      "source": {
+        "Synth": {
+          "synth": "siren",
+          "params": {
+            "wave": 0.6
+          }
+        }
+      },
+      "gain": 1.0,
+      "looped": true
+    }
+  }
+}

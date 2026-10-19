@@ -11,6 +11,7 @@ members = [
     "crates/wp_economy",
     "crates/wp_net",
     "crates/wp_sim",
+    "crates/wp_audio",
     "crates/wp_wasm",
     "apps/server",
     "apps/simcli",
@@ -39,6 +40,7 @@ wp_weather = { path = "crates/wp_weather" }
 wp_economy = { path = "crates/wp_economy" }
 wp_net = { path = "crates/wp_net" }
 wp_sim = { path = "crates/wp_sim" }
+wp_audio = { path = "crates/wp_audio" }
 
 # External crates
 rapier3d = { version = "0.36", features = ["enhanced-determinism", "serde-serialize"] }
