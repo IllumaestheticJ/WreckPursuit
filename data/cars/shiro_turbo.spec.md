@@ -140,7 +140,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 6.3 s | 258 km/h | 37.5 m | 0.95 g | — |
+| sim | 6.4 s | 260 km/h | 37.1 m | 0.96 g | — |
 | estimate | 6.0 s | 271 km/h | 34.5 m | 1.01 g | 591 |
 
 ## Damage lattice (`data/lattices/shiro_turbo.json`)

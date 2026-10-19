@@ -664,6 +664,8 @@ def adjust_lattice(lat: dict, c: dict, mass: float) -> list[str]:
                    "detach at 0.07 m (vs 0.15) — spring hangers tear out of the floor.")
 
     # 6. Police push bar: detachable tube frame ahead of the bumper, bolted to the bumper beam.
+    # Region `Accessory` (contract v0.3.0): its own detach group, no health weight, billed as a
+    # bolt-on part rather than as front-bumper damage.
     if lt.get("pushbar"):
         pkg = lt.get("police_package", {})
         pb_kg = pkg.get("pushbar_kg", PUSHBAR_MASS_KG)
@@ -683,7 +685,7 @@ def adjust_lattice(lat: dict, c: dict, mass: float) -> list[str]:
                 nid = len(nodes)
                 nodes.append({"id": nid, "pos_m": [round(x, 4), round(y_bar, 4), z],
                               "mass_kg": pb_kg / 4, "pinned_to_chassis": False,
-                              "region": "FrontBumper"})
+                              "region": "Accessory"})
                 new.append(nid)
         lo_l, lo_r, hi_l, hi_r = new
         for a_, b_ in ((lo_l, lo_r), (hi_l, hi_r), (lo_l, hi_l), (lo_r, hi_r), (lo_l, hi_r), (lo_r, hi_l)):
@@ -695,7 +697,7 @@ def adjust_lattice(lat: dict, c: dict, mass: float) -> list[str]:
                 beams.append({"a": m, "b": nid, "material_id": PUSHBAR_MOUNT[0],
                               "area_m2": pb_mount, "breakable": True,
                               "detach_group": GROUP_PUSHBAR})
-        lat["detachables"].append({"group": GROUP_PUSHBAR, "region": "FrontBumper",
+        lat["detachables"].append({"group": GROUP_PUSHBAR, "region": "Accessory",
                                    "hinge_nodes": [lo_l, lo_r], "break_impulse_ns": pb_imp,
                                    "mass_kg": pb_kg})
         extra = ""
@@ -707,7 +709,7 @@ def adjust_lattice(lat: dict, c: dict, mass: float) -> list[str]:
                     bm["area_m2"] *= 2.0
                     n += 1
             extra = f" Front bumper beam ×2 ({n} beams), as gen-lattice's cruiser profile does."
-        log.append(f"Push bar: 4 extra FrontBumper nodes 0.10 m ahead of the bumper (z {zs[0]}/"
+        log.append(f"Push bar: 4 extra Accessory-region nodes 0.10 m ahead of the bumper (z {zs[0]}/"
                    f"{zs[1]} m), {PUSHBAR[0]} {pb_sec:.1e} m² tubes bolted to the bumper-beam "
                    f"rail nodes with {pb_mount:.1e} m² mounts; detachable group {GROUP_PUSHBAR}, "
                    f"{pb_imp:.0f} N·s, {pb_kg:.0f} kg.{extra}")

@@ -139,7 +139,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 6.5 s | 242 km/h | 40.3 m | 0.85 g | — |
+| sim | 5.5 s | 244 km/h | 39.6 m | 0.85 g | — |
 | estimate | 6.1 s | 255 km/h | 38.1 m | 0.91 g | 558 |
 
 ## Damage lattice (`data/lattices/sentinel_wolfhound.json`)
@@ -150,4 +150,4 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 - Era `2010s`: gen-lattice's default HSS passenger cell kept as is.
 - Steel hood: 132 hood beams aluminum → mild_steel.
 - Detachables: steel bumpers ×2.3 break impulse / ×4 mass; steel hood ×1.4 / ×1.6.
-- Push bar: 4 extra FrontBumper nodes 0.10 m ahead of the bumper (z 0.35/0.8 m), hss 8.0e-04 m² tubes bolted to the bumper-beam rail nodes with 6.0e-04 m² mounts; detachable group 8, 15000 N·s, 25 kg.
+- Push bar: 4 extra Accessory-region nodes 0.10 m ahead of the bumper (z 0.35/0.8 m), hss 8.0e-04 m² tubes bolted to the bumper-beam rail nodes with 6.0e-04 m² mounts; detachable group 8, 15000 N·s, 25 kg.

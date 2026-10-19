@@ -301,10 +301,10 @@
     {"id":297,"pos_m":[0.4202,2.075,0.26],"mass_kg":6.3209877,"pinned_to_chassis":false,"region":"FrameFront"},
     {"id":298,"pos_m":[-0.4202,2.075,0.6266],"mass_kg":6.3209877,"pinned_to_chassis":false,"region":"FrameFront"},
     {"id":299,"pos_m":[0.4202,2.075,0.6266],"mass_kg":6.3209877,"pinned_to_chassis":false,"region":"FrameFront"},
-    {"id":300,"pos_m":[-0.6112,2.625,0.35],"mass_kg":10.0,"pinned_to_chassis":false,"region":"FrontBumper"},
-    {"id":301,"pos_m":[0.6112,2.625,0.35],"mass_kg":10.0,"pinned_to_chassis":false,"region":"FrontBumper"},
-    {"id":302,"pos_m":[-0.6112,2.625,0.8],"mass_kg":10.0,"pinned_to_chassis":false,"region":"FrontBumper"},
-    {"id":303,"pos_m":[0.6112,2.625,0.8],"mass_kg":10.0,"pinned_to_chassis":false,"region":"FrontBumper"}
+    {"id":300,"pos_m":[-0.6112,2.625,0.35],"mass_kg":10.0,"pinned_to_chassis":false,"region":"Accessory"},
+    {"id":301,"pos_m":[0.6112,2.625,0.35],"mass_kg":10.0,"pinned_to_chassis":false,"region":"Accessory"},
+    {"id":302,"pos_m":[-0.6112,2.625,0.8],"mass_kg":10.0,"pinned_to_chassis":false,"region":"Accessory"},
+    {"id":303,"pos_m":[0.6112,2.625,0.8],"mass_kg":10.0,"pinned_to_chassis":false,"region":"Accessory"}
   ],
   "beams": [
     {"a":0,"b":1,"material_id":"pp_bumper","area_m2":0.00012,"breakable":true,"detach_group":null},
@@ -2240,7 +2240,7 @@
     {"group":5,"region":"RightDoorF","hinge_nodes":[192,196],"break_impulse_ns":15215.198,"mass_kg":30.340065},
     {"group":6,"region":"LeftDoorR","hinge_nodes":[129,133],"break_impulse_ns":15215.198,"mass_kg":30.340065},
     {"group":7,"region":"RightDoorR","hinge_nodes":[132,136],"break_impulse_ns":15215.198,"mass_kg":30.340065},
-    {"group":8,"region":"FrontBumper","hinge_nodes":[300,301],"break_impulse_ns":30000.0,"mass_kg":40.0}
+    {"group":8,"region":"Accessory","hinge_nodes":[300,301],"break_impulse_ns":30000.0,"mass_kg":40.0}
   ],
   "components": [
     {"kind":"Engine","node_ids":[292,293,294,295,296,297,298,299],"intrusion_fail_m":0.3,"intrusion_total_m":0.54},

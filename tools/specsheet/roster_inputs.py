@@ -969,7 +969,7 @@ CARS = [
         trans=dict(
             desc="5-speed manual, open front differential",
             layout="Fwd",
-            gears=[3.55, 1.90, 1.28, 0.97, 0.78], final=4.06, reverse=3.31, shift=0.30,
+            gears=[3.55, 1.90, 1.28, 0.97, 0.78], final=4.06, reverse=3.31, shift=0.25,
             diff_f="Open", diff_r="Open", clutch_factor=1.35,
         ),
         tires=dict(front="175/65R14", rear="175/65R14", compound="street", unsprung=(15.0, 14.0)),
@@ -982,7 +982,7 @@ CARS = [
             bar=P_MODERN, handbrake_frac=1.0,
         ),
         steer=dict(ratio=16.0, turn_circle_m=10.0, ackermann=0.7, rack_speed=1.1),
-        price=4500,
+        price=7000,
         durability=2,
         note=("The city's most common car: a five-door supermini that fills traffic queues and "
               "parking bays. Light, upright and lazy above 100 km/h, it leans hard, understeers "
@@ -1045,7 +1045,7 @@ CARS = [
             bar=P_MODERN, handbrake_frac=0.6,
         ),
         steer=dict(ratio=18.0, turn_circle_m=13.4, ackermann=0.7, rack_speed=1.2),
-        price=9000,
+        price=20000,
         durability=4,
         note=("The delivery van that is always double-parked. Heavy, tall and soft, it leans "
               "like a boat, brakes long and gets out of breath above 150 km/h — but at "
@@ -1108,7 +1108,7 @@ CARS = [
             bar=P_MODERN, handbrake_frac=1.0,
         ),
         steer=dict(ratio=18.5, turn_circle_m=11.4, ackermann=0.7, rack_speed=1.0),
-        price=6500,
+        price=21000,
         durability=4,
         note=("The tradesman's truck: a small, light pickup with a light rear end that steps "
               "out in the wet and a gearbox that likes to be rowed. Slow, but honest, cheap "

@@ -137,7 +137,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 7.1 s | 248 km/h | 38.8 m | 0.93 g | — |
+| sim | 7.1 s | 248 km/h | 38.1 m | 0.93 g | — |
 | estimate | 6.6 s | 255 km/h | 35.8 m | 0.98 g | 552 |
 
 ## Damage lattice (`data/lattices/kestrel_ts.json`)
