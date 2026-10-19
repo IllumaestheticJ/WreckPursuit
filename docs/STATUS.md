@@ -103,6 +103,11 @@ restores the car; escape pays the bounty; sirens and light bars follow each unit
 The greybox demo loop from `docs/design/DEMO_GREYBOX.md` is complete on the link; next is the
 owner's playtest (`docs/design/PLAYTEST.md`).
 
+## Step 2 started (2026-10-19, owner request)
+Four parallel sessions: weather in the game (`lead/weather-in-game`), races in the city with a race
+menu and AI racers (L), a garage and career that persist between runs (G), and the 4-player test
+with a player cop (F). Real sounds (J2) were already running.
+
 ## Next (toward the single-player greybox demo)
 C draws police/traffic + city-chase preset; M wires the heat HUD and repair bill; E/D share
 roads and controller; G + lead wire capture/escape → economy.
