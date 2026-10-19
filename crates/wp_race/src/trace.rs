@@ -90,6 +90,10 @@ struct RunState {
     speed: f32,
     stopped: bool,
     next_incident: usize,
+    /// Current world position (continuous: lateral changes are rate-limited).
+    pos: [f32; 3],
+    /// Set by a teleport incident: the next position update jumps.
+    teleported: bool,
 }
 
 /// Width of one scripted gear, m/s.
@@ -128,6 +132,8 @@ pub fn simulate(
             speed: 0.0,
             stopped: false,
             next_incident: 0,
+            pos: slot.pos,
+            teleported: false,
         });
     }
     let green = judge.start(0).expect("scripted race start");
@@ -172,7 +178,10 @@ pub fn simulate(
                         kind,
                     }),
                     ScriptedIncident::Swerve { offset_m } => st.side_m = offset_m,
-                    ScriptedIncident::Teleport { jump_m } => st.along_m += jump_m,
+                    ScriptedIncident::Teleport { jump_m } => {
+                        st.along_m += jump_m;
+                        st.teleported = true;
+                    }
                     ScriptedIncident::Stop => st.stopped = true,
                 }
             }
@@ -183,20 +192,34 @@ pub fn simulate(
                 st.speed = (st.speed + r.accel_mps2 * PHYSICS_DT).min(r.top_speed_mps);
             }
             st.along_m += st.speed * PHYSICS_DT;
+            // Follow the centreline at the lateral offset, but never faster than the car moves
+            // plus 8 m/s sideways, so corners and swerves stay physically continuous.
+            let (c, d) = judge.course().point_at(st.along_m);
+            let rt = v2::right(d);
+            let want = [c[0] + rt[0] * st.side_m, c[1] + rt[1] * st.side_m, c[2]];
+            let delta = v2::sub(v2::xy(want), v2::xy(st.pos));
+            let dist = v2::len(delta);
+            let max_step = (st.speed + 8.0) * PHYSICS_DT;
+            if st.teleported || dist <= max_step {
+                st.pos = want;
+                st.teleported = false;
+            } else {
+                let k = max_step / dist;
+                st.pos = [st.pos[0] + delta[0] * k, st.pos[1] + delta[1] * k, want[2]];
+            }
         }
         if tick % sample_every == 0 || !events.is_empty() {
             let samples: Vec<RacerSample> = racers
                 .iter()
                 .zip(states.iter())
                 .map(|(r, st)| {
-                    let (c, d) = judge.course().point_at(st.along_m);
-                    let rt = v2::right(d);
+                    let (_, d) = judge.course().point_at(st.along_m);
                     let gear = 1 + (st.speed / GEAR_SPAN_MPS) as i8;
                     let in_gear = (st.speed % GEAR_SPAN_MPS) / GEAR_SPAN_MPS;
                     let red = r.entry.redline_rpm;
                     RacerSample {
                         racer: r.entry.racer,
-                        pos: [c[0] + rt[0] * st.side_m, c[1] + rt[1] * st.side_m, c[2]],
+                        pos: st.pos,
                         vel: [d[0] * st.speed, d[1] * st.speed, 0.0],
                         speed_mps: st.speed,
                         throttle: if !st.stopped && t_rel >= r.launch_s {
