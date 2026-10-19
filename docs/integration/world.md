@@ -801,6 +801,13 @@ expectations (0 racer contacts, no pursuit before 13.1 s). Not mine and untouche
 the lead's post-merge bless / an owner's look. (The grid and soak goldens I re-blessed were
 in that stale set too, so blessing them also absorbs that merge drift.)
 
+*Gate.* fmt, `clippy --workspace -D warnings`, wasm32 build of `wp_wasm`: pass.
+`cargo test --workspace --no-fail-fast`: everything passes except three tests that fail
+identically on `lead/round12` without my change — simcli `goldens_match` and
+`all_scenarios_pass_and_are_deterministic_in_process` (the stale goldens /
+`police_sideswipe_patrol_night` above), and `wp_net` `four_clients_three_minutes_in_port_vesper`
+(p0 pursuit ends `Escaped`, expected `Captured`; checked on `aee4916`).
+
 Determinism: both `city_blocked_parked_player_*` pass `simcli determinism`. No new RNG draws,
 f32 only. **Contract change requests:** none.
 
