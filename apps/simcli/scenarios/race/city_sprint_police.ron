@@ -15,6 +15,14 @@
 // The test asserts a pursuit starts during or after the race, and a control run without the
 // report asserts nobody is chased (the report is what lifts a racer over wanted level 1).
 //
+// Re-aimed in round 8 (contract v0.3.0 moved patrol spawns): a traffic camera now covers the
+// grid, so the meet report counts as witnessed (full +3 heat, no civilian call, no patrol
+// sent), and wanted level 1 needs 10 heat. The entrants are meet regulars police already know
+// (police_heat 3.0): report + witnessed speeding lifts them over L1, while without the report
+// they stay below it. Searched with WP_RACE_AIM_HEAT in race_police.rs: starting heat 2.0-4.5
+// passes both the report run and the control run (route and seed unchanged; shifting the
+// route or the seed gave only isolated passing points); 3.0 is the middle of that band.
+//
 // Run standalone, simcli has no race block and no AI driver for these entities (see
 // docs/integration/race.md, requests to I and N), so the cars wait on the grid while traffic
 // and patrols run around them.
@@ -30,10 +38,10 @@
     // Parked cars make debug test runs very slow and take no part in the race.
     parked_cars: false,
     entities: [
-        (id: "ai_coupe", car: "debug_coupe", pos: (58.05, -440.0, 0.0)),
-        (id: "ai_sedan", car: "debug_sedan", pos: (63.05, -444.0, 0.0)),
-        (id: "ai_coupe_2", car: "debug_coupe", pos: (58.05, -448.0, 0.0)),
-        (id: "ai_sedan_2", car: "debug_sedan", pos: (63.05, -452.0, 0.0)),
+        (id: "ai_coupe", car: "debug_coupe", pos: (58.05, -440.0, 0.0), police_heat: 3.0),
+        (id: "ai_sedan", car: "debug_sedan", pos: (63.05, -444.0, 0.0), police_heat: 3.0),
+        (id: "ai_coupe_2", car: "debug_coupe", pos: (58.05, -448.0, 0.0), police_heat: 3.0),
+        (id: "ai_sedan_2", car: "debug_sedan", pos: (63.05, -452.0, 0.0), police_heat: 3.0),
     ],
     duration_s: 30.0,
     hash_every: 240,

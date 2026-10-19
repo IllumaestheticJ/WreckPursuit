@@ -3,7 +3,7 @@
 - **Workstream / prompt:** 15 — race types, event scheduler, crews & territory (machine L)
 - **Branch:** `ws/race`
 - **Crates / folders owned:** `crates/wp_race`, `data/events/`, `apps/simcli/scenarios/race/`
-- **Contract version built against:** 0.2.0 (merged `main` + lead branch `claude/laughing-newton-0xqr6q`, round 6b, 2026-10-19). Nothing here needs v0.3.0; see "Drops onto v0.3.0" below.
+- **Contract version built against:** 0.3.0 (merged `main` at round 8, 2026-10-19).
 
 Design write-up: `crates/wp_race/README.md`. Data: `data/events/README.md`.
 
@@ -98,7 +98,8 @@ Other entry points: `Course::{straight, closed, new, grid, marshal_spots, projec
 | 07 `wp_net` (F) | call the lifecycle above from the server; `RaceCommand` messages (R6) | lobby transport is theirs | none; `trace::simulate` + simcli tests stand in |
 | 06 `wp_police` (E) | presence override API, capture notification, heat add for `Stake::heat`, heat-decay multiplier input; a non-stepping `PoliceSystem::report(&SimEvent)` (or a typed race report) | race stakes beyond cash | `PatrolAttracted` goes in as `Reckless` violations (`police::report_events`) through a zero-length `step` (`police::deliver`) |
 | Lead (`wp_sim`) | `Sim::queue_police_events(Vec<SimEvent>)`: events folded into the next tick's police step (or `Sim::police_mut()`) | race reports must reach the sim's own `PoliceSystem` | clone `sim.police()`, `police::deliver`, `sim.set_police(clone)` (works, deterministic, clones the road graph once per report) |
-| 08 `wp_economy` (G) | accept `wp_race` kinds (R5) or a purse from `Stake`; charge `cargo_damage_cost`; apply `CrewCut` | 3 of 8 kinds map onto Sprint | `bridge::economy_race_type` maps Outrun→Touge, TimeAttack→Circuit, Checkpoint/Cannonball/Delivery→Sprint |
+| 08 `wp_economy` (G) | R5 (round 8 proposal, below): apply `bridge::economy_race`'s `purse_scale` / `entry_scale` in `settle_race` / `entry_fee` (e.g. `RaceSetup::purse_scale: f32`, `entry_scale: f32`, serde default 1.0; G's crate, no contract change); charge `cargo_damage_cost`; apply `CrewCut` | the lobby advertises the stake; the economy pays its own table | `bridge::economy_race` returns the scales and the advertised purse/buy-in; settlement pays the economy's unscaled number until G applies them |
+| 06 `wp_police` (E) | (round 8) a civilian *report* (`PatrolAttracted` → `Reckless` at the venue) should dispatch a unit even when a traffic camera also sees the racer; today a camera-witnessed violation files no report incident, so nobody is sent | a hot meet under a camera attracts no patrol | `race_city_sprint_police` entrants start at 3.0 heat (meet regulars) so the report + witnessed speeding reaches L1 |
 | 02 `wp_vehicle` (A) | optional: runtime payload hook (`set_payload(kg, chassis_offset)`) | unloading destroyed cargo mid-race | cargo mass is applied at spawn through the `VehicleDef` (`cargo::load_cargo`), felt by the physics |
 | 02 `wp_vehicle` (A) | FYI: `debug_sedan` pulls ~12 m right over 402 m at full throttle with zero steer (see `race_drag_coupe_vs_sedan`, which now dabs left twice) | torque steer or asymmetry? | scenario corrects it |
 | 05 `wp_world` (D) | a marshal prop kind (`PropKind::Marshal`) or OK to spawn them as `Sim::add_static_box` | sanctioned events | `Course::marshal_spots` returns poses only |
@@ -117,7 +118,7 @@ final variant lists. **R1 below is the final list for `RaceEvent`.**
 | R2 | `PolicePresence { None, Normal, Elevated, Max }` in contracts | `police_presence_override: max` for illegal daytime races must reach `wp_police` | 06, 07 | for v0.3.0, with E's typed `PoliceEvent` |
 | R3 | `DistrictId(u32)` = zone index | territory is keyed by district | 05, 08, 06 | deferred to v0.3.0 by the lead (with D, G); wp_race keeps a local `DistrictId` |
 | R4 | Durable account id (accepted F NET-5) also used by crews/licences | crews outlive instances | 07, 08 | accepted upstream, not in v0.2.0; wp_race keeps a local `RacerAccount(u64)` |
-| R5 | `wp_economy::RaceType` keyed by the contract `RaceKind` (or `RacePayout` carries the purse from `wp_race::Stake`) | Outrun, Checkpoint, Cannonball, Delivery, TimeAttack have no economy type; legality is lost | 08 | for v0.3.0 with typed `EconomyEvent` / `RacePayout` |
+| R5 | Round 8 proposal to G (no contract change): keep the five contract `RaceType`s with the fixed mapping Sprint/Checkpoint/Cannonball/Delivery → Sprint, Circuit/TimeAttack → Circuit, Outrun → Touge, Drag → Drag (`bridge::economy_race_type`, locked by `economy_race_type_mapping_is_locked`); kind premium and legality travel as `bridge::economy_race`'s `purse_scale` / `entry_scale` = advertised stake ÷ the economy's Arcade purse/buy-in, which `wp_economy` multiplies in (placement share, wanted multiplier, clean bonus and Simulation premium stay the economy's). Both tables already agree at the shared feel target (Compact 9 km night street sprint: scale 0.9-1.1, tested) | Outrun, Checkpoint, Cannonball, Delivery, TimeAttack and legality otherwise pay the wrong purse | 08 | wp_race side done; waiting on G to apply the scales |
 | R6 | `ClientToServer::RaceCommand { Enter { event }, Withdraw { event }, Ready }`, `ServerToClient::Race(RaceEvent)` | lobby join/leave from clients | 07, 04 | for v0.3.0, inside F's full message set |
 
 ### City sprint (lead run 4 request, done on `ws/race`)
@@ -231,3 +232,25 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
 2. `DnfReason::Fled` was added to the contract (lead amendment) for your AI entrants.
 
 3. **Parked test (lead, round 8):** `tests/race_police.rs::city_sprint_pulls_in_police` is `#[ignore]`. Contract v0.3.0 moved patrol spawns, so re-aim the sprint (the lead re-aimed `golden/city_chase` by searching start positions; see its header) and un-ignore.
+
+### Round 8 — done on `ws/race`
+
+1. **R5 with G:** `bridge::economy_race(econ, stakes, kind, legality, class, bracket, length,
+   phase, mode) -> EconomyRace { setup, purse_scale, entry_scale, purse, entry_fee }`. A scaled
+   settlement pays exactly the advertised stake for every kind × legality × phase (tested in
+   `economy_race_pays_the_advertised_stake`); the mapping onto the five contract `RaceType`s
+   is locked by a test. G's half: multiply the scales in (see Needs and R5). G had not pushed
+   anything for R5 when this round ended, so this is L's proposal.
+2. **`DnfReason::Fled`:** `wp_race` re-exports the contract `DnfReason`; `entrants` maps
+   `OpponentEvent::Abandoned` to `Dnf(Fled)` (test `entrants::tests`); the police race accepts
+   `Fled` as a non-wreck outcome.
+3. **Parked test un-ignored:** `tests/race_police.rs::city_sprint_pulls_in_police` passes again.
+   Cause: under v0.3.0 a traffic camera covers the grid, so the meet report counts as
+   witnessed (full +3 heat but no civilian call, so no patrol is sent), and L1 needs 10 heat.
+   Re-aim: the four entrants start at `police_heat: 3.0` (meet regulars police already know);
+   route, grid and seed unchanged (the race still finishes in ~13 s). Searched with the new
+   `WP_RACE_AIM_{DY,SEED,HEAT}` knobs in that test: starting heat 2.0–4.5 passes both the
+   report run and the no-report control; shifting the route or changing the seed only gave
+   isolated passing points (and shifted routes queue at a signal). Golden
+   `race_city_sprint_police` re-blessed (`[bless]`): starting heat is in the police hash.
+   Request to E filed under Needs (reports under a camera should still dispatch).

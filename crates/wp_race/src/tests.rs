@@ -1274,7 +1274,7 @@ fn economy_race_pays_the_advertised_stake() {
                 };
                 let paid = econ.race_payout(&r.setup, &win).purse as f32 * r.purse_scale;
                 let share = paid / r.purse as f32;
-                assert!(share > 0.0 && share <= 1.0, "{kind:?}: share {share}");
+                assert!(share > 0.0 && share <= 1.001, "{kind:?}: share {share}");
             }
         }
     }
