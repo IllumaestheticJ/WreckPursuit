@@ -173,6 +173,14 @@ punishing but survivable".
 `audio_sideswipe_scrape`, `regression_grid_24`) and `golden_barrier_56kmh_arcade` is new. Every
 scenario expectation passes; no non-crash golden changed.
 
+**After merging lead run 5** (police/traffic as sim vehicles): six more goldens re-blessed for
+the same tuning — `golden_night_pursuit_escape`, `opponent_circuit_8x5`,
+`opponent_open_roads_traffic`, `opponent_reverse_grid_2laps`, `world_traffic_soak`,
+`world_traffic_soak_observer`. Their car-to-car contacts now take the new side energy share.
+Checked: with `main`'s `wp_damage` + `data/lattices` swapped in, all six match the run-5
+goldens, so the drift is only this tuning. Scenario expectations, determinism and the
+fresh-process check all pass (`cargo test --release -p simcli`).
+
 ## Response to v0.2.0 (lead run 3) — machine B, 2026-10-19
 
 Merged `main` (contract 0.2.0). My items from the "applied" entry:
