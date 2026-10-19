@@ -1,0 +1,84 @@
+# Race rules per kind. Owned by workstream 15 (wp_race). Loaded by wp_race::RulesTable.
+# Units: SI (m, s, N·s, m/s). Keys under [kinds.*] are RaceKind::key().
+
+[common]
+# Clean race = no contact above this impulse and no civilian hits. A 1 300 kg car tapping
+# another at ~1 m/s closing is ~1 300 N·s; a door-to-door lean stays under the limit.
+contact_clean_threshold_ns = 2500.0
+civilian_hit_threshold_ns = 400.0
+# Gate tolerance = base + per_mps_s × speed. 0.02 s ≈ one sample at 60 Hz with margin.
+gate_tolerance_base_m = 1.0
+gate_tolerance_per_mps_s = 0.02
+corridor_margin_m = 2.0
+corridor_grace_s = 3.0
+max_plausible_speed_mps = 110.0
+countdown_s = 3.0
+
+[kinds.sprint]
+grid = { Staggered = { row_gap_m = 8.0, column_gap_m = 5.0 } }
+min_racers = 2
+max_racers = 8
+time_limit_s = 900.0
+finish_window_s = 60.0
+
+[kinds.circuit]
+grid = { Staggered = { row_gap_m = 8.0, column_gap_m = 5.0 } }
+min_racers = 2
+max_racers = 12
+time_limit_s = 1800.0
+finish_window_s = 90.0
+
+[kinds.outrun]
+grid = { SideBySide = { lane_gap_m = 4.5 } }
+min_racers = 2
+max_racers = 2
+time_limit_s = 300.0
+finish_window_s = 0.0
+
+[kinds.checkpoint]
+grid = { Staggered = { row_gap_m = 8.0, column_gap_m = 5.0 } }
+min_racers = 1
+max_racers = 8
+time_limit_s = 420.0
+finish_window_s = 60.0
+
+[kinds.cannonball]
+grid = { Staggered = { row_gap_m = 8.0, column_gap_m = 5.0 } }
+min_racers = 2
+max_racers = 8
+time_limit_s = 1200.0
+finish_window_s = 120.0
+
+[kinds.delivery]
+grid = { Staggered = { row_gap_m = 8.0, column_gap_m = 5.0 } }
+min_racers = 1
+max_racers = 6
+time_limit_s = 600.0
+finish_window_s = 60.0
+
+[kinds.drag]
+grid = { SideBySide = { lane_gap_m = 5.0 } }
+min_racers = 2
+max_racers = 2
+time_limit_s = 60.0
+finish_window_s = 15.0
+
+[kinds.time_attack]
+grid = { SingleFile = { gap_m = 12.0 } }
+min_racers = 1
+max_racers = 8
+time_limit_s = 900.0
+finish_window_s = 0.0
+
+[drag]
+distance_m = 402.0
+jump_start_m = 0.3
+launch_throttle = 0.5
+shift_window = [0.88, 0.99]
+
+[outrun]
+overtake_margin_m = 2.0
+
+[delivery]
+cargo_threshold_ns = 800.0
+cargo_fragility_ns = 12000.0

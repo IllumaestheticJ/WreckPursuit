@@ -1,0 +1,86 @@
+{
+  "name": "golden_tbone",
+  "contract_version": "0.1.0",
+  "hash_spec": 1,
+  "systems": "world,vehicle,damage,police,net",
+  "seed": 104,
+  "ticks": 1440,
+  "final_hash": "079b3db716e76793",
+  "entities": [
+    {
+      "id": "victim",
+      "entity": 1,
+      "car": "debug_sedan",
+      "final_speed_mps": 1.4825542,
+      "max_speed_mps": 8.232753,
+      "distance_m": 30.537773,
+      "path_length_m": 32.69562,
+      "final_health": 0.8641349,
+      "max_lateral_g": 49.14729,
+      "max_long_g": 11.000193,
+      "max_yaw_rate_rps": 1.4090643,
+      "crush_depth_m": 0.09263726,
+      "components_failed": 0,
+      "parts_detached": 0,
+      "wheels_detached": 0,
+      "total_loss": false,
+      "min_z_m": -0.041039705
+    },
+    {
+      "id": "striker",
+      "entity": 2,
+      "car": "debug_coupe",
+      "final_speed_mps": 14.033342,
+      "max_speed_mps": 14.1279335,
+      "distance_m": 57.170677,
+      "path_length_m": 57.519867,
+      "final_health": 0.9017581,
+      "max_lateral_g": 10.907315,
+      "max_long_g": 45.856487,
+      "max_yaw_rate_rps": 1.4718987,
+      "crush_depth_m": 0.32972762,
+      "components_failed": 0,
+      "parts_detached": 0,
+      "wheels_detached": 0,
+      "total_loss": false,
+      "min_z_m": -0.01018101
+    }
+  ],
+  "events_total": 15,
+  "max_events_per_tick": 4,
+  "net": {
+    "snapshots": 360,
+    "bytes": 860737
+  },
+  "warnings": [],
+  "expectations": [
+    {
+      "expect": "speed_at(entity:\"striker\",t_s:2.5,min:12.0,max:15.0)",
+      "actual": "13.026843",
+      "passed": true
+    },
+    {
+      "expect": "speed_at(entity:\"victim\",t_s:2.5,min:7.0,max:9.0)",
+      "actual": "7.84251",
+      "passed": true
+    }
+  ],
+  "pending": [
+    {
+      "expect": "crush_depth(entity:\"victim\",min:0.15,max:0.6)",
+      "actual": "0.09263726",
+      "passed": false
+    },
+    {
+      "expect": "components_failed(entity:\"victim\",min:1,max:20)",
+      "actual": "0",
+      "passed": false
+    },
+    {
+      "expect": "total_loss(entity:\"victim\",expected:false)",
+      "actual": "false",
+      "passed": true
+    }
+  ],
+  "failures": []
+}

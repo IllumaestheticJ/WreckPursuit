@@ -1,0 +1,70 @@
+# Patrol and pursuit driving (wp_police::pursuit). Chases are slow, calculated and lethal to both
+# sides: pursuers are capped, plan corners conservatively and spend a risk budget.
+
+think_hz = 10.0
+patrol_speed_factor = 1.0
+respond_speed_factor = 1.15
+# Pursuit speed = min(target speed * (1 + target_speed_margin), pursuit_cap_mps[phase]).
+target_speed_margin = 0.10
+patrol_cornering_g = 0.35
+pursuit_cornering_g = 0.65
+shadow_cornering_g = 0.45
+
+[pursuit_cap_mps]
+dawn = 36.0
+day = 40.0
+dusk = 36.0
+night = 32.0
+
+# Ground unit line-of-sight range (headlights at night).
+[los_range_m]
+dawn = 200.0
+day = 260.0
+dusk = 200.0
+night = 140.0
+
+[unit]
+accel_mps2 = 4.0
+brake_mps2 = 6.5
+grip_g = 0.95
+crash_offset_m = 7.0
+# Health lost per (impact speed m/s)^2 / 1000. Simulation: a 25 m/s impact is a total loss.
+crash_health_per_kmps2 = { arcade = 0.8, simulation = 1.7 }
+contact_health_per_kmps2 = { arcade = 1.0, simulation = 2.5 }
+# At or below this health the unit is a total loss (Simulation: one hard hit ends it).
+total_loss_health = { arcade = 0.0, simulation = 0.25 }
+
+[risk]
+budget = 10.0
+lateral_g = 0.7
+cost_per_s_lateral = 1.0
+cost_near_miss = 1.5
+cost_collision = 4.0
+regen_per_s = 0.05
+
+# Built-in traffic hazard model for the headless driver (replaced by real traffic contacts).
+[hazard]
+speed_exponent = 2
+collision_chance_at_2x = 0.12
+collision_speed_fraction = { min = 0.2, max = 0.9 }
+[hazard.near_miss_per_km]
+dawn = 0.5
+day = 1.5
+dusk = 1.0
+night = 0.3
+
+[tactics]
+shadow_m = { min = 25.0, max = 40.0 }
+boxin_max_kmh = 60.0
+boxin_offset_m = [2.6, 6.0]
+pit_max_kmh = { arcade = 70.0, simulation = 55.0 }
+pit_min_straight_m = 60.0
+pit_engage_m = 12.0
+pit_cooldown_s = 8.0
+rolling_block_lead_m = 18.0
+rolling_block_speed_factor = 0.85
+intercept_horizon_s = { min = 10.0, max = 20.0 }
+intercept_min_gap_m = 150.0
+disengage_health = 0.4
+bent_wheel_toe_rad = 0.02
+puncture_pull_over = 0.5

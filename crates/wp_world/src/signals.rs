@@ -1,16 +1,23 @@
-//! Fixed-time signal controller evaluation. Signals run on simulation seconds (not game time).
+//! Fixed-time signal controller evaluation. Signals run on simulation time (physics ticks of
+//! `PHYSICS_DT`), not game time. Time is an integer tick count, so phase arithmetic is exact.
 
-use wp_contracts::SignalState;
+use wp_contracts::{SignalState, PHYSICS_DT};
 
 use crate::network::SignalController;
 
-/// State of `group` at simulation time `t_s`, plus the seconds until that state ends.
+/// Whole physics ticks in `secs` seconds (rounded).
+pub fn ticks_from_secs(secs: f32) -> u64 {
+    (secs.max(0.0) / PHYSICS_DT).round() as u64
+}
+
+/// State of `group` at simulation tick `tick`, plus the seconds until that state ends.
 ///
 /// Each phase is green → yellow → all-red. A group that is also green in the following phase
 /// stays green through the transition.
-pub fn group_state(sc: &SignalController, group: u8, t_s: f64) -> (SignalState, f32) {
-    let cycle = sc.cycle_s() as f64;
-    let local = (t_s - sc.offset_s as f64).rem_euclid(cycle) as f32;
+pub fn group_state(sc: &SignalController, group: u8, tick: u64) -> (SignalState, f32) {
+    let cycle = ticks_from_secs(sc.cycle_s()).max(1);
+    let offset = ticks_from_secs(sc.offset_s) % cycle;
+    let local = ((tick % cycle + cycle - offset) % cycle) as f32 * PHYSICS_DT;
     let n = sc.phases.len();
     let mut start = 0.0f32;
     for (i, p) in sc.phases.iter().enumerate() {
@@ -87,15 +94,36 @@ mod tests {
     fn phase_sequence() {
         let sc = two_phase();
         assert_eq!(sc.cycle_s(), 45.0);
-        assert_eq!(group_state(&sc, 0, 5.0).0, SignalState::Green);
-        assert_eq!(group_state(&sc, 1, 5.0).0, SignalState::Red);
-        assert_eq!(group_state(&sc, 0, 21.0).0, SignalState::Yellow);
-        assert_eq!(group_state(&sc, 0, 24.0).0, SignalState::Red);
-        assert_eq!(group_state(&sc, 1, 24.0).0, SignalState::Red);
-        assert_eq!(group_state(&sc, 1, 26.0).0, SignalState::Green);
+        assert_eq!(
+            group_state(&sc, 0, ticks_from_secs(5.0)).0,
+            SignalState::Green
+        );
+        assert_eq!(
+            group_state(&sc, 1, ticks_from_secs(5.0)).0,
+            SignalState::Red
+        );
+        assert_eq!(
+            group_state(&sc, 0, ticks_from_secs(21.0)).0,
+            SignalState::Yellow
+        );
+        assert_eq!(
+            group_state(&sc, 0, ticks_from_secs(24.0)).0,
+            SignalState::Red
+        );
+        assert_eq!(
+            group_state(&sc, 1, ticks_from_secs(24.0)).0,
+            SignalState::Red
+        );
+        assert_eq!(
+            group_state(&sc, 1, ticks_from_secs(26.0)).0,
+            SignalState::Green
+        );
         // Wraps.
-        assert_eq!(group_state(&sc, 0, 45.0 + 5.0).0, SignalState::Green);
-        let (st, rem) = group_state(&sc, 0, 21.0);
+        assert_eq!(
+            group_state(&sc, 0, ticks_from_secs(45.0 + 5.0)).0,
+            SignalState::Green
+        );
+        let (st, rem) = group_state(&sc, 0, ticks_from_secs(21.0));
         assert_eq!(st, SignalState::Yellow);
         assert!((rem - 2.0).abs() < 1e-4);
     }
@@ -104,8 +132,14 @@ mod tests {
     fn offset_shifts_cycle() {
         let mut sc = two_phase();
         sc.offset_s = 10.0;
-        assert_eq!(group_state(&sc, 0, 5.0).0, SignalState::Red);
-        assert_eq!(group_state(&sc, 0, 12.0).0, SignalState::Green);
+        assert_eq!(
+            group_state(&sc, 0, ticks_from_secs(5.0)).0,
+            SignalState::Red
+        );
+        assert_eq!(
+            group_state(&sc, 0, ticks_from_secs(12.0)).0,
+            SignalState::Green
+        );
         assert_eq!(group_green_start(&sc, 3), Some(25.0));
     }
 }

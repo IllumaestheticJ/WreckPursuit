@@ -1,0 +1,20 @@
+# Prompt 03: how much collision energy reaches the lattice (Simulation table), frontal and
+# T-bone, at the calibration speeds. Read crush vs speed per value; Arcade sits near 0.45.
+description: Sim impulse_to_lattice_scale 0.4–1.4 → crush / health / failures vs speed
+probe:
+  kind: barrier
+  car: debug_sedan
+  mode: Simulation
+  speeds_kmh: [15, 25, 40, 56, 80]
+params:
+  - {target: "mode:sim:impulse_to_lattice_scale", label: impulse_to_lattice_scale, values: [0.4, 0.6, 0.8, 1.0, 1.2, 1.4]}
+variants:
+  - name: frontal
+    probe: {impact: Frontal}
+    expect:
+      # Prompt 03 calibration (Simulation, debug_sedan): ~0.6 m frontal crush + TotalLoss at 56.
+      - {metric: "crush_m@56", min: 0.45, max: 0.75}
+      - {metric: "total_loss@56", min: 1, max: 1}
+      - {metric: "total_loss@25", min: 0, max: 0}
+  - {name: side (T-bone), probe: {impact: Side}}
+plots: ["crush_m@56", "health@56", "failed_components@56", "repair_total@56"]
