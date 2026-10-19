@@ -422,6 +422,37 @@ pub struct AgentView {
     pub variant: u8,
 }
 
+impl From<&AgentView> for wp_contracts::TrafficAgentSnapshot {
+    /// Contract snapshot of a kinematic agent (v0.3.0, world #6).
+    fn from(a: &AgentView) -> Self {
+        use wp_contracts::traffic_flags as f;
+        let mut flags = 0u8;
+        if a.brake_lights {
+            flags |= f::BRAKE;
+        }
+        if a.hazard_lights {
+            flags |= f::HAZARDS;
+        }
+        if a.turn_signal < 0 {
+            flags |= f::LEFT_SIGNAL;
+        }
+        if a.turn_signal > 0 {
+            flags |= f::RIGHT_SIGNAL;
+        }
+        if a.yielding {
+            flags |= f::YIELDING;
+        }
+        wp_contracts::TrafficAgentSnapshot {
+            id: a.id,
+            pos: a.pos,
+            yaw: a.yaw,
+            speed_mps: a.speed_mps,
+            flags,
+            variant: a.variant,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct Entry {
     s: f32,

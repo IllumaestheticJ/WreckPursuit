@@ -231,33 +231,8 @@ impl SignalController {
 }
 
 /// District kind of a zone. Drives traffic density curves and off-road surfaces.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub enum DistrictKind {
-    /// Downtown: dense all day, nightlife until ~02:00.
-    Core,
-    /// Shops and offices: commute destination.
-    Commercial,
-    /// Housing: commute origin.
-    Residential,
-    /// Factories and yards: shift peaks.
-    Industrial,
-    /// Docks: steady trucks.
-    Port,
-    /// Low-density outskirts.
-    Suburb,
-}
-
-impl DistrictKind {
-    /// All kinds, in declaration order.
-    pub const ALL: [DistrictKind; 6] = [
-        DistrictKind::Core,
-        DistrictKind::Commercial,
-        DistrictKind::Residential,
-        DistrictKind::Industrial,
-        DistrictKind::Port,
-        DistrictKind::Suburb,
-    ];
-}
+/// Since contract v0.3.0 this is `wp_contracts::DistrictId` (same variants, `ALL`).
+pub use wp_contracts::DistrictId as DistrictKind;
 
 /// A district polygon.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -47,7 +47,7 @@ pub use clock::{sun_direction, WorldClock, DEFAULT_TIME_RATIO};
 pub use map::{CityMap, SegId};
 pub use network::{RoadError, RoadNetwork};
 pub use props::{PropKind, StaticProp};
-pub use roads::{RoadEdge, RoadGraphView};
+pub use roads::{RoadEdge, RoadGraphView, RoadNetworkIndex};
 pub use routes::{ActiveRoute, Checkpoint, Route, RouteClosure};
 pub use traffic::{
     AgentId, AgentView, Hazard, Lod, LodChange, PhysicalAgent, TrackedVehicle, TrafficConfig,
