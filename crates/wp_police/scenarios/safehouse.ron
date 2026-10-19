@@ -1,0 +1,13 @@
+// Wanted racer drives to a safehouse and waits 10 s with no unit within 150 m: pursuit/wanted
+// state ends with the safehouse outcome.
+(
+    name: "police_safehouse",
+    seed: 700,
+    time_of_day_h: 3.0,
+    duration_s: 200.0,
+    stop_after_first_pursuit: true,
+    racers: [(district: Suburb, speed_factor: 1.5, initial_heat: 95.0, safehouse_at_s: Some(0.0), violations: false, stay_in_district: false)],
+    expect: [
+        (metric: "safehouse_escapes", min: 1.0, max: 1.0),
+    ],
+)

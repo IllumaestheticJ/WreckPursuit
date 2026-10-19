@@ -26,8 +26,18 @@ vehicle.telemetry() -> Telemetry       // throttle/brake/clutch/steer, TCS/ABS/E
 vehicle.place_body(&mut RigidBody, pos, yaw, speed, yaw_rate)   // teleport / reset
 vehicle.chassis(), vehicle.forces(), vehicle.gear(), vehicle.reset(pos, yaw), vehicle.set_rolling(speed)
 
+// Rewind / prediction (NET-N2)
+vehicle.snapshot() -> VehicleSnapshot            // full dynamic state, opaque ~0.9 kB, bit-exact
+vehicle.restore(&VehicleSnapshot) -> Result<(), SnapshotError>
+VehicleSnapshot::{as_bytes, from_bytes}          // wire form
+vehicle.set_state(&VehicleState)                 // approximate (public state only)
+vehicle.write_chassis_to_body(&mut RigidBody)    // after restore / set_state
+vehicle.set_pose_and_speed(pos, yaw, speed)      // traffic promotion (lead-added, kept)
+
 // Tools
-wp_vehicle::rig::Rig            // single-car Rapier world, same tick sequence as wp_sim
+wp_vehicle::rig::Rig            // client-side single-car stepper, bit-identical to wp_sim (flat ground)
+Rig::with_world(car, extras, world: impl WorldQuery, pos, yaw), rig.snapshot(), rig.restore(&snap), rig.set_ticks(t)
+wp_vehicle::rig::ground_collider()   // the ground slab shared by wp_sim and the rig
 wp_vehicle::metrics::*          // zero_to_100, braking_100_0, skidpad, step_steer, lift_off(_at),
                                 // power_on, power_oversteer_onset, top_speed_kmh, report
 ```
@@ -72,6 +82,15 @@ For prompt 04, the two calls worth exposing are `sim.vehicles()[i].vehicle.telem
 - `apps/simcli/scenarios/smoke/straight_line.ron`: brake 2 s then handbrake, because holding
   the brake pedal at a standstill now engages auto-reverse (keyboard convention).
 - Added `apps/simcli/scenarios/vehicle/*.ron` (accel brackets, braking, reverse, slalom).
+- (Run 2 follow-up) `crates/wp_sim/src/physics.rs`: ground slab now built by
+  `wp_vehicle::rig::ground_collider()` (identical shape/friction as before) so the prediction rig
+  cannot drift from the server. New `crates/wp_sim/tests/rig_parity.rs` asserts Rig == Sim
+  bit-for-bit over 8 s of mixed driving.
+- (Run 2 follow-up) **Blessed goldens** `[bless]`: every scenario with a `street`-tire car
+  (`golden_frontal_56kmh`, `golden_fwd_liftoff`, `golden_spike_strip`, `golden_tbone`,
+  `golden_night_pursuit_escape` replay, `regression_grid_24`, `smoke_straight_line`,
+  `smoke_subset_systems`, `vehicle_sedan_*`) because `street` lateral D went 1.0 → 0.96. All
+  scenario expectations still pass; coupe/sport-tire goldens are unchanged.
 
 ## Perf numbers
 
@@ -97,6 +116,31 @@ pedals swap; press throttle to return to first.
 
 See `crates/wp_vehicle/README.md` → Known gaps (ray probe not shape-cast, no stall/tire
 temperature/wear, fixed AWD split, trait `step` needs Rapier access).
+
+## Responses to lead feedback (02, run 2 follow-up)
+
+- **Tires (item 1):** added `all_terrain` (≈ 0.9 × street, soft, +33% rolling resistance, best
+  off-road), `vintage_bias` (≈ 0.85 × street, half the cornering stiffness, 85% grip at 2×
+  peak slip, lazy relaxation) and `drag_radial` (long. D 1.45, soft lateral, poor wet, fast
+  wear). `street` lateral D 1.0 → **0.96** (debug sedan skidpad 0.89 → 0.82 g, light cars
+  ≈ 0.9 g — inside 09's 0.82–0.92 band). New test `tests/tires.rs` checks every compound's
+  declared peak slips match its curves. See `data/tires/README.md`.
+- **Brake bias (contract #2):** worked example (bias 0.65, front 2000, rear 1100 → 2000 / 592
+  N·m per wheel, effective split 77/23) in `crates/wp_vehicle/README.md` → "Brakes". For 09:
+  the split equals the bias only when both per-wheel capacities are equal.
+- **Contract #1:** the `GroundQuery` design is fine; a ray is enough for now (I'd add an optional
+  `cast_sphere(origin, dir, max, radius)` later for kerbs — not blocking). I'll switch
+  `VehicleSim::step` to it and implement #3/#4/#5 and the torque converter once v0.2.0 lands
+  (`CONTRACT_VERSION` is still 0.1.0 on `main`).
+- **Lead-added methods (run 2):** reviewed. `set_pose_and_speed` kept as is (doc: forward speeds
+  only). `set_state` kept and extended (slip, compression, load, contact, surface, centre steer,
+  clutch lock inferred) — it is still approximate, so I added the bit-exact path:
+  `snapshot()/restore()`.
+- **Prediction stepper for F (NET-N2):** `rig::Rig` now builds its world exactly like `wp_sim`
+  (shared `ground_collider()`, priming before spawn, same tick order), is generic over the world
+  type, and has `snapshot/restore/set_ticks`. Rewind-and-replay is bit-exact
+  (`tests/snapshot.rs`) and Rig == Sim bit-for-bit (`wp_sim/tests/rig_parity.rs`). Note in
+  `net.md`.
 
 ## Lead feedback (2026-10-19)
 

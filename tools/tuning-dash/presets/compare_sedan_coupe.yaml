@@ -1,0 +1,8 @@
+# Side-by-side: every handling metric for the FWD sedan vs the RWD coupe.
+description: Every wp_vehicle metric, debug_sedan vs debug_coupe
+probe:
+  kind: vehicle_metrics
+  metrics: [zero_to_100, braking, skidpad, step_steer, lift_off, power_on, power_oversteer, top_speed]
+variants:
+  - {name: debug_sedan, probe: {car: debug_sedan}}
+  - {name: debug_coupe, probe: {car: debug_coupe}}

@@ -46,12 +46,19 @@ pub const CAR_LENGTH_M: f32 = 4.5;
 pub const CAR_WIDTH_M: f32 = 1.9;
 /// Traffic AI update period (60 Hz), s.
 pub const TRAFFIC_DT: f32 = 1.0 / 60.0;
+/// Physics ticks per traffic step (240 Hz / 60 Hz).
+pub const TICKS_PER_TRAFFIC_STEP: u64 = 4;
 /// Siren reaction radius, m.
 pub const SIREN_RADIUS_M: f32 = 60.0;
 
 const NONE: u32 = NO_SEG;
 const HALF_L: f32 = CAR_LENGTH_M * 0.5;
 const SPAWN_PERIOD_S: f32 = 0.25;
+
+/// Seconds spanned by `steps` traffic steps.
+pub fn steps_to_s(steps: u64) -> f32 {
+    steps as f32 * TRAFFIC_DT
+}
 
 /// Stable traffic agent id (never reused within a world).
 pub type AgentId = u32;
@@ -261,8 +268,8 @@ pub struct TrafficStats {
     pub lane_changes: u64,
     /// Emergency brake reactions.
     pub emergency_brakes: u64,
-    /// First 64 new overlap pairs: `(traffic time s, agent a, agent b)`.
-    pub collision_log: Vec<(f64, AgentId, AgentId)>,
+    /// First 64 new overlap pairs: `(traffic step, agent a, agent b)`.
+    pub collision_log: Vec<(u64, AgentId, AgentId)>,
 }
 
 /// Near-LOD state.
@@ -303,8 +310,9 @@ pub struct Agent {
     /// Next two segments.
     pub plan: [SegId; 2],
     permit: SegId,
-    stopped_since: Option<f64>,
-    last_lane_change: f64,
+    /// Traffic step at which the agent came to a stop.
+    stopped_since: Option<u64>,
+    last_lane_change: u64,
     ghost: Option<(SegId, f32)>,
     stuck_s: f32,
     /// Currently braking hard for a hazard.
@@ -393,7 +401,7 @@ pub struct Traffic {
     agents: Vec<Agent>,
     next_id: u32,
     rng: Rng,
-    time_s: f64,
+    /// Traffic steps run (the traffic clock; one step = `TRAFFIC_DT`).
     step_count: u64,
     lists: Vec<Vec<Entry>>,
     touched: Vec<SegId>,
@@ -486,7 +494,6 @@ impl Traffic {
             agents: Vec::new(),
             next_id: 1,
             rng: Rng::new(seed ^ 0x7AFF_1C00_5EED),
-            time_s: 0.0,
             step_count: 0,
             lists: vec![Vec::new(); nseg],
             touched: Vec::new(),
@@ -521,6 +528,11 @@ impl Traffic {
         self.agents
             .iter_mut()
             .filter_map(|a| a.physical.as_deref_mut().map(|p| (a.id, p)))
+    }
+
+    /// Traffic steps run so far (one step = [`TRAFFIC_DT`]).
+    pub fn step_count(&self) -> u64 {
+        self.step_count
     }
 
     /// Counters.
@@ -641,7 +653,6 @@ impl Traffic {
             return;
         }
         let dt = TRAFFIC_DT;
-        self.time_s += dt as f64;
         self.step_count += 1;
         self.sync_physical(map, inp);
         self.rebuild_lists();
@@ -687,7 +698,9 @@ impl Traffic {
         let assists = AssistProfile::ai();
         for a in &mut self.agents {
             if let Some(pa) = a.physical.as_deref_mut() {
-                pa.vehicle.step(&pa.input, &assists, map, dt, out);
+                // Flat ground until wp_sim promotes agents into its Rapier scene (lead, D #3).
+                let ground = wp_vehicle::FlatGround::default();
+                pa.vehicle.step(&pa.input, &assists, map, &ground, dt, out);
             }
         }
     }
@@ -969,10 +982,10 @@ impl Traffic {
         best
     }
 
-    fn stopped_for(&self, i: usize) -> f64 {
+    fn stopped_for(&self, i: usize) -> f32 {
         self.agents[i]
             .stopped_since
-            .map(|t| self.time_s - t)
+            .map(|t| steps_to_s(self.step_count - t))
             .unwrap_or(0.0)
     }
 
@@ -982,7 +995,7 @@ impl Traffic {
         let Some(ap) = map.approach[lane as usize] else {
             return true;
         };
-        let my_t = a.stopped_since.unwrap_or(self.time_s);
+        let my_t = a.stopped_since.unwrap_or(self.step_count);
         let conflicts = &map.seg(conn).conflicts;
         for inc in &map.net.intersections[ap.intersection as usize].incoming {
             if inc.lane == lane {
@@ -1334,7 +1347,7 @@ impl Traffic {
                 || d_end < 60.0
                 || a.v < 3.0
                 || a.lat.abs() > 0.3
-                || self.time_s - a.last_lane_change < 6.0
+                || steps_to_s(self.step_count - a.last_lane_change) < 6.0
                 || a.yielding
             {
                 continue;
@@ -1418,7 +1431,7 @@ impl Traffic {
                 } else {
                     NONE
                 };
-                let t = self.time_s;
+                let t = self.step_count;
                 let a = &mut self.agents[i];
                 a.seg = c;
                 a.s = s2;
@@ -1575,7 +1588,7 @@ impl Traffic {
     }
 
     fn update_stop_state(&mut self, map: &CityMap, i: usize, dt: f32) {
-        let t = self.time_s;
+        let t = self.step_count;
         let a = &mut self.agents[i];
         let seg = map.seg(a.seg);
         if a.v < 0.2 && !seg.is_connector() {
@@ -2001,7 +2014,7 @@ impl Traffic {
                 plan: [plan0, plan1],
                 permit: NONE,
                 stopped_since: None,
-                last_lane_change: self.time_s,
+                last_lane_change: self.step_count,
                 ghost: None,
                 stuck_s: 0.0,
                 emergency: false,
@@ -2102,7 +2115,9 @@ impl Traffic {
             if !self.overlaps.contains(pair) {
                 self.stats.civilian_collisions += 1;
                 if self.stats.collision_log.len() < 64 {
-                    self.stats.collision_log.push((self.time_s, pair.0, pair.1));
+                    self.stats
+                        .collision_log
+                        .push((self.step_count, pair.0, pair.1));
                 }
                 let aggressive = self.agents.iter().any(|a| {
                     (a.id == pair.0 || a.id == pair.1) && a.personality == Personality::Aggressive

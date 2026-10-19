@@ -1,0 +1,17 @@
+{"tick":1311,"t_s":5.462500,"event":{"Contact":{"a":1,"b":2,"point":[-0.03639071,57.678463,0.59008396],"normal":[0.0000021485607,1.0,9.3656105e-8],"impulse_ns":12800.347,"rel_speed":15.278946}}}
+{"tick":1312,"t_s":5.466667,"event":{"ComponentDamaged":{"vehicle":1,"component":"Lights","health":0.7722409}}}
+{"tick":1312,"t_s":5.466667,"event":{"ComponentDamaged":{"vehicle":2,"component":"Lights","health":0.78356254}}}
+{"tick":1314,"t_s":5.475000,"event":{"ComponentDamaged":{"vehicle":1,"component":"Radiator","health":0.8932101}}}
+{"tick":1314,"t_s":5.475000,"event":{"ComponentFailed":{"vehicle":1,"component":"Lights"}}}
+{"tick":1314,"t_s":5.475000,"event":{"ComponentFailed":{"vehicle":2,"component":"Lights"}}}
+{"tick":1316,"t_s":5.483334,"event":{"ComponentDamaged":{"vehicle":1,"component":"Battery","health":0.8687991}}}
+{"tick":1316,"t_s":5.483334,"event":{"ComponentDamaged":{"vehicle":2,"component":"Radiator","health":0.80787903}}}
+{"tick":1316,"t_s":5.483334,"event":{"ComponentDamaged":{"vehicle":2,"component":"Battery","health":0.8741034}}}
+{"tick":1322,"t_s":5.508334,"event":{"ComponentDamaged":{"vehicle":1,"component":"SteeringRack","health":0.8544967}}}
+{"tick":1322,"t_s":5.508334,"event":{"ComponentDamaged":{"vehicle":2,"component":"SteeringRack","health":0.86353123}}}
+{"tick":1324,"t_s":5.516667,"event":{"ComponentDamaged":{"vehicle":1,"component":"Engine","health":0.89564383}}}
+{"tick":1324,"t_s":5.516667,"event":{"ComponentDamaged":{"vehicle":2,"component":"Engine","health":0.8954592}}}
+{"tick":1324,"t_s":5.516667,"event":{"ComponentDamaged":{"vehicle":2,"component":"SuspensionFR","health":0.8942927}}}
+{"tick":1324,"t_s":5.516667,"event":{"ComponentDamaged":{"vehicle":2,"component":"BrakeFR","health":0.8839727}}}
+{"tick":1340,"t_s":5.583333,"event":{"PartDetached":{"vehicle":2,"group":2}}}
+{"tick":1352,"t_s":5.633334,"event":{"PartDetached":{"vehicle":1,"group":2}}}

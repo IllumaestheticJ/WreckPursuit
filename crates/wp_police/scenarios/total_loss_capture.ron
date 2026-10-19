@@ -1,0 +1,11 @@
+// TotalLoss while wanted ends in capture.
+(
+    name: "police_total_loss_capture",
+    seed: 500,
+    time_of_day_h: 12.0,
+    duration_s: 20.0,
+    racers: [(district: Suburb, speed_factor: 1.0, initial_heat: 20.0, total_loss_at_s: Some(5.0), violations: false)],
+    expect: [
+        (metric: "total_loss_captures", min: 1.0, max: 1.0),
+    ],
+)

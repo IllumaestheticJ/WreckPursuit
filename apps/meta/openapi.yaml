@@ -1,0 +1,734 @@
+openapi: 3.0.3
+info:
+  title: WreckPursuit meta service
+  version: 0.1.0
+  description: |
+    Accounts, progression persistence, instance directory, matchmaking, leaderboards and
+    admin for WreckPursuit. Served by `apps/meta` (`wp-meta`); also at `GET /openapi.yaml`.
+
+    Authentication (all `Authorization: Bearer <token>`):
+    - **player** — session token from signup/login (`wps_...`).
+    - **instanceKey** — shared registration key (`WP_META_INSTANCE_KEY`), only for `POST /v1/instances`.
+    - **instance** — per-instance token from registration (`wpi_...`); must match `{id}` in the path.
+    - **admin** — `WP_META_ADMIN_TOKEN`; optional `X-Admin-Actor` names the operator in the audit log.
+
+    Every error is `{"error": "<code>", "message": "..."}`. Common codes: `bad_request` (400),
+    `unauthorized` (401), `invalid_credentials` (401), `banned` (403), `not_found` (404),
+    `seq_conflict` (409), `rate_limited` (429), `internal` (500).
+
+    Times are Unix milliseconds (UTC). `Role` and `DamageMode` use the `wp_contracts` serde names.
+servers:
+  - url: http://127.0.0.1:8090
+components:
+  securitySchemes:
+    player: { type: http, scheme: bearer }
+    instanceKey: { type: http, scheme: bearer }
+    instance: { type: http, scheme: bearer }
+    admin: { type: http, scheme: bearer }
+  parameters:
+    InstanceId: { name: id, in: path, required: true, schema: { type: integer, format: int32 } }
+    AccountPath: { name: account, in: path, required: true, schema: { type: integer, format: int32 } }
+    IdPath: { name: id, in: path, required: true, schema: { type: integer, format: int32 } }
+    AccountIdPath: { name: id, in: path, required: true, schema: { type: integer, format: int32 } }
+    FromSeq: { name: from_seq, in: query, required: false, schema: { type: integer, minimum: 0, default: 0 } }
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NoContent: { description: Done, no body }
+  schemas:
+    Error:
+      type: object
+      required: [error, message]
+      properties:
+        error: { type: string, example: seq_conflict }
+        message: { type: string }
+    Role:
+      type: string
+      enum: [Racer, PoliceCaptain, PoliceChase, Spectator]
+    DamageMode:
+      type: string
+      enum: [Arcade, Simulation]
+    Bracket:
+      type: string
+      enum: [D, C, B, A, S, open]
+      description: Class bracket (wp_economy class index letters). Instances with `open` accept every bracket.
+    RoleCounts:
+      type: object
+      required: [racer, police_chase, police_captain, spectator]
+      properties:
+        racer: { type: integer, minimum: 0 }
+        police_chase: { type: integer, minimum: 0 }
+        police_captain: { type: integer, minimum: 0, maximum: 1 }
+        spectator: { type: integer, minimum: 0 }
+    SignupRequest:
+      type: object
+      required: [email, password, display_name]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8, maxLength: 128 }
+        display_name: { type: string, pattern: '^[A-Za-z0-9_-]{3,24}$' }
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string }
+        password: { type: string }
+    SessionResponse:
+      type: object
+      required: [account_id, token, expires_ms]
+      properties:
+        account_id: { type: integer }
+        token: { type: string }
+        expires_ms: { type: integer, format: int64 }
+    ProvidersResponse:
+      type: object
+      properties:
+        login: { type: array, items: { type: string } }
+        linkable: { type: array, items: { type: string } }
+    Profile:
+      type: object
+      properties:
+        account_id: { type: integer }
+        display_name: { type: string }
+        created_ms: { type: integer, format: int64 }
+        crew_id: { type: integer, nullable: true }
+        party_id: { type: integer, nullable: true }
+        clean_rating: { type: number }
+    PlayerAccount:
+      type: object
+      description: |
+        `wp_economy::PlayerAccount` serialised with serde (cash, rep, bounty, cop_rank, garage
+        with mods and damage, heat_history, stats, day, next_event_seq...). Owned by
+        workstream 08; see `crates/wp_economy/src/ledger.rs`.
+      additionalProperties: true
+    EconomyEvent:
+      type: object
+      description: '`wp_economy::EconomyEvent` (player, seq, day, reason, car, deltas, cash_after).'
+      additionalProperties: true
+    CommitRequest:
+      type: object
+      required: [account, events]
+      properties:
+        account: { $ref: '#/components/schemas/PlayerAccount' }
+        events: { type: array, items: { $ref: '#/components/schemas/EconomyEvent' } }
+    MatchPrefs:
+      type: object
+      required: [role, mode, bracket, region]
+      properties:
+        role: { $ref: '#/components/schemas/Role' }
+        mode: { $ref: '#/components/schemas/DamageMode' }
+        bracket: { $ref: '#/components/schemas/Bracket' }
+        region: { type: string, example: eu-west }
+        city: { type: string, nullable: true }
+    QueueRequest:
+      type: object
+      required: [prefs]
+      properties:
+        prefs: { $ref: '#/components/schemas/MatchPrefs' }
+    Assignment:
+      type: object
+      properties:
+        instance_id: { type: integer }
+        address: { type: string }
+        join_token: { type: string, description: One-time; re-minted on every status poll. }
+        join_expires_ms: { type: integer, format: int64 }
+        role: { $ref: '#/components/schemas/Role' }
+    TicketStatus:
+      type: object
+      properties:
+        ticket_id: { type: integer }
+        state: { type: string, enum: [queued, assigned, joined, cancelled, expired] }
+        party_id: { type: integer, nullable: true }
+        assignment: { allOf: [ { $ref: '#/components/schemas/Assignment' } ], nullable: true }
+    ReconnectRequest:
+      type: object
+      required: [reconnect_token]
+      properties:
+        reconnect_token: { type: string }
+    PartyCreated:
+      type: object
+      properties:
+        party_id: { type: integer }
+        code: { type: string, description: 8-char invite code (case-insensitive) }
+    JoinPartyRequest:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string }
+    PartyInfo:
+      type: object
+      properties:
+        party_id: { type: integer }
+        leader_id: { type: integer }
+        members: { type: array, items: { type: integer } }
+    CreateCrewRequest:
+      type: object
+      required: [name, tag]
+      properties:
+        name: { type: string, minLength: 3, maxLength: 32 }
+        tag: { type: string, pattern: '^[A-Za-z0-9]{2,5}$' }
+    CrewInfo:
+      type: object
+      properties:
+        crew_id: { type: integer }
+        name: { type: string }
+        tag: { type: string }
+        leader_id: { type: integer }
+        members: { type: array, items: { type: integer } }
+        territory: { type: array, items: { type: string, example: harbor_city/docks } }
+    RegisterInstanceRequest:
+      type: object
+      required: [name, region, city, mode, bracket, address, slots]
+      properties:
+        name: { type: string }
+        region: { type: string }
+        city: { type: string }
+        mode: { $ref: '#/components/schemas/DamageMode' }
+        bracket: { $ref: '#/components/schemas/Bracket' }
+        address: { type: string, example: 'ws://10.0.0.5:8080' }
+        slots: { $ref: '#/components/schemas/RoleCounts' }
+    RegisterInstanceResponse:
+      type: object
+      properties:
+        instance_id: { type: integer }
+        instance_token: { type: string }
+        heartbeat_interval_ms: { type: integer, format: int64 }
+    HeartbeatRequest:
+      type: object
+      properties:
+        population: { $ref: '#/components/schemas/RoleCounts' }
+        players: { type: array, items: { type: integer }, description: Connected account ids (refreshes reconnect tokens). }
+        draining: { type: boolean, default: false }
+        tick_ms: { type: number, default: 0 }
+    HeartbeatResponse:
+      type: object
+      properties:
+        kicks:
+          type: array
+          items:
+            type: object
+            properties:
+              account_id: { type: integer }
+              reason: { type: string }
+        flags: { type: object, additionalProperties: true }
+    InstanceInfo:
+      type: object
+      properties:
+        instance_id: { type: integer }
+        name: { type: string }
+        region: { type: string }
+        city: { type: string }
+        mode: { $ref: '#/components/schemas/DamageMode' }
+        bracket: { $ref: '#/components/schemas/Bracket' }
+        address: { type: string }
+        slots: { $ref: '#/components/schemas/RoleCounts' }
+        population: { $ref: '#/components/schemas/RoleCounts' }
+        reserved: { $ref: '#/components/schemas/RoleCounts' }
+        state: { type: string, enum: [up, draining, down] }
+        last_heartbeat_ms: { type: integer, format: int64 }
+        tick_ms: { type: number }
+    VerifyJoinRequest:
+      type: object
+      required: [join_token]
+      properties:
+        join_token: { type: string }
+    VerifyJoinResponse:
+      type: object
+      properties:
+        account_id: { type: integer, description: Durable account id = economy PlayerId. }
+        display_name: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+        party_id: { type: integer, nullable: true }
+        reconnect_token: { type: string }
+        reconnect_expires_ms: { type: integer, format: int64 }
+    RaceEntry:
+      type: object
+      required: [account_id, position, clean]
+      properties:
+        account_id: { type: integer }
+        position: { type: integer, description: 1 = win, 0 = DNF }
+        finish_time_ms: { type: integer, format: int64, nullable: true, description: Required for finishers, null for DNF. }
+        clean: { type: boolean }
+    RaceReport:
+      type: object
+      required: [report_key, route_id, race_type, mode, bracket, entries]
+      properties:
+        report_key: { type: string, description: Idempotency key. }
+        route_id: { type: string, pattern: '^[a-z0-9_-]{1,48}$' }
+        race_type: { type: string, description: '`time_attack` feeds time boards and does not rate.' }
+        mode: { $ref: '#/components/schemas/DamageMode' }
+        bracket: { $ref: '#/components/schemas/Bracket' }
+        entries: { type: array, minItems: 1, maxItems: 64, items: { $ref: '#/components/schemas/RaceEntry' } }
+    RaceReportResponse:
+      type: object
+      properties:
+        race_id: { type: integer }
+        duplicate: { type: boolean }
+        ratings:
+          type: array
+          items:
+            type: object
+            properties:
+              account_id: { type: integer }
+              before: { type: number }
+              after: { type: number }
+    PursuitReport:
+      type: object
+      required: [report_key, racer_id, max_wanted, bounty, outcome]
+      properties:
+        report_key: { type: string }
+        racer_id: { type: integer }
+        max_wanted: { type: integer, minimum: 0, maximum: 5 }
+        bounty: { type: integer, minimum: 0 }
+        outcome: { type: string, enum: [escaped, captured] }
+        captured_by: { type: integer, nullable: true }
+        assists: { type: array, items: { type: integer } }
+    PursuitReportResponse:
+      type: object
+      properties:
+        pursuit_id: { type: integer }
+        duplicate: { type: boolean }
+    TerritoryReport:
+      type: object
+      required: [district_id]
+      properties:
+        district_id: { type: string }
+        crew_id: { type: integer, nullable: true, description: null = neutral }
+    Leaderboard:
+      type: object
+      properties:
+        board: { type: string }
+        period: { type: string, example: 'd:2026-10-19' }
+        ascending: { type: boolean }
+        rows:
+          type: array
+          items:
+            type: object
+            properties:
+              rank: { type: integer }
+              account_id: { type: integer }
+              display_name: { type: string }
+              score: { type: number }
+    AdminAccountView:
+      type: object
+      properties:
+        profile: { $ref: '#/components/schemas/Profile' }
+        banned_until_ms: { type: integer, format: int64, nullable: true }
+        ban_reason: { type: string, nullable: true }
+        economy: { allOf: [ { $ref: '#/components/schemas/PlayerAccount' } ], nullable: true }
+    HealthReport:
+      type: object
+      properties:
+        now_ms: { type: integer, format: int64 }
+        schema_version: { type: integer }
+        accounts: { type: integer }
+        queued_tickets: { type: integer }
+        instances: { type: array, items: { $ref: '#/components/schemas/InstanceInfo' } }
+    AuditEntry:
+      type: object
+      properties:
+        id: { type: integer }
+        at_ms: { type: integer, format: int64 }
+        actor: { type: string }
+        action: { type: string, enum: [ban, unban, kick, economy_adjust, flag_set, flag_delete, leaderboard_reset] }
+        target: { type: string, example: 'account:12' }
+        details: { type: object, additionalProperties: true }
+paths:
+  /healthz:
+    get:
+      summary: Liveness probe
+      responses:
+        '200': { description: '`ok`', content: { text/plain: { schema: { type: string } } } }
+  /openapi.yaml:
+    get:
+      summary: This document
+      responses:
+        '200': { description: OpenAPI YAML, content: { application/yaml: { schema: { type: string } } } }
+  /admin:
+    get:
+      summary: Instance health dashboard (HTML; asks for the admin token in the page)
+      responses:
+        '200': { description: HTML page, content: { text/html: { schema: { type: string } } } }
+  /v1/auth/providers:
+    get:
+      summary: Login and linkable providers
+      responses:
+        '200': { description: Providers, content: { application/json: { schema: { $ref: '#/components/schemas/ProvidersResponse' } } } }
+  /v1/auth/signup:
+    post:
+      summary: Create an account (and its starting economy account); returns a session
+      description: Rate-limited per client IP. 409 `email_taken` / `name_taken`.
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/SignupRequest' } } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/SessionResponse' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/auth/login:
+    post:
+      summary: Email + password login
+      description: Rate-limited per IP and per email. 401 `invalid_credentials`, 403 `banned`.
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/LoginRequest' } } } }
+      responses:
+        '200': { description: Session, content: { application/json: { schema: { $ref: '#/components/schemas/SessionResponse' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/auth/logout:
+    post:
+      summary: Revoke the calling session
+      security: [ { player: [] } ]
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/auth/link:
+    post:
+      summary: Link an OAuth provider (stub — always 501 `provider_not_configured` today)
+      security: [ { player: [] } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [provider], properties: { provider: { type: string } } } } }
+      responses:
+        '202': { description: Link started (once a provider exists) }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/me:
+    get:
+      summary: Own profile
+      security: [ { player: [] } ]
+      responses:
+        '200': { description: Profile, content: { application/json: { schema: { $ref: '#/components/schemas/Profile' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/me/economy:
+    get:
+      summary: Own economy account (read-only; only instances commit changes)
+      security: [ { player: [] } ]
+      responses:
+        '200': { description: Account, content: { application/json: { schema: { $ref: '#/components/schemas/PlayerAccount' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/me/events:
+    get:
+      summary: Own economy events from `from_seq`
+      security: [ { player: [] } ]
+      parameters: [ { $ref: '#/components/parameters/FromSeq' } ]
+      responses:
+        '200': { description: Events, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/EconomyEvent' } } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/flags:
+    get:
+      summary: All feature flags
+      responses:
+        '200': { description: Flags, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+  /v1/leaderboards/{board}:
+    get:
+      summary: Leaderboard for the current period
+      description: |
+        Boards: `clean_rating` (all = rating, daily/weekly = rating gained), `bounty` (max),
+        `captures` (count), `time_attack:<route>` (best clean time, ascending).
+      parameters:
+        - { name: board, in: path, required: true, schema: { type: string } }
+        - { name: period, in: query, schema: { type: string, enum: [all, daily, weekly], default: all } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200': { description: Board, content: { application/json: { schema: { $ref: '#/components/schemas/Leaderboard' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/parties:
+    post:
+      summary: Create a party led by the caller
+      security: [ { player: [] } ]
+      responses:
+        '201': { description: Party, content: { application/json: { schema: { $ref: '#/components/schemas/PartyCreated' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/parties/leave:
+    post:
+      summary: Leave the party (cancels the party's waiting tickets)
+      security: [ { player: [] } ]
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/parties/{id}:
+    get:
+      summary: Party details (members only)
+      security: [ { player: [] } ]
+      parameters: [ { $ref: '#/components/parameters/IdPath' } ]
+      responses:
+        '200': { description: Party, content: { application/json: { schema: { $ref: '#/components/schemas/PartyInfo' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/parties/{id}/join:
+    post:
+      summary: Join a party with its invite code (max 4 members)
+      security: [ { player: [] } ]
+      parameters: [ { $ref: '#/components/parameters/IdPath' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/JoinPartyRequest' } } } }
+      responses:
+        '200': { description: Party, content: { application/json: { schema: { $ref: '#/components/schemas/PartyInfo' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/crews:
+    post:
+      summary: Create a crew led by the caller
+      security: [ { player: [] } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CreateCrewRequest' } } } }
+      responses:
+        '201': { description: Crew, content: { application/json: { schema: { $ref: '#/components/schemas/CrewInfo' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/crews/leave:
+    post:
+      summary: Leave the crew (last member out disbands it; its districts become neutral)
+      security: [ { player: [] } ]
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/crews/{id}:
+    get:
+      summary: Crew details with territory
+      parameters: [ { $ref: '#/components/parameters/IdPath' } ]
+      responses:
+        '200': { description: Crew, content: { application/json: { schema: { $ref: '#/components/schemas/CrewInfo' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/crews/{id}/join:
+    post:
+      summary: Join a crew (open membership for now)
+      security: [ { player: [] } ]
+      parameters: [ { $ref: '#/components/parameters/IdPath' } ]
+      responses:
+        '200': { description: Crew, content: { application/json: { schema: { $ref: '#/components/schemas/CrewInfo' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/matchmaking/queue:
+    post:
+      summary: Queue the caller, or the caller's whole party if they lead one
+      description: |
+        403 `not_party_leader`, 409 `already_queued`, 403 `feature_disabled` (flags
+        `player_police_enabled`, `simulation_mode_enabled`). Rate-limited per account.
+      security: [ { player: [] } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/QueueRequest' } } } }
+      responses:
+        '200': { description: Ticket, content: { application/json: { schema: { $ref: '#/components/schemas/TicketStatus' } } } }
+        default: { $ref: '#/components/responses/Error' }
+    delete:
+      summary: Leave the queue (whole party)
+      security: [ { player: [] } ]
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/matchmaking/status:
+    get:
+      summary: Latest ticket; when assigned, mints a fresh join token
+      security: [ { player: [] } ]
+      responses:
+        '200': { description: Ticket, content: { application/json: { schema: { $ref: '#/components/schemas/TicketStatus' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/matchmaking/reconnect:
+    post:
+      summary: Rejoin the instance a reconnect token was issued for (bypasses the queue)
+      description: 410 `reconnect_unavailable` when the token expired or the instance is down.
+      security: [ { player: [] } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ReconnectRequest' } } } }
+      responses:
+        '200': { description: Assigned ticket, content: { application/json: { schema: { $ref: '#/components/schemas/TicketStatus' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/instances:
+    get:
+      summary: Live instances (directory)
+      responses:
+        '200': { description: Instances, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/InstanceInfo' } } } } }
+    post:
+      summary: Register an instance server
+      security: [ { instanceKey: [] } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/RegisterInstanceRequest' } } } }
+      responses:
+        '201': { description: Registered, content: { application/json: { schema: { $ref: '#/components/schemas/RegisterInstanceResponse' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/instances/{id}:
+    delete:
+      summary: Deregister (token revoked, unclaimed seats requeued, reconnect tokens dropped)
+      security: [ { instance: [] } ]
+      parameters: [ { $ref: '#/components/parameters/InstanceId' } ]
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/instances/{id}/heartbeat:
+    post:
+      summary: Report population; receive kicks and feature flags
+      description: Send every `heartbeat_interval_ms`; three missed intervals mark the instance down.
+      security: [ { instance: [] } ]
+      parameters: [ { $ref: '#/components/parameters/InstanceId' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/HeartbeatRequest' } } } }
+      responses:
+        '200': { description: Orders, content: { application/json: { schema: { $ref: '#/components/schemas/HeartbeatResponse' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/instances/{id}/join/verify:
+    post:
+      summary: Verify a client's one-time join token
+      description: 401 `invalid_join_token` (unknown, expired, used, other instance), 403 `banned`.
+      security: [ { instance: [] } ]
+      parameters: [ { $ref: '#/components/parameters/InstanceId' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/VerifyJoinRequest' } } } }
+      responses:
+        '200': { description: Who joined, content: { application/json: { schema: { $ref: '#/components/schemas/VerifyJoinResponse' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/instances/{id}/results/race:
+    post:
+      summary: Report a race (archive + clean rating + time-attack boards; idempotent)
+      description: Every entry must have joined this instance (403 `not_hosted`).
+      security: [ { instance: [] } ]
+      parameters: [ { $ref: '#/components/parameters/InstanceId' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/RaceReport' } } } }
+      responses:
+        '200': { description: Recorded, content: { application/json: { schema: { $ref: '#/components/schemas/RaceReportResponse' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/instances/{id}/results/pursuit:
+    post:
+      summary: Report a pursuit outcome (heat history + bounty/captures boards; idempotent)
+      security: [ { instance: [] } ]
+      parameters: [ { $ref: '#/components/parameters/InstanceId' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/PursuitReport' } } } }
+      responses:
+        '200': { description: Recorded, content: { application/json: { schema: { $ref: '#/components/schemas/PursuitReportResponse' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/instances/{id}/territory:
+    post:
+      summary: Report who holds a district of this instance's city
+      security: [ { instance: [] } ]
+      parameters: [ { $ref: '#/components/parameters/InstanceId' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/TerritoryReport' } } } }
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/instances/{id}/accounts/{account}/economy:
+    get:
+      summary: AccountStore::load for a hosted player
+      security: [ { instance: [] } ]
+      parameters: [ { $ref: '#/components/parameters/InstanceId' }, { $ref: '#/components/parameters/AccountPath' } ]
+      responses:
+        '200': { description: Account, content: { application/json: { schema: { $ref: '#/components/schemas/PlayerAccount' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/instances/{id}/accounts/{account}/economy/commit:
+    post:
+      summary: AccountStore::commit for a hosted player (atomic, sequence-checked)
+      description: 409 `seq_conflict` when the events do not continue the stored log.
+      security: [ { instance: [] } ]
+      parameters: [ { $ref: '#/components/parameters/InstanceId' }, { $ref: '#/components/parameters/AccountPath' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CommitRequest' } } } }
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/instances/{id}/accounts/{account}/economy/events:
+    get:
+      summary: AccountStore::events_since for a hosted player
+      security: [ { instance: [] } ]
+      parameters: [ { $ref: '#/components/parameters/InstanceId' }, { $ref: '#/components/parameters/AccountPath' }, { $ref: '#/components/parameters/FromSeq' } ]
+      responses:
+        '200': { description: Events, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/EconomyEvent' } } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/admin/health:
+    get:
+      summary: Service and instance health (JSON behind `/admin`)
+      security: [ { admin: [] } ]
+      responses:
+        '200': { description: Health, content: { application/json: { schema: { $ref: '#/components/schemas/HealthReport' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/admin/audit:
+    get:
+      summary: Audit log, newest first
+      security: [ { admin: [] } ]
+      parameters: [ { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 1000, default: 100 } } ]
+      responses:
+        '200': { description: Rows, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/AuditEntry' } } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/admin/accounts/{id}:
+    get:
+      summary: Account, ban state and economy
+      security: [ { admin: [] } ]
+      parameters: [ { $ref: '#/components/parameters/AccountIdPath' } ]
+      responses:
+        '200': { description: View, content: { application/json: { schema: { $ref: '#/components/schemas/AdminAccountView' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/admin/accounts/{id}/ban:
+    post:
+      summary: Ban (revokes sessions, cancels tickets, queues a kick)
+      security: [ { admin: [] } ]
+      parameters: [ { $ref: '#/components/parameters/AccountIdPath' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string }
+                duration_s: { type: integer, nullable: true, description: null = permanent }
+      responses:
+        '200': { description: View, content: { application/json: { schema: { $ref: '#/components/schemas/AdminAccountView' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/admin/accounts/{id}/unban:
+    post:
+      summary: Lift a ban
+      security: [ { admin: [] } ]
+      parameters: [ { $ref: '#/components/parameters/AccountIdPath' } ]
+      responses:
+        '200': { description: View, content: { application/json: { schema: { $ref: '#/components/schemas/AdminAccountView' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/admin/accounts/{id}/kick:
+    post:
+      summary: Queue a kick (delivered in the hosting instance's next heartbeat response)
+      security: [ { admin: [] } ]
+      parameters: [ { $ref: '#/components/parameters/AccountIdPath' } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [reason], properties: { reason: { type: string } } } } }
+      responses:
+        '202': { description: Queued }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/admin/accounts/{id}/economy/adjust:
+    post:
+      summary: Audited cash adjustment through the economy (`EventReason::Adjustment`)
+      description: 409 `economy_refused` if a debit would create debt.
+      security: [ { admin: [] } ]
+      parameters: [ { $ref: '#/components/parameters/AccountIdPath' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cash, note]
+              properties:
+                cash: { type: integer, format: int64 }
+                note: { type: string }
+      responses:
+        '200': { description: Account after, content: { application/json: { schema: { $ref: '#/components/schemas/PlayerAccount' } } } }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/admin/flags/{key}:
+    put:
+      summary: Set a feature flag (any JSON value)
+      security: [ { admin: [] } ]
+      parameters: [ { name: key, in: path, required: true, schema: { type: string, pattern: '^[a-z0-9_.]{1,64}$' } } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [value], properties: { value: {} } } } }
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+        default: { $ref: '#/components/responses/Error' }
+    delete:
+      summary: Delete a feature flag
+      security: [ { admin: [] } ]
+      parameters: [ { name: key, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '204': { $ref: '#/components/responses/NoContent' }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/admin/leaderboards/reset:
+    post:
+      summary: Clear the current period of a board
+      security: [ { admin: [] } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [board, period]
+              properties:
+                board: { type: string }
+                period: { type: string, enum: [all, daily, weekly] }
+      responses:
+        '200': { description: Rows removed, content: { application/json: { schema: { type: object, properties: { removed: { type: integer } } } } } }
+        default: { $ref: '#/components/responses/Error' }

@@ -1,0 +1,13 @@
+// Same racer at 03:00: sparse patrols, short witness range, slow civilian reports. Pursuit takes
+// longer than 60 s on average (a patrol can still happen to be right there) and reinforcements arrive slower (ratios asserted in tests/police_scenarios.rs).
+(
+    name: "police_night_core_speeder",
+    seed: 100,
+    time_of_day_h: 3.0,
+    duration_s: 480.0,
+    runs: 8,
+    racers: [(district: Core, speed_factor: 2.0)],
+    expect: [
+        (metric: "pursuit_start_s", min: 60.0, max: 10000.0),
+    ],
+)

@@ -86,7 +86,7 @@ export class SceneView {
     this.cities.set(cityId, holder);
     this.scene.add(holder);
     try {
-      const gltf = await new GLTFLoader().loadAsync(`/data/city/${cityId}.greybox.glb`);
+      const gltf = await new GLTFLoader().loadAsync(`data/city/${cityId}.greybox.glb`);
       // glTF is +Y up, same as Three: add to the scene, not the Z-up world group.
       holder.add(gltf.scene);
     } catch (e) {
