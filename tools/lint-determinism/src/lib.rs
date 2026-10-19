@@ -22,7 +22,7 @@
 use std::path::{Path, PathBuf};
 
 /// Crates whose `src/` is linted. Everything reachable from a simulation step.
-pub const SIM_CRATES: [&str; 8] = [
+pub const SIM_CRATES: [&str; 9] = [
     "wp_contracts",
     "wp_math",
     "wp_vehicle",
@@ -31,6 +31,7 @@ pub const SIM_CRATES: [&str; 8] = [
     "wp_police",
     "wp_economy",
     "wp_sim",
+    "wp_weather",
 ];
 
 /// Severity of a finding.
