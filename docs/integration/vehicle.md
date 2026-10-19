@@ -67,6 +67,7 @@ For prompt 04, the two calls worth exposing are `sim.vehicles()[i].vehicle.telem
 | 4 | Optional `DrivetrainDef::efficiency` (default 0.85, constant `DRIVETRAIN_EFFICIENCY` now) | FWD vs RWD vs AWD losses differ | 09 | open |
 | 5 | AWD on-demand coupling: `DriveLayout::AwdOnDemand { base_front_split, max_rear_split, engage_slip }` | prompt 09's "Haldex-style" car | 09 | open |
 | 6 | Optional `VehicleState::ffb: FfbOutput` (or keep `VehicleSim::ffb`) | net/testbed want it in one snapshot | 04, 07 | open, low priority |
+| 7 | Optional `VehicleDef::slide_assist: Option<f32>` (0..1, overrides the derived slide class) | per-car tuning knob for the slide-control assists; `VehicleDef` has `deny_unknown_fields`, so today it lives in `wp_vehicle::slide::SLIDE_CLASS_OVERRIDES` keyed by car id | 09 (car data), lead | open, low priority |
 
 ## Changes outside my crates
 
@@ -255,3 +256,18 @@ Contract **v0.3.0** is being applied in parallel by the lead (branch `lead/contr
 2. Torque converter for automatic gearboxes (H's deferred request 3). Data fields already exist in the car files.
 3. Measure vehicle-only cost per car (native release, 24 cars) and record it in your README.
 Stay in `crates/wp_vehicle` and `data/tires`.
+
+## Slide control for keyboard/gamepad (lead helper `lead/playtest-drift`, owner playtest 2026-10-19)
+
+Owner: "For the higher-power RWD cars, give a little more steering assist (gyro effect) so we
+have more control over the sliding." Implemented in `wp_vehicle` only (`slide.rs`, `steering.rs`,
+`vehicle.rs`), driven by the existing `AssistProfile::countersteer_help` + car data (drive
+layout, power to weight). No contract change; see README → "Slide control" for the model and
+before/after numbers, and contract request 7 for the optional per-car knob.
+
+- With `countersteer_help == 0` (wheel, AI, sim purist) nothing changes, bit for bit
+  (`tests/slide_control.rs` checks hashes recorded on main before the change).
+- `Telemetry` gained `slide_gyro_nm` (additive; not in the WASM telemetry pack yet).
+- New metric `metrics::power_oversteer_exit` + `--example slide` sweep.
+- Goldens driven with keyboard/gamepad assists may move; re-blessed in a `[bless]` commit.
+- Outside my crates: one help line in `apps/testbed-web/src/hud.ts` (F1 → "Slide control").
