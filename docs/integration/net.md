@@ -157,6 +157,13 @@ Merged `origin/main` and the lead branch `origin/claude/laughing-newton-0xqr6q` 
    Remaining mismatches are all on replicas restored from dented snapshots → NET-N5 (full
    damage snapshot/restore, `wp_damage`).
 
+Checks (round 6b): fmt, clippy `-D warnings`, `cargo test` for every crate, simcli tests
+(release), every simcli scenario (they round-trip snapshots through the `wp_net` codec), and
+the wasm build all pass, except two tests that also fail on the lead branch (no files they use
+differ on `ws/net`): `wp_economy/tests/pursuit_wiring.rs::real_police_capture_settles_through_the_economy`
+(line 130) and `wp_race/tests/simcli_races.rs::city_sprint_on_real_roads` (index out of
+bounds, line 28).
+
 ## Response to lead feedback (run 4)
 Merged `origin/lead/net-merge` (unchanged since run 3, already in) and `origin/main` (contract
 v0.2.0, A's snapshot/`Rig`); took 02's `Vehicle::set_state` in the one conflict
