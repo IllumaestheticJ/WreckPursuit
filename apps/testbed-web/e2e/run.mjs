@@ -389,6 +389,72 @@ check(
     `pursuit banner: ${flow.pursuit.banner} → ${flow.searching.banner} → ${flow.escaped.banner} (${flow.escapedEnd}) → ${flow.captured.banner} (bill ${flow.captured.bill ? "opened" : "missing"}, chase end ${flow.capturedEnd?.how} at ${flow.capturedEnd?.level}) → ${flow.later.banner ?? "cleared"}`,
   );
 }
+// End of run (lead): a real capture in the sim (player parked in front of a patrol car at L2) →
+// end-of-run panel + repair bill → "Repair & continue" pays from the ledger and restores the car.
+{
+  await page.evaluate(() => window.__wp.startCityChase("debug_sedan", "Arcade"));
+  const parked = await page
+    .waitForFunction(
+      () => {
+        const wp = window.__wp;
+        try {
+          wp.sim.debugParkNearPolice(wp.app.player, 14);
+          wp.sim.debugSetHeat(wp.app.player, 30);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      null,
+      { timeout: 120000, polling: 100 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  const ended = await page
+    .waitForFunction(() => window.__wp.runEnd.open && !!document.querySelector('#ui-run-end [data-testid="run-end"]'), null, { timeout: 240000, polling: 250 })
+    .then(() => true)
+    .catch(() => false);
+  const before = await page.evaluate(() => {
+    const wp = window.__wp;
+    const r = wp.runEnd.report;
+    return {
+      outcome: r?.outcome ?? null,
+      fines: r?.fines ?? 0,
+      impound: r?.impound_fee ?? null,
+      cost: r?.continue_cost ?? 0,
+      cashAfter: r?.cash_after ?? 0,
+      bill: !document.getElementById("ui-bill").classList.contains("hidden"),
+      text: document.querySelector('#ui-run-end [data-testid="run-end"]')?.textContent ?? "",
+      held: !wp.sim.setInput(wp.app.player, { ...wp.app.input, throttle: 1 }),
+      ledger: wp.sim.runLedger().map((l) => l.reason),
+    };
+  });
+  await shot("run_end_captured.png");
+  await page.click('#ui-run-end button.wp-btn--primary').catch(() => {});
+  await page.waitForFunction(() => !window.__wp.runEnd.open, null, { timeout: 10000 }).catch(() => {});
+  await page.waitForTimeout(300);
+  const after = await page.evaluate(() => {
+    const wp = window.__wp;
+    return {
+      open: wp.runEnd.open,
+      panel: !!document.querySelector('#ui-run-end [data-testid="run-end"]'),
+      bill: !document.getElementById("ui-bill").classList.contains("hidden"),
+      health: wp.sim.states()[17],
+      cash: wp.sim.runAccount()?.cash ?? null,
+      ledger: wp.sim.runLedger().map((l) => l.reason),
+    };
+  });
+  check(
+    parked && ended && before.outcome === "Captured" && before.fines > 0 && before.impound > 0 && before.bill && before.held &&
+      /Busted/.test(before.text) && /Repair & continue/.test(before.text) && before.ledger.includes("CarImpounded"),
+    `capture ends the run: ${before.outcome} (fine $${before.fines}, impound $${before.impound}), result panel + bill ${before.bill ? "open" : "closed"}, input ${before.held ? "held" : "live"}`,
+  );
+  check(
+    !after.open && !after.panel && !after.bill && after.health === 1 && after.cash === before.cashAfter - before.cost &&
+      after.ledger.includes("ImpoundRetrieved"),
+    `"Repair & continue": health ${after.health}, cash $${before.cashAfter} → $${after.cash} (paid $${before.cost}), panel closed`,
+  );
+}
 // The selector keeps the old flat grid: the chase restarts there.
 await page.evaluate(() => {
   const sel = document.getElementById("city-map");

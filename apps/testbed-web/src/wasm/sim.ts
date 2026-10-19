@@ -204,7 +204,22 @@ export const sim = {
   contractVersion: (): string => wasm.contract_version(),
   /** Live repair bill for a vehicle (workstream 16; `garage.rs`). `requestJson` may be "". */
   repairQuote: (entity: number, requestJson: string): LiveBill => JSON.parse(wasm.repair_quote_json(entity, requestJson)),
+  /** End-of-run result (`wp_wasm::run::RunReport`), null until a chase or the car ends. */
+  runResult: (): RunReport | null => JSON.parse(wasm.run_result_json()),
+  /** Every ledger line of the player's account (carries over restarts). */
+  runLedger: (): LedgerLine[] => JSON.parse(wasm.run_ledger_json()),
+  /** `{ cash, rep, bounty, debt }`, or null without an economy run. */
+  runAccount: (): { cash: number; rep: number; bounty: number; debt: number } | null => JSON.parse(wasm.run_account_json()),
+  /** "Repair & continue": pays impound + repair, repairs the car, releases the brakes. Throws if refused. */
+  runRepairContinue: (): ContinueReport => JSON.parse(wasm.run_repair_continue()),
+  /** Debug / e2e: set a racer's police heat (not recorded in replays). */
+  debugSetHeat: (entity: number, heat: number): void => wasm.debug_set_heat(entity, heat),
+  /** Debug / e2e: park `entity` stopped `aheadM` in front of the first police car (throws if none yet). */
+  debugParkNearPolice: (entity: number, aheadM: number): number => wasm.debug_park_near_police(entity, aheadM),
 };
+
+export type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
+import type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
 
 /** `wp_wasm::garage::LiveBill` (typed in apps/ui-kit/src/live/bill.ts as LiveBillJson). */
 export type LiveBill = import("../../../ui-kit/src/live/bill").LiveBillJson;

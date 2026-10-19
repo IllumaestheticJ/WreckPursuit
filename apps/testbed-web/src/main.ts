@@ -17,6 +17,7 @@ import { Hud } from "./hud";
 import { TelemetryPlots } from "./telemetry";
 import { AudioSystem } from "./audio";
 import { UiOverlay } from "./ui/overlay";
+import { RunEndView } from "./ui/runEnd";
 import { RealTimeMeter } from "./rtf";
 
 // v2: canonical simcli replay.bin (v1 held the retired WPR\x01 format).
@@ -83,6 +84,17 @@ async function main(): Promise<void> {
   const plots = new TelemetryPlots(overlay);
   const audio = new AudioSystem(scene.world, overlay);
   const ui = new UiOverlay(overlay);
+  // End-of-run panel (lead): capture / wreck → result + "Repair & continue" / "Restart".
+  const runEndEl = document.createElement("div");
+  runEndEl.id = "ui-run-end";
+  runEndEl.style.cssText = "position:absolute;inset:0;pointer-events:none;";
+  overlay.appendChild(runEndEl);
+  const runEnd = new RunEndView(runEndEl, {
+    repair: () => sim.runRepairContinue(),
+    restart: () => restartRun(),
+    onOpen: () => ui.setBill(true),
+    onClose: () => ui.setBill(false),
+  });
   const citySel = $("city-map") as HTMLSelectElement;
   const cityParam = params.get("city");
   if (cityParam && CITY_IDS.includes(cityParam)) citySel.value = cityParam;
@@ -100,6 +112,7 @@ async function main(): Promise<void> {
     app.eventCounts = {};
     plots.clear();
     ui.reset();
+    runEnd.reset();
     syncViews();
     const ids = sim.entities();
     app.player = ids[0] ?? 1;
@@ -182,6 +195,14 @@ async function main(): Promise<void> {
     applyAssistPreset(app.source);
     // Back to the viewer's own angle (near chase unless they picked another one).
     rig.setMode(rig.preferred, app.views.get(app.focus)?.root);
+  };
+
+  /** "Restart" on the end-of-run panel: the same session again (the account carries over). */
+  const restartRun = () => {
+    const sc = sim.scenario();
+    const car = sc.entities[0]?.car;
+    if (sc.name === "city_chase") startCityChase(car, sc.mode);
+    else startFreeDrive(car, sc.mode);
   };
 
   const runScenario = async (file: string, speedKmh?: number) => {
@@ -476,6 +497,7 @@ async function main(): Promise<void> {
     {
       const w = sim.worldInfo();
       ui.frame(w[W.tick], app.player, events, w[W.hours], modeName());
+      if (!replay) runEnd.update(sim.runResult(), now);
     }
     scene.update(dt, sim.intents());
     // Promoted (physical) agents are drawn as sim vehicles once the sim spawns them.
@@ -662,6 +684,8 @@ async function main(): Promise<void> {
     },
     toggleLayer: (id: string) => layers.toggle(id),
     ui,
+    runEnd,
+    restartRun,
     lookFrom: (eye: [number, number, number], target: [number, number, number]) => rig.lookFrom(eye, target),
   };
   requestAnimationFrame(frame);
