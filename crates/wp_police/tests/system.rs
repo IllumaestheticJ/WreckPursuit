@@ -268,6 +268,9 @@ fn roadblocks_respect_sight_and_highway_rules() {
 #[test]
 fn radar_and_scanner() {
     let mut h = Harness::new(12.0, 5);
+    // Wanted, so the start-of-shift patrol chatter is on the radio (with nobody wanted it is
+    // only heard within earshot, `data/police/radio.toml`).
+    h.police.set_heat(RACER, 15.0);
     h.run(4.0, &[]);
     let v = h.racer_view();
     let near = h.police.radar(v.pos, 0);

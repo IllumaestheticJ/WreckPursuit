@@ -1,0 +1,18 @@
+// Radio budget (playtest row 6, "the dispatcher and cops are way too talkative"): a 5-minute
+// city chase at 23:00 on the full 12×12 city. The racer roams at twice the limit, so it is
+// spotted, chased, and escapes or gets caught several times. Radio lines per minute of sim time
+// while some racer is in a pursuit must stay at or under 10 (rates are pooled over runs).
+(
+    name: "police_radio_city_chase",
+    seed: 600,
+    city: (nx: 12, ny: 12, seed: 1),
+    time_of_day_h: 23.0,
+    duration_s: 300.0,
+    runs: 4,
+    racers: [(district: Core, speed_factor: 2.5)],
+    expect: [
+        (metric: "pursuits", min: 1, max: 1000),
+        (metric: "radio_per_min_pursuit", min: 0.5, max: 10.0),
+        (metric: "radio_per_min_calm", min: 0.0, max: 4.0),
+    ],
+)

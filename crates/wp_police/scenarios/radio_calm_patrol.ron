@@ -1,0 +1,16 @@
+// Radio budget when not wanted (playtest row 6): a law-abiding racer drives around the full
+// 12×12 city at 23:00 for 5 minutes while patrols come and go. Patrol chatter must stay at or
+// under 4 lines per minute of sim time.
+(
+    name: "police_radio_calm_patrol",
+    seed: 610,
+    city: (nx: 12, ny: 12, seed: 1),
+    time_of_day_h: 23.0,
+    duration_s: 300.0,
+    runs: 2,
+    racers: [(district: Core, speed_factor: 0.9, violations: false, stay_in_district: false)],
+    expect: [
+        (metric: "pursuits", min: 0, max: 0),
+        (metric: "radio_per_min_calm", min: 0.0, max: 4.0),
+    ],
+)

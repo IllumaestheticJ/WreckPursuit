@@ -4,6 +4,7 @@
 //!
 //! Every assignment change goes through [`PoliceSystem::assign`], which emits a radio line.
 
+use crate::radio::{RadioCue, RadioTier};
 use serde::{Deserialize, Serialize};
 use wp_contracts::{EntityId, ViolationKind, WorldQuery};
 
@@ -150,10 +151,11 @@ impl PoliceSystem {
                     unit: None,
                     scene_until: None,
                 });
-                self.radio(
+                self.radio(RadioCue::new(
+                    RadioTier::Tactical,
                     None,
                     format!("Dispatch: caller reports reckless driver, {:?}.", district),
-                );
+                ));
             }
         }
     }
@@ -239,13 +241,14 @@ impl PoliceSystem {
             unit: None,
             scene_until: None,
         });
-        self.radio(
+        self.radio(RadioCue::new(
+            RadioTier::Routine,
             None,
             format!(
                 "Dispatch: collision with injuries, {:?}, need a unit.",
                 district
             ),
-        );
+        ));
     }
 
     pub(crate) fn camera_sees(&self, world: &dyn WorldQuery, p: [f32; 2]) -> bool {
@@ -289,7 +292,6 @@ impl PoliceSystem {
             return;
         }
         let text = self.radio_text(i, &a);
-        let id = self.units[i].id;
         let now = self.now;
         {
             let u = &mut self.units[i];
@@ -306,10 +308,11 @@ impl PoliceSystem {
                 self.stats.units_engaged += 1;
             }
         }
-        self.radio(Some(id), text);
+        self.radio(text);
     }
 
-    fn racer_desc(&self, racer: EntityId) -> String {
+    /// Spoken description of a racer ("racer #3 northbound in Core").
+    pub(crate) fn racer_desc(&self, racer: EntityId) -> String {
         match self.racers.get(&racer) {
             Some(r) => {
                 let p = xy(r.pos);
@@ -324,52 +327,99 @@ impl PoliceSystem {
         }
     }
 
-    fn radio_text(&self, i: usize, a: &Assignment) -> String {
+    /// The radio line for unit `i` taking assignment `a`: tier and collapse rule per
+    /// assignment (`data/police/radio.toml` paces them, see [`crate::radio`]).
+    fn radio_text(&self, i: usize, a: &Assignment) -> RadioCue {
         let u = &self.units[i];
         let callsign = match u.kind {
             UnitKind::Car => format!("Unit {}", u.id.0),
             UnitKind::Helicopter => format!("Air {}", u.id.0),
         };
+        let line = |tier: RadioTier, text: String, key: String, group: &str| {
+            RadioCue::new(tier, Some(u.id), text).grouped(
+                Some(callsign.clone()),
+                key,
+                group.to_string(),
+            )
+        };
         match a {
-            Assignment::Idle => format!("{callsign}, clear and available."),
-            Assignment::Patrol { .. } => {
+            Assignment::Idle => line(
+                RadioTier::Routine,
+                format!("{callsign}, clear and available."),
+                "clear".into(),
+                "{units}, clear and available.",
+            ),
+            Assignment::Patrol { .. } => line(
+                RadioTier::Routine,
                 format!(
                     "{callsign} resuming patrol, {:?}.",
                     self.graph.district_at(u.body.pos)
-                )
-            }
+                ),
+                "patrol".into(),
+                "{units} resuming patrol.",
+            ),
             Assignment::Respond { incident } => {
-                let what = self
+                let kind = self
                     .incidents
                     .iter()
                     .find(|x| x.id == *incident)
-                    .map(|x| match x.kind {
-                        IncidentKind::Report { .. } => "reckless driver report",
-                        IncidentKind::Crash => "crash scene",
-                    })
-                    .unwrap_or("incident");
-                format!("{callsign} responding to {what}.")
+                    .map(|x| x.kind);
+                let (what, tier) = match kind {
+                    Some(IncidentKind::Report { .. }) => {
+                        ("reckless driver report", RadioTier::Tactical)
+                    }
+                    Some(IncidentKind::Crash) => ("crash scene", RadioTier::Routine),
+                    None => ("incident", RadioTier::Routine),
+                };
+                line(
+                    tier,
+                    format!("{callsign} responding to {what}."),
+                    format!("respond:{}", incident.0),
+                    &format!("{{units}} responding to {what}."),
+                )
             }
-            Assignment::Pursue { target } => {
-                format!("{callsign} in pursuit of {}.", self.racer_desc(*target))
-            }
-            Assignment::Intercept { target, .. } => {
+            Assignment::Pursue { target } => line(
+                RadioTier::Tactical,
+                format!("{callsign} in pursuit of {}.", self.racer_desc(*target)),
+                format!("pursue:{}", target.0),
+                &format!("{{units}} in pursuit of racer #{}.", target.0),
+            ),
+            Assignment::Intercept { target, .. } => line(
+                RadioTier::Tactical,
                 format!(
                     "{callsign} moving to intercept {}.",
                     self.racer_desc(*target)
-                )
-            }
-            Assignment::RoadblockAt { segment, .. } => {
-                format!("{callsign} setting up roadblock on segment {}.", segment.0)
-            }
-            Assignment::SpikeAt { segment, .. } => {
-                format!("{callsign} deploying spikes on segment {}.", segment.0)
-            }
-            Assignment::HeloTrack { target } => format!(
-                "{callsign} overhead, tracking {}.",
-                self.racer_desc(*target)
+                ),
+                format!("intercept:{}", target.0),
+                &format!("{{units}} moving to intercept racer #{}.", target.0),
             ),
-            Assignment::OutOfService => format!("{callsign} out of service."),
+            Assignment::RoadblockAt { segment, .. } => line(
+                RadioTier::Critical,
+                format!("{callsign} setting up roadblock on segment {}.", segment.0),
+                format!("roadblock:{}", segment.0),
+                &format!("{{units}} setting up roadblock on segment {}.", segment.0),
+            ),
+            Assignment::SpikeAt { segment, .. } => line(
+                RadioTier::Critical,
+                format!("{callsign} deploying spikes on segment {}.", segment.0),
+                format!("spikes:{}", segment.0),
+                &format!("{{units}} deploying spikes on segment {}.", segment.0),
+            ),
+            Assignment::HeloTrack { target } => line(
+                RadioTier::Tactical,
+                format!(
+                    "{callsign} overhead, tracking {}.",
+                    self.racer_desc(*target)
+                ),
+                format!("helo:{}", target.0),
+                &format!("{{units}} overhead, tracking racer #{}.", target.0),
+            ),
+            Assignment::OutOfService => line(
+                RadioTier::Routine,
+                format!("{callsign} out of service."),
+                "out_of_service".into(),
+                "{units} out of service.",
+            ),
         }
     }
 
@@ -619,10 +669,21 @@ impl PoliceSystem {
                 });
                 let n = have + pending + 1;
                 self.radio(
-                    None,
-                    format!(
-                        "Dispatch: copy, sending unit {n} of {want} on racer #{}.",
-                        racer.0
+                    RadioCue::new(
+                        RadioTier::Tactical,
+                        None,
+                        format!(
+                            "Dispatch: copy, sending unit {n} of {want} on racer #{}.",
+                            racer.0
+                        ),
+                    )
+                    .grouped(
+                        None,
+                        format!("backup:{}", racer.0),
+                        format!(
+                            "Dispatch: copy, {{count}} more units en route to racer #{}.",
+                            racer.0
+                        ),
                     ),
                 );
             }
@@ -716,7 +777,11 @@ impl PoliceSystem {
                 .get(self.phase),
         ) {
             self.stats.helo_unavailable += 1;
-            self.radio(None, "Dispatch: air unit unavailable.".to_string());
+            self.radio(RadioCue::new(
+                RadioTier::Tactical,
+                None,
+                "Dispatch: air unit unavailable.".to_string(),
+            ));
             return Err(CaptainError::Unavailable);
         }
         let launch = self.cfg.presence.helicopter.launch_s.get(self.phase);
@@ -724,10 +789,11 @@ impl PoliceSystem {
             racer,
             launch: now.plus(launch),
         });
-        self.radio(
+        self.radio(RadioCue::new(
+            RadioTier::Tactical,
             None,
             format!("Dispatch: air unit requested, ETA {launch:.0} s."),
-        );
+        ));
         Ok(())
     }
 

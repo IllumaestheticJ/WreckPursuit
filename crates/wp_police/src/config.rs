@@ -570,6 +570,8 @@ pub struct PoliceConfig {
     pub pursuit: PursuitFile,
     /// `tools.toml`.
     pub tools: ToolsFile,
+    /// `radio.toml` (radio pacing; optional in a tables directory, built-in when missing).
+    pub radio: crate::radio::RadioConfig,
 }
 
 /// Error loading police tables.
@@ -590,41 +592,62 @@ const BUILTIN_HEAT: &str = include_str!("../../../data/police/heat.toml");
 const BUILTIN_PRESENCE: &str = include_str!("../../../data/police/presence.toml");
 const BUILTIN_PURSUIT: &str = include_str!("../../../data/police/pursuit.toml");
 const BUILTIN_TOOLS: &str = include_str!("../../../data/police/tools.toml");
+const BUILTIN_RADIO: &str = include_str!("../../../data/police/radio.toml");
 
 fn parse_one<T: for<'de> Deserialize<'de>>(name: &str, text: &str) -> Result<T, ConfigError> {
     toml::from_str(text).map_err(|e| ConfigError::Parse(name.to_string(), e))
 }
 
 impl PoliceConfig {
-    /// Parse from the four TOML texts (heat, presence, pursuit, tools).
+    /// Parse from the four TOML texts (heat, presence, pursuit, tools), with the built-in
+    /// `radio.toml`.
     pub fn parse(
         heat: &str,
         presence: &str,
         pursuit: &str,
         tools: &str,
     ) -> Result<Self, ConfigError> {
+        Self::parse_with_radio(heat, presence, pursuit, tools, BUILTIN_RADIO)
+    }
+
+    /// Parse from all five TOML texts (heat, presence, pursuit, tools, radio).
+    pub fn parse_with_radio(
+        heat: &str,
+        presence: &str,
+        pursuit: &str,
+        tools: &str,
+        radio: &str,
+    ) -> Result<Self, ConfigError> {
         let cfg = Self {
             heat: parse_one("heat.toml", heat)?,
             presence: parse_one("presence.toml", presence)?,
             pursuit: parse_one("pursuit.toml", pursuit)?,
             tools: parse_one("tools.toml", tools)?,
+            radio: parse_one("radio.toml", radio)?,
         };
         cfg.validate()?;
         Ok(cfg)
     }
 
-    /// Load from a directory containing `heat.toml`, `presence.toml`, `pursuit.toml`, `tools.toml`.
+    /// Load from a directory containing `heat.toml`, `presence.toml`, `pursuit.toml`, `tools.toml`
+    /// and optionally `radio.toml` (the built-in one when missing).
     pub fn load(dir: impl AsRef<Path>) -> Result<Self, ConfigError> {
         let dir = dir.as_ref();
         let read = |name: &str| {
             let p = dir.join(name);
             std::fs::read_to_string(&p).map_err(|e| ConfigError::Io(p.display().to_string(), e))
         };
-        Self::parse(
+        let radio = if dir.join("radio.toml").exists() {
+            read("radio.toml")?
+        } else {
+            BUILTIN_RADIO.to_string()
+        };
+        Self::parse_with_radio(
             &read("heat.toml")?,
             &read("presence.toml")?,
             &read("pursuit.toml")?,
             &read("tools.toml")?,
+            &radio,
         )
     }
 
@@ -643,6 +666,22 @@ impl PoliceConfig {
     /// Sanity checks that would otherwise show up as odd behaviour.
     pub fn validate(&self) -> Result<(), ConfigError> {
         let bad = |m: &str| Err(ConfigError::Invalid(m.to_string()));
+        let r = &self.radio;
+        if [
+            r.global_gap_s,
+            r.global_gap_calm_s,
+            r.unit_gap_s,
+            r.collapse_window_s,
+            r.earshot_m,
+        ]
+        .iter()
+        .any(|v| !(v.is_finite() && *v >= 0.0))
+            || r.stale_s < r.collapse_window_s
+        {
+            return bad(
+                "radio: gaps, window and earshot must be >= 0 and stale_s >= collapse_window_s",
+            );
+        }
         let a = &self.pursuit.avoid;
         if a.decel_mps2 <= 0.0 || a.min_horizon_m <= 0.0 || a.max_horizon_m < a.min_horizon_m {
             return bad("pursuit.avoid: decel and horizons must be positive and ordered");

@@ -34,6 +34,7 @@ pub mod events;
 pub mod graph;
 pub mod heat;
 pub mod pursuit;
+pub mod radio;
 pub mod scenario;
 pub mod time;
 pub mod tools;
@@ -54,6 +55,7 @@ pub use dispatch::{Incident, IncidentKind};
 pub use events::{DisableCause, IncidentId, PoliceEvent, PursuitOutcome, ToolId, UnitId, UnitKind};
 pub use graph::{District, RoadGraph};
 pub use heat::{BountyRecord, PursuitStatus, RacerRecord, WantedLevel};
+pub use radio::{RadioConfig, RadioStats, RadioTier};
 pub use time::SimTime;
 pub use tools::{HeloView, RadarBlip, RadioLine, Roadblock, SpikeStrip, StaticCollider};
 pub use unit::{Assignment, DriveCommand, SteerGeometry, Tactic, Unit};
@@ -219,6 +221,7 @@ pub struct PoliceSystem {
     pub(crate) next_tool: u32,
     pub(crate) punctures: BTreeMap<EntityId, Puncture>,
     pub(crate) radio: VecDeque<RadioLine>,
+    pub(crate) radio_director: radio::RadioDirector,
     pub(crate) captain: CaptainState,
     pub(crate) stats: PoliceStats,
     pub(crate) contact_cooldown: BTreeMap<(UnitId, EntityId), SimTime>,
@@ -284,6 +287,7 @@ impl PoliceSystem {
             next_tool: 1,
             punctures: BTreeMap::new(),
             radio: VecDeque::new(),
+            radio_director: radio::RadioDirector::new(),
             captain: CaptainState {
                 human: false,
                 priority: None,
@@ -326,6 +330,7 @@ impl PoliceSystem {
             self.think_accum = 0.0;
             self.think(world, tdt);
         }
+        self.flush_radio();
         for e in self.pending.drain(..) {
             out.push(e.to_sim_event());
         }
@@ -401,17 +406,48 @@ impl PoliceSystem {
         self.units.iter().position(|u| u.entity == Some(e))
     }
 
-    /// Emit a radio line (event + scanner log).
-    pub(crate) fn radio(&mut self, unit: Option<UnitId>, text: String) {
-        self.radio.push_back(RadioLine {
-            time: self.now,
-            unit,
-            text: text.clone(),
-        });
-        while self.radio.len() > self.cfg.tools.gadgets.radio_log_len {
-            self.radio.pop_front();
+    /// Raise a radio line. The radio director ([`radio`]) decides at the end of the step
+    /// whether (and merged with which other lines) it is spoken.
+    pub(crate) fn radio(&mut self, cue: radio::RadioCue) {
+        self.radio_director.raise(self.now, cue);
+    }
+
+    /// Speak what the radio director lets through: event + scanner log.
+    fn flush_radio(&mut self) {
+        let racers: Vec<[f32; 2]> = self.racers.values().map(|r| [r.pos[0], r.pos[1]]).collect();
+        let any_wanted = self.racers.values().any(|r| r.level > WantedLevel::None);
+        let units = &self.units;
+        let unit_pos = |id: UnitId| {
+            units
+                .binary_search_by_key(&id, |u| u.id)
+                .ok()
+                .map(|i| units[i].body.pos)
+        };
+        let ctx = radio::RadioContext {
+            now: self.now,
+            any_wanted,
+            racers: &racers,
+            unit_pos: &unit_pos,
+        };
+        for line in self.radio_director.flush(&self.cfg.radio, &ctx) {
+            self.radio.push_back(RadioLine {
+                time: self.now,
+                unit: line.unit,
+                text: line.text.clone(),
+            });
+            while self.radio.len() > self.cfg.tools.gadgets.radio_log_len {
+                self.radio.pop_front();
+            }
+            self.pending.push(PoliceEvent::Radio {
+                unit: line.unit,
+                text: line.text,
+            });
         }
-        self.pending.push(PoliceEvent::Radio { unit, text });
+    }
+
+    /// Radio pacing counters (raised / spoken / collapsed / dropped lines).
+    pub fn radio_stats(&self) -> radio::RadioStats {
+        self.radio_director.stats()
     }
 
     // -----------------------------------------------------------------------------------------
