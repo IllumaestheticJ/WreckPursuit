@@ -77,8 +77,18 @@ fn risk_budget_and_caps_keep_cops_alive() {
     cfg.pursuit.target_speed_margin = 0.6;
     cfg.pursuit.pursuit_cap_mps.day = 60.0;
     let reckless = run_scenario_with(&sc, &cfg);
+    // Every risk event counts: since units keep their distance to the vehicle ahead (round 6)
+    // wrecks and traffic collisions alone are single digits for both configs, too few to rank.
     let harm = |s: &PoliceRunSummary| {
-        s.metric("self_wrecks").unwrap() + s.metric("traffic_collisions").unwrap()
+        [
+            "self_wrecks",
+            "traffic_collisions",
+            "run_wide_crashes",
+            "near_misses",
+        ]
+        .iter()
+        .map(|m| s.metric(m).unwrap())
+        .sum::<f32>()
     };
     assert!(careful.metric("self_wreck_rate").unwrap() < 0.10);
     assert!(

@@ -25,6 +25,9 @@
   - **`unit_input(&mut self, unit, dt) -> Option<VehicleInput>`**: the controller's
     pure-pursuit steer plus PID pedals, called every physics tick after `sync_unit`;
   - `sync_unit(unit, UnitSync { pos, vel, heading, health, effects })`. A unit whose effects show a bent wheel pulls over.
+  - **`set_obstacles(&[ObstacleView])`** (round 6): every vehicle units must not drive into, once per
+    tick before `unit_input`. `ObstacleView::car(entity, pos, vel, forward)` builds a car-sized one.
+    Units follow, wait behind or pass them, and spawn clear of them (`wp_police::avoid`).
 - Unit lifecycle events: `UnitSpawned` / `UnitDespawned`.
 - Queries: `wanted_level`, `racer`, `units`, `incidents`, `pool_count`, `tire_puncture(entity) -> [f32; 4]`,
   `static_colliders()`, `spike_strips()`, `roadblocks()`, `helicopters()`, `now() -> SimTime`, `state_hash()`, `stats()`.
@@ -43,7 +46,9 @@
 ## Needs
 | From | What | Workaround now |
 |---|---|---|
-| `wp_sim` (12) | Wiring for the city chase demo (see below) | Units are driven internally, and `wp_sim` uses `PoliceSystem::new()` |
+| Lead | Flip `soak/traffic_soak_observer` back to `police_cars: true` | Passes locally with it on |
+| Harness (I) | Re-aim `golden/city_chase` (see "Response to round 6") | Collision-free, but no pursuit within 20 s |
+| `wp_world` (05) | Optional: parked cars / cones near a point (spatial query), for police obstacle awareness | Units see vehicles only |
 | `wp_world` (05) / lead | `RoadGraphView` as the shared road-network trait (v0.3.0) | Police build from the struct directly |
 | `wp_world` (05) | Optional: per-node turn restrictions in `RoadGraphView`; traffic cameras as a `PoiKind` | Any legal outgoing road may be taken; cameras at every third signalised node |
 | `wp_net` (07) | Player roles (captain / chase seats) → `set_human_captain`, `add_player_unit`; replicate `CaptainView` | None |
@@ -104,6 +109,9 @@ The reply is `Result<(), CaptainError>` with:
 - `Site(SiteError { NoSite, NotOnPath, BlindCorner, Highway })`.
 
 ## Changes outside my crates
+- **`crates/wp_sim/src/police_link.rs`** (round 6, minimal): `drive_police_units` first calls
+  `police.set_obstacles(..)` with every vehicle slot (`forward_of(rot)`, `lin_vel`) and every
+  kinematic traffic agent (`world.agents()` with `Lod::Kinematic`). ≈ 20 lines; the lead may move it.
 - **Root `Cargo.toml`**: `[profile.dev.package.wp_police] opt-level = 2` (kept by the lead).
 - `wp_police` depends on `wp_world`. There's no cycle, and it is wasm32-clean.
 - **`apps/ui-kit/tools/record-police`** (standalone tool), two edits:
@@ -115,12 +123,14 @@ The reply is `Result<(), CaptainError>` with:
 ## Perf numbers
 | Measurement | Machine | Native | Browser | Budget |
 |---|---|---|---|---|
-| `PoliceSystem::step` per 60 Hz frame, 13 patrols + reinforcements, 4 wanted racers, D's small city with exact building LOS (`police_bench`) | Cloud Xeon 2.1 GHz, release | 0.055 ms | not measured | 0.5 ms / 1.0 ms |
+| `PoliceSystem::step` per 60 Hz frame, 13 patrols + reinforcements, 4 wanted racers, D's small city with exact building LOS, obstacle awareness on (`police_bench`) | Cloud Xeon 2.1 GHz, release | PERF_NOW ms (0.055 before round 6) | not measured | 0.5 ms / 1.0 ms |
 
 ## Known gaps
 - The headless kinematic body and traffic-hazard model stand in until units are physical (12).
   It runs wide more often on D's ring road and diagonals, mostly at low speed: the self-wreck
-  rate is 1.3% over 20 Simulation pursuits.
+  rate is 1.4% over 20 Simulation pursuits.
+- Obstacle awareness sees vehicles only, not parked cars or cones (`wp_world` static props). In the
+  observer soak a few physical units still brush a parked car or kerb at 1–6 m/s.
 - Scripted racers don't react to PIT or box-ins; physics resolves those.
 - Night pursuit start varies per seed (4 of 8 runs under 60 s, mean 114 s); the tests assert means and ratios.
 
@@ -136,6 +146,42 @@ The reply is `Result<(), CaptainError>` with:
 - **Real violations:** `TrafficViolation::pos` places reports.
 - **Typed events:** final `PoliceEvent` / `CaptainCommand` / `CaptainError` lists are above. Captain
   commands now name roads by D's edge id (`RoadEdgeId`).
+
+**Round 6, done:**
+- **Police cars no longer drive into stopped cars.** New `wp_police::avoid`: every tick a unit scans
+  its lane corridor ahead on its own track (plus a short bumper box straight ahead) for any
+  vehicle, and caps its speed to stop 3 m behind it or follow it. At a zero cap physical units hold
+  full brake (D's controller releases the brake below 0.6 m/s, which made them creep into the car
+  ahead). Behind a stopped vehicle a unit waits, then passes in the other lane when it is clear
+  (1.5 s with lights, 6 s without; no pass with oncoming traffic). PIT / box-in units ignore their own
+  target. `wp_sim` feeds every vehicle and kinematic traffic car via `set_obstacles` (my small
+  `police_link.rs` hook, see "Changes outside my crates"). Tuning: `[avoid]` in `data/police/pursuit.toml`.
+- **Spawns clear of other vehicles:** pool units spawn in the right-hand lane, ≥ 25 m from any
+  vehicle and outside any moving vehicle's next 5 s of travel (in its lane), and face their first
+  patrol route (turning around from standstill drove physical cars over the kerb into parked cars).
+  Reinforcement nodes use the same clearance.
+- **Also fixed:** route tracks started at the unit's body, so a unit already in its lane got the
+  lane offset twice (≈ 3.5 m right of the centreline) and scraped parked cars. They now start on
+  the centreline.
+- **`soak/traffic_soak_observer` with `police_cars: true` passes** (I didn't edit the file; flip it):
+  observer `distance_m` 0, `civilian_collisions` 0 (its pending target passes too). Before: the
+  observer was shoved 52 m, and units had 20+ contacts with traffic and each other at up to 24 m/s;
+  now none above 1.5 m/s. Two units still touch a parked car / kerb at ≤ 6 m/s (known gap).
+- **`golden/city_chase`: no collision, but no pursuit.** All pending checks pass except
+  `pursuit_started_before(20 s)`. The unit that used to start 5 m ahead of the racer now spawns
+  elsewhere (exactly the case the clearance rule exists for), and at 23:00 the 5 night patrols are
+  ≥ 199 m from the racer's street (`probe_police`: units at (273, 73) S, (277, −139) N, (186, 167) W,
+  (497, 30) N, (703, 603) E at t = 1 s). The scenario needs re-aiming (I's file). What I tried: the
+  racer overtaking unit 2 in the oncoming lane hits oncoming traffic head-on; a modest speeder just
+  ahead of unit 2 doesn't register a violation. A pursuit needs the racer wanted *and* a unit within
+  40 m for 4 s, so the reliable shape is a racer overtaking a patrol on a 2-lanes-per-direction
+  arterial (x or y = ±385) — which needs a patrol there, e.g. day time or starting heat. The cruise
+  driver can't overtake by itself, so a racer catching a patrol in a single lane will always rear-end
+  it.
+- **Typed `PoliceEvent` / `CaptainCommand` lists:** unchanged, final, in "Contract change requests".
+- Test change: `risk_budget_and_caps_keep_cops_alive` compared wrecks + traffic collisions only;
+  with units keeping distance those are single digits for both configs (careful 9, reckless 3, by
+  seed). Harm now also counts run-wide crashes and near misses (reckless 960 vs careful 920).
 
 ## Lead feedback (2026-10-19, run 2)
 

@@ -68,3 +68,28 @@ intercept_min_gap_m = 150.0
 disengage_health = 0.4
 bent_wheel_toe_rad = 0.02
 puncture_pull_over = 0.5
+
+# Obstacle awareness: units follow, wait behind or pass any vehicle in their lane, and spawn
+# clear of other vehicles (wp_police::avoid).
+[avoid]
+standstill_gap_m = 3.0
+reaction_s = 0.4
+decel_mps2 = 4.0
+lateral_margin_m = 0.35
+bumper_m = 4.0
+min_horizon_m = 20.0
+max_horizon_m = 90.0
+stopped_mps = 1.0
+pass_gap_m = 12.0
+pass_wait_s = 6.0
+pass_wait_siren_s = 1.5
+pass_shift_m = 3.5
+pass_extra_shift_m = 0.9
+pass_clear_m = 8.0
+oncoming_clear_m = 50.0
+pass_speed_mps = 9.0
+pass_creep_mps = 2.0
+pass_creep_gap_m = 1.0
+spawn_clear_m = 25.0
+spawn_path_s = 5.0
+spawn_path_half_width_m = 6.0

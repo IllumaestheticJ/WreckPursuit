@@ -90,6 +90,30 @@ racers share. Each unit owns one, created with its `SteerGeometry` (wheelbase, f
 
 Police keep only the speed planning (corner speeds, caps, tactics).
 
+### Obstacle awareness (`avoid.rs`)
+Every tick each ground unit (physical or headless) looks ahead on its own track:
+- **Lane corridor**: any vehicle whose box overlaps the unit's lane (unit half width + its
+  projected half extent + `lateral_margin_m`) within a speed-dependent horizon
+  (`min_horizon_m`..`max_horizon_m`). The nearest one caps the speed so the unit can stop
+  `standstill_gap_m` behind it (braking at `decel_mps2` after `reaction_s`); a moving leader is
+  followed at its own speed. A **bumper box** (`bumper_m` straight ahead of the body) catches
+  what the corridor misses while the body is off its track (turning, cutting corners).
+- **Hold**: at a zero cap, physical units get full brake (the shared controller would otherwise
+  release it below its hold speed and creep).
+- **Passing**: behind a *stopped* vehicle closer than `pass_gap_m` for `pass_wait_s` (6 s;
+  `pass_wait_siren_s` 1.5 s with lights), the unit pulls `pass_shift_m` left (or
+  `pass_extra_shift_m` further, for a car straddling the centreline) when that lane is clear past
+  the blocker and free of oncoming vehicles for `oncoming_clear_m`. It passes at ≤
+  `pass_speed_mps` and returns to its lane after the blocker.
+- **Exceptions**: a unit in a `Pit` or `BoxIn` tactic ignores its own target (contact is the point).
+- **Spawning**: pool units appear in the right-hand lane, ≥ `spawn_clear_m` from every vehicle
+  and outside every moving vehicle's next `spawn_path_s` of travel, already facing their first
+  patrol route (a physical car turning around from standstill runs over the kerb). Reinforcement
+  nodes use the same clearance.
+
+Obstacles: `wp_sim` reports every vehicle (players, racers, physical and kinematic traffic,
+police cars) with `set_obstacles` each tick. Headless, units see the racers and each other.
+
 ### Tools & gadgets (`tools.rs`)
 - `plan_site` puts a tool on the predicted path between `min_ahead_m` and `max_ahead_m`, never
   within 15 m of an intersection, and with approach sight distance ≥ `min_sight_m` (120 m).
@@ -142,7 +166,7 @@ distance and nearest road. Tests, scenarios and tools use `city::procedural(&Pro
 | Patrol presence (4 phases) | Exact table counts after warm-up |
 | Day speeder, Core, 2× limit (5 runs) | Pursuit at 8.6 s mean (≤ 13.3 s every run); reinforcement 30 s |
 | Night speeder, 03:00 (8 runs) | Pursuit at 114 s mean (4 of 8 runs < 60 s: the racer passed a cop); reinforcement 101 s |
-| Cop self-wreck, Simulation (20 pursuits) | 1.3% of engaged units; a reckless config (no budget, high caps) does measurably worse |
+| Cop self-wreck, Simulation (20 pursuits) | 1.4% of engaged units; a reckless config (no budget, high caps) has more risk events (run-wide crashes, near misses, wrecks, traffic hits) |
 | Tool placement (5 runs, L4) | 35 tools, minimum sight 120.1 m |
 | Escape (dusk, below helicopter level) | 2 of 3 runs escape |
 | Capture / safehouse (12×12 city) / total loss | Each rule fires in its scripted case |
@@ -171,6 +195,8 @@ cargo run --release -p wp_police --example police_scenario -- <file.ron> [--tabl
 - The police graph ignores per-lane turn restrictions, and puts cameras at every third signalised
   junction (the network has none). `RoadGraphView` becomes the shared road-network trait in v0.3.0.
 - The headless kinematic body and its traffic-hazard model stand in for physical cars and real traffic.
+- Obstacle awareness sees vehicles only: parked cars and cones (`wp_world` static props) are not
+  in the list, so a unit off its lane can still clip one. Passing assumes the other lane exists.
 - `PoliceSystem::new()` (used by `wp_sim` today) has no road network, so it tracks heat but spawns no units.
 - Scripted racers don't react to PIT or box-ins; physics resolves those in the real game.
 - Captain-command events are emitted on the next `step`.

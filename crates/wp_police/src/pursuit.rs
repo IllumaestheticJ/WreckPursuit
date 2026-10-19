@@ -23,6 +23,7 @@
 
 use wp_contracts::{EntityId, WorldQuery, GRAVITY_MPS2};
 
+use crate::dispatch::ROAD_HALF_WIDTH_M;
 use crate::events::{PoliceEvent, PursuitOutcome, UnitId, UnitKind};
 use crate::graph::{dist, dot, normalize, perp_left, scale, sub, xy, NodeId, PoiKind};
 use crate::heat::{PursuitStatus, RuleInputs, RuleOutcome, WantedLevel};
@@ -315,20 +316,44 @@ impl PoliceSystem {
     }
 
     /// A road route from a unit's position to `dest` as a drivable track.
-    fn route_track(&self, i: usize, dest: NodeId, final_point: Option<[f32; 2]>) -> Track {
+    pub(crate) fn route_track(
+        &self,
+        i: usize,
+        dest: NodeId,
+        final_point: Option<[f32; 2]>,
+    ) -> Track {
         let u = &self.units[i];
-        let Some(start) = self.start_node(u.body.pos, u.body.heading) else {
-            return Track::default();
+        self.route_from(u.body.pos, u.body.heading, dest, final_point)
+            .0
+    }
+
+    /// A road route from `pos` (facing `heading`) to `dest`, and whether it starts with a
+    /// turn-around.
+    pub(crate) fn route_from(
+        &self,
+        pos: [f32; 2],
+        heading: [f32; 2],
+        dest: NodeId,
+        final_point: Option<[f32; 2]>,
+    ) -> (Track, bool) {
+        let Some(start) = self.start_node(pos, heading) else {
+            return (Track::default(), false);
         };
-        let mut pts = vec![u.body.pos];
+        let on_road = self.graph.nearest_on_road(pos);
+        let mut turn_around = false;
+        let mut pts = vec![pos];
         if let Some(route) = self.graph.shortest_path(start, dest) {
             // Don't drive to the node ahead only to come straight back along the same road:
             // turn around now instead.
-            let behind = self
-                .graph
-                .nearest_on_road(u.body.pos)
-                .map(|rp| self.graph.other_end(rp.segment, start));
+            let behind = on_road.map(|rp| self.graph.other_end(rp.segment, start));
             let skip = route.len() >= 2 && Some(route[1]) == behind;
+            turn_around = skip;
+            // Start on the centreline, not at the body: the lane offset is applied on top, so
+            // a unit already in its lane would otherwise be pushed a second lane width right
+            // (into parked cars).
+            if let Some(rp) = on_road.filter(|rp| !skip && rp.dist_m < ROAD_HALF_WIDTH_M) {
+                pts[0] = rp.point;
+            }
             pts.extend(
                 route
                     .iter()
@@ -339,10 +364,10 @@ impl PoliceSystem {
         if let Some(p) = final_point {
             pts.push(p);
         }
-        Track::new(pts)
+        (Track::new(pts), turn_around)
     }
 
-    fn random_node_in(&mut self, d: Option<crate::graph::District>) -> Option<NodeId> {
+    pub(crate) fn random_node_in(&mut self, d: Option<crate::graph::District>) -> Option<NodeId> {
         let cands: Vec<u32> = (0..self.graph.nodes.len() as u32)
             .filter(|&n| d.is_none_or(|d| self.graph.nodes[n as usize].district == d))
             .collect();
@@ -824,6 +849,7 @@ impl PoliceSystem {
                         u.assignment,
                         Assignment::Pursue { .. } | Assignment::Intercept { .. }
                     );
+                    self.update_avoid(i, dt);
                     let rep = step_ground(&mut self.units[i], &env, &cfg, &mut self.rng, dt);
                     self.stats.near_misses += rep.near_miss as u32;
                     self.stats.traffic_collisions += rep.traffic_collision as u32;

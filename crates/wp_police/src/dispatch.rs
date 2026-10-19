@@ -12,18 +12,21 @@ use crate::events::{
     DisableCause, IncidentId, PoliceEvent, PursuitOutcome, ToolId, UnitId, UnitKind,
 };
 use crate::graph::{
-    add, dist, lerp2, normalize, perp_left, scale, sub, xy, District, PoiKind, RoadClass,
+    add, dist, lerp2, normalize, perp_left, scale, sub, xy, District, NodeId, PoiKind, RoadClass,
 };
 use crate::heat::{PursuitStatus, WantedLevel};
 use crate::time::SimTime;
 use crate::tools::{
     compass, plan_site, roadblock_barriers, roadblock_unit_spots, Roadblock, SiteRules, SpikeStrip,
 };
-use crate::unit::{Assignment, DriveCommand, Unit, UnitRole};
+use crate::unit::{Assignment, DriveCommand, Unit, UnitRole, LANE_OFFSET_M};
 use crate::PoliceSystem;
 
 /// Road half width used for tool layout, m.
 pub const ROAD_HALF_WIDTH_M: f32 = 5.0;
+
+/// Spots tried per pool spawn before giving up until the next think step.
+const SPAWN_TRIES: usize = 8;
 
 /// Kind of incident.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -385,6 +388,16 @@ impl PoliceSystem {
         let mut u = Unit::new(id, kind, role, pos, heading, self.cfg.pursuit.risk.budget);
         u.internal = self.setup.internal_driving;
         u.assigned = self.now;
+        if kind == UnitKind::Car {
+            // Later spawns this think step must keep clear of this one too.
+            self.obstacles.push(crate::avoid::Obstacle::car(
+                None,
+                Some(id),
+                u.body.pos,
+                [0.0, 0.0],
+                u.body.heading,
+            ));
+        }
         self.pending.push(PoliceEvent::UnitSpawned {
             unit: id,
             kind,
@@ -405,12 +418,51 @@ impl PoliceSystem {
         if cands.is_empty() {
             return None;
         }
-        let s = self.graph.segments[cands[self.rng.below(cands.len() as u32) as usize]];
-        let t = self.rng.range_f32(0.2, 0.8);
-        let a = self.graph.node(s.a).pos;
-        let b = self.graph.node(s.b).pos;
-        let pos = lerp2(a, b, t);
-        Some(self.spawn_unit(UnitKind::Car, UnitRole::Pool(d), pos, sub(b, a)))
+        // A few tries for a spot clear of other vehicles; none clear = try again next think.
+        for _ in 0..SPAWN_TRIES {
+            let s = self.graph.segments[cands[self.rng.below(cands.len() as u32) as usize]];
+            let t = self.rng.range_f32(0.2, 0.8);
+            let a = self.graph.node(s.a).pos;
+            let b = self.graph.node(s.b).pos;
+            let centre = lerp2(a, b, t);
+            let mut dir = normalize(sub(b, a));
+            let dest = self.random_node_in(Some(d))?;
+            // Face the way the first patrol route goes: a physical car turning around from
+            // standstill runs over the kerb and into parked cars.
+            if self.route_from(centre, dir, dest, None).1 {
+                dir = scale(dir, -1.0);
+            }
+            // In the right-hand lane, not on the centreline.
+            let pos = add(centre, scale([dir[1], -dir[0]], LANE_OFFSET_M));
+            if self.spawn_clear(pos) {
+                let i = self.spawn_unit(UnitKind::Car, UnitRole::Pool(d), pos, dir);
+                self.start_patrol(i, dest);
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    /// Put a fresh pool unit on patrol toward `dest` right away (before `wp_sim` gives it a
+    /// body), so it starts driving the way it faces.
+    fn start_patrol(&mut self, i: usize, dest: NodeId) {
+        self.assign(i, Assignment::Patrol { dest });
+        let track = self.route_track(i, dest, None);
+        let p = &self.cfg.pursuit;
+        let cmd = DriveCommand {
+            track,
+            speed_mps: 0.0,
+            cornering_g: p.patrol_cornering_g,
+            siren: false,
+            lane_offset_m: LANE_OFFSET_M,
+        };
+        self.units[i].set_command(cmd);
+    }
+
+    /// Whether a ground unit may appear at `pos` (see [`crate::avoid::spawn_clear`]).
+    pub(crate) fn spawn_clear(&mut self, pos: [f32; 2]) -> bool {
+        self.rebuild_obstacles();
+        crate::avoid::spawn_clear(pos, &self.obstacles, &self.cfg.pursuit.avoid)
     }
 
     pub(crate) fn despawn(&mut self, i: usize) {
@@ -622,7 +674,10 @@ impl PoliceSystem {
         let mut best: Option<(f32, usize)> = None;
         for (i, n) in self.graph.nodes.iter().enumerate() {
             let d = dist(n.pos, target);
-            if d < min_d || self.sees(world, n.pos, target) {
+            if d < min_d
+                || self.sees(world, n.pos, target)
+                || !crate::avoid::spawn_clear(n.pos, &self.obstacles, &self.cfg.pursuit.avoid)
+            {
                 continue;
             }
             if best.is_none_or(|b| d < b.0) {
