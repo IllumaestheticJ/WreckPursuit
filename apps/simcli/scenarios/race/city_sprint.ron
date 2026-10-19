@@ -5,6 +5,9 @@
 // cones) through World::set_active_routes. Staggered grid behind the start line (y = -437):
 // pole = sedan at (58.05, -440), second = coupe at (63.05, -444). Green at 3.0 s.
 // Traffic is off: simcli cannot apply a race closure yet (see docs/integration/race.md).
+// Police patrols are off too (police_cars: false; added by A, 2026-10-19): a patrol car crossed
+// the junction at y ≈ -108 in front of the coupe at ~170 km/h, so the outcome was a coin toss
+// (any physics change flipped it). The police version of this race is city_sprint_police.ron.
 (
     name: "race_city_sprint",
     seed: 15,
@@ -12,6 +15,7 @@
     mode: Arcade,
     assists: ai,
     traffic_density: 0.0,
+    police_cars: false,
     entities: [
         (
             id: "sedan",
