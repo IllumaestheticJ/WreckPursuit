@@ -407,6 +407,13 @@ impl Sim {
         &self.config.mode
     }
 
+    /// Mutable access to a vehicle's damage model, e.g. to attach hinged panels
+    /// (`sim.damage_mut(id)?.attach_panels(&spec)`, workstream R). Changing damage state
+    /// mid-run is an input as far as replays are concerned.
+    pub fn damage_mut(&mut self, id: EntityId) -> Result<&mut DamageModel, SimError> {
+        Ok(&mut self.slot_mut(id)?.damage)
+    }
+
     fn slot_mut(&mut self, id: EntityId) -> Result<&mut SimVehicle, SimError> {
         self.vehicles
             .iter_mut()
@@ -523,6 +530,16 @@ impl Sim {
         }
         if sys.damage {
             for (slot, contacts) in self.vehicles.iter_mut().zip(&tick_contacts.per_vehicle) {
+                // Hinged panels (workstream R) swing from the chassis motion; no-op without
+                // panels attached.
+                let rb = &self.physics.bodies[slot.body.body];
+                let r = *rb.rotation();
+                slot.damage.set_chassis_motion(
+                    rb.linvel().to_array(),
+                    rb.angvel().to_array(),
+                    [r.x, r.y, r.z, r.w],
+                    dt,
+                );
                 slot.damage
                     .apply_contacts(contacts, &self.config.mode, dt, &mut out);
                 if self.record_contacts && !contacts.is_empty() {

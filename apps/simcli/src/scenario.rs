@@ -46,6 +46,10 @@ pub struct Scenario {
     /// counts (1 = default, 0 = no patrols); `None` = 1. Needs a city.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub police_presence: Option<f32>,
+    /// Hinged/bolted body panels (workstream R): attach `data/panels/<car>.json` to every
+    /// scenario entity (default off, so existing goldens are unchanged).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub panels: bool,
     /// Systems to step (`"vehicle,damage,world,police,net"`); `None` = all. `--systems` overrides.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub systems: Option<String>,
@@ -73,6 +77,10 @@ pub struct Scenario {
 
 fn yes() -> bool {
     true
+}
+
+fn is_false(v: &bool) -> bool {
+    !*v
 }
 
 fn is_true(v: &bool) -> bool {

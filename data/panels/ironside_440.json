@@ -45,7 +45,7 @@
       "restitution": 0.2,
       "unlatch_impulse_ns": 4323.69,
       "latch_intrusion_m": 0.15,
-      "hinge_break_impulse_ns": 283.2,
+      "hinge_break_impulse_ns": 472.0,
       "break_impulse_ns": null
     },
     {
@@ -91,7 +91,7 @@
       "restitution": 0.2,
       "unlatch_impulse_ns": 4323.69,
       "latch_intrusion_m": 0.15,
-      "hinge_break_impulse_ns": 283.2,
+      "hinge_break_impulse_ns": 472.0,
       "break_impulse_ns": null
     },
     {
@@ -131,7 +131,7 @@
       "restitution": 0.25,
       "unlatch_impulse_ns": 2924.2202,
       "latch_intrusion_m": 0.1,
-      "hinge_break_impulse_ns": 362.52,
+      "hinge_break_impulse_ns": 604.19995,
       "break_impulse_ns": null
     },
     {
@@ -171,7 +171,7 @@
       "restitution": 0.25,
       "unlatch_impulse_ns": 1879.8558,
       "latch_intrusion_m": 0.1,
-      "hinge_break_impulse_ns": 198.2461,
+      "hinge_break_impulse_ns": 330.41016,
       "break_impulse_ns": null
     },
     {
@@ -207,7 +207,7 @@
       "restitution": 0.3,
       "unlatch_impulse_ns": 2784.9714,
       "latch_intrusion_m": 0.06,
-      "hinge_break_impulse_ns": 311.52957,
+      "hinge_break_impulse_ns": 519.21594,
       "break_impulse_ns": null
     },
     {
@@ -243,7 +243,7 @@
       "restitution": 0.3,
       "unlatch_impulse_ns": 2784.9714,
       "latch_intrusion_m": 0.06,
-      "hinge_break_impulse_ns": 311.52957,
+      "hinge_break_impulse_ns": 519.21594,
       "break_impulse_ns": null
     },
     {
@@ -279,7 +279,7 @@
         0.0
       ],
       "hang_limit_rad": 0.6,
-      "mass_kg": 0.616005,
+      "mass_kg": 9.086279,
       "lever_m": 0.67466664,
       "gyration_m": 0.77903795,
       "area_m2": 0.46977037,
@@ -287,7 +287,7 @@
       "restitution": 0.2,
       "unlatch_impulse_ns": 3341.9658,
       "latch_intrusion_m": 0.08,
-      "hinge_break_impulse_ns": 7.3920603,
+      "hinge_break_impulse_ns": 181.72559,
       "break_impulse_ns": 6683.9316
     },
     {
@@ -323,7 +323,7 @@
         0.0
       ],
       "hang_limit_rad": 0.6,
-      "mass_kg": 0.616005,
+      "mass_kg": 9.086279,
       "lever_m": 0.67466664,
       "gyration_m": 0.77903795,
       "area_m2": 0.46977037,
@@ -331,7 +331,7 @@
       "restitution": 0.2,
       "unlatch_impulse_ns": 3341.9658,
       "latch_intrusion_m": 0.08,
-      "hinge_break_impulse_ns": 7.3920603,
+      "hinge_break_impulse_ns": 181.72559,
       "break_impulse_ns": 6683.9316
     }
   ]

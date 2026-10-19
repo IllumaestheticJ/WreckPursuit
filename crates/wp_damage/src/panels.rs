@@ -365,6 +365,8 @@ const AIR_DENSITY: f32 = 1.2;
 const PANEL_CD: f32 = 1.1;
 /// Angular speed a freshly unlatched panel pops open with, rad/s.
 const UNLATCH_KICK_RAD_S: f32 = 0.8;
+/// Largest hinge speed a contact can push a panel to, rad/s.
+const MAX_PUSH_RAD_S: f32 = 10.0;
 /// Nodes this close to the hinge line stay lattice nodes (they are on the axis), m.
 const ON_AXIS_M: f32 = 0.03;
 /// Low-pass time constant of the chassis acceleration the panels feel, s.
@@ -601,8 +603,12 @@ impl DamageModel {
                         // Velocity of this point per unit ω along the impactor normal.
                         let r = vec3::sub(self.pos[i as usize], p.pivot);
                         let s = vec3::dot(vec3_cross(p.axis, r), imp.normal);
-                        if s.abs() > 0.05 {
-                            let need = imp.vel * g / s;
+                        // Only points with real leverage that the face pushes roughly along
+                        // their swing direction; ω is capped (a face at 15 m/s on a point 5 cm
+                        // from the hinge would otherwise spin it at 300 rad/s).
+                        let arm = vec3::length(perp(r, p.axis));
+                        if arm > 0.1 && s.abs() > 0.3 * arm {
+                            let need = (imp.vel * g / s).clamp(-MAX_PUSH_RAD_S, MAX_PUSH_RAD_S);
                             let cur = push.unwrap_or(p.omega);
                             // Raise ω toward the face's push direction only.
                             push = Some(if need > 0.0 {
@@ -905,6 +911,9 @@ impl DamageModel {
         let lever = p.def.lever_m;
         let mut slam = 0.0;
         for _ in 0..substeps {
+            // A panel already resting on a stop and pressed into it (by a contact or a steady
+            // load) is held there, not slammed: only free swings load the hinge.
+            let resting = p.angle <= lo || p.angle >= hi;
             let (s, c) = wp_math::sin_cos(p.angle);
             let r = vec3::scale(rotate(p.com_dir0, p.axis, s, c), lever);
             // Uniform apparent acceleration (gravity − chassis acceleration) on the COM.
@@ -926,7 +935,9 @@ impl DamageModel {
                 let edge = if p.angle < lo { lo } else { hi };
                 let into = (p.angle < lo && p.omega < 0.0) || (p.angle > hi && p.omega > 0.0);
                 p.angle = edge;
-                if into {
+                if into && resting {
+                    p.omega = 0.0;
+                } else if into {
                     // Stop impulse at the COM: change of momentum (1 + e)·I·|ω| / lever.
                     slam += (1.0 + p.def.restitution) * inertia * p.omega.abs() / lever.max(0.05);
                     p.omega = -p.def.restitution * p.omega;
@@ -1014,7 +1025,7 @@ impl PanelSpec {
     /// estimated from `body_size_m`. Deterministic (`tools/assets` `gen-panels` writes
     /// `data/panels/<car>.json` with it; hand edits are fine afterwards).
     pub fn derive(car_id: &str, lattice: &LatticeDef, opts: DeriveOptions) -> PanelSpec {
-        let [width, length, height] = opts.body_size_m;
+        let [_width, length, height] = opts.body_size_m;
         let four_door = lattice
             .detachables
             .iter()
@@ -1176,7 +1187,13 @@ impl PanelSpec {
                         0.08,
                     ),
                 };
-            let mass_kg = det.map_or(0.045 * width * height * length, |d| d.mass_kg);
+            // Fenders (no lattice detachable): about a third of a front door.
+            let door_mass = lattice
+                .detachables
+                .iter()
+                .find(|d| d.region == BodyRegion::LeftDoorF)
+                .map_or(20.0, |d| d.mass_kg);
+            let mass_kg = det.map_or(0.35 * door_mass, |d| d.mass_kg);
             // Bumpers swing down until the far end reaches the road (small-angle estimate).
             let hang_limit = match kind {
                 PanelKind::Bumper => ((h0[2].min(h1[2]) - 0.05) / span.max(0.1)).clamp(0.15, 1.2),
@@ -1207,7 +1224,7 @@ impl PanelSpec {
                 restitution,
                 unlatch_impulse_ns: unlatch_frac * break_impulse,
                 latch_intrusion_m: latch_m,
-                hinge_break_impulse_ns: 12.0 * mass_kg,
+                hinge_break_impulse_ns: 20.0 * mass_kg,
                 break_impulse_ns: if det.is_none() {
                     Some(break_impulse)
                 } else {

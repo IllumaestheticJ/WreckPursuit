@@ -415,6 +415,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "simcli",
  "wp_contracts",
  "wp_damage",
  "wp_math",
@@ -3121,6 +3122,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "wp_contracts",
+ "wp_damage",
  "wp_math",
  "wp_net",
  "wp_police",

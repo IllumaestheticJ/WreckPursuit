@@ -1,0 +1,19 @@
+// Panels (workstream R): a sedan hits a rigid barrier at 35 km/h with 40 % overlap. The front
+// bumper tears off its struck-side mount and hangs from the other end, sagging to the road.
+(
+    name: "panels_frontal_bumper_hang",
+    seed: 2102,
+    mode: Simulation,
+    assists: ai,
+    panels: true,
+    barriers: [(pos: (-1.6, 30.0, 0.75), size: (2.4, 1.0, 1.5))],
+    entities: [
+        (id: "car", car: "debug_sedan", driver: cruise(target_mps: 9.7)),
+    ],
+    duration_s: 6.0,
+    hash_every: 24,
+    expect: [
+        metric(entity: "car", name: "panels_hanging", min: 1, max: 6),
+        total_loss(entity: "car", expected: false),
+    ],
+)

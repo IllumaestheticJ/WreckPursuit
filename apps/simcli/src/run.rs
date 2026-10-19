@@ -232,6 +232,14 @@ pub fn build_sim(
             sim.place_vehicle(id, spec.pos, spec.yaw, spec.speed_mps)?;
         }
         sim.set_assists(id, spec.assists.unwrap_or(sc.assists).profile())?;
+        if sc.panels {
+            let rel = format!("panels/{}.json", spec.car);
+            let spec_p = wp_damage::PanelSpec::parse(&spec.car, &data.read(&rel)?)
+                .map_err(|e| RunError::Scenario(sc.name.clone(), e.to_string()))?;
+            sim.damage_mut(id)?
+                .attach_panels(&spec_p)
+                .map_err(|e| RunError::Scenario(sc.name.clone(), e.to_string()))?;
+        }
         ids.push(id);
     }
     let has_city = match load_world(data, &sc.city, world_config(sc))? {
@@ -341,6 +349,12 @@ pub struct EntitySummary {
     pub total_loss: bool,
     /// Lowest chassis z reached, m.
     pub min_z_m: f32,
+    /// Panels that unlatched (or went straight to hanging) at some point (scenario `panels`).
+    pub panels_unlatched: u32,
+    /// Panels that hung by one hinge or tore off at some point.
+    pub panels_hanging: u32,
+    /// Largest |hinge angle| of a free panel, rad.
+    pub max_panel_angle_rad: f32,
 }
 
 impl EntitySummary {
@@ -361,12 +375,15 @@ impl EntitySummary {
             "wheels_detached" => self.wheels_detached as f32,
             "total_loss" => self.total_loss as u8 as f32,
             "min_z_m" => self.min_z_m,
+            "panels_unlatched" => self.panels_unlatched as f32,
+            "panels_hanging" => self.panels_hanging as f32,
+            "max_panel_angle_rad" => self.max_panel_angle_rad,
             _ => return None,
         })
     }
 
     /// Every metric name [`EntitySummary::metric`] accepts.
-    pub const METRICS: [&'static str; 14] = [
+    pub const METRICS: [&'static str; 17] = [
         "final_speed_mps",
         "max_speed_mps",
         "distance_m",
@@ -381,6 +398,9 @@ impl EntitySummary {
         "wheels_detached",
         "total_loss",
         "min_z_m",
+        "panels_unlatched",
+        "panels_hanging",
+        "max_panel_angle_rad",
     ];
 }
 
@@ -823,6 +843,9 @@ pub fn run_with_hook(
                 wheels_detached: 0,
                 total_loss: false,
                 min_z_m: spec.pos[2],
+                panels_unlatched: 0,
+                panels_hanging: 0,
+                max_panel_angle_rad: 0.0,
             },
         });
     }
@@ -959,6 +982,25 @@ pub fn run_with_hook(
             tr.update(s);
             if let Some(slot) = probes.get_mut(&(idx, now)) {
                 *slot = s.speed_mps;
+            }
+            if sc.panels {
+                let panels = sim.vehicles()[idx].damage.panel_states();
+                let free = panels
+                    .iter()
+                    .filter(|p| p.state != wp_damage::PanelState::Attached)
+                    .count() as u32;
+                let hanging = panels
+                    .iter()
+                    .filter(|p| p.state >= wp_damage::PanelState::HangingByOne)
+                    .count() as u32;
+                let e = &mut tr.summary;
+                e.panels_unlatched = e.panels_unlatched.max(free);
+                e.panels_hanging = e.panels_hanging.max(hanging);
+                for p in &panels {
+                    if p.state != wp_damage::PanelState::Detached {
+                        e.max_panel_angle_rad = e.max_panel_angle_rad.max(p.angle_rad.abs());
+                    }
+                }
             }
             if sample || now == ticks {
                 let nodes = sim.node_positions(*id)?;

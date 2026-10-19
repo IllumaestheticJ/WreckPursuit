@@ -32,3 +32,7 @@ path = "src/bin/gen_panels.rs"
 [[bin]]
 name = "panels-bench"
 path = "src/bin/panels_bench.rs"
+
+[dev-dependencies]
+# panel_probe example: runs simcli scenarios and prints panel state changes.
+simcli = { path = "../../apps/simcli" }

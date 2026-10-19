@@ -45,7 +45,7 @@
       "restitution": 0.2,
       "unlatch_impulse_ns": 918.3664,
       "latch_intrusion_m": 0.15,
-      "hinge_break_impulse_ns": 49.487137,
+      "hinge_break_impulse_ns": 82.47856,
       "break_impulse_ns": null
     },
     {
@@ -91,7 +91,7 @@
       "restitution": 0.2,
       "unlatch_impulse_ns": 918.3664,
       "latch_intrusion_m": 0.15,
-      "hinge_break_impulse_ns": 49.487137,
+      "hinge_break_impulse_ns": 82.47856,
       "break_impulse_ns": null
     },
     {
@@ -131,7 +131,7 @@
       "restitution": 0.25,
       "unlatch_impulse_ns": 1428.5701,
       "latch_intrusion_m": 0.1,
-      "hinge_break_impulse_ns": 253.32,
+      "hinge_break_impulse_ns": 422.2,
       "break_impulse_ns": null
     },
     {
@@ -168,7 +168,7 @@
       "restitution": 0.25,
       "unlatch_impulse_ns": 918.3664,
       "latch_intrusion_m": 0.1,
-      "hinge_break_impulse_ns": 138.564,
+      "hinge_break_impulse_ns": 230.93997,
       "break_impulse_ns": null
     },
     {
@@ -204,7 +204,7 @@
       "restitution": 0.3,
       "unlatch_impulse_ns": 1360.5427,
       "latch_intrusion_m": 0.06,
-      "hinge_break_impulse_ns": 217.74341,
+      "hinge_break_impulse_ns": 362.9057,
       "break_impulse_ns": null
     },
     {
@@ -240,7 +240,7 @@
       "restitution": 0.3,
       "unlatch_impulse_ns": 1360.5427,
       "latch_intrusion_m": 0.06,
-      "hinge_break_impulse_ns": 217.74341,
+      "hinge_break_impulse_ns": 362.9057,
       "break_impulse_ns": null
     },
     {
@@ -276,7 +276,7 @@
       "restitution": 0.3,
       "unlatch_impulse_ns": 1360.5427,
       "latch_intrusion_m": 0.06,
-      "hinge_break_impulse_ns": 217.74341,
+      "hinge_break_impulse_ns": 362.9057,
       "break_impulse_ns": null
     },
     {
@@ -312,7 +312,7 @@
       "restitution": 0.3,
       "unlatch_impulse_ns": 1360.5427,
       "latch_intrusion_m": 0.06,
-      "hinge_break_impulse_ns": 217.74341,
+      "hinge_break_impulse_ns": 362.9057,
       "break_impulse_ns": null
     },
     {
@@ -344,7 +344,7 @@
         0.0
       ],
       "hang_limit_rad": 0.6,
-      "mass_kg": 0.4432698,
+      "mass_kg": 6.3508496,
       "lever_m": 0.495125,
       "gyration_m": 0.57172114,
       "area_m2": 0.37471062,
@@ -352,7 +352,7 @@
       "restitution": 0.2,
       "unlatch_impulse_ns": 1632.6514,
       "latch_intrusion_m": 0.08,
-      "hinge_break_impulse_ns": 5.3192377,
+      "hinge_break_impulse_ns": 127.01699,
       "break_impulse_ns": 3265.3027
     },
     {
@@ -384,7 +384,7 @@
         0.0
       ],
       "hang_limit_rad": 0.6,
-      "mass_kg": 0.4432698,
+      "mass_kg": 6.3508496,
       "lever_m": 0.495125,
       "gyration_m": 0.57172114,
       "area_m2": 0.37471062,
@@ -392,7 +392,7 @@
       "restitution": 0.2,
       "unlatch_impulse_ns": 1632.6514,
       "latch_intrusion_m": 0.08,
-      "hinge_break_impulse_ns": 5.3192377,
+      "hinge_break_impulse_ns": 127.01699,
       "break_impulse_ns": 3265.3027
     }
   ]

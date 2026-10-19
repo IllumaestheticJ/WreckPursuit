@@ -11,6 +11,8 @@ wp_contracts.workspace = true
 wp_math.workspace = true
 wp_net.workspace = true
 wp_sim.workspace = true
+# Panel specs (workstream R, scenario `panels: true`).
+wp_damage.workspace = true
 wp_police.workspace = true
 wp_world.workspace = true
 serde.workspace = true
