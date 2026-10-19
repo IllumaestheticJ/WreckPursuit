@@ -19,7 +19,7 @@ npm run typecheck
 | `src/scene.ts` | renderer, sky from time of day, ground + 10 m grid, `data/city/*.glb`, barriers, contacts, intents |
 | `src/vehicle_view.ts` | body box / skinned body, wheels (steer + spin), lattice, stress, tire forces, suspension, CG + velocity |
 | `src/skin.ts` | skin binding blend; synthesised hull binding for grid lattices |
-| `src/cameras.ts` | chase (spring-damped), hood, bumper, orbit, cinematic |
+| `src/cameras.ts` | near / far chase (car-relative spring), hood, bumper, cockpit, side tracking, TV / cinematic, orbit; C cycles, V look back |
 | `src/hud.ts` | speed/rpm/gear, badges, perf, damage silhouette, components, region energy, input + rack torque, help |
 | `src/telemetry.ts` | rolling 10 s canvas plots |
 | `src/input.ts` | keyboard ramps + Gamepad API with deadzones |

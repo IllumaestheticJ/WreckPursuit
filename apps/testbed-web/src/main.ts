@@ -2,16 +2,16 @@
 // telemetry, scenario menu and replay UI. See docs/integration/testbed.md.
 //
 // URL parameters (handy for automation): ?scenario=crash/head_on.ron&speed=60 runs a scenario,
-// ?bench=24 spawns a 24-car benchmark, ?cam=orbit picks a camera, ?replay=last plays the last
-// stored replay.
+// ?bench=24 spawns a 24-car benchmark, ?cam=orbit picks a camera (ids in cameras.ts), ?replay=last
+// plays the last stored replay.
 import { loadWasm, sim, type DriverInput, type Scenario, type ScenarioResult } from "./wasm/sim";
 import { META_STRIDE, STATE_STRIDE, S, T, VEHICLE_KIND, W } from "./wasm/layout";
-import { installKeyboard, readInput, toggleHeadlights, type InputSource } from "./input";
+import { installKeyboard, isHeld, readInput, toggleHeadlights, type InputSource } from "./input";
 import { layers, store, bytesToBase64, base64ToBytes } from "./settings";
 import { SceneView } from "./scene";
 import { VehicleView } from "./vehicle_view";
 import { clearDebris, panelEvents, stepDebris } from "./render/panels";
-import { CameraRig, CAMERA_MODES, type CameraMode } from "./cameras";
+import { CameraRig, CAMERA_MODES, cameraLabel, type CameraMode } from "./cameras";
 import { Hud } from "./hud";
 import { TelemetryPlots } from "./telemetry";
 import { AudioSystem } from "./audio";
@@ -164,7 +164,8 @@ async function main(): Promise<void> {
     sim.init(0, sim.cityChaseJson(car, mode), false);
     rebuildViews();
     applyAssistPreset(app.source);
-    rig.setMode("chase", app.views.get(app.focus)?.root);
+    // Back to the viewer's own angle (near chase unless they picked another one).
+    rig.setMode(rig.preferred, app.views.get(app.focus)?.root);
   };
 
   const runScenario = async (file: string, speedKmh?: number) => {
@@ -325,8 +326,11 @@ async function main(): Promise<void> {
     const layer = layers.byKey(e.code);
     if (layer) return layers.toggle(layer.id);
     const n = Number(e.key);
-    if (n >= 1 && n <= CAMERA_MODES.length) return rig.setMode(CAMERA_MODES[n - 1], app.views.get(app.focus)?.root);
+    if (n >= 1 && n <= CAMERA_MODES.length) return rig.choose(CAMERA_MODES[n - 1], app.views.get(app.focus)?.root);
     switch (e.code) {
+      case "KeyC":
+        rig.cycle(app.views.get(app.focus)?.root);
+        break;
       case "KeyR":
         if (!isReplay()) sim.reset(app.player);
         break;
@@ -369,6 +373,7 @@ async function main(): Promise<void> {
 
   // ----- start ----------------------------------------------------------------------------
 
+  rig.onPadNext = () => rig.cycle(app.views.get(app.focus)?.root);
   const camParam = params.get("cam") as CameraMode | null;
   if (camParam && CAMERA_MODES.includes(camParam)) rig.mode = camParam;
   const scParam = params.get("scenario");
@@ -459,7 +464,14 @@ async function main(): Promise<void> {
       if (layers.on("telemetry")) plots.draw();
     }
     plots.canvas.style.display = layers.on("telemetry") ? "" : "none";
-    rig.update(focusView?.root ?? null, focusView?.info.body_size_m ?? [2, 4.5, 1.4], focusRec >= 0 ? cur[focusRec + S.speed] : 0, dt);
+    rig.lookBack = isHeld("KeyV");
+    rig.update(
+      focusView?.root ?? null,
+      focusView?.info.body_size_m ?? [2, 4.5, 1.4],
+      focusRec >= 0 ? cur[focusRec + S.speed] : 0,
+      dt,
+      rig.mode === "cinematic" ? nearestPolice(focusView) : null,
+    );
     audio.update(rig.camera, events, app.paused && !replay ? 0 : dt, app.focus);
 
     const r0 = performance.now();
@@ -499,13 +511,26 @@ async function main(): Promise<void> {
         energy: focusView ? sim.regionEnergy(app.focus) : null,
         regionsOfNodes: focusView ? regionsCache(app.focus) : null,
         rest: focusView ? restCache(app.focus) : null,
-        camera: rig.mode,
+        camera: cameraLabel(rig.mode) + (rig.lookBack && rig.mode !== "orbit" && rig.mode !== "cinematic" ? " (look back)" : ""),
       });
       updatePanels(replay);
     }
     if (app.bench) benchTick(t1 - t0, r1 - r0);
     requestAnimationFrame(frame);
   }
+
+  /** Nearest police car to `view` (framed by the TV camera during pursuits). */
+  const nearestPolice = (view: VehicleView | null) => {
+    if (!view) return null;
+    let best: VehicleView | null = null;
+    let bestD = Infinity;
+    for (const v of app.views.values()) {
+      if (v === view || v.info.kind !== "Police") continue;
+      const d = v.root.position.distanceToSquared(view.root.position);
+      if (d < bestD) [best, bestD] = [v, d];
+    }
+    return best?.root ?? null;
+  };
 
   const regionsCache = (id: number) => regions.get(id) ?? regions.set(id, sim.latticeRegions(id)).get(id)!;
   const restCache = (id: number) => rests.get(id) ?? rests.set(id, sim.latticeRest(id)).get(id)!;
@@ -599,6 +624,8 @@ async function main(): Promise<void> {
     startCityChase,
     startBench,
     setCamera: (m: CameraMode, offset?: [number, number, number]) => rig.setMode(m, app.views.get(app.focus)?.root, offset),
+    cameraModes: CAMERA_MODES,
+    rig,
     toggleLayer: (id: string) => layers.toggle(id),
     ui,
   };
