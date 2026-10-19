@@ -1115,7 +1115,6 @@ fn add_cabin_cage(
             .filter(|&&j| j != i && !edges.contains(&(i.min(j), i.max(j))))
             .map(|&j| {
                 let pj = pos(j);
-                // Plain multiplies: `powi` is not guaranteed bit-identical across targets.
                 let (dx, dy, dz) = (pi[0] - pj[0], pi[1] - pj[1], pi[2] - pj[2]);
                 let d2 = dx * dx + dy * dy + dz * dz;
                 (d2, j)
