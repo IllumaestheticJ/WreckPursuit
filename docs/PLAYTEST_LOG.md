@@ -10,3 +10,5 @@
 | 5 | Use real open-source sounds | J (audio): CC0 recorded packs | dispatched |
 | 6 | Dispatcher and cops are way too talkative | helper `lead/playtest-radio` | dispatched |
 | 7 | Camera zooms way too far out; need more angles | helper `lead/playtest-camera` | dispatched |
+| 8 | High-power RWD cars: more steering assist ("gyro") to control slides | helper `lead/playtest-drift` | dispatched |
+| 9 | More steering angle on relevant cars to save slides | helper `lead/playtest-drift` (lock opens while sliding + per-car `max_steer_rad`) | dispatched |
