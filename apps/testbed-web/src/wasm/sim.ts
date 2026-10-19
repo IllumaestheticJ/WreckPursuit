@@ -212,6 +212,19 @@ export const sim = {
   runAccount: (): { cash: number; rep: number; bounty: number; debt: number } | null => JSON.parse(wasm.run_account_json()),
   /** "Repair & continue": pays impound + repair, repairs the car, releases the brakes. Throws if refused. */
   runRepairContinue: (): ContinueReport => JSON.parse(wasm.run_repair_continue()),
+  /** Race picker for a player in `car` (`wp_wasm::race::RaceCard[]`). */
+  raceList: (car: string, mode: string): RaceCard[] => JSON.parse(wasm.race_list(car, mode)),
+  /** Start a picker race (new session; the account carries over). Returns entity ids, player first. */
+  raceStart: (id: string, car: string, mode: string, autopilot: boolean): number[] =>
+    Array.from(wasm.race_start(id, car, mode, autopilot)),
+  /** `[phase, countdown_s, elapsed_s, laps, gates, player, racers, closed, length_m, autopilot, kind, player_done]`; empty without a race. */
+  raceInfo: (): Float32Array => wasm.race_info(),
+  /** Standings, position order, RACE_STRIDE floats each (see layout.ts RS). */
+  raceStandings: (): Float32Array => wasm.race_standings(),
+  /** Gates + route of the race (race_marker.ts parseCourse). */
+  raceCourse: (): Float32Array => wasm.race_course(),
+  /** Results once the player is done (`wp_wasm::race::RaceReport`), else null. */
+  raceResult: (): RaceReport | null => JSON.parse(wasm.race_result_json()),
   /** Debug / e2e: set a racer's police heat (not recorded in replays). */
   debugSetHeat: (entity: number, heat: number): void => wasm.debug_set_heat(entity, heat),
   /** Debug / e2e: park `entity` stopped `aheadM` in front of the first police car (throws if none yet). */
@@ -219,6 +232,8 @@ export const sim = {
 };
 
 export type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
+export type { RaceCard, RaceReport } from "../ui/race";
+import type { RaceCard, RaceReport } from "../ui/race";
 import type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
 
 /** `wp_wasm::garage::LiveBill` (typed in apps/ui-kit/src/live/bill.ts as LiveBillJson). */

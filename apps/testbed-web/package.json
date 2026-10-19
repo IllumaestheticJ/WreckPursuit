@@ -10,8 +10,9 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "e2e": "node e2e/run.mjs",
-    "e2e:cameras": "node e2e/cameras.mjs"
+    "e2e": "node e2e/run.mjs && node e2e/race.mjs",
+    "e2e:cameras": "node e2e/cameras.mjs",
+    "e2e:race": "node e2e/race.mjs"
   },
   "dependencies": {
     "three": "0.180.0",

@@ -105,3 +105,38 @@ export const META_STRIDE = 3;
 export const VEHICLE_KIND = { player: 0, aiRacer: 1, police: 2, traffic: 3 } as const;
 /** vehicle_meta() flag bits (from the input the vehicle drives with). */
 export const META_FLAG = { siren: 1, headlights: 2, brake: 4, horn: 8 } as const;
+
+/** `race_standings()` record (wp_wasm::race::STANDING_STRIDE floats per racer). */
+export const RACE_STRIDE = 10;
+export const RS = {
+  entity: 0,
+  position: 1,
+  /** 0 running, 1 finished, 2 DNF, 3 DQ. */
+  status: 2,
+  lap: 3,
+  nextGate: 4,
+  gatesPassed: 5,
+  progressM: 6,
+  /** −1 = none. */
+  gapAheadS: 7,
+  gapBehindS: 8,
+  elapsedS: 9,
+} as const;
+
+/** `race_info()` fields. */
+export const RI = {
+  /** 0 countdown, 1 running, 2 finished. */
+  phase: 0,
+  countdownS: 1,
+  elapsedS: 2,
+  laps: 3,
+  gates: 4,
+  player: 5,
+  racers: 6,
+  closed: 7,
+  lengthM: 8,
+  autopilot: 9,
+  /** 0 sprint, 1 circuit, 2 checkpoint, 3 other. */
+  kind: 10,
+  playerDone: 11,
+} as const;

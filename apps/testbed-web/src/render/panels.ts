@@ -180,7 +180,16 @@ export class PanelBody {
       interior: std({ color: 0x2b2724, roughness: 1 }),
     };
     bodies.set(entity, this);
-    void loadCarMesh(carId).then((m) => m && this.build(m));
+    // The car may be gone by the time its mesh arrives (a promoted traffic car demoted again
+    // between two frames): then there is nothing to build; the view is disposed next frame.
+    void loadCarMesh(carId).then((m) => {
+      if (!m || bodies.get(entity) !== this) return;
+      try {
+        this.build(m);
+      } catch {
+        // wp_wasm: unknown entity — the sim already removed the vehicle.
+      }
+    });
   }
 
   /** Called once the mesh has loaded (immediately if it already has). */
