@@ -353,7 +353,8 @@ check(
           window.__wp.sim.debugSetHeat(window.__wp.app.player, 0);
           window.__wp.sim.debugParkNearPolice(window.__wp.app.player, 40);
           return true;
-        } catch {
+        } catch (e) {
+          window.__mapParkError = String(e);
           return false;
         }
       },
@@ -362,17 +363,20 @@ check(
     )
     .then(() => true)
     .catch(() => false);
-  await page.waitForTimeout(600);
+  // Wait for a drawn frame with the parked player (the sim runs well below real time here).
+  await page
+    .waitForFunction(() => window.__wp.map.hud.stats().minimap.units >= 1, null, { timeout: 30000, polling: 200 })
+    .catch(() => {});
   const mini = await page.evaluate(() => {
     const s = window.__wp.map.hud.stats();
     const el = document.getElementById("wp-minimap");
     const r = el?.getBoundingClientRect();
-    return { ...s.minimap, city: s.city, district: s.district, visible: !!r && r.width > 100 && !el.hidden, total: window.__wp.sim.mapDynamic(window.__wp.app.player)[1] };
+    return { ...s.minimap, err: window.__mapParkError ?? null, city: s.city, district: s.district, visible: !!r && r.width > 100 && !el.hidden, total: window.__wp.sim.mapDynamic(window.__wp.app.player)[1] };
   });
   await shot("map_minimap_city_chase.png");
   check(
     parked && mini.visible && mini.player && mini.units >= 1 && mini.city === "vesper_v2",
-    `minimap: player + ${mini.units} police dot(s) of ${mini.total} units (${mini.blinking} blinking), radius ${mini.radiusM.toFixed(0)} m, district ${mini.district ?? "?"}`,
+    `minimap${parked ? "" : ` (park near police failed: ${mini.err})`}: player + ${mini.units} police dot(s) of ${mini.total} units (${mini.blinking} blinking), radius ${mini.radiusM.toFixed(0)} m, district ${mini.district ?? "?"}`,
   );
   const state = () => page.evaluate(() => ({ open: window.__wp.map.isOpen, shown: !document.getElementById("wp-map-full").hidden, ...window.__wp.map.hud.stats().full }));
   await page.keyboard.press("KeyM");

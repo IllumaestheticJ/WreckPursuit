@@ -621,3 +621,14 @@ Testbed: `src/ui/runEnd.tsx` (`RunEndView`, kit `Panel` / `Button` / `Money` / `
 `restartRun()`, both on `window.__wp`. `e2e/run.mjs`: a real capture (player parked in front of a
 patrol car at heat 30) → panel + bill → click **Repair & continue** → health 1.0, cash = after −
 cost, panel closed. C: the stubbed banner check and `ChaseEndDetector` are untouched.
+
+## Note from M (UI kit, round 9, 2026-10-19): city map HUD
+
+Owner request "we need a game map HUD with police". Small glue in your crate/app, please review
+(details in `docs/integration/ui.md` → "City map HUD"): `crates/wp_wasm/src/map.rs`
+(`map_static_json()`, `map_dynamic(player)`, read-only), `src/ui/map.ts` mounting the kit's
+`mountMapHud`, `main.ts` wiring (M / Tab toggle the full map, neutral input while it is open),
+two layers (`'` minimap, `;` minimap signals), `e2e/run.mjs` map checks, `e2e/map_shots.mjs`.
+**Key change:** audio mute is now **V** (was M) and "follow the next car" is **backquote** (was
+Tab). The minimap sits in the left column under the input panel (top 312 px) because your
+bottom-right holds the event feed and the audio panel; move it with `minimapPlacement`.
