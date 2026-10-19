@@ -346,6 +346,31 @@ pub fn polyline_distance(a: &[V3], b: &[V3]) -> f32 {
     best
 }
 
+/// Whether two polylines come within `d` of each other (2D); stops at the first close pair.
+pub fn polylines_within(a: &[V3], b: &[V3], d: f32) -> bool {
+    for wa in a.windows(2) {
+        let (a0, a1) = (xy(wa[0]), xy(wa[1]));
+        let (alo, ahi) = (
+            [a0[0].min(a1[0]) - d, a0[1].min(a1[1]) - d],
+            [a0[0].max(a1[0]) + d, a0[1].max(a1[1]) + d],
+        );
+        for wb in b.windows(2) {
+            let (b0, b1) = (xy(wb[0]), xy(wb[1]));
+            if b0[0].max(b1[0]) < alo[0]
+                || b0[0].min(b1[0]) > ahi[0]
+                || b0[1].max(b1[1]) < alo[1]
+                || b0[1].min(b1[1]) > ahi[1]
+            {
+                continue;
+            }
+            if segment_distance(a0, a1, b0, b1) < d {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Even-odd point-in-polygon test.
 pub fn point_in_polygon(p: V2, poly: &[V2]) -> bool {
     let mut inside = false;

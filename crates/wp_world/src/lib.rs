@@ -33,6 +33,7 @@ pub mod violations;
 
 use std::path::Path;
 
+use wp_contracts::PHYSICS_DT;
 use wp_contracts::{
     HandlingEffects, LoadedCar, SignalState, SimEvent, SurfaceType, TimeOfDay, WorldQuery,
 };
@@ -45,7 +46,7 @@ pub use props::{PropKind, StaticProp};
 pub use routes::{ActiveRoute, Checkpoint, Route, RouteClosure};
 pub use traffic::{
     AgentId, AgentView, Hazard, Lod, LodChange, PhysicalAgent, TrackedVehicle, TrafficConfig,
-    TrafficStats, TRAFFIC_DT,
+    TrafficStats, TICKS_PER_TRAFFIC_STEP, TRAFFIC_DT,
 };
 pub use violations::{ViolationConfig, ViolationTracker};
 
@@ -93,8 +94,8 @@ pub struct World {
     closed: Vec<bool>,
     cones: Vec<StaticProp>,
     parked: Vec<StaticProp>,
-    sim_time: f64,
-    traffic_acc: f64,
+    /// Physics ticks run (the world's simulation clock).
+    tick: u64,
 }
 
 impl Default for World {
@@ -158,8 +159,7 @@ impl World {
             closed: vec![false; n_lanes],
             cones: Vec::new(),
             parked,
-            sim_time: 0.0,
-            traffic_acc: 0.0,
+            tick: 0,
         }
     }
 
@@ -234,20 +234,22 @@ impl World {
         self.traffic.populate(&self.map, &inp);
     }
 
-    /// Advance clock, signals and traffic by `dt` seconds (normally `PHYSICS_DT`). Pushes
+    /// Advance clock, signals and traffic by `dt` seconds (normally `PHYSICS_DT`; other values
+    /// advance `round(dt / PHYSICS_DT)` ticks of signal/traffic time). Pushes
     /// `TrafficViolation` events (and any vehicle events from physical traffic) into `out`.
     pub fn step(&mut self, dt: f32, out: &mut Vec<SimEvent>) {
         self.clock.step(dt);
-        self.sim_time += dt as f64;
-        self.map.signal_time_s = self.sim_time;
+        let ticks = (dt / PHYSICS_DT).round() as u64;
+        let traffic_steps =
+            (self.tick + ticks) / TICKS_PER_TRAFFIC_STEP - self.tick / TICKS_PER_TRAFFIC_STEP;
+        self.tick += ticks;
+        self.map.signal_tick = self.tick;
         self.map.time = self.clock.time;
         if self.map.segs.is_empty() {
             return;
         }
         self.traffic.step_physics(&self.map, dt, out);
-        self.traffic_acc += dt as f64;
-        while self.traffic_acc >= TRAFFIC_DT as f64 - 1e-6 {
-            self.traffic_acc -= TRAFFIC_DT as f64;
+        for _ in 0..traffic_steps {
             let inp = TrafficInputs {
                 tracked: &self.tracked,
                 hazards: &self.hazards,
@@ -260,7 +262,7 @@ impl World {
                 &self.tracked,
                 &self.traffic,
                 TRAFFIC_DT,
-                self.sim_time,
+                self.traffic.step_count(),
                 out,
             );
         }
@@ -276,9 +278,14 @@ impl World {
         &self.map.net
     }
 
-    /// Simulation seconds since the world started (signal clock).
-    pub fn sim_time_s(&self) -> f64 {
-        self.sim_time
+    /// Physics ticks since the world started (signal clock).
+    pub fn tick(&self) -> u64 {
+        self.tick
+    }
+
+    /// Simulation seconds since the world started (`tick · PHYSICS_DT`; informational).
+    pub fn sim_time_s(&self) -> f32 {
+        self.tick as f32 * PHYSICS_DT
     }
 
     /// Renderer / netcode view of every civilian agent, ordered by id.
@@ -374,7 +381,7 @@ impl World {
     pub fn state_hash(&self) -> u64 {
         let mut h = StateHasher::new();
         h.write_f32_q(self.clock.time.seconds_since_midnight, 1e2);
-        h.write_u64(self.sim_time.to_bits());
+        h.write_u64(self.tick);
         self.traffic.hash_into(&mut h);
         h.finish()
     }
