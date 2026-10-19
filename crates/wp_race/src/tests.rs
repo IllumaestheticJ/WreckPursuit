@@ -1209,3 +1209,137 @@ fn economy_bridge_maps_results() {
         wp_economy::RaceType::Touge
     );
 }
+
+#[test]
+fn economy_race_pays_the_advertised_stake() {
+    use crate::bridge::economy_race;
+    use crate::kind::{ClassBracket, Legality};
+    use wp_contracts::{DamageMode, DayPhase, VehicleClass, WantedLevel};
+    use wp_economy::{Economy, RaceResult as EconResult, ViolationCounts};
+    let econ = Economy::embedded();
+    let data = crate::data::RaceData::embedded();
+    let kinds = [
+        RaceKind::Sprint,
+        RaceKind::Circuit { laps: 3 },
+        RaceKind::Outrun { lead_m: 200.0 },
+        RaceKind::Checkpoint,
+        RaceKind::Cannonball,
+        RaceKind::Delivery {
+            cargo_kg: 80.0,
+            cargo_value: 4000,
+        },
+        RaceKind::Drag,
+        RaceKind::TimeAttack,
+    ];
+    let legalities = [
+        Legality::Sanctioned,
+        Legality::Street,
+        Legality::IllegalDaytime,
+    ];
+    let phases = [
+        DayPhase::Dawn,
+        DayPhase::Day,
+        DayPhase::Dusk,
+        DayPhase::Night,
+    ];
+    for kind in kinds {
+        for legality in legalities {
+            for phase in phases {
+                let km = if kind == RaceKind::Drag { 0.402 } else { 6.0 };
+                let r = economy_race(
+                    &econ,
+                    &data.stakes,
+                    kind,
+                    legality,
+                    VehicleClass::Compact,
+                    ClassBracket::D,
+                    km * 1000.0,
+                    phase,
+                    DamageMode::Arcade,
+                );
+                let stake = data.stakes.stake(kind, phase, ClassBracket::D, legality);
+                // Arcade: the economy, scaled, pays exactly what the lobby advertised.
+                assert!(r.purse_scale.is_finite() && r.purse_scale > 0.0, "{kind:?}");
+                assert!(
+                    (r.purse - stake.purse).abs() <= 1,
+                    "{kind:?} {legality:?} {phase:?}"
+                );
+                assert!((r.entry_fee - stake.entry_fee).abs() <= 1, "{kind:?}");
+                // Settling a win with the scale applied reproduces the advertised purse.
+                let win = EconResult {
+                    placement: 1,
+                    contacts: 1,
+                    violations: ViolationCounts::default(),
+                    wanted: WantedLevel::None,
+                };
+                let paid = econ.race_payout(&r.setup, &win).purse as f32 * r.purse_scale;
+                let share = paid / r.purse as f32;
+                assert!(share > 0.0 && share <= 1.001, "{kind:?}: share {share}");
+            }
+        }
+    }
+    // Both tables were tuned to the same feel target (a D-class / Compact 9 km night street
+    // sprint pays ~2 800), so no scale is needed there.
+    let r = economy_race(
+        &econ,
+        &data.stakes,
+        RaceKind::Sprint,
+        Legality::Street,
+        VehicleClass::Compact,
+        ClassBracket::D,
+        9000.0,
+        DayPhase::Night,
+        DamageMode::Arcade,
+    );
+    assert!((0.9..1.1).contains(&r.purse_scale), "{}", r.purse_scale);
+    // Simulation keeps the economy's mode premium on top of the stake.
+    let sim = economy_race(
+        &econ,
+        &data.stakes,
+        RaceKind::Sprint,
+        Legality::Street,
+        VehicleClass::Compact,
+        ClassBracket::D,
+        9000.0,
+        DayPhase::Night,
+        DamageMode::Simulation,
+    );
+    assert!(sim.purse > r.purse);
+    // Legality is carried by the scale: illegal daytime pays more than a sanctioned event.
+    let at = |legality| {
+        economy_race(
+            &econ,
+            &data.stakes,
+            RaceKind::Cannonball,
+            legality,
+            VehicleClass::Compact,
+            ClassBracket::D,
+            9000.0,
+            DayPhase::Day,
+            DamageMode::Arcade,
+        )
+        .purse_scale
+    };
+    assert!(at(Legality::IllegalDaytime) > 2.0 * at(Legality::Sanctioned));
+}
+
+#[test]
+fn economy_race_type_mapping_is_locked() {
+    // The R5 mapping agreed for wp_economy's five contract race types.
+    use crate::bridge::economy_race_type as t;
+    use wp_economy::RaceType as E;
+    assert_eq!(t(RaceKind::Sprint), E::Sprint);
+    assert_eq!(t(RaceKind::Circuit { laps: 2 }), E::Circuit);
+    assert_eq!(t(RaceKind::TimeAttack), E::Circuit);
+    assert_eq!(t(RaceKind::Drag), E::Drag);
+    assert_eq!(t(RaceKind::Outrun { lead_m: 150.0 }), E::Touge);
+    assert_eq!(t(RaceKind::Checkpoint), E::Sprint);
+    assert_eq!(t(RaceKind::Cannonball), E::Sprint);
+    assert_eq!(
+        t(RaceKind::Delivery {
+            cargo_kg: 1.0,
+            cargo_value: 1
+        }),
+        E::Sprint
+    );
+}

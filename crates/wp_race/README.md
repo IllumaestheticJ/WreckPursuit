@@ -66,6 +66,17 @@ risk by construction (property-tested). Feel: a D-class night street sprint ≈ 
 `wp_economy`'s own target), an illegal daytime sprint ≈ 2.5× that with police presence `Max`,
 sanctioned day circuits pay least and cost no heat.
 
+**Paying the stake through `wp_economy` (R5).** The economy keeps the money and has five
+race types and no legality. `bridge::economy_race_type` maps kinds onto them (Sprint,
+Checkpoint, Cannonball, Delivery → Sprint; Circuit, TimeAttack → Circuit; Outrun → Touge;
+Drag → Drag) and `bridge::economy_race` returns the economy's `RaceSetup` plus
+`purse_scale` / `entry_scale` (advertised stake ÷ the economy's Arcade numbers), so a scaled
+settlement pays exactly what the lobby advertised; the economy's placement shares, wanted
+multiplier, clean bonus and Simulation premium still apply on top. The scale is ≈ 1.0 at the
+shared feel target (Compact 9 km night street sprint), and carries legality and the
+per-kind premium elsewhere. Applying the scale inside `settle_race` is G's side (see
+`docs/integration/race.md`, R5).
+
 ### Scheduler (`schedule.toml`)
 
 `Scheduler::generate_day(day, venues, meet_heat)` builds the day's calendar from
@@ -178,6 +189,9 @@ police budget (0.5 ms/frame).
   changes inertia, not the CG (the contract has no lateral CG).
 - Race → police goes through a cloned `PoliceSystem` (`police::deliver` + `Sim::set_police`)
   until `wp_sim` queues external events into its police step.
+- Purses: until `wp_economy` applies `bridge::economy_race`'s scales (R5), a settled race pays
+  the economy's own number, which differs from the advertised stake for every kind except a
+  street sprint near 9 km.
 - Signals are crate-local until the contract carries a typed race event (request R1).
 - Crews/territory are in-memory; persistence belongs to the server's account store.
 - AI entrants (`entrants`) are wired in tests only; `wp_net`'s server must spawn them at

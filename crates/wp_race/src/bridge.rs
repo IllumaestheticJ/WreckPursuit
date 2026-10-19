@@ -3,15 +3,16 @@
 //! world mutation is `activate_race_routes` through `World::set_active_routes`.
 
 use wp_contracts::{DamageMode, DayPhase, VehicleClass, WantedLevel};
-use wp_economy::{RaceResult as EconResult, RaceSetup, RaceType, ViolationCounts};
+use wp_economy::{Economy, Money, RaceResult as EconResult, RaceSetup, RaceType, ViolationCounts};
 use wp_world::network::{DistrictKind, PoiKind};
 use wp_world::routes::closure_for_route;
 use wp_world::{ActiveRoute, CityMap, Route, RouteClosure, World};
 
 use crate::course::{Course, Gate};
-use crate::kind::{DistrictId, Legality, RaceKind, VenueId};
+use crate::kind::{ClassBracket, DistrictId, Legality, RaceKind, VenueId};
 use crate::result::{RacerResult, RacerStatus};
 use crate::schedule::{ScheduledEvent, TrafficMode, Venue};
+use crate::stakes::StakeTable;
 
 /// Build a judged course from a `wp_world` route (`World::plan_route*`, `plan_circuit`).
 /// Gates are the route's checkpoints; the corridor is half the widest gate plus
@@ -194,6 +195,68 @@ pub fn economy_setup(
         route_length_m,
         phase,
         mode,
+    }
+}
+
+/// One event as `wp_economy` should settle it (request R5): the economy's own setup plus the
+/// scale factors that make its purse and buy-in match what the lobby advertised from
+/// `data/events/stakes.toml`.
+///
+/// `wp_economy` has five race types and no legality, so kinds that share a type (Sprint,
+/// Checkpoint, Cannonball, Delivery → `Sprint`) and legality (sanctioned pays less, illegal
+/// daytime pays 2.5-4×) are carried by `purse_scale` / `entry_scale`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EconomyRace {
+    /// What `Economy::settle_race` takes today.
+    pub setup: RaceSetup,
+    /// Multiply the economy's winner purse by this to pay the advertised purse.
+    pub purse_scale: f32,
+    /// Multiply the economy's buy-in by this to charge the advertised entry fee.
+    pub entry_scale: f32,
+    /// Winner purse the lobby advertises (before placement share, wanted multiplier and
+    /// clean bonus, which the economy applies on top), including the economy's damage-mode
+    /// premium.
+    pub purse: Money,
+    /// Buy-in the lobby advertises.
+    pub entry_fee: Money,
+}
+
+/// Reconcile an event's advertised stake with `wp_economy` (request R5, see
+/// `docs/integration/race.md`). The scales are measured against the economy's Arcade
+/// numbers, so the economy's Simulation-mode premium still applies on top of the stake.
+#[allow(clippy::too_many_arguments)]
+pub fn economy_race(
+    econ: &Economy,
+    stakes: &StakeTable,
+    kind: RaceKind,
+    legality: Legality,
+    class: VehicleClass,
+    bracket: ClassBracket,
+    route_length_m: f32,
+    phase: DayPhase,
+    mode: DamageMode,
+) -> EconomyRace {
+    let setup = economy_setup(kind, legality, class, route_length_m, phase, mode);
+    let arcade = RaceSetup {
+        mode: DamageMode::Arcade,
+        ..setup.clone()
+    };
+    let stake = stakes.stake(kind, phase, bracket, legality);
+    let ratio = |want: i64, have: Money| {
+        if have > 0 {
+            want as f32 / have as f32
+        } else {
+            0.0
+        }
+    };
+    let purse_scale = ratio(stake.purse, econ.base_purse(&arcade));
+    let entry_scale = ratio(stake.entry_fee, econ.entry_fee(&arcade));
+    EconomyRace {
+        purse: (econ.base_purse(&setup) as f32 * purse_scale).round() as Money,
+        entry_fee: (econ.entry_fee(&setup) as f32 * entry_scale).round() as Money,
+        setup,
+        purse_scale,
+        entry_scale,
     }
 }
 

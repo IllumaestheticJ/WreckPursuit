@@ -26,12 +26,29 @@ fn repo() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
+/// Knobs for re-aiming the scenario when police tuning changes (unset in normal runs):
+/// `WP_RACE_AIM_DY` shifts route and grid north along the arterial, `WP_RACE_AIM_SEED`
+/// replaces the scenario seed, `WP_RACE_AIM_HEAT` replaces the entrants' starting heat. Run
+/// `city_sprint_pulls_in_police` and `without_the_meet_report_nobody_is_chased` with the same
+/// values (release build) and keep the middle of the band where both pass.
+fn aim() -> (f32, Option<u64>) {
+    let dy = std::env::var("WP_RACE_AIM_DY")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0.0);
+    let seed = std::env::var("WP_RACE_AIM_SEED")
+        .ok()
+        .and_then(|v| v.parse().ok());
+    (dy, seed)
+}
+
 fn plan_sprint(world: &World) -> CityRace {
+    let dy = aim().0;
     plan_city_race(
         world,
-        [60.55, -437.0, 0.0],
+        [60.55, -437.0 + dy, 0.0],
         [0.0, 1.0],
-        [60.55, -230.0, 0.0],
+        [60.55, -230.0 + dy, 0.0],
         3.0,
     )
     .expect("arterial sprint route")
@@ -67,8 +84,21 @@ struct PoliceRace {
 }
 
 fn run_police_race(call_it_in: bool) -> PoliceRace {
-    let sc =
+    let mut sc =
         load_scenario(&repo().join("apps/simcli/scenarios/race/city_sprint_police.ron")).unwrap();
+    let (dy, seed) = aim();
+    for e in &mut sc.entities {
+        e.pos[1] += dy;
+        if let Some(h) = std::env::var("WP_RACE_AIM_HEAT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+        {
+            e.police_heat = h;
+        }
+    }
+    if let Some(seed) = seed {
+        sc.seed = seed;
+    }
     let data_src = FsData::new(repo().join("data"));
     let built = build_sim(&sc, &data_src, &RunOptions::default()).unwrap();
     let mut sim = built.sim;
@@ -262,9 +292,6 @@ fn run_police_race(call_it_in: bool) -> PoliceRace {
 }
 
 #[test]
-#[ignore = "L (round 8): contract v0.3.0 moved police patrol spawns, so this tuned sprint no \
-            longer meets a patrol; re-aim it (see golden/city_chase's round-8 re-aim) and \
-            un-ignore."]
 fn city_sprint_pulls_in_police() {
     let r = run_police_race(true);
     eprintln!(
@@ -289,8 +316,9 @@ fn city_sprint_pulls_in_police() {
         .signals
         .iter()
         .any(|s| matches!(s, RaceSignal::PatrolAttracted { .. })));
+    // (Entrants start at 3.0 heat, see the scenario header.)
     assert!(
-        r.heat_after_report.iter().all(|h| *h > 0.0),
+        r.heat_after_report.iter().all(|h| *h > 3.0),
         "{:?}",
         r.heat_after_report
     );
@@ -320,8 +348,8 @@ fn city_sprint_pulls_in_police() {
 #[test]
 fn without_the_meet_report_nobody_is_chased() {
     // Control run: same race, same seed, but nobody calls the hot meet in. The racers still
-    // speed and pick up some heat (a witnessed knock after the finish), but stay below wanted
-    // level 1, so no pursuit starts in the same window. The meet report is what tips it.
+    // speed and pick up some heat on top of their starting 3.0, but stay below wanted level 1,
+    // so no pursuit starts in the same window. The meet report is what tips it.
     // (Tuning-sensitive by design: if police or traffic tuning changes, re-check both runs.)
     let r = run_police_race(false);
     assert!(r.finished_tick.is_some());
