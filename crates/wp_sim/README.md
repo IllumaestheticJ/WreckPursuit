@@ -31,6 +31,26 @@ every contact. Disabling the vehicle system (`set_systems`) also disables the ch
 - Slot reserves: police stop spawning at 64 − 16 vehicles, traffic at 64 − 24.
 - `police()` exposes the police system; `examples/police_probe.rs` prints a chase timeline.
 
+## City ground: sidewalks and kerbs (playtest #20)
+- `PhysicsWorld::set_city_ground` runs for every city (`Sim::set_world`): sidewalk tops and
+  kerb faces (`wp_world::surface::sidewalk_mesh`, the triangles the greybox draws) as
+  triangle-mesh tiles of 256 m in `SIDEWALK_GROUP`; a flat city keeps its slab under them, a
+  city with terrain also gets terrain, road, building and deck-rail colliders.
+  `CityColliders::sidewalk_triangles` counts them.
+- A car upright on its wheels (≥ 2 wheel contacts, up.z > 0.7) has a chassis collider that
+  ignores `SIDEWALK_GROUP` (switched per tick, only on change): the wheels climb the kerb and
+  carry the car. The chassis box's floor sits at kerb height (0.15 m), so while straddling a
+  kerb it otherwise scraped the kerb edge and snagged on internal triangle edges (a dead stop
+  from 15 km/h). Rolled, airborne or wheel-less cars collide with sidewalks again.
+  (Parry's `FIX_INTERNAL_EDGES` would also cure the snag, but its pseudo-normals use
+  `f32::acos`, which can differ between native libm and wasm: not used.)
+- `place_on_ground` lifts a car onto a sidewalk top just above the road/terrain height under
+  it. `static_ground_z(xy, from_z, max_m)` raycasts the static world (diagnostics, tests).
+- Tests: `tests/sidewalk.rs` drives 96 kerb mounts (15 / 40 km/h, two angles, every Port
+  Vesper district, fill/deck approaches, the grid) and requires every tire on the visual
+  surface within 3 cm (worst today: −2.3 cm Vesper, −0.6 cm grid; −34 cm / −15 cm without the
+  colliders). simcli `city/sidewalk_mount_{15,40}kmh`.
+
 ## Known gaps
 - Contacts reach `wp_damage`, but damage is still the prompt-01 stub until workstream 03 merges.
 - Static geometry is boxes only (`add_static_box`, TB-3); simcli/testbed scenarios do not create them yet.

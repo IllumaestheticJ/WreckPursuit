@@ -109,6 +109,9 @@ pub struct SimVehicle {
     /// Lowest chassis-space z of the spawn collider; the damaged hull is clamped to it so a
     /// crushed car never drags its collider on the road (the wheels carry it).
     collider_floor_z: f32,
+    /// Whether the chassis collider currently ignores sidewalks (upright on its wheels; see
+    /// [`physics::SIDEWALK_GROUP`]).
+    chassis_skips_sidewalks: bool,
 }
 
 /// Gap left under a new prop in hilly cities, m.
@@ -265,6 +268,7 @@ impl Sim {
             wheel_size: (car.def.wheels[0].radius_m, car.def.wheels[0].width_m),
             hull_version,
             collider_floor_z,
+            chassis_skips_sidewalks: false,
         });
         Ok(id)
     }
@@ -272,13 +276,11 @@ impl Sim {
     /// Replace the world (city, traffic, clock) — e.g. `World::load`, `World::procedural` or
     /// `World::vesper` from `wp_world`. Call before spawning or the first tick. Every
     /// `static_props()` entry (parked cars, cones) becomes a dynamic Rapier box with its mass.
-    /// Flat cities drive on the ground slab at z = 0; a city with terrain (Port Vesper v2)
-    /// replaces it with terrain, road, building and deck-rail colliders
-    /// ([`PhysicsWorld::set_city_ground`]).
+    /// Every city gets sidewalk and kerb colliders; flat cities otherwise drive on the ground
+    /// slab at z = 0, and a city with terrain (Port Vesper v2) replaces the slab with terrain,
+    /// road, building and deck-rail colliders ([`PhysicsWorld::set_city_ground`]).
     pub fn set_world(&mut self, world: World) {
-        if world.network().terrain.is_some() {
-            self.city_colliders = self.physics.set_city_ground(world.map());
-        }
+        self.city_colliders = self.physics.set_city_ground(world.map());
         use rapier3d::math::Rotation;
         use rapier3d::prelude::{ColliderBuilder, Pose, RigidBodyBuilder, Vector};
         let hilly = world.network().terrain.is_some();
@@ -335,6 +337,33 @@ impl Sim {
         self.rebuild_police();
     }
 
+    /// A car upright on its wheels lets the wheels alone deal with kerbs and sidewalks: its
+    /// chassis box (whose floor sits at kerb height) would otherwise scrape the kerb edge
+    /// while straddling it and snag on the edges between sidewalk triangles. Rolled, airborne
+    /// or wheel-less cars collide with sidewalks again, so a wreck never sinks into one.
+    /// Vehicle order, only on change: deterministic.
+    fn update_sidewalk_filters(&mut self) {
+        if self.city_colliders.sidewalk_triangles == 0 {
+            return;
+        }
+        for slot in &mut self.vehicles {
+            let st = slot.vehicle.state();
+            let on_wheels = st.wheel_states.iter().filter(|w| w.contact).count() >= 2;
+            let up = slot.vehicle.chassis().rot * rapier3d::math::Vector::Z;
+            let skip = on_wheels && up.z > 0.7;
+            if skip != slot.chassis_skips_sidewalks {
+                slot.chassis_skips_sidewalks = skip;
+                if let Some(col) = self.physics.colliders.get_mut(slot.body.collider) {
+                    col.set_collision_groups(if skip {
+                        physics::chassis_on_wheels_groups()
+                    } else {
+                        rapier3d::prelude::InteractionGroups::all()
+                    });
+                }
+            }
+        }
+    }
+
     /// Props still resting on the road mesh without terrain pairs (hilly cities; diagnostics).
     pub fn resting_prop_count(&self) -> usize {
         self.resting_props.len()
@@ -376,6 +405,12 @@ impl Sim {
         self.city_colliders
     }
 
+    /// Height of the first static physics surface below `(xy, from_z)` (at most `max_m`
+    /// down), ignoring vehicles and props. See [`PhysicsWorld::static_ground_z`].
+    pub fn static_ground_z(&self, xy: [f32; 2], from_z: f32, max_m: f32) -> Option<f32> {
+        self.physics.static_ground_z(xy, from_z, max_m)
+    }
+
     /// Whether the current city has terrain (hills, decks): spawns are then placed on the
     /// ground under them and pitched to its slope.
     pub fn has_terrain(&self) -> bool {
@@ -383,9 +418,9 @@ impl Sim {
     }
 
     /// Teleport a vehicle onto the city's drivable ground at `xy`: height from the road (the
-    /// one nearest `near_z`, if given) or terrain, chassis pitched and rolled to the surface,
-    /// rolling forward along it at `speed_mps`. On a flat city this is
-    /// [`Sim::place_vehicle`] at z = 0.
+    /// one nearest `near_z`, if given) or terrain — or the sidewalk top over it — chassis
+    /// pitched and rolled to the surface, rolling forward along it at `speed_mps`. On a flat
+    /// city this is [`Sim::place_vehicle`] at z = 0 (or on the sidewalk top).
     pub fn place_on_ground(
         &mut self,
         id: EntityId,
@@ -395,10 +430,12 @@ impl Sim {
         near_z: Option<f32>,
     ) -> Result<(), SimError> {
         if !self.has_terrain() {
-            return self.place_vehicle(id, [xy[0], xy[1], 0.0], yaw, speed_mps);
+            let z = self.sidewalk_lift(xy, 0.0);
+            return self.place_vehicle(id, [xy[0], xy[1], z], yaw, speed_mps);
         }
         use rapier3d::math::Vector;
-        let (pos, rot) = ground_pose(self.world.map(), xy, yaw, near_z);
+        let (mut pos, rot) = ground_pose(self.world.map(), xy, yaw, near_z);
+        pos[2] = self.sidewalk_lift(xy, pos[2]);
         let f = rot * Vector::Y;
         self.place_vehicle(id, pos, yaw, speed_mps)?;
         let slot = self
@@ -415,6 +452,19 @@ impl Sim {
         slot.vehicle.read_body(rb);
         slot.spawn = (pos, yaw);
         Ok(())
+    }
+
+    /// `z` raised onto a sidewalk (or kerb) top just above it at `xy`, if there is one: the
+    /// road/terrain height `CityMap::ground_height` knows nothing about the raised sidewalks.
+    fn sidewalk_lift(&self, xy: [f32; 2], z: f32) -> f32 {
+        if self.city_colliders.sidewalk_triangles == 0 {
+            return z;
+        }
+        // A start inside a building hits at once (from_z itself): ignored by the band.
+        match self.physics.static_ground_z(xy, z + 0.4, 0.8) {
+            Some(h) if h > z && h < z + 0.35 => h,
+            _ => z,
+        }
     }
 
     /// Replace the police system built by [`Sim::set_world`], e.g. with scaled patrol tables or
@@ -676,6 +726,7 @@ impl Sim {
                 slot.vehicle
                     .write_body(&mut self.physics.bodies[slot.body.body]);
             }
+            self.update_sidewalk_filters();
         }
         let infos: Vec<contacts::BodyInfo> = self
             .vehicles

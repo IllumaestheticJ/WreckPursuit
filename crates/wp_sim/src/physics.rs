@@ -31,6 +31,8 @@ pub struct CityColliders {
     pub terrain_vertices: usize,
     /// Road surface triangles.
     pub road_triangles: usize,
+    /// Sidewalk top and kerb face triangles (every city with sidewalks, flat ones too).
+    pub sidewalk_triangles: usize,
     /// Static building colliders.
     pub buildings: usize,
     /// Guard-rail boxes along bridge decks.
@@ -44,6 +46,25 @@ pub const SAFETY_FLOOR_Z: f32 = -60.0;
 /// Collision group of the terrain heightfield tiles and the safety floor (cities with
 /// terrain). Resting props leave it out of their filter (see `Sim::set_world`).
 pub const TERRAIN_GROUP: Group = Group::GROUP_2;
+
+/// Collision group of the sidewalk and kerb colliders (every city with sidewalks). The
+/// chassis of a car upright on its wheels leaves it out of its filter (`Sim` switches it per
+/// tick): the wheels climb kerbs and carry the car over sidewalks.
+pub const SIDEWALK_GROUP: Group = Group::GROUP_3;
+
+/// Interaction groups of sidewalk colliders.
+pub fn sidewalk_groups() -> InteractionGroups {
+    InteractionGroups::new(SIDEWALK_GROUP, Group::ALL, InteractionTestMode::And)
+}
+
+/// Interaction groups of a vehicle chassis upright on its wheels: everything but sidewalks.
+pub fn chassis_on_wheels_groups() -> InteractionGroups {
+    InteractionGroups::new(
+        Group::ALL,
+        Group::ALL.difference(SIDEWALK_GROUP),
+        InteractionTestMode::And,
+    )
+}
 
 /// Interaction groups of terrain colliders.
 pub fn terrain_groups() -> InteractionGroups {
@@ -89,20 +110,29 @@ impl PhysicsWorld {
         world
     }
 
-    /// Replace the flat ground slab by the city's own ground (cities with terrain, e.g.
-    /// Port Vesper v2): a terrain heightfield, one triangle mesh of every paved surface
-    /// (banked ribbons, junction discs, bend connectors), a static collider per building and
-    /// guard rails along bridge decks. The slab moves down to [`SAFETY_FLOOR_Z`]. Colliders are
+    /// Build the city's ground colliders. Every city gets its raised sidewalks and kerb faces
+    /// ([`wp_world::surface::sidewalk_mesh`], the same triangles the greybox draws), so a car
+    /// bumps up the kerb and drives on the sidewalk at its visual height. A flat city keeps
+    /// the slab at z = 0 under them. A city with terrain (Port Vesper v2) replaces the slab:
+    /// a terrain heightfield, one triangle mesh of every paved surface (banked ribbons,
+    /// junction discs, bend connectors) and sidewalk, a static collider per building and
+    /// guard rails along bridge decks; the slab moves down to [`SAFETY_FLOOR_Z`]. Colliders are
     /// inserted in a fixed order and registered with the broad phase immediately, so ground
     /// probes see them on the next tick without a physics step. Call once, before the first
     /// tick (scenario setup).
     pub fn set_city_ground(&mut self, map: &wp_world::CityMap) -> CityColliders {
         let net = &map.net;
-        let Some(t) = &net.terrain else {
-            return CityColliders::default();
-        };
         let mut out = CityColliders::default();
         let mut added: Vec<ColliderHandle> = Vec::new();
+        let walks = wp_world::surface::sidewalk_mesh(map);
+        out.sidewalk_triangles = walks.tops.indices.len() + walks.kerbs.indices.len();
+        let mut walk_mesh = walks.tops;
+        walk_mesh.append(&walks.kerbs);
+        let Some(t) = &net.terrain else {
+            self.insert_mesh_tiles(&walk_mesh, sidewalk_groups(), &mut added);
+            self.register(&added);
+            return out;
+        };
         // Park the slab.
         let hz = wp_vehicle::rig::GROUND_HALF_EXTENTS[2];
         if let Some(c) = self.colliders.get_mut(self.ground) {
@@ -147,42 +177,11 @@ impl PhysicsWorld {
         }
         out.terrain_vertices = (t.nx * t.ny) as usize;
 
-        // Roads: one triangle mesh per 256 m cell (by triangle centroid).
-        const ROAD_TILE_M: f32 = 256.0;
+        // Roads, then sidewalks: triangle meshes per 256 m cell.
         let mesh = wp_world::surface::road_mesh(map);
         out.road_triangles = mesh.indices.len();
-        let mut tiles: std::collections::BTreeMap<(i32, i32), Vec<[u32; 3]>> =
-            std::collections::BTreeMap::new();
-        for tri in &mesh.indices {
-            let c = tri.iter().fold([0.0f32; 2], |acc, i| {
-                let p = mesh.positions[*i as usize];
-                [acc[0] + p[0] / 3.0, acc[1] + p[1] / 3.0]
-            });
-            let key = (
-                (c[0] / ROAD_TILE_M).floor() as i32,
-                (c[1] / ROAD_TILE_M).floor() as i32,
-            );
-            tiles.entry(key).or_default().push(*tri);
-        }
-        for tris in tiles.values() {
-            let mut remap: std::collections::BTreeMap<u32, u32> = std::collections::BTreeMap::new();
-            let mut verts: Vec<Vector> = Vec::new();
-            let mut idx: Vec<[u32; 3]> = Vec::with_capacity(tris.len());
-            for tri in tris {
-                let mut out_tri = [0u32; 3];
-                for (k, i) in tri.iter().enumerate() {
-                    out_tri[k] = *remap.entry(*i).or_insert_with(|| {
-                        verts.push(Vector::from_array(mesh.positions[*i as usize]));
-                        (verts.len() - 1) as u32
-                    });
-                }
-                idx.push(out_tri);
-            }
-            match ColliderBuilder::trimesh(verts, idx) {
-                Ok(b) => added.push(self.colliders.insert(b.build())),
-                Err(e) => eprintln!("road tile trimesh failed: {e:?}"),
-            }
-        }
+        self.insert_mesh_tiles(&mesh, InteractionGroups::all(), &mut added);
+        self.insert_mesh_tiles(&walk_mesh, sidewalk_groups(), &mut added);
 
         // Buildings: extruded footprints as convex hulls (footprints are convex lots).
         for b in &net.buildings {
@@ -222,11 +221,75 @@ impl PhysicsWorld {
             out.rails += 1;
         }
 
-        for h in added {
-            let aabb = self.colliders[h].compute_aabb();
-            self.broad_phase.set_aabb(&self.params, h, aabb);
-        }
+        self.register(&added);
         out
+    }
+
+    /// Insert `mesh` as static triangle meshes, one per 256 m cell (by triangle centroid,
+    /// cells in a fixed order), so a body only pairs with the surface around it.
+    fn insert_mesh_tiles(
+        &mut self,
+        mesh: &wp_world::surface::TriMesh,
+        groups: InteractionGroups,
+        added: &mut Vec<ColliderHandle>,
+    ) {
+        const TILE_M: f32 = 256.0;
+        let mut tiles: std::collections::BTreeMap<(i32, i32), Vec<[u32; 3]>> =
+            std::collections::BTreeMap::new();
+        for tri in &mesh.indices {
+            let c = tri.iter().fold([0.0f32; 2], |acc, i| {
+                let p = mesh.positions[*i as usize];
+                [acc[0] + p[0] / 3.0, acc[1] + p[1] / 3.0]
+            });
+            let key = (
+                (c[0] / TILE_M).floor() as i32,
+                (c[1] / TILE_M).floor() as i32,
+            );
+            tiles.entry(key).or_default().push(*tri);
+        }
+        for tris in tiles.values() {
+            let mut remap: std::collections::BTreeMap<u32, u32> = std::collections::BTreeMap::new();
+            let mut verts: Vec<Vector> = Vec::new();
+            let mut idx: Vec<[u32; 3]> = Vec::with_capacity(tris.len());
+            for tri in tris {
+                let mut out_tri = [0u32; 3];
+                for (k, i) in tri.iter().enumerate() {
+                    out_tri[k] = *remap.entry(*i).or_insert_with(|| {
+                        verts.push(Vector::from_array(mesh.positions[*i as usize]));
+                        (verts.len() - 1) as u32
+                    });
+                }
+                idx.push(out_tri);
+            }
+            match ColliderBuilder::trimesh(verts, idx) {
+                Ok(b) => added.push(self.colliders.insert(b.collision_groups(groups).build())),
+                Err(e) => eprintln!("city ground trimesh failed: {e:?}"),
+            }
+        }
+    }
+
+    /// Register freshly inserted static colliders with the broad phase (queries see them
+    /// before the next step).
+    fn register(&mut self, added: &[ColliderHandle]) {
+        for h in added {
+            let aabb = self.colliders[*h].compute_aabb();
+            self.broad_phase.set_aabb(&self.params, *h, aabb);
+        }
+    }
+
+    /// Height of the first static surface (ground, road, sidewalk, deck, building roof) hit
+    /// by a ray cast straight down from `(xy, from_z)`, at most `max_m` below it. Bodies
+    /// (vehicles, props, debris) are ignored. Diagnostics and tests (the visual vs
+    /// physics surface sweep).
+    pub fn static_ground_z(&self, xy: [f32; 2], from_z: f32, max_m: f32) -> Option<f32> {
+        // World geometry has no parent body (props and vehicles do).
+        let world_only = |_: ColliderHandle, c: &Collider| c.parent().is_none();
+        let qp = self.query_pipeline(QueryFilter::default().predicate(&world_only));
+        let ray = Ray::new(
+            Vector::new(xy[0], xy[1], from_z),
+            Vector::new(0.0, 0.0, -1.0),
+        );
+        qp.cast_ray(&ray, max_m, true).map(|(_, toi)| from_z - toi)
     }
 
     /// Scene query pipeline over the current colliders (as of the last step), with `filter`
