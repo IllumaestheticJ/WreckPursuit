@@ -84,6 +84,8 @@ export interface SamplePack {
   id: string;
   kind: "Engine" | "World" | "Siren" | "Radio";
   description: string;
+  /** Procedural pack played instead when the user picks the procedural fallback. */
+  fallback?: string;
   cues: Record<string, CueDef>;
 }
 
@@ -93,3 +95,14 @@ export interface AudioLibrary {
 }
 
 export const voiceKey = (v: VoiceId): string => `${v.entity}:${v.slot}`;
+
+/** Where cue audio comes from: recorded samples (default) or the procedural fallback packs. */
+export type SoundSource = "recorded" | "procedural";
+
+/** Sample loading progress (panel + e2e). */
+export interface SampleStatus {
+  total: number;
+  loaded: number;
+  loading: number;
+  failed: string[];
+}
