@@ -23,6 +23,7 @@ members = [
     "tools/bench",
     "apps/testbed-native",
     "tools/city-import",
+    "tools/tuning-dash/probe",
 ]
 
 [workspace.package]
