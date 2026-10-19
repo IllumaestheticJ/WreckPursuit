@@ -440,7 +440,14 @@ async function main(): Promise<void> {
   };
   ($("city") as HTMLInputElement).onchange = () => startFreeDrive();
   citySel.onchange = () => {
-    if (sim.scenario()?.name === "city_chase") startCityChase();
+    if (isReplay()) return;
+    const name = sim.scenario()?.name;
+    if (sim.careerRunActive()) {
+      // A career run restarts in the new city with the career car (the run so far is settled).
+      sim.careerEndRun();
+      void startCareerRun(name === "city_chase" ? "chase" : "free");
+    } else if (name === "city_chase") startCityChase();
+    else if (name === "city_chase_rainy_night") startCityChase(undefined, undefined, true);
     else if (($("city") as HTMLInputElement).checked) startFreeDrive();
   };
   document.querySelectorAll<HTMLInputElement>("#assist-row input").forEach((cb) => {

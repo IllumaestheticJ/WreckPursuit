@@ -603,7 +603,14 @@ check(
   );
   await page.evaluate(() => window.__wp.careerApi.close());
 }
-// The selector keeps the old flat grid: the chase restarts there.
+// The selector keeps the old flat grid: the chase restarts there. Start a plain (non-career)
+// city chase first: the career checks above leave a career free-drive run active.
+await page.evaluate(() => {
+  const career = document.getElementById("career");
+  if (career && career.checked) career.click();
+  document.getElementById("sc-chase").click();
+});
+await page.waitForTimeout(1500);
 await page.evaluate(() => {
   const sel = document.getElementById("city-map");
   sel.value = "procedural_12x12";
