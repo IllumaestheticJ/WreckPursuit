@@ -7,7 +7,15 @@
 //! - an instance fits when it is `up`, mode and region match, the city matches if requested,
 //!   its bracket equals the requested one or is `open`, and the role has enough free seats
 //!   (`slots - population - reserved`);
-//! - among fitting instances the fullest wins (fill servers before spreading), ties → lowest id.
+//! - racers only (the clean rating is a racing rating): when the instance already has racers
+//!   (listed in its last heartbeat, plus racer seats reserved since), their mean clean rating
+//!   must be within the ticket's skill window of the ticket's rating (a party queues with its
+//!   members' mean). The window starts at [`Config::skill_window`] and widens by
+//!   [`Config::skill_widen_per_s`] while the ticket waits, so nobody waits forever. An instance
+//!   with no racers fits any rating. Feature flag `skill_matching_enabled` (default on) turns
+//!   this off;
+//! - among fitting instances the fullest wins (fill servers before spreading), ties → the
+//!   closest racer rating, then the lowest id.
 
 use rusqlite::{params, Connection, OptionalExtension};
 use wp_contracts::{DamageMode, Role};
@@ -21,6 +29,7 @@ use crate::clock::UnixMs;
 use crate::config::Config;
 use crate::directory;
 use crate::error::{ApiError, ApiResult};
+use crate::leaderboards::{self, INITIAL_RATING};
 use crate::token;
 
 /// Largest party.
@@ -124,10 +133,17 @@ pub fn queue(
             ));
         }
     }
+    // The whole party queues with its members' mean rating.
+    let mut rating_sum = 0.0;
+    for m in &members {
+        rating_sum += leaderboards::clean_rating(&tx, *m)?;
+    }
+    let rating = rating_sum / members.len() as f64;
     for m in &members {
         tx.execute(
-            "INSERT INTO tickets (account_id, party_id, role, mode, bracket, region, city, state, created_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'queued', ?8)",
+            "INSERT INTO tickets (account_id, party_id, role, mode, bracket, region, city, state,
+                                  created_ms, rating)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'queued', ?8, ?9)",
             params![
                 m,
                 party,
@@ -136,7 +152,8 @@ pub fn queue(
                 prefs.bracket,
                 prefs.region,
                 prefs.city,
-                now
+                now,
+                rating
             ],
         )?;
     }
@@ -184,6 +201,20 @@ struct Candidate {
     bracket: String,
     free: RoleCounts,
     load: u32,
+    /// Racers there (last heartbeat + reserved racer seats): summed rating and count.
+    racer_sum: f64,
+    racer_n: u32,
+}
+
+impl Candidate {
+    /// Gap between the instance's mean racer rating and `rating` (0 with no racers there).
+    fn skill_gap(&self, rating: f64) -> f64 {
+        if self.racer_n == 0 {
+            0.0
+        } else {
+            (self.racer_sum / self.racer_n as f64 - rating).abs()
+        }
+    }
 }
 
 struct Group {
@@ -193,6 +224,27 @@ struct Group {
     bracket: String,
     region: String,
     city: Option<String>,
+    /// Rating the group queued with (party mean).
+    rating: f64,
+    /// When the group queued (oldest ticket).
+    created_ms: UnixMs,
+}
+
+/// Racer seats reserved per instance (assigned, or joined but not yet in a heartbeat):
+/// summed queue-time rating and count. These racers are not in the heartbeat's racer sums yet.
+fn reserved_racer_ratings(
+    conn: &Connection,
+) -> ApiResult<std::collections::BTreeMap<InstanceId, (f64, u32)>> {
+    let mut stmt = conn.prepare(
+        "SELECT instance_id, SUM(COALESCE(rating, ?1)), COUNT(*) FROM tickets
+         WHERE role = 'racer' AND instance_id IS NOT NULL
+           AND (state = 'assigned' OR (state = 'joined' AND reported = 0))
+         GROUP BY instance_id",
+    )?;
+    let rows = stmt.query_map(params![INITIAL_RATING], |r| {
+        Ok((r.get::<_, InstanceId>(0)?, (r.get(1)?, r.get(2)?)))
+    })?;
+    Ok(rows.collect::<Result<_, _>>()?)
 }
 
 /// Expire stale tickets and assign queued tickets to instances. Idempotent.
@@ -219,6 +271,8 @@ pub fn process(conn: &mut Connection, cfg: &Config, now: UnixMs) -> ApiResult<()
         params![now - directory::UNREPORTED_JOIN_HOLD_MS],
     )?;
 
+    let skill = flag_bool(&tx, "skill_matching_enabled", true)?;
+    let reserved_racers = reserved_racer_ratings(&tx)?;
     let mut candidates = Vec::new();
     for info in directory::list(&tx, false, now)? {
         if info.state != InstanceState::Up {
@@ -232,7 +286,18 @@ pub fn process(conn: &mut Connection, cfg: &Config, now: UnixMs) -> ApiResult<()
                 .saturating_sub(info.population.get(role))
                 .saturating_sub(info.reserved.get(role));
         }
+        let (listed_sum, listed_n) = tx.query_row(
+            "SELECT racer_rating_sum, racer_rated FROM instances WHERE id = ?1",
+            params![info.instance_id],
+            |r| Ok((r.get::<_, f64>(0)?, r.get::<_, u32>(1)?)),
+        )?;
+        let (res_sum, res_n) = reserved_racers
+            .get(&info.instance_id)
+            .copied()
+            .unwrap_or((0.0, 0));
         candidates.push(Candidate {
+            racer_sum: listed_sum + res_sum,
+            racer_n: listed_n + res_n,
             id: info.instance_id,
             region: info.region,
             city: info.city,
@@ -246,6 +311,8 @@ pub fn process(conn: &mut Connection, cfg: &Config, now: UnixMs) -> ApiResult<()
     let groups = queued_groups(&tx)?;
     for g in groups {
         let size = g.tickets.len() as u32;
+        let rated = skill && g.role == Role::Racer;
+        let window = skill_window(cfg, g.created_ms, now);
         let best = candidates
             .iter_mut()
             .filter(|c| {
@@ -254,14 +321,23 @@ pub fn process(conn: &mut Connection, cfg: &Config, now: UnixMs) -> ApiResult<()
                     && g.city.as_ref().is_none_or(|city| *city == c.city)
                     && (c.bracket == g.bracket || c.bracket == "open")
                     && c.free.get(g.role) >= size
+                    && (!rated || c.skill_gap(g.rating) <= window)
             })
-            // max_by_key keeps the last maximum; iterate in reverse id order so ties go to the
-            // lowest id.
-            .rev()
-            .max_by_key(|c| c.load);
+            // Fullest first, then the closest racer rating, then the lowest id.
+            .min_by(|a, b| {
+                let gap = |c: &Candidate| if rated { c.skill_gap(g.rating) } else { 0.0 };
+                b.load
+                    .cmp(&a.load)
+                    .then(gap(a).total_cmp(&gap(b)))
+                    .then(a.id.cmp(&b.id))
+            });
         let Some(inst) = best else { continue };
         *inst.free.get_mut(g.role) -= size;
         inst.load += size;
+        if g.role == Role::Racer {
+            inst.racer_sum += g.rating * f64::from(size);
+            inst.racer_n += size;
+        }
         for t in &g.tickets {
             tx.execute(
                 "UPDATE tickets SET state = 'assigned', instance_id = ?2, assigned_ms = ?3
@@ -274,10 +350,16 @@ pub fn process(conn: &mut Connection, cfg: &Config, now: UnixMs) -> ApiResult<()
     Ok(())
 }
 
+/// Skill window (rating points) of a ticket queued at `created_ms`: widens while it waits.
+pub fn skill_window(cfg: &Config, created_ms: UnixMs, now: UnixMs) -> f64 {
+    let waited_s = (now - created_ms).max(0) as f64 / 1000.0;
+    cfg.skill_window + cfg.skill_widen_per_s * waited_s
+}
+
 /// Queued tickets grouped by party (singles are their own group), oldest first.
 fn queued_groups(conn: &Connection) -> ApiResult<Vec<Group>> {
     let mut stmt = conn.prepare(
-        "SELECT id, party_id, role, mode, bracket, region, city FROM tickets
+        "SELECT id, party_id, role, mode, bracket, region, city, rating, created_ms FROM tickets
          WHERE state = 'queued' ORDER BY id",
     )?;
     type Raw = (
@@ -288,6 +370,8 @@ fn queued_groups(conn: &Connection) -> ApiResult<Vec<Group>> {
         String,
         String,
         Option<String>,
+        Option<f64>,
+        UnixMs,
     );
     let rows: Vec<Raw> = stmt
         .query_map([], |r| {
@@ -299,11 +383,13 @@ fn queued_groups(conn: &Connection) -> ApiResult<Vec<Group>> {
                 r.get(4)?,
                 r.get(5)?,
                 r.get(6)?,
+                r.get(7)?,
+                r.get(8)?,
             ))
         })?
         .collect::<Result<_, _>>()?;
     let mut groups: Vec<(Option<u32>, Group)> = Vec::new();
-    for (id, party, role, mode, bracket, region, city) in rows {
+    for (id, party, role, mode, bracket, region, city, rating, created_ms) in rows {
         if let Some(p) = party {
             if let Some((_, g)) = groups.iter_mut().find(|(gp, _)| *gp == Some(p)) {
                 g.tickets.push(id);
@@ -322,6 +408,8 @@ fn queued_groups(conn: &Connection) -> ApiResult<Vec<Group>> {
                 bracket,
                 region,
                 city,
+                rating: rating.unwrap_or(INITIAL_RATING),
+                created_ms,
             },
         ));
     }
@@ -495,11 +583,12 @@ pub fn reconnect(
         params![instance],
         |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
     )?;
+    let rating = leaderboards::clean_rating(&tx, account)?;
     tx.execute(
         "INSERT INTO tickets (account_id, party_id, role, mode, bracket, region, city, state,
-                              instance_id, created_ms, assigned_ms)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'assigned', ?8, ?9, ?9)",
-        params![account, party, role, mode, bracket, region, city, instance, now],
+                              instance_id, created_ms, assigned_ms, rating)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'assigned', ?8, ?9, ?9, ?10)",
+        params![account, party, role, mode, bracket, region, city, instance, now, rating],
     )?;
     tx.execute(
         "DELETE FROM reconnect_tokens WHERE token_hash = ?1",

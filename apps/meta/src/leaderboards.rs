@@ -27,6 +27,19 @@ pub const MAX_LIMIT: u32 = 200;
 /// Fixed board ids (time-attack boards are `time_attack:<route>`).
 pub const BOARDS: &[&str] = &["clean_rating", "bounty", "captures"];
 
+/// Current clean rating of an account ([`INITIAL_RATING`] before its first rated race).
+pub fn clean_rating(conn: &Connection, account: AccountId) -> ApiResult<f64> {
+    use rusqlite::OptionalExtension;
+    Ok(conn
+        .query_row(
+            "SELECT clean_rating FROM ratings WHERE account_id = ?1",
+            params![account],
+            |r| r.get(0),
+        )
+        .optional()?
+        .unwrap_or(INITIAL_RATING))
+}
+
 /// Which period of a board.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Period {

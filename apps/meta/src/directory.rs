@@ -175,11 +175,40 @@ pub fn heartbeat(
             params![p, id, now + reconnect_ttl_ms],
         )?;
     }
+    let (sum, n) = listed_racer_ratings(conn, id, &req.players)?;
+    conn.execute(
+        "UPDATE instances SET racer_rating_sum = ?2, racer_rated = ?3 WHERE id = ?1",
+        params![id, sum, n],
+    )?;
     let kicks = take_kicks(conn, id, &req.players, now)?;
     Ok(HeartbeatResponse {
         kicks,
         flags: flags(conn)?,
     })
+}
+
+/// Summed current clean rating and count of the listed players who hold a racer seat here
+/// (their latest joined ticket is a racer ticket on this instance).
+fn listed_racer_ratings(
+    conn: &Connection,
+    id: InstanceId,
+    players: &[api::AccountId],
+) -> ApiResult<(f64, u32)> {
+    let mut stmt = conn.prepare(
+        "SELECT role, instance_id FROM tickets
+         WHERE account_id = ?1 AND state = 'joined' ORDER BY id DESC LIMIT 1",
+    )?;
+    let (mut sum, mut n) = (0.0, 0u32);
+    for p in players {
+        let seat: Option<(String, Option<InstanceId>)> = stmt
+            .query_row(params![p], |r| Ok((r.get(0)?, r.get(1)?)))
+            .optional()?;
+        if matches!(&seat, Some((role, Some(i))) if role == "racer" && *i == id) {
+            sum += crate::leaderboards::clean_rating(conn, *p)?;
+            n += 1;
+        }
+    }
+    Ok((sum, n))
 }
 
 /// Every role, in a fixed order.
@@ -270,7 +299,7 @@ pub fn deregister(conn: &Connection, id: InstanceId) -> ApiResult<()> {
 }
 
 const INSTANCE_COLUMNS: &str = "id, name, region, city, mode, bracket, address, slots_json,
-     population_json, state, last_heartbeat_ms, tick_ms";
+     population_json, state, last_heartbeat_ms, tick_ms, racer_rating_sum, racer_rated";
 
 fn instance_from_row(r: &Row<'_>) -> rusqlite::Result<InstanceInfo> {
     let json_err = |e: serde_json::Error| {
@@ -292,6 +321,10 @@ fn instance_from_row(r: &Row<'_>) -> rusqlite::Result<InstanceInfo> {
         state: InstanceState::parse(&state).unwrap_or(InstanceState::Down),
         last_heartbeat_ms: r.get(10)?,
         tick_ms: r.get::<_, f64>(11)? as f32,
+        racer_rating: {
+            let (sum, n): (f64, u32) = (r.get(12)?, r.get(13)?);
+            (n > 0).then(|| sum / n as f64)
+        },
     })
 }
 

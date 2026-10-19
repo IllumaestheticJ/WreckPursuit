@@ -34,7 +34,7 @@
 <div class="wrap">
 <table>
   <thead><tr><th>id</th><th>name</th><th>state</th><th>region / city</th><th>mode</th><th>bracket</th>
-  <th>racers</th><th>cops</th><th>captain</th><th>spect.</th><th>tick ms</th><th>last beat</th></tr></thead>
+  <th>racers</th><th>cops</th><th>captain</th><th>spect.</th><th>racer rating</th><th>tick ms</th><th>last beat</th></tr></thead>
   <tbody id="rows"></tbody>
 </table>
 </div>
@@ -63,7 +63,7 @@
         [cell(i.instance_id), cell(i.name), cell(i.state, i.state), cell(`${i.region} / ${i.city}`), cell(i.mode), cell(i.bracket),
          cell(pair(i.population, i.slots, "racer")), cell(pair(i.population, i.slots, "police_chase")),
          cell(pair(i.population, i.slots, "police_captain")), cell(pair(i.population, i.slots, "spectator")),
-         cell(i.tick_ms.toFixed(2)), cell(age + " s ago")].forEach((td) => tr.appendChild(td));
+         cell(i.racer_rating == null ? "–" : i.racer_rating.toFixed(0)), cell(i.tick_ms.toFixed(2)), cell(age + " s ago")].forEach((td) => tr.appendChild(td));
         rows.appendChild(tr);
       }
       const f = await fetch("/v1/flags");

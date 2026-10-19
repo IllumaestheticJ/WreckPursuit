@@ -34,7 +34,7 @@ server port="8080":
 # Meta service (accounts, matchmaking, leaderboards, admin) on 127.0.0.1:8090 with dev secrets
 # and fast password hashing. Never use these settings in a deployment (see apps/meta/README.md).
 meta:
-    WP_META_DB=meta-dev.sqlite WP_META_INSTANCE_KEY=dev-instance-key-000 WP_META_ADMIN_TOKEN=dev-admin-token-0000 WP_META_FAST_HASH=1 cargo run -p wp_meta --bin wp-meta
+    WP_META_DB=meta-dev.sqlite WP_META_CORS_ORIGINS=http://localhost:5173,http://localhost:4173 WP_META_INSTANCE_KEY=dev-instance-key-000 WP_META_ADMIN_TOKEN=dev-admin-token-0000 WP_META_FAST_HASH=1 cargo run -p wp_meta --bin wp-meta
 # Server load test: N scripted websocket bots in the crash arena (see apps/server/README.md).
 server-bots n="32":
     cargo run --release -p wp_server --bin wp-server -- --bots {{n}} --arena 120

@@ -36,6 +36,11 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
         "joined_seat_hold",
         include_str!("../migrations/0005_joined_seat_hold.sql"),
     ),
+    (
+        6,
+        "skill_matching",
+        include_str!("../migrations/0006_skill_matching.sql"),
+    ),
 ];
 
 /// Shared database handle. SQLite has a single writer anyway; one connection behind a mutex

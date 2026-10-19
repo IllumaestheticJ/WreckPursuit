@@ -99,6 +99,15 @@ pub struct Config {
     pub hash_cost: HashCost,
     /// Rate limits.
     pub rate_limits: RateLimits,
+    /// Browser origins allowed to call the player API cross-origin (`scheme://host[:port]`,
+    /// or `*` for any; dev only). Empty = no CORS headers. See [`crate::cors`].
+    pub cors_origins: Vec<String>,
+    /// Skill matching for racers: largest clean-rating gap between a racer (or party mean) and
+    /// an instance's racers at queue time. See [`crate::matchmaking`].
+    pub skill_window: f64,
+    /// How fast the skill window widens while a ticket waits (rating points per second), so
+    /// nobody waits forever for an exact match.
+    pub skill_widen_per_s: f64,
 }
 
 impl Config {
@@ -117,6 +126,9 @@ impl Config {
             heartbeat_interval_ms: 5_000,
             hash_cost: HashCost::Production,
             rate_limits: RateLimits::production(),
+            cors_origins: Vec::new(),
+            skill_window: 200.0,
+            skill_widen_per_s: 10.0,
         }
     }
 
@@ -135,7 +147,8 @@ impl Config {
 
     /// Read `WP_META_*` environment variables on top of [`Config::local`]:
     /// `WP_META_LISTEN`, `WP_META_DB`, `WP_META_ADMIN_TOKEN`, `WP_META_INSTANCE_KEY`,
-    /// `WP_META_DATA`, `WP_META_FAST_HASH=1` (dev only), `WP_META_NO_RATE_LIMIT=1` (dev only).
+    /// `WP_META_DATA`, `WP_META_CORS_ORIGINS` (comma-separated origins, or `*`),
+    /// `WP_META_FAST_HASH=1` (dev only), `WP_META_NO_RATE_LIMIT=1` (dev only).
     pub fn from_env() -> Result<Self, String> {
         let mut c = Self::local();
         let var = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
@@ -158,6 +171,9 @@ impl Config {
         if let Some(v) = var("WP_META_DATA") {
             c.data_root = Some(PathBuf::from(v));
         }
+        if let Some(v) = var("WP_META_CORS_ORIGINS") {
+            c.cors_origins = parse_origins(&v)?;
+        }
         if var("WP_META_FAST_HASH").as_deref() == Some("1") {
             c.hash_cost = HashCost::Fast;
         }
@@ -173,5 +189,41 @@ impl Config {
             );
         }
         Ok(c)
+    }
+}
+
+/// Parse a comma-separated origin list (`WP_META_CORS_ORIGINS`). Each entry must be `*` or
+/// `http(s)://host[:port]` with no path.
+pub fn parse_origins(v: &str) -> Result<Vec<String>, String> {
+    let mut out = Vec::new();
+    for o in v.split(',').map(str::trim).filter(|o| !o.is_empty()) {
+        let rest = o
+            .strip_prefix("http://")
+            .or_else(|| o.strip_prefix("https://"));
+        let ok = o == "*" || rest.is_some_and(|r| !r.is_empty() && !r.contains('/'));
+        if !ok {
+            return Err(format!(
+                "WP_META_CORS_ORIGINS: '{o}' is not '*' or 'http(s)://host[:port]'"
+            ));
+        }
+        out.push(o.to_string());
+    }
+    Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn origin_list() {
+        assert_eq!(
+            parse_origins(" http://localhost:5173 , https://play.example.test").unwrap(),
+            ["http://localhost:5173", "https://play.example.test"]
+        );
+        assert_eq!(parse_origins("*").unwrap(), ["*"]);
+        assert!(parse_origins("http://localhost:5173/").is_err());
+        assert!(parse_origins("localhost:5173").is_err());
+        assert!(parse_origins("").unwrap().is_empty());
     }
 }

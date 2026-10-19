@@ -96,7 +96,9 @@ parties (`POST /v1/parties`, `/v1/parties/{id}/join {code}`); `POST /v1/matchmak
 {prefs: {role, mode, bracket, region, city?}}`, poll `GET /v1/matchmaking/status` until
 `assignment` → connect to `assignment.address` with `assignment.join_token`; leaderboards
 `GET /v1/leaderboards/{clean_rating|bounty|captures|time_attack:<route>}?period=all|daily|weekly`.
-No CORS headers yet (see gaps).
+**Browser:** run meta with `WP_META_CORS_ORIGINS=http://localhost:5173` (`just meta` does) or
+proxy `/v1` through Vite; example `fetch` client and both setups in `apps/meta/docs/browser.md`.
+CORS covers the player API only (never `/v1/admin/*` or the instance API).
 
 ### Library
 `wp_meta::{api, client::{MetaClient, RemoteAccountStore}, store::MetaStore}`. `MetaStore` is an
@@ -126,7 +128,7 @@ in-process `AccountStore` over the meta DB.
 |---|---|---|
 | `Cargo.toml` | added `apps/meta`, `tools/meta-cli` to `members` | new crates |
 | `Cargo.lock` | new dependencies (axum 0.8, argon2 0.5, sha2, hex, getrandom 0.3, ureq 2, clap 4; rusqlite 0.40 shared with `wp_economy`) | — |
-| `justfile` | `just meta` recipe (dev secrets, fast hashing) | run the service locally |
+| `justfile` | `just meta` recipe (dev secrets, fast hashing, CORS for the testbed's 5173/4173) | run the service locally |
 | `.gitignore` | `meta-dev.sqlite*` | dev database from `just meta` |
 
 `wp_economy` and `wp_contracts` untouched. Nothing here is reachable from `wp_wasm`
@@ -141,12 +143,11 @@ in-process `AccountStore` over the meta DB.
 
 ## Known gaps
 - Single process / single SQLite connection; Postgres port is a mechanical SQL change (README).
-- No CORS (the browser testbed calling meta directly needs `tower-http` CORS or a same-origin
-  proxy); no TLS (terminate at a proxy).
+- No TLS (terminate at a proxy). CORS is an exact-origin allowlist (no wildcard subdomains).
 - OAuth linking is a stub (501); no password reset or email verification.
 - Crews: open membership, no invites. Territory: last report wins.
-- Matching is greedy oldest-first inside region/mode/bracket; the clean rating is stored but not
-  yet used for skill matching.
+- Matching is greedy oldest-first inside region/mode/bracket. Skill matching covers racers only
+  (clean rating); cops are unrated.
 
 ## Lead feedback
 (Written by the integration lead.)
@@ -186,3 +187,41 @@ Contract **v0.3.0** is being applied in parallel by the lead (branch `lead/contr
 1. Fix the flaky `twenty_bots_…` heartbeat test under load (root cause, not retries).
 2. CORS (same-origin proxy or `tower-http` CORS) so the browser testbed can call meta. Add a small `docs` example.
 3. Use the stored clean rating in matchmaking (skill brackets).
+
+### Response (machine O, round 6b)
+1. **`twenty_bots_…` flake — already root-caused and fixed in run 3/4** (overbooking between join
+   verification and the next heartbeat; migration `0005_joined_seat_hold.sql`, see the first
+   response above). STATUS.md row O still quotes the run-3 note. Re-checked on today's merge
+   (`main` + lead branch): **0 failures in 40 runs** of `twenty_bots_signup_matchmake_results_leaderboard`
+   with 8 busy-loop CPU hogs on 4 cores. The test has no wall-clock dependence left (all expiry
+   on `ManualClock`; poll loops are bounded by iteration count, not time). **Please update
+   STATUS.md row O.**
+2. **CORS:** `wp_meta::cors`, a small allowlist middleware (no new dependency). Config
+   `WP_META_CORS_ORIGINS` (comma-separated `http(s)://host[:port]`, or `*` for dev); off when
+   unset. Player paths only: `/v1/admin/*` and `/v1/instances/{id}/…` never get CORS; bearer
+   auth, no credentials. Preflight → 204 with methods/headers, 10 min max-age. `just meta` allows
+   `http://localhost:5173` and `:4173`. Docs + TypeScript `fetch` example (and the Vite-proxy
+   alternative for the testbed owner): `apps/meta/docs/browser.md`. Test:
+   `cors_for_allowed_origins_on_player_paths_only`.
+3. **Skill matching:** racers are matched on the stored clean rating. A ticket stores the
+   rating it queued with (party = members' mean; migration `0006_skill_matching.sql`). An
+   instance's racer rating = racers listed in its last heartbeat (current ratings) + racer seats
+   reserved since. An instance with racers fits only within the ticket's window: 200 points,
+   +10 per second waited (`Config::skill_window` / `skill_widen_per_s`). Order among fits:
+   fullest, then closest rating, then lowest id (fill-first is kept). Cops/spectators unrated.
+   Admin flag `skill_matching_enabled` (default true). `InstanceInfo.racer_rating` is new
+   (optional; health JSON and `/admin` dashboard). Test:
+   `racers_match_by_clean_rating_with_a_widening_window` (separation, widening, flag off,
+   police unaffected).
+
+Nothing outside `apps/meta` changed except the `just meta` line. The single-player greybox
+demo does not need meta (the server runs standalone when `WP_META_URL` is unset).
+
+Checks on this branch (`main` + lead branch merged): fmt and clippy `-D warnings` are clean;
+`cargo test -p wp_meta` passes; `cargo test --workspace --exclude simcli --no-fail-fast`: 91
+binaries pass, 2 tests fail **outside meta, in code identical to the lead branch**:
+`wp_economy` `pursuit_wiring::real_police_capture_settles_through_the_economy` ("level at
+capture, not after the reset") and `wp_race` `simcli_races::city_sprint_on_real_roads`
+(index out of bounds, `simcli_races.rs:28`). `simcli`'s debug `scenarios` test ran past 30 min
+on this container and was stopped, so it is not covered by this run.
+

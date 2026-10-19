@@ -13,7 +13,7 @@ use crate::api::{
 use crate::clock::UnixMs;
 use crate::directory;
 use crate::error::{ApiError, ApiResult};
-use crate::leaderboards::{self, Combine, Placement, INITIAL_RATING};
+use crate::leaderboards::{self, Combine, Placement};
 
 /// Most entries in one race report.
 pub const MAX_ENTRIES: usize = 64;
@@ -50,14 +50,7 @@ fn validate_key(key: &str) -> ApiResult<()> {
 }
 
 fn rating(conn: &Connection, account: AccountId) -> ApiResult<f64> {
-    Ok(conn
-        .query_row(
-            "SELECT clean_rating FROM ratings WHERE account_id = ?1",
-            params![account],
-            |r| r.get(0),
-        )
-        .optional()?
-        .unwrap_or(INITIAL_RATING))
+    leaderboards::clean_rating(conn, account)
 }
 
 /// Archive a race and update clean ratings and time-attack boards.
