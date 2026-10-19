@@ -170,7 +170,22 @@ fn run_police_race(call_it_in: bool) -> PoliceRace {
         sim.step_fixed();
         events = sim.drain_events();
         let tick = sim.tick();
-        if std::env::var("WP_POLICE_TRACE").is_ok() && tick % 480 == 0 {
+        if tick < green_tick {
+            // Held on the grid until green.
+            for (spec, id) in sc.entities.iter().zip(&ids) {
+                let p = sim
+                    .vehicles()
+                    .iter()
+                    .find(|v| v.id == *id)
+                    .unwrap()
+                    .vehicle
+                    .state()
+                    .pos;
+                let moved = ((p[0] - spec.pos[0]).powi(2) + (p[1] - spec.pos[1]).powi(2)).sqrt();
+                assert!(moved < 0.3, "{} rolled {moved:.2} m before green", spec.id);
+            }
+        }
+        if std::env::var("WP_POLICE_TRACE").is_ok() && tick.is_multiple_of(480) {
             let p = sim.police();
             eprintln!("t={:.0} units:", tick as f32 / 240.0);
             for u in p.units() {
@@ -191,7 +206,7 @@ fn run_police_race(call_it_in: bool) -> PoliceRace {
                 }
             }
         }
-        if std::env::var("WP_RACE_TRACE").is_ok() && tick % 120 == 0 {
+        if std::env::var("WP_RACE_TRACE").is_ok() && tick.is_multiple_of(120) {
             for v in sim.vehicles().iter().filter(|v| ids.contains(&v.id)) {
                 let st = v.vehicle.state();
                 eprintln!(

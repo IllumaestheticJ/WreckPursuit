@@ -200,3 +200,96 @@ impl AiEntrants {
         &self.field
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bridge::plan_city_race;
+    use crate::data::RaceData;
+    use crate::judge::RacerEntry;
+    use crate::kind::EventId;
+    use crate::result::RacerStatus;
+
+    fn city() -> World {
+        let pg = wp_world::procgen::ProcGenConfig {
+            nx: 7,
+            ny: 7,
+            spacing_m: 110.0,
+            seed: 1,
+            ..Default::default()
+        };
+        World::procedural(&pg, wp_world::WorldConfig::default())
+    }
+
+    #[test]
+    fn opponent_outcomes_become_judge_dnfs_once() {
+        let world = city();
+        let race = plan_city_race(
+            &world,
+            [60.55, -437.0, 0.0],
+            [0.0, 1.0],
+            [60.55, -230.0, 0.0],
+            3.0,
+        )
+        .unwrap();
+        // The AI corridor runs past the judged finish.
+        let ext = run_off_route(&world, &race.route).expect("run-off route");
+        assert!(ext.length_m > race.route.length_m + 30.0);
+
+        let car = wp_contracts::load_car(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../data/cars/debug_sedan.json"
+        ))
+        .unwrap();
+        let data = RaceData::embedded();
+        let mut judge = RaceJudge::new(
+            EventId(1),
+            data.rules.for_kind(RaceKind::Sprint),
+            race.course.clone(),
+        );
+        let ids = [EntityId(1), EntityId(2), EntityId(3)];
+        let entrants: Vec<AiEntrant> = ids
+            .iter()
+            .map(|id| {
+                judge
+                    .enter(RacerEntry {
+                        racer: *id,
+                        redline_rpm: 7000.0,
+                    })
+                    .unwrap();
+                AiEntrant {
+                    racer: *id,
+                    profile: DriverProfile::default(),
+                    capability: CarCapability::geometry_only(&car),
+                }
+            })
+            .collect();
+        let mut ai = AiEntrants::new(&world, &race, RaceKind::Sprint, false, &entrants, 1);
+        assert_eq!(ai.racers(), &ids);
+        // Before the start the cars are held on the handbrake.
+        let held = ai.tick(&judge, 0, &world, &[], &[], &wp_opponent::NoPolice);
+        assert!(held
+            .iter()
+            .all(|(_, i)| i.handbrake == 1.0 && i.throttle == 0.0));
+        judge.start(0).unwrap();
+
+        ai.log.push(OpponentEvent::Abandoned {
+            entity: EntityId(2),
+            wanted_level: 2,
+        });
+        ai.log.push(OpponentEvent::Retired {
+            entity: EntityId(3),
+        });
+        ai.log.push(OpponentEvent::Abandoned {
+            entity: EntityId(2),
+            wanted_level: 3,
+        });
+        ai.report_to(&mut judge, 1000);
+        ai.report_to(&mut judge, 1001);
+        let res = judge.results();
+        let status = |id: u32| res.iter().find(|r| r.racer == EntityId(id)).unwrap().status;
+        assert_eq!(status(1), RacerStatus::Running);
+        assert_eq!(status(2), RacerStatus::Dnf(DnfReason::Fled));
+        assert_eq!(status(3), RacerStatus::Dnf(DnfReason::Retired));
+    }
+}
