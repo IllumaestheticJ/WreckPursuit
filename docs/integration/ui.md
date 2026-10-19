@@ -229,7 +229,7 @@ wired to G's `quote_repair` and opened at the end of a chase. Details under "Cha
 crates" → "Round 6".
 
 Checks after merging the lead branch: fmt, clippy `-D warnings`, wasm32 build, testbed `tsc`, ui-kit
-`tsc` + vitest (53 tests), testbed e2e all pass (release wasm; with a `--dev` wasm the city-chase
+`tsc` + vitest (50 tests, incl. 3 for `ChaseEndDetector`), testbed e2e all pass (release wasm; with a `--dev` wasm the city-chase
 check can time out before speeding reaches the feed). `cargo test --workspace --no-fail-fast`:
 95 suites pass, **2 fail on the lead branch as merged, in code this branch does not change** —
 `wp_economy/tests/pursuit_wiring.rs:130` (`real_police_capture_settles_through_the_economy`:
