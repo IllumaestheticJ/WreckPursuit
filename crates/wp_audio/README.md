@@ -71,6 +71,14 @@ functions. Same frames in → byte-identical commands out (tested on real physic
   quieter on wet asphalt; gravel/dirt/grass scrub instead. Rolling noise per dominant
   `SurfaceType` (one loop per surface so changes crossfade), plus `FfbOutput::road_rumble`.
   Suspension thump on compression rate > `thump_rate_mps`; landing after `land_airtime_s`.
+  **Wheelspin** (playtest #27) is its own loop, `tire/spin` (paved) / `tire/spin_loose`
+  (gravel roost): per wheel the driving slip ratio above `spin_ratio_onset` times the slip speed
+  `ω·r − vx` (inverted exactly from `wp_vehicle`'s slip ratio with the car's wheel radii) above
+  `spin_speed_onset_mps`; intensity and pitch rise with slip speed, weighted by
+  `sqrt(Fz / static)` and surface (`wet_spin_scale` on wet asphalt); loudest wheel + 35 % of the
+  others, so two spinning wheels (LSD / locked) beat a one-wheel peel; 30 ms attack, 80 ms
+  release. Squeal and scrub only hear the braking (negative) slip ratio and the slip angle, so a
+  burnout does not squeal and a power slide squeals from its slip angle while the spin howls.
 - **Collisions** (`collision.rs`): the material at a contact is recovered from the lattice
   (nearest node, dominant beam material; glass-region nodes with glass beams are glass). Layers
   by material × closing speed: thud (slow), plastic crack, panel dent (+ structural crunch at
@@ -157,7 +165,7 @@ one-shots peak −1 dBFS; balance between cues with `gain`, overall mix lives in
 | kind | cues |
 |---|---|
 | Engine | the layers above, `engine/limiter`, `turbo/whistle`, `turbo/blowoff`, `supercharger/whine`, `exhaust/pop` |
-| World | `tire/squeal`, `tire/burst`, `body/rattle`, `tire/scrub_loose`, `surface/{asphalt,wet_asphalt,concrete,gravel,grass,dirt,curb,metal}`, `suspension/{thump,land}`, `impact/{thud,plastic_crack,panel_dent,structural_crunch,glass_shatter,cast_clank}`, `scrape/{metal,plastic}`, `debris/{part_tear,wheel_off}`, `mech/{engine_fail,steam_hiss}`, `horn/{standard,truck}` |
+| World | `tire/squeal`, `tire/spin`, `tire/spin_loose`, `tire/burst`, `body/rattle`, `tire/scrub_loose`, `surface/{asphalt,wet_asphalt,concrete,gravel,grass,dirt,curb,metal}`, `suspension/{thump,land}`, `impact/{thud,plastic_crack,panel_dent,structural_crunch,glass_shatter,cast_clank}`, `scrape/{metal,plastic}`, `debris/{part_tear,wheel_off}`, `mech/{engine_fail,steam_hiss}`, `horn/{standard,truck}` |
 | Siren | `siren/{wail,yelp,phaser,hilo}` — seamless loops of one cadence cycle (or several), started in phase with the director's `phase` |
 | Radio | `radio/squelch_on`, `radio/squelch_off`, `radio/static` |
 
@@ -167,7 +175,8 @@ one-shots peak −1 dBFS; balance between cues with `gain`, overall mix lives in
 `root_rpm`; the backend plays all `engine`-synth layers and the limiter of one car as **one**
 instrument — gain `sqrt(Σ gain²)`, timbre blended by energy — because separate synths at the
 same firing frequency interfere; sample layers stay separate voices), `noise` (`lowpass_hz`, `highpass_hz`, `bandpass_hz`, `rumble`, `crackle`,
-`ripple_hz`), `whine`/`tone` (`freq_hz`, `noise`), `squeal` (`freq_hz`, `wobble_hz`), `horn`
+`ripple_hz`), `spin` (`freq_hz`, `chirp_hz`, `hiss`; `pitch` = slip speed, `load` =
+intensity), `whine`/`tone` (`freq_hz`, `noise`), `squeal` (`freq_hz`, `wobble_hz`), `horn`
 (`f1`, `f2`), `hiss`, `siren` (`wave`; cadence comes from the director), `impact` (`freq_hz`,
 `decay_s`, `noise`, `crack`, `ring`), `glass` (`decay_s`, `tinkles`), `thump` (`freq_hz`,
 `decay_s`, `noise`), `blowoff`, `pop`, `squelch`, `clatter` (`hits`, `decay_s`, `freq_hz`).
@@ -195,10 +204,14 @@ and within limits; synth frequency and sample pitch follow the crank rpm every f
 jumps, layers start/stop at their band edges; every WOT upshift dips 1.2–9 dB and is back
 within 1 dB 0.5 s later; rev-matched downshifts blip ≥ 2 dB; part throttle on-load / overrun
 off-load; every layer audible and only leading near its root; turbo cars blow off on upshifts.
-Same signals as a table/CSV (and the command stream for an offline browser render):
+`tests/wheelspin.rs` (playtest #27): a standstill burnout and full-throttle launches with TCS
+off (RWD V8, RWD turbo, FWD sedan) and a TCS launch — the spin loop is ≥ 0.2 after 0.1 s of
+hard spin (slip ratio ≥ 0.5, ≥ 3 m/s), silent after 0.5 s of grip, pitch rises with slip speed,
+and straight-line spin does not squeal. Same signals as a table/CSV (`--burnout` for the
+wheelspin script) and the command stream for an offline browser render:
 
 ```
-cargo run --release -p wp_audio --example engine_trace -- <car_id> [out.csv [render.json]]
+cargo run --release -p wp_audio --example engine_trace -- <car_id> [out.csv [render.json]] [--burnout]
 node apps/testbed-web/e2e/engine_render.mjs render.json [out.wav] [report.json]
 ```
 

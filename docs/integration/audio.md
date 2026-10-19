@@ -211,6 +211,29 @@ denormal safety), and `e2e/audio.mjs` check 6 (offline render through the real v
 0.1 %/frame rise must be heard — fails on the old pool at 120 Hz instead of 160 — and a
 two-layer crossfade must stay within 2 dB: old 5.0 dB, new 0.03 dB).
 
+## Playtest #27 — wheelspin audio (lead follow-up, 2026-10-19)
+
+Spinning driven tyres now have their own loop (`tire/spin`, slot `SPIN` = 0x202; on gravel / dirt
+/ grass `tire/spin_loose`, slot 0x203), separate from cornering squeal and braking skid.
+Model in `crates/wp_audio/src/tires.rs` (see the README): per-wheel driving slip ratio and slip
+speed (`ω·r − vx`, recovered exactly from `WheelState::slip_ratio`/`omega` and the car's wheel
+radii), weighted by load and surface, intensity and pitch rising with slip speed; the loudest
+wheel plus 35 % of the others, so both wheels spinning (LSD / locked, A's row 26) is louder than a
+one-wheel peel on an open diff — this works from `WheelState` alone, no contract change needed.
+Squeal and loose scrub now only hear braking slip and slip angle.
+
+Measured on the rig (`engine_trace --burnout`, `rampart_50`, TCS off): standstill burnout (rears
+at κ ≈ 3–6, 50 rad/s, car held by the brakes) — spin 0.41–0.46, pitch 1.2 → 1.5, squeal 0
+(before: squeal 0.42, no spin sound); launch — spin while the rears spin up to 9 km/h, gone
+≈ 0.2 s after they hook up; 2nd-gear pull and 30 % cruise — silent. Offline render (all buses):
+0 clicks. FWD `debug_sedan` barely spins with TCS off (max 0.06). Tests: `tests/wheelspin.rs`
+and four `tires` unit tests (slip-speed inversion, burnout loud / gripping launch silent, slip
+speed and two-vs-one wheel, wet / gravel).
+
+**Seen while testing (for A / lead `playtest-feel`, not audio):** with TCS off the automatic
+gearbox hunts 1 ↔ 2 several times during a burnout and a wheelspin launch (limiter-forced
+upshift, then a downshift as the wheels hook up), e.g. `rampart_50` from 0 to 50 km/h.
+
 ## Perf numbers
 | Measurement | Machine | Native | Browser | Budget |
 |---|---|---|---|---|
@@ -223,6 +246,7 @@ two-layer crossfade must stay within 2 dB: old 5.0 dB, new 0.03 dB).
 - Contact material comes from the lattice (A-1); glass shatters on inferred glass contacts, not
   from a damage event (B #1 pending).
 - Scrapes are thin until A-4: sliding contacts under 50 N·s per tick emit no events.
+- Wheelspin on a networked client depends on replicated `WheelState` slip (snapshots carry it).
 - No occlusion by buildings, no tunnel/underpass reverb, no interior camera filtering.
 - Kinematic traffic is silent (needs D #3 snapshot); police AI does not switch sirens on yet
   (no police system).
