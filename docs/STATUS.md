@@ -1,6 +1,6 @@
 # Status
 
-_Last updated: lead integration run 5, 2026-10-19. Contract **v0.2.0** (applied in run 3, see
+_Last updated: lead integration run 6, 2026-10-19. Contract **v0.2.0** (applied in run 3, see
 `docs/CONTRACT_CHANGELOG.md`; v0.3.0 = typed police/economy/net events)._
 
 Machines are named by letter: **A–I = prompts 02–10**, **J–Q = prompts 13–20** (started 2026-10-19 as
@@ -21,7 +21,7 @@ dashboard `ws/tuning-dash`).
 | G | 08 | Economy | `ws/economy` | merged | Ledger, garage, mods, repair quotes, payouts, impound | call sites when E/F land |
 | H | 09 | Cars | `ws/cars` | merged | 13 cars drive deterministically | new tires, `gen-lattice` regeneration, VALIDATION sim columns |
 | I | 10 | Harness | `ws/harness` | merged | 17 scenarios, goldens, lint, native-vs-wasm, benches, CI | `barriers`/speed in scenarios, real cities, traffic soak, F codec |
-| J | 13 | Audio | `ws/audio` | merged (run 3–4) | `wp_audio` director crate + procedural packs (not wired to the browser yet) | integration doc; hook into testbed |
+| J | 13 | Audio | `ws/audio` | merged (run 3–4) | `wp_audio` director crate + procedural packs, playing in the browser testbed | integration doc; hook into testbed |
 | K | 14 | Weather | `ws/weather` | merged (run 3–4) | `wp_weather` crate: schedule, wetness, grip/aquaplaning | integration doc; feed grip to vehicle via contracts |
 | L | 15 | Race/crews | `ws/race` | merged (run 3–4) | `wp_race` rules, scheduler, stakes, crews; `data/events/` | integration doc |
 | M | 16 | UI kit | `ws/ui` | merged (run 3–4) | `apps/ui-kit` against mock data | integration doc |
@@ -29,6 +29,7 @@ dashboard `ws/tuning-dash`).
 | O | 18 | Meta services | `ws/meta` | merged (run 3–4) | `apps/meta` accounts/matchmaking/leaderboards API | one flaky test under load (`twenty_bots_…` heartbeat) |
 | P | 19 | Design docs | `ws/design-docs` | merged run 3 | GDD, city zones, feature backlog (`docs/design/`) | — |
 | Q | 20 | Tuning dashboard | `ws/tuning-dash` | merged (run 3–4) | sweep runner + presets (`tools/tuning-dash`) | integration doc |
+| R | 21 | Car models & panels | `ws/panels` | started 2026-10-19 | — | per-panel meshes, hinged doors/hood/trunk swing, dangling bumpers |
 | Lead | 12 | Integration | `main` | — | Contacts → damage, debris, hull, static boxes, city loading; contract v0.2.0 | police units as sim vehicles, F's `wp_sim` hooks, physical traffic, v0.3.0 |
 
 ## What you can play right now
@@ -66,6 +67,13 @@ None pending (branch protection on, stale branch deleted, all machines resumed f
 Police units are real `wp_sim` vehicles in city runs (patrol → violations → pursuit → search
 works in the sim), near-player traffic is physical. Not yet drawn in the browser (C, this
 round). Lead rounds are now automatic every 2 h (`docs/LEAD_AUTOMATION.md`).
+
+## Run 6 (2026-10-19)
+All 15 branches merged; gate green after 3 lead fixes. On the link: **city chase** button (night city,
+police cars with light bars, traffic, heat panel, live repair bill). 18 cloud sessions dispatched
+(A–I, K–R; J was still busy) plus lead helpers for contract v0.3.0 (`lead/contract-v0.3.0`) and test
+speed (`lead/test-speed`). New machine **R** (prompt 21): per-panel car meshes, hinged
+doors/hood/trunk, dangling bumpers. Project map: https://claude.ai/artifact/2wecUWQ2NCxYdcWj1mMFAi
 
 ## Next (toward the single-player greybox demo)
 C draws police/traffic + city-chase preset; M wires the heat HUD and repair bill; E/D share

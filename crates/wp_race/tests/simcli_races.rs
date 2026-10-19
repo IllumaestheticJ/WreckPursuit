@@ -63,6 +63,8 @@ fn judge_scenario(file: &str, kind: RaceKind, course: Course) -> Vec<RacerResult
             .sim
             .vehicle_states()
             .iter()
+            // Scenario cars spawn first (ids 1..=n); police and traffic come after.
+            .take(sc.entities.len())
             .enumerate()
             .map(|(i, (id, s))| RacerSample::from_state(*id, s, throttle_at(&sc, i, t_s)))
             .collect();
