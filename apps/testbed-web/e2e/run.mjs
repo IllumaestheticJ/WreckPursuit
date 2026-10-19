@@ -178,8 +178,13 @@ for (const [file, kmh] of [
       total: document.querySelector("#ui-bill .wp-bill-total")?.textContent ?? "",
       live: document.querySelector("#ui-bill .wp-panel-title b")?.textContent ?? "",
       chase: !!document.querySelector("#ui-chase .wp-hud-heat"),
+      police: (() => {
+        const w = window.__wp;
+        const p = w.sim.policeStatus(w.app?.player ?? w.sim.entities()[0]);
+        return p === null || (typeof p.heat === "number" && typeof p.bounty === "number");
+      })(),
     }));
-    check(bill.lines > 0 && /\$[1-9]/.test(bill.total) && bill.live.includes("LIVE") && bill.chase, `repair bill priced live after the crash (${bill.lines} lines, ${bill.total}); chase readout mounted`);
+    check(bill.lines > 0 && /\$[1-9]/.test(bill.total) && bill.live.includes("LIVE") && bill.chase && bill.police, `repair bill priced live after the crash (${bill.lines} lines, ${bill.total}); chase readout mounted; police_status_json well-formed`);
     await shot("repair_bill.png");
     await page.keyboard.press("KeyF");
   }

@@ -46,7 +46,7 @@ Status: **live** = in the contract and emitted today · **v0.2** = accepted in t
 | HUD | detached parts by region | `wp_damage` → `PartDetached` | live, but group ids not mappable → UI-7 | guess (1 front, 2 rear) |
 | HUD | glass | `wp_damage` → `GlassShattered` | contract v0.2.0 ✓ | synthetic run |
 | HUD | wanted level, pursuit start/end | `wp_police::PoliceEvent::{WantedLevelChanged, PursuitStarted, PursuitEnded}` | live in E (opaque in contract until v0.3.0) | recorded `police_pursuit` + synthetic |
-| HUD | heat within level, searching/cooldown progress, units on me | `wp_police` `RacerSighting` (`heat`, `status`, `staleness_s`, `units_assigned`) — today only in `CaptainView` | UI-1 (local racer's sighting for the HUD) | recorded `captain.jsonl` |
+| HUD | heat within level, searching/cooldown progress, units on me | `wp_police` `RacerSighting` (`heat`, `status`, `staleness_s`, `units_assigned`) — today only in `CaptainView` | UI-1 (local racer's sighting for the HUD, networked clients) | recorded `captain.jsonl`; **testbed: live** via `wp_wasm::police_status_json` (single-player, reads `Sim::police()`) |
 | HUD | bounty | `wp_economy` `PlayerAccount.bounty` + `BountyGained` | v0.2 (typed EconomyEvent) | mock account + event |
 | HUD | minimap roads | `wp_world` `RoadNetwork` (`data/city/*.road.json`) | live (data) | derived fixture |
 | HUD | minimap blips (racers, police, heli) | snapshot vehicles + police units | live (vehicles) / UI-3 (units on the wire) | metrics + `CaptainView.units` |
@@ -159,13 +159,14 @@ Live HUD heat / wanted / bounty, pursuit status and the repair bill in the brows
 | File | Owner | Change |
 |---|---|---|
 | `crates/wp_wasm/src/garage.rs` (new) | C | `repair_quote_json(entity, request_json)`: the running car's `DamageSim::repair_estimate` (economy `PriceTable` for its class/value) priced by `wp_economy::Economy::quote_repair` (shop, district, mode, wanted markup, insurance, salvage). Read-only. |
-| `crates/wp_wasm/src/lib.rs` | C | `pub mod garage;` |
-| `crates/wp_wasm/Cargo.toml` | C | `wp_economy` dependency (default features; `cargo tree --target wasm32-unknown-unknown` shows no rusqlite). |
+| `crates/wp_wasm/src/police_status.rs` (new, after lead run 5) | C | `police_status_json(entity)`: the player's `RacerRecord` from `Sim::police()` (level, heat, status, bounty, staleness, `los_lost_s` escape timer, escape time for level + day phase, units assigned) in the kit's `PoliceReadout` shape; `"null"` before the police know the racer. Read-only. |
+| `crates/wp_wasm/src/lib.rs` | C | `pub mod garage;`, `pub mod police_status;` |
+| `crates/wp_wasm/Cargo.toml` | C | `wp_economy` dependency (default features; `cargo tree --target wasm32-unknown-unknown` shows no rusqlite); `wp_police` (already reachable through `wp_sim`). |
 | `apps/testbed-web/src/ui/overlay.ts` (new; all testbed-side UI-kit glue lives in `src/ui/`) | C | Mounts the kit's `chaseHud` and `repairBill` overlays on a `createLiveModel()` fed each frame with the drained events (+ the police record when available). |
 | `apps/testbed-web/src/main.ts` | C | 6 lines: construct `UiOverlay`, `ui.reset()` on session rebuild, `ui.frame(...)` after `eventsDrain()`, **F** toggles the repair bill. |
-| `apps/testbed-web/src/wasm/sim.ts` | C | `repairQuote()`, `policeStatus()` (feature-detects a `police_status_json` export; null until `Sim::police()` is wired). |
+| `apps/testbed-web/src/wasm/sim.ts` | C | `repairQuote()`, `policeStatus()` (calls `police_status_json`; feature-detected, so an older wasm build returns null). |
 | `apps/testbed-web/src/settings.ts`, `hud.ts` | C | Layer **Z** "chase readout"; help line mentions **F**. |
-| `apps/testbed-web/e2e/run.mjs` | C | One check after `crash/head_on.ron`: F opens a live, itemised bill; the chase readout is mounted. |
+| `apps/testbed-web/e2e/run.mjs` | C | One check after `crash/head_on.ron`: F opens a live, itemised bill; the chase readout is mounted; `police_status_json` is well-formed. |
 | `apps/testbed-web/{package.json,tsconfig.json,vite.config.ts}` | C | `preact` dependency; JSX + `vite/client` types; `resolve.dedupe: ["preact"]`; dev server may serve the repo (the kit imports `../ui-kit` and `data/`). |
 
 The testbed imports `apps/ui-kit/src/live` only (not the kit's index), so no fixtures or mock data
@@ -173,12 +174,16 @@ reach its bundle (testbed main chunk 237 kB).
 
 **Verified in the browser (headless Chromium, `npm run e2e` + a manual drive):** after the head-on
 crash the bill lists 16 priced lines ($1,868 at a legit shop, more at a crooked one), live from
-`wp_economy`. **Heat does not build in city free drive yet:** 24 s at up to 148 km/h produced one
-`Speeding` violation, and with no police units (no `Sim::police()` road graph until lead run 5)
-nothing witnesses it, so unwitnessed heat stays under L1 (10). The readout correctly shows CLEAR.
-For D: one speeding violation per long stretch seems low; for the lead: heat/bounty in the readout
-switch to the real `RacerRecord` as soon as wasm exports `police_status_json(entity)` (the testbed
-feature-detects it).
+`wp_economy`.
+
+**Live heat after lead run 5 (2026-10-19):** the readout now reads the real `RacerRecord` through
+`police_status_json`, so heat, bounty, escape bar and units are live (no more "—"). In a 60 s
+daytime city free drive (debug_sedan, up to 185 km/h) the record shows the police *see* the player
+(staleness 0.06–3 s while driving) but heat peaks at **0.76 / 100** and decays to 0, so the readout
+stays CLEAR / L0, which is correct for that data. **For D / E:** speeding at 150–185 km/h in view of
+the police should probably reach L1 (10 heat) within a few seconds; either the world emits too few
+`Speeding` violations or the witnessed-heat value is small. Needs C's city-chase preset (night,
+police car model set) to see a pursuit in the browser.
 
 ## Perf numbers
 
