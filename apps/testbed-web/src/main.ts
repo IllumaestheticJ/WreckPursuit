@@ -7,7 +7,9 @@
 // city chase (?chase=rain the rainy night), ?weather=heavy_rain picks the weather.
 import { loadWasm, sim, type DriverInput, type Scenario, type ScenarioResult } from "./wasm/sim";
 import { META_STRIDE, STATE_STRIDE, S, T, VEHICLE_KIND, W } from "./wasm/layout";
-import { installKeyboard, isHeld, readInput, toggleHeadlights, type InputSource } from "./input";
+import { actionHeld, getBindings, installKeyboard, readInput, toggleHeadlights, type InputSource } from "./input";
+import { actionsForKey, bindingsHelp, type ActionId } from "./bindings";
+import { ControlsPanel } from "./ui/controls";
 import { layers, store, bytesToBase64, base64ToBytes } from "./settings";
 import { SceneView } from "./scene";
 import { VehicleView } from "./vehicle_view";
@@ -90,6 +92,11 @@ async function main(): Promise<void> {
   const audio = new AudioSystem(scene.world, overlay);
   const ui = new UiOverlay(overlay);
   const map = new MapOverlay(overlay);
+  const controls = new ControlsPanel(overlay);
+  const refreshHelp = () => hud.setControlsHelp(bindingsHelp(getBindings()));
+  controls.onChange = refreshHelp;
+  refreshHelp();
+  $("controls-open").onclick = () => controls.toggle();
   // End-of-run panel (lead): capture / wreck → result + "Repair & continue" / "Restart".
   const runEndEl = document.createElement("div");
   runEndEl.id = "ui-run-end";
@@ -528,25 +535,63 @@ async function main(): Promise<void> {
 
   // ----- keyboard -------------------------------------------------------------------------
 
+  /** Run a rebindable edge action (keyboard keydown or gamepad button press). */
+  const doAction = (id: ActionId): void => {
+    switch (id) {
+      case "cameraCycle":
+        rig.cycle(app.views.get(app.focus)?.root);
+        break;
+      case "reset":
+        if (!isReplay()) sim.reset(app.player);
+        break;
+      case "headlights":
+        toggleHeadlights();
+        break;
+      case "pause":
+        togglePause();
+        break;
+      case "map":
+        map.toggle();
+        break;
+      case "followNext": {
+        const ids = [...app.views.keys()];
+        app.focus = ids[(ids.indexOf(app.focus) + 1) % ids.length];
+        rig.setMode(rig.mode, app.views.get(app.focus)?.root);
+        break;
+      }
+      case "repairBill":
+        ui.toggleBill();
+        break;
+      case "help":
+        hud.toggleHelp();
+        break;
+      case "controls":
+        controls.toggle();
+        break;
+      case "mute":
+        audio.toggleMute();
+        break;
+      default:
+        // Analogue / held actions and gears are read every frame by readInput.
+        break;
+    }
+  };
+
   installKeyboard((e) => {
     if (e.repeat) return;
+    // Rebindable actions win over the fixed keys (debug layers, camera angles, frame step).
+    const actions = actionsForKey(getBindings(), e.code);
+    if (actions.length) {
+      // A game key does not also scroll, open browser find (F3, /) or move focus (Tab).
+      e.preventDefault();
+      for (const a of actions) doAction(a);
+      return;
+    }
     const layer = layers.byKey(e.code);
     if (layer) return layers.toggle(layer.id);
     const n = Number(e.key);
     if (n >= 1 && n <= CAMERA_MODES.length) return rig.choose(CAMERA_MODES[n - 1], app.views.get(app.focus)?.root);
     switch (e.code) {
-      case "KeyC":
-        rig.cycle(app.views.get(app.focus)?.root);
-        break;
-      case "KeyR":
-        if (!isReplay()) sim.reset(app.player);
-        break;
-      case "KeyO":
-        toggleHeadlights();
-        break;
-      case "KeyP":
-        togglePause();
-        break;
       case "Period":
         frameStep(4);
         break;
@@ -560,31 +605,11 @@ async function main(): Promise<void> {
         sel.dispatchEvent(new Event("change"));
         break;
       }
-      case "KeyM":
-      case "Tab":
-        e.preventDefault();
-        map.toggle();
-        break;
-      case "Backquote": {
-        const ids = [...app.views.keys()];
-        app.focus = ids[(ids.indexOf(app.focus) + 1) % ids.length];
-        rig.setMode(rig.mode, app.views.get(app.focus)?.root);
-        break;
-      }
-      case "KeyF":
-        ui.toggleBill();
-        break;
-      case "F1":
-      case "Slash":
-        e.preventDefault();
-        hud.toggleHelp();
-        break;
     }
   });
 
   // ----- start ----------------------------------------------------------------------------
 
-  rig.onPadNext = () => rig.cycle(app.views.get(app.focus)?.root);
   const camParam = params.get("cam") as CameraMode | null;
   if (camParam && CAMERA_MODES.includes(camParam)) rig.mode = camParam;
   const scParam = params.get("scenario");
@@ -617,7 +642,8 @@ async function main(): Promise<void> {
     fps += (1 / Math.max(dt, 1e-3) - fps) * 0.05;
     const replay = isReplay();
 
-    const { input, source } = readInput(dt);
+    const { input, source, edges } = readInput(dt);
+    for (const a of edges) doAction(a);
     app.input = input;
     if (source !== app.source) {
       app.source = source;
@@ -705,7 +731,7 @@ async function main(): Promise<void> {
       if (layers.on("telemetry")) plots.draw();
     }
     plots.canvas.style.display = layers.on("telemetry") ? "" : "none";
-    rig.lookBack = isHeld("KeyV");
+    rig.lookBack = actionHeld("lookBack");
     rig.update(
       focusView?.root ?? null,
       focusView?.info.body_size_m ?? [2, 4.5, 1.4],
@@ -857,6 +883,9 @@ async function main(): Promise<void> {
     sim,
     app,
     scene,
+    /** Controls panel (rebinding) and the live bindings. */
+    controls,
+    bindings: getBindings,
     /** City map HUD (UI kit): `map.hud.stats()`, `map.toggle()`. */
     map,
     ready: true,

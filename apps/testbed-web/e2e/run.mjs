@@ -7,7 +7,7 @@
 // crash scenarios run and report, the city (Port Vesper v2 by default, the old grid via the
 // selector) loads with traffic, signals (day/night, lamps change over time) and the city chase,
 // weather (e2e/weather.mjs: selector, rain, wet roads, spray, fog, wipers, rainy-night chase)
-// and (optionally) perf at 1/8/24 cars.
+// gamepad + rebindable controls (e2e/gamepad.mjs) and (optionally) perf at 1/8/24 cars.
 import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -669,5 +669,16 @@ const wx = spawnSync("node", [join(here, "weather.mjs")], {
 });
 process.stdout.write(wx.stdout);
 check(wx.status === 0, `weather checks (e2e/weather.mjs)${wx.status === 0 ? "" : ": " + (wx.stderr || "").trim().split("\n").pop()}`);
+
+// 7. Gamepad + rebindable controls (e2e/gamepad.mjs, its own server and browser): fake pad
+// drives and steers, assists follow the device, disconnect releases, rebind survives a reload,
+// input latency one frame.
+const gp = spawnSync("node", [join(here, "gamepad.mjs")], {
+  cwd: root,
+  encoding: "utf8",
+  env: { ...process.env, GAMEPAD_SHOTS: shots ?? "" },
+});
+process.stdout.write(gp.stdout);
+check(gp.status === 0, `gamepad + controls checks (e2e/gamepad.mjs)${gp.status === 0 ? "" : ": " + (gp.stderr || "").trim().split("\n").pop()}`);
 console.log(failures ? `${failures} check(s) failed` : "all checks passed");
 process.exit(failures ? 1 : 0);
