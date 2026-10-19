@@ -5,6 +5,7 @@
 //!
 //! Runs the world at `PHYSICS_DT` (traffic AI at 60 Hz inside) with collision diagnostics on,
 //! and prints per-frame cost (one 60 Hz frame = 4 physics ticks) and traffic counters.
+//! `CITY=vesper_v2` runs on Port Vesper v2 (hills, curves, highway loop) instead of the grid.
 
 use std::time::Instant;
 
@@ -20,23 +21,25 @@ fn main() {
     let seed: u64 = args.get(4).and_then(|s| s.parse().ok()).unwrap_or(1);
     let aggressive: f32 = args.get(5).and_then(|s| s.parse().ok()).unwrap_or(0.05);
     let t_load = Instant::now();
-    let mut w = World::procedural(
-        &ProcGenConfig::default(),
-        WorldConfig {
-            seed,
-            start_time: TimeOfDay::from_hours(hour),
-            // Keep the time of day roughly constant for the run.
-            time_ratio: 1.0,
-            traffic: TrafficConfig {
-                max_agents: agents,
-                density_scale: 4.0,
-                aggressive_fraction: aggressive,
-                detect_collisions: std::env::var("NO_COLLISIONS").is_err(),
-                ..Default::default()
-            },
+    let wcfg = WorldConfig {
+        seed,
+        start_time: TimeOfDay::from_hours(hour),
+        // Keep the time of day roughly constant for the run.
+        time_ratio: 1.0,
+        traffic: TrafficConfig {
+            max_agents: agents,
+            density_scale: 4.0,
+            aggressive_fraction: aggressive,
+            detect_collisions: std::env::var("NO_COLLISIONS").is_err(),
             ..Default::default()
         },
-    );
+        ..Default::default()
+    };
+    let mut w = if std::env::var("CITY").as_deref() == Ok(wp_world::vesper::CITY_ID) {
+        World::vesper(&wp_world::vesper::VesperConfig::default(), wcfg)
+    } else {
+        World::procedural(&ProcGenConfig::default(), wcfg)
+    };
     println!(
         "generate + load: {:.1} ms, {:.1} drivable lane-km",
         t_load.elapsed().as_secs_f64() * 1000.0,

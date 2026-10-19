@@ -30,6 +30,7 @@ use crate::builder::{self, BuildOptions, Built, NodeSpec, RoadClass, RoadSpec};
 use crate::density::default_density_base;
 use crate::geom::{self, Obb, V2, V3};
 use crate::network::*;
+use crate::surface::is_elevated;
 use crate::terrain::{bump, smoothstep, Heightfield, ValueNoise};
 
 /// City id of this preset (file stem for its data files).
@@ -1344,23 +1345,6 @@ fn plan_crossings(g: &mut Gen) -> Vec<Crossing> {
 // Terrain carving
 // ------------------------------------------------------------------------------------------
 
-/// Whether the whole cross-section of surface `s` at point `k` is more than `gap` metres
-/// above `ground` (a bridge deck rather than an embankment).
-pub fn is_elevated(s: &RoadSurface, k: usize, ground: &dyn Fn(V2) -> f32, gap: f32) -> bool {
-    let n = s.centre.len();
-    let p = s.centre[k];
-    let tan = if k + 1 < n {
-        geom::normalize(geom::sub(geom::xy(s.centre[k + 1]), geom::xy(p)))
-    } else {
-        geom::normalize(geom::sub(geom::xy(p), geom::xy(s.centre[k - 1])))
-    };
-    let r = geom::right_of(tan);
-    [-s.left_m, 0.0, s.right_m].iter().all(|lat| {
-        let q = geom::add(geom::xy(p), geom::scale(r, *lat));
-        s.z_at(k, *lat) - ground(q) > gap
-    })
-}
-
 /// Carve `hf` (natural ground) to the built road surfaces and junction areas. `deck(road,
 /// point index)` says whether a surface point is a bridge deck (left uncarved).
 fn carve(
@@ -1737,7 +1721,13 @@ fn obb_corners(o: &Obb) -> [V2; 4] {
     ]
 }
 
-fn buildings(rng: &mut Rng, built: &Built, zones: &[Zone], hf: &Heightfield) -> Vec<Building> {
+fn buildings(
+    rng: &mut Rng,
+    built: &Built,
+    zones: &[Zone],
+    hf: &Heightfield,
+    dead_ends: &[V2],
+) -> Vec<Building> {
     let grid = SurfaceGrid::new(built);
     let mut placed: Vec<Obb> = Vec::new();
     let mut bgrid: BTreeMap<(i32, i32), Vec<usize>> = BTreeMap::new();
@@ -1776,6 +1766,13 @@ fn buildings(rng: &mut Rng, built: &Built, zones: &[Zone], hf: &Heightfield) -> 
                 let corners = obb_corners(&o);
                 let probes = [corners[0], corners[1], corners[2], corners[3], c];
                 if probes.iter().any(|q| grid.clearance(built, *q) < 3.0) {
+                    continue;
+                }
+                // Keep dead-end turnarounds clear (U-turns swing past the road end).
+                if probes
+                    .iter()
+                    .any(|q| dead_ends.iter().any(|d| geom::dist(*q, *d) < 20.0))
+                {
                     continue;
                 }
                 let k = key(c);
@@ -1835,13 +1832,20 @@ fn signed_area(p: &[V2]) -> f32 {
     a * 0.5
 }
 
-/// Pose on the rightmost forward lane of road `road`, `s` metres in.
+/// Pose on the rightmost forward (or backward) lane of road `road`, `s` metres in (negative:
+/// from the end).
 fn lane_pose(built: &Built, road: usize, s: f32, fwd: bool) -> Option<(V3, f32, LaneId)> {
     let rl = &built.road_lanes[road];
     let lane = *if fwd { rl.fwd.last() } else { rl.bwd.last() }?;
     let l = &built.lanes[lane as usize];
     let cum = geom::cumulative(&l.polyline);
-    let s = s.min(cum[cum.len() - 1] * 0.5);
+    let total = cum[cum.len() - 1];
+    // Negative `s` counts back from the lane end.
+    let s = if s >= 0.0 {
+        s.min(total * 0.5)
+    } else {
+        (total + s).max(total * 0.5)
+    };
     let (p, d) = geom::point_at(&l.polyline, &cum, s);
     Some((p, geom::yaw_of(d), lane))
 }
@@ -1883,7 +1887,7 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
         drafts: Vec::new(),
         skipped: 0,
     };
-    let (loop_roads, hollins, _knob, lot, _r40w, _r40n) = g.layout();
+    let (loop_roads, hollins, _knob, _lot, _r40w, _r40n) = g.layout();
     let crossings = plan_crossings(&mut g);
     let opt = BuildOptions::default();
     let specs = profile_roads(&mut g, &opt);
@@ -1918,7 +1922,16 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
     carve(&mut hf, &built, &g.nodes, &deck);
 
     let zones = zones();
-    let buildings = buildings(&mut g.rng, &built, &zones, &hf);
+    let mut degree = vec![0usize; g.nodes.len()];
+    for d in &g.drafts {
+        degree[d.a] += 1;
+        degree[d.b] += 1;
+    }
+    let dead_ends: Vec<V2> = (0..g.nodes.len())
+        .filter(|n| degree[*n] == 1)
+        .map(|n| g.nodes[n].pos)
+        .collect();
+    let buildings = buildings(&mut g.rng, &built, &zones, &hf, &dead_ends);
 
     // POIs. The first race grid is the city-chase / free-drive spawn.
     let mut pois = Vec::new();
@@ -1940,15 +1953,72 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
         .iter()
         .position(|d| d.name == "Bluff Road")
         .unwrap_or(0);
-    for (name, road, s) in [
-        ("Loop 9 sprint", longest_loop, 80.0),
-        ("Hollins Ascent", hollins, 12.0),
-        ("Harbor Boulevard drag", blvd, 20.0),
-        ("Bluff Road", bluff, 20.0),
+    let named = |n: &str| g.drafts.iter().position(|d| d.name == n).unwrap_or(0);
+    let (ridge, spur) = (named("Ridge Road"), named("Knob Observatory Lot"));
+    // The loop road over Hollins Heights' northern shoulder (the highway's big crest).
+    let loop_north = *loop_roads
+        .iter()
+        .find(|r| {
+            let p = &g.drafts[**r].path;
+            project2(p, &cum2(p), [-1000.0, 1390.0]).1 < 40.0
+        })
+        .unwrap_or(&longest_loop);
+    for (kind, name, road, s, fwd) in [
+        (
+            PoiKind::RaceStartGrid,
+            "Loop 9 sprint",
+            longest_loop,
+            80.0,
+            true,
+        ),
+        (
+            PoiKind::RaceStartGrid,
+            "Hollins Ascent",
+            hollins,
+            12.0,
+            true,
+        ),
+        (
+            PoiKind::RaceStartGrid,
+            "Hollins Descent",
+            hollins,
+            12.0,
+            false,
+        ),
+        (PoiKind::RaceStartGrid, "Ridge Road", ridge, 12.0, true),
+        (
+            PoiKind::RaceStartGrid,
+            "Harbor Boulevard drag",
+            blvd,
+            20.0,
+            true,
+        ),
+        (PoiKind::RaceStartGrid, "Bluff Road", bluff, 20.0, true),
+        (
+            PoiKind::RaceStartGrid,
+            "Loop 9 north",
+            loop_north,
+            40.0,
+            true,
+        ),
+        (
+            PoiKind::RaceStartGrid,
+            "Loop 9 west",
+            loop_north,
+            -80.0,
+            true,
+        ),
+        (
+            PoiKind::SafehouseCandidate,
+            "Knob Observatory Lot",
+            spur,
+            -8.0,
+            true,
+        ),
     ] {
-        if let Some((p, yaw, lane)) = lane_pose(&built, road, s, true) {
+        if let Some((p, yaw, lane)) = lane_pose(&built, road, s, fwd) {
             pois.push(Poi {
-                kind: PoiKind::RaceStartGrid,
+                kind,
                 name: name.into(),
                 pos: p,
                 heading_rad: yaw,
@@ -1978,11 +2048,6 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
     block_poi(PoiKind::Garage, "Meridian Motorworks", [150.0, -100.0]);
     block_poi(PoiKind::Garage, "Sal's Paint & Panel", [-900.0, 0.0]);
     block_poi(PoiKind::Garage, "Gantry Garage", [700.0, -870.0]);
-    block_poi(
-        PoiKind::SafehouseCandidate,
-        "Knob Observatory Lot",
-        g.nodes[lot].pos,
-    );
     block_poi(
         PoiKind::SafehouseCandidate,
         "Mercer Wash-n-Fold Lot",

@@ -33,6 +33,7 @@ pub mod props;
 pub mod roads;
 pub mod routes;
 pub mod signals;
+pub mod surface;
 pub mod terrain;
 pub mod traffic;
 pub mod vesper;
