@@ -41,15 +41,15 @@
         0.0
       ],
       "hang_limit_rad": 0.24277261,
-      "mass_kg": 6.325162,
+      "mass_kg": 6.8954697,
       "lever_m": 0.8786,
       "gyration_m": 1.0145199,
       "area_m2": 0.9102296,
       "damping_per_s": 1.0,
       "restitution": 0.2,
-      "unlatch_impulse_ns": 2160.4146,
+      "unlatch_impulse_ns": 5135.13,
       "latch_intrusion_m": 0.15,
-      "hinge_break_impulse_ns": 126.503235,
+      "hinge_break_impulse_ns": 137.9094,
       "break_impulse_ns": null
     },
     {
@@ -87,15 +87,15 @@
         0.0
       ],
       "hang_limit_rad": 0.24277261,
-      "mass_kg": 6.325162,
+      "mass_kg": 6.8954697,
       "lever_m": 0.8786,
       "gyration_m": 1.0145199,
       "area_m2": 0.9102296,
       "damping_per_s": 1.0,
       "restitution": 0.2,
-      "unlatch_impulse_ns": 2160.4146,
+      "unlatch_impulse_ns": 2567.5647,
       "latch_intrusion_m": 0.15,
-      "hinge_break_impulse_ns": 126.503235,
+      "hinge_break_impulse_ns": 137.9094,
       "break_impulse_ns": null
     },
     {
@@ -127,15 +127,15 @@
         0.0
       ],
       "hang_limit_rad": 0.6,
-      "mass_kg": 32.38,
+      "mass_kg": 35.3,
       "lever_m": 0.635,
       "gyration_m": 0.7332348,
       "area_m2": 1.45542,
       "damping_per_s": 0.6,
       "restitution": 0.25,
-      "unlatch_impulse_ns": 3360.6301,
+      "unlatch_impulse_ns": 3993.99,
       "latch_intrusion_m": 0.1,
-      "hinge_break_impulse_ns": 647.60004,
+      "hinge_break_impulse_ns": 706.0,
       "break_impulse_ns": null
     },
     {
@@ -167,15 +167,15 @@
         0.0
       ],
       "hang_limit_rad": 0.6,
-      "mass_kg": 17.710453,
+      "mass_kg": 19.307314,
       "lever_m": 0.50738585,
       "gyration_m": 0.58587873,
       "area_m2": 1.1629283,
       "damping_per_s": 0.6,
       "restitution": 0.25,
-      "unlatch_impulse_ns": 2160.4146,
+      "unlatch_impulse_ns": 2567.5647,
       "latch_intrusion_m": 0.1,
-      "hinge_break_impulse_ns": 354.20905,
+      "hinge_break_impulse_ns": 386.14627,
       "break_impulse_ns": null
     },
     {
@@ -203,15 +203,15 @@
         0.0
       ],
       "hang_limit_rad": 0.5,
-      "mass_kg": 27.830713,
+      "mass_kg": 30.340065,
       "lever_m": 0.60959995,
       "gyration_m": 0.7039054,
       "area_m2": 0.50157887,
       "damping_per_s": 0.6,
       "restitution": 0.3,
-      "unlatch_impulse_ns": 3200.6143,
+      "unlatch_impulse_ns": 3803.7996,
       "latch_intrusion_m": 0.06,
-      "hinge_break_impulse_ns": 556.61426,
+      "hinge_break_impulse_ns": 606.8013,
       "break_impulse_ns": null
     },
     {
@@ -239,15 +239,15 @@
         0.0
       ],
       "hang_limit_rad": 0.5,
-      "mass_kg": 27.830713,
+      "mass_kg": 30.340065,
       "lever_m": 0.60959995,
       "gyration_m": 0.7039054,
       "area_m2": 0.50157887,
       "damping_per_s": 0.6,
       "restitution": 0.3,
-      "unlatch_impulse_ns": 3200.6143,
+      "unlatch_impulse_ns": 3803.7996,
       "latch_intrusion_m": 0.06,
-      "hinge_break_impulse_ns": 556.61426,
+      "hinge_break_impulse_ns": 606.8013,
       "break_impulse_ns": null
     },
     {
@@ -275,15 +275,15 @@
         0.0
       ],
       "hang_limit_rad": 0.5,
-      "mass_kg": 27.830713,
+      "mass_kg": 30.340065,
       "lever_m": 0.5334,
       "gyration_m": 0.61591727,
       "area_m2": 0.43888155,
       "damping_per_s": 0.6,
       "restitution": 0.3,
-      "unlatch_impulse_ns": 3200.6143,
+      "unlatch_impulse_ns": 3803.7996,
       "latch_intrusion_m": 0.06,
-      "hinge_break_impulse_ns": 556.61426,
+      "hinge_break_impulse_ns": 606.8013,
       "break_impulse_ns": null
     },
     {
@@ -311,15 +311,15 @@
         0.0
       ],
       "hang_limit_rad": 0.5,
-      "mass_kg": 27.830713,
+      "mass_kg": 30.340065,
       "lever_m": 0.5334,
       "gyration_m": 0.61591727,
       "area_m2": 0.43888155,
       "damping_per_s": 0.6,
       "restitution": 0.3,
-      "unlatch_impulse_ns": 3200.6143,
+      "unlatch_impulse_ns": 3803.7996,
       "latch_intrusion_m": 0.06,
-      "hinge_break_impulse_ns": 556.61426,
+      "hinge_break_impulse_ns": 606.8013,
       "break_impulse_ns": null
     },
     {
@@ -353,16 +353,16 @@
         0.0
       ],
       "hang_limit_rad": 0.6,
-      "mass_kg": 9.740749,
+      "mass_kg": 10.619022,
       "lever_m": 0.58544993,
       "gyration_m": 0.6760194,
       "area_m2": 0.48170823,
       "damping_per_s": 1.0,
       "restitution": 0.2,
-      "unlatch_impulse_ns": 3840.7373,
+      "unlatch_impulse_ns": 4564.5596,
       "latch_intrusion_m": 0.08,
-      "hinge_break_impulse_ns": 194.81499,
-      "break_impulse_ns": 7681.4746
+      "hinge_break_impulse_ns": 212.38045,
+      "break_impulse_ns": 9129.119
     },
     {
       "name": "fender_fr",
@@ -395,16 +395,16 @@
         0.0
       ],
       "hang_limit_rad": 0.6,
-      "mass_kg": 9.740749,
+      "mass_kg": 10.619022,
       "lever_m": 0.58544993,
       "gyration_m": 0.6760194,
       "area_m2": 0.48170823,
       "damping_per_s": 1.0,
       "restitution": 0.2,
-      "unlatch_impulse_ns": 3840.7373,
+      "unlatch_impulse_ns": 4564.5596,
       "latch_intrusion_m": 0.08,
-      "hinge_break_impulse_ns": 194.81499,
-      "break_impulse_ns": 7681.4746
+      "hinge_break_impulse_ns": 212.38045,
+      "break_impulse_ns": 9129.119
     }
   ]
 }
