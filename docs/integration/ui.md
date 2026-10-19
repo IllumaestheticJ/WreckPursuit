@@ -228,6 +228,14 @@ police event for it reaches the client; when E adds one, `ChaseEndDetector` shou
 wired to G's `quote_repair` and opened at the end of a chase. Details under "Changes outside my
 crates" → "Round 6".
 
+Checks after merging the lead branch: fmt, clippy `-D warnings`, wasm32 build, testbed `tsc`, ui-kit
+`tsc` + vitest (53 tests), testbed e2e all pass (release wasm; with a `--dev` wasm the city-chase
+check can time out before speeding reaches the feed). `cargo test --workspace --no-fail-fast`:
+95 suites pass, **2 fail on the lead branch as merged, in code this branch does not change** —
+`wp_economy/tests/pursuit_wiring.rs:130` (`real_police_capture_settles_through_the_economy`:
+"level at capture, not after the reset") and `wp_race/tests/simcli_races.rs:28`
+(`city_sprint_on_real_roads`: index out of bounds, len 2 index 2). For G and the race owner.
+
 
 **Merged** (UI-kit glue in `apps/testbed-web/src/ui/`).
 
