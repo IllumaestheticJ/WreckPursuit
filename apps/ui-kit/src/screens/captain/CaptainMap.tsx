@@ -468,8 +468,8 @@ function RadialMenu(props: { radial: Radial; captain: CaptainState; selected: Po
     const s = hit.suspect;
     items.push({ label: c.priorityTarget === s.id ? "Clear priority" : "Priority target", run: () => cmd({ SetPriorityTarget: { target: c.priorityTarget === s.id ? null : s.id } }) });
     if (sendUnit) items.push({ label: `Send ${sendUnit.callsign}`, run: () => cmd({ AssignUnit: { unit: sendUnit.id, order: { Pursue: { target: s.id } } } }) });
-    items.push({ label: `Roadblock ahead${rd.roadblock_s > 0 ? ` (${rd.roadblock_s.toFixed(0)}s)` : ""}`, run: () => cmd({ RequestRoadblock: { target: s.id, segment: null } }) });
-    items.push({ label: `Spikes ahead${rd.spikes_s > 0 ? ` (${rd.spikes_s.toFixed(0)}s)` : ""}`, run: () => cmd({ RequestSpikes: { target: s.id, segment: null } }) });
+    items.push({ label: `Roadblock ahead${rd.roadblock_s > 0 ? ` (${rd.roadblock_s.toFixed(0)}s)` : ""}`, run: () => cmd({ RequestRoadblock: { target: s.id, road: null } }) });
+    items.push({ label: `Spikes ahead${rd.spikes_s > 0 ? ` (${rd.spikes_s.toFixed(0)}s)` : ""}`, run: () => cmd({ RequestSpikes: { target: s.id, road: null } }) });
     items.push({ label: "Air unit", run: () => cmd({ RequestHelicopter: { target: s.id } }) });
     items.push({ label: "Call off", run: () => cmd({ CallOff: { target: s.id } }) });
   } else if (hit.kind === "incident") {
@@ -478,8 +478,8 @@ function RadialMenu(props: { radial: Radial; captain: CaptainState; selected: Po
   } else if (top) {
     // Ground: tools on this road segment, aimed at the priority / most wanted racer.
     const seg = hit.road;
-    items.push({ label: `Roadblock here (${top.name})`, disabled: seg === null, run: () => cmd({ RequestRoadblock: { target: top.id, segment: seg } }) });
-    items.push({ label: `Spikes here (${top.name})`, disabled: seg === null, run: () => cmd({ RequestSpikes: { target: top.id, segment: seg } }) });
+    items.push({ label: `Roadblock here (${top.name})`, disabled: seg === null, run: () => cmd({ RequestRoadblock: { target: top.id, road: seg } }) });
+    items.push({ label: `Spikes here (${top.name})`, disabled: seg === null, run: () => cmd({ RequestSpikes: { target: top.id, road: seg } }) });
   }
   items.push({ label: "Cancel", run: props.onClose });
   // Items sit on an ellipse (labels are wide, so spread them more horizontally).

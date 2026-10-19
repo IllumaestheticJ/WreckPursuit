@@ -5,12 +5,11 @@
  * deterministic and side-effect free so it can be unit-tested and so seeking is just
  * "reset, then fold every line up to the tick".
  *
- * Police events are `wp_police::PoliceEvent` (mirrored in `model/police.ts`), carried in the
- * contract's opaque `SimEvent::PoliceEvent` until v0.3.0.
+ * Police, economy and race events are the contract's typed variants (v0.3.0):
+ * `SimEvent::Police(PoliceEvent)`, `SimEvent::Economy(EconomyEvent)`, `SimEvent::Race(RaceEvent)`.
  */
-import type { BodyRegion, Component, SimEvent, WantedLevel } from "../generated/contracts";
-import type { EconomyEventMirror } from "../model/proposed";
-import { decodePoliceEvent, type PoliceEvent, type UnitKind } from "../model/police";
+import type { BodyRegion, Component, EconomyEvent, SimEvent, WantedLevel } from "../generated/contracts";
+import { type PoliceEvent, type UnitKind } from "../model/police";
 import type { DeployedTool, HeatHud, Incident, ReplayMarker, ScannerEntry, Vec2 } from "../model/types";
 import { headingAt, rowAt, type EventLine, type Run } from "./runs";
 
@@ -49,7 +48,7 @@ export interface Playback {
   /** Racers currently in a pursuit. */
   pursued: number[];
   scanner: ScannerEntry[];
-  economy: EconomyEventMirror[];
+  economy: EconomyEvent[];
   nextId: number;
 }
 
@@ -93,13 +92,9 @@ export function eventKind(e: SimEvent): string {
   return Object.keys(e)[0];
 }
 
-/** Decode an `EconomyEvent` payload (UTF-8 JSON bytes of `wp_economy::EconomyEvent`). */
-export function decodeEconomy(payload: number[]): EconomyEventMirror | null {
-  try {
-    return JSON.parse(new TextDecoder().decode(new Uint8Array(payload))) as EconomyEventMirror;
-  } catch {
-    return null;
-  }
+/** The economy event inside `SimEvent::Economy`, or null for other variants. */
+export function decodeEconomy(e: SimEvent): EconomyEvent | null {
+  return "Economy" in e ? e.Economy : null;
 }
 
 /** World position of an entity at a tick, from metrics (null if the entity has no metrics). */
@@ -256,13 +251,11 @@ export function applyEvent(prev: Playback, line: EventLine, ctx: ReduceContext):
       say(p, line, "civil", "info", `${split(vk)}${over} — ${ctx.nameOf(v.vehicle)}`, v.vehicle);
       incident(p, line, vk as Incident["kind"], [v.pos[0], v.pos[1]], v.vehicle);
     }
-  } else if ("PoliceEvent" in e) {
-    const decoded = decodePoliceEvent(e);
-    if (decoded) applyPolice(p, line, decoded, ctx);
-    else say(p, line, "dispatch", "info", `Police event #${e.PoliceEvent.kind}`);
-  } else if ("EconomyEvent" in e) {
-    const d = decodeEconomy(e.EconomyEvent.payload);
-    if (d) {
+  } else if ("Police" in e) {
+    applyPolice(p, line, e.Police, ctx);
+  } else if ("Economy" in e) {
+    const d = e.Economy;
+    {
       p.economy = [...p.economy, d];
       p.heat = { ...p.heat, bounty: p.heat.bounty + d.bounty_delta };
       const reason = typeof d.reason === "string" ? d.reason : Object.keys(d.reason)[0];
@@ -291,7 +284,7 @@ function applyPolice(p: Playback, line: EventLine, ev: PoliceEvent, ctx: ReduceC
   const name = (u: number) => callsign(u, unitKind(u));
   if ("Radio" in ev) {
     // wp_police radio text already names the unit ("Unit 3 responding …").
-    say(p, line, ev.Radio.unit === null ? "dispatch" : "unit", "info", ev.Radio.text);
+    say(p, line, ev.Radio.unit == null ? "dispatch" : "unit", "info", ev.Radio.text);
   } else if ("WantedLevelChanged" in ev) {
     const { racer, level } = ev.WantedLevelChanged;
     const old = p.levels[racer] ?? "None";
@@ -305,7 +298,8 @@ function applyPolice(p: Playback, line: EventLine, ev: PoliceEvent, ctx: ReduceC
       say(p, line, "dispatch", "alert", `${ctx.nameOf(racer)} now wanted level ${level.slice(1)}`, racer);
     }
   } else if ("PursuitStarted" in ev) {
-    const { racer, unit } = ev.PursuitStarted;
+    const { racer } = ev.PursuitStarted;
+    const unit = ev.PursuitStarted.unit ?? null;
     if (!p.pursued.includes(racer)) p.pursued = [...p.pursued, racer];
     if (unit !== null && !p.pursuing.includes(unit) && racer === ctx.player) p.pursuing = [...p.pursuing, unit];
     if (racer === ctx.player) p.heat = { ...p.heat, state: "pursuit", cooldown: 0, unitsInPursuit: Math.max(1, p.pursuing.length) };
@@ -373,9 +367,8 @@ export function markersFor(run: Run, player: number): ReplayMarker[] {
     else if ("TotalLoss" in e) out.push({ tick: line.tick, kind: "totalLoss", label: "Total loss" });
     else if ("TrafficViolation" in e && e.TrafficViolation.vehicle === player && e.TrafficViolation.kind !== undefined && typeof e.TrafficViolation.kind === "string") {
       out.push({ tick: line.tick, kind: "violation", label: split(e.TrafficViolation.kind) });
-    } else if ("PoliceEvent" in e) {
-      const d = decodePoliceEvent(e);
-      if (!d) continue;
+    } else if ("Police" in e) {
+      const d = e.Police;
       if ("PursuitStarted" in d) out.push({ tick: line.tick, kind: "police", label: "Pursuit started" });
       else if ("PursuitEnded" in d) out.push({ tick: line.tick, kind: "police", label: `Pursuit ended: ${d.PursuitEnded.outcome}` });
       else if ("SpikeHit" in d && d.SpikeHit.vehicle === player) out.push({ tick: line.tick, kind: "police", label: "Spike hit" });

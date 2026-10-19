@@ -6,8 +6,9 @@ use std::path::PathBuf;
 
 use schemars::{schema_for, Schema};
 use wp_contracts::{
-    AssistProfile, DamageMode, DayPhase, HandlingEffects, InputSource, RepairEstimate, Role,
-    ServerToClient, SimEvent, TimeOfDay, VehicleInput, VehicleState, WantedLevel,
+    AssistProfile, ClientToServer, DamageMode, DayPhase, HandlingEffects, InputSource,
+    RepairEstimate, Role, ServerToClient, SimEvent, TimeOfDay, VehicleInput, VehicleState,
+    WantedLevel,
 };
 
 /// `(file name, schema)` for every runtime type the UI reads.
@@ -25,6 +26,7 @@ fn runtime_schemas() -> Vec<(&'static str, Schema)> {
         ("time_of_day.schema.json", schema_for!(TimeOfDay)),
         ("day_phase.schema.json", schema_for!(DayPhase)),
         ("server_to_client.schema.json", schema_for!(ServerToClient)),
+        ("client_to_server.schema.json", schema_for!(ClientToServer)),
         ("wanted_level.schema.json", schema_for!(WantedLevel)),
     ]
 }

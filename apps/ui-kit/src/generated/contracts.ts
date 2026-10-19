@@ -5,6 +5,170 @@
  */
 
 /**
+ * Messages from a client to the authoritative server.
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "ClientToServer".
+ */
+export type ClientToServer =
+  | {
+      Input: {
+        input: VehicleInput;
+        /**
+         * Physics tick the input applies to.
+         */
+        tick: number;
+      };
+    }
+  | {
+      RoleRequest: {
+        role: Role;
+      };
+    }
+  | {
+      CaptainCommand: CaptainCommand;
+    }
+  | {
+      RaceCommand: RaceCommand;
+    };
+/**
+ * Role a human player holds in an instance.
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "Role".
+ */
+export type Role = "Racer" | "PoliceCaptain" | "PoliceChase" | "Spectator";
+/**
+ * Police captain command (`ClientToServer::CaptainCommand`).
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "CaptainCommand".
+ */
+export type CaptainCommand =
+  | {
+      AssignUnit: {
+        order: UnitOrder;
+        unit: UnitId;
+      };
+    }
+  | {
+      RequestRoadblock: {
+        /**
+         * Road, or `None` for automatic placement. (Decodes the pre-v0.3.0 name `segment`.)
+         */
+        road?: RoadEdgeId | null;
+        target: EntityId;
+      };
+    }
+  | {
+      RequestSpikes: {
+        /**
+         * Road, or `None` for automatic placement. (Decodes the pre-v0.3.0 name `segment`.)
+         */
+        road?: RoadEdgeId | null;
+        target: EntityId;
+      };
+    }
+  | {
+      RequestHelicopter: {
+        target: EntityId;
+      };
+    }
+  | {
+      SetPriorityTarget: {
+        /**
+         * Racer.
+         */
+        target?: EntityId | null;
+      };
+    }
+  | {
+      CallOff: {
+        target: EntityId;
+      };
+    };
+/**
+ * An order for one police unit (forced on AI units for a hold time, a suggestion for player
+ * units).
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "UnitOrder".
+ */
+export type UnitOrder =
+  | "Patrol"
+  | {
+      Pursue: {
+        target: EntityId;
+      };
+    }
+  | {
+      Intercept: {
+        target: EntityId;
+      };
+    }
+  | {
+      Respond: {
+        incident: IncidentId;
+      };
+    }
+  | "Disengage";
+/**
+ * Simulation entity identifier (vehicles, debris, police units, traffic agents).
+ * Allocated by `wp_sim`, never reused within one instance.
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "EntityId".
+ */
+export type EntityId = number;
+/**
+ * Police incident id (allocated by `wp_police`).
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "IncidentId".
+ */
+export type IncidentId = number;
+/**
+ * Police unit id (allocated by `wp_police`, never reused within an instance). Distinct from
+ * `EntityId`: a unit may exist before `wp_sim` gives it a vehicle body.
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "UnitId".
+ */
+export type UnitId = number;
+/**
+ * A road of the loaded city: index into [`RoadNetworkQuery`] edges (= `wp_world`'s
+ * `RoadGraphView::edges`). Captains, the minimap and race previews share it.
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "RoadEdgeId".
+ */
+export type RoadEdgeId = number;
+/**
+ * Race commands from a client (v0.3.0, race R6; `ClientToServer::RaceCommand`).
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "RaceCommand".
+ */
+export type RaceCommand =
+  | {
+      Enter: {
+        event: RaceEventId;
+      };
+    }
+  | {
+      Withdraw: {
+        event: RaceEventId;
+      };
+    }
+  | "Ready";
+/**
+ * Identifier of a scheduled or ad-hoc race event (scheduler ids are `day * 1000 + n`).
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "RaceEventId".
+ */
+export type RaceEventId = number;
+/**
  * Damage mode. Both modes run the same code path with different [`crate::ModeTable`]s.
  *
  * This interface was referenced by `WpContractsBundle`'s JSON-Schema
@@ -68,7 +232,8 @@ export type BodyRegion =
   | "FrameRear"
   | "FrameLeft"
   | "FrameRight"
-  | "Cabin";
+  | "Cabin"
+  | "Accessory";
 /**
  * Mechanical component that can be damaged by intrusion.
  *
@@ -98,13 +263,6 @@ export type Component =
   | "Exhaust"
   | "Lights";
 /**
- * Role a human player holds in an instance.
- *
- * This interface was referenced by `WpContractsBundle`'s JSON-Schema
- * via the `definition` "Role".
- */
-export type Role = "Racer" | "PoliceCaptain" | "PoliceChase" | "Spectator";
-/**
  * Messages from the server to a client.
  *
  * This interface was referenced by `WpContractsBundle`'s JSON-Schema
@@ -121,6 +279,10 @@ export type ServerToClient =
          * Physics tick of the snapshot.
          */
         tick: number;
+        /**
+         * Kinematic traffic in the client's interest set, ascending id (v0.3.0).
+         */
+        traffic?: TrafficAgentSnapshot[];
         /**
          * Visible vehicles, ascending by entity id.
          */
@@ -148,6 +310,12 @@ export type ServerToClient =
          */
         vehicle?: EntityId | null;
       };
+    }
+  | {
+      CaptainReply: ResultOfNullOr_CaptainError;
+    }
+  | {
+      Weather: WeatherSnapshot;
     };
 /**
  * Every event the simulation can emit.
@@ -262,37 +430,27 @@ export type SimEvent =
       };
     }
   | {
-      PoliceEvent: {
-        /**
-         * Payload kind discriminator, defined by `wp_police`.
-         */
-        kind: number;
-        /**
-         * Encoded payload, defined by `wp_police`.
-         */
-        payload: number[];
-      };
+      Police: PoliceEvent;
     }
   | {
-      EconomyEvent: {
+      Economy: EconomyEvent;
+    }
+  | {
+      Race: RaceEvent;
+    }
+  | {
+      WeatherChanged: {
         /**
-         * Payload kind discriminator, defined by `wp_economy`.
+         * Forced by a scenario / admin rather than the schedule.
          */
-        kind: number;
+        forced: boolean;
         /**
-         * Encoded payload, defined by `wp_economy`.
+         * Intensity 0..1.
          */
-        payload: number[];
+        intensity: number;
+        kind: WeatherKind;
       };
     };
-/**
- * Simulation entity identifier (vehicles, debris, police units, traffic agents).
- * Allocated by `wp_sim`, never reused within one instance.
- *
- * This interface was referenced by `WpContractsBundle`'s JSON-Schema
- * via the `definition` "EntityId".
- */
-export type EntityId = number;
 /**
  * Kind of traffic violation detected by `wp_world`.
  *
@@ -313,19 +471,155 @@ export type ViolationKind =
   | "Collision"
   | "Reckless";
 /**
- * Road/ground surface classification returned by [`crate::WorldQuery::surface_at`].
+ * Everything `wp_police` reports to the rest of the game (`SimEvent::Police`).
  *
  * This interface was referenced by `WpContractsBundle`'s JSON-Schema
- * via the `definition` "SurfaceType".
+ * via the `definition` "PoliceEvent".
  */
-export type SurfaceType = "Asphalt" | "WetAsphalt" | "Concrete" | "Gravel" | "Grass" | "Dirt" | "Curb" | "Metal";
-/**
- * Human player identifier, allocated by `wp_net` on connect.
- *
- * This interface was referenced by `WpContractsBundle`'s JSON-Schema
- * via the `definition` "PlayerId".
- */
-export type PlayerId = number;
+export type PoliceEvent =
+  | {
+      Radio: {
+        /**
+         * Text.
+         */
+        text: string;
+        /**
+         * Speaking unit (`None` = dispatch).
+         */
+        unit?: UnitId | null;
+      };
+    }
+  | {
+      WantedLevelChanged: {
+        level: WantedLevel;
+        racer: EntityId;
+      };
+    }
+  | {
+      PursuitStarted: {
+        racer: EntityId;
+        /**
+         * First unit in pursuit (`None` = helicopter / captain).
+         */
+        unit?: UnitId | null;
+      };
+    }
+  | {
+      PursuitEnded: {
+        /**
+         * Other units on the racer at a capture, ascending ids (empty for non-captures).
+         */
+        assists: UnitId[];
+        /**
+         * Unit credited with a capture (closest unit on the racer); `None` for non-captures.
+         */
+        capturer?: UnitId | null;
+        level: WantedLevel;
+        outcome: PursuitOutcome;
+        racer: EntityId;
+      };
+    }
+  | {
+      UnitSpawned: {
+        /**
+         * Unit heading (XY unit vector).
+         *
+         * @minItems 2
+         * @maxItems 2
+         */
+        heading: [number, number];
+        kind: UnitKind;
+        /**
+         * World position, m.
+         *
+         * @minItems 3
+         * @maxItems 3
+         */
+        pos: [number, number, number];
+        unit: UnitId;
+      };
+    }
+  | {
+      UnitDespawned: {
+        unit: UnitId;
+      };
+    }
+  | {
+      UnitDisabled: {
+        cause: DisableCause;
+        unit: UnitId;
+      };
+    }
+  | {
+      RoadblockPlaced: {
+        /**
+         * Centre, m.
+         *
+         * @minItems 3
+         * @maxItems 3
+         */
+        pos: [number, number, number];
+        racer: EntityId;
+        /**
+         * Approach sight distance at placement, m.
+         */
+        sight_m: number;
+        tool: ToolId;
+      };
+    }
+  | {
+      SpikesPlaced: {
+        /**
+         * End A, m.
+         *
+         * @minItems 3
+         * @maxItems 3
+         */
+        a: [number, number, number];
+        /**
+         * End B, m.
+         *
+         * @minItems 3
+         * @maxItems 3
+         */
+        b: [number, number, number];
+        racer: EntityId;
+        /**
+         * Approach sight distance at placement, m.
+         */
+        sight_m: number;
+        tool: ToolId;
+      };
+    }
+  | {
+      ToolRemoved: {
+        tool: ToolId;
+      };
+    }
+  | {
+      SpikeHit: {
+        vehicle: EntityId;
+        /**
+         * Wheels hit, FL, FR, RL, RR.
+         *
+         * @minItems 4
+         * @maxItems 4
+         */
+        wheels: [boolean, boolean, boolean, boolean];
+      };
+    }
+  | {
+      HeloLaunched: {
+        target: EntityId;
+        unit: UnitId;
+      };
+    }
+  | {
+      PitAttempt: {
+        target: EntityId;
+        unit: UnitId;
+      };
+    };
 /**
  * Police wanted level of a racer, derived from heat by `wp_police` (v0.2.0: moved here from
  * `wp_police` so economy, net and UI share it).
@@ -334,6 +628,624 @@ export type PlayerId = number;
  * via the `definition` "WantedLevel".
  */
 export type WantedLevel = "None" | "L1" | "L2" | "L3" | "L4" | "L5";
+/**
+ * How a pursuit ended.
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "PursuitOutcome".
+ */
+export type PursuitOutcome = "Escaped" | "Safehouse" | "Captured" | "CapturedTotalLoss" | "CalledOff";
+/**
+ * Coarse police unit kind for events and views.
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "UnitKind".
+ */
+export type UnitKind = "Car" | "Helicopter";
+/**
+ * Why a unit left service.
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "DisableCause".
+ */
+export type DisableCause = "SelfCrash" | "RacerContact" | "Damaged" | "BentWheel";
+/**
+ * Roadblock / spike strip id (allocated by `wp_police`).
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "ToolId".
+ */
+export type ToolId = number;
+/**
+ * Durable account id (v0.3.0, F NET-5 / meta MC-1): allocated by meta at signup and stable
+ * across instances, unlike the per-instance [`PlayerId`] slot. The server maps
+ * `PlayerId → AccountId` at join.
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "AccountId".
+ */
+export type AccountId = number;
+/**
+ * Identifier of one owned car, unique within an account (never reused).
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "CarUid".
+ */
+export type CarUid = number;
+/**
+ * Why an account changed. Codes ([`EconomyReason::kind_code`]) are stable.
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "EconomyReason".
+ */
+export type EconomyReason =
+  | "AccountOpened"
+  | {
+      StakeCharged: {
+        race: RaceType;
+      };
+    }
+  | {
+      RacePayout: {
+        /**
+         * Finishing position (1 = win).
+         */
+        placement: number;
+        race: RaceType;
+      };
+    }
+  | "CleanRaceBonus"
+  | {
+      RaceRep: {
+        /**
+         * Finishing position (0 = DNF).
+         */
+        placement: number;
+      };
+    }
+  | {
+      PinkSlipWon: {
+        /**
+         * Base car id.
+         */
+        def_id: string;
+      };
+    }
+  | {
+      PinkSlipLost: {
+        /**
+         * Base car id.
+         */
+        def_id: string;
+      };
+    }
+  | {
+      RepairPaid: {
+        /**
+         * Labour multiplier applied (district × shop).
+         */
+        labour_multiplier: number;
+        /**
+         * Line items repaired.
+         */
+        lines: number;
+      };
+    }
+  | {
+      InsuranceClaim: {
+        /**
+         * Amount covered by the insurer.
+         */
+        covered: number;
+      };
+    }
+  | "InsuranceClaimDenied"
+  | "DriveDamaged"
+  | {
+      CarScrapped: {
+        /**
+         * Base car id.
+         */
+        def_id: string;
+      };
+    }
+  | {
+      ShopReported: {
+        /**
+         * District key of the shop (`data/economy/prices.toml [district_labour]`; still a
+         * string in v0.3.0 because those keys are not all [`crate::DistrictId`]s yet).
+         */
+        district: string;
+        level: WantedLevel;
+      };
+    }
+  | {
+      DamageRecorded: {
+        /**
+         * Global health reported.
+         */
+        health: number;
+        /**
+         * Total loss.
+         */
+        total_loss: boolean;
+      };
+    }
+  | {
+      Fine: {
+        level: WantedLevel;
+      };
+    }
+  | "Bail"
+  | {
+      CaptureRepLoss: {
+        level: WantedLevel;
+      };
+    }
+  | "BountyCleared"
+  | "BountyGained"
+  | "Towing"
+  | "CarImpounded"
+  | {
+      ImpoundRetrieved: {
+        /**
+         * Days spent in the pound.
+         */
+        days: number;
+      };
+    }
+  | {
+      CarAuctioned: {
+        /**
+         * Base car id.
+         */
+        def_id: string;
+      };
+    }
+  | {
+      CarSeized: {
+        /**
+         * Base car id.
+         */
+        def_id: string;
+      };
+    }
+  | {
+      CarDestroyed: {
+        /**
+         * Base car id.
+         */
+        def_id: string;
+      };
+    }
+  | {
+      Escape: {
+        level: WantedLevel;
+      };
+    }
+  | {
+      CopReward: {
+        level: WantedLevel;
+      };
+    }
+  | {
+      CopXp: {
+        reason: CopXpReason;
+      };
+    }
+  | {
+      InformantTip: {
+        /**
+         * Heat points to remove (0–100 scale).
+         */
+        heat_reduction: number;
+        /**
+         * Tier id.
+         */
+        tier: string;
+      };
+    }
+  | {
+      CarPurchased: {
+        /**
+         * Base car id.
+         */
+        def_id: string;
+      };
+    }
+  | {
+      CarSold: {
+        /**
+         * Base car id.
+         */
+        def_id: string;
+      };
+    }
+  | {
+      FloorCarIssued: {
+        /**
+         * Base car id.
+         */
+        def_id: string;
+      };
+    }
+  | {
+      ModInstalled: {
+        /**
+         * Mod id.
+         */
+        mod_id: string;
+      };
+    }
+  | {
+      ModRemoved: {
+        /**
+         * Mod id.
+         */
+        mod_id: string;
+      };
+    }
+  | {
+      InsurancePurchased: {
+        /**
+         * Tier id.
+         */
+        tier: string;
+      };
+    }
+  | "InsurancePremium"
+  | "InsuranceLapsed"
+  | "InsuranceVoided"
+  | {
+      Adjustment: {
+        /**
+         * Free-text note.
+         */
+        note: string;
+      };
+    };
+/**
+ * Economy race type; keys `data/economy/stakes.toml [race_types.*]`.
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "RaceType".
+ */
+export type RaceType = "Sprint" | "Circuit" | "Drag" | "Touge" | "Meet";
+/**
+ * Activity a player cop earned or lost XP for.
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "CopXpReason".
+ */
+export type CopXpReason =
+  "Capture" | "Assist" | "CleanDriving" | "CivilianCollision" | "SelfWreck" | "RiskBudgetOverspent";
+/**
+ * Everything `wp_race` tells the rest of the game (`SimEvent::Race`).
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "RaceEvent".
+ */
+export type RaceEvent =
+  | {
+      LobbyOpened: {
+        event: RaceEventId;
+        kind: RaceKind;
+        legality: Legality;
+        police: PolicePresence;
+        /**
+         * Venue position, m.
+         *
+         * @minItems 3
+         * @maxItems 3
+         */
+        pos: [number, number, number];
+        venue: VenueId;
+      };
+    }
+  | {
+      Countdown: {
+        event: RaceEventId;
+        /**
+         * Physics tick of the green light.
+         */
+        green_tick: number;
+      };
+    }
+  | {
+      Green: {
+        event: RaceEventId;
+        /**
+         * Tick.
+         */
+        tick: number;
+      };
+    }
+  | {
+      CheckpointPassed: {
+        event: RaceEventId;
+        /**
+         * Gate index.
+         */
+        gate: number;
+        /**
+         * Lap (1-based; 1 for point-to-point).
+         */
+        lap: number;
+        racer: EntityId;
+        /**
+         * Tick of the sample after the crossing.
+         */
+        tick: number;
+      };
+    }
+  | {
+      LapCompleted: {
+        event: RaceEventId;
+        /**
+         * Laps completed so far.
+         */
+        lap: number;
+        /**
+         * Lap time, sub-ticks.
+         */
+        lap_subticks: number;
+        racer: EntityId;
+      };
+    }
+  | {
+      LeadChanged: {
+        event: RaceEventId;
+        leader: EntityId;
+      };
+    }
+  | {
+      RacerFinished: {
+        /**
+         * Elapsed, sub-ticks.
+         */
+        elapsed_subticks: number;
+        event: RaceEventId;
+        racer: EntityId;
+      };
+    }
+  | {
+      RacerDnf: {
+        event: RaceEventId;
+        racer: EntityId;
+        reason: DnfReason;
+      };
+    }
+  | {
+      RacerDq: {
+        event: RaceEventId;
+        racer: EntityId;
+        reason: DqReason;
+      };
+    }
+  | {
+      RaceFinished: {
+        event: RaceEventId;
+        /**
+         * Ranked results.
+         */
+        results: RaceResultRow[];
+      };
+    }
+  | {
+      PatrolAttracted: {
+        /**
+         * Rolling meet heat at the venue.
+         */
+        heat: number;
+        /**
+         * Venue position, m.
+         *
+         * @minItems 3
+         * @maxItems 3
+         */
+        pos: [number, number, number];
+        venue: VenueId;
+      };
+    }
+  | {
+      TerritoryChanged: {
+        /**
+         * New controller.
+         */
+        crew?: CrewId | null;
+        zone: ZoneId;
+      };
+    };
+/**
+ * What kind of race this is, with the parameters that change its rules.
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "RaceKind".
+ */
+export type RaceKind =
+  | "Sprint"
+  | {
+      Circuit: {
+        /**
+         * Laps to complete (≥ 1).
+         */
+        laps: number;
+      };
+    }
+  | {
+      Outrun: {
+        /**
+         * Winning lead (straight-line gap), m.
+         */
+        lead_m: number;
+      };
+    }
+  | "Checkpoint"
+  | "Cannonball"
+  | {
+      Delivery: {
+        /**
+         * Cargo mass added to the car, kg.
+         */
+        cargo_kg: number;
+        /**
+         * Cargo value, money units.
+         */
+        cargo_value: number;
+      };
+    }
+  | "Drag"
+  | "TimeAttack";
+/**
+ * Legal status of an event; drives police presence and the stake risk premium.
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "Legality".
+ */
+export type Legality = "Sanctioned" | "Street" | "IllegalDaytime";
+/**
+ * Police presence requested for a race event (v0.3.0, race R2); `wp_police` maps it onto
+ * its dispatch tables.
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "PolicePresence".
+ */
+export type PolicePresence = "None" | "Normal" | "Elevated" | "Max";
+/**
+ * A race venue: index of a `wp_world` POI of kind `RaceStartGrid` (or a scheduler-local
+ * venue index when no city is loaded).
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "VenueId".
+ */
+export type VenueId = number;
+/**
+ * Why a racer did not finish (they still rank above every DQ).
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "DnfReason".
+ */
+export type DnfReason =
+  | "TotalLoss"
+  | "Captured"
+  | "TimeLimit"
+  | "FinishWindow"
+  | "Retired"
+  | "CargoDestroyed"
+  | "Outrun"
+  | "Disconnected"
+  | "Fled";
+/**
+ * Why a racer was disqualified (ranked below every finisher and every DNF).
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "DqReason".
+ */
+export type DqReason = "LeftCorridor" | "JumpStart" | "ImplausibleMovement" | "Marshal";
+/**
+ * A racer's state in the race.
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "RacerStatus".
+ */
+export type RacerStatus =
+  | "Running"
+  | "Finished"
+  | {
+      Dnf: DnfReason;
+    }
+  | {
+      Dq: DqReason;
+    };
+/**
+ * Identifier of a crew (allocated by `wp_race`, never reused).
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "CrewId".
+ */
+export type CrewId = number;
+/**
+ * One zone (district polygon) of the loaded city: index into `wp_world`'s
+ * `RoadNetwork::zones`. Territory (crews) is per zone.
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "ZoneId".
+ */
+export type ZoneId = number;
+/**
+ * Weather regime.
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "WeatherKind".
+ */
+export type WeatherKind = "Clear" | "Overcast" | "LightRain" | "HeavyRain" | "Fog";
+/**
+ * Road/ground surface classification returned by [`crate::WorldQuery::surface_at`].
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "SurfaceType".
+ */
+export type SurfaceType =
+  "Asphalt" | "WetAsphalt" | "Concrete" | "Gravel" | "Grass" | "Dirt" | "Curb" | "Metal" | "PaintedLine";
+/**
+ * Human player identifier, allocated by `wp_net` on connect.
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "PlayerId".
+ */
+export type PlayerId = number;
+/**
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "Result_of_null_or_CaptainError".
+ */
+export type ResultOfNullOr_CaptainError =
+  | {
+      Ok: null;
+    }
+  | {
+      Err: CaptainError;
+    };
+/**
+ * Why a [`CaptainCommand`] was refused. The reply to a command is `Result<(), CaptainError>`.
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "CaptainError".
+ */
+export type CaptainError =
+  | "UnknownUnit"
+  | "UnknownTarget"
+  | "UnknownIncident"
+  | "NotPursued"
+  | {
+      Locked: {
+        /**
+         * Required wanted level (1..=5).
+         */
+        need_level: number;
+      };
+    }
+  | {
+      Cooldown: {
+        /**
+         * Seconds left.
+         */
+        remaining_s: number;
+      };
+    }
+  | "Budget"
+  | {
+      Site: SiteError;
+    }
+  | "Unavailable"
+  | "UnitUnavailable"
+  | "Malformed";
+/**
+ * Why a roadblock / spike site was rejected.
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "SiteError".
+ */
+export type SiteError = "NoSite" | "NotOnPath" | "BlindCorner" | "Highway";
 /**
  * Mechanical behaviour family of a material.
  *
@@ -413,6 +1325,7 @@ export type DriveLayout =
  */
 export interface WpContractsBundle {
   AssistProfile?: AssistProfile;
+  ClientToServer?: ClientToServer;
   DamageMode?: DamageMode;
   DayPhase?: DayPhase;
   HandlingEffects?: HandlingEffects;
@@ -475,6 +1388,58 @@ export interface AssistProfile {
    * Throttle input smoothing strength, 0 (raw) ..= 1 (heavy ramp).
    */
   throttle_filter: number;
+}
+/**
+ * Driver input for one vehicle for one physics tick. Analog values are already deadzoned.
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "VehicleInput".
+ */
+export interface VehicleInput {
+  /**
+   * Brake pedal, 0..=1.
+   */
+  brake?: number;
+  /**
+   * Clutch pedal, 0 (engaged) ..= 1 (fully disengaged). Ignored with `auto_clutch`.
+   */
+  clutch?: number;
+  /**
+   * Shift down requested this tick (edge, not level).
+   */
+  gear_down?: boolean;
+  /**
+   * Shift up requested this tick (edge, not level).
+   */
+  gear_up?: boolean;
+  /**
+   * Handbrake lever, 0..=1.
+   */
+  handbrake?: number;
+  /**
+   * Headlights on.
+   */
+  headlights?: boolean;
+  /**
+   * Horn held.
+   */
+  horn?: boolean;
+  /**
+   * Siren on (police vehicles only; ignored otherwise).
+   */
+  siren?: boolean;
+  /**
+   * Steering, -1 (full left) ..= 1 (full right).
+   */
+  steer?: number;
+  /**
+   * Throttle pedal, 0..=1.
+   */
+  throttle?: number;
+  /**
+   * Role tool activation index (0 = none). Meaning defined by the role (e.g. police tools).
+   */
+  tool_use?: number;
 }
 /**
  * The **entire** interface from damage to handling. Produced by `DamageSim::handling_effects`,
@@ -606,6 +1571,124 @@ export interface RepairLine {
   total: number;
 }
 /**
+ * One auditable change to an account (`SimEvent::Economy`).
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "EconomyEvent".
+ */
+export interface EconomyEvent {
+  account: AccountId;
+  /**
+   * Bounty change.
+   */
+  bounty_delta: number;
+  /**
+   * Car concerned, if any.
+   */
+  car?: CarUid | null;
+  /**
+   * Cash after this event.
+   */
+  cash_after: number;
+  /**
+   * Cash change.
+   */
+  cash_delta: number;
+  /**
+   * Cop XP change (as applied).
+   */
+  cop_xp_delta: number;
+  /**
+   * In-game day.
+   */
+  day: number;
+  reason: EconomyReason;
+  /**
+   * Reputation change (as applied).
+   */
+  rep_delta: number;
+  /**
+   * Per-account sequence number, gap-free.
+   */
+  seq: number;
+}
+/**
+ * One racer's final result as replicated (the judge's `RacerResult` minus drag / violation
+ * detail).
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "RaceResultRow".
+ */
+export interface RaceResultRow {
+  /**
+   * Best completed lap, sub-ticks (circuits).
+   */
+  best_lap_subticks?: number | null;
+  /**
+   * Money owed for cargo damage (delivery only).
+   */
+  cargo_damage_cost: number;
+  /**
+   * Contacts with civilians / traffic.
+   */
+  civilian_hits: number;
+  /**
+   * Clean race (no contacts, civilian hits or collision violations; finished).
+   */
+  clean: boolean;
+  /**
+   * Contacts above the clean threshold.
+   */
+  contacts: number;
+  /**
+   * Elapsed time, sub-ticks (1/1000 physics tick; finishers only).
+   */
+  elapsed_subticks?: number | null;
+  /**
+   * Final position, 1-based, unique.
+   */
+  position: number;
+  racer: EntityId;
+  status: RacerStatus;
+}
+/**
+ * One kinematic traffic agent in a client's interest set (v0.3.0, world #6). Physical
+ * (promoted) agents replicate as ordinary vehicles; despawns are implicit (absent id).
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "TrafficAgentSnapshot".
+ */
+export interface TrafficAgentSnapshot {
+  /**
+   * Bit 0 brake lights, 1 hazards, 2 left signal, 3 right signal, 4 headlights,
+   * 5 yielding to a siren.
+   */
+  flags: number;
+  /**
+   * `wp_world` agent id, stable for the agent's life.
+   */
+  id: number;
+  /**
+   * Position, world m (`wp_net` may quantise on the wire).
+   *
+   * @minItems 3
+   * @maxItems 3
+   */
+  pos: [number, number, number];
+  /**
+   * Speed along the heading, m/s (client-side extrapolation).
+   */
+  speed_mps: number;
+  /**
+   * Visual variant (car model / colour).
+   */
+  variant: number;
+  /**
+   * Heading, rad (0 = +Y).
+   */
+  yaw: number;
+}
+/**
  * Snapshot of a vehicle's dynamic state. World space unless noted.
  *
  * This interface was referenced by `WpContractsBundle`'s JSON-Schema
@@ -721,6 +1804,36 @@ export interface WheelState {
   surface: SurfaceType;
 }
 /**
+ * Low-rate weather state for clients (v0.3.0, weather W-5).
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "WeatherSnapshot".
+ */
+export interface WeatherSnapshot {
+  /**
+   * Blend 0 (prev) ..= 1 (current).
+   */
+  blend: number;
+  /**
+   * Current intensity 0..1.
+   */
+  intensity: number;
+  kind: WeatherKind;
+  /**
+   * Intensity being blended from.
+   */
+  prev_intensity: number;
+  prev_kind: WeatherKind;
+  /**
+   * Road water grid, quantised (`wp_weather` grid order, 1/8 mm per step).
+   */
+  water_q8: number[];
+  /**
+   * Wind heading, rad.
+   */
+  wind_heading_rad: number;
+}
+/**
  * In-game time of day.
  *
  * This interface was referenced by `WpContractsBundle`'s JSON-Schema
@@ -731,58 +1844,6 @@ export interface TimeOfDay {
    * Seconds since midnight, `0.0 ..< 86400.0`.
    */
   seconds_since_midnight: number;
-}
-/**
- * Driver input for one vehicle for one physics tick. Analog values are already deadzoned.
- *
- * This interface was referenced by `WpContractsBundle`'s JSON-Schema
- * via the `definition` "VehicleInput".
- */
-export interface VehicleInput {
-  /**
-   * Brake pedal, 0..=1.
-   */
-  brake?: number;
-  /**
-   * Clutch pedal, 0 (engaged) ..= 1 (fully disengaged). Ignored with `auto_clutch`.
-   */
-  clutch?: number;
-  /**
-   * Shift down requested this tick (edge, not level).
-   */
-  gear_down?: boolean;
-  /**
-   * Shift up requested this tick (edge, not level).
-   */
-  gear_up?: boolean;
-  /**
-   * Handbrake lever, 0..=1.
-   */
-  handbrake?: number;
-  /**
-   * Headlights on.
-   */
-  headlights?: boolean;
-  /**
-   * Horn held.
-   */
-  horn?: boolean;
-  /**
-   * Siren on (police vehicles only; ignored otherwise).
-   */
-  siren?: boolean;
-  /**
-   * Steering, -1 (full left) ..= 1 (full right).
-   */
-  steer?: number;
-  /**
-   * Throttle pedal, 0..=1.
-   */
-  throttle?: number;
-  /**
-   * Role tool activation index (0 = none). Meaning defined by the role (e.g. police tools).
-   */
-  tool_use?: number;
 }
 /**
  * Complete damage lattice for one car.
@@ -1089,6 +2150,11 @@ export interface TireDef {
   surface_multipliers: {
     [k: string]: number | undefined;
   };
+  /**
+   * Treaded tire (v0.3.0, weather W-4). `None` = treaded; slicks set `false` and
+   * aquaplane much earlier.
+   */
+  treaded?: boolean | null;
   /**
    * Tread wear per metre of sliding distance at nominal load, fraction of tread (0..1) per m.
    */

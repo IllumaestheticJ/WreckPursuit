@@ -197,7 +197,8 @@ export function toyCaptainCommand(s: ToyCaptain, cmd: CaptainCommand, ctx: Comma
   }
   if ("RequestRoadblock" in cmd || "RequestSpikes" in cmd) {
     const isBlock = "RequestRoadblock" in cmd;
-    const { target, segment } = isBlock ? cmd.RequestRoadblock : cmd.RequestSpikes;
+    const { target } = isBlock ? cmd.RequestRoadblock : cmd.RequestSpikes;
+    const road = (isBlock ? cmd.RequestRoadblock.road : cmd.RequestSpikes.road) ?? null;
     const r = racer(target);
     if (!r) return "UnknownTarget";
     if (!pursued(target)) return "NotPursued";
@@ -207,9 +208,9 @@ export function toyCaptainCommand(s: ToyCaptain, cmd: CaptainCommand, ctx: Comma
     if (cd > 0) return { Cooldown: { remaining_s: cd } };
     const [active, max] = isBlock ? s.readiness.roadblocks : s.readiness.spikes;
     if (active >= max) return "Budget";
-    // Site: on the requested segment, else ~300 m ahead of the racer's last known position.
+    // Site: on the requested road, else ~300 m ahead of the racer's last known position.
     const ahead: Vec2 = [r.pos[0] + 300 * Math.sin(r.headingRad), r.pos[1] + 300 * Math.cos(r.headingRad)];
-    const pos = nearestOnRoad(ctx.map, segment, segment === null ? ahead : r.pos);
+    const pos = nearestOnRoad(ctx.map, road, road === null ? ahead : r.pos);
     const half = TOOL_RULES.spikesLengthM / 2;
     const tool: DeployedTool = isBlock
       ? { id: s.nextToolId, tool: "Roadblock", pos, remainingS: TOOL_RULES.roadblockLifetimeS }
@@ -246,7 +247,7 @@ export function toyCaptainCommand(s: ToyCaptain, cmd: CaptainCommand, ctx: Comma
     return { ...s, units: [...s.units, helo], readiness: { ...s.readiness, helo_s: TOOL_RULES.heloCooldownS } };
   }
   if ("SetPriorityTarget" in cmd) {
-    const { target } = cmd.SetPriorityTarget;
+    const target = cmd.SetPriorityTarget.target ?? null;
     if (target !== null && !racer(target)) return "UnknownTarget";
     return { ...s, priorityTarget: target };
   }

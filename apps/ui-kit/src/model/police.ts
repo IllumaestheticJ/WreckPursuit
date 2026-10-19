@@ -1,54 +1,43 @@
 /**
- * TypeScript mirror of `wp_police`'s public event / captain types (machine E, merged run 2).
+ * Police types for the UI.
  *
- * Source of truth: `crates/wp_police/src/events.rs` and `captain.rs`. The contract carries them
- * opaquely until v0.3.0 (`SimEvent::PoliceEvent { kind, payload }` with `payload` = JSON of
- * `PoliceEvent`; `ClientToServer::CaptainCommand(bytes)` with bytes = JSON of `CaptainCommand`).
- * When v0.3.0 types them in `wp_contracts`, `npm run gen:types` replaces this file.
+ * Since contract v0.3.0 the event and captain types are typed in `wp_contracts::police`
+ * (`SimEvent::Police(PoliceEvent)`, `ClientToServer::CaptainCommand(CaptainCommand)`) and come from
+ * `../generated/contracts.ts` (`npm run gen:types`); they are re-exported here. What remains
+ * hand-written mirrors `wp_police`'s read-only captain view (`CaptainView` and friends), which is
+ * not in the contract (UI-3), plus the heat / escape tables from `data/police/heat.toml`.
  * Serde's externally tagged JSON is mirrored exactly (unit variants are plain strings).
  */
-import type { DayPhase, EntityId, SimEvent, WantedLevel } from "../generated/contracts";
+import type {
+  CaptainCommand,
+  CaptainError,
+  ClientToServer,
+  DayPhase,
+  DisableCause,
+  EntityId,
+  IncidentId,
+  PoliceEvent,
+  PursuitOutcome,
+  RoadEdgeId,
+  SimEvent,
+  SiteError,
+  ToolId,
+  UnitId,
+  UnitKind,
+  UnitOrder,
+  WantedLevel,
+} from "../generated/contracts";
 
-/** `wp_police::UnitId` (distinct from `EntityId`). */
-export type UnitId = number;
-/** `wp_police::ToolId`. */
-export type ToolId = number;
-/** `wp_police::IncidentId`. */
-export type IncidentId = number;
-/** `wp_police::graph::SegmentId`. */
-export type SegmentId = number;
+export type { CaptainCommand, CaptainError, DisableCause, IncidentId, PoliceEvent, PursuitOutcome, RoadEdgeId, SiteError, ToolId, UnitId, UnitKind, UnitOrder };
 
-/** `wp_police::PursuitOutcome`. */
-export type PursuitOutcome = "Escaped" | "Safehouse" | "Captured" | "CapturedTotalLoss" | "CalledOff";
-/** `wp_police::DisableCause`. */
-export type DisableCause = "SelfCrash" | "RacerContact" | "Damaged" | "BentWheel";
-/** `wp_police::UnitKind`. */
-export type UnitKind = "Car" | "Helicopter";
 /** `wp_police::District`. */
 export type District = "Core" | "Suburb" | "Industrial";
 /** `wp_police::PursuitStatus`. */
 export type PursuitStatus = "Clear" | "Wanted" | "Pursuit" | "Searching";
 
-type V3 = [number, number, number];
 type V2 = [number, number];
 
-/** `wp_police::PoliceEvent`. */
-export type PoliceEvent =
-  | { Radio: { unit: UnitId | null; text: string } }
-  | { WantedLevelChanged: { racer: EntityId; level: WantedLevel } }
-  | { PursuitStarted: { racer: EntityId; unit: UnitId | null } }
-  | { PursuitEnded: { racer: EntityId; outcome: PursuitOutcome } }
-  | { UnitSpawned: { unit: UnitId; kind: UnitKind; pos: V3; heading: V2 } }
-  | { UnitDespawned: { unit: UnitId } }
-  | { UnitDisabled: { unit: UnitId; cause: DisableCause } }
-  | { RoadblockPlaced: { tool: ToolId; racer: EntityId; pos: V3; sight_m: number } }
-  | { SpikesPlaced: { tool: ToolId; racer: EntityId; a: V3; b: V3; sight_m: number } }
-  | { ToolRemoved: { tool: ToolId } }
-  | { SpikeHit: { vehicle: EntityId; wheels: [boolean, boolean, boolean, boolean] } }
-  | { HeloLaunched: { unit: UnitId; target: EntityId } }
-  | { PitAttempt: { unit: UnitId; target: EntityId } };
-
-/** `wp_police::events::kind` discriminators. */
+/** `wp_contracts::police_kind` discriminators (`PoliceEvent::kind()`). */
 export const POLICE_KIND = {
   Radio: 1,
   WantedLevelChanged: 2,
@@ -65,51 +54,22 @@ export const POLICE_KIND = {
   PitAttempt: 13,
 } as const;
 
-/** Decode `SimEvent::PoliceEvent` (null for other variants or a payload that does not parse). */
+/** The police event inside `SimEvent::Police`, or null for other variants. */
 export function decodePoliceEvent(e: SimEvent): PoliceEvent | null {
-  if (!("PoliceEvent" in e)) return null;
-  try {
-    return JSON.parse(new TextDecoder().decode(new Uint8Array(e.PoliceEvent.payload))) as PoliceEvent;
-  } catch {
-    return null;
-  }
+  return "Police" in e ? e.Police : null;
 }
 
-/** `wp_police::UnitOrder`. */
-export type UnitOrder =
-  | "Patrol"
-  | { Pursue: { target: EntityId } }
-  | { Intercept: { target: EntityId } }
-  | { Respond: { incident: IncidentId } }
-  | "Disengage";
-
-/** `wp_police::CaptainCommand` (sent as JSON bytes in `ClientToServer::CaptainCommand`). */
-export type CaptainCommand =
-  | { AssignUnit: { unit: UnitId; order: UnitOrder } }
-  | { RequestRoadblock: { target: EntityId; segment: SegmentId | null } }
-  | { RequestSpikes: { target: EntityId; segment: SegmentId | null } }
-  | { RequestHelicopter: { target: EntityId } }
-  | { SetPriorityTarget: { target: EntityId | null } }
-  | { CallOff: { target: EntityId } };
-
-/** Encode for `ClientToServer::CaptainCommand` (mirrors `CaptainCommand::to_bytes`). */
-export function captainCommandBytes(c: CaptainCommand): number[] {
-  return [...new TextEncoder().encode(JSON.stringify(c))];
+/** Wrap a captain command as the client message (`ClientToServer::CaptainCommand`). */
+export function captainMessage(c: CaptainCommand): ClientToServer {
+  return { CaptainCommand: c };
 }
 
-/** `wp_police::CaptainError`. */
-export type CaptainError =
-  | "UnknownUnit"
-  | "UnknownTarget"
-  | "UnknownIncident"
-  | "NotPursued"
-  | { Locked: { need_level: number } }
-  | { Cooldown: { remaining_s: number } }
-  | "Budget"
-  | { Site: unknown }
-  | "Unavailable"
-  | "UnitUnavailable"
-  | "Malformed";
+const SITE_TEXT: Record<SiteError, string> = {
+  NoSite: "No valid site for that tool",
+  NotOnPath: "That road is not on the racer's path",
+  BlindCorner: "Too close to a blind corner",
+  Highway: "Not allowed on the highway",
+};
 
 /** Human text for a refused captain command. */
 export function captainErrorText(e: CaptainError): string {
@@ -127,7 +87,7 @@ export function captainErrorText(e: CaptainError): string {
   }
   if ("Locked" in e) return `Unlocks at wanted level ${e.Locked.need_level}`;
   if ("Cooldown" in e) return `Cooling down: ${e.Cooldown.remaining_s.toFixed(0)} s`;
-  return "No valid site for that tool";
+  return SITE_TEXT[e.Site];
 }
 
 /** `wp_police::dispatch::IncidentKind`. */

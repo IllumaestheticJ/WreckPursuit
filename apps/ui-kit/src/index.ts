@@ -13,7 +13,7 @@ export type { UiCommand, SettingsPatch } from "./model/commands";
 export type * from "./model/proposed";
 export { wantedLevelNumber } from "./model/proposed";
 export type * as police from "./model/police";
-export { POLICE_KIND, decodePoliceEvent, captainCommandBytes, captainErrorText } from "./model/police";
+export { POLICE_KIND, decodePoliceEvent, captainMessage, captainErrorText } from "./model/police";
 export * as bindings from "./model/bindings";
 export type * as contracts from "./generated/contracts";
 
