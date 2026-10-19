@@ -1,6 +1,6 @@
 # Status
 
-_Last updated: lead integration run 2, 2026-10-19. Contract v0.1.0 (v0.2.0 planned, see
+_Last updated: lead integration run 3, 2026-10-19. Contract v0.1.0 (v0.2.0 planned, see
 `docs/CONTRACT_CHANGELOG.md`; next lead run)._
 
 Machines are named by letter: **A–I = prompts 02–10**, **J–Q = prompts 13–20** (started 2026-10-19 as
@@ -21,9 +21,18 @@ dashboard `ws/tuning-dash`).
 | G | 08 | Economy | `ws/economy` | merged | Ledger, garage, mods, repair quotes, payouts, impound | call sites when E/F land |
 | H | 09 | Cars | `ws/cars` | merged | 13 cars drive deterministically | new tires, `gen-lattice` regeneration, VALIDATION sim columns |
 | I | 10 | Harness | `ws/harness` | merged | 17 scenarios, goldens, lint, native-vs-wasm, benches, CI | `barriers`/speed in scenarios, real cities, traffic soak, F codec |
+| J | 13 | Audio | `ws/audio` | merged run 3 (in progress) | `wp_audio` director crate + procedural packs (not wired to the browser yet) | integration doc; hook into testbed |
+| K | 14 | Weather | `ws/weather` | merged run 3 (in progress) | `wp_weather` crate: schedule, wetness, grip/aquaplaning | integration doc; feed grip to vehicle via contracts |
+| L | 15 | Race/crews | `ws/race` | merged run 3 (in progress) | `wp_race` rules, scheduler, stakes, crews; `data/events/` | integration doc |
+| M | 16 | UI kit | `ws/ui` | merged run 3 (in progress) | `apps/ui-kit` against mock data | integration doc |
+| N | 17 | Opponent AI | `ws/opponent` | no branch yet | — | — |
+| O | 18 | Meta services | `ws/meta` | merged run 3 (in progress) | `apps/meta` accounts/matchmaking/leaderboards API | one flaky test under load (`twenty_bots_…` heartbeat) |
+| P | 19 | Design docs | `ws/design-docs` | merged run 3 | GDD, city zones, feature backlog (`docs/design/`) | — |
+| Q | 20 | Tuning dashboard | `ws/tuning-dash` | merged run 3 (in progress) | sweep runner + presets (`tools/tuning-dash`) | integration doc |
 | Lead | 12 | Integration | `main` | — | Contacts → damage, debris, hull, static boxes, city loading | **v0.2.0 contract bump**, police units as sim vehicles, F's `wp_sim` hooks, physical traffic |
 
 ## What you can play right now
+Published testbed (private link, owner): https://claude.ai/artifact/EJWFJePAQyuPts6NY8XACL — or
 `just web` → http://localhost:5173: drive any of the 15 cars with real handling; crash into the
 other car in the head-on scenario and watch the lattice crumple (L / H layers).
 
