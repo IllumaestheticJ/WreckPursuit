@@ -49,6 +49,23 @@ pub fn free_drive(car: &str, mode: DamageMode, city: bool) -> Scenario {
     }
 }
 
+/// Speed the city-chase player starts at, m/s (~110 km/h: well over the city limits).
+pub const CITY_CHASE_SPEED_MPS: f32 = 30.0;
+
+/// "City chase" preset: the procedural 12×12 city at 23:00 with full police presence and
+/// traffic; the live player starts on the race grid already speeding
+/// ([`CITY_CHASE_SPEED_MPS`]), which the world reports as violations and the police turn into
+/// heat. Same seed every time, so chases are reproducible and replayable.
+pub fn city_chase(car: &str, mode: DamageMode) -> Scenario {
+    let mut sc = free_drive(car, mode, true);
+    sc.name = "city_chase".into();
+    sc.seed = 23;
+    sc.time_of_day_h = 23.0;
+    sc.police_presence = Some(1.0);
+    sc.entities[0].speed_mps = CITY_CHASE_SPEED_MPS;
+    sc
+}
+
 /// A plainly scripted entity (no keyframes) at a pose.
 pub fn entity(id: &str, car: &str, pos: [f32; 3], yaw: f32) -> EntitySpec {
     EntitySpec {
@@ -98,6 +115,14 @@ mod tests {
         let sc = free_drive("debug_sedan", DamageMode::Simulation, true);
         sc.validate().unwrap();
         assert_eq!(from_ron(&sc.to_ron()).unwrap(), sc);
+    }
+
+    #[test]
+    fn city_chase_is_a_valid_v2_scenario() {
+        let sc = city_chase("debug_coupe", DamageMode::Arcade);
+        sc.validate().unwrap();
+        assert_eq!(from_ron(&sc.to_ron()).unwrap(), sc);
+        assert!(sc.entities[0].speed_mps > 20.0);
     }
 
     #[test]
