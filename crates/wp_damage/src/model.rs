@@ -679,6 +679,21 @@ impl DamageModel {
         self.wheel_lost
     }
 
+    /// Plastic work absorbed by beam `i` (index into `LatticeDef::beams`), J.
+    pub fn beam_energy_j(&self, i: usize) -> f32 {
+        self.beams[i].energy_j
+    }
+
+    /// Accumulated plastic strain of beam `i` (stress heat-map input), dimensionless.
+    pub fn beam_plastic_strain(&self, i: usize) -> f32 {
+        self.beams[i].plastic_strain
+    }
+
+    /// Whether beam `i` is broken.
+    pub fn beam_broken(&self, i: usize) -> bool {
+        self.hot[i].broken
+    }
+
     /// Number of broken beams.
     pub fn broken_beam_count(&self) -> usize {
         self.hot.iter().filter(|b| b.broken).count()
@@ -728,6 +743,29 @@ impl DamageModel {
                 continue;
             }
             worst = worst.max(vec3::dot(vec3::sub(self.pos[i], self.rest_pos[i]), dir));
+        }
+        worst
+    }
+
+    /// Structural crush: the largest displacement (any direction) of an active node that is
+    /// not glass or bumper cover, m. Use this for crush-depth metrics: polymer cover nodes ride
+    /// back past the bumper beam and detached/shattered nodes freeze where they left, so a
+    /// max over *all* nodes overstates the deformation of the car's structure.
+    pub fn structural_crush_m(&self) -> f32 {
+        let mut worst: f32 = 0.0;
+        for i in 0..self.pos.len() {
+            if self.detached[i]
+                || matches!(
+                    self.node_region[i],
+                    BodyRegion::Windshield
+                        | BodyRegion::RearGlass
+                        | BodyRegion::FrontBumper
+                        | BodyRegion::RearBumper
+                )
+            {
+                continue;
+            }
+            worst = worst.max(vec3::length(vec3::sub(self.pos[i], self.rest_pos[i])));
         }
         worst
     }

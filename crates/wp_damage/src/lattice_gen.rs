@@ -255,7 +255,7 @@ pub const DEFAULT_SECTIONS: Sections = Sections {
     panel_attach: 0.25e-4,
     structural: 0.25e-4,
     cabin: 3.0e-4,
-    cross_member: 0.15e-4,
+    cross_member: 0.06e-4,
     rail_soft: 0.5e-4,
     rail_hard: 0.9e-4,
     bumper_beam: 2.0e-4,
@@ -866,14 +866,16 @@ pub fn generate_lattice(p: &LatticeParams) -> LatticeDef {
             ("hss", sec.door_beam * mass_scale, true)
         } else if both(&is_structural) {
             let (pa, pb) = (nodes[a as usize].pos_m, nodes[b as usize].pos_m);
-            let (dx, dy, dz) = (
+            let (dx, _dy, _dz) = (
                 (pa[0] - pb[0]).abs(),
                 (pa[1] - pb[1]).abs(),
                 (pa[2] - pb[2]).abs(),
             );
             let cabin_zone = stations[ia.station].zone == Zone::Cabin
                 && stations[ib.station].zone == Zone::Cabin;
-            if cabin_zone && dx > dy.max(dz) {
+            // Any cabin member that spans columns carries side load (cross-car); only members
+            // within one column form the fore-aft / vertical survival cell.
+            if cabin_zone && dx > 0.05 {
                 ("hss", sec.cross_member * mass_scale, true)
             } else if cabin_zone {
                 ("hss", sec.cabin * mass_scale, true)

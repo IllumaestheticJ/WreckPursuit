@@ -97,10 +97,18 @@ impl DamageModel {
         let t = self.tuning.clone();
         let mut groups: Vec<ContactGroup> = Vec::new();
         for c in contacts {
-            let v = c.rel_speed_mps.abs();
-            if !v.is_finite() || v < t.min_contact_speed_mps {
+            let closing = c.rel_speed_mps.abs();
+            if !closing.is_finite() || closing < t.min_contact_speed_mps {
                 continue;
             }
+            // Against another moving body both cars crush at once: with equal stiffness each
+            // closes at half the speed and absorbs half of ½·μ·v² (a car hitting an identical
+            // parked car at 56 km/h ≈ a 28 km/h barrier hit for each). Static world: all of it.
+            let v = if c.other_mass_kg > 0.0 {
+                closing * t.dynamic_closing_share
+            } else {
+                closing
+            };
             let j = c.impulse_ns.max(0.0) * mode.impulse_to_lattice_scale;
             if !j.is_finite() || j <= 0.0 {
                 continue;

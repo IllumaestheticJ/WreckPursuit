@@ -582,3 +582,48 @@ fn every_body_profile_crashes_plausibly() {
         );
     }
 }
+
+#[test]
+fn car_to_car_contacts_split_the_energy() {
+    // The same impulse and closing speed against a static wall vs another car: each car's
+    // lattice gets half the energy against a car (dynamic_closing_share = 0.5).
+    let car = sedan();
+    let contact = |other_mass_kg: f32| ContactImpulse {
+        point_local_m: [0.0, 2.35, 0.5],
+        normal_local: [0.0, -1.0, 0.0],
+        impulse_ns: 10_000.0,
+        tangent_impulse_local_ns: [0.0; 3],
+        rel_speed_mps: 15.0,
+        other: (other_mass_kg > 0.0).then_some(wp_contracts::EntityId(9)),
+        other_mass_kg,
+    };
+    let injected = |other_mass_kg: f32| {
+        let mut m = DamageModel::new(&car.lattice, &car.materials);
+        let mut out = Vec::new();
+        m.apply_contacts(&[contact(other_mass_kg)], &sim_mode(), PHYSICS_DT, &mut out);
+        crate::ALL_REGIONS
+            .iter()
+            .map(|&r| m.region_injected_energy_j(r))
+            .sum::<f32>()
+    };
+    let wall = injected(0.0);
+    let car_hit = injected(1400.0);
+    assert!((wall - 0.5 * 10_000.0 * 15.0).abs() < 1.0, "{wall}");
+    assert!((car_hit - 0.5 * wall).abs() < 1.0, "{car_hit}");
+}
+
+#[test]
+fn structural_crush_ignores_cover_and_glass() {
+    let car = sedan();
+    let (m, r) = run_barrier(&car, &sim_mode(), ImpactKind::Frontal, 56.0, 0.0, 0.5, 1);
+    let s = m.structural_crush_m();
+    assert!(
+        s >= r.metrics["crush_m"] - 1e-6,
+        "any-direction >= along-normal"
+    );
+    assert!(
+        s < 1.2 * r.metrics["crush_m"] + 0.05,
+        "{s} vs {}",
+        r.metrics["crush_m"]
+    );
+}

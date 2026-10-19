@@ -153,9 +153,10 @@ as far at the same speed. Skin bindings are left empty (no visual meshes yet).
 | `DamageTuning` (`tuning.rs`) | `substeps`, `iterations`, `solver_divider` | solver cost/stiffness — **recalibrate if changed** |
 | | `buckle_strain`, `structural_buckle_factor`, `densify_*`, `min_length_ratio` | crumple character |
 | | `contact_radius_*`, `contact_min_nodes`, `merge_distance_m`, `min_contact_*` | impact footprint / filtering |
+| | `dynamic_closing_share` | energy split in car-to-car contacts (0.5 = even) |
 | | `total_loss_energy_per_kg`, `structural_health_weight`, `region_replace_strain` | health and billing |
 | | `node_damping_per_s`, `settle_damping_per_s`, `sleep_*` | ringing and sleep |
-| `lattice_gen.rs` | `DEFAULT_SECTIONS` (rails soft/hard, cabin, cross-members, panels…), `REAR_RAIL_FACTOR`, profile `rail_scale` | crush force per zone: frontal crush depth ∝ 1/rail strength, side intrusion ∝ 1/cross-member |
+| `lattice_gen.rs` | `DEFAULT_SECTIONS` (rails soft/hard, cabin, cross-members — every cabin member spanning columns —, panels…), `REAR_RAIL_FACTOR`, profile `rail_scale` | crush force per zone: frontal crush depth ∝ 1/rail strength, side intrusion ∝ 1/cross-member |
 | | mount thresholds (`intrusion_fail_m/total_m`), detach `break_impulse_ns` | per component / part |
 | `data/materials/*.json` | yield, tangent modulus, failure strain | material behaviour |
 | `--strength` | per-car section multiplier | durability class |
@@ -168,16 +169,28 @@ Crush m / cabin intrusion m / health at 15, 25, 40, 56, 80 km/h:
 
 | | 15 | 25 | 40 | 56 | 80 |
 |---|---|---|---|---|---|
-| Sim frontal | 0.04 / 0 / 0.96 | 0.16 / 0 / 0.86 | 0.34 / 0.01 / 0.66 | **0.57** / 0.03 / **0.21 TL** | 1.12 / 0.07 / 0.12 TL |
+| Sim frontal | 0.04 / 0 / 0.96 | 0.16 / 0 / 0.86 | 0.36 / 0.02 / 0.64 | **0.70** / 0.05 / **0.18 TL** | 1.48 / 0.31 / 0.11 TL |
 | Sim offset 40 % | 0.11 / 0 / 0.95 | 0.27 / 0 / 0.87 | 0.52 / 0.01 / 0.55 | 0.98 / 0.05 / 0.13 TL | 1.74 / 0.33 / 0.09 TL |
-| Sim T-bone (1400 kg) | 0.03 / 0.03 / 0.96 | 0.09 / 0.08 / 0.91 | 0.18 / 0.17 / 0.79 | 0.28 / 0.25 / 0.62 TL | 0.43 / 0.42 / 0.24 TL |
+| Sim T-bone (1400 kg) | 0.04 / 0.03 / 0.97 | 0.07 / 0.07 / 0.94 | 0.16 / 0.15 / 0.87 | 0.25 / 0.25 / 0.77 | 0.37 / 0.37 / 0.57 TL |
 | Sim rear | 0.05 / 0 / 0.97 | 0.18 / 0 / 0.85 | 0.51 / 0 / 0.60 | 0.99 / 0 / 0.26 | 1.50 / 0.05 / 0.25 TL |
-| Arcade frontal | 0.00 / 0 / 0.99 | 0.05 / 0 / 0.95 | 0.17 / 0 / 0.87 | 0.32 / 0 / 0.76 | 0.47 / 0.01 / 0.43 |
-| Arcade T-bone | 0.01 / 0 / 0.99 | 0.04 / 0.03 / 0.97 | 0.09 / 0.08 / 0.92 | 0.15 / 0.13 / 0.85 | 0.25 / 0.22 / 0.70 |
+| Arcade frontal | 0.00 / 0 / 0.99 | 0.05 / 0 / 0.95 | 0.17 / 0 / 0.86 | 0.33 / 0 / 0.74 | 0.56 / 0.03 / 0.41 |
+| Arcade T-bone | 0.01 / 0.01 / 0.99 | 0.04 / 0.03 / 0.98 | 0.07 / 0.07 / 0.95 | 0.13 / 0.13 / 0.91 | 0.22 / 0.22 / 0.83 |
 
-Targets met: 56 km/h frontal ≈ 0.6 m crush + TotalLoss; 25 km/h tap dents (severity ≈ 0.65) and
-cracks the cover; 40 km/h T-bone fails the struck-side front suspension and destroys the
-front door (severity ≈ 0.6); failures progress bumper → radiator (56) → engine (80).
+Targets met: 56 km/h frontal ≈ 0.6–0.7 m crush + TotalLoss; 25 km/h tap dents (severity ≈ 0.65)
+and cracks the cover; 40 km/h T-bone fails the struck-side front suspension and leaves the front
+door at severity ≈ 0.48 (heavy repair; replace from ~50 km/h); failures progress bumper →
+radiator (56) → engine (80). (Offset and rear rows are from the run-1 table and moved by < 10 %.)
+
+**Car-to-car energy split.** Against another moving body (`other_mass_kg > 0`) each car's lattice
+is crushed at `dynamic_closing_share` (0.5) × the closing speed, so the two cars share ½·μ·v²
+instead of each absorbing all of it (until run 2 they each did — 2× the physical energy). A car
+hitting an identical parked car at 56 km/h therefore gets the damage of a ~28 km/h barrier hit:
+≈ 0.17 m structural crush, health ≈ 0.8, no TotalLoss. The T-bone rows use this split.
+
+**Measuring crush.** Use `DamageModel::structural_crush_m()` (or `max_displacement_along`). A max
+over *all* node displacements also counts the polymer bumper-cover nodes, which ride ~0.25 m back
+past the bumper beam (nodes do not collide), and detached/shattered nodes frozen where they left:
+in a 56 km/h car-into-parked-car hit it reads 0.42 m while the structure crushed 0.17 m.
 
 ## Tests
 ```sh

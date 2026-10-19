@@ -45,6 +45,10 @@ pub struct DamageTuning {
     pub contact_friction: f32,
     /// Contacts slower than this (closing speed) never deform the lattice, m/s.
     pub min_contact_speed_mps: f32,
+    /// Fraction of the closing speed at which this car's lattice is crushed when the other
+    /// body is dynamic (`other_mass_kg > 0`); 0.5 splits the collision energy evenly between
+    /// two equally stiff cars instead of giving each car all of it.
+    pub dynamic_closing_share: f32,
     /// Contacts carrying less energy (`½·J·v` after scaling) are ignored, J.
     pub min_contact_energy_j: f32,
     /// A new manifold within this lateral distance of an active impact's footprint merges
@@ -108,6 +112,7 @@ impl Default for DamageTuning {
             contact_radius_per_ns: 1.0e-4,
             contact_friction: 0.5,
             min_contact_speed_mps: 1.0,
+            dynamic_closing_share: 0.5,
             min_contact_energy_j: 40.0,
             merge_distance_m: 0.3,
             impactor_max_age_s: 0.6,
