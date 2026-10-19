@@ -66,6 +66,11 @@ impl PhysicsWorld {
         )
     }
 
+    /// The narrow phase (contact pairs of the last step).
+    pub fn narrow_phase(&self) -> &NarrowPhase {
+        &self.narrow_phase
+    }
+
     /// Advance one fixed step.
     pub fn step(&mut self) {
         self.pipeline.step(

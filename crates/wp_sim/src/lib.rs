@@ -4,14 +4,17 @@
 //! ([`wp_contracts::PHYSICS_DT`]) it: applies inputs, steps the world clock/traffic, steps
 //! every vehicle, feeds contacts to damage, pushes handling effects back to vehicles, steps
 //! police, and collects events. **Current state:** vehicles are `wp_vehicle` rigid bodies
-//! (wheel probes via the Rapier query pipeline); contacts are not yet extracted from Rapier
-//! into damage; police and economy are stubs.
+//! (wheel probes via the Rapier query pipeline); chassis contacts are extracted from Rapier
+//! manifolds into `ContactImpulse`s for `wp_damage` and `SimEvent::Contact` events
+//! (`contacts.rs`); police and economy are stubs.
 
 #![warn(missing_docs)]
 
+mod contacts;
 mod physics;
 mod systems;
 
+pub use contacts::CONTACT_EVENT_MIN_IMPULSE_NS;
 pub use physics::PhysicsWorld;
 pub use systems::{SystemId, Systems};
 
@@ -111,6 +114,11 @@ impl Sim {
     /// disabled world freezes the clock, a disabled police system sees nothing.
     pub fn set_systems(&mut self, systems: Systems) {
         self.systems = systems;
+        // A frozen vehicle system also takes the chassis bodies out of the physics step, so
+        // they neither fall nor produce contacts.
+        for v in &self.vehicles {
+            self.physics.bodies[v.body.body].set_enabled(systems.vehicle);
+        }
     }
 
     /// Systems currently stepped.
@@ -133,6 +141,7 @@ impl Sim {
         let mut vehicle = Vehicle::new(&car.def, &car.tires, pos, yaw);
         vehicle.set_entity(id);
         let body = vehicle.build_body(&mut self.physics.bodies, &mut self.physics.colliders);
+        self.physics.bodies[body.body].set_enabled(self.systems.vehicle);
         self.vehicles.push(SimVehicle {
             id,
             car_id: car.def.id.clone(),
@@ -207,17 +216,38 @@ impl Sim {
                     .write_body(&mut self.physics.bodies[slot.body.body]);
             }
         }
+        let infos: Vec<contacts::BodyInfo> = self
+            .vehicles
+            .iter()
+            .map(|v| {
+                let rb = &self.physics.bodies[v.body.body];
+                contacts::BodyInfo {
+                    id: v.id,
+                    body: v.body.body,
+                    collider: v.body.collider,
+                    pre_linvel: rb.linvel(),
+                    pre_angvel: rb.angvel(),
+                    pre_com: rb.center_of_mass(),
+                }
+            })
+            .collect();
         self.physics.step();
+        let tick_contacts = contacts::collect(
+            self.physics.narrow_phase(),
+            &self.physics.bodies,
+            &self.physics.colliders,
+            &infos,
+        );
+        out.extend(tick_contacts.events);
         if sys.vehicle {
             for slot in &mut self.vehicles {
                 slot.vehicle.read_body(&self.physics.bodies[slot.body.body]);
             }
         }
         if sys.damage {
-            for slot in &mut self.vehicles {
-                // Contacts will come from Rapier manifolds (lead, next step).
+            for (slot, contacts) in self.vehicles.iter_mut().zip(&tick_contacts.per_vehicle) {
                 slot.damage
-                    .apply_contacts(&[], &self.config.mode, dt, &mut out);
+                    .apply_contacts(contacts, &self.config.mode, dt, &mut out);
                 let effects = slot.damage.handling_effects();
                 slot.vehicle.apply_damage_effects(&effects);
             }
@@ -402,6 +432,82 @@ mod tests {
         }
         let state = sim.vehicle_states()[0].1.clone();
         (sim.state_hash(), state)
+    }
+
+    /// Two sedans 30 m apart, 10 m/s each, head-on. Returns every event of a 3 s run.
+    fn head_on_events() -> Vec<SimEvent> {
+        let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
+        let mut sim = Sim::new(SimConfig {
+            seed: 3,
+            mode,
+            time_of_day: TimeOfDay::from_hours(12.0),
+            time_ratio: 10.0,
+        });
+        let a = sim.spawn_vehicle(&car, [0.0; 3], 0.0).unwrap();
+        let b = sim
+            .spawn_vehicle(&car, [0.0, 30.0, 0.0], std::f32::consts::PI)
+            .unwrap();
+        for (i, (pos, yaw)) in [([0.0; 3], 0.0), ([0.0, 30.0, 0.0], std::f32::consts::PI)]
+            .into_iter()
+            .enumerate()
+        {
+            let slot = &mut sim.vehicles[i];
+            let rb = &mut sim.physics.bodies[slot.body.body];
+            slot.vehicle.place_body(rb, pos, yaw, 10.0, 0.0);
+        }
+        let hold = VehicleInput {
+            throttle: 0.3,
+            ..Default::default()
+        };
+        sim.set_input(a, hold).unwrap();
+        sim.set_input(b, hold).unwrap();
+        for _ in 0..720 {
+            sim.step_fixed();
+        }
+        sim.drain_events()
+    }
+
+    #[test]
+    fn head_on_crash_emits_contacts() {
+        let events = head_on_events();
+        let contacts: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                SimEvent::Contact {
+                    a,
+                    b,
+                    impulse_ns,
+                    rel_speed,
+                    normal,
+                    ..
+                } => Some((*a, *b, *impulse_ns, *rel_speed, *normal)),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            !contacts.is_empty(),
+            "no Contact events from a head-on crash"
+        );
+        // Emitted once per pair, by the lower entity id, pointing from a (south) toward b.
+        assert!(contacts
+            .iter()
+            .all(|c| c.0 == EntityId(1) && c.1 == EntityId(2)));
+        let first = contacts[0];
+        assert!(
+            (14.0..=25.0).contains(&first.3),
+            "closing speed {} m/s, expected ≈ 20",
+            first.3
+        );
+        assert!(first.4[1] > 0.7, "normal {:?} should point +Y", first.4);
+        let total: f32 = contacts.iter().map(|c| c.2).sum();
+        // 2 × 1400 kg at ±10 m/s: momentum change of each car is O(10⁴) N·s.
+        assert!(total > 5_000.0, "total impulse {total} N·s");
+        assert_eq!(
+            events,
+            head_on_events(),
+            "contact events must be deterministic"
+        );
     }
 
     #[test]
