@@ -34,7 +34,12 @@ use crate::manoeuvre::{
 
 /// Extra standstill distance kept behind a stationary obstruction (wreck, parked car, debris),
 /// so there is room to pull out around it, m.
-pub const OBSTACLE_GAP_M: f32 = 4.0;
+pub const OBSTACLE_GAP_M: f32 = 6.0;
+/// While pulling out to pass, aim this much further left than the oncoming lane's centre (a
+/// physical car then turns out more sharply and clears the obstruction sooner), m.
+pub const PASS_PULL_OUT_EXTRA_M: f32 = 0.6;
+/// A pass held behind the obstruction (body not clear) for this long is abandoned, s.
+pub const PASS_STALL_S: f32 = 4.0;
 /// Time a driver stands behind an obstruction before acting (on top of its patience for how
 /// long the obstruction has been there), s.
 pub const SETTLE_S: f32 = 1.0;
@@ -100,6 +105,8 @@ pub(super) struct Pass {
     pub(super) opp_s: f32,
     /// Merging back.
     pub(super) returning: bool,
+    /// Time held at a standstill beside the obstruction without being clear of it, s.
+    pub(super) stall_s: f32,
 }
 
 /// A kinematic agent's progress through a planned turn.
@@ -774,8 +781,10 @@ impl Traffic {
         let t_pass = d / PASS_MPS + 3.0;
         let v_onc = os.speed_limit * 1.25;
         let clear = (d + v_onc * t_pass + 20.0).min(160.0);
-        // No passing over a crest or round a bend: the road must be visible for `clear` m.
-        if !crate::manoeuvre::sight_clear(&self.path_profile(map, a, clear), PASS_MAX_BEND_RAD) {
+        // No passing over a crest or round a bend: the road must be visible up to the junction
+        // ahead (or `clear` m). Traffic turning in at that junction is checked upstream.
+        let sight = clear.min(seg.length - a.s);
+        if !crate::manoeuvre::sight_clear(&self.path_profile(map, a, sight), PASS_MAX_BEND_RAD) {
             return PassTry::Impossible;
         }
         let q = geom::xy(self.poses[i].p);
@@ -818,6 +827,7 @@ impl Traffic {
             obs,
             opp_s: s_m,
             returning: false,
+            stall_s: 0.0,
         })));
         PassTry::Started
     }

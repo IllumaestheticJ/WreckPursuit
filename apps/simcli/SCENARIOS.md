@@ -141,7 +141,10 @@ without one).
 World metrics for `world_metric(...)` (all 0 on the flat world): `traffic_agents_final`,
 `traffic_agents_min` (fewest agents at any tick after a 10 s warm-up), `traffic_moving_frac_final`
 and `traffic_moving_frac_min` (fraction of agents above 0.5 m/s; the min is over 1 Hz samples
-after the warm-up), `civilian_collisions`, `traffic_spawned`, `traffic_stuck_recycled`, `props`
+after the warm-up), `civilian_collisions`, `traffic_spawned`, `traffic_stuck_recycled`,
+`traffic_go_arounds` (civilians that got around a stationary vehicle: oncoming-lane passes plus
+lane changes made for it), `traffic_turnarounds` (civilians that turned around or reversed back
+to the last junction because their lane was blocked), `props`
 (parked cars and cones turned into bodies), `static_boxes`, `police_units_max` (most police
 units alive at once), `police_units_final`.
 

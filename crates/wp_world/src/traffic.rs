@@ -1586,17 +1586,24 @@ impl Traffic {
             // Passing: keep clear of the obstruction until the body is beside it, and give way
             // to anything coming the other way in the oncoming lane.
             let mut pass_event = PassEvent::None;
+            let mut pass_stalled = false;
             if let Some(b) = pass {
                 if !b.returning {
                     lat_target = b.offset;
-                    let ahead = geom::add(q, geom::scale(pose.f, 1.5));
-                    let me = Obb {
-                        c: ahead,
+                    // Body not clear of the obstruction yet: aim a little wider and creep; stop
+                    // short of it if the body (0.1 m margin, 1 m ahead) would touch it.
+                    let body_at = |ahead: f32, m: f32| Obb {
+                        c: geom::add(q, geom::scale(pose.f, ahead)),
                         f: pose.f,
-                        hl: HALF_L + 0.3,
-                        hw: CAR_WIDTH_M * 0.5 + 0.3,
+                        hl: HALF_L + m,
+                        hw: CAR_WIDTH_M * 0.5 + m,
                     };
-                    if geom::obb_overlap(&me, &b.obs_box) {
+                    if geom::obb_overlap(&body_at(1.5, 0.3), &b.obs_box) {
+                        lat_target = b.offset - blocked::PASS_PULL_OUT_EXTRA_M;
+                        let creep = idm(v, 1.5, f32::INFINITY, 0.0, &p);
+                        cap(&mut acc, &mut bind, creep, Bind::Line);
+                    }
+                    if geom::obb_overlap(&body_at(1.0, 0.1), &b.obs_box) {
                         let g = b.obs_rear_s - a.s - HALF_L;
                         cap(
                             &mut acc,
@@ -1604,6 +1611,9 @@ impl Traffic {
                             idm(v, v0, g + p.min_gap_m - 0.8, 0.0, &p),
                             Bind::Line,
                         );
+                        if v < 0.2 {
+                            pass_stalled = true;
+                        }
                     }
                     if a.s >= b.end_s {
                         pass_event = PassEvent::Return;
@@ -1869,6 +1879,16 @@ impl Traffic {
             };
             a.go_around = cls == Wait::Obstructed && still >= a.patience_s && obs_gap < 60.0;
             a.retry_s = (a.retry_s - TRAFFIC_DT).max(0.0);
+            if let Some(Manoeuvre::Pass(b)) = a.manoeuvre.as_deref_mut() {
+                b.stall_s = if pass_stalled {
+                    b.stall_s + TRAFFIC_DT
+                } else {
+                    0.0
+                };
+                if b.stall_s > blocked::PASS_STALL_S && pass_event == PassEvent::None {
+                    pass_event = PassEvent::Abort;
+                }
+            }
             match pass_event {
                 PassEvent::None => {}
                 PassEvent::Return => {
