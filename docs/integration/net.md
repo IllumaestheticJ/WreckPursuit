@@ -187,9 +187,10 @@ Merged `origin/main` (contract v0.3.0, clean). Item 1 — the v0.3.0 net items, 
   traffic boxes, weather / radio / wanted in the overlay, `?join=`); smoke-tested in headless
   Chromium against a live `wp-server --city procedural --weather heavy_rain --bots 2`.
 
-Round-6b items were all done last round (see below). Checks: fmt, clippy `-D warnings`,
-`cargo test --workspace`, the wasm build, `tsc --noEmit` for the testbed (with bindings
-from `wasm-bindgen` 0.2.129) — results in the commit message of the round-8 docs commit.
+Round-6b items were all done last round (see below). Checks (round 8): fmt, clippy
+`--workspace --all-targets -D warnings` clean; `cargo test --workspace` 720 passed, 0 failed,
+15 ignored (the parked tests); wasm build passes (no tokio/tungstenite in `wp_wasm`'s tree);
+testbed `tsc --noEmit` clean against bindings from `wasm-bindgen` 0.2.129.
 
 ## Response to lead feedback (round 6b)
 Merged `origin/main` and the lead branch `origin/claude/laughing-newton-0xqr6q` (clean).
