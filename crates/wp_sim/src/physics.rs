@@ -63,6 +63,20 @@ impl PhysicsWorld {
         )
     }
 
+    /// Remove a rigid body and its colliders (despawn). Deterministic: Rapier frees the
+    /// handle; later insertions may reuse the slot with a new generation.
+    pub fn remove_body(&mut self, body: RigidBodyHandle) {
+        self.bodies.remove(
+            body,
+            &mut self.islands,
+            &mut self.colliders,
+            &mut self.impulse_joints,
+            &mut self.multibody_joints,
+            &mut self.soft_bodies,
+            true,
+        );
+    }
+
     /// The narrow phase (contact pairs of the last step).
     pub fn narrow_phase(&self) -> &NarrowPhase {
         &self.narrow_phase
