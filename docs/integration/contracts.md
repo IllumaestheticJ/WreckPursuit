@@ -62,3 +62,16 @@ Built on `claude/laughing-newton-0xqr6q`; not merged to `main`.
 - `DamageSnapshot` lacks compressive plastic strain and per-beam energy (B's shape); restore
   zeroes them. Repair of one region can leave neighbouring beams stretched until the next
   contact wakes the lattice. B should own `wp_damage/src/snapshot.rs`.
+
+**Gate results on this branch:** `cargo fmt --all --check`, `cargo clippy --workspace
+--all-targets -- -D warnings`, `cargo build --target wasm32-unknown-unknown -p wp_wasm`,
+`cargo run -p lint-determinism` (0 errors) pass. `cargo test --workspace`: goldens match
+(every tick hash unchanged; only the `contract=` header was re-blessed), scenario determinism
+in-process and fresh-process pass. Pre-existing failures on the base branch
+(`claude/laughing-newton-0xqr6q`), checked there:
+- `wp_economy` `real_police_capture_settles_through_the_economy` — **fixed here**: `set_heat`
+  emits no `WantedLevelChanged`, so the tracker saw `None`; it now uses `PursuitEnded.level`.
+- `wp_race` `simcli_races::city_sprint_on_real_roads` — **still failing, not touched**: the test
+  indexes scenario entities by the sim's vehicle list, which since run 6 also holds physical
+  police / traffic (`index out of bounds: len 2, index 2`). L should filter samples to the
+  scenario's entities.
