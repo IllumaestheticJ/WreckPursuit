@@ -20,7 +20,7 @@ use wp_world::procgen::ProcGenConfig;
 use wp_world::CityMap;
 
 use crate::config::PoliceConfig;
-use crate::events::{PoliceEvent, UnitKind};
+use crate::events::{PoliceEvent, PoliceEventExt, UnitKind};
 use crate::graph::{dist, lerp2, sub, District, NodeId, PoiKind, RoadClass, RoadGraph};
 use crate::unit::{
     plan_unit_speed, step_ground, DriveCommand, DriveEnv, Track, Unit, UnitRole, LANE_OFFSET_M,

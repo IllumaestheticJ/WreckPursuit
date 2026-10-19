@@ -2,7 +2,7 @@
 //! Runs a police scenario and prints every radio line with its sim time and the racers'
 //! wanted levels, then lines per minute. Used to tune `data/police/radio.toml`.
 
-use wp_police::PoliceEvent;
+use wp_police::{PoliceEvent, PoliceEventExt};
 
 fn main() {
     let path = std::env::args()
