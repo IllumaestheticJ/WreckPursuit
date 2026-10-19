@@ -3629,6 +3629,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "wp_race"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "serde",
+ "serde_json",
+ "simcli",
+ "thiserror 2.0.21",
+ "toml",
+ "wp_contracts",
+ "wp_economy",
+ "wp_math",
+ "wp_world",
+]
+
+[[package]]
 name = "wp_server"
 version = "0.1.0"
 dependencies = [

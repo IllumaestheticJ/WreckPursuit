@@ -1,0 +1,119 @@
+# Event stakes. Owned by workstream 15 (wp_race). Loaded by wp_race::StakeTable.
+#
+#   risk  = kinds.risk + phases.risk + legality.risk
+#   purse = kinds.base_purse × brackets.purse × risk_curve(risk)
+#   entry = purse × kinds.entry_frac × phases.entry × legality.entry
+#   heat  = kinds.heat + phases.heat + legality.heat      (0 for sanctioned events)
+#
+# Feel target: a D-class night street sprint pays ~2 800 (wp_economy's own feel target for a
+# Compact 9 km night sprint), a rare illegal daytime race pays 2.5-4× that, sanctioned day
+# circuits pay least but cost no heat.
+
+# [risk, purse multiplier]; both columns strictly ascending.
+risk_curve = [
+    [0.0, 0.60],
+    [1.0, 1.00],
+    [2.0, 1.50],
+    [3.0, 2.30],
+    [4.0, 3.40],
+    [6.0, 5.00],
+]
+
+[kinds.sprint]
+base_purse = 2150
+entry_frac = 0.11
+risk = 0.6
+heat = 1.0
+
+[kinds.circuit]
+base_purse = 2000
+entry_frac = 0.11
+risk = 0.3
+heat = 0.6
+
+[kinds.outrun]
+base_purse = 1600
+entry_frac = 0.15
+risk = 0.9
+heat = 1.5
+
+[kinds.checkpoint]
+base_purse = 1700
+entry_frac = 0.10
+risk = 0.7
+heat = 1.2
+
+[kinds.cannonball]
+base_purse = 2600
+entry_frac = 0.12
+risk = 1.2
+heat = 2.0
+
+[kinds.delivery]
+base_purse = 2200
+entry_frac = 0.08
+risk = 1.0
+heat = 1.6
+
+[kinds.drag]
+base_purse = 900
+entry_frac = 0.15
+risk = 0.2
+heat = 0.4
+
+[kinds.time_attack]
+base_purse = 1200
+entry_frac = 0.08
+risk = 0.1
+heat = 0.3
+
+[phases.Dawn]
+risk = 0.3
+entry = 0.9
+heat = 0.5
+
+[phases.Day]
+risk = 0.8       # witnesses, traffic, patrols on shift
+entry = 0.8
+heat = 1.5
+
+[phases.Dusk]
+risk = 0.4
+entry = 1.0
+heat = 0.8
+
+[phases.Night]
+risk = 0.5
+entry = 1.0
+heat = 0.0
+
+[brackets.D]
+purse = 1.0
+[brackets.C]
+purse = 1.35
+[brackets.B]
+purse = 1.8
+[brackets.A]
+purse = 2.4
+[brackets.S]
+purse = 3.2
+[brackets.X]
+purse = 4.2
+
+[legality.sanctioned]
+risk = 0.0
+entry = 1.2      # sanctioned events charge more to enter; prize money is lower (low risk)
+heat = 0.0
+police = "None"
+
+[legality.street]
+risk = 0.5
+entry = 1.0
+heat = 0.0
+police = "Normal"
+
+[legality.illegal_daytime]
+risk = 2.5
+entry = 1.5
+heat = 4.0
+police = "Max"
