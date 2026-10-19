@@ -115,9 +115,10 @@ fn set_state_is_a_close_approximation() {
         .map(|i| (s.pos[i] - truth.pos[i]).powi(2))
         .sum::<f32>()
         .sqrt();
-    // The contract `VehicleState` has no pedal-filter, auto-box timer or ESC-reference state,
-    // so the restored car re-ramps its throttle from 0. Since playtest row 28 the scripted
-    // keyboard turn at 3.3 s runs at the grip limit (~1 g, instead of washing out at ~0.6 g),
-    // where that throttle difference moves the car more: 0.27 m → 0.68 m after 1 s.
+    // At tick 800 the coupe is in a keyboard power slide with its clutch LSD slipping, turning
+    // at the grip limit (slip-targeted keyboard steering, playtest row 28). The public state
+    // carries no pedal filter, auto-box timer or ESC reference, so the restored car re-ramps
+    // its throttle from 0 and the slide diverges a little (0.27 m on main before the LSD and
+    // steering changes; 0.76 m with the 1.5-way clutch LSD; DRIFT_NOTE).
     assert!(d < 1.0, "set_state drift after 1 s: {d} m");
 }

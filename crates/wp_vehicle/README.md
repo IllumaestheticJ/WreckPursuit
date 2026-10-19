@@ -16,15 +16,16 @@ with assists and unfiltered on a wheel. Deterministic, 240 Hz with 2 sub-steps.
 | `suspension.rs` | spring + preload, bump/rebound damping, bump stop, anti-roll bars |
 | `tire.rs` | simplified Magic Formula, load sensitivity, combined slip (normalised slip vector), relaxation length, low-speed guard |
 | `engine.rs` | torque curve, idle controller, soft rev limiter, engine braking, turbo lag (`EngineExtras`) |
-| `drivetrain.rs` | gearbox (manual/auto: load-based schedule, kickdown, corner hold, rev-matched clutch shifts, auto-reverse), automatic clutch / launch control, open/LSD/locked diff transfer |
+| `drivetrain.rs` | gearbox (manual/auto: load-based schedule, kickdown, corner hold, rev-matched clutch shifts, auto-reverse), automatic clutch / launch control, torque converter |
+| `diff.rs` | differentials, axle + AWD centre: open, clutch-pack LSD (1 / 1.5 / 2-way), viscous, helical (torque-sensing), active e-diff, locked; per-car setups from `data/cars/differentials.toml` |
 | `brakes.rs` | bias, ABS (~15 Hz release cycle) |
 | `steering.rs` | slip-targeted lock + rack rate (keyboard/gamepad), countersteer help, Ackermann, toe, damage pull, FWD torque steer |
-| `assists.rs` | pedal filters, TCS, ESC (lagged ~1°/g reference) |
+| `assists.rs` | pedal filters, TCS (throttle cut + brake-based traction control), ESC (lagged ~1°/g reference) |
 | `aero.rs` | drag, axle lift/downforce |
 | `ffb.rs` | rack torque (aligning torque + caster trail), road rumble, damper |
 | `rig.rs` | single-car Rapier test rig (same per-tick sequence as `wp_sim`) |
 | `slide.rs` | slide-control assists for keyboard/gamepad: car slide class, gyro yaw damper, slide throttle |
-| `metrics.rs` | 0–100, 100–0, skidpad + understeer gradient, step steer, lift-off, power-on, power-oversteer onset, power-oversteer exit, top speed |
+| `metrics.rs` | 0–100, 100–0, skidpad + understeer gradient, step steer, lift-off, power-on, power-oversteer onset, power-oversteer exit, split-µ launch, corner exit, top speed |
 | `handling.rs` | driver-facing handling tests through a real `AssistProfile`: ramp steer, constant radius, step steer, slalom, city corner; keyboard tapping / analog drivers |
 | `math.rs` | deterministic `atan`/`atan2`/`tan` (polynomial), glam helpers |
 
@@ -207,6 +208,55 @@ understeer was in the input layer:
 
 Before/after per car: `docs/integration/vehicle.md` → "Handling balance".
 
+## Differentials (`diff.rs`)
+
+Every driven axle (and the centre of an AWD car) is solved once per drivetrain sub-step. A
+diff moves a torque `X` across: left/front side `T·share − X`, right/rear side `T·share + X`.
+Internal friction pushes torque from the faster to the slower side, and `X` never exceeds the
+torque that would equalise the two speeds within the sub-step (`k_eq·Δω`), so a diff below
+its capacity sticks (acts locked) and one above it slips at its capacity — a stick–slip
+clutch model, stable at any lock.
+
+| Type (`data/cars/differentials.toml`) | Bound on `X` (half the wheel-torque difference) | Feel |
+|---|---|---|
+| `open` | 0 | equal torque; the unloaded / low-grip wheel spins (inside wheel on exits, ice wheel on split-µ) |
+| `clutch` `{preload_nm, accel, decel}` | `½(preload + lock·|T_in|)`, lock = `accel` under drive, `decel` on the overrun (engine braking). **1-way** `decel = 0`, **1.5-way** `0 < decel < accel`, **2-way** `decel = accel` | more `accel`: traction, power understeer (FWD) / power oversteer (RWD); more `decel`: stable on lift-off and entry, less rotation; preload: locks even with no torque (pushes at parking speeds) |
+| `viscous` `{nm_per_rads, max_nm}` | `½·min(c·|Δω|, max)` — speed-difference only | soft, progressive, a little lazy |
+| `helical` `{tbr, tbr_coast, preload_nm?}` | `½·min(L·|T_in|, (TBR−1)·R_fast)`, `L = (TBR−1)/(TBR+1)`; `R_fast` = torque the faster wheel's tire + brake resists | smooth, no preload; **acts open when a wheel is unloaded** (in the air, on ice) — brake-based TC restores the bias by loading that wheel's brake |
+| `active` `{max_nm, preload_nm, accel, decel, slip_gain}` | drive: `½·min(max, preload + accel·|T_in| + slip_gain·excess)`, overrun `½·min(max, decel·|T_in|)`; `excess` = speed difference beyond the cornering geometry (yaw rate × track) | free on entry (turn-in), locks a spinning inside wheel on exit |
+| `locked` | unbounded | welded / spool: both wheels together; scrubs and pushes in tight turns |
+
+Lock fractions use the standard definition `lock = (T_slow − T_fast)/T_in`, i.e. torque bias
+ratio `(1 + lock)/(1 − lock)`. **Centre** (AWD layouts only): `default` keeps the layout's own
+behaviour (fixed split for `Awd`, the clutch coupling for `AwdOnDemand`); `viscous`, `helical`,
+`locked` act around the static split (`base_front_split` for on-demand cars, whose coupling is
+then off), comparing tire surface speeds so unequal tire sizes do not bind.
+
+**Where setups come from:** `data/cars/differentials.toml` (embedded with `include_str!`, keyed
+by car id, owned by workstream 09) wins; missing axles fall back to the car file's contract
+`diff_front` / `diff_rear` (`Lsd { preload_nm, ramp_power, ramp_coast }` = clutch with
+`accel = ramp_power`, `decel = ramp_coast`). `VehicleExtras::diffs` overrides both (tests,
+tuning, mods). `Vehicle::diffs()` reports what is in use; `Telemetry::diff_transfer_nm` the
+torque each diff moved (front, rear, centre).
+
+**Interactions.**
+- *TCS:* brake-based traction control (`assists::Tcs::update_brakes`) brakes the driven wheel
+  that out-runs its partner by more than the cornering geometry explains (dead band 0.6 m/s +
+  4 % of speed), with a feed-forward (drive torque minus what its tire resists) plus a
+  proportional term, up to the full service-brake torque. Rear axles fade it out from 6 to
+  12 m/s (one braked rear wheel adds yaw; at speed the throttle cut handles spin); front axles
+  keep it at all speeds. While it holds a wheel, the throttle cut watches the slower wheel of
+  the axle, blending back to the faster one as brake-TC nears its limit. Locked axles get no
+  brake-TC (nothing to split).
+- *ESC:* on a locked rear axle a single-wheel rear brake has no yaw effect, so understeer
+  braking moves to the same-side front wheel.
+- *Slide assists:* the car's slide class is scaled by its rear diff's steady lock (open 0.85 …
+  locked 1.15 of the power term): a locking rear sustains power slides, so it gets more help.
+  The gyro and countersteer logic themselves are unchanged and stay off with help 0.
+- *Gearbox / lift-off:* the ramp follows the sign of the torque entering the diff, so engine
+  braking (lift-off, downshifts) selects the decel ramp; in a clutch shift's neutral phase
+  only the preload acts.
+
 ## Brakes: how `BrakeDef` is read (worked example)
 
 Torque per wheel at full pedal: `norm = max(bias, 1 − bias)`;
@@ -231,11 +281,12 @@ Damage `brake_scale` and ABS then modulate per wheel; the handbrake adds
 ## Snapshots and client prediction
 
 `Vehicle::snapshot()` / `restore()` capture the **full** dynamic state as an opaque ~0.9 kB
-(format 2)
+(format 4: + brake-TC state)
 byte blob (`VehicleSnapshot::as_bytes` / `from_bytes`): chassis, wheels, engine, gearbox timers,
-clutch, input filters, TCS/ABS, AWD coupling, heat/fuel and the applied `HandlingEffects`. Restore + same
+clutch, input filters, TCS (throttle cut + brake-TC)/ABS, AWD coupling, heat/fuel and the applied `HandlingEffects`. Restore + same
 inputs = bit-identical replay (tested). `Vehicle::set_state(&VehicleState)` is the approximate
-version for when only the public state is available (< 0.5 m drift after 1 s in tests).
+version for when only the public state is available (< 1 m drift after 1 s of a keyboard
+power slide in tests; the pedal filter and a slipping LSD are not in the public state).
 
 `rig::Rig` is the client-side stepper: its own Rapier world built with the same ground
 collider (`rig::ground_collider`, also used by `wp_sim`), the same priming order and per-tick
@@ -270,6 +321,7 @@ cargo run --release -p wp_vehicle --example metrics        # print metrics for e
 cargo run --release -p wp_vehicle --example bench          # per-car cost
 cargo run --release -p wp_vehicle --example handling       # roster × keyboard/gamepad/wheel handling table
 cargo run --release -p wp_vehicle --example handling -- --causes   # + one-assist-off keyboard variants
+cargo run --release -p wp_vehicle --example diff_demo      # differential numbers per car + per type
 ```
 
 `tests/handling_balance.rs` holds the per-class understeer-gradient ranges and the "held key
@@ -278,7 +330,11 @@ reaches the grip limit" / "ESC adds no understeer" checks (playtest row 28).
 `tests/metrics.rs` asserts the prompt-02 ranges; `tests/behaviour.rs` covers parked
 stability, determinism, torque steer, ABS, handbrake, assists-off driving, manual gearbox,
 rev limiter, every damage effect, FFB, surfaces, road conditions (wet, ice, aquaplaning) and
-converter power-on shifts. Scenarios live in
+converter power-on shifts; `tests/differentials.rs` covers split-µ (open spins, LSD drives
+off, brake-TC pull-away), hairpin exit (LSD: less inside-wheel spin, more but controllable
+oversteer, higher exit speed), lift-off 1-way vs 2-way vs locked, the helical diff with an
+unloaded wheel, the AWD viscous centre, determinism/snapshots and pinned roster hashes.
+Scenarios live in
 `apps/simcli/scenarios/vehicle/*.ron`.
 
 ## Measured (release, this repo's cloud container)
@@ -319,8 +375,11 @@ Browser not measured yet (expect ~2×; budget 0.30 ms).
   post-peak drop (how "edgy" the limit is); `load_sensitivity` how much an overloaded outer
   tire gives back (more = more understeer at the limit); `relaxation_length_m` the response
   lag (longer = lazier, more forgiving on keyboard).
-- `LSD ramp_power`: more = better traction, more power understeer (FWD) / oversteer (RWD);
-  `ramp_coast` affects lift-off stability.
+- Differentials (`data/cars/differentials.toml`, see "Differentials" above): clutch `accel`
+  more = traction, power understeer (FWD) / oversteer (RWD); `decel` more = calmer lift-off and
+  entry, less rotation (1-way rotates most); `preload` = lock with no torque (tight-turn
+  push). Helical `tbr` 2–3 is smooth but useless with a wheel in the air. Viscous: gentle,
+  speed-based. Locked: maximum traction, maximum scrub.
 - `brakes.bias_front` and per-axle torques: the bias is normalised so the biased axle gets
   its full `max_torque_*`; too much rear = unstable stops without ABS.
 - `steering.rack_speed_rad_per_s`: keyboard steering speed; `ffb_scale` wheel weight.
@@ -334,6 +393,10 @@ Browser not measured yet (expect ~2×; budget 0.30 ms).
 - No engine stall model (anti-stall slip instead); no tire temperature or wear yet
   (`wear_rate` unused); no camber change with suspension travel.
 - AWD on-demand is front-biased only (couples the rear when the front slips).
+- Differentials: the helical diff's reaction excludes the spinning wheel's own inertia
+  torque (slightly less bias while a wheel spins up than a real one); no clutch-pack heat or
+  wear; the active e-diff is a stateless rule (no yaw-rate targeting); ESC is diff-aware only
+  for a locked rear. Diff setups live outside the car file until contract requests 8–9 land.
 - `VehicleSim::step` (trait) cannot reach Rapier; `wp_sim` calls `step_with_ground`.
 - Tread depth is not modelled (treaded / slick only). `wp_weather` has its own grip model
   (`grip.rs`) with slightly different constants; the vehicle uses `surface.rs`. Automatic shifts are a ratio blend, not a two-clutch

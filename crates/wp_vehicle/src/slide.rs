@@ -73,10 +73,26 @@ fn rear_drive_share(layout: &DriveLayout) -> f32 {
     }
 }
 
-/// How much slide help this car gets, `CLASS_FLOOR..=1`: rises with rear-drive share × power
-/// to weight (from [`CLASS_PW_LOW`] to [`CLASS_PW_HIGH`] W/kg). AWD cars count their rear share
-/// at 60% (the front axle pulls them straight). [`SLIDE_CLASS_OVERRIDES`] wins if listed.
+/// How much slide help this car gets, `CLASS_FLOOR..=1`, with the car's own differentials
+/// ([`crate::diff::DiffSetup::for_car`]); see [`slide_class_with_rear_lock`].
 pub fn slide_class(def: &VehicleDef) -> f32 {
+    slide_class_with_rear_lock(def, crate::diff::DiffSetup::for_car(def).rear.power_lock())
+}
+
+/// Rear-diff effect on the slide class: the power × layout term is scaled by
+/// `DIFF_CLASS_OPEN + DIFF_CLASS_PER_LOCK × rear lock` (open 0.85 … locked 1.15). A locking
+/// rear keeps both rear tires spinning together, so power slides start sooner and carry more
+/// yaw; an open rear flares the inside wheel instead and limits them.
+pub const DIFF_CLASS_OPEN: f32 = 0.85;
+/// See [`DIFF_CLASS_OPEN`].
+pub const DIFF_CLASS_PER_LOCK: f32 = 0.3;
+
+/// How much slide help this car gets, `CLASS_FLOOR..=1`: rises with rear-drive share × power
+/// to weight (from [`CLASS_PW_LOW`] to [`CLASS_PW_HIGH`] W/kg), scaled by the rear diff's
+/// steady lock under power (`rear_lock` 0 open … 1 locked, see [`DIFF_CLASS_OPEN`]). AWD cars
+/// count their rear share at 60% (the front axle pulls them straight).
+/// [`SLIDE_CLASS_OVERRIDES`] wins if listed.
+pub fn slide_class_with_rear_lock(def: &VehicleDef, rear_lock: f32) -> f32 {
     if let Some((_, c)) = SLIDE_CLASS_OVERRIDES.iter().find(|(id, _)| *id == def.id) {
         return c.clamp(0.0, 1.0);
     }
@@ -84,7 +100,8 @@ pub fn slide_class(def: &VehicleDef) -> f32 {
     let power = ((pw - CLASS_PW_LOW) / (CLASS_PW_HIGH - CLASS_PW_LOW)).clamp(0.0, 1.0);
     let rear = rear_drive_share(&def.drivetrain.layout);
     let layout = if rear >= 1.0 { 1.0 } else { 0.6 * rear };
-    CLASS_FLOOR + (1.0 - CLASS_FLOOR) * layout * power
+    let diff = DIFF_CLASS_OPEN + DIFF_CLASS_PER_LOCK * rear_lock.clamp(0.0, 1.0);
+    (CLASS_FLOOR + (1.0 - CLASS_FLOOR) * layout * power * diff).clamp(CLASS_FLOOR, 1.0)
 }
 
 /// 0..=1 "how much is the rear sliding" from the rear-axle slip angle (rad).
