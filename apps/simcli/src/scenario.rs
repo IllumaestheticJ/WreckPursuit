@@ -28,7 +28,8 @@ pub struct Scenario {
     /// Default assist profile for entities that do not set their own.
     #[serde(default)]
     pub assists: AssistSpec,
-    /// Civilian traffic density override (0..=1); `None` = city default.
+    /// Civilian traffic density multiplier (`TrafficConfig::density_scale`; 1 = city default,
+    /// 0 = no traffic); `None` = 1. Ignored on the flat world.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub traffic_density: Option<f32>,
     /// Police presence override (0..=1); `None` = city/time-of-day default.
@@ -37,6 +38,9 @@ pub struct Scenario {
     /// Systems to step (`"vehicle,damage,world,police,net"`); `None` = all. `--systems` overrides.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub systems: Option<String>,
+    /// Static boxes (barriers, walls) added before the first tick.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub barriers: Vec<Barrier>,
     /// Vehicles to spawn, in spawn order (entity ids are allocated in this order).
     pub entities: Vec<EntitySpec>,
     /// Simulated duration, s.
@@ -54,6 +58,10 @@ pub struct Scenario {
     /// are still stubs. Owners move them into `expect` when their system lands.
     #[serde(default)]
     pub expect_pending: Vec<Expect>,
+}
+
+fn is_zero(v: &f32) -> bool {
+    *v == 0.0
 }
 
 fn default_hour() -> f32 {
@@ -76,19 +84,34 @@ pub enum CitySpec {
     /// Infinite flat asphalt (the `wp_world` stub).
     #[default]
     Flat,
-    /// Procedurally generated city.
+    /// Procedurally generated city (`wp_world::procgen`; the ring road and other parameters keep
+    /// their defaults).
     Procedural {
         /// Generator seed (independent of the scenario seed).
         seed: u64,
-        /// Blocks along X.
+        /// Grid streets along X (`ProcGenConfig::nx`).
         blocks_x: u32,
-        /// Blocks along Y.
+        /// Grid streets along Y (`ProcGenConfig::ny`).
         blocks_y: u32,
-        /// Block edge length, m.
+        /// Street spacing centre to centre, m (`ProcGenConfig::spacing_m`).
         block_m: f32,
     },
-    /// City file relative to the data root (e.g. `"city/downtown.json"`).
+    /// Road network file relative to the data root: `.road.json` (works everywhere, including
+    /// the WASM runner) or `.road.bin` (disk only), e.g. `"city/procedural_12x12.road.json"`.
     File(String),
+}
+
+/// A static box (`Sim::add_static_box`): rigid, immovable, contacts reach damage as world geometry.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Barrier {
+    /// Centre, world m.
+    pub pos: [f32; 3],
+    /// Full size `[x, y, z]`, m (before `yaw`).
+    pub size: [f32; 3],
+    /// Heading, rad about +Z.
+    #[serde(default)]
+    pub yaw: f32,
 }
 
 /// Assist profile selection.
@@ -148,6 +171,10 @@ pub struct EntitySpec {
     /// Spawn heading, rad about +Z (0 = facing +Y).
     #[serde(default)]
     pub yaw: f32,
+    /// Initial forward speed, m/s (`Sim::place_vehicle`; wheels and engine spun up to match).
+    /// Lets crash tests start at speed instead of a run-up.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub speed_mps: f32,
     /// Assists for this entity (default: the scenario's).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assists: Option<AssistSpec>,
@@ -282,6 +309,15 @@ pub enum Expect {
         /// Deadline, s.
         t_s: f32,
     },
+    /// A world/traffic metric (see `SCENARIOS.md`, e.g. `"traffic_agents_min"`) in `[min, max]`.
+    WorldMetric {
+        /// Metric name.
+        name: String,
+        /// Inclusive minimum.
+        min: f32,
+        /// Inclusive maximum.
+        max: f32,
+    },
     /// Number of events of a `SimEvent` variant (e.g. `"PartDetached"`), optionally only those
     /// naming `entity`, in `[min, max]`.
     EventCount {
@@ -327,9 +363,6 @@ impl Scenario {
         if !(self.duration_s.is_finite() && self.duration_s > 0.0) {
             return Err(format!("duration_s = {} must be > 0", self.duration_s));
         }
-        if self.entities.is_empty() {
-            return Err("at least one entity is required".into());
-        }
         if self.hash_every == 0 {
             return Err("hash_every must be >= 1".into());
         }
@@ -339,7 +372,20 @@ impl Scenario {
                 self.sample_hz
             ));
         }
+        for b in &self.barriers {
+            if !b.size.iter().all(|x| x.is_finite() && *x > 0.0) {
+                return Err(format!("barrier size {:?} must be positive", b.size));
+            }
+        }
+        if let Some(d) = self.traffic_density {
+            if !(d.is_finite() && d >= 0.0) {
+                return Err(format!("traffic_density = {d} must be >= 0"));
+            }
+        }
         for (i, e) in self.entities.iter().enumerate() {
+            if !e.speed_mps.is_finite() {
+                return Err(format!("entity {:?}: speed_mps must be finite", e.id));
+            }
             if self.entities[..i].iter().any(|o| o.id == e.id) {
                 return Err(format!("duplicate entity id {:?}", e.id));
             }
@@ -351,7 +397,15 @@ impl Scenario {
             }
         }
         for x in self.expect.iter().chain(&self.expect_pending) {
-            self.entity_index(x.entity())?;
+            if self.entities.is_empty() && x.is_per_entity() {
+                return Err(format!(
+                    "{} needs an entity, but the scenario spawns none",
+                    to_ron_line(x)
+                ));
+            }
+            if x.is_per_entity() || x.entity().is_some() {
+                self.entity_index(x.entity())?;
+            }
         }
         Ok(())
     }
@@ -359,6 +413,7 @@ impl Scenario {
     /// Index of a scenario entity by name (`None` = the first entity).
     pub fn entity_index(&self, name: Option<&String>) -> Result<usize, String> {
         match name {
+            None if self.entities.is_empty() => Err("the scenario spawns no entities".into()),
             None => Ok(0),
             Some(n) => self
                 .entities
@@ -380,6 +435,25 @@ impl Scenario {
 }
 
 impl Expect {
+    /// Whether this expectation reads one entity's results (and so needs at least one entity).
+    pub fn is_per_entity(&self) -> bool {
+        matches!(
+            self,
+            Expect::Metric { .. }
+                | Expect::SpeedAt { .. }
+                | Expect::MaxLateralG { .. }
+                | Expect::CrushDepth { .. }
+                | Expect::ComponentsFailed { .. }
+                | Expect::TotalLoss { .. }
+        ) || matches!(
+            self,
+            Expect::EventCount {
+                entity: Some(_),
+                ..
+            }
+        )
+    }
+
     /// The entity this expectation names, if any.
     pub fn entity(&self) -> Option<&String> {
         match self {
@@ -390,7 +464,9 @@ impl Expect {
             | Expect::ComponentsFailed { entity, .. }
             | Expect::TotalLoss { entity, .. }
             | Expect::EventCount { entity, .. } => entity.as_ref(),
-            Expect::PursuitStartedBefore { .. } | Expect::PoliceEventBefore { .. } => None,
+            Expect::PursuitStartedBefore { .. }
+            | Expect::PoliceEventBefore { .. }
+            | Expect::WorldMetric { .. } => None,
         }
     }
 }
@@ -434,6 +510,38 @@ mod tests {
     fn ron_round_trip() {
         let sc = Scenario::from_ron("t", MINIMAL).unwrap();
         assert_eq!(Scenario::from_ron("t", &sc.to_ron()).unwrap(), sc);
+    }
+
+    #[test]
+    fn barriers_speed_and_cities_parse() {
+        let text = r#"(
+            name: "b", seed: 1,
+            city: file("city/procedural_12x12.road.json"),
+            traffic_density: 2.0,
+            barriers: [(pos: (0.0, 20.0, 0.75), size: (8.0, 1.0, 1.5)), (pos: (5.0, 0.0, 1.0), size: (1.0, 1.0, 2.0), yaw: 0.5)],
+            entities: [(id: "a", car: "debug_sedan", speed_mps: 15.0)],
+            duration_s: 1.0,
+            expect: [world_metric(name: "static_boxes", min: 2.0, max: 2.0)],
+        )"#;
+        let sc = Scenario::from_ron("b", text).unwrap();
+        assert_eq!(sc.barriers.len(), 2);
+        assert_eq!(sc.barriers[0].yaw, 0.0);
+        assert_eq!(sc.entities[0].speed_mps, 15.0);
+        assert_eq!(Scenario::from_ron("b", &sc.to_ron()).unwrap(), sc);
+        let bad = text.replace("size: (8.0, 1.0, 1.5)", "size: (8.0, 0.0, 1.5)");
+        assert!(Scenario::from_ron("b", &bad).is_err());
+    }
+
+    #[test]
+    fn zero_entities_allow_only_world_expectations() {
+        let ok = r#"(name: "w", seed: 1, entities: [], duration_s: 1.0,
+            expect: [world_metric(name: "props", min: 0.0, max: 0.0), event_count(event: "Contact", min: 0, max: 0)])"#;
+        Scenario::from_ron("w", ok).unwrap();
+        let bad = ok.replace(
+            "world_metric(name: \"props\"",
+            "metric(name: \"final_speed_mps\"",
+        );
+        assert!(Scenario::from_ron("w", &bad).is_err());
     }
 
     #[test]

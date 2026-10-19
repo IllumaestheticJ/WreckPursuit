@@ -10,7 +10,7 @@ use wp_math::Rng;
 
 use crate::data::{load_car, DataSource};
 use crate::run::{run_with_hook, RunOptions, TickView};
-use crate::scenario::{AssistSpec, EntitySpec, InputKey, Scenario};
+use crate::scenario::{AssistSpec, Barrier, EntitySpec, InputKey, Scenario};
 use crate::RunError;
 
 /// Most events a single tick may emit before it counts as a flood.
@@ -78,12 +78,19 @@ pub fn gen_case(cfg: &FuzzConfig, index: u64) -> Scenario {
                 ];
             }
         }
+        // Rammers start at speed so collisions happen early in the case.
+        let speed = if kind > 0 {
+            rng.range_f32(8.0, 30.0)
+        } else {
+            0.0
+        };
         for (pos, yaw) in spawn {
             entities.push(EntitySpec {
                 id: format!("car{i}"),
                 car: car.clone(),
                 pos,
                 yaw,
+                speed_mps: speed,
                 assists: Some(assists),
                 driver: Default::default(),
                 inputs: random_inputs(&mut rng, cfg.case_seconds, kind > 0),
@@ -91,8 +98,21 @@ pub fn gen_case(cfg: &FuzzConfig, index: u64) -> Scenario {
             i += 1;
         }
     }
+    // Sometimes a rigid wall 10-40 m ahead of a random car.
+    let mut barriers = Vec::new();
+    if rng.chance(0.3) {
+        let e = &entities[rng.below(entities.len() as u32) as usize];
+        let (s, c) = wp_math::sin_cos(e.yaw);
+        let d = rng.range_f32(10.0, 40.0);
+        barriers.push(Barrier {
+            pos: [e.pos[0] - s * d, e.pos[1] + c * d, 0.75],
+            size: [rng.range_f32(2.0, 12.0), 1.0, 1.5],
+            yaw: e.yaw,
+        });
+    }
     Scenario {
         name: format!("fuzz_{:016x}_{index}", cfg.seed),
+        barriers,
         seed: rng.next_u64(),
         city: Default::default(),
         time_of_day_h: rng.range_f32(0.0, 24.0),
