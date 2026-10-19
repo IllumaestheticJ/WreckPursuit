@@ -354,3 +354,11 @@ Contract **v0.3.0** is being applied in parallel by the lead (branch `lead/contr
 1. Police cruiser (`sentinel_cruiser`) pursuit tuning: it must catch every street car in the city at heat 3+ on straights within reason, and survive about 3 rams in Arcade. It has a push-bar accessory (front lattice stiffer).
 2. Traffic variety: add 3 cheap civilian analog cars (hatch, van, pickup) with lattices, for traffic and parked cars. Analog names only, per `data/cars/README.md`. Validate them as usual.
 3. `gen-lattice` regeneration pass; fold the hand adjustments back into the generator where possible.
+
+
+## Lead feedback (round 8, 2026-10-19)
+
+Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snapshot/summary, road-network trait, weather `LocalConditions`; see `docs/CONTRACT_CHANGELOG.md`). Workspace tests now take about 3.5 minutes (`lead/test-speed`). Owner playtest items are tracked in `docs/PLAYTEST_LOG.md`.
+
+1. `semi_slick.json`: `treaded: false` (W-4).
+2. Tire data for `PaintedLine`.

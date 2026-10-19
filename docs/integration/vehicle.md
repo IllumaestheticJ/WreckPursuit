@@ -388,3 +388,12 @@ before/after numbers, and contract request 7 for the optional per-car knob.
   smoke_coupe_circle, vehicle_coupe_slalom (all keyboard/gamepad-driven).
 - Outside my crates: one help line in `apps/testbed-web/src/hud.ts` (F1 → "Slide control"),
   `tools/specsheet/roster_inputs.py` + 5 `data/cars` files (item 6).
+
+
+## Lead feedback (round 8, 2026-10-19)
+
+Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snapshot/summary, road-network trait, weather `LocalConditions`; see `docs/CONTRACT_CHANGELOG.md`). Workspace tests now take about 3.5 minutes (`lead/test-speed`). Owner playtest items are tracked in `docs/PLAYTEST_LOG.md`.
+
+1. Read `WorldQuery::weather_at` (v0.3.0 W-1) per wheel into your surface-conditions hook; the lead wires weather into `wp_sim` next.
+2. `surfaces.toml`: add a `PaintedLine` row.
+3. Review the lead helpers' merged changes in your crate: gearbox/shift logic (`lead/playtest-feel`) and slide gyro / lock opening (`lead/playtest-drift`, `src/slide.rs`). You own them now.

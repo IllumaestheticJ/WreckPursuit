@@ -485,3 +485,13 @@ Owner feedback: "the camera zooms way too far out", "need more angles". Changes,
 - `just web-e2e` on this branch: all checks pass except "city chase … speeding violations in the
   feed" (heat stays 0.00, no TrafficViolation in the feed). It fails the same way on unmodified
   `origin/main` (612e036) in this container, so it is pre-existing and not camera-related.
+
+
+## Lead feedback (round 8, 2026-10-19)
+
+Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snapshot/summary, road-network trait, weather `LocalConditions`; see `docs/CONTRACT_CHANGELOG.md`). Workspace tests now take about 3.5 minutes (`lead/test-speed`). Owner playtest items are tracked in `docs/PLAYTEST_LOG.md`.
+
+1. The city chase now runs with merged physical police (E's obstacle awareness), D's traffic variety, H's cruiser package, and the lead helpers' camera rig, signals and RWD slide control. Play it in headless Chromium, and fix anything visibly broken (overlapping panels, layer toggles, help text).
+2. Make the city chase e2e check robust (wait for a condition, not a fixed 5 s).
+3. M will port its chase-end detector on top of your HUD; review it.
+4. Machine R's panel meshes are on by default (key 0). Check perf in the city chase with 6+ cars and record it.

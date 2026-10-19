@@ -268,3 +268,10 @@ Contract **v0.3.0** is being applied in parallel by the lead (branch `lead/contr
 1. 4-player end-to-end test on the **real** `wp_sim`: a headless server plus 4 bot clients for 60 s in a city scenario with police and traffic. Assert no desyncs beyond the correction budget, all clients see the same police units, and bandwidth per client is under budget. Record the numbers in your README.
 2. Police and physical traffic are now ordinary `wp_sim` vehicles (`VehicleKind::Police` / `Traffic`). Replicate them as entities with the kind flag. Kinematic traffic waits for v0.3.0 `TrafficAgentSnapshot`.
 3. NET-N1: damage replication on the real sim (not `ArenaSim`).
+
+
+## Lead feedback (round 8, 2026-10-19)
+
+Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snapshot/summary, road-network trait, weather `LocalConditions`; see `docs/CONTRACT_CHANGELOG.md`). Workspace tests now take about 3.5 minutes (`lead/test-speed`). Owner playtest items are tracked in `docs/PLAYTEST_LOG.md`.
+
+1. v0.3.0 net items: typed events on the wire, `TrafficAgentSnapshot`, weather snapshot (W-5), `RaceCommand`, and meta's `join_token` (MC-6) in `wp_net::protocol`.

@@ -242,3 +242,11 @@ check can time out before speeding reaches the feed). `cargo test --workspace --
 C also built a heat panel (`src/police_hud.tsx`); both are in `main.ts` now. **Consolidate with C**: one heat / wanted
 / pursuit readout using your components, and wire your repair-bill screen to G's economy (`quote_repair`) for the
 demo's end-of-chase moment. Keep your code in `src/ui/`.
+
+
+## Lead feedback (round 8, 2026-10-19)
+
+Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snapshot/summary, road-network trait, weather `LocalConditions`; see `docs/CONTRACT_CHANGELOG.md`). Workspace tests now take about 3.5 minutes (`lead/test-speed`). Owner playtest items are tracked in `docs/PLAYTEST_LOG.md`.
+
+1. **HUD consolidation clash.** You and C both consolidated the heat panel in round 6. On merge, the lead kept **C's** `apps/testbed-web` and `crates/wp_wasm/src/police.rs` (pursuit banner, capture opens the bill, `last_outcome`/`outcome_age_s` in `police_status`). Your ui-kit changes are in, but your testbed edits (`src/ui/overlay.ts` ChaseEndDetector wiring, `src/ui/police.ts`, `police_status` with `search_s`/`phase`) are not. Port the parts that add value on top of C's version (for example ChaseEndDetector, phase-scaled escape), coordinating via `docs/integration/testbed.md`. Keep exactly one chase panel.
+2. Regenerate `src/generated/contracts.ts` and the recorded fixtures for v0.3.0's typed events (`npm run gen:types`, `gen:police`, `gen:fixtures`), and switch the reducers from payload bytes to typed variants.

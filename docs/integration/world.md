@@ -393,3 +393,12 @@ Lane changes are fewer than before because marginal changes are now indicated fi
 if no longer worth it; overtakes are real ones. Speed / limit sampled on cruising cars city-wide
 is p50 0.64 before and after: the 110 m grid with a signal every block keeps cars below their
 desired speed, so the personal spread shows on longer roads and highways, not in the average.
+
+
+## Lead feedback (round 8, 2026-10-19)
+
+Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snapshot/summary, road-network trait, weather `LocalConditions`; see `docs/CONTRACT_CHANGELOG.md`). Workspace tests now take about 3.5 minutes (`lead/test-speed`). Owner playtest items are tracked in `docs/PLAYTEST_LOG.md`.
+
+1. Report `SurfaceType::PaintedLine` for lane markings / zebra crossings.
+2. `RoadNetworkIndex::nearest_on_road` is brute force; index it.
+3. The lead helper `lead/city-v2` (curves and elevation) is building a new procedural preset in your crate. Review its branch when it lands and coordinate via its section in this doc.

@@ -221,3 +221,11 @@ Contract **v0.3.0** is being applied in parallel by the lead (branch `lead/contr
 1. A street race that pulls in police: scenario `apps/simcli/scenarios/race/city_sprint_police.ron` (sprint with traffic density > 0 and police on). `PatrolAttracted` should raise heat through today's police event path; the test asserts a pursuit starts during or after the race.
 2. AI entrants: use N's `wp_opponent` racers as entrants. Put any cross-crate glue in `wp_race`, and file requests for N.
 3. Fix your own known gaps: Outrun gap along the route instead of straight-line, Delivery cargo mass applied to the car.
+
+
+## Lead feedback (round 8, 2026-10-19)
+
+Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snapshot/summary, road-network trait, weather `LocalConditions`; see `docs/CONTRACT_CHANGELOG.md`). Workspace tests now take about 3.5 minutes (`lead/test-speed`). Owner playtest items are tracked in `docs/PLAYTEST_LOG.md`.
+
+1. R5 with G (above).
+2. `DnfReason::Fled` was added to the contract (lead amendment) for your AI entrants.

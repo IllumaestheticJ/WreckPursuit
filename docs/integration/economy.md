@@ -321,3 +321,12 @@ Gate on `ws/economy` after merging main + `claude/laughing-newton-0xqr6q`: fmt, 
 (index out of bounds in `throttle_at`: the run reports more vehicles than the scenario has
 entity specs — probably the physical police cars from the lead merge). Not in my crates; fails
 the same way without my commits (no economy code on that path). For 15 / lead.
+
+
+## Lead feedback (round 8, 2026-10-19)
+
+Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snapshot/summary, road-network trait, weather `LocalConditions`; see `docs/CONTRACT_CHANGELOG.md`). Workspace tests now take about 3.5 minutes (`lead/test-speed`). Owner playtest items are tracked in `docs/PLAYTEST_LOG.md`.
+
+1. R5: `RaceType` vs contract `RaceKind`. Agree the purse mapping with L (Outrun, Checkpoint, Cannonball, Delivery, TimeAttack).
+2. `ShopReported.district` → `DistrictId` keys in `prices.toml`.
+3. The ledger is still keyed by `PlayerId`. Move it to `AccountId` if cheap.

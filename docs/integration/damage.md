@@ -412,3 +412,13 @@ no golden changes with the threshold back at 0.10); all expectations pass.
 `golden_tbone_sim` (Simulation totals a car in a 50 km/h T-bone; 0.27–0.32 m is within the real
 range at the soft end). No lattice hardening, no Arcade floor change. Contract request #8 is
 queued for the v0.3.x batch; the `crush_depth` → `structural_crush_m` request goes to machine I.
+
+
+## Lead feedback (round 8, 2026-10-19)
+
+Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snapshot/summary, road-network trait, weather `LocalConditions`; see `docs/CONTRACT_CHANGELOG.md`). Workspace tests now take about 3.5 minutes (`lead/test-speed`). Owner playtest items are tracked in `docs/PLAYTEST_LOG.md`.
+
+1. **Port your persistence onto the contract types.** On merge, the lead kept v0.3.0's `crates/wp_damage/src/snapshot.rs` (`DamageSim::{save_state, restore_state, apply_repair, summary}` with contract `DamageSnapshot`/`DamageSummary`) and **removed your `persist.rs`**, because both defined the same API. Your version was fuller: compressive plastic strain, per-beam energy, and the Arcade cosmetic state (`region_cosmetic_j`, component cosmetic). Bring those into `snapshot.rs`. If the contract `DamageSnapshot` needs fields, file them as contract request #9 and keep them in an opaque extension until the lead applies them.
+2. Restore the tests the lead removed while merging: `save_restore_round_trip_is_bit_exact`, `summary_counts_damage`, `repairing_every_billed_item_restores_the_car`, `partial_repair_fixes_only_the_paid_items`, `cosmetic_state_survives_save_restore_and_repair_clears_it`, and `restore_rejects_another_lattice_and_bad_arrays`. They are in your branch history (`git show origin/ws/damage~N:crates/wp_damage/src/tests.rs`).
+3. The lead also patched `raw_health` (snapshot.rs) to subtract `region_cosmetic_j`. Check it matches your `update_health`.
+4. gen-lattice options for H's push bar / heavy-duty component factors (H's request).

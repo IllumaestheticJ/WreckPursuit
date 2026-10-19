@@ -429,3 +429,12 @@ and after, unrelated to speed; not fixed here):
   assertion "level at capture, not after the reset" (line 130).
 - `wp_race` `tests/simcli_races.rs::city_sprint_on_real_roads`: index out of bounds, len 2
   index 2 (line 28) — the test indexes a third entity the scenario no longer has.
+
+
+## Lead feedback (round 8, 2026-10-19)
+
+Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snapshot/summary, road-network trait, weather `LocalConditions`; see `docs/CONTRACT_CHANGELOG.md`). Workspace tests now take about 3.5 minutes (`lead/test-speed`). Owner playtest items are tracked in `docs/PLAYTEST_LOG.md`.
+
+1. `crush_depth` → `DamageModel::structural_crush_m()` (B's request).
+2. Promote the observer soak civilian-collision gate (D says it passes; E may flip police back on).
+3. Run the slow city scenarios in the release CI jobs, per `lead/test-speed`.
