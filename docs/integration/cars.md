@@ -16,13 +16,12 @@
 **Checks (round 6b, cloud container):** fmt, clippy `-D warnings`, wasm build of `wp_wasm` (the
 new tool crate is not reachable from it), `nameplate_check.py` (68 files, 0 problems),
 `smoke_sim.py` (17 cars × 2 modes deterministic), `collect_results.py`. `cargo test --workspace`
-(run with `--release`: the debug simcli scenario suite exceeded the 30-min tool limit): all pass
-except **two that fail identically on the base branch with the old car data** (not caused by
-this work): `wp_economy` `pursuit_wiring::real_police_capture_settles_through_the_economy`
-("level at capture, not after the reset") and `wp_race`
-`simcli_races::city_sprint_on_real_roads` (index out of bounds at line 28 — the judge indexes
-scenario entities by vehicle order, and city police cars are vehicles too). **8 city goldens
-re-blessed** in a separate `[bless]` commit: simcli spawns `sentinel_cruiser` as the city police
+(run with `--release`: the debug simcli scenario suite exceeded the 30-min tool limit): **all
+pass** after merging the lead branch at `f92bf16` (the two failures seen earlier,
+`pursuit_wiring::real_police_capture_settles_through_the_economy` and
+`simcli_races::city_sprint_on_real_roads`, failed on the base branch too and are fixed there).
+**8 city goldens
+re-blessed** in separate `[bless]` commits (V8 cruiser, then the police package): simcli spawns `sentinel_cruiser` as the city police
 car, so every city run with police changed; with the old data all 35 goldens match, all 8 still
 pass their expectations.
 
