@@ -245,13 +245,23 @@ pub fn build_sim(
                 .collect();
             world.set_tracked_vehicles(&tracked);
             world.populate();
-            if sc.police_cars {
-                sim.set_police(police_for_city(sc, &world, &ids));
-            }
+            // `set_world` rebuilds police on the city, so the scenario's police (config,
+            // starting heat) are installed after it. Police cars are real vehicles (lead run 5);
+            // `police_cars: false` keeps heat and wanted levels with no patrols.
             sim.set_world(world);
-            // City runs get real police cars and physical near-player traffic (lead, run 5).
-            sim.set_police_car(load_car(data, POLICE_CAR)?);
-            sim.set_traffic_car(load_car(data, TRAFFIC_CAR)?);
+            if sc.police_cars {
+                sim.set_police(police_for_city(sc, sim.world(), &ids));
+                sim.set_police_car(load_car(data, POLICE_CAR)?);
+            } else {
+                let quiet = Scenario {
+                    police_presence: Some(0.0),
+                    ..sc.clone()
+                };
+                sim.set_police(police_for_city(&quiet, sim.world(), &ids));
+            }
+            if sc.traffic_cars {
+                sim.set_traffic_car(load_car(data, TRAFFIC_CAR)?);
+            }
             true
         }
         None => false,

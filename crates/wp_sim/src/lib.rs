@@ -261,11 +261,6 @@ impl Sim {
         self.police = police;
     }
 
-    /// The police system (heat, units, pursuits).
-    pub fn police(&self) -> &PoliceSystem {
-        &self.police
-    }
-
     /// Number of city props turned into physics bodies by [`Sim::set_world`].
     pub fn prop_count(&self) -> usize {
         self.props
@@ -581,11 +576,6 @@ impl Sim {
     /// The world (clock, roads, traffic).
     pub fn world(&self) -> &World {
         &self.world
-    }
-
-    /// The police system (heat, wanted levels, units, tools). Read-only.
-    pub fn police(&self) -> &PoliceSystem {
-        &self.police
     }
 
     /// Vehicle slots in ascending entity order.

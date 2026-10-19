@@ -14,7 +14,6 @@ use wp_economy::{
     CarFate, CarLocation, EventReason, PoliceSignal, PursuitEnd, PursuitSettlement, PursuitTracker,
 };
 use wp_math::Rng;
-use wp_police::graph::{procedural_city, CityParams};
 use wp_police::scenario::ScenarioWorld;
 use wp_police::{PoliceConfig, PoliceEvent, PoliceSetup, PoliceSystem, PursuitOutcome, RacerView};
 
@@ -52,7 +51,8 @@ const RACER: EntityId = EntityId(7);
 /// Run a real `PoliceSystem` until the racer is captured after a total loss while wanted, and
 /// feed every event through the adapter + tracker the way the sim's event drain would.
 fn police_capture_run(mode: DamageMode) -> (Option<wp_economy::PursuitResolution>, PursuitTracker) {
-    let graph = procedural_city(&CityParams::default());
+    // E moved police onto D's road network; its test city is `wp_police::city::procedural`.
+    let (graph, _map) = wp_police::city::procedural(&Default::default());
     let start = graph.segments[0];
     let p = graph.node(start.a).pos;
     let setup = PoliceSetup {
