@@ -30,37 +30,22 @@ fn state(s: &Session, id: EntityId) -> VehicleState {
         .unwrap()
 }
 
-fn yaw_of(st: &VehicleState) -> f32 {
-    let q = st.rot;
-    let fx = 2.0 * (q[0] * q[1] - q[3] * q[2]);
-    let fy = 1.0 - 2.0 * (q[0] * q[0] + q[2] * q[2]);
-    wp_math::atan2(-fx, fy)
-}
-
 /// A stationary racer parked `ahead_m` in front of the first police car, at `heat`.
 fn parked_near_police(ahead_m: f32, heat: f32) -> Session {
     let mut sc = city_chase_in("debug_sedan", DamageMode::Arcade, procedural_city());
     sc.entities[0].speed_mps = 0.0;
     let mut s = Session::new(sc, false).unwrap();
-    let cop = (0..240 * 5)
-        .find_map(|_| {
-            s.run_ticks(1);
-            s.sim()
-                .vehicles()
-                .iter()
-                .find(|v| v.kind == wp_sim::VehicleKind::Police)
-                .map(|v| v.id)
-        })
-        .expect("a police car spawns");
-    let st = state(&s, cop);
-    let yaw = yaw_of(&st);
-    let (sn, cs) = wp_math::sin_cos(yaw);
-    let xy = [st.pos[0] - sn * ahead_m, st.pos[1] + cs * ahead_m];
-    let sim = s.debug_sim_mut().unwrap();
-    sim.place_on_ground(PLAYER, xy, yaw, 0.0, Some(st.pos[2]))
-        .unwrap();
-    sim.police_mut().set_heat(PLAYER, heat);
-    s
+    for _ in 0..240 * 5 {
+        s.run_ticks(1);
+        if s.debug_park_near_police(PLAYER, ahead_m).is_ok() {
+            s.debug_sim_mut()
+                .unwrap()
+                .police_mut()
+                .set_heat(PLAYER, heat);
+            return s;
+        }
+    }
+    panic!("no police car spawned");
 }
 
 fn speed(s: &Session, id: EntityId) -> f32 {

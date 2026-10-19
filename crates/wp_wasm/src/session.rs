@@ -453,6 +453,36 @@ impl Session {
         Ok(&mut self.sim)
     }
 
+    /// Debug / e2e: park vehicle `id` (stopped) `ahead_m` in front of the first police car, in
+    /// its lane. Returns the police car's entity, or an error when there is none yet. Not in
+    /// the replay log.
+    pub fn debug_park_near_police(
+        &mut self,
+        id: EntityId,
+        ahead_m: f32,
+    ) -> Result<EntityId, String> {
+        self.live_check()?;
+        let cop = self
+            .sim
+            .vehicles()
+            .iter()
+            .find(|v| v.kind == wp_sim::VehicleKind::Police)
+            .map(|v| (v.id, v.vehicle.state()))
+            .ok_or("no police car yet")?;
+        let (cop, st) = (cop.0, cop.1);
+        let q = st.rot;
+        // Chassis +Y in world (XY), then yaw about +Z with 0 = +Y.
+        let fx = 2.0 * (q[0] * q[1] - q[3] * q[2]);
+        let fy = 1.0 - 2.0 * (q[0] * q[0] + q[2] * q[2]);
+        let yaw = wp_math::atan2(-fx, fy);
+        let (sn, cs) = wp_math::sin_cos(yaw);
+        let xy = [st.pos[0] - sn * ahead_m, st.pos[1] + cs * ahead_m];
+        self.sim
+            .place_on_ground(id, xy, yaw, 0.0, Some(st.pos[2]))
+            .map_err(|e| e.to_string())?;
+        Ok(cop)
+    }
+
     /// The vehicle is held on the brakes because its run is over (capture or wreck).
     pub fn held(&self, id: EntityId) -> bool {
         self.run
