@@ -460,3 +460,11 @@ you merge your converter work, `auto_shift` now takes `&ShiftInputs`.
 `smoke_coupe_circle`, `vehicle_coupe_slalom`) — caused only by the slide-gyro gravity fix
 (keyboard help while sliding); with that commit reverted 0 goldens fail, so the `weather_at`
 wiring is bit-identical on every scenario. All scenario range expectations pass.
+
+## Lead note: weather in the game (2026-10-19, `lead/weather-in-game`)
+Your `weather_at` hook is used as-is: `wp_sim` hands vehicles `wp_weather::WithWeather` with the
+interim `WetAsphalt` remap **off**, so `SurfaceConditions::from_local` drives wet grip, cold/ice,
+painted lines (D's `PaintedLine`) and aquaplaning. No change in `wp_vehicle` was needed.
+Measured in simcli: 100→0 braking 40.0 m dry vs 51.6 m soaked (debug_sedan, ABS); 33 m/s into a
+6 mm flooded stretch while steering: yaw rate 0.21 vs 0.37 rad/s on the merely wet road. The
+browser HUD reads `Telemetry::aquaplane` for its aquaplaning warning.

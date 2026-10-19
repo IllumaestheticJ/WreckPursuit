@@ -119,3 +119,4 @@ the schedule could hunt (1→2→1). New automatic (`crates/wp_vehicle/README.md
 | 30 | Siren audio error broke the frame loop (found by the e2e after row 29) | lead: siren pitch curves no longer overlap (float rounding); a bad curve can no longer stop the page | fixed on link v13 |
 | 31 | Hood does not crumple; headlights stay in place in crashes | R (panels): hood skinning; light parts on the surface and moving with the crush (then the lead drops the lamp markers) | dispatched |
 | 32 | AI cars, when blocked by a stationary vehicle, should go around it or turn around | D (traffic AI) | dispatched |
+| 33 | Step 2: weather in the playable game (rain, wet roads, fog, selector, rainy-night chase) | lead: `lead/weather-in-game` — weather selector + **rainy night** button, wet grip / aquaplaning / fog-limited police sight in the sim; try braking and cornering in heavy rain and losing the police in fog | on branch, not on the link yet |
