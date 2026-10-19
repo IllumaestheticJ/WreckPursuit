@@ -308,3 +308,55 @@ Lead fixes in your area this round:
 
 ## Lead note (2026-10-19, from machine B)
 - `simcli::run::crush_depth` should use `DamageModel::structural_crush_m()`. The any-node max counts shattered glass (0.58 vs 0.39 m in golden_tbone_sim). Please switch it, and re-bless only if expectations move, in a `[bless]` commit.
+## Lead helper: test speed (2026-10-19, branch `lead/test-speed`)
+Goal: `cargo test --workspace` under 10 min on a cloud container, same coverage, same hashes.
+Machine: cloud container, 4 cores, 15 GB. All timings with `CARGO_INCREMENTAL=0
+CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0`, clean `target/`.
+| | before | opt-level only | after (both) |
+|---|---|---|---|
+| `cargo test --workspace --no-run` (clean build) | 112 s | — | 333 s |
+| `cargo test --workspace` (run) | **4206 s (70 min)** | — | **210 s (3.5 min)** |
+| of which `simcli` `tests/scenarios.rs` | 3667 s | 465 s | 117–123 s |
+| `wp_opponent` `tests/race.rs` | 154 s | — | 15 s |
+| `wp_wasm` unit tests | 104 s | — | 3 s |
+| `wp_net` `tests/bandwidth.rs` | 96 s | — | 24 s |
+| `wp_sim` unit tests | 49 s | — | 2 s |
+Clean build + full test run: ≈ 72 min → ≈ 9 min. With a warm cache (CI's rust-cache, local
+re-runs) the extra build time for optimised dependencies is paid once.
+What changed:
+1. **`Cargo.toml` dev profile** (`build:`): `[profile.dev.package."*"] opt-level = 3` (rapier3d,
+   parry3d, glam, nalgebra, serde, …) and `opt-level = 2` for `wp_math`, `wp_vehicle`,
+   `wp_damage`, `wp_world`, `wp_police`, `wp_weather`, `wp_opponent`, `wp_race`, `wp_sim`,
+   `simcli`. Debug assertions and overflow checks stay on (opt-level does not touch them), so
+   `cfg!(debug_assertions)` code paths and the debug-only soak skip are unchanged. Other
+   workspace crates stay at opt-level 0 for quick edit-compile cycles.
+2. **Shared scenario pass** (`simcli:`): `all_scenarios_pass_and_are_deterministic_in_process`,
+   `fresh_process_matches_in_process` and `goldens_match` used to simulate each scenario
+   3 + 3 + 1–2 times (a plain run plus `check_in_process` twice over, then `check_scenario`).
+   Now one `OnceLock` pass per test binary runs, for every scenario: two recorded in-process
+   runs, one fresh `simcli hashes` child, and the golden replay verify (golden scenarios). The
+   three tests read those results. What each test checks is unchanged: expectations (from
+   recorded run 0; `RunSummary` does not depend on `record`), run 0 == run 1 via
+   `determinism::compare_runs` (tick hashes, checkpoints, summary, replay), child stdout ==
+   run 0's `hashes.txt`, and `golden::check_run` on run 0 plus the replay verify. Failures
+   are now collected for all scenarios instead of stopping at the first.
+   New library helpers (behaviour of the old entry points unchanged):
+   `determinism::compare_runs`, `golden::check_replay`, `golden::check_run`, `golden::ReplayCheck`.
+3. **Parallel jobs**: the pass spreads those jobs over `available_parallelism()` threads,
+   costliest first. Each job is one whole single-threaded sim, so threading cannot change a
+   hash; the two in-process runs of a scenario now run concurrently, which would also expose
+   any shared global state.
+4. `bless_is_refused_in_ci_without_tag` blesses only `scenarios/golden/tbone.ron` (was every
+   golden scenario, twice, in a debug child); it checks the same guard and the same files.
+5. **CI** (`ci.yml`): workflow env `CARGO_INCREMENTAL=0`, `CARGO_PROFILE_DEV_DEBUG=0`,
+   `CARGO_PROFILE_TEST_DEBUG=0`. The profile itself lives in `Cargo.toml`, so CI, `just test`
+   and local `cargo test` use the same opt-levels. The release jobs are untouched.
+Determinism: no hash changed. `goldens_match` (debug, all non-soak scenarios) passes with the
+optimised profile, `simcli goldens` (release, incl. soaks) passes, and
+`tools/wasm-determinism/compare.sh` reports native == wasm on all 35 scenarios.
+**Already failing on `claude/laughing-newton-0xqr6q` before this change** (same result before
+and after, unrelated to speed; not fixed here):
+- `wp_economy` `tests/pursuit_wiring.rs::real_police_capture_settles_through_the_economy`:
+  assertion "level at capture, not after the reset" (line 130).
+- `wp_race` `tests/simcli_races.rs::city_sprint_on_real_roads`: index out of bounds, len 2
+  index 2 (line 28) — the test indexes a third entity the scenario no longer has.

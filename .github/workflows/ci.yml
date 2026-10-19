@@ -7,6 +7,12 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Test speed (docs/integration/harness.md "Lead helper: test speed"): the dev/test profile
+  # in Cargo.toml optimises dependencies and sim crates; skip incremental state and debug info
+  # in CI, which only make the build and the rust-cache larger.
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
   # Lets `simcli --bless` run in CI only for commits tagged [bless] (see docs/TESTING.md).
   WP_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
 
