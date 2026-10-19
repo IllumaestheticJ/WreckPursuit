@@ -4,8 +4,7 @@
 //! - [`SimPolice`]: live, read-only view of `wp_sim`'s `PoliceSystem` (`Sim::police()`): wanted
 //!   levels, pursuit status and the *current* positions of every ground unit and roadblock.
 //!   Use this whenever the sim runs police units.
-//! - [`EventHeat`]: built from the sim's event stream (`wp_police::PoliceEvent`s inside
-//!   `SimEvent::PoliceEvent`); positions are only the last *reported* ones (spawns,
+//! - [`EventHeat`]: built from the sim's event stream (`SimEvent::Police`); positions are only the last *reported* ones (spawns,
 //!   roadblocks). Useful when only events are available (replays, net clients).
 //!
 //! Levels are `WantedLevel::number()`: 0 = not wanted, 1..=5.
@@ -13,7 +12,7 @@
 use std::collections::BTreeMap;
 
 use wp_contracts::{EntityId, SimEvent};
-use wp_police::events::{PoliceEvent, PoliceEventExt, UnitId};
+use wp_police::events::{PoliceEvent, UnitId};
 use wp_police::heat::PursuitStatus;
 use wp_police::{PoliceSystem, UnitKind};
 use wp_world::geom::V2;
@@ -85,7 +84,7 @@ impl PoliceQuery for FixedHeat {
     }
 }
 
-/// Wanted levels and police sightings tracked from `SimEvent::PoliceEvent`s. Call
+/// Wanted levels and police sightings tracked from `SimEvent::Police` events. Call
 /// [`EventHeat::observe`] with every tick's events (before `Field::tick`).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct EventHeat {
@@ -104,24 +103,24 @@ impl EventHeat {
     /// Consume one tick's sim events.
     pub fn observe(&mut self, events: &[SimEvent]) {
         for ev in events {
-            let Some(pe) = PoliceEvent::from_sim_event(ev) else {
+            let SimEvent::Police(pe) = ev else {
                 continue;
             };
             match pe {
                 PoliceEvent::WantedLevelChanged { racer, level } => {
-                    self.levels.insert(racer, level.number());
+                    self.levels.insert(*racer, level.number());
                 }
                 PoliceEvent::PursuitStarted { racer, .. } => {
-                    self.pursued.insert(racer, true);
+                    self.pursued.insert(*racer, true);
                 }
                 PoliceEvent::PursuitEnded { racer, .. } => {
-                    self.pursued.insert(racer, false);
+                    self.pursued.insert(*racer, false);
                 }
                 PoliceEvent::UnitSpawned { unit, pos, .. } => {
-                    self.units.insert(unit, [pos[0], pos[1]]);
+                    self.units.insert(*unit, [pos[0], pos[1]]);
                 }
                 PoliceEvent::UnitDespawned { unit, .. } => {
-                    self.units.remove(&unit);
+                    self.units.remove(unit);
                 }
                 PoliceEvent::RoadblockPlaced { pos, .. } => {
                     self.roadblocks.push([pos[0], pos[1]]);
@@ -163,25 +162,25 @@ mod tests {
     #[test]
     fn tracks_levels_and_units_from_events() {
         let mut h = EventHeat::new();
-        let evs = vec![
+        let evs: Vec<SimEvent> = [
             PoliceEvent::WantedLevelChanged {
                 racer: EntityId(3),
                 level: WantedLevel::L2,
-            }
-            .to_sim_event(),
+            },
             PoliceEvent::PursuitStarted {
                 racer: EntityId(3),
                 unit: None,
-            }
-            .to_sim_event(),
+            },
             PoliceEvent::UnitSpawned {
                 unit: UnitId(7),
                 kind: wp_police::events::UnitKind::Car,
                 pos: [10.0, 20.0, 0.0],
                 heading: [0.0, 1.0],
-            }
-            .to_sim_event(),
-        ];
+            },
+        ]
+        .into_iter()
+        .map(SimEvent::Police)
+        .collect();
         h.observe(&evs);
         assert_eq!(h.wanted_level(EntityId(3)), 2);
         assert_eq!(h.wanted_level(EntityId(4)), 0);

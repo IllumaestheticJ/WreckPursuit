@@ -31,7 +31,7 @@ use crate::corridor::{Corridor, CorridorOptions, OpposingLanes, CORRIDOR_STEP_M}
 use crate::line::{LineParams, RacingLine, SpeedProfile};
 use crate::profile::{DriverParams, DriverProfile};
 use crate::pursuit::PoliceQuery;
-use wp_police::{PoliceEvent, PoliceEventExt, PursuitOutcome};
+use wp_police::{PoliceEvent, PursuitOutcome};
 
 /// Impulse above which a racer–racer contact counts as a collision (not a rub), N·s.
 /// 400 N·s ≈ a 1.4 t car changing speed by 0.3 m/s.
@@ -272,8 +272,9 @@ struct Obstacle {
     unstable: bool,
     /// A racer that is itself overtaking (never pass it: no three-wide).
     passing: bool,
-    /// A racer pulled over for good (retired, busted, yielding): a fixed obstacle anyone may
-    /// pass, using the opposing lanes where the corridor allows overtaking there.
+    /// A car pulled over for good (a retired, busted or yielding racer; a civilian stopped
+    /// for a siren or with its hazards on): a fixed obstacle anyone may pass, using the
+    /// opposing lanes where the corridor allows overtaking there.
     parked: bool,
 }
 
@@ -476,6 +477,11 @@ const SIGNAL_LOOKAHEAD_M: f32 = 150.0;
 /// After waiting this long at a junction for civilians that are standing still (each waiting
 /// for the other), a racer stops counting them and creeps through, s.
 const JUNCTION_DEADLOCK_S: f32 = 3.0;
+/// Speed allowed while steering out round a parked car the racer is already stopped behind
+/// (a car must roll to move sideways), m/s.
+const CREEP_MPS: f32 = 2.5;
+/// Gap a creeping racer always keeps to the parked car it is steering round, m.
+const CREEP_STOP_GAP_M: f32 = 1.0;
 
 impl Field {
     /// Build a field on `corridor`. Lines are optimised once per distinct car width.
@@ -830,12 +836,10 @@ impl Field {
     /// pursuit that ends otherwise releases a yielding racer.
     fn record_police(&mut self, events: &[SimEvent]) {
         for ev in events {
-            let Some(PoliceEvent::PursuitEnded { racer, outcome, .. }) =
-                PoliceEvent::from_sim_event(ev)
-            else {
+            let SimEvent::Police(PoliceEvent::PursuitEnded { racer, outcome, .. }) = ev else {
                 continue;
             };
-            let Some(k) = self.racer_index(racer) else {
+            let Some(k) = self.racer_index(*racer) else {
                 continue;
             };
             let time_s = self.tick as f32 * PHYSICS_DT;
@@ -1829,8 +1833,9 @@ fn decide_racer(
         let mut n_cmd = approach(r.n_cmd, desired.clamp(act_lo, act_hi), rate * dt);
 
         // Hard side constraints: never move toward a car that overlaps me longitudinally.
-        let mut lo = lim_lo.min(r.n);
-        let mut hi = lim_hi.max(r.n);
+        // (Bounds are the active ones: an overtake may use the opposing lanes.)
+        let mut lo = act_lo.min(r.n);
+        let mut hi = act_hi.max(r.n);
         let mut squeezed_by_ahead = false;
         for x in &rel {
             // Alongside, or (mirrors) coming up from behind fast enough to be alongside
@@ -2037,6 +2042,18 @@ fn decide_racer(
             // Arriving fast next to a car: want more lateral room the faster I close.
             let margin = margin_for(o) + (0.15 * (closing - 2.0)).clamp(0.0, 1.0);
             if !overlaps(band, o, margin, x.gap / closing) {
+                continue;
+            }
+            // Steering out round a parked car: once the lane I am heading for is clear of
+            // it, creep instead of standing still behind it (a stopped car cannot move
+            // sideways), never closer than the stop gap.
+            let steering_round = o.parked
+                && r.tactic == Tactic::Overtake
+                && r.pass_target == Some(o.who)
+                && !overlaps(my_band(n_cmd, n_cmd), o, margin, 0.0);
+            if steering_round && x.gap > CREEP_STOP_GAP_M {
+                let creep = (a_brk * (x.gap - CREEP_STOP_GAP_M)).sqrt().min(CREEP_MPS);
+                cap_to(&mut v_target, creep, SpeedLimit::Obstacle(who_id(o.who)));
                 continue;
             }
             let in_corner = r.in_brake_zone
@@ -2261,7 +2278,9 @@ fn civilians_on(
             half_w: 0.5 * (CAR_WIDTH_M * ca + CAR_LENGTH_M * sa),
             unstable: false,
             passing: false,
-            parked: false,
+            // Pulled over for a siren (or broken down) and stopped: it stays put while a
+            // police car is near, possibly for minutes, so treat it like a parked car.
+            parked: a.speed_mps.abs() < 0.5 && (a.yielding || a.hazard_lights),
         });
     }
     out

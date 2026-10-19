@@ -3,11 +3,10 @@
 - **Workstream / prompt:** 17 — racer opponent AI (machine N)
 - **Branch:** `ws/opponent`
 - **Crates / folders owned:** `crates/wp_opponent`, `apps/simcli/scenarios/opponent/`
-- **Contract version built against:** 0.2.0 (main + lead branch `claude/laughing-newton-0xqr6q`
-  merged 2026-10-19, round 6b). No contract types are changed or required. v0.3.0 note: the
-  crate decodes police events with `wp_police::PoliceEvent::from_sim_event` in two places
-  (`pursuit::EventHeat::observe`, `field::Field::record_police`); with typed police events
-  these become a `match` on the new variant — nothing else depends on the payload format.
+- **Contract version built against:** 0.3.0 (main merged 2026-10-19, round 8). No contract
+  types are changed or required. Police events are read by matching `SimEvent::Police(..)`
+  directly (`pursuit::EventHeat::observe`, `field::Field::record_police`, test harness); the
+  `PoliceEventExt` shim is no longer used.
 
 ## Exposes
 All in `wp_opponent` (details, tuning table, perf: `crates/wp_opponent/README.md`).
@@ -211,3 +210,45 @@ wp_police) — pre-existing, for G / the lead.
 ## Lead feedback (round 8, 2026-10-19)
 1. **Parked test (lead, round 8):** `tests/race.rs::live_police_chase_ends_in_escape_or_capture_without_stuck_cars` is `#[ignore]`. After E round 6 (police obstacle avoidance) and D round 6 (driver personalities and reaction delays), racer 3 queues 97 s and covers only 388 m. Fix the AI racer, or report the police or traffic cause to E/D, and un-ignore.
 2. v0.3.0: `SimEvent::Police` is typed now; `PoliceEventExt` gives `from_sim_event`.
+
+### Round 8 status (machine N, 2026-10-19)
+1. **Parked test restored — done.** `live_police_chase_ends_in_escape_or_capture_without_stuck_cars`
+   is un-ignored and passes (max waits 4 / 38 / 22 s for racers 1 / 2 / 3, limit 90; no stuck
+   cars, no AI contacts, no DQ). Cause of the 97 s queue: police unit `EntityId(9)` crawls
+   around the junction at the bottom-right of the arterial square from t ≈ 22 s and then stands
+   still with its siren on at (147.4, −148.1), ~22 m from it, from t ≈ 66 s to past t = 148 s.
+   Every civilian within 60 m yields: two of them (agents 79 and 81) sit side by side at the stop
+   line at x ≈ 138 and fill both of our lanes from t ≈ 16 s to t ≈ 134 s. Racer 3 queued behind them. Three AI fixes in `wp_opponent` (all mine):
+   - Civilians stopped while yielding to a siren (or with hazards on) now count as **parked**,
+     so racers may use the opposing lanes to get round them (the rule already used for
+     pulled-over racers).
+   - **Bug:** while overtaking, the hard side constraint clamped the lateral target to the
+     normal lane bounds, not the pass bounds, so a pass could never actually reach the opposing
+     lanes. It now uses the active bounds.
+   - A racer already stopped right behind a parked car it is steering round **creeps**
+     (≤ 2.5 m/s, stops 1 m short) so it can move sideways.
+   With these, racer 3 gets round the pair, clears the junction once the frozen cross traffic
+   moves, picks up heat of its own, and flees: allowed by the test.
+   Side effect: open-road sweep (`sweep_open_roads_progress`, 8 seeds, no police) total progress
+   is 17 248 m vs 17 613 m before (−2 %: seed 7 down, seed 6 up), because risk-taking drivers
+   (risk ≥ 0.5) now really use the opposing lanes as designed. Stuck 0, DQ 0, hard contacts 0
+   in every seed, longest wait unchanged (34 s).
+2. **v0.3.0 typed police events — done.** `SimEvent::Police(e)` is matched directly; no use of
+   `PoliceEventExt` left in the crate or its tests.
+
+Checks at end of round 8: `cargo fmt --all --check`, `cargo clippy --workspace -- -D warnings`,
+`cargo test --workspace` (all pass, 0 failures), `--ignored` run of the restored test (pass),
+`cargo build --target wasm32-unknown-unknown -p wp_wasm`, `simcli run
+apps/simcli/scenarios/opponent` (4 PASS), `simcli goldens` (all ok) — green.
+
+### Reports for other workstreams (round 8)
+- **E (police):** in this test (seed 4, `sentinel_cruiser` patrols, 25 % traffic) unit
+  `EntityId(9)` stands still with its siren on for 80+ s at (147.4, −148.1), next to a
+  signalised junction, while no capture or roadblock happens there. Please check whether a
+  unit that is not moving (lost its target, or wedged) should switch its siren off or move on.
+  A parked siren freezes every civilian within 60 m (see D below).
+- **D (world / traffic):** agents yield (pull right, never enter junctions) to *any* siren within
+  60 m, even one that has not moved for a minute or more. Two agents at a stop line held
+  `yielding = true` for > 110 s and blocked both lanes of an arterial; cross traffic inside the
+  box also stopped. Suggest: yield only to sirens that are moving, or approaching, or closer
+  than ~25 m; or time out after ~10 s once the siren is not getting closer.
