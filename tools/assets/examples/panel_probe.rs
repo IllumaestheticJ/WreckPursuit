@@ -16,7 +16,7 @@ fn main() {
     let mut hook = |v: &simcli::TickView| -> Result<(), String> {
         let t = v.sim.tick() as f32 * wp_contracts::PHYSICS_DT;
         // TRACE=1: every free panel's angle each 0.1 s.
-        if trace && v.sim.tick() % 24 == 0 {
+        if trace && v.sim.tick().is_multiple_of(24) {
             for (i, veh) in v.sim.vehicles().iter().enumerate() {
                 for p in veh.damage.panel_states() {
                     if p.state != wp_damage::PanelState::Attached

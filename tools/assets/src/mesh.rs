@@ -171,16 +171,19 @@ enum Band {
 /// Part key while building: (name, region, kind, material).
 type Key = (String, Option<BodyRegion>, PartKind, MaterialSlot);
 
+/// One part under construction: key, positions, uvs, indices, vertex dedupe map.
+type PartBuild = (
+    Key,
+    Vec<[f32; 3]>,
+    Vec<[f32; 2]>,
+    Vec<u32>,
+    std::collections::BTreeMap<(i64, i64), u32>,
+);
+
 /// Collects triangles per part with per-part vertex dedupe.
 #[derive(Default)]
 struct Builder {
-    parts: Vec<(
-        Key,
-        Vec<[f32; 3]>,
-        Vec<[f32; 2]>,
-        Vec<u32>,
-        std::collections::BTreeMap<(i64, i64), u32>,
-    )>,
+    parts: Vec<PartBuild>,
 }
 
 impl Builder {

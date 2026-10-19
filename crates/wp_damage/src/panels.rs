@@ -970,7 +970,7 @@ impl DamageModel {
                 } else if into {
                     // Stop impulse at the COM: change of momentum (1 + e)·I·|ω| / lever.
                     slam += (1.0 + p.def.restitution) * inertia * p.omega.abs() / lever.max(0.05);
-                    p.omega = -p.def.restitution * p.omega;
+                    p.omega *= -p.def.restitution;
                 }
             }
         }
