@@ -110,9 +110,9 @@ pub fn car(id: &str) -> LoadedCar {
     load_car(repo().join(format!("data/cars/{id}.json"))).expect("car loads")
 }
 
-/// Run `script` on `car_id` and return one [`Frame`] per 60 Hz audio frame.
-/// `applied_throttle`: feed the engine model the telemetry throttle (what the bridge does
-/// now) instead of the raw pedal.
+/// Run `script` on `car_id` and return one [`Frame`] per 60 Hz audio frame. The engine model
+/// gets the telemetry throttle as `throttle_applied`, like the wasm bridge. `assists`: the
+/// `wp_vehicle` metric assists when `None`.
 pub fn run(car_id: &str, script: &[Segment], assists: Option<AssistProfile>) -> Vec<Frame> {
     let lib = AudioLibrary::embedded().expect("audio data");
     let c = car(car_id);
@@ -152,7 +152,7 @@ pub fn run(car_id: &str, script: &[Segment], assists: Option<AssistProfile>) -> 
             };
             let inputs = [VehicleAudioInput {
                 entity,
-                car_id: car_id,
+                car_id,
                 state: &st,
                 throttle: s.throttle,
                 throttle_applied: Some(tel.throttle),
@@ -201,10 +201,10 @@ pub fn run(car_id: &str, script: &[Segment], assists: Option<AssistProfile>) -> 
                             *v = view(&params);
                         }
                     }
-                    AudioCommand::Stop { voice, .. } if voice.entity == entity.0 => {
-                        if voices.remove(&voice.slot).is_some() {
-                            f.stopped.push(voice.slot);
-                        }
+                    AudioCommand::Stop { voice, .. }
+                        if voice.entity == entity.0 && voices.remove(&voice.slot).is_some() =>
+                    {
+                        f.stopped.push(voice.slot);
                     }
                     _ => {}
                 }

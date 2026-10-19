@@ -143,7 +143,8 @@ pub struct EngineAudioState {
     pub load: f32,
     /// Turbo boost 0..=1.
     pub boost: f32,
-    /// Throttle seen last frame (applied throttle; blow-off detection).
+    /// Recent applied throttle: follows it up at once, falls back 1/0.15 s per second
+    /// (blow-off detection sees a lift spread over a few frames, e.g. a clutch shift's cut).
     pub prev_throttle: f32,
     /// Engine rpm seen last frame.
     pub prev_rpm: f32,
@@ -313,6 +314,7 @@ pub fn update_engine(
         if st.prev_throttle > 0.5 && applied < 0.2 && was >= mix.blowoff_min_boost {
             out.blowoff = Some(mix.forced_induction_gain * was);
             st.boost *= 0.3;
+            st.prev_throttle = 0.0;
         }
     }
     if def.supercharger {
@@ -329,7 +331,7 @@ pub fn update_engine(
             out.pop = Some(gain * rng.range_f32(0.4, 1.0));
         }
     }
-    st.prev_throttle = applied;
+    st.prev_throttle = applied.max(st.prev_throttle - dt / 0.15);
     out
 }
 
@@ -431,9 +433,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn blowoff_on_lift_under_boost() {
-        let mix = EngineMix {
+    fn test_mix() -> EngineMix {
+        EngineMix {
             gain: 1.0,
             load_tau_s: 0.05,
             min_load: 0.1,
@@ -453,21 +454,131 @@ mod tests {
             shift_rate_full_rpm_s: 7000.0,
             shift_dip_depth: 0.6,
             blip_load: 0.8,
-        };
-        let def = EngineAudioDef {
+        }
+    }
+
+    fn test_def(turbo: bool) -> EngineAudioDef {
+        EngineAudioDef {
             cylinders: 4,
             layout: crate::data::EngineLayout::Inline,
             firing: crate::data::FiringFeel::Even,
             induction_exhaust_balance: 0.5,
-            turbo: true,
+            turbo,
             supercharger: false,
             gain: 1.0,
-        };
-        let limits = EngineLimits {
+        }
+    }
+
+    fn test_limits() -> EngineLimits {
+        EngineLimits {
             idle_rpm: 800.0,
             redline_rpm: 7000.0,
             rev_limit_rpm: 7200.0,
+        }
+    }
+
+    /// Run `frames` 60 Hz frames of `rpm(i)` / `applied(i)`; returns the outputs.
+    fn drive(
+        st: &mut EngineAudioState,
+        frames: usize,
+        rpm: impl Fn(usize) -> f32,
+        applied: impl Fn(usize) -> f32,
+    ) -> Vec<EngineOutput> {
+        let (mix, def, limits) = (test_mix(), test_def(false), test_limits());
+        let layers = EngineLayers::resolve(&pack(), 800.0, 7000.0);
+        let mut rng = Rng::new(3);
+        (0..frames)
+            .map(|i| {
+                update_engine(
+                    st,
+                    &mix,
+                    &def,
+                    limits,
+                    &layers,
+                    EngineInput {
+                        rpm: rpm(i),
+                        pedal: 1.0,
+                        applied: applied(i),
+                    },
+                    1.0 / 60.0,
+                    &mut rng,
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn rpm_falling_under_throttle_dips_the_load_and_it_re_rises() {
+        // Converter-style upshift: full throttle throughout, rpm 6000 -> 4000 in 0.3 s.
+        let mut st = EngineAudioState::default();
+        let rpm = |i: usize| match i {
+            0..=59 => 6000.0,
+            60..=77 => 6000.0 - (i - 59) as f32 * 2000.0 / 18.0,
+            _ => 4000.0,
         };
+        let out = drive(&mut st, 120, rpm, |_| 1.0);
+        let steady = out[59].load;
+        let low = out[60..80].iter().map(|o| o.load).fold(1.0, f32::min);
+        assert!(steady > 0.95);
+        assert!(low < 0.8 * steady, "dip to {low} from {steady}");
+        assert!(out[60..80].iter().any(|o| o.shift < -0.5));
+        assert!(out[119].load > 0.95, "re-rises to {}", out[119].load);
+        assert_eq!(out[119].shift, 0.0);
+    }
+
+    #[test]
+    fn rpm_rising_with_throttle_closed_blips() {
+        // Rev-matched downshift: throttle 0, rpm 2300 -> 2850 in 0.1 s.
+        let mut st = EngineAudioState::default();
+        let rpm = |i: usize| match i {
+            0..=59 => 2300.0,
+            60..=65 => 2300.0 + (i - 59) as f32 * 550.0 / 6.0,
+            _ => 2850.0,
+        };
+        let out = drive(&mut st, 120, rpm, |_| 0.0);
+        let idle_load = out[59].load;
+        let peak = out[60..75].iter().map(|o| o.load).fold(0.0, f32::max);
+        assert!(peak > idle_load + 0.15, "blip {idle_load} -> {peak}");
+        assert!(out[60..75]
+            .iter()
+            .any(|o| o.shift > 0.5 && o.on_share > 0.5));
+        assert!((out[119].load - idle_load).abs() < 0.02);
+    }
+
+    #[test]
+    fn part_throttle_is_mostly_on_layers() {
+        let mut st = EngineAudioState::default();
+        let out = drive(&mut st, 120, |_| 3000.0, |_| 0.35);
+        assert!(out[119].on_share > 0.95, "{}", out[119].on_share);
+        let mut st = EngineAudioState::default();
+        let out = drive(&mut st, 120, |_| 3000.0, |_| 0.0);
+        assert_eq!(out[119].on_share, 0.0);
+    }
+
+    #[test]
+    fn bad_inputs_stay_finite_and_decays_never_go_denormal() {
+        let mut st = EngineAudioState::default();
+        let bad = [f32::NAN, f32::INFINITY, -1.0, 5000.0];
+        let out = drive(&mut st, 40, |i| bad[i % 4], |i| bad[(i + 1) % 4]);
+        // Long steady overrun: every decaying state settles on exact values.
+        let out2 = drive(&mut st, 20_000, |_| 3000.0, |_| 0.0);
+        for o in out.iter().chain(out2.iter()) {
+            for x in [o.load, o.on_share, o.shift, o.firing_hz, o.limiter]
+                .into_iter()
+                .chain(o.layers.iter().flat_map(|l| [l.1, l.2]))
+            {
+                assert!(x.is_finite(), "{o:?}");
+            }
+        }
+        for x in [st.load, st.boost, st.rpm_rate, st.prev_throttle] {
+            assert!(x == 0.0 || x.abs() >= f32::MIN_POSITIVE, "denormal {x}");
+        }
+        assert_eq!(st.rpm_rate, 0.0);
+    }
+
+    #[test]
+    fn blowoff_on_lift_under_boost() {
+        let (mix, def, limits) = (test_mix(), test_def(true), test_limits());
         let layers = EngineLayers::resolve(&pack(), 800.0, 7000.0);
         let mut st = EngineAudioState::default();
         let mut rng = Rng::new(1);
