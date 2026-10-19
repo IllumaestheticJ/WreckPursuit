@@ -106,6 +106,22 @@ Every tick each ground unit (physical or headless) looks ahead on its own track:
   the blocker and free of oncoming vehicles for `oncoming_clear_m`. It passes at ≤
   `pass_speed_mps` and returns to its lane after the blocker.
 - **Exceptions**: a unit in a `Pit` or `BoxIn` tactic ignores its own target (contact is the point).
+  No unit ever overtakes its own target (a stopped target is an arrest).
+- **Traffic rules** (next junction on the track, refreshed at think rate; light from
+  `WorldQuery::signal_state_ahead`):
+  - *No lights (patrol)*: stop `stop_line_back_m` before a red, and before a yellow when there is
+    room; slow to `yield_mps` through unsignalised junctions and **give way** to cross traffic that
+    gets there within `yield_gap_s` of the unit (or is in the junction box), waiting at most
+    `yield_max_s`; turns at `turn_mps`; no overtaking within `no_pass_near_junction_m` of a
+    junction (red-light queues).
+  - *Lights on*: may run reds and exceed limits, but crosses junctions at `siren_junction_mps`
+    (`siren_red_mps` against a red, giving way to cross traffic for up to `yield_max_siren_s`) and
+    turns at `siren_turn_mps`.
+- **Holding still**: at a zero cap, and when parked (tool units, no track), a physical unit holds
+  brake 0.4 plus the handbrake. Full pedal at a standstill would engage `wp_vehicle`'s
+  automatic reverse.
+- **Gridlock**: a unit stopped behind another stopped police unit for `gridlock_s` creeps on at
+  `pass_creep_mps` past stopped higher-id units that cross or face it (they keep waiting).
 - **Spawning**: pool units appear in the right-hand lane, ≥ `spawn_clear_m` from every vehicle
   and outside every moving vehicle's next `spawn_path_s` of travel, already facing their first
   patrol route (a physical car turning around from standstill runs over the kerb). Reinforcement
@@ -164,12 +180,14 @@ distance and nearest road. Tests, scenarios and tools use `city::procedural(&Pro
 | Scenario | Result |
 |---|---|
 | Patrol presence (4 phases) | Exact table counts after warm-up |
-| Day speeder, Core, 2× limit (5 runs) | Pursuit at 8.6 s mean (≤ 13.3 s every run); reinforcement 30 s |
-| Night speeder, 03:00 (8 runs) | Pursuit at 114 s mean (4 of 8 runs < 60 s: the racer passed a cop); reinforcement 101 s |
-| Cop self-wreck, Simulation (20 pursuits) | 1.4% of engaged units; a reckless config (no budget, high caps) has more risk events (run-wide crashes, near misses, wrecks, traffic hits) |
+| Day speeder, Core, 2× limit (5 runs) | Pursuit at 8.8 s mean (≤ 12.8 s every run); reinforcement 29 s |
+| Night speeder, 03:00 (8 runs) | Pursuit at 126 s mean; reinforcement 115 s |
+| Cop self-wreck, Simulation (20 pursuits) | 0% of engaged units; a reckless config (no budget, high caps) has more risk events (run-wide crashes, near misses, wrecks, traffic hits) |
 | Tool placement (5 runs, L4) | 35 tools, minimum sight 120.1 m |
 | Escape (dusk, below helicopter level) | 2 of 3 runs escape |
 | Capture / safehouse (12×12 city) / total loss | Each rule fires in its scripted case |
+
+| City traffic, physical cars (`cargo run --release -p simcli --example police_traffic_contacts -- patrol\|pursuit 300`) | Patrol 300 s: 0 police↔traffic contacts, 1 overlap with kinematic traffic caused by a moving unit. Hot pursuit 362 s: 0 contacts, 0 overlaps with lights on, 3 caused by moving units in total |
 
 ## Perf
 `cargo run --release -p wp_police --example police_bench`: 13 patrols + reinforcements, 4 wanted
