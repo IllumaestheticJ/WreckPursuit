@@ -249,3 +249,13 @@ fn fuzz_alias_runs() {
     );
     assert!(String::from_utf8_lossy(&out.stdout).contains("fuzz ok"));
 }
+
+#[test]
+fn scenarios_md_example_parses_and_passes() {
+    let md = std::fs::read_to_string(root().join("SCENARIOS.md")).unwrap();
+    let start = md.rfind("```ron").expect("example block") + "```ron".len();
+    let end = start + md[start..].find("```").unwrap();
+    let sc = simcli::Scenario::from_ron("SCENARIOS.md", &md[start..end]).unwrap();
+    let out = simcli::run(&sc, &data(), &RunOptions::default()).unwrap();
+    assert!(out.summary.passed(), "{:?}", out.summary.failures);
+}
