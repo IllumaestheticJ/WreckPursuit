@@ -139,8 +139,8 @@ pub struct TireWetProfile {
     pub width_m: f32,
     /// The compound's `WetAsphalt / Asphalt` ratio (0..1).
     pub wet_ratio: f32,
-    /// Has drainage grooves. Inferred as `wet_ratio >= 0.6` (semi-slicks fall below) until the
-    /// contract has a tread field.
+    /// Has drainage grooves: `TireDef::treaded` (v0.3.0) when the tire file sets it, else
+    /// inferred as `wet_ratio >= 0.6` (slicks fall below), like `wp_weather::TireProfile`.
     pub treaded: bool,
 }
 
@@ -153,7 +153,7 @@ impl TireWetProfile {
         Self {
             width_m,
             wet_ratio,
-            treaded: wet_ratio >= 0.6,
+            treaded: def.treaded.unwrap_or(wet_ratio >= 0.6),
         }
     }
 }
@@ -411,5 +411,18 @@ mod tests {
         let def = wp_contracts::load_tire_def(p).unwrap();
         let prof = TireWetProfile::new(&def, 0.205);
         assert!((prof.wet_ratio - 0.7).abs() < 1e-6 && prof.treaded);
+        // The v0.3.0 `treaded` field wins over the wet-ratio inference.
+        let slick = wp_contracts::TireDef {
+            treaded: Some(false),
+            ..def.clone()
+        };
+        assert!(!TireWetProfile::new(&slick, 0.205).treaded);
+        let p = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../data/tires/semi_slick.json"
+        );
+        let semi = wp_contracts::load_tire_def(p).unwrap();
+        assert_eq!(semi.treaded, Some(false));
+        assert!(!TireWetProfile::new(&semi, 0.245).treaded);
     }
 }

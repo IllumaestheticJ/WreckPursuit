@@ -18,5 +18,6 @@
     "Curb": 0.85,
     "Metal": 0.55
   },
-  "wear_rate": 3e-05
+  "wear_rate": 3e-05,
+  "treaded": false
 }
