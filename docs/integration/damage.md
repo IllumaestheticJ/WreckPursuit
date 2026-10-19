@@ -111,9 +111,9 @@ testbed heat-map (TB-2): `beam_energy_j(i)`, `beam_plastic_strain(i)`, `beam_bro
 | `golden_frontal_56kmh` (Sim) | sedan into an *identical parked* sedan — not a rigid wall | structural crush 0.17 m (simcli `crush_depth` reads 0.46: cover nodes), health 0.79, 1 failure, **no TotalLoss** | No TotalLoss is correct physics (each car gets a ~28 km/h barrier's damage). Either expect `total_loss: false` and `crush_depth 0.1-0.35`, or make it a real barrier with `Sim::add_static_box` and keep `crush 0.45-0.8` + `total_loss: true` (that is the prompt-03 calibration case and passes in `crates/wp_damage/scenarios/frontal_sim.ron`). |
 | `golden_tbone` (Arcade) | coupe 50 km/h into the left front door/A-pillar (contacts span y −0.62…+1.23 m) of a sedan doing 8 m/s | victim 0.07 m, health 0.93, 0 failures; the same scenario in **Simulation**: 0.145 m, 2 failures | In Arcade the victim's lattice gets 45 % of half the energy (~17.5 kJ), so 0.15-0.6 m with failures is a Simulation-mode target. Either switch the golden to `mode: Simulation` with `crush_depth 0.1-0.4`, `components_failed ≥ 1`, or keep Arcade with `crush_depth 0.04-0.25`, `components_failed 0-20`. Softening the side further to reach 0.15 m in Arcade would put Sim side intrusion at ~0.4 m @ 50 km/h ("poor"-rated car). |
 
-**Goldens need a re-bless.** These are intended behaviour changes, so simcli `goldens_match` fails on
-this branch until the goldens are re-blessed (`just bless`, committed with `[bless]`). All simcli
-scenario expectations pass. Not blessed here: blessing was left to the lead/harness owner.
+**Goldens re-blessed (`[bless]` commit, with the owner's go-ahead).** Changed on purpose by the
+energy split / side softening: `golden_frontal_56kmh`, `golden_tbone`, `regression_grid_24`
+(hashes + the two replays). Every other golden is unchanged; all scenario expectations pass.
 
 Also for machine I: switch `simcli::run::crush_depth` to `DamageModel::structural_crush_m()` (the
 current max over all nodes is dominated by bumper-cover nodes and frozen detached parts).
