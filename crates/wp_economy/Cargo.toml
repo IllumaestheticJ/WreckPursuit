@@ -15,7 +15,6 @@ native = ["dep:rusqlite"]
 [dependencies]
 wp_contracts.workspace = true
 wp_math.workspace = true
-wp_police.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
@@ -23,4 +22,6 @@ thiserror.workspace = true
 rusqlite = { version = "0.40", features = ["bundled"], optional = true }
 
 [dev-dependencies]
+# Tests only: keeps `repair::reference_line` in lockstep with wp_damage's pricing constants.
+wp_damage.workspace = true
 proptest = { version = "1.12", default-features = false, features = ["std"] }

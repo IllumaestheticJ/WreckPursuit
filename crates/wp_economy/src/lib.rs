@@ -50,4 +50,4 @@ pub use ledger::{
 pub use mods::{ModCatalog, ModDef, ModEffect, ModSlot, ToolLoadout};
 pub use payouts::{PinkSlipConsent, RaceResult, RaceSettlement, RaceSetup, RaceType};
 pub use repair::{DamageReport, RepairOption, RepairOrder, RepairQuote, ShopContext, ShopKind};
-pub use wp_police::WantedLevel;
+pub use wp_contracts::WantedLevel;

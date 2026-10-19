@@ -5,8 +5,8 @@
 //! beyond speeding) adds `clean_bonus` on top. Buy-in = `entry_frac × base purse × phase.entry`.
 
 use serde::{Deserialize, Serialize};
+use wp_contracts::WantedLevel;
 use wp_contracts::{DamageMode, DayPhase, VehicleClass};
-use wp_police::WantedLevel;
 
 use crate::data::Economy;
 use crate::error::EconomyError;

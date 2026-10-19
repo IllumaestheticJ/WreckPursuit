@@ -4,15 +4,19 @@
 #
 # Parts cost of a region / component = reference cost below × class.parts_scale × value factor,
 # value factor = clamp(car value / class.reference_value, value_factor_clamp).
-# Labour = labour_hours_per_item × severity × class.labour_per_hour × district × shop markup.
+# Parts on a line: full price at severity >= 0.6 (replace), else repair_parts_fraction ×
+# severity / 0.6 of it (straighten / repair) — the same rule wp_damage uses.
+# Labour = item hours (tables below, else labour_hours_per_item) × max(severity, 0.1)
+#          × class.labour_per_hour × district × shop markup.
 # The bill is then × the damage mode's repair_cost_scale (data/modes: Sim 1.0, Arcade 0.5).
 #
 # Feel target: a fully wrecked car (every line at severity 1) costs ~2× its value in
 # Simulation (>= 60% is the hard floor, checked by tests); a bumper scrape costs less than a
 # buy-in; a medium front-end hit costs about one race win in Simulation (half in Arcade).
 
-labour_hours_per_item = 2.0
+labour_hours_per_item = 2.0        # fallback for items not in the hour tables below
 value_factor_clamp = [0.4, 2.5]
+repair_parts_fraction = 0.3        # a repair (not a replacement) costs 30% of the part at most
 
 # Parts cost on the reference Compact (value 18 000).
 [region_parts]
@@ -59,6 +63,54 @@ BrakeRL = 180
 BrakeRR = 180
 Exhaust = 450
 Lights = 400
+
+# Labour hours for a full replacement (× severity, at least 10%). Bolt-on panels are quick;
+# welded structure, glass bonding and the passenger cell are slow. Labour does not scale with
+# car value, only with the class labour rate. Detached parts use their region's hours.
+[region_labour_hours]
+FrontBumper = 1.5
+Hood = 1.5
+FrontLeftFender = 2.0
+FrontRightFender = 2.0
+LeftDoorF = 3.0
+LeftDoorR = 3.0
+RightDoorF = 3.0
+RightDoorR = 3.0
+Roof = 8.0
+RearLeftQuarter = 6.0
+RearRightQuarter = 6.0
+Trunk = 1.5
+RearBumper = 1.5
+Windshield = 2.0
+RearGlass = 1.5
+FrameFront = 10.0
+FrameRear = 8.0
+FrameLeft = 7.0
+FrameRight = 7.0
+Cabin = 14.0
+
+[component_labour_hours]
+Engine = 12.0
+Radiator = 1.5
+Battery = 0.3
+FuelTank = 2.5
+SteeringRack = 3.0
+SuspensionFL = 2.0
+SuspensionFR = 2.0
+SuspensionRL = 2.0
+SuspensionRR = 2.0
+WheelFL = 1.0
+WheelFR = 1.0
+WheelRL = 1.0
+WheelRR = 1.0
+Gearbox = 7.0
+Driveshaft = 2.0
+BrakeFL = 1.0
+BrakeFR = 1.0
+BrakeRL = 1.0
+BrakeRR = 1.0
+Exhaust = 1.0
+Lights = 0.5
 
 # reference_value: typical car value in the class (parts scale with value / this).
 [class.Beater]

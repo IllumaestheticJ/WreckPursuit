@@ -118,3 +118,83 @@ fn invalid_data_is_rejected() {
     src.mods[0].0 = "wrong_stem".into();
     assert!(Economy::from_sources(&src).is_err());
 }
+
+#[test]
+fn every_tire_file_has_a_grip_factor() {
+    let e = econ();
+    for entry in std::fs::read_dir(repo().join("data/tires"))
+        .unwrap()
+        .flatten()
+    {
+        let p = entry.path();
+        if p.extension().is_some_and(|x| x == "json") {
+            let id = p.file_stem().unwrap().to_str().unwrap().to_string();
+            assert!(
+                e.market.tire_grip.contains_key(&id),
+                "market.tire_grip lacks {id}"
+            );
+        }
+    }
+}
+
+#[test]
+fn price_table_fills_contract_v0_2_fields() {
+    use wp_contracts::{RepairItem, VehicleClass};
+    use wp_economy::data::{ALL_COMPONENTS, ALL_REGIONS};
+    let e = econ();
+    let t = e.price_table(VehicleClass::Compact, 18_000);
+    assert_eq!(
+        t.repair_parts_fraction,
+        Some(e.prices.repair_parts_fraction)
+    );
+    for r in ALL_REGIONS {
+        assert!(t.labour_hours.contains_key(&RepairItem::Region(r)), "{r:?}");
+        assert!(
+            t.labour_hours.contains_key(&RepairItem::DetachedPart(r)),
+            "{r:?}"
+        );
+    }
+    for c in ALL_COMPONENTS {
+        assert!(
+            t.labour_hours.contains_key(&RepairItem::Component(c)),
+            "{c:?}"
+        );
+    }
+    // Structure takes longer than a bolt-on panel.
+    let h = |i| t.labour_hours[&i];
+    use wp_contracts::BodyRegion::{Cabin, FrontBumper};
+    assert!(h(RepairItem::Region(Cabin)) > 4.0 * h(RepairItem::Region(FrontBumper)));
+}
+
+#[test]
+fn reference_pricing_matches_wp_damage() {
+    use wp_economy::repair::{
+        DEFAULT_REPAIR_PARTS_FRACTION, MIN_LABOUR_FRACTION, MIN_SEVERITY, REPLACE_SEVERITY,
+    };
+    assert_eq!(REPLACE_SEVERITY, wp_damage::repair::REPLACE_SEVERITY);
+    assert_eq!(
+        DEFAULT_REPAIR_PARTS_FRACTION,
+        wp_damage::repair::REPAIR_PARTS_FRACTION
+    );
+    assert_eq!(MIN_LABOUR_FRACTION, wp_damage::repair::MIN_LABOUR_FRACTION);
+    assert_eq!(MIN_SEVERITY, wp_damage::repair::MIN_SEVERITY);
+}
+
+#[test]
+fn reference_line_repairs_below_and_replaces_above_threshold() {
+    use wp_contracts::{BodyRegion, RepairItem, VehicleClass};
+    use wp_economy::repair::reference_line;
+    let e = econ();
+    let t = e.price_table(VehicleClass::Compact, 18_000);
+    let item = RepairItem::Region(BodyRegion::Hood);
+    let cost = t.region_replace_cost[&BodyRegion::Hood];
+    let repair = reference_line(&t, 1.0, item, 0.3);
+    assert!((repair.parts_cost - cost * 0.3 * 0.3 / 0.6).abs() < 1e-3);
+    let replace = reference_line(&t, 1.0, item, 0.8);
+    assert_eq!(replace.parts_cost, cost);
+    assert!((replace.labour_hours - t.labour_hours[&item] * 0.8).abs() < 1e-5);
+    // Unscaled parts/hours; only the total carries the mode scale.
+    let arcade = reference_line(&t, 0.5, item, 0.8);
+    assert_eq!(arcade.parts_cost, replace.parts_cost);
+    assert!((arcade.total - 0.5 * replace.total).abs() < 1e-3);
+}

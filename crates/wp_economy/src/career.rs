@@ -10,9 +10,9 @@
 
 use std::collections::BTreeMap;
 
+use wp_contracts::WantedLevel;
 use wp_contracts::{BodyRegion, Component, DamageMode, DayPhase, HandlingEffects, RepairItem};
 use wp_math::Rng;
-use wp_police::WantedLevel;
 
 use crate::capture::{CaptureContext, CarFate};
 use crate::data::Economy;

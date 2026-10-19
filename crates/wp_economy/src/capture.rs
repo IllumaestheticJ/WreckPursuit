@@ -8,8 +8,8 @@
 
 use serde::{Deserialize, Serialize};
 use wp_contracts::DamageMode;
+use wp_contracts::WantedLevel;
 use wp_math::Rng;
-use wp_police::WantedLevel;
 
 use crate::data::Economy;
 use crate::error::EconomyError;
