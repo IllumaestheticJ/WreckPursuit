@@ -1225,7 +1225,14 @@ fn decide_racer(
         // Lateral band I occupy / am heading into.
         let my_band = |n_a: f32, n_b: f32| (n_a.min(n_b) - hw, n_a.max(n_b) + hw);
         let overlaps = |band: (f32, f32), o: &Obstacle, margin: f32, t_reach: f32| {
-            let drift = o.v_n * t_reach.min(3.0);
+            // Civilians may be crossing: extrapolate up to 3 s. Racers steer toward their
+            // lines all the time; only their next half second of drift counts.
+            let horizon = if matches!(o.who, Who::Civilian(_)) {
+                3.0
+            } else {
+                0.5
+            };
+            let drift = o.v_n * t_reach.min(horizon);
             let lo = o.n.min(o.n + drift) - o.half_w - margin;
             let hi = o.n.max(o.n + drift) + o.half_w + margin;
             band.0 < hi && band.1 > lo
@@ -1411,8 +1418,25 @@ fn decide_racer(
         if r.unstable {
             cap_to(&mut v_target, v - 1.0, SpeedLimit::Unstable);
         }
-        // Obstacle caps: anything ahead in the band I'm driving through.
+        // Off the racing line (passing, defending, squeezed): the path at constant offset
+        // `n_cmd` has its own curvature — slow for it (inside lines are tighter).
         let a_brk = profile.a_brake.max(3.0) * 0.85;
+        if (n_cmd - line_n(r.s)).abs() > 1.0 {
+            let mut x = 0.0;
+            let horizon = (v * v / (2.0 * a_brk) + 20.0).min(150.0);
+            while x <= horizon {
+                let kc = corridor.centre_curvature(r.s + x);
+                let den = (1.0 - kc * n_cmd).max(0.2);
+                let k = (kc / den).abs();
+                if k > 1e-4 {
+                    let v_off = (profile.a_lat / k).sqrt();
+                    let cap = (v_off * v_off + 2.0 * a_brk * x).sqrt();
+                    cap_to(&mut v_target, cap, SpeedLimit::Mode);
+                }
+                x += 2.0 * CORRIDOR_STEP_M;
+            }
+        }
+        // Obstacle caps: anything ahead in the band I'm driving through.
         let band = my_band(r.n, n_cmd);
         for x in &rel {
             if x.ds <= 0.0 {

@@ -393,6 +393,16 @@ impl Corridor {
         }
     }
 
+    /// Signed centreline curvature at `s` (1/m, + = turning right), from the tangents of the
+    /// samples around it (±3 samples).
+    pub fn centre_curvature(&self, s: f32) -> f32 {
+        let i = (self.wrap_s(s) / CORRIDOR_STEP_M).floor() as isize;
+        let a = self.sample(i - 3).tangent;
+        let b = self.sample(i + 3).tangent;
+        // cross(a, b) > 0 = counter-clockwise (left); + = right here.
+        -geom::cross(a, b) / (6.0 * CORRIDOR_STEP_M)
+    }
+
     /// Distance along the corridor from `s` to the next point where the corridor turns by more
     /// than `angle_rad` within `window_m`, searched up to `horizon_m` ahead (None if none).
     pub fn next_turn(
