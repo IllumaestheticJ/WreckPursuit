@@ -16,6 +16,7 @@ import { TelemetryPlots } from "./telemetry";
 import { AudioSystem } from "./audio";
 import { PoliceHud } from "./police_hud";
 import { UiOverlay } from "./ui/overlay";
+import { RealTimeMeter } from "./rtf";
 
 // v2: canonical simcli replay.bin (v1 held the retired WPR\x01 format).
 const LAST_REPLAY_KEY = "wp.testbed.lastReplay.v2";
@@ -43,6 +44,8 @@ interface AppState {
   result: ScenarioResult | null;
   input: DriverInput;
   bench: { n: number; frames: number; sim: number; render: number; t0: number; tick0: number } | null;
+  /** Frame-time breakdown (ms, smoothed) and real-time factor; read by the HUD and e2e. */
+  perf: { simMs: number; viewsMs: number; renderMs: number; frameMs: number; rtf: number };
 }
 
 const app: AppState = {
@@ -58,6 +61,7 @@ const app: AppState = {
   result: null,
   input: { steer: 0, throttle: 0, brake: 0, handbrake: 0, clutch: 0, gearUp: false, gearDown: false, horn: false, headlights: false },
   bench: null,
+  perf: { simMs: 0, viewsMs: 0, renderMs: 0, frameMs: 0, rtf: 1 },
 };
 
 async function main(): Promise<void> {
@@ -379,9 +383,13 @@ async function main(): Promise<void> {
   let simMs = 0;
   let renderMs = 0;
   let frameNo = 0;
+  const rtf = new RealTimeMeter();
 
   function frame(now: number): void {
-    const dt = Math.min((now - last) / 1000, 0.1);
+    const wallDt = (now - last) / 1000;
+    // Cap one frame's catch-up at the session's own limit (MAX_TICKS_PER_STEP = 0.25 s): a
+    // tighter cap turned every slow frame into lost sim time (slow motion).
+    const dt = Math.min(wallDt, 0.25);
     last = now;
     fps += (1 / Math.max(dt, 1e-3) - fps) * 0.05;
     const replay = isReplay();
@@ -398,6 +406,7 @@ async function main(): Promise<void> {
     if (!app.paused || replay) app.alpha = sim.step(app.paused && !replay ? 0 : dt);
     const t1 = performance.now();
     simMs += (t1 - t0 - simMs) * 0.1;
+    rtf.push(wallDt, sim.worldInfo()[W.tick], !app.paused && !replay && !app.bench);
 
     const meta = sim.vehicleMeta();
     syncViews(meta);
@@ -451,6 +460,12 @@ async function main(): Promise<void> {
     scene.render(rig.camera);
     const r1 = performance.now();
     renderMs += (r1 - r0 - renderMs) * 0.1;
+    const p = app.perf;
+    p.simMs = simMs;
+    p.renderMs = renderMs;
+    p.viewsMs += (r0 - t1 - p.viewsMs) * 0.1;
+    p.frameMs += (wallDt * 1000 - p.frameMs) * 0.1;
+    p.rtf = rtf.factor;
 
     if (frameNo++ % 6 === 0 || !focusView) {
       hud.update({
@@ -467,6 +482,8 @@ async function main(): Promise<void> {
         fps,
         simMs,
         renderMs,
+        viewsMs: p.viewsMs,
+        rtf: rtf.factor,
         tick: wi[W.tick],
         hours: wi[W.hours],
         hash: sim.stateHash(),

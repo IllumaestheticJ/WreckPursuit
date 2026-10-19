@@ -4,6 +4,7 @@ import { T } from "./wasm/layout";
 import type { AssistProfile, DriverInput, SimEvent, VehicleInfo } from "./wasm/sim";
 import { layers, LAYERS } from "./settings";
 import { heat, healthColour } from "./vehicle_view";
+import { RTF_WARN } from "./rtf";
 
 /** Region energy (J) shown as fully red in the silhouette / panel. */
 const ENERGY_RED = 5000;
@@ -36,6 +37,10 @@ export interface HudFrame {
   fps: number;
   simMs: number;
   renderMs: number;
+  /** JS time between the sim step and the render call (views, HUD, scene updates), ms. */
+  viewsMs: number;
+  /** Real-time factor: sim seconds per wall second (1 = real time). */
+  rtf: number;
   tick: number;
   hours: number;
   hash: string;
@@ -124,7 +129,10 @@ export class Hud {
         ? `<div>${badge(a.abs, "ABS")}${badge(a.tcs, "TCS")}${badge(a.esc, "ESC")}${badge(a.steer_speed_sensitivity > 0, "STEER")}` +
           `${badge(a.countersteer_help > 0, "CSTR")}${badge(a.throttle_filter > 0, "THR-F")}${badge(a.auto_gears, "AUTO")}</div>`
         : "") +
-      `<div class="dim">${f.fps.toFixed(0)} fps · sim ${f.simMs.toFixed(2)} ms · render ${f.renderMs.toFixed(2)} ms · ${f.vehicles} car(s)</div>` +
+      `<div class="dim">${f.fps.toFixed(0)} fps · sim ${f.simMs.toFixed(2)} ms · views ${f.viewsMs.toFixed(1)} ms · render ${f.renderMs.toFixed(2)} ms · ${f.vehicles} car(s)</div>` +
+      (f.rtf < RTF_WARN
+        ? `<div class="rtf-warn">⚠ slow motion: ${f.rtf.toFixed(2)}× real time (browser can't keep up)</div>`
+        : `<div class="dim">real time ${f.rtf.toFixed(2)}×</div>`) +
       `<div class="dim">tick ${f.tick} · ${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")} · cam ${f.camera} · hash ${f.hash}</div>` +
       `<div class="dim">health ${t ? (t[T.health] * 100).toFixed(0) : "–"}% · ${f.info?.display_name ?? ""} · F1 help</div>`;
 
