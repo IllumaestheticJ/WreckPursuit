@@ -343,6 +343,31 @@ check(
     `banner ${chase.banner ?? "none"}, ${chase.police} police vehicles + ${chase.units} other units, ` +
     `${chase.violations} violation event(s) (in feed: ${chase.inFeed}) after ${chase.simS.toFixed(1)} s sim; wait ${chaseWait}`,
 );
+// Art style (machine S, render/style.ts): low-poly dark by default in the night chase (palette
+// fog, street lamps along the kerbs, post stack), the selector switches to greybox and back.
+const art = await page.evaluate(async () => {
+  const w = window.__wp;
+  const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  const { PALETTE } = await import("/src/render/palette.ts");
+  const low = { id: w.style.id, fog: w.scene.scene.fog?.density ?? 0, lamps: w.style.lampCount("vesper_v2"), override: !!w.scene.renderOverride };
+  const sel = document.getElementById("style");
+  sel.value = "greybox";
+  sel.dispatchEvent(new Event("change"));
+  await frame();
+  const grey = { id: w.style.id, fog: w.scene.scene.fog?.density ?? 0 };
+  sel.value = "lowpoly";
+  sel.dispatchEvent(new Event("change"));
+  await frame();
+  const others = [PALETTE.lampGlow, PALETTE.signalGlow, PALETTE.headlightGlow, PALETTE.brakeGlow, PALETTE.windowGlow];
+  const brightest = Math.min(PALETTE.policeRedGlow, PALETTE.policeBlueGlow) >= 3 * Math.max(...others);
+  return { low, grey, back: w.style.id, brightest };
+});
+check(
+  art.low.id === "lowpoly" && art.low.override && art.low.fog > 0.001 && art.low.lamps > 100 && art.grey.id === "greybox" && art.grey.fog === 0 && art.back === "lowpoly" && art.brightest,
+  `art style: low-poly dark in the chase (fog ${art.low.fog.toFixed(4)}, ${art.low.lamps} street lamps), greybox on the selector (fog ${art.grey.fog}), back to ${art.back}; police bars ≥ 3× every other glow: ${art.brightest}`,
+);
+await shot("city_chase_greybox_toggle.png");
+
 // City map HUD (workstream 16): the corner minimap shows the player and the police near them;
 // M / Tab open the full city map, M / Tab / Esc close it. The player is parked in front of a
 // patrol car so at least one police dot is inside the minimap.
