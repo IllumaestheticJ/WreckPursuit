@@ -157,6 +157,26 @@ impl Sim {
         Ok(id)
     }
 
+    /// Teleport a vehicle to `pos`/`yaw`, rolling forward at `speed_mps` (wheels and engine
+    /// spun up to match; 0 = at rest). Scenario setup: lets crash tests start at speed instead
+    /// of a long run-up. Damage is kept; use [`Sim::reset_vehicle`] for a pristine car.
+    pub fn place_vehicle(
+        &mut self,
+        id: EntityId,
+        pos: [f32; 3],
+        yaw: f32,
+        speed_mps: f32,
+    ) -> Result<(), SimError> {
+        let slot = self
+            .vehicles
+            .iter_mut()
+            .find(|v| v.id == id)
+            .ok_or(SimError::UnknownEntity(id))?;
+        let rb = &mut self.physics.bodies[slot.body.body];
+        slot.vehicle.place_body(rb, pos, yaw, speed_mps, 0.0);
+        Ok(())
+    }
+
     /// Add a static box to the world (barrier, wall), centre `pos` (world m), full `size`
     /// `[x, y, z]` m, heading `yaw` rad about +Z. Contacts with it reach damage as static world
     /// geometry (`other: None`, `other_mass_kg: 0.0`; events name [`wp_contracts::WORLD_ENTITY`]).
@@ -484,14 +504,9 @@ mod tests {
         let b = sim
             .spawn_vehicle(&car, [0.0, 30.0, 0.0], std::f32::consts::PI)
             .unwrap();
-        for (i, (pos, yaw)) in [([0.0; 3], 0.0), ([0.0, 30.0, 0.0], std::f32::consts::PI)]
-            .into_iter()
-            .enumerate()
-        {
-            let slot = &mut sim.vehicles[i];
-            let rb = &mut sim.physics.bodies[slot.body.body];
-            slot.vehicle.place_body(rb, pos, yaw, 10.0, 0.0);
-        }
+        sim.place_vehicle(a, [0.0; 3], 0.0, 10.0).unwrap();
+        sim.place_vehicle(b, [0.0, 30.0, 0.0], std::f32::consts::PI, 10.0)
+            .unwrap();
         let hold = VehicleInput {
             throttle: 0.3,
             ..Default::default()
@@ -557,10 +572,8 @@ mod tests {
             time_ratio: 10.0,
         });
         sim.add_static_box([0.0, 20.0, 0.75], [8.0, 1.0, 1.5], 0.0);
-        sim.spawn_vehicle(&car, [0.0; 3], 0.0).unwrap();
-        let slot = &mut sim.vehicles[0];
-        let rb = &mut sim.physics.bodies[slot.body.body];
-        slot.vehicle.place_body(rb, [0.0; 3], 0.0, 15.0, 0.0);
+        let id = sim.spawn_vehicle(&car, [0.0; 3], 0.0).unwrap();
+        sim.place_vehicle(id, [0.0; 3], 0.0, 15.0).unwrap();
         for _ in 0..720 {
             sim.step_fixed();
         }
