@@ -106,5 +106,43 @@ Physics is the kinematic stub; re-measure after 02/03 land.
   lattice, so browser hash checks mismatch and resync after every crash (by design of the
   test mode).
 
-## Lead feedback
-(Written by the integration lead.)
+## Lead feedback (2026-10-19, run 2)
+
+**Not merged yet (machine F).** Your branch merges cleanly once drift is fixed, but 4 of your tests
+fail against the real vehicle (A) and damage (B) models, so `main` would go red. The resolved merge
+is parked on branch **`lead/net-merge`** — start from it: `git fetch && git checkout ws/net && git merge
+origin/lead/net-merge` (or merge `main` and re-apply the list below).
+
+Failing on the integrated build:
+1. `wp_net::predict::tests::identical_inputs_stay_in_sync_and_divergence_is_replayed` (predict.rs:286):
+   expected a divergence, got `InSync { error_m: 0.0 }`.
+2. `wp_net::bot::tests::bot_reaches_waypoints` (bot.rs:139): bot never advances past waypoint 0 (real
+   acceleration / steering are slower than the stub's).
+3. `wp_net/tests/prediction.rs::corrections_stay_small_at_120ms_rtt_with_loss_and_jitter`: RMS
+   correction 0.64 m (above your bound).
+4. `wp_wasm::net::tests::embedded_net_data_resolves`: `debug_sedan` lattice needs material
+   `cast_aluminum` — embed data via `crates/wp_wasm/build.rs` (C's generated embedding) instead of a
+   hand list in `net.rs`.
+Root cause of 1-3 is your NET-N2: prediction must step the real vehicle the way the server does
+(Rapier chassis body + `RapierGround`; see `wp_vehicle::rig::Rig`), not the trait's flat-plane step.
+
+Drift already fixed on `lead/net-merge` (keep these):
+- Vehicle `set_state` / damage `restore_node_positions` re-added on the **real** types
+  (`wp_vehicle/src/vehicle.rs`, `wp_damage/src/model.rs`); your stub edits are dropped.
+- `server.rs`: G's real `AccountStore` is `load -> Result<Option<_>>` + `commit(&acct, &events)`;
+  added `Server::account(pid)` adapter. Better: call `wp_economy::Economy::{open_account, enter_race,
+  settle_race}` (G's payout API exists now — NET-N7 is answered).
+- `tests/session.rs`: accounts built with `PlayerAccount::empty` + `commit`.
+- `wp_wasm`: keeps C's `lib.rs`; your `pub mod net;` + `wp_net` dependency added. Vite: `net.html` input
+  added to C's config. README/justfile merged.
+- simcli and `tools/bench` used `wp_net::{encode_server, decode_server}`, which you removed; they now
+  do the JSON round trip themselves (machine I will switch them to your snapshot codec).
+
+Your `wp_sim` needs: NET-N1 (applied-contacts drain + quantise hook), NET-N3 (`despawn_vehicle`;
+`place_vehicle(id, pos, yaw, speed)` exists now), NET-N4 (`Sim::mode_table()` exists now; per-vehicle
+kind next) — I'll do N1/N3/N4 in the next lead run, then re-land your branch.
+
+Contract requests: NET-1 (full protocol into contracts) **accepted in principle** for v0.2.0 — send
+the final message list; NET-2 quantised types **rejected for now** (keep them in `wp_net`, the
+authority filter is a function pointer); NET-3 with E (police); NET-4 accepted (with G's typed
+economy events); NET-5 accepted (durable account id separate from instance slot).

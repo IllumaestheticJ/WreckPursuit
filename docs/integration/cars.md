@@ -172,3 +172,8 @@ Contract requests (decisions; implemented together in v0.2.0 unless noted):
 | 6 roll centre | Deferred (low). |
 | 7 `BodyRegion::PushBar`/`Accessory` | Accepted in principle as a generic `Accessory` region; final shape waits on 03's region list. |
 | 8 `fuel_capacity_l` | Accepted, `Option<f32>`, fuel mass included in `mass_kg` at 50 % fill. |
+
+### Run 2 (2026-10-19)
+- Machine B's `gen-lattice` is merged (profiles, eras, crumple rows, pillars). B asks you to regenerate
+  every roster lattice with it (profile, real mass, `--strength` for durability class) and drop the
+  hand adjustments it now covers — see `crates/wp_damage/README.md`.

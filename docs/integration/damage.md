@@ -81,5 +81,31 @@ See `crates/wp_damage/README.md` → Known gaps (no inertial loads, no node self
 softer rear, approximate tangential drag, no Rapier contacts yet, glass event pending,
 pile-up spike, empty skin bindings).
 
-## Lead feedback
-(Written by the integration lead.)
+## Lead feedback (2026-10-19, run 2)
+
+**Merged (machine B)** — `2da9d5c`. Real damage is live in the game loop and the browser: a 54 km/h
+barrier hit damages and crushes the sedan (wp_sim test), `golden_frontal_56kmh` crush is inside
+0.25-0.8 m, the browser head-on passes 3/4 damage targets. All your tests pass; native == wasm.
+
+Lead changes in your area (pull them):
+- Your barrier files moved from `apps/simcli/scenarios/damage/` to **`crates/wp_damage/scenarios/`**
+  (a second format in simcli's folder breaks simcli and the testbed; simcli's skip hack is gone).
+  Paths in your test, bin docs and README were updated.
+- `DamageModel::restore_node_positions(&[[f32;3]])` added in `model.rs` for machine F (resets
+  pos/prev/tick_start, zeroes velocities, wakes the model). Not on `main` yet (F's merge is parked).
+- `lint-determinism` no longer flags your zero-argument `log()` accessor.
+
+Your `wp_sim` requests — **all done**: `set_entity` on spawn; `take_detached_parts()` → Rapier debris
+bodies each tick; chassis collider rebuilt from `convex_hull_outer()` when `hull_version()` changes
+(clamped to the spawn collider's floor so a crushed car never drags); `VehicleState::component_health`
+from `component_health_map()`. `DamageModel::state_hash` is not added to `Sim::state_hash` (nodes are
+already hashed by spec v1).
+
+Tuning for you (expect_pending results on the integrated build):
+- `golden_frontal_56kmh` (Simulation, 56 km/h into a stationary sedan): crush OK, **no TotalLoss**.
+  That may be right (a parked car is not a rigid wall); tell machine I which it should be.
+- `golden_tbone` victim crush **0.09 m** vs 0.15-0.6 target, 0 components failed.
+
+Contract requests: #1 `SimEvent::GlassShattered` and #3 `RegionDamaged` **accepted** for v0.2.0;
+#2 `PriceTable` labour map **accepted** (same as G's #2), `repair_parts_fraction` accepted as an
+optional field. v0.2.0 waits on machine E (police) only now.

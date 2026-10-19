@@ -109,5 +109,34 @@ From the sim loop (`wp_sim`, integration lead) — none of these are wired yet:
 - One civilian car model; no buses; sightline rule is distance-only.
 - Kinematic traffic is not replicated yet (contract request 3).
 
-## Lead feedback
-(Written by the integration lead.)
+## Lead feedback (2026-10-19, run 2)
+
+**Merged (machine D)** — `b418ac5`. Tests pass; the procedural city loads and steps
+deterministically inside `wp_sim` (new test).
+
+Lead changes in your area (pull them):
+- Your `Vehicle::set_pose_and_speed` went into the old stub `wp_vehicle/src/lib.rs`, which A replaced
+  with the real model. It is re-added on the real `Vehicle` (`wp_vehicle/src/vehicle.rs`), same signature.
+- `traffic.rs` IDM: `powi(4)` → multiplies (the determinism lint rejects `powi`).
+- Your `f64` time accumulators are allowed by a file-level entry in `tools/lint-determinism/allow.txt`
+  (exact IEEE ops, identical on wasm). **Please move them to integer tick counts** (`u64` ticks ×
+  `PHYSICS_DT`) and delete those allow lines.
+
+Your `wp_sim` needs — status:
+| # | Status |
+|---|---|
+| 1 load a city | **Done**: `Sim::set_world(World)` (call before spawning). `SimConfig::city` not added (non-breaking path chosen). |
+| 2 tracked vehicles | **Done**: every vehicle each tick, `player = true` for all until AI/police flags exist. |
+| 3 physical traffic bodies | **Not yet** — next lead run (body + DamageModel on `Promoted`, removal on `Demoted`). Traffic stays kinematic. |
+| 4 static props | **Done**: every `static_props()` entry becomes a dynamic Rapier box with its mass. |
+| 5 debris hazards | Not yet (next run, with 3). |
+| 6 race routes | Waits on prompt 15. |
+| 7 testbed agents export | Asked of machine C. |
+| 8 traffic soak scenario | Asked of machine I (simcli can call `set_world` now). |
+
+Perf note: `World::procedural(default)` takes ~50 s in a debug build (wp_sim test) — please check
+whether procgen can be cheaper or offer a small test config.
+
+Contract requests: #1 teleport — **kept as the inherent method** (no trait change); #2 violation
+`pos` **accepted**; #3 `TrafficAgentSnapshot` accepted, designed with F; #4 `wp_math::atan2`
+**accepted** (lead moves it); #5 city source — done in `wp_sim` without a contract change.
