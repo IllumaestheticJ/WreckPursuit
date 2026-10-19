@@ -83,6 +83,12 @@ Q (probe contact), E+G (stationary capture), L (sprint pulls in police), N (AI r
 In progress: city v2 with curves and elevation (`lead/city-v2`), real CC0 sounds (J, blocked on
 network allow-list), M porting its HUD extras onto C's.
 
+## Round 9 (2026-10-19)
+City v2 (Port Vesper: downtown grid, curvy districts, hill road with switchbacks, banked loop with
+an overpass) is the city-chase default on the link; the grid stays selectable. Merged round-8
+work from A, B, D, E, F, G, H, L, M, N, Q. Parked now: L's stake-scale and control-run tests
+(L dispatched, round 9). Restored: L's sprint-pulls-in-police.
+
 ## Next (toward the single-player greybox demo)
 C draws police/traffic + city-chase preset; M wires the heat HUD and repair bill; E/D share
 roads and controller; G + lead wire capture/escape → economy.
