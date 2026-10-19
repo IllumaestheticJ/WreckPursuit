@@ -21,7 +21,7 @@ use wp_audio::{
 };
 use wp_contracts::{EntityId, SimEvent};
 
-use crate::{err, json, with_app};
+use crate::{err, json, with};
 
 thread_local! {
     static AUDIO: RefCell<Option<AudioDirector>> = const { RefCell::new(None) };
@@ -83,15 +83,15 @@ pub fn audio_frame(listener: &[f32], events_json: &str, focus: u32) -> Result<St
     } else {
         serde_json::from_str(events_json).map_err(err)?
     };
-    with_app(|app| {
-        let s = &app.session;
+    with(|s| {
+        let s = &*s;
         let states = s.sim().vehicle_states();
         let mut car_ids = Vec::with_capacity(states.len());
         for (id, _) in &states {
-            let x = s
-                .extra(*id)
+            let car = s
+                .car(*id)
                 .ok_or_else(|| format!("unknown entity {}", id.0))?;
-            car_ids.push(x.car.def.id.clone());
+            car_ids.push(car.def.id.clone());
         }
         AUDIO.with(|a| -> Result<String, String> {
             let mut a = a.borrow_mut();
@@ -101,7 +101,7 @@ pub fn audio_frame(listener: &[f32], events_json: &str, focus: u32) -> Result<St
             }
             let d = a.as_mut().expect("just created");
             for (id, _) in &states {
-                let car = &s.extra(*id).expect("checked above").car;
+                let car = s.car(*id).expect("checked above");
                 if !d.has_car(&car.def.id) {
                     d.register_car(car);
                 }
@@ -181,7 +181,7 @@ pub fn audio_set_scanner_tier(tier: &str) -> Result<(), JsValue> {
 #[wasm_bindgen]
 pub fn audio_radio(unit: u32, priority: &str, text: &str) -> Result<(), JsValue> {
     let priority: RadioPriority = serde_json::from_str(&format!("{priority:?}")).map_err(err)?;
-    let tick = with_app(|a| Ok(a.session.tick()))?;
+    let tick = with(|s| Ok(s.tick()))?;
     with_audio(|d| {
         d.push_radio_line(RadioLine {
             unit,
