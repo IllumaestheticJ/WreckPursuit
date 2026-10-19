@@ -119,5 +119,39 @@ Cloud container, Intel Xeon @ 2.10 GHz, 4 cores, release, stub systems (from `do
 - The lint is line-based: it can miss a transcendental called through a function pointer or a
   macro, and it stops at the first `#[cfg(test)]` in a file.
 
-## Lead feedback
-(Written by the integration lead.)
+## Lead feedback (2026-10-19)
+
+**Merged** (`297b6b8` + `2b5f063 [bless]`). Everything green on the integrated build: workspace tests,
+determinism lint (0 errors), goldens, and `tools/wasm-determinism/compare.sh` (native == wasm on every
+scenario).
+
+Lead changes in your area (pull them; the reasons are physics landing, not bugs in your work):
+- `smoke/straight_line.ron`: merged with 02's timing (brake until 8 s, then handbrake, because a held
+  brake at standstill now engages auto-reverse) and 02's tighter ranges.
+- 02's `vehicle/*.ron` converted to v2.
+- Goldens retimed for real acceleration (the stub hit 100 km/h in ~3 s; real cars need 5-10 s):
+  `fwd_liftoff` (+8 s run-up, custom assists: aids off but auto gears, since `off` = manual gearbox),
+  `rwd_power_slide` (+2 s), `spike_strip` (+9 s, police moved to y = 400), `night_pursuit_escape`
+  (+3.5-5 s, patrol at y = 200). `SCENARIOS.md` example retimed the same way.
+- Cars are rigid bodies now and collide: `frontal_56kmh` barrier-car displacement moved to
+  `expect_pending` (0.5-25 m); `grid_24` lets `c10` be nudged (≤ 2 m/s) and `s0` ≥ 5 m/s.
+- Goldens re-blessed in a `[bless]` commit.
+- Testbed's dialect crash files moved out of `apps/simcli/scenarios/` (see testbed.md).
+
+New `wp_sim` API you can use: `Sim::add_static_box(pos, size, yaw)`, `Sim::place_vehicle(id, pos,
+yaw, speed_mps)`, `Sim::set_mode_table`. `SimEvent::Contact` is now emitted (one per touching pair per
+tick, summed impulse ≥ `wp_sim::CONTACT_EVENT_MIN_IMPULSE_NS` = 50 N·s), so `event_count(Contact)`
+expectations work; `golden_frontal_56kmh` gets 1, `golden_tbone` 2, `grid_24` 119.
+
+Next for you (priority order):
+1. Scenario v2: add `barriers: [(pos, size, yaw)]` (→ `add_static_box`) and per-entity
+   `speed_mps` (→ `place_vehicle`, so crash goldens can start at speed instead of long run-ups).
+   Then retime the goldens back to short runs if you prefer, and re-bless.
+2. CI additions requested by others: `python3 tools/specsheet/nameplate_check.py` (09) and
+   `cargo test -p wp_economy --features native` (08).
+3. Perf baselines were blessed against stub physics; the lead re-measured with the real model (see
+   `docs/PERF.md`) — re-bless the baseline on your side if the nightly gate disagrees.
+
+Contract requests: H1 (police kind codes) **accepted** — will be a typed `PoliceEvent` enum designed
+with 06 in v0.2.0, so the provisional `PURSUIT_STARTED_KIND` goes away. H2 (`Systems` in contracts)
+**rejected for now**: only `wp_sim`/simcli use it; revisit when 07 needs it.

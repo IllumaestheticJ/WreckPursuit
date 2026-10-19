@@ -261,5 +261,45 @@ testbed). Per-frame JS work scales with layers: lattice + stress layers add one 
 - Native stub: window/FFB verified to build and open under Xvfb; FFB not tested against a real
   wheel in this environment.
 
-## Lead feedback
-(Written by the integration lead.)
+## Lead feedback (2026-10-19)
+
+**Merged** (`c0f78d9`). `just web-e2e` passes on the integrated build with the real vehicle model:
+drive, all layers + 5 cameras, replay after reload 26/26 hashes, CSV, three scenarios, no page errors.
+
+Lead changes in your area (pull them):
+- **Scenario format clash with 10.** simcli's format v2 is canonical (prompt 10 owns the format).
+  Your three crash files (`car`/`others`/`barriers`/`cruise_kmh` dialect) broke simcli, so they
+  moved to `apps/testbed-web/scenarios/crash/`. `vite.config.ts` serves both folders under
+  `/scenarios/`. `wp_wasm::Scenario::from_ron` now parses v2 first via the `simcli` lib
+  (wasm-clean, new dependency of `wp_wasm`) and converts it with `Scenario::from_simcli`, then
+  falls back to your dialect. Approximations in the adapter: entity 1 spawns at the origin; a
+  `cruise` driver holds for the whole run (no `from_s`/`until_s`); per-entity assists ignored;
+  only `metric(...)` expectations are kept.
+
+Next for you (priority order):
+1. Adopt v2 natively: build sessions straight from `simcli::scenario::Scenario` (entity poses,
+   cruise windows, assists, all expectation kinds), convert `crash/*.ron` to v2 and move them back
+   to `apps/simcli/scenarios/crash/`; then delete the adapter and the old dialect.
+2. Barriers: `wp_sim::Sim::add_static_box(pos, size, yaw)` exists (TB-3 done) — call it for
+   barriers so crash scenarios really crash. 10 is adding `barriers` to v2.
+3. Mode switch: `Sim::set_mode_table(ModeTable)` exists (TB-4 done) — switch without restarting and
+   log it as an op so replays survive the switch.
+4. Replays: one canonical format. simcli `replay.bin` v1 (10) is it, so `simcli replay` can verify
+   browser recordings headlessly. Write that format from the browser (keep reading WPR\x01 for old
+   files if you like).
+5. Tire forces: `sim.vehicles()[i].vehicle.telemetry()` already has the applied per-wheel Fx/Fy
+   (02's README), so the force-arrow estimate can go now without waiting for TB-1.
+6. Contact layer: `SimEvent::Contact` events now flow (one per touching pair per tick above
+   50 N·s); check the C layer shows them.
+
+Contract requests:
+| # | Decision |
+|---|---|
+| TB-1 `WheelState { fx_n, fy_n }` | Accepted for v0.2.0 (net snapshot cost is small). |
+| TB-2 region energy / node strain | Accepted in principle; final shape agreed with 03 when it lands. |
+| TB-3 static boxes | **Done** in `wp_sim` (no contract change). |
+| TB-4 mode switch | **Done** in `wp_sim` (`set_mode_table`). |
+| TB-5 debug intents | Deferred until 05/06 merge. |
+| TB-6 lattice nodes in hash | **Done** by 10's hash spec v1 (nodes are hashed). |
+
+Perf: please re-measure `?bench=24` now that the real model runs (your numbers were stub physics).

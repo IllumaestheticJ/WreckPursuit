@@ -16,9 +16,9 @@ Stub implementations in every other crate with final public entry points:
 `wp_net::{Transport, Channel, encode_*/decode_*, native::serve_tick_echo}`.
 
 ## Needs
-- 02: replace the kinematic stub; vehicles become Rapier bodies so `wp_sim` can extract contacts.
-- 03: real `DamageSim`; calibrate `data/modes/*.toml`.
-- 10: golden hashes and outputs for `simcli`.
+- 03: real `DamageSim`; calibrate `data/modes/*.toml`. Contacts already arrive (`wp_sim/src/contacts.rs`).
+- 03 + 06 merged before the v0.2.0 contract bump (plan in `docs/CONTRACT_CHANGELOG.md`).
+- 10: scenario `barriers` (→ `Sim::add_static_box`) and start speed (→ `Sim::place_vehicle`).
 
 ## Contract change requests
 None (this is the contract owner).

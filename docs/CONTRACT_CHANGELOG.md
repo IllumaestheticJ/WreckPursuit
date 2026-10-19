@@ -5,6 +5,47 @@
 changed, why, and which workstreams must update. Only the integration lead edits the contract.
 Every session reads this file at start.
 
+## v0.2.0 — plan (not applied yet; decided 2026-10-19 by the lead)
+
+**Still v0.1.0 on the branch.** These are the decisions on every request filed so far, published
+early so running workstreams can code toward them. They land in **one** bump once 03 (damage) and
+06 (police) have merged, because their requests (damage summary/state, region energy, police
+events, LOS query, `tire_puncture` use) belong in the same batch. Requests filed by 05/07/13/14/15
+before then join it.
+
+| Change | From | Decision | Who must update |
+|---|---|---|---|
+| `GroundQuery` trait (`cast_ray(origin, dir, max_m) -> Option<GroundHit { dist_m, point, normal }>`); `VehicleSim::step` gains `ground: &dyn GroundQuery` | 02 #1 | accepted (breaking) | 02, lead (`wp_sim`) |
+| `BrakeDef` doc: bias semantics as implemented by 02, with a worked example | 02 #2, 09 #4 | accepted (doc) | 09 re-checks data |
+| `WheelDef::inertia_kgm2: Option<f32>` (default `0.7·m·r²`) | 02 #3 | accepted | 02 |
+| `DrivetrainDef::efficiency: Option<f32>` (default 0.85) | 02 #4 | accepted | 02 |
+| `DriveLayout::AwdOnDemand { base_front_split, max_rear_split, engage_slip }` | 02 #5, 09 #2 | accepted | 02, 09, 08 |
+| `DrivetrainDef::torque_converter: Option<TorqueConverterDef { stall_rpm, stall_torque_ratio, coupling_rpm }>` | 09 #1 | accepted | 02, 09 |
+| `VehicleDef::fuel_capacity_l: Option<f32>` (fuel in `mass_kg` at 50 %) | 09 #8 | accepted | 02, 03, 09 |
+| `BodyRegion::Accessory` (push bars, body kits) | 09 #7 | accepted in principle; shape with 03 | 03, 08, 09, 04 |
+| `WheelState { fx_n, fy_n }` (applied tire-frame forces) | 04 TB-1 | accepted | 02, 04, 07 |
+| `DamageSim` region energy / node strain accessors | 04 TB-2 | accepted in principle; shape with 03 | 03, 04 |
+| Typed `PoliceEvent` (replaces `{kind, payload}`, gives stable kind codes) | 10 H1, 06 | accepted; designed with 06 | 06, 10, 08 |
+| Typed `EconomyEvent` (from `wp_economy::EventReason`) | 08 #1 | accepted; same bump as police/race events | 08, 07, 04 |
+| `RepairLine` unscaled-cost doc; `PriceTable::labour_hours: BTreeMap<RepairItem, f32>` | 08 #2 | accepted | 03, 08 |
+| `DamageSim::{save_state, restore_state, apply_repair}` | 08 #4 | accepted | 03, 08 |
+| `WantedLevel` moves into contracts | 08 #5 | accepted | 06, 07, 08 |
+| `DamageSummary { health, total_loss }` next to the estimate | 08 #3 | deferred to 03's merge | 03, 08 |
+| `DistrictId` | 08 #6 | deferred to 05's merge | 05, 08 |
+| `Sim::debug_intents()` | 04 TB-5 | deferred to 05/06 | 05, 06 |
+| Rear drum brakes + fade inputs | 09 #3 | deferred (post Checkpoint 1) | — |
+| Solid axles; roll-centre heights | 09 #5, #6 | deferred (post Checkpoint 2) | — |
+| `VehicleState::ffb` | 02 #6 | rejected (FFB is local-only; keep `VehicleSim::ffb`) | — |
+| `Systems` registry in contracts | 10 H2 | rejected for now | — |
+
+Done without a contract change (2026-10-19, `wp_sim`): `Sim::add_static_box` (TB-3),
+`Sim::set_mode_table` (TB-4), `Sim::place_vehicle`; lattice nodes in the state hash (TB-6, by 10's
+hash spec v1); Rapier contacts → `ContactImpulse` → damage + `SimEvent::Contact`.
+
+**Not a contract, but shared format decisions (2026-10-19):** simcli scenario format **v2**
+(`apps/simcli/SCENARIOS.md`) is the only scenario format; simcli `replay.bin` v1 is the canonical
+replay format (the testbed will write it).
+
 ## v0.1.0 — initial contract (prompt 01)
 
 Everything specified in `prompts/01_architecture_contracts.md`, plus these deliberate additions

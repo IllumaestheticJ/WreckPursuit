@@ -127,5 +127,26 @@ table (lead may move them).
 - 20-night tuning numbers come from the scripted career with synthetic damage; retune once real
   damage estimates flow (expect Simulation repair costs to move the most).
 
-## Lead feedback
-(Written by the integration lead.)
+## Lead feedback (2026-10-19)
+
+**Merged** (`f75248f`). All tests green, including
+`cargo test -p wp_economy --features native` (SQLite store). `rusqlite` stays behind the
+off-by-default `native` feature and does not reach `wp_wasm` (checked with `cargo tree`).
+
+Lead change in your area: `src/mods.rs` (~line 1119) used `f32::powi(2)`; the determinism lint rejects
+it (`powi` is not guaranteed bit-identical across targets), so it is now plain multiplies. Use
+`x * x` in sim-reachable code.
+
+Contract requests (decisions; implemented together in v0.2.0 unless noted):
+| # | Decision |
+|---|---|
+| 1 typed economy events | **Accepted.** `SimEvent::EconomyEvent { kind, payload }` becomes a typed enum, designed together with 06's police events and 15's race events in one bump. Your `EventReason` is the starting point. |
+| 2 unscaled repair lines + per-item labour | **Accepted**: doc says `parts_cost`/`labour_hours` are unscaled and only `total` includes `repair_cost_scale`; `PriceTable::labour_hours: BTreeMap<RepairItem, f32>` with `labour_hours_per_item` as fallback. |
+| 3 health/total loss next to the estimate | Deferred until 03 lands; leaning to `DamageSim::summary() -> DamageSummary { health, total_loss }`. |
+| 4 save/restore/apply repair | **Accepted**; 03 implements. |
+| 5 `WantedLevel` into contracts | **Accepted**; then drop your `wp_police` dependency. |
+| 6 `DistrictId` | Deferred until 05 lands. |
+
+Other needs routed: floor car `junkyard_beater` → 09 (in cars.md); tire files → 02 (in vehicle.md);
+CI line → 10 (in harness.md). Call sites (race results, session-end `DamageReport`, capture) come
+when 07 (server) and 06 (police) merge — nothing to do now.

@@ -98,6 +98,37 @@ pedals swap; press throttle to return to first.
 See `crates/wp_vehicle/README.md` → Known gaps (ray probe not shape-cast, no stall/tire
 temperature/wear, fixed AWD split, trait `step` needs Rapier access).
 
-## Lead feedback
+## Lead feedback (2026-10-19)
 
-(none yet)
+**Merged** into the integration branch (`83eb297`, lead integration run 2026-10-19). Your model is
+what the browser and every simcli scenario now drive. All your tests pass; native == wasm32 hashes.
+
+Lead changes in your area (please pull them, don't redo them):
+- `apps/simcli/scenarios/vehicle/*.ron` converted to **scenario format v2** (workstream 10's
+  `entities: [...]` format, `apps/simcli/SCENARIOS.md`). v2 is canonical; write new scenarios in it.
+  v1 files no longer parse.
+- `wp_sim::step_fixed`: your Rapier-body tick is wrapped in harness's system flags; disabling the
+  vehicle system now also disables the chassis bodies.
+- `wp_sim` now extracts chassis contacts → `ContactImpulse` → damage and `SimEvent::Contact`
+  (`crates/wp_sim/src/contacts.rs`). Cars collide with each other and with static boxes
+  (`Sim::add_static_box`). New `Sim::place_vehicle(id, pos, yaw, speed)` wraps your `place_body`.
+
+Contract requests (all land together in **v0.2.0**, see `docs/CONTRACT_CHANGELOG.md` → "v0.2.0 plan"):
+| # | Decision |
+|---|---|
+| 1 ground access for `VehicleSim::step` | **Accepted.** New `GroundQuery` trait in contracts (`cast_ray(origin, dir, max_m) -> Option<GroundHit { dist_m, point, normal }>`), `VehicleSim::step` gains `ground: &dyn GroundQuery`. `wp_sim` will pass a Rapier impl; your flat-plane fallback becomes a `FlatGround` impl. Reply in your doc if you want a shape-cast variant instead. |
+| 2 `BrakeDef` bias doc | **Accepted (doc only)** as you implemented it. ⚠ Workstream 09 assumed a different reading (capacity per wheel, bias = pedal-force split). Please write one worked example (bias 0.65, front 2000 N·m, rear 1100 N·m → torque per wheel at full pedal) in your README so 09 can check its data. |
+| 3 `WheelDef::inertia_kgm2` | Accepted, `Option`, default `0.7·m·r²`. |
+| 4 `DrivetrainDef::efficiency` | Accepted, `Option`, default 0.85. |
+| 5 `DriveLayout::AwdOnDemand` | Accepted, merged with 09's request #2: `AwdOnDemand { base_front_split, max_rear_split, engage_slip }`. |
+| 6 `VehicleState::ffb` | Rejected for now: FFB is local-only; keep `VehicleSim::ffb`. |
+| 09 #1 torque converter | Accepted: `DrivetrainDef::torque_converter: Option<TorqueConverterDef { stall_rpm, stall_torque_ratio, coupling_rpm }>`. Yours to implement after v0.2.0. |
+
+Next for you (in priority order):
+1. Tire compounds still missing, asked by 09 and 08: `all_terrain`, `vintage_bias`, `drag_radial`.
+   Also 09 notes `street` lateral `d = 1.0` reads like a summer tire (light cars ≈ 0.95 g); your call.
+2. First integrated roster numbers (`--example metrics`, cloud container) — passed to 09; nothing
+   for you to fix unless a debug car misses its band (both debug cars are inside):
+   `debug_sedan` 0-100 8.13 s, 100-0 42.9 m, 0.89 g · `debug_coupe` 5.23 s, 42.5 m, 0.95 g.
+3. Note for scenario authors: `assists: off` = manual gearbox (no upshifts); the lift-off golden now
+   uses a custom profile (aids off, auto gears).

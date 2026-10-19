@@ -28,8 +28,9 @@ Dependency graph (arrows = "depends on"):
 wp_contracts ◄── every crate
 wp_math ◄── wp_vehicle, wp_damage, wp_world, wp_police, wp_sim
 wp_sim ──► wp_vehicle, wp_damage, wp_world, wp_police, wp_economy, rapier3d
-wp_wasm ──► wp_sim                       (must stay wasm32-clean)
-apps/simcli ──► wp_sim
+wp_wasm ──► wp_sim, simcli (lib: scenario format v2)   (must stay wasm32-clean)
+apps/simcli ──► wp_sim, wp_net
+wp_economy ──► wp_police (WantedLevel, until v0.2.0); rusqlite only behind feature `native` (server)
 apps/server ──► wp_net[native] (tokio, tungstenite — never reachable from wp_wasm)
 ```
 
@@ -66,6 +67,9 @@ events ──► wp_economy (billing, payouts) · wp_net (snapshots @ 60 Hz) · 
 - No wall-clock time, `HashMap` iteration, unseeded randomness or `f32::sin/cos` in sim code
   (use `wp_math::sin_cos`). Determinism is checked by hashing (`Sim::state_hash`).
 - Every file in `data/` has `id` == file stem and must validate against `schemas/`.
+- **One scenario format:** simcli v2 (`apps/simcli/SCENARIOS.md`), owned by 10. Other workstreams
+  ask 10 for new fields instead of inventing a dialect. Replays: simcli `replay.bin` v1.
+- Goldens and perf baselines only change in a commit tagged `[bless]` (CI guard).
 
 ## How to run everything
 
@@ -77,6 +81,11 @@ events ──► wp_economy (billing, payouts) · wp_net (snapshots @ 60 Hz) · 
 | Browser testbed | `just web` → http://localhost:5173 |
 | Headless server | `just server 8080` |
 | Scenario | `just sim apps/simcli/scenarios/smoke/straight_line.ron` |
+| All scenarios / goldens / re-bless | `just scenarios` · `just goldens` · `just bless` (commit with `[bless]`) |
+| Determinism (in-process, fresh process, native vs wasm) | `just determinism` · `just lint-det` |
+| Browser end-to-end (headless Chromium) | `just web-e2e` |
+| Benchmarks + perf gate | `just bench` (see `docs/PERF.md`) |
+| Everything CI runs | `just ci` |
 | Regenerate schemas (lead) | `just schemas` |
 | Regenerate debug lattices | `just lattices` |
 

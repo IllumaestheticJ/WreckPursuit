@@ -122,5 +122,53 @@ to `gen-box-lattice` output today. Each spec sheet ends with the exact list appl
   and drop the adjustments it covers.
 - Prices and durability classes are first-pass; 08 should tune prices against the economy.
 
-## Lead feedback
-(Written by the integration lead: failing tests, expected vs actual.)
+## Lead feedback (2026-10-19)
+
+**Merged** (`7dbf8f3`). `nameplate_check.py`: 54 files, 0 problems. All 13 cars load, validate and run
+deterministically in both modes on the **real** `wp_vehicle` model (`smoke_sim.py` green).
+
+Lead change in your area: `tools/specsheet/smoke_sim.py` now writes simcli scenario **format v2**
+and calls `simcli run ... --no-write` (the harness changed the format and CLI). Pull it.
+
+First integrated numbers (`cargo run --release -p wp_vehicle --example metrics`, cloud container;
+most cars are still on `street` because they fell back to it):
+
+| car | 0-100 s | 100-0 m | skidpad g | Vmax km/h |
+|---|---|---|---|---|
+| vireo_xs | 9.87 | 45.7 | 0.89 | 202 |
+| kestrel_ts | 7.41 | 46.3 | 0.86 | 247 |
+| shiro_turbo | 6.68 | 42.4 | 0.88 | 258 |
+| hakone_gt | 6.16 | 40.5 | 0.83 | 283 |
+| rampart_50 | 6.29 | 55.6 | 0.81 | 270 |
+| ironside_440 | 7.18 | 61.4 | 0.74 | 212 |
+| sperber_32 | 6.34 | 41.9 | 0.84 | 274 |
+| lindwurm_4t | 5.53 | 43.9 | 0.86 | 260 |
+| lucciola_350 | 4.94 | 42.8 | 0.87 | 290 |
+| hauler_1500 | 8.95 | 49.8 | 0.67 | 204 |
+| sentinel_cruiser | 8.74 | 57.0 | 0.77 | 236 |
+| sentinel_wolfhound | 6.36 | 61.7 | 0.80 | 243 |
+| sentinel_bastion | 8.47 | 51.3 | 0.66 | 213 |
+
+Next for you:
+1. `data/tires/` now has `sport`, `semi_slick`, `police_pursuit`, `wet_biased` → re-run
+   `build_roster.py` so cars switch to their intended compounds, then fill the "sim" columns of
+   `VALIDATION.md` and write `tools/specsheet/validation_results.json` from the metrics example.
+2. Look at: Rampart 0-100 6.3 s vs 4.5-5.0 band (traction, as you predicted); Wolfhound 100-0
+   61.7 m is long for an interceptor; Ironside 61.4 m is the intended "scary brakes".
+3. ⚠ Brake semantics: 02 implemented "biased axle gets full `max_torque_*`, the other × (1−bias)/bias".
+   Your data assumed capacity per wheel with bias = pedal split. 02 will add a worked example to its
+   README; re-check your brake numbers against it.
+4. Economy (08) asks for a floor car `junkyard_beater` (Beater class, base price 3 000).
+5. barrier/crash columns wait on 03 (damage) — the sim now delivers contacts to damage.
+
+Contract requests (decisions; implemented together in v0.2.0 unless noted):
+| # | Decision |
+|---|---|
+| 1 torque converter | Accepted (`DrivetrainDef::torque_converter: Option<...>`). |
+| 2 AWD on-demand | Accepted, merged with 02 #5. |
+| 3 rear drum + fade | Deferred (post Checkpoint 1; brake-fade model is new vehicle work). |
+| 4 brake doc | Accepted, doc only — see item 3 above. |
+| 5 solid axle | Deferred (post Checkpoint 2). |
+| 6 roll centre | Deferred (low). |
+| 7 `BodyRegion::PushBar`/`Accessory` | Accepted in principle as a generic `Accessory` region; final shape waits on 03's region list. |
+| 8 `fuel_capacity_l` | Accepted, `Option<f32>`, fuel mass included in `mass_kg` at 50 % fill. |
