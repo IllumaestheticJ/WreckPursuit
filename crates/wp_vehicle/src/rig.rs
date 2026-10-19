@@ -49,6 +49,9 @@ impl WorldQuery for FlatWorld {
     fn time_of_day(&self) -> TimeOfDay {
         self.time
     }
+    fn line_of_sight(&self, _a: [f32; 3], _b: [f32; 3]) -> bool {
+        true
+    }
 }
 
 /// Half extents of the ground slab (identical to `wp_sim::PhysicsWorld`), m.

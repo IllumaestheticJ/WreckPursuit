@@ -1,0 +1,11 @@
+# Prompt 03 calibration checks (wp_damage barrier scenarios, with their own expected ranges)
+# under plasticity_scale changes: which values keep every barrier check green?
+description: Barrier scenario checks (frontal/side, sim) vs plasticity_scale — pass/fail
+probe:
+  kind: barrier_scenario
+params:
+  - {target: "mode:sim:plasticity_scale", label: plasticity_scale, values: [0.6, 0.8, 1.0, 1.2, 1.4]}
+variants:
+  - {name: frontal_sim, probe: {file: crates/wp_damage/scenarios/frontal_sim.ron}}
+  - {name: side_sim, probe: {file: crates/wp_damage/scenarios/side_sim.ron}}
+plots: ["crush_m@56", "health@56"]

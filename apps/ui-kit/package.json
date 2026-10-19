@@ -1,0 +1,31 @@
+{
+  "name": "@wreckpursuit/ui-kit",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "WreckPursuit game UI kit: HUD, menus, garage, mod tree, captain map. Preact, mock-data driven.",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./style.css": "./src/ui/theme.css"
+  },
+  "scripts": {
+    "demo": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "e2e": "node e2e/smoke.mjs",
+    "gen:types": "node scripts/gen-types.mjs",
+    "gen:fixtures": "node scripts/gen-fixtures.mjs"
+  },
+  "dependencies": {
+    "preact": "10.27.2"
+  },
+  "devDependencies": {
+    "json-schema-to-typescript": "15.0.4",
+    "playwright-core": "1.56.1",
+    "typescript": "5.9.3",
+    "vite": "7.1.12",
+    "vitest": "3.2.4"
+  }
+}

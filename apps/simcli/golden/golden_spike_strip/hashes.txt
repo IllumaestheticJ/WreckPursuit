@@ -1,4 +1,4 @@
-# simcli hashes scenario=golden_spike_strip systems=world,vehicle,damage,police,net hash_spec=1 contract=0.1.0
+# simcli hashes scenario=golden_spike_strip systems=world,vehicle,damage,police,net hash_spec=1 contract=0.2.0
 24 93d7ec5a77ff5065
 48 afdf2fd47d7f5562
 72 071e60569631a1b6

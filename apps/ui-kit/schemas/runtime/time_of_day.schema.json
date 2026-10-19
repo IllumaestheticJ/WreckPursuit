@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TimeOfDay",
+  "description": "In-game time of day.",
+  "type": "object",
+  "properties": {
+    "seconds_since_midnight": {
+      "description": "Seconds since midnight, `0.0 ..< 86400.0`.",
+      "type": "number",
+      "format": "float"
+    }
+  },
+  "required": [
+    "seconds_since_midnight"
+  ]
+}

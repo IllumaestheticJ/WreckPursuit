@@ -16,7 +16,7 @@ use crate::brakes::{service_torques, Abs};
 use crate::drivetrain::{auto_clutch_update, diff_transfer, Gearbox};
 use crate::engine::{Engine, EngineExtras, RPM_PER_RADPS};
 use crate::ffb::{self, FfbWheel};
-use crate::ground::{FlatGround, WheelCaster};
+use crate::ground::WheelCaster;
 use crate::math::{arr, sin_cos, v3, yaw_quat, Quat, V3};
 use crate::steering::{ackermann, body_slip, torque_steer, update_center_angle, SteerInput};
 use crate::suspension::{arb_force, static_compression, strut_force};
@@ -224,7 +224,9 @@ impl Vehicle {
                 x_static: static_compression(&def.suspension[i], load),
                 susp: def.suspension[i].clone(),
                 radius: w.radius_m,
-                inertia: 0.7 * w.mass_kg * w.radius_m * w.radius_m,
+                inertia: w
+                    .inertia_kgm2
+                    .unwrap_or(0.7 * w.mass_kg * w.radius_m * w.radius_m),
                 steerable: w.steerable,
                 max_steer: w.max_steer_rad,
                 ackermann: w.ackermann_frac,
@@ -475,6 +477,22 @@ impl Vehicle {
                 (1.0 - front_split) * 0.5,
                 (1.0 - front_split) * 0.5,
             ],
+            DriveLayout::AwdOnDemand {
+                base_front_split,
+                max_rear_split,
+                engage_slip,
+            } => {
+                // Lead's first cut (contract v0.2.0); workstream A owns the tuning. The coupling
+                // closes linearly as the front axle out-spins the rear by `engage_slip`..2×.
+                let front = (self.wheels[0].omega + self.wheels[1].omega) * 0.5;
+                let rear = (self.wheels[2].omega + self.wheels[3].omega) * 0.5;
+                let slip = (front - rear) / rear.abs().max(1.0);
+                let e = ((slip - engage_slip) / engage_slip.max(1e-3)).clamp(0.0, 1.0);
+                let rear_split =
+                    (1.0 - base_front_split) + e * (max_rear_split - (1.0 - base_front_split));
+                let f = 1.0 - rear_split.clamp(0.0, 1.0);
+                [f * 0.5, f * 0.5, (1.0 - f) * 0.5, (1.0 - f) * 0.5]
+            }
         }
     }
 
@@ -962,7 +980,12 @@ impl Vehicle {
 
         // Losses only reduce torque flowing engine → wheels.
         let wheel_side = if wheel_side * ratio > 0.0 {
-            wheel_side * DRIVETRAIN_EFFICIENCY
+            wheel_side
+                * self
+                    .def
+                    .drivetrain
+                    .efficiency
+                    .unwrap_or(DRIVETRAIN_EFFICIENCY)
         } else {
             wheel_side
         };
@@ -1087,10 +1110,12 @@ impl VehicleSim for Vehicle {
         input: &VehicleInput,
         assists: &AssistProfile,
         world: &dyn WorldQuery,
+        ground: &dyn wp_contracts::GroundQuery,
         dt: f32,
         out: &mut Vec<SimEvent>,
     ) {
-        self.step_with_ground(input, assists, world, &FlatGround::default(), dt, out);
+        let caster = crate::ground::ContractGround(ground);
+        self.step_with_ground(input, assists, world, &caster, dt, out);
     }
 
     fn state(&self) -> VehicleState {
@@ -1108,6 +1133,8 @@ impl VehicleSim for Vehicle {
                 surface: w.surface,
                 contact: w.contact,
                 detached: self.effects.wheel_lost[i],
+                fx_n: w.fx,
+                fy_n: w.fy,
             }
         });
         VehicleState {

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DamageMode",
+  "description": "Damage mode. Both modes run the same code path with different [`crate::ModeTable`]s.",
+  "oneOf": [
+    {
+      "description": "Punishing but survivable; one hard hit degrades, several end the car.",
+      "type": "string",
+      "const": "Arcade"
+    },
+    {
+      "description": "Real-world-ish; one hard hit at speed is a total loss.",
+      "type": "string",
+      "const": "Simulation"
+    }
+  ]
+}

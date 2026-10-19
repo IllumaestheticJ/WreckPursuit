@@ -56,7 +56,7 @@ use std::collections::BTreeMap;
 
 pub use body::VehicleBody;
 pub use engine::EngineExtras;
-pub use ground::{FlatGround, GroundHit, RapierGround, WheelCaster};
+pub use ground::{ContractGround, FlatGround, GroundHit, RapierGround, WheelCaster};
 pub use snapshot::{SnapshotError, VehicleSnapshot};
 pub use tire::TireForces;
 pub use vehicle::{Chassis, Telemetry, Vehicle, VehicleExtras};
