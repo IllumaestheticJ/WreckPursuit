@@ -126,8 +126,9 @@ checked against the original page.
 | `upload.wikimedia.org`, `commons.wikimedia.org` | public-domain siren/horn recordings (fallback) | PD / CC0 / CC-BY |
 
 Minimum useful set: `kenney.nl` + `opengameart.org` + `freesound.org` + `cdn.freesound.org`.
-Network access is changed in the environment settings (claude.ai/code → environment → network
-access), see https://code.claude.com/docs/en/claude-code-on-the-web.
+Network access is changed in the session's cloud environment menu → Edit → Network access (add the
+hosts under Allowed domains, keep "Allow package managers" ticked), see
+https://code.claude.com/docs/en/cloud-environments#network-access.
 
 **Plan once the hosts are open** (no code change needed for playback — `source: Samples` already loads
 `/data/audio/packs/<pack>/<file>`):
