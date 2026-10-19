@@ -5,7 +5,7 @@
 #   Light/medium hits (closing speed < ~41 km/h) are cosmetic: the body dents and is billed,
 #   but handling, alignment and component health are untouched (wp_damage
 #   DamageTuning::arcade_mechanical_min_closing_mps = 11.5 m/s until ModeTable has the field).
-#   56 km/h frontal -> ~0.34 m crush, health ~0.76, drivable; about four hard hits end the car.
+#   56 km/h frontal -> ~0.34 m crush, health ~0.76, drivable; health ~0.22 after three hard hits.
 #   After a hard hit 30 % of the lost handling comes back over 20 s ("limp-mode settle").
 mode = "Arcade"
 impulse_to_lattice_scale = 0.45        # sim x 0.45  — 45 % of the collision energy deforms the car
@@ -13,7 +13,7 @@ plasticity_scale = 0.8                 # sim x 0.8   — dents set a little less
 beam_break_scale = 1.5                 # sim x 1.5   — beams/parts tougher before breaking
 component_damage_scale = 0.6           # sim x 0.6   — components lose health slower
 component_fail_threshold_scale = 1.8   # sim x 1.8   — components tolerate more intrusion
-total_loss_health = 0.23               # sim 0.25 -> 0.23 — about four hard (56 km/h) hits end the car; light hits never do (cosmetic)
+total_loss_health = 0.1                # sim 0.25 -> 0.10 — more hits before the car is done (0.23 proposed, see docs/integration/damage.md)
 cabin_intrusion_total_loss_m = 0.5     # sim x 2.0   — 0.25 m -> 0.5 m
 repair_cost_scale = 0.5                # sim x 0.5   — cheaper repairs
 wheel_detach_scale = 0.5               # sim x 0.5   — wheels stay on twice as long

@@ -376,9 +376,13 @@ Machine R (`ws/panels`, prompt 21) owns `crates/wp_damage/src/panels.rs` (hinged
 - **Limp-mode settle:** after a hard hit, 30 % of the lost health / alignment of components that
   still work returns over 20 s (handling effects only; the bill and stored health do not change).
   Never in Simulation.
-- `data/modes/arcade.toml`: `total_loss_health` 0.10 → **0.23** (still < Sim's 0.25). Arcade health
-  plateaus ≈ 0.22 after three 56 km/h hits (structure saturates, components degrade slowly at
-  `component_damage_scale` 0.6), so 0.10 was never reached; now the 4th hard hit ends the car.
+- `data/modes/arcade.toml` `total_loss_health` stays **0.10**. I tried 0.23 (bf99fc0): Arcade
+  health plateaus ≈ 0.22 after three 56 km/h hits (structure saturates; components degrade slowly
+  at `component_damage_scale` 0.6), so with 0.10 hard hits wreck the car but never total it, while
+  0.23 totals it on the 4th. But `wp_economy`'s career model compares its own synthetic health
+  proxy to this threshold, and 0.23 made `twenty_nights_solvent_in_arcade_marginal_in_simulation`
+  fail ("an Arcade career ended in debt"), so I reverted it. **Request (G, economy):** make the
+  career proxy follow `wp_damage`'s health (or tolerate 0.23); then I raise Arcade to 0.23.
 - Knobs: `DamageTuning::{arcade_mechanical_min_closing_mps, arcade_cosmetic_health_share,
   arcade_settle_fraction, arcade_settle_s}` until contract request #8 moves them into `ModeTable`.
   Snapshot gained `component_cosmetic`, `region_cosmetic_j`, `since_hard_hit_s`; repairs clear
@@ -399,13 +403,14 @@ Machine R (`ws/panels`, prompt 21) owns `crates/wp_damage/src/panels.rs` (hinged
 Side swipe (simcli `audio_sideswipe_scrape`, Arcade): health 0.994 / 0.995 → 0.999 / 1.000, no
 handling effects. `golden_tbone` (50 km/h, a hard hit): victim 0.846 → 0.850, crush 0.169 m and
 1 failed component unchanged. Several hits: 56 km/h frontal → side → rear → offset gives health
-0.76 → 0.41 → 0.24 → 0.22 = TotalLoss on the 4th; twelve 30 km/h hits leave health > 0.7 and
+0.76 → 0.41 → 0.24 → 0.22 (TotalLoss on the 4th only with the proposed 0.23); twelve 30 km/h hits leave health > 0.7 and
 no handling effects. Simulation rows unchanged (e.g. Sim frontal 25: health 0.87, rack 0.98).
 
-Tests: `arcade_light_and_medium_hits_are_cosmetic`, `arcade_hard_hits_degrade_and_several_end_the_car`,
+Tests: `arcade_light_and_medium_hits_are_cosmetic`, `arcade_hard_hits_degrade_and_several_wreck_the_car`,
 `arcade_many_light_hits_never_end_the_car`, `arcade_limp_mode_settles_partially_and_sim_does_not`,
 `cosmetic_state_survives_save_restore_and_repair_clears_it`. Goldens: 12 Arcade scenarios
-re-blessed in `[bless]` commit 10ae2b6 (numbers in its message); all expectations pass.
+re-blessed in `[bless]` commit 10ae2b6 (numbers in its message; its "0.23" note is superseded, and
+no golden changes with the threshold back at 0.10); all expectations pass.
 
 **Lead decision on round-6b item 2 (2026-10-19): option (b).** Keep the run-5 calibration and
 `golden_tbone_sim` (Simulation totals a car in a 50 km/h T-bone; 0.27–0.32 m is within the real
