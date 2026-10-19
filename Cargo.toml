@@ -25,6 +25,7 @@ members = [
     "apps/testbed-native",
     "tools/city-import",
     "tools/tuning-dash/probe",
+    "tools/assets",
 ]
 
 [workspace.package]

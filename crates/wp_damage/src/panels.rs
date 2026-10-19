@@ -1091,6 +1091,11 @@ impl PanelSpec {
                 .iter()
                 .map(|&i| vec3::length(perp(vec3::sub(pos(i), h0), u)))
                 .fold(0.0f32, f32::max);
+            // Hinged panels need nodes off the hinge line to swing (some hatch/pickup
+            // tailgates are a single row of nodes on it); those stay plain detachables.
+            if kind.is_hinged() && reach < 0.05 {
+                continue;
+            }
             let latch_nodes: Vec<u16> = match kind {
                 PanelKind::Bumper | PanelKind::Fender => nodes
                     .iter()

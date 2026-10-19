@@ -1,0 +1,34 @@
+[package]
+name = "car-assets"
+description = "Car asset pipeline (workstream R): procedural low-poly per-panel car meshes, bind-skin, validate-car-asset, panel specs."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+wp_contracts.workspace = true
+wp_math.workspace = true
+wp_damage.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[[bin]]
+name = "gen-car-mesh"
+path = "src/bin/gen_car_mesh.rs"
+
+[[bin]]
+name = "bind-skin"
+path = "src/bin/bind_skin.rs"
+
+[[bin]]
+name = "validate-car-asset"
+path = "src/bin/validate_car_asset.rs"
+
+[[bin]]
+name = "gen-panels"
+path = "src/bin/gen_panels.rs"
+
+[[bin]]
+name = "panels-bench"
+path = "src/bin/panels_bench.rs"
