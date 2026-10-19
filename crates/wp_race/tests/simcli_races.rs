@@ -56,15 +56,30 @@ fn judge_scenario(file: &str, kind: RaceKind, course: Course) -> Vec<RacerResult
     }
     judge.start(0).unwrap();
     let dt = wp_contracts::PHYSICS_DT;
+    let racers = sc.entities.len();
     let mut hook = |v: &simcli::run::TickView| -> Result<(), String> {
         let tick = v.sim.tick();
         let t_s = tick as f32 * dt;
+        // City runs add police and physical traffic after the scenario entities (ids 1..=n);
+        // only the scenario entities are racers. Police contacts are contacts, not civilian
+        // hits.
+        let police: Vec<EntityId> = v
+            .sim
+            .vehicles()
+            .iter()
+            .filter(|x| x.kind == wp_sim::VehicleKind::Police)
+            .map(|x| x.id)
+            .collect();
+        judge.set_police(&police);
         let samples: Vec<RacerSample> = v
             .sim
             .vehicle_states()
             .iter()
-            .enumerate()
-            .map(|(i, (id, s))| RacerSample::from_state(*id, s, throttle_at(&sc, i, t_s)))
+            .filter(|(id, _)| (1..=racers as u32).contains(&id.0))
+            .map(|(id, s)| {
+                let i = id.0 as usize - 1;
+                RacerSample::from_state(*id, s, throttle_at(&sc, i, t_s))
+            })
             .collect();
         judge.observe(tick, &samples, v.events);
         Ok(())

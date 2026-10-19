@@ -4333,6 +4333,7 @@ dependencies = [
  "wp_contracts",
  "wp_economy",
  "wp_math",
+ "wp_sim",
  "wp_world",
 ]
 
