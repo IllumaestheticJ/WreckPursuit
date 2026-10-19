@@ -16,7 +16,7 @@ use crate::brakes::{service_torques, Abs};
 use crate::drivetrain::{auto_clutch_update, diff_transfer, Gearbox};
 use crate::engine::{Engine, EngineExtras, RPM_PER_RADPS};
 use crate::ffb::{self, FfbWheel};
-use crate::ground::{FlatGround, WheelCaster};
+use crate::ground::WheelCaster;
 use crate::math::{arr, sin_cos, v3, yaw_quat, Quat, V3};
 use crate::steering::{ackermann, body_slip, torque_steer, update_center_angle, SteerInput};
 use crate::suspension::{arb_force, static_compression, strut_force};
@@ -224,7 +224,9 @@ impl Vehicle {
                 x_static: static_compression(&def.suspension[i], load),
                 susp: def.suspension[i].clone(),
                 radius: w.radius_m,
-                inertia: 0.7 * w.mass_kg * w.radius_m * w.radius_m,
+                inertia: w
+                    .inertia_kgm2
+                    .unwrap_or(0.7 * w.mass_kg * w.radius_m * w.radius_m),
                 steerable: w.steerable,
                 max_steer: w.max_steer_rad,
                 ackermann: w.ackermann_frac,
@@ -374,10 +376,64 @@ impl Vehicle {
         self.torque = V3::ZERO;
     }
 
+    /// Overwrite the dynamic state from a [`VehicleState`] (`VehicleSim::state` output):
+    /// chassis pose and velocities, gear, engine rpm, and per wheel spin, steer, slip,
+    /// compression and load; the clutch is treated as locked when engine and wheel speeds
+    /// agree. Approximate: input filters, ABS/TCS state, shift timers and turbo boost are not
+    /// in `VehicleState` and keep their values — for bit-exact rewind use
+    /// [`Vehicle::snapshot`] / [`Vehicle::restore`]. With a Rapier body, call
+    /// [`Vehicle::write_chassis_to_body`] afterwards. (Added by the integration lead for
+    /// workstream F; extended by 02.)
+    pub fn set_state(&mut self, s: &wp_contracts::VehicleState) {
+        let rot = Quat::from_xyzw(s.rot[0], s.rot[1], s.rot[2], s.rot[3]);
+        let pos = v3(s.pos);
+        self.chassis = Chassis {
+            pos,
+            rot,
+            lin_vel: v3(s.lin_vel),
+            ang_vel: v3(s.ang_vel),
+            com: pos + rot * self.com_local,
+        };
+        for (w, ws) in self.wheels.iter_mut().zip(&s.wheel_states) {
+            w.omega = ws.omega;
+            w.steer = ws.steer_rad;
+            w.alpha_lag = ws.slip_angle;
+            w.kappa = ws.slip_ratio;
+            w.x = ws.compression_m;
+            w.fz = ws.fz_n;
+            w.contact = ws.contact;
+            w.surface = ws.surface;
+        }
+        // Centre angle: mean of the steered wheels with their toe removed.
+        let mut sum = 0.0;
+        let mut n = 0;
+        for i in 0..4 {
+            let c = &self.corners[i];
+            if c.steerable {
+                let toe = c.toe + self.effects.toe_delta[i];
+                sum += s.wheel_states[i].steer_rad - if c.left { -toe } else { toe };
+                n += 1;
+            }
+        }
+        if n > 0 {
+            self.center_steer = sum / n as f32;
+        }
+        self.gearbox.set(s.gear);
+        self.engine.omega = s.engine_rpm / RPM_PER_RADPS;
+        let split = self.drive_split(0.0);
+        let ratio = self.gearbox.total_ratio(&self.def.drivetrain);
+        let w_in = ratio * self.axle_omega(&split);
+        self.clutch_locked = ratio != 0.0 && (self.engine.omega - w_in).abs() < 1.0;
+        if self.clutch_locked {
+            self.clutch = 1.0;
+        }
+    }
+
     /// Teleport to `pos`/`yaw` already moving forward (chassis +Y) at `speed_mps`, wheels and
     /// engine matched. Used by `wp_world` to promote kinematic traffic to a physical vehicle
-    /// without a jolt. (Added by the integration lead for workstream D; when the vehicle has a
-    /// Rapier body, use [`Vehicle::place_body`] instead.)
+    /// without a jolt. Forward speeds only (a negative speed spins the wheels backwards in
+    /// first gear). (Added by the integration lead for workstream D; reviewed by 02. When the
+    /// vehicle has a Rapier body, use [`Vehicle::place_body`] instead.)
     pub fn set_pose_and_speed(&mut self, pos: [f32; 3], yaw: f32, speed_mps: f32) {
         self.reset(pos, yaw);
         let mut ch = *self.chassis();
@@ -421,6 +477,22 @@ impl Vehicle {
                 (1.0 - front_split) * 0.5,
                 (1.0 - front_split) * 0.5,
             ],
+            DriveLayout::AwdOnDemand {
+                base_front_split,
+                max_rear_split,
+                engage_slip,
+            } => {
+                // Lead's first cut (contract v0.2.0); workstream A owns the tuning. The coupling
+                // closes linearly as the front axle out-spins the rear by `engage_slip`..2×.
+                let front = (self.wheels[0].omega + self.wheels[1].omega) * 0.5;
+                let rear = (self.wheels[2].omega + self.wheels[3].omega) * 0.5;
+                let slip = (front - rear) / rear.abs().max(1.0);
+                let e = ((slip - engage_slip) / engage_slip.max(1e-3)).clamp(0.0, 1.0);
+                let rear_split =
+                    (1.0 - base_front_split) + e * (max_rear_split - (1.0 - base_front_split));
+                let f = 1.0 - rear_split.clamp(0.0, 1.0);
+                [f * 0.5, f * 0.5, (1.0 - f) * 0.5, (1.0 - f) * 0.5]
+            }
         }
     }
 
@@ -908,7 +980,12 @@ impl Vehicle {
 
         // Losses only reduce torque flowing engine → wheels.
         let wheel_side = if wheel_side * ratio > 0.0 {
-            wheel_side * DRIVETRAIN_EFFICIENCY
+            wheel_side
+                * self
+                    .def
+                    .drivetrain
+                    .efficiency
+                    .unwrap_or(DRIVETRAIN_EFFICIENCY)
         } else {
             wheel_side
         };
@@ -1033,10 +1110,12 @@ impl VehicleSim for Vehicle {
         input: &VehicleInput,
         assists: &AssistProfile,
         world: &dyn WorldQuery,
+        ground: &dyn wp_contracts::GroundQuery,
         dt: f32,
         out: &mut Vec<SimEvent>,
     ) {
-        self.step_with_ground(input, assists, world, &FlatGround::default(), dt, out);
+        let caster = crate::ground::ContractGround(ground);
+        self.step_with_ground(input, assists, world, &caster, dt, out);
     }
 
     fn state(&self) -> VehicleState {
@@ -1054,6 +1133,8 @@ impl VehicleSim for Vehicle {
                 surface: w.surface,
                 contact: w.contact,
                 detached: self.effects.wheel_lost[i],
+                fx_n: w.fx,
+                fy_n: w.fy,
             }
         });
         VehicleState {

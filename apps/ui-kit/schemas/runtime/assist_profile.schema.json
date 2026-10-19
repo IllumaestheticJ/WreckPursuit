@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AssistProfile",
+  "description": "Driver assists. Independent of [`DamageMode`]. Nothing in the physics may depend on these\nbeing on; each is individually toggleable.",
+  "type": "object",
+  "properties": {
+    "abs": {
+      "description": "Anti-lock brakes.",
+      "type": "boolean"
+    },
+    "auto_clutch": {
+      "description": "Automatic clutch (launch, stall prevention, shifts).",
+      "type": "boolean"
+    },
+    "auto_gears": {
+      "description": "Automatic gear changes.",
+      "type": "boolean"
+    },
+    "brake_filter": {
+      "description": "Brake input smoothing strength, 0 (raw) ..= 1 (heavy ramp).",
+      "type": "number",
+      "format": "float"
+    },
+    "countersteer_help": {
+      "description": "Fraction of the estimated countersteer angle blended in automatically, 0..=1.",
+      "type": "number",
+      "format": "float"
+    },
+    "esc": {
+      "description": "Electronic stability control (per-wheel brake yaw correction).",
+      "type": "boolean"
+    },
+    "steer_speed_sensitivity": {
+      "description": "Speed-sensitive steering lock/rate reduction strength, 0 (off) ..= 1 (full).",
+      "type": "number",
+      "format": "float"
+    },
+    "tcs": {
+      "description": "Traction control (throttle cut on driven-wheel slip).",
+      "type": "boolean"
+    },
+    "throttle_filter": {
+      "description": "Throttle input smoothing strength, 0 (raw) ..= 1 (heavy ramp).",
+      "type": "number",
+      "format": "float"
+    }
+  },
+  "required": [
+    "abs",
+    "tcs",
+    "esc",
+    "steer_speed_sensitivity",
+    "countersteer_help",
+    "throttle_filter",
+    "brake_filter",
+    "auto_gears",
+    "auto_clutch"
+  ]
+}

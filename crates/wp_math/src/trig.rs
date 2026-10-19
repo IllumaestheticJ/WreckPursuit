@@ -26,6 +26,52 @@ pub fn sin_cos(x: f32) -> (f32, f32) {
     }
 }
 
+/// Deterministic `atan(x)` (max abs error ≈ 1e-5 rad).
+pub fn atan(x: f32) -> f32 {
+    let ax = x.abs();
+    let (t, flip) = if ax > 1.0 {
+        (1.0 / ax, true)
+    } else {
+        (ax, false)
+    };
+    let t2 = t * t;
+    let p = t
+        * (0.999_977_3
+            + t2 * (-0.332_623_5
+                + t2 * (0.193_543_5
+                    + t2 * (-0.116_432_9 + t2 * (0.052_653_3 - t2 * 0.011_721_2)))));
+    let r = if flip {
+        std::f32::consts::FRAC_PI_2 - p
+    } else {
+        p
+    };
+    if x < 0.0 {
+        -r
+    } else {
+        r
+    }
+}
+
+/// Deterministic `atan2(y, x)` (polynomial, no libm; moved from `wp_world::geom` in v0.2.0).
+pub fn atan2(y: f32, x: f32) -> f32 {
+    use std::f32::consts::{FRAC_PI_2, PI};
+    if x > 0.0 {
+        atan(y / x)
+    } else if x < 0.0 {
+        if y >= 0.0 {
+            atan(y / x) + PI
+        } else {
+            atan(y / x) - PI
+        }
+    } else if y > 0.0 {
+        FRAC_PI_2
+    } else if y < 0.0 {
+        -FRAC_PI_2
+    } else {
+        0.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
