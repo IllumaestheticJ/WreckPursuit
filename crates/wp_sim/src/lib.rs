@@ -87,6 +87,7 @@ pub struct Sim {
     events: Vec<SimEvent>,
     systems: Systems,
     last_tick_events: usize,
+    static_boxes: usize,
 }
 
 impl Sim {
@@ -105,6 +106,7 @@ impl Sim {
             events: Vec::new(),
             systems: Systems::ALL,
             last_tick_events: 0,
+            static_boxes: 0,
         }
     }
 
@@ -153,6 +155,40 @@ impl Sim {
             spawn: (pos, yaw),
         });
         Ok(id)
+    }
+
+    /// Add a static box to the world (barrier, wall), centre `pos` (world m), full `size`
+    /// `[x, y, z]` m, heading `yaw` rad about +Z. Contacts with it reach damage as static world
+    /// geometry (`other: None`, `other_mass_kg: 0.0`; events name [`wp_contracts::WORLD_ENTITY`]).
+    /// Static boxes are scenario setup: add them before the first tick so replays match.
+    pub fn add_static_box(&mut self, pos: [f32; 3], size: [f32; 3], yaw: f32) {
+        use rapier3d::math::Rotation;
+        use rapier3d::prelude::{ColliderBuilder, Pose, Vector};
+        let (s, c) = wp_math::sin_cos(yaw * 0.5);
+        let pose = Pose::from_parts(Vector::from_array(pos), Rotation::from_xyzw(0.0, 0.0, s, c));
+        let col = ColliderBuilder::cuboid(size[0] * 0.5, size[1] * 0.5, size[2] * 0.5)
+            .position(pose)
+            .friction(0.6)
+            .restitution(0.05)
+            .build();
+        self.physics.colliders.insert(col);
+        self.static_boxes += 1;
+    }
+
+    /// Number of static boxes added with [`Sim::add_static_box`].
+    pub fn static_box_count(&self) -> usize {
+        self.static_boxes
+    }
+
+    /// Swap the damage mode table (Arcade ↔ Simulation) without restarting. Applies from the
+    /// next tick; existing damage is kept. Log it as an input-like op if replays must match.
+    pub fn set_mode_table(&mut self, mode: ModeTable) {
+        self.config.mode = mode;
+    }
+
+    /// The damage mode table in effect.
+    pub fn mode_table(&self) -> &ModeTable {
+        &self.config.mode
     }
 
     fn slot_mut(&mut self, id: EntityId) -> Result<&mut SimVehicle, SimError> {
@@ -508,6 +544,40 @@ mod tests {
             head_on_events(),
             "contact events must be deterministic"
         );
+    }
+
+    #[test]
+    fn static_barrier_stops_car_and_reports_world_contact() {
+        let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
+        let mut sim = Sim::new(SimConfig {
+            seed: 4,
+            mode,
+            time_of_day: TimeOfDay::from_hours(12.0),
+            time_ratio: 10.0,
+        });
+        sim.add_static_box([0.0, 20.0, 0.75], [8.0, 1.0, 1.5], 0.0);
+        sim.spawn_vehicle(&car, [0.0; 3], 0.0).unwrap();
+        let slot = &mut sim.vehicles[0];
+        let rb = &mut sim.physics.bodies[slot.body.body];
+        slot.vehicle.place_body(rb, [0.0; 3], 0.0, 15.0, 0.0);
+        for _ in 0..720 {
+            sim.step_fixed();
+        }
+        let s = &sim.vehicle_states()[0].1;
+        assert!(
+            s.pos[1] < 20.0,
+            "car went through the barrier: y = {}",
+            s.pos[1]
+        );
+        let hit = sim.drain_events().into_iter().find_map(|e| match e {
+            SimEvent::Contact { b, rel_speed, .. } if b == wp_contracts::WORLD_ENTITY => {
+                Some(rel_speed)
+            }
+            _ => None,
+        });
+        let speed = hit.expect("no world Contact event");
+        assert!((12.0..=17.0).contains(&speed), "closing speed {speed}");
     }
 
     #[test]

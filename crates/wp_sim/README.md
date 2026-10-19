@@ -2,7 +2,7 @@
 
 **Owned by workstream 12 (integration lead).**
 
-The fixed-step game loop. `Sim::new(SimConfig)`, `spawn_vehicle(&LoadedCar, pos, yaw)`, `set_input`, `set_assists`, `reset_vehicle`, `step_fixed()` (one `PHYSICS_DT` tick), `advance(frame_dt) -> alpha`, `vehicle_states()`, `drain_events()`, `state_hash()`.
+The fixed-step game loop. `Sim::new(SimConfig)`, `spawn_vehicle(&LoadedCar, pos, yaw)`, `set_input`, `set_assists`, `reset_vehicle`, `add_static_box(pos, size, yaw)`, `set_mode_table`, `step_fixed()` (one `PHYSICS_DT` tick), `advance(frame_dt) -> alpha`, `vehicle_states()`, `drain_events()`, `state_hash()`.
 
 Per tick: world clock → vehicles (`wp_vehicle` wheel probes against Rapier, forces written to
 the chassis bodies) → Rapier step (gravity -Z, static ground slab with top at z = 0) → contact
@@ -25,7 +25,7 @@ every contact. Disabling the vehicle system (`set_systems`) also disables the ch
 
 ## Known gaps
 - Contacts reach `wp_damage`, but damage is still the prompt-01 stub until workstream 03 merges.
-- No static world geometry besides the ground slab (barriers: contract request TB-3).
+- Static geometry is boxes only (`add_static_box`, TB-3); simcli/testbed scenarios do not create them yet.
 - Chassis collider is the box from `wp_vehicle::build_body`; a lattice hull comes with 03.
 - Economy is not wired in.
 
