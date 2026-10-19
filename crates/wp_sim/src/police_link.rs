@@ -45,6 +45,12 @@ impl Sim {
         &self.police
     }
 
+    /// Mutable police system, for tests and debug tools (e.g. `PoliceSystem::set_heat`).
+    /// Anything changed here changes the run: it is not recorded in replays.
+    pub fn police_mut(&mut self) -> &mut PoliceSystem {
+        &mut self.police
+    }
+
     /// Validate and execute a human captain's command (`wp_police` decides; added by 07 for
     /// typed `ClientToServer::CaptainCommand`, v0.3.0). Takes effect from the next tick.
     pub fn captain_command(
