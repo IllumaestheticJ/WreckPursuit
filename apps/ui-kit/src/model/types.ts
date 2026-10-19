@@ -35,7 +35,9 @@ export type ScreenId =
   | "police"
   | "captain"
   | "scanner"
-  | "replay";
+  | "replay"
+  | "chaseHud"
+  | "repairBill";
 
 /** World position on the 2D map plane, metres (+X east, +Y north). */
 export type Vec2 = [number, number];
@@ -100,6 +102,10 @@ export interface HeatHud {
   /** Units actively chasing the player. */
   unitsInPursuit: number;
   bounty: number;
+  /** False when the source only knows the level (events), not the heat value (default true). */
+  heatKnown?: boolean;
+  /** False when the source has no bounty figure (default true). */
+  bountyKnown?: boolean;
 }
 
 /** Everything the in-race HUD shows for the local player's car. */
@@ -271,6 +277,51 @@ export interface MarketListing {
   price: number;
   classIndex: number;
   bracket: string;
+}
+
+/** What the repair-bill screen asks the economy to price. */
+export interface BillRequest {
+  shop: "Legit" | "Crooked";
+  /** District id for the labour multiplier (`prices.toml` `[district_labour]`). */
+  district: string;
+  option: "RepairAll" | "DriveDamaged" | "Scrap";
+  insurance: "basic" | "full" | null;
+  /** Wanted level of the car (crooked markup / legit shops report). */
+  wanted: WantedLevel;
+}
+
+/** One priced line of the bill (`wp_economy::QuotedLine`). */
+export interface BillLineView {
+  label: string;
+  severity: number;
+  parts: number;
+  labour: number;
+  total: number;
+}
+
+/**
+ * The repair bill for the car the player is driving (owner: `wp_damage` estimate priced by
+ * `wp_economy::Economy::quote_repair`; in the testbed via `wp_wasm::repair_quote_json`).
+ */
+export interface RepairBillView {
+  /** `wp_economy` (live) or the UI's TS port (mock). */
+  source: "wp_economy" | "mock";
+  carName: string;
+  carClass: string;
+  health: number;
+  totalLoss: boolean;
+  mode: string;
+  lines: BillLineView[];
+  labourMultiplier: number;
+  gross: number;
+  insuranceCovers: number;
+  claimDenied: boolean;
+  playerPays: number;
+  salvage: number;
+  reportsToPolice: boolean;
+  /** Why there is no priced quote ("nothing to repair"…), else null. */
+  error: string | null;
+  request: BillRequest;
 }
 
 // ---------------------------------------------------------------- races
@@ -548,6 +599,8 @@ export interface UiState {
   captain: CaptainState;
   map: CityMap;
   replay: ReplayState;
+  /** Live repair bill for the current car (null until requested). */
+  bill: RepairBillView | null;
   /** Last command refused by the provider (shown as a toast). */
   notice: { id: number; text: string; kind: "info" | "error" } | null;
 }

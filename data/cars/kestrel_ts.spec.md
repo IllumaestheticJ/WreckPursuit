@@ -145,5 +145,5 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 257 nodes, 1620 beams, 8 detachables, 21 component mounts.
 
 - Generated with `gen-lattice --id kestrel_ts --profile sedan --width 1.77 --length 4.6 --height 1.45 --wheelbase 2.64 --mass 319.6 --car-mass 1452.7 --clearance 0.14 --front-overhang 0.95 --strength 1.0` (22% of vehicle mass in the lattice; strength from durability class 3).
-- Era `2000s` passenger cell: 162 cabin/sill, 119 cross-member, 10 pillar, 10 roof rail → hss × 0.90 section.
+- Era `2000s` passenger cell: 138 cabin/sill, 143 cross-member, 10 pillar, 10 roof rail → hss × 0.90 section.
 - Transverse engine: gearbox mounted on the left end of the engine block (gen-lattice places it in the tunnel at the firewall, as for FR).

@@ -245,3 +245,17 @@ Contract requests (decisions; implemented together in v0.2.0 unless noted):
 Other needs routed: floor car `junkyard_beater` → 09 (in cars.md); tire files → 02 (in vehicle.md);
 CI line → 10 (in harness.md). Call sites (race results, session-end `DamageReport`, capture) come
 when 07 (server) and 06 (police) merge — nothing to do now.
+
+## Lead feedback (round 6, 2026-10-19)
+
+**Merged** — typed event list, price-table fill, pursuit wiring draft (`PursuitTracker`, `settle_pursuit`). The lead
+wires capture / escape into the sim and the testbed next round, once E's typed events land in contract v0.3.0.
+
+
+## Lead feedback (round 6b, 2026-10-19) — head-start tasks
+
+Contract **v0.3.0** is being applied in parallel by the lead (branch `lead/contract-v0.3.0`). Do not edit `wp_contracts`; build your work so it drops onto v0.3.0 (inherent methods / local types now, trait wiring after). Merge `origin/claude/laughing-newton-0xqr6q` (the lead branch, ahead of `main` until today's gate finishes) before starting. Goal of the project right now: the **single-player greybox demo**: drive in the city, raise heat, get chased by physical police, escape or get caught, and pay the repair bill.
+
+1. Build the glue the lead calls from `wp_sim`: an `EconomySession` (in `wp_economy`) that takes a stream of `SimEvent`s plus a per-car `DamageReport`, and produces the end-of-run result: repair bill, payouts, fines, impound decision, ledger entries. Use today's v0.2.0 event shapes, with your `PursuitTracker`/`settle_pursuit` behind it. Write it so switching to typed v0.3.0 events is a small change. Include tests from recorded event lists.
+2. Impound flow end to end: capture → impound fee → release, with the car's damage carried over.
+3. Tune prices against H's 13 cars (H flagged first-pass prices).

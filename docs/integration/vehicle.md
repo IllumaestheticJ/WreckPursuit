@@ -117,6 +117,44 @@ pedals swap; press throttle to return to first.
 See `crates/wp_vehicle/README.md` → Known gaps (ray probe not shape-cast, no stall/tire
 temperature/wear, fixed AWD split, trait `step` needs Rapier access).
 
+## City chase in the browser (A, on request; touches C's / M's areas)
+
+Asked for directly by the owner. Additive changes outside my crates:
+- `crates/wp_wasm`: `city_chase_json(car, mode)` preset (procedural city, 23:00, traffic 1.0,
+  police 1.0, player on the race grid at 90 km/h); `live_vehicles()` (`[entity, kind]` for every
+  sim vehicle incl. sim-spawned police/traffic); `vehicle_info` works for sim-spawned vehicles and
+  reports `kind`; `Session::car()` resolves their cars (cache by car id); debug
+  `set_vehicle_kind(entity, code)` (refused while recording/replaying); `police_hud_json()` —
+  **placeholder returning `null` until `Sim::police()` lands (lead run 5)**.
+- `apps/testbed-web`: "city chase" button / `?preset=chase[&car=…][&police=N]`; views follow
+  `live_vehicles()` (spawn + despawn); police livery + flashing red/blue light bar with point
+  lights at night + `Auto` siren via J's audio bridge; traffic in muted colours; heat panel =
+  M's `HeatPanel` (UI kit) mounted in a `.wp-ui` overlay, with police/traffic counts.
+- `apps/ui-kit/package.json`: new subpath export `"./hud"` (the HUD module, without the eager
+  1.2 MB fixtures the package index pulls in). Testbed consumes the kit as source
+  (`file:../ui-kit`, `preact`, esbuild JSX, `resolve.dedupe`).
+
+## Roster check with the converter + on-demand AWD (A, after lead run 4)
+
+09's automatics and on-demand AWD cars now run on the real converter and coupling (0–100,
+release, cloud container; band from `data/cars/VALIDATION.md`):
+
+| Car | Before (VALIDATION.md) | Now | Band | |
+|---|---|---|---|---|
+| Sentinel Cruiser | 8.6 | **8.36** | 7.0–8.5 | ✓ now in band |
+| Lindwurm 4T (AWD on-demand) | 5.44 (lead's first cut) | **5.40** | 4.6–5.4 | ✓ (edge) |
+| Sentinel Bastion | 8.3 | 8.55 | 7.5–9.0 | ✓ |
+| Hauler 1500 | 9.5 | **8.98** | 7.0–8.0 | ✗ traction-limited (09's note: 4WD mod / tires) |
+| Ironside 440 | 8.8 | **8.71** | 6.5–8.0 | ✗ traction-limited on `vintage_bias` |
+| Sentinel Wolfhound (AWD on-demand) | 6.4 | 6.55 | 5.5–6.5 | ✗ by 0.05 s |
+
+Wolfhound: the converter delivers stall torque instantly and the 90/50 coupling still puts ≥ 50 %
+on the fronts, so it launches with front wheelspin; plus converter slip below its 3000 rpm
+coupling speed. I made the coupling pre-charge fully at a standstill (real couplings do), worth
+0.02 s. For 09: `coupling_rpm` 2400–2600 or `stall_torque_ratio` 1.7–1.8 should bring it in band
+— your data call. (`coupling_rpm` is used as the lock-up speed; my earlier suggestion of
+1500–1900 assumed that reading.)
+
 ## Contract v0.2.0 follow-up (A, after lead run 3)
 
 - **Torque converter implemented** (`drivetrain::Converter`, used when
@@ -201,3 +239,19 @@ Next for you (in priority order):
   only until F re-lands). Please review them and keep them.
 - Machine F needs a client-side single-car stepper that matches the server bit-for-bit (`rig::Rig`-like,
   own Rapier world) for prediction — the trait `step` flat-plane path diverges. Coordinate in net.md.
+
+## Lead feedback (round 6, 2026-10-19)
+
+Your on-demand AWD pre-charge is merged. Your branch also contained a full browser city chase (testbed / `wp_wasm`),
+which is machine C's area — C did the same task, so your testbed changes were reverted. Please stay in
+`crates/wp_vehicle` and `data/tires`; no new task this round.
+
+
+## Lead feedback (round 6b, 2026-10-19) — head-start tasks
+
+Contract **v0.3.0** is being applied in parallel by the lead (branch `lead/contract-v0.3.0`). Do not edit `wp_contracts`; build your work so it drops onto v0.3.0 (inherent methods / local types now, trait wiring after). Merge `origin/claude/laughing-newton-0xqr6q` (the lead branch, ahead of `main` until today's gate finishes) before starting. Goal of the project right now: the **single-player greybox demo**: drive in the city, raise heat, get chased by physical police, escape or get caught, and pay the repair bill.
+
+1. Weather grip hook (K's W-1): add a per-wheel surface-conditions input on the vehicle (`water_depth_mm`, `temperature_c`, `painted_line`) as a `wp_vehicle` type with a dry default; tires use it for wet grip and aquaplaning onset. The lead binds it to `WorldQuery::weather_at` after v0.3.0.
+2. Torque converter for automatic gearboxes (H's deferred request 3). Data fields already exist in the car files.
+3. Measure vehicle-only cost per car (native release, 24 cars) and record it in your README.
+Stay in `crates/wp_vehicle` and `data/tires`.

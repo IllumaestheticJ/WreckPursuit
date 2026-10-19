@@ -144,7 +144,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 244 nodes, 1539 beams, 8 detachables, 21 component mounts.
 
 - Generated with `gen-lattice --id junkyard_beater --profile sedan --width 1.66 --length 4.3 --height 1.38 --wheelbase 2.5 --mass 232.8 --car-mass 1058.2 --clearance 0.14 --front-overhang 0.9 --strength 0.9` (22% of vehicle mass in the lattice; strength from durability class 2).
-- Era `80s` passenger cell: 170 cabin/sill, 115 cross-member, 10 pillar, 10 roof rail → hss × 0.65 section.
+- Era `80s` passenger cell: 138 cabin/sill, 143 cross-member, 10 pillar, 10 roof rail → hss × 0.65 section.
 - Steel hood: 105 hood beams aluminum → mild_steel.
 - Detachables: steel bumpers ×2.3 break impulse / ×4 mass; steel hood ×1.4 / ×1.6.
 - Transverse engine: gearbox mounted on the left end of the engine block (gen-lattice places it in the tunnel at the firewall, as for FR).

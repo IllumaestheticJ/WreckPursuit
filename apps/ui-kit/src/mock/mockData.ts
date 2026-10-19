@@ -3,11 +3,9 @@
  * police career). Shapes follow `model/types.ts`; car and mod data are the real `data/` files.
  * Everything is deterministic (no Math.random).
  */
-import type { AssistProfile, RepairEstimate, RepairItem, VehicleClass } from "../generated/contracts";
-import { defaultBindings } from "../model/bindings";
+import type { RepairEstimate, RepairItem, VehicleClass } from "../generated/contracts";
 import type {
   AccountView,
-  AssistPreset,
   CityMap,
   Crew,
   CrewState,
@@ -17,7 +15,6 @@ import type {
   MarketListing,
   PoliceCareer,
   ResultsState,
-  Settings,
   ShopView,
 } from "../model/types";
 import { CARS, isDebugCar } from "../data/catalog";
@@ -35,80 +32,7 @@ import {
 import { previewBuild } from "../data/estimate";
 import mapJson from "../../fixtures/city/procedural_12x12.map.json";
 
-/** Assist presets, matching `wp_contracts::AssistProfile` constructors. */
-export const ASSIST_PRESETS: Record<Exclude<AssistPreset, "custom">, AssistProfile> = {
-  // Everything off (not a contract preset: the hardcore option).
-  off: {
-    abs: false,
-    tcs: false,
-    esc: false,
-    steer_speed_sensitivity: 0,
-    countersteer_help: 0,
-    throttle_filter: 0,
-    brake_filter: 0,
-    auto_gears: false,
-    auto_clutch: false,
-  },
-  // AssistProfile::wheel_default()
-  sim: {
-    abs: true,
-    tcs: false,
-    esc: false,
-    steer_speed_sensitivity: 0,
-    countersteer_help: 0,
-    throttle_filter: 0,
-    brake_filter: 0,
-    auto_gears: false,
-    auto_clutch: true,
-  },
-  // AssistProfile::gamepad_default()
-  standard: {
-    abs: true,
-    tcs: true,
-    esc: false,
-    steer_speed_sensitivity: 0.7,
-    countersteer_help: 0.3,
-    throttle_filter: 0.2,
-    brake_filter: 0.2,
-    auto_gears: true,
-    auto_clutch: true,
-  },
-  // AssistProfile::keyboard_default()
-  full: {
-    abs: true,
-    tcs: true,
-    esc: true,
-    steer_speed_sensitivity: 1,
-    countersteer_help: 0.6,
-    throttle_filter: 0.7,
-    brake_filter: 0.6,
-    auto_gears: true,
-    auto_clutch: true,
-  },
-};
-
-/** Which preset (if any) a profile equals. */
-export function presetOf(a: AssistProfile): AssistPreset {
-  for (const [name, p] of Object.entries(ASSIST_PRESETS)) {
-    if ((Object.keys(p) as (keyof AssistProfile)[]).every((k) => p[k] === a[k])) return name as AssistPreset;
-  }
-  return "custom";
-}
-
-/** Default settings. */
-export function defaultSettings(): Settings {
-  return {
-    bindings: defaultBindings(),
-    assistPreset: "full",
-    assists: { ...ASSIST_PRESETS.full },
-    damageMode: "Arcade",
-    units: "metric",
-    input: { steerDeadzone: 0.04, steerLinearity: 1.4, wheelRotationDeg: 900, combinedPedals: false },
-    accessibility: { palette: "default", uiScale: 1, reduceMotion: false, largeScannerText: false },
-    feedback: { rumble: true, rumbleStrength: 0.7, ffbStrength: 0.8 },
-    audio: { master: 0.9, engine: 0.8, scanner: 0.7, music: 0.5 },
-  };
-}
+export { ASSIST_PRESETS, defaultSettings, presetOf } from "../model/defaults";
 
 /** The city map fixture as a `CityMap`. */
 export function cityMap(): CityMap {

@@ -65,6 +65,7 @@ fn director_frame_cost_24_cars() {
                 horn: false,
                 siren: i % ids.len() == 2,
                 road_rumble: 0.3,
+                kind: DriverKind::Player,
             })
             .collect();
         let events: Vec<SimEvent> = (0..8u32)

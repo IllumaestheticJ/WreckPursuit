@@ -103,14 +103,15 @@ export function HeatPanel({ heat }: { heat: HeatHud }) {
           <div class="wp-mono wp-dim wp-hud-small">SEARCHING… {Math.round(heat.cooldown * 100)}%</div>
         </div>
       ) : (
-        <Meter value={level === 0 ? 0 : heat.heat} color={level >= 4 ? "var(--danger)" : "var(--warn)"} segmented label="Heat" />
+        // Without a heat value (event-only sources) the bar shows the level band instead.
+        <Meter value={level === 0 ? 0 : heat.heatKnown === false ? level / 5 : heat.heat} color={level >= 4 ? "var(--danger)" : "var(--warn)"} segmented label="Heat" />
       )}
       <div class="wp-spread wp-mono wp-hud-small">
         <span>
           <span class="wp-dim">UNITS</span> {heat.unitsInPursuit}
         </span>
         <span>
-          <span class="wp-dim">BOUNTY</span> <span class="wp-cash">${heat.bounty.toLocaleString("en-US")}</span>
+          <span class="wp-dim">BOUNTY</span> {heat.bountyKnown === false ? <span class="wp-dim">—</span> : <span class="wp-cash">${heat.bounty.toLocaleString("en-US")}</span>}
         </span>
       </div>
     </div>

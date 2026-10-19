@@ -20,6 +20,7 @@ clock. Implements `wp_contracts::WorldQuery`. No renderer dependency; compiles f
 | `props` | Parked cars and cones (static colliders) |
 | `clock` | `WorldClock`, `sun_direction` |
 | `geom` | Deterministic geometry (polylines, OBB, Bézier; re-exports `wp_math::{atan, atan2}`) |
+| `drive` | Shared AI driving: `DriveController` (pure pursuit + PID) and `PathFollower` (`follow_path` along any `DrivePath`) for traffic, police and racers |
 | `roads` | Road-level graph view (`RoadGraphView`) for police routing / minimaps |
 
 City data lives in `data/city/` (see its README); importer and generator in
@@ -164,8 +165,11 @@ the box.
 **Hazards**: emergency braking (−8 m/s², hazard lights) when a tracked vehicle in front or
 alongside has time-to-closest-approach < 3 s with miss distance < 3 m at > 5 m/s relative
 speed (head-on or crossing); sirens within 60 m → pull 1 m right, slow to 3 m/s at up to
-4 m/s², stop if the siren is within 25 m behind, never enter a junction; debris ahead → swerve
-up to 1.5 m and slow to 60 % of the limit, or stop if it cannot be passed. Civilians never chase
+4 m/s², stop if the siren is within 25 m behind, never enter a junction; debris ahead (`Hazard`,
+extrapolated along its velocity up to 2 s) → swerve within the lane by up to 1.5 m (planned in
+the lane frame, held until the rear bumper is past) at 60 % of the limit; debris that blocks the
+lane → change to a free neighbour lane (forced MOBIL change, safety still checked) or stop;
+debris in a junction box blocks every connector through it. Civilians never chase
 or block players on purpose.
 
 **LOD**: within 80 m of a player or an active race route (max 16), agents become physical:

@@ -23,6 +23,7 @@ pub mod crews;
 pub mod db;
 pub mod directory;
 pub mod error;
+pub mod instance;
 pub mod leaderboards;
 pub mod matchmaking;
 pub mod ratelimit;

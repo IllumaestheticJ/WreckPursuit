@@ -30,7 +30,7 @@ pub mod grid;
 pub mod grip;
 pub mod kind;
 
-pub use adapter::WithWeather;
+pub use adapter::{Weathered, WithWeather};
 pub use conditions::LocalConditions;
 pub use data::{ClimateTable, EffectsTable, SurfaceTable, WeatherData, WeatherDataError};
 pub use effects::{
@@ -441,6 +441,13 @@ impl WeatherSim {
     /// AI sight-distance multiplier (fog + rain), 0..1.
     pub fn sight_multiplier(&self) -> f32 {
         self.modifiers.sight_multiplier
+    }
+
+    /// How far anyone can see in this weather, m: `visibility.reference_sight_m` (800) ×
+    /// [`WeatherSim::sight_multiplier`]. 800 m in clear air, ~130 m in thick fog, ~480 m in a
+    /// 16 mm/h downpour. The adapters' `line_of_sight` is false beyond it.
+    pub fn sight_range_m(&self) -> f32 {
+        self.data.effects.visibility.reference_sight_m * self.modifiers.sight_multiplier
     }
 
     /// Weather-limited sight check for police / AI: true if `b` is within
