@@ -204,6 +204,12 @@ impl EconomySession {
         &self.config
     }
 
+    /// Damage mode from now on (the player switched modes mid-run; fines, impound and repair
+    /// scaling at [`EconomySession::finish`] use it).
+    pub fn set_mode(&mut self, mode: DamageMode) {
+        self.config.mode = mode;
+    }
+
     /// Bind a racer vehicle to the owned car it is driving. Events of unbound vehicles
     /// (traffic, police units) are tracked but never settled.
     pub fn bind(&mut self, vehicle: EntityId, player: PlayerId, car: CarUid) {
