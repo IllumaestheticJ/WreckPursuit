@@ -1,0 +1,46 @@
+// Opponent AI (workstream 17). Runs today on the flat world with a warning: simcli does not
+// yet load procedural cities or drive `follow_route` entities. Once machine I wires
+// `follow_route` to `wp_opponent::Field` (request in docs/integration/opponent.md), the
+// pending expectations become the real check. Entity ids name the driver's skill
+// (`skillNN` = DriverProfile { skill: 0.NN, ..default }); `target_speed: 0.0` = race pace.
+// The same race runs today as a Rust test: crates/wp_opponent/tests/race.rs.
+(
+    name: "opponent_circuit_8x5",
+    seed: 7,
+    city: procedural(seed: 1, blocks_x: 7, blocks_y: 7, block_m: 110.0),
+    mode: Arcade,
+    assists: ai,
+    traffic_density: 0.0,
+    entities: [
+        (id: "skill95", car: "debug_sedan", pos: (-104.0, -166.75, 0.0), yaw: -1.5708, assists: ai,
+         driver: follow_route(route_id: "procedural_8x8/arterial_square_ccw", target_speed: 0.0)),
+        (id: "skill85", car: "debug_sedan", pos: (-112.2, -166.75, 0.0), yaw: -1.5708, assists: ai,
+         driver: follow_route(route_id: "procedural_8x8/arterial_square_ccw", target_speed: 0.0)),
+        (id: "skill75", car: "debug_sedan", pos: (-120.4, -166.75, 0.0), yaw: -1.5708, assists: ai,
+         driver: follow_route(route_id: "procedural_8x8/arterial_square_ccw", target_speed: 0.0)),
+        (id: "skill65", car: "debug_sedan", pos: (-128.6, -166.75, 0.0), yaw: -1.5708, assists: ai,
+         driver: follow_route(route_id: "procedural_8x8/arterial_square_ccw", target_speed: 0.0)),
+        (id: "skill55", car: "debug_sedan", pos: (-136.8, -166.75, 0.0), yaw: -1.5708, assists: ai,
+         driver: follow_route(route_id: "procedural_8x8/arterial_square_ccw", target_speed: 0.0)),
+        (id: "skill45", car: "debug_sedan", pos: (-145.0, -166.75, 0.0), yaw: -1.5708, assists: ai,
+         driver: follow_route(route_id: "procedural_8x8/arterial_square_ccw", target_speed: 0.0)),
+        (id: "skill35", car: "debug_sedan", pos: (-153.2, -166.75, 0.0), yaw: -1.5708, assists: ai,
+         driver: follow_route(route_id: "procedural_8x8/arterial_square_ccw", target_speed: 0.0)),
+        (id: "skill25", car: "debug_sedan", pos: (-161.4, -166.75, 0.0), yaw: -1.5708, assists: ai,
+         driver: follow_route(route_id: "procedural_8x8/arterial_square_ccw", target_speed: 0.0)),
+    ],
+    duration_s: 330.0,
+    hash_every: 2400,
+    expect: [
+        // Holds on the flat world too: nobody wrecks.
+        event_count(event: "TotalLoss", min: 0, max: 0),
+    ],
+    expect_pending: [
+        // 8 racers x 5 laps: no AI-AI collisions above 400 N·s (simcli counts every contact
+        // >= 50 N·s, so allow light rubbing), everyone covers 5 laps (~6.5 km).
+        event_count(event: "Contact", min: 0, max: 10),
+        metric(entity: "skill95", name: "path_length_m", min: 6400.0, max: 7200.0),
+        metric(entity: "skill25", name: "path_length_m", min: 6400.0, max: 7200.0),
+        metric(entity: "skill95", name: "max_speed_mps", min: 30.0, max: 60.0),
+    ],
+)

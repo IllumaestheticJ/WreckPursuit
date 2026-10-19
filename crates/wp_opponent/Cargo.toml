@@ -16,3 +16,4 @@ serde.workspace = true
 [dev-dependencies]
 wp_sim.workspace = true
 wp_damage.workspace = true
+lint-determinism = { path = "../../tools/lint-determinism" }

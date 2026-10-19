@@ -112,6 +112,8 @@ pub struct Outcome {
     pub contacts: Vec<(u64, EntityId, EntityId, f32)>,
     /// Contacts of racers with anything else (world, props) above 50 N·s.
     pub other_contacts: u32,
+    /// Wall time spent inside `Field::tick` (harness measurement only), s.
+    pub field_wall_s: f64,
 }
 
 /// Measured capability, cached per process.
@@ -219,6 +221,7 @@ pub fn run(
     let _ = cap;
     let mut contacts = Vec::new();
     let mut other_contacts = 0u32;
+    let mut field_wall_s = 0.0f64;
     let mut events: Vec<SimEvent> = Vec::new();
     let max_ticks = (setup.max_s * 240.0) as u64;
     while sim.tick() < max_ticks {
@@ -235,7 +238,9 @@ pub fn run(
                 ],
             })
             .collect();
+        let t0 = std::time::Instant::now();
         let inputs = field.tick(sim.world(), &obs, &events, police).to_vec();
+        field_wall_s += t0.elapsed().as_secs_f64();
         for (e, inp) in inputs {
             sim.set_input(e, inp).unwrap();
         }
@@ -273,6 +278,7 @@ pub fn run(
         entities,
         contacts,
         other_contacts,
+        field_wall_s,
     }
 }
 

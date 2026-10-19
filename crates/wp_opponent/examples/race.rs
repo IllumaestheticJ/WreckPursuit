@@ -125,6 +125,12 @@ fn main() {
         wall,
         wall * 1000.0 / (out.sim_s * 240.0)
     );
+    let frames = out.sim_s as f64 * 60.0;
+    println!(
+        "AI (Field::tick): {:.4} ms per 60 Hz frame for {n} racers ({:.4} ms/racer)",
+        out.field_wall_s * 1000.0 / frames,
+        out.field_wall_s * 1000.0 / frames / n as f64
+    );
     let line = out.field.line_of(0);
     println!(
         "corridor {:.0} m, line {:.0} m, max curvature {:.3}, predicted lap (racer 0) {:.1} s",
