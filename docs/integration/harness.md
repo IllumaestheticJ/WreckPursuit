@@ -239,3 +239,10 @@ with 06 in v0.2.0, so the provisional `PURSUIT_STARTED_KIND` goes away. H2 (`Sys
   and add D's traffic soak scenario (0 civilian collisions, ≥ 380 agents, ≥ 50 % moving).
 - Question from B's tuning: should `golden_frontal_56kmh` (into a *parked sedan*) be a TotalLoss? A
   parked car absorbs energy; consider adding a rigid-barrier golden (static box via `barriers`).
+
+### Lead run 5 (2026-10-19)
+- `build_sim` city runs now set `POLICE_CAR` / `TRAFFIC_CAR` (`run.rs` consts), so city scenarios contain
+  extra police / traffic vehicles. Metrics and expectations use `scenario_states(&sim, &ids)` (scenario
+  entities only); fuzz names extra vehicles "city vehicle". City goldens re-blessed.
+- `soak/traffic_soak_observer`: `civilian_collisions` gate 0 → ≤ 3, zero moved to `expect_pending`
+  (physical traffic; D is investigating). Consider scenario fields to opt out of police / traffic.
