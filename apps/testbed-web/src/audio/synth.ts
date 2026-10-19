@@ -123,31 +123,53 @@ function stopAll(nodes: AudioScheduledSourceNode[], t: number): void {
 
 // ----- loops -------------------------------------------------------------------------------
 
-/** Engine: harmonic stack on the firing frequency, uneven-firing AM, combustion noise, drive. */
-function engine(ctx: BaseAudioContext, s: Params, p: VoiceParams): SynthVoice {
+/** Timbre blend of an engine instrument (see `engineInstrument`). */
+export interface EngineMix {
+  /** Brightness 0..1 (low-pass opening), energy-weighted over the active layers. */
+  bright: number;
+  /** Overrun share 0..1: crossfades the on-throttle drive into the softer off-throttle one. */
+  off: number;
+  /** Combustion / intake noise level (pack `noise`). */
+  noise: number;
+  /** Limiter chop depth 0..1. */
+  chop: number;
+}
+
+/** An engine synth whose timbre can move continuously (`setMix`). */
+export interface EngineSynth extends SynthVoice {
+  setMix(m: EngineMix, t: number): void;
+}
+
+/**
+ * Engine: one harmonic stack on the firing frequency (sub, 1×, 2×, 3×), uneven-firing AM,
+ * combustion noise, on/off-throttle drive and a limiter chop. Every timbre control is a
+ * continuous parameter so one instance can stand in for all of a car's procedural layers:
+ * separate per-layer synths play the *same* tone, so summing them cancels or reinforces at
+ * random with their start phase (playtest #19: up to 6 dB holes in the crossfades).
+ */
+export function engineInstrument(ctx: BaseAudioContext, s: Params, p: VoiceParams, mix: EngineMix): EngineSynth {
   const f = clampF(p.freq_hz, 5, 2000);
   const uneven = s.uneven ?? 0;
   const balance = s.balance ?? 0.4;
   const out = gain(ctx, 1);
-  const mix = gain(ctx, 1);
+  const pre = gain(ctx, 1);
   const lp = filter(ctx, "lowpass", 2000, 0.9);
-  const drive = shaper(ctx, (s.drive ?? 0.3) * (s.off ? 0.6 : 1));
+  // On / off throttle: the same signal through a hard and a softer drive, crossfaded.
+  const onG = gain(ctx, 1 - mix.off);
+  const offG = gain(ctx, mix.off);
+  pre.connect(shaper(ctx, s.drive ?? 0.3)).connect(onG).connect(lp);
+  pre.connect(shaper(ctx, (s.drive ?? 0.3) * 0.6)).connect(offG).connect(lp);
   // Uneven firing: amplitude modulation at half the firing rate (cross-plane burble).
   const am = gain(ctx, 1 - uneven * 0.35);
-  mix.connect(drive).connect(lp).connect(am);
+  lp.connect(am);
   const lfo = osc(ctx, "sine", f * 0.5);
   lfo.connect(gain(ctx, uneven * 0.35)).connect(am.gain);
-  // Limiter: square-wave chop of the whole note.
-  let tail: AudioNode = am;
-  let chop: OscillatorNode | null = null;
-  if (s.chop_hz) {
-    const chopGain = gain(ctx, 0.5);
-    chop = osc(ctx, "square", s.chop_hz);
-    chop.connect(gain(ctx, 0.5)).connect(chopGain.gain);
-    am.connect(chopGain);
-    tail = chopGain;
-  }
-  tail.connect(out);
+  // Limiter: square-wave chop of the whole note, depth 0..1.
+  const chopGain = gain(ctx, 1 - 0.5 * mix.chop);
+  const chop = osc(ctx, "square", s.chop_hz ?? 18);
+  const chopDepth = gain(ctx, 0.5 * mix.chop);
+  chop.connect(chopDepth).connect(chopGain.gain);
+  am.connect(chopGain).connect(out);
 
   const orders: [number, OscillatorType, number][] = [
     [0.5, "triangle", (s.h1 ?? 0.5) * (0.25 + uneven) * (1.5 - balance)],
@@ -157,30 +179,56 @@ function engine(ctx: BaseAudioContext, s: Params, p: VoiceParams): SynthVoice {
   ];
   const oscs = orders.map(([o, type, a]) => {
     const n = osc(ctx, type, f * o);
-    n.connect(gain(ctx, a)).connect(mix);
+    n.connect(gain(ctx, a)).connect(pre);
     return { n, o };
   });
   // Combustion / intake noise.
   const nz = noise(ctx);
   const nbp = filter(ctx, "bandpass", f * 3, 0.8);
-  const ng = gain(ctx, (s.noise ?? 0.1) * (0.5 + balance));
-  nz.connect(nbp).connect(ng).connect(mix);
+  const ng = gain(ctx, mix.noise * (0.5 + balance));
+  nz.connect(nbp).connect(ng).connect(pre);
 
-  const sources: AudioScheduledSourceNode[] = [...oscs.map((x) => x.n), lfo, nz, ...(chop ? [chop] : [])];
-  const v: SynthVoice = {
+  const sources: AudioScheduledSourceNode[] = [...oscs.map((x) => x.n), lfo, nz, chop];
+  let cur = { ...mix };
+  let f2 = f;
+  let load = p.load;
+  const setLp = (t: number) => {
+    const bright = cur.bright * (0.4 + 0.6 * load);
+    smooth(lp.frequency, clampF(f2 * (2.5 + 14 * bright), 150, 12000), t);
+  };
+  const v: EngineSynth = {
     output: out,
     update(p2, t) {
-      const f2 = clampF(p2.freq_hz, 5, 2000);
+      f2 = clampF(p2.freq_hz, 5, 2000);
+      load = p2.load;
       for (const { n, o } of oscs) smooth(n.frequency, f2 * o, t, 0.012);
       smooth(lfo.frequency, f2 * 0.5, t, 0.012);
       smooth(nbp.frequency, clampF(f2 * 3), t);
-      const bright = (s.bright ?? 0.5) * (0.4 + 0.6 * p2.load);
-      smooth(lp.frequency, clampF(f2 * (2.5 + 14 * bright), 150, 12000), t);
+      setLp(t);
+    },
+    setMix(m, t) {
+      cur = { ...m };
+      smooth(onG.gain, 1 - m.off, t);
+      smooth(offG.gain, m.off, t);
+      smooth(ng.gain, m.noise * (0.5 + balance), t);
+      smooth(chopGain.gain, 1 - 0.5 * m.chop, t);
+      smooth(chopDepth.gain, 0.5 * m.chop, t);
+      setLp(t);
     },
     stop: (t) => stopAll(sources, t),
   };
   v.update(p, ctx.currentTime);
   return v;
+}
+
+/** One engine layer played on its own (cue params fix the timbre). */
+function engine(ctx: BaseAudioContext, s: Params, p: VoiceParams): SynthVoice {
+  return engineInstrument(ctx, s, p, {
+    bright: s.bright ?? 0.5,
+    off: s.off ? 1 : 0,
+    noise: s.noise ?? 0.1,
+    chop: s.chop_hz ? 1 : 0,
+  });
 }
 
 /** Filtered noise loop: rolling surfaces, scrub, scrapes. */
@@ -278,6 +326,44 @@ function squeal(ctx: BaseAudioContext, s: Params, p: VoiceParams): SynthVoice {
       smooth(og.gain, 0.2 + 0.5 * p2.load, t);
     },
     stop: (t) => stopAll([o, vib, nz], t),
+  };
+  v.update(p, ctx.currentTime);
+  return v;
+}
+
+/**
+ * Wheelspin: a low rough howl (band-passed saw, lower than cornering squeal) chopped by the tread
+ * "chirp" at a rate rising with slip speed, plus smoke / scrub hiss. `pitch` and `load` come from
+ * the director (slip speed and spin intensity).
+ */
+function spin(ctx: BaseAudioContext, s: Params, p: VoiceParams): SynthVoice {
+  const out = gain(ctx, 1);
+  const base = s.freq_hz ?? 620;
+  const chirpHz = s.chirp_hz ?? 34;
+  const am = gain(ctx, 0.65);
+  am.connect(out);
+  const chirp = osc(ctx, "square", chirpHz);
+  const chirpDepth = gain(ctx, 0.35);
+  chirp.connect(chirpDepth).connect(am.gain);
+  const o = osc(ctx, "sawtooth", base);
+  const bp = filter(ctx, "bandpass", base * 1.3, 4);
+  const og = gain(ctx, 0.4);
+  o.connect(bp).connect(og).connect(am);
+  const nz = noise(ctx);
+  const nbp = filter(ctx, "bandpass", 2500, 0.8);
+  const ng = gain(ctx, 0.3);
+  nz.connect(nbp).connect(ng).connect(out);
+  const v: SynthVoice = {
+    output: out,
+    update(p2, t) {
+      const pitch = Math.min(3, Math.max(0.3, p2.pitch));
+      smooth(o.frequency, clampF(base * pitch), t);
+      smooth(bp.frequency, clampF(base * 1.3 * pitch), t);
+      smooth(chirp.frequency, chirpHz * pitch, t);
+      smooth(og.gain, 0.25 + 0.5 * p2.load, t);
+      smooth(ng.gain, (s.hiss ?? 0.7) * (0.3 + 0.7 * p2.load), t);
+    },
+    stop: (t) => stopAll([o, chirp, nz], t),
   };
   v.update(p, ctx.currentTime);
   return v;
@@ -532,6 +618,8 @@ export function makeSynth(
       return whine(ctx, params, p);
     case "squeal":
       return squeal(ctx, params, p);
+    case "spin":
+      return spin(ctx, params, p);
     case "horn":
       return horn(ctx, params);
     case "hiss":

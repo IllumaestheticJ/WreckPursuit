@@ -30,6 +30,36 @@
       "gain": 0.8,
       "looped": true
     },
+    "tire/spin": {
+      "source": {
+        "Synth": {
+          "synth": "spin",
+          "params": {
+            "freq_hz": 620.0,
+            "chirp_hz": 34.0,
+            "hiss": 0.7
+          }
+        }
+      },
+      "gain": 0.8,
+      "looped": true
+    },
+    "tire/spin_loose": {
+      "source": {
+        "Synth": {
+          "synth": "noise",
+          "params": {
+            "lowpass_hz": 2200.0,
+            "highpass_hz": 150.0,
+            "crackle": 1.6,
+            "rumble": 0.6,
+            "ripple_hz": 18.0
+          }
+        }
+      },
+      "gain": 0.8,
+      "looped": true
+    },
     "suspension/thump": {
       "source": {
         "Synth": {

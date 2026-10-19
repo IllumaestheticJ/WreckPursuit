@@ -62,6 +62,7 @@ fn director_frame_cost_24_cars() {
                 } else {
                     0.0
                 },
+                throttle_applied: None,
                 horn: false,
                 siren: i % ids.len() == 2,
                 road_rumble: 0.3,

@@ -55,6 +55,7 @@ tests. Check: `node apps/testbed-web/e2e/audio.mjs` (after the wasm build).
 | D (05) | traffic agents in a snapshot (`TrafficAgentSnapshot`, D #3) | far (kinematic) traffic sound | near-player physical traffic (`VehicleKind::Traffic` sim vehicles) is heard at `engine.traffic_gain` and Low priority; kinematic agents stay silent |
 | I (10) | add `wp_audio` to `lint-determinism::SIM_CRATES` | CI determinism lint | `tests/director.rs::passes_determinism_lint` runs the lint on this crate |
 | C (04) | keep the 3-line hook in `main.ts` when refactoring; maybe a layer toggle for the audio panel | — | — |
+| A (02, `wp_vehicle`) | `Telemetry::throttle` to show the clutch box's rev-match blip in the neutral phase of a downshift (today the rev-match is kinematic and the telemetry throttle stays 0) | the downshift blip would come from the vehicle instead of being inferred | audio infers the blip from the rpm rate (`blip_load`, `shift_rate_*` in `audio_config.json`) |
 
 ## Contract change requests
 | # | Change (type / field / variant) | Why | Who is affected | Status |
@@ -63,7 +64,7 @@ tests. Check: `node apps/testbed-web/e2e/audio.mjs` (after the wasm build).
 | A-2 | in v0.3.0's typed `PoliceEvent`: `Radio { unit, text, priority: RadioPriority }` with `RadioPriority { Chatter, Routine, Dispatch, Pursuit, Urgent }` (+ P's C9 line id) | scanner orders and chops by priority; captain UI can colour lines | 06, 13, 04, 07 | requested for v0.3.0 (Radio itself exists in `wp_police` and is consumed) |
 | A-3 | the player's scanner tier as data (economy gadget or `RacerView` field), tier index = `wp_police` scanner tier | tier delay per player | 06, 08, 13 | requested (delays already shared: audio config == `tools.toml`) |
 | A-4 | `SimEvent::Contact` emitted for every touching tick (or every net tick) regardless of `CONTACT_EVENT_MIN_IMPULSE_NS`, or a new `SimEvent::ContactSustained { a, b, point, slide_mps }` at 60 Hz | a 0.5 s sideswipe currently yields 3 events (`apps/simcli/scenarios/audio/sideswipe_scrape.ron`), so scrape loops cannot be sustained | lead (`wp_sim`), 10 (event counts in goldens), 07 (event volume — could stay local, not replicated) | requested |
-| A-5 | `VehicleState::throttle_applied: f32` (after TCS/launch control) and optionally `boost: f32` | engine load from the applied throttle (TCS cuts, rev-matching blips audible); real boost from the vehicle model instead of the audio estimate | 02, 07 | requested |
+| A-5 | `VehicleState::throttle_applied: f32` (after TCS/launch control) and optionally `boost: f32` | engine load from the applied throttle (TCS cuts, shift cuts, rev-matching blips audible); real boost from the vehicle model instead of the audio estimate | 02, 07 | requested; **local cars covered** since playtest #19 (the wasm bridge reads `Telemetry::throttle` into `VehicleAudioInput::throttle_applied`); still needed for networked clients |
 | A-6 | `VehicleInput::siren_pattern: u8` (0 = auto, 1 wail, 2 yelp, 3 phaser, 4 hi-lo) | police players/AI choose patterns and it must replicate | 06, 07, 04 | requested |
 
 ## Changes outside my crates
@@ -78,6 +79,8 @@ tests. Check: `node apps/testbed-web/e2e/audio.mjs` (after the wasm build).
   camera update.
 - `apps/testbed-web/e2e/audio.mjs`: new audio end-to-end check (the existing `e2e/run.mjs` is
   unchanged and still passes).
+- `crates/wp_wasm/src/audio.rs` (my bridge file): `throttle_applied` from
+  `SimVehicle::vehicle.telemetry().throttle` (playtest #19).
 - `apps/simcli/scenarios/audio/sideswipe_scrape.ron`: new scenario (format v2) documenting
   request A-4 (gating: approach speed + ≥ 1 contact; pending: sustained contacts — 7 events on
   v0.2.0 `main`), golden `apps/simcli/golden/audio_sideswipe_scrape/` (new, `[bless]` commit).
@@ -144,6 +147,93 @@ https://code.claude.com/docs/en/cloud-environments#network-access.
 5. Car defs point at the `*_rec` packs by default; audio panel gets a "Procedural (fallback)" toggle
    that swaps back to the existing `*_proc` packs.
 
+## Playtest #19 — "the sounds in 2nd gear onwards don't work great" (2026-10-19)
+
+**Reproduced first** with a scripted drive on the flat `wp_vehicle` rig (idle, WOT 1→5, lift,
+brake, 35 % cruise, kickdown) for five cars — `debug_sedan` (I4), `rampart_50` (V8 muscle),
+`shiro_turbo` (turbo, clutch), `lindwurm_4t` (turbo DCT, the testbed default) and
+`sentinel_cruiser` (converter automatic) — with the director at 60 Hz like the browser:
+`cargo run --release -p wp_audio --example engine_trace -- <car> out.csv render.json` dumps per
+frame rpm, gear, pedal, applied throttle, clutch and every engine voice's gain / pitch / synth
+frequency / load. `node apps/testbed-web/e2e/engine_render.mjs render.json out.wav` then plays
+the command stream through the testbed's **real voice pool and synths** in an
+`OfflineAudioContext` (suspending at every frame) so the actual audio could be measured.
+
+**What was wrong** (in order of impact):
+1. **Frozen engine pitch from 2nd gear (backend).** `VoicePool.set` re-automated a parameter
+   only when it moved > 0.4 % from the *previous frame* but stored every frame as "last", so a
+   slow change was never applied. In 1st gear rpm climbs > 0.4 %/frame and tracked; from 2nd
+   gear the climb is slower and the note froze at its post-shift pitch (4th gear WOT: stuck at
+   155 Hz while the crank went 4,900 → 6,300 rpm = 162 → 210 Hz). Layer gains froze the same way.
+   Fixed: compare against the last *applied* value per field.
+2. **Procedural layers cancelling each other (backend).** Every engine layer was its own synth
+   playing the same firing frequency; two coherent copies sum with a phase that depends on when
+   each voice started, so the mid↔high crossfade (4,500–5,500 rpm, where 3rd/4th spend seconds)
+   was up to 10 dB louder or quieter for the same weights. Fixed: all `engine`-synth layers and
+   the limiter of a car are one `engineInstrument` (gain `sqrt(Σ gain²)`, brightness / overrun
+   drive / noise / limiter chop blended by energy). Sample packs keep one voice per layer.
+3. **No shift note (model).** Load came from the pedal, which stays at 1 through a shift: the
+   engine dived 3,000 rpm at full volume (no dip, even a +0.9 dB bump), converter shifts were a
+   plain slur, downshift rev-matches had no blip. Now load follows the applied throttle
+   (`Telemetry::throttle`, new `VehicleAudioInput::throttle_applied`, filled by the wasm
+   bridge) and the smoothed rpm rate adds a dip (rpm falling fast under throttle) or a blip (rpm
+   rising fast with the throttle closed) for every gearbox type.
+4. **Part throttle sounded like overrun (model).** On/off layers split linearly with load: a
+   35 % cruise was 57 % off-throttle timbre. Now `on_share = smoothstep(0, 0.3, load)`.
+5. Turbo blow-off never fired on shifts (lift detection needed "> 0.5 last frame"; a clutch cut
+   ramps over several frames) — now looks back 0.15 s.
+
+Checked and **not** at fault: the rpm source (`engine_rpm` is the crank, already rev-matched in
+the neutral phase), converter slip (the rpm slurs down over the 0.3 s ratio blend), crossfade
+bands and pitch limits (each layer leads within 0.45–2.2× of its root; synth ≤ 2 kHz). No clicks
+before or after (rendered click detector: 0 on all cars).
+
+**Before / after** (rendered audio, WOT 2–30 s; "level spread" = range of rendered level minus
+the director's intended level across all gears and crossfades; pitch = worst error of the
+rendered note vs the crank rpm, 1 s samples outside shifts):
+
+| Car | Level spread before → after | Pitch error before → after | Upshift dip before → after | Clicks |
+|---|---|---|---|---|
+| debug_sedan (I4, clutch) | 5.4 → **0.5 dB** | 32 % → **0.6 %** | none (+0.9 dB bump) → **4.9 dB**, back in 0.25 s | 0 → 0 |
+| rampart_50 (V8, clutch) | 6.1 → **0.9 dB** | 29 % → **0.6 %** | none → **4.9 dB** | 0 → 0 |
+| shiro_turbo (turbo, clutch) | 8.2 → **0.5 dB** | 30 % → **0.6 %** | none → **4.5 dB** + blow-off (0/4 → 4/4 upshifts) | 0 → 0 |
+| lindwurm_4t (turbo DCT) | 3.5 → **0.4 dB** | 28 % → **0.6 %** | none → **2.3 dB** + blow-off | 0 → 0 |
+| sentinel_cruiser (converter) | 9.6 → **0.8 dB** | 32 % → **0.6 %** | rpm slur only → **2.1 dB** dip and re-rise | 0 → 0 |
+
+Also: 35 % cruise on-throttle share 0.43 → 1.0; braking downshifts blip +2.5–5 dB (sedan:
++1.9 → +2.6 dB rendered); overrun (lift at speed) stays off-load.
+
+**Regression tests:** `crates/wp_audio/tests/engine_shift.rs` (8 tests over the dumped signals
+of the five cars: finite / normal / in range, note follows crank rpm, no jumps and quiet layer
+starts/stops, dip + re-rise on every WOT upshift, blips, part throttle / overrun, every layer
+audible in its band, blow-off), engine unit tests (dip, blip, part-throttle share, NaN and
+denormal safety), and `e2e/audio.mjs` check 6 (offline render through the real voice pool: a
+0.1 %/frame rise must be heard — fails on the old pool at 120 Hz instead of 160 — and a
+two-layer crossfade must stay within 2 dB: old 5.0 dB, new 0.03 dB).
+
+## Playtest #27 — wheelspin audio (lead follow-up, 2026-10-19)
+
+Spinning driven tyres now have their own loop (`tire/spin`, slot `SPIN` = 0x202; on gravel / dirt
+/ grass `tire/spin_loose`, slot 0x203), separate from cornering squeal and braking skid.
+Model in `crates/wp_audio/src/tires.rs` (see the README): per-wheel driving slip ratio and slip
+speed (`ω·r − vx`, recovered exactly from `WheelState::slip_ratio`/`omega` and the car's wheel
+radii), weighted by load and surface, intensity and pitch rising with slip speed; the loudest
+wheel plus 35 % of the others, so both wheels spinning (LSD / locked, A's row 26) is louder than a
+one-wheel peel on an open diff — this works from `WheelState` alone, no contract change needed.
+Squeal and loose scrub now only hear braking slip and slip angle.
+
+Measured on the rig (`engine_trace --burnout`, `rampart_50`, TCS off): standstill burnout (rears
+at κ ≈ 3–6, 50 rad/s, car held by the brakes) — spin 0.41–0.46, pitch 1.2 → 1.5, squeal 0
+(before: squeal 0.42, no spin sound); launch — spin while the rears spin up to 9 km/h, gone
+≈ 0.2 s after they hook up; 2nd-gear pull and 30 % cruise — silent. Offline render (all buses):
+0 clicks. FWD `debug_sedan` barely spins with TCS off (max 0.06). Tests: `tests/wheelspin.rs`
+and four `tires` unit tests (slip-speed inversion, burnout loud / gripping launch silent, slip
+speed and two-vs-one wheel, wet / gravel).
+
+**Seen while testing (for A / lead `playtest-feel`, not audio):** with TCS off the automatic
+gearbox hunts 1 ↔ 2 several times during a burnout and a wheelspin launch (limiter-forced
+upshift, then a downshift as the wheels hook up), e.g. `rampart_50` from 0 to 50 km/h.
+
 ## Perf numbers
 | Measurement | Machine | Native | Browser | Budget |
 |---|---|---|---|---|
@@ -156,6 +246,7 @@ https://code.claude.com/docs/en/cloud-environments#network-access.
 - Contact material comes from the lattice (A-1); glass shatters on inferred glass contacts, not
   from a damage event (B #1 pending).
 - Scrapes are thin until A-4: sliding contacts under 50 N·s per tick emit no events.
+- Wheelspin on a networked client depends on replicated `WheelState` slip (snapshots carry it).
 - No occlusion by buildings, no tunnel/underpass reverb, no interior camera filtering.
 - Kinematic traffic is silent (needs D #3 snapshot); police AI does not switch sirens on yet
   (no police system).

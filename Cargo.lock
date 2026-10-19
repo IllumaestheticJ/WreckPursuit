@@ -4218,6 +4218,7 @@ dependencies = [
  "wp_math",
  "wp_police",
  "wp_sim",
+ "wp_vehicle",
 ]
 
 [[package]]
