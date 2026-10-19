@@ -1,0 +1,9 @@
+{
+  "id": "paint",
+  "mods": [
+    {"id": "paint_gloss", "name": "Gloss Paint", "slot": "Paint", "line": "paint", "tier": 1, "price": 400, "effects": [{"Cosmetic": {"kind": "Paint", "value": "gloss"}}], "tradeoff": "Cosmetic."},
+    {"id": "paint_metallic", "name": "Metallic Paint", "slot": "Paint", "line": "paint", "tier": 2, "price": 600, "effects": [{"Cosmetic": {"kind": "Paint", "value": "metallic"}}], "tradeoff": "Cosmetic."},
+    {"id": "paint_matte", "name": "Matte Paint", "slot": "Paint", "line": "paint", "tier": 3, "price": 700, "effects": [{"Cosmetic": {"kind": "Paint", "value": "matte"}}], "tradeoff": "Cosmetic."},
+    {"id": "paint_pearl", "name": "Pearlescent Paint", "slot": "Paint", "line": "paint", "tier": 4, "price": 1200, "effects": [{"Cosmetic": {"kind": "Paint", "value": "pearl"}}], "tradeoff": "Cosmetic; expensive to match after a crash (flavour)."}
+  ]
+}

@@ -1,0 +1,74 @@
+# Car market, valuation, economy floor and the class (performance) index. Owned by workstream 08.
+
+starting_cash = 4000
+dealer_buy_frac = 0.7          # dealer pays 70% of base price (× condition) when you sell
+mod_resale_frac = 0.4          # removing / selling a mod returns 40% of its price
+mod_value_frac = 0.5           # installed mods add 50% of their price to the car's value
+damaged_value_floor = 0.25     # a damaged (not totalled) car is worth at least 25% of pristine
+
+# Dealer prices are base_price × condition, clamped into the class band.
+[class_bands]
+Beater = [1500, 6000]
+Compact = [9000, 30000]
+Sport = [25000, 70000]
+Muscle = [22000, 60000]
+Exotic = [90000, 320000]
+Truck = [15000, 50000]
+PoliceCruiser = [20000, 45000]
+PoliceInterceptor = [35000, 80000]
+PoliceSuv = [30000, 65000]
+
+[condition]
+New = 1.0
+Used = 0.8
+Worn = 0.6
+
+# Economy floor: a player with no usable car can always get this beater for its price or all
+# the cash they have, whichever is lower. The car file comes from the roster (prompt 09).
+[floor_car]
+def_id = "junkyard_beater"
+class = "Beater"
+base_price = 3000
+price = 1500
+
+# PI = base + per_w_per_kg × P/m + per_lateral_g × (lat_g - 1) + per_brake_g × (brake_g - 1)
+[class_index]
+base = 100.0
+per_w_per_kg = 2.2
+per_lateral_g = 250.0
+per_brake_g = 80.0
+min = 100
+max = 999
+
+[[class_index.brackets]]
+name = "D"
+min = 100
+
+[[class_index.brackets]]
+name = "C"
+min = 300
+
+[[class_index.brackets]]
+name = "B"
+min = 450
+
+[[class_index.brackets]]
+name = "A"
+min = 600
+
+[[class_index.brackets]]
+name = "S"
+min = 750
+
+[[class_index.brackets]]
+name = "X"
+min = 900
+
+# Grip factor per tire id (street = 1.0). Tire files for the non-street compounds are requested
+# from workstream 02 (see docs/integration/economy.md).
+[tire_grip]
+street = 1.0
+sport = 1.08
+semi_slick = 1.18
+drag_radial = 1.03
+all_terrain = 0.92

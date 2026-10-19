@@ -1,0 +1,12 @@
+{
+  "id": "electronics",
+  "mods": [
+    {"id": "elec_radar_1", "name": "Radar Detector", "slot": "Electronics", "line": "radar", "tier": 1, "price": 1200, "effects": [{"Tool": {"kind": "RadarDetector", "tier": 1}}], "tradeoff": "Short range; false alerts (flavour)."},
+    {"id": "elec_radar_2", "name": "Long-range Radar Detector", "slot": "Electronics", "line": "radar", "tier": 2, "price": 2800, "effects": [{"Tool": {"kind": "RadarDetector", "tier": 2}}], "tradeoff": "Illegal in the city: a legit shop notices it (flavour)."},
+    {"id": "elec_scanner_1", "name": "Police Scanner", "slot": "Electronics", "line": "scanner", "tier": 1, "price": 1500, "effects": [{"Tool": {"kind": "Scanner", "tier": 1}}], "tradeoff": "Radio lines arrive late."},
+    {"id": "elec_scanner_2", "name": "Decrypting Scanner", "slot": "Electronics", "line": "scanner", "tier": 2, "price": 3500, "requires": ["elec_radar_1"], "effects": [{"Tool": {"kind": "Scanner", "tier": 2}}], "tradeoff": "Needs a radar detector wired in."},
+    {"id": "elec_fake_plates", "name": "Fake Plates", "slot": "Electronics", "line": "plates", "tier": 1, "price": 2500, "effects": [{"Tool": {"kind": "FakePlates", "tier": 1}}], "tradeoff": "Seen violations still count in full."},
+    {"id": "elec_nitrous_1", "name": "Nitrous Kit", "slot": "Electronics", "line": "nitrous", "tier": 1, "price": 3000, "requires": ["engine_fuel_system"], "modes": ["Arcade"], "effects": [{"Tool": {"kind": "Nitrous", "tier": 1}}, {"Vehicle": {"param": "body.mass_kg", "op": "Add", "value": 12.0}}], "tradeoff": "Arcade only. +12 kg; engine damage risk when used hot."},
+    {"id": "elec_nitrous_2", "name": "Direct-port Nitrous", "slot": "Electronics", "line": "nitrous", "tier": 2, "price": 6000, "requires": ["engine_fuel_system", "engine_internals_1"], "modes": ["Arcade"], "effects": [{"Tool": {"kind": "Nitrous", "tier": 2}}, {"Vehicle": {"param": "body.mass_kg", "op": "Add", "value": 16.0}}], "tradeoff": "Arcade only. +16 kg; bigger engine damage risk."}
+  ]
+}

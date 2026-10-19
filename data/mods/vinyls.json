@@ -1,0 +1,9 @@
+{
+  "id": "vinyls",
+  "mods": [
+    {"id": "vinyl_stripes", "name": "Racing Stripes", "slot": "Vinyls", "line": "vinyl", "tier": 1, "price": 300, "effects": [{"Cosmetic": {"kind": "Vinyl", "value": "stripes"}}], "tradeoff": "Cosmetic; makes the car easier to describe to the police (flavour)."},
+    {"id": "vinyl_flames", "name": "Flames", "slot": "Vinyls", "line": "vinyl", "tier": 2, "price": 500, "effects": [{"Cosmetic": {"kind": "Vinyl", "value": "flames"}}], "tradeoff": "Cosmetic."},
+    {"id": "vinyl_tribal", "name": "Tribal", "slot": "Vinyls", "line": "vinyl", "tier": 3, "price": 500, "effects": [{"Cosmetic": {"kind": "Vinyl", "value": "tribal"}}], "tradeoff": "Cosmetic."},
+    {"id": "vinyl_sponsor", "name": "Fake Sponsor Livery", "slot": "Vinyls", "line": "vinyl", "tier": 4, "price": 800, "effects": [{"Cosmetic": {"kind": "Vinyl", "value": "sponsor_generic"}}], "tradeoff": "Cosmetic; invented sponsors only."}
+  ]
+}
