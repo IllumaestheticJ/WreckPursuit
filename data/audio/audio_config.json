@@ -40,7 +40,13 @@
     "pop_rate_per_s": 1.5,
     "pop_min_redline_frac": 0.55,
     "forced_induction_gain": 0.22,
-    "traffic_gain": 0.6
+    "traffic_gain": 0.6,
+    "on_full_load": 0.3,
+    "rpm_rate_tau_s": 0.03,
+    "shift_rate_onset_rpm_s": 3000.0,
+    "shift_rate_full_rpm_s": 7000.0,
+    "shift_dip_depth": 0.6,
+    "blip_load": 0.8
   },
   "tires": {
     "slip_ratio_peak": 0.1,

@@ -183,6 +183,19 @@ pub struct EngineMix {
     pub forced_induction_gain: f32,
     /// Engine gain multiplier for physical traffic (`DriverKind::Traffic`).
     pub traffic_gain: f32,
+    /// Load (0..1, above `min_load`) at which the on-throttle layers fully take over from the
+    /// off-throttle ones (smoothstep from 0). Part throttle above this sounds "on", not overrun.
+    pub on_full_load: f32,
+    /// Smoothing time constant of the rpm rate used for shift cues, s.
+    pub rpm_rate_tau_s: f32,
+    /// |rpm rate| where a shift cue starts, rpm/s (WOT pulls in 1st reach ~3,500 rpm/s).
+    pub shift_rate_onset_rpm_s: f32,
+    /// |rpm rate| where a shift cue is full, rpm/s.
+    pub shift_rate_full_rpm_s: f32,
+    /// Upshift note: rpm falling fast under throttle cuts the load by up to this fraction.
+    pub shift_dip_depth: f32,
+    /// Downshift blip: rpm rising fast with the throttle closed raises the load to this.
+    pub blip_load: f32,
 }
 
 /// Tire, surface and suspension tuning.

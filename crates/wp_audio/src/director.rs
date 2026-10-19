@@ -12,7 +12,9 @@ use wp_police::PoliceEvent;
 
 use crate::collision::{impact_gain, impact_layers, pair_key, ImpactLayer, MaterialMap, PairState};
 use crate::data::{cues, AudioLibrary, CarAudioDef};
-use crate::engine::{engine_synth, update_engine, EngineAudioState, EngineLayers, EngineLimits};
+use crate::engine::{
+    engine_synth, update_engine, EngineAudioState, EngineInput, EngineLayers, EngineLimits,
+};
 use crate::mixer::{CueRef, CueTable, Desire, MixerStats, VoiceMixer};
 use crate::scanner::{RadioLine, RadioPriority, Scanner, ScannerTier};
 use crate::siren::{update_siren, SirenMode, SirenPattern, SirenState};
@@ -57,6 +59,11 @@ pub struct VehicleAudioInput<'a> {
     pub state: &'a VehicleState,
     /// Throttle the vehicle received, 0..=1 (`VehicleInput::throttle` after assists if known).
     pub throttle: f32,
+    /// Throttle actually reaching the engine (`wp_vehicle::Telemetry::throttle`: after the
+    /// pedal filter, TCS and the gearbox's shift cut / blip), if the caller has it. The engine
+    /// sound uses it for load so shift dips, TCS cuts and rev-match blips are heard; `None`
+    /// falls back to `throttle`.
+    pub throttle_applied: Option<f32>,
     /// Horn held (`VehicleInput::horn`).
     pub horn: bool,
     /// Siren requested (`VehicleInput::siren`).
@@ -437,8 +444,11 @@ impl AudioDirector {
                 &car.def.engine,
                 car.limits,
                 &car.layers,
-                s.engine_rpm,
-                v.throttle,
+                EngineInput {
+                    rpm: s.engine_rpm,
+                    pedal: v.throttle,
+                    applied: v.throttle_applied.unwrap_or(v.throttle),
+                },
                 dt,
                 &mut self.rng,
             );
