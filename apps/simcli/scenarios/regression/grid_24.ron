@@ -1,0 +1,42 @@
+// Regression: 24 cars (12 sedans, 12 coupes) in a grid, mixed inputs and assists. Exercises
+// entity ordering in the state hash and the net snapshot round trip with many vehicles.
+(
+    name: "regression_grid_24",
+    seed: 24,
+    mode: Simulation,
+    entities: [
+        (id: "s0",  car: "debug_sedan", pos: (0.0, 0.0, 0.0),   assists: ai,       inputs: [(t_s: 0.0, input: (throttle: 1.0))]),
+        (id: "s1",  car: "debug_sedan", pos: (6.0, 0.0, 0.0),   assists: keyboard, inputs: [(t_s: 0.0, input: (throttle: 0.8, steer: 0.1))]),
+        (id: "s2",  car: "debug_sedan", pos: (12.0, 0.0, 0.0),  assists: gamepad,  inputs: [(t_s: 0.0, input: (throttle: 0.6, steer: -0.1))]),
+        (id: "s3",  car: "debug_sedan", pos: (18.0, 0.0, 0.0),  assists: wheel,    inputs: [(t_s: 0.0, input: (throttle: 0.4)), (t_s: 2.0, input: (brake: 0.5))]),
+        (id: "s4",  car: "debug_sedan", pos: (24.0, 0.0, 0.0),  assists: off,      inputs: [(t_s: 0.0, input: (throttle: 1.0, steer: 0.5))]),
+        (id: "s5",  car: "debug_sedan", pos: (30.0, 0.0, 0.0),  assists: ai,       inputs: [(t_s: 0.0, input: (throttle: 0.2, handbrake: 1.0))]),
+        (id: "s6",  car: "debug_sedan", pos: (0.0, 10.0, 0.0),  assists: ai,       inputs: [(t_s: 0.0, input: (throttle: 1.0)), (t_s: 3.0, input: (steer: 1.0, throttle: 0.5))]),
+        (id: "s7",  car: "debug_sedan", pos: (6.0, 10.0, 0.0),  assists: keyboard, inputs: [(t_s: 0.5, input: (throttle: 0.9))]),
+        (id: "s8",  car: "debug_sedan", pos: (12.0, 10.0, 0.0), assists: gamepad,  inputs: [(t_s: 1.0, input: (throttle: 0.7, steer: 0.3))]),
+        (id: "s9",  car: "debug_sedan", pos: (18.0, 10.0, 0.0), assists: wheel,    inputs: [(t_s: 0.0, input: (throttle: 1.0, gear_up: true))]),
+        (id: "s10", car: "debug_sedan", pos: (24.0, 10.0, 0.0), assists: off,      inputs: [(t_s: 0.0, input: (brake: 1.0))]),
+        (id: "s11", car: "debug_sedan", pos: (30.0, 10.0, 0.0), assists: ai,       inputs: [(t_s: 0.0, input: (throttle: 0.3, steer: -0.6))]),
+        (id: "c0",  car: "debug_coupe", pos: (0.0, 20.0, 0.0),  yaw: 3.14159, assists: ai,       inputs: [(t_s: 0.0, input: (throttle: 1.0))]),
+        (id: "c1",  car: "debug_coupe", pos: (6.0, 20.0, 0.0),  yaw: 3.14159, assists: keyboard, inputs: [(t_s: 0.0, input: (throttle: 0.8, steer: 0.1))]),
+        (id: "c2",  car: "debug_coupe", pos: (12.0, 20.0, 0.0), yaw: 3.14159, assists: gamepad,  inputs: [(t_s: 0.0, input: (throttle: 0.6, steer: -0.1))]),
+        (id: "c3",  car: "debug_coupe", pos: (18.0, 20.0, 0.0), yaw: 3.14159, assists: wheel,    inputs: [(t_s: 0.0, input: (throttle: 0.4)), (t_s: 2.0, input: (brake: 0.5))]),
+        (id: "c4",  car: "debug_coupe", pos: (24.0, 20.0, 0.0), yaw: 3.14159, assists: off,      inputs: [(t_s: 0.0, input: (throttle: 1.0, steer: 0.5))]),
+        (id: "c5",  car: "debug_coupe", pos: (30.0, 20.0, 0.0), yaw: 3.14159, assists: ai,       inputs: [(t_s: 0.0, input: (throttle: 0.2, handbrake: 1.0))]),
+        (id: "c6",  car: "debug_coupe", pos: (0.0, 30.0, 0.0),  yaw: 1.5708,  assists: ai,       inputs: [(t_s: 0.0, input: (throttle: 1.0)), (t_s: 3.0, input: (steer: 1.0, throttle: 0.5))]),
+        (id: "c7",  car: "debug_coupe", pos: (6.0, 30.0, 0.0),  yaw: 1.5708,  assists: keyboard, inputs: [(t_s: 0.5, input: (throttle: 0.9))]),
+        (id: "c8",  car: "debug_coupe", pos: (12.0, 30.0, 0.0), yaw: 1.5708,  assists: gamepad,  inputs: [(t_s: 1.0, input: (throttle: 0.7, steer: 0.3))]),
+        (id: "c9",  car: "debug_coupe", pos: (18.0, 30.0, 0.0), yaw: 1.5708,  assists: wheel,    inputs: [(t_s: 0.0, input: (throttle: 1.0, gear_up: true))]),
+        (id: "c10", car: "debug_coupe", pos: (24.0, 30.0, 0.0), yaw: 1.5708,  assists: off,      inputs: [(t_s: 0.0, input: (brake: 1.0))]),
+        (id: "c11", car: "debug_coupe", pos: (30.0, 30.0, 0.0), yaw: 1.5708,  assists: ai,       inputs: [(t_s: 0.0, input: (throttle: 0.3, steer: -0.6))]),
+    ],
+    duration_s: 6.0,
+    hash_every: 120,
+    expect: [
+        metric(entity: "s0", name: "max_speed_mps", min: 5.0, max: 60.0),
+        // Brake from rest never drives forward. Cars are rigid bodies now and c11 starts
+        // behind c10, so c10 may be nudged: allow a small bump, not a drive-off.
+        metric(entity: "c10", name: "max_speed_mps", min: 0.0, max: 2.0),
+        event_count(event: "TotalLoss", min: 0, max: 0),
+    ],
+)

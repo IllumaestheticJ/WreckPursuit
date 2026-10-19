@@ -1,0 +1,21 @@
+{
+  "fingerprint": {
+    "runner_class": "claude-cloud",
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "cores": 4,
+    "platform": "linux-x86_64",
+    "rustc": "rustc 1.97.0 (2d8144b78 2026-07-07)",
+    "commit": "ca9b0fe",
+    "date": "2026-10-19"
+  },
+  "benches": {
+    "city/24v_400traffic": 4452.508055420408,
+    "lattice/solver_8_contacts": 0.8110544772590794,
+    "sim_only/1": 490.3792094225045,
+    "sim_only/24": 4566.424403089888,
+    "sim_only/64": 12925.381078098202,
+    "sim_only/8": 1647.144799965733,
+    "snapshot/decode_24": 49878.44032921811,
+    "snapshot/encode_24": 30362.4191370224
+  }
+}

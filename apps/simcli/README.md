@@ -1,18 +1,65 @@
 # simcli
 
-**Owned by workstream 10 (test harness & CI).**
+**Owned by workstream 10 (test harness & CI).** Headless scenario runner, determinism suite,
+golden hash/replay regression and fuzz/soak for the whole simulation. Scenario format:
+[`SCENARIOS.md`](SCENARIOS.md). How workstreams use it: [`docs/TESTING.md`](../../docs/TESTING.md).
 
-Headless scenario runner. `just sim <file.ron>` or `cargo run -p simcli -- <file.ron> [--data data]` prints `state_hash <hex>` and a JSON summary; exits 1 if an `expect` range fails.
+## Commands
 
-Scenario format (`scenarios/**/*.ron`): `name`, `car`, `mode` (`Arcade`|`Simulation`), `seed`, `duration_s`, optional `time_of_day_h`, `inputs: [(t_s, input: (VehicleInput fields…))]` (held until the next key), `expect: [(metric, min, max)]`. Metrics: `final_speed_mps`, `max_speed_mps`, `distance_m`, `final_health`.
+```sh
+cargo run -p simcli -- run apps/simcli/scenarios                  # all scenarios → out/<name>/*
+cargo run -p simcli -- run X.ron --systems vehicle,world          # exclude stub systems
+cargo run -p simcli -- run X.ron --compare apps/simcli/golden/<name>/hashes.txt
+cargo run -p simcli -- run X.ron --bless                          # regenerate X's goldens
+cargo run -p simcli -- goldens [--bless]                          # check / bless every golden
+cargo run -p simcli -- replay apps/simcli/golden/golden_tbone.replay.bin   # divergence report
+cargo run -p simcli -- determinism apps/simcli/scenarios          # 2× in-process + fresh process
+cargo run -p simcli -- hashes X.ron                               # hashes.txt to stdout
+cargo run -p simcli -- --fuzz --minutes 5 [--seed S]              # soak; repro → out/fuzz/*.ron
+cargo run -p simcli -- bundle > bundle.json                       # data root for the WASM runner
+```
 
-`tests/scenarios.rs` runs every scenario twice: expectations must pass and hashes must match.
+`simcli <file.ron>` without a subcommand means `run`. `--data DIR` picks the data root (default
+`./data`, else the repo's). Exit codes: 0 pass, 1 expectation/golden/determinism/fuzz failure,
+2 usage or load error. Use `--release` for anything long (fuzz, soak, many scenarios).
 
-## Known gaps
-- Single car per scenario; no outputs written to `out/`; no golden hashes yet (prompt 10).
+## Layout
+
+| path | what |
+|---|---|
+| `src/scenario.rs` | scenario types, parsing, validation |
+| `src/run.rs` | runner: drivers, metrics, events, hashes, net round trip, expectations |
+| `src/replay.rs` | `replay.bin` format (documented in the module) + verifier / diff report |
+| `src/golden.rs` | golden hashes/replays, compare, bless (+ `[bless]` CI guard) |
+| `src/determinism.rs` | in-process repeat check |
+| `src/fuzz.rs` | random cases + invariants (NaN, node bounds, below ground, event floods) |
+| `src/data.rs` | one loader path for disk and in-memory (WASM) data |
+| `scenarios/` | scenario library (`smoke/`, `regression/`, `golden/`) |
+| `golden/` | `<name>/hashes.txt` for every scenario, `<name>.replay.bin` for `scenarios/golden/*` |
 
 ## Tests
 
 ```sh
 cargo test -p simcli
 ```
+
+Runs every scenario (expectations + in-process determinism), the fresh-process check, golden
+comparison, output files, `--compare`, replay divergence reporting, the CI bless guard and a short
+fuzz. `cargo test --workspace` therefore fails when a change alters any golden.
+
+## Perf (harness overhead)
+
+All 10 library scenarios (≈ 21 000 ticks, up to 24 stub cars) run in ≈ 0.14 s release without
+recording on the cloud container (Xeon 2.1 GHz). Fuzz: ≈ 20 simulated seconds × up to 16 cars per case; see
+`docs/PERF.md` for sim numbers.
+
+## Known gaps
+
+- Vehicles are not Rapier bodies yet (`wp_sim`), so crash/T-bone/spike goldens only check the
+  approach; their physics targets sit in `expect_pending` until prompts 02/03/06/12 land.
+- `procedural`/`file` cities, traffic/police overrides, `follow_route` and `ai_driver` warn and
+  fall back (need prompts 05/06 APIs).
+- `pursuit_started_before` uses a provisional police kind code (`PURSUIT_STARTED_KIND = 1`)
+  until `wp_police` exports one.
+- Golden replays are recorded from scripted scenarios; the testbed (prompt 04) should record
+  real-driver replays in the same format (`src/replay.rs`).
