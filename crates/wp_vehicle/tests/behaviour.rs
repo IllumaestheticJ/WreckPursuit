@@ -533,3 +533,138 @@ fn snapshot_covers_converter_and_awd_state() {
     );
     assert_eq!(again.state(), truth);
 }
+
+fn brake_from(c: &LoadedCar, speed: f32, cond: wp_vehicle::SurfaceConditions) -> f32 {
+    let mut rig = Rig::new(c);
+    rig.vehicle.set_surface_conditions([cond; 4]);
+    rig.teleport([0.0; 3], 0.0, speed, 0.0);
+    // Furthest point reached (holding the brake at a standstill engages auto-reverse).
+    let mut furthest = 0.0f32;
+    for _ in 0..(240 * 10) {
+        rig.step(
+            &VehicleInput {
+                brake: 1.0,
+                ..Default::default()
+            },
+            &metric_assists(),
+        );
+        furthest = furthest.max(rig.state().pos[1]);
+    }
+    furthest
+}
+
+#[test]
+fn surface_conditions_wet_ice_and_dry_default() {
+    use wp_vehicle::SurfaceConditions;
+    let c = car("debug_sedan");
+    let dry = brake_from(&c, 20.0, SurfaceConditions::default());
+    let wet = brake_from(
+        &c,
+        20.0,
+        SurfaceConditions {
+            water_depth_mm: 0.6,
+            ..SurfaceConditions::DRY
+        },
+    );
+    let ice = brake_from(
+        &c,
+        20.0,
+        SurfaceConditions {
+            water_depth_mm: 0.6,
+            temperature_c: -4.0,
+            ..SurfaceConditions::DRY
+        },
+    );
+    // street tire: wet grip 0.7 × dry → ~1.4× the distance (ABS on).
+    assert!((1.2 * dry..1.7 * dry).contains(&wet), "dry {dry} wet {wet}");
+    assert!(ice > 4.0 * dry, "dry {dry} ice {ice}");
+    // Explicit dry conditions are bit-identical to never setting them.
+    let mut a = Rig::new(&c);
+    let mut b = Rig::new(&c);
+    b.vehicle
+        .set_surface_conditions([SurfaceConditions::DRY; 4]);
+    for _ in 0..480 {
+        a.step(&throttle(1.0), &metric_assists());
+        b.step(&throttle(1.0), &metric_assists());
+    }
+    assert_eq!(a.state_hash(), b.state_hash());
+}
+
+#[test]
+fn aquaplaning_in_standing_water_at_speed() {
+    use wp_vehicle::SurfaceConditions;
+    let c = car("debug_sedan");
+    let puddle = SurfaceConditions {
+        water_depth_mm: 5.0,
+        ..SurfaceConditions::DRY
+    };
+    // At 40 m/s in 5 mm of water the tires ride on the water: a steering input barely turns
+    // the car, while the same input on a merely wet road does.
+    let yaw_after = |cond: SurfaceConditions| {
+        let mut rig = Rig::new(&c);
+        rig.vehicle.set_surface_conditions([cond; 4]);
+        rig.teleport([0.0; 3], 0.0, 40.0, 0.0);
+        let mut planing = 0.0f32;
+        for _ in 0..240 {
+            rig.step(
+                &VehicleInput {
+                    steer: -0.3,
+                    ..Default::default()
+                },
+                &metric_assists(),
+            );
+            planing = planing.max(rig.vehicle.telemetry().aquaplane[0]);
+        }
+        (rig.state().lin_vel[0].abs(), planing)
+    };
+    let (lat_wet, p_wet) = yaw_after(SurfaceConditions {
+        water_depth_mm: 0.6,
+        ..SurfaceConditions::DRY
+    });
+    let (lat_puddle, p_puddle) = yaw_after(puddle);
+    assert_eq!(p_wet, 0.0);
+    assert!(p_puddle > 0.8, "planing {p_puddle}");
+    assert!(
+        lat_puddle < 0.5 * lat_wet,
+        "wet {lat_wet} puddle {lat_puddle}"
+    );
+    // Slow through the same puddle: no planing.
+    let mut rig = Rig::new(&c);
+    rig.vehicle.set_surface_conditions([puddle; 4]);
+    rig.teleport([0.0; 3], 0.0, 12.0, 0.0);
+    run(&mut rig, throttle(0.2), &metric_assists(), 1.0);
+    assert_eq!(rig.vehicle.telemetry().aquaplane, [0.0; 4]);
+}
+
+#[test]
+fn converter_automatic_shifts_under_power() {
+    // Through every upshift of a full-throttle run the converter car keeps pulling (no torque
+    // hole), while the same car with a clutch gearbox coasts during its shifts.
+    let min_accel = |c: &LoadedCar| {
+        let mut rig = Rig::new(c);
+        let a = metric_assists();
+        let (mut min_acc, mut shifts, mut gear, mut v_prev) = (f32::MAX, 0, 1, 0.0);
+        for tick in 0..(240 * 14) {
+            rig.step(&throttle(1.0), &a);
+            let v = rig.state().speed_mps;
+            if rig.vehicle.gear() != gear {
+                shifts += 1;
+                gear = rig.vehicle.gear();
+            }
+            if tick > 120 {
+                min_acc = min_acc.min((v - v_prev) * 240.0);
+            }
+            v_prev = v;
+        }
+        (min_acc, shifts)
+    };
+    let (acc_conv, shifts) = min_accel(&converter_sedan());
+    let (acc_clutch, _) = min_accel(&car("debug_sedan"));
+    eprintln!("min accel: converter {acc_conv}, clutch {acc_clutch}; upshifts {shifts}");
+    assert!(shifts >= 2, "upshifts {shifts}");
+    assert!(acc_conv > 0.3, "converter car min accel {acc_conv} m/s²");
+    assert!(
+        acc_clutch < 0.0,
+        "clutch car coasts while shifting: {acc_clutch}"
+    );
+}

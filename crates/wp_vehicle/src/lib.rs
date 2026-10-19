@@ -17,6 +17,8 @@
 //!   cut, kickdown, auto-reverse), open/LSD/locked diffs, AWD split, handbrake declutch.
 //!   Wheel spin is integrated semi-implicitly against tire slip stiffness, 2 sub-steps per
 //!   tick ([`wp_contracts::VEHICLE_SUBSTEPS`]).
+//! - **Road conditions** per wheel ([`surface::SurfaceConditions`]: water depth, road
+//!   temperature, painted line) for wet grip, ice and aquaplaning — the weather hook.
 //! - **Brakes** with bias and ABS, **steering** with speed sensitivity, Ackermann, toe,
 //!   countersteer help and FWD torque steer, **assists** (filters, TCS, ESC), **aero**,
 //!   **FFB**, and full [`wp_contracts::HandlingEffects`] damage feedback.
@@ -48,6 +50,7 @@ pub mod metrics;
 pub mod rig;
 pub mod snapshot;
 pub mod steering;
+pub mod surface;
 pub mod suspension;
 pub mod tire;
 pub mod vehicle;
@@ -58,6 +61,7 @@ pub use body::VehicleBody;
 pub use engine::EngineExtras;
 pub use ground::{ContractGround, FlatGround, GroundHit, RapierGround, WheelCaster};
 pub use snapshot::{SnapshotError, VehicleSnapshot};
+pub use surface::{SurfaceConditions, TireWetProfile};
 pub use tire::TireForces;
 pub use vehicle::{Chassis, Telemetry, Vehicle, VehicleExtras};
 pub use wp_contracts::AssistProfile;
