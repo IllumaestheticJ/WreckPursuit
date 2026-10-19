@@ -96,6 +96,13 @@ Port Vesper Hollins sprint). Every previously parked test is restored; the obser
 with police on again. Full gate green. In progress: `lead/demo-endrun` (capture/escape → money,
 results screen, sirens follow pursuit), the last lead item of the greybox demo.
 
+## Round 11 (2026-10-19)
+Merged `lead/demo-endrun`: capture or a wreck holds the car and opens the result panel (fine,
+bail, impound fee, repair quote, cash before → after, ledger lines); **Repair & continue** pays and
+restores the car; escape pays the bounty; sirens and light bars follow each unit's assignment.
+The greybox demo loop from `docs/design/DEMO_GREYBOX.md` is complete on the link; next is the
+owner's playtest (`docs/design/PLAYTEST.md`).
+
 ## Next (toward the single-player greybox demo)
 C draws police/traffic + city-chase preset; M wires the heat HUD and repair bill; E/D share
 roads and controller; G + lead wire capture/escape → economy.
