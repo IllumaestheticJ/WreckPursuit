@@ -30,6 +30,11 @@
   - **`set_obstacles(&[ObstacleView])`** (round 6): every vehicle units must not drive into, once per
     tick before `unit_input`. `ObstacleView::car(entity, pos, vel, forward)` builds a car-sized one.
     Units follow, wait behind or pass them, and spawn clear of them (`wp_police::avoid`).
+- **Assaulting an officer** (playtest row 24): a `SimEvent::Contact` between a racer and a bound
+  unit's entity that passes `[heat.assault]` in `data/police/heat.toml` raises heat to ≥ L2 and
+  starts the pursuit in the same `step` (events: `WantedLevelChanged`, `PursuitStarted { unit }`,
+  `Radio` "Unit N: I've been hit! … assault on an officer."). `stats().assaults` counts them.
+  Nothing new is needed from `wp_sim`: it already passes contacts and binds unit entities.
 - Unit lifecycle events: `UnitSpawned` / `UnitDespawned`.
 - Queries: `wanted_level`, `racer`, `units`, `incidents`, `pool_count`, `tire_puncture(entity) -> [f32; 4]`,
   `static_colliders()`, `spike_strips()`, `roadblocks()`, `helicopters()`, `now() -> SimTime`, `state_hash()`, `stats()`.
@@ -63,6 +68,9 @@
 ## Needs
 | From | What | Workaround now |
 |---|---|---|
+| Harness (I) | A negative police expectation for simcli, e.g. `no_pursuit_before(t_s)` (or `pursuit_started_before` with `expected: false`), so a 5 km/h parking-bump city scenario can assert "no pursuit" (row 24) | Covered by `wp_sim/tests/police_assault.rs` and `crates/wp_police/scenarios/parking_bump.ron` |
+| Lead (`wp_wasm`) | A captured / wrecked car is held with brake 1.0. At a standstill that engages `wp_vehicle`'s auto-reverse (brake > 0.5 for 0.25 s), and in reverse the pedals swap, so a held car can drive itself backwards. Hold with brake 0.4 + handbrake, as police units do. Found via the capture test above, where it is masked because the racer is pinned against the police car | — |
+| ui-kit / lead (`wp_wasm`) | Optional: the HUD banner sub-line could say why a pursuit started ("assault on an officer"); `police_status()` would need the last offence. The PURSUIT banner and the radio line in the event feed already show it | — |
 | Harness (I) | Promote the `soak/traffic_soak_observer` gate: it now runs with `police_cars: true` and meets its pending `civilian_collisions = 0` (round 8) | — |
 | Economy (G) | Remove `#[ignore]` from `wp_economy/tests/session.rs::live_police_run_settles_like_the_recording`: it passes with `--ignored` since round 8 (see "Response to round 8"). Re-record the fixtures if you want them from today's police | Test still ignored |
 | Specsheet (H) | `tools/specsheet/ram_probe` hard-codes `DISENGAGE_HEALTH = 0.4`; it is now per mode (Arcade 0.15, Simulation 0.4) | Its "off" column is wrong for Arcade |
@@ -130,6 +138,18 @@ The reply is `Result<(), CaptainError>` with:
 - `Site(SiteError { NoSite, NotOnPath, BlindCorner, Highway })`.
 
 ## Changes outside my crates
+- **Playtest row 24** (this round):
+  - `crates/wp_sim/tests/police_assault.rs`: new test file only (no `wp_sim` code changed; the
+    contact → `on_contact` → unit-entity path already worked).
+  - `apps/simcli/scenarios/police/sideswipe_patrol_{day,night}.ron`: new city scenarios, with
+    their goldens in `apps/simcli/golden/` (`[bless]` commit).
+  - `crates/wp_wasm/src/run_tests.rs` (lead's): `capture_bills_holds_the_car_and_repair_continue_restores_it`
+    asserted the capture at exactly L2. Its "parked" racer holds full brake, which at a standstill
+    engages `wp_vehicle`'s auto-reverse, so it backs into the police car at about 27 km/h (6,800 N·s):
+    now an assault, L3. The assertion is `>= L2` with a comment; nothing else changed.
+  - `apps/simcli/golden/race_city_sprint/` re-blessed: at 15.2 s the coupe, already pursued for
+    speeding, rams police unit 3 (8,600 N·s, 8.7 m/s). That is now an assault (L1 → L2), so the
+    hashes change from tick 3840. Its expectations still pass.
 - **`apps/simcli/scenarios/soak/traffic_soak_observer.ron`** (round 8, at the lead's request):
   `police_cars: true` and its comment. Nothing else changed.
 - **`apps/simcli/examples/police_traffic_contacts.rs`** (round 6): new measurement example
@@ -151,6 +171,11 @@ The reply is `Result<(), CaptainError>` with:
 | `PoliceSystem::step` per 60 Hz frame, 13 patrols + reinforcements, 4 wanted racers, D's small city with exact building LOS, obstacle awareness on (`police_bench`) | Cloud Xeon 2.1 GHz, release | 0.074 ms (0.055 before round 6) | not measured | 0.5 ms / 1.0 ms |
 
 ## Known gaps
+- Assault isn't judged by fault: a moving racer that a patrol car drives into (rare with obstacle
+  awareness) also counts; overflow kinematic units in `wp_sim` (beyond the physical slots) can't
+  be hit, and the headless proximity stand-in never counts as an assault.
+- `presence.toml` unlocks spikes at L2 (`spikes_level = 2`); the doctrine table says L3+. Unchanged
+  here (it would move goldens); flagging it for a tuning pass.
 - The headless kinematic body and traffic-hazard model stand in until units are physical (12).
   It runs wide more often on D's ring road and diagonals, mostly at low speed: the self-wreck
   rate is 0% over 20 Simulation pursuits.
@@ -160,6 +185,52 @@ The reply is `Result<(), CaptainError>` with:
 - In the police-on soak two police cars touch at 4.5 m/s right after spawn (t = 3.9 s).
 - Scripted racers don't react to PIT or box-ins; physics resolves those.
 - Night pursuit start varies per seed (4 of 8 runs under 60 s, mean 114 s); the tests assert means and ratios.
+
+## Response to owner playtest row 24 (2026-10-19): "I sideswiped a cop and a chase didn't start"
+**Fixed.** Cause: `wp_sim` delivered the contact and `wp_police` mapped it to the hit unit, but
+`unit_racer_contact` only charged the unit's risk budget: hitting a cop added no heat, and a
+pursuit still needed a wanted racer kept in recognition range for `recognition_time_s` (4 s
+within 40 m at night). Checked the whole path:
+1. `SimEvent::Contact` (player ↔ police car) reaches `PoliceSystem::step` in the same tick, and
+   `unit_index_by_entity` finds the unit (physical units since round 5). No glue was needed.
+2. New offence, assaulting an officer (`[heat.assault]` in `data/police/heat.toml`): heat
+   +20, to at least L2 (doctrine table: assault ≥ L2).
+3. The hit unit recognises the racer at once and the pursuit starts in the contact's tick, day
+   or night (nearby units with line of sight act if the hit unit is out of action).
+4. HUD: the PURSUIT banner follows `police_status().status`, and the Critical radio line
+   "Unit N: I've been hit! racer #… rammed my unit, assault on an officer." appears in the event
+   feed and the audio scanner.
+
+Telling a hit from a nudge (measured with physical cars, `wp_sim` and simcli):
+
+| Contact | Summed impulse | Normal closing | Relative speed | Counts? |
+|---|---|---|---|---|
+| Glancing flank sideswipe, 30-50 km/h | 220-1,500 N·s | 0.7-2.1 m/s | 8.3-13.9 m/s | yes |
+| Harder sideswipe / quarter hit, 30-50 km/h | 2,500-12,500 N·s | 2.7-13.8 m/s | ≥ 8 m/s | yes |
+| Mirror-to-mirror with an oncoming patrol car, 30 km/h | 1,300-11,000 N·s | 4-13 m/s | ≈ 14 m/s | yes |
+| 5 km/h parking bump | 860-1,460 N·s | 0.9-1.3 m/s | 1.4 m/s | no |
+
+A glancing swipe has little normal closing speed, so the rule uses the cars' relative speed
+(`min_rel_speed_mps` = 2.5) plus a small impulse floor (`min_impulse_ns` = 150, feather touches)
+and racer speed ≥ 2.5 m/s (a standing car is the one being hit). Speeds are the racer's just
+before the episode's first contact: a head-on hit stops the racer within the tick that reports
+it (reading the speed after the hit first hid a 10,700 N·s hit), and a patrol car nudging a
+parked racer shoves it (which must not make the parked racer the attacker). The unit's own PIT / box-in / rolling-block contact on its target is not an assault.
+
+Tests:
+- `wp_sim/tests/police_assault.rs`: real Rapier cars, patrol car paused at its post. Glancing
+  and rear-quarter sideswipes at 30 and 50 km/h → pursuit within 1 s of the contact, wanted ≥ L2,
+  radio line. Grid at 12:00 and 23:00, Port Vesper v2 at 12:00 and 23:00. A 5 km/h bump into
+  the tail (both cities, day and night): nothing. Fails without the fix.
+- `wp_police/tests/system.rs`: thresholds day/night, episodes, repeat cooldown, PIT exclusion,
+  ramming a second unit escalates.
+- Police scenarios `assault_sideswipe_{day_30,day_50,night_30,night_50}.ron` and
+  `parking_bump.ron` (new `hit_unit_at_s` / `hit_kmh` racer script; metrics `hits`, `assaults`,
+  `hit_to_pursuit_max_s`): pursuit in 0.01 s every run; the bump does nothing.
+- simcli `police/sideswipe_patrol_day.ron` (glancing swipe of a patrol car waiting at a junction)
+  and `police/sideswipe_patrol_night.ron` (mirror-to-mirror with an oncoming patrol car): wanted
+  change and pursuit in the contact's tick. Both fail with the rule off (day: pursuit only at
+  9.2 s from L1 reports; night: never).
 
 ## Response to lead feedback
 **Round 8, all done:**

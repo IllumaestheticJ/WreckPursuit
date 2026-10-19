@@ -145,6 +145,40 @@ pub struct HeatConfig {
     pub pursuit_heat_per_s: f32,
     /// Heat added when the racer disables (total-losses) a police unit by contact.
     pub cop_disabled_heat: f32,
+    /// Hitting a police car (assaulting an officer).
+    pub assault: AssaultConfig,
+}
+
+/// A racer hitting a police unit is assaulting an officer (owner playtest row 24): heat jumps
+/// to at least `min_level` and the hit unit (plus units nearby with line of sight) recognises
+/// the racer at once, so a pursuit starts immediately, day or night.
+///
+/// A contact counts when, within one contact episode, the summed normal impulse reaches
+/// `min_impulse_ns`, the speed of the two cars relative to each other reaches
+/// `min_rel_speed_mps`, and the racer itself was moving at `min_racer_speed_mps` or more.
+/// Parking-lot nudges stay below these. Only physics contacts count (the headless units'
+/// proximity stand-in never does).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AssaultConfig {
+    /// Summed normal impulse of one contact episode, N·s.
+    pub min_impulse_ns: f32,
+    /// Highest speed of the racer relative to the unit in the episode (the larger of the car
+    /// velocities' difference and the contact's normal closing speed), m/s. A glancing
+    /// sideswipe has little normal closing speed but a large relative speed.
+    pub min_rel_speed_mps: f32,
+    /// Racer speed at the contact, m/s (a car standing still is the one being hit).
+    pub min_racer_speed_mps: f32,
+    /// Contacts between the same racer and unit closer together than this are one episode, s.
+    pub episode_s: f32,
+    /// The same racer–unit pair counts as a new assault at most once per this many seconds.
+    pub repeat_cooldown_s: f32,
+    /// Heat added per assault.
+    pub heat: f32,
+    /// Wanted level (1–5) the racer is raised to at least.
+    pub min_level: u8,
+    /// Other ground units within this range with line of sight also recognise the racer, m.
+    pub nearby_units_m: f32,
 }
 
 /// Escape (breaking contact) rule.
@@ -722,6 +756,22 @@ impl PoliceConfig {
         let t = &self.heat.heat.level_thresholds;
         if t.windows(2).any(|w| w[0] >= w[1]) || t[0] <= 0.0 || t[4] > self.heat.heat.max_heat {
             return bad("heat.level_thresholds must ascend within (0, max_heat]");
+        }
+        let a = &self.heat.heat.assault;
+        if !(1..=5).contains(&a.min_level)
+            || [
+                a.min_impulse_ns,
+                a.min_rel_speed_mps,
+                a.min_racer_speed_mps,
+                a.episode_s,
+                a.repeat_cooldown_s,
+                a.heat,
+                a.nearby_units_m,
+            ]
+            .iter()
+            .any(|v| !(v.is_finite() && *v >= 0.0))
+        {
+            return bad("heat.assault: min_level must be 1..=5 and every value >= 0");
         }
         if !(0.0..=1.0).contains(&self.heat.heat.unseen_factor) {
             return bad("heat.unseen_factor must be in 0..=1");

@@ -167,6 +167,8 @@ pub struct PoliceStats {
     pub helo_unavailable: u32,
     /// Racer–unit contacts.
     pub racer_contacts: u32,
+    /// Racer–unit contacts hard enough to count as assaulting an officer (`heat.assault`).
+    pub assaults: u32,
     /// Built-in driver: traffic near misses.
     pub near_misses: u32,
     /// Built-in driver: traffic collisions.
@@ -215,6 +217,9 @@ pub struct PoliceSystem {
     pub(crate) recognition_s: BTreeMap<EntityId, f32>,
     pub(crate) trails: BTreeMap<EntityId, unit::Track>,
     pub(crate) prev_pos: BTreeMap<EntityId, [f32; 2]>,
+    /// Racer velocity reported on the previous step, m/s: how the racer came into this tick's
+    /// contacts (by the time a contact is reported, the hit has already changed its velocity).
+    pub(crate) prev_vel: BTreeMap<EntityId, [f32; 3]>,
     pub(crate) units: Vec<Unit>,
     pub(crate) next_unit: u32,
     pub(crate) incidents: Vec<Incident>,
@@ -230,6 +235,8 @@ pub struct PoliceSystem {
     pub(crate) captain: CaptainState,
     pub(crate) stats: PoliceStats,
     pub(crate) contact_cooldown: BTreeMap<(UnitId, EntityId), SimTime>,
+    /// Racer–unit contact episodes (assault detection).
+    pub(crate) contact_episodes: BTreeMap<(UnitId, EntityId), dispatch::ContactEpisode>,
     pub(crate) pending: Vec<PoliceEvent>,
     /// Vehicles reported by `wp_sim` ([`PoliceSystem::set_obstacles`]).
     pub(crate) ext_obstacles: Vec<avoid::Obstacle>,
@@ -281,6 +288,7 @@ impl PoliceSystem {
             recognition_s: BTreeMap::new(),
             trails: BTreeMap::new(),
             prev_pos: BTreeMap::new(),
+            prev_vel: BTreeMap::new(),
             units: Vec::new(),
             next_unit: 1,
             incidents: Vec::new(),
@@ -302,6 +310,7 @@ impl PoliceSystem {
             },
             stats: PoliceStats::default(),
             contact_cooldown: BTreeMap::new(),
+            contact_episodes: BTreeMap::new(),
             pending: Vec::new(),
             ext_obstacles: Vec::new(),
             ext_obstacles_set: false,
@@ -328,7 +337,7 @@ impl PoliceSystem {
         self.sync_racers(racers);
         self.process_events(world, events);
         self.rebuild_obstacles();
-        self.drive_units(dt);
+        self.drive_units(world, dt);
         self.think_accum += dt;
         if self.think_accum >= 1.0 / self.cfg.pursuit.think_hz {
             let tdt = self.think_accum;
@@ -348,6 +357,7 @@ impl PoliceSystem {
                 .racers
                 .entry(r.entity)
                 .or_insert_with(|| RacerRecord::new(r.entity));
+            self.prev_vel.insert(r.entity, rec.vel);
             rec.pos = r.pos;
             rec.vel = r.vel;
             let p = xy(r.pos);
@@ -389,8 +399,9 @@ impl PoliceSystem {
                     b,
                     point,
                     rel_speed,
+                    impulse_ns,
                     ..
-                } => self.on_contact(*a, *b, *point, *rel_speed),
+                } => self.on_contact(world, *a, *b, *point, *rel_speed, *impulse_ns),
                 _ => {}
             }
         }

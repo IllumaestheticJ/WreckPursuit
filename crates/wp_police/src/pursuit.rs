@@ -203,7 +203,7 @@ impl PoliceSystem {
         }
     }
 
-    fn start_pursuit(&mut self, racer: EntityId, unit: UnitId) {
+    pub(crate) fn start_pursuit(&mut self, racer: EntityId, unit: UnitId) {
         let now = self.now;
         let p = xy(self.racers[&racer].pos);
         {
@@ -894,7 +894,7 @@ impl PoliceSystem {
     // Per-tick driving
     // -----------------------------------------------------------------------------------------
 
-    pub(crate) fn drive_units(&mut self, dt: f32) {
+    pub(crate) fn drive_units(&mut self, world: &dyn WorldQuery, dt: f32) {
         if self.units.is_empty() {
             return;
         }
@@ -957,12 +957,12 @@ impl PoliceSystem {
                 }
             }
         }
-        self.internal_racer_contacts();
+        self.internal_racer_contacts(world);
     }
 
     /// Proximity contacts between internally driven units and racers (physical units get
     /// `SimEvent::Contact` from Rapier instead).
-    fn internal_racer_contacts(&mut self) {
+    fn internal_racer_contacts(&mut self, world: &dyn WorldQuery) {
         let racers: Vec<(EntityId, [f32; 2], [f32; 2])> = self
             .racers
             .values()
@@ -980,7 +980,12 @@ impl PoliceSystem {
                     let rel_speed = (rel[0] * rel[0] + rel[1] * rel[1]).sqrt();
                     let pit = self.units[i].tactic == Tactic::Pit;
                     let before = self.stats.racer_contacts;
-                    self.unit_racer_contact(i, e, rel_speed, true);
+                    let hit = crate::dispatch::RacerHit {
+                        rel_speed,
+                        impulse_ns: 0.0,
+                        physical: false,
+                    };
+                    self.unit_racer_contact(world, i, e, hit, true);
                     if self.stats.racer_contacts != before {
                         let u = &mut self.units[i];
                         u.body.speed = u.body.speed.min((v[0] * v[0] + v[1] * v[1]).sqrt()) * 0.8;

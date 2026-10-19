@@ -36,6 +36,21 @@ Pure Rust, no renderer, builds for `wasm32-unknown-unknown`.
 - While pursued and seen: `pursuit_heat_per_s` (long chases escalate). Disabling a cop: `cop_disabled_heat`.
 - **Pursuit start**: a wanted racer kept within `recognition_range_m[phase]` with line of sight
   for `recognition_time_s[phase]` (a glimpse at night is not enough).
+- **Assaulting an officer** (`[heat.assault]`, playtest row 24): a racer hitting a police car.
+  Physics contacts (`SimEvent::Contact`) between a racer and a unit's entity are summed into a
+  contact episode (contacts less than `episode_s` apart). It counts when the episode's impulse
+  reaches `min_impulse_ns`, the cars' relative speed `min_rel_speed_mps`, and the racer's own
+  speed `min_racer_speed_mps`. Speeds are the racer's just before the episode's first
+  contact (by the time a contact is reported, a head-on hit has stopped the racer, and a patrol
+  car nudging a parked racer has shoved it). Then heat rises by `heat`, to at
+  least `min_level` (L2), the radio says "Unit N: I've been hit! … assault on an officer.", and
+  the pursuit starts in the same tick with the hit unit (or the closest unit within
+  `nearby_units_m` that sees the racer, if the hit unit is out of action), day or night: no
+  recognition window. A new assault on the same unit needs `repeat_cooldown_s`; ramming another
+  unit counts again. Not an assault: parking-lot nudges (relative speed below 2.5 m/s), a
+  standing racer hit by a unit, the unit's own PIT / box-in / rolling-block contact on its
+  target, and the headless units' proximity stand-in (no collider). Measured contact numbers
+  are in `heat.toml`.
 - **Escape**: no unit, camera or helicopter has line of sight for
   `escape.base_s[level] × escape.phase_scale[phase]`.
 - **Safehouse**: inside a safehouse POI for `dwell_s` with no unit within `clear_radius_m`;
@@ -191,6 +206,8 @@ distance and nearest road. Tests, scenarios and tools use `city::procedural(&Pro
 | Tool placement (5 runs, L4) | 35 tools, minimum sight 120.1 m |
 | Escape (dusk, below helicopter level) | 2 of 3 runs escape |
 | Capture / safehouse (12×12 city) / total loss | Each rule fires in its scripted case |
+| Sideswipe a paused patrol car at 30 / 50 km/h, noon / 23:00 / 03:00 (3 runs each) | Assault every run, pursuit in the same tick (0.01 s), wanted L2 |
+| 5 km/h parking bump (3 runs) | No assault, no heat, no pursuit |
 
 | City traffic, physical cars (`cargo run --release -p simcli --example police_traffic_contacts -- patrol\|pursuit 300`) | Patrol 300 s: 0 police↔traffic contacts, 1 overlap with kinematic traffic caused by a moving unit. Hot pursuit 362 s: 0 contacts, 0 overlaps with lights on, 3 caused by moving units in total |
 
@@ -223,5 +240,8 @@ cargo run --release -p wp_police --example police_scenario -- <file.ron> [--tabl
   in the list, so a unit off its lane can still clip one. Passing assumes the other lane exists.
 - `PoliceSystem::new()` (used by `wp_sim` today) has no road network, so it tracks heat but spawns no units.
 - Scripted racers don't react to PIT or box-ins; physics resolves those in the real game.
+- Assault is not judged by fault: a moving racer that a patrol car drives into (rare with
+  obstacle awareness) also counts. Overflow kinematic units in `wp_sim` (beyond the physical
+  slots) can't be hit at all.
 - Captain-command events are emitted on the next `step`.
 - No JSON Schema for `data/police/*.toml`; validation lives in `PoliceConfig::validate` plus serde `deny_unknown_fields`.
