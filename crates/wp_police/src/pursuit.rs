@@ -21,7 +21,7 @@
 //! - Disengage — health below `disengage_health` or a bent wheel / flat: pull over
 //!   (handled in `dispatch`).
 
-use wp_contracts::{EntityId, GRAVITY_MPS2};
+use wp_contracts::{EntityId, WorldQuery, GRAVITY_MPS2};
 
 use crate::events::{PoliceEvent, PursuitOutcome, UnitId, UnitKind};
 use crate::graph::{dist, dot, normalize, perp_left, scale, sub, xy, NodeId, PoiKind};
@@ -60,7 +60,7 @@ impl PoliceSystem {
     // Observation & rules
     // -----------------------------------------------------------------------------------------
 
-    pub(crate) fn update_observations(&mut self) {
+    pub(crate) fn update_observations(&mut self, world: &dyn WorldQuery) {
         let los_range = self.cfg.pursuit.los_range_m.get(self.phase);
         let witness = self.cfg.heat.heat.witness_range_m.get(self.phase);
         let recognise = self.cfg.heat.heat.recognition_range_m.get(self.phase);
@@ -84,7 +84,7 @@ impl PoliceSystem {
                         if u.assignment == Assignment::OutOfService {
                             continue;
                         }
-                        if d <= los_range && self.graph.line_of_sight(u.body.pos, p) {
+                        if d <= los_range && self.sees(world, u.body.pos, p) {
                             // Recognition (pursuit start) and witnessing (full violation heat)
                             // have their own ranges inside line-of-sight range.
                             o.seen = true;
@@ -98,13 +98,18 @@ impl PoliceSystem {
                     UnitKind::Helicopter => {
                         if matches!(u.assignment, Assignment::HeloTrack { target } if target == id)
                             && d <= helo_range
+                            // Looking down from altitude: only tall buildings block.
+                            && world.line_of_sight(
+                                [u.body.pos[0], u.body.pos[1], u.body.alt_m],
+                                [p[0], p[1], crate::EYE_HEIGHT_M],
+                            )
                         {
                             o.seen = true;
                         }
                     }
                 }
             }
-            if self.camera_sees(p) {
+            if self.camera_sees(world, p) {
                 o.seen = true;
                 o.witnessed = true;
             }
@@ -148,7 +153,7 @@ impl PoliceSystem {
                 speed_mps: speed,
                 district,
                 phase: self.phase,
-                now_s: self.time_s,
+                now: self.now,
             };
             let rec = self.racers.get_mut(&id).expect("racer");
             let before = rec.level;
@@ -190,19 +195,19 @@ impl PoliceSystem {
     }
 
     fn start_pursuit(&mut self, racer: EntityId, unit: UnitId) {
-        let now = self.time_s;
+        let now = self.now;
         let p = xy(self.racers[&racer].pos);
         {
             let rec = self.racers.get_mut(&racer).expect("racer");
             rec.start_pursuit(now);
-            rec.last_seen_s = Some(now);
+            rec.last_seen = Some(now);
             rec.last_known = Some(p);
         }
         self.trails.insert(racer, Track::new(vec![p]));
         self.stats.pursuits.push(PursuitRecord {
             racer,
-            start_s: now,
-            end_s: None,
+            start: now,
+            end: None,
             outcome: None,
         });
         self.incidents
@@ -221,7 +226,7 @@ impl PoliceSystem {
 
     /// End the pursuit of `racer` with `outcome` (rules, total loss, or captain call-off).
     pub(crate) fn end_pursuit(&mut self, racer: EntityId, outcome: PursuitOutcome) {
-        let now = self.time_s;
+        let now = self.now;
         let cfg = self.cfg.heat.clone();
         let was_pursued = self.racers[&racer].pursued();
         {
@@ -245,16 +250,16 @@ impl PoliceSystem {
             .pursuits
             .iter_mut()
             .rev()
-            .find(|p| p.racer == racer && p.end_s.is_none())
+            .find(|p| p.racer == racer && p.end.is_none())
         {
-            p.end_s = Some(now);
+            p.end = Some(now);
             p.outcome = Some(outcome);
         } else if !was_pursued {
             // Total loss / safehouse while merely wanted: record a zero-length entry.
             self.stats.pursuits.push(PursuitRecord {
                 racer,
-                start_s: now,
-                end_s: Some(now),
+                start: now,
+                end: Some(now),
                 outcome: Some(outcome),
             });
         }
@@ -387,8 +392,8 @@ impl PoliceSystem {
         fallback
     }
 
-    pub(crate) fn plan_units(&mut self, tdt: f32) {
-        let now = self.time_s;
+    pub(crate) fn plan_units(&mut self, world: &dyn WorldQuery, tdt: f32) {
+        let now = self.now;
         let p = self.cfg.pursuit.clone();
         for i in 0..self.units.len() {
             if self.units[i].player.is_some() {
@@ -465,10 +470,9 @@ impl PoliceSystem {
                                 self.assign(i, Assignment::Idle);
                             }
                             crate::dispatch::IncidentKind::Crash => {
-                                if inc.scene_until_s.is_none() {
-                                    let dur =
-                                        self.cfg.presence.crash_scene_s.get(self.phase) as f64;
-                                    self.incidents[k].scene_until_s = Some(now + dur);
+                                if inc.scene_until.is_none() {
+                                    let dur = self.cfg.presence.crash_scene_s.get(self.phase);
+                                    self.incidents[k].scene_until = Some(now.plus(dur));
                                 }
                                 self.units[i].cmd = DriveCommand::stop();
                             }
@@ -503,10 +507,7 @@ impl PoliceSystem {
                     let u = &self.units[i];
                     // Join the chase only once on the racer's line and behind it (hysteresis with
                     // the off-trail check in coordinate_pursuits).
-                    if seen
-                        && dist(u.body.pos, rp) < 120.0
-                        && self.graph.line_of_sight(u.body.pos, rp)
-                    {
+                    if seen && dist(u.body.pos, rp) < 120.0 && self.sees(world, u.body.pos, rp) {
                         let joins = self.pursuit_track(target).is_some_and(|(tr, racer_s)| {
                             let (s_u, lat) = tr.project(u.body.pos, racer_s, 200.0);
                             lat < 12.0 && s_u <= racer_s + 5.0
@@ -516,7 +517,8 @@ impl PoliceSystem {
                             continue;
                         }
                     }
-                    let stale = now - u.assigned_s > 0.0 && (now - u.assigned_s) % 3.0 < tdt as f64;
+                    let held_for = now.since(u.assigned);
+                    let stale = held_for > 0.0 && held_for % 3.0 < tdt;
                     if !u.cmd.track.is_drivable()
                         || u.track_s > u.cmd.track.length() - 10.0
                         || stale
@@ -595,7 +597,7 @@ impl PoliceSystem {
     }
 
     fn coordinate_pursuits(&mut self) {
-        let now = self.time_s;
+        let now = self.now;
         let p = self.cfg.pursuit.clone();
         let t = &p.tactics;
         let unlocks = self.cfg.presence.unlocks.clone();
@@ -645,7 +647,7 @@ impl PoliceSystem {
             // Units off the trail or far behind go intercept.
             let mut active = Vec::new();
             for &(gap, lat, i) in &pursuers {
-                let held = now < self.units[i].captain_hold_until_s;
+                let held = now < self.units[i].captain_hold_until;
                 if !held && (lat > 30.0 || gap > t.intercept_min_gap_m + 100.0) {
                     let point = rec.last_known.unwrap_or(self.units[i].body.pos);
                     self.assign(
@@ -699,7 +701,7 @@ impl PoliceSystem {
                     && v_r < t.pit_max_kmh.get(mode) / 3.6
                     && v_r > 3.0
                     && straight_ahead
-                    && now >= u.pit_ready_s
+                    && now >= u.pit_ready
                     && gap < 40.0
                 {
                     Tactic::Pit
@@ -869,8 +871,7 @@ impl PoliceSystem {
                         let u = &mut self.units[i];
                         u.body.speed = u.body.speed.min((v[0] * v[0] + v[1] * v[1]).sqrt()) * 0.8;
                         if pit {
-                            u.pit_ready_s =
-                                self.time_s + self.cfg.pursuit.tactics.pit_cooldown_s as f64;
+                            u.pit_ready = self.now.plus(self.cfg.pursuit.tactics.pit_cooldown_s);
                             let id = u.id;
                             self.stats.pit_attempts += 1;
                             self.pending.push(PoliceEvent::PitAttempt {

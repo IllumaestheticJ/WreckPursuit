@@ -85,6 +85,10 @@ pub enum PoiKind {
     Safehouse,
     /// Traffic camera: witnesses violations within its radius.
     Camera,
+    /// Helicopter base.
+    Helipad,
+    /// Police station.
+    PoliceStation,
 }
 
 /// A point of interest.

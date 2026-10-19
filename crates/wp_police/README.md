@@ -80,8 +80,9 @@ Assignments: `Patrol`, `Respond(incident)`, `Pursue(target)`, `Intercept(point)`
 
 The **built-in driver** (`step_ground`) is a point mass that keeps right
 (`LANE_OFFSET_M`), uses pure-pursuit steering, saturates at a grip limit, crashes when it runs
-wide and has a background traffic-hazard model. It stands in until physical police cars exist;
-`drive_input` converts a `DriveCommand` into `VehicleInput` for physical units.
+wide and has a background traffic-hazard model. It stands in until physical police cars exist.
+For physical units, `drive_input(.., SteerGeometry)` converts a `DriveCommand` into `VehicleInput`.
+It uses the same pure-pursuit steering law as `wp_world`'s physical traffic cars.
 
 ### Tools & gadgets (`tools.rs`)
 - `plan_site` puts a tool on the predicted path between `min_ahead_m` and `max_ahead_m`, never
@@ -93,7 +94,7 @@ wide and has a background traffic-hazard model. It stands in until physical poli
 - **Spike strip**: a line collider. Wheels that cross it deflate linearly over `deflate_s` (5 s)
   → `tire_puncture(entity)` for `HandlingEffects::tire_puncture`.
 - **Radar detector** `radar(pos, tier)`: units in Patrol/Pursue state within `radar_range_m[tier]`.
-- **Scanner** `scanner(tier, since_s)`: radio lines delayed by `scanner_delay_s[tier]` (10/6/3 s).
+- **Scanner** `scanner(tier, since: Option<SimTime>)`: radio lines delayed by `scanner_delay_s[tier]` (10/6/3 s).
 
 ### Captain (`captain.rs`)
 `CaptainCommand` (assign unit, roadblock, spikes, helicopter, priority target, call off) is
@@ -115,7 +116,18 @@ Player chase units get `unit_order()` **suggestions** only.
 The tables are compiled in (`PoliceConfig::builtin()`) and can be loaded from disk with
 `PoliceConfig::load(dir)`. A test checks that both copies match.
 
-## Measured behaviour (`crates/wp_police/scenarios`, procedural city)
+## Cities
+- **`wp_world`'s city**: `PoliceSystem::for_world(cfg, &world, setup)` or
+  `RoadGraph::from_city(&CityMap)` (`city.rs`). It converts D's lane network: node ids are kept;
+  curved lanes become chains of one-way segments; straight two-way roads become a single segment;
+  districts map Core/Commercial → Core, Residential/Suburb → Suburb, Industrial/Port → Industrial.
+  Line of sight comes from `WorldQuery::line_of_sight` (building footprints).
+- **Police grid city**: `procedural_city(&CityParams)` is the self-contained test city, with its
+  own AABB occluders.
+
+Scenarios pick the city with `world_city: true|false`.
+
+## Measured behaviour (`crates/wp_police/scenarios`, police grid city unless noted)
 | Scenario | Result |
 |---|---|
 | Patrol presence (4 phases) | Exact table counts after warm-up |
@@ -124,22 +136,31 @@ The tables are compiled in (`PoliceConfig::builtin()`) and can be loaded from di
 | Cop self-wreck, Simulation (20 pursuits) | 4.1% of engaged units; a reckless config (no budget, high caps) does measurably worse |
 | Tool placement (5 runs, L4) | 40 tools, minimum sight 120.1 m |
 | Escape / capture / safehouse / total loss | Each rule fires in its scripted case |
+| `wp_world` city: day / night speeder (5 runs each) | Pursuit at 9.5 s / 240 s mean (≤ 14 s by day); reinforcement 30 s / 101 s |
+| `wp_world` city: cop self-wreck, Simulation (20 pursuits) | 2.0% |
 
 ## Perf
 `cargo run --release -p wp_police --example police_bench`: 13 patrols + reinforcements, 4 wanted
 racers → **0.030 ms per 60 Hz frame** (native, release, cloud Xeon 2.1 GHz). Budget 0.5 ms
 native / 1.0 ms browser. Browser not measured yet.
 
+## Determinism
+Absolute time is integer `SimTime` microseconds (`src/time.rs`); durations are `f32` seconds.
+The crate uses no `f64`, no `HashMap` iteration and no libm transcendentals (only `wp_math::sin_cos`
+and repeated multiplication). The RNG is seeded via `PoliceSetup::seed`. `lint-determinism` reports
+no errors for this crate and needs no allow-list entries.
+
 ## Tests
 ```sh
 cargo test -p wp_police                          # unit + system tests
-cargo test -p simcli --test police_scenarios     # scenarios, ratios, determinism
+cargo test -p wp_police --test police_scenarios  # scenarios, ratios, determinism
 cargo run --release -p wp_police --bin police-scenario -- crates/wp_police/scenarios/day_core_speeder.ron
 cargo run --release -p wp_police --example police_scenario -- <file.ron> [--tables <dir>]
 ```
 
 ## Known gaps
-- Own `RoadGraph` and `procedural_city` stand in for `wp_world`'s network and LOS queries.
+- `RoadGraph::from_city` ignores per-lane turn restrictions, and puts cameras at every third
+  signalised junction (the network has none). It becomes the shared road-network trait in v0.3.0.
 - The built-in kinematic driver and its traffic-hazard model stand in for physical cars and real traffic.
 - `PoliceSystem::new()` (used by `wp_sim` today) has no road network, so it tracks heat but spawns no units.
 - Scripted racers don't react to PIT or box-ins; physics resolves those in the real game.

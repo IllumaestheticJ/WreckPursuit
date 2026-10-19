@@ -9,6 +9,7 @@ use wp_contracts::{DayPhase, EntityId, ViolationKind};
 
 use crate::config::HeatFile;
 use crate::graph::District;
+use crate::time::SimTime;
 
 /// Wanted level derived from heat (moved to `wp_contracts` in v0.2.0; re-exported here).
 pub use wp_contracts::WantedLevel;
@@ -111,8 +112,8 @@ pub struct RuleInputs {
     pub district: District,
     /// Day phase.
     pub phase: DayPhase,
-    /// Simulation time, s.
-    pub now_s: f64,
+    /// Simulation time.
+    pub now: SimTime,
 }
 
 /// Per-racer police state.
@@ -130,8 +131,8 @@ pub struct RacerRecord {
     pub level: WantedLevel,
     /// Pursuit status.
     pub status: PursuitStatus,
-    /// Last time any unit/camera saw the racer, s (`None` = never).
-    pub last_seen_s: Option<f64>,
+    /// Last time any unit/camera saw the racer (`None` = never).
+    pub last_seen: Option<SimTime>,
     /// Last position the police know, m.
     pub last_known: Option<[f32; 2]>,
     /// Seconds since line of sight was lost (Searching).
@@ -140,12 +141,12 @@ pub struct RacerRecord {
     pub stopped_s: f32,
     /// Seconds of quiet safehouse dwell.
     pub safehouse_s: f32,
-    /// Last time each violation kind counted, s.
-    pub last_violation_s: [f64; 5],
+    /// Last time each violation kind counted.
+    pub last_violation: [Option<SimTime>; 5],
     /// Bounty ledger.
     pub bounty: BountyRecord,
-    /// When the current pursuit started, s.
-    pub pursuit_started_s: Option<f64>,
+    /// When the current pursuit started.
+    pub pursuit_started: Option<SimTime>,
 }
 
 impl RacerRecord {
@@ -158,14 +159,14 @@ impl RacerRecord {
             heat: 0.0,
             level: WantedLevel::None,
             status: PursuitStatus::Clear,
-            last_seen_s: None,
+            last_seen: None,
             last_known: None,
             los_lost_s: 0.0,
             stopped_s: 0.0,
             safehouse_s: 0.0,
-            last_violation_s: [f64::NEG_INFINITY; 5],
+            last_violation: [None; 5],
             bounty: BountyRecord::default(),
-            pursuit_started_s: None,
+            pursuit_started: None,
         }
     }
 
@@ -183,14 +184,14 @@ impl RacerRecord {
         &mut self,
         kind: &ViolationKind,
         seen: bool,
-        now_s: f64,
+        now: SimTime,
         cfg: &HeatFile,
     ) -> f32 {
         let i = violation_index(kind);
-        if now_s - self.last_violation_s[i] < cfg.heat.repeat_cooldown_s as f64 {
+        if self.last_violation[i].is_some_and(|t| now.since(t) < cfg.heat.repeat_cooldown_s) {
             return 0.0;
         }
-        self.last_violation_s[i] = now_s;
+        self.last_violation[i] = Some(now);
         let factor = if seen { 1.0 } else { cfg.heat.unseen_factor };
         let h = violation_heat(kind, cfg) * factor;
         self.add_heat(h, cfg);
@@ -204,11 +205,11 @@ impl RacerRecord {
     }
 
     /// Mark the start of a pursuit.
-    pub fn start_pursuit(&mut self, now_s: f64) {
+    pub fn start_pursuit(&mut self, now: SimTime) {
         self.status = PursuitStatus::Pursuit;
         self.los_lost_s = 0.0;
         self.stopped_s = 0.0;
-        self.pursuit_started_s = Some(now_s);
+        self.pursuit_started = Some(now);
     }
 
     /// End the pursuit (status falls back to Wanted/Clear by heat).
@@ -221,14 +222,14 @@ impl RacerRecord {
         self.los_lost_s = 0.0;
         self.stopped_s = 0.0;
         self.safehouse_s = 0.0;
-        self.pursuit_started_s = None;
+        self.pursuit_started = None;
     }
 
     /// Advance the rules by `dt` seconds. Returns an outcome when a pursuit-ending rule fires
     /// (the caller ends the pursuit and adjusts heat).
     pub fn update(&mut self, inp: &RuleInputs, dt: f32, cfg: &HeatFile) -> Option<RuleOutcome> {
         if inp.seen {
-            self.last_seen_s = Some(inp.now_s);
+            self.last_seen = Some(inp.now);
             self.last_known = Some([self.pos[0], self.pos[1]]);
         }
         // Bounty integrates heat while wanted.
@@ -240,8 +241,8 @@ impl RacerRecord {
             self.add_heat(cfg.heat.pursuit_heat_per_s * dt, cfg);
         } else if !self.pursued() {
             let since_seen = self
-                .last_seen_s
-                .map(|t| (inp.now_s - t) as f32)
+                .last_seen
+                .map(|t| inp.now.since(t))
                 .unwrap_or(f32::INFINITY);
             if since_seen > cfg.heat.decay_grace_s {
                 let rate = cfg.heat.decay_per_s.get(inp.phase)
@@ -307,7 +308,7 @@ mod tests {
         PoliceConfig::builtin().heat
     }
 
-    fn inputs(seen: bool, nearest: f32, speed: f32, now: f64) -> RuleInputs {
+    fn inputs(seen: bool, nearest: f32, speed: f32, now: f32) -> RuleInputs {
         RuleInputs {
             seen,
             nearest_unit_m: nearest,
@@ -315,7 +316,7 @@ mod tests {
             speed_mps: speed,
             district: District::Core,
             phase: DayPhase::Day,
-            now_s: now,
+            now: SimTime::from_secs(now),
         }
     }
 
@@ -333,15 +334,15 @@ mod tests {
     fn unseen_violations_count_twenty_percent_and_respect_cooldown() {
         let c = cfg();
         let mut r = RacerRecord::new(EntityId(1));
-        let seen = r.add_violation(&ViolationKind::RedLight, true, 0.0, &c);
+        let seen = r.add_violation(&ViolationKind::RedLight, true, SimTime::ZERO, &c);
         let mut r2 = RacerRecord::new(EntityId(2));
-        let unseen = r2.add_violation(&ViolationKind::RedLight, false, 0.0, &c);
+        let unseen = r2.add_violation(&ViolationKind::RedLight, false, SimTime::ZERO, &c);
         assert!((unseen - seen * c.heat.unseen_factor).abs() < 1e-5);
         assert_eq!(
-            r.add_violation(&ViolationKind::RedLight, true, 0.5, &c),
+            r.add_violation(&ViolationKind::RedLight, true, SimTime::from_secs(0.5), &c),
             0.0
         );
-        assert!(r.add_violation(&ViolationKind::RedLight, true, 1.5, &c) > 0.0);
+        assert!(r.add_violation(&ViolationKind::RedLight, true, SimTime::from_secs(1.5), &c) > 0.0);
     }
 
     #[test]
@@ -349,14 +350,14 @@ mod tests {
         let c = cfg();
         let mut r = RacerRecord::new(EntityId(1));
         r.add_heat(35.0, &c); // L2
-        r.start_pursuit(0.0);
+        r.start_pursuit(SimTime::ZERO);
         let need = escape_time_s(r.level, DayPhase::Day, &c);
         let dt = 0.1;
         let mut t = 0.0;
         let mut fired_at = None;
         while t < need + 5.0 {
             t += dt;
-            if let Some(o) = r.update(&inputs(false, 500.0, 30.0, t as f64), dt, &c) {
+            if let Some(o) = r.update(&inputs(false, 500.0, 30.0, t), dt, &c) {
                 assert_eq!(o, RuleOutcome::Escaped);
                 fired_at = Some(t);
                 break;
@@ -371,21 +372,21 @@ mod tests {
         let c = cfg();
         let mut r = RacerRecord::new(EntityId(1));
         r.add_heat(15.0, &c);
-        r.start_pursuit(0.0);
+        r.start_pursuit(SimTime::ZERO);
         let need = escape_time_s(r.level, DayPhase::Day, &c);
         let dt = 0.1;
-        let mut t = 0.0f64;
+        let mut t = 0.0f32;
         // Lose contact for 80% of the escape time, regain, lose again: no escape yet.
         for _ in 0..((need * 0.8 / dt) as usize) {
-            t += dt as f64;
+            t += dt;
             assert!(r.update(&inputs(false, 300.0, 25.0, t), dt, &c).is_none());
         }
         assert_eq!(r.status, PursuitStatus::Searching);
-        t += dt as f64;
+        t += dt;
         assert!(r.update(&inputs(true, 50.0, 25.0, t), dt, &c).is_none());
         assert_eq!(r.status, PursuitStatus::Pursuit);
         for _ in 0..((need * 0.8 / dt) as usize) {
-            t += dt as f64;
+            t += dt;
             assert!(r.update(&inputs(false, 300.0, 25.0, t), dt, &c).is_none());
         }
     }
@@ -395,13 +396,13 @@ mod tests {
         let c = cfg();
         let mut r = RacerRecord::new(EntityId(1));
         r.add_heat(15.0, &c);
-        r.start_pursuit(0.0);
+        r.start_pursuit(SimTime::ZERO);
         let dt = 0.1;
         // Stopped but the unit is too far: no capture.
         for i in 0..100 {
             assert!(r
                 .update(
-                    &inputs(true, c.capture.unit_radius_m + 5.0, 0.5, i as f64 * 0.1),
+                    &inputs(true, c.capture.unit_radius_m + 5.0, 0.5, i as f32 * 0.1),
                     dt,
                     &c
                 )
@@ -411,7 +412,7 @@ mod tests {
         let mut t = 0.0;
         loop {
             t += dt;
-            if let Some(o) = r.update(&inputs(true, 8.0, 0.5, 10.0 + t as f64), dt, &c) {
+            if let Some(o) = r.update(&inputs(true, 8.0, 0.5, 10.0 + t), dt, &c) {
                 assert_eq!(o, RuleOutcome::Captured);
                 break;
             }
@@ -421,10 +422,10 @@ mod tests {
         // Rolling at 3 m/s never captures.
         let mut r = RacerRecord::new(EntityId(2));
         r.add_heat(15.0, &c);
-        r.start_pursuit(0.0);
+        r.start_pursuit(SimTime::ZERO);
         for i in 0..200 {
             assert!(r
-                .update(&inputs(true, 5.0, 3.0, i as f64 * 0.1), dt, &c)
+                .update(&inputs(true, 5.0, 3.0, i as f32 * 0.1), dt, &c)
                 .is_none());
         }
     }
@@ -434,30 +435,30 @@ mod tests {
         let c = cfg();
         let mut r = RacerRecord::new(EntityId(1));
         r.add_heat(40.0, &c);
-        r.start_pursuit(0.0);
+        r.start_pursuit(SimTime::ZERO);
         let dt = 0.1;
         let mut inp = inputs(false, 100.0, 0.0, 0.0);
         inp.in_safehouse = true;
         // A unit at 100 m (< 150 m) blocks the safehouse; nearest > capture radius so no capture.
         for i in 0..150 {
-            inp.now_s = i as f64 * 0.1;
+            inp.now = SimTime::from_secs(i as f32 * 0.1);
             let o = r.update(&inp, dt, &c);
             assert_ne!(o, Some(RuleOutcome::Safehouse));
             if o == Some(RuleOutcome::Escaped) {
-                r.start_pursuit(inp.now_s);
+                r.start_pursuit(inp.now);
             }
         }
         inp.nearest_unit_m = 400.0;
         let mut t = 0.0;
         loop {
             t += dt;
-            inp.now_s = 20.0 + t as f64;
+            inp.now = SimTime::from_secs(20.0 + t);
             let o = r.update(&inp, dt, &c);
             if o == Some(RuleOutcome::Safehouse) {
                 break;
             }
             if o == Some(RuleOutcome::Escaped) {
-                r.start_pursuit(inp.now_s);
+                r.start_pursuit(inp.now);
             }
             assert!(t < c.safehouse.dwell_s + 0.5);
         }
@@ -474,7 +475,7 @@ mod tests {
             inp.phase = phase;
             inp.district = district;
             for i in 0..300 {
-                inp.now_s = 10.0 + i as f64 * 0.1;
+                inp.now = SimTime::from_secs(10.0 + i as f32 * 0.1);
                 r.update(&inp, 0.1, &c);
             }
             r.heat

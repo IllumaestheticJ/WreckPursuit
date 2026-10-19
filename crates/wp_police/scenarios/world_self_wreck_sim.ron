@@ -1,0 +1,16 @@
+// Same as self_wreck_sim.ron (20 Simulation pursuits), on wp_world's procedural city.
+(
+    name: "police_world_self_wreck_sim",
+    seed: 200,
+    world_city: true,
+    mode: Simulation,
+    time_of_day_h: 12.0,
+    duration_s: 120.0,
+    runs: 20,
+    racers: [(district: Core, speed_factor: 2.2, initial_heat: 35.0, stay_in_district: false)],
+    expect: [
+        (metric: "pursuits", min: 20.0, max: 1000.0),
+        (metric: "self_wreck_rate", min: 0.0, max: 0.0999),
+        (metric: "min_tool_sight_m", min: 120.0, max: 10000.0),
+    ],
+)

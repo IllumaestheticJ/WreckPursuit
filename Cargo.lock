@@ -4203,6 +4203,7 @@ dependencies = [
  "toml",
  "wp_contracts",
  "wp_math",
+ "wp_world",
 ]
 
 [[package]]

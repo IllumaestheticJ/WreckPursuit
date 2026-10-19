@@ -8,6 +8,7 @@
 
 use std::collections::BTreeMap;
 use std::path::Path;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use wp_contracts::{
@@ -15,6 +16,8 @@ use wp_contracts::{
     PHYSICS_DT,
 };
 use wp_math::{Rng, StateHasher};
+use wp_world::procgen::{self, ProcGenConfig};
+use wp_world::CityMap;
 
 use crate::config::PoliceConfig;
 use crate::events::UnitKind;
@@ -98,6 +101,10 @@ pub struct PoliceScenario {
     /// Procedural city.
     #[serde(default)]
     pub city: CityParams,
+    /// Run on `wp_world`'s procedural city (`ProcGenConfig::small()` with `city.seed`) instead
+    /// of the police grid city.
+    #[serde(default)]
+    pub world_city: bool,
     /// Damage mode.
     #[serde(default)]
     pub mode: DamageMode,
@@ -160,13 +167,27 @@ pub fn load_scenario(path: &Path) -> Result<PoliceScenario, ScenarioError> {
         .map_err(|e| ScenarioError::Parse(path.display().to_string(), e.to_string()))
 }
 
-/// Clock-only world for scenarios (the police read time of day through `WorldQuery`).
-#[derive(Debug, Clone, Copy)]
+/// Minimal world for scenarios: the clock, plus line of sight from a `wp_world` city when the
+/// scenario runs on one.
+#[derive(Debug, Clone)]
 pub struct ScenarioWorld {
     /// Time of day.
     pub time: TimeOfDay,
     /// Clock ratio.
     pub ratio: f32,
+    /// City whose buildings block line of sight (`None`: the police graph's occluders only).
+    pub map: Option<Arc<CityMap>>,
+}
+
+impl ScenarioWorld {
+    /// Clock-only world.
+    pub fn clock(time: TimeOfDay, ratio: f32) -> Self {
+        Self {
+            time,
+            ratio,
+            map: None,
+        }
+    }
 }
 
 impl WorldQuery for ScenarioWorld {
@@ -182,9 +203,9 @@ impl WorldQuery for ScenarioWorld {
     fn time_of_day(&self) -> TimeOfDay {
         self.time
     }
-    fn line_of_sight(&self, _a: [f32; 3], _b: [f32; 3]) -> bool {
-        // Occlusion in these scenarios comes from the police road graph's own occluders.
-        true
+    fn line_of_sight(&self, a: [f32; 3], b: [f32; 3]) -> bool {
+        // Grid-city scenarios: occlusion comes from the police road graph's own occluders.
+        self.map.as_ref().is_none_or(|m| m.line_of_sight(a, b))
     }
 }
 
@@ -271,7 +292,16 @@ fn run_once(sc: &PoliceScenario, seed: u64, cfg: &PoliceConfig) -> RunNumbers {
         seed: sc.city.seed,
         ..sc.city
     };
-    let graph = procedural_city(&city);
+    let (graph, map) = if sc.world_city {
+        let pg = ProcGenConfig {
+            seed: sc.city.seed,
+            ..ProcGenConfig::small()
+        };
+        let map = CityMap::new(procgen::generate(&pg));
+        (RoadGraph::from_city(&map), Some(Arc::new(map)))
+    } else {
+        (procedural_city(&city), None)
+    };
     let setup = PoliceSetup {
         seed,
         mode: sc.mode,
@@ -282,6 +312,7 @@ fn run_once(sc: &PoliceScenario, seed: u64, cfg: &PoliceConfig) -> RunNumbers {
     let mut world = ScenarioWorld {
         time: TimeOfDay::from_hours(sc.time_of_day_h),
         ratio: sc.time_ratio,
+        map,
     };
     let mut rng = Rng::new(seed ^ 0x5CE7_A210);
     let mut racers: Vec<ScriptedRacer> = Vec::new();
@@ -401,14 +432,13 @@ fn run_once(sc: &PoliceScenario, seed: u64, cfg: &PoliceConfig) -> RunNumbers {
         for r in &racers {
             nums.max_level = nums.max_level.max(police.wanted_level(r.entity).number());
         }
-        if sc.stop_after_first_pursuit && police.stats().pursuits.iter().any(|p| p.end_s.is_some())
-        {
+        if sc.stop_after_first_pursuit && police.stats().pursuits.iter().any(|p| p.end.is_some()) {
             break;
         }
     }
     let st = police.stats();
-    nums.pursuit_start_s = st.pursuits.first().map(|p| p.start_s as f32);
-    nums.pursuit_end_s = st.pursuits.iter().find_map(|p| p.end_s).map(|t| t as f32);
+    nums.pursuit_start_s = st.pursuits.first().map(|p| p.start.secs());
+    nums.pursuit_end_s = st.pursuits.iter().find_map(|p| p.end).map(|t| t.secs());
     nums.reinforcement_delays = st.reinforcement_delays_s.clone();
     for p in &st.pursuits {
         match p.outcome {
@@ -422,7 +452,7 @@ fn run_once(sc: &PoliceScenario, seed: u64, cfg: &PoliceConfig) -> RunNumbers {
     nums.pursuits = st
         .pursuits
         .iter()
-        .filter(|p| p.end_s != Some(p.start_s))
+        .filter(|p| p.end != Some(p.start))
         .count() as u32;
     nums.units_engaged = st.units_engaged;
     nums.self_wrecks = st.self_wrecks;

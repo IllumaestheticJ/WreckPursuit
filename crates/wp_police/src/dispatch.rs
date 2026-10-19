@@ -5,7 +5,7 @@
 //! Every assignment change goes through [`PoliceSystem::assign`], which emits a radio line.
 
 use serde::{Deserialize, Serialize};
-use wp_contracts::{EntityId, ViolationKind};
+use wp_contracts::{EntityId, ViolationKind, WorldQuery};
 
 use crate::captain::CaptainError;
 use crate::events::{
@@ -15,6 +15,7 @@ use crate::graph::{
     add, dist, lerp2, normalize, perp_left, scale, sub, xy, District, PoiKind, RoadClass,
 };
 use crate::heat::{PursuitStatus, WantedLevel};
+use crate::time::SimTime;
 use crate::tools::{
     compass, plan_site, roadblock_barriers, roadblock_unit_spots, Roadblock, SiteRules, SpikeStrip,
 };
@@ -47,14 +48,14 @@ pub struct Incident {
     pub pos: [f32; 2],
     /// District.
     pub district: District,
-    /// Created at, s.
-    pub created_s: f64,
-    /// A unit is dispatched no earlier than this, s.
-    pub dispatch_at_s: f64,
+    /// Created at.
+    pub created: SimTime,
+    /// A unit is dispatched no earlier than this.
+    pub dispatch_at: SimTime,
     /// Responding unit.
     pub unit: Option<UnitId>,
-    /// Crash scene: the unit is released at this time, s.
-    pub scene_until_s: Option<f64>,
+    /// Crash scene: the unit is released at this time.
+    pub scene_until: Option<SimTime>,
 }
 
 /// Pending reinforcement.
@@ -62,10 +63,10 @@ pub struct Incident {
 pub struct ReinforcementRequest {
     /// Racer.
     pub racer: EntityId,
-    /// Requested at, s.
-    pub requested_s: f64,
-    /// Arrives at, s.
-    pub due_s: f64,
+    /// Requested at.
+    pub requested: SimTime,
+    /// Arrives at.
+    pub due: SimTime,
 }
 
 /// Pending helicopter launch.
@@ -73,8 +74,8 @@ pub struct ReinforcementRequest {
 pub struct HeloRequest {
     /// Racer.
     pub racer: EntityId,
-    /// Launch at, s.
-    pub launch_s: f64,
+    /// Launch at.
+    pub launch: SimTime,
 }
 
 impl PoliceSystem {
@@ -82,21 +83,28 @@ impl PoliceSystem {
     // Event handlers
     // -----------------------------------------------------------------------------------------
 
-    pub(crate) fn on_violation(&mut self, racer: EntityId, kind: &ViolationKind) {
-        let now = self.time_s;
+    /// A traffic violation by `racer` at world position `at` (from `SimEvent::TrafficViolation`).
+    pub(crate) fn on_violation(
+        &mut self,
+        world: &dyn WorldQuery,
+        racer: EntityId,
+        kind: &ViolationKind,
+        at: [f32; 2],
+    ) {
+        let now = self.now;
         let obs = self.obs.get(&racer).copied().unwrap_or_default();
         let p = {
             let r = &self.racers[&racer];
             xy(r.pos)
         };
-        let camera = self.camera_sees(p);
+        let camera = self.camera_sees(world, p);
         let witnessed = obs.witnessed || camera;
         let cfg = self.cfg.heat.clone();
         let rec = self.racers.get_mut(&racer).expect("racer exists");
         let before = rec.level;
         let added = rec.add_violation(kind, witnessed, now, &cfg);
         if witnessed {
-            rec.last_seen_s = Some(now);
+            rec.last_seen = Some(now);
             rec.last_known = Some(p);
         }
         let after = rec.level;
@@ -110,14 +118,15 @@ impl PoliceSystem {
             });
         }
         if !witnessed && !self.racers[&racer].pursued() && !self.graph.nodes.is_empty() {
-            // A civilian calls it in. One open report per racer; later calls update the position.
-            let district = self.graph.district_at(p);
+            // A civilian calls it in at the violation's position. One open report per racer;
+            // later calls update the position.
+            let district = self.graph.district_at(at);
             if let Some(inc) = self
                 .incidents
                 .iter_mut()
                 .find(|i| i.kind == IncidentKind::Report { racer })
             {
-                inc.pos = p;
+                inc.pos = at;
                 inc.district = district;
             } else {
                 let id = IncidentId(self.next_incident);
@@ -131,12 +140,12 @@ impl PoliceSystem {
                 self.incidents.push(Incident {
                     id,
                     kind: IncidentKind::Report { racer },
-                    pos: p,
+                    pos: at,
                     district,
-                    created_s: now,
-                    dispatch_at_s: now + delay as f64,
+                    created: now,
+                    dispatch_at: now.plus(delay),
                     unit: None,
-                    scene_until_s: None,
+                    scene_until: None,
                 });
                 self.radio(
                     None,
@@ -182,11 +191,11 @@ impl PoliceSystem {
         apply_damage: bool,
     ) {
         let key = (self.units[i].id, racer);
-        let now = self.time_s;
+        let now = self.now;
         if self
             .contact_cooldown
             .get(&key)
-            .is_some_and(|t| now - *t < 1.0)
+            .is_some_and(|t| now.since(*t) < 1.0)
         {
             return;
         }
@@ -222,10 +231,10 @@ impl PoliceSystem {
             kind: IncidentKind::Crash,
             pos,
             district,
-            created_s: self.time_s,
-            dispatch_at_s: self.time_s,
+            created: self.now,
+            dispatch_at: self.now,
             unit: None,
-            scene_until_s: None,
+            scene_until: None,
         });
         self.radio(
             None,
@@ -236,38 +245,38 @@ impl PoliceSystem {
         );
     }
 
-    pub(crate) fn camera_sees(&self, p: [f32; 2]) -> bool {
+    pub(crate) fn camera_sees(&self, world: &dyn WorldQuery, p: [f32; 2]) -> bool {
         self.graph
             .pois_of(PoiKind::Camera)
-            .any(|c| dist(c.pos, p) <= c.radius_m && self.graph.line_of_sight(c.pos, p))
+            .any(|c| dist(c.pos, p) <= c.radius_m && self.sees(world, c.pos, p))
     }
 
     // -----------------------------------------------------------------------------------------
     // Think: orchestration
     // -----------------------------------------------------------------------------------------
 
-    pub(crate) fn think(&mut self, tdt: f32) {
+    pub(crate) fn think(&mut self, world: &dyn WorldQuery, tdt: f32) {
         if self.graph.nodes.is_empty() {
             // No road network: rules only.
-            self.update_observations();
+            self.update_observations(world);
             self.update_racer_rules(tdt);
             return;
         }
         if !self.warmed_up {
             self.warm_up();
         }
-        self.update_observations();
+        self.update_observations(world);
         self.update_racer_rules(tdt);
         self.check_unit_health();
         self.maintain_pool();
         self.dispatch_incidents();
-        self.maintain_reinforcements();
+        self.maintain_reinforcements(world);
         self.maintain_helicopters();
         if !self.captain.human {
             self.ai_captain_tools();
         }
         self.expire_tools();
-        self.plan_units(tdt);
+        self.plan_units(world, tdt);
         self.cleanup_units();
     }
 
@@ -278,11 +287,11 @@ impl PoliceSystem {
         }
         let text = self.radio_text(i, &a);
         let id = self.units[i].id;
-        let now = self.time_s;
+        let now = self.now;
         {
             let u = &mut self.units[i];
             u.assignment = a;
-            u.assigned_s = now;
+            u.assigned = now;
             u.cmd = DriveCommand::stop();
             u.track_s = 0.0;
             if matches!(
@@ -375,7 +384,7 @@ impl PoliceSystem {
         let id = self.alloc_unit_id();
         let mut u = Unit::new(id, kind, role, pos, heading, self.cfg.pursuit.risk.budget);
         u.internal = self.setup.internal_driving;
-        u.assigned_s = self.time_s;
+        u.assigned = self.now;
         self.pending.push(PoliceEvent::UnitSpawned {
             unit: id,
             kind,
@@ -469,14 +478,14 @@ impl PoliceSystem {
     }
 
     fn dispatch_incidents(&mut self) {
-        let now = self.time_s;
+        let now = self.now;
         // Reports about racers already in pursuit are moot; stale reports expire.
         let racers = &self.racers;
         self.incidents.retain(|inc| match inc.kind {
             IncidentKind::Report { racer } => {
-                !racers.get(&racer).is_some_and(|r| r.pursued()) && now - inc.created_s < 180.0
+                !racers.get(&racer).is_some_and(|r| r.pursued()) && now.since(inc.created) < 180.0
             }
-            IncidentKind::Crash => inc.scene_until_s.is_none_or(|t| now < t),
+            IncidentKind::Crash => inc.scene_until.is_none_or(|t| now < t),
         });
         // Release units whose incident disappeared.
         for i in 0..self.units.len() {
@@ -488,7 +497,7 @@ impl PoliceSystem {
         }
         for k in 0..self.incidents.len() {
             let inc = self.incidents[k];
-            if inc.unit.is_some() || now < inc.dispatch_at_s {
+            if inc.unit.is_some() || now < inc.dispatch_at {
                 continue;
             }
             if let Some(i) = self.nearest_available(inc.pos, f32::INFINITY) {
@@ -527,8 +536,8 @@ impl PoliceSystem {
             .count() as u32
     }
 
-    fn maintain_reinforcements(&mut self) {
-        let now = self.time_s;
+    fn maintain_reinforcements(&mut self, world: &dyn WorldQuery) {
+        let now = self.now;
         let racers = &self.racers;
         self.reinforcements
             .retain(|r| racers.get(&r.racer).is_some_and(|x| x.pursued()));
@@ -553,8 +562,8 @@ impl PoliceSystem {
                     base * (1.0 - prio * self.cfg.presence.reinforcement.priority_max_reduction);
                 self.reinforcements.push(ReinforcementRequest {
                     racer,
-                    requested_s: now,
-                    due_s: now + t as f64,
+                    requested: now,
+                    due: now.plus(t),
                 });
                 let n = have + pending + 1;
                 self.radio(
@@ -570,7 +579,7 @@ impl PoliceSystem {
         let mut k = 0;
         while k < self.reinforcements.len() {
             let req = self.reinforcements[k];
-            if now < req.due_s {
+            if now < req.due {
                 k += 1;
                 continue;
             }
@@ -584,7 +593,7 @@ impl PoliceSystem {
                     if self.ground_units_alive() >= self.cfg.presence.max_ground_units {
                         continue;
                     }
-                    let Some((pos, heading)) = self.reinforcement_spawn_point(target) else {
+                    let Some((pos, heading)) = self.reinforcement_spawn_point(world, target) else {
                         continue;
                     };
                     self.spawn_unit(UnitKind::Car, UnitRole::Reinforcement, pos, heading)
@@ -592,7 +601,7 @@ impl PoliceSystem {
             };
             self.stats
                 .reinforcement_delays_s
-                .push((now - req.requested_s) as f32);
+                .push(now.since(req.requested));
             self.assign(
                 i,
                 Assignment::Intercept {
@@ -604,12 +613,16 @@ impl PoliceSystem {
     }
 
     /// The closest node at least `spawn_min_distance_m` from `target` without line of sight.
-    fn reinforcement_spawn_point(&self, target: [f32; 2]) -> Option<([f32; 2], [f32; 2])> {
+    fn reinforcement_spawn_point(
+        &self,
+        world: &dyn WorldQuery,
+        target: [f32; 2],
+    ) -> Option<([f32; 2], [f32; 2])> {
         let min_d = self.cfg.presence.reinforcement.spawn_min_distance_m;
         let mut best: Option<(f32, usize)> = None;
         for (i, n) in self.graph.nodes.iter().enumerate() {
             let d = dist(n.pos, target);
-            if d < min_d || self.graph.line_of_sight(n.pos, target) {
+            if d < min_d || self.sees(world, n.pos, target) {
                 continue;
             }
             if best.is_none_or(|b| d < b.0) {
@@ -624,10 +637,10 @@ impl PoliceSystem {
 
     /// Request a helicopter on `racer` (AI captain and captain command share this).
     pub(crate) fn request_helo(&mut self, racer: EntityId) -> Result<(), CaptainError> {
-        let now = self.time_s;
-        if now < self.captain.helo_ready_s {
+        let now = self.now;
+        if now < self.captain.helo_ready {
             return Err(CaptainError::Cooldown {
-                remaining_s: (self.captain.helo_ready_s - now) as f32,
+                remaining_s: self.captain.helo_ready.since(now),
             });
         }
         let active = self
@@ -639,7 +652,7 @@ impl PoliceSystem {
         if active as u32 >= self.cfg.presence.helicopter.count.get(self.phase) {
             return Err(CaptainError::Budget);
         }
-        self.captain.helo_ready_s = now + self.cfg.tools.helo_request_cooldown_s as f64;
+        self.captain.helo_ready = now.plus(self.cfg.tools.helo_request_cooldown_s);
         if self.rng.chance(
             self.cfg
                 .presence
@@ -654,7 +667,7 @@ impl PoliceSystem {
         let launch = self.cfg.presence.helicopter.launch_s.get(self.phase);
         self.helo_requests.push(HeloRequest {
             racer,
-            launch_s: now + launch as f64,
+            launch: now.plus(launch),
         });
         self.radio(
             None,
@@ -664,7 +677,7 @@ impl PoliceSystem {
     }
 
     fn maintain_helicopters(&mut self) {
-        let now = self.time_s;
+        let now = self.now;
         let min_level = self.cfg.presence.helicopter.min_level;
         if !self.captain.human {
             for racer in self.pursued_by_priority() {
@@ -673,7 +686,7 @@ impl PoliceSystem {
                     u.kind == UnitKind::Helicopter && u.assignment.target() == Some(racer)
                 });
                 let requested = self.helo_requests.iter().any(|h| h.racer == racer);
-                if lvl >= min_level && !tracked && !requested && now >= self.captain.helo_ready_s {
+                if lvl >= min_level && !tracked && !requested && now >= self.captain.helo_ready {
                     let _ = self.request_helo(racer);
                 }
             }
@@ -684,7 +697,7 @@ impl PoliceSystem {
         let mut k = 0;
         while k < self.helo_requests.len() {
             let req = self.helo_requests[k];
-            if now < req.launch_s {
+            if now < req.launch {
                 k += 1;
                 continue;
             }
@@ -700,20 +713,23 @@ impl PoliceSystem {
             self.assign(i, Assignment::HeloTrack { target: req.racer });
         }
         // Helicopters return when the pursuit ends or they run out of time on station.
-        let max_track = self.cfg.tools.helicopter.max_track_s as f64;
+        let max_track = self.cfg.tools.helicopter.max_track_s;
         for i in 0..self.units.len() {
             let u = &self.units[i];
             if let Assignment::HeloTrack { target } = u.assignment {
                 let done = !self.racers.get(&target).is_some_and(|r| r.pursued());
-                if done || now - u.assigned_s > max_track {
+                if done || now.since(u.assigned) > max_track {
                     self.assign(i, Assignment::OutOfService);
                 }
             }
         }
     }
 
-    /// Helicopter base: the middle of the map.
+    /// Helicopter base: the city's helipad POI, else the middle of the map.
     fn helipad(&self) -> [f32; 2] {
+        if let Some(h) = self.graph.pois_of(PoiKind::Helipad).next() {
+            return h.pos;
+        }
         let mut min = [f32::INFINITY; 2];
         let mut max = [f32::NEG_INFINITY; 2];
         for n in &self.graph.nodes {
@@ -741,7 +757,7 @@ impl PoliceSystem {
         racer: EntityId,
         segment: Option<crate::graph::SegmentId>,
     ) -> Result<ToolId, CaptainError> {
-        let now = self.time_s;
+        let now = self.now;
         let rec = self.racers.get(&racer).ok_or(CaptainError::UnknownTarget)?;
         if !rec.pursued() {
             return Err(CaptainError::NotPursued);
@@ -752,9 +768,9 @@ impl PoliceSystem {
         if level < need {
             return Err(CaptainError::Locked { need_level: need });
         }
-        if now < self.captain.roadblock_ready_s {
+        if now < self.captain.roadblock_ready {
             return Err(CaptainError::Cooldown {
-                remaining_s: (self.captain.roadblock_ready_s - now) as f32,
+                remaining_s: self.captain.roadblock_ready.since(now),
             });
         }
         if self.roadblocks.len() as u32 >= rb.max_active {
@@ -775,8 +791,8 @@ impl PoliceSystem {
             rb.barrier_mass_kg,
             ROAD_HALF_WIDTH_M,
         );
-        let lifetime = rb.lifetime_s as f64;
-        let cooldown = rb.cooldown_s.get(self.phase) as f64;
+        let lifetime = rb.lifetime_s;
+        let cooldown = rb.cooldown_s.get(self.phase);
         let id = ToolId(self.next_tool);
         self.next_tool += 1;
         let mut units = Vec::new();
@@ -797,9 +813,9 @@ impl PoliceSystem {
             site,
             units,
             barriers,
-            expires_s: now + lifetime,
+            expires: now.plus(lifetime),
         });
-        self.captain.roadblock_ready_s = now + cooldown;
+        self.captain.roadblock_ready = now.plus(cooldown);
         self.stats.roadblocks += 1;
         self.stats.tool_sight_m.push(site.sight_m);
         self.pending.push(PoliceEvent::RoadblockPlaced {
@@ -817,7 +833,7 @@ impl PoliceSystem {
         racer: EntityId,
         segment: Option<crate::graph::SegmentId>,
     ) -> Result<ToolId, CaptainError> {
-        let now = self.time_s;
+        let now = self.now;
         let rec = self.racers.get(&racer).ok_or(CaptainError::UnknownTarget)?;
         if !rec.pursued() {
             return Err(CaptainError::NotPursued);
@@ -828,9 +844,9 @@ impl PoliceSystem {
         if level < need {
             return Err(CaptainError::Locked { need_level: need });
         }
-        if now < self.captain.spikes_ready_s {
+        if now < self.captain.spikes_ready {
             return Err(CaptainError::Cooldown {
-                remaining_s: (self.captain.spikes_ready_s - now) as f32,
+                remaining_s: self.captain.spikes_ready.since(now),
             });
         }
         if self.spikes.len() as u32 >= sc.max_active {
@@ -844,11 +860,8 @@ impl PoliceSystem {
             highway_ok: true,
         };
         let site = plan_site(&self.graph, p, v, &rules, segment).map_err(CaptainError::Site)?;
-        let (length, lifetime, cooldown) = (
-            sc.length_m,
-            sc.lifetime_s as f64,
-            sc.cooldown_s.get(self.phase) as f64,
-        );
+        let (length, lifetime, cooldown) =
+            (sc.length_m, sc.lifetime_s, sc.cooldown_s.get(self.phase));
         let id = ToolId(self.next_tool);
         self.next_tool += 1;
         let side = add(
@@ -864,7 +877,7 @@ impl PoliceSystem {
                 tool: id,
             },
         );
-        let strip = SpikeStrip::across(id, racer, site, length, Some(uid), now + lifetime);
+        let strip = SpikeStrip::across(id, racer, site, length, Some(uid), now.plus(lifetime));
         self.pending.push(PoliceEvent::SpikesPlaced {
             tool: id,
             racer,
@@ -873,7 +886,7 @@ impl PoliceSystem {
             sight_m: site.sight_m,
         });
         self.spikes.push(strip);
-        self.captain.spikes_ready_s = now + cooldown;
+        self.captain.spikes_ready = now.plus(cooldown);
         self.stats.spikes += 1;
         self.stats.tool_sight_m.push(site.sight_m);
         Ok(id)
@@ -887,13 +900,13 @@ impl PoliceSystem {
             }
             let lvl = r.level.number();
             if lvl >= self.cfg.presence.unlocks.spikes_level
-                && self.time_s >= self.captain.spikes_ready_s
+                && self.now >= self.captain.spikes_ready
             {
                 // No valid site yet (blind corners ahead) is normal; try again next think.
                 let _ = self.place_spikes(racer, None);
             }
             if lvl >= self.cfg.presence.unlocks.roadblock_level
-                && self.time_s >= self.captain.roadblock_ready_s
+                && self.now >= self.captain.roadblock_ready
             {
                 let _ = self.place_roadblock(racer, None);
             }
@@ -901,17 +914,17 @@ impl PoliceSystem {
     }
 
     pub(crate) fn remove_tools_for(&mut self, racer: Option<EntityId>) {
-        let now = self.time_s;
+        let now = self.now;
         let mut removed = Vec::new();
         self.roadblocks.retain(|rb| {
-            let keep = now < rb.expires_s && racer != Some(rb.racer);
+            let keep = now < rb.expires && racer != Some(rb.racer);
             if !keep {
                 removed.push((rb.id, rb.units.clone()));
             }
             keep
         });
         self.spikes.retain(|s| {
-            let keep = now < s.expires_s && racer != Some(s.racer);
+            let keep = now < s.expires && racer != Some(s.racer);
             if !keep {
                 removed.push((s.id, s.unit.into_iter().collect()));
             }
@@ -993,12 +1006,12 @@ impl PoliceSystem {
     }
 
     fn cleanup_units(&mut self) {
-        let now = self.time_s;
+        let now = self.now;
         let racers: Vec<[f32; 2]> = self.racers.values().map(|r| xy(r.pos)).collect();
         let mut i = 0;
         while i < self.units.len() {
             let u = &self.units[i];
-            let age = now - u.assigned_s;
+            let age = now.since(u.assigned);
             let far = racers.iter().all(|p| dist(*p, u.body.pos) > 250.0);
             let remove = match (&u.assignment, u.role) {
                 (_, UnitRole::Player) => false,

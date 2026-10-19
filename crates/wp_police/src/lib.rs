@@ -26,6 +26,7 @@
 #![warn(missing_docs)]
 
 pub mod captain;
+pub mod city;
 pub mod config;
 pub mod dispatch;
 pub mod events;
@@ -33,6 +34,7 @@ pub mod graph;
 pub mod heat;
 pub mod pursuit;
 pub mod scenario;
+pub mod time;
 pub mod tools;
 pub mod unit;
 
@@ -50,12 +52,16 @@ pub use dispatch::{Incident, IncidentKind};
 pub use events::{DisableCause, IncidentId, PoliceEvent, PursuitOutcome, ToolId, UnitId, UnitKind};
 pub use graph::{procedural_city, CityParams, District, RoadGraph};
 pub use heat::{BountyRecord, PursuitStatus, RacerRecord, WantedLevel};
+pub use time::SimTime;
 pub use tools::{HeloView, RadarBlip, RadioLine, Roadblock, SpikeStrip, StaticCollider};
-pub use unit::{Assignment, DriveCommand, Tactic, Unit};
+pub use unit::{Assignment, DriveCommand, SteerGeometry, Tactic, Unit};
 
 use graph::xy;
 use tools::Puncture;
 use unit::{UnitBody, UnitRole};
+
+/// Height of a driver's eyes / a car's roof for line-of-sight queries, m.
+pub const EYE_HEIGHT_M: f32 = 1.3;
 
 /// What the police system sees of a racer each tick.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -113,10 +119,10 @@ pub struct UnitSync {
 pub struct PursuitRecord {
     /// Racer.
     pub racer: EntityId,
-    /// Start, s.
-    pub start_s: f64,
-    /// End, s.
-    pub end_s: Option<f64>,
+    /// Start.
+    pub start: SimTime,
+    /// End.
+    pub end: Option<SimTime>,
     /// Outcome.
     pub outcome: Option<PursuitOutcome>,
 }
@@ -165,9 +171,9 @@ pub struct PoliceStats {
 pub(crate) struct CaptainState {
     pub(crate) human: bool,
     pub(crate) priority: Option<EntityId>,
-    pub(crate) roadblock_ready_s: f64,
-    pub(crate) spikes_ready_s: f64,
-    pub(crate) helo_ready_s: f64,
+    pub(crate) roadblock_ready: SimTime,
+    pub(crate) spikes_ready: SimTime,
+    pub(crate) helo_ready: SimTime,
 }
 
 /// Per-think observation of a racer.
@@ -191,7 +197,7 @@ pub struct PoliceSystem {
     pub(crate) setup: PoliceSetup,
     pub(crate) rng: Rng,
     pub(crate) tick: u64,
-    pub(crate) time_s: f64,
+    pub(crate) now: SimTime,
     pub(crate) think_accum: f32,
     pub(crate) phase: DayPhase,
     pub(crate) warmed_up: bool,
@@ -213,7 +219,7 @@ pub struct PoliceSystem {
     pub(crate) radio: VecDeque<RadioLine>,
     pub(crate) captain: CaptainState,
     pub(crate) stats: PoliceStats,
-    pub(crate) contact_cooldown: BTreeMap<(UnitId, EntityId), f64>,
+    pub(crate) contact_cooldown: BTreeMap<(UnitId, EntityId), SimTime>,
     pub(crate) pending: Vec<PoliceEvent>,
 }
 
@@ -235,6 +241,13 @@ impl PoliceSystem {
         )
     }
 
+    /// Police on `wp_world`'s city: the road graph is converted with
+    /// [`RoadGraph::from_city`]. Pass the same `World` as `world` to [`PoliceSystem::step`] so
+    /// line of sight uses its buildings.
+    pub fn for_world(cfg: PoliceConfig, world: &wp_world::World, setup: PoliceSetup) -> Self {
+        Self::with_city(cfg, RoadGraph::from_city(world.map()), setup)
+    }
+
     /// Police on a road network.
     pub fn with_city(cfg: PoliceConfig, graph: RoadGraph, setup: PoliceSetup) -> Self {
         Self {
@@ -243,7 +256,7 @@ impl PoliceSystem {
             setup,
             rng: Rng::new(setup.seed),
             tick: 0,
-            time_s: 0.0,
+            now: SimTime::ZERO,
             think_accum: 0.0,
             phase: DayPhase::Day,
             warmed_up: false,
@@ -266,9 +279,9 @@ impl PoliceSystem {
             captain: CaptainState {
                 human: false,
                 priority: None,
-                roadblock_ready_s: 0.0,
-                spikes_ready_s: 0.0,
-                helo_ready_s: 0.0,
+                roadblock_ready: SimTime::ZERO,
+                spikes_ready: SimTime::ZERO,
+                helo_ready: SimTime::ZERO,
             },
             stats: PoliceStats::default(),
             contact_cooldown: BTreeMap::new(),
@@ -290,16 +303,16 @@ impl PoliceSystem {
         out: &mut Vec<SimEvent>,
     ) {
         self.tick += 1;
-        self.time_s += dt as f64;
+        self.now = self.now.plus(dt);
         self.phase = world.time_of_day().phase();
         self.sync_racers(racers);
-        self.process_events(events);
+        self.process_events(world, events);
         self.drive_units(dt);
         self.think_accum += dt;
         if self.think_accum >= 1.0 / self.cfg.pursuit.think_hz {
             let tdt = self.think_accum;
             self.think_accum = 0.0;
-            self.think(tdt);
+            self.think(world, tdt);
         }
         for e in self.pending.drain(..) {
             out.push(e.to_sim_event());
@@ -307,7 +320,7 @@ impl PoliceSystem {
     }
 
     fn sync_racers(&mut self, racers: &[RacerView]) {
-        let now = self.time_s;
+        let now = self.now;
         for r in racers {
             let rec = self
                 .racers
@@ -334,12 +347,12 @@ impl PoliceSystem {
         }
     }
 
-    fn process_events(&mut self, events: &[SimEvent]) {
+    fn process_events(&mut self, world: &dyn WorldQuery, events: &[SimEvent]) {
         for ev in events {
             match ev {
-                SimEvent::TrafficViolation { vehicle, kind, .. } => {
+                SimEvent::TrafficViolation { vehicle, kind, pos } => {
                     if self.racers.contains_key(vehicle) {
-                        self.on_violation(*vehicle, kind);
+                        self.on_violation(world, *vehicle, kind, xy(*pos));
                     }
                 }
                 SimEvent::TotalLoss { vehicle } => {
@@ -361,6 +374,13 @@ impl PoliceSystem {
         }
     }
 
+    /// Line of sight between two ground points at eye height: the police graph's own occluders
+    /// (procedural test city) and the world's buildings (`WorldQuery::line_of_sight`).
+    pub(crate) fn sees(&self, world: &dyn WorldQuery, a: [f32; 2], b: [f32; 2]) -> bool {
+        self.graph.line_of_sight(a, b)
+            && world.line_of_sight([a[0], a[1], EYE_HEIGHT_M], [b[0], b[1], EYE_HEIGHT_M])
+    }
+
     pub(crate) fn unit_index(&self, id: UnitId) -> Option<usize> {
         self.units.binary_search_by_key(&id, |u| u.id).ok()
     }
@@ -372,7 +392,7 @@ impl PoliceSystem {
     /// Emit a radio line (event + scanner log).
     pub(crate) fn radio(&mut self, unit: Option<UnitId>, text: String) {
         self.radio.push_back(RadioLine {
-            time_s: self.time_s,
+            time: self.now,
             unit,
             text: text.clone(),
         });
@@ -421,9 +441,9 @@ impl PoliceSystem {
         &self.stats
     }
 
-    /// Simulation time seen by the police, s.
-    pub fn time_s(&self) -> f64 {
-        self.time_s
+    /// Simulation time seen by the police.
+    pub fn now(&self) -> SimTime {
+        self.now
     }
 
     /// Current day phase (as of the last step).
@@ -443,7 +463,7 @@ impl PoliceSystem {
     pub fn tire_puncture(&self, vehicle: EntityId) -> [f32; 4] {
         self.punctures
             .get(&vehicle)
-            .map(|p| p.level(self.time_s, self.cfg.tools.spikes.deflate_s))
+            .map(|p| p.level(self.now, self.cfg.tools.spikes.deflate_s))
             .unwrap_or([0.0; 4])
     }
 
@@ -587,8 +607,9 @@ impl PoliceSystem {
         }
     }
 
-    /// Driver input for an externally driven AI unit (stand-in shared controller).
-    pub fn unit_input(&self, unit: UnitId) -> Option<VehicleInput> {
+    /// Driver input for an externally driven AI unit with steering geometry `geom` (from the
+    /// unit's `VehicleDef`). `None` for player units and unknown ids.
+    pub fn unit_input(&self, unit: UnitId, geom: unit::SteerGeometry) -> Option<VehicleInput> {
         let u = &self.units[self.unit_index(unit)?];
         if u.player.is_some() {
             return None;
@@ -600,6 +621,7 @@ impl PoliceSystem {
             &u.cmd,
             u.track_s,
             u.planned_speed,
+            geom,
         ))
     }
 
@@ -647,14 +669,13 @@ impl PoliceSystem {
         v
     }
 
-    /// Scanner: radio lines spoken after `since_s`, delayed by the tier's delay.
-    pub fn scanner(&self, tier: usize, since_s: f64) -> Vec<RadioLine> {
+    /// Scanner: radio lines spoken after `since` (all if `None`), delayed by the tier's delay.
+    pub fn scanner(&self, tier: usize, since: Option<SimTime>) -> Vec<RadioLine> {
         let delays = &self.cfg.tools.gadgets.scanner_delay_s;
-        let delay = delays[tier.min(delays.len() - 1)] as f64;
-        let horizon = self.time_s - delay;
+        let delay = delays[tier.min(delays.len() - 1)];
         self.radio
             .iter()
-            .filter(|l| l.time_s > since_s && l.time_s <= horizon)
+            .filter(|l| since.is_none_or(|s| l.time > s) && self.now.since(l.time) >= delay)
             .cloned()
             .collect()
     }
