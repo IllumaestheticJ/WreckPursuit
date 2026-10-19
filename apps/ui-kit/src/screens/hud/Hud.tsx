@@ -13,6 +13,7 @@ import type { HeatHud, HudState, RaceHud, ScannerEntry } from "../../model/types
 import { clock, gap, gearLabel, raceTime, speed, words } from "../../ui/format";
 import { Badge, Meter, severityColor } from "../../ui/kit";
 import { DamageSilhouette } from "./DamageSilhouette";
+import { visibleFeed } from "./feed";
 import { Minimap } from "./Minimap";
 import "./hud.css";
 
@@ -119,12 +120,12 @@ export function HeatPanel({ heat }: { heat: HeatHud }) {
 }
 
 function Alerts({ entries, nowS }: { entries: ScannerEntry[]; nowS: number }) {
-  // Last few entries from the past 8 s, newest at the bottom.
-  const recent = entries.filter((e) => nowS - e.tS < 8 && e.tS <= nowS).slice(-5);
+  // At most three recent lines, newest at the bottom, fading out (feed.ts).
+  const recent = visibleFeed(entries, nowS);
   return (
     <ul class="wp-hud-alerts" aria-live="polite">
-      {recent.map((e) => (
-        <li key={e.id} data-sev={e.severity} data-ch={e.channel} style={{ opacity: Math.max(0.25, 1 - (nowS - e.tS) / 8) }}>
+      {recent.map(({ entry: e, opacity }) => (
+        <li key={e.id} data-sev={e.severity} data-ch={e.channel} style={{ opacity }}>
           <span class="wp-hud-alert-ch">{e.channel === "dispatch" ? "DISP" : e.channel === "unit" ? "UNIT" : e.channel === "civil" ? "CIV" : "SYS"}</span>
           {e.text}
         </li>

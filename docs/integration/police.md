@@ -40,7 +40,22 @@
 - Crash scenes (for prompt 05): `report_crash_scene(pos)`; civilian–civilian `SimEvent::Contact`s also create them.
 - `SimEvent::PoliceEvent { kind, payload }` until v0.3.0: `kind` = `wp_police::events::kind::*`,
   `payload` = JSON of `wp_police::PoliceEvent` (`PoliceEvent::from_sim_event`).
-- Data: `data/police/{heat,presence,pursuit,tools}.toml`. Scenarios: `crates/wp_police/scenarios/*.ron`
+- **Radio pacing** (lead helper `lead/playtest-radio`, playtest row 6): `PoliceEvent::Radio` is no
+  longer emitted for every assignment. Dispatch logic *raises* a `wp_police::radio::RadioCue`
+  (tier `Critical | Tactical | Routine` + optional collapse key) through `PoliceSystem::radio`,
+  and `RadioDirector` decides at the end of each `step` what is spoken (event + scanner log).
+  Critical (pursuit start "10-80", wanted level up, roadblock/spikes set, suspect lost, capture,
+  captain orders) always plays; tactical/routine lines wait for `global_gap_s` (8 s, someone
+  wanted) / `global_gap_calm_s` (20 s), `unit_gap_s` (30 s), merge duplicates within
+  `collapse_window_s` ("Units 4 and 5 resuming patrol."), drop after `stale_s`; routine chatter
+  with nobody wanted needs a unit within `earshot_m` of a racer. Tables: `data/police/radio.toml`
+  (`PoliceConfig::radio`; `PoliceConfig::load` uses the built-in one if the directory has none).
+  Sim time only, no RNG, not hashed. `radio_stats()` counts raised / spoken / collapsed / dropped.
+  **When adding a radio line, pick a tier and a collapse key** (see `dispatch.rs::radio_text`).
+  Budget scenarios: `radio_city_chase.ron`, `radio_calm_patrol.ron` (metrics
+  `radio_per_min_pursuit`, `radio_per_min_calm`); `cargo run --release -p wp_police --example
+  radio_log -- <scenario>` prints the spoken lines.
+- Data: `data/police/{heat,presence,pursuit,tools,radio}.toml`. Scenarios: `crates/wp_police/scenarios/*.ron`
   on D's procedural city (`city: (nx, ny, seed)`, default `ProcGenConfig::small()`).
 
 ## Needs

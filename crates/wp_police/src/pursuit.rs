@@ -21,6 +21,7 @@
 //! - Disengage — health below `disengage_health` or a bent wheel / flat: pull over
 //!   (handled in `dispatch`).
 
+use crate::radio::{RadioCue, RadioTier};
 use wp_contracts::{EntityId, WorldQuery, GRAVITY_MPS2};
 
 use crate::dispatch::ROAD_HALF_WIDTH_M;
@@ -172,14 +173,15 @@ impl PoliceSystem {
                     level: after,
                 });
                 if after > before && self.racers[&id].pursued() {
-                    self.radio(
+                    self.radio(RadioCue::new(
+                        RadioTier::Critical,
                         None,
                         format!(
                             "Dispatch: racer #{} now wanted level {}.",
                             id.0,
                             after.number()
                         ),
-                    );
+                    ));
                 }
             }
             match outcome {
@@ -223,6 +225,12 @@ impl PoliceSystem {
             racer,
             unit: Some(unit),
         });
+        let desc = self.racer_desc(racer);
+        self.radio(RadioCue::new(
+            RadioTier::Critical,
+            None,
+            format!("Dispatch: 10-80, all units, pursuit of {desc}."),
+        ));
         if let Some(i) = self.unit_index(unit) {
             if self.units[i].player.is_none() {
                 self.units[i].racer_contact = false;
@@ -345,7 +353,7 @@ impl PoliceSystem {
                 format!("Dispatch: pursuit of racer #{} called off.", racer.0)
             }
         };
-        self.radio(None, text);
+        self.radio(RadioCue::new(RadioTier::Critical, None, text));
         self.release_units(racer);
     }
 

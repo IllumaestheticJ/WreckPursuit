@@ -1,0 +1,20 @@
+# Police radio pacing (wp_police::radio). Sim seconds; no wall clock.
+# Playtest row 6 ("the dispatcher and cops are way too talkative"). Budget: <= 4 lines/min with
+# nobody wanted, <= 10 lines/min in a hot pursuit (wp_police scenarios radio_*.ron check it).
+#
+# Critical lines (pursuit start, wanted level up, roadblock/spikes set, suspect lost, capture,
+# captain orders) always play. Tactical lines (en route, intercepts, backup, helicopter) and
+# routine lines (resuming patrol, clear, unrelated incidents) obey the gaps below.
+
+# After any spoken line, no tactical/routine line for this long while a racer is wanted, s.
+global_gap_s = 8.0
+# ... and while nobody is wanted, s.
+global_gap_calm_s = 20.0
+# One unit says at most one tactical/routine line per this long, s.
+unit_gap_s = 30.0
+# Tactical/routine lines wait this long so duplicates from several units merge into one, s.
+collapse_window_s = 1.0
+# Held tactical/routine lines older than this are dropped, s.
+stale_s = 6.0
+# With nobody wanted, routine chatter plays only from units within this range of a racer, m.
+earshot_m = 200.0

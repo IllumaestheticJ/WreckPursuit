@@ -8,6 +8,7 @@
 //! Player chase units receive [`UnitOrder`]s as **suggestions** ([`PoliceSystem::unit_order`]);
 //! the captain never takes control of a player's car.
 
+use crate::radio::{RadioCue, RadioTier};
 use serde::{Deserialize, Serialize};
 use wp_contracts::{DayPhase, EntityId};
 
@@ -178,13 +179,14 @@ impl PoliceSystem {
                     }
                 }
                 self.captain.priority = target;
-                self.radio(
+                self.radio(RadioCue::new(
+                    RadioTier::Critical,
                     None,
                     match target {
                         Some(t) => format!("Captain: all units, priority is racer #{}.", t.0),
                         None => "Captain: priority cleared.".to_string(),
                     },
-                );
+                ));
                 Ok(())
             }
             CaptainCommand::CallOff { target } => {

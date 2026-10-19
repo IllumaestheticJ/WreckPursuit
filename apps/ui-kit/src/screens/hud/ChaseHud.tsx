@@ -1,8 +1,10 @@
 /**
  * Compact chase readout for hosts that keep their own HUD (the testbed): wanted level / heat /
- * bounty (`HeatPanel`), pursuit status line and the latest police radio. Transparent, top centre.
+ * bounty (`HeatPanel`), pursuit status line and the latest police radio (at most three lines,
+ * fading out; `feed.ts`). Transparent, top centre.
  */
 import { useSlice } from "../../model/GameModel";
+import { visibleFeed } from "./feed";
 import { HeatPanel } from "./Hud";
 import "./hud.css";
 
@@ -20,7 +22,7 @@ export function ChaseHud() {
   const tick = useSlice((s) => s.replay.tick);
   const tps = useSlice((s) => s.replay.ticksPerSecond);
   const nowS = tick / tps;
-  const radio = scanner.filter((e) => (e.channel === "dispatch" || e.channel === "unit" || e.severity === "alert") && nowS - e.tS < 10).slice(-3);
+  const radio = visibleFeed(scanner, nowS, (e) => e.channel === "dispatch" || e.channel === "unit" || e.severity === "alert");
   return (
     <div class="wp-hud wp-chase-hud" data-heat={heat.state}>
       <div class="wp-chase-col">
@@ -29,8 +31,8 @@ export function ChaseHud() {
           {STATUS_TEXT[heat.state]}
         </div>
         <ul class="wp-hud-alerts">
-          {radio.map((e) => (
-            <li key={e.id} data-sev={e.severity} data-ch={e.channel}>
+          {radio.map(({ entry: e, opacity }) => (
+            <li key={e.id} data-sev={e.severity} data-ch={e.channel} style={{ opacity }}>
               {e.text}
             </li>
           ))}
