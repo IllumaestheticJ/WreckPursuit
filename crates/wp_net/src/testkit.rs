@@ -290,11 +290,17 @@ impl NetSim for ArenaSim {
 /// Cars by id and mode tables by mode, as the net layer consumes them.
 pub type GameData = (BTreeMap<String, LoadedCar>, BTreeMap<DamageMode, ModeTable>);
 
+/// Car model of AI police units in city instances.
+pub const AI_POLICE_CAR: &str = "sentinel_cruiser";
+/// Car model of physical traffic in city instances.
+pub const TRAFFIC_CAR: &str = "debug_sedan";
+
 /// Load the cars and mode tables the net layer uses from a `data/` directory:
-/// `debug_sedan` (racers), `debug_coupe` (police), `arcade` and `sim` modes.
+/// `debug_sedan` (racers, traffic), `debug_coupe` (police seats), [`AI_POLICE_CAR`], `arcade`
+/// and `sim` modes.
 pub fn load_data(data_dir: &std::path::Path) -> Result<GameData, wp_contracts::LoadError> {
     let mut cars = BTreeMap::new();
-    for id in ["debug_sedan", "debug_coupe"] {
+    for id in ["debug_sedan", "debug_coupe", AI_POLICE_CAR] {
         let car = wp_contracts::load_car(data_dir.join(format!("cars/{id}.json")))?;
         cars.insert(id.to_string(), car);
     }

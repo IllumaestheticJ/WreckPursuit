@@ -112,6 +112,24 @@ impl WpSim {
         }
     }
 
+    /// A city instance: `Sim` with the world, AI police cars and physical traffic installed
+    /// (`wp_sim` builds `wp_police` on the city's roads in `set_world`).
+    pub fn with_city(
+        config: SimConfig,
+        cars: BTreeMap<String, LoadedCar>,
+        city: CitySetup,
+    ) -> Self {
+        let mut sim = Sim::new(config);
+        sim.set_world(city.world);
+        if let Some(car) = city.police_car {
+            sim.set_police_car(car);
+        }
+        if let Some(car) = city.traffic_car {
+            sim.set_traffic_car(car);
+        }
+        Self::from_sim(sim, cars)
+    }
+
     /// The wrapped simulation.
     pub fn sim(&self) -> &Sim {
         &self.sim
@@ -125,6 +143,56 @@ impl WpSim {
     fn slot(&self, id: EntityId) -> Option<&wp_sim::SimVehicle> {
         self.sim.vehicles().iter().find(|v| v.id == id)
     }
+}
+
+/// What a city instance contains besides the road network (see [`WpSim::with_city`]).
+pub struct CitySetup {
+    /// The city (road network, traffic, clock), e.g. `wp_world::World::load`.
+    pub world: wp_world::World,
+    /// Car for AI police units (`None` = police stay kinematic, no police cars).
+    pub police_car: Option<LoadedCar>,
+    /// Car for physical near-player traffic (`None` = traffic stays kinematic).
+    pub traffic_car: Option<LoadedCar>,
+}
+
+/// `wp_world` settings for a server city: traffic on, clock from the instance, no parked
+/// cars (thousands of extra physics bodies; they add little to multiplayer and cost a lot).
+pub fn server_world_config(config: &SimConfig) -> wp_world::WorldConfig {
+    wp_world::WorldConfig {
+        seed: config.seed,
+        start_time: config.time_of_day,
+        time_ratio: config.time_ratio,
+        traffic: wp_world::TrafficConfig {
+            enabled: true,
+            detect_collisions: true,
+            ..Default::default()
+        },
+        parked_cars: false,
+    }
+}
+
+/// Up to `n` spawn poses on the city's through lanes: one per lane, from lanes at least 60 m
+/// long, 20 m after the lane start, facing along the lane. Deterministic (lane order).
+pub fn lane_spawn_points(world: &wp_world::World, n: usize) -> Vec<([f32; 3], f32)> {
+    let mut out = Vec::new();
+    for lane in &world.network().lanes {
+        if out.len() >= n {
+            break;
+        }
+        if lane.kind != wp_world::network::LaneKind::Through || lane.polyline.len() < 2 {
+            continue;
+        }
+        let (a, b) = (lane.polyline[0], lane.polyline[1]);
+        let d = [b[0] - a[0], b[1] - a[1]];
+        let len = (d[0] * d[0] + d[1] * d[1]).sqrt();
+        if len < 60.0 {
+            continue;
+        }
+        let t = 20.0 / len;
+        let pos = [a[0] + d[0] * t, a[1] + d[1] * t, 0.0];
+        out.push((pos, wp_math::atan2(-d[0], d[1])));
+    }
+    out
 }
 
 /// `wp_sim` contact filter: replace a contact with its wire round trip, so the authority's

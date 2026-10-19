@@ -131,3 +131,26 @@ fn config_from_flags_and_toml() {
     assert!(AppConfig::from_args(&["--wat".into()]).is_err());
     assert!(AppConfig::from_args(&["--port".into()]).is_err());
 }
+
+/// `--city` loads a road file, adds traffic and AI police, and players spawn on its lanes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn city_flag_runs_bots_in_a_police_city() {
+    let city = repo_data_dir().join("city/procedural_12x12.road.bin");
+    let cfg = AppConfig {
+        bots: 4,
+        city: Some(city.display().to_string()),
+        ..test_config()
+    };
+    let running = run(cfg, null_log()).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(4000)).await;
+    let j = body_json(&http_get(running.admin_addr, "/status").await);
+    assert_eq!(j["players"], 4, "{j}");
+    assert_eq!(j["connected"], 4, "{j}");
+    assert!(j["tick"].as_u64().unwrap() > 0, "{j}");
+    assert!(j["downlink_bps_max"].as_f64().unwrap() <= 40_000.0, "{j}");
+    let missing = AppConfig {
+        city: Some("no/such/city.road.bin".into()),
+        ..test_config()
+    };
+    assert!(run(missing, null_log()).await.is_err());
+}

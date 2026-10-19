@@ -4288,6 +4288,7 @@ dependencies = [
  "wp_damage",
  "wp_economy",
  "wp_math",
+ "wp_police",
  "wp_sim",
  "wp_vehicle",
  "wp_world",
@@ -4350,6 +4351,7 @@ dependencies = [
  "wp_contracts",
  "wp_net",
  "wp_sim",
+ "wp_world",
 ]
 
 [[package]]

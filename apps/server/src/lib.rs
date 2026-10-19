@@ -20,9 +20,9 @@ use wp_contracts::{DamageMode, LoadedCar, ModeTable, Role, TimeOfDay};
 use wp_net::bot::{random_route, BotDriver};
 use wp_net::client::{default_damage_factory, Client, ClientConfig, Phase};
 use wp_net::native::{connect_ws, serve_ws, spawn_game_loop, LogFn, StatusReport};
-use wp_net::netsim::WpSim;
+use wp_net::netsim::{lane_spawn_points, server_world_config, CitySetup, WpSim};
 use wp_net::server::{ServerConfig, ServerInstance};
-use wp_net::testkit::{load_data, ArenaSim, ToyLattice};
+use wp_net::testkit::{load_data, ArenaSim, ToyLattice, AI_POLICE_CAR, TRAFFIC_CAR};
 use wp_net::Transport;
 use wp_sim::SimConfig;
 
@@ -36,7 +36,8 @@ usage: wp-server [--config FILE.toml] [--port N] [--admin-port N] [--bind ADDR]
   --port         websocket port (default 8080; 0 = any)
   --admin-port   admin HTTP port, GET /status (default 8081; 0 = any)
   --max-players  instance size (default 32)
-  --city         city file (validated to exist; wp_world has no city loader yet)
+  --city         city: a .road.json / .road.bin file, or `procedural` (12x12 blocks);
+                 adds physical traffic and AI police cars, players spawn on its lanes
   --seed         instance seed (default 1)
   --time-ratio   in-game seconds per real second (default 10)
   --time-of-day  start hour (default 21)
@@ -59,7 +60,7 @@ pub struct AppConfig {
     pub bind: String,
     /// Instance size.
     pub max_players: usize,
-    /// City file path (checked to exist; not consumed until `wp_world` has a loader).
+    /// City: a `.road.json` / `.road.bin` path or `procedural`; `None` = flat world.
     pub city: Option<String>,
     /// Instance seed.
     pub seed: u64,
@@ -188,29 +189,43 @@ pub async fn run(cfg: AppConfig, log: LogFn) -> Result<Running, String> {
     let data_dir = PathBuf::from(&cfg.data_dir);
     let (cars, modes) =
         load_data(&data_dir).map_err(|e| format!("loading {}: {e}", data_dir.display()))?;
-    if let Some(city) = &cfg.city {
-        if !std::path::Path::new(city).exists() {
-            return Err(format!("city file {city} not found"));
-        }
-        log(
-            "city_not_loaded",
-            vec![
-                ("city", city.clone()),
-                ("reason", "wp_world has no city loader yet".into()),
-            ],
-        );
-    }
     let sim_cfg = SimConfig {
         seed: cfg.seed,
         mode: modes[&mode].clone(),
         time_of_day: TimeOfDay::from_hours(cfg.time_of_day_h),
         time_ratio: cfg.time_ratio,
     };
-    let server_cfg = ServerConfig {
+    let mut server_cfg = ServerConfig {
         max_players: cfg.max_players,
         seed: cfg.seed,
         ..Default::default()
     };
+    let world = match &cfg.city {
+        Some(city) => {
+            let world = load_city(city, &sim_cfg)?;
+            let spawns = lane_spawn_points(&world, cfg.max_players.max(1));
+            if spawns.is_empty() {
+                return Err(format!("city {city} has no lane long enough to spawn on"));
+            }
+            log(
+                "city_loaded",
+                vec![
+                    ("city", city.clone()),
+                    ("lanes", world.network().lanes.len().to_string()),
+                    ("spawn_points", spawns.len().to_string()),
+                ],
+            );
+            server_cfg.spawn_points = spawns;
+            Some(world)
+        }
+        None => None,
+    };
+    // Bots drive around the first spawn point (the origin without a city).
+    let bot_center = server_cfg
+        .spawn_points
+        .first()
+        .filter(|_| world.is_some())
+        .map_or([0.0, 0.0], |(p, _)| [p[0], p[1]]);
 
     let ws = TcpListener::bind((cfg.bind.as_str(), cfg.port))
         .await
@@ -238,7 +253,20 @@ pub async fn run(cfg: AppConfig, log: LogFn) -> Result<Running, String> {
         None => {
             let cars = cars.clone();
             spawn_game_loop(
-                move || ServerInstance::new(server_cfg, WpSim::new(sim_cfg, cars)),
+                move || {
+                    let sim = match world {
+                        Some(world) => {
+                            let city = CitySetup {
+                                world,
+                                police_car: cars.get(AI_POLICE_CAR).cloned(),
+                                traffic_car: cars.get(TRAFFIC_CAR).cloned(),
+                            };
+                            WpSim::with_city(sim_cfg, cars, city)
+                        }
+                        None => WpSim::new(sim_cfg, cars),
+                    };
+                    ServerInstance::new(server_cfg, sim)
+                },
                 rx,
                 status.clone(),
                 log.clone(),
@@ -264,7 +292,10 @@ pub async fn run(cfg: AppConfig, log: LogFn) -> Result<Running, String> {
         let bot = BotSpec {
             index: i,
             seed: cfg.seed.wrapping_mul(1000) + i as u64,
-            route_radius: cfg.arena_radius_m.map_or(300.0, |r| r * 0.8),
+            route_center: bot_center,
+            route_radius: cfg
+                .arena_radius_m
+                .map_or(if cfg.city.is_some() { 150.0 } else { 300.0 }, |r| r * 0.8),
             arena: cfg.arena_radius_m.is_some(),
         };
         tokio::spawn(run_bot(
@@ -280,6 +311,16 @@ pub async fn run(cfg: AppConfig, log: LogFn) -> Result<Running, String> {
         admin_addr,
         status,
     })
+}
+
+/// Load a city for the server: `procedural` (the 12×12 procedural city) or a road file.
+pub fn load_city(city: &str, sim_cfg: &SimConfig) -> Result<wp_world::World, String> {
+    let wcfg = server_world_config(sim_cfg);
+    if city == "procedural" {
+        let pg = wp_world::procgen::ProcGenConfig::default();
+        return Ok(wp_world::World::procedural(&pg, wcfg));
+    }
+    wp_world::World::load(city, wcfg).map_err(|e| format!("loading city {city}: {e}"))
 }
 
 /// Status as JSON (admin endpoint body).
@@ -342,6 +383,7 @@ async fn serve_admin(listener: TcpListener, status: Arc<Mutex<StatusReport>>) {
 struct BotSpec {
     index: usize,
     seed: u64,
+    route_center: [f32; 2],
     route_radius: f32,
     arena: bool,
 }
@@ -376,7 +418,7 @@ async fn run_bot(
     });
     let mut driver = BotDriver::new(
         spec.seed,
-        random_route(spec.seed, [0.0, 0.0], spec.route_radius, 16),
+        random_route(spec.seed, spec.route_center, spec.route_radius, 16),
     );
     let start = Instant::now();
     client.connect(0.0, 0);

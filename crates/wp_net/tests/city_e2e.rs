@@ -27,17 +27,15 @@ use common::Harness;
 use wp_contracts::{DamageMode, DamageSim, EntityId, Role, TimeOfDay};
 use wp_net::bot::BotDriver;
 use wp_net::client::default_damage_factory;
-use wp_net::netsim::{NetSim, WpSim};
+use wp_net::netsim::{server_world_config, CitySetup, NetSim, WpSim};
 use wp_net::protocol::EntityKind;
 use wp_net::quant::QVehicle;
 use wp_net::server::ServerConfig;
 use wp_net::sim_link::LinkConfig;
-use wp_net::testkit::{load_data, repo_data_dir};
+use wp_net::testkit::{load_data, repo_data_dir, AI_POLICE_CAR, TRAFFIC_CAR};
 use wp_net::DOWNLINK_BUDGET_BPS;
-use wp_sim::{Sim, SimConfig};
+use wp_sim::SimConfig;
 
-const POLICE_CAR: &str = "sentinel_cruiser";
-const TRAFFIC_CAR: &str = "debug_sedan";
 /// Southbound lane of the x ≈ 55 m collector (same street as simcli's `golden_city_chase`).
 const LANE_X: f32 = 53.25;
 
@@ -51,6 +49,8 @@ fn link(seed: u64, latency_ms: f64) -> LinkConfig {
     }
 }
 
+/// The server's city instance: 8×8 procedural blocks at 23:00, physical traffic, AI police
+/// cars (the same builder `wp-server --city procedural` uses).
 fn city_sim(
     seed: u64,
 ) -> (
@@ -58,17 +58,13 @@ fn city_sim(
     BTreeMap<String, wp_contracts::LoadedCar>,
     BTreeMap<DamageMode, wp_contracts::ModeTable>,
 ) {
-    let (mut cars, modes) = load_data(&repo_data_dir()).expect("data");
-    let police_car =
-        wp_contracts::load_car(repo_data_dir().join(format!("cars/{POLICE_CAR}.json")))
-            .expect("police car");
-    cars.insert(POLICE_CAR.to_string(), police_car.clone());
-    let mut sim = Sim::new(SimConfig {
+    let (cars, modes) = load_data(&repo_data_dir()).expect("data");
+    let config = SimConfig {
         seed,
         mode: modes[&DamageMode::Arcade].clone(),
         time_of_day: TimeOfDay::from_hours(23.0),
         time_ratio: 1.0,
-    });
+    };
     let pg = wp_world::procgen::ProcGenConfig {
         nx: 8,
         ny: 8,
@@ -76,26 +72,13 @@ fn city_sim(
         seed: 1,
         ..Default::default()
     };
-    let world = wp_world::World::procedural(
-        &pg,
-        wp_world::WorldConfig {
-            seed,
-            start_time: TimeOfDay::from_hours(23.0),
-            time_ratio: 1.0,
-            traffic: wp_world::TrafficConfig {
-                enabled: true,
-                detect_collisions: true,
-                ..Default::default()
-            },
-            // Thousands of parked-car bodies make debug runs very slow and add nothing here.
-            parked_cars: false,
-        },
-    );
-    // `set_world` builds `wp_police` on the city's roads (built-in patrol tables).
-    sim.set_world(world);
-    sim.set_police_car(police_car);
-    sim.set_traffic_car(cars[TRAFFIC_CAR].clone());
-    (WpSim::from_sim(sim, cars.clone()), cars, modes)
+    let world = wp_world::World::procedural(&pg, server_world_config(&config));
+    let city = CitySetup {
+        world,
+        police_car: Some(cars[AI_POLICE_CAR].clone()),
+        traffic_car: Some(cars[TRAFFIC_CAR].clone()),
+    };
+    (WpSim::with_city(config, cars.clone(), city), cars, modes)
 }
 
 /// Quantised states of every AI police car, exactly as the server sends them.
@@ -123,7 +106,7 @@ fn four_players_in_a_police_city() {
         .collect();
     let cfg = ServerConfig {
         racer_car: "debug_coupe".into(),
-        police_car: POLICE_CAR.into(),
+        police_car: AI_POLICE_CAR.into(),
         spawn_points: spawns,
         ..ServerConfig::default()
     };
