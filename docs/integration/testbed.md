@@ -318,6 +318,9 @@ populating around the player).
 ## Known gaps
 - Signals: no turn arrows or pedestrian heads (the city has no protected-turn or walk phases);
   the far-side head is placed by junction radius, not by the outgoing road's real curb.
+- e2e "city chase" check fails in the cloud container on `main` too (2026-10-19): headless
+  SwiftShader runs the sim at ~150–250 ticks per 5 s wall-clock, so the player never earns heat.
+  Same root cause as playtest item 3 (browser sim falls behind real time).
 - Region energy / stress are elastic-strain proxies (TB-2).
 - Recordings always cover the whole session from tick 0 (`record_start` does not trim; the
   replay format has no view-start field).
