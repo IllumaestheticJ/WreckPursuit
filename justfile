@@ -31,6 +31,11 @@ native:
 server port="8080":
     cargo run -p wp_server --bin wp-server -- --port {{port}}
 
+# Meta service (accounts, matchmaking, leaderboards, admin) on 127.0.0.1:8090 with dev secrets
+# and fast password hashing. Never use these settings in a deployment (see apps/meta/README.md).
+meta:
+    WP_META_DB=meta-dev.sqlite WP_META_INSTANCE_KEY=dev-instance-key-000 WP_META_ADMIN_TOKEN=dev-admin-token-0000 WP_META_FAST_HASH=1 cargo run -p wp_meta --bin wp-meta
+
 # Run one headless scenario, e.g. `just sim apps/simcli/scenarios/smoke/straight_line.ron`.
 sim scenario:
     cargo run --release -p simcli -- {{scenario}}
