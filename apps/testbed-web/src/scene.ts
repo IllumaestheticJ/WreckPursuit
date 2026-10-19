@@ -58,8 +58,10 @@ export class SceneView {
   /** Called once with each city's glTF scene when it has loaded (wet road materials). */
   onCityLoaded: ((root: THREE.Object3D, cityId: string) => void) | null = null;
 
-  constructor(parent: HTMLElement) {
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+  /** `antialias: false` when the art style's post stack does the antialiasing (its own MSAA
+   * target), which saves resolving a second multisampled canvas every frame. */
+  constructor(parent: HTMLElement, opts: { antialias?: boolean } = {}) {
+    this.renderer = new THREE.WebGLRenderer({ antialias: opts.antialias ?? true, preserveDrawingBuffer: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     parent.appendChild(this.renderer.domElement);

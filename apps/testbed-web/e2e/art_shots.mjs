@@ -1,10 +1,8 @@
 // Art-style screenshots and perf for docs/media/art/ (machine S, render/style.ts).
 // Usage (after `npm run wasm`): node e2e/art_shots.mjs [outDir]   Env: CHROMIUM, VIEWPORT=WxH.
 // Shots: the city chase in Port Vesper at dawn / day / dusk / night in low-poly dark, the same
-// night in greybox, the rainy night, a police close-up and a street-level view. Then a perf
-// A/B in the night chase: frame / render ms in each style and the post pass alone (render with
-// and without the post stack, GPU synced with readPixels; swiftshader = relative numbers).
-// Prints one PERF line per measurement; exits 1 on page errors.
+// night in greybox, the rainy night, a police close-up and street-level / aerial views downtown.
+// Perf A/B: e2e/art_perf.mjs. Exits 1 on page errors.
 import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -144,62 +142,6 @@ await page.keyboard.up("KeyW");
 await page.screenshot({ path: join(out, "rainy_night_chase.png") });
 console.log("wrote rainy_night_chase.png");
 
-// Perf A/B in the night chase.
-await chase(23);
-await page.evaluate(() => window.__wp.setCamera("chase"));
-await page.keyboard.down("KeyW");
-await page.waitForTimeout(3000);
-const measure = (style) =>
-  page.evaluate(async (s) => {
-    const w = window.__wp;
-    w.setStyle(s);
-    await new Promise((r) => setTimeout(r, 1500));
-    const p0 = { ...w.app.perf };
-    const t0 = performance.now();
-    let frames = 0;
-    await new Promise((resolve) => {
-      const tick = () => {
-        frames++;
-        if (performance.now() - t0 < 6000) requestAnimationFrame(tick);
-        else resolve();
-      };
-      requestAnimationFrame(tick);
-    });
-    const wall = performance.now() - t0;
-    return { style: s, fps: (frames * 1000) / wall, renderMs: w.app.perf.renderMs, frameMs: w.app.perf.frameMs, calls: w.scene.renderer.info.render.calls, before: p0.renderMs };
-  }, style);
-const grey = await measure("greybox");
-const low = await measure("lowpoly");
-console.log(`PERF style frame (swiftshader ${vw}×${vh}, night chase): greybox ${grey.fps.toFixed(1)} fps, render ${grey.renderMs.toFixed(2)} ms; low-poly dark ${low.fps.toFixed(1)} fps, render ${low.renderMs.toFixed(2)} ms (${low.calls} draw calls in the last pass)`);
-// Post pass alone: same frame rendered plainly vs through the post stack (both GPU-synced).
-const post = await page.evaluate(() => {
-  const w = window.__wp;
-  w.app.paused = true;
-  const r = w.scene.renderer;
-  const gl = r.getContext();
-  const px = new Uint8Array(4);
-  const time = (fn) => {
-    fn();
-    gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
-    const t0 = performance.now();
-    for (let i = 0; i < 15; i++) {
-      fn();
-      gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
-    }
-    return (performance.now() - t0) / 15;
-  };
-  const plain = time(() => r.render(w.scene.scene, w.rig.camera));
-  const styled = time(() => w.scene.render(w.rig.camera));
-  w.style.bloom = false;
-  const noBloom = time(() => w.scene.render(w.rig.camera));
-  w.style.bloom = true;
-  w.app.paused = false;
-  return { plain, styled, noBloom, w: gl.drawingBufferWidth, h: gl.drawingBufferHeight };
-});
-console.log(
-  `PERF post pass (swiftshader ${post.w}×${post.h}): scene ${post.plain.toFixed(2)} ms plain → ${post.styled.toFixed(2)} ms through the post stack ` +
-    `(+${(post.styled - post.plain).toFixed(2)} ms; tonemap only ${post.noBloom.toFixed(2)} ms)`,
-);
 const lamps = await page.evaluate(() => window.__wp.style.lampCount("vesper_v2"));
 console.log(`street lamps in Port Vesper: ${lamps}`);
 

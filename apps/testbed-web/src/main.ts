@@ -85,7 +85,12 @@ const app: AppState = {
 async function main(): Promise<void> {
   await loadWasm();
   const overlay = $("overlay");
-  const scene = new SceneView(document.body);
+  // Art style (machine S): low-poly dark by default; the selector / ?style= switch to greybox.
+  const STYLE_KEY = "wp.testbed.style.v1";
+  const initialStyle: StyleId = (params.get("style") ?? store.get(STYLE_KEY)) === "greybox" ? "greybox" : "lowpoly";
+  // The low-poly post stack renders into its own MSAA target: no multisampled canvas needed
+  // (greybox picked later in the session then draws without antialiasing).
+  const scene = new SceneView(document.body, { antialias: initialStyle === "greybox" });
   const rig = new CameraRig(scene.renderer.domElement);
   const hud = new Hud(overlay);
   const plots = new TelemetryPlots(overlay);
@@ -106,12 +111,9 @@ async function main(): Promise<void> {
   });
   const weather = new WeatherView(scene.scene, scene.renderer, overlay);
   weather.attachMaterial(scene.groundMaterial);
-  // Art style (machine S): low-poly dark by default; the selector / ?style= switch to greybox.
-  const STYLE_KEY = "wp.testbed.style.v1";
   const styleSel = $("style") as HTMLSelectElement;
   for (const [id, label] of Object.entries(STYLE_LABELS)) styleSel.add(new Option(label, id));
-  const styleParam = params.get("style") ?? store.get(STYLE_KEY);
-  const style = new ArtStyle(scene, styleParam === "greybox" ? "greybox" : "lowpoly");
+  const style = new ArtStyle(scene, initialStyle);
   styleSel.value = style.id;
   const setStyle = (id: StyleId) => {
     style.set(id);

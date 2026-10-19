@@ -767,7 +767,7 @@ function smooth(e0: number, e1: number, x: number): number {
   return t * t * (3 - 2 * t);
 }
 
-/** Traffic agent box colour in low-poly dark: muted paint per agent, brake = dark red. */
+/** Traffic agent box colour in low-poly dark: a muted paint per agent slot and variant. */
 function lowpolyAgentColour(flags: number, index: number): number {
   const p = PALETTE.trafficPaints;
   return col(p[(index * 7 + (flags >> 8)) % p.length]).getHex();
