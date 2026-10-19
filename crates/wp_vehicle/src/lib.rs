@@ -64,6 +64,13 @@ impl Vehicle {
         self.engine_rpm = self.def.engine.idle_rpm;
     }
 
+    /// Teleport to a pose already moving forward at `speed_mps` (along chassis +Y). Used by
+    /// `wp_world` to promote kinematic traffic to a physical vehicle without a jolt.
+    pub fn set_pose_and_speed(&mut self, pos: [f32; 3], yaw: f32, speed_mps: f32) {
+        self.reset(pos, yaw);
+        self.speed = speed_mps;
+    }
+
     fn peak_torque_nm(&self) -> f32 {
         self.def
             .engine
