@@ -12,6 +12,9 @@ wp_math.workspace = true
 # Read-only bridges: route geometry/POIs/zones from wp_world, payout inputs for wp_economy.
 wp_world.workspace = true
 wp_economy.workspace = true
+# AI entrants (wp_opponent field) and race → police reports (wp_police input events).
+wp_opponent.workspace = true
+wp_police.workspace = true
 serde.workspace = true
 toml.workspace = true
 thiserror.workspace = true

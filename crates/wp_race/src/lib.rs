@@ -17,6 +17,9 @@
 //! | [`progression`] | class brackets, licence tiers, entry requirements (`data/events/progression.toml`) |
 //! | [`signals`] | events emitted to `wp_net`, `wp_economy`, `wp_police` |
 //! | [`trace`] | deterministic scripted race traces for tests and balancing |
+//! | [`entrants`] | AI entrants: `wp_opponent` racers driven in a judged race |
+//! | [`police`] | race signals → `wp_police` input events (hot meets call in a patrol) |
+//! | [`cargo`] | Delivery cargo applied to the car's mass, CG and inertia |
 //! | [`bridge`] | `wp_world` city race planning + race-route activation, POIs/zones; `wp_economy` payout inputs |
 //!
 //! `wp_net` owns the lobby transport; this crate owns the rules. Everything here is
@@ -30,9 +33,11 @@ pub mod cargo;
 pub mod course;
 pub mod crew;
 pub mod data;
+pub mod entrants;
 pub mod error;
 pub mod judge;
 pub mod kind;
+pub mod police;
 pub mod progression;
 pub mod result;
 pub mod rules;

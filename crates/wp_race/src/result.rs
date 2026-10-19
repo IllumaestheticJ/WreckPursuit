@@ -34,6 +34,8 @@ pub enum DnfReason {
     Outrun,
     /// Disconnected from the server.
     Disconnected,
+    /// Abandoned the race to run from the police (AI entrants; see `entrants`).
+    Fled,
 }
 
 /// Why a racer was disqualified (ranked below every finisher and every DNF).
