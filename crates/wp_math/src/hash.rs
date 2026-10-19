@@ -6,7 +6,23 @@ pub fn quantize(v: f32, scale: f32) -> i64 {
     if v.is_nan() {
         return i64::MIN;
     }
-    (v as f64 * scale as f64).round() as i64
+    round_half_away(v as f64 * scale as f64)
+}
+
+/// `y.round() as i64` (half away from zero, saturating, NaN → 0) without the `round` libcall,
+/// which neither x86-64 baseline nor wasm32 has as an instruction; bit-identical results (see
+/// the `fast_round_matches_std` test). `y - trunc(y)` is exact for every `f64`: below 2^52 it
+/// is the fractional part, above it `y` is already an integer.
+fn round_half_away(y: f64) -> i64 {
+    let t = y as i64;
+    let frac = y - t as f64;
+    if frac >= 0.5 {
+        t.saturating_add(1)
+    } else if frac <= -0.5 {
+        t.saturating_sub(1)
+    } else {
+        t
+    }
 }
 
 /// FNV-1a 64-bit hasher. Stable across platforms, versions and runs (unlike `std` hashers).
@@ -69,6 +85,52 @@ impl StateHasher {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fast_round_matches_std() {
+        let reference = |y: f64| y.round() as i64;
+        let mut edge = vec![
+            0.0,
+            -0.0,
+            0.5,
+            -0.5,
+            1.5,
+            -1.5,
+            2.5,
+            -2.5,
+            0.499_999_999_999_999_94,
+            -0.499_999_999_999_999_94,
+            4_503_599_627_370_495.5,
+            -4_503_599_627_370_495.5,
+            4_503_599_627_370_496.0,
+            9_007_199_254_740_993.0,
+            9.223_372_036_854_775e18,
+            -9.223_372_036_854_775e18,
+            1e19,
+            -1e19,
+            f64::MAX,
+            f64::MIN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NAN,
+            f64::MIN_POSITIVE,
+        ];
+        // Random bit patterns and random values around every scale the hashes use.
+        let mut x: u64 = 0x9E37_79B9_7F4A_7C15;
+        for i in 0..200_000 {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            edge.push(f64::from_bits(x));
+            let f = f32::from_bits(x as u32);
+            let scale = [1.0f32, 1e3, 1e4, 1e5][i % 4];
+            edge.push(f as f64 * scale as f64);
+            edge.push((x % 2_000_001) as f64 * 0.5 - 500_000.0);
+        }
+        for y in edge {
+            assert_eq!(round_half_away(y), reference(y), "y = {y:e}");
+        }
+    }
 
     #[test]
     fn fnv_reference_value() {

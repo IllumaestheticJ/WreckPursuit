@@ -297,6 +297,7 @@ fn panel_name(r: BodyRegion) -> String {
         Windshield => "windshield".into(),
         RearGlass => "rear_glass".into(),
         Cabin => "body".into(),
+        Accessory => "accessory".into(),
         FrameFront => "frame_front".into(),
         FrameRear => "frame_rear".into(),
     }

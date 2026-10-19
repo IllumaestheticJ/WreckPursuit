@@ -40,6 +40,13 @@ interface WheelView {
   susp: THREE.Mesh;
 }
 
+/** Element-wise equality of two node arrays (cheaper than rebuilding geometry). */
+function sameValues(a: Float32Array, b: Float32Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
 export class VehicleView {
   readonly root = new THREE.Group();
   readonly info: VehicleInfo;
@@ -57,6 +64,10 @@ export class VehicleView {
   readonly velocity: THREE.ArrowHelper;
   /** Latest lattice nodes (chassis space). */
   nodes: Float32Array;
+  /** Lattice wireframe / skin need rebuilding (nodes changed or a layer was switched on). */
+  private shapeDirty = true;
+  /** The wireframe currently carries strain colours (repaint grey when stress turns off). */
+  private strainShown = false;
   private readonly lightBar: THREE.Group | null = null;
   private readonly barRed: THREE.MeshStandardMaterial | null = null;
   private readonly barBlue: THREE.MeshStandardMaterial | null = null;
@@ -131,12 +142,17 @@ export class VehicleView {
     this.lattice = new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ vertexColors: true, depthTest: false, transparent: true }));
     this.lattice.renderOrder = 2;
     this.root.add(this.lattice);
+    // Nodes stay near the body box (chassis space) even when crushed: a fixed bounding sphere
+    // instead of recomputing one for every car every frame.
+    const bound = new THREE.Sphere(new THREE.Vector3(0, 0, h / 2), 0.5 * Math.hypot(w, l, h) + 1);
+    lg.boundingSphere = bound;
 
     // Stress heat-map points.
     const sg = new THREE.BufferGeometry();
     sg.setAttribute("position", new THREE.BufferAttribute(this.nodes, 3));
     this.stressCol = new Float32Array(this.nodes.length);
     sg.setAttribute("color", new THREE.BufferAttribute(this.stressCol, 3));
+    sg.boundingSphere = bound;
     this.stressPoints = new THREE.Points(sg, new THREE.PointsMaterial({ size: 0.12, vertexColors: true, depthTest: false }));
     this.stressPoints.renderOrder = 3;
     this.root.add(this.stressPoints);
@@ -206,7 +222,19 @@ export class VehicleView {
     const latticeOn = layers.on("lattice") || (bodyOn && !layers.on("panels"));
     const stressOn = layers.on("stress");
     const needNodes = latticeOn || stressOn || (bodyOn && this.skinned) || panelsOn;
-    if (needNodes) this.nodes = sim.latticeNodes(this.entity);
+    if (needNodes) {
+      // Nodes only move when the car is dented: rebuild the wireframe / skin on change only.
+      const fresh = sim.latticeNodes(this.entity);
+      if (!sameValues(fresh, this.nodes)) {
+        this.nodes = fresh;
+        this.shapeDirty = true;
+      }
+    } else {
+      // Rebuild once a layer that needs nodes comes back on.
+      this.shapeDirty = true;
+    }
+    const rebuild = this.shapeDirty;
+    if (needNodes) this.shapeDirty = false;
     this.panels.root.visible = panelsOn;
     for (const lamp of this.lamps) lamp.visible = !panelsOn;
     for (const w of this.wheels)
@@ -228,7 +256,7 @@ export class VehicleView {
     } else if (this.skinned) {
       this.skinned.object.visible = bodyOn;
       this.box.visible = false;
-      if (bodyOn) this.skinned.update(this.nodes);
+      if (bodyOn && rebuild) this.skinned.update(this.nodes);
     } else {
       this.box.visible = bodyOn;
     }
@@ -240,23 +268,29 @@ export class VehicleView {
     this.lattice.visible = latticeOn;
     this.stressPoints.visible = stressOn;
     if (latticeOn || stressOn) {
+      // Strain colours change every frame; positions only when the nodes did.
       const strain = stressOn ? sim.latticeStrain(this.entity) : null;
-      for (let b = 0; b < this.beams.length; b++) {
-        const n = this.beams[b];
-        this.latticePos.set(this.nodes.subarray(n * 3, n * 3 + 3), b * 3);
-        if (strain) heat(strain[n] / STRAIN_RED).toArray(this.latticeCol, b * 3);
-        else this.latticeCol.fill(0.75, b * 3, b * 3 + 3);
+      if (rebuild || strain || this.strainShown) {
+        const pos = this.latticePos;
+        const col = this.latticeCol;
+        for (let b = 0; b < this.beams.length; b++) {
+          const n = this.beams[b] * 3;
+          pos[b * 3] = this.nodes[n];
+          pos[b * 3 + 1] = this.nodes[n + 1];
+          pos[b * 3 + 2] = this.nodes[n + 2];
+          if (strain) heat(strain[n / 3] / STRAIN_RED).toArray(col, b * 3);
+          else col[b * 3] = col[b * 3 + 1] = col[b * 3 + 2] = 0.75;
+        }
+        this.lattice.geometry.attributes.position.needsUpdate = true;
+        this.lattice.geometry.attributes.color.needsUpdate = true;
+        this.strainShown = strain !== null;
       }
-      this.lattice.geometry.attributes.position.needsUpdate = true;
-      this.lattice.geometry.attributes.color.needsUpdate = true;
-      this.lattice.geometry.computeBoundingSphere();
       if (strain) {
         const pos = this.stressPoints.geometry.attributes.position as THREE.BufferAttribute;
         (pos.array as Float32Array).set(this.nodes);
         pos.needsUpdate = true;
         for (let i = 0; i < strain.length; i++) heat(strain[i] / STRAIN_RED).toArray(this.stressCol, i * 3);
         this.stressPoints.geometry.attributes.color.needsUpdate = true;
-        this.stressPoints.geometry.computeBoundingSphere();
       }
     }
 

@@ -323,9 +323,10 @@ pub fn run(
                     });
                     open.insert(key, (hits.len() - 1, now));
                 }
-                SimEvent::PoliceEvent { kind, .. } => {
-                    first_kind.entry(*kind).or_insert(now);
-                    *kind_counts.entry(*kind).or_default() += 1;
+                SimEvent::Police(pe) => {
+                    let kind = pe.kind();
+                    first_kind.entry(kind).or_insert(now);
+                    *kind_counts.entry(kind).or_default() += 1;
                 }
                 SimEvent::TotalLoss { vehicle } => {
                     if let Some(i) = scenario_index(*vehicle) {

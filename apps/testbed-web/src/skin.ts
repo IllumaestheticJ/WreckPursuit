@@ -1,6 +1,6 @@
 // Skinned deformable body: every visual vertex is a linear blend of up to four lattice nodes
-// (wp_contracts::SkinBind). Positions are refreshed from lattice_nodes() each frame; normals
-// every 4th frame.
+// (wp_contracts::SkinBind). Positions and normals are refreshed from lattice_nodes() whenever
+// the nodes change (VehicleView skips unchanged frames).
 //
 // Debug cars ship with an empty skin_binding and no visual mesh, so for regular grid lattices
 // (like the generated 4×10×3 box lattices) we synthesise a hull binding: the outer faces of the
@@ -96,7 +96,6 @@ export class SkinnedBody {
   readonly object: THREE.Mesh | THREE.Points;
   private readonly geom = new THREE.BufferGeometry();
   private readonly pos: Float32Array;
-  private frame = 0;
 
   constructor(readonly skin: SkinData, material: THREE.Material) {
     this.pos = new Float32Array(skin.vertexCount * 3);
@@ -130,7 +129,7 @@ export class SkinnedBody {
     }
     const attr = this.geom.getAttribute("position") as THREE.BufferAttribute;
     attr.needsUpdate = true;
-    if (this.skin.index && this.frame++ % 4 === 0) this.geom.computeVertexNormals();
+    if (this.skin.index) this.geom.computeVertexNormals();
     this.geom.computeBoundingSphere();
   }
 }

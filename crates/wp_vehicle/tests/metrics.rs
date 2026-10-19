@@ -71,7 +71,10 @@ fn rwd_coupe_metrics() {
     let onset = r
         .power_oversteer_throttle_40m
         .expect("RWD coupe must power-oversteer");
-    assert!(onset < 0.7, "power oversteer onset at {onset}");
+    // 0.82 in 2nd with the rev-matched automatic. The old box measured 0.52 because it held
+    // first to 4,500 rpm and then dumped the clutch at the limiter mid-corner (a shift shock,
+    // not power oversteer).
+    assert!(onset < 0.9, "power oversteer onset at {onset}");
     assert!(
         r.power_on_curvature_ratio_40m > 1.0,
         "RWD should rotate on power"
