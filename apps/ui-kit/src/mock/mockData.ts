@@ -103,6 +103,7 @@ export function defaultSettings(): Settings {
     assists: { ...ASSIST_PRESETS.full },
     damageMode: "Arcade",
     units: "metric",
+    input: { steerDeadzone: 0.04, steerLinearity: 1.4, wheelRotationDeg: 900, combinedPedals: false },
     accessibility: { palette: "default", uiScale: 1, reduceMotion: false, largeScannerText: false },
     feedback: { rumble: true, rumbleStrength: 0.7, ffbStrength: 0.8 },
     audio: { master: 0.9, engine: 0.8, scanner: 0.7, music: 0.5 },

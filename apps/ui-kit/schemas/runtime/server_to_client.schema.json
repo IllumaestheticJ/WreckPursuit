@@ -128,6 +128,111 @@
     }
   ],
   "$defs": {
+    "BodyRegion": {
+      "description": "Body region a lattice node belongs to. Used for damage accounting, repair billing,\ndetachable groups and the HUD damage silhouette.",
+      "oneOf": [
+        {
+          "description": "Front bumper cover and beam.",
+          "type": "string",
+          "const": "FrontBumper"
+        },
+        {
+          "description": "Hood / bonnet.",
+          "type": "string",
+          "const": "Hood"
+        },
+        {
+          "description": "Front-left fender.",
+          "type": "string",
+          "const": "FrontLeftFender"
+        },
+        {
+          "description": "Front-right fender.",
+          "type": "string",
+          "const": "FrontRightFender"
+        },
+        {
+          "description": "Left front door.",
+          "type": "string",
+          "const": "LeftDoorF"
+        },
+        {
+          "description": "Left rear door (or rear half of the left side on 2-door cars).",
+          "type": "string",
+          "const": "LeftDoorR"
+        },
+        {
+          "description": "Right front door.",
+          "type": "string",
+          "const": "RightDoorF"
+        },
+        {
+          "description": "Right rear door.",
+          "type": "string",
+          "const": "RightDoorR"
+        },
+        {
+          "description": "Roof panel.",
+          "type": "string",
+          "const": "Roof"
+        },
+        {
+          "description": "Rear-left quarter panel.",
+          "type": "string",
+          "const": "RearLeftQuarter"
+        },
+        {
+          "description": "Rear-right quarter panel.",
+          "type": "string",
+          "const": "RearRightQuarter"
+        },
+        {
+          "description": "Trunk / boot lid / tailgate.",
+          "type": "string",
+          "const": "Trunk"
+        },
+        {
+          "description": "Rear bumper cover and beam.",
+          "type": "string",
+          "const": "RearBumper"
+        },
+        {
+          "description": "Windshield.",
+          "type": "string",
+          "const": "Windshield"
+        },
+        {
+          "description": "Rear window.",
+          "type": "string",
+          "const": "RearGlass"
+        },
+        {
+          "description": "Front frame rails / crumple zone.",
+          "type": "string",
+          "const": "FrameFront"
+        },
+        {
+          "description": "Rear frame rails / crumple zone.",
+          "type": "string",
+          "const": "FrameRear"
+        },
+        {
+          "description": "Left sill / side frame.",
+          "type": "string",
+          "const": "FrameLeft"
+        },
+        {
+          "description": "Right sill / side frame.",
+          "type": "string",
+          "const": "FrameRight"
+        },
+        {
+          "description": "Passenger cell (pillars, floor, firewall). Intrusion here drives total loss.",
+          "type": "string",
+          "const": "Cabin"
+        }
+      ]
+    },
     "Component": {
       "description": "Mechanical component that can be damaged by intrusion.",
       "oneOf": [
@@ -556,6 +661,16 @@
                   "description": "What happened.",
                   "$ref": "#/$defs/ViolationKind"
                 },
+                "pos": {
+                  "description": "Where it happened, world m (v0.2.0; police witnesses / cameras).",
+                  "type": "array",
+                  "items": {
+                    "type": "number",
+                    "format": "float"
+                  },
+                  "maxItems": 3,
+                  "minItems": 3
+                },
                 "vehicle": {
                   "description": "Offending vehicle.",
                   "$ref": "#/$defs/EntityId"
@@ -563,13 +678,74 @@
               },
               "required": [
                 "vehicle",
-                "kind"
+                "kind",
+                "pos"
               ]
             }
           },
           "additionalProperties": false,
           "required": [
             "TrafficViolation"
+          ]
+        },
+        {
+          "description": "All glass of a body region shattered (v0.2.0; renderer, audio, net).",
+          "type": "object",
+          "properties": {
+            "GlassShattered": {
+              "type": "object",
+              "properties": {
+                "region": {
+                  "description": "Region whose glass broke.",
+                  "$ref": "#/$defs/BodyRegion"
+                },
+                "vehicle": {
+                  "description": "Vehicle.",
+                  "$ref": "#/$defs/EntityId"
+                }
+              },
+              "required": [
+                "vehicle",
+                "region"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "GlassShattered"
+          ]
+        },
+        {
+          "description": "A body region crossed a damage threshold (v0.2.0; HUD silhouette, police \"visibly\nwrecked\" heuristics). Thresholded like `ComponentDamaged`, not emitted every tick.",
+          "type": "object",
+          "properties": {
+            "RegionDamaged": {
+              "type": "object",
+              "properties": {
+                "region": {
+                  "description": "Region.",
+                  "$ref": "#/$defs/BodyRegion"
+                },
+                "severity": {
+                  "description": "Damage severity 0 (cosmetic) ..= 1 (destroyed).",
+                  "type": "number",
+                  "format": "float"
+                },
+                "vehicle": {
+                  "description": "Vehicle.",
+                  "$ref": "#/$defs/EntityId"
+                }
+              },
+              "required": [
+                "vehicle",
+                "region",
+                "severity"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "RegionDamaged"
           ]
         },
         {
@@ -857,6 +1033,18 @@
         "detached": {
           "description": "Whether the wheel has been torn off.",
           "type": "boolean"
+        },
+        "fx_n": {
+          "description": "Longitudinal tire force actually applied this tick, tire frame, N (v0.2.0; + = forward).",
+          "type": "number",
+          "format": "float",
+          "default": 0.0
+        },
+        "fy_n": {
+          "description": "Lateral tire force actually applied this tick, tire frame, N (v0.2.0; + = left).",
+          "type": "number",
+          "format": "float",
+          "default": 0.0
         },
         "fz_n": {
           "description": "Vertical tire load, N.",

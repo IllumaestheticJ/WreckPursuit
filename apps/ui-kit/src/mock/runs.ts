@@ -7,13 +7,20 @@
  * Fixtures live in `fixtures/runs/<name>/` (see `scripts/gen-fixtures.mjs`).
  */
 import type { SimEvent } from "../generated/contracts";
-import type { ProposedSimEvent } from "../model/proposed";
+import type { CaptainView } from "../model/police";
+import type { CityMap } from "../model/types";
 
 /** One line of `events.jsonl`. */
 export interface EventLine {
   tick: number;
   t_s: number;
-  event: SimEvent | ProposedSimEvent;
+  event: SimEvent;
+}
+
+/** One line of a recorded run's `captain.jsonl` (`wp_police::CaptainView` samples). */
+export interface CaptainSample {
+  tick: number;
+  view: CaptainView;
 }
 
 /** One row of `metrics.csv`. */
@@ -57,6 +64,10 @@ export interface Run {
   metrics: Record<string, MetricsRow[]>;
   totalTicks: number;
   ticksPerSecond: number;
+  /** `CaptainView` samples in tick order (recorded wp_police runs only). */
+  captain: CaptainSample[];
+  /** The run's own map (recorded wp_police runs drive E's police city), else null. */
+  map: CityMap | null;
 }
 
 /** Parse `events.jsonl` (blank lines ignored; a bad line throws with its line number). */
@@ -134,7 +145,7 @@ export function parseMetricsCsv(text: string): Record<string, MetricsRow[]> {
 export function parseRun(
   id: string,
   label: string,
-  files: { events: string; metrics: string; summary: string },
+  files: { events: string; metrics: string; summary: string; captain?: string; map?: string },
   synthetic = false,
 ): Run {
   const summary = JSON.parse(files.summary) as { ticks: number; entities: RunEntity[] };
@@ -150,7 +161,52 @@ export function parseRun(
     metrics,
     totalTicks: Math.max(summary.ticks ?? 0, lastMetric),
     ticksPerSecond: 240,
+    captain: files.captain ? parseCaptainJsonl(files.captain) : [],
+    map: files.map ? parseMapJson(files.map) : null,
   };
+}
+
+/** Parse `captain.jsonl` (`{"tick","view"}` per line). */
+export function parseCaptainJsonl(text: string): CaptainSample[] {
+  return text
+    .split("\n")
+    .filter((l) => l.trim())
+    .map((l) => JSON.parse(l) as CaptainSample);
+}
+
+/** Parse a map fixture (`scripts/gen-fixtures.mjs` / `tools/record-police` format). */
+export function parseMapJson(text: string): CityMap {
+  const m = JSON.parse(text) as {
+    id: string;
+    bounds_min: [number, number];
+    bounds_max: [number, number];
+    roads: { id: number; points: [number, number][]; speed_limit_mps: number; district?: CityMap["roads"][number]["district"] }[];
+    zones: { id: number; kind: string; polygon: [number, number][] }[];
+    pois: { kind: string; name: string; pos: [number, number] }[];
+  };
+  return {
+    id: m.id,
+    boundsMin: m.bounds_min,
+    boundsMax: m.bounds_max,
+    roads: m.roads.map((r) => ({ id: r.id, points: r.points, speedLimitMps: r.speed_limit_mps, district: r.district })),
+    zones: m.zones,
+    pois: m.pois,
+  };
+}
+
+/** Index of the last captain sample with `tick <= t`, or -1. */
+export function captainAt(samples: CaptainSample[], tick: number): number {
+  let lo = 0;
+  let hi = samples.length - 1;
+  let ans = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (samples[mid].tick <= tick) {
+      ans = mid;
+      lo = mid + 1;
+    } else hi = mid - 1;
+  }
+  return ans;
 }
 
 /** Index of the last row with `tick <= t` (binary search), or -1. */

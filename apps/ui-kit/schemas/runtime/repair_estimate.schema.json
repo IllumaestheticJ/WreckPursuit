@@ -290,12 +290,12 @@
           "$ref": "#/$defs/RepairItem"
         },
         "labour_hours": {
-          "description": "Labour hours.",
+          "description": "Labour hours, **unscaled**.",
           "type": "number",
           "format": "float"
         },
         "parts_cost": {
-          "description": "Parts cost.",
+          "description": "Parts cost, **unscaled** (v0.2.0 clarification: the mode's `repair_cost_scale` is not in it).",
           "type": "number",
           "format": "float"
         },
@@ -305,7 +305,7 @@
           "format": "float"
         },
         "total": {
-          "description": "Line total (parts + labour), already including the mode's `repair_cost_scale`.",
+          "description": "Line total (parts + labour), the only figure that includes the mode's `repair_cost_scale`.",
           "type": "number",
           "format": "float"
         }

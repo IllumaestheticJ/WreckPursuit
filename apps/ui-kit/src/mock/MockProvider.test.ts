@@ -78,17 +78,48 @@ describe("mock provider", () => {
     expect(mods).not.toContain("engine_intake_1");
   });
 
-  it("captain commands move units and spend charges", () => {
+  it("toy captain follows wp_police rules: orders, cooldowns, locks, budget", () => {
     const m = manual();
+    // Before any pursuit, ordering a unit onto the racer is refused (NotPursued).
+    m.advance(5);
     const unit = m.get().captain.units[1];
-    m.send({ type: "captain", command: { Assign: { unit: unit.id, target: { Hold: { pos: [unit.pos[0] + 200, unit.pos[1]] } } } } });
+    m.send({ type: "captain", command: { AssignUnit: { unit: unit.id, order: { Pursue: { target: 1 } } } } });
+    expect(m.get().notice?.text).toMatch(/not being pursued/);
+    // During the pursuit at L3 it works, and the unit drives toward the racer.
+    m.send({ type: "replay.seek", tick: 35 * 240 });
+    m.send({ type: "captain", command: { AssignUnit: { unit: unit.id, order: { Pursue: { target: 1 } } } } });
+    const before = m.get().captain.units.find((u) => u.id === unit.id)!;
+    expect(before.assignment).toBe("pursue");
     m.advance(2);
-    const moved = m.get().captain.units.find((u) => u.id === unit.id)!;
-    expect(moved.pos[0]).toBeGreaterThan(unit.pos[0] + 20);
-    const spikes = m.get().captain.charges.SpikeStrip;
-    m.send({ type: "captain", command: { Deploy: { tool: "SpikeStrip", pos: [0, 0], heading_rad: 0 } } });
-    expect(m.get().captain.charges.SpikeStrip).toBe(spikes - 1);
-    expect(m.get().captain.tools.some((t) => t.tool === "SpikeStrip" && t.id < 0)).toBe(true);
+    const after = m.get().captain.units.find((u) => u.id === unit.id)!;
+    expect(after.pos).not.toEqual(before.pos);
+    // Spikes: allowed at L3, then cooling down.
+    m.send({ type: "captain", command: { RequestSpikes: { target: 1, segment: null } } });
+    expect(m.get().captain.readiness.spikes[0]).toBeGreaterThanOrEqual(1);
+    m.send({ type: "captain", command: { RequestSpikes: { target: 1, segment: null } } });
+    expect(m.get().notice?.text).toMatch(/Cooling down/);
+    // Roadblocks unlock at L3: fine now; a second one hits the budget / cooldown.
+    m.send({ type: "captain", command: { RequestRoadblock: { target: 1, segment: null } } });
+    expect(m.get().captain.tools.some((t) => t.tool === "Roadblock")).toBe(true);
+    m.send({ type: "captain", command: { SetPriorityTarget: { target: 1 } } });
+    expect(m.get().captain.priorityTarget).toBe(1);
+  });
+
+  it("recorded wp_police run drives the captain map and HUD heat", () => {
+    const m = manual("police_pursuit");
+    expect(m.get().captain.source).toBe("wp_police");
+    expect(m.get().map.id).toBe("police_procedural_10x10");
+    m.send({ type: "replay.seek", tick: 100 * 240 });
+    const s = m.get();
+    expect(s.captain.units.length).toBeGreaterThan(3);
+    expect(s.captain.suspects[0]?.id).toBe(1);
+    expect(s.hud.heat.level).not.toBe("None");
+    expect(["pursuit", "cooldown", "noticed"]).toContain(s.hud.heat.state);
+    // Orders are validated and queued (the recording itself cannot change).
+    const car = s.captain.units.find((u) => u.kind === "Car" && !["out-of-service", "roadblock", "spikes"].includes(u.assignment))!;
+    m.send({ type: "captain", command: { AssignUnit: { unit: car.id, order: "Disengage" } } });
+    expect(m.get().notice?.text).toMatch(/Sent to wp_police/);
+    expect(m.get().captain.units.find((u) => u.id === car.id)?.pendingOrder).toBe("Disengage");
   });
 
   it("assist presets and bindings", () => {

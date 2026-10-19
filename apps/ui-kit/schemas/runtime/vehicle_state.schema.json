@@ -179,6 +179,18 @@
           "description": "Whether the wheel has been torn off.",
           "type": "boolean"
         },
+        "fx_n": {
+          "description": "Longitudinal tire force actually applied this tick, tire frame, N (v0.2.0; + = forward).",
+          "type": "number",
+          "format": "float",
+          "default": 0.0
+        },
+        "fy_n": {
+          "description": "Lateral tire force actually applied this tick, tire frame, N (v0.2.0; + = left).",
+          "type": "number",
+          "format": "float",
+          "default": 0.0
+        },
         "fz_n": {
           "description": "Vertical tire load, N.",
           "type": "number",

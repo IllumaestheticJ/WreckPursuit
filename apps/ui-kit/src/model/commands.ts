@@ -6,7 +6,7 @@
  */
 import type { DamageMode, Role } from "../generated/contracts";
 import type { InputAction, InputDevice } from "./bindings";
-import type { CaptainCommand } from "./proposed";
+import type { CaptainCommand } from "./police";
 import type { AssistPreset, RepairChoice, ReplayState, ScreenId, Settings } from "./types";
 
 /** Deep-partial settings patch. */

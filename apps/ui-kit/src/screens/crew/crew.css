@@ -1,0 +1,26 @@
+.wp-crew {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(16em, 1fr);
+  gap: 1em;
+  align-items: start;
+}
+.wp-crew-map svg {
+  max-height: 72vh;
+  background: #050706;
+}
+.wp-crew-row {
+  display: grid;
+  grid-template-columns: 0.5em 1fr;
+  gap: 0.7em;
+  padding: 0.5em 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+.wp-crew-swatch {
+  width: 0.5em;
+  height: 100%;
+}
+@media (max-width: 1000px) {
+  .wp-crew {
+    grid-template-columns: 1fr;
+  }
+}

@@ -33,8 +33,8 @@ describe("input bindings", () => {
   });
 
   it("classifies devices and labels codes", () => {
-    expect(deviceOf("Logitech G29 Driving Force Racing Wheel")).toBe("wheel");
-    expect(deviceOf("Xbox Wireless Controller")).toBe("gamepad");
+    expect(deviceOf("Generic USB Racing Wheel (Vendor: 1234 Product: 5678)")).toBe("wheel");
+    expect(deviceOf("Generic Gamepad (STANDARD GAMEPAD)")).toBe("gamepad");
     expect(codeLabel("KeyW")).toBe("W");
     expect(codeLabel("ArrowLeft")).toBe("←");
     expect(codeLabel("axis:2-")).toBe("Axis 2−");

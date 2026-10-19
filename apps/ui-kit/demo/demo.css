@@ -1,0 +1,111 @@
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: #050606;
+  color: #cfd9d3;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+}
+#demo,
+.demo {
+  height: 100%;
+}
+.demo {
+  display: grid;
+  grid-template-columns: 15rem 1fr;
+}
+.demo[data-chrome="false"] {
+  grid-template-columns: 1fr;
+}
+.demo-nav {
+  border-right: 1px solid #1d2622;
+  padding: 0.9rem 0.8rem;
+  overflow: auto;
+  font-size: 12px;
+  background: #070908;
+}
+.demo-brand {
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  margin-bottom: 0.6rem;
+  color: #e6efe9;
+}
+.demo-brand span {
+  color: #3dff8f;
+}
+.demo-group {
+  margin: 1rem 0 0.3rem;
+  color: #5d6d64;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 10px;
+}
+.demo-link {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-left: 2px solid transparent;
+  color: inherit;
+  font: inherit;
+  padding: 0.25rem 0.5rem;
+  cursor: pointer;
+}
+.demo-link:hover {
+  color: #fff;
+}
+.demo-link[aria-current="true"] {
+  border-left-color: #3dff8f;
+  color: #3dff8f;
+}
+.demo-field {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0.4rem 0;
+}
+.demo-field select,
+.demo-row button {
+  background: #0e1311;
+  color: inherit;
+  border: 1px solid #26332d;
+  font: inherit;
+  padding: 0.2rem 0.3rem;
+}
+.demo-row {
+  display: flex;
+  gap: 0.3rem;
+  align-items: center;
+}
+.demo-time {
+  margin-left: auto;
+  color: #3dff8f;
+}
+.demo-stage {
+  position: relative;
+  overflow: hidden;
+}
+/* Fake night street behind the HUD-type screens, so contrast can be judged. */
+.demo-backdrop {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(60% 40% at 50% 100%, rgba(255, 170, 60, 0.18), transparent 70%),
+    radial-gradient(30% 25% at 20% 30%, rgba(80, 140, 255, 0.12), transparent 70%),
+    radial-gradient(25% 20% at 80% 25%, rgba(255, 60, 90, 0.1), transparent 70%),
+    linear-gradient(180deg, #0b0f17 0%, #121620 45%, #1b1a1a 46%, #262321 100%);
+}
+.demo-backdrop::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 70%;
+  height: 54%;
+  transform: translateX(-50%);
+  background:
+    linear-gradient(90deg, transparent 49.4%, rgba(255, 210, 120, 0.5) 49.5% 50.5%, transparent 50.6%) center / 100% 10% repeat-y,
+    linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.3));
+  clip-path: polygon(45% 0, 55% 0, 100% 100%, 0 100%);
+  opacity: 0.6;
+}

@@ -1,0 +1,15 @@
+{
+  "contract_version": "0.2.0",
+  "entities": [
+    {
+      "car": "shiro_turbo",
+      "entity": 1,
+      "id": "racer"
+    }
+  ],
+  "name": "police_pursuit",
+  "pursuits": 1,
+  "recorded": "wp_police PoliceSystem (internal driving) + scripted kinematic racer; tools/record-police",
+  "seed": 4242,
+  "ticks": 57600
+}

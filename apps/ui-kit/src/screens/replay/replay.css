@@ -1,0 +1,74 @@
+.wp-replay-screen {
+  position: absolute;
+  inset: 0;
+}
+/* Lift the HUD clear of the transport bar. */
+.wp-replay-screen .wp-hud-b,
+.wp-replay-screen .wp-hud-r {
+  bottom: 12em;
+}
+.wp-replay-screen .wp-hud-l {
+  bottom: 21em;
+}
+.wp-replay-dock {
+  position: absolute;
+  left: 1.4em;
+  right: 1.4em;
+  bottom: 1.2em;
+}
+.wp-replay {
+  display: grid;
+  gap: 0.6em;
+  padding: 0.7em 1em;
+}
+.wp-replay-timeline {
+  position: relative;
+  padding-top: 0.7em;
+}
+.wp-replay-timeline input[type="range"] {
+  width: 100%;
+  accent-color: var(--scan);
+  margin: 0;
+}
+.wp-replay-markers {
+  position: absolute;
+  inset: 0 0.5em auto 0.5em;
+  height: 0.7em;
+}
+.wp-replay-marker {
+  position: absolute;
+  top: 0;
+  width: 0.5em;
+  height: 0.7em;
+  transform: translateX(-50%);
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  background: var(--ink-3);
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+}
+.wp-replay-marker[data-kind="contact"],
+.wp-replay-marker[data-kind="totalLoss"] {
+  background: var(--danger);
+}
+.wp-replay-marker[data-kind="damage"],
+.wp-replay-marker[data-kind="detach"] {
+  background: var(--warn);
+}
+.wp-replay-marker[data-kind="police"] {
+  background: var(--police-b);
+}
+.wp-replay-marker[data-kind="violation"] {
+  background: var(--info);
+}
+.wp-replay-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8em 1.4em;
+  align-items: center;
+  justify-content: space-between;
+}
+.wp-replay-time {
+  font-size: 1.1em;
+  min-width: 14em;
+}
