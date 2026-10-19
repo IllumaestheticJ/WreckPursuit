@@ -32,12 +32,30 @@ fn fixture_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("tests/fixtures/{name}.json"))
 }
 
-/// Drive a real `PoliceSystem` with a stationary racer. `wreck_after` sends `TotalLoss` that many
-/// ticks after the racer becomes wanted. Returns every event in drain order (inputs first).
+/// Drive a real `PoliceSystem` with a stationary racer. With `wreck`, the racer sends `TotalLoss`
+/// shortly after becoming wanted. Returns every event in drain order (inputs first).
+///
+/// The racer parks at the first junction no traffic camera covers, so its violations become a
+/// civilian report and a unit is sent to look. (A camera-witnessed violation only records a
+/// last-known position, and police do not send anyone to it: see `docs/integration/economy.md`,
+/// round 8 item 5.)
 fn record_police_run(mode: DamageMode, wreck: bool) -> Vec<SimEvent> {
     let (graph, _map) = wp_police::city::procedural(&Default::default());
-    let start = graph.segments[0];
-    let p = graph.node(start.a).pos;
+    let uncovered = |q: [f32; 2]| {
+        graph.pois_of(wp_police::graph::PoiKind::Camera).all(|c| {
+            let (dx, dy) = (c.pos[0] - q[0], c.pos[1] - q[1]);
+            (dx * dx + dy * dy).sqrt() > c.radius_m + 30.0
+        })
+    };
+    let p = graph
+        .segments
+        .iter()
+        .map(|s| {
+            let (a, b) = (graph.node(s.a).pos, graph.node(s.b).pos);
+            [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5]
+        })
+        .find(|q| uncovered(*q))
+        .expect("a junction without a camera");
     let setup = PoliceSetup {
         seed: 8,
         mode,
@@ -63,25 +81,34 @@ fn record_police_run(mode: DamageMode, wreck: bool) -> Vec<SimEvent> {
         pos: [p[0], p[1], 0.0],
     };
     let mut ended = false;
-    for tick in 0..240 * 180 {
+    let mut pursued_at = None;
+    for tick in 0..240 * 300 {
         world.time = world.time.advanced(PHYSICS_DT * world.ratio);
         let mut inputs = Vec::new();
         match tick {
             1 => inputs.push(red.clone()),
             2 => inputs.push(speeding.clone()),
             3 => police.set_heat(RACER, 30.0),
-            40 if wreck => inputs.push(SimEvent::TotalLoss { vehicle: RACER }),
             _ => {}
+        }
+        // Nobody sees a parked racer, so its heat decays long before the night-time responder
+        // arrives. Keep offending (one violation every 4 s) until a unit starts the pursuit.
+        if pursued_at.is_none() && tick > 3 && tick % 960 == 0 {
+            inputs.push(speeding.clone());
+        }
+        if wreck && pursued_at.is_some_and(|t| tick == t + 40) {
+            inputs.push(SimEvent::TotalLoss { vehicle: RACER });
         }
         let mut out = Vec::new();
         police.step(&world, &[view], &inputs, PHYSICS_DT, &mut out);
         log.extend(inputs);
         for ev in out {
-            if matches!(
-                PoliceEvent::from_sim_event(&ev),
-                Some(PoliceEvent::PursuitEnded { .. })
-            ) {
-                ended = true;
+            match PoliceEvent::from_sim_event(&ev) {
+                Some(PoliceEvent::PursuitStarted { .. }) if pursued_at.is_none() => {
+                    pursued_at = Some(tick)
+                }
+                Some(PoliceEvent::PursuitEnded { .. }) => ended = true,
+                _ => {}
             }
             log.push(ev);
         }
@@ -255,9 +282,6 @@ fn police_decoder_matches_wp_police_encoding() {
 }
 
 #[test]
-#[ignore = "E + G (round 8): since E's round-6 police changes no unit finds a racer that never \
-            moves (3 am, heat set directly, no chase). Capture in a chase still works \
-            (wp_police capture_stop / total_loss_capture). Restore with a racer police can reach."]
 fn live_police_run_settles_like_the_recording() {
     // Guards the fixtures against drifting from what police emits today (outcome-level only,
     // so police tuning does not churn this test).
@@ -287,7 +311,8 @@ fn recorded_capture_arcade_impounds_bills_and_keeps_damage() {
     let mode = DamageMode::Arcade;
     let (mut a, car) = account_with_sedan(&e, 5_000);
     let mut s = session_for(mode, &a, car);
-    replay(&mut s, &fixture("capture_stationary"));
+    let events = fixture("capture_stationary");
+    replay(&mut s, &events);
     assert!(s.is_captured(RACER));
     assert!(s.was_wanted(RACER));
     let report = front_hit(&e, &a, car, mode);
@@ -300,8 +325,22 @@ fn recorded_capture_arcade_impounds_bills_and_keeps_damage() {
     let (res, settled) = &r.pursuits[0];
     assert_eq!(res.outcome, PursuitEnd::Captured);
     assert_eq!(res.level, WantedLevel::L1);
+    // The parked racer keeps speeding until police arrive; every ticket counts.
+    let speeding = events
+        .iter()
+        .filter(|e| {
+            matches!(
+                e,
+                SimEvent::TrafficViolation {
+                    kind: ViolationKind::Speeding { .. },
+                    ..
+                }
+            )
+        })
+        .count() as u32;
+    assert!(speeding > 1, "{speeding}");
     assert_eq!(res.violations.red_light, 1);
-    assert_eq!(res.violations.speeding, 1);
+    assert_eq!(res.violations.speeding, speeding);
     let PursuitSettlement::Captured(out) = settled else {
         panic!("{settled:?}")
     };
