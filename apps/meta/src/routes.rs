@@ -88,6 +88,10 @@ pub fn router(state: AppState) -> Router {
             put(admin_set_flag).delete(admin_delete_flag),
         )
         .route("/v1/admin/leaderboards/reset", post(admin_reset_board))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::cors::layer,
+        ))
         .with_state(state)
 }
 

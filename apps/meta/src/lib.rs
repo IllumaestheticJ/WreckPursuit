@@ -19,6 +19,7 @@ pub mod auth;
 pub mod client;
 pub mod clock;
 pub mod config;
+pub mod cors;
 pub mod crews;
 pub mod db;
 pub mod directory;

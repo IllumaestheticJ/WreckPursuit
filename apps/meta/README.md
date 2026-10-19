@@ -36,6 +36,7 @@ open http://127.0.0.1:8090/admin   # paste the admin token (dev-admin-token-0000
 | `WP_META_INSTANCE_KEY` | — (required, ≥ 16 chars) | shared key city servers use to register |
 | `WP_META_ADMIN_TOKEN` | unset = admin API off | ≥ 16 chars; send `X-Admin-Actor: <name>` to name yourself in the audit log |
 | `WP_META_DATA` | embedded tables | `data/` root for `wp_economy` tables (starting cash, adjustments) |
+| `WP_META_CORS_ORIGINS` | unset = no CORS | comma-separated browser origins (`http://localhost:5173`), `*` = any (dev only). Player API only; never admin / instance routes. See `docs/browser.md` |
 | `WP_META_FAST_HASH=1` | off | minimal Argon2 cost — **development only** |
 | `WP_META_NO_RATE_LIMIT=1` | off | disables rate limits — **load tests only** |
 
@@ -59,6 +60,9 @@ Fixed defaults (in `Config::local`): sessions 30 days, join tokens 60 s, reconne
   `schema_migrations`). Never edit a released migration; add the next number.
 - **Smoke test** a deployment with `meta-cli smoke --instance-key ... --bots 8` (creates throwaway
   `smk*` accounts in region `smoke`, registers and deregisters a temporary instance).
+- **Browsers:** either set `WP_META_CORS_ORIGINS` to the game's web origin(s) or serve meta
+  under the same origin through the reverse proxy (`/v1` → meta). Example client code and both
+  setups: `docs/browser.md`.
 - Graceful shutdown on Ctrl-C / SIGINT. Liveness probe: `GET /healthz`.
 
 ### Postgres

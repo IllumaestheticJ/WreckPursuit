@@ -801,3 +801,81 @@ fn unreported_join_holds_expire() {
     inst.heartbeat();
     assert_eq!(b.ticket_status().unwrap().state, TicketState::Assigned);
 }
+
+/// Raw request with an `Origin` header; returns (status, allow-origin header).
+fn cors_call(method: &str, url: &str, origin: &str, preflight: bool) -> (u16, Option<String>) {
+    let mut r = ureq::request(method, url).set("Origin", origin);
+    if preflight {
+        r = r.set("Access-Control-Request-Method", "POST").set(
+            "Access-Control-Request-Headers",
+            "authorization, content-type",
+        );
+    }
+    let resp = match r.call() {
+        Ok(r) => r,
+        Err(ureq::Error::Status(_, r)) => r,
+        Err(e) => panic!("transport: {e}"),
+    };
+    (
+        resp.status(),
+        resp.header("Access-Control-Allow-Origin")
+            .map(str::to_string),
+    )
+}
+
+#[test]
+fn cors_for_allowed_origins_on_player_paths_only() {
+    const DEV: &str = "http://localhost:5173";
+    let srv = TestServer::start_with(Config {
+        cors_origins: vec![DEV.into()],
+        ..Config::test()
+    });
+    let b = &srv.base;
+    // Preflight from the testbed origin.
+    let (st, allow) = cors_call("OPTIONS", &format!("{b}/v1/auth/signup"), DEV, true);
+    assert_eq!(st, 204);
+    assert_eq!(allow.as_deref(), Some(DEV));
+    // Actual request (error responses carry the header too, so the browser can read them).
+    let (st, allow) = cors_call("GET", &format!("{b}/v1/me"), DEV, false);
+    assert_eq!(st, 401);
+    assert_eq!(allow.as_deref(), Some(DEV));
+    let (st, allow) = cors_call("GET", &format!("{b}/v1/leaderboards/bounty"), DEV, false);
+    assert_eq!(st, 200);
+    assert_eq!(allow.as_deref(), Some(DEV));
+    // Other origins: no CORS headers.
+    let (_, allow) = cors_call(
+        "GET",
+        &format!("{b}/v1/leaderboards/bounty"),
+        "http://evil.test",
+        false,
+    );
+    assert_eq!(allow, None);
+    let (st, allow) = cors_call(
+        "OPTIONS",
+        &format!("{b}/v1/auth/login"),
+        "http://evil.test",
+        true,
+    );
+    assert_ne!(st, 204);
+    assert_eq!(allow, None);
+    // Admin and instance APIs never get CORS.
+    let (_, allow) = cors_call("OPTIONS", &format!("{b}/v1/admin/health"), DEV, true);
+    assert_eq!(allow, None);
+    let (_, allow) = cors_call(
+        "OPTIONS",
+        &format!("{b}/v1/instances/1/heartbeat"),
+        DEV,
+        true,
+    );
+    assert_eq!(allow, None);
+
+    // CORS off by default.
+    let off = TestServer::start();
+    let (_, allow) = cors_call(
+        "GET",
+        &format!("{}/v1/leaderboards/bounty", off.base),
+        DEV,
+        false,
+    );
+    assert_eq!(allow, None);
+}
