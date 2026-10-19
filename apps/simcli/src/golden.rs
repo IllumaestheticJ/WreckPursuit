@@ -190,6 +190,48 @@ pub fn check_scenario(
 ) -> Result<GoldenResult, RunError> {
     let sc = load_scenario(path)?;
     let out = record(&sc, data)?;
+    let replay = check_replay(path, &sc, data, golden_root)?;
+    Ok(check_run(path, &sc, &out, replay, golden_root))
+}
+
+/// Result of [`check_replay`]: the replay report (`None` = not a replay scenario or no golden
+/// replay) and the golden replay file if it is missing.
+pub type ReplayCheck = (Option<ReplayReport>, Option<String>);
+
+/// Verify a scenario's golden replay, if it is in the replay library (`scenarios/golden/…`).
+/// This re-simulates the recorded inputs, so it is independent of any run of the scenario's
+/// own drivers and can run in parallel with them.
+pub fn check_replay(
+    path: &Path,
+    sc: &Scenario,
+    data: &dyn DataSource,
+    golden_root: &Path,
+) -> Result<ReplayCheck, RunError> {
+    if !is_replay_scenario(path) {
+        return Ok((None, None));
+    }
+    let rp = replay_path(golden_root, &sc.name);
+    match std::fs::read(&rp) {
+        Ok(bytes) => {
+            let golden = Replay::decode(&bytes)?;
+            // Replay the recorded inputs (not the scenario's drivers): that is what the
+            // testbed recordings will contain.
+            Ok((Some(replay::verify(&golden, data)?), None))
+        }
+        Err(_) => Ok((None, Some(rp.display().to_string()))),
+    }
+}
+
+/// Build the golden result for scenario `sc` (file `path`) from a recorded run `out` (as made
+/// by `run` with `record: true`) and its [`check_replay`] result. Lets callers that already
+/// simulated the scenario reuse that run instead of simulating it again.
+pub fn check_run(
+    path: &Path,
+    sc: &Scenario,
+    out: &RunOutput,
+    replay: ReplayCheck,
+    golden_root: &Path,
+) -> GoldenResult {
     let mut missing = Vec::new();
     let hp = hashes_path(golden_root, &sc.name);
     let hashes = match std::fs::read_to_string(&hp) {
@@ -199,20 +241,9 @@ pub fn check_scenario(
             None
         }
     };
-    let mut replay_report = None;
-    if is_replay_scenario(path) {
-        let rp = replay_path(golden_root, &sc.name);
-        match std::fs::read(&rp) {
-            Ok(bytes) => {
-                let golden = Replay::decode(&bytes)?;
-                // Replay the recorded inputs (not the scenario's drivers): that is what the
-                // testbed recordings will contain.
-                replay_report = Some(replay::verify(&golden, data)?);
-            }
-            Err(_) => missing.push(rp.display().to_string()),
-        }
-    }
-    Ok(GoldenResult {
+    let (replay_report, replay_missing) = replay;
+    missing.extend(replay_missing);
+    GoldenResult {
         name: sc.name.clone(),
         path: path.display().to_string(),
         expectations_passed: out.summary.passed(),
@@ -220,7 +251,7 @@ pub fn check_scenario(
         hashes,
         replay: replay_report,
         missing,
-    })
+    }
 }
 
 /// Regenerate the goldens for one scenario file. Returns the files written.

@@ -1,13 +1,15 @@
 //! Harness integration tests: every scenario passes and is deterministic (in-process and in a
-//! fresh process), goldens match, outputs are written, replays verify and report divergence,
+//! fresh process), goldens match (these three share one parallel pass over the scenarios), outputs are written, replays verify and report divergence,
 //! blessing is guarded in CI, and a short fuzz passes.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::OnceLock;
 
 use simcli::golden;
 use simcli::replay::{self, Replay};
-use simcli::{find_scenarios, load_scenario, FsData, RunOptions};
+use simcli::{find_scenarios, load_scenario, FsData, RunOptions, RunOutput, Scenario};
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -39,35 +41,212 @@ fn simcli() -> Command {
     Command::new(env!("CARGO_BIN_EXE_simcli"))
 }
 
+/// Everything the three long tests below need for one scenario, simulated once.
+struct ScenarioRuns {
+    path: PathBuf,
+    scenario: Scenario,
+    /// Two recorded in-process runs (the determinism pair; run 0 also serves expectations
+    /// and goldens: the summary does not depend on `record`).
+    runs: [Result<RunOutput, String>; 2],
+    /// Stdout of `simcli hashes <path>` in a fresh process (records nothing).
+    fresh_process: Result<String, String>,
+    /// Golden replay verification (re-simulates the recorded inputs).
+    replay: Result<golden::ReplayCheck, String>,
+}
+
+/// One independent simulation job of the shared pass.
+#[derive(Clone, Copy)]
+enum Job {
+    Recorded(usize, usize),
+    FreshProcess(usize),
+    Replay(usize),
+}
+
+enum JobResult {
+    Recorded(Box<Result<RunOutput, String>>),
+    FreshProcess(Result<String, String>),
+    Replay(Result<golden::ReplayCheck, String>),
+}
+
+fn panic_message(p: Box<dyn std::any::Any + Send>) -> String {
+    p.downcast_ref::<String>()
+        .cloned()
+        .or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string()))
+        .unwrap_or_else(|| "panic".into())
+}
+
+/// Rough cost of a scenario, to start the slowest jobs first.
+fn cost(sc: &Scenario) -> u64 {
+    let city = !matches!(sc.city, simcli::scenario::CitySpec::Flat);
+    sc.ticks() * if city { 20 } else { 1 } * (1 + sc.entities.len() as u64)
+}
+
+fn run_job(job: Job, scenarios: &[(PathBuf, Scenario)]) -> JobResult {
+    let catch = |f: &dyn Fn() -> Result<JobResult, String>| {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(f))
+            .map_err(panic_message)
+            .and_then(|r| r)
+    };
+    match job {
+        Job::Recorded(i, _) => {
+            let sc = &scenarios[i].1;
+            let r = catch(&|| {
+                let opts = RunOptions {
+                    record: true,
+                    ..Default::default()
+                };
+                let out = simcli::run(sc, &data(), &opts).map_err(|e| e.to_string())?;
+                Ok(JobResult::Recorded(Box::new(Ok(out))))
+            });
+            r.unwrap_or_else(|e| JobResult::Recorded(Box::new(Err(e))))
+        }
+        Job::FreshProcess(i) => {
+            let path = &scenarios[i].0;
+            let r = (|| {
+                let child = simcli()
+                    .arg("hashes")
+                    .arg(path)
+                    .output()
+                    .map_err(|e| e.to_string())?;
+                if !child.status.success() {
+                    return Err(format!(
+                        "simcli hashes failed: {}",
+                        String::from_utf8_lossy(&child.stderr)
+                    ));
+                }
+                String::from_utf8(child.stdout).map_err(|e| e.to_string())
+            })();
+            JobResult::FreshProcess(r)
+        }
+        Job::Replay(i) => {
+            let (path, sc) = &scenarios[i];
+            let r = catch(&|| {
+                Ok(JobResult::Replay(Ok(golden::check_replay(
+                    path,
+                    sc,
+                    &data(),
+                    &root().join("golden"),
+                )
+                .map_err(|e| e.to_string())?)))
+            });
+            r.unwrap_or_else(|e| JobResult::Replay(Err(e)))
+        }
+    }
+}
+
+/// Simulate every scenario once for all three long tests, spread over all cores. Each job is
+/// one whole run on one thread (a sim never shares state with another), so threading cannot
+/// change a hash; the two in-process runs of a scenario even run concurrently, which would
+/// expose any shared global state.
+fn shared_runs() -> &'static [ScenarioRuns] {
+    static RUNS: OnceLock<Vec<ScenarioRuns>> = OnceLock::new();
+    RUNS.get_or_init(|| {
+        let scenarios: Vec<(PathBuf, Scenario)> = all_scenarios()
+            .into_iter()
+            .map(|p| {
+                let sc = load_scenario(&p).unwrap();
+                (p, sc)
+            })
+            .collect();
+        let mut jobs = Vec::new();
+        for (i, (path, _)) in scenarios.iter().enumerate() {
+            jobs.push(Job::Recorded(i, 0));
+            jobs.push(Job::Recorded(i, 1));
+            jobs.push(Job::FreshProcess(i));
+            if golden::is_replay_scenario(path) {
+                jobs.push(Job::Replay(i));
+            }
+        }
+        let job_scenario = |j: &Job| match *j {
+            Job::Recorded(i, _) | Job::FreshProcess(i) | Job::Replay(i) => i,
+        };
+        jobs.sort_by_key(|j| std::cmp::Reverse(cost(&scenarios[job_scenario(j)].1)));
+
+        let next = AtomicUsize::new(0);
+        let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
+        let mut results: Vec<(usize, JobResult)> = std::thread::scope(|s| {
+            let workers: Vec<_> = (0..threads)
+                .map(|_| {
+                    s.spawn(|| {
+                        let mut done = Vec::new();
+                        loop {
+                            let k = next.fetch_add(1, Ordering::Relaxed);
+                            let Some(job) = jobs.get(k) else { break };
+                            done.push((k, run_job(*job, &scenarios)));
+                        }
+                        done
+                    })
+                })
+                .collect();
+            workers
+                .into_iter()
+                .flat_map(|w| w.join().expect("worker thread"))
+                .collect()
+        });
+        results.sort_by_key(|(k, _)| *k);
+
+        let mut out: Vec<ScenarioRuns> = scenarios
+            .into_iter()
+            .map(|(path, scenario)| ScenarioRuns {
+                path,
+                scenario,
+                runs: [Err("not run".into()), Err("not run".into())],
+                fresh_process: Err("not run".into()),
+                replay: Ok((None, None)),
+            })
+            .collect();
+        for (k, r) in results {
+            match (jobs[k], r) {
+                (Job::Recorded(i, n), JobResult::Recorded(r)) => out[i].runs[n] = *r,
+                (Job::FreshProcess(i), JobResult::FreshProcess(r)) => out[i].fresh_process = r,
+                (Job::Replay(i), JobResult::Replay(r)) => out[i].replay = r,
+                _ => unreachable!("job and result kinds match"),
+            }
+        }
+        out
+    })
+}
+
+/// The in-process determinism verdict for one scenario: its `hashes.txt` text if both
+/// recorded runs succeeded and are identical.
+fn in_process(r: &ScenarioRuns) -> Result<String, String> {
+    let a = r.runs[0].as_ref().map_err(Clone::clone)?;
+    let b = r.runs[1].as_ref().map_err(Clone::clone)?;
+    simcli::determinism::compare_runs(&r.scenario, a, b)
+}
+
 #[test]
 fn all_scenarios_pass_and_are_deterministic_in_process() {
-    for path in all_scenarios() {
-        let sc = load_scenario(&path).unwrap();
-        let out = simcli::run(&sc, &data(), &RunOptions::default()).unwrap();
-        assert!(
-            out.summary.passed(),
-            "{}: {:?}",
-            path.display(),
-            out.summary.failures
-        );
-        simcli::determinism::check_in_process(&sc, &data()).unwrap();
+    let mut failures = Vec::new();
+    for r in shared_runs() {
+        match &r.runs[0] {
+            Ok(out) if !out.summary.passed() => {
+                failures.push(format!("{}: {:?}", r.path.display(), out.summary.failures))
+            }
+            Ok(_) => {}
+            Err(e) => failures.push(format!("{}: {e}", r.path.display())),
+        }
+        if let Err(e) = in_process(r) {
+            failures.push(format!("{}: {e}", r.path.display()));
+        }
     }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 #[test]
 fn fresh_process_matches_in_process() {
-    for path in all_scenarios() {
-        let sc = load_scenario(&path).unwrap();
-        let in_process = simcli::determinism::check_in_process(&sc, &data()).unwrap();
-        let child = simcli().arg("hashes").arg(&path).output().unwrap();
-        assert!(child.status.success());
-        assert_eq!(
-            String::from_utf8(child.stdout).unwrap(),
-            in_process,
-            "{} differs across processes",
-            path.display()
-        );
+    let mut failures = Vec::new();
+    for r in shared_runs() {
+        match (in_process(r), &r.fresh_process) {
+            (Ok(a), Ok(b)) if a == *b => {}
+            (Ok(_), Ok(_)) => {
+                failures.push(format!("{} differs across processes", r.path.display()))
+            }
+            (Err(e), _) => failures.push(format!("{}: {e}", r.path.display())),
+            (_, Err(e)) => failures.push(format!("{}: {e}", r.path.display())),
+        }
     }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 #[test]
@@ -75,10 +254,12 @@ fn goldens_match() {
     let golden_root = root().join("golden");
     let mut report = String::new();
     let mut ok = true;
-    for path in all_scenarios() {
-        let r = golden::check_scenario(&path, &data(), &golden_root).unwrap();
-        ok &= r.ok();
-        report.push_str(&r.to_text());
+    for r in shared_runs() {
+        let out = r.runs[0].as_ref().unwrap();
+        let replay = r.replay.clone().unwrap();
+        let g = golden::check_run(&r.path, &r.scenario, out, replay, &golden_root);
+        ok &= g.ok();
+        report.push_str(&g.to_text());
     }
     assert!(
         ok,
@@ -212,7 +393,8 @@ fn replay_divergence_report_names_tick_and_entity() {
 #[test]
 fn bless_is_refused_in_ci_without_tag() {
     let g = tmp("bless_guard");
-    let scenarios = root().join("scenarios/golden");
+    // One golden scenario is enough to exercise the guard and the files it writes.
+    let scenarios = root().join("scenarios/golden/tbone.ron");
     let refused = simcli()
         .args(["goldens", "--bless", "--golden"])
         .arg(&g)
