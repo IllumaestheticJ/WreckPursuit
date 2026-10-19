@@ -1149,4 +1149,3 @@ fn driver_parameters_vary_between_drivers() {
     assert!((20.0..40.0).contains(&frac(amber_go)));
     assert!(frac(eager) > 10.0);
 }
-

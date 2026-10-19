@@ -160,7 +160,10 @@ fn highway_player_never_sees_traffic_pop_in_closer_than_300_m() {
     }
     // The streets around the player stay about as busy as with the old radii.
     println!("cars within 150 m (sum of 5 seeds): new {near_new:.1}, old {near_old:.1}");
-    assert!(near_new >= 0.6 * near_old, "new {near_new} vs old {near_old}");
+    assert!(
+        near_new >= 0.6 * near_old,
+        "new {near_new} vs old {near_old}"
+    );
 }
 
 /// Radii comparison over five seeds (mean agents, agents near the player, spawn churn):
