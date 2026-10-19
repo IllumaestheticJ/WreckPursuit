@@ -49,11 +49,66 @@ pub enum Reconcile {
     Stale,
 }
 
-/// Predicted local vehicle.
-pub struct Predictor {
+/// The vehicle model a [`Predictor`] drives. It must run exactly the code the server runs
+/// for one physics tick, and must be rewindable to a server state.
+///
+/// [`StubVehicle`] covers the current kinematic `wp_vehicle`. The Rapier-bodied vehicle from
+/// workstream 02 needs its own impl (a single-car Rapier world on a flat ground, as its
+/// `rig::Rig` does) plus a full-state rewind — see `docs/integration/net.md`, NET-N2.
+pub trait PredictedVehicle: Send {
+    /// One physics tick with `input` under `effects`.
+    fn step(&mut self, input: &VehicleInput, effects: &HandlingEffects);
+    /// Current state.
+    fn state(&self) -> VehicleState;
+    /// Rewind to a server state.
+    fn set_state(&mut self, s: &VehicleState);
+}
+
+/// [`PredictedVehicle`] over `wp_vehicle::Vehicle` on a flat world.
+pub struct StubVehicle {
     vehicle: Vehicle,
     world: World,
     assists: AssistProfile,
+}
+
+impl StubVehicle {
+    /// Build `car` at `state`.
+    pub fn new(
+        car: &LoadedCar,
+        assists: AssistProfile,
+        state: &VehicleState,
+        time: TimeOfDay,
+    ) -> Self {
+        let mut vehicle = Vehicle::new(&car.def, &car.tires, state.pos, 0.0);
+        vehicle.set_state(state);
+        Self {
+            vehicle,
+            world: World::flat(time, 0.0),
+            assists,
+        }
+    }
+}
+
+impl PredictedVehicle for StubVehicle {
+    fn step(&mut self, input: &VehicleInput, effects: &HandlingEffects) {
+        self.vehicle.apply_damage_effects(effects);
+        let mut events: Vec<SimEvent> = Vec::new();
+        self.vehicle
+            .step(input, &self.assists, &self.world, PHYSICS_DT, &mut events);
+    }
+
+    fn state(&self) -> VehicleState {
+        self.vehicle.state()
+    }
+
+    fn set_state(&mut self, s: &VehicleState) {
+        self.vehicle.set_state(s);
+    }
+}
+
+/// Predicted local vehicle.
+pub struct Predictor {
+    vehicle: Box<dyn PredictedVehicle>,
     tick: u64,
     ring: Vec<Option<Frame>>,
 }
@@ -78,12 +133,13 @@ impl Predictor {
         tick: u64,
         time: TimeOfDay,
     ) -> Self {
-        let mut vehicle = Vehicle::new(&car.def, &car.tires, state.pos, 0.0);
-        vehicle.set_state(state);
+        Self::with_vehicle(Box::new(StubVehicle::new(car, assists, state, time)), tick)
+    }
+
+    /// Predict with any [`PredictedVehicle`] whose state is at `tick`.
+    pub fn with_vehicle(vehicle: Box<dyn PredictedVehicle>, tick: u64) -> Self {
         Self {
             vehicle,
-            world: World::flat(time, 0.0),
-            assists,
             tick,
             ring: vec![None; INPUT_RING],
         }
@@ -102,10 +158,7 @@ impl Predictor {
     /// Simulate one tick with `input` (must already be quantised, see
     /// [`crate::quant::quantize_input`]) under the given damage effects.
     pub fn step(&mut self, input: VehicleInput, effects: &HandlingEffects) {
-        self.vehicle.apply_damage_effects(effects);
-        let mut events: Vec<SimEvent> = Vec::new();
-        self.vehicle
-            .step(&input, &self.assists, &self.world, PHYSICS_DT, &mut events);
+        self.vehicle.step(&input, effects);
         let s = self.vehicle.state();
         self.ring[(self.tick % INPUT_RING as u64) as usize] = Some(Frame {
             tick: self.tick,

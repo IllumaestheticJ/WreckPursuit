@@ -1,43 +1,44 @@
-//! `wp-server [--port 8080]` — headless server (owned by workstream 07).
-//! **Stub:** accepts websocket connections, streams `{"tick":N}` at 60 Hz and echoes text.
+//! `wp-server` — headless authoritative server for one city instance (workstream 07).
+//! Run `wp-server --help` for flags; see `apps/server/README.md`.
 
 #[tokio::main]
-async fn main() -> std::io::Result<()> {
-    let args: Vec<String> = std::env::args().collect();
-    let port: u16 = args
-        .iter()
-        .position(|a| a == "--port")
-        .and_then(|i| args.get(i + 1))
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(8080);
-    let listener = tokio::net::TcpListener::bind(("0.0.0.0", port)).await?;
-    println!("wp-server listening on ws://0.0.0.0:{port}");
-    wp_net::native::serve_tick_echo(listener).await
-}
-
-#[cfg(test)]
-mod tests {
-    use futures_util::{SinkExt, StreamExt};
-    use tokio_tungstenite::tungstenite::Message;
-
-    #[tokio::test]
-    async fn streams_ticks_and_echoes() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        tokio::spawn(wp_net::native::serve_tick_echo(listener));
-        let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
-            .await
-            .unwrap();
-        let first = ws.next().await.unwrap().unwrap();
-        assert!(first.to_text().unwrap().starts_with("{\"tick\":"));
-        ws.send(Message::text("hello")).await.unwrap();
-        let mut echoed = false;
-        for _ in 0..200 {
-            if ws.next().await.unwrap().unwrap().to_text().unwrap() == "hello" {
-                echoed = true;
-                break;
-            }
+async fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        println!("{}", wp_server::USAGE);
+        return;
+    }
+    let cfg = match wp_server::AppConfig::from_args(&args) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("wp-server: {e}\n\n{}", wp_server::USAGE);
+            std::process::exit(2);
         }
-        assert!(echoed);
+    };
+    let log = wp_server::json_log();
+    let running = match wp_server::run(cfg, log.clone()).await {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("wp-server: {e}");
+            std::process::exit(1);
+        }
+    };
+    // Periodic status line; the admin endpoint has the same data on demand.
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+        let s = running.status.lock().map(|s| s.clone()).unwrap_or_default();
+        log(
+            "status",
+            vec![
+                ("players", s.stats.players.to_string()),
+                ("tick", s.stats.tick.to_string()),
+                ("tick_rate_hz", format!("{:.1}", s.tick_rate_hz)),
+                ("ms_per_tick_avg", format!("{:.3}", s.ms_per_tick_avg)),
+                (
+                    "downlink_bps_max",
+                    format!("{:.0}", s.stats.downlink_bps_max),
+                ),
+            ],
+        );
     }
 }

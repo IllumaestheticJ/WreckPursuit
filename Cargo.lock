@@ -1555,10 +1555,13 @@ dependencies = [
 name = "wp_server"
 version = "0.1.0"
 dependencies = [
- "futures-util",
+ "serde",
+ "serde_json",
  "tokio",
- "tokio-tungstenite",
+ "toml",
+ "wp_contracts",
  "wp_net",
+ "wp_sim",
 ]
 
 [[package]]
@@ -1593,6 +1596,7 @@ dependencies = [
  "serde_json",
  "wasm-bindgen",
  "wp_contracts",
+ "wp_net",
  "wp_sim",
 ]
 

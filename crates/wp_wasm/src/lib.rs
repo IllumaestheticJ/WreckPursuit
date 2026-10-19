@@ -13,8 +13,13 @@
 //! | `reset_vehicle()` | put the player car back at spawn |
 //!
 //! Car data is embedded at compile time (the browser has no filesystem).
+//!
+//! The multiplayer client (`net_*`) lives in [`net`] (workstream 07).
 
 #![warn(missing_docs)]
+
+/// Multiplayer client surface (`net_*` functions), see the module docs.
+pub mod net;
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;

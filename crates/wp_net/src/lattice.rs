@@ -132,7 +132,7 @@ impl LatticeSnapshot {
 
 /// What the client needs from a damage model to replicate it. Implemented for
 /// `wp_damage::DamageModel`; tests use [`crate::testkit::ToyLattice`].
-pub trait ReplicaDamage {
+pub trait ReplicaDamage: Send {
     /// Same contract as `wp_contracts::DamageSim::apply_contacts`.
     fn apply_contacts(
         &mut self,
