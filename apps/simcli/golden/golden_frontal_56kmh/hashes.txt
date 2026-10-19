@@ -1,4 +1,4 @@
-# simcli hashes scenario=golden_frontal_56kmh systems=world,vehicle,damage,police,net hash_spec=3 contract=0.2.0
+# simcli hashes scenario=golden_frontal_56kmh systems=world,vehicle,damage,police,net hash_spec=3 contract=0.3.0
 24 551f4f24e9995e58
 48 f13a8eb23381d579
 72 4b90237199af5e56

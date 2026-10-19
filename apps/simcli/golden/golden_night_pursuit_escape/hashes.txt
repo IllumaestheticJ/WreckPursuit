@@ -1,4 +1,4 @@
-# simcli hashes scenario=golden_night_pursuit_escape systems=world,vehicle,damage,police,net hash_spec=3 contract=0.2.0
+# simcli hashes scenario=golden_night_pursuit_escape systems=world,vehicle,damage,police,net hash_spec=3 contract=0.3.0
 24 ee9ebb47f8b70513
 48 9295a5aee89fdf14
 72 fe13bc1d297655cf

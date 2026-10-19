@@ -1,4 +1,4 @@
-# simcli hashes scenario=regression_grid_24 systems=world,vehicle,damage,police,net hash_spec=3 contract=0.2.0
+# simcli hashes scenario=regression_grid_24 systems=world,vehicle,damage,police,net hash_spec=3 contract=0.3.0
 120 a5cb74b75df1112f
 240 ce57c9bfc11f0c01
 360 793493f4b0db2507
