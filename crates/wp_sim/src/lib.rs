@@ -553,6 +553,11 @@ impl Sim {
         &self.world
     }
 
+    /// The police system (heat, wanted levels, units, tools). Read-only.
+    pub fn police(&self) -> &PoliceSystem {
+        &self.police
+    }
+
     /// Vehicle slots in ascending entity order.
     pub fn vehicles(&self) -> &[SimVehicle] {
         &self.vehicles
