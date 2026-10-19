@@ -134,7 +134,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 8.8 s | 210 km/h | 52.3 m | 0.62 g | — |
+| sim | 8.7 s | 210 km/h | 52.5 m | 0.62 g | — |
 | estimate | 7.7 s | 220 km/h | 49.9 m | 0.71 g | 450 |
 
 ## Damage lattice (`data/lattices/ironside_440.json`)
@@ -142,7 +142,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 302 nodes, 1930 beams, 6 detachables, 21 component mounts.
 
 - Generated with `gen-lattice --id ironside_440 --profile coupe --width 1.95 --length 5.2 --height 1.35 --wheelbase 2.95 --mass 406.8 --car-mass 1695.2 --clearance 0.15 --front-overhang 1.0 --strength 1.15` (24% of vehicle mass in the lattice; strength from durability class 4).
-- Era `70s` passenger cell: 150 cabin/sill, 131 cross-member, 12 door beam, 10 pillar, 14 roof rail → mild_steel × 1.00 section (no door intrusion beams: × 0.5).
+- Era `70s` passenger cell: 138 cabin/sill, 143 cross-member, 12 door beam, 10 pillar, 14 roof rail → mild_steel × 1.00 section (no door intrusion beams: × 0.5).
 - Steel hood: 159 hood beams aluminum → mild_steel.
 - Chrome steel bumpers: 180 bumper beams pp_bumper → mild_steel.
 - Detachables: steel bumpers ×2.3 break impulse / ×4 mass; steel hood ×1.4 / ×1.6.

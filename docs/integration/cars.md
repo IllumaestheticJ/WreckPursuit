@@ -5,6 +5,16 @@
 - **Crates / folders owned:** `data/cars/` (roster files), `data/lattices/` (roster car files, not the generator), `tools/specsheet/`
 - **Contract version built against:** 0.2.0
 
+## Update after lead run 4
+
+- Re-measured on A's torque converter and stateful on-demand coupling. Converter slip costs the
+  automatics ≈ 0.2 s where traction is not the limit (Wolfhound 6.38 → 6.57 s, measured with and
+  without), and helps where it is (Hauler 9.45 → 8.98 s, Cruiser 8.61 → 8.36 s, now in band).
+  Wolfhound coupling now engages at 2 % front slip (was 5 %): 6.47 s, back in its band.
+- B changed `DEFAULT_SECTIONS.cross_member` (0.15e-4 → 0.06e-4); `build_roster.py`'s `SEC` mirror
+  updated so the era adjustment still finds the cabin cross-members (see the coupling note in Needs).
+  Lattices regenerated on B's current `gen-lattice`; barrier sweep still 109/112 (03's two-box rear).
+
 ## Response to contract v0.2.0 (lead run 3)
 
 | v0.2.0 item for 09 | Done |
