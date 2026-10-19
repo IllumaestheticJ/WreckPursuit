@@ -45,7 +45,7 @@ fn factor_list<T: serde::de::DeserializeOwned + Ord>(what: &str, s: &str) -> BTr
 }
 
 fn write_lattice(lattice: &LatticeDef, out: Option<String>) {
-    let json = lattice_to_json_lines(&lattice);
+    let json = lattice_to_json_lines(lattice);
     match out {
         Some(path) => {
             std::fs::write(&path, json).expect("write lattice");
