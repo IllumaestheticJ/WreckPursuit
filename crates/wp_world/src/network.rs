@@ -18,7 +18,8 @@ use thiserror::Error;
 pub const ROAD_MAGIC: [u8; 4] = *b"WPRD";
 /// Version of the road format. Bump on any layout change.
 /// v2 (city v2): road surfaces, terrain heightfield, building base heights.
-pub const ROAD_FORMAT_VERSION: u32 = 2;
+/// v3 (tunnels, backlog B04): covered spans ([`RoadNetwork::covered`]).
+pub const ROAD_FORMAT_VERSION: u32 = 3;
 
 /// Index into [`RoadNetwork::nodes`].
 pub type NodeId = u32;
@@ -67,6 +68,45 @@ pub struct RoadNetwork {
     pub surfaces: Vec<RoadSurface>,
     /// Ground heightfield between roads (`None` = flat ground at z = 0).
     pub terrain: Option<crate::terrain::Heightfield>,
+    /// Covered stretches of road (tunnels, covered trenches): line of sight does not pass
+    /// in or out of them (see [`crate::covered`]). Empty for cities without any.
+    #[serde(default)]
+    pub covered: Vec<CoveredSpan>,
+}
+
+/// What kind of cover a [`CoveredSpan`] is (drawing and radio flavour; line of sight treats
+/// every kind the same).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum CoverKind {
+    /// A tunnel through high ground (the road keeps its profile; ground is backfilled over
+    /// the roof).
+    Tunnel,
+    /// A road lowered into a trench with a deck over it (cut and cover).
+    CoveredTrench,
+}
+
+/// A covered stretch of one road: an enclosure from the road surface up to a ceiling, between
+/// two walls, from one portal to the other.
+///
+/// Inside = within `half_width_m` of the centreline (laterally), between the two portals
+/// (along) and from 3 m below the road up to the ceiling (height). Line of sight never passes
+/// from inside to outside or back, and two points inside see each other only along a line
+/// that stays inside (a curved tunnel's wall blocks).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CoveredSpan {
+    /// Display name, e.g. `Hollins Tunnel`.
+    pub name: String,
+    /// Kind of cover.
+    pub kind: CoverKind,
+    /// Source road index (`Lane::road`, `RoadSurface::road`).
+    pub road: u32,
+    /// Road-surface centreline through the covered stretch, portal to portal, m. At least two
+    /// points.
+    pub centre: Vec<[f32; 3]>,
+    /// Inner half width (centreline to the wall face), m.
+    pub half_width_m: f32,
+    /// Ceiling height above the road surface, m.
+    pub clearance_m: f32,
 }
 
 /// The paved ribbon of one road between its two junction setbacks.
@@ -503,6 +543,15 @@ impl RoadNetwork {
         for (i, s) in self.surfaces.iter().enumerate() {
             if s.centre.len() < 2 || s.bank.len() != s.centre.len() {
                 return bad(format!("surface {i}: bad centreline / bank"));
+            }
+        }
+        for (i, c) in self.covered.iter().enumerate() {
+            if c.centre.len() < 2
+                || c.half_width_m <= 1.0
+                || c.clearance_m <= 2.0
+                || c.road as usize >= self.surfaces.len().max(1)
+            {
+                return bad(format!("covered span {i}: bad centreline, size or road"));
             }
         }
         if let Some(t) = &self.terrain {
