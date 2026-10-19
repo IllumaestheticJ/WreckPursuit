@@ -77,6 +77,15 @@ broken, the part's nodes leave the car, `SimEvent::PartDetached` is emitted and 
 `DetachedPart` (mass, hull points, velocity) is queued for `wp_sim` to turn into a Rapier
 debris body (`DetachedPart::to_rapier`).
 
+### Hinged panels (`panels.rs`, workstream R)
+Opt-in (`DamageModel::attach_panels(&PanelSpec)`, specs in `data/panels/<car>.json`): doors,
+hood and trunk unlatch (group hinge impulse or latch-node intrusion) and swing on a kinematic
+1-DOF hinge driven by chassis acceleration + gravity (`set_chassis_motion`), aero, contact
+pushes and damping, with restitution stops; bumpers and fenders hang from one mount; stop slams
+load the hinges until the part tears off through `detach_group`. The lattice keeps sleeping
+while panels swing. Without a spec nothing changes (same hashes). Details and perf:
+`docs/integration/panels.md`.
+
 ### Components and intrusion (`model.rs`)
 Intrusion of a `ComponentMount` = mean displacement of its nodes toward the chassis centre in
 extent-normalised horizontal coordinates (side nodes measure lateral intrusion, end nodes

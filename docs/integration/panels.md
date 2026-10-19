@@ -77,7 +77,18 @@
 | `Cargo.toml` (workspace) | member `tools/assets` | new crate |
 
 ## Perf numbers
-See below (filled from `panels-bench` / scenario timings).
+`cargo run --release -p car-assets --bin panels-bench` (debug_sedan, 24 cars, cloud Xeon, 4 vCPU,
+release; per car; ms/frame = 4 physics steps):
+
+| Measurement | Machine | Native | Browser | Budget |
+|---|---|---|---|---|
+| Idle car, panels attached vs none | cloud 4 vCPU | 0.51 vs 0.44 µs/step (0.002 ms/frame) | — | — |
+| 40 km/h side hit + 2 s swing (2.4 s avg), panels vs none | cloud 4 vCPU | 24.7 vs 17.9 µs/step (0.099 vs 0.072 ms/frame) | — | 0.25 ms/car (lattice) |
+| Swing only (3 panels swinging per car, lattice asleep) | cloud 4 vCPU | 2.7 µs/step (0.011 ms/frame) | — | 0.25 ms/car |
+| Panel mesh skinning in JS (≈3k vertices, per car per frame) | cloud, headless Chromium (SwiftShader) | — | see below | 2× native |
+
+Panels add ~0.03 ms/frame per crashing car on top of the lattice and ~0.01 ms/frame per car with
+swinging panels; both inside the 0.25 ms/car lattice budget.
 
 ## Known gaps
 - A swinging panel is rigid: dents taken before it unlatched stay, new contacts push it about the

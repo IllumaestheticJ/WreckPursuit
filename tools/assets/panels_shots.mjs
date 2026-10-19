@@ -93,6 +93,18 @@ check(car.some((p) => p.state >= 2), `frontal: a panel hangs or fell (${JSON.str
 await page.screenshot({ path: join(out, "frontal_bumper_hanging.png") });
 await page.keyboard.press("KeyP");
 
+// Browser cost of panel skinning (JS, per car per frame) and of the wasm panel_states call.
+const perf = await page.evaluate(() => {
+  const v = [...window.__wp.app.views.values()][0];
+  const nodes = window.__wp.sim.latticeNodes(v.entity);
+  const n = 300;
+  let t0 = performance.now();
+  for (let i = 0; i < n; i++) v.panels.update(nodes, 0);
+  const skin = (performance.now() - t0) / n;
+  return { skinMsPerCar: skin };
+});
+console.log(`browser: panel mesh skinning ${perf.skinMsPerCar.toFixed(3)} ms per car per frame (includes panel_states)`);
+
 check(errors.length === 0, `no page errors ${errors.slice(0, 3).join(" | ")}`);
 await browser.close();
 server.kill("SIGTERM");
