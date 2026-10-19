@@ -270,4 +270,13 @@ before/after numbers, and contract request 7 for the optional per-car knob.
 - `Telemetry` gained `slide_gyro_nm` (additive; not in the WASM telemetry pack yet).
 - New metric `metrics::power_oversteer_exit` + `--example slide` sweep.
 - Goldens driven with keyboard/gamepad assists may move; re-blessed in a `[bless]` commit.
-- Outside my crates: one help line in `apps/testbed-web/src/hud.ts` (F1 → "Slide control").
+- Item 6 (lead follow-up, "more steering angle to save the car"): lock opens while sliding
+  (code), and more lock on shiro_turbo, sperber_32, rampart_50, hakone_gt and lucciola_350
+  via tighter turning circles in `tools/specsheet/roster_inputs.py` (workstream 09's source;
+  car JSON + spec sheets regenerated with `build_roster.py --only`, lattices deliberately not
+  regenerated because the current generator output differs from the committed lattices for
+  unrelated reasons). Validation metrics unchanged (skidpad etc. to 3 decimals).
+- Goldens re-blessed in `[bless]` fe32739: golden_city_chase, regression_grid_24,
+  smoke_coupe_circle, vehicle_coupe_slalom (all keyboard/gamepad-driven).
+- Outside my crates: one help line in `apps/testbed-web/src/hud.ts` (F1 → "Slide control"),
+  `tools/specsheet/roster_inputs.py` + 5 `data/cars` files (item 6).
