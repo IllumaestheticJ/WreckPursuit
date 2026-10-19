@@ -724,17 +724,17 @@ CARS = [
         price=30000,
         durability=4,
         note=("The everyday patrol car: rear-drive, heavy and planted, with pursuit-rated tires, "
-              "big brakes and the V8 pursuit package. It reels in anything ordinary on a "
-              "straight (traffic, beaters, hot hatches, sport sedans, trucks, old muscle) but "
-              "not a modern sports car or exotic — those are the interceptor's job. Boxing in, "
-              "PIT manoeuvres and the push bar do the rest."),
+              "big brakes and the V8 pursuit package. It gets to pursuit speed before anything "
+              "ordinary (traffic, beaters, hatches, trucks, old muscle, FF sport sedans) but "
+              "not before a modern sports car or exotic — those are the interceptor's job. "
+              "Boxing in, PIT manoeuvres and the push bar do the rest."),
         breaks=("Modern full-size unibody with UHSS cabin, plus a reinforced push bar bolted "
                 "through to the front rails: nose-to-tail shunts at pursuit speed mostly bend the "
                 "bar and the bumper cover before the radiator. Hard enough hits rip the bar off, "
                 "after which the front is as soft as any sedan's. Long rear overhang crumples in "
                 "rear-enders."),
         sources=["fleet spec-class data for 2010s full-size RWD police sedans",
-                 "owner/fleet dyno averages for 3.6-3.7 L V6s",
+                 "owner/fleet dyno averages for 5.7 L pushrod V8s",
                  "engineering tables (tire radius, ride frequency, caliper hydraulics)"],
         lattice=dict(mass_frac=0.22, bumper="plastic", hood="steel", pushbar=True),
     ),

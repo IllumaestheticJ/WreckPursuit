@@ -104,8 +104,8 @@ fn main() {
         let car = wp_contracts::load_car(root.join("cars").join(format!("{id}.json")))
             .expect("car loads");
         for (mode_name, file) in [("Arcade", "arcade.toml"), ("Sim", "sim.toml")] {
-            let mode = wp_contracts::load_mode_table(root.join("modes").join(file))
-                .expect("mode loads");
+            let mode =
+                wp_contracts::load_mode_table(root.join("modes").join(file)).expect("mode loads");
             for kind in [
                 ImpactKind::Frontal,
                 ImpactKind::Offset,
