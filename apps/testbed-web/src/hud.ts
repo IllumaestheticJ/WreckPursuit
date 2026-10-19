@@ -76,7 +76,7 @@ export class Hud {
       `<b>WreckPursuit testbed — keys</b><br>` +
       `W/S or ↑/↓ throttle/brake · A/D or ←/→ steer · Space handbrake · Shift/Ctrl gear up/down<br>` +
       `R reset · O headlights · Q horn · 1 chase · 2 hood · 3 bumper · 4 orbit · 5 cinematic<br>` +
-      `F1 or ? this help · P pause · . frame step (replay) · [ / ] replay speed<br><br>` +
+      `F1 or ? this help · P pause · . frame step (replay) · [ / ] replay speed · F repair bill<br><br>` +
       LAYERS.map((l) => `${l.key.replace("Key", "")} — ${l.label}`).join("<br>");
   }
 

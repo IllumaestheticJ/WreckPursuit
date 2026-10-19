@@ -8,6 +8,8 @@
 //! bytes that `simcli replay` verifies headlessly. Playback re-simulates that log and compares
 //! every tick hash.
 
+use std::collections::BTreeMap;
+
 use wp_contracts::{
     AssistProfile, DamageMode, EntityId, FfbOutput, LoadedCar, SimEvent, VehicleInput, VehicleSim,
     VehicleState, PHYSICS_DT,
@@ -69,9 +71,13 @@ pub struct Session {
     load_city: bool,
     systems: Selection,
     sim: Sim,
+    /// Scenario entities, in scenario order (vehicles the sim spawns itself — police units,
+    /// physical traffic — are not in here; see [`Session::vehicle`]).
     ids: Vec<EntityId>,
-    cars: Vec<LoadedCar>,
-    extras: Vec<EntityExtra>,
+    /// Resolved cars by car id (scenario cars and any car the sim spawned).
+    cars: BTreeMap<String, LoadedCar>,
+    /// Per-vehicle extras for every sim vehicle, by entity.
+    extras: BTreeMap<EntityId, EntityExtra>,
     last_input: Vec<VehicleInput>,
     fixed: FixedStep,
     log: Replay,
@@ -126,7 +132,6 @@ impl Session {
             selection,
             ..
         } = build_sim(&sc, mem_data(), &opts(systems)).map_err(|e| e.to_string())?;
-        let per_entity: Vec<LoadedCar> = sc.entities.iter().map(|e| cars[&e.car].clone()).collect();
         let log = Replay::new(&sc, &selection.to_string(), ids.len());
         let n = ids.len();
         Ok(Self {
@@ -138,8 +143,8 @@ impl Session {
             systems: selection,
             sim,
             ids,
-            cars: per_entity,
-            extras: vec![EntityExtra::default(); n],
+            cars,
+            extras: BTreeMap::new(),
             last_input: vec![VehicleInput::default(); n],
             fixed: FixedStep::new(PHYSICS_DT, MAX_TICKS_PER_STEP),
             log,
@@ -225,14 +230,31 @@ impl Session {
         self.index(id).map(|i| &self.sc.entities[i])
     }
 
-    /// Resolved car of an entity.
-    pub fn car(&self, id: EntityId) -> Option<&LoadedCar> {
-        self.index(id).map(|i| &self.cars[i])
+    /// A sim vehicle by entity (scenario entities and sim-spawned police / traffic).
+    pub fn vehicle(&self, id: EntityId) -> Option<&wp_sim::SimVehicle> {
+        self.sim.vehicles().iter().find(|v| v.id == id)
     }
 
-    /// Per-entity extras.
+    /// Resolved car of any sim vehicle.
+    pub fn car(&self, id: EntityId) -> Option<&LoadedCar> {
+        self.vehicle(id).and_then(|v| self.cars.get(&v.car_id))
+    }
+
+    /// Per-vehicle extras.
     pub fn extra(&self, id: EntityId) -> Option<&EntityExtra> {
-        self.index(id).map(|i| &self.extras[i])
+        self.extras.get(&id)
+    }
+
+    /// Load the car of every sim vehicle not seen before (the sim may spawn police units and
+    /// physical traffic on its own).
+    fn sync_cars(&mut self) {
+        for v in self.sim.vehicles() {
+            if !self.cars.contains_key(&v.car_id) {
+                if let Ok(car) = simcli::data::load_car(mem_data(), &v.car_id) {
+                    self.cars.insert(v.car_id.clone(), car);
+                }
+            }
+        }
     }
 
     /// Playback state, if this is a replay.
@@ -317,8 +339,7 @@ impl Session {
             .entities
             .push(entity(&format!("car{n}"), car_id, pos, yaw));
         self.ids.push(id);
-        self.cars.push(car);
-        self.extras.push(EntityExtra::default());
+        self.cars.insert(car_id.to_string(), car);
         self.last_input.push(VehicleInput::default());
         self.log.entities = self.ids.len() as u32;
         Ok(id)
@@ -419,6 +440,7 @@ impl Session {
             }
             self.playback = Some(p);
         } else if self.script_running() {
+            // Scenario entities only: city runs add police / traffic cars (not scripted).
             let states = scenario_states(&self.sim, &self.ids);
             for (idx, (_, state)) in states.iter().enumerate() {
                 let input = driver_input(&self.sc, idx, tick, state, &self.last_input[idx]);
@@ -427,21 +449,28 @@ impl Session {
         }
 
         // 2. Step, keeping the pre-tick state for interpolation and acceleration.
-        // Scenario entities only: city runs add police / traffic cars (drawn, not scripted).
-        let before = scenario_states(&self.sim, &self.ids);
+        let before = self.sim.vehicle_states();
         if capture_prev {
-            for (x, (_, s)) in self.extras.iter_mut().zip(&before) {
-                x.prev_state = Some(s.clone());
+            for (id, s) in &before {
+                self.extras.entry(*id).or_default().prev_state = Some(s.clone());
             }
         }
         self.sim.step_fixed();
+        self.sync_cars();
         self.events.extend(self.sim.drain_events());
         if self.events.len() > MAX_BUFFERED_EVENTS {
             let excess = self.events.len() - MAX_BUFFERED_EVENTS;
             self.events.drain(..excess);
         }
-        let after = scenario_states(&self.sim, &self.ids);
-        for ((x, (_, b)), (_, s)) in self.extras.iter_mut().zip(&before).zip(&after) {
+        let after = self.sim.vehicle_states();
+        let before: BTreeMap<EntityId, VehicleState> = before.into_iter().collect();
+        self.extras
+            .retain(|id, _| after.iter().any(|(a, _)| a == id));
+        for (id, s) in &after {
+            let Some(b) = before.get(id) else {
+                continue;
+            };
+            let x = self.extras.entry(*id).or_default();
             let a = [
                 (s.lin_vel[0] - b.lin_vel[0]) / PHYSICS_DT,
                 (s.lin_vel[1] - b.lin_vel[1]) / PHYSICS_DT,
@@ -494,6 +523,7 @@ impl Session {
     }
 
     fn checkpoint(&self) -> Checkpoint {
+        // Replay checkpoints cover the scenario's own entities (the replay format's entity list).
         let states = scenario_states(&self.sim, &self.ids);
         let hashes: Vec<_> = self
             .sim
@@ -525,19 +555,17 @@ impl Session {
 
     /// Force-feedback output of a vehicle.
     pub fn ffb(&self, id: EntityId) -> Option<FfbOutput> {
-        self.index(id).map(|i| self.sim.vehicles()[i].vehicle.ffb())
+        self.vehicle(id).map(|v| v.vehicle.ffb())
     }
 
-    /// Current input of a vehicle.
+    /// Input a vehicle is driving with (live, scripted, replayed or AI).
     pub fn input(&self, id: EntityId) -> VehicleInput {
-        self.index(id)
-            .map(|i| self.last_input[i])
-            .unwrap_or_default()
+        self.vehicle(id).map(|v| v.input).unwrap_or_default()
     }
 
     /// Assists of a vehicle.
     pub fn assists(&self, id: EntityId) -> Option<AssistProfile> {
-        self.index(id).map(|i| self.sim.vehicles()[i].assists)
+        self.vehicle(id).map(|v| v.assists)
     }
 
     // ----- scenario outcome --------------------------------------------------------------

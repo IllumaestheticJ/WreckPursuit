@@ -502,8 +502,8 @@ impl Vehicle {
     }
 
     /// On-demand AWD coupling (contract `DriveLayout::AwdOnDemand`): closes when the front axle
-    /// out-runs the rear by more than `engage_slip` (fully at 2×), pre-loads at launch
-    /// (60% of throttle below 5 m/s), closes fast (10/s) and opens slowly (2/s) like a
+    /// out-runs the rear by more than `engage_slip` (fully at 2×), is pre-charged below 5 m/s
+    /// (100% × max(throttle, 0.5)), closes fast (10/s) and opens slowly (2/s) like a
     /// hydraulic clutch pack, so it does not chatter as the slip it cures disappears.
     fn update_awd_coupling(&mut self, throttle: f32, speed: f32, dt: f32) {
         let DriveLayout::AwdOnDemand { engage_slip, .. } = self.def.drivetrain.layout else {
@@ -516,8 +516,10 @@ impl Vehicle {
         let slip = (front - rear) / rear.max(1.0);
         let engage = engage_slip.max(1e-3);
         let from_slip = ((slip - engage) / engage).clamp(0.0, 1.0);
+        // Pre-charged while slow (like real on-demand couplings at a standstill), so a
+        // torque-converter launch does not dump its stall torque on the front axle alone.
         let preload = if speed.abs() < 5.0 {
-            0.6 * throttle
+            1.0 * throttle.max(0.5)
         } else {
             0.0
         };

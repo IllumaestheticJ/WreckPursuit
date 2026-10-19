@@ -1,0 +1,27 @@
+# Study for 03 (B), part 2: Arcade plasticity_scale (permanent set per over-yield) with
+# impulse_to_lattice_scale, against the golden T-bone target and the Arcade guardrails.
+# See b_crush_arcade_table.yaml for the targets.
+description: Arcade plasticity_scale × impulse_to_lattice_scale vs the golden T-bone target + Arcade guardrails
+probe:
+  kind: scenario
+params:
+  - {target: "mode:arcade:plasticity_scale", label: plasticity, values: [0.8, 1.0, 1.25, 1.5]}
+  - {target: "mode:arcade:impulse_to_lattice_scale", label: impulse, values: [0.45, 0.55, 0.65]}
+variants:
+  - name: tbone victim (Arcade)
+    probe: {file: apps/simcli/scenarios/golden/tbone.ron}
+    expect:
+      - {metric: victim.crush_depth_m, min: 0.15, max: 0.6}
+      - {metric: victim.components_failed, min: 1, max: 20}
+      - {metric: victim.total_loss, min: 0, max: 0}
+  - name: barrier 56 (Arcade)
+    probe: {file: apps/simcli/scenarios/golden/barrier_56kmh.ron}
+    # Run the Simulation golden in Arcade; drop its Simulation-only expectations (total_loss: true).
+    set: [{target: "scenario:mode", value: Arcade}, {target: "scenario:expect", value: []}]
+    expect:
+      - {metric: car.total_loss, min: 0, max: 0}
+  - name: side_arcade checks
+    probe: {kind: barrier_scenario, file: crates/wp_damage/scenarios/side_arcade.ron}
+  - name: frontal_arcade checks
+    probe: {kind: barrier_scenario, file: crates/wp_damage/scenarios/frontal_arcade.ron}
+plots: [victim.crush_depth_m, victim.components_failed, car.final_health, "crush_m@56"]

@@ -23,6 +23,8 @@
       .bar i { position: absolute; top: 0; bottom: 0; left: 0; }
       .bar b { position: absolute; top: -2px; bottom: -2px; left: 50%; width: 1px; background: #888; }
       .right-col { position: absolute; top: 8px; right: 8px; display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+      .police-hud { position: absolute !important; top: 8px; left: 50%; transform: translateX(-50%); width: 16em; background: transparent; pointer-events: none; }
+      .police-hud .wp-hud-heat { pointer-events: auto; }
       .feed { max-width: 360px; max-height: 22vh; overflow: auto; font-size: 11px; }
       .comps, .regions { white-space: pre; max-height: 30vh; overflow: auto; }
       .comps .bar { width: 80px; }
@@ -49,6 +51,7 @@
           speed <input id="sc-speed" type="number" min="5" max="250" step="5" value="56" /> km/h
           <button id="sc-run">run</button>
           <button id="sc-free">free drive</button>
+          <button id="sc-chase" title="procedural city at night, police, traffic, you start speeding">city chase</button>
         </div>
         <div class="row">
           mode <select id="mode"><option>Arcade</option><option>Simulation</option></select>
