@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use wp_contracts::{
     DamageMode, DayPhase, EntityId, HandlingEffects, PlayerId, VehicleInput, GRAVITY_MPS2,
 };
-use wp_math::{sin_cos, Rng};
+use wp_math::{atan, sin_cos, Rng};
 
 use crate::config::PursuitFile;
 use crate::events::{IncidentId, ToolId, UnitId, UnitKind};
@@ -666,10 +666,29 @@ pub fn step_helo(u: &mut Unit, target: [f32; 2], speed: f32, altitude: f32, dt: 
     b.alt_m += (altitude - b.alt_m).clamp(-8.0 * dt, 8.0 * dt);
 }
 
-/// The stand-in for the shared AI driving controller: converts a [`DriveCommand`] plus the
-/// vehicle's actual state into a [`VehicleInput`] (pure pursuit steering, P speed control).
-/// `wp_sim` uses this for AI-driven police vehicles until `wp_vehicle` provides the shared
-/// controller (requested in `docs/integration/police.md`).
+/// Steering geometry of the vehicle a [`DriveCommand`] is turned into input for.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct SteerGeometry {
+    /// Wheelbase, m (`VehicleDef::wheelbase_m`).
+    pub wheelbase_m: f32,
+    /// Road-wheel angle at full lock, rad (`WheelDef::max_steer_rad` of a front wheel).
+    pub max_steer_rad: f32,
+}
+
+impl Default for SteerGeometry {
+    fn default() -> Self {
+        Self {
+            wheelbase_m: 2.7,
+            max_steer_rad: 0.6,
+        }
+    }
+}
+
+/// Converts a [`DriveCommand`] plus the vehicle's actual state into a [`VehicleInput`] for
+/// physical police cars. Steering is the same pure-pursuit law `wp_world`'s traffic uses for
+/// its physical cars (look-ahead `4 + 0.6·v` clamped to 5–25 m, `δ = atan(L·κ)`); speed is a
+/// stateless proportional throttle/brake. `wp_world` keeps its controller private, so this is a
+/// port until it exposes one (requested in `docs/integration/police.md`).
 pub fn drive_input(
     pos: [f32; 2],
     heading: [f32; 2],
@@ -677,6 +696,7 @@ pub fn drive_input(
     cmd: &DriveCommand,
     track_s: f32,
     planned_speed: f32,
+    geom: SteerGeometry,
 ) -> VehicleInput {
     if !cmd.track.is_drivable() {
         return VehicleInput {
@@ -686,15 +706,17 @@ pub fn drive_input(
             ..Default::default()
         };
     }
-    let look = (speed * 0.6).max(6.0);
+    let look = (4.0 + 0.6 * speed.abs()).clamp(5.0, 25.0);
     let target = lane_point(&cmd.track, track_s + look, cmd.lane_offset_m);
-    let to = sub(target, pos);
-    let ld = len(to).max(1.0);
-    let sin_alpha = cross(heading, to) / ld;
-    // Curvature → steer fraction, assuming ~2.7 m wheelbase and 0.6 rad full lock.
-    let curvature = 2.0 * sin_alpha / ld;
-    // Positive steer = right in the contract; positive curvature = left turn here.
-    let steer = (-(curvature * 2.7) / 0.6).clamp(-1.0, 1.0);
+    let d = sub(target, pos);
+    let right = [heading[1], -heading[0]];
+    let long = dot(d, heading);
+    let latd = dot(d, right);
+    let l2 = (long * long + latd * latd).max(1.0);
+    // Positive curvature = left turn; positive steer = right in the contract.
+    let curvature = -2.0 * latd / l2;
+    let delta = atan(geom.wheelbase_m * curvature);
+    let steer = (-delta / geom.max_steer_rad.max(0.1)).clamp(-1.0, 1.0);
     let want = cmd.speed_mps.min(planned_speed);
     let err = want - speed;
     let (throttle, brake) = if err > 0.0 {
@@ -794,7 +816,15 @@ mod tests {
             lane_offset_m: 0.0,
         };
         // Facing +Y, the track goes up-right: steer right (positive).
-        let i = drive_input([0.0, 0.0], [0.0, 1.0], 5.0, &cmd, 0.0, 10.0);
+        let i = drive_input(
+            [0.0, 0.0],
+            [0.0, 1.0],
+            5.0,
+            &cmd,
+            0.0,
+            10.0,
+            SteerGeometry::default(),
+        );
         assert!(i.steer > 0.0 && i.throttle > 0.0);
     }
 }

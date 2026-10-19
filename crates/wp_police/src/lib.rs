@@ -26,6 +26,7 @@
 #![warn(missing_docs)]
 
 pub mod captain;
+pub mod city;
 pub mod config;
 pub mod dispatch;
 pub mod events;
@@ -53,11 +54,14 @@ pub use graph::{procedural_city, CityParams, District, RoadGraph};
 pub use heat::{BountyRecord, PursuitStatus, RacerRecord, WantedLevel};
 pub use time::SimTime;
 pub use tools::{HeloView, RadarBlip, RadioLine, Roadblock, SpikeStrip, StaticCollider};
-pub use unit::{Assignment, DriveCommand, Tactic, Unit};
+pub use unit::{Assignment, DriveCommand, SteerGeometry, Tactic, Unit};
 
 use graph::xy;
 use tools::Puncture;
 use unit::{UnitBody, UnitRole};
+
+/// Height of a driver's eyes / a car's roof for line-of-sight queries, m.
+pub const EYE_HEIGHT_M: f32 = 1.3;
 
 /// What the police system sees of a racer each tick.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -237,6 +241,13 @@ impl PoliceSystem {
         )
     }
 
+    /// Police on `wp_world`'s city: the road graph is converted with
+    /// [`RoadGraph::from_city`]. Pass the same `World` as `world` to [`PoliceSystem::step`] so
+    /// line of sight uses its buildings.
+    pub fn for_world(cfg: PoliceConfig, world: &wp_world::World, setup: PoliceSetup) -> Self {
+        Self::with_city(cfg, RoadGraph::from_city(world.map()), setup)
+    }
+
     /// Police on a road network.
     pub fn with_city(cfg: PoliceConfig, graph: RoadGraph, setup: PoliceSetup) -> Self {
         Self {
@@ -295,13 +306,13 @@ impl PoliceSystem {
         self.now = self.now.plus(dt);
         self.phase = world.time_of_day().phase();
         self.sync_racers(racers);
-        self.process_events(events);
+        self.process_events(world, events);
         self.drive_units(dt);
         self.think_accum += dt;
         if self.think_accum >= 1.0 / self.cfg.pursuit.think_hz {
             let tdt = self.think_accum;
             self.think_accum = 0.0;
-            self.think(tdt);
+            self.think(world, tdt);
         }
         for e in self.pending.drain(..) {
             out.push(e.to_sim_event());
@@ -336,12 +347,12 @@ impl PoliceSystem {
         }
     }
 
-    fn process_events(&mut self, events: &[SimEvent]) {
+    fn process_events(&mut self, world: &dyn WorldQuery, events: &[SimEvent]) {
         for ev in events {
             match ev {
-                SimEvent::TrafficViolation { vehicle, kind, .. } => {
+                SimEvent::TrafficViolation { vehicle, kind, pos } => {
                     if self.racers.contains_key(vehicle) {
-                        self.on_violation(*vehicle, kind);
+                        self.on_violation(world, *vehicle, kind, xy(*pos));
                     }
                 }
                 SimEvent::TotalLoss { vehicle } => {
@@ -361,6 +372,13 @@ impl PoliceSystem {
                 _ => {}
             }
         }
+    }
+
+    /// Line of sight between two ground points at eye height: the police graph's own occluders
+    /// (procedural test city) and the world's buildings (`WorldQuery::line_of_sight`).
+    pub(crate) fn sees(&self, world: &dyn WorldQuery, a: [f32; 2], b: [f32; 2]) -> bool {
+        self.graph.line_of_sight(a, b)
+            && world.line_of_sight([a[0], a[1], EYE_HEIGHT_M], [b[0], b[1], EYE_HEIGHT_M])
     }
 
     pub(crate) fn unit_index(&self, id: UnitId) -> Option<usize> {
@@ -589,8 +607,9 @@ impl PoliceSystem {
         }
     }
 
-    /// Driver input for an externally driven AI unit (stand-in shared controller).
-    pub fn unit_input(&self, unit: UnitId) -> Option<VehicleInput> {
+    /// Driver input for an externally driven AI unit with steering geometry `geom` (from the
+    /// unit's `VehicleDef`). `None` for player units and unknown ids.
+    pub fn unit_input(&self, unit: UnitId, geom: unit::SteerGeometry) -> Option<VehicleInput> {
         let u = &self.units[self.unit_index(unit)?];
         if u.player.is_some() {
             return None;
@@ -602,6 +621,7 @@ impl PoliceSystem {
             &u.cmd,
             u.track_s,
             u.planned_speed,
+            geom,
         ))
     }
 

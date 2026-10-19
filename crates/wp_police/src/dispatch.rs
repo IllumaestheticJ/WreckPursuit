@@ -5,7 +5,7 @@
 //! Every assignment change goes through [`PoliceSystem::assign`], which emits a radio line.
 
 use serde::{Deserialize, Serialize};
-use wp_contracts::{EntityId, ViolationKind};
+use wp_contracts::{EntityId, ViolationKind, WorldQuery};
 
 use crate::captain::CaptainError;
 use crate::events::{
@@ -83,14 +83,21 @@ impl PoliceSystem {
     // Event handlers
     // -----------------------------------------------------------------------------------------
 
-    pub(crate) fn on_violation(&mut self, racer: EntityId, kind: &ViolationKind) {
+    /// A traffic violation by `racer` at world position `at` (from `SimEvent::TrafficViolation`).
+    pub(crate) fn on_violation(
+        &mut self,
+        world: &dyn WorldQuery,
+        racer: EntityId,
+        kind: &ViolationKind,
+        at: [f32; 2],
+    ) {
         let now = self.now;
         let obs = self.obs.get(&racer).copied().unwrap_or_default();
         let p = {
             let r = &self.racers[&racer];
             xy(r.pos)
         };
-        let camera = self.camera_sees(p);
+        let camera = self.camera_sees(world, p);
         let witnessed = obs.witnessed || camera;
         let cfg = self.cfg.heat.clone();
         let rec = self.racers.get_mut(&racer).expect("racer exists");
@@ -111,14 +118,15 @@ impl PoliceSystem {
             });
         }
         if !witnessed && !self.racers[&racer].pursued() && !self.graph.nodes.is_empty() {
-            // A civilian calls it in. One open report per racer; later calls update the position.
-            let district = self.graph.district_at(p);
+            // A civilian calls it in at the violation's position. One open report per racer;
+            // later calls update the position.
+            let district = self.graph.district_at(at);
             if let Some(inc) = self
                 .incidents
                 .iter_mut()
                 .find(|i| i.kind == IncidentKind::Report { racer })
             {
-                inc.pos = p;
+                inc.pos = at;
                 inc.district = district;
             } else {
                 let id = IncidentId(self.next_incident);
@@ -132,7 +140,7 @@ impl PoliceSystem {
                 self.incidents.push(Incident {
                     id,
                     kind: IncidentKind::Report { racer },
-                    pos: p,
+                    pos: at,
                     district,
                     created: now,
                     dispatch_at: now.plus(delay),
@@ -237,38 +245,38 @@ impl PoliceSystem {
         );
     }
 
-    pub(crate) fn camera_sees(&self, p: [f32; 2]) -> bool {
+    pub(crate) fn camera_sees(&self, world: &dyn WorldQuery, p: [f32; 2]) -> bool {
         self.graph
             .pois_of(PoiKind::Camera)
-            .any(|c| dist(c.pos, p) <= c.radius_m && self.graph.line_of_sight(c.pos, p))
+            .any(|c| dist(c.pos, p) <= c.radius_m && self.sees(world, c.pos, p))
     }
 
     // -----------------------------------------------------------------------------------------
     // Think: orchestration
     // -----------------------------------------------------------------------------------------
 
-    pub(crate) fn think(&mut self, tdt: f32) {
+    pub(crate) fn think(&mut self, world: &dyn WorldQuery, tdt: f32) {
         if self.graph.nodes.is_empty() {
             // No road network: rules only.
-            self.update_observations();
+            self.update_observations(world);
             self.update_racer_rules(tdt);
             return;
         }
         if !self.warmed_up {
             self.warm_up();
         }
-        self.update_observations();
+        self.update_observations(world);
         self.update_racer_rules(tdt);
         self.check_unit_health();
         self.maintain_pool();
         self.dispatch_incidents();
-        self.maintain_reinforcements();
+        self.maintain_reinforcements(world);
         self.maintain_helicopters();
         if !self.captain.human {
             self.ai_captain_tools();
         }
         self.expire_tools();
-        self.plan_units(tdt);
+        self.plan_units(world, tdt);
         self.cleanup_units();
     }
 
@@ -528,7 +536,7 @@ impl PoliceSystem {
             .count() as u32
     }
 
-    fn maintain_reinforcements(&mut self) {
+    fn maintain_reinforcements(&mut self, world: &dyn WorldQuery) {
         let now = self.now;
         let racers = &self.racers;
         self.reinforcements
@@ -585,7 +593,7 @@ impl PoliceSystem {
                     if self.ground_units_alive() >= self.cfg.presence.max_ground_units {
                         continue;
                     }
-                    let Some((pos, heading)) = self.reinforcement_spawn_point(target) else {
+                    let Some((pos, heading)) = self.reinforcement_spawn_point(world, target) else {
                         continue;
                     };
                     self.spawn_unit(UnitKind::Car, UnitRole::Reinforcement, pos, heading)
@@ -605,12 +613,16 @@ impl PoliceSystem {
     }
 
     /// The closest node at least `spawn_min_distance_m` from `target` without line of sight.
-    fn reinforcement_spawn_point(&self, target: [f32; 2]) -> Option<([f32; 2], [f32; 2])> {
+    fn reinforcement_spawn_point(
+        &self,
+        world: &dyn WorldQuery,
+        target: [f32; 2],
+    ) -> Option<([f32; 2], [f32; 2])> {
         let min_d = self.cfg.presence.reinforcement.spawn_min_distance_m;
         let mut best: Option<(f32, usize)> = None;
         for (i, n) in self.graph.nodes.iter().enumerate() {
             let d = dist(n.pos, target);
-            if d < min_d || self.graph.line_of_sight(n.pos, target) {
+            if d < min_d || self.sees(world, n.pos, target) {
                 continue;
             }
             if best.is_none_or(|b| d < b.0) {
@@ -713,8 +725,11 @@ impl PoliceSystem {
         }
     }
 
-    /// Helicopter base: the middle of the map.
+    /// Helicopter base: the city's helipad POI, else the middle of the map.
     fn helipad(&self) -> [f32; 2] {
+        if let Some(h) = self.graph.pois_of(PoiKind::Helipad).next() {
+            return h.pos;
+        }
         let mut min = [f32::INFINITY; 2];
         let mut max = [f32::NEG_INFINITY; 2];
         for n in &self.graph.nodes {

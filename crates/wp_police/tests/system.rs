@@ -9,7 +9,7 @@ use wp_police::graph::{dist, procedural_city, CityParams, District, RoadClass, R
 use wp_police::scenario::ScenarioWorld;
 use wp_police::{
     Assignment, PoliceConfig, PoliceEvent, PoliceSetup, PoliceSystem, PursuitOutcome,
-    PursuitStatus, RacerView, UnitKind, UnitSync, WantedLevel,
+    PursuitStatus, RacerView, SteerGeometry, UnitKind, UnitSync, WantedLevel,
 };
 
 const RACER: EntityId = EntityId(7);
@@ -45,10 +45,7 @@ impl Harness {
         };
         Self {
             police: PoliceSystem::with_city(PoliceConfig::builtin(), graph, setup),
-            world: ScenarioWorld {
-                time: TimeOfDay::from_hours(hour),
-                ratio: 0.0,
-            },
+            world: ScenarioWorld::clock(TimeOfDay::from_hours(hour), 0.0),
             events: Vec::new(),
             path,
             s: 0.0,
@@ -346,7 +343,7 @@ fn player_units_get_suggestions_and_external_units_pull_over() {
             .pos,
         before
     );
-    assert!(h.police.unit_input(pu).is_none());
+    assert!(h.police.unit_input(pu, SteerGeometry::default()).is_none());
     // An AI unit bound to a physical body follows sync_unit; a bent wheel makes it pull over.
     let ai = h
         .police
@@ -356,7 +353,7 @@ fn player_units_get_suggestions_and_external_units_pull_over() {
         .unwrap()
         .id;
     h.police.bind_unit_entity(ai, EntityId(901));
-    assert!(h.police.unit_input(ai).is_some());
+    assert!(h.police.unit_input(ai, SteerGeometry::default()).is_some());
     let mut eff = HandlingEffects::NEUTRAL;
     eff.toe_delta[0] = 0.05;
     h.police.sync_unit(
@@ -432,4 +429,47 @@ fn bounty_persists_and_scales_payouts() {
     other.run(0.1, &[]);
     h.run(0.1, &[]);
     assert!(h.police.payout_scale() > other.police.payout_scale());
+}
+
+#[test]
+fn world_city_converts_into_a_routable_police_graph() {
+    use wp_police::graph::{NodeId, PoiKind};
+    let map = wp_world::CityMap::new(wp_world::procgen::generate(
+        &wp_world::procgen::ProcGenConfig::small(),
+    ));
+    let g = wp_police::RoadGraph::from_city(&map);
+    assert!(g.segments.len() > 100, "{} segments", g.segments.len());
+    for d in District::ALL {
+        assert!(g.segments.iter().any(|s| s.district == d), "no {d:?} roads");
+    }
+    let candidates = map
+        .net
+        .pois
+        .iter()
+        .filter(|p| p.kind == wp_world::network::PoiKind::SafehouseCandidate)
+        .count();
+    assert_eq!(g.pois_of(PoiKind::Safehouse).count(), candidates);
+    assert_eq!(g.pois_of(PoiKind::Helipad).count(), 1);
+    // Network nodes keep their ids; most junctions reach each other along legal roads.
+    let n = map.net.nodes.len() as u32;
+    let mut reached = 0;
+    let mut tried = 0;
+    for a in (0..n).step_by(7) {
+        for b in (0..n).step_by(11) {
+            tried += 1;
+            reached += g.shortest_path(NodeId(a), NodeId(b)).is_some() as u32;
+        }
+    }
+    assert!(
+        reached as f32 >= 0.9 * tried as f32,
+        "{reached}/{tried} routable"
+    );
+    // World line of sight is honoured: a police system on the world city sees through streets
+    // but not through buildings.
+    let b = &map.net.buildings[0].footprint;
+    let c = b
+        .iter()
+        .fold([0.0f32; 2], |acc, p| [acc[0] + p[0], acc[1] + p[1]]);
+    let c = [c[0] / b.len() as f32, c[1] / b.len() as f32];
+    assert!(!map.line_of_sight([c[0] - 60.0, c[1], 1.3], [c[0] + 60.0, c[1], 1.3]) || b.len() < 3);
 }

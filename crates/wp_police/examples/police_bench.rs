@@ -23,6 +23,7 @@ fn main() {
         name: "bench".into(),
         seed: 9,
         city: Default::default(),
+        world_city: false,
         mode: wp_contracts::DamageMode::Simulation,
         time_of_day_h: 12.0,
         time_ratio: 0.0,

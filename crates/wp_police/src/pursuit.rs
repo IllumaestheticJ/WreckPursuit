@@ -21,7 +21,7 @@
 //! - Disengage — health below `disengage_health` or a bent wheel / flat: pull over
 //!   (handled in `dispatch`).
 
-use wp_contracts::{EntityId, GRAVITY_MPS2};
+use wp_contracts::{EntityId, WorldQuery, GRAVITY_MPS2};
 
 use crate::events::{PoliceEvent, PursuitOutcome, UnitId, UnitKind};
 use crate::graph::{dist, dot, normalize, perp_left, scale, sub, xy, NodeId, PoiKind};
@@ -60,7 +60,7 @@ impl PoliceSystem {
     // Observation & rules
     // -----------------------------------------------------------------------------------------
 
-    pub(crate) fn update_observations(&mut self) {
+    pub(crate) fn update_observations(&mut self, world: &dyn WorldQuery) {
         let los_range = self.cfg.pursuit.los_range_m.get(self.phase);
         let witness = self.cfg.heat.heat.witness_range_m.get(self.phase);
         let recognise = self.cfg.heat.heat.recognition_range_m.get(self.phase);
@@ -84,7 +84,7 @@ impl PoliceSystem {
                         if u.assignment == Assignment::OutOfService {
                             continue;
                         }
-                        if d <= los_range && self.graph.line_of_sight(u.body.pos, p) {
+                        if d <= los_range && self.sees(world, u.body.pos, p) {
                             // Recognition (pursuit start) and witnessing (full violation heat)
                             // have their own ranges inside line-of-sight range.
                             o.seen = true;
@@ -98,13 +98,18 @@ impl PoliceSystem {
                     UnitKind::Helicopter => {
                         if matches!(u.assignment, Assignment::HeloTrack { target } if target == id)
                             && d <= helo_range
+                            // Looking down from altitude: only tall buildings block.
+                            && world.line_of_sight(
+                                [u.body.pos[0], u.body.pos[1], u.body.alt_m],
+                                [p[0], p[1], crate::EYE_HEIGHT_M],
+                            )
                         {
                             o.seen = true;
                         }
                     }
                 }
             }
-            if self.camera_sees(p) {
+            if self.camera_sees(world, p) {
                 o.seen = true;
                 o.witnessed = true;
             }
@@ -387,7 +392,7 @@ impl PoliceSystem {
         fallback
     }
 
-    pub(crate) fn plan_units(&mut self, tdt: f32) {
+    pub(crate) fn plan_units(&mut self, world: &dyn WorldQuery, tdt: f32) {
         let now = self.now;
         let p = self.cfg.pursuit.clone();
         for i in 0..self.units.len() {
@@ -502,10 +507,7 @@ impl PoliceSystem {
                     let u = &self.units[i];
                     // Join the chase only once on the racer's line and behind it (hysteresis with
                     // the off-trail check in coordinate_pursuits).
-                    if seen
-                        && dist(u.body.pos, rp) < 120.0
-                        && self.graph.line_of_sight(u.body.pos, rp)
-                    {
+                    if seen && dist(u.body.pos, rp) < 120.0 && self.sees(world, u.body.pos, rp) {
                         let joins = self.pursuit_track(target).is_some_and(|(tr, racer_s)| {
                             let (s_u, lat) = tr.project(u.body.pos, racer_s, 200.0);
                             lat < 12.0 && s_u <= racer_s + 5.0

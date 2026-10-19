@@ -1,0 +1,14 @@
+// Same as night_core_speeder.ron, on wp_world's procedural city.
+(
+    name: "police_world_night_core_speeder",
+    seed: 100,
+    world_city: true,
+    time_of_day_h: 3.0,
+    duration_s: 480.0,
+    runs: 5,
+    racers: [(district: Core, speed_factor: 2.0)],
+    expect: [
+        (metric: "pursuit_start_s", min: 60.0, max: 10000.0),
+        (metric: "patrols_core", min: 3.0, max: 3.0),
+    ],
+)
