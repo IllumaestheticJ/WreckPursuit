@@ -8,7 +8,7 @@
 
 use std::time::Instant;
 
-use wp_contracts::{TimeOfDay, PHYSICS_DT};
+use wp_contracts::{TimeOfDay, WorldQuery, PHYSICS_DT};
 use wp_world::procgen::ProcGenConfig;
 use wp_world::{TrafficConfig, World, WorldConfig};
 
@@ -64,8 +64,30 @@ fn main() {
     let mut frames_ms: Vec<f64> = Vec::new();
     let t0 = Instant::now();
     let mut frame_start = Instant::now();
+    // Driving variety (playtest row 14): speed / limit of cruising cars (> 5 m/s, not braking),
+    // sampled once per second, and how often indicators are on.
+    let mut ratios: Vec<f32> = Vec::new();
+    // Highway lanes (limit ≥ 24 m/s): long straights where cars actually cruise.
+    let mut hw_ratios: Vec<f32> = Vec::new();
+    let (mut signal_samples, mut view_samples) = (0usize, 0usize);
     for i in 0..ticks {
         w.step(PHYSICS_DT, &mut ev);
+        if i % 240 == 0 && i > 240 * 60 {
+            for a in w.agents() {
+                view_samples += 1;
+                if a.turn_signal != 0 {
+                    signal_samples += 1;
+                }
+                if a.speed_mps > 5.0 && !a.brake_lights {
+                    if let Some(l) = w.speed_limit_at(a.pos) {
+                        ratios.push(a.speed_mps / l);
+                        if l >= 24.0 && a.speed_mps > 0.6 * l {
+                            hw_ratios.push(a.speed_mps / l);
+                        }
+                    }
+                }
+            }
+        }
         if i % 4 == 3 {
             let f = frame_start.elapsed().as_secs_f64();
             if i > 240 {
@@ -116,5 +138,48 @@ fn main() {
         mean_speed
     );
     println!("{s:?}");
+    for (name, r) in [
+        ("all cruising cars", &mut ratios),
+        ("highway", &mut hw_ratios),
+    ] {
+        r.sort_by(|a, b| a.total_cmp(b));
+        if r.is_empty() {
+            continue;
+        }
+        let q = |p: f32| r[((r.len() - 1) as f32 * p) as usize];
+        println!(
+            "speed / limit, {name} ({} samples): p5 {:.2} p25 {:.2} p50 {:.2} p75 {:.2} p95 {:.2}",
+            r.len(),
+            q(0.05),
+            q(0.25),
+            q(0.5),
+            q(0.75),
+            q(0.95)
+        );
+        let mut hist = [0usize; 8];
+        for x in r.iter() {
+            hist[(((x - 0.7) / 0.1).floor().max(0.0) as usize).min(7)] += 1;
+        }
+        let pcts: Vec<String> = hist
+            .iter()
+            .enumerate()
+            .map(|(k, n)| {
+                let label = match k {
+                    0 => "<0.8".to_string(),
+                    7 => "≥1.4".to_string(),
+                    _ => format!("{:.1}", 0.7 + 0.1 * k as f32),
+                };
+                format!("{label}: {:.0} %", 100.0 * *n as f32 / r.len() as f32)
+            })
+            .collect();
+        println!("  histogram: {}", pcts.join(", "));
+    }
+    println!(
+        "lane changes: {} ({} left / overtaking, {:.1} per agent-hour), indicators on in {:.1} % of samples",
+        s.lane_changes,
+        s.lane_changes_left,
+        s.lane_changes as f32 / (w.agent_count().max(1) as f32 * minutes / 60.0),
+        100.0 * signal_samples as f32 / view_samples.max(1) as f32
+    );
     println!("hash {:016x}", w.state_hash());
 }

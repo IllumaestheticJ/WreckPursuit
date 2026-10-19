@@ -192,6 +192,7 @@ Suburb }` — exactly `wp_world::network::DistrictKind` (moved to contracts, re-
 | `World::procedural(ProcGenConfig::small())` (6×6, 650 lanes, 521 parked cars) | same | ≈ 5 ms (debug ≈ 0.06 s) | — | — |
 | `line_of_sight`, random 300 m sight lines at 1.5 m, procedural_12x12 | same | 1.1 µs/query | — | — |
 | 10-min soak × 18 (9 seeds × 0 / 5 % aggressive) | same | 0 civilian–civilian collisions | — | < 1 % with aggressive |
+| 400 agents per frame after driver variety (round 6) | same | 0.055 ms (0.060 before, same run) | — | 2 ms |
 
 ## Known gaps
 - No rigid bodies for physical traffic until the sim loop handles `LodChange` (Needs 3).
@@ -347,3 +348,48 @@ zero gate passes; you can promote it). Goldens: see below.
 
 Needs added for this round: **9.** `wp_sim` / E: pass vehicle states to the police controller
 for the leader query (above).
+
+### Response from D (round 6 follow-up: playtest row 14, "NPC cars need variance")
+- **Per-driver personality** (deterministic, traffic RNG at spawn): `DriverParams` now also
+  carries `highway_bias`, `amber_decel`, `start_delay_s`, `lane_change_threshold`,
+  `keep_right_bias`, and every existing field is a range per personality (table in the
+  `DriverParams` docs / README). Desired speed / limit over the 70/25/5 mix: **p5 0.84, p50 0.98,
+  p95 1.13** (was ≈ 0.94 / 0.98 / 1.11); highways p95 1.20; alleys ≤ 0.9. 12 % of law-abiding
+  drivers are slow (0.80–0.88×).
+- **Lane changes**: per-driver MOBIL threshold + keep-right bias (overtake slower leaders, return
+  right); discretionary changes are **indicated ≥ 0.5 s before** they start (`AgentView::turn_signal`,
+  already in the planned `TrafficAgentSnapshot.flags` bits 2/3 — no new contract request), with
+  hysteresis so an indicated change usually happens; never within 60 m of a junction or inside one.
+  Lane prep before turns is implicit (turns are picked from the current lane).
+- **Dynamic driving**: reaction delay pulling away in a moving queue or first at a green
+  (0.15–2.2 s, 8 % hesitant ≥ 1.2 s); casual drivers run ambers only when they reach the line
+  before red; IDM gives smooth accel/decel with per-driver comfort values.
+- **Physical agents** follow the same personality (controller tracks the same IDM acceleration);
+  stopped ones are held on the handbrake (see round 6 above).
+- **Bug found and fixed on the way**: a stopped car holding a junction permit at a green had its
+  permit revoked every step (`need = 0 ≤ limit = 0`) — harmless before, a gridlock with start
+  delays (119 stuck recycles / 10 min until fixed; now 1–4).
+- **Own traffic no longer "tracked"** (`World::step`): `wp_sim` passes every vehicle to
+  `set_tracked_vehicles`, including promoted traffic cars. Those were (a) obstacles for their own
+  kinematic agent, (b) "players" for spawning / promotion, (c) earning traffic violations — every
+  promoted civilian logged a `Collision` violation (27 in `traffic_soak_observer`), i.e. police
+  heat for civilians. World now drops entities that are its own agents. Also RedLight is
+  reported once per crossing (a slow car straddling the line was reported every update).
+  `traffic_soak_observer` now has **0 events and 0 civilian collisions**.
+
+Measurements (release, 12×12, 400 agents, `density_scale` 4, noon, 5 % aggressive, 10 min sim;
+`cargo run --release -p wp_world --example traffic_bench -- 10 400 12 1 0.05`):
+
+| | before | after |
+|---|---|---|
+| civilian collisions (10-min soaks, 0 % / 5 % aggressive) | 0 / 0 | 0 / 0 |
+| stuck > 120 s, recycled | 11 / 2 | 3 / 1 |
+| lane changes | 1133 / 1173 | 847 / 912 (328 of 912 to the left = overtakes) |
+| indicators on (share of agent samples) | 28.6 % | 28.0 % |
+| moving at the end | 327 / 309 of 400 | 336 / 333 |
+| frame cost (bench, collision diagnostics on) | 0.245 ms avg | 0.246 ms avg |
+
+Lane changes are fewer than before because marginal changes are now indicated first and dropped
+if no longer worth it; overtakes are real ones. Speed / limit sampled on cruising cars city-wide
+is p50 0.64 before and after: the 110 m grid with a signal every block keeps cars below their
+desired speed, so the personal spread shows on longer roads and highways, not in the average.

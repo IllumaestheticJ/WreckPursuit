@@ -129,10 +129,22 @@ columns (northbound) and diagonals at 90 % of the limit. POIs: 2 police stations
 speed `v`, lateral offset and a two-segment plan. Kinematic agents integrate at 60 Hz
 (`TRAFFIC_DT`) inside `World::step` (called at 240 Hz).
 
-**Personalities** (sampled per spawn): 70 % law-abiding (0.93–1.0× limit, headway 1.6–2.0 s,
-s₀ 2 m, comfortable decel 2.5 m/s², politeness 0.5, accepted gap 5 s), 25 % casual
-(1.07–1.12× limit, 1.4–1.6 s, 3.0 m/s², 4.5 s), 5 % aggressive (1.15–1.22×, 1.2–1.3 s,
-s₀ 1.2 m, runs yellows, politeness 0.05, 3.5 s gaps).
+**Personalities** (sampled per spawn from the traffic RNG; every driver differs within its
+personality — owner playtest row 14): 70 % law-abiding (12 % slow drivers at 0.80–0.88× the
+limit, the rest 0.88–1.03×; headway 1.6–2.2 s, s₀ 2 m, accel 1.1–1.7, comfortable decel
+2.0–2.8 m/s², politeness 0.4–0.7, accepted gap 5 s), 25 % casual (1.03–1.13×, 1.3–1.6 s,
+1.5–2.1 / 2.6–3.3 m/s², 4.5 s), 5 % aggressive (1.13–1.25×, 1.1–1.3 s, s₀ 1.2 m, runs yellows,
+politeness 0–0.1, 3.5 s gaps). Per road class: highways add −4…+12 % (by personality), alleys
+cap at 0.9×. Resulting desired speed / limit over the mix: p5 0.84, p50 0.98, p95 1.13 (highway
+p95 1.20). Full table: `DriverParams` docs.
+
+**Dynamic driving**: reaction delay when pulling away — in a queue that starts moving, or first
+in line at a green going straight/right — 0.5–1.0 s law-abiding (10 % hesitant: 1.2–2.2 s),
+0.35–0.75 s casual, 0.15–0.4 s aggressive (not for gap-accepting moves: the gap would close).
+Ambers: law-abiding stop whenever they can at their comfortable decel; casual drivers go when
+stopping would need more than 55–90 % of it *and* they reach the line before red; aggressive go
+whenever they reach the line. Physical (near-LOD) cars follow the same personality: the
+controller tracks the same IDM acceleration.
 
 **Longitudinal (IDM)** against the nearest of: car ahead on the own segment or the planned
 ones (incl. a car on a diverging sibling connector whose rear has not cleared the shared
@@ -155,13 +167,19 @@ first in its lane and within comfortable stopping distance of the line. Granting
   accept a gap: no higher-ranked conflicting car arrives within the driver's accepted gap
   (upstream search 2 segments deep; cars that will stop for yellow/red are ignored).
 The permit reserves the connector until the agent leaves it. Permits are revoked if the light
-changes and the agent can still stop comfortably, a siren appears, or a tracked vehicle blocks
+changes and the agent can still stop comfortably (never at a green: a stopped, hesitating car
+keeps its permit), a siren appears, or a tracked vehicle blocks
 the box.
 
 **Lane changes (MOBIL)** every 0.5 s per agent on multi-lane roads, ≥ 15 m into the lane and
 ≥ 60 m before its end: safety (new follower ≥ −4 m/s², gaps ≥ s₀), incentive
-`Δa_self + p(Δa_new + Δa_old) > 0.25` with a 0.3 m/s² keep-right bias. The car slides over at
-1.3 m/s and keeps a ghost in its old lane until clear.
+`Δa_self + p(Δa_new + Δa_old) > threshold` with a keep-right bias, both per driver (threshold
+0.15–0.35 / 0.15–0.3 / 0.08–0.15 m/s², bias 0.2–0.4 / 0.15–0.3 / 0.05–0.15 for law-abiding /
+casual / aggressive). Discretionary changes are **indicated first** (`AgentView::turn_signal`)
+and happen at the next check ≥ 0.5 s later if still chosen (half the threshold then) and still
+safe; debris-forced changes go at once. The car slides over at 1.3 m/s and keeps a ghost in its
+old lane until clear. Lane choice before turns is implicit: an agent picks its turn from the
+lane it is in. `TrafficStats::{lane_changes, lane_changes_left}`.
 
 **Hazards**: emergency braking (−8 m/s², hazard lights) when a tracked vehicle in front or
 alongside has time-to-closest-approach < 3 s with miss distance < 3 m at > 5 m/s relative
@@ -245,6 +263,8 @@ Release, cloud container (4 vCPU), procedural 12×12, 400 agents at saturation
 | Measurement | Native | Browser | Budget |
 |---|---|---|---|
 | Traffic + signals + violations per 60 Hz frame (4 × `World::step`) | avg 0.06 ms, p99 0.15 ms, p99.9 0.3 ms, max ≈ 1.4 ms (noise) | not measured | 2 ms (browser 4 ms) |
+| Same after driver variety (round 6 follow-up, 2026-10-19) | perf test 0.055 ms (0.060 before, same run); bench avg 0.068 ms, p99 0.27 ms, p99.9 0.76 ms, single max 4.5 ms (container noise; before: 3.7–6.6 ms) | — | 2 ms |
+| `leader::find_leader`, 60 m look-ahead, ~30 obstacles | a few µs per call | — | — |
 | Same with civilian-collision diagnostics on | avg 0.20 ms | — | — |
 | `line_of_sight`, random 300 m sight lines at eye height | ≈ 1.1 µs/query | — | — |
 | `World::load` of `procedural_12x12.road.bin` (decode + `CityMap::new` + parked cars) | ≈ 17 ms (debug build ≈ 0.2 s; `ProcGenConfig::small()` ≈ 5 ms / 0.06 s) | — | — |
