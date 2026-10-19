@@ -64,6 +64,22 @@ impl Vehicle {
         self.engine_rpm = self.def.engine.idle_rpm;
     }
 
+    /// Overwrite the dynamic state from a full-precision [`VehicleState`] (as produced by
+    /// [`VehicleSim::state`]). Used by `wp_net` client reconciliation: rewind to the server's
+    /// state, then re-simulate stored inputs. `state()` → `set_state()` → `state()` must
+    /// round-trip to float precision (the stub recovers yaw with `atan2`, ≈1e-7 rad).
+    /// Client-side only; never called inside the authoritative sim. Added by workstream 07;
+    /// keep it when replacing the stub.
+    pub fn set_state(&mut self, s: &VehicleState) {
+        self.pos = s.pos;
+        // Stub rotation is pure yaw: q = [0, 0, sin(yaw/2), cos(yaw/2)].
+        self.yaw = wp_math::wrap_angle(2.0 * s.rot[2].atan2(s.rot[3]));
+        self.speed = s.speed_mps;
+        self.steer_rad = s.wheel_states[0].steer_rad;
+        self.gear = s.gear;
+        self.engine_rpm = s.engine_rpm;
+    }
+
     fn peak_torque_nm(&self) -> f32 {
         self.def
             .engine
