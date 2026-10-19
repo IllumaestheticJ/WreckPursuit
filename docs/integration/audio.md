@@ -108,41 +108,68 @@ tests. Check: `node apps/testbed-web/e2e/audio.mjs` (after the wasm build).
   embedded data). The bridge core is now `audio::frame_commands` (native-testable); the test
   takes ~75 s in a debug build because it runs the full city physics.
 
-## Recorded CC0 packs (playtest #5, "use real open source sounds") — BLOCKED on network policy
-Status 2026-10-19: **not started — no audio was downloaded or committed.** This container's egress
-proxy refuses every sound-library host (`connect_rejected` from the agent proxy for each one below;
-only GitHub and the package registries are reachable). Per the brief, nothing was fetched from
-unverified mirrors (GitHub re-uploads, npm packages) because their provenance/licence can't be
-checked against the original page.
+## Recorded packs (playtest #5, "use real open source sounds") — branch `ws/audio-samples` (J, 2nd session)
+Status 2026-10-19: **done.** 80 recorded files, **1.25 MB** (budget 15 MB), mono OGG Vorbis, from
+kenney.nl and opengameart.org (freesound.org answers 403 without an API key and was skipped). Licences:
+CC0 1.0 and CC-BY 3.0 only (no NC / ND / SA, no game rips); every file, its page, author, licence and
+processing is in `data/audio/LICENSES.md` (+ machine-readable `data/audio/sources.json`); CC-BY authors
+(qubodup, Nayckron) are credited in the testbed's F1 help (`apps/testbed-web/src/audio/credits.ts`).
 
-**Hosts the environment's network policy must allow** (HTTPS, port 443):
-
-| Host | Used for | Licence of what we'd take |
+| Pack (fallback) | What | Source |
 |---|---|---|
-| `kenney.nl`, `www.kenney.nl` | Kenney audio packs (impact, UI, sci-fi/vehicle) — zip downloads | CC0 |
-| `opengameart.org` | CC0 engine loops, sirens, crashes (files under `/sites/default/files/`) | CC0 / CC-BY only (filter out NC/SA) |
-| `freesound.org` | search + licence metadata (API `/apiv2/`, needs a free API key for original-quality downloads) | CC0 / CC-BY only |
-| `cdn.freesound.org` | Freesound preview/download files | as above |
-| `sonniss.com` | GDC royalty-free bundle pages + licence text (download links point at the mirror named on that page) | Sonniss royalty-free licence (verify text) |
-| `archive.org`, `*.us.archive.org` | public-domain / CC0 sound collections (fallback) | CC0 / PD |
-| `upload.wikimedia.org`, `commons.wikimedia.org` | public-domain siren/horn recordings (fallback) | PD / CC0 / CC-BY |
+| `engine_rec_i4` (`engine_proc_i4`) | idle / 2,600 / 4,900 rpm loops (anchors from the measured firing frequency), low-passed copies as off-throttle layers | GGBotNet (CC0), qubodup (CC-BY 3.0) |
+| `engine_rec_turbo` (`engine_proc_i4`) | the I4 loops + recorded blow-off hisses; louder whistle (still procedural) | + bart (CC0) |
+| `engine_rec_v6`, `engine_rec_i6` (`engine_proc_v6` / `_i6`) | 4-pitch loops of one public-domain car recording; i6 reuses the v6 files | domasx2 (CC0) |
+| `engine_rec_v8` (`engine_proc_v8`) | heavy engine loop at 4 speeds | Nayckron (CC-BY 3.0) |
+| `world_rec` (`world_proc`) | squeal loop, impacts light/medium/heavy metal, plastic, glass ×7, cast clank, thud/thump/land, scrape loops (metal/plastic), part tear, wheel off, engine fail, steam hiss, horn + truck horn, **gear-shift clunks**, **city night ambience** | Kenney Impact Sounds (CC0), qubodup, rubberduck, TinyWorlds, AntumDeluge, Ziph, BMacZero, GGBotNet, IgnasD, Wolfgang_ (all CC0) |
+| `siren_rec` (`siren_proc`) | wail (rise + fall), yelp, phaser, hi-lo loops | aquinn (CC0, electronic) |
+| `radio_rec` (`radio_proc`) | squelch on/off bursts + static bed from a real scanner (Uniden SDS100) | Kresiek The Furry (CC0) |
 
-Minimum useful set: `kenney.nl` + `opengameart.org` + `freesound.org` + `cdn.freesound.org`.
-Network access is changed in the session's cloud environment menu → Edit → Network access (add the
-hosts under Allowed domains, keep "Allow package managers" ticked), see
-https://code.claude.com/docs/en/cloud-environments#network-access.
+**Honest gaps (best available on these two sites):** no multi-RPM recordings of distinct engines exist
+there under CC0/CC-BY. The I4 layers are three real loops from two different cars; the V6/I6 and V8
+packs are each one recording at several pitches (more "recorded timbre" than true RPM layering). Turbo
+whistle, supercharger whine, exhaust pops, the limiter, rolling-surface noise, gravel scrub, tire burst and
+panel rattle stay procedural inside the recorded packs (no fitting recording). Sirens are electronic
+(synthesised) sweeps — they play at their own recorded cadence, not phase-locked to the director.
+Better engine sets would need freesound (API key) or a recording session; the pack format is ready.
 
-**Plan once the hosts are open** (no code change needed for playback — `source: Samples` already loads
-`/data/audio/packs/<pack>/<file>`):
-1. Download into a scratch dir, keep the original page URL, author and licence for each file.
-2. `ffmpeg`: mono, trim, loudness-normalise (EBU R128, −16 LUFS one-shots / −20 LUFS loops), seamless
-   loop points, OGG Vorbis q3 (MP3 fallback for Safari); target < 15 MB total.
-3. New packs `engine_rec_{i4,v6,v8,turbo}` (4–6 RPM points each + whistle/blow-off), `world_rec`
-   (shift clunk, squeal/skid, light/medium/heavy metal, glass, plastic, scrape loops, horn),
-   `siren_rec` (wail/yelp/hi-lo), `radio_rec` (squelch/static), `ambient_city_night`.
-4. `data/audio/LICENSES.md` row per file; CC-BY authors in the testbed F1/help screen.
-5. Car defs point at the `*_rec` packs by default; audio panel gets a "Procedural (fallback)" toggle
-   that swaps back to the existing `*_proc` packs.
+**Loading path** (no `wp_contracts` change):
+- `SamplePack::fallback: Option<String>` (`wp_audio::data`, optional, serde default): the procedural
+  twin. `validate()` checks it exists, is the same kind and defines every engine layer cue.
+- Car defs point at the `*_rec` packs. `DEFAULT_WORLD_PACK` / `CarAudioDef::fallback` still name the
+  procedural packs (cars without a def).
+- Backend (`voices.ts`): `VoicePool.source = "recorded" | "procedural"`. Procedural → plays the
+  fallback pack's cue of the same name; recorded but the file not decoded yet / failed → also the
+  fallback cue (never silent, never "noise"). URLs are relative, `data/audio/packs/<pack>/<file>`,
+  `..` segments normalised (shared files load once) — same layout on the dev server and the published
+  link. Audio panel: **sounds: recorded / procedural** (persisted), **ambience** slider, sample load
+  counter. `__wpAudio.setSource()`, `.soundSource()`, `.sampleStatus()` for tests.
+- Ambience: optional cue `ambient/city_night` in a World pack, played by the backend as a
+  non-spatial loop on the World bus (recorded mode only). Not tied to the day/night clock yet.
+- Gear shifts: optional cue `drivetrain/shift` (`wp_audio::data::cues::SHIFT`); the director plays it
+  as a Low-priority one-shot when `VehicleState::gear` changes, only if the car's world pack defines it.
+- Scanner squelch/static use `radio_rec` when present.
+
+**Tests:** `cargo test -p wp_audio --test samples` — every referenced file exists, stays inside
+`data/audio/packs/`, is .ogg/.mp3/.wav, has a `LICENSES.md` row with an allowed licence; no
+unreferenced audio files; total ≤ 15 MB; recorded packs have a fully procedural fallback; every car
+uses recorded packs; a gear change plays one shift clunk. Browser: `node e2e/audio_samples.mjs`
+(after the wasm build) — all files fetched from relative URLs and decoded, engine plays, switching to
+procedural and back works, no page errors.
+
+**Rebuilding the files:** `tools/audio_packs/` (new, outside my folders: download, cut/loop/normalise/
+encode, pack JSON and LICENSES.md generators; README there). Per-file processing is also recorded in
+`sources.json` / `LICENSES.md`.
+
+**Coordination with the `ws/audio` session (engine bug):** files touched in `wp_audio` here:
+`data.rs` (new `SamplePack::fallback` + its validation, `cues::SHIFT` / `AMBIENT_CITY_NIGHT`),
+`director.rs` (`WorldCues::shift`, `VehicleRuntime::last_gear`, one block before "Tires, surfaces,
+suspension"), `engine.rs` **one line in the test helper** (`fallback: None` in a `SamplePack`
+literal), new `tests/samples.rs`. No engine-model / synthesis code changed. Car defs now name
+`engine_rec_*`: an engine-model fix tuned against the procedural packs should be re-checked with the
+recorded layers (anchors in `data/audio/packs/engine_rec_*.json`).
+Outside my folders: `apps/testbed-web/src/hud.ts` (import + append `AUDIO_CREDITS` to the F1 help),
+`apps/testbed-web/package.json` (`e2e:audio-samples` script).
 
 ## Perf numbers
 | Measurement | Machine | Native | Browser | Budget |
@@ -162,9 +189,8 @@ https://code.claude.com/docs/en/cloud-environments#network-access.
 - TTS via `speechSynthesis` bypasses the Web Audio radio EQ (browser limitation); squelch and
   static go through it. Recorded line packs will use the EQ.
 - No music player; the Music bus exists and is ducked by the scanner.
-- Procedural packs are placeholders: recognisably engine-like (firing frequency, harmonics,
-  cross-plane burble, limiter chop), not realistic. Recorded packs plug in by changing
-  `source` to `Samples` — no code change.
+- Recorded packs are the default (see "Recorded packs"); engine recordings are thin (one or two
+  sources per engine type). Procedural packs remain as the fallback setting.
 
 ## Lead feedback
 (Written by the integration lead: failing tests, expected vs actual.)

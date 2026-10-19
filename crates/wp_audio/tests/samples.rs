@@ -163,3 +163,51 @@ fn recorded_packs_have_a_procedural_fallback_and_cars_use_them() {
         }
     }
 }
+
+#[test]
+fn gear_change_plays_the_recorded_shift_clunk_once() {
+    use wp_audio::{AudioDirector, AudioFrame, DriverKind, Listener, VehicleAudioInput};
+    use wp_contracts::{load_car, EntityId, VehicleState};
+    let car = load_car(audio_dir().join("../cars/debug_sedan.json")).expect("car loads");
+    let mut dir = AudioDirector::new(AudioLibrary::embedded().unwrap(), 3);
+    dir.register_car(&car);
+    let mut s = VehicleState {
+        rot: [0.0, 0.0, 0.0, 1.0],
+        engine_rpm: 3000.0,
+        gear: 1,
+        ..Default::default()
+    };
+    let mut shifts = Vec::new();
+    for f in 0..6u64 {
+        if f == 3 {
+            s.gear = 2;
+        }
+        let inputs = [VehicleAudioInput {
+            entity: EntityId(1),
+            car_id: "debug_sedan",
+            state: &s,
+            throttle: 0.5,
+            horn: false,
+            siren: false,
+            road_rumble: 0.0,
+            kind: DriverKind::Player,
+        }];
+        let cmds = dir.update(&AudioFrame {
+            tick: f * 4,
+            listener: Listener::default(),
+            focus: Some(EntityId(1)),
+            vehicles: &inputs,
+            events: &[],
+        });
+        let n = cmds
+            .iter()
+            .filter(|c| matches!(c, wp_audio::AudioCommand::Play { cue, pack, .. } if cue == "drivetrain/shift" && pack == "world_rec"))
+            .count();
+        shifts.push(n);
+    }
+    assert_eq!(
+        shifts,
+        vec![0, 0, 0, 1, 0, 0],
+        "one clunk on the frame the gear changes"
+    );
+}

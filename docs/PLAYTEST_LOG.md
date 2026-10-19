@@ -7,7 +7,7 @@
 | 2 | No visible car damage | lead: lattice view on by default; real denting panels = R (prompt 21) | interim fix on link |
 | 3 | Cars feel really slow | helper `lead/playtest-feel`: browser sim perf (sim fell behind real time at ~35–50 ms/frame in city chase) + car speed/feel | dispatched |
 | 4 | Transmission is sloppy | helper `lead/playtest-feel` (shift logic) | dispatched |
-| 5 | Use real open-source sounds | J (audio): CC0 recorded packs | **blocked**: container network policy refuses kenney.nl / opengameart.org / freesound.org / sonniss.com etc. — hosts to allow listed in `docs/integration/audio.md`; no audio committed |
+| 5 | Use real open-source sounds | J (audio): CC0 recorded packs | **done on `ws/audio-samples`**: 80 recorded files (1.25 MB, CC0 + CC-BY 3.0, kenney.nl + opengameart.org) play by default; procedural packs are a fallback setting in the audio panel. Engine recordings are thin (one or two sources per engine type) — details in `docs/integration/audio.md` → "Recorded packs" |
 | 6 | Dispatcher and cops are way too talkative | helper `lead/playtest-radio` | dispatched |
 | 7 | Camera zooms way too far out; need more angles | helper `lead/playtest-camera` | dispatched |
 | 8 | High-power RWD cars: more steering assist ("gyro") to control slides | helper `lead/playtest-drift` | dispatched |
@@ -34,7 +34,7 @@ Numbers for 8–9 (`cargo run --release -p wp_vehicle --example slide`; scripted
 | Catch at 110/130 km/h, rampart / shiro / lucciola | keyboard, TCS/ESC off | 180°, 7/12 recovered | ≤ 7°, 12/12 |
 | Any of the above | wheel (help 0) | spins | bit-identical to main |
 | 7 | Camera zooms way too far out; need more angles | helper `lead/playtest-camera` | fixed on `lead/playtest-camera`: chase was a world-space spring trailing ≈12 m at chase speed → car-relative near chase 5.6 m back / 1.8 m up (≤1.2 m pull-back; 6.4 m measured at 115 km/h); 8 angles on C / 1–8 (near, far, hood, bumper, cockpit, side, TV, orbit), V hold look back, mouse/stick look-around, remembered per viewer; shots in `docs/media/cameras/` |
-| 5 | Use real open-source sounds | J (audio): CC0 recorded packs | dispatched |
+| 5 | Use real open-source sounds | J (audio): CC0 recorded packs | done on `ws/audio-samples` (see row 5 above); not yet on the link |
 | 6 | Dispatcher and cops are way too talkative | helper `lead/playtest-radio`: `wp_police::radio` director (critical lines always; tactical/routine behind 8 s / 20 s global and 30 s per-unit gaps; duplicates merged; patrol chatter only when wanted or within 200 m; `data/police/radio.toml`) + HUD feed max 3 lines fading after 6 s. 5-min night city chase (`wp_police` scenario `radio_city_chase`, 4 seeds): **in pursuit 30.8 → 5.6 lines/min, not wanted 20.5 → 3.4/min**; calm patrol (`radio_calm_patrol`) 1.0 → 0.1/min. Goldens unchanged (radio not hashed) | fixed on `lead/playtest-radio` |
 ### Row 6 gate notes (`lead/playtest-radio`)
 - fmt, `clippy --workspace --all-targets -D warnings`, `lint-determinism`, wasm32 build, ui-kit + testbed `tsc`, ui-kit vitest: pass.
