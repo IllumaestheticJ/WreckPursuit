@@ -1,0 +1,16 @@
+# Prompt 03: barrier speed sweep 10–90 km/h, every impact kind, both damage modes. No data
+# changes: this is the calibration picture (crush, health, failures, repair cost vs speed).
+description: Barrier 10–90 km/h, Frontal/Offset/Side/Rear × Arcade/Simulation (debug_sedan)
+probe:
+  kind: barrier
+  car: debug_sedan
+  speeds_kmh: [10, 15, 20, 25, 30, 35, 40, 45, 50, 56, 60, 65, 70, 75, 80, 85, 90]
+variants:
+  - {name: sim frontal, probe: {mode: Simulation, impact: Frontal}}
+  - {name: sim offset, probe: {mode: Simulation, impact: Offset}}
+  - {name: sim side, probe: {mode: Simulation, impact: Side}}
+  - {name: sim rear, probe: {mode: Simulation, impact: Rear}}
+  - {name: arcade frontal, probe: {mode: Arcade, impact: Frontal}}
+  - {name: arcade offset, probe: {mode: Arcade, impact: Offset}}
+  - {name: arcade side, probe: {mode: Arcade, impact: Side}}
+  - {name: arcade rear, probe: {mode: Arcade, impact: Rear}}

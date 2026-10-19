@@ -1,0 +1,14 @@
+[package]
+name = "wp_weather"
+description = "Deterministic weather, road wetness, grip/aquaplaning, visibility and weather hooks."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+wp_contracts.workspace = true
+wp_math.workspace = true
+serde.workspace = true
+toml.workspace = true
+thiserror.workspace = true

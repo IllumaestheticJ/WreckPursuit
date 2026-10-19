@@ -1,0 +1,13 @@
+// Patrol presence: after warm-up the pool per district matches data/police/presence.toml (dusk).
+(
+    name: "police_patrol_presence_dusk",
+    seed: 11,
+    time_of_day_h: 19.0,
+    duration_s: 30.0,
+    racers: [],
+    expect: [
+        (metric: "patrols_core", min: 6, max: 6),
+        (metric: "patrols_suburb", min: 2, max: 2),
+        (metric: "patrols_industrial", min: 2, max: 2),
+    ],
+)

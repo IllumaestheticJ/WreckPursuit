@@ -3624,6 +3624,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "tuning-probe"
+version = "0.1.0"
+dependencies = [
+ "ron",
+ "serde",
+ "serde_json",
+ "simcli",
+ "toml",
+ "wp_contracts",
+ "wp_damage",
+ "wp_vehicle",
+]
+
+[[package]]
 name = "typeid"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4167,6 +4181,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
+name = "wp_audio"
+version = "0.1.0"
+dependencies = [
+ "lint-determinism",
+ "serde",
+ "serde_json",
+ "wp_contracts",
+ "wp_math",
+ "wp_sim",
+]
+
+[[package]]
 name = "wp_bench"
 version = "0.1.0"
 dependencies = [
@@ -4261,9 +4287,29 @@ dependencies = [
 name = "wp_police"
 version = "0.1.0"
 dependencies = [
+ "ron",
  "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "toml",
  "wp_contracts",
  "wp_math",
+]
+
+[[package]]
+name = "wp_race"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "serde",
+ "serde_json",
+ "simcli",
+ "thiserror 2.0.21",
+ "toml",
+ "wp_contracts",
+ "wp_economy",
+ "wp_math",
+ "wp_world",
 ]
 
 [[package]]
@@ -4296,6 +4342,7 @@ name = "wp_vehicle"
 version = "0.1.0"
 dependencies = [
  "rapier3d",
+ "thiserror 2.0.21",
  "wp_contracts",
  "wp_math",
 ]
@@ -4313,6 +4360,17 @@ dependencies = [
  "wp_contracts",
  "wp_math",
  "wp_sim",
+]
+
+[[package]]
+name = "wp_weather"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror 2.0.21",
+ "toml",
+ "wp_contracts",
+ "wp_math",
 ]
 
 [[package]]

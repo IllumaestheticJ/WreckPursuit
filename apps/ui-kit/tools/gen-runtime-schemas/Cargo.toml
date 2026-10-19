@@ -1,0 +1,16 @@
+# Standalone (own workspace) so the ui-kit never edits the root workspace or wp_contracts.
+# Writes JSON Schemas for the *runtime* contract types the UI consumes (events, vehicle state,
+# repair estimates...) into apps/ui-kit/schemas/runtime/. `schemas/` at the repo root only covers
+# data files and is owned by the integration lead.
+[package]
+name = "ui-gen-runtime-schemas"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+wp_contracts = { path = "../../../../crates/wp_contracts" }
+schemars = "1"
+serde_json = "1"

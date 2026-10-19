@@ -1,0 +1,22 @@
+# Crews and territory. Owned by workstream 15 (wp_race). Loaded by wp_race::RaceData.
+
+[crew]
+max_members = 8
+name_max_len = 24
+default_bank_cut = 0.10
+max_bank_cut = 0.30
+rep_share = 0.25
+
+[territory]
+# Points for winning a race held in the district, by event legality. Sanctioned wins count
+# a little (it is still a win on home turf); illegal daytime wins count the most.
+win_points = { sanctioned = 4, street = 10, illegal_daytime = 25 }
+podium_points = [5, 2]
+clean_bonus = 3
+challenge_points = 20
+challenge_steal = 0.25
+control_threshold = 40
+max_points = 200
+# Territory decays weekly: an absent crew drops below the control threshold ~4 weeks after reaching the cap.
+weekly_decay = 0.35
+heat_decay_bonus = 0.15

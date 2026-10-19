@@ -46,7 +46,7 @@ pub use traits::*;
 pub use vehicle::*;
 
 /// Semantic version of the contract. Bumped on every change; see `docs/CONTRACT_CHANGELOG.md`.
-pub const CONTRACT_VERSION: &str = "0.1.0";
+pub const CONTRACT_VERSION: &str = "0.2.0";
 
 /// Fixed physics timestep in seconds (240 Hz). The only `dt` simulation code may integrate with.
 pub const PHYSICS_DT: f32 = 1.0 / 240.0;

@@ -1,0 +1,13 @@
+# Prompt 03: permanent set per over-yield (Simulation table).
+description: Sim plasticity_scale 0.5–1.5 → crush / health / failures vs speed (frontal, offset)
+probe:
+  kind: barrier
+  car: debug_sedan
+  mode: Simulation
+  speeds_kmh: [15, 25, 40, 56, 80]
+params:
+  - {target: "mode:sim:plasticity_scale", label: plasticity_scale, values: [0.5, 0.75, 1.0, 1.25, 1.5]}
+variants:
+  - {name: frontal, probe: {impact: Frontal}}
+  - {name: offset, probe: {impact: Offset}}
+plots: ["crush_m@56", "cabin_intrusion_m@56", "health@56", "failed_components@56"]

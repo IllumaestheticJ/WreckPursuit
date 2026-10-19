@@ -1,0 +1,127 @@
+{
+  "id": "audio_config",
+  "max_voices": 40,
+  "bus_max_voices": {
+    "Engine": 16,
+    "World": 18,
+    "Police": 8,
+    "Ui": 4,
+    "Music": 2
+  },
+  "priority_weights": [
+    0.5,
+    1.0,
+    2.0,
+    50.0
+  ],
+  "keep_bonus": 1.25,
+  "min_audible_gain": 0.003,
+  "stop_fade_s": 0.08,
+  "spatial": {
+    "ref_distance_m": 6.0,
+    "max_distance_m": 450.0,
+    "rolloff": 1.0,
+    "speed_of_sound_mps": 343.0,
+    "doppler_factor": 1.0,
+    "max_doppler": 1.6,
+    "lowpass_near_hz": 18000.0,
+    "lowpass_half_distance_m": 90.0
+  },
+  "engine": {
+    "gain": 0.55,
+    "load_tau_s": 0.06,
+    "min_load": 0.12,
+    "limiter_window_rpm": 120.0,
+    "turbo_spool_tau_s": 0.45,
+    "turbo_fall_tau_s": 0.18,
+    "turbo_onset_frac": 0.35,
+    "turbo_full_frac": 0.62,
+    "blowoff_min_boost": 0.45,
+    "pop_rate_per_s": 1.5,
+    "pop_min_redline_frac": 0.55,
+    "forced_induction_gain": 0.22
+  },
+  "tires": {
+    "slip_ratio_peak": 0.1,
+    "slip_angle_peak_rad": 0.12,
+    "squeal_threshold": 0.85,
+    "squeal_range": 1.4,
+    "squeal_gain": 0.55,
+    "wet_squeal_scale": 0.3,
+    "scrub_gain": 0.5,
+    "rumble_speed_ref_mps": 40.0,
+    "rumble_gain": 0.35,
+    "ffb_rumble_weight": 0.25,
+    "thump_rate_mps": 0.7,
+    "thump_rate_ref_mps": 2.5,
+    "land_airtime_s": 0.18,
+    "thump_debounce_s": 0.12
+  },
+  "impacts": {
+    "min_speed_mps": 0.6,
+    "thud_max_speed_mps": 1.8,
+    "panel_crunch_speed_mps": 9.0,
+    "structural_crunch_speed_mps": 4.0,
+    "glass_break_speed_mps": 6.0,
+    "impulse_ref_ns": 3000.0,
+    "debounce_s": 0.12,
+    "louder_factor": 1.6,
+    "scrape_min_speed_mps": 0.8,
+    "scrape_speed_ref_mps": 12.0,
+    "scrape_release_s": 0.15,
+    "impact_gain": 0.9,
+    "scrape_gain": 0.5
+  },
+  "sirens": {
+    "cadence": {
+      "Wail": {
+        "lo_hz": 650.0,
+        "hi_hz": 1500.0,
+        "cycle_s": 4.6,
+        "rise_frac": 0.55,
+        "shape": "Sweep"
+      },
+      "Yelp": {
+        "lo_hz": 650.0,
+        "hi_hz": 1500.0,
+        "cycle_s": 0.33,
+        "rise_frac": 0.5,
+        "shape": "Sweep"
+      },
+      "Phaser": {
+        "lo_hz": 750.0,
+        "hi_hz": 1600.0,
+        "cycle_s": 0.1,
+        "rise_frac": 0.85,
+        "shape": "Sweep"
+      },
+      "HiLo": {
+        "lo_hz": 770.0,
+        "hi_hz": 960.0,
+        "cycle_s": 1.1,
+        "rise_frac": 0.5,
+        "shape": "TwoTone"
+      }
+    },
+    "auto_wail_above_mps": 16.0,
+    "auto_yelp_below_mps": 9.0,
+    "gain": 0.6,
+    "horn_gain": 0.5
+  },
+  "scanner": {
+    "tier_delay_s": [
+      10.0,
+      7.0,
+      5.0,
+      3.0
+    ],
+    "max_queue": 8,
+    "stale_after_s": 20.0,
+    "words_per_s": 2.6,
+    "line_pad_s": 0.7,
+    "music_duck_gain": 0.3,
+    "duck_fade_s": 0.15,
+    "restore_fade_s": 0.8,
+    "interrupt_at": "Pursuit"
+  }
+}

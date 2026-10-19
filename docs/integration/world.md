@@ -88,6 +88,7 @@ From the sim loop (`wp_sim`, integration lead) — none of these are wired yet:
 - `Cargo.toml` (workspace): added member `tools/city-import`.
 - `Cargo.lock`: `postcard` (wp_world), `osmpbf` (city-import only).
 - `justfile`: added `city` and `traffic-bench` recipes.
+- `tools/lint-determinism/allow.txt`: removed the five `crates/wp_world/... f64` entries (run 2 feedback).
 - `crates/wp_vehicle/src/lib.rs`: added `Vehicle::set_pose_and_speed(pos, yaw, speed_mps)`
   (Lead: the stub this went into was replaced by 02's real model; the method now lives in `wp_vehicle/src/vehicle.rs`, same signature.)
   (7 lines, `reset` + speed) for LOD promotion — see contract request 1.
@@ -97,7 +98,8 @@ From the sim loop (`wp_sim`, integration lead) — none of these are wired yet:
 |---|---|---|---|---|
 | 400 agents, traffic + signals + violations per 60 Hz frame (release) | cloud container, 4 vCPU | avg 0.06 ms, p99 0.15 ms, max ≈ 1.4 ms | not measured | 2 ms (browser 4 ms) |
 | Same with collision diagnostics | same | avg 0.20 ms | — | — |
-| `World::load` procedural_12x12 | same | ≈ 60 ms | — | — |
+| `World::load` procedural_12x12 | same | ≈ 17 ms (debug ≈ 0.2 s) | — | — |
+| `World::procedural(ProcGenConfig::small())` (6×6, 650 lanes, 521 parked cars) | same | ≈ 5 ms (debug ≈ 0.06 s) | — | — |
 | 10-min soak × 18 (9 seeds × 0 / 5 % aggressive) | same | 0 civilian–civilian collisions | — | < 1 % with aggressive |
 
 ## Known gaps
@@ -105,7 +107,7 @@ From the sim loop (`wp_sim`, integration lead) — none of these are wired yet:
 - OSM importer verified on synthetic data only (download hosts blocked here); see
   `tools/city-import/README.md`.
 - In saturated flow a few permissive left / minor-road cars starve > 2 min and get recycled
-  when unseen (0–9 per 10 min with 400 agents); no protected-left phases yet.
+  when unseen (0–11 per 10 min with 400 agents); no protected-left phases yet.
 - One civilian car model; no buses; sightline rule is distance-only.
 - Kinematic traffic is not replicated yet (contract request 3).
 
@@ -140,3 +142,24 @@ whether procgen can be cheaper or offer a small test config.
 Contract requests: #1 teleport — **kept as the inherent method** (no trait change); #2 violation
 `pos` **accepted**; #3 `TrafficAgentSnapshot` accepted, designed with F; #4 `wp_math::atan2`
 **accepted** (lead moves it); #5 city source — done in `wp_sim` without a contract change.
+
+### Response from D (run 2 feedback)
+- **Integer ticks — done.** `wp_world` has no `f64` left: `World` counts physics ticks
+  (`World::tick()`, `sim_time_s()` now returns `f32` derived from it), `CityMap::signal_tick: u64`
+  replaces `signal_time_s`, `signals::group_state(sc, group, tick: u64)` works in exact integer
+  ticks (`signals::ticks_from_secs`), traffic and violations use the 60 Hz traffic step count
+  (`Traffic::step_count()`, `steps_to_s`). The five `wp_world` lines are deleted from
+  `tools/lint-determinism/allow.txt`; `lint-determinism` reports 0 errors. Behaviour is unchanged
+  (soaks still 0 collisions; simcli goldens pass without re-blessing).
+- **Debug load time — done on my side.** `CityMap::new` conflict detection now uses bounding
+  boxes + an early-exit distance test: 1.44 s → 0.17 s in debug (14 ms release), identical
+  conflict sets. Added `ProcGenConfig::small()` (6×6 grid with every feature: highway, diagonals,
+  bus lanes, alleys, signals, ring). The remaining ~50 s of `procedural_city_loads_props_and_steps`
+  is not the world: the default city has **3190 parked cars**, which `Sim::set_world` turns into
+  dynamic Rapier bodies stepped in a debug build. Measured here (not committed, your crate):
+  the test takes 8.9 s with `ProcGenConfig::small()` and 0.3 s with `parked_cars: false` (the
+  `prop_count() > 0` assert then fails, as expected). Suggestions for `wp_sim`: use
+  `ProcGenConfig::small()` in that test, and create parked-car bodies asleep
+  (`RigidBodyBuilder::dynamic().sleeping(true)`) or fixed until hit, which also matters in
+  release with ~3000 props.
+
