@@ -7,6 +7,10 @@ fn scenarios(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in std::fs::read_dir(dir).unwrap() {
         let p = entry.unwrap().path();
         if p.is_dir() {
+            // Police scenarios use wp_police's format; see tests/police_scenarios.rs.
+            if p.file_name().and_then(|n| n.to_str()) == Some("police") {
+                continue;
+            }
             scenarios(&p, out);
         } else if p.extension().and_then(|e| e.to_str()) == Some("ron") {
             out.push(p);

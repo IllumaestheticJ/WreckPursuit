@@ -9,6 +9,7 @@ publish.workspace = true
 [dependencies]
 wp_contracts.workspace = true
 wp_sim.workspace = true
+wp_police.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 ron.workspace = true

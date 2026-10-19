@@ -19,6 +19,30 @@ fn main() {
         .and_then(|i| args.get(i + 1))
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data"));
+    // Police scenarios (scenarios/police/*.ron) have their own format and runner (wp_police).
+    if scenario_path
+        .components()
+        .any(|c| c.as_os_str() == "police")
+    {
+        let sc = match wp_police::scenario::load_scenario(&scenario_path) {
+            Ok(sc) => sc,
+            Err(e) => {
+                eprintln!("error: {e}");
+                std::process::exit(2);
+            }
+        };
+        let summary = wp_police::scenario::run_scenario(&sc);
+        println!("state_hash {:016x}", summary.state_hash);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&summary).expect("summary serializes")
+        );
+        if !summary.failures.is_empty() {
+            eprintln!("FAILED: {:?}", summary.failures);
+            std::process::exit(1);
+        }
+        return;
+    }
     let result =
         simcli::load_scenario(&scenario_path).and_then(|sc| simcli::run_scenario(&sc, &data));
     match result {

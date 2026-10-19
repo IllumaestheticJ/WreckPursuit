@@ -1,0 +1,15 @@
+// A racer doing 2x the limit through Core at noon is in a pursuit within 20 s (dense patrols,
+// long sight lines). Paired with night_core_speeder.ron; tests/police_scenarios.rs asserts the
+// night/day ratios for pursuit start and reinforcement delay.
+(
+    name: "police_day_core_speeder",
+    seed: 100,
+    time_of_day_h: 12.0,
+    duration_s: 180.0,
+    runs: 5,
+    racers: [(district: Core, speed_factor: 2.0)],
+    expect: [
+        (metric: "pursuit_start_max_s", min: 0.0, max: 20.0),
+        (metric: "reinforcements", min: 1.0, max: 1000.0),
+    ],
+)

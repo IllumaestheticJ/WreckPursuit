@@ -1138,6 +1138,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "wp_contracts",
+ "wp_police",
  "wp_sim",
 ]
 
@@ -1542,7 +1543,11 @@ dependencies = [
 name = "wp_police"
 version = "0.1.0"
 dependencies = [
+ "ron",
  "serde",
+ "serde_json",
+ "thiserror",
+ "toml",
  "wp_contracts",
  "wp_math",
 ]
