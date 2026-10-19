@@ -1,0 +1,36 @@
+// wp_race: a night street sprint up Port Vesper v2's Hollins Drive, from the Mercer junction
+// to the Knob Observatory Lot (≈ 1.2 km, ≈ 85 m climb, 6 hairpins, grades up to 11.5 %). The
+// course is the city's own "Hollins Ascent -> Knob Observatory Lot" route (the one
+// city/hill_road_ascent.ron drives at 25 mph). Four entrants sit on the judge's staggered grid
+// slots on the climb (row gap 8 m, columns 5 m apart); simcli puts each on the road surface.
+//
+// The race itself is driven and judged by crates/wp_race/tests/race_vesper.rs (wp_opponent AI
+// entrants via wp_race::entrants). Traffic and police are off: this is the hill-course check
+// for the race stack (grid, corridor, judge, AI) — the police race lives in
+// city_sprint_police.ron.
+//
+// Run standalone, simcli has no race block and no AI driver for these entities (see
+// docs/integration/race.md, requests to I and N), so the cars wait on the grid.
+(
+    name: "race_vesper_hollins_sprint",
+    seed: 16,
+    city: preset(name: "vesper_v2", seed: 1),
+    time_of_day_h: 23.0,
+    mode: Arcade,
+    assists: ai,
+    traffic_density: 0.0,
+    police_cars: false,
+    parked_cars: false,
+    entities: [
+        (id: "ai_coupe", car: "debug_coupe", pos: (-437.14, 875.92, 22.4), yaw: 1.4439),
+        (id: "ai_sedan", car: "debug_sedan", pos: (-432.54, 880.37, 22.4), yaw: 1.4439),
+        (id: "ai_coupe_2", car: "debug_coupe", pos: (-429.21, 874.9, 22.4), yaw: 1.4439),
+        (id: "ai_sedan_2", car: "debug_sedan", pos: (-424.6, 879.36, 22.4), yaw: 1.4439),
+    ],
+    duration_s: 10.0,
+    hash_every: 240,
+    expect: [
+        total_loss(entity: "ai_coupe", expected: false),
+        total_loss(entity: "ai_sedan", expected: false),
+    ],
+)

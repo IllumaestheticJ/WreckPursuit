@@ -98,13 +98,14 @@ Other entry points: `Course::{straight, closed, new, grid, marshal_spots, projec
 | 07 `wp_net` (F) | call the lifecycle above from the server; `RaceCommand` messages (R6) | lobby transport is theirs | none; `trace::simulate` + simcli tests stand in |
 | 06 `wp_police` (E) | presence override API, capture notification, heat add for `Stake::heat`, heat-decay multiplier input; a non-stepping `PoliceSystem::report(&SimEvent)` (or a typed race report) | race stakes beyond cash | `PatrolAttracted` goes in as `Reckless` violations (`police::report_events`) through a zero-length `step` (`police::deliver`) |
 | Lead (`wp_sim`) | `Sim::queue_police_events(Vec<SimEvent>)`: events folded into the next tick's police step (or `Sim::police_mut()`) | race reports must reach the sim's own `PoliceSystem` | clone `sim.police()`, `police::deliver`, `sim.set_police(clone)` (works, deterministic, clones the road graph once per report) |
-| 08 `wp_economy` (G) | R5 (round 8 proposal, below): apply `bridge::economy_race`'s `purse_scale` / `entry_scale` in `settle_race` / `entry_fee` (e.g. `RaceSetup::purse_scale: f32`, `entry_scale: f32`, serde default 1.0; G's crate, no contract change); charge `cargo_damage_cost`; apply `CrewCut` | the lobby advertises the stake; the economy pays its own table | `bridge::economy_race` returns the scales and the advertised purse/buy-in; settlement pays the economy's unscaled number until G applies them |
-| 06 `wp_police` (E) | (round 8) a civilian *report* (`PatrolAttracted` → `Reckless` at the venue) should dispatch a unit even when a traffic camera also sees the racer; today a camera-witnessed violation files no report incident, so nobody is sent | a hot meet under a camera attracts no patrol | `race_city_sprint_police` entrants start at 3.0 heat (meet regulars) so the report + witnessed speeding reaches L1 |
+| 08 `wp_economy` (G) | R5 (agreed round 9, see R5): keep `[legality]` / `[day_phase]` as they are; if you change them, `wp_race`'s `economy_race_pays_the_advertised_stake` checks the calendar band (scale 0.75-1.33) and tells me to retune `data/events/stakes.toml`. Still open: charge `cargo_damage_cost`; apply `CrewCut` (call site: server) | the lobby advertises the stake; the economy pays its own table | none needed for purses; cargo / crew cut not charged yet |
+| 06 `wp_police` (E) | (round 8) a civilian *report* (`PatrolAttracted` → `Reckless` at the venue) should dispatch a unit even when a traffic camera also sees the racer; today a camera-witnessed violation files no report incident, so nobody is sent | a hot meet under a camera attracts no patrol | `race_city_sprint_police` entrants start at 3.75 heat (meet regulars, round 9) so the report + witnessed speeding reaches L1 |
 | 02 `wp_vehicle` (A) | optional: runtime payload hook (`set_payload(kg, chassis_offset)`) | unloading destroyed cargo mid-race | cargo mass is applied at spawn through the `VehicleDef` (`cargo::load_cargo`), felt by the physics |
 | 02 `wp_vehicle` (A) | FYI: `debug_sedan` pulls ~12 m right over 402 m at full throttle with zero steer (see `race_drag_coupe_vs_sedan`, which now dabs left twice) | torque steer or asymmetry? | scenario corrects it |
 | 05 `wp_world` (D) | a marshal prop kind (`PropKind::Marshal`) or OK to spawn them as `Sim::add_static_box` | sanctioned events | `Course::marshal_spots` returns poses only |
 | 10 harness (I) | add `wp_race` to `lint-determinism::SIM_CRATES`; a `pursuit_started_after(t_s)` expectation; scenario v2 race block (`race: (kind, course, …)`, `expect: race_position(entity, pos)`, `race_status(entity, Dq(LeftCorridor))`) | judge results inside simcli itself | `crates/wp_race/tests/simcli_races.rs` judges the runs via `run_with_hook`; `tests/determinism_lint.rs` self-lints |
 | 17 opponent AI (N) | (a) `Field` option to run *through* the corridor end instead of parking before it; (b) a "hold until green" input or `RaceConfig::start_tick`; (c) `OpponentEvent::Abandoned` → also emit the police-chase reason so `wp_race` can tell fleeing from wrecked; (d) a simcli `driver: opponent(...)` so race scenarios drive AI entrants standalone; (e) `CarCapability::measure` is slow in debug, a cached table per car id in `data/` would help servers and tests | AI entrants in judged races | `entrants` extends the route 60 m past the finish (`run_off_route`), holds on the handbrake until green, maps `Abandoned`/`Retired` to judge DNFs; tests use `geometry_only` |
+| 17 opponent AI (N) | (round 9) (f) a crest-aware following gap: on Hollins Drive the last AI follows ~1 s behind over the blind summit crest and rear-ends a car braking for the bend just past it (`race_vesper_hollins_sprint`, seed 16) | hill races on Port Vesper | `tests/race_vesper.rs` allows one such incident |
 | 07 `wp_net` (F) | spawn AI entrants at `ScheduledEvent::spawn_s`, call `AiEntrants::tick` before each physics step and `report_to` after the judge | populated meets on the server | `tests/race_police.rs` runs the same loop |
 
 ## Contract change requests
@@ -118,7 +119,7 @@ final variant lists. **R1 below is the final list for `RaceEvent`.**
 | R2 | `PolicePresence { None, Normal, Elevated, Max }` in contracts | `police_presence_override: max` for illegal daytime races must reach `wp_police` | 06, 07 | for v0.3.0, with E's typed `PoliceEvent` |
 | R3 | `DistrictId(u32)` = zone index | territory is keyed by district | 05, 08, 06 | deferred to v0.3.0 by the lead (with D, G); wp_race keeps a local `DistrictId` |
 | R4 | Durable account id (accepted F NET-5) also used by crews/licences | crews outlive instances | 07, 08 | accepted upstream, not in v0.2.0; wp_race keeps a local `RacerAccount(u64)` |
-| R5 | Round 8 proposal to G (no contract change): keep the five contract `RaceType`s with the fixed mapping Sprint/Checkpoint/Cannonball/Delivery → Sprint, Circuit/TimeAttack → Circuit, Outrun → Touge, Drag → Drag (`bridge::economy_race_type`, locked by `economy_race_type_mapping_is_locked`); kind premium and legality travel as `bridge::economy_race`'s `purse_scale` / `entry_scale` = advertised stake ÷ the economy's Arcade purse/buy-in, which `wp_economy` multiplies in (placement share, wanted multiplier, clean bonus and Simulation premium stay the economy's). Both tables already agree at the shared feel target (Compact 9 km night street sprint: scale 0.9-1.1, tested) | Outrun, Checkpoint, Cannonball, Delivery, TimeAttack and legality otherwise pay the wrong purse | 08 | wp_race side done; waiting on G to apply the scales |
+| R5 | Round 8 proposal to G (no contract change): keep the five contract `RaceType`s with the fixed mapping Sprint/Checkpoint/Cannonball/Delivery → Sprint, Circuit/TimeAttack → Circuit, Outrun → Touge, Drag → Drag (`bridge::economy_race_type`, locked by `economy_race_type_mapping_is_locked`); kind premium and legality travel as `bridge::economy_race`'s `purse_scale` / `entry_scale` = advertised stake ÷ the economy's Arcade purse/buy-in, which `wp_economy` multiplies in (placement share, wanted multiplier, clean bonus and Simulation premium stay the economy's). Both tables already agree at the shared feel target (Compact 9 km night street sprint: scale 0.9-1.1, tested) | Outrun, Checkpoint, Cannonball, Delivery, TimeAttack and legality otherwise pay the wrong purse | 08 | **agreed (round 9):** G prices kinds and legality itself (`stakes.toml [race_kinds]`/`[legality]`), so no scale is applied; L retuned `[legality.sanctioned]` (risk −1.0, entry 1.5) so the advertised stake and G's payout agree within a third at every calendar slot (sanctioned day circuit/time attack/drag, illegal daytime sprint/cannonball/outrun, night street meets) |
 | R6 | `ClientToServer::RaceCommand { Enter { event }, Withdraw { event }, Ready }`, `ServerToClient::Race(RaceEvent)` | lobby join/leave from clients | 07, 04 | for v0.3.0, inside F's full message set |
 
 ### City sprint (lead run 4 request, done on `ws/race`)
@@ -261,3 +262,37 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
    - `src/tests.rs::economy_race_pays_the_advertised_stake`: after G's R5 legality pricing, illegal daytime no longer pays more than 2x sanctioned for a Cannonball. Agree the scale with G (`data/economy/stakes.toml [legality]` vs your `data/events/stakes.toml`), then un-ignore.
    - `tests/race_police.rs::without_the_meet_report_nobody_is_chased`: a patrol now finds the control-run racers without the meet report (pursuit at tick 8352). Re-tune the control run (for example its start or seed), then un-ignore.
 2. The city chase now defaults to Port Vesper v2 (hills, curves). Consider a Port Vesper street-race scenario (Hollins Drive or Loop 9).
+
+### Round 9 — done on `ws/race`
+
+1. **Parked tests restored:**
+   - `src/tests.rs::economy_race_pays_the_advertised_stake` (un-ignored). Cause: with G's R5
+     the economy prices legality itself (sanctioned ×0.8, illegal daytime ×4.5), so the scale
+     no longer *carries* legality and the old "illegal scale > 2× sanctioned scale" check was
+     measuring the wrong thing. Agreed scale (R5 row, economy.md Needs → 15 is G's side): the
+     economy's own purse is the payout; both tables must agree at every kind × legality ×
+     phase the calendar schedules. Only sanctioned events disagreed (our sanctioned day
+     circuit paid ~0.9× a night street race vs G's ~0.45×; scale 1.6-1.8). Fixed on my side:
+     `data/events/stakes.toml [legality.sanctioned]` risk 0.0 → −1.0 (marshals and closed roads
+     cancel the daytime risk), entry 1.2 → 1.5 (keeps "costs more to enter"). The test now
+     checks purse scale 0.75-1.33 and entry scale 0.5-2.0 for every calendar slot, and that an
+     advertised illegal daytime cannonball pays > 2× a sanctioned circuit. G's
+     `tests/race_kinds.rs` reads only `[kinds]`, unchanged. Note for G: off-calendar combos
+     (street races at Day/Dusk) still differ up to ~2× because your Day/Dusk purse (0.75/1.0)
+     is lower than our day risk premium; nothing schedules them today.
+   - `tests/race_police.rs::without_the_meet_report_nobody_is_chased` (un-ignored). Cause: not
+     heat — the pursuit tick (8352) was identical for starting heat 0-4.5. With seed 15 the
+     winner, parked past the finish, drove on north ~18 s later and committed a violation in
+     front of a patrol at the next junction, inside the 20 s post-finish window. Re-tune:
+     scenario seed 15 → 5 (seeds 4, 5, 6, 8 replay the identical race and report-run
+     pursuits; 15 of seeds 1-20 pass both runs) and starting heat 3.0 → 3.75 (at seed 5,
+     2.5-5.0 passes both runs). Golden `race_city_sprint_police` re-blessed (`[bless]`).
+2. **Port Vesper street race:** `apps/simcli/scenarios/race/vesper_hollins_sprint.ron` +
+   `tests/race_vesper.rs`: night street sprint up Hollins Drive on the city's
+   `Hollins Ascent -> Knob Observatory Lot` route (1001 m, hairpins, crest), four AI entrants on
+   the judge's grid. Result at seed 16: winner 65.3 s, three finish, the fourth follows another
+   car over the summit crest, runs into it when it brakes for the bend at the line and is DQ'd
+   off the corridor (test allows one such incident, no wrecks). New golden
+   `race_vesper_hollins_sprint` (`[bless]`). FYI for N: the AI follows at ~1 s over a blind
+   crest and cannot avoid a car braking just past it; worth a crest-aware following gap.
+   Loop 9 (highway) not done this round.

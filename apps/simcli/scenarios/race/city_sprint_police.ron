@@ -23,12 +23,19 @@
 // passes both the report run and the control run (route and seed unchanged; shifting the
 // route or the seed gave only isolated passing points); 3.0 is the middle of that band.
 //
+// Re-tuned in round 9 (police changes after round 8): with seed 15 the race winner, parked past
+// the finish, drove on north ~18 s later and was chased after a violation in front of a patrol at
+// the next junction, so the control run saw a pursuit with no meet report. Seed 15 → 5 (seeds
+// 4, 5, 6 and 8 replay the same race: same finish, same report-run pursuits at 9.4 s and 11.1 s)
+// and starting heat 3.0 → 3.75: at seed 5, heat 2.5-5.0 passes both runs, 3.75 is the middle.
+// Seed sweep 1-20 at heat 3.0: 15 of 20 seeds pass both runs.
+//
 // Run standalone, simcli has no race block and no AI driver for these entities (see
 // docs/integration/race.md, requests to I and N), so the cars wait on the grid while traffic
 // and patrols run around them.
 (
     name: "race_city_sprint_police",
-    seed: 15,
+    seed: 5,
     city: procedural(seed: 1, blocks_x: 7, blocks_y: 7, block_m: 110.0),
     time_of_day_h: 13.0,
     mode: Arcade,
@@ -38,10 +45,10 @@
     // Parked cars make debug test runs very slow and take no part in the race.
     parked_cars: false,
     entities: [
-        (id: "ai_coupe", car: "debug_coupe", pos: (58.05, -440.0, 0.0), police_heat: 3.0),
-        (id: "ai_sedan", car: "debug_sedan", pos: (63.05, -444.0, 0.0), police_heat: 3.0),
-        (id: "ai_coupe_2", car: "debug_coupe", pos: (58.05, -448.0, 0.0), police_heat: 3.0),
-        (id: "ai_sedan_2", car: "debug_sedan", pos: (63.05, -452.0, 0.0), police_heat: 3.0),
+        (id: "ai_coupe", car: "debug_coupe", pos: (58.05, -440.0, 0.0), police_heat: 3.75),
+        (id: "ai_sedan", car: "debug_sedan", pos: (63.05, -444.0, 0.0), police_heat: 3.75),
+        (id: "ai_coupe_2", car: "debug_coupe", pos: (58.05, -448.0, 0.0), police_heat: 3.75),
+        (id: "ai_sedan_2", car: "debug_sedan", pos: (63.05, -452.0, 0.0), police_heat: 3.75),
     ],
     duration_s: 30.0,
     hash_every: 240,

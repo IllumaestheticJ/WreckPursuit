@@ -100,9 +100,13 @@ purse = 3.2
 [brackets.X]
 purse = 4.2
 
+# Sanctioned: marshals and closed roads cancel most of the daytime risk (agreed with
+# workstream 08 in round 9, race.md R5: the economy's [legality] sanctioned ×0.8 at its Day
+# ×0.75 pays these events ~0.45× a night street race, and so do we). Higher entry for less
+# prize money.
 [legality.sanctioned]
-risk = 0.0
-entry = 1.2      # sanctioned events charge more to enter; prize money is lower (low risk)
+risk = -1.0
+entry = 1.5
 heat = 0.0
 police = "None"
 

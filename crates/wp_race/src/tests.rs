@@ -1211,7 +1211,6 @@ fn economy_bridge_maps_results() {
 }
 
 #[test]
-#[ignore = "L + G (round 9): G's R5 legality pricing (stakes.toml [legality]) no longer pays illegal daytime > 2x sanctioned for a Cannonball; agree the scale with G and un-ignore."]
 fn economy_race_pays_the_advertised_stake() {
     use crate::bridge::economy_race;
     use crate::kind::{ClassBracket, Legality};
@@ -1306,12 +1305,51 @@ fn economy_race_pays_the_advertised_stake() {
         DamageMode::Simulation,
     );
     assert!(sim.purse > r.purse);
-    // Legality is carried by the scale: illegal daytime pays more than a sanctioned event.
-    let at = |legality| {
+    // Agreed with G (round 9, race.md R5): both tables price legality, so the scale is not
+    // what carries it. At every kind × legality × phase the calendar actually schedules, the
+    // economy's own purse is within a third of the advertised stake (scale 0.75-1.33), and the
+    // advertised illegal daytime race still pays more than 2x a sanctioned one.
+    let rules = &data.schedule;
+    let slots = [
+        (&rules.sanctioned, Legality::Sanctioned),
+        (&rules.illegal_daytime.slot, Legality::IllegalDaytime),
+        (&rules.night_meets, Legality::Street),
+    ];
+    for (slot, legality) in slots {
+        for h in [slot.hours[0], slot.hours[1] - 0.01] {
+            let phase = wp_contracts::time::TimeOfDay::from_hours(h).phase();
+            for key in slot.kinds.keys() {
+                let kind = RaceKind::from_key(key).unwrap();
+                let km = if kind == RaceKind::Drag { 0.402 } else { 9.0 };
+                let r = economy_race(
+                    &econ,
+                    &data.stakes,
+                    kind,
+                    legality,
+                    VehicleClass::Compact,
+                    ClassBracket::D,
+                    km * 1000.0,
+                    phase,
+                    DamageMode::Arcade,
+                );
+                assert!(
+                    (0.75..=1.33).contains(&r.purse_scale),
+                    "{key} {legality:?} {phase:?}: scale {:.2}",
+                    r.purse_scale
+                );
+                assert!(
+                    (0.5..=2.0).contains(&r.entry_scale),
+                    "{key} {legality:?} {phase:?}: entry scale {:.2}",
+                    r.entry_scale
+                );
+            }
+        }
+    }
+    let advertised = |kind, legality| {
         economy_race(
             &econ,
             &data.stakes,
-            RaceKind::Cannonball,
+            kind,
             legality,
             VehicleClass::Compact,
             ClassBracket::D,
@@ -1319,9 +1357,13 @@ fn economy_race_pays_the_advertised_stake() {
             DayPhase::Day,
             DamageMode::Arcade,
         )
-        .purse_scale
+        .purse
     };
-    assert!(at(Legality::IllegalDaytime) > 2.0 * at(Legality::Sanctioned));
+    // Illegal daytime cannonball vs the best-paid sanctioned event (a circuit).
+    assert!(
+        advertised(RaceKind::Cannonball, Legality::IllegalDaytime)
+            > 2 * advertised(RaceKind::Circuit { laps: 3 }, Legality::Sanctioned)
+    );
 }
 
 #[test]
