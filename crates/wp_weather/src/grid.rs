@@ -35,6 +35,29 @@ impl GridSpec {
         }
     }
 
+    /// Grid covering the XY bounding box of `points` plus `margin_m` on every side (e.g. the
+    /// road network's node positions). With no points: a 2 km square around the origin, which
+    /// covers the flat test world's driving area.
+    pub fn around<'a>(
+        points: impl IntoIterator<Item = &'a [f32; 3]>,
+        margin_m: f32,
+        cell_m: f32,
+    ) -> Self {
+        let mut min = [f32::INFINITY; 2];
+        let mut max = [f32::NEG_INFINITY; 2];
+        for p in points {
+            for k in 0..2 {
+                min[k] = min[k].min(p[k]);
+                max[k] = max[k].max(p[k]);
+            }
+        }
+        if !(min[0] <= max[0] && min[1] <= max[1]) {
+            return Self::covering([-1000.0, -1000.0], [1000.0, 1000.0], cell_m);
+        }
+        let m = margin_m.max(0.0);
+        Self::covering([min[0] - m, min[1] - m], [max[0] + m, max[1] + m], cell_m)
+    }
+
     /// Number of cells.
     pub fn len(&self) -> usize {
         self.nx as usize * self.ny as usize
@@ -401,6 +424,17 @@ mod tests {
         }
         assert_eq!(spec.cell_of([-101.0, 0.0, 0.0]), None);
         assert_eq!(spec.cell_of([f32::NAN, 0.0, 0.0]), None);
+    }
+
+    #[test]
+    fn around_points_and_empty_fallback() {
+        let pts = [[10.0, -20.0, 0.0], [110.0, 60.0, 5.0]];
+        let g = GridSpec::around(pts.iter(), 50.0, 8.0);
+        assert_eq!(g.origin, [-40.0, -70.0]);
+        assert!(g.cell_of([159.9, 109.9, 0.0]).is_some());
+        assert!(g.cell_of([-41.0, 0.0, 0.0]).is_none());
+        let e = GridSpec::around(std::iter::empty(), 50.0, 8.0);
+        assert!(e.cell_of([999.0, -999.0, 0.0]).is_some());
     }
 
     #[test]

@@ -7,7 +7,7 @@
 import type { DamageMode, Role } from "../generated/contracts";
 import type { InputAction, InputDevice } from "./bindings";
 import type { CaptainCommand } from "./police";
-import type { AssistPreset, RepairChoice, ReplayState, ScreenId, Settings } from "./types";
+import type { AssistPreset, BillRequest, RepairChoice, ReplayState, ScreenId, Settings } from "./types";
 
 /** Deep-partial settings patch. */
 export type SettingsPatch = {
@@ -57,5 +57,7 @@ export type UiCommand =
   | { type: "replay.speed"; speed: number }
   | { type: "replay.camera"; camera: ReplayState["camera"] }
   | { type: "replay.load"; source: string }
+  // repair bill (live car)
+  | { type: "bill.request"; request: Partial<BillRequest> }
   // misc
   | { type: "notice.dismiss" };

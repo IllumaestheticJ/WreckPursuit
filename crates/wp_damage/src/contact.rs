@@ -101,20 +101,26 @@ impl DamageModel {
             if !closing.is_finite() || closing < t.min_contact_speed_mps {
                 continue;
             }
-            // Against another moving body both cars crush at once: with equal stiffness each
-            // closes at half the speed and absorbs half of ½·μ·v² (a car hitting an identical
-            // parked car at 56 km/h ≈ a 28 km/h barrier hit for each). Static world: all of it.
-            let v = if c.other_mass_kg > 0.0 {
-                closing * t.dynamic_closing_share
-            } else {
-                closing
-            };
             let j = c.impulse_ns.max(0.0) * mode.impulse_to_lattice_scale;
             if !j.is_finite() || j <= 0.0 {
                 continue;
             }
             let Some(n) = vec3::normalize(c.normal_local) else {
                 continue;
+            };
+            // Against another moving body both cars crush at once. Each lattice is crushed at
+            // a share of the closing speed (= its share of ½·μ·v²): ends (nose/tail) take
+            // `dynamic_closing_share`, sides `dynamic_closing_share_side`, blended by how
+            // lateral the normal is. A car's side is much softer than another car's nose, so in
+            // a T-bone most of the energy goes into the door (shares then add to > 1 — a
+            // deliberate bias toward the struck car). Static world: all of it.
+            let v = if c.other_mass_kg > 0.0 {
+                let lateral = n[0] * n[0];
+                let share = t.dynamic_closing_share
+                    + (t.dynamic_closing_share_side - t.dynamic_closing_share) * lateral;
+                closing * share
+            } else {
+                closing
             };
             let tan = c.tangent_impulse_local_ns;
             let tan = vec3::scale(

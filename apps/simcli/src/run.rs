@@ -152,10 +152,9 @@ pub fn police_config(sc: &Scenario) -> wp_police::PoliceConfig {
     cfg
 }
 
-/// Police for a city scenario: `wp_police` on the city's road graph, set up exactly like
-/// `Sim::set_world` does (same seed salt, mode and unit driving) plus the scenario's
-/// `police_presence` scale and per-entity `police_heat` (`ids` in scenario order). Units get
-/// real cars once `Sim::set_police_car` is called.
+/// Police for a city scenario: `wp_police` on the city's road graph with its built-in kinematic
+/// unit driver (units are not physics bodies yet), seeded from the scenario seed.
+/// Entities with `police_heat` start with that heat (`ids` in scenario order).
 pub fn police_for_city(
     sc: &Scenario,
     world: &wp_world::World,
@@ -246,18 +245,20 @@ pub fn build_sim(
                 .collect();
             world.set_tracked_vehicles(&tracked);
             world.populate();
+            // `set_world` rebuilds police on the city, so the scenario's police (config,
+            // starting heat) are installed after it. Police cars are real vehicles (lead run 5);
+            // `police_cars: false` keeps heat and wanted levels with no patrols.
             sim.set_world(world);
-            // `set_world` builds police on the city; rebuild it with the scenario's presence
-            // scale and starting heat (identical to the default when neither is set).
             if sc.police_cars {
-                let police = police_for_city(sc, sim.world(), &ids);
-                sim.set_police(police);
-                // City runs get real police cars (lead, run 5) unless opted out.
+                sim.set_police(police_for_city(sc, sim.world(), &ids));
                 sim.set_police_car(load_car(data, POLICE_CAR)?);
             } else {
-                sim.set_police(wp_police::PoliceSystem::new());
+                let quiet = Scenario {
+                    police_presence: Some(0.0),
+                    ..sc.clone()
+                };
+                sim.set_police(police_for_city(&quiet, sim.world(), &ids));
             }
-            // Physical near-player traffic (lead, run 5) unless opted out.
             if sc.traffic_cars {
                 sim.set_traffic_car(load_car(data, TRAFFIC_CAR)?);
             }

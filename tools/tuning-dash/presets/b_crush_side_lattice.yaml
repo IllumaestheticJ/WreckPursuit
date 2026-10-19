@@ -1,0 +1,39 @@
+# Study for 03 (B), part 3: the debug_sedan side cross-members (the 195 `hss` beams at
+# 0.06e-4 m², B's `cross_member` section in wp_damage::lattice_gen) × Arcade impulse. The lattice
+# is shared by both modes, so the Simulation guardrails run too: Sim T-bone victim stays in
+# 0.15-0.6 m, the Sim 56 km/h barrier still totals, side_sim / frontal_sim checks hold.
+# A winning area is a gen-lattice constant change for B (and a lattice regen for 09), not a
+# hand edit of data/lattices.
+description: debug_sedan side cross-member area × Arcade impulse vs T-bone target, both modes guarded
+probe:
+  kind: scenario
+params:
+  - {target: "lattice:debug_sedan:beams[area_m2=0.000006].area_m2", label: cross_member_area, op: scale, values: [0.33, 0.5, 0.67, 1.0]}
+  - {target: "mode:arcade:impulse_to_lattice_scale", label: impulse, values: [0.45, 0.55, 0.65]}
+variants:
+  - name: tbone victim (Arcade)
+    probe: {file: apps/simcli/scenarios/golden/tbone.ron}
+    expect:
+      - {metric: victim.crush_depth_m, min: 0.15, max: 0.6}
+      - {metric: victim.components_failed, min: 1, max: 20}
+      - {metric: victim.total_loss, min: 0, max: 0}
+  - name: tbone victim (Sim)
+    probe: {file: apps/simcli/scenarios/golden/tbone.ron}
+    set: [{target: "scenario:mode", value: Simulation}]
+    expect:
+      - {metric: victim.crush_depth_m, min: 0.15, max: 0.6}
+      - {metric: victim.total_loss, min: 0, max: 0}
+  - name: barrier 56 (Arcade)
+    probe: {file: apps/simcli/scenarios/golden/barrier_56kmh.ron}
+    set: [{target: "scenario:mode", value: Arcade}, {target: "scenario:expect", value: []}]
+    expect:
+      - {metric: car.total_loss, min: 0, max: 0}
+  - name: barrier 56 (Sim)
+    probe: {file: apps/simcli/scenarios/golden/barrier_56kmh.ron}
+  - name: side_arcade checks
+    probe: {kind: barrier_scenario, file: crates/wp_damage/scenarios/side_arcade.ron}
+  - name: side_sim checks
+    probe: {kind: barrier_scenario, file: crates/wp_damage/scenarios/side_sim.ron}
+  - name: frontal_arcade checks
+    probe: {kind: barrier_scenario, file: crates/wp_damage/scenarios/frontal_arcade.ron}
+plots: [victim.crush_depth_m, victim.components_failed, car.total_loss, "crush_m@56"]

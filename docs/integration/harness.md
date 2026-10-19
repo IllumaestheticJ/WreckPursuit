@@ -310,3 +310,17 @@ with 06 in v0.2.0, so the provisional `PURSUIT_STARTED_KIND` goes away. H2 (`Sys
   entities only); fuzz names extra vehicles "city vehicle". City goldens re-blessed.
 - `soak/traffic_soak_observer`: `civilian_collisions` gate 0 → ≤ 3, zero moved to `expect_pending`
   (physical traffic; D is investigating). Consider scenario fields to opt out of police / traffic.
+
+## Lead feedback (round 6, 2026-10-19)
+
+**Merged** (city chase golden, police/traffic/parked opt-outs, starting heat, F's snapshot codec in the bench).
+
+Lead fixes in your area this round:
+- `build_sim` installed your `police_for_city` **before** `set_world`, which rebuilds police on the city and threw
+  your config / starting heat away. Now: `set_world` first, then `set_police(police_for_city(..))`; police car only
+  with `police_cars`, physical traffic only with `traffic_cars`; `police_cars: false` = presence 0, heat kept.
+- `golden/city_chase`: police cars are solid now and the racer starts 5 m behind a stopped patrol car at 22 m/s, so it
+  rear-ends it at t = 0.11 s. Its checks moved to `expect_pending`. **Re-aim it** (start further back / adjacent
+  lane, or wait for E's obstacle-aware units) and move the checks back to `expect`.
+- `soak/traffic_soak_observer`: `police_cars: false` for now (police ram the parked observer; E's task). Flip it back
+  once E lands obstacle awareness.
