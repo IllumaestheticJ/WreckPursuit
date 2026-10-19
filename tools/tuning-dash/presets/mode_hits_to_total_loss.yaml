@@ -6,7 +6,8 @@
 # total loss (cap 12) and finds the lowest single-hit total-loss speed (1 km/h resolution).
 # Checks: Arcade frontal 56 degrades (health <= 0.9) and ends in 2-6 hits; Simulation frontal
 # 56 ends in 1. Side impacts are reported, not checked. No data is changed.
-# Generated variant list: one per car x mode x impact (class in the name).
+# Generated variant list: one per car x mode x impact (class in the name). Round 8 added H's
+# drayman_cargo, furrow_24 and tansy_13.
 description: Hits to total loss and single-hit total-loss speed, every car, Arcade vs Simulation, frontal and side
 probe:
   kind: survival
@@ -172,5 +173,35 @@ variants:
     expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
   - name: vireo_xs (Compact) sim side
     probe: {car: vireo_xs, mode: Simulation, impact: Side}
+  - name: drayman_cargo (Truck) arc frontal
+    probe: {car: drayman_cargo, mode: Arcade, impact: Frontal}
+    expect: [{metric: "health_after_1@56", min: 0, max: 0.9}, {metric: "hits_to_total_loss@56", min: 2, max: 6}]
+  - name: drayman_cargo (Truck) arc side
+    probe: {car: drayman_cargo, mode: Arcade, impact: Side}
+  - name: drayman_cargo (Truck) sim frontal
+    probe: {car: drayman_cargo, mode: Simulation, impact: Frontal}
+    expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
+  - name: drayman_cargo (Truck) sim side
+    probe: {car: drayman_cargo, mode: Simulation, impact: Side}
+  - name: furrow_24 (Truck) arc frontal
+    probe: {car: furrow_24, mode: Arcade, impact: Frontal}
+    expect: [{metric: "health_after_1@56", min: 0, max: 0.9}, {metric: "hits_to_total_loss@56", min: 2, max: 6}]
+  - name: furrow_24 (Truck) arc side
+    probe: {car: furrow_24, mode: Arcade, impact: Side}
+  - name: furrow_24 (Truck) sim frontal
+    probe: {car: furrow_24, mode: Simulation, impact: Frontal}
+    expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
+  - name: furrow_24 (Truck) sim side
+    probe: {car: furrow_24, mode: Simulation, impact: Side}
+  - name: tansy_13 (Compact) arc frontal
+    probe: {car: tansy_13, mode: Arcade, impact: Frontal}
+    expect: [{metric: "health_after_1@56", min: 0, max: 0.9}, {metric: "hits_to_total_loss@56", min: 2, max: 6}]
+  - name: tansy_13 (Compact) arc side
+    probe: {car: tansy_13, mode: Arcade, impact: Side}
+  - name: tansy_13 (Compact) sim frontal
+    probe: {car: tansy_13, mode: Simulation, impact: Frontal}
+    expect: [{metric: "hits_to_total_loss@56", min: 1, max: 1}]
+  - name: tansy_13 (Compact) sim side
+    probe: {car: tansy_13, mode: Simulation, impact: Side}
 workers: 4
 plots: ["hits_to_total_loss@56", "hits_to_total_loss@80", "health_after_1@56", total_loss_speed_kmh]
