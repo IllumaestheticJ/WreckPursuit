@@ -214,7 +214,7 @@ function pickDefaultAB() {
   const pts = S.sweep.points.filter((p) => p.ok);
   const vs = S.sweep.variants;
   if (vs.length > 1) {
-    const base = (v) => pts.find((p) => p.variant === v && (p.is_base || !Object.keys(p.params).length)) || pts.find((p) => p.variant === v);
+    const base = (v) => pts.find((p) => p.variant === v && p.is_base) || pts.find((p) => p.variant === v);
     S.A = base(vs[0])?.id || null;
     S.B = base(vs[1])?.id || null;
   } else {
