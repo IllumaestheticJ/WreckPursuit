@@ -21,7 +21,14 @@
 - `docs/design/FEATURE_BACKLOG.md` — unscheduled features B01–B37, prioritised.
 - `docs/design/DEMO_SCRIPT.md` — 3-minute single-player demo script (night city → speeding →
   pursuit → escape/capture → repair bill) with what each moment proves and whether it works on
-  `main` today, plus the playtest checklist. Requested by the lead.
+  `main` today. Requested by the lead. Its playtest checklist moved to `PLAYTEST.md`.
+- `docs/design/DEMO_GREYBOX.md` — the 5-minute single-player greybox demo (round 6b task 1):
+  setup (city-chase preset), controls, heat table, police per wanted level, escape/capture rules,
+  the bill (repair + fine + impound), the "done" checklist, and a per-machine gap table with the
+  critical path. All numbers quoted from `data/police`, `data/economy`, `data/modes` and the
+  procedural road graph.
+- `docs/design/PLAYTEST.md` — fill-in playtest form for the published testbed (round 6b task 2),
+  with a table mapping each section to the owning machine.
 
 ## Needs
 Nothing blocks this workstream. Design decisions waiting on others are in GDD §12.
@@ -31,7 +38,7 @@ None directly. Proposals for owners (details in `CITY.md` §9, GDD §12):
 
 | # | Change | Why | Who is affected | Status |
 |---|---|---|---|---|
-| C1 | Build `handmade_v0.road.*` from `CITY.md` | design target city | 05 | proposed |
+| C1 | Build `handmade_v0.road.*` from `CITY.md` | design target city; **blocks measuring the §6 route lengths** (round 6b task 3) | 05 | proposed |
 | C2 | `Zone.name` or `DistrictId` | districts named across crews, heat, labour, radio, UI | lead, 05, 06, 08, 15, 16 | `DistrictId` deferred to v0.3.0 by the lead; still wanted |
 | C3 | Garage shop kind on POIs (legit / crooked) | economy already prices it | 05, 08 | proposed |
 | C4 | Dynamic world entities: drawbridge, rail crossings + trains, ferry ramp, straddle carriers | city hazards | 05 | proposed |
@@ -46,6 +53,25 @@ Docs only, so nothing broke. References updated: `WorldQuery::line_of_sight` exi
 `PoliceEvent` and `BodyRegion::Accessory` are deferred to v0.3.0 (C2, C9 and the CARS_LORE
 open question now say so). `WantedLevel` moving to `wp_contracts` needs no doc change (the docs never named its crate).
 No new contract requests. Lead feedback section was empty; no items assigned.
+
+## Round 6b response (2026-10-19)
+1. **Done:** `docs/design/DEMO_GREYBOX.md`. Critical path it found: E (+D) stop police ramming →
+   lead + G feed `PursuitEnded` into `EconomySession` and export the end-of-run result to wasm →
+   C + M one HUD, PURSUIT/SEARCHING/ESCAPED/CAPTURED banner, bill opens on capture with fine +
+   impound → B `apply_repair` → I re-aims `golden/city_chase`.
+2. **Done:** `docs/design/PLAYTEST.md`. `DEMO_SCRIPT.md`'s old checklist now points to it.
+3. **Blocked:** `CITY.md` §6 route lengths need a Port Vesper road graph (C1, workstream 05);
+   only `procedural_12x12` exists, which has none of those streets. Marked in `CITY.md` §6.
+   Measured the procedural city instead for the demo: ring road 5.58 km/lap (72 km/h,
+   2 lanes each way), central highway 1.49 km (88 km/h, 3 lanes each way), 36.6 km of 40 km/h
+   local streets.
+
+Notes for the lead (not edits I can make):
+- `docs/STATUS.md` row J says audio is "not wired to the browser yet"; it is
+  (`apps/testbed-web/src/audio/`, `main.ts`). Checkpoint 2 line could link `DEMO_GREYBOX.md` §4
+  as its definition of done.
+- Two heat readouts are mounted in the testbed (C's `police_hud.tsx` and M's `ui/overlay.ts`).
+  `DEMO_GREYBOX.md` §4 asks for one; C and M should agree who keeps it.
 
 ## Changes outside my crates
 - `data/city/handmade_v0.zones.json` (new file in 05's folder): a draft, clearly labelled in its
@@ -62,6 +88,10 @@ Not applicable (docs only).
   proposals for 06 (marked there).
 - Junkyard beater layout (FWD) in `CARS_LORE.md` is a guess until 09 adds the car file.
 - Invented maker-house names were checked against the naming rule by hand only.
+- `DEMO_GREYBOX.md` §5 is a snapshot of 2026-10-19; it goes stale as machines land work.
+  Refresh it each lead round (or the lead may take it over in `STATUS.md`).
+- The heat-per-second and escape-time figures in `DEMO_GREYBOX.md` are computed by hand from
+  the TOML formulas, not measured in a run.
 
 ## Lead feedback
 (Written by the integration lead.)
