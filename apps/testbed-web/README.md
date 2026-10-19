@@ -2,20 +2,43 @@
 
 **Owned by workstream 04 (browser testbed).**
 
-Vite + TypeScript + Three.js shell that loads `wp_wasm` (built with wasm-pack) and renders a ground
-plane and one box per vehicle from `get_vehicle_state_json()`.
+Vite + TypeScript + Three.js testbed over `wp_wasm`: drivable cars, debug layers, HUD,
+telemetry plots, scenario menu and deterministic replay. Full reference (WASM ABI, hotkeys, how
+to add layers/scenarios, perf): `docs/integration/testbed.md`.
 
 ```sh
-just web            # = npm install && npm run wasm && npm run dev → http://localhost:5173
+just web            # npm install + release wasm + vite → http://localhost:5173
+just web-e2e        # headless Chromium end-to-end check
+npm run typecheck
 ```
 
-Controls: arrows / WASD drive, Space handbrake, R reset.
+| File | What |
+|---|---|
+| `src/main.ts` | session/scenario/replay glue, frame loop, controls panel, `window.__wp` automation hook |
+| `src/wasm/sim.ts`, `src/wasm/layout.ts` | typed wrapper + packed layouts (mirror `crates/wp_wasm/src/pack.rs`) |
+| `src/scene.ts` | renderer, sky from time of day, ground + 10 m grid, `data/city/*.glb`, barriers, contacts, intents |
+| `src/vehicle_view.ts` | body box / skinned body, wheels (steer + spin), lattice, stress, tire forces, suspension, CG + velocity |
+| `src/skin.ts` | skin binding blend; synthesised hull binding for grid lattices |
+| `src/cameras.ts` | chase (spring-damped), hood, bumper, orbit, cinematic |
+| `src/hud.ts` | speed/rpm/gear, badges, perf, damage silhouette, components, region energy, input + rack torque, help |
+| `src/telemetry.ts` | rolling 10 s canvas plots |
+| `src/input.ts` | keyboard ramps + Gamepad API with deadzones |
+| `src/settings.ts` | debug layer table (hotkeys, `localStorage`) |
+| `vite.config.ts` | serves `apps/simcli/scenarios` at `/scenarios/` and `data/` at `/data/` (+ listings) |
+| `e2e/run.mjs` | Playwright check; `SHOTS=dir` writes screenshots, `BENCH=1` measures 1/8/24 cars |
 
 Sim space is +Z up / +Y forward; the Three.js scene is +Y up, so all sim-space objects live under
 a `world` group rotated −90° about X.
 
 Requires Node 22+, `wasm-pack` (`cargo install wasm-pack`) and the `wasm32-unknown-unknown`
 target (installed by `rust-toolchain.toml`). `src/wasm/pkg/` is generated and gitignored.
+The e2e script uses `playwright-core` with the Chromium at `$CHROMIUM` (default: the
+preinstalled `/opt/pw-browsers/chromium-1194`).
+
+## Perf (headless Chromium, SwiftShader, stub physics)
+sim 0.015 / 0.031 / 0.054 ms per 60 Hz frame and render 0.5 / 1.5 / 4.1 ms at 1 / 8 / 24 cars.
+Re-measure in desktop Chrome with a GPU once 02/03 land.
 
 ## Known gaps
-Debug layers, cameras, HUD, telemetry, replay, scenario menu, gamepad: all prompt 04.
+See `docs/integration/testbed.md` → Known gaps (crash scenarios can't crash until vehicles are
+Rapier bodies; tire forces / region energy are proxies; no GIF yet).

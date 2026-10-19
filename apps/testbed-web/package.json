@@ -4,17 +4,20 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "wasm": "wasm-pack build ../../crates/wp_wasm --target web --out-dir ../../apps/testbed-web/src/wasm/pkg --dev",
-    "wasm:release": "wasm-pack build ../../crates/wp_wasm --target web --out-dir ../../apps/testbed-web/src/wasm/pkg --release",
+    "wasm": "wasm-pack build ../../crates/wp_wasm --target web --out-dir ../../apps/testbed-web/src/wasm/pkg --release",
+    "wasm:dev": "wasm-pack build ../../crates/wp_wasm --target web --out-dir ../../apps/testbed-web/src/wasm/pkg --dev",
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "typecheck": "tsc --noEmit"
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "e2e": "node e2e/run.mjs"
   },
   "dependencies": {
     "three": "0.180.0"
   },
   "devDependencies": {
     "@types/three": "0.180.0",
+    "playwright-core": "1.56.1",
     "typescript": "5.9.3",
     "vite": "7.1.12"
   }

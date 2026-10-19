@@ -4,16 +4,86 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>WreckPursuit Testbed</title>
+    <link rel="icon" href="data:," />
     <style>
-      html, body { margin: 0; height: 100%; overflow: hidden; background: #111; }
-      #hud {
-        position: fixed; top: 8px; left: 8px; color: #9f9; font: 12px/1.4 monospace;
-        background: rgba(0, 0, 0, 0.55); padding: 6px 8px; white-space: pre; pointer-events: none;
-      }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #111; color: #ddd; font: 12px/1.35 monospace; }
+      #overlay { position: fixed; inset: 0; pointer-events: none; }
+      .panel { background: rgba(0, 0, 0, 0.6); padding: 6px 8px; border-radius: 4px; pointer-events: auto; }
+      .hidden { display: none !important; }
+      .left-col { position: absolute; top: 8px; left: 8px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+      .hud-main { min-width: 300px; }
+      .hud-main .speed { font-size: 28px; color: #fff; }
+      .hud-main .gear { font-size: 28px; color: #ffdc00; margin-left: 12px; }
+      .dim { color: #999; }
+      .badge { display: inline-block; padding: 0 4px; margin: 2px 3px 0 0; border-radius: 3px; font-size: 11px; }
+      .badge.on { background: #2a6; color: #fff; }
+      .badge.off { background: #333; color: #777; }
+      .badge.rec { background: #c22; color: #fff; }
+      .bar { display: inline-block; position: relative; width: 140px; height: 9px; background: #222; margin-left: 6px; vertical-align: middle; }
+      .bar i { position: absolute; top: 0; bottom: 0; left: 0; }
+      .bar b { position: absolute; top: -2px; bottom: -2px; left: 50%; width: 1px; background: #888; }
+      .right-col { position: absolute; top: 8px; right: 8px; display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+      .comps, .regions { white-space: pre; max-height: 30vh; overflow: auto; }
+      .comps .bar { width: 80px; }
+      .inputs { }
+      .telemetry { position: absolute; bottom: 8px; left: 552px; padding: 0; }
+      .help { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); max-width: 640px; z-index: 5; }
+      #controls { position: absolute; bottom: 8px; left: 8px; max-width: 520px; max-height: 45vh; overflow: auto; }
+      #controls .row { margin: 3px 0; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+      #controls button, #controls select, #controls input { font: 11px monospace; background: #222; color: #ddd; border: 1px solid #555; border-radius: 3px; padding: 1px 5px; }
+      #controls button:hover { background: #333; }
+      #controls input[type="number"] { width: 50px; }
+      #rp-scrub { flex: 1; min-width: 160px; }
+      #sc-result .pass { color: #2ecc40; }
+      #sc-result .fail { color: #ff4136; }
+      #sc-result .pending { color: #aaa; }
+      #error { position: absolute; top: 40%; left: 50%; transform: translateX(-50%); color: #f66; white-space: pre; }
     </style>
   </head>
   <body>
-    <div id="hud">loading wasm…</div>
+    <div id="overlay">
+      <div id="controls" class="panel">
+        <div class="row">
+          scenario <select id="sc-select"></select>
+          speed <input id="sc-speed" type="number" min="5" max="250" step="5" value="56" /> km/h
+          <button id="sc-run">run</button>
+          <button id="sc-free">free drive</button>
+        </div>
+        <div class="row">
+          mode <select id="mode"><option>Arcade</option><option>Simulation</option></select>
+          car <select id="car"></select>
+          bench <button class="bench" data-n="1">1</button><button class="bench" data-n="8">8</button><button class="bench" data-n="24">24</button>
+          <span id="bench-out" class="dim"></span>
+        </div>
+        <div class="row" id="assist-row">
+          assists
+          <label><input type="checkbox" data-a="abs" />ABS</label>
+          <label><input type="checkbox" data-a="tcs" />TCS</label>
+          <label><input type="checkbox" data-a="esc" />ESC</label>
+          <label><input type="checkbox" data-a="auto_gears" />auto gears</label>
+        </div>
+        <div class="row">
+          replay
+          <button id="rec">● record</button>
+          <button id="rec-stop">■ stop</button>
+          <button id="rp-last">load last</button>
+          <label class="dim">file <input id="rp-file" type="file" accept=".wpreplay" style="width: 90px" /></label>
+          <button id="rp-dl">download</button>
+          <button id="rp-csv">csv</button>
+          <button id="rp-exit">exit</button>
+        </div>
+        <div class="row" id="rp-bar">
+          <button id="rp-play">⏯</button>
+          <button id="rp-back">⏮</button>
+          <button id="rp-step">⏭</button>
+          <select id="rp-speed"><option>0.1</option><option>0.25</option><option>0.5</option><option selected>1</option><option>2</option><option>4</option></select>
+          <input id="rp-scrub" type="range" min="0" max="0" value="0" />
+        </div>
+        <div class="row dim" id="rp-status">no replay loaded</div>
+        <div id="sc-result"></div>
+      </div>
+      <div id="error"></div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

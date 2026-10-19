@@ -1,0 +1,78 @@
+// Packed array layouts returned by wp_wasm. Mirrors crates/wp_wasm/src/pack.rs — keep in sync
+// (documented in docs/integration/testbed.md).
+
+/** Floats per vehicle in vehicle_states(). */
+export const STATE_STRIDE = 50;
+/** Field offsets inside one state record. */
+export const S = {
+  entity: 0,
+  pos: 1, // 3
+  rot: 4, // 4, quaternion [x, y, z, w]
+  linVel: 8, // 3
+  angVel: 11, // 3
+  speed: 14,
+  rpm: 15,
+  gear: 16,
+  health: 17,
+  wheelBase: 18,
+  wheelStride: 8,
+} as const;
+/** Offsets inside a wheel block of a state record. */
+export const SW = {
+  omega: 0,
+  steer: 1,
+  compression: 2,
+  slipAngle: 3,
+  slipRatio: 4,
+  fz: 5,
+  contact: 6,
+  detached: 7,
+} as const;
+
+/** Offsets inside telemetry(). */
+export const T = {
+  speed: 0,
+  rpm: 1,
+  gear: 2,
+  steerAngle: 3,
+  health: 4,
+  gLong: 5,
+  gLat: 6,
+  gVert: 7,
+  yawRate: 8,
+  inThrottle: 9,
+  inBrake: 10,
+  inSteer: 11,
+  inHandbrake: 12,
+  wheelBase: 13,
+  wheelStride: 10,
+  componentBase: 53,
+} as const;
+/** Offsets inside a telemetry wheel block. */
+export const TW = {
+  slipAngle: 0,
+  slipRatio: 1,
+  load: 2,
+  surface: 3,
+  compression: 4,
+  contact: 5,
+  detached: 6,
+  omega: 7,
+  fxEst: 8,
+  fyEst: 9,
+} as const;
+
+/** set_input() flag bits. */
+export const INPUT_FLAG = {
+  gearUp: 1,
+  gearDown: 2,
+  horn: 4,
+  headlights: 8,
+  siren: 16,
+} as const;
+
+/** world_info() offsets. */
+export const W = { tick: 0, hours: 1, night: 2, mode: 3, replay: 4, recording: 5 } as const;
+
+/** Floats per intent arrow in intents(). */
+export const INTENT_STRIDE = 8;
