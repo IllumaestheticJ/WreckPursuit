@@ -619,78 +619,36 @@ fn camera_flagged_parked_racer_is_found_and_captured() {
 /// Playtest row 24: a racer sideswiping a patrol car is assaulting an officer. The hit unit
 /// recognises the racer at once (no recognition window, day or night), heat goes to at least
 /// L2 and the pursuit starts within a second. Thresholds from `heat.assault`; contact numbers
-/// as measured on physical cars in `wp_sim` (sideswipe 30 km/h ≈ 6,700 N·s / 7.5 m/s,
-/// 50 km/h ≈ 12,000 N·s / 13 m/s; 5 km/h parking bump ≈ 860 N·s / 0.9 m/s).
+/// as measured on physical cars in `wp_sim` / simcli (see `data/police/heat.toml`).
 #[test]
 fn hitting_a_police_car_is_assault_and_starts_a_pursuit_at_once() {
     struct Case {
         hour: f32,
         racer_kmh: f32,
+        /// Patrol car speed, same direction as the racer.
+        unit_kmh: f32,
         impulse_ns: f32,
         closing_mps: f32,
         assault: bool,
     }
+    #[rustfmt::skip]
     let cases = [
-        // Sideswipes, day and night.
-        Case {
-            hour: 12.0,
-            racer_kmh: 30.0,
-            impulse_ns: 6700.0,
-            closing_mps: 7.5,
-            assault: true,
-        },
-        Case {
-            hour: 12.0,
-            racer_kmh: 50.0,
-            impulse_ns: 12000.0,
-            closing_mps: 13.0,
-            assault: true,
-        },
-        Case {
-            hour: 23.0,
-            racer_kmh: 30.0,
-            impulse_ns: 6700.0,
-            closing_mps: 7.5,
-            assault: true,
-        },
-        Case {
-            hour: 3.0,
-            racer_kmh: 50.0,
-            impulse_ns: 12000.0,
-            closing_mps: 13.0,
-            assault: true,
-        },
-        // A slow overtaking scrape of a moving patrol (30 vs 20 km/h): still counts.
-        Case {
-            hour: 23.0,
-            racer_kmh: 30.0,
-            impulse_ns: 2600.0,
-            closing_mps: 2.7,
-            assault: true,
-        },
-        // 5 km/h parking-lot bump: nothing.
-        Case {
-            hour: 12.0,
-            racer_kmh: 5.0,
-            impulse_ns: 860.0,
-            closing_mps: 0.93,
-            assault: false,
-        },
-        Case {
-            hour: 23.0,
-            racer_kmh: 5.0,
-            impulse_ns: 860.0,
-            closing_mps: 0.93,
-            assault: false,
-        },
+        // Glancing flank sideswipe of a stopped patrol car (simcli police/sideswipe_patrol_day):
+        // little impulse and normal closing, but 30 km/h relative speed. Day and night.
+        Case { hour: 12.0, racer_kmh: 30.0, unit_kmh: 0.0, impulse_ns: 700.0, closing_mps: 1.4, assault: true },
+        Case { hour: 23.0, racer_kmh: 30.0, unit_kmh: 0.0, impulse_ns: 700.0, closing_mps: 1.4, assault: true },
+        // Harder sideswipes, day and night.
+        Case { hour: 12.0, racer_kmh: 50.0, unit_kmh: 0.0, impulse_ns: 12000.0, closing_mps: 13.0, assault: true },
+        Case { hour: 3.0, racer_kmh: 50.0, unit_kmh: 0.0, impulse_ns: 12000.0, closing_mps: 13.0, assault: true },
+        // Overtaking scrape of a moving patrol car (30 vs 20 km/h): still counts.
+        Case { hour: 23.0, racer_kmh: 30.0, unit_kmh: 20.0, impulse_ns: 2600.0, closing_mps: 2.7, assault: true },
+        // Feather touch at speed: below the impulse floor.
+        Case { hour: 12.0, racer_kmh: 30.0, unit_kmh: 0.0, impulse_ns: 100.0, closing_mps: 0.3, assault: false },
+        // 5 km/h parking-lot bump: nothing, day or night.
+        Case { hour: 12.0, racer_kmh: 5.0, unit_kmh: 0.0, impulse_ns: 860.0, closing_mps: 0.93, assault: false },
+        Case { hour: 23.0, racer_kmh: 5.0, unit_kmh: 0.0, impulse_ns: 860.0, closing_mps: 0.93, assault: false },
         // Hard contact but the racer is standing still (the patrol car hit it): not assault.
-        Case {
-            hour: 12.0,
-            racer_kmh: 0.0,
-            impulse_ns: 6000.0,
-            closing_mps: 7.0,
-            assault: false,
-        },
+        Case { hour: 12.0, racer_kmh: 0.0, unit_kmh: 0.0, impulse_ns: 6000.0, closing_mps: 7.0, assault: false },
     ];
     for c in cases {
         let label = format!("{}:00, {} km/h", c.hour, c.racer_kmh);
@@ -714,7 +672,7 @@ fn hitting_a_police_car_is_assault_and_starts_a_pursuit_at_once() {
             ai,
             UnitSync {
                 pos: [r.pos[0] - d[1] * 2.0, r.pos[1] + d[0] * 2.0, 0.0],
-                vel: [0.0; 3],
+                vel: [d[0] * c.unit_kmh / 3.6, d[1] * c.unit_kmh / 3.6, 0.0],
                 heading: d,
                 health: 1.0,
                 effects: HandlingEffects::NEUTRAL,
@@ -798,12 +756,12 @@ fn assault_counts_once_per_episode_and_not_for_police_contact_tactics() {
         impulse_ns: imp,
         rel_speed: 3.0,
     };
-    h.run(PHYSICS_DT, &[scrape(600.0)]);
+    h.run(PHYSICS_DT, &[scrape(60.0)]);
     assert_eq!(h.police.stats().assaults, 0);
-    h.run(PHYSICS_DT, &[scrape(600.0)]);
+    h.run(PHYSICS_DT, &[scrape(60.0)]);
     assert_eq!(h.police.stats().assaults, 0);
-    h.run(PHYSICS_DT, &[scrape(600.0)]);
-    assert_eq!(h.police.stats().assaults, 1, "1,800 N·s within one episode");
+    h.run(PHYSICS_DT, &[scrape(60.0)]);
+    assert_eq!(h.police.stats().assaults, 1, "180 N·s within one episode");
     let heat = h.police.racer(RACER).unwrap().heat;
     h.run(PHYSICS_DT, &[scrape(5000.0)]);
     h.run(1.0, &[scrape(5000.0)]);

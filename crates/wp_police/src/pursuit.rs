@@ -983,7 +983,7 @@ impl PoliceSystem {
                     let hit = crate::dispatch::RacerHit {
                         rel_speed,
                         impulse_ns: 0.0,
-                        estimated: true,
+                        physical: false,
                     };
                     self.unit_racer_contact(world, i, e, hit, true);
                     if self.stats.racer_contacts != before {

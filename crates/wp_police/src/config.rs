@@ -154,15 +154,19 @@ pub struct HeatConfig {
 /// the racer at once, so a pursuit starts immediately, day or night.
 ///
 /// A contact counts when, within one contact episode, the summed normal impulse reaches
-/// `min_impulse_ns`, the closing speed reaches `min_closing_mps`, and the racer itself was
-/// moving at `min_racer_speed_mps` or more. Parking-lot nudges stay below these.
+/// `min_impulse_ns`, the speed of the two cars relative to each other reaches
+/// `min_rel_speed_mps`, and the racer itself was moving at `min_racer_speed_mps` or more.
+/// Parking-lot nudges stay below these. Only physics contacts count (the headless units'
+/// proximity stand-in never does).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AssaultConfig {
     /// Summed normal impulse of one contact episode, N·s.
     pub min_impulse_ns: f32,
-    /// Highest closing speed in the episode, m/s.
-    pub min_closing_mps: f32,
+    /// Highest speed of the racer relative to the unit in the episode (the larger of the car
+    /// velocities' difference and the contact's normal closing speed), m/s. A glancing
+    /// sideswipe has little normal closing speed but a large relative speed.
+    pub min_rel_speed_mps: f32,
     /// Racer speed at the contact, m/s (a car standing still is the one being hit).
     pub min_racer_speed_mps: f32,
     /// Contacts between the same racer and unit closer together than this are one episode, s.
@@ -175,9 +179,6 @@ pub struct AssaultConfig {
     pub min_level: u8,
     /// Other ground units within this range with line of sight also recognise the racer, m.
     pub nearby_units_m: f32,
-    /// Headless units (no physics contact): impulse is estimated as this mass × the relative
-    /// speed, kg (about the reduced mass of two cars).
-    pub headless_mass_kg: f32,
 }
 
 /// Escape (breaking contact) rule.
@@ -760,13 +761,12 @@ impl PoliceConfig {
         if !(1..=5).contains(&a.min_level)
             || [
                 a.min_impulse_ns,
-                a.min_closing_mps,
+                a.min_rel_speed_mps,
                 a.min_racer_speed_mps,
                 a.episode_s,
                 a.repeat_cooldown_s,
                 a.heat,
                 a.nearby_units_m,
-                a.headless_mass_kg,
             ]
             .iter()
             .any(|v| !(v.is_finite() && *v >= 0.0))

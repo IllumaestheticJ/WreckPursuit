@@ -110,7 +110,7 @@ the schedule could hunt (1→2→1). New automatic (`crates/wp_vehicle/README.md
 | 21 | Need a game map HUD with police | M (UI kit): rotating minimap with police dots, sight cones and search zone, plus a full city map (M/Tab) | dispatched |
 | 22 | Brake lights stopped working | lead: the panel meshes hide their own light parts inside the shell; lamp markers kept on, placed at the panel body nose/tail (R to fix light parts in the mesh generator) | fixed on link v12 |
 | 23 | Keys get stuck (a key stays "held") / buttons re-trigger | lead: release all keys on tab switch, context menu, focus into form controls, Cmd (macOS); clicked buttons give focus back, so Space/Enter no longer re-press them | fixed on link v12 |
-| 24 | Sideswiped a cop and no chase started | E (police) | dispatched |
+| 24 | Sideswiped a cop and no chase started | E (police): hitting a police car is now assaulting an officer (`[heat.assault]` in `data/police/heat.toml`). A sideswipe at moderate speed (relative speed ≥ 2.5 m/s, impulse ≥ 150 N·s, racer moving) raises heat to ≥ L2 and starts the pursuit in the same tick, day or night, with the hit unit (no 4 s recognition wait); the radio says "Unit N: I've been hit! … assault on an officer." and the PURSUIT banner shows. A 5 km/h parking bump does nothing. Tested with real cars on the grid and Port Vesper v2, day and night (`wp_sim/tests/police_assault.rs`), police scenarios and simcli `police/sideswipe_patrol_{day,night}` | fixed on `ws/police`, to playtest |
 | 25 | Some cars load their LOD too slowly (pop-in) | helper `lead/fix-lod-popin` (C testbed meshes + D traffic LOD) | dispatched |
 | 26 | Simulate LSDs in certain cars | A (vehicle) + H (car data) | dispatched |
 | 27 | Audio for wheelspin | J (audio) | dispatched |

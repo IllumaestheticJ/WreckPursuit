@@ -98,23 +98,59 @@ fn offset(p: [f32; 3], yaw: f32, fwd: f32, left: f32) -> [f32; 2] {
 
 /// What happened within `secs` of the player being placed.
 struct Outcome {
-    contact: bool,
+    /// First player–cop contact, s after placement.
+    contact_at_s: Option<f32>,
     pursuit_at_s: Option<f32>,
     level: WantedLevel,
     radio: bool,
 }
 
-/// Pause the patrol car, put the player behind it (`left` m to its left, aimed `angle_deg`
-/// into it) at `kmh`, and run `secs`.
-fn hit(city: City, hour: f32, kmh: f32, left: f32, angle_deg: f32, secs: f32) -> Outcome {
+/// How the player meets the cop.
+#[derive(Debug, Clone, Copy)]
+struct Approach {
+    /// Player centre this far left of the cop's centre line, m.
+    left: f32,
+    /// Player aimed this far into the cop, degrees.
+    angle_deg: f32,
+    /// How far the player's nose is past the cop's tail when the bodies first touch, m
+    /// (0 = its front corner meets the cop's rear corner).
+    overlap: f32,
+}
+
+/// Aimed 6° in from the next lane: the front corner meets the cop's rear quarter.
+const QUARTER: Approach = Approach {
+    left: 2.3,
+    angle_deg: 6.0,
+    overlap: 0.0,
+};
+/// Glancing flank swipe: 3° in, the front corner rubs along the cop's side.
+const GLANCING: Approach = Approach {
+    left: 2.3,
+    angle_deg: 3.0,
+    overlap: 2.0,
+};
+/// Straight into the tail.
+const TAIL: Approach = Approach {
+    left: 0.0,
+    angle_deg: 0.0,
+    overlap: 0.0,
+};
+
+/// Pause the patrol car, put the player behind it on `approach` at `kmh`, and run `secs`.
+fn hit(city: City, hour: f32, kmh: f32, approach: Approach, secs: f32) -> Outcome {
+    let Approach {
+        left,
+        angle_deg,
+        overlap,
+    } = approach;
     let (mut sim, cop) = city_with_patrol(city, hour);
     let (cp, cyaw) = pose(&sim, cop);
     sim.place_on_ground(cop, [cp[0], cp[1]], cyaw, 0.0, Some(cp[2]))
         .unwrap();
     let car = load_car(data("cars/debug_sedan.json")).unwrap();
-    // Gap so the player's front corner meets the cop's flank (or its tail, head-on).
+    // Centre-to-centre distance behind the cop (both cars ≈ 4.9 m long, 1.9 m wide).
     let back = if angle_deg > 0.0 {
-        4.9 + (left - 1.9).max(0.0) / angle_deg.to_radians().tan()
+        4.9 - overlap + (left - 1.9).max(0.0) / angle_deg.to_radians().tan()
     } else {
         4.9 + 0.2
     };
@@ -127,7 +163,7 @@ fn hit(city: City, hour: f32, kmh: f32, left: f32, angle_deg: f32, secs: f32) ->
         .unwrap();
     sim.drain_events();
     let mut out = Outcome {
-        contact: false,
+        contact_at_s: None,
         pursuit_at_s: None,
         level: WantedLevel::None,
         radio: false,
@@ -140,7 +176,7 @@ fn hit(city: City, hour: f32, kmh: f32, left: f32, angle_deg: f32, secs: f32) ->
                 SimEvent::Contact { a, b, .. }
                     if (*a == player && *b == cop) || (*a == cop && *b == player) =>
                 {
-                    out.contact = true;
+                    out.contact_at_s.get_or_insert((t + 1) as f32 / 240.0);
                 }
                 SimEvent::Police(PoliceEvent::PursuitStarted { racer, .. }) if *racer == player => {
                     out.pursuit_at_s.get_or_insert((t + 1) as f32 / 240.0);
@@ -158,40 +194,54 @@ fn hit(city: City, hour: f32, kmh: f32, left: f32, angle_deg: f32, secs: f32) ->
     out
 }
 
-fn assert_assault(city: City, hour: f32, kmh: f32) {
-    let o = hit(city, hour, kmh, 2.3, 6.0, 1.0);
-    let label = format!("{city:?} {hour}:00, sideswipe at {kmh} km/h");
-    assert!(o.contact, "{label}: the cars never touched");
+fn assert_assault(city: City, hour: f32, kmh: f32, approach: Approach) {
+    let o = hit(city, hour, kmh, approach, 2.0);
+    let label = format!("{city:?} {hour}:00, {approach:?} at {kmh} km/h");
+    let hit_at = o
+        .contact_at_s
+        .unwrap_or_else(|| panic!("{label}: the cars never touched"));
     let at = o
         .pursuit_at_s
-        .unwrap_or_else(|| panic!("{label}: no pursuit within 1 s"));
-    assert!(at <= 1.0, "{label}: pursuit at {at} s");
+        .unwrap_or_else(|| panic!("{label}: no pursuit"));
+    assert!(
+        at >= hit_at && at - hit_at <= 1.0,
+        "{label}: contact at {hit_at} s, pursuit at {at} s"
+    );
     assert!(o.level >= WantedLevel::L2, "{label}: {:?}", o.level);
     assert!(o.radio, "{label}: no assault radio line");
 }
 
 #[test]
 fn sideswiping_a_patrol_car_starts_a_pursuit_on_the_grid() {
-    for (hour, kmh) in [(12.0, 30.0), (12.0, 50.0), (23.0, 30.0), (23.0, 50.0)] {
-        assert_assault(City::Grid, hour, kmh);
+    for hour in [12.0, 23.0] {
+        for kmh in [30.0, 50.0] {
+            for approach in [GLANCING, QUARTER] {
+                assert_assault(City::Grid, hour, kmh, approach);
+            }
+        }
     }
 }
 
 #[test]
 fn sideswiping_a_patrol_car_starts_a_pursuit_in_port_vesper() {
     for (hour, kmh) in [(12.0, 30.0), (23.0, 50.0)] {
-        assert_assault(City::Vesper, hour, kmh);
+        for approach in [GLANCING, QUARTER] {
+            assert_assault(City::Vesper, hour, kmh, approach);
+        }
     }
 }
 
 #[test]
 fn a_parking_bump_starts_nothing() {
     for city in [City::Grid, City::Vesper] {
-        // Straight into the tail at 5 km/h; watch for 3 s.
-        let o = hit(city, 12.0, 5.0, 0.0, 0.0, 3.0);
-        assert!(o.contact, "{city:?}: the bump never touched");
-        assert_eq!(o.pursuit_at_s, None, "{city:?}");
-        assert_eq!(o.level, WantedLevel::None, "{city:?}");
-        assert!(!o.radio, "{city:?}");
+        for hour in [12.0, 23.0] {
+            // Straight into the tail at 5 km/h; watch for 3 s.
+            let o = hit(city, hour, 5.0, TAIL, 3.0);
+            let label = format!("{city:?} {hour}:00");
+            assert!(o.contact_at_s.is_some(), "{label}: the bump never touched");
+            assert_eq!(o.pursuit_at_s, None, "{label}");
+            assert_eq!(o.level, WantedLevel::None, "{label}");
+            assert!(!o.radio, "{label}");
+        }
     }
 }

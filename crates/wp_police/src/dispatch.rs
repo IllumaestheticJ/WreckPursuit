@@ -65,12 +65,14 @@ pub struct Incident {
 /// One racer–unit contact as police sees it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct RacerHit {
-    /// Closing speed, m/s.
+    /// Normal closing speed at the contact, m/s.
     pub(crate) rel_speed: f32,
-    /// Normal impulse of this contact, N·s (physical units).
+    /// Normal impulse of this contact, N·s (physical contacts).
     pub(crate) impulse_ns: f32,
-    /// Headless contact: no impulse, estimate it from `rel_speed`.
-    pub(crate) estimated: bool,
+    /// A physics contact (`SimEvent::Contact`). The headless proximity stand-in (no collider:
+    /// a scripted racer drives through a unit, and in `wp_sim` a player can't touch an
+    /// overflow kinematic unit) costs risk and health but is never an assault.
+    pub(crate) physical: bool,
 }
 
 /// Contacts between one racer and one unit that belong together (closer than
@@ -81,8 +83,8 @@ pub(crate) struct ContactEpisode {
     pub(crate) last: Option<SimTime>,
     /// Summed normal impulse, N·s.
     pub(crate) impulse_ns: f32,
-    /// Highest closing speed, m/s.
-    pub(crate) closing_mps: f32,
+    /// Highest racer-to-unit relative speed, m/s.
+    pub(crate) rel_speed_mps: f32,
     /// Highest racer speed, m/s.
     pub(crate) racer_speed_mps: f32,
     /// Latest contact that counted as an assault.
@@ -218,7 +220,7 @@ impl PoliceSystem {
         let hit = RacerHit {
             rel_speed,
             impulse_ns,
-            estimated: false,
+            physical: true,
         };
         match (ua, ub, ra, rb) {
             (Some(i), _, _, true) => self.unit_racer_contact(world, i, b, hit, false),
@@ -274,6 +276,9 @@ impl PoliceSystem {
     /// Accumulate one racer–unit contact into the pair's episode and fire
     /// [`PoliceSystem::on_assault`] when the episode crosses the `heat.assault` thresholds.
     fn track_assault(&mut self, world: &dyn WorldQuery, i: usize, racer: EntityId, hit: RacerHit) {
+        if !hit.physical {
+            return;
+        }
         let a = self.cfg.heat.heat.assault.clone();
         let now = self.now;
         let u = &self.units[i];
@@ -287,37 +292,31 @@ impl PoliceSystem {
         {
             return;
         }
-        let r = &self.racers[&racer];
-        let racer_speed = (r.vel[0] * r.vel[0] + r.vel[1] * r.vel[1]).sqrt();
+        // Racer velocity now (after this tick's physics) and on the previous step (before the
+        // hit: a head-on stops the racer within the tick that reports it).
+        let now_vel = self.racers[&racer].vel;
+        let before = self.prev_vel.get(&racer).copied().unwrap_or(now_vel);
         let uv = u.body.vel();
-        let rel = [r.vel[0] - uv[0], r.vel[1] - uv[1]];
-        let closing = hit
-            .rel_speed
-            .max((rel[0] * rel[0] + rel[1] * rel[1]).sqrt());
-        let impulse = if hit.estimated {
-            a.headless_mass_kg * hit.rel_speed
-        } else {
-            hit.impulse_ns
-        };
+        let (mut racer_speed, mut rel_speed) = (0.0f32, hit.rel_speed);
+        for v in [now_vel, before] {
+            racer_speed = racer_speed.max((v[0] * v[0] + v[1] * v[1]).sqrt());
+            let rel = [v[0] - uv[0], v[1] - uv[1]];
+            rel_speed = rel_speed.max((rel[0] * rel[0] + rel[1] * rel[1]).sqrt());
+        }
         let key = (u.id, racer);
         let ep = self.contact_episodes.entry(key).or_default();
         if ep.last.is_none_or(|t| now.since(t) > a.episode_s) {
             ep.impulse_ns = 0.0;
-            ep.closing_mps = 0.0;
+            ep.rel_speed_mps = 0.0;
             ep.racer_speed_mps = 0.0;
         }
         ep.last = Some(now);
-        // Physical contacts arrive once per tick with that tick's impulse (sum them); the
-        // headless estimate repeats every tick while the bodies overlap (keep the largest).
-        ep.impulse_ns = if hit.estimated {
-            ep.impulse_ns.max(impulse)
-        } else {
-            ep.impulse_ns + impulse
-        };
-        ep.closing_mps = ep.closing_mps.max(closing);
+        // Contacts arrive once per tick with that tick's impulse: a scrape adds up.
+        ep.impulse_ns += hit.impulse_ns;
+        ep.rel_speed_mps = ep.rel_speed_mps.max(rel_speed);
         ep.racer_speed_mps = ep.racer_speed_mps.max(racer_speed);
         let hard = ep.impulse_ns >= a.min_impulse_ns
-            && ep.closing_mps >= a.min_closing_mps
+            && ep.rel_speed_mps >= a.min_rel_speed_mps
             && ep.racer_speed_mps >= a.min_racer_speed_mps;
         let fresh = ep
             .assault_at
@@ -325,6 +324,28 @@ impl PoliceSystem {
         if hard && fresh {
             ep.assault_at = Some(now);
             self.on_assault(world, i, racer);
+        }
+    }
+
+    /// A physical racer–unit contact given by unit id (police scenarios script a sideswipe of
+    /// a headless unit with it; `wp_sim` contacts arrive as `SimEvent::Contact`).
+    pub(crate) fn scripted_contact(
+        &mut self,
+        world: &dyn WorldQuery,
+        unit: UnitId,
+        racer: EntityId,
+        impulse_ns: f32,
+        rel_speed: f32,
+    ) {
+        if let Some(i) = self.unit_index(unit) {
+            if self.racers.contains_key(&racer) {
+                let hit = RacerHit {
+                    rel_speed,
+                    impulse_ns,
+                    physical: true,
+                };
+                self.unit_racer_contact(world, i, racer, hit, self.units[i].internal);
+            }
         }
     }
 

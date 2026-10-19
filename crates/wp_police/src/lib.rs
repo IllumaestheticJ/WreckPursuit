@@ -217,6 +217,9 @@ pub struct PoliceSystem {
     pub(crate) recognition_s: BTreeMap<EntityId, f32>,
     pub(crate) trails: BTreeMap<EntityId, unit::Track>,
     pub(crate) prev_pos: BTreeMap<EntityId, [f32; 2]>,
+    /// Racer velocity reported on the previous step, m/s (before this tick's contacts: a hard
+    /// hit has already slowed the racer by the time it is reported).
+    pub(crate) prev_vel: BTreeMap<EntityId, [f32; 3]>,
     pub(crate) units: Vec<Unit>,
     pub(crate) next_unit: u32,
     pub(crate) incidents: Vec<Incident>,
@@ -285,6 +288,7 @@ impl PoliceSystem {
             recognition_s: BTreeMap::new(),
             trails: BTreeMap::new(),
             prev_pos: BTreeMap::new(),
+            prev_vel: BTreeMap::new(),
             units: Vec::new(),
             next_unit: 1,
             incidents: Vec::new(),
@@ -353,6 +357,7 @@ impl PoliceSystem {
                 .racers
                 .entry(r.entity)
                 .or_insert_with(|| RacerRecord::new(r.entity));
+            self.prev_vel.insert(r.entity, rec.vel);
             rec.pos = r.pos;
             rec.vel = r.vel;
             let p = xy(r.pos);
