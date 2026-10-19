@@ -39,7 +39,7 @@ use crate::density::{f_distance, f_time};
 use crate::drive::{DriveController, DriveGains};
 use crate::geom::{self, Obb, V2, V3};
 use crate::map::{CityMap, SegId, SegKind, NO_SEG};
-use crate::network::{IntersectionControl, TurnKind, ZoneId};
+use crate::network::{IntersectionControl, LaneKind, TurnKind, ZoneId};
 
 /// Civilian car length used for spacing and overlap tests, m.
 pub const CAR_LENGTH_M: f32 = 4.5;
@@ -49,6 +49,9 @@ pub const CAR_WIDTH_M: f32 = 1.9;
 pub const TRAFFIC_DT: f32 = 1.0 / 60.0;
 /// Physics ticks per traffic step (240 Hz / 60 Hz).
 pub const TICKS_PER_TRAFFIC_STEP: u64 = 4;
+/// A discretionary lane change is indicated at least this long before it starts, s.
+pub const LANE_CHANGE_SIGNAL_S: f32 = 0.5;
+
 /// Siren reaction radius, m.
 pub const SIREN_RADIUS_M: f32 = 60.0;
 
@@ -75,12 +78,30 @@ pub enum Personality {
     Aggressive,
 }
 
-/// Per-driver parameters sampled from the personality.
+/// Per-driver parameters sampled from the personality (once, at spawn, from the traffic RNG).
+///
+/// Every driver is different within its personality: desired speed, headway, acceleration
+/// and braking comfort, how quickly it pulls away at a green, how it treats ambers and how
+/// eager it is to change lanes. The ranges (owner playtest row 14, "NPC cars need variance"):
+///
+/// | | law-abiding (70 %) | casual (25 %) | aggressive (5 %) |
+/// |---|---|---|---|
+/// | speed × limit | 0.80–0.88 (12 % slow) or 0.88–1.03 | 1.03–1.13 | 1.13–1.25 |
+/// | extra on highways | −4…+5 % | 0…+8 % | +3…+12 % |
+/// | headway, s | 1.6–2.2 | 1.3–1.6 | 1.1–1.3 |
+/// | accel / comfort brake, m/s² | 1.1–1.7 / 2.0–2.8 | 1.5–2.1 / 2.6–3.3 | 2.2–2.8 / 3.2–3.8 |
+/// | start delay (queue moving, straight/right at green), s | 0.5–1.0 (10 % hesitant: 1.2–2.2) | 0.35–0.75 (5 % hesitant) | 0.15–0.4 |
+/// | runs an amber when stopping needs more than | its comfort brake | 55–90 % of it, if it reaches the line before red | always, if it reaches the line |
+/// | lane-change incentive threshold / keep-right bias, m/s² | 0.15–0.35 / 0.2–0.4 | 0.15–0.3 / 0.15–0.3 | 0.08–0.15 / 0.05–0.15 |
+///
+/// Alleys: everyone drives at most 0.9 × the limit there.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct DriverParams {
     /// Desired speed as a multiple of the limit.
     pub speed_factor: f32,
-    /// IDM time headway, s (1.2–2.0).
+    /// Extra desired-speed fraction on highway lanes (−0.04 … +0.12).
+    pub highway_bias: f32,
+    /// IDM time headway, s (1.1–2.2).
     pub headway_s: f32,
     /// IDM standstill gap, m.
     pub min_gap_m: f32,
@@ -94,42 +115,99 @@ pub struct DriverParams {
     pub gap_accept_s: f32,
     /// Goes through yellows whenever it can reach the line before red.
     pub yellow_runner: bool,
+    /// At an amber, stops if that needs at most this deceleration (m/s²); otherwise goes when
+    /// it can reach the line before red. Law-abiding = `comfort_decel`.
+    pub amber_decel: f32,
+    /// Reaction time before pulling away from a standstill (green light, queue moving), s.
+    pub start_delay_s: f32,
+    /// MOBIL incentive needed for a discretionary lane change, m/s².
+    pub lane_change_threshold: f32,
+    /// MOBIL keep-right bias (added for moving right, subtracted for moving left), m/s².
+    pub keep_right_bias: f32,
 }
 
 impl DriverParams {
     /// Sample parameters for a personality.
     pub fn sample(p: Personality, rng: &mut Rng) -> Self {
         match p {
-            Personality::LawAbiding => Self {
-                speed_factor: rng.range_f32(0.93, 1.0),
-                headway_s: rng.range_f32(1.6, 2.0),
-                min_gap_m: 2.0,
-                max_accel: rng.range_f32(1.2, 1.6),
-                comfort_decel: 2.5,
-                politeness: 0.5,
-                gap_accept_s: 5.0,
-                yellow_runner: false,
-            },
-            Personality::Casual => Self {
-                speed_factor: rng.range_f32(1.07, 1.12),
-                headway_s: rng.range_f32(1.4, 1.6),
-                min_gap_m: 1.8,
-                max_accel: rng.range_f32(1.5, 2.0),
-                comfort_decel: 3.0,
-                politeness: 0.3,
-                gap_accept_s: 4.5,
-                yellow_runner: false,
-            },
+            Personality::LawAbiding => {
+                let slow = rng.next_f32() < 0.12;
+                let speed_factor = if slow {
+                    rng.range_f32(0.80, 0.88)
+                } else {
+                    rng.range_f32(0.88, 1.03)
+                };
+                let comfort_decel = rng.range_f32(2.0, 2.8);
+                let start_delay_s = if rng.next_f32() < 0.10 {
+                    rng.range_f32(1.2, 2.2)
+                } else {
+                    rng.range_f32(0.5, 1.0)
+                };
+                Self {
+                    speed_factor,
+                    highway_bias: rng.range_f32(-0.04, 0.05),
+                    headway_s: rng.range_f32(1.6, 2.2),
+                    min_gap_m: 2.0,
+                    max_accel: rng.range_f32(1.1, 1.7),
+                    comfort_decel,
+                    politeness: rng.range_f32(0.4, 0.7),
+                    gap_accept_s: 5.0,
+                    yellow_runner: false,
+                    amber_decel: comfort_decel,
+                    start_delay_s,
+                    lane_change_threshold: rng.range_f32(0.15, 0.35),
+                    keep_right_bias: rng.range_f32(0.2, 0.4),
+                }
+            }
+            Personality::Casual => {
+                let speed_factor = rng.range_f32(1.03, 1.13);
+                let comfort_decel = rng.range_f32(2.6, 3.3);
+                let start_delay_s = if rng.next_f32() < 0.05 {
+                    rng.range_f32(1.2, 2.0)
+                } else {
+                    rng.range_f32(0.35, 0.75)
+                };
+                Self {
+                    speed_factor,
+                    highway_bias: rng.range_f32(0.0, 0.08),
+                    headway_s: rng.range_f32(1.3, 1.6),
+                    min_gap_m: 1.8,
+                    max_accel: rng.range_f32(1.5, 2.1),
+                    comfort_decel,
+                    politeness: rng.range_f32(0.2, 0.4),
+                    gap_accept_s: 4.5,
+                    yellow_runner: false,
+                    amber_decel: comfort_decel * rng.range_f32(0.55, 0.9),
+                    start_delay_s,
+                    lane_change_threshold: rng.range_f32(0.15, 0.3),
+                    keep_right_bias: rng.range_f32(0.15, 0.3),
+                }
+            }
             Personality::Aggressive => Self {
-                speed_factor: rng.range_f32(1.15, 1.22),
-                headway_s: rng.range_f32(1.2, 1.3),
+                speed_factor: rng.range_f32(1.13, 1.25),
+                highway_bias: rng.range_f32(0.03, 0.12),
+                headway_s: rng.range_f32(1.1, 1.3),
                 min_gap_m: 1.2,
                 max_accel: rng.range_f32(2.2, 2.8),
-                comfort_decel: 3.5,
-                politeness: 0.05,
+                comfort_decel: rng.range_f32(3.2, 3.8),
+                politeness: rng.range_f32(0.0, 0.1),
                 gap_accept_s: 3.5,
                 yellow_runner: true,
+                amber_decel: 0.0,
+                start_delay_s: rng.range_f32(0.15, 0.4),
+                lane_change_threshold: rng.range_f32(0.08, 0.15),
+                keep_right_bias: rng.range_f32(0.05, 0.15),
             },
+        }
+    }
+
+    /// Desired speed as a multiple of the limit on a lane of this kind (`None` = junction
+    /// connector): `speed_factor`, plus `highway_bias` on highways, at most 0.9 in alleys.
+    pub fn factor_on(&self, kind: Option<LaneKind>) -> f32 {
+        match kind {
+            Some(LaneKind::Highway) => self.speed_factor * (1.0 + self.highway_bias),
+            Some(LaneKind::Alley) => self.speed_factor.min(0.9),
+            _ => self.speed_factor,
         }
     }
 }
@@ -333,6 +411,8 @@ pub struct TrafficStats {
     pub demotions: u64,
     /// Lane changes performed.
     pub lane_changes: u64,
+    /// Of those, changes to the left (overtaking; the rest move right / keep right).
+    pub lane_changes_left: u64,
     /// Emergency brake reactions.
     pub emergency_brakes: u64,
     /// First 64 new overlap pairs: `(traffic step, agent a, agent b)`.
@@ -378,6 +458,10 @@ pub struct Agent {
     /// Traffic step at which the agent came to a stop.
     stopped_since: Option<u64>,
     last_lane_change: u64,
+    /// Discretionary lane change being indicated: (to the right, traffic step it started).
+    pending_lc: Option<(bool, u64)>,
+    /// Time spent wanting to pull away from a standstill (reaction delay), s.
+    start_wait_s: f32,
     ghost: Option<(SegId, f32)>,
     stuck_s: f32,
     /// Currently braking hard for a hazard.
@@ -515,27 +599,21 @@ pub struct Traffic {
     car: Option<(VehicleDef, TireDb)>,
 }
 
-/// IDM acceleration with an IIDM-style free term above the desired speed.
+/// Desired-speed factor of driver `p` on segment `seg` ([`DriverParams::factor_on`]).
+fn speed_factor_on(map: &CityMap, seg: SegId, p: &DriverParams) -> f32 {
+    p.factor_on(map.seg(seg).lane().map(|l| map.net.lanes[l as usize].kind))
+}
+
+/// IDM acceleration with an IIDM-style free term above the desired speed (the shared law in
+/// [`crate::leader::CarFollowing::idm`], so police / racers follow cars the same way).
 fn idm(v: f32, v0: f32, gap: f32, v_lead: f32, p: &DriverParams) -> f32 {
-    let v0 = v0.max(0.1);
-    // x⁴ by multiplies: `powi` is not guaranteed bit-identical across targets.
-    let pow4 = |x: f32| {
-        let x2 = x * x;
-        x2 * x2
-    };
-    let free = if v <= v0 {
-        p.max_accel * (1.0 - pow4(v / v0))
-    } else {
-        -p.comfort_decel * (1.0 - pow4(v0 / v))
-    };
-    if !gap.is_finite() {
-        return free;
+    crate::leader::CarFollowing {
+        headway_s: p.headway_s,
+        min_gap_m: p.min_gap_m,
+        max_accel: p.max_accel,
+        comfort_decel: p.comfort_decel,
     }
-    let dv = v - v_lead;
-    let s_star = p.min_gap_m
-        + (v * p.headway_s + v * dv / (2.0 * (p.max_accel * p.comfort_decel).sqrt())).max(0.0);
-    let g = gap.max(0.05);
-    free - p.max_accel * (s_star / g) * (s_star / g)
+    .idm(v, v0, gap, v_lead)
 }
 
 /// Unit forward (XY) of a chassis quaternion `[x, y, z, w]` (chassis +Y rotated).
@@ -675,6 +753,8 @@ impl Traffic {
             }
             if a.ghost.is_some() {
                 turn_signal = if a.lat < 0.0 { 1 } else { -1 };
+            } else if let Some((to_right, _)) = a.pending_lc {
+                turn_signal = if to_right { 1 } else { -1 };
             }
             AgentView {
                 id: a.id,
@@ -1163,7 +1243,10 @@ impl Traffic {
                         let go = if p.yellow_runner {
                             d_line / v.max(0.1) < rem + 1.0
                         } else {
+                            // Can't stop comfortably: go. Casual drivers also go when stopping
+                            // would merely be firm, if they reach the line before red.
                             need > p.comfort_decel
+                                || (need > p.amber_decel && d_line / v.max(0.1) < rem + 0.5)
                         };
                         if !go {
                             return false;
@@ -1257,11 +1340,12 @@ impl Traffic {
             }
 
             // Desired speed.
-            let mut v0 = (seg.speed_limit * p.speed_factor).min(seg.curve_speed * p.speed_factor);
+            let sf = speed_factor_on(map, a.seg, &p);
+            let mut v0 = (seg.speed_limit * sf).min(seg.curve_speed * sf);
             let d_end = seg.length - a.s;
             if a.plan[0] != NONE {
                 let ns = map.seg(a.plan[0]);
-                let vc = ns.curve_speed.min(ns.speed_limit) * p.speed_factor;
+                let vc = ns.curve_speed.min(ns.speed_limit) * speed_factor_on(map, a.plan[0], &p);
                 v0 = v0.min((vc * vc + 2.0 * p.comfort_decel * (d_end - HALF_L).max(0.0)).sqrt());
             }
             let mut lat_target = 0.0f32;
@@ -1365,14 +1449,19 @@ impl Traffic {
                 let d_line = d_end - HALF_L - 0.5;
                 let need = v * v / (2.0 * d_line.max(0.1));
                 if a.permit == next {
-                    let st = map.lane_signal(a.seg).map(|x| x.0);
+                    let sig = map.lane_signal(a.seg);
+                    let st = sig.map(|x| x.0);
+                    let reaches = sig.is_some_and(|x| d_line / v.max(0.1) < x.1 + 0.5);
                     let limit = match st {
                         Some(SignalState::Yellow) if p.yellow_runner => 0.0,
+                        Some(SignalState::Yellow) if reaches => p.amber_decel,
                         Some(SignalState::Yellow) => p.comfort_decel,
                         Some(SignalState::Red) => 5.0,
                         _ => 0.0,
                     };
-                    if (need <= limit)
+                    // `limit > 0`: at a green (or no signal) a stopped car keeps its permit
+                    // (need = 0 would otherwise revoke it every step).
+                    if (limit > 0.0 && need <= limit)
                         || (siren && need <= 5.0)
                         || (self.tv_block[next as usize] && need <= 8.0)
                     {
@@ -1394,6 +1483,30 @@ impl Traffic {
                 }
             }
 
+            // Reaction delay pulling away from a standstill: in a queue that starts moving, or
+            // first in line at a green (straight / right). Not for moves that wait for a gap
+            // (permissive lefts, stop / yield signs): the gap would close while hesitating.
+            let mut start_wait = 0.0;
+            if v < 0.3 && acc > 0.0 {
+                let in_queue = gap < 15.0;
+                let green_start = !seg.is_connector()
+                    && next != NONE
+                    && map.lane_signal(a.seg).map(|x| x.0) == Some(SignalState::Green)
+                    && !matches!(
+                        map.seg(next).kind,
+                        SegKind::Connector {
+                            turn: TurnKind::Left | TurnKind::UTurn,
+                            ..
+                        }
+                    );
+                if in_queue || green_start {
+                    start_wait = a.start_wait_s + TRAFFIC_DT;
+                    if start_wait < p.start_delay_s {
+                        acc = acc.min(-0.5);
+                    }
+                }
+            }
+
             if emergency {
                 acc = acc.min(-8.0);
             }
@@ -1405,6 +1518,7 @@ impl Traffic {
             }
             a.emergency = emergency;
             a.yielding = siren;
+            a.start_wait_s = start_wait;
             a.acc = acc.clamp(-9.0, p.max_accel);
             a.lat_target = lat_target;
             if revoke {
@@ -1438,6 +1552,10 @@ impl Traffic {
             if !(a.id as u64 + self.step_count).is_multiple_of(30) {
                 continue;
             }
+            // The indicator stays on only while this check keeps choosing the same change.
+            let prev_signal = a.pending_lc;
+            self.agents[i].pending_lc = None;
+            let a = &self.agents[i];
             if a.physical.is_some() || a.disabled || a.permit != NONE || a.ghost.is_some() {
                 continue;
             }
@@ -1470,7 +1588,7 @@ impl Traffic {
                 continue;
             }
             let p = a.params;
-            let v0 = seg.speed_limit * p.speed_factor;
+            let v0 = seg.speed_limit * speed_factor_on(map, a.seg, &p);
             let own = &self.lists[a.seg as usize];
             let pos = self.list_pos[i] as usize;
             let a_c = self.lane_local_acc(own, a.s, a.v, &p, v0);
@@ -1479,7 +1597,7 @@ impl Traffic {
             let (a_o, a_o2) = match old_f {
                 Some(e) => {
                     let fp = self.agents[e.agent as usize].params;
-                    let fv0 = seg.speed_limit * fp.speed_factor;
+                    let fv0 = seg.speed_limit * speed_factor_on(map, a.seg, &fp);
                     let a_o = idm(e.v, fv0, a.s - e.s - CAR_LENGTH_M, a.v, &fp);
                     let a_o2 = self.lane_local_acc(&own[pos + 1..], e.s, e.v, &fp, fv0);
                     (a_o, a_o2)
@@ -1528,7 +1646,7 @@ impl Traffic {
                             continue;
                         }
                         let fp = self.agents[e.agent as usize].params;
-                        let fv0 = cs.speed_limit * fp.speed_factor;
+                        let fv0 = cs.speed_limit * speed_factor_on(map, c, &fp);
                         let a_n2 = idm(e.v, fv0, s2 - e.s - CAR_LENGTH_M, a.v, &fp);
                         if a_n2 < -4.0 {
                             continue;
@@ -1545,15 +1663,42 @@ impl Traffic {
                     Some(e) => idm(a.v, v0, e.s - s2 - CAR_LENGTH_M, e.v, &p),
                     None => idm(a.v, v0, f32::INFINITY, 0.0, &p),
                 };
-                let bias = if to_right { 0.3 } else { -0.3 };
+                let bias = if to_right {
+                    p.keep_right_bias
+                } else {
+                    -p.keep_right_bias
+                };
                 let forced = if blocked { 10.0 } else { 0.0 };
                 let incentive =
                     a_c2 - a_c + p.politeness * (a_n2 - a_n + a_o2 - a_o) + bias + forced;
-                if incentive > 0.25 && best.is_none_or(|b| incentive > b.0) {
+                // Hysteresis: a change already being indicated goes ahead at half the threshold.
+                let thr = if prev_signal.is_some_and(|(d, _)| d == to_right) {
+                    p.lane_change_threshold * 0.5
+                } else {
+                    p.lane_change_threshold
+                };
+                if incentive > thr && best.is_none_or(|b| incentive > b.0) {
                     best = Some((incentive, c, s2, to_right));
                 }
             }
             if let Some((_, c, s2, to_right)) = best {
+                // Discretionary changes are indicated first: the change happens at the next
+                // check (≥ 0.5 s later) if it is still the best and still safe. Debris: at once.
+                if !blocked {
+                    match prev_signal {
+                        Some((dir, t0))
+                            if dir == to_right
+                                && steps_to_s(self.step_count - t0) >= LANE_CHANGE_SIGNAL_S => {}
+                        Some((dir, t0)) if dir == to_right => {
+                            self.agents[i].pending_lc = Some((dir, t0));
+                            continue;
+                        }
+                        _ => {
+                            self.agents[i].pending_lc = Some((to_right, self.step_count));
+                            continue;
+                        }
+                    }
+                }
                 let w = map.net.lanes[c as usize].width_m;
                 let old_seg = self.agents[i].seg;
                 let old_s = self.agents[i].s;
@@ -1573,6 +1718,9 @@ impl Traffic {
                 a.last_lane_change = t;
                 a.stopped_since = None;
                 self.stats.lane_changes += 1;
+                if !to_right {
+                    self.stats.lane_changes_left += 1;
+                }
             }
         }
     }
@@ -1783,6 +1931,11 @@ impl Traffic {
                 headlights: map.time.night_factor() > 0.5,
                 ..Default::default()
             };
+            // Stopped (queue, stop line, wreck): hold on the handbrake. The PID releases the
+            // foot brake near standstill (auto-reverse), which would let the car idle forward.
+            if (acc < 0.0 || disabled) && v < crate::leader::HOLD_BEHIND_MPS {
+                pa.input = crate::leader::held(pa.input);
+            }
         }
     }
 
@@ -2102,7 +2255,7 @@ impl Traffic {
                 }
             };
             let params = DriverParams::sample(personality, &mut self.rng);
-            let v0 = seg.speed_limit * params.speed_factor;
+            let v0 = seg.speed_limit * speed_factor_on(map, smp.seg, &params);
             let room = (seg.length - s - 15.0).max(0.0);
             let v = (v0 * 0.8)
                 .min(((gap_a - 6.0) / 1.6).max(0.0))
@@ -2131,6 +2284,8 @@ impl Traffic {
                 permit: NONE,
                 stopped_since: None,
                 last_lane_change: self.step_count,
+                pending_lc: None,
+                start_wait_s: 0.0,
                 ghost: None,
                 stuck_s: 0.0,
                 emergency: false,

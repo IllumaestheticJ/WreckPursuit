@@ -753,6 +753,53 @@ fn hitting_a_civilian_is_a_collision_violation() {
     assert!(violations(&ev).contains(&ViolationKind::Collision));
 }
 
+#[test]
+fn own_traffic_cars_are_not_tracked_for_violations() {
+    // wp_sim tracks every vehicle, including promoted traffic. A tracked entity that is one of
+    // this world's own agents must not earn violations (or block its own agent).
+    let mut w = world(
+        TrafficConfig {
+            density_scale: 3.0,
+            sight_radius_m: 0.0,
+            ..Default::default()
+        },
+        12.0,
+        1.0,
+    );
+    w.populate();
+    let a = w.agents().next().unwrap();
+    w.set_agent_entity(a.id, Some(EntityId(1)));
+    let mut ev = Vec::new();
+    for _ in 0..4 {
+        w.set_tracked_vehicles(&[player(a.pos, geom::dir_of_yaw(a.yaw), 0.0)]);
+        w.step(PHYSICS_DT, &mut ev);
+    }
+    assert!(violations(&ev).is_empty(), "{:?}", violations(&ev));
+}
+
+#[test]
+fn slow_red_light_crossing_is_reported_once() {
+    let mut w = world(no_traffic(), 12.0, 10.0);
+    let map = w.map();
+    let lane = (0..map.n_lanes() as u32)
+        .find(|&l| map.lane_signal(l).is_some() && map.seg(l).length > 60.0)
+        .unwrap();
+    let len = w.map().seg(lane).length;
+    let mut ev = Vec::new();
+    while w.map().lane_signal(lane).unwrap().0 != SignalState::Red
+        || w.map().lane_signal(lane).unwrap().1 < 8.0
+    {
+        w.step(PHYSICS_DT, &mut ev);
+    }
+    // Creep over the stop line at 1 m/s: the centre straddles it for several updates.
+    let crossed = drive_lane(&mut w, lane, len - 3.0, 1.0, 6.0, 1.0);
+    let n = violations(&crossed)
+        .iter()
+        .filter(|k| **k == ViolationKind::RedLight)
+        .count();
+    assert_eq!(n, 1, "{:?}", violations(&crossed));
+}
+
 // ---------------------------------------------------------------------------------------------
 // LOD
 // ---------------------------------------------------------------------------------------------
@@ -1021,4 +1068,64 @@ fn small_debris_is_swerved_around_and_junction_debris_is_avoided() {
     println!("swerve + junction debris: overlaps {overlaps}, moving {moving:.2}");
     assert_eq!(overlaps, 0, "a civilian drove into debris");
     assert!(moving > 0.5);
+}
+
+/// Owner playtest row 14 ("NPC cars need variance"): the per-driver parameters drawn at spawn
+/// (70 / 25 / 5 % personality mix, as `TrafficConfig::default`) spread desired speeds, reaction
+/// times, amber behaviour and lane-change eagerness.
+#[test]
+fn driver_parameters_vary_between_drivers() {
+    use wp_world::traffic::{DriverParams, Personality};
+    let mut rng = wp_math::Rng::new(7);
+    let n = 20_000;
+    let mut speed = Vec::with_capacity(n);
+    let mut highway = Vec::with_capacity(n);
+    let (mut hesitant, mut amber_go, mut eager) = (0, 0, 0);
+    for _ in 0..n {
+        let r = rng.next_f32();
+        let pers = if r < 0.05 {
+            Personality::Aggressive
+        } else if r < 0.30 {
+            Personality::Casual
+        } else {
+            Personality::LawAbiding
+        };
+        let p = DriverParams::sample(pers, &mut rng);
+        speed.push(p.factor_on(Some(LaneKind::Through)));
+        highway.push(p.factor_on(Some(LaneKind::Highway)));
+        assert!(p.factor_on(Some(LaneKind::Alley)) <= 0.9);
+        if p.start_delay_s >= 1.2 {
+            hesitant += 1;
+        }
+        if p.yellow_runner || p.amber_decel < p.comfort_decel {
+            amber_go += 1;
+        }
+        if p.lane_change_threshold < 0.2 {
+            eager += 1;
+        }
+    }
+    let pct = |v: &mut Vec<f32>, q: f32| {
+        v.sort_by(|a, b| a.total_cmp(b));
+        v[((v.len() - 1) as f32 * q) as usize]
+    };
+    let (s5, s50, s95) = (
+        pct(&mut speed, 0.05),
+        pct(&mut speed, 0.5),
+        pct(&mut speed, 0.95),
+    );
+    let (h50, h95) = (pct(&mut highway, 0.5), pct(&mut highway, 0.95));
+    let frac = |k: usize| 100.0 * k as f32 / n as f32;
+    println!(
+        "desired speed / limit: p5 {s5:.2} p50 {s50:.2} p95 {s95:.2} (highway p50 {h50:.2} p95 {h95:.2}); \
+         hesitant starters {:.1} %, amber runners {:.1} %, eager lane changers {:.1} %",
+        frac(hesitant),
+        frac(amber_go),
+        frac(eager)
+    );
+    assert!(s5 < 0.88 && s95 > 1.08, "speed spread {s5}..{s95}");
+    assert!((0.9..1.02).contains(&s50));
+    assert!(h95 > s95);
+    assert!((5.0..12.0).contains(&frac(hesitant)));
+    assert!((20.0..40.0).contains(&frac(amber_go)));
+    assert!(frac(eager) > 10.0);
 }

@@ -72,6 +72,10 @@ All in `wp_world` (details and format spec: `crates/wp_world/README.md`).
   - Verified on the real `wp_vehicle` model in its Rapier rig: city route 866 m stays on the
     road, stops at the end, ≤ 1.7 m off line; circuit lap pursuit 192 s vs civilian 274 s,
     ≤ 1.4 m off line.
+- **Leader / obstacle query** (`wp_world::leader`, round 6): `find_leader(own_pos, centreline,
+  &[Obstacle], skip, &LeaderParams) -> Option<Leader { id, gap_m, speed_mps, .. }>`,
+  `Obstacle::{from_state, from_agent}`, `CarFollowing::{CIVILIAN, PURSUIT}::leader_cap` (traffic's
+  IDM), `hold_behind` / `held`; `DrivePath::leader`, `PathFollower::follow_behind`.
 - **Debris hazards**: `World::set_hazards(&[Hazard::new(pos, radius)])` (or with `vel`).
   Small debris is swerved around within the lane (≤ 1.5 m, held until the rear clears);
   lane-blocking debris → lane change if the neighbour lane is free, else stop; debris in a
@@ -100,6 +104,10 @@ From the sim loop (`wp_sim`, integration lead) — none of these are wired yet:
    per agent).
 8. **simcli scenarios** (10): a traffic soak scenario once the sim loads cities (expected
    ranges: 0 civilian collisions, ≥ 380 agents, ≥ 50 % moving).
+9. **Leader query inputs for police** (round 6): each tick, the state of every vehicle near an
+   AI unit as `wp_world::leader::Obstacle`s (players, physical traffic, other units; kinematic
+   traffic via `Obstacle::from_agent`) handed to `wp_police` (E's API) — see "Response from D
+   (round 6)".
 
 ## Contract change requests
 | # | Change (type / field / variant) | Why | Who is affected | Status |
@@ -184,6 +192,7 @@ Suburb }` — exactly `wp_world::network::DistrictKind` (moved to contracts, re-
 | `World::procedural(ProcGenConfig::small())` (6×6, 650 lanes, 521 parked cars) | same | ≈ 5 ms (debug ≈ 0.06 s) | — | — |
 | `line_of_sight`, random 300 m sight lines at 1.5 m, procedural_12x12 | same | 1.1 µs/query | — | — |
 | 10-min soak × 18 (9 seeds × 0 / 5 % aggressive) | same | 0 civilian–civilian collisions | — | < 1 % with aggressive |
+| 400 agents per frame after driver variety (round 6) | same | 0.055 ms (0.060 before, same run) | — | 2 ms |
 
 ## Known gaps
 - No rigid bodies for physical traffic until the sim loop handles `LodChange` (Needs 3).
@@ -282,3 +291,105 @@ Police units drive with your shared controller but have no obstacle sensing, so 
 police.md round 6). Please expose a **leader / obstacle query** E can use from the controller: nearest vehicle ahead
 on the path within a look-ahead (players, physical traffic, other units — `wp_sim` vehicle states can be passed in),
 returning gap and speed, so units do the same car-following your traffic does. Coordinate the API with E in your doc.
+
+### Response from D (round 6)
+**Leader / obstacle query — done** (`wp_world::leader`, commit on `ws/world`). Pure geometry on
+data the caller passes in, so it works for police units, AI racers and anything else that is
+not lane-bound traffic:
+
+```rust
+use wp_world::leader::{find_leader, hold_behind, held, CarFollowing, LeaderParams, Obstacle};
+
+// 1. Every vehicle near the unit (wp_sim vehicle states; kinematic traffic via AgentView).
+let obstacles: Vec<Obstacle> = states.iter().map(|(id, st)| Obstacle::from_state(*id, st))
+    .chain(world.agents().map(|a| Obstacle::from_agent(&a))).collect();
+// 2. Nearest one in a ±1.2 m corridor along the unit's own track (any path: a closure giving
+//    the point `d` m ahead, lane offset included). `skip` = own id, + the suspect when ramming.
+let lp = LeaderParams::CAR.lookahead_for(v);
+let leader = find_leader(pos, |d| lane_point(&track, s + d, lane_offset), &obstacles, &[own], &lp);
+// 3. Same IDM law as traffic: cap the commanded acceleration.
+let cap = CarFollowing::PURSUIT.leader_cap(v, leader.as_ref());
+let acc = acc.min(cap.max(-max_brake));
+let mut input = /* controller.steer + controller.pedals(v, acc, dt, disabled) as today */;
+// 4. Stopped behind it: hold on the handbrake (pedals releases the foot brake < 0.6 m/s
+//    because holding it engages auto-reverse — the car would idle forward into the leader).
+if let Some(l) = &leader { if hold_behind(v, cap, l) { input = held(input); } }
+```
+
+- `Leader { id, gap_m (bumper to bumper), speed_mps (along the path, negative = oncoming),
+  along_m, lateral_m }`. Obstacles are oriented boxes, so a car stopped sideways across the lane
+  counts by its footprint; neighbour/oncoming lanes (≥ 3 m away) do not. Ties break on id
+  (order-independent, deterministic).
+- `CarFollowing::PURSUIT` = headway 0.8 s, standstill gap 2.5 m, a 4 m/s², b 5 m/s²;
+  `CIVILIAN` = traffic's middle values. Traffic's own `idm` now delegates to
+  `CarFollowing::idm` (same arithmetic; all traffic tests and the soaks unchanged).
+- `DrivePath` users get it in one call: `PathFollower::follow_behind(state, path, target,
+  offset, dt, Some(&FollowTraffic { obstacles, skip, corridor, following }))` (racers / N).
+- Verified on the real vehicle (`tests/drive.rs`): from 25 m/s with `FollowParams::PURSUIT`
+  it stops **2.5 m behind a stopped car** (no contact) and settles ≈ 9 m behind an 8 m/s car.
+- Cost: 60 m look-ahead = 30 corridor samples; each obstacle is one circle reject or a
+  30-segment projection — microseconds for 24 vehicles + nearby traffic.
+
+**Coordination with E (police):** the call site is `PoliceSystem::unit_input` (it already uses
+my `DriveController`; steps 2–4 above slot in around its `acc`). E needs the obstacle list from
+`wp_sim`: proposed `PoliceSystem::set_obstacles(&[wp_world::leader::Obstacle])` (or a
+`unit_input(unit, dt, &obstacles)` argument), filled by `police_link.rs` each tick from every
+`wp_sim` vehicle (players, physical traffic, other units) plus kinematic `AgentView`s within
+~150 m. When a unit means to ram/PIT the suspect it puts the suspect's id in `skip`; while
+following or boxing it keeps it in. Spawn clearance (golden/city_chase unit 5 m ahead of the
+racer) is E's/lead's; `find_leader` from the spawn pose with a 0 m/s look-ahead tells whether a
+spot is clear.
+
+**Physical traffic creep — fixed on my side too.** Same cause: a physical civilian stopped in
+a queue or at a stop line had its foot brake released below 0.6 m/s and idled forward. It is
+now held on the handbrake while its IDM acceleration is negative (or it is disabled) and it is
+below 1 m/s. `soak/traffic_soak_observer`: 0 civilian collisions before and after (the pending
+zero gate passes; you can promote it). Goldens: see below.
+
+Needs added for this round: **9.** `wp_sim` / E: pass vehicle states to the police controller
+for the leader query (above).
+
+### Response from D (round 6 follow-up: playtest row 14, "NPC cars need variance")
+- **Per-driver personality** (deterministic, traffic RNG at spawn): `DriverParams` now also
+  carries `highway_bias`, `amber_decel`, `start_delay_s`, `lane_change_threshold`,
+  `keep_right_bias`, and every existing field is a range per personality (table in the
+  `DriverParams` docs / README). Desired speed / limit over the 70/25/5 mix: **p5 0.84, p50 0.98,
+  p95 1.13** (was ≈ 0.94 / 0.98 / 1.11); highways p95 1.20; alleys ≤ 0.9. 12 % of law-abiding
+  drivers are slow (0.80–0.88×).
+- **Lane changes**: per-driver MOBIL threshold + keep-right bias (overtake slower leaders, return
+  right); discretionary changes are **indicated ≥ 0.5 s before** they start (`AgentView::turn_signal`,
+  already in the planned `TrafficAgentSnapshot.flags` bits 2/3 — no new contract request), with
+  hysteresis so an indicated change usually happens; never within 60 m of a junction or inside one.
+  Lane prep before turns is implicit (turns are picked from the current lane).
+- **Dynamic driving**: reaction delay pulling away in a moving queue or first at a green
+  (0.15–2.2 s, 8 % hesitant ≥ 1.2 s); casual drivers run ambers only when they reach the line
+  before red; IDM gives smooth accel/decel with per-driver comfort values.
+- **Physical agents** follow the same personality (controller tracks the same IDM acceleration);
+  stopped ones are held on the handbrake (see round 6 above).
+- **Bug found and fixed on the way**: a stopped car holding a junction permit at a green had its
+  permit revoked every step (`need = 0 ≤ limit = 0`) — harmless before, a gridlock with start
+  delays (119 stuck recycles / 10 min until fixed; now 1–4).
+- **Own traffic no longer "tracked"** (`World::step`): `wp_sim` passes every vehicle to
+  `set_tracked_vehicles`, including promoted traffic cars. Those were (a) obstacles for their own
+  kinematic agent, (b) "players" for spawning / promotion, (c) earning traffic violations — every
+  promoted civilian logged a `Collision` violation (27 in `traffic_soak_observer`), i.e. police
+  heat for civilians. World now drops entities that are its own agents. Also RedLight is
+  reported once per crossing (a slow car straddling the line was reported every update).
+  `traffic_soak_observer` now has **0 events and 0 civilian collisions**.
+
+Measurements (release, 12×12, 400 agents, `density_scale` 4, noon, 5 % aggressive, 10 min sim;
+`cargo run --release -p wp_world --example traffic_bench -- 10 400 12 1 0.05`):
+
+| | before | after |
+|---|---|---|
+| civilian collisions (10-min soaks, 0 % / 5 % aggressive) | 0 / 0 | 0 / 0 |
+| stuck > 120 s, recycled | 11 / 2 | 3 / 1 |
+| lane changes | 1133 / 1173 | 847 / 912 (328 of 912 to the left = overtakes) |
+| indicators on (share of agent samples) | 28.6 % | 28.0 % |
+| moving at the end | 327 / 309 of 400 | 336 / 333 |
+| frame cost (bench, collision diagnostics on) | 0.245 ms avg | 0.246 ms avg |
+
+Lane changes are fewer than before because marginal changes are now indicated first and dropped
+if no longer worth it; overtakes are real ones. Speed / limit sampled on cruising cars city-wide
+is p50 0.64 before and after: the 110 m grid with a signal every block keeps cars below their
+desired speed, so the personal spread shows on longer roads and highways, not in the average.

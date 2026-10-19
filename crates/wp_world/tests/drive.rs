@@ -172,3 +172,99 @@ fn pursuit_params_lap_a_circuit_faster_than_civilian() {
     assert!(t_pur < t_civ * 0.9);
     assert!(ct_civ < 1.5 && ct_pur < 2.0);
 }
+
+// ---------------------------------------------------------------------------------------------
+// Leader query: police / racers stop behind vehicles ahead (lead round 6).
+// ---------------------------------------------------------------------------------------------
+
+use wp_world::drive::FollowTraffic;
+use wp_world::leader::{CarFollowing, LeaderParams, Obstacle, CAR_HALF_LENGTH_M};
+
+/// A pursuit-tuned car on a straight 600 m path along +Y (flat ground) drives at `target`
+/// m/s while `leader_at(t)` gives the other car's centre `y` and speed at time `t`. Returns
+/// (smallest bumper gap seen, final gap, final speed).
+fn approach(target: f32, leader_at: impl Fn(f32) -> (f32, f32), seconds: f32) -> (f32, f32, f32) {
+    let car = sedan();
+    let mut rig = Rig::new(&car);
+    let path = DrivePath::new(&[[0.0, 0.0, 0.0], [0.0, 600.0, 0.0]], false);
+    let mut f = PathFollower::for_vehicle(&car.def, FollowParams::PURSUIT, 0.0);
+    let assists = AssistProfile::ai();
+    let mut input = Default::default();
+    let mut min_gap = f32::INFINITY;
+    let (mut gap, mut speed) = (0.0, 0.0);
+    let own = 1u32;
+    for i in 0..((seconds / PHYSICS_DT) as usize) {
+        let t = i as f32 * PHYSICS_DT;
+        let (ly, lv) = leader_at(t);
+        let st = rig.vehicle.state();
+        gap = ly - st.pos[1] - 2.0 * CAR_HALF_LENGTH_M;
+        min_gap = min_gap.min(gap);
+        speed = st.speed_mps;
+        if i % 4 == 0 {
+            let other = Obstacle {
+                id: 2,
+                pos: [0.0, ly, 0.0],
+                vel: [0.0, lv, 0.0],
+                forward: [0.0, 1.0],
+                half_width_m: 0.9,
+                half_length_m: CAR_HALF_LENGTH_M,
+            };
+            // The car itself is in the list too, as wp_sim would pass every vehicle.
+            let me = Obstacle::from_state(own, &st);
+            let obstacles = [me, other];
+            let traffic = FollowTraffic {
+                obstacles: &obstacles,
+                skip: &[own],
+                corridor: LeaderParams::CAR,
+                following: CarFollowing::PURSUIT,
+            };
+            let out = f.follow_behind(&st, &path, target, 0.0, 4.0 * PHYSICS_DT, Some(&traffic));
+            input = out.input;
+        }
+        rig.step(&input, &assists);
+    }
+    (min_gap, gap, speed)
+}
+
+#[test]
+fn pursuit_follower_stops_behind_a_stopped_car() {
+    // Stopped car 250 m ahead; the unit is at 25 m/s well before reaching it.
+    let (min_gap, gap, speed) = approach(25.0, |_| (250.0, 0.0), 40.0);
+    println!("stopped leader: min gap {min_gap:.2} m, final gap {gap:.2} m, speed {speed:.2}");
+    assert!(min_gap > 1.0, "came within {min_gap} m");
+    assert!(gap < 6.0, "stopped too far back: {gap}");
+    assert!(speed < 0.5);
+}
+
+#[test]
+fn pursuit_follower_settles_behind_a_slower_car() {
+    // A car at 8 m/s starting 80 m ahead; the unit wants 25 m/s.
+    let (min_gap, gap, speed) = approach(25.0, |t| (80.0 + 8.0 * t, 8.0), 60.0);
+    println!("moving leader: min gap {min_gap:.2} m, final gap {gap:.2} m, speed {speed:.2}");
+    assert!(min_gap > 4.0, "came within {min_gap} m");
+    assert!((speed - 8.0).abs() < 1.0, "speed {speed}");
+    assert!(gap < 25.0, "hangs back {gap} m");
+}
+
+#[test]
+fn follow_without_traffic_is_unchanged() {
+    // `follow` == `follow_behind(.., None)`, and an empty obstacle list changes nothing.
+    let car = sedan();
+    let rig = Rig::new(&car);
+    let path = DrivePath::new(&[[0.0, 0.0, 0.0], [0.0, 600.0, 0.0]], false);
+    let st = rig.vehicle.state();
+    let mut a = PathFollower::for_vehicle(&car.def, FollowParams::PURSUIT, 0.0);
+    let mut b = a.clone();
+    let mut c = a.clone();
+    let oa = a.follow(&st, &path, 20.0, 0.0, 1.0 / 60.0);
+    let ob = b.follow_behind(&st, &path, 20.0, 0.0, 1.0 / 60.0, None);
+    let empty = FollowTraffic {
+        obstacles: &[],
+        skip: &[],
+        corridor: LeaderParams::CAR,
+        following: CarFollowing::PURSUIT,
+    };
+    let oc = c.follow_behind(&st, &path, 20.0, 0.0, 1.0 / 60.0, Some(&empty));
+    assert_eq!(oa, ob);
+    assert_eq!(oa, oc);
+}

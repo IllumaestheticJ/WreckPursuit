@@ -60,6 +60,8 @@ struct VState {
     near_misses: Vec<u64>,
     near_miss_seen: BTreeMap<AgentId, u64>,
     touching: BTreeSet<AgentId>,
+    /// Lane whose red light was last reported (cleared once on another lane).
+    red_lane: Option<SegId>,
 }
 
 /// Per-entity violation state machine.
@@ -113,8 +115,13 @@ impl ViolationTracker {
                 let seg = map.seg(l);
                 let pr = seg.project(q);
                 if pr.s > seg.length && st.last_s <= seg.length && pr.dist < 8.0 {
-                    if map.lane_signal(l).map(|s| s.0) == Some(SignalState::Red) {
+                    // Once per crossing: a slow car whose centre straddles the line would be
+                    // re-located onto the lane and "cross" again every update.
+                    if map.lane_signal(l).map(|s| s.0) == Some(SignalState::Red)
+                        && st.red_lane != Some(l)
+                    {
                         emit(ViolationKind::RedLight);
+                        st.red_lane = Some(l);
                     }
                     st.lane = None;
                 }
@@ -122,6 +129,9 @@ impl ViolationTracker {
             let here = map.locate(t.pos, Some(fwd), 0.5, false, false);
             match here {
                 Some(loc) => {
+                    if st.red_lane.is_some_and(|r| r != loc.seg) {
+                        st.red_lane = None;
+                    }
                     st.lane = Some(loc.seg);
                     st.last_s = loc.s;
                 }

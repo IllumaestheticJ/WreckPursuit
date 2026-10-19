@@ -25,6 +25,7 @@ pub mod clock;
 pub mod density;
 pub mod drive;
 pub mod geom;
+pub mod leader;
 pub mod map;
 pub mod network;
 pub mod procgen;
@@ -257,6 +258,21 @@ impl World {
             return;
         }
         self.traffic.step_physics(&self.map, dt, out);
+        // The sim loop tracks every vehicle, including this world's own physical traffic cars.
+        // Traffic already knows those (they are its agents): as "tracked" they would block
+        // their own kinematic agent, count as players for spawning / promotion, and collect
+        // traffic violations (a civilian earning police heat).
+        if traffic_steps > 0 {
+            let own: std::collections::BTreeSet<wp_contracts::EntityId> = self
+                .traffic
+                .agents()
+                .iter()
+                .filter_map(|a| a.entity)
+                .collect();
+            if !own.is_empty() {
+                self.tracked.retain(|t| !own.contains(&t.entity));
+            }
+        }
         for _ in 0..traffic_steps {
             let inp = TrafficInputs {
                 tracked: &self.tracked,
