@@ -26,24 +26,30 @@ EXE = os.path.join(REPO, "target", "release", "simcli")
 
 SCENARIO = """(
     name: "smoke_{car}_{mode}",
-    car: "{car}",
-    mode: {mode},
     seed: 9,
-    duration_s: 14.0,
-    inputs: [
-        (t_s: 0.0, input: (throttle: 1.0)),
-        (t_s: 6.0, input: (brake: 1.0)),
-        (t_s: 11.0, input: ()),
+    mode: {mode},
+    entities: [
+        (
+            id: "car",
+            car: "{car}",
+            inputs: [
+                (t_s: 0.0, input: (throttle: 1.0)),
+                (t_s: 6.0, input: (brake: 1.0)),
+                (t_s: 8.0, input: (handbrake: 1.0)),
+            ],
+        ),
     ],
+    duration_s: 14.0,
     expect: [],
 )
 """
 
 
 def run(path: str) -> str:
-    out = subprocess.run([EXE, path, "--data", os.path.join(REPO, "data")],
+    # simcli scenario format v2; first line is "PASS <name> ticks=N hash=<hex> events=N".
+    out = subprocess.run([EXE, "run", path, "--data", os.path.join(REPO, "data"), "--no-write"],
                          check=True, capture_output=True, text=True).stdout
-    return out.splitlines()[0].split()[1]
+    return next(t for t in out.splitlines()[0].split() if t.startswith("hash=")).removeprefix("hash=")
 
 
 def main() -> int:
