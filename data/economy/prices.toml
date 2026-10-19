@@ -126,13 +126,13 @@ labour_per_hour = 85
 towing = 150
 
 [class.Sport]
-reference_value = 40000
-parts_scale = 1.9
+reference_value = 40000            # roster: 22k (Kestrel) .. 48k (Hakone)
+parts_scale = 1.75
 labour_per_hour = 110
 towing = 200
 
 [class.Muscle]
-reference_value = 34000
+reference_value = 40000            # roster: Ironside 38k, Rampart 42k
 parts_scale = 1.7
 labour_per_hour = 95
 towing = 220
@@ -145,7 +145,7 @@ towing = 450
 
 [class.Truck]
 reference_value = 30000
-parts_scale = 1.5
+parts_scale = 1.3
 labour_per_hour = 90
 towing = 300
 

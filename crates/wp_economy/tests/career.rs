@@ -107,3 +107,53 @@ fn careers_are_deterministic() {
         assert_eq!(a, b);
     }
 }
+
+/// The same 20-night career on each street-racing roster car (prices from `data/cars`).
+/// Arcade must stay solvent on every car; Simulation is reported only (it is meant to be
+/// marginal, and expensive cars are meant to be riskier).
+#[test]
+fn twenty_nights_on_roster_cars() {
+    const CARS: &[&str] = &[
+        "vireo_xs",
+        "kestrel_ts",
+        "shiro_turbo",
+        "lindwurm_4t",
+        "sperber_32",
+        "hakone_gt",
+        "ironside_440",
+        "rampart_50",
+        "lucciola_350",
+    ];
+    let e = Economy::embedded();
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data/cars");
+    for id in CARS {
+        let car = wp_contracts::load_car(root.join(format!("{id}.json"))).unwrap();
+        let spec = wp_economy::CarSpec::from(&car.def);
+        let mut line = format!("{id:14}");
+        for mode in [DamageMode::Arcade, DamageMode::Simulation] {
+            let mut reports: Vec<CareerReport> = (1..=32)
+                .map(|s| {
+                    let mut cfg = CareerConfig::mid_skill(mode, s);
+                    cfg.car = spec.clone();
+                    simulate_career(&e, &cfg)
+                })
+                .collect();
+            reports.sort_by_key(|r| r.end_net_worth);
+            let start = reports[0].start_net_worth;
+            let med = reports[reports.len() / 2].end_net_worth;
+            let p10 = reports[reports.len() / 10].end_net_worth;
+            let debt = reports.iter().filter(|r| r.end_cash < 0).count();
+            line += &format!(
+                " | {mode:?} start {start:7} median {med:7} ({:+.0}%) p10 {p10:7} debt {debt:2}/32",
+                100.0 * (med - start) as f32 / start as f32
+            );
+            if mode == DamageMode::Arcade {
+                assert!(
+                    med as f32 >= 1.2 * start as f32,
+                    "{id}: Arcade median {med} vs start {start}"
+                );
+            }
+        }
+        println!("{line}");
+    }
+}
