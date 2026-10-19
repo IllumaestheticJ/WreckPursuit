@@ -588,3 +588,9 @@ Contract **v0.3.0** is being applied in parallel by the lead (branch `lead/contr
 3. **Done.** `WeatherSim::visibility_m(p)`, `LocalConditions::visibility_m` (rides on W-1's
    `weather_at`), adapter accessors; `line_of_sight` cuts at it. E's use: step 4.
 
+Checks on `ws/weather` (round 6b): fmt, clippy `--workspace --all-targets -D warnings`, wasm build
+of `wp_wasm` pass; `cargo test --workspace --no-fail-fast`: 572 passed, 2 failed — both also fail
+on the lead branch `claude/laughing-newton-0xqr6q` without any weather change (not mine, for the
+lead): `wp_economy` `pursuit_wiring::real_police_capture_settles_through_the_economy` ("level at
+capture, not after the reset", line 130) and `wp_race` `simcli_races::city_sprint_on_real_roads`
+(index out of bounds, line 28). `weather_dry_brake_100_0` PASS, hashes match its golden.
