@@ -27,8 +27,11 @@ use crate::{Channel, NetError, TICK_HZ};
 pub const INPUT_REDUNDANCY: u64 = 24;
 /// Most physics ticks predicted in one [`Client::update`] call.
 pub const MAX_STEPS_PER_UPDATE: u64 = 32;
-/// Most empty damage steps a replica runs to catch up (lattices settle well within 1 s).
-pub const MAX_EMPTY_CATCHUP: u64 = TICK_HZ;
+/// Most empty damage steps a replica runs to catch up in one go. Every step must run, even on
+/// a settled lattice: `wp_damage` runs its solver on every 2nd step, so skipping steps shifts
+/// the replica's solver phase against the server's. Tracked vehicles get a lattice hash every
+/// 2 s, so real gaps are ≤ 480 steps; this only bounds a pathological jump.
+pub const MAX_EMPTY_CATCHUP: u64 = 60 * TICK_HZ;
 
 /// Builds a damage replica for a car.
 pub type DamageFactory = fn(&LoadedCar) -> Box<dyn ReplicaDamage>;
@@ -83,6 +86,21 @@ struct Replica {
     rest: Vec<[f32; 3]>,
     /// Damage steps applied (the replica is "at" this tick).
     tick: u64,
+    /// `apply_contacts` calls run on this replica since it was created.
+    steps: u64,
+    /// Restored from a snapshot of a dented lattice at some point. Such a replica has the
+    /// server's node positions but not its internal damage state (NET-N5), so later hits
+    /// may diverge; replicas built only from contacts must never mismatch.
+    restored_dented: bool,
+}
+
+impl Replica {
+    fn step(&mut self, contacts: &[wp_contracts::ContactImpulse], mode: &ModeTable) {
+        let mut sink: Vec<SimEvent> = Vec::new();
+        self.damage
+            .apply_contacts(contacts, mode, PHYSICS_DT, &mut sink);
+        self.steps += 1;
+    }
 }
 
 /// Client-side counters (debug overlay, tests).
@@ -120,6 +138,9 @@ pub struct ClientStats {
     pub hash_checks: u64,
     /// Of which mismatched.
     pub hash_mismatches: u64,
+    /// Of those, on replicas built only from replicated contacts (never restored from a dented
+    /// snapshot). Should stay 0: contact replication is bit-exact.
+    pub hash_mismatches_contact_only: u64,
     /// Lattice snapshots applied after a mismatch.
     pub resyncs: u64,
     /// Longest time from a mismatch to its resync, server ticks.
@@ -596,9 +617,7 @@ impl Client {
                     if tick >= r.tick {
                         advance_empty(r, tick, &mode);
                         let impulses: Vec<_> = contacts.iter().map(|c| c.to_impulse()).collect();
-                        let mut sink: Vec<SimEvent> = Vec::new();
-                        r.damage
-                            .apply_contacts(&impulses, &mode, PHYSICS_DT, &mut sink);
+                        r.step(&impulses, &mode);
                         r.tick = tick + 1;
                     }
                 }
@@ -621,6 +640,9 @@ impl Client {
                         self.stats.hash_checks += 1;
                         if lattice_hash(r.damage.node_positions(), &r.rest) != hash {
                             self.stats.hash_mismatches += 1;
+                            if !r.restored_dented {
+                                self.stats.hash_mismatches_contact_only += 1;
+                            }
                             if let std::collections::btree_map::Entry::Vacant(slot) =
                                 self.pending_resync.entry(vehicle)
                             {
@@ -639,7 +661,8 @@ impl Client {
                 vehicle,
                 tick,
                 snapshot,
-            } => self.on_lattice_snapshot(vehicle, tick, &snapshot),
+                damage_steps,
+            } => self.on_lattice_snapshot(vehicle, tick, &snapshot, damage_steps),
             ServerMsg::Pong {
                 client_ms,
                 server_tick,
@@ -736,6 +759,7 @@ impl Client {
         vehicle: u32,
         tick: u64,
         snapshot: &crate::lattice::LatticeSnapshot,
+        damage_steps: Option<u64>,
     ) {
         if !self.replicas.contains_key(&vehicle) {
             let car_id = if Some(EntityId(vehicle)) == self.own_vehicle {
@@ -748,10 +772,28 @@ impl Client {
             };
             let damage = (self.cfg.damage_factory)(car);
             let rest = damage.rest_positions();
-            self.replicas
-                .insert(vehicle, Replica { damage, rest, tick });
+            self.replicas.insert(
+                vehicle,
+                Replica {
+                    damage,
+                    rest,
+                    tick,
+                    steps: 0,
+                    restored_dented: false,
+                },
+            );
         }
         let r = self.replicas.get_mut(&vehicle).expect("inserted above");
+        // Match the server model's solver phase: pad with empty steps (their effect on the
+        // nodes is overwritten just below).
+        if let (Some(server), Some(mode)) = (damage_steps, self.cfg.modes.get(&self.mode)) {
+            let p = r.damage.solver_period();
+            let pad = (server % p + p - r.steps % p) % p;
+            for _ in 0..pad {
+                r.step(&[], mode);
+            }
+        }
+        r.restored_dented |= !snapshot.is_pristine();
         let nodes = snapshot.positions(&r.rest);
         r.damage.restore_nodes(&nodes);
         r.tick = tick;
@@ -822,9 +864,8 @@ impl Client {
 /// Run empty damage steps until the replica is at `tick` (at most [`MAX_EMPTY_CATCHUP`]).
 fn advance_empty(r: &mut Replica, tick: u64, mode: &ModeTable) {
     let gap = tick.saturating_sub(r.tick);
-    let mut sink: Vec<SimEvent> = Vec::new();
     for _ in 0..gap.min(MAX_EMPTY_CATCHUP) {
-        r.damage.apply_contacts(&[], mode, PHYSICS_DT, &mut sink);
+        r.step(&[], mode);
     }
     r.tick = tick;
 }

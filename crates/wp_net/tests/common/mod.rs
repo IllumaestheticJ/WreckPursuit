@@ -1,5 +1,6 @@
-//! In-process harness: one `ServerInstance<ArenaSim>` and N clients connected through
-//! simulated links, all driven by one virtual clock in 1/60 s steps.
+//! In-process harness: one `ServerInstance` (the crash arena by default, or any `NetSim`, e.g.
+//! the real `wp_sim` city) and N clients connected through simulated links, all driven by one
+//! virtual clock in 1/60 s steps.
 
 #![allow(dead_code)]
 
@@ -8,6 +9,7 @@ use std::collections::BTreeMap;
 use wp_contracts::{DamageMode, LoadedCar, ModeTable, Role, TimeOfDay, VehicleInput};
 use wp_net::bot::{random_route, BotDriver};
 use wp_net::client::{Client, ClientConfig, DamageFactory, Phase};
+use wp_net::netsim::NetSim;
 use wp_net::server::{ConnId, ServerConfig, ServerInstance};
 use wp_net::sim_link::{LinkConfig, Pipe};
 use wp_net::testkit::{load_data, repo_data_dir, ArenaSim, ToyLattice};
@@ -28,21 +30,23 @@ pub struct Peer {
     window_bytes: u64,
 }
 
-pub struct Harness {
-    pub server: ServerInstance<ArenaSim>,
+pub struct Harness<S: NetSim = ArenaSim> {
+    pub server: ServerInstance<S>,
     pub peers: Vec<Peer>,
     pub now_ms: f64,
     pub steps: u64,
     pub cars: BTreeMap<String, LoadedCar>,
     pub modes: BTreeMap<DamageMode, ModeTable>,
     pub factory: DamageFactory,
+    /// Wall time of each `server.net_tick()` in `step`, ms (test measurement only).
+    pub server_ms: Vec<f64>,
 }
 
 pub fn data() -> (BTreeMap<String, LoadedCar>, BTreeMap<DamageMode, ModeTable>) {
     load_data(&repo_data_dir()).expect("repo data loads")
 }
 
-impl Harness {
+impl Harness<ArenaSim> {
     pub fn new(cfg: ServerConfig, arena_radius_m: f32) -> Self {
         let (cars, modes) = data();
         let sim_cfg = SimConfig {
@@ -60,6 +64,29 @@ impl Harness {
             cars,
             modes,
             factory: ToyLattice::factory,
+            server_ms: Vec::new(),
+        }
+    }
+}
+
+impl<S: NetSim> Harness<S> {
+    /// Harness over any sim; clients replicate damage with `factory`.
+    pub fn with_sim(
+        cfg: ServerConfig,
+        sim: S,
+        cars: BTreeMap<String, LoadedCar>,
+        modes: BTreeMap<DamageMode, ModeTable>,
+        factory: DamageFactory,
+    ) -> Self {
+        Self {
+            server: ServerInstance::new(cfg, sim),
+            peers: Vec::new(),
+            now_ms: 0.0,
+            steps: 0,
+            cars,
+            modes,
+            factory,
+            server_ms: Vec::new(),
         }
     }
 
@@ -106,7 +133,11 @@ impl Harness {
     }
 
     pub fn give_bot(&mut self, i: usize, seed: u64, radius: f32) {
-        let mut bot = BotDriver::new(seed, random_route(seed, [0.0, 0.0], radius, 16));
+        self.give_bot_at(i, seed, [0.0, 0.0], radius);
+    }
+
+    pub fn give_bot_at(&mut self, i: usize, seed: u64, center: [f32; 2], radius: f32) {
+        let mut bot = BotDriver::new(seed, random_route(seed, center, radius, 16));
         bot.crash_chance_per_s = 0.08;
         self.peers[i].bot = Some(bot);
     }
@@ -129,7 +160,9 @@ impl Harness {
                 }
             }
         }
+        let t0 = std::time::Instant::now();
         self.server.net_tick();
+        self.server_ms.push(t0.elapsed().as_secs_f64() * 1000.0);
         for out in self.server.drain_outgoing() {
             if let Some(p) = self.peers.iter_mut().find(|p| p.conn == Some(out.conn)) {
                 p.down.send(now, out.channel, out.bytes);

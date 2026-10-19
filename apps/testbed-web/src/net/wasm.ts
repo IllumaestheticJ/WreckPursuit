@@ -12,7 +12,7 @@ export interface NetInput {
   horn?: boolean;
 }
 
-export type EntityKind = "racer" | "police" | "ai_police" | "traffic";
+export type EntityKind = "racer" | "police" | "ai_police" | "traffic" | "ai_racer";
 
 export interface RenderVehicle {
   entity: number;

@@ -1,30 +1,34 @@
 //! The simulation surface the server needs ([`NetSim`]) and its adapter over `wp_sim::Sim`
 //! ([`WpSim`]).
 //!
-//! `wp_sim` is owned by the integration lead; everything the net layer needs that `Sim` does
-//! not expose yet is listed in `docs/integration/net.md` ("Needs") and worked around here:
-//! - **despawn**: `Sim` has none, so [`WpSim`] parks the vehicle (reset, hidden, braking) and
-//!   reuses it for the next spawn of the same car at the same spawn point;
-//! - **applied contacts**: `Sim` does not extract Rapier contacts yet and has no hook to
-//!   quantise them before damage, so [`WpSim::drain_applied_contacts`] is always empty;
-//! - **AI vehicles**: none exist yet, so every vehicle is spawned through the net layer.
+//! [`WpSim`] uses the `wp_sim` hooks the lead added for the net layer (NET-N1/N3/N4):
+//! - **damage replication**: [`QContact::round_trip`] is installed as the sim's contact filter,
+//!   so damage applies the exact values clients receive, and applied contacts are recorded and
+//!   drained every step;
+//! - **despawn**: `Sim::despawn_vehicle` (ids are never reused);
+//! - **AI vehicles**: police units and physical traffic are ordinary sim vehicles; their
+//!   `wp_sim::VehicleKind` becomes the replicated [`EntityKind`], and wanted levels come from
+//!   the sim's police system.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use wp_contracts::{
     AssistProfile, ContactImpulse, DamageMode, DamageSim, EntityId, LoadedCar, SimEvent, TimeOfDay,
     VehicleInput, VehicleState, WorldQuery,
 };
-use wp_sim::{Sim, SimConfig};
+use wp_sim::{Sim, SimConfig, VehicleKind};
 
+use crate::lattice::damage_relevant;
 use crate::protocol::EntityKind;
+use crate::quant::QContact;
 
 /// What the authoritative server needs from a simulation.
 ///
 /// Contract for damage replication: every contact applied to a vehicle's damage model in the
-/// last [`NetSim::step`] must be reported by [`NetSim::drain_applied_contacts`], and must have
-/// been passed through [`crate::quant::QContact::round_trip`] *before* it was applied, so
-/// clients re-running the quantised contacts reproduce the lattice bit-for-bit.
+/// last [`NetSim::step`] must be reported by [`NetSim::drain_applied_contacts`] (contacts the
+/// damage model provably ignores may be left out, see [`crate::lattice::damage_relevant`]),
+/// and must have been passed through [`crate::quant::QContact::round_trip`] *before* it was
+/// applied, so clients re-running the quantised contacts reproduce the lattice bit-for-bit.
 pub trait NetSim {
     /// Physics ticks run so far.
     fn tick(&self) -> u64;
@@ -67,39 +71,144 @@ pub trait NetSim {
     fn vehicle_snapshot(&self, _id: EntityId) -> Option<Vec<u8>> {
         None
     }
-}
-
-#[derive(Debug, Clone)]
-struct Spawned {
-    car_id: String,
-    pos: [f32; 3],
-    yaw: f32,
+    /// Damage steps (`DamageSim::apply_contacts` calls) a vehicle's model has run since it was
+    /// created. Sent with lattice snapshots so replicas can match the solver phase. Default:
+    /// unknown.
+    fn damage_steps(&self, _id: EntityId) -> Option<u64> {
+        None
+    }
+    /// Tell the sim who drives a vehicle the net layer spawned (racer seat or police seat).
+    /// Default: ignored.
+    fn set_owned_kind(&mut self, _id: EntityId, _kind: EntityKind) {}
 }
 
 /// [`NetSim`] over the real `wp_sim::Sim`.
 pub struct WpSim {
     sim: Sim,
     cars: BTreeMap<String, LoadedCar>,
-    spawned: BTreeMap<EntityId, Spawned>,
-    parked: BTreeSet<EntityId>,
     mode: DamageMode,
+    /// Damage steps run per live vehicle (see [`NetSim::damage_steps`]).
+    damage_steps: BTreeMap<EntityId, u64>,
 }
 
 impl WpSim {
-    /// Wrap a new `Sim` with the cars players may drive.
+    /// Wrap a new, empty `Sim` (flat world) with the cars players may drive.
     pub fn new(config: SimConfig, cars: BTreeMap<String, LoadedCar>) -> Self {
+        Self::from_sim(Sim::new(config), cars)
+    }
+
+    /// Wrap an already built `Sim` (e.g. with a city, police and traffic installed, as
+    /// `simcli::run::build_sim` does) with the cars players may drive. Installs the contact
+    /// quantiser and turns on applied-contact recording.
+    pub fn from_sim(mut sim: Sim, cars: BTreeMap<String, LoadedCar>) -> Self {
+        sim.set_contact_filter(Some(quantise_contact));
+        sim.set_record_applied_contacts(true);
+        let damage_steps = sim.vehicles().iter().map(|v| (v.id, 0)).collect();
         Self {
-            mode: config.mode.mode,
-            sim: Sim::new(config),
+            mode: sim.mode_table().mode,
+            sim,
             cars,
-            spawned: BTreeMap::new(),
-            parked: BTreeSet::new(),
+            damage_steps,
         }
+    }
+
+    /// A city instance: `Sim` with the world, AI police cars and physical traffic installed
+    /// (`wp_sim` builds `wp_police` on the city's roads in `set_world`).
+    pub fn with_city(
+        config: SimConfig,
+        cars: BTreeMap<String, LoadedCar>,
+        city: CitySetup,
+    ) -> Self {
+        let mut sim = Sim::new(config);
+        sim.set_world(city.world);
+        if let Some(car) = city.police_car {
+            sim.set_police_car(car);
+        }
+        if let Some(car) = city.traffic_car {
+            sim.set_traffic_car(car);
+        }
+        Self::from_sim(sim, cars)
     }
 
     /// The wrapped simulation.
     pub fn sim(&self) -> &Sim {
         &self.sim
+    }
+
+    /// The wrapped simulation, mutable (scenario setup, heat injection in tests).
+    pub fn sim_mut(&mut self) -> &mut Sim {
+        &mut self.sim
+    }
+
+    fn slot(&self, id: EntityId) -> Option<&wp_sim::SimVehicle> {
+        self.sim.vehicles().iter().find(|v| v.id == id)
+    }
+}
+
+/// What a city instance contains besides the road network (see [`WpSim::with_city`]).
+pub struct CitySetup {
+    /// The city (road network, traffic, clock), e.g. `wp_world::World::load`.
+    pub world: wp_world::World,
+    /// Car for AI police units (`None` = police stay kinematic, no police cars).
+    pub police_car: Option<LoadedCar>,
+    /// Car for physical near-player traffic (`None` = traffic stays kinematic).
+    pub traffic_car: Option<LoadedCar>,
+}
+
+/// `wp_world` settings for a server city: traffic on, clock from the instance, no parked
+/// cars (thousands of extra physics bodies; they add little to multiplayer and cost a lot).
+pub fn server_world_config(config: &SimConfig) -> wp_world::WorldConfig {
+    wp_world::WorldConfig {
+        seed: config.seed,
+        start_time: config.time_of_day,
+        time_ratio: config.time_ratio,
+        traffic: wp_world::TrafficConfig {
+            enabled: true,
+            detect_collisions: true,
+            ..Default::default()
+        },
+        parked_cars: false,
+    }
+}
+
+/// Up to `n` spawn poses on the city's through lanes: one per lane, from lanes at least 60 m
+/// long, 20 m after the lane start, facing along the lane. Deterministic (lane order).
+pub fn lane_spawn_points(world: &wp_world::World, n: usize) -> Vec<([f32; 3], f32)> {
+    let mut out = Vec::new();
+    for lane in &world.network().lanes {
+        if out.len() >= n {
+            break;
+        }
+        if lane.kind != wp_world::network::LaneKind::Through || lane.polyline.len() < 2 {
+            continue;
+        }
+        let (a, b) = (lane.polyline[0], lane.polyline[1]);
+        let d = [b[0] - a[0], b[1] - a[1]];
+        let len = (d[0] * d[0] + d[1] * d[1]).sqrt();
+        if len < 60.0 {
+            continue;
+        }
+        let t = 20.0 / len;
+        let pos = [a[0] + d[0] * t, a[1] + d[1] * t, 0.0];
+        out.push((pos, wp_math::atan2(-d[0], d[1])));
+    }
+    out
+}
+
+/// `wp_sim` contact filter: replace a contact with its wire round trip, so the authority's
+/// damage applies exactly what clients will replay.
+fn quantise_contact(c: &mut ContactImpulse) {
+    *c = QContact::round_trip(c);
+}
+
+/// Replicated kind of a sim vehicle the net layer did not spawn.
+pub fn entity_kind(kind: VehicleKind) -> EntityKind {
+    match kind {
+        // A `Player` vehicle no client owns (e.g. scenario setup): show it as a racer.
+        VehicleKind::Player => EntityKind::Racer,
+        VehicleKind::AiRacer => EntityKind::AiRacer,
+        VehicleKind::Police => EntityKind::AiPolice,
+        VehicleKind::Traffic => EntityKind::Traffic,
     }
 }
 
@@ -109,18 +218,6 @@ impl NetSim for WpSim {
     }
 
     fn spawn(&mut self, car_id: &str, pos: [f32; 3], yaw: f32) -> Result<EntityId, String> {
-        let reusable = self.parked.iter().copied().find(|id| {
-            let s = &self.spawned[id];
-            s.car_id == car_id && s.pos == pos && s.yaw == yaw
-        });
-        if let Some(id) = reusable {
-            self.parked.remove(&id);
-            self.sim.reset_vehicle(id).map_err(|e| e.to_string())?;
-            self.sim
-                .set_input(id, VehicleInput::default())
-                .map_err(|e| e.to_string())?;
-            return Ok(id);
-        }
         let car = self
             .cars
             .get(car_id)
@@ -129,28 +226,13 @@ impl NetSim for WpSim {
             .sim
             .spawn_vehicle(car, pos, yaw)
             .map_err(|e| e.to_string())?;
-        self.spawned.insert(
-            id,
-            Spawned {
-                car_id: car_id.to_string(),
-                pos,
-                yaw,
-            },
-        );
+        self.damage_steps.insert(id, 0);
         Ok(id)
     }
 
     fn despawn(&mut self, id: EntityId) {
-        if self.sim.reset_vehicle(id).is_ok() {
-            let _ = self.sim.set_input(
-                id,
-                VehicleInput {
-                    brake: 1.0,
-                    ..Default::default()
-                },
-            );
-            self.parked.insert(id);
-        }
+        let _ = self.sim.despawn_vehicle(id);
+        self.damage_steps.remove(&id);
     }
 
     fn set_input(&mut self, id: EntityId, input: VehicleInput) {
@@ -163,40 +245,37 @@ impl NetSim for WpSim {
 
     fn step(&mut self) {
         self.sim.step_fixed();
+        // Count damage steps. Vehicles that existed before the tick all ran one. Vehicles the
+        // sim spawned during the tick: physical traffic is embodied before the damage step
+        // (`apply_traffic_lod` runs with the world step), police cars after it
+        // (`reconcile_police_units` runs after the police step). Checked against
+        // `DamageModel::state_hash` (which includes the step count) in the tests below.
+        let mut next = BTreeMap::new();
+        for v in self.sim.vehicles() {
+            let steps = match self.damage_steps.get(&v.id) {
+                Some(n) => n + 1,
+                None if v.traffic_agent.is_some() => 1,
+                None => 0,
+            };
+            next.insert(v.id, steps);
+        }
+        self.damage_steps = next;
     }
 
     fn vehicles(&self) -> Vec<(EntityId, VehicleState)> {
-        self.sim
-            .vehicle_states()
-            .into_iter()
-            .filter(|(id, _)| !self.parked.contains(id))
-            .collect()
+        self.sim.vehicle_states()
     }
 
     fn car_id(&self, id: EntityId) -> Option<String> {
-        if self.parked.contains(&id) {
-            return None;
-        }
-        self.sim
-            .vehicles()
-            .iter()
-            .find(|v| v.id == id)
-            .map(|v| v.car_id.clone())
+        self.slot(id).map(|v| v.car_id.clone())
     }
 
     fn lattice_nodes(&self, id: EntityId) -> Option<Vec<[f32; 3]>> {
-        self.sim
-            .vehicles()
-            .iter()
-            .find(|v| v.id == id)
-            .map(|v| v.damage.node_positions().to_vec())
+        self.slot(id).map(|v| v.damage.node_positions().to_vec())
     }
 
     fn lattice_rest(&self, id: EntityId) -> Option<Vec<[f32; 3]>> {
-        self.sim
-            .vehicles()
-            .iter()
-            .find(|v| v.id == id)
+        self.slot(id)
             .map(|v| v.damage.lattice().nodes.iter().map(|n| n.pos_m).collect())
     }
 
@@ -205,18 +284,27 @@ impl NetSim for WpSim {
     }
 
     fn vehicle_snapshot(&self, id: EntityId) -> Option<Vec<u8>> {
-        if self.parked.contains(&id) {
-            return None;
-        }
-        self.sim
-            .vehicles()
-            .iter()
-            .find(|v| v.id == id)
+        self.slot(id)
             .map(|v| v.vehicle.snapshot().as_bytes().to_vec())
     }
 
     fn drain_applied_contacts(&mut self) -> Vec<(EntityId, Vec<ContactImpulse>)> {
-        Vec::new()
+        let mode = self.sim.mode_table().clone();
+        let mut out: Vec<(EntityId, Vec<ContactImpulse>)> = Vec::new();
+        for (id, batch) in self.sim.drain_applied_contacts() {
+            // Resting / scraping contacts that cannot dent anything are not replicated.
+            let relevant = match self.slot(id) {
+                Some(v) => damage_relevant(&batch, v.damage.tuning(), &mode),
+                None => batch,
+            };
+            if relevant.is_empty() {
+                continue;
+            }
+            // Several batches of one vehicle in one step stay separate (they were separate
+            // damage steps); `wp_sim` records one per vehicle per tick.
+            out.push((id, relevant));
+        }
+        out
     }
 
     fn time_of_day(&self) -> TimeOfDay {
@@ -225,5 +313,125 @@ impl NetSim for WpSim {
 
     fn damage_mode(&self) -> DamageMode {
         self.mode
+    }
+
+    fn ai_kind(&self, id: EntityId) -> EntityKind {
+        self.slot(id)
+            .map(|v| entity_kind(v.kind))
+            .unwrap_or(EntityKind::Traffic)
+    }
+
+    fn damage_steps(&self, id: EntityId) -> Option<u64> {
+        self.damage_steps.get(&id).copied()
+    }
+
+    fn wanted_level(&self, id: EntityId) -> u8 {
+        self.sim.police().wanted_level(id).number()
+    }
+
+    fn set_owned_kind(&mut self, id: EntityId, kind: EntityKind) {
+        // Player police seats must not be treated as racers by `wp_police` (they would earn
+        // heat and be chased). `VehicleKind::Police` also drops them from the traffic spawn
+        // ring; see NET-N9 in docs/integration/net.md.
+        let k = if kind.is_police() {
+            VehicleKind::Police
+        } else {
+            VehicleKind::Player
+        };
+        let _ = self.sim.set_vehicle_kind(id, k);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testkit::{load_data, repo_data_dir};
+
+    /// [`WpSim`]'s damage-step count matches the real models' (`state_hash` includes it) for
+    /// player cars, physical traffic and AI police spawned mid-tick.
+    #[test]
+    fn damage_steps_match_the_models() {
+        let (mut cars, modes) = load_data(&repo_data_dir()).unwrap();
+        let police =
+            wp_contracts::load_car(repo_data_dir().join("cars/sentinel_cruiser.json")).unwrap();
+        cars.insert("sentinel_cruiser".into(), police.clone());
+        let mode = modes[&DamageMode::Arcade].clone();
+        let mut sim = Sim::new(SimConfig {
+            seed: 3,
+            mode: mode.clone(),
+            time_of_day: TimeOfDay::from_hours(23.0),
+            time_ratio: 1.0,
+        });
+        let pg = wp_world::procgen::ProcGenConfig {
+            nx: 6,
+            ny: 6,
+            spacing_m: 110.0,
+            seed: 1,
+            ..Default::default()
+        };
+        sim.set_world(wp_world::World::procedural(
+            &pg,
+            wp_world::WorldConfig {
+                seed: 3,
+                start_time: TimeOfDay::from_hours(23.0),
+                time_ratio: 1.0,
+                traffic: wp_world::TrafficConfig {
+                    enabled: true,
+                    ..Default::default()
+                },
+                parked_cars: false,
+            },
+        ));
+        sim.set_police_car(police);
+        sim.set_traffic_car(cars["debug_sedan"].clone());
+        let mut net = WpSim::from_sim(sim, cars.clone());
+        let me = net
+            .spawn("debug_coupe", [53.25, 300.0, 0.0], std::f32::consts::PI)
+            .unwrap();
+        for _ in 0..3 {
+            net.step();
+        }
+        net.set_input(
+            me,
+            VehicleInput {
+                throttle: 0.3,
+                ..Default::default()
+            },
+        );
+        let (mut traffic, mut police, mut checked) = (0, 0, 0);
+        for _ in 0..1200 {
+            net.step();
+        }
+        for v in net.sim().vehicles() {
+            let pristine = v
+                .damage
+                .node_positions()
+                .iter()
+                .zip(&v.damage.lattice().nodes)
+                .all(|(a, b)| *a == b.pos_m);
+            if !pristine {
+                continue;
+            }
+            let car = &cars[&v.car_id];
+            let mut fresh = wp_damage::DamageModel::new(&car.lattice, &car.materials);
+            let mut sink = Vec::new();
+            for _ in 0..net.damage_steps(v.id).unwrap() {
+                fresh.apply_contacts(&[], &mode, wp_contracts::PHYSICS_DT, &mut sink);
+            }
+            assert_eq!(
+                fresh.state_hash(),
+                v.damage.state_hash(),
+                "vehicle {:?} ({:?}) step count",
+                v.id,
+                v.kind
+            );
+            checked += 1;
+            traffic += usize::from(v.kind == VehicleKind::Traffic);
+            police += usize::from(v.kind == VehicleKind::Police);
+        }
+        assert!(
+            checked >= 3 && traffic >= 1 && police >= 1,
+            "{checked} {traffic} {police}"
+        );
     }
 }

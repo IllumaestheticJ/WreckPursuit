@@ -91,7 +91,7 @@ pub fn classify(v: &Viewer, s: &Subject) -> Option<Category> {
     if v.race.is_some() && v.race == s.race {
         return Some(Category::SameRace);
     }
-    let pursuit_pair = (v.racer && s.kind.is_police()) || (v.police && s.kind == EntityKind::Racer);
+    let pursuit_pair = (v.racer && s.kind.is_police()) || (v.police && s.kind.is_racer());
     if pursuit_pair && d2 <= PURSUIT_RADIUS_M * PURSUIT_RADIUS_M {
         return Some(Category::Pursuit);
     }

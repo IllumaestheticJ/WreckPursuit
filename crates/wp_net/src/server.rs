@@ -137,6 +137,9 @@ pub struct ServerStats {
     pub decode_errors: u64,
     /// Lattice snapshots sent in response to hash mismatches.
     pub lattice_resyncs: u64,
+    /// Bytes sent to players since start, by message tag (first byte of the encoding; see
+    /// the protocol table in the README).
+    pub bytes_by_tag: BTreeMap<u8, u64>,
 }
 
 #[derive(Debug, Default)]
@@ -155,6 +158,11 @@ struct View {
     /// Down-link byte credit (token bucket): refilled per net tick, spent by everything sent,
     /// so a large frame (own-vehicle snapshot) is repaid by the following ticks.
     credit: i64,
+    /// Lattice snapshots owed to this client (entities entering interest, resync requests),
+    /// sent oldest first as the byte credit allows.
+    lattice_queue: VecDeque<EntityId>,
+    /// Encoded size of the queued lattice snapshot the credit is being saved for (0 = none).
+    lattice_wait: usize,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -358,6 +366,9 @@ impl<S: NetSim> ServerInstance<S> {
         let bytes = msg.encode();
         p.view.bytes_this_tick += bytes.len();
         self.stats.bytes_sent_total += bytes.len() as u64;
+        if let Some(tag) = bytes.first() {
+            *self.stats.bytes_by_tag.entry(*tag).or_default() += bytes.len() as u64;
+        }
         self.outgoing.push(Outgoing {
             conn,
             channel: msg.channel(),
@@ -794,6 +805,7 @@ impl<S: NetSim> ServerInstance<S> {
         };
         if let (Some(v), Some((car, kind))) = (current, &wanted) {
             if *car == current_car {
+                self.sim.set_owned_kind(v, *kind);
                 self.owned.insert(v, (pid, *kind));
                 return;
             }
@@ -818,6 +830,7 @@ impl<S: NetSim> ServerInstance<S> {
                 Ok(v) => {
                     let assists = self.players[&pid].assists;
                     self.sim.set_assists(v, assists);
+                    self.sim.set_owned_kind(v, kind);
                     self.owned.insert(v, (pid, kind));
                     new_vehicle = Some(v);
                     new_car = car;
@@ -1061,17 +1074,24 @@ impl<S: NetSim> ServerInstance<S> {
             .unwrap_or_else(|| self.sim.ai_kind(e))
     }
 
-    fn send_lattice(&mut self, pid: PlayerId, e: EntityId) {
+    /// Lattice snapshot of `e` as of now (`None` if it has no lattice).
+    fn lattice_msg(&self, e: EntityId) -> Option<ServerMsg> {
         let (Some(nodes), Some(rest)) = (self.sim.lattice_nodes(e), self.sim.lattice_rest(e))
         else {
-            return;
+            return None;
         };
-        let msg = ServerMsg::LatticeSnapshot {
+        Some(ServerMsg::LatticeSnapshot {
             vehicle: e.0,
             tick: self.sim.tick(),
             snapshot: LatticeSnapshot::capture(&nodes, &rest),
-        };
-        self.send(pid, &msg);
+            damage_steps: self.sim.damage_steps(e),
+        })
+    }
+
+    fn send_lattice(&mut self, pid: PlayerId, e: EntityId) {
+        if let Some(msg) = self.lattice_msg(e) {
+            self.send(pid, &msg);
+        }
     }
 
     fn client_output(
@@ -1123,7 +1143,7 @@ impl<S: NetSim> ServerInstance<S> {
             std::mem::take(&mut self.players.get_mut(&pid).expect("p").view.lattice_requests);
         for e in requests {
             self.stats.lattice_resyncs += 1;
-            self.send_lattice(pid, e);
+            self.queue_lattice(pid, e);
         }
 
         // 3. Interest set.
@@ -1136,7 +1156,10 @@ impl<S: NetSim> ServerInstance<S> {
             self.update_interest(pid, own, states);
         }
 
-        // 4. Snapshot.
+        // 4. Lattice snapshots owed, as the byte credit allows.
+        self.drain_lattice_queue(pid);
+
+        // 5. Snapshot.
         self.snapshot(pid, tick, own, states);
     }
 
@@ -1211,8 +1234,51 @@ impl<S: NetSim> ServerInstance<S> {
                 .view
                 .tracked
                 .insert(e);
-            self.send_lattice(pid, e);
+            self.queue_lattice(pid, e);
         }
+    }
+
+    fn queue_lattice(&mut self, pid: PlayerId, e: EntityId) {
+        let q = &mut self.players.get_mut(&pid).expect("p").view.lattice_queue;
+        if !q.contains(&e) {
+            q.push_back(e);
+        }
+    }
+
+    /// Send queued lattice snapshots while the byte credit covers them. A snapshot of a
+    /// dented car is up to ~3.7 kB (exact f32 of every displaced node), several entering at
+    /// once would blow the down-link budget, so they wait: [`Self::snapshot`] then sends
+    /// only minimal entity updates until the credit has grown to the waiting snapshot's size.
+    fn drain_lattice_queue(&mut self, pid: PlayerId) {
+        loop {
+            let v = &self.players[&pid].view;
+            let Some(&e) = v.lattice_queue.front() else {
+                break;
+            };
+            let available = v.credit - v.bytes_this_tick as i64;
+            if !v.tracked.contains(&e) {
+                self.players
+                    .get_mut(&pid)
+                    .expect("p")
+                    .view
+                    .lattice_queue
+                    .pop_front();
+                continue;
+            }
+            let msg = self.lattice_msg(e);
+            let size = msg.as_ref().map_or(0, |m| m.encode().len());
+            let v = &mut self.players.get_mut(&pid).expect("p").view;
+            if size as i64 > available {
+                v.lattice_wait = size;
+                return;
+            }
+            v.lattice_queue.pop_front();
+            v.lattice_wait = 0;
+            if let Some(m) = msg {
+                self.send(pid, &m);
+            }
+        }
+        self.players.get_mut(&pid).expect("p").view.lattice_wait = 0;
     }
 
     fn snapshot(
@@ -1234,8 +1300,9 @@ impl<S: NetSim> ServerInstance<S> {
             } else {
                 None
             };
-        // 5 % headroom so any 1 s window stays under budget despite the burst cap and debt.
-        let rate = (self.cfg.downlink_budget_bps * 95 / 100 / 60) as i64;
+        // Refill at 85 % of the budget: a 1 s window can carry the saved-up credit for one
+        // waiting lattice snapshot (≤ ~3.7 kB) on top of a second's refill and stay under it.
+        let rate = (self.cfg.downlink_budget_bps * 85 / 100 / 60) as i64;
         let net_tick = self.net_ticks;
         let p = self.players.get_mut(&pid).expect("p");
         // input ack = newest tick the server holds contiguously from now.
@@ -1251,9 +1318,16 @@ impl<S: NetSim> ServerInstance<S> {
             + 1
             + own_full.as_ref().map_or(0, |b| b.len() + 2)
             + 2;
-        p.view.credit = (p.view.credit + rate).min(rate);
+        // While a lattice snapshot waits, credit may grow to its size and entity updates get
+        // only the minimum, so the snapshot goes out within a few ticks.
+        let waiting = p.view.lattice_wait as i64;
+        p.view.credit = (p.view.credit + rate).min(rate.max(waiting + rate));
         let used_reliable = p.view.bytes_this_tick as i64;
-        let allowance = (p.view.credit - used_reliable - header as i64).max(96) as usize;
+        let allowance = if waiting > 0 {
+            96
+        } else {
+            (p.view.credit - used_reliable - header as i64).max(96) as usize
+        };
         let mut used = 0;
         let mut entities = Vec::new();
         let mut sent = Vec::new();
