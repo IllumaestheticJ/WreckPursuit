@@ -496,3 +496,99 @@ reverse_grid_2laps}`, `race_city_sprint{,_police}`, `world_traffic_soak_observer
 goldens are unchanged. `simcli run apps/simcli/scenarios`: 39/39 pass, and pendings are unchanged in kind
 (`traffic_soak_observer` 0 events / 0 civilian collisions, min agents 361 against its 350 gate).
 When H adds `PaintedLine` to the tire files (or N to `surfaces.toml`), these move again.
+## Lead helper: city v2 (branch `lead/city-v2`, 2026-10-19)
+Playtest #15 ("the city needs to be more dynamic and have curves/elevation"). Built on
+`main` + `ws/world` (merged at the start). D: `traffic.rs` and `drive.rs` were left alone except
+the one line listed under "Changes in your files" — please merge `lead/city-v2` into `ws/world`
+when convenient.
+**What exists now**
+- **Port Vesper v2** (`wp_world::vesper`, city id `vesper_v2`, `World::vesper(&VesperConfig,
+  cfg)`): curved organic districts, downtown grid, waterfront/port flat, Hollins Drive
+  switchbacks + Ridge Road crests up a ≈ 110 m hill, Bluff Road on a plateau, and Loop 9, a 3+3
+  highway loop with banked sweepers and two grade separations (Route 40 West under an
+  overpass, Route 40 North in an underpass cut). Grades capped per class (6 % highway …
+  11.5 % hill roads), junctions flat, crests/sags ≤ 0.3 g at 1.15 × the limit. Details:
+  `crates/wp_world/README.md` → "Port Vesper v2". The 12×12 grid is unchanged
+  (`procgen`, still the default for every existing scenario and golden).
+- **Road format v2** (`ROAD_FORMAT_VERSION` 2): `RoadNetwork::surfaces` (paved ribbon per road,
+  with bank), `RoadNetwork::terrain: Option<Heightfield>`, `Building::base_z_m`. `RoadSpec` has
+  `via_z` (heights at via points) and `bank` (cross slope per point); lanes are built on the
+  banked surface. The grid's `.road.bin/.json` were regenerated (lanes byte-identical; only the
+  new fields). OSM imports get `via_z`/`bank` empty (unchanged behaviour).
+- **Queries:** `CityMap::ground_height(p, near_z)` (road under `p`, the level nearest `near_z`
+  at a grade separation, else terrain); `surface_at` and junction checks ignore roads more
+  than 3 m above/below the probe (decks); `line_of_sight` also tests the terrain (every 8 m).
+- **`wp_world::surface`:** `road_mesh` (banked ribbons + junction discs + bend connectors) used
+  by `wp_sim` and the greybox; `deck_rails`; `MapGround`, a wheel probe over roads + terrain.
+- **Physics (`wp_sim`):** for a city with terrain, `Sim::set_world` replaces the slab (parked at
+  z = −60 as a safety floor) by heightfield tiles (64 cells), road trimesh tiles (256 m),
+  convex-hull building colliders (cars can no longer drive through buildings in city v2) and
+  deck guard rails. `Sim::place_on_ground` puts a car on the surface under (x, y), pitched and
+  rolled to it; police and promoted traffic spawn through it. Parked cars are posed flush
+  (+4 cm), created asleep, sleep at ≤ 0.25 m/s and skip terrain pairs until hit. Grid cities
+  take none of these paths.
+- **simcli:** `city: preset(name: "vesper_v2", seed: 1)`; `follow_route(route_id: "<start POI> ->
+  <finish POI>", target_speed)` now drives (shared `PathFollower`, pursuit limits); metrics
+  `off_road_s`, `max_airborne_s`, `route_progress`; entities in hilly cities are placed on the
+  ground under (x, y). Scenarios `city/hill_road_ascent`, `city/hill_road_descent` (Ridge Road),
+  `city/loop_crest_at_limit`, `soak/traffic_soak_vesper`, `soak/traffic_soak_vesper_observer`.
+- **Greybox:** `gen-city --preset vesper_v2` / `just city-v2` → `data/city/vesper_v2.greybox.glb`
+  + `.greybox.b64.txt` (terrain, sea, banked ribbons, sidewalks + kerbs, retaining walls,
+  bridge decks/parapets/piers, buildings on slopes; 6.8 MB / 9.1 MB). Every `.glb` written by
+  `city-import` now gets its `.b64.txt` twin (the grid's too) and 16-bit index chunks (grid glb
+  1.1 MB → 0.47 MB). `vesper_v2.road.bin` is generated in memory and not committed.
+- **Testbed:** the city chase and the free-drive "city" box use the city selector (default
+  Port Vesper v2, "grid 12×12" keeps the old city); `?city=procedural_12x12`, `?chase=1`;
+  wasm `free_drive_city_json`, `city_chase_city_json`, `city_id`; police units drawn on the
+  ground; `__wp.lookAt(from, to)` for docs shots (`e2e/city_v2_shots.mjs` →
+  `docs/media/city-v2/`).
+**Checks (this branch)**
+| Check | Result |
+| Hollins Drive ascent at the 25 mph limit (`city/hill_road_ascent`) | route done in 94 s, max 12.1 m/s, 0 s off road, 0 s airborne, no damage |
+| Ridge Road descent over the crests (`city/hill_road_descent`) | done in 116 s, max 11.6 m/s, 0 s off road, 0 s airborne, no damage |
+| Loop 9 over the hill shoulder at 55 mph (`city/loop_crest_at_limit`) | 2.7 km in 111 s, max 25.1 m/s, 46 m of climb/drop, 0 s off road / airborne |
+| Traffic soak, 400 agents, no player (`soak/traffic_soak_vesper`, 60 s) | 0 civilian collisions, ≥ 380 agents, flowing |
+| Traffic soak with a parked player downtown (`…_observer`) | 0 collisions, min 398 agents |
+| `wp_world` 10-min soaks, 3 seeds × {0 %, 5 % aggressive} (`tests/city_v2.rs`, ignored) | 0 collisions in all 6; worst agent z error 0.22 m |
+| Cars spawned on hill road / loop / deck / under the deck / junction / hillside | settle within 2.4 cm of the surface (`wp_sim/tests/city_v2.rs`) |
+| Native vs wasm (`tools/wasm-determinism/compare.sh`) on the 5 new scenarios | identical hashes |
+| Existing goldens | unchanged |
+**Perf (release, cloud container, 4 vCPU)**
+| Measurement | Native | Browser (headless Chromium) | Budget |
+| `vesper::generate` + `CityMap::new` | 0.12 s + 10 ms (debug ≈ 0.4 s) | session start ≈ 0.8 s incl. colliders | — |
+| Traffic, 400 agents, 60 Hz frame (`CITY=vesper_v2 just traffic-bench`) | avg 0.061 ms, p99 0.16 ms (0.27 ms avg with collision diagnostics; grid 0.26) | — | 2 ms |
+| City chase, full frame (`cargo run --release -p simcli --example city_frame_cost`) | 1.7 ms (12 vehicles; grid 0.9 ms with 22) | 2.8 ms after warm-up (grid 1.5 ms) | — |
+| Of which physics with ~3800 parked cars asleep | ≈ 0 (was 2 ms before the prop fixes) | — | — |
+| One car alone (vehicle + damage + world) | 0.065 ms (grid 0.032) | — | 0.15 ms/car |
+| Greybox | 6.8 MB `.glb`, 9.1 MB `.b64.txt` | parse ≈ 2 s (SwiftShader) | — |
+**Changes in your files / outside my areas** (minimal, listed per the working rules)
+- `crates/wp_world/src/traffic.rs` (one line): `step_physics` probes `surface::MapGround`
+  instead of `FlatGround` for physical agents without a `wp_sim` body (identical on flat cities).
+- `crates/wp_world/src/map.rs`: `ground_height`, z-aware `surface_at`, terrain LOS, building
+  roof = `base_z_m + height_m`.
+- `apps/simcli` (owned by I): `CitySpec::Preset`, `FollowRoute` driver, three metrics, terrain
+  placement of entities, the debug `scenarios.rs` test skips `scenarios/city/` like `soak/`,
+  and the net round-trip position check allows f32 rounding at the coordinate's magnitude
+  (`pos_err_allowance`; city v2 reaches 1.7 km). `follow_route` ids without `->` (N's opponent
+  scenarios) keep the old "not available yet" warning.
+- `crates/wp_wasm`, `apps/testbed-web` (C): city selector, exports above, `lookAt`.
+- `crates/wp_sim/src/police_link.rs`: the police car model is cloned only when a unit needs a
+  body (it was cloned every tick: ~15 % of a city frame).
+**Known gaps / follow-ups**
+- Kinematic traffic is drawn level (`AgentView` has yaw only); physical cars pitch correctly.
+  Proposal for the v0.3.0 `TrafficAgentSnapshot`: add `pitch`/`roll` (i8, ~0.5° steps) or let
+  clients sample `ground_height`.
+- `wp_vehicle::rig` (client prediction in `wp_net`) still predicts on a flat slab: networked
+  play in city v2 will mispredict on slopes until the rig gets the city ground (the server is
+  authoritative, so it only corrects). Needs F + lead.
+- Buildings now block cars in city v2 only; the grid keeps its old behaviour (no building
+  colliders) so its goldens stay put.
+- Loop junctions are signalised T-junctions (no ramps/merges yet); Route 40 W/N end at
+  the map edge with U-turns.
+- `surface_at` / `ground_height` / police `nearest_on_road` project onto whole polylines; the
+  curved city has up to 281 points per lane (≈ 0.5 µs per query, fine today; index pieces in
+  the grid if it grows).
+- Browser: the first city-chase second costs more (greybox parse ≈ 2 s in headless
+  SwiftShader; prop wake-ups); `vesper_v2.greybox.b64.txt` is 9.1 MB on the published link.
+**Contract change requests:** none needed (no `wp_contracts` change). Optional for v0.3.0: the
+`TrafficAgentSnapshot` pitch/roll above.

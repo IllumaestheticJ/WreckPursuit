@@ -1,0 +1,31 @@
+// Port Vesper v2: Loop 9 westbound over Hollins Heights' northern shoulder at the 55 mph
+// limit: banked sweepers, the big highway crest, the deck over the Route 40 North underpass
+// and the drop down the west leg. Expect: no launch over the crest, on the road throughout.
+(
+    name: "city_loop_crest_at_limit",
+    seed: 13,
+    city: preset(name: "vesper_v2", seed: 1),
+    time_of_day_h: 12.0,
+    time_ratio: 1.0,
+    traffic_density: 0.0,
+    police_cars: false,
+    assists: ai,
+    entities: [
+        (
+            id: "cruiser",
+            car: "debug_sedan",
+            pos: (0.0, 0.0, 0.0),
+            speed_mps: 20.0,
+            driver: follow_route(route_id: "Loop 9 north -> Loop 9 west", target_speed: 24.587),
+        ),
+    ],
+    duration_s: 120.0,
+    expect: [
+        metric(name: "route_progress", min: 0.97, max: 1.0),
+        metric(name: "off_road_s", min: 0.0, max: 0.5),
+        metric(name: "max_airborne_s", min: 0.0, max: 0.05),
+        metric(name: "max_speed_mps", min: 23.0, max: 27.0),
+        metric(name: "crush_depth_m", min: 0.0, max: 0.02),
+        total_loss(expected: false),
+    ],
+)

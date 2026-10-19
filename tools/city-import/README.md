@@ -13,7 +13,18 @@ cargo run --release -p city-import --bin city-import -- extract.osm.pbf --id myc
     [--out data/city] [--origin LAT,LON] [--core LAT,LON] [--seed N]
 ```
 
-Both write `<out>/<id>.road.bin`, `<id>.road.json` (debug dump) and `<id>.greybox.glb`.
+Both write `<out>/<id>.road.bin`, `<id>.road.json` (debug dump), `<id>.greybox.glb` and
+`<id>.greybox.b64.txt` (the same bytes base64-encoded, for the published testbed).
+Port Vesper v2 (hills, terrain): `gen-city --preset vesper_v2 [--seed 1] [--json]` (`just city-v2`;
+the JSON dump only with `--json`).
+
+Greybox: one primitive per material (16-bit index chunks): `asphalt`, `highway_concrete`,
+`parking`, `bus_lane` (lane ribbons, banked like the road surface), `sidewalk` + `kerb`,
+`building` (prisms from `base_z_m`), `ground_<district>` (zone polygons on flat cities; on
+terrain cities a 10 m terrain mesh, each vertex the minimum of the fine heights around it so it
+never rises above a road, smooth normals), `rock`, `seabed`, `water` (sea plane at 0.25 m),
+`retaining_wall` (road edges above the ground) and `bridge` (deck sides, parapets, piers).
+Flat faces carry no normals (the testbed flat-shades them).
 Format: see `crates/wp_world/README.md`.
 
 ## OSM mapping

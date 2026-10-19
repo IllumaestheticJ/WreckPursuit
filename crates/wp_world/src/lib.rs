@@ -34,7 +34,10 @@ pub mod props;
 pub mod roads;
 pub mod routes;
 pub mod signals;
+pub mod surface;
+pub mod terrain;
 pub mod traffic;
+pub mod vesper;
 pub mod violations;
 
 use std::path::Path;
@@ -127,6 +130,8 @@ fn empty_network() -> RoadNetwork {
         zones: Vec::new(),
         pois: Vec::new(),
         buildings: Vec::new(),
+        surfaces: Vec::new(),
+        terrain: None,
     }
 }
 
@@ -183,6 +188,11 @@ impl World {
     /// Generate the procedural city in memory.
     pub fn procedural(pg: &procgen::ProcGenConfig, cfg: WorldConfig) -> Self {
         Self::new(procgen::generate(pg), cfg)
+    }
+
+    /// Generate Port Vesper v2 (curves, elevation, terrain; `vesper::CITY_ID`) in memory.
+    pub fn vesper(vc: &vesper::VesperConfig, cfg: WorldConfig) -> Self {
+        Self::new(vesper::generate(vc), cfg)
     }
 
     /// Car used for physical (near-LOD) traffic. Without one, traffic stays kinematic.

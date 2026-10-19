@@ -68,7 +68,14 @@ impl Sim {
         let Ok(id) = self.spawn_vehicle(&car, state.pos, yaw) else {
             return;
         };
-        let _ = self.place_vehicle(id, state.pos, yaw, state.speed_mps);
+        // Pitched onto the lane under it on hilly cities (plain place on flat ones).
+        let _ = self.place_on_ground(
+            id,
+            [state.pos[0], state.pos[1]],
+            yaw,
+            state.speed_mps,
+            Some(state.pos[2]),
+        );
         let _ = self.set_assists(id, AssistProfile::ai());
         if let Ok(slot) = self.slot_mut(id) {
             slot.kind = VehicleKind::Traffic;

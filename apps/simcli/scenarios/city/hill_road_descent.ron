@@ -1,0 +1,30 @@
+// Port Vesper v2: Ridge Road from Hollins Knob down to Mercer (≈ 1 km, ≈ 85 m drop, blind
+// crests over the ridge). Downhill at the 25 mph limit is where a car would launch over a
+// crest or run wide on a bend. Expect: on the road, wheels on the ground, no damage.
+(
+    name: "city_hill_road_descent",
+    seed: 12,
+    city: preset(name: "vesper_v2", seed: 1),
+    time_of_day_h: 12.0,
+    time_ratio: 1.0,
+    traffic_density: 0.0,
+    police_cars: false,
+    assists: ai,
+    entities: [
+        (
+            id: "descender",
+            car: "debug_sedan",
+            pos: (0.0, 0.0, 0.0),
+            driver: follow_route(route_id: "Ridge Road -> Mercer Wash-n-Fold Lot", target_speed: 11.176),
+        ),
+    ],
+    duration_s: 125.0,
+    expect: [
+        metric(name: "route_progress", min: 0.97, max: 1.0),
+        metric(name: "off_road_s", min: 0.0, max: 0.5),
+        metric(name: "max_airborne_s", min: 0.0, max: 0.05),
+        metric(name: "max_speed_mps", min: 10.0, max: 13.0),
+        metric(name: "crush_depth_m", min: 0.0, max: 0.02),
+        total_loss(expected: false),
+    ],
+)

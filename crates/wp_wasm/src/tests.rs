@@ -282,3 +282,29 @@ fn flat_world_has_no_signal_heads() {
     assert!(crate::signals::heads(s.sim().world()).is_empty());
     assert!(crate::signals::states(s.sim().world()).is_empty());
 }
+
+#[test]
+fn vesper_free_drive_stays_on_the_ground_with_traffic() {
+    let sc = crate::scenario::free_drive_in(
+        "debug_sedan",
+        DamageMode::Arcade,
+        crate::scenario::city_spec("vesper_v2"),
+    );
+    let mut s = Session::new(sc, false).unwrap();
+    assert!(s.has_city());
+    for _ in 0..4 {
+        s.run_ticks(240);
+        let st = s.sim().vehicle_states()[0].1.clone();
+        let ground = s
+            .sim()
+            .world()
+            .map()
+            .ground_height([st.pos[0], st.pos[1]], Some(st.pos[2]));
+        assert!(
+            (st.pos[2] - ground).abs() < 0.5,
+            "player {} m off the ground",
+            st.pos[2] - ground
+        );
+    }
+    assert!(s.sim().world().agent_count() > 10, "traffic spawned");
+}

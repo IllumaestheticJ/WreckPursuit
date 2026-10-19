@@ -139,6 +139,11 @@ export const sim = {
     Array.from(wasm.init(seed, scenarioJson, scripted)),
   freeDriveJson: (car: string, mode: string, city: boolean): string => wasm.free_drive_json(car, mode, city),
   cityChaseJson: (car: string, mode: string): string => wasm.city_chase_json(car, mode),
+  /** Free drive / city chase in a city by id ("vesper_v2" | "procedural_12x12"). */
+  freeDriveCityJson: (car: string, mode: string, cityId: string): string => wasm.free_drive_city_json(car, mode, cityId),
+  cityChaseCityJson: (car: string, mode: string, cityId: string): string => wasm.city_chase_city_json(car, mode, cityId),
+  /** Id of the session's city ("" on the flat world): data/city/<id>.greybox.glb. */
+  cityId: (): string => wasm.city_id(),
   scenarioFromRon: (text: string): string => wasm.scenario_from_ron(text),
   scenarioWithSpeed: (json: string, mps: number): string => wasm.scenario_with_speed(json, mps),
   step: (dt: number): number => wasm.step(dt),

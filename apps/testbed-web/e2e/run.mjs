@@ -4,7 +4,8 @@
 //
 // Checks: the car drives from keyboard input, every debug layer toggles without errors, a
 // recorded replay survives a page reload and re-simulates to the same hash with no drift,
-// crash scenarios run and report, city traffic + signals (day/night, lamps change over time),
+// crash scenarios run and report, the city (Port Vesper v2 by default, the old grid via the
+// selector) loads with traffic, signals (day/night, lamps change over time) and the city chase,
 // and (optionally) perf at 1/8/24 cars.
 import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -286,15 +287,32 @@ for (const [hour, label] of [
   const help = await page.evaluate(() => document.querySelector(".help")?.textContent ?? "");
   check(hidden && help.includes("traffic signals"), "6 hides the signals layer; F1 help lists it");
 }
+// The default city is Port Vesper v2: its greybox loads and the car sits on the terrain.
+await page.waitForFunction(() => (window.__wp.scene.cities.get("vesper_v2")?.children.length ?? 0) > 0, null, {
+  timeout: 30000,
+});
+const v2 = await page.evaluate(() => {
+  const st = window.__wp.sim.states(); // [entity, x, y, z, …]
+  return { id: window.__wp.sim.cityId(), x: st[1], y: st[2], z: st[3] };
+});
+// Lantern Run starts on Lantern Way west of downtown, ≈ 8–12 m above the sea.
+check(
+  v2.id === "vesper_v2" && v2.z > 4 && v2.z < 30,
+  `city free drive in ${v2.id}: greybox loaded, car at (${v2.x.toFixed(0)}, ${v2.y.toFixed(0)}, ${v2.z.toFixed(1)}) m`,
+);
 // City chase preset: night city, police + traffic, speeding player; heat panel from the UI kit.
 await page.evaluate(() => window.__wp.startCityChase("debug_sedan", "Arcade"));
 await page.keyboard.down("KeyW");
-// Wait on sim time, not wall time: under SwiftShader the city runs well below real time.
+// Headless SwiftShader renders the city slowly (the sim keeps real time only when frames are
+// fast), so wait for simulated time, not wall time: until the speeding violation shows up or
+// 8 s of sim have run.
 await page
   .waitForFunction(
-    () => (document.querySelector(".feed")?.textContent ?? "").includes("TrafficViolation") || window.__wp.sim.worldInfo()[0] > 240 * 30,
+    () =>
+      (document.querySelector(".feed")?.textContent ?? "").includes("TrafficViolation") ||
+      window.__wp.sim.worldInfo()[0] >= 240 * 8,
     null,
-    { timeout: 240000 },
+    { timeout: 180000, polling: 500 },
   )
   .catch(() => {});
 await page.keyboard.up("KeyW");
@@ -363,7 +381,18 @@ check(
     `pursuit banner: ${flow.pursuit.banner} → ${flow.searching.banner} → ${flow.escaped.banner} (${flow.escapedEnd}) → ${flow.captured.banner} (bill ${flow.captured.bill ? "opened" : "missing"}, chase end ${flow.capturedEnd?.how} at ${flow.capturedEnd?.level}) → ${flow.later.banner ?? "cleared"}`,
   );
 }
+// The selector keeps the old flat grid: the chase restarts there.
 await page.evaluate(() => {
+  const sel = document.getElementById("city-map");
+  sel.value = "procedural_12x12";
+  sel.dispatchEvent(new Event("change"));
+});
+await page.waitForTimeout(1500);
+const grid = await page.evaluate(() => ({ id: window.__wp.sim.cityId(), name: window.__wp.sim.scenario().name }));
+check(grid.id === "procedural_12x12" && grid.name === "city_chase", `city selector: chase restarted in ${grid.id}`);
+await page.evaluate(() => {
+  const sel = document.getElementById("city-map");
+  sel.value = "vesper_v2";
   document.getElementById("city").checked = false;
   window.__wp.startFreeDrive("debug_sedan", "Arcade", false);
 });

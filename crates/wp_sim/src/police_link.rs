@@ -134,8 +134,7 @@ impl Sim {
             .filter(|u| u.kind == UnitKind::Car && u.player.is_none() && u.entity.is_none())
             .map(|u| (u.id, u.body.pos, u.body.heading, u.body.speed))
             .collect();
-        // Clone the car (lattice included) only when a unit actually needs one: this runs
-        // every tick.
+        // Clone the car model (lattice and all) only when a unit actually needs a body.
         let car = if wanted.is_empty() {
             None
         } else {
@@ -148,11 +147,17 @@ impl Sim {
                 }
                 // Heading (x, y) → yaw about +Z with 0 = +Y.
                 let yaw = wp_math::atan2(-heading[0], heading[1]);
-                let p = [pos[0], pos[1], 0.0];
+                // On the road / terrain under the unit (z = 0 on flat cities).
+                let z = if self.has_terrain() {
+                    self.world.map().ground_height(pos, None)
+                } else {
+                    0.0
+                };
+                let p = [pos[0], pos[1], z];
                 let Ok(id) = self.spawn_vehicle(&car, p, yaw) else {
                     break;
                 };
-                let _ = self.place_vehicle(id, p, yaw, speed);
+                let _ = self.place_on_ground(id, pos, yaw, speed, None);
                 let _ = self.set_assists(id, AssistProfile::ai());
                 if let Ok(slot) = self.slot_mut(id) {
                     slot.kind = VehicleKind::Police;

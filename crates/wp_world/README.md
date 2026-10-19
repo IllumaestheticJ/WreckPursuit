@@ -10,7 +10,10 @@ clock. Implements `wp_contracts::WorldQuery`. No renderer dependency; compiles f
 |---|---|
 | `network` | The road file format (`.road.bin` / `.road.json`), validation |
 | `builder` | Abstract road graph → lanes, connections, junction control, signal plans |
-| `procgen` | Procedural fallback city (grid + ring + highway spine + 2 diagonals) |
+| `procgen` | Procedural fallback city (grid + ring + highway spine + 2 diagonals), flat |
+| `vesper` | Port Vesper v2 (`vesper_v2`): curved streets, hills, terrain, banked highway loop, grade separations |
+| `terrain` | `Heightfield` (stored with the network), value noise, bumps |
+| `surface` | Road trimesh for physics/greybox, deck rails, `MapGround` wheel probe |
 | `map` | Runtime map: connector curves, conflict sets, uniform-grid index, `WorldQuery` (incl. building line of sight) |
 | `signals` | Fixed-time controller evaluation |
 | `traffic` | Civilian agents: IDM, MOBIL, junction permits, hazards, spawning, LOD |
@@ -64,7 +67,7 @@ physical cars stay on the road); routes, circuits and closures; parked cars.
 
 ## Road format (`data/city/<city>.road.bin` + `.road.json`)
 
-Binary: `b"WPRD"`, little-endian `u32` format version (`ROAD_FORMAT_VERSION` = 1), then the
+Binary: `b"WPRD"`, little-endian `u32` format version (`ROAD_FORMAT_VERSION` = 2), then the
 [postcard](https://docs.rs/postcard) encoding of `RoadNetwork`. The `.road.json` debug dump is
 the `serde_json` encoding of the same struct and loads identically (`RoadNetwork::load` picks by
 extension). All coordinates are metres, +X east, +Y north, +Z up. Ids are `u32` indices.
@@ -90,7 +93,14 @@ extension). All coordinates are metres, +X east, +Y north, +Z up. Ids are `u32` 
   `density_base` (peak vehicles per lane-km), `polygon`.
 - `pois[]`: `kind` = `SafehouseCandidate | Garage | RaceStartGrid | PoliceStation | Helipad`,
   `name`, `pos`, `heading_rad` (yaw, 0 = +Y), nearest `lane`.
-- `buildings[]`: `footprint` polygon + `height_m`.
+- `buildings[]`: `footprint` polygon, `base_z_m` (lowest ground under it), `height_m` (roof =
+  `base_z_m + height_m`).
+- `surfaces[]` (v2): the paved ribbon of each source road between its junction setbacks:
+  `road`, trimmed `centre` polyline (3D), `bank[]` per point (cross slope, dz per metre to the
+  right; lanes lie on `centre.z + bank · lateral`), `left_m`/`right_m` paved widths,
+  `highway`, `sidewalk`. Physics and the greybox draw these.
+- `terrain` (v2): `Option<Heightfield>` — `origin`, `cell_m`, `nx`, `ny`, row-major heights
+  (bilinear between vertices). `None` = flat ground at z = 0 (the procedural grid, imports).
 
 Derived at load (`CityMap::new`), not stored: junction connector curves (cubic Bézier, tangent
 continuous), per-connector conflict sets (same target lane or swept paths closer than 2.4 m),
@@ -142,6 +152,44 @@ courtyards, warehouses in the bands). Green-wave offsets along arterial rows (ea
 columns (northbound) and diagonals at 90 % of the limit. POIs: 2 police stations + helipad,
 3 garages, 4 safehouse candidates, 3 race grids (highway, arterial, ring). The 12×12 city has
 1734 lanes, 224 junctions (58 signalised), 1144 buildings, ~104 drivable lane-km.
+
+## Port Vesper v2 (`vesper::generate`, `World::vesper`, `gen-city --preset vesper_v2`)
+After `docs/design/CITY.md`, scaled to ≈ 3.3 × 2.9 km (`MAP_LO..MAP_HI`), 5 m terrain cells.
+- **Layout:** Lantern Row downtown (7×7 grid at 100 m, arterials/collectors, signals);
+  Harbor Boulevard curving along the flat south shore; Gantry Row port grid + Terminal Avenue on
+  the quay; Canal Flats industrial grid; organic districts as warped grids with curved edges,
+  dropped edges and cul-de-sacs (Larkspur west, Mercer north, Eastgate east, Bayview on the
+  north-east plateau); Hollins Drive (6 switchbacks up Hollins Knob, ≈ 110 m), Ridge Road back
+  down over the crests, the Knob lot; Bluff Road along the plateau edge; Loop 9, a 3+3
+  highway loop (filleted control polygon, radius ≥ 420 m sweepers) with 7 signalised
+  junctions; Route 40 West (dead-ends at the map edge, passes **under** the loop: overpass)
+  and Route 40 North (cut **under** the loop: underpass).
+- **Terrain:** natural ground = northward rise + authored hill (`bump`) + plateau + two
+  octaves of seeded value noise (damped downtown, none on the port flat) + sea at the south and
+  east edges.
+- **Profiles:** node heights from the ground, relaxed until every road can meet its grade
+  cap; per road, samples every ~4 m follow the (smoothed) ground inside the cones of the
+  anchors (both junction approaches flat, deck heights at grade separations), clamped to the
+  grade cap (highway 6 %, arterials 8 %, streets 10 %, hill roads 11.5 %) by averaged
+  forward/backward passes, then binomially smoothed so a full grade reversal bends no tighter
+  than 0.3 g of vertical acceleration at 1.15 × the limit. Junction boxes are pinned flat.
+  Banking (highway ≤ 6 %, Bluff Road ≤ 3 %) from curvature, faded out near junctions.
+- **Carving:** the heightfield is carved 12 cm under every at-grade surface (full strength
+  7.5 m beyond the paved edge, smoothstep blend over 15–22 m) and junction discs; never above
+  any road; left natural under bridge decks (explicit crossing decks, or any stretch whose
+  whole cross-section is > 3 m above the ground) and kept ≥ 0.5 m under decks.
+- **Lots:** buildings along every street side (district-sized lots), clear of all roads and
+  dead-end turnarounds, skipped on > 8 m of slope or water; walls start at the lowest ground
+  under the footprint.
+- **POIs:** race grids `Lantern Run` (first: free drive / city chase spawn), `Loop 9 sprint`,
+  `Hollins Ascent`, `Hollins Descent`, `Ridge Road`, `Harbor Boulevard drag`, `Bluff Road`,
+  `Loop 9 north`, `Loop 9 west`; 3 precincts + helipad, 3 garages, 4 safehouses (incl.
+  `Knob Observatory Lot`).
+
+950 lanes, 133 junctions (27 signalised), 3346 buildings, 2 grade separations, terrain
+681 × 611 vertices (−3 … 111 m); generation ≈ 0.12 s release (0.4 s debug), `CityMap::new`
+≈ 10 ms. `cargo run --release -p wp_world --example vesper_stats` prints grades, crest/sag g
+at the limit and banks per road.
 
 ## Traffic AI
 
@@ -294,6 +342,10 @@ Release, cloud container (4 vCPU), procedural 12×12, 400 agents at saturation
 
 Physical agents use the `wp_vehicle` stub (negligible); re-measure when prompt 02 lands.
 
+Port Vesper v2, same settings (`CITY=vesper_v2 just traffic-bench`): avg 0.061 ms, p99 0.16 ms
+per 60 Hz frame (0.27 ms avg with collision diagnostics); 10-min soaks × 3 seeds × {0 %, 5 %}
+aggressive: 0 civilian–civilian collisions (`tests/city_v2.rs`, ignored).
+
 ## Known gaps
 - Physical agents are `wp_vehicle` instances, but `wp_sim` does not yet create rigid bodies /
   damage models for them (needs `LodChange` handling in the sim loop, see
@@ -304,4 +356,8 @@ Physical agents use the `wp_vehicle` stub (negligible); re-measure when prompt 0
 - Agents do not react to other civilians' hazards (only tracked vehicles and debris).
 - Sightline rule is distance-only (no building occlusion).
 - Lane change across a solid line / bus lane rules not modelled; buses not simulated.
-- Elevation: kinematic agents follow lane polylines' z, the stub vehicle keeps its spawn z.
+- Elevation: kinematic agents follow the lanes' 3D polylines; un-embodied physical agents
+  probe `surface::MapGround` (roads + terrain). Agent views carry yaw only (no pitch/roll on
+  slopes; the testbed draws kinematic cars level).
+- City v2: `WorldQuery::surface_at` and `CityMap::ground_height` project onto whole lane
+  polylines (≈ 0.5 µs on the curved city); terrain LOS samples every 8 m.

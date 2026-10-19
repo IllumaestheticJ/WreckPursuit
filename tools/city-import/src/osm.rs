@@ -367,6 +367,8 @@ pub fn to_network(data: &OsmData, opt: &ImportOptions) -> Result<RoadNetwork, St
                     a,
                     b,
                     via,
+                    via_z: Vec::new(),
+                    bank: Vec::new(),
                     class: *class,
                     lanes_fwd: fwd,
                     lanes_bwd: bwd,
@@ -450,6 +452,7 @@ pub fn to_network(data: &OsmData, opt: &ImportOptions) -> Result<RoadNetwork, St
         buildings.push(Building {
             footprint: fp,
             height_m: height.clamp(2.5, 300.0),
+            base_z_m: 0.0,
         });
     }
 

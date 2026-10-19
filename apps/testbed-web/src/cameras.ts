@@ -205,6 +205,11 @@ export class CameraRig {
   /** Orbit camera pinned to a world spot by [`lookFrom`] (does not follow the car). */
   private pinned = false;
 
+  /** Alias of [`lookFrom`] (city-v2 automation name). */
+  lookAt(from: [number, number, number], to: [number, number, number]): void {
+    this.lookFrom(from, to);
+  }
+
   /** Debug/e2e: orbit camera at world `eye` looking at `target` (sim coordinates), pinned. */
   lookFrom(eye: [number, number, number], target: [number, number, number]): void {
     this.setMode("orbit");

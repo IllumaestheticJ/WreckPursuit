@@ -875,8 +875,9 @@ impl Traffic {
                 continue;
             }
             if let Some(pa) = a.physical.as_deref_mut() {
-                // Flat ground for agents the sim loop has not embodied.
-                let ground = wp_vehicle::FlatGround::default();
+                // Roads and terrain (city v2) for agents the sim loop has not embodied; on a
+                // flat city this is exactly the old z = 0 plane.
+                let ground = crate::surface::MapGround { map };
                 pa.vehicle.step(&pa.input, &assists, map, &ground, dt, out);
             }
         }

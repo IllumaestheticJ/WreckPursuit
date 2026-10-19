@@ -15,8 +15,15 @@ use wp_net::snapshot::{DeltaVehicle, OwnState};
 /// Send every vehicle absolutely (no baseline) once per this many net ticks, as a resync.
 pub const ABSOLUTE_EVERY: u64 = 60;
 
-/// Worst allowed dequantised position error, m (the codec quantises to 1 cm).
+/// Worst allowed dequantised position error, m (the codec quantises to 1 cm), at the origin.
+/// Far from it the f32 rounding of the coordinate itself adds up to a few ulps
+/// ([`pos_err_allowance`]; ≈ 0.4 mm at 1.5 km, city v2's map edge).
 pub const MAX_POS_ERR_M: f32 = 0.0051;
+
+/// Allowed dequantised error for a coordinate of magnitude `v`, m.
+pub fn pos_err_allowance(v: f32) -> f32 {
+    MAX_POS_ERR_M + v.abs() * 3.0 * f32::EPSILON
+}
 
 /// Sender + receiver state for the round trip.
 #[derive(Debug, Default)]
@@ -102,15 +109,17 @@ impl NetRoundTrip {
             for k in 0..3 {
                 let err = (dq_pos(q.pos[k]) - truth.pos[k]).abs();
                 self.max_pos_err_m = self.max_pos_err_m.max(err);
+                if err > pos_err_allowance(truth.pos[k]) {
+                    return Err(format!(
+                        "position quantisation error {err} m > {} m at {} m",
+                        pos_err_allowance(truth.pos[k]),
+                        truth.pos[k]
+                    ));
+                }
             }
             self.received.insert(d.entity, q);
         }
-        if self.max_pos_err_m > MAX_POS_ERR_M {
-            return Err(format!(
-                "position quantisation error {} m > {MAX_POS_ERR_M} m",
-                self.max_pos_err_m
-            ));
-        }
+
         Ok(())
     }
 }
