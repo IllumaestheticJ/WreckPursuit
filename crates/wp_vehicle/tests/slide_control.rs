@@ -76,14 +76,16 @@ fn gamepad_power_slides_never_spin() {
 
 #[test]
 fn wheel_profile_is_bit_identical_to_the_plain_model() {
-    // Hashes recorded on main (612e036) before the slide assists existed. The wheel preset
-    // has countersteer_help 0, so none of the slide code may change a single bit. (With no
-    // help the naive driver spins: full sim, no safety net.)
+    // Hashes first recorded on main (612e036) before the slide assists existed; re-recorded
+    // [bless] on ws/vehicle (2026-10-19) when the differential model replaced the old LSD
+    // (a drivetrain change, not a slide-code change). The wheel preset has countersteer_help
+    // 0, so none of the slide code may change a single bit. (With no help the naive driver
+    // spins: full sim, no safety net.)
     let cases = [
-        ("rampart_50", 0.5, 0.3, 0xa0515ee69de2deca_u64),
-        ("rampart_50", 0.7, 0.8, 0xdeddd3e5b1284e37),
-        ("lucciola_350", 0.5, 0.3, 0x8cac80168e8bb943),
-        ("lucciola_350", 0.7, 0.8, 0x20fdb5196575e4af),
+        ("rampart_50", 0.5, 0.3, 0x56abe2718445681e_u64),
+        ("rampart_50", 0.7, 0.8, 0x51eda59121a8f47f),
+        ("lucciola_350", 0.5, 0.3, 0xda8596490db18c72),
+        ("lucciola_350", 0.7, 0.8, 0x7c876ee142b47163),
     ];
     for (id, lat_g, react, hash) in cases {
         // The steering-lock data change (playtest item 6b) is not a code change: pin the lock
