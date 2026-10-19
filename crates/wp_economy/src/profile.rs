@@ -59,6 +59,23 @@ pub struct CareerStats {
     pub driven_ticks: u64,
 }
 
+/// A career run that was in progress during a pursuit when the profile was saved (B05). A
+/// save carries it only while a run is being driven with the police on the player; ending the
+/// run normally saves a profile without it. A save that still has it when it is loaded means
+/// the game was closed mid-pursuit: the loader settles it as a capture
+/// ([`Economy::settle_abandoned_run`]), so closing the tab is never an escape.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct AbandonedRun {
+    /// The career car being driven.
+    pub car: crate::ledger::CarUid,
+    /// Wanted level at the save.
+    pub level: wp_contracts::WantedLevel,
+    /// Police heat at the save.
+    pub heat: f32,
+    /// Sim time driven in the run up to the save, physics ticks.
+    pub driven_ticks: u64,
+}
+
 /// How a run ended, for the carry-over rules.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RunEnd {
@@ -115,6 +132,10 @@ pub struct CareerProfile {
     /// pristine.
     #[serde(default)]
     pub lattices: BTreeMap<u32, String>,
+    /// Set only in saves written during a run while the player was pursued (see
+    /// [`AbandonedRun`]); `None` between runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_in_pursuit: Option<AbandonedRun>,
 }
 
 impl Economy {
@@ -131,7 +152,38 @@ impl Economy {
             carry: CarryOver::default(),
             stats: CareerStats::default(),
             lattices: BTreeMap::new(),
+            run_in_pursuit: None,
         }
+    }
+
+    /// Settle a run the game was closed in during a pursuit ([`AbandonedRun`]) as a capture:
+    /// [`Economy::handle_capture`] at the saved wanted level (fine, bail, rep loss, impound /
+    /// seizure by mode), then the run closes as [`RunEnd::Captured`] (no heat carried, one
+    /// night passes). Clears the marker. Returns the capture's and the night's ledger lines,
+    /// or `None` when the profile has no marker. A marker whose car is no longer in the
+    /// account (or not wanted) is dropped with only the run closed as captured.
+    pub fn settle_abandoned_run(
+        &self,
+        p: &mut CareerProfile,
+        rng: &mut wp_math::Rng,
+    ) -> Option<Vec<EconomyEvent>> {
+        let run = p.run_in_pursuit.take()?;
+        let mut events = Vec::new();
+        if p.account.car(run.car).is_some() {
+            let ctx = crate::capture::CaptureContext {
+                mode: p.mode,
+                wanted: run.level.max(wp_contracts::WantedLevel::L1),
+                car: run.car,
+                total_loss: false,
+                session_violations: Default::default(),
+            };
+            if let Ok((_, ev)) = self.handle_capture(&mut p.account, &ctx, rng) {
+                p.ledger.extend(ev.iter().cloned());
+                events.extend(ev);
+            }
+        }
+        events.extend(self.close_run(p, RunEnd::Captured, 0.0, 0, run.driven_ticks));
+        Some(events)
     }
 
     /// Heat the next run starts with, given the heat when this one ended (module docs).
