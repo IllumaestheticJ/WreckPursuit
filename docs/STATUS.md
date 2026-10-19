@@ -89,6 +89,13 @@ an overpass) is the city-chase default on the link; the grid stays selectable. M
 work from A, B, D, E, F, G, H, L, M, N, Q. Parked now: L's stake-scale and control-run tests
 (L dispatched, round 9). Restored: L's sprint-pulls-in-police.
 
+## Round 10 (2026-10-19)
+Merged C (robust city-chase e2e, perf script), I (crush via structural_crush_m, ignored-test
+report, slow city scenarios in release CI), L (stake scale agreed with G, control run re-tuned,
+Port Vesper Hollins sprint). Every previously parked test is restored; the observer soak runs
+with police on again. Full gate green. In progress: `lead/demo-endrun` (capture/escape → money,
+results screen, sirens follow pursuit), the last lead item of the greybox demo.
+
 ## Next (toward the single-player greybox demo)
 C draws police/traffic + city-chase preset; M wires the heat HUD and repair bill; E/D share
 roads and controller; G + lead wire capture/escape → economy.
