@@ -186,7 +186,8 @@ pub fn check_invariants(view: &TickView, cars: &[String], bounds: &Bounds) -> Re
         ));
     }
     for (idx, (id, s)) in view.sim.vehicle_states().iter().enumerate() {
-        let name = &view.names[idx];
+        // City runs add police / traffic cars after the scenario's own entities.
+        let name = view.names.get(idx).map_or("city vehicle", |n| n.as_str());
         let scalars = [s.engine_rpm, s.speed_mps, s.health];
         if !(finite(&s.pos)
             && finite(&s.rot)
