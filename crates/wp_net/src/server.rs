@@ -292,6 +292,8 @@ pub struct ServerInstance<S: NetSim> {
     pending_damage: Vec<(u64, BTreeMap<EntityId, TickDamage>)>,
     /// Typed events (police / race / economy / weather) since the last client output.
     pending_events: Vec<(u64, SimEvent)>,
+    /// Copy of every forwarded game event for the host (`set_event_tap`), until taken.
+    tapped_events: Option<Vec<SimEvent>>,
     /// Hellos parked for join-token verification.
     pending_joins: BTreeMap<ConnId, PendingJoin>,
     /// Kinematic traffic of this net tick (`Some` on traffic ticks).
@@ -323,6 +325,7 @@ impl<S: NetSim> ServerInstance<S> {
             incidents: VecDeque::new(),
             pending_damage: Vec::new(),
             pending_events: Vec::new(),
+            tapped_events: None,
             pending_joins: BTreeMap::new(),
             traffic_now: None,
             last_weather: None,
@@ -451,6 +454,63 @@ impl<S: NetSim> ServerInstance<S> {
         }
         let name = display_name.unwrap_or(pending.request.name);
         Some(self.join(conn, name, pending.assists, meta_reconnect_token))
+    }
+
+    /// Put a joined player in `role` as if they had asked for it (the host decides, e.g. the
+    /// role meta reserved at matchmaking). Policy (police share, one captain) still applies.
+    pub fn assign_role(&mut self, pid: PlayerId, role: Role) {
+        let tick = self.sim.tick();
+        let events = self.roles.request(pid, role, tick);
+        self.apply_role_events(events);
+    }
+
+    /// Disconnect a player for good (no reconnect window): `Reject { reason }`, then close.
+    pub fn kick(&mut self, pid: PlayerId, reason: impl Into<String>) {
+        let Some(conn) = self.players.get(&pid).and_then(|p| p.conn) else {
+            self.remove_player(pid);
+            return;
+        };
+        let reason = reason.into();
+        self.send_conn(conn, &ServerMsg::Reject { reason }, true);
+        self.remove_player(pid);
+    }
+
+    /// Players with a live connection and their roles, ascending.
+    pub fn connected_players(&self) -> Vec<(PlayerId, Role)> {
+        self.players
+            .values()
+            .filter(|p| p.conn.is_some())
+            .map(|p| (p.id, self.roles.role(p.id).unwrap_or(Role::Spectator)))
+            .collect()
+    }
+
+    /// The player driving vehicle `e`, if a player does.
+    pub fn owner_of(&self, e: EntityId) -> Option<PlayerId> {
+        self.owned.get(&e).map(|(p, _)| *p)
+    }
+
+    /// The player driving the police seat embodied by `wp_police` unit `unit` (player cops).
+    pub fn player_of_unit(&self, unit: UnitId) -> Option<PlayerId> {
+        self.owned
+            .iter()
+            .find(|(e, (_, k))| {
+                *k == EntityKind::PoliceChase && self.sim.police_unit(**e) == Some(unit)
+            })
+            .map(|(_, (p, _))| *p)
+    }
+
+    /// Start (`true`) or stop keeping a copy of every game event the server forwards
+    /// (police, race, economy, weather) for the host, e.g. meta pursuit reports.
+    pub fn set_event_tap(&mut self, on: bool) {
+        self.tapped_events = on.then(Vec::new);
+    }
+
+    /// Events collected since the last call (see [`ServerInstance::set_event_tap`]).
+    pub fn take_tapped_events(&mut self) -> Vec<SimEvent> {
+        self.tapped_events
+            .as_mut()
+            .map(std::mem::take)
+            .unwrap_or_default()
     }
 
     /// Refuse a parked join: the client gets `Reject { reason }` and the connection closes.
@@ -1218,6 +1278,9 @@ impl<S: NetSim> ServerInstance<S> {
             }
         }
         self.pending_damage.clear();
+        if let Some(tap) = self.tapped_events.as_mut() {
+            tap.extend(self.pending_events.iter().map(|(_, e)| e.clone()));
+        }
         self.pending_events.clear();
         self.traffic_now = None;
     }

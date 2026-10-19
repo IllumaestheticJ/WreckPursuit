@@ -70,6 +70,10 @@ pub trait NetSim {
     fn wanted_level(&self, _id: EntityId) -> u8 {
         0
     }
+    /// A racer's bounty from `wp_police` (cash value of its heat history). Default: 0.
+    fn bounty(&self, _id: EntityId) -> u32 {
+        0
+    }
     /// Bit-exact full state of a vehicle (`wp_vehicle::VehicleSnapshot` bytes) for the owning
     /// client's prediction rewind. Default: none (clients fall back to `set_state`).
     fn vehicle_snapshot(&self, _id: EntityId) -> Option<Vec<u8>> {
@@ -470,6 +474,13 @@ impl NetSim for WpSim {
 
     fn damage_steps(&self, id: EntityId) -> Option<u64> {
         self.damage_steps.get(&id).copied()
+    }
+
+    fn bounty(&self, id: EntityId) -> u32 {
+        let police = self.sim.police();
+        police.racer(id).map_or(0, |r| {
+            r.bounty.bounty(&police.config().heat).max(0.0) as u32
+        })
     }
 
     fn wanted_level(&self, id: EntityId) -> u8 {

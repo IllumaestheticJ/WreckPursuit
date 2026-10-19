@@ -386,6 +386,16 @@ impl Client {
             .map(|r| r.damage.node_positions())
     }
 
+    /// Rest node positions of a replica's lattice (chassis space), for damage display.
+    pub fn replica_rest(&self, vehicle: u32) -> Option<&[[f32; 3]]> {
+        self.replicas.get(&vehicle).map(|r| r.rest.as_slice())
+    }
+
+    /// Vehicles with a damage replica (own car and tracked remotes), ascending.
+    pub fn replica_ids(&self) -> Vec<u32> {
+        self.replicas.keys().copied().collect()
+    }
+
     /// Test hook: overwrite a replica's nodes (simulates a desync).
     pub fn corrupt_replica(&mut self, vehicle: u32, node: usize, delta: [f32; 3]) {
         if let Some(r) = self.replicas.get_mut(&vehicle) {

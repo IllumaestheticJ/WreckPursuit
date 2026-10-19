@@ -4380,6 +4380,7 @@ dependencies = [
  "tokio",
  "toml",
  "wp_contracts",
+ "wp_meta",
  "wp_net",
  "wp_sim",
  "wp_world",

@@ -1,10 +1,12 @@
 // Multiplayer page (net.html): connects to wp-server, predicts the own car through the wasm
 // client, interpolates everyone else, and switches to the captain map for the captain role.
-//   http://localhost:5173/net.html?server=ws://localhost:8080&name=me
+//   http://localhost:5173/net.html?server=ws://localhost:8080&name=me[&role=racer]
+// Each car shows its replicated damage lattice as points (dents appear where it was hit).
+// `window.__wpNet` is a small hook for the two-tab e2e check (e2e/net_two_tabs.mjs).
 import * as THREE from "three";
 import initWasm from "../wasm/pkg/wp_wasm.js";
 import * as net from "./wasm";
-import type { GameEvent, RenderVehicle } from "./wasm";
+import type { DamageInfo, GameEvent, NetInput, RenderVehicle, RoleName } from "./wasm";
 import { Connection } from "./connection";
 import { installKeyboard, readInput } from "./keyboard";
 import { renderOverlay } from "./overlay";
@@ -23,6 +25,7 @@ async function main(): Promise<void> {
   const params = new URLSearchParams(location.search);
   const url = params.get("server") ?? `ws://${location.hostname}:8080`;
   const name = params.get("name") ?? `web${Math.floor(Math.random() * 1000)}`;
+  const autoRole = params.get("role") as RoleName | null;
   await initWasm();
   net.create(name, 0);
 
@@ -61,17 +64,49 @@ async function main(): Promise<void> {
     if (obj) return obj;
     const [w, l, h] = v.body_size_m;
     obj = new THREE.Group();
+    // Translucent body so the replicated damage lattice inside shows its dents.
     const body = new THREE.Mesh(new THREE.BoxGeometry(w, l, h),
-      new THREE.MeshStandardMaterial({ color: v.own ? 0xffaa22 : COLORS[v.kind] ?? 0xffffff }));
+      new THREE.MeshStandardMaterial({
+        color: v.own ? 0xffaa22 : COLORS[v.kind] ?? 0xffffff,
+        transparent: true,
+        opacity: 0.35,
+        depthWrite: false,
+      }));
     body.position.z = h / 2;
     const nose = new THREE.Mesh(new THREE.BoxGeometry(w * 0.6, 0.3, 0.1),
       new THREE.MeshStandardMaterial({ color: 0xffee88 }));
     nose.position.set(0, l / 2 - 0.2, h + 0.05);
-    obj.add(body, nose);
+    // The replicated damage lattice: refreshed from the client's replica a few times a second.
+    const pts = new THREE.Points(new THREE.BufferGeometry(),
+      new THREE.PointsMaterial({ color: 0xffffff, size: 0.09 }));
+    pts.name = "lattice";
+    obj.add(body, nose, pts);
     world.add(obj);
     cars.set(v.entity, obj);
     return obj;
   }
+
+  function refreshLattices(): void {
+    for (const [e, obj] of cars) {
+      const pts = obj.getObjectByName("lattice") as THREE.Points | undefined;
+      const nodes = net.latticeNodes(e);
+      if (!pts || nodes.length === 0) continue;
+      pts.geometry.setAttribute("position", new THREE.BufferAttribute(nodes, 3));
+      pts.geometry.computeBoundingSphere();
+    }
+  }
+
+  // Test hook (e2e/net_two_tabs.mjs): read state, steer the car.
+  let lastRender: RenderVehicle[] = [];
+  let testInput: NetInput | null = null;
+  (window as unknown as { __wpNet: unknown }).__wpNet = {
+    status: () => net.status(),
+    stats: () => net.stats(),
+    render: () => lastRender,
+    damage: (): DamageInfo[] => net.damage(),
+    requestRole: (role: RoleName) => net.requestRole(role, performance.now()),
+    setInput: (i: NetInput | null) => (testInput = i),
+  };
 
   // Kinematic traffic (display only, extrapolated by the client).
   const trafficCars = new Map<number, THREE.Mesh>();
@@ -101,14 +136,19 @@ async function main(): Promise<void> {
   const camTarget = new THREE.Vector3();
   let last = performance.now();
   let lastUi = 0;
+  let roleRequested = false;
 
   function frame(now: number): void {
     const dt = Math.min((now - last) / 1000, 0.1);
     last = now;
-    net.update(now, readInput());
+    net.update(now, testInput ?? readInput());
     conn.flush();
 
     const st = net.status();
+    if (autoRole && st.phase === "joined" && st.role === "spectator" && !roleRequested) {
+      roleRequested = true;
+      net.requestRole(autoRole, now);
+    }
     const isCaptain = st.role === "police_captain";
     captain.visible = isCaptain;
     renderer.domElement.style.display = isCaptain ? "none" : "block";
@@ -117,6 +157,7 @@ async function main(): Promise<void> {
       captain.draw(net.captainMap());
     } else {
       const list = net.render(now);
+      lastRender = list;
       const seen = new Set<number>();
       ownCar = undefined;
       for (const v of list) {
@@ -167,6 +208,7 @@ async function main(): Promise<void> {
     if (now - lastUi > 200) {
       lastUi = now;
       for (const e of net.events()) onEvent(e);
+      if (!isCaptain) refreshLattices();
       const reply = st.captain_replies[st.captain_replies.length - 1];
       if (reply) captain.lastReply = `#${reply.seq} ${reply.ok ? "ok" : JSON.stringify(reply.error)}`;
       renderOverlay(overlay, st, net.stats(), connState, radio, trafficCars.size);
