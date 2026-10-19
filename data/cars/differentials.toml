@@ -1,0 +1,91 @@
+# Differential setups per car — read by `wp_vehicle::diff` (embedded at build time).
+#
+# Owner: workstream 09 (cars, machine H) from 2026-10-19; first version by 02 (vehicle, A).
+# Why a separate file: the contract `DrivetrainDef` only knows Open / Lsd / Locked and the car
+# JSON rejects unknown fields; contract requests 8–9 in docs/integration/vehicle.md ask for the
+# fields. Until then this table wins over the car file; axles not listed here fall back to the
+# car file's `diff_front` / `diff_rear` (`Lsd` = clutch LSD, ramps read as lock fractions).
+#
+# Axle types (`front` / `rear`), all torques N·m, lock fractions 0..1:
+#   { type = "open" }
+#   { type = "clutch", preload_nm, accel, decel }   1-way: decel = 0 · 1.5-way: decel < accel · 2-way: decel = accel
+#   { type = "viscous", nm_per_rads, max_nm }        wheel-torque difference per rad/s of speed difference
+#   { type = "helical", tbr, tbr_coast, preload_nm? } torque bias ratio (acts open with a wheel in the air)
+#   { type = "active", max_nm, preload_nm, accel, decel, slip_gain }   e-diff
+#   { type = "locked" }                              welded / spool
+# Centre (AWD only): { type = "default" } (layout's split / on-demand coupling), "viscous",
+#   { type = "helical", tbr }, "locked".
+# Lock % = (slow-side − fast-side torque) / input torque; TBR = (1 + lock) / (1 − lock).
+# Every entry needs a one-line `reason` (analog names only — no makers or models).
+
+[cars.vireo_xs]
+front = { type = "open" }
+reason = "late-90s FF hatch on a budget: open front; a plate LSD is a garage upgrade"
+
+[cars.kestrel_ts]
+front = { type = "helical", tbr = 2.2, tbr_coast = 1.5 }
+reason = "mid-2000s FF turbo sedan: factory helical front diff pulls it out of corners (adds some torque steer)"
+
+[cars.shiro_turbo]
+rear = { type = "clutch", preload_nm = 60.0, accel = 0.45, decel = 0.25 }
+reason = "early-2000s FR turbo coupe: 1.5-way plate LSD, the period street/drift setup"
+
+[cars.hakone_gt]
+rear = { type = "helical", tbr = 2.5, tbr_coast = 1.8 }
+reason = "90s FR twin-turbo GT: factory helical (torque-sensing) rear, smooth and progressive"
+
+[cars.rampart_50]
+rear = { type = "clutch", preload_nm = 80.0, accel = 0.35, decel = 0.20 }
+reason = "2010s V8 muscle coupe: factory 1.5-way clutch LSD (performance pack)"
+
+[cars.ironside_440]
+rear = { type = "clutch", preload_nm = 150.0, accel = 0.20, decel = 0.20 }
+reason = "early-70s big-block: spring-preloaded clutch/cone limited-slip, 2-way, mostly preload"
+
+[cars.sperber_32]
+rear = { type = "viscous", nm_per_rads = 40.0, max_nm = 1200.0 }
+reason = "2000s FR I6 sport sedan: speed-sensing viscous rear diff"
+
+[cars.lindwurm_4t]
+front = { type = "open" }
+rear = { type = "active", max_nm = 1200.0, preload_nm = 0.0, accel = 0.30, decel = 0.05, slip_gain = 150.0 }
+centre = { type = "default" }
+reason = "2010s AWD hot hatch: hang-on clutch coupling (car file) + rear active e-diff; open front with brake-based TC"
+
+[cars.lucciola_350]
+rear = { type = "clutch", preload_nm = 50.0, accel = 0.40, decel = 0.20 }
+reason = "90s mid-engine V8: 1.5-way plate LSD"
+
+[cars.hauler_1500]
+rear = { type = "clutch", preload_nm = 100.0, accel = 0.45, decel = 0.0 }
+reason = "half-ton pickup, towing package: locking rear modelled as a 1-way clutch (bites under drive, free when coasting)"
+
+[cars.sentinel_cruiser]
+rear = { type = "clutch", preload_nm = 80.0, accel = 0.25, decel = 0.25 }
+reason = "RWD police package: low-lock spring-preloaded 2-way clutch LSD for wet pursuit exits without snap"
+
+[cars.sentinel_wolfhound]
+front = { type = "open" }
+rear = { type = "open" }
+centre = { type = "viscous", nm_per_rads = 150.0, max_nm = 1500.0 }
+reason = "AWD pursuit sedan: front-biased split with a viscous centre (sends torque rearward when the fronts slip), open axles + brake-based TC"
+
+[cars.sentinel_bastion]
+rear = { type = "open" }
+reason = "RWD police SUV, fleet spec: open rear, relies on brake-based traction control"
+
+[cars.junkyard_beater]
+front = { type = "locked" }
+reason = "worn-out late-80s FF: welded front diff (junkyard special) — scrubs and pushes in tight turns"
+
+[cars.tansy_13]
+front = { type = "open" }
+reason = "traffic supermini: open"
+
+[cars.drayman_cargo]
+rear = { type = "open" }
+reason = "traffic cargo van: open"
+
+[cars.furrow_24]
+rear = { type = "open" }
+reason = "traffic compact pickup: open"
