@@ -60,6 +60,10 @@ impl WeatherKind {
     }
 }
 
+/// Visibility in clear air, m. Longer than any police or traffic sight range, so "no weather"
+/// and "clear weather" behave the same.
+pub const CLEAR_VISIBILITY_M: f32 = 800.0;
+
 /// Weather at one world-space point (plain data).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct LocalConditions {
@@ -83,6 +87,9 @@ pub struct LocalConditions {
     pub fog_per_m: f32,
     /// AI sight-distance multiplier from fog and rain, 0..1 (night not included).
     pub sight_multiplier: f32,
+    /// How far anyone can see from this point, m: reference sight ([`CLEAR_VISIBILITY_M`]) ×
+    /// `sight_multiplier`. Night is not included. Police LOS caps its ranges with it.
+    pub visibility_m: f32,
     /// Wind velocity in world XY, m/s (direction the air moves toward).
     pub wind_mps: [f32; 2],
 }
@@ -100,6 +107,7 @@ impl LocalConditions {
         road_temp_c: 20.0,
         fog_per_m: 0.0,
         sight_multiplier: 1.0,
+        visibility_m: CLEAR_VISIBILITY_M,
         wind_mps: [0.0, 0.0],
     };
 }

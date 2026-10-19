@@ -21,7 +21,9 @@ signatures: `docs/integration/weather.md`).
 | Police / traffic / economy multipliers | `effects.rs`, `effects.toml` | patrol + pursuit speed caps, incident rate, traffic speed/headway/density, payout/rep (tables only — owners apply) |
 | Puddles + spray for the renderer | `grid.rs`, `effects.rs` | `puddle_cells(min_mm)`, `wetness_u8()` texture, `spray_intensity(water, speed)` |
 | `LocalConditions` / `weather_at(p)` | `conditions.rs` | payload of the requested `WorldQuery::weather_at` |
-| `WithWeather` / `Weathered<W>` adapters | `adapter.rs` | wrap any `WorldQuery`: wet `Asphalt` → `WetAsphalt` so rain costs grip **now**; `line_of_sight` cut at the fog/rain sight range (`sight_range_m`) |
+| `WithWeather` / `Weathered<W>` adapters | `adapter.rs` | wrap any `WorldQuery`: wet `Asphalt` → `WetAsphalt` so rain costs grip **now**; `line_of_sight` cut at the observer's `visibility_m` |
+| Police sight cap | `lib.rs`, `conditions.rs` | `visibility_m(p)` (also `LocalConditions::visibility_m`): 800 m clear, 750 light rain, 480 heavy rain, 130 thick fog |
+| `wp_sim` integration (ready to move) | `examples/weather_in_sim.rs` | `WeatherLink`: build/rebuild grid, step per tick, weathered query, hash, per-wheel conditions |
 | Snapshot | `lib.rs` | `snapshot()` / `apply_snapshot()`: regime + `u8` water per cell (0.05 mm steps) |
 
 Time: weather runs in **in-game seconds** (`dt × time_ratio`), like the clock. At the default
@@ -51,6 +53,7 @@ let grip = SurfaceTable::embedded()
 ```
 cargo test -p wp_weather
 cargo run --release -p wp_weather --example weather_bench
+cargo run --release -p wp_weather --example weather_in_sim   # weather + wp_sim, braking dry vs wet
 ```
 
 Unit tests (in each module) + `tests/weather.rs`: same seed ⇒ identical hashes over 72 in-game
@@ -69,6 +72,10 @@ round trip; disk tables == embedded tables; invalid tables are rejected.
 100→0 km/h with ABS **42.9 m / 3.09 s dry, 54.1 m / 3.93 s soaked** (1.26×); a dry road under
 the adapter is bit-for-bit the plain dry world. simcli pair: `apps/simcli/scenarios/weather/`
 (`dry_brake_100_0.ron` active; `wet_brake_100_0.ron.pending` until the `weather:` field lands).
+
+`examples/weather_in_sim.rs` (checked by `tests/weather_in_sim.rs`) steps a `WeatherLink`
+beside a real `wp_sim::Sim` and repeats the brake test on `Rig` over a real `wp_world::World`:
+dry `Sim` 42.9 m = dry rig 42.9 m = weather-on-but-clear 42.9 m (bit-identical); soaked 54.1 m.
 
 ## Performance (native, release, cloud container, 2026-10-19)
 

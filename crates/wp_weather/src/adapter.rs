@@ -10,7 +10,8 @@
 //! composes the full multiplier itself.
 //!
 //! `line_of_sight` adds the weather range on top of the world's occluder test: false beyond
-//! [`WeatherSim::sight_range_m`] (800 m × the fog/rain sight multiplier; 800 m in clear air, so
+//! [`WeatherSim::visibility_m`] at the observer `a` (= [`WeatherSim::sight_range_m`] while the
+//! sky is uniform) (800 m × the fog/rain sight multiplier; 800 m in clear air, so
 //! longer than any police range and behaviour is unchanged). Turn it off with
 //! `weather_los = false` to get the geometric test alone.
 //!
@@ -49,6 +50,11 @@ impl<'a> WithWeather<'a> {
     pub fn weather_at(&self, p: [f32; 3]) -> LocalConditions {
         self.weather.conditions_at(p)
     }
+
+    /// Visibility from `p`, m ([`WeatherSim::visibility_m`]): the cap `line_of_sight` applies.
+    pub fn visibility_m(&self, p: [f32; 3]) -> f32 {
+        self.weather.visibility_m(p)
+    }
 }
 
 /// The interim surface rule shared by both adapters.
@@ -78,7 +84,7 @@ fn weathered_los(
 ) -> bool {
     if limit {
         let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
-        let r = weather.sight_range_m();
+        let r = weather.visibility_m(a);
         if d[0] * d[0] + d[1] * d[1] + d[2] * d[2] > r * r {
             return false;
         }
@@ -144,6 +150,11 @@ impl<W: WorldQuery> Weathered<W> {
     /// Weather at `p` (what `WorldQuery::weather_at` will return).
     pub fn weather_at(&self, p: [f32; 3]) -> LocalConditions {
         self.weather.conditions_at(p)
+    }
+
+    /// Visibility from `p`, m ([`WeatherSim::visibility_m`]): the cap `line_of_sight` applies.
+    pub fn visibility_m(&self, p: [f32; 3]) -> f32 {
+        self.weather.visibility_m(p)
     }
 }
 

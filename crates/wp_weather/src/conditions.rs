@@ -4,4 +4,4 @@
 //! `WorldQuery::weather_at`; re-exported here so `wp_weather::conditions::LocalConditions`
 //! keeps working.
 
-pub use wp_contracts::LocalConditions;
+pub use wp_contracts::{LocalConditions, CLEAR_VISIBILITY_M};

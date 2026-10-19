@@ -16,3 +16,8 @@ thiserror.workspace = true
 [dev-dependencies]
 # End-to-end grip tests drive a real car (wp_vehicle::rig::Rig) on a weathered world.
 wp_vehicle.workspace = true
+# examples/weather_in_sim.rs (+ tests/weather_in_sim.rs): weather composed with the real game
+# loop from the outside. Dev-only, so wp_sim may depend on wp_weather later without a cycle in
+# normal builds (cargo allows dev-dependency cycles).
+wp_sim.workspace = true
+wp_world.workspace = true

@@ -31,7 +31,7 @@ pub mod grip;
 pub mod kind;
 
 pub use adapter::{Weathered, WithWeather};
-pub use conditions::LocalConditions;
+pub use conditions::{LocalConditions, CLEAR_VISIBILITY_M};
 pub use data::{ClimateTable, EffectsTable, SurfaceTable, WeatherData, WeatherDataError};
 pub use effects::{
     spray_intensity, EconomyWeatherModifiers, PoliceWeatherModifiers, RenderParams,
@@ -446,6 +446,7 @@ impl WeatherSim {
             road_temp_c: st.road_temp_c,
             fog_per_m: st.fog_density,
             sight_multiplier: self.modifiers.sight_multiplier,
+            visibility_m: self.visibility_m(p),
             wind_mps: st.wind,
         }
     }
@@ -460,6 +461,17 @@ impl WeatherSim {
     /// 16 mm/h downpour. The adapters' `line_of_sight` is false beyond it.
     pub fn sight_range_m(&self) -> f32 {
         self.data.effects.visibility.reference_sight_m * self.modifiers.sight_multiplier
+    }
+
+    /// Visibility at a world point, m: how far an observer standing at `p` can see through fog
+    /// and rain (night not included). Today the sky is uniform, so this equals
+    /// [`WeatherSim::sight_range_m`] everywhere; it takes a point so callers do not change when
+    /// fog banks arrive. Police use it as a cap on every sight range:
+    /// `range = phase_range.min(weather.visibility_m(observer))` (and after contract W-1 the same
+    /// value arrives as `world.weather_at(observer).visibility_m`).
+    pub fn visibility_m(&self, p: [f32; 3]) -> f32 {
+        let _ = p; // uniform sky: no spatial variation yet
+        self.sight_range_m()
     }
 
     /// Weather-limited sight check for police / AI: true if `b` is within
