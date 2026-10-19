@@ -168,8 +168,13 @@ workstreams" below).
    bands; Wolfhound sits at the fast edge — a 0.4–0.5 s `shift_time_s` or `stall_torque_ratio`
    1.8 would move it toward its 6.1 s reference. Non-converter cars are unchanged (debug sedan
    8.13 s, coupe 5.23 s).
-   **Goldens:** police cars are converter automatics, so city / pursuit scenario hashes can move
-   — see "Checks" below.
+   **Goldens re-blessed `[bless]`** (`apps/simcli/golden/`, outside my crate): `golden_city_chase`
+   and `golden_night_pursuit_escape` (+ replays), `opponent_circuit_8x5`, `opponent_flee_police`,
+   `opponent_open_roads_traffic`, `opponent_reverse_grid_2laps`, `race_city_sprint`,
+   `world_traffic_soak` — every scenario with converter automatics (police, AI, traffic). All
+   other goldens (crash, vehicle, smoke, weather) are unchanged. Verified the cause: with
+   power-on shifts disabled, `race_city_sprint` matches its old golden. Scenario expectations
+   all still pass.
 3. **24-car cost** — `--example bench` now steps a 24-car field (whole roster cycled, varied
    inputs): **0.019–0.021 ms/car/frame** dry, 0.45–0.50 ms/frame for all 24 (budget 0.15
    ms/car); the weather terms cost nothing measurable. Recorded in the README.
