@@ -55,6 +55,36 @@ pub const PASS_JUNCTION_CLEAR_M: f32 = 20.0;
 pub const MAX_PASS_OBSTACLE_M: f32 = 30.0;
 /// Sharpest bend allowed within the sight distance of a pass, rad (20°).
 pub const PASS_MAX_BEND_RAD: f32 = 0.35;
+/// Deceleration oncoming traffic is assumed to manage when a car turns around across its lane,
+/// m/s².
+pub const TURN_ONCOMING_DECEL: f32 = 3.0;
+/// Added to each oncoming car's current speed when checking it can stop for a turn-around (it
+/// may still be speeding up), m/s.
+pub const TURN_ONCOMING_SPEED_MARGIN_MPS: f32 = 2.0;
+/// Room left between a stopped oncoming car and the turning car, m.
+pub const TURN_ONCOMING_GAP_M: f32 = 25.0;
+/// Comfortable deceleration assumed for a follower rolling up behind a car about to turn
+/// around, m/s².
+pub const TURN_FOLLOWER_DECEL: f32 = 2.0;
+/// Room behind a turning car's rear that its reversing legs may use (≈ a turning radius plus
+/// margin): a follower must be able to stop short of it, m.
+pub const TURN_REAR_ROOM_M: f32 = 10.0;
+
+/// Distance an oncoming car at `v` m/s needs to stop for a car turning around across its lane:
+/// its stopping distance from `v` + [`TURN_ONCOMING_SPEED_MARGIN_MPS`] at
+/// [`TURN_ONCOMING_DECEL`], plus [`TURN_ONCOMING_GAP_M`], m.
+pub fn turn_oncoming_room(v: f32) -> f32 {
+    let v = v.max(0.0) + TURN_ONCOMING_SPEED_MARGIN_MPS;
+    v * v / (2.0 * TURN_ONCOMING_DECEL) + TURN_ONCOMING_GAP_M
+}
+
+/// Can a follower at arc length `s` doing `v` m/s (same lane) stop at [`TURN_FOLLOWER_DECEL`]
+/// short of the room behind a car about to turn around at `turner_s` (its rear minus
+/// [`TURN_REAR_ROOM_M`])?
+pub fn turn_follower_stops_short(s: f32, v: f32, turner_s: f32) -> bool {
+    let v = v.max(0.0);
+    s + v * v / (2.0 * TURN_FOLLOWER_DECEL) <= turner_s - CAR_LENGTH_M - TURN_REAR_ROOM_M
+}
 
 /// Why an agent is held up (as of its last decision).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -631,6 +661,42 @@ impl Traffic {
         true
     }
 
+    /// Can every car approaching on the oncoming lane `opp` stop before `s_m` (the turning
+    /// car's position on it)? Each car needs its stopping distance from its current speed (plus
+    /// [`TURN_ONCOMING_SPEED_MARGIN_MPS`]) at [`TURN_ONCOMING_DECEL`], plus [`TURN_ONCOMING_GAP_M`].
+    /// Cars further upstream than a car at 1.25 × the limit would need are not looked at; any
+    /// car in a junction connector feeding `opp` within that distance blocks the turn.
+    fn oncoming_can_stop(&self, map: &CityMap, i: usize, opp: SegId, s_m: f32) -> bool {
+        let need = turn_oncoming_room;
+        let too_close = |e: &Entry, d: f32| e.agent as usize != i && d < need(e.v);
+        if self.lists[opp as usize]
+            .iter()
+            .any(|e| e.s < s_m + CAR_LENGTH_M + 2.0 && too_close(e, s_m - e.s))
+        {
+            return false;
+        }
+        let os = map.seg(opp);
+        if s_m >= need(os.speed_limit * 1.25) {
+            return true;
+        }
+        for &c in &os.prev {
+            if self.lists[c as usize].iter().any(|e| e.agent as usize != i) {
+                return false;
+            }
+            let SegKind::Connector { from, .. } = map.seg(c).kind else {
+                continue;
+            };
+            let base = s_m + map.seg(c).length + map.seg(from).length;
+            for e in &self.lists[from as usize] {
+                let ag = &self.agents[e.agent as usize];
+                if !e.ghost && ag.plan[0] == c && too_close(e, base - e.s) {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
     /// Obstacle boxes within `r` metres of agent `i` (other agents, tracked vehicles, debris).
     fn obstacles_near(&self, map: &CityMap, inp: &TrafficInputs, i: usize, r: f32) -> Vec<Obb> {
         let (p, _) = self.pose_of(map, &self.agents[i]);
@@ -865,20 +931,26 @@ impl Traffic {
         };
         // Oncoming traffic must be able to stop for the turning car; cars in the lanes crossed
         // must not be about to arrive.
-        let os = map.seg(opp);
-        let s_m = os.project(q).s;
-        let v_onc = os.speed_limit * 1.25;
-        let clear = v_onc * v_onc / (2.0 * 3.0) + 25.0;
-        if !self.oncoming_clear(map, i, opp, s_m + 6.0, clear + 6.0) {
+        let s_m = map.seg(opp).project(q).s;
+        if !self.oncoming_can_stop(map, i, opp, s_m + 6.0) {
             return false;
         }
         let mut l = map.seg(a.seg).lane();
         while let Some(c) = l {
             let cs = map.seg(c);
             let sc = cs.project(q).s;
+            // Own lane: a follower still rolling up must be able to stop comfortably short of
+            // the room a reversing leg may use. Lanes crossed: nobody arriving within 40 m.
+            let arriving = |e: &Entry| {
+                if c == a.seg {
+                    !turn_follower_stops_short(e.s, e.v, sc)
+                } else {
+                    e.s > sc - 40.0
+                }
+            };
             if self.lists[c as usize].iter().any(|e| {
                 e.agent as usize != i
-                    && ((e.s > sc - 40.0 && e.s < sc - CAR_LENGTH_M && e.v > 1.0)
+                    && ((e.s < sc - CAR_LENGTH_M && e.v > 1.0 && arriving(e))
                         || (e.s - sc).abs() < CAR_LENGTH_M + 2.0 && c != a.seg)
             }) {
                 return false;
@@ -1386,5 +1458,34 @@ impl Traffic {
 impl TrafficStats {
     fn turnaround_completed(&mut self) {
         self.turnarounds_completed += 1;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn oncoming_room_grows_with_speed() {
+        assert!((turn_oncoming_room(0.0) - (4.0 / 6.0 + 25.0)).abs() < 1e-4);
+        // 11 m/s (a car at about 40 km/h): 13²/6 + 25 ≈ 53 m.
+        assert!((turn_oncoming_room(11.0) - 53.17).abs() < 0.05);
+        assert!(turn_oncoming_room(17.0) > turn_oncoming_room(11.0));
+        // A car at 1.25 × a 50 km/h limit needs about as much as the old fixed rule.
+        let v = 13.9 * 1.25;
+        assert!(turn_oncoming_room(v) >= v * v / 6.0 + 25.0);
+    }
+
+    #[test]
+    fn slow_follower_far_back_does_not_block_a_turn() {
+        let turner = 100.0;
+        // Creeping up 30 m back at 3 m/s: stops in 2.25 m.
+        assert!(turn_follower_stops_short(turner - 30.0, 3.0, turner));
+        // Same speed, already close behind: inside the reversing room.
+        assert!(!turn_follower_stops_short(turner - 12.0, 3.0, turner));
+        // 39 m back at 11 m/s needs 30 m: too close.
+        assert!(!turn_follower_stops_short(turner - 39.0, 11.0, turner));
+        // 60 m back at 14 m/s needs 49 m: too close (the old 40 m window missed it).
+        assert!(!turn_follower_stops_short(turner - 60.0, 14.0, turner));
     }
 }
