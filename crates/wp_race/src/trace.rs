@@ -176,6 +176,7 @@ pub fn simulate(
                     ScriptedIncident::Violation(kind) => events.push(SimEvent::TrafficViolation {
                         vehicle: r.entry.racer,
                         kind,
+                        pos: st.pos,
                     }),
                     ScriptedIncident::Swerve { offset_m } => st.side_m = offset_m,
                     ScriptedIncident::Teleport { jump_m } => {

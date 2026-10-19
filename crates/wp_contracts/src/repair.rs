@@ -19,7 +19,15 @@ pub struct PriceTable {
     /// Labour rate per hour.
     pub labour_per_hour: f32,
     /// Labour hours to fully replace a region / component (applied per line item × severity).
+    /// Fallback for items missing from `labour_hours`.
     pub labour_hours_per_item: f32,
+    /// Per-item labour hours for a full replacement (v0.2.0; a roof costs more than a mirror).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub labour_hours: BTreeMap<RepairItem, f32>,
+    /// Fraction of the replacement parts cost charged for a *repair* (below the replace
+    /// severity) (v0.2.0). `None` = the damage model's default (0.3 in `wp_damage`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repair_parts_fraction: Option<f32>,
 }
 
 /// What a repair line item fixes.
@@ -42,11 +50,11 @@ pub struct RepairLine {
     pub item: RepairItem,
     /// Damage severity 0 (cosmetic) ..= 1 (replace).
     pub severity: f32,
-    /// Parts cost.
+    /// Parts cost, **unscaled** (v0.2.0 clarification: the mode's `repair_cost_scale` is not in it).
     pub parts_cost: f32,
-    /// Labour hours.
+    /// Labour hours, **unscaled**.
     pub labour_hours: f32,
-    /// Line total (parts + labour), already including the mode's `repair_cost_scale`.
+    /// Line total (parts + labour), the only figure that includes the mode's `repair_cost_scale`.
     pub total: f32,
 }
 

@@ -1,0 +1,93 @@
+# Heat, wanted levels, escape / capture / safehouse rules and bounty (wp_police::heat).
+# Every day/night difference is a [*.dawn/day/dusk/night] table; nothing is hard-coded.
+# Units: seconds, metres, heat points (0..max_heat).
+
+[heat]
+max_heat = 100.0
+# Heat at which wanted levels L1..L5 begin.
+level_thresholds = [10.0, 30.0, 50.0, 70.0, 90.0]
+# A violation nobody saw (no unit / camera with line of sight) counts at this fraction ("reports").
+unseen_factor = 0.2
+# The same violation kind from the same racer is counted at most once per this period.
+repeat_cooldown_s = 1.0
+# Seconds after the last sighting before heat starts to decay.
+decay_grace_s = 5.0
+# Long chases escalate: heat per second while actively pursued (seen).
+pursuit_heat_per_s = 0.25
+# Disabling a police unit by contact.
+cop_disabled_heat = 15.0
+
+[heat.violation]
+speeding_base = 2.0
+speeding_per_mps = 0.4
+red_light = 6.0
+wrong_way = 4.0
+collision = 8.0
+reckless = 3.0
+
+# A unit with line of sight within this range witnesses a violation. Shorter at night.
+[heat.witness_range_m]
+dawn = 120.0
+day = 160.0
+dusk = 120.0
+night = 70.0
+
+# A unit with line of sight within this range recognises a wanted car and starts a pursuit.
+[heat.recognition_range_m]
+dawn = 120.0
+day = 250.0
+dusk = 120.0
+night = 40.0
+
+# ...after this many seconds of continuous sight (a glimpse at night is not enough).
+[heat.recognition_time_s]
+dawn = 2.0
+day = 0.3
+dusk = 2.0
+night = 4.0
+
+# Heat lost per second while unseen and not pursued. Faster at night.
+[heat.decay_per_s]
+dawn = 0.5
+day = 0.35
+dusk = 0.5
+night = 0.7
+
+# Multiplier on decay by district (Suburb/Industrial cool off faster).
+[heat.decay_district_scale]
+core = 1.0
+suburb = 1.6
+industrial = 1.5
+
+[escape]
+# Seconds without any unit (or helicopter) line of sight needed to escape, per wanted level L1..L5.
+base_s = [12.0, 16.0, 22.0, 30.0, 40.0]
+
+[escape.phase_scale]
+dawn = 0.9
+day = 1.0
+dusk = 0.9
+night = 0.7
+
+[capture]
+stop_speed_mps = 2.0
+stop_time_s = 4.0
+unit_radius_m = 15.0
+
+[safehouse]
+dwell_s = 10.0
+clear_radius_m = 150.0
+heat_scale_on_enter = 0.25
+
+[bounty]
+per_heat_second = 2.0
+per_race_won_wanted = 500.0
+per_cop_disabled = 250.0
+max_priority_bounty = 20000.0
+
+# Race payout / stake multiplier by phase (night pays more).
+[bounty.payout_scale]
+dawn = 1.2
+day = 1.0
+dusk = 1.2
+night = 1.6

@@ -7,7 +7,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{Component, EntityId};
+use crate::{BodyRegion, Component, EntityId};
 
 /// Kind of traffic violation detected by `wp_world`.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -93,6 +93,25 @@ pub enum SimEvent {
         vehicle: EntityId,
         /// What happened.
         kind: ViolationKind,
+        /// Where it happened, world m (v0.2.0; police witnesses / cameras).
+        pos: [f32; 3],
+    },
+    /// All glass of a body region shattered (v0.2.0; renderer, audio, net).
+    GlassShattered {
+        /// Vehicle.
+        vehicle: EntityId,
+        /// Region whose glass broke.
+        region: BodyRegion,
+    },
+    /// A body region crossed a damage threshold (v0.2.0; HUD silhouette, police "visibly
+    /// wrecked" heuristics). Thresholded like `ComponentDamaged`, not emitted every tick.
+    RegionDamaged {
+        /// Vehicle.
+        vehicle: EntityId,
+        /// Region.
+        region: BodyRegion,
+        /// Damage severity 0 (cosmetic) ..= 1 (destroyed).
+        severity: f32,
     },
     /// Police event with a payload defined by `wp_police` (opaque to everyone else).
     PoliceEvent {

@@ -457,7 +457,7 @@ impl RaceJudge {
                     self.set_status(i, RacerStatus::Dnf(DnfReason::TotalLoss), tick);
                 }
             }
-            SimEvent::TrafficViolation { vehicle, kind } => {
+            SimEvent::TrafficViolation { vehicle, kind, .. } => {
                 if let Some(i) = self.index_of(*vehicle) {
                     if self.tracks[i].running() {
                         self.tracks[i].violations[violation_index(kind)] += 1;
