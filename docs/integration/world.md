@@ -179,6 +179,7 @@ Suburb }` — exactly `wp_world::network::DistrictKind` (moved to contracts, re-
 `ZoneId(u32)` alongside.
 
 ## Changes outside my crates
+- `apps/simcli/golden/*`: re-blessed city goldens for `PaintedLine` (round 8, see gate note).
 - `Cargo.toml` (workspace): added member `tools/city-import`.
 - `Cargo.lock`: `postcard` (wp_world), `osmpbf` (city-import only).
 - `justfile`: added `city` and `traffic-bench` recipes.
@@ -484,3 +485,14 @@ My markings and the indexed `nearest_on_road` already pass on Vesper (checked in
 | # | Change | Why | Who | Status |
 |---|---|---|---|---|
 | 9 | `RoadNetworkQuery::nearest_on_road_3d(p: [f32; 3]) -> Option<(u32, f32, [f32; 3], f32)>` (prefer edges within 3 m of `p.z`), and `RoadEdgeInfo`/`edge_polyline` with z | Vesper has stacked roads (loop overpass over Route 40, 6.5–9 m clearance). The 2D query can snap a car under a bridge to the deck, which misroutes police | 06 (E), 12 | proposed |
+
+### Gate note (round 8): goldens re-blessed
+`PaintedLine` changes physics in city scenarios only. On asphalt the grip is the same: tires
+have no `PaintedLine` entry, so `surface_grip` falls back to 1.0, the same as Asphalt. Highway lines
+used to read as Concrete (0.95 on every tire) and now read 1.0. The surface code is also part of
+the vehicle snapshot hash. Re-blessed (`simcli goldens --bless`; the commit message carries `[bless]`):
+`golden_city_chase` (+ replay), `opponent_{circuit_8x5, flee_police, open_roads_traffic,
+reverse_grid_2laps}`, `race_city_sprint{,_police}`, `world_traffic_soak_observer`. Non-city
+goldens are unchanged. `simcli run apps/simcli/scenarios`: 39/39 pass, and pendings are unchanged in kind
+(`traffic_soak_observer` 0 events / 0 civilian collisions, min agents 361 against its 350 gate).
+When H adds `PaintedLine` to the tire files (or N to `surfaces.toml`), these move again.
