@@ -106,6 +106,41 @@ tests. Check: `node apps/testbed-web/e2e/audio.mjs` (after the wasm build).
   embedded data). The bridge core is now `audio::frame_commands` (native-testable); the test
   takes ~75 s in a debug build because it runs the full city physics.
 
+## Recorded CC0 packs (playtest #5, "use real open source sounds") — BLOCKED on network policy
+Status 2026-10-19: **not started — no audio was downloaded or committed.** This container's egress
+proxy refuses every sound-library host (`connect_rejected` from the agent proxy for each one below;
+only GitHub and the package registries are reachable). Per the brief, nothing was fetched from
+unverified mirrors (GitHub re-uploads, npm packages) because their provenance/licence can't be
+checked against the original page.
+
+**Hosts the environment's network policy must allow** (HTTPS, port 443):
+
+| Host | Used for | Licence of what we'd take |
+|---|---|---|
+| `kenney.nl`, `www.kenney.nl` | Kenney audio packs (impact, UI, sci-fi/vehicle) — zip downloads | CC0 |
+| `opengameart.org` | CC0 engine loops, sirens, crashes (files under `/sites/default/files/`) | CC0 / CC-BY only (filter out NC/SA) |
+| `freesound.org` | search + licence metadata (API `/apiv2/`, needs a free API key for original-quality downloads) | CC0 / CC-BY only |
+| `cdn.freesound.org` | Freesound preview/download files | as above |
+| `sonniss.com` | GDC royalty-free bundle pages + licence text (download links point at the mirror named on that page) | Sonniss royalty-free licence (verify text) |
+| `archive.org`, `*.us.archive.org` | public-domain / CC0 sound collections (fallback) | CC0 / PD |
+| `upload.wikimedia.org`, `commons.wikimedia.org` | public-domain siren/horn recordings (fallback) | PD / CC0 / CC-BY |
+
+Minimum useful set: `kenney.nl` + `opengameart.org` + `freesound.org` + `cdn.freesound.org`.
+Network access is changed in the environment settings (claude.ai/code → environment → network
+access), see https://code.claude.com/docs/en/claude-code-on-the-web.
+
+**Plan once the hosts are open** (no code change needed for playback — `source: Samples` already loads
+`/data/audio/packs/<pack>/<file>`):
+1. Download into a scratch dir, keep the original page URL, author and licence for each file.
+2. `ffmpeg`: mono, trim, loudness-normalise (EBU R128, −16 LUFS one-shots / −20 LUFS loops), seamless
+   loop points, OGG Vorbis q3 (MP3 fallback for Safari); target < 15 MB total.
+3. New packs `engine_rec_{i4,v6,v8,turbo}` (4–6 RPM points each + whistle/blow-off), `world_rec`
+   (shift clunk, squeal/skid, light/medium/heavy metal, glass, plastic, scrape loops, horn),
+   `siren_rec` (wail/yelp/hi-lo), `radio_rec` (squelch/static), `ambient_city_night`.
+4. `data/audio/LICENSES.md` row per file; CC-BY authors in the testbed F1/help screen.
+5. Car defs point at the `*_rec` packs by default; audio panel gets a "Procedural (fallback)" toggle
+   that swaps back to the existing `*_proc` packs.
+
 ## Perf numbers
 | Measurement | Machine | Native | Browser | Budget |
 |---|---|---|---|---|

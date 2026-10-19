@@ -7,6 +7,6 @@
 | 2 | No visible car damage | lead: lattice view on by default; real denting panels = R (prompt 21) | interim fix on link |
 | 3 | Cars feel really slow | helper `lead/playtest-feel`: browser sim perf (sim fell behind real time at ~35–50 ms/frame in city chase) + car speed/feel | dispatched |
 | 4 | Transmission is sloppy | helper `lead/playtest-feel` (shift logic) | dispatched |
-| 5 | Use real open-source sounds | J (audio): CC0 recorded packs | dispatched |
+| 5 | Use real open-source sounds | J (audio): CC0 recorded packs | **blocked**: container network policy refuses kenney.nl / opengameart.org / freesound.org / sonniss.com etc. — hosts to allow listed in `docs/integration/audio.md`; no audio committed |
 | 6 | Dispatcher and cops are way too talkative | helper `lead/playtest-radio` | dispatched |
 | 7 | Camera zooms way too far out; need more angles | helper `lead/playtest-camera` | dispatched |
