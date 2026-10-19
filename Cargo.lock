@@ -2604,6 +2604,7 @@ dependencies = [
  "wp_math",
  "wp_net",
  "wp_sim",
+ "wp_world",
 ]
 
 [[package]]

@@ -16,22 +16,29 @@
 //! inputs       u32 count, then per event:
 //!                u64 tick, u16 entity index, f32 steer, throttle, brake, handbrake, clutch,
 //!                u8 flags (1 gear_up, 2 gear_down, 4 horn, 8 headlights, 16 siren), u8 tool_use
+//! ops (v2+)    u32 count, then per op: u64 tick, u16 entity index, u8 kind, payload:
+//!                0 reset: –
+//!                1 assists: u8 flags (1 abs, 2 tcs, 4 esc, 8 auto_gears, 16 auto_clutch),
+//!                  f32 steer_speed_sensitivity, countersteer_help, throttle_filter, brake_filter
+//!                2 mode: u8 (0 Arcade, 1 Simulation)
+//!              Ops apply before the inputs of the same tick, in file order.
 //! tick hashes  u64 count, then per tick (state after tick i+1): u64 state hash
 //! checkpoints  u32 count, then per checkpoint: u64 tick,
 //!                N × (u64 entity hash, f32×3 pos, f32×3 lin_vel, f32 health)
 //! ```
 //!
-//! The testbed (prompt 04) records the same format: setup scenario + the inputs it applied.
+//! The testbed (prompt 04) records the same format: setup scenario + the inputs and ops it
+//! applied. Version 1 files (no ops section) still decode.
 
-use wp_contracts::{VehicleInput, PHYSICS_DT};
+use wp_contracts::{AssistProfile, DamageMode, VehicleInput, PHYSICS_DT};
 
 use crate::data::DataSource;
 use crate::run::{run, RunOptions, Selection};
 use crate::scenario::Scenario;
 use crate::RunError;
 
-/// Current `replay.bin` format version.
-pub const REPLAY_FORMAT_VERSION: u32 = 1;
+/// Current `replay.bin` format version (v2 added the ops section).
+pub const REPLAY_FORMAT_VERSION: u32 = 2;
 const MAGIC: &[u8; 8] = b"WPREPLAY";
 
 /// An input change applied before a tick.
@@ -43,6 +50,28 @@ pub struct InputEvent {
     pub entity: u16,
     /// The input.
     pub input: VehicleInput,
+}
+
+/// A non-input change recorded by an interactive session (the testbed).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum OpKind {
+    /// `Sim::reset_vehicle`.
+    Reset,
+    /// `Sim::set_assists`.
+    Assists(AssistProfile),
+    /// `Sim::set_mode_table` with the mode's table.
+    Mode(DamageMode),
+}
+
+/// An op applied before tick `tick`'s inputs.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct OpEvent {
+    /// Tick index the op applies before.
+    pub tick: u64,
+    /// Entity index in spawn order (ignored for `Mode`).
+    pub entity: u16,
+    /// The op.
+    pub op: OpKind,
 }
 
 /// Coarse per-entity state stored every `hash_every` ticks, used to size a divergence.
@@ -84,6 +113,8 @@ pub struct Replay {
     pub entities: u32,
     /// Input changes, ascending by tick.
     pub inputs: Vec<InputEvent>,
+    /// Ops, ascending by tick (empty for runner recordings and v1 files).
+    pub ops: Vec<OpEvent>,
     /// State hash after every tick.
     pub tick_hashes: Vec<u64>,
     /// Periodic checkpoints.
@@ -101,6 +132,7 @@ impl Replay {
             ticks: 0,
             entities: entities as u32,
             inputs: Vec::new(),
+            ops: Vec::new(),
             tick_hashes: Vec::new(),
             checkpoints: Vec::new(),
         }
@@ -133,6 +165,39 @@ impl Replay {
             w.push(flags);
             w.push(i.tool_use);
         }
+        put_u32(&mut w, self.ops.len() as u32);
+        for ev in &self.ops {
+            put_u64(&mut w, ev.tick);
+            w.extend_from_slice(&ev.entity.to_le_bytes());
+            match ev.op {
+                OpKind::Reset => w.push(0),
+                OpKind::Assists(p) => {
+                    w.push(1);
+                    w.push(
+                        p.abs as u8
+                            | (p.tcs as u8) << 1
+                            | (p.esc as u8) << 2
+                            | (p.auto_gears as u8) << 3
+                            | (p.auto_clutch as u8) << 4,
+                    );
+                    for f in [
+                        p.steer_speed_sensitivity,
+                        p.countersteer_help,
+                        p.throttle_filter,
+                        p.brake_filter,
+                    ] {
+                        put_f32(&mut w, f);
+                    }
+                }
+                OpKind::Mode(m) => {
+                    w.push(2);
+                    w.push(match m {
+                        DamageMode::Arcade => 0,
+                        DamageMode::Simulation => 1,
+                    });
+                }
+            }
+        }
         put_u64(&mut w, self.tick_hashes.len() as u64);
         for h in &self.tick_hashes {
             put_u64(&mut w, *h);
@@ -158,7 +223,7 @@ impl Replay {
             return Err(RunError::Replay("not a replay (bad magic)".into()));
         }
         let format = r.u32()?;
-        if format != REPLAY_FORMAT_VERSION {
+        if !(1..=REPLAY_FORMAT_VERSION).contains(&format) {
             return Err(RunError::Replay(format!(
                 "replay format v{format}, this simcli reads v{REPLAY_FORMAT_VERSION}"
             )));
@@ -198,6 +263,38 @@ impl Replay {
                     tool_use,
                 },
             });
+        }
+        let mut ops = Vec::new();
+        if format >= 2 {
+            let n = r.u32()? as usize;
+            for _ in 0..n {
+                let tick = r.u64()?;
+                let entity = u16::from_le_bytes(r.take(2)?.try_into().expect("2 bytes"));
+                let op = match r.take(1)?[0] {
+                    0 => OpKind::Reset,
+                    1 => {
+                        let flags = r.take(1)?[0];
+                        OpKind::Assists(AssistProfile {
+                            abs: flags & 1 != 0,
+                            tcs: flags & 2 != 0,
+                            esc: flags & 4 != 0,
+                            auto_gears: flags & 8 != 0,
+                            auto_clutch: flags & 16 != 0,
+                            steer_speed_sensitivity: r.f32()?,
+                            countersteer_help: r.f32()?,
+                            throttle_filter: r.f32()?,
+                            brake_filter: r.f32()?,
+                        })
+                    }
+                    2 => OpKind::Mode(match r.take(1)?[0] {
+                        0 => DamageMode::Arcade,
+                        1 => DamageMode::Simulation,
+                        m => return Err(RunError::Replay(format!("bad mode {m}"))),
+                    }),
+                    k => return Err(RunError::Replay(format!("bad op kind {k}"))),
+                };
+                ops.push(OpEvent { tick, entity, op });
+            }
         }
         let n = r.u64()? as usize;
         let mut tick_hashes = Vec::with_capacity(n.min(1 << 20));
@@ -241,6 +338,7 @@ impl Replay {
             ticks,
             entities,
             inputs,
+            ops,
             tick_hashes,
             checkpoints,
         })
@@ -330,7 +428,9 @@ pub fn verify(golden: &Replay, data: &dyn DataSource) -> Result<ReplayReport, Ru
             systems: Some(systems),
             record: true,
             input_track: Some(golden.inputs.clone()),
+            op_track: Some(golden.ops.clone()),
             strict: false,
+            load_city: false,
         },
     )?;
     Ok(compare(&sc, golden, &out.replay))
@@ -495,6 +595,23 @@ mod tests {
                     ..Default::default()
                 },
             }],
+            ops: vec![
+                OpEvent {
+                    tick: 1,
+                    entity: 0,
+                    op: OpKind::Reset,
+                },
+                OpEvent {
+                    tick: 1,
+                    entity: 0,
+                    op: OpKind::Assists(AssistProfile::gamepad_default()),
+                },
+                OpEvent {
+                    tick: 2,
+                    entity: 0,
+                    op: OpKind::Mode(DamageMode::Simulation),
+                },
+            ],
             tick_hashes: vec![1, 3],
             checkpoints: vec![Checkpoint {
                 tick: 2,

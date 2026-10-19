@@ -37,6 +37,9 @@ pub struct Scenario {
     /// Systems to step (`"vehicle,damage,world,police,net"`); `None` = all. `--systems` overrides.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub systems: Option<String>,
+    /// Static rigid boxes (crash barriers, walls), added before any vehicle spawns.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub barriers: Vec<BarrierSpec>,
     /// Vehicles to spawn, in spawn order (entity ids are allocated in this order).
     pub entities: Vec<EntitySpec>,
     /// Simulated duration, s.
@@ -132,6 +135,19 @@ impl AssistSpec {
             AssistSpec::Custom(p) => *p,
         }
     }
+}
+
+/// A static box collider (`wp_sim::Sim::add_static_box`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BarrierSpec {
+    /// Centre, world m.
+    pub pos: [f32; 3],
+    /// Full size `[x, y, z]`, m.
+    pub size: [f32; 3],
+    /// Heading about +Z, rad.
+    #[serde(default)]
+    pub yaw: f32,
 }
 
 /// One vehicle to spawn.
@@ -329,6 +345,11 @@ impl Scenario {
         }
         if self.entities.is_empty() {
             return Err("at least one entity is required".into());
+        }
+        for b in &self.barriers {
+            if !b.size.iter().all(|x| x.is_finite() && *x > 0.0) {
+                return Err(format!("barrier size {:?} must be positive", b.size));
+            }
         }
         if self.hash_every == 0 {
             return Err("hash_every must be >= 1".into());

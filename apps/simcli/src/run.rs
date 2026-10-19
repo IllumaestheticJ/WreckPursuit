@@ -12,7 +12,7 @@ use wp_contracts::{
 use wp_sim::{Sim, SimConfig, Systems};
 
 use crate::data::{load_car, load_mode, DataSource};
-use crate::replay::{Checkpoint, EntityCheckpoint, InputEvent, Replay};
+use crate::replay::{Checkpoint, EntityCheckpoint, InputEvent, OpEvent, OpKind, Replay};
 use crate::scenario::{tick_of, CitySpec, Driver, Expect, Scenario};
 use crate::RunError;
 
@@ -84,6 +84,166 @@ pub struct RunOptions {
     pub input_track: Option<Vec<InputEvent>>,
     /// Treat warnings (unsupported features, unapplied overrides) as failures.
     pub strict: bool,
+    /// Replay mode: apply these non-input ops (reset, assists, mode switch) before the inputs of
+    /// the same tick. Recorded into the replay when `record` is on.
+    pub op_track: Option<Vec<OpEvent>>,
+    /// Load `city` (procedural or a `.road.json` file) with `wp_world`. Off by default until
+    /// the goldens using a city are re-blessed (workstream 10); the testbed turns it on.
+    pub load_city: bool,
+}
+
+/// A simulation built from a scenario's setup, before the first tick. Shared by [`run`] and the
+/// browser testbed (`wp_wasm`) so both construct identical sims.
+pub struct BuiltSim {
+    /// The simulation (systems selected, barriers added, entities spawned with their assists).
+    pub sim: Sim,
+    /// Entity ids in scenario order.
+    pub ids: Vec<EntityId>,
+    /// Loaded cars by car id.
+    pub cars: BTreeMap<String, wp_contracts::LoadedCar>,
+    /// Systems that will run.
+    pub selection: Selection,
+    /// Unsupported features / unapplied overrides.
+    pub warnings: Vec<String>,
+}
+
+/// Build the world for a scenario's `city` (`None` for the flat stub world).
+pub fn build_city(
+    sc: &Scenario,
+    data: &dyn DataSource,
+) -> Result<Option<wp_world::World>, RunError> {
+    let cfg = wp_world::WorldConfig {
+        seed: sc.seed,
+        start_time: TimeOfDay::from_hours(sc.time_of_day_h),
+        time_ratio: sc.time_ratio,
+        ..Default::default()
+    };
+    let bad = |e: String| RunError::Scenario(sc.name.clone(), e);
+    Ok(match &sc.city {
+        CitySpec::Flat => None,
+        CitySpec::Procedural {
+            seed,
+            blocks_x,
+            blocks_y,
+            block_m,
+        } => Some(wp_world::World::procedural(
+            &wp_world::procgen::ProcGenConfig {
+                nx: *blocks_x as usize,
+                ny: *blocks_y as usize,
+                spacing_m: *block_m,
+                seed: *seed,
+                ..Default::default()
+            },
+            cfg,
+        )),
+        CitySpec::File(rel) => {
+            if !rel.ends_with(".json") {
+                return Err(bad(format!(
+                    "city file {rel:?}: only .road.json is readable here"
+                )));
+            }
+            let net = wp_world::RoadNetwork::from_json(&data.read(rel)?)
+                .map_err(|e| bad(format!("city {rel:?}: {e}")))?;
+            Some(wp_world::World::new(net, cfg))
+        }
+    })
+}
+
+/// Build the [`Sim`] for a scenario: systems, city (if `opts.load_city`), barriers, then every
+/// entity in order with its assists.
+pub fn build_sim(
+    sc: &Scenario,
+    data: &dyn DataSource,
+    opts: &RunOptions,
+) -> Result<BuiltSim, RunError> {
+    let selection = match (&opts.systems, &sc.systems) {
+        (Some(s), _) => *s,
+        (None, Some(list)) => {
+            Selection::parse(list).map_err(|e| RunError::Scenario(sc.name.clone(), e))?
+        }
+        (None, None) => Selection::ALL,
+    };
+    let mut warnings = Vec::new();
+    let city = if opts.load_city {
+        build_city(sc, data)?
+    } else {
+        if sc.city != CitySpec::Flat {
+            warnings.push(format!(
+                "city {:?} not loaded (RunOptions::load_city is off); ran on the flat world",
+                sc.city
+            ));
+        }
+        None
+    };
+    if let Some(d) = sc.traffic_density {
+        warnings.push(format!(
+            "traffic_density override {d} not applied: wp_world has no traffic API yet"
+        ));
+    }
+    if let Some(p) = sc.police_presence {
+        warnings.push(format!(
+            "police_presence override {p} not applied: wp_police has no presence API yet"
+        ));
+    }
+    for e in &sc.entities {
+        match &e.driver {
+            Driver::FollowRoute { .. } | Driver::AiDriver { .. } => warnings.push(format!(
+                "entity {:?}: driver {:?} not available yet; using its input keyframes",
+                e.id, e.driver
+            )),
+            Driver::Scripted | Driver::Cruise { .. } => {}
+        }
+    }
+
+    let mode = load_mode(data, sc.mode)?;
+    let mut sim = Sim::new(SimConfig {
+        seed: sc.seed,
+        mode,
+        time_of_day: TimeOfDay::from_hours(sc.time_of_day_h),
+        time_ratio: sc.time_ratio,
+    });
+    sim.set_systems(selection.sim);
+    if let Some(world) = city {
+        sim.set_world(world);
+    }
+    for b in &sc.barriers {
+        sim.add_static_box(b.pos, b.size, b.yaw);
+    }
+    let mut ids = Vec::new();
+    let mut cars: BTreeMap<String, wp_contracts::LoadedCar> = BTreeMap::new();
+    for spec in &sc.entities {
+        if !cars.contains_key(&spec.car) {
+            cars.insert(spec.car.clone(), load_car(data, &spec.car)?);
+        }
+        let id = sim.spawn_vehicle(&cars[&spec.car], spec.pos, spec.yaw)?;
+        sim.set_assists(id, spec.assists.unwrap_or(sc.assists).profile())?;
+        ids.push(id);
+    }
+    Ok(BuiltSim {
+        sim,
+        ids,
+        cars,
+        selection,
+        warnings,
+    })
+}
+
+/// Apply one replay op to a built sim (`ids` in scenario order).
+pub fn apply_op(
+    sim: &mut Sim,
+    ids: &[EntityId],
+    data: &dyn DataSource,
+    ev: &OpEvent,
+) -> Result<(), RunError> {
+    let id = *ids.get(ev.entity as usize).ok_or_else(|| {
+        RunError::Replay(format!("op for entity index {} out of range", ev.entity))
+    })?;
+    match ev.op {
+        OpKind::Reset => sim.reset_vehicle(id)?,
+        OpKind::Assists(p) => sim.set_assists(id, p)?,
+        OpKind::Mode(m) => sim.set_mode_table(load_mode(data, m)?),
+    }
+    Ok(())
 }
 
 /// Read-only view handed to [`run_with_hook`] after every tick.
@@ -386,8 +546,9 @@ impl Tracker {
     }
 }
 
-/// Per-tick input for one entity, from its driver and keyframes.
-fn driver_input(
+/// Per-tick input for one entity, from its driver and keyframes (`prev` = the input applied
+/// last tick). Public so the testbed drives scenarios exactly like the runner.
+pub fn driver_input(
     sc: &Scenario,
     idx: usize,
     tick: u64,
@@ -443,60 +604,16 @@ pub fn run_with_hook(
     opts: &RunOptions,
     hook: &mut dyn FnMut(&TickView) -> Result<(), String>,
 ) -> Result<RunOutput, RunError> {
-    let selection = match (&opts.systems, &sc.systems) {
-        (Some(s), _) => *s,
-        (None, Some(list)) => {
-            Selection::parse(list).map_err(|e| RunError::Scenario(sc.name.clone(), e))?
-        }
-        (None, None) => Selection::ALL,
-    };
-    let mut warnings = Vec::new();
-    match &sc.city {
-        CitySpec::Flat => {}
-        other => warnings.push(format!(
-            "city {other:?} not supported by wp_world yet (prompt 05); ran on the flat world"
-        )),
-    }
-    if let Some(d) = sc.traffic_density {
-        warnings.push(format!(
-            "traffic_density override {d} not applied: wp_world has no traffic API yet"
-        ));
-    }
-    if let Some(p) = sc.police_presence {
-        warnings.push(format!(
-            "police_presence override {p} not applied: wp_police has no presence API yet"
-        ));
-    }
-    for e in &sc.entities {
-        match &e.driver {
-            Driver::FollowRoute { .. } | Driver::AiDriver { .. } => warnings.push(format!(
-                "entity {:?}: driver {:?} not available yet; using its input keyframes",
-                e.id, e.driver
-            )),
-            Driver::Scripted | Driver::Cruise { .. } => {}
-        }
-    }
-
-    let mode = load_mode(data, sc.mode)?;
-    let mut sim = Sim::new(SimConfig {
-        seed: sc.seed,
-        mode,
-        time_of_day: TimeOfDay::from_hours(sc.time_of_day_h),
-        time_ratio: sc.time_ratio,
-    });
-    sim.set_systems(selection.sim);
-
-    let mut ids = Vec::new();
+    let BuiltSim {
+        mut sim,
+        ids,
+        cars,
+        selection,
+        warnings,
+    } = build_sim(sc, data, opts)?;
     let mut trackers = Vec::new();
-    let mut cars: BTreeMap<String, wp_contracts::LoadedCar> = BTreeMap::new();
-    for spec in &sc.entities {
-        if !cars.contains_key(&spec.car) {
-            cars.insert(spec.car.clone(), load_car(data, &spec.car)?);
-        }
+    for (spec, id) in sc.entities.iter().zip(&ids) {
         let car = &cars[&spec.car];
-        let id = sim.spawn_vehicle(car, spec.pos, spec.yaw)?;
-        sim.set_assists(id, spec.assists.unwrap_or(sc.assists).profile())?;
-        ids.push(id);
         trackers.push(Tracker {
             spawn: spec.pos,
             rest_nodes: car.lattice.nodes.iter().map(|n| n.pos_m).collect(),
@@ -561,7 +678,18 @@ pub fn run_with_hook(
     let mut failures = Vec::new();
     let mut track_cursor = 0usize;
 
+    let mut op_cursor = 0usize;
     for tick in 0..ticks {
+        // Ops (reset / assists / mode), then inputs.
+        if let Some(track) = &opts.op_track {
+            while op_cursor < track.len() && track[op_cursor].tick == tick {
+                apply_op(&mut sim, &ids, data, &track[op_cursor])?;
+                if opts.record {
+                    replay.ops.push(track[op_cursor]);
+                }
+                op_cursor += 1;
+            }
+        }
         // Inputs.
         if let Some(track) = &opts.input_track {
             while track_cursor < track.len() && track[track_cursor].tick == tick {
