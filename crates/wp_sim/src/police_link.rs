@@ -47,6 +47,30 @@ impl Sim {
 
     /// Before the vehicle step: AI police drivers set their cars' inputs.
     pub(crate) fn drive_police_units(&mut self) {
+        // Obstacle awareness (E, round 6): every vehicle and kinematic traffic car, so units
+        // follow, wait behind or pass them instead of driving into them.
+        let mut obstacles: Vec<wp_police::ObstacleView> = self
+            .vehicles
+            .iter()
+            .map(|v| {
+                let s = v.vehicle.state();
+                let f = wp_world::drive::forward_of(s.rot);
+                wp_police::ObstacleView::car(Some(v.id), s.pos, s.lin_vel, f)
+            })
+            .collect();
+        obstacles.extend(
+            self.world
+                .agents()
+                .filter(|a| a.lod == wp_world::traffic::Lod::Kinematic)
+                .map(|a| {
+                    let (sn, cs) = wp_math::sin_cos(a.yaw);
+                    // Yaw 0 = +Y, positive turns left.
+                    let f = [-sn, cs];
+                    let v = [f[0] * a.speed_mps, f[1] * a.speed_mps, 0.0];
+                    wp_police::ObstacleView::car(None, a.pos, v, f)
+                }),
+        );
+        self.police.set_obstacles(&obstacles);
         for slot in &mut self.vehicles {
             let Some(unit) = slot.police_unit else {
                 continue;
