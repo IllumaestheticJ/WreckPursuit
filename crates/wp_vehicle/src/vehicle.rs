@@ -18,7 +18,10 @@ use crate::engine::{Engine, EngineExtras, RPM_PER_RADPS};
 use crate::ffb::{self, FfbWheel};
 use crate::ground::WheelCaster;
 use crate::math::{arr, sin_cos, v3, yaw_quat, Quat, V3};
-use crate::steering::{ackermann, body_slip, torque_steer, update_center_angle, SteerInput};
+use crate::slide::{gyro_yaw_torque, slide_class, slide_throttle, GyroInput};
+use crate::steering::{
+    ackermann, body_slip, rear_axle_slip, torque_steer, update_center_angle, SteerInput,
+};
 use crate::surface::{conditions_grip, SurfaceConditions, TireWetProfile};
 use crate::suspension::{arb_force, static_compression, strut_force};
 use crate::tire::{
@@ -163,6 +166,8 @@ pub struct Telemetry {
     /// Per-wheel aquaplaning 0 (full contact) … 1 (riding on water), from
     /// [`Vehicle::set_surface_conditions`].
     pub aquaplane: [f32; 4],
+    /// Slide-gyro yaw torque applied this tick, N·m (+ = left; 0 with countersteer help off).
+    pub slide_gyro_nm: f32,
 }
 
 /// One simulated vehicle. See the crate docs for the integration contract with Rapier.
@@ -181,6 +186,8 @@ pub struct Vehicle {
     pub(crate) converter: Option<Converter>,
     pub(crate) awd_coupling: f32,
     pub(crate) center_steer: f32,
+    /// Slide-assist class from the car data (constant; see [`crate::slide::slide_class`]).
+    pub(crate) slide_class: f32,
     pub(crate) throttle_f: f32,
     pub(crate) brake_f: f32,
     pub(crate) tcs: Tcs,
@@ -279,6 +286,7 @@ impl Vehicle {
             converter: None,
             awd_coupling: 0.0,
             center_steer: 0.0,
+            slide_class: slide_class(def),
             throttle_f: 0.0,
             brake_f: 0.0,
             tcs: Tcs::default(),
@@ -674,7 +682,17 @@ impl Vehicle {
         } else {
             (raw_thr, raw_brk)
         };
-        self.throttle_f = filter_pedal(self.throttle_f, thr_in, assists.throttle_filter, dt);
+        // Rear-axle slip angle (slide assists): CG-to-rear-axle distance from the car data.
+        let cg_to_rear = self.com_local.y - self.def.wheels[2].position_m[1];
+        let rear_axle = rear_axle_slip(v_fwd, v_left, ch.ang_vel.dot(up), cg_to_rear);
+        let st = slide_throttle(assists, self.slide_class, rear_axle, input.steer);
+        // `scale` is exactly 1.0 unless the slide throttle is active (bit-identical otherwise).
+        let thr_target = if st.scale < 1.0 {
+            thr_in * st.scale
+        } else {
+            thr_in
+        };
+        self.throttle_f = filter_pedal(self.throttle_f, thr_target, st.filter, dt);
         self.brake_f = filter_pedal(self.brake_f, brk_in, assists.brake_filter, dt);
         let handbrake = input.handbrake.clamp(0.0, 1.0);
 
@@ -781,6 +799,8 @@ impl Vehicle {
             speed: v_fwd,
             body_slip: body_slip(v_fwd, v_left),
             rear_slip: 0.5 * (self.wheels[2].alpha_lag + self.wheels[3].alpha_lag),
+            rear_axle_slip: rear_axle,
+            slide_class: self.slide_class,
             pull: eff.steer_pull,
             ratio_scale: eff.steer_ratio_scale.max(0.05),
         };
@@ -948,6 +968,26 @@ impl Vehicle {
             force += f;
             torque += (p - ch.com).cross(f);
         }
+        // Slide gyro (keyboard/gamepad help only; 0 with countersteer help off).
+        let gyro = gyro_yaw_torque(
+            &GyroInput {
+                v_fwd,
+                v_left,
+                yaw_rate,
+                force_left: -force.dot(right),
+                force_fwd: force.dot(fwd),
+                rear_axle_slip: rear_axle,
+                mass: self.def.mass_kg,
+                yaw_inertia: self.def.inertia_kgm2[2],
+                wheelbase,
+                driver_steer: input.steer,
+            },
+            assists.countersteer_help,
+            self.slide_class,
+        );
+        if gyro != 0.0 {
+            torque += up * gyro;
+        }
         self.force = force;
         self.torque = torque;
 
@@ -979,6 +1019,7 @@ impl Vehicle {
             engine_heat: self.heat,
             fuel: self.fuel,
             aquaplane,
+            slide_gyro_nm: gyro,
         };
     }
 

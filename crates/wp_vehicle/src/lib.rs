@@ -48,6 +48,7 @@ pub mod ground;
 pub mod math;
 pub mod metrics;
 pub mod rig;
+pub mod slide;
 pub mod snapshot;
 pub mod steering;
 pub mod surface;

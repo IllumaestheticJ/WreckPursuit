@@ -205,7 +205,7 @@ CARS = [
             rear=dict(kind="disc", d_mm=297, pistons_mm=[38], pad_mu=0.40),
             bar=P_MODERN, handbrake_frac=0.9,
         ),
-        steer=dict(ratio=15.0, turn_circle_m=10.4, ackermann=0.5, rack_speed=1.6),
+        steer=dict(ratio=15.0, turn_circle_m=9.3, ackermann=0.5, rack_speed=1.6),
         price=28000,
         durability=2,
         note=("The drift scene's favourite: balanced, light, and with a 1.5-way LSD that locks on "
@@ -267,7 +267,7 @@ CARS = [
             rear=dict(kind="disc", d_mm=324, pistons_mm=[36, 36], pad_mu=0.40),
             bar=P_MODERN, handbrake_frac=0.8,
         ),
-        steer=dict(ratio=15.5, turn_circle_m=11.0, ackermann=0.55, rack_speed=1.4),
+        steer=dict(ratio=15.5, turn_circle_m=10.2, ackermann=0.55, rack_speed=1.4),
         price=48000,
         durability=3,
         note=("A heavy, stable highway missile. Off boost below 3000 rpm it feels ordinary; past "
@@ -330,7 +330,7 @@ CARS = [
             rear=dict(kind="disc", d_mm=330, pistons_mm=[45], pad_mu=0.40),
             bar=P_MODERN, handbrake_frac=0.8,
         ),
-        steer=dict(ratio=15.7, turn_circle_m=11.6, ackermann=0.6, rack_speed=1.4),
+        steer=dict(ratio=15.7, turn_circle_m=10.4, ackermann=0.6, rack_speed=1.4),
         price=42000,
         durability=3,
         note=("Big V8 noise and big straight-line pace for the money. It is traction-limited "
@@ -461,7 +461,7 @@ CARS = [
             rear=dict(kind="disc", d_mm=328, pistons_mm=[42], pad_mu=0.40),
             bar=P_MODERN, handbrake_frac=0.8,
         ),
-        steer=dict(ratio=15.4, turn_circle_m=11.0, ackermann=0.55, rack_speed=1.5),
+        steer=dict(ratio=15.4, turn_circle_m=10.3, ackermann=0.55, rack_speed=1.5),
         price=36000,
         durability=3,
         note=("The precision instrument: near 50:50 balance, a howling 8000 rpm six and a diff "
@@ -587,7 +587,7 @@ CARS = [
             rear=dict(kind="disc", d_mm=310, pistons_mm=[36, 36], pad_mu=0.42),
             bar=P_MODERN, handbrake_frac=0.6,
         ),
-        steer=dict(ratio=16.0, turn_circle_m=11.8, ackermann=0.5, rack_speed=1.6),
+        steer=dict(ratio=16.0, turn_circle_m=10.5, ackermann=0.5, rack_speed=1.6),
         price=120000,
         durability=1,
         note=("The poster car. Rear-biased mid-engine weight, a screaming 8500 rpm V8 and the "

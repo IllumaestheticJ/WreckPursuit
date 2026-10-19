@@ -133,7 +133,7 @@ Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 1197 N·m/whe
 
 ## Steering
 
-Ratio 16.0:1. Kerb-to-kerb turning circle 11.8 m → outer-front path radius 5.79 m, rear-axle-centre radius 4.49 m → mean road-wheel lock δ = atan(L/R) = **0.500 rad (28.6°)** (outer 25.0°, inner 33.3° at full Ackermann; `ackermann_frac` 0.50). Rack speed 1.6 rad/s.
+Ratio 16.0:1. Kerb-to-kerb turning circle 10.5 m → outer-front path radius 5.14 m, rear-axle-centre radius 3.76 m → mean road-wheel lock δ = atan(L/R) = **0.577 rad (33.1°)** (outer 28.5°, inner 39.2° at full Ackermann; `ackermann_frac` 0.50). Rack speed 1.6 rad/s.
 
 ## Performance
 
