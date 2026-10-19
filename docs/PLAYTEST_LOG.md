@@ -114,3 +114,4 @@ the schedule could hunt (1→2→1). New automatic (`crates/wp_vehicle/README.md
 | 25 | Some cars load their LOD too slowly (pop-in) | helper `lead/fix-lod-popin` (C testbed meshes + D traffic LOD) | dispatched |
 | 26 | Simulate LSDs in certain cars | A (vehicle) + H (car data) | dispatched |
 | 27 | Audio for wheelspin | J (audio) | dispatched |
+| 28 | All cars understeer too much | helper `lead/handling-balance`: measure understeer per car and assist profile (lock reduction, steer filter, ESC, tyres, setup), fix at the root, keep the wheel profile raw | dispatched |
