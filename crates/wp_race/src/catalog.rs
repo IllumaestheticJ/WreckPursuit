@@ -19,6 +19,9 @@ use crate::bridge::{course_from_route, CityRace};
 /// Corridor margin added to half the widest carriageway, m (same as the city sprints).
 pub const CORRIDOR_MARGIN_M: f32 = 3.0;
 
+/// Matches `rules.toml [common] corridor_margin_m`: gates span the corridor plus this, m.
+pub const GATE_CORRIDOR_MARGIN_M: f32 = 2.0;
+
 /// Which city a race runs in (the testbed's city ids).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RaceCity {
@@ -53,6 +56,15 @@ pub enum CourseSpec {
         /// Start POI name.
         start: &'static str,
         /// Finish point, m (z ignored by the planner).
+        finish: [f32; 3],
+    },
+    /// Point to point from a start point facing `heading` (unit XY) to a finish point.
+    Points {
+        /// Start (pole position), m.
+        start: [f32; 3],
+        /// Start heading, unit XY.
+        heading: [f32; 2],
+        /// Finish point, m.
         finish: [f32; 3],
     },
     /// Closed circuit through these points in driving order (`World::plan_circuit`); the
@@ -233,7 +245,7 @@ pub fn races() -> Vec<RaceDef> {
                 finish: "Knob Observatory Lot",
             },
             length_hint_m: 1001.0,
-            ai: &[MARA, VIC, JUNO, DEZ],
+            ai: &[MARA, VIC, JUNO],
             seed: 16,
             prior_meets: 0,
         },
@@ -255,17 +267,21 @@ pub fn races() -> Vec<RaceDef> {
         RaceDef {
             id: "lantern_checkpoint",
             name: "Lantern Row checkpoint run",
-            blurb: "Illegal daytime run through downtown: big purse, every cop in town.",
+            blurb: "Illegal daytime zig-zag through downtown: big purse, every cop in town.",
             city: RaceCity::Vesper,
             kind: RaceKind::Checkpoint,
             legality: Legality::IllegalDaytime,
             time_of_day_h: 14.0,
-            traffic_density: 0.5,
-            course: CourseSpec::PoiToPoint {
-                start: "Lantern Run",
-                finish: [250.0, -350.0, 0.0],
+            // Daytime downtown at higher densities gridlocks the junction boxes.
+            traffic_density: 0.2,
+            // Down Lantern Row's centre avenue, then east and south through the grid. (From
+            // the Lantern Run grid the AI jams at the turn by Central Precinct.)
+            course: CourseSpec::Points {
+                start: [2.0, 230.0, 0.0],
+                heading: [0.0, -1.0],
+                finish: [300.0, -150.0, 0.0],
             },
-            length_hint_m: 1346.0,
+            length_hint_m: 665.0,
             ai: &[JUNO, DEZ, TITO],
             seed: 31,
             prior_meets: 2,
@@ -320,9 +336,22 @@ pub fn plan_course(world: &World, def: &RaceDef) -> Option<CityRace> {
                 finish,
             )?
         }
+        CourseSpec::Points {
+            start,
+            heading,
+            finish,
+        } => world.plan_route(start, Some(heading), finish)?,
         CourseSpec::Circuit { polygon } => world.plan_circuit(polygon)?,
     };
-    let course = course_from_route(&route, CORRIDOR_MARGIN_M);
+    let mut course = course_from_route(&route, CORRIDOR_MARGIN_M);
+    // A street race uses every lane: a checkpoint is passed anywhere inside the legal corridor
+    // (half-width + the rules' 2 m margin), not only across the planned lane's carriageway.
+    // Without this an AI overtaking in the outer lane of Loop 9 misses a gate and is never
+    // credited with the lap.
+    let span = 2.0 * (course.corridor_half_width_m + GATE_CORRIDOR_MARGIN_M);
+    for g in &mut course.gates {
+        g.width_m = g.width_m.max(span);
+    }
     Some(CityRace { route, course })
 }
 

@@ -229,3 +229,51 @@ fn a_capture_mid_race_is_a_dnf_and_hands_off_to_the_end_of_run_panel() {
     }
     panic!("never captured");
 }
+
+/// `apps/simcli/scenarios/race/pick_<id>.ron`: each picker race as a simcli v2 scenario (the
+/// browser's scenario with a 10 s duration). `WP_RACE_WRITE_SCENARIOS=1` rewrites the files;
+/// otherwise the files must match what the browser builds.
+#[test]
+fn race_scenario_files_match_the_picker() {
+    let dir =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/simcli/scenarios/race");
+    for def in wp_race::catalog::races() {
+        let mut sc = race_scenario(&def, CAR, DamageMode::Arcade, false).unwrap();
+        sc.duration_s = 10.0;
+        sc.expect = vec![
+            simcli::scenario::Expect::TotalLoss {
+                entity: Some("player".into()),
+                expected: false,
+            },
+            simcli::scenario::Expect::TotalLoss {
+                entity: Some(crate::race::ai_entity_id(&def.ai[0])),
+                expected: false,
+            },
+        ];
+        let path = dir.join(format!("pick_{}.ron", def.id));
+        if std::env::var("WP_RACE_WRITE_SCENARIOS").is_ok() {
+            let header = format!(
+                "// wp_race picker race \"{}\" ({}): {}\n\
+                 // Generated from wp_race::catalog by wp_wasm's race_scenario_files_match_the_picker\n\
+                 // (WP_RACE_WRITE_SCENARIOS=1); the browser's race_start builds the same scenario with\n\
+                 // the player's car. Entity \"player\" sits on the last grid slot, the AI field ahead.\n\
+                 // Run standalone, simcli has no race block or AI driver, so the cars wait on the grid\n\
+                 // for 10 s; crates/wp_race/tests/race_picker.rs races it to the finish with wp_opponent\n\
+                 // AI in every seat and checks the expectation ranges.\n",
+                def.name,
+                def.id,
+                def.blurb
+            );
+            std::fs::write(&path, header + &sc.to_ron() + "\n").unwrap();
+        }
+        let text =
+            std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        let file = crate::scenario::from_ron(&text).unwrap();
+        assert_eq!(
+            file,
+            sc,
+            "{} is out of date (WP_RACE_WRITE_SCENARIOS=1)",
+            path.display()
+        );
+    }
+}

@@ -77,6 +77,8 @@ pub fn race_scenario(
     sc.seed = def.seed;
     sc.time_of_day_h = def.time_of_day_h;
     sc.time_ratio = 1.0;
+    // AI cars drive with the AI assist profile; the testbed applies the player's own preset.
+    sc.assists = simcli::scenario::AssistSpec::Ai;
     sc.police_presence = Some(def.police_presence());
     sc.traffic_density = Some(def.traffic_density);
     let world = simcli::data::load_world(mem_data(), &sc.city, world_config(&sc))
