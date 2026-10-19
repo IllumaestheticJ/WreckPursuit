@@ -31,7 +31,10 @@ Never hand-edit the generated files; the next build overwrites them.
 
 ## Derivations (summary — each spec sheet shows the numbers)
 
-- `mass_kg` = curb + 75 kg driver.
+- `mass_kg` = curb (full tank) − half a tank (0.745 kg/L) + 75 kg driver; `fuel_capacity_l`
+  set per car (contract v0.2.0: fuel in `mass_kg` at 50 %).
+- Automatics carry `torque_converter` (stall rpm, stall ratio, coupling rpm); on-demand AWD
+  cars use `AwdOnDemand` (the estimator assumes the coupling closed at launch).
 - Inertia: box formula `m·(a²+b²)/12` per axis × mass-concentration factor `k` (0.75 mid-engine
   … 0.97 long-overhang/body-on-frame).
 - CdA = Cd × `area_k`·W·H (+ police lightbar 0.05 m²).

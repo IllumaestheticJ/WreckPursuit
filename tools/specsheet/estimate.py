@@ -52,19 +52,22 @@ DRIVETRAIN_EFF = {"Fwd": 0.88, "Rwd": 0.85, "Awd": 0.80}
 
 
 def layout_name(layout) -> str:
-    """'Fwd' | 'Rwd' | 'Awd' from the JSON layout value."""
+    """'Fwd' | 'Rwd' | 'Awd' from the JSON layout value (on-demand AWD counts as 'Awd')."""
     if isinstance(layout, str):
         return layout
-    return next(iter(layout))
+    return "Awd" if next(iter(layout)).startswith("Awd") else next(iter(layout))
 
 
 def front_split(layout) -> float:
-    """Fraction of drive torque to the front axle."""
+    """Fraction of drive torque to the front axle. For on-demand AWD the coupling is assumed
+    closed (the hard-launch case): front = 1 − max_rear_split."""
     name = layout_name(layout)
     if name == "Fwd":
         return 1.0
     if name == "Rwd":
         return 0.0
+    if "AwdOnDemand" in layout:
+        return 1.0 - float(layout["AwdOnDemand"]["max_rear_split"])
     return float(layout["Awd"]["front_split"])
 
 

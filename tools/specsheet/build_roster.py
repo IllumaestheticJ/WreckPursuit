@@ -31,7 +31,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import estimate  # noqa: E402
-from roster_inputs import CARS, DRIVER_KG  # noqa: E402
+from roster_inputs import CARS, DRIVER_KG, FUEL_KG_PER_L  # noqa: E402
 
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 DATA = os.path.join(REPO, "data")
@@ -121,12 +121,20 @@ def diff_text(d):
 
 
 def layout_json(layout):
+    if isinstance(layout, tuple) and layout[0] == "AwdOnDemand":
+        return {"AwdOnDemand": {"base_front_split": r(layout[1], 2),
+                                "max_rear_split": r(layout[2], 2),
+                                "engage_slip": r(layout[3], 3)}}
     if isinstance(layout, tuple):
         return {"Awd": {"front_split": r(layout[1], 2)}}
     return layout
 
 
 def layout_text(layout):
+    if isinstance(layout, tuple) and layout[0] == "AwdOnDemand":
+        return (f"on-demand AWD, {layout[1] * 100:.0f} % front with the coupling open, up to "
+                f"{layout[2] * 100:.0f} % rear once the fronts out-spin the rears by "
+                f"{layout[3] * 100:.0f} %")
     if isinstance(layout, tuple):
         return f"AWD, {layout[1] * 100:.0f} % front"
     return {"Fwd": "FWD", "Rwd": "RWD"}[layout]
@@ -145,7 +153,9 @@ def compact_json(obj) -> str:
 def derive(c: dict) -> tuple[dict, dict]:
     """Return (VehicleDef JSON dict, derivation record for the spec sheet)."""
     d: dict = {}
-    m = c["curb_kg"] + DRIVER_KG
+    fuel_kg = 0.5 * c["fuel_l"] * FUEL_KG_PER_L
+    m = c["curb_kg"] - fuel_kg + DRIVER_KG
+    d["fuel_kg"] = fuel_kg
     w, l, h = c["body"]
     L = c["wheelbase"]
     tf, tr = c["track_f"], c["track_r"]
@@ -304,6 +314,11 @@ def derive(c: dict) -> tuple[dict, dict]:
             "diff_rear": diff_json(c["trans"]["diff_r"]),
             "clutch_max_nm": r(d["engine"]["clutch"], 0),
             "shift_time_s": r(c["trans"]["shift"], 3),
+            **({"torque_converter": {
+                "stall_rpm": r(c["trans"]["torque_converter"]["stall_rpm"], 0),
+                "stall_torque_ratio": r(c["trans"]["torque_converter"]["ratio"], 2),
+                "coupling_rpm": r(c["trans"]["torque_converter"]["coupling_rpm"], 0),
+            }} if c["trans"].get("torque_converter") else {}),
         },
         "wheels": [
             wheel(-tf / 2, L / 2, tl_f, tw_f, un_f, True),
@@ -332,6 +347,7 @@ def derive(c: dict) -> tuple[dict, dict]:
         "lattice_id": c["id"],
         "base_price": int(c["price"]),
         "durability_class": int(c["durability"]),
+        "fuel_capacity_l": r(c["fuel_l"], 1),
     }
     return j, d
 
@@ -738,8 +754,9 @@ def spec_md(c: dict, j: dict, d: dict, est: dict, lat_log: list[str], lat: dict)
 
     o.append("## Mass, geometry, CG\n")
     o.append(fmt_table(["Quantity", "Value", "Derivation"], [
-        ["Curb mass", f"{c['curb_kg']:.0f} kg", "class spec data"],
-        ["`mass_kg`", f"{m:.0f} kg", f"curb + {DRIVER_KG:.0f} kg driver"],
+        ["Curb mass", f"{c['curb_kg']:.0f} kg", "class spec data (full tank)"],
+        ["Fuel tank", f"{c['fuel_l']:.0f} L", f"`fuel_capacity_l`; half a tank = {d['fuel_kg']:.0f} kg at {FUEL_KG_PER_L} kg/L"],
+        ["`mass_kg`", f"{m:.0f} kg", f"curb − half tank + {DRIVER_KG:.0f} kg driver (contract: fuel at 50 %)"],
         ["Front weight", f"{c['front_frac']:.3f}", f"axle loads {m * c['front_frac']:.0f} / {m * (1 - c['front_frac']):.0f} kg"],
         ["Wheelbase", f"{L:.3f} m", "spec"],
         ["Track F / R", f"{c['track_f']:.3f} / {c['track_r']:.3f} m", "spec"],
@@ -780,7 +797,12 @@ def spec_md(c: dict, j: dict, d: dict, est: dict, lat_log: list[str], lat: dict)
 
     o.append("## Drivetrain\n")
     o.append(f"{tr['desc']}. Layout **{layout_text(tr['layout'])}**; front diff: "
-             f"{diff_text(tr['diff_f'])}; rear diff: {diff_text(tr['diff_r'])}. Clutch capacity "
+             f"{diff_text(tr['diff_f'])}; rear diff: {diff_text(tr['diff_r'])}. "
+             + (f"Torque converter: stall {tr['torque_converter']['stall_rpm']} rpm, "
+                f"{tr['torque_converter']['ratio']:.1f}× at stall, couples 1:1 from "
+                f"{tr['torque_converter']['coupling_rpm']} rpm (class-typical for the gearbox). "
+                if tr.get("torque_converter") else "")
+             + f"Clutch capacity "
              f"{tr['clutch_factor']:.2f} × peak torque = {de['clutch']:.0f} N·m. Shift time "
              f"{tr['shift']:.2f} s.\n")
     rows = []

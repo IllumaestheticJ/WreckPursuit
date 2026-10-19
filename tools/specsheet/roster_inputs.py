@@ -14,13 +14,16 @@ Per-car keys
 ------------
 id, display_name, cls, analog_of, era ('70s' | '80s' | '90s' | '2000s' | '2010s'), profile
 ('hatch' | 'sedan' | 'coupe' | 'mr' | 'truck' | 'suv'), curb_kg, front_frac, wheelbase,
-track_f, track_r, body (w, l, h), clearance, front_overhang (front axle → bumper face, m), cg (m), cg_why, inertia_k (roll, pitch, yaw
+track_f, track_r, body (w, l, h), fuel_l (tank, L), clearance, front_overhang (front axle → bumper face, m), cg (m), cg_why, inertia_k (roll, pitch, yaw
 scale on the box formula), cd, area_k (frontal area = area_k·w·h), extra_cda (lightbar etc.),
 lift (front, rear Cl·A), engine{...}, trans{...}, tires{...}, susp{...}, align{...},
 brakes{...}, steer{...}, price, durability, note, breaks, sources, lattice{...}.
 """
 
-DRIVER_KG = 75.0  # VehicleDef.mass_kg = curb + one driver
+DRIVER_KG = 75.0  # one driver
+FUEL_KG_PER_L = 0.745  # petrol
+# VehicleDef.mass_kg = curb (full tank, as manufacturer curb figures are quoted) − half a tank
+# + one driver: the contract (v0.2.0) puts fuel in mass_kg at 50 % fill.
 
 # Brake line pressure at full pedal with ABS cycling, bar. Modern boosted systems reach
 # 100-120 bar in a panic stop; 70s single-diaphragm boosters with organic pads ~65 bar.
@@ -37,6 +40,7 @@ CARS = [
         era="90s",
         profile="hatch",
         curb_kg=1050.0,
+        fuel_l=45,
         front_frac=0.62,
         wheelbase=2.62,
         track_f=1.475,
@@ -100,6 +104,7 @@ CARS = [
         era="2000s",
         profile="sedan",
         curb_kg=1400.0,
+        fuel_l=60,
         front_frac=0.61,
         wheelbase=2.64,
         track_f=1.53,
@@ -162,6 +167,7 @@ CARS = [
         era="2000s",
         profile="coupe",
         curb_kg=1250.0,
+        fuel_l=65,
         front_frac=0.55,
         wheelbase=2.525,
         track_f=1.48,
@@ -223,6 +229,7 @@ CARS = [
         era="90s",
         profile="coupe",
         curb_kg=1550.0,
+        fuel_l=70,
         front_frac=0.53,
         wheelbase=2.55,
         track_f=1.52,
@@ -285,6 +292,7 @@ CARS = [
         era="2010s",
         profile="coupe",
         curb_kg=1700.0,
+        fuel_l=60,
         front_frac=0.54,
         wheelbase=2.72,
         track_f=1.58,
@@ -347,6 +355,7 @@ CARS = [
         era="70s",
         profile="coupe",
         curb_kg=1650.0,
+        fuel_l=80,
         front_frac=0.56,
         wheelbase=2.95,
         track_f=1.52,
@@ -370,9 +379,10 @@ CARS = [
             why="Net (installed, with accessories and exhaust) output class for early-70s 7.2 L big-blocks, i.e. well below the period gross ratings; torque peaks low as owner dynos show for long-runner carbureted big-blocks.",
         ),
         trans=dict(
-            desc="3-speed automatic (modelled as a 3-speed with long shift), open live rear axle",
+            desc="3-speed automatic with torque converter, open live rear axle",
             layout="Rwd",
             gears=[2.45, 1.45, 1.00], final=3.23, reverse=2.20, shift=0.40,
+            torque_converter=dict(stall_rpm=2200, ratio=2.1, coupling_rpm=2800),
             diff_f="Open", diff_r="Open", clutch_factor=1.5,
         ),
         tires=dict(front="235/70R15", rear="235/70R15", compound="vintage_bias", unsprung=(30.0, 45.0)),
@@ -413,6 +423,7 @@ CARS = [
         era="2000s",
         profile="sedan",
         curb_kg=1550.0,
+        fuel_l=63,
         front_frac=0.51,
         wheelbase=2.73,
         track_f=1.51,
@@ -475,6 +486,7 @@ CARS = [
         era="2010s",
         profile="hatch",
         curb_kg=1500.0,
+        fuel_l=55,
         front_frac=0.60,
         wheelbase=2.63,
         track_f=1.535,
@@ -498,8 +510,8 @@ CARS = [
             why="Class-typical 2010s 2.0 T (~110 kW/L) with the electronically flattened torque plateau owner dynos show.",
         ),
         trans=dict(
-            desc="6-speed dual-clutch, on-demand rear coupling (modelled as fixed 65/35 split), open diffs with brake-based torque vectoring (assist)",
-            layout=("Awd", 0.65),
+            desc="6-speed dual-clutch, on-demand clutch-pack rear coupling (95 % front until the fronts slip 5 %, then up to 50 % rear), open diffs with brake-based torque vectoring (assist)",
+            layout=("AwdOnDemand", 0.95, 0.50, 0.05),
             gears=[3.46, 2.15, 1.45, 1.10, 0.87, 0.71], final=3.65, reverse=3.00, shift=0.08,
             diff_f="Open", diff_r="Open", clutch_factor=1.4,
         ),
@@ -537,6 +549,7 @@ CARS = [
         era="90s",
         profile="mr",
         curb_kg=1300.0,
+        fuel_l=82,
         front_frac=0.42,
         wheelbase=2.45,
         track_f=1.51,
@@ -600,6 +613,7 @@ CARS = [
         era="2010s",
         profile="truck",
         curb_kg=2400.0,
+        fuel_l=98,
         front_frac=0.57,
         wheelbase=3.645,
         track_f=1.745,
@@ -622,9 +636,10 @@ CARS = [
             why="Class-typical 2010s 5.3 L truck V8 (~50 kW/L), torque-rich low end per owner dyno averages.",
         ),
         trans=dict(
-            desc="6-speed automatic (modelled with 0.30 s shifts), automatic-locking rear diff modelled as high-preload LSD; 4WD transfer case is a mod",
+            desc="6-speed automatic with lock-up torque converter, automatic-locking rear diff modelled as high-preload LSD; 4WD transfer case is a mod",
             layout="Rwd",
             gears=[4.03, 2.36, 1.53, 1.15, 0.85, 0.67], final=3.42, reverse=3.06, shift=0.30,
+            torque_converter=dict(stall_rpm=2200, ratio=2.0, coupling_rpm=2600),
             diff_f="Open", diff_r=dict(preload=150.0, power=0.60, coast=0.20), clutch_factor=1.6,
         ),
         tires=dict(front="265/70R17", rear="265/70R17", compound="all_terrain", unsprung=(40.0, 55.0)),
@@ -663,6 +678,7 @@ CARS = [
         era="2010s",
         profile="sedan",
         curb_kg=1900.0,
+        fuel_l=72,
         front_frac=0.53,
         wheelbase=3.05,
         track_f=1.60,
@@ -686,9 +702,10 @@ CARS = [
             why="Class-typical 2010s 3.6-3.7 L police V6 (~59 kW/L) per fleet spec-class data.",
         ),
         trans=dict(
-            desc="5-speed automatic, mild rear LSD (pursuit package)",
+            desc="5-speed automatic with torque converter, mild rear LSD (pursuit package)",
             layout="Rwd",
             gears=[3.59, 2.19, 1.41, 1.00, 0.83], final=3.07, reverse=3.16, shift=0.30,
+            torque_converter=dict(stall_rpm=2400, ratio=2.0, coupling_rpm=2800),
             diff_f="Open", diff_r=dict(preload=40.0, power=0.30, coast=0.15), clutch_factor=1.6,
         ),
         tires=dict(front="225/60R18", rear="225/60R18", compound="police_pursuit", unsprung=(26.0, 28.0)),
@@ -726,6 +743,7 @@ CARS = [
         era="2010s",
         profile="sedan",
         curb_kg=2000.0,
+        fuel_l=70,
         front_frac=0.56,
         wheelbase=2.87,
         track_f=1.66,
@@ -749,9 +767,10 @@ CARS = [
             why="Class-typical 2010s 3.5 TT V6 (~78 kW/L), boost plateau from 2500 rpm per fleet spec-class data and owner dynos.",
         ),
         trans=dict(
-            desc="6-speed automatic, AWD (modelled as fixed 55/45 split), open diffs",
-            layout=("Awd", 0.55),
+            desc="6-speed automatic with torque converter, on-demand AWD (90 % front until the fronts slip 5 %, then up to 50 % rear), open diffs",
+            layout=("AwdOnDemand", 0.90, 0.50, 0.05),
             gears=[4.48, 2.87, 1.84, 1.41, 1.00, 0.74], final=3.16, reverse=2.88, shift=0.30,
+            torque_converter=dict(stall_rpm=2600, ratio=1.9, coupling_rpm=3000),
             diff_f="Open", diff_r="Open", clutch_factor=1.6,
         ),
         tires=dict(front="245/55R18", rear="245/55R18", compound="police_pursuit", unsprung=(28.0, 28.0)),
@@ -787,6 +806,7 @@ CARS = [
         era="2010s",
         profile="suv",
         curb_kg=2600.0,
+        fuel_l=98,
         front_frac=0.53,
         wheelbase=2.95,
         track_f=1.73,
@@ -809,9 +829,10 @@ CARS = [
             why="Same class engine as the Hauler (2010s 5.3 L truck V8).",
         ),
         trans=dict(
-            desc="6-speed automatic, open rear diff",
+            desc="6-speed automatic with torque converter, open rear diff",
             layout="Rwd",
             gears=[4.03, 2.36, 1.53, 1.15, 0.85, 0.67], final=3.08, reverse=3.06, shift=0.30,
+            torque_converter=dict(stall_rpm=2200, ratio=2.0, coupling_rpm=2600),
             diff_f="Open", diff_r="Open", clutch_factor=1.6,
         ),
         tires=dict(front="265/60R17", rear="265/60R17", compound="police_pursuit", unsprung=(36.0, 50.0)),
@@ -849,6 +870,7 @@ CARS = [
         era="80s",
         profile="sedan",
         curb_kg=1000.0,
+        fuel_l=45,
         front_frac=0.62,
         wheelbase=2.50,
         track_f=1.43,

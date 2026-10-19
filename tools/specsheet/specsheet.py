@@ -85,6 +85,8 @@ def load():
 
 def layout(j):
     lay = j["drivetrain"]["layout"]
+    if isinstance(lay, dict) and "AwdOnDemand" in lay:
+        return f"AWD on-demand (≤ {lay['AwdOnDemand']['max_rear_split'] * 100:.0f} % rear)"
     if isinstance(lay, dict):
         return f"AWD {lay['Awd']['front_split'] * 100:.0f}/{100 - lay['Awd']['front_split'] * 100:.0f}"
     return {"Fwd": "FWD", "Rwd": "RWD"}[lay]
@@ -254,7 +256,7 @@ def validation_md(rows) -> str:
 # Explanations for sim misses (kept next to the targets so they stay in sync).
 SHARED = {
     "A (sim conservative)": "wp_vehicle's metric run is a little slower and longer than published road tests across the board (TCS-on launch, ABS release cycle, shift torque cut): its own debug coupe at 200 kW/t runs 0-100 in 5.2 s and the debug cars stop in ≈ 42.5 m. Car data was not inflated to compensate; flagged to workstream 02.",
-    "B (automatic)": "automatic gearbox modelled without torque-converter multiplication, so launches are soft (contract request #1, accepted for v0.2.0 — re-measure after it lands).",
+    "B (automatic)": "automatic gearbox without torque-converter multiplication in the sim yet: the five automatics carry `torque_converter` data (contract v0.2.0) but `wp_vehicle` ignores it until workstream A implements it — re-measure then.",
     "C (tire-limited)": "limited by the tire compound, not the chassis: setup changes (bars, camber, CG, LSD) moved it < 1 %, a grippier compound moves it directly (measured).",
 }
 
@@ -270,10 +272,14 @@ SIM_NOTES = {
     ("Lindwurm 4T", "100-0"): "A — 0.5 m over.",
     ("Lucciola 350", "skidpad"): "C — 0.95 g on `sport`, 1.09 g on `semi_slick` (measured). A 90s exotic on its stock tires tested ≈ 0.95 g; the prompt-09 ≥ 1.0 g target needs either a stickier `sport` compound (02) or giving the Lucciola semi-slicks — lead's call.",
     ("Hauler 1500", "0-100"): "B + 2WD with an empty bed; semi-slicks reach 7.9 s, so traction matters too. The 4WD mod (08) should land it in band.",
-    ("Hauler 1500", "skidpad"): "C — 0.01 g under on the `street` stand-in for `all_terrain`.",
+    ("Hauler 1500", "skidpad"): "C — now on 02's `all_terrain` (≈ 0.9 × street, as requested): 0.63 g vs 0.68-0.76 published for half-tons on all-terrain tires. Joint re-tune with 02 (compound peak or cornering stiffness) rather than a chassis change.",
+    ("Ironside 440", "0-100"): "B + bias-ply traction: on 02's `vintage_bias` (longitudinal D 0.93) the 560 N·m launch spins the rears, and the converter's stall multiplication is not simulated yet (contract v0.2.0 field set, `wp_vehicle` ignores it). Re-measure when A implements the converter.",
+    ("Ironside 440", "skidpad"): "C — 02's `vintage_bias` (≈ 0.85 × street, half the cornering stiffness, as requested) on a soft, 0.55 m-CG chassis gives 0.62 g; period road tests put the archetype at 0.70-0.75 g. Joint re-tune with 02.",
+    ("Lindwurm 4T", "0-100"): "0.04 s over after switching to on-demand AWD (`AwdOnDemand` 95 % front, up to 50 % rear at 5 % front slip — the lead's first-cut coupling, which A tunes); the fixed 65/35 split ran 5.37 s.",
+    ("Sentinel Wolfhound", "skidpad"): "C — 0.848 g, 0.002 under the band on `police_pursuit` (rounds to 0.85); on-demand AWD changed it by < 0.01 g.",
     ("Sentinel Cruiser", "0-100"): "B — 0.2 s over.",
     ("Sentinel Cruiser", "skidpad"): "C — 0.02 g under on `police_pursuit`.",
-    ("Sentinel Bastion", "skidpad"): "C — 0.01 g under; tall body-on-frame SUV.",
+    ("Sentinel Bastion", "skidpad"): "C — ≤ 0.01 g under; tall body-on-frame SUV.",
 }
 
 BARRIER_NOTES = {
