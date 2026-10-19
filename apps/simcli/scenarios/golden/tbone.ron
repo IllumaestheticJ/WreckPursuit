@@ -14,8 +14,8 @@
     expect: [
         speed_at(entity: "striker", t_s: 1.0, min: 12.0, max: 15.0),
         speed_at(entity: "victim", t_s: 1.0, min: 7.0, max: 9.0),
-    ],
-    expect_pending: [
+        // Met since wp_damage's T-bone tuning (struck side takes the full closing-energy share,
+        // rail bracing, softer side skin attachments) — promoted from expect_pending.
         crush_depth(entity: "victim", min: 0.15, max: 0.6),
         components_failed(entity: "victim", min: 1, max: 20),
         total_loss(entity: "victim", expected: false),

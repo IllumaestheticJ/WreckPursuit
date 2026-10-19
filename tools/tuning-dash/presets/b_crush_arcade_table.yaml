@@ -1,0 +1,31 @@
+# Study for workstream 03 (B): can the Arcade table reach the golden T-bone victim target
+# (crush 0.15-0.6 m, >= 1 component failed, not a total loss; apps/simcli/scenarios/golden/
+# tbone.ron expect_pending) without breaking Arcade's other promises? Guardrails:
+#  - a 56 km/h rigid barrier in Arcade is NOT a total loss ("punishing but survivable"),
+#  - B's own Arcade barrier calibration (crates/wp_damage/scenarios/{side,frontal}_arcade.ron).
+# Only modes/arcade.toml moves, so the Simulation goldens (barrier 56 totals, Sim T-bone 0.33 m)
+# are untouched by any point here. Full rigid-body sims via simcli (Rapier contacts).
+description: Arcade impulse_to_lattice_scale × component_fail_threshold_scale vs the golden T-bone target + Arcade guardrails
+probe:
+  kind: scenario
+params:
+  - {target: "mode:arcade:impulse_to_lattice_scale", label: impulse, values: [0.45, 0.55, 0.65, 0.75, 0.85, 1.0]}
+  - {target: "mode:arcade:component_fail_threshold_scale", label: fail_threshold, values: [1.2, 1.5, 1.8]}
+variants:
+  - name: tbone victim (Arcade)
+    probe: {file: apps/simcli/scenarios/golden/tbone.ron}
+    expect:
+      - {metric: victim.crush_depth_m, min: 0.15, max: 0.6}
+      - {metric: victim.components_failed, min: 1, max: 20}
+      - {metric: victim.total_loss, min: 0, max: 0}
+  - name: barrier 56 (Arcade)
+    probe: {file: apps/simcli/scenarios/golden/barrier_56kmh.ron}
+    # Run the Simulation golden in Arcade; drop its Simulation-only expectations (total_loss: true).
+    set: [{target: "scenario:mode", value: Arcade}, {target: "scenario:expect", value: []}]
+    expect:
+      - {metric: car.total_loss, min: 0, max: 0}
+  - name: side_arcade checks
+    probe: {kind: barrier_scenario, file: crates/wp_damage/scenarios/side_arcade.ron}
+  - name: frontal_arcade checks
+    probe: {kind: barrier_scenario, file: crates/wp_damage/scenarios/frontal_arcade.ron}
+plots: [victim.crush_depth_m, victim.components_failed, car.final_health, "crush_m@56"]

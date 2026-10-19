@@ -132,6 +132,47 @@ See `crates/wp_damage/README.md` → Known gaps (no inertial loads, no node self
 softer rear, approximate tangential drag, no Rapier contacts yet, glass event pending,
 pile-up spike, empty skin bindings).
 
+## Run 5 — T-bone tuning, parked-car decision, rigid-wall goldens (machine B, 2026-10-19)
+
+**T-bone tuned to target** (`golden_tbone`, Arcade, coupe at 50 km/h into the driver door of a
+moving sedan): victim crush **0.094 → 0.169 m**, components failed **0 → 1** — inside the
+0.15-0.6 / ≥ 1 targets, so I promoted them from `expect_pending` to `expect` in
+`apps/simcli/scenarios/golden/tbone.ron`. What changed (all in `wp_damage`):
+1. **Side contacts take the full energy share** (`dynamic_closing_share_side = 1.0`; nose/tail stay
+   0.5). A door is far softer than the striking car's rails, so it absorbs most of a T-bone.
+2. **The barrier harness's side impact now matches Rapier's manifold**: floor-to-roof, 1.85 m wide,
+   centred on the front door like the golden. With it the harness reproduces the golden's crush,
+   which made calibration possible (the old bumper-height footprint was ~2× too soft).
+3. **Softer lateral skin attachments** (`side_attach` 0.05e-4 m²: door/fender/quarter → body,
+   left-right members only), which is what actually holds a side skin against a nose.
+4. **Rail-to-rail bracing** (`rail_brace` 1.0e-4 m², left-right members between the inner columns
+   ahead of/behind the cabin). In a pin-jointed lattice the same lateral attachments also kept the
+   front rails from folding sideways; without them the 56 km/h frontal went 0.63 → 0.87 m. Bracing
+   the rails against each other restores it (0.63 m) and is out of reach of a side impact.
+5. **Region repair severity counts intrusion** (`max(energy ratio, deepest node displacement /
+   0.3 m)`): a door shoved 0.2 m in is a replace even if soft attachments absorbed little energy.
+Result, Sim T-bone 40 km/h: 0.21 m, struck-side front suspension + wheel failed, door severity
+0.67 (replace). Sim frontal 56: 0.63 m + TotalLoss. `crates/wp_damage/scenarios/` all pass
+(side door floors back to the prompt-03 targets 0.5 @ 40 / 0.9 @ 56).
+
+**Parked-car decision (with machine I): a 56 km/h hit into a parked car does *not* total in
+Simulation.** Physics: an equal parked car shares the energy, so each car gets a ~28 km/h barrier
+hit's worth (0.41 m crush, health 0.82, 1 failure). Machine I had already applied my run-2
+recommendation (`golden_frontal_56kmh` expects `total_loss: false`, plus the rigid-wall
+`golden_barrier_56kmh` that expects TotalLoss); I confirm both. CLAUDE.md's "one hard hit at speed
+is a total loss" is the rigid-wall case. Machine I was not reachable as a live session, so this is
+the written agreement — machine I, please object here if you disagree.
+
+**New golden: `golden_barrier_56kmh_arcade`** — the same rigid-wall 56 km/h frontal in Arcade:
+expects crush 0.2-0.9 m, health 0.5-0.95, **no** TotalLoss (measured 0.59 m any-node, health
+0.73, 1 failure). Together with the Sim golden it pins "Sim: one hard hit totals; Arcade:
+punishing but survivable".
+
+**Goldens re-blessed** (`[bless]`): the crash goldens change (`golden_barrier_56kmh`,
+`golden_frontal_56kmh`, `golden_tbone`, `crash_barrier_frontal(_sim)`, `crash_head_on`,
+`audio_sideswipe_scrape`, `regression_grid_24`) and `golden_barrier_56kmh_arcade` is new. Every
+scenario expectation passes; no non-crash golden changed.
+
 ## Response to v0.2.0 (lead run 3) — machine B, 2026-10-19
 
 Merged `main` (contract 0.2.0). My items from the "applied" entry:
@@ -213,3 +254,12 @@ Tuning for you (expect_pending results on the integrated build):
 Contract requests: #1 `SimEvent::GlassShattered` and #3 `RegionDamaged` **accepted** for v0.2.0;
 #2 `PriceTable` labour map **accepted** (same as G's #2), `repair_parts_fraction` accepted as an
 optional field. v0.2.0 waits on machine E (police) only now.
+
+
+## Lead feedback (round 6b, 2026-10-19) — head-start tasks
+
+Contract **v0.3.0** is being applied in parallel by the lead (branch `lead/contract-v0.3.0`). Do not edit `wp_contracts`; build your work so it drops onto v0.3.0 (inherent methods / local types now, trait wiring after). Merge `origin/claude/laughing-newton-0xqr6q` (the lead branch, ahead of `main` until today's gate finishes) before starting. Goal of the project right now: the **single-player greybox demo**: drive in the city, raise heat, get chased by physical police, escape or get caught, and pay the repair bill.
+
+1. Implement the v0.3.0 damage items as **inherent methods** on your damage model, using your final shapes in this doc: `save_state`/`restore_state` (bit-exact round trip test), `apply_repair(items, full)`, and `summary() -> DamageSummary` (local struct for now). The lead switches them to the trait in v0.3.0.
+2. T-bone crush: bring the side-impact intrusion toward the 0.15 m target in both modes without breaking the frontal/rear goldens (re-bless only in `[bless]` commits, with numbers).
+3. Glass-break event data (audio's #1 request): record which glass panels broke this tick, readable by the sim.

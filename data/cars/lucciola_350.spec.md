@@ -149,6 +149,6 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 263 nodes, 1691 beams, 6 detachables, 21 component mounts.
 
 - Generated with `gen-lattice --id lucciola_350 --profile coupe --width 1.9 --length 4.25 --height 1.17 --wheelbase 2.45 --mass 268.9 --car-mass 1344.5 --clearance 0.11 --front-overhang 0.85 --strength 0.8` (20% of vehicle mass in the lattice; strength from durability class 1).
-- Era `90s` passenger cell: 150 cabin/sill, 131 cross-member, 10 pillar, 14 roof rail → hss × 0.75 section.
+- Era `90s` passenger cell: 138 cabin/sill, 143 cross-member, 10 pillar, 14 roof rail → hss × 0.75 section.
 - Aluminium body: 584 outer-panel beams mild_steel → aluminum.
 - Mid-engine: engine block moved behind the cabin bulkhead (y -0.92…-1.57 m), mounted to the rear rails and the bulkhead; 10 nodes behind the bulkhead relabelled FrameRear (engine bay, not cabin); 166 rear-subframe beams → aluminum ×1.5 section (sacrificial); gearbox and half-shafts at the rear axle, side fuel tanks at the sills behind the seats; engine fails at 0.12 m, gearbox 0.08 m.

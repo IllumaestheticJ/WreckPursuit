@@ -46,9 +46,12 @@ pub struct DamageTuning {
     /// Contacts slower than this (closing speed) never deform the lattice, m/s.
     pub min_contact_speed_mps: f32,
     /// Fraction of the closing speed at which this car's lattice is crushed when the other
-    /// body is dynamic (`other_mass_kg > 0`); 0.5 splits the collision energy evenly between
-    /// two equally stiff cars instead of giving each car all of it.
+    /// body is dynamic (`other_mass_kg > 0`) and the contact is on the nose or tail; 0.5
+    /// splits a head-on's energy evenly between two equally stiff cars.
     pub dynamic_closing_share: f32,
+    /// Same as `dynamic_closing_share` for contacts on the car's side (normal along chassis
+    /// X); interpolated by the squared lateral component of the contact normal.
+    pub dynamic_closing_share_side: f32,
     /// Contacts carrying less energy (`½·J·v` after scaling) are ignored, J.
     pub min_contact_energy_j: f32,
     /// A new manifold within this lateral distance of an active impact's footprint merges
@@ -72,6 +75,9 @@ pub struct DamageTuning {
     /// Plastic strain (averaged over a region's beams, energy weighted) at which a region
     /// is billed as "replace", dimensionless.
     pub region_replace_strain: f32,
+    /// A region whose deepest node is pushed this far is billed as "replace" whatever energy
+    /// it absorbed, m.
+    pub region_replace_displacement_m: f32,
     /// Time for a failed radiator to take `overheating` from 0 to 1, s.
     pub overheat_ramp_s: f32,
     /// Net node speed over a solver tick below which the lattice counts as at rest, m/s.
@@ -114,6 +120,7 @@ impl Default for DamageTuning {
             contact_friction: 0.5,
             min_contact_speed_mps: 1.0,
             dynamic_closing_share: 0.5,
+            dynamic_closing_share_side: 1.0,
             min_contact_energy_j: 40.0,
             merge_distance_m: 0.3,
             impactor_max_age_s: 0.6,
@@ -124,6 +131,7 @@ impl Default for DamageTuning {
             total_loss_energy_per_kg: 400.0,
             structural_health_weight: 0.7,
             region_replace_strain: 0.08,
+            region_replace_displacement_m: 0.3,
             overheat_ramp_s: 45.0,
             sleep_velocity_mps: 0.01,
             sleep_ticks: 8,

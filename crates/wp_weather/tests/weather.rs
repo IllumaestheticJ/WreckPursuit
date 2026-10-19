@@ -350,6 +350,33 @@ fn fog_shortens_police_sight_and_walls_still_block() {
 }
 
 #[test]
+fn adapter_line_of_sight_is_cut_by_fog_range() {
+    let world = FlatWorld;
+    let mut w = sim(1, |c| c.locked = true);
+    let t = TimeOfDay::from_hours(12.0);
+    w.update(1.0, t, &[]);
+    let a = [0.0, 0.0, 1.0];
+    let far = [0.0, 300.0, 1.0];
+    // Clear: the full 800 m reference range, so nothing a police range uses is cut.
+    assert!((w.sight_range_m() - 800.0).abs() < 1e-3);
+    assert!(WithWeather::new(&world, &w).line_of_sight(a, far));
+    w.force(Regime::new(WeatherKind::Fog, 1.0), true);
+    w.update(1.0, t, &[]);
+    let r = w.sight_range_m();
+    assert!((100.0..160.0).contains(&r), "{r}");
+    let q = WithWeather::new(&world, &w);
+    assert!(!q.line_of_sight(a, far));
+    assert!(q.line_of_sight(a, [0.0, 100.0, 1.0]));
+    // Walls still block inside the fog range; the geometric test alone ignores fog.
+    assert!(!q.line_of_sight(a, [205.0, 0.0, 1.0]));
+    let geo = WithWeather {
+        weather_los: false,
+        ..WithWeather::new(&world, &w)
+    };
+    assert!(geo.line_of_sight(a, far));
+}
+
+#[test]
 fn adapter_reports_wet_asphalt_only_when_wet() {
     let world = FlatWorld;
     let mut w = WeatherSim::from_world(

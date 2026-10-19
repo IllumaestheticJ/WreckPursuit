@@ -57,10 +57,7 @@ export function initialUnits(map: CityMap): PoliceUnit[] {
   return [mk(1, 0, true), mk(2, 1), mk(3, 2), mk(4, 3)];
 }
 
-/** Fresh tool readiness (nothing cooling down, nothing placed). */
-export function initialReadiness(): ToolReadiness {
-  return { roadblock_s: 0, spikes_s: 0, helo_s: 0, roadblocks: [0, TOOL_RULES.roadblockMaxActive], spikes: [0, TOOL_RULES.spikesMaxActive] };
-}
+export { initialReadiness } from "../model/readiness";
 
 function moveManhattan(pos: Vec2, target: Vec2, step: number): { pos: Vec2; heading: number } {
   const dx = target[0] - pos[0];

@@ -215,6 +215,11 @@ pub struct Sections {
     pub panel: f32,
     /// Panel ↔ structure attachment.
     pub panel_attach: f32,
+    /// Left-right attachments of the door skins and rear quarter panels to the body (cabin
+    /// cage, frame): what holds the side skin against a nose in a T-bone. Fore-aft door
+    /// attachments (they carry frontal load into the body side) and all front-fender
+    /// attachments (they brace the front rails) stay `panel_attach`.
+    pub side_attach: f32,
     /// Generic frame member outside the cabin (subframe, diagonals, crossmembers).
     pub structural: f32,
     /// Passenger-cell member running fore-aft or vertically (survival cell, stronger than
@@ -222,6 +227,10 @@ pub struct Sections {
     pub cabin: f32,
     /// Passenger-cell cross-car member (floor/seat crossmembers; sets side-impact crush).
     pub cross_member: f32,
+    /// Left-right frame member ahead of / behind the cabin (subframe crossmembers).
+    pub frame_cross: f32,
+    /// Left-right member between the two inner (rail) columns ahead of / behind the cabin.
+    pub rail_brace: f32,
     /// Front/rear rail sacrificial segment (crash can).
     pub rail_soft: f32,
     /// Front/rear rail main segments.
@@ -253,9 +262,12 @@ pub const DEFAULT_SECTIONS: Sections = Sections {
     glass: 0.6e-4,
     panel: 0.25e-4,
     panel_attach: 0.25e-4,
+    side_attach: 0.05e-4,
     structural: 0.25e-4,
     cabin: 3.0e-4,
     cross_member: 0.06e-4,
+    frame_cross: 0.25e-4,
+    rail_brace: 1.0e-4,
     rail_soft: 0.5e-4,
     rail_hard: 0.9e-4,
     bumper_beam: 2.0e-4,
@@ -362,6 +374,18 @@ fn is_door(r: BodyRegion) -> bool {
             | BodyRegion::LeftDoorR
             | BodyRegion::RightDoorF
             | BodyRegion::RightDoorR
+    )
+}
+
+/// Rear quarter panels. (Front fenders are excluded on purpose: their left-right attachments
+/// brace the upper front rails against sideways folding in a frontal crush.)
+fn is_side_skin(r: BodyRegion) -> bool {
+    matches!(
+        r,
+        BodyRegion::FrontLeftFender
+            | BodyRegion::FrontRightFender
+            | BodyRegion::RearLeftQuarter
+            | BodyRegion::RearRightQuarter
     )
 }
 
@@ -792,6 +816,11 @@ pub fn generate_lattice(p: &LatticeParams) -> LatticeDef {
         let (ya, yb) = (nodes[a as usize].pos_m[1], nodes[b as usize].pos_m[1]);
         let either = |f: &dyn Fn(BodyRegion) -> bool| f(ra) || f(rb);
         let both = |f: &dyn Fn(BodyRegion) -> bool| f(ra) && f(rb);
+        // A beam that runs mostly left-right (carries side load).
+        let lateral = |a: u16, b: u16| {
+            let (pa, pb) = (nodes[a as usize].pos_m, nodes[b as usize].pos_m);
+            (pa[0] - pb[0]).abs() > (pa[1] - pb[1]).abs().max((pa[2] - pb[2]).abs())
+        };
         let same_station = ia.station == ib.station;
         let (material, area, breakable): (&str, f32, bool) = if ia.engine && ib.engine {
             ("hss", sec.engine_block * mass_scale, false)
@@ -866,7 +895,7 @@ pub fn generate_lattice(p: &LatticeParams) -> LatticeDef {
             ("hss", sec.door_beam * mass_scale, true)
         } else if both(&is_structural) {
             let (pa, pb) = (nodes[a as usize].pos_m, nodes[b as usize].pos_m);
-            let (dx, _dy, _dz) = (
+            let (dx, _dy, dz) = (
                 (pa[0] - pb[0]).abs(),
                 (pa[1] - pb[1]).abs(),
                 (pa[2] - pb[2]).abs(),
@@ -879,6 +908,14 @@ pub fn generate_lattice(p: &LatticeParams) -> LatticeDef {
                 ("hss", sec.cross_member * mass_scale, true)
             } else if cabin_zone {
                 ("hss", sec.cabin * mass_scale, true)
+            } else if lateral(a, b) && ia.col != 0 && ia.col != 4 && ib.col != 0 && ib.col != 4 {
+                // Rail-to-rail bracing between the inner columns: keeps the front/rear rails
+                // from folding sideways in a frontal, out of reach of a side impact.
+                ("hss", sec.rail_brace * mass_scale, true)
+            } else if same_station && dx > dz {
+                // Left-right members of the engine bay / rear floor (subframe crossmembers):
+                // they carry side load and barely any fore-aft crush load.
+                ("hss", sec.frame_cross * mass_scale, true)
             } else if both(&|r| r == BodyRegion::FrameRear) {
                 ("hss", sec.structural * REAR_RAIL_FACTOR * mass_scale, true)
             } else {
@@ -893,6 +930,8 @@ pub fn generate_lattice(p: &LatticeParams) -> LatticeDef {
             ("aluminum", s * mass_scale.sqrt(), true)
         } else if !is_structural(ra) && !is_structural(rb) {
             ("mild_steel", sec.panel * mass_scale.sqrt(), true)
+        } else if (either(&is_door) || either(&is_side_skin)) && lateral(a, b) {
+            ("mild_steel", sec.side_attach * mass_scale.sqrt(), true)
         } else {
             ("mild_steel", sec.panel_attach * mass_scale.sqrt(), true)
         };
