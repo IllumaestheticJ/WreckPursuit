@@ -150,7 +150,7 @@
   },
   "aero_downforce_coeffs": [0.0, 0.0],
   "lattice_id": "furrow_24",
-  "base_price": 6500,
+  "base_price": 21000,
   "durability_class": 4,
   "fuel_capacity_l": 60.0
 }

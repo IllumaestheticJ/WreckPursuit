@@ -44,7 +44,7 @@
     "diff_front": "Open",
     "diff_rear": "Open",
     "clutch_max_nm": 160.0,
-    "shift_time_s": 0.3
+    "shift_time_s": 0.25
   },
   "wheels": [
     {
@@ -151,7 +151,7 @@
   },
   "aero_downforce_coeffs": [0.0, 0.0],
   "lattice_id": "tansy_13",
-  "base_price": 4500,
+  "base_price": 7000,
   "durability_class": 2,
   "fuel_capacity_l": 45.0
 }

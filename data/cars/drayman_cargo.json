@@ -156,7 +156,7 @@
   },
   "aero_downforce_coeffs": [0.0, 0.0],
   "lattice_id": "drayman_cargo",
-  "base_price": 9000,
+  "base_price": 20000,
   "durability_class": 4,
   "fuel_capacity_l": 117.0
 }
