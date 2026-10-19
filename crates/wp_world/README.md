@@ -22,7 +22,8 @@ clock. Implements `wp_contracts::WorldQuery`. No renderer dependency; compiles f
 | `geom` | Deterministic geometry (polylines, OBB, Bézier; re-exports `wp_math::{atan, atan2}`) |
 | `drive` | Shared AI driving: `DriveController` (pure pursuit + PID) and `PathFollower` (`follow_path` along any `DrivePath`) for traffic, police and racers |
 | `leader` | Leader / obstacle query (`find_leader`) + shared IDM (`CarFollowing`) so police and racers follow and stop behind vehicles like traffic does |
-| `roads` | Road-level graph view (`RoadGraphView`) for police routing / minimaps |
+| `roads` | Road-level graph view (`RoadGraphView`) for police routing / minimaps; `RoadNetworkIndex` (contract `RoadNetworkQuery`, grid-indexed `nearest_on_road`) |
+| `markings` | Painted markings derived from the lane layout (`marking_at` / `painted_at`): `WorldQuery::surface_at` reports `SurfaceType::PaintedLine` on them |
 
 City data lives in `data/city/` (see its README); importer and generator in
 `tools/city-import/`.
@@ -95,6 +96,25 @@ Derived at load (`CityMap::new`), not stored: junction connector curves (cubic B
 continuous), per-connector conflict sets (same target lane or swept paths closer than 2.4 m),
 sibling divergence distances, approach info per lane, drivable lane-km per zone and a 32 m
 uniform grid over segments, junction boxes and zones for `WorldQuery` lookups.
+
+### Painted markings (`markings`)
+Not stored in the road file; derived from the lanes, so every city gets them and a renderer
+can draw them from the same constants (`wp_world::markings::*`). `surface_at` returns
+`PaintedLine` on them before any other rule.
+
+| Marking | Where | Size / pattern |
+|---|---|---|
+| Centre line | left edge of the leftmost lane of a two-way road | double solid, 2 × 0.12 m, 0.12 m gap |
+| Lane line | between same-direction lanes | 0.12 m, dashed 3 m on / 9 m off from the lane start |
+| Separator | next to a bus lane or parking strip | 0.20 m solid |
+| Edge line | inside the curb edge | 0.15 m solid |
+| Stop line | last 0.5 m of a lane that stops (signal, all-way stop, minor approach) | full lane width |
+| Crosswalk | 0.2–1.8 m past each lane end / before each lane start at signalised and all-way-stop junctions (inside the 2 m crosswalk setback) | zebra bars 0.5 m on / 0.5 m off across the lane |
+
+Alleys and parking strips are unmarked; highways get centre, lane and edge lines but no stop
+lines or crosswalks. Each lane owns its half of a shared line, so answers do not depend on
+query order. Lanes more than 3 m above or below the queried z are ignored (grade
+separation). About 4 % of road samples are paint on Port Vesper v2 (`painted_share_is_plausible` gates 2–15 % on the 6×6 city).
 
 ### Builder rules (procgen and OSM share them)
 - Junction setback per road end from both road half-widths and the junction angle
@@ -267,6 +287,8 @@ Release, cloud container (4 vCPU), procedural 12×12, 400 agents at saturation
 | `leader::find_leader`, 60 m look-ahead, ~30 obstacles | a few µs per call | — | — |
 | Same with civilian-collision diagnostics on | avg 0.20 ms | — | — |
 | `line_of_sight`, random 300 m sight lines at eye height | ≈ 1.1 µs/query | — | — |
+| `surface_at` (round 8, incl. markings) | 0.36 µs/query, of which markings 0.10 µs (`surface_timing`) | — | — |
+| `RoadNetworkIndex::nearest_on_road` (425 edges) | 0.63 µs/query with the edge grid; linear scan was 19 µs (`nearest_on_road_timing`) | — | — |
 | `World::load` of `procedural_12x12.road.bin` (decode + `CityMap::new` + parked cars) | ≈ 17 ms (debug build ≈ 0.2 s; `ProcGenConfig::small()` ≈ 5 ms / 0.06 s) | — | — |
 | 10-min soak, 9 seeds × {0 %, 5 %} aggressive | 0 civilian–civilian collisions; 0–11 agents recycled after being stuck > 120 s (starved permissive lefts / minor approaches in saturated flow) | — | < 1 % |
 

@@ -3,7 +3,7 @@
 - **Workstream / prompt:** 05 — city, road network, signals & civilian traffic
 - **Branch:** `ws/world`
 - **Crates / folders owned:** `crates/wp_world`, `data/city/`, `tools/city-import/`
-- **Contract version built against:** 0.2.0
+- **Contract version built against:** 0.3.0
 
 ## Exposes
 All in `wp_world` (details and format spec: `crates/wp_world/README.md`).
@@ -80,6 +80,10 @@ All in `wp_world` (details and format spec: `crates/wp_world/README.md`).
   Small debris is swerved around within the lane (≤ 1.5 m, held until the rear clears);
   lane-blocking debris → lane change if the neighbour lane is free, else stop; debris in a
   junction box blocks the connectors through it; no spawning within 30 m.
+- **Painted markings** (round 8, `wp_world::markings`): `surface_at` → `SurfaceType::PaintedLine`
+  on centre/lane/edge lines, separators, stop lines and zebra crosswalks; `marking_at(&map, p)
+  -> Option<MarkingKind>` + public geometry constants for the renderer (C).
+- `RoadNetworkIndex` (contract `RoadNetworkQuery`): grid-indexed `nearest_on_road` (0.6 µs).
 - `wp_world::geom::{atan, atan2}` re-export `wp_math::{atan, atan2}` (moved in v0.2.0).
 
 ## Needs
@@ -402,3 +406,81 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
 1. Report `SurfaceType::PaintedLine` for lane markings / zebra crossings.
 2. `RoadNetworkIndex::nearest_on_road` is brute force; index it.
 3. The lead helper `lead/city-v2` (curves and elevation) is building a new procedural preset in your crate. Review its branch when it lands and coordinate via its section in this doc.
+
+### Response from D (round 8)
+1. **`SurfaceType::PaintedLine` — done** (`wp_world::markings`). Markings are derived from the
+   lane layout (no road-format change), so every city gets them, procedural, imported and v2
+   alike: double centre line, dashed lane lines (3 m on / 9 m off), solid separators next to bus
+   lanes and parking, edge lines at the curb, stop lines (last 0.5 m of a lane that stops) and
+   zebra crosswalks (0.5 m bars, 0.2–1.8 m past each stop point / before each lane start at
+   signalised and all-way-stop junctions). `CityMap::surface_at` checks them first and returns
+   `PaintedLine`. Each lane owns its half of a shared line; lanes > 3 m above or below the
+   queried z are ignored (bridges). Geometry constants and `marking_at(&map, p) ->
+   Option<MarkingKind>` are public, so **C** can draw the same lines (table in the README).
+   About 4 % of road samples are paint; cost 0.10 µs per wheel query (`surface_at` 0.36 µs
+   total), ≈ 0.04 ms per frame for 24 cars. Grip: `surfaces.toml` still has no `PaintedLine` row
+   (N), so `SurfaceTable` treats it as asphalt for now; A/N decide the wet-paint penalty.
+   **Goldens:** see the gate note below.
+2. **`nearest_on_road` indexed — done.** `RoadNetworkIndex` builds a 32 m uniform grid over
+   the edge polyline pieces and searches rings outwards until nothing closer can exist; ties
+   go to the lowest edge id, as before. 0.63 µs vs 19 µs per query (425 edges, release);
+   `nearest_on_road_matches_linear_scan` compares it with the old scan on 4000 points inside
+   and around the city. It is 2D like the trait (`[f32; 2]`): under a bridge it returns
+   whichever road is closer in plan, which is the contract's semantics today.
+3. **`lead/city-v2` review** (at `6cc3967`). Trial merge into `ws/world`: every `wp_world`
+   file merges cleanly with this round's work; the only conflicts are `crates/wp_sim/src/lib.rs`
+   and `apps/simcli/src/run.rs` (against `main`, lead files). With the merge, `tests/city_v2.rs`
+   passes (incl. the grade-separation surface test: the probe points are not on paint), my
+   markings work on Port Vesper (4.0 % paint, decks vs roads below kept apart by z) and the
+   indexed `nearest_on_road` equals the linear scan on 3000 Vesper points (245 edges).
+   Code review findings: see "City v2 review notes" below.
+
+### City v2 review notes (D → lead helper `lead/city-v2`, at `6cc3967`)
+These are findings only. I have not edited the branch, and `procgen.rs`/`builder.rs` are untouched on `ws/world`. Checks:
+lint-determinism 0 errors; `wp_world` tests pass; traffic bench, 400 agents: grid 0.26 ms, vesper
+0.24 ms per frame. Determinism: clean (no HashMap/f64/powi; sorts use `total_cmp`). On flat cities
+behaviour is unchanged (`terrain: None`, `base_z_m = 0`).
+
+**Blocking**
+1. `clippy -D warnings` fails: `needless_range_loop` at `vesper.rs:643`, `:742`, `:747`
+   (use `iter().enumerate()`).
+2. v1 road files no longer load: `network.rs:21` bumps the format to 2 and `from_bin` /
+   `validate` require an exact match. `surfaces`, `terrain` and `Building::base_z_m` have no
+   serde default, and postcard can't default fields anyway. Only `procedural_12x12.*` was
+   regenerated, so locally imported OSM files fail. Either decode v1 (`surfaces = []`,
+   `terrain = None`, `base_z_m = 0`) plus serde defaults for JSON, or document "regenerate with
+   `city-import`".
+
+**Should fix**
+3. `ground_height` / `MapGround` (`map.rs:481`, `surface.rs:148`): under a deck, when the
+   only nearby segment is the deck, the probe returns the deck z. The downward cast misses and
+   the terrain is never tried, so the wheel has no ground (off-road under a bridge, or just past
+   the lower road's edge). Only accept candidates at or below the cast origin (+ margin), and keep
+   terrain as a candidate.
+4. Per-wheel cost: 5 `ground_height` calls per cast, each a full projection over every segment
+   in the cell. Vesper's filleted curves have many points. Short-circuit to `FlatGround` when the
+   map has no terrain and every node z is 0, or take the normal from the tangent and bank instead
+   of finite differences. Not covered by the bench (0 promotions in it).
+5. The new 3 m z checks make `wp_weather/src/grid.rs:216` (`surface_at([x, y, 0.0])`) read
+   every Vesper road above 3 m as grass. K should sample at `ground_height(p, None)` (request
+   to K/lead; not my crate).
+6. Merge with `main`: `roads.rs:174` `OccluderBox.height_m = b.height_m` must become
+   `b.roof_z()` (it auto-merges silently). `map.rs` `roof_z` hunks conflict with nothing on
+   `ws/world` today.
+7. `intersection_at` (`ix_grid … find`) returns the first junction disc. Stacked junctions at
+   different heights would be picked arbitrarily in `surface_at` and `ground_height`. Filter
+   by z in the `find`.
+
+**Nits**: `builder.rs:306/324` silently ignore `via_z`/`bank` of the wrong length (reject in
+`build`); `builder.rs:470` short-road `s0` should come from `trim_polyline`'s result so the bank
+stays aligned; `surface.rs:100/120` index `len() - 1` / `k - 1` relying on `validate()`; `vesper.rs`
+(2310 lines) would read better split into layout / profile / carve / buildings.
+
+**Merge plan:** merge `ws/world` (this round) into `lead/city-v2`. All `wp_world` files merge
+cleanly; resolve `wp_sim/src/lib.rs` and `simcli/src/run.rs` against `main` and apply note 6.
+My markings and the indexed `nearest_on_road` already pass on Vesper (checked in a trial merge).
+
+### Contract change request (round 8)
+| # | Change | Why | Who | Status |
+|---|---|---|---|---|
+| 9 | `RoadNetworkQuery::nearest_on_road_3d(p: [f32; 3]) -> Option<(u32, f32, [f32; 3], f32)>` (prefer edges within 3 m of `p.z`), and `RoadEdgeInfo`/`edge_polyline` with z | Vesper has stacked roads (loop overpass over Route 40, 6.5–9 m clearance). The 2D query can snap a car under a bridge to the deck, which misroutes police | 06 (E), 12 | proposed |

@@ -491,10 +491,10 @@ mod tests {
                         paint += 1;
                         road += 1;
                     }
-                    SurfaceType::Asphalt | SurfaceType::Concrete => {
-                        if map.locate(p, None, 0.0, false, true).is_some() {
-                            road += 1;
-                        }
+                    SurfaceType::Asphalt | SurfaceType::Concrete
+                        if map.locate(p, None, 0.0, false, true).is_some() =>
+                    {
+                        road += 1;
                     }
                     _ => {}
                 }
@@ -505,6 +505,40 @@ mod tests {
         let share = paint as f32 / road.max(1) as f32;
         assert!(road > 10_000, "{road}");
         assert!((0.02..0.15).contains(&share), "painted share {share}");
+    }
+
+    /// `cargo test -p wp_world --release --lib surface_timing -- --ignored --nocapture`
+    #[test]
+    #[ignore = "timing report, run in release"]
+    fn surface_timing() {
+        let map = CityMap::new(generate(&ProcGenConfig::default()));
+        let (lo, hi) = (map.net.bounds_min, map.net.bounds_max);
+        let mut rng = wp_math::Rng::new(9);
+        let pts: Vec<V3> = (0..200_000)
+            .map(|_| {
+                [
+                    lo[0] + rng.next_f32() * (hi[0] - lo[0]),
+                    lo[1] + rng.next_f32() * (hi[1] - lo[1]),
+                    0.0,
+                ]
+            })
+            .collect();
+        let t0 = std::time::Instant::now();
+        let mut n = 0u32;
+        for p in &pts {
+            n += u32::from(map.surface_at(*p) == SurfaceType::PaintedLine);
+        }
+        let all = t0.elapsed().as_secs_f64() / pts.len() as f64;
+        let t0 = std::time::Instant::now();
+        for p in &pts {
+            n += u32::from(painted_at(&map, *p));
+        }
+        let paint = t0.elapsed().as_secs_f64() / pts.len() as f64;
+        println!(
+            "surface_at {:.2} us/query, of which markings {:.2} us ({n})",
+            all * 1e6,
+            paint * 1e6
+        );
     }
 
     #[test]
