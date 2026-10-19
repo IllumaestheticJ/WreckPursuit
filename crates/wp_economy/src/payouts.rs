@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 use wp_contracts::WantedLevel;
-use wp_contracts::{DamageMode, DayPhase, VehicleClass};
+use wp_contracts::{DamageMode, DayPhase, Legality, RaceKind, VehicleClass};
 
 use crate::data::Economy;
 use crate::error::EconomyError;
@@ -19,10 +19,20 @@ use crate::ledger::{
 pub use wp_contracts::RaceType;
 
 /// A race as set up in the lobby (prompt 07).
+///
+/// Races from `wp_race` carry their contract `kind` and `legality`; build them with
+/// [`Economy::race_setup`]. When `kind` is set, `stakes.toml [race_kinds]` decides which race
+/// type prices the race (and is recorded in the ledger), whatever `race_type` says.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RaceSetup {
-    /// Type.
+    /// Type (used when `kind` is `None`, e.g. street meets and the career harness).
     pub race_type: RaceType,
+    /// Contract race kind, for races scheduled by `wp_race`.
+    #[serde(default)]
+    pub kind: Option<RaceKind>,
+    /// Legality (default `Street`).
+    #[serde(default)]
+    pub legality: Legality,
     /// Class bracket of the race.
     pub class: VehicleClass,
     /// Route length, m.
@@ -80,10 +90,55 @@ fn money(v: f32) -> Money {
 }
 
 impl Economy {
+    /// The race type that prices a contract race kind (`stakes.toml [race_kinds]`).
+    pub fn race_type_for(&self, kind: &RaceKind) -> RaceType {
+        self.stakes.race_kinds[kind.key()].race_type
+    }
+
+    /// A `RaceSetup` for a race scheduled by `wp_race` (kind + legality; R5).
+    pub fn race_setup(
+        &self,
+        kind: RaceKind,
+        legality: Legality,
+        class: VehicleClass,
+        route_length_m: f32,
+        phase: DayPhase,
+        mode: DamageMode,
+    ) -> RaceSetup {
+        RaceSetup {
+            race_type: self.race_type_for(&kind),
+            kind: Some(kind),
+            legality,
+            class,
+            route_length_m,
+            phase,
+            mode,
+        }
+    }
+
+    /// The race type that actually prices `s` (the kind's row when it has a kind).
+    pub fn effective_race_type(&self, s: &RaceSetup) -> RaceType {
+        s.kind
+            .as_ref()
+            .map_or(s.race_type, |k| self.race_type_for(k))
+    }
+
+    /// `(purse, entry)` multipliers from the race kind and legality.
+    fn kind_multipliers(&self, s: &RaceSetup) -> (f32, f32) {
+        let (kp, ke) = s.kind.as_ref().map_or((1.0, 1.0), |k| {
+            let k = &self.stakes.race_kinds[k.key()];
+            (k.purse, k.entry)
+        });
+        let l = &self.stakes.legality[s.legality.key()];
+        (kp * l.purse, ke * l.entry)
+    }
+
     fn base_purse_raw(&self, s: &RaceSetup) -> f32 {
-        let rt = &self.stakes.race_types[&s.race_type];
+        let rt = &self.stakes.race_types[&self.effective_race_type(s)];
         let km = (s.route_length_m / 1000.0).clamp(0.0, rt.max_km);
-        (rt.base_per_km * km).max(rt.min_purse as f32) * self.stakes.class_purse[&s.class]
+        (rt.base_per_km * km).max(rt.min_purse as f32)
+            * self.stakes.class_purse[&s.class]
+            * self.kind_multipliers(s).0
     }
 
     /// Winner's purse before the wanted multiplier and clean bonus.
@@ -97,8 +152,13 @@ impl Economy {
 
     /// Buy-in for a race.
     pub fn entry_fee(&self, s: &RaceSetup) -> Money {
-        let rt = &self.stakes.race_types[&s.race_type];
-        money(self.base_purse_raw(s) * rt.entry_frac * self.stakes.day_phase[&s.phase].entry)
+        let rt = &self.stakes.race_types[&self.effective_race_type(s)];
+        money(
+            self.base_purse_raw(s)
+                * rt.entry_frac
+                * self.kind_multipliers(s).1
+                * self.stakes.day_phase[&s.phase].entry,
+        )
     }
 
     /// What a result pays (pure; nothing is posted).
@@ -157,7 +217,10 @@ impl Economy {
         if acct.in_debt() && fee > self.stakes.debt.max_entry_fee {
             return Err(EconomyError::InDebt {
                 debt: acct.debt(),
-                what: format!("{} race with buy-in {fee}", s.race_type.id()),
+                what: format!(
+                    "{} race with buy-in {fee}",
+                    self.effective_race_type(s).id()
+                ),
             });
         }
         transact(acct, |tx| {
@@ -165,7 +228,7 @@ impl Economy {
                 tx.spend(
                     fee,
                     EventReason::RaceEntryFee {
-                        race: s.race_type.id().into(),
+                        race: self.effective_race_type(s).id().into(),
                     },
                     Some(car),
                 )?;
@@ -191,7 +254,7 @@ impl Economy {
                 tx.credit(
                     pay.purse,
                     EventReason::RacePurse {
-                        race: s.race_type.id().into(),
+                        race: self.effective_race_type(s).id().into(),
                         placement: r.placement,
                     },
                     some,

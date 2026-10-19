@@ -447,6 +447,8 @@ impl Career<'_> {
                 } else {
                     RaceType::Circuit
                 },
+                kind: None,
+                legality: Default::default(),
                 class,
                 route_length_m: km * 1000.0,
                 phase: DayPhase::Night,

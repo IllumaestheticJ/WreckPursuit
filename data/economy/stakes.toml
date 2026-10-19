@@ -44,6 +44,66 @@ min_purse = 250
 entry_frac = 0.0
 max_km = 10
 
+# Contract race kinds (wp_race events; agreed with workstream 15, race.md R5). Each kind is
+# priced by one race_types row × purse; buy-in × entry. Multipliers keep wp_race's relative
+# advertised purses (data/events/stakes.toml [kinds]) at a 9 km night Compact race:
+# checkpoint 0.8, cannonball 1.2, delivery 1.0, outrun ~0.75, time attack ~0.55, drag ~0.4 of a
+# sprint (tests/race_kinds.rs keeps them within 15 %).
+[race_kinds.sprint]
+race_type = "Sprint"
+purse = 1.0
+entry = 1.0
+
+[race_kinds.circuit]
+race_type = "Circuit"
+purse = 1.0
+entry = 1.0
+
+[race_kinds.drag]          # a 402 m pass: ~0.42 of a 9 km sprint, as in wp_race
+race_type = "Drag"
+purse = 0.85
+entry = 1.0
+
+[race_kinds.outrun]        # 1v1 gap duel in open traffic: the touge row (high buy-in), smaller pot
+race_type = "Touge"
+purse = 0.65
+entry = 1.0
+
+[race_kinds.checkpoint]    # any path between gates: shorter effective route
+race_type = "Sprint"
+purse = 0.8
+entry = 0.9
+
+[race_kinds.cannonball]    # cross-city through heavy traffic: most risk
+race_type = "Sprint"
+purse = 1.2
+entry = 1.0
+
+[race_kinds.delivery]      # cargo damage is charged separately (wp_race cargo_damage_cost)
+race_type = "Sprint"
+purse = 1.0
+entry = 0.7
+
+[race_kinds.time_attack]   # solo clock: no contact with rivals, least risk
+race_type = "Circuit"
+purse = 0.6
+entry = 0.7
+
+# Legality (wp_contracts::Legality). Sanctioned events pay less and cost more to enter (no
+# police); a rare illegal daytime race pays ~2.5x a night street race once the day-phase purse
+# (0.75 vs 1.35) is applied.
+[legality.sanctioned]
+purse = 0.8
+entry = 1.2
+
+[legality.street]
+purse = 1.0
+entry = 1.0
+
+[legality.illegal_daytime]
+purse = 4.5
+entry = 1.5
+
 [day_phase.Day]
 purse = 0.75
 entry = 0.8

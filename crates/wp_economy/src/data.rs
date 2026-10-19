@@ -213,6 +213,11 @@ pub struct StakesTables {
     pub clean_rep: i64,
     /// Per race type.
     pub race_types: BTreeMap<RaceType, RaceTypeStakes>,
+    /// Per contract race kind (`RaceKind::key`): which `race_types` row prices it, and its
+    /// purse / buy-in multipliers. Races from `wp_race` carry a kind; see `Economy::race_setup`.
+    pub race_kinds: BTreeMap<String, RaceKindStakes>,
+    /// Purse / buy-in multipliers by race legality (`Legality::key`).
+    pub legality: BTreeMap<String, LegalityStakes>,
     /// Per day phase multipliers.
     pub day_phase: BTreeMap<DayPhase, PhaseStakes>,
     /// Purse multiplier by vehicle class.
@@ -243,6 +248,42 @@ pub struct RaceTypeStakes {
     pub entry_frac: f32,
     /// Route length beyond this does not increase the purse, km.
     pub max_km: f32,
+}
+
+/// How one contract `RaceKind` is priced.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RaceKindStakes {
+    /// The `race_types` row that sets the per-km purse, minimum and length cap; also the race
+    /// type recorded in the ledger.
+    pub race_type: RaceType,
+    /// Purse multiplier on top of that row.
+    pub purse: f32,
+    /// Buy-in multiplier on top of that row's `entry_frac`.
+    pub entry: f32,
+}
+
+/// Multipliers for one race legality.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LegalityStakes {
+    /// Purse multiplier.
+    pub purse: f32,
+    /// Buy-in multiplier.
+    pub entry: f32,
+}
+
+/// Every `Legality` key (exhaustive, so a new variant fails to compile here).
+pub(crate) fn legality_keys() -> [&'static str; 3] {
+    use wp_contracts::Legality;
+    let key = |l: Legality| match l {
+        Legality::Sanctioned | Legality::Street | Legality::IllegalDaytime => l.key(),
+    };
+    [
+        key(Legality::Sanctioned),
+        key(Legality::Street),
+        key(Legality::IllegalDaytime),
+    ]
 }
 
 /// Multipliers for one day phase.
@@ -792,6 +833,33 @@ impl Economy {
         )?;
         require_frac("stakes.bounty.cop_share", s.bounty.cop_share)?;
         require_frac("stakes.bounty.assist_share", s.bounty.assist_share)?;
+        let kind_keys: Vec<String> = wp_contracts::RaceKind::KEYS
+            .iter()
+            .map(|k| k.to_string())
+            .collect();
+        require_keys("stakes.race_kinds", &s.race_kinds, &kind_keys)?;
+        let legality_keys: Vec<String> = legality_keys().iter().map(|k| k.to_string()).collect();
+        require_keys("stakes.legality", &s.legality, &legality_keys)?;
+        for (id, k) in &s.race_kinds {
+            let w = format!("stakes.race_kinds.{id}");
+            if !kind_keys.contains(id) {
+                return Err(invalid(w, "not a RaceKind key"));
+            }
+            require_positive(&w, k.purse)?;
+            if k.entry < 0.0 {
+                return Err(invalid(w, "entry must be >= 0"));
+            }
+        }
+        for (id, l) in &s.legality {
+            let w = format!("stakes.legality.{id}");
+            if !legality_keys.contains(id) {
+                return Err(invalid(w, "not a Legality key"));
+            }
+            require_positive(&w, l.purse)?;
+            if l.entry < 0.0 {
+                return Err(invalid(w, "entry must be >= 0"));
+            }
+        }
         for (id, rt) in &s.race_types {
             let w = format!("stakes.race_types.{id:?}");
             require_positive(&w, rt.base_per_km)?;

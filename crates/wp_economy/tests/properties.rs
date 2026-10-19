@@ -145,6 +145,8 @@ fn run_op(
                     } else {
                         RaceType::Sprint
                     },
+                    kind: None,
+                    legality: Default::default(),
                     class,
                     route_length_m: 8000.0,
                     phase: DayPhase::Night,

@@ -517,6 +517,8 @@ fn race_results_settle_through_the_session() {
     let (mut a, car) = account_with_sedan(&e, 5_000);
     let setup = RaceSetup {
         race_type: RaceType::Sprint,
+        kind: None,
+        legality: Default::default(),
         class: VehicleClass::Compact,
         route_length_m: 4_000.0,
         phase: DayPhase::Night,

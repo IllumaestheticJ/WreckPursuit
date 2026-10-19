@@ -150,6 +150,8 @@ fn twenty_bots_signup_matchmake_results_leaderboard() {
     // ---- phase 4: each instance runs a race, settles the economy over HTTP, reports results.
     let setup = |mode| RaceSetup {
         race_type: RaceType::Sprint,
+        kind: None,
+        legality: Default::default(),
         class: VehicleClass::Compact,
         route_length_m: 4000.0,
         phase: DayPhase::Night,
