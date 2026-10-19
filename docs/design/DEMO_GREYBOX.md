@@ -124,7 +124,8 @@ chase with several violations.
 - **Player learns:** chases are tense, not bumper cars. Contact costs both sides.
 - **On main?** Partly. The pursuit runs, police are drawn with light bars, sirens play. **Police
   cars still ram stopped cars** and spawn too close to other vehicles (E's top gap). Sirens are
-  set by hand, not by pursuit state (J/lead).
+  set by hand, not by pursuit state (J/lead) — on `lead/demo-endrun` they follow each unit's
+  assignment (lights and siren on while responding or pursuing, off on patrol).
 
 ### 2:45 – 3:45 · Breaking contact
 Get out of every unit's line of sight and stay out:
@@ -157,8 +158,8 @@ suburb (× 1.6) districts. A safehouse (stop 10 s, nobody within 150 m) cuts hea
   impounded, not destroyed.
 
 - **Player learns:** both endings are fair and readable.
-- **On main?** **No.** The event is emitted into the sim's event stream, but nothing shows it,
-  nothing stops the run, and nothing bills it.
+- **On main?** **No.** On `lead/demo-endrun`: yes — the capture is billed by G's economy, the car
+  brakes to a halt and is held, the end-of-run panel and the bill open; an escape shows a bounty toast.
 
 ### 4:30 – 5:00 · The repair bill
 Press **F**, or the bill opens on its own after capture. It shows:
@@ -175,8 +176,10 @@ Example: captured at L1 in Arcade after two red lights and one collision →
 
 - **Player learns:** every crash and every bust has a price that carries over.
 - **On main?** Partly. The bill screen exists and prices real damage (`repair_quote_json`), but
-  only by hand (**F**). No fine, impound or bounty is computed for the run, and the bill does
-  not open at the end of a chase. Repairing after paying needs B's `apply_repair`.
+  only by hand (**F**). On `lead/demo-endrun`: the end-of-run panel shows the fine, bail, impound
+  fee, G's repair quote and cash before → after; **Repair & continue** pays impound + repair from
+  the ledger and restores the car (`Sim::repair_vehicle`, a replay op). Bounty after an escape is
+  shown as a toast.
 
 ---
 
@@ -225,7 +228,7 @@ feedback) and the code on `main` + the lead branch, 2026-10-19.
 | **O** Meta | ✓ API | — | no |
 | **P** Design docs | ✓ this file, `PLAYTEST.md`, `DEMO_SCRIPT.md` | ○ Port Vesper route lengths (blocked, see `CITY.md` §6) | no |
 | **Q** Tuning dash | ✓ sweep runner | ○ pursuit sweep on aggression / ram parameters, findings to E | helps E |
-| **Lead** | ✓ police as sim vehicles, physical traffic, city loading, `police_status` / `police_units` / `repair_quote_json` exports | ✗ feed `PursuitEnded` into G's `EconomySession`; ✗ wasm export for the end-of-run result (bill + fine + impound); ✗ capture stops the run; ✗ sirens from pursuit state; ✗ typed v0.3.0 police/economy events; ○ refresh `STATUS.md` (Checkpoint 2 row, J row says audio "not wired" but it is) | yes |
+| **Lead** | ✓ police as sim vehicles, physical traffic, city loading, `police_status` / `police_units` / `repair_quote_json` exports, typed v0.3.0 events. **Done on `lead/demo-endrun`:** ✓ drained `SimEvent`s + the player's damage feed G's `EconomySession` outside the sim step (`wp_wasm::run`, hashes unchanged); ✓ `run_result_json()` (outcome, bounty, fines, bail, impound + fee, G's repair quote, cash before/after) + `run_ledger_json()`; ✓ capture / wreck ends the run (car held on the brakes, result panel + bill, **Repair & continue** pays impound + repair from the ledger and repairs in place, **Restart** keeps the account); ✓ escape shows the bounty and play goes on; ✓ sirens and light bars follow each unit's assignment (respond / pursue / intercept / roadblock on, patrol off) | ○ refresh `STATUS.md` (Checkpoint 2 row, J row says audio "not wired" but it is); ○ a partial repair ("Repair some") from the end-of-run panel | no (merge) |
 
 ### Critical path
 1. **E (+D):** police stop ramming → the chase is watchable.
@@ -244,6 +247,6 @@ feedback) and the code on `main` + the lead branch, 2026-10-19.
 | Heat never rises | Drive past a patrol car within 70 m; it must *see* you | E / C (HUD) |
 | The chase never starts | Stay in sight for 4 s within 40 m (night rules) | — (by design; tell us if it feels wrong) |
 | Two heat meters disagree | Use C's panel; note both values | C / M |
-| Captured but nothing happens | Expected today; press **F** for the bill | Lead / C |
+| Captured but nothing happens | Fixed on `lead/demo-endrun` (panel + bill open). Elsewhere press **F** for the bill | Lead / C |
 | The car is wrecked in the first minute | Press **F** to see the bill, then **R** | — |
 | Stutters | Close other tabs; note the moment | I (perf) |
