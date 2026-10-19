@@ -224,9 +224,7 @@ impl RaceJudge {
         if self.tracks.len() >= self.rules.kind_rules.max_racers as usize {
             return Err(EntryDenied::Full);
         }
-        let n = self.tracks.len() + 1;
-        let grid = self.course.grid(self.rules.kind_rules.grid, n);
-        let slot = grid[n - 1];
+        let slot = self.slot_for(self.tracks.len());
         self.tracks.push(Track {
             entry,
             slot,
@@ -256,6 +254,13 @@ impl RaceJudge {
             last_vel: [0.0; 3],
         });
         Ok(slot)
+    }
+
+    /// Grid slot `i`, laid out for the race's full capacity so slots never move as racers join
+    /// (side-by-side grids are centred on `max_racers` lanes).
+    fn slot_for(&self, i: usize) -> GridSlot {
+        let cap = (self.rules.kind_rules.max_racers as usize).max(i + 1);
+        self.course.grid(self.rules.kind_rules.grid, cap)[i]
     }
 
     /// Remove a racer while still in the lobby.
