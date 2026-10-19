@@ -13,11 +13,12 @@ crate-type = ["cdylib", "rlib"]
 wp_contracts.workspace = true
 wp_math.workspace = true
 wp_sim.workspace = true
-# Canonical scenario format v2 parser (simcli lib is wasm32-clean; see tools/wasm-determinism).
+wp_world.workspace = true
+# Canonical scenario format v2, sim setup (`build_sim`), drivers, expectations and replay.bin
+# (simcli lib is wasm32-clean; see tools/wasm-determinism).
 simcli = { path = "../../apps/simcli" }
 serde.workspace = true
 serde_json.workspace = true
-ron.workspace = true
 wasm-bindgen.workspace = true
 # Pure-Rust, no_std-capable binary codec for events and replays (wasm32-clean).
 postcard = { version = "1", default-features = false, features = ["alloc"] }

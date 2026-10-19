@@ -3668,7 +3668,6 @@ name = "wp_wasm"
 version = "0.1.0"
 dependencies = [
  "postcard",
- "ron",
  "serde",
  "serde_json",
  "simcli",
@@ -3676,6 +3675,7 @@ dependencies = [
  "wp_contracts",
  "wp_math",
  "wp_sim",
+ "wp_world",
 ]
 
 [[package]]
