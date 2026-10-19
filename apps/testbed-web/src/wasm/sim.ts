@@ -1,6 +1,7 @@
 // Typed wrapper over the wp_wasm surface. Per-frame calls return typed arrays (see layout.ts);
 // JSON only for rare structured data.
 import initWasm, * as wasm from "./pkg/wp_wasm.js";
+import type { PoliceStatus } from "../ui/police";
 
 /** Driver input in the testbed (packed to Float32Array for set_input). */
 export interface DriverInput {
@@ -27,8 +28,10 @@ export interface WheelInfo {
 /** vehicle_info(entity) JSON. */
 export interface VehicleInfo {
   entity: number;
-  /** Scenario-local entity name. */
+  /** Scenario-local entity name (sim-spawned vehicles: `police7`, `traffic12`, …). */
   name: string;
+  /** `Player` | `AiRacer` | `Police` | `Traffic` (`wp_sim::VehicleKind`). */
+  kind: string;
   car_id: string;
   display_name: string;
   body_size_m: [number, number, number];
@@ -135,6 +138,7 @@ export const sim = {
   init: (seed: number, scenarioJson: string, scripted: boolean): number[] =>
     Array.from(wasm.init(seed, scenarioJson, scripted)),
   freeDriveJson: (car: string, mode: string, city: boolean): string => wasm.free_drive_json(car, mode, city),
+  cityChaseJson: (car: string, mode: string): string => wasm.city_chase_json(car, mode),
   scenarioFromRon: (text: string): string => wasm.scenario_from_ron(text),
   scenarioWithSpeed: (json: string, mps: number): string => wasm.scenario_with_speed(json, mps),
   step: (dt: number): number => wasm.step(dt),
@@ -153,6 +157,12 @@ export const sim = {
   info: (entity: number): VehicleInfo => JSON.parse(wasm.vehicle_info(entity)),
   worldInfo: (): Float32Array => wasm.world_info(),
   trafficAgents: (): Float32Array => wasm.traffic_agents(),
+  /** [entity, kind, flags] per sim vehicle (layout.ts META_*), same order as states(). */
+  vehicleMeta: (): Float32Array => wasm.vehicle_meta(),
+  /** Police units that are not sim vehicles: [x, y, z, yaw, speed, flags] each. */
+  policeUnits: (): Float32Array => wasm.police_units(),
+  /** Wanted level / heat for a racer (`police::PoliceStatus`), or null when the session has no police. */
+  policeStatus: (entity: number): PoliceStatus | null => JSON.parse(wasm.police_status(entity)),
   stateHash: (): string => wasm.state_hash(),
   latticeNodes: (entity: number): Float32Array => wasm.lattice_nodes(entity),
   latticeRest: (entity: number): Float32Array => wasm.lattice_rest(entity),
@@ -185,15 +195,6 @@ export const sim = {
   contractVersion: (): string => wasm.contract_version(),
   /** Live repair bill for a vehicle (workstream 16; `garage.rs`). `requestJson` may be "". */
   repairQuote: (entity: number, requestJson: string): LiveBill => JSON.parse(wasm.repair_quote_json(entity, requestJson)),
-  /**
-   * The player's police record (`Sim::police()` → `RacerRecord`) as JSON, or null when this wasm
-   * build has no `police_status_json` export yet (then the UI falls back to police events).
-   */
-  policeStatus: (entity: number): unknown => {
-    const f = (wasm as unknown as Record<string, unknown>).police_status_json;
-    if (typeof f !== "function") return null;
-    return JSON.parse((f as (e: number) => string)(entity));
-  },
 };
 
 /** `wp_wasm::garage::LiveBill` (typed in apps/ui-kit/src/live/bill.ts as LiveBillJson). */

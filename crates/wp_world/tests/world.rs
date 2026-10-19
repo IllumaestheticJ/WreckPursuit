@@ -899,3 +899,126 @@ fn parked_cars_line_parking_lanes() {
         .iter()
         .any(|i| matches!(i.control, IntersectionControl::Signal { .. })));
 }
+
+// ---------------------------------------------------------------------------------------------
+// Debris hazards
+// ---------------------------------------------------------------------------------------------
+
+/// Run a busy city for `seconds` with `hazards`; returns (agent–debris overlaps, lane changes,
+/// moving fraction at the end).
+fn debris_run(hazards: &[wp_world::Hazard], seconds: f32) -> (usize, u64, f32) {
+    let mut w = world(
+        TrafficConfig {
+            density_scale: 4.0,
+            sight_radius_m: 0.0,
+            ..Default::default()
+        },
+        12.0,
+        1.0,
+    );
+    w.set_hazards(hazards);
+    w.populate();
+    let mut ev = Vec::new();
+    let mut overlaps = 0;
+    for i in 0..(seconds / PHYSICS_DT) as usize {
+        w.step(PHYSICS_DT, &mut ev);
+        if i % 4 != 0 {
+            continue;
+        }
+        for a in w.agents() {
+            let car = geom::Obb {
+                c: geom::xy(a.pos),
+                f: geom::dir_of_yaw(a.yaw),
+                hl: 2.25,
+                hw: 0.95,
+            };
+            for h in hazards {
+                let d = geom::Obb {
+                    c: geom::xy(h.pos),
+                    f: [0.0, 1.0],
+                    hl: h.radius_m,
+                    hw: h.radius_m,
+                };
+                if geom::obb_overlap(&car, &d) {
+                    overlaps += 1;
+                }
+            }
+        }
+    }
+    let moving = w.agents().filter(|a| a.speed_mps > 0.5).count() as f32 / w.agent_count() as f32;
+    (overlaps, w.traffic_stats().lane_changes, moving)
+}
+
+/// A point on lane `lane` at the middle, offset `lat` to the right.
+fn lane_point(net: &RoadNetwork, lane: usize, lat: f32) -> [f32; 3] {
+    let l = &net.lanes[lane];
+    let (a, b) = (
+        geom::xy(l.polyline[0]),
+        geom::xy(*l.polyline.last().unwrap()),
+    );
+    let d = geom::normalize(geom::sub(b, a));
+    let r = geom::right_of(d);
+    let m = geom::scale(geom::add(a, b), 0.5);
+    [m[0] + r[0] * lat, m[1] + r[1] * lat, l.polyline[0][2]]
+}
+
+#[test]
+fn debris_blocking_a_lane_is_passed_in_the_next_lane_without_contact() {
+    let net = procgen::generate(&ProcGenConfig::default());
+    // Arterial lanes (two per direction) on long straight roads: block the right lane.
+    let lanes: Vec<usize> = net
+        .lanes
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| {
+            l.kind == LaneKind::Through
+                && l.left.is_some()
+                && l.right.is_none()
+                && geom::dist(
+                    geom::xy(l.polyline[0]),
+                    geom::xy(*l.polyline.last().unwrap()),
+                ) > 70.0
+        })
+        .map(|(i, _)| i)
+        .take(6)
+        .collect();
+    assert!(lanes.len() >= 4);
+    let hazards: Vec<_> = lanes
+        .iter()
+        .map(|&l| wp_world::Hazard::new(lane_point(&net, l, 0.0), 1.2))
+        .collect();
+    let (overlaps, changes, moving) = debris_run(&hazards, 60.0);
+    println!("blocked lanes: overlaps {overlaps}, lane changes {changes}, moving {moving:.2}");
+    assert_eq!(overlaps, 0, "a civilian drove into debris");
+    assert!(changes > 0);
+    assert!(moving > 0.5, "traffic jammed behind debris");
+}
+
+#[test]
+fn small_debris_is_swerved_around_and_junction_debris_is_avoided() {
+    let net = procgen::generate(&ProcGenConfig::default());
+    // Small debris near the right edge of single-lane local streets: swerve, keep moving.
+    let mut hazards: Vec<_> = net
+        .lanes
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| l.kind == LaneKind::Through && l.left.is_none() && l.right.is_none())
+        .step_by(37)
+        .take(8)
+        .map(|(i, _)| wp_world::Hazard::new(lane_point(&net, i, 1.2), 0.3))
+        .collect();
+    // Debris in the middle of a few signalised junction boxes.
+    for ix in net
+        .intersections
+        .iter()
+        .filter(|i| matches!(i.control, IntersectionControl::Signal { .. }))
+        .step_by(9)
+        .take(4)
+    {
+        hazards.push(wp_world::Hazard::new(net.nodes[ix.node as usize].pos, 0.8));
+    }
+    let (overlaps, _, moving) = debris_run(&hazards, 60.0);
+    println!("swerve + junction debris: overlaps {overlaps}, moving {moving:.2}");
+    assert_eq!(overlaps, 0, "a civilian drove into debris");
+    assert!(moving > 0.5);
+}

@@ -7,8 +7,17 @@
 //! callers; this module only tracks.
 //!
 //! Defaults ([`DriveGains::TRAFFIC`]) are exactly the gains civilian traffic always used.
+//!
+//! Two levels:
+//! - [`DriveController`]: the raw tracker — you supply the look-ahead target and a commanded
+//!   acceleration (what traffic does, with IDM supplying the acceleration).
+//! - [`PathFollower`]: `follow_path`-style driving along any [`DrivePath`] (a race route, a
+//!   police pursuit path, a lane sequence): projects the car onto the path, picks the
+//!   look-ahead point (with an optional lateral offset), plans speed from the target speed,
+//!   the curvature ahead (lateral-acceleration limit) and the end of the path, and returns a
+//!   complete [`VehicleInput`].
 
-use wp_contracts::VehicleState;
+use wp_contracts::{VehicleDef, VehicleInput, VehicleState};
 
 use crate::geom::{self, V2, V3};
 
@@ -135,6 +144,307 @@ impl DriveController {
     }
 }
 
+/// A polyline to drive along (open or looped), arc-length parametrised.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DrivePath {
+    pts: Vec<V3>,
+    cum: Vec<f32>,
+    looped: bool,
+}
+
+impl DrivePath {
+    /// Path through `points` (consecutive duplicates dropped). A looped path closes back to its
+    /// first point and arc lengths wrap.
+    ///
+    /// # Panics
+    /// If fewer than two distinct points remain.
+    pub fn new(points: &[V3], looped: bool) -> Self {
+        let mut pts: Vec<V3> = Vec::with_capacity(points.len() + 1);
+        for p in points {
+            if pts
+                .last()
+                .is_none_or(|q| geom::dist(geom::xy(*q), geom::xy(*p)) > 0.01)
+            {
+                pts.push(*p);
+            }
+        }
+        if looped
+            && pts.len() > 2
+            && geom::dist(geom::xy(pts[0]), geom::xy(pts[pts.len() - 1])) > 0.01
+        {
+            pts.push(pts[0]);
+        }
+        assert!(pts.len() >= 2, "a drive path needs two distinct points");
+        let cum = geom::cumulative(&pts);
+        Self { pts, cum, looped }
+    }
+
+    /// Path along a race route ([`crate::Route`]); circuits loop.
+    pub fn from_route(route: &crate::Route) -> Self {
+        Self::new(&route.polyline, route.closed_loop)
+    }
+
+    /// Length, m.
+    pub fn length(&self) -> f32 {
+        self.cum[self.cum.len() - 1]
+    }
+
+    /// Whether arc length wraps.
+    pub fn looped(&self) -> bool {
+        self.looped
+    }
+
+    /// Points.
+    pub fn points(&self) -> &[V3] {
+        &self.pts
+    }
+
+    fn wrap(&self, s: f32) -> f32 {
+        if self.looped {
+            s.rem_euclid(self.length())
+        } else {
+            s
+        }
+    }
+
+    /// Point and unit tangent at arc length `s` (wrapped when looped, extrapolated past the
+    /// ends otherwise).
+    pub fn point_at(&self, s: f32) -> (V3, V2) {
+        geom::point_at(&self.pts, &self.cum, self.wrap(s))
+    }
+
+    /// Closest point to `p`: `(s, signed lateral offset (+ right), distance)`. With a `hint`
+    /// (last known `s`) only the stretch `hint - 20 m ..= hint + 60 m` is searched, so
+    /// self-crossing circuits do not jump; it falls back to the whole path if the car is more
+    /// than 15 m from that stretch.
+    pub fn project(&self, p: V2, hint: Option<f32>) -> (f32, f32, f32) {
+        let n = self.pts.len() - 1;
+        let pick = |best: Option<(f32, f32, f32)>, c: (f32, f32, f32)| match best {
+            Some(b) if b.2 <= c.2 => Some(b),
+            _ => Some(c),
+        };
+        if let Some(h) = hint {
+            let (lo, hi) = (h - 20.0, h + 60.0);
+            let len = self.length();
+            let mut best = None;
+            for i in 0..n {
+                let (c0, c1) = (self.cum[i], self.cum[i + 1]);
+                let hit = if self.looped {
+                    [-len, 0.0, len]
+                        .iter()
+                        .any(|o| c1 + o >= lo && c0 + o <= hi)
+                } else {
+                    c1 >= lo && c0 <= hi
+                };
+                if hit {
+                    best = pick(best, self.project_segment(i, p));
+                }
+            }
+            if let Some(b) = best.filter(|b| b.2 <= 15.0) {
+                return b;
+            }
+        }
+        let mut best = None;
+        for i in 0..n {
+            best = pick(best, self.project_segment(i, p));
+        }
+        best.expect("path has segments")
+    }
+
+    /// `(s, lateral, distance)` of `p` against segment `i`.
+    fn project_segment(&self, i: usize, p: V2) -> (f32, f32, f32) {
+        let (a, b) = (geom::xy(self.pts[i]), geom::xy(self.pts[i + 1]));
+        let ab = geom::sub(b, a);
+        let len = geom::len(ab).max(1e-6);
+        let dir = geom::scale(ab, 1.0 / len);
+        let t = (geom::dot(geom::sub(p, a), dir) / len).clamp(0.0, 1.0);
+        let c = geom::add(a, geom::scale(ab, t));
+        let lat = geom::dot(geom::sub(p, a), geom::right_of(dir));
+        (self.cum[i] + t * len, lat, geom::dist(p, c))
+    }
+}
+
+/// Speed planning limits for [`PathFollower`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FollowParams {
+    /// Maximum commanded acceleration, m/s².
+    pub max_accel: f32,
+    /// Deceleration used to plan for curves and the end of the path, m/s².
+    pub plan_decel: f32,
+    /// Hardest commanded deceleration, m/s².
+    pub max_decel: f32,
+    /// Lateral acceleration allowed in curves, m/s².
+    pub max_lat_accel: f32,
+    /// Speed error → commanded acceleration gain, 1/s. Too low and the car reaches corners
+    /// faster than planned and runs wide (1.5 → 6 m off line at pursuit pace; 3 → 1.4 m).
+    pub speed_gain: f32,
+    /// Open paths: stop this far before the end, m.
+    pub stop_margin_m: f32,
+}
+
+impl FollowParams {
+    /// Civilian-like driving (gentle).
+    pub const CIVILIAN: Self = Self {
+        max_accel: 2.0,
+        plan_decel: 2.5,
+        max_decel: 7.0,
+        max_lat_accel: 2.8,
+        speed_gain: 2.0,
+        stop_margin_m: 1.0,
+    };
+    /// Pursuit / emergency driving (close to the grip limit of a street car).
+    pub const PURSUIT: Self = Self {
+        max_accel: 4.0,
+        plan_decel: 6.0,
+        max_decel: 8.5,
+        max_lat_accel: 6.5,
+        speed_gain: 3.0,
+        stop_margin_m: 1.0,
+    };
+}
+
+impl Default for FollowParams {
+    fn default() -> Self {
+        Self::CIVILIAN
+    }
+}
+
+/// Result of one [`PathFollower::follow`] call.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FollowOutput {
+    /// Driver input to apply until the next call.
+    pub input: VehicleInput,
+    /// Arc length of the car on the path, m.
+    pub s: f32,
+    /// Lateral offset from the path (+ right), m.
+    pub cross_track_m: f32,
+    /// Distance left to the end (open paths; `INFINITY` when looped), m.
+    pub remaining_m: f32,
+    /// Speed the planner is aiming for now, m/s.
+    pub planned_speed_mps: f32,
+    /// Open path finished: within the stop margin and (nearly) stopped.
+    pub done: bool,
+}
+
+/// `follow_path`: drives a vehicle along a [`DrivePath`] with the shared controller. Keep one
+/// per vehicle (it holds the PID state and the last path position); call at a fixed rate.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PathFollower {
+    /// Steering / pedal tracker.
+    pub controller: DriveController,
+    /// Speed planning limits.
+    pub params: FollowParams,
+    s_hint: Option<f32>,
+}
+
+impl PathFollower {
+    /// Follower with an existing controller.
+    pub fn new(controller: DriveController, params: FollowParams) -> Self {
+        Self {
+            controller,
+            params,
+            s_hint: None,
+        }
+    }
+
+    /// Follower for a car definition (wheelbase and full-lock angle from `def`) currently at
+    /// `speed_mps`, with traffic gains.
+    pub fn for_vehicle(def: &VehicleDef, params: FollowParams, speed_mps: f32) -> Self {
+        let max_steer = def
+            .wheels
+            .iter()
+            .map(|w| w.max_steer_rad)
+            .fold(0.0, f32::max);
+        Self::new(
+            DriveController::new(DriveGains::TRAFFIC, def.wheelbase_m, max_steer, speed_mps),
+            params,
+        )
+    }
+
+    /// Forget the path position and PID state (new path, teleport).
+    pub fn reset(&mut self, speed_mps: f32) {
+        self.s_hint = None;
+        self.controller.resync(speed_mps);
+    }
+
+    /// Highest speed allowed now so that every curve within the braking horizon (and the end
+    /// of an open path) can be met at `plan_decel`.
+    pub fn planned_speed(&self, path: &DrivePath, s: f32, v: f32, target_mps: f32) -> f32 {
+        let p = &self.params;
+        let mut allowed = target_mps.max(0.0);
+        let horizon = (v * v / (2.0 * p.plan_decel) + 25.0).min(200.0);
+        const STEP: f32 = 4.0;
+        let mut d = 0.0;
+        while d <= horizon {
+            let (_, t0) = path.point_at(s + d);
+            let (_, t1) = path.point_at(s + d + STEP);
+            let ang = geom::atan2(geom::cross(t0, t1), geom::dot(t0, t1)).abs();
+            let kappa = ang / STEP;
+            if kappa > 1e-4 {
+                let vc2 = p.max_lat_accel / kappa;
+                allowed = allowed.min((vc2 + 2.0 * p.plan_decel * d).sqrt());
+            }
+            d += STEP;
+        }
+        if !path.looped {
+            let rem = (path.length() - p.stop_margin_m - s).max(0.0);
+            allowed = allowed.min((2.0 * p.plan_decel * rem).sqrt());
+        }
+        allowed
+    }
+
+    /// One control step: input for a car in `state` following `path` at up to `target_mps`,
+    /// offset `lateral_offset_m` to the right of the path (negative = left), advancing the PID
+    /// by `dt` seconds.
+    pub fn follow(
+        &mut self,
+        state: &VehicleState,
+        path: &DrivePath,
+        target_mps: f32,
+        lateral_offset_m: f32,
+        dt: f32,
+    ) -> FollowOutput {
+        let (pos, fwd) = pose_2d(state);
+        let v = state.speed_mps;
+        let (s, lat, _) = path.project(pos, self.s_hint);
+        self.s_hint = Some(s);
+        let planned = self.planned_speed(path, s, v, target_mps);
+        // Look ahead for the speed we are about to drive, so the target point does not jump
+        // across the inside of a corner we are braking for.
+        let look = self.controller.lookahead(v.min(planned.max(0.0)));
+        let (tp, tt) = path.point_at(s + look);
+        let r = geom::right_of(tt);
+        let target = [
+            tp[0] + r[0] * lateral_offset_m,
+            tp[1] + r[1] * lateral_offset_m,
+            tp[2],
+        ];
+        let steer = self.controller.steer(pos, fwd, target);
+        let p = self.params;
+        let acc = ((planned - v) * p.speed_gain).clamp(-p.max_decel, p.max_accel);
+        let remaining = if path.looped {
+            f32::INFINITY
+        } else {
+            (path.length() - s).max(0.0)
+        };
+        let done = !path.looped && remaining <= p.stop_margin_m + 0.5 && v < 0.5;
+        let (throttle, brake) = self.controller.pedals(v, acc, dt, done);
+        FollowOutput {
+            input: VehicleInput {
+                steer,
+                throttle,
+                brake,
+                ..Default::default()
+            },
+            s,
+            cross_track_m: lat - lateral_offset_m,
+            remaining_m: remaining,
+            planned_speed_mps: planned,
+            done,
+        }
+    }
+}
+
 /// Horizontal position and unit forward direction of a vehicle state.
 pub fn pose_2d(state: &VehicleState) -> (V2, V2) {
     (geom::xy(state.pos), forward_of(state.rot))
@@ -159,6 +469,46 @@ mod tests {
         let s = c.steer([0.0, 0.0], [0.0, 1.0], [-3.0, 10.0, 0.0]);
         assert!(s < 0.0, "{s}");
         assert_eq!(c.steer([0.0, 0.0], [0.0, 1.0], [0.0, 10.0, 0.0]), 0.0);
+    }
+
+    #[test]
+    fn path_projection_and_wrap() {
+        let sq = [
+            [0.0, 0.0, 0.0],
+            [100.0, 0.0, 0.0],
+            [100.0, 100.0, 0.0],
+            [0.0, 100.0, 0.0],
+        ];
+        let p = DrivePath::new(&sq, true);
+        assert_eq!(p.length(), 400.0);
+        let (s, lat, d) = p.project([50.0, 2.0], None);
+        assert!((s - 50.0).abs() < 1e-4 && (lat + 2.0).abs() < 1e-4 && (d - 2.0).abs() < 1e-4);
+        // Wraps past the end of a loop.
+        let (q, _) = p.point_at(410.0);
+        assert!((q[0] - 10.0).abs() < 1e-4 && q[1].abs() < 1e-4);
+        // Hint keeps the projection on the nearby stretch.
+        let (s, _, _) = p.project([2.0, 1.0], Some(395.0));
+        assert!(!(5.0..=390.0).contains(&s), "{s}");
+        let open = DrivePath::new(&sq, false);
+        assert_eq!(open.length(), 300.0);
+    }
+
+    #[test]
+    fn planner_slows_for_corners_and_the_end() {
+        let f = PathFollower::new(
+            DriveController::new(DriveGains::TRAFFIC, 2.7, 0.6, 0.0),
+            FollowParams::CIVILIAN,
+        );
+        let l = DrivePath::new(
+            &[[0.0, 0.0, 0.0], [0.0, 200.0, 0.0], [200.0, 200.0, 0.0]],
+            false,
+        );
+        // Far from the corner: target speed. Near the 90° corner: much slower.
+        assert!((f.planned_speed(&l, 0.0, 15.0, 15.0) - 15.0).abs() < 1e-3);
+        assert!(f.planned_speed(&l, 195.0, 15.0, 15.0) < 8.0);
+        // Approaching the end of an open path: stop.
+        assert!(f.planned_speed(&l, 399.0, 1.0, 15.0) < 0.05);
+        assert!(f.planned_speed(&l, 390.0, 5.0, 15.0) < 7.0);
     }
 
     #[test]

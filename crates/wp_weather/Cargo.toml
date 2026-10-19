@@ -12,3 +12,7 @@ wp_math.workspace = true
 serde.workspace = true
 toml.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+# End-to-end grip tests drive a real car (wp_vehicle::rig::Rig) on a weathered world.
+wp_vehicle.workspace = true

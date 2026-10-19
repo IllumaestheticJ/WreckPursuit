@@ -114,8 +114,10 @@ cargo run --release -p wp_race --example judge_bench
   territory, progression; property tests: scoring is a total consistent order (no unresolved
   ties, finishers ≺ DNF ≺ DQ), stakes monotone with risk.
 - `tests/simcli_races.rs` — judges real physics runs of `apps/simcli/scenarios/race/*.ron`
-  (drag coupe vs sedan with reaction/shift/trap; corridor-cutting DQ), checks judging is
-  deterministic, and runs sprint + circuit courses planned on the procedural city.
+  (drag coupe vs sedan with reaction/shift/trap; corridor-cutting DQ; a city sprint on the
+  procedural city's arterial, route planned by `wp_world`), checks judging is deterministic,
+  checks race closures through `World::set_active_routes` (closed lanes, cones, no civilians on
+  the route), and runs sprint + circuit courses planned on the procedural city.
 - `tests/determinism_lint.rs` — runs `tools/lint-determinism` over `wp_race/src`.
 
 ## Performance (native, release, cloud container, 2026-10-19)

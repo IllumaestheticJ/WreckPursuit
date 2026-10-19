@@ -14,12 +14,17 @@ use wp_contracts::{DayPhase, EntityId};
 
 use crate::dispatch::Incident;
 use crate::events::{IncidentId, PursuitOutcome, ToolId, UnitId, UnitKind};
-use crate::graph::{District, SegmentId};
+use crate::graph::District;
 use crate::heat::{PursuitStatus, WantedLevel};
 use crate::time::SimTime;
 use crate::tools::SiteError;
 use crate::unit::{Assignment, Tactic, UnitRole};
 use crate::PoliceSystem;
+
+/// A road of `wp_world`'s city: index into `wp_world::roads::RoadGraphView::edges` (also
+/// `RoadSegment::edge` in the police graph). The id captains, the minimap and race previews share.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct RoadEdgeId(pub u32);
 
 /// An order for one unit (forced on AI units for `captain_order_hold_s`, a suggestion for
 /// player units).
@@ -60,15 +65,19 @@ pub enum CaptainCommand {
     RequestRoadblock {
         /// Racer.
         target: EntityId,
-        /// Segment, or `None` for automatic placement.
-        segment: Option<SegmentId>,
+        /// Road (index into `wp_world::roads::RoadGraphView::edges`), or `None` for automatic
+        /// placement. (Decodes the pre-v0.3.0 name `segment` too.)
+        #[serde(alias = "segment")]
+        road: Option<RoadEdgeId>,
     },
     /// Spike strip ahead of a racer.
     RequestSpikes {
         /// Racer.
         target: EntityId,
-        /// Segment, or `None` for automatic placement.
-        segment: Option<SegmentId>,
+        /// Road (index into `wp_world::roads::RoadGraphView::edges`), or `None` for automatic
+        /// placement. (Decodes the pre-v0.3.0 name `segment` too.)
+        #[serde(alias = "segment")]
+        road: Option<RoadEdgeId>,
     },
     /// Helicopter on a racer.
     RequestHelicopter {
@@ -255,11 +264,11 @@ impl PoliceSystem {
     pub fn captain_command(&mut self, cmd: CaptainCommand) -> Result<(), CaptainError> {
         match cmd {
             CaptainCommand::AssignUnit { unit, order } => self.order_unit(unit, order),
-            CaptainCommand::RequestRoadblock { target, segment } => {
-                self.place_roadblock(target, segment).map(|_| ())
+            CaptainCommand::RequestRoadblock { target, road } => {
+                self.place_roadblock(target, road).map(|_| ())
             }
-            CaptainCommand::RequestSpikes { target, segment } => {
-                self.place_spikes(target, segment).map(|_| ())
+            CaptainCommand::RequestSpikes { target, road } => {
+                self.place_spikes(target, road).map(|_| ())
             }
             CaptainCommand::RequestHelicopter { target } => {
                 let r = self
@@ -457,9 +466,11 @@ mod tests {
     fn command_bytes_roundtrip() {
         let c = CaptainCommand::RequestSpikes {
             target: EntityId(3),
-            segment: Some(SegmentId(9)),
+            road: Some(RoadEdgeId(9)),
         };
         assert_eq!(CaptainCommand::from_bytes(&c.to_bytes()), Ok(c));
+        let old = br#"{"RequestSpikes":{"target":3,"segment":9}}"#;
+        assert_eq!(CaptainCommand::from_bytes(old), Ok(c));
         assert_eq!(
             CaptainCommand::from_bytes(b"nope"),
             Err(CaptainError::Malformed)

@@ -1,11 +1,13 @@
 //! System-level tests of `PoliceSystem` on the procedural city: presence per phase, captain
 //! validation, tools, gadgets, crash incidents, external/player units and determinism.
 
+use std::sync::{Arc, OnceLock};
 use wp_contracts::{
     DamageMode, EntityId, HandlingEffects, PlayerId, SimEvent, TimeOfDay, ViolationKind, PHYSICS_DT,
 };
 use wp_police::captain::{CaptainCommand, CaptainError, UnitOrder};
-use wp_police::graph::{dist, procedural_city, CityParams, District, RoadClass, RoadPath};
+
+use wp_police::graph::{dist, District, RoadClass, RoadGraph, RoadPath};
 use wp_police::scenario::ScenarioWorld;
 use wp_police::{
     Assignment, PoliceConfig, PoliceEvent, PoliceSetup, PoliceSystem, PursuitOutcome,
@@ -23,9 +25,18 @@ struct Harness {
     speed: f32,
 }
 
+/// D's small procedural city and its police graph, built once per test binary.
+fn city() -> &'static (RoadGraph, Arc<wp_world::CityMap>) {
+    static CITY: OnceLock<(RoadGraph, Arc<wp_world::CityMap>)> = OnceLock::new();
+    CITY.get_or_init(|| {
+        let (g, map) = wp_police::city::procedural(&wp_police::city::ProcGenConfig::small());
+        (g, Arc::new(map))
+    })
+}
+
 impl Harness {
     fn new(hour: f32, seed: u64) -> Self {
-        let graph = procedural_city(&CityParams::default());
+        let (graph, map) = city().clone();
         // Racer path: from the middle of a Core arterial, straight-most continuation.
         let seg = graph
             .segments
@@ -45,7 +56,10 @@ impl Harness {
         };
         Self {
             police: PoliceSystem::with_city(PoliceConfig::builtin(), graph, setup),
-            world: ScenarioWorld::clock(TimeOfDay::from_hours(hour), 0.0),
+            world: ScenarioWorld {
+                map: Some(map),
+                ..ScenarioWorld::clock(TimeOfDay::from_hours(hour), 0.0)
+            },
             events: Vec::new(),
             path,
             s: 0.0,
@@ -148,7 +162,7 @@ fn heat_violation_wanted_pursuit_and_captain_tools() {
         .police
         .captain_command(CaptainCommand::RequestRoadblock {
             target: RACER,
-            segment: None,
+            road: None,
         })
         .unwrap_err();
     assert!(matches!(err, CaptainError::Locked { .. }), "{err:?}");
@@ -161,7 +175,7 @@ fn heat_violation_wanted_pursuit_and_captain_tools() {
         h.run(0.5, &[]);
         r = h.police.captain_command(CaptainCommand::RequestSpikes {
             target: RACER,
-            segment: None,
+            road: None,
         });
         if r.is_ok() {
             break;
@@ -171,11 +185,13 @@ fn heat_violation_wanted_pursuit_and_captain_tools() {
     assert!(r.is_ok(), "{r:?}");
     let strip = h.police.spike_strips()[0].clone();
     assert!(strip.site.sight_m >= 120.0);
+    // Sites remember D's road id; a captain can name roads by it.
+    assert!(h.police.graph().segment(strip.site.segment).edge.is_some());
     let err = h
         .police
         .captain_command(CaptainCommand::RequestSpikes {
             target: RACER,
-            segment: None,
+            road: None,
         })
         .unwrap_err();
     assert!(
@@ -343,7 +359,7 @@ fn player_units_get_suggestions_and_external_units_pull_over() {
             .pos,
         before
     );
-    assert!(h.police.unit_input(pu, SteerGeometry::default()).is_none());
+    assert!(h.police.unit_input(pu, wp_contracts::PHYSICS_DT).is_none());
     // An AI unit bound to a physical body follows sync_unit; a bent wheel makes it pull over.
     let ai = h
         .police
@@ -352,8 +368,9 @@ fn player_units_get_suggestions_and_external_units_pull_over() {
         .find(|u| u.kind == UnitKind::Car && u.player.is_none() && !u.wrecked)
         .unwrap()
         .id;
-    h.police.bind_unit_entity(ai, EntityId(901));
-    assert!(h.police.unit_input(ai, SteerGeometry::default()).is_some());
+    h.police
+        .bind_unit_entity(ai, EntityId(901), SteerGeometry::default());
+    assert!(h.police.unit_input(ai, wp_contracts::PHYSICS_DT).is_some());
     let mut eff = HandlingEffects::NEUTRAL;
     eff.toe_delta[0] = 0.05;
     h.police.sync_unit(

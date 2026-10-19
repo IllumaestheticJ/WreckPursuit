@@ -1,0 +1,44 @@
+// Golden "feel" case: city chase. 23:00 in the 12×12 procedural city with traffic, parked cars
+// and police patrols (wp_police on the city's road graph). The racer does 22 m/s (79 km/h, the
+// collector's limit is 48 km/h) south down the x = 55 collector, coming up behind the patrol
+// unit that starts there. Speeding in front of a patrol builds heat (witness range 70 m at
+// night), and keeping the racer within recognition range (40 m for 4 s at night) starts a
+// pursuit, which must happen within 20 s. No starting heat: this is a plain speeder.
+// If police spawning changes and no patrol starts on this street, re-aim the racer
+// (`apps/simcli/examples/probe_police.rs` prints unit positions).
+(
+    name: "golden_city_chase",
+    seed: 108,
+    city: procedural(seed: 1, blocks_x: 12, blocks_y: 12, block_m: 110.0),
+    time_of_day_h: 23.0,
+    time_ratio: 1.0,
+    mode: Arcade,
+    // Parked cars (3000+ physics bodies) don't take part in the chase and make debug test
+    // runs very slow.
+    parked_cars: false,
+    assists: keyboard,
+    entities: [
+        (
+            id: "racer",
+            car: "debug_coupe",
+            pos: (53.25, 40.0, 0.0),
+            yaw: 3.14159,
+            speed_mps: 22.0,
+            driver: cruise(target_mps: 22.0),
+            inputs: [(t_s: 0.0, input: (headlights: true))],
+        ),
+    ],
+    duration_s: 20.0,
+    hash_every: 24,
+    // Lead run 6: police cars are physical now and the racer starts 5 m behind a stopped patrol
+    // car, so it rear-ends it at 22 m/s. Checks are pending until I re-aims the run (lane offset
+    // or longer approach) and E's units avoid obstacles.
+    expect: [],
+    expect_pending: [
+        speed_at(entity: "racer", t_s: 2.0, min: 20.0, max: 24.0),
+        event_count(event: "TrafficViolation", entity: "racer", min: 1, max: 100000),
+        world_metric(name: "police_units_max", min: 1.0, max: 100.0),
+        pursuit_started_before(t_s: 20.0),
+        metric(entity: "racer", name: "final_health", min: 0.8, max: 1.0),
+    ],
+)

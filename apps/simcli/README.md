@@ -28,7 +28,9 @@ cargo run -p simcli -- bundle > bundle.json                       # data root fo
 | path | what |
 |---|---|
 | `src/scenario.rs` | scenario types, parsing, validation |
-| `src/run.rs` | runner: drivers, metrics, events, hashes, net round trip, expectations |
+| `src/run.rs` | runner: drivers, metrics, events, hashes, expectations; city, traffic and police setup |
+| `src/net.rs` | net round trip on `wp_net`'s wire codec (quantise → delta → `ServerMsg::Snapshot` → decode → re-apply) |
+| `examples/probe_police.rs` | prints police unit positions per second, to aim police scenarios at a patrol |
 | `src/replay.rs` | `replay.bin` format (documented in the module) + verifier / diff report |
 | `src/golden.rs` | golden hashes/replays, compare, bless (+ `[bless]` CI guard) |
 | `src/determinism.rs` | in-process repeat check |
@@ -55,10 +57,12 @@ recording on the cloud container (Xeon 2.1 GHz). Fuzz: ≈ 20 simulated seconds 
 
 ## Known gaps
 
-- Police is still a stub, so the spike-strip and pursuit targets sit in `expect_pending`
-  (prompt 06). The T-bone victim's crush/failure targets are pending too (03 tuning).
-- Police presence override, `follow_route` and `ai_driver` warn and fall back (need prompt
-  05/06 APIs). Traffic in scenarios is kinematic (no rigid bodies for physical-LOD agents yet).
+- Police units are `wp_police`'s internal kinematic cars (no physics bodies), so PIT/ramming
+  and spike strips don't touch the player's physics yet. The spike-strip golden runs on the
+  flat world (no police), and the night-pursuit golden's racer passes its "patrol" (a plain
+  parked car) too fast to be recognised. Both keep their police targets in `expect_pending`.
+  `golden_city_chase` is the working pursuit golden.
+- `follow_route` and `ai_driver` warn and fall back. Traffic in scenarios is kinematic.
 - `pursuit_started_before` uses a provisional police kind code (`PURSUIT_STARTED_KIND = 1`)
   until the typed `PoliceEvent` (contract v0.2.0) lands.
 - City props (parked cars) are physics bodies but are not part of the state hash.

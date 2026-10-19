@@ -1,0 +1,47 @@
+// wp_race: a short city sprint on the procedural 7x7 city's northbound arterial
+// (three 3.7 m lanes, x = 56.85 / 60.55 / 64.25, straight from y = -457 to -123). The race
+// route comes from wp_world::World::plan_route((60.55, -437) → (60.55, -140)) and is judged by
+// crates/wp_race/tests/simcli_races.rs; that test also checks the route's closure (closed lanes,
+// cones) through World::set_active_routes. Staggered grid behind the start line (y = -437):
+// pole = sedan at (58.05, -440), second = coupe at (63.05, -444). Green at 3.0 s.
+// Traffic is off: simcli cannot apply a race closure yet (see docs/integration/race.md).
+(
+    name: "race_city_sprint",
+    seed: 15,
+    city: procedural(seed: 1, blocks_x: 7, blocks_y: 7, block_m: 110.0),
+    mode: Arcade,
+    assists: ai,
+    traffic_density: 0.0,
+    entities: [
+        (
+            id: "sedan",
+            car: "debug_sedan",
+            pos: (58.05, -440.0, 0.0),
+            inputs: [
+                (t_s: 3.3, input: (throttle: 1.0)),
+                (t_s: 6.0, input: (throttle: 1.0, steer: -0.006)),
+                (t_s: 7.0, input: (throttle: 1.0)),
+                (t_s: 11.0, input: (throttle: 1.0, steer: -0.005)),
+                (t_s: 12.0, input: (throttle: 1.0)),
+                (t_s: 17.2, input: (brake: 1.0)),
+            ],
+        ),
+        (
+            id: "coupe",
+            car: "debug_coupe",
+            pos: (63.05, -444.0, 0.0),
+            inputs: [
+                (t_s: 3.2, input: (throttle: 1.0)),
+                (t_s: 15.0, input: (brake: 1.0)),
+            ],
+        ),
+    ],
+    duration_s: 20.0,
+    hash_every: 240,
+    expect: [
+        metric(name: "distance_m", entity: "coupe", min: 380.0, max: 500.0),
+        metric(name: "distance_m", entity: "sedan", min: 330.0, max: 450.0),
+        total_loss(entity: "coupe", expected: false),
+        total_loss(entity: "sedan", expected: false),
+    ],
+)

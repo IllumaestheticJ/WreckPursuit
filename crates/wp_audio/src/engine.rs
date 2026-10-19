@@ -360,6 +360,7 @@ mod tests {
             pop_rate_per_s: 0.0,
             pop_min_redline_frac: 0.6,
             forced_induction_gain: 0.5,
+            traffic_gain: 0.6,
         };
         let def = EngineAudioDef {
             cylinders: 4,

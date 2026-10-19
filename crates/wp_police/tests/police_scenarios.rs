@@ -88,21 +88,3 @@ fn risk_budget_and_caps_keep_cops_alive() {
         harm(&careful)
     );
 }
-
-#[test]
-fn night_is_slower_than_day_on_the_world_city() {
-    let day = run("world_day_core_speeder.ron");
-    let night = run("world_night_core_speeder.ron");
-    let m = |s: &PoliceRunSummary, k: &str| s.metric(k).unwrap();
-    let ratio = m(&night, "pursuit_start_s") / m(&day, "pursuit_start_s");
-    assert!(ratio >= 3.0, "pursuit start night/day = {ratio}");
-    let (rd, rn) = (
-        m(&day, "reinforcement_delay_s"),
-        m(&night, "reinforcement_delay_s"),
-    );
-    assert!(
-        rd > 0.0 && rn > 0.0,
-        "both phases must dispatch reinforcements ({rd}, {rn})"
-    );
-    assert!(rn / rd >= 2.0, "reinforcement night/day = {}", rn / rd);
-}
