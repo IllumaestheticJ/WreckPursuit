@@ -254,3 +254,35 @@
 .wp-hud-assists {
   justify-content: center;
 }
+
+/* Chase readout (testbed overlay): top centre, out of the host HUD's corners. */
+.wp-chase-col {
+  position: absolute;
+  top: 0.8em;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35em;
+  width: 15em;
+}
+.wp-chase-col .wp-hud-heat {
+  width: 100%;
+}
+.wp-chase-status {
+  font-size: 0.75em;
+  letter-spacing: 0.08em;
+  color: var(--ink-2);
+  text-transform: uppercase;
+}
+.wp-chase-status[data-state="pursuit"] {
+  color: var(--police-a);
+}
+.wp-chase-status[data-state="cooldown"] {
+  color: var(--info);
+}
+.wp-chase-col .wp-hud-alerts {
+  width: 22em;
+  font-size: 0.72em;
+}

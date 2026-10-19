@@ -17,7 +17,7 @@
 //! | [`progression`] | class brackets, licence tiers, entry requirements (`data/events/progression.toml`) |
 //! | [`signals`] | events emitted to `wp_net`, `wp_economy`, `wp_police` |
 //! | [`trace`] | deterministic scripted race traces for tests and balancing |
-//! | [`bridge`] | read-only adapters to `wp_world` routes/POIs/zones and `wp_economy` payouts |
+//! | [`bridge`] | `wp_world` city race planning + race-route activation, POIs/zones; `wp_economy` payout inputs |
 //!
 //! `wp_net` owns the lobby transport; this crate owns the rules. Everything here is
 //! deterministic: no wall-clock time, no `HashMap` iteration, randomness only through a seeded

@@ -35,7 +35,9 @@ pub mod tires;
 pub mod types;
 
 pub use data::{AudioConfig, AudioLibrary, CarAudioDef, EngineAudioDef, SamplePack};
-pub use director::{AudioDirector, AudioFrame, DirectorStats, SirenOverride, VehicleAudioInput};
+pub use director::{
+    AudioDirector, AudioFrame, DirectorStats, DriverKind, SirenOverride, VehicleAudioInput,
+};
 pub use scanner::{RadioLine, RadioPriority, ScannerTier};
 pub use siren::{SirenMode, SirenPattern};
 pub use types::{AudioCommand, Bus, Listener, Priority, VoiceId, VoiceParams};

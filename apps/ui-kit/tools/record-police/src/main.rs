@@ -22,7 +22,7 @@ use wp_contracts::{
 };
 use wp_math::Rng;
 use wp_police::graph::{NodeId, RoadGraph};
-use wp_police::{procedural_city, CityParams, District, PoliceConfig, PoliceSystem, RacerView};
+use wp_police::{District, PoliceConfig, PoliceSystem, RacerView};
 
 const SEED: u64 = 4242;
 const START_HOUR: f32 = 23.2;
@@ -102,7 +102,7 @@ fn main() {
         });
     std::fs::create_dir_all(&out).expect("create output dir");
 
-    let graph = procedural_city(&CityParams::default());
+    let (graph, _map) = wp_police::city::procedural(&wp_police::city::ProcGenConfig::small());
     let setup = wp_police::PoliceSetup {
         seed: SEED,
         internal_driving: true,
@@ -222,7 +222,7 @@ fn main() {
             let line = json!({ "tick": tick, "view": police.captain_view() });
             writeln!(captain_jsonl, "{line}").expect("write");
         }
-        if ended_at.is_none() && police.stats().pursuits.iter().any(|p| p.end_s.is_some()) {
+        if ended_at.is_none() && police.stats().pursuits.iter().any(|p| p.end.is_some()) {
             ended_at = Some(t);
         }
         if ended_at.is_some_and(|e| t > e + TAIL_S) {
@@ -259,7 +259,7 @@ fn main() {
     }
     let map = json!({
         "id": "police_procedural_10x10",
-        "source": "wp_police::procedural_city(CityParams::default()), recorded by tools/record-police",
+        "source": "wp_world ProcGenConfig::small() via wp_police::city::procedural, recorded by tools/record-police",
         "bounds_min": lo,
         "bounds_max": hi,
         "roads": roads,

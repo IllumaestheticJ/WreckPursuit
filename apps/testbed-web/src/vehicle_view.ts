@@ -2,7 +2,7 @@
 // in sim/chassis coordinates (+Z up, +Y forward, +X right); the scene maps that to Three's
 // Y-up by parenting under a rotated `world` group (see scene.ts).
 import * as THREE from "three";
-import { S, SW, T, TW } from "./wasm/layout";
+import { META_FLAG, S, SW, T, TW } from "./wasm/layout";
 import type { VehicleInfo } from "./wasm/sim";
 import { sim } from "./wasm/sim";
 import { layers } from "./settings";
@@ -26,60 +26,6 @@ export function heat(t: number, out = tmpColor): THREE.Color {
 /** Green (1 = healthy) → red (0 = destroyed). */
 export function healthColour(h: number, out = tmpColor): THREE.Color {
   return out.setHSL(Math.min(Math.max(h, 0), 1) * 0.33, 0.85, 0.45);
-}
-
-/** Who drives a vehicle (`live_vehicles()` kind codes). */
-export type VehicleKind = "player" | "ai_racer" | "police" | "traffic";
-export const KIND_BY_CODE: VehicleKind[] = ["player", "ai_racer", "police", "traffic"];
-
-/** Muted civilian colours for physical traffic. */
-const TRAFFIC_COLOURS = [0x8a8f96, 0x5c6b7a, 0xb9b2a3, 0x6e5a4c, 0x3d4a3f, 0x9c9a92];
-
-/** Body colour for a vehicle of `kind` (police: white body, black panels via the light bar). */
-export function kindColour(kind: VehicleKind, entity: number, fallback: number): number {
-  if (kind === "police") return 0xf2f2f2;
-  if (kind === "traffic") return TRAFFIC_COLOURS[entity % TRAFFIC_COLOURS.length];
-  return fallback;
-}
-
-/** Roof light bar of a police car: red (left) / blue (right) halves alternating at ~2.5 Hz,
- * plus coloured point lights that only matter at night. */
-class LightBar {
-  readonly group = new THREE.Group();
-  private readonly red: THREE.MeshStandardMaterial;
-  private readonly blue: THREE.MeshStandardMaterial;
-  private readonly redLight = new THREE.PointLight(0xff2020, 0, 25, 2);
-  private readonly blueLight = new THREE.PointLight(0x2040ff, 0, 25, 2);
-
-  constructor(width: number, length: number, height: number) {
-    const mk = (c: number) => new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: 0 });
-    this.red = mk(0xff1a1a);
-    this.blue = mk(0x1a3cff);
-    const half = new THREE.BoxGeometry(width * 0.32, 0.22, 0.1);
-    const r = new THREE.Mesh(half, this.red);
-    const b = new THREE.Mesh(half, this.blue);
-    r.position.set(-width * 0.17, 0, 0);
-    b.position.set(width * 0.17, 0, 0);
-    // Black door panels so the car reads as a cruiser from the chase camera.
-    const panel = new THREE.MeshStandardMaterial({ color: 0x111111 });
-    const doors = new THREE.Mesh(new THREE.BoxGeometry(width * 1.01, length * 0.42, height * 0.35), panel);
-    doors.position.set(0, 0, -height * 0.38);
-    this.redLight.position.set(-width * 0.3, 0, 0.3);
-    this.blueLight.position.set(width * 0.3, 0, 0.3);
-    this.group.add(r, b, doors, this.redLight, this.blueLight);
-    this.group.position.set(0, -length * 0.05, height + 0.06);
-  }
-
-  /** Flash pattern at time `t` (s); `night` 0..1 scales the light cast on the scene. */
-  update(t: number, on: boolean, night: number): void {
-    const phase = Math.floor(t * 5) % 4; // R R B B with a double-flash feel
-    const redOn = on && (phase === 0 || phase === 1) && Math.floor(t * 20) % 2 === 0;
-    const blueOn = on && (phase === 2 || phase === 3) && Math.floor(t * 20) % 2 === 0;
-    this.red.emissiveIntensity = redOn ? 3 : 0.15;
-    this.blue.emissiveIntensity = blueOn ? 3 : 0.15;
-    this.redLight.intensity = redOn ? 8 * (0.2 + night) : 0;
-    this.blueLight.intensity = blueOn ? 8 * (0.2 + night) : 0;
-  }
 }
 
 interface WheelView {
@@ -110,11 +56,17 @@ export class VehicleView {
   readonly velocity: THREE.ArrowHelper;
   /** Latest lattice nodes (chassis space). */
   nodes: Float32Array;
-  private readonly lightBar: LightBar | null;
+  private readonly lightBar: THREE.Group | null = null;
+  private readonly barRed: THREE.MeshStandardMaterial | null = null;
+  private readonly barBlue: THREE.MeshStandardMaterial | null = null;
+  private readonly sirenLight: THREE.PointLight | null = null;
+  private readonly headMat: THREE.MeshStandardMaterial;
+  private readonly tailMat: THREE.MeshStandardMaterial;
 
-  constructor(readonly entity: number, colour: number, readonly kind: VehicleKind = "player") {
+  constructor(readonly entity: number, colour: number) {
     this.info = sim.info(entity);
     const [w, l, h] = this.info.body_size_m;
+    const police = this.info.kind === "Police";
 
     const bodyMat = new THREE.MeshStandardMaterial({ color: colour, transparent: true, opacity: 1, side: THREE.DoubleSide });
     this.box = new THREE.Mesh(new THREE.BoxGeometry(w, l, h * 0.9), bodyMat);
@@ -126,8 +78,33 @@ export class VehicleView {
     nose.position.set(0, l / 2 - 0.25, h + 0.03);
     this.nose = nose;
     this.root.add(this.box, nose);
-    this.lightBar = kind === "police" ? new LightBar(w, l, h) : null;
-    if (this.lightBar) this.root.add(this.lightBar.group);
+
+    // Head- and tail-lights (emissive, brighter with headlights on / when braking).
+    this.headMat = new THREE.MeshStandardMaterial({ color: 0xfff6d0, emissive: 0x000000 });
+    this.tailMat = new THREE.MeshStandardMaterial({ color: 0x550000, emissive: 0x000000 });
+    for (const sx of [-1, 1]) {
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.05, 0.14), this.headMat);
+      head.position.set(sx * (w / 2 - 0.25), l / 2 + 0.01, h * 0.45);
+      const tail = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.05, 0.12), this.tailMat);
+      tail.position.set(sx * (w / 2 - 0.25), -l / 2 - 0.01, h * 0.5);
+      this.root.add(head, tail);
+    }
+
+    // Police: roof light bar (red left, blue right) + one point light that flashes with the siren.
+    if (police) {
+      this.lightBar = new THREE.Group();
+      this.barRed = new THREE.MeshStandardMaterial({ color: 0x661018, emissive: 0x000000 });
+      this.barBlue = new THREE.MeshStandardMaterial({ color: 0x102266, emissive: 0x000000 });
+      const red = new THREE.Mesh(new THREE.BoxGeometry(w * 0.32, 0.25, 0.12), this.barRed);
+      red.position.x = -w * 0.17;
+      const blue = new THREE.Mesh(new THREE.BoxGeometry(w * 0.32, 0.25, 0.12), this.barBlue);
+      blue.position.x = w * 0.17;
+      this.lightBar.add(red, blue);
+      this.lightBar.position.set(0, -0.1, h + 0.08);
+      this.sirenLight = new THREE.PointLight(0xff2244, 0, 18, 2);
+      this.sirenLight.position.set(0, 0, h + 0.6);
+      this.root.add(this.lightBar, this.sirenLight);
+    }
 
     const rest = sim.latticeRest(entity);
     this.nodes = rest.slice();
@@ -314,9 +291,22 @@ export class VehicleView {
     }
   }
 
-  /** Animate police lights (`on` = pursuing / siren); no-op for other kinds. */
-  updateLights(t: number, on: boolean, night: number): void {
-    this.lightBar?.update(t, on, night);
+  /** Lights from `vehicle_meta()` flags; `timeS` drives the siren flash pattern. */
+  setMeta(flags: number, timeS: number): void {
+    const headlights = (flags & META_FLAG.headlights) !== 0;
+    this.headMat.emissive.setHex(headlights ? 0xfff2c0 : 0x000000);
+    this.tailMat.emissive.setHex(flags & META_FLAG.brake ? 0xff1010 : headlights ? 0x400000 : 0x000000);
+    if (!this.lightBar) return;
+    const siren = (flags & META_FLAG.siren) !== 0;
+    // Alternating red/blue at 2.5 Hz with a double strobe on each side.
+    const phase = (timeS * 2.5) % 1;
+    const strobe = (phase % 0.5) < 0.12 || ((phase % 0.5) > 0.2 && (phase % 0.5) < 0.32);
+    const redOn = siren && phase < 0.5 && strobe;
+    const blueOn = siren && phase >= 0.5 && strobe;
+    this.barRed!.emissive.setHex(redOn ? 0xff2040 : 0x000000);
+    this.barBlue!.emissive.setHex(blueOn ? 0x2060ff : 0x000000);
+    this.sirenLight!.color.setHex(redOn ? 0xff2040 : 0x2060ff);
+    this.sirenLight!.intensity = redOn || blueOn ? 25 : 0;
   }
 
   dispose(): void {

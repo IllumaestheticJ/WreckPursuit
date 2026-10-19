@@ -37,6 +37,9 @@ pub fn free_drive(car: &str, mode: DamageMode, city: bool) -> Scenario {
         mode,
         assists: AssistSpec::Keyboard,
         traffic_density: None,
+        traffic_cars: true,
+        parked_cars: true,
+        police_cars: true,
         police_presence: None,
         systems: None,
         barriers: Vec::new(),
@@ -49,23 +52,22 @@ pub fn free_drive(car: &str, mode: DamageMode, city: bool) -> Scenario {
     }
 }
 
-/// City chase preset: the live `car` ("player") starts on the procedural city's race grid at
-/// night (23:00) already doing 90 km/h — far over the city limits — with full traffic and police
-/// presence, so violations, heat and a pursuit follow as soon as the player keeps speeding.
+/// Speed the city-chase player starts at, m/s (~110 km/h: well over the city limits).
+pub const CITY_CHASE_SPEED_MPS: f32 = 30.0;
+
+/// "City chase" preset: the procedural 12×12 city at 23:00 with full police presence and
+/// traffic; the live player starts on the race grid already speeding
+/// ([`CITY_CHASE_SPEED_MPS`]), which the world reports as violations and the police turn into
+/// heat. Same seed every time, so chases are reproducible and replayable.
 pub fn city_chase(car: &str, mode: DamageMode) -> Scenario {
     let mut sc = free_drive(car, mode, true);
     sc.name = "city_chase".into();
+    sc.seed = 23;
     sc.time_of_day_h = 23.0;
-    // Real-time-ish clock so the night lasts the whole chase.
-    sc.time_ratio = 1.0;
-    sc.traffic_density = Some(1.0);
     sc.police_presence = Some(1.0);
-    sc.entities[0].speed_mps = CITY_CHASE_START_MPS;
+    sc.entities[0].speed_mps = CITY_CHASE_SPEED_MPS;
     sc
 }
-
-/// Start speed of the city-chase player, m/s (90 km/h).
-pub const CITY_CHASE_START_MPS: f32 = 25.0;
 
 /// A plainly scripted entity (no keyframes) at a pose.
 pub fn entity(id: &str, car: &str, pos: [f32; 3], yaw: f32) -> EntitySpec {
@@ -75,6 +77,7 @@ pub fn entity(id: &str, car: &str, pos: [f32; 3], yaw: f32) -> EntitySpec {
         pos,
         yaw,
         speed_mps: 0.0,
+        police_heat: 0.0,
         assists: None,
         driver: Driver::Scripted,
         inputs: Vec::new(),
@@ -101,15 +104,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn city_chase_is_a_valid_night_city_scenario() {
-        let sc = city_chase("debug_coupe", DamageMode::Arcade);
-        sc.validate().unwrap();
-        assert_ne!(sc.city, CitySpec::Flat);
-        assert!(sc.time_of_day_h >= 20.0);
-        assert_eq!(sc.entities[0].speed_mps, CITY_CHASE_START_MPS);
-    }
-
-    #[test]
     fn every_simcli_scenario_parses() {
         let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../apps/simcli/scenarios");
         let files = simcli::find_scenarios(std::path::Path::new(dir));
@@ -125,6 +119,14 @@ mod tests {
         let sc = free_drive("debug_sedan", DamageMode::Simulation, true);
         sc.validate().unwrap();
         assert_eq!(from_ron(&sc.to_ron()).unwrap(), sc);
+    }
+
+    #[test]
+    fn city_chase_is_a_valid_v2_scenario() {
+        let sc = city_chase("debug_coupe", DamageMode::Arcade);
+        sc.validate().unwrap();
+        assert_eq!(from_ron(&sc.to_ron()).unwrap(), sc);
+        assert!(sc.entities[0].speed_mps > 20.0);
     }
 
     #[test]

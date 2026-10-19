@@ -14,7 +14,6 @@
   },
   "dependencies": {
     "three": "0.180.0",
-    "@wreckpursuit/ui-kit": "file:../ui-kit",
     "preact": "10.27.2"
   },
   "devDependencies": {

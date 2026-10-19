@@ -8,6 +8,8 @@
 //! bytes that `simcli replay` verifies headlessly. Playback re-simulates that log and compares
 //! every tick hash.
 
+use std::collections::BTreeMap;
+
 use wp_contracts::{
     AssistProfile, DamageMode, EntityId, FfbOutput, LoadedCar, SimEvent, VehicleInput, VehicleSim,
     VehicleState, PHYSICS_DT,
@@ -69,11 +71,13 @@ pub struct Session {
     load_city: bool,
     systems: Selection,
     sim: Sim,
+    /// Scenario entities, in scenario order (vehicles the sim spawns itself — police units,
+    /// physical traffic — are not in here; see [`Session::vehicle`]).
     ids: Vec<EntityId>,
-    cars: Vec<LoadedCar>,
-    /// Cars of vehicles the sim spawned itself (police units, promoted traffic), by car id.
-    dyn_cars: std::collections::BTreeMap<String, LoadedCar>,
-    extras: Vec<EntityExtra>,
+    /// Resolved cars by car id (scenario cars and any car the sim spawned).
+    cars: BTreeMap<String, LoadedCar>,
+    /// Per-vehicle extras for every sim vehicle, by entity.
+    extras: BTreeMap<EntityId, EntityExtra>,
     last_input: Vec<VehicleInput>,
     fixed: FixedStep,
     log: Replay,
@@ -128,7 +132,6 @@ impl Session {
             selection,
             ..
         } = build_sim(&sc, mem_data(), &opts(systems)).map_err(|e| e.to_string())?;
-        let per_entity: Vec<LoadedCar> = sc.entities.iter().map(|e| cars[&e.car].clone()).collect();
         let log = Replay::new(&sc, &selection.to_string(), ids.len());
         let n = ids.len();
         Ok(Self {
@@ -140,9 +143,8 @@ impl Session {
             systems: selection,
             sim,
             ids,
-            cars: per_entity,
-            dyn_cars: Default::default(),
-            extras: vec![EntityExtra::default(); n],
+            cars,
+            extras: BTreeMap::new(),
             last_input: vec![VehicleInput::default(); n],
             fixed: FixedStep::new(PHYSICS_DT, MAX_TICKS_PER_STEP),
             log,
@@ -228,99 +230,31 @@ impl Session {
         self.index(id).map(|i| &self.sc.entities[i])
     }
 
-    /// Resolved car of an entity: scenario entities, then vehicles the sim spawned itself.
+    /// A sim vehicle by entity (scenario entities and sim-spawned police / traffic).
+    pub fn vehicle(&self, id: EntityId) -> Option<&wp_sim::SimVehicle> {
+        self.sim.vehicles().iter().find(|v| v.id == id)
+    }
+
+    /// Resolved car of any sim vehicle.
     pub fn car(&self, id: EntityId) -> Option<&LoadedCar> {
-        match self.index(id) {
-            Some(i) => Some(&self.cars[i]),
-            None => {
-                let slot = self.sim.vehicles().iter().find(|v| v.id == id)?;
-                self.dyn_cars.get(&slot.car_id)
-            }
-        }
+        self.vehicle(id).and_then(|v| self.cars.get(&v.car_id))
     }
 
-    /// The first entity's (the player's) police heat for the HUD, or `None` without a record.
-    pub fn police_hud(&self) -> Option<HeatHud> {
-        use wp_police::{Assignment, PursuitStatus};
-        let player = *self.ids.first()?;
-        let police = self.sim.police();
-        let r = police.racer(player)?;
-        let heat_cfg = &police.config().heat;
-        let t = &heat_cfg.heat.level_thresholds;
-        // Heat within the current level: 0 at its threshold, 1 at the next one.
-        let i = r.level.number() as usize;
-        let lo = if i == 0 { 0.0 } else { t[i - 1] };
-        let hi = if i < t.len() {
-            t[i]
-        } else {
-            heat_cfg.heat.max_heat
-        };
-        let heat = ((r.heat - lo) / (hi - lo).max(1e-6)).clamp(0.0, 1.0);
-        let state = match r.status {
-            PursuitStatus::Clear => "clear",
-            PursuitStatus::Wanted => "noticed",
-            PursuitStatus::Pursuit => "pursuit",
-            PursuitStatus::Searching => "cooldown",
-        };
-        let cooldown = if r.status == PursuitStatus::Searching {
-            let need = wp_police::heat::escape_time_s(r.level, police.phase(), heat_cfg);
-            (r.los_lost_s / need.max(1e-6)).clamp(0.0, 1.0)
-        } else {
-            0.0
-        };
-        let units_in_pursuit = police
-            .units()
-            .iter()
-            .filter(|u| {
-                !u.wrecked
-                    && matches!(u.assignment, Assignment::Pursue { target } if target == player)
-            })
-            .count() as u32;
-        Some(HeatHud {
-            level: r.level,
-            heat,
-            state,
-            cooldown,
-            units_in_pursuit,
-            bounty: police.bounty(player).round(),
-        })
-    }
-
-    /// Debug: mark an entity as police / traffic / … (cosmetic + sim behaviour; not recorded in
-    /// replays, so refused while recording or replaying).
-    pub fn set_kind(&mut self, id: EntityId, kind: wp_sim::VehicleKind) -> Result<(), String> {
-        if self.recording || self.playback.is_some() {
-            return Err("set_vehicle_kind is not recorded in replays; stop recording first".into());
-        }
-        self.sim
-            .set_vehicle_kind(id, kind)
-            .map_err(|e| e.to_string())
-    }
-
-    /// Who drives an entity (player / AI racer / police / traffic).
-    pub fn kind_of(&self, id: EntityId) -> Option<wp_sim::VehicleKind> {
-        self.sim
-            .vehicles()
-            .iter()
-            .find(|v| v.id == id)
-            .map(|v| v.kind)
-    }
-
-    /// Load the car of every sim-spawned vehicle not seen yet (so `car()` resolves them).
-    fn cache_dynamic_cars(&mut self) {
-        for v in self.sim.vehicles() {
-            if self.ids.contains(&v.id) || self.dyn_cars.contains_key(&v.car_id) {
-                continue;
-            }
-            if let Ok(car) = simcli::data::load_car(mem_data(), &v.car_id) {
-                self.dyn_cars.insert(v.car_id.clone(), car);
-            }
-        }
-    }
-
-    /// Per-entity extras.
+    /// Per-vehicle extras.
     pub fn extra(&self, id: EntityId) -> Option<&EntityExtra> {
-        self.index(id).map(|i| &self.extras[i])
+        self.extras.get(&id)
+    }
+
+    /// Load the car of every sim vehicle not seen before (the sim may spawn police units and
+    /// physical traffic on its own).
+    fn sync_cars(&mut self) {
+        for v in self.sim.vehicles() {
+            if !self.cars.contains_key(&v.car_id) {
+                if let Ok(car) = simcli::data::load_car(mem_data(), &v.car_id) {
+                    self.cars.insert(v.car_id.clone(), car);
+                }
+            }
+        }
     }
 
     /// Playback state, if this is a replay.
@@ -405,8 +339,7 @@ impl Session {
             .entities
             .push(entity(&format!("car{n}"), car_id, pos, yaw));
         self.ids.push(id);
-        self.cars.push(car);
-        self.extras.push(EntityExtra::default());
+        self.cars.insert(car_id.to_string(), car);
         self.last_input.push(VehicleInput::default());
         self.log.entities = self.ids.len() as u32;
         Ok(id)
@@ -461,7 +394,6 @@ impl Session {
             ticks = ticks.min(p.replay.ticks.saturating_sub(self.sim.tick()));
         }
         self.run_ticks(ticks);
-        self.cache_dynamic_cars();
         if self.at_replay_end() {
             return 1.0;
         }
@@ -508,6 +440,7 @@ impl Session {
             }
             self.playback = Some(p);
         } else if self.script_running() {
+            // Scenario entities only: city runs add police / traffic cars (not scripted).
             let states = scenario_states(&self.sim, &self.ids);
             for (idx, (_, state)) in states.iter().enumerate() {
                 let input = driver_input(&self.sc, idx, tick, state, &self.last_input[idx]);
@@ -516,21 +449,28 @@ impl Session {
         }
 
         // 2. Step, keeping the pre-tick state for interpolation and acceleration.
-        // Scenario entities only: city runs add police / traffic cars (drawn, not scripted).
-        let before = scenario_states(&self.sim, &self.ids);
+        let before = self.sim.vehicle_states();
         if capture_prev {
-            for (x, (_, s)) in self.extras.iter_mut().zip(&before) {
-                x.prev_state = Some(s.clone());
+            for (id, s) in &before {
+                self.extras.entry(*id).or_default().prev_state = Some(s.clone());
             }
         }
         self.sim.step_fixed();
+        self.sync_cars();
         self.events.extend(self.sim.drain_events());
         if self.events.len() > MAX_BUFFERED_EVENTS {
             let excess = self.events.len() - MAX_BUFFERED_EVENTS;
             self.events.drain(..excess);
         }
-        let after = scenario_states(&self.sim, &self.ids);
-        for ((x, (_, b)), (_, s)) in self.extras.iter_mut().zip(&before).zip(&after) {
+        let after = self.sim.vehicle_states();
+        let before: BTreeMap<EntityId, VehicleState> = before.into_iter().collect();
+        self.extras
+            .retain(|id, _| after.iter().any(|(a, _)| a == id));
+        for (id, s) in &after {
+            let Some(b) = before.get(id) else {
+                continue;
+            };
+            let x = self.extras.entry(*id).or_default();
             let a = [
                 (s.lin_vel[0] - b.lin_vel[0]) / PHYSICS_DT,
                 (s.lin_vel[1] - b.lin_vel[1]) / PHYSICS_DT,
@@ -583,6 +523,7 @@ impl Session {
     }
 
     fn checkpoint(&self) -> Checkpoint {
+        // Replay checkpoints cover the scenario's own entities (the replay format's entity list).
         let states = scenario_states(&self.sim, &self.ids);
         let hashes: Vec<_> = self
             .sim
@@ -614,19 +555,17 @@ impl Session {
 
     /// Force-feedback output of a vehicle.
     pub fn ffb(&self, id: EntityId) -> Option<FfbOutput> {
-        self.index(id).map(|i| self.sim.vehicles()[i].vehicle.ffb())
+        self.vehicle(id).map(|v| v.vehicle.ffb())
     }
 
-    /// Current input of a vehicle.
+    /// Input a vehicle is driving with (live, scripted, replayed or AI).
     pub fn input(&self, id: EntityId) -> VehicleInput {
-        self.index(id)
-            .map(|i| self.last_input[i])
-            .unwrap_or_default()
+        self.vehicle(id).map(|v| v.input).unwrap_or_default()
     }
 
     /// Assists of a vehicle.
     pub fn assists(&self, id: EntityId) -> Option<AssistProfile> {
-        self.index(id).map(|i| self.sim.vehicles()[i].assists)
+        self.vehicle(id).map(|v| v.assists)
     }
 
     // ----- scenario outcome --------------------------------------------------------------
@@ -785,22 +724,4 @@ pub struct ReplayStatus {
     pub contract_version: String,
     /// Hash spec at record time.
     pub hash_spec: u32,
-}
-
-/// The UI kit's `HeatHud` (`apps/ui-kit/src/model/types.ts`), serialized camelCase.
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HeatHud {
-    /// Wanted level (`"None"`, `"L1"`..`"L5"`).
-    pub level: wp_contracts::WantedLevel,
-    /// Heat 0..=1 within the current level.
-    pub heat: f32,
-    /// `clear` / `noticed` / `pursuit` / `cooldown`.
-    pub state: &'static str,
-    /// Escape progress 0..=1 while searching (time without sight ÷ escape time).
-    pub cooldown: f32,
-    /// Units assigned to pursue the player.
-    pub units_in_pursuit: u32,
-    /// Current bounty, whole dollars.
-    pub bounty: f32,
 }

@@ -7,8 +7,7 @@
   "main": "src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./style.css": "./src/ui/theme.css",
-    "./hud": "./src/screens/hud/Hud.tsx"
+    "./style.css": "./src/ui/theme.css"
   },
   "scripts": {
     "demo": "vite",

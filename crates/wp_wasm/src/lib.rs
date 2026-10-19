@@ -27,7 +27,9 @@ pub mod net;
 
 pub mod audio;
 pub mod data;
+pub mod garage;
 pub mod pack;
+pub mod police;
 pub mod scenario;
 pub mod session;
 
@@ -105,9 +107,8 @@ pub fn free_drive_json(car: &str, mode: &str, city: bool) -> Result<String, JsVa
     Ok(json(&scenario::free_drive(car, mode, city)))
 }
 
-/// City-chase preset JSON: procedural city at night, full traffic and police presence, the
-/// live `car` ("player") starting on the race grid already at 90 km/h (see
-/// [`scenario::city_chase`]). Start it with `init(seed, json, false)`.
+/// "City chase" preset JSON (live): procedural city at night, full police presence, traffic,
+/// the player already speeding on the race grid.
 #[wasm_bindgen]
 pub fn city_chase_json(car: &str, mode: &str) -> Result<String, JsValue> {
     let mode = data::parse_mode(mode).map_err(err)?;
@@ -212,64 +213,6 @@ pub fn entities() -> Result<Vec<u32>, JsValue> {
     get(|s| s.entities().iter().map(|e| e.0).collect())
 }
 
-/// Every vehicle in the sim — scenario entities *and* vehicles the sim spawned itself (police
-/// units, promoted traffic) — as `[entity, kind]` pairs, ascending by entity. Kind: 0 player,
-/// 1 AI racer, 2 police, 3 traffic.
-#[wasm_bindgen]
-pub fn live_vehicles() -> Result<Vec<f32>, JsValue> {
-    get(|s| {
-        let mut out = Vec::new();
-        for v in s.sim().vehicles() {
-            out.push(v.id.0 as f32);
-            out.push(kind_code(v.kind) as f32);
-        }
-        out
-    })
-}
-
-/// Debug: set who drives a vehicle (0 player, 1 AI racer, 2 police, 3 traffic), e.g. to look at
-/// police visuals before police units spawn on their own. Refused while recording / replaying.
-#[wasm_bindgen]
-pub fn set_vehicle_kind(entity: u32, kind: u8) -> Result<(), JsValue> {
-    let k = match kind {
-        0 => wp_sim::VehicleKind::Player,
-        1 => wp_sim::VehicleKind::AiRacer,
-        2 => wp_sim::VehicleKind::Police,
-        3 => wp_sim::VehicleKind::Traffic,
-        _ => return Err(err(format!("unknown vehicle kind {kind}"))),
-    };
-    with(|s| s.set_kind(EntityId(entity), k))
-}
-
-fn kind_code(k: wp_sim::VehicleKind) -> u8 {
-    match k {
-        wp_sim::VehicleKind::Player => 0,
-        wp_sim::VehicleKind::AiRacer => 1,
-        wp_sim::VehicleKind::Police => 2,
-        wp_sim::VehicleKind::Traffic => 3,
-    }
-}
-
-fn kind_name(k: wp_sim::VehicleKind) -> &'static str {
-    match k {
-        wp_sim::VehicleKind::Player => "player",
-        wp_sim::VehicleKind::AiRacer => "ai_racer",
-        wp_sim::VehicleKind::Police => "police",
-        wp_sim::VehicleKind::Traffic => "traffic",
-    }
-}
-
-/// The player's police heat as the UI kit's `HeatHud` JSON
-/// (`{level, heat, state, cooldown, unitsInPursuit, bounty}`), from `Sim::police()`, or `null`
-/// when the player has no police record yet.
-#[wasm_bindgen]
-pub fn police_hud_json() -> Result<String, JsValue> {
-    get(|s| match s.police_hud() {
-        Some(h) => serde_json::to_string(&h).unwrap_or_else(|_| "null".into()),
-        None => "null".into(),
-    })
-}
-
 /// Floats per vehicle record in `vehicle_states()` ([`pack::STATE_STRIDE`]).
 #[wasm_bindgen]
 pub fn state_stride() -> u32 {
@@ -319,9 +262,8 @@ struct WheelInfo {
 #[derive(Serialize)]
 struct VehicleInfo {
     entity: u32,
-    /// `player` / `ai_racer` / `police` / `traffic`.
-    kind: &'static str,
     name: String,
+    kind: String,
     car_id: String,
     display_name: String,
     body_size_m: [f32; 3],
@@ -348,22 +290,23 @@ struct VehicleInfo {
 pub fn vehicle_info(entity: u32) -> Result<String, JsValue> {
     with(|s| {
         let kind = s
-            .kind_of(EntityId(entity))
+            .vehicle(EntityId(entity))
+            .map(|v| v.kind)
             .ok_or_else(|| format!("unknown entity {entity}"))?;
-        let car = car_of(s, entity)?;
-        let d = &car.def;
-        // Sim-spawned vehicles (police, traffic) have no scenario spec.
+        // Scenario entities have a name and spawn pose; sim-spawned ones (police, traffic) don't.
         let (name, spawn_pos) = match s.spec(EntityId(entity)) {
             Some(spec) => (spec.id.clone(), spec.pos),
             None => (
-                format!("{}_{entity}", kind_name(kind)),
-                state_of(s, entity)?.pos,
+                format!("{}{entity}", kind_name(kind).to_lowercase()),
+                [0.0; 3],
             ),
         };
+        let car = car_of(s, entity)?;
+        let d = &car.def;
         Ok(json(&VehicleInfo {
             entity,
-            kind: kind_name(kind),
             name,
+            kind: kind_name(kind).into(),
             car_id: d.id.clone(),
             display_name: d.display_name.clone(),
             body_size_m: d.body_size_m,
@@ -410,6 +353,43 @@ pub fn vehicle_info(entity: u32) -> Result<String, JsValue> {
     })
 }
 
+fn kind_name(k: wp_sim::VehicleKind) -> &'static str {
+    match k {
+        wp_sim::VehicleKind::Player => "Player",
+        wp_sim::VehicleKind::AiRacer => "AiRacer",
+        wp_sim::VehicleKind::Police => "Police",
+        wp_sim::VehicleKind::Traffic => "Traffic",
+    }
+}
+
+/// Floats per vehicle in `vehicle_meta()`.
+pub const META_STRIDE: usize = 3;
+
+/// Per-vehicle render metadata, same order as `vehicle_states()`, 3 floats each:
+/// `[entity, kind (0 player, 1 AI racer, 2 police, 3 physical traffic), flags]` with flags
+/// 1 siren, 2 headlights, 4 braking, 8 horn (from the input the vehicle is driving with).
+#[wasm_bindgen]
+pub fn vehicle_meta() -> Result<Vec<f32>, JsValue> {
+    get(|s| {
+        let mut out = Vec::with_capacity(s.sim().vehicles().len() * META_STRIDE);
+        for v in s.sim().vehicles() {
+            let kind = match v.kind {
+                wp_sim::VehicleKind::Player => 0.0,
+                wp_sim::VehicleKind::AiRacer => 1.0,
+                wp_sim::VehicleKind::Police => 2.0,
+                wp_sim::VehicleKind::Traffic => 3.0,
+            };
+            let i = &v.input;
+            let flags = i.siren as u32
+                | (i.headlights as u32) << 1
+                | ((i.brake > 0.1) as u32) << 2
+                | (i.horn as u32) << 3;
+            out.extend_from_slice(&[v.id.0 as f32, kind, flags as f32]);
+        }
+        out
+    })
+}
+
 /// `[tick, time_of_day_h, night_factor, mode (0 Arcade / 1 Simulation), replay (0/1),
 /// recording (0/1), city (0/1), scripted (0/1)]`.
 #[wasm_bindgen]
@@ -434,6 +414,27 @@ pub fn world_info() -> Result<Vec<f32>, JsValue> {
 #[wasm_bindgen]
 pub fn state_hash() -> Result<String, JsValue> {
     get(|s| format!("{:016x}", s.sim().state_hash()))
+}
+
+/// Wanted level / heat of a racer as JSON ([`police::PoliceStatus`]): level, heat, heat
+/// within the level, pursuit status, escape progress, units in pursuit, bounty. `null` when the
+/// police system is not stepped in this session.
+#[wasm_bindgen]
+pub fn police_status(entity: u32) -> Result<String, JsValue> {
+    get(|s| {
+        if !s.sim().systems().police {
+            return "null".to_string();
+        }
+        json(&police::status(s.sim().police(), EntityId(entity)))
+    })
+}
+
+/// Police units that are not sim vehicles (internally driven cars, helicopters), 6 floats
+/// each: `[x, y, z, yaw, speed_mps, flags]` (1 helicopter, 2 pursuing). Bound units are sim
+/// vehicles of kind Police and come through `vehicle_states()` / `vehicle_meta()`.
+#[wasm_bindgen]
+pub fn police_units() -> Result<Vec<f32>, JsValue> {
+    get(|s| police::units(s.sim().police()))
 }
 
 /// Floats per agent in `traffic_agents()`.

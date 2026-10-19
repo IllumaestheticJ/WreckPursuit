@@ -1,0 +1,36 @@
+// Opponent AI (workstream 17): AI racers on open roads with traffic and police. Every racer is
+// a `VehicleKind::AiRacer`; violations raise heat in `wp_police`, and a racer whose wanted
+// level reaches its `flee_wanted_level` (risk 0.4 → level 2) abandons the race and drives a
+// route away from the police it has seen (`wp_opponent::EventHeat` reads the police events).
+// The city loads; simcli does not drive `follow_route` entities yet and `wp_sim` has no
+// police units to witness violations, so the pursuit checks are pending. The same flight
+// runs today as a Rust test: crates/wp_opponent/tests/race.rs
+// (`wanted_ai_racer_flees_police_through_the_city`).
+(
+    name: "opponent_flee_police",
+    seed: 4,
+    city: procedural(seed: 1, blocks_x: 8, blocks_y: 8, block_m: 110.0),
+    mode: Arcade,
+    assists: ai,
+    traffic_density: 0.25,
+    police_presence: 1.0,
+    entities: [
+        (id: "skill95", car: "debug_sedan", pos: (-104.0, -166.75, 0.0), yaw: -1.5708, assists: ai,
+         driver: follow_route(route_id: "procedural_8x8/arterial_square_ccw", target_speed: 0.0)),
+        (id: "skill75", car: "debug_sedan", pos: (-112.2, -166.75, 0.0), yaw: -1.5708, assists: ai,
+         driver: follow_route(route_id: "procedural_8x8/arterial_square_ccw", target_speed: 0.0)),
+        (id: "skill55", car: "debug_sedan", pos: (-120.4, -166.75, 0.0), yaw: -1.5708, assists: ai,
+         driver: follow_route(route_id: "procedural_8x8/arterial_square_ccw", target_speed: 0.0)),
+    ],
+    duration_s: 120.0,
+    hash_every: 2400,
+    expect: [event_count(event: "TotalLoss", min: 0, max: 0)],
+    expect_pending: [
+        // Racing through the city at speed gets them reported and wanted.
+        police_event_before(kind: 2, t_s: 90.0),
+        // The flight covers real ground and nobody is wrecked or hits another racer hard.
+        metric(entity: "skill95", name: "path_length_m", min: 600.0, max: 3500.0),
+        metric(entity: "skill95", name: "final_health", min: 0.8, max: 1.0),
+        event_count(event: "Contact", min: 0, max: 6),
+    ],
+)
