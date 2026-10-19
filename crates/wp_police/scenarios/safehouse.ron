@@ -3,6 +3,8 @@
 (
     name: "police_safehouse",
     seed: 700,
+    // The small city has no residential district, so no safehouse candidates.
+    city: (nx: 12, ny: 12),
     time_of_day_h: 3.0,
     duration_s: 200.0,
     stop_after_first_pursuit: true,
