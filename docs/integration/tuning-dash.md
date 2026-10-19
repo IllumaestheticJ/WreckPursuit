@@ -571,4 +571,9 @@ Muscle and Truck end in 3–4 hard hits and survive one 80 km/h hit. The cruiser
 toughness question. 40 km/h hits never total any car at any threshold, which matches the split.
 
 ### Session checks (round 8)
-See the end of this section (filled in after the run).
+`cargo fmt --all --check` and `cargo clippy --workspace --all-targets -- -D warnings` are clean.
+`cargo test --workspace --no-fail-fast` passes with 0 failures; the 14 ignored tests all belong to
+other workstreams. `tuning-probe` has no ignored tests left (`cargo test -p tuning-probe -- --ignored`
+runs 0). `python3 -m unittest discover -s tools/tuning-dash/tests` passes (10 tests). All four sweeps
+ran with no point errors. This branch changes only `tools/tuning-dash`, `docs/integration/tuning-dash.md`
+and one SVG in `docs/media/tuning/`. Nothing here is reachable from `wp_wasm`.
