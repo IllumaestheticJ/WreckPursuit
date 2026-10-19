@@ -18,7 +18,15 @@ let nodes = dm.node_positions();         // + dm.node_active() → renderer skin
 let parts = dm.take_detached_parts();    // → part.to_rapier(..) debris bodies
 if dm.hull_version() != last { rebuild_collider(dm.convex_hull_outer()) }
 let bill = dm.repair_estimate(&mode, &prices);
+let glass = dm.glass_broken_this_tick();  // panels that shattered in this apply_contacts call
+let snap = dm.save_state();              // DamageSnapshot (serde) → garage / impound / net
+dm.restore_state(&snap)?;                // bit-exact; Err on another lattice
+dm.apply_repair(&items, false);          // pay line items (true = full repair)
+let s = dm.summary();                    // DamageSummary { health, total_loss, counts }
 ```
+`save_state` / `restore_state` / `apply_repair` / `summary` and `DamageSnapshot` /
+`DamageSummary` are inherent and local until contract v0.3.0 moves them onto `DamageSim`
+(`persist.rs`).
 
 ## The model
 
@@ -112,6 +120,23 @@ Line per damaged region (severity = plastic energy / energy to strain all its be
 component (1 − health). Severity ≥ 0.6 bills the full part price, below it 30 % × severity/0.6
 (straightening); labour = `labour_hours_per_item × severity` (min 0.1). All × `repair_cost_scale`.
 `default_price_table()` is a placeholder until `wp_economy` supplies prices.
+
+### Persistence and repair (`persist.rs`)
+`save_state()` captures a settled car: node positions, beam rest lengths / plastic strains /
+energy / broken+buckled flags, the energy ledger, cracked and shattered regions, component
+health (+ last reported health and time since failure, so the radiator ramp and event thresholds
+carry over), detached groups, lost wheels, steer-pull bias, health and total loss. Restoring it
+into a fresh model of the same lattice gives the same `state_hash` (once call counters match)
+and identical results for later crashes. A crash in progress (impactors, velocities) is not
+saved; the damage log and pending debris are session-only.
+
+`apply_repair(items, full)`: `Region(r)` puts `r`'s nodes back to rest, restores every beam
+touching them, zeroes `r`'s ledger and un-shatters glass; `DetachedPart(r)` re-attaches the
+group and repairs region `r` (the estimate bills the part instead of the region); `Component(c)`
+restores health and its mount nodes (a new part on a crushed mount would fail at once); `Wheel*`
+gives the wheel back. Afterwards every intact beam takes its current length as rest length
+(stress relief), so a partial repair never makes the car creep; health, total loss and effects
+are recomputed with the last mode passed to `apply_contacts`; the hull is rebuilt.
 
 ### Hull, skinning, sleeping
 `convex_hull_outer()` (parry quickhull over active nodes) is recomputed only when a node moved
@@ -214,7 +239,10 @@ identical hashes (seed only changes steer pull); containment at 120 km/h every k
 left-front hit misaligns only the left front; effects of a frontal; radiator overheating ramp;
 Arcade more forgiving + cheaper; events once with the entity id; sleeping; repair monotone and
 scaled; reset; hull throttling; debris bodies; skinning; mode-table derivation; every body
-profile crashes plausibly. Scenarios: `crates/wp_damage/scenarios/*.ron` — frontal / offset /
+profile crashes plausibly; save/restore bit-exact round trip (+ JSON) and identical later
+crashes; restore rejects other lattices; summary counts; repairing every billed item restores
+the car (and it re-crashes like a new one); partial repair fixes only paid items without creep;
+per-tick glass-break records match `GlassShattered` events. Scenarios: `crates/wp_damage/scenarios/*.ron` — frontal / offset /
 side / rear × both modes × 15/25/40/56/80 km/h (monotone crush, total-loss verdicts, required
 failures/survivors, failure order, containment) + a coupe check. Native vs `wasm32-wasip1`
 (node 22) scenario hashes were verified identical.
@@ -237,9 +265,10 @@ Release, cloud Xeon @ 2.1 GHz, debug_sedan lattice (270 nodes / 1701 beams), `da
 - Rear structure is softer than the front (no engine load path): ~1 m crush at 56 km/h into a
   rigid barrier. Offset crashes crush deep (~1 m at 56 km/h).
 - Tangential friction drag is approximate (does not conserve tangential momentum).
-- Contacts are synthesised in tests; `wp_sim` does not feed Rapier contacts yet.
-- Glass shatter is only in `DamageModel::log()`/`shattered_regions()` until a `SimEvent`
-  exists (contract request). Battery failure has no handling effect.
+- Battery failure has no handling effect.
+- Simulation crushes ~1.9× deeper than Arcade in the same crash (crush ≈ ∝ energy^0.9 and
+  Arcade feeds 0.45 of the energy). With Arcade's T-bone at its 0.15 m golden floor, the
+  Simulation T-bone is ~0.3 m and a TotalLoss (see `docs/integration/damage.md`, round 6b).
 - A simultaneous pile-up of 24 cars costs ~24 ms/frame while it lasts; LOD (fewer sub-steps
   for far cars) or staggering solver ticks would fix it.
 - Debug lattices have no skin binding (no visual meshes yet).

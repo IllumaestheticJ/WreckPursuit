@@ -29,6 +29,11 @@
     `cracked_regions()`, `shattered_regions()`, `detached_groups()`, `wheels_lost()`,
     `log()` (`DamageLogEntry` timeline), `state_hash()`, `reset()`, `is_awake()`.
   - `repair_estimate(&ModeTable, &PriceTable)`; `wp_damage::default_price_table()` placeholder.
+  - v0.3.0 items, inherent until the contract lands (`persist.rs`): `save_state() ->
+    DamageSnapshot`, `restore_state(&DamageSnapshot) -> Result<(), String>`,
+    `apply_repair(&[RepairItem], full: bool)`, `summary() -> DamageSummary`.
+  - `glass_broken_this_tick() -> &[GlassBreak { region, centroid_m, nodes }]` — glass panels
+    that shattered during the last `apply_contacts` call (audio/VFX positioning).
   - Debug: `set_emit_lattice_events(true)` → `SimEvent::LatticeDeformed` (never replicate),
     `apply_node_impulse`, `set_node_force`.
 - `wp_damage::lattice_gen` + `gen-lattice` binary (profiles sedan/coupe/hatch/truck/suv/cruiser,
@@ -65,19 +70,28 @@
 ### Final shapes for the v0.3.0 damage items (#4–#7)
 ```rust
 /// Serialisable damage state of one vehicle (wp_contracts::repair or a new damage.rs).
+/// Implemented today as wp_damage::DamageSnapshot (same fields; add JsonSchema when moved).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct DamageSnapshot {
-    pub lattice_id: String,                         // restore refuses another lattice
-    pub node_pos_m: Vec<[f32; 3]>,                  // chassis space, by node id
-    pub beam_rest_m: Vec<f32>,                      // current rest length, by beam index
+    pub lattice_id: String,                                // restore refuses another lattice
+    pub node_pos_m: Vec<[f32; 3]>,                         // chassis space, by node id
+    pub beam_rest_m: Vec<f32>,                             // current rest length, by beam index
     pub beam_plastic_strain: Vec<f32>,
-    pub beam_flags: Vec<u8>,                        // bit 0 broken, bit 1 buckled
+    pub beam_comp_plastic_strain: Vec<f32>,                // drives buckling
+    pub beam_energy_j: Vec<f32>,                           // heat map
+    pub beam_flags: Vec<u8>,                               // bit 0 broken, bit 1 buckled
     pub region_plastic_j: BTreeMap<BodyRegion, f32>,
-    pub component_health: BTreeMap<Component, f32>, // only < 1.0
-    pub components_failed: BTreeSet<Component>,
+    pub region_injected_j: BTreeMap<BodyRegion, f32>,
+    pub region_reported_severity: BTreeMap<BodyRegion, f32>, // RegionDamaged thresholds
+    pub cracked: BTreeSet<BodyRegion>,
+    pub component_health: BTreeMap<Component, f32>,        // only < 1.0
+    pub component_reported_health: BTreeMap<Component, f32>, // ComponentDamaged thresholds
+    pub components_failed: BTreeMap<Component, f32>,       // → seconds since failure
     pub detached_groups: BTreeSet<u16>,
+    pub detach_impulse_ns: BTreeMap<u16, f32>,             // hinge impulse still accumulated
     pub shattered: BTreeSet<BodyRegion>,
     pub wheels_lost: [bool; 4],
+    pub steer_pull_bias: f32,
     pub health: f32,
     pub total_loss: bool,
 }
@@ -97,17 +111,19 @@ pub trait DamageSim {
     /// Err if `lattice_id` or array lengths do not match this lattice. Leaves the model asleep.
     fn restore_state(&mut self, s: &DamageSnapshot) -> Result<(), String>;
     /// Region(r): nodes and beams of `r` back to rest, its energy ledger zeroed, glass
-    /// un-shattered; DetachedPart(r): group re-attached (nodes back to rest); Component(c):
-    /// health 1 and not failed (Wheel* also clears `wheel_lost`). Health and total loss are
-    /// recomputed from what is left. Items not damaged are ignored.
-    fn apply_repair(&mut self, items: &[RepairItem]);
+    /// un-shattered; DetachedPart(r): group re-attached + region r repaired; Component(c):
+    /// health 1, not failed, mount nodes restored (Wheel* also clears `wheel_lost`).
+    /// `full` = everything (reset). Health and total loss are recomputed from what is left.
+    fn apply_repair(&mut self, items: &[RepairItem], full: bool);
 }
 ```
 `BodyRegion::Accessory`: `gen-lattice --accessory pushbar|kit` adds an Accessory node row ahead of
 the bumper with its own detach group (`GROUP_ACCESSORY = 8`), structural (push bar) or polymer
 (kit) beams; it does not change `HandlingEffects`; billing via `PriceTable::region_replace_cost`.
-`wp_damage` implements all of these inherently the day the contract lands (the internals exist:
-`restore_node_positions`, `reset`, the energy ledger).
+All of these exist today as inherent methods / local types in `wp_damage` (round 6b); the trait
+wiring is a rename once v0.3.0 lands. The snapshot gained fields over the earlier draft
+(compressive strain, beam energy, injected ledger, reported thresholds, failure age, hinge
+impulse, steer-pull bias) — they are what makes the round trip bit-exact.
 
 ## Changes outside my crates
 - `crates/wp_wasm/src/lib.rs`: embed `data/materials/cast_aluminum.json` in `MATERIALS` (the
@@ -271,3 +287,72 @@ Contract **v0.3.0** is being applied in parallel by the lead (branch `lead/contr
 1. Implement the v0.3.0 damage items as **inherent methods** on your damage model, using your final shapes in this doc: `save_state`/`restore_state` (bit-exact round trip test), `apply_repair(items, full)`, and `summary() -> DamageSummary` (local struct for now). The lead switches them to the trait in v0.3.0.
 2. T-bone crush: bring the side-impact intrusion toward the 0.15 m target in both modes without breaking the frontal/rear goldens (re-bless only in `[bless]` commits, with numbers).
 3. Glass-break event data (audio's #1 request): record which glass panels broke this tick, readable by the sim.
+
+## Response to round 6b — machine B, 2026-10-19
+
+Merged `origin/main` (no-op) and `origin/claude/laughing-newton-0xqr6q`. The merge conflicted only
+in golden hash files; resolved to the lead's versions (they already carry my run-5 bless).
+
+**1. v0.3.0 damage items as inherent methods** (`crates/wp_damage/src/persist.rs`, local
+`DamageSnapshot` / `DamageSummary`, final shapes above):
+- `save_state()` / `restore_state(&snap)`: a settled car restored into a fresh model of the same
+  lattice is bit-identical — same `state_hash` (once call counters match), same `summary`, and
+  the same events/state after a second crash. JSON round trip is lossless. Another lattice,
+  wrong array lengths or unknown groups → `Err`, model untouched. Tests:
+  `save_restore_round_trip_is_bit_exact`, `restore_rejects_another_lattice_and_bad_arrays`.
+- `apply_repair(items, full)`: matches economy's `apply_repair(&[RepairItem], full: bool)`.
+  Repairing every line of a 56 km/h Sim frontal's estimate: health 0.999, no TotalLoss, no
+  detached parts, estimate ≈ 0, and the car re-crashes like a new one. Partial repairs fix only
+  the paid items and never make the lattice creep (stress relief). Tests:
+  `repairing_every_billed_item_restores_the_car`, `partial_repair_fixes_only_the_paid_items`.
+- `summary() -> DamageSummary { health, total_loss, components_failed, parts_detached,
+  wheels_lost }`. Test: `summary_counts_damage`.
+
+**3. Glass-break data per tick:** `DamageModel::glass_broken_this_tick() -> &[GlassBreak]`
+(`region`, chassis-space `centroid_m`, `nodes` count), cleared at the start of every
+`apply_contacts`; matches that call's `SimEvent::GlassShattered` events one-to-one. Test:
+`glass_breaks_are_readable_for_the_tick_they_happen`. **Request (lead, `wp_sim`):** after
+stepping each car's damage, read `glass_broken_this_tick()` and hand it to audio (world position
+= chassis pose × `centroid_m`), e.g. a `Sim::glass_breaks_this_tick() -> &[(EntityId,
+GlassBreak)]` accessor; no contract change needed.
+
+**2. T-bone crush — measured, calibration kept, Simulation pinned by a new golden.**
+
+| `golden_tbone` crash (coupe 50 km/h into the sedan's door) | Arcade | Simulation |
+|---|---|---|
+| victim energy into the lattice, first hit | 33 kJ | 75 kJ |
+| victim structural crush, first hit | **0.165 m** | 0.324 m (cabin 0.31 → TotalLoss) |
+| victim at 4 s (striker keeps driving into it in Sim) | 0.165 m, 1 failed, health 0.85 | 0.385 m, 5 failed, health 0.43, TotalLoss |
+| simcli `crush_depth` (any node incl. shattered glass) | 0.169 m ✓ (0.15–0.6) | 0.58 m |
+
+Arcade is on target. Simulation cannot be brought to ~0.15 m without taking Arcade below the
+golden's 0.15 m floor: Sim crush is ~1.9× Arcade's in the same crash because crush grows ≈ with
+energy^0.9 and Arcade feeds 0.45 of the energy (`impulse_to_lattice_scale`, pinned by prompt 03).
+I checked this rather than assumed it — barrier harness, side impact 50 km/h (Sim / Arcade crush):
+
+| Side structure variant | Sim | Arcade | Ratio | Frontal 56 Sim |
+|---|---|---|---|---|
+| current | 0.27 m | 0.14 m | 1.94 | 0.63 m, TotalLoss |
+| cross-members 8× work hardening | 0.20 | 0.10 | 1.92 | 0.59 m, **no** TotalLoss |
+| lateral cross-members only, 8× | 0.20 | 0.10 | 1.92 | 0.57 m, **no** TotalLoss |
+| half section, 40× hardening | 0.15 | 0.08 | 1.83 | — |
+
+Every variant that lowers Sim also lowers Arcade by the same factor (and stiffening the cabin
+also took the Sim 56 km/h frontal out of TotalLoss). So I kept the run-5 calibration (no
+lattice/material/tuning change, no re-bless of existing goldens) and added
+**`apps/simcli/scenarios/golden/tbone_sim.ron` (`golden_tbone_sim`)**: the same crash in
+Simulation, expecting victim crush 0.25–0.8 m, ≥ 2 failed components, TotalLoss; striker
+0.1–0.7 m, no TotalLoss. With `golden_tbone` it pins the mode pair. New golden files only (`[bless]`
+commit); every existing golden is unchanged.
+
+**Lead decision needed** if Simulation should *not* total a car in a 50 km/h T-bone: either
+(a) accept Arcade ≈ 0.10 m in `golden_tbone` (lower its floor to 0.08) and I ship the
+lateral-cross-member hardening (Sim ≈ 0.24 m in the golden, then retune the Sim frontal back to
+TotalLoss), or (b) keep this (Sim side intrusion ≈ a "poor"-rated real car, TotalLoss). Real
+50 km/h side tests: 0.15–0.3 m B-pillar intrusion, so (b) is at the soft end of reality.
+
+For machine I (repeat of the run-2 request): `simcli::run::crush_depth` should use
+`DamageModel::structural_crush_m()`; the any-node max counts shattered glass (0.58 vs 0.39 m here).
+
+**Checks:** see the commit; fmt, clippy `-D warnings`, `cargo test --workspace`, wasm build,
+`crates/wp_damage/scenarios/*` and `simcli goldens` (results below).
