@@ -157,6 +157,13 @@ uses recorded packs; a gear change plays one shift clunk. Browser: `node e2e/aud
 (after the wasm build) — all files fetched from relative URLs and decoded, engine plays, switching to
 procedural and back works, no page errors.
 
+**Verified 2026-10-19 (headless Chromium):** `e2e/audio_samples.mjs` 80/80 files decoded, 80
+relative requests, recorded default, procedural ↔ recorded switch, no errors. `e2e/audio.mjs` and
+`e2e/run.mjs` still pass; the audio e2e now hears `drivetrain/shift` (7 clunks while driving). 24-car
+bench with samples: audio frame 1.8 ms (director 0.62, Web Audio apply 1.17 ms) at 3.5 fps software
+GL (≈45 sim ticks per frame) — apply is higher than with synths only because sample voices restart
+buffers; still within the 2× browser budget per 60 Hz frame equivalent.
+
 **Rebuilding the files:** `tools/audio_packs/` (new, outside my folders: download, cut/loop/normalise/
 encode, pack JSON and LICENSES.md generators; README there). Per-file processing is also recorded in
 `sources.json` / `LICENSES.md`.
