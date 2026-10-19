@@ -13,6 +13,30 @@ Everything is a method on `wp_economy::Economy` (immutable data bundle). Mutatin
 `&mut PlayerAccount` and return `Result<(T, Vec<EconomyEvent>), EconomyError>`; a refused call
 never changes the account. Persist with `AccountStore::commit(&account, &events)`.
 
+### End-of-run glue for `wp_sim` (`wp_economy::session`) — round 6b
+| Call | Notes |
+|---|---|
+| `EconomySession::new(SessionConfig::new(mode))` | `SessionConfig { mode, shop, repair: RepairPolicy::{PayIfAffordable (default), QuoteOnly}, phase }` |
+| `bind(vehicle: EntityId, player, car: CarUid)` | at spawn; unbound vehicles (traffic, police) are never settled |
+| `observe(&SimEvent)` | every drained event; reads `TrafficViolation`, `TotalLoss`, police `WantedLevelChanged` / `PursuitEnded` (0.03 µs/event) |
+| `observe_police(&PoliceSignal)` | for typed v0.3.0 events / already-decoded police events |
+| `set_day_phase(phase)`, `add_race_result(vehicle, RaceSetup, RaceResult)`, `mark_towed(vehicle)` | |
+| `is_captured(vehicle)`, `was_wanted`, `wanted_level`, `pending_pursuits()` | end the run on a capture |
+| `finish(&econ, &mut acct, &[DamageReport], &mut rng) -> RunResult` | all-or-nothing, per account: damage (towing) → races → pursuits (fine / bail / impound / seizure / destruction, escape bounty) → repair bill. `RunResult { cash_before, cash_after, payouts, fines, bail, towing, repairs_paid, rep_delta, bounty_delta, races, pursuits, cars: [CarRunResult { status, towed, repair_quote, repair_order, impound }], events }` |
+| `PoliceSignal::from_sim_event(&SimEvent)` | decodes today's opaque police events (kinds 2 and 4); the one function that changes for typed v0.3.0 police events |
+| `Economy::impound_status(&acct, car) -> ImpoundStatus` | `{ days, level, fee, fee_per_day, days_until_auction, affordable }` |
+
+Demo wiring (single player): bind the player's vehicle at spawn, `observe` every drained event,
+end the run when `is_captured` (or the player quits / reaches the garage), build the
+`DamageReport` from `wp_damage` (estimate priced with `econ.price_table_for(car)`), call
+`finish`, show `RunResult`, `store.commit(&acct, &result.events)`. If `repair_order` is `Some`,
+apply it to the stored lattice (full reset today). An impounded car comes back through
+`retrieve_from_impound` with its damage intact.
+
+Switching to typed v0.3.0 events: replace the body of `PoliceSignal::from_sim_event` with a
+match on the typed police variant (and take `level` from `PursuitEnded` when it has it); the
+session API does not change.
+
 ### Data / setup
 | Item | Notes |
 |---|---|
@@ -117,10 +141,11 @@ per seed). `apps/simcli` (workstream 10) may wrap it as an economy scenario.
 | From | What | Workaround now |
 |---|---|---|
 | 07 net / 12 lead | Call sites: race results (`RaceSetup` + `RaceResult` per racer, server-validated), session end `DamageReport`s, capture/escape, garage UI messages; persist with `SqliteStore` (enable `wp_economy/native` in `apps/server` only) | tests drive the API directly |
+| 06 police | **New (round 6b):** `PoliceSystem::set_heat` changes the wanted level without emitting `WantedLevelChanged`, so a pursuit raised that way ends with the economy never having seen a level (broke `real_police_capture_settles_through_the_economy` after the lead merge; the test now raises heat with real violations, and the economy bills an un-levelled capture at L1). Please emit the event on the next step, or (better) carry `level` in `PursuitEnded` as requested for v0.3.0. | L1 fallback |
 | 06 police | ~~Capture/escape payload~~ covered by `PursuitEnded` + `WantedLevelChanged` (pursuit wiring above). **New for v0.3.0:** `PursuitEnded` should name the capturing unit and assisting units (`capturer: Option<UnitId>, assists: Vec<UnitId>`) so `award_cop` can pay player cops; and the event order (ended before the level reset) should stay as it is or carry `level` in the event. Consume `InformantTip` / `ShopReported` / `BountyCleared`. Feed the risk-budget overspend for `CopAction::RiskBudgetOverspent`. Read `ToolLoadout` (radar/scanner/fake plates) | `CaptureContext` built by hand in tests |
 | 03 damage | (a) ~~unscaled `parts_cost` / `labour_hours`~~ done in v0.2.0; (b) an API to serialize / restore lattice state (`Vec<u8>`) and to apply a `RepairOrder` (restore listed items / full reset); (c) `gen-lattice` extension: create detachable groups for body-kit `DetachableRequest`s | `reference_estimate`; lattice blob stays empty |
 | 02 vehicle | ~~Tire files~~ landed; `market.tire_grip` is now each file's `lateral.d` / street's (a test requires an entry per `data/tires/` file). Optionally `wp_vehicle::metrics` to replace the estimator; consume `ToolLoadout.run_flat`, `reinforced_cooling`, `nitrous` | estimator + grip table |
-| 09 cars | A Beater car file `junkyard_beater` (base price 3 000) for the economy floor (`market.toml [floor_car]`); keep `base_price`s inside the `market.toml` class bands | floor car is economy-only data |
+| 09 cars | ~~`junkyard_beater`~~ landed (a test checks it matches `market.toml [floor_car]`). **Price retune (round 6b):** `hakone_gt` 48 000 → **40 000** (PI 494 vs Sperber 32's 500 at 36 000; its front-hit repair is 1.5× a win, the highest of the Sport cars); `ironside_440` 38 000 → **26 000** (PI 330, slower than the 22 000 Kestrel TS and the 28 000 Shiro Turbo). Both are listed as known outliers in `tests/roster_prices.rs::pricier_cars_are_not_slower`; that test fails once they are fixed until they are removed from `KNOWN`, so tell me (or remove them yourself — test-only change). Every other price is fine as is. | known-outlier list |
 | 10 harness | CI line `cargo test -p wp_economy --features native` so the SQLite store is tested in CI | run locally |
 
 ## Contract change requests
@@ -208,6 +233,8 @@ table (lead may move them).
 | `preview`, 7 mods | cloud container, release | 167 µs | — | not per-frame |
 | `preview`, welded cage | cloud container, release | 248 µs | — | not per-frame |
 | `enter_race` + `settle_race` | cloud container, release | 0.4 µs | — | not per-frame |
+| `EconomySession::observe`, per event | cloud container, release | 0.03 µs | — | runs in the event drain |
+| `EconomySession::finish` (capture + impound) | cloud container, release | 1.3 µs | — | not per-frame |
 | `handle_capture` | cloud container, release | 0.2 µs | — | not per-frame |
 | 20-night career (60 races) | cloud container, release | 168 µs | — | — |
 
@@ -215,7 +242,10 @@ table (lead may move them).
 - Lattice blobs and partial repairs wait on `DamageSim::{save_state, restore_state, apply_repair}`
   (v0.3.0). Real estimates come from `wp_damage` once the sim calls `record_damage`;
   `reference_estimate` now prices with exactly `wp_damage`'s formula for tests and the career.
-- The floor car file `junkyard_beater` does not exist yet (09); no Beater-class car is in the roster.
+- The career's win rate does not depend on the car, so its roster sweep overstates how much
+  expensive cars lose in Simulation (README, "Prices against the car roster").
+- `EconomySession` has no persistence of its own: a run that crashes before `finish` loses its
+  pending settlements (the server should `finish` on disconnect).
 - Body kits only reuse existing detachable groups (03 `gen-lattice` extension needed).
 - Economy data has no generated JSON Schema (types live outside contracts); typed loaders with
   `deny_unknown_fields` + completeness checks validate it.
@@ -259,3 +289,35 @@ Contract **v0.3.0** is being applied in parallel by the lead (branch `lead/contr
 1. Build the glue the lead calls from `wp_sim`: an `EconomySession` (in `wp_economy`) that takes a stream of `SimEvent`s plus a per-car `DamageReport`, and produces the end-of-run result: repair bill, payouts, fines, impound decision, ledger entries. Use today's v0.2.0 event shapes, with your `PursuitTracker`/`settle_pursuit` behind it. Write it so switching to typed v0.3.0 events is a small change. Include tests from recorded event lists.
 2. Impound flow end to end: capture → impound fee → release, with the car's damage carried over.
 3. Tune prices against H's 13 cars (H flagged first-pass prices).
+
+### Round 6b response (economy)
+
+1. **`EconomySession`** (`crates/wp_economy/src/session.rs`, API table under "Exposes"): sim
+   events + per-car `DamageReport` → one `RunResult` (repair bill, payouts, fines, bail, towing,
+   impound decision, ledger entries), all-or-nothing, using `PursuitTracker` / `settle_pursuit`.
+   Police events are decoded by `PoliceSignal::from_sim_event`, the only place that changes
+   for typed v0.3.0 events. Tests replay event lists recorded from a real `PoliceSystem`
+   (`tests/fixtures/`, `tests/session.rs`), plus a live run that must settle like its
+   recording.
+2. **Impound flow end to end**: capture → damage recorded → impounded → `impound_status`
+   (fee, daily growth, auction countdown) → `end_of_day`s → `retrieve_from_impound` → the car is
+   back with the same lattice blob / handling / estimate → repaired; plus the auction when it is
+   never retrieved, and the total-loss capture in both modes.
+3. **Prices tuned against the 13-car roster** (`tests/roster_prices.rs`, numbers in the README):
+   class bands widened (they were clamping Vireo XS / Kestrel TS and erasing their Used/Worn
+   discount), Sport parts 1.9 → 1.75, Truck parts 1.5 → 1.3, Muscle reference value 34 k → 40 k.
+   Two car prices are 09's to change (Hakone GT → 40 000, Ironside 440 → 26 000; see Needs).
+   Career sweep over every street car: Arcade solvent on all of them.
+
+Also: after the lead merge, `real_police_capture_settles_through_the_economy` failed because
+`PoliceSystem::set_heat` no longer emits `WantedLevelChanged` (request to 06 under Needs). Fixed
+in my test (heat via real violations) and made robust in the tracker (a capture with no level
+seen is billed at L1).
+
+
+Gate on `ws/economy` after merging main + `claude/laughing-newton-0xqr6q`: fmt, workspace clippy
+`-D warnings`, wasm build, `cargo test -p wp_economy --features native` all clean;
+`cargo test --workspace` green except **`wp_race` `tests/simcli_races.rs::city_sprint_on_real_roads`**
+(index out of bounds in `throttle_at`: the run reports more vehicles than the scenario has
+entity specs — probably the physical police cars from the lead merge). Not in my crates; fails
+the same way without my commits (no economy code on that path). For 15 / lead.

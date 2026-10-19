@@ -6,14 +6,16 @@ mod_resale_frac = 0.4          # removing / selling a mod returns 40% of its pri
 mod_value_frac = 0.5           # installed mods add 50% of their price to the car's value
 damaged_value_floor = 0.25     # a damaged (not totalled) car is worth at least 25% of pristine
 
-# Dealer prices are base_price × condition, clamped into the class band.
+# Dealer prices are base_price × condition, clamped into the class band. The bands are a
+# guard against data typos, not a pricing tool: every roster car's price in every condition
+# must sit inside its band (tests/roster_prices.rs), so the Used / Worn discount is never lost.
 [class_bands]
 Beater = [1500, 6000]
-Compact = [9000, 30000]
-Sport = [25000, 70000]
-Muscle = [22000, 60000]
-Exotic = [90000, 320000]
-Truck = [15000, 50000]
+Compact = [4000, 30000]
+Sport = [12000, 70000]
+Muscle = [14000, 60000]
+Exotic = [60000, 320000]
+Truck = [12000, 50000]
 PoliceCruiser = [20000, 45000]
 PoliceInterceptor = [35000, 80000]
 PoliceSuv = [30000, 65000]

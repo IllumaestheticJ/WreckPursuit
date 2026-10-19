@@ -33,6 +33,27 @@ pub struct CaptureContext {
     pub session_violations: ViolationCounts,
 }
 
+/// A car in the pound, for the garage / end-of-run UI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImpoundStatus {
+    /// The car.
+    pub car: CarUid,
+    /// In-game day it was impounded.
+    pub since_day: u32,
+    /// Days in the pound so far.
+    pub days: u32,
+    /// Wanted level at capture.
+    pub level: WantedLevel,
+    /// Retrieval fee today.
+    pub fee: Money,
+    /// The fee grows by this much per in-game day.
+    pub fee_per_day: Money,
+    /// `end_of_day` calls left before the car is auctioned (0 = auctioned at the next one).
+    pub days_until_auction: u32,
+    /// The player can pay the fee now.
+    pub affordable: bool,
+}
+
 /// What happened to the car.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CarFate {
@@ -258,7 +279,34 @@ impl Economy {
         }
     }
 
+    /// Pound status of an impounded car (fee today, growth, days to auction).
+    pub fn impound_status(
+        &self,
+        acct: &PlayerAccount,
+        car: CarUid,
+    ) -> Result<ImpoundStatus, EconomyError> {
+        let fee = self.retrieval_fee(acct, car)?;
+        let c = acct.try_car(car)?;
+        let CarLocation::Impound { since_day, level } = c.location else {
+            unreachable!("retrieval_fee refuses cars that are not impounded");
+        };
+        let days = acct.day.saturating_sub(since_day);
+        let auction = self.consequences.impound.auction_after_days;
+        Ok(ImpoundStatus {
+            car,
+            since_day,
+            days,
+            level,
+            fee,
+            fee_per_day: self.consequences.impound.per_day[&c.class],
+            days_until_auction: auction.saturating_sub(days + 1),
+            affordable: acct.cash >= fee,
+        })
+    }
+
     /// Pay the retrieval fee (voluntary: must be affordable) and move the car to the garage.
+    /// The car keeps its damage (lattice blob, handling effects, outstanding estimate): repair
+    /// it afterwards like any other damaged car.
     pub fn retrieve_from_impound(&self, acct: &mut PlayerAccount, car: CarUid) -> EconResult<()> {
         let fee = self.retrieval_fee(acct, car)?;
         transact(acct, |tx| {
