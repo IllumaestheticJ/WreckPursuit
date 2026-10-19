@@ -26,6 +26,13 @@ npm run typecheck
 | `src/settings.ts` | debug layer table (hotkeys, `localStorage`) |
 | `vite.config.ts` | serves `apps/simcli/scenarios` (simcli format v2) at `/scenarios/` and `data/` at `/data/` (+ listings) |
 | `e2e/run.mjs` | Playwright check; `SHOTS=dir` writes screenshots, `BENCH=1` measures 1/8/24 cars |
+| `e2e/city_v2_shots.mjs` | Port Vesper v2 screenshots → `docs/media/city-v2/` (`node e2e/city_v2_shots.mjs [dir]`) |
+
+Cities: the "city" box (free drive) and the city chase use the city selector — Port Vesper v2
+(`vesper_v2`, hills, default) or the flat grid (`procedural_12x12`); URL `?city=procedural_12x12`,
+`?chase=1`. The greybox is `data/city/<sim.cityId()>.greybox.glb` (base64 fallback
+`.greybox.b64.txt` on the published build). Automation: `__wp.lookAt(from, to)` places a fixed
+orbit camera in sim coordinates, `__wp.setClip(near, far)`.
 
 Sim space is +Z up / +Y forward; the Three.js scene is +Y up, so all sim-space objects live under
 a `world` group rotated −90° about X.
@@ -37,7 +44,9 @@ preinstalled `/opt/pw-browsers/chromium-1194`).
 
 ## Perf (headless Chromium, SwiftShader, real vehicle + damage)
 sim 0.09 / 0.62 / 3.0 ms per 60 Hz frame and render 0.7 / 3.4 / 9.2 ms at 1 / 8 / 24 cars;
-city + ~190 traffic agents 0.27 ms sim. Re-measure in desktop Chrome with a GPU.
+city + ~190 traffic agents 0.27 ms sim. City chase after warm-up: grid 1.5 ms, Port Vesper v2
+2.8 ms sim per 60 Hz frame (its 6.8 MB greybox parses in ≈ 2 s under SwiftShader). Re-measure in
+desktop Chrome with a GPU.
 
 ## Known gaps
 See `docs/integration/testbed.md` → Known gaps.
