@@ -27,6 +27,7 @@ pub mod drive;
 pub mod geom;
 pub mod leader;
 pub mod map;
+pub mod markings;
 pub mod network;
 pub mod procgen;
 pub mod props;
