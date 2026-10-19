@@ -158,8 +158,14 @@ Not done / blocked:
   `Sim::set_weather`, which does not exist in `wp_sim` yet (needs W-1, after v0.3.0). The
   parser half is small and ready to add with it; `wet_brake_100_0.ron.pending` stays pending.
 - Test-build speed is the lead helper's (`lead/test-speed`); nothing changed here for it.
+- **For the lead / 08:** `cargo test --workspace` fails one test outside my crates,
+  `wp_economy` `tests/pursuit_wiring.rs::real_police_capture_settles_through_the_economy`
+  (line 130, "level at capture, not after the reset": the `PursuitEnded` resolution reports
+  `WantedLevel::None`). Fails alone too. It comes in with the lead branch (my `crates/` diff
+  against it is one doc comment in `wp_sim`); likely the run-6 police changes resetting the
+  level before the capture event is read. Not fixed here (not my crate).
 
-Checks: `cargo fmt`, `cargo clippy --workspace -D warnings`, `cargo test --workspace`,
+Checks: `cargo fmt`, `cargo clippy --workspace -D warnings`, `cargo test --workspace` (one upstream failure, below),
 `simcli run apps/simcli/scenarios` (35/35 pass), `simcli goldens` (all match), wasm build of
 `wp_wasm`.
 
