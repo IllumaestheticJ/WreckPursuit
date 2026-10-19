@@ -572,3 +572,9 @@ says so instead of being swallowed.
   would help the published link on weak laptops.
 - Still open from round 6: a test-only way to force a capture in a `wp_sim` session, so e2e can
   run the real capture → bill path.
+
+**Checks (this container):** `cargo fmt --check`, `clippy --workspace -D warnings`, `cargo test
+--workspace` (717 passed, 15 ignored, 0 failed), wasm32 build of `wp_wasm`, `tsc`, `just web-e2e`
+25/25 (1 min 18 s; city chase ready after 1.0 s of sim time — that run counted 2 violations
+while the feed, redrawn every 6th frame, did not show them yet: the race the old check had),
+`playtest_chase.mjs` at 1400×860 and 1280×720 all pass.
