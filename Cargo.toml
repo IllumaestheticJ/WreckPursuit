@@ -1,0 +1,55 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/wp_contracts",
+    "crates/wp_math",
+    "crates/wp_vehicle",
+    "crates/wp_damage",
+    "crates/wp_world",
+    "crates/wp_police",
+    "crates/wp_economy",
+    "crates/wp_net",
+    "crates/wp_sim",
+    "crates/wp_wasm",
+    "apps/server",
+    "apps/simcli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "UNLICENSED"
+publish = false
+
+[workspace.dependencies]
+# Internal crates
+wp_contracts = { path = "crates/wp_contracts" }
+wp_math = { path = "crates/wp_math" }
+wp_vehicle = { path = "crates/wp_vehicle" }
+wp_damage = { path = "crates/wp_damage" }
+wp_world = { path = "crates/wp_world" }
+wp_police = { path = "crates/wp_police" }
+wp_economy = { path = "crates/wp_economy" }
+wp_net = { path = "crates/wp_net" }
+wp_sim = { path = "crates/wp_sim" }
+
+# External crates
+rapier3d = { version = "0.36", features = ["enhanced-determinism", "serde-serialize"] }
+# rapier 0.36 math is glam-based (rapier3d::math); nalgebra is available for crates that need
+# general linear algebra. Keep the version matched to the one rapier pulls in.
+nalgebra = { version = "0.35", features = ["serde-serialize"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "1"
+schemars = "1"
+ron = "0.12"
+thiserror = "2"
+indexmap = { version = "2", features = ["serde"] }
+wasm-bindgen = "0.2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync"] }
+tokio-tungstenite = "0.30"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+jsonschema = { version = "0.59", default-features = false }
+
+[profile.release]
+debug = 1
