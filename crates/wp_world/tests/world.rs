@@ -581,8 +581,23 @@ fn civilians_stop_behind_a_stationary_player_and_yield_to_sirens() {
     run(&mut w, 12.0, &mut ev);
     let after = w.agents().find(|x| x.id == a.id);
     if let Some(after) = after {
+        // Bodies must not overlap (it may be passing alongside it now: playtest row 32).
+        let car = geom::Obb {
+            c: geom::xy(after.pos),
+            f: geom::dir_of_yaw(after.yaw),
+            hl: 2.25,
+            hw: 0.95,
+        };
+        let stopped = geom::Obb {
+            c: geom::xy(obstacle.pos),
+            f,
+            ..car
+        };
         let d = geom::dist(geom::xy(after.pos), geom::xy(obstacle.pos));
-        assert!(d > 4.4, "civilian drove into the stopped car ({d} m)");
+        assert!(
+            !geom::obb_overlap(&car, &stopped),
+            "civilian drove into the stopped car ({d} m)"
+        );
     }
     // Siren: nearby agents start yielding and slow down.
     let mut cop = obstacle;
