@@ -1,0 +1,37 @@
+// Tuning-dash fixture (Q, round 8): a racer drives into a police car held stopped.
+// Restores `pursuit::tests::racer_contact_classified` after golden/city_chase stopped producing
+// that contact (contract v0.3.0 moved patrol spawns; police avoid the racer lane since E round 6).
+//
+// The "cop" is a scenario entity held on the brakes; the pursuit probe marks it as a police car
+// with `police_entities: ["cop"]` (`Sim::set_vehicle_kind`, which changes no physics). No AI
+// police, traffic or parked cars, so the only police contact is the racer's rear-end at ~1.24 s.
+// Same lane as golden/city_chase (outer northbound lane of the x = 55 collector).
+(
+    name: "tuning_racer_into_stopped_cop",
+    seed: 108,
+    city: procedural(seed: 1, blocks_x: 12, blocks_y: 12, block_m: 110.0),
+    time_of_day_h: 12.0,
+    mode: Arcade,
+    traffic_cars: false,
+    parked_cars: false,
+    police_cars: false,
+    assists: keyboard,
+    entities: [
+        (
+            id: "racer",
+            car: "debug_coupe",
+            pos: (59.75, -175.0, 0.0),
+            speed_mps: 16.5,
+            // Cruise into the cop (contact at ~1.24 s), then brake so it does not keep pushing.
+            driver: cruise(target_mps: 16.5, until_s: 1.3),
+            inputs: [(t_s: 1.3, input: (brake: 1.0))],
+        ),
+        (
+            id: "cop",
+            car: "sentinel_cruiser",
+            pos: (59.75, -150.0, 0.0),
+            inputs: [(t_s: 0.0, input: (brake: 1.0, handbrake: 1.0, siren: true))],
+        ),
+    ],
+    duration_s: 2.5,
+)
