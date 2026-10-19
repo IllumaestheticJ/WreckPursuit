@@ -8,8 +8,9 @@
     time_of_day_h: 12.0,
     time_ratio: 1.0,
     traffic_density: 4.0,
-    // Traffic-only soak. Since lead run 6 police cars are physical and still drive into stopped
-    // cars (no obstacle awareness yet, E's task); police behaviour is covered by golden/city_chase.
+    // Traffic-only soak (D's gate). Police stay off: with them on, seed 5 passes (0 collisions,
+    // 13 units) but seed 6 has 3 police-caused hits (round 8). E flips this to `true` once units
+    // avoid traffic on every seed; police behaviour is covered by golden/city_chase.
     police_cars: false,
     assists: ai,
     entities: [
@@ -17,16 +18,14 @@
     ],
     duration_s: 60.0,
     expect: [
-        // Near-player traffic is physical since lead run 5 (Rapier bodies, real braking and
-        // nudges); D tunes its controller for that. Gate only floods here; zero stays the
-        // pending target below, and the no-player soak still gates zero.
-        world_metric(name: "civilian_collisions", min: 0.0, max: 3.0),
+        // Near-player traffic is physical since lead run 5. Promoted to zero in round 8: D's
+        // controller gives 0 civilian collisions here (also on seeds 6-9, measured).
+        world_metric(name: "civilian_collisions", min: 0.0, max: 0.0),
         world_metric(name: "traffic_agents_min", min: 350.0, max: 400.0),
         world_metric(name: "traffic_moving_frac_min", min: 0.5, max: 1.0),
         metric(name: "distance_m", min: 0.0, max: 0.5),
     ],
     expect_pending: [
-        world_metric(name: "civilian_collisions", min: 0.0, max: 0.0),
         // 05's target with a player present.
         world_metric(name: "traffic_agents_min", min: 380.0, max: 400.0),
     ],
