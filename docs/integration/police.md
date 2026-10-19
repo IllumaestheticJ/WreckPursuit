@@ -166,3 +166,14 @@ real city). #5 shared road-network trait **accepted in principle**, shape from D
 optional, later.
 
 **v0.2.0 contract bump is unblocked** — it is the next lead run's first job.
+
+### Lead run 5 (2026-10-19)
+- **Your `wp_sim` needs are done:** `Sim::set_world` builds `PoliceSystem::for_world` on the city;
+  `Sim::set_police_car(car)` (simcli city runs use `sentinel_cruiser`) gives every AI car unit a real
+  vehicle (`VehicleKind::Police`), bound with `bind_unit_entity`, driven by `unit_input`, reported with
+  `sync_unit`; retired units are despawned; `tire_puncture` merges into handling. Up to 64 − 16 slots;
+  beyond that units keep your kinematic driving. `crates/wp_sim/src/police_link.rs`.
+- Racers reported to you are now only players and AI racers (police and traffic were included before).
+- Timeline with `cargo run --release -p wp_sim --example police_probe` (small city, 22:00, speeding coupe):
+  13 cars on patrol, 11 violations by 5 s, pursuit at ≈ 10 s, searching at ≈ 20 s.
+- Not yet: `static_colliders()` (roadblock barriers) as physics boxes — next lead run.
