@@ -19,6 +19,7 @@
 //! | replay | `record_start()`, `record_stop()`, `recording()`, `replay_load(bytes)`, `replay_seek(tick)`, `replay_play(speed)`, `replay_status()`, `replay_export_csv(bytes, entity, every)` |
 //! | scenario | `scenario_json()`, `scenario_result()` |
 //! | run (lead) | `run_result_json()`, `run_ledger_json()`, `run_account_json()`, `run_repair_continue()`, `debug_set_heat(entity, heat)`, `debug_park_near_police(entity, ahead_m)` — see [`run`] |
+//! | map (16) | `map_static_json()` once per city, `map_dynamic(player)` per frame — see [`map`] |
 //! | audio (13) | `audio_library()`, `audio_frame(listener, events_json, focus)`, `audio_set_siren`, `audio_set_scanner_tier`, `audio_radio`, `audio_reset()` — see [`audio`] |
 
 #![warn(missing_docs)]
@@ -29,6 +30,7 @@ pub mod net;
 pub mod audio;
 pub mod data;
 pub mod garage;
+pub mod map;
 pub mod pack;
 pub mod police;
 pub mod run;
@@ -487,6 +489,37 @@ pub fn police_units() -> Result<Vec<f32>, JsValue> {
     get(|s| {
         let world = s.sim().world();
         police::units(s.sim().police(), &|p| world.map().ground_height(p, None))
+    })
+}
+
+/// Static map of the session's city as JSON ([`map::MapStatic`]): road centrelines by class
+/// and layer (grade / bridge deck), district polygons, POIs, signalised junctions. `null` on
+/// the flat world. Fetch once per city (UI kit minimap and full map).
+#[wasm_bindgen]
+pub fn map_static_json() -> Result<String, JsValue> {
+    get(|s| {
+        if !s.has_city() {
+            return "null".to_string();
+        }
+        json(&map::map_static(s.sim().world().map()))
+    })
+}
+
+/// Per-frame map data for `player` ([`map::map_dynamic`]): a header (status, level, search
+/// zone, escape progress, sight ranges, player pose), then every police unit
+/// (`map::UNIT_STRIDE` floats) and every roadblock / spike strip (`map::TOOL_STRIDE`).
+/// Without police in the session the header only carries the player pose.
+#[wasm_bindgen]
+pub fn map_dynamic(player: u32) -> Result<Vec<f32>, JsValue> {
+    get(|s| {
+        let pose = s
+            .sim()
+            .vehicle_states()
+            .into_iter()
+            .find(|(id, _)| id.0 == player)
+            .map(|(_, st)| map::pose_of(&st));
+        let police = s.sim().systems().police.then(|| s.sim().police());
+        map::map_dynamic(police, EntityId(player), pose)
     })
 }
 
