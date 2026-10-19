@@ -91,6 +91,10 @@ pub mod cues {
     pub const HORN_STANDARD: &str = "horn/standard";
     /// Truck / SUV horn loop.
     pub const HORN_TRUCK: &str = "horn/truck";
+    /// Optional gear-shift clunk one-shot (World packs; played when `VehicleState::gear` changes).
+    pub const SHIFT: &str = "drivetrain/shift";
+    /// Optional city ambience loop (World packs; played by the backend, not the director).
+    pub const AMBIENT_CITY_NIGHT: &str = "ambient/city_night";
 
     /// Every cue a `World` pack must define.
     pub fn world() -> Vec<&'static str> {
@@ -607,6 +611,11 @@ pub struct SamplePack {
     /// Free text for humans.
     #[serde(default)]
     pub description: String,
+    /// Procedural pack of the same kind the backend plays instead of this one when the
+    /// player picks the procedural fallback (recorded `*_rec` packs point at their `*_proc` twin).
+    /// Cues are matched by name; the fallback must define every cue this pack's layers use.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback: Option<String>,
     /// Engine layers (Engine packs only), any order.
     #[serde(default)]
     pub engine_layers: Vec<EngineLayerDef>,
@@ -829,6 +838,24 @@ impl AudioLibrary {
                     "packs/{}: engine_layers only allowed in Engine packs",
                     p.id
                 ));
+            }
+            if let Some(fb) = &p.fallback {
+                match self.packs.get(fb) {
+                    Some(f) if f.kind == p.kind => {
+                        for l in &p.engine_layers {
+                            if !f.cues.contains_key(&l.cue) {
+                                errs.push(format!(
+                                    "packs/{}: fallback {fb} lacks engine layer cue {}",
+                                    p.id, l.cue
+                                ));
+                            }
+                        }
+                    }
+                    Some(_) => {
+                        errs.push(format!("packs/{}: fallback {fb} is a different kind", p.id))
+                    }
+                    None => errs.push(format!("packs/{}: unknown fallback {fb}", p.id)),
+                }
             }
             for (name, c) in &p.cues {
                 if !c.looped && c.duration_s.is_none() {

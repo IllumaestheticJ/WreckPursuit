@@ -4,7 +4,17 @@
 // the Rust director, so panners only pan (rolloff 0).
 
 import { engineInstrument, makeSynth, type EngineMix, type EngineSynth, type SynthVoice } from "./synth";
-import { BUSES, voiceKey, type AudioLibrary, type Bus, type CueDef, type VoiceId, type VoiceParams } from "./types";
+import {
+  BUSES,
+  voiceKey,
+  type AudioLibrary,
+  type Bus,
+  type CueDef,
+  type SampleStatus,
+  type SoundSource,
+  type VoiceId,
+  type VoiceParams,
+} from "./types";
 
 interface BusNodes {
   user: GainNode;
@@ -77,7 +87,8 @@ interface Voice {
   src: AudioBufferSourceNode | null;
   gain: GainNode;
   lp: BiquadFilterNode;
-  panner: PannerNode;
+  /** Null for local (non-spatial) voices: scanner sounds, ambience. */
+  panner: PannerNode | null;
   /** Audio time after which the voice is disconnected (one-shots and stopped loops). */
   endTime: number;
   /** Parameters last applied (skip automation calls when nothing changed). */
@@ -113,6 +124,9 @@ interface EngineGroup extends Voice {
   dirty: boolean;
 }
 
+/** Entity id of voices played outside the director (non-spatial). */
+const LOCAL_ENTITY = 0xfffffffe;
+
 /** Relative change above which a parameter is re-automated. */
 const EPS = 0.004;
 const changed = (a: number, b: number) => Math.abs(a - b) > EPS * Math.max(Math.abs(a), Math.abs(b), 1e-3);
@@ -144,15 +158,49 @@ export class VoicePool {
     return n;
   }
 
+  /** Recorded samples (default) or each pack's procedural `fallback`. */
+  source: SoundSource = "recorded";
+
   private cue(pack: string, cue: string): CueDef | undefined {
     return this.lib.packs[pack]?.cues[cue];
   }
 
-  private sampleUrl(pack: string, file: string): string {
-    return `data/audio/packs/${pack}/${file}`;
+  /**
+   * The cue to perform for `pack`/`cue`: in procedural mode (or while a recorded file is not
+   * decoded yet / failed to load) the pack's `fallback` cue of the same name, if it has one.
+   */
+  private resolve(pack: string, cue: string): { def: CueDef | undefined; buf: AudioBuffer | null; pack: string } {
+    const def = this.cue(pack, cue);
+    const fb = this.lib.packs[pack]?.fallback;
+    const fbDef = fb ? this.cue(fb, cue) : undefined;
+    if (this.source === "procedural" && fbDef) return { def: fbDef, buf: null, pack: fb! };
+    const src = def?.source;
+    if (src && "Samples" in src) {
+      const files = src.Samples.files;
+      const file = files[Math.floor(Math.random() * files.length)];
+      const buf = this.samples.get(this.sampleUrl(pack, file));
+      if (buf instanceof AudioBuffer) return { def, buf, pack };
+      if (fbDef) return { def: fbDef, buf: null, pack: fb! };
+    }
+    return { def, buf: null, pack };
   }
 
-  /** Fetch every recorded file referenced by a pack (none ship yet; synths cover them). */
+  /** Whether `pack` defines `cue` (optional cues such as the city ambience). */
+  has(pack: string, cue: string): boolean {
+    return !!this.cue(pack, cue);
+  }
+
+  /** Relative URL (works on the dev server and the published link): `data/audio/packs/<pack>/<file>`. */
+  private sampleUrl(pack: string, file: string): string {
+    const parts: string[] = [];
+    for (const seg of `${pack}/${file}`.split("/")) {
+      if (seg === "..") parts.pop();
+      else if (seg && seg !== ".") parts.push(seg);
+    }
+    return `data/audio/packs/${parts.join("/")}`;
+  }
+
+  /** Fetch and decode every recorded file referenced by a pack (shared files load once). */
   private preloadSamples(): void {
     for (const [packId, pack] of Object.entries(this.lib.packs)) {
       for (const c of Object.values(pack.cues)) {
@@ -162,13 +210,27 @@ export class VoicePool {
           if (this.samples.has(url)) continue;
           this.samples.set(url, "loading");
           fetch(url)
-            .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(String(r.status)))))
+            .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(`HTTP ${r.status}`))))
             .then((b) => this.ctx.decodeAudioData(b))
             .then((buf) => this.samples.set(url, buf))
-            .catch(() => this.samples.set(url, "failed"));
+            .catch((e) => {
+              console.warn("audio sample failed:", url, e);
+              this.samples.set(url, "failed");
+            });
         }
       }
     }
+  }
+
+  /** Loading progress of the recorded samples. */
+  sampleStatus(): SampleStatus {
+    const st: SampleStatus = { total: this.samples.size, loaded: 0, loading: 0, failed: [] };
+    for (const [url, v] of this.samples) {
+      if (v instanceof AudioBuffer) st.loaded++;
+      else if (v === "loading") st.loading++;
+      else st.failed.push(url);
+    }
+    return st;
   }
 
   private setPanner(p: PannerNode, pos: [number, number, number], t: number, smooth: boolean): void {
@@ -188,7 +250,7 @@ export class VoicePool {
   }
 
   play(voice: VoiceId, bus: Bus, pack: string, cue: string, looped: boolean, params: VoiceParams, synth: Record<string, number>): void {
-    const def = this.cue(pack, cue);
+    const { def, buf, pack: played } = this.resolve(pack, cue);
     if (this.isEngineSynth(voice, bus, def)) {
       this.enginePlay(voice, def!, params, synth);
       return;
@@ -203,20 +265,23 @@ export class VoicePool {
     const lp = this.ctx.createBiquadFilter();
     lp.type = "lowpass";
     lp.frequency.value = Math.min(params.lowpass_hz || 18000, 18000);
-    const panner = this.ctx.createPanner();
-    panner.panningModel = "equalpower";
-    panner.distanceModel = "linear";
-    panner.rolloffFactor = 0;
-    this.setPanner(panner, params.pos, t, false);
-    const dest = this.lib.packs[pack]?.kind === "Radio" ? this.mixer.radioIn : this.mixer.input(bus);
-    gain.connect(lp).connect(panner).connect(dest);
+    const dest = this.lib.packs[played]?.kind === "Radio" ? this.mixer.radioIn : this.mixer.input(bus);
+    let panner: PannerNode | null = null;
+    if (voice.entity === LOCAL_ENTITY) {
+      gain.connect(lp).connect(dest);
+    } else {
+      panner = this.ctx.createPanner();
+      panner.panningModel = "equalpower";
+      panner.distanceModel = "linear";
+      panner.rolloffFactor = 0;
+      this.setPanner(panner, params.pos, t, false);
+      gain.connect(lp).connect(panner).connect(dest);
+    }
 
     let src: AudioBufferSourceNode | null = null;
     let syn: SynthVoice | null = null;
     const source = def?.source;
-    const file = source && "Samples" in source ? source.Samples.files[Math.floor(Math.random() * source.Samples.files.length)] : null;
-    const buf = file ? this.samples.get(this.sampleUrl(pack, file)) : undefined;
-    if (buf instanceof AudioBuffer) {
+    if (buf) {
       src = this.ctx.createBufferSource();
       src.buffer = buf;
       src.loop = looped;
@@ -229,7 +294,8 @@ export class VoicePool {
       syn = makeSynth(this.ctx, name, sp, params, t);
       syn.output.connect(gain);
     }
-    const dur = def?.duration_s ?? 1;
+    // A recorded one-shot can outlast the director's estimate: keep the voice until it ends.
+    const dur = Math.max(def?.duration_s ?? 1, buf && !looped ? buf.duration / Math.max(params.pitch, 0.25) : 0);
     this.voices.set(key, { synth: syn, src, gain, lp, panner, endTime: looped ? Infinity : t + dur + 0.5, last: params });
     this.created++;
   }
@@ -263,7 +329,7 @@ export class VoicePool {
       v.lp.frequency.setTargetAtTime(Math.min(params.lowpass_hz || 18000, 18000), t, 0.05);
       l.lowpass_hz = params.lowpass_hz;
     }
-    if (moved(params.pos, l.pos)) {
+    if (v.panner && moved(params.pos, l.pos)) {
       this.setPanner(v.panner, params.pos, t, true);
       l.pos = params.pos;
     }
@@ -409,13 +475,13 @@ export class VoicePool {
     const t = this.ctx.currentTime;
     for (const [k, v] of this.voices) {
       if (v.endTime <= t) {
-        v.panner.disconnect();
+        (v.panner ?? v.lp).disconnect();
         this.voices.delete(k);
       }
     }
     this.dying = this.dying.filter((v) => {
       if (v.endTime > t) return true;
-      v.panner.disconnect();
+      (v.panner ?? v.lp).disconnect();
       return false;
     });
   }
@@ -430,14 +496,18 @@ export class VoicePool {
     this.engines.clear();
   }
 
-  /** Play a cue outside the director (scanner squelch / static). Returns a stop function. */
-  playLocal(pack: string, cue: string, gain: number): () => void {
-    const id: VoiceId = { entity: 0xfffffffe, slot: Math.floor(Math.random() * 0x7fffffff) };
+  /**
+   * Play a cue outside the director (scanner squelch / static, city ambience), non-spatial at
+   * the listener. Returns a stop function.
+   */
+  playLocal(pack: string, cue: string, gain: number, bus: Bus = "Police"): () => void {
+    const id: VoiceId = { entity: LOCAL_ENTITY, slot: Math.floor(Math.random() * 0x7fffffff) };
     const def = this.cue(pack, cue);
     const params: VoiceParams = { gain, pitch: 1, freq_hz: 0, load: 0, phase: 0, lowpass_hz: 18000, doppler: 1, pos: [0, 0, 0] };
-    this.play(id, "Police", pack, cue, def?.looped ?? false, params, {});
+    this.play(id, bus, pack, cue, def?.looped ?? false, params, {});
     return () => this.stop(id, 0.15);
   }
+
 }
 
 /** Point the Web Audio listener at the camera (sim world space). */

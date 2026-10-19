@@ -110,6 +110,12 @@ functions. Same frames in → byte-identical commands out (tested on real physic
 | `data/audio/cars/<car_id>.json` | `CarAudioDef`: engine description, engine pack, world pack, horn cue, optional siren |
 | `data/audio/packs/<id>.json` | sample packs (below) |
 
+**Recorded packs** (`*_rec*`, the default for every shipped car) hold OGG files under
+`data/audio/packs/<id>/` and name their procedural twin in `"fallback"`; the browser plays the
+fallback cue (same name) when the player picks "procedural" or a file has not loaded. Licences and
+sources: `data/audio/LICENSES.md`; tooling: `tools/audio_packs/`. Optional World-pack cues:
+`drivetrain/shift` (one-shot on gear change, director) and `ambient/city_night` (backend loop).
+
 Cars without a file get `CarAudioDef::fallback` (I4, or V8 for muscle/trucks; sirens on police
 classes) so a new car is never silent, but the tests require a file for every shipped car.
 `build.rs` embeds all of `data/audio/` for the browser.
@@ -185,6 +191,7 @@ intensity), `whine`/`tone` (`freq_hz`, `noise`), `squeal` (`freq_hz`, `wobble_hz
 
 ```
 cargo test -p wp_audio
+cargo test -p wp_audio --test samples   # recorded files exist, licensed, ≤ 15 MB
 ```
 
 Unit tests per module plus `tests/director.rs`: shipped data validates (and disk == embedded,

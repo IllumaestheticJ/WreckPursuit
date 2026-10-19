@@ -383,6 +383,7 @@ mod tests {
             id: "t".into(),
             kind: PackKind::Engine,
             description: String::new(),
+            fallback: None,
             engine_layers: vec![
                 layer("high_on", RpmAnchor::RedlineFrac(0.85), ThrottleSide::On),
                 layer("idle", RpmAnchor::Idle, ThrottleSide::Both),

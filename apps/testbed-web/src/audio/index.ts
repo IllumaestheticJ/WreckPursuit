@@ -13,13 +13,16 @@ import { audioBridge } from "./bridge";
 import { AudioPanel } from "./panel";
 import { ScannerPlayer } from "./scanner";
 import { AudioMixer, setListener, VoicePool } from "./voices";
-import type { AudioCommand, AudioLibrary, Bus, DirectorStats, RadioPriority } from "./types";
+import type { AudioCommand, AudioLibrary, Bus, DirectorStats, RadioPriority, SampleStatus, SoundSource } from "./types";
 
 const TEST_LINES: Record<string, string[]> = {
   Routine: ["Unit fourteen, respond to a fender bender on Harbor and Fifth.", "Copy dispatch, fourteen en route."],
   Pursuit: ["Twelve in pursuit, grey coupe northbound on the expressway, speeds over one twenty.", "Suspect vehicle took the off ramp, heading downtown."],
   Urgent: ["All units, air one has visual on the suspect, deploy spikes at the bridge.", "Officer needs assistance, Fifth and Market!"],
 };
+
+/** City ambience loop (optional World-pack cue, played by the backend, not the director). */
+const AMBIENCE_CUE = "ambient/city_night";
 
 export class AudioSystem {
   private ctx: AudioContext | null = null;
@@ -35,6 +38,7 @@ export class AudioSystem {
   private focus = 0;
   private lineNo = 0;
   private lastStats: DirectorStats | null = null;
+  private stopAmbience: (() => void) | null = null;
   private readonly listenerArr = new Float32Array(12);
   /** Smoothed cost of one audio frame (director in wasm + JSON + Web Audio calls), ms. */
   frameMs = 0;
@@ -58,6 +62,8 @@ export class AudioSystem {
       },
       setSiren: (m) => this.setSiren(m),
       testRadio: (p) => this.testRadio(p),
+      setSource: (src) => this.setSource(src),
+      setAmbience: () => this.restartAmbience(),
     });
     (window as unknown as { __wpAudio?: AudioSystem }).__wpAudio = this;
     const kick = () => this.start();
@@ -93,6 +99,7 @@ export class AudioSystem {
     this.ctx = new AudioContext({ latencyHint: "interactive" });
     this.mixer = new AudioMixer(this.ctx);
     this.pool = new VoicePool(this.ctx, this.mixer, this.lib);
+    this.pool.source = this.panel.settings.source;
     this.scanner = new ScannerPlayer(this.pool);
     const s = this.panel.settings;
     this.mixer.master.gain.value = s.master;
@@ -101,7 +108,38 @@ export class AudioSystem {
     this.safe(() => audioBridge.setScannerTier(s.tier));
     // Forget anything the director thinks is playing: it re-plays every loop next frame.
     this.safe(() => void audioBridge.reset());
+    this.restartAmbience();
     this.panel.setStatus(`${this.ctx.sampleRate} Hz · max ${this.lib.config.max_voices} voices`);
+  }
+
+  /** Recorded samples (default) or the procedural fallback packs; loops restart with the new source. */
+  setSource(source: SoundSource): void {
+    this.panel.settings.source = source;
+    if (!this.pool) return;
+    this.pool.source = source;
+    this.safe(() => void audioBridge.reset());
+    this.restartAmbience();
+  }
+
+  /** Current sound source. */
+  soundSource(): SoundSource {
+    return this.pool?.source ?? this.panel.settings.source;
+  }
+
+  /** Recorded sample loading progress (null before the AudioContext starts). */
+  sampleStatus(): SampleStatus | null {
+    return this.pool?.sampleStatus() ?? null;
+  }
+
+  /** (Re)start the city ambience bed: recorded only, non-spatial, on the World bus. */
+  private restartAmbience(): void {
+    this.stopAmbience?.();
+    this.stopAmbience = null;
+    const pool = this.pool;
+    const gain = this.panel.settings.ambience;
+    if (!pool || gain <= 0 || pool.source !== "recorded") return;
+    const pack = Object.keys(this.lib?.packs ?? {}).find((p) => pool.has(p, AMBIENCE_CUE));
+    if (pack) this.stopAmbience = pool.playLocal(pack, AMBIENCE_CUE, gain, "World");
   }
 
   toggleMute(): void {
@@ -181,7 +219,7 @@ export class AudioSystem {
     this.frameMs += (performance.now() - t0 - this.frameMs) * 0.1;
     this.frames++;
     this.lastStats = out.stats;
-    this.panel.update(out.stats, this.pool.size, this.scanner.log);
+    this.panel.update(out.stats, this.pool.size, this.scanner.log, this.pool.sampleStatus());
   }
 
   private apply(cmds: AudioCommand[]): void {
