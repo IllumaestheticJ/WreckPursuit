@@ -32,6 +32,9 @@ archive them).
 | P | 19 design docs | `ws/design-docs` | `design-docs.md` |
 | Q | 20 tuning dash | `ws/tuning-dash` | `tuning-dash.md` |
 
+Lead helper sessions (title `WP Lead helper · <task>`) work on `lead/*` branches (e.g.
+`lead/contract-v0.3.0`, `lead/test-speed`); the lead merges them like `ws/*` branches.
+
 Session titles: `WP <letter> · <name> · round <n>`, so the lead can find this round's sessions
 with `list_sessions`.
 
