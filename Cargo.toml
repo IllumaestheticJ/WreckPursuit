@@ -9,6 +9,7 @@ members = [
     "crates/wp_police",
     "crates/wp_economy",
     "crates/wp_net",
+    "crates/wp_opponent",
     "crates/wp_sim",
     "crates/wp_wasm",
     "apps/server",
@@ -37,6 +38,7 @@ wp_police = { path = "crates/wp_police" }
 wp_economy = { path = "crates/wp_economy" }
 wp_net = { path = "crates/wp_net" }
 wp_sim = { path = "crates/wp_sim" }
+wp_opponent = { path = "crates/wp_opponent" }
 
 # External crates
 rapier3d = { version = "0.36", features = ["enhanced-determinism", "serde-serialize"] }
