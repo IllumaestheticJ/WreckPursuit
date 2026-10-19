@@ -337,8 +337,12 @@ pub const ALL_SURFACES: [SurfaceType; 8] = [
 
 impl SurfaceTable {
     /// Parameters of a surface.
+    /// Surfaces missing from the table (`PaintedLine` until `surfaces.toml` lists it, contract
+    /// v0.3.0 W-3) use the asphalt parameters.
     pub fn surface(&self, s: SurfaceType) -> &SurfaceParams {
-        &self.surfaces[&s]
+        self.surfaces
+            .get(&s)
+            .unwrap_or(&self.surfaces[&SurfaceType::Asphalt])
     }
 
     /// The embedded table (`data/weather/surfaces.toml` at build time). Convenience for crates

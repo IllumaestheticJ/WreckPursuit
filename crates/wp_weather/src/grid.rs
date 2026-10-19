@@ -142,6 +142,7 @@ fn is_road(s: SurfaceType) -> bool {
             | SurfaceType::Concrete
             | SurfaceType::Curb
             | SurfaceType::Metal
+            | SurfaceType::PaintedLine
     )
 }
 

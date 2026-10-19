@@ -1,5 +1,6 @@
-//! [`WithWeather`]: wrap any [`WorldQuery`] so weather reaches the vehicles **today**, before
-//! the contract has `weather_at` (request W-1).
+//! [`WithWeather`]: wrap any [`WorldQuery`] so weather reaches the vehicles. Since contract
+//! v0.3.0 both adapters also answer `WorldQuery::weather_at` (W-1); `wp_vehicle` does not call
+//! it yet, so the interim surface remap below is still what changes grip.
 //!
 //! Interim behaviour: `surface_at` reports `Asphalt` as `WetAsphalt` where the road wetness is
 //! at or above `surfaces.toml: interim_wet_threshold`. Every tire already has a `WetAsphalt`
@@ -107,6 +108,10 @@ impl WorldQuery for WithWeather<'_> {
         weathered_los(self.world, self.weather, self.weather_los, a, b)
     }
 
+    fn weather_at(&self, p: [f32; 3]) -> LocalConditions {
+        self.weather.conditions_at(p)
+    }
+
     fn time_of_day(&self) -> TimeOfDay {
         self.world.time_of_day()
     }
@@ -162,6 +167,10 @@ impl<W: WorldQuery> WorldQuery for Weathered<W> {
 
     fn line_of_sight(&self, a: [f32; 3], b: [f32; 3]) -> bool {
         weathered_los(&self.world, &self.weather, self.weather_los, a, b)
+    }
+
+    fn weather_at(&self, p: [f32; 3]) -> LocalConditions {
+        self.weather.conditions_at(p)
     }
 
     fn time_of_day(&self) -> TimeOfDay {

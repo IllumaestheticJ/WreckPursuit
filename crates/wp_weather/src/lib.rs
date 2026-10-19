@@ -96,7 +96,8 @@ impl Default for WeatherConfig {
     }
 }
 
-/// A schedule change, for logs / UI / the requested `SimEvent::WeatherChanged` (W-5).
+/// A schedule change, for logs / UI and `SimEvent::WeatherChanged` (contract v0.3.0, W-2;
+/// see [`WeatherChange::to_sim_event`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WeatherChange {
     /// Regime before.
@@ -105,6 +106,17 @@ pub struct WeatherChange {
     pub to: Regime,
     /// Whether the change was forced (scenario / captain / debug) rather than rolled.
     pub forced: bool,
+}
+
+impl WeatherChange {
+    /// The contract event (v0.3.0, W-2) for whoever drains [`WeatherSim::drain_changes`].
+    pub fn to_sim_event(&self) -> wp_contracts::SimEvent {
+        wp_contracts::SimEvent::WeatherChanged {
+            kind: self.to.kind,
+            intensity: self.to.intensity,
+            forced: self.forced,
+        }
+    }
 }
 
 /// The full weather state.
