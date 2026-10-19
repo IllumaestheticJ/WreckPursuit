@@ -162,7 +162,8 @@ relative requests, recorded default, procedural ↔ recorded switch, no errors. 
 `e2e/run.mjs` still pass; the audio e2e now hears `drivetrain/shift` (7 clunks while driving). 24-car
 bench with samples: audio frame 1.8 ms (director 0.62, Web Audio apply 1.17 ms) at 3.5 fps software
 GL (≈45 sim ticks per frame) — apply is higher than with synths only because sample voices restart
-buffers; still within the 2× browser budget per 60 Hz frame equivalent.
+buffers. That is over the proposed 1 ms browser audio budget in this software-GL run (many ticks
+per frame); not yet measured on a real GPU at 60 fps.
 
 **Rebuilding the files:** `tools/audio_packs/` (new, outside my folders: download, cut/loop/normalise/
 encode, pack JSON and LICENSES.md generators; README there). Per-file processing is also recorded in
