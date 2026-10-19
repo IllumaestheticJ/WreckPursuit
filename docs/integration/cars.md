@@ -14,7 +14,7 @@ Merged `origin/main` at `d3effad` (contract v0.3.0) into `ws/cars`; no conflicts
 | Lead's changes to my civilian cars | **Kept, and moved into the source of truth** (`roster_inputs.py`): `tansy_13` 7 000 + `shift_time_s` 0.25, `drayman_cargo` 20 000, `furrow_24` 21 000. `build_roster.py` now regenerates byte-identical car JSON and lattices to `main`; spec sheets / ROSTER.md show the new prices. Re-run with the new shift: Tansy 0-100 13.3 s (band 11.5-13.5), unchanged within 0.1 s. Panel meshes (`data/car-assets`, R) not touched. |
 | 1 `semi_slick.json` `treaded: false` (W-4) | Done. Every other compound stays treaded (`None`), the drag radial too (DOT street tire with shallow tread). |
 | 2 Tire data for `PaintedLine` | Done on all 8 compounds: **dry** tire-on-paint multiplier 0.92-0.96 (street / police 0.95, wet-biased 0.96, sport / all-terrain 0.94, vintage bias 0.93, semi-slick / drag radial 0.92). Paint fills the asphalt macrotexture, so the hysteresis share of grip drops; compounds that rely on it most lose most. Reasoning + a `paint` column in `data/tires/README.md`. **Wet** paint grip stays in the conditions model (see request below: do not stack a second *dry* paint factor). |
-| v0.3.0 checklist: push bar → `Accessory` | Done in `build_roster.py`: the 4 push-bar nodes and detach group 8 of `sentinel_cruiser`, `sentinel_wolfhound`, `sentinel_bastion` are `BodyRegion::Accessory` (was `FrontBumper`). `ram-probe` on all three, both modes, 4 ram kinds × 3 speeds × 6 rams: **health, disengage ram and total-loss ram identical** to before; barrier verdicts identical. Only the crush *metrics* changed (request to B below). |
+| v0.3.0 checklist: push bar → `Accessory` | Done in `build_roster.py` (+ R's generated panel specs/meshes for the three cars regenerated, see "Changes outside my crates"): the 4 push-bar nodes and detach group 8 of `sentinel_cruiser`, `sentinel_wolfhound`, `sentinel_bastion` are `BodyRegion::Accessory` (was `FrontBumper`). `ram-probe` on all three, both modes, 4 ram kinds × 3 speeds × 6 rams: **health, disengage ram and total-loss ram identical** to before; barrier verdicts identical. Only the crush *metrics* changed (request to B below). |
 | Validation re-collected on `main` | `collect_results.py`, `specsheet.py`, `nameplate_check.py` (69 files, 0 problems), `smoke_sim.py` (17 cars × 2 modes deterministic), `pursuit_probe.py --chase`, `ram-probe`. Main's vehicle changes (A's faster pedal filter `880753b`, save-the-car steering) shortened stops ≈ 1-2 m roster-wide and moved two cars across a band edge: **Vireo 100-0 37.9 m** (band 38-44) and **Lindwurm 0-100 5.42 s** (band ≤ 5.4). Both explained in VALIDATION.md, not retuned (rounding-level, caused by the vehicle model). Cruiser now 0-100 6.4 s, 0-144 11.65 s; it still reaches the day pursuit cap before every traffic and cheap car. Barrier sweep unchanged: 135/136, the one miss is the known Wolfhound offset near miss. |
 
 **Checks (round 8, cloud container):** `cargo fmt --check`, `cargo clippy --workspace -- -D
@@ -286,6 +286,14 @@ would help:
   def, same reason as the Beater) and `data/audio/cars/sentinel_cruiser.json` switched from the
   V6 pack to `engine_proc_v8` / 8-cylinder cross-plane (the cruiser is a V8 now). Audio owner
   may retune.
+- Round 8: `data/panels/{sentinel_cruiser,sentinel_wolfhound,sentinel_bastion}.json` and
+  `data/panels/meshes/` for the same cars (R's folder): regenerated with R's own
+  `gen-panels` / `gen-car-mesh` because the push-bar nodes left `FrontBumper`
+  (`tools/assets` test `every_car_has_a_valid_up_to_date_mesh_and_panel_spec` failed on
+  "node 300 is not a free node of FrontBumper"). Checked first that main's specs for those
+  three cars were exactly generator output (`gen-panels --check` clean against main's
+  lattices), so no hand tuning was lost; `--check` is clean for all cars after.
+- Round 8: `data/tires/*.json` + `data/tires/README.md` (02's folder; assigned to H by the lead).
 - Round 6b: root `Cargo.toml` — one workspace member line, `tools/specsheet/ram_probe` (a tool
   crate like `tools/tuning-dash/probe`; not reachable from `wp_wasm`).
 
