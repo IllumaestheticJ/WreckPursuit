@@ -1,72 +1,53 @@
 //! # wp_economy
 //!
-//! Money, reputation, repair billing, impound, mods and garage (owned by workstream 08).
-//! **Current state: stub** — an in-memory account store and a pass-through repair bill.
+//! Money, reputation, repair billing, capture consequences, impound, race payouts, the mod
+//! system and the garage (owned by workstream 08).
+//!
+//! Design: **pure functions over a small persistent state**. Every operation is a method on
+//! [`Economy`] (immutable, data-driven tables loaded from `data/economy/*.toml` and
+//! `data/mods/*.json`) that takes a `&mut` [`PlayerAccount`] and returns the
+//! [`EconomyEvent`]s it posted. Operations are all-or-nothing: a refused operation leaves the
+//! account untouched. The server persists accounts and events through an [`AccountStore`]
+//! (SQLite behind the `native` feature, [`InMemoryStore`] otherwise).
+//!
+//! Server-authoritative: nothing here reads wall-clock time; randomness (Simulation seizures)
+//! comes from an explicitly passed [`wp_math::Rng`]; maps are `BTreeMap`.
+//!
+//! Modules:
+//! - [`ledger`] — accounts, events, transactions, stores.
+//! - [`repair`] — price tables for `wp_damage`, damage reports, repair options, shops, insurance.
+//! - [`capture`] — fines, bail, impound, seizure, escapes, the daily tick, cop XP.
+//! - [`payouts`] — purses, buy-ins, clean bonus, pink slips, informants.
+//! - [`mods`] — mod definitions, catalog, install rules, applying mods to definitions.
+//! - [`garage`] — buy/sell, floor car, install/uninstall, preview, valuation, insurance.
+//! - [`estimate`] — performance estimator and class index.
+//! - [`career`] — scripted multi-night career simulation used for tuning.
 
 #![warn(missing_docs)]
 
-use std::collections::BTreeMap;
+pub mod capture;
+pub mod career;
+pub mod data;
+mod error;
+pub mod estimate;
+pub mod garage;
+pub mod ledger;
+pub mod mods;
+pub mod payouts;
+pub mod repair;
+#[cfg(feature = "native")]
+pub mod sqlite;
 
-use serde::{Deserialize, Serialize};
-use wp_contracts::{PlayerId, RepairEstimate};
-
-/// Persistent per-player economy state.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-pub struct PlayerAccount {
-    /// Cash in whole currency units (may go negative only via fines = debt).
-    pub cash: i64,
-    /// Street reputation.
-    pub rep: i64,
-    /// Outstanding bounty.
-    pub bounty: u32,
-    /// Police career rank XP.
-    pub cop_rank: u32,
-    /// Ids of owned cars (`VehicleDef::id`).
-    pub garage: Vec<String>,
-}
-
-/// Storage backend for accounts (in-memory now; SQLite behind a `native` feature later).
-pub trait AccountStore {
-    /// Load an account, or a fresh default one.
-    fn load(&self, player: PlayerId) -> PlayerAccount;
-    /// Persist an account.
-    fn save(&mut self, player: PlayerId, account: &PlayerAccount);
-}
-
-/// Deterministic in-memory [`AccountStore`].
-#[derive(Debug, Clone, Default)]
-pub struct InMemoryStore {
-    accounts: BTreeMap<PlayerId, PlayerAccount>,
-}
-
-impl AccountStore for InMemoryStore {
-    fn load(&self, player: PlayerId) -> PlayerAccount {
-        self.accounts.get(&player).cloned().unwrap_or_default()
-    }
-
-    fn save(&mut self, player: PlayerId, account: &PlayerAccount) {
-        self.accounts.insert(player, account.clone());
-    }
-}
-
-/// Repair bill total for an estimate (stub: the estimate total, rounded up).
-pub fn repair_bill(estimate: &RepairEstimate) -> i64 {
-    estimate.total.ceil() as i64
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn store_round_trips() {
-        let mut s = InMemoryStore::default();
-        let acc = PlayerAccount {
-            cash: 500,
-            ..Default::default()
-        };
-        s.save(PlayerId(3), &acc);
-        assert_eq!(s.load(PlayerId(3)), acc);
-        assert_eq!(repair_bill(&RepairEstimate::default()), 0);
-    }
-}
+pub use capture::{CaptureContext, CaptureOutcome, CarFate, CopAction};
+pub use data::{DataSources, Economy};
+pub use error::{DataError, EconomyError};
+pub use estimate::PerfMetrics;
+pub use garage::{CarSpec, Condition, Preview};
+pub use ledger::{
+    AccountStore, CarLocation, CarUid, DamageSnapshot, EconResult, EconomyEvent, EventReason,
+    InMemoryStore, Money, OwnedCar, PlayerAccount, StoreError, ViolationCounts,
+};
+pub use mods::{ModCatalog, ModDef, ModEffect, ModSlot, ToolLoadout};
+pub use payouts::{PinkSlipConsent, RaceResult, RaceSettlement, RaceSetup, RaceType};
+pub use repair::{DamageReport, RepairOption, RepairOrder, RepairQuote, ShopContext, ShopKind};
+pub use wp_police::WantedLevel;

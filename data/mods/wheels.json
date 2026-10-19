@@ -1,0 +1,8 @@
+{
+  "id": "wheels",
+  "mods": [
+    {"id": "wheels_steel", "name": "Steel Wheels", "slot": "Wheels", "line": "rims", "tier": 1, "price": 200, "effects": [{"Cosmetic": {"kind": "Wheels", "value": "steel"}}], "tradeoff": "Cosmetic."},
+    {"id": "wheels_mesh", "name": "Mesh Wheels", "slot": "Wheels", "line": "rims", "tier": 2, "price": 1200, "effects": [{"Cosmetic": {"kind": "Wheels", "value": "mesh"}}], "tradeoff": "Cosmetic."},
+    {"id": "wheels_forged", "name": "Forged Wheels", "slot": "Wheels", "line": "rims", "tier": 3, "price": 3500, "effects": [{"Cosmetic": {"kind": "Wheels", "value": "forged_5spoke"}}, {"Vehicle": {"param": "wheels.mass_kg", "op": "Add", "value": -3.5}}], "tradeoff": "Bend easily on kerbs (flavour)."}
+  ]
+}

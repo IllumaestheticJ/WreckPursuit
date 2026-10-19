@@ -1,0 +1,95 @@
+# Capture consequences, impound and cop XP. Owned by workstream 08.
+#
+# fine = (fine_by_level × (1 + fine_per_prior_capture × min(priors, cap)) + session violations
+#         + min(lifetime violations × lifetime_violation_weight, cap × base)) × mode.fine_scale
+# bail = bail_bounty_frac × bounty. Fines and bail may push cash into debt.
+
+fine_per_prior_capture = 0.15
+prior_capture_cap = 6
+lifetime_violation_weight = 0.05
+lifetime_violation_cap = 0.5
+bail_bounty_frac = 0.5
+cop_rank_thresholds = [500, 1500, 3500, 7000, 12000, 20000]
+
+[fine_by_level]
+None = 300           # stopped for a traffic stop while not in a pursuit
+L1 = 600
+L2 = 1200
+L3 = 2500
+L4 = 5000
+L5 = 9000
+
+[fine_per_violation]
+speeding = 40
+red_light = 150
+wrong_way = 200
+collision = 300
+reckless = 120
+
+[rep_loss_by_level]
+None = 0
+L1 = 30
+L2 = 60
+L3 = 120
+L4 = 250
+L5 = 500
+
+[impound]
+auction_after_days = 10
+auction_return_frac = 0.1
+
+[impound.base_fee]
+Beater = 150
+Compact = 400
+Sport = 700
+Muscle = 650
+Exotic = 2500
+Truck = 500
+PoliceCruiser = 0
+PoliceInterceptor = 0
+PoliceSuv = 0
+
+[impound.per_day]
+Beater = 40
+Compact = 120
+Sport = 200
+Muscle = 180
+Exotic = 600
+Truck = 150
+PoliceCruiser = 0
+PoliceInterceptor = 0
+PoliceSuv = 0
+
+[mode.Arcade]
+seizure_chance = 0.0
+seizure_min_level = "L4"
+total_loss_destroys_car = false   # Arcade: always impound + fine
+fine_scale = 0.6                  # one big bust hurts but does not end the career
+
+[mode.Simulation]
+seizure_chance = 0.3              # 30% seizure at wanted level 4-5
+seizure_min_level = "L4"
+total_loss_destroys_car = true    # a total loss at capture means the car is gone
+fine_scale = 1.25
+
+[cop_xp]
+clean_minute = 2
+civilian_collision = -40
+self_wreck = -150
+risk_overspend = -60    # per full risk budget overspent (prompt 06)
+
+[cop_xp.capture]
+None = 20
+L1 = 60
+L2 = 100
+L3 = 180
+L4 = 300
+L5 = 500
+
+[cop_xp.assist]
+None = 10
+L1 = 25
+L2 = 40
+L3 = 70
+L4 = 120
+L5 = 200

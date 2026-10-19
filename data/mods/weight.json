@@ -1,0 +1,11 @@
+{
+  "id": "weight",
+  "mods": [
+    {"id": "weight_strip_1", "name": "Interior Strip", "slot": "Weight", "line": "strip", "tier": 1, "price": 400, "effects": [{"Vehicle": {"param": "body.mass_kg", "op": "Add", "value": -30.0}}], "tradeoff": "Loud, bare cabin (flavour)."},
+    {"id": "weight_strip_2", "name": "Full Gut", "slot": "Weight", "line": "strip", "tier": 2, "price": 1500, "effects": [{"Vehicle": {"param": "body.mass_kg", "op": "Add", "value": -60.0}}], "tradeoff": "No sound deadening, no comfort; resale unaffected."},
+    {"id": "weight_carbon_hood", "name": "Carbon Hood", "slot": "Weight", "line": "hood_panel", "tier": 1, "price": 1800, "effects": [{"Durability": {"target": {"Region": "Hood"}, "scale": 0.6, "mass_kg": -9.0}}], "tradeoff": "Hood crumples and tears off much more easily."},
+    {"id": "weight_carbon_trunk", "name": "Carbon Trunk Lid", "slot": "Weight", "line": "trunk_panel", "tier": 1, "price": 1500, "effects": [{"Durability": {"target": {"Region": "Trunk"}, "scale": 0.6, "mass_kg": -7.0}}], "tradeoff": "Trunk lid crumples and tears off more easily."},
+    {"id": "weight_poly_windows", "name": "Polycarbonate Rear Windows", "slot": "Weight", "line": "glass", "tier": 1, "price": 1200, "effects": [{"Durability": {"target": {"Region": "RearGlass"}, "scale": 0.8, "mass_kg": -8.0}}], "tradeoff": "Scratches; rear glass region weaker."},
+    {"id": "weight_battery_light", "name": "Lightweight Battery", "slot": "Weight", "line": "battery", "tier": 1, "price": 500, "effects": [{"Durability": {"target": {"Component": "Battery"}, "scale": 0.8, "mass_kg": -8.0}}], "tradeoff": "Battery fails at lower intrusion."}
+  ]
+}
