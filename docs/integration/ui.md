@@ -3,8 +3,8 @@
 - **Workstream / prompt:** 16 — UI kit (HUD, garage, mod tree, captain map, menus). Machine M.
 - **Branch:** `ws/ui`
 - **Crates / folders owned:** `apps/ui-kit` (new; TypeScript + Preact, not a Cargo workspace member)
-- **Contract version built against:** 0.2.0 (merged `main` after lead run 3). Police types mirror
-  `wp_police` (E) until v0.3.0 types them in the contract.
+- **Contract version built against:** 0.3.0 (merged `main` after lead round 8). Police, economy
+  and race events and captain commands are the generated contract types.
 
 ## Exposes
 
@@ -22,7 +22,8 @@
 | Generated contract types | `src/generated/contracts.ts` (`npm run gen:types`) | any TS code (testbed could reuse) |
 | `tools/gen-runtime-schemas` | standalone Rust crate: JSON Schemas for runtime contract types → `apps/ui-kit/schemas/runtime/` | lead may want to fold this into `gen-schemas` |
 | `tools/record-police` | standalone Rust crate: drives E's real `PoliceSystem` with a scripted racer and records `events.jsonl` + `metrics.csv` + `captain.jsonl` (`CaptainView` at 0.5 Hz) + E's road graph as `map.json` (`npm run gen:police`) | E (a reproducible pursuit trace), anyone needing real police output before `wp_sim` wires police |
-| `model/police.ts` | TS mirror of `wp_police::{PoliceEvent, CaptainCommand, UnitOrder, CaptainError, CaptainView, UnitView, RacerSighting, ToolReadiness, Incident}` + `decodePoliceEvent`, `captainCommandBytes` | testbed / client code talking to police before v0.3.0 |
+| `model/police.ts` | re-exports the generated `PoliceEvent`, `CaptainCommand`, `UnitOrder`, `CaptainError`, …; hand mirror of `wp_police::{CaptainView, UnitView, RacerSighting, ToolReadiness, Incident}` (not in the contract, UI-3); `decodePoliceEvent`, `captainMessage` (→ `ClientToServer::CaptainCommand`), `captainErrorText` | client code talking to police |
+| `ChaseEndDetector` (`src/live/chaseEnd.ts`) | `update(racer, status, level, events, freshOutcome?) → { how, outcome, level } \| null`, once per chase | testbed (bill on capture / wreck), any live host |
 | Demo | `npm run demo` → http://localhost:5180 | everyone |
 
 Wiring into the testbed (04 owns it; nothing edited there):
@@ -130,7 +131,7 @@ I ask that E's current variant lists go in as they are, plus the additions below
 | UI-5 | (wasm surface, not contract) `wp_wasm` exports for the garage: `economy_preview(def_id, mods, mode) → Preview`, `quote_repair(...)`, `current_value`, `sale_price`, `retrieval_fee`, `market_price` (JSON in/out) | Lets the UI drop its ports of `estimate.rs` and the billing rules. | 04, 08 | open (for 04 / 08) |
 | UI-6 | Race events into the contract with L's shapes: `RaceSignal::{CheckpointPassed, LapCompleted, LeadChanged, RacerFinished, RacerDnf, RacerDq, RaceFinished { results: Vec<RacerResult> }}`; plus a live standings accessor in `wp_race` (`RaceJudge::standings() -> Vec<{racer, position, progress_m, gap_ahead_s}>`) | HUD race panel (position, gaps) and results screen. L has the data; there is no live position/gap API and nothing reaches the client. | 15, 07 | open (for L) |
 | UI-7 | `PartDetached` gains `region: BodyRegion` | Group ids are lattice-specific, so the silhouette cannot map them. (`RegionDamaged` is now emitted by B, seen in the testbed feed.) | 03 | open |
-| UI-8 | Typed `EconomyEvent` (v0.3.0, G #1): keep `EventReason` names stable incl. `RaceEntryFee`, `RacePurse`, `CleanRaceBonus`, `RaceRep`, `BountyGained` | Results payout lines map 1:1 to reasons. | 08 | note on an accepted item |
+| UI-8 | Typed `EconomyEvent` (v0.3.0, G #1): keep `EventReason` names stable incl. `RaceEntryFee`, `RacePurse`, `CleanRaceBonus`, `RaceRep`, `BountyGained` | Results payout lines map 1:1 to reasons. | 08 | **done in v0.3.0** (`StakeCharged` / `RacePayout` renames taken; the UI reads `SimEvent::Economy`) |
 | UI-9 | `ServerToClient::Snapshot` gains `time_of_day: TimeOfDay` (or a low-rate message) | HUD clock. | 05, 07 | open |
 | UI-10 | `DistrictId` (deferred to v0.3.0) shared between D's zones and L's `wp_race::DistrictId`, plus a territory view from L: `Vec<{ district, owner: Option<CrewId>, points: BTreeMap<CrewId, u32> }>` and `Crew { id, name, rep, members }` | Crews & territory map (today: data/city zone index + mock owners). | 05, 15, 08 | open |
 
@@ -154,16 +155,18 @@ limit; `apps/ui-kit/fixtures/runs/police_pursuit/`) shows two things worth a loo
 
 Live HUD heat / wanted / bounty, pursuit status and the repair bill in the browser testbed
 (owner request, 2026-10-19: "wire them into apps/testbed-web with C"). Kept minimal and additive;
-**C and the lead, please review**:
+**C and the lead, please review**. (Round 8: the lead kept C's testbed and `wp_wasm/src/police.rs`;
+my round-6 `src/ui/police.ts` and the extra `police_status` fields are not on `main` and their rows
+are removed. C's `src/police.ts` maps the status onto the kit's readout.)
 
 | File | Owner | Change |
 |---|---|---|
 | `crates/wp_wasm/src/garage.rs` (new) | C | `repair_quote_json(entity, request_json)`: the running car's `DamageSim::repair_estimate` (economy `PriceTable` for its class/value) priced by `wp_economy::Economy::quote_repair` (shop, district, mode, wanted markup, insurance, salvage). Read-only. |
-| `crates/wp_wasm/src/police.rs` (C's, round 6) | C | **Round 6 consolidation:** my `police_status.rs` / `police_status_json` are gone; C's `police::PoliceStatus` gained four additive fields — `staleness_s`, `search_s` (`los_lost_s`), `escape_s` (level + day phase), `phase` — so one wasm call (`police_status`) feeds the one readout. Unit test extended. |
 | `crates/wp_wasm/src/lib.rs` | C | `pub mod garage;` |
 | `crates/wp_wasm/Cargo.toml` | C | `wp_economy` dependency (default features; `cargo tree --target wasm32-unknown-unknown` shows no rusqlite). |
+| `apps/testbed-web/src/ui/overlay.ts` (round 8) | C | Chase end via the kit's `ChaseEndDetector` (typed `PursuitEnded`, else status + fresh `last_outcome`) instead of back-computing the end tick from `outcome_age_s`; bill still opens on capture / wreck only (C's choice: not on escape); `ui.lastChaseEnd` = `{ how, outcome, level, tick }`. |
+| `apps/testbed-web/e2e/run.mjs` (round 8) | C | Stubbed banner flow: a pursuit frame before the capture (a capture always follows a chase), and checks `ui.lastChaseEnd` (escaped, then captured at L3). |
 | `apps/testbed-web/src/ui/overlay.ts` (new; all testbed-side UI-kit glue lives in `src/ui/`) | C | Mounts the kit's `chaseHud` and `repairBill` overlays on a `createLiveModel()` fed each frame with the drained events + `police_status`. Opens the bill by itself when a chase ends (kit's `ChaseEndDetector`); `ui.lastChaseEnd` records how. |
-| `apps/testbed-web/src/ui/police.ts` (new, round 6) | C | `PoliceStatus` type for `police_status` JSON + `toReadout()` onto the kit's `PoliceReadout`. |
 | `apps/testbed-web/src/police_hud.tsx` | C | **Removed** (round 6): it was a second heat panel; the kit's chase HUD is now the only one. Its CSS in `index.html` removed too. |
 | `apps/testbed-web/src/main.ts` | C | Construct `UiOverlay`, `ui.reset()` on session rebuild, `ui.frame(...)` after `eventsDrain()`, **F** toggles the repair bill, `ui` on `window.__wp`; `PoliceHud` lines removed. |
 | `apps/testbed-web/src/wasm/sim.ts` | C | `repairQuote()`; one `policeStatus()` (calls `police_status`, typed by `src/ui/police.ts`). The duplicate `police_status_json` wrapper is gone. |
@@ -250,3 +253,32 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
 
 1. **HUD consolidation clash.** You and C both consolidated the heat panel in round 6. On merge, the lead kept **C's** `apps/testbed-web` and `crates/wp_wasm/src/police.rs` (pursuit banner, capture opens the bill, `last_outcome`/`outcome_age_s` in `police_status`). Your ui-kit changes are in, but your testbed edits (`src/ui/overlay.ts` ChaseEndDetector wiring, `src/ui/police.ts`, `police_status` with `search_s`/`phase`) are not. Port the parts that add value on top of C's version (for example ChaseEndDetector, phase-scaled escape), coordinating via `docs/integration/testbed.md`. Keep exactly one chase panel.
 2. Regenerate `src/generated/contracts.ts` and the recorded fixtures for v0.3.0's typed events (`npm run gen:types`, `gen:police`, `gen:fixtures`), and switch the reducers from payload bytes to typed variants.
+
+**Done (M, round 8, 2026-10-19):**
+
+1. **HUD clash.** Took C's testbed as kept by the lead (one chase panel: the kit's chase HUD + C's
+   pursuit banner). Of my round-6 testbed edits, `src/ui/police.ts` and the `search_s` / `phase`
+   fields are **dropped**: C's `police_status` already has phase-scaled `escape_s` and
+   `staleness_s`, so they added nothing. Ported on top of C: the **`ChaseEndDetector`**, now
+   reading the typed `PoliceEvent::PursuitEnded` (outcome + level before the reset) and falling
+   back to the status turning clear with C's fresh `last_outcome`; it replaces C's
+   `outcome_age_s` → end-tick arithmetic and also opens the bill on a total loss mid-chase.
+   C's UX kept: escapes show the banner but don't pop the bill. Listed under "Changes outside my
+   crates"; note for C in `docs/integration/testbed.md`.
+2. **v0.3.0.** `npm run gen:types` (now also emits `ClientToServer`), `gen:police`,
+   `gen:fixtures`, `gen-synthetic` re-run. Reducers match `SimEvent::Police` /
+   `SimEvent::Economy` directly; the payload decoders and `EconomyEventMirror` are gone;
+   `captainCommandBytes` → `captainMessage` (typed `ClientToServer::CaptainCommand`);
+   `RequestRoadblock` / `RequestSpikes` use `road` (was `segment`). vitest 58 / 58.
+   - **For E:** the re-recorded `police_pursuit` (same seed and script) now has 0 `SpikeHit`
+     (was 3) and the pursuit is still active at 240 s; radio lines are batched ("Units 7, 8 and 9
+     out of service."). The recorded-run test now checks spikes are *placed*; the hit line is unit
+     tested.
+
+3. **Checks (this container, after merging `main`):** `cargo fmt --check`, `cargo clippy
+   --workspace -D warnings`, `cargo test --workspace` (115 suites, 0 failures), wasm32 build of
+   `wp_wasm`, testbed `tsc`, ui-kit `tsc` + vitest 58 / 58, ui-kit e2e (60 fps, 0 long tasks), and
+   testbed `npm run e2e` (release wasm) — all pass, including "pursuit banner: PURSUIT → SEARCHING
+   → ESCAPED (escaped) → CAPTURED (bill opened, chase end captured at L3)". The reworked golden
+   frontal scenario (4 s, parked car) changed the crash fixtures; the fixture tests now assert
+   ranges for it (rear bumper < half the front, heading checked before the hit).

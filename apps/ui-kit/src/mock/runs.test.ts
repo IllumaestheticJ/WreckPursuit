@@ -14,11 +14,12 @@ describe("simcli run parsing", () => {
 
   it("parses the frontal run: entities, events, metrics", () => {
     const run = loadFixture("golden_frontal_56kmh");
+    // "barrier" is a parked debug_sedan since the 4 s rework of the golden scenario.
     expect(run.entities.map((e) => [e.id, e.entity])).toEqual([["car", 1], ["barrier", 2]]);
     expect(run.events.length).toBeGreaterThan(5);
     expect(Object.keys(run.events[0].event)[0]).toBe("Contact");
     expect(run.metrics.car.length).toBeGreaterThan(100);
-    expect(run.totalTicks).toBe(1920);
+    expect(run.totalTicks).toBe(960);
   });
 
   it("reports the line number of a bad events line", () => {
@@ -31,10 +32,10 @@ describe("simcli run parsing", () => {
 
   it("finds rows by tick and derives heading from motion", () => {
     const rows = loadFixture("golden_frontal_56kmh").metrics.car;
-    const i = rowAt(rows, 600);
-    expect(rows[i].tick).toBeLessThanOrEqual(600);
-    expect(rows[i + 1].tick).toBeGreaterThan(600);
-    // The frontal car drives along +Y: heading ~0.
+    const i = rowAt(rows, 120);
+    expect(rows[i].tick).toBeLessThanOrEqual(120);
+    expect(rows[i + 1].tick).toBeGreaterThan(120);
+    // Before the hit (0.5 s) the frontal car drives along +Y: heading ~0.
     expect(Math.abs(headingAt(rows, i))).toBeLessThan(0.05);
     expect(rowAt(rows, -5)).toBe(-1);
   });

@@ -508,3 +508,12 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
 - New tools: `e2e/chase_perf.mjs` (sim ms + RTF in headless Chromium; `VIEWPORT=480x270`),
   `e2e/cpu_profile.mjs`, `cargo run --release -p wp_wasm --example chase_bench`.
 Numbers: `docs/PLAYTEST_LOG.md` rows 3–4.
+### Note from M (UI kit, round 8 item 3) — for C to review
+`src/ui/overlay.ts`: the capture → bill trigger now uses the kit's `ChaseEndDetector`
+(`apps/ui-kit/src/live/chaseEnd.ts`). It reads the typed `PoliceEvent::PursuitEnded` from the
+drained events (exact outcome and level before the reset), falling back to the status turning
+clear plus a fresh (< 1 s) `last_outcome` from your `police_status`; it replaces the
+`outcome_age_s` → end-tick arithmetic. Your behaviour is kept (banner unchanged; bill on capture,
+and now also on a total loss mid-chase; not on escape). `ui.lastChaseEnd` = `{ how, outcome,
+level, tick }`. `e2e/run.mjs` stubbed flow: one extra pursuit frame before the capture, plus checks
+on `lastChaseEnd`. Nothing else in your files changed.

@@ -341,9 +341,14 @@ check(
     stub({ level: "None", status: "Clear", last_outcome: "Escaped", outcome_age_s: 0.5 });
     await frames();
     out.escaped = read();
+    out.escapedEnd = window.__wp.ui.lastChaseEnd?.how ?? null;
+    // A new chase, ended by a capture (the kit's ChaseEndDetector reads the fresh outcome).
+    stub({ level: "L3", status: "Pursuit", units_in_pursuit: 2 });
+    await frames();
     stub({ level: "None", status: "Clear", last_outcome: "Captured", outcome_age_s: 0.2 });
     await frames();
     out.captured = read();
+    out.capturedEnd = window.__wp.ui.lastChaseEnd;
     stub({ level: "None", status: "Clear", last_outcome: "Captured", outcome_age_s: 30 });
     await frames();
     out.later = read();
@@ -353,8 +358,9 @@ check(
   });
   check(
     flow.pursuit.banner === "PURSUIT" && flow.searching.banner === "SEARCHING" && flow.escaped.banner === "ESCAPED" && !flow.escaped.bill &&
-      flow.captured.banner === "CAPTURED" && flow.captured.bill && flow.later.banner === null,
-    `pursuit banner: ${flow.pursuit.banner} → ${flow.searching.banner} → ${flow.escaped.banner} → ${flow.captured.banner} (bill ${flow.captured.bill ? "opened" : "missing"}) → ${flow.later.banner ?? "cleared"}`,
+      flow.captured.banner === "CAPTURED" && flow.captured.bill && flow.later.banner === null &&
+      flow.escapedEnd === "escaped" && flow.capturedEnd?.how === "captured" && flow.capturedEnd?.level === "L3",
+    `pursuit banner: ${flow.pursuit.banner} → ${flow.searching.banner} → ${flow.escaped.banner} (${flow.escapedEnd}) → ${flow.captured.banner} (bill ${flow.captured.bill ? "opened" : "missing"}, chase end ${flow.capturedEnd?.how} at ${flow.capturedEnd?.level}) → ${flow.later.banner ?? "cleared"}`,
   );
 }
 await page.evaluate(() => {

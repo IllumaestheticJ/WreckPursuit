@@ -1,0 +1,513 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ClientToServer",
+  "description": "Messages from a client to the authoritative server.",
+  "oneOf": [
+    {
+      "description": "Input for the client's own vehicle at a given physics tick.",
+      "type": "object",
+      "properties": {
+        "Input": {
+          "type": "object",
+          "properties": {
+            "input": {
+              "description": "The input.",
+              "$ref": "#/$defs/VehicleInput"
+            },
+            "tick": {
+              "description": "Physics tick the input applies to.",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "tick",
+            "input"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "Input"
+      ]
+    },
+    {
+      "description": "Ask for a role.",
+      "type": "object",
+      "properties": {
+        "RoleRequest": {
+          "type": "object",
+          "properties": {
+            "role": {
+              "description": "Requested role.",
+              "$ref": "#/$defs/Role"
+            }
+          },
+          "required": [
+            "role"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "RoleRequest"
+      ]
+    },
+    {
+      "description": "Police captain command (v0.3.0: typed, NET-3).",
+      "type": "object",
+      "properties": {
+        "CaptainCommand": {
+          "$ref": "#/$defs/CaptainCommand"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "CaptainCommand"
+      ]
+    },
+    {
+      "description": "Race lobby command (v0.3.0, race R6).",
+      "type": "object",
+      "properties": {
+        "RaceCommand": {
+          "$ref": "#/$defs/RaceCommand"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "RaceCommand"
+      ]
+    }
+  ],
+  "$defs": {
+    "CaptainCommand": {
+      "description": "Police captain command (`ClientToServer::CaptainCommand`).",
+      "oneOf": [
+        {
+          "description": "Give a unit an order.",
+          "type": "object",
+          "properties": {
+            "AssignUnit": {
+              "type": "object",
+              "properties": {
+                "order": {
+                  "description": "Order.",
+                  "$ref": "#/$defs/UnitOrder"
+                },
+                "unit": {
+                  "description": "Unit.",
+                  "$ref": "#/$defs/UnitId"
+                }
+              },
+              "required": [
+                "unit",
+                "order"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "AssignUnit"
+          ]
+        },
+        {
+          "description": "Roadblock ahead of a racer.",
+          "type": "object",
+          "properties": {
+            "RequestRoadblock": {
+              "type": "object",
+              "properties": {
+                "road": {
+                  "description": "Road, or `None` for automatic placement. (Decodes the pre-v0.3.0 name `segment`.)",
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/RoadEdgeId"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "target": {
+                  "description": "Racer.",
+                  "$ref": "#/$defs/EntityId"
+                }
+              },
+              "required": [
+                "target"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "RequestRoadblock"
+          ]
+        },
+        {
+          "description": "Spike strip ahead of a racer.",
+          "type": "object",
+          "properties": {
+            "RequestSpikes": {
+              "type": "object",
+              "properties": {
+                "road": {
+                  "description": "Road, or `None` for automatic placement. (Decodes the pre-v0.3.0 name `segment`.)",
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/RoadEdgeId"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "target": {
+                  "description": "Racer.",
+                  "$ref": "#/$defs/EntityId"
+                }
+              },
+              "required": [
+                "target"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "RequestSpikes"
+          ]
+        },
+        {
+          "description": "Helicopter on a racer.",
+          "type": "object",
+          "properties": {
+            "RequestHelicopter": {
+              "type": "object",
+              "properties": {
+                "target": {
+                  "description": "Racer.",
+                  "$ref": "#/$defs/EntityId"
+                }
+              },
+              "required": [
+                "target"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "RequestHelicopter"
+          ]
+        },
+        {
+          "description": "Racer whose reinforcements are dispatched first (`None` clears).",
+          "type": "object",
+          "properties": {
+            "SetPriorityTarget": {
+              "type": "object",
+              "properties": {
+                "target": {
+                  "description": "Racer.",
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/EntityId"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "SetPriorityTarget"
+          ]
+        },
+        {
+          "description": "Call off the pursuit of a racer.",
+          "type": "object",
+          "properties": {
+            "CallOff": {
+              "type": "object",
+              "properties": {
+                "target": {
+                  "description": "Racer.",
+                  "$ref": "#/$defs/EntityId"
+                }
+              },
+              "required": [
+                "target"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "CallOff"
+          ]
+        }
+      ]
+    },
+    "EntityId": {
+      "description": "Simulation entity identifier (vehicles, debris, police units, traffic agents).\nAllocated by `wp_sim`, never reused within one instance.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "IncidentId": {
+      "description": "Police incident id (allocated by `wp_police`).",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "RaceCommand": {
+      "description": "Race commands from a client (v0.3.0, race R6; `ClientToServer::RaceCommand`).",
+      "oneOf": [
+        {
+          "description": "Join a lobby.",
+          "type": "object",
+          "properties": {
+            "Enter": {
+              "type": "object",
+              "properties": {
+                "event": {
+                  "description": "Event.",
+                  "$ref": "#/$defs/RaceEventId"
+                }
+              },
+              "required": [
+                "event"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Enter"
+          ]
+        },
+        {
+          "description": "Leave a lobby / retire.",
+          "type": "object",
+          "properties": {
+            "Withdraw": {
+              "type": "object",
+              "properties": {
+                "event": {
+                  "description": "Event.",
+                  "$ref": "#/$defs/RaceEventId"
+                }
+              },
+              "required": [
+                "event"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Withdraw"
+          ]
+        },
+        {
+          "description": "Ready on the grid.",
+          "type": "string",
+          "const": "Ready"
+        }
+      ]
+    },
+    "RaceEventId": {
+      "description": "Identifier of a scheduled or ad-hoc race event (scheduler ids are `day * 1000 + n`).",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "RoadEdgeId": {
+      "description": "A road of the loaded city: index into [`RoadNetworkQuery`] edges (= `wp_world`'s\n`RoadGraphView::edges`). Captains, the minimap and race previews share it.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "Role": {
+      "description": "Role a human player holds in an instance.",
+      "oneOf": [
+        {
+          "description": "Street racer driving their own car.",
+          "type": "string",
+          "const": "Racer"
+        },
+        {
+          "description": "The single police captain: map view, dispatch, tools. Does not drive.",
+          "type": "string",
+          "const": "PoliceCaptain"
+        },
+        {
+          "description": "Player-driven police chase unit.",
+          "type": "string",
+          "const": "PoliceChase"
+        },
+        {
+          "description": "Observer with no vehicle.",
+          "type": "string",
+          "const": "Spectator"
+        }
+      ]
+    },
+    "UnitId": {
+      "description": "Police unit id (allocated by `wp_police`, never reused within an instance). Distinct from\n`EntityId`: a unit may exist before `wp_sim` gives it a vehicle body.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "UnitOrder": {
+      "description": "An order for one police unit (forced on AI units for a hold time, a suggestion for player\nunits).",
+      "oneOf": [
+        {
+          "description": "Resume patrol.",
+          "type": "string",
+          "const": "Patrol"
+        },
+        {
+          "description": "Pursue a racer.",
+          "type": "object",
+          "properties": {
+            "Pursue": {
+              "type": "object",
+              "properties": {
+                "target": {
+                  "description": "Racer.",
+                  "$ref": "#/$defs/EntityId"
+                }
+              },
+              "required": [
+                "target"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Pursue"
+          ]
+        },
+        {
+          "description": "Intercept a racer via the road graph.",
+          "type": "object",
+          "properties": {
+            "Intercept": {
+              "type": "object",
+              "properties": {
+                "target": {
+                  "description": "Racer.",
+                  "$ref": "#/$defs/EntityId"
+                }
+              },
+              "required": [
+                "target"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Intercept"
+          ]
+        },
+        {
+          "description": "Respond to an incident.",
+          "type": "object",
+          "properties": {
+            "Respond": {
+              "type": "object",
+              "properties": {
+                "incident": {
+                  "description": "Incident.",
+                  "$ref": "#/$defs/IncidentId"
+                }
+              },
+              "required": [
+                "incident"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Respond"
+          ]
+        },
+        {
+          "description": "Pull over and stay out of the chase.",
+          "type": "string",
+          "const": "Disengage"
+        }
+      ]
+    },
+    "VehicleInput": {
+      "description": "Driver input for one vehicle for one physics tick. Analog values are already deadzoned.",
+      "type": "object",
+      "properties": {
+        "brake": {
+          "description": "Brake pedal, 0..=1.",
+          "type": "number",
+          "format": "float",
+          "default": 0.0
+        },
+        "clutch": {
+          "description": "Clutch pedal, 0 (engaged) ..= 1 (fully disengaged). Ignored with `auto_clutch`.",
+          "type": "number",
+          "format": "float",
+          "default": 0.0
+        },
+        "gear_down": {
+          "description": "Shift down requested this tick (edge, not level).",
+          "type": "boolean",
+          "default": false
+        },
+        "gear_up": {
+          "description": "Shift up requested this tick (edge, not level).",
+          "type": "boolean",
+          "default": false
+        },
+        "handbrake": {
+          "description": "Handbrake lever, 0..=1.",
+          "type": "number",
+          "format": "float",
+          "default": 0.0
+        },
+        "headlights": {
+          "description": "Headlights on.",
+          "type": "boolean",
+          "default": false
+        },
+        "horn": {
+          "description": "Horn held.",
+          "type": "boolean",
+          "default": false
+        },
+        "siren": {
+          "description": "Siren on (police vehicles only; ignored otherwise).",
+          "type": "boolean",
+          "default": false
+        },
+        "steer": {
+          "description": "Steering, -1 (full left) ..= 1 (full right).",
+          "type": "number",
+          "format": "float",
+          "default": 0.0
+        },
+        "throttle": {
+          "description": "Throttle pedal, 0..=1.",
+          "type": "number",
+          "format": "float",
+          "default": 0.0
+        },
+        "tool_use": {
+          "description": "Role tool activation index (0 = none). Meaning defined by the role (e.g. police tools).",
+          "type": "integer",
+          "format": "uint8",
+          "default": 0,
+          "maximum": 255,
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

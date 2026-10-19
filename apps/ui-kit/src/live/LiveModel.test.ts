@@ -4,7 +4,7 @@ import type { PoliceEvent } from "../model/police";
 import type { LiveBillJson } from "./bill";
 import { createLiveModel } from "./LiveModel";
 
-const police = (p: PoliceEvent, kind: number): SimEvent => ({ PoliceEvent: { kind, payload: [...new TextEncoder().encode(JSON.stringify(p))] } });
+const police = (p: PoliceEvent): SimEvent => ({ Police: p });
 
 const bill: LiveBillJson = {
   entity: 1,
@@ -32,14 +32,16 @@ const bill: LiveBillJson = {
 describe("live model", () => {
   it("folds live police events into the chase readout (level + pursuit, heat unknown)", () => {
     const m = createLiveModel();
-    m.push({ tick: 10, player: 1, events: [police({ WantedLevelChanged: { racer: 1, level: "L2" } }, 2)] });
+    m.push({ tick: 10, player: 1, events: [police({ WantedLevelChanged: { racer: 1, level: "L2" } })] });
     expect(m.get().hud.heat.level).toBe("L2");
     expect(m.get().hud.heat.state).toBe("noticed");
     expect(m.get().hud.heat.heatKnown).toBe(false);
-    m.push({ tick: 20, player: 1, events: [police({ PursuitStarted: { racer: 1, unit: 3 } }, 3), police({ Radio: { unit: 3, text: "Unit 3 in pursuit." } }, 1)] });
+    m.push({ tick: 20, player: 1, events: [police({ PursuitStarted: { racer: 1, unit: 3 } }), police({ Radio: { unit: 3, text: "Unit 3 in pursuit." } })] });
     expect(m.get().hud.heat.state).toBe("pursuit");
     expect(m.get().scanner.some((s) => s.text === "Unit 3 in pursuit.")).toBe(true);
-    m.push({ tick: 30, player: 1, events: [police({ PursuitEnded: { racer: 1, outcome: "Escaped" } }, 4)] });
+    m.push({ tick: 25, player: 1, events: [police({ SpikeHit: { vehicle: 1, wheels: [true, true, false, false] } })] });
+    expect(m.get().scanner.some((s) => s.text.startsWith("Spikes! 2 tyres deflating"))).toBe(true);
+    m.push({ tick: 30, player: 1, events: [police({ PursuitEnded: { racer: 1, outcome: "Escaped", level: "L2", capturer: null, assists: [] } })] });
     expect(m.get().hud.heat.state).toBe("clear");
   });
 
@@ -67,7 +69,7 @@ describe("live model", () => {
         closed = true;
       },
     });
-    m.push({ tick: 1, player: 1, events: [police({ WantedLevelChanged: { racer: 1, level: "L1" } }, 2)] });
+    m.push({ tick: 1, player: 1, events: [police({ WantedLevelChanged: { racer: 1, level: "L1" } })] });
     m.openBill();
     expect(asked).toBe("Legit/RepairAll/L1");
     expect(m.get().bill?.lines[0].label).toBe("Front Bumper — panel");

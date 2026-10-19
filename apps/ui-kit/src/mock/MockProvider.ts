@@ -821,8 +821,8 @@ export function describeCommand(c: CaptainCommand): string {
     const what = typeof o === "string" ? o.toLowerCase() : "Pursue" in o ? `pursue racer #${o.Pursue.target}` : "Intercept" in o ? `intercept racer #${o.Intercept.target}` : `respond to incident #${o.Respond.incident}`;
     return `Unit ${c.AssignUnit.unit} → ${what}`;
   }
-  if ("RequestRoadblock" in c) return `roadblock on racer #${c.RequestRoadblock.target}${c.RequestRoadblock.segment !== null ? ` (segment ${c.RequestRoadblock.segment})` : ""}`;
-  if ("RequestSpikes" in c) return `spikes on racer #${c.RequestSpikes.target}${c.RequestSpikes.segment !== null ? ` (segment ${c.RequestSpikes.segment})` : ""}`;
+  if ("RequestRoadblock" in c) return `roadblock on racer #${c.RequestRoadblock.target}${c.RequestRoadblock.road != null ? ` (road ${c.RequestRoadblock.road})` : ""}`;
+  if ("RequestSpikes" in c) return `spikes on racer #${c.RequestSpikes.target}${c.RequestSpikes.road != null ? ` (road ${c.RequestSpikes.road})` : ""}`;
   if ("RequestHelicopter" in c) return `air unit on racer #${c.RequestHelicopter.target}`;
   if ("SetPriorityTarget" in c) return c.SetPriorityTarget.target === null ? "priority cleared" : `priority racer #${c.SetPriorityTarget.target}`;
   return `call off racer #${c.CallOff.target}`;

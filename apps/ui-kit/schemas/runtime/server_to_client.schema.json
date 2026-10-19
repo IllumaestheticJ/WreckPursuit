@@ -23,6 +23,14 @@
               "format": "uint64",
               "minimum": 0
             },
+            "traffic": {
+              "description": "Kinematic traffic in the client's interest set, ascending id (v0.3.0).",
+              "type": "array",
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/TrafficAgentSnapshot"
+              }
+            },
             "vehicles": {
               "description": "Visible vehicles, ascending by entity id.",
               "type": "array",
@@ -125,9 +133,41 @@
       "required": [
         "RoleAssigned"
       ]
+    },
+    {
+      "description": "Reply to a [`ClientToServer::CaptainCommand`] (v0.3.0).",
+      "type": "object",
+      "properties": {
+        "CaptainReply": {
+          "$ref": "#/$defs/Result_of_null_or_CaptainError"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "CaptainReply"
+      ]
+    },
+    {
+      "description": "Weather state (v0.3.0, W-5; sent on join and on change, low rate).",
+      "type": "object",
+      "properties": {
+        "Weather": {
+          "$ref": "#/$defs/WeatherSnapshot"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "Weather"
+      ]
     }
   ],
   "$defs": {
+    "AccountId": {
+      "description": "Durable account id (v0.3.0, F NET-5 / meta MC-1): allocated by meta at signup and stable\nacross instances, unlike the per-instance [`PlayerId`] slot. The server maps\n`PlayerId → AccountId` at join.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
     "BodyRegion": {
       "description": "Body region a lattice node belongs to. Used for damage accounting, repair billing,\ndetachable groups and the HUD damage silhouette.",
       "oneOf": [
@@ -230,8 +270,125 @@
           "description": "Passenger cell (pillars, floor, firewall). Intrusion here drives total loss.",
           "type": "string",
           "const": "Cabin"
+        },
+        {
+          "description": "Bolt-on accessory ahead of / around the body: push bar, body kit (v0.3.0). Its own\ndetach group; no `HandlingEffects`; billed via `PriceTable::region_replace_cost`.",
+          "type": "string",
+          "const": "Accessory"
         }
       ]
+    },
+    "CaptainError": {
+      "description": "Why a [`CaptainCommand`] was refused. The reply to a command is `Result<(), CaptainError>`.",
+      "oneOf": [
+        {
+          "description": "No such unit.",
+          "type": "string",
+          "const": "UnknownUnit"
+        },
+        {
+          "description": "No such racer.",
+          "type": "string",
+          "const": "UnknownTarget"
+        },
+        {
+          "description": "No such incident.",
+          "type": "string",
+          "const": "UnknownIncident"
+        },
+        {
+          "description": "The racer is not being pursued.",
+          "type": "string",
+          "const": "NotPursued"
+        },
+        {
+          "description": "The tool unlocks at a higher wanted level.",
+          "type": "object",
+          "properties": {
+            "Locked": {
+              "type": "object",
+              "properties": {
+                "need_level": {
+                  "description": "Required wanted level (1..=5).",
+                  "type": "integer",
+                  "format": "uint8",
+                  "maximum": 255,
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "need_level"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Locked"
+          ]
+        },
+        {
+          "description": "Tool still cooling down.",
+          "type": "object",
+          "properties": {
+            "Cooldown": {
+              "type": "object",
+              "properties": {
+                "remaining_s": {
+                  "description": "Seconds left.",
+                  "type": "number",
+                  "format": "float"
+                }
+              },
+              "required": [
+                "remaining_s"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Cooldown"
+          ]
+        },
+        {
+          "description": "Too many active tools / helicopters.",
+          "type": "string",
+          "const": "Budget"
+        },
+        {
+          "description": "Placement rejected.",
+          "type": "object",
+          "properties": {
+            "Site": {
+              "$ref": "#/$defs/SiteError"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Site"
+          ]
+        },
+        {
+          "description": "The helicopter is unavailable (night availability roll).",
+          "type": "string",
+          "const": "Unavailable"
+        },
+        {
+          "description": "The unit cannot take orders (wrecked, parked at a tool, helicopter).",
+          "type": "string",
+          "const": "UnitUnavailable"
+        },
+        {
+          "description": "Command did not decode.",
+          "type": "string",
+          "const": "Malformed"
+        }
+      ]
+    },
+    "CarUid": {
+      "description": "Identifier of one owned car, unique within an account (never reused).",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
     },
     "Component": {
       "description": "Mechanical component that can be damaged by intrusion.",
@@ -343,6 +500,47 @@
         }
       ]
     },
+    "CopXpReason": {
+      "description": "Activity a player cop earned or lost XP for.",
+      "oneOf": [
+        {
+          "description": "Made a capture.",
+          "type": "string",
+          "const": "Capture"
+        },
+        {
+          "description": "Assisted a capture.",
+          "type": "string",
+          "const": "Assist"
+        },
+        {
+          "description": "Minutes of patrol / pursuit without incident.",
+          "type": "string",
+          "const": "CleanDriving"
+        },
+        {
+          "description": "Hit a civilian.",
+          "type": "string",
+          "const": "CivilianCollision"
+        },
+        {
+          "description": "Wrecked own unit.",
+          "type": "string",
+          "const": "SelfWreck"
+        },
+        {
+          "description": "Kept pushing after the risk budget was spent.",
+          "type": "string",
+          "const": "RiskBudgetOverspent"
+        }
+      ]
+    },
+    "CrewId": {
+      "description": "Identifier of a crew (allocated by `wp_race`, never reused).",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
     "DamageMode": {
       "description": "Damage mode. Both modes run the same code path with different [`crate::ModeTable`]s.",
       "oneOf": [
@@ -358,17 +556,2128 @@
         }
       ]
     },
+    "DisableCause": {
+      "description": "Why a unit left service.",
+      "oneOf": [
+        {
+          "description": "Crashed on its own (no racer contact this pursuit).",
+          "type": "string",
+          "const": "SelfCrash"
+        },
+        {
+          "description": "Wrecked after contact with a racer.",
+          "type": "string",
+          "const": "RacerContact"
+        },
+        {
+          "description": "Pulled over: health below the disengage threshold.",
+          "type": "string",
+          "const": "Damaged"
+        },
+        {
+          "description": "Pulled over: bent wheel / flat tire.",
+          "type": "string",
+          "const": "BentWheel"
+        }
+      ]
+    },
+    "DnfReason": {
+      "description": "Why a racer did not finish (they still rank above every DQ).",
+      "oneOf": [
+        {
+          "description": "The car became a total loss.",
+          "type": "string",
+          "const": "TotalLoss"
+        },
+        {
+          "description": "Arrested by police.",
+          "type": "string",
+          "const": "Captured"
+        },
+        {
+          "description": "The race time limit ran out.",
+          "type": "string",
+          "const": "TimeLimit"
+        },
+        {
+          "description": "Did not finish within the window after the winner.",
+          "type": "string",
+          "const": "FinishWindow"
+        },
+        {
+          "description": "Quit / left the race voluntarily.",
+          "type": "string",
+          "const": "Retired"
+        },
+        {
+          "description": "Delivery cargo destroyed.",
+          "type": "string",
+          "const": "CargoDestroyed"
+        },
+        {
+          "description": "Lost an outrun.",
+          "type": "string",
+          "const": "Outrun"
+        },
+        {
+          "description": "Disconnected from the server.",
+          "type": "string",
+          "const": "Disconnected"
+        },
+        {
+          "description": "Abandoned the race to run from the police (AI entrants).",
+          "type": "string",
+          "const": "Fled"
+        }
+      ]
+    },
+    "DqReason": {
+      "description": "Why a racer was disqualified (ranked below every finisher and every DNF).",
+      "oneOf": [
+        {
+          "description": "Outside the route corridor longer than the grace time (shortcut).",
+          "type": "string",
+          "const": "LeftCorridor"
+        },
+        {
+          "description": "Moved before green (drag).",
+          "type": "string",
+          "const": "JumpStart"
+        },
+        {
+          "description": "Moved faster than physically plausible between two samples.",
+          "type": "string",
+          "const": "ImplausibleMovement"
+        },
+        {
+          "description": "Disqualified by the server / a marshal / an admin.",
+          "type": "string",
+          "const": "Marshal"
+        }
+      ]
+    },
+    "EconomyEvent": {
+      "description": "One auditable change to an account (`SimEvent::Economy`).",
+      "type": "object",
+      "properties": {
+        "account": {
+          "description": "Durable account id (F NET-5 / meta MC-1).",
+          "$ref": "#/$defs/AccountId"
+        },
+        "bounty_delta": {
+          "description": "Bounty change.",
+          "type": "integer",
+          "format": "int64"
+        },
+        "car": {
+          "description": "Car concerned, if any.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CarUid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cash_after": {
+          "description": "Cash after this event.",
+          "type": "integer",
+          "format": "int64"
+        },
+        "cash_delta": {
+          "description": "Cash change.",
+          "type": "integer",
+          "format": "int64"
+        },
+        "cop_xp_delta": {
+          "description": "Cop XP change (as applied).",
+          "type": "integer",
+          "format": "int64"
+        },
+        "day": {
+          "description": "In-game day.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "reason": {
+          "description": "Why.",
+          "$ref": "#/$defs/EconomyReason"
+        },
+        "rep_delta": {
+          "description": "Reputation change (as applied).",
+          "type": "integer",
+          "format": "int64"
+        },
+        "seq": {
+          "description": "Per-account sequence number, gap-free.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "account",
+        "seq",
+        "day",
+        "reason",
+        "cash_delta",
+        "rep_delta",
+        "bounty_delta",
+        "cop_xp_delta",
+        "cash_after"
+      ]
+    },
+    "EconomyReason": {
+      "description": "Why an account changed. Codes ([`EconomyReason::kind_code`]) are stable.",
+      "oneOf": [
+        {
+          "description": "1: account created with starting cash.",
+          "type": "string",
+          "const": "AccountOpened"
+        },
+        {
+          "description": "10: race buy-in paid (was `RaceEntryFee`).",
+          "type": "object",
+          "properties": {
+            "StakeCharged": {
+              "type": "object",
+              "properties": {
+                "race": {
+                  "description": "Race type.",
+                  "$ref": "#/$defs/RaceType"
+                }
+              },
+              "required": [
+                "race"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "StakeCharged"
+          ]
+        },
+        {
+          "description": "11: race purse share paid (was `RacePurse`).",
+          "type": "object",
+          "properties": {
+            "RacePayout": {
+              "type": "object",
+              "properties": {
+                "placement": {
+                  "description": "Finishing position (1 = win).",
+                  "type": "integer",
+                  "format": "uint8",
+                  "maximum": 255,
+                  "minimum": 0
+                },
+                "race": {
+                  "description": "Race type.",
+                  "$ref": "#/$defs/RaceType"
+                }
+              },
+              "required": [
+                "race",
+                "placement"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "RacePayout"
+          ]
+        },
+        {
+          "description": "12: clean-race bonus.",
+          "type": "string",
+          "const": "CleanRaceBonus"
+        },
+        {
+          "description": "13: reputation from a race result.",
+          "type": "object",
+          "properties": {
+            "RaceRep": {
+              "type": "object",
+              "properties": {
+                "placement": {
+                  "description": "Finishing position (0 = DNF).",
+                  "type": "integer",
+                  "format": "uint8",
+                  "maximum": 255,
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "placement"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "RaceRep"
+          ]
+        },
+        {
+          "description": "14: won the loser's car in a pink-slip race.",
+          "type": "object",
+          "properties": {
+            "PinkSlipWon": {
+              "type": "object",
+              "properties": {
+                "def_id": {
+                  "description": "Base car id.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "def_id"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "PinkSlipWon"
+          ]
+        },
+        {
+          "description": "15: lost a car in a pink-slip race.",
+          "type": "object",
+          "properties": {
+            "PinkSlipLost": {
+              "type": "object",
+              "properties": {
+                "def_id": {
+                  "description": "Base car id.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "def_id"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "PinkSlipLost"
+          ]
+        },
+        {
+          "description": "20: repair paid at a shop.",
+          "type": "object",
+          "properties": {
+            "RepairPaid": {
+              "type": "object",
+              "properties": {
+                "labour_multiplier": {
+                  "description": "Labour multiplier applied (district × shop).",
+                  "type": "number",
+                  "format": "float"
+                },
+                "lines": {
+                  "description": "Line items repaired.",
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "lines",
+                "labour_multiplier"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "RepairPaid"
+          ]
+        },
+        {
+          "description": "21: insurance paid part of a repair bill.",
+          "type": "object",
+          "properties": {
+            "InsuranceClaim": {
+              "type": "object",
+              "properties": {
+                "covered": {
+                  "description": "Amount covered by the insurer.",
+                  "type": "integer",
+                  "format": "int64"
+                }
+              },
+              "required": [
+                "covered"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "InsuranceClaim"
+          ]
+        },
+        {
+          "description": "22: insurance refused a claim.",
+          "type": "string",
+          "const": "InsuranceClaimDenied"
+        },
+        {
+          "description": "23: player chose to drive the car damaged.",
+          "type": "string",
+          "const": "DriveDamaged"
+        },
+        {
+          "description": "24: car scrapped for salvage.",
+          "type": "object",
+          "properties": {
+            "CarScrapped": {
+              "type": "object",
+              "properties": {
+                "def_id": {
+                  "description": "Base car id.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "def_id"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "CarScrapped"
+          ]
+        },
+        {
+          "description": "25: a legit shop reported a wanted car (police add heat).",
+          "type": "object",
+          "properties": {
+            "ShopReported": {
+              "type": "object",
+              "properties": {
+                "district": {
+                  "description": "District key of the shop (`data/economy/prices.toml [district_labour]`; still a\nstring in v0.3.0 because those keys are not all [`crate::DistrictId`]s yet).",
+                  "type": "string"
+                },
+                "level": {
+                  "description": "Wanted level at the time.",
+                  "$ref": "#/$defs/WantedLevel"
+                }
+              },
+              "required": [
+                "district",
+                "level"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "ShopReported"
+          ]
+        },
+        {
+          "description": "26: damage report recorded at the end of a session.",
+          "type": "object",
+          "properties": {
+            "DamageRecorded": {
+              "type": "object",
+              "properties": {
+                "health": {
+                  "description": "Global health reported.",
+                  "type": "number",
+                  "format": "float"
+                },
+                "total_loss": {
+                  "description": "Total loss.",
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "health",
+                "total_loss"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "DamageRecorded"
+          ]
+        },
+        {
+          "description": "30: fine at capture.",
+          "type": "object",
+          "properties": {
+            "Fine": {
+              "type": "object",
+              "properties": {
+                "level": {
+                  "description": "Wanted level at capture.",
+                  "$ref": "#/$defs/WantedLevel"
+                }
+              },
+              "required": [
+                "level"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Fine"
+          ]
+        },
+        {
+          "description": "31: bail posted at capture.",
+          "type": "string",
+          "const": "Bail"
+        },
+        {
+          "description": "32: reputation lost at capture.",
+          "type": "object",
+          "properties": {
+            "CaptureRepLoss": {
+              "type": "object",
+              "properties": {
+                "level": {
+                  "description": "Wanted level at capture.",
+                  "$ref": "#/$defs/WantedLevel"
+                }
+              },
+              "required": [
+                "level"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "CaptureRepLoss"
+          ]
+        },
+        {
+          "description": "33: bounty cleared at capture (police heat resets).",
+          "type": "string",
+          "const": "BountyCleared"
+        },
+        {
+          "description": "34: bounty grew.",
+          "type": "string",
+          "const": "BountyGained"
+        },
+        {
+          "description": "35: towing charge.",
+          "type": "string",
+          "const": "Towing"
+        },
+        {
+          "description": "36: car moved to the pound (must not spawn).",
+          "type": "string",
+          "const": "CarImpounded"
+        },
+        {
+          "description": "37: car retrieved from the pound.",
+          "type": "object",
+          "properties": {
+            "ImpoundRetrieved": {
+              "type": "object",
+              "properties": {
+                "days": {
+                  "description": "Days spent in the pound.",
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "days"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "ImpoundRetrieved"
+          ]
+        },
+        {
+          "description": "38: car auctioned by the pound (lost).",
+          "type": "object",
+          "properties": {
+            "CarAuctioned": {
+              "type": "object",
+              "properties": {
+                "def_id": {
+                  "description": "Base car id.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "def_id"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "CarAuctioned"
+          ]
+        },
+        {
+          "description": "39: car seized by the police (must not spawn).",
+          "type": "object",
+          "properties": {
+            "CarSeized": {
+              "type": "object",
+              "properties": {
+                "def_id": {
+                  "description": "Base car id.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "def_id"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "CarSeized"
+          ]
+        },
+        {
+          "description": "40: car destroyed (must not spawn).",
+          "type": "object",
+          "properties": {
+            "CarDestroyed": {
+              "type": "object",
+              "properties": {
+                "def_id": {
+                  "description": "Base car id.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "def_id"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "CarDestroyed"
+          ]
+        },
+        {
+          "description": "41: escaped a pursuit.",
+          "type": "object",
+          "properties": {
+            "Escape": {
+              "type": "object",
+              "properties": {
+                "level": {
+                  "description": "Wanted level escaped from.",
+                  "$ref": "#/$defs/WantedLevel"
+                }
+              },
+              "required": [
+                "level"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Escape"
+          ]
+        },
+        {
+          "description": "50: cop bounty reward for a capture or assist.",
+          "type": "object",
+          "properties": {
+            "CopReward": {
+              "type": "object",
+              "properties": {
+                "level": {
+                  "description": "Wanted level of the captured racer.",
+                  "$ref": "#/$defs/WantedLevel"
+                }
+              },
+              "required": [
+                "level"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "CopReward"
+          ]
+        },
+        {
+          "description": "51: cop XP change.",
+          "type": "object",
+          "properties": {
+            "CopXp": {
+              "type": "object",
+              "properties": {
+                "reason": {
+                  "description": "Why.",
+                  "$ref": "#/$defs/CopXpReason"
+                }
+              },
+              "required": [
+                "reason"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "CopXp"
+          ]
+        },
+        {
+          "description": "52: paid an informant (police reduce heat).",
+          "type": "object",
+          "properties": {
+            "InformantTip": {
+              "type": "object",
+              "properties": {
+                "heat_reduction": {
+                  "description": "Heat points to remove (0–100 scale).",
+                  "type": "number",
+                  "format": "float"
+                },
+                "tier": {
+                  "description": "Tier id.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "tier",
+                "heat_reduction"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "InformantTip"
+          ]
+        },
+        {
+          "description": "60: bought a car.",
+          "type": "object",
+          "properties": {
+            "CarPurchased": {
+              "type": "object",
+              "properties": {
+                "def_id": {
+                  "description": "Base car id.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "def_id"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "CarPurchased"
+          ]
+        },
+        {
+          "description": "61: sold a car.",
+          "type": "object",
+          "properties": {
+            "CarSold": {
+              "type": "object",
+              "properties": {
+                "def_id": {
+                  "description": "Base car id.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "def_id"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "CarSold"
+          ]
+        },
+        {
+          "description": "62: issued the economy-floor beater.",
+          "type": "object",
+          "properties": {
+            "FloorCarIssued": {
+              "type": "object",
+              "properties": {
+                "def_id": {
+                  "description": "Base car id.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "def_id"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "FloorCarIssued"
+          ]
+        },
+        {
+          "description": "63: mod installed.",
+          "type": "object",
+          "properties": {
+            "ModInstalled": {
+              "type": "object",
+              "properties": {
+                "mod_id": {
+                  "description": "Mod id.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "mod_id"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "ModInstalled"
+          ]
+        },
+        {
+          "description": "64: mod removed.",
+          "type": "object",
+          "properties": {
+            "ModRemoved": {
+              "type": "object",
+              "properties": {
+                "mod_id": {
+                  "description": "Mod id.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "mod_id"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "ModRemoved"
+          ]
+        },
+        {
+          "description": "70: insurance policy bought.",
+          "type": "object",
+          "properties": {
+            "InsurancePurchased": {
+              "type": "object",
+              "properties": {
+                "tier": {
+                  "description": "Tier id.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "tier"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "InsurancePurchased"
+          ]
+        },
+        {
+          "description": "71: daily insurance premium.",
+          "type": "string",
+          "const": "InsurancePremium"
+        },
+        {
+          "description": "72: policy lapsed.",
+          "type": "string",
+          "const": "InsuranceLapsed"
+        },
+        {
+          "description": "73: policy voided (captured while wanted).",
+          "type": "string",
+          "const": "InsuranceVoided"
+        },
+        {
+          "description": "999: manual adjustment (admin / harness only).",
+          "type": "object",
+          "properties": {
+            "Adjustment": {
+              "type": "object",
+              "properties": {
+                "note": {
+                  "description": "Free-text note.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "note"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Adjustment"
+          ]
+        }
+      ]
+    },
     "EntityId": {
       "description": "Simulation entity identifier (vehicles, debris, police units, traffic agents).\nAllocated by `wp_sim`, never reused within one instance.",
       "type": "integer",
       "format": "uint32",
       "minimum": 0
     },
+    "Legality": {
+      "description": "Legal status of an event; drives police presence and the stake risk premium.",
+      "oneOf": [
+        {
+          "description": "Sanctioned daytime event on a closed route: no police interest.",
+          "type": "string",
+          "const": "Sanctioned"
+        },
+        {
+          "description": "Ordinary illegal street race.",
+          "type": "string",
+          "const": "Street"
+        },
+        {
+          "description": "Rare illegal race in broad daylight: police presence forced to max.",
+          "type": "string",
+          "const": "IllegalDaytime"
+        }
+      ]
+    },
     "PlayerId": {
       "description": "Human player identifier, allocated by `wp_net` on connect.",
       "type": "integer",
       "format": "uint32",
       "minimum": 0
+    },
+    "PoliceEvent": {
+      "description": "Everything `wp_police` reports to the rest of the game (`SimEvent::Police`).",
+      "oneOf": [
+        {
+          "description": "Radio-log line (scanner audio, captain UI). Emitted for every assignment.",
+          "type": "object",
+          "properties": {
+            "Radio": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "description": "Text.",
+                  "type": "string"
+                },
+                "unit": {
+                  "description": "Speaking unit (`None` = dispatch).",
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/UnitId"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "text"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Radio"
+          ]
+        },
+        {
+          "description": "A racer's wanted level changed.",
+          "type": "object",
+          "properties": {
+            "WantedLevelChanged": {
+              "type": "object",
+              "properties": {
+                "level": {
+                  "description": "New level.",
+                  "$ref": "#/$defs/WantedLevel"
+                },
+                "racer": {
+                  "description": "Racer.",
+                  "$ref": "#/$defs/EntityId"
+                }
+              },
+              "required": [
+                "racer",
+                "level"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "WantedLevelChanged"
+          ]
+        },
+        {
+          "description": "A pursuit started.",
+          "type": "object",
+          "properties": {
+            "PursuitStarted": {
+              "type": "object",
+              "properties": {
+                "racer": {
+                  "description": "Racer.",
+                  "$ref": "#/$defs/EntityId"
+                },
+                "unit": {
+                  "description": "First unit in pursuit (`None` = helicopter / captain).",
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/UnitId"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "racer"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "PursuitStarted"
+          ]
+        },
+        {
+          "description": "A pursuit ended. Emitted **before** the `WantedLevelChanged` that resets the level.",
+          "type": "object",
+          "properties": {
+            "PursuitEnded": {
+              "type": "object",
+              "properties": {
+                "assists": {
+                  "description": "Other units on the racer at a capture, ascending ids (empty for non-captures).",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/UnitId"
+                  }
+                },
+                "capturer": {
+                  "description": "Unit credited with a capture (closest unit on the racer); `None` for non-captures.",
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/UnitId"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "level": {
+                  "description": "Wanted level when the pursuit ended (before any reset).",
+                  "$ref": "#/$defs/WantedLevel"
+                },
+                "outcome": {
+                  "description": "Outcome.",
+                  "$ref": "#/$defs/PursuitOutcome"
+                },
+                "racer": {
+                  "description": "Racer.",
+                  "$ref": "#/$defs/EntityId"
+                }
+              },
+              "required": [
+                "racer",
+                "outcome",
+                "level",
+                "assists"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "PursuitEnded"
+          ]
+        },
+        {
+          "description": "A unit appeared. `wp_sim` spawns a vehicle body for it when it drives units physically.",
+          "type": "object",
+          "properties": {
+            "UnitSpawned": {
+              "type": "object",
+              "properties": {
+                "heading": {
+                  "description": "Unit heading (XY unit vector).",
+                  "type": "array",
+                  "items": {
+                    "type": "number",
+                    "format": "float"
+                  },
+                  "maxItems": 2,
+                  "minItems": 2
+                },
+                "kind": {
+                  "description": "Kind.",
+                  "$ref": "#/$defs/UnitKind"
+                },
+                "pos": {
+                  "description": "World position, m.",
+                  "type": "array",
+                  "items": {
+                    "type": "number",
+                    "format": "float"
+                  },
+                  "maxItems": 3,
+                  "minItems": 3
+                },
+                "unit": {
+                  "description": "Unit.",
+                  "$ref": "#/$defs/UnitId"
+                }
+              },
+              "required": [
+                "unit",
+                "kind",
+                "pos",
+                "heading"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "UnitSpawned"
+          ]
+        },
+        {
+          "description": "A unit was removed.",
+          "type": "object",
+          "properties": {
+            "UnitDespawned": {
+              "type": "object",
+              "properties": {
+                "unit": {
+                  "description": "Unit.",
+                  "$ref": "#/$defs/UnitId"
+                }
+              },
+              "required": [
+                "unit"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "UnitDespawned"
+          ]
+        },
+        {
+          "description": "A unit is out of service.",
+          "type": "object",
+          "properties": {
+            "UnitDisabled": {
+              "type": "object",
+              "properties": {
+                "cause": {
+                  "description": "Why.",
+                  "$ref": "#/$defs/DisableCause"
+                },
+                "unit": {
+                  "description": "Unit.",
+                  "$ref": "#/$defs/UnitId"
+                }
+              },
+              "required": [
+                "unit",
+                "cause"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "UnitDisabled"
+          ]
+        },
+        {
+          "description": "A roadblock was placed.",
+          "type": "object",
+          "properties": {
+            "RoadblockPlaced": {
+              "type": "object",
+              "properties": {
+                "pos": {
+                  "description": "Centre, m.",
+                  "type": "array",
+                  "items": {
+                    "type": "number",
+                    "format": "float"
+                  },
+                  "maxItems": 3,
+                  "minItems": 3
+                },
+                "racer": {
+                  "description": "Racer it targets.",
+                  "$ref": "#/$defs/EntityId"
+                },
+                "sight_m": {
+                  "description": "Approach sight distance at placement, m.",
+                  "type": "number",
+                  "format": "float"
+                },
+                "tool": {
+                  "description": "Tool.",
+                  "$ref": "#/$defs/ToolId"
+                }
+              },
+              "required": [
+                "tool",
+                "racer",
+                "pos",
+                "sight_m"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "RoadblockPlaced"
+          ]
+        },
+        {
+          "description": "A spike strip was placed (line collider from `a` to `b`).",
+          "type": "object",
+          "properties": {
+            "SpikesPlaced": {
+              "type": "object",
+              "properties": {
+                "a": {
+                  "description": "End A, m.",
+                  "type": "array",
+                  "items": {
+                    "type": "number",
+                    "format": "float"
+                  },
+                  "maxItems": 3,
+                  "minItems": 3
+                },
+                "b": {
+                  "description": "End B, m.",
+                  "type": "array",
+                  "items": {
+                    "type": "number",
+                    "format": "float"
+                  },
+                  "maxItems": 3,
+                  "minItems": 3
+                },
+                "racer": {
+                  "description": "Racer it targets.",
+                  "$ref": "#/$defs/EntityId"
+                },
+                "sight_m": {
+                  "description": "Approach sight distance at placement, m.",
+                  "type": "number",
+                  "format": "float"
+                },
+                "tool": {
+                  "description": "Tool.",
+                  "$ref": "#/$defs/ToolId"
+                }
+              },
+              "required": [
+                "tool",
+                "racer",
+                "a",
+                "b",
+                "sight_m"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "SpikesPlaced"
+          ]
+        },
+        {
+          "description": "A roadblock or spike strip expired or was cleared.",
+          "type": "object",
+          "properties": {
+            "ToolRemoved": {
+              "type": "object",
+              "properties": {
+                "tool": {
+                  "description": "Tool.",
+                  "$ref": "#/$defs/ToolId"
+                }
+              },
+              "required": [
+                "tool"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "ToolRemoved"
+          ]
+        },
+        {
+          "description": "A vehicle ran over a spike strip; flagged wheels deflate.",
+          "type": "object",
+          "properties": {
+            "SpikeHit": {
+              "type": "object",
+              "properties": {
+                "vehicle": {
+                  "description": "Vehicle.",
+                  "$ref": "#/$defs/EntityId"
+                },
+                "wheels": {
+                  "description": "Wheels hit, FL, FR, RL, RR.",
+                  "type": "array",
+                  "items": {
+                    "type": "boolean"
+                  },
+                  "maxItems": 4,
+                  "minItems": 4
+                }
+              },
+              "required": [
+                "vehicle",
+                "wheels"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "SpikeHit"
+          ]
+        },
+        {
+          "description": "Helicopter launched toward a racer.",
+          "type": "object",
+          "properties": {
+            "HeloLaunched": {
+              "type": "object",
+              "properties": {
+                "target": {
+                  "description": "Target.",
+                  "$ref": "#/$defs/EntityId"
+                },
+                "unit": {
+                  "description": "Helicopter unit.",
+                  "$ref": "#/$defs/UnitId"
+                }
+              },
+              "required": [
+                "unit",
+                "target"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "HeloLaunched"
+          ]
+        },
+        {
+          "description": "A unit attempted a PIT manoeuvre (contact is resolved by physics).",
+          "type": "object",
+          "properties": {
+            "PitAttempt": {
+              "type": "object",
+              "properties": {
+                "target": {
+                  "description": "Target.",
+                  "$ref": "#/$defs/EntityId"
+                },
+                "unit": {
+                  "description": "Unit.",
+                  "$ref": "#/$defs/UnitId"
+                }
+              },
+              "required": [
+                "unit",
+                "target"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "PitAttempt"
+          ]
+        }
+      ]
+    },
+    "PolicePresence": {
+      "description": "Police presence requested for a race event (v0.3.0, race R2); `wp_police` maps it onto\nits dispatch tables.",
+      "oneOf": [
+        {
+          "description": "Police ignore the event (sanctioned, marshals on site).",
+          "type": "string",
+          "const": "None"
+        },
+        {
+          "description": "Normal patrol behaviour for the area and time.",
+          "type": "string",
+          "const": "Normal"
+        },
+        {
+          "description": "Elevated: extra patrols near the venue.",
+          "type": "string",
+          "const": "Elevated"
+        },
+        {
+          "description": "Maximum: illegal daytime races (`police_presence_override: max`).",
+          "type": "string",
+          "const": "Max"
+        }
+      ]
+    },
+    "PursuitOutcome": {
+      "description": "How a pursuit ended.",
+      "oneOf": [
+        {
+          "description": "No unit had line of sight for the escape time.",
+          "type": "string",
+          "const": "Escaped"
+        },
+        {
+          "description": "Quiet dwell inside a safehouse.",
+          "type": "string",
+          "const": "Safehouse"
+        },
+        {
+          "description": "Stopped next to a unit.",
+          "type": "string",
+          "const": "Captured"
+        },
+        {
+          "description": "The racer's car became a total loss while wanted.",
+          "type": "string",
+          "const": "CapturedTotalLoss"
+        },
+        {
+          "description": "Called off by the captain.",
+          "type": "string",
+          "const": "CalledOff"
+        }
+      ]
+    },
+    "RaceEvent": {
+      "description": "Everything `wp_race` tells the rest of the game (`SimEvent::Race`).",
+      "oneOf": [
+        {
+          "description": "The lobby for a scheduled event opened.",
+          "type": "object",
+          "properties": {
+            "LobbyOpened": {
+              "type": "object",
+              "properties": {
+                "event": {
+                  "description": "Event.",
+                  "$ref": "#/$defs/RaceEventId"
+                },
+                "kind": {
+                  "description": "Race kind.",
+                  "$ref": "#/$defs/RaceKind"
+                },
+                "legality": {
+                  "description": "Legality.",
+                  "$ref": "#/$defs/Legality"
+                },
+                "police": {
+                  "description": "Police presence for `wp_police`.",
+                  "$ref": "#/$defs/PolicePresence"
+                },
+                "pos": {
+                  "description": "Venue position, m.",
+                  "type": "array",
+                  "items": {
+                    "type": "number",
+                    "format": "float"
+                  },
+                  "maxItems": 3,
+                  "minItems": 3
+                },
+                "venue": {
+                  "description": "Venue.",
+                  "$ref": "#/$defs/VenueId"
+                }
+              },
+              "required": [
+                "event",
+                "venue",
+                "pos",
+                "kind",
+                "legality",
+                "police"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "LobbyOpened"
+          ]
+        },
+        {
+          "description": "Countdown started; green at `green_tick`.",
+          "type": "object",
+          "properties": {
+            "Countdown": {
+              "type": "object",
+              "properties": {
+                "event": {
+                  "description": "Event.",
+                  "$ref": "#/$defs/RaceEventId"
+                },
+                "green_tick": {
+                  "description": "Physics tick of the green light.",
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "event",
+                "green_tick"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Countdown"
+          ]
+        },
+        {
+          "description": "Green light.",
+          "type": "object",
+          "properties": {
+            "Green": {
+              "type": "object",
+              "properties": {
+                "event": {
+                  "description": "Event.",
+                  "$ref": "#/$defs/RaceEventId"
+                },
+                "tick": {
+                  "description": "Tick.",
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "event",
+                "tick"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Green"
+          ]
+        },
+        {
+          "description": "A racer passed a checkpoint gate.",
+          "type": "object",
+          "properties": {
+            "CheckpointPassed": {
+              "type": "object",
+              "properties": {
+                "event": {
+                  "description": "Event.",
+                  "$ref": "#/$defs/RaceEventId"
+                },
+                "gate": {
+                  "description": "Gate index.",
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                },
+                "lap": {
+                  "description": "Lap (1-based; 1 for point-to-point).",
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                },
+                "racer": {
+                  "description": "Racer.",
+                  "$ref": "#/$defs/EntityId"
+                },
+                "tick": {
+                  "description": "Tick of the sample after the crossing.",
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "event",
+                "racer",
+                "gate",
+                "lap",
+                "tick"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "CheckpointPassed"
+          ]
+        },
+        {
+          "description": "A racer completed a lap.",
+          "type": "object",
+          "properties": {
+            "LapCompleted": {
+              "type": "object",
+              "properties": {
+                "event": {
+                  "description": "Event.",
+                  "$ref": "#/$defs/RaceEventId"
+                },
+                "lap": {
+                  "description": "Laps completed so far.",
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                },
+                "lap_subticks": {
+                  "description": "Lap time, sub-ticks.",
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0
+                },
+                "racer": {
+                  "description": "Racer.",
+                  "$ref": "#/$defs/EntityId"
+                }
+              },
+              "required": [
+                "event",
+                "racer",
+                "lap",
+                "lap_subticks"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "LapCompleted"
+          ]
+        },
+        {
+          "description": "Outrun lead changed.",
+          "type": "object",
+          "properties": {
+            "LeadChanged": {
+              "type": "object",
+              "properties": {
+                "event": {
+                  "description": "Event.",
+                  "$ref": "#/$defs/RaceEventId"
+                },
+                "leader": {
+                  "description": "New leader.",
+                  "$ref": "#/$defs/EntityId"
+                }
+              },
+              "required": [
+                "event",
+                "leader"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "LeadChanged"
+          ]
+        },
+        {
+          "description": "A racer finished.",
+          "type": "object",
+          "properties": {
+            "RacerFinished": {
+              "type": "object",
+              "properties": {
+                "elapsed_subticks": {
+                  "description": "Elapsed, sub-ticks.",
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0
+                },
+                "event": {
+                  "description": "Event.",
+                  "$ref": "#/$defs/RaceEventId"
+                },
+                "racer": {
+                  "description": "Racer.",
+                  "$ref": "#/$defs/EntityId"
+                }
+              },
+              "required": [
+                "event",
+                "racer",
+                "elapsed_subticks"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "RacerFinished"
+          ]
+        },
+        {
+          "description": "A racer did not finish.",
+          "type": "object",
+          "properties": {
+            "RacerDnf": {
+              "type": "object",
+              "properties": {
+                "event": {
+                  "description": "Event.",
+                  "$ref": "#/$defs/RaceEventId"
+                },
+                "racer": {
+                  "description": "Racer.",
+                  "$ref": "#/$defs/EntityId"
+                },
+                "reason": {
+                  "description": "Why.",
+                  "$ref": "#/$defs/DnfReason"
+                }
+              },
+              "required": [
+                "event",
+                "racer",
+                "reason"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "RacerDnf"
+          ]
+        },
+        {
+          "description": "A racer was disqualified.",
+          "type": "object",
+          "properties": {
+            "RacerDq": {
+              "type": "object",
+              "properties": {
+                "event": {
+                  "description": "Event.",
+                  "$ref": "#/$defs/RaceEventId"
+                },
+                "racer": {
+                  "description": "Racer.",
+                  "$ref": "#/$defs/EntityId"
+                },
+                "reason": {
+                  "description": "Why.",
+                  "$ref": "#/$defs/DqReason"
+                }
+              },
+              "required": [
+                "event",
+                "racer",
+                "reason"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "RacerDq"
+          ]
+        },
+        {
+          "description": "Race over; final ranked results.",
+          "type": "object",
+          "properties": {
+            "RaceFinished": {
+              "type": "object",
+              "properties": {
+                "event": {
+                  "description": "Event.",
+                  "$ref": "#/$defs/RaceEventId"
+                },
+                "results": {
+                  "description": "Ranked results.",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/RaceResultRow"
+                  }
+                }
+              },
+              "required": [
+                "event",
+                "results"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "RaceFinished"
+          ]
+        },
+        {
+          "description": "Too many meets at one venue: a patrol should be sent.",
+          "type": "object",
+          "properties": {
+            "PatrolAttracted": {
+              "type": "object",
+              "properties": {
+                "heat": {
+                  "description": "Rolling meet heat at the venue.",
+                  "type": "number",
+                  "format": "float"
+                },
+                "pos": {
+                  "description": "Venue position, m.",
+                  "type": "array",
+                  "items": {
+                    "type": "number",
+                    "format": "float"
+                  },
+                  "maxItems": 3,
+                  "minItems": 3
+                },
+                "venue": {
+                  "description": "Venue.",
+                  "$ref": "#/$defs/VenueId"
+                }
+              },
+              "required": [
+                "venue",
+                "pos",
+                "heat"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "PatrolAttracted"
+          ]
+        },
+        {
+          "description": "Control of a city zone changed hands (`None` = nobody controls it any more).",
+          "type": "object",
+          "properties": {
+            "TerritoryChanged": {
+              "type": "object",
+              "properties": {
+                "crew": {
+                  "description": "New controller.",
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/CrewId"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "zone": {
+                  "description": "Zone (territory is per zone, not per district kind).",
+                  "$ref": "#/$defs/ZoneId"
+                }
+              },
+              "required": [
+                "zone"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "TerritoryChanged"
+          ]
+        }
+      ]
+    },
+    "RaceEventId": {
+      "description": "Identifier of a scheduled or ad-hoc race event (scheduler ids are `day * 1000 + n`).",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "RaceKind": {
+      "description": "What kind of race this is, with the parameters that change its rules.",
+      "oneOf": [
+        {
+          "description": "Point to point along a fixed corridor; first across the finish wins.",
+          "type": "string",
+          "const": "Sprint"
+        },
+        {
+          "description": "Closed loop; first to complete `laps` wins.",
+          "type": "object",
+          "properties": {
+            "Circuit": {
+              "type": "object",
+              "properties": {
+                "laps": {
+                  "description": "Laps to complete (≥ 1).",
+                  "type": "integer",
+                  "format": "uint8",
+                  "maximum": 255,
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "laps"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Circuit"
+          ]
+        },
+        {
+          "description": "1v1 gap race in open traffic: a lead of `lead_m` wins outright, else the leader at the\ntime limit.",
+          "type": "object",
+          "properties": {
+            "Outrun": {
+              "type": "object",
+              "properties": {
+                "lead_m": {
+                  "description": "Winning lead (straight-line gap), m.",
+                  "type": "number",
+                  "format": "float"
+                }
+              },
+              "required": [
+                "lead_m"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Outrun"
+          ]
+        },
+        {
+          "description": "Open route: pass every checkpoint in order by any path, within the time limit.",
+          "type": "string",
+          "const": "Checkpoint"
+        },
+        {
+          "description": "Cross-city point to point, any path, through heavy traffic.",
+          "type": "string",
+          "const": "Cannonball"
+        },
+        {
+          "description": "Point to point with cargo; cargo damage costs money, destroyed cargo is a DNF.",
+          "type": "object",
+          "properties": {
+            "Delivery": {
+              "type": "object",
+              "properties": {
+                "cargo_kg": {
+                  "description": "Cargo mass added to the car, kg.",
+                  "type": "number",
+                  "format": "float"
+                },
+                "cargo_value": {
+                  "description": "Cargo value, money units.",
+                  "type": "integer",
+                  "format": "int64"
+                }
+              },
+              "required": [
+                "cargo_kg",
+                "cargo_value"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Delivery"
+          ]
+        },
+        {
+          "description": "Straight-line pass from a standing start.",
+          "type": "string",
+          "const": "Drag"
+        },
+        {
+          "description": "Each racer on their own clock from the start gate; best elapsed time wins.",
+          "type": "string",
+          "const": "TimeAttack"
+        }
+      ]
+    },
+    "RaceResultRow": {
+      "description": "One racer's final result as replicated (the judge's `RacerResult` minus drag / violation\ndetail).",
+      "type": "object",
+      "properties": {
+        "best_lap_subticks": {
+          "description": "Best completed lap, sub-ticks (circuits).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "cargo_damage_cost": {
+          "description": "Money owed for cargo damage (delivery only).",
+          "type": "integer",
+          "format": "int64"
+        },
+        "civilian_hits": {
+          "description": "Contacts with civilians / traffic.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "clean": {
+          "description": "Clean race (no contacts, civilian hits or collision violations; finished).",
+          "type": "boolean"
+        },
+        "contacts": {
+          "description": "Contacts above the clean threshold.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "elapsed_subticks": {
+          "description": "Elapsed time, sub-ticks (1/1000 physics tick; finishers only).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "position": {
+          "description": "Final position, 1-based, unique.",
+          "type": "integer",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0
+        },
+        "racer": {
+          "description": "Racer vehicle.",
+          "$ref": "#/$defs/EntityId"
+        },
+        "status": {
+          "description": "Status.",
+          "$ref": "#/$defs/RacerStatus"
+        }
+      },
+      "required": [
+        "racer",
+        "position",
+        "status",
+        "clean",
+        "contacts",
+        "civilian_hits",
+        "cargo_damage_cost"
+      ]
+    },
+    "RaceType": {
+      "description": "Economy race type; keys `data/economy/stakes.toml [race_types.*]`.",
+      "oneOf": [
+        {
+          "description": "Point-to-point through traffic.",
+          "type": "string",
+          "const": "Sprint"
+        },
+        {
+          "description": "Laps of a closed-ish loop.",
+          "type": "string",
+          "const": "Circuit"
+        },
+        {
+          "description": "Quarter-mile.",
+          "type": "string",
+          "const": "Drag"
+        },
+        {
+          "description": "Mountain / hill road duel.",
+          "type": "string",
+          "const": "Touge"
+        },
+        {
+          "description": "Informal street meet sprint: free entry, small purse.",
+          "type": "string",
+          "const": "Meet"
+        }
+      ]
+    },
+    "RacerStatus": {
+      "description": "A racer's state in the race.",
+      "oneOf": [
+        {
+          "description": "Entered; race not over for them yet.",
+          "type": "string",
+          "const": "Running"
+        },
+        {
+          "description": "Crossed the finish (or won the outrun).",
+          "type": "string",
+          "const": "Finished"
+        },
+        {
+          "description": "Did not finish.",
+          "type": "object",
+          "properties": {
+            "Dnf": {
+              "$ref": "#/$defs/DnfReason"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Dnf"
+          ]
+        },
+        {
+          "description": "Disqualified.",
+          "type": "object",
+          "properties": {
+            "Dq": {
+              "$ref": "#/$defs/DqReason"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Dq"
+          ]
+        }
+      ]
+    },
+    "Result_of_null_or_CaptainError": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "Ok": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "Ok"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Err": {
+              "$ref": "#/$defs/CaptainError"
+            }
+          },
+          "required": [
+            "Err"
+          ]
+        }
+      ]
     },
     "Role": {
       "description": "Role a human player holds in an instance.",
@@ -749,76 +3058,101 @@
           ]
         },
         {
-          "description": "Police event with a payload defined by `wp_police` (opaque to everyone else).",
+          "description": "Police event (v0.3.0: typed; replaces `PoliceEvent { kind, payload }`).",
           "type": "object",
           "properties": {
-            "PoliceEvent": {
-              "type": "object",
-              "properties": {
-                "kind": {
-                  "description": "Payload kind discriminator, defined by `wp_police`.",
-                  "type": "integer",
-                  "format": "uint16",
-                  "maximum": 65535,
-                  "minimum": 0
-                },
-                "payload": {
-                  "description": "Encoded payload, defined by `wp_police`.",
-                  "type": "array",
-                  "items": {
-                    "type": "integer",
-                    "format": "uint8",
-                    "maximum": 255,
-                    "minimum": 0
-                  }
-                }
-              },
-              "required": [
-                "kind",
-                "payload"
-              ]
+            "Police": {
+              "$ref": "#/$defs/PoliceEvent"
             }
           },
           "additionalProperties": false,
           "required": [
-            "PoliceEvent"
+            "Police"
           ]
         },
         {
-          "description": "Economy event with a payload defined by `wp_economy` (opaque to everyone else).",
+          "description": "Economy event (v0.3.0: typed; replaces `EconomyEvent { kind, payload }`).",
           "type": "object",
           "properties": {
-            "EconomyEvent": {
+            "Economy": {
+              "$ref": "#/$defs/EconomyEvent"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Economy"
+          ]
+        },
+        {
+          "description": "Race event (v0.3.0).",
+          "type": "object",
+          "properties": {
+            "Race": {
+              "$ref": "#/$defs/RaceEvent"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Race"
+          ]
+        },
+        {
+          "description": "The weather regime changed (v0.3.0, weather W-2; audio, HUD, replays, stakes).",
+          "type": "object",
+          "properties": {
+            "WeatherChanged": {
               "type": "object",
               "properties": {
-                "kind": {
-                  "description": "Payload kind discriminator, defined by `wp_economy`.",
-                  "type": "integer",
-                  "format": "uint16",
-                  "maximum": 65535,
-                  "minimum": 0
+                "forced": {
+                  "description": "Forced by a scenario / admin rather than the schedule.",
+                  "type": "boolean"
                 },
-                "payload": {
-                  "description": "Encoded payload, defined by `wp_economy`.",
-                  "type": "array",
-                  "items": {
-                    "type": "integer",
-                    "format": "uint8",
-                    "maximum": 255,
-                    "minimum": 0
-                  }
+                "intensity": {
+                  "description": "Intensity 0..1.",
+                  "type": "number",
+                  "format": "float"
+                },
+                "kind": {
+                  "description": "New regime.",
+                  "$ref": "#/$defs/WeatherKind"
                 }
               },
               "required": [
                 "kind",
-                "payload"
+                "intensity",
+                "forced"
               ]
             }
           },
           "additionalProperties": false,
           "required": [
-            "EconomyEvent"
+            "WeatherChanged"
           ]
+        }
+      ]
+    },
+    "SiteError": {
+      "description": "Why a roadblock / spike site was rejected.",
+      "oneOf": [
+        {
+          "description": "No point on the predicted path satisfies the rules.",
+          "type": "string",
+          "const": "NoSite"
+        },
+        {
+          "description": "The requested road is not on the racer's predicted path in range.",
+          "type": "string",
+          "const": "NotOnPath"
+        },
+        {
+          "description": "Sight distance too short (blind corner).",
+          "type": "string",
+          "const": "BlindCorner"
+        },
+        {
+          "description": "Highway not allowed at this wanted level.",
+          "type": "string",
+          "const": "Highway"
         }
       ]
     },
@@ -864,6 +3198,92 @@
           "description": "Metal plates, rails, bridge joints.",
           "type": "string",
           "const": "Metal"
+        },
+        {
+          "description": "Painted lane markings and zebra crossings (v0.3.0, weather W-3; slippery when wet).\nTires without an entry use 1.0.",
+          "type": "string",
+          "const": "PaintedLine"
+        }
+      ]
+    },
+    "ToolId": {
+      "description": "Roadblock / spike strip id (allocated by `wp_police`).",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "TrafficAgentSnapshot": {
+      "description": "One kinematic traffic agent in a client's interest set (v0.3.0, world #6). Physical\n(promoted) agents replicate as ordinary vehicles; despawns are implicit (absent id).",
+      "type": "object",
+      "properties": {
+        "flags": {
+          "description": "Bit 0 brake lights, 1 hazards, 2 left signal, 3 right signal, 4 headlights,\n5 yielding to a siren.",
+          "type": "integer",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0
+        },
+        "id": {
+          "description": "`wp_world` agent id, stable for the agent's life.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "pos": {
+          "description": "Position, world m (`wp_net` may quantise on the wire).",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "float"
+          },
+          "maxItems": 3,
+          "minItems": 3
+        },
+        "speed_mps": {
+          "description": "Speed along the heading, m/s (client-side extrapolation).",
+          "type": "number",
+          "format": "float"
+        },
+        "variant": {
+          "description": "Visual variant (car model / colour).",
+          "type": "integer",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0
+        },
+        "yaw": {
+          "description": "Heading, rad (0 = +Y).",
+          "type": "number",
+          "format": "float"
+        }
+      },
+      "required": [
+        "id",
+        "pos",
+        "yaw",
+        "speed_mps",
+        "flags",
+        "variant"
+      ]
+    },
+    "UnitId": {
+      "description": "Police unit id (allocated by `wp_police`, never reused within an instance). Distinct from\n`EntityId`: a unit may exist before `wp_sim` gives it a vehicle body.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "UnitKind": {
+      "description": "Coarse police unit kind for events and views.",
+      "oneOf": [
+        {
+          "description": "Ground patrol car.",
+          "type": "string",
+          "const": "Car"
+        },
+        {
+          "description": "Helicopter (kinematic, never a weapon).",
+          "type": "string",
+          "const": "Helicopter"
         }
       ]
     },
@@ -969,6 +3389,12 @@
         "mode"
       ]
     },
+    "VenueId": {
+      "description": "A race venue: index of a `wp_world` POI of kind `RaceStartGrid` (or a scheduler-local\nvenue index when no city is loaded).",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
     "ViolationKind": {
       "description": "Kind of traffic violation detected by `wp_world`.",
       "oneOf": [
@@ -1015,6 +3441,124 @@
           "type": "string",
           "const": "Reckless"
         }
+      ]
+    },
+    "WantedLevel": {
+      "description": "Police wanted level of a racer, derived from heat by `wp_police` (v0.2.0: moved here from\n`wp_police` so economy, net and UI share it).",
+      "oneOf": [
+        {
+          "description": "Not wanted.",
+          "type": "string",
+          "const": "None"
+        },
+        {
+          "description": "Level 1.",
+          "type": "string",
+          "const": "L1"
+        },
+        {
+          "description": "Level 2.",
+          "type": "string",
+          "const": "L2"
+        },
+        {
+          "description": "Level 3.",
+          "type": "string",
+          "const": "L3"
+        },
+        {
+          "description": "Level 4.",
+          "type": "string",
+          "const": "L4"
+        },
+        {
+          "description": "Level 5.",
+          "type": "string",
+          "const": "L5"
+        }
+      ]
+    },
+    "WeatherKind": {
+      "description": "Weather regime.",
+      "oneOf": [
+        {
+          "description": "Clear skies.",
+          "type": "string",
+          "const": "Clear"
+        },
+        {
+          "description": "Cloud cover, no rain.",
+          "type": "string",
+          "const": "Overcast"
+        },
+        {
+          "description": "Drizzle to steady rain (≈ 0.5–2.5 mm/h).",
+          "type": "string",
+          "const": "LightRain"
+        },
+        {
+          "description": "Downpour (≈ 4–16 mm/h).",
+          "type": "string",
+          "const": "HeavyRain"
+        },
+        {
+          "description": "Fog (visibility ≈ 650–130 m).",
+          "type": "string",
+          "const": "Fog"
+        }
+      ]
+    },
+    "WeatherSnapshot": {
+      "description": "Low-rate weather state for clients (v0.3.0, weather W-5).",
+      "type": "object",
+      "properties": {
+        "blend": {
+          "description": "Blend 0 (prev) ..= 1 (current).",
+          "type": "number",
+          "format": "float"
+        },
+        "intensity": {
+          "description": "Current intensity 0..1.",
+          "type": "number",
+          "format": "float"
+        },
+        "kind": {
+          "description": "Current regime.",
+          "$ref": "#/$defs/WeatherKind"
+        },
+        "prev_intensity": {
+          "description": "Intensity being blended from.",
+          "type": "number",
+          "format": "float"
+        },
+        "prev_kind": {
+          "description": "Regime being blended from.",
+          "$ref": "#/$defs/WeatherKind"
+        },
+        "water_q8": {
+          "description": "Road water grid, quantised (`wp_weather` grid order, 1/8 mm per step).",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0
+          }
+        },
+        "wind_heading_rad": {
+          "description": "Wind heading, rad.",
+          "type": "number",
+          "format": "float"
+        }
+      },
+      "required": [
+        "kind",
+        "intensity",
+        "prev_kind",
+        "prev_intensity",
+        "blend",
+        "wind_heading_rad",
+        "water_q8"
       ]
     },
     "WheelState": {
@@ -1087,6 +3631,12 @@
         "contact",
         "detached"
       ]
+    },
+    "ZoneId": {
+      "description": "One zone (district polygon) of the loaded city: index into `wp_world`'s\n`RoadNetwork::zones`. Territory (crews) is per zone.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
     }
   }
 }

@@ -159,6 +159,11 @@
           "description": "Metal plates, rails, bridge joints.",
           "type": "string",
           "const": "Metal"
+        },
+        {
+          "description": "Painted lane markings and zebra crossings (v0.3.0, weather W-3; slippery when wet).\nTires without an entry use 1.0.",
+          "type": "string",
+          "const": "PaintedLine"
         }
       ]
     },

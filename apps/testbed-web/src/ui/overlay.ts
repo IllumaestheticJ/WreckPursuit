@@ -4,13 +4,16 @@
 //  - repair bill (F): the running car's wp_damage estimate priced by wp_economy (wasm
 //    repair_quote_json), with shop / district / option / insurance / wanted controls.
 //  - pursuit banner (centre): PURSUIT / SEARCHING / ESCAPED / CAPTURED from `police_status()`;
-//    a capture opens the repair bill, as does the end of a scripted scenario.
+//    a capture (or a total loss mid-chase) opens the repair bill, as does the end of a scripted
+//    scenario. The chase end comes from the kit's `ChaseEndDetector`: the typed
+//    `PoliceEvent::PursuitEnded` (outcome + level before the reset), else the status turning
+//    clear with `police_status().last_outcome`.
 // The kit's live model folds events with the same reducer as its mock provider, so these widgets
 // behave the same in the testbed and on the kit's demo page. This is the testbed's only police
 // readout (the old standalone heat panel was folded in here, round 6).
-import { billRequestJson, createLiveModel, mountOverlay, type LiveBillJson, type LiveModel } from "../../../ui-kit/src/live";
+import { billRequestJson, ChaseEndDetector, createLiveModel, mountOverlay, type ChaseEndInfo, type LiveBillJson, type LiveModel } from "../../../ui-kit/src/live";
 import type { SimEvent as KitSimEvent } from "../../../ui-kit/src/generated/contracts";
-import { bannerFor, isCapture, OUTCOME_BANNER_S, toReadout, type Banner, type PoliceStatus } from "../police";
+import { bannerFor, toReadout, type Banner, type PoliceStatus } from "../police";
 import { layers } from "../settings";
 import { sim, type SimEvent } from "../wasm/sim";
 
@@ -23,8 +26,9 @@ export class UiOverlay {
   /** The open bill was opened automatically (capture / scenario end), not by the user. */
   private billAuto = false;
   private bannerKey = "";
-  /** Tick the last pursuit ended on (so each outcome is acted on once). */
-  private outcomeTick = -1;
+  private readonly chaseEnd = new ChaseEndDetector();
+  /** The latest chase end this session (outcome and level before the reset), for e2e / debugging. */
+  lastChaseEnd: (ChaseEndInfo & { tick: number }) | null = null;
   /** Bill already shown automatically for this session's scripted end. */
   private endBillShown = false;
   /** Latest police status of the player (null = no police in this session). */
@@ -61,14 +65,13 @@ export class UiOverlay {
     const status = sim.policeStatus(player);
     this.status = status;
     this.showBanner(chase ? bannerFor(status) : null);
-    // A capture ends the run: show what the damage costs.
-    if (status?.last_outcome && status.outcome_age_s !== null) {
-      const endTick = tick - Math.round(status.outcome_age_s * 240);
-      if (Math.abs(endTick - this.outcomeTick) > 1) {
-        this.outcomeTick = endTick;
-        const fresh = status.outcome_age_s < OUTCOME_BANNER_S;
-        if (fresh && isCapture(status.last_outcome) && !this.billOpen) this.autoBill();
-      }
+    // A capture or a wreck ends the run: show what the damage costs. (An escape does not: the
+    // player is still driving.)
+    const fresh = status?.last_outcome && status.outcome_age_s !== null && status.outcome_age_s < 1 ? status.last_outcome : null;
+    const end = this.chaseEnd.update(player, status?.status, status?.level ?? "None", events as unknown as KitSimEvent[], fresh);
+    if (end) {
+      this.lastChaseEnd = { ...end, tick };
+      if ((end.how === "captured" || end.how === "wrecked") && !this.billOpen) this.autoBill();
     }
     this.model.push({
       tick,
@@ -96,7 +99,8 @@ export class UiOverlay {
    * (re-priced for the new car); one that popped up automatically closes. */
   reset(): void {
     this.model.reset();
-    this.outcomeTick = -1;
+    this.chaseEnd.reset();
+    this.lastChaseEnd = null;
     this.endBillShown = false;
     this.showBanner(null);
     if (this.billAuto) this.setBill(false);

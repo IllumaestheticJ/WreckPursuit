@@ -109,8 +109,8 @@ commands into economy calls / `ClientToServer` messages.
 
 | Run | Source | What it shows |
 |---|---|---|
-| `synthetic_pursuit` | `scripts/gen-synthetic.mjs` (hand-scripted, **not** sim output) | 90 s night race + pursuit: violations, L1→L5, PIT, spikes, roadblock, helicopter, escape, region damage, a bounty `EconomyEvent` (wp_police event shapes) |
-| `police_pursuit` | `npm run gen:police` (`tools/record-police`: E's real `PoliceSystem` + a scripted racer) | 240 s pursuit in E's police city: real `PoliceEvent`s, `captain.jsonl` (`CaptainView` at 0.5 Hz), the city as `map.json` |
+| `synthetic_pursuit` | `scripts/gen-synthetic.mjs` (hand-scripted, **not** sim output) | 90 s night race + pursuit: violations, L1→L5, PIT, spikes, roadblock, helicopter, escape, region damage, a bounty `EconomyEvent` (typed v0.3.0 events) |
+| `police_pursuit` | `npm run gen:police` (`tools/record-police`: E's real `PoliceSystem` + a scripted racer) | 240 s pursuit in E's police city: real typed `SimEvent::Police` events, `captain.jsonl` (`CaptainView` at 0.5 Hz), the city as `map.json` |
 | `golden_frontal_56kmh` | `simcli run` | real frontal crash: contact, component damage, failed lights, detached parts |
 | `golden_tbone` | `simcli run` | real side impact |
 | `city/procedural_12x12.map.json` | derived from `data/city/procedural_12x12.road.json` | roads (one polyline per road), zones, POIs |
@@ -130,14 +130,25 @@ npm run gen:types -- --skip-cargo # only the TypeScript step
 1. `tools/gen-runtime-schemas` (a standalone Rust crate with its own `[workspace]`, so neither the
    root workspace nor `wp_contracts` is touched) writes JSON Schemas for the runtime types the UI
    reads (`SimEvent`, `VehicleState`, `VehicleInput`, `AssistProfile`, `HandlingEffects`,
-   `RepairEstimate`, `Role`, `DamageMode`, `TimeOfDay`, `ServerToClient`, …) to `schemas/runtime/`.
+   `RepairEstimate`, `Role`, `DamageMode`, `TimeOfDay`, `ServerToClient`, `ClientToServer`, …) to
+   `schemas/runtime/`.
 2. `scripts/gen-types.mjs` merges those with the lead's data schemas (`../../schemas/*.json`),
    normalises draft 2020-12 tuples for json-schema-to-typescript, and writes one
    `src/generated/contracts.ts` (committed, so consumers do not need cargo).
 
-Police types are a hand mirror of `wp_police` in `src/model/police.ts` (the contract carries them
-as opaque JSON payloads until v0.3.0); `src/model/proposed.ts` keeps only the economy event mirror.
-Both are replaced by generated types when v0.3.0 lands.
+Since contract v0.3.0 police, economy and race events are typed (`SimEvent::Police(PoliceEvent)`,
+`SimEvent::Economy(EconomyEvent)`, `SimEvent::Race(RaceEvent)`) and so are captain commands
+(`ClientToServer::CaptainCommand(CaptainCommand)`, built with `captainMessage`); the reducers read
+them directly from the generated types. `src/model/police.ts` re-exports those and keeps a hand
+mirror only of `wp_police`'s captain view (`CaptainView`, not in the contract — UI-3).
+
+### Live hosts: chase end
+
+`src/live/chaseEnd.ts` `ChaseEndDetector.update(racer, status, level, events, freshOutcome?)`
+reports `{ how: "escaped" | "captured" | "wrecked" | "calledOff", outcome, level }` once per
+chase: from the typed `PursuitEnded` (outcome + level before the reset) when the host forwards
+events, else from the status turning clear (with the host's fresh `last_outcome`, if any) or a
+`TotalLoss` mid-chase. The testbed uses it to open the repair bill on a capture or wreck.
 
 ## Accessibility
 

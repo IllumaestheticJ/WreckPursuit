@@ -5,11 +5,10 @@
 // (`police_pursuit` is the recorded wp_police run; the simcli runs are crashes only).
 //
 // - Car motion is a simple kinematic drive along grid roads (not physics).
-// - Police events are real `wp_police::PoliceEvent` shapes (src/model/police.ts) in
-//   `SimEvent::PoliceEvent { kind, payload }`, payload = UTF-8 JSON, kind = wp_police::events::kind.
+// - Police events are contract v0.3.0 `SimEvent::Police(PoliceEvent)` (typed, no payload bytes).
 // - Damage uses the contract v0.2.0 `RegionDamaged` / `GlassShattered` variants;
 //   `TrafficViolation` carries `pos`.
-// - The economy event is a real `wp_economy::EconomyEvent` JSON payload.
+// - The economy event is a contract v0.3.0 `SimEvent::Economy(EconomyEvent)`.
 //
 //   node scripts/gen-synthetic.mjs
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -88,10 +87,7 @@ const posAt = (samples, t) => {
   const s = samples[Math.min(samples.length - 1, Math.round(t * TPS))];
   return [Math.round(s.x * 10) / 10, Math.round(s.y * 10) / 10, 0];
 };
-const bytes = (obj) => [...Buffer.from(JSON.stringify(obj), "utf8")];
-// wp_police::events::kind
-const KIND = { Radio: 1, WantedLevelChanged: 2, PursuitStarted: 3, PursuitEnded: 4, UnitSpawned: 5, UnitDespawned: 6, UnitDisabled: 7, RoadblockPlaced: 8, SpikesPlaced: 9, ToolRemoved: 10, SpikeHit: 11, HeloLaunched: 12, PitAttempt: 13 };
-const police = (t, payload) => at(t, { PoliceEvent: { kind: KIND[Object.keys(payload)[0]], payload: bytes(payload) } });
+const police = (t, ev) => at(t, { Police: ev });
 const radio = (t, unit, text) => police(t, { Radio: { unit, text } });
 const level = (t, l) => police(t, { WantedLevelChanged: { racer: PLAYER, level: l } });
 const spawn = (t, unit, kind, p) => police(t, { UnitSpawned: { unit, kind, pos: p, heading: [0, 1] } });
@@ -162,12 +158,12 @@ spawn(69.0, 8, "Car", off(posAt(player, 80), 4, 0));
 police(69.0, { RoadblockPlaced: { tool: 2, racer: PLAYER, pos: posAt(player, 80), sight_m: 150 } });
 radio(69.0, 7, "Unit 7 setting up roadblock on segment 88.");
 at(76.0, { ComponentDamaged: { vehicle: PLAYER, component: "Engine", health: 0.66 } });
-police(87.5, { PursuitEnded: { racer: PLAYER, outcome: "Escaped" } });
+police(87.5, { PursuitEnded: { racer: PLAYER, outcome: "Escaped", level: "L5", capturer: null, assists: [] } });
 level(87.5, "None");
 radio(87.6, null, "Dispatch: racer #1 lost. All units resume patrol.");
 police(88.0, { ToolRemoved: { tool: 2 } });
-const econ = { player: 1, seq: 42, day: 7, reason: "BountyGained", car: 1, cash_delta: 0, rep_delta: 120, bounty_delta: 2500, cop_xp_delta: 0, cash_after: 12850 };
-at(88.0, { EconomyEvent: { kind: 34, payload: bytes(econ) } });
+const econ = { account: 1, seq: 42, day: 7, reason: "BountyGained", car: 1, cash_delta: 0, rep_delta: 120, bounty_delta: 2500, cop_xp_delta: 0, cash_after: 12850 };
+at(88.0, { Economy: econ });
 events.sort((a, b) => a.tick - b.tick);
 
 // Player health follows the hits.
