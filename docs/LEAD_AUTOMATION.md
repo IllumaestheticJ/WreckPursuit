@@ -31,6 +31,7 @@ archive them).
 | O | 18 meta | `ws/meta` | `meta.md` |
 | P | 19 design docs | `ws/design-docs` | `design-docs.md` |
 | Q | 20 tuning dash | `ws/tuning-dash` | `tuning-dash.md` |
+| R | 21 car models & panels | `ws/panels` | `panels.md` |
 
 Lead helper sessions (title `WP Lead helper · <task>`) work on `lead/*` branches (e.g.
 `lead/contract-v0.3.0`, `lead/test-speed`); the lead merges them like `ws/*` branches.

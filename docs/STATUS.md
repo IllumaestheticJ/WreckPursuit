@@ -29,6 +29,7 @@ dashboard `ws/tuning-dash`).
 | O | 18 | Meta services | `ws/meta` | merged (run 3–4) | `apps/meta` accounts/matchmaking/leaderboards API | one flaky test under load (`twenty_bots_…` heartbeat) |
 | P | 19 | Design docs | `ws/design-docs` | merged run 3 | GDD, city zones, feature backlog (`docs/design/`) | — |
 | Q | 20 | Tuning dashboard | `ws/tuning-dash` | merged (run 3–4) | sweep runner + presets (`tools/tuning-dash`) | integration doc |
+| R | 21 | Car models & panels | `ws/panels` | started 2026-10-19 | — | per-panel meshes, hinged doors/hood/trunk swing, dangling bumpers |
 | Lead | 12 | Integration | `main` | — | Contacts → damage, debris, hull, static boxes, city loading; contract v0.2.0 | police units as sim vehicles, F's `wp_sim` hooks, physical traffic, v0.3.0 |
 
 ## What you can play right now

@@ -405,3 +405,7 @@ Lead changes in your area:
 
 Next: show the **repair bill** after a session / capture (G's economy is merged; ask for a `wasm` call if needed),
 and a visible "PURSUIT / SEARCHING / ESCAPED / CAPTURED" banner from `police_status()`.
+
+
+## Lead note (2026-10-19): new machine R (panels)
+Machine R (`ws/panels`, prompt 21) owns `crates/wp_damage/src/panels.rs` (hinged panel swing / unlatch / hang states), `data/panels/`, `tools/assets/` and `apps/testbed-web/src/render/`. Expect small hooks from R in your files; coordinate through `docs/integration/panels.md`.
