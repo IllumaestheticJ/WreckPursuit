@@ -16,6 +16,7 @@ members = [
     "tools/wasm-determinism",
     "tools/lint-determinism",
     "tools/bench",
+    "apps/testbed-native",
 ]
 
 [workspace.package]

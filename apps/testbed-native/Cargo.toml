@@ -1,0 +1,26 @@
+[package]
+name = "testbed-native"
+description = "Native testbed stub: window + car box + FFB out to an SDL2 wheel. Everything beyond a headless smoke run is behind cargo features so CI never needs it."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "testbed-native"
+path = "src/main.rs"
+
+[features]
+default = []
+# winit + softbuffer window with a top-down car box (no GPU needed).
+window = ["dep:winit", "dep:softbuffer"]
+# Constant-force FFB to the first SDL2 haptic device (needs libSDL2 at link time).
+ffb = ["dep:sdl2"]
+
+[dependencies]
+wp_contracts.workspace = true
+wp_sim.workspace = true
+wp_wasm = { path = "../../crates/wp_wasm" }
+winit = { version = "0.30", optional = true }
+softbuffer = { version = "0.4", optional = true }
+sdl2 = { version = "0.38", optional = true }

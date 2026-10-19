@@ -1,0 +1,180 @@
+// DOM/canvas HUD: speed, rpm bar, gear, mode + assist badges, perf, damage silhouette,
+// component health, region energy, input display with rack-torque bar, help overlay.
+import { T } from "./wasm/layout";
+import type { AssistProfile, DriverInput, VehicleInfo } from "./wasm/sim";
+import { layers, LAYERS } from "./settings";
+import { heat, healthColour } from "./vehicle_view";
+
+/** Region energy (J) shown as fully red in the silhouette / panel. */
+const ENERGY_RED = 5000;
+
+const el = (tag: string, cls: string, parent: HTMLElement, html = ""): HTMLElement => {
+  const e = document.createElement(tag);
+  e.className = cls;
+  e.innerHTML = html;
+  parent.appendChild(e);
+  return e;
+};
+
+const bar = (frac: number, colour: string, centred = false): string => {
+  const f = Math.max(-1, Math.min(1, frac));
+  if (centred) {
+    const left = f < 0 ? 50 + f * 50 : 50;
+    return `<span class="bar"><i style="left:${left}%;width:${Math.abs(f) * 50}%;background:${colour}"></i><b></b></span>`;
+  }
+  return `<span class="bar"><i style="width:${Math.max(0, f) * 100}%;background:${colour}"></i></span>`;
+};
+
+export interface HudFrame {
+  info: VehicleInfo | null;
+  tel: Float32Array | null;
+  input: DriverInput;
+  source: string;
+  assists: AssistProfile | null;
+  mode: string;
+  rack: number;
+  fps: number;
+  simMs: number;
+  renderMs: number;
+  tick: number;
+  hours: number;
+  hash: string;
+  vehicles: number;
+  replay: boolean;
+  recording: boolean;
+  energy: Float32Array | null;
+  regionsOfNodes: Uint8Array | null;
+  rest: Float32Array | null;
+  camera: string;
+}
+
+export class Hud {
+  private readonly main: HTMLElement;
+  private readonly comps: HTMLElement;
+  private readonly regions: HTMLElement;
+  private readonly inputs: HTMLElement;
+  private readonly help: HTMLElement;
+  private readonly silhouette: HTMLCanvasElement;
+
+  constructor(root: HTMLElement) {
+    const left = el("div", "left-col", root);
+    this.main = el("div", "panel hud-main", left);
+    const right = el("div", "right-col", root);
+    this.silhouette = document.createElement("canvas");
+    this.silhouette.width = 120;
+    this.silhouette.height = 220;
+    this.silhouette.className = "panel silhouette";
+    right.appendChild(this.silhouette);
+    this.comps = el("div", "panel comps", right);
+    this.regions = el("div", "panel regions", right);
+    this.inputs = el("div", "panel inputs", left);
+    this.help = el("div", "panel help hidden", root);
+    this.help.innerHTML =
+      `<b>WreckPursuit testbed — keys</b><br>` +
+      `W/S or ↑/↓ throttle/brake · A/D or ←/→ steer · Space handbrake · Shift/Ctrl gear up/down<br>` +
+      `R reset · O headlights · Q horn · 1 chase · 2 hood · 3 bumper · 4 orbit · 5 cinematic<br>` +
+      `F1 or ? this help · P pause · . frame step (replay) · [ / ] replay speed<br><br>` +
+      LAYERS.map((l) => `${l.key.replace("Key", "")} — ${l.label}`).join("<br>");
+  }
+
+  toggleHelp(): void {
+    this.help.classList.toggle("hidden");
+  }
+
+  update(f: HudFrame): void {
+    const t = f.tel;
+    const speed = t ? t[T.speed] * 3.6 : 0;
+    const rpm = t ? t[T.rpm] : 0;
+    const gear = t ? t[T.gear] : 0;
+    const redline = f.info?.redline_rpm ?? 7000;
+    const limit = f.info?.rev_limit_rpm ?? 7500;
+    const gearTxt = gear < 0 ? "R" : gear === 0 ? "N" : String(gear);
+    const a = f.assists;
+    const badge = (on: boolean, txt: string) => `<span class="badge ${on ? "on" : "off"}">${txt}</span>`;
+    const hh = Math.floor(f.hours);
+    const mm = Math.floor((f.hours - hh) * 60);
+    this.main.innerHTML =
+      `<div class="speed">${speed.toFixed(0)}<small> km/h</small> <span class="gear">${gearTxt}</span></div>` +
+      `<div>rpm ${rpm.toFixed(0)} ${bar(rpm / limit, rpm > redline ? "#ff4040" : "#40c0ff")}</div>` +
+      `<div>${badge(true, f.mode)}${f.replay ? badge(true, "REPLAY") : ""}${f.recording ? '<span class="badge rec">● REC</span>' : ""}</div>` +
+      (a
+        ? `<div>${badge(a.abs, "ABS")}${badge(a.tcs, "TCS")}${badge(a.esc, "ESC")}${badge(a.steer_speed_sensitivity > 0, "STEER")}` +
+          `${badge(a.countersteer_help > 0, "CSTR")}${badge(a.throttle_filter > 0, "THR-F")}${badge(a.auto_gears, "AUTO")}</div>`
+        : "") +
+      `<div class="dim">${f.fps.toFixed(0)} fps · sim ${f.simMs.toFixed(2)} ms · render ${f.renderMs.toFixed(2)} ms · ${f.vehicles} car(s)</div>` +
+      `<div class="dim">tick ${f.tick} · ${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")} · cam ${f.camera} · hash ${f.hash}</div>` +
+      `<div class="dim">health ${t ? (t[T.health] * 100).toFixed(0) : "–"}% · ${f.info?.display_name ?? ""} · F1 help</div>`;
+
+    this.drawSilhouette(f);
+
+    this.comps.style.display = layers.on("components") ? "" : "none";
+    if (layers.on("components") && t && f.info) {
+      const rows = f.info.components
+        .map((name, i) => ({ name, h: t[T.componentBase + i], mounted: f.info!.mounted_components.includes(name) }))
+        .filter((c) => c.mounted || c.h < 1);
+      this.comps.innerHTML =
+        `<b>components</b>` +
+        rows.map((c) => `<div>${c.name.padEnd(13, " ")}${bar(c.h, `#${healthColour(c.h).getHexString()}`)}</div>`).join("");
+    }
+
+    this.regions.style.display = layers.on("regions") ? "" : "none";
+    if (layers.on("regions") && f.energy && f.info) {
+      this.regions.innerHTML =
+        `<b>region energy (J, elastic proxy)</b>` +
+        f.info.regions
+          .map((r, i) => `<div>${r.padEnd(17, " ")}${f.energy![i].toFixed(0).padStart(6, " ")}</div>`)
+          .join("");
+    }
+
+    this.inputs.style.display = layers.on("inputs") ? "" : "none";
+    if (layers.on("inputs")) {
+      const i = f.input;
+      this.inputs.innerHTML =
+        `<b>input (${f.source})</b>` +
+        `<div>steer${bar(i.steer, "#7fdbff", true)}</div>` +
+        `<div>thr  ${bar(i.throttle, "#2ecc40")}</div>` +
+        `<div>brk  ${bar(i.brake, "#ff4136")}</div>` +
+        `<div>hbk  ${bar(i.handbrake, "#ff851b")}</div>` +
+        `<div>clt  ${bar(i.clutch, "#aaaaaa")}</div>` +
+        `<div title="Browser has no FFB: rack torque shown as a bar (±20 N·m)">rack${bar(f.rack / 20, "#f012be", true)} ${f.rack.toFixed(1)} N·m</div>`;
+    }
+  }
+
+  /** Top-down damage silhouette: each region's node bounding box coloured by its energy. */
+  private drawSilhouette(f: HudFrame): void {
+    const c = this.silhouette.getContext("2d")!;
+    c.clearRect(0, 0, this.silhouette.width, this.silhouette.height);
+    c.fillStyle = "rgba(0,0,0,0.55)";
+    c.fillRect(0, 0, this.silhouette.width, this.silhouette.height);
+    if (!f.rest || !f.regionsOfNodes || !f.info) return;
+    const [w, l] = f.info.body_size_m;
+    const sx = (this.silhouette.width - 20) / w;
+    const sy = (this.silhouette.height - 30) / l;
+    const s = Math.min(sx, sy);
+    const cx = this.silhouette.width / 2;
+    const cy = this.silhouette.height / 2 + 6;
+    const boxes = new Map<number, [number, number, number, number]>();
+    for (let n = 0; n < f.regionsOfNodes.length; n++) {
+      const r = f.regionsOfNodes[n];
+      const x = f.rest[n * 3];
+      const y = f.rest[n * 3 + 1];
+      const b = boxes.get(r) ?? [x, y, x, y];
+      boxes.set(r, [Math.min(b[0], x), Math.min(b[1], y), Math.max(b[2], x), Math.max(b[3], y)]);
+    }
+    c.font = "10px monospace";
+    c.fillStyle = "#ccc";
+    c.fillText("damage (top view)", 4, 11);
+    for (const [r, [x0, y0, x1, y1]] of boxes) {
+      const e = f.energy ? f.energy[r] : 0;
+      c.fillStyle = e > 1 ? `#${heat(e / ENERGY_RED).getHexString()}` : "#6a7078";
+      c.globalAlpha = e > 1 ? 0.85 : 0.35;
+      const pad = 0.12;
+      c.fillRect(cx + (x0 - pad) * s, cy - (y1 + pad) * s, (x1 - x0 + 2 * pad) * s, (y1 - y0 + 2 * pad) * s);
+    }
+    c.globalAlpha = 1;
+    c.strokeStyle = "#888";
+    c.strokeRect(cx - (w / 2) * s, cy - (l / 2) * s, w * s, l * s);
+    c.fillStyle = "#ffee88";
+    c.fillRect(cx - 6, cy - (l / 2) * s - 6, 12, 4); // nose marker
+  }
+}

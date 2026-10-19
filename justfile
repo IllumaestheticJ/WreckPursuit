@@ -19,6 +19,14 @@ wasm:
 web: wasm
     cd apps/testbed-web && npm run dev
 
+# Headless-Chromium end-to-end check of the testbed (drive, layers, replay after reload, scenarios).
+web-e2e: wasm
+    cd apps/testbed-web && npm run e2e
+
+# Native testbed stub window (add `--features window,ffb` manually for an SDL2 FFB wheel).
+native:
+    cargo run --release -p testbed-native --features window
+
 # Headless server (websocket on the given port, default 8080).
 server port="8080":
     cargo run -p wp_server --bin wp-server -- --port {{port}}

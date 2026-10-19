@@ -1,0 +1,27 @@
+// Two-car head-on: sedan from the origin heading +Y, coupe from 60 m ahead heading -Y, both
+// holding 50 km/h (testbed `cruise_kmh`; simcli only runs vehicle 1 with `inputs`).
+// `pending_expect` needs vehicle bodies + contacts + damage (prompts 02/03/12).
+(
+    name: "crash_head_on",
+    car: "debug_sedan",
+    mode: Arcade,
+    seed: 12,
+    duration_s: 6.0,
+    inputs: [
+        (t_s: 0.0, input: (throttle: 1.0)),
+    ],
+    cruise_kmh: Some(50.0),
+    others: [
+        (car: "debug_coupe", pos: (0.0, 60.0, 0.0), yaw: 3.14159265, cruise_kmh: Some(50.0)),
+    ],
+    expect: [
+        (metric: "max_speed_mps", min: 10.0, max: 60.0),
+        (metric: "final_health", min: 0.0, max: 1.0),
+    ],
+    pending_expect: [
+        (metric: "v1.distance_m", min: 20.0, max: 32.0),
+        (metric: "v2.distance_m", min: 20.0, max: 32.0),
+        (metric: "v1.final_health", min: 0.0, max: 0.8),
+        (metric: "v2.final_health", min: 0.0, max: 0.8),
+    ],
+)

@@ -1,0 +1,24 @@
+// Same frontal barrier test in Simulation mode: one hard hit at speed should be a total loss.
+// See barrier_frontal.ron for the meaning of the testbed extension fields.
+(
+    name: "crash_barrier_frontal_sim",
+    car: "debug_sedan",
+    mode: Simulation,
+    seed: 11,
+    duration_s: 7.0,
+    inputs: [
+        (t_s: 0.0, input: (throttle: 1.0)),
+    ],
+    cruise_kmh: Some(56.0),
+    barriers: [
+        (pos: (0.0, 45.0, 0.75), size: (8.0, 1.0, 1.5)),
+    ],
+    expect: [
+        (metric: "max_speed_mps", min: 10.0, max: 60.0),
+        (metric: "final_health", min: 0.0, max: 1.0),
+    ],
+    pending_expect: [
+        (metric: "final_speed_mps", min: -2.0, max: 2.0),
+        (metric: "min_health", min: 0.0, max: 0.2),
+    ],
+)
