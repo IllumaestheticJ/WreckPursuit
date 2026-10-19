@@ -3,7 +3,7 @@
 - **Workstream / prompt:** 15 — race types, event scheduler, crews & territory (machine L)
 - **Branch:** `ws/race`
 - **Crates / folders owned:** `crates/wp_race`, `data/events/`, `apps/simcli/scenarios/race/`
-- **Contract version built against:** 0.1.0 (codes toward the v0.2.0 plan; see requests)
+- **Contract version built against:** 0.2.0 (merged `main` 2026-10-19, lead run 3)
 
 Design write-up: `crates/wp_race/README.md`. Data: `data/events/README.md`.
 
@@ -83,14 +83,26 @@ Other entry points: `Course::{straight, closed, new, grid, marshal_spots, projec
 
 ## Contract change requests
 
+None of these landed in v0.2.0; the lead deferred the event payloads to v0.3.0 and asked for
+final variant lists. **R1 below is the final list for `RaceEvent`.**
+
 | # | Change (type / field / variant) | Why | Who is affected | Status |
 |---|---|---|---|---|
-| R1 | `SimEvent::Race(RaceEvent)` with `RaceEvent` = the `wp_race::RaceSignal` variants (`LobbyOpened`, `Countdown`, `Green`, `CheckpointPassed`, `LapCompleted`, `LeadChanged`, `RacerFinished`, `RacerDnf`, `RacerDq`, `RaceFinished { results: Vec<RaceResultRow> }`, `PatrolAttracted`, `TerritoryChanged`), plus the small types they need moved into contracts: `RaceEventId(u32)`, `RaceKind`, `Legality`, `ClassBracket`, `DnfReason`, `DqReason`, `RacerStatus`, `RaceResultRow { racer, position, status, elapsed_subticks, best_lap_subticks, clean, contacts, civilian_hits, cargo_damage_cost }` | economy, police, net and the renderer all react to race events; same bump as typed `PoliceEvent`/`EconomyEvent` | 07, 08, 06, 04, 10 | requested |
-| R2 | `PolicePresence { None, Normal, Elevated, Max }` in contracts | `police_presence_override: max` for illegal daytime races must reach `wp_police` | 06, 07 | requested |
-| R3 | `DistrictId(u32)` = zone index (joins deferred 08 #6) | territory is keyed by district | 05, 08, 06 | requested (wp_race uses a local `DistrictId`) |
-| R4 | Durable account id (accepted F NET-5) also used by crews/licences | crews outlive instances | 07, 08 | accepted upstream; wp_race uses a local `RacerAccount(u64)` until it lands |
-| R5 | `wp_economy::RaceType` keyed by the contract `RaceKind` (or `RacePayout` carries the purse from `wp_race::Stake`) | Outrun, Checkpoint, Cannonball, Delivery, TimeAttack have no economy type; legality is lost | 08 | requested |
-| R6 | `ClientToServer::RaceCommand { Enter { event }, Withdraw { event }, Ready }`, `ServerToClient::Race(RaceEvent)` (inside F's NET-1 message list) | lobby join/leave from clients | 07, 04 | requested |
+| R1 | `SimEvent::Race(RaceEvent)`. Final `RaceEvent` variants (= `wp_race::RaceSignal`): `LobbyOpened { event, venue, pos, kind, legality, police }`, `Countdown { event, green_tick }`, `Green { event, tick }`, `CheckpointPassed { event, racer, gate, lap, tick }`, `LapCompleted { event, racer, lap, lap_subticks }`, `LeadChanged { event, leader }`, `RacerFinished { event, racer, elapsed_subticks }`, `RacerDnf { event, racer, reason }`, `RacerDq { event, racer, reason }`, `RaceFinished { event, results: Vec<RaceResultRow> }`, `PatrolAttracted { venue, pos, heat }`, `TerritoryChanged { district, crew: Option<CrewId> }`. Types moved with it: `RaceEventId(u32)`, `VenueId(u32)`, `CrewId(u32)`, `RaceKind`, `Legality`, `DnfReason`, `DqReason`, `RacerStatus`, `RaceResultRow { racer, position, status, elapsed_subticks, best_lap_subticks, clean, contacts, civilian_hits, cargo_damage_cost }` (the full `RacerResult` minus drag/violation detail, which stays server-side) | economy, police, net and the renderer all react to race events | 07, 08, 06, 04, 10 | deferred to v0.3.0 (same batch as typed `PoliceEvent`/`EconomyEvent`); final list above |
+| R2 | `PolicePresence { None, Normal, Elevated, Max }` in contracts | `police_presence_override: max` for illegal daytime races must reach `wp_police` | 06, 07 | for v0.3.0, with E's typed `PoliceEvent` |
+| R3 | `DistrictId(u32)` = zone index | territory is keyed by district | 05, 08, 06 | deferred to v0.3.0 by the lead (with D, G); wp_race keeps a local `DistrictId` |
+| R4 | Durable account id (accepted F NET-5) also used by crews/licences | crews outlive instances | 07, 08 | accepted upstream, not in v0.2.0; wp_race keeps a local `RacerAccount(u64)` |
+| R5 | `wp_economy::RaceType` keyed by the contract `RaceKind` (or `RacePayout` carries the purse from `wp_race::Stake`) | Outrun, Checkpoint, Cannonball, Delivery, TimeAttack have no economy type; legality is lost | 08 | for v0.3.0 with typed `EconomyEvent` / `RacePayout` |
+| R6 | `ClientToServer::RaceCommand { Enter { event }, Withdraw { event }, Ready }`, `ServerToClient::Race(RaceEvent)` | lobby join/leave from clients | 07, 04 | for v0.3.0, inside F's full message set |
+
+### v0.2.0 follow-up (done on `ws/race`)
+- `SimEvent::TrafficViolation { .., pos }`: the lead patched the judge's match and the scripted
+  trace on `main`; merged.
+- `WantedLevel`: the economy bridge now takes `wp_contracts::WantedLevel` (no `wp_police` path).
+- Race goldens re-blessed: `main`'s street-tire grip change (`data/tires`, lateral D 0.96) and the
+  shared ground collider changed the two race scenarios' hashes from tick 960 on; every
+  race-judging test still passes unchanged (coupe wins the drag with the same reaction/shift
+  checks; the corridor cutter is still DQ'd).
 
 ## Changes outside my crates
 
@@ -98,7 +110,7 @@ Other entry points: `Course::{straight, closed, new, grid, marshal_spots, projec
 |---|---|---|
 | `Cargo.toml` (root) | `crates/wp_race` workspace member + `wp_race` workspace dependency | new crate |
 | `apps/simcli/scenarios/race/*.ron` | two new scenarios (simcli v2, no new fields) | scenario tests live there per `CLAUDE.md` |
-| `apps/simcli/golden/race_*/hashes.txt` | goldens for those scenarios (`[bless]` commit) | `goldens_match` requires one per scenario |
+| `apps/simcli/golden/race_*/hashes.txt` | goldens for those scenarios (`[bless]` commits; re-blessed for v0.2.0 physics) | `goldens_match` requires one per scenario |
 
 No edits to `wp_contracts`, `wp_world`, `wp_economy`, `wp_sim` or simcli code.
 

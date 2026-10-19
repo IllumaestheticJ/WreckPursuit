@@ -1136,7 +1136,7 @@ fn progression_gates() {
 
 #[test]
 fn economy_bridge_maps_results() {
-    use wp_economy::WantedLevel;
+    use wp_contracts::WantedLevel;
     let racers = [
         ScriptedRacer::new(1, 5.0, 40.0)
             .with(3.0, ScriptedIncident::Violation(ViolationKind::RedLight))
