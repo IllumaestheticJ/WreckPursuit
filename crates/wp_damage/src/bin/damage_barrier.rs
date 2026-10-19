@@ -124,6 +124,29 @@ fn detail(car_id: &str, mode_name: &str, kind: &str, speed: f32) {
             m.node_detached(*i)
         );
     }
+    println!("-- beams with the most plastic work");
+    let mut b: Vec<(f32, usize)> = (0..car.lattice.beams.len())
+        .map(|i| (m.beam_energy_j(i), i))
+        .collect();
+    b.sort_by(|x, y| y.0.total_cmp(&x.0));
+    for (e, i) in b.iter().take(15) {
+        let lb = &car.lattice.beams[*i];
+        let (na, nb) = (
+            &car.lattice.nodes[lb.a as usize],
+            &car.lattice.nodes[lb.b as usize],
+        );
+        println!(
+            "beam {i:4} {:.2} kJ {} {:.1e} m² {:?}{:?} -> {:?}{:?} broken {}",
+            e * 1e-3,
+            lb.material_id,
+            lb.area_m2,
+            na.region,
+            na.pos_m,
+            nb.region,
+            nb.pos_m,
+            m.beam_broken(*i)
+        );
+    }
     println!("-- plastic energy by region (kJ)");
     for reg in wp_damage::ALL_REGIONS {
         let e = m.region_plastic_energy_j(reg);

@@ -145,7 +145,8 @@ fn default_duration() -> f32 {
 pub struct BarrierResult {
     /// Closing speed, km/h.
     pub speed_kmh: f32,
-    /// Named metrics: `crush_m`, `health`, `damage` (1 - health), `cabin_intrusion_m`, `plastic_energy_kj`,
+    /// Named metrics: `crush_m` (along the impact normal), `structural_crush_m` (any
+    /// direction, see [`DamageModel::structural_crush_m`]), `health`, `damage` (1 - health), `cabin_intrusion_m`, `plastic_energy_kj`,
     /// `injected_energy_kj`, `broken_beams`, `detached_parts`, `failed_components`,
     /// `repair_total`, `power_scale`, `steer_ratio_scale`, `grip_min`, `camber_abs_max`,
     /// `toe_abs_max`, `total_loss` (0/1), `health:<Component>` / `intrusion:<Component>`
@@ -275,6 +276,7 @@ pub fn measure(
         metrics.insert(k.to_string(), v);
     };
     put("crush_m", m.max_displacement_along(kind.normal()));
+    put("structural_crush_m", m.structural_crush_m());
     put("health", m.health());
     put("damage", 1.0 - m.health());
     put("cabin_intrusion_m", m.cabin_intrusion_m());

@@ -582,3 +582,102 @@ fn every_body_profile_crashes_plausibly() {
         );
     }
 }
+
+#[test]
+fn car_to_car_contacts_split_the_energy() {
+    // The same impulse and closing speed against a static wall vs another car: each car's
+    // lattice gets half the energy against a car (dynamic_closing_share = 0.5).
+    let car = sedan();
+    let contact = |other_mass_kg: f32| ContactImpulse {
+        point_local_m: [0.0, 2.35, 0.5],
+        normal_local: [0.0, -1.0, 0.0],
+        impulse_ns: 10_000.0,
+        tangent_impulse_local_ns: [0.0; 3],
+        rel_speed_mps: 15.0,
+        other: (other_mass_kg > 0.0).then_some(wp_contracts::EntityId(9)),
+        other_mass_kg,
+    };
+    let injected = |other_mass_kg: f32| {
+        let mut m = DamageModel::new(&car.lattice, &car.materials);
+        let mut out = Vec::new();
+        m.apply_contacts(&[contact(other_mass_kg)], &sim_mode(), PHYSICS_DT, &mut out);
+        crate::ALL_REGIONS
+            .iter()
+            .map(|&r| m.region_injected_energy_j(r))
+            .sum::<f32>()
+    };
+    let wall = injected(0.0);
+    let car_hit = injected(1400.0);
+    assert!((wall - 0.5 * 10_000.0 * 15.0).abs() < 1.0, "{wall}");
+    assert!((car_hit - 0.5 * wall).abs() < 1.0, "{car_hit}");
+}
+
+#[test]
+fn structural_crush_ignores_cover_and_glass() {
+    let car = sedan();
+    let (m, r) = run_barrier(&car, &sim_mode(), ImpactKind::Frontal, 56.0, 0.0, 0.5, 1);
+    let s = m.structural_crush_m();
+    assert!(
+        s >= r.metrics["crush_m"] - 1e-6,
+        "any-direction >= along-normal"
+    );
+    assert!(
+        s < 1.2 * r.metrics["crush_m"] + 0.05,
+        "{s} vs {}",
+        r.metrics["crush_m"]
+    );
+}
+
+#[test]
+fn glass_and_region_events_are_emitted_once_per_threshold() {
+    let car = sedan();
+    let mut m = DamageModel::new(&car.lattice, &car.materials);
+    m.set_entity(wp_contracts::EntityId(5));
+    let mut lo = [f32::MAX; 3];
+    let mut hi = [f32::MIN; 3];
+    for n in &car.lattice.nodes {
+        for k in 0..3 {
+            lo[k] = lo[k].min(n.pos_m[k]);
+            hi[k] = hi[k].max(n.pos_m[k]);
+        }
+    }
+    let (c0, c1) =
+        crate::barrier::barrier_contacts(lo, hi, ImpactKind::Frontal, 70.0 / 3.6, 1400.0, 0.0);
+    let mut out = Vec::new();
+    m.apply_contacts(&c0, &sim_mode(), PHYSICS_DT, &mut out);
+    m.apply_contacts(&c1, &sim_mode(), PHYSICS_DT, &mut out);
+    for _ in 0..240 {
+        m.apply_contacts(&[], &sim_mode(), PHYSICS_DT, &mut out);
+    }
+    let mut glass = Vec::new();
+    let mut last: BTreeMap<BodyRegion, f32> = BTreeMap::new();
+    for e in &out {
+        match e {
+            SimEvent::GlassShattered { vehicle, region } => {
+                assert_eq!(*vehicle, wp_contracts::EntityId(5));
+                glass.push(*region);
+            }
+            SimEvent::RegionDamaged {
+                vehicle,
+                region,
+                severity,
+            } => {
+                assert_eq!(*vehicle, wp_contracts::EntityId(5));
+                assert!((0.0..=1.0).contains(severity));
+                let prev = last.insert(*region, *severity).unwrap_or(0.0);
+                assert!(
+                    *severity > prev,
+                    "{region:?} severity must rise between events"
+                );
+            }
+            _ => {}
+        }
+    }
+    let shattered: Vec<BodyRegion> = m.shattered_regions().iter().copied().collect();
+    let mut sorted = glass.clone();
+    sorted.sort();
+    assert_eq!(sorted, shattered, "one GlassShattered per shattered region");
+    assert!(!shattered.is_empty(), "a 70 km/h frontal breaks glass");
+    assert!(last.contains_key(&BodyRegion::FrontBumper), "{last:?}");
+    assert!(last.len() <= crate::REGION_COUNT);
+}

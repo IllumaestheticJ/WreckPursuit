@@ -302,6 +302,8 @@ pub struct DamageModel {
     pub(crate) region_plastic_j: [f32; REGION_COUNT],
     pub(crate) region_injected_j: [f32; REGION_COUNT],
     pub(crate) region_ref_j: [f32; REGION_COUNT],
+    /// Severity last reported in a `SimEvent::RegionDamaged`, per region.
+    pub(crate) region_event_severity: [f32; REGION_COUNT],
     pub(crate) shattered: BTreeSet<BodyRegion>,
     pub(crate) cracked: BTreeSet<BodyRegion>,
     pub(crate) wheel_lost: [bool; 4],
@@ -525,6 +527,7 @@ impl DamageModel {
             region_plastic_j: [0.0; REGION_COUNT],
             region_injected_j: [0.0; REGION_COUNT],
             region_ref_j,
+            region_event_severity: [0.0; REGION_COUNT],
             shattered: BTreeSet::new(),
             cracked: BTreeSet::new(),
             wheel_lost: [false; 4],
@@ -679,6 +682,21 @@ impl DamageModel {
         self.wheel_lost
     }
 
+    /// Plastic work absorbed by beam `i` (index into `LatticeDef::beams`), J.
+    pub fn beam_energy_j(&self, i: usize) -> f32 {
+        self.beams[i].energy_j
+    }
+
+    /// Accumulated plastic strain of beam `i` (stress heat-map input), dimensionless.
+    pub fn beam_plastic_strain(&self, i: usize) -> f32 {
+        self.beams[i].plastic_strain
+    }
+
+    /// Whether beam `i` is broken.
+    pub fn beam_broken(&self, i: usize) -> bool {
+        self.hot[i].broken
+    }
+
     /// Number of broken beams.
     pub fn broken_beam_count(&self) -> usize {
         self.hot.iter().filter(|b| b.broken).count()
@@ -728,6 +746,29 @@ impl DamageModel {
                 continue;
             }
             worst = worst.max(vec3::dot(vec3::sub(self.pos[i], self.rest_pos[i]), dir));
+        }
+        worst
+    }
+
+    /// Structural crush: the largest displacement (any direction) of an active node that is
+    /// not glass or bumper cover, m. Use this for crush-depth metrics: polymer cover nodes ride
+    /// back past the bumper beam and detached/shattered nodes freeze where they left, so a
+    /// max over *all* nodes overstates the deformation of the car's structure.
+    pub fn structural_crush_m(&self) -> f32 {
+        let mut worst: f32 = 0.0;
+        for i in 0..self.pos.len() {
+            if self.detached[i]
+                || matches!(
+                    self.node_region[i],
+                    BodyRegion::Windshield
+                        | BodyRegion::RearGlass
+                        | BodyRegion::FrontBumper
+                        | BodyRegion::RearBumper
+                )
+            {
+                continue;
+            }
+            worst = worst.max(vec3::length(vec3::sub(self.pos[i], self.rest_pos[i])));
         }
         worst
     }
@@ -919,11 +960,15 @@ impl DamageModel {
     }
 
     /// Shatter a glass region: break its glass beams and remove its nodes from the car.
-    fn shatter(&mut self, r: BodyRegion, _out: &mut Vec<SimEvent>) {
+    fn shatter(&mut self, r: BodyRegion, out: &mut Vec<SimEvent>) {
         if !self.shattered.insert(r) {
             return;
         }
         self.push_log(DamageLogKind::GlassShattered(r));
+        out.push(SimEvent::GlassShattered {
+            vehicle: self.entity,
+            region: r,
+        });
         for i in 0..self.pos.len() {
             if self.node_region[i] == r && !self.detached[i] {
                 self.detached[i] = true;
@@ -1139,6 +1184,23 @@ impl DamageModel {
         (toe.clamp(-0.2, 0.2), camber.clamp(-0.2, 0.2))
     }
 
+    /// `SimEvent::RegionDamaged` whenever a region's repair severity has risen by at least
+    /// `component_event_step` since its last report (thresholded, never every tick).
+    fn emit_region_events(&mut self, out: &mut Vec<SimEvent>) {
+        let step = self.tuning.component_event_step;
+        for (region, severity) in crate::repair::region_severities(self) {
+            let last = &mut self.region_event_severity[region as usize];
+            if severity - *last >= step || (severity >= 1.0 && *last < 1.0) {
+                *last = severity;
+                out.push(SimEvent::RegionDamaged {
+                    vehicle: self.entity,
+                    region,
+                    severity,
+                });
+            }
+        }
+    }
+
     fn update_health(&mut self, mode: &ModeTable, out: &mut Vec<SimEvent>) {
         let mut weighted = 0.0;
         for r in ALL_REGIONS {
@@ -1324,6 +1386,7 @@ impl DamageSim for DamageModel {
             if self.dirty {
                 self.update_components(mode, out);
                 self.update_health(mode, out);
+                self.emit_region_events(out);
                 if self.emit_lattice_events {
                     self.emit_lattice_deformed(out);
                 }
