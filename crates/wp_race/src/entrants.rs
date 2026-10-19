@@ -3,9 +3,10 @@
 //! `wp_opponent::Field` drives the cars (racing line, tactics, traffic and police awareness);
 //! the [`RaceJudge`] stays the only authority on results. This module is the glue:
 //!
-//! - one `Field` on the race's `wp_world` route, built from the same [`CityRace`] the judge
-//!   uses, with the AI's own civilian-contact DQ off (the judge's rules decide);
-//! - inputs are held (full brake) until the judge's green tick, so AI cars obey the countdown;
+//! - one `Field` on the race's `wp_world` route (extended [`AI_RUN_OFF_M`] past a
+//!   point-to-point finish so the cars drive through the gate), built from the same
+//!   [`CityRace`] the judge uses, with the AI's own civilian-contact DQ off (the judge's rules decide);
+//! - inputs are held (handbrake) until the judge's green tick, so AI cars obey the countdown;
 //! - `wp_opponent` outcomes the judge cannot see map onto judge DNFs: `Abandoned` (ran from
 //!   the police) → [`DnfReason::Fled`], `Retired` (too damaged) → [`DnfReason::Retired`].
 //!
@@ -26,9 +27,35 @@ use wp_opponent::{
 use wp_world::World;
 
 use crate::bridge::CityRace;
+use crate::course::v2;
 use crate::judge::{RaceJudge, RacePhase};
 use crate::kind::RaceKind;
 use crate::result::DnfReason;
+
+/// The AI corridor runs this far past a point-to-point finish line, m. `wp_opponent` parks
+/// at the end of its corridor; without run-off it would stop short of the judge's finish gate.
+pub const AI_RUN_OFF_M: f32 = 60.0;
+
+/// The race route extended [`AI_RUN_OFF_M`] past the finish (same start and heading), so AI
+/// cars drive through the finish gate. `None` for closed loops or when no such route exists.
+pub fn run_off_route(world: &World, route: &wp_world::Route) -> Option<wp_world::Route> {
+    if route.closed_loop || route.polyline.len() < 2 {
+        return None;
+    }
+    let p = &route.polyline;
+    let (a, b) = (p[0], p[1]);
+    let (y, z) = (p[p.len() - 2], p[p.len() - 1]);
+    let start_dir = v2::norm(v2::sub(v2::xy(b), v2::xy(a)));
+    let end_dir = v2::norm(v2::sub(v2::xy(z), v2::xy(y)));
+    let beyond = [
+        z[0] + end_dir[0] * AI_RUN_OFF_M,
+        z[1] + end_dir[1] * AI_RUN_OFF_M,
+        z[2],
+    ];
+    let ext = world.plan_route(a, Some(start_dir), beyond)?;
+    // Only accept an extension that really continues the race route.
+    (ext.length_m > route.length_m + 0.5 * AI_RUN_OFF_M).then_some(ext)
+}
 
 /// One AI racer to enter.
 #[derive(Debug, Clone, PartialEq)]
@@ -92,14 +119,17 @@ impl AiEntrants {
                 capability: e.capability,
             })
             .collect();
-        let field = Field::from_route(world, &race.route, &specs, config);
+        let ai_route = run_off_route(world, &race.route).unwrap_or_else(|| race.route.clone());
+        let field = Field::from_route(world, &ai_route, &specs, config);
         let hold = entrants
             .iter()
             .map(|e| {
                 (
                     e.racer,
+                    // Handbrake, not the brake pedal: auto-reverse turns a held brake at a
+                    // standstill into reverse throttle.
                     VehicleInput {
-                        brake: 1.0,
+                        handbrake: 1.0,
                         ..VehicleInput::default()
                     },
                 )
@@ -115,7 +145,7 @@ impl AiEntrants {
     }
 
     /// Inputs for every AI racer this tick, in entrant order. Before the judge's green tick
-    /// the cars are held on the brakes and the field does not run. `vehicles`: every sim
+    /// the cars are held on the handbrake and the field does not run. `vehicles`: every sim
     /// vehicle; `events`: the previous tick's sim events (contacts, police events).
     pub fn tick(
         &mut self,
