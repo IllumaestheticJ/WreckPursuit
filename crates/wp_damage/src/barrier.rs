@@ -29,7 +29,8 @@ pub enum ImpactKind {
     Frontal,
     /// 40 % overlap frontal on the left (driver) side.
     Offset,
-    /// Side impact centred on the left front door / A-pillar, 1.2 m wide (T-bone).
+    /// Side impact (T-bone) centred on the left front door / A-pillar: a 1.85 m wide,
+    /// floor-to-roof manifold like a striking car's hull gives in Rapier.
     Side,
     /// Full-width rear.
     Rear,
@@ -199,12 +200,23 @@ pub fn barrier_contacts(
             ImpactKind::Offset => {
                 points.extend((0..3).map(|i| [lo[0] + w * (0.05 + 0.15 * i as f32), hi[1], z]))
             }
-            ImpactKind::Side => {
-                let yc = cy + 0.15 * len;
-                points.extend((0..4).map(|i| [lo[0], yc + (-0.6 + 0.4 * i as f32), z]))
-            }
+            // Replaced below by the striker-hull manifold.
+            ImpactKind::Side => {}
             ImpactKind::Rear => {
                 points.extend((0..5).map(|i| [cx + w * (-0.4 + 0.2 * i as f32), lo[1], z]))
+            }
+        }
+    }
+    if kind == ImpactKind::Side {
+        // A striking car's convex hull against our side: Rapier reports the four corners of
+        // the overlap — the striker's width (≈ 1.85 m) from floor to near roof height.
+        // Centred like simcli's golden T-bone (contacts y −0.62…+1.23 on the sedan): front
+        // door and B-pillar, reaching the front wheel arch.
+        let yc = cy + 0.065 * len;
+        points.clear();
+        for z in [lo[2], lo[2] + 0.82 * (hi[2] - lo[2])] {
+            for y in [yc - 0.92, yc + 0.92] {
+                points.push([lo[0], y, z]);
             }
         }
     }
