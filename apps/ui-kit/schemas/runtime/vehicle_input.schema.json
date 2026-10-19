@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VehicleInput",
+  "description": "Driver input for one vehicle for one physics tick. Analog values are already deadzoned.",
+  "type": "object",
+  "properties": {
+    "brake": {
+      "description": "Brake pedal, 0..=1.",
+      "type": "number",
+      "format": "float",
+      "default": 0.0
+    },
+    "clutch": {
+      "description": "Clutch pedal, 0 (engaged) ..= 1 (fully disengaged). Ignored with `auto_clutch`.",
+      "type": "number",
+      "format": "float",
+      "default": 0.0
+    },
+    "gear_down": {
+      "description": "Shift down requested this tick (edge, not level).",
+      "type": "boolean",
+      "default": false
+    },
+    "gear_up": {
+      "description": "Shift up requested this tick (edge, not level).",
+      "type": "boolean",
+      "default": false
+    },
+    "handbrake": {
+      "description": "Handbrake lever, 0..=1.",
+      "type": "number",
+      "format": "float",
+      "default": 0.0
+    },
+    "headlights": {
+      "description": "Headlights on.",
+      "type": "boolean",
+      "default": false
+    },
+    "horn": {
+      "description": "Horn held.",
+      "type": "boolean",
+      "default": false
+    },
+    "siren": {
+      "description": "Siren on (police vehicles only; ignored otherwise).",
+      "type": "boolean",
+      "default": false
+    },
+    "steer": {
+      "description": "Steering, -1 (full left) ..= 1 (full right).",
+      "type": "number",
+      "format": "float",
+      "default": 0.0
+    },
+    "throttle": {
+      "description": "Throttle pedal, 0..=1.",
+      "type": "number",
+      "format": "float",
+      "default": 0.0
+    },
+    "tool_use": {
+      "description": "Role tool activation index (0 = none). Meaning defined by the role (e.g. police tools).",
+      "type": "integer",
+      "format": "uint8",
+      "default": 0,
+      "maximum": 255,
+      "minimum": 0
+    }
+  }
+}

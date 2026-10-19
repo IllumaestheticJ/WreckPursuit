@@ -403,6 +403,10 @@ impl WorldQuery for World {
     fn time_of_day(&self) -> TimeOfDay {
         self.clock.time
     }
+
+    fn line_of_sight(&self, a: [f32; 3], b: [f32; 3]) -> bool {
+        self.map.line_of_sight(a, b)
+    }
 }
 
 #[cfg(test)]

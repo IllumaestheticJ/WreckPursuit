@@ -62,7 +62,7 @@ export class SceneView {
   async loadCity(): Promise<number> {
     let files: string[] = [];
     try {
-      const r = await fetch("/data/city/index.json");
+      const r = await fetch("data/city/index.json");
       if (r.ok) files = await r.json();
     } catch {
       return 0;
@@ -70,7 +70,7 @@ export class SceneView {
     const loader = new GLTFLoader();
     for (const f of files) {
       try {
-        const gltf = await loader.loadAsync(`/data/city/${f}`);
+        const gltf = await loader.loadAsync(`data/city/${f}`);
         // glTF is +Y up, same as Three: add to the scene, not the Z-up world group.
         this.scene.add(gltf.scene);
       } catch (e) {

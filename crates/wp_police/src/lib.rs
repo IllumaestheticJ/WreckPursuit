@@ -337,7 +337,7 @@ impl PoliceSystem {
     fn process_events(&mut self, events: &[SimEvent]) {
         for ev in events {
             match ev {
-                SimEvent::TrafficViolation { vehicle, kind } => {
+                SimEvent::TrafficViolation { vehicle, kind, .. } => {
                     if self.racers.contains_key(vehicle) {
                         self.on_violation(*vehicle, kind);
                     }
@@ -737,6 +737,9 @@ mod tests {
             fn time_of_day(&self) -> wp_contracts::TimeOfDay {
                 wp_contracts::TimeOfDay::from_hours(12.0)
             }
+            fn line_of_sight(&self, _a: [f32; 3], _b: [f32; 3]) -> bool {
+                true
+            }
         }
         let mut p = PoliceSystem::new();
         let r = RacerView {
@@ -747,6 +750,7 @@ mod tests {
         let ev = vec![SimEvent::TrafficViolation {
             vehicle: EntityId(1),
             kind: wp_contracts::ViolationKind::Collision,
+            pos: [0.0; 3],
         }];
         let mut out = Vec::new();
         p.step(&W, &[r], &ev, wp_contracts::PHYSICS_DT, &mut out);
