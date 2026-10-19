@@ -62,6 +62,33 @@ the turbine multiplies by `stall_torque_ratio` at stall falling to 1:1 at the co
 The converter's stiffness is applied semi-implicitly on both engine and wheels (it is stiff in
 first gear). Idle in gear creeps at walking pace; TCS cuts throttle (no clutch to trim).
 
+**Power-on shifts (converter automatics):** a clutch gearbox cuts drive for `shift_time_s`. A
+car with a `torque_converter` shifts between forward gears clutch-to-clutch instead: over
+`shift_time_s` the effective ratio moves from the old gear to the new one (the inertia phase
+pulls the engine down), the lock-up clutch stays open and the converter carries the torque, so
+the car keeps pulling through every upshift (tested: min. acceleration through the 0–100 run
++1.05 m/s² vs −0.39 for the same car with a clutch). Shifts into neutral/reverse still cut
+drive. Roster effect on 0–100 (release): Wolfhound 6.55 → 5.55 s, Cruiser 8.36 → 7.82,
+Bastion 8.55 → 7.98, Hauler 8.98 → 8.09, Ironside 8.71 → 8.15; non-automatics unchanged.
+
+**Road conditions (weather hook):** `Vehicle::set_surface_conditions([SurfaceConditions; 4])`
+— per wheel `water_depth_mm`, `temperature_c` (road surface), `painted_line`. Default = dry,
+20 °C, no paint, which leaves grip bit-identical (tested). Model (`surface.rs`), multiplied onto
+the tire's dry `surface_multipliers[surface]`:
+- *Wet:* the tire's own `WetAsphalt/Asphalt` ratio, reached at 0.5 mm of water (a damp 0.15 mm
+  film already costs most of it), scaled per surface (metal 1.6×, curb 1.3×, grass 1.3×,
+  dirt 1.2×, concrete 1.1×, gravel 0.4×). Skipped if the surface already reads `WetAsphalt`
+  (no double counting with the interim `WithWeather` adapter).
+- *Cold / ice:* −0.6 %/°C below 7 °C (floor 0.9); a wet road between +1 and −1 °C turns to ice
+  (×0.15).
+- *Painted line:* ×0.95 dry, ×0.65 of the wet road when wet.
+- *Aquaplaning:* standing water ≥ 1 mm; onset ≈ 90 km/h for a 205 mm treaded tire in 3 mm,
+  `∝ √(3 mm/depth) · √(0.205 m/width)`, slicks (wet ratio < 0.6) at ≈ 58 km/h; fully planing at
+  1.3× onset, up to 85 % grip loss (stronger in deeper water). The aligning torque falls with
+  the lateral force, so the steering goes light. Per-wheel amount in `Telemetry::aquaplane`.
+Conditions are an input (not in snapshots): set them before each step. After contract
+v0.3.0 the lead fills them from `WorldQuery::weather_at` at each contact point.
+
 **On-demand AWD** (`DriveLayout::AwdOnDemand`): a coupling state 0..1 moves the rear share from
 `1 − base_front_split` to `max_rear_split`. It closes when the front axle's wheel speed out-runs
 the rear by `engage_slip` (fully at 2×) and pre-loads at launch (60% of throttle below 5 m/s);
@@ -141,7 +168,8 @@ cargo run --release -p wp_vehicle --example bench          # per-car cost
 
 `tests/metrics.rs` asserts the prompt-02 ranges; `tests/behaviour.rs` covers parked
 stability, determinism, torque steer, ABS, handbrake, assists-off driving, manual gearbox,
-rev limiter, every damage effect, FFB and surfaces. Scenarios live in
+rev limiter, every damage effect, FFB, surfaces, road conditions (wet, ice, aquaplaning) and
+converter power-on shifts. Scenarios live in
 `apps/simcli/scenarios/vehicle/*.ron`.
 
 ## Measured (release, this repo's cloud container)
@@ -160,8 +188,13 @@ rev limiter, every damage effect, FFB and surfaces. Scenarios live in
 
 | Cost | Value | Budget |
 |---|---|---|
-| Vehicle model per car | 4.1 µs/tick = **0.016 ms/frame** (4 ticks) | 0.15 ms/car/frame |
-| Vehicle + Rapier step, single car rig | 9.7 µs/tick = 0.039 ms/frame | — |
+| Vehicle model per car | 4.0–4.7 µs/tick = **0.016–0.019 ms/frame** (4 ticks) | 0.15 ms/car/frame |
+| Vehicle model, **24-car field** (whole roster cycled, varied inputs), dry | 4.6–5.2 µs/car/tick = **0.019–0.021 ms/car/frame**, 0.45–0.50 ms/frame for all 24 | 0.15 ms/car/frame (3.6 ms for 24) |
+| Same, wet road with 4 mm puddles, 4 °C, painted lines | 4.0–4.5 µs/car/tick = 0.016–0.018 ms/car/frame (no measurable weather cost) | — |
+| Vehicle + Rapier step, single car rig | 9.0–9.3 µs/tick = 0.037 ms/frame | — |
+
+`cargo run --release -p wp_vehicle --example bench` (cloud container, 3 runs, 2026-10-19). The
+24-car numbers are vehicle-only (flat-ground probe, no Rapier); about 8× under budget.
 
 Browser not measured yet (expect ~2×; budget 0.30 ms).
 
@@ -191,3 +224,7 @@ Browser not measured yet (expect ~2×; budget 0.30 ms).
   (`wear_rate` unused); no camber change with suspension travel.
 - AWD on-demand is front-biased only (couples the rear when the front slips).
 - `VehicleSim::step` (trait) cannot reach Rapier; `wp_sim` calls `step_with_ground`.
+- Road conditions are set by the caller (`set_surface_conditions`); nothing binds them to the
+  world's weather until contract v0.3.0. Tread depth is not modelled (treaded / slick is
+  inferred from the tire's wet ratio). Automatic shifts are a ratio blend, not a two-clutch
+  torque/inertia-phase model; no shift-time torque reduction.

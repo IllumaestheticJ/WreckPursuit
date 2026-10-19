@@ -805,7 +805,7 @@ impl Vehicle {
 
         // --- Contact frames ---------------------------------------------------------------
         let mut aquaplane = [0.0f32; 4];
-        for i in 0..4 {
+        for (i, planing_out) in aquaplane.iter_mut().enumerate() {
             let c = &self.corners[i];
             let w = &mut self.wheels[i];
             let (s, co) = sin_cos(w.steer);
@@ -826,7 +826,7 @@ impl Vehicle {
             let camber_grip = (1.0 - (camber.abs() - 0.03).max(0.0)).clamp(0.6, 1.0);
             let (cond_grip, planing) =
                 conditions_grip(&self.conditions[i], w.surface, w.vx, &c.wet);
-            aquaplane[i] = if w.contact { planing } else { 0.0 };
+            *planing_out = if w.contact { planing } else { 0.0 };
             w.grip = surface_grip(&c.tire, w.surface)
                 * cond_grip
                 * eff.grip_scale[i].max(0.0)
