@@ -67,7 +67,7 @@ reason = "RWD police package: low-lock spring-preloaded 2-way clutch LSD for wet
 [cars.sentinel_wolfhound]
 front = { type = "open" }
 rear = { type = "open" }
-centre = { type = "viscous", nm_per_rads = 150.0, max_nm = 1500.0 }
+centre = { type = "viscous", nm_per_rads = 600.0, max_nm = 3000.0 }
 reason = "AWD pursuit sedan: front-biased split with a viscous centre (sends torque rearward when the fronts slip), open axles + brake-based TC"
 
 [cars.sentinel_bastion]

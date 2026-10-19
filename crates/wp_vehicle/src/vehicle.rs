@@ -13,7 +13,7 @@ use wp_contracts::{
 use crate::aero::aero_forces;
 use crate::assists::{
     btc_rear_authority, esc, filter_pedal, BtcAxle, Tcs, BTC_MAX_FRAC, TCS_BRAKE_ACTIVE_NM,
-    TCS_SPLIT_ALLOW,
+    TCS_BRAKE_HANDOFF,
 };
 use crate::brakes::{service_torques, Abs};
 use crate::diff::{axle_transfer, centre_transfer, AxleDiff, CentreDiff, DiffInput, DiffSetup};
@@ -815,23 +815,30 @@ impl Vehicle {
             .map(|i| self.corners[i].tire.peak_slip_ratio)
             .unwrap_or(0.1);
         // TCS throttle cut watches the driven wheels in contact. While brake-based TC is
-        // braking the faster wheel of an axle (one wheel spinning alone on an open diff), that
-        // spin is left to the brakes: the throttle reacts to the slower wheel, or to the faster
-        // one once it is more than `TCS_SPLIT_ALLOW` × peak slip ahead (the brakes are not
-        // holding it).
+        // braking the faster wheel of an axle (one wheel spinning alone on an open diff) and
+        // has brake to spare, that spin is the brakes' job: the throttle reacts to the slower
+        // wheel. As brake-TC nears its limit, the faster wheel is blended back in.
         let mut driven_slip = 0.0f32;
-        for (l, r) in [(0usize, 1usize), (2, 3)] {
+        for (l, r, max_brake) in [
+            (0usize, 1usize, self.def.brakes.max_torque_front_nm),
+            (2, 3, self.def.brakes.max_torque_rear_nm),
+        ] {
             let k = |i: usize| {
                 (base_split[i] > 0.0 && self.wheels[i].contact).then_some(self.wheels[i].kappa)
             };
             let s = match (k(l), k(r)) {
                 (Some(a), Some(b)) => {
                     let fast = if a >= b { l } else { r };
-                    if assists.tcs && self.tcs.brake[fast] > TCS_BRAKE_ACTIVE_NM {
-                        a.min(b).max(a.max(b) - TCS_SPLIT_ALLOW * peak_slip)
+                    let held = self.tcs.brake[fast];
+                    // 0 = brakes holding the spin … 1 = brakes saturated / not acting.
+                    let w = if assists.tcs && held > TCS_BRAKE_ACTIVE_NM {
+                        let use_frac = held / (BTC_MAX_FRAC * max_brake).max(1.0);
+                        ((use_frac - TCS_BRAKE_HANDOFF) / (1.0 - TCS_BRAKE_HANDOFF)).clamp(0.0, 1.0)
                     } else {
-                        a.max(b)
-                    }
+                        1.0
+                    };
+                    let (lo, hi) = (a.min(b), a.max(b));
+                    lo + (hi - lo) * w
                 }
                 (Some(a), None) | (None, Some(a)) => a,
                 (None, None) => 0.0,
@@ -992,6 +999,7 @@ impl Vehicle {
             v_l: 0.0,
             v_r: 0.0,
             v_kin: 0.0,
+            ff: [0.0; 2],
             max_nm: 0.0,
             authority: 0.0,
         }; 2];
@@ -1020,6 +1028,10 @@ impl Vehicle {
                     v_l: v(l),
                     v_r: v(r),
                     v_kin: -yaw_rate * track * dir,
+                    ff: [l, r].map(|i| {
+                        let w = &self.wheels[i];
+                        ((w.drive - w.fx * w.r_eff) * dir).max(0.0)
+                    }),
                     max_nm: BTC_MAX_FRAC * max,
                     authority: if l >= 2 {
                         btc_rear_authority(v_fwd)
