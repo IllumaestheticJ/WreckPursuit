@@ -430,3 +430,12 @@ and a visible "PURSUIT / SEARCHING / ESCAPED / CAPTURED" banner from `police_sta
 - Request (lead / E): a test-only way to force a capture in a `wp_sim` session
   (e.g. `Sim::police_mut()` or a `PoliceSystem::set_heat` passthrough) so e2e can run the real
   capture path instead of a stub.
+- Checks (this container): fmt, clippy `-D warnings`, wasm32 build, `tsc`, `npm run e2e` 21/21
+  (city chase now waits on sim time: SwiftShader ran the city at ~0.3× real time and the old
+  fixed 5 s wait saw no violation), crash scenarios pass and match their goldens.
+  `cargo test --workspace`: simcli green (release), everything else 546 passed, **2 failed, both
+  already on the lead branch** (code identical, not in my crates) — lead / owners please look:
+  - `wp_economy` `tests/pursuit_wiring.rs:130` `real_police_capture_settles_through_the_economy`
+    ("level at capture, not after the reset");
+  - `wp_race` `tests/simcli_races.rs:28` `city_sprint_on_real_roads` (index out of bounds,
+    len 2 index 2 — probably counts sim vehicles now that city runs add police/traffic).
