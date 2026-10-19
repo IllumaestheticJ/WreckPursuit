@@ -426,9 +426,7 @@ impl PoliceSystem {
             let b = self.graph.node(s.b).pos;
             let centre = lerp2(a, b, t);
             let mut dir = normalize(sub(b, a));
-            let Some(dest) = self.random_node_in(Some(d)) else {
-                return None;
-            };
+            let dest = self.random_node_in(Some(d))?;
             // Face the way the first patrol route goes: a physical car turning around from
             // standstill runs over the kerb and into parked cars.
             if self.route_from(centre, dir, dest, None).1 {
