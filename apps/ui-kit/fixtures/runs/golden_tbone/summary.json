@@ -1,80 +1,100 @@
 {
   "name": "golden_tbone",
-  "contract_version": "0.1.0",
-  "hash_spec": 1,
+  "contract_version": "0.3.0",
+  "hash_spec": 3,
   "systems": "world,vehicle,damage,police,net",
   "seed": 104,
-  "ticks": 1440,
-  "final_hash": "079b3db716e76793",
+  "ticks": 960,
+  "final_hash": "88a8b009bc6ff501",
   "entities": [
     {
       "id": "victim",
       "entity": 1,
       "car": "debug_sedan",
-      "final_speed_mps": 1.4825542,
-      "max_speed_mps": 8.232753,
-      "distance_m": 30.537773,
-      "path_length_m": 32.69562,
-      "final_health": 0.8641349,
-      "max_lateral_g": 49.14729,
-      "max_long_g": 11.000193,
-      "max_yaw_rate_rps": 1.4090643,
-      "crush_depth_m": 0.09263726,
-      "components_failed": 0,
+      "final_speed_mps": 7.8596387,
+      "max_speed_mps": 8.449557,
+      "distance_m": 27.501194,
+      "path_length_m": 31.49128,
+      "final_health": 0.8421043,
+      "max_lateral_g": 50.680183,
+      "max_long_g": 19.545097,
+      "max_yaw_rate_rps": 3.0224855,
+      "crush_depth_m": 0.17797631,
+      "components_failed": 1,
       "parts_detached": 0,
       "wheels_detached": 0,
       "total_loss": false,
-      "min_z_m": -0.041039705
+      "min_z_m": -0.016052276,
+      "panels_unlatched": 0,
+      "panels_hanging": 0,
+      "max_panel_angle_rad": 0.0
     },
     {
       "id": "striker",
       "entity": 2,
       "car": "debug_coupe",
-      "final_speed_mps": 14.033342,
-      "max_speed_mps": 14.1279335,
-      "distance_m": 57.170677,
-      "path_length_m": 57.519867,
-      "final_health": 0.9017581,
-      "max_lateral_g": 10.907315,
-      "max_long_g": 45.856487,
-      "max_yaw_rate_rps": 1.4718987,
-      "crush_depth_m": 0.32972762,
+      "final_speed_mps": 13.382334,
+      "max_speed_mps": 13.898852,
+      "distance_m": 47.807915,
+      "path_length_m": 49.193592,
+      "final_health": 0.9635377,
+      "max_lateral_g": 20.045311,
+      "max_long_g": 46.555317,
+      "max_yaw_rate_rps": 1.8223959,
+      "crush_depth_m": 0.30887386,
       "components_failed": 0,
       "parts_detached": 0,
       "wheels_detached": 0,
       "total_loss": false,
-      "min_z_m": -0.01018101
+      "min_z_m": -0.007268995,
+      "panels_unlatched": 0,
+      "panels_hanging": 0,
+      "max_panel_angle_rad": 0.0
     }
   ],
-  "events_total": 15,
-  "max_events_per_tick": 4,
+  "events_total": 68,
+  "max_events_per_tick": 16,
   "net": {
-    "snapshots": 360,
-    "bytes": 860737
+    "snapshots": 240,
+    "bytes": 35206,
+    "deltas": 472,
+    "max_pos_err_m": 0.0049962997
+  },
+  "world": {
+    "city": "flat",
+    "traffic_agents_final": 0,
+    "traffic_agents_min": 0,
+    "traffic_moving_frac_final": 0.0,
+    "traffic_moving_frac_min": 0.0,
+    "civilian_collisions": 0,
+    "traffic_spawned": 0,
+    "traffic_stuck_recycled": 0,
+    "props": 0,
+    "static_boxes": 0,
+    "police_units_max": 0,
+    "police_units_final": 0
   },
   "warnings": [],
   "expectations": [
     {
-      "expect": "speed_at(entity:\"striker\",t_s:2.5,min:12.0,max:15.0)",
-      "actual": "13.026843",
+      "expect": "speed_at(entity:\"striker\",t_s:1.0,min:12.0,max:15.0)",
+      "actual": "13.745994",
       "passed": true
     },
     {
-      "expect": "speed_at(entity:\"victim\",t_s:2.5,min:7.0,max:9.0)",
-      "actual": "7.84251",
+      "expect": "speed_at(entity:\"victim\",t_s:1.0,min:7.0,max:9.0)",
+      "actual": "7.8422184",
       "passed": true
-    }
-  ],
-  "pending": [
+    },
     {
       "expect": "crush_depth(entity:\"victim\",min:0.15,max:0.6)",
-      "actual": "0.09263726",
-      "passed": false
+      "actual": "0.17797631",
+      "passed": true
     },
     {
       "expect": "components_failed(entity:\"victim\",min:1,max:20)",
-      "actual": "0",
-      "passed": false
+      "actual": "1",
+      "passed": true
     },
     {
       "expect": "total_loss(entity:\"victim\",expected:false)",
@@ -82,5 +102,6 @@
       "passed": true
     }
   ],
+  "pending": [],
   "failures": []
 }
