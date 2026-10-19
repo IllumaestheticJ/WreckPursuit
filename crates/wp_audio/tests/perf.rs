@@ -57,7 +57,7 @@ fn director_frame_cost_24_cars() {
                 entity: EntityId(i as u32 + 1),
                 car_id: ids[i % ids.len()],
                 state: s,
-                throttle: if (f / 30 + i as u64) % 2 == 0 {
+                throttle: if (f / 30 + i as u64).is_multiple_of(2) {
                     1.0
                 } else {
                     0.0

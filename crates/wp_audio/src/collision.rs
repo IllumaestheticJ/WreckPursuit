@@ -84,8 +84,8 @@ impl MaterialMap {
         let mut sum = [0.0f32; 3];
         let mut n = 0u32;
         for node in self.nodes.iter().filter(|x| x.region == region) {
-            for k in 0..3 {
-                sum[k] += node.pos[k];
+            for (acc, v) in sum.iter_mut().zip(node.pos) {
+                *acc += v;
             }
             n += 1;
         }

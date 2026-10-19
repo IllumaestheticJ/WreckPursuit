@@ -113,7 +113,7 @@ export class VoicePool {
   }
 
   private sampleUrl(pack: string, file: string): string {
-    return `/data/audio/packs/${pack}/${file}`;
+    return `data/audio/packs/${pack}/${file}`;
   }
 
   /** Fetch every recorded file referenced by a pack (none ship yet; synths cover them). */
