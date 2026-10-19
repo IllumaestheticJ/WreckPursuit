@@ -249,6 +249,8 @@ export const sim = {
   careerStartRun: (scenarioJson: string): number[] => Array.from(wasm.career_start_run(scenarioJson)),
   /** End the career run (back to the garage; one night passes). */
   careerEndRun: (): RunClose | null => JSON.parse(wasm.career_end_run()),
+  /** The bust settled on load because the game was closed during a pursuit (B05), once. */
+  careerTakeAbandoned: (): RunClose | null => JSON.parse(wasm.career_take_abandoned_json()),
   careerBuy: (defId: string, condition: string): CareerView => JSON.parse(wasm.career_buy_car(defId, condition)),
   careerFloorCar: (): CareerView => JSON.parse(wasm.career_floor_car()),
   careerSell: (uid: number): CareerView => JSON.parse(wasm.career_sell_car(uid)),
