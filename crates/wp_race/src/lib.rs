@@ -40,6 +40,7 @@ pub mod signals;
 pub mod stakes;
 pub mod territory;
 pub mod trace;
+mod trail;
 
 pub use course::{Course, Gate, GridLayout, GridSlot};
 pub use crew::{Challenge, ChallengeId, ChallengeOutcome, Crew, CrewCut, CrewRegistry};
