@@ -10,7 +10,6 @@ use wp_opponent::{
     CarCapability, CorridorOptions, DriverProfile, EventHeat, Field, GridLayout, NoPolice,
     OpposingLanes, PoliceQuery, RaceConfig, RacerSpec, SimPolice, SpeedLimit, Tactic, VehicleObs,
 };
-use wp_police::PoliceEventExt;
 use wp_sim::{Sim, SimConfig, VehicleKind};
 use wp_world::procgen::ProcGenConfig;
 use wp_world::{ActiveRoute, TrafficConfig, World, WorldConfig};
@@ -316,7 +315,7 @@ pub fn run(
         let t0 = std::time::Instant::now();
         for (t, pe) in &setup.inject {
             if sim.tick() == (t * 240.0) as u64 {
-                events.push(pe.to_sim_event());
+                events.push(SimEvent::Police(pe.clone()));
             }
         }
         heat.observe(&events);
@@ -349,11 +348,10 @@ pub fn run(
         }
         sim.step_fixed();
         events = sim.drain_events();
-        police_events.extend(
-            events
-                .iter()
-                .filter_map(wp_police::PoliceEvent::from_sim_event),
-        );
+        police_events.extend(events.iter().filter_map(|e| match e {
+            SimEvent::Police(pe) => Some(pe.clone()),
+            _ => None,
+        }));
         for e in &events {
             if matches!(e, SimEvent::TrafficViolation { .. }) {
                 violations += 1;
