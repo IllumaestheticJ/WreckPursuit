@@ -551,3 +551,34 @@ fn mode_tables_load_and_arcade_is_derived_from_sim() {
     assert_eq!(s.cabin_intrusion_total_loss_m, 0.25);
     assert_eq!(a.cabin_intrusion_total_loss_m, 0.5);
 }
+
+#[test]
+fn every_body_profile_crashes_plausibly() {
+    use crate::lattice_gen::{generate_lattice, BodyProfile, LatticeParams};
+    let base = sedan();
+    for profile in BodyProfile::ALL {
+        let mut p = LatticeParams::new("p", profile, [1.85, 4.7, 1.5], 2.75, 360.0);
+        p.car_mass_kg = 1450.0;
+        let mut car = base.clone();
+        car.lattice = generate_lattice(&p);
+        car.def.mass_kg = p.car_mass_kg;
+        let (_, front) = run_barrier(&car, &sim_mode(), ImpactKind::Frontal, 56.0, 0.0, 0.5, 1);
+        let crush = front.metrics["crush_m"];
+        assert!(front.contained, "{profile:?}");
+        assert!(
+            (0.3..=0.9).contains(&crush),
+            "{profile:?} 56 km/h crush {crush}"
+        );
+        assert!(front.metrics["total_loss"] > 0.5, "{profile:?}");
+        let (_, side) = run_barrier(&car, &sim_mode(), ImpactKind::Side, 40.0, 1450.0, 0.5, 1);
+        let intrusion = side.metrics["cabin_intrusion_m"];
+        assert!(
+            (0.05..=0.35).contains(&intrusion),
+            "{profile:?} side intrusion {intrusion}"
+        );
+        assert!(
+            side.failed.contains(&Component::SuspensionFL),
+            "{profile:?}"
+        );
+    }
+}
