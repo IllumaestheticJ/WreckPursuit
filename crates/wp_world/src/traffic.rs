@@ -693,8 +693,12 @@ impl Traffic {
     pub fn step_physics(&mut self, map: &CityMap, dt: f32, out: &mut Vec<SimEvent>) {
         let assists = AssistProfile::ai();
         for a in &mut self.agents {
+            // Agents with an entity have a rigid body in wp_sim, which steps them (lead, D #3).
+            if a.entity.is_some() {
+                continue;
+            }
             if let Some(pa) = a.physical.as_deref_mut() {
-                // Flat ground until wp_sim promotes agents into its Rapier scene (lead, D #3).
+                // Flat ground for agents the sim loop has not embodied.
                 let ground = wp_vehicle::FlatGround::default();
                 pa.vehicle.step(&pa.input, &assists, map, &ground, dt, out);
             }
