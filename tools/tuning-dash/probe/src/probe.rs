@@ -9,7 +9,9 @@ use serde_json::Value;
 use wp_contracts::DamageMode;
 use wp_damage::barrier::{self, ImpactKind};
 
+use crate::frames::{self, FrameCapture, Scenery, DEFAULT_FRAMES};
 use crate::overrides::{self, Applied, Overlay, Override};
+use crate::{pursuit, survival};
 
 /// A job file: everything one probe run needs.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -80,6 +82,41 @@ pub enum Probe {
     BarrierScenario {
         /// `.ron` file.
         file: PathBuf,
+    },
+    /// A simcli city scenario with the police tables read from the data root (so
+    /// `police:pursuit:…` overrides apply) and every police contact classified
+    /// ([`crate::pursuit`]). Scenario expectations are not evaluated; use sweep `expect`.
+    Pursuit {
+        /// `.ron` file.
+        file: PathBuf,
+        /// Struck cars below this speed count as stopped, m/s (default 1).
+        #[serde(default)]
+        stopped_mps: Option<f32>,
+    },
+    /// Repeated identical barrier-harness hits until total loss, plus the lowest single-hit
+    /// total-loss speed ([`crate::survival`]).
+    Survival {
+        /// Car id.
+        car: String,
+        /// Damage mode (`Arcade` | `Simulation`).
+        mode: DamageMode,
+        /// `Frontal` | `Offset` | `Side` | `Rear`.
+        impact: ImpactKind,
+        /// Hit speeds, km/h (default 25, 40, 56, 80).
+        #[serde(default)]
+        speeds_kmh: Option<Vec<f32>>,
+        /// Hit cap per speed (default 12).
+        #[serde(default)]
+        max_hits: Option<u32>,
+        /// Other body mass, kg (default: the car's own mass for `Side`, rigid barrier otherwise).
+        #[serde(default)]
+        other_mass_kg: Option<f32>,
+        /// Settling time after each hit, s (default 0.5).
+        #[serde(default)]
+        duration_s: Option<f32>,
+        /// Damage-model seed (default 1).
+        #[serde(default)]
+        seed: Option<u64>,
     },
 }
 
@@ -203,8 +240,32 @@ fn run_inner(job: &Job, root: &Path) -> Result<PointResult, String> {
                 record: job.out.is_some(),
                 ..Default::default()
             };
-            let out = simcli::run(&sc, &data, &opts).map_err(|e| e.to_string())?;
+            // With an output folder, also take top-down frames (crate::frames) from a hook.
+            let mut capture = None;
+            let mut scenery = None;
+            let out = if job.out.is_some() {
+                let mut c = FrameCapture::new(sc.ticks(), DEFAULT_FRAMES, car_sizes(&data, &sc));
+                let barriers = sc.barriers.clone();
+                let out = simcli::run::run_with_hook(&sc, &data, &opts, &mut |v| {
+                    if scenery.is_none() {
+                        scenery = Some(Scenery::from_sim(v.sim, true, &barriers));
+                    }
+                    c.on_tick(v.sim, v.events, v.names.len());
+                    Ok(())
+                });
+                capture = Some(c);
+                out
+            } else {
+                simcli::run(&sc, &data, &opts)
+            }
+            .map_err(|e| e.to_string())?;
             scenario_result(&mut res, &out);
+            if let (Some(dir), Some(c), Some(scenery)) = (&job.out, capture.as_mut(), &scenery) {
+                res.artifacts
+                    .extend(frames::write_frames(dir, &mut c.frames, scenery)?);
+                res.info
+                    .insert("frames".into(), Value::from(frames::frame_notes(&c.frames)));
+            }
             if let Some(dir) = &job.out {
                 let written =
                     simcli::output::write_outputs(dir, &out).map_err(|e| e.to_string())?;
@@ -383,8 +444,123 @@ fn run_inner(job: &Job, root: &Path) -> Result<PointResult, String> {
             );
             res.passed = Some(report.failures.is_empty());
         }
+        Probe::Pursuit { file, stopped_mps } => {
+            let sc = simcli::load_scenario(file).map_err(|e| e.to_string())?;
+            let mut sc_val = serde_json::to_value(&sc).map_err(|e| e.to_string())?;
+            res.applied = overrides::apply(&mut data, Some(&mut sc_val), &job.overrides)?;
+            let sc: simcli::Scenario = serde_json::from_value(sc_val)
+                .map_err(|e| format!("scenario after overrides: {e}"))?;
+            sc.validate()
+                .map_err(|e| format!("scenario after overrides: {e}"))?;
+            let mut run = pursuit::run(
+                &sc,
+                &data,
+                stopped_mps.unwrap_or(pursuit::DEFAULT_STOPPED_MPS),
+                job.out.is_some(),
+            )?;
+            res.metrics = std::mem::take(&mut run.metrics);
+            res.info = pursuit::info(&run);
+            res.thumb = std::mem::take(&mut run.thumb);
+            if let (Some(dir), Some((frames, scenery))) = (&job.out, run.frames.as_mut()) {
+                res.artifacts = frames::write_frames(dir, frames, scenery)?;
+                res.info
+                    .insert("frames".into(), Value::from(frames::frame_notes(frames)));
+            }
+        }
+        Probe::Survival {
+            car,
+            mode,
+            impact,
+            speeds_kmh,
+            max_hits,
+            other_mass_kg,
+            duration_s,
+            seed,
+        } => {
+            res.applied = overrides::apply(&mut data, None, &job.overrides)?;
+            let car = simcli::data::load_car(&data, car).map_err(|e| e.to_string())?;
+            let table = simcli::data::load_mode(&data, *mode).map_err(|e| e.to_string())?;
+            let imp = survival::Impact {
+                kind: *impact,
+                other_mass_kg: other_mass_kg.unwrap_or(if *impact == ImpactKind::Side {
+                    car.def.mass_kg
+                } else {
+                    0.0
+                }),
+                duration_s: duration_s.unwrap_or(0.5),
+                seed: seed.unwrap_or(1),
+            };
+            let speeds = speeds_kmh
+                .clone()
+                .unwrap_or(DEFAULT_SURVIVAL_SPEEDS_KMH.to_vec());
+            let cap = max_hits.unwrap_or(survival::DEFAULT_MAX_HITS);
+            let mut series = Series {
+                x_name: "speed_kmh".into(),
+                x: speeds.iter().map(|&s| s as f64).collect(),
+                y: BTreeMap::new(),
+            };
+            let mut per_speed = serde_json::Map::new();
+            for &speed in &speeds {
+                let h = survival::hits_to_total_loss(&car, &table, &imp, speed, cap);
+                let at = fmt_speed(speed);
+                let hits = h.hits_to_total_loss.map(|n| n as f64);
+                let h1 = h.health.first().map(|&x| x as f64);
+                let f1 = h.failed.first().map(|&x| x as f64);
+                res.metrics.insert(format!("hits_to_total_loss@{at}"), hits);
+                res.metrics.insert(format!("health_after_1@{at}"), h1);
+                res.metrics.insert(format!("failed_after_1@{at}"), f1);
+                res.metrics.insert(
+                    format!("survives_cap@{at}"),
+                    Some(if hits.is_none() { 1.0 } else { 0.0 }),
+                );
+                series
+                    .y
+                    .entry("hits_to_total_loss".into())
+                    .or_default()
+                    .push(hits);
+                series
+                    .y
+                    .entry("health_after_1".into())
+                    .or_default()
+                    .push(h1);
+                series
+                    .y
+                    .entry("failed_after_1".into())
+                    .or_default()
+                    .push(f1);
+                per_speed.insert(
+                    at,
+                    serde_json::json!({"health": h.health, "failed": h.failed}),
+                );
+            }
+            res.metrics.insert(
+                "total_loss_speed_kmh".into(),
+                survival::single_hit_total_loss_kmh(&car, &table, &imp).map(|v| v as f64),
+            );
+            res.info.insert("per_hit".into(), Value::Object(per_speed));
+            res.info.insert("max_hits".into(), Value::from(cap));
+            res.info
+                .insert("class".into(), Value::from(format!("{:?}", car.def.class)));
+            res.series = Some(series);
+        }
     }
     Ok(res)
+}
+
+/// Default survival-probe speeds, km/h.
+pub const DEFAULT_SURVIVAL_SPEEDS_KMH: [f32; 4] = [25.0, 40.0, 56.0, 80.0];
+
+/// `[width, length]` of every car a scenario run can show (its own cars, police, traffic).
+fn car_sizes(data: &Overlay, sc: &simcli::Scenario) -> BTreeMap<String, [f32; 2]> {
+    let mut ids: Vec<&str> = sc.entities.iter().map(|e| e.car.as_str()).collect();
+    ids.extend([simcli::run::POLICE_CAR, simcli::run::TRAFFIC_CAR]);
+    let mut out = BTreeMap::new();
+    for id in ids {
+        if let Ok(c) = simcli::data::load_car(data, id) {
+            out.insert(id.to_string(), [c.def.body_size_m[0], c.def.body_size_m[1]]);
+        }
+    }
+    out
 }
 
 /// `56` for 56.0, `12.5` for 12.5.

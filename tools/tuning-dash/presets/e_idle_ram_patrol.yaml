@@ -1,0 +1,21 @@
+# Study for workstream 07 (E, police), round 6b: physical AI police cars drive into stopped cars
+# (soak/traffic_soak_observer with police_cars: true; E is adding obstacle awareness). Which
+# patrol driving values change how often and how hard units hit a stopped car (the parked
+# observer and stopped traffic), before any avoidance exists? Three seeds per point because
+# hits are rare events. Police tables come from data/police/*.toml via the `pursuit` probe
+# (simcli itself uses the copy compiled into wp_police). E's data is not changed.
+description: Police patrol speed × braking vs hits on stopped cars (observer soak, police cars on, 3 seeds)
+probe:
+  kind: pursuit
+  file: apps/simcli/scenarios/soak/traffic_soak_observer.ron
+overrides:
+  - {target: "scenario:police_cars", value: true}
+params:
+  - {target: "police:pursuit:patrol_speed_factor", label: patrol_speed, values: [0.6, 0.8, 1.0]}
+  - {target: "police:pursuit:unit.brake_mps2", label: brake_mps2, values: [4.5, 6.5, 9.0]}
+  - {target: "scenario:seed", label: seed, values: [5, 6, 7]}
+expect:
+  - {metric: hits_stopped_scenario, min: 0, max: 0}
+  - {metric: hits_stopped_traffic, min: 0, max: 0}
+workers: 4
+plots: [hits_stopped_scenario, hits_stopped_traffic, max_closing_stopped_mps, hits_police_police, observer.final_health]

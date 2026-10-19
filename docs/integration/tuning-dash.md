@@ -18,7 +18,14 @@
 - Presets: `tire_lateral_bcde`, `tire_longitudinal_bcde`, `spring_damper`, `arb_balance`,
   `impulse_to_lattice_scale`, `plasticity_scale`, `barrier_speeds`, `compare_sedan_coupe`,
   `damage_scenarios_plasticity`, `sedan_brakes`, `drivetrain_options` (v0.2.0 optional fields),
-  `b_crush_arcade_table`, `b_crush_arcade_plasticity`, `b_crush_side_lattice` (crash-target study for B).
+  `b_crush_arcade_table`, `b_crush_arcade_plasticity`, `b_crush_side_lattice` (crash-target study for B),
+  `e_idle_ram_patrol`, `e_pursuit_aggression` (police studies for E, round 6b),
+  `mode_hits_to_total_loss`, `b_arcade_total_loss_health` (mode semantics, round 6b).
+- Probe kinds (round 6b): `pursuit` (city scenario with `data/police/*.toml` from the data root,
+  targets `police:pursuit:…`; police contacts grouped into hits; same final hash as `simcli run`)
+  and `survival` (repeated barrier-harness hits to total loss + single-hit total-loss speed).
+- Top-down SVG frames for `scenario` / `pursuit` points (`points/pNNNN/frames/fNN.svg`: first
+  hard contact + 4 evenly spaced); the dashboard thumbnails and point detail use them.
 
 ## Needs
 | from | what | why | workaround |
@@ -26,7 +33,8 @@
 | 03 (B, damage) | `barrier::run_scenario_with(&BarrierScenario, &LoadedCar, &ModeTable)` (or `run_scenario` over a `simcli::DataSource`) | the probe applies overrides in memory; `run_scenario` only reads a data root on disk | `barrier_scenario` points copy cars/tires/lattices/materials/modes to a scratch folder (~ms) |
 | 03 (B) | `DamageTuning` fields loadable from data (optional) | solver/buckle constants cannot be swept today | none; sweep `ModeTable`, materials and lattices instead |
 | 10 (I, harness/CI) | run `python3 -m unittest discover -s tools/tuning-dash/tests` in CI (needs PyYAML) | the Python side is not covered by `cargo test` | `cargo test --workspace` covers the Rust probe; run `just tune-test` locally |
-| 04 (C, testbed) | open a `replay.bin` by URL/path (`?replay=…`) | the dashboard links each scenario point's replay; a click-through would replace thumbnails | top-down path thumbnails from `metrics.csv` |
+| 04 (C, testbed) | open a `replay.bin` by URL/path (`?replay=…`) | the dashboard links each scenario point's replay; a click-through would give a rendered view | top-down SVG frames drawn from the sim state (round 6b) |
+| 10 (I, harness) or lead (simcli) | `simcli::run` takes the police tables from its `DataSource` (`police/*.toml`, falling back to `PoliceConfig::builtin()`), or a `RunOptions::police_config` | then the `pursuit` probe could use `simcli::run` instead of its own copy of the tick loop | the probe re-implements the loop; a unit test pins it to `simcli::run`'s final hash |
 
 ## Contract change requests
 None. Everything goes through existing public APIs (`wp_contracts::parse_*`, `simcli`
@@ -39,7 +47,8 @@ None. Everything goes through existing public APIs (`wp_contracts::parse_*`, `si
 - `Cargo.toml` (root): `tools/tuning-dash/probe` added to workspace members (`Cargo.lock`
   updated; no new external dependencies — serde, serde_json, toml, ron are workspace deps).
 - `justfile`: recipes `tune`, `tune-dash`, `tune-test`.
-- Nothing reachable from `wp_wasm` (the probe is a leaf tool crate).
+- Nothing reachable from `wp_wasm` (the probe is a leaf tool crate). Round 6b: `tuning-probe`
+  now also depends on `wp_sim` and `wp_police` (workspace crates; `Cargo.lock` updated).
 
 ## Perf numbers
 | Measurement | Machine | Native | Browser | Budget |
@@ -47,6 +56,10 @@ None. Everything goes through existing public APIs (`wp_contracts::parse_*`, `si
 | `vehicle_metrics` point (all but top speed) | cloud container, 4 cores | 0.3 s | — | — |
 | `barrier` point, 5 speeds | cloud container | 0.1 s | — | — |
 | `tire_lateral_bcde`, 40 points, 4 workers | cloud container | 2.7 s | — | — |
+| `pursuit` point, 60 s observer soak (400 traffic agents, 13–18 police cars) | cloud container | 12 s | — | — |
+| `e_idle_ram_patrol`, 27 points, 4 workers | cloud container | 2 min 43 s | — | — |
+| `e_pursuit_aggression`, 36 points, 4 workers | cloud container | 1 min 16 s | — | — |
+| `mode_hits_to_total_loss`, 64 points, 4 workers | cloud container | 10.9 s | — | — |
 
 ## Findings from the presets (for the owners; not changed here)
 - **02 vehicle / skidpad metric** (re-measured on `main` after run 3; the `wp_vehicle`
@@ -192,7 +205,7 @@ both `arcade.toml` lines and the changelog line), but that is B's call and B's c
 change → `[bless]`).
 
 ## Known gaps
-See `tools/tuning-dash/README.md` → Known gaps (thumbnails are paths, not frames;
+See `tools/tuning-dash/README.md` → Known gaps (frames are drawn from the sim state, not testbed renders;
 `DamageTuning` is code; promote does not commit — owners commit data changes with `[bless]`).
 
 ## Lead feedback
@@ -219,3 +232,188 @@ Contract **v0.3.0** is being applied in parallel by the lead (branch `lead/contr
 1. Pursuit tuning sweep: police aggression / ram parameters vs "police ram a stopped car" (the observer soak issue E is fixing). Report which parameter ranges keep pursuits physical without wrecking idle cars. Findings go to E; don't change their data.
 2. Damage mode sweep: Arcade vs Simulation, total-loss speed per car class. Report hits-to-total-loss per mode against the CLAUDE.md mode semantics.
 3. Thumbnails as frames (known gap), if cheap.
+
+## Round 6b (machine Q): done
+
+All three head-start items are done. Merged `origin/main` and `origin/claude/laughing-newton-0xqr6q`
+(clean). No other workstream's data or code was changed; everything below is a finding for its
+owner. Reproduce any table with `tools/tuning-dash/tune.py sweep <preset>` and look at it with
+`tune.py serve`.
+
+### 1. Police ramming stopped cars: patrol and pursuit values (for E, 07)
+
+**New tooling.** simcli builds police from the tables compiled into `wp_police`, so the probe
+could not sweep `data/police/*.toml` through it. The new `pursuit` probe builds the sim with
+`simcli::run::build_sim`, installs a `PoliceSystem` made from the (overridden) data files, and
+runs simcli's tick loop. With no overrides it ends on the same state hash as `simcli run` (unit
+test). Every police contact is grouped into a **hit** (contact gap ≤ 0.25 s) recording the struck
+body, both speeds just before, the largest closing speed, and the unit's assignment and tactic.
+A struck car under 1 m/s counts as stopped.
+
+**It reproduces your report.** In `soak/traffic_soak_observer` with `police_cars: true` (seed 5,
+file values), a patrol car rear-ends the parked observer at 35.6 s, closing at 10.8 m/s, and hits it
+3 times in all. In the same run police also hit **stopped traffic 23 times** (the worst at
+24.5 m/s, a patrol car at full speed into a car waiting at a light), hit each other 6 times and
+hit world objects 21 times. One unit wrecks itself.
+
+![first hit on the parked observer](../media/tuning/e_observer_first_hit.svg)
+![end of the same run: observer pushed onto the sidewalk](../media/tuning/e_observer_end.svg)
+
+**`e_idle_ram_patrol`** varies `pursuit.toml` `patrol_speed_factor` × `unit.brake_mps2`, with 3 seeds
+per cell, on the observer soak (no heat). The table shows the mean over the seeds, and the maximum
+for closing speed:
+
+| patrol_speed_factor | brake_mps2 | hits on the stopped observer | hits on stopped traffic | max closing on a stopped car | police↔police | units disabled |
+|---|---|---|---|---|---|---|
+| 0.6 | 4.5 / 6.5 / 9.0 | 0.33 / 0.33 / 0.33 | 13.7 / 18.3 / 16.3 | 14.8 m/s | 3.0 / 6.0 / 8.0 | 1.7–2.0 |
+| 0.8 | 4.5 / 6.5 / 9.0 | 1.33 / 1.33 / 1.67 | 14.3 / 15.3 / 13.0 | 19.1 m/s | 6.3 / 2.7 / 11.7 | 1.7–2.3 |
+| 1.0 (file) | 4.5 / 6.5 (file) / 9.0 | 0.67 / 1.33 / 3.33 | 6.0 / 12.3 / 7.7 | 24.6 m/s | 13.3 / 6.0 / 17.0 | 2.7–4.0 |
+
+What this shows:
+- **No value in these ranges keeps idle cars safe.** Every one of the 27 runs has police hitting
+  a stopped car (3 to 34 hits on stopped traffic per run). Without obstacle awareness, tuning only
+  changes how hard the hits are. Your planned fix (slow or stop behind any vehicle ahead) is the
+  real fix.
+- **`patrol_speed_factor` sets how hard the hits are.** The worst closing speed on a stopped car is
+  14.8 m/s at 0.6, 19.1 m/s at 0.8 and 24.6 m/s at 1.0. The observer takes 0–1 hits at 0.6 against
+  0–8 at 1.0. If you want a stop-gap before avoidance lands, **0.6–0.7** roughly halves the impact
+  energy. It has a cost: the slower units spend longer in traffic, and hits on stopped traffic
+  *rise* (mean 16 at 0.6 against 9 at 1.0).
+- **`unit.brake_mps2` has no consistent effect** on hits on stopped cars; the spread between seeds
+  is larger than any brake trend. Stronger brakes go with more police↔police hits at 1.0 (17 at
+  9.0). Leave it at 6.5.
+- Seeds matter more than either knob: hit counts range 3–34 for the same values. Any done-check
+  for the obstacle fix should use several seeds (this preset runs 3).
+
+**`e_pursuit_aggression`** varies `target_speed_margin` × `tactics.pit_max_kmh.arcade` ×
+`tactics.pit_min_straight_m` in two cases:
+- **chase:** `golden/city_chase` re-aimed so the racer drives north, away from the parked patrol
+  car, at noon with starting heat 55 (wanted level 3).
+- **wanted, stopped:** the observer soak car parked with heat 55.
+
+Every run starts a pursuit at 0.3 s.
+
+| case | margin | pit_max_kmh | pit_straight_m | PIT attempts | closest pursuer after 3 s | contact with the target | hits on stopped cars | police↔police | units disabled |
+|---|---|---|---|---|---|---|---|---|---|
+| chase | 0.0 | any | any | 0 | 59 m | none | 3 | 2 | 1 |
+| chase | 0.1 (file) | any | any | 0 | 7.7 m | none | 2 | 1 | 2 |
+| chase | 0.25 | any | any | 0 | 8.5 m | none | 1 | 2 | 1 |
+| wanted, stopped | any | any | any | 0 | 7.8 m | **none** | 31 (traffic) | 11 | 6 |
+
+What this shows:
+- **Pursuits are not physical yet: no PIT, box-in or contact with the racer at any setting.**
+  Every police hit in these runs happens while the unit is in tactic `Shadow`. PIT stays off even
+  with `pit_max_kmh` raised to 110 (the chase racer does 79 km/h, above the Arcade default of 70)
+  and `pit_min_straight_m` lowered to 25. The block is therefore one of the code gates in
+  `pursuit.rs` (around line 696: `rank == 0`, `straight_ahead` needing a track radius ≥ 300 m along
+  the racer's track, the risk budget, `gap < 40`). A unit test with a racer on a straight
+  collector at 60 km/h and one unit 20 m behind would show which gate. `pit_engage_m` was also
+  tried (12 / 25) and made no difference either.
+- **`target_speed_margin` must stay above 0.** At 0 the pursuer never gets closer than 59 m; at
+  0.1–0.25 it gets to about 8 m. 0.1 (the file value) is fine.
+- **Stopped wanted cars are not rammed (good):** pursuers stop about 8 m away. The damage happens
+  on the way there: the converging roadblock and spike units and reinforcements hit stopped
+  traffic 31 times and each other 11 times, and 6 units are disabled. The obstacle fix should
+  cover units on `RoadblockAt` / `SpikeAt` assignments as well as patrols. In the hit lists those
+  units hit things while barely moving (0.3–0.8 m/s before the contact, then 3–11 m/s closing);
+  they look like they are being shoved while parking.
+- When the obstacle fix lands, re-run both presets. They are written as done-checks: the expects
+  require 0 hits on stopped cars, and for the wanted case a closing speed on the suspect of at
+  most 5 m/s.
+
+### 2. Damage modes vs the CLAUDE.md semantics: hits to total loss per car (for B, 03)
+
+**New tooling.** The new `survival` probe repeats the `wp_damage` barrier-harness impact on one
+already-damaged model until it is a total loss (cap 12 hits) at each speed. It also finds the
+lowest single-hit total-loss speed (scan 10–200 km/h, then bisect to 1 km/h). A hard hit is
+56 km/h into a rigid barrier (frontal), or a same-mass car into the side. Caveat: later hits load
+the rest-geometry footprint again, so they test "same wall, same face, again".
+
+**`mode_hits_to_total_loss`** covers all 16 cars × both modes × frontal and side. Each cell reads:
+single-hit total-loss speed (km/h) / hits to total loss at 40 / 56 / 80 km/h / health after one
+56 km/h hit. "—" means never within the scan or the 12-hit cap. ✕ marks a failed check: Arcade
+frontal at 56 must degrade the car (health ≤ 0.9) and end it in 2–6 hits; Simulation frontal at 56
+must end it in 1.
+
+| car | class | Arcade frontal | Simulation frontal | Arcade side | Simulation side |
+|---|---|---|---|---|---|
+| debug_coupe | Sport | — / — / — / 5 / 0.75 ✕ | 54 / 2 / 1 / 1 / 0.18 | — / — / — / — / 0.84 | 51 / 2 / 1 / 1 / 0.58 |
+| debug_sedan | Compact | 190 / — / — / 6 / 0.76 ✕ | 55 / 2 / 1 / 1 / 0.20 | — / — / — / — / 0.84 | 47 / 2 / 1 / 1 / 0.59 |
+| hakone_gt | Sport | — / — / 8 / 4 / 0.70 ✕ | 50 / 2 / 1 / 1 / 0.13 | — / — / — / — / 0.83 | 62 / 3 / 2 / 1 / 0.53 |
+| hauler_1500 | Truck | 181 / — / 12 / 9 / 0.69 ✕ | 50 / 3 / 1 / 1 / 0.17 | 200 / — / — / — / 0.84 | 65 / 3 / 2 / 1 / 0.54 |
+| ironside_440 | Muscle | — / — / — / 7 / 0.71 ✕ | 52 / 2 / 1 / 1 / 0.20 | — / — / — / — / 0.84 | 62 / 2 / 2 / 1 / 0.54 |
+| junkyard_beater | Beater | 113 / 10 / 5 / 3 / 0.68 | 50 / 2 / 1 / 1 / 0.13 | 189 / — / — / — / 0.83 | 54 / 2 / 1 / 1 / 0.53 |
+| kestrel_ts | Sport | 113 / 10 / 5 / 3 / 0.70 | 50 / 2 / 1 / 1 / 0.13 | 190 / — / — / — / 0.83 | 54 / 2 / 1 / 1 / 0.52 |
+| lindwurm_4t | Sport | 119 / 9 / 5 / 3 / 0.67 | 48 / 2 / 1 / 1 / 0.10 | — / — / — / — / 0.83 | 59 / 2 / 2 / 1 / 0.52 |
+| lucciola_350 | Exotic | — / — / — / 8 / 0.62 ✕ | 50 / 2 / 1 / 1 / 0.19 | 188 / — / — / — / 0.81 | 55 / 2 / 1 / 1 / 0.49 |
+| rampart_50 | Muscle | — / — / 8 / 4 / 0.71 ✕ | 50 / 2 / 1 / 1 / 0.13 | — / — / — / — / 0.83 | 59 / 2 / 2 / 1 / 0.52 |
+| sentinel_bastion | PoliceSuv | 186 / — / — / 4 / 0.66 ✕ | 52 / 2 / 1 / 1 / 0.20 | — / — / — / — / 0.83 | 59 / 2 / 2 / 1 / 0.53 |
+| sentinel_cruiser | PoliceCruiser | — / — / — / 6 / 0.72 ✕ | 54 / 3 / 1 / 1 / 0.23 | — / — / — / — / 0.84 | 62 / 3 / 2 / 1 / 0.54 |
+| sentinel_wolfhound | PoliceInterceptor | 190 / — / 12 / 5 / 0.70 ✕ | 53 / 2 / 1 / 1 / 0.22 | 200 / — / — / — / 0.83 | 62 / 3 / 2 / 1 / 0.54 |
+| shiro_turbo | Sport | 187 / 12 / 9 / 5 / 0.70 ✕ | 51 / 2 / 1 / 1 / 0.14 | — / — / — / — / 0.83 | 61 / 3 / 2 / 1 / 0.53 |
+| sperber_32 | Sport | 175 / — / 12 / 6 / 0.68 ✕ | 50 / 2 / 1 / 1 / 0.13 | — / — / — / — / 0.83 | 55 / 2 / 1 / 1 / 0.53 |
+| vireo_xs | Compact | 115 / 8 / 4 / 3 / 0.66 | 49 / 2 / 1 / 1 / 0.10 | 196 / — / — / — / 0.83 | 57 / 2 / 2 / 1 / 0.53 |
+
+How this compares with CLAUDE.md:
+- **Simulation meets "one hard hit at speed is a total loss" for every car.** A frontal hit
+  totals the car from 48–55 km/h, and 56 km/h always takes one hit. A 25 km/h knock does not total
+  any car, and two or three 40 km/h hits do. Side hits total from 47–65 km/h; 10 of 16 cars need two
+  same-mass side hits at 56 km/h (all of them need one at 80). That is plausible, since a car-to-car
+  side hit transfers half the energy of a rigid wall.
+- **Arcade meets "one hard hit degrades"** (health 0.62–0.76 after one 56 km/h frontal hit) **but
+  fails "several end the car" for 12 of 16 cars.** Their health levels off just above
+  `total_loss_health = 0.10`: the sedan reads 0.76, 0.45, 0.25, 0.20, 0.17, 0.12, 0.109, 0.106,
+  0.104, … after successive 56 km/h hits and never crosses. Only the four lighter cars (Beater,
+  Kestrel, Lindwurm, Vireo) end in 4–5 hits. `arcade.toml`'s own header promises "two or three
+  hard hits end the car".
+- **Arcade side impacts never total any car** (health levels off around 0.8 after the first hit;
+  more hits barely move it). The side lattice or the side component mapping saturates in Arcade.
+  This matches the earlier T-bone study (Arcade victim crush stuck near 0.1 m).
+
+**`b_arcade_total_loss_health`** sweeps `modes/arcade.toml:total_loss_health`, the one Arcade
+value that moves this without touching Simulation. Cells are hits to total loss at 40 / 56 / 80 km/h:
+
+| car / impact | 0.10 (file) | 0.15 | 0.20 | 0.25 | 0.30 |
+|---|---|---|---|---|---|
+| debug_sedan frontal | — / — / 6 | 12 / 6 / 3 | 8 / 4 / 2 | 7 / 3 / 2 | 6 / 3 / 2 |
+| ironside_440 frontal | — / — / 7 | — / 6 / 3 | 8 / 4 / 2 | 7 / 4 / 2 | 6 / 3 / 2 |
+| hauler_1500 frontal | — / 12 / 9 | — / 7 / 5 | — / 5 / 2 | 9 / 3 / 2 | 6 / 3 / 1 |
+| sentinel_cruiser frontal | — / — / 6 | — / 8 / 4 | 9 / 5 / 3 | 7 / 4 / 2 | 5 / 3 / 2 |
+| debug_sedan side | never | never | never | never | never |
+| ironside_440 side | never | never | never | never | 11 / 5 / 3 |
+
+**Proposed for B to decide (not promoted):** Arcade `total_loss_health` **0.20–0.25**. That gives
+3–5 hard frontal hits to total loss across Compact, Muscle, Truck and police cruiser, keeps
+single-hit health unchanged (one hit still only degrades), and keeps a single 80 km/h hit
+survivable at 0.20 (2–3 hits). The single-hit total-loss speed falls from ~190 to 101–118 km/h at
+0.20 (87–92 at 0.25), so Arcade stays well above Simulation's ~52 km/h. To promote:
+`tune.py promote b_arcade_total_loss_health <point>` writes the line and the changelog entry.
+That is B's call and B's commit (`[bless]`, since the goldens may move). The Arcade **side**
+result needs a model or lattice look; no threshold below 0.3 fixes it.
+
+Also for B: after this round's damage merge, Simulation `plasticity_scale` is no longer
+monotonic in crush. For the debug_sedan 56 km/h frontal, 0.8 gives 0.639 m and 1.0 gives 0.634 m,
+so less plasticity now means slightly *more* crush. That broke an old tuning-dash test, which now
+sweeps `impulse_to_lattice_scale` instead. It fits the saturation reported in "Findings from the
+presets".
+
+### Session checks (round 6b)
+`cargo fmt`, `cargo clippy --workspace --all-targets -D warnings` are clean. `cargo test
+-p tuning-probe` passes (22 tests), and `python3 -m unittest discover -s tools/tuning-dash/tests`
+passes (10 tests). `cargo test --workspace --no-fail-fast`: 578 passed, **2 failed, both outside
+this workstream and already failing on the merged lead/main state** (this branch changes only
+`tools/tuning-dash`, docs, and tuning-probe's `Cargo.lock` entry):
+- `wp_economy` `tests/pursuit_wiring.rs::real_police_capture_settles_through_the_economy` (line 130)
+- `wp_race` `tests/simcli_races.rs::city_sprint_on_real_roads` (line 28)
+
+One workspace test binary takes about 55 minutes in a debug build on this 4-core container.
+
+### 3. Thumbnails as frames (known gap): done
+
+`scenario` and `pursuit` points now write top-down SVG frames: one at the first hard contact of a
+scenario car (closing speed ≥ 3 m/s) and four evenly spaced, the last at the end. They are drawn
+from the simulation state (roads, building footprints, barriers, every vehicle as an oriented box
+coloured by driver, scenario-car trails), so they cost microseconds and need no browser. The
+points table shows the first-hit frame (else the last) as the thumbnail, and the point detail
+shows the strip with captions (`info.frames`). The two images above are frames from
+`e_idle_ram_patrol`. They are boxes on a map, not testbed renders: no deformation or lighting.

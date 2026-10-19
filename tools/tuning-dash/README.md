@@ -35,6 +35,16 @@ Probe kinds (`probe.kind` in a spec):
 | `vehicle_metrics` | `wp_vehicle::metrics` on `car` (`metrics: [zero_to_100, braking, skidpad, step_steer, lift_off, power_on, power_oversteer, top_speed]`, default all but `top_speed`; `skidpad_radius_m` 50, `turn_radius_m` 40) | `zero_to_100_s`, `braking_100_0_m`, `skidpad_max_lat_g`, `understeer_deg_per_g`, `step_steer_overshoot_pct`, `lift_off_yaw_rate_delta_rps`, `lift_off_curvature_ratio`, `power_on_curvature_ratio`, `power_oversteer_throttle`, `top_speed_kmh` |
 | `barrier` | `wp_damage::barrier::run_barrier` for `car`, `mode` (`Arcade`/`Simulation`), `impact` (`Frontal`/`Offset`/`Side`/`Rear`) at `speeds_kmh` (default 15/25/40/56/80; `other_mass_kg` defaults to the car's mass for `Side`) | series vs speed + flat `<metric>@<speed>` for `crush_m`, `cabin_intrusion_m`, `plastic_energy_kj`, `health`, `broken_beams`, `detached_parts`, `failed_components`, `repair_total`, `total_loss`, `power_scale`; failed components per speed in `info` |
 | `barrier_scenario` | a `crates/wp_damage/scenarios/*.ron` file with its own checks | as `barrier`, plus pass/fail of every scenario check |
+| `pursuit` | a simcli **city** scenario (`file`) with the police tables read from the data root, so `police:pursuit:…` overrides apply (`simcli::run` uses the copy compiled into `wp_police`). Same setup and tick loop as `simcli::run`: with no police overrides the final hash is identical. Scenario `expect` is not evaluated; use spec `expect`. `stopped_mps` (default 1) | every police contact grouped into **hits** (`info.hits`: time, what was struck, both speeds before, max closing speed, the unit's assignment and tactic). Counts: `police_hits`, `hits_stopped_scenario`, `hits_moving_scenario`, `hits_stopped_traffic`, `hits_moving_traffic`, `hits_stopped_any`, `hits_patrol_on_stopped` (not pursuing), `hits_police_police`, `hits_world`; `max_closing_stopped_mps`, `max_closing_scenario_mps`, `first_stopped_hit_s`; police: `pursuit_started_s`, `pursuits_started`, `pit_attempts`, `units_disabled`, `police_units_max`, `police_cars_max`; per scenario car `<id>.final_health`, `.final_speed_mps`, `.crush_depth_m`, `.total_loss`, `.path_length_m`; frames |
+| `survival` | `car`, `mode`, `impact`: the barrier-harness impact repeated on one damaged model at each of `speeds_kmh` (default 25/40/56/80) until total loss (`max_hits`, default 12), plus a scan + bisection for the lowest single-hit total-loss speed (10–200 km/h, 1 km/h) | `hits_to_total_loss@<speed>` (null = survived the cap; `survives_cap@<speed>` = 1), `health_after_1@<speed>`, `failed_after_1@<speed>`, `total_loss_speed_kmh`; health and failed components after every hit in `info.per_hit`; series vs speed |
+
+**Frames.** `scenario` and `pursuit` points write top-down SVG frames
+(`points/pNNNN/frames/f00.svg`…): one at the first hard contact of a scenario car
+(closing speed ≥ 3 m/s) and four evenly spaced (the last at the end of the run). A frame is drawn
+from the simulation state: roads and building footprints (city runs), barriers, every vehicle
+in view as an oriented box (scenario cars in accent colours, police blue, traffic grey) and
+the scenario cars' trails. The table's thumbnail is the first-hit frame (else the last); the
+point detail shows the strip. Captions are in `info.frames`.
 
 ## Spec reference
 
@@ -65,7 +75,8 @@ workers: 4                      # parallel probes (default: CPU count, max 8)
 ```
 
 **Targets.** File part: `cars/x.json` (any data-root path) or the shorthands `car:x`,
-`tire:x`, `lattice:x`, `material:x`, `mode:sim` / `mode:arcade`, or `scenario` (the probe's
+`tire:x`, `lattice:x`, `material:x`, `mode:sim` / `mode:arcade`, `police:pursuit` /
+`police:heat` / `police:presence` / `police:tools` (only the `pursuit` probe reads them), or `scenario` (the probe's
 own simcli scenario, e.g. `scenario:entities[*].car`; never promoted). Field path: dotted keys
 with selectors `[2]`, `[0,1]`, `[*]`, `[field=value]`, e.g.
 `car:debug_sedan:suspension[0,1].spring_n_per_m` (front axle),
@@ -82,6 +93,7 @@ out/sweeps/<name>/sweep.json            spec, points, metrics, series, checks, a
 out/sweeps/<name>/points/pNNNN/job.json  exact probe job (re-run: target/release/tuning-probe run job.json)
 out/sweeps/<name>/points/pNNNN/result.json
 out/sweeps/<name>/points/pNNNN/<scenario>/{metrics.csv,…,replay.bin}   (scenario probes)
+out/sweeps/<name>/points/pNNNN/frames/fNN.svg                         (scenario, pursuit probes)
 ```
 
 A point is re-measured only when its `job.json` changes (or with `--force`), so widening a
@@ -105,8 +117,10 @@ cargo test -p tuning-probe                                 # paths, overrides, t
 python3 -m unittest discover -s tools/tuning-dash/tests     # specs, presets, end-to-end sweep + promote
 ```
 
-The end-to-end Python test runs a real barrier sweep and a simcli scenario point against a
-temporary copy of `data/` and promotes into that copy.
+The end-to-end Python test runs a real barrier sweep, a simcli scenario point (with frames),
+a survival sweep and a short pursuit point with a police override against a temporary copy of
+`data/` and promotes into that copy. `cargo test -p tuning-probe` also checks that the pursuit
+loop ends on the same state hash as `simcli::run`.
 
 ## Perf (cloud container, 4 cores, release probe)
 
@@ -124,8 +138,15 @@ five speeds ≈ 0.1 s. Process start-up and data loading are a few ms per point.
 
 ## Known gaps
 
-- Thumbnails are top-down paths from `metrics.csv`, not rendered replay frames (the replay
-  itself is linked; open it in the testbed).
+- Frames are drawn from the simulation state (boxes on a road map), not rendered by the
+  testbed; there is no deformation or lighting in them. The replay is linked for the real view.
+- The `pursuit` probe re-implements simcli's tick loop (inputs, step, events) because simcli
+  builds police from the compiled-in tables. A unit test pins it to `simcli::run`'s final hash;
+  if simcli grows a police-config hook (or reads `police/*.toml` through its `DataSource`) the
+  probe should use `simcli::run` instead.
+- `survival` repeats the harness footprint on the rest geometry; later hits load the same nodes
+  as the first (no contact search on the crushed shape), and there is no rigid-body bounce
+  between hits.
 - `barrier_scenario` copies the car/tire/lattice/material/mode folders to a scratch folder per
   point because `wp_damage::barrier::run_scenario` reads from a data root on disk.
 - `DamageTuning` constants (solver iterations, buckle factors, …) are Rust code, not data, so

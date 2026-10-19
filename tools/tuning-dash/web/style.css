@@ -160,6 +160,9 @@ tbody tr.selected { box-shadow: inset 3px 0 0 var(--accent); background: var(--h
 .status.none { color: var(--text-muted); }
 
 .thumb { display: block; }
+.frame { display: block; border-radius: 3px; }
+.frames { display: flex; flex-wrap: wrap; gap: 6px; }
+.frames .frame { max-width: 100%; height: auto; }
 .thumb path { fill: none; stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
 
 dl.kv { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 0; font-size: 12px; }

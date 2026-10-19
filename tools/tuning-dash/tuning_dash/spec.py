@@ -34,7 +34,7 @@ from typing import Any
 
 OPS = ("set", "scale", "add")
 COMBINES = ("grid", "zip", "each")
-PROBE_KINDS = ("scenario", "vehicle_metrics", "barrier", "barrier_scenario")
+PROBE_KINDS = ("scenario", "vehicle_metrics", "barrier", "barrier_scenario", "pursuit", "survival")
 _NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
