@@ -350,15 +350,7 @@ function siren(ctx: BaseAudioContext, s: Params, p: VoiceParams): SynthVoice {
         const t = scheduledUntil + (seg * i) / (n - 1);
         curve[i] = sirenFreqAtPhase(s, phase0 + (t - t0) / cycle) * doppler;
       }
-      for (const node of [o, o2]) {
-        // Chrome can reject a segment as overlapping the previous curve (seen with several
-        // police sirens at once); skip that segment rather than throw out of the frame.
-        try {
-          node.frequency.setValueCurveAtTime(curve, scheduledUntil, seg);
-        } catch {
-          /* keep the previous segment's pitch */
-        }
-      }
+      for (const node of [o, o2]) node.frequency.setValueCurveAtTime(curve, scheduledUntil, seg);
       scheduledUntil += seg;
     }
   };

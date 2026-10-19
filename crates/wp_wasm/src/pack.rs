@@ -134,9 +134,7 @@ pub fn pack_state(entity: u32, s: &VehicleState, out: &mut Vec<f32>) {
 /// `[steer, throttle, brake, handbrake, clutch, flags, tool_use]` with flags bit 0 gear_up,
 /// 1 gear_down, 2 horn, 3 headlights, 4 siren. Missing trailing values are 0.
 pub fn unpack_input(a: &[f32]) -> VehicleInput {
-    // Missing or non-finite values (a JS `undefined` packs as NaN) read as 0: a NaN input would
-    // poison the vehicle's physics state for good.
-    let at = |i: usize| a.get(i).copied().filter(|v| v.is_finite()).unwrap_or(0.0);
+    let at = |i: usize| a.get(i).copied().unwrap_or(0.0);
     let flags = at(5) as u32;
     VehicleInput {
         steer: at(0).clamp(-1.0, 1.0),
@@ -324,16 +322,6 @@ mod tests {
         assert!(i.gear_up && i.headlights && !i.gear_down);
         assert_eq!(i.tool_use, 2);
         assert_eq!(unpack_input(&[2.0]).steer, 1.0);
-        let nan = unpack_input(&[
-            f32::NAN,
-            f32::NAN,
-            f32::INFINITY,
-            f32::NAN,
-            f32::NAN,
-            f32::NAN,
-        ]);
-        assert_eq!((nan.steer, nan.throttle, nan.brake), (0.0, 0.0, 0.0));
-        assert!(!nan.gear_up && !nan.siren);
     }
 
     #[test]
