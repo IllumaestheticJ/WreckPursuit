@@ -172,7 +172,7 @@ sight in the last 300 m) and **one way in** (so it is a commitment, not a free r
 | SH03 | Lantern Garage Level 4 | Lantern Row | (600, 400, 8) | Multi-storey car park: the helicopter cannot see inside. Downtown means many witnesses on the way in. |
 | SH04 | Mercer Wash-n-Fold Lot | Mercer | (−1100, 1100, 22) | Rear lot of a laundromat off an alley; the scene's oldest hideout. Tight alleys punish wide cars. |
 | SH05 | Westline Roundhouse | Westline Yards | (−2300, 400, 6) | Inside the disused roundhouse; reached over gravel and a rail crossing. |
-| SH06 | Knob Observatory Lot | Hollins Heights | (−2300, 2550, 138) | Top of the touge; a long climb with nowhere to hide on the last km. Best payout for escapes that end here (see GDD §6). |
+| SH06 | Knob Observatory Lot | Hollins Heights | (−2300, 2550, 138) | Top of the touge; a long climb with nowhere to hide on the last km. Proposed rep bonus for escapes that end here (GDD §5.4). |
 | SH07 | Northfield Self-Storage | Northfield | (300, 2400, 34) | Rented unit; two blocks from North Precinct. |
 | SH08 | Cliffside Carport | Bayview Bluffs | (1700, 2500, 48) | Under a cantilevered house off Bluff Road; fog often covers it. |
 | SH09 | Sluice House | Canal Flats | (−300, −800, 2) | Old pump house on the canal; reached via the Iron Bridge or Five Points. |
