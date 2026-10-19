@@ -369,3 +369,7 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
    `recorded_capture_arcade_impounds_bills_and_keeps_damage` now counts the speeding tickets in
    the fixture instead of assuming one.
 
+
+Gate on `ws/economy` after merging `origin/main` (round 8): `cargo fmt --check`, workspace clippy
+`--all-targets -D warnings`, `cargo test --workspace` (all green, no failures),
+`cargo test -p wp_economy --features native`, wasm build of `wp_wasm` (no `rusqlite` in its tree).
