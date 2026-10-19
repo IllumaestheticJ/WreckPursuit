@@ -61,6 +61,11 @@ impl WorldQuery for WithWeather<'_> {
         self.world.signal_state_ahead(p, heading)
     }
 
+    fn line_of_sight(&self, a: [f32; 3], b: [f32; 3]) -> bool {
+        // Fog / rain visibility limits are wp_weather's to add on top later.
+        self.world.line_of_sight(a, b)
+    }
+
     fn time_of_day(&self) -> TimeOfDay {
         self.world.time_of_day()
     }

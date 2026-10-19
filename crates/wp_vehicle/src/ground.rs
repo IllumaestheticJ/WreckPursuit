@@ -4,6 +4,7 @@
 use rapier3d::prelude::{QueryPipeline, Ray};
 
 use crate::math::V3;
+use wp_contracts::GroundQuery;
 
 /// Result of a ground probe.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -62,6 +63,57 @@ impl WheelCaster for RapierGround<'_> {
                 distance: hit.time_of_impact,
                 point: origin + dir * hit.time_of_impact,
                 normal: hit.normal,
+            })
+    }
+}
+
+fn arr(v: V3) -> [f32; 3] {
+    [v.x, v.y, v.z]
+}
+
+fn to_contract(h: GroundHit) -> wp_contracts::GroundHit {
+    wp_contracts::GroundHit {
+        dist_m: h.distance,
+        point: arr(h.point),
+        normal: arr(h.normal),
+    }
+}
+
+impl GroundQuery for FlatGround {
+    fn cast_ray(
+        &self,
+        origin: [f32; 3],
+        dir: [f32; 3],
+        max_m: f32,
+    ) -> Option<wp_contracts::GroundHit> {
+        self.cast(V3::from_array(origin), V3::from_array(dir), max_m)
+            .map(to_contract)
+    }
+}
+
+impl GroundQuery for RapierGround<'_> {
+    fn cast_ray(
+        &self,
+        origin: [f32; 3],
+        dir: [f32; 3],
+        max_m: f32,
+    ) -> Option<wp_contracts::GroundHit> {
+        self.cast(V3::from_array(origin), V3::from_array(dir), max_m)
+            .map(to_contract)
+    }
+}
+
+/// Adapter: any contract [`GroundQuery`] used as this crate's [`WheelCaster`] (lead, v0.2.0).
+pub struct ContractGround<'a>(pub &'a dyn GroundQuery);
+
+impl WheelCaster for ContractGround<'_> {
+    fn cast(&self, origin: V3, dir: V3, max_dist: f32) -> Option<GroundHit> {
+        self.0
+            .cast_ray(arr(origin), arr(dir), max_dist)
+            .map(|h| GroundHit {
+                distance: h.dist_m,
+                point: V3::from_array(h.point),
+                normal: V3::from_array(h.normal),
             })
     }
 }

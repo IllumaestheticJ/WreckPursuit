@@ -76,6 +76,14 @@
       "type": "number",
       "format": "float"
     },
+    "fuel_capacity_l": {
+      "description": "Fuel tank capacity, litres (v0.2.0). `mass_kg` includes fuel at 50 % fill. `None` = not\nmodelled (fuel leaks from `HandlingEffects::fuel_leak_rate` then never run dry).",
+      "type": [
+        "number",
+        "null"
+      ],
+      "format": "float"
+    },
     "id": {
       "description": "Unique id; must equal the file stem (`data/cars/<id>.json`).",
       "type": "string"
@@ -177,7 +185,7 @@
   ],
   "$defs": {
     "BrakeDef": {
-      "description": "Brake system.",
+      "description": "Brake system.\n\nHow it is read (v0.2.0 clarification, as implemented by `wp_vehicle`): `max_torque_*` are\nper-wheel **capacities** and `bias_front` is the pedal-force split. At full pedal, with\n`norm = max(bias, 1 − bias)`: front torque per wheel = `max_torque_front_nm · bias / norm`,\nrear = `max_torque_rear_nm · (1 − bias) / norm`. The biased axle gets its full capacity, the\nother is scaled down. Example: bias 0.65, front 2000, rear 1100 → 2000 and 592 N·m per wheel.",
       "type": "object",
       "properties": {
         "bias_front": {
@@ -191,12 +199,12 @@
           "format": "float"
         },
         "max_torque_front_nm": {
-          "description": "Maximum brake torque per front wheel at full pedal and `bias_front = 1`, N·m.",
+          "description": "Brake torque capacity per front wheel, N·m (see the type docs for how bias applies).",
           "type": "number",
           "format": "float"
         },
         "max_torque_rear_nm": {
-          "description": "Maximum brake torque per rear wheel at full pedal and `bias_front = 0`, N·m.",
+          "description": "Brake torque capacity per rear wheel, N·m.",
           "type": "number",
           "format": "float"
         }
@@ -294,6 +302,41 @@
           "required": [
             "Awd"
           ]
+        },
+        {
+          "description": "On-demand (clutch-pack) all-wheel drive (v0.2.0): runs at `base_front_split` until the\nfront axle slips more than `engage_slip` over the rear, then shifts torque rearward up to\n`max_rear_split`.",
+          "type": "object",
+          "properties": {
+            "AwdOnDemand": {
+              "type": "object",
+              "properties": {
+                "base_front_split": {
+                  "description": "Front torque fraction with the coupling open, 0..1 (typically 0.9-1.0).",
+                  "type": "number",
+                  "format": "float"
+                },
+                "engage_slip": {
+                  "description": "Front-over-rear wheel-speed slip ratio at which the coupling starts to close.",
+                  "type": "number",
+                  "format": "float"
+                },
+                "max_rear_split": {
+                  "description": "Maximum fraction sent to the rear with the coupling closed, 0..1.",
+                  "type": "number",
+                  "format": "float"
+                }
+              },
+              "required": [
+                "base_front_split",
+                "max_rear_split",
+                "engage_slip"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "AwdOnDemand"
+          ]
         }
       ]
     },
@@ -313,6 +356,14 @@
         "diff_rear": {
           "description": "Rear differential. Ignored for FWD.",
           "$ref": "#/$defs/DiffDef"
+        },
+        "efficiency": {
+          "description": "Gearbox + final drive mechanical efficiency for drive torque, 0..1 (v0.2.0).\n`None` = 0.85.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float"
         },
         "final_drive": {
           "description": "Final drive ratio.",
@@ -340,6 +391,17 @@
           "description": "Time a gear change takes (torque interrupted), s.",
           "type": "number",
           "format": "float"
+        },
+        "torque_converter": {
+          "description": "Torque converter for automatics (v0.2.0). `None` = manual / dual-clutch (friction clutch).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TorqueConverterDef"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false,
@@ -491,6 +553,33 @@
         "bump_stop_n_per_m"
       ]
     },
+    "TorqueConverterDef": {
+      "description": "Automatic gearbox torque converter (v0.2.0).",
+      "type": "object",
+      "properties": {
+        "coupling_rpm": {
+          "description": "Engine speed above which the converter couples 1:1 (lock-up), rpm.",
+          "type": "number",
+          "format": "float"
+        },
+        "stall_rpm": {
+          "description": "Engine speed at full throttle with the output held still, rpm.",
+          "type": "number",
+          "format": "float"
+        },
+        "stall_torque_ratio": {
+          "description": "Torque multiplication at stall (output/input), typically 1.8-2.5.",
+          "type": "number",
+          "format": "float"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "stall_rpm",
+        "stall_torque_ratio",
+        "coupling_rpm"
+      ]
+    },
     "VehicleClass": {
       "description": "Gameplay class of a vehicle. Used for matchmaking brackets, pricing and police roles.",
       "oneOf": [
@@ -558,6 +647,14 @@
         "caster_rad": {
           "description": "Caster angle, rad (positive = steering axis top leans rearward).",
           "type": "number",
+          "format": "float"
+        },
+        "inertia_kgm2": {
+          "description": "Spin inertia of wheel + tire + hub about the axle, kg·m² (v0.2.0).\n`None` = `0.7 · mass_kg · radius_m²`.",
+          "type": [
+            "number",
+            "null"
+          ],
           "format": "float"
         },
         "mass_kg": {

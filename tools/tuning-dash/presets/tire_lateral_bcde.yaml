@@ -1,0 +1,16 @@
+# Prompt 02: Magic Formula lateral B/C/D/E, one at a time (others at their file values),
+# on each car's own tire. Read: skidpad g and understeer gradient vs each coefficient.
+description: Lateral Magic Formula B/C/D/E ±20 % (one at a time) → skidpad, understeer, step steer
+probe:
+  kind: vehicle_metrics
+  metrics: [skidpad, step_steer, lift_off]
+params:
+  - {target: "tire:{tire}:lateral.b", label: lat B, op: scale, values: [0.8, 0.9, 1.0, 1.1, 1.2]}
+  - {target: "tire:{tire}:lateral.c", label: lat C, op: scale, values: [0.8, 0.9, 1.0, 1.1, 1.2]}
+  - {target: "tire:{tire}:lateral.d", label: lat D, op: scale, values: [0.8, 0.9, 1.0, 1.1, 1.2]}
+  - {target: "tire:{tire}:lateral.e", label: lat E, op: scale, values: [0.8, 0.9, 1.0, 1.1, 1.2]}
+combine: each
+variants:
+  - {name: sedan (FWD), vars: {tire: street}, probe: {car: debug_sedan}}
+  - {name: coupe (RWD), vars: {tire: sport}, probe: {car: debug_coupe}}
+plots: [skidpad_max_lat_g, understeer_deg_per_g, step_steer_overshoot_pct, lift_off_yaw_rate_delta_rps]

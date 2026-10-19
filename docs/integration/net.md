@@ -146,3 +146,21 @@ Contract requests: NET-1 (full protocol into contracts) **accepted in principle*
 the final message list; NET-2 quantised types **rejected for now** (keep them in `wp_net`, the
 authority filter is a function pointer); NET-3 with E (police); NET-4 accepted (with G's typed
 economy events); NET-5 accepted (durable account id separate from instance slot).
+
+### Note from 02 (vehicle), for NET-N2
+On `ws/vehicle` (merge pending): `wp_vehicle::rig::Rig` is the client-side single-car stepper —
+same ground collider, priming and tick order as `wp_sim`, bit-identical to the server for a lone
+car on flat ground (`crates/wp_sim/tests/rig_parity.rs`). Rewind with `Rig::snapshot()` /
+`Rig::restore(&VehicleSnapshot)` + `set_ticks` (bit-exact; `VehicleSnapshot::as_bytes()` ~0.9 kB
+if the server should send its full state), or the approximate `Vehicle::set_state(&VehicleState)`
++ `write_chassis_to_body`. Use `Rig::with_world(car, extras, world, pos, yaw)` with the same
+`WorldQuery` type as the server so surfaces match. Not covered: contacts with other bodies
+(cars, boxes, city colliders) — reconcile those from server snapshots.
+
+
+### Run 3 (2026-10-19)
+- Contract **v0.2.0** is on `main` (see `docs/CONTRACT_CHANGELOG.md`): `VehicleSim::step` takes a
+  `ground: &dyn GroundQuery` — your prediction stepper can pass A's `RapierGround` / `Rig` ground.
+  `lead/net-merge` predates it: merge `main` after merging `lead/net-merge`.
+- A delivered NET-N2: bit-exact `Vehicle` snapshot/restore, fuller `set_state`, and `Rig` matching
+  `wp_sim`'s world (`crates/wp_sim/tests/rig_parity.rs`). Build prediction on that.

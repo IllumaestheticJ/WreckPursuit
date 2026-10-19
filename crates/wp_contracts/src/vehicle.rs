@@ -99,6 +99,10 @@ pub struct VehicleDef {
     pub base_price: u32,
     /// Durability class 1 (fragile) ..= 5 (battering ram). Informational for UI and pricing.
     pub durability_class: u8,
+    /// Fuel tank capacity, litres (v0.2.0). `mass_kg` includes fuel at 50 % fill. `None` = not
+    /// modelled (fuel leaks from `HandlingEffects::fuel_leak_rate` then never run dry).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fuel_capacity_l: Option<f32>,
 }
 
 /// One point of the engine's full-load torque curve: `(rpm, torque_nm)`.
@@ -135,6 +139,29 @@ pub enum DriveLayout {
         /// Fraction of drive torque sent to the front axle, 0..1.
         front_split: f32,
     },
+    /// On-demand (clutch-pack) all-wheel drive (v0.2.0): runs at `base_front_split` until the
+    /// front axle slips more than `engage_slip` over the rear, then shifts torque rearward up to
+    /// `max_rear_split`.
+    AwdOnDemand {
+        /// Front torque fraction with the coupling open, 0..1 (typically 0.9-1.0).
+        base_front_split: f32,
+        /// Maximum fraction sent to the rear with the coupling closed, 0..1.
+        max_rear_split: f32,
+        /// Front-over-rear wheel-speed slip ratio at which the coupling starts to close.
+        engage_slip: f32,
+    },
+}
+
+/// Automatic gearbox torque converter (v0.2.0).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TorqueConverterDef {
+    /// Engine speed at full throttle with the output held still, rpm.
+    pub stall_rpm: f32,
+    /// Torque multiplication at stall (output/input), typically 1.8-2.5.
+    pub stall_torque_ratio: f32,
+    /// Engine speed above which the converter couples 1:1 (lock-up), rpm.
+    pub coupling_rpm: f32,
 }
 
 /// Differential type for one axle.
@@ -175,6 +202,13 @@ pub struct DrivetrainDef {
     pub clutch_max_nm: f32,
     /// Time a gear change takes (torque interrupted), s.
     pub shift_time_s: f32,
+    /// Gearbox + final drive mechanical efficiency for drive torque, 0..1 (v0.2.0).
+    /// `None` = 0.85.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub efficiency: Option<f32>,
+    /// Torque converter for automatics (v0.2.0). `None` = manual / dual-clutch (friction clutch).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub torque_converter: Option<TorqueConverterDef>,
 }
 
 /// One wheel + tire.
@@ -203,6 +237,10 @@ pub struct WheelDef {
     pub toe_rad: f32,
     /// Caster angle, rad (positive = steering axis top leans rearward).
     pub caster_rad: f32,
+    /// Spin inertia of wheel + tire + hub about the axle, kg·m² (v0.2.0).
+    /// `None` = `0.7 · mass_kg · radius_m²`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inertia_kgm2: Option<f32>,
 }
 
 /// One suspension corner.
@@ -226,12 +264,18 @@ pub struct SuspensionDef {
 }
 
 /// Brake system.
+///
+/// How it is read (v0.2.0 clarification, as implemented by `wp_vehicle`): `max_torque_*` are
+/// per-wheel **capacities** and `bias_front` is the pedal-force split. At full pedal, with
+/// `norm = max(bias, 1 − bias)`: front torque per wheel = `max_torque_front_nm · bias / norm`,
+/// rear = `max_torque_rear_nm · (1 − bias) / norm`. The biased axle gets its full capacity, the
+/// other is scaled down. Example: bias 0.65, front 2000, rear 1100 → 2000 and 592 N·m per wheel.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct BrakeDef {
-    /// Maximum brake torque per front wheel at full pedal and `bias_front = 1`, N·m.
+    /// Brake torque capacity per front wheel, N·m (see the type docs for how bias applies).
     pub max_torque_front_nm: f32,
-    /// Maximum brake torque per rear wheel at full pedal and `bias_front = 0`, N·m.
+    /// Brake torque capacity per rear wheel, N·m.
     pub max_torque_rear_nm: f32,
     /// Brake bias toward the front, 0..1.
     pub bias_front: f32,
