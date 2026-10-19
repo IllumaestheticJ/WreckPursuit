@@ -4300,6 +4300,7 @@ dependencies = [
  "wp_contracts",
  "wp_damage",
  "wp_math",
+ "wp_police",
  "wp_sim",
  "wp_vehicle",
  "wp_world",
