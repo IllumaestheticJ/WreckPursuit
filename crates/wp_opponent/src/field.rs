@@ -31,7 +31,7 @@ use crate::corridor::{Corridor, CorridorOptions, OpposingLanes, CORRIDOR_STEP_M}
 use crate::line::{LineParams, RacingLine, SpeedProfile};
 use crate::profile::{DriverParams, DriverProfile};
 use crate::pursuit::PoliceQuery;
-use wp_police::{PoliceEvent, PursuitOutcome};
+use wp_police::{PoliceEvent, PoliceEventExt, PursuitOutcome};
 
 /// Impulse above which a racer–racer contact counts as a collision (not a rub), N·s.
 /// 400 N·s ≈ a 1.4 t car changing speed by 0.3 m/s.
@@ -830,7 +830,7 @@ impl Field {
     /// pursuit that ends otherwise releases a yielding racer.
     fn record_police(&mut self, events: &[SimEvent]) {
         for ev in events {
-            let Some(PoliceEvent::PursuitEnded { racer, outcome }) =
+            let Some(PoliceEvent::PursuitEnded { racer, outcome, .. }) =
                 PoliceEvent::from_sim_event(ev)
             else {
                 continue;
