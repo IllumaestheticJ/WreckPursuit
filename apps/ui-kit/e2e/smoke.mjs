@@ -128,6 +128,43 @@ await page.locator(".wp-replay-timeline input").fill("12000");
 const tick = await page.evaluate(() => window.wpModel.get().replay.tick);
 check(tick === 12000, `replay: seek to 12000 (got ${tick})`);
 
+// Perf probe: frame pacing and long tasks while playing (HUD and captain map redraw every frame).
+for (const s of ["hud", "captain", "mainMenu"]) {
+  await page.goto(`${BASE}/?screen=${s}&chrome=0&t=40`);
+  await page.waitForTimeout(500);
+  const stats = await page.evaluate(
+    () =>
+      new Promise((done) => {
+        const deltas = [];
+        let longTasks = 0;
+        let longMs = 0;
+        const obs = new PerformanceObserver((l) => {
+          for (const e of l.getEntries()) {
+            longTasks++;
+            longMs += e.duration;
+          }
+        });
+        try {
+          obs.observe({ entryTypes: ["longtask"] });
+        } catch {}
+        let last = performance.now();
+        const t0 = last;
+        const frame = (t) => {
+          deltas.push(t - last);
+          last = t;
+          if (t - t0 < 3000) requestAnimationFrame(frame);
+          else {
+            obs.disconnect();
+            deltas.sort((a, b) => a - b);
+            done({ frames: deltas.length, p50: deltas[Math.floor(deltas.length * 0.5)], p95: deltas[Math.floor(deltas.length * 0.95)], longTasks, longMs });
+          }
+        };
+        requestAnimationFrame(frame);
+      }),
+  );
+  console.log(`perf ${s}: ${stats.frames} frames/3s, frame p50 ${stats.p50.toFixed(1)} ms, p95 ${stats.p95.toFixed(1)} ms, long tasks ${stats.longTasks} (${stats.longMs.toFixed(0)} ms)`);
+}
+
 await browser.close();
 server.kill();
 if (failures) {

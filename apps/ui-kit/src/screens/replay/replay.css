@@ -2,11 +2,13 @@
   position: absolute;
   inset: 0;
 }
-.wp-replay-screen .wp-hud-b {
-  bottom: 9em;
-}
+/* Lift the HUD clear of the transport bar. */
+.wp-replay-screen .wp-hud-b,
 .wp-replay-screen .wp-hud-r {
-  bottom: 9em;
+  bottom: 12em;
+}
+.wp-replay-screen .wp-hud-l {
+  bottom: 21em;
 }
 .wp-replay-dock {
   position: absolute;

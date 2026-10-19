@@ -125,7 +125,7 @@ function structuredCloneBindings(b: InputBindings): InputBindings {
 
 /** Which device family a Gamepad API id belongs to. */
 export function deviceOf(gamepadId: string): Exclude<InputDevice, "keyboard"> {
-  return /wheel|racing|g29|g920|t300|t150|dd1|csl|pedal/i.test(gamepadId) ? "wheel" : "gamepad";
+  return /wheel|racing|steering|pedal/i.test(gamepadId) ? "wheel" : "gamepad";
 }
 
 /** Human-readable label for a binding code. */

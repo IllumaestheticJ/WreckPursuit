@@ -32,8 +32,8 @@
   --heat-0: rgba(255, 178, 30, 0);
   --heat-1: rgba(255, 61, 61, 0.55);
 
-  --font-mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-  --font-display: "Barlow Condensed", "Oswald", "Roboto Condensed", "Arial Narrow", "Helvetica Neue", sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+  --font-display: "Arial Narrow", "Helvetica Neue", system-ui, sans-serif;
 
   --ui-scale: 1;
   --r: 2px;
