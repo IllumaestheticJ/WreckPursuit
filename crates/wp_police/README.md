@@ -55,7 +55,10 @@ Pure Rust, no renderer, builds for `wasm32-unknown-unknown`.
   an idle unit within 700 m is committed, or a new unit spawns ≥ `spawn_min_distance_m` away, out of sight.
 - **Helicopter**: `count`, `launch_s`, `unavailable_chance` per phase. It requests from `min_level`.
   It is kinematic, gives line of sight to every unit, and is **not** a weapon.
-- Every assignment change emits `PoliceEvent::Radio`.
+- Every assignment change raises a radio line; `radio::RadioDirector` paces what is spoken as
+  `PoliceEvent::Radio` (tiers, sim-time cooldowns, duplicate collapse, earshot;
+  `data/police/radio.toml`). Budget: <= 4 lines/min with nobody wanted, <= 10/min in a pursuit
+  (`scenarios/radio_*.ron`).
 
 Assignments: `Patrol`, `Respond(incident)`, `Pursue(target)`, `Intercept(point)`, `RoadblockAt`,
 `SpikeAt`, `HeloTrack`, `OutOfService`.
