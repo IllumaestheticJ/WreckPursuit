@@ -1,6 +1,6 @@
 [package]
 name = "wp_server"
-description = "Headless authoritative server. Stub: websocket server streaming a tick counter."
+description = "Headless authoritative server: one city instance over websockets, admin status endpoint, scripted bots."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,9 +11,10 @@ name = "wp-server"
 path = "src/main.rs"
 
 [dependencies]
+wp_contracts.workspace = true
+wp_sim.workspace = true
 wp_net = { workspace = true, features = ["native"] }
-tokio.workspace = true
-
-[dev-dependencies]
-tokio-tungstenite.workspace = true
-futures-util.workspace = true
+tokio = { workspace = true, features = ["io-util"] }
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true

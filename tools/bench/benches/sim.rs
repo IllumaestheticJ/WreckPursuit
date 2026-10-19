@@ -58,13 +58,19 @@ fn lattice(c: &mut Criterion) {
 fn snapshots(c: &mut Criterion) {
     let sim = wp_bench::sim_with_vehicles(24);
     let msg = wp_bench::snapshot(&sim);
-    let bytes = wp_net::encode_server(&msg);
+    // Contract-message JSON (the old wp_net stub codec); F's real snapshot codec is
+    // `wp_net::snapshot` — switching this bench to it is on I's list.
+    let bytes = serde_json::to_vec(&msg).expect("serializes");
     let mut g = c.benchmark_group("snapshot");
     g.bench_function("encode_24", |b| {
-        b.iter(|| black_box(wp_net::encode_server(&msg)))
+        b.iter(|| black_box(serde_json::to_vec(&msg).expect("serializes")))
     });
     g.bench_function("decode_24", |b| {
-        b.iter(|| black_box(wp_net::decode_server(&bytes).expect("decodes")))
+        b.iter(|| {
+            black_box(
+                serde_json::from_slice::<wp_contracts::ServerToClient>(&bytes).expect("decodes"),
+            )
+        })
     });
     g.finish();
 }

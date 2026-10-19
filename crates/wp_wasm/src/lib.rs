@@ -21,6 +21,9 @@
 
 #![warn(missing_docs)]
 
+/// Multiplayer client surface (`net_*` functions, workstream F), see the module docs.
+pub mod net;
+
 pub mod data;
 pub mod pack;
 pub mod scenario;

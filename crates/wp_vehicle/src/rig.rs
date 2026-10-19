@@ -234,6 +234,21 @@ impl<W: WorldQuery> Rig<W> {
         self.vehicle.place_body(rb, pos, yaw, speed, yaw_rate);
     }
 
+    /// Rewind vehicle *and* rigid body to a full-precision state (see [`Vehicle::set_state`]),
+    /// clearing accumulated forces. Used by `wp_net` client reconciliation. (Added by
+    /// workstream F, additive.)
+    pub fn set_state(&mut self, s: &VehicleState) {
+        self.vehicle.set_state(s);
+        let ch = *self.vehicle.chassis();
+        let rb = &mut self.bodies[self.handles.body];
+        rb.set_position(Pose::from_parts(ch.pos, ch.rot), true);
+        rb.set_linvel(ch.lin_vel, true);
+        rb.set_angvel(ch.ang_vel, true);
+        rb.reset_forces(true);
+        rb.reset_torques(true);
+        self.vehicle.read_body(rb);
+    }
+
     /// Apply damage effects to the vehicle.
     pub fn set_effects(&mut self, eff: &HandlingEffects) {
         self.vehicle.apply_damage_effects(eff);
