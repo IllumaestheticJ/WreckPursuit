@@ -210,14 +210,15 @@ const frameJunction = () =>
       if (d < bestD) [best, bestD] = [i, d];
     }
     const o = best * 10;
-    const [x, y, z, yaw, , right, radius] = heads.slice(o, o + 7);
+    const [x, y, z, yaw, left, right, radius] = heads.slice(o, o + 7);
     const f = [-Math.sin(yaw), Math.cos(yaw)];
     const r = [f[1], -f[0]];
     // Behind and above the approach, looking across the junction at the heads facing us.
-    const back = 16;
+    const back = 14;
+    const mid = (left + right) / 2;
     window.__wp.lookFrom(
-      [x - f[0] * back + r[0] * (right - 1), y - f[1] * back + r[1] * (right - 1), z + 3.2],
-      [x + f[0] * radius, y + f[1] * radius, z + 3],
+      [x - f[0] * back + r[0] * mid, y - f[1] * back + r[1] * mid, z + 2.6],
+      [x + f[0] * radius + r[0] * mid, y + f[1] * radius + r[1] * mid, z + 2.4],
     );
     return { n, head: best };
   });
@@ -232,7 +233,10 @@ for (const [hour, label] of [
   await page.waitForTimeout(600);
   const framed = await frameJunction();
   await page.waitForTimeout(2500);
+  // HUD panels hide the stop line; shoot the scene alone.
+  await page.evaluate(() => (document.getElementById("overlay").style.visibility = "hidden"));
   await shot(`signals/junction_${label}.png`);
+  await page.evaluate(() => (document.getElementById("overlay").style.visibility = ""));
   const drawn = await page.evaluate(() => ({
     hour: window.__wp.sim.worldInfo()[1],
     drawn: window.__wp.scene.signals.drawnStates(),
@@ -258,14 +262,16 @@ for (const [hour, label] of [
     )
     .then((h) => h.jsonValue())
     .catch(() => 0);
+  await page.evaluate(() => (document.getElementById("overlay").style.visibility = "hidden"));
   await shot("signals/junction_night_later.png");
+  await page.evaluate(() => (document.getElementById("overlay").style.visibility = ""));
   check(changed > 0, `signal lamps change over time and match the sim (${changed} heads changed)`);
-  await page.keyboard.press("KeyM");
+  await page.keyboard.press("Digit6");
   await page.waitForTimeout(200);
   const hidden = await page.evaluate(() => !window.__wp.scene.signals.group.visible);
-  await page.keyboard.press("KeyM");
+  await page.keyboard.press("Digit6");
   const help = await page.evaluate(() => document.querySelector(".help")?.textContent ?? "");
-  check(hidden && help.includes("traffic signals"), "M hides the signals layer; F1 help lists it");
+  check(hidden && help.includes("traffic signals"), "6 hides the signals layer; F1 help lists it");
 }
 // City chase preset: night city, police + traffic, speeding player; heat panel from the UI kit.
 await page.evaluate(() => window.__wp.startCityChase("debug_sedan", "Arcade"));

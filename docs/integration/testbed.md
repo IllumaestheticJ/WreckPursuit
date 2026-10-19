@@ -177,7 +177,7 @@ hash per tick dominate). `simcli replay file.replay.bin` verifies a browser reco
 | C | contact points & impulses (fading) |
 | G | CG + velocity vector |
 | X | civilian traffic agents (grey; red = braking, yellow = physical LOD, blue = yielding); promoted agents are drawn as sim vehicles instead |
-| M | traffic signals: mast-arm head at each stop line + far-side pedestal head, white stop line; lit lamp unlit-bright with an additive glow that strengthens at night (`signals_view.ts`, 6 InstancedMeshes for the whole city) |
+| 6 | traffic signals: mast-arm head at each stop line + far-side pedestal head, white stop line; lit lamp unlit-bright with an additive glow that strengthens at night (`signals_view.ts`, 6 InstancedMeshes for the whole city) |
 | Z | wanted level / heat panel (UI kit `HeatPanel`) |
 | I | traffic / police intent arrows |
 | K | component health panel |
@@ -224,7 +224,7 @@ matches every tick hash and the final hash; scrub back/forward; CSV; the three c
 and a smoke scenario pass with `matches_simcli` and draw contact markers; city free drive shows
 traffic; signals: the junction nearest the player framed at 12:00 and 22:00
 (`docs/media/signals/`), every head drawn and lit, lamps change within 30 s and match
-`signal_states()`, M hides the layer and F1 lists it. `BENCH=1` adds perf, `SHOTS=dir` screenshots.
+`signal_states()`, 6 hides the layer and F1 lists it. `BENCH=1` adds perf, `SHOTS=dir` screenshots.
 
 ### City chase
 **city chase** (button, `__wp.startCityChase()`): the procedural 12×12 city at 23:00 with
@@ -307,6 +307,8 @@ instancing before Checkpoint 3. The first seconds of a city session are slower (
 populating around the player).
 
 ## Known gaps
+- Signals: no turn arrows or pedestrian heads (the city has no protected-turn or walk phases);
+  the far-side head is placed by junction radius, not by the outgoing road's real curb.
 - Region energy / stress are elastic-strain proxies (TB-2).
 - Recordings always cover the whole session from tick 0 (`record_start` does not trim; the
   replay format has no view-start field).
