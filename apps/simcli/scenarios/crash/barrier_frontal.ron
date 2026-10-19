@@ -1,0 +1,29 @@
+// Full-frontal rigid-barrier test (prompt 03 calibration target: 56 km/h => ~0.6 m crush and
+// TotalLoss in Simulation). Testbed extensions (ignored by simcli): `cruise_kmh` holds the
+// approach speed (the browser scenario menu overrides it), `barriers` is drawn, and
+// `pending_expect` needs real vehicle bodies + damage (prompts 02/03/12) so it is reported
+// but never gates. simcli runs `inputs` (full throttle) and checks `expect` only.
+(
+    name: "crash_barrier_frontal",
+    car: "debug_sedan",
+    mode: Arcade,
+    seed: 11,
+    duration_s: 7.0,
+    inputs: [
+        (t_s: 0.0, input: (throttle: 1.0)),
+    ],
+    cruise_kmh: Some(56.0),
+    barriers: [
+        (pos: (0.0, 45.0, 0.75), size: (8.0, 1.0, 1.5)),
+    ],
+    expect: [
+        (metric: "max_speed_mps", min: 10.0, max: 60.0),
+        (metric: "final_health", min: 0.0, max: 1.0),
+    ],
+    pending_expect: [
+        (metric: "distance_m", min: 40.0, max: 44.5),
+        (metric: "final_speed_mps", min: -2.0, max: 2.0),
+        (metric: "peak_decel_g", min: 10.0, max: 80.0),
+        (metric: "final_health", min: 0.0, max: 0.9),
+    ],
+)

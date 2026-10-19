@@ -1,6 +1,6 @@
 [package]
 name = "wp_wasm"
-description = "wasm-bindgen surface of the simulation for the browser testbed."
+description = "wasm-bindgen surface of the simulation for the browser testbed: sessions, packed state arrays, scenarios and deterministic replay."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,10 +11,17 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 wp_contracts.workspace = true
+wp_math.workspace = true
 wp_sim.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+ron.workspace = true
 wasm-bindgen.workspace = true
+# Pure-Rust, no_std-capable binary codec for events and replays (wasm32-clean).
+postcard = { version = "1", default-features = false, features = ["alloc"] }
 
 [package.metadata.wasm-pack.profile.release]
+wasm-opt = false
+
+[package.metadata.wasm-pack.profile.dev]
 wasm-opt = false
