@@ -4,7 +4,7 @@
 //! one mid-sentence.
 //!
 //! Lines come from `wp_police::PoliceEvent::Radio { unit, text }` (decoded from
-//! `SimEvent::PoliceEvent` by the director) or [`crate::AudioDirector::push_radio_line`]. The
+//! `SimEvent::Police` by the director) or [`crate::AudioDirector::push_radio_line`]. The
 //! police payload has no priority yet (request A-2): the director uses Dispatch for dispatch
 //! lines, Pursuit while any pursuit is active, Routine otherwise. The listener's tier is set by
 //! the caller (the item lives with the player's gadgets).

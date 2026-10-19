@@ -15,63 +15,8 @@ pub fn subticks_to_s(subticks: u64) -> f32 {
         + (subticks % SUBTICKS_PER_TICK) as f32 * (PHYSICS_DT / SUBTICKS_PER_TICK as f32)
 }
 
-/// Why a racer did not finish (they still rank above every DQ).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub enum DnfReason {
-    /// The car became a total loss.
-    TotalLoss,
-    /// Arrested by police (reported by `wp_police` through the server).
-    Captured,
-    /// The race time limit ran out.
-    TimeLimit,
-    /// Did not finish within the window after the winner.
-    FinishWindow,
-    /// Quit / left the race voluntarily.
-    Retired,
-    /// Delivery cargo destroyed.
-    CargoDestroyed,
-    /// Lost an outrun (the opponent built the winning lead or led at the time limit).
-    Outrun,
-    /// Disconnected from the server.
-    Disconnected,
-}
-
-/// Why a racer was disqualified (ranked below every finisher and every DNF).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub enum DqReason {
-    /// Outside the route corridor longer than the grace time (shortcut).
-    LeftCorridor,
-    /// Moved before green (drag).
-    JumpStart,
-    /// Moved faster than physically plausible between two samples.
-    ImplausibleMovement,
-    /// Disqualified by the server / a marshal / an admin.
-    Marshal,
-}
-
-/// A racer's state in the race.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum RacerStatus {
-    /// Entered; race not over for them yet.
-    Running,
-    /// Crossed the finish (or won the outrun).
-    Finished,
-    /// Did not finish.
-    Dnf(DnfReason),
-    /// Disqualified.
-    Dq(DqReason),
-}
-
-impl RacerStatus {
-    /// Ranking class: finishers 0, still running / DNF 1, DQ 2.
-    pub fn class(&self) -> u8 {
-        match self {
-            RacerStatus::Finished => 0,
-            RacerStatus::Running | RacerStatus::Dnf(_) => 1,
-            RacerStatus::Dq(_) => 2,
-        }
-    }
-}
+/// DNF / DQ reasons and racer status (contract types since v0.3.0).
+pub use wp_contracts::{DnfReason, DqReason, RacerStatus};
 
 /// Drag-specific results.
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
@@ -143,6 +88,22 @@ pub struct RacerResult {
     pub cargo_damage_cost: i64,
     /// Drag stats (drag only).
     pub drag: Option<DragStats>,
+}
+
+impl From<&RacerResult> for wp_contracts::RaceResultRow {
+    fn from(r: &RacerResult) -> Self {
+        wp_contracts::RaceResultRow {
+            racer: r.racer,
+            position: r.position,
+            status: r.status,
+            elapsed_subticks: r.elapsed_subticks,
+            best_lap_subticks: r.best_lap_subticks,
+            clean: r.clean,
+            contacts: r.contacts,
+            civilian_hits: r.civilian_hits,
+            cargo_damage_cost: r.cargo_damage_cost,
+        }
+    }
 }
 
 impl RacerResult {

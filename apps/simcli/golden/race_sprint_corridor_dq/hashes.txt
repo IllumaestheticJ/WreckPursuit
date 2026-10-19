@@ -1,4 +1,4 @@
-# simcli hashes scenario=race_sprint_corridor_dq systems=vehicle,damage hash_spec=3 contract=0.2.0
+# simcli hashes scenario=race_sprint_corridor_dq systems=vehicle,damage hash_spec=3 contract=0.3.0
 240 38edf78cd7f718c0
 480 198ce55b564a61f5
 720 575a8b48bc57ca7c

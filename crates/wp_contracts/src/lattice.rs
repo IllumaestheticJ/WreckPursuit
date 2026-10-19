@@ -51,6 +51,9 @@ pub enum BodyRegion {
     FrameRight,
     /// Passenger cell (pillars, floor, firewall). Intrusion here drives total loss.
     Cabin,
+    /// Bolt-on accessory ahead of / around the body: push bar, body kit (v0.3.0). Its own
+    /// detach group; no `HandlingEffects`; billed via `PriceTable::region_replace_cost`.
+    Accessory,
 }
 
 /// Mechanical component that can be damaged by intrusion.

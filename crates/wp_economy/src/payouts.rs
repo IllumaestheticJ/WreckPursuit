@@ -15,42 +15,8 @@ use crate::ledger::{
     ViolationCounts,
 };
 
-/// Race type; keys `stakes.toml [race_types.*]`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub enum RaceType {
-    /// Point-to-point through traffic.
-    Sprint,
-    /// Laps of a closed-ish loop.
-    Circuit,
-    /// Quarter-mile.
-    Drag,
-    /// Mountain / hill road duel.
-    Touge,
-    /// Informal street meet sprint: free entry, small purse (what you can still do in debt).
-    Meet,
-}
-
-impl RaceType {
-    /// Every race type.
-    pub const ALL: [RaceType; 5] = [
-        RaceType::Sprint,
-        RaceType::Circuit,
-        RaceType::Drag,
-        RaceType::Touge,
-        RaceType::Meet,
-    ];
-
-    /// Stable id used in events.
-    pub fn id(self) -> &'static str {
-        match self {
-            RaceType::Sprint => "sprint",
-            RaceType::Circuit => "circuit",
-            RaceType::Drag => "drag",
-            RaceType::Touge => "touge",
-            RaceType::Meet => "meet",
-        }
-    }
-}
+/// Race type; keys `stakes.toml [race_types.*]` (contract type since v0.3.0).
+pub use wp_contracts::RaceType;
 
 /// A race as set up in the lobby (prompt 07).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

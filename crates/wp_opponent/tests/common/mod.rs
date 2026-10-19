@@ -10,6 +10,7 @@ use wp_opponent::{
     CarCapability, CorridorOptions, DriverProfile, EventHeat, Field, GridLayout, NoPolice,
     OpposingLanes, PoliceQuery, RaceConfig, RacerSpec, VehicleObs,
 };
+use wp_police::PoliceEventExt;
 use wp_sim::{Sim, SimConfig, VehicleKind};
 use wp_world::procgen::ProcGenConfig;
 use wp_world::{ActiveRoute, TrafficConfig, World, WorldConfig};

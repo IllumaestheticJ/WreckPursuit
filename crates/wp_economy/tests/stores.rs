@@ -93,7 +93,7 @@ fn events_round_trip_through_sim_event() {
     for x in &ev {
         let se = x.to_sim_event();
         match &se {
-            SimEvent::EconomyEvent { kind, .. } => assert_eq!(*kind, x.reason.kind_code()),
+            SimEvent::Economy(e) => assert_eq!(e.reason.kind_code(), x.reason.kind_code()),
             _ => panic!("wrong variant"),
         }
         assert_eq!(EconomyEvent::from_sim_event(&se).as_ref(), Some(x));

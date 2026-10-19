@@ -54,6 +54,13 @@
         "format": "float"
       }
     },
+    "treaded": {
+      "description": "Treaded tire (v0.3.0, weather W-4). `None` = treaded; slicks set `false` and\naquaplane much earlier.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "wear_rate": {
       "description": "Tread wear per metre of sliding distance at nominal load, fraction of tread (0..1) per m.",
       "type": "number",

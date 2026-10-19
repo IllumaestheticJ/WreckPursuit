@@ -44,16 +44,16 @@ impl Default for TireProfile {
 
 impl TireProfile {
     /// Derive a profile from a tire definition and the wheel's `WheelDef::width_m`. `wet_ratio` comes from the tire's surface table
-    /// (`WetAsphalt / Asphalt`, missing entries = 1.0 as in `wp_vehicle`); `treaded` is inferred
-    /// as `wet_ratio >= 0.6` (semi-slicks and slicks fall below) until the contract has a tread
-    /// field.
+    /// (`WetAsphalt / Asphalt`, missing entries = 1.0 as in `wp_vehicle`); `treaded` is
+    /// `TireDef::treaded` (contract v0.3.0) when set, else inferred as `wet_ratio >= 0.6`
+    /// (semi-slicks and slicks fall below).
     pub fn from_tire_def(def: &TireDef, width_m: f32) -> Self {
         let get = |s| def.surface_multipliers.get(&s).copied().unwrap_or(1.0);
         let dry = get(SurfaceType::Asphalt).max(1e-3);
         let wet_ratio = (get(SurfaceType::WetAsphalt) / dry).clamp(0.0, 1.0);
         Self {
             width_m,
-            treaded: wet_ratio >= 0.6,
+            treaded: def.treaded.unwrap_or(wet_ratio >= 0.6),
             wet_ratio,
         }
     }

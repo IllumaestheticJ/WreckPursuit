@@ -16,6 +16,14 @@ pub struct EntityId(pub u32);
 )]
 pub struct PlayerId(pub u32);
 
+/// Durable account id (v0.3.0, F NET-5 / meta MC-1): allocated by meta at signup and stable
+/// across instances, unlike the per-instance [`PlayerId`] slot. The server maps
+/// `PlayerId → AccountId` at join.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+pub struct AccountId(pub u32);
+
 /// Role a human player holds in an instance.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,

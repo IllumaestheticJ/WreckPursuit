@@ -1,14 +1,12 @@
-//! Pursuit → economy wiring (draft for contract v0.3.0).
+//! Pursuit → economy wiring.
 //!
-//! `wp_police` reports pursuits through the opaque `SimEvent::PoliceEvent` today; contract
-//! v0.3.0 will type them. To keep `wp_economy` free of a `wp_police` dependency, this module
-//! defines the two police facts the economy needs ([`PoliceSignal`]) and a small per-racer
-//! [`PursuitTracker`] that turns a pursuit ending into a [`PursuitResolution`]. The caller
-//! (`wp_sim` / the server, which see both crates) decodes police events into `PoliceSignal`s
-//! (see `tests/pursuit_wiring.rs` for the ten-line adapter from today's
-//! `wp_police::PoliceEvent`), maps the racer's `EntityId` to an account + car, and calls
-//! [`Economy::settle_pursuit`], which dispatches to [`Economy::handle_capture`] /
-//! [`Economy::handle_escape`]. When v0.3.0 lands only the adapter changes.
+//! `wp_police` reports pursuits as the typed contract `SimEvent::Police` (v0.3.0).
+//! [`PoliceSignal::from_sim_event`] extracts the two facts the economy needs and a small
+//! per-racer [`PursuitTracker`] turns a pursuit ending into a [`PursuitResolution`]. The caller
+//! maps the racer's `EntityId` to an account + car and calls [`Economy::settle_pursuit`], which
+//! dispatches to [`Economy::handle_capture`] / [`Economy::handle_escape`]. (`PursuitEnded` now
+//! also carries `level`, `capturer` and `assists`; paying player cops from them is G's next
+//! step.)
 //!
 //! Event order matters: at a capture `wp_police` emits `PursuitEnded` **before** the
 //! `WantedLevelChanged` that drops the level, so the tracker's last known level is the level at
@@ -18,28 +16,15 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use wp_contracts::{DamageMode, DayPhase, EntityId, SimEvent, WantedLevel};
+use wp_contracts::{DamageMode, DayPhase, EntityId, PoliceEvent, SimEvent, WantedLevel};
 use wp_math::Rng;
 
 use crate::capture::{CaptureContext, CaptureOutcome};
 use crate::data::Economy;
 use crate::ledger::{CarUid, EconResult, PlayerAccount, ViolationCounts};
 
-/// How a pursuit ended. Mirrors `wp_police::PursuitOutcome` variant for variant (a test keeps
-/// them in step) until the contract owns the type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum PursuitEnd {
-    /// No unit had line of sight for the escape time.
-    Escaped,
-    /// Quiet dwell inside a safehouse.
-    Safehouse,
-    /// Stopped next to a unit.
-    Captured,
-    /// The racer's car became a total loss while wanted.
-    CapturedTotalLoss,
-    /// Called off by the captain.
-    CalledOff,
-}
+/// How a pursuit ended: the contract `PursuitOutcome` (v0.3.0; the old local mirror is gone).
+pub use wp_contracts::PursuitOutcome as PursuitEnd;
 
 /// The police facts the economy consumes, decoded from `SimEvent::PoliceEvent` by the caller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -57,6 +42,9 @@ pub enum PoliceSignal {
         racer: EntityId,
         /// Outcome.
         outcome: PursuitEnd,
+        /// Wanted level when the pursuit ended, as carried by the v0.3.0 `PursuitEnded` event
+        /// (`None` if unknown: the tracker's last `WantedLevelChanged` is used).
+        level: WantedLevel,
     },
 }
 
@@ -73,6 +61,32 @@ pub struct PursuitResolution {
     pub max_level: WantedLevel,
     /// Violations since the racer's last capture (or since tracking started).
     pub violations: ViolationCounts,
+}
+
+impl PoliceSignal {
+    /// Decode the economy-relevant police facts from a drained `SimEvent` (v0.3.0 typed
+    /// `SimEvent::Police`). `None` for everything else.
+    pub fn from_sim_event(ev: &SimEvent) -> Option<Self> {
+        match ev {
+            SimEvent::Police(PoliceEvent::WantedLevelChanged { racer, level }) => {
+                Some(PoliceSignal::WantedLevelChanged {
+                    racer: *racer,
+                    level: *level,
+                })
+            }
+            SimEvent::Police(PoliceEvent::PursuitEnded {
+                racer,
+                outcome,
+                level,
+                ..
+            }) => Some(PoliceSignal::PursuitEnded {
+                racer: *racer,
+                outcome: *outcome,
+                level: *level,
+            }),
+            _ => None,
+        }
+    }
 }
 
 /// What [`Economy::settle_pursuit`] did.
@@ -130,13 +144,19 @@ impl PursuitTracker {
                 t.max_level = t.max_level.max(level);
                 None
             }
-            PoliceSignal::PursuitEnded { racer, outcome } => {
+            PoliceSignal::PursuitEnded {
+                racer,
+                outcome,
+                level,
+            } => {
                 let t = self.racers.entry(racer).or_default();
+                // The event's level covers heat set without a `WantedLevelChanged` (v0.3.0).
+                let at_end = t.level.max(level);
                 let res = PursuitResolution {
                     racer,
                     outcome,
-                    level: t.level,
-                    max_level: t.max_level.max(t.level),
+                    level: at_end,
+                    max_level: t.max_level.max(at_end),
                     violations: t.violations,
                 };
                 // The next pursuit's maximum starts fresh (its current level is folded in

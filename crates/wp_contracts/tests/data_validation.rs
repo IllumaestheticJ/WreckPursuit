@@ -231,17 +231,102 @@ fn runtime_types_round_trip_through_json() {
             region: BodyRegion::FrontBumper,
             severity: 0.4,
         },
+        SimEvent::Police(PoliceEvent::PursuitEnded {
+            racer: EntityId(1),
+            outcome: PursuitOutcome::Captured,
+            level: WantedLevel::L3,
+            capturer: Some(UnitId(4)),
+            assists: vec![UnitId(5)],
+        }),
+        SimEvent::Economy(EconomyEvent {
+            account: AccountId(7),
+            seq: 3,
+            day: 2,
+            reason: EconomyReason::RacePayout {
+                race: RaceType::Sprint,
+                placement: 1,
+            },
+            car: Some(CarUid(1)),
+            cash_delta: 900,
+            rep_delta: 10,
+            bounty_delta: 0,
+            cop_xp_delta: 0,
+            cash_after: 1900,
+        }),
+        SimEvent::Race(RaceEvent::RacerDnf {
+            event: RaceEventId(1001),
+            racer: EntityId(2),
+            reason: DnfReason::Captured,
+        }),
+        SimEvent::WeatherChanged {
+            kind: WeatherKind::HeavyRain,
+            intensity: 0.8,
+            forced: false,
+        },
     ];
     let msg = ServerToClient::Snapshot {
         tick: 9,
         vehicles: vec![(EntityId(1), VehicleState::default())],
+        traffic: vec![TrafficAgentSnapshot {
+            id: 3,
+            pos: [1.0, 2.0, 0.0],
+            yaw: 0.5,
+            speed_mps: 10.0,
+            flags: traffic_flags::BRAKE,
+            variant: 2,
+        }],
         events: ev,
     };
     let text = serde_json::to_string(&msg).unwrap();
     assert_eq!(serde_json::from_str::<ServerToClient>(&text).unwrap(), msg);
+    let cmd = ClientToServer::CaptainCommand(CaptainCommand::RequestSpikes {
+        target: EntityId(3),
+        road: Some(RoadEdgeId(9)),
+    });
+    let text = serde_json::to_string(&cmd).unwrap();
+    assert_eq!(serde_json::from_str::<ClientToServer>(&text).unwrap(), cmd);
+    let reply = ServerToClient::CaptainReply(Err(CaptainError::Site(SiteError::BlindCorner)));
+    let text = serde_json::to_string(&reply).unwrap();
+    assert_eq!(
+        serde_json::from_str::<ServerToClient>(&text).unwrap(),
+        reply
+    );
+    assert_eq!(
+        EconomyReason::StakeCharged {
+            race: RaceType::Drag
+        }
+        .kind_code(),
+        10
+    );
+    assert_eq!(RaceType::from_id("touge"), Some(RaceType::Touge));
+    assert_eq!(
+        WorldWithoutWeather.weather_at([0.0; 3]),
+        LocalConditions::DRY
+    );
     assert_eq!(HandlingEffects::default(), HandlingEffects::NEUTRAL);
     assert_eq!(
         PHYSICS_TICKS_PER_NET_TICK,
         (1.0 / PHYSICS_DT).round() as u32 / NET_TICK_HZ
     );
+}
+
+/// A `WorldQuery` that does not override `weather_at` (checks the v0.3.0 default).
+struct WorldWithoutWeather;
+
+impl WorldQuery for WorldWithoutWeather {
+    fn surface_at(&self, _p: [f32; 3]) -> SurfaceType {
+        SurfaceType::Asphalt
+    }
+    fn speed_limit_at(&self, _p: [f32; 3]) -> Option<f32> {
+        None
+    }
+    fn signal_state_ahead(&self, _p: [f32; 3], _h: [f32; 3]) -> Option<SignalState> {
+        None
+    }
+    fn time_of_day(&self) -> TimeOfDay {
+        TimeOfDay::from_hours(12.0)
+    }
+    fn line_of_sight(&self, _a: [f32; 3], _b: [f32; 3]) -> bool {
+        true
+    }
 }

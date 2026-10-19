@@ -25,6 +25,7 @@ pub mod hull;
 pub mod lattice_gen;
 mod model;
 pub mod repair;
+mod snapshot;
 mod solver;
 #[cfg(test)]
 mod tests;

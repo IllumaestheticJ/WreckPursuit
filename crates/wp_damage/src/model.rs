@@ -12,8 +12,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use wp_contracts::{
-    BodyRegion, Component, ContactImpulse, DamageSim, EntityId, HandlingEffects, LatticeDef,
-    MaterialDef, MaterialKind, ModeTable, PriceTable, RepairEstimate, SimEvent,
+    BodyRegion, Component, ContactImpulse, DamageSim, DamageSnapshot, DamageSummary, EntityId,
+    HandlingEffects, LatticeDef, MaterialDef, MaterialKind, ModeTable, PriceTable, RepairEstimate,
+    RepairItem, SimEvent,
 };
 use wp_math::{Rng, StateHasher};
 
@@ -23,7 +24,7 @@ use crate::tuning::DamageTuning;
 use crate::vec3::{self, V3};
 
 /// Number of [`BodyRegion`] variants (regions index arrays via `region as usize`).
-pub const REGION_COUNT: usize = 20;
+pub const REGION_COUNT: usize = 21;
 
 /// Every [`BodyRegion`] in declaration (= index) order.
 pub const ALL_REGIONS: [BodyRegion; REGION_COUNT] = [
@@ -47,6 +48,7 @@ pub const ALL_REGIONS: [BodyRegion; REGION_COUNT] = [
     BodyRegion::FrameLeft,
     BodyRegion::FrameRight,
     BodyRegion::Cabin,
+    BodyRegion::Accessory,
 ];
 
 /// Weight of a region's plastic energy in structural health (frame and cabin dominate).
@@ -58,6 +60,8 @@ pub fn region_health_weight(r: BodyRegion) -> f32 {
         | RightDoorR | Roof | RearLeftQuarter | RearRightQuarter | Trunk => 0.6,
         FrontBumper | RearBumper => 0.3,
         Windshield | RearGlass => 0.1,
+        // Bolt-on push bars / kits: billed, but never part of the car's health (v0.3.0).
+        Accessory => 0.0,
     }
 }
 
@@ -319,6 +323,9 @@ pub struct DamageModel {
     pub(crate) log: Vec<DamageLogEntry>,
     pub(crate) emit_lattice_events: bool,
     pub(crate) last_emitted_pos: Vec<V3>,
+    /// Mode table of the last `apply_contacts` call (repair / restore recompute health and
+    /// effects with it). Not part of the state hash.
+    pub(crate) last_mode: Option<ModeTable>,
 }
 
 impl DamageModel {
@@ -542,6 +549,7 @@ impl DamageModel {
             log: Vec::new(),
             emit_lattice_events: false,
             last_emitted_pos: rest_pos,
+            last_mode: None,
         };
         model.recompute_hull();
         model
@@ -813,6 +821,7 @@ impl DamageModel {
     pub fn reset(&mut self) {
         let entity = self.entity;
         let emit = self.emit_lattice_events;
+        let last_mode = self.last_mode.take();
         *self = Self::with_tuning(
             &self.def.clone(),
             &self.materials.clone(),
@@ -821,6 +830,7 @@ impl DamageModel {
         );
         self.entity = entity;
         self.emit_lattice_events = emit;
+        self.last_mode = last_mode;
     }
 
     /// Outer convex hull of the active nodes (chassis space) for the chassis collider.
@@ -1218,25 +1228,7 @@ impl DamageModel {
     }
 
     fn update_health(&mut self, mode: &ModeTable, out: &mut Vec<SimEvent>) {
-        let mut weighted = 0.0;
-        for r in ALL_REGIONS {
-            weighted += region_health_weight(r) * self.region_plastic_j[r as usize];
-        }
-        let e_ref = (self.tuning.total_loss_energy_per_kg * self.lattice_mass_kg).max(1.0);
-        let structural = 1.0 - (weighted / e_ref).clamp(0.0, 1.0);
-        let (mut wsum, mut hsum) = (0.0, 0.0);
-        for c in &self.components {
-            let w = component_health_weight(c.kind);
-            wsum += w;
-            hsum += w * c.health;
-        }
-        let comp = if wsum > 0.0 { hsum / wsum } else { 1.0 };
-        let raw = if mode.global_health_from_intrusion {
-            let sw = self.tuning.structural_health_weight;
-            sw * structural + (1.0 - sw) * comp
-        } else {
-            comp
-        };
+        let raw = self.raw_health(mode.global_health_from_intrusion);
         if raw < self.health {
             self.health = raw.max(0.0);
         }
@@ -1252,7 +1244,7 @@ impl DamageModel {
         }
     }
 
-    fn compute_effects(&self, mode: &ModeTable) -> HandlingEffects {
+    pub(crate) fn compute_effects(&self, mode: &ModeTable) -> HandlingEffects {
         let mut e = HandlingEffects::NEUTRAL;
         let mut power = 1.0f32;
         for c in &self.components {
@@ -1411,6 +1403,9 @@ impl DamageSim for DamageModel {
         }
         self.maybe_update_hull();
         self.effects = self.compute_effects(mode);
+        if self.last_mode.as_ref() != Some(mode) {
+            self.last_mode = Some(mode.clone());
+        }
     }
 
     fn handling_effects(&self) -> HandlingEffects {
@@ -1423,5 +1418,21 @@ impl DamageSim for DamageModel {
 
     fn repair_estimate(&self, mode: &ModeTable, price_table: &PriceTable) -> RepairEstimate {
         crate::repair::estimate(self, mode, price_table)
+    }
+
+    fn summary(&self) -> DamageSummary {
+        self.damage_summary()
+    }
+
+    fn save_state(&self) -> DamageSnapshot {
+        self.snapshot()
+    }
+
+    fn restore_state(&mut self, s: &DamageSnapshot) -> Result<(), String> {
+        self.restore_snapshot(s)
+    }
+
+    fn apply_repair(&mut self, items: &[RepairItem]) {
+        self.repair_items(items)
     }
 }

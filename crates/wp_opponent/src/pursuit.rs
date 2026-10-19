@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 
 use wp_contracts::{EntityId, SimEvent};
-use wp_police::events::{PoliceEvent, UnitId};
+use wp_police::events::{PoliceEvent, PoliceEventExt, UnitId};
 use wp_world::geom::V2;
 
 /// What a racer can know about the police.

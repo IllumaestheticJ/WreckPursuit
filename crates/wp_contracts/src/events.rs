@@ -7,7 +7,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{BodyRegion, Component, EntityId};
+use crate::{BodyRegion, Component, EconomyEvent, EntityId, PoliceEvent, RaceEvent, WeatherKind};
 
 /// Kind of traffic violation detected by `wp_world`.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -113,19 +113,20 @@ pub enum SimEvent {
         /// Damage severity 0 (cosmetic) ..= 1 (destroyed).
         severity: f32,
     },
-    /// Police event with a payload defined by `wp_police` (opaque to everyone else).
-    PoliceEvent {
-        /// Payload kind discriminator, defined by `wp_police`.
-        kind: u16,
-        /// Encoded payload, defined by `wp_police`.
-        payload: Vec<u8>,
-    },
-    /// Economy event with a payload defined by `wp_economy` (opaque to everyone else).
-    EconomyEvent {
-        /// Payload kind discriminator, defined by `wp_economy`.
-        kind: u16,
-        /// Encoded payload, defined by `wp_economy`.
-        payload: Vec<u8>,
+    /// Police event (v0.3.0: typed; replaces `PoliceEvent { kind, payload }`).
+    Police(PoliceEvent),
+    /// Economy event (v0.3.0: typed; replaces `EconomyEvent { kind, payload }`).
+    Economy(EconomyEvent),
+    /// Race event (v0.3.0).
+    Race(RaceEvent),
+    /// The weather regime changed (v0.3.0, weather W-2; audio, HUD, replays, stakes).
+    WeatherChanged {
+        /// New regime.
+        kind: WeatherKind,
+        /// Intensity 0..1.
+        intensity: f32,
+        /// Forced by a scenario / admin rather than the schedule.
+        forced: bool,
     },
 }
 

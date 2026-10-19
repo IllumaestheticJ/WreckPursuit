@@ -224,11 +224,54 @@ impl PoliceSystem {
         }
     }
 
+    /// Units credited with capturing `racer`: the closest in-service ground unit assigned to
+    /// it (or, if none is assigned, the closest in-service ground unit) and the other assigned
+    /// units as assists, ascending ids. Read-only; does not touch simulation state.
+    fn capture_credit(&self, racer: EntityId) -> (Option<UnitId>, Vec<UnitId>) {
+        let p = xy(self.racers[&racer].pos);
+        let candidates: Vec<&crate::unit::Unit> = self
+            .units
+            .iter()
+            .filter(|u| u.kind == UnitKind::Car && !u.wrecked)
+            .collect();
+        let on_racer: Vec<&crate::unit::Unit> = candidates
+            .iter()
+            .copied()
+            .filter(|u| u.assignment.target() == Some(racer))
+            .collect();
+        let pool = if on_racer.is_empty() {
+            &candidates
+        } else {
+            &on_racer
+        };
+        let capturer = pool
+            .iter()
+            .min_by(|a, b| {
+                crate::graph::dist2(a.body.pos, p)
+                    .total_cmp(&crate::graph::dist2(b.body.pos, p))
+                    .then(a.id.cmp(&b.id))
+            })
+            .map(|u| u.id);
+        let mut assists: Vec<UnitId> = on_racer
+            .iter()
+            .map(|u| u.id)
+            .filter(|id| Some(*id) != capturer)
+            .collect();
+        assists.sort();
+        (capturer, assists)
+    }
+
     /// End the pursuit of `racer` with `outcome` (rules, total loss, or captain call-off).
     pub(crate) fn end_pursuit(&mut self, racer: EntityId, outcome: PursuitOutcome) {
         let now = self.now;
         let cfg = self.cfg.heat.clone();
         let was_pursued = self.racers[&racer].pursued();
+        let level_at_end = self.racers[&racer].level;
+        let (capturer, assists) = if outcome.is_capture() {
+            self.capture_credit(racer)
+        } else {
+            (None, Vec::new())
+        };
         {
             let rec = self.racers.get_mut(&racer).expect("racer");
             match outcome {
@@ -264,8 +307,13 @@ impl PoliceSystem {
             });
         }
         self.trails.remove(&racer);
-        self.pending
-            .push(PoliceEvent::PursuitEnded { racer, outcome });
+        self.pending.push(PoliceEvent::PursuitEnded {
+            racer,
+            outcome,
+            level: level_at_end,
+            capturer,
+            assists,
+        });
         self.pending.push(PoliceEvent::WantedLevelChanged {
             racer,
             level: self.racers[&racer].level,

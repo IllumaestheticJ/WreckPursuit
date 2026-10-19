@@ -111,6 +111,7 @@ fn surface_code(s: SurfaceType) -> u8 {
         SurfaceType::Dirt => 5,
         SurfaceType::Curb => 6,
         SurfaceType::Metal => 7,
+        SurfaceType::PaintedLine => 8,
     }
 }
 
@@ -124,6 +125,7 @@ fn surface_from(c: u8) -> Result<SurfaceType, SnapshotError> {
         5 => SurfaceType::Dirt,
         6 => SurfaceType::Curb,
         7 => SurfaceType::Metal,
+        8 => SurfaceType::PaintedLine,
         _ => return Err(SnapshotError::Malformed),
     })
 }

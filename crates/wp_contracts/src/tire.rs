@@ -38,6 +38,9 @@ pub enum SurfaceType {
     Curb,
     /// Metal plates, rails, bridge joints.
     Metal,
+    /// Painted lane markings and zebra crossings (v0.3.0, weather W-3; slippery when wet).
+    /// Tires without an entry use 1.0.
+    PaintedLine,
 }
 
 /// Simplified Pacejka Magic Formula coefficients for one axis:
@@ -82,4 +85,8 @@ pub struct TireDef {
     pub surface_multipliers: BTreeMap<SurfaceType, f32>,
     /// Tread wear per metre of sliding distance at nominal load, fraction of tread (0..1) per m.
     pub wear_rate: f32,
+    /// Treaded tire (v0.3.0, weather W-4). `None` = treaded; slicks set `false` and
+    /// aquaplane much earlier.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub treaded: Option<bool>,
 }

@@ -33,7 +33,7 @@ fn main() {
         for e in sim.drain_events() {
             match e {
                 SimEvent::TrafficViolation { .. } => viol += 1,
-                SimEvent::PoliceEvent { .. } => police_ev += 1,
+                SimEvent::Police(_) => police_ev += 1,
                 SimEvent::Contact { .. } => contacts += 1,
                 _ => {}
             }

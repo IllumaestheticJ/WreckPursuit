@@ -24,11 +24,8 @@ use crate::error::EconomyError;
 /// Whole in-game currency units. Negative cash = debt.
 pub type Money = i64;
 
-/// Identifier of one owned car, unique within an account (never reused).
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
-)]
-pub struct CarUid(pub u32);
+/// Identifier of one owned car, unique within an account (contract type since v0.3.0).
+pub use wp_contracts::CarUid;
 
 /// Where an owned car currently is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -306,25 +303,11 @@ impl PlayerAccount {
     }
 }
 
-/// Activity a player cop earned or lost XP for.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub enum CopXpReason {
-    /// Made a capture.
-    Capture,
-    /// Assisted a capture.
-    Assist,
-    /// Minutes of patrol / pursuit without incident.
-    CleanDriving,
-    /// Hit a civilian.
-    CivilianCollision,
-    /// Wrecked own unit.
-    SelfWreck,
-    /// Kept pushing after the risk budget was spent (prompt 06).
-    RiskBudgetOverspent,
-}
+/// Activity a player cop earned or lost XP for (contract type since v0.3.0).
+pub use wp_contracts::CopXpReason;
 
-/// Why an account changed. The `u16` discriminator ([`EventReason::kind_code`]) is the
-/// `kind` of the opaque `SimEvent::EconomyEvent` until the contract types this payload.
+/// Why an account changed (ledger / persistence form). Converts to the contract
+/// `wp_contracts::EconomyReason` with [`EventReason::to_contract`]; the `u16` codes are the same.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum EventReason {
     /// Account created with starting cash.
@@ -499,7 +482,7 @@ pub enum EventReason {
 }
 
 impl EventReason {
-    /// Stable `u16` discriminator, used as `SimEvent::EconomyEvent::kind`.
+    /// Stable `u16` discriminator (= `wp_contracts::EconomyReason::kind_code`).
     pub fn kind_code(&self) -> u16 {
         use EventReason::*;
         match self {
@@ -580,21 +563,185 @@ pub struct EconomyEvent {
 }
 
 impl EconomyEvent {
-    /// Encode as the contract's opaque `SimEvent::EconomyEvent` (`kind` = reason code,
-    /// `payload` = JSON of this struct) for the net layer / client feed.
-    pub fn to_sim_event(&self) -> SimEvent {
-        SimEvent::EconomyEvent {
-            kind: self.reason.kind_code(),
-            payload: serde_json::to_vec(self).expect("economy events always serialize"),
+    /// The contract form (v0.3.0): `player` becomes the durable `AccountId` (same number until
+    /// the economy switches to meta's account ids), reasons are renamed
+    /// (`RaceEntryFee` → `StakeCharged`, `RacePurse` → `RacePayout`).
+    pub fn to_contract(&self) -> wp_contracts::EconomyEvent {
+        wp_contracts::EconomyEvent {
+            account: wp_contracts::AccountId(self.player.0),
+            seq: self.seq,
+            day: self.day,
+            reason: self.reason.to_contract(),
+            car: self.car,
+            cash_delta: self.cash_delta,
+            rep_delta: self.rep_delta,
+            bounty_delta: self.bounty_delta,
+            cop_xp_delta: self.cop_xp_delta,
+            cash_after: self.cash_after,
         }
     }
 
-    /// Decode a `SimEvent::EconomyEvent` produced by [`EconomyEvent::to_sim_event`].
-    /// Returns `None` for other event types or undecodable payloads.
+    /// Inverse of [`EconomyEvent::to_contract`].
+    pub fn from_contract(e: &wp_contracts::EconomyEvent) -> Self {
+        Self {
+            player: PlayerId(e.account.0),
+            seq: e.seq,
+            day: e.day,
+            reason: EventReason::from_contract(&e.reason),
+            car: e.car,
+            cash_delta: e.cash_delta,
+            rep_delta: e.rep_delta,
+            bounty_delta: e.bounty_delta,
+            cop_xp_delta: e.cop_xp_delta,
+            cash_after: e.cash_after,
+        }
+    }
+
+    /// Wrap as the contract event `SimEvent::Economy` for the net layer / client feed.
+    pub fn to_sim_event(&self) -> SimEvent {
+        SimEvent::Economy(self.to_contract())
+    }
+
+    /// Decode a `SimEvent::Economy`. Returns `None` for other event types.
     pub fn from_sim_event(ev: &SimEvent) -> Option<Self> {
         match ev {
-            SimEvent::EconomyEvent { payload, .. } => serde_json::from_slice(payload).ok(),
+            SimEvent::Economy(e) => Some(Self::from_contract(e)),
             _ => None,
+        }
+    }
+}
+
+impl EventReason {
+    /// Contract form of this reason. Race type ids that `wp_contracts::RaceType` does not know
+    /// (only possible for hand-edited records) become an `Adjustment` naming them.
+    pub fn to_contract(&self) -> wp_contracts::EconomyReason {
+        use wp_contracts::{EconomyReason as C, RaceType};
+        use EventReason as R;
+        let unknown_race = |race: &str| C::Adjustment {
+            note: format!("unknown race type {race}"),
+        };
+        match self.clone() {
+            R::AccountOpened => C::AccountOpened,
+            R::RaceEntryFee { race } => match RaceType::from_id(&race) {
+                Some(race) => C::StakeCharged { race },
+                None => unknown_race(&race),
+            },
+            R::RacePurse { race, placement } => match RaceType::from_id(&race) {
+                Some(race) => C::RacePayout { race, placement },
+                None => unknown_race(&race),
+            },
+            R::CleanRaceBonus => C::CleanRaceBonus,
+            R::RaceRep { placement } => C::RaceRep { placement },
+            R::PinkSlipWon { def_id } => C::PinkSlipWon { def_id },
+            R::PinkSlipLost { def_id } => C::PinkSlipLost { def_id },
+            R::RepairPaid {
+                lines,
+                labour_multiplier,
+            } => C::RepairPaid {
+                lines,
+                labour_multiplier,
+            },
+            R::InsuranceClaim { covered } => C::InsuranceClaim { covered },
+            R::InsuranceClaimDenied => C::InsuranceClaimDenied,
+            R::DriveDamaged => C::DriveDamaged,
+            R::CarScrapped { def_id } => C::CarScrapped { def_id },
+            R::ShopReported { district, level } => C::ShopReported { district, level },
+            R::Fine { level } => C::Fine { level },
+            R::Bail => C::Bail,
+            R::CaptureRepLoss { level } => C::CaptureRepLoss { level },
+            R::BountyCleared => C::BountyCleared,
+            R::BountyGained => C::BountyGained,
+            R::Towing => C::Towing,
+            R::CarImpounded => C::CarImpounded,
+            R::ImpoundRetrieved { days } => C::ImpoundRetrieved { days },
+            R::CarAuctioned { def_id } => C::CarAuctioned { def_id },
+            R::CarSeized { def_id } => C::CarSeized { def_id },
+            R::CarDestroyed { def_id } => C::CarDestroyed { def_id },
+            R::Escape { level } => C::Escape { level },
+            R::CopReward { level } => C::CopReward { level },
+            R::CopXp { reason } => C::CopXp { reason },
+            R::InformantTip {
+                tier,
+                heat_reduction,
+            } => C::InformantTip {
+                tier,
+                heat_reduction,
+            },
+            R::CarPurchased { def_id } => C::CarPurchased { def_id },
+            R::CarSold { def_id } => C::CarSold { def_id },
+            R::FloorCarIssued { def_id } => C::FloorCarIssued { def_id },
+            R::ModInstalled { mod_id } => C::ModInstalled { mod_id },
+            R::ModRemoved { mod_id } => C::ModRemoved { mod_id },
+            R::InsurancePurchased { tier } => C::InsurancePurchased { tier },
+            R::InsurancePremium => C::InsurancePremium,
+            R::InsuranceLapsed => C::InsuranceLapsed,
+            R::InsuranceVoided => C::InsuranceVoided,
+            R::DamageRecorded { health, total_loss } => C::DamageRecorded { health, total_loss },
+            R::Adjustment { note } => C::Adjustment { note },
+        }
+    }
+
+    /// Inverse of [`EventReason::to_contract`].
+    pub fn from_contract(c: &wp_contracts::EconomyReason) -> Self {
+        use wp_contracts::EconomyReason as C;
+        use EventReason as R;
+        match c.clone() {
+            C::AccountOpened => R::AccountOpened,
+            C::StakeCharged { race } => R::RaceEntryFee {
+                race: race.id().into(),
+            },
+            C::RacePayout { race, placement } => R::RacePurse {
+                race: race.id().into(),
+                placement,
+            },
+            C::CleanRaceBonus => R::CleanRaceBonus,
+            C::RaceRep { placement } => R::RaceRep { placement },
+            C::PinkSlipWon { def_id } => R::PinkSlipWon { def_id },
+            C::PinkSlipLost { def_id } => R::PinkSlipLost { def_id },
+            C::RepairPaid {
+                lines,
+                labour_multiplier,
+            } => R::RepairPaid {
+                lines,
+                labour_multiplier,
+            },
+            C::InsuranceClaim { covered } => R::InsuranceClaim { covered },
+            C::InsuranceClaimDenied => R::InsuranceClaimDenied,
+            C::DriveDamaged => R::DriveDamaged,
+            C::CarScrapped { def_id } => R::CarScrapped { def_id },
+            C::ShopReported { district, level } => R::ShopReported { district, level },
+            C::DamageRecorded { health, total_loss } => R::DamageRecorded { health, total_loss },
+            C::Fine { level } => R::Fine { level },
+            C::Bail => R::Bail,
+            C::CaptureRepLoss { level } => R::CaptureRepLoss { level },
+            C::BountyCleared => R::BountyCleared,
+            C::BountyGained => R::BountyGained,
+            C::Towing => R::Towing,
+            C::CarImpounded => R::CarImpounded,
+            C::ImpoundRetrieved { days } => R::ImpoundRetrieved { days },
+            C::CarAuctioned { def_id } => R::CarAuctioned { def_id },
+            C::CarSeized { def_id } => R::CarSeized { def_id },
+            C::CarDestroyed { def_id } => R::CarDestroyed { def_id },
+            C::Escape { level } => R::Escape { level },
+            C::CopReward { level } => R::CopReward { level },
+            C::CopXp { reason } => R::CopXp { reason },
+            C::InformantTip {
+                tier,
+                heat_reduction,
+            } => R::InformantTip {
+                tier,
+                heat_reduction,
+            },
+            C::CarPurchased { def_id } => R::CarPurchased { def_id },
+            C::CarSold { def_id } => R::CarSold { def_id },
+            C::FloorCarIssued { def_id } => R::FloorCarIssued { def_id },
+            C::ModInstalled { mod_id } => R::ModInstalled { mod_id },
+            C::ModRemoved { mod_id } => R::ModRemoved { mod_id },
+            C::InsurancePurchased { tier } => R::InsurancePurchased { tier },
+            C::InsurancePremium => R::InsurancePremium,
+            C::InsuranceLapsed => R::InsuranceLapsed,
+            C::InsuranceVoided => R::InsuranceVoided,
+            C::Adjustment { note } => R::Adjustment { note },
         }
     }
 }

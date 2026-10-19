@@ -16,6 +16,8 @@
 
 #![warn(missing_docs)]
 
+pub mod damage;
+pub mod economy;
 pub mod events;
 pub mod ids;
 pub mod lattice;
@@ -23,6 +25,8 @@ pub mod load;
 pub mod material;
 pub mod mode;
 pub mod net;
+pub mod police;
+pub mod race;
 pub mod repair;
 pub mod runtime;
 pub mod schema;
@@ -30,7 +34,11 @@ pub mod time;
 pub mod tire;
 pub mod traits;
 pub mod vehicle;
+pub mod weather;
+pub mod world;
 
+pub use damage::*;
+pub use economy::*;
 pub use events::*;
 pub use ids::*;
 pub use lattice::*;
@@ -38,15 +46,19 @@ pub use load::*;
 pub use material::*;
 pub use mode::*;
 pub use net::*;
+pub use police::*;
+pub use race::*;
 pub use repair::*;
 pub use runtime::*;
 pub use time::*;
 pub use tire::*;
 pub use traits::*;
 pub use vehicle::*;
+pub use weather::*;
+pub use world::*;
 
 /// Semantic version of the contract. Bumped on every change; see `docs/CONTRACT_CHANGELOG.md`.
-pub const CONTRACT_VERSION: &str = "0.2.0";
+pub const CONTRACT_VERSION: &str = "0.3.0";
 
 /// Fixed physics timestep in seconds (240 Hz). The only `dt` simulation code may integrate with.
 pub const PHYSICS_DT: f32 = 1.0 / 240.0;
