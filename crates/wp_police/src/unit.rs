@@ -453,6 +453,7 @@ impl Unit {
         // A pass is tied to the old track's arc length.
         self.avoid.pass_offset_m = None;
         self.avoid.blocked_s = 0.0;
+        self.avoid.junction = None;
     }
 
     /// Whether handling damage forces the unit to pull over.

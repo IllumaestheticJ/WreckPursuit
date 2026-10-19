@@ -587,6 +587,16 @@ impl PoliceSystem {
         let ext = self.ext_obstacles_set;
         if ext {
             self.obstacles.extend_from_slice(&self.ext_obstacles);
+            // Mark police cars (junction give-way breaks ties between units by id).
+            for o in &mut self.obstacles {
+                if let Some(u) = self
+                    .units
+                    .iter()
+                    .find(|u| u.entity.is_some() && u.entity == o.entity)
+                {
+                    o.unit = Some(u.id);
+                }
+            }
         } else {
             for r in self.racers.values() {
                 self.obstacles.push(avoid::Obstacle::car(
@@ -626,6 +636,8 @@ impl PoliceSystem {
             heading: u.body.heading,
             track_s: u.track_s,
             ignore,
+            target: u.assignment.target(),
+            skip_higher_units: false,
         };
         avoid::update(
             &mut u.avoid,
@@ -711,9 +723,13 @@ impl PoliceSystem {
         }
         let v = u.body.speed;
         if !u.cmd.track.is_drivable() {
+            // Parked (tool units, between jobs): hold the brake. The controller alone releases
+            // it below its hold speed, and the car would idle-creep away.
             let (_, b) = u.controller().pedals(v, -brake, dt, true);
+            let (brake, handbrake) = standstill_hold(v, b);
             return Some(VehicleInput {
-                brake: b,
+                brake,
+                handbrake,
                 siren: u.cmd.siren,
                 headlights: true,
                 ..Default::default()
@@ -733,16 +749,19 @@ impl PoliceSystem {
         let siren = u.cmd.siren;
         let ctl = u.controller();
         let steer = ctl.steer(pos, heading, [target[0], target[1], 0.0]);
-        let (throttle, mut brake) = ctl.pedals(v, acc, dt, disabled);
+        let (mut throttle, mut brake) = ctl.pedals(v, acc, dt, disabled);
+        let mut handbrake = 0.0;
         if hold {
-            // The shared controller releases the brake below its hold speed (no creeping
-            // backwards); right behind another vehicle the unit must not creep forwards either.
-            brake = 1.0;
+            // The shared controller releases the brake below its hold speed; right behind
+            // another vehicle or at a stop line the unit must not creep forwards either.
+            throttle = 0.0;
+            (brake, handbrake) = standstill_hold(v, brake.max(1.0));
         }
         Some(VehicleInput {
             steer,
             throttle,
             brake,
+            handbrake,
             siren,
             headlights: true,
             ..Default::default()
@@ -855,6 +874,20 @@ impl PoliceSystem {
         h.write_u32(self.spikes.len() as u32);
         h.write_u64(self.stats.pursuits.len() as u64);
         h.finish()
+    }
+}
+
+/// Pedal held at a standstill (below `wp_vehicle`'s auto-reverse threshold of 0.5).
+const STANDSTILL_BRAKE: f32 = 0.4;
+
+/// Brake and handbrake that keep a car stopped: above walking pace the requested `brake`; at a
+/// standstill a light pedal plus the handbrake, because `wp_vehicle`'s automatic gearbox
+/// engages reverse when the pedal is held past half travel at a standstill.
+fn standstill_hold(v: f32, brake: f32) -> (f32, f32) {
+    if v.abs() > 1.0 {
+        (brake, 0.0)
+    } else {
+        (STANDSTILL_BRAKE, 1.0)
     }
 }
 

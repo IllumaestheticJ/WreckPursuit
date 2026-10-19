@@ -449,6 +449,38 @@ pub struct AvoidConfig {
     pub pass_creep_mps: f32,
     /// ... while it is further than this, m.
     pub pass_creep_gap_m: f32,
+    /// Look this far ahead on the track for the next junction, m.
+    pub junction_lookahead_m: f32,
+    /// Stop line distance before the junction centre, m.
+    pub stop_line_back_m: f32,
+    /// Speed is down to the junction speed this far before the centre, m.
+    pub junction_slow_m: f32,
+    /// Patrol speed through an unsignalised junction, m/s.
+    pub yield_mps: f32,
+    /// Speed through a turn at a junction, m/s.
+    pub turn_mps: f32,
+    /// With lights: speed through a turn at a junction, m/s.
+    pub siren_turn_mps: f32,
+    /// With lights: speed through a junction, m/s.
+    pub siren_junction_mps: f32,
+    /// With lights: speed through a junction against a red, m/s.
+    pub siren_red_mps: f32,
+    /// Give way: check cross traffic within this distance of the junction centre, m.
+    pub yield_radius_m: f32,
+    /// ... once the junction is this close, m.
+    pub yield_lookahead_m: f32,
+    /// ... and wait while it arrives less than this after the unit would, s.
+    pub yield_gap_s: f32,
+    /// Radius of the junction box (anything inside it blocks), m.
+    pub box_radius_m: f32,
+    /// Longest wait for cross traffic without lights, s.
+    pub yield_max_s: f32,
+    /// Longest wait with lights (at a red), s.
+    pub yield_max_siren_s: f32,
+    /// Without lights, no passing a stopped vehicle this close to a junction, m.
+    pub no_pass_near_junction_m: f32,
+    /// Stopped behind another police unit this long, the lower id creeps on, s.
+    pub gridlock_s: f32,
     /// Units spawn at least this far from any vehicle, m.
     pub spawn_clear_m: f32,
     /// ... and not where a moving vehicle will be within this time, s.

@@ -33,6 +33,12 @@ use crate::unit::{
 };
 use crate::{PoliceSystem, PursuitRecord, RacerObs};
 
+/// Below this speed a racer counts as stopped for interception, m/s.
+const STOPPED_RACER_MPS: f32 = 2.0;
+
+/// A pursuer this close to the racer tracks the racer's end of the breadcrumb trail, m.
+const NEAR_RACER_M: f32 = 40.0;
+
 /// Pursuit speed: `min(max(target × (1 + margin), floor), cap)`. The floor (10 m/s) lets units
 /// close on a stopped racer for the arrest.
 pub fn pursuit_speed_cap(target_speed: f32, margin: f32, cap: f32) -> f32 {
@@ -390,7 +396,21 @@ impl PoliceSystem {
         let rec = self.racers.get(&racer)?;
         let p = rec.last_known?;
         let v = [rec.vel[0], rec.vel[1]];
-        let speed = (v[0] * v[0] + v[1] * v[1]).sqrt().max(5.0);
+        let real_speed = (v[0] * v[0] + v[1] * v[1]).sqrt();
+        if real_speed < STOPPED_RACER_MPS {
+            // A stopped racer stays put: drive to it (via the end of its road nearer the unit).
+            let rp = self.graph.nearest_on_road(p)?;
+            let seg = *self.graph.segment(rp.segment);
+            let me = self.units[i].body.pos;
+            let near =
+                if dist(self.graph.node(seg.a).pos, me) <= dist(self.graph.node(seg.b).pos, me) {
+                    seg.a
+                } else {
+                    seg.b
+                };
+            return Some((near, p));
+        }
+        let speed = real_speed.max(5.0);
         let h = &self.cfg.pursuit.tactics.intercept_horizon_s;
         let path = self.graph.predict_path(p, v, speed * h.max + 50.0);
         let u = &self.units[i];
@@ -549,7 +569,10 @@ impl PoliceSystem {
                         || stale
                     {
                         if let Some((node, point)) = self.intercept_point(i, target) {
-                            let t = self.route_track(i, node, None);
+                            // A stopped racer: drive all the way to it, not just to the junction.
+                            let v_r = (rec.vel[0] * rec.vel[0] + rec.vel[1] * rec.vel[1]).sqrt();
+                            let fin = (v_r < STOPPED_RACER_MPS).then_some(point);
+                            let t = self.route_track(i, node, fin);
                             self.units[i].assignment = Assignment::Intercept { target, point };
                             self.units[i].set_command(DriveCommand {
                                 track: t,
@@ -665,7 +688,16 @@ impl PoliceSystem {
                 } else {
                     racer_s
                 };
-                let (s, lat) = track.project(u.body.pos, hint, 200.0);
+                // Right next to the racer: it is the racer's end of the trail, not an older leg
+                // of it that passes close by (a racer looping a block).
+                let near = rec
+                    .last_known
+                    .is_some_and(|p| dist(p, u.body.pos) < NEAR_RACER_M);
+                let (s, lat) = if near {
+                    track.project(u.body.pos, racer_s, NEAR_RACER_M)
+                } else {
+                    track.project(u.body.pos, hint, 200.0)
+                };
                 pursuers.push((racer_s - s, lat, i));
             }
             pursuers.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.2.cmp(&b.2)));

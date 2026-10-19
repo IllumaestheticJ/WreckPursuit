@@ -90,6 +90,26 @@ oncoming_clear_m = 50.0
 pass_speed_mps = 9.0
 pass_creep_mps = 2.0
 pass_creep_gap_m = 1.0
+# Traffic rules. Without lights: stop at reds (and yellows with room), slow to yield_mps through
+# unsignalised junctions, no overtaking near a junction. With lights: run reds, but slowly.
+junction_lookahead_m = 90.0
+stop_line_back_m = 7.0
+junction_slow_m = 8.0
+yield_mps = 5.0
+turn_mps = 3.5
+siren_turn_mps = 6.0
+siren_junction_mps = 11.0
+siren_red_mps = 6.0
+no_pass_near_junction_m = 25.0
+# Give way to cross traffic (patrol at unsignalised junctions, lights at a red).
+yield_radius_m = 40.0
+yield_lookahead_m = 30.0
+yield_gap_s = 2.5
+box_radius_m = 7.0
+yield_max_s = 8.0
+yield_max_siren_s = 3.0
+# Units waiting on each other: after this the lower unit id creeps on.
+gridlock_s = 2.0
 spawn_clear_m = 25.0
 spawn_path_s = 5.0
 spawn_path_half_width_m = 6.0

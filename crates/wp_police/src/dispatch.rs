@@ -280,7 +280,53 @@ impl PoliceSystem {
         }
         self.expire_tools();
         self.plan_units(world, tdt);
+        self.refresh_junctions(world);
         self.cleanup_units();
+    }
+
+    /// For every ground unit: the next junction on its track and its light (traffic rules in
+    /// [`crate::avoid::junction_speed`]).
+    pub(crate) fn refresh_junctions(&mut self, world: &dyn WorldQuery) {
+        let look = self.cfg.pursuit.avoid.junction_lookahead_m;
+        for i in 0..self.units.len() {
+            let u = &self.units[i];
+            if u.kind != UnitKind::Car || u.player.is_some() || !u.cmd.track.is_drivable() {
+                self.units[i].avoid.junction = None;
+                continue;
+            }
+            let mut best: Option<(f32, usize)> = None;
+            for (k, n) in self.graph.nodes.iter().enumerate() {
+                if !n.junction || dist(n.pos, u.body.pos) > look + 10.0 {
+                    continue;
+                }
+                let (s, lat) = u.cmd.track.project_ahead(n.pos, u.track_s, 2.0, look);
+                let ahead = s - u.track_s;
+                // On the track (through its centre), not behind the unit's front.
+                if lat > ROAD_HALF_WIDTH_M + 2.0 || ahead < -2.0 || ahead > look {
+                    continue;
+                }
+                if best.is_none_or(|b| s < b.0) {
+                    best = Some((s, k));
+                }
+            }
+            let junction = best.map(|(s, k)| {
+                let n = &self.graph.nodes[k];
+                let light = if n.signalised {
+                    let h = u.body.heading;
+                    world
+                        .signal_state_ahead([u.body.pos[0], u.body.pos[1], 0.5], [h[0], h[1], 0.0])
+                        .and_then(crate::avoid::Light::from_signal)
+                } else {
+                    None
+                };
+                let t = &u.cmd.track;
+                let into = normalize(sub(t.point_at(s), t.point_at(s - 8.0)));
+                let out = normalize(sub(t.point_at(s + 8.0), t.point_at(s)));
+                let turn = crate::graph::dot(into, out) < 0.87;
+                crate::avoid::JunctionAhead { s, light, turn }
+            });
+            self.units[i].avoid.junction = junction;
+        }
     }
 
     /// Change a unit's assignment and say so on the radio.
