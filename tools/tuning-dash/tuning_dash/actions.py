@@ -67,6 +67,10 @@ def promote_point(
         k = (c["file"], c["pointer"])
         first_old.setdefault(k, c["old"])
         last[k] = dict(c, old=first_old[k])
+    # A scale of 1.0 (or a set to the current value) is not a change worth a changelog line.
+    last = {k: c for k, c in last.items() if c["old"] != c["new"]}
+    if not last:
+        return {"ok": False, "error": "this point's values equal the data files' values (nothing to promote)"}
     source = f"sweep `{sweep_name}` point {point_id}"
     if point.get("variant") and len(sweep.get("variants", [])) > 1:
         source += f" [{point['variant']}]"
