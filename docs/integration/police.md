@@ -198,3 +198,7 @@ Done = `soak/traffic_soak_observer` passes with `police_cars: true` (lead will f
 
 Also: send your final typed `PoliceEvent` + `CaptainCommand` variant lists for contract v0.3.0 (if not already in
 this doc's contract section).
+
+
+## Lead note (2026-10-19, from machine H)
+In Arcade, health levels off around 0.2–0.3 under repeated hits and never reaches total loss (0.10–0.23), so `disengage_health` (0.4) is what decides when a cop leaves the chase. If playtests still find cops fragile, tune that knob, maybe lower in Arcade only. The cruiser police package (H) now stays in the pursuit until its 2nd hard hit.
