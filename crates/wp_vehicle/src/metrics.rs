@@ -11,6 +11,7 @@
 //! | [`power_on`] | steady 0.4 g on a 40 m circle, steering frozen, full throttle for 1.5 s: path-curvature ratio (< 1 = power understeer) |
 //! | [`power_oversteer_onset`] | steady 0.4 g on a 40 m circle, throttle ramped open-loop to 100%: throttle at which the rear slides (rear slip angle exceeds front by 2°) |
 //! | [`power_oversteer_exit`] | mid-corner on a circle, then full throttle while still steering in, then steering released with throttle held: peak body slip and whether the car straightens out (slide-control assists) |
+//! | [`high_speed_catch`] | straight at speed, sudden yaw-rate kick (a nudge from traffic), driver countersteers with keys / stick after 0.15 s: peak body slip and whether the car is caught |
 //! | [`top_speed_kmh`] | full throttle on a straight until acceleration stops |
 
 use wp_contracts::{AssistProfile, LoadedCar, VehicleInput, GRAVITY_MPS2, PHYSICS_DT};
@@ -490,6 +491,85 @@ pub fn power_oversteer_exit(
             &VehicleInput {
                 steer,
                 throttle: 1.0,
+                ..Default::default()
+            },
+            assists,
+        );
+        max_slip = max_slip.max(body_slip_deg(&rig).abs());
+    }
+    let final_slip = body_slip_deg(&rig);
+    let final_speed = speed(&rig);
+    SlideExit {
+        max_slip_deg: max_slip,
+        final_slip_deg: final_slip,
+        final_speed_mps: final_speed,
+        gear_at_throttle,
+        recovered: max_slip < 90.0
+            && final_slip.abs() < 15.0
+            && yaw_rate(&rig).abs() < 0.5
+            && final_speed > 8.0,
+        hash: rig.state_hash(),
+    }
+}
+
+/// High-speed catch: driving straight at `speed_mps` with light throttle, the car gets a yaw
+/// rate kick of `yaw_kick` rad/s (+ = nose to the left). After a 0.15 s reaction the driver
+/// countersteers against the body slip: a full key past 2° while the slide grows or exceeds 6°
+/// (keyboard), or a stick proportional to it (analog), throttle at 30%, for 4 s.
+pub fn high_speed_catch(
+    car: &LoadedCar,
+    assists: &AssistProfile,
+    style: DriverStyle,
+    speed_mps: f32,
+    yaw_kick: f32,
+) -> SlideExit {
+    let mut rig = Rig::new(car);
+    rig.teleport([0.0; 3], 0.0, speed_mps, 0.0);
+    for _ in 0..TICKS_PER_S {
+        let (throttle, brake) = hold_speed(&rig, speed_mps);
+        rig.step(
+            &VehicleInput {
+                throttle,
+                brake,
+                ..Default::default()
+            },
+            assists,
+        );
+    }
+    let gear_at_throttle = rig.vehicle.gear();
+    {
+        let s = rig.state();
+        let ch = *rig.vehicle.chassis();
+        let pos = s.pos;
+        let fwd = ch.rot * V3::Y;
+        let yaw = atan2(-fwd.x, fwd.y);
+        let v = speed(&rig);
+        rig.teleport(pos, yaw, v, yaw_kick);
+    }
+    let react = TICKS_PER_S * 15 / 100;
+    let mut max_slip = 0.0f32;
+    let mut prev_slip = body_slip_deg(&rig);
+    for tick in 0..4 * TICKS_PER_S {
+        let slip = body_slip_deg(&rig);
+        // Like a player tapping keys: hold the countersteer key while the slide grows or is
+        // still big (> 6°), let go once it is coming back.
+        let growing = slip.abs() > prev_slip.abs();
+        prev_slip = slip;
+        let key = slip.abs() > 2.0 && (growing || slip.abs() > 6.0);
+        let steer = if tick < react {
+            0.0
+        } else {
+            match style {
+                // Slip < 0 = sliding toward the right of the heading: steer right (+).
+                DriverStyle::Keyboard if key => -slip.signum(),
+                DriverStyle::Keyboard => 0.0,
+                DriverStyle::Analog => (-slip / 20.0).clamp(-1.0, 1.0),
+            }
+        };
+        rig.step(
+            &VehicleInput {
+                steer,
+                throttle: 0.3,
                 ..Default::default()
             },
             assists,

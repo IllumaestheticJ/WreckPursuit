@@ -45,7 +45,7 @@ const GYRO_GAIN: f32 = 9.0;
 const GYRO_RECOVER_SCALE: f32 = 0.4;
 /// Straighten-up rate with the steering centred, 1/s: the gyro aims for a slide angle that
 /// decays as `exp(-K t)`.
-const GYRO_STRAIGHTEN: f32 = 0.9;
+const GYRO_STRAIGHTEN: f32 = 1.2;
 /// Torque cap as a fraction of `m · g · wheelbase / 2` (about what the rear tires can make).
 const GYRO_CAP: f32 = 0.35;
 

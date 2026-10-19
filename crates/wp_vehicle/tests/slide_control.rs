@@ -6,7 +6,7 @@
 //! throttle still down. It never countersteers by itself.
 
 use wp_contracts::{AssistProfile, LoadedCar};
-use wp_vehicle::metrics::{power_oversteer_exit, DriverStyle, SlideExit};
+use wp_vehicle::metrics::{high_speed_catch, power_oversteer_exit, DriverStyle, SlideExit};
 
 fn car(id: &str) -> LoadedCar {
     let p = format!("{}/../../data/cars/{id}.json", env!("CARGO_MANIFEST_DIR"));
@@ -86,14 +86,40 @@ fn wheel_profile_is_bit_identical_to_the_plain_model() {
         ("lucciola_350", 0.7, 0.8, 0x20fdb5196575e4af),
     ];
     for (id, lat_g, react, hash) in cases {
-        let r = exit(
-            id,
+        // The steering-lock data change (playtest item 6b) is not a code change: pin the lock
+        // these hashes were recorded with.
+        let mut c = car(id);
+        let old_lock = if id == "rampart_50" { 0.576 } else { 0.5 };
+        for w in c.def.wheels.iter_mut().filter(|w| w.steerable) {
+            w.max_steer_rad = old_lock;
+        }
+        let r = power_oversteer_exit(
+            &c,
             &AssistProfile::wheel_default(),
             DriverStyle::Analog,
+            30.0,
             lat_g,
             react,
         );
         assert_eq!(r.hash, hash, "{id} {lat_g} {react}: {r:?}");
         assert!(r.max_slip_deg > 90.0, "still spins unassisted");
+    }
+}
+
+#[test]
+fn keyboard_catches_a_slide_above_100_kmh() {
+    // A sudden yaw kick at 110 / 130 km/h (a nudge from traffic), the driver countersteers
+    // with keys. Main spun 7 of 12 such cases with TCS/ESC off; now all are caught.
+    for a in [AssistProfile::keyboard_default(), keyboard_no_tcs()] {
+        for id in ["rampart_50", "shiro_turbo", "lucciola_350"] {
+            for kmh in [110.0, 130.0] {
+                let r = high_speed_catch(&car(id), &a, DriverStyle::Keyboard, kmh / 3.6, 1.2);
+                assert!(
+                    r.recovered && r.max_slip_deg < 30.0,
+                    "{id} tcs={} {kmh} km/h: {r:?}",
+                    a.tcs
+                );
+            }
+        }
     }
 }

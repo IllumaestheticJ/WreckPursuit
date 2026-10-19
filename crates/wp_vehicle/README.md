@@ -80,29 +80,39 @@ purist" presets are bit-identical to the plain model (tested against hashes from
   target blends toward that angle (front wheels pointed where the rear is going), the driver's
   input trims ±35% around it, the rack runs up to 3.5× faster, and full steer into the slide
   fades the help to 40% (no fighting a deliberate flick). Help grows with class:
-  `help + (1 − help)·help·class`.
+  `help + (1 − help)·help·class`. With help on, the rack also *unwinds* toward centre at the
+  fast rate (like self-aligning torque spinning the wheel back), which stops the tank-slapper a
+  slow unwind caused at 130 km/h.
+- *Save-the-car lock*: while sliding, the speed-sensitive lock (down to 25% at 150 km/h) opens
+  toward 1.3 × the rear-axle slip angle, scaled by how much the rear slides; grip driving is
+  unchanged.
 - *Gyro*: a yaw torque `−gain·I_zz·(yaw rate − path rate − k·β)` while the rear slides, gain up
   to 9/s (`min(2·help, 1) × class × slide`), capped at 0.35·m·g·wheelbase/2. Path rate =
-  rotation of the velocity vector, so a held drift is not resisted; `k` = 0.9/s with the
-  steering centred (straightens up), 0 steering into the turn (holds), 1.8/s countersteering.
+  rotation of the velocity vector, so a held drift is not resisted; `k` = 1.2/s with the
+  steering centred (straightens up), 0 steering into the turn (holds), 2.4/s countersteering.
   Straightening faster than wanted is damped at 40%. Shown as `Telemetry::slide_gyro_nm`.
 - *Slide throttle* (TCS off, throttle filter on, i.e. keyboard): while sliding, the pedal filter
   is up to 2.5× slower and the throttle target is feathered by up to 35% unless the driver
   steers into the turn.
+- *Car data* (playtest item 6b): tighter turning circles → more lock on the drift-capable RWD
+  cars: shiro_turbo 34.4° → 39.8°, sperber_32 35.1° → 38.1°, rampart_50 33.0° → 37.9°,
+  hakone_gt 32.7° → 35.9°, lucciola_350 28.6° → 33.1°. Skidpad / step steer / lift-off are
+  unchanged to 3 decimals.
 
-Measured with `cargo run --release -p wp_vehicle --example slide` (naive driver: full throttle
-mid-corner, then steering released; 6 cases per row; worst body slip / recovered):
+Measured with `cargo run --release -p wp_vehicle --example slide` (scripted naive drivers, see
+`metrics::power_oversteer_exit` / `high_speed_catch`; worst body slip, cases recovered):
 
-| Car | keyboard TCS/ESC off, before → after | gamepad, before → after | gamepad TCS off, before → after |
+| Car | power exit, keyboard TCS/ESC off: main → now | power exit, gamepad: main → now | catch at 110/130 km/h, keyboard TCS/ESC off: main → now |
 |---|---|---|---|
-| rampart_50 (319 kW RWD) | 180° 0/4 → 23° 6/6 | 71° 2/4 → 16° 4/6 | 180° 1/4 → 47° 2/6 |
-| lucciola_350 (207 W/kg RWD) | 180° 0/4 → 30° 6/6 | 180° 1/4 → 18° 4/6 | 180° 1/4 → 40° 1/6 |
-| hakone_gt (151 W/kg RWD) | 180° 0/4 → 26° 5/6 | 71° 2/4 → 19° 3/6 | 180° 1/4 → 63° 1/6 |
+| rampart_50 (319 kW RWD) | 180° 0/4 → 29° 6/6 | 71° 2/4 → 13° 6/6 | 180° 2/4 → 7° 4/4 |
+| lucciola_350 (207 W/kg RWD) | 180° 0/4 → 29° 6/6 | 180° 1/4 → 15° 4/6 | 180° 3/4 → 6° 4/4 |
+| shiro_turbo (drift car) | — → 15° 6/6 | — → 19° 4/6 | 173° 2/4 → 7° 4/4 |
+| hakone_gt (151 W/kg RWD) | 180° 0/4 → 17° 6/6 | 71° 2/4 → 17° 3/6 | — → 7° 4/4 |
 
-(Before = 4 cases, after = 6 incl. a 2 s held drift.) Keyboard with TCS on recovered already
-and still does (worst slip 8–12°). Gamepad's help is light (0.3): full throttle with centred
-steering holds a 15–60° power drift instead of straightening, but nothing spins. FWD/AWD cars
-are unchanged in practice (worst slip ≤ 4° before and after).
+("main" power-exit columns = 4 cases; now 6 incl. a 2 s held drift.) Keyboard with TCS on
+recovered already and still does (worst 6–13°). Gamepad's help is light (0.3): with TCS off,
+full throttle and a centred stick hold a 25–46° power drift instead of straightening, but
+nothing spins. FWD/AWD cars are unchanged in practice (worst slip ≤ 4° before and after).
 
 **Low-speed guards:** slip ratio and slip angle use `max(|vx|, 3 m/s)` denominators, slip
 angle has a relaxation-length lag, and below 1 m/s the lateral force blends into a viscous

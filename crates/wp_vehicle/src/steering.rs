@@ -38,6 +38,8 @@ pub fn lock_scale(sensitivity: f32, speed: f32) -> f32 {
 /// While sliding, the driver's own input trims the countersteer target by this fraction of
 /// their steer, so throttle + small corrections hold or change the drift angle.
 const DRIVER_TRIM: f32 = 0.35;
+/// While sliding, the driver's available lock opens up to this × the rear-axle slip angle.
+const SLIDE_LOCK_MARGIN: f32 = 1.3;
 /// Rack speed multiplier at full help in a full slide (the rack "catches" quickly).
 const SLIDE_RACK_BOOST: f32 = 2.5;
 
@@ -45,9 +47,11 @@ const SLIDE_RACK_BOOST: f32 = 2.5;
 ///
 /// With `countersteer_help > 0` and the rear sliding, the target blends from the driver's
 /// angle toward the rear-axle slip angle (front wheels pointed where the rear is going) plus
-/// a trim from the driver's input, and the rack moves faster. If the driver steers hard
-/// against the countersteer (into the slide) the help fades to 40%, so it does not fight a
-/// deliberate flick. With help 0 this is exactly the plain model.
+/// a trim from the driver's input, the rack moves faster (and always unwinds fast), and the
+/// speed-sensitive lock opens toward the countersteer needed, so a full countersteer key can
+/// catch a slide at speed. If the driver steers hard against the countersteer (into the
+/// slide) the help fades to 40%, so it does not fight a deliberate flick. With help 0 this is
+/// exactly the plain model.
 pub fn update_center_angle(
     current: f32,
     inp: &SteerInput,
@@ -56,12 +60,25 @@ pub fn update_center_angle(
     rack_speed: f32,
     dt: f32,
 ) -> f32 {
-    let lock = max_steer * inp.ratio_scale * lock_scale(assists.steer_speed_sensitivity, inp.speed);
+    let mut lock =
+        max_steer * inp.ratio_scale * lock_scale(assists.steer_speed_sensitivity, inp.speed);
+    let assisted = assists.countersteer_help > 0.0 && inp.speed > 3.0;
+    let slide = if assisted {
+        slide_amount(inp.rear_axle_slip)
+    } else {
+        0.0
+    };
+    if slide > 0.0 {
+        // Save-the-car lock: the speed-sensitive lock opens toward the countersteer the slide
+        // needs (rear-axle slip + margin), scaled by how much the rear slides.
+        let needed =
+            (inp.rear_axle_slip.abs() * SLIDE_LOCK_MARGIN).min(max_steer * inp.ratio_scale);
+        lock += (needed.max(lock) - lock) * slide;
+    }
     let driver_target = -(inp.driver.clamp(-1.0, 1.0) + inp.pull) * lock;
     let mut target = driver_target;
     let mut rate_boost = 1.0;
-    if assists.countersteer_help > 0.0 && inp.speed > 3.0 {
-        let slide = slide_amount(inp.rear_axle_slip);
+    if assisted {
         // Higher-class (powerful RWD) cars get more: help moves toward 1 by `help × class`
         // (keyboard 0.6 → 0.84 on a full-class car, gamepad 0.3 → 0.51).
         let base = assists.countersteer_help.min(1.0);
@@ -74,7 +91,12 @@ pub fn update_center_angle(
         };
         let h = help * slide * (1.0 - 0.6 * opposing);
         target = lerp(driver_target, catch + DRIVER_TRIM * driver_target, h);
-        rate_boost = 1.0 + SLIDE_RACK_BOOST * help * slide;
+        // Unwinding toward centre (letting go after a catch) is always fast with help on, like
+        // the self-aligning torque spinning the wheel back through the driver's hands; a slow
+        // unwind leaves countersteer on as the car swings back (tank-slapper).
+        let unwinding = target.abs() < current.abs() || target * current < 0.0;
+        let catch_or_unwind = if unwinding { 1.0 } else { slide };
+        rate_boost = 1.0 + SLIDE_RACK_BOOST * help * catch_or_unwind;
     }
     target = target.clamp(-max_steer, max_steer);
     if assists.steer_speed_sensitivity <= 0.0 && assists.countersteer_help <= 0.0 {
@@ -210,6 +232,25 @@ mod tests {
         // Full lock into the slide: the help fades, the driver gets most of their angle.
         let flick = settle(&sliding(-1.0), &kb);
         assert!(flick > 0.0, "{flick}");
+    }
+
+    #[test]
+    fn lock_opens_while_sliding_at_speed() {
+        let kb = AssistProfile::keyboard_default();
+        let fast = |rear_axle_slip| SteerInput {
+            speed: 140.0 / 3.6,
+            rear_axle_slip,
+            ..sliding(1.0)
+        };
+        // Grip: full right key at 140 km/h gets the speed-reduced lock (≈ 0.17 rad).
+        let grip = settle(&fast(0.0), &kb);
+        assert!(
+            (grip + 0.6 * lock_scale(1.0, 140.0 / 3.6)).abs() < 1e-3,
+            "{grip}"
+        );
+        // Sliding 0.35 rad: full countersteer key reaches well past it.
+        let slide = settle(&fast(-0.35), &kb);
+        assert!(slide < -0.35, "{slide}");
     }
 
     #[test]
