@@ -216,10 +216,20 @@ fn runtime_types_round_trip_through_json() {
         SimEvent::TrafficViolation {
             vehicle: EntityId(3),
             kind: ViolationKind::Speeding { over_mps: 4.5 },
+            pos: [10.0, -4.0, 0.0],
         },
         SimEvent::WheelDetached {
             vehicle: EntityId(1),
             wheel: 2,
+        },
+        SimEvent::GlassShattered {
+            vehicle: EntityId(1),
+            region: BodyRegion::Windshield,
+        },
+        SimEvent::RegionDamaged {
+            vehicle: EntityId(2),
+            region: BodyRegion::FrontBumper,
+            severity: 0.4,
         },
     ];
     let msg = ServerToClient::Snapshot {

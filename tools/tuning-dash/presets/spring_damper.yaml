@@ -1,0 +1,19 @@
+# Prompt 02: spring rate × damping (all four corners, bump and rebound together).
+# Read: step-steer overshoot falls with damping; understeer gradient vs springs.
+description: Springs ×0.7–1.3 × dampers ×0.7–1.3 (all corners) → step steer, skidpad, lift-off
+probe:
+  kind: vehicle_metrics
+  metrics: [skidpad, step_steer, lift_off]
+params:
+  - target: "car:{car}:suspension[*].spring_n_per_m"
+    label: springs
+    op: scale
+    values: [0.7, 0.85, 1.0, 1.15, 1.3]
+  - targets: ["car:{car}:suspension[*].damper_bump_ns_per_m", "car:{car}:suspension[*].damper_rebound_ns_per_m"]
+    label: dampers
+    op: scale
+    values: [0.7, 1.0, 1.3]
+variants:
+  - {name: sedan (FWD), probe: {car: debug_sedan}}
+  - {name: coupe (RWD), probe: {car: debug_coupe}}
+plots: [step_steer_overshoot_pct, understeer_deg_per_g, skidpad_max_lat_g, lift_off_yaw_rate_delta_rps]

@@ -210,6 +210,10 @@ impl Economy {
                 .collect(),
             labour_per_hour: cp.labour_per_hour,
             labour_hours_per_item: self.prices.labour_hours_per_item,
+            // Contract v0.2.0 fields: per-item hours and the repair-vs-replace parts fraction
+            // are G's to fill from prices.toml; empty / None keep today's behaviour.
+            labour_hours: Default::default(),
+            repair_parts_fraction: None,
         }
     }
 
