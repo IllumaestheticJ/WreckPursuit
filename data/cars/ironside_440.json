@@ -4,13 +4,13 @@
   "class": "Muscle",
   "analog_of": "early-70s American big-block muscle coupe, 7.2 L pushrod V8, live rear axle",
   "body_size_m": [1.95, 5.2, 1.35],
-  "mass_kg": 1725.0,
+  "mass_kg": 1695.2,
   "front_weight_frac": 0.56,
   "wheelbase_m": 2.95,
   "track_front_m": 1.52,
   "track_rear_m": 1.5,
   "cg_height_m": 0.55,
-  "inertia_kgm2": [650.0, 3940.0, 4300.0],
+  "inertia_kgm2": [640.0, 3870.0, 4230.0],
   "drag_cd_a_m2": 1.039,
   "lift_front": 0.15,
   "lift_rear": 0.18,
@@ -44,7 +44,12 @@
     "diff_front": "Open",
     "diff_rear": "Open",
     "clutch_max_nm": 840.0,
-    "shift_time_s": 0.4
+    "shift_time_s": 0.4,
+    "torque_converter": {
+      "stall_rpm": 2200.0,
+      "stall_torque_ratio": 2.1,
+      "coupling_rpm": 2800.0
+    }
   },
   "wheels": [
     {
@@ -52,7 +57,7 @@
       "radius_m": 0.344,
       "width_m": 0.235,
       "mass_kg": 30.0,
-      "tire_id": "street",
+      "tire_id": "vintage_bias",
       "steerable": true,
       "max_steer_rad": 0.552,
       "ackermann_frac": 0.8,
@@ -65,7 +70,7 @@
       "radius_m": 0.344,
       "width_m": 0.235,
       "mass_kg": 30.0,
-      "tire_id": "street",
+      "tire_id": "vintage_bias",
       "steerable": true,
       "max_steer_rad": 0.552,
       "ackermann_frac": 0.8,
@@ -78,7 +83,7 @@
       "radius_m": 0.344,
       "width_m": 0.235,
       "mass_kg": 45.0,
-      "tire_id": "street",
+      "tire_id": "vintage_bias",
       "steerable": false,
       "max_steer_rad": 0.0,
       "ackermann_frac": 0.0,
@@ -91,7 +96,7 @@
       "radius_m": 0.344,
       "width_m": 0.235,
       "mass_kg": 45.0,
-      "tire_id": "street",
+      "tire_id": "vintage_bias",
       "steerable": false,
       "max_steer_rad": 0.0,
       "ackermann_frac": 0.0,
@@ -102,46 +107,46 @@
   ],
   "suspension": [
     {
-      "spring_n_per_m": 21600.0,
-      "damper_bump_ns_per_m": 1380.0,
-      "damper_rebound_ns_per_m": 2070.0,
+      "spring_n_per_m": 21200.0,
+      "damper_bump_ns_per_m": 1350.0,
+      "damper_rebound_ns_per_m": 2020.0,
       "travel_m": 0.2,
       "preload_m": 0.03,
-      "arb_n_per_m": 11300.0,
+      "arb_n_per_m": 11100.0,
       "bump_stop_n_per_m": 120000.0
     },
     {
-      "spring_n_per_m": 21600.0,
-      "damper_bump_ns_per_m": 1380.0,
-      "damper_rebound_ns_per_m": 2070.0,
+      "spring_n_per_m": 21200.0,
+      "damper_bump_ns_per_m": 1350.0,
+      "damper_rebound_ns_per_m": 2020.0,
       "travel_m": 0.2,
       "preload_m": 0.03,
-      "arb_n_per_m": 11300.0,
+      "arb_n_per_m": 11100.0,
       "bump_stop_n_per_m": 120000.0
     },
     {
-      "spring_n_per_m": 19000.0,
-      "damper_bump_ns_per_m": 1110.0,
-      "damper_rebound_ns_per_m": 1660.0,
+      "spring_n_per_m": 18600.0,
+      "damper_bump_ns_per_m": 1090.0,
+      "damper_rebound_ns_per_m": 1640.0,
       "travel_m": 0.22,
       "preload_m": 0.03,
-      "arb_n_per_m": 200.0,
+      "arb_n_per_m": 300.0,
       "bump_stop_n_per_m": 120000.0
     },
     {
-      "spring_n_per_m": 19000.0,
-      "damper_bump_ns_per_m": 1110.0,
-      "damper_rebound_ns_per_m": 1660.0,
+      "spring_n_per_m": 18600.0,
+      "damper_bump_ns_per_m": 1090.0,
+      "damper_rebound_ns_per_m": 1640.0,
       "travel_m": 0.22,
       "preload_m": 0.03,
-      "arb_n_per_m": 200.0,
+      "arb_n_per_m": 300.0,
       "bump_stop_n_per_m": 120000.0
     }
   ],
   "brakes": {
     "max_torque_front_nm": 1720.0,
     "max_torque_rear_nm": 630.0,
-    "bias_front": 0.73,
+    "bias_front": 0.519,
     "handbrake_rear_nm": 600.0
   },
   "steering": {
@@ -152,5 +157,6 @@
   "aero_downforce_coeffs": [0.0, 0.0],
   "lattice_id": "ironside_440",
   "base_price": 38000,
-  "durability_class": 4
+  "durability_class": 4,
+  "fuel_capacity_l": 80.0
 }

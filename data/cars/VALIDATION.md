@@ -5,76 +5,99 @@
 Three layers of evidence per car:
 
 1. **Data validity** — every car + lattice loads through `wp_contracts::load_car` and validates
-   against `schemas/` (`cargo test -p wp_contracts`, green), and the nameplate check passes
-   (`python3 tools/specsheet/nameplate_check.py`).
-2. **Estimate vs class target** — point-mass estimates (`tools/specsheet/estimate.py`) against
-   class-typical published figures for each archetype. This is what the data was tuned with.
-3. **Sim vs class target** — prompt 02's metric scenarios (0-100, 100-0, skidpad, top speed) and
-   prompt 03's barrier scenarios, run with `apps/simcli` on the integrated build. **Pending:**
-   on this branch `wp_vehicle` and `wp_damage` are still the prompt-01 stubs (kinematic model,
-   no deformation), so their numbers say nothing about the data. The tables are ready; drop
-   results into `tools/specsheet/validation_results.json` and re-run this script.
+   against `schemas/` (`cargo test -p wp_contracts`), the nameplate check passes
+   (`python3 tools/specsheet/nameplate_check.py`) and every car runs deterministically through
+   `simcli` in both damage modes (`python3 tools/specsheet/smoke_sim.py`).
+2. **Sim vs class target (primary)** — `wp_vehicle`'s metrics (0-100, 100-0, 50 m skidpad, top
+   speed) and `wp_damage`'s barrier sweep on the integrated build, collected by
+   `python3 tools/specsheet/collect_results.py` into `tools/specsheet/validation_results.json`.
+3. **Estimate vs class target (secondary)** — the point-mass estimator
+   (`tools/specsheet/estimate.py`) the data was first sized with.
 
 † = intended tire compound not in `data/tires/` yet (JSON uses `street`, estimate scaled).
 
-## Performance
+## Performance (sim)
 
-| Car | 0-100 target s | est. | result | sim | Skidpad target g | est. | result | sim | 100-0 target m | est. | result | sim | Vmax est. km/h | sim |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| Vireo XS | 8.5-9.5 | 8.6 | PASS | pending | 0.82-0.92 | 0.95 | FAIL (high) | pending | 38-44 | 39.2 | PASS | pending | 209 | pending |
-| Kestrel TS | 6.2-7.2 | 6.7† | PASS | pending | 0.86-0.95 | 0.98† | FAIL (high) | pending | 35-40 | 37.1† | PASS | pending | 255 | pending |
-| Shiro Turbo | 5.6-6.6 | 6.2† | PASS | pending | 0.88-0.98 | 1.01† | FAIL (high) | pending | 34-38 | 35.9† | PASS | pending | 270 | pending |
-| Hakone GT | 4.8-5.8 | 5.7† | PASS | pending | 0.90-1.00 | 0.98† | PASS | pending | 33-38 | 36.7† | PASS | pending | 288 | pending |
-| Rampart 5.0 | 4.5-5.0 | 5.6† | FAIL (slow) | pending | 0.92-1.00 | 0.96† | PASS | pending | 33-38 | 37.3† | PASS | pending | 275 | pending |
-| Ironside 440 | 6.5-8.0 | 7.9† | PASS | pending | 0.70-0.80 | 0.74† | PASS | pending | 45-60 | 50.5† | PASS | pending | 221 | pending |
-| Sperber 32 | 5.0-5.8 | 5.7† | PASS | pending | 0.90-1.00 | 0.99† | PASS | pending | 33-37 | 36.5† | PASS | pending | 279 | pending |
-| Lindwurm 4T | 4.6-5.4 | 5.3† | PASS | pending | 0.90-1.00 | 0.97† | PASS | pending | 33-37 | 37.3† | FAIL (long) | pending | 258 | pending |
-| Lucciola 350 | 4.3-5.0 | 4.5† | PASS | pending | 1.00-1.10 | 1.02† | PASS | pending | 32-37 | 35.3† | PASS | pending | 297 | pending |
-| Hauler 1500 | 7.0-8.0 | 8.4† | FAIL (slow) | pending | 0.68-0.76 | 0.70† | PASS | pending | 42-50 | 48.7† | PASS | pending | 221 | pending |
-| Sentinel Cruiser | 7.0-8.5 | 8.0† | PASS | pending | 0.85-0.92 | 0.89† | PASS | pending | 38-43 | 39.9† | PASS | pending | 241 | pending |
-| Sentinel Wolfhound | 5.5-6.5 | 6.2† | PASS | pending | 0.85-0.92 | 0.88† | PASS | pending | 38-43 | 40.8† | PASS | pending | 255 | pending |
-| Sentinel Bastion | 7.5-9.0 | 7.7† | PASS | pending | 0.72-0.80 | 0.76† | PASS | pending | 40-46 | 43.5† | PASS | pending | 224 | pending |
+| Car | 0-100 target s | sim |  | Skidpad target g | sim |  | 100-0 target m | sim |  | Vmax km/h | est. 0-100 / skid / 100-0 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| Vireo XS | 8.5-9.5 | 9.2 | ✓ | 0.82-0.92 | 0.86 | ✓ | 38.0-44.0 | 39.7 | ✓ | 207 | 8.0 / 0.91 / 37.4 |
+| Kestrel TS | 6.2-7.2 | 7.1 | ✓ | 0.86-0.95 | 0.93 | ✓ | 35.0-40.0 | 38.8 | ✓ | 248 | 6.6 / 0.98 / 35.8 |
+| Shiro Turbo | 5.6-6.6 | 6.3 | ✓ | 0.88-0.98 | 0.95 | ✓ | 34.0-38.0 | 37.5 | ✓ | 258 | 6.0 / 1.01 / 34.5 |
+| Hakone GT | 4.8-5.8 | 5.8 | FAIL (slow) | 0.90-1.00 | 0.91 | ✓ | 33.0-38.0 | 38.7 | FAIL (long) | 282 | 5.5 / 0.98 / 35.4 |
+| Rampart 5.0 | 4.5-5.0 | 5.9 | FAIL (slow) | 0.92-1.00 | 0.87 | FAIL (low) | 33.0-38.0 | 38.9 | FAIL (long) | 269 | 5.4 / 0.96 / 36.0 |
+| Ironside 440 | 6.5-8.0 | 8.8 | FAIL (slow) | 0.70-0.80 | 0.62 | FAIL (low) | 45.0-60.0 | 52.3 | ✓ | 210 | 7.7 / 0.71 / 49.9 |
+| Sperber 32 | 5.0-5.8 | 6.1 | FAIL (slow) | 0.90-1.00 | 0.91 | ✓ | 33.0-37.0 | 37.5 | FAIL (long) | 273 | 5.6 / 0.99 / 35.2 |
+| Lindwurm 4T | 4.6-5.4 | 5.4 | FAIL (slow) | 0.90-1.00 | 0.93 | ✓ | 33.0-37.0 | 37.6 | FAIL (long) | 260 | 5.3 / 0.97 / 36.1 |
+| Lucciola 350 | 4.3-5.0 | 4.6 | ✓ | 1.00-1.10 | 0.96 | FAIL (low) | 32.0-37.0 | 36.2 | ✓ | 291 | 4.4 / 1.02 / 33.9 |
+| Hauler 1500 | 7.0-8.0 | 9.5 | FAIL (slow) | 0.68-0.76 | 0.63 | FAIL (low) | 42.0-50.0 | 44.8 | ✓ | 203 | 8.0 / 0.71 / 45.1 |
+| Sentinel Cruiser | 7.0-8.5 | 8.6 | FAIL (slow) | 0.85-0.92 | 0.83 | FAIL (low) | 38.0-43.0 | 40.0 | ✓ | 247 | 7.9 / 0.92 / 37.4 |
+| Sentinel Wolfhound | 5.5-6.5 | 6.4 | ✓ | 0.85-0.92 | 0.85 | FAIL (low) | 38.0-43.0 | 39.8 | ✓ | 242 | 6.1 / 0.91 / 38.1 |
+| Sentinel Bastion | 7.5-9.0 | 8.3 | ✓ | 0.72-0.80 | 0.72 | FAIL (low) | 40.0-46.0 | 42.9 | ✓ | 213 | 7.6 / 0.81 / 40.2 |
+| Junkyard Beater | 12.0-15.0 | 13.8 | ✓ | 0.75-0.88 | 0.80 | ✓ | 38.0-46.0 | 39.2 | ✓ | 163 | 12.3 / 0.90 / 37.3 |
 
-Target sources (type): vireo_xs: late-90s 1.6 NA hot hatch road tests; kestrel_ts: mid-2000s FF 2.0 T sedan road tests; shiro_turbo: early-2000s FR 2.0 T coupe road tests; hakone_gt: 90s FR 3.0 TT GT road tests (export trim); rampart_50: prompt 09 target; 2010s 5.0 V8 coupe road tests; ironside_440: period road tests of 7.2 L big-blocks on period tires (net-rated); sperber_32: 2000s 3.2 I6 sport sedan/coupe road tests; lindwurm_4t: 2010s AWD 2.0 T hot hatch road tests (dual-clutch); lucciola_350: prompt 09 target (skidpad >= 1.0 g); 90s 3.5 V8 MR road tests; hauler_1500: prompt 09 target (~7.5 s); 2010s half-ton 5.3 V8 pickup tests; sentinel_cruiser: fleet evaluation figures for RWD V6 police sedans; sentinel_wolfhound: fleet evaluation figures for AWD TT V6 pursuit vehicles; sentinel_bastion: fleet evaluation figures for RWD 5.3 V8 police SUVs.
+Target sources (type): vireo_xs: late-90s 1.6 NA hot hatch road tests; kestrel_ts: mid-2000s FF 2.0 T sedan road tests; shiro_turbo: early-2000s FR 2.0 T coupe road tests; hakone_gt: 90s FR 3.0 TT GT road tests (export trim); rampart_50: prompt 09 target; 2010s 5.0 V8 coupe road tests; ironside_440: period road tests of 7.2 L big-blocks on period tires (net-rated); sperber_32: 2000s 3.2 I6 sport sedan/coupe road tests; lindwurm_4t: 2010s AWD 2.0 T hot hatch road tests (dual-clutch); lucciola_350: prompt 09 target (skidpad >= 1.0 g); 90s 3.5 V8 MR road tests; hauler_1500: prompt 09 target (~7.5 s); 2010s half-ton 5.3 V8 pickup tests; sentinel_cruiser: fleet evaluation figures for RWD V6 police sedans; sentinel_wolfhound: fleet evaluation figures for AWD TT V6 pursuit vehicles; sentinel_bastion: fleet evaluation figures for RWD 5.3 V8 police SUVs; junkyard_beater: period road tests of late-80s 1.6 L economy sedans, derated for wear.
 
-### Estimate misses and why
+### Sim misses and why
 
-- **Vireo XS skidpad: FAIL (high)** — the shared `street` tire (lateral D = 1.0 at 4 kN) has summer-tire grip; a light car's low wheel loads raise it further via load sensitivity. Real all-season grip is D ≈ 0.90. Flagged to workstream 02 (tire files), not a car-data problem.
-- **Kestrel TS skidpad: FAIL (high)** — sport-compound assumption (street × 1.10) — revisit when `sport.json` lands.
-- **Shiro Turbo skidpad: FAIL (high)** — sport-compound assumption (street × 1.10) — revisit when `sport.json` lands.
-- **Rampart 5.0 0-100: FAIL (slow)** — traction-limited RWD (1775 kg, 46 % rear): the point-mass launch uses the scaled street longitudinal μ ≈ 1.1; the class figure implies ≈ 1.2 at launch. Expected to close with the real `sport` compound and wp_vehicle's launch behaviour; if the sim also misses, raise rear-tire longitudinal grip rather than inventing power.
-- **Lindwurm 4T 100-0: FAIL (long)** — 0.3 m over the band and tire-limited, not brake-limited (capacity 1.8× front / 2.8× rear lock torque at 1 g): the front-heavy, high-CG hatch loads its front tires hardest, and load sensitivity costs a little peak μ. Within estimator noise; check in the sim before changing anything.
-- **Hauler 1500 0-100: FAIL (slow)** — 2WD, empty bed (43 % rear) and an automatic without torque-converter multiplication (the contract has no converter model — see contract requests). Published ≈ 7.5 s figures are mostly 4WD; the 4WD mod should land inside the band.
+- **Hakone GT 0-100 5.8: FAIL (slow)** — A — 0.03 s over.
+- **Hakone GT 100-0 38.7: FAIL (long)** — A — 1 m over; heaviest `sport`-tire car after the Rampart.
+- **Rampart 5.0 0-100 5.9: FAIL (slow)** — A + traction. Measured: final drive 3.73, CG 0.48 m and a stronger LSD each change it by ≤ 0.03 s; semi-slicks only reach 5.5 s; 0.12 s shifts 5.6 s. The prompt-09 band (4.5-5.0) needs 02's launch/TCS to be less conservative.
+- **Rampart 5.0 skidpad 0.87: FAIL (low)** — C — heavy nose on `sport` tires; semi-slicks give 0.97 g.
+- **Rampart 5.0 100-0 38.9: FAIL (long)** — A — 1 m over. Was 55.6 m in the lead's first run (rear starved by the bias semantics) and 45.6 m with the bias fixed but the full 6-piston caliper torque (ABS cannot modulate it); the ABS ceiling brings it to 39 m.
+- **Ironside 440 0-100 8.8: FAIL (slow)** — B + bias-ply traction: on 02's `vintage_bias` (longitudinal D 0.93) the 560 N·m launch spins the rears, and the converter's stall multiplication is not simulated yet (contract v0.2.0 field set, `wp_vehicle` ignores it). Re-measure when A implements the converter.
+- **Ironside 440 skidpad 0.62: FAIL (low)** — C — 02's `vintage_bias` (≈ 0.85 × street, half the cornering stiffness, as requested) on a soft, 0.55 m-CG chassis gives 0.62 g; period road tests put the archetype at 0.70-0.75 g. Joint re-tune with 02.
+- **Sperber 32 0-100 6.1: FAIL (slow)** — A — high-revving NA six on a TCS launch.
+- **Sperber 32 100-0 37.5: FAIL (long)** — A — 0.7 m over.
+- **Lindwurm 4T 0-100 5.4: FAIL (slow)** — 0.04 s over after switching to on-demand AWD (`AwdOnDemand` 95 % front, up to 50 % rear at 5 % front slip — the lead's first-cut coupling, which A tunes); the fixed 65/35 split ran 5.37 s.
+- **Lindwurm 4T 100-0 37.6: FAIL (long)** — A — 0.5 m over.
+- **Lucciola 350 skidpad 0.96: FAIL (low)** — C — 0.95 g on `sport`, 1.09 g on `semi_slick` (measured). A 90s exotic on its stock tires tested ≈ 0.95 g; the prompt-09 ≥ 1.0 g target needs either a stickier `sport` compound (02) or giving the Lucciola semi-slicks — lead's call.
+- **Hauler 1500 0-100 9.5: FAIL (slow)** — B + 2WD with an empty bed; semi-slicks reach 7.9 s, so traction matters too. The 4WD mod (08) should land it in band.
+- **Hauler 1500 skidpad 0.63: FAIL (low)** — C — now on 02's `all_terrain` (≈ 0.9 × street, as requested): 0.63 g vs 0.68-0.76 published for half-tons on all-terrain tires. Joint re-tune with 02 (compound peak or cornering stiffness) rather than a chassis change.
+- **Sentinel Cruiser 0-100 8.6: FAIL (slow)** — B — 0.2 s over.
+- **Sentinel Cruiser skidpad 0.83: FAIL (low)** — C — 0.02 g under on `police_pursuit`.
+- **Sentinel Wolfhound skidpad 0.85: FAIL (low)** — C — 0.848 g, 0.002 under the band on `police_pursuit` (rounds to 0.85); on-demand AWD changed it by < 0.01 g.
+- **Sentinel Bastion skidpad 0.72: FAIL (low)** — C — ≤ 0.01 g under; tall body-on-frame SUV.
 
-## Barrier matrix (prompt 03 scenarios, both modes)
+Shared causes referenced above:
 
-Expected Simulation-mode outcome by test; Arcade must be strictly milder. Durability class
-and the per-car "how this car breaks" notes (spec sheets) refine these per car.
+- **A (sim conservative)** — wp_vehicle's metric run is a little slower and longer than published road tests across the board (TCS-on launch, ABS release cycle, shift torque cut): its own debug coupe at 200 kW/t runs 0-100 in 5.2 s and the debug cars stop in ≈ 42.5 m. Car data was not inflated to compensate; flagged to workstream 02.
+- **B (automatic)** — automatic gearbox without torque-converter multiplication in the sim yet: the five automatics carry `torque_converter` data (contract v0.2.0) but `wp_vehicle` ignores it until workstream A implements it — re-measure then.
+- **C (tire-limited)** — limited by the tire compound, not the chassis: setup changes (bars, camber, CG, LSD) moved it < 1 %, a grippier compound moves it directly (measured).
 
-| Test | Expectation | Vireo XS | Kestrel TS | Shiro Turbo | Hakone GT | Rampart 5.0 | Ironside 440 | Sperber 32 | Lindwurm 4T | Lucciola 350 | Hauler 1500 | Sentinel Cruiser | Sentinel Wolfhound | Sentinel Bastion |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| frontal 15 km/h | bumper scuff, no component damage | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending |
-| frontal 25 km/h | bumper cover cracked/dented; radiator intact (durability ≥ 4: bumper only) | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending |
-| frontal 40 km/h | radiator failed; engine damaged on durability ≤ 2 | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending |
-| frontal 56 km/h | ≈0.6 m frame crush, TotalLoss in Simulation (durability 5: severe but drivable in Arcade) | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending |
-| frontal 80 km/h | TotalLoss in both modes except durability 5 in Arcade | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending |
-| offset 40% 56 km/h | struck-side suspension + wheel mount failed; cabin intrusion higher on 70s/90s cars | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending |
-| side (T-bone) 40 km/h | struck-side door + suspension failed (prompt 03 calibration) | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending |
-| rear 40 km/h | rear bumper off; fuel tank damaged on cars with rear tanks (ironside); rear drive lost on lucciola | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending | pending |
+### Estimate misses
 
-## Smoke run on the stub sim
+Vireo XS 0-100 (FAIL (fast)); Vireo XS 100-0 (FAIL (short)); Kestrel TS skidpad (FAIL (high)); Shiro Turbo skidpad (FAIL (high)); Rampart 5.0 0-100 (FAIL (slow)); Hauler 1500 0-100 (FAIL (slow)); Sentinel Cruiser 100-0 (FAIL (short)); Sentinel Bastion skidpad (FAIL (high)); Junkyard Beater skidpad (FAIL (high)); Junkyard Beater 100-0 (FAIL (short)). The estimator is a point-mass model; the sim numbers above are authoritative.
 
-Every roster car was spawned in `wp_sim` through `apps/simcli` (full throttle 6 s, brake to
-11 s, Arcade + Simulation, run twice): all 13 load, run, and produce identical state hashes
-on repeat runs. Command: `python3 tools/specsheet/smoke_sim.py` (writes nothing to the repo).
+## Barrier matrix (`damage-barrier --sweep`, Simulation mode)
+
+Each cell is checked by `collect_results.py` against the row's expectation (Arcade is
+checked to be milder at 56 km/h frontal). Durability class and the per-car "how this car
+breaks" notes (spec sheets) explain the differences between cars.
+
+| Test | Expectation | Vireo XS | Kestrel TS | Shiro Turbo | Hakone GT | Rampart 5.0 | Ironside 440 | Sperber 32 | Lindwurm 4T | Lucciola 350 | Hauler 1500 | Sentinel Cruiser | Sentinel Wolfhound | Sentinel Bastion | Junkyard Beater |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| frontal 15 km/h | bumper scuff, no component damage | PASS: crush 0.01 m, cabin 0.00 m, health 0.96 | PASS: crush 0.04 m, cabin 0.00 m, health 0.96 | PASS: crush 0.01 m, cabin 0.00 m, health 0.96 | PASS: crush 0.03 m, cabin 0.00 m, health 0.95 | PASS: crush 0.05 m, cabin 0.00 m, health 0.95 | PASS: crush 0.06 m, cabin 0.00 m, health 0.96 | PASS: crush 0.03 m, cabin 0.00 m, health 0.96 | PASS: crush 0.03 m, cabin 0.00 m, health 0.96 | PASS: crush 0.01 m, cabin 0.00 m, health 0.96 | PASS: crush 0.08 m, cabin 0.00 m, health 0.95 | PASS: crush 0.07 m, cabin 0.00 m, health 0.94 | PASS: crush 0.07 m, cabin 0.00 m, health 0.94 | PASS: crush 0.04 m, cabin 0.00 m, health 0.96 | PASS: crush 0.01 m, cabin 0.00 m, health 0.96 |
+| frontal 25 km/h | bumper damage only: radiator and engine intact, not a total loss | PASS: crush 0.14 m, cabin 0.00 m, health 0.84 | PASS: crush 0.17 m, cabin 0.00 m, health 0.85 | PASS: crush 0.13 m, cabin 0.00 m, health 0.84 | PASS: crush 0.16 m, cabin 0.00 m, health 0.84 | PASS: crush 0.18 m, cabin 0.00 m, health 0.84 | PASS: crush 0.18 m, cabin 0.00 m, health 0.85 | PASS: crush 0.14 m, cabin 0.00 m, health 0.83 | PASS: crush 0.15 m, cabin 0.00 m, health 0.83 | PASS: crush 0.22 m, cabin 0.00 m, health 0.81 | PASS: crush 0.18 m, cabin 0.00 m, health 0.84 | PASS: crush 0.20 m, cabin 0.00 m, health 0.84 | PASS: crush 0.20 m, cabin 0.00 m, health 0.83 | PASS: crush 0.24 m, cabin 0.00 m, health 0.82 | PASS: crush 0.13 m, cabin 0.00 m, health 0.84 |
+| frontal 40 km/h | crumple zone engaged (≥ 0.2 m crush), not a total loss (prompt 03 calibration: radiator goes at 56) | PASS: crush 0.30 m, cabin 0.01 m, health 0.54; failed Radiator | PASS: crush 0.35 m, cabin 0.01 m, health 0.59 | PASS: crush 0.29 m, cabin 0.01 m, health 0.57 | PASS: crush 0.34 m, cabin 0.01 m, health 0.59 | PASS: crush 0.34 m, cabin 0.01 m, health 0.61 | PASS: crush 0.33 m, cabin 0.00 m, health 0.65 | PASS: crush 0.29 m, cabin 0.01 m, health 0.56 | PASS: crush 0.31 m, cabin 0.01 m, health 0.54 | PASS: crush 0.61 m, cabin 0.00 m, health 0.52; failed Radiator, Battery | PASS: crush 0.36 m, cabin 0.00 m, health 0.63 | PASS: crush 0.36 m, cabin 0.00 m, health 0.65 | PASS: crush 0.44 m, cabin 0.00 m, health 0.59 | PASS: crush 0.44 m, cabin 0.00 m, health 0.62 | PASS: crush 0.29 m, cabin 0.02 m, health 0.58 |
+| frontal 56 km/h | ≈0.6 m frame crush (0.35-1.3 m), TotalLoss in Simulation (durability ≥ 4 may survive), Arcade milder | PASS: crush 0.67 m, cabin 0.03 m, health 0.12, TotalLoss; failed Engine, Radiator, Battery, SteeringRack… | PASS: crush 0.58 m, cabin 0.04 m, health 0.18, TotalLoss; failed Radiator, Battery, SteeringRack, Gearbox | PASS: crush 0.57 m, cabin 0.02 m, health 0.18, TotalLoss; failed Radiator, Battery, SteeringRack, SuspensionFR… | PASS: crush 0.59 m, cabin 0.04 m, health 0.21, TotalLoss; failed Radiator, SteeringRack | PASS: crush 0.55 m, cabin 0.01 m, health 0.20, TotalLoss; failed Radiator, Battery, SteeringRack | PASS: crush 0.50 m, cabin 0.13 m, health 0.22, TotalLoss; failed Radiator, SteeringRack | PASS: crush 0.53 m, cabin 0.04 m, health 0.18, TotalLoss; failed Radiator, Battery, SteeringRack, Driveshaft | PASS: crush 0.67 m, cabin 0.03 m, health 0.10, TotalLoss; failed Engine, Radiator, Battery, SteeringRack… | PASS: crush 1.18 m, cabin 0.01 m, health 0.19, TotalLoss; failed Radiator, Battery, SteeringRack, SuspensionFL… | PASS: crush 0.68 m, cabin 0.16 m, health 0.19, TotalLoss; failed Radiator, Battery, SteeringRack | PASS: crush 0.58 m, cabin 0.01 m, health 0.25; failed Radiator | PASS: crush 0.57 m, cabin 0.04 m, health 0.23, TotalLoss; failed Radiator, SteeringRack | PASS: crush 0.59 m, cabin 0.08 m, health 0.23, TotalLoss; failed Radiator, SteeringRack | PASS: crush 0.59 m, cabin 0.04 m, health 0.16, TotalLoss; failed Radiator, Battery, SteeringRack, Gearbox… |
+| frontal 80 km/h | TotalLoss in Simulation | PASS: crush 1.12 m, cabin 0.23 m, health 0.09, TotalLoss; failed Engine, Radiator, Battery, SteeringRack… | PASS: crush 1.12 m, cabin 0.11 m, health 0.09, TotalLoss; failed Engine, Radiator, Battery, SteeringRack… | PASS: crush 1.07 m, cabin 0.07 m, health 0.11, TotalLoss; failed Engine, Radiator, Battery, SteeringRack… | PASS: crush 1.24 m, cabin 0.16 m, health 0.10, TotalLoss; failed Engine, Radiator, Battery, SteeringRack… | PASS: crush 1.23 m, cabin 0.04 m, health 0.12, TotalLoss; failed Engine, Radiator, Battery, SteeringRack… | PASS: crush 1.06 m, cabin 0.14 m, health 0.11, TotalLoss; failed Engine, Radiator, Battery, SteeringRack… | PASS: crush 1.04 m, cabin 0.08 m, health 0.11, TotalLoss; failed Engine, Radiator, Battery, SteeringRack… | PASS: crush 1.08 m, cabin 0.25 m, health 0.09, TotalLoss; failed Engine, Radiator, Battery, SteeringRack… | PASS: crush 1.71 m, cabin 0.28 m, health 0.17, TotalLoss; failed Radiator, Battery, SteeringRack, SuspensionFL… | PASS: crush 0.97 m, cabin 0.15 m, health 0.11, TotalLoss; failed Engine, Radiator, Battery, SteeringRack… | PASS: crush 1.07 m, cabin 0.11 m, health 0.13, TotalLoss; failed Engine, Radiator, Battery, SteeringRack… | PASS: crush 1.07 m, cabin 0.10 m, health 0.12, TotalLoss; failed Engine, Radiator, Battery, SteeringRack… | PASS: crush 1.08 m, cabin 0.18 m, health 0.11, TotalLoss; failed Engine, Radiator, Battery, SteeringRack… | PASS: crush 1.09 m, cabin 0.19 m, health 0.10, TotalLoss; failed Engine, Radiator, Battery, SteeringRack… |
+| offset 40% 56 km/h | struck-side front suspension or wheel mount failed | PASS: crush 0.95 m, cabin 0.17 m, health 0.11, TotalLoss; failed Engine, Radiator, Battery, SteeringRack… | PASS: crush 0.99 m, cabin 0.06 m, health 0.10, TotalLoss; failed Engine, Radiator, Battery, SteeringRack… | PASS: crush 1.06 m, cabin 0.07 m, health 0.12, TotalLoss; failed Engine, Radiator, Battery, SteeringRack… | PASS: crush 1.08 m, cabin 0.03 m, health 0.12, TotalLoss; failed Engine, Radiator, Battery, SteeringRack… | PASS: crush 1.27 m, cabin 0.01 m, health 0.13, TotalLoss; failed Engine, Radiator, Battery, SteeringRack… | PASS: crush 0.89 m, cabin 0.03 m, health 0.18, TotalLoss; failed Radiator, Battery, SteeringRack, SuspensionFL… | PASS: crush 1.06 m, cabin 0.02 m, health 0.12, TotalLoss; failed Engine, Radiator, Battery, SteeringRack… | PASS: crush 0.95 m, cabin 0.14 m, health 0.11, TotalLoss; failed Engine, Radiator, Battery, SteeringRack… | PASS: crush 1.41 m, cabin 0.14 m, health 0.17, TotalLoss; failed Radiator, Battery, SteeringRack, SuspensionFL… | PASS: crush 0.70 m, cabin 0.10 m, health 0.17, TotalLoss; failed Radiator, Battery, SteeringRack, SuspensionFL… | PASS: crush 0.90 m, cabin 0.01 m, health 0.14, TotalLoss; failed Engine, Radiator, Battery, SteeringRack… | PASS: crush 0.81 m, cabin 0.01 m, health 0.15, TotalLoss; failed Engine, Radiator, Battery, SteeringRack… | PASS: crush 0.87 m, cabin 0.01 m, health 0.14, TotalLoss; failed Engine, Radiator, Battery, SteeringRack… | PASS: crush 0.86 m, cabin 0.09 m, health 0.11, TotalLoss; failed Engine, Radiator, Battery, SteeringRack… |
+| side (T-bone) 40 km/h | struck-side suspension failed (prompt 03 calibration; body-on-frame exempt: the barrier hits above the frame) | PASS: crush 0.17 m, cabin 0.15 m, health 0.75; failed SuspensionFL | PASS: crush 0.18 m, cabin 0.17 m, health 0.76; failed SuspensionFL | PASS: crush 0.20 m, cabin 0.20 m, health 0.74; failed SuspensionFL | PASS: crush 0.21 m, cabin 0.20 m, health 0.74; failed SuspensionFL | PASS: crush 0.21 m, cabin 0.21 m, health 0.74; failed SuspensionFL | PASS: crush 0.21 m, cabin 0.21 m, health 0.76; failed SuspensionFL | PASS: crush 0.17 m, cabin 0.15 m, health 0.76; failed SuspensionFL | PASS: crush 0.17 m, cabin 0.15 m, health 0.76; failed SuspensionFL | PASS: crush 0.24 m, cabin 0.24 m, health 0.73, TotalLoss; failed SuspensionFL | PASS: crush 0.15 m, cabin 0.13 m, health 0.78 | PASS: crush 0.18 m, cabin 0.15 m, health 0.77; failed SuspensionFL | PASS: crush 0.18 m, cabin 0.16 m, health 0.77; failed SuspensionFL | PASS: crush 0.14 m, cabin 0.12 m, health 0.79; failed SuspensionFL | PASS: crush 0.17 m, cabin 0.16 m, health 0.77; failed SuspensionFL |
+| rear 40 km/h | not a total loss; Ironside: rear fuel tank failed; Lucciola: rear drive (engine/gearbox/half-shafts) failed | FAIL: crush 0.48 m, cabin 0.32 m, health 0.56, TotalLoss (total loss from a 40 km/h rear hit) | PASS: crush 0.51 m, cabin 0.00 m, health 0.55 | PASS: crush 0.50 m, cabin 0.12 m, health 0.55 | PASS: crush 0.51 m, cabin 0.13 m, health 0.54 | PASS: crush 0.44 m, cabin 0.14 m, health 0.55; failed Exhaust | PASS: crush 0.42 m, cabin 0.12 m, health 0.58; failed FuelTank, Exhaust, SuspensionRL, SuspensionRR | PASS: crush 0.53 m, cabin 0.00 m, health 0.56 | FAIL: crush 0.50 m, cabin 0.32 m, health 0.56, TotalLoss (total loss from a 40 km/h rear hit) | PASS: crush 0.60 m, cabin 0.00 m, health 0.47; failed Gearbox | PASS: crush 0.66 m, cabin 0.00 m, health 0.57; failed Exhaust, SuspensionRL | PASS: crush 0.50 m, cabin 0.00 m, health 0.53 | PASS: crush 0.47 m, cabin 0.00 m, health 0.60; failed Exhaust | FAIL: crush 0.38 m, cabin 0.21 m, health 0.60, TotalLoss (total loss from a 40 km/h rear hit) | PASS: crush 0.44 m, cabin 0.00 m, health 0.56; failed Exhaust |
+
+### Barrier misses and why
+
+- **Vireo XS, rear 40 km/h** — gen-lattice's hatch profile runs the passenger cell to the tailgate, so a 40 km/h rear hit measures 0.32 m cabin intrusion and totals the car. Same on the Lindwurm and the SUV. Reported to workstream 03 (two-box rear crumple zone); not patched in car data.
+- **Lindwurm 4T, rear 40 km/h** — same two-box rear-structure finding as the Vireo (0.33 m cabin intrusion) — workstream 03.
+- **Sentinel Bastion, rear 40 km/h** — same two-box rear-structure finding (SUV profile, 0.22 m cabin intrusion) — workstream 03.
 
 ## `validation_results.json` format
 
 ```json
 {
   "vireo_xs": {
-    "t0100_s": 8.9, "skidpad_g": 0.86, "brake_100_0_m": 40.1, "vmax_kmh": 205,
-    "barrier": { "frontal 56 km/h": "PASS: 0.58 m crush, TotalLoss" }
+    "t0100_s": 9.3, "skidpad_g": 0.89, "brake_100_0_m": 40.2, "vmax_kmh": 202,
+    "barrier": { "frontal 56 km/h": "PASS: crush 0.67 m, cabin 0.02 m, health 0.11, TotalLoss" }
   }
 }
 ```

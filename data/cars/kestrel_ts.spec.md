@@ -26,9 +26,10 @@ All values are class-typical figures for the archetype, rounded; no single real 
 
 | Quantity | Value | Derivation |
 |---|---|---|
-| Curb mass | 1400 kg | class spec data |
-| `mass_kg` | 1475 kg | curb + 75 kg driver |
-| Front weight | 0.610 | axle loads 900 / 575 kg |
+| Curb mass | 1400 kg | class spec data (full tank) |
+| Fuel tank | 60 L | `fuel_capacity_l`; half a tank = 22 kg at 0.745 kg/L |
+| `mass_kg` | 1453 kg | curb − half tank + 75 kg driver (contract: fuel at 50 %) |
+| Front weight | 0.610 | axle loads 886 / 567 kg |
 | Wheelbase | 2.640 m | spec |
 | Track F / R | 1.530 / 1.520 m | spec |
 | Body W × L × H | 1.770 × 4.600 × 1.450 m | spec |
@@ -48,9 +49,9 @@ I_yaw   = k_y · m·(W² + L²)/12
 
 | Axis | Box (kg·m²) | k | `inertia_kgm2` |
 |---|---|---|---|
-| roll | 644 | 0.80 | 510 |
-| pitch | 2859 | 0.90 | 2570 |
-| yaw | 2986 | 0.92 | 2750 |
+| roll | 634 | 0.80 | 510 |
+| pitch | 2816 | 0.90 | 2530 |
+| yaw | 2941 | 0.92 | 2710 |
 
 ## Aerodynamics
 
@@ -76,7 +77,7 @@ Frontal area A = 0.84·W·H = 2.16 m²; Cd = 0.31 → **CdA = 0.668 m²**. Lift 
 | 6500 | 262 | 178.3 |
 | 6800 | 240 | 170.9 |
 
-Peak **181 kW @ 6000 rpm**, **335 N·m @ 3000 rpm**. Idle 800 / redline 6500 / limiter 6800 rpm. Rotating inertia 0.13 kg·m² (class: 0.10 small four … 0.30 big-block). Engine braking 11% of peak torque = 37 N·m. Power-to-weight 123 kW/t.
+Peak **181 kW @ 6000 rpm**, **335 N·m @ 3000 rpm**. Idle 800 / redline 6500 / limiter 6800 rpm. Rotating inertia 0.13 kg·m² (class: 0.10 small four … 0.30 big-block). Engine braking 11% of peak torque = 37 N·m. Power-to-weight 125 kW/t.
 
 ## Drivetrain
 
@@ -100,7 +101,7 @@ Final drive 4.06, reverse 3.30. Speeds use the driven-wheel loaded radius 0.308 
 | Front | 225/45R17 | 225 mm | 0.3171 m | 0.308 m | 22 kg |
 | Rear | 225/45R17 | 225 mm | 0.3171 m | 0.308 m | 20 kg |
 
-Unloaded r = rim/2 + width·aspect; loaded r = 0.97 × unloaded (static deflection). Compound: intended compound **`sport`** — no `data/tires/sport.json` yet, so the JSON uses `street`; re-run the build when the file lands.
+Unloaded r = rim/2 + width·aspect; loaded r = 0.97 × unloaded (static deflection). Compound: `sport`.
 
 ## Suspension
 
@@ -108,10 +109,10 @@ Springs from ride frequency, `k = m_s·(2πf)²` with sprung corner mass `m_s = 
 
 | Axle | m_s | f | Wheel rate k | Bump c | Rebound c | Travel |
 |---|---|---|---|---|---|---|
-| Front | 428 kg | 1.50 Hz | 38000 N/m | 2420 N·s/m | 3630 N·s/m | 0.16 m |
-| Rear | 268 kg | 1.60 Hz | 27000 N/m | 1610 N·s/m | 2420 N·s/m | 0.17 m |
+| Front | 421 kg | 1.50 Hz | 37400 N/m | 2380 N·s/m | 3570 N·s/m | 0.16 m |
+| Rear | 263 kg | 1.60 Hz | 26600 N/m | 1590 N·s/m | 2380 N·s/m | 0.17 m |
 
-Anti-roll bars from a roll-gradient target of 3.0°/g with 55% of roll stiffness at the front. Roll arm h − h_rc = 0.424 m (roll centres 0.08 m F / 0.12 m R). Required total K_φ = m·g·arm/φ = 117284 N·m/rad; springs give k·t²/2 = 44485 F / 31245 R N·m/rad; bars supply the rest as `arb_n_per_m = K_bar/t²` = **8600 F / 9300 R N/m** (clamped at ≥ 0). Resulting gradient 3.0°/g, front share 55%. Bump stops 150000 N/m.
+Anti-roll bars from a roll-gradient target of 3.0°/g with 55% of roll stiffness at the front. Roll arm h − h_rc = 0.424 m (roll centres 0.08 m F / 0.12 m R). Required total K_φ = m·g·arm/φ = 115507 N·m/rad; springs give k·t²/2 = 43776 F / 30736 R N·m/rad; bars supply the rest as `arb_n_per_m = K_bar/t²` = **8400 F / 9200 R N/m** (clamped at ≥ 0). Resulting gradient 3.0°/g, front share 55%. Bump stops 150000 N/m.
 
 Alignment: camber -0.7° F / -1.2° R, toe +0.00° F / +0.15° R (+ = in), caster 4.5°.
 
@@ -122,33 +123,27 @@ Full-pedal line pressure 100 bar.
 - Front: 300 mm disc, pistons per side 57 mm → A = 25.5 cm², r_eff = D/2 − 25 mm = 125 mm, pad μ = 0.4: T = 2·μ·p·A·r_eff = 2·0.4·100 bar·25.5 cm²·0.125 m = **2552 N·m**
 - Rear: 280 mm disc, pistons per side 38 mm → A = 11.3 cm², r_eff = D/2 − 25 mm = 115 mm, pad μ = 0.4: T = 2·μ·p·A·r_eff = 2·0.4·100 bar·11.3 cm²·0.115 m = **1043 N·m**
 
-Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 1796 N·m/wheel (capacity 1.42×), rear needs 430 N·m/wheel (capacity 2.42×). `bias_front` = f + 0.9·h/L = 0.78 (ideal distribution at 0.9 g, clamped 0.55-0.78). Handbrake 830 N·m per rear wheel.
+Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 1769 N·m/wheel (capacity 1.44×), rear needs 423 N·m/wheel (capacity 2.46×).
+
+`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 610 N·m), never boosted above its caliper capacity. Rear capacity exceeds that, so `bias_front` = T_r/(T_r + ideal) = **0.630** → delivered 2550 N·m front / 611 N·m rear per wheel at full pedal. Handbrake 830 N·m per rear wheel.
 
 ## Steering
 
 Ratio 15.0:1. Kerb-to-kerb turning circle 11.2 m → outer-front path radius 5.49 m, rear-axle-centre radius 4.05 m → mean road-wheel lock δ = atan(L/R) = **0.578 rad (33.1°)** (outer 28.8°, inner 38.8° at full Ackermann; `ackermann_frac` 0.60). Rack speed 1.4 rad/s.
 
-## Estimated performance
+## Performance
 
-From `tools/specsheet/estimate.py` (point-mass model, intended tire compound; see `data/cars/VALIDATION.md` for the sim results and class targets).
+Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of the last run); estimate = `tools/specsheet/estimate.py` (point-mass model). Class targets and explanations of any miss: `data/cars/VALIDATION.md`.
 
-| 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
-|---|---|---|---|---|
-| 6.7 s | 255 km/h | 37.1 m | 0.98 g | 546 |
+|  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
+|---|---|---|---|---|---|
+| sim | 7.1 s | 248 km/h | 38.8 m | 0.93 g | — |
+| estimate | 6.6 s | 255 km/h | 35.8 m | 0.98 g | 552 |
 
 ## Damage lattice (`data/lattices/kestrel_ts.json`)
 
-120 nodes, 704 beams, 3 detachables, 21 component mounts.
+257 nodes, 1620 beams, 8 detachables, 21 component mounts.
 
-- Generated with `gen-box-lattice --id kestrel_ts --width 1.77 --length 4.6 --height 1.45 --wheelbase 2.64 --mass 324.5 --clearance 0.14` (22% of vehicle mass).
-- Shaped top layer to the `sedan` profile (hood/deck/bumper tops dropped to beltline, greenhouse narrowed to 86% width).
-- Beams: pillars + roof rails → hss 4.5e-04 m² (34 beams).
-- Beams: cabin cell → hss 4.5e-04 m² (88 beams).
-- Beams: sills → hss 5.0e-04 m² (6 beams).
-- Beams: crumple (outer) rail segments → hss 2.5e-04 m² (36 beams).
-- Beams: inner rail segments / firewall → hss 4.5e-04 m² (36 beams).
-- Beams: hood → aluminum 1.5e-4 m² (16 beams).
-- Beams: outer panels → mild_steel 1.5e-04 m² (284 beams).
-- Components: radiator at row 8 ahead of the engine (fails first), transverse engine at row 7 with the gearbox on its left end, fuel tank under the rear seat.
-- Detachables: FrontBumper 3000 N·s / 6 kg, RearBumper 3000 N·s / 6 kg, Hood 3500 N·s / 9 kg.
-- Node mass: engine-mount nodes ×2.5, renormalised to 325 kg total.
+- Generated with `gen-lattice --id kestrel_ts --profile sedan --width 1.77 --length 4.6 --height 1.45 --wheelbase 2.64 --mass 319.6 --car-mass 1452.7 --clearance 0.14 --front-overhang 0.95 --strength 1.0` (22% of vehicle mass in the lattice; strength from durability class 3).
+- Era `2000s` passenger cell: 162 cabin/sill, 119 cross-member, 10 pillar, 10 roof rail → hss × 0.90 section.
+- Transverse engine: gearbox mounted on the left end of the engine block (gen-lattice places it in the tunnel at the firewall, as for FR).

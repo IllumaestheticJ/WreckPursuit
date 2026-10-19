@@ -46,19 +46,20 @@ TARGETS = {
     "sentinel_cruiser": dict(t0100=(7.0, 8.5), lat=(0.85, 0.92), brake=(38, 43), why="fleet evaluation figures for RWD V6 police sedans"),
     "sentinel_wolfhound": dict(t0100=(5.5, 6.5), lat=(0.85, 0.92), brake=(38, 43), why="fleet evaluation figures for AWD TT V6 pursuit vehicles"),
     "sentinel_bastion": dict(t0100=(7.5, 9.0), lat=(0.72, 0.80), brake=(40, 46), why="fleet evaluation figures for RWD 5.3 V8 police SUVs"),
+    "junkyard_beater": dict(t0100=(12.0, 15.0), lat=(0.75, 0.88), brake=(38, 46), why="period road tests of late-80s 1.6 L economy sedans, derated for wear"),
 }
 
 # Barrier matrix (prompt 03). Expected outcome per durability class in Simulation mode; Arcade
 # applies the mode-table scaling (≈ 0.45 × lattice impulse) and must be strictly milder.
 BARRIERS = [
     ("frontal 15 km/h", "bumper scuff, no component damage"),
-    ("frontal 25 km/h", "bumper cover cracked/dented; radiator intact (durability ≥ 4: bumper only)"),
-    ("frontal 40 km/h", "radiator failed; engine damaged on durability ≤ 2"),
-    ("frontal 56 km/h", "≈0.6 m frame crush, TotalLoss in Simulation (durability 5: severe but drivable in Arcade)"),
-    ("frontal 80 km/h", "TotalLoss in both modes except durability 5 in Arcade"),
-    ("offset 40% 56 km/h", "struck-side suspension + wheel mount failed; cabin intrusion higher on 70s/90s cars"),
-    ("side (T-bone) 40 km/h", "struck-side door + suspension failed (prompt 03 calibration)"),
-    ("rear 40 km/h", "rear bumper off; fuel tank damaged on cars with rear tanks (ironside); rear drive lost on lucciola"),
+    ("frontal 25 km/h", "bumper damage only: radiator and engine intact, not a total loss"),
+    ("frontal 40 km/h", "crumple zone engaged (≥ 0.2 m crush), not a total loss (prompt 03 calibration: radiator goes at 56)"),
+    ("frontal 56 km/h", "≈0.6 m frame crush (0.35-1.3 m), TotalLoss in Simulation (durability ≥ 4 may survive), Arcade milder"),
+    ("frontal 80 km/h", "TotalLoss in Simulation"),
+    ("offset 40% 56 km/h", "struck-side front suspension or wheel mount failed"),
+    ("side (T-bone) 40 km/h", "struck-side suspension failed (prompt 03 calibration; body-on-frame exempt: the barrier hits above the frame)"),
+    ("rear 40 km/h", "not a total loss; Ironside: rear fuel tank failed; Lucciola: rear drive (engine/gearbox/half-shafts) failed"),
 ]
 
 
@@ -84,6 +85,8 @@ def load():
 
 def layout(j):
     lay = j["drivetrain"]["layout"]
+    if isinstance(lay, dict) and "AwdOnDemand" in lay:
+        return f"AWD on-demand (≤ {lay['AwdOnDemand']['max_rear_split'] * 100:.0f} % rear)"
     if isinstance(lay, dict):
         return f"AWD {lay['Awd']['front_split'] * 100:.0f}/{100 - lay['Awd']['front_split'] * 100:.0f}"
     return {"Fwd": "FWD", "Rwd": "RWD"}[lay]
@@ -143,84 +146,106 @@ def validation_md(rows) -> str:
          "Three layers of evidence per car:",
          "",
          "1. **Data validity** — every car + lattice loads through `wp_contracts::load_car` and validates",
-         "   against `schemas/` (`cargo test -p wp_contracts`, green), and the nameplate check passes",
-         "   (`python3 tools/specsheet/nameplate_check.py`).",
-         "2. **Estimate vs class target** — point-mass estimates (`tools/specsheet/estimate.py`) against",
-         "   class-typical published figures for each archetype. This is what the data was tuned with.",
-         "3. **Sim vs class target** — prompt 02's metric scenarios (0-100, 100-0, skidpad, top speed) and",
-         "   prompt 03's barrier scenarios, run with `apps/simcli` on the integrated build. **Pending:**",
-         "   on this branch `wp_vehicle` and `wp_damage` are still the prompt-01 stubs (kinematic model,",
-         "   no deformation), so their numbers say nothing about the data. The tables are ready; drop",
-         "   results into `tools/specsheet/validation_results.json` and re-run this script.",
+         "   against `schemas/` (`cargo test -p wp_contracts`), the nameplate check passes",
+         "   (`python3 tools/specsheet/nameplate_check.py`) and every car runs deterministically through",
+         "   `simcli` in both damage modes (`python3 tools/specsheet/smoke_sim.py`).",
+         "2. **Sim vs class target (primary)** — `wp_vehicle`'s metrics (0-100, 100-0, 50 m skidpad, top",
+         "   speed) and `wp_damage`'s barrier sweep on the integrated build, collected by",
+         "   `python3 tools/specsheet/collect_results.py` into `tools/specsheet/validation_results.json`.",
+         "3. **Estimate vs class target (secondary)** — the point-mass estimator",
+         "   (`tools/specsheet/estimate.py`) the data was first sized with.",
          "",
          "† = intended tire compound not in `data/tires/` yet (JSON uses `street`, estimate scaled).",
          "",
-         "## Performance",
+         "## Performance (sim)",
          ""]
-    head = ["Car", "0-100 target s", "est.", "result", "sim", "Skidpad target g", "est.", "result",
-            "sim", "100-0 target m", "est.", "result", "sim", "Vmax est. km/h", "sim"]
+    head = ["Car", "0-100 target s", "sim", "", "Skidpad target g", "sim", "", "100-0 target m",
+            "sim", "", "Vmax km/h", "est. 0-100 / skid / 100-0"]
     o.append("| " + " | ".join(head) + " |")
     o.append("|" + "|".join("---" for _ in head) + "|")
-    fails = []
+    sim_fails, est_fails = [], []
     for _, j, comp, scaled, e in rows:
         t = TARGETS.get(j["id"])
         if not t:
             continue
         m = measured.get(j["id"], {})
         mark = "†" if scaled else ""
-        r1 = band(e["t0100_s"], *t["t0100"])
-        r2 = band_hi_good(e["skidpad_g"], *t["lat"])
-        r3 = band(e["brake_100_0_m"], *t["brake"]).replace("fast", "short").replace("slow", "long")
-        for name, res in (("0-100", r1), ("skidpad", r2), ("100-0", r3)):
+        cells = [j["display_name"]]
+        for key, tk, kind, name in (("t0100_s", "t0100", "t", "0-100"),
+                                    ("skidpad_g", "lat", "lat", "skidpad"),
+                                    ("brake_100_0_m", "brake", "brake", "100-0")):
+            lo, hi = t[tk]
+            if m.get(key) is None:
+                v, res = "pending", "—"
+            else:
+                val = m[key]
+                v = f"{val:.2f}" if kind == "lat" else f"{val:.1f}"
+                res = band_hi_good(val, lo, hi) if kind == "lat" else band(val, lo, hi)
+                if kind == "brake":
+                    res = res.replace("fast", "short").replace("slow", "long")
+                if res != "PASS":
+                    sim_fails.append((j["display_name"], name, res, v))
+            rng = f"{lo:.2f}-{hi:.2f}" if kind == "lat" else f"{lo:.1f}-{hi:.1f}"
+            cells += [rng, v, "✓" if res == "PASS" else res]
+        e_res = (band(e["t0100_s"], *t["t0100"]), band_hi_good(e["skidpad_g"], *t["lat"]),
+                 band(e["brake_100_0_m"], *t["brake"]).replace("fast", "short").replace("slow", "long"))
+        for name, res in zip(("0-100", "skidpad", "100-0"), e_res):
             if res != "PASS":
-                fails.append((j["display_name"], name, res))
-
-        def sim(key, fmt):
-            return fmt.format(m[key]) if key in m else "pending"
-
-        o.append("| " + " | ".join([
-            j["display_name"],
-            f"{t['t0100'][0]:.1f}-{t['t0100'][1]:.1f}", f"{e['t0100_s']:.1f}{mark}", r1, sim("t0100_s", "{:.1f}"),
-            f"{t['lat'][0]:.2f}-{t['lat'][1]:.2f}", f"{e['skidpad_g']:.2f}{mark}", r2, sim("skidpad_g", "{:.2f}"),
-            f"{t['brake'][0]:.0f}-{t['brake'][1]:.0f}", f"{e['brake_100_0_m']:.1f}{mark}", r3, sim("brake_100_0_m", "{:.1f}"),
-            f"{e['vmax_kmh']:.0f}", sim("vmax_kmh", "{:.0f}"),
-        ]) + " |")
-    o += ["", "Target sources (type): " + "; ".join(f"{k}: {v['why']}" for k, v in TARGETS.items()) + ".", ""]
-    o += ["### Estimate misses and why", ""]
-    if not fails:
+                est_fails.append((j["display_name"], name, res))
+        vmax = f"{m['vmax_kmh']:.0f}" if m.get("vmax_kmh") else "pending"
+        cells += [vmax, f"{e['t0100_s']:.1f}{mark} / {e['skidpad_g']:.2f}{mark} / "
+                        f"{e['brake_100_0_m']:.1f}{mark}"]
+        o.append("| " + " | ".join(cells) + " |")
+    o += ["", "Target sources (type): "
+          + "; ".join(f"{k}: {v['why']}" for k, v in TARGETS.items()) + ".", ""]
+    o += ["### Sim misses and why", ""]
+    if not sim_fails:
         o.append("None.")
-    for name, metric, res in fails:
-        o.append(f"- **{name} {metric}: {res}** — {MISS_NOTES.get((name, metric), 'see integration notes')}")
+    for name, metric, res, v in sim_fails:
+        note = SIM_NOTES.get((name, metric), "see docs/integration/cars.md")
+        o.append(f"- **{name} {metric} {v}: {res}** — {note}")
+    o += ["", "Shared causes referenced above:", ""]
+    o += [f"- **{k}** — {v}" for k, v in SHARED.items()]
+    o += ["", "### Estimate misses", ""]
+    if not est_fails:
+        o.append("None.")
+    else:
+        o.append("; ".join(f"{n} {mt} ({r})" for n, mt, r in est_fails)
+                 + ". The estimator is a point-mass model; the sim numbers above are authoritative.")
     o += ["",
-          "## Barrier matrix (prompt 03 scenarios, both modes)",
+          "## Barrier matrix (`damage-barrier --sweep`, Simulation mode)",
           "",
-          "Expected Simulation-mode outcome by test; Arcade must be strictly milder. Durability class",
-          "and the per-car \"how this car breaks\" notes (spec sheets) refine these per car.",
+          "Each cell is checked by `collect_results.py` against the row's expectation (Arcade is",
+          "checked to be milder at 56 km/h frontal). Durability class and the per-car \"how this car",
+          "breaks\" notes (spec sheets) explain the differences between cars.",
           ""]
     cars = [j for _, j, _, _, _ in rows if j["id"] in TARGETS]
     head = ["Test", "Expectation"] + [j["display_name"] for j in cars]
     o.append("| " + " | ".join(head) + " |")
     o.append("|" + "|".join("---" for _ in head) + "|")
+    barrier_fails = []
     for test, expect in BARRIERS:
         cells = []
         for j in cars:
             v = measured.get(j["id"], {}).get("barrier", {}).get(test)
             cells.append(v if v else "pending")
+            if v and v.startswith("FAIL"):
+                barrier_fails.append((j["display_name"], test))
         o.append("| " + " | ".join([test, expect] + cells) + " |")
+    o += ["", "### Barrier misses and why", ""]
+    if not barrier_fails:
+        o.append("None.")
+    for name, test in barrier_fails:
+        note = BARRIER_NOTES.get((name, test), "see docs/integration/cars.md")
+        o.append(f"- **{name}, {test}** — {note}")
     o += ["",
-          "## Smoke run on the stub sim",
-          "",
-          "Every roster car was spawned in `wp_sim` through `apps/simcli` (full throttle 6 s, brake to",
-          "11 s, Arcade + Simulation, run twice): all 13 load, run, and produce identical state hashes",
-          "on repeat runs. Command: `python3 tools/specsheet/smoke_sim.py` (writes nothing to the repo).",
-          "",
           "## `validation_results.json` format",
           "",
           "```json",
           "{",
           '  "vireo_xs": {',
-          '    "t0100_s": 8.9, "skidpad_g": 0.86, "brake_100_0_m": 40.1, "vmax_kmh": 205,',
-          '    "barrier": { "frontal 56 km/h": "PASS: 0.58 m crush, TotalLoss" }',
+          '    "t0100_s": 9.3, "skidpad_g": 0.89, "brake_100_0_m": 40.2, "vmax_kmh": 202,',
+          '    "barrier": { "frontal 56 km/h": "PASS: crush 0.67 m, cabin 0.02 m, health 0.11, TotalLoss" }',
           "  }",
           "}",
           "```",
@@ -228,15 +253,39 @@ def validation_md(rows) -> str:
     return "\n".join(o)
 
 
-# Explanations for estimate misses (kept next to the targets so they stay in sync).
-MISS_NOTES = {
-    ("Vireo XS", "skidpad"): "the shared `street` tire (lateral D = 1.0 at 4 kN) has summer-tire grip; a light car's low wheel loads raise it further via load sensitivity. Real all-season grip is D ≈ 0.90. Flagged to workstream 02 (tire files), not a car-data problem.",
-    ("Kestrel TS", "skidpad"): "sport-compound assumption (street × 1.10) — revisit when `sport.json` lands.",
-    ("Shiro Turbo", "skidpad"): "sport-compound assumption (street × 1.10) — revisit when `sport.json` lands.",
-    ("Rampart 5.0", "0-100"): "traction-limited RWD (1775 kg, 46 % rear): the point-mass launch uses the scaled street longitudinal μ ≈ 1.1; the class figure implies ≈ 1.2 at launch. Expected to close with the real `sport` compound and wp_vehicle's launch behaviour; if the sim also misses, raise rear-tire longitudinal grip rather than inventing power.",
-    ("Hauler 1500", "0-100"): "2WD, empty bed (43 % rear) and an automatic without torque-converter multiplication (the contract has no converter model — see contract requests). Published ≈ 7.5 s figures are mostly 4WD; the 4WD mod should land inside the band.",
-    ("Lindwurm 4T", "100-0"): "0.3 m over the band and tire-limited, not brake-limited (capacity 1.8× front / 2.8× rear lock torque at 1 g): the front-heavy, high-CG hatch loads its front tires hardest, and load sensitivity costs a little peak μ. Within estimator noise; check in the sim before changing anything.",
-    ("Ironside 440", "100-0"): "intended: the brakes are deliberately under-sized (capacity 0.79× front lock torque), i.e. 'scary brakes'. Target band already reflects period tests.",
+# Explanations for sim misses (kept next to the targets so they stay in sync).
+SHARED = {
+    "A (sim conservative)": "wp_vehicle's metric run is a little slower and longer than published road tests across the board (TCS-on launch, ABS release cycle, shift torque cut): its own debug coupe at 200 kW/t runs 0-100 in 5.2 s and the debug cars stop in ≈ 42.5 m. Car data was not inflated to compensate; flagged to workstream 02.",
+    "B (automatic)": "automatic gearbox without torque-converter multiplication in the sim yet: the five automatics carry `torque_converter` data (contract v0.2.0) but `wp_vehicle` ignores it until workstream A implements it — re-measure then.",
+    "C (tire-limited)": "limited by the tire compound, not the chassis: setup changes (bars, camber, CG, LSD) moved it < 1 %, a grippier compound moves it directly (measured).",
+}
+
+SIM_NOTES = {
+    ("Rampart 5.0", "0-100"): "A + traction. Measured: final drive 3.73, CG 0.48 m and a stronger LSD each change it by ≤ 0.03 s; semi-slicks only reach 5.5 s; 0.12 s shifts 5.6 s. The prompt-09 band (4.5-5.0) needs 02's launch/TCS to be less conservative.",
+    ("Rampart 5.0", "skidpad"): "C — heavy nose on `sport` tires; semi-slicks give 0.97 g.",
+    ("Rampart 5.0", "100-0"): "A — 1 m over. Was 55.6 m in the lead's first run (rear starved by the bias semantics) and 45.6 m with the bias fixed but the full 6-piston caliper torque (ABS cannot modulate it); the ABS ceiling brings it to 39 m.",
+    ("Hakone GT", "0-100"): "A — 0.03 s over.",
+    ("Hakone GT", "100-0"): "A — 1 m over; heaviest `sport`-tire car after the Rampart.",
+    ("Kestrel TS", "0-100"): "A — 0.02 s over (FWD, torque-limited launch).",
+    ("Sperber 32", "0-100"): "A — high-revving NA six on a TCS launch.",
+    ("Sperber 32", "100-0"): "A — 0.7 m over.",
+    ("Lindwurm 4T", "100-0"): "A — 0.5 m over.",
+    ("Lucciola 350", "skidpad"): "C — 0.95 g on `sport`, 1.09 g on `semi_slick` (measured). A 90s exotic on its stock tires tested ≈ 0.95 g; the prompt-09 ≥ 1.0 g target needs either a stickier `sport` compound (02) or giving the Lucciola semi-slicks — lead's call.",
+    ("Hauler 1500", "0-100"): "B + 2WD with an empty bed; semi-slicks reach 7.9 s, so traction matters too. The 4WD mod (08) should land it in band.",
+    ("Hauler 1500", "skidpad"): "C — now on 02's `all_terrain` (≈ 0.9 × street, as requested): 0.63 g vs 0.68-0.76 published for half-tons on all-terrain tires. Joint re-tune with 02 (compound peak or cornering stiffness) rather than a chassis change.",
+    ("Ironside 440", "0-100"): "B + bias-ply traction: on 02's `vintage_bias` (longitudinal D 0.93) the 560 N·m launch spins the rears, and the converter's stall multiplication is not simulated yet (contract v0.2.0 field set, `wp_vehicle` ignores it). Re-measure when A implements the converter.",
+    ("Ironside 440", "skidpad"): "C — 02's `vintage_bias` (≈ 0.85 × street, half the cornering stiffness, as requested) on a soft, 0.55 m-CG chassis gives 0.62 g; period road tests put the archetype at 0.70-0.75 g. Joint re-tune with 02.",
+    ("Lindwurm 4T", "0-100"): "0.04 s over after switching to on-demand AWD (`AwdOnDemand` 95 % front, up to 50 % rear at 5 % front slip — the lead's first-cut coupling, which A tunes); the fixed 65/35 split ran 5.37 s.",
+    ("Sentinel Wolfhound", "skidpad"): "C — 0.848 g, 0.002 under the band on `police_pursuit` (rounds to 0.85); on-demand AWD changed it by < 0.01 g.",
+    ("Sentinel Cruiser", "0-100"): "B — 0.2 s over.",
+    ("Sentinel Cruiser", "skidpad"): "C — 0.02 g under on `police_pursuit`.",
+    ("Sentinel Bastion", "skidpad"): "C — ≤ 0.01 g under; tall body-on-frame SUV.",
+}
+
+BARRIER_NOTES = {
+    ("Vireo XS", "rear 40 km/h"): "gen-lattice's hatch profile runs the passenger cell to the tailgate, so a 40 km/h rear hit measures 0.32 m cabin intrusion and totals the car. Same on the Lindwurm and the SUV. Reported to workstream 03 (two-box rear crumple zone); not patched in car data.",
+    ("Lindwurm 4T", "rear 40 km/h"): "same two-box rear-structure finding as the Vireo (0.33 m cabin intrusion) — workstream 03.",
+    ("Sentinel Bastion", "rear 40 km/h"): "same two-box rear-structure finding (SUV profile, 0.22 m cabin intrusion) — workstream 03.",
 }
 
 

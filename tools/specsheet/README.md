@@ -6,19 +6,21 @@ Plain Python 3 (standard library only, 3.9+). Nothing here is reachable from the
 | File | What it does |
 |---|---|
 | `roster_inputs.py` | **The source of truth** for the roster: per-car engineering inputs (mass, geometry, torque curve, gearing, tire sizes, ride frequencies, roll targets, caliper sizes, turning circle…), prose (design note, how it breaks, source types) and lattice options. |
-| `build_roster.py` | Derives `data/cars/<id>.json`, `data/cars/<id>.spec.md` and `data/lattices/<id>.json` from the inputs. Lattices = `gen-box-lattice` output + documented hand adjustments (`adjust_lattice`). Deterministic. |
+| `build_roster.py` | Derives `data/cars/<id>.json`, `data/cars/<id>.spec.md` and `data/lattices/<id>.json` from the inputs. Lattices = workstream 03's `gen-lattice` output + the documented hand adjustments it cannot express yet (`adjust_lattice`). Deterministic. |
 | `estimate.py` | Point-mass performance estimator (0-100, top speed, 100-0, skidpad, rough class index). Not the game's vehicle model. |
-| `specsheet.py` | Renders `data/cars/ROSTER.md` (roster table) and `data/cars/VALIDATION.md` from the car JSON. |
+| `collect_results.py` | Runs `wp_vehicle`'s metrics example and `damage-barrier --sweep` for every roster car, checks the barrier expectations and writes `validation_results.json`. |
+| `validation_results.json` | Measured sim results (generated; read by `specsheet.py`). |
+| `specsheet.py` | Renders `data/cars/ROSTER.md` (roster table) and `data/cars/VALIDATION.md` from the car JSON and `validation_results.json`. |
 | `nameplate_check.py` | Fails if a real maker/model/badge/trademarked tech name appears in roster files. Denylist stored as hashes. |
-| `smoke_sim.py` | Spawns every roster car in `wp_sim` via `simcli` in both damage modes, twice, and checks the state hashes match. |
+| `smoke_sim.py` | Spawns every roster car in `wp_sim` via `simcli` (scenario format v2) in both damage modes, twice, and checks the state hashes match. |
 
 ## Typical loop
 
 ```sh
-cargo build --release -p wp_damage --bin gen-box-lattice
-cargo build --release -p simcli
+cargo build --release -p wp_damage --bins -p wp_vehicle --example metrics -p simcli
 # edit tools/specsheet/roster_inputs.py, then:
 python3 tools/specsheet/build_roster.py          # cars, spec sheets, lattices
+python3 tools/specsheet/collect_results.py       # sim metrics + barrier sweeps → validation_results.json
 python3 tools/specsheet/specsheet.py             # ROSTER.md + VALIDATION.md
 python3 tools/specsheet/nameplate_check.py       # naming policy
 python3 tools/specsheet/smoke_sim.py             # loads + determinism through the sim
@@ -29,7 +31,10 @@ Never hand-edit the generated files; the next build overwrites them.
 
 ## Derivations (summary — each spec sheet shows the numbers)
 
-- `mass_kg` = curb + 75 kg driver.
+- `mass_kg` = curb (full tank) − half a tank (0.745 kg/L) + 75 kg driver; `fuel_capacity_l`
+  set per car (contract v0.2.0: fuel in `mass_kg` at 50 %).
+- Automatics carry `torque_converter` (stall rpm, stall ratio, coupling rpm); on-demand AWD
+  cars use `AwdOnDemand` (the estimator assumes the coupling closed at launch).
 - Inertia: box formula `m·(a²+b²)/12` per axis × mass-concentration factor `k` (0.75 mid-engine
   … 0.97 long-overhang/body-on-frame).
 - CdA = Cd × `area_k`·W·H (+ police lightbar 0.05 m²).
@@ -38,14 +43,20 @@ Never hand-edit the generated files; the next build overwrites them.
 - Anti-roll bars: total roll stiffness for a target roll gradient (°/g) with a front share;
   springs contribute `k·t²/2`, bars `k_arb·t²` (the bar rate in `arb_n_per_m`).
 - Brakes: disc `T = 2·μ_pad·p·A_piston(one side)·r_eff`, drum `T = BF·p·A_wc·r`; line pressure
-  100 bar modern, 65 bar 70s; `bias_front = f + 0.9·h/L` clamped 0.55-0.78.
+  100 bar modern, 65 bar 70s. `wp_vehicle` gives the axle `bias_front` favours its full
+  `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` = caliper capacity per
+  wheel and `bias_front` is the proportioning valve: 0.5 when the rear caliper is the limit,
+  above 0.5 only to trim an oversized rear to the front's lock margin
+  (`ideal rear = T_f · lock_r / lock_f` at 1 g). **ABS ceiling**: delivered front torque is capped
+  at 1.5 × the front lock torque on the car's own tire (rear scaled with it) because
+  `wp_vehicle`'s ABS cannot modulate an oversized caliper — remove once it can.
 - Steering lock from kerb-to-kerb turning circle (mean road-wheel angle `atan(L/R_rear)`).
 - Engine braking = 10-12 % of peak torque; clutch capacity 1.35-1.6 × peak torque.
 
 ## Tire compounds
 
 Each car names an *intended* compound (`street`, `sport`, `police_pursuit`, `all_terrain`,
-`vintage_bias`). `build_roster.py` uses it when `data/tires/<compound>.json` exists, else
+`vintage_bias`; the last two do not exist yet). `build_roster.py` uses it when `data/tires/<compound>.json` exists, else
 `street`. The estimator then scales street peak friction by `estimate.COMPOUND_SCALE`
 (sport 1.10, semi-slick 1.22, police pursuit 1.04, all-terrain 0.90, vintage bias-ply 0.85 —
 rule-of-thumb ratios of peak lateral g between tire categories on the same car).
@@ -69,11 +80,12 @@ failure.
 
 - The estimator is a point-mass model: no wheelspin dynamics, no torque converter, no
   combined slip, no transient handling. Use it to catch data mistakes, not to tune feel.
-- Lattices are post-processed 120-node box grids (124 with a push bar) until prompt 03's
-  `gen-lattice` lands; see `docs/integration/cars.md` for what it should learn.
+- `adjust_lattice` recognises beam roles in gen-lattice output by section size (`SEC` mirrors
+  `lattice_gen::DEFAULT_SECTIONS`); if 03 changes those sections, update `SEC` or the era
+  adjustment stops matching (the spec sheets' change log would then show fewer beams).
+- The remaining hand adjustments are listed in `docs/integration/cars.md`.
 
 ## Perf
 
-Building all 13 cars (including 13 generator runs) takes ≈ 1 s; `specsheet.py` ≈ 1 s.
-Roster lattices: 120-124 nodes and 704-714 beams per car (input for prompt 03's
-0.25 ms/car lattice budget).
+Building all 14 cars (including 14 gen-lattice runs) takes ≈ 0.8 s; `collect_results.py`
+≈ 15 s; `specsheet.py` < 1 s. Roster lattices: 244-304 nodes and 1539-1988 beams per car.

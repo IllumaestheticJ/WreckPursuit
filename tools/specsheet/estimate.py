@@ -52,19 +52,22 @@ DRIVETRAIN_EFF = {"Fwd": 0.88, "Rwd": 0.85, "Awd": 0.80}
 
 
 def layout_name(layout) -> str:
-    """'Fwd' | 'Rwd' | 'Awd' from the JSON layout value."""
+    """'Fwd' | 'Rwd' | 'Awd' from the JSON layout value (on-demand AWD counts as 'Awd')."""
     if isinstance(layout, str):
         return layout
-    return next(iter(layout))
+    return "Awd" if next(iter(layout)).startswith("Awd") else next(iter(layout))
 
 
 def front_split(layout) -> float:
-    """Fraction of drive torque to the front axle."""
+    """Fraction of drive torque to the front axle. For on-demand AWD the coupling is assumed
+    closed (the hard-launch case): front = 1 − max_rear_split."""
     name = layout_name(layout)
     if name == "Fwd":
         return 1.0
     if name == "Rwd":
         return 0.0
+    if "AwdOnDemand" in layout:
+        return 1.0 - float(layout["AwdOnDemand"]["max_rear_split"])
     return float(layout["Awd"]["front_split"])
 
 
@@ -154,8 +157,12 @@ class Car:
         self.kroll_f = s[0]["spring_n_per_m"] * self.tf**2 / 2 + s[0]["arb_n_per_m"] * self.tf**2
         self.kroll_r = s[2]["spring_n_per_m"] * self.tr**2 / 2 + s[2]["arb_n_per_m"] * self.tr**2
         b = car["brakes"]
-        self.tb_f = b["max_torque_front_nm"]
-        self.tb_r = b["max_torque_rear_nm"]
+        # Delivered torque at full pedal with wp_vehicle's bias normalisation: the favoured
+        # axle gets its full max_torque_*, the other is scaled by (1 - b)/b.
+        bias = b["bias_front"]
+        norm = max(bias, 1.0 - bias)
+        self.tb_f = b["max_torque_front_nm"] * bias / norm
+        self.tb_r = b["max_torque_rear_nm"] * (1.0 - bias) / norm
 
     # Driven-wheel radius (rear for RWD; front for FWD; mean for AWD).
     def drive_radius(self) -> float:

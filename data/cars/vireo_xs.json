@@ -4,39 +4,39 @@
   "class": "Compact",
   "analog_of": "late-90s Japanese FF hot hatch, 1.6 L naturally aspirated I4 with two-stage cam",
   "body_size_m": [1.695, 4.18, 1.37],
-  "mass_kg": 1125.0,
+  "mass_kg": 1108.2,
   "front_weight_frac": 0.62,
   "wheelbase_m": 2.62,
   "track_front_m": 1.475,
   "track_rear_m": 1.475,
   "cg_height_m": 0.5,
-  "inertia_kgm2": [360.0, 1630.0, 1750.0],
+  "inertia_kgm2": [350.0, 1610.0, 1730.0],
   "drag_cd_a_m2": 0.644,
   "lift_front": 0.1,
   "lift_rear": 0.12,
   "engine": {
     "torque_curve_nm": [
-      [1000, 93],
-      [1500, 106],
-      [2000, 117],
-      [2500, 124],
-      [3000, 129],
-      [3500, 132],
-      [4000, 134],
-      [4500, 135],
-      [5000, 134],
-      [5500, 142],
-      [6000, 144],
-      [6500, 141],
-      [7000, 133],
-      [7600, 118],
-      [7900, 104]
+      [1000, 98],
+      [1500, 112],
+      [2000, 123],
+      [2500, 131],
+      [3000, 136],
+      [3500, 139],
+      [4000, 141],
+      [4500, 142],
+      [5000, 141],
+      [5500, 150],
+      [6000, 152],
+      [6500, 148],
+      [7000, 140],
+      [7600, 124],
+      [7900, 110]
     ],
     "idle_rpm": 800.0,
     "redline_rpm": 7600.0,
     "rev_limit_rpm": 7900.0,
     "inertia_kgm2": 0.1,
-    "engine_brake_nm": 17.0
+    "engine_brake_nm": 18.0
   },
   "drivetrain": {
     "layout": "Fwd",
@@ -45,7 +45,7 @@
     "reverse_ratio": 3.0,
     "diff_front": "Open",
     "diff_rear": "Open",
-    "clutch_max_nm": 200.0,
+    "clutch_max_nm": 210.0,
     "shift_time_s": 0.25
   },
   "wheels": [
@@ -104,46 +104,46 @@
   ],
   "suspension": [
     {
-      "spring_n_per_m": 31400.0,
-      "damper_bump_ns_per_m": 1930.0,
-      "damper_rebound_ns_per_m": 2900.0,
+      "spring_n_per_m": 30900.0,
+      "damper_bump_ns_per_m": 1900.0,
+      "damper_rebound_ns_per_m": 2850.0,
       "travel_m": 0.16,
       "preload_m": 0.02,
       "arb_n_per_m": 800.0,
       "bump_stop_n_per_m": 150000.0
     },
     {
-      "spring_n_per_m": 31400.0,
-      "damper_bump_ns_per_m": 1930.0,
-      "damper_rebound_ns_per_m": 2900.0,
+      "spring_n_per_m": 30900.0,
+      "damper_bump_ns_per_m": 1900.0,
+      "damper_rebound_ns_per_m": 2850.0,
       "travel_m": 0.16,
       "preload_m": 0.02,
       "arb_n_per_m": 800.0,
       "bump_stop_n_per_m": 150000.0
     },
     {
-      "spring_n_per_m": 22600.0,
-      "damper_bump_ns_per_m": 1270.0,
-      "damper_rebound_ns_per_m": 1900.0,
+      "spring_n_per_m": 22200.0,
+      "damper_bump_ns_per_m": 1250.0,
+      "damper_rebound_ns_per_m": 1880.0,
       "travel_m": 0.17,
       "preload_m": 0.02,
-      "arb_n_per_m": 11500.0,
+      "arb_n_per_m": 11300.0,
       "bump_stop_n_per_m": 150000.0
     },
     {
-      "spring_n_per_m": 22600.0,
-      "damper_bump_ns_per_m": 1270.0,
-      "damper_rebound_ns_per_m": 1900.0,
+      "spring_n_per_m": 22200.0,
+      "damper_bump_ns_per_m": 1250.0,
+      "damper_rebound_ns_per_m": 1880.0,
       "travel_m": 0.17,
       "preload_m": 0.02,
-      "arb_n_per_m": 11500.0,
+      "arb_n_per_m": 11300.0,
       "bump_stop_n_per_m": 150000.0
     }
   ],
   "brakes": {
     "max_torque_front_nm": 1850.0,
     "max_torque_rear_nm": 650.0,
-    "bias_front": 0.78,
+    "bias_front": 0.601,
     "handbrake_rear_nm": 600.0
   },
   "steering": {
@@ -154,5 +154,6 @@
   "aero_downforce_coeffs": [0.0, 0.0],
   "lattice_id": "vireo_xs",
   "base_price": 7500,
-  "durability_class": 2
+  "durability_class": 2,
+  "fuel_capacity_l": 45.0
 }
