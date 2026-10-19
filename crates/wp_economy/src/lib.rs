@@ -21,7 +21,10 @@
 //! - [`mods`] — mod definitions, catalog, install rules, applying mods to definitions.
 //! - [`garage`] — buy/sell, floor car, install/uninstall, preview, valuation, insurance.
 //! - [`estimate`] — performance estimator and class index.
-//! - [`pursuit`] — police pursuit endings → capture / escape settlement (draft for contract v0.3.0).
+//! - [`pursuit`] — police pursuit endings → capture / escape settlement; decodes today's
+//!   police events ([`PoliceSignal::from_sim_event`]).
+//! - [`session`] — end-of-run glue for `wp_sim`: sim events + damage reports → one settled
+//!   [`RunResult`].
 //! - [`career`] — scripted multi-night career simulation used for tuning.
 
 #![warn(missing_docs)]
@@ -37,10 +40,11 @@ pub mod mods;
 pub mod payouts;
 pub mod pursuit;
 pub mod repair;
+pub mod session;
 #[cfg(feature = "native")]
 pub mod sqlite;
 
-pub use capture::{CaptureContext, CaptureOutcome, CarFate, CopAction};
+pub use capture::{CaptureContext, CaptureOutcome, CarFate, CopAction, ImpoundStatus};
 pub use data::{DataSources, Economy};
 pub use error::{DataError, EconomyError};
 pub use estimate::PerfMetrics;
@@ -53,4 +57,8 @@ pub use mods::{ModCatalog, ModDef, ModEffect, ModSlot, ToolLoadout};
 pub use payouts::{PinkSlipConsent, RaceResult, RaceSettlement, RaceSetup, RaceType};
 pub use pursuit::{PoliceSignal, PursuitEnd, PursuitResolution, PursuitSettlement, PursuitTracker};
 pub use repair::{DamageReport, RepairOption, RepairOrder, RepairQuote, ShopContext, ShopKind};
+pub use session::{
+    Binding, CarRunResult, CarStatus, EconomySession, PendingPursuit, RepairPolicy, RunResult,
+    SessionConfig,
+};
 pub use wp_contracts::WantedLevel;
