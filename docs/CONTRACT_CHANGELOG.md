@@ -5,6 +5,123 @@
 changed, why, and which workstreams must update. Only the integration lead edits the contract.
 Every session reads this file at start.
 
+## v0.3.0 — applied 2026-10-19 (branch `lead/contract-v0.3.0`)
+
+The deferred v0.2.0 batch, using each owner's final list. Behaviour is unchanged: no
+simulation code path reads the new data yet (only new fields are filled), so every golden state
+hash is identical; only the `contract=` header of `hashes.txt` changes (a header-only
+`[bless]` commit). Schemas regenerated (`tire_def`, `lattice_def`). New modules in
+`wp_contracts`: `police`, `economy`, `race`, `damage`, `world`, `weather`; all re-exported at
+the crate root.
+
+**Breaking — `SimEvent`:**
+| Change | Who | What to do |
+|---|---|---|
+| `SimEvent::PoliceEvent { kind, payload }` → `SimEvent::Police(PoliceEvent)` | E emits; C, F, I, J, K, M, O, P consume | match `SimEvent::Police(e)`. Kind codes: `PoliceEvent::kind()` / `wp_contracts::police_kind` (same numbers; `wp_police::events::kind` re-exports it). `wp_police::PoliceEventExt` keeps `to_sim_event` / `from_sim_event` for one release. |
+| `SimEvent::EconomyEvent { kind, payload }` → `SimEvent::Economy(EconomyEvent)` | G emits; C, F, M, P consume | `wp_economy::EconomyEvent::{to_contract, from_contract, to_sim_event, from_sim_event}` convert; the ledger type is unchanged (meta's archive is unaffected). |
+| New `SimEvent::Race(RaceEvent)` | L emits; F, G, E, C, P consume | `wp_race::RaceSignal::{to_event, to_sim_event}`. |
+| New `SimEvent::WeatherChanged { kind, intensity, forced }` (W-2) | N emits; C, J, P consume | `wp_weather::WeatherChange::to_sim_event` for whoever drains `drain_changes`. |
+| simcli `event_name` keeps `"PoliceEvent"` / `"EconomyEvent"` for the typed variants | 10 | scenario event counts are unchanged; new names `"RaceEvent"`, `"WeatherChanged"`. |
+
+**Police (E's final lists; police.md #2, #3, #5; race R2):** `UnitId`, `ToolId`, `IncidentId`,
+`PursuitOutcome` (+ `is_capture`), `DisableCause`, `UnitKind`, `PoliceEvent` (13 variants, codes
+1–13), `UnitOrder`, `CaptainCommand`, `SiteError`, `CaptainError`, `PolicePresence`, `RoadEdgeId`.
+`wp_police` re-exports them from the old paths (`wp_police::{events, captain, tools}::*`).
+- `PoliceEvent::PursuitEnded` gains `level: WantedLevel` (before the reset), `capturer:
+  Option<UnitId>`, `assists: Vec<UnitId>` (economy #06 row). `wp_police` fills them: capturer =
+  closest in-service ground unit assigned to the racer (else closest ground unit), assists = the
+  other assigned units, ascending; non-captures get `None` / empty. Read-only; no state change.
+- `CaptainCommand::{to_bytes, from_bytes}` (inherent) → free functions
+  `wp_police::{command_to_bytes, command_from_bytes}` (same JSON, still decodes `segment`).
+- **Not taken:** audio A-2 (`Radio { priority }`) and design C9 (line id) — not in E's final list;
+  E decides. UI-2 (`UnitOrder::Hold`) — optional, E decides.
+
+**Economy (G's final list, economy.md #1, #3, #6; F NET-4, NET-5; meta MC-1):** `AccountId(u32)`
+(in `ids.rs`), `CarUid`, `RaceType` (+ `ALL`, `id`, `from_id`), `CopXpReason`, `EconomyReason`
+(codes as before; `RaceEntryFee` → `StakeCharged { race: RaceType }`, `RacePurse` →
+`RacePayout { race, placement }`), `EconomyEvent { account, seq, day, reason, car, deltas,
+cash_after }`. `wp_economy` re-exports `CarUid`, `CopXpReason`, `RaceType`; `PursuitEnd` is now
+an alias of the contract `PursuitOutcome`; new `PoliceSignal::from_sim_event`.
+- `ShopReported.district` stays a `String`: `prices.toml [district_labour]` keys (`Docks`,
+  `Hills`, `default`) are not all `DistrictId`s. G aligns the keys, then the field becomes
+  `DistrictId` in a later patch.
+- Not done: G switching its ledger from `PlayerId` to `AccountId` (conversion uses the same
+  number today); race R5 (economy `RaceType` keyed by the race `RaceKind`) needs G + L to agree
+  on the purse table first.
+
+**Race (L's final list, race.md R1, R2, R6; meta MC-2):** `RaceEventId`, `VenueId`, `CrewId`,
+`RaceKind` (+ `key`, `KEYS`, `from_key`, `uses_corridor`, `is_head_to_head`), `Legality`
+(+ `key`), `DnfReason`, `DqReason`, `RacerStatus` (+ `class`), `RaceResultRow`, `RaceEvent`
+(12 variants), `RaceCommand { Enter, Withdraw, Ready }`. `wp_race` re-exports them under its old
+names (`EventId` = `RaceEventId`, local `DistrictId` = contract `ZoneId`); `RacerResult` stays
+in `wp_race` and converts with `From<&RacerResult> for RaceResultRow`.
+- `RaceEvent::TerritoryChanged` uses `zone: ZoneId` (R1 said `district`): territory is per
+  zone; `DistrictId` is the district *kind* (see world). R3 is answered by `ZoneId`.
+
+**Damage (B's final shapes, damage.md #4–#7):** `DamageSnapshot`, `DamageSummary`;
+`DamageSim` gains `summary()`, `save_state()`, `restore_state(&DamageSnapshot) ->
+Result<(), String>`, `apply_repair(&[RepairItem])`; `BodyRegion::Accessory`.
+- `wp_damage` implements them (no inherent versions existed on `ws/damage`; new
+  `wp_damage/src/snapshot.rs`): restore starts from the pristine model and leaves it asleep;
+  repair edits a snapshot (region / group nodes and their beams back to rest) and recomputes
+  health and total loss with the last mode table it was stepped with. `Accessory` has health
+  weight 0 and no handling effect. Tests: round trip, size / lattice refusal, repair-all.
+- H: the cruiser push bar can move from `FrontBumper` + group 8 to `Accessory` (data change);
+  B: `gen-lattice --accessory`.
+
+**World (D's proposals, world.md #6–#8; police #5):** `DistrictId` (= the old
+`wp_world::network::DistrictKind`, which is now a re-export), `ZoneId(u32)`, `RoadEdgeId`,
+`RoadClass`, `RoadEdgeInfo`, `PoiKind`, `PoiInfo`, trait `RoadNetworkQuery`;
+`TrafficAgentSnapshot` + `traffic_flags` (in `net.rs`).
+- `wp_world::RoadNetworkIndex::new(&CityMap)` implements `RoadNetworkQuery` (lead's first cut:
+  brute-force `nearest_on_road`, cameras at every third signalised junction like E's graph).
+  `From<&AgentView> for TrafficAgentSnapshot` (no headlights bit yet: `AgentView` has none).
+- E still builds its own `RoadGraph`; moving it onto the trait is E's step.
+
+**Weather (weather.md W-1…W-5):** `WeatherKind`, `LocalConditions` (+ `DRY`) moved from
+`wp_weather` (re-exported there); `WorldQuery::weather_at(p) -> LocalConditions` with a default
+returning `DRY` (additive: every implementor still compiles); `SurfaceType::PaintedLine`;
+`TireDef::treaded: Option<bool>` (serde-default; `wp_weather::TireProfile` honours it, else
+infers as before); `ServerToClient::Weather(WeatherSnapshot)` (W-5).
+- `wp_weather::{WithWeather, Weathered}` answer `weather_at`; `wp_vehicle` does not call it yet
+  (A's step), so the interim `WetAsphalt` remap still decides grip. `surfaces.toml` has no
+  `PaintedLine` row yet (N adds it; `SurfaceTable::surface` falls back to asphalt). D reports
+  markings; H sets `treaded: false` on `semi_slick.json`.
+- Exhaustive `SurfaceType` matches got arms: `wp_vehicle` snapshot code 8, `wp_audio` sounds
+  like asphalt.
+
+**Net (F's NET-1, NET-3, NET-4, NET-5):** NET-1 decision: `wp_net::protocol` is the source of
+truth for the **wire** (handshake, acks, time sync, quantised snapshots, lobby — the quantised
+types stay in `wp_net`, NET-2 rejected); the contract keeps the *logical* messages with typed
+payloads: `ClientToServer::CaptainCommand(CaptainCommand)` (was `Vec<u8>`),
+`ClientToServer::RaceCommand(RaceCommand)`, `ServerToClient::Snapshot { .., traffic:
+Vec<TrafficAgentSnapshot> (serde-default), .. }`, `ServerToClient::CaptainReply(Result<(),
+CaptainError>)`, `ServerToClient::Weather(WeatherSnapshot)`. NET-4 = `StakeCharged` /
+`RacePayout`; NET-5 = `AccountId`. Meta MC-6 (`Hello.join_token`, `Welcome.meta_reconnect_token`)
+is wire-only, so it belongs in `wp_net::protocol` (F).
+
+**Opponent #2 (AI racer flag):** no contract change needed: `wp_sim::VehicleKind::AiRacer`
+exists; whether `wp_world::TrackedVehicle` carries it is D's call.
+
+**Migration checklist per workstream:**
+- A (vehicle): optionally call `world.weather_at(wheel_pos)`; handle `PaintedLine` grip.
+- B (damage): done here; review `snapshot.rs` and own it; `gen-lattice --accessory`.
+- C (testbed): no TS mirrors events; new `SimEvent` variants appear in JSON event feeds.
+- D (world): `DistrictKind` is the contract `DistrictId`; own `RoadNetworkIndex`; report
+  `PaintedLine`; headlights in `AgentView`.
+- E (police): types moved (re-exported); `PursuitEnded` fields filled; consume
+  `RoadNetworkQuery`, `PolicePresence`.
+- F (net): send typed `CaptainCommand` / `RaceCommand`; replicate `TrafficAgentSnapshot`;
+  `CaptainReply`; weather snapshot; `join_token` in your protocol.
+- G (economy): conversions in place; switch the ledger to `AccountId`, `ShopReported` to
+  `DistrictId`, pay cops from `capturer` / `assists`.
+- H (cars): `treaded: false` on slicks; push bar → `Accessory`.
+- J (audio), O (opponent), K/M/P: match the typed variants (done here where code existed).
+- L (race): types moved (re-exported); emit `SimEvent::Race` from the server.
+- N (weather): `PaintedLine` row in `surfaces.toml`; emit `WeatherChanged` from the server loop.
+- UI kit (16): run `npm run gen:types` and switch `decodePoliceEvent` / `decodeEconomy` from
+  payload bytes to the typed variants; re-record fixtures (`gen:police`, `gen:fixtures`).
+
 ## v0.2.0 — applied 2026-10-19 (lead run 3)
 
 Physics is unchanged: every golden state hash is identical before and after (only the contract

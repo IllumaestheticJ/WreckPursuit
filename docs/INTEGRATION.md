@@ -1,7 +1,7 @@
 # WreckPursuit — Integration Guide
 
 Read this and `docs/CONTRACT_CHANGELOG.md` at the start of every session (see `CLAUDE.md`).
-Contract version: **0.2.0**.
+Contract version: **0.3.0**.
 
 ## Crate map & ownership
 
@@ -54,7 +54,7 @@ Rapier step (gravity -Z)  ──► contact manifolds ──► ContactImpulse (
    │                                                     │
    ◄──────────── VehicleSim.apply_damage_effects(HandlingEffects) ◄──┘
    ▼
-wp_police.step(world, racers, events, dt)   ──► SimEvent::PoliceEvent
+wp_police.step(world, racers, events, dt)   ──► SimEvent::Police(PoliceEvent)
    ▼
 events ──► wp_economy (billing, payouts) · wp_net (snapshots @ 60 Hz) · renderer (via wp_wasm)
 ```
