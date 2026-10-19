@@ -29,6 +29,7 @@ pub mod net;
 pub mod audio;
 pub mod data;
 pub mod garage;
+pub mod lod;
 pub mod pack;
 pub mod police;
 pub mod run;
@@ -333,6 +334,39 @@ struct VehicleInfo {
     spawn_pos: [f32; 3],
 }
 
+#[derive(Serialize)]
+struct CarModelInfo {
+    car_id: String,
+    body_size_m: [f32; 3],
+    wheels: Vec<WheelInfo>,
+}
+
+/// Static info JSON for a car model without a vehicle (`{ car_id, body_size_m, wheels }`, wheels
+/// as in `vehicle_info`): the browser builds a model's instanced far-LOD mesh before any car
+/// of that model exists.
+#[wasm_bindgen]
+pub fn car_model_info(car_id: &str) -> Result<String, JsValue> {
+    let car = data::load_car(car_id).map_err(err)?;
+    let d = &car.def;
+    Ok(json(&CarModelInfo {
+        car_id: d.id.clone(),
+        body_size_m: d.body_size_m,
+        wheels: d
+            .wheels
+            .iter()
+            .zip(d.suspension.iter())
+            .map(|(w, su)| WheelInfo {
+                position_m: w.position_m,
+                radius_m: w.radius_m,
+                width_m: w.width_m,
+                steerable: w.steerable,
+                travel_m: su.travel_m,
+                tire_id: w.tire_id.clone(),
+            })
+            .collect(),
+    }))
+}
+
 /// Static info JSON for a vehicle: scenario name, dimensions, wheels, CG (chassis space),
 /// lattice sizes and the name tables for region / component / surface indices.
 #[wasm_bindgen]
@@ -579,6 +613,36 @@ pub fn traffic_agents() -> Result<Vec<f32>, JsValue> {
         }
         out
     })
+}
+
+/// Floats per record in `traffic_draw()` / `police_draw()` ([`lod::DRAW_STRIDE`]).
+#[wasm_bindgen]
+pub fn lod_draw_stride() -> u32 {
+    lod::DRAW_STRIDE as u32
+}
+
+/// Draw records for every civilian agent at any LOD (see [`lod::traffic_draw`]), 10 floats each:
+/// `[agent id, entity (0 = none), x, y, z, qx, qy, qz, qw, flags]`; flags as in
+/// `traffic_agents()`. Kinematic agents are seated on the ground the way the sim places a
+/// promoted car, so the browser can swap instanced and full meshes without a jump.
+#[wasm_bindgen]
+pub fn traffic_draw() -> Result<Vec<f32>, JsValue> {
+    get(|s| lod::traffic_draw(s.sim()))
+}
+
+/// Draw records for every police unit, bound or not (see [`lod::police_draw`]), 10 floats each:
+/// `[unit id, entity (0 = none), x, y, z, qx, qy, qz, qw, flags]`, flags 1 helicopter,
+/// 2 pursuing.
+#[wasm_bindgen]
+pub fn police_draw() -> Result<Vec<f32>, JsValue> {
+    get(|s| lod::police_draw(s.sim()))
+}
+
+/// Car models the current session can show, as JSON `{ cars, traffic, police }`
+/// ([`lod::SessionModels`]), for the browser to preload their meshes before they appear.
+#[wasm_bindgen]
+pub fn session_car_models() -> Result<String, JsValue> {
+    get(|s| json(&lod::session_car_models(s.scenario(), s.has_city())))
 }
 
 /// Floats per head in `signal_heads()`.
