@@ -36,3 +36,26 @@ stubs and these numbers only prove the harness works.
 | `sim_only/8` | 1.65 µs | 0.0008 ms/car/frame | 0.40 ms/car (vehicle 0.15 + lattice 0.25) | +0.0% |
 | `snapshot/decode_24` | 49.88 µs | 0.0499 ms/snapshot | — | +0.0% |
 | `snapshot/encode_24` | 30.36 µs | 0.0304 ms/snapshot | — | +0.0% |
+
+## 2026-10-19 — `cef7f7f` @ claude-cloud
+
+- runner class: `claude-cloud`
+- cpu: Intel(R) Xeon(R) Processor @ 2.10GHz (4 logical cores), linux-x86_64
+- rustc 1.97.0 (2d8144b78 2026-07-07)
+
+| bench | median / iter | per frame (60 Hz) | budget (native) | vs baseline |
+|---|---|---|---|---|
+| `city/24v_400traffic` | 166.66 µs | 0.6666 ms/frame | 11.6 ms (24 × 0.40 + traffic 2.0) | +3643.1% |
+| `lattice/solver_8_contacts` | 0.9 ns | 0.0000 ms/car/frame | 0.25 ms/car | +16.8% |
+| `sim_only/1` | 9.04 µs | 0.0362 ms/car/frame | 0.40 ms/car (vehicle 0.15 + lattice 0.25) | +1743.6% |
+| `sim_only/24` | 173.54 µs | 0.0289 ms/car/frame | 0.40 ms/car (vehicle 0.15 + lattice 0.25) | +3700.4% |
+| `sim_only/64` | 519.81 µs | 0.0325 ms/car/frame | 0.40 ms/car (vehicle 0.15 + lattice 0.25) | +3921.6% |
+| `sim_only/8` | 49.88 µs | 0.0249 ms/car/frame | 0.40 ms/car (vehicle 0.15 + lattice 0.25) | +2928.5% |
+| `snapshot/decode_24` | 65.21 µs | 0.0652 ms/snapshot | — | +30.7% |
+| `snapshot/encode_24` | 47.78 µs | 0.0478 ms/snapshot | — | +57.4% |
+
+> Lead note (integration 2026-10-19): the entry above is the first with the real `wp_vehicle`
+> model, Rapier chassis bodies and contact extraction (damage, world and police are still stubs).
+> The "regressions" are against the stub baseline and expected: 24 cars cost 0.029 ms/car/frame,
+> ≈ 7 % of the 0.40 ms/car budget. Snapshot encode/decode grew because the JSON stub codec now
+> carries non-trivial floats. Baseline `claude-cloud.json` re-blessed in the same `[bless]` commit.
