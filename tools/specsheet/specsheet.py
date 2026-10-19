@@ -30,7 +30,8 @@ from roster_inputs import CARS  # noqa: E402
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 DATA = os.path.join(REPO, "data")
 
-# Class expectations per car: (0-100 s min, max), skidpad g (min, max), 100-0 m (min, max).
+# Class expectations per car: (0-100 s min, max), skidpad g (min, max), 100-0 m (min, max),
+# optional top speed km/h (min, max) where a brief sets one.
 # Ranges are class-typical published road-test figures for the archetype on its stock tires.
 TARGETS = {
     "vireo_xs": dict(t0100=(8.5, 9.5), lat=(0.82, 0.92), brake=(38, 44), why="late-90s 1.6 NA hot hatch road tests"),
@@ -46,7 +47,7 @@ TARGETS = {
     "sentinel_cruiser": dict(t0100=(6.2, 7.2), lat=(0.85, 0.92), brake=(38, 43), why="fleet evaluation figures for RWD 5.7 V8 police sedans (pursuit package, round 6b)"),
     "sentinel_wolfhound": dict(t0100=(5.5, 6.5), lat=(0.85, 0.92), brake=(38, 43), why="fleet evaluation figures for AWD TT V6 pursuit vehicles"),
     "sentinel_bastion": dict(t0100=(7.5, 9.0), lat=(0.72, 0.80), brake=(40, 46), why="fleet evaluation figures for RWD 5.3 V8 police SUVs"),
-    "junkyard_beater": dict(t0100=(12.0, 15.0), lat=(0.75, 0.88), brake=(38, 46), why="period road tests of late-80s 1.6 L economy sedans, derated for wear"),
+    "junkyard_beater": dict(t0100=(14.0, 16.0), lat=(0.68, 0.78), brake=(42, 48), vmax=(140, 160), why="lead brief round 12b (0-100 14-16 s, ~150 km/h); period road tests of 1980s 1.6 L 4-speed economy sedans, derated for wear, on old hard tyres"),
     "tansy_13": dict(t0100=(11.5, 13.5), lat=(0.78, 0.88), brake=(38, 45), why="road tests of 2000s 1.3 L superminis"),
     "drayman_cargo": dict(t0100=(9.5, 12.0), lat=(0.64, 0.74), brake=(44, 52), why="road tests of 2000s full-size V8 cargo vans (empty)"),
     "furrow_24": dict(t0100=(10.0, 12.5), lat=(0.70, 0.80), brake=(42, 50), why="period road tests of 90s compact 2.4 L pickups (manual)"),
@@ -196,6 +197,12 @@ def validation_md(rows) -> str:
             if res != "PASS":
                 est_fails.append((j["display_name"], name, res))
         vmax = f"{m['vmax_kmh']:.0f}" if m.get("vmax_kmh") else "pending"
+        if t.get("vmax") and m.get("vmax_kmh"):
+            lo, hi = t["vmax"]
+            v_res = "PASS" if lo <= m["vmax_kmh"] <= hi else ("HIGH" if m["vmax_kmh"] > hi else "LOW")
+            vmax += f" ({lo}-{hi} {'✓' if v_res == 'PASS' else v_res})"
+            if v_res != "PASS":
+                sim_fails.append((j["display_name"], "top speed", v_res, f"{m['vmax_kmh']:.0f}"))
         cells += [vmax, f"{e['t0100_s']:.1f}{mark} / {e['skidpad_g']:.2f}{mark} / "
                         f"{e['brake_100_0_m']:.1f}{mark}"]
         o.append("| " + " | ".join(cells) + " |")

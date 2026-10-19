@@ -4,11 +4,11 @@
 
 | Class | Archetype | Durability | Base price |
 |---|---|---|---|
-| Beater | late-80s compact FF sedan, 1.6 L SOHC I4, high mileage (tired engine, worn dampers) | 2 / 5 | 3,000 |
+| Beater | 1980s compact FF sedan, 1.6 L SOHC I4, 4-speed manual, high mileage (tired engine, sagging springs, worn dampers, old tyres) | 2 / 5 | 3,000 |
 
 ## Design note
 
-The economy floor: always affordable, never fast. Sagging springs and worn dampers make it bounce and lean, the tired four needs every one of its 6000 rpm, and the slow gearshift punishes hurry. It is what you drive after the impound took your real car — and a surprisingly good teacher of weight transfer.
+The economy floor: always affordable, never fast. Sagging springs and worn dampers make it lean hard and bob over every crest, the old hard tyres squeal long before they let go, and the tired four needs every one of its 5800 rpm through a long-throw 4-speed with a slow shift. Flat out it buzzes on the limiter at about 150 km/h. It is what you drive after the impound took your real car — slow, but it tells you exactly what the weight is doing, so it is a surprisingly good teacher.
 
 ## How this car breaks
 
@@ -16,8 +16,9 @@ A thin late-80s shell with a weak passenger cell: modest crumple rails and light
 
 ## Sources (type)
 
-- manufacturer spec-class data for late-80s 1.6 L FF compact sedans
-- owner dyno sheets for high-mileage 1.6 SOHC engines
+- manufacturer spec-class data for 1980s 1.6 L FF compact sedans (4-speed manual / 3-speed automatic trims)
+- owner dyno sheets for high-mileage 1.6 SOHC carburettor engines
+- tyre test data for aged (hardened) radials: ≈ 0.85 × new street grip, earlier and louder breakaway
 - engineering tables (tire radius, ride frequency, disc/drum brake hydraulics)
 
 All values are class-typical figures for the archetype, rounded; no single real vehicle is reproduced.
@@ -26,10 +27,10 @@ All values are class-typical figures for the archetype, rounded; no single real 
 
 | Quantity | Value | Derivation |
 |---|---|---|
-| Curb mass | 1000 kg | class spec data (full tank) |
+| Curb mass | 990 kg | class spec data (full tank) |
 | Fuel tank | 45 L | `fuel_capacity_l`; half a tank = 17 kg at 0.745 kg/L |
-| `mass_kg` | 1058 kg | curb − half tank + 75 kg driver (contract: fuel at 50 %) |
-| Front weight | 0.620 | axle loads 656 / 402 kg |
+| `mass_kg` | 1048 kg | curb − half tank + 75 kg driver (contract: fuel at 50 %) |
+| Front weight | 0.620 | axle loads 650 / 398 kg |
 | Wheelbase | 2.500 m | spec |
 | Track F / R | 1.430 / 1.420 m | spec |
 | Body W × L × H | 1.660 × 4.300 × 1.380 m | spec |
@@ -49,9 +50,9 @@ I_yaw   = k_y · m·(W² + L²)/12
 
 | Axis | Box (kg·m²) | k | `inertia_kgm2` |
 |---|---|---|---|
-| roll | 411 | 0.80 | 330 |
-| pitch | 1799 | 0.90 | 1620 |
-| yaw | 1874 | 0.92 | 1720 |
+| roll | 407 | 0.80 | 330 |
+| pitch | 1782 | 0.90 | 1600 |
+| yaw | 1856 | 0.92 | 1710 |
 
 ## Aerodynamics
 
@@ -59,39 +60,38 @@ Frontal area A = 0.84·W·H = 1.92 m²; Cd = 0.38 → **CdA = 0.731 m²**. Lift 
 
 ## Engine
 
-1.6 L SOHC 8-valve I4, throttle-body injection, worn (≈ 10 % down on its new rating). Class-typical late-80s 1.6 SOHC economy engine (~45 kW/L new), derated ~10 % for wear (compression loss) per owner dyno sheets of high-mileage examples.
+1.6 L SOHC 8-valve I4, twin-choke carburettor, worn (≈ 10 % down on its new rating). Class-typical late-80s 1.6 SOHC economy engine (~45 kW/L new), derated ~10 % for wear (compression loss) per owner dyno sheets of high-mileage examples.
 
 | rpm | N·m | kW |
 |---|---|---|
-| 800 | 85 | 7.1 |
-| 1200 | 98 | 12.3 |
-| 1600 | 108 | 18.1 |
-| 2000 | 115 | 24.1 |
-| 2500 | 120 | 31.4 |
-| 3000 | 124 | 39.0 |
-| 3500 | 125 | 45.8 |
-| 4000 | 123 | 51.5 |
-| 4500 | 119 | 56.1 |
-| 5000 | 114 | 59.7 |
-| 5500 | 106 | 61.1 |
-| 6000 | 95 | 59.7 |
-| 6300 | 86 | 56.7 |
+| 800 | 82 | 6.9 |
+| 1200 | 94 | 11.8 |
+| 1600 | 103 | 17.3 |
+| 2000 | 110 | 23.0 |
+| 2500 | 116 | 30.4 |
+| 3000 | 120 | 37.7 |
+| 3500 | 123 | 45.1 |
+| 4000 | 124 | 51.9 |
+| 4500 | 123 | 58.0 |
+| 5000 | 121 | 63.4 |
+| 5500 | 113 | 65.1 |
+| 5800 | 104 | 63.2 |
+| 6000 | 96 | 60.3 |
 
-Peak **61 kW @ 5500 rpm**, **125 N·m @ 3500 rpm**. Idle 850 / redline 6000 / limiter 6300 rpm. Rotating inertia 0.11 kg·m² (class: 0.10 small four … 0.30 big-block). Engine braking 12% of peak torque = 15 N·m. Power-to-weight 58 kW/t.
+Peak **65 kW @ 5500 rpm**, **124 N·m @ 4000 rpm**. Idle 850 / redline 5800 / limiter 6000 rpm. Rotating inertia 0.12 kg·m² (class: 0.10 small four … 0.30 big-block). Engine braking 12% of peak torque = 15 N·m. Power-to-weight 62 kW/t.
 
 ## Drivetrain
 
-5-speed manual with a tired synchro (slow shifts), open front differential. Layout **FWD**; front diff: open; rear diff: open. Clutch capacity 1.30 × peak torque = 160 N·m. Shift time 0.35 s.
+4-speed manual with a tired second-gear synchro (slow shifts), open front differential. Layout **FWD**; front diff: open; rear diff: open. Drivetrain efficiency 0.78 (default 0.85): worn CV joints, tired wheel bearings and dragging front calipers; class-typical 0.85 minus ≈ 8 % for high mileage. Clutch capacity 1.30 × peak torque = 160 N·m. Shift time 0.55 s.
 
 | Gear | Ratio | Overall | km/h @ redline |
 |---|---|---|---|
-| 1 | 3.25 | 13.19 | 48 |
-| 2 | 1.89 | 7.67 | 82 |
-| 3 | 1.25 | 5.07 | 124 |
-| 4 | 0.92 | 3.74 | 169 |
-| 5 | 0.73 | 2.96 | 213 |
+| 1 | 3.17 | 13.73 | 44 |
+| 2 | 1.84 | 7.97 | 77 |
+| 3 | 1.26 | 5.46 | 112 |
+| 4 | 0.97 | 4.20 | 145 |
 
-Final drive 4.06, reverse 3.15. Speeds use the driven-wheel loaded radius 0.279 m.
+Final drive 4.33, reverse 3.17. Speeds use the driven-wheel loaded radius 0.279 m.
 
 ## Wheels & tires
 
@@ -100,18 +100,18 @@ Final drive 4.06, reverse 3.15. Speeds use the driven-wheel loaded radius 0.279 
 | Front | 175/70R13 | 175 mm | 0.2876 m | 0.279 m | 15 kg |
 | Rear | 175/70R13 | 175 mm | 0.2876 m | 0.279 m | 14 kg |
 
-Unloaded r = rim/2 + width·aspect; loaded r = 0.97 × unloaded (static deflection). Compound: `street`.
+Unloaded r = rim/2 + width·aspect; loaded r = 0.97 × unloaded (static deflection). Compound: `vintage_bias`.
 
 ## Suspension
 
-Springs from ride frequency, `k = m_s·(2πf)²` with sprung corner mass `m_s = axle load/2 − unsprung`; dampers `c = 2ζ·√(k·m_s)`, ζ = 0.18 bump, rebound = 1.5 × bump.
+Springs from ride frequency, `k = m_s·(2πf)²` with sprung corner mass `m_s = axle load/2 − unsprung`; dampers `c = 2ζ·√(k·m_s)`, ζ = 0.14 bump, rebound = 1.5 × bump.
 
 | Axle | m_s | f | Wheel rate k | Bump c | Rebound c | Travel |
 |---|---|---|---|---|---|---|
-| Front | 313 kg | 1.30 Hz | 20900 N/m | 920 N·s/m | 1380 N·s/m | 0.15 m |
-| Rear | 187 kg | 1.45 Hz | 15500 N/m | 610 N·s/m | 920 N·s/m | 0.16 m |
+| Front | 310 kg | 1.15 Hz | 16200 N/m | 630 N·s/m | 940 N·s/m | 0.16 m |
+| Rear | 185 kg | 1.25 Hz | 11400 N/m | 410 N·s/m | 620 N·s/m | 0.17 m |
 
-Anti-roll bars from a roll-gradient target of 5.0°/g with 60% of roll stiffness at the front. Roll arm h − h_rc = 0.405 m (roll centres 0.08 m F / 0.12 m R). Required total K_φ = m·g·arm/φ = 48155 N·m/rad; springs give k·t²/2 = 21355 F / 15654 R N·m/rad; bars supply the rest as `arb_n_per_m = K_bar/t²` = **3700 F / 1800 R N/m** (clamped at ≥ 0). Resulting gradient 5.0°/g, front share 60%. Bump stops 120000 N/m.
+Anti-roll bars from a roll-gradient target of 6.5°/g with 60% of roll stiffness at the front. Roll arm h − h_rc = 0.405 m (roll centres 0.08 m F / 0.12 m R). Required total K_φ = m·g·arm/φ = 36693 N·m/rad; springs give k·t²/2 = 16546 F / 11516 R N·m/rad; bars supply the rest as `arb_n_per_m = K_bar/t²` = **2700 F / 1600 R N/m** (clamped at ≥ 0). Resulting gradient 6.5°/g, front share 60%. Bump stops 120000 N/m.
 
 Alignment: camber -0.2° F / -0.5° R, toe +0.00° F / +0.10° R (+ = in), caster 2.0°.
 
@@ -122,7 +122,7 @@ Full-pedal line pressure 100 bar.
 - Front: 240 mm disc, pistons per side 51 mm → A = 20.4 cm², r_eff = D/2 − 25 mm = 95 mm, pad μ = 0.35: T = 2·μ·p·A·r_eff = 2·0.35·100 bar·20.4 cm²·0.095 m = **1358 N·m**
 - Rear: 200 mm leading/trailing drum, wheel cylinder 17.5 mm → A = 2.41 cm², drum radius 100 mm, brake factor 1.8 (includes lining μ): T = BF·p·A·r = **433 N·m**
 
-Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 1187 N·m/wheel (capacity 1.15×), rear needs 261 N·m/wheel (capacity 1.65×).
+Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 1176 N·m/wheel (capacity 1.16×), rear needs 258 N·m/wheel (capacity 1.67×).
 
 `wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 299 N·m), never boosted above its caliper capacity. Rear capacity exceeds that, so `bias_front` = T_r/(T_r + ideal) = **0.590** → delivered 1360 N·m front / 299 N·m rear per wheel at full pedal. Handbrake 600 N·m per rear wheel.
 
@@ -137,13 +137,13 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
 | sim | 13.8 s | 164 km/h | 38.8 m | 0.80 g | — |
-| estimate | 12.3 s | 169 km/h | 37.3 m | 0.90 g | 377 |
+| estimate | 14.0 s | 150 km/h | 43.7 m | 0.77 g | 327 |
 
 ## Damage lattice (`data/lattices/junkyard_beater.json`)
 
 244 nodes, 1539 beams, 8 detachables, 21 component mounts.
 
-- Generated with `gen-lattice --id junkyard_beater --profile sedan --width 1.66 --length 4.3 --height 1.38 --wheelbase 2.5 --mass 232.8 --car-mass 1058.2 --clearance 0.14 --front-overhang 0.9 --strength 0.9` (22% of vehicle mass in the lattice; strength from durability class 2).
+- Generated with `gen-lattice --id junkyard_beater --profile sedan --width 1.66 --length 4.3 --height 1.38 --wheelbase 2.5 --mass 230.6 --car-mass 1048.2 --clearance 0.14 --front-overhang 0.9 --strength 0.9` (22% of vehicle mass in the lattice; strength from durability class 2).
 - Era `80s` passenger cell: 138 cabin/sill, 143 cross-member, 10 pillar, 10 roof rail → hss × 0.65 section.
 - Steel hood: 105 hood beams aluminum → mild_steel.
 - Detachables: steel bumpers ×2.3 break impulse / ×4 mass; steel hood ×1.4 / ×1.6.
