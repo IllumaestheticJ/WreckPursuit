@@ -26,6 +26,8 @@ pub mod lattice_gen;
 mod model;
 pub mod repair;
 mod solver;
+#[cfg(test)]
+mod tests;
 pub mod tuning;
 pub mod vec3;
 

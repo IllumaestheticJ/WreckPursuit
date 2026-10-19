@@ -52,6 +52,25 @@ fn main() {
     };
     let mut out = Vec::new();
 
+    // How long one crash keeps a lattice awake.
+    let mut m = DamageModel::new(&car.lattice, &car.materials);
+    let mut awake = 0;
+    for s in 0..2400 {
+        let c: &[_] = match s {
+            0 => &c0,
+            1 => &c1,
+            _ => &[],
+        };
+        m.apply_contacts(c, &mode, PHYSICS_DT, &mut out);
+        if m.is_awake() {
+            awake = s + 1;
+        }
+    }
+    println!(
+        "one 56 km/h crash keeps the lattice awake for {awake} steps ({:.2} s)",
+        awake as f32 * PHYSICS_DT
+    );
+
     // (a) idle
     let mut cars = fresh();
     let steps = 2400;

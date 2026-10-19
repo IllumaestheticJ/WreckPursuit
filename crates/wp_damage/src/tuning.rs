@@ -14,6 +14,8 @@ pub struct DamageTuning {
     pub iterations: u32,
     /// Linear velocity damping of free nodes, 1/s.
     pub node_damping_per_s: f32,
+    /// Node damping once every impact is spent (settling), 1/s.
+    pub settle_damping_per_s: f32,
     /// Fraction of a beam's over-yield length converted to permanent set per sub-step (before
     /// `ModeTable::plasticity_scale`). The remainder springs back on unloading.
     pub plastic_flow_rate: f32,
@@ -68,7 +70,7 @@ pub struct DamageTuning {
     pub region_replace_strain: f32,
     /// Time for a failed radiator to take `overheating` from 0 to 1, s.
     pub overheat_ramp_s: f32,
-    /// Max node speed below which the lattice counts as at rest, m/s.
+    /// Net node speed over a solver tick below which the lattice counts as at rest, m/s.
     pub sleep_velocity_mps: f32,
     /// Quiet solver ticks before the lattice sleeps (skips solving).
     pub sleep_ticks: u32,
@@ -91,6 +93,7 @@ impl Default for DamageTuning {
             substeps: 12,
             iterations: 1,
             node_damping_per_s: 20.0,
+            settle_damping_per_s: 60.0,
             plastic_flow_rate: 0.9,
             buckle_strain: 0.015,
             structural_buckle_factor: 0.35,
@@ -116,8 +119,8 @@ impl Default for DamageTuning {
             structural_health_weight: 0.7,
             region_replace_strain: 0.08,
             overheat_ramp_s: 45.0,
-            sleep_velocity_mps: 0.002,
-            sleep_ticks: 30,
+            sleep_velocity_mps: 0.005,
+            sleep_ticks: 12,
             component_event_step: 0.1,
             displacement_deadband_m: 0.005,
             fuel_leak_failed_per_s: 0.01,

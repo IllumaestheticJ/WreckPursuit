@@ -142,8 +142,10 @@ pub(crate) struct BeamState {
     pub rest: f32,
     /// Original rest length, m.
     pub rest0: f32,
-    /// Axial stiffness × length: `E·A`, N.
-    pub ea: f32,
+    /// `1 / (E·A)`, 1/N (axial compliance × 1/length).
+    pub inv_ea: f32,
+    /// Length at the last projection, m.
+    pub len: f32,
     /// Initial yield force `σy·A`, N.
     pub yield_force: f32,
     /// Hardening `Et·A`, N per unit plastic strain.
@@ -237,9 +239,14 @@ pub struct DamageModel {
 
     pub(crate) pos: Vec<V3>,
     pub(crate) prev: Vec<V3>,
+    /// Positions at the start of the current solver tick (sleep test scratch).
+    pub(crate) tick_start: Vec<V3>,
     pub(crate) vel: Vec<V3>,
     pub(crate) rest_pos: Vec<V3>,
     pub(crate) inv_mass: Vec<f32>,
+    /// Persistent external force per node (chassis space), N. See [`DamageModel::set_node_force`].
+    pub(crate) ext_force: Vec<V3>,
+    pub(crate) has_ext_force: bool,
     pub(crate) detached: Vec<bool>,
     pub(crate) node_region: Vec<BodyRegion>,
     pub(crate) intrusion_dir: Vec<V3>,
@@ -383,7 +390,8 @@ impl DamageModel {
                 b: b.b as u32,
                 rest: rest0,
                 rest0,
-                ea: m.young_mpa * 1e6 * b.area_m2,
+                inv_ea: 1.0 / (m.young_mpa * 1e6 * b.area_m2),
+                len: rest0,
                 yield_force: m.yield_mpa * 1e6 * b.area_m2,
                 hardening: m.plastic_modulus_mpa * 1e6 * b.area_m2,
                 fail_strain: m.failure_strain,
@@ -450,9 +458,12 @@ impl DamageModel {
             steer_pull_bias,
             pos: rest_pos.clone(),
             prev: rest_pos.clone(),
+            tick_start: rest_pos.clone(),
             vel: vec![[0.0; 3]; n],
             rest_pos: rest_pos.clone(),
             inv_mass: base_inv_mass,
+            ext_force: vec![[0.0; 3]; n],
+            has_ext_force: false,
             detached: vec![false; n],
             node_region: lattice.nodes.iter().map(|n| n.region).collect(),
             intrusion_dir,
@@ -688,6 +699,16 @@ impl DamageModel {
             self.awake = true;
             self.quiet_ticks = 0;
         }
+    }
+
+    /// Debug/scripting: apply a persistent external force (chassis space, N) to node `i`
+    /// every sub-step until changed (e.g. inertial loads, test rigs). `[0; 3]` removes it.
+    /// The lattice stays awake while any force is set.
+    pub fn set_node_force(&mut self, i: usize, force: [f32; 3]) {
+        self.ext_force[i] = force;
+        self.has_ext_force = self.ext_force.iter().any(|f| *f != [0.0; 3]);
+        self.awake = true;
+        self.quiet_ticks = 0;
     }
 
     /// Restore the pristine state (full repair). Keeps entity id, tuning and seed.
@@ -1249,7 +1270,10 @@ impl DamageSim for DamageModel {
         self.calls += 1;
         self.accum_dt += dt;
         self.time_s += dt;
-        if self.calls % self.tuning.solver_divider.max(1) as u64 == 0 {
+        if self
+            .calls
+            .is_multiple_of(self.tuning.solver_divider.max(1) as u64)
+        {
             let t = std::mem::take(&mut self.accum_dt);
             if self.awake {
                 self.solve(t, mode, out);

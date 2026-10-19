@@ -22,10 +22,18 @@ impl DamageModel {
         let h = t / substeps as f32;
         let h2 = h * h;
         let flow = (tune.plastic_flow_rate * mode.plasticity_scale).clamp(0.0, 1.0);
-        let damp = (1.0 - tune.node_damping_per_s * h).clamp(0.0, 1.0);
         let n = self.pos.len();
+        self.tick_start.clone_from(&self.pos);
 
         for _ in 0..substeps {
+            // Ringing after the impacts are spent is invisible; damp it hard so the lattice
+            // goes back to sleep quickly.
+            let damping = if self.impactors.is_empty() {
+                tune.settle_damping_per_s
+            } else {
+                tune.node_damping_per_s
+            };
+            let damp = (1.0 - damping * h).clamp(0.0, 1.0);
             for imp in &mut self.impactors {
                 imp.travel_prev = imp.travel;
                 imp.travel += imp.vel * h;
@@ -34,6 +42,10 @@ impl DamageModel {
             for i in 0..n {
                 self.prev[i] = self.pos[i];
                 if self.inv_mass[i] > 0.0 {
+                    if self.has_ext_force {
+                        self.vel[i] =
+                            vec3::madd(self.vel[i], self.ext_force[i], self.inv_mass[i] * h);
+                    }
                     self.pos[i] = vec3::madd(self.pos[i], self.vel[i], h);
                 }
             }
@@ -71,12 +83,15 @@ impl DamageModel {
         let max_age = tune.impactor_max_age_s;
         self.impactors
             .retain(|imp| imp.vel > 0.05 && imp.age < max_age);
-        let max_v2 = self
-            .vel
-            .iter()
-            .map(|v| vec3::dot(*v, *v))
-            .fold(0.0, f32::max);
-        if self.impactors.is_empty() && max_v2 < tune.sleep_velocity_mps * tune.sleep_velocity_mps {
+        // Sleep on net motion over the tick, not per-sub-step velocity: stiff XPBD beams
+        // jitter by ~1 µm per sub-step without going anywhere.
+        let mut max_d2: f32 = 0.0;
+        for i in 0..n {
+            let d = vec3::sub(self.pos[i], self.tick_start[i]);
+            max_d2 = max_d2.max(vec3::dot(d, d));
+        }
+        let still = tune.sleep_velocity_mps * t;
+        if self.impactors.is_empty() && !self.has_ext_force && max_d2 < still * still {
             self.quiet_ticks += 1;
             if self.quiet_ticks >= tune.sleep_ticks {
                 self.awake = false;
@@ -132,9 +147,10 @@ impl DamageModel {
             return;
         }
         let nrm = vec3::scale(d, 1.0 / len);
+        b.len = len;
         let c = len - b.rest;
         // Compliance α = 1/k with k = EA / rest; α̃ = α / h².
-        let alpha = b.rest / (b.ea * h2);
+        let alpha = b.rest * b.inv_ea / h2;
         let dl = (-c - alpha * b.lambda) / (w + alpha);
         // λ < 0 = tension, λ > 0 = compression; force = |λ| / h².
         let want = b.lambda + dl;
@@ -175,7 +191,13 @@ impl DamageModel {
         if self.inv_mass[ia] + self.inv_mass[ib] <= 0.0 {
             return;
         }
-        let len = vec3::length(vec3::sub(self.pos[ib], self.pos[ia]));
+        // Exact length for yielding beams; the length seen by the last projection (off by at
+        // most one correction) is good enough for everyone else's break test.
+        let len = if b.at_limit != 0 {
+            vec3::length(vec3::sub(self.pos[ib], self.pos[ia]))
+        } else {
+            b.len
+        };
         let mut work = 0.0;
         let mut brk = false;
         {
@@ -192,37 +214,30 @@ impl DamageModel {
             match b.at_limit {
                 // Brittle beams (glass, cast) are force-limited but take no permanent set;
                 // they break on strain below.
-                1 => {
-                    if !b.is_brittle() {
-                        let excess = len - b.rest - b.lim_t * b.rest / b.ea;
-                        if excess > 0.0 {
-                            let dr = flow * excess;
-                            b.rest += dr;
-                            b.plastic_strain += dr / b.rest0;
-                            work = b.lim_t * dr;
-                        }
+                1 if !b.is_brittle() => {
+                    let excess = len - b.rest - b.lim_t * b.rest * b.inv_ea;
+                    if excess > 0.0 {
+                        let dr = flow * excess;
+                        b.rest += dr;
+                        b.plastic_strain += dr / b.rest0;
+                        work = b.lim_t * dr;
                     }
                 }
-                -1 => {
-                    if !b.is_brittle() {
-                        let excess = b.rest - len - b.lim_c * b.rest / b.ea;
-                        if excess > 0.0 {
-                            let new_rest = (b.rest - flow * excess).max(tune_min * b.rest0);
-                            let dr = b.rest - new_rest;
-                            if dr > 0.0 {
-                                work = b.lim_c * dr;
-                                b.rest = new_rest;
-                                b.plastic_strain += dr / b.rest0;
-                                b.comp_plastic_strain += dr / b.rest0;
-                                if !b.buckled
-                                    && b.comp_plastic_strain > buckle_strain
-                                    && matches!(
-                                        b.kind,
-                                        MaterialKind::Structural | MaterialKind::Panel
-                                    )
-                                {
-                                    b.buckled = true;
-                                }
+                -1 if !b.is_brittle() => {
+                    let excess = b.rest - len - b.lim_c * b.rest * b.inv_ea;
+                    if excess > 0.0 {
+                        let new_rest = (b.rest - flow * excess).max(tune_min * b.rest0);
+                        let dr = b.rest - new_rest;
+                        if dr > 0.0 {
+                            work = b.lim_c * dr;
+                            b.rest = new_rest;
+                            b.plastic_strain += dr / b.rest0;
+                            b.comp_plastic_strain += dr / b.rest0;
+                            if !b.buckled
+                                && b.comp_plastic_strain > buckle_strain
+                                && matches!(b.kind, MaterialKind::Structural | MaterialKind::Panel)
+                            {
+                                b.buckled = true;
                             }
                         }
                     }
