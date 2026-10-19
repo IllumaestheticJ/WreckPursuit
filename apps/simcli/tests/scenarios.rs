@@ -17,10 +17,16 @@ fn data() -> FsData {
     FsData::new(root().join("../../data"))
 }
 
+/// Every scenario, minus `scenarios/soak/` in debug builds: soaks simulate minutes of a full
+/// city and take ~200× longer unoptimised. CI's release jobs (`simcli goldens`,
+/// `simcli determinism`, the wasm compare) still run them.
 fn all_scenarios() -> Vec<PathBuf> {
     let found = find_scenarios(&root().join("scenarios"));
     assert!(found.len() >= 6, "scenario library missing");
     found
+        .into_iter()
+        .filter(|p| !(cfg!(debug_assertions) && p.components().any(|c| c.as_os_str() == "soak")))
+        .collect()
 }
 
 fn tmp(name: &str) -> PathBuf {
@@ -206,9 +212,12 @@ fn replay_divergence_report_names_tick_and_entity() {
 #[test]
 fn bless_is_refused_in_ci_without_tag() {
     let g = tmp("bless_guard");
+    let scenarios = root().join("scenarios/golden");
     let refused = simcli()
         .args(["goldens", "--bless", "--golden"])
         .arg(&g)
+        .arg("--scenarios")
+        .arg(&scenarios)
         .env("CI", "true")
         .env("WP_COMMIT_MESSAGE", "wp_vehicle: tweak tires")
         .output()
@@ -218,12 +227,14 @@ fn bless_is_refused_in_ci_without_tag() {
     let allowed = simcli()
         .args(["goldens", "--bless", "--golden"])
         .arg(&g)
+        .arg("--scenarios")
+        .arg(&scenarios)
         .env("CI", "true")
         .env("WP_COMMIT_MESSAGE", "wp_vehicle: tweak tires [bless]")
         .output()
         .unwrap();
     assert!(allowed.status.success());
-    assert!(g.join("smoke_straight_line/hashes.txt").exists());
+    assert!(g.join("golden_tbone/hashes.txt").exists());
     assert!(g.join("golden_tbone.replay.bin").exists());
 }
 

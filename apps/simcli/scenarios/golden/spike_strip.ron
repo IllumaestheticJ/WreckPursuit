@@ -8,16 +8,17 @@
     assists: keyboard,
     police_presence: 1.0,
     entities: [
-        (id: "racer", car: "debug_sedan", driver: cruise(target_mps: 30.0, until_s: 15.0)),
-        (id: "police", car: "debug_coupe", pos: (4.0, 400.0, 0.0), inputs: [(t_s: 11.0, input: (siren: true, tool_use: 1))]),
+        (id: "racer", car: "debug_sedan", speed_mps: 30.0, driver: cruise(target_mps: 30.0, until_s: 6.0)),
+        (id: "police", car: "debug_coupe", pos: (4.0, 150.0, 0.0), inputs: [(t_s: 1.0, input: (siren: true, tool_use: 1))]),
     ],
-    duration_s: 19.0,
+    duration_s: 9.0,
     hash_every: 24,
     expect: [
-        speed_at(entity: "racer", t_s: 14.0, min: 27.0, max: 32.0),
+        speed_at(entity: "racer", t_s: 4.0, min: 27.0, max: 32.0),
     ],
     expect_pending: [
-        police_event_before(kind: 2, t_s: 13.0),
+        // wp_police::events::kind::SPIKES_PLACED.
+        police_event_before(kind: 9, t_s: 3.0),
         event_count(event: "ComponentDamaged", entity: "racer", min: 1, max: 100),
         metric(entity: "racer", name: "final_speed_mps", min: 0.0, max: 20.0),
     ],

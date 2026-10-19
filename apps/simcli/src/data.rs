@@ -12,6 +12,11 @@ use crate::RunError;
 pub trait DataSource {
     /// Read a file by its path relative to the data root, using `/` separators.
     fn read(&self, rel: &str) -> Result<String, RunError>;
+
+    /// Read a binary file (default: the text from [`DataSource::read`] as bytes).
+    fn read_bytes(&self, rel: &str) -> Result<Vec<u8>, RunError> {
+        self.read(rel).map(String::into_bytes)
+    }
 }
 
 /// A data root on disk (normally the repo's `data/`).
@@ -32,6 +37,16 @@ impl DataSource for FsData {
     fn read(&self, rel: &str) -> Result<String, RunError> {
         let path = self.root.join(rel);
         std::fs::read_to_string(&path).map_err(|source| {
+            RunError::Load(LoadError::Io {
+                path: path.clone(),
+                source,
+            })
+        })
+    }
+
+    fn read_bytes(&self, rel: &str) -> Result<Vec<u8>, RunError> {
+        let path = self.root.join(rel);
+        std::fs::read(&path).map_err(|source| {
             RunError::Load(LoadError::Io {
                 path: path.clone(),
                 source,
@@ -152,6 +167,44 @@ pub fn load_mode(src: &dyn DataSource, mode: DamageMode) -> Result<ModeTable, Ru
         DamageMode::Simulation => "modes/sim.toml",
     };
     Ok(wp_contracts::parse_mode_table(rel, &src.read(rel)?)?)
+}
+
+/// Build the world for a scenario's city. `Flat` gives `None` (the sim's default world).
+/// Traffic collision diagnostics are always on so `world_metric(civilian_collisions)` works.
+pub fn load_world(
+    src: &dyn DataSource,
+    city: &crate::scenario::CitySpec,
+    cfg: wp_world::WorldConfig,
+) -> Result<Option<wp_world::World>, RunError> {
+    use crate::scenario::CitySpec;
+    let road =
+        |rel: &str, e: wp_world::RoadError| RunError::Scenario(rel.to_string(), e.to_string());
+    Ok(match city {
+        CitySpec::Flat => None,
+        CitySpec::Procedural {
+            seed,
+            blocks_x,
+            blocks_y,
+            block_m,
+        } => {
+            let pg = wp_world::procgen::ProcGenConfig {
+                nx: *blocks_x as usize,
+                ny: *blocks_y as usize,
+                spacing_m: *block_m,
+                seed: *seed,
+                ..Default::default()
+            };
+            Some(wp_world::World::procedural(&pg, cfg))
+        }
+        CitySpec::File(rel) => {
+            let net = if rel.ends_with(".json") {
+                wp_world::RoadNetwork::from_json(&src.read(rel)?).map_err(|e| road(rel, e))?
+            } else {
+                wp_world::RoadNetwork::from_bin(&src.read_bytes(rel)?).map_err(|e| road(rel, e))?
+            };
+            Some(wp_world::World::new(net, cfg))
+        }
+    })
 }
 
 /// Car ids available under `cars/` in an on-disk data root, sorted.

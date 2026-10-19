@@ -9,6 +9,7 @@ How every workstream proves its work with the shared harness (workstream 10). Sh
 |---|---|
 | `ci.yml` → `rust` | `cargo fmt --check`, `clippy -D warnings`, `cargo test --workspace` (includes every scenario, golden comparison, fresh-process determinism, the determinism lint audit, schema drift), wasm build of `wp_wasm` |
 | `ci.yml` → `schema` | any `data/**` file failing its JSON Schema or typed loader; files with no schema are reported as warnings |
+| `ci.yml` → `workstream-checks` | a licensed car name/badge in code, data or docs (`tools/specsheet/nameplate_check.py`); `wp_economy` tests with the native SQLite store |
 | `ci.yml` → `determinism-lint` | `f64`, libm transcendentals, `HashMap`, wall clock, threads or unseeded RNG in sim crates |
 | `ci.yml` → `determinism` | a scenario whose hashes differ between two in-process runs, a fresh process, or **native vs wasm32** (Node) |
 | `ci.yml` → `goldens` | a scenario whose `hashes.txt` or golden replay differs from `apps/simcli/golden/` (prints first divergent tick, entity, magnitude) |
@@ -22,7 +23,9 @@ Run it all locally with `just ci` (or the individual `just` recipes below).
 ## Adding a scenario
 
 1. Pick a folder under `apps/simcli/scenarios/` (`vehicle/`, `damage/`, `world/`, `police/`, …;
-   `golden/` is reserved for the "feel" library, see below). File name = what it tests.
+   `golden/` is reserved for the "feel" library, see below; anything that simulates more than
+   ~20 s of a full city goes in `soak/`, which debug `cargo test` skips and the release CI jobs
+   run). File name = what it tests.
 2. Write it (format: `apps/simcli/SCENARIOS.md`). Rules:
    - **Ranges, not exact numbers** (`speed_at(t_s: 5.0, min: 20.0, max: 24.0)`). Exact behaviour
      is already pinned by the golden hash; the ranges say what is *physically right*.

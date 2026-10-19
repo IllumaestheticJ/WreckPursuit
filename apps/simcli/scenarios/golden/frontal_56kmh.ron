@@ -1,26 +1,26 @@
-// Golden "feel" case: 56 km/h (15.56 m/s) full frontal into a stationary sedan acting as a
-// barrier 60 m ahead, Simulation mode. Needs vehicle rigid bodies + damage (prompts 02/03/12);
-// until contacts reach damage only the approach is checked.
+// Golden "feel" case: 56 km/h (15.56 m/s) full frontal into a parked sedan 25 m ahead,
+// Simulation mode. The car starts at speed (`speed_mps`). A parked car absorbs and shares the
+// energy (closing Δv for equal masses ≈ half), so this is *not* expected to be a total loss;
+// `barrier_56kmh` is the rigid-wall case.
 (
     name: "golden_frontal_56kmh",
     seed: 103,
     mode: Simulation,
     assists: ai,
     entities: [
-        (id: "car", car: "debug_sedan", driver: cruise(target_mps: 15.56)),
-        (id: "barrier", car: "debug_sedan", pos: (0.0, 60.0, 0.0), yaw: 3.14159),
+        (id: "car", car: "debug_sedan", speed_mps: 15.56, driver: cruise(target_mps: 15.56, until_s: 1.0)),
+        (id: "barrier", car: "debug_sedan", pos: (0.0, 25.0, 0.0), yaw: 3.14159),
     ],
-    duration_s: 8.0,
+    duration_s: 4.0,
     hash_every: 24,
     expect: [
-        speed_at(entity: "car", t_s: 4.0, min: 15.0, max: 16.1),
-    ],
-    expect_pending: [
-        // Vehicles are rigid bodies now, so the barrier car is shoved; it should not fly off.
+        speed_at(entity: "car", t_s: 0.5, min: 15.0, max: 16.1),
+        event_count(event: "Contact", entity: "car", min: 1, max: 100000),
+        // Vehicles are rigid bodies, so the parked car is shoved; it should not fly off.
         metric(entity: "barrier", name: "distance_m", min: 0.5, max: 25.0),
         crush_depth(entity: "car", min: 0.25, max: 0.8),
-        total_loss(entity: "car", expected: true),
         components_failed(entity: "car", min: 1, max: 20),
-        event_count(event: "Contact", entity: "car", min: 1, max: 100000),
+        // Energy is shared with the parked car: damaged, not written off (see header).
+        total_loss(entity: "car", expected: false),
     ],
 )

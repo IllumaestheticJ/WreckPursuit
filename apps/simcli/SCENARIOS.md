@@ -2,7 +2,8 @@
 
 Scenarios live in `apps/simcli/scenarios/<group>/*.ron`. Groups: `smoke/` (quick sanity),
 `regression/` (bug repros, multi-car), `golden/` (the "feel" library; these also get a golden
-replay), plus any folder a workstream adds (`vehicle/`, `damage/`, `police/`, …).
+replay), `soak/` (long city/traffic runs: skipped by debug `cargo test`, run by the release CI
+jobs), plus any folder a workstream adds (`vehicle/`, `damage/`, `police/`, …).
 
 Parsing uses RON with `implicit_some`, so optional fields are written plainly
 (`entity: "car"`, not `entity: Some("car")`). Unknown fields are errors.
@@ -13,15 +14,16 @@ Parsing uses RON with `implicit_some`, so optional fields are written plainly
 (
     name: "golden_frontal_56kmh",   // unique; output folder out/<name>/, golden folder golden/<name>/
     seed: 103,                       // master RNG seed (u64)
-    city: flat,                      // flat | procedural(seed, blocks_x, blocks_y, block_m) | file("city/x.json")
+    city: flat,                      // flat | procedural(seed, blocks_x, blocks_y, block_m) | file("city/x.road.json")
     time_of_day_h: 12.0,             // start time, hours        (default 12.0)
     time_ratio: 10.0,                // game s per sim s         (default 10.0)
     mode: Simulation,                // Arcade | Simulation      (default Arcade) → data/modes/{arcade,sim}.toml
     assists: ai,                     // default assists: keyboard | gamepad | wheel | ai | off | custom((abs: true, …))
-    traffic_density: 0.3,            // optional override 0..=1
+    traffic_density: 0.3,            // optional traffic density multiplier (1 = city default, 0 = none)
     police_presence: 1.0,            // optional override 0..=1
     systems: "vehicle,damage,world", // optional; default all. --systems overrides. "net" adds the snapshot round trip
-    entities: [ … ],                 // spawn order = entity id order (1, 2, 3, …)
+    barriers: [(pos: (0.0, 20.0, 0.75), size: (8.0, 1.0, 1.5), yaw: 0.0)],  // static boxes (rigid walls)
+    entities: [ … ],                 // spawn order = entity id order (1, 2, 3, …); may be empty
     duration_s: 8.0,
     sample_hz: 60.0,                 // metrics.csv rate (default 60)
     hash_every: 24,                  // hashes.txt / replay checkpoint interval in ticks (default 240 = 1 s)
@@ -30,9 +32,25 @@ Parsing uses RON with `implicit_some`, so optional fields are written plainly
 )
 ```
 
-Features a crate does not support yet (`procedural`/`file` cities, traffic/police overrides,
-`follow_route`, `ai_driver`) run anyway and add a **warning** to the summary; `--strict` turns
-warnings into failures.
+Cities:
+- `flat` (default): infinite asphalt, no roads, no traffic.
+- `procedural(seed, blocks_x, blocks_y, block_m)`: `wp_world::procgen` with `nx = blocks_x`,
+  `ny = blocks_y` grid streets `block_m` apart (ring road etc. at their defaults).
+  `procedural(seed: 1, blocks_x: 12, blocks_y: 12, block_m: 110.0)` is exactly
+  `data/city/procedural_12x12`.
+- `file("city/<id>.road.json")` (works in the WASM runner too) or `file("city/<id>.road.bin")`
+  (disk only).
+
+With a city, the world is seeded from the scenario `seed`, parked cars become physics bodies,
+traffic is pre-populated around the spawned cars (or the whole city when `entities: []`), and
+civilian-collision diagnostics are on so `world_metric(name: "civilian_collisions", …)` works.
+
+`barriers` are static boxes (`Sim::add_static_box`): centre `pos`, full `size` `[x, y, z]`,
+`yaw` about +Z. Contacts with them reach damage as static world geometry.
+
+Features a crate does not support yet (police presence override, `follow_route`,
+`ai_driver`) run anyway and add a **warning** to the summary; `--strict` turns warnings into
+failures.
 
 ## Entities
 
@@ -42,6 +60,7 @@ warnings into failures.
     car: "debug_coupe",             // data/cars/<car>.json
     pos: (-40.0, 0.0, 0.0),         // world m (default origin)
     yaw: -1.5708,                   // rad about +Z, 0 = facing +Y (default 0)
+    speed_mps: 13.9,                // start rolling forward at this speed (default 0, at rest)
     assists: off,                   // optional per-entity override
     driver: cruise(target_mps: 13.9, from_s: 0.0, until_s: 5.0),
     inputs: [
@@ -64,7 +83,7 @@ warnings into failures.
 
 ## Expectations (`expect`, `expect_pending`)
 
-All ranges are inclusive. `entity` defaults to the first entity.
+All ranges are inclusive. `entity` defaults to the first entity; a scenario with `entities: []` may only use `world_metric`, police and entity-less `event_count` expectations.
 
 | expectation | checks |
 |---|---|
@@ -77,11 +96,18 @@ All ranges are inclusive. `entity` defaults to the first entity.
 | `pursuit_started_before(t_s)` | a `PoliceEvent` with kind `simcli::PURSUIT_STARTED_KIND` before `t_s` |
 | `police_event_before(kind, t_s)` | a `PoliceEvent` of `kind` before `t_s` |
 | `event_count(event, entity, min, max)` | number of `SimEvent::<event>` (optionally naming `entity`) |
+| `world_metric(name, min, max)` | a world/traffic metric (list below) |
 
 Metrics for `metric(...)`: `final_speed_mps`, `max_speed_mps`, `distance_m` (horizontal,
 from spawn), `path_length_m`, `final_health`, `max_lateral_g`, `max_long_g`,
 `max_yaw_rate_rps`, `crush_depth_m`, `components_failed`, `parts_detached`, `wheels_detached`,
 `total_loss` (0/1), `min_z_m`.
+
+World metrics for `world_metric(...)` (all 0 on the flat world): `traffic_agents_final`,
+`traffic_agents_min` (fewest agents at any tick after a 10 s warm-up), `traffic_moving_frac_final`
+and `traffic_moving_frac_min` (fraction of agents above 0.5 m/s; the min is over 1 Hz samples
+after the warm-up), `civilian_collisions`, `traffic_spawned`, `traffic_stuck_recycled`, `props`
+(parked cars and cones turned into bodies), `static_boxes`.
 
 Use ranges, never exact numbers: the hash goldens already pin exact behaviour, and ranges
 describe what "correct" means so they survive tuning.

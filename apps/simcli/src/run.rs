@@ -11,15 +11,14 @@ use wp_contracts::{
 };
 use wp_sim::{Sim, SimConfig, Systems};
 
-use crate::data::{load_car, load_mode, DataSource};
+use crate::data::{load_car, load_mode, load_world, DataSource};
 use crate::replay::{Checkpoint, EntityCheckpoint, InputEvent, Replay};
 use crate::scenario::{tick_of, CitySpec, Driver, Expect, Scenario};
 use crate::RunError;
 
-/// `wp_police` payload kind treated as "pursuit started" by
-/// [`Expect::PursuitStartedBefore`]. Provisional until `wp_police` (prompt 06) exports its own
-/// constant; see `docs/integration/harness.md`.
-pub const PURSUIT_STARTED_KIND: u16 = 1;
+/// `wp_police` payload kind treated as "pursuit started" by [`Expect::PursuitStartedBefore`]
+/// (`wp_police::events::kind::PURSUIT_STARTED`; the full list is in that module).
+pub const PURSUIT_STARTED_KIND: u16 = wp_police::events::kind::PURSUIT_STARTED;
 
 /// Systems to run: the [`Systems`] inside [`Sim`] plus the harness-side net round trip.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -196,6 +195,124 @@ pub struct NetStats {
     pub bytes: u64,
 }
 
+/// World and traffic results.
+#[derive(Debug, Clone, PartialEq, Default, Serialize)]
+pub struct WorldSummary {
+    /// City (`flat`, `procedural_<nx>x<ny>` or the file path).
+    pub city: String,
+    /// Traffic agents at the end.
+    pub traffic_agents_final: u32,
+    /// Fewest agents at any tick after the first [`WORLD_WARMUP_S`] s (the final count if the
+    /// run is shorter).
+    pub traffic_agents_min: u32,
+    /// Fraction of agents moving (> 0.5 m/s) at the end.
+    pub traffic_moving_frac_final: f32,
+    /// Lowest moving fraction over 1 Hz samples after the warm-up.
+    pub traffic_moving_frac_min: f32,
+    /// New civilian–civilian overlap pairs (`TrafficStats::civilian_collisions`).
+    pub civilian_collisions: u64,
+    /// Agents spawned.
+    pub traffic_spawned: u64,
+    /// Agents recycled because they were stuck.
+    pub traffic_stuck_recycled: u64,
+    /// City props turned into physics bodies (parked cars, cones).
+    pub props: u32,
+    /// Static boxes from `barriers`.
+    pub static_boxes: u32,
+}
+
+impl WorldSummary {
+    /// Look up a metric by name (the names `Expect::WorldMetric` accepts).
+    pub fn metric(&self, name: &str) -> Option<f32> {
+        Some(match name {
+            "traffic_agents_final" => self.traffic_agents_final as f32,
+            "traffic_agents_min" => self.traffic_agents_min as f32,
+            "traffic_moving_frac_final" => self.traffic_moving_frac_final,
+            "traffic_moving_frac_min" => self.traffic_moving_frac_min,
+            "civilian_collisions" => self.civilian_collisions as f32,
+            "traffic_spawned" => self.traffic_spawned as f32,
+            "traffic_stuck_recycled" => self.traffic_stuck_recycled as f32,
+            "props" => self.props as f32,
+            "static_boxes" => self.static_boxes as f32,
+            _ => return None,
+        })
+    }
+
+    /// Every metric name [`WorldSummary::metric`] accepts.
+    pub const METRICS: [&'static str; 9] = [
+        "traffic_agents_final",
+        "traffic_agents_min",
+        "traffic_moving_frac_final",
+        "traffic_moving_frac_min",
+        "civilian_collisions",
+        "traffic_spawned",
+        "traffic_stuck_recycled",
+        "props",
+        "static_boxes",
+    ];
+}
+
+/// Seconds at the start of a run that the `*_min` traffic metrics ignore (spawn-in).
+pub const WORLD_WARMUP_S: f32 = 10.0;
+
+#[derive(Default)]
+struct WorldTracker {
+    agents_min: Option<u32>,
+    moving_min: Option<f32>,
+}
+
+fn moving_frac(world: &wp_world::World) -> f32 {
+    let n = world.agent_count();
+    if n == 0 {
+        return 0.0;
+    }
+    world.agents().filter(|a| a.speed_mps > 0.5).count() as f32 / n as f32
+}
+
+impl WorldTracker {
+    fn update(&mut self, world: &wp_world::World, tick: u64) {
+        if tick < tick_of(WORLD_WARMUP_S) {
+            return;
+        }
+        let n = world.agent_count() as u32;
+        self.agents_min = Some(self.agents_min.map_or(n, |m| m.min(n)));
+        if tick.is_multiple_of(240) {
+            let f = moving_frac(world);
+            self.moving_min = Some(self.moving_min.map_or(f, |m| m.min(f)));
+        }
+    }
+
+    fn finish(
+        &self,
+        world: &wp_world::World,
+        city: &CitySpec,
+        props: usize,
+        boxes: usize,
+    ) -> WorldSummary {
+        let stats = world.traffic_stats();
+        let n = world.agent_count() as u32;
+        let frac = moving_frac(world);
+        WorldSummary {
+            city: match city {
+                CitySpec::Flat => "flat".into(),
+                CitySpec::Procedural {
+                    blocks_x, blocks_y, ..
+                } => format!("procedural_{blocks_x}x{blocks_y}"),
+                CitySpec::File(f) => f.clone(),
+            },
+            traffic_agents_final: n,
+            traffic_agents_min: self.agents_min.unwrap_or(n),
+            traffic_moving_frac_final: frac,
+            traffic_moving_frac_min: self.moving_min.unwrap_or(frac),
+            civilian_collisions: stats.civilian_collisions,
+            traffic_spawned: stats.spawned,
+            traffic_stuck_recycled: stats.stuck_recycled,
+            props: props as u32,
+            static_boxes: boxes as u32,
+        }
+    }
+}
+
 /// Result of one run (`summary.json`).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RunSummary {
@@ -221,6 +338,8 @@ pub struct RunSummary {
     pub max_events_per_tick: u64,
     /// Net round-trip stats (zero when `net` is off).
     pub net: NetStats,
+    /// World and traffic results (zeros on the flat world).
+    pub world: WorldSummary,
     /// Things the run could not do as asked (unsupported city, drivers, overrides).
     pub warnings: Vec<String>,
     /// `expect` results.
@@ -455,16 +574,8 @@ pub fn run_with_hook(
         (None, None) => Selection::ALL,
     };
     let mut warnings = Vec::new();
-    match &sc.city {
-        CitySpec::Flat => {}
-        other => warnings.push(format!(
-            "city {other:?} not supported by wp_world yet (prompt 05); ran on the flat world"
-        )),
-    }
-    if let Some(d) = sc.traffic_density {
-        warnings.push(format!(
-            "traffic_density override {d} not applied: wp_world has no traffic API yet"
-        ));
+    if sc.city == CitySpec::Flat && sc.traffic_density.is_some() {
+        warnings.push("traffic_density ignored: the flat world has no roads or traffic".into());
     }
     if let Some(p) = sc.police_presence {
         warnings.push(format!(
@@ -489,6 +600,9 @@ pub fn run_with_hook(
         time_ratio: sc.time_ratio,
     });
     sim.set_systems(selection.sim);
+    for b in &sc.barriers {
+        sim.add_static_box(b.pos, b.size, b.yaw);
+    }
 
     let mut ids = Vec::new();
     let mut trackers = Vec::new();
@@ -499,6 +613,9 @@ pub fn run_with_hook(
         }
         let car = &cars[&spec.car];
         let id = sim.spawn_vehicle(car, spec.pos, spec.yaw)?;
+        if spec.speed_mps != 0.0 {
+            sim.place_vehicle(id, spec.pos, spec.yaw, spec.speed_mps)?;
+        }
         sim.set_assists(id, spec.assists.unwrap_or(sc.assists).profile())?;
         ids.push(id);
         trackers.push(Tracker {
@@ -531,6 +648,36 @@ pub fn run_with_hook(
         });
     }
     let names: Vec<String> = sc.entities.iter().map(|e| e.id.clone()).collect();
+    let density = sc.traffic_density.unwrap_or(1.0);
+    let world_cfg = wp_world::WorldConfig {
+        seed: sc.seed,
+        start_time: TimeOfDay::from_hours(sc.time_of_day_h),
+        time_ratio: sc.time_ratio,
+        traffic: wp_world::TrafficConfig {
+            enabled: density > 0.0,
+            density_scale: density,
+            detect_collisions: true,
+            ..Default::default()
+        },
+        parked_cars: true,
+    };
+    let has_city = match load_world(data, &sc.city, world_cfg)? {
+        Some(mut world) => {
+            // Fill the area around the spawned cars before the first tick (the sim refreshes
+            // the tracked set every tick from then on).
+            let tracked: Vec<wp_world::TrackedVehicle> = sim
+                .vehicle_states()
+                .iter()
+                .map(|(id, s)| wp_world::TrackedVehicle::from_state(*id, s, false, true))
+                .collect();
+            world.set_tracked_vehicles(&tracked);
+            world.populate();
+            sim.set_world(world);
+            true
+        }
+        None => false,
+    };
+    let mut world_tr = WorldTracker::default();
     let index_of = |id: EntityId| ids.iter().position(|x| *x == id);
 
     // Probe ticks for `speed_at` expectations: tick -> [(entity index, slot)].
@@ -680,6 +827,11 @@ pub fn run_with_hook(
             }
         }
 
+        // World / traffic.
+        if has_city {
+            world_tr.update(sim.world(), now);
+        }
+
         // Hashes.
         let checkpoint = now.is_multiple_of(sc.hash_every) || now == ticks;
         if checkpoint {
@@ -760,6 +912,12 @@ pub fn run_with_hook(
         events_total,
         max_events_per_tick,
         net,
+        world: world_tr.finish(
+            sim.world(),
+            &sc.city,
+            sim.prop_count(),
+            sim.static_box_count(),
+        ),
         warnings,
         expectations: Vec::new(),
         pending: Vec::new(),
@@ -859,6 +1017,16 @@ impl EvalCtx<'_> {
                 let v = self.ent(entity.as_ref()).1.total_loss;
                 (v.to_string(), v == *expected)
             }
+            Expect::WorldMetric { name, min, max } => match self.summary.world.metric(name) {
+                Some(v) => range(v, *min, *max),
+                None => (
+                    format!(
+                        "unknown world metric {name:?}; known: {:?}",
+                        WorldSummary::METRICS
+                    ),
+                    false,
+                ),
+            },
             Expect::PursuitStartedBefore { t_s } => self.police_before(PURSUIT_STARTED_KIND, *t_s),
             Expect::PoliceEventBefore { kind, t_s } => self.police_before(*kind, *t_s),
             Expect::EventCount {

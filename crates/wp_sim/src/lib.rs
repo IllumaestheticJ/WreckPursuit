@@ -592,14 +592,22 @@ impl Sim {
             .ok_or(SimError::UnknownEntity(id))
     }
 
-    /// Stable hash of the whole simulation state (hash spec v1, see `docs/integration/harness.md`):
-    /// FNV-1a 64 over `HASH_SPEC_VERSION`, tick, in-game clock (1 ms), vehicle count, then every
-    /// [`Sim::entity_hashes`] value in ascending entity order.
+    /// Stable hash of the whole simulation state (hash spec v2, see `docs/integration/harness.md`):
+    /// FNV-1a 64 over `HASH_SPEC_VERSION`, tick, in-game clock (1 ms), [`World::state_hash`]
+    /// (signals + traffic), debris count and every debris body position (1e-3 m) in spawn order,
+    /// vehicle count, then every [`Sim::entity_hashes`] value in ascending entity order.
     pub fn state_hash(&self) -> u64 {
         let mut h = StateHasher::new();
         h.write_u32(HASH_SPEC_VERSION);
         h.write_u64(self.tick);
         h.write_f32_q(self.world.clock.time.seconds_since_midnight, 1e3);
+        h.write_u64(self.world.state_hash());
+        h.write_u32(self.debris.len() as u32);
+        for d in &self.debris {
+            for x in self.physics.bodies[*d].translation().to_array() {
+                h.write_f32_q(x, 1e3);
+            }
+        }
         h.write_u32(self.vehicles.len() as u32);
         for (_, eh) in self.entity_hashes() {
             h.write_u64(eh);
@@ -653,7 +661,7 @@ impl Sim {
 
 /// Version of the [`Sim::state_hash`] layout. Bump when the hashed fields change; every golden
 /// must then be re-blessed.
-pub const HASH_SPEC_VERSION: u32 = 1;
+pub const HASH_SPEC_VERSION: u32 = 2;
 
 #[cfg(test)]
 mod tests {
