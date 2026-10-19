@@ -109,6 +109,15 @@ jobs:
           path: out/
           retention-days: 14
 
+  harness-report:
+    name: harness report (ignored tests, release-only scenarios)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: list what cargo test --workspace skips, in the job summary
+        run: |
+          python3 tools/ci/harness_report.py | tee -a "$GITHUB_STEP_SUMMARY"
+
   bless-guard:
     name: goldens change only with [bless]
     if: github.event_name == 'pull_request'
