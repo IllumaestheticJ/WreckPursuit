@@ -230,6 +230,10 @@ components:
         state: { type: string, enum: [up, draining, down] }
         last_heartbeat_ms: { type: integer, format: int64 }
         tick_ms: { type: number }
+        racer_rating:
+          type: number
+          nullable: true
+          description: Mean clean rating of the racers listed in the last heartbeat (null = none). Used for skill matching.
     VerifyJoinRequest:
       type: object
       required: [join_token]
@@ -497,6 +501,10 @@ paths:
       description: |
         403 `not_party_leader`, 409 `already_queued`, 403 `feature_disabled` (flags
         `player_police_enabled`, `simulation_mode_enabled`). Rate-limited per account.
+        Racers are matched by clean rating: an instance with racers fits when their mean
+        rating is within the ticket's skill window (starts at 200 points, widens 10 points per
+        second of waiting; a party uses its members' mean). Flag `skill_matching_enabled`
+        (default true) turns this off.
       security: [ { player: [] } ]
       requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/QueueRequest' } } } }
       responses:

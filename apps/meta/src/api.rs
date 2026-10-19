@@ -245,6 +245,10 @@ pub struct InstanceInfo {
     pub state: InstanceState,
     /// Last heartbeat (Unix ms).
     pub last_heartbeat_ms: i64,
+    /// Mean clean rating of the racers listed in the last heartbeat (`None` = no racers).
+    /// Racer matchmaking prefers instances whose racers are close to the player's rating.
+    #[serde(default)]
+    pub racer_rating: Option<f64>,
     /// Mean tick time last reported, ms.
     pub tick_ms: f32,
 }

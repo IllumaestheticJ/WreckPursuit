@@ -879,3 +879,128 @@ fn cors_for_allowed_origins_on_player_paths_only() {
     );
     assert_eq!(allow, None);
 }
+
+/// Two-racer race on `inst`: `winner` beats `loser` cleanly (+16 / -16 from 1500).
+fn duel(inst: &FakeInstance, key: &str, winner: AccountId, loser: AccountId) {
+    let entry = |id, position| RaceEntry {
+        account_id: id,
+        position,
+        finish_time_ms: Some(60_000 + position as u64),
+        clean: true,
+    };
+    inst.client
+        .report_race(
+            inst.id,
+            &RaceReport {
+                report_key: key.into(),
+                route_id: "loop".into(),
+                race_type: "sprint".into(),
+                mode: DamageMode::Simulation,
+                bracket: "B".into(),
+                entries: vec![entry(winner, 1), entry(loser, 2)],
+            },
+        )
+        .unwrap();
+}
+
+#[test]
+fn racers_match_by_clean_rating_with_a_widening_window() {
+    let srv = TestServer::start_with(Config {
+        skill_window: 5.0,
+        skill_widen_per_s: 1.0,
+        ..Config::test()
+    });
+    // Training server (Simulation) to give players different ratings.
+    let training = FakeInstance::register(
+        &srv,
+        "training",
+        DamageMode::Simulation,
+        "B",
+        racer_slots(8),
+    );
+    let names = ["hi1", "lo1", "hi2", "lo2"];
+    let players: Vec<_> = names.iter().map(|n| player(&srv, n)).collect();
+    for (_, c) in &players {
+        matchmake(
+            c,
+            Some(&prefs(Role::Racer, DamageMode::Simulation, "B")),
+            &[Arc::clone(&training)],
+        );
+    }
+    training.heartbeat();
+    duel(&training, "d1", players[0].0, players[1].0);
+    duel(&training, "d2", players[2].0, players[3].0);
+    for (id, _) in &players {
+        training.disconnect(*id);
+    }
+    training.heartbeat();
+
+    // Two empty Arcade servers. hi1 goes to the lowest id; lo1 (32 points lower) is outside
+    // the window there and opens the other one; hi2 / lo2 join their peers.
+    let a1 = FakeInstance::register(&srv, "a1", DamageMode::Arcade, "open", racer_slots(6));
+    let a2 = FakeInstance::register(&srv, "a2", DamageMode::Arcade, "open", racer_slots(6));
+    let arcade = [Arc::clone(&a1), Arc::clone(&a2)];
+    let racer = prefs(Role::Racer, DamageMode::Arcade, "C");
+    let seat_of = |i: usize| {
+        let s = matchmake(&players[i].1, Some(&racer), &arcade);
+        assert_eq!(s.account_id, players[i].0);
+    };
+    seat_of(0);
+    seat_of(1);
+    a1.heartbeat();
+    a2.heartbeat();
+    seat_of(2);
+    seat_of(3);
+    let on = |inst: &FakeInstance, i: usize| inst.seats.lock().unwrap().contains_key(&players[i].0);
+    assert!(on(&a1, 0) && on(&a1, 2), "high-rated racers together");
+    assert!(on(&a2, 1) && on(&a2, 3), "low-rated racers together");
+    a1.heartbeat();
+    a2.heartbeat();
+    let health = srv.admin().admin_health().unwrap();
+    let rating_of = |id| {
+        health
+            .instances
+            .iter()
+            .find(|i| i.instance_id == id)
+            .unwrap()
+            .racer_rating
+    };
+    assert!((rating_of(a1.id).unwrap() - 1516.0).abs() < 1e-6);
+    assert!((rating_of(a2.id).unwrap() - 1484.0).abs() < 1e-6);
+
+    // A new 1500 player is 16 points from both lobbies: waits until the window (5 + 1/s)
+    // reaches 16, then takes the fuller / closer / lower-id one.
+    let (new_id, newbie) = player(&srv, "newbie");
+    let st = newbie.queue(&racer).unwrap();
+    assert!(st.assignment.is_none(), "outside both skill windows");
+    srv.advance(10_000);
+    a1.heartbeat();
+    a2.heartbeat();
+    assert!(
+        newbie.ticket_status().unwrap().assignment.is_none(),
+        "window 15 < 16"
+    );
+    srv.advance(1_500);
+    a1.heartbeat();
+    a2.heartbeat();
+    let a = newbie
+        .ticket_status()
+        .unwrap()
+        .assignment
+        .expect("window widened");
+    assert_eq!(a.instance_id, a1.id, "tie on load and gap → lowest id");
+    assert!(a1.connect(&a.join_token).unwrap().account_id == new_id);
+
+    // Police seats ignore ratings; with the flag off, racers do too.
+    let (_, cop) = player(&srv, "cop");
+    assert!(cop
+        .queue(&prefs(Role::PoliceChase, DamageMode::Arcade, "C"))
+        .unwrap()
+        .assignment
+        .is_some());
+    srv.admin()
+        .admin_set_flag("skill_matching_enabled", json!(false))
+        .unwrap();
+    let (_, other) = player(&srv, "other");
+    assert!(other.queue(&racer).unwrap().assignment.is_some());
+}

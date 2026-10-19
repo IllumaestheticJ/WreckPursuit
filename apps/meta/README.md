@@ -10,7 +10,7 @@ Everything a persistent online game needs that is not the simulation. City serve
 | Archives | race results, pursuit outcomes (bounty / heat history), audit log — all append-only (DB triggers) | `results`, `admin` |
 | Crews | crews, members, districts held (territory reported by instances) | `crews` |
 | Directory | instance registration, heartbeats (population, drain, tick time), liveness, kicks + flags pushed in heartbeat replies | `directory` |
-| Matchmaking | tickets by role / mode / class bracket / region (/ city), parties (all-or-nothing), one-time join tokens, reconnect tokens | `matchmaking` |
+| Matchmaking | tickets by role / mode / class bracket / region (/ city), racer skill matching on the clean rating (widening window), parties (all-or-nothing), one-time join tokens, reconnect tokens | `matchmaking` |
 | Leaderboards | clean-race rating (Elo), bounty, captures, time attack per route; all-time / daily / weekly | `leaderboards` |
 | Server hook | opt-in, non-blocking `MetaWorker` for `apps/server` (`WP_META_URL` unset = standalone) | `instance` |
 | Admin | ban / unban / kick, audited economy adjustments, feature flags, board resets, audit log, health JSON + `/admin` HTML dashboard | `admin`, `routes` |
@@ -42,7 +42,17 @@ open http://127.0.0.1:8090/admin   # paste the admin token (dev-admin-token-0000
 
 Fixed defaults (in `Config::local`): sessions 30 days, join tokens 60 s, reconnect tokens 10 min
 (refreshed while the player appears in heartbeats), queue tickets 5 min, heartbeat every 5 s
-(down after 3 missed).
+(down after 3 missed), racer skill window 200 rating points widening by 10 per second waited.
+
+### Skill matching
+
+Racers queue with their clean rating (a party with its members' mean). An instance that already
+has racers fits only if their mean rating is within the ticket's window: 200 points at first,
++10 per second of waiting (so after ~30 s almost anything fits, and nobody waits forever on an
+empty population). Among fitting instances the fullest still wins (fill before spreading), then
+the closest rating, then the lowest id. Cops and spectators are not rated. Admins can switch it
+off with the feature flag `skill_matching_enabled = false`. The instance's racer rating shows
+in `/v1/admin/health` and on the `/admin` dashboard.
 
 ## Deploy notes
 
@@ -127,8 +137,12 @@ player base". At these numbers one process handles ~1000 matchmaking calls/s.
   report (no conflict resolution between instances of the same city).
 - `ensure_hosted` trusts registered instances: an instance can commit any economy change for the
   players it hosts. Instances are first-party servers holding the instance key.
-- Matching is greedy oldest-first; no skill-based matching inside a bracket yet (the clean rating
-  is there to feed it), no backfill priority for parties beyond all-or-nothing.
+- Matching is greedy oldest-first; no backfill priority for parties beyond all-or-nothing.
+- Skill matching uses the clean rating only (racers; cops have no rating yet — cop rank could
+  feed the same mechanism). The window is a fixed config (`Config::skill_window` 200,
+  `skill_widen_per_s` 10), not an env variable; tune once real queue times exist. An instance's
+  rating is the mean of the racers in its last heartbeat plus seats reserved since; players who
+  leave count until the next heartbeat.
 - Leaderboard ties break by earliest update, then account id. Daily/weekly periods are UTC.
 - `PlayerId` doubles as the durable account id until the contract splits them (MC-1 in
   `docs/integration/meta.md`).
