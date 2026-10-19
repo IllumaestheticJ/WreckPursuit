@@ -2,14 +2,17 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, "ws/**"]
   pull_request:
 
 env:
   CARGO_TERM_COLOR: always
+  # Lets `simcli --bless` run in CI only for commits tagged [bless] (see docs/TESTING.md).
+  WP_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
 
 jobs:
   rust:
+    name: fmt / clippy / test / wasm build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,12 +25,100 @@ jobs:
         run: cargo fmt --all -- --check
       - name: clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: test (includes schema drift, data validation, scenario determinism)
+      - name: test (unit, scenarios, goldens, determinism audit, schema drift)
         run: cargo test --workspace
       - name: wasm build
         run: cargo build --target wasm32-unknown-unknown -p wp_wasm
 
+  schema:
+    name: schema validation of data/**
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.97.0
+      - uses: Swatinem/rust-cache@v2
+      - name: validate every data file against schemas/ and the typed loaders
+        run: cargo test -p wp_contracts --test data_validation
+      - name: report data files no schema covers
+        run: tools/ci/data_coverage.sh
+
+  determinism-lint:
+    name: determinism lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.97.0
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo run -p lint-determinism
+
+  determinism:
+    name: determinism suite (in-process, fresh process, native vs wasm)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.97.0
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: in-process twice + fresh process
+        run: |
+          cargo build --release -p simcli
+          ./target/release/simcli determinism apps/simcli/scenarios
+      - name: native vs wasm32 (Node)
+        run: tools/wasm-determinism/compare.sh
+
+  goldens:
+    name: golden hashes + golden replays
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.97.0
+      - uses: Swatinem/rust-cache@v2
+      - name: compare every scenario with apps/simcli/golden (diff report on failure)
+        run: |
+          cargo build --release -p simcli
+          ./target/release/simcli goldens
+      - name: run all scenarios and keep their outputs
+        if: always()
+        run: ./target/release/simcli run apps/simcli/scenarios --out out
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scenario-outputs
+          path: out/
+          retention-days: 14
+
+  bless-guard:
+    name: goldens change only with [bless]
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: tools/ci/bless_guard.sh origin/${{ github.base_ref }}
+
+  fuzz:
+    name: fuzz (1 minute)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.97.0
+      - uses: Swatinem/rust-cache@v2
+      - run: |
+          cargo build --release -p simcli
+          ./target/release/simcli fuzz --minutes 1 --seed ${{ github.run_number }}
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: fuzz-repro
+          path: out/fuzz/
+
   web:
+    name: testbed build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

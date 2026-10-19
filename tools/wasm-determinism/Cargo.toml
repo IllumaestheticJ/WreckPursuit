@@ -1,0 +1,14 @@
+[package]
+name = "wasm-determinism"
+description = "simcli's runner compiled to wasm32 with a tiny C ABI, so Node can run scenarios and compare hashes with native."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+simcli = { path = "../../apps/simcli" }
+serde_json.workspace = true

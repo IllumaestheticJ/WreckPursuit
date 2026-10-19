@@ -1,0 +1,16 @@
+// Smoke: only vehicle + world are stepped (damage and police excluded, net round trip off).
+// Shows how a scenario can exclude a crate that is still a stub.
+(
+    name: "smoke_subset_systems",
+    seed: 3,
+    systems: "vehicle,world",
+    entities: [
+        (id: "sedan", car: "debug_sedan", inputs: [(t_s: 0.0, input: (throttle: 0.6, steer: -0.2))]),
+    ],
+    duration_s: 4.0,
+    hash_every: 60,
+    expect: [
+        metric(name: "max_speed_mps", min: 3.0, max: 60.0),
+        metric(name: "final_health", min: 1.0, max: 1.0),
+    ],
+)
