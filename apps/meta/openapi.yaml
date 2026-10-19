@@ -281,7 +281,7 @@ components:
       properties:
         report_key: { type: string }
         racer_id: { type: integer }
-        max_wanted: { type: integer, minimum: 0, maximum: 5 }
+        max_wanted: { type: string, enum: [None, L1, L2, L3, L4, L5], description: '`wp_contracts::WantedLevel`' }
         bounty: { type: integer, minimum: 0 }
         outcome: { type: string, enum: [escaped, captured] }
         captured_by: { type: integer, nullable: true }

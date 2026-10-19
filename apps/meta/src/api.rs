@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use wp_contracts::{DamageMode, Role};
+use wp_contracts::{DamageMode, Role, WantedLevel};
 
 /// Durable account id. Equals the economy `PlayerId.0` until the contract gains a separate
 /// `AccountId` (contract change request MC-1 in `docs/integration/meta.md`).
@@ -238,7 +238,8 @@ pub struct InstanceInfo {
     pub slots: RoleCounts,
     /// Reported population per role.
     pub population: RoleCounts,
-    /// Seats promised to matched players who have not connected yet.
+    /// Seats held by matched players the reported population does not cover yet (assigned,
+    /// or joined but not yet listed in a heartbeat).
     pub reserved: RoleCounts,
     /// State.
     pub state: InstanceState,
@@ -509,8 +510,8 @@ pub struct PursuitReport {
     pub report_key: String,
     /// The pursued racer.
     pub racer_id: AccountId,
-    /// Highest wanted level reached (0..=5).
-    pub max_wanted: u8,
+    /// Highest wanted level reached.
+    pub max_wanted: WantedLevel,
     /// Racer bounty at the end of the pursuit.
     pub bounty: u32,
     /// Outcome.

@@ -95,8 +95,16 @@ fn validate_password(pw: &str) -> ApiResult<()> {
     }
 }
 
-/// Create an account with a password identity and a fresh economy account, then open a
-/// session.
+/// Validate signup fields; returns the normalised email.
+pub fn validate_signup(email: &str, password: &str, display_name: &str) -> ApiResult<String> {
+    let email = normalise_email(email)?;
+    validate_display_name(display_name)?;
+    validate_password(password)?;
+    Ok(email)
+}
+
+/// Validate, hash and create in one call (tests, tools). The HTTP handler does the same in
+/// three steps so the slow hash runs without the database lock.
 #[allow(clippy::too_many_arguments)]
 pub fn signup(
     conn: &mut Connection,
@@ -108,12 +116,30 @@ pub fn signup(
     session_ttl_ms: i64,
     now: UnixMs,
 ) -> ApiResult<SessionResponse> {
-    let email = normalise_email(email)?;
-    validate_display_name(display_name)?;
-    validate_password(password)?;
-    // Hash before taking the write transaction: hashing is the slow part.
+    let email = validate_signup(email, password, display_name)?;
     let phc = hash_password(password, cost)?;
+    create_account(
+        conn,
+        economy,
+        &email,
+        &phc,
+        display_name,
+        session_ttl_ms,
+        now,
+    )
+}
 
+/// Create an account with a password identity (`email` already normalised, `phc` from
+/// [`hash_password`]) and a fresh economy account, then open a session.
+pub fn create_account(
+    conn: &mut Connection,
+    economy: &Economy,
+    email: &str,
+    phc: &str,
+    display_name: &str,
+    session_ttl_ms: i64,
+    now: UnixMs,
+) -> ApiResult<SessionResponse> {
     let tx = conn.transaction()?;
     let email_taken: bool = tx
         .query_row(
@@ -162,7 +188,9 @@ pub fn signup(
     Ok(session)
 }
 
-/// Verify email + password and open a session. Banned accounts are refused with 403.
+/// Verify email + password and open a session in one call (tests, tools). The HTTP handler
+/// uses [`password_identity`], [`check_password`] and [`open_session`] so the slow verify runs
+/// without the database lock.
 pub fn login(
     conn: &Connection,
     email: &str,
@@ -171,14 +199,24 @@ pub fn login(
     session_ttl_ms: i64,
     now: UnixMs,
 ) -> ApiResult<SessionResponse> {
-    let invalid = || {
-        ApiError::new(
-            StatusCode::UNAUTHORIZED,
-            "invalid_credentials",
-            "wrong email or password",
-        )
+    let identity = password_identity(conn, email)?;
+    let account = check_password(password, identity.as_ref(), cost)?;
+    open_session(conn, account, session_ttl_ms, now)
+}
+
+fn invalid_credentials() -> ApiError {
+    ApiError::new(
+        StatusCode::UNAUTHORIZED,
+        "invalid_credentials",
+        "wrong email or password",
+    )
+}
+
+/// The password identity of an email: `(account, PHC hash)`, `None` if unknown.
+pub fn password_identity(conn: &Connection, email: &str) -> ApiResult<Option<(AccountId, String)>> {
+    let Ok(email) = normalise_email(email) else {
+        return Ok(None);
     };
-    let email = normalise_email(email).map_err(|_| invalid())?;
     let row: Option<(AccountId, Option<String>)> = conn
         .query_row(
             "SELECT account_id, secret_hash FROM identities
@@ -187,16 +225,35 @@ pub fn login(
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .optional()?;
-    let Some((account_id, Some(phc))) = row else {
-        // Spend comparable time on unknown emails so response timing does not reveal them.
-        let _ = verify_password(password, dummy_phc(cost));
-        return Err(invalid());
-    };
-    if !verify_password(password, &phc) {
-        return Err(invalid());
+    Ok(row.and_then(|(id, phc)| phc.map(|p| (id, p))))
+}
+
+/// Check a password against an identity. Unknown identities still cost one hash so response
+/// timing does not reveal which emails exist. 401 `invalid_credentials` on mismatch.
+pub fn check_password(
+    password: &str,
+    identity: Option<&(AccountId, String)>,
+    cost: HashCost,
+) -> ApiResult<AccountId> {
+    match identity {
+        Some((account, phc)) if verify_password(password, phc) => Ok(*account),
+        Some(_) => Err(invalid_credentials()),
+        None => {
+            let _ = verify_password(password, dummy_phc(cost));
+            Err(invalid_credentials())
+        }
     }
-    check_not_banned(conn, account_id, now)?;
-    create_session(conn, account_id, session_ttl_ms, now)
+}
+
+/// Open a session for a verified account (403 `banned` if banned).
+pub fn open_session(
+    conn: &Connection,
+    account: AccountId,
+    session_ttl_ms: i64,
+    now: UnixMs,
+) -> ApiResult<SessionResponse> {
+    check_not_banned(conn, account, now)?;
+    create_session(conn, account, session_ttl_ms, now)
 }
 
 /// A hash at the configured cost, verified against for unknown emails so login timing does

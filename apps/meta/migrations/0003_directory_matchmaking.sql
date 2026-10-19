@@ -49,7 +49,7 @@ CREATE TABLE tickets (
     created_ms       INTEGER NOT NULL,
     assigned_ms      INTEGER
 );
-CREATE INDEX tickets_state ON tickets(state);
+CREATE INDEX tickets_state ON tickets(state, instance_id);
 CREATE INDEX tickets_account ON tickets(account_id);
 
 CREATE TABLE reconnect_tokens (

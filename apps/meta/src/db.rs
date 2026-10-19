@@ -31,6 +31,11 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
         "leaderboards_admin",
         include_str!("../migrations/0004_leaderboards_admin.sql"),
     ),
+    (
+        5,
+        "joined_seat_hold",
+        include_str!("../migrations/0005_joined_seat_hold.sql"),
+    ),
 ];
 
 /// Shared database handle. SQLite has a single writer anyway; one connection behind a mutex

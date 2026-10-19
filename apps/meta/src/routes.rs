@@ -226,21 +226,32 @@ async fn providers() -> Json<ProvidersResponse> {
     })
 }
 
+/// Run CPU-heavy work (password hashing) off the async workers.
+async fn blocking<T: Send + 'static>(
+    f: impl FnOnce() -> ApiResult<T> + Send + 'static,
+) -> ApiResult<T> {
+    tokio::task::spawn_blocking(f)
+        .await
+        .map_err(|e| ApiError::internal(format!("worker: {e}")))?
+}
+
 async fn signup(
     State(st): State<AppState>,
     ClientIp(ip): ClientIp,
     Body(req): Body<SignupRequest>,
 ) -> ApiResult<(StatusCode, Json<SessionResponse>)> {
     limit(&st, "signup_ip", &ip, st.config.rate_limits.signup_per_ip)?;
+    let email = auth::validate_signup(&req.email, &req.password, &req.display_name)?;
+    let cost = st.config.hash_cost;
+    let password = req.password;
+    let phc = blocking(move || auth::hash_password(&password, cost)).await?;
     let now = st.now();
-    let mut conn = st.db.lock();
-    let s = auth::signup(
-        &mut conn,
+    let s = auth::create_account(
+        &mut st.db.lock(),
         &st.economy,
-        &req.email,
-        &req.password,
+        &email,
+        &phc,
         &req.display_name,
-        st.config.hash_cost,
         st.config.session_ttl_ms,
         now,
     )?;
@@ -260,16 +271,18 @@ async fn login(
         &email_key,
         st.config.rate_limits.login_per_email,
     )?;
+    let identity = auth::password_identity(&st.db.lock(), &req.email)?;
+    let cost = st.config.hash_cost;
+    let password = req.password;
+    let account =
+        blocking(move || auth::check_password(&password, identity.as_ref(), cost)).await?;
     let now = st.now();
-    let s = auth::login(
+    Ok(Json(auth::open_session(
         &st.db.lock(),
-        &req.email,
-        &req.password,
-        st.config.hash_cost,
+        account,
         st.config.session_ttl_ms,
         now,
-    )?;
-    Ok(Json(s))
+    )?))
 }
 
 async fn logout(

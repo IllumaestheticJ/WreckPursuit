@@ -18,24 +18,25 @@ use crate::leaderboards::{self, Combine, Placement, INITIAL_RATING};
 /// Most entries in one race report.
 pub const MAX_ENTRIES: usize = 64;
 
-/// 403 unless `account` joined `instance` through matchmaking at some point. Instances may
-/// only report on and read/write the economy of players they actually hosted.
+/// 403 unless `instance` is the last instance `account` joined through matchmaking. Instances
+/// may only report on and read/write the economy of players they host (or hosted last, so a
+/// result sent just after the player left still lands); once the player joins elsewhere, the
+/// old instance loses access.
 pub fn ensure_hosted(conn: &Connection, instance: InstanceId, account: AccountId) -> ApiResult<()> {
-    let ok = conn
+    let last: Option<InstanceId> = conn
         .query_row(
-            "SELECT 1 FROM tickets WHERE account_id = ?1 AND instance_id = ?2 AND state = 'joined'
-             LIMIT 1",
-            params![account, instance],
-            |_| Ok(()),
+            "SELECT instance_id FROM tickets WHERE account_id = ?1 AND state = 'joined'
+             ORDER BY id DESC LIMIT 1",
+            params![account],
+            |r| r.get(0),
         )
-        .optional()?
-        .is_some();
-    if ok {
+        .optional()?;
+    if last == Some(instance) {
         Ok(())
     } else {
         Err(ApiError::forbidden(
             "not_hosted",
-            format!("account {account} never joined instance {instance}"),
+            format!("account {account} is not hosted by instance {instance}"),
         ))
     }
 }
@@ -216,9 +217,6 @@ pub fn report_pursuit(
     now: UnixMs,
 ) -> ApiResult<PursuitReportResponse> {
     validate_key(&report.report_key)?;
-    if report.max_wanted > 5 {
-        return Err(ApiError::bad_request("max_wanted is 0..=5"));
-    }
     if report.outcome == PursuitOutcome::Escaped && report.captured_by.is_some() {
         return Err(ApiError::bad_request("an escape has no captured_by"));
     }
@@ -252,7 +250,7 @@ pub fn report_pursuit(
             report.report_key,
             instance,
             report.racer_id,
-            report.max_wanted,
+            report.max_wanted.number(),
             report.bounty,
             outcome,
             report.captured_by,
