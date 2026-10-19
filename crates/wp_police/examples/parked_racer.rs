@@ -46,7 +46,7 @@ fn main() {
         let mut out = Vec::new();
         police.step(&world, &[view], &inputs, PHYSICS_DT, &mut out);
         for ev in &out {
-            if let Some(e) = PoliceEvent::from_sim_event(ev) {
+            if let SimEvent::Police(e) = ev {
                 if !matches!(e, PoliceEvent::Radio { .. }) {
                     println!("  t={:6.2}  {e:?}", tick as f32 * PHYSICS_DT);
                 }
@@ -57,7 +57,14 @@ fn main() {
                 .units()
                 .iter()
                 .filter(|u| !u.wrecked)
-                .map(|u| (dist(u.body.pos, p), u.id.0, u.assignment, u.body.speed))
+                .map(|u| {
+                    (
+                        dist(u.body.pos, p),
+                        u.id.0,
+                        u.assignment.clone(),
+                        u.body.speed,
+                    )
+                })
                 .collect();
             near.sort_by(|a, b| a.0.total_cmp(&b.0));
             println!(

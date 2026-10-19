@@ -554,3 +554,64 @@ fn world_city_converts_into_a_routable_police_graph() {
     let c = [c[0] / b.len() as f32, c[1] / b.len() as f32];
     assert!(!map.line_of_sight([c[0] - 60.0, c[1], 1.3], [c[0] + 60.0, c[1], 1.3]) || b.len() < 3);
 }
+
+/// Lead round 8 (economy parked test): a violation only a traffic camera saw still sends a
+/// unit, so a wanted racer that never moves is found and captured.
+#[test]
+fn camera_flagged_parked_racer_is_found_and_captured() {
+    let (graph, map) = city().clone();
+    let cam = graph
+        .pois
+        .iter()
+        .find(|p| p.kind == wp_police::graph::PoiKind::Camera)
+        .unwrap()
+        .pos;
+    let setup = PoliceSetup {
+        seed: 8,
+        mode: DamageMode::Arcade,
+        internal_driving: true,
+        hazards: false,
+    };
+    let mut police = PoliceSystem::with_city(PoliceConfig::builtin(), graph, setup);
+    let mut world = ScenarioWorld {
+        map: Some(map),
+        ..ScenarioWorld::clock(TimeOfDay::from_hours(3.0), 0.0)
+    };
+    let view = RacerView {
+        entity: RACER,
+        pos: [cam[0], cam[1], 0.0],
+        vel: [0.0; 3],
+    };
+    let red = SimEvent::TrafficViolation {
+        vehicle: RACER,
+        kind: ViolationKind::RedLight,
+        pos: [cam[0], cam[1], 0.0],
+    };
+    let mut captured = false;
+    for tick in 0..240 * 240 {
+        world.time = world.time.advanced(PHYSICS_DT * world.ratio);
+        let inputs = match tick {
+            1 => vec![red.clone()],
+            2 => {
+                police.set_heat(RACER, 30.0);
+                Vec::new()
+            }
+            _ => Vec::new(),
+        };
+        let mut out = Vec::new();
+        police.step(&world, &[view], &inputs, PHYSICS_DT, &mut out);
+        if tick == 3 {
+            assert_eq!(police.incidents().len(), 1, "camera hit opened no report");
+        }
+        if out.iter().any(|e| {
+            matches!(
+                e,
+                SimEvent::Police(PoliceEvent::PursuitEnded { outcome, .. }) if outcome.is_capture()
+            )
+        }) {
+            captured = true;
+            break;
+        }
+    }
+    assert!(captured, "parked racer never captured");
+}
