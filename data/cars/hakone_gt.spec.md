@@ -145,4 +145,4 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 276 nodes, 1768 beams, 6 detachables, 21 component mounts.
 
 - Generated with `gen-lattice --id hakone_gt --profile coupe --width 1.81 --length 4.515 --height 1.275 --wheelbase 2.55 --mass 351.8 --car-mass 1598.9 --clearance 0.13 --front-overhang 0.95 --strength 1.0` (22% of vehicle mass in the lattice; strength from durability class 3).
-- Era `90s` passenger cell: 150 cabin/sill, 131 cross-member, 10 pillar, 14 roof rail → hss × 0.75 section.
+- Era `90s` passenger cell: 138 cabin/sill, 143 cross-member, 10 pillar, 14 roof rail → hss × 0.75 section.
