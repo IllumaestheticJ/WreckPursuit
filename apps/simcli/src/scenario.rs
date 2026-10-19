@@ -363,6 +363,11 @@ impl Scenario {
         if !(self.duration_s.is_finite() && self.duration_s > 0.0) {
             return Err(format!("duration_s = {} must be > 0", self.duration_s));
         }
+        for b in &self.barriers {
+            if !b.size.iter().all(|x| x.is_finite() && *x > 0.0) {
+                return Err(format!("barrier size {:?} must be positive", b.size));
+            }
+        }
         if self.hash_every == 0 {
             return Err("hash_every must be >= 1".into());
         }

@@ -12,7 +12,7 @@ use wp_contracts::{
 use wp_sim::{Sim, SimConfig, Systems};
 
 use crate::data::{load_car, load_mode, load_world, DataSource};
-use crate::replay::{Checkpoint, EntityCheckpoint, InputEvent, Replay};
+use crate::replay::{Checkpoint, EntityCheckpoint, InputEvent, OpEvent, OpKind, Replay};
 use crate::scenario::{tick_of, CitySpec, Driver, Expect, Scenario};
 use crate::RunError;
 
@@ -83,6 +83,145 @@ pub struct RunOptions {
     pub input_track: Option<Vec<InputEvent>>,
     /// Treat warnings (unsupported features, unapplied overrides) as failures.
     pub strict: bool,
+    /// Replay mode: apply these non-input ops (reset, assists, mode switch) before the inputs of
+    /// the same tick. Recorded into the replay when `record` is on.
+    pub op_track: Option<Vec<OpEvent>>,
+}
+
+/// A simulation built from a scenario's setup, before the first tick. Shared by [`run`] and the
+/// browser testbed (`wp_wasm`) so both construct identical sims.
+pub struct BuiltSim {
+    /// The simulation (systems selected, barriers added, entities spawned with their assists).
+    pub sim: Sim,
+    /// Entity ids in scenario order.
+    pub ids: Vec<EntityId>,
+    /// Loaded cars by car id.
+    pub cars: BTreeMap<String, wp_contracts::LoadedCar>,
+    /// Systems that will run.
+    pub selection: Selection,
+    /// Unsupported features / unapplied overrides.
+    pub warnings: Vec<String>,
+    /// Whether a city (`wp_world`) was loaded instead of the flat world.
+    pub has_city: bool,
+}
+
+/// The `wp_world` settings a scenario implies (seed, clock, traffic density override).
+pub fn world_config(sc: &Scenario) -> wp_world::WorldConfig {
+    let density = sc.traffic_density.unwrap_or(1.0);
+    wp_world::WorldConfig {
+        seed: sc.seed,
+        start_time: TimeOfDay::from_hours(sc.time_of_day_h),
+        time_ratio: sc.time_ratio,
+        traffic: wp_world::TrafficConfig {
+            enabled: density > 0.0,
+            density_scale: density,
+            detect_collisions: true,
+            ..Default::default()
+        },
+        parked_cars: true,
+    }
+}
+
+/// Build the [`Sim`] for a scenario: systems, barriers, every entity (spawn pose, start speed,
+/// assists), then the city (`None` = flat world) populated around the spawned cars. Shared by
+/// [`run`] and the browser testbed (`wp_wasm`) so both construct identical sims.
+pub fn build_sim(
+    sc: &Scenario,
+    data: &dyn DataSource,
+    opts: &RunOptions,
+) -> Result<BuiltSim, RunError> {
+    let selection = match (&opts.systems, &sc.systems) {
+        (Some(s), _) => *s,
+        (None, Some(list)) => {
+            Selection::parse(list).map_err(|e| RunError::Scenario(sc.name.clone(), e))?
+        }
+        (None, None) => Selection::ALL,
+    };
+    let mut warnings = Vec::new();
+    if sc.city == CitySpec::Flat && sc.traffic_density.is_some() {
+        warnings.push("traffic_density ignored: the flat world has no roads or traffic".into());
+    }
+    if let Some(p) = sc.police_presence {
+        warnings.push(format!(
+            "police_presence override {p} not applied: wp_police has no presence API yet"
+        ));
+    }
+    for e in &sc.entities {
+        match &e.driver {
+            Driver::FollowRoute { .. } | Driver::AiDriver { .. } => warnings.push(format!(
+                "entity {:?}: driver {:?} not available yet; using its input keyframes",
+                e.id, e.driver
+            )),
+            Driver::Scripted | Driver::Cruise { .. } => {}
+        }
+    }
+
+    let mode = load_mode(data, sc.mode)?;
+    let mut sim = Sim::new(SimConfig {
+        seed: sc.seed,
+        mode,
+        time_of_day: TimeOfDay::from_hours(sc.time_of_day_h),
+        time_ratio: sc.time_ratio,
+    });
+    sim.set_systems(selection.sim);
+    for b in &sc.barriers {
+        sim.add_static_box(b.pos, b.size, b.yaw);
+    }
+    let mut ids = Vec::new();
+    let mut cars: BTreeMap<String, wp_contracts::LoadedCar> = BTreeMap::new();
+    for spec in &sc.entities {
+        if !cars.contains_key(&spec.car) {
+            cars.insert(spec.car.clone(), load_car(data, &spec.car)?);
+        }
+        let id = sim.spawn_vehicle(&cars[&spec.car], spec.pos, spec.yaw)?;
+        if spec.speed_mps != 0.0 {
+            sim.place_vehicle(id, spec.pos, spec.yaw, spec.speed_mps)?;
+        }
+        sim.set_assists(id, spec.assists.unwrap_or(sc.assists).profile())?;
+        ids.push(id);
+    }
+    let has_city = match load_world(data, &sc.city, world_config(sc))? {
+        Some(mut world) => {
+            // Fill the area around the spawned cars before the first tick (the sim refreshes
+            // the tracked set every tick from then on).
+            let tracked: Vec<wp_world::TrackedVehicle> = sim
+                .vehicle_states()
+                .iter()
+                .map(|(id, s)| wp_world::TrackedVehicle::from_state(*id, s, false, true))
+                .collect();
+            world.set_tracked_vehicles(&tracked);
+            world.populate();
+            sim.set_world(world);
+            true
+        }
+        None => false,
+    };
+    Ok(BuiltSim {
+        sim,
+        ids,
+        cars,
+        selection,
+        warnings,
+        has_city,
+    })
+}
+
+/// Apply one replay op to a built sim (`ids` in scenario order).
+pub fn apply_op(
+    sim: &mut Sim,
+    ids: &[EntityId],
+    data: &dyn DataSource,
+    ev: &OpEvent,
+) -> Result<(), RunError> {
+    let id = *ids.get(ev.entity as usize).ok_or_else(|| {
+        RunError::Replay(format!("op for entity index {} out of range", ev.entity))
+    })?;
+    match ev.op {
+        OpKind::Reset => sim.reset_vehicle(id)?,
+        OpKind::Assists(p) => sim.set_assists(id, p)?,
+        OpKind::Mode(m) => sim.set_mode_table(load_mode(data, m)?),
+    }
+    Ok(())
 }
 
 /// Read-only view handed to [`run_with_hook`] after every tick.
@@ -509,8 +648,9 @@ impl Tracker {
     }
 }
 
-/// Per-tick input for one entity, from its driver and keyframes.
-fn driver_input(
+/// Per-tick input for one entity, from its driver and keyframes (`prev` = the input applied
+/// last tick). Public so the testbed drives scenarios exactly like the runner.
+pub fn driver_input(
     sc: &Scenario,
     idx: usize,
     tick: u64,
@@ -566,58 +706,17 @@ pub fn run_with_hook(
     opts: &RunOptions,
     hook: &mut dyn FnMut(&TickView) -> Result<(), String>,
 ) -> Result<RunOutput, RunError> {
-    let selection = match (&opts.systems, &sc.systems) {
-        (Some(s), _) => *s,
-        (None, Some(list)) => {
-            Selection::parse(list).map_err(|e| RunError::Scenario(sc.name.clone(), e))?
-        }
-        (None, None) => Selection::ALL,
-    };
-    let mut warnings = Vec::new();
-    if sc.city == CitySpec::Flat && sc.traffic_density.is_some() {
-        warnings.push("traffic_density ignored: the flat world has no roads or traffic".into());
-    }
-    if let Some(p) = sc.police_presence {
-        warnings.push(format!(
-            "police_presence override {p} not applied: wp_police has no presence API yet"
-        ));
-    }
-    for e in &sc.entities {
-        match &e.driver {
-            Driver::FollowRoute { .. } | Driver::AiDriver { .. } => warnings.push(format!(
-                "entity {:?}: driver {:?} not available yet; using its input keyframes",
-                e.id, e.driver
-            )),
-            Driver::Scripted | Driver::Cruise { .. } => {}
-        }
-    }
-
-    let mode = load_mode(data, sc.mode)?;
-    let mut sim = Sim::new(SimConfig {
-        seed: sc.seed,
-        mode,
-        time_of_day: TimeOfDay::from_hours(sc.time_of_day_h),
-        time_ratio: sc.time_ratio,
-    });
-    sim.set_systems(selection.sim);
-    for b in &sc.barriers {
-        sim.add_static_box(b.pos, b.size, b.yaw);
-    }
-
-    let mut ids = Vec::new();
+    let BuiltSim {
+        mut sim,
+        ids,
+        cars,
+        selection,
+        warnings,
+        has_city,
+    } = build_sim(sc, data, opts)?;
     let mut trackers = Vec::new();
-    let mut cars: BTreeMap<String, wp_contracts::LoadedCar> = BTreeMap::new();
-    for spec in &sc.entities {
-        if !cars.contains_key(&spec.car) {
-            cars.insert(spec.car.clone(), load_car(data, &spec.car)?);
-        }
+    for (spec, id) in sc.entities.iter().zip(&ids) {
         let car = &cars[&spec.car];
-        let id = sim.spawn_vehicle(car, spec.pos, spec.yaw)?;
-        if spec.speed_mps != 0.0 {
-            sim.place_vehicle(id, spec.pos, spec.yaw, spec.speed_mps)?;
-        }
-        sim.set_assists(id, spec.assists.unwrap_or(sc.assists).profile())?;
-        ids.push(id);
         trackers.push(Tracker {
             spawn: spec.pos,
             rest_nodes: car.lattice.nodes.iter().map(|n| n.pos_m).collect(),
@@ -648,35 +747,6 @@ pub fn run_with_hook(
         });
     }
     let names: Vec<String> = sc.entities.iter().map(|e| e.id.clone()).collect();
-    let density = sc.traffic_density.unwrap_or(1.0);
-    let world_cfg = wp_world::WorldConfig {
-        seed: sc.seed,
-        start_time: TimeOfDay::from_hours(sc.time_of_day_h),
-        time_ratio: sc.time_ratio,
-        traffic: wp_world::TrafficConfig {
-            enabled: density > 0.0,
-            density_scale: density,
-            detect_collisions: true,
-            ..Default::default()
-        },
-        parked_cars: true,
-    };
-    let has_city = match load_world(data, &sc.city, world_cfg)? {
-        Some(mut world) => {
-            // Fill the area around the spawned cars before the first tick (the sim refreshes
-            // the tracked set every tick from then on).
-            let tracked: Vec<wp_world::TrackedVehicle> = sim
-                .vehicle_states()
-                .iter()
-                .map(|(id, s)| wp_world::TrackedVehicle::from_state(*id, s, false, true))
-                .collect();
-            world.set_tracked_vehicles(&tracked);
-            world.populate();
-            sim.set_world(world);
-            true
-        }
-        None => false,
-    };
     let mut world_tr = WorldTracker::default();
     let index_of = |id: EntityId| ids.iter().position(|x| *x == id);
 
@@ -712,7 +782,18 @@ pub fn run_with_hook(
     let mut failures = Vec::new();
     let mut track_cursor = 0usize;
 
+    let mut op_cursor = 0usize;
     for tick in 0..ticks {
+        // Ops (reset / assists / mode), then inputs.
+        if let Some(track) = &opts.op_track {
+            while op_cursor < track.len() && track[op_cursor].tick == tick {
+                apply_op(&mut sim, &ids, data, &track[op_cursor])?;
+                if opts.record {
+                    replay.ops.push(track[op_cursor]);
+                }
+                op_cursor += 1;
+            }
+        }
         // Inputs.
         if let Some(track) = &opts.input_track {
             while track_cursor < track.len() && track[track_cursor].tick == tick {

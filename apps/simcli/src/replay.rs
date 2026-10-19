@@ -430,7 +430,6 @@ pub fn verify(golden: &Replay, data: &dyn DataSource) -> Result<ReplayReport, Ru
             input_track: Some(golden.inputs.clone()),
             op_track: Some(golden.ops.clone()),
             strict: false,
-            load_city: false,
         },
     )?;
     Ok(compare(&sc, golden, &out.replay))

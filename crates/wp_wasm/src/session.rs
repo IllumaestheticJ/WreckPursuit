@@ -16,7 +16,9 @@ use wp_math::FixedStep;
 use wp_sim::Sim;
 
 use simcli::replay::{Checkpoint, EntityCheckpoint, InputEvent, OpEvent, OpKind, Replay};
-use simcli::run::{apply_op, build_city, build_sim, driver_input, BuiltSim, RunOptions, Selection};
+use simcli::run::{
+    apply_op, build_sim, driver_input, world_config, BuiltSim, RunOptions, Selection,
+};
 use simcli::scenario::{CitySpec, EntitySpec};
 use simcli::{RunSummary, Scenario};
 
@@ -80,10 +82,9 @@ pub struct Session {
     outcome: Option<RunSummary>,
 }
 
-fn opts(load_city: bool, systems: Option<Selection>) -> RunOptions {
+fn opts(systems: Option<Selection>) -> RunOptions {
     RunOptions {
         systems,
-        load_city,
         ..Default::default()
     }
 }
@@ -123,7 +124,7 @@ impl Session {
             cars,
             selection,
             ..
-        } = build_sim(&sc, mem_data(), &opts(load_city, systems)).map_err(|e| e.to_string())?;
+        } = build_sim(&sc, mem_data(), &opts(systems)).map_err(|e| e.to_string())?;
         let per_entity: Vec<LoadedCar> = sc.entities.iter().map(|e| cars[&e.car].clone()).collect();
         let log = Replay::new(&sc, &selection.to_string(), ids.len());
         let n = ids.len();
@@ -163,7 +164,9 @@ impl Session {
     pub fn new(mut sc: Scenario, scripted: bool) -> Result<Self, String> {
         sc.validate()?;
         if !scripted && sc.city != CitySpec::Flat {
-            if let Some(world) = build_city(&sc, mem_data()).map_err(|e| e.to_string())? {
+            let city = simcli::data::load_world(mem_data(), &sc.city, world_config(&sc))
+                .map_err(|e| e.to_string())?;
+            if let Some(world) = city {
                 let grid = world
                     .network()
                     .pois
@@ -542,13 +545,9 @@ impl Session {
         }
         let done = self.sim.tick() >= self.script_end;
         if done && self.outcome.is_none() {
-            self.outcome = simcli::run(
-                &self.sc,
-                mem_data(),
-                &opts(self.load_city, Some(self.systems)),
-            )
-            .ok()
-            .map(|o| o.summary);
+            self.outcome = simcli::run(&self.sc, mem_data(), &opts(Some(self.systems)))
+                .ok()
+                .map(|o| o.summary);
         }
         let live_hash = self.live_end_hash.map(|h| format!("{h:016x}"));
         Some(ScenarioResult {
