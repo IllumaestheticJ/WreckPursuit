@@ -14,10 +14,10 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
+use wp_contracts::WantedLevel;
 use wp_contracts::{
     HandlingEffects, PlayerId, RepairEstimate, SimEvent, VehicleClass, ViolationKind,
 };
-use wp_police::WantedLevel;
 
 use crate::error::EconomyError;
 

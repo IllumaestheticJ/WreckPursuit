@@ -10,10 +10,10 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
+use wp_contracts::WantedLevel;
 use wp_contracts::{
     DamageMode, HandlingEffects, PriceTable, RepairEstimate, RepairItem, RepairLine, VehicleClass,
 };
-use wp_police::WantedLevel;
 
 use crate::data::Economy;
 use crate::error::EconomyError;
@@ -137,11 +137,62 @@ pub struct DamageReport {
     pub towed: bool,
 }
 
-/// Turn damage severities into an estimate with the same formula `wp_damage` is expected to
-/// use: `parts = replace cost × severity`, `hours = labour_hours_per_item × severity`,
-/// `total = (parts + hours × rate) × repair_cost_scale`. Duplicate items keep the highest
-/// severity; detached parts are always full replacements. Used by tests, the career scenario
-/// and as a stand-in while `wp_damage` is a stub.
+/// Severity at and above which a part is replaced rather than repaired. Same value as
+/// `wp_damage::repair::REPLACE_SEVERITY` (a test keeps them equal).
+pub const REPLACE_SEVERITY: f32 = 0.6;
+/// Parts fraction used when the table has none. Same as `wp_damage::repair::REPAIR_PARTS_FRACTION`.
+pub const DEFAULT_REPAIR_PARTS_FRACTION: f32 = 0.3;
+/// Minimum labour as a fraction of an item's full hours. Same as
+/// `wp_damage::repair::MIN_LABOUR_FRACTION`.
+pub const MIN_LABOUR_FRACTION: f32 = 0.1;
+/// Lines below this severity are not billed. Same as `wp_damage::repair::MIN_SEVERITY`.
+pub const MIN_SEVERITY: f32 = 0.02;
+
+/// Price one line exactly like `wp_damage` does: at `severity >= REPLACE_SEVERITY` the full part
+/// price, below it `repair_parts_fraction × severity / REPLACE_SEVERITY` of it; labour is the
+/// item's hours (`PriceTable::labour_hours`, else `labour_hours_per_item`) × max(severity,
+/// MIN_LABOUR_FRACTION). `parts_cost` / `labour_hours` are unscaled; `total` includes
+/// `repair_cost_scale` (contract v0.2.0).
+pub fn reference_line(
+    table: &PriceTable,
+    repair_cost_scale: f32,
+    item: RepairItem,
+    severity: f32,
+) -> RepairLine {
+    let severity = severity.clamp(0.0, 1.0);
+    let cost = match item {
+        RepairItem::Region(r) | RepairItem::DetachedPart(r) => {
+            table.region_replace_cost.get(&r).copied().unwrap_or(0.0)
+        }
+        RepairItem::Component(c) => table.component_replace_cost.get(&c).copied().unwrap_or(0.0),
+    };
+    let parts = if severity >= REPLACE_SEVERITY {
+        cost
+    } else {
+        let fraction = table
+            .repair_parts_fraction
+            .unwrap_or(DEFAULT_REPAIR_PARTS_FRACTION);
+        cost * fraction * severity / REPLACE_SEVERITY
+    };
+    let full_hours = table
+        .labour_hours
+        .get(&item)
+        .copied()
+        .unwrap_or(table.labour_hours_per_item);
+    let hours = full_hours * severity.max(MIN_LABOUR_FRACTION);
+    RepairLine {
+        item,
+        severity,
+        parts_cost: parts,
+        labour_hours: hours,
+        total: (parts + hours * table.labour_per_hour) * repair_cost_scale,
+    }
+}
+
+/// Turn damage severities into an estimate with `wp_damage`'s pricing ([`reference_line`]).
+/// Duplicate items keep the highest severity; detached parts are always full replacements;
+/// lines under [`MIN_SEVERITY`] are dropped. Used by tests and the career scenario, which have
+/// no lattice to simulate.
 pub fn reference_estimate(
     table: &PriceTable,
     repair_cost_scale: f32,
@@ -153,32 +204,16 @@ pub fn reference_estimate(
             RepairItem::DetachedPart(_) => 1.0,
             _ => s.clamp(0.0, 1.0),
         };
-        if s > 0.0 {
+        if s >= MIN_SEVERITY {
             let e = sev.entry(*item).or_insert(0.0);
             *e = e.max(s);
         }
     }
     let mut est = RepairEstimate::default();
     for (item, s) in sev {
-        let cost = match item {
-            RepairItem::Region(r) | RepairItem::DetachedPart(r) => {
-                table.region_replace_cost.get(&r).copied().unwrap_or(0.0)
-            }
-            RepairItem::Component(c) => {
-                table.component_replace_cost.get(&c).copied().unwrap_or(0.0)
-            }
-        };
-        let parts = cost * s;
-        let hours = table.labour_hours_per_item * s;
-        let total = (parts + hours * table.labour_per_hour) * repair_cost_scale;
-        est.total += total;
-        est.lines.push(RepairLine {
-            item,
-            severity: s,
-            parts_cost: parts,
-            labour_hours: hours,
-            total,
-        });
+        let line = reference_line(table, repair_cost_scale, item, s);
+        est.total += line.total;
+        est.lines.push(line);
     }
     est
 }
@@ -210,11 +245,24 @@ impl Economy {
                 .collect(),
             labour_per_hour: cp.labour_per_hour,
             labour_hours_per_item: self.prices.labour_hours_per_item,
-            // Contract v0.2.0 fields: per-item hours and the repair-vs-replace parts fraction
-            // are G's to fill from prices.toml; empty / None keep today's behaviour.
-            labour_hours: Default::default(),
-            repair_parts_fraction: None,
+            labour_hours: self.labour_hours(),
+            repair_parts_fraction: Some(self.prices.repair_parts_fraction),
         }
+    }
+
+    /// Per-item labour hours for `PriceTable::labour_hours`: region hours (also for detached
+    /// parts) and component hours from `prices.toml`. Labour does not scale with car value.
+    pub fn labour_hours(&self) -> BTreeMap<RepairItem, f32> {
+        let p = &self.prices;
+        let mut out = BTreeMap::new();
+        for (r, h) in &p.region_labour_hours {
+            out.insert(RepairItem::Region(*r), *h);
+            out.insert(RepairItem::DetachedPart(*r), *h);
+        }
+        for (c, h) in &p.component_labour_hours {
+            out.insert(RepairItem::Component(*c), *h);
+        }
+        out
     }
 
     /// Price table for an owned car (uses its pristine value).

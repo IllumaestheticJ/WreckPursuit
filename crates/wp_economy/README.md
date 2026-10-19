@@ -66,7 +66,12 @@ Data: `data/economy/{prices,stakes,consequences,market}.toml`, `data/mods/*.json
 
 ### Repairs ("you pay for what you break")
 - `wp_damage` prices damage with the `PriceTable` from `Economy::price_table(class, value)`:
-  reference parts costs × class `parts_scale` × clamp(value / class reference value).
+  reference parts costs × class `parts_scale` × clamp(value / class reference value), per-item
+  labour hours (`prices.toml [region_labour_hours]`, `[component_labour_hours]`; a cabin is 14 h,
+  a bumper 1.5 h) and `repair_parts_fraction` (0.3). A line at severity ≥ 0.6 replaces the part
+  (full price); below that it is repaired for `0.3 × severity / 0.6` of the price. Labour = item
+  hours × max(severity, 0.1). `repair::reference_line` is the same formula (a test pins its
+  constants to `wp_damage`'s).
 - Billing re-prices every line: `(parts + hours × class labour rate × district × shop) × mode
   repair_cost_scale` (Simulation 1.0, Arcade 0.5).
 - Options: `RepairAll`, `RepairSelected(items)`, `DriveDamaged` (free; the car keeps its lattice
@@ -154,11 +159,13 @@ draws in both modes. Simulation applies 2× crash severity, can total the car on
 
 | Mode | p10 | p25 | median | p75 | mean | ended in debt | avg captures | avg cars lost / scrapped |
 |---|---|---|---|---|---|---|---|---|
-| Arcade | 30 918 | 41 814 | **54 305 (2.5×)** | 60 228 | 51 680 | 0 / 64 | 1.9 | 0.03 / 0.09 |
-| Simulation | 3 202 | 8 977 | **20 114 (0.91×)** | 29 858 | 22 232 | 4 / 64 | 2.2 | 0.48 / 1.69 |
+| Arcade | 30 847 | 43 211 | **54 610 (2.5×)** | 60 766 | 52 261 | 0 / 64 | 1.9 | 0.03 / 0.09 |
+| Simulation | 2 701 | 8 953 | **18 747 (0.85×)** | 28 156 | 21 312 | 4 / 64 | 2.2 | 0.48 / 1.92 |
 
-Averages: Arcade earns 72.6 k, pays 16.3 k buy-ins, 19.8 k repairs, 4.5 k penalties;
-Simulation earns 67.6 k, pays 12.2 k buy-ins, 30.6 k repairs, 8.8 k penalties. The test asserts:
+Averages: Arcade earns 72.5 k, pays 16.3 k buy-ins, 19.1 k repairs, 4.5 k penalties;
+Simulation earns 68.1 k, pays 12.2 k buy-ins, 28.9 k repairs, 8.8 k penalties. (Re-measured on
+contract 0.2.0 with `wp_damage`'s repair-vs-replace pricing and per-item labour hours; the
+previous numbers were within 2–7 % of these.) The test asserts:
 Arcade — no run in debt, median ≥ 1.6× start, p10 ≥ start; Simulation — median and mean within
 0.7–1.3× start, p25 below start, median ≤ 0.6× the Arcade median.
 
@@ -202,12 +209,9 @@ build (`cargo test -p wp_economy --release --test perf -- --ignored --nocapture`
 Browser numbers not measured yet (expect ~2× native).
 
 ## Known gaps
-- `wp_damage` is a stub: no real `RepairEstimate`s or lattice-state blobs yet. `reference_estimate`
-  mirrors the formula `wp_damage` is expected to use; `RepairOrder` needs a `wp_damage` API to
-  apply partial repairs to a stored lattice (requested in `docs/integration/economy.md`).
-- Tire files `sport`, `semi_slick`, `drag_radial`, `all_terrain` do not exist yet (workstream 02);
-  the estimator uses `market.tire_grip`, but the sim cannot load a car with those tires until
-  they exist.
+- Lattice-state blobs and partial repairs need `DamageSim::{save_state, restore_state,
+  apply_repair}` (contract v0.3.0). Until the sim calls `record_damage` with real estimates, the
+  career scenario uses `reference_estimate` (same pricing as `wp_damage`, synthetic severities).
 - The floor car `junkyard_beater` needs a car file from the roster (workstream 09).
 - No `wp_vehicle::metrics` yet, so `preview` uses the built-in estimator (comparative, not
   lap-time accurate).

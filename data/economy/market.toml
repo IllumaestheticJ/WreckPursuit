@@ -64,11 +64,14 @@ min = 750
 name = "X"
 min = 900
 
-# Grip factor per tire id (street = 1.0). Tire files for the non-street compounds are requested
-# from workstream 02 (see docs/integration/economy.md).
+# Grip factor per tire id = the tire file's lateral peak (`lateral.d`) / street's (0.96).
+# Every id in data/tires/ must be listed (a test checks).
 [tire_grip]
 street = 1.0
-sport = 1.08
-semi_slick = 1.18
-drag_radial = 1.03
-all_terrain = 0.92
+sport = 1.15
+semi_slick = 1.33
+drag_radial = 1.02
+all_terrain = 0.9
+police_pursuit = 1.08
+vintage_bias = 0.84
+wet_biased = 1.0

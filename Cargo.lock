@@ -4149,8 +4149,8 @@ dependencies = [
  "thiserror 2.0.21",
  "toml",
  "wp_contracts",
+ "wp_damage",
  "wp_math",
- "wp_police",
 ]
 
 [[package]]

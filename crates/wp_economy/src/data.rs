@@ -9,10 +9,10 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
+use wp_contracts::WantedLevel;
 use wp_contracts::{
     parse_mode_table, BodyRegion, Component, DamageMode, DayPhase, ModeTable, VehicleClass,
 };
-use wp_police::WantedLevel;
 
 use crate::error::{invalid, DataError};
 use crate::garage::Condition;
@@ -111,8 +111,19 @@ pub const ALL_COMPONENTS: [Component; 21] = [
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PriceTables {
-    /// Labour hours to fully replace one region / component (× severity per line).
+    /// Fallback labour hours to fully replace one region / component (× severity per line),
+    /// for items missing from `region_labour_hours` / `component_labour_hours`.
     pub labour_hours_per_item: f32,
+    /// Labour hours to fully replace each region (also used for re-fitting a detached part).
+    /// Fills `PriceTable::labour_hours` (contract v0.2.0).
+    #[serde(default)]
+    pub region_labour_hours: BTreeMap<BodyRegion, f32>,
+    /// Labour hours to fully replace each component.
+    #[serde(default)]
+    pub component_labour_hours: BTreeMap<Component, f32>,
+    /// Fraction of the replacement parts price charged for a *repair* (below the damage
+    /// model's replace severity). Fills `PriceTable::repair_parts_fraction`.
+    pub repair_parts_fraction: f32,
     /// Clamp on `car_value / class.reference_value` when scaling parts prices.
     pub value_factor_clamp: [f32; 2],
     /// Parts cost to replace each region on the class-reference Compact.
@@ -698,6 +709,13 @@ impl Economy {
     pub fn validate(&self) -> Result<(), DataError> {
         let p = &self.prices;
         require_positive("prices.labour_hours_per_item", p.labour_hours_per_item)?;
+        require_frac("prices.repair_parts_fraction", p.repair_parts_fraction)?;
+        for (r, h) in &p.region_labour_hours {
+            require_positive(&format!("prices.region_labour_hours.{r:?}"), *h)?;
+        }
+        for (c, h) in &p.component_labour_hours {
+            require_positive(&format!("prices.component_labour_hours.{c:?}"), *h)?;
+        }
         let [lo, hi] = p.value_factor_clamp;
         if !(lo > 0.0 && lo <= hi) {
             return Err(invalid("prices.value_factor_clamp", "need 0 < min <= max"));
