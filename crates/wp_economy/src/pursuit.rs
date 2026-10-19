@@ -42,6 +42,9 @@ pub enum PoliceSignal {
         racer: EntityId,
         /// Outcome.
         outcome: PursuitEnd,
+        /// Wanted level when the pursuit ended, as carried by the v0.3.0 `PursuitEnded` event
+        /// (`None` if unknown: the tracker's last `WantedLevelChanged` is used).
+        level: WantedLevel,
     },
 }
 
@@ -71,12 +74,16 @@ impl PoliceSignal {
                     level: *level,
                 })
             }
-            SimEvent::Police(PoliceEvent::PursuitEnded { racer, outcome, .. }) => {
-                Some(PoliceSignal::PursuitEnded {
-                    racer: *racer,
-                    outcome: *outcome,
-                })
-            }
+            SimEvent::Police(PoliceEvent::PursuitEnded {
+                racer,
+                outcome,
+                level,
+                ..
+            }) => Some(PoliceSignal::PursuitEnded {
+                racer: *racer,
+                outcome: *outcome,
+                level: *level,
+            }),
             _ => None,
         }
     }
@@ -137,13 +144,19 @@ impl PursuitTracker {
                 t.max_level = t.max_level.max(level);
                 None
             }
-            PoliceSignal::PursuitEnded { racer, outcome } => {
+            PoliceSignal::PursuitEnded {
+                racer,
+                outcome,
+                level,
+            } => {
                 let t = self.racers.entry(racer).or_default();
+                // The event's level covers heat set without a `WantedLevelChanged` (v0.3.0).
+                let at_end = t.level.max(level);
                 let res = PursuitResolution {
                     racer,
                     outcome,
-                    level: t.level,
-                    max_level: t.max_level.max(t.level),
+                    level: at_end,
+                    max_level: t.max_level.max(at_end),
                     violations: t.violations,
                 };
                 // The next pursuit's maximum starts fresh (its current level is folded in

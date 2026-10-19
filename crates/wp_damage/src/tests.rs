@@ -741,7 +741,12 @@ fn repairing_every_billed_item_restores_the_car() {
     assert!(health_before < 1.0);
     let items: Vec<wp_contracts::RepairItem> = est.lines.iter().map(|l| l.item).collect();
     m.apply_repair(&items);
-    assert!(m.health() > health_before, "{} -> {}", health_before, m.health());
+    assert!(
+        m.health() > health_before,
+        "{} -> {}",
+        health_before,
+        m.health()
+    );
     let after = m.repair_estimate(&mode, &prices);
     assert!(
         after.total < est.total * 0.2,

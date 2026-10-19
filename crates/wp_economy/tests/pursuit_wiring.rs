@@ -25,9 +25,15 @@ fn police_signal(ev: &PoliceEvent) -> Option<PoliceSignal> {
                 level: *level,
             })
         }
-        PoliceEvent::PursuitEnded { racer, outcome, .. } => Some(PoliceSignal::PursuitEnded {
+        PoliceEvent::PursuitEnded {
+            racer,
+            outcome,
+            level,
+            ..
+        } => Some(PoliceSignal::PursuitEnded {
             racer: *racer,
             outcome: pursuit_end(*outcome),
+            level: *level,
         }),
         _ => None,
     }
@@ -180,6 +186,7 @@ fn ended(outcome: PursuitEnd) -> PoliceSignal {
     PoliceSignal::PursuitEnded {
         racer: RACER,
         outcome,
+        level: WantedLevel::None,
     }
 }
 
