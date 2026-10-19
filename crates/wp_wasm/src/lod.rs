@@ -305,8 +305,9 @@ mod tests {
         let sc = crate::scenario::city_chase("lindwurm_4t", wp_contracts::DamageMode::Arcade);
         let mut s = Session::new(sc, false).unwrap();
         let player = s.entities()[0];
-        // id → (pos, previous pos, embodied)
-        let mut last: BTreeMap<u32, ([f32; 3], Option<[f32; 3]>, bool)> = BTreeMap::new();
+        /// Position, previous position, embodied.
+        type Seen = ([f32; 3], Option<[f32; 3]>, bool);
+        let mut last: BTreeMap<u32, Seen> = BTreeMap::new();
         let (mut swaps, mut worst_swap, mut worst_step) = (0, 0.0f32, 0.0f32);
         for _ in 0..(12 * 240) {
             s.set_input(
@@ -330,7 +331,10 @@ mod tests {
                         Some(pp) => [0, 1, 2].map(|i| p[i] + (p[i] - pp[i])),
                         None => *p,
                     };
-                    let err = (0..3).map(|i| (pos[i] - pred[i]).powi(2)).sum::<f32>().sqrt();
+                    let err = (0..3)
+                        .map(|i| (pos[i] - pred[i]).powi(2))
+                        .sum::<f32>()
+                        .sqrt();
                     if *e != embodied {
                         swaps += 1;
                         worst_swap = worst_swap.max(err);
@@ -344,7 +348,9 @@ mod tests {
             }
             last = now;
         }
-        println!("{swaps} swaps, worst swap error {worst_swap:.3} m, worst step error {worst_step:.3} m");
+        println!(
+            "{swaps} swaps, worst swap error {worst_swap:.3} m, worst step error {worst_step:.3} m"
+        );
         assert!(swaps > 0, "no promotion in 12 s of city chase");
         assert!(worst_swap < 0.5, "swap jump {worst_swap} m");
     }

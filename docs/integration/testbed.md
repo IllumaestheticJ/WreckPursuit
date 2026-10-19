@@ -671,7 +671,7 @@ applied:
 | Promotion: drawer change | grey/red box → `#7a8a99` debug_sedan + debug arrows | same model, livery and lamps (`*_promotion_strip.png`) |
 | Frames with a car drawn without its mesh (after 1 s) | n/a (placeholder until fetched) | 0 |
 | Car mesh fetch (local) | on first appearance of a model (5–25 ms + 1 frame) | at session start, before the first frame |
-| Swap pose jump, browser log / wasm records | — | 0.30 m (velocity-predicted, 1/60 s steps) / 0.06 m |
+| Swap jump: drawn vs sim pose (e2e) / sim pose tick by tick (wasm test) | — | 0.000 m over 7 swaps / 0.06 m over 15 swaps |
 | City chase frame (`chase_perf.mjs`, 20 s) | 899 ms, render 13.8 ms, 541k tris, 622 calls | 920 ms, render 26.6 ms, 627k tris, 470 calls |
 
 SwiftShader frame time is dominated by rasterising the city and is unchanged; renderer CPU time
@@ -686,3 +686,10 @@ browser profile, lower `FULL_LOD_M` (render/fleet.ts) to ~150 m.
 - Kinematic poses are carried forward between traffic steps, not interpolated by the frame's
   alpha (≤ 1 physics tick, 0.125 m at 30 m/s).
 - Bench / car-selector cars outside the session list still load on demand (with the proxy).
+
+### Gate (2026-10-19)
+fmt, clippy `-D warnings`, `cargo test --workspace` (goldens blessed in the `[bless]` commit), wasm
+build, tsc, `just web-e2e`: all checks pass (LOD: 0 frames without a mesh, 7 swaps with 0.000 m
+hand-over jump, traffic appears ≥ 327 m / vanishes ≥ 353 m). One earlier run failed the capture /
+"Repair & continue" checks and logged an audio `setValueCurveAtTime` overlap page error; `main`
+fails the same three checks in this container, so they are pre-existing and flaky here (J / lead).
