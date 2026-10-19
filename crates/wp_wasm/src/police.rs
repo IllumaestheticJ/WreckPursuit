@@ -5,7 +5,7 @@
 use serde::Serialize;
 use wp_contracts::{EntityId, WantedLevel};
 use wp_police::unit::Assignment;
-use wp_police::{PoliceSystem, PursuitStatus, UnitKind};
+use wp_police::{PoliceSystem, PursuitOutcome, PursuitStatus, UnitKind};
 
 /// One racer's police status (JSON for the testbed's heat panel).
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -26,6 +26,26 @@ pub struct PoliceStatus {
     pub bounty: f32,
     /// Police units in the session (cars and helicopters).
     pub units_total: u32,
+    /// Seconds since a unit last had line of sight (0 unless `Searching`).
+    pub staleness_s: f32,
+    /// Escape time for the current level and day phase, s.
+    pub escape_s: f32,
+    /// Outcome of this racer's most recent finished pursuit (`wp_police::PursuitOutcome`
+    /// name: `Escaped`, `Safehouse`, `Captured`, `CapturedTotalLoss`, `CalledOff`), if any.
+    pub last_outcome: Option<&'static str>,
+    /// Seconds since that pursuit ended (police clock), if any.
+    pub outcome_age_s: Option<f32>,
+}
+
+/// Name of a pursuit outcome (matches the serde name).
+fn outcome_name(o: PursuitOutcome) -> &'static str {
+    match o {
+        PursuitOutcome::Escaped => "Escaped",
+        PursuitOutcome::Safehouse => "Safehouse",
+        PursuitOutcome::Captured => "Captured",
+        PursuitOutcome::CapturedTotalLoss => "CapturedTotalLoss",
+        PursuitOutcome::CalledOff => "CalledOff",
+    }
 }
 
 /// Status of `racer` (a racer the police have never seen is `Clear` at heat 0).
@@ -56,6 +76,13 @@ pub fn status(p: &PoliceSystem, racer: EntityId) -> PoliceStatus {
             matches!(u.assignment, Assignment::Pursue { target } | Assignment::Intercept { target, .. } if target == racer)
         })
         .count() as u32;
+    // Latest finished pursuit of this racer (records are in start order).
+    let last = p
+        .stats()
+        .pursuits
+        .iter()
+        .rev()
+        .find(|r| r.racer == racer && r.end.is_some() && r.outcome.is_some());
     PoliceStatus {
         level,
         heat,
@@ -70,6 +97,14 @@ pub fn status(p: &PoliceSystem, racer: EntityId) -> PoliceStatus {
         units_in_pursuit,
         bounty: p.bounty(racer),
         units_total: p.units().len() as u32,
+        staleness_s: if st == PursuitStatus::Searching {
+            los_lost
+        } else {
+            0.0
+        },
+        escape_s,
+        last_outcome: last.and_then(|r| r.outcome).map(outcome_name),
+        outcome_age_s: last.and_then(|r| r.end).map(|end| p.now().since(end)),
     }
 }
 
@@ -108,5 +143,38 @@ mod tests {
         assert_eq!(s.status, "Clear");
         assert_eq!(s.heat_in_level, 0.0);
         assert!(units(&p).is_empty());
+        assert_eq!(s.last_outcome, None);
+        assert_eq!(s.outcome_age_s, None);
+    }
+
+    #[test]
+    fn total_loss_while_wanted_reports_capture_outcome() {
+        use wp_contracts::{SimEvent, TimeOfDay, PHYSICS_DT};
+        use wp_police::scenario::ScenarioWorld;
+        use wp_police::RacerView;
+        let racer = EntityId(1);
+        let view = RacerView {
+            entity: racer,
+            pos: [0.0; 3],
+            vel: [0.0; 3],
+        };
+        let mut world = ScenarioWorld::clock(TimeOfDay::from_hours(23.0), 0.0);
+        let mut p = PoliceSystem::new();
+        let mut out = Vec::new();
+        let mut step = |p: &mut PoliceSystem, ev: &[SimEvent]| {
+            world.time = world.time.advanced(PHYSICS_DT * world.ratio);
+            p.step(&world, &[view], ev, PHYSICS_DT, &mut out);
+        };
+        step(&mut p, &[]);
+        p.set_heat(racer, 30.0);
+        step(&mut p, &[SimEvent::TotalLoss { vehicle: racer }]);
+        for _ in 0..240 {
+            step(&mut p, &[]);
+        }
+        let s = status(&p, racer);
+        assert_eq!(s.last_outcome, Some("CapturedTotalLoss"));
+        let age = s.outcome_age_s.unwrap();
+        assert!((0.9..1.1).contains(&age), "{age}");
+        assert_eq!(s.status, "Clear");
     }
 }
