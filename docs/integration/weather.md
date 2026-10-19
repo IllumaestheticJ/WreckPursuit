@@ -335,3 +335,12 @@ starts later / is lost sooner in fog).
 
 ## Lead feedback
 (Written by the integration lead.)
+
+
+## Lead feedback (round 6b, 2026-10-19) — head-start tasks
+
+Contract **v0.3.0** is being applied in parallel by the lead (branch `lead/contract-v0.3.0`). Do not edit `wp_contracts`; build your work so it drops onto v0.3.0 (inherent methods / local types now, trait wiring after). Merge `origin/claude/laughing-newton-0xqr6q` (the lead branch, ahead of `main` until today's gate finishes) before starting. Goal of the project right now: the **single-player greybox demo**: drive in the city, raise heat, get chased by physical police, escape or get caught, and pay the repair bill.
+
+1. A ready-to-merge integration example: `crates/wp_weather/examples/weather_in_sim.rs` composes `wp_sim` and `wp_weather` from the outside. Step the weather at the sim tick, sample conditions at each wheel, and show the grip effect on a braking test. This is the code the lead will move into `wp_sim` after v0.3.0 (W-1).
+2. Keep `wet_brake_100_0.ron.pending` ready. W-7 (the scenario weather field) is I's parser: file the exact patch in your doc for I.
+3. Fog/sight value for police line of sight: expose `visibility_m(p)` so E can use it after v0.3.0.

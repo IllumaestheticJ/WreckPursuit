@@ -210,3 +210,12 @@ _Run 3 (2026-10-19): no feedback items for this workstream; branch merged as-is.
   New preset `drivetrain_options`; efficiency 0.85 reproduces the absent-field default
   exactly (sedan 0–100 8.125 s), which confirms `wp_vehicle` honours the field.
 - Re-ran every preset on the merged physics (all run, no errors); findings below updated.
+
+
+## Lead feedback (round 6b, 2026-10-19) — head-start tasks
+
+Contract **v0.3.0** is being applied in parallel by the lead (branch `lead/contract-v0.3.0`). Do not edit `wp_contracts`; build your work so it drops onto v0.3.0 (inherent methods / local types now, trait wiring after). Merge `origin/claude/laughing-newton-0xqr6q` (the lead branch, ahead of `main` until today's gate finishes) before starting. Goal of the project right now: the **single-player greybox demo**: drive in the city, raise heat, get chased by physical police, escape or get caught, and pay the repair bill.
+
+1. Pursuit tuning sweep: police aggression / ram parameters vs "police ram a stopped car" (the observer soak issue E is fixing). Report which parameter ranges keep pursuits physical without wrecking idle cars. Findings go to E; don't change their data.
+2. Damage mode sweep: Arcade vs Simulation, total-loss speed per car class. Report hits-to-total-loss per mode against the CLAUDE.md mode semantics.
+3. Thumbnails as frames (known gap), if cheap.

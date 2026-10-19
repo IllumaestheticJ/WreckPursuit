@@ -254,3 +254,12 @@ Tuning for you (expect_pending results on the integrated build):
 Contract requests: #1 `SimEvent::GlassShattered` and #3 `RegionDamaged` **accepted** for v0.2.0;
 #2 `PriceTable` labour map **accepted** (same as G's #2), `repair_parts_fraction` accepted as an
 optional field. v0.2.0 waits on machine E (police) only now.
+
+
+## Lead feedback (round 6b, 2026-10-19) — head-start tasks
+
+Contract **v0.3.0** is being applied in parallel by the lead (branch `lead/contract-v0.3.0`). Do not edit `wp_contracts`; build your work so it drops onto v0.3.0 (inherent methods / local types now, trait wiring after). Merge `origin/claude/laughing-newton-0xqr6q` (the lead branch, ahead of `main` until today's gate finishes) before starting. Goal of the project right now: the **single-player greybox demo**: drive in the city, raise heat, get chased by physical police, escape or get caught, and pay the repair bill.
+
+1. Implement the v0.3.0 damage items as **inherent methods** on your damage model, using your final shapes in this doc: `save_state`/`restore_state` (bit-exact round trip test), `apply_repair(items, full)`, and `summary() -> DamageSummary` (local struct for now). The lead switches them to the trait in v0.3.0.
+2. T-bone crush: bring the side-impact intrusion toward the 0.15 m target in both modes without breaking the frontal/rear goldens (re-bless only in `[bless]` commits, with numbers).
+3. Glass-break event data (audio's #1 request): record which glass panels broke this tick, readable by the sim.

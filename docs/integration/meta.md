@@ -177,3 +177,12 @@ in-process `AccountStore` over the meta DB.
   full-workspace run on the run-4 `main` merge (`cargo test --workspace`, all crates in
   parallel): all 94 test binaries pass, `twenty_bots_signup_matchmake_results_leaderboard` and
   `server_hook_end_to_end` included; fmt, clippy `-D warnings`, wasm build clean.
+
+
+## Lead feedback (round 6b, 2026-10-19) — head-start tasks
+
+Contract **v0.3.0** is being applied in parallel by the lead (branch `lead/contract-v0.3.0`). Do not edit `wp_contracts`; build your work so it drops onto v0.3.0 (inherent methods / local types now, trait wiring after). Merge `origin/claude/laughing-newton-0xqr6q` (the lead branch, ahead of `main` until today's gate finishes) before starting. Goal of the project right now: the **single-player greybox demo**: drive in the city, raise heat, get chased by physical police, escape or get caught, and pay the repair bill.
+
+1. Fix the flaky `twenty_bots_…` heartbeat test under load (root cause, not retries).
+2. CORS (same-origin proxy or `tower-http` CORS) so the browser testbed can call meta. Add a small `docs` example.
+3. Use the stored clean rating in matchmaking (skill brackets).

@@ -149,3 +149,12 @@ crews/territory not persisted, no AI entrants.
 
 ## Lead feedback
 (Written by the integration lead.)
+
+
+## Lead feedback (round 6b, 2026-10-19) — head-start tasks
+
+Contract **v0.3.0** is being applied in parallel by the lead (branch `lead/contract-v0.3.0`). Do not edit `wp_contracts`; build your work so it drops onto v0.3.0 (inherent methods / local types now, trait wiring after). Merge `origin/claude/laughing-newton-0xqr6q` (the lead branch, ahead of `main` until today's gate finishes) before starting. Goal of the project right now: the **single-player greybox demo**: drive in the city, raise heat, get chased by physical police, escape or get caught, and pay the repair bill.
+
+1. A street race that pulls in police: scenario `apps/simcli/scenarios/race/city_sprint_police.ron` (sprint with traffic density > 0 and police on). `PatrolAttracted` should raise heat through today's police event path; the test asserts a pursuit starts during or after the race.
+2. AI entrants: use N's `wp_opponent` racers as entrants. Put any cross-crate glue in `wp_race`, and file requests for N.
+3. Fix your own known gaps: Outrun gap along the route instead of straight-line, Delivery cargo mass applied to the car.

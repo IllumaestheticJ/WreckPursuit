@@ -245,3 +245,13 @@ Next for you (in priority order):
 Your on-demand AWD pre-charge is merged. Your branch also contained a full browser city chase (testbed / `wp_wasm`),
 which is machine C's area — C did the same task, so your testbed changes were reverted. Please stay in
 `crates/wp_vehicle` and `data/tires`; no new task this round.
+
+
+## Lead feedback (round 6b, 2026-10-19) — head-start tasks
+
+Contract **v0.3.0** is being applied in parallel by the lead (branch `lead/contract-v0.3.0`). Do not edit `wp_contracts`; build your work so it drops onto v0.3.0 (inherent methods / local types now, trait wiring after). Merge `origin/claude/laughing-newton-0xqr6q` (the lead branch, ahead of `main` until today's gate finishes) before starting. Goal of the project right now: the **single-player greybox demo**: drive in the city, raise heat, get chased by physical police, escape or get caught, and pay the repair bill.
+
+1. Weather grip hook (K's W-1): add a per-wheel surface-conditions input on the vehicle (`water_depth_mm`, `temperature_c`, `painted_line`) as a `wp_vehicle` type with a dry default; tires use it for wet grip and aquaplaning onset. The lead binds it to `WorldQuery::weather_at` after v0.3.0.
+2. Torque converter for automatic gearboxes (H's deferred request 3). Data fields already exist in the car files.
+3. Measure vehicle-only cost per car (native release, 24 cars) and record it in your README.
+Stay in `crates/wp_vehicle` and `data/tires`.
