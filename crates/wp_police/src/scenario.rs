@@ -20,7 +20,7 @@ use wp_world::procgen::ProcGenConfig;
 use wp_world::CityMap;
 
 use crate::config::PoliceConfig;
-use crate::events::UnitKind;
+use crate::events::{PoliceEvent, UnitKind};
 use crate::graph::{dist, lerp2, sub, District, NodeId, PoiKind, RoadClass, RoadGraph};
 use crate::unit::{
     plan_unit_speed, step_ground, DriveCommand, DriveEnv, Track, Unit, UnitRole, LANE_OFFSET_M,
@@ -269,6 +269,12 @@ struct RunNumbers {
     run_wide: u32,
     pool: [u32; 3],
     max_level: u8,
+    /// Radio lines while no racer is wanted / while some racer is in a pursuit.
+    radio_calm: u32,
+    radio_hot: u32,
+    /// Seconds with no racer wanted / with some racer in a pursuit.
+    calm_s: f32,
+    hot_s: f32,
     hash: u64,
 }
 
@@ -317,7 +323,12 @@ fn racer_route(rng: &mut Rng, g: &RoadGraph, r: &ScriptedRacer) -> Track {
     Track::new(route_pts(g.shortest_path(start, dest).unwrap_or_default()))
 }
 
-fn run_once(sc: &PoliceScenario, seed: u64, cfg: &PoliceConfig) -> RunNumbers {
+fn run_once(
+    sc: &PoliceScenario,
+    seed: u64,
+    cfg: &PoliceConfig,
+    hook: &mut dyn FnMut(&PoliceSystem, &[SimEvent]),
+) -> RunNumbers {
     let (graph, map) = crate::city::procedural(&sc.city.procgen());
     let map = Some(Arc::new(map));
     let setup = PoliceSetup {
@@ -447,8 +458,30 @@ fn run_once(sc: &PoliceScenario, seed: u64, cfg: &PoliceConfig) -> RunNumbers {
         world.time = world.time.advanced(PHYSICS_DT * world.ratio);
         out.clear();
         police.step(&world, &views, &events, PHYSICS_DT, &mut out);
+        hook(&police, &out);
+        let mut wanted = false;
+        let mut hot = false;
         for r in &racers {
-            nums.max_level = nums.max_level.max(police.wanted_level(r.entity).number());
+            let level = police.wanted_level(r.entity).number();
+            nums.max_level = nums.max_level.max(level);
+            wanted |= level > 0;
+            hot |= police.racer(r.entity).is_some_and(|rec| rec.pursued());
+        }
+        let lines = out
+            .iter()
+            .filter(|e| {
+                matches!(
+                    PoliceEvent::from_sim_event(e),
+                    Some(PoliceEvent::Radio { .. })
+                )
+            })
+            .count() as u32;
+        if hot {
+            nums.hot_s += PHYSICS_DT;
+            nums.radio_hot += lines;
+        } else if !wanted {
+            nums.calm_s += PHYSICS_DT;
+            nums.radio_calm += lines;
         }
         if sc.stop_after_first_pursuit && police.stats().pursuits.iter().any(|p| p.end.is_some()) {
             break;
@@ -506,8 +539,18 @@ pub fn run_scenario(sc: &PoliceScenario) -> PoliceRunSummary {
 
 /// Run a scenario with explicit tables.
 pub fn run_scenario_with(sc: &PoliceScenario, cfg: &PoliceConfig) -> PoliceRunSummary {
+    run_scenario_with_hook(sc, cfg, &mut |_, _| {})
+}
+
+/// Run a scenario with explicit tables, calling `hook` after every police step with the
+/// system and the events it emitted that tick (e.g. to print the radio log).
+pub fn run_scenario_with_hook(
+    sc: &PoliceScenario,
+    cfg: &PoliceConfig,
+    hook: &mut dyn FnMut(&PoliceSystem, &[SimEvent]),
+) -> PoliceRunSummary {
     let runs: Vec<RunNumbers> = (0..sc.runs.max(1))
-        .map(|k| run_once(sc, sc.seed + k as u64, cfg))
+        .map(|k| run_once(sc, sc.seed + k as u64, cfg, hook))
         .collect();
     let never = sc.duration_s + 1.0;
     let mut m = BTreeMap::new();
@@ -578,6 +621,26 @@ pub fn run_scenario_with(sc: &PoliceScenario, cfg: &PoliceConfig) -> PoliceRunSu
         "max_wanted_level".to_string(),
         runs.iter().map(|r| r.max_level).max().unwrap_or(0) as f32,
     );
+    // Radio rates, pooled over runs (lines per minute of sim time).
+    let per_min = |lines: u32, secs: f32| {
+        if secs > 0.0 {
+            lines as f32 * 60.0 / secs
+        } else {
+            0.0
+        }
+    };
+    let calm_s: f32 = runs.iter().map(|r| r.calm_s).sum();
+    let hot_s: f32 = runs.iter().map(|r| r.hot_s).sum();
+    m.insert(
+        "radio_per_min_calm".to_string(),
+        per_min(sum(&|r| r.radio_calm) as u32, calm_s),
+    );
+    m.insert(
+        "radio_per_min_pursuit".to_string(),
+        per_min(sum(&|r| r.radio_hot) as u32, hot_s),
+    );
+    m.insert("calm_s".to_string(), calm_s);
+    m.insert("pursuit_s".to_string(), hot_s);
     let last = runs.last().expect("at least one run");
     m.insert("patrols_core".to_string(), last.pool[0] as f32);
     m.insert("patrols_suburb".to_string(), last.pool[1] as f32);
