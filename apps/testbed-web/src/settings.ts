@@ -1,6 +1,7 @@
 // Debug layer toggles and other per-viewer settings, persisted in localStorage.
 // To add a debug layer: add an entry to LAYERS (key + label + default), then read
 // `layers.on("<id>")` where you draw it. The help overlay and hotkeys pick it up automatically.
+// Keys 1–8 are camera angles (cameras.ts) and M is audio mute: keep layer keys off them.
 
 export interface LayerDef {
   id: string;
@@ -20,7 +21,7 @@ export const LAYERS: LayerDef[] = [
   { id: "contacts", key: "F2", label: "contact points & impulses", default: true },
   { id: "cgVelocity", key: "KeyG", label: "CG + velocity vector", default: true },
   { id: "traffic", key: "KeyX", label: "civilian traffic agents", default: true },
-  { id: "signals", key: "Digit6", label: "traffic signals + stop lines", default: true },
+  { id: "signals", key: "Digit9", label: "traffic signals + stop lines", default: true },
   { id: "intents", key: "KeyI", label: "traffic/police intent arrows", default: false },
   { id: "components", key: "KeyK", label: "component health panel", default: true },
   { id: "regions", key: "KeyE", label: "region energy panel", default: false },

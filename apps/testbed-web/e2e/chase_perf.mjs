@@ -1,7 +1,7 @@
 // City-chase performance in headless Chromium: sim ms per frame and the real-time factor
 // (sim seconds advanced per wall second). Usage: node e2e/chase_perf.mjs [car] [mode] [seconds]
-// (needs `npm run wasm`; starts its own Vite). Prints one JSON line. VIEWPORT=640x360 shrinks the
-// page (headless Chromium rasterises on the CPU, which otherwise dominates the frame time).
+// (needs `npm run wasm`; starts its own Vite). Prints one JSON line. PANELS=0 turns R's panel
+// meshes (layer key 0, on by default) off for an A/B comparison; VIEWPORT=WxH (default 1280x720).
 import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,6 +32,11 @@ page.on("pageerror", (e) => errors.push(String(e)));
 await page.goto(URL);
 await page.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 60000 });
 await page.evaluate(([c, m]) => window.__wp.startCityChase(c || undefined, m), [car, mode]);
+const panelsOff = process.env.PANELS === "0";
+await page.evaluate(async (off) => {
+  const { layers } = await import("/src/settings.ts");
+  if (layers.on("panels") === off) layers.toggle("panels");
+}, panelsOff);
 await page.keyboard.down("KeyW");
 await page.waitForTimeout(3000); // warm-up (spawns, JIT)
 const result = await page.evaluate(async (ms) => {
@@ -66,9 +71,12 @@ const result = await page.evaluate(async (ms) => {
     realTimeFactor: ticks / 240 / wall,
     vehicles: sim.vehicleMeta().length / 3,
     playerSpeedKmh: speed * 3.6,
-    hudPerf: wp.app.perf,
+    hudPerf: { ...wp.app.perf },
+    carsWithPanels: [...wp.app.views.values()].filter((v) => v.panels.root.visible).length,
+    drawCalls: wp.scene.renderer.info.render.calls,
+    triangles: wp.scene.renderer.info.render.triangles,
   };
 }, Number(secs) * 1000);
-console.log(JSON.stringify({ car: car || "(default)", mode, ...result, errors: errors.slice(0, 3) }));
+console.log(JSON.stringify({ car: car || "(default)", mode, panels: !panelsOff, viewport: `${vw}x${vh}`, ...result, errors: errors.slice(0, 3) }));
 await browser.close();
 process.exit(0);

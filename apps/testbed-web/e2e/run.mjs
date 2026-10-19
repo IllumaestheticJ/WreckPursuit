@@ -279,15 +279,15 @@ for (const [hour, label] of [
   await shot("signals/junction_night_later.png");
   await page.evaluate(() => (document.getElementById("overlay").style.visibility = ""));
   check(changed > 0, `signal lamps change over time and match the sim (${changed} heads changed)`);
-  await page.keyboard.press("Digit6");
+  await page.keyboard.press("Digit9");
   // Software GL frames take a few hundred ms: wait for the next frame to apply the toggle.
   const hidden = await page
     .waitForFunction(() => !window.__wp.scene.signals.group.visible, null, { timeout: 10000 })
     .then(() => true)
     .catch(() => false);
-  await page.keyboard.press("Digit6");
+  await page.keyboard.press("Digit9");
   const help = await page.evaluate(() => document.querySelector(".help")?.textContent ?? "");
-  check(hidden && help.includes("traffic signals"), "6 hides the signals layer; F1 help lists it");
+  check(hidden && help.includes("traffic signals"), "9 hides the signals layer; F1 help lists it");
 }
 // The default city is Port Vesper v2: its greybox loads and the car sits on the terrain.
 await page.waitForFunction(() => (window.__wp.scene.cities.get("vesper_v2")?.children.length ?? 0) > 0, null, {
@@ -303,20 +303,25 @@ check(
   `city free drive in ${v2.id}: greybox loaded, car at (${v2.x.toFixed(0)}, ${v2.y.toFixed(0)}, ${v2.z.toFixed(1)}) m`,
 );
 // City chase preset: night city, police + traffic, speeding player; heat panel from the UI kit.
+// Waits for the state the check needs (no fixed sleep): under SwiftShader the city runs well below
+// real time, so a wall-clock wait is either too short (flaky) or wastes minutes. Violations are
+// counted per session (`app.eventCounts`), not read from the 12-line feed, which can scroll them out.
 await page.evaluate(() => window.__wp.startCityChase("debug_sedan", "Arcade"));
 await page.keyboard.down("KeyW");
-// Headless SwiftShader renders the city slowly (the sim keeps real time only when frames are
-// fast), so wait for simulated time, not wall time: until the speeding violation shows up or
-// 8 s of sim have run.
-await page
-  .waitForFunction(
-    () =>
-      (document.querySelector(".feed")?.textContent ?? "").includes("TrafficViolation") ||
-      window.__wp.sim.worldInfo()[0] >= 240 * 8,
-    null,
-    { timeout: 180000, polling: 500 },
-  )
-  .catch(() => {});
+const chaseReady = () => {
+  const wp = window.__wp;
+  return (
+    wp.sim.worldInfo()[1] >= 23 &&
+    (wp.app.eventCounts.TrafficViolation ?? 0) > 0 &&
+    wp.sim.policeStatus(wp.app.player) !== null &&
+    document.querySelectorAll(".wp-hud-heat").length === 1 &&
+    !!document.querySelector("#ui-chase .wp-hud-heat")?.getAttribute("aria-label")
+  );
+};
+const chaseWait = await page
+  .waitForFunction(chaseReady, null, { timeout: 240000, polling: 250 })
+  .then(() => "ready")
+  .catch((e) => `timed out (${String(e).split("\n")[0]})`);
 await page.keyboard.up("KeyW");
 const chase = await page.evaluate(() => ({
   hour: window.__wp.sim.worldInfo()[1],
@@ -326,15 +331,16 @@ const chase = await page.evaluate(() => ({
   banner: document.getElementById("pursuit-banner").classList.contains("hidden") ? null : document.querySelector("#pursuit-banner b").textContent,
   police: Array.from(window.__wp.sim.vehicleMeta()).filter((_, i, a) => i % 3 === 1 && a[i] === 2).length,
   units: window.__wp.sim.policeUnits().length / 6,
-  violations: document.querySelector(".feed")?.textContent?.includes("TrafficViolation") ?? false,
+  violations: window.__wp.app.eventCounts.TrafficViolation ?? 0,
+  inFeed: document.querySelector(".feed")?.textContent?.includes("TrafficViolation") ?? false,
   simS: window.__wp.sim.worldInfo()[0] / 240,
 }));
 await shot("city_chase.png");
 check(
-  chase.hour >= 23 && chase.status !== null && chase.panel !== null && chase.panels === 1 && chase.violations,
+  chaseWait === "ready" && chase.hour >= 23 && chase.status !== null && chase.panel !== null && chase.panels === 1 && chase.violations > 0,
   `city chase: ${chase.hour.toFixed(2)} h, ${chase.panels} heat panel(s) "${chase.panel}", heat ${chase.status?.heat.toFixed(2)} (${chase.status?.status}), ` +
     `banner ${chase.banner ?? "none"}, ${chase.police} police vehicles + ${chase.units} other units, ` +
-    `violations in the feed: ${chase.violations} (after ${chase.simS.toFixed(1)} s sim)`,
+    `${chase.violations} violation event(s) (in feed: ${chase.inFeed}) after ${chase.simS.toFixed(1)} s sim; wait ${chaseWait}`,
 );
 // Pursuit banner + capture → repair bill, driven by a stubbed police_status() (a real capture
 // needs minutes of driving; the outcome plumbing is unit-tested in wp_wasm::police).

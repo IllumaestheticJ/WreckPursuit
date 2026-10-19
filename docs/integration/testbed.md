@@ -182,8 +182,8 @@ hash per tick dominate). `simcli replay file.replay.bin` verifies a browser reco
 | X | civilian traffic agents (grey; red = braking, yellow = physical LOD, blue = yielding); promoted agents are drawn as sim vehicles instead |
 | Z | chase readout (UI kit `ChaseHud`: wanted / heat / bounty / radio) + pursuit banner |
 | F | repair bill (UI kit `RepairBill`, priced by `wp_economy`); opens by itself on capture or scenario end |
-| 6 | traffic signals: mast-arm head at each stop line + far-side pedestal head, white stop line; lit lamp unlit-bright with an additive glow that strengthens at night (`signals_view.ts`, 6 InstancedMeshes for the whole city) |
-| Z | wanted level / heat panel (UI kit `HeatPanel`) |
+| 9 | traffic signals (was 6 until round 8: 6 is the side camera): mast-arm head at each stop line + far-side pedestal head, white stop line; lit lamp unlit-bright with an additive glow that strengthens at night (`signals_view.ts`, 6 InstancedMeshes for the whole city) |
+| 0 | panel meshes (machine R, `src/render/panels.ts`; on by default) — off shows the lattice view |
 | I | traffic / police intent arrows |
 | K | component health panel |
 | E | region energy panel |
@@ -229,7 +229,8 @@ matches every tick hash and the final hash; scrub back/forward; CSV; the three c
 and a smoke scenario pass with `matches_simcli` and draw contact markers; city free drive shows
 traffic; signals: the junction nearest the player framed at 12:00 and 22:00
 (`docs/media/signals/`), every head drawn and lit, lamps change within 30 s and match
-`signal_states()`, 6 hides the layer and F1 lists it. `BENCH=1` adds perf, `SHOTS=dir` screenshots.
+`signal_states()`, 9 hides the layer and F1 lists it; city chase waits (≤ 240 s, no fixed sleep) until it is
+23:00, a `TrafficViolation` was counted (`__wp.app.eventCounts`) and exactly one heat panel is mounted. `BENCH=1` adds perf, `SHOTS=dir` screenshots.
 
 ### City chase
 **city chase** (button, `__wp.startCityChase()`): the procedural 12×12 city at 23:00 with
@@ -314,6 +315,23 @@ page (includes the session's per-tick state hash and input logging).
 Rendering dominates; 24 cars with every per-car layer (lattice, stress, skinned body) would want
 instancing before Checkpoint 3. The first seconds of a city session are slower (traffic
 populating around the player).
+
+### Panel meshes in the city chase (round 8, `e2e/chase_perf.mjs`, A/B with `PANELS=0`)
+City chase, default car, 22 vehicles (player + police + physical traffic, 20 with panel meshes),
+20 s holding W, same SwiftShader container as above. HUD smoothed ms per frame.
+
+| Viewport | Panels | Frame (wall) | sim | views | render submit | draw calls | triangles |
+|---|---|---|---|---|---|---|---|
+| 1280×720 | on | 625–633 ms | 42–56 | 11.5–17.0 | 17.8–20.2 | ~985 | 436 k |
+| 1280×720 | off | 591–645 ms | 46–55 | 7.3–9.8 | 7.7 (one 140 outlier) | ~95 | 351 k |
+| 640×360 | on | 451 ms | 67 | 11.5 | 27.2 | 1147 | 447 k |
+| 640×360 | off | 405 ms | 71 | 6.8 | 11.1 | 416 | 360 k |
+
+Panels cost about +5 ms of view updates and +10–16 ms of JS render submission for 20 cars
+(~45 draw calls per car), i.e. ~0.75 ms/car of CPU, and add ~85 k triangles. In this container the
+wall frame time is set by SwiftShader rasterising the ~350 k-triangle night city (barely changes
+from 1280×720 to 640×360), so panels change it by 0–10 %. On a real GPU the per-car draw calls are
+the part that scales: request for R below.
 
 ## Known gaps
 - Signals: no turn arrows or pedestrian heads (the city has no protected-turn or walk phases);
@@ -517,3 +535,62 @@ clear plus a fresh (< 1 s) `last_outcome` from your `police_status`; it replaces
 and now also on a total loss mid-chase; not on escape). `ui.lastChaseEnd` = `{ how, outcome,
 level, tick }`. `e2e/run.mjs` stubbed flow: one extra pursuit frame before the capture, plus checks
 on `lastChaseEnd`. Nothing else in your files changed.
+### Response — round 8 (2026-10-19, workstream 04)
+Merged `origin/main` (d3effad, fast-forward). Changes are all in `apps/testbed-web/`.
+**1. City chase playtest** (headless Chromium, 1400×860 and 1280×720; new
+`node e2e/playtest_chase.mjs [outDir] [WxH]` drives the chase 12 s of sim time, screenshots it,
+checks HUD boxes for overlaps, that every layer key flips its layer, camera keys 1–8 and F1 help).
+Fixed:
+- **Key 6 did two things.** The signals helper put the signals layer on 6 before the camera
+  helper made 1–8 camera angles; layer keys win, so 6 never reached the side camera and F1 listed
+  6 twice. Signals layer → **9**; `settings.ts` notes that 1–8 and M are taken.
+- **Telemetry plots covered the car.** The 360×280 strip at bottom-centre hid the lower third of
+  the player car in the near chase camera; now 340×192 and clear of the car at 720 and 860 px tall.
+- **Event feed printed raw JSON** for police and violation events
+  (`Police Radio={"unit":1,"text":…}`, `kind={"Speeding":{"over_mps":15.097}}`, unit positions).
+  Enum variants are unwrapped: `Police Radio unit=1 text=…`, `TrafficViolation #1 Speeding
+  over_mps=15.1`, `UnitSpawned unit=5 kind=Car` (`hud.ts` `feedDetail`).
+- **F1 help** was 60 % transparent over the HUD and unreadable in the chase; now opaque, scrolls if
+  the window is short, and lists Tab (follow next car). Stale duplicate Z row in the hotkey
+  table above replaced with the missing 0 (panels) row.
+- Checked and fine: no overlapping panels at either size (chase readout sits between the HUD and
+  the damage column), all 18 layer toggles, all 8 cameras, no page errors.
+**2. City chase e2e check** now waits (≤ 240 s, polling) for the whole condition it checks —
+23:00, a counted `TrafficViolation`, a police status, exactly one mounted heat panel — instead of
+a fixed sleep or reading the 12-line feed (violations can scroll out of it). The count is
+`__wp.app.eventCounts` (sim events by kind, reset per session). A timeout now fails the check and
+says so instead of being swallowed.
+**3. Review of M's chase-end detector** (`apps/ui-kit/src/live/chaseEnd.ts` is on main; the
+`overlay.ts` integration on `ws/ui` was held back by the lead). For M's port onto my HUD:
+- **Capture is reported as "escaped".** Pursuit → Clear is how both an escape and a capture look
+  in `status`. The detector must read `police_status().last_outcome` (`Escaped` / `Captured`,
+  with `outcome_age_s`), which the HUD already uses (`src/police.ts` `isCapture`). Suggest
+  `update(status, totalLoss, lastOutcome)` returning `"escaped" | "captured" | "wrecked"`.
+- **One trigger, not two.** `UiOverlay.frame` already opens the bill on a fresh capture
+  (`outcomeTick` guard, once per outcome). Replace that block with the detector rather than adding
+  a second path, or the bill logic runs twice on a capture.
+- **Use `autoBill()`, not `setBill(true)`.** An auto-opened bill closes on the next session; one
+  opened with `setBill(true)` counts as user-opened and stays open after a restart.
+- **Escape opening the bill is a product call.** Today ESCAPED shows the banner only (e2e asserts
+  `!escaped.bill`); M's version opens the bill on escape. Fine by me if the lead wants that — then
+  update that e2e assertion in the same change.
+- Keep `lastChaseEnd` (useful for automation), reset it in `reset()`, and gate on
+  `layers.on("chase")` the same way the banner is.
+- Detector logic and its vitest cases otherwise look right (fires once, wreck mid-chase,
+  reset forgets).
+**4. Panel meshes perf** with 22 cars: table in "Perf numbers" above. ~0.75 ms/car of CPU
+(views + draw submission), ~45 draw calls/car; not the bottleneck in SwiftShader.
+**Requests**
+- **R (panels):** ~45 draw calls per car (985 vs 95 for 20 cars). Merging each car's static
+  panels into one geometry per material (keep swinging/detached panels separate) would cut that
+  to a handful and matters most on real GPUs with 24 cars.
+- **Lead (city):** the night city is ~350 k triangles and sets the frame time in headless
+  Chromium (~0.4–0.6 s/frame, sim at ~0.4× real time); LOD or distance culling for buildings
+  would help the published link on weak laptops.
+- Still open from round 6: a test-only way to force a capture in a `wp_sim` session, so e2e can
+  run the real capture → bill path.
+**Checks (this container):** `cargo fmt --check`, `clippy --workspace -D warnings`, `cargo test
+--workspace` (717 passed, 15 ignored, 0 failed), wasm32 build of `wp_wasm`, `tsc`, `just web-e2e`
+25/25 (1 min 18 s; city chase ready after 1.0 s of sim time — that run counted 2 violations
+while the feed, redrawn every 6th frame, did not show them yet: the race the old check had),
+`playtest_chase.mjs` at 1400×860 and 1280×720 all pass.

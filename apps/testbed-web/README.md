@@ -33,6 +33,8 @@ Cities: the "city" box (free drive) and the city chase use the city selector —
 `?chase=1`. The greybox is `data/city/<sim.cityId()>.greybox.glb` (base64 fallback
 `.greybox.b64.txt` on the published build). Automation: `__wp.lookAt(from, to)` places a fixed
 orbit camera in sim coordinates, `__wp.setClip(near, far)`.
+| `e2e/playtest_chase.mjs` | city chase playtest: screenshots, overlapping HUD panels, layer + camera keys, F1 help (`node e2e/playtest_chase.mjs [outDir] [WxH]`) |
+| `e2e/chase_perf.mjs` | city chase perf (sim / views / render ms, draw calls); `PANELS=0` A/B for panel meshes, `VIEWPORT=WxH` |
 
 Sim space is +Z up / +Y forward; the Three.js scene is +Y up, so all sim-space objects live under
 a `world` group rotated −90° about X.

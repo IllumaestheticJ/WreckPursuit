@@ -38,7 +38,7 @@
       .comps .bar { width: 80px; }
       .inputs { }
       .telemetry { position: absolute; bottom: 8px; left: 552px; padding: 0; }
-      .help { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); max-width: 640px; z-index: 5; }
+      .help { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); max-width: 640px; max-height: calc(100vh - 16px); overflow: auto; z-index: 5; background: rgba(0, 0, 0, 0.92); }
       #controls { position: absolute; bottom: 8px; left: 8px; max-width: 520px; max-height: 45vh; overflow: auto; }
       #controls .row { margin: 3px 0; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
       #controls button, #controls select, #controls input { font: 11px monospace; background: #222; color: #ddd; border: 1px solid #555; border-radius: 3px; padding: 1px 5px; }

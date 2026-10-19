@@ -27,6 +27,40 @@ const bar = (frac: number, colour: string, centred = false): string => {
   return `<span class="bar"><i style="width:${Math.max(0, f) * 100}%;background:${colour}"></i></span>`;
 };
 
+/** Fields the event feed leaves out: who (shown separately), positions and raw payloads. */
+const FEED_SKIP = new Set(["vehicle", "pos", "heading", "payload"]);
+
+/** One event's fields as `key=value` pairs. Single-key wrapper objects (serde enum variants such
+ * as `{ Radio: { text } }` or `kind: { Speeding: { over_mps } }`) are unwrapped into their name
+ * and fields, so the feed reads `Radio unit=1 text=…` instead of raw JSON. */
+export function feedDetail(body: Record<string, unknown>): string {
+  const fmt = (v: unknown): string => {
+    if (typeof v === "number") return String(Number(v.toFixed(2)));
+    if (typeof v === "string") return v;
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      const entries = Object.entries(v as Record<string, unknown>);
+      if (entries.length === 1 && entries[0][1] && typeof entries[0][1] === "object" && !Array.isArray(entries[0][1])) {
+        const inner = feedDetail(entries[0][1] as Record<string, unknown>);
+        return inner ? `${entries[0][0]} ${inner}` : entries[0][0];
+      }
+      return feedDetail(v as Record<string, unknown>);
+    }
+    return JSON.stringify(v);
+  };
+  return Object.entries(body)
+    .filter(([k]) => !FEED_SKIP.has(k))
+    .map(([k, v]) => {
+      if (v && typeof v === "object" && !Array.isArray(v)) {
+        // An enum variant (`{ Radio: { … } }`; serde names variants in PascalCase): name, then fields.
+        if (/^[A-Z]/.test(k)) return `${k} ${fmt(v)}`.trim();
+        // A field holding an enum variant (`kind: { Speeding: { … } }`): drop the `key=` prefix.
+        if (Object.keys(v).length === 1 && /^[A-Z]/.test(Object.keys(v)[0])) return fmt(v);
+      }
+      return `${k}=${fmt(v)}`;
+    })
+    .join(" ");
+}
+
 export interface HudFrame {
   info: VehicleInfo | null;
   tel: Float32Array | null;
@@ -81,7 +115,7 @@ export class Hud {
     this.help.innerHTML =
       `<b>WreckPursuit testbed — keys</b><br>` +
       `W/S or ↑/↓ throttle/brake · A/D or ←/→ steer · Space handbrake · Shift/Ctrl gear up/down<br>` +
-      `R reset · O headlights · Q horn · M mute<br>` +
+      `R reset · O headlights · Q horn · M mute · Tab follow the next car<br>` +
       `<b>Cameras</b> ${CAMERA_HELP}<br>` +
       `F1 or ? this help · P pause · . frame step (replay) · [ / ] replay speed · F repair bill<br><br>` +
       `<b>Slide control</b> (keyboard/gamepad assists): the car catches power slides itself — ` +
@@ -97,11 +131,7 @@ export class Hud {
       if (!kind || kind === "Contact" || kind === "LatticeDeformed") continue;
       const b = (body ?? {}) as Record<string, unknown>;
       const who = b.vehicle !== undefined ? `#${b.vehicle}` : "";
-      const detail = Object.entries(b)
-        .filter(([k]) => k !== "vehicle" && k !== "pos" && k !== "payload")
-        .map(([k, v]) => `${k}=${typeof v === "number" ? Number(v.toFixed(2)) : JSON.stringify(v)}`)
-        .join(" ");
-      this.feedLines.unshift(`${(tick / 240).toFixed(2)}s ${kind} ${who} ${detail}`);
+      this.feedLines.unshift(`${(tick / 240).toFixed(2)}s ${kind} ${who} ${feedDetail(b)}`);
     }
     this.feedLines.length = Math.min(this.feedLines.length, 12);
   }
