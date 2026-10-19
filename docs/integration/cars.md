@@ -50,7 +50,7 @@ traffic sedan, Hauler and Ironside (measured with the same model); the Kestrel a
 car still need the Wolfhound. Making the cruiser itself catch those would make it faster than
 the interceptor. → request to E/lead below.
 
-### Ram durability — superseded by the police package below
+### Durability under repeated hits — superseded by the police package below
 
 The first round-6b numbers (damage-model `ram-probe` only) are replaced by the full-sim
 sequence in "Lead follow-up: cop cars too fragile".
