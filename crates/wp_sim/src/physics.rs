@@ -31,11 +31,8 @@ impl PhysicsWorld {
             ..Default::default()
         };
         let mut colliders = ColliderSet::new();
-        colliders.insert(
-            ColliderBuilder::cuboid(5000.0, 5000.0, 0.5)
-                .translation(Vector::new(0.0, 0.0, -0.5))
-                .build(),
-        );
+        // Shared with `wp_vehicle::rig::Rig` so the client prediction stepper matches exactly.
+        colliders.insert(wp_vehicle::rig::ground_collider());
         let mut world = Self {
             gravity: Vector::new(0.0, 0.0, -wp_contracts::GRAVITY_MPS2),
             params,

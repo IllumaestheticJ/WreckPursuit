@@ -4,7 +4,7 @@
 - **Branch:** `ws/harness`
 - **Crates / folders owned:** `apps/simcli`, `tools/bench`, `tools/lint-determinism`,
   `tools/wasm-determinism`, `tools/ci`, `.github/workflows/`, the test surface of `wp_sim`
-- **Contract version built against:** 0.1.0
+- **Contract version built against:** 0.2.0
 
 ## Exposes
 
@@ -76,7 +76,7 @@ Systems should not add fields to the hash themselves — ask here, so the spec s
 |---|---|---|
 | 05 (world) | routes for `follow_route`; physical (rigid-body) traffic via `LodChange` | `follow_route` warns; traffic stays kinematic in scenarios |
 | 05 (world) | population with a player present: the soak dips to ≈ 360 agents (≥ 380 without players) | `world_traffic_soak_observer` floor 350, 380 in `expect_pending` |
-| 06 (police) | presence override, exported `PoliceEvent` kind codes (pursuit started, spike deployed, escaped) | `PURSUIT_STARTED_KIND = 1` provisional; golden spike/pursuit use kinds 2/3 as placeholders in `expect_pending` |
+| 06 (police) | presence override; police that react in the night-pursuit / spike goldens | presence warns; pursuit/spike targets in `expect_pending` (kinds from `wp_police::events::kind`) |
 | 07 (net) | `wp-server --bots N --minutes M` | nightly soak falls back to `simcli fuzz --minutes 10 --max-vehicles 32` (auto-switches when `--bots` appears in `apps/server/src/main.rs`) |
 | 04 (testbed) | record replays in `replay.bin` v1 | golden replays recorded from scripted scenarios |
 | 03 (damage) | T-bone victim: crush 0.12 m and no component failures at 50 km/h side impact | targets stay in `expect_pending` |
@@ -128,6 +128,22 @@ Cloud container, Intel Xeon @ 2.10 GHz, 4 cores, release, real vehicle + damage 
   `wasm-determinism` module could host one).
 - The lint is line-based: it can miss a transcendental called through a function pointer or a
   macro, and it stops at the first `#[cfg(test)]` in a file.
+
+## Run 4 — contract v0.2.0 merge (2026-10-19)
+
+- Merged `main` (contract 0.2.0, machines A/D/E and the run-3 merges). simcli already had the lead's
+  `GlassShattered` / `RegionDamaged` arms. No other v0.2.0 item touches the harness: the typed
+  `PoliceEvent` is deferred to v0.3.0.
+- `PURSUIT_STARTED_KIND` is now `wp_police::events::kind::PURSUIT_STARTED` (3), not the provisional 1.
+  The golden placeholders now use E's real codes: night pursuit escape → `PURSUIT_ENDED` (4),
+  spike strip → `SPIKES_PLACED` (9). simcli depends on `wp_police` for the constants.
+- Goldens re-blessed (`[bless]`): `main`'s physics changes (tire grip, shared ground collider)
+  under hash spec v2. Merge conflicts in `vehicle_sedan_{brake,reverse}/hashes.txt` were
+  resolved by regenerating them.
+- **For E:** with police merged, the night-pursuit golden emits 13 `TrafficViolation`s (the
+  racer speeding at 35 m/s) but no `PoliceEvent` at all. The parked "patrol" sedan is only a
+  vehicle, and no police unit spawns in 12 s. Is there a scenario
+  hook to spawn a police unit or set presence? simcli would wire it to `police_presence`.
 
 ## Run 3 — response to lead feedback (2026-10-19)
 

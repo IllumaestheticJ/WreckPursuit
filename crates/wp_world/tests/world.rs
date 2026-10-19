@@ -99,7 +99,8 @@ fn signals_never_show_conflicting_greens_and_honour_cycles() {
     let dt = 0.1f32;
     let steps = (2.0 * max_cycle / dt) as usize;
     for k in 0..steps {
-        map.signal_time_s = k as f64 * dt as f64;
+        // 0.1 s = 24 physics ticks.
+        map.signal_tick = k as u64 * 24;
         // 1. Conflicting movements are never both protected.
         for &c in &signal_conns {
             if rank(&map, c) < 2 {
@@ -119,8 +120,8 @@ fn signals_never_show_conflicting_greens_and_honour_cycles() {
                 }
                 assert!(
                     rank(&map, o) < 2,
-                    "conflicting protected movements {c} / {o} at t={}",
-                    map.signal_time_s
+                    "conflicting protected movements {c} / {o} at tick {}",
+                    map.signal_tick
                 );
             }
         }
@@ -152,7 +153,7 @@ fn signals_never_show_conflicting_greens_and_honour_cycles() {
             }
             if k as f32 * dt < sc.cycle_s() {
                 for g in 0..sc.groups {
-                    let st = wp_world::signals::group_state(sc, g, map.signal_time_s).0;
+                    let st = wp_world::signals::group_state(sc, g, map.signal_tick).0;
                     if st == SignalState::Green {
                         green_time[si][g as usize] += dt;
                     }
@@ -179,9 +180,10 @@ fn signals_never_show_conflicting_greens_and_honour_cycles() {
                 (measured - planned).abs() <= 2.0 * dt + 1e-3,
                 "signal {si} group {g}: green {measured} vs planned {planned}"
             );
-            for t in [3.3f64, 17.9, 41.0] {
+            let cycle = wp_world::signals::ticks_from_secs(sc.cycle_s());
+            for t in [792u64, 4296, 9840] {
                 let a = wp_world::signals::group_state(sc, g, t).0;
-                let b = wp_world::signals::group_state(sc, g, t + sc.cycle_s() as f64).0;
+                let b = wp_world::signals::group_state(sc, g, t + cycle).0;
                 assert_eq!(a, b, "signal {si} not periodic");
             }
         }

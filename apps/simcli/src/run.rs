@@ -16,10 +16,9 @@ use crate::replay::{Checkpoint, EntityCheckpoint, InputEvent, Replay};
 use crate::scenario::{tick_of, CitySpec, Driver, Expect, Scenario};
 use crate::RunError;
 
-/// `wp_police` payload kind treated as "pursuit started" by
-/// [`Expect::PursuitStartedBefore`]. Provisional until `wp_police` (prompt 06) exports its own
-/// constant; see `docs/integration/harness.md`.
-pub const PURSUIT_STARTED_KIND: u16 = 1;
+/// `wp_police` payload kind treated as "pursuit started" by [`Expect::PursuitStartedBefore`]
+/// (`wp_police::events::kind::PURSUIT_STARTED`; the full list is in that module).
+pub const PURSUIT_STARTED_KIND: u16 = wp_police::events::kind::PURSUIT_STARTED;
 
 /// Systems to run: the [`Systems`] inside [`Sim`] plus the harness-side net round trip.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -408,6 +407,8 @@ pub fn event_name(e: &SimEvent) -> &'static str {
         SimEvent::WheelDetached { .. } => "WheelDetached",
         SimEvent::TotalLoss { .. } => "TotalLoss",
         SimEvent::TrafficViolation { .. } => "TrafficViolation",
+        SimEvent::GlassShattered { .. } => "GlassShattered",
+        SimEvent::RegionDamaged { .. } => "RegionDamaged",
         SimEvent::PoliceEvent { .. } => "PoliceEvent",
         SimEvent::EconomyEvent { .. } => "EconomyEvent",
     }
@@ -423,7 +424,9 @@ pub fn event_entities(e: &SimEvent) -> Vec<EntityId> {
         | SimEvent::ComponentFailed { vehicle, .. }
         | SimEvent::WheelDetached { vehicle, .. }
         | SimEvent::TotalLoss { vehicle }
-        | SimEvent::TrafficViolation { vehicle, .. } => vec![*vehicle],
+        | SimEvent::TrafficViolation { vehicle, .. }
+        | SimEvent::GlassShattered { vehicle, .. }
+        | SimEvent::RegionDamaged { vehicle, .. } => vec![*vehicle],
         SimEvent::PoliceEvent { .. } | SimEvent::EconomyEvent { .. } => Vec::new(),
     }
 }

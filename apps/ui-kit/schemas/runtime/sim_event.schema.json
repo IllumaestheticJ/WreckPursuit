@@ -1,0 +1,524 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SimEvent",
+  "description": "Every event the simulation can emit.",
+  "oneOf": [
+    {
+      "description": "Rigid-body contact between two entities (or an entity and the world).",
+      "type": "object",
+      "properties": {
+        "Contact": {
+          "type": "object",
+          "properties": {
+            "a": {
+              "description": "First entity.",
+              "$ref": "#/$defs/EntityId"
+            },
+            "b": {
+              "description": "Second entity (`EntityId(u32::MAX)` = static world).",
+              "$ref": "#/$defs/EntityId"
+            },
+            "impulse_ns": {
+              "description": "Normal impulse magnitude, N·s.",
+              "type": "number",
+              "format": "float"
+            },
+            "normal": {
+              "description": "Unit contact normal in world space (from `a` toward `b`).",
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "float"
+              },
+              "maxItems": 3,
+              "minItems": 3
+            },
+            "point": {
+              "description": "Contact point in world space, m.",
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "float"
+              },
+              "maxItems": 3,
+              "minItems": 3
+            },
+            "rel_speed": {
+              "description": "Relative closing speed, m/s.",
+              "type": "number",
+              "format": "float"
+            }
+          },
+          "required": [
+            "a",
+            "b",
+            "point",
+            "normal",
+            "impulse_ns",
+            "rel_speed"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "Contact"
+      ]
+    },
+    {
+      "description": "Lattice node displacement deltas. **Debug / replay only**; never sent over the network.",
+      "type": "object",
+      "properties": {
+        "LatticeDeformed": {
+          "type": "object",
+          "properties": {
+            "nodes_delta": {
+              "description": "`(node id, displacement delta in chassis space m)`.",
+              "type": "array",
+              "items": {
+                "type": "array",
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "integer",
+                    "format": "uint16",
+                    "maximum": 65535,
+                    "minimum": 0
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "number",
+                      "format": "float"
+                    },
+                    "maxItems": 3,
+                    "minItems": 3
+                  }
+                ]
+              }
+            },
+            "vehicle": {
+              "description": "Deformed vehicle.",
+              "$ref": "#/$defs/EntityId"
+            }
+          },
+          "required": [
+            "vehicle",
+            "nodes_delta"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "LatticeDeformed"
+      ]
+    },
+    {
+      "description": "A detachable part group tore off.",
+      "type": "object",
+      "properties": {
+        "PartDetached": {
+          "type": "object",
+          "properties": {
+            "group": {
+              "description": "`Detachable::group` id.",
+              "type": "integer",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0
+            },
+            "vehicle": {
+              "description": "Vehicle the part came from.",
+              "$ref": "#/$defs/EntityId"
+            }
+          },
+          "required": [
+            "vehicle",
+            "group"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "PartDetached"
+      ]
+    },
+    {
+      "description": "A component's health changed noticeably (emitters should threshold, not spam).",
+      "type": "object",
+      "properties": {
+        "ComponentDamaged": {
+          "type": "object",
+          "properties": {
+            "component": {
+              "description": "Component.",
+              "$ref": "#/$defs/Component"
+            },
+            "health": {
+              "description": "New health 0..=1.",
+              "type": "number",
+              "format": "float"
+            },
+            "vehicle": {
+              "description": "Vehicle.",
+              "$ref": "#/$defs/EntityId"
+            }
+          },
+          "required": [
+            "vehicle",
+            "component",
+            "health"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "ComponentDamaged"
+      ]
+    },
+    {
+      "description": "A component failed (crossed its failure intrusion).",
+      "type": "object",
+      "properties": {
+        "ComponentFailed": {
+          "type": "object",
+          "properties": {
+            "component": {
+              "description": "Component.",
+              "$ref": "#/$defs/Component"
+            },
+            "vehicle": {
+              "description": "Vehicle.",
+              "$ref": "#/$defs/EntityId"
+            }
+          },
+          "required": [
+            "vehicle",
+            "component"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "ComponentFailed"
+      ]
+    },
+    {
+      "description": "A wheel came off.",
+      "type": "object",
+      "properties": {
+        "WheelDetached": {
+          "type": "object",
+          "properties": {
+            "vehicle": {
+              "description": "Vehicle.",
+              "$ref": "#/$defs/EntityId"
+            },
+            "wheel": {
+              "description": "Wheel index (0 FL, 1 FR, 2 RL, 3 RR).",
+              "type": "integer",
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0
+            }
+          },
+          "required": [
+            "vehicle",
+            "wheel"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "WheelDetached"
+      ]
+    },
+    {
+      "description": "The vehicle is a total loss.",
+      "type": "object",
+      "properties": {
+        "TotalLoss": {
+          "type": "object",
+          "properties": {
+            "vehicle": {
+              "description": "Vehicle.",
+              "$ref": "#/$defs/EntityId"
+            }
+          },
+          "required": [
+            "vehicle"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "TotalLoss"
+      ]
+    },
+    {
+      "description": "A traffic violation was detected.",
+      "type": "object",
+      "properties": {
+        "TrafficViolation": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "description": "What happened.",
+              "$ref": "#/$defs/ViolationKind"
+            },
+            "vehicle": {
+              "description": "Offending vehicle.",
+              "$ref": "#/$defs/EntityId"
+            }
+          },
+          "required": [
+            "vehicle",
+            "kind"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "TrafficViolation"
+      ]
+    },
+    {
+      "description": "Police event with a payload defined by `wp_police` (opaque to everyone else).",
+      "type": "object",
+      "properties": {
+        "PoliceEvent": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "description": "Payload kind discriminator, defined by `wp_police`.",
+              "type": "integer",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0
+            },
+            "payload": {
+              "description": "Encoded payload, defined by `wp_police`.",
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "format": "uint8",
+                "maximum": 255,
+                "minimum": 0
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "payload"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "PoliceEvent"
+      ]
+    },
+    {
+      "description": "Economy event with a payload defined by `wp_economy` (opaque to everyone else).",
+      "type": "object",
+      "properties": {
+        "EconomyEvent": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "description": "Payload kind discriminator, defined by `wp_economy`.",
+              "type": "integer",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0
+            },
+            "payload": {
+              "description": "Encoded payload, defined by `wp_economy`.",
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "format": "uint8",
+                "maximum": 255,
+                "minimum": 0
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "payload"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "EconomyEvent"
+      ]
+    }
+  ],
+  "$defs": {
+    "Component": {
+      "description": "Mechanical component that can be damaged by intrusion.",
+      "oneOf": [
+        {
+          "description": "Engine block.",
+          "type": "string",
+          "const": "Engine"
+        },
+        {
+          "description": "Radiator / cooling pack.",
+          "type": "string",
+          "const": "Radiator"
+        },
+        {
+          "description": "Battery.",
+          "type": "string",
+          "const": "Battery"
+        },
+        {
+          "description": "Fuel tank.",
+          "type": "string",
+          "const": "FuelTank"
+        },
+        {
+          "description": "Steering rack.",
+          "type": "string",
+          "const": "SteeringRack"
+        },
+        {
+          "description": "Front-left suspension mount / arms.",
+          "type": "string",
+          "const": "SuspensionFL"
+        },
+        {
+          "description": "Front-right suspension mount / arms.",
+          "type": "string",
+          "const": "SuspensionFR"
+        },
+        {
+          "description": "Rear-left suspension mount / arms.",
+          "type": "string",
+          "const": "SuspensionRL"
+        },
+        {
+          "description": "Rear-right suspension mount / arms.",
+          "type": "string",
+          "const": "SuspensionRR"
+        },
+        {
+          "description": "Front-left wheel / hub attachment.",
+          "type": "string",
+          "const": "WheelFL"
+        },
+        {
+          "description": "Front-right wheel / hub attachment.",
+          "type": "string",
+          "const": "WheelFR"
+        },
+        {
+          "description": "Rear-left wheel / hub attachment.",
+          "type": "string",
+          "const": "WheelRL"
+        },
+        {
+          "description": "Rear-right wheel / hub attachment.",
+          "type": "string",
+          "const": "WheelRR"
+        },
+        {
+          "description": "Gearbox.",
+          "type": "string",
+          "const": "Gearbox"
+        },
+        {
+          "description": "Driveshaft / half-shafts.",
+          "type": "string",
+          "const": "Driveshaft"
+        },
+        {
+          "description": "Front-left brake.",
+          "type": "string",
+          "const": "BrakeFL"
+        },
+        {
+          "description": "Front-right brake.",
+          "type": "string",
+          "const": "BrakeFR"
+        },
+        {
+          "description": "Rear-left brake.",
+          "type": "string",
+          "const": "BrakeRL"
+        },
+        {
+          "description": "Rear-right brake.",
+          "type": "string",
+          "const": "BrakeRR"
+        },
+        {
+          "description": "Exhaust system.",
+          "type": "string",
+          "const": "Exhaust"
+        },
+        {
+          "description": "Head and tail lights (cosmetic + night visibility).",
+          "type": "string",
+          "const": "Lights"
+        }
+      ]
+    },
+    "EntityId": {
+      "description": "Simulation entity identifier (vehicles, debris, police units, traffic agents).\nAllocated by `wp_sim`, never reused within one instance.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "ViolationKind": {
+      "description": "Kind of traffic violation detected by `wp_world`.",
+      "oneOf": [
+        {
+          "description": "Exceeding the speed limit.",
+          "type": "object",
+          "properties": {
+            "Speeding": {
+              "type": "object",
+              "properties": {
+                "over_mps": {
+                  "description": "Amount over the limit, m/s.",
+                  "type": "number",
+                  "format": "float"
+                }
+              },
+              "required": [
+                "over_mps"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Speeding"
+          ]
+        },
+        {
+          "description": "Crossing a stop line on red.",
+          "type": "string",
+          "const": "RedLight"
+        },
+        {
+          "description": "Driving against lane direction.",
+          "type": "string",
+          "const": "WrongWay"
+        },
+        {
+          "description": "Collision with another road user or property.",
+          "type": "string",
+          "const": "Collision"
+        },
+        {
+          "description": "Near-misses / dangerous driving.",
+          "type": "string",
+          "const": "Reckless"
+        }
+      ]
+    }
+  }
+}

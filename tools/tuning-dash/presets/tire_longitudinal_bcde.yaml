@@ -1,0 +1,15 @@
+# Prompt 02: longitudinal B/C/D/E one at a time → launch and braking.
+description: Longitudinal Magic Formula B/C/D/E ±20 % (one at a time) → 0–100, 100–0
+probe:
+  kind: vehicle_metrics
+  metrics: [zero_to_100, braking]
+params:
+  - {target: "tire:{tire}:longitudinal.b", label: long B, op: scale, values: [0.8, 0.9, 1.0, 1.1, 1.2]}
+  - {target: "tire:{tire}:longitudinal.c", label: long C, op: scale, values: [0.8, 0.9, 1.0, 1.1, 1.2]}
+  - {target: "tire:{tire}:longitudinal.d", label: long D, op: scale, values: [0.8, 0.9, 1.0, 1.1, 1.2]}
+  - {target: "tire:{tire}:longitudinal.e", label: long E, op: scale, values: [0.8, 0.9, 1.0, 1.1, 1.2]}
+combine: each
+variants:
+  - {name: sedan (FWD), vars: {tire: street}, probe: {car: debug_sedan}}
+  - {name: coupe (RWD), vars: {tire: sport}, probe: {car: debug_coupe}}
+plots: [zero_to_100_s, braking_100_0_m]

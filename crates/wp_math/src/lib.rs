@@ -20,4 +20,4 @@ pub use fixed_step::FixedStep;
 pub use hash::{quantize, StateHasher};
 pub use interp::{clamp01, lerp, lerp3, nlerp_quat, smoothstep};
 pub use rng::Rng;
-pub use trig::{sin_cos, wrap_angle};
+pub use trig::{atan, atan2, sin_cos, wrap_angle};

@@ -5,12 +5,46 @@
 changed, why, and which workstreams must update. Only the integration lead edits the contract.
 Every session reads this file at start.
 
-## v0.2.0 — plan (not applied yet; decided 2026-10-19 by the lead)
+## v0.2.0 — applied 2026-10-19 (lead run 3)
+
+Physics is unchanged: every golden state hash is identical before and after (only the contract
+version in file headers changed). Schemas regenerated; all `data/` validates.
+
+**Breaking — you must update if you implement or call these:**
+| Change | Who | What to do |
+|---|---|---|
+| `VehicleSim::step(.., world, ground: &dyn GroundQuery, dt, out)` + new `GroundQuery` trait / `GroundHit` in `traits.rs` | A, D, F, anyone stepping a vehicle via the trait | pass a ground: `wp_vehicle::FlatGround` (tests) or `RapierGround`; both implement `GroundQuery`. `wp_vehicle::ContractGround` adapts the other way. |
+| `WorldQuery::line_of_sight(a, b) -> bool` (required) | every `WorldQuery` impl (D, E, K, test worlds) | implement it; worlds without occluders return `true`. D's `CityMap` tests building footprints (lead's first cut). |
+| `SimEvent::TrafficViolation` gains `pos: [f32; 3]` | D (emits), E, L (match) | fill the world position; match with `{ vehicle, kind, .. }`. |
+| New `SimEvent::GlassShattered { vehicle, region }`, `RegionDamaged { vehicle, region, severity }` | B (emits), C, F, J, M | exhaustive matches need arms. B should start emitting them. |
+| `PriceTable` gains `labour_hours: BTreeMap<RepairItem, f32>` and `repair_parts_fraction: Option<f32>` (serde-defaulted) | B, G | struct literals need the fields. `wp_damage` now uses both; G should fill them from `prices.toml`. |
+| `RepairLine::parts_cost` / `labour_hours` are **unscaled**; only `total` includes `repair_cost_scale` | B, G | `wp_damage` changed to match (it used to scale `parts_cost`). |
+| `WantedLevel` moved to `wp_contracts` (same variants and methods) | E, G, F, M | `wp_police` re-exports it, so `wp_police::WantedLevel` still works; prefer `wp_contracts::WantedLevel`. G can drop its `wp_police` dependency. |
+
+**Additive (optional fields, serde-defaulted, old data still loads):**
+- `VehicleDef::fuel_capacity_l: Option<f32>` (H fills; fuel in `mass_kg` at 50 %).
+- `WheelDef::inertia_kgm2: Option<f32>` (default `0.7·m·r²`), `DrivetrainDef::efficiency: Option<f32>`
+  (default 0.85) — both honoured by `wp_vehicle` now.
+- `DrivetrainDef::torque_converter: Option<TorqueConverterDef { stall_rpm, stall_torque_ratio,
+  coupling_rpm }>` — **A implements** (ignored today); H then sets it on the 5 automatics.
+- `DriveLayout::AwdOnDemand { base_front_split, max_rear_split, engage_slip }` — lead's first-cut
+  coupling in `wp_vehicle::base_split`; A owns tuning; H can switch Lindwurm / Wolfhound.
+- `WheelState { fx_n, fy_n }` — applied tire-frame forces, filled by `wp_vehicle`. C can drop its
+  force estimate; F should decide whether they go on the wire.
+- `BrakeDef` docs: capacity-per-wheel + pedal-split semantics with A's worked example.
+- `wp_math::{atan, atan2}` (moved from `wp_world::geom`, which re-exports them).
+
+**Deferred to v0.3.0** (need final variant lists from their owners; send them in your integration
+doc): typed `PoliceEvent` + `CaptainCommand` (E, with F/I), typed `EconomyEvent` incl.
+`StakeCharged`/`RacePayout` (G, F), full net protocol message sets (F), `DamageSim::{save_state,
+restore_state, apply_repair}` + `DamageSummary` (B, G), shared road-network trait (D, E),
+`TrafficAgentSnapshot` (D, F), `Accessory` body region (B, H), `DistrictId` (D, G).
+
+## v0.2.0 — original plan (2026-10-19; see the applied entry above for what landed)
 
 **Still v0.1.0 on the branch.** These are the decisions on every request filed so far, published
-early so running workstreams can code toward them. They land in **one** bump once machine E (06,
-police) has merged — B (damage), D (world) and F (net) requests are in the table now; E's (police
-events, LOS query, `tire_puncture` use, captain command payload) complete the batch. Requests filed by 05/07/13/14/15
+early so running workstreams can code toward them. All requesting workstreams (A–I) have now
+reported; the bump is the next lead run's first job. Requests filed by 05/07/13/14/15
 before then join it.
 
 | Change | From | Decision | Who must update |
@@ -43,6 +77,9 @@ before then join it.
 | `StakeCharged` / `RacePayout` economy events | F NET-4 | accepted (inside typed `EconomyEvent`) | G, F |
 | Quantised wire types in contracts | F NET-2 | rejected for now (stay in `wp_net`) | — |
 | `VehicleSim::teleport` | D #1 | rejected: inherent `Vehicle::set_pose_and_speed` is enough | — |
+| Typed `PoliceEvent` + `CaptainCommand` (from `wp_police`; no JSON payloads) | E #2, #3, F NET-3, I H1 | accepted | E, F, G, I |
+| `WorldQuery::line_of_sight(a, b) -> bool` | E #4 | accepted (D implements) | D, E |
+| Shared read-only road-network trait | E #5 | accepted in principle; shape from D + E | D, E |
 | Rear drum brakes + fade inputs | 09 #3 | deferred (post Checkpoint 1) | — |
 | Solid axles; roll-centre heights | 09 #5, #6 | deferred (post Checkpoint 2) | — |
 | `VehicleState::ffb` | 02 #6 | rejected (FFB is local-only; keep `VehicleSim::ffb`) | — |

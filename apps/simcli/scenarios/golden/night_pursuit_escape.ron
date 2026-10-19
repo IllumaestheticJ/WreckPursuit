@@ -31,6 +31,7 @@
     ],
     expect_pending: [
         pursuit_started_before(t_s: 6.0),
-        police_event_before(kind: 3, t_s: 12.0),
+        // wp_police::events::kind::PURSUIT_ENDED (escape).
+        police_event_before(kind: 4, t_s: 12.0),
     ],
 )

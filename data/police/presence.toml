@@ -1,0 +1,86 @@
+# Patrol presence, reinforcement, helicopter availability and tool unlocks (wp_police::dispatch).
+# Day: dense patrols, fast reinforcement, full toolset. Night: sparse, slow, helicopter iffy.
+
+max_ground_units = 24
+# A civilian-civilian contact faster than this creates a crash-scene incident.
+crash_incident_min_speed_mps = 8.0
+
+# Patrol unit count per district per phase (the dispatcher keeps this many pool units alive).
+[patrols.core]
+dawn = 2
+day = 8
+dusk = 6
+night = 3
+
+[patrols.suburb]
+dawn = 1
+day = 3
+dusk = 2
+night = 1
+
+[patrols.industrial]
+dawn = 1
+day = 2
+dusk = 2
+night = 1
+
+# A crash scene keeps one unit busy this long.
+[crash_scene_s]
+dawn = 180.0
+day = 240.0
+dusk = 180.0
+night = 120.0
+
+[reinforcement]
+# Ground units wanted on one racer per wanted level L1..L5.
+units_per_level = [1, 2, 3, 4, 6]
+# High-bounty racers get reinforcements up to this much sooner.
+priority_max_reduction = 0.3
+spawn_min_distance_m = 350.0
+
+# Reinforcement response time (uniformly sampled), s.
+[reinforcement.response_s.dawn]
+min = 40.0
+max = 90.0
+[reinforcement.response_s.day]
+min = 20.0
+max = 40.0
+[reinforcement.response_s.dusk]
+min = 30.0
+max = 70.0
+[reinforcement.response_s.night]
+min = 60.0
+max = 150.0
+
+# Unseen violations become a civilian report; a unit is dispatched to it after this delay.
+[reinforcement.report_dispatch_delay_s]
+dawn = 30.0
+day = 8.0
+dusk = 20.0
+night = 50.0
+
+[helicopter]
+min_level = 3
+[helicopter.count]
+dawn = 1
+day = 1
+dusk = 1
+night = 1
+[helicopter.launch_s]
+dawn = 90.0
+day = 45.0
+dusk = 70.0
+night = 120.0
+[helicopter.unavailable_chance]
+dawn = 0.15
+day = 0.0
+dusk = 0.1
+night = 0.25
+
+# Wanted level (1..=5) at which tools / tactics unlock.
+[unlocks]
+spikes_level = 2
+roadblock_level = 3
+pit_level = 2
+boxin_level = 2
+rolling_block_level = 3

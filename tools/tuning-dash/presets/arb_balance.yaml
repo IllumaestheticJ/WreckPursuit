@@ -1,0 +1,10 @@
+# Balance: front vs rear anti-roll bar → understeer gradient and lift-off rotation.
+description: Front ARB ×0.5–1.5 × rear ARB ×0.5–1.5 → understeer gradient, lift-off
+probe:
+  kind: vehicle_metrics
+  car: debug_sedan
+  metrics: [skidpad, lift_off]
+params:
+  - {target: "car:{car}:suspension[0,1].arb_n_per_m", label: front ARB, op: scale, values: [0.5, 1.0, 1.5]}
+  - {target: "car:{car}:suspension[2,3].arb_n_per_m", label: rear ARB, op: scale, values: [0.5, 1.0, 1.5]}
+plots: [understeer_deg_per_g, lift_off_yaw_rate_delta_rps, skidpad_max_lat_g]
