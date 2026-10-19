@@ -119,3 +119,16 @@ the schedule could hunt (1→2→1). New automatic (`crates/wp_vehicle/README.md
 | 30 | Siren audio error broke the frame loop (found by the e2e after row 29) | lead: siren pitch curves no longer overlap (float rounding); a bad curve can no longer stop the page | fixed on link v13 |
 | 31 | Hood does not crumple; headlights stay in place in crashes | R (panels): hood skinning; light parts on the surface and moving with the crush (then the lead drops the lamp markers) | dispatched |
 | 32 | AI cars, when blocked by a stationary vehicle, should go around it or turn around | D (traffic AI) | dispatched |
+
+## 2026-10-19 — step 2: 4-player test on Port Vesper v2 (F, `ws/net`)
+Found by the new 3-minute 4-client test (`crates/wp_net/tests/vesper_e2e.rs`) and the
+two-tab browser check (`just web-e2e-net`).
+| # | Item | Owner | Status |
+|---|---|---|---|
+| 33 | A player cop could not start a pursuit or capture anyone: player police seats were not `wp_police` units | F (+ glue `Sim::bind_player_police`) | fixed on `ws/net`: the cop spots racer 0 and starts the pursuit, takes the captain's order, calls in a roadblock + spikes, captures; all 4 clients see the capture |
+| 34 | Police never recognised a racer in downtown Port Vesper: sightlines at a fixed 1.3 m ran through the terrain (downtown is ~5 m up) | F fix in `wp_police::sees_at` (E to review) | fixed on `ws/net`; identical on flat cities (z < 1 m) |
+| 35 | Multiplayer on Port Vesper: own-car prediction drove on the flat slab while the server drives on terrain | F (`Rig::set_city_ground` with `wp_sim::city_ground_colliders`) | fixed: RMS correction 0.03–0.12 m on terrain |
+| 36 | Another player's car could freeze on one client for good (its first deltas arrived before `EntityEnter`; baseline deadlock) | F (protocol v5 `Inputs.missing`) | fixed: 0 missing baselines in 3 min |
+| 37 | Damaged cars entering view diverged on the next hit (positions-only snapshot, NET-N5) | F (full `DamageSnapshot` in lattice snapshots, provisional follow-up) | fixed: 0 / 3844 lattice hash mismatches (was 106 / 1345 in the first run) |
+| 38 | Roadblocks / spikes are never possible in downtown Port Vesper (a side street every 100 m breaks the 120 m sight rule) | E (police) design question | open |
+| 39 | Two browser tabs: join, see each other, crash, see each other's dents | owner | to playtest: `just server`, then `net.html?role=racer` in two tabs (the e2e passes) |

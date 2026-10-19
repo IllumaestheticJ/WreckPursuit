@@ -828,7 +828,7 @@ fn four_clients_three_minutes_in_port_vesper() {
             events[i].len(),
         );
         let mut top: Vec<(usize, u64)> = down.iter().copied().enumerate().collect();
-        top.sort_by(|a, b| b.1.cmp(&a.1));
+        top.sort_by_key(|x| std::cmp::Reverse(x.1));
         top.truncate(3);
         println!("p{i} busiest seconds (index, bytes): {top:?}");
         total_hash += s.hash_checks;
