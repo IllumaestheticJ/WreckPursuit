@@ -22,7 +22,9 @@ use wp_economy::{
 };
 use wp_math::Rng;
 use wp_police::scenario::ScenarioWorld;
-use wp_police::{PoliceConfig, PoliceEvent, PoliceEventExt, PoliceSetup, PoliceSystem, PursuitOutcome, RacerView};
+use wp_police::{
+    PoliceConfig, PoliceEvent, PoliceEventExt, PoliceSetup, PoliceSystem, PursuitOutcome, RacerView,
+};
 
 const RACER: EntityId = EntityId(7);
 

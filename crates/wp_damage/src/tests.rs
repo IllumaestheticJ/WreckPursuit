@@ -718,11 +718,6 @@ fn crash_and_settle(
     out
 }
 
-
-
-
-
-
 #[test]
 fn glass_breaks_are_readable_for_the_tick_they_happen() {
     let car = sedan();
@@ -903,7 +898,6 @@ fn arcade_limp_mode_settles_partially_and_sim_does_not() {
         }
     }
 }
-
 
 #[test]
 fn snapshot_round_trips_into_a_fresh_model() {

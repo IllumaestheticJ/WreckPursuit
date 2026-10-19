@@ -11,7 +11,7 @@ use simcli::run::build_sim;
 use simcli::{load_scenario, FsData, RunOptions};
 use wp_contracts::{DamageSim, EntityId, SimEvent, VehicleSim};
 use wp_opponent::{CarCapability, DriverProfile, EventHeat, VehicleObs};
-use wp_police::{PoliceEvent, RacerView};
+use wp_police::{PoliceEvent, PoliceEventExt as _, RacerView};
 use wp_race::bridge::{plan_city_race, CityRace};
 use wp_race::entrants::{AiEntrant, AiEntrants};
 use wp_race::schedule::Venue;

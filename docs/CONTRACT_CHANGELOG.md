@@ -7,6 +7,8 @@ Every session reads this file at start.
 
 ## v0.3.0 — applied 2026-10-19 (branch `lead/contract-v0.3.0`)
 
+- Amendment (lead round 8, additive): `DnfReason::Fled` (AI entrants abandoning a race to flee police; machine L).
+
 The deferred v0.2.0 batch, using each owner's final list. Behaviour is unchanged: no
 simulation code path reads the new data yet (only new fields are filled), so every golden state
 hash is identical; only the `contract=` header of `hashes.txt` changes (a header-only
