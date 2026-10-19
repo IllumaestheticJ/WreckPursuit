@@ -44,8 +44,9 @@ export class TelemetryPlots {
   private samples: { t: number; v: number[] }[] = [];
 
   constructor(parent: HTMLElement) {
-    this.canvas.width = 360;
-    this.canvas.height = 4 * 70;
+    // Short strip: at 4 × 70 px it covered the lower half of the car in the near chase camera.
+    this.canvas.width = 340;
+    this.canvas.height = 4 * 48;
     this.canvas.className = "panel telemetry";
     parent.appendChild(this.canvas);
     this.ctx = this.canvas.getContext("2d")!;

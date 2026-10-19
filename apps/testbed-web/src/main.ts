@@ -51,6 +51,9 @@ interface AppState {
   bench: { n: number; frames: number; sim: number; render: number; t0: number; tick0: number } | null;
   /** Frame-time breakdown (ms, smoothed) and real-time factor; read by the HUD and e2e. */
   perf: { simMs: number; viewsMs: number; renderMs: number; frameMs: number; rtf: number };
+  /** Sim events seen this session, by kind (`TrafficViolation`, `Police`, …). The event feed
+   * keeps only 12 lines, so automation waits on these counts instead of the feed text. */
+  eventCounts: Record<string, number>;
 }
 
 const app: AppState = {
@@ -67,6 +70,7 @@ const app: AppState = {
   input: { steer: 0, throttle: 0, brake: 0, handbrake: 0, clutch: 0, gearUp: false, gearDown: false, horn: false, headlights: false },
   bench: null,
   perf: { simMs: 0, viewsMs: 0, renderMs: 0, frameMs: 0, rtf: 1 },
+  eventCounts: {},
 };
 
 async function main(): Promise<void> {
@@ -89,6 +93,7 @@ async function main(): Promise<void> {
     rests.clear();
     scene.clearContacts();
     hud.clearEvents();
+    app.eventCounts = {};
     plots.clear();
     ui.reset();
     syncViews();
@@ -448,6 +453,10 @@ async function main(): Promise<void> {
       }
     }
     const events = sim.eventsDrain();
+    for (const ev of events) {
+      const kind = Object.keys(ev)[0];
+      if (kind) app.eventCounts[kind] = (app.eventCounts[kind] ?? 0) + 1;
+    }
     scene.addEvents(events);
     panelEvents(events);
     stepDebris(app.paused && !replay ? 0 : dt);
