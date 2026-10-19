@@ -303,3 +303,10 @@ Contract requests:
 | TB-6 lattice nodes in hash | **Done** by 10's hash spec v1 (nodes are hashed). |
 
 Perf: please re-measure `?bench=24` now that the real model runs (your numbers were stub physics).
+
+### Run 2 (2026-10-19)
+- Real damage (B) is live: the lattice/stress layers now show deformation; head-on scenario passes 3/4
+  pending damage checks. `e2e` all green.
+- Machine D asks for an agents export (`Float32Array` of `x, y, z, yaw, flags` per traffic agent) and
+  the greybox city (`data/city/procedural_12x12.greybox.glb`); `Sim::set_world` exists to load a city.
+- Machine F's `net.html` will land in your app when F re-lands; keep `src/net/` theirs.

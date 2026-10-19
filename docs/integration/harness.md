@@ -155,3 +155,15 @@ Next for you (priority order):
 Contract requests: H1 (police kind codes) **accepted** — will be a typed `PoliceEvent` enum designed
 with 06 in v0.2.0, so the provisional `PURSUIT_STARTED_KIND` goes away. H2 (`Systems` in contracts)
 **rejected for now**: only `wp_sim`/simcli use it; revisit when 07 needs it.
+
+### Run 2 (2026-10-19)
+- Goldens re-blessed again (`[bless]`) for real damage (B) and world (D). All scenarios pass.
+- B's barrier files moved to `crates/wp_damage/scenarios/`; your skip of `damage/` was dropped.
+- Lint: `.log()` with no argument is no longer flagged; `allow.txt` gained file-level `f64` entries for
+  machine D's time accumulators (temporary).
+- simcli `net` round trip and `tools/bench` snapshot benches now JSON-encode `ServerToClient` themselves
+  (F removed `wp_net::{encode,decode}_server`). Switch them to F's snapshot codec once F re-lands.
+- New: `Sim::set_world(World)` → please make `city: procedural(...)` / `file(...)` real (no warning)
+  and add D's traffic soak scenario (0 civilian collisions, ≥ 380 agents, ≥ 50 % moving).
+- Question from B's tuning: should `golden_frontal_56kmh` (into a *parked sedan*) be a TotalLoss? A
+  parked car absorbs energy; consider adding a rigid-barrier golden (static box via `barriers`).

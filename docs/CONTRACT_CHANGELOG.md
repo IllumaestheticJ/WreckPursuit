@@ -8,9 +8,9 @@ Every session reads this file at start.
 ## v0.2.0 — plan (not applied yet; decided 2026-10-19 by the lead)
 
 **Still v0.1.0 on the branch.** These are the decisions on every request filed so far, published
-early so running workstreams can code toward them. They land in **one** bump once 03 (damage) and
-06 (police) have merged, because their requests (damage summary/state, region energy, police
-events, LOS query, `tire_puncture` use) belong in the same batch. Requests filed by 05/07/13/14/15
+early so running workstreams can code toward them. They land in **one** bump once machine E (06,
+police) has merged — B (damage), D (world) and F (net) requests are in the table now; E's (police
+events, LOS query, `tire_puncture` use, captain command payload) complete the batch. Requests filed by 05/07/13/14/15
 before then join it.
 
 | Change | From | Decision | Who must update |
@@ -33,6 +33,16 @@ before then join it.
 | `DamageSummary { health, total_loss }` next to the estimate | 08 #3 | deferred to 03's merge | 03, 08 |
 | `DistrictId` | 08 #6 | deferred to 05's merge | 05, 08 |
 | `Sim::debug_intents()` | 04 TB-5 | deferred to 05/06 | 05, 06 |
+| `SimEvent::GlassShattered { vehicle, region }`, `SimEvent::RegionDamaged { vehicle, region, severity }` | B #1, #3 | accepted | B, C, F, E |
+| `PriceTable::repair_parts_fraction: Option<f32>` | B #2 | accepted (with G #2's labour map) | B, G |
+| `SimEvent::TrafficViolation` gains `pos: [f32; 3]` | D #2 | accepted | D, E, F |
+| `TrafficAgentSnapshot` + snapshot field | D #3 | accepted; designed with F | D, F, C |
+| `wp_math::atan2` (moved from `wp_world::geom`) | D #4 | accepted (lead) | D, A, E |
+| Full net protocol message sets into contracts | F NET-1 | accepted in principle; F sends final list | F, C |
+| Durable account id separate from per-instance `PlayerId` | F NET-5 | accepted | F, G |
+| `StakeCharged` / `RacePayout` economy events | F NET-4 | accepted (inside typed `EconomyEvent`) | G, F |
+| Quantised wire types in contracts | F NET-2 | rejected for now (stay in `wp_net`) | — |
+| `VehicleSim::teleport` | D #1 | rejected: inherent `Vehicle::set_pose_and_speed` is enough | — |
 | Rear drum brakes + fade inputs | 09 #3 | deferred (post Checkpoint 1) | — |
 | Solid axles; roll-centre heights | 09 #5, #6 | deferred (post Checkpoint 2) | — |
 | `VehicleState::ffb` | 02 #6 | rejected (FFB is local-only; keep `VehicleSim::ffb`) | — |

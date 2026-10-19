@@ -132,3 +132,10 @@ Next for you (in priority order):
    `debug_sedan` 0-100 8.13 s, 100-0 42.9 m, 0.89 g · `debug_coupe` 5.23 s, 42.5 m, 0.95 g.
 3. Note for scenario authors: `assists: off` = manual gearbox (no upshifts); the lift-off golden now
    uses a custom profile (aids off, auto gears).
+
+### Run 2 (2026-10-19)
+- Lead added two inherent methods to your real `Vehicle` (`vehicle.rs`): `set_pose_and_speed` (machine D's
+  traffic promotion) and `set_state(&VehicleState)` (machine F's prediction rewind; on `lead/net-merge`
+  only until F re-lands). Please review them and keep them.
+- Machine F needs a client-side single-car stepper that matches the server bit-for-bit (`rig::Rig`-like,
+  own Rapier world) for prediction — the trait `step` flat-plane path diverges. Coordinate in net.md.
