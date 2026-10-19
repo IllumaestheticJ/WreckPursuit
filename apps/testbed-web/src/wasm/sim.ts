@@ -172,6 +172,10 @@ export const sim = {
   /** Police units that are not sim vehicles: [x, y, z, yaw, speed, flags] each. */
   policeUnits: (): Float32Array => wasm.police_units(),
   policeStatus: (entity: number): PoliceStatus | null => JSON.parse(wasm.police_status(entity)),
+  /** Static city map for the UI kit's minimap / full map (`wp_wasm::map`); `null` on the flat world. Once per city. */
+  mapStaticJson: (): string => wasm.map_static_json(),
+  /** Per-frame map data for `player` (units, tools, search zone; layout in ui-kit `src/map/data.ts`). */
+  mapDynamic: (player: number): Float32Array => wasm.map_dynamic(player),
   stateHash: (): string => wasm.state_hash(),
   latticeNodes: (entity: number): Float32Array => wasm.lattice_nodes(entity),
   latticeRest: (entity: number): Float32Array => wasm.lattice_rest(entity),

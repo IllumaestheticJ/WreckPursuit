@@ -71,7 +71,7 @@ export class AudioPanel {
     });
     const head = document.createElement("div");
     head.style.cursor = "pointer";
-    head.innerHTML = "<b>audio</b> <span class='dim'>(M mute, click to fold)</span>";
+    head.innerHTML = "<b>audio</b> <span class='dim'>(V mute, click to fold)</span>";
     this.status = document.createElement("div");
     this.status.className = "dim";
     this.body = document.createElement("div");

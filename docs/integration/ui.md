@@ -23,6 +23,7 @@
 | `tools/gen-runtime-schemas` | standalone Rust crate: JSON Schemas for runtime contract types → `apps/ui-kit/schemas/runtime/` | lead may want to fold this into `gen-schemas` |
 | `tools/record-police` | standalone Rust crate: drives E's real `PoliceSystem` with a scripted racer and records `events.jsonl` + `metrics.csv` + `captain.jsonl` (`CaptainView` at 0.5 Hz) + E's road graph as `map.json` (`npm run gen:police`) | E (a reproducible pursuit trace), anyone needing real police output before `wp_sim` wires police |
 | `model/police.ts` | re-exports the generated `PoliceEvent`, `CaptainCommand`, `UnitOrder`, `CaptainError`, …; hand mirror of `wp_police::{CaptainView, UnitView, RacerSighting, ToolReadiness, Incident}` (not in the contract, UI-3); `decodePoliceEvent`, `captainMessage` (→ `ClientToServer::CaptainCommand`), `captainErrorText` | client code talking to police |
+| City map HUD (`src/map/`, exported from `src/live`) | `mountMapHud(parent, { onOpenChange?, minimapPlacement? }) → MapHud` with `setStatic(json)` once per city, `frame(map_dynamic, nowMs)` each frame, `toggle()` / `open()` / `close()` / `isOpen`, `setSignals`, `setMinimapVisible`, `stats()`; pure helpers `decodeMapDynamic`, `worldToMinimap`, `minimapMatrix`, `radiusForSpeed`, `fitBounds`, `zoomAt`, `pan`, `districtLabels` | testbed (mounted), later the game client |
 | `ChaseEndDetector` (`src/live/chaseEnd.ts`) | `update(racer, status, level, events, freshOutcome?) → { how, outcome, level } \| null`, once per chase | testbed (bill on capture / wreck), any live host |
 | Demo | `npm run demo` → http://localhost:5180 | everyone |
 
@@ -32,6 +33,57 @@ Wiring into the testbed (04 owns it; nothing edited there):
 import { mountUi, createMockModel } from "../../ui-kit/src";
 const hud = mountUi(document.getElementById("hud-overlay")!, { model: createMockModel({ screen: "hud" }), screen: "hud", globalKeys: false });
 ```
+
+## City map HUD (round 9, owner request "we need a game map HUD with police")
+
+Screenshots: `docs/media/map/` (`node apps/testbed-web/e2e/map_shots.mjs`).
+
+- **Minimap** (always on; testbed layer `'` "minimap", left column under the input panel because
+  the testbed's bottom-right holds the event feed; the kit's default is bottom-right): heading up,
+  radius 160 m standing → 480 m at 45 m/s (smoothed), roads blitted from one offscreen canvas per
+  city (0.76 px/m for Port Vesper, ≈ 2600 × 2400 px), bridge decks drawn over a dark casing so
+  Loop 9's overpass reads as on top. Police: lights on (respond / pursue / intercept / roadblock /
+  spikes) = alternating red/blue dot with a halo; patrol / idle = steady dim blue; helicopter =
+  diamond with a rotor ring. Units outside the disc that are chasing you (or the helicopter) sit
+  on the rim. While wanted: every ground unit's sight radius (one union fill; the police see all
+  round, buildings permitting, so this is a circle, not a cone), the helicopter's range ring and
+  spotlight disc, intercepting units' target point; while SEARCHING: the search zone (last known
+  position, dashed amber) and the escape ring around the rim with `ESCAPE nn%`. Roadblocks
+  (red/white bar) and spike strips (yellow teeth). Garages and safehouses as icons. Traffic
+  signals optional (testbed layer `;`). Rim: red/blue blinking in pursuit, amber searching.
+  Caption: district + speed.
+- **Full map** (testbed **M** or **Tab**; **M** / **Tab** / **Esc** close): whole city fitted,
+  districts tinted by kind and named, roads by class, decks cased, POIs with names (garages,
+  safehouses, police stations, helipads, race starts), player with a locator ring, police and
+  sight / search as on the minimap. Drag / arrows / WASD pan, wheel / + / − zoom at the cursor,
+  0 whole city, F follow. Legend panel (swatches drawn by the same code as the map). While open,
+  the testbed sends the player's car neutral input with brake 0.35 (input paused, sim running).
+- **District names:** the city data has no zone names (CITY.md C2, still open), so Port Vesper
+  v2's names live in `src/map/districts.ts` by zone index (Lantern Row, Midtown, Harbor Blvd,
+  Gantry Row, Canal Flats, Mercer, Eastgate, Hollins Heights, Bayview Bluffs, Larkspur); other
+  cities show the district kind. A ring zone (Midtown around Lantern Row) is labelled on the ring.
+- **Style:** scanner-green monospace for titles / labels / player; roads muted grey-green so the
+  police lights are the brightest thing; grime + scanlines on the full-map chrome only (off with
+  the high-contrast palette); colours come from the kit's CSS variables, so the colour-blind
+  palettes apply.
+- **Search radius** is presentation only: `wp_police` has no explicit search area, so the zone is
+  `min(60 m + 10 m/s × time since line of sight was lost, 600 m)` around `last_known`
+  (`wp_wasm::map::search_radius`). **For E:** if police get a real search area, put it in the
+  record and I'll draw that instead.
+
+### wasm surface (`crates/wp_wasm/src/map.rs`, C's crate; minimal, read-only)
+
+| Function | Returns |
+|---|---|
+| `map_static_json()` | `null` on the flat world, else `{ city, bounds: [x0,y0,x1,y1], roads: [{ class 0 highway…4 alley, layer 0 grade / 1 deck, pts: [x,y,…] }], zones: [{ id, kind, poly }], pois: [{ kind, name, pos }], signals: [[x,y]] }` from `RoadGraphView` (classes) + each road's own `RoadSurface` vs the terrain (deck = > 1.5 m above, as `deck_rails`). Port Vesper: 103 kB JSON. |
+| `map_dynamic(player)` | `f32` array: header 20 (`[version 1, n_units, n_tools, status 0 clear/1 wanted/2 pursuit/3 searching, level, search_x, search_y, search_r, escape 0..1, car_sight_m, heli_sight_m, heli_spot_m, last_x, last_y, has_last, player_x, player_y, player_yaw, player_speed, has_player]`), then per unit 8 (`[id, x, y, yaw, speed, flags, target_x, target_y]`; flags = state code 0–8 in bits 0–3 + 16 heli, 32 lights, 64 on player, 128 wrecked, 256 human, 512 has target), then per tool 6 (`[kind 0 roadblock / 1 spikes, x, y, dir_x, dir_y, half_len_m]`). Every unit, bound or internal, from `wp_police` unit bodies. `police_units()` / `police_status()` stay as they are (C's 3D view and the chase readout use them). |
+
+Tests: `wp_wasm` `map::tests` (Vesper: classes, decks, zones, POIs, size; grid flat; dynamic
+layout vs the police unit count and the player pose/yaw convention; search radius); ui-kit
+`src/map/*.test.ts` (23: heading-up projection and rotation for any yaw, inverse, canvas matrix,
+composition with the road cache, glyph rotation, speed zoom, rim clamp, full-map fit / zoom at
+cursor / pan, decoder, district labels); testbed e2e (minimap shows the player + police dots in
+the city chase; M opens, M closes, Tab opens, Esc closes).
 
 ## Needs — data per screen, owner, status
 
@@ -164,6 +216,10 @@ are removed. C's `src/police.ts` maps the status onto the kit's readout.)
 | `crates/wp_wasm/src/garage.rs` (new) | C | `repair_quote_json(entity, request_json)`: the running car's `DamageSim::repair_estimate` (economy `PriceTable` for its class/value) priced by `wp_economy::Economy::quote_repair` (shop, district, mode, wanted markup, insurance, salvage). Read-only. |
 | `crates/wp_wasm/src/lib.rs` | C | `pub mod garage;` |
 | `crates/wp_wasm/Cargo.toml` | C | `wp_economy` dependency (default features; `cargo tree --target wasm32-unknown-unknown` shows no rusqlite). |
+| `crates/wp_wasm/src/map.rs` (new), `lib.rs` (`pub mod map`, `map_static_json`, `map_dynamic`) | C | City map HUD data (round 9), read-only. |
+| `apps/testbed-web/src/ui/map.ts` (new), `main.ts`, `wasm/sim.ts`, `settings.ts` | C | Mount the kit's map HUD; `map.reset()` on rebuild, `map.frame()` after `ui.frame`; **M** / **Tab** toggle the full map; neutral input + brake 0.35 while it is open; layers `'` minimap, `;` minimap signals; `map` on `window.__wp`. |
+| `apps/testbed-web/src/audio/index.ts`, `audio/panel.ts`, `hud.ts` | C / J | **Mute moved M → V; "follow the next car" moved Tab → backquote** (the owner asked for M / Tab on the map); help text updated. |
+| `apps/testbed-web/e2e/run.mjs`, `e2e/map_shots.mjs` (new) | C | Map checks after the city chase; screenshot script for `docs/media/map/`. |
 | `apps/testbed-web/src/ui/overlay.ts` (round 8) | C | Chase end via the kit's `ChaseEndDetector` (typed `PursuitEnded`, else status + fresh `last_outcome`) instead of back-computing the end tick from `outcome_age_s`; bill still opens on capture / wreck only (C's choice: not on escape); `ui.lastChaseEnd` = `{ how, outcome, level, tick }`. |
 | `apps/testbed-web/e2e/run.mjs` (round 8) | C | Stubbed banner flow: a pursuit frame before the capture (a capture always follows a chase), and checks `ui.lastChaseEnd` (escaped, then captured at L3). |
 | `apps/testbed-web/src/ui/overlay.ts` (new; all testbed-side UI-kit glue lives in `src/ui/`) | C | Mounts the kit's `chaseHud` and `repairBill` overlays on a `createLiveModel()` fed each frame with the drained events + `police_status`. Opens the bill by itself when a chase ends (kit's `ChaseEndDetector`); `ui.lastChaseEnd` records how. |
@@ -208,9 +264,27 @@ police event for it reaches the client; when E adds one, `ChaseEndDetector` shou
 | HUD frame pacing, mock playing (3 s) | 4-core cloud container, headless Chromium 141 | — | 181 frames, p50 16.7 ms, p95 16.7 ms, 0 long tasks | 60 fps |
 | Captain map (canvas redraw/frame, heat map 4 Hz) | same | — | 181 frames, p50 16.7 ms, p95 16.8 ms, 0 long tasks | 60 fps |
 | Captain map on the recorded wp_police run (12 units, CaptainView interpolation) | same | — | 60 fps, 0 long tasks (e2e screenshot run) | 60 fps |
+| City map HUD, Port Vesper city chase (5 units), testbed, sim paused (`map_shots`-style script) | same | — | `map_static_json` 4.9 ms + parse 1.7 ms + road cache 24 ms, once per city; `map_dynamic` 0.007 ms; minimap draw 0.07 ms/frame; full map open (+ minimap) 0.27 ms/frame (CPU time of the canvas calls; headless GPU raster not included) | 60 fps |
 | Demo bundle (incl. fixtures + data) | — | — | 1.42 MB JS / 256 kB gzip (incl. the 410 kB `captain.jsonl` fixture), 30 kB CSS | — |
 
+## Checks (round 9, this container, after merging `main`)
+
+`cargo fmt --check`, `cargo clippy --workspace -D warnings`, `cargo test --workspace` (120 suites,
+0 failures), wasm32 release build of `wp_wasm` (packaged with `wasm-bindgen` 0.2.129; no
+wasm-pack here), testbed `tsc`, ui-kit `tsc` + vitest 81 / 81, ui-kit e2e (60 fps, 0 long tasks),
+testbed `npm run e2e`: all checks pass, including the two new map checks. The first e2e run of
+the session failed both `debugParkNearPolice`-based checks (the map one and the lead's capture
+check: the park never succeeded within its timeout) and logged an audio
+`setValueCurveAtTime overlaps` page error; the rerun passed everything. Looks like a flake in the
+park helper / audio scheduling under load, not in the map code (it only reads); **for C / J** if
+it shows up again.
+
 ## Known gaps
+
+- Map: zone names are a UI-side table for Port Vesper v2 (CITY.md C2 asks for `Zone.name`); the
+  search zone radius is UI-defined (no police search area); the minimap's signals are junction
+  markers, not live colours; the kit's demo page has no map screen (the testbed is its surface);
+  no water polygons in the city data, so the sea is just background.
 
 - Race progress, crews, lobby and results are mock-only (see Needs). Police has a recorded real
   run (`police_pursuit`, E's city, not D's: E has not switched to D's road network yet).

@@ -17,6 +17,7 @@ import { Hud } from "./hud";
 import { TelemetryPlots } from "./telemetry";
 import { AudioSystem } from "./audio";
 import { UiOverlay } from "./ui/overlay";
+import { MapOverlay } from "./ui/map";
 import { RunEndView } from "./ui/runEnd";
 import { RealTimeMeter } from "./rtf";
 
@@ -84,6 +85,7 @@ async function main(): Promise<void> {
   const plots = new TelemetryPlots(overlay);
   const audio = new AudioSystem(scene.world, overlay);
   const ui = new UiOverlay(overlay);
+  const map = new MapOverlay(overlay);
   // End-of-run panel (lead): capture / wreck → result + "Repair & continue" / "Restart".
   const runEndEl = document.createElement("div");
   runEndEl.id = "ui-run-end";
@@ -112,6 +114,7 @@ async function main(): Promise<void> {
     app.eventCounts = {};
     plots.clear();
     ui.reset();
+    map.reset();
     runEnd.reset();
     syncViews();
     const ids = sim.entities();
@@ -410,8 +413,12 @@ async function main(): Promise<void> {
         sel.dispatchEvent(new Event("change"));
         break;
       }
-      case "Tab": {
+      case "KeyM":
+      case "Tab":
         e.preventDefault();
+        map.toggle();
+        break;
+      case "Backquote": {
         const ids = [...app.views.keys()];
         app.focus = ids[(ids.indexOf(app.focus) + 1) % ids.length];
         rig.setMode(rig.mode, app.views.get(app.focus)?.root);
@@ -469,7 +476,8 @@ async function main(): Promise<void> {
       app.source = source;
       if (!app.scenario && !app.bench) applyAssistPreset(source);
     }
-    if (!replay && !app.bench) sim.setInput(app.player, input);
+    // The full city map pauses driving input (the sim keeps running): coast with light brakes.
+    if (!replay && !app.bench) sim.setInput(app.player, map.isOpen ? { ...input, throttle: 0, steer: 0, brake: 0.35, handbrake: 0, gearUp: false, gearDown: false } : input);
 
     const t0 = performance.now();
     if (!app.paused || replay) app.alpha = sim.step(app.paused && !replay ? 0 : dt);
@@ -513,6 +521,7 @@ async function main(): Promise<void> {
     {
       const w = sim.worldInfo();
       ui.frame(w[W.tick], app.player, events, w[W.hours], modeName());
+      map.frame(app.player, now);
       if (!replay) runEnd.update(sim.runResult(), now);
     }
     scene.update(dt, sim.intents());
@@ -681,6 +690,8 @@ async function main(): Promise<void> {
     sim,
     app,
     scene,
+    /** City map HUD (UI kit): `map.hud.stats()`, `map.toggle()`. */
+    map,
     ready: true,
     stopRecording,
     loadReplay,

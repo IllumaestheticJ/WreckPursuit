@@ -1,7 +1,8 @@
 // Debug layer toggles and other per-viewer settings, persisted in localStorage.
 // To add a debug layer: add an entry to LAYERS (key + label + default), then read
 // `layers.on("<id>")` where you draw it. The help overlay and hotkeys pick it up automatically.
-// Keys 1–8 are camera angles (cameras.ts) and M is audio mute: keep layer keys off them.
+// Keys 1–8 are camera angles (cameras.ts), V is audio mute, M / Tab open the city map and `
+// follows the next car: keep layer keys off them.
 
 export interface LayerDef {
   id: string;
@@ -28,6 +29,8 @@ export const LAYERS: LayerDef[] = [
   { id: "events", key: "F4", label: "event feed (damage, glass, parts, violations)", default: true },
   { id: "telemetry", key: "KeyJ", label: "telemetry plots", default: true },
   { id: "inputs", key: "KeyN", label: "input display + rack torque", default: true },
+  { id: "minimap", key: "Quote", label: "minimap (UI kit; M or Tab opens the city map)", default: true },
+  { id: "mapSignals", key: "Semicolon", label: "minimap: traffic signals", default: false },
   { id: "chase", key: "KeyZ", label: "chase readout: wanted / heat / bounty / pursuit (UI kit)", default: true },
 ];
 
