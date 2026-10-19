@@ -159,5 +159,6 @@ describe what "correct" means so they survive tuning.
                 inputs: [(t_s: 14.0, input: (brake: 1.0)), (t_s: 17.0, input: ())])],
     duration_s: 18.0,
     expect: [speed_at(t_s: 13.9, min: 27.0, max: 28.6), speed_at(t_s: 17.0, min: -0.1, max: 2.0)],
+    expect: [speed_at(t_s: 13.9, min: 27.0, max: 28.6), speed_at(t_s: 17.0, min: -0.5, max: 2.0)],
 )
 ```

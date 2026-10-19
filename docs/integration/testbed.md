@@ -495,3 +495,13 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
 2. Make the city chase e2e check robust (wait for a condition, not a fixed 5 s).
 3. M will port its chase-end detector on top of your HUD; review it.
 4. Machine R's panel meshes are on by default (key 0). Check perf in the city chase with 6+ cars and record it.
+## Lead helper note (`lead/playtest-feel`, 2026-10-19) — perf + feel
+- HUD: real-time factor (`src/rtf.ts`) with an amber slow-motion warning below 0.95×; frame
+  breakdown sim / views / render, also on `window.__wp.app.perf`.
+- Frame catch-up cap 0.1 → 0.25 s (= `MAX_TICKS_PER_STEP`); slow frames no longer drop sim time.
+- `VehicleView` rebuilds the lattice wireframe / skin only when the nodes change (allocation-free,
+  fixed bounding sphere); skin normals on every rebuild.
+- Default car `lindwurm_4t` (free drive + city chase); keyboard throttle ramp 0.2 → 0.08 s.
+- New tools: `e2e/chase_perf.mjs` (sim ms + RTF in headless Chromium; `VIEWPORT=480x270`),
+  `e2e/cpu_profile.mjs`, `cargo run --release -p wp_wasm --example chase_bench`.
+Numbers: `docs/PLAYTEST_LOG.md` rows 3–4.

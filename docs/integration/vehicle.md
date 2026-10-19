@@ -397,3 +397,11 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
 1. Read `WorldQuery::weather_at` (v0.3.0 W-1) per wheel into your surface-conditions hook; the lead wires weather into `wp_sim` next.
 2. `surfaces.toml`: add a `PaintedLine` row.
 3. Review the lead helpers' merged changes in your crate: gearbox/shift logic (`lead/playtest-feel`) and slide gyro / lock opening (`lead/playtest-drift`, `src/slide.rs`). You own them now.
+## Lead helper note (`lead/playtest-feel`, 2026-10-19) — automatic gearbox rework
+Owner playtest: "the transmission is sloppy". Changed in `wp_vehicle` (shift scheduling and
+clutch logic only; the converter model and its under-power blend are untouched):
+`Gearbox::auto_shift(def, &ShiftInputs, dt)` (load schedule, anti-hunting band, kickdown,
+corner hold, braking hold), clutch shifts in three phases with rev-matching, `filter_pedal`
+full strength 0.6 → 0.3 s, snapshot format 3. Details, numbers and the two test bounds that
+moved: `docs/integration/playtest-feel.md` and the README's "Automatic gearbox" section. When
+you merge your converter work, `auto_shift` now takes `&ShiftInputs`.

@@ -16,7 +16,7 @@ with assists and unfiltered on a wheel. Deterministic, 240 Hz with 2 sub-steps.
 | `suspension.rs` | spring + preload, bump/rebound damping, bump stop, anti-roll bars |
 | `tire.rs` | simplified Magic Formula, load sensitivity, combined slip (normalised slip vector), relaxation length, low-speed guard |
 | `engine.rs` | torque curve, idle controller, soft rev limiter, engine braking, turbo lag (`EngineExtras`) |
-| `drivetrain.rs` | gearbox (manual/auto, shift cut, kickdown, auto-reverse), automatic clutch / launch control, open/LSD/locked diff transfer |
+| `drivetrain.rs` | gearbox (manual/auto: load-based schedule, kickdown, corner hold, rev-matched clutch shifts, auto-reverse), automatic clutch / launch control, open/LSD/locked diff transfer |
 | `brakes.rs` | bias, ABS (~15 Hz release cycle) |
 | `steering.rs` | speed-sensitive lock/rate, countersteer help, Ackermann, toe, damage pull, FWD torque steer |
 | `assists.rs` | pedal filters, TCS, ESC |
@@ -63,7 +63,28 @@ the turbine multiplies by `stall_torque_ratio` at stall falling to 1:1 at the co
 The converter's stiffness is applied semi-implicitly on both engine and wheels (it is stiff in
 first gear). Idle in gear creeps at walking pace; TCS cuts throttle (no clutch to trim).
 
-**Power-on shifts (converter automatics):** a clutch gearbox cuts drive for `shift_time_s`. A
+**Automatic gearbox (playtest round, `lead/playtest-feel`).** One schedule for clutch and
+converter automatics (`drivetrain::schedule`, `Gearbox::auto_shift(def, &ShiftInputs, dt)`):
+
+| Rule | Value (fraction of redline) |
+|---|---|
+| Load | pedal, held up by a filter that rises in 0.12 s and falls in 0.8 s |
+| Upshift point | 0.36 (light) … 0.975 (full load), linear in load |
+| Downshift point | 0.20 … 0.45 by √load (part throttle already asks for the lower gear); 0.36 while braking |
+| Anti-hunting | a shift is taken only if the new gear lands ≥ 0.05 clear of the opposite point; no reversal for 1 s, no repeat for 0.25 s |
+| Limiter | ≥ 0.985 forces an upshift |
+| Kickdown | pedal ≥ 0.9 and ≥ 0.3 ahead of the load: straight to the lowest gear ≤ 0.85 (skips gears) |
+| Corner hold | lateral tire usage `Σ|Fy| / Σ μ·Fz·grip` ≥ 0.75: no upshift, no power-on downshift (unless lugging), no kickdown |
+| Braking | sequential downshifts never above 0.72; upshifts held 1.5 s after the brake |
+
+**Clutch shifts** (no converter) take `shift_time_s` in three phases: release (30%, clutch and —
+on upshifts — throttle fade out in the old gear), neutral (40%, the ECU rev-matches the engine
+to the new gear: throttle cut on upshifts, blip on downshifts), re-engage (30%, new gear, clutch
+and throttle fade back in; the clutch locks as soon as it is in sync). The old box cut drive for
+the whole shift, let the engine flare to the limiter, then re-engaged with a 0.1 s clutch ramp.
+`cargo run --release -p wp_vehicle --example shift_trace -- <car>` prints every shift.
+
+**Power-on shifts (converter automatics):** a clutch gearbox cuts drive in the neutral phase. A
 car with a `torque_converter` shifts between forward gears clutch-to-clutch instead: over
 `shift_time_s` the effective ratio moves from the old gear to the new one (the inertia phase
 pulls the engine down), the lock-up clutch stays open and the converter carries the torque, so
@@ -222,19 +243,19 @@ converter power-on shifts. Scenarios live in
 
 | Metric | debug_sedan (FWD) | debug_coupe (RWD) | Target |
 |---|---|---|---|
-| 0–100 km/h | 8.1 s | 5.2 s | 8–10 / 5–6 |
+| 0–100 km/h | 8.3 s | 5.2 s | 8–10 / 5–6 |
 | 100–0 km/h (ABS) | 42.8 m | 42.3 m | plausible |
 | Skidpad, 50 m radius | 0.82 g | 0.95 g | ~0.85 / ~0.95 |
 | Understeer gradient | +0.38 °/g | +0.29 °/g | positive (road-wheel deg per g) |
 | Step steer 80 km/h, overshoot | 0.0 % | 0.1 % | (well damped at 80 km/h) |
 | Lift-off at 0.7 g, 40 m: curvature ratio after 1 s | 1.09 | 1.07 | > 1 = tucks in |
 | Power-on at 0.4 g, 40 m: curvature ratio | 0.65 (pushes wide) | spins | FWD < 1 |
-| Power-oversteer onset, 40 m | none | 52 % throttle | RWD < 70 % |
+| Power-oversteer onset, 40 m | none | 82 % throttle (2nd) | RWD < 90 % |
 | Top speed | 234 km/h | 290 km/h | |
 
 | Cost | Value | Budget |
 |---|---|---|
-| Vehicle model per car | 4.0–4.7 µs/tick = **0.016–0.019 ms/frame** (4 ticks) | 0.15 ms/car/frame |
+| Vehicle model per car | 3.2–4.7 µs/tick = **0.013–0.019 ms/frame** (4 ticks; 3.2 µs after the gearbox rework) | 0.15 ms/car/frame |
 | Vehicle model, **24-car field** (whole roster cycled, varied inputs), dry | 4.6–5.2 µs/car/tick = **0.019–0.021 ms/car/frame**, 0.45–0.50 ms/frame for all 24 | 0.15 ms/car/frame (3.6 ms for 24) |
 | Same, wet road with 4 mm puddles, 4 °C, painted lines | 4.0–4.5 µs/car/tick = 0.016–0.018 ms/car/frame (no measurable weather cost) | — |
 | Vehicle + Rapier step, single car rig | 9.0–9.3 µs/tick = 0.037 ms/frame | — |
@@ -261,7 +282,9 @@ Browser not measured yet (expect ~2×; budget 0.30 ms).
 - `brakes.bias_front` and per-axle torques: the bias is normalised so the biased axle gets
   its full `max_torque_*`; too much rear = unstable stops without ABS.
 - `steering.rack_speed_rad_per_s`: keyboard steering speed; `ffb_scale` wheel weight.
-- `drivetrain.shift_time_s`: torque gap per shift (launch times!).
+- `drivetrain.shift_time_s`: length of a clutch shift; drive is fully cut for 40% of it (the
+  neutral phase), so 0.25 s ≈ 0.1 s of no drive. Street cars ≤ 0.25 s (tested), DCT 0.08 s.
+- `filter_pedal`: assist strength 1 = 0.32 s full throttle ramp (keyboard preset 0.7 ≈ 0.23 s).
 
 ## Known gaps
 
@@ -276,3 +299,8 @@ Browser not measured yet (expect ~2×; budget 0.30 ms).
   torque/inertia-phase model; no shift-time torque reduction.
 - Slide control: on gamepad presets (help 0.3) a centred stick with full throttle holds a power
   drift rather than straightening; the per-car slide class has no data field yet (request 7).
+  inferred from the tire's wet ratio). Converter shifts are a ratio blend, not a two-clutch
+  torque/inertia-phase model. Clutch-automatic rev-matching is kinematic (the engine speed is
+  driven to the target, not through torque), and full-load shift points are a fixed fraction
+  of the redline (for every roster car the next gear never beats the current one before the
+  redline, so this is the fastest schedule; a peaky engine would want per-gear points).

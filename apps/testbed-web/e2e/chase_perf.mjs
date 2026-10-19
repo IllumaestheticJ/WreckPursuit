@@ -1,6 +1,7 @@
 // City-chase performance in headless Chromium: sim ms per frame and the real-time factor
 // (sim seconds advanced per wall second). Usage: node e2e/chase_perf.mjs [car] [mode] [seconds]
-// (needs `npm run wasm`; starts its own Vite). Prints one JSON line.
+// (needs `npm run wasm`; starts its own Vite). Prints one JSON line. VIEWPORT=640x360 shrinks the
+// page (headless Chromium rasterises on the CPU, which otherwise dominates the frame time).
 import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,7 +25,8 @@ const browser = await chromium.launch({
   executablePath: process.env.CHROMIUM ?? "/opt/pw-browsers/chromium-1194/chrome-linux/chrome",
   args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"],
 });
-const page = await (await browser.newContext({ viewport: { width: 1280, height: 720 } })).newPage();
+const [vw, vh] = (process.env.VIEWPORT ?? "1280x720").split("x").map(Number);
+const page = await (await browser.newContext({ viewport: { width: vw, height: vh } })).newPage();
 const errors = [];
 page.on("pageerror", (e) => errors.push(String(e)));
 await page.goto(URL);
