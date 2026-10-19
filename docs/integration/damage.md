@@ -5,7 +5,7 @@
 - **Crates / folders owned:** `crates/wp_damage`, `data/lattices/` (generator + debug lattices;
   roster lattices are 09's, generated with `gen-lattice`), `data/materials/`, `data/modes/`,
   `apps/simcli/scenarios/damage/`
-- **Contract version built against:** 0.1.0 (no contract edits)
+- **Contract version built against:** 0.2.0 (no contract edits)
 
 ## Exposes
 - `wp_damage::DamageModel: wp_contracts::DamageSim`
@@ -56,7 +56,58 @@
 |---|---|---|---|---|
 | 1 | `SimEvent::GlassShattered { vehicle: EntityId, region: BodyRegion }` | Prompt 03 asks for a shatter event; the renderer/audio and net clients need it (today only in `DamageModel::log()`). | 03 emits; 04, 07 consume | accepted for v0.2.0 |
 | 2 | `PriceTable` refinements: optional per-item labour hours (`BTreeMap<RepairItem, f32>`) and a `repair_parts_fraction` (repair-vs-replace split, now `wp_damage::repair::REPAIR_PARTS_FRACTION = 0.3`, `REPLACE_SEVERITY = 0.6`). `PriceTable` itself was already promoted in 0.1.0. | Let economy own pricing policy. | 03, 08 | accepted for v0.2.0 (labour map + optional field) |
-| 3 | `SimEvent::RegionDamaged { vehicle, region, severity }` (thresholded like `ComponentDamaged`) | HUD damage silhouette and police "visibly wrecked car" heuristics without reading lattice state. | 03 emits; 04, 06 consume | accepted for v0.2.0 |
+| 3 | `SimEvent::RegionDamaged { vehicle, region, severity }` (thresholded like `ComponentDamaged`) | HUD damage silhouette and police "visibly wrecked car" heuristics without reading lattice state. | 03 emits; 04, 06 consume | **applied v0.2.0, emitted** |
+| 4 | `DamageSnapshot` + `DamageSim::{save_state, restore_state}` (final shape below) | Garage persistence, impound, net late-join baselines. | 03, 08, 07 | for v0.3.0 |
+| 5 | `DamageSim::apply_repair(&mut self, items: &[RepairItem])` | Economy bills and repairs line items, not just "full reset". | 03, 08 | for v0.3.0 |
+| 6 | `DamageSummary` + `DamageSim::summary()` | Economy/police/HUD read health without the whole model. | 03, 08, 06, 04 | for v0.3.0 |
+| 7 | `BodyRegion::Accessory` (push bars, kits) | Mods and the cruiser push bar as detachable, billable parts. | 03, 08, 09, 04 | for v0.3.0 |
+
+### Final shapes for the v0.3.0 damage items (#4–#7)
+```rust
+/// Serialisable damage state of one vehicle (wp_contracts::repair or a new damage.rs).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct DamageSnapshot {
+    pub lattice_id: String,                         // restore refuses another lattice
+    pub node_pos_m: Vec<[f32; 3]>,                  // chassis space, by node id
+    pub beam_rest_m: Vec<f32>,                      // current rest length, by beam index
+    pub beam_plastic_strain: Vec<f32>,
+    pub beam_flags: Vec<u8>,                        // bit 0 broken, bit 1 buckled
+    pub region_plastic_j: BTreeMap<BodyRegion, f32>,
+    pub component_health: BTreeMap<Component, f32>, // only < 1.0
+    pub components_failed: BTreeSet<Component>,
+    pub detached_groups: BTreeSet<u16>,
+    pub shattered: BTreeSet<BodyRegion>,
+    pub wheels_lost: [bool; 4],
+    pub health: f32,
+    pub total_loss: bool,
+}
+/// Cheap read for economy / police / HUD.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct DamageSummary {
+    pub health: f32,
+    pub total_loss: bool,
+    pub components_failed: u8,
+    pub parts_detached: u8,
+    pub wheels_lost: u8,
+}
+pub trait DamageSim {
+    // … existing methods …
+    fn summary(&self) -> DamageSummary;
+    fn save_state(&self) -> DamageSnapshot;
+    /// Err if `lattice_id` or array lengths do not match this lattice. Leaves the model asleep.
+    fn restore_state(&mut self, s: &DamageSnapshot) -> Result<(), String>;
+    /// Region(r): nodes and beams of `r` back to rest, its energy ledger zeroed, glass
+    /// un-shattered; DetachedPart(r): group re-attached (nodes back to rest); Component(c):
+    /// health 1 and not failed (Wheel* also clears `wheel_lost`). Health and total loss are
+    /// recomputed from what is left. Items not damaged are ignored.
+    fn apply_repair(&mut self, items: &[RepairItem]);
+}
+```
+`BodyRegion::Accessory`: `gen-lattice --accessory pushbar|kit` adds an Accessory node row ahead of
+the bumper with its own detach group (`GROUP_ACCESSORY = 8`), structural (push bar) or polymer
+(kit) beams; it does not change `HandlingEffects`; billing via `PriceTable::region_replace_cost`.
+`wp_damage` implements all of these inherently the day the contract lands (the internals exist:
+`restore_node_positions`, `reset`, the energy ledger).
 
 ## Changes outside my crates
 - `crates/wp_wasm/src/lib.rs`: embed `data/materials/cast_aluminum.json` in `MATERIALS` (the
@@ -80,6 +131,22 @@
 See `crates/wp_damage/README.md` → Known gaps (no inertial loads, no node self-collision,
 softer rear, approximate tangential drag, no Rapier contacts yet, glass event pending,
 pile-up spike, empty skin bindings).
+
+## Response to v0.2.0 (lead run 3) — machine B, 2026-10-19
+
+Merged `main` (contract 0.2.0). My items from the "applied" entry:
+- **`SimEvent::GlassShattered { vehicle, region }`** — emitted once when a glass region shatters.
+- **`SimEvent::RegionDamaged { vehicle, region, severity }`** — emitted when a region's repair
+  severity has risen by ≥ `DamageTuning::component_event_step` (0.1) since its last report, and
+  once at 1.0. Severity = the repair-estimate severity (`repair::region_severities`). Test:
+  `glass_and_region_events_are_emitted_once_per_threshold`.
+- **`PriceTable::labour_hours` / `repair_parts_fraction`, unscaled `RepairLine` costs** — the lead's
+  `repair.rs` change is correct and kept; `repair_estimate_grows_with_damage_and_scales_with_mode`
+  passes (totals scale with the mode, parts/labour do not).
+- v0.3.0 deferrals: final shapes for `save_state` / `restore_state` / `apply_repair` /
+  `DamageSummary` / `Accessory` are in "Contract change requests" (#4–#7).
+- Goldens: the merge conflicted only in generated hashes; re-blessed on the merged build
+  (`[bless]` commit) — see the commit for which changed.
 
 ## Response to lead feedback (run 2) — machine B, 2026-10-19
 

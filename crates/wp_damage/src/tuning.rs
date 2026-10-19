@@ -78,7 +78,8 @@ pub struct DamageTuning {
     pub sleep_velocity_mps: f32,
     /// Quiet solver ticks before the lattice sleeps (skips solving).
     pub sleep_ticks: u32,
-    /// Health drop between two `ComponentDamaged` events for the same component.
+    /// Health drop between two `ComponentDamaged` events for the same component, and severity
+    /// rise between two `RegionDamaged` events for the same region.
     pub component_event_step: f32,
     /// Node displacements smaller than this are ignored for intrusion and alignment, m.
     pub displacement_deadband_m: f32,

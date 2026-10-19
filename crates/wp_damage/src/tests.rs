@@ -627,3 +627,57 @@ fn structural_crush_ignores_cover_and_glass() {
         r.metrics["crush_m"]
     );
 }
+
+#[test]
+fn glass_and_region_events_are_emitted_once_per_threshold() {
+    let car = sedan();
+    let mut m = DamageModel::new(&car.lattice, &car.materials);
+    m.set_entity(wp_contracts::EntityId(5));
+    let mut lo = [f32::MAX; 3];
+    let mut hi = [f32::MIN; 3];
+    for n in &car.lattice.nodes {
+        for k in 0..3 {
+            lo[k] = lo[k].min(n.pos_m[k]);
+            hi[k] = hi[k].max(n.pos_m[k]);
+        }
+    }
+    let (c0, c1) =
+        crate::barrier::barrier_contacts(lo, hi, ImpactKind::Frontal, 70.0 / 3.6, 1400.0, 0.0);
+    let mut out = Vec::new();
+    m.apply_contacts(&c0, &sim_mode(), PHYSICS_DT, &mut out);
+    m.apply_contacts(&c1, &sim_mode(), PHYSICS_DT, &mut out);
+    for _ in 0..240 {
+        m.apply_contacts(&[], &sim_mode(), PHYSICS_DT, &mut out);
+    }
+    let mut glass = Vec::new();
+    let mut last: BTreeMap<BodyRegion, f32> = BTreeMap::new();
+    for e in &out {
+        match e {
+            SimEvent::GlassShattered { vehicle, region } => {
+                assert_eq!(*vehicle, wp_contracts::EntityId(5));
+                glass.push(*region);
+            }
+            SimEvent::RegionDamaged {
+                vehicle,
+                region,
+                severity,
+            } => {
+                assert_eq!(*vehicle, wp_contracts::EntityId(5));
+                assert!((0.0..=1.0).contains(severity));
+                let prev = last.insert(*region, *severity).unwrap_or(0.0);
+                assert!(
+                    *severity > prev,
+                    "{region:?} severity must rise between events"
+                );
+            }
+            _ => {}
+        }
+    }
+    let shattered: Vec<BodyRegion> = m.shattered_regions().iter().copied().collect();
+    let mut sorted = glass.clone();
+    sorted.sort();
+    assert_eq!(sorted, shattered, "one GlassShattered per shattered region");
+    assert!(!shattered.is_empty(), "a 70 km/h frontal breaks glass");
+    assert!(last.contains_key(&BodyRegion::FrontBumper), "{last:?}");
+    assert!(last.len() <= crate::REGION_COUNT);
+}
