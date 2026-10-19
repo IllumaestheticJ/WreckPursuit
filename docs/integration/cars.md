@@ -398,3 +398,15 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
 
 1. `semi_slick.json`: `treaded: false` (W-4).
 2. Tire data for `PaintedLine`.
+
+## Lead feedback (round 12b, 2026-10-19) — junkyard beater (backlog B06)
+Base: `origin/lead/round12` (round 12's merges; `main` catches up when its gate is green), not main.
+1. Add `data/cars/junkyard_beater.json`: the economy's floor car (G's career already hands it out
+   — see `wp_economy` / `wp_wasm::career` and `docs/integration/economy.md`). A tired 1980s-style
+   compact FWD sedan analogue (no real names): ~1,050 kg, ~65 kW, 4-speed manual/3-speed auto,
+   open diff, soft worn suspension, old tyres (lower grip), low durability, cheap parts. It
+   should be slow but fun and *readable* (body roll, squeal). Lore line in `CARS_LORE.md`.
+2. Its lattice + panel mesh: reuse the closest existing body (coordinate with R's panel pipeline
+   via `docs/integration/panels.md` if a new mesh is needed; a placeholder generated mesh is fine).
+3. Validation band in `data/cars/VALIDATION.md` (0–100 km/h ~14–16 s, top speed ~150 km/h),
+   tests, price consistent with the economy floor. Add it to the testbed car list.

@@ -649,3 +649,17 @@ two layers (`'` minimap, `;` minimap signals), `e2e/run.mjs` map checks, `e2e/ma
 **Key change:** audio mute is now **V** (was M) and "follow the next car" is **backquote** (was
 Tab). The minimap sits in the left column under the input panel (top 312 px) because your
 bottom-right holds the event feed and the audio panel; move it with `minimapPlacement`.
+
+## Lead feedback (round 12b, 2026-10-19) — gamepad + rebindable controls (owner request)
+Base: `origin/lead/round12` (round 12's merges; `main` catches up when its gate is green), not main.
+1. **Gamepad** via the browser Gamepad API in `apps/testbed-web/src/input.ts`: analogue steer
+   (left stick, with a small deadzone + optional curve), throttle/brake on the triggers (RT/LT),
+   handbrake, shift up/down, camera cycle/look-back, horn, reset. Standard mapping first; handle
+   connect/disconnect mid-drive (release everything on disconnect, as keyboard does on blur).
+   Feed the real analogue values to the sim (no keyboard-style ramps) so the existing gamepad
+   assist profile applies; check `AssistProfile` selection follows the active device.
+2. **Rebindable controls**: a small settings panel (keyboard + gamepad) that lists every action,
+   lets the player press a key/button to rebind, resets to defaults, and saves to localStorage
+   (`wp.bindings.v1`, try/catch). Show the current bindings in the F1 help.
+3. e2e: a fake gamepad (override `navigator.getGamepads`) drives forward and steers; a rebind
+   survives a reload. Measure input latency stays one frame.
