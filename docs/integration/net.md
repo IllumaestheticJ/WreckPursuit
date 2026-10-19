@@ -56,7 +56,7 @@ misprediction count, correction magnitude, bandwidth, lattice hash stats). Separ
 | # | From | What | Why | Workaround now |
 |---|---|---|---|---|
 | NET-N1 | `wp_sim` (lead) | Per-tick **applied contacts** per vehicle, and a hook to quantise each `ContactImpulse` *before* `DamageSim::apply_contacts` (e.g. `Sim::set_contact_filter(fn(&mut ContactImpulse))` + `Sim::drain_applied_contacts() -> Vec<(EntityId, Vec<ContactImpulse>)>`). `wp_sim` cannot depend on `wp_net`, so the filter is a function pointer the server installs (`wp_net::quant::QContact::round_trip`). | Clients re-run the server's contacts; bit-identical replicas require the authority to apply the same quantised values. | `WpSim` reports no contacts (damage is not replicated on the real stack); `testkit::ArenaSim` implements the contract and the tests use it. |
-| NET-N2 | `wp_vehicle` (02) | Full-state rewind of one vehicle for client prediction: `Vehicle::set_state(&VehicleState)` (added to the stub on this branch) or better an opaque `snapshot() -> Vec<u8>` / `restore(&[u8])` covering engine, clutch, wheel spin, filters; plus a client-side single-car stepper (like 02's `rig::Rig`: own Rapier world, flat ground) to implement `wp_net::predict::PredictedVehicle`. | Rewind-and-replay must reproduce the server exactly. `ws/vehicle` moves the chassis into Rapier, so `set_state` must also place the body. | `predict::RigVehicle` over `wp_vehicle::rig::Rig` + lead's `Vehicle::set_state` + `Rig::set_state` (added, run 3). Still wanted: lossless `snapshot()/restore()`. |
+| NET-N2 | `wp_vehicle` (02) | Full-state rewind of one vehicle for client prediction: `Vehicle::set_state(&VehicleState)` (added to the stub on this branch) or better an opaque `snapshot() -> Vec<u8>` / `restore(&[u8])` covering engine, clutch, wheel spin, filters; plus a client-side single-car stepper (like 02's `rig::Rig`: own Rapier world, flat ground) to implement `wp_net::predict::PredictedVehicle`. | Rewind-and-replay must reproduce the server exactly. `ws/vehicle` moves the chassis into Rapier, so `set_state` must also place the body. | **Done (run 4)** on A's delivery: `predict::RigVehicle` over `Rig`, exact rewind via `Rig::restore(VehicleSnapshot)` sent 5 Hz as `Snapshot.own_full`; `Rig::set_state` (mine, additive) is the fallback between snapshots. |
 | NET-N3 | `wp_sim` (lead) | `Sim::despawn_vehicle(EntityId)` and `Sim::teleport_vehicle(EntityId, pos, yaw)`. | Players leave/switch roles; spawn points vary. | `WpSim` parks vehicles (reset + brake, hidden) and reuses them for the same car at the same spawn point. |
 | NET-N4 | `wp_sim` (lead) | `Sim::mode()` / `config()` accessor and per-vehicle `kind` for AI vehicles (traffic vs AI police). | Welcome carries the mode; interest needs AI kinds. | Mode remembered by `WpSim`; AI kind defaults to traffic. |
 | NET-N5 | `wp_damage` (03) | `DamageModel::restore_node_positions(&[[f32;3]])` (added to the stub on this branch) — and, if the real model has state beyond node positions (velocities, plastic strain, detached groups), a full `snapshot()/restore()` so a `LatticeSnapshot` resync is exact. Also: running `apply_contacts(&[], …)` on a settled lattice must be a no-op (replicas skip > 240 empty steps). | Desync recovery. | Stub has only node positions. |
@@ -86,10 +86,10 @@ misprediction count, correction magnitude, bandwidth, lattice hash stats). Separ
 ## Perf numbers
 | Measurement | Machine | Native (release) | Browser | Budget |
 |---|---|---|---|---|
-| Server net tick, 32 clients, in-process (4 physics ticks + output) | cloud container | avg 4.2 ms, p99 10.7 ms (real vehicle) | — | 16.7 ms |
-| Down-link per client, 32 bots in a 120 m arena | in-process | mean 31.5 kB/s, worst 1 s 38.1 kB/s | — | 40 kB/s |
-| Prediction, 120 ms RTT / 2 % loss / ±30 ms jitter, 3 other cars | in-process | RMS correction 0.11 m (193 / 2629 reconciles; most from collisions) | — | < 0.3 m RMS |
-| Prediction, same link, alone | in-process | RMS 0.12 m (13 / 2634) | — | < 2 % mispredict |
+| Server net tick, 32 clients, in-process (4 physics ticks + output) | cloud container | avg 3.4 ms, p99 9.0 ms (real vehicle) | — | 16.7 ms |
+| Down-link per client, 32 bots in a 120 m arena (incl. 5 Hz own snapshots) | in-process | mean 29.7 kB/s, worst 1 s 33.9 kB/s | — | 40 kB/s |
+| Prediction, 120 ms RTT / 2 % loss / ±30 ms jitter, 3 other cars | in-process | RMS correction 0.11 m (260 / 2631 reconciles; most from collisions) | — | < 0.3 m RMS |
+| Prediction, same link, alone | in-process | RMS 0.15 m (4 / 2634) | — | < 2 % mispredict |
 | Lattice hash checks, 4 clients × 2 min | in-process | 1 mismatch / 992 (injected), resynced in 16 ticks | — | < 1 %, < 2 s |
 
 Measured on the integrated build with the real vehicle (A) and damage (B) models. The browser
@@ -97,8 +97,8 @@ figures from run 1 (stub) have not been re-measured.
 
 ## Known gaps
 - No damage replication on the real `wp_sim` until NET-N1; tests use `ArenaSim`.
-- Client rewind is not lossless (`VehicleState` omits filters/clutch/tire relaxation, ≈1.4 cm
-  per 10 replayed ticks) and collisions are not predicted (NET-N2).
+- Rewinds are bit-exact only at the 5 Hz snapshot ticks (`set_state` in between); collisions
+  with city geometry and other cars are corrected, not predicted.
 - Own-car predicted contacts are not applied; own damage is server-driven, one RTT late.
 - No AI traffic/police to replicate yet; interest/captain code paths for them are exercised
   only through the `NetSim` defaults.
@@ -107,6 +107,23 @@ figures from run 1 (stub) have not been re-measured.
 - `--arena` + browser clients: the browser uses `wp_damage` replicas, the arena uses the toy
   lattice, so browser hash checks mismatch and resync after every crash (by design of the
   test mode).
+
+## Response to lead feedback (run 4)
+Merged `origin/lead/net-merge` (unchanged since run 3, already in) and `origin/main` (contract
+v0.2.0, A's snapshot/`Rig`); took 02's `Vehicle::set_state` in the one conflict
+(`wp_vehicle/src/vehicle.rs`). After the merge all `wp_net`/`wp_wasm`/`wp_server` tests were
+already green; then, per run-3 feedback, prediction now rewinds on A's snapshot:
+- `NetSim::vehicle_snapshot` (default `None`; `WpSim` = `Vehicle::snapshot()` bytes,
+  `ArenaSim` delegates). The server adds the own car's snapshot to `Snapshot.own_full` every
+  12th net tick (5 Hz). **Protocol v2** (wire change: `u8 has_full, [bytes]` after `OwnState`).
+- `PredictedVehicle::restore` / `Predictor::reconcile(.., exact, ..)`: exact `Rig::restore`
+  when the snapshot is present, `Rig::set_state` otherwise; the predictor is initialised from
+  the snapshot when the first own state carries one.
+- Tests: `exact_snapshot_rewind_replays_bit_for_bit` (client vs a server `Rig`: 0.0 m gap after
+  rewind + 10-tick replay) and `state_rewind_fallback_is_close` (< 5 cm). Bots (tests and
+  `wp-server --bots`) drive through the same predictor; `bot_reaches_waypoints` steps a `Rig`.
+- Down-link budget is now a per-client byte bucket (refill 95 % of budget, burst one tick):
+  the per-tick split let the 0.9 kB snapshot push one client's 1 s window past 40 kB.
 
 ## Response to lead feedback (run 3)
 Merged `origin/lead/net-merge` (kept all its drift fixes) and then `origin/main` into `ws/net`.
