@@ -115,3 +115,7 @@ the schedule could hunt (1→2→1). New automatic (`crates/wp_vehicle/README.md
 | 26 | Simulate LSDs in certain cars | A (vehicle) + H (car data) | dispatched |
 | 27 | Audio for wheelspin | J (audio) | dispatched |
 | 28 | All cars understeer too much | helper `lead/handling-balance`: measure understeer per car and assist profile (lock reduction, steer filter, ESC, tyres, setup), fix at the root, keep the wheel profile raw | dispatched |
+| 29 | TCS / ESC / automatic gears off by default | lead: the testbed starts with TCS, ESC and auto gears off (keyboard and gamepad); any assist box you change is remembered | fixed on link v13 |
+| 30 | Siren audio error broke the frame loop (found by the e2e after row 29) | lead: siren pitch curves no longer overlap (float rounding); a bad curve can no longer stop the page | fixed on link v13 |
+| 31 | Hood does not crumple; headlights stay in place in crashes | R (panels): hood skinning; light parts on the surface and moving with the crush (then the lead drops the lamp markers) | dispatched |
+| 32 | AI cars, when blocked by a stationary vehicle, should go around it or turn around | D (traffic AI) | dispatched |
