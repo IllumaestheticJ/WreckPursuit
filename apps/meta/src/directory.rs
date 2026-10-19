@@ -287,18 +287,27 @@ fn instance_from_row(r: &Row<'_>) -> rusqlite::Result<InstanceInfo> {
 
 /// Seats promised to assigned (not yet joined) tickets, per role.
 pub fn reserved(conn: &Connection, id: InstanceId) -> ApiResult<RoleCounts> {
+    Ok(reserved_all(conn)?.remove(&id).unwrap_or_default())
+}
+
+/// Reserved seats of every instance that has any, in one query.
+pub fn reserved_all(conn: &Connection) -> ApiResult<BTreeMap<InstanceId, RoleCounts>> {
     let mut stmt = conn.prepare(
-        "SELECT role, COUNT(*) FROM tickets WHERE state = 'assigned' AND instance_id = ?1
-         GROUP BY role",
+        "SELECT instance_id, role, COUNT(*) FROM tickets WHERE state = 'assigned'
+         GROUP BY instance_id, role",
     )?;
-    let rows = stmt.query_map(params![id], |r| {
-        Ok((r.get::<_, String>(0)?, r.get::<_, u32>(1)?))
+    let rows = stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, InstanceId>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, u32>(2)?,
+        ))
     })?;
-    let mut out = RoleCounts::default();
+    let mut out: BTreeMap<InstanceId, RoleCounts> = BTreeMap::new();
     for r in rows {
-        let (role, n) = r?;
+        let (id, role, n) = r?;
         if let Some(role) = api::parse_role(&role) {
-            *out.get_mut(role) = n;
+            *out.entry(id).or_default().get_mut(role) = n;
         }
     }
     Ok(out)
@@ -332,8 +341,9 @@ pub fn list(conn: &Connection, include_down: bool, now: UnixMs) -> ApiResult<Vec
     let mut out: Vec<InstanceInfo> = stmt
         .query_map(params![now - 86_400_000], instance_from_row)?
         .collect::<Result<_, _>>()?;
+    let mut reserved = reserved_all(conn)?;
     for i in &mut out {
-        i.reserved = reserved(conn, i.instance_id)?;
+        i.reserved = reserved.remove(&i.instance_id).unwrap_or_default();
     }
     Ok(out)
 }
