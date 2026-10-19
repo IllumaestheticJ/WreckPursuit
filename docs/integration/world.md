@@ -592,3 +592,64 @@ when convenient.
   SwiftShader; prop wake-ups); `vesper_v2.greybox.b64.txt` is 9.1 MB on the published link.
 **Contract change requests:** none needed (no `wp_contracts` change). Optional for v0.3.0: the
 `TrafficAgentSnapshot` pitch/roll above.
+
+## Lead helper: LOD pop-in (branch `lead/fix-lod-popin`, 2026-10-19, playtest row 25)
+
+Owner report: "some cars load LOD too slow": cars pop in late or look wrong for a while. Two
+causes were D's tuning (the rest was browser-side, see `docs/integration/testbed.md`):
+
+- **Spawn ring in plain view.** Agents spawned and despawned 150 m from the player. The browser
+  draws every agent, so that ring *was* the draw distance: on Loop 9, Ridge Road and the downtown
+  avenues cars materialised / vanished 150–230 m ahead (measured in the browser: closest
+  appearance 226 m in a 5 s window of the city chase; `wp_world` itself allows 150 m).
+- **Promotion swap.** Fine on the sim side (promote/demote keep the pose, < 0.2 m); the pop was
+  the browser drawing kinematic agents as grey boxes and promoted ones as a different car.
+
+### What changed in `wp_world` (kept small)
+
+| Change | Why |
+|---|---|
+| `TrafficConfig::default()`: `sight_radius_m` 150 → **320**, `active_radius_m` 400 → **440** | nothing spawns or despawns within 320 m of a player (now or 1 s ahead), i.e. cars are visible ≥ 300 m ahead at highway speed; 440 m keeps the density near the player at today's level |
+| `traffic::POPULATE_SIGHT_RADIUS_M = 150` + `Traffic::populating` | `populate()` (before the first tick, nobody has seen anything) keeps the old 150 m clearance, so sessions start as busy as before |
+| `tests/lod_draw.rs` (new) | a player riding Loop-9-style traffic for 60 s on Port Vesper never sees a car appear or vanish within 300 m; cars within 150 m stay ≥ 0.6× the old radii (5 seeds; measured 97 vs 83). `--ignored compare_radii` prints the radius comparison |
+| `tests/world.rs` | `spawns_respect_sightline_and_active_area` reads the radii from the config and checks live spawns too; `lod_promotion_and_demotion_are_seamless` lets its player cruise the row (the parked player depended on one queue stopping inside 80 m; it now sees 25 promotions, max jump 0.17 m) |
+| `README.md` | sightline rule numbers |
+
+Radius comparison (`cargo test -p wp_world --release --test lod_draw -- --ignored --nocapture`,
+5 seeds, 60 s each, player riding the fastest traffic at ≈ 17–21 m/s):
+
+| sight / active | agents | cars < 150 m | cars < 300 m | spawns / min |
+|---|---|---|---|---|
+| 150 / 400 (old) | 145 | 16.7 | 71 | 751 |
+| **320 / 440 (new)** | 190 | 17.2 | 60 | 978 |
+| 320 / 480 | 176 | 14.8 | 54 | 763 |
+| 340 / 600 | 181 | 9.3 | 34 | 528 |
+
+Agents stay capped at `max_agents` (400), so the 2 ms / 400 agents budget is unchanged; the
+typical count near a player grows ≈ 30 % (145 → 190).
+
+Physical (promotion) radius stays **80 m** (`max_physical` 16): with the browser hand-over now
+seamless (same model, livery and pose on the swap frame) promotion distance is invisible, and a
+larger radius would only cost physics. Not changed: `wp_police` spawning (E): reinforcements
+already spawn ≥ 350 m away out of sight (`data/police/presence.toml`).
+
+### Changes outside `wp_world`
+| File | Change | Why |
+|---|---|---|
+| `crates/wp_net/src/netsim.rs` (test only) | `damage_steps_match_the_models` populates the world around the spawn before the first tick, as simcli does | it needs a promoted traffic car within 5 s; live spawns now start 320 m out |
+
+### Goldens (blessed in the `[bless]` commit)
+Every city scenario with a player or race route changes from tick 1 (different spawn ring):
+`golden_city_chase`, `golden_night_pursuit_escape`, `opponent_flee_police`,
+`opponent_open_roads_traffic`, `race_city_sprint_police`, `world_traffic_soak_observer`,
+`world_traffic_soak_vesper_observer`. Player-less soaks are unchanged; every scenario
+expectation still passes; `wp_race`'s tuning-sensitive meet-report pair still passes (it did not
+at 480 m, which is why the active radius is 440 m).
+
+### For D (please own from here)
+- **Joining a running server**: `wp_net` servers never call `populate()`; a player who joins
+  where nobody else is sees the street fill from 320 m out instead of 150 m. If that reads empty
+  in multiplayer playtests, a per-player warm start (populate around a newly tracked player,
+  outside any other player's sight) would fix it.
+- Kinematic agents move in 60 Hz traffic steps and are not interpolated by the browser; at
+  40+ fps that is a slight judder on the instanced far LOD (it was there with the boxes too).

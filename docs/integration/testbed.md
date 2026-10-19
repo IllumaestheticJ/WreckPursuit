@@ -82,6 +82,10 @@ Car data (`data/{cars,lattices,tires,materials,modes}`) is embedded at build tim
 | `signal_heads` | – | `Float32Array` 10 × heads | Static, fetch once per session. One head per signalised junction approach (signal group): `[x, y, z, yaw, left_m, right_m, radius_m, centre_z, intersection, group]` — stop-line centre (z from the lane polyline, so heads follow elevation), travel yaw (lamps face `yaw + π`), stop-line lateral extent along travel-right, junction radius and node height (far-side heads). Empty on the flat world. `signal_head_stride()` = 10. |
 | `signal_states` | – | `Uint8Array` 1 × heads | Per frame, `signal_heads` order: 0 off, 1 red, 2 yellow, 3 green, from the world's signal clock (`wp_world::signals::group_state`), so pauses/replays show the simulated state. No turn arrows: the city has no protected turn phases. |
 | `traffic_agents` | – | `Float32Array` 5 × agents | `[x, y, z, yaw, flags]`; flags 1 physical LOD, 2 brake lights, 4 hazards, 8 yielding to siren, 16 / 32 turn signal L / R, 64 aggressive, `variant << 8`. Empty on the flat world. |
+| `traffic_draw` | – | `Float32Array` 10 × agents | Every agent at any LOD (`lod.rs`): `[agent id, entity (0 = none), x, y, z, qx, qy, qz, qw, flags]`, flags as `traffic_agents`. Embodied agents report their vehicle's state; kinematic ones are seated on the ground exactly as the sim places a promoted car (`ground_pose`) and carried forward between 60 Hz traffic steps. `lod_draw_stride()` = 10. |
+| `police_draw` | – | `Float32Array` 10 × units | Every police unit, bound or not: `[unit id, entity (0 = none), x, y, z, qx, qy, qz, qw, flags]`, flags 1 helicopter, 2 pursuing. |
+| `session_car_models` | – | JSON | `{ cars, traffic, police }`: every car model the session can show (scenario cars, physical traffic, police) for preloading. |
+| `car_model_info` | `car_id` | JSON | `{ car_id, body_size_m, wheels }` of a model without a vehicle (builds the instanced far-LOD mesh). |
 | `lattice_nodes` | `entity` | `Float32Array` xyz × nodes | Current, chassis space (`Sim::node_positions`). |
 | `lattice_rest` | `entity` | `Float32Array` xyz × nodes | Rest pose. |
 | `lattice_beams` | `entity` | `Uint32Array` `[a, b]` × beams | |
@@ -236,9 +240,10 @@ traffic; signals: the junction nearest the player framed at 12:00 and 22:00
 **city chase** (button, `__wp.startCityChase()`): the procedural 12×12 city at 23:00 with
 traffic and full police presence; the player starts on the race grid already doing ~110 km/h,
 so speeding violations (event feed) start the heat. Police cars (`VehicleKind::Police` sim
-vehicles, or `police_units()` for internally driven units) are white with a red/blue light bar
-that strobes while their siren is on (plus a point light); physical traffic
-(`VehicleKind::Traffic`) is grey; every car has head/tail lights (headlights: O). The wanted
+vehicles, or instanced from `police_draw()` for internally driven units) are white with a
+red/blue light bar that strobes while their siren is on (plus a point light); traffic keeps one
+of 8 liveries (`variant`) at every LOD (instanced far / kinematic, full view once physical, see
+"LOD pop-in" below); every car has head/tail lights (headlights: O). The wanted
 level / heat readout is M's UI-kit chase HUD (`apps/ui-kit/src/live`, mounted by
 `src/ui/overlay.ts`), fed by `police_status()` mapped onto the kit's `PoliceReadout`
 (`src/police.ts`). A centre banner shows **PURSUIT** / **SEARCHING** (escape %) while chased and
@@ -621,3 +626,39 @@ Testbed: `src/ui/runEnd.tsx` (`RunEndView`, kit `Panel` / `Button` / `Money` / `
 `restartRun()`, both on `window.__wp`. `e2e/run.mjs`: a real capture (player parked in front of a
 patrol car at heat 30) → panel + bill → click **Repair & continue** → health 1.0, cash = after −
 cost, panel closed. C: the stubbed banner check and `ChaseEndDetector` are untouched.
+
+## Lead helper note (`lead/fix-lod-popin`, 2026-10-19) — LOD pop-in (playtest row 25)
+
+Owner: "some cars load LOD too slow": cars pop in late or look wrong for a while. Reproduced on
+`main` in headless Chromium (`e2e/lod_shots.mjs`, `docs/media/lod/before_*`); all four suspects
+applied:
+
+1. **Panel meshes loaded late.** `PanelBody` fetched `data/panels/meshes/<car>.json` the first
+   time a model appeared: the traffic model at the first promotion, the police cruiser at the
+   first police spawn. Until the file arrived (and always for one frame, since the build ran in a
+   promise callback even when cached) the car was the lattice hull / debug box. Locally that is
+   5–25 ms; on the published link it is a 180–230 KB fetch per model.
+2. **Promotion swap.** Kinematic agents were 1.8 × 4.4 × 1.4 m boxes (grey; red when braking,
+   blue when yielding, yellow when physical without a vehicle); a promoted agent became the
+   `debug_sedan` panel mesh in `#7a8a99` with tire-force arrows and a CG marker on the same frame
+   (`before_promotion_strip.png`). Physical agents were hidden whenever *any* physical traffic car
+   existed, so one whose sim vehicle could not be spawned (vehicle limit) vanished.
+3. **Draw distance.** The instanced boxes were never culled, but `wp_world` spawned / despawned
+   agents 150 m from the player: cars materialised in plain view (closest measured 226 m in a 5 s
+   window of the chase; the rule allows 150 m). Fixed in `wp_world` (see
+   `docs/integration/world.md`, "Lead helper: LOD pop-in"): 320 m.
+4. **Police.** Same mesh-on-first-spawn delay for the cruiser; unbound units were boxes.
+
+### What changed
+
+| File | Change |
+|---|---|
+| `crates/wp_wasm/src/lod.rs` (new), `lib.rs` | `traffic_draw()`, `police_draw()`, `lod_draw_stride()`, `session_car_models()`, `car_model_info()` (table above). Read-only: hashes and goldens unchanged by these. Native tests: quaternion maths, model list, and **draw poses stay continuous through 15 real promotions/demotions in 12 s of city chase (worst swap 0.06 m, worst tick 0.08 m)**. |
+| `src/render/fleet.ts` (new) | Instanced cars: per model a full mesh (the model's real panel mesh merged at rest: paint with per-instance livery, detail, head/tail lamp markers where `VehicleView` puts them, police light bar) for cars < 250 m from the camera (192 per model), a ~130-triangle proxy beyond (and while a mesh is loading). Shared 8-colour `TRAFFIC_PALETTE` by `variant`. |
+| `src/render/lod.ts` (new) | `LodDirector`: per frame, each traffic agent / police unit is drawn by exactly one of its `VehicleView` (once the sim spawned it **and** its mesh is ready) or the fleet, same model / livery / pose — so promotions and demotions swap the drawer on one frame with no gap. `LodLog` records per-frame draw states (missing-mesh frames, swap pose jumps with ±3 frames, appear / vanish distances, placeholder time). |
+| `src/render/panels.ts` | `preloadCarMeshes()`, `carMeshNow()`, `meshTimings`; a preloaded mesh builds in the `PanelBody` constructor (no placeholder frame). |
+| `src/vehicle_view.ts` | `drawable` (mesh ready or panels layer off); while loading, a proxy in the car's livery instead of the debug box / lattice hull; sim-spawned traffic / police (`background`) show per-car debug overlays (tire forces, slip colours, suspension, CG / velocity) only when focused (Tab), so a promotion does not sprout arrows. |
+| `src/main.ts` | Session start: `session_car_models()` → preload (first frame of the page waits ≤ 5 s for them); promoted traffic views get their agent's livery; `lod.update()` after the camera moves; `__wp.lod`, `__wp.meshTimings`. |
+| `src/scene.ts` | Agent boxes removed; `updateHelicopters(police_draw())` keeps the helicopter boxes. |
+| `e2e/run.mjs` | LOD check (fresh city chase, ≥ 12 s sim, ≥ 2 swaps): no car without its mesh after the first second; swap pose jump < 0.5 m; traffic appears / vanishes ≥ 300 m from the player. |
+| `e2e/lod_shots.mjs` (new) | Before/after strips + frame logs into `docs/media/lod/` (runs against an older testbed too: `node e2e/lod_shots.mjs <out> before <main-worktree>/apps/testbed-web`). |
