@@ -61,6 +61,7 @@ fn main() {
         let t = Instant::now();
         let mut swing_start = 0.0;
         let mut swing_steps = 0;
+        let mut awake_steps = 0usize;
         for s in 0..steps {
             let c: &[ContactImpulse] = match s {
                 0 => &c0,
@@ -79,12 +80,17 @@ fn main() {
             }
             if s >= 96 {
                 swing_steps += 1;
+                awake_steps += models.iter().filter(|m| m.is_awake()).count();
             }
             out.clear();
         }
         let total = t.elapsed().as_secs_f64();
         let crash = total / steps as f64 / CARS as f64;
         let swing = (total - swing_start) / swing_steps as f64 / CARS as f64;
+        let awake = models.iter().filter(|m| m.is_awake()).count();
+        println!(
+            "awake lattices at the end: {awake}; awake car-steps in swing phase: {awake_steps}"
+        );
         let open = models
             .iter()
             .flat_map(|m| m.panel_states())

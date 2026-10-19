@@ -372,8 +372,6 @@ const UNLATCH_KICK_RAD_S: f32 = 0.8;
 const AJAR_RAD: f32 = 0.03;
 /// Largest hinge speed a contact can push a panel to, rad/s.
 const MAX_PUSH_RAD_S: f32 = 10.0;
-/// Nodes this close to the hinge line stay lattice nodes (they are on the axis), m.
-const ON_AXIS_M: f32 = 0.03;
 /// Low-pass time constant of the chassis acceleration the panels feel, s.
 const ACCEL_FILTER_S: f32 = 0.03;
 
@@ -769,9 +767,12 @@ impl DamageModel {
         };
         let mut hinge_line = Vec::new();
         let mut moving = Vec::new();
+        // Only the two hinge nodes stay lattice nodes: the rotation preserves their distance
+        // to every panel node exactly. A node merely near the axis would be strained by the
+        // swing and keep the lattice awake.
         for &i in &nodes {
             let r = vec3::sub(self.pos[i as usize], p0);
-            if vec3::length(perp(r, u0)) < ON_AXIS_M {
+            if i as usize == h0 || i as usize == h1 {
                 hinge_line.push(i);
             } else {
                 moving.push((i, r));
@@ -807,7 +808,10 @@ impl DamageModel {
             None => 0.0,
         };
         let moving_ids: Vec<u32> = moving.iter().map(|m| m.0).collect();
-        self.free_nodes(&moving_ids, &hinge_line);
+        // Beams to the hinge nodes go too: the panel follows them kinematically, and a beam
+        // between a kinematic node and a solved one would feed hinge deformation back into
+        // the lattice and keep it awake.
+        self.free_nodes(&moving_ids, &[]);
         let set = self.panels.as_mut().expect("panels");
         let p = &mut set.panels[k];
         p.state = PanelState::Unlatched;
@@ -854,7 +858,7 @@ impl DamageModel {
             .map(|&i| (i, vec3::sub(self.pos[i as usize], p0)))
             .collect();
         let moving_ids: Vec<u32> = moving.iter().map(|m| m.0).collect();
-        self.free_nodes(&moving_ids, &[pivot]);
+        self.free_nodes(&moving_ids, &[]);
         let axis = def.hang_axis;
         let com = moving
             .iter()
