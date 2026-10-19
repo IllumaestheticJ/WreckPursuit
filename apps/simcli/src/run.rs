@@ -842,6 +842,10 @@ fn dist(a: [f32; 3], b: [f32; 3]) -> f32 {
 }
 
 /// Maximum distance of any lattice node from its rest position, m.
+///
+/// This is the raw any-node max: shattered glass and bumper covers count. Scenario
+/// `crush_depth` checks use `DamageModel::structural_crush_m()` instead; this helper stays for
+/// tools that only have node positions (e.g. the tuning-dash probe).
 pub fn crush_depth(rest: &[[f32; 3]], now: &[[f32; 3]]) -> f32 {
     rest.iter()
         .zip(now)
@@ -853,7 +857,6 @@ struct Tracker {
     /// Current all-wheels-off-the-ground stretch, s.
     airborne_s: f32,
     spawn: [f32; 3],
-    rest_nodes: Vec<[f32; 3]>,
     vel_window: VecDeque<[f32; 3]>,
     last_pos: [f32; 3],
     lat_g: f32,
@@ -957,7 +960,7 @@ pub fn run_with_hook(
     let BuiltSim {
         mut sim,
         ids,
-        cars,
+        cars: _,
         selection,
         warnings,
         has_city,
@@ -966,7 +969,6 @@ pub fn run_with_hook(
     let start_states = scenario_states(&sim, &ids);
     let mut trackers = Vec::new();
     for ((spec, id), (_, st0)) in sc.entities.iter().zip(&ids).zip(&start_states) {
-        let car = &cars[&spec.car];
         // Route drivers start where their route starts, and cars in hilly cities on the
         // ground under `pos`.
         let start = if matches!(spec.driver, Driver::FollowRoute { .. }) || sim.has_terrain() {
@@ -977,7 +979,6 @@ pub fn run_with_hook(
         trackers.push(Tracker {
             airborne_s: 0.0,
             spawn: start,
-            rest_nodes: car.lattice.nodes.iter().map(|n| n.pos_m).collect(),
             vel_window: VecDeque::new(),
             last_pos: start,
             lat_g: 0.0,
@@ -1176,11 +1177,13 @@ pub fn run_with_hook(
                 }
             }
             if sample || now == ticks {
-                let nodes = sim.node_positions(*id)?;
-                tr.summary.crush_depth_m = tr
-                    .summary
-                    .crush_depth_m
-                    .max(crush_depth(&tr.rest_nodes, nodes));
+                // Structural crush (no glass / bumper covers / detached nodes), per B.
+                let crush = sim
+                    .vehicles()
+                    .iter()
+                    .find(|v| v.id == *id)
+                    .map_or(0.0, |v| v.damage.structural_crush_m());
+                tr.summary.crush_depth_m = tr.summary.crush_depth_m.max(crush);
             }
             if opts.record && sample {
                 let _ = writeln!(

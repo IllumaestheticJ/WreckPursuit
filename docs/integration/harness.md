@@ -4,7 +4,7 @@
 - **Branch:** `ws/harness`
 - **Crates / folders owned:** `apps/simcli`, `tools/bench`, `tools/lint-determinism`,
   `tools/wasm-determinism`, `tools/ci`, `.github/workflows/`, the test surface of `wp_sim`
-- **Contract version built against:** 0.2.0
+- **Contract version built against:** 0.3.0
 
 ## Exposes
 
@@ -118,7 +118,7 @@ Cloud container, Intel Xeon @ 2.10 GHz, 4 cores, release, real vehicle + damage 
 | `lattice/solver_8_contacts` | 145 µs → 0.58 ms/car/frame | — | 0.25 ms/car |
 | `snapshot/encode_24` / `decode_24` (JSON codec) | 40 µs / 53 µs | — | — |
 | `world_traffic_soak` (60 s, 400 agents, 3344 prop bodies) | 3 s | — | — |
-| `cargo test -p simcli` (debug, soaks skipped) | 130 s | — | — |
+| `cargo test -p simcli` (debug, soaks skipped) | 130 s → 6.9 s `tests/scenarios.rs` (round 8: lead's opt-levels + two more `slow`) | — | — |
 | native vs wasm compare, all scenarios (incl. builds) | ≈ 2 min | — | — |
 
 ## Known gaps
@@ -131,6 +131,56 @@ Cloud container, Intel Xeon @ 2.10 GHz, 4 cores, release, real vehicle + damage 
   `wasm-determinism` module could host one).
 - The lint is line-based: it can miss a transcendental called through a function pointer or a
   macro, and it stops at the first `#[cfg(test)]` in a file.
+
+## Run 8 — response to lead feedback round 8 (2026-10-19)
+
+Merged `origin/main` (contract v0.3.0, `lead/test-speed`, round 8 docs) into `ws/harness`; no
+conflicts.
+
+1. **`crush_depth` → `DamageModel::structural_crush_m()`** (B's request). The scenario metric
+   (`crush_depth_m` in `summary.json` / `metrics.csv`, the `crush_depth` check) now skips glass,
+   bumper covers and detached nodes. `simcli::run::crush_depth` (any-node max) stays as a
+   helper because the tuning-dash probe (Q) calls it. Measured, structural vs old any-node:
+   | Scenario / entity | structural | any-node | range now |
+   |---|---|---|---|
+   | `golden_tbone_sim` victim / striker | 0.35 / 0.19 | 0.35 / 0.42 | unchanged (0.25–0.8 / 0.1–0.7) |
+   | `golden_tbone` victim | 0.18 | 0.18 | unchanged (0.15–0.6) |
+   | `golden_frontal_56kmh` car | 0.21 | 0.45 | 0.25–0.8 → **0.15–0.5** |
+   | `golden_barrier_56kmh` / `_arcade` | 0.66 / 0.31 | 0.93 / 0.59 | unchanged |
+   | `crash_head_on` sedan | 0.28 | 0.53 | 0.3–1.2 → **0.2–0.8** |
+   | `crash_barrier_frontal` / `_sim` | 0.32 / 0.69 | 0.58 / 0.88 | **0.2–0.8** / **0.45–1.5** |
+   No re-bless: crush is a metric, not part of the state hash; every golden matches. (B's
+   "0.58 vs 0.39 m in golden_tbone_sim" no longer reproduces: the victim reads 0.35 both ways
+   now; the striker's front is where glass/bumper inflated it.)
+2. **Observer soak gate promoted**: `civilian_collisions` max 3 → **0**, removed from
+   `expect_pending`. 0 on seed 5 and on seeds 6–9 (measured). **Police stay off** in this soak:
+   with `police_cars: true`, seeds 5, 7, 8, 9 give 0 collisions, seed 6 gives **3** (police
+   cause them: 0 on seed 6 with police off). For E: flip it to `true` once units avoid traffic
+   on seed 6 too (`sed 's/seed: 5,/seed: 6,/'` + `police_cars: true` reproduces it).
+3. **Slow city scenarios in release CI**: `opponent/flee_police` (15.6 s per run in the test
+   profile) and `race/city_sprint_police` (5.1 s) are now `slow: true`. The test pass ran each
+   three times, so they were most of `tests/scenarios.rs` (lead: 117–123 s → now **6.9 s**).
+   The release jobs run every scenario regardless (`determinism`, `goldens`, wasm compare), and
+   the `goldens` job's "run all scenarios" step is where `slow`/`soak` expectations are gated
+   (step renamed to say so).
+4. **Harness report** (new `ci.yml` job `harness-report`, `tools/ci/harness_report.py`,
+   `just report`): writes to the job summary every `#[ignore]`d Rust test with its reason and
+   every release-only scenario (`soak/`, `slow: true`). Never fails (`--strict` exists to fail
+   on bare `#[ignore]`, not on in CI). Today: 12 ignored tests, 4 without a reason, 7
+   release-only scenarios. `docs/TESTING.md` asks for `#[ignore = "<who> (<round>): why"]`.
+
+Requests (not my crates):
+- **J (audio)** `crates/wp_audio/tests/perf.rs::director_frame_cost_24_cars`, **O (meta)**
+  `apps/meta/tests/perf.rs::matchmaking_and_results_throughput`, **G (economy)**
+  `crates/wp_economy/tests/perf.rs::perf`, **N (opponent)**
+  `crates/wp_opponent/tests/race.rs::sweep_open_roads_progress`: bare `#[ignore]`; please give
+  each a reason (`#[ignore = "perf: run with --release"]` or similar) so the report shows why.
+- **E (police)**: seed 6 observer soak with police on (item 2).
+
+Checks: `cargo fmt`, `cargo clippy --workspace --all-targets -D warnings`, `cargo test
+--workspace --no-fail-fast` (717 passed, 0 failed, 15 ignored = the 12 listed + 3 ```` ```ignore ````
+doc examples; 6 min wall), wasm build of `wp_wasm`, `simcli run apps/simcli/scenarios` (all pass),
+`simcli goldens` (all match), `simcli determinism` (39/39 deterministic, slow + soak included), `tools/wasm-determinism/compare.sh` (native == wasm on all 39 scenarios).
 
 ## Run 6 — response to lead feedback round 6 (2026-10-19)
 

@@ -35,6 +35,9 @@
 // and patrols run around them.
 (
     name: "race_city_sprint_police",
+    // Slowest city runs in the test pass (round 8): skipped by debug `cargo test`, run by the
+    // release CI jobs (`simcli determinism`, `simcli goldens`).
+    slow: true,
     seed: 5,
     city: procedural(seed: 1, blocks_x: 7, blocks_y: 7, block_m: 110.0),
     time_of_day_h: 13.0,

@@ -103,9 +103,14 @@ bench class="local":
     cargo bench -p wp_bench
     cargo run --release -p wp_bench --bin perf-gate -- check --class {{class}} --append docs/PERF.md
 
+# What `cargo test --workspace` skips: #[ignore]d tests (with reasons), release-only scenarios.
+report:
+    python3 tools/ci/harness_report.py
+
 # Everything CI runs for the harness, locally.
 ci: check lint-det determinism goldens
     tools/ci/data_coverage.sh
+    python3 tools/ci/harness_report.py
 
 # --- Tuning dashboard (workstream 20, see docs/TUNING.md) ---
 

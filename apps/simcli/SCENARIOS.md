@@ -122,7 +122,7 @@ All ranges are inclusive. `entity` defaults to the first entity; a scenario with
 | `metric(name, entity, min, max)` | any per-entity summary metric (list below) |
 | `speed_at(entity, t_s, min, max)` | forward speed (m/s) right after tick `round(t_s/dt)` |
 | `max_lateral_g(entity, min, max)` | max \|lateral accel\| in g over 1/60 s windows |
-| `crush_depth(entity, min, max)` | max lattice node displacement from rest, m |
+| `crush_depth(entity, min, max)` | max structural crush, m (`DamageModel::structural_crush_m`: largest displacement of an attached node that is not glass or bumper cover) |
 | `components_failed(entity, min, max)` | distinct components with a `ComponentFailed` event |
 | `total_loss(entity, expected)` | a `TotalLoss` event was / was not emitted |
 | `pursuit_started_before(t_s)` | a `PoliceEvent` with kind `simcli::PURSUIT_STARTED_KIND` before `t_s` |

@@ -99,7 +99,9 @@ jobs:
         run: |
           cargo build --release -p simcli
           ./target/release/simcli goldens
-      - name: run all scenarios and keep their outputs
+      # Release build: this is where `slow: true` and soak/ scenarios get their expectations
+      # checked (debug `cargo test` skips them; see the harness report job's list).
+      - name: run all scenarios (incl. slow + soak), gate expectations, keep outputs
         if: always()
         run: ./target/release/simcli run apps/simcli/scenarios --out out
       - uses: actions/upload-artifact@v4
@@ -108,6 +110,15 @@ jobs:
           name: scenario-outputs
           path: out/
           retention-days: 14
+
+  harness-report:
+    name: harness report (ignored tests, release-only scenarios)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: list what cargo test --workspace skips, in the job summary
+        run: |
+          python3 tools/ci/harness_report.py | tee -a "$GITHUB_STEP_SUMMARY"
 
   bless-guard:
     name: goldens change only with [bless]
