@@ -118,6 +118,8 @@ struct WorldCues {
     steam: CueRef,
     tire_burst: CueRef,
     rattle: CueRef,
+    /// Optional gear-shift clunk (`drivetrain/shift`); silent when the pack lacks it.
+    shift: CueRef,
 }
 
 impl WorldCues {
@@ -148,6 +150,7 @@ impl WorldCues {
             steam: t.get(pack, cues::STEAM_HISS, true),
             tire_burst: t.get(pack, cues::TIRE_BURST, false),
             rattle: t.get(pack, cues::BODY_RATTLE, true),
+            shift: t.get(pack, cues::SHIFT, false),
         }
     }
 }
@@ -156,6 +159,8 @@ impl WorldCues {
 #[derive(Debug, Clone, Default)]
 struct VehicleRuntime {
     car_id: String,
+    /// Gear seen last frame (`None` until the first frame), for the shift clunk.
+    last_gear: Option<i8>,
     engine: EngineAudioState,
     tires: TireAudioState,
     siren: SirenState,
@@ -538,6 +543,22 @@ impl AudioDirector {
                 d.load = g;
                 out.push(d);
             }
+        }
+
+        // Gear-shift clunk, only when the world pack defines `drivetrain/shift`.
+        let shifted = rt.last_gear.is_some_and(|g| g != s.gear);
+        rt.last_gear = Some(s.gear);
+        if shifted && self.cues.info(car.world.shift).defined {
+            self.one_shot_seq = self.one_shot_seq.wrapping_add(1);
+            let d = Desire::new(
+                VoiceId::new(e, slot::one_shot(self.one_shot_seq)),
+                Bus::World,
+                car.world.shift,
+                up(Priority::Low),
+                pos,
+                vel,
+            );
+            out.push(d);
         }
 
         // Tires, surfaces, suspension.
