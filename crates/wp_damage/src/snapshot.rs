@@ -272,7 +272,10 @@ impl DamageModel {
     pub(crate) fn raw_health(&self, from_intrusion: bool) -> f32 {
         let mut weighted = 0.0;
         for r in ALL_REGIONS {
-            weighted += region_health_weight(r) * self.region_plastic_j[r as usize];
+            // Arcade cosmetic episodes are discounted from health (machine B, playtest #10).
+            let e =
+                (self.region_plastic_j[r as usize] - self.region_cosmetic_j[r as usize]).max(0.0);
+            weighted += region_health_weight(r) * e;
         }
         let e_ref = (self.tuning.total_loss_energy_per_kg * self.lattice_mass_kg).max(1.0);
         let structural = 1.0 - (weighted / e_ref).clamp(0.0, 1.0);

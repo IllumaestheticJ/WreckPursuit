@@ -35,7 +35,7 @@ pub mod vec3;
 pub use debris::{DetachedKind, DetachedPart};
 pub use model::{
     component_health_weight, region_health_weight, DamageLogEntry, DamageLogKind, DamageModel,
-    ALL_REGIONS, REGION_COUNT,
+    GlassBreak, ALL_REGIONS, REGION_COUNT,
 };
 pub use repair::default_price_table;
 pub use tuning::DamageTuning;
