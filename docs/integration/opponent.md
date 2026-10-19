@@ -214,11 +214,11 @@ wp_police) — pre-existing, for G / the lead.
 ### Round 8 status (machine N, 2026-10-19)
 1. **Parked test restored — done.** `live_police_chase_ends_in_escape_or_capture_without_stuck_cars`
    is un-ignored and passes (max waits 4 / 38 / 22 s for racers 1 / 2 / 3, limit 90; no stuck
-   cars, no AI contacts, no DQ). Cause of the 97 s queue: police unit `EntityId(9)` stops with its
-   siren on at (147.4, −148.1), ~22 m from the junction at the bottom-right of the arterial
-   square, from t ≈ 50 s to t ≈ 134 s. Every civilian within 60 m yields: two of them (agents
-   79 and 81) sit side by side at the stop line at x ≈ 138 and fill both of our lanes for the
-   whole time. Racer 3 queued behind them. Three AI fixes in `wp_opponent` (all mine):
+   cars, no AI contacts, no DQ). Cause of the 97 s queue: police unit `EntityId(9)` crawls
+   around the junction at the bottom-right of the arterial square from t ≈ 22 s and then stands
+   still with its siren on at (147.4, −148.1), ~22 m from it, from t ≈ 66 s to past t = 148 s.
+   Every civilian within 60 m yields: two of them (agents 79 and 81) sit side by side at the stop
+   line at x ≈ 138 and fill both of our lanes from t ≈ 16 s to t ≈ 134 s. Racer 3 queued behind them. Three AI fixes in `wp_opponent` (all mine):
    - Civilians stopped while yielding to a siren (or with hazards on) now count as **parked**,
      so racers may use the opposing lanes to get round them (the rule already used for
      pulled-over racers).
@@ -243,7 +243,7 @@ apps/simcli/scenarios/opponent` (4 PASS), `simcli goldens` (all ok) — green.
 
 ### Reports for other workstreams (round 8)
 - **E (police):** in this test (seed 4, `sentinel_cruiser` patrols, 25 % traffic) unit
-  `EntityId(9)` stands still with its siren on for ~85 s at (147.4, −148.1), next to a
+  `EntityId(9)` stands still with its siren on for 80+ s at (147.4, −148.1), next to a
   signalised junction, while no capture or roadblock happens there. Please check whether a
   unit that is not moving (lost its target, or wedged) should switch its siren off or move on.
   A parked siren freezes every civilian within 60 m (see D below).
