@@ -300,6 +300,8 @@ struct Racer {
     running_wide: bool,
     /// Lateral position on the grid (held during the start).
     start_n: f32,
+    /// Car passed by the last completed overtake (reported once by the field).
+    last_pass: Option<Who>,
     /// Pass evaluations: [accepted, no run, too late, no room, slow line, lane ahead, lane
     /// behind, target busy passing].
     pass_checks: [u32; 8],
@@ -482,6 +484,7 @@ impl Field {
                 get_run: None,
                 running_wide: false,
                 start_n: 0.0,
+                last_pass: None,
                 pass_checks: [0; 8],
             });
         }
@@ -1099,6 +1102,19 @@ impl Field {
         );
         self.racers[k].speed = speed;
         self.racers[k].flight = flight;
+        if let Some(who) = self.racers[k].last_pass.take() {
+            let other = match who {
+                Who::Racer(j) => Some(self.racers[j].entity),
+                Who::Vehicle(e) => Some(e),
+                Who::Civilian(_) => None,
+            };
+            if let Some(other) = other {
+                self.events.push(OpponentEvent::Overtook {
+                    entity: self.racers[k].entity,
+                    other,
+                });
+            }
+        }
     }
 
     /// Last decision's debug readout for racer `k` (spec order). Obstacle ids: racers are
@@ -1267,6 +1283,7 @@ fn decide_racer(
                     Some(x) => {
                         if x.ds < -(hl + x.o.half_len + 2.0) {
                             r.passes += 1;
+                            r.last_pass = Some(x.o.who);
                             true
                         } else {
                             let alongside = x.ds.abs() < hl + x.o.half_len;
