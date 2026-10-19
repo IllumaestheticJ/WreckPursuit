@@ -224,9 +224,7 @@ impl RaceJudge {
         if self.tracks.len() >= self.rules.kind_rules.max_racers as usize {
             return Err(EntryDenied::Full);
         }
-        let n = self.tracks.len() + 1;
-        let grid = self.course.grid(self.rules.kind_rules.grid, n);
-        let slot = grid[n - 1];
+        let slot = self.slot_for(self.tracks.len());
         self.tracks.push(Track {
             entry,
             slot,
@@ -256,6 +254,13 @@ impl RaceJudge {
             last_vel: [0.0; 3],
         });
         Ok(slot)
+    }
+
+    /// Grid slot `i`, laid out for the race's full capacity so slots never move as racers join
+    /// (side-by-side grids are centred on `max_racers` lanes).
+    fn slot_for(&self, i: usize) -> GridSlot {
+        let cap = (self.rules.kind_rules.max_racers as usize).max(i + 1);
+        self.course.grid(self.rules.kind_rules.grid, cap)[i]
     }
 
     /// Remove a racer while still in the lobby.
@@ -318,6 +323,18 @@ impl RaceJudge {
 
     fn index_of(&self, racer: EntityId) -> Option<usize> {
         self.tracks.iter().position(|t| t.entry.racer == racer)
+    }
+
+    /// The server moved a racer on purpose (reset to track after a crash, respawn): the next
+    /// sample is measured from `pos` so the move is not judged as a teleport. Progress and gates
+    /// are kept; a reset never counts as passing a gate.
+    pub fn relocate(&mut self, racer: EntityId, pos: [f32; 3], tick: u64) {
+        if let Some(i) = self.index_of(racer) {
+            let t = &mut self.tracks[i];
+            t.last = Some((tick, pos));
+            t.seg_hint = None;
+            t.out_ticks = 0;
+        }
     }
 
     /// Declare a racer DNF (police capture, disconnect, retire). Ignored if they are no longer

@@ -1,0 +1,35 @@
+// wp_race: 500 m straight sprint, two coupes on the staggered grid (pole at x = -2.5, y = 0;
+// second at x = 2.5, y = -4; start line y = 3). Green at 3.0 s. The second car drifts right
+// from 6 s and leaves the route corridor for good: wp_race must DQ it (LeftCorridor) while the
+// pole car wins. crates/wp_race/tests/simcli_races.rs judges this run.
+(
+    name: "race_sprint_corridor_dq",
+    seed: 15,
+    mode: Arcade,
+    assists: ai,
+    systems: "vehicle,damage",
+    entities: [
+        (
+            id: "pole",
+            car: "debug_coupe",
+            pos: (-2.5, 0.0, 0.0),
+            inputs: [(t_s: 3.2, input: (throttle: 1.0))],
+        ),
+        (
+            id: "cutter",
+            car: "debug_coupe",
+            pos: (2.5, -4.0, 0.0),
+            inputs: [
+                (t_s: 3.2, input: (throttle: 1.0)),
+                (t_s: 6.0, input: (throttle: 1.0, steer: 0.06)),
+                (t_s: 7.5, input: (throttle: 1.0)),
+            ],
+        ),
+    ],
+    duration_s: 24.0,
+    hash_every: 240,
+    expect: [
+        metric(name: "distance_m", entity: "pole", min: 500.0, max: 1000.0),
+        metric(name: "final_health", entity: "pole", min: 1.0, max: 1.0),
+    ],
+)

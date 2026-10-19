@@ -1,8 +1,8 @@
 //! Read-only bridges to `wp_world` (routes, venues, districts, safehouses) and `wp_economy`
 //! (payout inputs). Neither crate is modified; these functions only translate types.
 
-use wp_contracts::{DamageMode, DayPhase, VehicleClass};
-use wp_economy::{RaceResult as EconResult, RaceSetup, RaceType, ViolationCounts, WantedLevel};
+use wp_contracts::{DamageMode, DayPhase, VehicleClass, WantedLevel};
+use wp_economy::{RaceResult as EconResult, RaceSetup, RaceType, ViolationCounts};
 use wp_world::network::{DistrictKind, PoiKind};
 use wp_world::{ActiveRoute, CityMap, Route};
 
