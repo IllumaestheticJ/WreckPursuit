@@ -71,6 +71,8 @@ pub struct Session {
     sim: Sim,
     ids: Vec<EntityId>,
     cars: Vec<LoadedCar>,
+    /// Cars of vehicles the sim spawned itself (police units, promoted traffic), by car id.
+    dyn_cars: std::collections::BTreeMap<String, LoadedCar>,
     extras: Vec<EntityExtra>,
     last_input: Vec<VehicleInput>,
     fixed: FixedStep,
@@ -139,6 +141,7 @@ impl Session {
             sim,
             ids,
             cars: per_entity,
+            dyn_cars: Default::default(),
             extras: vec![EntityExtra::default(); n],
             last_input: vec![VehicleInput::default(); n],
             fixed: FixedStep::new(PHYSICS_DT, MAX_TICKS_PER_STEP),
@@ -225,9 +228,47 @@ impl Session {
         self.index(id).map(|i| &self.sc.entities[i])
     }
 
-    /// Resolved car of an entity.
+    /// Resolved car of an entity: scenario entities, then vehicles the sim spawned itself.
     pub fn car(&self, id: EntityId) -> Option<&LoadedCar> {
-        self.index(id).map(|i| &self.cars[i])
+        match self.index(id) {
+            Some(i) => Some(&self.cars[i]),
+            None => {
+                let slot = self.sim.vehicles().iter().find(|v| v.id == id)?;
+                self.dyn_cars.get(&slot.car_id)
+            }
+        }
+    }
+
+    /// Debug: mark an entity as police / traffic / … (cosmetic + sim behaviour; not recorded in
+    /// replays, so refused while recording or replaying).
+    pub fn set_kind(&mut self, id: EntityId, kind: wp_sim::VehicleKind) -> Result<(), String> {
+        if self.recording || self.playback.is_some() {
+            return Err("set_vehicle_kind is not recorded in replays; stop recording first".into());
+        }
+        self.sim
+            .set_vehicle_kind(id, kind)
+            .map_err(|e| e.to_string())
+    }
+
+    /// Who drives an entity (player / AI racer / police / traffic).
+    pub fn kind_of(&self, id: EntityId) -> Option<wp_sim::VehicleKind> {
+        self.sim
+            .vehicles()
+            .iter()
+            .find(|v| v.id == id)
+            .map(|v| v.kind)
+    }
+
+    /// Load the car of every sim-spawned vehicle not seen yet (so `car()` resolves them).
+    fn cache_dynamic_cars(&mut self) {
+        for v in self.sim.vehicles() {
+            if self.ids.contains(&v.id) || self.dyn_cars.contains_key(&v.car_id) {
+                continue;
+            }
+            if let Ok(car) = simcli::data::load_car(mem_data(), &v.car_id) {
+                self.dyn_cars.insert(v.car_id.clone(), car);
+            }
+        }
     }
 
     /// Per-entity extras.
@@ -373,6 +414,7 @@ impl Session {
             ticks = ticks.min(p.replay.ticks.saturating_sub(self.sim.tick()));
         }
         self.run_ticks(ticks);
+        self.cache_dynamic_cars();
         if self.at_replay_end() {
             return 1.0;
         }

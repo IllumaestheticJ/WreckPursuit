@@ -2,14 +2,16 @@
 // telemetry, scenario menu and replay UI. See docs/integration/testbed.md.
 //
 // URL parameters (handy for automation): ?scenario=crash/head_on.ron&speed=60 runs a scenario,
-// ?bench=24 spawns a 24-car benchmark, ?cam=orbit picks a camera, ?replay=last plays the last
+// ?bench=24 spawns a 24-car benchmark, ?preset=chase[&car=id] starts the city chase, ?cam=orbit picks a camera, ?replay=last plays the last
 // stored replay.
 import { loadWasm, sim, type DriverInput, type Scenario, type ScenarioResult } from "./wasm/sim";
-import { STATE_STRIDE, S, T, W } from "./wasm/layout";
+import { AGENT_STRIDE, STATE_STRIDE, S, T, W } from "./wasm/layout";
 import { installKeyboard, readInput, toggleHeadlights, type InputSource } from "./input";
 import { layers, store, bytesToBase64, base64ToBytes } from "./settings";
 import { SceneView } from "./scene";
-import { VehicleView } from "./vehicle_view";
+import { KIND_BY_CODE, kindColour, VehicleView } from "./vehicle_view";
+import { ChaseHud } from "./chase";
+import { audioBridge } from "./audio/bridge";
 import { CameraRig, CAMERA_MODES, type CameraMode } from "./cameras";
 import { Hud } from "./hud";
 import { TelemetryPlots } from "./telemetry";
@@ -66,6 +68,9 @@ async function main(): Promise<void> {
   const hud = new Hud(overlay);
   const plots = new TelemetryPlots(overlay);
   const audio = new AudioSystem(scene.world, overlay);
+  const chaseHud = new ChaseHud(overlay);
+  /** City-chase session active (shows the heat panel). */
+  let chase = params.get("preset") === "chase";
 
   // ----- session management --------------------------------------------------------------
 
@@ -95,12 +100,33 @@ async function main(): Promise<void> {
   };
 
   const syncViews = () => {
-    for (const id of sim.entities()) {
+    // Every sim vehicle, including police units and promoted traffic the sim spawns itself.
+    const live = sim.liveVehicles();
+    const seen = new Set<number>();
+    for (let i = 0; i < live.length; i += 2) {
+      const id = live[i];
+      seen.add(id);
       if (app.views.has(id)) continue;
-      const v = new VehicleView(id, COLOURS[(id - 1) % COLOURS.length]);
+      const kind = KIND_BY_CODE[live[i + 1]] ?? "player";
+      const v = new VehicleView(id, kindColour(kind, id, COLOURS[(id - 1) % COLOURS.length]), kind);
       scene.world.add(v.root);
       scene.world.add(v.velocity);
       app.views.set(id, v);
+      if (kind === "police") {
+        try {
+          audioBridge.setSiren(id, "Auto");
+        } catch {
+          /* audio not initialised yet */
+        }
+      }
+    }
+    // Vehicles the sim despawned (traffic demoted, police units released).
+    for (const [id, v] of app.views) {
+      if (seen.has(id)) continue;
+      scene.world.remove(v.root);
+      scene.world.remove(v.velocity);
+      v.dispose();
+      app.views.delete(id);
     }
   };
 
@@ -120,6 +146,39 @@ async function main(): Promise<void> {
     app.scenario = null;
     rebuildViews();
     applyAssistPreset(app.source);
+  };
+
+  /** City chase preset: procedural city at night, traffic + police, player already speeding. */
+  const startCityChase = (
+    car = ($("car") as HTMLSelectElement).value || "debug_coupe",
+    mode = ($("mode") as HTMLSelectElement).value,
+  ) => {
+    app.scenarioFile = null;
+    app.scenario = null;
+    app.result = null;
+    app.bench = null;
+    sim.init(1, sim.cityChaseJson(car, mode), false);
+    app.scenario = null;
+    rebuildViews();
+    applyAssistPreset(app.source);
+    chase = true;
+    // Debug (?police=N): park N cruisers behind the player as police, to check the light bar /
+    // siren before police units spawn on their own.
+    const parked = Number(params.get("police") ?? 0);
+    const me = sim.states();
+    if (parked > 0 && me.length >= STATE_STRIDE) {
+      const [x, y] = [me[S.pos], me[S.pos + 1]];
+      const yaw = 2 * Math.atan2(me[S.rot + 2], me[S.rot + 3]);
+      const fwd = [-Math.sin(yaw), Math.cos(yaw)];
+      const right = [fwd[1], -fwd[0]];
+      for (let i = 0; i < parked; i++) {
+        const back = 12 + 7 * Math.floor(i / 2);
+        const side = i % 2 ? 1.8 : -1.8;
+        const pos: [number, number, number] = [x - fwd[0] * back + right[0] * side, y - fwd[1] * back + right[1] * side, 0];
+        sim.setVehicleKind(sim.spawn("sentinel_cruiser", pos, yaw), 2);
+      }
+      syncViews();
+    }
   };
 
   const runScenario = async (file: string, speedKmh?: number) => {
@@ -192,7 +251,11 @@ async function main(): Promise<void> {
     scSel.add(new Option("(scenario folder not served)", ""));
   }
   $("sc-run").onclick = () => scSel.value && runScenario(scSel.value, Number(($("sc-speed") as HTMLInputElement).value));
-  $("sc-free").onclick = () => startFreeDrive();
+  $("sc-free").onclick = () => {
+    chase = false;
+    startFreeDrive();
+  };
+  $("sc-chase").onclick = () => startCityChase();
   ($("mode") as HTMLSelectElement).onchange = (e) => {
     // Live switch (Sim::set_mode_table), logged as a replay op; existing damage is kept.
     if (isReplay()) return void (($("mode") as HTMLSelectElement).value = modeName());
@@ -326,6 +389,8 @@ async function main(): Promise<void> {
   if (scParam) {
     scSel.value = scParam;
     await runScenario(scParam, Number(params.get("speed") ?? 0));
+  } else if (chase) {
+    startCityChase(params.get("car") ?? "debug_coupe");
   } else {
     startFreeDrive("debug_sedan");
   }
@@ -383,6 +448,14 @@ async function main(): Promise<void> {
     scene.updateAgents(sim.trafficAgents());
     const wi = sim.worldInfo();
     scene.setTimeOfDay(wi[W.night]);
+    const simT = wi[W.tick] / 240;
+    let policeN = 0;
+    let trafficN = 0;
+    for (const v of app.views.values()) {
+      if (v.kind === "police") policeN++;
+      else if (v.kind === "traffic") trafficN++;
+      v.updateLights(simT, true, wi[W.night]);
+    }
 
     const focusView = app.views.get(app.focus) ?? null;
     if (focusTel) {
@@ -398,6 +471,10 @@ async function main(): Promise<void> {
     const r1 = performance.now();
     renderMs += (r1 - r0 - renderMs) * 0.1;
 
+    if (frameNo % 6 === 0) {
+      const agents = Math.floor(sim.trafficAgents().length / AGENT_STRIDE);
+      chaseHud.update(chase, chase ? sim.policeHud() : null, policeN, agents + trafficN, trafficN);
+    }
     if (frameNo++ % 6 === 0 || !focusView) {
       hud.update({
         info: focusView?.info ?? null,
