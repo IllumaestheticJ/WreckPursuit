@@ -198,3 +198,11 @@ Contract **v0.3.0** is being applied in parallel by the lead (branch `lead/contr
    cross traffic held at its red; careful drivers (risk < 0.35) stop at reds, others go only
    when clear; a 3 s stand-off breaker for civilians standing still in the box. 8-seed sweep:
    +13 % open-road progress, no civilian contacts, no AI collisions. Unit tests for the rules.
+
+Checks at end of round 6b: fmt, clippy `-D warnings` (workspace), wasm build of `wp_wasm`,
+`simcli run apps/simcli/scenarios/opponent` (4 PASS), `simcli goldens` (all ok) — green.
+`cargo test --workspace`: everything passes except
+`wp_economy/tests/pursuit_wiring.rs::real_police_capture_settles_through_the_economy`
+("level at capture, not after the reset"), which fails identically on
+`origin/claude/laughing-newton-0xqr6q` without this branch (no diff in wp_economy / wp_sim /
+wp_police) — pre-existing, for G / the lead.
