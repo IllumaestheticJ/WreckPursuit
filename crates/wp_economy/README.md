@@ -43,6 +43,7 @@ store.commit(&acct, &events)?;                     // AccountStore: in-memory or
 | `sqlite` (`native`) | `SqliteStore`: `accounts` + append-only `events` tables, one transaction per commit |
 | `repair` | `price_table` (→ contract `PriceTable` for `wp_damage`), `DamageReport`, `RepairOption`, shops, insurance claims, scrap, `reference_estimate` |
 | `capture` | fines, bail, rep loss, impound/seizure/destruction, escapes, pound fees + auction, daily tick, cop XP + rewards |
+| `pursuit` | `PursuitTracker` + `settle_pursuit`: police pursuit endings → capture / escape settlement (no `wp_police` dependency; adapter in `tests/pursuit_wiring.rs`) |
 | `payouts` | purses, buy-ins, clean bonus, rep, bounty while wanted, debt rules, pink slips, informants |
 | `mods` | `ModDef`/`ModEffect`, catalog validation, install/uninstall rules, `apply_mods` → modified `VehicleDef` + `LatticeDef` |
 | `garage` | accounts, buy/sell, floor car, install/uninstall, `preview`, valuation, insurance |
@@ -189,6 +190,7 @@ cargo test -p wp_economy --test career -- --nocapture   # print the tuning numbe
 - `tests/garage_repair.rs`, `tests/capture_payouts.rs`: behaviour of every API.
 - `tests/data_tables.rs`: data completeness, embedded copy == `data/`, every mod applies.
 - `tests/stores.rs`: in-memory + SQLite stores, sequence conflicts, `SimEvent` round trip.
+- `tests/pursuit_wiring.rs`: a real `PoliceSystem` capture settled through the economy (both modes), escape / safehouse / called-off settlement, tracker event-order rules.
 - `tests/career.rs`: the 20-night scenario + determinism.
 
 ## Performance

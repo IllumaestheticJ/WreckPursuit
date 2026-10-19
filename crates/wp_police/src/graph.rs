@@ -1,11 +1,11 @@
-//! The police view of the road network: nodes, directed-or-two-way segments, districts, POIs
-//! (safehouses, cameras) and building occluders for line of sight.
+//! The police index over the road network: nodes, directed-or-two-way segments, districts and
+//! POIs, plus what the police compute on it (legal routing, predicted paths, approach sight
+//! distance, nearest-road lookup).
 //!
-//! `wp_world` (prompt 05) owns the real city. Until it exposes a road graph and LOS queries,
-//! this crate carries its own minimal graph plus [`procedural_city`], an irregular grid city
-//! used by every police test and scenario. `wp_world` is expected to convert its network into
-//! a [`RoadGraph`] (or the lead promotes this type into `wp_contracts`); see
-//! `docs/integration/police.md`.
+//! The roads themselves come from `wp_world` (machine D): [`RoadGraph::from_view`] /
+//! [`RoadGraph::from_city`] in [`crate::city`] build this from D's `RoadGraphView`. Line of
+//! sight is `WorldQuery::line_of_sight`; the optional [`Occluder`] boxes here are for
+//! hand-built test graphs only.
 //!
 //! All geometry is 2D in the world XY plane (+Z up is ignored), metres.
 
@@ -13,7 +13,6 @@ use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
 use serde::{Deserialize, Serialize};
-use wp_math::Rng;
 
 /// Road node (intersection or bend).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -76,6 +75,10 @@ pub struct RoadSegment {
     pub district: District,
     /// One-way `a → b` only.
     pub oneway: bool,
+    /// Source road in D's `RoadGraphView::edges` (`None` for hand-built graphs). Captain
+    /// commands name roads by this id.
+    #[serde(default)]
+    pub edge: Option<u32>,
 }
 
 /// Kind of point of interest.
@@ -243,6 +246,7 @@ impl RoadGraph {
             class,
             district: self.nodes[a.0 as usize].district,
             oneway,
+            edge: None,
         });
         self.out[a.0 as usize].push((id, b));
         self.inc[b.0 as usize].push((id, a));
@@ -533,198 +537,6 @@ impl RoadGraph {
     }
 }
 
-/// Parameters for [`procedural_city`].
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct CityParams {
-    /// Seed for block sizes, jitter, occluders and POIs.
-    pub seed: u64,
-    /// Grid columns (north-south streets).
-    pub cols: u32,
-    /// Grid rows (east-west streets).
-    pub rows: u32,
-    /// Block size range, m.
-    pub block_min_m: f32,
-    /// Block size range, m.
-    pub block_max_m: f32,
-    /// Max node jitter (creates bends and blind corners), m.
-    pub jitter_m: f32,
-    /// Add a highway along the south edge.
-    pub highway: bool,
-}
-
-impl Default for CityParams {
-    fn default() -> Self {
-        Self {
-            seed: 1,
-            cols: 10,
-            rows: 10,
-            block_min_m: 90.0,
-            block_max_m: 190.0,
-            jitter_m: 14.0,
-            highway: true,
-        }
-    }
-}
-
-const KMH: f32 = 1.0 / 3.6;
-
-/// An irregular grid city: Core in the middle, Industrial to the east, Suburb elsewhere,
-/// arterials every third street, alternating one-way local streets in Core, an optional
-/// highway with ramps along the south edge, buildings in most blocks, two safehouses and a few
-/// traffic cameras. Stand-in for prompt 05's procedural city.
-#[allow(clippy::needless_range_loop)] // grid[i][j] indexing reads clearer than iterators here
-pub fn procedural_city(p: &CityParams) -> RoadGraph {
-    let mut rng = Rng::new(p.seed ^ 0xC17E_C17E);
-    let mut xs = vec![0.0f32];
-    for _ in 1..p.cols {
-        let last = *xs.last().unwrap();
-        xs.push(last + rng.range_f32(p.block_min_m, p.block_max_m));
-    }
-    let mut ys = vec![0.0f32];
-    for _ in 1..p.rows {
-        let last = *ys.last().unwrap();
-        ys.push(last + rng.range_f32(p.block_min_m, p.block_max_m));
-    }
-    let (w, h) = (*xs.last().unwrap(), *ys.last().unwrap());
-    let (cx, cy) = (w * 0.5, h * 0.5);
-    let district_of = |x: f32, y: f32| {
-        let u = (x - cx) / (w * 0.5);
-        let v = (y - cy) / (h * 0.5);
-        if u.abs().max(v.abs()) < 0.45 {
-            District::Core
-        } else if u > 0.3 {
-            District::Industrial
-        } else {
-            District::Suburb
-        }
-    };
-    let mut g = RoadGraph::new();
-    let mut grid = vec![vec![NodeId(0); p.rows as usize]; p.cols as usize];
-    for (i, &x) in xs.iter().enumerate() {
-        for (j, &y) in ys.iter().enumerate() {
-            let jx = rng.range_f32(-p.jitter_m, p.jitter_m);
-            let jy = rng.range_f32(-p.jitter_m, p.jitter_m);
-            grid[i][j] = g.add_node([x + jx, y + jy], district_of(x, y));
-        }
-    }
-    let limit_for = |d: District, arterial: bool| {
-        if arterial {
-            60.0 * KMH
-        } else {
-            match d {
-                District::Core | District::Suburb => 50.0 * KMH,
-                District::Industrial => 60.0 * KMH,
-            }
-        }
-    };
-    // East-west rows (two-way).
-    for j in 0..p.rows as usize {
-        let arterial = j % 3 == 0;
-        for i in 0..p.cols as usize - 1 {
-            let a = grid[i][j];
-            let b = grid[i + 1][j];
-            let d = g.node(a).district;
-            let class = if arterial {
-                RoadClass::Arterial
-            } else {
-                RoadClass::Local
-            };
-            g.add_segment(a, b, limit_for(d, arterial), class, false);
-        }
-    }
-    // North-south columns; Core local columns are one-way, alternating direction.
-    for i in 0..p.cols as usize {
-        let arterial = i % 3 == 0;
-        for j in 0..p.rows as usize - 1 {
-            let (mut a, mut b) = (grid[i][j], grid[i][j + 1]);
-            let d = g.node(a).district;
-            let oneway = !arterial && d == District::Core && g.node(b).district == District::Core;
-            if oneway && i % 2 == 1 {
-                std::mem::swap(&mut a, &mut b);
-            }
-            let class = if arterial {
-                RoadClass::Arterial
-            } else {
-                RoadClass::Local
-            };
-            g.add_segment(a, b, limit_for(d, arterial), class, oneway);
-        }
-    }
-    if p.highway {
-        let hy = -160.0;
-        let mut prev: Option<NodeId> = None;
-        for (i, &x) in xs.iter().enumerate() {
-            let n = g.add_node([x, hy], district_of(x, 0.0));
-            if let Some(pn) = prev {
-                g.add_segment(pn, n, 100.0 * KMH, RoadClass::Highway, false);
-            }
-            if i % 3 == 0 {
-                g.add_segment(n, grid[i][0], 50.0 * KMH, RoadClass::Local, false);
-            }
-            prev = Some(n);
-        }
-    }
-    // Buildings: inset footprints inside each block.
-    let inset = 10.0;
-    for i in 0..p.cols as usize - 1 {
-        for j in 0..p.rows as usize - 1 {
-            let c = [
-                grid[i][j],
-                grid[i + 1][j],
-                grid[i][j + 1],
-                grid[i + 1][j + 1],
-            ];
-            let pos: Vec<[f32; 2]> = c.iter().map(|n| g.node(*n).pos).collect();
-            let minx = pos[0][0].max(pos[2][0]) + inset;
-            let maxx = pos[1][0].min(pos[3][0]) - inset;
-            let miny = pos[0][1].max(pos[1][1]) + inset;
-            let maxy = pos[2][1].min(pos[3][1]) - inset;
-            if maxx - minx < 4.0 || maxy - miny < 4.0 {
-                continue;
-            }
-            let fill = match g.node(c[0]).district {
-                District::Core => 1.0,
-                District::Industrial => 0.8,
-                District::Suburb => 0.7,
-            };
-            if rng.chance(fill) {
-                g.occluders.push(Occluder {
-                    min: [minx, miny],
-                    max: [maxx, maxy],
-                });
-            }
-        }
-    }
-    // Safehouses: one in Suburb, one in Industrial, at segment midpoints.
-    for want in [District::Suburb, District::Industrial] {
-        let cands: Vec<usize> = (0..g.segments.len())
-            .filter(|&s| g.segments[s].district == want && g.segments[s].class == RoadClass::Local)
-            .collect();
-        if cands.is_empty() {
-            continue;
-        }
-        let s = g.segments[cands[rng.below(cands.len() as u32) as usize]];
-        let m = lerp2(g.node(s.a).pos, g.node(s.b).pos, 0.5);
-        g.pois.push(Poi {
-            kind: PoiKind::Safehouse,
-            pos: m,
-            radius_m: 15.0,
-        });
-    }
-    // Cameras at a quarter of Core intersections.
-    for n in 0..g.nodes.len() {
-        if g.nodes[n].district == District::Core && rng.chance(0.25) {
-            g.pois.push(Poi {
-                kind: PoiKind::Camera,
-                pos: g.nodes[n].pos,
-                radius_m: 60.0,
-            });
-        }
-    }
-    g
-}
-
 // ---------------------------------------------------------------------------------------------
 // Small 2D vector helpers (f32, IEEE ops only).
 // ---------------------------------------------------------------------------------------------
@@ -829,7 +641,7 @@ mod tests {
     use super::*;
 
     fn city() -> RoadGraph {
-        procedural_city(&CityParams::default())
+        crate::city::procedural(&crate::city::ProcGenConfig::small()).0
     }
 
     #[test]
@@ -839,8 +651,7 @@ mod tests {
         for d in District::ALL {
             assert!(a.segments.iter().any(|s| s.district == d), "{d:?}");
         }
-        assert_eq!(a.pois_of(PoiKind::Safehouse).count(), 2);
-        assert!(!a.occluders.is_empty());
+        assert!(a.pois_of(PoiKind::Helipad).count() == 1);
     }
 
     #[test]
@@ -859,13 +670,17 @@ mod tests {
     }
 
     #[test]
-    fn los_blocked_by_building_but_not_along_street() {
-        let g = city();
-        let o = g.occluders[0];
-        let c = lerp2(o.min, o.max, 0.5);
-        assert!(!g.line_of_sight([o.min[0] - 5.0, c[1]], [o.max[0] + 5.0, c[1]]));
-        let s = g.segments[0];
-        assert!(g.line_of_sight(g.node(s.a).pos, g.node(s.b).pos));
+    fn hand_built_occluders_block_line_of_sight() {
+        let mut g = RoadGraph::new();
+        let a = g.add_node([0.0, 0.0], District::Core);
+        let b = g.add_node([100.0, 0.0], District::Core);
+        g.add_segment(a, b, 14.0, RoadClass::Local, false);
+        g.occluders.push(Occluder {
+            min: [40.0, 10.0],
+            max: [60.0, 30.0],
+        });
+        assert!(g.line_of_sight([0.0, 0.0], [100.0, 0.0]));
+        assert!(!g.line_of_sight([50.0, 0.0], [50.0, 40.0]));
     }
 
     #[test]

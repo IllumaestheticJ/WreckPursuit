@@ -6,6 +6,8 @@ import { CrewMap } from "./crew/CrewMap";
 import { Garage } from "./garage/Garage";
 import { ModTree } from "./garage/ModTree";
 import { Hud } from "./hud/Hud";
+import { ChaseHud } from "./hud/ChaseHud";
+import { RepairBill } from "./garage/RepairBill";
 import { Impound } from "./impound/Impound";
 import { Lobby } from "./race/Lobby";
 import { Results } from "./race/Results";
@@ -29,12 +31,14 @@ export interface ScreenEntry {
 export const SCREENS: ScreenEntry[] = [
   { id: "hud", label: "HUD", group: "Race", component: Hud },
   { id: "replay", label: "Replay controls", group: "Race", component: ReplayScreen },
+  { id: "chaseHud", label: "Chase readout (overlay)", group: "Race", component: ChaseHud },
   { id: "mainMenu", label: "Main menu", group: "Menus", component: MainMenu },
   { id: "pause", label: "Pause", group: "Menus", component: Pause },
   { id: "settings", label: "Settings", group: "Menus", component: Settings },
   { id: "garage", label: "Garage", group: "Garage", component: Garage },
   { id: "modTree", label: "Mod tree", group: "Garage", component: ModTree },
   { id: "market", label: "Market", group: "Garage", component: Market },
+  { id: "repairBill", label: "Repair bill (overlay)", group: "Garage", component: RepairBill },
   { id: "lobby", label: "Race lobby / meet", group: "Street", component: Lobby },
   { id: "results", label: "Results & payout", group: "Street", component: Results },
   { id: "impound", label: "Impound", group: "Street", component: Impound },

@@ -254,6 +254,13 @@ impl Sim {
         self.rebuild_police();
     }
 
+    /// Replace the police system, e.g. `PoliceSystem::for_world(cfg, &world, setup)` so units
+    /// patrol the city's road graph (the default `PoliceSystem::new()` has no road network and
+    /// therefore no units). Call before the first tick so replays match.
+    pub fn set_police(&mut self, police: PoliceSystem) {
+        self.police = police;
+    }
+
     /// Number of city props turned into physics bodies by [`Sim::set_world`].
     pub fn prop_count(&self) -> usize {
         self.props
@@ -610,9 +617,9 @@ impl Sim {
             .ok_or(SimError::UnknownEntity(id))
     }
 
-    /// Stable hash of the whole simulation state (hash spec v2, see `docs/integration/harness.md`):
+    /// Stable hash of the whole simulation state (hash spec v3, see `docs/integration/harness.md`):
     /// FNV-1a 64 over `HASH_SPEC_VERSION`, tick, in-game clock (1 ms), [`World::state_hash`]
-    /// (signals + traffic), debris count and every debris body position (1e-3 m) in spawn order,
+    /// (signals + traffic), `PoliceSystem::state_hash` (units, heat, pursuits), debris count and every debris body position (1e-3 m) in spawn order,
     /// vehicle count, then every [`Sim::entity_hashes`] value in ascending entity order.
     pub fn state_hash(&self) -> u64 {
         let mut h = StateHasher::new();
@@ -620,6 +627,7 @@ impl Sim {
         h.write_u64(self.tick);
         h.write_f32_q(self.world.clock.time.seconds_since_midnight, 1e3);
         h.write_u64(self.world.state_hash());
+        h.write_u64(self.police.state_hash());
         h.write_u32(self.debris.len() as u32);
         for d in &self.debris {
             for x in self.physics.bodies[*d].translation().to_array() {
@@ -679,7 +687,7 @@ impl Sim {
 
 /// Version of the [`Sim::state_hash`] layout. Bump when the hashed fields change; every golden
 /// must then be re-blessed.
-pub const HASH_SPEC_VERSION: u32 = 2;
+pub const HASH_SPEC_VERSION: u32 = 3;
 
 #[cfg(test)]
 mod tests {

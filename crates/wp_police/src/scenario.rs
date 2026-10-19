@@ -1,4 +1,4 @@
-//! Headless police scenarios on the procedural city (`crates/wp_police/scenarios/*.ron`).
+//! Headless police scenarios on `wp_world`'s procedural city (`crates/wp_police/scenarios/*.ron`).
 //!
 //! A scenario scripts one or more racers (roam a district at a multiple of the speed limit,
 //! stop, run for a safehouse, total their car) and checks metric **ranges** after the run. With
@@ -16,14 +16,12 @@ use wp_contracts::{
     PHYSICS_DT,
 };
 use wp_math::{Rng, StateHasher};
-use wp_world::procgen::{self, ProcGenConfig};
+use wp_world::procgen::ProcGenConfig;
 use wp_world::CityMap;
 
 use crate::config::PoliceConfig;
 use crate::events::UnitKind;
-use crate::graph::{
-    dist, lerp2, procedural_city, sub, CityParams, District, NodeId, PoiKind, RoadClass, RoadGraph,
-};
+use crate::graph::{dist, lerp2, sub, District, NodeId, PoiKind, RoadClass, RoadGraph};
 use crate::unit::{
     plan_unit_speed, step_ground, DriveCommand, DriveEnv, Track, Unit, UnitRole, LANE_OFFSET_M,
 };
@@ -98,13 +96,9 @@ pub struct PoliceScenario {
     pub name: String,
     /// Base seed (police RNG, racer starts, routes).
     pub seed: u64,
-    /// Procedural city.
+    /// `wp_world` procedural city to run on.
     #[serde(default)]
-    pub city: CityParams,
-    /// Run on `wp_world`'s procedural city (`ProcGenConfig::small()` with `city.seed`) instead
-    /// of the police grid city.
-    #[serde(default)]
-    pub world_city: bool,
+    pub city: ScenarioCity,
     /// Damage mode.
     #[serde(default)]
     pub mode: DamageMode,
@@ -167,15 +161,51 @@ pub fn load_scenario(path: &Path) -> Result<PoliceScenario, ScenarioError> {
         .map_err(|e| ScenarioError::Parse(path.display().to_string(), e.to_string()))
 }
 
-/// Minimal world for scenarios: the clock, plus line of sight from a `wp_world` city when the
-/// scenario runs on one.
+/// `wp_world` procedural city size and seed (`ProcGenConfig` with the remaining fields at
+/// their defaults). The default is `ProcGenConfig::small()`; the safehouse scenario needs the
+/// full 12×12 city (the small one has no residential district).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ScenarioCity {
+    /// Grid columns.
+    pub nx: usize,
+    /// Grid rows.
+    pub ny: usize,
+    /// Generator seed.
+    pub seed: u64,
+}
+
+impl Default for ScenarioCity {
+    fn default() -> Self {
+        let small = ProcGenConfig::small();
+        Self {
+            nx: small.nx,
+            ny: small.ny,
+            seed: small.seed,
+        }
+    }
+}
+
+impl ScenarioCity {
+    /// The generator config.
+    pub fn procgen(&self) -> ProcGenConfig {
+        ProcGenConfig {
+            nx: self.nx,
+            ny: self.ny,
+            seed: self.seed,
+            ..ProcGenConfig::default()
+        }
+    }
+}
+
+/// Minimal world for scenarios: the clock, plus line of sight from the `wp_world` city.
 #[derive(Debug, Clone)]
 pub struct ScenarioWorld {
     /// Time of day.
     pub time: TimeOfDay,
     /// Clock ratio.
     pub ratio: f32,
-    /// City whose buildings block line of sight (`None`: the police graph's occluders only).
+    /// City whose buildings block line of sight (`None`: nothing blocks).
     pub map: Option<Arc<CityMap>>,
 }
 
@@ -204,7 +234,6 @@ impl WorldQuery for ScenarioWorld {
         self.time
     }
     fn line_of_sight(&self, a: [f32; 3], b: [f32; 3]) -> bool {
-        // Grid-city scenarios: occlusion comes from the police road graph's own occluders.
         self.map.as_ref().is_none_or(|m| m.line_of_sight(a, b))
     }
 }
@@ -260,15 +289,21 @@ fn racer_route(rng: &mut Rng, g: &RoadGraph, r: &ScriptedRacer) -> Track {
     } else {
         seg.a
     };
+    // Don't drive to the node ahead only to come straight back: turn around now instead.
+    let behind = g.other_end(rp.segment, start);
+    let route_pts = |route: Vec<NodeId>| {
+        let skip = route.len() >= 2 && route[1] == behind;
+        let mut pts = vec![pos];
+        pts.extend(route.iter().skip(skip as usize).map(|n| g.node(*n).pos));
+        pts
+    };
     let dest = if r.to_safehouse {
         let sh = g
             .pois_of(PoiKind::Safehouse)
             .min_by(|a, b| dist(a.pos, pos).total_cmp(&dist(b.pos, pos)))
             .expect("city has safehouses");
         let n = g.nearest_node(sh.pos).expect("nodes");
-        let route = g.shortest_path(start, n).unwrap_or_default();
-        let mut pts = vec![pos];
-        pts.extend(route.iter().map(|n| g.node(*n).pos));
+        let mut pts = route_pts(g.shortest_path(start, n).unwrap_or_default());
         pts.push(sh.pos);
         return Track::new(pts);
     } else {
@@ -279,29 +314,12 @@ fn racer_route(rng: &mut Rng, g: &RoadGraph, r: &ScriptedRacer) -> Track {
         }
         dest
     };
-    let route = g.shortest_path(start, dest).unwrap_or_default();
-    let behind = g.other_end(rp.segment, start);
-    let skip = route.len() >= 2 && route[1] == behind;
-    let mut pts = vec![pos];
-    pts.extend(route.iter().skip(skip as usize).map(|n| g.node(*n).pos));
-    Track::new(pts)
+    Track::new(route_pts(g.shortest_path(start, dest).unwrap_or_default()))
 }
 
 fn run_once(sc: &PoliceScenario, seed: u64, cfg: &PoliceConfig) -> RunNumbers {
-    let city = CityParams {
-        seed: sc.city.seed,
-        ..sc.city
-    };
-    let (graph, map) = if sc.world_city {
-        let pg = ProcGenConfig {
-            seed: sc.city.seed,
-            ..ProcGenConfig::small()
-        };
-        let map = CityMap::new(procgen::generate(&pg));
-        (RoadGraph::from_city(&map), Some(Arc::new(map)))
-    } else {
-        (procedural_city(&city), None)
-    };
+    let (graph, map) = crate::city::procedural(&sc.city.procgen());
+    let map = Some(Arc::new(map));
     let setup = PoliceSetup {
         seed,
         mode: sc.mode,

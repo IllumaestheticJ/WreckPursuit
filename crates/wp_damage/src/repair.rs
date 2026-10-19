@@ -2,8 +2,10 @@
 //! with a [`PriceTable`] and scaled by `ModeTable::repair_cost_scale`.
 //!
 //! Severity per line, 0 ..= 1:
-//! - region: plastic energy / the region's "replace" energy (the work to plastically strain
-//!   all its beams by `DamageTuning::region_replace_strain`); shattered glass = 1;
+//! - region: the larger of plastic energy / the region's "replace" energy (the work to
+//!   plastically strain all its beams by `DamageTuning::region_replace_strain`) and its
+//!   deepest node displacement / `DamageTuning::region_replace_displacement_m`; shattered
+//!   glass = 1;
 //! - detached part: 1 (the region line is replaced by a `DetachedPart` line);
 //! - component: `1 - health` (failed = 1).
 //!
@@ -63,14 +65,33 @@ fn line(
 
 /// Severity of each damaged region (0 ..= 1), regions with no damage omitted.
 pub fn region_severities(m: &DamageModel) -> BTreeMap<BodyRegion, f32> {
+    // Deepest permanent displacement of each region's active nodes (a panel shoved in far
+    // enough is a replace however little energy it took).
+    let mut worst_disp = [0.0f32; crate::model::REGION_COUNT];
+    for i in 0..m.pos.len() {
+        if m.detached[i] {
+            continue;
+        }
+        let d = crate::vec3::length(crate::vec3::sub(m.pos[i], m.rest_pos[i]));
+        let r = m.node_region[i] as usize;
+        worst_disp[r] = worst_disp[r].max(d);
+    }
+    let replace_disp = m.tuning.region_replace_displacement_m.max(1e-3);
+    let deadband = m.tuning.displacement_deadband_m;
     let mut out = BTreeMap::new();
     for r in ALL_REGIONS {
         let i = r as usize;
-        let mut sev = if m.region_ref_j[i] > 0.0 {
+        let energy = if m.region_ref_j[i] > 0.0 {
             m.region_plastic_j[i] / m.region_ref_j[i]
         } else {
             0.0
         };
+        let disp = if worst_disp[i] > deadband {
+            worst_disp[i] / replace_disp
+        } else {
+            0.0
+        };
+        let mut sev = energy.max(disp);
         if m.shattered.contains(&r) {
             sev = 1.0;
         }
