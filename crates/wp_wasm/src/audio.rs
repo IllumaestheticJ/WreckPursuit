@@ -139,7 +139,7 @@ pub(crate) fn frame_commands(
             state: st,
             throttle: v.input.throttle,
             horn: v.input.horn,
-            siren: v.input.siren,
+            siren: crate::police::siren_on(sim, v),
             road_rumble: s.ffb(*id).map(|f| f.road_rumble).unwrap_or(0.0),
             kind: driver_kind(v.kind),
         });

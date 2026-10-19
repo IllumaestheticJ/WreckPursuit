@@ -18,6 +18,7 @@
 //! | io | `events_drain() -> postcard`, `events_decode(bytes)`, `telemetry(entity)`, `telemetry_names()`, `ffb(entity)`, `intents()` |
 //! | replay | `record_start()`, `record_stop()`, `recording()`, `replay_load(bytes)`, `replay_seek(tick)`, `replay_play(speed)`, `replay_status()`, `replay_export_csv(bytes, entity, every)` |
 //! | scenario | `scenario_json()`, `scenario_result()` |
+//! | run (lead) | `run_result_json()`, `run_ledger_json()`, `run_account_json()`, `run_repair_continue()`, `debug_set_heat(entity, heat)` — see [`run`] |
 //! | audio (13) | `audio_library()`, `audio_frame(listener, events_json, focus)`, `audio_set_siren`, `audio_set_scanner_tier`, `audio_radio`, `audio_reset()` — see [`audio`] |
 
 #![warn(missing_docs)]
@@ -30,9 +31,13 @@ pub mod data;
 pub mod garage;
 pub mod pack;
 pub mod police;
+pub mod run;
 pub mod scenario;
 pub mod session;
 pub mod signals;
+
+#[cfg(test)]
+mod run_tests;
 
 use std::cell::RefCell;
 
@@ -61,9 +66,16 @@ fn get<T>(f: impl FnOnce(&mut Session) -> T) -> Result<T, JsValue> {
     with(|s| Ok(f(s)))
 }
 
-fn install(session: Session) -> Vec<u32> {
+fn install(mut session: Session) -> Vec<u32> {
     let ids = session.entities().iter().map(|e| e.0).collect();
-    SESSION.with(|s| *s.borrow_mut() = Some(session));
+    SESSION.with(|s| {
+        let mut slot = s.borrow_mut();
+        // The player's account (cash, garage, ledger) carries over a restart.
+        if let Some(prev) = slot.as_mut().and_then(Session::take_run) {
+            session.adopt_account(prev);
+        }
+        *slot = Some(session);
+    });
     ids
 }
 
@@ -404,7 +416,8 @@ pub const META_STRIDE: usize = 3;
 
 /// Per-vehicle render metadata, same order as `vehicle_states()`, 3 floats each:
 /// `[entity, kind (0 player, 1 AI racer, 2 police, 3 physical traffic), flags]` with flags
-/// 1 siren, 2 headlights, 4 braking, 8 horn (from the input the vehicle is driving with).
+/// 1 siren, 2 headlights, 4 braking, 8 horn (from the input the vehicle is driving with; a
+/// police car's siren and light bar follow its unit's assignment, see [`police::siren_on`]).
 #[wasm_bindgen]
 pub fn vehicle_meta() -> Result<Vec<f32>, JsValue> {
     get(|s| {
@@ -417,7 +430,7 @@ pub fn vehicle_meta() -> Result<Vec<f32>, JsValue> {
                 wp_sim::VehicleKind::Traffic => 3.0,
             };
             let i = &v.input;
-            let flags = i.siren as u32
+            let flags = police::siren_on(s.sim(), v) as u32
                 | (i.headlights as u32) << 1
                 | ((i.brake > 0.1) as u32) << 2
                 | (i.horn as u32) << 3;
@@ -474,6 +487,61 @@ pub fn police_units() -> Result<Vec<f32>, JsValue> {
     get(|s| {
         let world = s.sim().world();
         police::units(s.sim().police(), &|p| world.map().ground_height(p, None))
+    })
+}
+
+/// End-of-run result as JSON ([`run::RunReport`]): outcome (`Escaped`, `Safehouse`,
+/// `Captured`, `CapturedTotalLoss`, `TotalLoss`), bounty payout, fines, bail, impound decision
+/// and fee, G's repair quote, cash before and after, and this settlement's ledger lines.
+/// `null` until the player's first chase (or car) ends, or when the session has no economy run
+/// (replays, scripted scenarios, no police). `seq` grows with each settlement.
+#[wasm_bindgen]
+pub fn run_result_json() -> Result<String, JsValue> {
+    get(|s| json(&s.run().and_then(|r| r.report())))
+}
+
+/// Every ledger entry of the player's account as JSON ([`run::LedgerLine`] array, oldest first;
+/// carries over restarts). `[]` without an economy run.
+#[wasm_bindgen]
+pub fn run_ledger_json() -> Result<String, JsValue> {
+    get(|s| {
+        let lines: Vec<run::LedgerLine> = s
+            .run()
+            .map(|r| r.ledger().iter().map(run::LedgerLine::of).collect())
+            .unwrap_or_default();
+        json(&lines)
+    })
+}
+
+/// `{ cash, rep, bounty, debt }` of the player's account, or `null` without an economy run.
+#[wasm_bindgen]
+pub fn run_account_json() -> Result<String, JsValue> {
+    get(|s| {
+        json(&s.run().map(|r| {
+            let a = r.account();
+            serde_json::json!({ "cash": a.cash, "rep": a.rep, "bounty": a.bounty, "debt": a.debt() })
+        }))
+    })
+}
+
+/// "Repair & continue" after a capture or wreck: pays the impound fee and G's `RepairAll` from
+/// the ledger, repairs the car in place (replay op `Repair`) and releases the brakes. Returns
+/// [`run::ContinueReport`] JSON; an error (nothing changed) if the run is not over, the car is
+/// gone, or the player cannot afford it.
+#[wasm_bindgen]
+pub fn run_repair_continue() -> Result<String, JsValue> {
+    with(|s| s.repair_and_continue().map(|r| json(&r)))
+}
+
+/// Debug / e2e: set a racer's police heat (`PoliceSystem::set_heat`). Changes the run and is
+/// **not** recorded in replays.
+#[wasm_bindgen]
+pub fn debug_set_heat(entity: u32, heat: f32) -> Result<(), JsValue> {
+    with(|s| {
+        s.debug_sim_mut()?
+            .police_mut()
+            .set_heat(EntityId(entity), heat);
+        Ok(())
     })
 }
 
