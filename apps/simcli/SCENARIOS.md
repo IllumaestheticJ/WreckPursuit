@@ -24,6 +24,7 @@ Parsing uses RON with `implicit_some`, so optional fields are written plainly
     traffic_cars: true,              // moving civilian traffic (default true)
     parked_cars: true,               // parked cars along parking lanes, as physics bodies (default true)
     police_cars: true,               // AI police units patrolling the city (default true)
+    slow: false,                     // true = minutes of a full city: debug `cargo test` skips it (release CI runs it)
     systems: "vehicle,damage,world", // optional; default all. --systems overrides. "net" adds the snapshot round trip
     barriers: [(pos: (0.0, 20.0, 0.75), size: (8.0, 1.0, 1.5), yaw: 0.0)],  // static boxes (rigid walls)
     entities: [ … ],                 // spawn order = entity id order (1, 2, 3, …); may be empty

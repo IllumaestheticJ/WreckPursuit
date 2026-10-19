@@ -41,6 +41,7 @@ pub fn free_drive(car: &str, mode: DamageMode, city: bool) -> Scenario {
         traffic_cars: true,
         parked_cars: true,
         police_cars: true,
+        slow: false,
         systems: None,
         barriers: Vec::new(),
         entities: vec![entity("player", car, [0.0; 3], 0.0)],

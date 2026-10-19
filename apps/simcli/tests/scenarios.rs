@@ -17,15 +17,19 @@ fn data() -> FsData {
     FsData::new(root().join("../../data"))
 }
 
-/// Every scenario, minus `scenarios/soak/` in debug builds: soaks simulate minutes of a full
-/// city and take ~200× longer unoptimised. CI's release jobs (`simcli goldens`,
-/// `simcli determinism`, the wasm compare) still run them.
+/// Every scenario, minus `scenarios/soak/` and scenarios marked `slow: true` in debug builds:
+/// they simulate minutes of a full city and take ~200× longer unoptimised. CI's release jobs
+/// (`simcli goldens`, `simcli determinism`, the wasm compare) still run them.
 fn all_scenarios() -> Vec<PathBuf> {
     let found = find_scenarios(&root().join("scenarios"));
     assert!(found.len() >= 6, "scenario library missing");
     found
         .into_iter()
-        .filter(|p| !(cfg!(debug_assertions) && p.components().any(|c| c.as_os_str() == "soak")))
+        .filter(|p| {
+            let soak = p.components().any(|c| c.as_os_str() == "soak");
+            let slow = soak || load_scenario(p).map(|sc| sc.slow).unwrap_or(false);
+            !(cfg!(debug_assertions) && slow)
+        })
         .collect()
 }
 

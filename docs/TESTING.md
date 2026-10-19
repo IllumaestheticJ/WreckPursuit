@@ -24,8 +24,8 @@ Run it all locally with `just ci` (or the individual `just` recipes below).
 
 1. Pick a folder under `apps/simcli/scenarios/` (`vehicle/`, `damage/`, `world/`, `police/`, …;
    `golden/` is reserved for the "feel" library, see below; anything that simulates more than
-   ~20 s of a full city goes in `soak/`, which debug `cargo test` skips and the release CI jobs
-   run). File name = what it tests.
+   ~20 s of a full city goes in `soak/`, or sets `slow: true` if it belongs in another folder;
+   debug `cargo test` skips both and the release CI jobs run them). File name = what it tests.
 2. Write it (format: `apps/simcli/SCENARIOS.md`). Rules:
    - **Ranges, not exact numbers** (`speed_at(t_s: 5.0, min: 20.0, max: 24.0)`). Exact behaviour
      is already pinned by the golden hash; the ranges say what is *physically right*.

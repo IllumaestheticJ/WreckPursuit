@@ -6,6 +6,8 @@
 // The same race runs today as a Rust test: crates/wp_opponent/tests/race.rs.
 (
     name: "opponent_open_roads_traffic",
+    // Minutes of a full city: skipped by debug `cargo test`, run by the release CI jobs.
+    slow: true,
     seed: 7,
     city: procedural(seed: 1, blocks_x: 7, blocks_y: 7, block_m: 110.0),
     mode: Arcade,
