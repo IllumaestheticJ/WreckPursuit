@@ -1,0 +1,15 @@
+// Smoke test: RWD coupe holding half throttle and steady steer in Simulation mode.
+(
+    name: "smoke_coupe_circle",
+    car: "debug_coupe",
+    mode: Simulation,
+    seed: 2,
+    duration_s: 8.0,
+    time_of_day_h: 23.0,
+    inputs: [
+        (t_s: 0.0, input: (throttle: 0.5, steer: 0.4)),
+    ],
+    expect: [
+        (metric: "max_speed_mps", min: 5.0, max: 90.0),
+    ],
+)

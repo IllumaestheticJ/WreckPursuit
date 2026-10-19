@@ -1,0 +1,10 @@
+[package]
+name = "wp_math"
+description = "Deterministic math helpers: fixed-step accumulator, seeded RNG, interpolation, stable hashing."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true

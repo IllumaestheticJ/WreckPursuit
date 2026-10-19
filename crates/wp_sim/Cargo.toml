@@ -1,0 +1,18 @@
+[package]
+name = "wp_sim"
+description = "The fixed-step game loop composing vehicle, damage, world, police and economy. Owned by the integration lead."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+wp_contracts.workspace = true
+wp_math.workspace = true
+wp_vehicle.workspace = true
+wp_damage.workspace = true
+wp_world.workspace = true
+wp_police.workspace = true
+wp_economy.workspace = true
+rapier3d.workspace = true
+thiserror.workspace = true

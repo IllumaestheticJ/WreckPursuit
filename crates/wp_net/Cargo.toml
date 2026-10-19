@@ -1,0 +1,24 @@
+[package]
+name = "wp_net"
+description = "Authoritative server, client prediction, snapshots, roles, interest management."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+default = []
+# Native transport (tokio + websockets). Never enable in anything reachable from wp_wasm.
+native = ["dep:tokio", "dep:tokio-tungstenite", "dep:futures-util"]
+
+[dependencies]
+wp_contracts.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, optional = true }
+tokio-tungstenite = { workspace = true, optional = true }
+futures-util = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

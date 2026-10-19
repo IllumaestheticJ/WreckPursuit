@@ -1,0 +1,12 @@
+[package]
+name = "wp_police"
+description = "Heat/bounty, dispatch, patrol/pursuit AI, captain tools."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+wp_contracts.workspace = true
+wp_math.workspace = true
+serde.workspace = true

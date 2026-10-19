@@ -1,0 +1,19 @@
+[package]
+name = "wp_server"
+description = "Headless authoritative server. Stub: websocket server streaming a tick counter."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "wp-server"
+path = "src/main.rs"
+
+[dependencies]
+wp_net = { workspace = true, features = ["native"] }
+tokio.workspace = true
+
+[dev-dependencies]
+tokio-tungstenite.workspace = true
+futures-util.workspace = true
