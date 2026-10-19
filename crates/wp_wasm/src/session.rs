@@ -17,7 +17,8 @@ use wp_sim::Sim;
 
 use simcli::replay::{Checkpoint, EntityCheckpoint, InputEvent, OpEvent, OpKind, Replay};
 use simcli::run::{
-    apply_op, build_sim, driver_input, world_config, BuiltSim, RunOptions, Selection,
+    apply_op, build_sim, driver_input, scenario_states, world_config, BuiltSim, RunOptions,
+    Selection,
 };
 use simcli::scenario::{CitySpec, EntitySpec};
 use simcli::{RunSummary, Scenario};
@@ -460,7 +461,7 @@ impl Session {
             }
             self.playback = Some(p);
         } else if self.script_running() {
-            let states = self.sim.vehicle_states();
+            let states = scenario_states(&self.sim, &self.ids);
             for (idx, (_, state)) in states.iter().enumerate() {
                 let input = driver_input(&self.sc, idx, tick, state, &self.last_input[idx]);
                 self.log_input(idx, input);
@@ -468,7 +469,8 @@ impl Session {
         }
 
         // 2. Step, keeping the pre-tick state for interpolation and acceleration.
-        let before = self.sim.vehicle_states();
+        // Scenario entities only: city runs add police / traffic cars (drawn, not scripted).
+        let before = scenario_states(&self.sim, &self.ids);
         if capture_prev {
             for (x, (_, s)) in self.extras.iter_mut().zip(&before) {
                 x.prev_state = Some(s.clone());
@@ -480,7 +482,7 @@ impl Session {
             let excess = self.events.len() - MAX_BUFFERED_EVENTS;
             self.events.drain(..excess);
         }
-        let after = self.sim.vehicle_states();
+        let after = scenario_states(&self.sim, &self.ids);
         for ((x, (_, b)), (_, s)) in self.extras.iter_mut().zip(&before).zip(&after) {
             let a = [
                 (s.lin_vel[0] - b.lin_vel[0]) / PHYSICS_DT,
@@ -534,8 +536,13 @@ impl Session {
     }
 
     fn checkpoint(&self) -> Checkpoint {
-        let states = self.sim.vehicle_states();
-        let hashes = self.sim.entity_hashes();
+        let states = scenario_states(&self.sim, &self.ids);
+        let hashes: Vec<_> = self
+            .sim
+            .entity_hashes()
+            .into_iter()
+            .filter(|(id, _)| self.ids.contains(id))
+            .collect();
         Checkpoint {
             tick: self.sim.tick(),
             entities: states
