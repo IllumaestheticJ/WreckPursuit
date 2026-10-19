@@ -105,6 +105,20 @@ pub struct BuiltSim {
     pub has_city: bool,
 }
 
+/// States of the scenario's own entities, in scenario order. City runs add police and traffic
+/// vehicles (spawned later, so higher ids); expectations and metrics ignore those.
+pub fn scenario_states(sim: &Sim, ids: &[EntityId]) -> Vec<(EntityId, wp_contracts::VehicleState)> {
+    sim.vehicle_states()
+        .into_iter()
+        .filter(|(id, _)| ids.contains(id))
+        .collect()
+}
+
+/// Car model for AI police units in city scenarios.
+pub const POLICE_CAR: &str = "sentinel_cruiser";
+/// Car model for physical (near-player) traffic in city scenarios.
+pub const TRAFFIC_CAR: &str = "debug_sedan";
+
 /// The `wp_world` settings a scenario implies (seed, clock, traffic density override).
 pub fn world_config(sc: &Scenario) -> wp_world::WorldConfig {
     let density = sc.traffic_density.unwrap_or(1.0);
@@ -138,9 +152,10 @@ pub fn police_config(sc: &Scenario) -> wp_police::PoliceConfig {
     cfg
 }
 
-/// Police for a city scenario: `wp_police` on the city's road graph with its built-in kinematic
-/// unit driver (units are not physics bodies yet), seeded from the scenario seed.
-/// Entities with `police_heat` start with that heat (`ids` in scenario order).
+/// Police for a city scenario: `wp_police` on the city's road graph, set up exactly like
+/// `Sim::set_world` does (same seed salt, mode and unit driving) plus the scenario's
+/// `police_presence` scale and per-entity `police_heat` (`ids` in scenario order). Units get
+/// real cars once `Sim::set_police_car` is called.
 pub fn police_for_city(
     sc: &Scenario,
     world: &wp_world::World,
@@ -231,10 +246,21 @@ pub fn build_sim(
                 .collect();
             world.set_tracked_vehicles(&tracked);
             world.populate();
-            if sc.police_cars {
-                sim.set_police(police_for_city(sc, &world, &ids));
-            }
             sim.set_world(world);
+            // `set_world` builds police on the city; rebuild it with the scenario's presence
+            // scale and starting heat (identical to the default when neither is set).
+            if sc.police_cars {
+                let police = police_for_city(sc, sim.world(), &ids);
+                sim.set_police(police);
+                // City runs get real police cars (lead, run 5) unless opted out.
+                sim.set_police_car(load_car(data, POLICE_CAR)?);
+            } else {
+                sim.set_police(wp_police::PoliceSystem::new());
+            }
+            // Physical near-player traffic (lead, run 5) unless opted out.
+            if sc.traffic_cars {
+                sim.set_traffic_car(load_car(data, TRAFFIC_CAR)?);
+            }
             true
         }
         None => false,
@@ -862,7 +888,7 @@ pub fn run_with_hook(
                 track_cursor += 1;
             }
         } else {
-            let states = sim.vehicle_states();
+            let states = scenario_states(&sim, &ids);
             for (idx, id) in ids.iter().enumerate() {
                 let input = driver_input(sc, idx, tick, &states[idx].1, &last_inputs[idx]);
                 if input != last_inputs[idx] {
@@ -925,7 +951,7 @@ pub fn run_with_hook(
         }
 
         // Metrics.
-        let states = sim.vehicle_states();
+        let states = scenario_states(&sim, &ids);
         let sample = now.is_multiple_of(sample_every);
         for (idx, (id, s)) in states.iter().enumerate() {
             let tr = &mut trackers[idx];
@@ -1008,7 +1034,7 @@ pub fn run_with_hook(
     replay.ticks = ticks;
 
     // Final per-entity values.
-    let states = sim.vehicle_states();
+    let states = scenario_states(&sim, &ids);
     let mut entities = Vec::new();
     for (tr, (_, s)) in trackers.iter_mut().zip(&states) {
         tr.summary.final_speed_mps = s.speed_mps;

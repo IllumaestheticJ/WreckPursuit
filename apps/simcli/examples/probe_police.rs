@@ -36,8 +36,13 @@ fn main() {
                 ((u.body.pos[0] - s.pos[0]).powi(2) + (u.body.pos[1] - s.pos[1]).powi(2)).sqrt();
             nearest = nearest.min(d);
             println!(
-                "    unit {:>2} at ({:.0}, {:.0}) heading ({:.2}, {:.2})  {d:.0} m",
-                u.id.0, u.body.pos[0], u.body.pos[1], u.body.heading[0], u.body.heading[1]
+                "    unit {:>2} at ({:.1}, {:.1}) heading ({:.2}, {:.2}) {:.1} m/s  {d:.0} m",
+                u.id.0,
+                u.body.pos[0],
+                u.body.pos[1],
+                u.body.heading[0],
+                u.body.heading[1],
+                u.body.speed
             );
         }
         println!("    nearest unit {nearest:.0} m");

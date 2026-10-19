@@ -132,6 +132,26 @@ Cloud container, Intel Xeon @ 2.10 GHz, 4 cores, release, real vehicle + damage 
 - The lint is line-based: it can miss a transcendental called through a function pointer or a
   macro, and it stops at the first `#[cfg(test)]` in a file.
 
+## Run 5b — lead run 5 merged (2026-10-19)
+
+- **Reconciled with the lead's police/traffic vehicles.** `Sim::set_world` now builds police
+  itself, so simcli calls `set_police(police_for_city(..))` *after* `set_world`. That carries
+  `police_presence` and `police_heat`. With neither set it builds exactly what `set_world`
+  does (same seed salt, mode and driving), so default goldens match the lead's. My duplicate
+  `Sim::police()` was dropped in favour of `police_link.rs`'s. The opt-outs gate run 5's cars:
+  `police_cars: false` → `PoliceSystem::new()` and no `set_police_car`; `traffic_cars: false` →
+  no `set_traffic_car`.
+- **`golden_city_chase` re-aimed.** With real police cars, the racer rear-ended the patrol it
+  was aimed at. It now passes in the outer northbound lane at 16.5 m/s, as a known speeder
+  (`police_heat: 15`, L1). Pursuit starts at 6.7 s, no damage. All 12 nearby lane/speed/start
+  variants pursue in 5–9 s. Without starting heat a clean pass is never recognised at
+  night: heat only builds once the patrol has witnessed the speeding.
+- **For the lead (run-5 police driver):** unit 1 (starts at (55, −21) on the x = 55 collector)
+  drives a slow circle about 14 m across at 3.8 m/s around (40, −17) for 12+ s instead of
+  patrolling (`examples/probe_police.rs` on `golden_city_chase` with the racer moved away shows
+  it). The loop cuts into the southbound lanes, which is where my racer kept hitting it. It
+  looks like `unit_input` steering never converging on its target.
+
 ## Run 5 — city chase, opt-outs, F's codec (2026-10-19)
 
 - **Police in cities.** `wp_sim` gained `Sim::set_police(PoliceSystem)` / `Sim::police()`
@@ -283,3 +303,10 @@ with 06 in v0.2.0, so the provisional `PURSUIT_STARTED_KIND` goes away. H2 (`Sys
   and add D's traffic soak scenario (0 civilian collisions, ≥ 380 agents, ≥ 50 % moving).
 - Question from B's tuning: should `golden_frontal_56kmh` (into a *parked sedan*) be a TotalLoss? A
   parked car absorbs energy; consider adding a rigid-barrier golden (static box via `barriers`).
+
+### Lead run 5 (2026-10-19)
+- `build_sim` city runs now set `POLICE_CAR` / `TRAFFIC_CAR` (`run.rs` consts), so city scenarios contain
+  extra police / traffic vehicles. Metrics and expectations use `scenario_states(&sim, &ids)` (scenario
+  entities only); fuzz names extra vehicles "city vehicle". City goldens re-blessed.
+- `soak/traffic_soak_observer`: `civilian_collisions` gate 0 → ≤ 3, zero moved to `expect_pending`
+  (physical traffic; D is investigating). Consider scenario fields to opt out of police / traffic.
