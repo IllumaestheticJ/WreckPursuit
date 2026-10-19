@@ -110,6 +110,9 @@ pub struct SimVehicle {
     collider_floor_z: f32,
 }
 
+/// Gap left under a new prop in hilly cities, m.
+const PROP_HOVER_M: f32 = 0.04;
+
 /// Props settle for this many ticks (1 s) after `set_world` before motion counts as a hit.
 const PROP_SETTLE_TICKS: u64 = 240;
 
@@ -296,8 +299,13 @@ impl Sim {
                     prop.yaw,
                     Some(prop.pos[2] - prop.half_extents[2]),
                 );
+                // A hair above the surface: no touching contact at creation, so it stays asleep
+                // until something reaches it (then it drops the last few centimetres).
                 let up = rot * Vector::Z;
-                pose = Pose::from_parts(Vector::from_array(pos) + up * prop.half_extents[2], rot);
+                pose = Pose::from_parts(
+                    Vector::from_array(pos) + up * (prop.half_extents[2] + PROP_HOVER_M),
+                    rot,
+                );
             }
             let body = self.physics.bodies.insert(
                 RigidBodyBuilder::dynamic()

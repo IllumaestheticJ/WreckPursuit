@@ -611,7 +611,8 @@ impl Gen {
 
     /// Warped grid with curved edges. `drop` = chance of removing an optional edge (kept
     /// connected, no new dead ends). Returns node ids `[row][col]`.
-    #[allow(clippy::too_many_arguments)]
+    // Grid code reads clearer with explicit row/column indices.
+    #[allow(clippy::too_many_arguments, clippy::needless_range_loop)]
     fn warped_grid(
         &mut self,
         xs: &[f32],
@@ -687,6 +688,9 @@ impl Gen {
         }
     }
 
+    /// Lay out every road; returns (loop roads, Hollins Drive, knob, lot, Route 40 W end,
+    /// Route 40 N end).
+    #[allow(clippy::needless_range_loop)]
     fn layout(&mut self) -> (Vec<usize>, usize, usize, usize, usize, usize) {
         // ---- Loop 9 -------------------------------------------------------------------
         let ctrl: Vec<V2> = vec![
@@ -1963,7 +1967,15 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
             project2(p, &cum2(p), [-1000.0, 1390.0]).1 < 40.0
         })
         .unwrap_or(&longest_loop);
+    // Lantern Way's western approach into downtown (from Larkspur), heading east.
+    let lantern = (0..g.drafts.len())
+        .find(|k| {
+            let d = &g.drafts[*k];
+            d.name == "Lantern Way" && geom::dist(g.nodes[d.b].pos, [-300.0, 150.0]) < 1.0
+        })
+        .unwrap_or(0);
     for (kind, name, road, s, fwd) in [
+        (PoiKind::RaceStartGrid, "Lantern Run", lantern, 40.0, true),
         (
             PoiKind::RaceStartGrid,
             "Loop 9 sprint",
@@ -2170,7 +2182,8 @@ mod tests {
         ] {
             assert!(net.pois.iter().any(|p| p.kind == k), "no {k:?}");
         }
-        assert_eq!(net.pois[0].name, "Loop 9 sprint");
+        // The free-drive / city-chase spawn: heading into downtown on Lantern Way.
+        assert_eq!(net.pois[0].name, "Lantern Run");
         for (i, l) in net.lanes.iter().enumerate() {
             if l.kind.drivable() {
                 assert!(!l.connections.is_empty(), "lane {i} is a trap");
