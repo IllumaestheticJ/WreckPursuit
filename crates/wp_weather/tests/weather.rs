@@ -377,6 +377,46 @@ fn adapter_line_of_sight_is_cut_by_fog_range() {
 }
 
 #[test]
+fn visibility_m_is_the_police_sight_cap_in_every_regime() {
+    let world = FlatWorld;
+    let t = TimeOfDay::from_hours(12.0);
+    let p = [10.0, -20.0, 1.0];
+    // No weather and clear weather report the same visibility (behaviour unchanged).
+    assert_eq!(
+        wp_weather::LocalConditions::DRY.visibility_m,
+        wp_weather::CLEAR_VISIBILITY_M
+    );
+    let mut w = sim(1, |c| c.locked = true);
+    w.update(1.0, t, &[]);
+    assert!((w.visibility_m(p) - wp_weather::CLEAR_VISIBILITY_M).abs() < 1e-3);
+    let mut last = f32::INFINITY;
+    for (kind, lo, hi) in [
+        (WeatherKind::Clear, 799.0, 801.0),
+        (WeatherKind::LightRain, 500.0, 800.0),
+        (WeatherKind::HeavyRain, 300.0, 600.0),
+        (WeatherKind::Fog, 100.0, 160.0),
+    ] {
+        w.force(Regime::new(kind, 1.0), true);
+        w.update(1.0, t, &[]);
+        let v = w.visibility_m(p);
+        assert!((lo..=hi).contains(&v), "{kind:?}: {v} m");
+        assert!(
+            v <= last,
+            "{kind:?} should not see further than the previous regime"
+        );
+        last = v;
+        // One value everywhere it is exposed.
+        assert_eq!(v, w.conditions_at(p).visibility_m);
+        assert_eq!(v, w.sight_range_m());
+        assert_eq!(v, WithWeather::new(&world, &w).visibility_m(p));
+        // The adapter's LOS is cut exactly at it.
+        let q = WithWeather::new(&world, &w);
+        assert!(q.line_of_sight(p, [p[0], p[1] + v * 0.99, p[2]]));
+        assert!(!q.line_of_sight(p, [p[0], p[1] + v * 1.01, p[2]]));
+    }
+}
+
+#[test]
 fn adapter_reports_wet_asphalt_only_when_wet() {
     let world = FlatWorld;
     let mut w = WeatherSim::from_world(

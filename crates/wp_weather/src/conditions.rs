@@ -5,6 +5,11 @@
 
 use crate::kind::WeatherKind;
 
+/// Visibility in clear air, m (`effects.toml: visibility.reference_sight_m` ships with this
+/// value). Used by [`LocalConditions::DRY`]; longer than any police or traffic sight range, so
+/// "no weather" and "clear weather" behave the same.
+pub const CLEAR_VISIBILITY_M: f32 = 800.0;
+
 /// Weather at one world-space point.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LocalConditions {
@@ -28,6 +33,10 @@ pub struct LocalConditions {
     pub fog_per_m: f32,
     /// AI sight-distance multiplier from fog and rain, 0..1 (night is not included).
     pub sight_multiplier: f32,
+    /// How far anyone can see from this point, m: reference sight (800 m) × `sight_multiplier`.
+    /// ~800 clear, ~480 in a 16 mm/h downpour, ~130 in thick fog. Night is not included. Police
+    /// LOS caps its ranges with it (see `WeatherSim::visibility_m`).
+    pub visibility_m: f32,
     /// Wind velocity in world XY, m/s (direction the air moves toward).
     pub wind_mps: [f32; 2],
 }
@@ -45,6 +54,7 @@ impl LocalConditions {
         road_temp_c: 20.0,
         fog_per_m: 0.0,
         sight_multiplier: 1.0,
+        visibility_m: CLEAR_VISIBILITY_M,
         wind_mps: [0.0, 0.0],
     };
 }
