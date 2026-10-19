@@ -167,14 +167,14 @@ parts_scale = 2.0
 labour_per_hour = 100
 towing = 280
 
-# Labour multiplier by district (prompt 05 district ids; unknown ids use "default").
+# Labour multiplier by district (wp_contracts::DistrictId; every district needs a row).
 [district_labour]
-default = 1.0
-Core = 1.25
+Core = 1.25          # downtown rents
+Commercial = 1.1
+Residential = 1.0
 Suburb = 1.0
 Industrial = 0.85
-Docks = 0.8
-Hills = 1.1
+Port = 0.8           # dockside yards, no questions asked
 
 [shop]
 crooked_markup = 1.15          # crooked shop, car not wanted

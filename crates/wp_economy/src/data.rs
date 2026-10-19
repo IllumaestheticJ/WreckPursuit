@@ -132,8 +132,8 @@ pub struct PriceTables {
     pub component_parts: BTreeMap<Component, f32>,
     /// Per-class scaling.
     pub class: BTreeMap<VehicleClass, ClassPricing>,
-    /// Labour multiplier per district; must contain `"default"`.
-    pub district_labour: BTreeMap<String, f32>,
+    /// Labour multiplier per district (every contract `DistrictId`).
+    pub district_labour: BTreeMap<wp_contracts::DistrictId, f32>,
     /// Shop behaviour.
     pub shop: ShopPricing,
     /// Salvage value formula.
@@ -774,9 +774,11 @@ impl Economy {
             require_positive(&w, cp.parts_scale)?;
             require_positive(&w, cp.labour_per_hour)?;
         }
-        if !p.district_labour.contains_key("default") {
-            return Err(invalid("prices.district_labour", "missing \"default\""));
-        }
+        require_keys(
+            "prices.district_labour",
+            &p.district_labour,
+            &wp_contracts::DistrictId::ALL,
+        )?;
         for v in p.district_labour.values() {
             require_positive("prices.district_labour", *v)?;
         }

@@ -56,7 +56,10 @@ pub use ledger::{
 pub use mods::{ModCatalog, ModDef, ModEffect, ModSlot, ToolLoadout};
 pub use payouts::{PinkSlipConsent, RaceResult, RaceSettlement, RaceSetup, RaceType};
 pub use pursuit::{PoliceSignal, PursuitEnd, PursuitResolution, PursuitSettlement, PursuitTracker};
-pub use repair::{DamageReport, RepairOption, RepairOrder, RepairQuote, ShopContext, ShopKind};
+pub use repair::{
+    district_from_key, district_key, DamageReport, RepairOption, RepairOrder, RepairQuote,
+    ShopContext, ShopKind,
+};
 pub use session::{
     Binding, CarRunResult, CarStatus, EconomySession, PendingPursuit, RepairPolicy, RunResult,
     SessionConfig,

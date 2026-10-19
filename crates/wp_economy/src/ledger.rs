@@ -365,7 +365,7 @@ pub enum EventReason {
     /// A legit shop reported a wanted car to the police (wp_police should add heat).
     ShopReported {
         /// District of the shop.
-        district: String,
+        district: wp_contracts::DistrictId,
         /// Wanted level at the time.
         level: WantedLevel,
     },
@@ -645,7 +645,10 @@ impl EventReason {
             R::InsuranceClaimDenied => C::InsuranceClaimDenied,
             R::DriveDamaged => C::DriveDamaged,
             R::CarScrapped { def_id } => C::CarScrapped { def_id },
-            R::ShopReported { district, level } => C::ShopReported { district, level },
+            R::ShopReported { district, level } => C::ShopReported {
+                district: crate::repair::district_key(district),
+                level,
+            },
             R::Fine { level } => C::Fine { level },
             R::Bail => C::Bail,
             R::CaptureRepLoss { level } => C::CaptureRepLoss { level },
@@ -709,7 +712,14 @@ impl EventReason {
             C::InsuranceClaimDenied => R::InsuranceClaimDenied,
             C::DriveDamaged => R::DriveDamaged,
             C::CarScrapped { def_id } => R::CarScrapped { def_id },
-            C::ShopReported { district, level } => R::ShopReported { district, level },
+            C::ShopReported { district, level } => {
+                match crate::repair::district_from_key(&district) {
+                    Some(district) => R::ShopReported { district, level },
+                    None => R::Adjustment {
+                        note: format!("shop report from unknown district {district}"),
+                    },
+                }
+            }
             C::DamageRecorded { health, total_loss } => R::DamageRecorded { health, total_loss },
             C::Fine { level } => R::Fine { level },
             C::Bail => R::Bail,

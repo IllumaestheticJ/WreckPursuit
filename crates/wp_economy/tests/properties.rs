@@ -122,7 +122,7 @@ fn run_op(
     let before = a.cash;
     let car = a.active_car.or_else(|| a.garage.first().map(|c| c.uid));
     let shop = |crooked: bool| ShopContext {
-        district: "Core".into(),
+        district: wp_contracts::DistrictId::Core,
         kind: if crooked {
             ShopKind::Crooked
         } else {
@@ -412,7 +412,7 @@ proptest! {
         let mut a = PlayerAccount::empty(wp_contracts::PlayerId(1));
         a.garage.push(car);
         let shop = ShopContext {
-            district: ["default", "Core", "Suburb", "Industrial", "Docks", "Hills"][district].into(),
+            district: wp_contracts::DistrictId::ALL[district],
             kind: if crooked { ShopKind::Crooked } else { ShopKind::Legit },
             wanted: WantedLevel::None,
         };

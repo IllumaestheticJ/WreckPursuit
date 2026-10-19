@@ -10,10 +10,10 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use wp_contracts::WantedLevel;
 use wp_contracts::{
     DamageMode, HandlingEffects, PriceTable, RepairEstimate, RepairItem, RepairLine, VehicleClass,
 };
+use wp_contracts::{DistrictId, WantedLevel};
 
 use crate::data::Economy;
 use crate::error::EconomyError;
@@ -34,19 +34,43 @@ pub enum ShopKind {
 /// Where the car is being repaired.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShopContext {
-    /// District id (labour multiplier from `prices.district_labour`; unknown = `default`).
-    pub district: String,
+    /// District of the shop (labour multiplier from `prices.district_labour`).
+    pub district: DistrictId,
     /// Shop kind.
     pub kind: ShopKind,
     /// The car's current wanted level.
     pub wanted: WantedLevel,
 }
 
+/// Parse a district key: a contract `DistrictId` name (`"Core"`, `"Port"`, ..) or one of the
+/// pre-v0.3.0 `prices.toml` keys (`"default"` → `Residential`, `"Docks"` → `Port`, `"Hills"` →
+/// `Suburb`). Case-sensitive.
+pub fn district_from_key(key: &str) -> Option<DistrictId> {
+    let legacy = match key {
+        "default" => Some(DistrictId::Residential),
+        "Docks" => Some(DistrictId::Port),
+        "Hills" => Some(DistrictId::Suburb),
+        _ => None,
+    };
+    legacy.or_else(|| {
+        DistrictId::ALL
+            .iter()
+            .copied()
+            .find(|d| format!("{d:?}") == key)
+    })
+}
+
+/// Contract string for a district (its variant name; `ShopReported.district` is a `String` in
+/// v0.3.0).
+pub fn district_key(d: DistrictId) -> String {
+    format!("{d:?}")
+}
+
 impl ShopContext {
-    /// A legit shop in the default district with a car that is not wanted.
+    /// A legit shop in a residential district (labour × 1.0) with a car that is not wanted.
     pub fn legit_default() -> Self {
         Self {
-            district: "default".into(),
+            district: DistrictId::Residential,
             kind: ShopKind::Legit,
             wanted: WantedLevel::None,
         }
@@ -272,8 +296,7 @@ impl Economy {
 
     /// District × shop labour multiplier.
     pub fn labour_multiplier(&self, shop: &ShopContext) -> f32 {
-        let d = &self.prices.district_labour;
-        let district = d.get(&shop.district).copied().unwrap_or(d["default"]);
+        let district = self.prices.district_labour[&shop.district];
         let markup = match shop.kind {
             ShopKind::Legit => 1.0,
             ShopKind::Crooked if shop.wanted > WantedLevel::None => {
@@ -478,7 +501,7 @@ impl Economy {
             if quote.reports_to_police {
                 tx.note(
                     EventReason::ShopReported {
-                        district: shop.district.clone(),
+                        district: shop.district,
                         level: shop.wanted,
                     },
                     some,
