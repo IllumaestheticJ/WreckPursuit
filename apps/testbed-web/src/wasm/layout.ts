@@ -58,8 +58,10 @@ export const TW = {
   contact: 5,
   detached: 6,
   omega: 7,
-  fxEst: 8,
-  fyEst: 9,
+  /** Applied longitudinal tire force, N (along the wheel heading). */
+  fx: 8,
+  /** Applied lateral tire force, N (positive = toward the wheel's left). */
+  fyLeft: 9,
 } as const;
 
 /** set_input() flag bits. */
@@ -72,7 +74,20 @@ export const INPUT_FLAG = {
 } as const;
 
 /** world_info() offsets. */
-export const W = { tick: 0, hours: 1, night: 2, mode: 3, replay: 4, recording: 5 } as const;
+export const W = { tick: 0, hours: 1, night: 2, mode: 3, replay: 4, recording: 5, city: 6, scripted: 7 } as const;
+
+/** Floats per agent in traffic_agents(): [x, y, z, yaw, flags]. */
+export const AGENT_STRIDE = 5;
+/** traffic_agents() flag bits (variant in bits 8+). */
+export const AGENT_FLAG = {
+  physical: 1,
+  brake: 2,
+  hazard: 4,
+  yielding: 8,
+  turnLeft: 16,
+  turnRight: 32,
+  aggressive: 64,
+} as const;
 
 /** Floats per intent arrow in intents(). */
 export const INTENT_STRIDE = 8;

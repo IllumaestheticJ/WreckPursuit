@@ -21,6 +21,7 @@ Parsing uses RON with `implicit_some`, so optional fields are written plainly
     traffic_density: 0.3,            // optional override 0..=1
     police_presence: 1.0,            // optional override 0..=1
     systems: "vehicle,damage,world", // optional; default all. --systems overrides. "net" adds the snapshot round trip
+    barriers: [(pos: (0.0, 45.0, 0.75), size: (8.0, 1.0, 1.5), yaw: 0.0)], // optional static boxes (Sim::add_static_box)
     entities: [ … ],                 // spawn order = entity id order (1, 2, 3, …)
     duration_s: 8.0,
     sample_hz: 60.0,                 // metrics.csv rate (default 60)
@@ -30,7 +31,10 @@ Parsing uses RON with `implicit_some`, so optional fields are written plainly
 )
 ```
 
-Features a crate does not support yet (`procedural`/`file` cities, traffic/police overrides,
+Cities load only with `RunOptions::load_city` (the browser testbed sets it; the CLI does not
+yet, so the city goldens keep their flat-world hashes until they are re-blessed). `file` cities
+must be `.road.json`. Features a crate does not support yet (cities without `load_city`,
+traffic/police overrides,
 `follow_route`, `ai_driver`) run anyway and add a **warning** to the summary; `--strict` turns
 warnings into failures.
 

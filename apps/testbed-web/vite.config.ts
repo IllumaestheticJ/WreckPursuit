@@ -8,12 +8,9 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 
 const repo = resolve(__dirname, "../..");
 
-/**
- * Folders served read-only to the testbed: URL prefix → repo folders (searched in order).
- * Scenarios come from simcli's canonical folder plus the testbed's own (older dialect).
- */
+/** Folders served read-only to the testbed: URL prefix → repo folders (searched in order). */
 const mounts: Record<string, string[]> = {
-  "/scenarios/": [join(repo, "apps/simcli/scenarios"), join(repo, "apps/testbed-web/scenarios")],
+  "/scenarios/": [join(repo, "apps/simcli/scenarios")],
   "/data/": [join(repo, "data")],
 };
 
@@ -31,7 +28,7 @@ function listFiles(dir: string, ext: string[]): string[] {
 }
 
 /**
- * Serves `apps/simcli/scenarios/**` and `apps/testbed-web/scenarios/**` at `/scenarios/` and `data/**` at `/data/`, plus JSON
+ * Serves `apps/simcli/scenarios/**` at `/scenarios/` and `data/**` at `/data/`, plus JSON
  * listings at `/scenarios/index.json` (all `.ron`) and `/data/city/index.json` (all `.glb`).
  * Works for both `vite` (dev) and `vite preview`.
  */

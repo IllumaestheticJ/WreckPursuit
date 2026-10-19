@@ -18,8 +18,7 @@ mod ffb;
 #[cfg(feature = "window")]
 mod window;
 
-use wp_contracts::{EntityId, VehicleInput};
-use wp_wasm::scenario::Scenario;
+use wp_contracts::{DamageMode, EntityId, VehicleInput};
 use wp_wasm::session::Session;
 
 /// Rack torque (N·m) that maps to full FFB output.
@@ -27,7 +26,11 @@ pub const FULL_SCALE_TORQUE_NM: f32 = 20.0;
 
 /// Create the standard free-drive session (one `debug_sedan`, Arcade).
 pub fn new_session() -> Session {
-    Session::from_scenario(1, Scenario::default()).expect("embedded data is valid")
+    Session::new(
+        wp_wasm::scenario::free_drive("debug_sedan", DamageMode::Arcade, false),
+        false,
+    )
+    .expect("embedded data is valid")
 }
 
 /// The player entity of [`new_session`].

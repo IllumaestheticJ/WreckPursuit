@@ -52,6 +52,7 @@
         <div class="row">
           mode <select id="mode"><option>Arcade</option><option>Simulation</option></select>
           car <select id="car"></select>
+          <label title="free drive in the procedural 12×12 city with traffic"><input type="checkbox" id="city" />city</label>
           bench <button class="bench" data-n="1">1</button><button class="bench" data-n="8">8</button><button class="bench" data-n="24">24</button>
           <span id="bench-out" class="dim"></span>
         </div>
@@ -67,7 +68,7 @@
           <button id="rec">● record</button>
           <button id="rec-stop">■ stop</button>
           <button id="rp-last">load last</button>
-          <label class="dim">file <input id="rp-file" type="file" accept=".wpreplay" style="width: 90px" /></label>
+          <label class="dim">file <input id="rp-file" type="file" accept=".bin" style="width: 90px" /></label>
           <button id="rp-dl">download</button>
           <button id="rp-csv">csv</button>
           <button id="rp-exit">exit</button>

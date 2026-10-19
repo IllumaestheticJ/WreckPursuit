@@ -27,6 +27,8 @@ export interface WheelInfo {
 /** vehicle_info(entity) JSON. */
 export interface VehicleInfo {
   entity: number;
+  /** Scenario-local entity name. */
+  name: string;
   car_id: string;
   display_name: string;
   body_size_m: [number, number, number];
@@ -65,51 +67,55 @@ export interface Barrier {
   yaw: number;
 }
 
-/** Testbed scenario (superset of the simcli .ron format). */
+/** simcli scenario format v2 (apps/simcli/SCENARIOS.md); only the fields the UI reads. */
 export interface Scenario {
   name: string;
-  car: string;
-  mode: "Arcade" | "Simulation";
   seed: number;
+  mode: "Arcade" | "Simulation";
   duration_s: number;
-  time_of_day_h: number;
-  cruise_kmh: number | null;
-  others: { car: string; pos: number[]; yaw: number; cruise_kmh: number | null }[];
-  barriers: Barrier[];
+  barriers?: Barrier[];
+  entities: { id: string; car: string; pos: number[]; yaw: number }[];
   [k: string]: unknown;
 }
 
-export interface CheckResult {
-  metric: string;
-  min: number;
-  max: number;
-  value: number | null;
-  pass: boolean;
-  pending: boolean;
+/** One evaluated simcli expectation. */
+export interface ExpectResult {
+  expect: string;
+  actual: string;
+  passed: boolean;
 }
 
+/** scenario_result(): progress, and once done the headless simcli run summary. */
 export interface ScenarioResult {
   name: string;
   done: boolean;
   tick: number;
   end_tick: number;
   pass: boolean;
-  checks: CheckResult[];
-  state_hash: number;
+  live_hash: string | null;
+  matches_simcli: boolean | null;
+  summary: {
+    final_hash: string;
+    expectations: ExpectResult[];
+    pending: ExpectResult[];
+    failures: string[];
+    warnings: string[];
+  } | null;
 }
 
 export interface ReplayStatus {
   tick: number;
-  start_tick: number;
   end_tick: number;
   speed: number;
-  verified_hashes: number;
-  stored_hashes: number;
+  verified_ticks: number;
+  drift_count: number;
   drift_ticks: number[];
   state_hash: string;
   recorded_final_hash: string | null;
   scenario: string;
   mode: string;
+  contract_version: string;
+  hash_spec: number;
 }
 
 /** SimEvent as decoded by events_decode (serde externally tagged). */
@@ -125,10 +131,14 @@ export function packInput(i: DriverInput): Float32Array {
 }
 
 export const sim = {
-  init: (seed: number, scenarioJson = ""): number[] => Array.from(wasm.init(seed, scenarioJson)),
-  scenarioFromRon: (text: string): Scenario => JSON.parse(wasm.scenario_from_ron(text)),
+  /** Start a live session from scenario JSON; `scripted` = drive entities by their drivers. */
+  init: (seed: number, scenarioJson: string, scripted: boolean): number[] =>
+    Array.from(wasm.init(seed, scenarioJson, scripted)),
+  freeDriveJson: (car: string, mode: string, city: boolean): string => wasm.free_drive_json(car, mode, city),
+  scenarioFromRon: (text: string): string => wasm.scenario_from_ron(text),
+  scenarioWithSpeed: (json: string, mps: number): string => wasm.scenario_with_speed(json, mps),
   step: (dt: number): number => wasm.step(dt),
-  setDamageMode: (mode: string): number[] => Array.from(wasm.set_damage_mode(mode)),
+  setDamageMode: (mode: string): void => wasm.set_damage_mode(mode),
   carIds: (): string[] => JSON.parse(wasm.car_ids()),
   spawn: (carId: string, pos: [number, number, number], yaw: number): number =>
     wasm.spawn_vehicle(carId, new Float32Array(pos), yaw),
@@ -142,6 +152,7 @@ export const sim = {
   statesPrev: (): Float32Array => wasm.vehicle_states_prev(),
   info: (entity: number): VehicleInfo => JSON.parse(wasm.vehicle_info(entity)),
   worldInfo: (): Float32Array => wasm.world_info(),
+  trafficAgents: (): Float32Array => wasm.traffic_agents(),
   stateHash: (): string => wasm.state_hash(),
   latticeNodes: (entity: number): Float32Array => wasm.lattice_nodes(entity),
   latticeRest: (entity: number): Float32Array => wasm.lattice_rest(entity),

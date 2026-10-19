@@ -24,7 +24,7 @@ npm run typecheck
 | `src/telemetry.ts` | rolling 10 s canvas plots |
 | `src/input.ts` | keyboard ramps + Gamepad API with deadzones |
 | `src/settings.ts` | debug layer table (hotkeys, `localStorage`) |
-| `vite.config.ts` | serves `apps/simcli/scenarios` at `/scenarios/` and `data/` at `/data/` (+ listings) |
+| `vite.config.ts` | serves `apps/simcli/scenarios` (simcli format v2) at `/scenarios/` and `data/` at `/data/` (+ listings) |
 | `e2e/run.mjs` | Playwright check; `SHOTS=dir` writes screenshots, `BENCH=1` measures 1/8/24 cars |
 
 Sim space is +Z up / +Y forward; the Three.js scene is +Y up, so all sim-space objects live under
@@ -35,10 +35,9 @@ target (installed by `rust-toolchain.toml`). `src/wasm/pkg/` is generated and gi
 The e2e script uses `playwright-core` with the Chromium at `$CHROMIUM` (default: the
 preinstalled `/opt/pw-browsers/chromium-1194`).
 
-## Perf (headless Chromium, SwiftShader, stub physics)
-sim 0.015 / 0.031 / 0.054 ms per 60 Hz frame and render 0.5 / 1.5 / 4.1 ms at 1 / 8 / 24 cars.
-Re-measure in desktop Chrome with a GPU once 02/03 land.
+## Perf (headless Chromium, SwiftShader, real vehicle + damage)
+sim 0.09 / 0.62 / 3.0 ms per 60 Hz frame and render 0.7 / 3.4 / 9.2 ms at 1 / 8 / 24 cars;
+city + ~190 traffic agents 0.27 ms sim. Re-measure in desktop Chrome with a GPU.
 
 ## Known gaps
-See `docs/integration/testbed.md` → Known gaps (crash scenarios can't crash until vehicles are
-Rapier bodies; tire forces / region energy are proxies; no GIF yet).
+See `docs/integration/testbed.md` → Known gaps.

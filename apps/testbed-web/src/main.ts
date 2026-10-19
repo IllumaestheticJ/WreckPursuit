@@ -14,11 +14,18 @@ import { CameraRig, CAMERA_MODES, type CameraMode } from "./cameras";
 import { Hud } from "./hud";
 import { TelemetryPlots } from "./telemetry";
 
-const LAST_REPLAY_KEY = "wp.testbed.lastReplay.v1";
+// v2: canonical simcli replay.bin (v1 held the retired WPR\x01 format).
+const LAST_REPLAY_KEY = "wp.testbed.lastReplay.v2";
+/** City the free-drive "city" box loads (matches data/city/procedural_12x12.*). */
+const CITY_ID = "procedural_12x12";
 const COLOURS = [0xd04a2a, 0x2a7fd0, 0x3fb950, 0xd0a92a, 0x9b59b6, 0x1abc9c];
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
 const params = new URLSearchParams(location.search);
+
+// Per-entity static lattice data for the HUD; cleared whenever a new session starts.
+const regions = new Map<number, Uint8Array>();
+const rests = new Map<number, Float32Array>();
 
 interface AppState {
   views: Map<number, VehicleView>;
@@ -63,6 +70,8 @@ async function main(): Promise<void> {
   const rebuildViews = () => {
     for (const v of app.views.values()) v.dispose();
     app.views.clear();
+    regions.clear();
+    rests.clear();
     scene.clearContacts();
     plots.clear();
     syncViews();
@@ -70,7 +79,10 @@ async function main(): Promise<void> {
     app.player = ids[0] ?? 1;
     app.focus = app.player;
     const sc = sim.scenario();
-    scene.setBarriers(isReplay() ? [] : sc.barriers ?? []);
+    scene.setBarriers(sc.barriers ?? []);
+    const city = sim.worldInfo()[W.city] > 0.5;
+    void scene.setCity(city ? CITY_ID : null);
+    ($("city") as HTMLInputElement).checked = city;
     ($("mode") as HTMLSelectElement).value = modeName();
     const first = app.views.get(app.player);
     if (first) ($("car") as HTMLSelectElement).value = first.info.car_id;
@@ -95,28 +107,27 @@ async function main(): Promise<void> {
   const startFreeDrive = (
     car = ($("car") as HTMLSelectElement).value || "debug_sedan",
     mode = ($("mode") as HTMLSelectElement).value,
+    city = ($("city") as HTMLInputElement).checked,
   ) => {
     app.scenarioFile = null;
     app.scenario = null;
     app.result = null;
     app.bench = null;
-    sim.init(1, JSON.stringify({ name: "free_drive", car, mode, seed: 1 }));
+    sim.init(1, sim.freeDriveJson(car, mode, city), false);
+    app.scenario = null;
     rebuildViews();
     applyAssistPreset(app.source);
   };
 
   const runScenario = async (file: string, speedKmh?: number) => {
     const text = await (await fetch(`/scenarios/${file}`)).text();
-    const sc = sim.scenarioFromRon(text);
-    if (speedKmh && speedKmh > 0) {
-      if (sc.cruise_kmh != null) sc.cruise_kmh = speedKmh;
-      for (const o of sc.others) if (o.cruise_kmh != null) o.cruise_kmh = speedKmh;
-    }
+    let json = sim.scenarioFromRon(text);
+    if (speedKmh && speedKmh > 0) json = sim.scenarioWithSpeed(json, speedKmh / 3.6);
     app.scenarioFile = file;
-    app.scenario = sc;
     app.result = null;
     app.bench = null;
-    sim.init(0, JSON.stringify(sc));
+    sim.init(0, json, true);
+    app.scenario = sim.scenario();
     rebuildViews();
   };
 
@@ -180,10 +191,11 @@ async function main(): Promise<void> {
   $("sc-run").onclick = () => scSel.value && runScenario(scSel.value, Number(($("sc-speed") as HTMLInputElement).value));
   $("sc-free").onclick = () => startFreeDrive();
   ($("mode") as HTMLSelectElement).onchange = (e) => {
+    // Live switch (Sim::set_mode_table), logged as a replay op; existing damage is kept.
+    if (isReplay()) return void (($("mode") as HTMLSelectElement).value = modeName());
     sim.setDamageMode((e.target as HTMLSelectElement).value);
-    rebuildViews();
-    if (!app.scenario) applyAssistPreset(app.source);
   };
+  ($("city") as HTMLInputElement).onchange = () => startFreeDrive();
   document.querySelectorAll<HTMLInputElement>("#assist-row input").forEach((cb) => {
     cb.onchange = () => {
       if (isReplay()) return;
@@ -209,7 +221,7 @@ async function main(): Promise<void> {
   };
   $("rp-dl").onclick = () => {
     const bytes = app.lastReplay ?? (sim.recording() ? stopRecording() : null);
-    if (bytes) download(bytes, `wreckpursuit-${Date.now()}.wpreplay`, "application/octet-stream");
+    if (bytes) download(bytes, `wreckpursuit-${Date.now()}.replay.bin`, "application/octet-stream");
   };
   $("rp-csv").onclick = () => {
     const bytes = app.lastReplay;
@@ -238,11 +250,12 @@ async function main(): Promise<void> {
     app.paused = true;
     sim.replayPlay(0);
     const st = sim.replayStatus();
-    if (st) sim.replaySeek(Math.max(st.start_tick, st.tick + ticks));
+    if (st) sim.replaySeek(Math.max(0, st.tick + ticks));
   };
 
   const startBench = (n: number) => {
-    startFreeDrive("debug_sedan");
+    // Spawns happen before the first tick, so they become part of the (replayable) scenario.
+    startFreeDrive("debug_sedan", ($("mode") as HTMLSelectElement).value, false);
     const cars = sim.carIds();
     for (let i = 1; i < n; i++) {
       const col = i % 6;
@@ -315,7 +328,6 @@ async function main(): Promise<void> {
   }
   if (params.get("bench")) startBench(Number(params.get("bench")));
   if (params.get("replay") === "last") $("rp-last").click();
-  void scene.loadCity();
 
   // ----- frame loop -----------------------------------------------------------------------
 
@@ -363,6 +375,7 @@ async function main(): Promise<void> {
     }
     scene.addEvents(sim.eventsDrain());
     scene.update(dt, sim.intents());
+    scene.updateAgents(sim.trafficAgents());
     const wi = sim.worldInfo();
     scene.setTimeOfDay(wi[W.night]);
 
@@ -411,44 +424,51 @@ async function main(): Promise<void> {
     requestAnimationFrame(frame);
   }
 
-  const regions = new Map<number, Uint8Array>();
-  const rests = new Map<number, Float32Array>();
   const regionsCache = (id: number) => regions.get(id) ?? regions.set(id, sim.latticeRegions(id)).get(id)!;
   const restCache = (id: number) => rests.get(id) ?? rests.set(id, sim.latticeRest(id)).get(id)!;
 
+  const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");
   const updatePanels = (replay: boolean) => {
     const st = sim.replayStatus();
     const status = $("rp-status");
     if (replay && st) {
-      scrub.min = String(st.start_tick);
+      scrub.min = "0";
       scrub.max = String(st.end_tick);
       if (document.activeElement !== scrub) scrub.value = String(st.tick);
-      const ok = st.drift_ticks.length === 0;
+      const ok = st.drift_count === 0;
       const atEnd = st.tick >= st.end_tick;
       status.innerHTML =
-        `replay "${st.scenario}" ${st.mode} · tick ${st.tick}/${st.end_tick} · ${((st.tick - st.start_tick) / 240).toFixed(2)} s · x${app.paused ? 0 : st.speed}` +
-        `<br>hashes verified ${st.verified_hashes}/${st.stored_hashes} · ` +
-        (ok ? `<span style="color:#2ecc40">no drift</span>` : `<span style="color:#ff4136">DRIFT at ticks ${st.drift_ticks.slice(0, 5).join(",")}</span>`) +
+        `replay "${esc(st.scenario)}" ${st.mode} · tick ${st.tick}/${st.end_tick} · ${(st.tick / 240).toFixed(2)} s · x${app.paused ? 0 : st.speed}` +
+        `<br>tick hashes verified ${st.verified_ticks}/${st.tick} · ` +
+        (ok
+          ? `<span style="color:#2ecc40">no drift</span>`
+          : `<span style="color:#ff4136">DRIFT ${st.drift_count} ticks, first ${st.drift_ticks.slice(0, 5).join(",")}</span>`) +
         (atEnd ? ` · final ${st.state_hash === st.recorded_final_hash ? "✓ matches" : "✗ differs"} ${st.state_hash}` : "");
     } else {
       status.textContent = sim.recording()
         ? `recording… (tick ${sim.worldInfo()[W.tick]})`
         : app.lastReplay
-          ? `last replay ${app.lastReplay.length} bytes (stored)`
+          ? `last replay ${app.lastReplay.length} bytes (stored; simcli replay <file> verifies it)`
           : "no replay loaded";
     }
     const res = sim.scenarioResult();
     const out = $("sc-result");
     if (res && !replay) {
       app.result = res;
+      const row = (r: { expect: string; actual: string; passed: boolean }, pending: boolean) =>
+        `<div class="${pending ? "pending" : r.passed ? "pass" : "fail"}">${r.passed ? "✓" : "✗"} ${esc(r.expect)} → ${esc(r.actual)}${pending ? " (pending)" : ""}</div>`;
+      const sum = res.summary;
       out.innerHTML =
-        `<b>${res.name}</b> ${res.done ? (res.pass ? '<span class="pass">PASS</span>' : '<span class="fail">FAIL</span>') : `running ${((res.end_tick - res.tick) / 240).toFixed(1)} s left`}` +
-        res.checks
-          .map(
-            (c) =>
-              `<div class="${c.pending ? "pending" : c.pass ? "pass" : "fail"}">${c.pass ? "✓" : "✗"} ${c.metric} = ${c.value?.toFixed(3) ?? "?"} in [${c.min}, ${c.max}]${c.pending ? " (pending physics)" : ""}</div>`,
-          )
-          .join("");
+        `<b>${esc(res.name)}</b> ` +
+        (res.done
+          ? (res.pass ? '<span class="pass">PASS</span>' : '<span class="fail">FAIL</span>') +
+            (res.matches_simcli === true
+              ? ' <span class="pass" title="live end-of-script hash equals the headless simcli run">= simcli</span>'
+              : res.matches_simcli === false
+                ? ' <span class="fail">≠ simcli (live run diverged)</span>'
+                : "")
+          : `running ${((res.end_tick - res.tick) / 240).toFixed(1)} s left`) +
+        (sum ? sum.expectations.map((r) => row(r, false)).join("") + sum.pending.map((r) => row(r, true)).join("") : "");
     } else if (!replay) {
       out.innerHTML = "";
     }
@@ -486,6 +506,7 @@ async function main(): Promise<void> {
   (window as unknown as { __wp: unknown }).__wp = {
     sim,
     app,
+    scene,
     ready: true,
     stopRecording,
     loadReplay,
