@@ -13,6 +13,7 @@ use wp_contracts::{DamageMode, DayPhase, EntityId, HandlingEffects, PlayerId, GR
 use wp_math::{sin_cos, Rng};
 use wp_world::drive::{DriveController, DriveGains};
 
+use crate::avoid::AvoidState;
 use crate::config::PursuitFile;
 use crate::events::{IncidentId, ToolId, UnitId, UnitKind};
 use crate::graph::{
@@ -375,6 +376,8 @@ pub struct Unit {
     /// `wp_world`'s shared driving controller (pure pursuit + PID), created on first use.
     #[serde(skip)]
     pub controller: Option<DriveController>,
+    /// Obstacle awareness: speed cap behind the vehicle ahead, passing state.
+    pub avoid: AvoidState,
 }
 
 impl Unit {
@@ -419,6 +422,7 @@ impl Unit {
             engaged: false,
             geometry: SteerGeometry::default(),
             controller: None,
+            avoid: AvoidState::default(),
         }
     }
 
@@ -446,6 +450,10 @@ impl Unit {
         self.track_s = s;
         self.on_track = lat < 2.0;
         self.cmd = cmd;
+        // A pass is tied to the old track's arc length.
+        self.avoid.pass_offset_m = None;
+        self.avoid.blocked_s = 0.0;
+        self.avoid.junction = None;
     }
 
     /// Whether handling damage forces the unit to pull over.
@@ -593,7 +601,8 @@ pub fn step_ground(
 
     // Steering: wp_world's shared controller (pure pursuit) toward a lookahead point, then a
     // kinematic bicycle (curvature = tan(road-wheel angle) / wheelbase).
-    let target = lane_point(track, s + look, u.cmd.lane_offset_m);
+    let offset = u.avoid.pass_offset_m.unwrap_or(u.cmd.lane_offset_m);
+    let target = lane_point(track, s + look, offset);
     let to = sub(target, b.pos);
     let mut steer = u
         .controller
@@ -629,7 +638,7 @@ pub fn step_ground(
     b.lat_g = a_lat.abs() / GRAVITY_MPS2;
 
     // Longitudinal.
-    let want = u.cmd.speed_mps.min(u.planned_speed);
+    let want = u.cmd.speed_mps.min(u.planned_speed).min(u.avoid.limit_mps);
     let accel = dynm.accel_mps2 * u.effects.power_scale.clamp(0.0, 1.0);
     let brake = dynm.brake_mps2 * 1.3;
     let dv = (want - b.speed).clamp(-brake * dt, accel * dt);

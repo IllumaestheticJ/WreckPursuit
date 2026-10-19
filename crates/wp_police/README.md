@@ -90,6 +90,46 @@ racers share. Each unit owns one, created with its `SteerGeometry` (wheelbase, f
 
 Police keep only the speed planning (corner speeds, caps, tactics).
 
+### Obstacle awareness (`avoid.rs`)
+Every tick each ground unit (physical or headless) looks ahead on its own track:
+- **Lane corridor**: any vehicle whose box overlaps the unit's lane (unit half width + its
+  projected half extent + `lateral_margin_m`) within a speed-dependent horizon
+  (`min_horizon_m`..`max_horizon_m`). The nearest one caps the speed so the unit can stop
+  `standstill_gap_m` behind it (braking at `decel_mps2` after `reaction_s`); a moving leader is
+  followed at its own speed. A **bumper box** (`bumper_m` straight ahead of the body) catches
+  what the corridor misses while the body is off its track (turning, cutting corners).
+- **Hold**: at a zero cap, physical units get full brake (the shared controller would otherwise
+  release it below its hold speed and creep).
+- **Passing**: behind a *stopped* vehicle closer than `pass_gap_m` for `pass_wait_s` (6 s;
+  `pass_wait_siren_s` 1.5 s with lights), the unit pulls `pass_shift_m` left (or
+  `pass_extra_shift_m` further, for a car straddling the centreline) when that lane is clear past
+  the blocker and free of oncoming vehicles for `oncoming_clear_m`. It passes at ≤
+  `pass_speed_mps` and returns to its lane after the blocker.
+- **Exceptions**: a unit in a `Pit` or `BoxIn` tactic ignores its own target (contact is the point).
+  No unit ever overtakes its own target (a stopped target is an arrest).
+- **Traffic rules** (next junction on the track, refreshed at think rate; light from
+  `WorldQuery::signal_state_ahead`):
+  - *No lights (patrol)*: stop `stop_line_back_m` before a red, and before a yellow when there is
+    room; slow to `yield_mps` through unsignalised junctions and **give way** to cross traffic that
+    gets there within `yield_gap_s` of the unit (or is in the junction box), waiting at most
+    `yield_max_s`; turns at `turn_mps`; no overtaking within `no_pass_near_junction_m` of a
+    junction (red-light queues).
+  - *Lights on*: may run reds and exceed limits, but crosses junctions at `siren_junction_mps`
+    (`siren_red_mps` against a red, giving way to cross traffic for up to `yield_max_siren_s`) and
+    turns at `siren_turn_mps`.
+- **Holding still**: at a zero cap, and when parked (tool units, no track), a physical unit holds
+  brake 0.4 plus the handbrake. Full pedal at a standstill would engage `wp_vehicle`'s
+  automatic reverse.
+- **Gridlock**: a unit stopped behind another stopped police unit for `gridlock_s` creeps on at
+  `pass_creep_mps` past stopped higher-id units that cross or face it (they keep waiting).
+- **Spawning**: pool units appear in the right-hand lane, ≥ `spawn_clear_m` from every vehicle
+  and outside every moving vehicle's next `spawn_path_s` of travel, already facing their first
+  patrol route (a physical car turning around from standstill runs over the kerb). Reinforcement
+  nodes use the same clearance.
+
+Obstacles: `wp_sim` reports every vehicle (players, racers, physical and kinematic traffic,
+police cars) with `set_obstacles` each tick. Headless, units see the racers and each other.
+
 ### Tools & gadgets (`tools.rs`)
 - `plan_site` puts a tool on the predicted path between `min_ahead_m` and `max_ahead_m`, never
   within 15 m of an intersection, and with approach sight distance ≥ `min_sight_m` (120 m).
@@ -140,16 +180,18 @@ distance and nearest road. Tests, scenarios and tools use `city::procedural(&Pro
 | Scenario | Result |
 |---|---|
 | Patrol presence (4 phases) | Exact table counts after warm-up |
-| Day speeder, Core, 2× limit (5 runs) | Pursuit at 8.6 s mean (≤ 13.3 s every run); reinforcement 30 s |
-| Night speeder, 03:00 (8 runs) | Pursuit at 114 s mean (4 of 8 runs < 60 s: the racer passed a cop); reinforcement 101 s |
-| Cop self-wreck, Simulation (20 pursuits) | 1.3% of engaged units; a reckless config (no budget, high caps) does measurably worse |
+| Day speeder, Core, 2× limit (5 runs) | Pursuit at 8.8 s mean (≤ 12.8 s every run); reinforcement 29 s |
+| Night speeder, 03:00 (8 runs) | Pursuit at 126 s mean; reinforcement 115 s |
+| Cop self-wreck, Simulation (20 pursuits) | 0% of engaged units; a reckless config (no budget, high caps) has more risk events (run-wide crashes, near misses, wrecks, traffic hits) |
 | Tool placement (5 runs, L4) | 35 tools, minimum sight 120.1 m |
 | Escape (dusk, below helicopter level) | 2 of 3 runs escape |
 | Capture / safehouse (12×12 city) / total loss | Each rule fires in its scripted case |
 
+| City traffic, physical cars (`cargo run --release -p simcli --example police_traffic_contacts -- patrol\|pursuit 300`) | Patrol 300 s: 0 police↔traffic contacts, 1 overlap with kinematic traffic caused by a moving unit. Hot pursuit 362 s: 0 contacts, 0 overlaps with lights on, 3 caused by moving units in total |
+
 ## Perf
 `cargo run --release -p wp_police --example police_bench`: 13 patrols + reinforcements, 4 wanted
-racers on D's small city, with exact building line of sight → **0.055 ms per 60 Hz frame**
+racers on D's small city, with exact building line of sight and obstacle awareness → **0.074 ms per 60 Hz frame** (0.055 before round 6)
 (native, release, cloud Xeon 2.1 GHz). Budget 0.5 ms native / 1.0 ms browser. Browser not
 measured yet.
 
@@ -171,6 +213,8 @@ cargo run --release -p wp_police --example police_scenario -- <file.ron> [--tabl
 - The police graph ignores per-lane turn restrictions, and puts cameras at every third signalised
   junction (the network has none). `RoadGraphView` becomes the shared road-network trait in v0.3.0.
 - The headless kinematic body and its traffic-hazard model stand in for physical cars and real traffic.
+- Obstacle awareness sees vehicles only: parked cars and cones (`wp_world` static props) are not
+  in the list, so a unit off its lane can still clip one. Passing assumes the other lane exists.
 - `PoliceSystem::new()` (used by `wp_sim` today) has no road network, so it tracks heat but spawns no units.
 - Scripted racers don't react to PIT or box-ins; physics resolves those in the real game.
 - Captain-command events are emitted on the next `step`.

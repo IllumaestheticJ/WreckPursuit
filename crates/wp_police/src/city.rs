@@ -79,6 +79,20 @@ impl RoadGraph {
                 from = next;
             }
         }
+        // Junction flags on the view's own nodes (ids are kept 1:1).
+        let mut degree = vec![0u32; view.nodes.len()];
+        for edge in view
+            .edges
+            .iter()
+            .filter(|e| e.lanes_ab > 0 || e.lanes_ba > 0)
+        {
+            degree[edge.a as usize] += 1;
+            degree[edge.b as usize] += 1;
+        }
+        for (i, n) in view.nodes.iter().enumerate() {
+            g.nodes[i].junction = degree[i] >= 3 || n.signalised;
+            g.nodes[i].signalised = n.signalised;
+        }
         for p in &view.pois {
             let kind = match p.kind {
                 WorldPoi::SafehouseCandidate => PoiKind::Safehouse,

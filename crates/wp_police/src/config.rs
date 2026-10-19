@@ -405,6 +405,88 @@ pub struct PursuitFile {
     pub hazard: HazardConfig,
     /// Tactics.
     pub tactics: TacticConfig,
+    /// Obstacle awareness (following, passing, spawn clearance).
+    pub avoid: AvoidConfig,
+}
+
+/// Obstacle awareness for ground units (see [`crate::avoid`]).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AvoidConfig {
+    /// Bumper-to-bumper gap kept to a stopped vehicle, m.
+    pub standstill_gap_m: f32,
+    /// Reaction time added to the stopping distance, s.
+    pub reaction_s: f32,
+    /// Deceleration the follow speed is planned with, m/s².
+    pub decel_mps2: f32,
+    /// Extra lateral clearance for the lane corridor, m.
+    pub lateral_margin_m: f32,
+    /// Anything this close ahead of the bumper (in the unit's own heading) also blocks, m.
+    pub bumper_m: f32,
+    /// Shortest look-ahead, m.
+    pub min_horizon_m: f32,
+    /// Longest look-ahead, m.
+    pub max_horizon_m: f32,
+    /// A vehicle slower than this counts as stopped, m/s.
+    pub stopped_mps: f32,
+    /// Only a stopped vehicle closer than this can be passed, m.
+    pub pass_gap_m: f32,
+    /// Wait this long behind a stopped vehicle before passing (no lights), s.
+    pub pass_wait_s: f32,
+    /// Wait this long with lights and siren, s.
+    pub pass_wait_siren_s: f32,
+    /// Lane shift to the left for passing, m.
+    pub pass_shift_m: f32,
+    /// Second try: shift this much further (a vehicle straddling the centreline), m.
+    pub pass_extra_shift_m: f32,
+    /// Clear road needed beyond the passed vehicle, m.
+    pub pass_clear_m: f32,
+    /// No oncoming vehicle this much further away, m.
+    pub oncoming_clear_m: f32,
+    /// Speed cap while passing, m/s.
+    pub pass_speed_mps: f32,
+    /// While pulling out to pass, creep at this speed past anything still ahead, m/s ...
+    pub pass_creep_mps: f32,
+    /// ... while it is further than this, m.
+    pub pass_creep_gap_m: f32,
+    /// Look this far ahead on the track for the next junction, m.
+    pub junction_lookahead_m: f32,
+    /// Stop line distance before the junction centre, m.
+    pub stop_line_back_m: f32,
+    /// Speed is down to the junction speed this far before the centre, m.
+    pub junction_slow_m: f32,
+    /// Patrol speed through an unsignalised junction, m/s.
+    pub yield_mps: f32,
+    /// Speed through a turn at a junction, m/s.
+    pub turn_mps: f32,
+    /// With lights: speed through a turn at a junction, m/s.
+    pub siren_turn_mps: f32,
+    /// With lights: speed through a junction, m/s.
+    pub siren_junction_mps: f32,
+    /// With lights: speed through a junction against a red, m/s.
+    pub siren_red_mps: f32,
+    /// Give way: check cross traffic within this distance of the junction centre, m.
+    pub yield_radius_m: f32,
+    /// ... once the junction is this close, m.
+    pub yield_lookahead_m: f32,
+    /// ... and wait while it arrives less than this after the unit would, s.
+    pub yield_gap_s: f32,
+    /// Radius of the junction box (anything inside it blocks), m.
+    pub box_radius_m: f32,
+    /// Longest wait for cross traffic without lights, s.
+    pub yield_max_s: f32,
+    /// Longest wait with lights (at a red), s.
+    pub yield_max_siren_s: f32,
+    /// Without lights, no passing a stopped vehicle this close to a junction, m.
+    pub no_pass_near_junction_m: f32,
+    /// Stopped behind another police unit this long, the lower id creeps on, s.
+    pub gridlock_s: f32,
+    /// Units spawn at least this far from any vehicle, m.
+    pub spawn_clear_m: f32,
+    /// ... and not where a moving vehicle will be within this time, s.
+    pub spawn_path_s: f32,
+    /// Half width of that path, m.
+    pub spawn_path_half_width_m: f32,
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -593,6 +675,10 @@ impl PoliceConfig {
     /// Sanity checks that would otherwise show up as odd behaviour.
     pub fn validate(&self) -> Result<(), ConfigError> {
         let bad = |m: &str| Err(ConfigError::Invalid(m.to_string()));
+        let a = &self.pursuit.avoid;
+        if a.decel_mps2 <= 0.0 || a.min_horizon_m <= 0.0 || a.max_horizon_m < a.min_horizon_m {
+            return bad("pursuit.avoid: decel and horizons must be positive and ordered");
+        }
         let t = &self.heat.heat.level_thresholds;
         if t.windows(2).any(|w| w[0] >= w[1]) || t[0] <= 0.0 || t[4] > self.heat.heat.max_heat {
             return bad("heat.level_thresholds must ascend within (0, max_heat]");

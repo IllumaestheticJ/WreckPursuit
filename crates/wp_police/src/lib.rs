@@ -25,6 +25,7 @@
 
 #![warn(missing_docs)]
 
+pub mod avoid;
 pub mod captain;
 pub mod city;
 pub mod config;
@@ -46,6 +47,7 @@ use wp_contracts::{
 };
 use wp_math::{Rng, StateHasher};
 
+pub use avoid::ObstacleView;
 pub use captain::{
     command_from_bytes, command_to_bytes, CaptainCommand, CaptainError, CaptainView, RoadEdgeId,
     UnitOrder,
@@ -226,6 +228,12 @@ pub struct PoliceSystem {
     pub(crate) stats: PoliceStats,
     pub(crate) contact_cooldown: BTreeMap<(UnitId, EntityId), SimTime>,
     pub(crate) pending: Vec<PoliceEvent>,
+    /// Vehicles reported by `wp_sim` ([`PoliceSystem::set_obstacles`]).
+    pub(crate) ext_obstacles: Vec<avoid::Obstacle>,
+    /// Whether `wp_sim` reports obstacles (then racers and bound units come from that list).
+    pub(crate) ext_obstacles_set: bool,
+    /// Everything units avoid this tick (rebuilt by `rebuild_obstacles`).
+    pub(crate) obstacles: Vec<avoid::Obstacle>,
 }
 
 impl Default for PoliceSystem {
@@ -291,6 +299,9 @@ impl PoliceSystem {
             stats: PoliceStats::default(),
             contact_cooldown: BTreeMap::new(),
             pending: Vec::new(),
+            ext_obstacles: Vec::new(),
+            ext_obstacles_set: false,
+            obstacles: Vec::new(),
         }
     }
 
@@ -312,6 +323,7 @@ impl PoliceSystem {
         self.phase = world.time_of_day().phase();
         self.sync_racers(racers);
         self.process_events(world, events);
+        self.rebuild_obstacles();
         self.drive_units(dt);
         self.think_accum += dt;
         if self.think_accum >= 1.0 / self.cfg.pursuit.think_hz {
@@ -570,6 +582,90 @@ impl PoliceSystem {
     // wp_sim integration for physical units
     // -----------------------------------------------------------------------------------------
 
+    /// Report every vehicle units must not drive into: players, racers, traffic (physical and
+    /// kinematic) and police cars, including the units' own bodies (each unit skips itself).
+    /// Call once per tick before [`PoliceSystem::unit_input`]; the list stays until replaced.
+    /// Without it, units avoid the racers and each other only.
+    pub fn set_obstacles(&mut self, vehicles: &[ObstacleView]) {
+        self.ext_obstacles.clear();
+        self.ext_obstacles
+            .extend(vehicles.iter().map(avoid::Obstacle::from_view));
+        self.ext_obstacles_set = true;
+        self.rebuild_obstacles();
+    }
+
+    /// Rebuild `obstacles`: `wp_sim`'s list plus internally driven units, or (headless) the
+    /// racers and every ground unit.
+    pub(crate) fn rebuild_obstacles(&mut self) {
+        self.obstacles.clear();
+        let ext = self.ext_obstacles_set;
+        if ext {
+            self.obstacles.extend_from_slice(&self.ext_obstacles);
+            // Mark police cars (junction give-way breaks ties between units by id).
+            for o in &mut self.obstacles {
+                if let Some(u) = self
+                    .units
+                    .iter()
+                    .find(|u| u.entity.is_some() && u.entity == o.entity)
+                {
+                    o.unit = Some(u.id);
+                }
+            }
+        } else {
+            for r in self.racers.values() {
+                self.obstacles.push(avoid::Obstacle::car(
+                    Some(r.entity),
+                    None,
+                    xy(r.pos),
+                    [r.vel[0], r.vel[1]],
+                    [r.vel[0], r.vel[1]],
+                ));
+            }
+        }
+        for u in &self.units {
+            if u.kind != UnitKind::Car || (ext && u.entity.is_some()) {
+                continue;
+            }
+            self.obstacles.push(avoid::Obstacle::car(
+                u.entity,
+                Some(u.id),
+                u.body.pos,
+                u.body.vel(),
+                u.body.heading,
+            ));
+        }
+    }
+
+    /// Run obstacle awareness for unit `i` for one tick; returns the lane offset to steer for.
+    pub(crate) fn update_avoid(&mut self, i: usize, dt: f32) -> f32 {
+        let u = &mut self.units[i];
+        let ignore = match (&u.assignment, u.tactic) {
+            (Assignment::Pursue { target }, Tactic::Pit | Tactic::BoxIn(_)) => Some(*target),
+            _ => None,
+        };
+        let me = avoid::Me {
+            unit: u.id,
+            entity: u.entity,
+            pos: u.body.pos,
+            heading: u.body.heading,
+            track_s: u.track_s,
+            ignore,
+            target: u.assignment.target(),
+            skip_higher_units: false,
+        };
+        avoid::update(
+            &mut u.avoid,
+            &me,
+            &u.cmd.track,
+            u.cmd.lane_offset_m,
+            u.body.speed,
+            u.cmd.siren,
+            &self.obstacles,
+            &self.cfg.pursuit.avoid,
+            dt,
+        )
+    }
+
     /// Bind a unit to the vehicle entity `wp_sim` spawned for it, with that car's steering
     /// geometry (`VehicleDef::wheelbase_m`, front `WheelDef::max_steer_rad`). From then on the
     /// unit is driven externally: `wp_sim` applies [`PoliceSystem::unit_input`] and reports back
@@ -641,9 +737,13 @@ impl PoliceSystem {
         }
         let v = u.body.speed;
         if !u.cmd.track.is_drivable() {
+            // Parked (tool units, between jobs): hold the brake. The controller alone releases
+            // it below its hold speed, and the car would idle-creep away.
             let (_, b) = u.controller().pedals(v, -brake, dt, true);
+            let (brake, handbrake) = standstill_hold(v, b);
             return Some(VehicleInput {
-                brake: b,
+                brake,
+                handbrake,
                 siren: u.cmd.siren,
                 headlights: true,
                 ..Default::default()
@@ -651,20 +751,31 @@ impl PoliceSystem {
         }
         let (s, _) = u.cmd.track.project_ahead(u.body.pos, u.track_s, 3.0, 40.0);
         u.track_s = s;
+        let offset = self.update_avoid(i, dt);
+        let u = &mut self.units[i];
         let look = u.controller().lookahead(v);
-        let target = unit::lane_point(&u.cmd.track, s + look, u.cmd.lane_offset_m);
+        let target = unit::lane_point(&u.cmd.track, s + look, offset);
         let (pos, heading) = (u.body.pos, u.body.heading);
-        let want = u.cmd.speed_mps.min(u.planned_speed);
+        let want = u.cmd.speed_mps.min(u.planned_speed).min(u.avoid.limit_mps);
+        let hold = u.avoid.limit_mps <= 0.0;
         let acc = (want - v).clamp(-brake, accel);
         let disabled = u.wrecked || u.assignment == Assignment::OutOfService;
         let siren = u.cmd.siren;
         let ctl = u.controller();
         let steer = ctl.steer(pos, heading, [target[0], target[1], 0.0]);
-        let (throttle, brake) = ctl.pedals(v, acc, dt, disabled);
+        let (mut throttle, mut brake) = ctl.pedals(v, acc, dt, disabled);
+        let mut handbrake = 0.0;
+        if hold {
+            // The shared controller releases the brake below its hold speed; right behind
+            // another vehicle or at a stop line the unit must not creep forwards either.
+            throttle = 0.0;
+            (brake, handbrake) = standstill_hold(v, brake.max(1.0));
+        }
         Some(VehicleInput {
             steer,
             throttle,
             brake,
+            handbrake,
             siren,
             headlights: true,
             ..Default::default()
@@ -777,6 +888,20 @@ impl PoliceSystem {
         h.write_u32(self.spikes.len() as u32);
         h.write_u64(self.stats.pursuits.len() as u64);
         h.finish()
+    }
+}
+
+/// Pedal held at a standstill (below `wp_vehicle`'s auto-reverse threshold of 0.5).
+const STANDSTILL_BRAKE: f32 = 0.4;
+
+/// Brake and handbrake that keep a car stopped: above walking pace the requested `brake`; at a
+/// standstill a light pedal plus the handbrake, because `wp_vehicle`'s automatic gearbox
+/// engages reverse when the pedal is held past half travel at a standstill.
+fn standstill_hold(v: f32, brake: f32) -> (f32, f32) {
+    if v.abs() > 1.0 {
+        (brake, 0.0)
+    } else {
+        (STANDSTILL_BRAKE, 1.0)
     }
 }
 

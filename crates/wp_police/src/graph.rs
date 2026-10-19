@@ -56,6 +56,12 @@ pub struct RoadNode {
     pub pos: [f32; 2],
     /// District the node lies in.
     pub district: District,
+    /// A junction (three or more roads meet).
+    #[serde(default)]
+    pub junction: bool,
+    /// A signalised junction.
+    #[serde(default)]
+    pub signalised: bool,
 }
 
 /// A straight road segment.
@@ -220,7 +226,12 @@ impl RoadGraph {
 
     /// Add a node.
     pub fn add_node(&mut self, pos: [f32; 2], district: District) -> NodeId {
-        self.nodes.push(RoadNode { pos, district });
+        self.nodes.push(RoadNode {
+            pos,
+            district,
+            junction: false,
+            signalised: false,
+        });
         self.out.push(Vec::new());
         self.inc.push(Vec::new());
         NodeId(self.nodes.len() as u32 - 1)
