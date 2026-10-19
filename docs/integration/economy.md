@@ -314,3 +314,10 @@ Also: after the lead merge, `real_police_capture_settles_through_the_economy` fa
 in my test (heat via real violations) and made robust in the tracker (a capture with no level
 seen is billed at L1).
 
+
+Gate on `ws/economy` after merging main + `claude/laughing-newton-0xqr6q`: fmt, workspace clippy
+`-D warnings`, wasm build, `cargo test -p wp_economy --features native` all clean;
+`cargo test --workspace` green except **`wp_race` `tests/simcli_races.rs::city_sprint_on_real_roads`**
+(index out of bounds in `throttle_at`: the run reports more vehicles than the scenario has
+entity specs — probably the physical police cars from the lead merge). Not in my crates; fails
+the same way without my commits (no economy code on that path). For 15 / lead.
