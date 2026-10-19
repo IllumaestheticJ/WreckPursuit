@@ -260,11 +260,14 @@ fn kind_name(k: wp_sim::VehicleKind) -> &'static str {
 }
 
 /// The player's police heat as the UI kit's `HeatHud` JSON
-/// (`{level, heat, state, cooldown, unitsInPursuit, bounty}`), or `null` when the sim exposes no
-/// police state for the player yet. **Placeholder** until `Sim::police()` lands (lead run 5).
+/// (`{level, heat, state, cooldown, unitsInPursuit, bounty}`), from `Sim::police()`, or `null`
+/// when the player has no police record yet.
 #[wasm_bindgen]
 pub fn police_hud_json() -> Result<String, JsValue> {
-    get(|_s| "null".to_string())
+    get(|s| match s.police_hud() {
+        Some(h) => serde_json::to_string(&h).unwrap_or_else(|_| "null".into()),
+        None => "null".into(),
+    })
 }
 
 /// Floats per vehicle record in `vehicle_states()` ([`pack::STATE_STRIDE`]).

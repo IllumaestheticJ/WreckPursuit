@@ -239,6 +239,53 @@ impl Session {
         }
     }
 
+    /// The first entity's (the player's) police heat for the HUD, or `None` without a record.
+    pub fn police_hud(&self) -> Option<HeatHud> {
+        use wp_police::{Assignment, PursuitStatus};
+        let player = *self.ids.first()?;
+        let police = self.sim.police();
+        let r = police.racer(player)?;
+        let heat_cfg = &police.config().heat;
+        let t = &heat_cfg.heat.level_thresholds;
+        // Heat within the current level: 0 at its threshold, 1 at the next one.
+        let i = r.level.number() as usize;
+        let lo = if i == 0 { 0.0 } else { t[i - 1] };
+        let hi = if i < t.len() {
+            t[i]
+        } else {
+            heat_cfg.heat.max_heat
+        };
+        let heat = ((r.heat - lo) / (hi - lo).max(1e-6)).clamp(0.0, 1.0);
+        let state = match r.status {
+            PursuitStatus::Clear => "clear",
+            PursuitStatus::Wanted => "noticed",
+            PursuitStatus::Pursuit => "pursuit",
+            PursuitStatus::Searching => "cooldown",
+        };
+        let cooldown = if r.status == PursuitStatus::Searching {
+            let need = wp_police::heat::escape_time_s(r.level, police.phase(), heat_cfg);
+            (r.los_lost_s / need.max(1e-6)).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let units_in_pursuit = police
+            .units()
+            .iter()
+            .filter(|u| {
+                !u.wrecked
+                    && matches!(u.assignment, Assignment::Pursue { target } if target == player)
+            })
+            .count() as u32;
+        Some(HeatHud {
+            level: r.level,
+            heat,
+            state,
+            cooldown,
+            units_in_pursuit,
+            bounty: police.bounty(player).round(),
+        })
+    }
+
     /// Debug: mark an entity as police / traffic / … (cosmetic + sim behaviour; not recorded in
     /// replays, so refused while recording or replaying).
     pub fn set_kind(&mut self, id: EntityId, kind: wp_sim::VehicleKind) -> Result<(), String> {
@@ -738,4 +785,22 @@ pub struct ReplayStatus {
     pub contract_version: String,
     /// Hash spec at record time.
     pub hash_spec: u32,
+}
+
+/// The UI kit's `HeatHud` (`apps/ui-kit/src/model/types.ts`), serialized camelCase.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HeatHud {
+    /// Wanted level (`"None"`, `"L1"`..`"L5"`).
+    pub level: wp_contracts::WantedLevel,
+    /// Heat 0..=1 within the current level.
+    pub heat: f32,
+    /// `clear` / `noticed` / `pursuit` / `cooldown`.
+    pub state: &'static str,
+    /// Escape progress 0..=1 while searching (time without sight ÷ escape time).
+    pub cooldown: f32,
+    /// Units assigned to pursue the player.
+    pub units_in_pursuit: u32,
+    /// Current bounty, whole dollars.
+    pub bounty: f32,
 }

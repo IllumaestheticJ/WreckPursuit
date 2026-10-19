@@ -11,6 +11,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 wp_contracts.workspace = true
+wp_police.workspace = true
 wp_math.workspace = true
 wp_sim.workspace = true
 wp_world.workspace = true
