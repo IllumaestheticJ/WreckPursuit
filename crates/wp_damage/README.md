@@ -211,6 +211,9 @@ Crush m / cabin intrusion m / health at 15, 25, 40, 56, 80 km/h:
 | Arcade frontal | 0.00 / 0 / 0.99 | 0.05 / 0 / 0.95 | 0.17 / 0 / 0.87 | 0.33 / 0.01 / 0.76 | 0.52 / 0.04 / 0.43 |
 | Arcade T-bone | 0.02 / 0.01 / 0.99 | 0.04 / 0.04 / 0.97 | 0.10 / 0.09 / 0.92 | 0.17 / 0.16 / 0.84 | 0.26 / 0.26 / 0.68 |
 
+Arcade health/handling rows below 41 km/h are from before the cosmetic split (now health
+≥ 0.97 and no handling effects for those hits; see `docs/integration/damage.md`, playtest #10).
+
 Targets met: 56 km/h frontal ≈ 0.6 m crush + TotalLoss; 25 km/h tap dents and cracks the cover;
 40 km/h T-bone fails the struck-side front suspension (and knocks the wheel off) and the front door
 is a replace (severity ≈ 0.67); failures progress bumper → radiator (56) → engine (80). Integrated
