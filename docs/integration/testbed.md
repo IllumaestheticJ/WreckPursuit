@@ -79,6 +79,8 @@ Car data (`data/{cars,lattices,tires,materials,modes}`) is embedded at build tim
 | `state_hash` | – | 16 hex digits | `Sim::state_hash()` (hash spec v1: includes lattice nodes). |
 | `police_status` | `entity` | JSON or `null` | From `Sim::police()`: `{level ("None"/"L1".."L5"), heat, heat_in_level 0..1, status (Clear/Wanted/Pursuit/Searching), cooldown 0..1 (escape progress while Searching), units_in_pursuit, bounty, units_total}`; `null` when the police system is off. Mapped onto the UI kit's `HeatHud`. |
 | `police_units` | – | `Float32Array` 6 × units | Police units that are **not** sim vehicles (internally driven cars, helicopters): `[x, y, z, yaw, speed_mps, flags]`, flags 1 helicopter, 2 pursuing/intercepting. |
+| `signal_heads` | – | `Float32Array` 10 × heads | Static, fetch once per session. One head per signalised junction approach (signal group): `[x, y, z, yaw, left_m, right_m, radius_m, centre_z, intersection, group]` — stop-line centre (z from the lane polyline, so heads follow elevation), travel yaw (lamps face `yaw + π`), stop-line lateral extent along travel-right, junction radius and node height (far-side heads). Empty on the flat world. `signal_head_stride()` = 10. |
+| `signal_states` | – | `Uint8Array` 1 × heads | Per frame, `signal_heads` order: 0 off, 1 red, 2 yellow, 3 green, from the world's signal clock (`wp_world::signals::group_state`), so pauses/replays show the simulated state. No turn arrows: the city has no protected turn phases. |
 | `traffic_agents` | – | `Float32Array` 5 × agents | `[x, y, z, yaw, flags]`; flags 1 physical LOD, 2 brake lights, 4 hazards, 8 yielding to siren, 16 / 32 turn signal L / R, 64 aggressive, `variant << 8`. Empty on the flat world. |
 | `lattice_nodes` | `entity` | `Float32Array` xyz × nodes | Current, chassis space (`Sim::node_positions`). |
 | `lattice_rest` | `entity` | `Float32Array` xyz × nodes | Rest pose. |
@@ -175,6 +177,7 @@ hash per tick dominate). `simcli replay file.replay.bin` verifies a browser reco
 | C | contact points & impulses (fading) |
 | G | CG + velocity vector |
 | X | civilian traffic agents (grey; red = braking, yellow = physical LOD, blue = yielding); promoted agents are drawn as sim vehicles instead |
+| M | traffic signals: mast-arm head at each stop line + far-side pedestal head, white stop line; lit lamp unlit-bright with an additive glow that strengthens at night (`signals_view.ts`, 6 InstancedMeshes for the whole city) |
 | Z | wanted level / heat panel (UI kit `HeatPanel`) |
 | I | traffic / police intent arrows |
 | K | component health panel |
@@ -193,7 +196,9 @@ bench 1/8/24, assists, replay (record / stop / load last / file / download `.rep
 exit), timeline scrubber + speed + frame step.
 
 URL parameters: `?scenario=crash/head_on.ron&speed=60`, `?bench=24`, `?cam=orbit`,
-`?replay=last`. `window.__wp` exposes the sim wrapper, the scene and helpers for automation.
+`?replay=last`. `window.__wp` exposes the sim wrapper, the scene and helpers for automation
+(`startFreeDrive(car, mode, city, hour?)`, `lookFrom(eye, target)` pins the orbit camera to a
+sim-space spot).
 
 ### How to add a debug layer
 1. Add `{ id, key, label, default }` to `LAYERS` in `apps/testbed-web/src/settings.ts` — the
@@ -217,7 +222,9 @@ Headless Chromium: keyboard drive; all layers + 5 cameras; record (with a live m
 gear shift, handbrake, reset) → `simcli replay` verifies the file → page reload → playback
 matches every tick hash and the final hash; scrub back/forward; CSV; the three crash scenarios
 and a smoke scenario pass with `matches_simcli` and draw contact markers; city free drive shows
-traffic. `BENCH=1` adds perf, `SHOTS=dir` screenshots.
+traffic; signals: the junction nearest the player framed at 12:00 and 22:00
+(`docs/media/signals/`), every head drawn and lit, lamps change within 30 s and match
+`signal_states()`, M hides the layer and F1 lists it. `BENCH=1` adds perf, `SHOTS=dir` screenshots.
 
 ### City chase
 **city chase** (button, `__wp.startCityChase()`): the procedural 12×12 city at 23:00 with

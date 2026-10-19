@@ -4,7 +4,8 @@
 //
 // Checks: the car drives from keyboard input, every debug layer toggles without errors, a
 // recorded replay survives a page reload and re-simulates to the same hash with no drift,
-// crash scenarios run and report, and (optionally) perf at 1/8/24 cars.
+// crash scenarios run and report, city traffic + signals (day/night, lamps change over time),
+// and (optionally) perf at 1/8/24 cars.
 import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -195,6 +196,77 @@ await page.waitForTimeout(4000);
 const agents = await page.evaluate(() => window.__wp.sim.trafficAgents().length / 5);
 await shot("city_traffic.png");
 check(agents > 10, `city free drive: ${agents} traffic agents rendered`);
+// Traffic signals: heads at every signalised approach, frame the junction nearest the player
+// by day and night, lamps follow the sim and change over time, M toggles the layer.
+const frameJunction = () =>
+  page.evaluate(() => {
+    const heads = window.__wp.sim.signalHeads();
+    const st = window.__wp.sim.states();
+    const n = heads.length / 10;
+    let best = 0;
+    let bestD = Infinity;
+    for (let i = 0; i < n; i++) {
+      const d = Math.hypot(heads[i * 10] - st[1], heads[i * 10 + 1] - st[2]);
+      if (d < bestD) [best, bestD] = [i, d];
+    }
+    const o = best * 10;
+    const [x, y, z, yaw, , right, radius] = heads.slice(o, o + 7);
+    const f = [-Math.sin(yaw), Math.cos(yaw)];
+    const r = [f[1], -f[0]];
+    // Behind and above the approach, looking across the junction at the heads facing us.
+    const back = 16;
+    window.__wp.lookFrom(
+      [x - f[0] * back + r[0] * (right - 1), y - f[1] * back + r[1] * (right - 1), z + 3.2],
+      [x + f[0] * radius, y + f[1] * radius, z + 3],
+    );
+    return { n, head: best };
+  });
+for (const [hour, label] of [
+  [12, "day"],
+  [22, "night"],
+]) {
+  await page.evaluate((h) => {
+    document.getElementById("city").checked = true;
+    window.__wp.startFreeDrive("debug_sedan", "Arcade", true, h);
+  }, hour);
+  await page.waitForTimeout(600);
+  const framed = await frameJunction();
+  await page.waitForTimeout(2500);
+  await shot(`signals/junction_${label}.png`);
+  const drawn = await page.evaluate(() => ({
+    hour: window.__wp.sim.worldInfo()[1],
+    drawn: window.__wp.scene.signals.drawnStates(),
+    visible: window.__wp.scene.signals.group.visible,
+  }));
+  const lit = drawn.drawn.filter((c) => c >= 1 && c <= 3).length;
+  check(
+    framed.n > 8 && drawn.visible && lit === framed.n,
+    `signals (${label}, ${drawn.hour.toFixed(1)} h): ${framed.n} heads drawn, ${lit} lit, framed head ${framed.head}`,
+  );
+}
+{
+  const before = await page.evaluate(() => window.__wp.scene.signals.drawnStates());
+  const changed = await page
+    .waitForFunction(
+      (b) => {
+        const now = window.__wp.scene.signals.drawnStates();
+        const sim = Array.from(window.__wp.sim.signalStates());
+        return now.some((c, i) => c !== b[i]) && now.every((c, i) => c === sim[i]) ? now.filter((c, i) => c !== b[i]).length : false;
+      },
+      before,
+      { timeout: 30000 },
+    )
+    .then((h) => h.jsonValue())
+    .catch(() => 0);
+  await shot("signals/junction_night_later.png");
+  check(changed > 0, `signal lamps change over time and match the sim (${changed} heads changed)`);
+  await page.keyboard.press("KeyM");
+  await page.waitForTimeout(200);
+  const hidden = await page.evaluate(() => !window.__wp.scene.signals.group.visible);
+  await page.keyboard.press("KeyM");
+  const help = await page.evaluate(() => document.querySelector(".help")?.textContent ?? "");
+  check(hidden && help.includes("traffic signals"), "M hides the signals layer; F1 help lists it");
+}
 // City chase preset: night city, police + traffic, speeding player; heat panel from the UI kit.
 await page.evaluate(() => window.__wp.startCityChase("debug_sedan", "Arcade"));
 await page.keyboard.down("KeyW");

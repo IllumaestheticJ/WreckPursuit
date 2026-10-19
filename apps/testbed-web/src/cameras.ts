@@ -35,6 +35,8 @@ export class CameraRig {
   readonly camera: THREE.PerspectiveCamera;
   mode: CameraMode = "chase";
   private readonly orbit: OrbitControls;
+  /** Orbit pivot stays on a world spot (lookFrom) instead of following the car. */
+  private pinned = false;
   private readonly chasePos = new Spring3(5);
   private readonly chaseLook = new Spring3(9);
   private cineTimer = 0;
@@ -56,6 +58,7 @@ export class CameraRig {
   /** Switch camera. `orbitOffset` (vehicle-local metres) places a fresh orbit camera. */
   setMode(mode: CameraMode, target?: THREE.Object3D, orbitOffset: [number, number, number] = [-7, -9, 6]): void {
     this.mode = mode;
+    this.pinned = false;
     this.orbit.enabled = mode === "orbit";
     this.camera.fov = mode === "hood" || mode === "bumper" ? 75 : 60;
     this.camera.updateProjectionMatrix();
@@ -68,6 +71,19 @@ export class CameraRig {
     this.chasePos.reset();
     this.chaseLook.reset();
     this.cineTimer = 0;
+  }
+
+  /**
+   * Orbit camera pinned to a fixed world spot instead of the car (automation, e.g. framing a
+   * junction). `eye` and `target` are sim-space metres (+Z up). Any setMode() unpins it.
+   */
+  lookFrom(eye: [number, number, number], target: [number, number, number]): void {
+    this.setMode("orbit");
+    this.pinned = true;
+    // Sim (x, y, z) → Three (x, z, -y): the sim world group is rotated -90° about X.
+    this.orbit.target.set(target[0], target[2], -target[1]);
+    this.camera.position.set(eye[0], eye[2], -eye[1]);
+    this.camera.lookAt(this.orbit.target);
   }
 
   /** `target` is the vehicle root; `size` its body size [w, l, h] (sim metres). */
@@ -100,7 +116,9 @@ export class CameraRig {
         break;
       case "orbit":
         // Follow the car with the orbit pivot; the user controls angle and distance.
-        {
+        if (this.pinned) {
+          this.orbit.update();
+        } else {
           const p = target.getWorldPosition(new THREE.Vector3());
           const delta = p.clone().sub(this.orbit.target);
           this.orbit.target.add(delta);

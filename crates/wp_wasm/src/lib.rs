@@ -13,7 +13,7 @@
 //! |---|---|
 //! | session | `init(seed, scenario_json, scripted)`, `free_drive_json(car, mode, city)`, `scenario_from_ron(text)`, `scenario_with_speed(json, mps)`, `step(dt) -> alpha`, `set_damage_mode(str)`, `car_ids()` |
 //! | control | `spawn_vehicle(car_id, pos, yaw)`, `set_input(entity, f32[])`, `set_assist_profile(entity, json)`, `assist_preset(source)`, `reset_vehicle(entity)` |
-//! | state | `entities()`, `vehicle_states()`, `vehicle_states_prev()`, `vehicle_info(entity)`, `world_info()`, `state_hash()`, `traffic_agents()` |
+//! | state | `entities()`, `vehicle_states()`, `vehicle_states_prev()`, `vehicle_info(entity)`, `world_info()`, `state_hash()`, `traffic_agents()`, `signal_heads()`, `signal_states()` |
 //! | damage | `lattice_nodes`, `lattice_rest`, `lattice_beams`, `lattice_node_regions`, `lattice_strain`, `region_energy`, `skin_binding_indices`, `skin_binding_weights` |
 //! | io | `events_drain() -> postcard`, `events_decode(bytes)`, `telemetry(entity)`, `telemetry_names()`, `ffb(entity)`, `intents()` |
 //! | replay | `record_start()`, `record_stop()`, `recording()`, `replay_load(bytes)`, `replay_seek(tick)`, `replay_play(speed)`, `replay_status()`, `replay_export_csv(bytes, entity, every)` |
@@ -32,6 +32,7 @@ pub mod pack;
 pub mod police;
 pub mod scenario;
 pub mod session;
+pub mod signals;
 
 use std::cell::RefCell;
 
@@ -461,6 +462,28 @@ pub fn traffic_agents() -> Result<Vec<f32>, JsValue> {
         }
         out
     })
+}
+
+/// Floats per head in `signal_heads()`.
+#[wasm_bindgen]
+pub fn signal_head_stride() -> u32 {
+    signals::HEAD_STRIDE as u32
+}
+
+/// Static traffic signal heads of the session's city (empty without one), one per signalised
+/// junction approach, 10 floats each:
+/// `[x, y, z, yaw, left_m, right_m, radius_m, centre_z, intersection, group]`
+/// (see [`signals::heads`]). Fetch once per session.
+#[wasm_bindgen]
+pub fn signal_heads() -> Result<Vec<f32>, JsValue> {
+    get(|s| signals::heads(s.sim().world()))
+}
+
+/// Current state per head in `signal_heads()` order, one byte each: 0 off, 1 red, 2 yellow,
+/// 3 green. Cheap enough to call every frame.
+#[wasm_bindgen]
+pub fn signal_states() -> Result<Vec<u8>, JsValue> {
+    get(|s| signals::states(s.sim().world()))
 }
 
 // ----- damage ------------------------------------------------------------------------------

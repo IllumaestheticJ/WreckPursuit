@@ -236,3 +236,49 @@ fn city_chase_speeding_player_gets_heat() {
     assert!(violations > 0, "speeding player produced no violations");
     assert!(max_heat > 0.0, "violations produced no heat");
 }
+
+#[test]
+fn city_signal_heads_cycle_and_sit_on_the_road() {
+    let mut s = Session::new(free_drive("debug_sedan", DamageMode::Arcade, true), false).unwrap();
+    s.run_ticks(240);
+    let heads = crate::signals::heads(s.sim().world());
+    let stride = crate::signals::HEAD_STRIDE;
+    assert_eq!(heads.len() % stride, 0);
+    let n = heads.len() / stride;
+    assert!(n > 8, "city has signalised approaches: {n}");
+    for h in heads.chunks(stride) {
+        assert!(
+            h[4] <= 0.0 && h[5] >= 0.0 && h[5] - h[4] > 2.0,
+            "stop line extent {h:?}"
+        );
+        assert!(h.iter().all(|v| v.is_finite()));
+    }
+    let first = crate::signals::states(s.sim().world());
+    assert_eq!(first.len(), n);
+    assert!(first.iter().all(|&c| c <= crate::signals::code::GREEN));
+    assert!(first.contains(&crate::signals::code::GREEN));
+    assert!(first.contains(&crate::signals::code::RED));
+    // Over one long cycle every head changes state at least once.
+    assert_eq!(
+        first,
+        crate::signals::states_at(s.sim().world(), s.sim().world().tick())
+    );
+    let mut changed = vec![false; n];
+    for sec in 1..=60u64 {
+        let tick = s.sim().world().tick() + sec * 240;
+        for (i, c) in crate::signals::states_at(s.sim().world(), tick)
+            .iter()
+            .enumerate()
+        {
+            changed[i] |= *c != first[i];
+        }
+    }
+    assert!(changed.iter().all(|&c| c), "every head changes within 60 s");
+}
+
+#[test]
+fn flat_world_has_no_signal_heads() {
+    let s = live_session(1);
+    assert!(crate::signals::heads(s.sim().world()).is_empty());
+    assert!(crate::signals::states(s.sim().world()).is_empty());
+}
