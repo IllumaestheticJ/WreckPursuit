@@ -117,7 +117,8 @@ export interface CareerStats {
   runs_captured: number;
   runs_wrecked: number;
   best_escape_bounty: number;
-  driven_s: number;
+  /** Physics ticks driven (240 per second). */
+  driven_ticks: number;
 }
 
 /** `career::CareerView`: the whole garage screen. */

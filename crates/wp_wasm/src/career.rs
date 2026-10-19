@@ -33,7 +33,7 @@ use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 use wp_contracts::{
     DamageMode, DamageSim, DistrictId, EntityId, LoadedCar, RepairItem, VehicleClass, VehicleDef,
-    WantedLevel, PHYSICS_DT,
+    WantedLevel,
 };
 use wp_damage::{DamageModel, FullDamageSnapshot};
 use wp_economy::{
@@ -1256,7 +1256,7 @@ impl Career {
         let heat = player
             .and_then(|p| s.sim().police().racer(p))
             .map_or(0.0, |r| r.heat);
-        let driven_s = s.tick() as f64 * PHYSICS_DT as f64;
+        let driven_ticks = s.tick();
         let wrecked = player
             .and_then(|p| s.vehicle(p))
             .is_some_and(|v| v.damage.summary().total_loss);
@@ -1306,7 +1306,7 @@ impl Career {
             None => self.reseat_active(start.car),
         }
         self.econ
-            .close_run(&mut self.profile, end, heat, bounty_cash, driven_s);
+            .close_run(&mut self.profile, end, heat, bounty_cash, driven_ticks);
         let ledger = self
             .profile
             .ledger

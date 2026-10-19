@@ -55,8 +55,8 @@ pub struct CareerStats {
     pub runs_wrecked: u32,
     /// Largest single escape bounty.
     pub best_escape_bounty: Money,
-    /// Sim time driven over the whole career, s.
-    pub driven_s: f64,
+    /// Sim time driven over the whole career, physics ticks (`PHYSICS_DT` each).
+    pub driven_ticks: u64,
 }
 
 /// How a run ended, for the carry-over rules.
@@ -157,7 +157,7 @@ impl Economy {
         end: RunEnd,
         heat_at_end: f32,
         escape_bounty: Money,
-        driven_s: f64,
+        driven_ticks: u64,
     ) -> Vec<EconomyEvent> {
         let s = &mut p.stats;
         s.runs += 1;
@@ -167,9 +167,7 @@ impl Economy {
             RunEnd::Wrecked => s.runs_wrecked += 1,
         }
         s.best_escape_bounty = s.best_escape_bounty.max(escape_bounty);
-        if driven_s.is_finite() && driven_s > 0.0 {
-            s.driven_s += driven_s;
-        }
+        s.driven_ticks = s.driven_ticks.saturating_add(driven_ticks);
         p.carry.heat = self.carry_heat(heat_at_end, end);
         self.next_night(p)
     }
@@ -326,16 +324,16 @@ mod tests {
         let mut p = e.new_career(PlayerId(1), DamageMode::Arcade);
         p.lattices.insert(99, String::new()); // car 99 is not owned
         let day0 = p.account.day;
-        e.close_run(&mut p, RunEnd::Free, 30.0, 250, 61.5);
+        e.close_run(&mut p, RunEnd::Free, 30.0, 250, 600);
         assert_eq!(p.account.day, day0 + 1);
         assert_eq!(p.stats.runs, 1);
         assert_eq!(p.stats.runs_free, 1);
         assert_eq!(p.stats.best_escape_bounty, 250);
         assert_eq!(p.carry.heat, 15.0);
         assert!(p.lattices.is_empty());
-        e.close_run(&mut p, RunEnd::Captured, 30.0, 0, 10.0);
+        e.close_run(&mut p, RunEnd::Captured, 30.0, 0, 240);
         assert_eq!(p.carry.heat, 0.0);
         assert_eq!(p.stats.runs_captured, 1);
-        assert!((p.stats.driven_s - 71.5).abs() < 1e-9);
+        assert_eq!(p.stats.driven_ticks, 840);
     }
 }
