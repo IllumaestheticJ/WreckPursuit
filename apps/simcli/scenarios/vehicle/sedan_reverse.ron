@@ -1,0 +1,14 @@
+// Hold the brake at a standstill: auto-reverse engages and the car backs up (brake pedal
+// acts as throttle in reverse; reverse gear tops out around 60 km/h at the limiter).
+(
+    name: "vehicle_sedan_reverse",
+    car: "debug_sedan",
+    mode: Arcade,
+    seed: 4,
+    duration_s: 4.0,
+    inputs: [(t_s: 0.0, input: (brake: 1.0))],
+    expect: [
+        (metric: "final_speed_mps", min: -20.0, max: -1.0),
+        (metric: "distance_m", min: 1.0, max: 40.0),
+    ],
+)

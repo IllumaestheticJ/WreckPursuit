@@ -1,0 +1,18 @@
+// Accelerate for 5 s, full brake (ABS) for 2.2 s, then handbrake to hold (keeping the pedal
+// down at a standstill would engage auto-reverse).
+(
+    name: "vehicle_sedan_brake",
+    car: "debug_sedan",
+    mode: Simulation,
+    seed: 3,
+    duration_s: 10.0,
+    inputs: [
+        (t_s: 0.0, input: (throttle: 1.0)),
+        (t_s: 5.0, input: (brake: 1.0)),
+        (t_s: 7.2, input: (handbrake: 1.0)),
+    ],
+    expect: [
+        (metric: "final_speed_mps", min: -0.2, max: 0.2),
+        (metric: "distance_m", min: 40.0, max: 110.0),
+    ],
+)

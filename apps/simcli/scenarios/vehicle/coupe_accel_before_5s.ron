@@ -1,0 +1,11 @@
+// RWD debug coupe, full throttle: must NOT reach 100 km/h within 5 s.
+// Together with coupe_accel_by_6s this brackets 0-100 km/h in 5-6 s (prompt 02).
+(
+    name: "vehicle_coupe_accel_before_5s",
+    car: "debug_coupe",
+    mode: Arcade,
+    seed: 1,
+    duration_s: 5.0,
+    inputs: [(t_s: 0.0, input: (throttle: 1.0))],
+    expect: [(metric: "max_speed_mps", min: 20.0, max: 27.77)],
+)

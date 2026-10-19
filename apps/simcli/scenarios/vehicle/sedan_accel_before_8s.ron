@@ -1,0 +1,11 @@
+// FWD debug sedan, full throttle (keyboard assists): must NOT reach 100 km/h within 8 s.
+// Together with sedan_accel_by_10s this brackets 0-100 km/h in 8-10 s (prompt 02).
+(
+    name: "vehicle_sedan_accel_before_8s",
+    car: "debug_sedan",
+    mode: Arcade,
+    seed: 1,
+    duration_s: 8.0,
+    inputs: [(t_s: 0.0, input: (throttle: 1.0))],
+    expect: [(metric: "max_speed_mps", min: 20.0, max: 27.77)],
+)
