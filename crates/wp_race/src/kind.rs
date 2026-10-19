@@ -41,7 +41,8 @@ pub enum RaceKind {
     /// 1v1 gap race in open traffic: whoever leads by `lead_m` wins outright; otherwise the
     /// leader when the time limit runs out wins.
     Outrun {
-        /// Lead (straight-line gap) that wins the race, m.
+        /// Lead that wins the race, m, measured along the leader's own trail (straight line
+        /// when the chaser left that trail).
         lead_m: f32,
     },
     /// Open route: pass every checkpoint in order by any path, within the time limit.

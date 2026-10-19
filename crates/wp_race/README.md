@@ -5,8 +5,8 @@ judged, and the crew/territory meta that gives night racing stakes beyond cash. 
 the lobby transport; this crate owns the rules. Workstream 15 (machine L), branch `ws/race`.
 
 Pure Rust, deterministic, wasm32-clean (`cargo build --target wasm32-unknown-unknown -p wp_race`).
-Depends on `wp_contracts`, `wp_math`, and read-only on `wp_world` (routes, POIs, zones) and
-`wp_economy` (payout types). Data lives in `data/events/` (see its README).
+Depends on `wp_contracts`, `wp_math`, and read-only on `wp_world` (routes, POIs, zones),
+`wp_economy` (payout types), `wp_opponent` (AI entrants) and `wp_police` (report input path). Data lives in `data/events/` (see its README).
 
 ## Design
 
@@ -16,10 +16,10 @@ Depends on `wp_contracts`, `wp_math`, and read-only on `wp_world` (routes, POIs,
 |---|---|---|---|
 | `Sprint` | fixed corridor, ordered gates | first across the last gate | corridor DQ |
 | `Circuit { laps }` | closed loop, gate 0 = start/finish | first to complete `laps` | best lap tracked |
-| `Outrun { lead_m }` | open world (course = start line only) | lead by `lead_m` (straight-line gap), else leader at the time limit | lead changes when the chaser is `overtake_margin_m` ahead along the leader's heading; opponent DNF/DQ → survivor wins |
+| `Outrun { lead_m }` | open world (course = start line only) | lead by `lead_m` measured **along the leader's own trail** (breadcrumbs every 2 m; straight line if the chaser left the trail), else leader at the time limit | lead changes when the chaser is `overtake_margin_m` ahead along the leader's heading; opponent DNF/DQ → survivor wins |
 | `Checkpoint` | open route, ordered gates, any path | first through every gate; time limit | no corridor |
 | `Cannonball` | cross-city, start + finish, any path | first to finish | no corridor; scheduler asks for heavy traffic |
-| `Delivery { cargo_kg, cargo_value }` | corridor | first to finish | contact impulse above a threshold damages cargo; cost = value × damage; destroyed cargo = DNF |
+| `Delivery { cargo_kg, cargo_value }` | corridor | first to finish | contact impulse above a threshold damages cargo; cost = value × damage; destroyed cargo = DNF; the cargo mass is on the car (`cargo::load_cargo`) |
 | `Drag` | 402 m straight, side-by-side grid | lower elapsed time | jump start (moved > 0.3 m before green) = DQ; reaction time, upshift-in-window score, trap speed |
 | `TimeAttack` | single-file grid | best **own** elapsed time | each racer's clock starts at their own start-line crossing |
 
@@ -41,7 +41,8 @@ Lobby ──start(tick)──► Countdown (3 s) ──► Running ──nobody 
 - **Finish timing** uses the crossing fraction between samples, in integer *sub-ticks*
   (1/1000 tick), so finishing order is exact and identical on every target.
 - **DNF:** total loss (`SimEvent::TotalLoss`), police capture (`dnf(.., Captured)` from the
-  server), time limit, finish window, retire/disconnect, cargo destroyed, lost outrun.
+  server), time limit, finish window, retire/disconnect, cargo destroyed, lost outrun, fled
+  from the police (AI entrants, reported by `entrants`).
 - **DQ:** outside the corridor (`corridor_half_width + 2 m`) for more than 3 s (shortcuts),
   jump start, implausible movement (faster than 110 m/s between samples — teleport/anti-cheat),
   marshal. `relocate()` lets the server reset a car without tripping the teleport check.
@@ -102,6 +103,34 @@ Class brackets D/C/B/A/S/X from `wp_economy`'s `class_index` (boundaries checked
 races, `EntryRequirements { brackets, min_licence, min_rep, crews }` checked by
 `ProgressionTable::check_entry`.
 
+### AI entrants (`entrants`)
+
+`AiEntrants` puts machine N's `wp_opponent::Field` into a judged race: one field on the race's
+`wp_world` route, extended `AI_RUN_OFF_M` (60 m) past a point-to-point finish so the AI drives
+through the gate instead of parking at the end of its corridor. Cars are held on the handbrake
+until the judge's green tick (not the brake: auto-reverse turns a held brake at a standstill
+into reverse). The judge stays the authority: the AI's own civilian-contact DQ is off, and
+`wp_opponent` outcomes the judge cannot see become judge DNFs (`Abandoned` → `Fled`,
+`Retired` → `Retired`), once each.
+
+### Police (`police`)
+
+`wp_police` has no race API before contract v0.3.0, so race signals use its existing input:
+`SimEvent::TrafficViolation`. `police::report_events` turns `PatrolAttracted` (a hot meet)
+into one `Reckless` report per racer within 400 m of the venue (heat, and an unwitnessed one
+files a civilian report that dispatches a patrol). `police::deliver` feeds them to a
+`PoliceSystem` with a zero-length step until `wp_sim` can queue external events for its own
+police step (request to the lead in `docs/integration/race.md`).
+
+### Delivery cargo (`cargo`)
+
+`load_cargo(car, &CargoLoad::in_boot(&car.def, kg))` returns a `LoadedCar` carrying the cargo:
+mass added, front weight fraction and CG height moved to the combined centre of mass, principal
+inertias grown by the cargo box plus both bodies' parallel-axis terms. `wp_vehicle` builds the
+chassis body and static wheel loads from those fields, so spawning the Delivery entrant with
+this car makes the cargo felt (400 kg in a sedan: 22 % less distance in 6 s from rest, 30 %
+longer stop from 25 m/s; `tests/cargo_physics.rs`).
+
 ## Tests
 
 ```sh
@@ -118,6 +147,11 @@ cargo run --release -p wp_race --example judge_bench
   procedural city's arterial, route planned by `wp_world`), checks judging is deterministic,
   checks race closures through `World::set_active_routes` (closed lanes, cones, no civilians on
   the route), and runs sprint + circuit courses planned on the procedural city.
+- `tests/race_police.rs` — `apps/simcli/scenarios/race/city_sprint_police.ron` (traffic + police
+  on): four `wp_opponent` AI entrants race a judged sprint, the hot venue's `PatrolAttracted`
+  is called in through `police`, and a pursuit starts; a control run without the report has no
+  pursuit; the run is deterministic.
+- `tests/cargo_physics.rs` — Delivery cargo slows the car in the real `wp_sim` loop.
 - `tests/determinism_lint.rs` — runs `tools/lint-determinism` over `wp_race/src`.
 
 ## Performance (native, release, cloud container, 2026-10-19)
@@ -132,14 +166,20 @@ police budget (0.5 ms/frame).
 
 ## Known gaps
 
-- Outrun measures the straight-line gap, not the gap along the road.
+- Outrun's trail gap falls back to the straight-line distance when the chaser is more than
+  25 m off the leader's trail (took another street), which can under-count a lead.
 - Progress for DNF ranking projects onto the centreline; on open-route kinds a racer far off the
   suggested line ranks by gates passed first, so this only matters between racers with equal
   gates.
 - `Checkpoint` gates must be taken in order (no any-order variant yet).
 - Drag shift scoring needs the car's redline (`RacerEntry::redline_rpm`; 0 = skipped).
-- Delivery cargo mass is not applied to the car yet (needs a `wp_vehicle` hook, see
-  `docs/integration/race.md`).
+- Delivery cargo is applied at spawn (`cargo::load_cargo`); destroyed cargo stays in the car's
+  mass (no unload mid-race without a `wp_vehicle` payload hook). Lateral cargo offset only
+  changes inertia, not the CG (the contract has no lateral CG).
+- Race → police goes through a cloned `PoliceSystem` (`police::deliver` + `Sim::set_police`)
+  until `wp_sim` queues external events into its police step.
 - Signals are crate-local until the contract carries a typed race event (request R1).
 - Crews/territory are in-memory; persistence belongs to the server's account store.
-- No AI entrants yet (prompt 17); the scheduler only says when cars spawn.
+- AI entrants (`entrants`) are wired in tests only; `wp_net`'s server must spawn them at
+  `ScheduledEvent::spawn_s` and call `AiEntrants::tick` / `report_to` (request to F).
+  simcli cannot drive them in a standalone scenario run yet (requests to I and N).

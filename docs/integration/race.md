@@ -3,7 +3,7 @@
 - **Workstream / prompt:** 15 — race types, event scheduler, crews & territory (machine L)
 - **Branch:** `ws/race`
 - **Crates / folders owned:** `crates/wp_race`, `data/events/`, `apps/simcli/scenarios/race/`
-- **Contract version built against:** 0.2.0 (merged `main` 2026-10-19, lead run 3)
+- **Contract version built against:** 0.2.0 (merged `main` + lead branch `claude/laughing-newton-0xqr6q`, round 6b, 2026-10-19). Nothing here needs v0.3.0; see "Drops onto v0.3.0" below.
 
 Design write-up: `crates/wp_race/README.md`. Data: `data/events/README.md`.
 
@@ -47,6 +47,27 @@ judge.dnf(entity, DnfReason::Disconnected, tick);    // from wp_net
 judge.relocate(entity, pos, tick);                   // server reset/respawn (not a teleport DQ)
 for s in judge.drain_signals() { /* fan out, see below */ }
 
+// AI entrants (wp_opponent), every tick before Sim::step_fixed:
+let mut ai = entrants::AiEntrants::new(&world, &race, ev.kind, closed, &ai_entrants, ev_seed);
+for (e, inp) in ai.tick(&judge, sim.tick(), sim.world(), &vehicle_obs, &last_events, &heat) {
+    sim.set_input(e, inp)?;                          // held on the handbrake until green
+}
+ai.report_to(&mut judge, sim.tick());                // Abandoned → Dnf(Fled), Retired → Dnf(Retired)
+
+// Hot meet → police (today's police input path; see "Needs" for the wp_sim queue):
+if let Some(sig) = meet_heat.record_race(&venue, abs_s, &data.schedule.meet_heat) {
+    let reports = police::report_events(&sig, &racer_positions);   // Reckless per racer
+    let mut p = sim.police().clone();
+    police::deliver(&mut p, sim.world(), &racer_views, &reports);
+    sim.set_police(p);
+}
+
+// Delivery: spawn the entrant with the cargo already in the car.
+let car = match cargo::CargoLoad::for_kind(ev.kind, &car.def) {
+    Some(c) => cargo::load_cargo(&car, &c),
+    None => car,
+};
+
 // 5. Results.
 if judge.is_finished() { let results: Vec<RacerResult> = judge.results(); }
 ```
@@ -67,7 +88,7 @@ Other entry points: `Course::{straight, closed, new, grid, marshal_spots, projec
 | `CheckpointPassed`, `LapCompleted`, `LeadChanged` | HUD | — | — | — |
 | `RacerFinished`, `RacerDnf`, `RacerDq` | HUD | — | — | — |
 | `RaceFinished { results }` | results screen | settle: `bridge::economy_result(r, wanted)` + `bridge::economy_setup(..)` → `Economy::settle_race`; crew cut via `CrewRegistry::credit_race`; `cargo_damage_cost` charge; pink slip from `ChallengeOutcome` | add `Stake::heat` to illegal racers | `Territory::award_race(district, legality, ..)` |
-| `PatrolAttracted { venue, pos, heat }` | — | — | dispatch a patrol to `pos` | — |
+| `PatrolAttracted { venue, pos, heat }` | — | — | consumed today as `Reckless` reports via `police::report_events` (+3 heat each, civilian report → patrol dispatch) | — |
 | `TerritoryChanged { district, crew }` | map overlay | — | `heat_decay_multiplier` changes | — |
 
 ## Needs
@@ -75,13 +96,15 @@ Other entry points: `Course::{straight, closed, new, grid, marshal_spots, projec
 | From | What | Why | Workaround now |
 |---|---|---|---|
 | 07 `wp_net` (F) | call the lifecycle above from the server; `RaceCommand` messages (R6) | lobby transport is theirs | none; `trace::simulate` + simcli tests stand in |
-| 06 `wp_police` (E) | presence override API, capture notification, heat add for `Stake::heat`, patrol dispatch for `PatrolAttracted`, heat-decay multiplier input | race stakes beyond cash | signals carry everything; nothing consumes them yet |
+| 06 `wp_police` (E) | presence override API, capture notification, heat add for `Stake::heat`, heat-decay multiplier input; a non-stepping `PoliceSystem::report(&SimEvent)` (or a typed race report) | race stakes beyond cash | `PatrolAttracted` goes in as `Reckless` violations (`police::report_events`) through a zero-length `step` (`police::deliver`) |
+| Lead (`wp_sim`) | `Sim::queue_police_events(Vec<SimEvent>)`: events folded into the next tick's police step (or `Sim::police_mut()`) | race reports must reach the sim's own `PoliceSystem` | clone `sim.police()`, `police::deliver`, `sim.set_police(clone)` (works, deterministic, clones the road graph once per report) |
 | 08 `wp_economy` (G) | accept `wp_race` kinds (R5) or a purse from `Stake`; charge `cargo_damage_cost`; apply `CrewCut` | 3 of 8 kinds map onto Sprint | `bridge::economy_race_type` maps Outrun→Touge, TimeAttack→Circuit, Checkpoint/Cannonball/Delivery→Sprint |
-| 02 `wp_vehicle` (A) | extra payload mass hook (`set_payload(kg, chassis_offset)`) | Delivery cargo mass | cargo is scored but not felt |
+| 02 `wp_vehicle` (A) | optional: runtime payload hook (`set_payload(kg, chassis_offset)`) | unloading destroyed cargo mid-race | cargo mass is applied at spawn through the `VehicleDef` (`cargo::load_cargo`), felt by the physics |
 | 02 `wp_vehicle` (A) | FYI: `debug_sedan` pulls ~12 m right over 402 m at full throttle with zero steer (see `race_drag_coupe_vs_sedan`, which now dabs left twice) | torque steer or asymmetry? | scenario corrects it |
 | 05 `wp_world` (D) | a marshal prop kind (`PropKind::Marshal`) or OK to spawn them as `Sim::add_static_box` | sanctioned events | `Course::marshal_spots` returns poses only |
-| 10 harness (I) | add `wp_race` to `lint-determinism::SIM_CRATES`; scenario v2 race block (`race: (kind, course, …)`, `expect: race_position(entity, pos)`, `race_status(entity, Dq(LeftCorridor))`) | judge results inside simcli itself | `crates/wp_race/tests/simcli_races.rs` judges the runs via `run_with_hook`; `tests/determinism_lint.rs` self-lints |
-| 17 opponent AI | AI entrants for meets (`ScheduledEvent::spawn_s`) | populated meets | — |
+| 10 harness (I) | add `wp_race` to `lint-determinism::SIM_CRATES`; a `pursuit_started_after(t_s)` expectation; scenario v2 race block (`race: (kind, course, …)`, `expect: race_position(entity, pos)`, `race_status(entity, Dq(LeftCorridor))`) | judge results inside simcli itself | `crates/wp_race/tests/simcli_races.rs` judges the runs via `run_with_hook`; `tests/determinism_lint.rs` self-lints |
+| 17 opponent AI (N) | (a) `Field` option to run *through* the corridor end instead of parking before it; (b) a "hold until green" input or `RaceConfig::start_tick`; (c) `OpponentEvent::Abandoned` → also emit the police-chase reason so `wp_race` can tell fleeing from wrecked; (d) a simcli `driver: opponent(...)` so race scenarios drive AI entrants standalone; (e) `CarCapability::measure` is slow in debug, a cached table per car id in `data/` would help servers and tests | AI entrants in judged races | `entrants` extends the route 60 m past the finish (`run_off_route`), holds on the handbrake until green, maps `Abandoned`/`Retired` to judge DNFs; tests use `geometry_only` |
+| 07 `wp_net` (F) | spawn AI entrants at `ScheduledEvent::spawn_s`, call `AiEntrants::tick` before each physics step and `report_to` after the judge | populated meets on the server | `tests/race_police.rs` runs the same loop |
 
 ## Contract change requests
 
@@ -90,7 +113,7 @@ final variant lists. **R1 below is the final list for `RaceEvent`.**
 
 | # | Change (type / field / variant) | Why | Who is affected | Status |
 |---|---|---|---|---|
-| R1 | `SimEvent::Race(RaceEvent)`. Final `RaceEvent` variants (= `wp_race::RaceSignal`): `LobbyOpened { event, venue, pos, kind, legality, police }`, `Countdown { event, green_tick }`, `Green { event, tick }`, `CheckpointPassed { event, racer, gate, lap, tick }`, `LapCompleted { event, racer, lap, lap_subticks }`, `LeadChanged { event, leader }`, `RacerFinished { event, racer, elapsed_subticks }`, `RacerDnf { event, racer, reason }`, `RacerDq { event, racer, reason }`, `RaceFinished { event, results: Vec<RaceResultRow> }`, `PatrolAttracted { venue, pos, heat }`, `TerritoryChanged { district, crew: Option<CrewId> }`. Types moved with it: `RaceEventId(u32)`, `VenueId(u32)`, `CrewId(u32)`, `RaceKind`, `Legality`, `DnfReason`, `DqReason`, `RacerStatus`, `RaceResultRow { racer, position, status, elapsed_subticks, best_lap_subticks, clean, contacts, civilian_hits, cargo_damage_cost }` (the full `RacerResult` minus drag/violation detail, which stays server-side) | economy, police, net and the renderer all react to race events | 07, 08, 06, 04, 10 | deferred to v0.3.0 (same batch as typed `PoliceEvent`/`EconomyEvent`); final list above |
+| R1 | `SimEvent::Race(RaceEvent)`. Final `RaceEvent` variants (= `wp_race::RaceSignal`): `LobbyOpened { event, venue, pos, kind, legality, police }`, `Countdown { event, green_tick }`, `Green { event, tick }`, `CheckpointPassed { event, racer, gate, lap, tick }`, `LapCompleted { event, racer, lap, lap_subticks }`, `LeadChanged { event, leader }`, `RacerFinished { event, racer, elapsed_subticks }`, `RacerDnf { event, racer, reason }`, `RacerDq { event, racer, reason }`, `RaceFinished { event, results: Vec<RaceResultRow> }`, `PatrolAttracted { venue, pos, heat }`, `TerritoryChanged { district, crew: Option<CrewId> }`. Types moved with it (`DnfReason` gained `Fled` in round 6b): `RaceEventId(u32)`, `VenueId(u32)`, `CrewId(u32)`, `RaceKind`, `Legality`, `DnfReason`, `DqReason`, `RacerStatus`, `RaceResultRow { racer, position, status, elapsed_subticks, best_lap_subticks, clean, contacts, civilian_hits, cargo_damage_cost }` (the full `RacerResult` minus drag/violation detail, which stays server-side) | economy, police, net and the renderer all react to race events | 07, 08, 06, 04, 10 | deferred to v0.3.0 (same batch as typed `PoliceEvent`/`EconomyEvent`); final list above |
 | R2 | `PolicePresence { None, Normal, Elevated, Max }` in contracts | `police_presence_override: max` for illegal daytime races must reach `wp_police` | 06, 07 | for v0.3.0, with E's typed `PoliceEvent` |
 | R3 | `DistrictId(u32)` = zone index | territory is keyed by district | 05, 08, 06 | deferred to v0.3.0 by the lead (with D, G); wp_race keeps a local `DistrictId` |
 | R4 | Durable account id (accepted F NET-5) also used by crews/licences | crews outlive instances | 07, 08 | accepted upstream, not in v0.2.0; wp_race keeps a local `RacerAccount(u64)` |
@@ -115,6 +138,34 @@ final variant lists. **R1 below is the final list for `RaceEvent`.**
   sprint's `events.jsonl`); the judge counts each, so it would help if it fired once per
   crossing (it does not affect clean status, which only looks at `Collision`).
 
+### Round 6b (done on `ws/race`, 2026-10-19)
+1. **Street race that pulls in police.** `apps/simcli/scenarios/race/city_sprint_police.ron`
+   (traffic 0.3, police on, 13:00, `police_presence: 2.0` standing in for the stake table's
+   `PolicePresence::Max` for illegal daytime races until R2). `tests/race_police.rs` runs the
+   full server lifecycle in the `wp_sim` loop: four AI entrants on the judge's grid, held until
+   green, race a 207 m arterial sprint through traffic (all finish, all clean, 10–14 s). The
+   venue is hot from two earlier meets, so starting the race emits `PatrolAttracted`;
+   `wp_race::police` turns it into `Reckless` reports that `wp_police` consumes like any
+   violation (+3 heat each). A pursuit starts ~7 s after the finish (tick 5808). A control run
+   without the report never crosses wanted level 1 (max 8.4 heat) and has no pursuit, so the
+   report is what pulls the police in. Deterministic (same hashes twice). On a longer 687 m
+   route through four signalled junctions, pursuits start mid-race and two AI entrants abandon
+   to flee (judged `Dnf(Fled)`); not kept as a test (88 s in debug).
+2. **AI entrants.** `wp_race::entrants::AiEntrants` binds a `wp_opponent::Field` to a
+   `RaceJudge` (glue only, no edits to N's crate); requests for N in "Needs".
+3. **Own gaps.** Outrun gap is measured along the leader's trail (`src/trail.rs`; switchback
+   test where straight-line never reaches the lead). Delivery cargo is real mass
+   (`cargo::load_cargo`: mass, CG, inertia; `tests/cargo_physics.rs`).
+
+### Drops onto v0.3.0
+- `RaceSignal` → `RaceEvent` (R1) is a rename + `From` impl; `DnfReason::Fled` is the only new
+  variant since the R1 list.
+- `police::report_events` keeps working on v0.3.0 (it emits `SimEvent::TrafficViolation`); if
+  v0.3.0 brings a typed race report for `wp_police`, it replaces the `Reckless` stand-in and
+  `police::deliver` goes away once `wp_sim` queues events.
+- `entrants`, `cargo`, `trail` touch no contract types beyond `EntityId`, `SimEvent`,
+  `VehicleInput`, `LoadedCar`.
+
 ### v0.2.0 follow-up (done on `ws/race`)
 - `SimEvent::TrafficViolation { .., pos }`: the lead patched the judge's match and the scripted
   trace on `main`; merged.
@@ -129,10 +180,12 @@ final variant lists. **R1 below is the final list for `RaceEvent`.**
 | File | Change | Why |
 |---|---|---|
 | `Cargo.toml` (root) | `crates/wp_race` workspace member + `wp_race` workspace dependency | new crate |
-| `apps/simcli/scenarios/race/*.ron` | three scenarios (simcli v2, no new fields): drag, corridor DQ, city sprint | scenario tests live there per `CLAUDE.md` |
-| `apps/simcli/golden/race_*/hashes.txt` | goldens for those scenarios (`[bless]` commits; re-blessed for v0.2.0 physics) | `goldens_match` requires one per scenario |
+| `apps/simcli/scenarios/race/*.ron` | four scenarios (simcli v2, no new fields): drag, corridor DQ, city sprint, city sprint with police (round 6b) | scenario tests live there per `CLAUDE.md` |
+| `apps/simcli/golden/race_*/hashes.txt` | goldens for those scenarios (`[bless]` commits; re-blessed for v0.2.0 physics; `race_city_sprint_police` added in round 6b) | `goldens_match` requires one per scenario |
 
-No edits to `wp_contracts`, `wp_world`, `wp_economy`, `wp_sim` or simcli code.
+No edits to `wp_contracts`, `wp_world`, `wp_economy`, `wp_opponent`, `wp_police`, `wp_sim` or
+simcli code. `wp_race` now depends (read-only) on `wp_opponent` and `wp_police`; neither is new
+to the workspace and `wp_race` is not reachable from `wp_wasm`.
 
 ## Perf numbers
 
@@ -143,9 +196,9 @@ No edits to `wp_contracts`, `wp_world`, `wp_economy`, `wp_sim` or simcli code.
 
 ## Known gaps
 
-See `crates/wp_race/README.md` → Known gaps. Main ones: nothing consumes the signals yet (needs
-F/E/G call sites), Outrun gap is straight-line, Delivery cargo mass not applied to the car,
-crews/territory not persisted, no AI entrants.
+See `crates/wp_race/README.md` → Known gaps. Main ones: the server does not call the lifecycle
+yet (F), race → police goes through a cloned `PoliceSystem` until `wp_sim` queues events (lead),
+crews/territory not persisted, simcli cannot drive AI entrants standalone (I/N).
 
 ## Lead feedback
 (Written by the integration lead.)
