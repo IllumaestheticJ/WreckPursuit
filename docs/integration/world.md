@@ -725,3 +725,16 @@ city scenarios without tracked vehicles in traffic's path are unchanged. `simcli
 apps/simcli/scenarios`: 47/47 pass. fmt, `clippy --workspace --all-targets -D warnings`,
 `cargo test --workspace`, wasm32 build of `wp_wasm`: pass.
 
+## Lead request W-D1 (weather in the game, 2026-10-19)
+Weather now runs in `wp_sim` (`Sim::weather()`); traffic should drive slower and leave longer
+gaps in rain and fog. `wp_world` has no hook for it yet (per-agent `DriverParams::speed_factor`
+exists, but nothing global), so please add one (no contract change):
+- `World::set_weather_modifiers(&mut self, m: TrafficWeather)` with a `wp_world`-owned
+  `TrafficWeather { desired_speed_mult, time_headway_mult, density_mult, hazard_sight_mult }`
+  (all 1.0 by default; `wp_world` need not depend on `wp_weather`). Apply in the IDM:
+  `v0 *= desired_speed_mult` (in `speed_factor_on` or where `seg.speed_limit * speed_factor_on`
+  is used), `T *= time_headway_mult`, density targets `*= density_mult`.
+- The lead will call it from `Sim::step_fixed` before `World::step`, filled from
+  `WeatherSim::traffic_modifiers()` (heavy rain 0.85–0.75 × speed / 1.4–1.8 × headway; fog
+  0.85–0.70 / 1.3–1.6, by intensity; `data/weather/effects.toml`).
+- Keep the default 1.0 bit-identical, so traffic goldens do not move.

@@ -587,3 +587,10 @@ wasm32-unknown-unknown -p wp_wasm`, `cargo run -p lint-determinism` (0 errors, n
 old code), goldens re-blessed, `tools/wasm-determinism/compare.sh` 45/45 native == wasm,
 `simcli determinism apps/simcli/scenarios` 45/45 deterministic. Nameplate check run by hand
 over the new files: clean.
+## Lead note: weather in the game (2026-10-19, `lead/weather-in-game`)
+Your `weather_at` hook is used as-is: `wp_sim` hands vehicles `wp_weather::WithWeather` with the
+interim `WetAsphalt` remap **off**, so `SurfaceConditions::from_local` drives wet grip, cold/ice,
+painted lines (D's `PaintedLine`) and aquaplaning. No change in `wp_vehicle` was needed.
+Measured in simcli: 100→0 braking 40.0 m dry vs 51.6 m soaked (debug_sedan, ABS); 33 m/s into a
+6 mm flooded stretch while steering: yaw rate 0.21 vs 0.37 rad/s on the merely wet road. The
+browser HUD reads `Telemetry::aquaplane` for its aquaplaning warning.

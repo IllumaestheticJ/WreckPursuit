@@ -3136,6 +3136,7 @@ dependencies = [
  "wp_net",
  "wp_police",
  "wp_sim",
+ "wp_weather",
  "wp_world",
 ]
 
@@ -4397,6 +4398,7 @@ dependencies = [
  "wp_math",
  "wp_police",
  "wp_vehicle",
+ "wp_weather",
  "wp_world",
 ]
 
@@ -4428,6 +4430,7 @@ dependencies = [
  "wp_net",
  "wp_police",
  "wp_sim",
+ "wp_weather",
  "wp_world",
 ]
 

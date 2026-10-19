@@ -20,6 +20,7 @@
 //! | scenario | `scenario_json()`, `scenario_result()` |
 //! | run (lead) | `run_result_json()`, `run_ledger_json()`, `run_account_json()`, `run_repair_continue()`, `debug_set_heat(entity, heat)`, `debug_park_near_police(entity, ahead_m)` — see [`run`] |
 //! | map (16) | `map_static_json()` once per city, `map_dynamic(player)` per frame — see [`map`] |
+//! | weather (lead) | `weather_choices()`, `scenario_with_weather(json, choice)`, `scenario_weather_choice(json)`, `city_chase_rain_json(car, mode, city_id)`, `weather_info()`, `weather_grid_meta()`, `weather_grid()`, `weather_spray()` — see [`weather`] |
 //! | audio (13) | `audio_library()`, `audio_frame(listener, events_json, focus)`, `audio_set_siren`, `audio_set_scanner_tier`, `audio_radio`, `audio_reset()` — see [`audio`] |
 
 #![warn(missing_docs)]
@@ -37,6 +38,7 @@ pub mod run;
 pub mod scenario;
 pub mod session;
 pub mod signals;
+pub mod weather;
 
 #[cfg(test)]
 mod run_tests;
@@ -460,6 +462,70 @@ pub fn world_info() -> Result<Vec<f32>, JsValue> {
             b(s.scripted()),
         ]
     })
+}
+
+// ----- weather -----------------------------------------------------------------------------
+
+/// The weather selector's choices as JSON `[[id, label], …]` ([`weather::CHOICES`]).
+#[wasm_bindgen]
+pub fn weather_choices() -> String {
+    json(&weather::CHOICES)
+}
+
+/// Scenario JSON with the weather of a selector choice (`"none"`, `"clear"`, `"overcast"`,
+/// `"rain"`, `"heavy_rain"`, `"fog"`, `"dynamic"`); the session must be restarted with it
+/// (weather is part of the scenario, so replays carry it).
+#[wasm_bindgen]
+pub fn scenario_with_weather(scenario_json: &str, choice: &str) -> Result<String, JsValue> {
+    let sc: simcli::Scenario = serde_json::from_str(scenario_json).map_err(err)?;
+    Ok(json(&weather::with_choice(sc, choice).map_err(err)?))
+}
+
+/// The selector choice matching a scenario's weather (`"none"`, a choice id, or `"custom"`).
+#[wasm_bindgen]
+pub fn scenario_weather_choice(scenario_json: &str) -> Result<String, JsValue> {
+    let sc: simcli::Scenario = serde_json::from_str(scenario_json).map_err(err)?;
+    Ok(weather::choice_of(&sc).to_string())
+}
+
+/// "Rainy night" city chase JSON: [`city_chase_city_json`] in a held downpour on a soaked road.
+#[wasm_bindgen]
+pub fn city_chase_rain_json(car: &str, mode: &str, city_id: &str) -> Result<String, JsValue> {
+    let mode = data::parse_mode(mode).map_err(err)?;
+    Ok(json(&weather::rainy_night(scenario::city_chase_in(
+        car,
+        mode,
+        scenario::city_spec(city_id),
+    ))))
+}
+
+/// Per-frame weather state ([`weather::info`], [`weather::INFO_STRIDE`] floats), local values at
+/// the session's first entity (the player).
+#[wasm_bindgen]
+pub fn weather_info() -> Result<Vec<f32>, JsValue> {
+    get(|s| {
+        let focus = s.entities().first().and_then(|id| s.vehicle(*id));
+        weather::info(s.sim(), focus)
+    })
+}
+
+/// Wetness grid placement `[origin_x, origin_y, cell_m, nx, ny]` (empty without weather).
+#[wasm_bindgen]
+pub fn weather_grid_meta() -> Result<Vec<f32>, JsValue> {
+    get(|s| weather::grid_meta(s.sim()))
+}
+
+/// Wetness grid, 2 bytes per cell (wetness × 255, standing water mm × 40); see
+/// [`weather::grid_bytes`]. Call at about 1 Hz.
+#[wasm_bindgen]
+pub fn weather_grid() -> Result<Vec<u8>, JsValue> {
+    get(|s| weather::grid_bytes(s.sim()))
+}
+
+/// Spray intensity 0..1 per vehicle, same order as `vehicle_states()` ([`weather::spray`]).
+#[wasm_bindgen]
+pub fn weather_spray() -> Result<Vec<f32>, JsValue> {
+    get(|s| weather::spray(s.sim()))
 }
 
 /// `Sim::state_hash()` as 16 hex digits.

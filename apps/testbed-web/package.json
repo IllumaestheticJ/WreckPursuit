@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit",
     "e2e": "node e2e/run.mjs",
     "e2e:cameras": "node e2e/cameras.mjs",
-    "e2e:audio-samples": "node e2e/audio_samples.mjs"
+    "e2e:audio-samples": "node e2e/audio_samples.mjs",
+    "e2e:weather": "node e2e/weather.mjs"
   },
   "dependencies": {
     "three": "0.180.0",

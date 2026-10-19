@@ -26,12 +26,14 @@ cargo build --target wasm32-unknown-unknown -p wp_wasm  # wasm check
 cd apps/testbed-web && npm run wasm                     # wasm-pack release package into src/wasm/pkg
 ```
 
-Dependencies are wasm32-clean: `simcli` (lib), `wp_world`, `postcard` (no_std + alloc), `serde_json`, `wasm-bindgen`.
+Dependencies are wasm32-clean: `simcli` (lib), `wp_world`, `wp_weather`, `postcard` (no_std + alloc), `serde_json`, `wasm-bindgen`.
 
 ## Perf
 Real vehicle + damage, headless Chromium (SwiftShader), release wasm: 0.09 / 0.62 / 3.0 ms of
 sim per 60 Hz frame at 1 / 8 / 24 cars; 0.27 ms in the 12×12 city with ~190 traffic agents. See
 `docs/integration/testbed.md`.
+Weather (`weather.rs`): +0.1 ms of sim per frame in heavy rain on the flat world (0.24 vs 0.14 ms,
+1 car, 62 500-cell grid); `weather_info` 0.005 ms, `weather_grid` 0.8 ms (called at 1 Hz).
 
 ## Known gaps
 - The end-of-run economy (`run.rs`) keeps the account in memory only (lost on reload); the lattice blob in `DamageReport` is empty (the live sim keeps the dents).

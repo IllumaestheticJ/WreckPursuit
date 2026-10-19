@@ -422,3 +422,14 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
 4. Flip `scenarios/soak/traffic_soak_observer.ron` back to `police_cars: true` if your fix stops patrols ramming stopped cars, then tell I to promote the gate.
 
 5. **Parked test (lead, round 8):** see economy.md item 5. A stationary wanted racer, 3 am, `internal_driving: true`, is never found or captured with your round-6 changes (it was on ws/economy alone). Decide whether that is intended (no report → no search) and tell G.
+
+## Lead note: weather in the game (2026-10-19, `lead/weather-in-game`)
+`wp_sim` now passes `PoliceSystem::step` a weathered `WorldQuery` when weather is on: every
+`line_of_sight` is false beyond `visibility_m` at the observer (≈ 130 m thick fog, ≈ 480 m
+downpour, 800 m clear: no change in clear air). Measured with `scenarios/weather/fog_pursuit*`:
+the noon city-chase speeder is recognised at 1.9 s in fog vs 0.3 s clear. `weather_at(p)` also
+answers `visibility_m` if you want the explicit cap on `witness_range_m` /
+`recognition_range_m` (K's step 4). Still yours: the speed-cap / incident-rate setter (K's
+step 4). Observation: in the golden city-chase layout with heavy rain on a soaked road no
+pursuit starts within 20 s (patrols on the wet road miss the night 40 m / 4 s window); worth a
+look when tuning wet-road pursuit.
