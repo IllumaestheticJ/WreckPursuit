@@ -86,13 +86,6 @@ pub fn audio_frame(listener: &[f32], events_json: &str, focus: u32) -> Result<St
         serde_json::from_str(events_json).map_err(err)?
     };
     with(|s| {
-        let s = &*s;
-        let sim = s.sim();
-        let states = sim.vehicle_states();
-        // Applied input and driver kind come from the sim vehicle itself, so AI racers, police
-        // units and physical traffic (spawned by the sim, not the session) are heard truthfully.
-        let vehicles: BTreeMap<EntityId, &wp_sim::SimVehicle> =
-            sim.vehicles().iter().map(|v| (v.id, v)).collect();
         AUDIO.with(|a| -> Result<String, String> {
             let mut a = a.borrow_mut();
             if a.is_none() {
@@ -100,44 +93,63 @@ pub fn audio_frame(listener: &[f32], events_json: &str, focus: u32) -> Result<St
                 *a = Some(AudioDirector::new(lib, AUDIO_SEED));
             }
             let d = a.as_mut().expect("just created");
-            let mut inputs: Vec<VehicleAudioInput> = Vec::with_capacity(states.len());
-            for (id, st) in &states {
-                let Some(v) = vehicles.get(id) else {
-                    continue;
-                };
-                if !d.has_car(&v.car_id) {
-                    match s.car(*id) {
-                        Some(car) => d.register_car(car),
-                        None => match crate::data::load_car(&v.car_id) {
-                            Ok(car) => d.register_car(&car),
-                            // Unknown car: skip it rather than silencing everything.
-                            Err(_) => continue,
-                        },
-                    }
-                }
-                inputs.push(VehicleAudioInput {
-                    entity: *id,
-                    car_id: &v.car_id,
-                    state: st,
-                    throttle: v.input.throttle,
-                    horn: v.input.horn,
-                    siren: v.input.siren,
-                    road_rumble: s.ffb(*id).map(|f| f.road_rumble).unwrap_or(0.0),
-                    kind: driver_kind(v.kind),
-                });
-            }
-            let commands = d.update(&AudioFrame {
-                tick: s.tick(),
-                listener: lis,
-                focus: (focus != 0).then_some(EntityId(focus)),
-                vehicles: &inputs,
-                events: &events,
-            });
+            let focus = (focus != 0).then_some(EntityId(focus));
+            let commands = frame_commands(s, d, lis, focus, &events);
             Ok(json(&FrameOut {
                 commands: &commands,
                 stats: d.stats(),
             }))
         })
+    })
+}
+
+/// One director frame against the live session (native-testable core of [`audio_frame`]).
+/// Applied input and driver kind come from each sim vehicle, so AI racers, police units and
+/// physical traffic (spawned by the sim, not the session) are heard truthfully. Cars the
+/// director does not know yet are registered from the session or the embedded data; an
+/// unknown car is skipped rather than silencing everything.
+pub(crate) fn frame_commands(
+    s: &crate::session::Session,
+    d: &mut AudioDirector,
+    listener: Listener,
+    focus: Option<EntityId>,
+    events: &[SimEvent],
+) -> Vec<AudioCommand> {
+    let sim = s.sim();
+    let states = sim.vehicle_states();
+    let vehicles: BTreeMap<EntityId, &wp_sim::SimVehicle> =
+        sim.vehicles().iter().map(|v| (v.id, v)).collect();
+    let mut inputs: Vec<VehicleAudioInput> = Vec::with_capacity(states.len());
+    for (id, st) in &states {
+        let Some(v) = vehicles.get(id) else {
+            continue;
+        };
+        if !d.has_car(&v.car_id) {
+            match s.car(*id) {
+                Some(car) => d.register_car(car),
+                None => match crate::data::load_car(&v.car_id) {
+                    Ok(car) => d.register_car(&car),
+                    Err(_) => continue,
+                },
+            }
+        }
+        inputs.push(VehicleAudioInput {
+            entity: *id,
+            car_id: &v.car_id,
+            state: st,
+            throttle: v.input.throttle,
+            horn: v.input.horn,
+            siren: v.input.siren,
+            road_rumble: s.ffb(*id).map(|f| f.road_rumble).unwrap_or(0.0),
+            kind: driver_kind(v.kind),
+        });
+    }
+    d.update(&AudioFrame {
+        tick: s.tick(),
+        listener,
+        focus,
+        vehicles: &inputs,
+        events,
     })
 }
 
@@ -213,5 +225,99 @@ fn driver_kind(k: wp_sim::VehicleKind) -> DriverKind {
         wp_sim::VehicleKind::AiRacer => DriverKind::AiRacer,
         wp_sim::VehicleKind::Police => DriverKind::Police,
         wp_sim::VehicleKind::Traffic => DriverKind::Traffic,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! The bridge against real lead-run-5 police units and physical traffic in the city.
+    use super::*;
+    use crate::scenario::free_drive;
+    use crate::session::Session;
+    use wp_audio::types::slot;
+    use wp_audio::{Bus, Priority};
+    use wp_contracts::{DamageMode, VehicleInput};
+
+    /// A speeding player in the city: police units arrive as sim vehicles with their siren on,
+    /// the bridge gives them siren voices, traffic cars get low-priority engines, and nothing
+    /// is skipped as unregistered.
+    #[test]
+    fn city_police_sirens_and_traffic_engines_are_heard() {
+        let mut s = Session::new(free_drive("debug_sedan", DamageMode::Arcade, true), false)
+            .expect("city session");
+        let player = EntityId(1);
+        let mut d = AudioDirector::new(AudioLibrary::embedded().unwrap(), AUDIO_SEED);
+        let (mut police_siren_on, mut siren_voice, mut traffic_engine) = (false, false, false);
+        let mut police_ids = std::collections::BTreeSet::new();
+        // Both show up about 17 s in (seed 1); 30 s of sim time leaves margin.
+        for _ in 0..60 * 30 {
+            s.set_input(
+                player,
+                VehicleInput {
+                    throttle: 1.0,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            s.step(1.0 / 60.0);
+            let events = s.drain_events();
+            let sim = s.sim();
+            for v in sim.vehicles() {
+                if v.kind == wp_sim::VehicleKind::Police {
+                    police_ids.insert(v.id.0);
+                    police_siren_on |= v.input.siren;
+                }
+            }
+            // Listener rides with the player, like the chase camera.
+            let pos = sim
+                .vehicle_states()
+                .iter()
+                .find(|(id, _)| *id == player)
+                .map(|(_, st)| st.pos)
+                .unwrap_or([0.0; 3]);
+            let lis = Listener {
+                pos,
+                vel: [0.0; 3],
+                forward: [0.0, 1.0, 0.0],
+                up: [0.0, 0.0, 1.0],
+            };
+            let traffic: std::collections::BTreeSet<u32> = sim
+                .vehicles()
+                .iter()
+                .filter(|v| v.kind == wp_sim::VehicleKind::Traffic)
+                .map(|v| v.id.0)
+                .collect();
+            for c in frame_commands(&s, &mut d, lis, Some(player), &events) {
+                if let AudioCommand::Play {
+                    voice,
+                    bus,
+                    priority,
+                    ..
+                } = c
+                {
+                    let is_siren = (slot::SIREN..slot::SIREN + 8).contains(&voice.slot);
+                    if is_siren && bus == Bus::Police && police_ids.contains(&voice.entity) {
+                        siren_voice = true;
+                    }
+                    if bus == Bus::Engine
+                        && traffic.contains(&voice.entity)
+                        && priority == Priority::Low
+                    {
+                        traffic_engine = true;
+                    }
+                }
+            }
+            assert_eq!(d.stats().unregistered, 0, "every sim car has audio");
+            if siren_voice && traffic_engine {
+                break;
+            }
+        }
+        assert!(!police_ids.is_empty(), "police units became sim vehicles");
+        assert!(police_siren_on, "a pursuing unit drives with its siren on");
+        assert!(siren_voice, "police sirens get voices on the police bus");
+        assert!(
+            traffic_engine,
+            "physical traffic engines play at low priority"
+        );
     }
 }

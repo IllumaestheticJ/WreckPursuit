@@ -49,7 +49,7 @@ tests. Check: `node apps/testbed-web/e2e/audio.mjs` (after the wasm build).
 |---|---|---|---|
 | E (06, police) | a priority on `PoliceEvent::Radio` (A-2, for v0.3.0's typed `PoliceEvent`) | scanner ordering / chop | **Radio lines are decoded now** (`wp_police::PoliceEvent::from_sim_event`); priority = Dispatch / Pursuit-while-pursuing / Routine heuristic |
 | E (06) / G (08) | which scanner tier the player owns (A-3) | tier delay | caller sets the tier; delays equal `data/police/tools.toml` `scanner_delay_s` (test-enforced) |
-| Lead (run 5) / E (06) | police units as sim vehicles with `VehicleKind::Police` and `VehicleInput::siren` from the unit's command (pattern: A-6) | sirens on AI units | ready: the bridge reads each sim vehicle's own input + kind; `DriverKind::Police` makes any car siren-capable (Auto) |
+| Lead (run 5) / E (06) | police units as sim vehicles with `VehicleKind::Police` and `VehicleInput::siren` from the unit's command (pattern: A-6) | sirens on AI units | **done** (run 5 merged): verified by `wp_wasm` test `audio::tests::city_police_sirens_and_traffic_engines_are_heard`; pattern still Auto (A-6 open) |
 | Lead (`wp_sim`) | contacts while sliding (A-4) | scrape loops | scrapes play from the few events above 50 N·s; the sideswipe scenario keeps the expectation pending |
 | B (03) | start emitting `GlassShattered` / `RegionDamaged` (v0.2.0) | exact glass timing, panel rattle | both handled; until B emits, glass is inferred from contacts and nothing rattles |
 | D (05) | traffic agents in a snapshot (`TrafficAgentSnapshot`, D #3) | far (kinematic) traffic sound | near-player physical traffic (`VehicleKind::Traffic` sim vehicles) is heard at `engine.traffic_gain` and Low priority; kinematic agents stay silent |
@@ -99,6 +99,12 @@ tests. Check: `node apps/testbed-web/e2e/audio.mjs` (after the wasm build).
   registers cars the session did not spawn (police / traffic) from embedded data
   (`wp_wasm::data::load_car`); an unknown car is skipped instead of failing the whole frame.
 - Police radio: already decoded from `SimEvent::PoliceEvent` (`Radio`, pursuits, `SpikeHit`).
+- Verified against lead run 5 (merged into `ws/audio`): in the city free-drive (seed 1) a
+  full-throttle player draws a pursuit about 17 s in; the pursuing `sentinel_cruiser` units
+  drive with `siren: true` and get siren voices on the Police bus, `debug_sedan` traffic cars get
+  Low-priority engine voices, and `stats.unregistered` stays 0 (every city car is loaded from the
+  embedded data). The bridge core is now `audio::frame_commands` (native-testable); the test
+  takes ~75 s in a debug build because it runs the full city physics.
 
 ## Perf numbers
 | Measurement | Machine | Native | Browser | Budget |
