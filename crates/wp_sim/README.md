@@ -23,6 +23,14 @@ every contact. Disabling the vehicle system (`set_systems`) also disables the ch
 - `Sim::last_tick_event_count`, `Sim::node_positions(id)`, `Sim::entity_hashes`.
 - Scenario-level tests live in `apps/simcli` (see `docs/TESTING.md`).
 
+## City: police and traffic as vehicles (lead run 5)
+- `set_world(World)` also rebuilds police on the city (`PoliceSystem::for_world`).
+- `set_police_car(car)`: AI police car units become `VehicleKind::Police` vehicles driven by
+  `wp_police` (`police_link.rs`). `set_traffic_car(car)` (after `set_world`): traffic promoted to
+  physical LOD becomes `VehicleKind::Traffic` vehicles driven by `wp_world` (`traffic_link.rs`).
+- Slot reserves: police stop spawning at 64 − 16 vehicles, traffic at 64 − 24.
+- `police()` exposes the police system; `examples/police_probe.rs` prints a chase timeline.
+
 ## Known gaps
 - Contacts reach `wp_damage`, but damage is still the prompt-01 stub until workstream 03 merges.
 - Static geometry is boxes only (`add_static_box`, TB-3); simcli/testbed scenarios do not create them yet.
