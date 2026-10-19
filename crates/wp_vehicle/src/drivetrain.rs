@@ -1,9 +1,8 @@
 //! Gearbox (manual / automatic with a load-based schedule, kickdown, corner hold, rev-matched
 //! clutch shifts and auto-reverse; power-on shifts behind a torque converter), clutch
-//! engagement, torque converter, and
-//! differential torque transfer (open, clutch-type LSD, locked).
+//! engagement and torque converter. Differentials live in [`crate::diff`].
 
-use wp_contracts::{DiffDef, DrivetrainDef};
+use wp_contracts::DrivetrainDef;
 
 use crate::math::lerp;
 
@@ -465,31 +464,6 @@ impl Converter {
     }
 }
 
-/// Differential torque transfer `X` for one axle: the left wheel receives `share_l − X`, the
-/// right `share_r + X`. `axle_torque` is the torque entering the diff (for ramp selection),
-/// `k_eq` the equalising gain (N·m per rad/s) that would lock the pair in a few steps.
-pub fn diff_transfer(
-    diff: &DiffDef,
-    axle_torque: f32,
-    omega_l: f32,
-    omega_r: f32,
-    k_eq: f32,
-) -> f32 {
-    let lock = match *diff {
-        DiffDef::Open => return 0.0,
-        DiffDef::Locked => f32::MAX,
-        DiffDef::Lsd {
-            preload_nm,
-            ramp_power,
-            ramp_coast,
-        } => {
-            let driving = axle_torque * (omega_l + omega_r) >= 0.0;
-            preload_nm + axle_torque.abs() * if driving { ramp_power } else { ramp_coast }
-        }
-    };
-    (k_eq * (omega_l - omega_r)).clamp(-lock, lock)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -763,21 +737,5 @@ mod tests {
         assert!(tt <= tp * 1.0001 && tp < 250.0);
         let (tp, tt) = c.torques(w, w * 1.1);
         assert!(tp < 0.0 && tt == tp, "over-run brakes the engine");
-    }
-
-    #[test]
-    fn diff_types() {
-        assert_eq!(diff_transfer(&DiffDef::Open, 1000.0, 10.0, 0.0, 100.0), 0.0);
-        let lsd = DiffDef::Lsd {
-            preload_nm: 50.0,
-            ramp_power: 0.5,
-            ramp_coast: 0.2,
-        };
-        assert_eq!(diff_transfer(&lsd, 1000.0, 10.0, 0.0, 1000.0), 550.0);
-        assert_eq!(diff_transfer(&lsd, -1000.0, 10.0, 0.0, 1000.0), 250.0);
-        assert_eq!(
-            diff_transfer(&DiffDef::Locked, 1000.0, 10.0, 0.0, 100.0),
-            1000.0
-        );
     }
 }
