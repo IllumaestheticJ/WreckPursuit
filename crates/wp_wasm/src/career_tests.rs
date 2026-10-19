@@ -1,0 +1,479 @@
+//! Native tests of the browser career (`crate::career`): save → load, exact repairs of the
+//! stored lattice, buy / sell / mod flows, the impound lot, heat carry-over, and the full
+//! loop run → captured → garage → repair → new run with the repaired car.
+
+use wp_contracts::{DamageMode, DamageSim, EntityId, VehicleInput};
+use wp_damage::barrier::{run_barrier, ImpactKind};
+use wp_damage::DamageModel;
+use wp_economy::{CarLocation, CarUid, Condition, Economy, RepairOption, RunEnd, ShopKind};
+
+use crate::career::{Career, ShopRequest};
+use crate::run::RunOutcome;
+use crate::scenario::{city_chase_in, free_drive, procedural_city};
+use crate::session::Session;
+
+fn econ() -> Economy {
+    crate::garage::with_economy(|e| e.clone())
+}
+
+/// A career with `cash` and one car of `def_id` (bought used), active.
+fn career_with(def_id: &str, cash: i64, mode: DamageMode) -> (Career, CarUid) {
+    let mut c = Career::new(econ(), mode);
+    c.profile_mut().account.cash = cash;
+    let uid = c.buy_car(def_id, Condition::Used).unwrap();
+    c.set_active(uid).unwrap();
+    (c, uid)
+}
+
+fn player(s: &Session) -> EntityId {
+    s.entities()[0]
+}
+
+/// Dent the player's car as a frontal barrier hit at `kmh` would.
+fn crash(s: &mut Session, kmh: f32) {
+    let id = player(s);
+    let car = s.car(id).unwrap().clone();
+    let mode = s.sim().mode_table().clone();
+    let (m, _) = run_barrier(&car, &mode, ImpactKind::Frontal, kmh, 0.0, 0.3, 1);
+    s.debug_sim_mut()
+        .unwrap()
+        .damage_mut(id)
+        .unwrap()
+        .restore_full(&m.save_full())
+        .unwrap();
+}
+
+fn player_damage(s: &Session) -> &DamageModel {
+    &s.vehicle(player(s)).unwrap().damage
+}
+
+/// A flat free drive with the career car, a few ticks, a crash, back to the garage.
+fn drive_and_crash(c: &mut Career, kmh: f32) {
+    let mut s = c
+        .start_run(free_drive("ignored", DamageMode::Arcade, false))
+        .unwrap();
+    s.run_ticks(10);
+    crash(&mut s, kmh);
+    s.run_ticks(2);
+    let close = c.finish_run(&mut s).unwrap();
+    assert_eq!(close.end, RunEnd::Free);
+}
+
+#[test]
+fn a_run_uses_the_career_car_and_carries_its_damage_over() {
+    let (mut c, uid) = career_with("kestrel_ts", 30_000, DamageMode::Arcade);
+    let day0 = c.profile().account.day;
+    drive_and_crash(&mut c, 35.0);
+    assert_eq!(c.profile().account.day, day0 + 1, "a run is one night");
+    let car = c.profile().account.car(uid).unwrap().clone();
+    assert!(car.damage.health < 1.0, "{:?}", car.damage.health);
+    assert!(!car.damage.outstanding.lines.is_empty());
+    let saved = c.lattice(uid).unwrap().expect("dented lattice saved");
+
+    // The next run (another scenario) starts with exactly that damage, in the career's car.
+    let sc = free_drive("debug_sedan", DamageMode::Simulation, false);
+    let s = c.start_run(sc).unwrap();
+    assert_eq!(s.car(player(&s)).unwrap().def.id, "kestrel_ts");
+    assert_eq!(s.mode(), DamageMode::Arcade, "the career's mode wins");
+    assert_eq!(player_damage(&s).save_full(), saved);
+    assert!(s.is_career());
+}
+
+#[test]
+fn save_load_gives_the_same_state() {
+    let (mut c, uid) = career_with("kestrel_ts", 40_000, DamageMode::Arcade);
+    c.install_mod(uid, "engine_intake_1").unwrap();
+    c.insure(uid, "basic").unwrap();
+    let beater = c.buy_car("vireo_xs", Condition::Worn).unwrap();
+    drive_and_crash(&mut c, 35.0);
+    let text = c.save_json();
+    let back = Career::load_json(econ(), &text).unwrap();
+    assert_eq!(back.profile(), c.profile());
+    assert_eq!(back.save_json(), text, "save → load → save is stable");
+    assert!(back.profile().account.car(beater).is_some());
+    assert_eq!(back.lattice(uid).unwrap(), c.lattice(uid).unwrap());
+    // And through the browser slot (the testbed's localStorage path).
+    crate::career::set_career(None);
+    crate::career::career_load_json(&text).unwrap();
+    assert_eq!(crate::career::career_save_json().unwrap(), text);
+    crate::career::set_career(None);
+    // Garbage and future versions are refused.
+    assert!(Career::load_json(econ(), "{}").is_err());
+    let mut v: serde_json::Value = serde_json::from_str(&text).unwrap();
+    v["version"] = 99.into();
+    assert!(Career::load_json(econ(), &v.to_string()).is_err());
+}
+
+#[test]
+fn full_repair_restores_the_car_exactly() {
+    let (mut c, uid) = career_with("kestrel_ts", 40_000, DamageMode::Arcade);
+    drive_and_crash(&mut c, 35.0);
+    let quote = c.quote(uid, &ShopRequest::parse("").unwrap()).unwrap();
+    let cash = c.profile().account.cash;
+    c.repair(uid, &ShopRequest::parse("").unwrap()).unwrap();
+    assert_eq!(c.profile().account.cash, cash - quote.player_pays);
+    let car = c.profile().account.car(uid).unwrap();
+    assert!(car.damage.is_pristine());
+    assert_eq!(car.damage.health, 1.0);
+    assert!(
+        c.lattice(uid).unwrap().is_none(),
+        "pristine body: no blob kept"
+    );
+
+    // The next run's car is bit-for-bit a new one.
+    let s = c
+        .start_run(free_drive("x", DamageMode::Arcade, false))
+        .unwrap();
+    let fresh = {
+        let loaded = s.car(player(&s)).unwrap();
+        DamageModel::new(&loaded.lattice, &loaded.materials)
+    };
+    assert_eq!(
+        player_damage(&s).save_full().snapshot,
+        fresh.save_full().snapshot
+    );
+    assert_eq!(player_damage(&s).summary().health, 1.0);
+}
+
+#[test]
+fn partial_repair_applies_exactly_the_paid_items() {
+    let (mut c, uid) = career_with("kestrel_ts", 40_000, DamageMode::Arcade);
+    drive_and_crash(&mut c, 40.0);
+    let car = c.profile().account.car(uid).unwrap().clone();
+    let lines = car.damage.outstanding.lines.clone();
+    assert!(lines.len() >= 2, "{lines:?}");
+    let items = vec![lines[0].item];
+    let before = c.lattice(uid).unwrap().unwrap();
+
+    // Expected: the saved model with `apply_repair(items)`, as wp_damage defines it.
+    let mut expected = c.damage_model(&car).unwrap();
+    expected.apply_repair(&items);
+
+    let req = ShopRequest {
+        option: RepairOption::RepairSelected(items.clone()),
+        district: Some("Port".into()),
+        shop: ShopKind::Crooked,
+    };
+    let q = c.quote(uid, &req).unwrap();
+    assert_eq!(q.lines.len(), 1);
+    let cash = c.profile().account.cash;
+    c.repair(uid, &req).unwrap();
+    assert_eq!(c.profile().account.cash, cash - q.player_pays);
+    let after = c.lattice(uid).unwrap().unwrap();
+    assert_ne!(after, before);
+    assert_eq!(after, expected.save_full());
+    let car = c.profile().account.car(uid).unwrap();
+    assert!(car
+        .damage
+        .outstanding
+        .lines
+        .iter()
+        .all(|l| l.item != items[0]));
+    assert!(car.damage.health > 0.0);
+
+    // Paying for every remaining item one by one ends pristine, like a full repair.
+    let rest: Vec<_> = car
+        .damage
+        .outstanding
+        .lines
+        .iter()
+        .map(|l| l.item)
+        .collect();
+    let req = ShopRequest {
+        option: RepairOption::RepairSelected(rest),
+        district: None,
+        shop: ShopKind::Legit,
+    };
+    c.repair(uid, &req).unwrap();
+    let car = c.profile().account.car(uid).unwrap();
+    assert!(car.damage.outstanding.lines.is_empty(), "{:?}", car.damage);
+    assert!(
+        (car.damage.health - 1.0).abs() < 1e-3,
+        "{}",
+        car.damage.health
+    );
+}
+
+#[test]
+fn buy_sell_and_mod_flows() {
+    let mut c = Career::new(econ(), DamageMode::Arcade);
+    let start = c.profile().account.cash;
+    assert!(c.start_blocker().is_some(), "no car yet");
+    // The dealer: street roster only, cheapest first; prices sit in the class bands.
+    let dealer = c.dealer().to_vec();
+    assert!(dealer.iter().all(|d| !d.def_id.starts_with("debug_")));
+    assert!(dealer.iter().all(|d| !d.def_id.starts_with("sentinel_")));
+    assert!(dealer
+        .windows(2)
+        .all(|w| w[0].price_worn <= w[1].price_worn));
+    let beater = dealer
+        .iter()
+        .find(|d| d.def_id == "junkyard_beater")
+        .unwrap()
+        .clone();
+    assert!(
+        beater.price_worn < start,
+        "a new player can afford a beater"
+    );
+
+    let uid = c.buy_car("junkyard_beater", Condition::Worn).unwrap();
+    assert_eq!(c.profile().account.cash, start - beater.price_worn);
+    assert_eq!(
+        c.profile().account.active_car,
+        Some(uid),
+        "first car becomes active"
+    );
+    assert!(c.start_blocker().is_none());
+    assert!(c.buy_car("sentinel_cruiser", Condition::New).is_err());
+    assert!(
+        c.buy_car("lucciola_350", Condition::New).is_err(),
+        "too expensive"
+    );
+
+    // Mods: install shows the stat delta the tree promised; the run drives the modded car.
+    c.profile_mut().account.cash = 20_000;
+    let tree = c.mod_tree(uid).unwrap();
+    let intake = tree
+        .mods
+        .iter()
+        .find(|m| m.id == "engine_intake_1")
+        .unwrap();
+    assert!(intake.allowed && !intake.installed, "{intake:?}");
+    let promised = intake.stats_after.clone().unwrap();
+    let cash = c.profile().account.cash;
+    c.install_mod(uid, "engine_intake_1").unwrap();
+    assert_eq!(c.profile().account.cash, cash - intake.price as i64);
+    let tree = c.mod_tree(uid).unwrap();
+    assert_eq!(tree.stats, promised);
+    let mut s = c
+        .start_run(free_drive("x", DamageMode::Arcade, false))
+        .unwrap();
+    let base = crate::data::load_car("junkyard_beater").unwrap();
+    let driven = s.car(player(&s)).unwrap();
+    assert_ne!(
+        driven.def.engine, base.def.engine,
+        "the run's car carries the mod"
+    );
+    c.finish_run(&mut s).unwrap();
+
+    // Uninstall refunds 40 %.
+    let cash = c.profile().account.cash;
+    c.uninstall_mod(uid, "engine_intake_1").unwrap();
+    let refund = (0.4 * intake.price as f32).round() as i64;
+    assert_eq!(c.profile().account.cash, cash + refund);
+
+    // A cage changes the structure: refused while the body is dented, fine once repaired.
+    drive_and_crash(&mut c, 30.0);
+    let cage = c
+        .mod_tree(uid)
+        .unwrap()
+        .mods
+        .into_iter()
+        .find(|m| m.id == "prot_cage_1")
+        .unwrap();
+    if c.lattice(uid).unwrap().is_some() && !cage.allowed {
+        assert!(
+            cage.reason.as_deref().unwrap().contains("repair"),
+            "{cage:?}"
+        );
+        assert!(c.install_mod(uid, "prot_cage_1").is_err());
+        c.repair(uid, &ShopRequest::parse("").unwrap()).unwrap();
+    }
+    c.install_mod(uid, "prot_cage_1").unwrap();
+    let car = c.profile().account.car(uid).unwrap().clone();
+    let loaded = c.loaded_car(&car).unwrap();
+    assert!(
+        loaded.lattice.beams.len() > base.lattice.beams.len(),
+        "cage beams added"
+    );
+    assert!(
+        loaded.def.mass_kg > base.def.mass_kg,
+        "durability adds mass"
+    );
+
+    // Sell: the dealer's price for it now.
+    let price = c.economy().sale_price(&car);
+    let cash = c.profile().account.cash;
+    c.sell_car(uid).unwrap();
+    assert_eq!(c.profile().account.cash, cash + price);
+    assert!(c.profile().account.garage.is_empty());
+    assert!(c.lattice(uid).unwrap().is_none());
+    assert!(c.start_blocker().is_some());
+}
+
+#[test]
+fn economy_floor_always_gives_a_car() {
+    let mut c = Career::new(econ(), DamageMode::Arcade);
+    c.profile_mut().account.cash = 300;
+    let v = c.view();
+    let (id, price) = v.floor_car.clone().unwrap();
+    assert_eq!(id, "junkyard_beater");
+    assert_eq!(price, 300, "all the cash when the beater costs more");
+    c.floor_car().unwrap();
+    assert_eq!(c.profile().account.cash, 0);
+    assert!(c.start_blocker().is_none());
+    assert!(c.view().floor_car.is_none());
+    assert!(c.floor_car().is_err(), "only with no usable car");
+}
+
+/// A career city chase with the player parked in front of a patrol car at `heat`.
+fn career_chase_parked(c: &mut Career, heat: f32) -> Session {
+    let mut sc = city_chase_in("ignored", DamageMode::Arcade, procedural_city());
+    sc.entities[0].speed_mps = 0.0;
+    let mut s = c.start_run(sc).unwrap();
+    let id = player(&s);
+    for _ in 0..240 * 5 {
+        s.run_ticks(1);
+        if s.debug_park_near_police(id, 14.0).is_ok() {
+            s.debug_sim_mut().unwrap().police_mut().set_heat(id, heat);
+            return s;
+        }
+    }
+    panic!("no police car spawned");
+}
+
+fn brake_until_settled(s: &mut Session, max_s: u64) {
+    let id = player(s);
+    for _ in 0..240 * max_s {
+        let _ = s.set_input(
+            id,
+            VehicleInput {
+                brake: 1.0,
+                ..Default::default()
+            },
+        );
+        s.run_ticks(1);
+        if s.run().and_then(|r| r.report()).is_some() {
+            return;
+        }
+    }
+    panic!("nothing settled in {max_s} s");
+}
+
+#[test]
+fn captured_garage_repair_and_a_new_run_with_the_repaired_car() {
+    let (mut c, uid) = career_with("kestrel_ts", 25_000, DamageMode::Arcade);
+    let mut s = career_chase_parked(&mut c, 30.0);
+    crash(&mut s, 35.0);
+    brake_until_settled(&mut s, 60);
+    let r = s.run().unwrap().report().unwrap().clone();
+    assert_eq!(r.outcome, RunOutcome::Captured, "{r:?}");
+    let cash_after_bust = r.cash_after;
+    // Autosave during the run sees the bust and the live damage.
+    let live = c.live_profile(Some(&s));
+    assert_eq!(live.account.cash, cash_after_bust);
+    assert!(live.lattices.contains_key(&uid.0));
+
+    // Back to the garage: the bust is in the career, the car is in the pound, dented.
+    let close = c.finish_run(&mut s).unwrap();
+    assert_eq!(close.end, RunEnd::Captured);
+    assert_eq!(close.carried_heat, 0.0, "a capture clears heat");
+    assert!(!s.is_career());
+    let a = &c.profile().account;
+    assert_eq!(a.heat_history.captures, 1);
+    let car = a.car(uid).unwrap().clone();
+    assert!(matches!(car.location, CarLocation::Impound { .. }));
+    let why = c.start_blocker();
+    assert!(
+        why.as_deref().unwrap_or("").contains("pound"),
+        "{why:?} {car:?}"
+    );
+    assert!(c
+        .profile()
+        .ledger
+        .iter()
+        .any(|e| matches!(e.reason, wp_economy::EventReason::Fine { .. })));
+    let view = c.view();
+    let imp = view.cars[0].impound.unwrap();
+    assert!(imp.fee > 0);
+
+    // A night in the pound costs a day of storage.
+    c.next_night().unwrap();
+    let imp2 = c.view().cars[0].impound.unwrap();
+    assert_eq!(imp2.fee, imp.fee + imp.fee_per_day);
+    assert_eq!(imp2.days_until_auction + 1, imp.days_until_auction);
+
+    // Release (damage comes with it), repair, drive again: the car is as new.
+    let cash = c.profile().account.cash;
+    let fee = c.release(uid).unwrap();
+    assert_eq!(fee, imp2.fee);
+    assert_eq!(c.profile().account.cash, cash - fee);
+    assert!(c.lattice(uid).unwrap().is_some(), "dents survive the pound");
+    c.repair(uid, &ShopRequest::parse("").unwrap()).unwrap();
+    assert!(c.start_blocker().is_none());
+    let s = c
+        .start_run(free_drive("x", DamageMode::Arcade, false))
+        .unwrap();
+    assert_eq!(s.car(player(&s)).unwrap().def.id, "kestrel_ts");
+    assert_eq!(player_damage(&s).summary().health, 1.0);
+    let fresh = {
+        let l = s.car(player(&s)).unwrap();
+        DamageModel::new(&l.lattice, &l.materials)
+    };
+    assert_eq!(
+        player_damage(&s).save_full().snapshot,
+        fresh.save_full().snapshot
+    );
+}
+
+#[test]
+fn auction_takes_an_unclaimed_car() {
+    let (mut c, uid) = career_with("vireo_xs", 10_000, DamageMode::Arcade);
+    c.profile_mut().account.car_mut(uid).unwrap().location = CarLocation::Impound {
+        since_day: c.profile().account.day,
+        level: wp_economy::WantedLevel::L1,
+    };
+    let days = c.view().cars[0].impound.unwrap().days_until_auction;
+    for _ in 0..=days {
+        c.next_night().unwrap();
+    }
+    assert!(c.profile().account.car(uid).is_none(), "auctioned");
+    assert!(c.view().floor_car.is_some(), "the floor car is offered");
+}
+
+#[test]
+fn heat_carries_into_the_next_night() {
+    let (mut c, _) = career_with("kestrel_ts", 20_000, DamageMode::Arcade);
+    let mut sc = city_chase_in("ignored", DamageMode::Arcade, procedural_city());
+    sc.entities[0].speed_mps = 0.0;
+    let mut s = c.start_run(sc).unwrap();
+    let id = player(&s);
+    s.run_ticks(1);
+    s.debug_sim_mut().unwrap().police_mut().set_heat(id, 40.0);
+    s.run_ticks(1);
+    let close = c.finish_run(&mut s).unwrap();
+    assert_eq!(close.end, RunEnd::Free);
+    assert!(
+        (close.carried_heat - 20.0).abs() < 0.5,
+        "{}",
+        close.carried_heat
+    );
+    let mut sc = city_chase_in("ignored", DamageMode::Arcade, procedural_city());
+    sc.entities[0].speed_mps = 0.0;
+    let s = c.start_run(sc).unwrap();
+    let heat = s.sim().police().racer(player(&s)).map(|r| r.heat).unwrap();
+    assert!((heat - close.carried_heat).abs() < 1e-3, "{heat}");
+    // Flat free drive has no police: no heat there.
+    let mut s = s;
+    c.finish_run(&mut s).unwrap();
+}
+
+#[test]
+fn career_runs_lock_the_mode_and_a_new_session_ends_the_run() {
+    let (mut c, _) = career_with("kestrel_ts", 20_000, DamageMode::Simulation);
+    let mut s = c
+        .start_run(free_drive("x", DamageMode::Arcade, false))
+        .unwrap();
+    assert_eq!(s.mode(), DamageMode::Simulation);
+    assert!(s.set_mode(DamageMode::Arcade).is_err());
+    assert!(
+        c.buy_car("vireo_xs", Condition::Worn).is_err(),
+        "garage waits for the run"
+    );
+    let close = c.finish_run(&mut s).unwrap();
+    assert_eq!(close.end, RunEnd::Free);
+    assert!(
+        s.set_mode(DamageMode::Arcade).is_ok(),
+        "plain session again"
+    );
+}

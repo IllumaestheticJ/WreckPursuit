@@ -90,6 +90,9 @@ pub struct Session {
     outcome: Option<RunSummary>,
     /// The player's economy (live sessions with police; see [`crate::run`]).
     run: Option<PlayerRun>,
+    /// This is a career run (machine G, [`crate::career`]): the player drives a career car
+    /// and the account belongs to the career.
+    career: bool,
 }
 
 fn opts(systems: Option<Selection>) -> RunOptions {
@@ -126,6 +129,7 @@ impl Session {
         scripted: bool,
         systems: Option<Selection>,
         playback: Option<Replay>,
+        data: &dyn simcli::data::DataSource,
     ) -> Result<Self, String> {
         let load_city = sc.city != CitySpec::Flat;
         let BuiltSim {
@@ -134,7 +138,7 @@ impl Session {
             cars,
             selection,
             ..
-        } = build_sim(&sc, mem_data(), &opts(systems)).map_err(|e| e.to_string())?;
+        } = build_sim(&sc, data, &opts(systems)).map_err(|e| e.to_string())?;
         let log = Replay::new(&sc, &selection.to_string(), ids.len());
         let n = ids.len();
         // The player's economy: live (not replayed, not scripted) sessions with police.
@@ -156,6 +160,7 @@ impl Session {
         };
         Ok(Self {
             run,
+            career: false,
             script_end: if scripted { sc.ticks() } else { 0 },
             mode: sc.mode,
             sc,
@@ -188,7 +193,17 @@ impl Session {
     /// Live session. `scripted` = drive every entity by its scenario driver until
     /// `duration_s` (menu scenarios); otherwise every entity is live-controlled (free drive).
     /// A free-drive city session spawns the first entity on the city's race start grid.
-    pub fn new(mut sc: Scenario, scripted: bool) -> Result<Self, String> {
+    pub fn new(sc: Scenario, scripted: bool) -> Result<Self, String> {
+        Self::new_with_data(sc, scripted, mem_data())
+    }
+
+    /// [`Session::new`] with the scenario's cars read from `data` (the career's modded car
+    /// overlays the embedded files; city, tires and materials come from `data` too).
+    pub fn new_with_data(
+        mut sc: Scenario,
+        scripted: bool,
+        data: &dyn simcli::data::DataSource,
+    ) -> Result<Self, String> {
         sc.validate()?;
         if !scripted && sc.city != CitySpec::Flat {
             let city = simcli::data::load_world(mem_data(), &sc.city, world_config(&sc))
@@ -205,7 +220,7 @@ impl Session {
                 }
             }
         }
-        Self::build(sc, scripted, None, None)
+        Self::build(sc, scripted, None, None, data)
     }
 
     /// Playback session for `replay.bin` bytes.
@@ -218,7 +233,7 @@ impl Session {
     pub fn from_replay(replay: Replay) -> Result<Self, String> {
         let sc = replay.scenario().map_err(|e| e.to_string())?;
         let systems = Selection::parse(&replay.systems)?;
-        Self::build(sc, false, Some(systems), Some(replay))
+        Self::build(sc, false, Some(systems), Some(replay), mem_data())
     }
 
     /// The scenario this session runs (entities include tick-0 spawns).
@@ -399,6 +414,9 @@ impl Session {
     /// Switch the damage mode without restarting (logged op; existing damage is kept).
     pub fn set_mode(&mut self, mode: DamageMode) -> Result<(), String> {
         self.live_check()?;
+        if self.career && mode != self.mode {
+            return Err("a career run keeps the career's damage mode".into());
+        }
         self.log_op(0, OpKind::Mode(mode))?;
         self.mode = mode;
         if let Some(r) = &mut self.run {
@@ -444,6 +462,47 @@ impl Session {
             self.mode,
             self.sc.seed,
         ));
+    }
+
+    // ----- career (machine G; see `crate::career`) -----------------------------------------
+
+    /// This session is a career run.
+    pub fn is_career(&self) -> bool {
+        self.career
+    }
+
+    /// Make this live session a career run, with `run` as the player's economy (the career's
+    /// account bound to the career car; `None` for sessions without police).
+    pub fn begin_career(&mut self, run: Option<PlayerRun>) -> Result<(), String> {
+        self.live_check()?;
+        if self.sim.tick() != 0 {
+            return Err("a career run starts before the first tick".into());
+        }
+        if let Some(run) = run {
+            if self.run.is_none() {
+                return Err("this session has no economy run (no police)".into());
+            }
+            self.run = Some(run);
+        }
+        self.career = true;
+        Ok(())
+    }
+
+    /// End the career run: the session goes on as a plain session; returns its economy run
+    /// (the career absorbs it).
+    pub fn end_career(&mut self) -> Option<PlayerRun> {
+        self.career = false;
+        self.run.take()
+    }
+
+    /// The sim before the first tick (the career restores the car's saved damage). Not in
+    /// the replay log: replays of a run that started damaged do not verify.
+    pub fn sim_before_start_mut(&mut self) -> Result<&mut Sim, String> {
+        self.live_check()?;
+        if self.sim.tick() != 0 {
+            return Err("only before the first tick".into());
+        }
+        Ok(&mut self.sim)
     }
 
     /// Mutable sim for debug tools (`debug_set_heat`) and tests. Live sessions only; changes

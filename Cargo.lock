@@ -4420,6 +4420,7 @@ dependencies = [
  "wasm-bindgen",
  "wp_audio",
  "wp_contracts",
+ "wp_damage",
  "wp_economy",
  "wp_math",
  "wp_net",

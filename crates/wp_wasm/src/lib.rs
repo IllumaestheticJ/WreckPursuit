@@ -27,6 +27,7 @@
 pub mod net;
 
 pub mod audio;
+pub mod career;
 pub mod data;
 pub mod garage;
 pub mod pack;
@@ -36,6 +37,8 @@ pub mod scenario;
 pub mod session;
 pub mod signals;
 
+#[cfg(test)]
+mod career_tests;
 #[cfg(test)]
 mod run_tests;
 
@@ -62,6 +65,11 @@ fn with<T>(f: impl FnOnce(&mut Session) -> Result<T, String>) -> Result<T, JsVal
     })
 }
 
+/// Run `f` with the current session, if any (career glue: works with no session too).
+fn with_session_opt<T, E>(f: impl FnOnce(Option<&mut Session>) -> Result<T, E>) -> Result<T, E> {
+    SESSION.with(|s| f(s.borrow_mut().as_mut()))
+}
+
 fn get<T>(f: impl FnOnce(&mut Session) -> T) -> Result<T, JsValue> {
     with(|s| Ok(f(s)))
 }
@@ -70,9 +78,16 @@ fn install(mut session: Session) -> Vec<u32> {
     let ids = session.entities().iter().map(|e| e.0).collect();
     SESSION.with(|s| {
         let mut slot = s.borrow_mut();
-        // The player's account (cash, garage, ledger) carries over a restart.
-        if let Some(prev) = slot.as_mut().and_then(Session::take_run) {
-            session.adopt_account(prev);
+        if let Some(prev) = slot.as_mut() {
+            if prev.is_career() {
+                // A career run being replaced ends: the career absorbs it (machine G).
+                career::absorb(prev);
+            } else if let Some(run) = prev.take_run() {
+                // The player's account (cash, garage, ledger) carries over a restart.
+                if !session.is_career() {
+                    session.adopt_account(run);
+                }
+            }
         }
         *slot = Some(session);
     });

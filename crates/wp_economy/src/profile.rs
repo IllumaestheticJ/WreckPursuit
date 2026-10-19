@@ -110,10 +110,11 @@ pub struct CareerProfile {
     /// Career counters.
     #[serde(default)]
     pub stats: CareerStats,
-    /// Lattice damage per owned car uid (opaque; written by the damage system). A car with no
-    /// entry is pristine.
+    /// Lattice damage per owned car uid: opaque text written by the damage system (JSON in
+    /// the browser, kept as a string so it round-trips bit-exactly). A car with no entry is
+    /// pristine.
     #[serde(default)]
-    pub lattices: BTreeMap<u32, serde_json::Value>,
+    pub lattices: BTreeMap<u32, String>,
 }
 
 impl Economy {
@@ -272,7 +273,7 @@ mod tests {
         let e = econ();
         let mut p = e.new_career(PlayerId(1), DamageMode::Arcade);
         p.lattices
-            .insert(1, serde_json::json!({ "anything": [1.5, 2.25] }));
+            .insert(1, r#"{"anything":[1.5,2.25]}"#.to_string());
         p.carry.heat = 12.5;
         let back = CareerProfile::from_json(&p.to_json()).unwrap();
         assert_eq!(back, p);
@@ -323,7 +324,7 @@ mod tests {
     fn close_run_counts_a_night_and_trims() {
         let e = econ();
         let mut p = e.new_career(PlayerId(1), DamageMode::Arcade);
-        p.lattices.insert(99, serde_json::Value::Null); // car 99 is not owned
+        p.lattices.insert(99, String::new()); // car 99 is not owned
         let day0 = p.account.day;
         e.close_run(&mut p, RunEnd::Free, 30.0, 250, 61.5);
         assert_eq!(p.account.day, day0 + 1);
