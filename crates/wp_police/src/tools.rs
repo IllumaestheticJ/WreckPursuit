@@ -52,18 +52,7 @@ pub struct SiteRules {
     pub highway_ok: bool,
 }
 
-/// Why a site was rejected.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SiteError {
-    /// No point on the predicted path satisfies the rules.
-    NoSite,
-    /// The requested segment is not on the racer's predicted path in range.
-    NotOnPath,
-    /// Sight distance too short (blind corner).
-    BlindCorner,
-    /// Highway not allowed at this wanted level.
-    Highway,
-}
+pub use wp_contracts::SiteError;
 
 /// Check one candidate point `d_m` along `seg` from `from`.
 pub fn check_point(

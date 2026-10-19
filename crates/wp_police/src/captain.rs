@@ -2,8 +2,7 @@
 //! against budgets, cooldowns and unlocks, and the [`CaptainView`] the captain client shows.
 //!
 //! This is the entire server-side model `wp_net` (prompt 07) replicates to the captain client.
-//! Commands travel inside the opaque `ClientToServer::CaptainCommand(Vec<u8>)`; encode them with
-//! [`CaptainCommand::to_bytes`]. If no human captain is seated the dispatcher acts as captain
+//! Commands travel as the typed contract `ClientToServer::CaptainCommand(CaptainCommand)` (v0.3.0). If no human captain is seated the dispatcher acts as captain
 //! through the same validated paths.
 //!
 //! Player chase units receive [`UnitOrder`]s as **suggestions** ([`PoliceSystem::unit_order`]);
@@ -13,132 +12,24 @@ use serde::{Deserialize, Serialize};
 use wp_contracts::{DayPhase, EntityId};
 
 use crate::dispatch::Incident;
-use crate::events::{IncidentId, PursuitOutcome, ToolId, UnitId, UnitKind};
+use crate::events::{PursuitOutcome, ToolId, UnitId, UnitKind};
 use crate::graph::District;
 use crate::heat::{PursuitStatus, WantedLevel};
 use crate::time::SimTime;
-use crate::tools::SiteError;
 use crate::unit::{Assignment, Tactic, UnitRole};
 use crate::PoliceSystem;
 
-/// A road of `wp_world`'s city: index into `wp_world::roads::RoadGraphView::edges` (also
-/// `RoadSegment::edge` in the police graph). The id captains, the minimap and race previews share.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct RoadEdgeId(pub u32);
+pub use wp_contracts::{CaptainCommand, CaptainError, RoadEdgeId, UnitOrder};
 
-/// An order for one unit (forced on AI units for `captain_order_hold_s`, a suggestion for
-/// player units).
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub enum UnitOrder {
-    /// Resume patrol.
-    Patrol,
-    /// Pursue a racer.
-    Pursue {
-        /// Racer.
-        target: EntityId,
-    },
-    /// Intercept a racer via the road graph.
-    Intercept {
-        /// Racer.
-        target: EntityId,
-    },
-    /// Respond to an incident.
-    Respond {
-        /// Incident.
-        incident: IncidentId,
-    },
-    /// Pull over and stay out of the chase.
-    Disengage,
+/// Encode a command as JSON bytes (pre-v0.3.0 transport; `ClientToServer::CaptainCommand` is
+/// typed now, this stays for tools and the UI kit's JSON fixtures).
+pub fn command_to_bytes(c: &CaptainCommand) -> Vec<u8> {
+    serde_json::to_vec(c).expect("CaptainCommand always serializes")
 }
 
-/// Captain command.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub enum CaptainCommand {
-    /// Give a unit an order.
-    AssignUnit {
-        /// Unit.
-        unit: UnitId,
-        /// Order.
-        order: UnitOrder,
-    },
-    /// Roadblock ahead of a racer (on a specific segment, or the best site).
-    RequestRoadblock {
-        /// Racer.
-        target: EntityId,
-        /// Road (index into `wp_world::roads::RoadGraphView::edges`), or `None` for automatic
-        /// placement. (Decodes the pre-v0.3.0 name `segment` too.)
-        #[serde(alias = "segment")]
-        road: Option<RoadEdgeId>,
-    },
-    /// Spike strip ahead of a racer.
-    RequestSpikes {
-        /// Racer.
-        target: EntityId,
-        /// Road (index into `wp_world::roads::RoadGraphView::edges`), or `None` for automatic
-        /// placement. (Decodes the pre-v0.3.0 name `segment` too.)
-        #[serde(alias = "segment")]
-        road: Option<RoadEdgeId>,
-    },
-    /// Helicopter on a racer.
-    RequestHelicopter {
-        /// Racer.
-        target: EntityId,
-    },
-    /// Racer whose reinforcements are dispatched first (`None` clears).
-    SetPriorityTarget {
-        /// Racer.
-        target: Option<EntityId>,
-    },
-    /// Call off the pursuit of a racer.
-    CallOff {
-        /// Racer.
-        target: EntityId,
-    },
-}
-
-/// Why a command was refused.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub enum CaptainError {
-    /// No such unit.
-    UnknownUnit,
-    /// No such racer.
-    UnknownTarget,
-    /// No such incident.
-    UnknownIncident,
-    /// The racer is not being pursued.
-    NotPursued,
-    /// The tool unlocks at a higher wanted level.
-    Locked {
-        /// Required wanted level (1..=5).
-        need_level: u8,
-    },
-    /// Tool still cooling down.
-    Cooldown {
-        /// Seconds left.
-        remaining_s: f32,
-    },
-    /// Too many active tools / helicopters.
-    Budget,
-    /// Placement rejected.
-    Site(SiteError),
-    /// The helicopter is unavailable (night availability roll).
-    Unavailable,
-    /// The unit cannot take orders (wrecked, parked at a tool, helicopter).
-    UnitUnavailable,
-    /// Command bytes did not decode.
-    Malformed,
-}
-
-impl CaptainCommand {
-    /// Encode for `ClientToServer::CaptainCommand`.
-    pub fn to_bytes(&self) -> Vec<u8> {
-        serde_json::to_vec(self).expect("CaptainCommand always serializes")
-    }
-
-    /// Decode from `ClientToServer::CaptainCommand`.
-    pub fn from_bytes(b: &[u8]) -> Result<Self, CaptainError> {
-        serde_json::from_slice(b).map_err(|_| CaptainError::Malformed)
-    }
+/// Decode JSON bytes from [`command_to_bytes`] (also the pre-v0.3.0 `segment` field name).
+pub fn command_from_bytes(b: &[u8]) -> Result<CaptainCommand, CaptainError> {
+    serde_json::from_slice(b).map_err(|_| CaptainError::Malformed)
 }
 
 /// One unit in the captain view.
@@ -468,12 +359,9 @@ mod tests {
             target: EntityId(3),
             road: Some(RoadEdgeId(9)),
         };
-        assert_eq!(CaptainCommand::from_bytes(&c.to_bytes()), Ok(c));
+        assert_eq!(command_from_bytes(&command_to_bytes(&c)), Ok(c));
         let old = br#"{"RequestSpikes":{"target":3,"segment":9}}"#;
-        assert_eq!(CaptainCommand::from_bytes(old), Ok(c));
-        assert_eq!(
-            CaptainCommand::from_bytes(b"nope"),
-            Err(CaptainError::Malformed)
-        );
+        assert_eq!(command_from_bytes(old), Ok(c));
+        assert_eq!(command_from_bytes(b"nope"), Err(CaptainError::Malformed));
     }
 }

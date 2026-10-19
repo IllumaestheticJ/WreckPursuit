@@ -20,7 +20,7 @@
 //! - [`unit`]: unit state and the built-in kinematic driver.
 //! - [`tools`]: roadblocks, spike strips, radar detector and scanner queries.
 //! - [`captain`]: captain commands, validation and the captain view.
-//! - [`events`]: the `SimEvent::PoliceEvent` payload.
+//! - [`events`]: re-exports of the contract `PoliceEvent` (`SimEvent::Police`).
 //! - [`scenario`]: headless scripted scenarios on the procedural city.
 
 #![warn(missing_docs)]
@@ -46,10 +46,15 @@ use wp_contracts::{
 };
 use wp_math::{Rng, StateHasher};
 
-pub use captain::{CaptainCommand, CaptainError, CaptainView, RoadEdgeId, UnitOrder};
+pub use captain::{
+    command_from_bytes, command_to_bytes, CaptainCommand, CaptainError, CaptainView, RoadEdgeId,
+    UnitOrder,
+};
 pub use config::PoliceConfig;
 pub use dispatch::{Incident, IncidentKind};
-pub use events::{DisableCause, IncidentId, PoliceEvent, PursuitOutcome, ToolId, UnitId, UnitKind};
+pub use events::{
+    DisableCause, IncidentId, PoliceEvent, PoliceEventExt, PursuitOutcome, ToolId, UnitId, UnitKind,
+};
 pub use graph::{District, RoadGraph};
 pub use heat::{BountyRecord, PursuitStatus, RacerRecord, WantedLevel};
 pub use time::SimTime;
@@ -315,7 +320,7 @@ impl PoliceSystem {
             self.think(world, tdt);
         }
         for e in self.pending.drain(..) {
-            out.push(e.to_sim_event());
+            out.push(SimEvent::Police(e));
         }
     }
 

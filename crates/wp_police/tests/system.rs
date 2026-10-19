@@ -88,8 +88,10 @@ impl Harness {
             let ev: Vec<SimEvent> = if k == 0 { extra.to_vec() } else { Vec::new() };
             self.police
                 .step(&self.world, &[v], &ev, PHYSICS_DT, &mut out);
-            self.events
-                .extend(out.iter().filter_map(PoliceEvent::from_sim_event));
+            self.events.extend(out.iter().filter_map(|e| match e {
+                SimEvent::Police(p) => Some(p.clone()),
+                _ => None,
+            }));
         }
     }
 
@@ -416,6 +418,20 @@ fn total_loss_while_wanted_is_a_capture_and_violations_need_witnesses() {
             ..
         }
     )));
+    // v0.3.0: the event carries the level before the reset and the capture credit.
+    for e in &h.events {
+        if let PoliceEvent::PursuitEnded {
+            level,
+            capturer,
+            assists,
+            ..
+        } = e
+        {
+            assert!(*level > WantedLevel::None, "level at capture {level:?}");
+            assert!(capturer.is_none_or(|c| !assists.contains(&c)));
+            assert!(assists.windows(2).all(|w| w[0] < w[1]));
+        }
+    }
 }
 
 #[test]
