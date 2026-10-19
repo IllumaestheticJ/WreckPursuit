@@ -17,7 +17,7 @@ mod systems;
 mod traffic_link;
 
 pub use contacts::CONTACT_EVENT_MIN_IMPULSE_NS;
-pub use physics::PhysicsWorld;
+pub use physics::{CityColliders, PhysicsWorld, SAFETY_FLOOR_Z};
 pub use police_link::POLICE_SLOT_RESERVE;
 pub use systems::{SystemId, Systems};
 pub use traffic_link::TRAFFIC_SLOT_RESERVE;
@@ -132,6 +132,7 @@ pub struct Sim {
     record_contacts: bool,
     applied_contacts: Vec<(EntityId, Vec<wp_contracts::ContactImpulse>)>,
     debris: Vec<rapier3d::prelude::RigidBodyHandle>,
+    city_colliders: CityColliders,
 }
 
 impl Sim {
@@ -158,6 +159,7 @@ impl Sim {
             record_contacts: false,
             applied_contacts: Vec::new(),
             debris: Vec::new(),
+            city_colliders: CityColliders::default(),
         }
     }
 
@@ -223,11 +225,16 @@ impl Sim {
         Ok(id)
     }
 
-    /// Replace the world (city, traffic, clock) — e.g. `World::load` or `World::procedural`
-    /// from `wp_world`. Call before spawning or the first tick. Every `static_props()` entry
-    /// (parked cars, cones) becomes a dynamic Rapier box with its mass. The city road surface
-    /// is the flat ground slab at z = 0 (cities are flat in phase 1).
+    /// Replace the world (city, traffic, clock) — e.g. `World::load`, `World::procedural` or
+    /// `World::vesper` from `wp_world`. Call before spawning or the first tick. Every
+    /// `static_props()` entry (parked cars, cones) becomes a dynamic Rapier box with its mass.
+    /// Flat cities drive on the ground slab at z = 0; a city with terrain (Port Vesper v2)
+    /// replaces it with terrain, road, building and deck-rail colliders
+    /// ([`PhysicsWorld::set_city_ground`]).
     pub fn set_world(&mut self, world: World) {
+        if world.network().terrain.is_some() {
+            self.city_colliders = self.physics.set_city_ground(world.map());
+        }
         use rapier3d::math::Rotation;
         use rapier3d::prelude::{ColliderBuilder, Pose, RigidBodyBuilder, Vector};
         for prop in world.static_props() {
@@ -252,6 +259,65 @@ impl Sim {
         }
         self.world = world;
         self.rebuild_police();
+    }
+
+    /// Colliders built for the current city's ground (all zero for flat cities).
+    pub fn city_colliders(&self) -> CityColliders {
+        self.city_colliders
+    }
+
+    /// Whether the current city has terrain (hills, decks): spawns are then placed on the
+    /// ground under them and pitched to its slope.
+    pub fn has_terrain(&self) -> bool {
+        self.world.network().terrain.is_some()
+    }
+
+    /// Teleport a vehicle onto the city's drivable ground at `xy`: height from the road (the
+    /// one nearest `near_z`, if given) or terrain, chassis pitched and rolled to the surface,
+    /// rolling forward along it at `speed_mps`. On a flat city this is
+    /// [`Sim::place_vehicle`] at z = 0.
+    pub fn place_on_ground(
+        &mut self,
+        id: EntityId,
+        xy: [f32; 2],
+        yaw: f32,
+        speed_mps: f32,
+        near_z: Option<f32>,
+    ) -> Result<(), SimError> {
+        if !self.has_terrain() {
+            return self.place_vehicle(id, [xy[0], xy[1], 0.0], yaw, speed_mps);
+        }
+        use rapier3d::math::{Mat3, Rotation, Vector};
+        let map = self.world.map();
+        let z = map.ground_height(xy, near_z);
+        // Surface normal from the same query a metre around.
+        let e = 1.0;
+        let dx = map.ground_height([xy[0] + e, xy[1]], Some(z))
+            - map.ground_height([xy[0] - e, xy[1]], Some(z));
+        let dy = map.ground_height([xy[0], xy[1] + e], Some(z))
+            - map.ground_height([xy[0], xy[1] - e], Some(z));
+        let n = Vector::new(-dx / (2.0 * e), -dy / (2.0 * e), 1.0).normalize();
+        let (sy, cy) = wp_math::sin_cos(yaw);
+        let f0 = Vector::new(-sy, cy, 0.0);
+        let f = (f0 - n * f0.dot(n)).normalize();
+        let r = f.cross(n);
+        let rot = Rotation::from_mat3(&Mat3::from_cols(r, f, n));
+        let pos = [xy[0], xy[1], z];
+        self.place_vehicle(id, pos, yaw, speed_mps)?;
+        let slot = self
+            .vehicles
+            .iter_mut()
+            .find(|v| v.id == id)
+            .ok_or(SimError::UnknownEntity(id))?;
+        let rb = &mut self.physics.bodies[slot.body.body];
+        rb.set_position(
+            rapier3d::prelude::Pose::from_parts(Vector::from_array(pos), rot),
+            true,
+        );
+        rb.set_linvel(f * speed_mps, true);
+        slot.vehicle.read_body(rb);
+        slot.spawn = (pos, yaw);
+        Ok(())
     }
 
     /// Replace the police system, e.g. `PoliceSystem::for_world(cfg, &world, setup)` so units
