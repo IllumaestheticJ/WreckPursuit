@@ -14,7 +14,6 @@ import { CameraRig, CAMERA_MODES, type CameraMode } from "./cameras";
 import { Hud } from "./hud";
 import { TelemetryPlots } from "./telemetry";
 import { AudioSystem } from "./audio";
-import { PoliceHud } from "./police_hud";
 import { UiOverlay } from "./ui/overlay";
 
 // v2: canonical simcli replay.bin (v1 held the retired WPR\x01 format).
@@ -68,7 +67,6 @@ async function main(): Promise<void> {
   const hud = new Hud(overlay);
   const plots = new TelemetryPlots(overlay);
   const audio = new AudioSystem(scene.world, overlay);
-  const policeHud = new PoliceHud(overlay);
   const ui = new UiOverlay(overlay);
 
   // ----- session management --------------------------------------------------------------
@@ -434,7 +432,6 @@ async function main(): Promise<void> {
     // Promoted (physical) agents are drawn as sim vehicles once the sim spawns them.
     scene.updateAgents(sim.trafficAgents(), physicalTraffic);
     scene.updatePoliceUnits(sim.policeUnits(), tS);
-    policeHud.update(layers.on("police") ? sim.policeStatus(app.player) : null);
     const wi = sim.worldInfo();
     scene.setTimeOfDay(wi[W.night]);
 
@@ -515,6 +512,7 @@ async function main(): Promise<void> {
     const out = $("sc-result");
     if (res && !replay) {
       app.result = res;
+      if (res.done) ui.sessionEnded();
       const row = (r: { expect: string; actual: string; passed: boolean }, pending: boolean) =>
         `<div class="${pending ? "pending" : r.passed ? "pass" : "fail"}">${r.passed ? "✓" : "✗"} ${esc(r.expect)} → ${esc(r.actual)}${pending ? " (pending)" : ""}</div>`;
       const sum = res.summary;
@@ -576,6 +574,7 @@ async function main(): Promise<void> {
     startBench,
     setCamera: (m: CameraMode, offset?: [number, number, number]) => rig.setMode(m, app.views.get(app.focus)?.root, offset),
     toggleLayer: (id: string) => layers.toggle(id),
+    ui,
   };
   requestAnimationFrame(frame);
 }

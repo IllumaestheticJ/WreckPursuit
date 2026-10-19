@@ -168,7 +168,15 @@ for (const [file, kmh] of [
     const kinds = ["GlassShattered", "RegionDamaged", "ComponentFailed", "PartDetached", "TotalLoss"].filter((k) => feed.includes(k));
     check(kinds.length > 0, `event feed shows damage events: ${kinds.join(", ")}`);
   }
+  if (file === "crash/barrier_frontal.ron") {
+    // The repair bill pops up once a scripted scenario ends.
+    await page.waitForTimeout(300);
+    const auto = await page.evaluate(() => !document.getElementById("ui-bill").classList.contains("hidden"));
+    check(auto, "repair bill opens automatically when the scenario ends");
+  }
   if (file.includes("head_on")) {
+    await page.waitForTimeout(300);
+    await page.evaluate(() => window.__wp.ui.setBill(false));
     await shot("scenario_head_on.png");
     // UI-kit overlays (workstream 16): live repair bill (F) for the crashed car + chase readout.
     await page.keyboard.press("KeyF");
@@ -203,17 +211,60 @@ await page.keyboard.up("KeyW");
 const chase = await page.evaluate(() => ({
   hour: window.__wp.sim.worldInfo()[1],
   status: window.__wp.sim.policeStatus(window.__wp.app.player),
-  panel: document.querySelector(".police-hud .wp-hud-heat")?.getAttribute("aria-label") ?? null,
+  panel: document.querySelector("#ui-chase .wp-hud-heat")?.getAttribute("aria-label") ?? null,
+  panels: document.querySelectorAll(".wp-hud-heat").length,
+  banner: document.getElementById("pursuit-banner").classList.contains("hidden") ? null : document.querySelector("#pursuit-banner b").textContent,
   police: Array.from(window.__wp.sim.vehicleMeta()).filter((_, i, a) => i % 3 === 1 && a[i] === 2).length,
   units: window.__wp.sim.policeUnits().length / 6,
   violations: document.querySelector(".feed")?.textContent?.includes("TrafficViolation") ?? false,
 }));
 await shot("city_chase.png");
 check(
-  chase.hour >= 23 && chase.status !== null && chase.panel !== null && chase.violations,
-  `city chase: ${chase.hour.toFixed(2)} h, heat panel "${chase.panel}", heat ${chase.status?.heat.toFixed(2)}, ` +
-    `${chase.police} police vehicles + ${chase.units} other units, speeding violations in the feed`,
+  chase.hour >= 23 && chase.status !== null && chase.panel !== null && chase.panels === 1 && chase.violations,
+  `city chase: ${chase.hour.toFixed(2)} h, one heat panel "${chase.panel}", heat ${chase.status?.heat.toFixed(2)} (${chase.status?.status}), ` +
+    `banner ${chase.banner ?? "none"}, ${chase.police} police vehicles + ${chase.units} other units, speeding violations in the feed`,
 );
+// Pursuit banner + capture → repair bill, driven by a stubbed police_status() (a real capture
+// needs minutes of driving; the outcome plumbing is unit-tested in wp_wasm::police).
+{
+  const flow = await page.evaluate(async () => {
+    const sim = window.__wp.sim;
+    const real = sim.policeStatus;
+    const base = real(window.__wp.app.player);
+    const frames = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const read = () => ({
+      banner: document.getElementById("pursuit-banner").classList.contains("hidden") ? null : document.querySelector("#pursuit-banner b").textContent,
+      bill: !document.getElementById("ui-bill").classList.contains("hidden"),
+      units: document.querySelector("#ui-chase .wp-hud-heat")?.getAttribute("aria-label") ?? "",
+    });
+    const out = {};
+    window.__wp.ui.setBill(false);
+    const stub = (s) => (sim.policeStatus = () => ({ ...base, last_outcome: null, outcome_age_s: null, ...s }));
+    stub({ level: "L2", status: "Pursuit", units_in_pursuit: 3 });
+    await frames();
+    out.pursuit = read();
+    stub({ level: "L2", status: "Searching", cooldown: 0.4, staleness_s: 4, escape_s: 10 });
+    await frames();
+    out.searching = read();
+    stub({ level: "None", status: "Clear", last_outcome: "Escaped", outcome_age_s: 0.5 });
+    await frames();
+    out.escaped = read();
+    stub({ level: "None", status: "Clear", last_outcome: "Captured", outcome_age_s: 0.2 });
+    await frames();
+    out.captured = read();
+    stub({ level: "None", status: "Clear", last_outcome: "Captured", outcome_age_s: 30 });
+    await frames();
+    out.later = read();
+    sim.policeStatus = real;
+    window.__wp.ui.setBill(false);
+    return out;
+  });
+  check(
+    flow.pursuit.banner === "PURSUIT" && flow.searching.banner === "SEARCHING" && flow.escaped.banner === "ESCAPED" && !flow.escaped.bill &&
+      flow.captured.banner === "CAPTURED" && flow.captured.bill && flow.later.banner === null,
+    `pursuit banner: ${flow.pursuit.banner} → ${flow.searching.banner} → ${flow.escaped.banner} → ${flow.captured.banner} (bill ${flow.captured.bill ? "opened" : "missing"}) → ${flow.later.banner ?? "cleared"}`,
+  );
+}
 await page.evaluate(() => {
   document.getElementById("city").checked = false;
   window.__wp.startFreeDrive("debug_sedan", "Arcade", false);
