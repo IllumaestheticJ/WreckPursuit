@@ -21,6 +21,7 @@ clock. Implements `wp_contracts::WorldQuery`. No renderer dependency; compiles f
 | `clock` | `WorldClock`, `sun_direction` |
 | `geom` | Deterministic geometry (polylines, OBB, Bézier; re-exports `wp_math::{atan, atan2}`) |
 | `drive` | Shared AI driving: `DriveController` (pure pursuit + PID) and `PathFollower` (`follow_path` along any `DrivePath`) for traffic, police and racers |
+| `leader` | Leader / obstacle query (`find_leader`) + shared IDM (`CarFollowing`) so police and racers follow and stop behind vehicles like traffic does |
 | `roads` | Road-level graph view (`RoadGraphView`) for police routing / minimaps |
 
 City data lives in `data/city/` (see its README); importer and generator in
@@ -204,6 +205,21 @@ extruded from the ground to `height_m`; a sight line is blocked if any part of i
 footprint is below the roof (checked at both ends of the inside span — height is linear along
 the line). Buildings are indexed in the 32 m grid and only cells the line crosses (2D DDA) are
 tested. Roads, parked cars and traffic do not occlude.
+
+**Leader query** (`leader`, for police units and AI racers): `find_leader(own_pos,
+centreline, obstacles, skip, params)` samples the caller's path ahead (any path type — a
+closure `d → point d m ahead`) from the car's own position out to the look-ahead
+(`LeaderParams::lookahead_for(v)`: stopping distance at 6 m/s² + 3 s + 20 m, 40–150 m), projects
+every `Obstacle` (oriented box from a `VehicleState` or `AgentView`) onto it and returns the one
+whose box overlaps a ±1.2 m strip with the smallest bumper gap, with its speed along the path
+(negative = oncoming). `CarFollowing::{CIVILIAN, PURSUIT}::leader_cap(v, leader)` is the IDM
+interaction term (the exact law traffic uses — traffic's `idm` delegates to it); combine as
+`acc.min(cap)`. `hold_behind` / `held` keep a stopped car on the handbrake: `DriveController::pedals`
+releases the foot brake below 0.6 m/s (holding it engages auto-reverse), so without a hold a car
+idles forward into the one it stopped behind. `PathFollower::follow_behind` does all of this
+for `DrivePath` users. Real-vehicle tests (`tests/drive.rs`): from 25 m/s with pursuit
+settings it stops 2.5 m behind a stopped car and settles ≈ 9 m behind an 8 m/s car. Physical
+traffic uses the same hold when stopped.
 
 **Road graph** (`World::road_graph()`, `roads::RoadGraphView`): one edge per road with class,
 limit, lanes each way, district; nodes with district and signal flag; POIs; building bounds.

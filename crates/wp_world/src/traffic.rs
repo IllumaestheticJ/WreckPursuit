@@ -1741,6 +1741,11 @@ impl Traffic {
                 headlights: map.time.night_factor() > 0.5,
                 ..Default::default()
             };
+            // Stopped (queue, stop line, wreck): hold on the handbrake. The PID releases the
+            // foot brake near standstill (auto-reverse), which would let the car idle forward.
+            if (acc < 0.0 || disabled) && v < crate::leader::HOLD_BEHIND_MPS {
+                pa.input = crate::leader::held(pa.input);
+            }
         }
     }
 
