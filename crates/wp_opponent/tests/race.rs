@@ -512,3 +512,53 @@ fn sweep_open_roads_progress() {
     }
     eprintln!("TOTAL {total:.0} longest wait {worst:.0}");
 }
+
+/// Same car, one clearly better driver at the back: with slipstream it gets past (the tow
+/// on the straights closes the time gap the corners open); without, it never does.
+/// Needs `Sim::set_drag_scale` (feature `sim-draft-hook`, see the integration doc).
+#[cfg(feature = "sim-draft-hook")]
+#[test]
+fn draft_lets_a_faster_driver_in_the_same_car_pass() {
+    let race = |seed: u64, draft: bool| {
+        let mut drivers = vec![
+            DriverProfile {
+                skill: 0.35,
+                ..DriverProfile::default()
+            };
+            4
+        ];
+        drivers[3].skill = 0.8;
+        let setup = Setup {
+            seed,
+            laps: 4,
+            drivers,
+            grid: GridLayout::SingleFile,
+            max_s: 330.0,
+            draft,
+            ..Setup::default()
+        };
+        let out = common::run_plain(&setup);
+        let hard = out
+            .contacts
+            .iter()
+            .filter(|c| c.3 >= AI_CONTACT_IMPULSE_NS)
+            .count();
+        assert_eq!(hard, 0, "seed {seed} draft {draft}: {:?}", out.contacts);
+        let st = out.field.standings();
+        let pos = st.iter().position(|s| s.entity == EntityId(4)).unwrap();
+        (pos, out.tow_s[3])
+    };
+    let mut gained_with = 0;
+    let mut gained_without = 0;
+    for seed in 1..=4 {
+        let (with, tow) = race(seed, true);
+        let (without, _) = race(seed, false);
+        assert!(tow > 5.0, "seed {seed}: only {tow:.1} s in the tow");
+        gained_with += 3 - with;
+        gained_without += 3 - without;
+    }
+    assert!(
+        gained_with >= 4 && gained_with > gained_without,
+        "places gained with draft {gained_with}, without {gained_without}"
+    );
+}

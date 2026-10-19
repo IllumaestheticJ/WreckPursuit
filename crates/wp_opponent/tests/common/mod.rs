@@ -90,6 +90,9 @@ pub struct Setup {
     pub heat: Vec<(EntityId, f32)>,
     /// Keep running to `max_s` after every racer has left the race (chases).
     pub run_full: bool,
+    /// Apply the slipstream model (`wp_opponent::draft`) to every vehicle each tick. Needs
+    /// the `sim-draft-hook` feature (`Sim::set_drag_scale`); ignored without it.
+    pub draft: bool,
 }
 
 impl Default for Setup {
@@ -110,6 +113,7 @@ impl Default for Setup {
             sim_police: None,
             heat: Vec::new(),
             run_full: false,
+            draft: false,
         }
     }
 }
@@ -144,6 +148,8 @@ pub struct Outcome {
     pub max_wait_s: Vec<f32>,
     /// Police vehicles alive at the end.
     pub police_vehicles: usize,
+    /// Seconds each racer spent with its drag cut by more than 15 % (slipstream runs only).
+    pub tow_s: Vec<f32>,
 }
 
 /// Measured capability, cached per process.
@@ -214,6 +220,7 @@ pub fn run(
             ..CorridorOptions::default()
         },
         signals: !setup.closed_roads && std::env::var("WP_NO_SIGNALS").is_err(),
+        draft: setup.draft && cfg!(feature = "sim-draft-hook"),
         ..RaceConfig::default()
     };
     // Entities are assigned 1.. in spawn order, before any other vehicle.
@@ -287,6 +294,8 @@ pub fn run(
     let mut stuck_s = vec![0.0f32; entities.len()];
     let mut max_stuck_s = vec![0.0f32; entities.len()];
     let mut wait_s = vec![0.0f32; entities.len()];
+    #[allow(unused_mut)]
+    let mut tow_s = vec![0.0f32; entities.len()];
     let mut max_wait_s = vec![0.0f32; entities.len()];
     let max_ticks = (setup.max_s * 240.0) as u64;
     while sim.tick() < max_ticks {
@@ -322,6 +331,20 @@ pub fn run(
         field_wall_s += t0.elapsed().as_secs_f64();
         for (e, inp) in inputs {
             sim.set_input(e, inp).unwrap();
+        }
+        #[cfg(feature = "sim-draft-hook")]
+        if setup.draft {
+            let bodies: Vec<wp_opponent::DraftBody> =
+                obs.iter().map(wp_opponent::DraftBody::from_obs).collect();
+            let scales = wp_opponent::drag_scales(&bodies, &wp_opponent::DraftParams::default());
+            for (o, k) in obs.iter().zip(scales) {
+                sim.set_drag_scale(o.entity, k).unwrap();
+                if let Some(i) = entities.iter().position(|e| *e == o.entity) {
+                    if k < 0.85 {
+                        tow_s[i] += 1.0 / 240.0;
+                    }
+                }
+            }
         }
         sim.step_fixed();
         events = sim.drain_events();
@@ -382,7 +405,7 @@ pub fn run(
         }
         // WP_TRACE=<grid index>: print that racer every second (debugging aid).
         if let Ok(k) = std::env::var("WP_TRACE").map(|v| v.parse::<usize>().unwrap_or(0)) {
-            if sim.tick().is_multiple_of(240) && k < entities.len() {
+            if sim.tick().is_multiple_of(60) && k < entities.len() {
                 let d = field.debug_of(k);
                 let st = sim
                     .vehicles()
@@ -391,7 +414,7 @@ pub fn run(
                     .map(|v| v.vehicle.state());
                 if let Some(st) = st {
                     eprintln!(
-                        "t={} ({:.1},{:.1}) v={:.1} vt={:.1} {:?} {:?} n={:.1}/{:.1}",
+                        "t={:.2} ({:.1},{:.1}) v={:.1} vt={:.1} {:?} {:?} n={:.1}/{:.1}",
                         sim.tick() / 240,
                         st.pos[0],
                         st.pos[1],
@@ -423,6 +446,7 @@ pub fn run(
         violations,
         max_stuck_s,
         max_wait_s,
+        tow_s,
         police_vehicles: sim
             .vehicles()
             .iter()

@@ -60,6 +60,10 @@ pub struct RaceConfig {
     /// Read traffic signals at junctions (open roads): a lasting green means cross traffic
     /// is held; careful drivers stop at reds. Off for closed courses.
     pub signals: bool,
+    /// The sim applies slipstream ([`crate::draft`]): held-up racers close right up into the
+    /// tow on straights and pull out with the run it gives. Leave off unless the sim loop
+    /// really applies the drag multipliers (otherwise sitting that close only adds risk).
+    pub draft: bool,
 }
 
 impl Default for RaceConfig {
@@ -74,6 +78,7 @@ impl Default for RaceConfig {
             line: LineParams::default(),
             corridor: CorridorOptions::default(),
             signals: true,
+            draft: false,
         }
     }
 }
@@ -1355,10 +1360,12 @@ impl Field {
             Some(f) => (&f.corridor, &f.line, &f.profile),
             None => (&self.corridor, &self.lines[line_idx].1, &speed),
         };
+        let draft = self.config.draft;
         decide_racer(
             &mut self.racers[k],
             civs,
             signal,
+            draft,
             k,
             corridor,
             line,
@@ -1413,6 +1420,7 @@ fn decide_racer(
     r: &mut Racer,
     civs: &[(u32, V2, V2)],
     signal: Option<SignalAhead>,
+    draft: bool,
     k: usize,
     corridor: &Corridor,
     line: &RacingLine,
@@ -1685,7 +1693,11 @@ fn decide_racer(
                     tuck = Some(x.o.n);
                 }
                 // Patience when stuck behind; none needed when arriving with a real run.
-                let momentum = v - x.o.v_s > 2.5 && x.gap < 30.0 && brake_dist > v * 1.5;
+                // A run: real closing speed, or (with slipstream) a smaller one built in the
+                // tow right behind it.
+                let tow_run = draft && v - x.o.v_s > 0.8 && x.gap < 12.0;
+                let momentum =
+                    (v - x.o.v_s > 2.5 || tow_run) && x.gap < 30.0 && brake_dist > v * 1.5;
                 if (r.blocked_s > p.overtake_patience_s || momentum)
                     && x.o.v_s > -1.0
                     && (!start_phase || x.o.parked)
@@ -1697,6 +1709,7 @@ fn decide_racer(
                         brake_dist,
                         v,
                         margin: margin_for(&x.o),
+                        draft,
                     };
                     let plan = plan_pass(r, x, &rel, &ctx, &pass_limits);
                     let slot = match plan {
@@ -2030,11 +2043,22 @@ fn decide_racer(
                 || line.curvature[corridor.wrap((r.s / CORRIDOR_STEP_M) as isize)].abs()
                     > 1.0 / 80.0;
             // Held up on a straight with pace in hand: close up to a tow position (short
-            // gap) before pulling out. Without a draft model in `wp_vehicle`, dropping back
-            // to get a run only loses ground, so `get_run` only ever shortens the gap.
-            let towing = r.get_run == Some(o.who) && !in_corner && brake_dist > v * 2.0;
+            // gap) before pulling out. With slipstream in the sim, stay flat out in the wake
+            // down to the minimum gap (the braking-distance cap below still holds) so the
+            // tow builds a run.
+            let towing = (r.get_run == Some(o.who)
+                || (draft && v_line(r.s + v) > o.v_s + 1.0 && x.gap < 25.0))
+                && !in_corner
+                && brake_dist > v * 2.0;
+            // With slipstream, a time gap kept through the corner becomes a distance gap the
+            // wake cannot bridge on the straight: stay tight on its exit too.
+            let exit_tow = draft && !r.in_brake_zone && matches!(o.who, Who::Racer(_));
             let headway = if civ {
                 p.civilian_headway_s
+            } else if towing && draft {
+                0.0
+            } else if exit_tow {
+                0.3
             } else if towing {
                 (p.headway_s * 0.5).max(0.3)
             } else {
@@ -2263,6 +2287,8 @@ struct PassCtx<'a> {
     brake_dist: f32,
     v: f32,
     margin: f32,
+    /// The sim applies slipstream.
+    draft: bool,
 }
 
 /// Choose a passing lateral position beside `target`, or None if no side is clear far
@@ -2309,7 +2335,7 @@ fn plan_pass(
     let potential = ctx.corridor.interp(&ctx.profile.v, r.s + v) - o.v_s;
     let straight = ctx.brake_dist > v * 2.0;
     let closing = (v - o.v_s).max(if straight { 0.6 * potential } else { 0.0 });
-    let tow = target.gap < 4.0 && straight;
+    let tow = (target.gap < 4.0 || (ctx.draft && target.gap < 8.0)) && straight;
     if closing < 0.5 && !tow {
         return Err(PassReject::NoRun);
     }
