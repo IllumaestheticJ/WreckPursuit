@@ -7,63 +7,69 @@
 
 ## Exposes
 - `PoliceSystem::step(world: &dyn WorldQuery, racers: &[RacerView], events: &[SimEvent], dt, out)`.
-  `world.line_of_sight` is used for every unit, camera and helicopter sighting (eye height
-  `EYE_HEIGHT_M` = 1.3 m; the helicopter looks down from its altitude). `TrafficViolation::pos`
-  places civilian reports.
+  - `world.line_of_sight` is used for every unit, camera and helicopter sighting (eye height
+    `EYE_HEIGHT_M` = 1.3 m; the helicopter looks down from its altitude).
+  - `TrafficViolation::pos` places civilian reports.
 - Construction:
-  - `PoliceSystem::new()`: built-in tables, no road network, so heat only.
   - **`PoliceSystem::for_world(PoliceConfig, &wp_world::World, PoliceSetup)`**: police on D's
     city. Call `step` with the same `World` as `world`.
-  - `PoliceSystem::with_city(PoliceConfig, RoadGraph, PoliceSetup { seed, mode, internal_driving, hazards })`.
-- **`RoadGraph::from_city(&wp_world::CityMap)`**: converts D's network into the police graph. The
-  mapping is in `crates/wp_police/src/city.rs`:
-  - network node ids are kept; curved lanes add interior nodes;
-  - straight two-way roads merge into one segment, everything else stays one-way;
-  - districts: Core/Commercial → Core, Residential/Suburb → Suburb, Industrial/Port → Industrial;
-  - POIs: safehouse candidates, helipad and stations are kept, and every third signalised junction gets a traffic camera.
+  - `PoliceSystem::new()`: built-in tables, no road network, heat only. This is what `wp_sim` uses today.
+  - `PoliceSystem::with_city(cfg, RoadGraph, setup)`.
+- Roads come from D's `wp_world::roads::RoadGraphView`:
+  - **`RoadGraph::from_view(&RoadGraphView)` / `RoadGraph::from_city(&CityMap)`** map it 1:1:
+    node ids are kept, and `RoadSegment::edge` holds the source edge id.
+  - `wp_police::city::procedural(&ProcGenConfig) -> (RoadGraph, CityMap)` builds both for tests and tools.
+  - `RoadGraph` keeps only police algorithms: routing, prediction, sight distance and nearest road.
+- Driving uses D's **`wp_world::drive::DriveController`**, one per unit:
+  - **`bind_unit_entity(unit, entity, SteerGeometry { wheelbase_m, max_steer_rad })`**;
+  - **`unit_input(&mut self, unit, dt) -> Option<VehicleInput>`**: the controller's
+    pure-pursuit steer plus PID pedals, called every physics tick after `sync_unit`;
+  - `sync_unit(unit, UnitSync { pos, vel, heading, health, effects })`. A unit whose effects show a bent wheel pulls over.
+- Unit lifecycle events: `UnitSpawned` / `UnitDespawned`.
 - Queries: `wanted_level`, `racer`, `units`, `incidents`, `pool_count`, `tire_puncture(entity) -> [f32; 4]`,
   `static_colliders()`, `spike_strips()`, `roadblocks()`, `helicopters()`, `now() -> SimTime`, `state_hash()`, `stats()`.
 - Bounty (for prompt 08): `bounty`, `bounty_record`, `set_bounty_record`, `record_race_won`, `payout_scale`.
-- Physical units (for prompt 12):
-  - the `UnitSpawned` / `UnitDespawned` events;
-  - `bind_unit_entity(unit, entity)`;
-  - `unit_input(unit, SteerGeometry { wheelbase_m, max_steer_rad }) -> Option<VehicleInput>`;
-  - `sync_unit(unit, UnitSync { pos, vel, heading, health, effects })`. A unit whose effects show a bent wheel pulls over.
 - Player chase units (for prompt 07): `add_player_unit(player, entity, pos, heading)` and `unit_order(unit)` (suggestion only).
 - Captain API (for prompt 07): `captain_command(CaptainCommand) -> Result<(), CaptainError>`,
-  `captain_view() -> CaptainView`, `set_human_captain(bool)`. `CaptainCommand::{to_bytes, from_bytes}`
-  stays until v0.3.0 types it.
-- Racer gadgets (for prompts 07/08 to gate by tier): `radar(pos, tier) -> Vec<RadarBlip>`,
-  `scanner(tier, since: Option<SimTime>) -> Vec<RadioLine>`, `radio_log()`.
-- Crash scenes (for prompt 05): `report_crash_scene(pos)`. Civilian–civilian `SimEvent::Contact`s also create them.
+  `captain_view()`, `set_human_captain(bool)`. Roads are named by **`RoadEdgeId`** (D's edge index).
+  `CaptainCommand::{to_bytes, from_bytes}` stays until v0.3.0 types it.
+- Racer gadgets (for prompts 07/08): `radar(pos, tier)`, `scanner(tier, since: Option<SimTime>)`, `radio_log()`.
+- Crash scenes (for prompt 05): `report_crash_scene(pos)`; civilian–civilian `SimEvent::Contact`s also create them.
 - `SimEvent::PoliceEvent { kind, payload }` until v0.3.0: `kind` = `wp_police::events::kind::*`,
-  `payload` = JSON of `wp_police::PoliceEvent`. Decode with `PoliceEvent::from_sim_event`.
-- Data: `data/police/{heat,presence,pursuit,tools}.toml` (meanings are in the crate README).
-- Headless scenarios: `crates/wp_police/scenarios/*.ron` (`cargo run -p wp_police --bin police-scenario -- <file>`).
-  `world_city: true` runs them on D's `ProcGenConfig::small()` city.
+  `payload` = JSON of `wp_police::PoliceEvent` (`PoliceEvent::from_sim_event`).
+- Data: `data/police/{heat,presence,pursuit,tools}.toml`. Scenarios: `crates/wp_police/scenarios/*.ron`
+  on D's procedural city (`city: (nx, ny, seed)`, default `ProcGenConfig::small()`).
 
 ## Needs
 | From | What | Workaround now |
 |---|---|---|
-| `wp_world` (05) | **A public driving controller**, e.g. `wp_world::traffic::follow_path(state, path, s, v_ref, wheelbase, max_steer) -> VehicleInput`. `drive_physical` is private, so police and opponent AI (N) can't reuse it | `unit::drive_input` ports the same steering law (look-ahead `4 + 0.6·v` clamped 5–25 m, `δ = atan(L·κ)`), with stateless speed control |
-| `wp_world` (05) / lead | Shared read-only road-network trait (v0.3.0) | `RoadGraph::from_city` converter |
-| `wp_world` (05) | Optional: turn restrictions per node, and traffic cameras as a `PoiKind` | Any legal outgoing road may be taken; cameras at every third signalised junction |
-| `wp_sim` (12) | `PoliceSystem::for_world(cfg, &world, setup)` once a city is set; spawn vehicles for units plus `bind_unit_entity`, `unit_input` and `sync_unit`; merge `tire_puncture`; insert `static_colliders` | Units are driven internally |
+| `wp_sim` (12) | Wiring for the city chase demo (see below) | Units are driven internally, and `wp_sim` uses `PoliceSystem::new()` |
+| `wp_world` (05) / lead | `RoadGraphView` as the shared road-network trait (v0.3.0) | Police build from the struct directly |
+| `wp_world` (05) | Optional: per-node turn restrictions in `RoadGraphView`; traffic cameras as a `PoiKind` | Any legal outgoing road may be taken; cameras at every third signalised node |
 | `wp_net` (07) | Player roles (captain / chase seats) → `set_human_captain`, `add_player_unit`; replicate `CaptainView` | None |
+| ui-kit (`apps/ui-kit`) | Rename `segment` → `road` (a `RoadEdgeId`) in `RequestRoadblock` / `RequestSpikes` | `wp_police` still decodes `segment` as an alias |
+
+`wp_sim` wiring for the city chase demo, once a city is set:
+1. `PoliceSystem::for_world(cfg, &world, setup)`, and pass the world to `step`.
+2. On `UnitSpawned`, spawn a police car, then `bind_unit_entity(unit, entity, geometry)`.
+   Each tick: `sync_unit`, `unit_input(unit, PHYSICS_DT)`; despawn on `UnitDespawned`.
+3. Merge `tire_puncture(entity)` into `HandlingEffects::tire_puncture`.
+4. Insert `static_colliders()` (roadblock barriers) and `spike_strips()` (line colliders).
+5. Pass `TrackedVehicle::siren` from police inputs, so traffic yields.
 
 ## Contract change requests
 | # | Change | Why | Who is affected | Status |
 |---|---|---|---|---|
 | 1 | `HandlingEffects.tire_puncture` | Spike strips | — | Already in v0.1.0 |
-| 2 | Typed `PoliceEvent` (final list below) | Replaces the `{kind, payload}` bytes | 07, 08, 10, 04 | **Variant list sent** for v0.3.0 |
-| 3 | Typed `CaptainCommand` (final list below) | Captain client | 07 | **Variant list sent** for v0.3.0 |
+| 2 | Typed `PoliceEvent` (final list below) | Replaces the `{kind, payload}` bytes | 07, 08, 10, 04, J (audio) | **Final list** for v0.3.0 |
+| 3 | Typed `CaptainCommand` + `CaptainError` (final lists below) | Captain client | 07, ui-kit | **Final list** for v0.3.0 |
 | 4 | `WorldQuery::line_of_sight` | Police LOS on the real city | — | Landed in v0.2.0; used |
-| 5 | Shared road-network trait | One road model | 05, 06 | Accepted in principle; `RoadGraph::from_city` bridges until then |
+| 5 | Shared road-network trait = D's `RoadGraphView` (+ `RoadEdgeId`) | One road model | 05, 06 | Police now consume it; ready to promote |
 | 6 | JSON Schema for `data/police/*.toml` | Data validation parity | Lead | Optional, later |
 
-### Final `PoliceEvent` variant list (for contract v0.3.0)
-These are the stable kind codes from `wp_police::events::kind`. Ids are `UnitId(u32)` and
-`ToolId(u32)`, and positions are `[f32; 3]`. They can live in contracts as-is.
+### Final `PoliceEvent` variant list (contract v0.3.0)
+Kind codes are stable (`wp_police::events::kind`). `UnitId(u32)`, `ToolId(u32)` and
+`IncidentId(u32)` are police-allocated ids. Positions are `[f32; 3]` world metres.
 | Code | Variant | Fields |
 |---|---|---|
 | 1 | `Radio` | `unit: Option<UnitId>, text: String` |
@@ -80,58 +86,56 @@ These are the stable kind codes from `wp_police::events::kind`. Ids are `UnitId(
 | 12 | `HeloLaunched` | `unit: UnitId, target: EntityId` |
 | 13 | `PitAttempt` | `unit: UnitId, target: EntityId` |
 
-### Final `CaptainCommand` list (for contract v0.3.0)
+### Final `CaptainCommand` list (contract v0.3.0)
 | Variant | Fields |
 |---|---|
-| `AssignUnit` | `unit: UnitId, order: UnitOrder { Patrol, Pursue { target }, Intercept { target }, Respond { incident: IncidentId }, Disengage }` |
-| `RequestRoadblock` | `target: EntityId, segment: Option<SegmentId>` |
-| `RequestSpikes` | `target: EntityId, segment: Option<SegmentId>` |
+| `AssignUnit` | `unit: UnitId, order: UnitOrder { Patrol, Pursue { target: EntityId }, Intercept { target: EntityId }, Respond { incident: IncidentId }, Disengage }` |
+| `RequestRoadblock` | `target: EntityId, road: Option<RoadEdgeId>` (`None` = automatic placement) |
+| `RequestSpikes` | `target: EntityId, road: Option<RoadEdgeId>` |
 | `RequestHelicopter` | `target: EntityId` |
 | `SetPriorityTarget` | `target: Option<EntityId>` |
 | `CallOff` | `target: EntityId` |
 
-The reply type would be `CaptainError { UnknownUnit, UnknownTarget, UnknownIncident, NotPursued,
-Locked { need_level: u8 }, Cooldown { remaining_s: f32 }, Budget, Site(SiteError { NoSite,
-NotOnPath, BlindCorner, Highway }), Unavailable, UnitUnavailable, Malformed }`. `SegmentId` is a
-police graph id. Once the shared road-network trait lands it should become that trait's segment id.
+`RoadEdgeId(u32)` is an index into `wp_world::roads::RoadGraphView::edges`.
+
+The reply is `Result<(), CaptainError>` with:
+- `UnknownUnit`, `UnknownTarget`, `UnknownIncident`, `NotPursued`, `Unavailable`, `UnitUnavailable`, `Malformed`;
+- `Locked { need_level: u8 }`, `Cooldown { remaining_s: f32 }`, `Budget`;
+- `Site(SiteError { NoSite, NotOnPath, BlindCorner, Highway })`.
 
 ## Changes outside my crates
 - **Root `Cargo.toml`**: `[profile.dev.package.wp_police] opt-level = 2` (kept by the lead).
-- `wp_police` now depends on `wp_world`. There's no cycle: `wp_world` doesn't depend on police, and it is wasm32-clean.
-- `tools/lint-determinism/allow.txt`: police entries deleted (integer `SimTime`).
+- `wp_police` depends on `wp_world`. There's no cycle, and it is wasm32-clean.
+- **`apps/ui-kit/tools/record-police`** (standalone tool), two edits:
+  - it now uses `wp_police::city::procedural(&ProcGenConfig::small())` instead of the removed grid city;
+  - `PursuitRecord::end` replaces `end_s` (the tool was already broken by the `SimTime` change).
+
+  Its recorded fixture (`apps/ui-kit/fixtures/runs/police_pursuit`) was not regenerated.
 
 ## Perf numbers
 | Measurement | Machine | Native | Browser | Budget |
 |---|---|---|---|---|
-| `PoliceSystem::step` per 60 Hz frame, 13 patrols + reinforcements, 4 wanted racers (`police_bench`) | Cloud Xeon 2.1 GHz, release | 0.030 ms | not measured | 0.5 ms / 1.0 ms |
+| `PoliceSystem::step` per 60 Hz frame, 13 patrols + reinforcements, 4 wanted racers, D's small city with exact building LOS (`police_bench`) | Cloud Xeon 2.1 GHz, release | 0.055 ms | not measured | 0.5 ms / 1.0 ms |
 
 ## Known gaps
-- The built-in kinematic driver and traffic-hazard model stand in until units are physical (12).
-- On D's city the built-in driver runs wide more often, on the ring road and diagonals. It's
-  mostly at low speed: the self-wreck rate is 2% over 20 Simulation pursuits.
-- `wp_sim` still uses `PoliceSystem::new()`; `for_world` is ready for it.
+- The headless kinematic body and traffic-hazard model stand in until units are physical (12).
+  It runs wide more often on D's ring road and diagonals, mostly at low speed: the self-wreck
+  rate is 1.3% over 20 Simulation pursuits.
 - Scripted racers don't react to PIT or box-ins; physics resolves those.
-- Night pursuit start varies per seed; the tests assert means and ratios.
+- Night pursuit start varies per seed (4 of 8 runs under 60 s, mean 114 s); the tests assert means and ratios.
 
 ## Response to lead feedback
-**Run 2:**
-- **Integer ticks: done.** Police time is `SimTime` (u64 µs), and the allow-list entries are deleted.
-- **Use D's road network: done**, via the converter `RoadGraph::from_city` and `PoliceSystem::for_world`:
-  - Line of sight comes from `WorldQuery::line_of_sight` (D's building footprints).
-  - Scenarios can run on D's city (`world_city: true`). `world_day_core_speeder`,
-    `world_night_core_speeder` and `world_self_wreck_sim` pass with the same tables:
-
-    | Measure | Day | Night |
-    |---|---|---|
-    | Pursuit start, mean | 9.5 s | 240 s |
-    | Reinforcement delay | 30 s | 101 s |
-
-    Self-wreck rate is 2%. A test asserts the night/day ratios.
-  - Own `procedural_city()` stays for the original tests.
-- **Use D's AI controller: partly.** It is private (`Traffic::drive_physical`), so `drive_input`
-  now ports the same steering law and takes `SteerGeometry`. I've asked D for a public function (see Needs).
-- **Real violations:** `TrafficViolation::pos` is used for report positions; heat already came from the event stream.
-- **Typed `PoliceEvent` / `CaptainCommand`:** final variant lists are above.
+**Run 2, all done:**
+- **Integer ticks:** police time is `SimTime` (u64 µs); there are no allow-list entries.
+- **D's road network:** units drive, route, predict and place tools on D's roads. `RoadGraph` is
+  built 1:1 from D's `RoadGraphView`. My grid city (`procedural_city`, `CityParams`) and my lane
+  converter are gone, so every test and scenario runs on D's procedural city. Line of sight is D's
+  building footprints.
+- **D's controller:** every unit uses `wp_world::drive::DriveController`, for physical units
+  (`unit_input`) and the headless body (`step_ground`). My `drive_input` is gone.
+- **Real violations:** `TrafficViolation::pos` places reports.
+- **Typed events:** final `PoliceEvent` / `CaptainCommand` / `CaptainError` lists are above. Captain
+  commands now name roads by D's edge id (`RoadEdgeId`).
 
 ## Lead feedback (2026-10-19, run 2)
 
@@ -177,3 +181,20 @@ optional, later.
 - Timeline with `cargo run --release -p wp_sim --example police_probe` (small city, 22:00, speeding coupe):
   13 cars on patrol, 11 violations by 5 s, pursuit at ≈ 10 s, searching at ≈ 20 s.
 - Not yet: `static_colliders()` (roadblock barriers) as physics boxes — next lead run.
+
+## Lead feedback (round 6, 2026-10-19)
+
+**Merged.** Units on D's roads and D's `DriveController` work in the sim (your new `bind_unit_entity(unit, id, geometry)` /
+`unit_input(unit, dt)` are wired in `crates/wp_sim/src/police_link.rs`).
+
+**Top priority — police cars ram stopped cars.** Since run 5 AI police cars are real Rapier vehicles. In
+`soak/traffic_soak_observer` (player car parked at the city core, 12:00) a patrol car drives into it at 10.8 m/s at
+35.5 s and another at 47 s (`Contact` a=1, b=10 / b=31). With `police_cars: false` the same run has no hits, so it is
+the units, not traffic. Units need obstacle awareness on their track: slow / stop behind any vehicle ahead (players,
+traffic, other units — `wp_sim` vehicle states, or ask D for a leader query in the shared controller), and pass or
+wait sensibly. Also: spawn units clear of other vehicles (in `golden/city_chase` a unit sits 5 m ahead of the racer).
+Done = `soak/traffic_soak_observer` passes with `police_cars: true` (lead will flip it back), and the
+`golden/city_chase` pursuit happens without a collision.
+
+Also: send your final typed `PoliceEvent` + `CaptainCommand` variant lists for contract v0.3.0 (if not already in
+this doc's contract section).

@@ -203,3 +203,12 @@ if the server should send its full state), or the approximate `Vehicle::set_stat
   `drain_applied_contacts() -> Vec<(EntityId, Vec<ContactImpulse>)>`; NET-N3 `Sim::despawn_vehicle(id)`
   (ids never reused) and `place_vehicle(id, pos, yaw, speed)`; NET-N4 `Sim::mode_table()` and
   `Sim::set_vehicle_kind(id, VehicleKind::{Player, AiRacer, Police, Traffic})` / `SimVehicle::kind`.
+
+
+## Lead feedback (round 6b, 2026-10-19) — head-start tasks
+
+Contract **v0.3.0** is being applied in parallel by the lead (branch `lead/contract-v0.3.0`). Do not edit `wp_contracts`; build your work so it drops onto v0.3.0 (inherent methods / local types now, trait wiring after). Merge `origin/claude/laughing-newton-0xqr6q` (the lead branch, ahead of `main` until today's gate finishes) before starting. Goal of the project right now: the **single-player greybox demo**: drive in the city, raise heat, get chased by physical police, escape or get caught, and pay the repair bill.
+
+1. 4-player end-to-end test on the **real** `wp_sim`: a headless server plus 4 bot clients for 60 s in a city scenario with police and traffic. Assert no desyncs beyond the correction budget, all clients see the same police units, and bandwidth per client is under budget. Record the numbers in your README.
+2. Police and physical traffic are now ordinary `wp_sim` vehicles (`VehicleKind::Police` / `Traffic`). Replicate them as entities with the kind flag. Kinematic traffic waits for v0.3.0 `TrafficAgentSnapshot`.
+3. NET-N1: damage replication on the real sim (not `ArenaSim`).

@@ -33,6 +33,29 @@ fn main() {
         traffic,
         closed_roads: traffic == 0.0,
         max_s: 120.0 * laps as f32 + 60.0,
+        live_police: std::env::var("WP_POLICE").is_ok() || std::env::var("WP_FLEE").is_ok(),
+        inject: if std::env::var("WP_FLEE").is_ok() {
+            vec![
+                (
+                    20.0,
+                    wp_police::PoliceEvent::UnitSpawned {
+                        unit: wp_police::UnitId(1),
+                        kind: wp_police::UnitKind::Car,
+                        pos: [-100.0, -166.75, 0.0],
+                        heading: [1.0, 0.0],
+                    },
+                ),
+                (
+                    20.0,
+                    wp_police::PoliceEvent::WantedLevelChanged {
+                        racer: wp_contracts::EntityId(1),
+                        level: wp_contracts::WantedLevel::L3,
+                    },
+                ),
+            ]
+        } else {
+            Vec::new()
+        },
         grid: if std::env::var("WP_SINGLE").is_ok() {
             wp_opponent::GridLayout::SingleFile
         } else {
@@ -100,6 +123,18 @@ fn main() {
                 }
             }
         }
+        if sim.tick() == 240 * 21 {
+            if let Some(c) = field.flight_of(0) {
+                let a = c.samples[0].pos;
+                let b = c.samples[c.len() - 1].pos;
+                println!(
+                    "flight: {:.0} m from ({:.0},{:.0}) to ({:.0},{:.0})",
+                    c.length_m, a[0], a[1], b[0], b[1]
+                );
+            } else {
+                println!("flight: none");
+            }
+        }
         if sim.tick() >= last_print + 240 * 10 {
             last_print = sim.tick();
             let st = field.standings();
@@ -158,6 +193,24 @@ fn main() {
         );
         println!("    pass checks {:?}", out.field.debug_of(gi).pass_checks);
     }
+    let mut kinds = std::collections::BTreeMap::new();
+    for pe in &out.police_events {
+        let k = format!("{pe:?}");
+        let name = k.split([' ', '{', '(']).next().unwrap_or("").to_string();
+        *kinds.entry(name).or_insert(0) += 1;
+        if matches!(
+            pe,
+            wp_police::PoliceEvent::WantedLevelChanged { .. }
+                | wp_police::PoliceEvent::PursuitStarted { .. }
+                | wp_police::PoliceEvent::PursuitEnded { .. }
+        ) {
+            println!("police {k}");
+        }
+    }
+    println!(
+        "police event kinds {kinds:?}; traffic violations {}",
+        out.violations
+    );
     let mut field = out.field.clone();
     for ev in field.drain_events() {
         if !matches!(ev, wp_opponent::OpponentEvent::LapCompleted { .. }) {

@@ -12,7 +12,8 @@
 //!   (follow, overtake with margin, one defensive move, back out of side-by-side, rejoin,
 //!   reverse, park), braking-point noise, damage awareness, civilian-contact DQ, police flight,
 //!   laps and standings.
-//! - [`pursuit`]: the police-heat hook ([`PoliceQuery`]).
+//! - [`pursuit`]: police awareness ([`PoliceQuery`]; [`EventHeat`] tracks wanted levels and
+//!   police sightings from `wp_police` events).
 //!
 //! Steering and pedals come from the shared controller `wp_world::drive::DriveController`
 //! (machine D's pure pursuit + PID, also used by physical traffic). **No rubber-banding**:
@@ -40,4 +41,4 @@ pub use field::{
 };
 pub use line::{LineParams, RacingLine, SpeedProfile, Usage};
 pub use profile::{DriverParams, DriverProfile};
-pub use pursuit::{FixedHeat, NoPolice, PoliceQuery};
+pub use pursuit::{EventHeat, FixedHeat, NoPolice, PoliceQuery};

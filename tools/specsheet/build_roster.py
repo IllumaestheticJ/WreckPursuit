@@ -378,7 +378,7 @@ ERA = {
 
 # gen-lattice DEFAULT_SECTIONS (m², for a 1400 kg car at strength 1), used to recognise beam
 # roles in the generated file. Keep in sync with crates/wp_damage/src/lattice_gen.rs.
-SEC = dict(cover=1.2e-4, cabin=3.0e-4, cross_member=0.15e-4, rail_hard=0.9e-4,
+SEC = dict(cover=1.2e-4, cabin=3.0e-4, cross_member=0.06e-4, rail_hard=0.9e-4,
            bumper_beam=2.0e-4, sill=3.0e-4, pillar=2.0e-4, roof_rail=1.5e-4, door_beam=1.5e-4,
            engine_mount=0.6e-4, engine_firewall=1.2e-4, structural=0.25e-4)
 RAIL_X_FRAC = 0.30
