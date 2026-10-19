@@ -1,0 +1,19 @@
+[package]
+name = "wp_opponent"
+description = "AI street-racer opponents: racing lines, speed profiles, driver personalities, race tactics."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+wp_contracts.workspace = true
+wp_math.workspace = true
+wp_vehicle.workspace = true
+wp_world.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+wp_sim.workspace = true
+wp_damage.workspace = true
+lint-determinism = { path = "../../tools/lint-determinism" }

@@ -36,6 +36,7 @@ use wp_math::{Rng, StateHasher};
 use wp_vehicle::{TireDb, Vehicle};
 
 use crate::density::{f_distance, f_time};
+use crate::drive::{DriveController, DriveGains};
 use crate::geom::{self, Obb, V2, V3};
 use crate::map::{CityMap, SegId, SegKind, NO_SEG};
 use crate::network::{IntersectionControl, TurnKind, ZoneId};
@@ -279,10 +280,8 @@ pub struct PhysicalAgent {
     pub vehicle: Vehicle,
     /// Controller output applied every physics tick.
     pub input: VehicleInput,
-    wheelbase: f32,
-    max_steer: f32,
-    v_ref: f32,
-    integ: f32,
+    /// Shared pure-pursuit + PID controller ([`crate::drive`]).
+    pub controller: DriveController,
 }
 
 /// One civilian car.
@@ -443,10 +442,7 @@ fn idm(v: f32, v0: f32, gap: f32, v_lead: f32, p: &DriverParams) -> f32 {
 }
 
 /// Unit forward (XY) of a chassis quaternion `[x, y, z, w]` (chassis +Y rotated).
-pub fn forward_of(q: [f32; 4]) -> V2 {
-    let [x, y, z, w] = q;
-    geom::normalize([2.0 * (x * y - w * z), 1.0 - 2.0 * (x * x + z * z)])
-}
+pub use crate::drive::forward_of;
 
 impl Traffic {
     /// New traffic system for a map.
@@ -1637,35 +1633,13 @@ impl Traffic {
             let pos = geom::xy(st.pos);
             let f = forward_of(st.rot);
             let v = st.speed_mps;
-            let ld = (4.0 + 0.6 * v.abs()).clamp(5.0, 25.0);
+            let ld = pa.controller.lookahead(v);
             let tp = self.path_point(map, a, a.s + ld);
-            let d = geom::sub(geom::xy(tp), pos);
-            let long = geom::dot(d, f);
-            let latd = geom::dot(d, geom::right_of(f));
-            let l2 = (long * long + latd * latd).max(1.0);
-            let curvature = -2.0 * latd / l2;
-            let delta = geom::atan(pa.wheelbase * curvature);
-            let steer = (-delta / pa.max_steer).clamp(-1.0, 1.0);
+            let steer = pa.controller.steer(pos, f, tp);
             let acc = a.acc;
             let disabled = a.disabled;
             let pa = self.agents[i].physical.as_deref_mut().unwrap();
-            pa.v_ref = (pa.v_ref + acc * TRAFFIC_DT).max(0.0);
-            if (pa.v_ref - v).abs() > 3.0 {
-                pa.v_ref = v.max(0.0);
-                pa.integ = 0.0;
-            }
-            let err = pa.v_ref - v;
-            pa.integ = (pa.integ + err * TRAFFIC_DT).clamp(-5.0, 5.0);
-            let u = acc / 6.0 + 0.5 * err + 0.1 * pa.integ;
-            let (throttle, brake) = if disabled {
-                (0.0, if v > 0.6 { 1.0 } else { 0.0 })
-            } else if u >= 0.0 {
-                (u.min(1.0), 0.0)
-            } else if v > 0.6 {
-                (0.0, (-u).min(1.0))
-            } else {
-                (0.0, 0.0)
-            };
+            let (throttle, brake) = pa.controller.pedals(v, acc, TRAFFIC_DT, disabled);
             pa.input = VehicleInput {
                 steer,
                 throttle,
@@ -1688,10 +1662,12 @@ impl Traffic {
         let pa = PhysicalAgent {
             vehicle,
             input: VehicleInput::default(),
-            wheelbase: def.wheelbase_m,
-            max_steer: def.wheels[0].max_steer_rad.max(0.1),
-            v_ref: a.v,
-            integ: 0.0,
+            controller: DriveController::new(
+                DriveGains::TRAFFIC,
+                def.wheelbase_m,
+                def.wheels[0].max_steer_rad,
+                a.v,
+            ),
         };
         let a = &mut self.agents[i];
         a.physical = Some(Box::new(pa));

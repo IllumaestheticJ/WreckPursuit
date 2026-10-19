@@ -4286,6 +4286,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "wp_opponent"
+version = "0.1.0"
+dependencies = [
+ "lint-determinism",
+ "serde",
+ "wp_contracts",
+ "wp_damage",
+ "wp_math",
+ "wp_sim",
+ "wp_vehicle",
+ "wp_world",
+]
+
+[[package]]
 name = "wp_police"
 version = "0.1.0"
 dependencies = [

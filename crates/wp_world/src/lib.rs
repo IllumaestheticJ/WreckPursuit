@@ -10,6 +10,8 @@
 //!   [`WorldQuery`].
 //! - [`traffic`]: civilian agents (IDM, MOBIL, junction right of way, hazards, density
 //!   spawning, kinematic/physical LOD).
+//! - [`drive`]: the shared AI driving controller (pure pursuit + PID) used by physical
+//!   traffic, racers (`wp_opponent`) and police.
 //! - [`density`], [`signals`], [`clock`], [`violations`], [`routes`], [`props`].
 //!
 //! [`World`] composes them. The sim loop calls [`World::set_tracked_vehicles`] (players,
@@ -21,6 +23,7 @@
 pub mod builder;
 pub mod clock;
 pub mod density;
+pub mod drive;
 pub mod geom;
 pub mod map;
 pub mod network;

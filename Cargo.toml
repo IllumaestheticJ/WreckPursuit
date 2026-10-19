@@ -10,6 +10,7 @@ members = [
     "crates/wp_weather",
     "crates/wp_economy",
     "crates/wp_net",
+    "crates/wp_opponent",
     "crates/wp_sim",
     "crates/wp_audio",
     "crates/wp_race",
@@ -44,6 +45,7 @@ wp_weather = { path = "crates/wp_weather" }
 wp_economy = { path = "crates/wp_economy" }
 wp_net = { path = "crates/wp_net" }
 wp_sim = { path = "crates/wp_sim" }
+wp_opponent = { path = "crates/wp_opponent" }
 wp_audio = { path = "crates/wp_audio" }
 wp_race = { path = "crates/wp_race" }
 
