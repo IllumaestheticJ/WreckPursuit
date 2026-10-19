@@ -319,6 +319,8 @@ pub struct DamageModel {
     pub(crate) log: Vec<DamageLogEntry>,
     pub(crate) emit_lattice_events: bool,
     pub(crate) last_emitted_pos: Vec<V3>,
+    /// Hinged/bolted panels (workstream R, `panels.rs`); `None` unless `attach_panels`.
+    pub(crate) panels: Option<Box<crate::panels::PanelSet>>,
 }
 
 impl DamageModel {
@@ -542,6 +544,7 @@ impl DamageModel {
             log: Vec::new(),
             emit_lattice_events: false,
             last_emitted_pos: rest_pos,
+            panels: None,
         };
         model.recompute_hull();
         model
@@ -813,6 +816,7 @@ impl DamageModel {
     pub fn reset(&mut self) {
         let entity = self.entity;
         let emit = self.emit_lattice_events;
+        let panels = self.take_panel_spec();
         *self = Self::with_tuning(
             &self.def.clone(),
             &self.materials.clone(),
@@ -821,6 +825,10 @@ impl DamageModel {
         );
         self.entity = entity;
         self.emit_lattice_events = emit;
+        if let Some(spec) = panels {
+            // Validated when first attached; the lattice has not changed since.
+            let _ = self.attach_panels(&spec);
+        }
     }
 
     /// Outer convex hull of the active nodes (chassis space) for the chassis collider.
@@ -884,6 +892,7 @@ impl DamageModel {
         }
         h.write_f32_q(self.health, 1e4);
         h.write_u32(self.total_loss as u32);
+        self.hash_panels(&mut h);
         h.finish()
     }
 
@@ -1394,11 +1403,13 @@ impl DamageSim for DamageModel {
             .is_multiple_of(self.tuning.solver_divider.max(1) as u64)
         {
             let t = std::mem::take(&mut self.accum_dt);
+            self.panels_pre_tick();
             if self.awake {
                 self.solve(t, mode, out);
                 self.check_groups(mode, out);
                 self.dirty = true;
             }
+            self.panels_post_tick(t, mode, out);
             if self.dirty {
                 self.update_components(mode, out);
                 self.update_health(mode, out);
