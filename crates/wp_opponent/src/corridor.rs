@@ -99,6 +99,10 @@ pub struct Corridor {
     pub length_m: f32,
     /// Use of the opposing lanes this corridor was built with.
     pub opposing: OpposingLanes,
+    /// Junction entries: `(index of the first junction sample, lane the route enters the
+    /// junction from)`, in sample order. The lane's signal (`CityMap::lane_signal`) governs
+    /// the entry. Empty for synthetic corridors.
+    pub junction_lanes: Vec<(usize, u32)>,
 }
 
 /// `(left racing, left for overtaking, right)` extents of a lane, kerb margin applied.
@@ -193,13 +197,35 @@ impl Corridor {
         // Extents per lane piece (connectors get NaN and are blended afterwards).
         // (pos, tangent, left, left_pass, right, junction)
         let mut pts: Vec<(V3, V2, f32, f32, f32, bool)> = Vec::new();
+        let mut junction_lanes: Vec<(usize, u32)> = Vec::new();
         let mut carry = 0.0f32;
+        // Lane driven before each piece (on a circuit the first piece follows the last).
+        let mut prev_lane: Option<u32> = if route.closed_loop {
+            pieces.iter().rev().find_map(|p| map.seg(p.seg).lane())
+        } else {
+            None
+        };
+        let mut prev_was_lane = true;
         for p in &pieces {
             let seg = map.seg(p.seg);
             let ext = match seg.kind {
                 SegKind::Lane { lane } => Some(lane_extents(map, lane, opts)),
                 SegKind::Connector { .. } => None,
             };
+            match seg.lane() {
+                Some(lane) => {
+                    prev_lane = Some(lane);
+                    prev_was_lane = true;
+                }
+                None => {
+                    if prev_was_lane {
+                        if let Some(lane) = prev_lane {
+                            junction_lanes.push((pts.len(), lane));
+                        }
+                    }
+                    prev_was_lane = false;
+                }
+            }
             let mut s = p.a + carry;
             while s < p.b {
                 let (pos, t) = seg.point_at(s);
@@ -278,12 +304,36 @@ impl Corridor {
         } else {
             (samples.len().saturating_sub(1)) as f32 * CORRIDOR_STEP_M
         };
+        junction_lanes.retain(|(i, _)| *i < samples.len());
         Self {
             samples,
             closed,
             length_m,
             opposing: opts.opposing,
+            junction_lanes,
         }
+    }
+
+    /// The next junction entry at or after sample `i0` within `steps` samples: `(samples
+    /// ahead, approach lane)`.
+    pub fn next_junction_lane(&self, i0: usize, steps: usize) -> Option<(usize, u32)> {
+        let n = self.samples.len();
+        if n == 0 {
+            return None;
+        }
+        self.junction_lanes
+            .iter()
+            .filter_map(|&(i, lane)| {
+                let ahead = if i >= i0 {
+                    i - i0
+                } else if self.closed {
+                    i + n - i0
+                } else {
+                    return None;
+                };
+                (ahead <= steps).then_some((ahead, lane))
+            })
+            .min_by_key(|x| x.0)
     }
 
     /// Number of samples.
@@ -502,6 +552,7 @@ mod tests {
             },
             samples,
             closed,
+            junction_lanes: Vec::new(),
         }
     }
 

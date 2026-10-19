@@ -17,7 +17,9 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use wp_contracts::{EntityId, HandlingEffects, SimEvent, VehicleInput, VehicleState, PHYSICS_DT};
+use wp_contracts::{
+    EntityId, HandlingEffects, SignalState, SimEvent, VehicleInput, VehicleState, PHYSICS_DT,
+};
 use wp_math::{Rng, StateHasher};
 use wp_world::drive::{forward_of, DriveController, DriveGains};
 use wp_world::geom::{self, Obb, V2, V3};
@@ -29,6 +31,7 @@ use crate::corridor::{Corridor, CorridorOptions, OpposingLanes, CORRIDOR_STEP_M}
 use crate::line::{LineParams, RacingLine, SpeedProfile};
 use crate::profile::{DriverParams, DriverProfile};
 use crate::pursuit::PoliceQuery;
+use wp_police::{PoliceEvent, PursuitOutcome};
 
 /// Impulse above which a racer–racer contact counts as a collision (not a rub), N·s.
 /// 400 N·s ≈ a 1.4 t car changing speed by 0.3 m/s.
@@ -54,6 +57,13 @@ pub struct RaceConfig {
     pub line: LineParams,
     /// Corridor derivation.
     pub corridor: CorridorOptions,
+    /// Read traffic signals at junctions (open roads): a lasting green means cross traffic
+    /// is held; careful drivers stop at reds. Off for closed courses.
+    pub signals: bool,
+    /// The sim applies slipstream ([`crate::draft`]): held-up racers close right up into the
+    /// tow on straights and pull out with the run it gives. Leave off unless the sim loop
+    /// really applies the drag multipliers (otherwise sitting that close only adds risk).
+    pub draft: bool,
 }
 
 impl Default for RaceConfig {
@@ -67,6 +77,8 @@ impl Default for RaceConfig {
             seed: 1,
             line: LineParams::default(),
             corridor: CorridorOptions::default(),
+            signals: true,
+            draft: false,
         }
     }
 }
@@ -121,6 +133,8 @@ pub enum RacerStatus {
     Retired,
     /// Abandoned the race to run from the police.
     Fled,
+    /// Caught by the police (stopped next to a unit while wanted).
+    Busted,
 }
 
 /// What a racer is doing right now.
@@ -138,6 +152,9 @@ pub enum Tactic {
     Reverse,
     /// Pulled over and stopped (DQ, retired, escaped).
     Park,
+    /// Pulled over for the police (wanted below the flee level with a unit on its tail);
+    /// resumes if the police lose interest.
+    Yield,
 }
 
 /// Race events reported by the field (race/economy/UI consumers; not `SimEvent`s until the
@@ -190,6 +207,27 @@ pub enum OpponentEvent {
         /// Wanted level that triggered it.
         wanted_level: u8,
     },
+    /// Pulled over for a chasing unit instead of running.
+    Yielded {
+        /// Racer.
+        entity: EntityId,
+        /// Wanted level at the time.
+        wanted_level: u8,
+    },
+    /// Caught by the police (`PursuitEnded` with a capture outcome).
+    Busted {
+        /// Racer.
+        entity: EntityId,
+        /// Race time, s.
+        time_s: f32,
+    },
+    /// A fleeing racer lost the police (no longer wanted or chased).
+    Escaped {
+        /// Racer.
+        entity: EntityId,
+        /// Race time, s.
+        time_s: f32,
+    },
     /// Two AI racers touched above [`AI_CONTACT_IMPULSE_NS`].
     AiContact {
         /// First racer.
@@ -199,6 +237,17 @@ pub enum OpponentEvent {
         /// Normal impulse, N·s.
         impulse_ns: f32,
     },
+}
+
+/// The signal governing the next junction entry on a racer's track.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct SignalAhead {
+    /// Distance to the junction entry, m.
+    d_entry: f32,
+    /// Current state for my approach.
+    state: SignalState,
+    /// Seconds until that state ends.
+    remaining_s: f32,
 }
 
 /// Who an obstacle is.
@@ -223,6 +272,9 @@ struct Obstacle {
     unstable: bool,
     /// A racer that is itself overtaking (never pass it: no three-wide).
     passing: bool,
+    /// A racer pulled over for good (retired, busted, yielding): a fixed obstacle anyone may
+    /// pass, using the opposing lanes where the corridor allows overtaking there.
+    parked: bool,
 }
 
 /// An obstacle relative to one racer: arc distance ahead (`ds` < 0 = behind) and the
@@ -308,6 +360,14 @@ struct Racer {
     /// Held up by this car and no pass possible yet: drop back through the next corner to
     /// get a run at it on the following straight.
     get_run: Option<Who>,
+    /// Seconds a chasing unit has been within [`YIELD_RADIUS_M`] (wanted below flee level).
+    yield_s: f32,
+    /// Seconds since the flight route was last planned.
+    replan_s: f32,
+    /// Fleeing racer that lost the police.
+    escaped: bool,
+    /// Seconds held at a junction by civilians that are not moving (deadlock breaker).
+    junction_wait_s: f32,
 }
 
 /// Why a racer is doing what it does (last decision), for overlays and tuning.
@@ -346,6 +406,8 @@ pub enum SpeedLimit {
     Unstable,
     /// Rejoin / park / cool-down caps.
     Mode,
+    /// Stopping for a red light (careful drivers on open roads).
+    Signal,
 }
 
 /// Standing of one racer.
@@ -395,6 +457,25 @@ const LAT_MARGIN_M: f32 = 0.35;
 const START_HOLD_M: f32 = 150.0;
 /// Seconds of lateral closing speed added to the side clearance.
 const LATERAL_LEAD_S: f32 = 0.6;
+/// A racer wanted below its flee level pulls over when a unit chasing it stays this close, m.
+pub const YIELD_RADIUS_M: f32 = 30.0;
+/// ... for this long, s.
+pub const YIELD_AFTER_S: f32 = 2.0;
+/// A fleeing racer re-plans its route when a police position is this close to the next
+/// stretch of it, m.
+const FLIGHT_THREAT_M: f32 = 35.0;
+/// Route stretch checked for police ahead, m.
+const FLIGHT_LOOKAHEAD_M: f32 = 160.0;
+/// Minimum time between flight re-plans, s.
+const FLIGHT_REPLAN_S: f32 = 6.0;
+/// Drivers below this risk stop for red lights on open roads; the others go through a red
+/// only when the junction is clear.
+pub const RED_LIGHT_RISK: f32 = 0.35;
+/// Signals are looked up this far ahead, m.
+const SIGNAL_LOOKAHEAD_M: f32 = 150.0;
+/// After waiting this long at a junction for civilians that are standing still (each waiting
+/// for the other), a racer stops counting them and creeps through, s.
+const JUNCTION_DEADLOCK_S: f32 = 3.0;
 
 impl Field {
     /// Build a field on `corridor`. Lines are optimised once per distinct car width.
@@ -482,6 +563,10 @@ impl Field {
                 ),
                 alongside_s: 0.0,
                 get_run: None,
+                yield_s: 0.0,
+                replan_s: 0.0,
+                escaped: false,
+                junction_wait_s: 0.0,
                 running_wide: false,
                 start_n: 0.0,
                 last_pass: None,
@@ -653,6 +738,7 @@ impl Field {
                 RacerStatus::Disqualified => 2,
                 RacerStatus::Retired => 3,
                 RacerStatus::Fled => 4,
+                RacerStatus::Busted => 5,
             });
             h.write_u32(r.tactic as u32);
             h.write_u32(r.laps_done);
@@ -685,6 +771,7 @@ impl Field {
         police: &dyn PoliceQuery,
     ) -> &[(EntityId, VehicleInput)] {
         self.record_contacts(events);
+        self.record_police(events);
         if self
             .tick
             .is_multiple_of(self.config.decision_ticks.max(1) as u64)
@@ -698,7 +785,8 @@ impl Field {
                     None => snapshot.clone(),
                     Some(f) => self.perceive_on(&f.corridor, k, world, vehicles),
                 };
-                self.decide(k, &obstacles, &civs, dt);
+                let signal = self.signal_ahead(k, world);
+                self.decide(k, &obstacles, &civs, signal, dt);
             }
             self.outputs = self.racers.iter().map(|r| (r.entity, r.input)).collect();
         } else {
@@ -738,6 +826,50 @@ impl Field {
         }
     }
 
+    /// Pursuit outcomes from the sim's police events: captures end a racer's event; a
+    /// pursuit that ends otherwise releases a yielding racer.
+    fn record_police(&mut self, events: &[SimEvent]) {
+        for ev in events {
+            let Some(PoliceEvent::PursuitEnded { racer, outcome }) =
+                PoliceEvent::from_sim_event(ev)
+            else {
+                continue;
+            };
+            let Some(k) = self.racer_index(racer) else {
+                continue;
+            };
+            let time_s = self.tick as f32 * PHYSICS_DT;
+            let r = &mut self.racers[k];
+            match outcome {
+                PursuitOutcome::Captured | PursuitOutcome::CapturedTotalLoss => {
+                    if r.status != RacerStatus::Busted {
+                        r.status = RacerStatus::Busted;
+                        r.tactic = Tactic::Park;
+                        self.events.push(OpponentEvent::Busted {
+                            entity: r.entity,
+                            time_s,
+                        });
+                    }
+                }
+                _ => {
+                    if r.status == RacerStatus::Fled && !r.escaped {
+                        r.escaped = true;
+                        r.v_cap = self.config.cooldown_speed_mps;
+                        self.events.push(OpponentEvent::Escaped {
+                            entity: r.entity,
+                            time_s,
+                        });
+                    }
+                    if r.tactic == Tactic::Yield {
+                        r.tactic = Tactic::Rejoin;
+                        r.tactic_ticks = 0;
+                        r.yield_s = 0.0;
+                    }
+                }
+            }
+        }
+    }
+
     /// Step 1: kinematics, progress, laps, damage, heat, civilian DQ.
     fn observe(
         &mut self,
@@ -748,6 +880,8 @@ impl Field {
     ) {
         let laps = self.config.laps.max(1);
         let tick = self.tick;
+        // Police positions, fetched once per decision and only if someone is wanted.
+        let mut police_at: Option<Vec<V2>> = None;
         for k in 0..self.racers.len() {
             let Some(obs) = vehicles.iter().find(|v| v.entity == self.racers[k].entity) else {
                 continue;
@@ -898,30 +1032,9 @@ impl Field {
             r.pressure = (r.pressure - 0.5 * dt).max(0.0);
             // Police heat.
             let lvl = police.wanted_level(r.entity);
-            if self.config.allow_abandon
-                && r.status == RacerStatus::Racing
-                && lvl >= r.params.flee_wanted_level
-            {
-                r.status = RacerStatus::Fled;
-                self.events.push(OpponentEvent::Abandoned {
-                    entity: r.entity,
-                    wanted_level: lvl,
-                });
-                let police_at = police.police_positions();
-                let flight = plan_flight(world, &self.racers[k], &self.config, &police_at);
-                let r = &mut self.racers[k];
-                match flight {
-                    Some(f) => {
-                        let cp = f.corridor.project(r.pos, None, 0);
-                        r.hint = cp.index;
-                        r.s = cp.s;
-                        r.n = cp.n;
-                        r.n_cmd = cp.n;
-                        r.tactic = Tactic::Follow;
-                        r.flight = Some(Box::new(f));
-                    }
-                    None => r.tactic = Tactic::Park,
-                }
+            if lvl > 0 || r.status == RacerStatus::Fled || r.tactic == Tactic::Yield {
+                let at = police_at.get_or_insert_with(|| police.police_positions());
+                self.react_to_police(k, world, police, at, lvl, dt);
             }
         }
         // Civilian contact = DQ.
@@ -958,7 +1071,10 @@ impl Field {
                         })
                         .unwrap_or(0.0)
                     };
-                    if geom::obb_overlap(&me, &other) && toward > 0.5 {
+                    // ... and only while driving: a car shoved into a civilian (by police,
+                    // say) with its foot off the throttle did nothing wrong.
+                    let driving = r.throttle > 0.05;
+                    if geom::obb_overlap(&me, &other) && toward > 0.5 && driving {
                         let r = &mut self.racers[k];
                         if r.status == RacerStatus::Racing {
                             // Out of the race; drives on at cool-down pace (a car parked on
@@ -975,6 +1091,130 @@ impl Field {
                     }
                 }
             }
+        }
+    }
+
+    /// Flee, yield or keep going for racer `k` wanted at `lvl` (see the module docs).
+    fn react_to_police(
+        &mut self,
+        k: usize,
+        world: &World,
+        police: &dyn PoliceQuery,
+        police_at: &[V2],
+        lvl: u8,
+        dt: f32,
+    ) {
+        let time_s = self.tick as f32 * PHYSICS_DT;
+        let r = &mut self.racers[k];
+        let chased = police.in_pursuit(r.entity);
+        let nearest = police_at
+            .iter()
+            .fold(f32::INFINITY, |m, p| m.min(geom::dist(*p, r.pos)));
+        match r.status {
+            RacerStatus::Racing
+                if self.config.allow_abandon && lvl >= r.params.flee_wanted_level =>
+            {
+                r.status = RacerStatus::Fled;
+                r.yield_s = 0.0;
+                self.events.push(OpponentEvent::Abandoned {
+                    entity: r.entity,
+                    wanted_level: lvl,
+                });
+                self.start_flight(k, world, police_at);
+            }
+            RacerStatus::Racing | RacerStatus::Finished { .. } | RacerStatus::Disqualified => {
+                // Wanted below my flee level: keep going until a unit is right on me, then
+                // pull over and take the ticket.
+                if r.tactic == Tactic::Yield {
+                    if lvl == 0 || !chased {
+                        r.tactic = Tactic::Rejoin;
+                        r.tactic_ticks = 0;
+                        r.yield_s = 0.0;
+                    }
+                } else if lvl > 0 && chased && nearest < YIELD_RADIUS_M {
+                    r.yield_s += dt;
+                    if r.yield_s >= YIELD_AFTER_S && r.tactic != Tactic::Park {
+                        r.tactic = Tactic::Yield;
+                        r.tactic_ticks = 0;
+                        r.pass_target = None;
+                        self.events.push(OpponentEvent::Yielded {
+                            entity: r.entity,
+                            wanted_level: lvl,
+                        });
+                    }
+                } else {
+                    r.yield_s = (r.yield_s - dt).max(0.0);
+                }
+            }
+            RacerStatus::Fled if !r.escaped => {
+                if lvl == 0 && !chased {
+                    r.escaped = true;
+                    r.v_cap = self.config.cooldown_speed_mps;
+                    self.events.push(OpponentEvent::Escaped {
+                        entity: r.entity,
+                        time_s,
+                    });
+                    return;
+                }
+                r.replan_s += dt;
+                let Some(f) = &r.flight else {
+                    // No route could be planned last time: try again now and then.
+                    if r.replan_s >= FLIGHT_REPLAN_S {
+                        self.start_flight(k, world, police_at);
+                    }
+                    return;
+                };
+                let near_end = r.s > f.corridor.length_m - 40.0;
+                // Police waiting further along my route (not the ones on my tail: a chaser
+                // behind is beaten by driving on, not by turning around).
+                let ahead: Vec<V2> = police_at
+                    .iter()
+                    .copied()
+                    .filter(|q| geom::dot(geom::sub(*q, r.pos), r.fwd) > 15.0)
+                    .collect();
+                let threat_ahead = r.replan_s >= FLIGHT_REPLAN_S && !ahead.is_empty() && {
+                    let mut x = 20.0;
+                    let mut hit = false;
+                    while x <= FLIGHT_LOOKAHEAD_M && !hit {
+                        let i = ((r.s + x) / CORRIDOR_STEP_M) as isize;
+                        let p = geom::xy(f.corridor.sample(i).pos);
+                        hit = ahead.iter().any(|q| geom::dist(*q, p) < FLIGHT_THREAT_M);
+                        x += 4.0 * CORRIDOR_STEP_M;
+                    }
+                    hit
+                };
+                if (near_end && r.replan_s >= 1.0) || threat_ahead {
+                    self.start_flight(k, world, police_at);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Plan (or re-plan) racer `k`'s flight route away from `police_at`. Keeps the old route
+    /// when no new one plans; parks when there is none at all.
+    fn start_flight(&mut self, k: usize, world: &World, police_at: &[V2]) {
+        let flight = plan_flight(world, &self.racers[k], &self.config, police_at);
+        let r = &mut self.racers[k];
+        r.replan_s = 0.0;
+        match flight {
+            Some(f) => {
+                let cp = f.corridor.project(r.pos, None, 0);
+                r.hint = cp.index;
+                r.s = cp.s;
+                r.n = cp.n;
+                r.n_cmd = cp.n;
+                if matches!(
+                    r.tactic,
+                    Tactic::Park | Tactic::Yield | Tactic::Overtake | Tactic::Defend
+                ) {
+                    r.tactic = Tactic::Follow;
+                }
+                r.pass_target = None;
+                r.flight = Some(Box::new(f));
+            }
+            None if r.flight.is_none() => r.tactic = Tactic::Park,
+            None => {}
         }
     }
 
@@ -1005,6 +1245,7 @@ impl Field {
                             half_w: r.ext.1,
                             unstable,
                             passing: r.tactic == Tactic::Overtake,
+                            parked: matches!(r.tactic, Tactic::Park | Tactic::Yield),
                         });
                         continue;
                     }
@@ -1074,7 +1315,36 @@ impl Field {
         out
     }
 
-    fn decide(&mut self, k: usize, obstacles: &[Obstacle], civs: &[(u32, V2, V2)], dt: f32) {
+    /// Signal state of the next junction entry on racer `k`'s track (None: unsignalised,
+    /// too far, or signals ignored by the race rules).
+    fn signal_ahead(&self, k: usize, world: &World) -> Option<SignalAhead> {
+        if !self.config.signals {
+            return None;
+        }
+        let r = &self.racers[k];
+        let corridor = match &r.flight {
+            Some(f) => &f.corridor,
+            None => &self.corridor,
+        };
+        let i0 = corridor.wrap((r.s / CORRIDOR_STEP_M) as isize);
+        let steps = (SIGNAL_LOOKAHEAD_M / CORRIDOR_STEP_M) as usize;
+        let (ahead, lane) = corridor.next_junction_lane(i0, steps)?;
+        let (state, remaining_s) = world.map().lane_signal(lane)?;
+        Some(SignalAhead {
+            d_entry: ahead as f32 * CORRIDOR_STEP_M,
+            state,
+            remaining_s,
+        })
+    }
+
+    fn decide(
+        &mut self,
+        k: usize,
+        obstacles: &[Obstacle],
+        civs: &[(u32, V2, V2)],
+        signal: Option<SignalAhead>,
+        dt: f32,
+    ) {
         // Take the racer's own track data out while it is mutated.
         let flight = self.racers[k].flight.take();
         let speed = std::mem::replace(
@@ -1090,9 +1360,12 @@ impl Field {
             Some(f) => (&f.corridor, &f.line, &f.profile),
             None => (&self.corridor, &self.lines[line_idx].1, &speed),
         };
+        let draft = self.config.draft;
         decide_racer(
             &mut self.racers[k],
             civs,
+            signal,
+            draft,
             k,
             corridor,
             line,
@@ -1146,6 +1419,8 @@ impl Field {
 fn decide_racer(
     r: &mut Racer,
     civs: &[(u32, V2, V2)],
+    signal: Option<SignalAhead>,
+    draft: bool,
     k: usize,
     corridor: &Corridor,
     line: &RacingLine,
@@ -1170,9 +1445,16 @@ fn decide_racer(
             }
         };
         let limits = |s: f32| to_limits(corridor.bounds(s));
-        // Overtaking may use the opposing lanes on open roads (risk-takers only).
-        let may_use_opposing =
-            corridor.opposing == OpposingLanes::ForOvertaking && r.profile.risk >= 0.5;
+        // Overtaking may use the opposing lanes on open roads: risk-takers always, everyone
+        // to get round a pulled-over racer just ahead.
+        let parked_ahead = obstacles.iter().any(|o| {
+            o.parked && o.who != Who::Racer(k) && {
+                let ds = corridor.delta_s(r.s, o.s);
+                ds > -(hl + o.half_len) && ds < 60.0
+            }
+        });
+        let may_use_opposing = corridor.opposing == OpposingLanes::ForOvertaking
+            && (r.profile.risk >= 0.5 || parked_ahead);
         let pass_limits = |s: f32| {
             if may_use_opposing {
                 to_limits(corridor.pass_bounds(s))
@@ -1243,9 +1525,13 @@ fn decide_racer(
         let (lim_lo, lim_hi) = limits(r.s);
         let (pass_lo, pass_hi) = pass_limits(r.s);
         r.tactic_ticks += 1;
-        let parked = r.status == RacerStatus::Retired || r.tactic == Tactic::Park;
+        let parked = matches!(r.status, RacerStatus::Retired | RacerStatus::Busted)
+            || r.tactic == Tactic::Park;
         if parked {
             r.tactic = Tactic::Park;
+        } else if r.tactic == Tactic::Yield {
+            // Pulled over for the police: hold still until released.
+            r.stuck_s = 0.0;
         } else {
             // Off the corridor / facing the wrong way → rejoin.
             let t = corridor.samples[r.hint].tangent;
@@ -1407,10 +1693,14 @@ fn decide_racer(
                     tuck = Some(x.o.n);
                 }
                 // Patience when stuck behind; none needed when arriving with a real run.
-                let momentum = v - x.o.v_s > 2.5 && x.gap < 30.0 && brake_dist > v * 1.5;
+                // A run: real closing speed, or (with slipstream) a smaller one built in the
+                // tow right behind it.
+                let tow_run = draft && v - x.o.v_s > 0.8 && x.gap < 12.0;
+                let momentum =
+                    (v - x.o.v_s > 2.5 || tow_run) && x.gap < 30.0 && brake_dist > v * 1.5;
                 if (r.blocked_s > p.overtake_patience_s || momentum)
                     && x.o.v_s > -1.0
-                    && !start_phase
+                    && (!start_phase || x.o.parked)
                 {
                     let ctx = PassCtx {
                         corridor,
@@ -1419,6 +1709,7 @@ fn decide_racer(
                         brake_dist,
                         v,
                         margin: margin_for(&x.o),
+                        draft,
                     };
                     let plan = plan_pass(r, x, &rel, &ctx, &pass_limits);
                     let slot = match plan {
@@ -1517,14 +1808,14 @@ fn decide_racer(
                 follow_w = 0.0;
                 r.n
             }
-            Tactic::Park => {
+            Tactic::Park | Tactic::Yield => {
                 follow_w = 0.0;
                 lim_hi
             }
         };
         let rate = match r.tactic {
             Tactic::Overtake | Tactic::Defend => 1.4 + 1.0 * r.profile.aggression,
-            Tactic::Park => 0.8,
+            Tactic::Park | Tactic::Yield => 0.8,
             _ => 0.9,
         };
         if r.n_cmd.is_nan() {
@@ -1587,9 +1878,17 @@ fn decide_racer(
         if r.status == RacerStatus::Fled && fleeing && r.s > corridor.length_m - 15.0 {
             r.tactic = Tactic::Park;
         }
+        // Pulling over for the police: roll on slowly until at the kerb and clear of any
+        // junction, then stop there (a car stopped mid-lane blocks everyone behind it).
+        let pulling_over = r.tactic == Tactic::Yield && {
+            let i0 = (r.s / CORRIDOR_STEP_M) as isize;
+            let near_junction = (-3..=12).any(|j| corridor.sample(i0 + j).junction);
+            (r.n - lim_hi).abs() > 0.5 || near_junction
+        };
         match r.tactic {
             Tactic::Rejoin => cap_to(&mut v_target, 7.0, SpeedLimit::Mode),
-            Tactic::Park => cap_to(
+            Tactic::Yield if pulling_over => cap_to(&mut v_target, 6.0, SpeedLimit::Mode),
+            Tactic::Park | Tactic::Yield => cap_to(
                 &mut v_target,
                 (v - 3.0 * dt * 4.0).max(0.0),
                 SpeedLimit::Mode,
@@ -1634,8 +1933,12 @@ fn decide_racer(
             }
         }
         // Junction awareness: while a civilian is heading into (or is inside) the next
-        // junction box, keep the ability to stop before entering it.
-        if !civs.is_empty() {
+        // junction box, keep the ability to stop before entering it. With a green that lasts
+        // until I am through, cross traffic is held at its red: only civilians already moving
+        // inside the box count. At a red, careful drivers stop at the line; the rest go
+        // through only when nobody is heading in.
+        let mut held_by_stopped = false;
+        if !civs.is_empty() || signal.is_some() {
             let i0 = corridor.wrap((r.s / CORRIDOR_STEP_M) as isize);
             let horizon = (v * v / (2.0 * a_brk) + 30.0).min(130.0);
             let steps = (horizon / CORRIDOR_STEP_M) as isize;
@@ -1656,6 +1959,29 @@ fn decide_racer(
                 let d_entry = j as f32 * CORRIDOR_STEP_M;
                 let t_dir = corridor.sample(i0 as isize + (j + j_end) / 2).tangent;
                 let watch = 25.0 + 20.0 * r.profile.awareness;
+                // The signal belongs to this junction only if its entry is this entry.
+                let sig = signal.filter(|g| {
+                    !in_junction && (g.d_entry - d_entry).abs() <= 2.5 * CORRIDOR_STEP_M
+                });
+                let v_app = v.max(4.0);
+                let t_arrive = d_entry / v_app;
+                let t_through = t_arrive + (j_end - j) as f32 * CORRIDOR_STEP_M / v_app + 1.0;
+                let stop_dist = v * v / (2.0 * a_brk);
+                let can_stop = stop_dist < d_entry - 2.0;
+                let protected =
+                    sig.is_some_and(|g| g.state == SignalState::Green && g.remaining_s > t_through);
+                let red_on_arrival = sig.is_some_and(|g| match g.state {
+                    SignalState::Red => g.remaining_s > t_arrive - 0.5,
+                    SignalState::Yellow => can_stop,
+                    SignalState::Green => g.remaining_s < t_arrive && can_stop,
+                    SignalState::Off => false,
+                });
+                // Nobody stops for a red with the police behind them.
+                if red_on_arrival && can_stop && !fleeing && r.profile.risk < RED_LIGHT_RISK {
+                    let free = (d_entry - 4.0).max(0.0);
+                    let cap = (2.0 * a_brk * 0.8 * free).sqrt();
+                    cap_to(&mut v_target, cap, SpeedLimit::Signal);
+                }
                 for (id, pos, vel) in civs {
                     let to = geom::sub(c_j, *pos);
                     let d = geom::len(to);
@@ -1669,11 +1995,19 @@ fn decide_racer(
                     }
                     // Stopped civilians inside are waiting for me once I'm in the box
                     // myself (avoid a stand-off); moving ones always count.
-                    let inside = d < radius && (speed > 0.5 || !in_junction);
-                    let heading_in = speed > 0.5
+                    // A stopped car in the box that has not moved while I waited is waiting
+                    // for me: stop counting it (no stand-off).
+                    let waited_out = r.junction_wait_s > JUNCTION_DEADLOCK_S;
+                    let inside =
+                        d < radius && (speed > 0.5 || (!in_junction && !protected && !waited_out));
+                    let heading_in = !protected
+                        && speed > 0.5
                         && geom::dot(*vel, to) > 0.5 * speed * d
                         && (d - radius) / speed < 4.0;
                     if inside || heading_in {
+                        if speed <= 0.5 {
+                            held_by_stopped = true;
+                        }
                         let free = if in_junction {
                             0.0
                         } else {
@@ -1684,6 +2018,11 @@ fn decide_racer(
                     }
                 }
             }
+        }
+        if held_by_stopped && v < 1.5 {
+            r.junction_wait_s += dt;
+        } else if v > 3.0 {
+            r.junction_wait_s = 0.0;
         }
         // Obstacle caps: anything ahead in the band I'm driving through.
         let band = my_band(r.n, n_cmd);
@@ -1704,11 +2043,22 @@ fn decide_racer(
                 || line.curvature[corridor.wrap((r.s / CORRIDOR_STEP_M) as isize)].abs()
                     > 1.0 / 80.0;
             // Held up on a straight with pace in hand: close up to a tow position (short
-            // gap) before pulling out. Without a draft model in `wp_vehicle`, dropping back
-            // to get a run only loses ground, so `get_run` only ever shortens the gap.
-            let towing = r.get_run == Some(o.who) && !in_corner && brake_dist > v * 2.0;
+            // gap) before pulling out. With slipstream in the sim, stay flat out in the wake
+            // down to the minimum gap (the braking-distance cap below still holds) so the
+            // tow builds a run.
+            let towing = (r.get_run == Some(o.who)
+                || (draft && v_line(r.s + v) > o.v_s + 1.0 && x.gap < 25.0))
+                && !in_corner
+                && brake_dist > v * 2.0;
+            // With slipstream, a time gap kept through the corner becomes a distance gap the
+            // wake cannot bridge on the straight: stay tight on its exit too.
+            let exit_tow = draft && !r.in_brake_zone && matches!(o.who, Who::Racer(_));
             let headway = if civ {
                 p.civilian_headway_s
+            } else if towing && draft {
+                0.0
+            } else if exit_tow {
+                0.3
             } else if towing {
                 (p.headway_s * 0.5).max(0.3)
             } else {
@@ -1759,7 +2109,10 @@ fn decide_racer(
             .find(|x| !is_civ(&x.o) && x.ds > 0.0 && x.ds < hl + x.o.half_len + 0.5);
         if let Some(x) = alongside_ahead {
             let into_corner = brake_dist < v * p.side_by_side_s && r.tactic != Tactic::Overtake;
-            if squeezed_by_ahead || into_corner || r.unstable {
+            if x.o.parked || x.o.v_s.abs() < 1.0 {
+                // Backing away from a stopped car gains nothing: creep past it.
+                cap_to(&mut v_target, 4.0, SpeedLimit::BackOut(who_id(x.o.who)));
+            } else if squeezed_by_ahead || into_corner || r.unstable {
                 cap_to(
                     &mut v_target,
                     x.o.v_s - 1.5,
@@ -1795,8 +2148,15 @@ fn decide_racer(
             if decel_demand > 0.5 {
                 acc = acc.min(-1.2 * decel_demand);
             }
-            let hold = r.tactic == Tactic::Park && v < 0.6;
+            let hold = matches!(r.tactic, Tactic::Park | Tactic::Yield) && v < 0.6;
             let (mut th, br) = r.ctrl.pedals(v, acc, dt, hold);
+            // The controller releases the brake pedal near a standstill (a held brake there
+            // selects reverse): a car told to stop holds on the handbrake instead of idling
+            // forward into whatever it stopped for.
+            if v < 1.5 && (v_target < 0.3 || matches!(r.tactic, Tactic::Park | Tactic::Yield)) {
+                input.handbrake = 1.0;
+                th = 0.0;
+            }
             if r.unstable {
                 th = th.min(0.2);
             }
@@ -1856,6 +2216,7 @@ fn vehicle_obstacle(
         half_w: 0.5 * (w * ca + len * sa),
         unstable: v_long > 8.0 && v_lat.abs() > 0.2 * v_long,
         passing: false,
+        parked: false,
     })
 }
 
@@ -1900,6 +2261,7 @@ fn civilians_on(
             half_w: 0.5 * (CAR_WIDTH_M * ca + CAR_LENGTH_M * sa),
             unstable: false,
             passing: false,
+            parked: false,
         });
     }
     out
@@ -1925,6 +2287,8 @@ struct PassCtx<'a> {
     brake_dist: f32,
     v: f32,
     margin: f32,
+    /// The sim applies slipstream.
+    draft: bool,
 }
 
 /// Choose a passing lateral position beside `target`, or None if no side is clear far
@@ -1947,11 +2311,21 @@ fn plan_pass(
     let clear_len = target.gap.max(0.0) + 2.0 * hl + 2.0 * o.half_len + 3.0;
     let potential = ctx.corridor.interp(&ctx.profile.v, r.s + v) - o.v_s;
     let t_clear = (clear_len / (v - o.v_s).max(0.6 * potential).max(1.0)).min(4.0);
-    let pass_dist = (v * t_clear).max(40.0);
+    // A pulled-over car only needs room until I am past it.
+    let pass_dist = if o.parked {
+        clear_len + 5.0
+    } else {
+        (v * t_clear).max(40.0)
+    };
     // No three-wide: never pass a car that is passing, nor start a pass while a car is
     // alongside me.
+    // (A car right behind me in line is not alongside.)
     let engaged = rel.iter().any(|q| {
-        q.o.who != o.who && !matches!(q.o.who, Who::Civilian(_)) && q.ds <= 0.0 && q.gap < 3.0
+        q.o.who != o.who
+            && !matches!(q.o.who, Who::Civilian(_))
+            && q.ds <= 0.0
+            && q.gap < 3.0
+            && (q.o.n - r.n).abs() > hw + q.o.half_w - 0.5
     });
     if o.passing || engaged {
         return Err(PassReject::TargetBusy);
@@ -1961,7 +2335,7 @@ fn plan_pass(
     let potential = ctx.corridor.interp(&ctx.profile.v, r.s + v) - o.v_s;
     let straight = ctx.brake_dist > v * 2.0;
     let closing = (v - o.v_s).max(if straight { 0.6 * potential } else { 0.0 });
-    let tow = target.gap < 4.0 && straight;
+    let tow = (target.gap < 4.0 || (ctx.draft && target.gap < 8.0)) && straight;
     if closing < 0.5 && !tow {
         return Err(PassReject::NoRun);
     }
@@ -2110,6 +2484,7 @@ mod tests {
             closed: false,
             length_m: (n - 1) as f32 * CORRIDOR_STEP_M,
             opposing: OpposingLanes::Never,
+            junction_lanes: Vec::new(),
         }
     }
 
@@ -2151,6 +2526,80 @@ mod tests {
             })
             .collect();
         Field::new(straight(), &specs, RaceConfig::default())
+    }
+
+    /// One racer of `risk` at y = 70 m doing 15 m/s on a straight with a junction box at
+    /// y = 100..120 m; returns its debug after one decision with `signal` and `civs`.
+    fn junction_decision(risk: f32, signal: Option<SignalAhead>, civs: &[(u32, V2, V2)]) -> Debug {
+        let mut corridor = straight();
+        for smp in &mut corridor.samples[50..60] {
+            smp.junction = true;
+        }
+        let spec = RacerSpec {
+            entity: EntityId(1),
+            profile: DriverProfile {
+                risk,
+                ..DriverProfile::default()
+            },
+            capability: cap(),
+        };
+        let mut f = Field::new(corridor, &[spec], RaceConfig::default());
+        let world = World::flat(TimeOfDay::from_hours(12.0), 1.0);
+        // Past the start-discipline zone, so only the junction rules apply.
+        f.racers[0].laps_done = 1;
+        f.tick(
+            &world,
+            &[obs(1, 70.0, 15.0, HandlingEffects::NEUTRAL)],
+            &[],
+            &NoPolice,
+        );
+        f.decide(0, &[], civs, signal, 4.0 * PHYSICS_DT);
+        f.debug_of(0)
+    }
+
+    #[test]
+    fn careful_driver_stops_for_a_red_and_a_risk_taker_does_not() {
+        let red = Some(SignalAhead {
+            d_entry: 30.0,
+            state: SignalState::Red,
+            remaining_s: 20.0,
+        });
+        let careful = junction_decision(0.1, red, &[]);
+        assert_eq!(careful.limit, SpeedLimit::Signal);
+        // Capped to the stopping envelope for the line (4 m before the box).
+        assert!(careful.v_target * careful.v_target < 2.0 * 12.0 * 26.0);
+        let bold = junction_decision(0.6, red, &[]);
+        assert_ne!(bold.limit, SpeedLimit::Signal);
+        // A green that turns red before arrival counts as a red for the careful driver.
+        let stale = junction_decision(
+            0.1,
+            Some(SignalAhead {
+                d_entry: 30.0,
+                state: SignalState::Green,
+                remaining_s: 1.0,
+            }),
+            &[],
+        );
+        assert_eq!(stale.limit, SpeedLimit::Signal);
+    }
+
+    #[test]
+    fn lasting_green_ignores_cross_traffic_held_at_its_red() {
+        // A civilian stopped at the edge of the junction box (cross street).
+        let civ = [(7u32, [8.0f32, 110.0f32], [0.0f32, 0.0f32])];
+        let unsignalised = junction_decision(0.4, None, &civ);
+        assert_eq!(unsignalised.limit, SpeedLimit::Obstacle(1_000_007));
+        let green = Some(SignalAhead {
+            d_entry: 30.0,
+            state: SignalState::Green,
+            remaining_s: 30.0,
+        });
+        let protected = junction_decision(0.4, green, &civ);
+        assert_ne!(protected.limit, SpeedLimit::Obstacle(1_000_007));
+        // A civilian still moving inside the box counts even on green.
+        let moving = [(7u32, [4.0f32, 110.0f32], [-6.0f32, 0.0f32])];
+        let busy = junction_decision(0.4, green, &moving);
+        assert_eq!(busy.limit, SpeedLimit::Obstacle(1_000_007));
     }
 
     #[test]

@@ -1,13 +1,21 @@
-//! Police awareness. The field asks a [`PoliceQuery`] for each racer's wanted level and where
-//! police were last seen. [`EventHeat`] builds that from the sim's event stream
-//! (`wp_police::PoliceEvent`s inside `SimEvent::PoliceEvent`), so the sim loop does not have to
-//! expose the police system; an adapter over `wp_police::PoliceSystem` works too.
+//! Police awareness. The field asks a [`PoliceQuery`] for each racer's wanted level, whether
+//! it is being chased, and where police are. Two implementations:
+//!
+//! - [`SimPolice`]: live, read-only view of `wp_sim`'s `PoliceSystem` (`Sim::police()`): wanted
+//!   levels, pursuit status and the *current* positions of every ground unit and roadblock.
+//!   Use this whenever the sim runs police units.
+//! - [`EventHeat`]: built from the sim's event stream (`wp_police::PoliceEvent`s inside
+//!   `SimEvent::PoliceEvent`); positions are only the last *reported* ones (spawns,
+//!   roadblocks). Useful when only events are available (replays, net clients).
+//!
 //! Levels are `WantedLevel::number()`: 0 = not wanted, 1..=5.
 
 use std::collections::BTreeMap;
 
 use wp_contracts::{EntityId, SimEvent};
 use wp_police::events::{PoliceEvent, PoliceEventExt, UnitId};
+use wp_police::heat::PursuitStatus;
+use wp_police::{PoliceSystem, UnitKind};
 use wp_world::geom::V2;
 
 /// What a racer can know about the police.
@@ -19,6 +27,41 @@ pub trait PoliceQuery {
     /// them. Default: none known.
     fn police_positions(&self) -> Vec<V2> {
         Vec::new()
+    }
+
+    /// Whether police are actively chasing `racer` (pursuit or search running). Default: no.
+    fn in_pursuit(&self, _racer: EntityId) -> bool {
+        false
+    }
+}
+
+/// Live read-only view of the sim's police system (`Sim::police()`).
+///
+/// Positions are every ground unit's current body position plus placed roadblocks, in the
+/// police system's list order (deterministic). Helicopters are left out: a racer cannot
+/// drive away from one by choosing streets.
+#[derive(Clone, Copy)]
+pub struct SimPolice<'a>(pub &'a PoliceSystem);
+
+impl PoliceQuery for SimPolice<'_> {
+    fn wanted_level(&self, racer: EntityId) -> u8 {
+        self.0.wanted_level(racer).number()
+    }
+
+    fn police_positions(&self) -> Vec<V2> {
+        self.0
+            .units()
+            .iter()
+            .filter(|u| u.kind == UnitKind::Car)
+            .map(|u| u.body.pos)
+            .chain(self.0.roadblocks().iter().map(|b| b.site.pos))
+            .collect()
+    }
+
+    fn in_pursuit(&self, racer: EntityId) -> bool {
+        self.0
+            .racer(racer)
+            .is_some_and(|r| matches!(r.status, PursuitStatus::Pursuit | PursuitStatus::Searching))
     }
 }
 
@@ -97,6 +140,10 @@ impl EventHeat {
 impl PoliceQuery for EventHeat {
     fn wanted_level(&self, racer: EntityId) -> u8 {
         self.levels.get(&racer).copied().unwrap_or(0)
+    }
+
+    fn in_pursuit(&self, racer: EntityId) -> bool {
+        EventHeat::in_pursuit(self, racer)
     }
 
     fn police_positions(&self) -> Vec<V2> {

@@ -8,7 +8,7 @@ mod common;
 use std::collections::BTreeMap;
 
 use common::Setup;
-use wp_contracts::EntityId;
+use wp_contracts::{EntityId, VehicleSim};
 use wp_opponent::{
     DriverProfile, FixedHeat, GridLayout, OpponentEvent, RacerStatus, AI_CONTACT_IMPULSE_NS,
 };
@@ -226,9 +226,10 @@ fn wanted_racer_abandons_the_race_and_runs() {
 
 #[test]
 fn open_roads_with_traffic_no_civilian_contact() {
-    // An illegal street race on open roads: civilian traffic, junctions, signals. Pace is
-    // slow (racers yield at busy junctions); what matters is that nobody touches a civilian
-    // and nobody hits another racer.
+    // An illegal street race on open roads: civilian traffic, junctions, signals. Racers read
+    // the signals (a lasting green means cross traffic is held), wait out reds when cross
+    // traffic is moving, and break junction stand-offs. Nobody touches a civilian, nobody
+    // hits another racer, nobody is stuck.
     let setup = Setup {
         seed: 7,
         laps: 1,
@@ -253,6 +254,12 @@ fn open_roads_with_traffic_no_civilian_contact() {
         .filter(|c| c.3 >= AI_CONTACT_IMPULSE_NS)
         .count();
     assert_eq!(hard, 0, "{:?}", out.contacts);
+    for (k, t) in out.max_stuck_s.iter().enumerate() {
+        assert!(*t < 8.0, "racer {} stuck {t:.0} s", k + 1);
+    }
+    for (k, t) in out.max_wait_s.iter().enumerate() {
+        assert!(*t < 90.0, "racer {} waited {t:.0} s", k + 1);
+    }
     for s in field.standings() {
         assert!(
             s.progress_m > 250.0,
@@ -314,9 +321,18 @@ fn wanted_ai_racer_flees_police_through_the_city() {
         .any(|e| matches!(e, OpponentEvent::Disqualified { .. })));
     let st = field.standings();
     let fled = st.iter().find(|s| s.entity == EntityId(1)).unwrap();
-    assert_eq!(fled.status, RacerStatus::Fled);
+    // The sim's own police patrol the city too and may catch it on the way.
+    assert!(
+        matches!(fled.status, RacerStatus::Fled | RacerStatus::Busted),
+        "{:?}",
+        fled.status
+    );
     for s in st.iter().filter(|s| s.entity != EntityId(1)) {
-        assert_eq!(s.status, RacerStatus::Racing);
+        assert!(
+            matches!(s.status, RacerStatus::Racing | RacerStatus::Busted),
+            "{:?}",
+            s.status
+        );
     }
     // Its flight route ends far from the unit, and it made real progress along it (traffic
     // and junctions included) in the minute after the call.
@@ -338,4 +354,211 @@ fn wanted_ai_racer_flees_police_through_the_city() {
         .filter(|c| c.3 >= AI_CONTACT_IMPULSE_NS)
         .count();
     assert_eq!(hard, 0, "{:?}", out.contacts);
+}
+
+#[test]
+fn live_police_chase_ends_in_escape_or_capture_without_stuck_cars() {
+    // Open roads, traffic, and the sim's own police: physical patrol cars on D's road graph
+    // that witness violations, recognise wanted cars and chase them. The AI reads
+    // `Sim::police()` directly (`SimPolice`).
+    //  - racer 1 starts at L3 (above its flee level 2): abandons the race and runs;
+    //  - racer 2 starts at L1 (below it): keeps racing, pulls over if a unit sits on it;
+    //  - racer 3 is clean (but may earn heat of its own on the way).
+    let setup = Setup {
+        seed: 4,
+        laps: 2,
+        drivers: eight_drivers()[..3].to_vec(),
+        closed_roads: false,
+        traffic: 0.25,
+        grid: GridLayout::SingleFile,
+        sim_police: Some("sentinel_cruiser".into()),
+        heat: vec![(EntityId(1), 55.0), (EntityId(2), 15.0)],
+        run_full: true,
+        max_s: 150.0,
+        ..Setup::default()
+    };
+    let mut speeds = [0.0f32; 3];
+    let out = common::run(&setup, &wp_opponent::NoPolice, &mut |sim, _| {
+        for (k, v) in sim.vehicles().iter().take(3).enumerate() {
+            speeds[k] = v.vehicle.state().speed_mps;
+        }
+    });
+    let mut field = out.field;
+    let events = field.drain_events();
+    let st = field.standings();
+    let summary: Vec<_> = events
+        .iter()
+        .filter(|e| {
+            !matches!(
+                e,
+                OpponentEvent::LapCompleted { .. } | OpponentEvent::Overtook { .. }
+            )
+        })
+        .collect();
+    let info = format!(
+        "{summary:?}\n{st:?}\nstuck {:?} wait {:?}",
+        out.max_stuck_s, out.max_wait_s
+    );
+    assert!(out.police_vehicles > 0, "no physical police: {info}");
+    // Racer 1 runs, and the chase ends either way (caught, or still running / escaped).
+    assert!(
+        events.iter().any(
+            |e| matches!(e, OpponentEvent::Abandoned { entity, wanted_level: 3 } if *entity == EntityId(1))
+        ),
+        "{info}"
+    );
+    // Racer 2 never runs at L1: it yields (and is booked) or races on.
+    assert!(
+        !events.iter().any(
+            |e| matches!(e, OpponentEvent::Abandoned { entity, wanted_level: 1 } if *entity == EntityId(2))
+        ),
+        "{info}"
+    );
+    for s in &st {
+        match s.status {
+            RacerStatus::Busted => {
+                // A booked car stays put.
+                let k = (s.entity.0 - 1) as usize;
+                assert!(
+                    speeds[k].abs() < 1.0,
+                    "busted {:?} still moving {:.1} m/s",
+                    s.entity,
+                    speeds[k]
+                );
+            }
+            RacerStatus::Fled | RacerStatus::Racing | RacerStatus::Finished { .. } => {}
+            other => panic!("{:?} ended {other:?}: {info}", s.entity),
+        }
+    }
+    // Every busted racer was announced; escapes only for racers that fled.
+    for s in st.iter().filter(|s| s.status == RacerStatus::Busted) {
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, OpponentEvent::Busted { entity, .. } if *entity == s.entity)));
+    }
+    // No stuck cars: nobody stands still with nothing in its way, and no queue (behind a
+    // car, a civilian or a red light: this corner's red lasts ~45 s) outlasts 1.5 cycles.
+    for (k, t) in out.max_stuck_s.iter().enumerate() {
+        assert!(*t < 8.0, "racer {} stuck {t:.0} s: {info}", k + 1);
+    }
+    for (k, t) in out.max_wait_s.iter().enumerate() {
+        assert!(*t < 90.0, "racer {} waited {t:.0} s: {info}", k + 1);
+    }
+    // Racers that are not caught keep making progress round the circuit.
+    let free = st
+        .iter()
+        .filter(|s| matches!(s.status, RacerStatus::Racing | RacerStatus::Finished { .. }))
+        .collect::<Vec<_>>();
+    for s in &free {
+        assert!(
+            s.progress_m > 400.0,
+            "{:?} only {:.0} m: {info}",
+            s.entity,
+            s.progress_m
+        );
+    }
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, OpponentEvent::Disqualified { .. })),
+        "{info}"
+    );
+    let hard = out
+        .contacts
+        .iter()
+        .filter(|c| c.3 >= AI_CONTACT_IMPULSE_NS)
+        .count();
+    assert_eq!(hard, 0, "{:?}", out.contacts);
+}
+
+#[test]
+#[ignore]
+fn sweep_open_roads_progress() {
+    let mut total = 0.0;
+    let mut worst = 0.0f32;
+    for seed in 1..=8u64 {
+        let setup = Setup {
+            seed,
+            laps: 1,
+            drivers: eight_drivers()[..4].to_vec(),
+            closed_roads: false,
+            traffic: 0.25,
+            grid: GridLayout::SingleFile,
+            max_s: 90.0,
+            ..Setup::default()
+        };
+        let out = common::run_plain(&setup);
+        let mut field = out.field;
+        let p: Vec<i32> = field
+            .standings()
+            .iter()
+            .map(|s| s.progress_m as i32)
+            .collect();
+        let dq = field
+            .drain_events()
+            .iter()
+            .filter(|e| matches!(e, OpponentEvent::Disqualified { .. }))
+            .count();
+        let hard = out
+            .contacts
+            .iter()
+            .filter(|c| c.3 >= AI_CONTACT_IMPULSE_NS)
+            .count();
+        total += p.iter().sum::<i32>() as f32;
+        let st = out.max_stuck_s.iter().fold(0.0f32, |m, x| m.max(*x));
+        let wt = out.max_wait_s.iter().fold(0.0f32, |m, x| m.max(*x));
+        worst = worst.max(wt);
+        eprintln!("seed {seed}: {p:?} stuck {st:.0} wait {wt:.0} dq {dq} hard {hard}");
+    }
+    eprintln!("TOTAL {total:.0} longest wait {worst:.0}");
+}
+
+/// Same car, one clearly better driver at the back: with slipstream it gets past (the tow
+/// on the straights closes the time gap the corners open); without, it never does.
+/// Needs `Sim::set_drag_scale` (feature `sim-draft-hook`, see the integration doc).
+#[cfg(feature = "sim-draft-hook")]
+#[test]
+fn draft_lets_a_faster_driver_in_the_same_car_pass() {
+    let race = |seed: u64, draft: bool| {
+        let mut drivers = vec![
+            DriverProfile {
+                skill: 0.35,
+                ..DriverProfile::default()
+            };
+            4
+        ];
+        drivers[3].skill = 0.8;
+        let setup = Setup {
+            seed,
+            laps: 4,
+            drivers,
+            grid: GridLayout::SingleFile,
+            max_s: 330.0,
+            draft,
+            ..Setup::default()
+        };
+        let out = common::run_plain(&setup);
+        let hard = out
+            .contacts
+            .iter()
+            .filter(|c| c.3 >= AI_CONTACT_IMPULSE_NS)
+            .count();
+        assert_eq!(hard, 0, "seed {seed} draft {draft}: {:?}", out.contacts);
+        let st = out.field.standings();
+        let pos = st.iter().position(|s| s.entity == EntityId(4)).unwrap();
+        (pos, out.tow_s[3])
+    };
+    let mut gained_with = 0;
+    let mut gained_without = 0;
+    for seed in 1..=4 {
+        let (with, tow) = race(seed, true);
+        let (without, _) = race(seed, false);
+        assert!(tow > 5.0, "seed {seed}: only {tow:.1} s in the tow");
+        gained_with += 3 - with;
+        gained_without += 3 - without;
+    }
+    assert!(
+        gained_with >= 4 && gained_with > gained_without,
+        "places gained with draft {gained_with}, without {gained_without}"
+    );
 }
