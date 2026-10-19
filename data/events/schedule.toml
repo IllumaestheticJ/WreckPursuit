@@ -1,0 +1,46 @@
+# Event scheduler rules. Owned by workstream 15 (wp_race). Loaded by wp_race::ScheduleRules.
+# Hours are since midnight of the calendar day; night windows may run past 24 (after midnight
+# belongs to that night). Kind weights are keyed by RaceKind::key().
+
+bracket_weights = { D = 4, C = 4, B = 3, A = 2, S = 1, X = 1 }
+circuit_laps = [3, 5]
+marshals = 6
+venue_gap_min = 40
+
+# Sanctioned daytime events on closed routes (traffic suppressed, cones, marshals).
+[sanctioned]
+per_day = [1, 2]
+hours = [9.0, 16.0]
+kinds = { circuit = 4, time_attack = 2, drag = 1 }
+spawn_lead_min = 45
+lobby_open_min = 30
+min_licence = 0
+min_rep = 0
+
+# Frequent night meets at race-start POIs.
+[night_meets]
+per_day = [5, 8]
+hours = [21.0, 28.0]
+kinds = { sprint = 4, drag = 3, outrun = 2, checkpoint = 2, circuit = 1, cannonball = 1, delivery = 1 }
+spawn_lead_min = 20
+lobby_open_min = 10
+min_licence = 0
+min_rep = 0
+
+# Rare illegal daytime street races: very high purse, police presence forced to Max.
+[illegal_daytime]
+chance_per_day = 0.08
+per_day = [1, 1]
+hours = [11.0, 17.0]
+kinds = { sprint = 2, cannonball = 2, outrun = 1 }
+spawn_lead_min = 10
+lobby_open_min = 5
+min_licence = 2
+min_rep = 1500
+
+# Rolling heat per venue: too many races at one POI attracts a patrol.
+[meet_heat]
+per_race = 1.0
+decay_per_hour = 0.25
+patrol_threshold = 2.5
+hot_weight = 0.2

@@ -7,12 +7,17 @@ members = [
     "crates/wp_damage",
     "crates/wp_world",
     "crates/wp_police",
+    "crates/wp_weather",
     "crates/wp_economy",
     "crates/wp_net",
     "crates/wp_sim",
+    "crates/wp_audio",
+    "crates/wp_race",
     "crates/wp_wasm",
     "apps/server",
     "apps/simcli",
+    "apps/meta",
+    "tools/meta-cli",
     "tools/wasm-determinism",
     "tools/lint-determinism",
     "tools/bench",
@@ -35,9 +40,12 @@ wp_vehicle = { path = "crates/wp_vehicle" }
 wp_damage = { path = "crates/wp_damage" }
 wp_world = { path = "crates/wp_world" }
 wp_police = { path = "crates/wp_police" }
+wp_weather = { path = "crates/wp_weather" }
 wp_economy = { path = "crates/wp_economy" }
 wp_net = { path = "crates/wp_net" }
 wp_sim = { path = "crates/wp_sim" }
+wp_audio = { path = "crates/wp_audio" }
+wp_race = { path = "crates/wp_race" }
 
 # External crates
 rapier3d = { version = "0.36", features = ["enhanced-determinism", "serde-serialize"] }
@@ -59,3 +67,12 @@ jsonschema = { version = "0.59", default-features = false }
 
 [profile.release]
 debug = 1
+
+# wp_police's headless scenario tests simulate hours of pursuits; unoptimised they take minutes.
+# (Added by workstream 06; see docs/integration/police.md.)
+[profile.dev.package.wp_police]
+opt-level = 2
+
+# wp_world's procedural city + 400-agent traffic is slow unoptimised (lead, same reason).
+[profile.dev.package.wp_world]
+opt-level = 2

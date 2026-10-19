@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WreckPursuit Meta</title>
+<style>
+  :root { --bg: #fff; --fg: #1a1a1a; --muted: #666; --line: #ddd; --ok: #1b7f3b; --warn: #a66b00; --bad: #b3261e; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #121212; --fg: #e8e8e8; --muted: #9a9a9a; --line: #333; --ok: #5cc87f; --warn: #e0a640; --bad: #f2786d; }
+  }
+  body { background: var(--bg); color: var(--fg); font: 14px/1.4 system-ui, sans-serif; margin: 0; padding: 16px; }
+  h1 { font-size: 18px; margin: 0 0 12px; }
+  .bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+  input { font: inherit; padding: 4px 8px; min-width: 16em; background: var(--bg); color: var(--fg); border: 1px solid var(--line); }
+  button { font: inherit; padding: 4px 12px; }
+  .wrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; }
+  .up { color: var(--ok); } .draining { color: var(--warn); } .down { color: var(--bad); }
+  #status { color: var(--muted); }
+  pre { background: transparent; border: 1px solid var(--line); padding: 8px; overflow-x: auto; }
+</style>
+</head>
+<body>
+<h1>WreckPursuit meta — instance health</h1>
+<div class="bar">
+  <input id="token" type="password" placeholder="admin token" autocomplete="off">
+  <button id="go">Load</button>
+  <span id="status">enter the admin token (kept in this tab only)</span>
+</div>
+<div id="summary"></div>
+<div class="wrap">
+<table>
+  <thead><tr><th>id</th><th>name</th><th>state</th><th>region / city</th><th>mode</th><th>bracket</th>
+  <th>racers</th><th>cops</th><th>captain</th><th>spect.</th><th>tick ms</th><th>last beat</th></tr></thead>
+  <tbody id="rows"></tbody>
+</table>
+</div>
+<h1 style="margin-top:16px">Feature flags</h1>
+<pre id="flags"></pre>
+<script>
+  const $ = (id) => document.getElementById(id);
+  let token = "";
+  try { token = sessionStorage.getItem("wp_meta_admin") || ""; } catch (e) {}
+  $("token").value = token;
+  const cell = (t, cls) => { const td = document.createElement("td"); td.textContent = t; if (cls) td.className = cls; return td; };
+  const pair = (pop, slots, role) => `${pop[role]}/${slots[role]}`;
+  async function load() {
+    token = $("token").value.trim();
+    try { sessionStorage.setItem("wp_meta_admin", token); } catch (e) {}
+    if (!token) return;
+    try {
+      const r = await fetch("/v1/admin/health", { headers: { Authorization: "Bearer " + token } });
+      if (!r.ok) { $("status").textContent = "error " + r.status; return; }
+      const h = await r.json();
+      $("summary").textContent = `schema v${h.schema_version} · ${h.accounts} accounts · ${h.queued_tickets} queued tickets · ${h.instances.length} instances`;
+      const rows = $("rows"); rows.replaceChildren();
+      for (const i of h.instances) {
+        const tr = document.createElement("tr");
+        const age = Math.round((h.now_ms - i.last_heartbeat_ms) / 1000);
+        [cell(i.instance_id), cell(i.name), cell(i.state, i.state), cell(`${i.region} / ${i.city}`), cell(i.mode), cell(i.bracket),
+         cell(pair(i.population, i.slots, "racer")), cell(pair(i.population, i.slots, "police_chase")),
+         cell(pair(i.population, i.slots, "police_captain")), cell(pair(i.population, i.slots, "spectator")),
+         cell(i.tick_ms.toFixed(2)), cell(age + " s ago")].forEach((td) => tr.appendChild(td));
+        rows.appendChild(tr);
+      }
+      const f = await fetch("/v1/flags");
+      $("flags").textContent = JSON.stringify(await f.json(), null, 2);
+      $("status").textContent = "updated " + new Date().toLocaleTimeString();
+    } catch (e) { $("status").textContent = "error: " + e; }
+  }
+  $("go").onclick = load;
+  load();
+  setInterval(load, 5000);
+</script>
+</body>
+</html>
