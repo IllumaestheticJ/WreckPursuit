@@ -267,3 +267,7 @@ Contract **v0.3.0** is being applied in parallel by the lead (branch `lead/contr
 
 ## Lead note (2026-10-19): new machine R (panels)
 Machine R (`ws/panels`, prompt 21) owns `crates/wp_damage/src/panels.rs` (hinged panel swing / unlatch / hang states), `data/panels/`, `tools/assets/` and `apps/testbed-web/src/render/`. Expect small hooks from R in your files; coordinate through `docs/integration/panels.md`.
+
+
+## Lead decision (2026-10-19): T-bone item 2 → option (b)
+Keep the run-5 calibration and `golden_tbone_sim` (Simulation total loss in a 50 km/h T-bone; CLAUDE.md Simulation semantics). Arcade knobs → ModeTable is contract request #8, for v0.3.x.
