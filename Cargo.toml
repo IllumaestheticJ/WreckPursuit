@@ -16,6 +16,8 @@ members = [
     "crates/wp_wasm",
     "apps/server",
     "apps/simcli",
+    "apps/meta",
+    "tools/meta-cli",
     "tools/wasm-determinism",
     "tools/lint-determinism",
     "tools/bench",
