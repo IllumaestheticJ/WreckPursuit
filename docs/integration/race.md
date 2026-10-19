@@ -229,3 +229,5 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
 
 1. R5 with G (above).
 2. `DnfReason::Fled` was added to the contract (lead amendment) for your AI entrants.
+
+3. **Parked test (lead, round 8):** `tests/race_police.rs::city_sprint_pulls_in_police` is `#[ignore]`. Contract v0.3.0 moved patrol spawns, so re-aim the sprint (the lead re-aimed `golden/city_chase` by searching start positions; see its header) and un-ignore.

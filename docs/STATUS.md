@@ -1,7 +1,6 @@
 # Status
 
-_Last updated: lead integration run 6, 2026-10-19. Contract **v0.2.0** (applied in run 3, see
-`docs/CONTRACT_CHANGELOG.md`; v0.3.0 = typed police/economy/net events)._
+_Last updated: lead integration round 8, 2026-10-19. Contract **v0.3.0** (applied round 8: typed police/economy/race/weather events, damage snapshot, road-network trait; see `docs/CONTRACT_CHANGELOG.md`)._
 
 Machines are named by letter: **A–I = prompts 02–10**, **J–Q = prompts 13–20** (started 2026-10-19 as
 cloud sessions: J audio `ws/audio`, K weather `ws/weather`, L race/crews `ws/race`, M UI kit `ws/ui`,
@@ -74,6 +73,15 @@ police cars with light bars, traffic, heat panel, live repair bill). 18 cloud se
 (A–I, K–R; J was still busy) plus lead helpers for contract v0.3.0 (`lead/contract-v0.3.0`) and test
 speed (`lead/test-speed`). New machine **R** (prompt 21): per-panel car meshes, hinged
 doors/hood/trunk, dangling bumpers. Project map: https://claude.ai/artifact/2wecUWQ2NCxYdcWj1mMFAi
+
+## Round 8 (2026-10-19)
+Merged 24 branches plus contract v0.3.0. On the link: panel car bodies (R), visible traffic lights,
+close chase cam with 8 angles, quieter radio, RWD slide control, faster car/gearbox, gentler Arcade
+damage, tougher cruiser, traffic personalities, cops avoiding traffic. Workspace tests 70 → 3.5 min.
+Four spawn- or behaviour-tuned AI tests are parked (`#[ignore]` with reasons) and assigned:
+Q (probe contact), E+G (stationary capture), L (sprint pulls in police), N (AI racer queue).
+In progress: city v2 with curves and elevation (`lead/city-v2`), real CC0 sounds (J, blocked on
+network allow-list), M porting its HUD extras onto C's.
 
 ## Next (toward the single-player greybox demo)
 C draws police/traffic + city-chase preset; M wires the heat HUD and repair bill; E/D share

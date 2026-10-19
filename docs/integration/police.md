@@ -303,3 +303,5 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
 2. Arcade `disengage_health`: see H's note above. Make it mode-dependent so cops stay in an Arcade chase until they're properly wrecked.
 3. Verify playtest row 11 in a 5-minute city chase (civilian contacts by police on patrol and in pursuit) and record the numbers.
 4. Flip `scenarios/soak/traffic_soak_observer.ron` back to `police_cars: true` if your fix stops patrols ramming stopped cars, then tell I to promote the gate.
+
+5. **Parked test (lead, round 8):** see economy.md item 5. A stationary wanted racer, 3 am, `internal_driving: true`, is never found or captured with your round-6 changes (it was on ws/economy alone). Decide whether that is intended (no report → no search) and tell G.

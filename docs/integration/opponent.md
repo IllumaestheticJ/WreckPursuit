@@ -206,3 +206,8 @@ Checks at end of round 6b: fmt, clippy `-D warnings` (workspace), wasm build of 
 ("level at capture, not after the reset"), which fails identically on
 `origin/claude/laughing-newton-0xqr6q` without this branch (no diff in wp_economy / wp_sim /
 wp_police) — pre-existing, for G / the lead.
+
+
+## Lead feedback (round 8, 2026-10-19)
+1. **Parked test (lead, round 8):** `tests/race.rs::live_police_chase_ends_in_escape_or_capture_without_stuck_cars` is `#[ignore]`. After E round 6 (police obstacle avoidance) and D round 6 (driver personalities and reaction delays), racer 3 queues 97 s and covers only 388 m. Fix the AI racer, or report the police or traffic cause to E/D, and un-ignore.
+2. v0.3.0: `SimEvent::Police` is typed now; `PoliceEventExt` gives `from_sim_event`.

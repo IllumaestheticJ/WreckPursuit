@@ -330,3 +330,5 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
 1. R5: `RaceType` vs contract `RaceKind`. Agree the purse mapping with L (Outrun, Checkpoint, Cannonball, Delivery, TimeAttack).
 2. `ShopReported.district` → `DistrictId` keys in `prices.toml`.
 3. The ledger is still keyed by `PlayerId`. Move it to `AccountId` if cheap.
+
+5. **Parked test (lead, round 8):** `wp_economy/tests/session.rs::live_police_run_settles_like_the_recording` is `#[ignore]`. Since E round 6, no unit finds a racer that never moves (3 am, heat set directly). Work with E: either police should find such a racer, or the test needs a racer police can reach. Also, the recorded fixtures were converted to v0.3.0 typed events by the lead. Re-record them once the live run works.
