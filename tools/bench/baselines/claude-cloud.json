@@ -5,17 +5,17 @@
     "cores": 4,
     "platform": "linux-x86_64",
     "rustc": "rustc 1.97.0 (2d8144b78 2026-07-07)",
-    "commit": "b1fd87f",
+    "commit": "867d9b5",
     "date": "2026-10-19"
   },
   "benches": {
-    "city/24v_400traffic": 391578.3133116883,
-    "lattice/solver_8_contacts": 145448.08859416447,
-    "sim_only/1": 6307.91712388664,
-    "sim_only/24": 382579.1602240896,
-    "sim_only/64": 2766353.020833333,
-    "sim_only/8": 36870.33498263889,
-    "snapshot/decode_24": 52943.56869658119,
-    "snapshot/encode_24": 40171.75390720391
+    "city/24v_400traffic": 562458.1128364389,
+    "lattice/solver_8_contacts": 168718.23586956522,
+    "sim_only/1": 8715.268948182522,
+    "sim_only/24": 418406.46557017544,
+    "sim_only/64": 3253921.04248366,
+    "sim_only/8": 47178.54869281046,
+    "snapshot/decode_24": 1589.955094186269,
+    "snapshot/encode_24": 3265.8432372949183
   }
 }

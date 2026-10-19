@@ -32,7 +32,18 @@ pub struct Scenario {
     /// 0 = no traffic); `None` = 1. Ignored on the flat world.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub traffic_density: Option<f32>,
-    /// Police presence override (0..=1); `None` = city/time-of-day default.
+    /// Moving civilian traffic (default on). `false` = no traffic cars, whatever the density.
+    #[serde(default = "yes", skip_serializing_if = "is_true")]
+    pub traffic_cars: bool,
+    /// Parked cars along parking lanes (default on; they become physics bodies).
+    #[serde(default = "yes", skip_serializing_if = "is_true")]
+    pub parked_cars: bool,
+    /// AI police units patrolling the city (default on). `false` keeps heat and wanted levels
+    /// but spawns no units. Ignored on the flat world, which has no roads for police.
+    #[serde(default = "yes", skip_serializing_if = "is_true")]
+    pub police_cars: bool,
+    /// Police patrol multiplier on `data/police/presence.toml`'s per-district, per-phase patrol
+    /// counts (1 = default, 0 = no patrols); `None` = 1. Needs a city.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub police_presence: Option<f32>,
     /// Systems to step (`"vehicle,damage,world,police,net"`); `None` = all. `--systems` overrides.
@@ -58,6 +69,14 @@ pub struct Scenario {
     /// are still stubs. Owners move them into `expect` when their system lands.
     #[serde(default)]
     pub expect_pending: Vec<Expect>,
+}
+
+fn yes() -> bool {
+    true
+}
+
+fn is_true(v: &bool) -> bool {
+    *v
 }
 
 fn is_zero(v: &f32) -> bool {
@@ -175,6 +194,10 @@ pub struct EntitySpec {
     /// Lets crash tests start at speed instead of a run-up.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub speed_mps: f32,
+    /// Starting police heat (`wp_police` scale: wanted level L1 from 10, L2 from 30, …), for a
+    /// racer the police already know about. Needs a city with police.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub police_heat: f32,
     /// Assists for this entity (default: the scenario's).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assists: Option<AssistSpec>,
@@ -382,12 +405,20 @@ impl Scenario {
                 return Err(format!("barrier size {:?} must be positive", b.size));
             }
         }
+        if let Some(p) = self.police_presence {
+            if !(p.is_finite() && p >= 0.0) {
+                return Err(format!("police_presence = {p} must be >= 0"));
+            }
+        }
         if let Some(d) = self.traffic_density {
             if !(d.is_finite() && d >= 0.0) {
                 return Err(format!("traffic_density = {d} must be >= 0"));
             }
         }
         for (i, e) in self.entities.iter().enumerate() {
+            if !(e.police_heat.is_finite() && e.police_heat >= 0.0) {
+                return Err(format!("entity {:?}: police_heat must be >= 0", e.id));
+            }
             if !e.speed_mps.is_finite() {
                 return Err(format!("entity {:?}: speed_mps must be finite", e.id));
             }

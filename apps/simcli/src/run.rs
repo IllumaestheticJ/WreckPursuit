@@ -6,8 +6,8 @@ use std::fmt::Write as _;
 
 use serde::Serialize;
 use wp_contracts::{
-    Component, EntityId, ServerToClient, SimEvent, TimeOfDay, VehicleInput, VehicleState,
-    GRAVITY_MPS2, PHYSICS_DT, PHYSICS_TICKS_PER_NET_TICK,
+    Component, EntityId, SimEvent, TimeOfDay, VehicleInput, VehicleState, GRAVITY_MPS2, PHYSICS_DT,
+    PHYSICS_TICKS_PER_NET_TICK,
 };
 use wp_sim::{Sim, SimConfig, Systems};
 
@@ -25,7 +25,7 @@ pub const PURSUIT_STARTED_KIND: u16 = wp_police::events::kind::PURSUIT_STARTED;
 pub struct Selection {
     /// Systems stepped by the sim.
     pub sim: Systems,
-    /// Encode → decode a `ServerToClient::Snapshot` through `wp_net` every net tick and check
+    /// Round-trip a snapshot through `wp_net`'s wire codec every net tick ([`crate::net`]) and check
     /// it round-trips.
     pub net: bool,
 }
@@ -127,13 +127,55 @@ pub fn world_config(sc: &Scenario) -> wp_world::WorldConfig {
         start_time: TimeOfDay::from_hours(sc.time_of_day_h),
         time_ratio: sc.time_ratio,
         traffic: wp_world::TrafficConfig {
-            enabled: density > 0.0,
+            enabled: sc.traffic_cars && density > 0.0,
             density_scale: density,
             detect_collisions: true,
             ..Default::default()
         },
-        parked_cars: true,
+        parked_cars: sc.parked_cars,
     }
+}
+
+/// The `wp_police` tables a scenario implies: the built-in tables with every patrol count
+/// scaled by `police_presence` (rounded to whole units).
+pub fn police_config(sc: &Scenario) -> wp_police::PoliceConfig {
+    let mut cfg = wp_police::PoliceConfig::builtin();
+    if let Some(p) = sc.police_presence {
+        let scale = |n: &mut u32| *n = (*n as f32 * p).round() as u32;
+        let t = &mut cfg.presence.patrols;
+        for d in [&mut t.core, &mut t.suburb, &mut t.industrial] {
+            for n in [&mut d.dawn, &mut d.day, &mut d.dusk, &mut d.night] {
+                scale(n);
+            }
+        }
+    }
+    cfg
+}
+
+/// Police for a city scenario: `wp_police` on the city's road graph with its built-in kinematic
+/// unit driver (units are not physics bodies yet), seeded from the scenario seed.
+/// Entities with `police_heat` start with that heat (`ids` in scenario order).
+pub fn police_for_city(
+    sc: &Scenario,
+    world: &wp_world::World,
+    ids: &[EntityId],
+) -> wp_police::PoliceSystem {
+    let mut police = wp_police::PoliceSystem::for_world(
+        police_config(sc),
+        world,
+        wp_police::PoliceSetup {
+            seed: sc.seed ^ 0x0090_11CE,
+            mode: sc.mode,
+            internal_driving: true,
+            hazards: sc.traffic_cars,
+        },
+    );
+    for (spec, id) in sc.entities.iter().zip(ids) {
+        if spec.police_heat > 0.0 {
+            police.set_heat(*id, spec.police_heat);
+        }
+    }
+    police
 }
 
 /// Build the [`Sim`] for a scenario: systems, barriers, every entity (spawn pose, start speed,
@@ -155,10 +197,8 @@ pub fn build_sim(
     if sc.city == CitySpec::Flat && sc.traffic_density.is_some() {
         warnings.push("traffic_density ignored: the flat world has no roads or traffic".into());
     }
-    if let Some(p) = sc.police_presence {
-        warnings.push(format!(
-            "police_presence override {p} not applied: wp_police has no presence API yet"
-        ));
+    if sc.city == CitySpec::Flat && sc.police_presence.is_some() {
+        warnings.push("police_presence ignored: the flat world has no roads for police".into());
     }
     for e in &sc.entities {
         match &e.driver {
@@ -205,6 +245,9 @@ pub fn build_sim(
                 .collect();
             world.set_tracked_vehicles(&tracked);
             world.populate();
+            if sc.police_cars {
+                sim.set_police(police_for_city(sc, &world, &ids));
+            }
             sim.set_world(world);
             // City runs get real police cars and physical near-player traffic (lead, run 5).
             sim.set_police_car(load_car(data, POLICE_CAR)?);
@@ -342,13 +385,17 @@ pub struct ExpectResult {
     pub passed: bool,
 }
 
-/// Harness-side net statistics.
+/// Harness-side net statistics (see [`crate::net`]).
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize)]
 pub struct NetStats {
     /// Snapshots round-tripped.
     pub snapshots: u64,
     /// Total encoded bytes.
     pub bytes: u64,
+    /// Entity updates sent as deltas against a baseline.
+    pub deltas: u64,
+    /// Worst dequantised position error, m.
+    pub max_pos_err_m: f32,
 }
 
 /// World and traffic results.
@@ -375,6 +422,10 @@ pub struct WorldSummary {
     pub props: u32,
     /// Static boxes from `barriers`.
     pub static_boxes: u32,
+    /// Most police units alive at once.
+    pub police_units_max: u32,
+    /// Police units alive at the end.
+    pub police_units_final: u32,
 }
 
 impl WorldSummary {
@@ -390,12 +441,14 @@ impl WorldSummary {
             "traffic_stuck_recycled" => self.traffic_stuck_recycled as f32,
             "props" => self.props as f32,
             "static_boxes" => self.static_boxes as f32,
+            "police_units_max" => self.police_units_max as f32,
+            "police_units_final" => self.police_units_final as f32,
             _ => return None,
         })
     }
 
     /// Every metric name [`WorldSummary::metric`] accepts.
-    pub const METRICS: [&'static str; 9] = [
+    pub const METRICS: [&'static str; 11] = [
         "traffic_agents_final",
         "traffic_agents_min",
         "traffic_moving_frac_final",
@@ -405,6 +458,8 @@ impl WorldSummary {
         "traffic_stuck_recycled",
         "props",
         "static_boxes",
+        "police_units_max",
+        "police_units_final",
     ];
 }
 
@@ -415,6 +470,7 @@ pub const WORLD_WARMUP_S: f32 = 10.0;
 struct WorldTracker {
     agents_min: Option<u32>,
     moving_min: Option<f32>,
+    police_max: u32,
 }
 
 fn moving_frac(world: &wp_world::World) -> f32 {
@@ -438,13 +494,8 @@ impl WorldTracker {
         }
     }
 
-    fn finish(
-        &self,
-        world: &wp_world::World,
-        city: &CitySpec,
-        props: usize,
-        boxes: usize,
-    ) -> WorldSummary {
+    fn finish(&self, sim: &Sim, city: &CitySpec) -> WorldSummary {
+        let world = sim.world();
         let stats = world.traffic_stats();
         let n = world.agent_count() as u32;
         let frac = moving_frac(world);
@@ -463,8 +514,10 @@ impl WorldTracker {
             civilian_collisions: stats.civilian_collisions,
             traffic_spawned: stats.spawned,
             traffic_stuck_recycled: stats.stuck_recycled,
-            props: props as u32,
-            static_boxes: boxes as u32,
+            props: sim.prop_count() as u32,
+            static_boxes: sim.static_box_count() as u32,
+            police_units_max: self.police_max,
+            police_units_final: sim.police().units().len() as u32,
         }
     }
 }
@@ -794,8 +847,7 @@ pub fn run_with_hook(
     let mut max_events_per_tick = 0u64;
     let mut police_first: BTreeMap<u16, u64> = BTreeMap::new();
     let mut event_counts: Vec<(&'static str, Vec<EntityId>)> = Vec::new();
-    let mut net = NetStats::default();
-    let mut net_events: Vec<SimEvent> = Vec::new();
+    let mut net_rt = crate::net::NetRoundTrip::default();
     let mut failures = Vec::new();
     let mut track_cursor = 0usize;
 
@@ -928,6 +980,7 @@ pub fn run_with_hook(
         // World / traffic.
         if has_city {
             world_tr.update(sim.world(), now);
+            world_tr.police_max = world_tr.police_max.max(sim.police().units().len() as u32);
         }
 
         // Hashes.
@@ -955,28 +1008,10 @@ pub fn run_with_hook(
             }
         }
 
-        // Net round trip.
-        if selection.net {
-            net_events.extend(events.iter().cloned());
-            if now.is_multiple_of(PHYSICS_TICKS_PER_NET_TICK as u64) {
-                let msg = ServerToClient::Snapshot {
-                    tick: now,
-                    vehicles: states.clone(),
-                    events: std::mem::take(&mut net_events),
-                };
-                // Contract-message JSON round trip (the old wp_net stub codec). Workstream F
-                // replaced it with its own snapshot protocol; moving this check onto
-                // `wp_net::snapshot` is on I's list.
-                let bytes = serde_json::to_vec(&msg).expect("ServerToClient serializes");
-                net.snapshots += 1;
-                net.bytes += bytes.len() as u64;
-                match serde_json::from_slice::<ServerToClient>(&bytes) {
-                    Ok(back) if back == msg => {}
-                    Ok(_) => {
-                        failures.push(format!("net: snapshot at tick {now} did not round-trip"))
-                    }
-                    Err(e) => failures.push(format!("net: snapshot at tick {now}: {e}")),
-                }
+        // Net round trip on wp_net's wire codec.
+        if selection.net && now.is_multiple_of(PHYSICS_TICKS_PER_NET_TICK as u64) {
+            if let Err(e) = net_rt.snapshot(now, &states) {
+                failures.push(format!("net: snapshot at tick {now}: {e}"));
             }
         }
 
@@ -1012,13 +1047,13 @@ pub fn run_with_hook(
         entities,
         events_total,
         max_events_per_tick,
-        net,
-        world: world_tr.finish(
-            sim.world(),
-            &sc.city,
-            sim.prop_count(),
-            sim.static_box_count(),
-        ),
+        net: NetStats {
+            snapshots: net_rt.snapshots,
+            bytes: net_rt.bytes,
+            deltas: net_rt.deltas,
+            max_pos_err_m: net_rt.max_pos_err_m,
+        },
+        world: world_tr.finish(&sim, &sc.city),
         warnings,
         expectations: Vec::new(),
         pending: Vec::new(),
