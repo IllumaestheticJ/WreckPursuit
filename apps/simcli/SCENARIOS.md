@@ -2,8 +2,8 @@
 
 Scenarios live in `apps/simcli/scenarios/<group>/*.ron`. Groups: `smoke/` (quick sanity),
 `regression/` (bug repros, multi-car), `golden/` (the "feel" library; these also get a golden
-replay), `soak/` (long city/traffic runs: skipped by debug `cargo test`, run by the release CI
-jobs), plus any folder a workstream adds (`vehicle/`, `damage/`, `police/`, …).
+replay), `soak/` (long city/traffic runs) and `city/` (route drives through Port Vesper v2),
+both skipped by debug `cargo test` and run by the release CI jobs, plus any folder a workstream adds (`vehicle/`, `damage/`, `police/`, …).
 
 Parsing uses RON with `implicit_some`, so optional fields are written plainly
 (`entity: "car"`, not `entity: Some("car")`). Unknown fields are errors.
@@ -14,7 +14,7 @@ Parsing uses RON with `implicit_some`, so optional fields are written plainly
 (
     name: "golden_frontal_56kmh",   // unique; output folder out/<name>/, golden folder golden/<name>/
     seed: 103,                       // master RNG seed (u64)
-    city: flat,                      // flat | procedural(seed, blocks_x, blocks_y, block_m) | file("city/x.road.json")
+    city: flat,                      // flat | procedural(seed, blocks_x, blocks_y, block_m) | file("city/x.road.json") | preset(name: "vesper_v2", seed: 1)
     time_of_day_h: 12.0,             // start time, hours        (default 12.0)
     time_ratio: 10.0,                // game s per sim s         (default 10.0)
     mode: Simulation,                // Arcade | Simulation      (default Arcade) → data/modes/{arcade,sim}.toml
@@ -43,6 +43,11 @@ Cities:
   `data/city/procedural_12x12`.
 - `file("city/<id>.road.json")` (works in the WASM runner too) or `file("city/<id>.road.bin")`
   (disk only).
+- `preset(name: "vesper_v2", seed: 1)`: Port Vesper v2 (`wp_world::vesper`): curved streets,
+  hills (Hollins Heights ≈ 110 m), a 3+3 highway loop with banked sweepers and grade
+  separations, terrain. Generated in memory everywhere (≈ 0.1 s release). In a city with
+  terrain every entity is placed **on the ground under its `(x, y)`**, pitched to the slope
+  (`pos.z` only picks the level at a grade separation), so scenario heights need not be exact.
 
 With a city, the world is seeded from the scenario `seed`, parked cars become physics bodies,
 traffic is pre-populated around the spawned cars (or the whole city when `entities: []`), and
@@ -64,8 +69,8 @@ wanted levels.
 `barriers` are static boxes (`Sim::add_static_box`): centre `pos`, full `size` `[x, y, z]`,
 `yaw` about +Z. Contacts with them reach damage as static world geometry.
 
-Features a crate does not support yet (police presence override, `follow_route`,
-`ai_driver`) run anyway and add a **warning** to the summary; `--strict` turns warnings into
+Features a crate does not support yet (police presence override, `follow_route` with a
+route id that is not `"<start POI> -> <finish POI>"`, `ai_driver`) run anyway and add a **warning** to the summary; `--strict` turns warnings into
 failures.
 
 ## Entities
@@ -95,7 +100,13 @@ failures.
   - `cruise(target_mps, from_s, until_s)`: harness P-controller on throttle/brake (pedals
     quantised to 1/32, ±0.1 m/s deadband) between `from_s` and `until_s`; steer and the other
     fields still come from the keyframes. Use it to arrive at a crash at an exact speed.
-  - `follow_route(route_id, target_speed)`: needs `wp_world` routes (prompt 05). Warns for now.
+  - `follow_route(route_id, target_speed)` (city scenarios): `route_id` is
+    `"<start POI name> -> <finish POI name>"` (e.g. `"Hollins Ascent -> Knob Observatory Lot"`;
+    POIs are the city's `pois`), planned with `wp_world::routes`. The car is placed on the
+    route start (its `pos`/`yaw` are ignored, `speed_mps` still applies) and driven by
+    `wp_world::drive::PathFollower` with pursuit limits at up to `target_speed`, then holds at
+    the finish. Inputs are logged as usual, so replays match. Other route-id styles warn and
+    fall back to keyframes.
   - `ai_driver(target)`: needs the AI driver (prompts 05/06). Warns for now.
 
 ## Expectations (`expect`, `expect_pending`)
@@ -118,7 +129,10 @@ All ranges are inclusive. `entity` defaults to the first entity; a scenario with
 Metrics for `metric(...)`: `final_speed_mps`, `max_speed_mps`, `distance_m` (horizontal,
 from spawn), `path_length_m`, `final_health`, `max_lateral_g`, `max_long_g`,
 `max_yaw_rate_rps`, `crush_depth_m`, `components_failed`, `parts_detached`, `wheels_detached`,
-`total_loss` (0/1), `min_z_m`.
+`total_loss` (0/1), `min_z_m`, `off_road_s` (time not on any lane, junction connector or
+junction box at about its height; city runs only), `max_airborne_s` (longest stretch with all
+four wheels off the ground), `route_progress` (fraction of a `follow_route` route covered, 0
+without one).
 
 World metrics for `world_metric(...)` (all 0 on the flat world): `traffic_agents_final`,
 `traffic_agents_min` (fewest agents at any tick after a 10 s warm-up), `traffic_moving_frac_final`

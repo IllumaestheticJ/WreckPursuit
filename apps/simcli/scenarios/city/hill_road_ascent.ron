@@ -1,0 +1,32 @@
+// Port Vesper v2: Hollins Drive from the Mercer junction to Hollins Knob (≈ 1.2 km, ≈ 85 m
+// climb, 6 hairpins, grades up to 11.5 %, crests). The route driver holds the 25 mph limit
+// wherever the curves allow it (pursuit-grade cornering), so every crest is taken at the
+// limit. Expect: the car stays on the road, never leaves the ground, arrives undamaged.
+(
+    name: "city_hill_road_ascent",
+    seed: 11,
+    city: preset(name: "vesper_v2", seed: 1),
+    time_of_day_h: 12.0,
+    time_ratio: 1.0,
+    traffic_density: 0.0,
+    police_cars: false,
+    assists: ai,
+    entities: [
+        (
+            id: "climber",
+            car: "debug_sedan",
+            pos: (0.0, 0.0, 0.0),
+            driver: follow_route(route_id: "Hollins Ascent -> Knob Observatory Lot", target_speed: 11.176),
+        ),
+    ],
+    duration_s: 105.0,
+    expect: [
+        metric(name: "route_progress", min: 0.97, max: 1.0),
+        metric(name: "off_road_s", min: 0.0, max: 0.5),
+        metric(name: "max_airborne_s", min: 0.0, max: 0.05),
+        metric(name: "max_speed_mps", min: 10.0, max: 12.5),
+        metric(name: "crush_depth_m", min: 0.0, max: 0.02),
+        metric(name: "path_length_m", min: 900.0, max: 1600.0),
+        total_loss(expected: false),
+    ],
+)

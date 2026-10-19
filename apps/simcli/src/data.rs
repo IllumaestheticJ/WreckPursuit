@@ -196,6 +196,19 @@ pub fn load_world(
             };
             Some(wp_world::World::procedural(&pg, cfg))
         }
+        CitySpec::Preset { name, seed } => {
+            if name != wp_world::vesper::CITY_ID {
+                return Err(RunError::Scenario(
+                    name.clone(),
+                    format!("unknown city preset (known: {})", wp_world::vesper::CITY_ID),
+                ));
+            }
+            let vc = wp_world::vesper::VesperConfig {
+                seed: *seed,
+                ..Default::default()
+            };
+            Some(wp_world::World::vesper(&vc, cfg))
+        }
         CitySpec::File(rel) => {
             let net = if rel.ends_with(".json") {
                 wp_world::RoadNetwork::from_json(&src.read(rel)?).map_err(|e| road(rel, e))?

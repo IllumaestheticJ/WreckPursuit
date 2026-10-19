@@ -118,6 +118,44 @@ pub enum CitySpec {
     /// Road network file relative to the data root: `.road.json` (works everywhere, including
     /// the WASM runner) or `.road.bin` (disk only), e.g. `"city/procedural_12x12.road.json"`.
     File(String),
+    /// A named generated city: `"vesper_v2"` (Port Vesper v2: curves, hills, terrain, highway
+    /// loop with grade separations; `wp_world::vesper`). Generated in memory everywhere.
+    Preset {
+        /// Preset name (`wp_world::vesper::CITY_ID`).
+        name: String,
+        /// Generator seed (independent of the scenario seed).
+        seed: u64,
+    },
+}
+
+impl CitySpec {
+    /// Port Vesper v2 with the default seed (the browser's city-chase city).
+    pub fn vesper() -> Self {
+        CitySpec::Preset {
+            name: wp_world::vesper::CITY_ID.into(),
+            seed: 1,
+        }
+    }
+
+    /// City id (data file stem / greybox name): `flat`, `procedural_12x12`, `vesper_v2`, or the
+    /// file stem.
+    pub fn city_id(&self) -> String {
+        match self {
+            CitySpec::Flat => "flat".into(),
+            CitySpec::Procedural {
+                blocks_x, blocks_y, ..
+            } => format!("procedural_{blocks_x}x{blocks_y}"),
+            CitySpec::File(f) => f
+                .rsplit('/')
+                .next()
+                .unwrap_or(f)
+                .split('.')
+                .next()
+                .unwrap_or(f)
+                .to_string(),
+            CitySpec::Preset { name, .. } => name.clone(),
+        }
+    }
 }
 
 /// A static box (`Sim::add_static_box`): rigid, immovable, contacts reach damage as world geometry.
@@ -229,7 +267,11 @@ pub enum Driver {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         until_s: Option<f32>,
     },
-    /// Follow a road-network route at a target speed. Needs `wp_world` routes (prompt 05).
+    /// Follow a road-network route at a target speed (city scenarios): `route_id` is
+    /// `"<start POI name> -> <finish POI name>"`; the car is placed on the route start (its
+    /// `pos`/`yaw` are ignored; `speed_mps` still applies) and driven by `wp_world`'s shared
+    /// path follower (pursuit limits, speed planned for curves, never above `target_speed`),
+    /// stopping at the finish. Inputs are logged like any driver's, so replays match.
     FollowRoute {
         /// Route id in the city.
         route_id: String,

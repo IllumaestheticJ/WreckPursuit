@@ -103,6 +103,45 @@ pub struct BuiltSim {
     pub warnings: Vec<String>,
     /// Whether a city (`wp_world`) was loaded instead of the flat world.
     pub has_city: bool,
+    /// Route drivers per scenario entity (`Driver::FollowRoute`), in scenario order.
+    pub routes: Vec<Option<RouteDriver>>,
+}
+
+/// A `Driver::FollowRoute` entity's planned route and path follower.
+#[derive(Debug, Clone)]
+pub struct RouteDriver {
+    /// The route as a drivable path.
+    pub path: wp_world::drive::DrivePath,
+    /// Shared path follower (pursuit limits).
+    pub follower: wp_world::drive::PathFollower,
+    /// Target speed, m/s.
+    pub target_mps: f32,
+    /// Furthest arc length reached, m.
+    pub progress_m: f32,
+}
+
+impl RouteDriver {
+    /// Input for this tick (advances the follower's PID by one physics tick).
+    pub fn input(&mut self, state: &wp_contracts::VehicleState) -> VehicleInput {
+        let out = self
+            .follower
+            .follow(state, &self.path, self.target_mps, 0.0, PHYSICS_DT);
+        self.progress_m = self.progress_m.max(out.s);
+        // Stopped at the finish (or crawling to it): hold on the handbrake, as traffic does —
+        // the follower releases the foot brake near standstill (auto-reverse).
+        if out.done
+            || (out.remaining_m < 3.0 && state.speed_mps < wp_world::leader::HOLD_BEHIND_MPS)
+        {
+            wp_world::leader::held(out.input)
+        } else {
+            out.input
+        }
+    }
+
+    /// Fraction of the route covered, 0..=1.
+    pub fn progress(&self) -> f32 {
+        (self.progress_m / self.path.length().max(1e-3)).clamp(0.0, 1.0)
+    }
 }
 
 /// States of the scenario's own entities, in scenario order. City runs add police and traffic
@@ -202,11 +241,21 @@ pub fn build_sim(
     }
     for e in &sc.entities {
         match &e.driver {
-            Driver::FollowRoute { .. } | Driver::AiDriver { .. } => warnings.push(format!(
+            Driver::AiDriver { .. } => warnings.push(format!(
                 "entity {:?}: driver {:?} not available yet; using its input keyframes",
                 e.id, e.driver
             )),
-            Driver::Scripted | Driver::Cruise { .. } => {}
+            Driver::FollowRoute { route_id, .. } if !route_id.contains("->") => {
+                warnings.push(format!(
+                    "entity {:?}: driver {:?} not available yet; using its input keyframes",
+                    e.id, e.driver
+                ))
+            }
+            Driver::FollowRoute { .. } if sc.city == CitySpec::Flat => warnings.push(format!(
+                "entity {:?}: follow_route needs a city; using its input keyframes",
+                e.id
+            )),
+            Driver::Scripted | Driver::Cruise { .. } | Driver::FollowRoute { .. } => {}
         }
     }
 
@@ -266,6 +315,74 @@ pub fn build_sim(
         }
         None => false,
     };
+    // Hilly cities: every entity sits on the ground under its (x, y) (z = a hint for which
+    // level at grade separations), pitched to the slope. Flat cities keep `pos` exactly.
+    if sim.has_terrain() {
+        for (spec, id) in sc.entities.iter().zip(&ids) {
+            sim.place_on_ground(
+                *id,
+                [spec.pos[0], spec.pos[1]],
+                spec.yaw,
+                spec.speed_mps,
+                Some(spec.pos[2]),
+            )?;
+        }
+    }
+    let mut routes = Vec::with_capacity(ids.len());
+    for (spec, id) in sc.entities.iter().zip(&ids) {
+        let Driver::FollowRoute {
+            route_id,
+            target_speed,
+        } = &spec.driver
+        else {
+            routes.push(None);
+            continue;
+        };
+        if !has_city {
+            routes.push(None);
+            continue;
+        }
+        let bad = |m: String| RunError::Scenario(sc.name.clone(), m);
+        // Other route-id styles (e.g. opponent circuits, workstream N) are not resolved here:
+        // the entity keeps its input keyframes, as before.
+        let Some((a, b)) = route_id.split_once("->") else {
+            routes.push(None);
+            continue;
+        };
+        let poi = |name: &str| {
+            sim.world()
+                .network()
+                .pois
+                .iter()
+                .position(|p| p.name == name.trim())
+                .ok_or_else(|| {
+                    bad(format!(
+                        "route_id {route_id:?}: no POI named {:?}",
+                        name.trim()
+                    ))
+                })
+        };
+        let (pa, pb) = (poi(a)?, poi(b)?);
+        let route = sim
+            .world()
+            .plan_route_between_pois(pa, pb)
+            .ok_or_else(|| bad(format!("route_id {route_id:?}: no route")))?;
+        let path = wp_world::drive::DrivePath::from_route(&route);
+        let (p0, d0) = path.point_at(0.0);
+        let yaw = wp_world::geom::yaw_of(d0);
+        sim.place_on_ground(*id, [p0[0], p0[1]], yaw, spec.speed_mps, Some(p0[2]))?;
+        let follower = wp_world::drive::PathFollower::for_vehicle(
+            &cars[&spec.car].def,
+            wp_world::drive::FollowParams::PURSUIT,
+            spec.speed_mps,
+        );
+        routes.push(Some(RouteDriver {
+            path,
+            follower,
+            target_mps: *target_speed,
+            progress_m: 0.0,
+        }));
+    }
     Ok(BuiltSim {
         sim,
         ids,
@@ -273,6 +390,7 @@ pub fn build_sim(
         selection,
         warnings,
         has_city,
+        routes,
     })
 }
 
@@ -341,6 +459,15 @@ pub struct EntitySummary {
     pub total_loss: bool,
     /// Lowest chassis z reached, m.
     pub min_z_m: f32,
+    /// Time spent off every road and junction (city runs), s.
+    #[serde(default)]
+    pub off_road_s: f32,
+    /// Longest stretch with all four wheels off the ground, s.
+    #[serde(default)]
+    pub max_airborne_s: f32,
+    /// Fraction of its `follow_route` route the entity covered (0 without one).
+    #[serde(default)]
+    pub route_progress: f32,
 }
 
 impl EntitySummary {
@@ -361,12 +488,15 @@ impl EntitySummary {
             "wheels_detached" => self.wheels_detached as f32,
             "total_loss" => self.total_loss as u8 as f32,
             "min_z_m" => self.min_z_m,
+            "off_road_s" => self.off_road_s,
+            "max_airborne_s" => self.max_airborne_s,
+            "route_progress" => self.route_progress,
             _ => return None,
         })
     }
 
     /// Every metric name [`EntitySummary::metric`] accepts.
-    pub const METRICS: [&'static str; 14] = [
+    pub const METRICS: [&'static str; 17] = [
         "final_speed_mps",
         "max_speed_mps",
         "distance_m",
@@ -381,6 +511,9 @@ impl EntitySummary {
         "wheels_detached",
         "total_loss",
         "min_z_m",
+        "off_road_s",
+        "max_airborne_s",
+        "route_progress",
     ];
 }
 
@@ -511,11 +644,8 @@ impl WorldTracker {
         let frac = moving_frac(world);
         WorldSummary {
             city: match city {
-                CitySpec::Flat => "flat".into(),
-                CitySpec::Procedural {
-                    blocks_x, blocks_y, ..
-                } => format!("procedural_{blocks_x}x{blocks_y}"),
                 CitySpec::File(f) => f.clone(),
+                other => other.city_id(),
             },
             traffic_agents_final: n,
             traffic_agents_min: self.agents_min.unwrap_or(n),
@@ -650,6 +780,16 @@ pub fn event_entities(e: &SimEvent) -> Vec<EntityId> {
     }
 }
 
+/// Whether `p` is on a road: within a lane or junction connector (plus 1 m) at about its
+/// height, or inside a junction box.
+fn on_road(map: &wp_world::CityMap, p: [f32; 3]) -> bool {
+    map.locate(p, None, 1.0, false, true).is_some()
+        || map.intersection_at([p[0], p[1]]).is_some_and(|ix| {
+            let n = map.net.intersections[ix as usize].node;
+            (map.net.nodes[n as usize].pos[2] - p[2]).abs() < 3.0
+        })
+}
+
 /// Rotate `v` by unit quaternion `q = [x, y, z, w]`.
 pub fn rotate(q: [f32; 4], v: [f32; 3]) -> [f32; 3] {
     let [x, y, z, w] = q;
@@ -684,6 +824,8 @@ pub fn crush_depth(rest: &[[f32; 3]], now: &[[f32; 3]]) -> f32 {
 }
 
 struct Tracker {
+    /// Current all-wheels-off-the-ground stretch, s.
+    airborne_s: f32,
     spawn: [f32; 3],
     rest_nodes: Vec<[f32; 3]>,
     vel_window: VecDeque<[f32; 3]>,
@@ -793,15 +935,25 @@ pub fn run_with_hook(
         selection,
         warnings,
         has_city,
+        mut routes,
     } = build_sim(sc, data, opts)?;
+    let start_states = scenario_states(&sim, &ids);
     let mut trackers = Vec::new();
-    for (spec, id) in sc.entities.iter().zip(&ids) {
+    for ((spec, id), (_, st0)) in sc.entities.iter().zip(&ids).zip(&start_states) {
         let car = &cars[&spec.car];
+        // Route drivers start where their route starts, and cars in hilly cities on the
+        // ground under `pos`.
+        let start = if matches!(spec.driver, Driver::FollowRoute { .. }) || sim.has_terrain() {
+            st0.pos
+        } else {
+            spec.pos
+        };
         trackers.push(Tracker {
-            spawn: spec.pos,
+            airborne_s: 0.0,
+            spawn: start,
             rest_nodes: car.lattice.nodes.iter().map(|n| n.pos_m).collect(),
             vel_window: VecDeque::new(),
-            last_pos: spec.pos,
+            last_pos: start,
             lat_g: 0.0,
             long_g: 0.0,
             failed: BTreeSet::new(),
@@ -822,7 +974,10 @@ pub fn run_with_hook(
                 parts_detached: 0,
                 wheels_detached: 0,
                 total_loss: false,
-                min_z_m: spec.pos[2],
+                min_z_m: start[2],
+                off_road_s: 0.0,
+                max_airborne_s: 0.0,
+                route_progress: 0.0,
             },
         });
     }
@@ -891,7 +1046,10 @@ pub fn run_with_hook(
         } else {
             let states = scenario_states(&sim, &ids);
             for (idx, id) in ids.iter().enumerate() {
-                let input = driver_input(sc, idx, tick, &states[idx].1, &last_inputs[idx]);
+                let input = match routes[idx].as_mut() {
+                    Some(route) => route.input(&states[idx].1),
+                    None => driver_input(sc, idx, tick, &states[idx].1, &last_inputs[idx]),
+                };
                 if input != last_inputs[idx] {
                     sim.set_input(*id, input)?;
                     last_inputs[idx] = input;
@@ -957,6 +1115,15 @@ pub fn run_with_hook(
         for (idx, (id, s)) in states.iter().enumerate() {
             let tr = &mut trackers[idx];
             tr.update(s);
+            if s.wheel_states.iter().all(|w| !w.contact) {
+                tr.airborne_s += PHYSICS_DT;
+                tr.summary.max_airborne_s = tr.summary.max_airborne_s.max(tr.airborne_s);
+            } else {
+                tr.airborne_s = 0.0;
+            }
+            if has_city && !on_road(sim.world().map(), s.pos) {
+                tr.summary.off_road_s += PHYSICS_DT;
+            }
             if let Some(slot) = probes.get_mut(&(idx, now)) {
                 *slot = s.speed_mps;
             }
@@ -1037,12 +1204,16 @@ pub fn run_with_hook(
     // Final per-entity values.
     let states = scenario_states(&sim, &ids);
     let mut entities = Vec::new();
-    for (tr, (_, s)) in trackers.iter_mut().zip(&states) {
+    for (i, (tr, (_, s))) in trackers.iter_mut().zip(&states).enumerate() {
         tr.summary.final_speed_mps = s.speed_mps;
         tr.summary.final_health = s.health;
         tr.summary.distance_m = dist([s.pos[0], s.pos[1], 0.0], [tr.spawn[0], tr.spawn[1], 0.0]);
         tr.summary.components_failed = tr.failed.len() as u32;
-        entities.push(tr.summary.clone());
+        let mut summary = tr.summary.clone();
+        if let Some(Some(route)) = routes.get(i) {
+            summary.route_progress = route.progress();
+        }
+        entities.push(summary);
     }
 
     let final_hash = sim.state_hash();
