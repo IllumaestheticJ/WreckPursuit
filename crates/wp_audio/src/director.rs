@@ -824,7 +824,7 @@ impl AudioDirector {
                         }
                     }
                 }
-                SimEvent::PoliceEvent { .. } => self.police_event(ev, by_id, tick, out),
+                SimEvent::Police(_) => self.police_event(ev, by_id, tick, out),
                 _ => {}
             }
         }
@@ -876,9 +876,10 @@ impl AudioDirector {
         tick: u64,
         out: &mut Vec<Desire>,
     ) {
-        let Some(pe) = PoliceEvent::from_sim_event(ev) else {
+        let SimEvent::Police(pe) = ev else {
             return;
         };
+        let pe = pe.clone();
         match pe {
             PoliceEvent::Radio { unit, text } => {
                 let priority = match unit {

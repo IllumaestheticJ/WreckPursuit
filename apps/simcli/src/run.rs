@@ -18,7 +18,7 @@ use crate::RunError;
 
 /// `wp_police` payload kind treated as "pursuit started" by [`Expect::PursuitStartedBefore`]
 /// (`wp_police::events::kind::PURSUIT_STARTED`; the full list is in that module).
-pub const PURSUIT_STARTED_KIND: u16 = wp_police::events::kind::PURSUIT_STARTED;
+pub const PURSUIT_STARTED_KIND: u16 = wp_contracts::police_kind::PURSUIT_STARTED;
 
 /// Systems to run: the [`Systems`] inside [`Sim`] plus the harness-side net round trip.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -628,8 +628,11 @@ pub fn event_name(e: &SimEvent) -> &'static str {
         SimEvent::TrafficViolation { .. } => "TrafficViolation",
         SimEvent::GlassShattered { .. } => "GlassShattered",
         SimEvent::RegionDamaged { .. } => "RegionDamaged",
-        SimEvent::PoliceEvent { .. } => "PoliceEvent",
-        SimEvent::EconomyEvent { .. } => "EconomyEvent",
+        // v0.3.0 typed variants keep their v0.2.0 names so scenario event counts stay valid.
+        SimEvent::Police(_) => "PoliceEvent",
+        SimEvent::Economy(_) => "EconomyEvent",
+        SimEvent::Race(_) => "RaceEvent",
+        SimEvent::WeatherChanged { .. } => "WeatherChanged",
     }
 }
 
@@ -646,7 +649,10 @@ pub fn event_entities(e: &SimEvent) -> Vec<EntityId> {
         | SimEvent::TrafficViolation { vehicle, .. }
         | SimEvent::GlassShattered { vehicle, .. }
         | SimEvent::RegionDamaged { vehicle, .. } => vec![*vehicle],
-        SimEvent::PoliceEvent { .. } | SimEvent::EconomyEvent { .. } => Vec::new(),
+        SimEvent::Police(_)
+        | SimEvent::Economy(_)
+        | SimEvent::Race(_)
+        | SimEvent::WeatherChanged { .. } => Vec::new(),
     }
 }
 
@@ -917,8 +923,8 @@ pub fn run_with_hook(
         for e in &events {
             event_counts.push((event_name(e), event_entities(e)));
             match e {
-                SimEvent::PoliceEvent { kind, .. } => {
-                    police_first.entry(*kind).or_insert(now);
+                SimEvent::Police(p) => {
+                    police_first.entry(p.kind()).or_insert(now);
                 }
                 SimEvent::ComponentFailed { vehicle, component } => {
                     if let Some(i) = index_of(*vehicle) {

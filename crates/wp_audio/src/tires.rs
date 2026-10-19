@@ -18,6 +18,8 @@ pub fn surface_index(s: SurfaceType) -> usize {
         SurfaceType::Dirt => 5,
         SurfaceType::Curb => 6,
         SurfaceType::Metal => 7,
+        // Lane markings sound like the asphalt around them (contract v0.3.0).
+        SurfaceType::PaintedLine => 0,
     }
 }
 

@@ -493,7 +493,7 @@ fn plays(cmds: &[AudioCommand], cue_name: &str) -> usize {
 
 #[test]
 fn police_radio_events_reach_the_scanner_with_tier_delay() {
-    use wp_police::{PoliceEvent, UnitId};
+    use wp_police::{PoliceEvent, PoliceEventExt, UnitId};
     let (mut dir, s) = one_car_dir();
     dir.set_scanner_tier(ScannerTier::Pro); // 6 s
     let ev = [
@@ -568,7 +568,7 @@ fn glass_event_shatters_once_and_disables_contact_inference() {
 #[test]
 fn spike_hit_bursts_and_panel_damage_rattles() {
     use wp_contracts::BodyRegion;
-    use wp_police::PoliceEvent;
+    use wp_police::{PoliceEvent, PoliceEventExt};
     let (mut dir, s) = one_car_dir();
     step(&mut dir, &s, 0, &[]);
     let spikes = PoliceEvent::SpikeHit {
