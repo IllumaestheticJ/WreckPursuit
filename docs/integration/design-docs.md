@@ -19,6 +19,9 @@
   150 radio line templates (`L001`–`L150`) with tokens for `PoliceEvent::Radio`.
 - `docs/design/CARS_LORE.md` — car fiction and cosmetic themes, proposed cosmetic mod ids.
 - `docs/design/FEATURE_BACKLOG.md` — unscheduled features B01–B37, prioritised.
+- `docs/design/DEMO_SCRIPT.md` — 3-minute single-player demo script (night city → speeding →
+  pursuit → escape/capture → repair bill) with what each moment proves and whether it works on
+  `main` today, plus the playtest checklist. Requested by the lead.
 
 ## Needs
 Nothing blocks this workstream. Design decisions waiting on others are in GDD §12.

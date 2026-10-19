@@ -1,6 +1,6 @@
 # Status
 
-_Last updated: lead integration run 4, 2026-10-19. Contract **v0.2.0** (applied in run 3, see
+_Last updated: lead integration run 5, 2026-10-19. Contract **v0.2.0** (applied in run 3, see
 `docs/CONTRACT_CHANGELOG.md`; v0.3.0 = typed police/economy/net events)._
 
 Machines are named by letter: **A–I = prompts 02–10**, **J–Q = prompts 13–20** (started 2026-10-19 as
@@ -55,13 +55,18 @@ determinism lint (0 errors), native == wasm on every scenario, `just web-e2e` al
         need `barriers` in scenarios (I) and tuning (B)
   - [x] replay round-trips
   - [~] determinism suite green — locally yes; GitHub CI runs once `main` is pushed
-- [ ] Checkpoint 2 (Greybox): city + traffic ✓ partly (D merged, traffic kinematic); police (E) merged, not yet wired to sim vehicles;
+- [ ] Checkpoint 2 (Greybox): city + traffic ✓ (near-player traffic physical); police ✓ as sim vehicles (not drawn yet);
       heat/escape/capture ✗; repair billing (G ✓, wiring ✗); 4-player server test (F merged; end-to-end test pending).
 - [ ] Checkpoint 3 (Low-poly playable).
 
 ## Owner actions
 None pending (branch protection on, stale branch deleted, all machines resumed for v0.2.0).
 
-## Next lead run (toward the single-player greybox demo)
-Police units as real `wp_sim` vehicles (E's unit API), physical traffic on LOD promotion (D #3),
-heat/escape/capture → economy wiring, then republish the testbed.
+## Run 5 (2026-10-19)
+Police units are real `wp_sim` vehicles in city runs (patrol → violations → pursuit → search
+works in the sim), near-player traffic is physical. Not yet drawn in the browser (C, this
+round). Lead rounds are now automatic every 2 h (`docs/LEAD_AUTOMATION.md`).
+
+## Next (toward the single-player greybox demo)
+C draws police/traffic + city-chase preset; M wires the heat HUD and repair bill; E/D share
+roads and controller; G + lead wire capture/escape → economy.
