@@ -132,6 +132,37 @@ Cloud container, Intel Xeon @ 2.10 GHz, 4 cores, release, real vehicle + damage 
 - The lint is line-based: it can miss a transcendental called through a function pointer or a
   macro, and it stops at the first `#[cfg(test)]` in a file.
 
+## Run 6 — response to lead feedback round 6 (2026-10-19)
+
+Merged `main` and the lead branch (run 6 + round 6/6b docs) into `ws/harness`. The lead's
+round 6 was written against the pre-5b harness, so items 1 and 2 overlapped with run 5b:
+
+1. **`build_sim` police order** — already `set_world` first, then `set_police` (run 5b). Merge
+   conflict resolved to the lead's version: `police_cars: false` now means presence 0 with heat
+   and wanted levels kept (run 5b used `PoliceSystem::new()`). `smoke/city_opt_out` still passes
+   (0 units).
+2. **`golden_city_chase` re-aimed (again) and checks back in `expect`.** Run 5b's aim (outer
+   northbound lane of x = 55 from y = −100) no longer pursues after the run-6 merges: unit 1 now
+   starts near (55, 33), pulls away north and turns west at y ≈ 57 by 5 s, before the racer
+   arrives. The racer now starts at (59.75, −20), 16.5 m/s, `police_heat: 15`: pursuit at
+   4.8 s, no damage. Robustness sweep with seed 108: every start from y = −40 to y = 25 at
+   16 / 16.5 / 18 m/s passes (pursuit 4.0–6.9 s, health ≥ 0.95); y = −60 is too late; 15 m/s
+   is under the violation threshold (no `TrafficViolation`). Other seeds spawn patrols
+   elsewhere and are not expected to pass (this golden is aimed at seed 108's layout).
+   Re-blessed (`[bless]`, only this golden changed; every other golden matched the lead's).
+3. **`soak/traffic_soak_observer`** keeps `police_cars: false`. E's obstacle awareness is not on
+   `main` yet; flip it back to `true` when it lands.
+
+Not done / blocked:
+- **W-7 (weather scenario field, request from K).** The spec in `weather.md` step 1b calls
+  `Sim::set_weather`, which does not exist in `wp_sim` yet (needs W-1, after v0.3.0). The
+  parser half is small and ready to add with it; `wet_brake_100_0.ron.pending` stays pending.
+- Test-build speed is the lead helper's (`lead/test-speed`); nothing changed here for it.
+
+Checks: `cargo fmt`, `cargo clippy --workspace -D warnings`, `cargo test --workspace`,
+`simcli run apps/simcli/scenarios` (35/35 pass), `simcli goldens` (all match), wasm build of
+`wp_wasm`.
+
 ## Run 5b — lead run 5 merged (2026-10-19)
 
 - **Reconciled with the lead's police/traffic vehicles.** `Sim::set_world` now builds police
