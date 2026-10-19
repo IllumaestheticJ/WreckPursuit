@@ -272,6 +272,8 @@ fn cop_career() {
 fn sprint(class: VehicleClass) -> RaceSetup {
     RaceSetup {
         race_type: RaceType::Sprint,
+        kind: None,
+        legality: Default::default(),
         class,
         route_length_m: 9_000.0,
         phase: DayPhase::Night,

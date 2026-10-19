@@ -53,6 +53,8 @@ fn perf() {
     let (a0, car) = account_with_sedan(&e, 100_000);
     let setup = RaceSetup {
         race_type: RaceType::Sprint,
+        kind: None,
+        legality: Default::default(),
         class: VehicleClass::Compact,
         route_length_m: 9000.0,
         phase: DayPhase::Night,

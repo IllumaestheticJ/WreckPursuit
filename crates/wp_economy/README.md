@@ -104,7 +104,9 @@ Data: `data/economy/{prices,stakes,consequences,market}.toml`, `data/mods/*.json
   hours × max(severity, 0.1). `repair::reference_line` is the same formula (a test pins its
   constants to `wp_damage`'s).
 - Billing re-prices every line: `(parts + hours × class labour rate × district × shop) × mode
-  repair_cost_scale` (Simulation 1.0, Arcade 0.5).
+  repair_cost_scale` (Simulation 1.0, Arcade 0.5). Districts are the contract `DistrictId`s
+  (Core ×1.25, Commercial ×1.1, Residential / Suburb ×1.0, Industrial ×0.85, Port ×0.8);
+  `district_from_key` also reads the pre-v0.3.0 keys (`default`, `Docks`, `Hills`).
 - Options: `RepairAll`, `RepairSelected(items)`, `DriveDamaged` (free; the car keeps its lattice
   state and `HandlingEffects`, so a car you could not afford to align drives crooked) and `Scrap`
   (salvage = `base × (0.08 + 0.32 × health) + 0.3 × mods price`).
@@ -132,7 +134,13 @@ Data: `data/economy/{prices,stakes,consequences,market}.toml`, `data/mods/*.json
 ### Payouts
 `winner purse = max(min, per_km × km) × class × day phase × mode × wanted`; places 1–4 get
 100/50/25/10 %; clean race (no contact, no violations beyond speeding) +25 %. Buy-in =
-`entry_frac × base purse × phase entry`. Night pays ×1.35 (entry ×1.2), Simulation ×1.2, racing
+`entry_frac × base purse × phase entry`. Races scheduled by `wp_race` carry their contract
+`RaceKind` + `Legality` (`Economy::race_setup`): `[race_kinds]` picks the race-type row (Outrun →
+Touge, TimeAttack → Circuit, Checkpoint / Cannonball / Delivery → Sprint) and a purse / buy-in
+multiplier that keeps `wp_race`'s relative purses (checkpoint 0.8, cannonball 1.2, outrun ≈ 0.75,
+time attack ≈ 0.55, drag ≈ 0.4 of a sprint); `[legality]` pays sanctioned events ×0.8 (buy-in
+×1.2) and illegal daytime races ×4.5 (≈ 2.5× a night street race after the day-phase purse).
+Night pays ×1.35 (entry ×1.2), Simulation ×1.2, racing
 with the cops on you up to ×1.45 plus bounty. Pink slips: both consent, Simulation only by
 default, 500 rep minimum; the car moves with its mods and damage, never its insurance.
 
@@ -172,7 +180,7 @@ debug coupe = 559 (B). Monotone in power and in lower mass (property-tested).
 | `labour_hours_per_item`, `region_parts`, `component_parts`, `class.*.parts_scale` | prices.toml | bumper scrape < one buy-in; medium front hit ≈ one race win in Sim (half in Arcade); full wreck ≈ 2× value in Sim (≥ 60 % hard floor) |
 | `data/modes/*.toml repair_cost_scale` | (workstream 03) | Arcade repairs half of Sim |
 | `shop.*`, `district_labour` | prices.toml | crooked = convenience tax; legit = risk of a report |
-| `race_types.*`, `day_phase.*`, `class_purse`, `mode_purse` | stakes.toml | Compact 9 km night sprint win ≈ 2 800; mid-skill nets ≈ 3 000 / night before repairs |
+| `race_types.*`, `race_kinds.*`, `legality.*`, `day_phase.*`, `class_purse`, `mode_purse` | stakes.toml | Compact 9 km night sprint win ≈ 2 800; mid-skill nets ≈ 3 000 / night before repairs |
 | `wanted_purse`, `bounty.*` | stakes.toml | racing hot pays, but captures cost more than it pays |
 | `fine_by_level`, `mode.*.fine_scale`, `bail_bounty_frac` | consequences.toml | an L5 bust costs ≈ 2 nights in Arcade, ≈ 4 in Sim |
 | `mode.Simulation.seizure_chance`, `total_loss_destroys_car` | consequences.toml | Sim can take your car |
@@ -280,7 +288,12 @@ cargo test -p wp_economy --test career -- --nocapture   # print the tuning numbe
   total-loss capture by mode; escape → bounty → repair paid; unaffordable / quote-only repairs;
   uncaptured total loss towed; races; all-or-nothing and per-account `finish`; auction
   countdown; the police decoder against `wp_police`'s encoder (every level and outcome); a live
-  police run settles like its recording.
+  police run settles like its recording. The recorded racer is parked mid-block at the first
+  junction no traffic camera covers and keeps speeding every 4 s until a unit starts the
+  pursuit (police only send a unit to a civilian report, and the racer's heat decays before
+  the night-time responder arrives otherwise).
+- `tests/race_kinds.rs`: every contract `RaceKind` maps onto `wp_race`'s race type and stays
+  within 15 % of `wp_race`'s relative purse; legality order; outrun recorded as touge.
 - `tests/roster_prices.rs`: feel targets on every roster car (table above).
 - `tests/career.rs`: the 20-night scenario + determinism + the roster sweep.
 

@@ -176,10 +176,11 @@ pub fn economy_race_type(kind: RaceKind) -> RaceType {
 }
 
 /// `wp_economy::RaceSetup` for an event (the economy keys purses by `VehicleClass`, so the
-/// server passes the car's class; `legality` is not representable there yet).
+/// server passes the car's class). The economy prices the kind and legality itself
+/// (`stakes.toml [race_kinds]`, `[legality]`; R5).
 pub fn economy_setup(
     kind: RaceKind,
-    _legality: Legality,
+    legality: Legality,
     class: VehicleClass,
     route_length_m: f32,
     phase: DayPhase,
@@ -187,6 +188,8 @@ pub fn economy_setup(
 ) -> RaceSetup {
     RaceSetup {
         race_type: economy_race_type(kind),
+        kind: Some(kind),
+        legality,
         class,
         route_length_m,
         phase,

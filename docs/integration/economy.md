@@ -3,7 +3,7 @@
 - **Workstream / prompt:** 08 — economy, progression, mods
 - **Branch:** `ws/economy`
 - **Crates / folders owned:** `crates/wp_economy`, `data/economy/`, `data/mods/`
-- **Contract version built against:** 0.2.0
+- **Contract version built against:** 0.3.0
 
 Design write-up, tuning levers and measured numbers: `crates/wp_economy/README.md`.
 
@@ -50,6 +50,7 @@ session API does not change.
 | `PlayerAccount { player, cash, rep, bounty, cop_rank, garage: Vec<OwnedCar>, active_car, heat_history, stats, day, .. }` | persistent per-player state |
 | `OwnedCar { uid: CarUid, def_id, class, base_price, mods, damage: DamageSnapshot, location, insurance }` | `DamageSnapshot` keeps `lattice_state: Vec<u8>` (opaque, from `wp_damage`) + `HandlingEffects` + outstanding `RepairEstimate` |
 | `EconomyEvent { player, seq, day, reason: EventReason, car, cash_delta, rep_delta, bounty_delta, cop_xp_delta, cash_after }` | gap-free `seq` per account |
+| `PlayerAccount::account_id()`, `EconomyEvent::account_id()`, `AccountStore::{load_account, account_events_since}`, `account_id_of` / `player_of` | durable `AccountId` view of the ledger (round 8; the ledger key is still `PlayerId` with the same number, see request #7) |
 | `EconomyEvent::to_sim_event()` / `from_sim_event()` | `SimEvent::EconomyEvent { kind: reason.kind_code(), payload: JSON }` for the client feed |
 | `trait AccountStore { load, commit, events_since }` | `InMemoryStore`; `sqlite::SqliteStore` behind feature `native` (server only) |
 | `Economy::open_account(PlayerId)`, `end_of_day(&mut acct)` | the in-game day is advanced by the server, never wall-clock |
@@ -78,13 +79,14 @@ capture), `CarImpounded/CarSeized/CarDestroyed` (despawn / do not spawn that car
 |---|---|
 | `price_table(class, car_value)` / `price_table_for(&OwnedCar)` | contract `PriceTable` to pass to `DamageSim::repair_estimate` |
 | `record_damage(&mut acct, &DamageReport)` | end of session: health, total_loss, handling, estimate, lattice blob, `wanted_during_session`, `towed` (towing is a penalty) |
-| `quote_repair(&acct, car, &RepairOption, &ShopContext, mode) -> RepairQuote` | `RepairAll`, `RepairSelected(items)`, `DriveDamaged`, `Scrap`; district + crooked/legit labour; insurance |
+| `quote_repair(&acct, car, &RepairOption, &ShopContext, mode) -> RepairQuote` | `RepairAll`, `RepairSelected(items)`, `DriveDamaged`, `Scrap`; district + crooked/legit labour; insurance. `ShopContext.district: DistrictId` (round 8); `district_from_key(&str)` parses names and the old keys (`default` → Residential, `Docks` → Port, `Hills` → Suburb) |
 | `repair(...) -> RepairOrder` | the damage system must apply the order to the stored lattice and send a fresh `DamageReport` (`towed: false`) |
 | `repair::reference_estimate(&PriceTable, scale, &[(RepairItem, severity)])` | formula stand-in for `wp_damage` |
 
 ### Payouts
 | Call | Notes |
 |---|---|
+| `race_setup(RaceKind, Legality, class, route_length_m, phase, mode) -> RaceSetup` | races from `wp_race` (R5, round 8): `RaceSetup { kind: Option<RaceKind>, legality, .. }` (both serde-default); `[race_kinds]` picks the race-type row + purse/buy-in multipliers, `[legality]` scales them. `race_type_for(&kind)`, `effective_race_type(&setup)` (the type recorded in the ledger) |
 | `entry_fee(&RaceSetup)`, `base_purse`, `race_payout(&RaceSetup, &RaceResult)` | pure |
 | `enter_race(&mut acct, &RaceSetup, car)` | debt blocks any buy-in > 0 (free `RaceType::Meet` allowed) |
 | `settle_race(&mut acct, &RaceSetup, car, &RaceResult)` | purse share, clean bonus, rep, bounty while wanted |
@@ -141,11 +143,13 @@ per seed). `apps/simcli` (workstream 10) may wrap it as an economy scenario.
 | From | What | Workaround now |
 |---|---|---|
 | 07 net / 12 lead | Call sites: race results (`RaceSetup` + `RaceResult` per racer, server-validated), session end `DamageReport`s, capture/escape, garage UI messages; persist with `SqliteStore` (enable `wp_economy/native` in `apps/server` only) | tests drive the API directly |
-| 06 police | **New (round 6b):** `PoliceSystem::set_heat` changes the wanted level without emitting `WantedLevelChanged`, so a pursuit raised that way ends with the economy never having seen a level (broke `real_police_capture_settles_through_the_economy` after the lead merge; the test now raises heat with real violations, and the economy bills an un-levelled capture at L1). Please emit the event on the next step, or (better) carry `level` in `PursuitEnded` as requested for v0.3.0. | L1 fallback |
+| 06 police (E) | **Round 8, stationary capture (lead item 5; decide whether intended).** Found while restoring `live_police_run_settles_like_the_recording` (3 am, racer parked, heat set directly, `internal_driving: true`, seed 8, small procedural city): **(a)** a violation a traffic camera witnesses only sets `last_known`; no report is filed and nobody is sent there, so a wanted racer who parks under a camera is never visited (the old recording position (-605, -605) is camera-covered). A civilian report is dispatched (`report_dispatch_delay_s.night` 50 s), but the racer's heat decays to None ~18 s after the last violation, so the responder arrives at a racer who is no longer wanted. **(b)** With the racer parked on a junction centre (-495, -605), the pursuing unit's Shadow "close in for the arrest" (`want_gap = 8.0` along the track, `pursuit.rs` ≈ line 833) stops it 16 m away in a straight line, just outside `capture.unit_radius_m = 15`, so the stopped racer is never captured (pursuit escalates to L3 instead). Suggest: close in by straight-line distance (or to `unit_radius_m − 3`) when the racer is stopped, and dispatch a unit to a camera hit on a wanted, unpursued racer. My test now parks mid-block off-camera and keeps offending, so it passes either way; tell me if you change (a)/(b) and I will move the racer back to the junction to cover it. | test racer placed where police reach it |
+| 06 police | ~~`set_heat` emits no `WantedLevelChanged`~~ done (it emits now; v0.3.0 `PursuitEnded` carries `level`). | — |
 | 06 police | ~~Capture/escape payload~~ covered by `PursuitEnded` + `WantedLevelChanged` (pursuit wiring above). **New for v0.3.0:** `PursuitEnded` should name the capturing unit and assisting units (`capturer: Option<UnitId>, assists: Vec<UnitId>`) so `award_cop` can pay player cops; and the event order (ended before the level reset) should stay as it is or carry `level` in the event. Consume `InformantTip` / `ShopReported` / `BountyCleared`. Feed the risk-budget overspend for `CopAction::RiskBudgetOverspent`. Read `ToolLoadout` (radar/scanner/fake plates) | `CaptureContext` built by hand in tests |
 | 03 damage | (a) ~~unscaled `parts_cost` / `labour_hours`~~ done in v0.2.0; (b) an API to serialize / restore lattice state (`Vec<u8>`) and to apply a `RepairOrder` (restore listed items / full reset); (c) `gen-lattice` extension: create detachable groups for body-kit `DetachableRequest`s | `reference_estimate`; lattice blob stays empty |
 | 02 vehicle | ~~Tire files~~ landed; `market.tire_grip` is now each file's `lateral.d` / street's (a test requires an entry per `data/tires/` file). Optionally `wp_vehicle::metrics` to replace the estimator; consume `ToolLoadout.run_flat`, `reinforced_cooling`, `nitrous` | estimator + grip table |
 | 09 cars | ~~`junkyard_beater`~~ landed (a test checks it matches `market.toml [floor_car]`). **Price retune (round 6b):** `hakone_gt` 48 000 → **40 000** (PI 494 vs Sperber 32's 500 at 36 000; its front-hit repair is 1.5× a win, the highest of the Sport cars); `ironside_440` 38 000 → **26 000** (PI 330, slower than the 22 000 Kestrel TS and the 28 000 Shiro Turbo). Both are listed as known outliers in `tests/roster_prices.rs::pricier_cars_are_not_slower`; that test fails once they are fixed until they are removed from `KNOWN`, so tell me (or remove them yourself — test-only change). Every other price is fine as is. | known-outlier list |
+| 15 race (L) | **R5 agreed mapping (round 8):** the economy prices every `RaceKind` itself from `stakes.toml [race_kinds]` (same type mapping as your `bridge::economy_race_type`: Outrun → Touge, TimeAttack → Circuit, Checkpoint / Cannonball / Delivery → Sprint; multipliers keep your `data/events/stakes.toml [kinds]` purse ratios within 15 %, checked by `tests/race_kinds.rs`, which reads your file) and `[legality]` (sanctioned ×0.8 purse / ×1.2 buy-in, illegal daytime ×4.5 ≈ 2.5× a night street race). Your `Stake.purse` stays the lobby's advertised number; the payout is the economy's. I added `kind: Some(kind), legality` to the `RaceSetup` literal in `bridge::economy_setup` (compile fix); you may replace the body with `econ.race_setup(..)` if you have an `Economy` there. If you change the kind → race type mapping or the relative `base_purse`s, `race_kinds.rs` fails: tell me and I retune. Still open from R5: charge `cargo_damage_cost` and apply `CrewCut` at the call site (server) — economy calls exist (`Adjustment` / a new reason if you want one: say which). | — |
 | 10 harness | CI line `cargo test -p wp_economy --features native` so the SQLite store is tested in CI | run locally |
 
 ## Contract change requests
@@ -156,7 +160,8 @@ per seed). `apps/simcli` (workstream 10) may wrap it as an economy scenario.
 | 3 | `RepairEstimate::health: f32` and `total_loss: bool` (or a `DamageSummary` returned next to the estimate) | the economy needs both at session end; today `DamageReport` carries them separately | 03, 08, 12 | deferred → v0.3.0 (`DamageSummary`) |
 | 4 | `DamageSim::{save_state() -> Vec<u8>, restore_state(&[u8]), apply_repair(&[RepairItem], full: bool)}` | `DriveDamaged` must carry the lattice across sessions; partial repairs must restore only the paid items | 03, 08, 12 | accepted → v0.3.0 (03 implements) |
 | 5 | Move `WantedLevel` from `wp_police` into `wp_contracts` | economy, net and police all key tables by it; today `wp_economy` depends on `wp_police` just for this enum | 06, 07, 08 | **done in v0.2.0**; `wp_economy` now uses `wp_contracts::WantedLevel` and no longer depends on `wp_police` |
-| 6 | Optional: `DistrictId` type in contracts (prompt 05 ids) | repair labour is keyed by district name strings (`prices.toml [district_labour]`) | 05, 08 | deferred → v0.3.0 |
+| 6 | Optional: `DistrictId` type in contracts (prompt 05 ids) | repair labour is keyed by district name strings (`prices.toml [district_labour]`) | 05, 08 | `DistrictId` in v0.3.0. **Round 8: economy side done** — `[district_labour]` is keyed by every `DistrictId`, the ledger's `ShopReported` carries a `DistrictId`, and the contract string is its variant name (`"Core"`, `"Port"`, ..). **Lead:** `EconomyReason::ShopReported.district` can become `DistrictId` (same JSON for every value the economy emits); then I drop `district_key` / the parse in `from_contract`. |
+| 7 | Ledger keyed by `AccountId` (round 8 item 3) | the contract event already says `account: AccountId` | 08, 18 meta, 07 net | **Not cheap, proposed for a coordinated step.** `PlayerAccount.player` / `EconomyEvent.player` / `AccountStore::{load, events_since}(PlayerId)` are used by `apps/meta` (two `AccountStore` impls, routes, client, auth, and the JSON stored in its `econ_accounts` / event tables and served by its HTTP API) and `wp_net`'s server. Plan: rename the fields to `account: AccountId` with `#[serde(alias = "player")]` (old JSON still loads), switch the trait to `AccountId`, and fix meta + net in the same commit (mechanical: `PlayerId(x)` → `AccountId(x)`). Needs O's (meta) and F's (net) OK since it touches their crates; until then the additive accessors above give everyone the durable id. |
 
 ### Typed `EconomyEvent` for v0.3.0 — final variant list (request #1, with 07's NET-4)
 
@@ -217,7 +222,12 @@ Police / net consumers: `InformantTip`, `ShopReported`, `BountyCleared` change h
 `CarImpounded`/`CarSeized`/`CarDestroyed` mean the car must not spawn.
 
 ## Changes outside my crates
-None. (The previous stub's public API in `wp_economy` changed — `PlayerAccount::garage` is now
+Round 8 (minimal compile fixes for new fields, nothing else):
+- `crates/wp_race/src/bridge.rs` (L): `economy_setup` fills `RaceSetup { kind: Some(kind), legality, .. }` (the `_legality` parameter is now used) and its doc line.
+- `apps/meta/tests/bots.rs` (O): `RaceSetup` literal gets `kind: None, legality: Default::default()`.
+- `crates/wp_wasm/src/garage.rs` (C): the overlay's `district` string is parsed with `wp_economy::district_from_key` (`"default"` still works; unknown names are an error).
+
+Before round 8: none. (The previous stub's public API in `wp_economy` changed — `PlayerAccount::garage` is now
 `Vec<OwnedCar>`, `AccountStore` is `load -> Result<Option<_>>` / `commit` / `events_since`,
 `repair_bill` is replaced by `quote_repair`/`repair` — no other crate used it.)
 Dependencies: `wp_contracts`, `wp_math`, `serde_json`, `toml`, `thiserror` (all wasm-clean;
@@ -228,6 +238,8 @@ Versions for `rusqlite`/`proptest` are pinned in the crate's `Cargo.toml`, not t
 table (lead may move them).
 
 ## Perf numbers
+(Round 8 changes add one `BTreeMap` lookup per purse / fee; not re-measured.)
+
 | Measurement | Machine | Native | Browser | Budget |
 |---|---|---|---|---|
 | `preview`, 7 mods | cloud container, release | 167 µs | — | not per-frame |
@@ -332,3 +344,32 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
 3. The ledger is still keyed by `PlayerId`. Move it to `AccountId` if cheap.
 
 5. **Parked test (lead, round 8):** `wp_economy/tests/session.rs::live_police_run_settles_like_the_recording` is `#[ignore]`. Since E round 6, no unit finds a racer that never moves (3 am, heat set directly). Work with E: either police should find such a racer, or the test needs a racer police can reach. Also, the recorded fixtures were converted to v0.3.0 typed events by the lead. Re-record them once the live run works.
+
+### Round 8 response (economy)
+
+1. **R5 `RaceType` vs `RaceKind`** — done on my side; mapping and multipliers above (Needs → 15).
+   `RaceSetup` gains `kind` + `legality` (serde-default), `Economy::race_setup` builds one, and
+   `stakes.toml [race_kinds]` / `[legality]` price them. Ledger records the kind's race type.
+   Tests: `tests/race_kinds.rs` (mapping = `wp_race`'s, relative purses within 15 % of
+   `data/events/stakes.toml`, legality order, kinds without a setup unchanged, outrun → touge
+   in the ledger).
+2. **`ShopReported.district` → `DistrictId`** — `prices.toml [district_labour]` keyed by all six
+   `DistrictId`s (Docks → Port, Hills folded into Commercial ×1.1, `default` → Residential ×1.0);
+   `ShopContext.district` and the ledger's `ShopReported` are `DistrictId`; the contract field
+   can now become `DistrictId` (request #6).
+3. **Ledger → `AccountId`** — not cheap (meta's stored JSON + two store impls, net server).
+   Added the durable-id accessors; coordinated rename proposed as request #7.
+5. **Parked test** — `live_police_run_settles_like_the_recording` is back (not ignored) and
+   passes; fixtures re-recorded (v0.3.0 typed events). Root cause, for E (Needs → 06): a parked
+   wanted racer is only found through a civilian report, its heat decays before the night
+   responder arrives, a camera hit dispatches nobody, and the Shadow arrest gap stops the unit
+   16 m from a racer on a junction centre (capture radius 15 m). The test racer now parks
+   mid-block at the first junction no camera covers and keeps speeding every 4 s until a unit
+   starts the pursuit (capture at ≈ 134 s; total-loss capture both settle like the recordings).
+   `recorded_capture_arcade_impounds_bills_and_keeps_damage` now counts the speeding tickets in
+   the fixture instead of assuming one.
+
+
+Gate on `ws/economy` after merging `origin/main` (round 8): `cargo fmt --check`, workspace clippy
+`--all-targets -D warnings`, `cargo test --workspace` (all green, no failures),
+`cargo test -p wp_economy --features native`, wasm build of `wp_wasm` (no `rusqlite` in its tree).

@@ -75,6 +75,8 @@ fn row(e: &Economy, car: &LoadedCar, mode: DamageMode) -> Row {
     ];
     let setup = RaceSetup {
         race_type: RaceType::Sprint,
+        kind: None,
+        legality: Default::default(),
         class: car.def.class,
         route_length_m: 5_000.0,
         phase: DayPhase::Night,

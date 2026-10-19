@@ -40,7 +40,8 @@ struct QuoteRequest {
     /// Shop kind (default legit).
     #[serde(default = "d_shop")]
     shop: ShopKind,
-    /// District id for the labour multiplier (`prices.toml` `[district_labour]`).
+    /// District for the labour multiplier: a `DistrictId` name (`prices.toml`
+    /// `[district_labour]`) or `"default"` (= `Residential`).
     #[serde(default = "d_district")]
     district: String,
     /// Wanted level of the car (crooked-shop markup, legit-shop reports).
@@ -133,7 +134,8 @@ pub fn repair_quote_json(entity: u32, request_json: &str) -> Result<String, JsVa
                     .map_err(|e| e.to_string())?;
             }
             let shop = ShopContext {
-                district: req.district.clone(),
+                district: wp_economy::district_from_key(&req.district)
+                    .ok_or_else(|| format!("unknown district {:?}", req.district))?,
                 kind: req.shop,
                 wanted: req.wanted,
             };

@@ -3,7 +3,7 @@
 mod common;
 
 use common::*;
-use wp_contracts::{BodyRegion, Component, DamageMode, HandlingEffects, RepairItem};
+use wp_contracts::{BodyRegion, Component, DamageMode, DistrictId, HandlingEffects, RepairItem};
 use wp_economy::repair::{reference_estimate, DamageReport};
 use wp_economy::{
     CarLocation, CarSpec, Condition, EconomyError, EventReason, RepairOption, ShopContext,
@@ -166,13 +166,13 @@ fn shops_district_markup_and_reporting() {
     let (mut a, car) = account_with_sedan(&e, 100_000);
     let r = damaged_report(&e, &a, car, mode);
     e.record_damage(&mut a, &r).unwrap();
-    let q = |kind, wanted, district: &str| {
+    let q = |kind, wanted, district: DistrictId| {
         e.quote_repair(
             &a,
             car,
             &RepairOption::RepairAll,
             &ShopContext {
-                district: district.into(),
+                district,
                 kind,
                 wanted,
             },
@@ -180,14 +180,18 @@ fn shops_district_markup_and_reporting() {
         )
         .unwrap()
     };
-    let legit = q(ShopKind::Legit, WantedLevel::None, "default");
-    let core = q(ShopKind::Legit, WantedLevel::None, "Core");
-    let docks = q(ShopKind::Legit, WantedLevel::None, "Docks");
-    let crooked = q(ShopKind::Crooked, WantedLevel::None, "default");
-    let crooked_wanted = q(ShopKind::Crooked, WantedLevel::L3, "default");
-    let legit_wanted = q(ShopKind::Legit, WantedLevel::L3, "default");
-    let legit_l1 = q(ShopKind::Legit, WantedLevel::L1, "default");
-    assert!(core.gross > legit.gross && docks.gross < legit.gross);
+    let legit = q(ShopKind::Legit, WantedLevel::None, DistrictId::Residential);
+    let core = q(ShopKind::Legit, WantedLevel::None, DistrictId::Core);
+    let port = q(ShopKind::Legit, WantedLevel::None, DistrictId::Port);
+    let crooked = q(
+        ShopKind::Crooked,
+        WantedLevel::None,
+        DistrictId::Residential,
+    );
+    let crooked_wanted = q(ShopKind::Crooked, WantedLevel::L3, DistrictId::Residential);
+    let legit_wanted = q(ShopKind::Legit, WantedLevel::L3, DistrictId::Residential);
+    let legit_l1 = q(ShopKind::Legit, WantedLevel::L1, DistrictId::Residential);
+    assert!(core.gross > legit.gross && port.gross < legit.gross);
     assert!(crooked.gross > legit.gross && crooked_wanted.gross > crooked.gross);
     assert!(!crooked_wanted.reports_to_police);
     assert!(legit_wanted.reports_to_police);
@@ -195,16 +199,56 @@ fn shops_district_markup_and_reporting() {
     assert_eq!(legit_wanted.gross, legit.gross);
 
     let shop = ShopContext {
-        district: "Suburb".into(),
+        district: DistrictId::Suburb,
         kind: ShopKind::Legit,
         wanted: WantedLevel::L3,
     };
     let (_, ev) = e
         .repair(&mut a, car, &RepairOption::RepairAll, &shop, mode)
         .unwrap();
-    assert!(ev
+    let report = ev
         .iter()
-        .any(|x| matches!(x.reason, EventReason::ShopReported { .. })));
+        .find(|x| matches!(x.reason, EventReason::ShopReported { .. }))
+        .expect("legit shop reports an L3 car");
+    assert_eq!(
+        report.reason,
+        EventReason::ShopReported {
+            district: DistrictId::Suburb,
+            level: WantedLevel::L3
+        }
+    );
+    // Contract form carries the district name; it round-trips.
+    let c = report.to_contract();
+    assert!(matches!(
+        &c.reason,
+        wp_contracts::EconomyReason::ShopReported { district, .. } if district == "Suburb"
+    ));
+    assert_eq!(wp_economy::EconomyEvent::from_contract(&c), *report);
+}
+
+#[test]
+fn district_keys_cover_every_district_and_old_keys() {
+    let e = econ();
+    for d in DistrictId::ALL {
+        assert_eq!(
+            wp_economy::district_from_key(&wp_economy::district_key(d)),
+            Some(d)
+        );
+        assert!(e.prices.district_labour[&d] > 0.0);
+    }
+    assert_eq!(
+        wp_economy::district_from_key("default"),
+        Some(DistrictId::Residential)
+    );
+    assert_eq!(
+        wp_economy::district_from_key("Docks"),
+        Some(DistrictId::Port)
+    );
+    assert_eq!(
+        wp_economy::district_from_key("Hills"),
+        Some(DistrictId::Suburb)
+    );
+    assert_eq!(wp_economy::district_from_key("Atlantis"), None);
 }
 
 #[test]
