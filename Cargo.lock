@@ -4385,6 +4385,7 @@ dependencies = [
  "wasm-bindgen",
  "wp_audio",
  "wp_contracts",
+ "wp_economy",
  "wp_math",
  "wp_net",
  "wp_sim",

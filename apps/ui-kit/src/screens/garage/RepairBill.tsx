@@ -48,7 +48,15 @@ export function RepairBill() {
               </>
             )}
           </span>
-          <span class="wp-mono wp-dim">{bill.carClass}</span>
+          <span class="wp-row">
+            <span class="wp-mono wp-dim">{bill.carClass}</span>
+            <Button size="sm" onClick={() => ask({})}>
+              Refresh
+            </Button>
+            <Button size="sm" onClick={() => send({ type: "back" })} hotkey="Esc">
+              Close
+            </Button>
+          </span>
         </div>
         <ChoiceField<BillRequest["option"]>
           label="Decision"
@@ -162,22 +170,10 @@ export function RepairBill() {
                 <span>{r.option === "Scrap" ? "You receive" : "You pay"}</span>
                 <Money value={r.option === "Scrap" ? bill.salvage : bill.playerPays} tone={r.option === "Scrap"} />
               </div>
-              <div class="wp-spread wp-mono wp-dim" style={{ fontSize: "0.8em" }}>
-                <span>Salvage value</span>
-                <Money value={bill.salvage} />
-              </div>
               {bill.reportsToPolice && <div class="wp-warn">This shop will report the car to the police.</div>}
             </div>
           </>
         )}
-        <div class="wp-row" style={{ justifyContent: "flex-end", marginTop: "0.6em" }}>
-          <Button size="sm" onClick={() => ask({})}>
-            Refresh
-          </Button>
-          <Button size="sm" onClick={() => send({ type: "back" })} hotkey="Esc">
-            Close
-          </Button>
-        </div>
       </Panel>
     </div>
   );

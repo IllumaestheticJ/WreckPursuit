@@ -14,6 +14,7 @@ import { CameraRig, CAMERA_MODES, type CameraMode } from "./cameras";
 import { Hud } from "./hud";
 import { TelemetryPlots } from "./telemetry";
 import { AudioSystem } from "./audio";
+import { UiOverlay } from "./ui_overlay";
 
 // v2: canonical simcli replay.bin (v1 held the retired WPR\x01 format).
 const LAST_REPLAY_KEY = "wp.testbed.lastReplay.v2";
@@ -66,6 +67,7 @@ async function main(): Promise<void> {
   const hud = new Hud(overlay);
   const plots = new TelemetryPlots(overlay);
   const audio = new AudioSystem(scene.world, overlay);
+  const ui = new UiOverlay(overlay);
 
   // ----- session management --------------------------------------------------------------
 
@@ -77,6 +79,7 @@ async function main(): Promise<void> {
     scene.clearContacts();
     hud.clearEvents();
     plots.clear();
+    ui.reset();
     syncViews();
     const ids = sim.entities();
     app.player = ids[0] ?? 1;
@@ -310,6 +313,9 @@ async function main(): Promise<void> {
         rig.setMode(rig.mode, app.views.get(app.focus)?.root);
         break;
       }
+      case "KeyF":
+        ui.toggleBill();
+        break;
       case "F1":
       case "Slash":
         e.preventDefault();
@@ -379,6 +385,10 @@ async function main(): Promise<void> {
     const events = sim.eventsDrain();
     scene.addEvents(events);
     hud.pushEvents(events, sim.worldInfo()[W.tick]);
+    {
+      const w = sim.worldInfo();
+      ui.frame(w[W.tick], app.player, events, w[W.hours], modeName());
+    }
     scene.update(dt, sim.intents());
     scene.updateAgents(sim.trafficAgents());
     const wi = sim.worldInfo();

@@ -27,6 +27,7 @@ pub mod net;
 
 pub mod audio;
 pub mod data;
+pub mod garage;
 pub mod pack;
 pub mod scenario;
 pub mod session;
