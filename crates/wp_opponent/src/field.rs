@@ -277,6 +277,45 @@ struct Racer {
     input: VehicleInput,
     flight: Option<Box<Flight>>,
     passes: u32,
+    race_speed: Option<SpeedProfile>,
+    debug: Debug,
+    /// Half extents along / across the corridor (yaw-aware), m.
+    ext: (f32, f32),
+}
+
+/// Why a racer is doing what it does (last decision), for overlays and tuning.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+pub struct Debug {
+    /// Speed target, m/s.
+    pub v_target: f32,
+    /// What set the speed target.
+    pub limit: SpeedLimit,
+    /// Commanded lateral offset, m.
+    pub n_cmd: f32,
+    /// Corridor position, m.
+    pub s: f32,
+    /// Lateral position, m.
+    pub n: f32,
+    /// Distance to the next braking point, m.
+    pub brake_dist: f32,
+}
+
+/// What limits a racer's speed target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum SpeedLimit {
+    /// The speed profile (corner / braking zone / top speed).
+    #[default]
+    Profile,
+    /// A car or civilian ahead in my path (entity id or civilian agent id + 1_000_000).
+    Obstacle(u32),
+    /// Backing out of a side-by-side.
+    BackOut(u32),
+    /// Waiting to rejoin.
+    RejoinWait,
+    /// Lost the rear / sliding.
+    Unstable,
+    /// Rejoin / park / cool-down caps.
+    Mode,
 }
 
 /// Standing of one racer.
@@ -322,6 +361,8 @@ fn approach(x: f32, target: f32, max_step: f32) -> f32 {
 const SIDE_GAP_M: f32 = 0.6;
 const MIN_GAP_M: f32 = 2.5;
 const LAT_MARGIN_M: f32 = 0.35;
+/// Seconds of lateral closing speed added to the side clearance.
+const LATERAL_LEAD_S: f32 = 0.6;
 
 impl Field {
     /// Build a field on `corridor`. Lines are optimised once per distinct car width.
@@ -401,6 +442,12 @@ impl Field {
                 input: VehicleInput::default(),
                 flight: None,
                 passes: 0,
+                race_speed: None,
+                debug: Debug::default(),
+                ext: (
+                    0.5 * spec.capability.length_m,
+                    0.5 * spec.capability.width_m,
+                ),
             });
         }
         Self {
@@ -685,6 +732,10 @@ impl Field {
                 let v_long = geom::dot(vel, fwd);
                 let v_lat = geom::dot(vel, geom::right_of(fwd));
                 r.unstable = v_long > 8.0 && v_lat.abs() > 0.2 * v_long;
+                let ca = geom::dot(fwd, t).abs();
+                let sa = (1.0 - ca * ca).max(0.0).sqrt();
+                let (w, l) = (r.cap.width_m, r.cap.length_m);
+                r.ext = (0.5 * (l * ca + w * sa), 0.5 * (w * ca + l * sa));
                 line_len = corridor.length_m;
                 if r.flight.is_none() {
                     if first {
@@ -737,6 +788,9 @@ impl Field {
                         time_s: tick as f32 * PHYSICS_DT,
                     });
                     r.v_cap = self.config.cooldown_speed_mps;
+                    if r.race_speed.is_none() {
+                        r.race_speed = Some(r.speed.clone());
+                    }
                     let cap = r.cap_now;
                     r.speed = SpeedProfile::build(
                         &self.corridor,
@@ -773,6 +827,9 @@ impl Field {
                 };
                 r.v_cap = v_cap;
                 if r.flight.is_none() {
+                    if r.race_speed.is_none() {
+                        r.race_speed = Some(r.speed.clone());
+                    }
                     r.speed = SpeedProfile::build(
                         &self.corridor,
                         &self.lines[r.line_idx].1,
@@ -882,8 +939,8 @@ impl Field {
                             n: r.n,
                             v_s: r.v_s,
                             v_n: r.v_n,
-                            half_len: 0.5 * r.cap.length_m,
-                            half_w: 0.5 * r.cap.width_m,
+                            half_len: r.ext.0,
+                            half_w: r.ext.1,
                             unstable,
                         });
                         continue;
@@ -970,6 +1027,18 @@ impl Field {
         );
         self.racers[k].speed = speed;
         self.racers[k].flight = flight;
+    }
+
+    /// Last decision's debug readout for racer `k` (spec order). Obstacle ids: racers are
+    /// `100 + spec index`, other vehicles their entity id, civilians `1_000_000 + agent id`.
+    pub fn debug_of(&self, k: usize) -> Debug {
+        self.racers[k].debug
+    }
+
+    /// Speed profile racer `k` raced to (before any cool-down / damage rebuild).
+    pub fn race_profile_of(&self, k: usize) -> &SpeedProfile {
+        let r = &self.racers[k];
+        r.race_speed.as_ref().unwrap_or(&r.speed)
     }
 
     /// Who racer `k` (spec order) has passed on the road (debug / tests).
@@ -1212,7 +1281,7 @@ fn decide_racer(
             let attacker = rel.iter().find(|x| {
                 !is_civ(&x.o)
                     && x.ds < 0.0
-                    && x.gap > 0.5
+                    && x.gap > 3.0
                     && x.gap < 12.0
                     && x.o.v_s > v + 0.5
                     && (x.o.n - r.n).abs() > 1.0
@@ -1285,21 +1354,22 @@ fn decide_racer(
         let mut hi = lim_hi.max(r.n);
         let mut squeezed_by_ahead = false;
         for x in &rel {
-            if x.ds.abs() > hl + x.o.half_len + 1.5 {
+            if x.ds.abs() > hl + x.o.half_len + 2.5 {
                 continue;
             }
-            let need = hw
-                + x.o.half_w
-                + SIDE_GAP_M
-                + if is_civ(&x.o) {
-                    p.civilian_margin_m
-                } else {
-                    0.0
-                };
-            if x.o.n >= r.n {
-                hi = hi.min(x.o.n - need);
+            let civ_extra = if is_civ(&x.o) {
+                p.civilian_margin_m
             } else {
-                lo = lo.max(x.o.n + need);
+                0.0
+            };
+            let need = hw + x.o.half_w + SIDE_GAP_M + civ_extra;
+            // Lateral closing speed (either car drifting toward the other) eats clearance.
+            if x.o.n >= r.n {
+                let closing = (r.v_n - x.o.v_n).max(0.0);
+                hi = hi.min(x.o.n - need - LATERAL_LEAD_S * closing);
+            } else {
+                let closing = (x.o.v_n - r.v_n).max(0.0);
+                lo = lo.max(x.o.n + need + LATERAL_LEAD_S * closing);
             }
             if x.ds > 0.0 {
                 r.pressure = 1.0;
@@ -1317,17 +1387,29 @@ fn decide_racer(
         r.n_cmd = n_cmd;
 
         // ---- Longitudinal target ----
-        let mut v_target = v_line(r.s + v * (0.15 + r.brake_err_s)).min(r.v_cap);
+        let mut v_target = v_line(r.s + v * (0.15 + r.brake_err_s));
+        let mut limit = SpeedLimit::Profile;
+        let mut cap_to = |v_target: &mut f32, cap: f32, why: SpeedLimit| {
+            if cap < *v_target {
+                *v_target = cap;
+                limit = why;
+            }
+        };
+        cap_to(&mut v_target, r.v_cap, SpeedLimit::Mode);
         if r.status == RacerStatus::Fled && fleeing && r.s > corridor.length_m - 15.0 {
             r.tactic = Tactic::Park;
         }
         match r.tactic {
-            Tactic::Rejoin => v_target = v_target.min(7.0),
-            Tactic::Park => v_target = (v - 3.0 * dt * 4.0).max(0.0).min(v_target),
+            Tactic::Rejoin => cap_to(&mut v_target, 7.0, SpeedLimit::Mode),
+            Tactic::Park => cap_to(
+                &mut v_target,
+                (v - 3.0 * dt * 4.0).max(0.0),
+                SpeedLimit::Mode,
+            ),
             _ => {}
         }
         if r.unstable {
-            v_target = v_target.min(v - 1.0);
+            cap_to(&mut v_target, v - 1.0, SpeedLimit::Unstable);
         }
         // Obstacle caps: anything ahead in the band I'm driving through.
         let a_brk = profile.a_brake.max(3.0) * 0.85;
@@ -1357,7 +1439,11 @@ fn decide_racer(
             } else {
                 v_brake.min(v_time)
             };
-            v_target = v_target.min(cap.max(0.0));
+            cap_to(
+                &mut v_target,
+                cap.max(0.0),
+                SpeedLimit::Obstacle(who_id(o.who)),
+            );
         }
         // Rejoining: wait for a racer coming from behind on my path.
         if r.tactic == Tactic::Rejoin {
@@ -1365,7 +1451,7 @@ fn decide_racer(
                 if x.ds < 0.0 && x.ds > -50.0 && !is_civ(&x.o) && x.o.v_s > v + 3.0 {
                     let t_arrive = x.gap / (x.o.v_s - v).max(1.0);
                     if t_arrive < 3.0 && overlaps(band, &x.o, 1.0, 0.0) {
-                        v_target = 0.0;
+                        cap_to(&mut v_target, 0.0, SpeedLimit::RejoinWait);
                     }
                 }
             }
@@ -1378,7 +1464,11 @@ fn decide_racer(
         if let Some(x) = alongside_ahead {
             let into_corner = brake_dist < v * p.side_by_side_s;
             if squeezed_by_ahead || into_corner || r.unstable {
-                v_target = v_target.min(x.o.v_s - 1.5);
+                cap_to(
+                    &mut v_target,
+                    x.o.v_s - 1.5,
+                    SpeedLimit::BackOut(who_id(x.o.who)),
+                );
             }
         }
 
@@ -1414,6 +1504,22 @@ fn decide_racer(
             input.steer = steer;
         }
         r.input = input;
+        r.debug = Debug {
+            v_target,
+            limit,
+            n_cmd,
+            s: r.s,
+            n: r.n,
+            brake_dist,
+        };
+    }
+}
+
+fn who_id(w: Who) -> u32 {
+    match w {
+        Who::Racer(k) => 100 + k as u32,
+        Who::Vehicle(e) => e.0,
+        Who::Civilian(a) => 1_000_000 + a,
     }
 }
 

@@ -61,7 +61,7 @@ impl DriverProfile {
                 braking: lerp(0.68, 0.92, p.skill),
                 accel: lerp(0.85, 1.0, p.skill),
             },
-            lookahead_per_mps: lerp(0.72, 0.55, p.skill),
+            lookahead_per_mps: lerp(0.45, 0.35, p.skill),
             throttle_rate_per_s: lerp(2.0, 8.0, p.skill),
             brake_error_s: lerp(0.12, 0.0, p.consistency) + lerp(0.03, 0.0, p.skill),
             line_noise_m: lerp(0.6, 0.05, p.consistency),
