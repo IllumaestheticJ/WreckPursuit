@@ -70,11 +70,42 @@ jsonschema = { version = "0.59", default-features = false }
 [profile.release]
 debug = 1
 
-# wp_police's headless scenario tests simulate hours of pursuits; unoptimised they take minutes.
-# (Added by workstream 06; see docs/integration/police.md.)
+# Test speed (lead helper, see docs/integration/harness.md "Lead helper: test speed").
+# `cargo test` simulates minutes of city, traffic, police and Rapier physics; unoptimised
+# that took over an hour. Optimise every dependency and the simulation crates in the dev/test
+# profile. Debug assertions and overflow checks stay on (opt-level does not change them), and
+# no hash changes: rustc never reorders or fuses (FMA) float operations at any opt-level, and
+# the goldens + native-vs-wasm compare check that. Everything else in the workspace keeps
+# opt-level 0 so edit-compile cycles stay quick.
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.dev.package.wp_math]
+opt-level = 2
+
+[profile.dev.package.wp_vehicle]
+opt-level = 2
+
+[profile.dev.package.wp_damage]
+opt-level = 2
+
+[profile.dev.package.wp_world]
+opt-level = 2
+
 [profile.dev.package.wp_police]
 opt-level = 2
 
-# wp_world's procedural city + 400-agent traffic is slow unoptimised (lead, same reason).
-[profile.dev.package.wp_world]
+[profile.dev.package.wp_weather]
+opt-level = 2
+
+[profile.dev.package.wp_opponent]
+opt-level = 2
+
+[profile.dev.package.wp_race]
+opt-level = 2
+
+[profile.dev.package.wp_sim]
+opt-level = 2
+
+[profile.dev.package.simcli]
 opt-level = 2
