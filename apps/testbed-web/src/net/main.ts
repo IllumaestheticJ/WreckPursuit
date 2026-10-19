@@ -106,6 +106,8 @@ async function main(): Promise<void> {
     damage: (): DamageInfo[] => net.damage(),
     requestRole: (role: RoleName) => net.requestRole(role, performance.now()),
     setInput: (i: NetInput | null) => (testInput = i),
+    dropConnection: () => conn.dropForTest(),
+    connState: () => connState,
   };
 
   // Kinematic traffic (display only, extrapolated by the client).

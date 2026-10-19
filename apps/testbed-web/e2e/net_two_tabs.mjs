@@ -6,7 +6,8 @@
 // Checks: both pages join the same session as racers and each sees 2 player cars; tab A
 // drives off and stops, tab B steers into it (each page drives from what it sees); after the
 // crash both cars are dented on both pages, the two pages hold identical damage (lattice
-// hashes) for both cars, and nothing failed to decode.
+// hashes) for both cars; tab A's socket drops and it reconnects with its token, keeping its
+// car; no page errors.
 import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -167,6 +168,20 @@ for (const [name, d] of [["A", dA], ["B", dB]]) {
 for (const [who, e] of [["A", idA], ["B", idB]]) {
   check(dA[e] && dB[e] && dA[e].hash === dB[e].hash, `car ${who}: both pages hold the same damage (hash ${dA[e]?.hash} / ${dB[e]?.hash})`);
 }
+// 5. Reconnect: tab A's socket drops; the page reconnects with its token and keeps its car.
+await a.evaluate(() => window.__wpNet.dropConnection());
+await a.waitForFunction(() => window.__wpNet.connState() === "closed", null, { timeout: 10000 }).catch(() => {});
+const back = await a
+  .waitForFunction(
+    (id) => window.__wpNet.connState() === "open" && window.__wpNet.status().vehicle === id,
+    idA,
+    { timeout: 20000 },
+  )
+  .then(() => true)
+  .catch(() => false);
+check(back, "tab A reconnected with its token and kept its car");
+check((await waitPlayers(a, 2)) === 2, "tab A sees both player cars again after reconnecting");
+
 await shot(a, "net_two_tabs_a.png");
 await shot(b, "net_two_tabs_b.png");
 const stats = await Promise.all([a, b].map((p) => p.evaluate(() => window.__wpNet.stats())));
