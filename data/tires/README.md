@@ -8,16 +8,16 @@ Simplified Magic Formula per axis: `F = D·Fz·sin(C·atan(Bx − E(Bx − atan 
 (`peak_slip_*` are the normalisers and must match the curves' peaks — they are computed from
 the coefficients, not hand-typed).
 
-| id | lat D | long D | peak α | peak κ | wet | Use |
-|---|---|---|---|---|---|---|
-| `street` | 0.96 | 1.10 | 7.6° | 0.115 | 0.70 | all-season touring, default (debug sedan 0.82 g) |
-| `sport` | 1.10 | 1.20 | 6.2° | 0.101 | 0.62 | summer performance |
-| `semi_slick` | 1.28 | 1.36 | 4.7° | 0.080 | 0.50 | track-day, edgy past the peak |
-| `wet_biased` | 0.96 | 1.03 | 8.0° | 0.134 | 0.86 | rain / winter-ish, forgiving |
-| `police_pursuit` | 1.04 | 1.14 | 7.0° | 0.108 | 0.72 | heavy-duty pursuit, low wear, higher Fz0 |
-| `all_terrain` | 0.86 | 0.98 | 12.0° | 0.158 | 0.72 | pickups/SUVs: ≈ 0.9 × street, soft (low cornering stiffness), +33% rolling resistance, best on gravel/dirt (0.82–0.84) |
-| `vintage_bias` | 0.81 | 0.93 | 8.3° | 0.132 | 0.60 | 70s bias-ply: ≈ 0.85 × street, ~half street's cornering stiffness, strong fall-off past the peak (85% at 2× peak slip), long relaxation length (lazy) |
-| `drag_radial` | 0.98 | 1.45 | 11.5° | 0.130 | 0.45 | street-legal drag tire: huge straight-line traction, soft sidewall (weak cornering response), terrible in the wet, fast wear |
+| id | lat D | long D | peak α | peak κ | wet | paint | Use |
+|---|---|---|---|---|---|---|---|
+| `street` | 0.96 | 1.10 | 7.6° | 0.115 | 0.70 | 0.95 | all-season touring, default (debug sedan 0.82 g) |
+| `sport` | 1.10 | 1.20 | 6.2° | 0.101 | 0.62 | 0.94 | summer performance |
+| `semi_slick` | 1.28 | 1.36 | 4.7° | 0.080 | 0.50 | 0.92 | track-day, edgy past the peak |
+| `wet_biased` | 0.96 | 1.03 | 8.0° | 0.134 | 0.86 | 0.96 | rain / winter-ish, forgiving |
+| `police_pursuit` | 1.04 | 1.14 | 7.0° | 0.108 | 0.72 | 0.95 | heavy-duty pursuit, low wear, higher Fz0 |
+| `all_terrain` | 0.86 | 0.98 | 12.0° | 0.158 | 0.72 | 0.94 | pickups/SUVs: ≈ 0.9 × street, soft (low cornering stiffness), +33% rolling resistance, best on gravel/dirt (0.82–0.84) |
+| `vintage_bias` | 0.81 | 0.93 | 8.3° | 0.132 | 0.60 | 0.93 | 70s bias-ply: ≈ 0.85 × street, ~half street's cornering stiffness, strong fall-off past the peak (85% at 2× peak slip), long relaxation length (lazy) |
+| `drag_radial` | 0.98 | 1.45 | 11.5° | 0.130 | 0.45 | 0.92 | street-legal drag tire: huge straight-line traction, soft sidewall (weak cornering response), terrible in the wet, fast wear |
 
 ## Source reasoning
 
@@ -35,6 +35,17 @@ the coefficients, not hand-typed).
   sidewalls. Also the keyboard-friendliness knob.
 - **Surfaces:** wet asphalt keeps 60–85% of dry grip depending on tread; loose surfaces
   ~0.45–0.68; grass lowest.
+- **`PaintedLine` (contract v0.3.0, added by 09 / H in round 8)** is the *dry* tire-on-paint
+  multiplier: 0.92–0.96. Road paint fills the asphalt macrotexture, so the hysteresis part of
+  grip drops a few percent; compounds that lean hardest on hysteresis (semi-slick, drag radial,
+  hard 70s bias-ply rubber) lose most, soft siped tires least. The **wet** loss on paint (to
+  roughly half of dry) is not in this table: it comes from the conditions model
+  (`wp_vehicle::surface` / `wp_weather::grip`), scaled by each tire's `WetAsphalt / Asphalt`
+  ratio like every other surface, so the paint value must not also carry a dry paint factor
+  there (see `docs/integration/cars.md`).
+- **`treaded`** (contract v0.3.0): `semi_slick` is `false` (aquaplanes at the slick onset);
+  every other compound, the drag radial included (DOT street tire with shallow tread), is
+  treaded (`None`).
 - `street` lateral D = 0.96 (was 1.0): all-season car-level grip is 0.82–0.92 g (09's class
   band); 1.0 read like a summer tire.
 - Rolling resistance 0.010–0.016; `wear_rate` is a placeholder (wear not simulated yet).

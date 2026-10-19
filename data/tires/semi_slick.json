@@ -16,7 +16,9 @@
     "Grass": 0.32,
     "Dirt": 0.45,
     "Curb": 0.85,
-    "Metal": 0.55
+    "Metal": 0.55,
+    "PaintedLine": 0.92
   },
-  "wear_rate": 3e-05
+  "wear_rate": 3e-05,
+  "treaded": false
 }
