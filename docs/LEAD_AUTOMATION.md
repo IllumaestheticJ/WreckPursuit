@@ -33,6 +33,7 @@ archive them).
 | Q | 20 tuning dash | `ws/tuning-dash` | `tuning-dash.md` |
 | R | 21 car models & panels | `ws/panels` | `panels.md` |
 | J2 | 13 audio (recorded samples) | `ws/audio-samples` | `audio.md` |
+| S | 11 art direction (low-poly dark) | `ws/art` | `art.md` |
 
 Lead helper sessions (title `WP Lead helper · <task>`) work on `lead/*` branches (e.g.
 `lead/contract-v0.3.0`, `lead/test-speed`); the lead merges them like `ws/*` branches.
