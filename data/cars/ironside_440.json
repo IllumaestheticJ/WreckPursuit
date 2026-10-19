@@ -1,0 +1,156 @@
+{
+  "id": "ironside_440",
+  "display_name": "Ironside 440",
+  "class": "Muscle",
+  "analog_of": "early-70s American big-block muscle coupe, 7.2 L pushrod V8, live rear axle",
+  "body_size_m": [1.95, 5.2, 1.35],
+  "mass_kg": 1725.0,
+  "front_weight_frac": 0.56,
+  "wheelbase_m": 2.95,
+  "track_front_m": 1.52,
+  "track_rear_m": 1.5,
+  "cg_height_m": 0.55,
+  "inertia_kgm2": [650.0, 3940.0, 4300.0],
+  "drag_cd_a_m2": 1.039,
+  "lift_front": 0.15,
+  "lift_rear": 0.18,
+  "engine": {
+    "torque_curve_nm": [
+      [800, 380],
+      [1200, 450],
+      [1600, 500],
+      [2000, 530],
+      [2400, 550],
+      [2800, 558],
+      [3200, 560],
+      [3600, 552],
+      [4000, 515],
+      [4400, 465],
+      [4800, 415],
+      [5200, 365],
+      [5500, 330]
+    ],
+    "idle_rpm": 650.0,
+    "redline_rpm": 5200.0,
+    "rev_limit_rpm": 5500.0,
+    "inertia_kgm2": 0.3,
+    "engine_brake_nm": 67.0
+  },
+  "drivetrain": {
+    "layout": "Rwd",
+    "gear_ratios": [2.45, 1.45, 1.0],
+    "final_drive": 3.23,
+    "reverse_ratio": 2.2,
+    "diff_front": "Open",
+    "diff_rear": "Open",
+    "clutch_max_nm": 840.0,
+    "shift_time_s": 0.4
+  },
+  "wheels": [
+    {
+      "position_m": [-0.76, 1.475, 0.344],
+      "radius_m": 0.344,
+      "width_m": 0.235,
+      "mass_kg": 30.0,
+      "tire_id": "street",
+      "steerable": true,
+      "max_steer_rad": 0.552,
+      "ackermann_frac": 0.8,
+      "camber_rad": 0.0044,
+      "toe_rad": 0.0017,
+      "caster_rad": 0.0349
+    },
+    {
+      "position_m": [0.76, 1.475, 0.344],
+      "radius_m": 0.344,
+      "width_m": 0.235,
+      "mass_kg": 30.0,
+      "tire_id": "street",
+      "steerable": true,
+      "max_steer_rad": 0.552,
+      "ackermann_frac": 0.8,
+      "camber_rad": 0.0044,
+      "toe_rad": 0.0017,
+      "caster_rad": 0.0349
+    },
+    {
+      "position_m": [-0.75, -1.475, 0.344],
+      "radius_m": 0.344,
+      "width_m": 0.235,
+      "mass_kg": 45.0,
+      "tire_id": "street",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0,
+      "caster_rad": 0.0
+    },
+    {
+      "position_m": [0.75, -1.475, 0.344],
+      "radius_m": 0.344,
+      "width_m": 0.235,
+      "mass_kg": 45.0,
+      "tire_id": "street",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": 0.0,
+      "toe_rad": 0.0,
+      "caster_rad": 0.0
+    }
+  ],
+  "suspension": [
+    {
+      "spring_n_per_m": 21600.0,
+      "damper_bump_ns_per_m": 1380.0,
+      "damper_rebound_ns_per_m": 2070.0,
+      "travel_m": 0.2,
+      "preload_m": 0.03,
+      "arb_n_per_m": 11300.0,
+      "bump_stop_n_per_m": 120000.0
+    },
+    {
+      "spring_n_per_m": 21600.0,
+      "damper_bump_ns_per_m": 1380.0,
+      "damper_rebound_ns_per_m": 2070.0,
+      "travel_m": 0.2,
+      "preload_m": 0.03,
+      "arb_n_per_m": 11300.0,
+      "bump_stop_n_per_m": 120000.0
+    },
+    {
+      "spring_n_per_m": 19000.0,
+      "damper_bump_ns_per_m": 1110.0,
+      "damper_rebound_ns_per_m": 1660.0,
+      "travel_m": 0.22,
+      "preload_m": 0.03,
+      "arb_n_per_m": 200.0,
+      "bump_stop_n_per_m": 120000.0
+    },
+    {
+      "spring_n_per_m": 19000.0,
+      "damper_bump_ns_per_m": 1110.0,
+      "damper_rebound_ns_per_m": 1660.0,
+      "travel_m": 0.22,
+      "preload_m": 0.03,
+      "arb_n_per_m": 200.0,
+      "bump_stop_n_per_m": 120000.0
+    }
+  ],
+  "brakes": {
+    "max_torque_front_nm": 1720.0,
+    "max_torque_rear_nm": 630.0,
+    "bias_front": 0.73,
+    "handbrake_rear_nm": 600.0
+  },
+  "steering": {
+    "ratio": 19.0,
+    "rack_speed_rad_per_s": 1.0,
+    "ffb_scale": 1.0
+  },
+  "aero_downforce_coeffs": [0.0, 0.0],
+  "lattice_id": "ironside_440",
+  "base_price": 38000,
+  "durability_class": 4
+}

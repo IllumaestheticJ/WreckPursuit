@@ -1,0 +1,164 @@
+{
+  "id": "lucciola_350",
+  "display_name": "Lucciola 350",
+  "class": "Exotic",
+  "analog_of": "90s Italian mid-engine exotic coupe, 3.5 L flat-plane V8, transverse-mounted gearbox behind the engine",
+  "body_size_m": [1.9, 4.25, 1.17],
+  "mass_kg": 1375.0,
+  "front_weight_frac": 0.42,
+  "wheelbase_m": 2.45,
+  "track_front_m": 1.51,
+  "track_rear_m": 1.615,
+  "cg_height_m": 0.41,
+  "inertia_kgm2": [440.0, 1670.0, 1860.0],
+  "drag_cd_a_m2": 0.602,
+  "lift_front": -0.05,
+  "lift_rear": -0.12,
+  "engine": {
+    "torque_curve_nm": [
+      [1000, 180],
+      [2000, 240],
+      [3000, 285],
+      [3500, 305],
+      [4000, 320],
+      [4500, 335],
+      [5000, 348],
+      [5500, 358],
+      [6000, 363],
+      [6500, 360],
+      [7000, 352],
+      [7500, 343],
+      [8000, 330],
+      [8250, 322],
+      [8800, 280]
+    ],
+    "idle_rpm": 1000.0,
+    "redline_rpm": 8500.0,
+    "rev_limit_rpm": 8800.0,
+    "inertia_kgm2": 0.12,
+    "engine_brake_nm": 36.0
+  },
+  "drivetrain": {
+    "layout": "Rwd",
+    "gear_ratios": [3.08, 2.16, 1.61, 1.27, 1.03, 0.84],
+    "final_drive": 4.3,
+    "reverse_ratio": 2.92,
+    "diff_front": "Open",
+    "diff_rear": {
+      "Lsd": {
+        "preload_nm": 60.0,
+        "ramp_power": 0.5,
+        "ramp_coast": 0.35
+      }
+    },
+    "clutch_max_nm": 510.0,
+    "shift_time_s": 0.22
+  },
+  "wheels": [
+    {
+      "position_m": [-0.755, 1.225, 0.309],
+      "radius_m": 0.309,
+      "width_m": 0.225,
+      "mass_kg": 20.0,
+      "tire_id": "street",
+      "steerable": true,
+      "max_steer_rad": 0.5,
+      "ackermann_frac": 0.5,
+      "camber_rad": -0.0175,
+      "toe_rad": 0.0,
+      "caster_rad": 0.1309
+    },
+    {
+      "position_m": [0.755, 1.225, 0.309],
+      "radius_m": 0.309,
+      "width_m": 0.225,
+      "mass_kg": 20.0,
+      "tire_id": "street",
+      "steerable": true,
+      "max_steer_rad": 0.5,
+      "ackermann_frac": 0.5,
+      "camber_rad": -0.0175,
+      "toe_rad": 0.0,
+      "caster_rad": 0.1309
+    },
+    {
+      "position_m": [-0.807, -1.225, 0.325],
+      "radius_m": 0.325,
+      "width_m": 0.265,
+      "mass_kg": 24.0,
+      "tire_id": "street",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": -0.0314,
+      "toe_rad": 0.0044,
+      "caster_rad": 0.0
+    },
+    {
+      "position_m": [0.807, -1.225, 0.325],
+      "radius_m": 0.325,
+      "width_m": 0.265,
+      "mass_kg": 24.0,
+      "tire_id": "street",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": -0.0314,
+      "toe_rad": 0.0044,
+      "caster_rad": 0.0
+    }
+  ],
+  "suspension": [
+    {
+      "spring_n_per_m": 42400.0,
+      "damper_bump_ns_per_m": 2160.0,
+      "damper_rebound_ns_per_m": 3240.0,
+      "travel_m": 0.12,
+      "preload_m": 0.02,
+      "arb_n_per_m": 11300.0,
+      "bump_stop_n_per_m": 200000.0
+    },
+    {
+      "spring_n_per_m": 42400.0,
+      "damper_bump_ns_per_m": 2160.0,
+      "damper_rebound_ns_per_m": 3240.0,
+      "travel_m": 0.12,
+      "preload_m": 0.02,
+      "arb_n_per_m": 11300.0,
+      "bump_stop_n_per_m": 200000.0
+    },
+    {
+      "spring_n_per_m": 68400.0,
+      "damper_bump_ns_per_m": 3240.0,
+      "damper_rebound_ns_per_m": 4860.0,
+      "travel_m": 0.13,
+      "preload_m": 0.02,
+      "arb_n_per_m": 0.0,
+      "bump_stop_n_per_m": 200000.0
+    },
+    {
+      "spring_n_per_m": 68400.0,
+      "damper_bump_ns_per_m": 3240.0,
+      "damper_rebound_ns_per_m": 4860.0,
+      "travel_m": 0.13,
+      "preload_m": 0.02,
+      "arb_n_per_m": 0.0,
+      "bump_stop_n_per_m": 200000.0
+    }
+  ],
+  "brakes": {
+    "max_torque_front_nm": 3170.0,
+    "max_torque_rear_nm": 2220.0,
+    "bias_front": 0.57,
+    "handbrake_rear_nm": 1330.0
+  },
+  "steering": {
+    "ratio": 16.0,
+    "rack_speed_rad_per_s": 1.6,
+    "ffb_scale": 1.0
+  },
+  "aero_downforce_coeffs": [0.0, 0.0],
+  "lattice_id": "lucciola_350",
+  "base_price": 120000,
+  "durability_class": 1
+}

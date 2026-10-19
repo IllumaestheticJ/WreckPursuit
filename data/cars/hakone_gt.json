@@ -1,0 +1,162 @@
+{
+  "id": "hakone_gt",
+  "display_name": "Hakone GT",
+  "class": "Sport",
+  "analog_of": "90s Japanese FR grand tourer, 3.0 L sequential twin-turbo I6",
+  "body_size_m": [1.81, 4.515, 1.275],
+  "mass_kg": 1625.0,
+  "front_weight_frac": 0.53,
+  "wheelbase_m": 2.55,
+  "track_front_m": 1.52,
+  "track_rear_m": 1.53,
+  "cg_height_m": 0.46,
+  "inertia_kgm2": [530.0, 2620.0, 2880.0],
+  "drag_cd_a_m2": 0.601,
+  "lift_front": 0.04,
+  "lift_rear": 0.03,
+  "engine": {
+    "torque_curve_nm": [
+      [1000, 230],
+      [1500, 280],
+      [2000, 320],
+      [2500, 355],
+      [3000, 390],
+      [3500, 420],
+      [4000, 435],
+      [4500, 432],
+      [5000, 425],
+      [5500, 412],
+      [6000, 385],
+      [6500, 345],
+      [7000, 300]
+    ],
+    "idle_rpm": 750.0,
+    "redline_rpm": 6800.0,
+    "rev_limit_rpm": 7000.0,
+    "inertia_kgm2": 0.18,
+    "engine_brake_nm": 48.0
+  },
+  "drivetrain": {
+    "layout": "Rwd",
+    "gear_ratios": [3.83, 2.36, 1.69, 1.31, 1.0, 0.79],
+    "final_drive": 3.13,
+    "reverse_ratio": 3.28,
+    "diff_front": "Open",
+    "diff_rear": {
+      "Lsd": {
+        "preload_nm": 80.0,
+        "ramp_power": 0.4,
+        "ramp_coast": 0.25
+      }
+    },
+    "clutch_max_nm": 610.0,
+    "shift_time_s": 0.25
+  },
+  "wheels": [
+    {
+      "position_m": [-0.76, 1.275, 0.312],
+      "radius_m": 0.312,
+      "width_m": 0.235,
+      "mass_kg": 24.0,
+      "tire_id": "street",
+      "steerable": true,
+      "max_steer_rad": 0.57,
+      "ackermann_frac": 0.55,
+      "camber_rad": -0.014,
+      "toe_rad": 0.0,
+      "caster_rad": 0.1134
+    },
+    {
+      "position_m": [0.76, 1.275, 0.312],
+      "radius_m": 0.312,
+      "width_m": 0.235,
+      "mass_kg": 24.0,
+      "tire_id": "street",
+      "steerable": true,
+      "max_steer_rad": 0.57,
+      "ackermann_frac": 0.55,
+      "camber_rad": -0.014,
+      "toe_rad": 0.0,
+      "caster_rad": 0.1134
+    },
+    {
+      "position_m": [-0.765, -1.275, 0.308],
+      "radius_m": 0.308,
+      "width_m": 0.255,
+      "mass_kg": 26.0,
+      "tire_id": "street",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": -0.0227,
+      "toe_rad": 0.0026,
+      "caster_rad": 0.0
+    },
+    {
+      "position_m": [0.765, -1.275, 0.308],
+      "radius_m": 0.308,
+      "width_m": 0.255,
+      "mass_kg": 26.0,
+      "tire_id": "street",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": -0.0227,
+      "toe_rad": 0.0026,
+      "caster_rad": 0.0
+    }
+  ],
+  "suspension": [
+    {
+      "spring_n_per_m": 52000.0,
+      "damper_bump_ns_per_m": 2760.0,
+      "damper_rebound_ns_per_m": 4140.0,
+      "travel_m": 0.14,
+      "preload_m": 0.02,
+      "arb_n_per_m": 14200.0,
+      "bump_stop_n_per_m": 170000.0
+    },
+    {
+      "spring_n_per_m": 52000.0,
+      "damper_bump_ns_per_m": 2760.0,
+      "damper_rebound_ns_per_m": 4140.0,
+      "travel_m": 0.14,
+      "preload_m": 0.02,
+      "arb_n_per_m": 14200.0,
+      "bump_stop_n_per_m": 170000.0
+    },
+    {
+      "spring_n_per_m": 50700.0,
+      "damper_bump_ns_per_m": 2550.0,
+      "damper_rebound_ns_per_m": 3820.0,
+      "travel_m": 0.15,
+      "preload_m": 0.02,
+      "arb_n_per_m": 0.0,
+      "bump_stop_n_per_m": 170000.0
+    },
+    {
+      "spring_n_per_m": 50700.0,
+      "damper_bump_ns_per_m": 2550.0,
+      "damper_rebound_ns_per_m": 3820.0,
+      "travel_m": 0.15,
+      "preload_m": 0.02,
+      "arb_n_per_m": 0.0,
+      "bump_stop_n_per_m": 170000.0
+    }
+  ],
+  "brakes": {
+    "max_torque_front_nm": 2880.0,
+    "max_torque_rear_nm": 2230.0,
+    "bias_front": 0.69,
+    "handbrake_rear_nm": 1780.0
+  },
+  "steering": {
+    "ratio": 15.5,
+    "rack_speed_rad_per_s": 1.4,
+    "ffb_scale": 1.0
+  },
+  "aero_downforce_coeffs": [0.0, 0.0],
+  "lattice_id": "hakone_gt",
+  "base_price": 48000,
+  "durability_class": 3
+}
