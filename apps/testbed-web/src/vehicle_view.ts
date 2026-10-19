@@ -7,6 +7,7 @@ import type { VehicleInfo } from "./wasm/sim";
 import { sim } from "./wasm/sim";
 import { layers } from "./settings";
 import { autoHullSkin, SkinnedBody, skinFromBinding } from "./skin";
+import { PanelBody } from "./render/panels";
 
 /** Newtons per metre of tire-force arrow. */
 const FORCE_SCALE = 1 / 4000;
@@ -62,6 +63,9 @@ export class VehicleView {
   private readonly sirenLight: THREE.PointLight | null = null;
   private readonly headMat: THREE.MeshStandardMaterial;
   private readonly tailMat: THREE.MeshStandardMaterial;
+  /** Per-panel car mesh (workstream R, render/panels.ts); replaces box, lamps and tires once loaded. */
+  readonly panels: PanelBody;
+  private readonly lamps: THREE.Mesh[] = [];
 
   constructor(readonly entity: number, colour: number) {
     this.info = sim.info(entity);
@@ -88,6 +92,7 @@ export class VehicleView {
       const tail = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.05, 0.12), this.tailMat);
       tail.position.set(sx * (w / 2 - 0.25), -l / 2 - 0.01, h * 0.5);
       this.root.add(head, tail);
+      this.lamps.push(head, tail);
     }
 
     // Police: roof light bar (red left, blue right) + one point light that flashes with the siren.
@@ -168,6 +173,13 @@ export class VehicleView {
       this.wheels.push({ pivot, spin, tire, material, angle: 0, fx, fy, susp });
     }
 
+    // Per-panel mesh: its wheel parts spin with the wheel groups above.
+    this.panels = new PanelBody(entity, this.info.car_id, colour, this.headMat, this.tailMat);
+    this.root.add(this.panels.root);
+    this.panels.whenReady(() =>
+      this.wheels.forEach((w, i) => this.panels.wheelParts[i].forEach((m) => w.spin.add(m))),
+    );
+
     // CG marker (+ velocity arrow, which lives in world space; see update()).
     this.cg = new THREE.Mesh(
       new THREE.SphereGeometry(0.12, 12, 8),
@@ -189,19 +201,38 @@ export class VehicleView {
     this.root.quaternion.copy(qa.slerp(qb, alpha));
 
     const bodyOn = layers.on("body");
-    const latticeOn = layers.on("lattice");
+    // "panel meshes / lattice view" (key 0): panel meshes, or the bare lattice wireframe.
+    const panelsOn = bodyOn && layers.on("panels") && this.panels.ready;
+    const latticeOn = layers.on("lattice") || (bodyOn && !layers.on("panels"));
     const stressOn = layers.on("stress");
-    const needNodes = latticeOn || stressOn || (bodyOn && this.skinned);
+    const needNodes = latticeOn || stressOn || (bodyOn && this.skinned) || panelsOn;
     if (needNodes) this.nodes = sim.latticeNodes(this.entity);
+    this.panels.root.visible = panelsOn;
+    for (const lamp of this.lamps) lamp.visible = !panelsOn;
+    for (const w of this.wheels)
+      for (const c of w.spin.children) {
+        const ours = this.panels.wheelParts.some((p) => p.includes(c as THREE.Mesh));
+        c.visible = ours ? panelsOn : !panelsOn;
+      }
+    if (panelsOn) {
+      const v = new THREE.Vector3(cur[o + S.linVel], cur[o + S.linVel + 1], cur[o + S.linVel + 2]);
+      this.panels.update(this.nodes, dt, v);
+      this.panels.paint.opacity = latticeOn || stressOn ? 0.35 : 1;
+      this.panels.paint.transparent = this.panels.paint.opacity < 1;
+      this.panels.paint.depthWrite = !this.panels.paint.transparent;
+    }
 
-    if (this.skinned) {
+    if (panelsOn) {
+      if (this.skinned) this.skinned.object.visible = false;
+      this.box.visible = false;
+    } else if (this.skinned) {
       this.skinned.object.visible = bodyOn;
       this.box.visible = false;
       if (bodyOn) this.skinned.update(this.nodes);
     } else {
       this.box.visible = bodyOn;
     }
-    this.nose.visible = bodyOn;
+    this.nose.visible = bodyOn && !panelsOn && layers.on("panels");
     const bodyMat = this.box.material as THREE.MeshStandardMaterial;
     bodyMat.opacity = latticeOn || stressOn ? 0.35 : 1;
     bodyMat.depthWrite = bodyMat.opacity === 1;
@@ -310,6 +341,7 @@ export class VehicleView {
   }
 
   dispose(): void {
+    this.panels.dispose();
     this.root.removeFromParent();
     this.velocity.removeFromParent();
   }

@@ -1,0 +1,24 @@
+// Panels (workstream R): a coupe side-swipes a sedan's driver side at a shallow angle (Arcade:
+// survivable). The hit pops the sedan's door latches; the sideways jolt flings the unlatched
+// door open on its hinge, it bounces off its stop, the wind pushes it back toward closed and
+// hard braking at 2.5 s swings it forward again.
+(
+    name: "panels_side_swipe_door",
+    seed: 2101,
+    mode: Arcade,
+    assists: ai,
+    panels: true,
+    entities: [
+        (id: "victim", car: "debug_sedan", pos: (0.0, 0.0, 0.0), speed_mps: 14.0, driver: cruise(target_mps: 14.0, until_s: 2.5),
+            inputs: [(t_s: 2.5, input: (brake: 1.0))]),
+        (id: "striker", car: "debug_coupe", pos: (-6.0, -2.5, 0.0), yaw: -0.45, speed_mps: 18.0, driver: cruise(target_mps: 18.0, until_s: 0.8),
+            inputs: [(t_s: 0.8, input: (brake: 1.0))]),
+    ],
+    duration_s: 5.0,
+    hash_every: 24,
+    expect: [
+        metric(entity: "victim", name: "panels_unlatched", min: 1, max: 4),
+        metric(entity: "victim", name: "max_panel_angle_rad", min: 0.8, max: 1.25),
+        total_loss(entity: "victim", expected: false),
+    ],
+)

@@ -11,6 +11,8 @@
 //!   [`lattice_gen::BodyProfile`].
 //! - [`barrier`] runs crash-barrier scenarios (`crates/wp_damage/scenarios/*.ron`).
 //! - [`repair`] prices damage into a [`RepairEstimate`].
+//! - [`panels`] (workstream R): hinged doors/hood/trunk and bolted bumpers/fenders that
+//!   unlatch, swing, hang by one hinge and tear off (opt-in via `DamageModel::attach_panels`).
 //!
 //! See `README.md` for the model write-up and tuning knobs.
 
@@ -24,6 +26,7 @@ pub mod debris;
 pub mod hull;
 pub mod lattice_gen;
 mod model;
+pub mod panels;
 pub mod repair;
 mod snapshot;
 mod solver;
@@ -36,6 +39,9 @@ pub use debris::{DetachedKind, DetachedPart};
 pub use model::{
     component_health_weight, region_health_weight, DamageLogEntry, DamageLogKind, DamageModel,
     GlassBreak, ALL_REGIONS, REGION_COUNT,
+};
+pub use panels::{
+    DeriveOptions, PanelDef, PanelError, PanelKind, PanelSpec, PanelState, PanelStatus,
 };
 pub use repair::default_price_table;
 pub use tuning::DamageTuning;

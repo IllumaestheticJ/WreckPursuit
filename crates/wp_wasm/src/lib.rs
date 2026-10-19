@@ -526,6 +526,38 @@ pub fn lattice_strain(entity: u32) -> Result<Vec<f32>, JsValue> {
     })
 }
 
+/// Floats per panel in `panel_states()`.
+pub const PANEL_STRIDE: usize = 10;
+
+/// Hinged/bolted body panels of a vehicle (workstream R; empty unless the scenario has
+/// `panels: true`), in `data/panels/<car>.json` order, [`PANEL_STRIDE`] floats each:
+/// `[region index (like vehicle_info().regions), state (0 Attached, 1 Unlatched,
+/// 2 HangingByOne, 3 Detached), angle rad, angular velocity rad/s, pivot x, y, z, axis x, y, z]`
+/// (chassis space). A free panel's lattice nodes are already rotated; renderers use pivot,
+/// axis and angle to swing the rigid panel mesh about its hinge.
+#[wasm_bindgen]
+pub fn panel_states(entity: u32) -> Result<Vec<f32>, JsValue> {
+    with(|s| {
+        let v = s
+            .sim()
+            .vehicles()
+            .iter()
+            .find(|v| v.id == EntityId(entity))
+            .ok_or_else(|| format!("unknown entity {entity}"))?;
+        let panels = v.damage.panel_states();
+        let mut out = Vec::with_capacity(panels.len() * PANEL_STRIDE);
+        for p in panels {
+            out.push(pack::region_index(p.region) as f32);
+            out.push(p.state.code() as f32);
+            out.push(p.angle_rad);
+            out.push(p.omega_rad_s);
+            out.extend_from_slice(&p.pivot);
+            out.extend_from_slice(&p.axis);
+        }
+        Ok(out)
+    })
+}
+
 /// Deformation energy per body region (J), indexed like `vehicle_info().regions`.
 #[wasm_bindgen]
 pub fn region_energy(entity: u32) -> Result<Vec<f32>, JsValue> {

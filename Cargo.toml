@@ -26,6 +26,7 @@ members = [
     "tools/city-import",
     "tools/tuning-dash/probe",
     "tools/specsheet/ram_probe",
+    "tools/assets",
 ]
 
 [workspace.package]

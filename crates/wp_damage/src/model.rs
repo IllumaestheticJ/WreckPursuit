@@ -370,6 +370,8 @@ pub struct DamageModel {
     pub(crate) region_cosmetic_j: [f32; REGION_COUNT],
     /// Damage-model time at which the last hard episode ended (limp-mode settle), s.
     pub(crate) last_hard_end_s: f32,
+    /// Hinged/bolted panels (workstream R, `panels.rs`); `None` unless `attach_panels`.
+    pub(crate) panels: Option<Box<crate::panels::PanelSet>>,
 }
 
 impl DamageModel {
@@ -606,6 +608,7 @@ impl DamageModel {
             ep_region_plastic_j: [0.0; REGION_COUNT],
             region_cosmetic_j: [0.0; REGION_COUNT],
             last_hard_end_s: 0.0,
+            panels: None,
         };
         model.recompute_hull();
         model
@@ -885,6 +888,7 @@ impl DamageModel {
         let entity = self.entity;
         let emit = self.emit_lattice_events;
         let last_mode = self.last_mode.take();
+        let panels = self.take_panel_spec();
         *self = Self::with_tuning(
             &self.def.clone(),
             &self.materials.clone(),
@@ -894,6 +898,10 @@ impl DamageModel {
         self.entity = entity;
         self.emit_lattice_events = emit;
         self.last_mode = last_mode;
+        if let Some(spec) = panels {
+            // Validated when first attached; the lattice has not changed since.
+            let _ = self.attach_panels(&spec);
+        }
     }
 
     /// Outer convex hull of the active nodes (chassis space) for the chassis collider.
@@ -957,6 +965,7 @@ impl DamageModel {
         }
         h.write_f32_q(self.health, 1e4);
         h.write_u32(self.total_loss as u32);
+        self.hash_panels(&mut h);
         h.finish()
     }
 
@@ -1544,6 +1553,7 @@ impl DamageSim for DamageModel {
             .is_multiple_of(self.tuning.solver_divider.max(1) as u64)
         {
             let t = std::mem::take(&mut self.accum_dt);
+            self.panels_pre_tick();
             if self.awake {
                 self.solve(t, mode, out);
                 self.check_groups(mode, out);
@@ -1552,6 +1562,7 @@ impl DamageSim for DamageModel {
                     self.end_episode();
                 }
             }
+            self.panels_post_tick(t, mode, out);
             if self.dirty {
                 self.update_components(mode, out);
                 if !self.cosmetic_episode() {

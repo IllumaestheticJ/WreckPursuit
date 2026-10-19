@@ -410,6 +410,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "car-assets"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "simcli",
+ "wp_contracts",
+ "wp_damage",
+ "wp_math",
+]
+
+[[package]]
 name = "cast"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3119,6 +3131,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "wp_contracts",
+ "wp_damage",
  "wp_math",
  "wp_net",
  "wp_police",

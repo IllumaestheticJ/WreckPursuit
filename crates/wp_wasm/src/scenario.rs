@@ -42,6 +42,8 @@ pub fn free_drive(car: &str, mode: DamageMode, city: bool) -> Scenario {
         police_cars: true,
         police_presence: None,
         slow: false,
+        // Hinged panels + per-panel meshes in the browser (workstream R).
+        panels: true,
         systems: None,
         barriers: Vec::new(),
         entities: vec![entity("player", car, [0.0; 3], 0.0)],

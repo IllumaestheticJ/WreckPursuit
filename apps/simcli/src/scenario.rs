@@ -51,6 +51,10 @@ pub struct Scenario {
     /// wasm compare) still run it.
     #[serde(default, skip_serializing_if = "is_false")]
     pub slow: bool,
+    /// Hinged/bolted body panels (workstream R): attach `data/panels/<car>.json` to every
+    /// scenario entity (default off, so existing goldens are unchanged).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub panels: bool,
     /// Systems to step (`"vehicle,damage,world,police,net"`); `None` = all. `--systems` overrides.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub systems: Option<String>,
@@ -80,12 +84,12 @@ fn yes() -> bool {
     true
 }
 
-fn is_true(v: &bool) -> bool {
-    *v
-}
-
 fn is_false(v: &bool) -> bool {
     !*v
+}
+
+fn is_true(v: &bool) -> bool {
+    *v
 }
 
 fn is_zero(v: &f32) -> bool {
