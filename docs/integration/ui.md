@@ -275,3 +275,10 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
      out of service."). The recorded-run test now checks spikes are *placed*; the hit line is unit
      tested.
 
+3. **Checks (this container, after merging `main`):** `cargo fmt --check`, `cargo clippy
+   --workspace -D warnings`, `cargo test --workspace` (115 suites, 0 failures), wasm32 build of
+   `wp_wasm`, testbed `tsc`, ui-kit `tsc` + vitest 58 / 58, ui-kit e2e (60 fps, 0 long tasks), and
+   testbed `npm run e2e` (release wasm) — all pass, including "pursuit banner: PURSUIT → SEARCHING
+   → ESCAPED (escaped) → CAPTURED (bill opened, chase end captured at L3)". The reworked golden
+   frontal scenario (4 s, parked car) changed the crash fixtures; the fixture tests now assert
+   ranges for it (rear bumper < half the front, heading checked before the hit).
