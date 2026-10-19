@@ -417,3 +417,8 @@ coloured by driver, scenario-car trails), so they cost microseconds and need no 
 points table shows the first-hit frame (else the last) as the thumbnail, and the point detail
 shows the strip with captions (`info.frames`). The two images above are frames from
 `e_idle_ram_patrol`. They are boxes on a map, not testbed renders: no deformation or lighting.
+
+
+## Lead feedback (round 8, 2026-10-19)
+1. **Restore `pursuit::tests::racer_contact_classified`**, which the lead marked `#[ignore]` in round 8. `golden/city_chase` was re-aimed after contract v0.3.0 moved patrol spawns, and since E round 6 police no longer stop in the racer lane, so the 0.5 s rear-end no longer happens. Build a deliberate setup (your own scenario in `tools/tuning-dash`, for example a racer driving into a police unit held stopped) and un-ignore the test.
+2. Re-run your pursuit and damage sweeps on the merged `main`, which now has H's cruiser package, B's Arcade split, E's avoidance and radio throttling. Report what changed.
