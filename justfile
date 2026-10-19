@@ -47,9 +47,13 @@ sim scenario:
 schemas:
     cargo run -p wp_contracts --bin gen-schemas
 
-# Regenerate the procedural city (data/city/procedural_12x12.{road.bin,road.json,greybox.glb}).
+# Regenerate the procedural grid city (data/city/procedural_12x12.{road.bin,road.json,greybox.glb,greybox.b64.txt}).
 city:
     cargo run --release -p city-import --bin gen-city -- --grid 12x12 --seed 1 --out data/city
+
+# Regenerate Port Vesper v2's greybox (data/city/vesper_v2.greybox.{glb,b64.txt}; road.bin stays local).
+city-v2:
+    cargo run --release -p city-import --bin gen-city -- --preset vesper_v2 --seed 1 --out data/city
 
 # Traffic benchmark / soak: `just traffic-bench 10` (minutes, 400 agents, noon).
 traffic-bench minutes="2":
