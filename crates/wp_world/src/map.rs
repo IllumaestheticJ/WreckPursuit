@@ -476,6 +476,31 @@ impl CityMap {
         Some((ix.control, ap, ix.allow_rtor))
     }
 
+    /// Drivable surface height at `p`: the lane or junction connector under it (the one
+    /// closest to `near_z` when given, else the lowest — grade separation), else the terrain.
+    pub fn ground_height(&self, p: V2, near_z: Option<f32>) -> f32 {
+        let mut best: Option<f32> = None;
+        let score = |z: f32| near_z.map_or(z, |h| (z - h).abs());
+        for &id in self.seg_grid.at(p) {
+            let s = &self.segs[id as usize];
+            let pr = s.project(p);
+            if pr.dist > s.width * 0.5 + 0.5 {
+                continue;
+            }
+            let z = s.point_at(pr.s.clamp(0.0, s.length)).0[2];
+            if best.is_none_or(|b| score(z) < score(b)) {
+                best = Some(z);
+            }
+        }
+        if let Some(ix) = self.intersection_at(p) {
+            let z = self.net.nodes[self.net.intersections[ix as usize].node as usize].pos[2];
+            if best.is_none_or(|b| score(z) < score(b)) {
+                best = Some(z);
+            }
+        }
+        best.unwrap_or_else(|| self.net.ground_z(p))
+    }
+
     /// Zone district kind at `p`.
     pub fn district_at(&self, p: V2) -> Option<DistrictKind> {
         self.zone_at(p).map(|z| self.net.zones[z as usize].kind)
@@ -647,8 +672,20 @@ impl CityMap {
     /// Whether the segment `a`→`b` clears every building (contract v0.2.0 line of sight).
     /// Buildings are extruded footprints from the ground to their height; the segment is
     /// blocked if any part of it inside a footprint is below the roof. Only buildings in grid
-    /// cells the segment crosses are tested. Roads, parked cars and traffic do not occlude.
+    /// cells the segment crosses are tested. With terrain, the ground occludes too (sampled
+    /// every 8 m; ends excluded). Roads, parked cars and traffic do not occlude.
     pub fn line_of_sight(&self, a: V3, b: V3) -> bool {
+        if let Some(t) = &self.net.terrain {
+            let len = geom::dist(geom::xy(a), geom::xy(b));
+            let n = (len / 8.0).ceil() as u32;
+            for k in 1..n {
+                let f = k as f32 / n as f32;
+                let p = [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f];
+                if a[2] + (b[2] - a[2]) * f < t.height_at(p) - 0.2 {
+                    return false;
+                }
+            }
+        }
         if self.net.buildings.is_empty() {
             return true;
         }
@@ -663,7 +700,7 @@ impl CityMap {
         cands.dedup();
         !cands.iter().any(|&i| {
             let bld = &self.net.buildings[i as usize];
-            bld.footprint.len() >= 3 && segment_hits_building(a, b, &bld.footprint, bld.height_m)
+            bld.footprint.len() >= 3 && segment_hits_building(a, b, &bld.footprint, bld.roof_z())
         })
     }
 }
@@ -674,14 +711,21 @@ impl WorldQuery for CityMap {
             return SurfaceType::Asphalt;
         }
         let q = geom::xy(p);
-        if self.intersection_at(q).is_some() {
-            return SurfaceType::Asphalt;
+        if let Some(ix) = self.intersection_at(q) {
+            let node = self.net.intersections[ix as usize].node;
+            if (self.net.nodes[node as usize].pos[2] - p[2]).abs() < 3.0 {
+                return SurfaceType::Asphalt;
+            }
         }
         let mut curb = false;
         for &id in self.seg_grid.at(q) {
             let s = &self.segs[id as usize];
             let pr = s.project(q);
             if pr.s < -0.5 || pr.s > s.length + 0.5 {
+                continue;
+            }
+            // Grade separation: a deck above (or a road below) is not under this wheel.
+            if (s.point_at(pr.s.clamp(0.0, s.length)).0[2] - p[2]).abs() > 3.0 {
                 continue;
             }
             let half = s.width * 0.5;
@@ -769,6 +813,7 @@ mod tests {
         Building {
             footprint: vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1]],
             height_m: h,
+            base_z_m: 0.0,
         }
     }
 

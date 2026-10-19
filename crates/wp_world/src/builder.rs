@@ -118,6 +118,12 @@ pub struct RoadSpec {
     pub b: usize,
     /// Interior centreline points (a → b), m.
     pub via: Vec<V2>,
+    /// Centreline height at each `via` point, m (empty = linear between the node heights by
+    /// arc length).
+    pub via_z: Vec<f32>,
+    /// Cross slope at each centreline point `[a, via.., b]` (dz per metre to the right of
+    /// a → b; empty = flat). Keep it 0 near junctions.
+    pub bank: Vec<f32>,
     /// Functional class.
     pub class: RoadClass,
     /// Driving lanes a → b (≥ 1).
@@ -143,6 +149,8 @@ impl RoadSpec {
             a,
             b,
             via: Vec::new(),
+            via_z: Vec::new(),
+            bank: Vec::new(),
             class,
             lanes_fwd,
             lanes_bwd,
@@ -209,6 +217,8 @@ pub struct Built {
     pub signals: Vec<SignalController>,
     /// Lanes per input road (same order as the input).
     pub road_lanes: Vec<RoadLanes>,
+    /// Paved surface per input road (same order as the input).
+    pub surfaces: Vec<RoadSurface>,
 }
 
 impl Built {
@@ -264,6 +274,8 @@ impl Built {
             zones,
             pois,
             buildings,
+            surfaces: self.surfaces,
+            terrain: None,
         }
     }
 }
@@ -291,10 +303,52 @@ fn road_points(nodes: &[NodeSpec], r: &RoadSpec) -> Vec<V3> {
     }
     let total = cum[cum.len() - 1].max(1e-6);
     let (za, zb) = (nodes[r.a].z, nodes[r.b].z);
+    let explicit = r.via_z.len() == r.via.len() && !r.via.is_empty();
     xy.iter()
         .zip(&cum)
-        .map(|(p, c)| [p[0], p[1], za + (zb - za) * c / total])
+        .enumerate()
+        .map(|(k, (p, c))| {
+            let z = if explicit && k > 0 && k <= r.via.len() {
+                r.via_z[k - 1]
+            } else {
+                za + (zb - za) * c / total
+            };
+            [p[0], p[1], z]
+        })
         .collect()
+}
+
+/// Bank (cross slope) at each point of `trimmed`, which starts `s0` metres into the road's
+/// full centreline `full` (interpolated by arc length; 0 without bank data).
+fn trimmed_bank(r: &RoadSpec, full: &[V3], trimmed: &[V3], s0: f32) -> Vec<f32> {
+    if r.bank.len() != full.len() {
+        return vec![0.0; trimmed.len()];
+    }
+    let cum_full = geom::cumulative(full);
+    let cum_t = geom::cumulative(trimmed);
+    cum_t
+        .iter()
+        .map(|c| {
+            let s = s0 + c;
+            let i = match cum_full.binary_search_by(|x| x.total_cmp(&s)) {
+                Ok(i) => i.min(full.len() - 2),
+                Err(i) => i.saturating_sub(1).min(full.len() - 2),
+            };
+            let len = (cum_full[i + 1] - cum_full[i]).max(1e-6);
+            let t = ((s - cum_full[i]) / len).clamp(0.0, 1.0);
+            r.bank[i] + (r.bank[i + 1] - r.bank[i]) * t
+        })
+        .collect()
+}
+
+/// Offset `center` by `off` (right of its direction) and lift each point by `bank * lat`,
+/// where `lat = off * sign` is the offset in the road's a → b frame.
+fn lane_on_surface(center: &[V3], bank: &[f32], off: f32, sign: f32) -> Vec<V3> {
+    let mut pts = geom::offset_polyline(center, off);
+    for (p, b) in pts.iter_mut().zip(bank) {
+        p[2] += b * off * sign;
+    }
+    pts
 }
 
 fn lane_width(class: RoadClass, opt: &BuildOptions) -> f32 {
@@ -410,12 +464,38 @@ pub fn build(nodes: &[NodeSpec], roads: &[RoadSpec], opt: &BuildOptions) -> Buil
     // C. Lanes.
     let mut lanes: Vec<Lane> = Vec::new();
     let mut road_lanes: Vec<RoadLanes> = vec![RoadLanes::default(); roads.len()];
+    let mut surfaces: Vec<RoadSurface> = Vec::with_capacity(roads.len());
     for (ri, r) in roads.iter().enumerate() {
         let trimmed = geom::trim_polyline(&pts[ri], setback_a[ri], setback_b[ri]);
+        let total = *geom::cumulative(&pts[ri]).last().unwrap();
+        let s0 = if setback_a[ri] + setback_b[ri] < total - 0.5 {
+            setback_a[ri]
+        } else {
+            total * 0.5 - 0.25
+        };
+        let bank_fwd = trimmed_bank(r, &pts[ri], &trimmed, s0);
+        let mut bank_rev = bank_fwd.clone();
+        bank_rev.reverse();
         let mut rev = trimmed.clone();
         rev.reverse();
         let w = lane_width(r.class, opt);
         let one_way = r.lanes_bwd == 0;
+        let park = if r.parking { opt.parking_width_m } else { 0.0 };
+        let (left_m, right_m) = if one_way {
+            let h = r.lanes_fwd as f32 * w * 0.5 + park;
+            (h, h)
+        } else {
+            (r.lanes_bwd as f32 * w + park, r.lanes_fwd as f32 * w + park)
+        };
+        surfaces.push(RoadSurface {
+            road: ri as u32,
+            centre: trimmed.clone(),
+            bank: bank_fwd.clone(),
+            left_m,
+            right_m,
+            highway: r.class == RoadClass::Highway,
+            sidewalk: [r.class != RoadClass::Highway, r.class != RoadClass::Highway],
+        });
         let base_kind = match r.class {
             RoadClass::Highway => LaneKind::Highway,
             RoadClass::Alley => LaneKind::Alley,
@@ -426,6 +506,8 @@ pub fn build(nodes: &[NodeSpec], roads: &[RoadSpec], opt: &BuildOptions) -> Buil
                 continue;
             }
             let center = if dir_fwd { &trimmed } else { &rev };
+            let bank = if dir_fwd { &bank_fwd } else { &bank_rev };
+            let sign = if dir_fwd { 1.0 } else { -1.0 };
             let (from, to) = if dir_fwd { (r.a, r.b) } else { (r.b, r.a) };
             let first = lanes.len() as LaneId;
             for j in 0..count {
@@ -445,7 +527,7 @@ pub fn build(nodes: &[NodeSpec], roads: &[RoadSpec], opt: &BuildOptions) -> Buil
                     road: ri as u32,
                     kind,
                     index_from_left: j,
-                    polyline: geom::offset_polyline(center, off),
+                    polyline: lane_on_surface(center, bank, off, sign),
                     width_m: w,
                     speed_limit_mps: r.speed_mps,
                     left: if j > 0 {
@@ -481,7 +563,7 @@ pub fn build(nodes: &[NodeSpec], roads: &[RoadSpec], opt: &BuildOptions) -> Buil
                     road: ri as u32,
                     kind: LaneKind::Parking,
                     index_from_left: count,
-                    polyline: geom::offset_polyline(center, edge + opt.parking_width_m * 0.5),
+                    polyline: lane_on_surface(center, bank, edge + opt.parking_width_m * 0.5, sign),
                     width_m: opt.parking_width_m,
                     speed_limit_mps: r.speed_mps,
                     left: None,
@@ -727,6 +809,7 @@ pub fn build(nodes: &[NodeSpec], roads: &[RoadSpec], opt: &BuildOptions) -> Buil
         intersections,
         signals,
         road_lanes,
+        surfaces,
     }
 }
 

@@ -483,6 +483,7 @@ pub fn generate(cfg: &ProcGenConfig) -> RoadNetwork {
                 buildings.push(Building {
                     footprint: vec![l0, [l1[0], l0[1]], l1, [l0[0], l1[1]]],
                     height_m: storeys as f32 * 3.2 + rng.range_f32(0.0, 1.0),
+                    base_z_m: 0.0,
                 });
             }
         }
@@ -524,6 +525,7 @@ pub fn generate(cfg: &ProcGenConfig) -> RoadNetwork {
                 buildings.push(Building {
                     footprint: vec![lo, [hi[0], lo[1]], hi, [lo[0], hi[1]]],
                     height_m: height,
+                    base_z_m: 0.0,
                 });
             }
         }

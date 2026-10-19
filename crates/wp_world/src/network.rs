@@ -17,7 +17,8 @@ use thiserror::Error;
 /// Magic bytes at the start of a `.road.bin` file.
 pub const ROAD_MAGIC: [u8; 4] = *b"WPRD";
 /// Version of the road format. Bump on any layout change.
-pub const ROAD_FORMAT_VERSION: u32 = 1;
+/// v2 (city v2): road surfaces, terrain heightfield, building base heights.
+pub const ROAD_FORMAT_VERSION: u32 = 2;
 
 /// Index into [`RoadNetwork::nodes`].
 pub type NodeId = u32;
@@ -61,6 +62,40 @@ pub struct RoadNetwork {
     pub pois: Vec<Poi>,
     /// Building footprints for the greybox mesh and line-of-sight.
     pub buildings: Vec<Building>,
+    /// Paved surface of every source road (one per road, in road order): what physics and the
+    /// greybox draw. Lane polylines lie on these surfaces.
+    pub surfaces: Vec<RoadSurface>,
+    /// Ground heightfield between roads (`None` = flat ground at z = 0).
+    pub terrain: Option<crate::terrain::Heightfield>,
+}
+
+/// The paved ribbon of one road between its two junction setbacks.
+///
+/// Height across the ribbon is linear: at lateral offset `lat` (m, + = right of the
+/// `centre` direction) it is `centre.z + bank * lat`. Lanes of the road lie on it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RoadSurface {
+    /// Source road index (`Lane::road`).
+    pub road: u32,
+    /// Trimmed centreline (a → b), m.
+    pub centre: Vec<[f32; 3]>,
+    /// Cross slope per centreline point (dz per metre to the right; > 0 = right side higher).
+    pub bank: Vec<f32>,
+    /// Paved width left of the centreline (driving + parking lanes), m.
+    pub left_m: f32,
+    /// Paved width right of the centreline, m.
+    pub right_m: f32,
+    /// Highway (concrete, no sidewalks).
+    pub highway: bool,
+    /// Kerb + sidewalk on the left / right edge.
+    pub sidewalk: [bool; 2],
+}
+
+impl RoadSurface {
+    /// Surface height at centreline point `k` and lateral offset `lat`.
+    pub fn z_at(&self, k: usize, lat: f32) -> f32 {
+        self.centre[k][2] + self.bank[k] * lat
+    }
 }
 
 /// A road graph node.
@@ -305,8 +340,17 @@ pub struct Poi {
 pub struct Building {
     /// Footprint polygon (counter-clockwise), m.
     pub footprint: Vec<[f32; 2]>,
-    /// Height above ground, m.
+    /// Roof height above `base_z_m`, m.
     pub height_m: f32,
+    /// Ground height the walls start from (lowest ground under the footprint), m.
+    pub base_z_m: f32,
+}
+
+impl Building {
+    /// Absolute roof height, m.
+    pub fn roof_z(&self) -> f32 {
+        self.base_z_m + self.height_m
+    }
 }
 
 /// Errors loading or validating a road network.
@@ -332,6 +376,12 @@ pub enum RoadError {
 }
 
 impl RoadNetwork {
+    /// Ground height at `p` (terrain, or 0 without one). Roads are not included; see
+    /// `CityMap::surface_height`.
+    pub fn ground_z(&self, p: [f32; 2]) -> f32 {
+        self.terrain.as_ref().map_or(0.0, |t| t.height_at(p))
+    }
+
     /// Encode to the `.road.bin` format.
     pub fn to_bin(&self) -> Vec<u8> {
         let mut out = Vec::new();
@@ -473,6 +523,16 @@ impl RoadNetwork {
         for (i, p) in self.pois.iter().enumerate() {
             if p.lane.is_some_and(|l| l >= nl) {
                 return bad(format!("poi {i}: lane out of range"));
+            }
+        }
+        for (i, s) in self.surfaces.iter().enumerate() {
+            if s.centre.len() < 2 || s.bank.len() != s.centre.len() {
+                return bad(format!("surface {i}: bad centreline / bank"));
+            }
+        }
+        if let Some(t) = &self.terrain {
+            if t.nx < 2 || t.ny < 2 || t.z.len() != (t.nx * t.ny) as usize || t.cell_m <= 0.0 {
+                return bad("terrain: bad grid".into());
             }
         }
         Ok(())
