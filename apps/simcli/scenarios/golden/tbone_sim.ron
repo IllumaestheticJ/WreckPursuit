@@ -3,7 +3,8 @@
 // Pins the mode pair with golden_tbone (Arcade, victim crush 0.165 m): Simulation puts ~2x the
 // energy into the lattice, so the first hit crushes the door/B-pillar ~0.32 m (cabin 0.31 m >
 // Sim's 0.25 m limit -> TotalLoss) and the striker, still on the throttle, adds more after.
-// crush_depth is simcli's any-node max (shattered glass included), measured 0.58 m.
+// crush_depth is structural crush (`DamageModel::structural_crush_m`, no glass or bumper
+// covers): victim 0.35 m, striker 0.19 m (round 8; the old any-node max read 0.35 / 0.42).
 (
     name: "golden_tbone_sim",
     seed: 104,
