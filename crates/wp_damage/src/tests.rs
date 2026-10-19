@@ -94,7 +94,7 @@ fn elastic_below_yield_no_permanent_set() {
         "elastic stretch {stretch} vs F/k {expected}"
     );
     assert_eq!(
-        m.beams[0].rest, m.beams[0].rest0,
+        m.hot[0].rest, m.beams[0].rest0,
         "no plastic flow below yield"
     );
     assert_eq!(m.total_plastic_energy_j(), 0.0);
@@ -113,15 +113,15 @@ fn yield_caps_force_and_leaves_plastic_set_with_hardening() {
     run(&mut m, &sim_mode(), 0.1);
     m.set_node_force(1, [0.0; 3]);
     run(&mut m, &sim_mode(), 0.5);
-    let b = &m.beams[0];
-    let set = b.rest - b.rest0;
+    let (b, hb) = (&m.beams[0], &m.hot[0]);
+    let set = hb.rest - b.rest0;
     assert!(set > 0.01, "permanent set {set}");
     // Permanent set is what remains after unloading (springback ≤ elastic strain at yield).
-    assert!((beam_len(&m) - b.rest).abs() < 2e-3);
+    assert!((beam_len(&m) - hb.rest).abs() < 2e-3);
     // Hardening: yield force grew with plastic strain exactly per material maths.
     let eps_p = b.plastic_strain;
     assert!((eps_p - set / b.rest0).abs() < 1e-5);
-    assert!((b.lim_t - (fy + et_a * eps_p)).abs() < 1e-3 * fy);
+    assert!((hb.lim_t - (fy + et_a * eps_p)).abs() < 1e-3 * fy);
     // Plastic work = ∫ F_yield d(rest), between the initial and the hardened yield force.
     let e = m.total_plastic_energy_j();
     assert!(
@@ -137,23 +137,23 @@ fn structural_beam_buckles_in_compression() {
     let fy = mat.yield_mpa * 1e6 * area;
     m.set_node_force(1, [0.0, -2.0 * fy, 0.0]);
     run(&mut m, &sim_mode(), 0.05);
-    let b = &m.beams[0];
+    let (b, hb) = (&m.beams[0], &m.hot[0]);
     assert!(
         b.buckled,
         "compressive yield past buckle strain folds the member"
     );
     let t = &m.tuning;
-    let densify = if b.rest < t.densify_ratio * b.rest0 {
+    let densify = if hb.rest < t.densify_ratio * b.rest0 {
         t.densify_factor
     } else {
         1.0
     };
     assert!(
-        (b.lim_c - b.lim_t * t.structural_buckle_factor * densify).abs() < 1e-3 * b.lim_t,
+        (hb.lim_c - hb.lim_t * t.structural_buckle_factor * densify).abs() < 1e-3 * hb.lim_t,
         "buckled member is weaker in compression (until it densifies)"
     );
-    assert!(b.rest >= m.tuning.min_length_ratio * b.rest0 - 1e-6);
-    assert!(!b.broken, "compression folds, it does not tear");
+    assert!(hb.rest >= m.tuning.min_length_ratio * b.rest0 - 1e-6);
+    assert!(!hb.broken, "compression folds, it does not tear");
 }
 
 #[test]
@@ -163,12 +163,12 @@ fn glass_is_brittle_no_plastic_range() {
     let fy = mat.yield_mpa * 1e6 * area;
     m.set_node_force(1, [0.0, 0.5 * fy, 0.0]);
     run(&mut m, &sim_mode(), 0.2);
-    assert!(!m.beams[0].broken);
+    assert!(!m.hot[0].broken);
     m.set_node_force(1, [0.0, 3.0 * fy, 0.0]);
     run(&mut m, &sim_mode(), 0.2);
-    assert!(m.beams[0].broken, "glass breaks instead of yielding");
+    assert!(m.hot[0].broken, "glass breaks instead of yielding");
     assert_eq!(m.total_plastic_energy_j(), 0.0, "no plastic work in glass");
-    assert_eq!(m.beams[0].rest, m.beams[0].rest0);
+    assert_eq!(m.hot[0].rest, m.beams[0].rest0);
 }
 
 #[test]
@@ -178,11 +178,11 @@ fn plastic_cover_cracks_when_crushed_or_stretched() {
     let fy = mat.yield_mpa * 1e6 * area;
     m.set_node_force(1, [0.0, -6.0 * fy, 0.0]);
     run(&mut m, &sim_mode(), 0.3);
-    assert!(m.beams[0].broken, "crushed polymer cracks");
+    assert!(m.hot[0].broken, "crushed polymer cracks");
     let (mut m, _) = one_beam("pp_bumper", area);
     m.set_node_force(1, [0.0, 6.0 * fy, 0.0]);
     run(&mut m, &sim_mode(), 0.3);
-    assert!(m.beams[0].broken, "stretched polymer tears");
+    assert!(m.hot[0].broken, "stretched polymer tears");
     assert!(
         m.total_plastic_energy_j() > 0.0,
         "polymer yields before it tears"
@@ -207,10 +207,10 @@ fn beam_break_scale_toughens_beams() {
     for step in 0..2400 {
         a.apply_contacts(&[], &sim_mode(), PHYSICS_DT, &mut out);
         b.apply_contacts(&[], &tough, PHYSICS_DT, &mut out);
-        if a_broke.is_none() && a.beams[0].broken {
+        if a_broke.is_none() && a.hot[0].broken {
             a_broke = Some(step);
         }
-        if b_broke.is_none() && b.beams[0].broken {
+        if b_broke.is_none() && b.hot[0].broken {
             b_broke = Some(step);
         }
     }

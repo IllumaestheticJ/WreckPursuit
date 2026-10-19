@@ -133,19 +133,40 @@ pub enum DamageLogKind {
     TotalLoss,
 }
 
-/// Runtime state of one lattice beam.
-#[derive(Debug, Clone)]
-pub(crate) struct BeamState {
+/// "No detachable group" marker in [`BeamHot::group`].
+pub(crate) const NO_GROUP: u16 = u16::MAX;
+
+/// Per-beam data touched every sub-step by the solver (kept small and contiguous).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct BeamHot {
     pub a: u32,
     pub b: u32,
     /// Current rest length (changes with plastic flow), m.
     pub rest: f32,
-    /// Original rest length, m.
-    pub rest0: f32,
     /// `1 / (E·A)`, 1/N (axial compliance × 1/length).
     pub inv_ea: f32,
+    /// Current tensile / compressive force limits, N.
+    pub lim_t: f32,
+    pub lim_c: f32,
+    /// XPBD multiplier accumulated over the current sub-step.
+    pub lambda: f32,
     /// Length at the last projection, m.
     pub len: f32,
+    /// The beam breaks above / below these lengths (mode-scaled failure strains), m.
+    pub break_long: f32,
+    pub break_short: f32,
+    /// Index into `DamageModel::groups`, or [`NO_GROUP`].
+    pub group: u16,
+    /// +1 if the tensile limit clamped this sub-step, -1 compressive, 0 none.
+    pub at_limit: i8,
+    pub broken: bool,
+}
+
+/// Per-beam data used only when a beam yields, breaks or is billed.
+#[derive(Debug, Clone)]
+pub(crate) struct BeamState {
+    /// Original rest length, m.
+    pub rest0: f32,
     /// Initial yield force `σy·A`, N.
     pub yield_force: f32,
     /// Hardening `Et·A`, N per unit plastic strain.
@@ -154,22 +175,12 @@ pub(crate) struct BeamState {
     pub fail_strain: f32,
     pub kind: MaterialKind,
     pub breakable: bool,
-    /// Index into `DamageModel::groups` if this is an attachment beam.
-    pub group: Option<usize>,
     pub regions: [BodyRegion; 2],
-    pub broken: bool,
     pub buckled: bool,
     /// Accumulated |plastic strain| (tension + compression).
     pub plastic_strain: f32,
     /// Accumulated compressive plastic strain.
     pub comp_plastic_strain: f32,
-    /// Current tensile / compressive force limits, N.
-    pub lim_t: f32,
-    pub lim_c: f32,
-    /// XPBD multiplier accumulated over the current sub-step.
-    pub lambda: f32,
-    /// +1 if the tensile limit clamped this sub-step, -1 compressive, 0 none.
-    pub at_limit: i8,
     /// Plastic work absorbed, J.
     pub energy_j: f32,
 }
@@ -179,10 +190,10 @@ impl BeamState {
         matches!(self.kind, MaterialKind::Glass | MaterialKind::Cast)
     }
 
-    /// Recompute force limits from hardening, buckling and densification.
-    pub(crate) fn update_limits(&mut self, t: &DamageTuning) {
+    /// Recompute `hot`'s force limits from hardening, buckling and densification.
+    pub(crate) fn update_limits(&self, hot: &mut BeamHot, t: &DamageTuning) {
         let base = self.yield_force + self.hardening * self.plastic_strain;
-        self.lim_t = base;
+        hot.lim_t = base;
         let mut c = base;
         if self.buckled {
             c *= match self.kind {
@@ -190,10 +201,28 @@ impl BeamState {
                 _ => t.panel_buckle_factor,
             };
         }
-        if self.rest < t.densify_ratio * self.rest0 {
+        if hot.rest < t.densify_ratio * self.rest0 {
             c *= t.densify_factor;
         }
-        self.lim_c = c;
+        hot.lim_c = c;
+    }
+
+    /// Recompute `hot`'s break lengths for a mode's `beam_break_scale`. Every material tears
+    /// when stretched past its failure strain; brittle ones (glass, cast) also fail when
+    /// squeezed by it and polymer cracks when crushed past `plastic_crush_fail_strain`.
+    pub(crate) fn update_break_lengths(&self, hot: &mut BeamHot, scale: f32, t: &DamageTuning) {
+        if !self.breakable {
+            hot.break_long = f32::INFINITY;
+            hot.break_short = 0.0;
+            return;
+        }
+        let fail = self.fail_strain * scale;
+        hot.break_long = self.rest0 * (1.0 + fail);
+        hot.break_short = match self.kind {
+            MaterialKind::Glass | MaterialKind::Cast => self.rest0 * (1.0 - fail),
+            MaterialKind::Plastic => self.rest0 * (1.0 - t.plastic_crush_fail_strain * scale),
+            _ => 0.0,
+        };
     }
 }
 
@@ -256,6 +285,9 @@ pub struct DamageModel {
     pub(crate) lattice_mass_kg: f32,
 
     pub(crate) beams: Vec<BeamState>,
+    pub(crate) hot: Vec<BeamHot>,
+    /// `beam_break_scale` the break lengths in `hot` were computed for.
+    pub(crate) break_scale: f32,
     pub(crate) impactors: Vec<Impactor>,
     pub(crate) groups: Vec<GroupState>,
     pub(crate) components: Vec<ComponentState>,
@@ -372,6 +404,7 @@ impl DamageModel {
             .collect();
 
         let mut beams = Vec::with_capacity(lattice.beams.len());
+        let mut hot = Vec::with_capacity(lattice.beams.len());
         let mut node_beams = vec![Vec::new(); n];
         for (bi, b) in lattice.beams.iter().enumerate() {
             let m = materials
@@ -385,35 +418,41 @@ impl DamageModel {
             if let Some(g) = group {
                 groups[g].attach_beams.push(bi as u32);
             }
-            let mut beam = BeamState {
-                a: b.a as u32,
-                b: b.b as u32,
-                rest: rest0,
+            let cold = BeamState {
                 rest0,
-                inv_ea: 1.0 / (m.young_mpa * 1e6 * b.area_m2),
-                len: rest0,
                 yield_force: m.yield_mpa * 1e6 * b.area_m2,
                 hardening: m.plastic_modulus_mpa * 1e6 * b.area_m2,
                 fail_strain: m.failure_strain,
                 kind: m.kind,
                 breakable: b.breakable,
-                group,
                 regions: [
                     lattice.nodes[b.a as usize].region,
                     lattice.nodes[b.b as usize].region,
                 ],
-                broken: false,
                 buckled: false,
                 plastic_strain: 0.0,
                 comp_plastic_strain: 0.0,
+                energy_j: 0.0,
+            };
+            let mut h = BeamHot {
+                a: b.a as u32,
+                b: b.b as u32,
+                rest: rest0,
+                inv_ea: 1.0 / (m.young_mpa * 1e6 * b.area_m2),
                 lim_t: 0.0,
                 lim_c: 0.0,
                 lambda: 0.0,
+                len: rest0,
+                break_long: f32::INFINITY,
+                break_short: 0.0,
+                group: group.map(|g| g as u16).unwrap_or(NO_GROUP),
                 at_limit: 0,
-                energy_j: 0.0,
+                broken: false,
             };
-            beam.update_limits(&tuning);
-            beams.push(beam);
+            cold.update_limits(&mut h, &tuning);
+            cold.update_break_lengths(&mut h, 1.0, &tuning);
+            beams.push(cold);
+            hot.push(h);
             node_beams[b.a as usize].push(bi as u32);
             node_beams[b.b as usize].push(bi as u32);
         }
@@ -472,6 +511,8 @@ impl DamageModel {
             bounds_hi,
             lattice_mass_kg,
             beams,
+            hot,
+            break_scale: 1.0,
             impactors: Vec::new(),
             groups,
             components,
@@ -640,7 +681,7 @@ impl DamageModel {
 
     /// Number of broken beams.
     pub fn broken_beam_count(&self) -> usize {
-        self.beams.iter().filter(|b| b.broken).count()
+        self.hot.iter().filter(|b| b.broken).count()
     }
 
     /// Notable damage events so far, in time order.
@@ -773,9 +814,9 @@ impl DamageModel {
                 h.write_f32_q(*v, 1e4);
             }
         }
-        for b in &self.beams {
+        for (b, c) in self.hot.iter().zip(&self.beams) {
             h.write_f32_q(b.rest, 1e5);
-            h.write_u32(b.broken as u32 | ((b.buckled as u32) << 1));
+            h.write_u32(b.broken as u32 | ((c.buckled as u32) << 1));
         }
         for c in &self.components {
             h.write_f32_q(c.health, 1e4);
@@ -842,10 +883,10 @@ impl DamageModel {
 
     /// Mark a beam broken and log the crack (and glass shatter).
     pub(crate) fn break_beam(&mut self, bi: usize, out: &mut Vec<SimEvent>) {
-        if self.beams[bi].broken {
+        if self.hot[bi].broken {
             return;
         }
-        self.beams[bi].broken = true;
+        self.hot[bi].broken = true;
         self.dirty = true;
         let regions = self.beams[bi].regions;
         let kind = self.beams[bi].kind;
@@ -890,7 +931,7 @@ impl DamageModel {
                 self.vel[i] = [0.0; 3];
                 for k in 0..self.node_beams[i].len() {
                     let bi = self.node_beams[i][k] as usize;
-                    self.beams[bi].broken = true;
+                    self.hot[bi].broken = true;
                 }
             }
         }
@@ -930,7 +971,7 @@ impl DamageModel {
             self.vel[i] = [0.0; 3];
             for k in 0..self.node_beams[i].len() {
                 let bi = self.node_beams[i][k] as usize;
-                self.beams[bi].broken = true;
+                self.hot[bi].broken = true;
             }
         }
         let group = self.groups[g].group;
@@ -958,7 +999,7 @@ impl DamageModel {
             let broken = s
                 .attach_beams
                 .iter()
-                .filter(|&&b| self.beams[b as usize].broken)
+                .filter(|&&b| self.hot[b as usize].broken)
                 .count();
             let frac = broken as f32 / s.attach_beams.len() as f32;
             if s.impulse_ns > s.break_impulse_ns * mode.beam_break_scale || frac >= 0.6 {
@@ -985,7 +1026,7 @@ impl DamageModel {
             let mount_broken = is_wheel(kind)
                 && self.node_beams[nodes[0] as usize]
                     .iter()
-                    .all(|&b| self.beams[b as usize].broken);
+                    .all(|&b| self.hot[b as usize].broken);
             if corner_of(kind).is_some()
                 && matches!(
                     kind,

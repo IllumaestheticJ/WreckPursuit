@@ -8,7 +8,7 @@
 
 use wp_contracts::{MaterialKind, ModeTable, SimEvent};
 
-use crate::model::DamageModel;
+use crate::model::{DamageModel, NO_GROUP};
 use crate::vec3;
 
 impl DamageModel {
@@ -24,6 +24,12 @@ impl DamageModel {
         let flow = (tune.plastic_flow_rate * mode.plasticity_scale).clamp(0.0, 1.0);
         let n = self.pos.len();
         self.tick_start.clone_from(&self.pos);
+        if mode.beam_break_scale != self.break_scale {
+            self.break_scale = mode.beam_break_scale;
+            for (c, h) in self.beams.iter().zip(self.hot.iter_mut()) {
+                c.update_break_lengths(h, mode.beam_break_scale, &tune);
+            }
+        }
 
         for _ in 0..substeps {
             // Ringing after the impacts are spent is invisible; damp it hard so the lattice
@@ -49,10 +55,6 @@ impl DamageModel {
                     self.pos[i] = vec3::madd(self.pos[i], self.vel[i], h);
                 }
             }
-            for b in &mut self.beams {
-                b.lambda = 0.0;
-                b.at_limit = 0;
-            }
             for _ in 0..tune.iterations.max(1) {
                 for bi in 0..self.beams.len() {
                     self.project_beam(bi, h2);
@@ -62,7 +64,7 @@ impl DamageModel {
                 }
             }
             for bi in 0..self.beams.len() {
-                self.post_beam(bi, flow, mode.beam_break_scale, h, out);
+                self.post_beam(bi, flow, h, out);
             }
             for i in 0..n {
                 if self.inv_mass[i] > 0.0 {
@@ -131,7 +133,7 @@ impl DamageModel {
     /// One XPBD projection of beam `bi` with its force clamped to the current yield limits.
     #[inline]
     fn project_beam(&mut self, bi: usize, h2: f32) {
-        let b = &mut self.beams[bi];
+        let b = &mut self.hot[bi];
         if b.broken {
             return;
         }
@@ -146,8 +148,8 @@ impl DamageModel {
         if len < 1e-6 {
             return;
         }
-        let nrm = vec3::scale(d, 1.0 / len);
         b.len = len;
+        let nrm = vec3::scale(d, 1.0 / len);
         let c = len - b.rest;
         // Compliance α = 1/k with k = EA / rest; α̃ = α / h².
         let alpha = b.rest * b.inv_ea / h2;
@@ -171,102 +173,89 @@ impl DamageModel {
     }
 
     /// After a sub-step's iterations: plastic flow, hardening/buckling, breaking, energy
-    /// ledger and detachable hinge impulse for beam `bi`.
-    fn post_beam(
-        &mut self,
-        bi: usize,
-        flow: f32,
-        break_scale: f32,
-        h: f32,
-        out: &mut Vec<SimEvent>,
-    ) {
-        let tune_min = self.tuning.min_length_ratio;
-        let buckle_strain = self.tuning.buckle_strain;
-        let plastic_crush = self.tuning.plastic_crush_fail_strain;
-        let b = &self.beams[bi];
-        if b.broken {
+    /// ledger and detachable hinge impulse for beam `bi`; resets its multiplier.
+    fn post_beam(&mut self, bi: usize, flow: f32, h: f32, out: &mut Vec<SimEvent>) {
+        let hb = self.hot[bi];
+        self.hot[bi].lambda = 0.0;
+        self.hot[bi].at_limit = 0;
+        if hb.broken {
             return;
         }
-        let (ia, ib) = (b.a as usize, b.b as usize);
+        // Fast path: elastic, not an attachment, inside its break lengths.
+        if hb.at_limit == 0
+            && hb.group == NO_GROUP
+            && hb.len < hb.break_long
+            && hb.len > hb.break_short
+        {
+            return;
+        }
+        let (ia, ib) = (hb.a as usize, hb.b as usize);
         if self.inv_mass[ia] + self.inv_mass[ib] <= 0.0 {
             return;
         }
+        // Parts tear off under hard tension, not by being pushed into the car; residual
+        // stress below a quarter of yield never accumulates (the integrator also leaks).
+        if hb.group != NO_GROUP {
+            let tension = -hb.lambda / (h * h);
+            let over = tension - 0.25 * hb.lim_t;
+            if over > 0.0 {
+                self.groups[hb.group as usize].impulse_ns += over * h;
+            }
+        }
         // Exact length for yielding beams; the length seen by the last projection (off by at
         // most one correction) is good enough for everyone else's break test.
-        let len = if b.at_limit != 0 {
+        let len = if hb.at_limit != 0 {
             vec3::length(vec3::sub(self.pos[ib], self.pos[ia]))
         } else {
-            b.len
+            hb.len
         };
+        let tune_min = self.tuning.min_length_ratio;
+        let buckle_strain = self.tuning.buckle_strain;
+        let cold = &mut self.beams[bi];
+        let hot = &mut self.hot[bi];
         let mut work = 0.0;
-        let mut brk = false;
-        {
-            let b = &mut self.beams[bi];
-            // Parts tear off under hard tension, not by being pushed into the car; residual
-            // stress below a quarter of yield never accumulates (the integrator also leaks).
-            if let Some(g) = b.group {
-                let tension = -b.lambda / (h * h);
-                let over = tension - 0.25 * b.lim_t;
-                if over > 0.0 {
-                    self.groups[g].impulse_ns += over * h;
+        // Brittle beams (glass, cast) are force-limited but take no permanent set; they break
+        // on strain below.
+        match hb.at_limit {
+            1 if !cold.is_brittle() => {
+                let excess = len - hot.rest - hot.lim_t * hot.rest * hot.inv_ea;
+                if excess > 0.0 {
+                    let dr = flow * excess;
+                    hot.rest += dr;
+                    cold.plastic_strain += dr / cold.rest0;
+                    work = hot.lim_t * dr;
                 }
             }
-            match b.at_limit {
-                // Brittle beams (glass, cast) are force-limited but take no permanent set;
-                // they break on strain below.
-                1 if !b.is_brittle() => {
-                    let excess = len - b.rest - b.lim_t * b.rest * b.inv_ea;
-                    if excess > 0.0 {
-                        let dr = flow * excess;
-                        b.rest += dr;
-                        b.plastic_strain += dr / b.rest0;
-                        work = b.lim_t * dr;
-                    }
-                }
-                -1 if !b.is_brittle() => {
-                    let excess = b.rest - len - b.lim_c * b.rest * b.inv_ea;
-                    if excess > 0.0 {
-                        let new_rest = (b.rest - flow * excess).max(tune_min * b.rest0);
-                        let dr = b.rest - new_rest;
-                        if dr > 0.0 {
-                            work = b.lim_c * dr;
-                            b.rest = new_rest;
-                            b.plastic_strain += dr / b.rest0;
-                            b.comp_plastic_strain += dr / b.rest0;
-                            if !b.buckled
-                                && b.comp_plastic_strain > buckle_strain
-                                && matches!(b.kind, MaterialKind::Structural | MaterialKind::Panel)
-                            {
-                                b.buckled = true;
-                            }
+            -1 if !cold.is_brittle() => {
+                let excess = hot.rest - len - hot.lim_c * hot.rest * hot.inv_ea;
+                if excess > 0.0 {
+                    let new_rest = (hot.rest - flow * excess).max(tune_min * cold.rest0);
+                    let dr = hot.rest - new_rest;
+                    if dr > 0.0 {
+                        work = hot.lim_c * dr;
+                        hot.rest = new_rest;
+                        cold.plastic_strain += dr / cold.rest0;
+                        cold.comp_plastic_strain += dr / cold.rest0;
+                        if !cold.buckled
+                            && cold.comp_plastic_strain > buckle_strain
+                            && matches!(cold.kind, MaterialKind::Structural | MaterialKind::Panel)
+                        {
+                            cold.buckled = true;
                         }
                     }
                 }
-                _ => {}
             }
-            let strain0 = (len - b.rest0) / b.rest0;
-            let fail = b.fail_strain * break_scale;
-            let broke = match b.kind {
-                MaterialKind::Glass | MaterialKind::Cast => strain0.abs() > fail,
-                // Polymer also cracks when crushed flat.
-                MaterialKind::Plastic => strain0 > fail || -strain0 > plastic_crush * break_scale,
-                _ => strain0 > fail,
-            };
-            if b.breakable && broke {
-                brk = true;
-            }
-            if work > 0.0 {
-                b.energy_j += work;
-                let tuning = &self.tuning;
-                b.update_limits(tuning);
-            }
+            _ => {}
         }
+        let brk = len >= hot.break_long || len <= hot.break_short;
         if work > 0.0 {
-            let regions = self.beams[bi].regions;
+            cold.energy_j += work;
+            cold.update_limits(hot, &self.tuning);
+            let regions = cold.regions;
             self.region_plastic_j[regions[0] as usize] += 0.5 * work;
             self.region_plastic_j[regions[1] as usize] += 0.5 * work;
         }
-        if brk && self.beams[bi].breakable {
+        if brk {
             self.break_beam(bi, out);
         }
     }
