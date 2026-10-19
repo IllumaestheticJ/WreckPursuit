@@ -12,7 +12,7 @@
 //!
 //! Event order matters: at a capture `wp_police` emits `PursuitEnded` **before** the
 //! `WantedLevelChanged` that drops the level, so the tracker's last known level is the level at
-//! capture. Violations are counted from `SimEvent::TrafficViolation` since the racer's last
+//! capture (a capture with no level seen is billed at `L1`). Violations are counted from `SimEvent::TrafficViolation` since the racer's last
 //! capture (they scale the fine).
 
 use std::collections::BTreeMap;
@@ -179,20 +179,29 @@ impl PursuitTracker {
             }
             PoliceSignal::PursuitEnded { racer, outcome } => {
                 let t = self.racers.entry(racer).or_default();
+                let captured = matches!(
+                    outcome,
+                    PursuitEnd::Captured | PursuitEnd::CapturedTotalLoss
+                );
+                // Police only capture wanted racers. If no level change was seen (a silent
+                // heat change such as `PoliceSystem::set_heat`), bill the lowest wanted level
+                // rather than a plain traffic stop. v0.3.0 puts the level in the event.
+                let level = if captured {
+                    t.level.max(WantedLevel::L1)
+                } else {
+                    t.level
+                };
                 let res = PursuitResolution {
                     racer,
                     outcome,
-                    level: t.level,
-                    max_level: t.max_level.max(t.level),
+                    level,
+                    max_level: t.max_level.max(level),
                     violations: t.violations,
                 };
                 // The next pursuit's maximum starts fresh (its current level is folded in
                 // when it resolves); a capture also wipes the violations it was fined for.
                 t.max_level = WantedLevel::None;
-                if matches!(
-                    outcome,
-                    PursuitEnd::Captured | PursuitEnd::CapturedTotalLoss
-                ) {
+                if captured {
                     t.violations = ViolationCounts::default();
                 }
                 Some(res)

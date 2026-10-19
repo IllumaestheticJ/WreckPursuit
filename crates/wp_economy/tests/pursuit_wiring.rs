@@ -99,6 +99,13 @@ fn police_capture_run(mode: DamageMode) -> (Option<wp_economy::PursuitResolution
         pos: [0.0; 3],
     };
     step(&mut police, &mut world, &mut tracker, &[red]);
+    // Real violations raise heat (and emit WantedLevelChanged); `set_heat` alone is silent.
+    let speeding = SimEvent::TrafficViolation {
+        vehicle: RACER,
+        kind: ViolationKind::Speeding { over_mps: 12.0 },
+        pos: [0.0; 3],
+    };
+    step(&mut police, &mut world, &mut tracker, &[speeding]);
     police.set_heat(RACER, 30.0);
     for _ in 0..24 {
         step(&mut police, &mut world, &mut tracker, &[]);
@@ -132,6 +139,7 @@ fn real_police_capture_settles_through_the_economy() {
             "level at capture, not after the reset"
         );
         assert_eq!(res.violations.red_light, 1);
+        assert_eq!(res.violations.speeding, 1);
         assert_eq!(
             tracker.level(RACER),
             WantedLevel::None,
@@ -298,4 +306,16 @@ fn capture_uses_level_before_reset_and_clears_violations() {
         "the previous capture was fined for those"
     );
     assert_eq!(next.max_level, WantedLevel::L1);
+}
+
+#[test]
+fn capture_without_a_seen_level_is_billed_as_l1() {
+    // `PoliceSystem::set_heat` changes the level without an event; police only capture wanted
+    // racers, so the economy never bills such a capture as a plain traffic stop.
+    let mut t = PursuitTracker::new();
+    let res = t.observe_police(&ended(PursuitEnd::Captured)).unwrap();
+    assert_eq!(res.level, WantedLevel::L1);
+    // Escapes keep the seen level (None settles nothing).
+    let res = t.observe_police(&ended(PursuitEnd::Escaped)).unwrap();
+    assert_eq!(res.level, WantedLevel::None);
 }
