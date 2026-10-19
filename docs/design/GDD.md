@@ -1,6 +1,6 @@
 # WreckPursuit — Game Design Document
 
-**Owner:** workstream 19 (design docs). **Status:** v0, 2026-10-19, written against contract 0.1.0
+**Owner:** workstream 19 (design docs). **Status:** v0, 2026-10-19, written against contract 0.1.0, reviewed against 0.2.0
 and the code on `main` (vehicle, damage, world, economy, cars, harness merged; police, net, race,
 audio, weather, UI in progress).
 
@@ -390,10 +390,10 @@ first five minutes, and never changes it silently.
 
 | Topic | Needs | From |
 |---|---|---|
-| District identity everywhere (crews, heat maps, labour) | `DistrictId` / zone names | lead, 05 (`CITY.md` C2) |
+| District identity everywhere (crews, heat maps, labour) | `DistrictId` / zone names (deferred to contract v0.3.0) | lead, 05 (`CITY.md` C2) |
 | Garage legit/crooked on the map | POI shop kind | 05, 08 (`CITY.md` C3) |
 | Drawbridge, trains, port carriers | dynamic world entities | 05 (`CITY.md` C4) |
-| Helicopter LOS in tunnels / parking structures | covered-lane flag + LOS query | 05, 06 (`CITY.md` C5) |
+| Helicopter LOS in tunnels / parking structures | covered-lane flag (`line_of_sight` landed in v0.2.0) | 05, 06 (`CITY.md` C5) |
 | Licence tiers and illegal-day multipliers | numbers in `data/events/` | 15 |
 | Escape rewards per safehouse | rep bonus table | 06, 08 (§5.4) |
 | Department standing for captains | budget feedback | 06, 08 (backlog) |

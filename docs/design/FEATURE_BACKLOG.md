@@ -21,7 +21,7 @@ Priority:
 | B01 | Handmade city v0 road graph (`handmade_v0.road.*`) from `CITY.md` | 05 | The procedural grid has no landmarks, chokepoints or hills; testers need a place, not a test fixture. |
 | B02 | District identity (`DistrictId` / zone names) end to end | lead, 05 | Crews, heat maps, district labour, radio lines and UI all name districts; today they are indices. |
 | B03 | Legit/crooked flag on garage POIs | 05, 08 | The economy prices the difference but the map cannot say which shop is which. |
-| B04 | Covered-road flag + LOS query (tunnels, Founders Cut, parking structures) | 05, 06 | Breaking line of sight is the racer's win condition; tunnels are the city's best tools for it. |
+| B04 | Covered-road flag for LOS (tunnels, Founders Cut, parking structures); `line_of_sight` itself landed in v0.2.0 | 05, 06 | Breaking line of sight is the racer's win condition; tunnels are the city's best tools for it. |
 | B05 | Disconnect-while-wanted = capture after a 60 s grace | 07, 18 | Without it, quitting is the best escape and pursuits stop meaning anything. |
 | B06 | Junkyard beater car file (`junkyard_beater`) | 09 | The economy floor references a car that does not exist. |
 | B07 | Garage test lot (drive, crash test, compare before/after mods) | 04, 16 | Mods and repairs need somewhere to be felt (design overview §4). |

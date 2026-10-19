@@ -314,10 +314,10 @@ These are proposals. Owners decide; contract-level changes go through the lead
 | # | To | Proposal | Why |
 |---|---|---|---|
 | C1 | 05 world | Build `handmade_v0.road.{bin,json}` from this doc; snap POIs to lanes; elevations per §2. | The procedural city is a test fixture; this is the design target. |
-| C2 | 05 / lead | `Zone.name: Option<String>` (or the deferred `DistrictId`), so UI, crews, police and economy refer to "Mercer", not zone 4. | Territory (15), heat maps (06), district labour (08) all need a stable district identity. |
+| C2 | 05 / lead | `Zone.name: Option<String>` (or `DistrictId`, deferred to contract v0.3.0), so UI, crews, police and economy refer to "Mercer", not zone 4. | Territory (15), heat maps (06), district labour (08) all need a stable district identity. |
 | C3 | 05 / 08 | Garage shop kind on the POI (`Garage { legit: bool }` or `PoiKind::CrookedGarage`). | 08 already prices legit vs crooked; the map must say which is which. |
 | C4 | 05 | Dynamic world entities: drawbridge (deck angle, gate state), rail crossings + trains, ferry ramp, straddle carriers. Deterministic schedules from the world clock. | Hazards in §8. |
-| C5 | 05 / 06 | Tunnel / covered-road flag on lanes (`covered: bool`) used by LOS queries. | Helicopter and camera LOS rules (Calloway, Founders Cut, parking structures). |
+| C5 | 05 / 06 | Tunnel / covered-road flag on lanes (`covered: bool`) used by LOS queries. Contract v0.2.0 added `WorldQuery::line_of_sight`, which today tests 2D building footprints only, so covered roads still need this flag. | Helicopter and camera LOS rules (Calloway, Founders Cut, parking structures). |
 | C6 | 02 / lead | Surface types `Cobblestone` and `SteelGrate` (or document that `Metal` covers grates). | Old Harbor, Iron Bridge. |
 | C7 | 05 | Timed speed zones (school zone) as lane metadata. | Mercer St. |
 | C8 | 15 | Use route ids R01–R15 and the circuits in §7 as the first event data set. | Shared names across UI, leaderboards and radio lines. |
