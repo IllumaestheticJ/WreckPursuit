@@ -142,7 +142,7 @@ impl FrameCapture {
         if self.trails.len() < n_scenario {
             self.trails.resize(n_scenario, Vec::new());
         }
-        if now % TRAIL_EVERY == 0 {
+        if now.is_multiple_of(TRAIL_EVERY) {
             for (i, v) in vehicles.iter().take(n_scenario).enumerate() {
                 let p = v.vehicle.state().pos;
                 self.trails[i].push([p[0], p[1]]);

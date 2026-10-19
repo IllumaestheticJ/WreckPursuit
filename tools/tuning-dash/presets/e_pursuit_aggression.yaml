@@ -4,14 +4,16 @@
 #    contact with the moving racer (PIT attempts, hits on it) without wrecking it.
 #  - wanted, stopped: the observer soak car parked with heat 55. The police should stop it, not
 #    ram it, and should not wreck stopped traffic or each other on the way.
-# Knobs: pursuit speed margin over the target, PIT engage distance and the straight-road
-# length PIT needs (60 m by default; city blocks are 110 m). E's data is not changed.
-description: Pursuit margin × PIT engage × PIT straight vs racer contact and collateral (chase / wanted-stopped)
+# Knobs: pursuit speed margin over the target, the top racer speed PIT is allowed at (Arcade
+# 70 km/h by default; the chase racer does 79 km/h) and the straight-road length PIT needs
+# (60 m by default; city blocks are 110 m). pit_engage_m was tried first and is inert here
+# (no PIT is ever chosen at the default pit_max_kmh). E's data is not changed.
+description: Pursuit margin × PIT max speed × PIT straight vs racer contact and collateral (chase / wanted-stopped)
 probe:
   kind: pursuit
 params:
   - {target: "police:pursuit:target_speed_margin", label: margin, values: [0.0, 0.1, 0.25]}
-  - {target: "police:pursuit:tactics.pit_engage_m", label: pit_engage_m, values: [12.0, 25.0]}
+  - {target: "police:pursuit:tactics.pit_max_kmh.arcade", label: pit_max_kmh, values: [70.0, 90.0, 110.0]}
   - {target: "police:pursuit:tactics.pit_min_straight_m", label: pit_straight_m, values: [25.0, 60.0]}
 variants:
   - name: chase
@@ -32,4 +34,4 @@ variants:
     expect:
       - {metric: max_closing_scenario_mps, min: 0, max: 5}
 workers: 4
-plots: [pit_attempts, hits_moving_scenario, max_closing_scenario_mps, hits_stopped_any, units_disabled, racer.final_health]
+plots: [pit_attempts, min_pursuer_gap_m, hits_moving_scenario, max_closing_scenario_mps, hits_stopped_any, units_disabled, racer.final_health]

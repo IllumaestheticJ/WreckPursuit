@@ -32,6 +32,9 @@ pub const DEFAULT_STOPPED_MPS: f32 = 1.0;
 /// Police RNG salt used by simcli (`run::police_for_city`).
 const POLICE_SEED_SALT: u64 = 0x0090_11CE;
 
+/// `min_pursuer_gap_m` ignores the first seconds of a run, s.
+pub const GAP_SKIP_S: f32 = 3.0;
+
 /// Hits kept in `info.hits` (the counts cover all of them).
 const MAX_LISTED_HITS: usize = 40;
 
@@ -227,6 +230,10 @@ pub fn run(
     let mut kind_counts: BTreeMap<u16, u64> = BTreeMap::new();
     let mut units_max = 0usize;
     let mut cars_max = 0usize;
+    // Closest physical pursuer (Pursue / Intercept) to any scenario car after the first
+    // GAP_SKIP_S (spawn positions say nothing about the chase), and time spent pursuing.
+    let mut min_gap = f32::INFINITY;
+    let mut pursue_ticks = 0u64;
     let ticks = sc.ticks();
     let sample_every = sc.sample_every();
 
@@ -346,12 +353,12 @@ pub fn run(
                     .sqrt();
                 path_len[i] += d;
                 last_pos[i] = s.pos;
-                if now % sample_every == 0 || now == ticks {
+                if now.is_multiple_of(sample_every) || now == ticks {
                     if let Ok(nodes) = sim.node_positions(*id) {
                         crush[i] = crush[i].max(simcli::run::crush_depth(&rest[i], nodes));
                     }
                     if thumb.get(&names[i]).is_none_or(|t| t.len() < 400)
-                        && now % (sample_every * 4) == 0
+                        && now.is_multiple_of(sample_every * 4)
                     {
                         thumb
                             .entry(names[i].clone())
@@ -362,6 +369,37 @@ pub fn run(
             }
         }
         units_max = units_max.max(sim.police().units().len());
+        let mut pursuing = false;
+        for v in sim
+            .vehicles()
+            .iter()
+            .filter(|v| v.kind == VehicleKind::Police)
+        {
+            let Some(u) = v
+                .police_unit
+                .and_then(|u| sim.police().units().iter().find(|x| x.id == u))
+            else {
+                continue;
+            };
+            if !matches!(
+                u.assignment,
+                wp_police::Assignment::Pursue { .. } | wp_police::Assignment::Intercept { .. }
+            ) {
+                continue;
+            }
+            pursuing = true;
+            if (now as f32) * PHYSICS_DT < GAP_SKIP_S {
+                continue;
+            }
+            let p = v.vehicle.state().pos;
+            for (_, s) in simcli::run::scenario_states(&sim, &ids) {
+                let d = ((p[0] - s.pos[0]).powi(2) + (p[1] - s.pos[1]).powi(2)).sqrt();
+                min_gap = min_gap.min(d);
+            }
+        }
+        if pursuing {
+            pursue_ticks += 1;
+        }
         cars_max = cars_max.max(
             sim.vehicles()
                 .iter()
@@ -428,6 +466,14 @@ pub fn run(
     );
     put("police_units_max", Some(units_max as f64));
     put("police_cars_max", Some(cars_max as f64));
+    put(
+        "min_pursuer_gap_m",
+        min_gap.is_finite().then_some(min_gap as f64),
+    );
+    put(
+        "pursue_time_s",
+        Some(pursue_ticks as f64 * PHYSICS_DT as f64),
+    );
     let finals = simcli::run::scenario_states(&sim, &ids);
     for (i, (_, s)) in finals.iter().enumerate() {
         let id = &names[i];
