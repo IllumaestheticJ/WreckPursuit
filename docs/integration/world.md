@@ -59,6 +59,23 @@ All in `wp_world` (details and format spec: `crates/wp_world/README.md`).
   lanes each way / one-way, district), POIs, building bounds. Maps 1:1 onto
   `wp_police::RoadGraph::{add_node, add_segment}`; proposed shape for the v0.3.0 shared trait.
 - `ProcGenConfig::small()` — 6×6 test city with every feature.
+- **Shared AI driving** (`wp_world::drive`, for police E and racers N):
+  - `DriveController` — raw pure pursuit + PID (`steer(pos, fwd, target)`,
+    `pedals(v, acc, dt, hold)`), what traffic uses.
+  - `PathFollower::follow(&state, &DrivePath, target_mps, lateral_offset_m, dt) -> FollowOutput
+    { input: VehicleInput, s, cross_track_m, remaining_m, planned_speed_mps, done }` — the
+    `follow_path` API: projects onto the path, look-ahead target, speed planned from target,
+    curvature ahead (lateral-acceleration limit) and end of path. One per vehicle
+    (`PathFollower::for_vehicle(&def, FollowParams::{CIVILIAN, PURSUIT}, speed)`).
+  - `DrivePath::new(points, looped)` / `DrivePath::from_route(&Route)`; windowed projection
+    keeps self-crossing circuits stable.
+  - Verified on the real `wp_vehicle` model in its Rapier rig: city route 866 m stays on the
+    road, stops at the end, ≤ 1.7 m off line; circuit lap pursuit 192 s vs civilian 274 s,
+    ≤ 1.4 m off line.
+- **Debris hazards**: `World::set_hazards(&[Hazard::new(pos, radius)])` (or with `vel`).
+  Small debris is swerved around within the lane (≤ 1.5 m, held until the rear clears);
+  lane-blocking debris → lane change if the neighbour lane is free, else stop; debris in a
+  junction box blocks the connectors through it; no spawning within 30 m.
 - `wp_world::geom::{atan, atan2}` re-export `wp_math::{atan, atan2}` (moved in v0.2.0).
 
 ## Needs
@@ -75,7 +92,8 @@ From the sim loop (`wp_sim`, integration lead) — none of these are wired yet:
    damage and call `apply_agent_damage`; remove on `Demoted` / `Despawned`. Physical agents
    count against `MAX_VEHICLES` (max 16 by default, `TrafficConfig::max_physical`).
 4. **Static colliders** for `static_props()` (re-read after `set_active_routes`).
-5. **Debris hazards**: `world.set_hazards(&[Hazard { pos, radius_m }])` from detached parts (03).
+5. **Debris hazards**: each tick `world.set_hazards(&[Hazard { pos, radius_m, vel }])` for every
+   loose body near the road (detached parts, wheels, knocked parked cars / cones). World side done.
 6. **Race events** (08/12): `set_active_routes` when an event starts/ends.
 7. **Testbed** (04): load `data/city/procedural_12x12.greybox.glb` and draw `AgentView`s; it
    needs a `wp_wasm` export for agents (suggest a flat `Float32Array` of `x, y, z, yaw, flags`
