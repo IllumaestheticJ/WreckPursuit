@@ -246,6 +246,9 @@ pub struct Vehicle {
     pub(crate) awd_coupling: f32,
     pub(crate) diffs: DiffSetup,
     pub(crate) center_steer: f32,
+    /// Tyre-slip lab (`crate::car_lab::CarTune::rack_compliance`): road-wheel angle the
+    /// compliant rack / column yields to the front tyres' steering-axis moment, rad. 0 when off.
+    rack_yield: f32,
     /// Slide-assist class from the car data (constant; see [`crate::slide::slide_class`]).
     pub(crate) slide_class: f32,
     pub(crate) throttle_f: f32,
@@ -366,6 +369,7 @@ impl Vehicle {
             awd_coupling: 0.0,
             diffs,
             center_steer: 0.0,
+            rack_yield: 0.0,
             slide_class: slide_class_with_rear_lock(def, diffs.rear.power_lock()),
             throttle_f: 0.0,
             brake_f: 0.0,
@@ -1262,6 +1266,16 @@ impl Vehicle {
         // --- Steering ---------------------------------------------------------------------
         let steer_in = self.steer_input(steer_cmd, v_fwd, v_left, rear_axle);
         let max_steer = self.max_steer();
+        // Tyre-slip lab: drift-only lock extension (extra lock once the body slip is past
+        // `drift_lock_from_deg`, ramped over 10°, as drift cars with extended lock). Off = 0.
+        let max_steer = match crate::car_lab::active() {
+            Some(t) if t.drift_lock_extra != 0.0 => {
+                let slip = body_slip(v_fwd, v_left).abs().to_degrees();
+                let x = ((slip - t.drift_lock_from_deg) / 10.0).clamp(0.0, 1.0);
+                max_steer * (1.0 + t.drift_lock_extra.clamp(-0.7, 1.0) * x * x * (3.0 - 2.0 * x))
+            }
+            _ => max_steer,
+        };
         self.center_steer = if let Some(p) = plain {
             crate::plain::update_center_angle(
                 self.center_steer,
@@ -1300,6 +1314,31 @@ impl Vehicle {
             hold_angle: dc.hold_angle,
             throttle_key: thr_in,
         };
+        // Tyre-slip lab: compliant rack / column. The front tyres' moment about the steering
+        // axis (aligning moment + caster trail × side force, as in force feedback; last tick's
+        // forces) turns the road wheels by `compliance × moment` through a first-order lag, so
+        // the wheels yield toward the front axle's travel. Off (0) = rigid rack.
+        self.rack_yield = match crate::car_lab::active() {
+            Some(t) if t.rack_compliance > 0.0 => {
+                let axis: f32 = (0..2)
+                    .filter(|&i| self.corners[i].steerable)
+                    .map(|i| {
+                        let w = &self.wheels[i];
+                        w.mz - self.corners[i].radius * self.corners[i].caster * w.fy
+                    })
+                    .sum();
+                let lim = 0.5 * max_steer;
+                let mut target = (t.rack_compliance.to_radians() * axis / 1000.0).clamp(-lim, lim);
+                if t.rack_yield_to_centre_only && target * self.center_steer > 0.0 {
+                    // The rack is held at the key's position: it can give way toward the
+                    // centre, not past where the key put it.
+                    target = 0.0;
+                }
+                let k = (dt / t.rack_compliance_tau_s.max(dt)).min(1.0);
+                self.rack_yield + (target - self.rack_yield) * k
+            }
+            _ => 0.0,
+        };
         let ts = if base_split[0] > 0.0 && self.corners[0].steerable {
             torque_steer(self.wheels[0].drive, self.wheels[1].drive)
         } else {
@@ -1314,7 +1353,7 @@ impl Vehicle {
             };
             let mut s = if c.steerable {
                 ackermann(
-                    self.center_steer + ts,
+                    self.center_steer + ts + self.rack_yield,
                     c.left,
                     c.ackermann,
                     wheelbase,
@@ -1828,6 +1867,7 @@ impl Vehicle {
                 }
                 None => (&c.tire, 1.0, None),
             };
+            let side_scale = car_tune.map_or(1.0, |t| t.side_scale(i, w.alpha_lag));
             // Tyre-slip A/B: the spin-weighted combined-slip model replaces the ellipse.
             let forces = |kappa: f32, alpha: f32, fz: f32, grip: f32| match &spin {
                 Some(m) => combined_forces_spin(tire, kappa, alpha, fz, grip, Some(m)),
@@ -1851,6 +1891,7 @@ impl Vehicle {
             w.omega = om;
             w.kappa = slip_ratio(om, r, vx);
             let (fx, fy) = forces(w.kappa, alpha, fz, grip);
+            let fy = fy * side_scale;
             let mu_y = load_sensitive_mu(
                 tire.lateral.d,
                 tire.load_sensitivity,

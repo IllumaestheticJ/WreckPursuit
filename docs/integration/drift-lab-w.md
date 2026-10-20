@@ -33,8 +33,10 @@ car itself does when the steering is as simple as the reference's.
    "throttle / power" → the parity cars give the reference's W/kg, and the runaway happens at
    every throttle.
 
-**How to try it:** `?drift=w` (default car `parity_rwd_d`, the clip-1 drift car), or
-`?drift=w&car=parity_rwd_a`, or the start menu's *Drift Lab W*. The *tune* panel has the car
+**How to try it:** the testbed panel's *drift lab W* button, the start menu's *Drift Lab W*, or
+`?drift=w` (default car `parity_rwd_d`, the clip-1 drift car; `?drift=w&car=parity_rwd_a`). The
+old Drift Lab C (with its drift assists) is reachable only via `?drift=c`, titled *old lab C
+(assists)*. The *tune* panel has the car
 selector and the steering constants.
 
 ## Step 1 — raw keys, plain constant-rate rack, reference cars
@@ -520,6 +522,24 @@ comes back as the slip angle grows; `CarTune::spin_model` and its `spin_*` knobs
 now calls `spin_grip_damper()`. Panel: *spin model (tyre-slip)* checkbox (off by default) and
 *spin model* preset button (tyre-slip's). e2e covers the button, *tyre data* turning it off, and
 the checkbox on / off. `tire.rs` / the tyre model are tyre-slip's from here on.
+
+## Fix — the build said "Drift Lab C" (owner, via lead)
+
+The testbed button `#sc-drift-b` ("drift lab C") and the start menu's *Drift Lab C* entry still
+launched C, and W was reachable only via `?drift=w`. Now:
+- The button is `#sc-drift-w` "drift lab W" and launches W (plain profile, parity_rwd_d).
+- The menu has *Drift Lab W* only; the `driftLabB` choice is removed.
+- C's readout title (`drift_lab_b.ts` `DRIFT_LAB_TITLE`) is "old lab C (assists)", and C opens
+  only via `?drift=c` / `?drift=b`.
+- With W active, every visible title says Drift Lab W (readout, page title).
+
+e2e (`e2e/drift_lab_w.mjs`, built site, 40 / 40) adds: from a free-drive page load, the button
+lands in W (scenario, car, plain steering on, title, readout); no visible "Drift Lab C" anywhere,
+shadow roots included; the menu lists Drift Lab W and no C, and its entry lands in W. C's e2e
+(`drift_lab_b.mjs`, `?drift=c`) still passes with the new title.
+
+Also merged `lead/tyre-slip` step 3 (3014d7b8, "spin + drift lock" preset, panel button from
+tyre-slip). The conflicts were adjacent additions only.
 
 ## Contract change requests
 

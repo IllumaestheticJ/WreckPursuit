@@ -64,6 +64,9 @@ check((await page.evaluate(() => window.__wp.sim.carTune().yaw_damping)) === 0, 
 await page.locator("#drift-lab-w button", { hasText: "spin model" }).click();
 const spin = await page.evaluate(() => window.__wp.sim.carTune());
 check(spin.spin_model === true && spin.yaw_damping === 0 && Math.abs(spin.spin_fx_slide - 0.958) < 1e-4, `spin model preset ${JSON.stringify(spin)}`);
+await page.locator("#drift-lab-w button", { hasText: "spin + drift lock" }).click();
+const sl = await page.evaluate(() => window.__wp.sim.carTune());
+check(sl.spin_model === true && Math.abs(sl.drift_lock_extra + 0.5) < 1e-4 && Math.abs(sl.front_deep_falloff - 0.13) < 1e-4, `spin + drift lock preset ${JSON.stringify(sl)}`);
 await page.locator("#drift-lab-w button", { hasText: "tyre data" }).click();
 check((await page.evaluate(() => window.__wp.sim.carTune().spin_model)) === false, "tyre data turns the spin model off");
 // The spin model checkbox alone (default off) turns it on and off.
@@ -104,6 +107,40 @@ for (const car of ["parity_rwd_a", "parity_rwd_b", "parity_fwd_c", "shiro_turbo"
   sc = await sim();
   check(sc.name === "drift_lab_w" && sc.entities?.[0]?.car === car, `selector → ${car}`);
 }
+// From free drive, the testbed's "drift lab W" button lands in W (not the old lab C).
+const freeDrive = async () => {
+  await page.goto(`http://localhost:${PORT}/`);
+  await page.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 90000 });
+  await page.keyboard.press("Escape").catch(() => {});
+};
+await freeDrive();
+check((await sim()).name !== "drift_lab_w", `page load = ${(await sim()).name}`);
+check((await page.evaluate(() => window.__wp.sim.plainSteer())) === null, "free drive: plain steering off");
+check((await page.locator("#sc-drift-w").innerText()).trim() === "drift lab W", "button labelled drift lab W");
+// The career garage can sit over free drive on load; the button's own click handler is
+// what the owner hits from the testbed panel.
+await page.evaluate(() => document.getElementById("sc-drift-w").click());
+await page.waitForFunction(() => window.__wp.sim.scenario().name === "drift_lab_w", null, { timeout: 30000 }).catch(() => {});
+sc = await sim();
+check(sc.name === "drift_lab_w" && sc.entities?.[0]?.car === "parity_rwd_d", `button → ${sc.name} / ${sc.entities?.[0]?.car}`);
+check((await page.evaluate(() => window.__wp.sim.plainSteer())) !== null, "button → plain steering on");
+check((await page.title()) === "Drift Lab W", `button → title "${await page.title()}"`);
+await page.waitForTimeout(500);
+const visible = await page.evaluate(() => document.body.innerText);
+check(!/drift lab c/i.test(visible) && (await page.getByText(/drift lab c/i).count()) === 0, "no visible 'Drift Lab C' anywhere (incl. shadow roots)");
+check(/Drift Lab W · plain steering/.test(await page.locator("#drift-lab-w").innerText()), "button → W readout");
+// The start menu's entry: "Drift Lab W" (no "Drift Lab C" entry) launches W.
+await freeDrive();
+await page.evaluate(() => window.__wp.menu.openMain());
+await page.getByText("Drift Lab W", { exact: true }).first().waitFor({ timeout: 10000 }).catch(() => {});
+// The menu renders in a shadow root: locators pierce it, body.innerText does not.
+const wEntries = await page.getByText("Drift Lab W", { exact: true }).count();
+const cEntries = await page.getByText(/drift lab c/i).count();
+check(wEntries > 0 && cEntries === 0, `menu lists Drift Lab W (${wEntries}), no Drift Lab C (${cEntries})`);
+await page.getByText("Drift Lab W", { exact: true }).first().click();
+await page.waitForFunction(() => window.__wp.sim.scenario().name === "drift_lab_w", null, { timeout: 30000 }).catch(() => {});
+sc = await sim();
+check(sc.name === "drift_lab_w" && sc.entities?.[0]?.car === "parity_rwd_d", `menu → ${sc.name} / ${sc.entities?.[0]?.car}`);
 check(errors.length === 0, `no page errors ${errors.join(" | ")}`);
 await browser.close();
 server.kill("SIGTERM");

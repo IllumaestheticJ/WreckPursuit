@@ -126,14 +126,20 @@ pub struct SpinGrip {
     pub on_braking: bool,
     /// Past the longitudinal peak, the drive force's shape never falls below this fraction of
     /// the peak (dry rubber keeps most of its friction while spinning; the data's curve can fall
-    /// to ~half). 0 = the data's curve.
+    /// to ~half). 0 = the data's curve. Faded in with slip angle between `fx_slide_from_deg`
+    /// and `fx_slide_full_deg`, so straight-line wheelspin (launches) keeps the data's curve.
     pub fx_slide: f32,
+    /// Slip angle (degrees) below which the drive floor is off.
+    pub fx_slide_from_deg: f32,
+    /// Slip angle (degrees) from which the drive floor is fully on.
+    pub fx_slide_full_deg: f32,
 }
 
 impl Default for SpinGrip {
     /// The tyre-slip workstream's tuned set (docs/integration/tyre-slip.md; parity_rwd_d,
     /// "sport" tyres): side force under spin fades in around 35° of slip angle, drive grip under
-    /// spin kept at ~96 % of the peak.
+    /// spin kept at ~96 % of the peak once the tyre is 1–3° sideways (straight-line launches
+    /// keep the data's curve).
     fn default() -> Self {
         Self {
             b0: 6.99,
@@ -143,6 +149,8 @@ impl Default for SpinGrip {
             fx_yield: 0.0,
             on_braking: false,
             fx_slide: 0.958,
+            fx_slide_from_deg: 1.0,
+            fx_slide_full_deg: 3.0,
         }
     }
 }
@@ -192,7 +200,22 @@ pub fn combined_forces_spin(
         let s = (sx * sx + sy * sy).sqrt();
         if s > 1.0 {
             let mu_x = load_sensitive_mu(def.longitudinal.d, def.load_sensitivity, fz, def.fz0_n);
-            let floor = mu_x * fz * grip * m.fx_slide.min(1.0) * (sx / s) * kappa.signum();
+            // Fade with slip angle (smoothstep; from ≥ full = always on).
+            let (a0, a1) = (
+                m.fx_slide_from_deg.to_radians(),
+                m.fx_slide_full_deg.to_radians(),
+            );
+            let fade = if a1 <= a0 {
+                if alpha.abs() >= a0 {
+                    1.0
+                } else {
+                    0.0
+                }
+            } else {
+                let t = ((alpha.abs() - a0) / (a1 - a0)).clamp(0.0, 1.0);
+                t * t * (3.0 - 2.0 * t)
+            };
+            let floor = mu_x * fz * grip * m.fx_slide.min(1.0) * fade * (sx / s) * kappa.signum();
             if floor.abs() > fx.abs() {
                 floor
             } else {
@@ -327,6 +350,19 @@ mod tests {
     }
 
     #[test]
+    fn spin_model_keeps_straight_line_wheelspin() {
+        // Launches: no slip angle, any wheelspin → exactly the ellipse (drive floor faded out).
+        let t = street();
+        let m = SpinGrip::default();
+        for k in [0.1f32, 0.5, 2.0, 6.0] {
+            assert_eq!(
+                combined_forces_spin(&t, k, 0.0, t.fz0_n, 1.0, Some(&m)),
+                combined_forces(&t, k, 0.0, t.fz0_n, 1.0)
+            );
+        }
+    }
+
+    #[test]
     fn spin_model_drive_floor_and_yield() {
         let t = street();
         let floor = SpinGrip::default();
@@ -334,8 +370,8 @@ mod tests {
             fx_slide: 0.0,
             ..floor
         };
-        let (fx_f, _) = combined_forces_spin(&t, 2.0, 0.0, t.fz0_n, 1.0, Some(&floor));
-        let (fx_0, _) = combined_forces_spin(&t, 2.0, 0.0, t.fz0_n, 1.0, Some(&none));
+        let (fx_f, _) = combined_forces_spin(&t, 2.0, 0.2, t.fz0_n, 1.0, Some(&floor));
+        let (fx_0, _) = combined_forces_spin(&t, 2.0, 0.2, t.fz0_n, 1.0, Some(&none));
         assert!(fx_f > 1.3 * fx_0, "{fx_f} vs {fx_0}");
         let mu_x = load_sensitive_mu(t.longitudinal.d, t.load_sensitivity, t.fz0_n, t.fz0_n);
         assert!(fx_f <= mu_x * t.fz0_n * 1.0001);
