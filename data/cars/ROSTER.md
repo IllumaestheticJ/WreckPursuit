@@ -5,7 +5,7 @@
 | Car | Id | Class | Layout | Mass kg | Power kW | kW/t | 0-100 est. s | Vmax est. km/h | Skidpad est. g | Class idx est. | Dur. | Price | Tire |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | Vireo XS | `vireo_xs` | Compact | FWD | 1108 | 103 | 93 | 8.0 | 213 | 0.91 | 474 | 2 | 7,500 | street |
-| Kestrel TS | `kestrel_ts` | Sport | FWD | 1383 | 318 | 230 | 5.8 | 266 | 0.99 | 593 | 3 | 22,000 | sport |
+| Kestrel TS | `kestrel_ts` | Sport | FWD | 1383 | 318 | 230 | 5.8 | 266 | 0.99 | 593 | 3 | 27,500 | sport |
 | Shiro Turbo | `shiro_turbo` | Sport | RWD | 1241 | 297 | 240 | 5.1 | 316 | 1.02 | 663 | 2 | 28,000 | sport |
 | Hakone GT | `hakone_gt` | Sport | RWD | 1519 | 372 | 245 | 5.0 | 327 | 0.99 | 665 | 3 | 48,000 | sport |
 | Rampart 5.0 | `rampart_50` | Muscle | RWD | 1663 | 416 | 250 | 5.3 | 312 | 0.97 | 641 | 3 | 42,000 | sport |

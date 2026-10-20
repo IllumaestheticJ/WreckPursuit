@@ -141,7 +141,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 4.3 s | 291 km/h | 35.5 m | 0.96 g | — |
+| sim | 4.3 s | 319 km/h | 35.5 m | 0.96 g | — |
 | estimate | 4.1 s | 325 km/h | 33.8 m | 1.02 g | 750 |
 
 ## Damage lattice (`data/lattices/lucciola_350.json`)

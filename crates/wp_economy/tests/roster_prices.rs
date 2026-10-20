@@ -225,7 +225,7 @@ fn pricier_cars_are_not_slower() {
     // sale): a car that costs 25% more than another must not have a lower class index. Known
     // outliers are listed with the request to 09 in docs/integration/economy.md; drop them from
     // KNOWN once 09 retunes the price (the test then keeps them honest).
-    const KNOWN: &[&str] = &["hakone_gt", "ironside_440"];
+    const KNOWN: &[&str] = &["ironside_440"];
     let e = econ();
     let cars: Vec<_> = roster()
         .into_iter()

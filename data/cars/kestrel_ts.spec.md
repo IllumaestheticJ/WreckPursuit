@@ -4,7 +4,7 @@
 
 | Class | Archetype | Durability | Base price |
 |---|---|---|---|
-| Sport | mid-2000s Japanese FF sport sedan, 2.0 L turbocharged I4 (AWD variant via mod) | 3 / 5 | 22,000 |
+| Sport | mid-2000s Japanese FF sport sedan, 2.0 L turbocharged I4 (AWD variant via mod) | 3 / 5 | 27,500 |
 
 ## Design note
 

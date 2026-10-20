@@ -64,9 +64,9 @@ fn no_hunting_under_a_constant_throttle_sweep() {
 #[test]
 fn shift_count_on_a_standard_launch() {
     // Full throttle from standstill (metric assists: TCS on). Chosen windows sit well clear
-    // of the next shift: sedan 1→2 ≈ 3.2 s, 2→3 ≈ 7.5 s, 3→4 ≈ 15 s; Hakone GT 2.9 / 6.1 /
-    // 10 s.
-    for (id, seconds, expected) in [("debug_sedan", 10.0, 2), ("hakone_gt", 8.0, 2)] {
+    // of the next shift: sedan 1→2 ≈ 3.2 s, 2→3 ≈ 7.5 s, 3→4 ≈ 15 s; Hakone GT (street
+    // spec, 2026-10-20) 2.9 / 5.2 / 7.8 s.
+    for (id, seconds, expected) in [("debug_sedan", 10.0, 2), ("hakone_gt", 6.5, 2)] {
         let mut rig = Rig::new(&car(id));
         let s = shifts(&mut rig, &throttle(1.0), seconds);
         assert_eq!(s, vec![1; expected], "{id}: {s:?}");

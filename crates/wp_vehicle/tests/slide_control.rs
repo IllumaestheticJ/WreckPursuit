@@ -1,7 +1,7 @@
 //! Slide-control assists (owner playtest 2026-10-19: "more steering assist / gyro for the
 //! higher-power RWD cars"). Scripted power-oversteer exits ([`power_oversteer_exit`]) on the
-//! most powerful RWD roster car (rampart_50, 319 kW) and the best power-to-weight one
-//! (lucciola_350, 207 W/kg). The scripted driver is naive: it floors the throttle mid-corner,
+//! most powerful RWD roster car (rampart_50, 416 kW) and the best power-to-weight one
+//! (lucciola_350, 275 W/kg). The scripted driver is naive: it floors the throttle mid-corner,
 //! keeps steering into the corner for a reaction time, then lets go of the steering with the
 //! throttle still down. It never countersteers by itself.
 
@@ -86,9 +86,16 @@ fn wheel_profile_is_bit_identical_to_the_plain_model() {
         ("lucciola_350", 0.7, 0.8, 0x20fdb5196575e4af),
     ];
     for (id, lat_g, react, hash) in cases {
-        // The steering-lock data change (playtest item 6b) is not a code change: pin the lock
-        // these hashes were recorded with.
+        // Data changes are not code changes: the street-spec power rebalance (2026-10-20)
+        // replaced these cars' mass and torque, so load the definitions from before it
+        // (`tests/fixtures/pre_street_spec/`; tires unchanged), and pin the steering
+        // lock of playtest item 6b.
         let mut c = car(id);
+        c.def = wp_contracts::load_vehicle_def(format!(
+            "{}/tests/fixtures/pre_street_spec/{id}.json",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .unwrap();
         let old_lock = if id == "rampart_50" { 0.576 } else { 0.5 };
         for w in c.def.wheels.iter_mut().filter(|w| w.steerable) {
             w.max_steer_rad = old_lock;

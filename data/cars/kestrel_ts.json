@@ -157,7 +157,7 @@
   },
   "aero_downforce_coeffs": [0.0, 0.0],
   "lattice_id": "kestrel_ts",
-  "base_price": 22000,
+  "base_price": 27500,
   "durability_class": 3,
   "fuel_capacity_l": 60.0
 }

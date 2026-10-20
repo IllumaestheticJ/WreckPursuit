@@ -151,7 +151,7 @@ CARS = [
             bar=P_MODERN, handbrake_frac=0.8,
         ),
         steer=dict(ratio=15.0, turn_circle_m=11.2, ackermann=0.6, rack_speed=1.4),
-        price=22000,
+        price=27500,
         durability=3,
         note=("A sleeper sedan with a big turbo hit: lazy below 2500 rpm, then a wall of torque "
               "that tugs the wheel. Front-drive in stock form, so it is about managing torque "

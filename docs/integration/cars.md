@@ -42,8 +42,28 @@ engine `why`. Curb mass is trimmed ≈ 5 %. Source of truth: `roster_inputs.py`
   any sport/muscle car on a straight). The gap is wider now: cruiser 14.0 s and Wolfhound
   13.2 s to 160 km/h, against 8.1-12.9 s for these cars. If pursuits get too easy to escape on
   straights, the cop cars need the same treatment. Not done here (out of scope).
-- **For G (economy):** power went up a lot, so the class/performance index and `market_price`
-  derived from `CarSpec` move up for these 8 cars. See test results below.
+- **Kestrel price 22 000 → 27 500.** `roster_prices::pricier_cars_are_not_slower` failed:
+  the big-turbo Kestrel rated PI 659 against the 34 000 Lindwurm's 638. At 27 500 the Kestrel
+  is above 34 000 / 1.25 = 27 200, so the Lindwurm no longer counts as 25 % pricier than a
+  higher-rated car. That is a small raise, and it fits a 318 kW build. The test's
+  `KNOWN` outliers (Hakone, Ironside) are unchanged.
+- **For G (economy):** the class index went up for these 8 cars (now Sport 638-699, Muscle
+  570-718, Exotic 769). `wp_economy::estimate` rates the Lindwurm lowest of the sport cars
+  (PI 638), but in the sim it is the quickest of them to 100 km/h (3.95 s). The point-mass
+  launch seems to underrate AWD; worth a look. Your README tuning table and
+  `docs/design/{CARS_LORE,GDD}.md` still quote the Kestrel at 22 000 (not edited: not my files).
+- **Changes outside my crates (test-only, to keep the workspace green):**
+  - `wp_economy/tests/roster_prices.rs`: `hakone_gt` dropped from `KNOWN`, because it is no
+    longer a value-for-money outlier (economy.md says to remove fixed outliers ourselves).
+  - `wp_vehicle/tests/gearbox.rs`: the Hakone launch window went 8.0 → 6.5 s. The faster car
+    now shifts 1→2 / 2→3 / 3→4 at 2.9 / 5.2 / 7.8 s, so 8 s caught a third shift.
+  - `wp_vehicle/tests/slide_control.rs` (`wheel_profile_is_bit_identical_to_the_plain_model`):
+    its hashes were recorded on the old Rampart/Lucciola data. The test now loads those
+    definitions from `tests/fixtures/pre_street_spec/` (copied from `60c236a`), and all four
+    hashes match. So the code invariant is still tested, and no hash was re-recorded.
+- **Checks:** `cargo fmt --check`, `cargo clippy --workspace -- -D warnings`, wasm build of
+  `wp_wasm`, `cargo test --workspace --release --no-fail-fast`. The only failures were the 3
+  above, all now passing. No simcli golden changed.
 
 ## Response to lead feedback round 8 (2026-10-19)
 

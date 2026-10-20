@@ -1,0 +1,165 @@
+{
+  "id": "rampart_50",
+  "display_name": "Rampart 5.0",
+  "class": "Muscle",
+  "analog_of": "2010s American muscle coupe, 5.0 L DOHC V8, independent rear suspension",
+  "body_size_m": [1.92, 4.78, 1.38],
+  "mass_kg": 1752.7,
+  "front_weight_frac": 0.54,
+  "wheelbase_m": 2.72,
+  "track_front_m": 1.58,
+  "track_rear_m": 1.65,
+  "cg_height_m": 0.5,
+  "inertia_kgm2": [650.0, 3250.0, 3570.0],
+  "drag_cd_a_m2": 0.779,
+  "lift_front": 0.08,
+  "lift_rear": 0.1,
+  "engine": {
+    "torque_curve_nm": [
+      [1000, 350],
+      [1500, 395],
+      [2000, 430],
+      [2500, 460],
+      [3000, 485],
+      [3500, 505],
+      [4000, 522],
+      [4250, 529],
+      [4750, 525],
+      [5250, 515],
+      [5750, 500],
+      [6250, 482],
+      [6750, 452],
+      [7000, 435],
+      [7400, 395]
+    ],
+    "idle_rpm": 700.0,
+    "redline_rpm": 7000.0,
+    "rev_limit_rpm": 7400.0,
+    "inertia_kgm2": 0.22,
+    "engine_brake_nm": 53.0
+  },
+  "drivetrain": {
+    "layout": "Rwd",
+    "gear_ratios": [3.66, 2.43, 1.69, 1.32, 1.0, 0.65],
+    "final_drive": 3.55,
+    "reverse_ratio": 3.53,
+    "diff_front": "Open",
+    "diff_rear": {
+      "Lsd": {
+        "preload_nm": 50.0,
+        "ramp_power": 0.5,
+        "ramp_coast": 0.35
+      }
+    },
+    "clutch_max_nm": 710.0,
+    "shift_time_s": 0.25
+  },
+  "wheels": [
+    {
+      "position_m": [-0.79, 1.36, 0.333],
+      "radius_m": 0.333,
+      "width_m": 0.255,
+      "mass_kg": 26.0,
+      "tire_id": "sport",
+      "steerable": true,
+      "max_steer_rad": 0.662,
+      "ackermann_frac": 0.6,
+      "camber_rad": -0.014,
+      "toe_rad": 0.0,
+      "caster_rad": 0.1222
+    },
+    {
+      "position_m": [0.79, 1.36, 0.333],
+      "radius_m": 0.333,
+      "width_m": 0.255,
+      "mass_kg": 26.0,
+      "tire_id": "sport",
+      "steerable": true,
+      "max_steer_rad": 0.662,
+      "ackermann_frac": 0.6,
+      "camber_rad": -0.014,
+      "toe_rad": 0.0,
+      "caster_rad": 0.1222
+    },
+    {
+      "position_m": [-0.825, -1.36, 0.341],
+      "radius_m": 0.341,
+      "width_m": 0.275,
+      "mass_kg": 28.0,
+      "tire_id": "sport",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": -0.0175,
+      "toe_rad": 0.0035,
+      "caster_rad": 0.0
+    },
+    {
+      "position_m": [0.825, -1.36, 0.341],
+      "radius_m": 0.341,
+      "width_m": 0.275,
+      "mass_kg": 28.0,
+      "tire_id": "sport",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": -0.0175,
+      "toe_rad": 0.0035,
+      "caster_rad": 0.0
+    }
+  ],
+  "suspension": [
+    {
+      "spring_n_per_m": 42400.0,
+      "damper_bump_ns_per_m": 2610.0,
+      "damper_rebound_ns_per_m": 3920.0,
+      "travel_m": 0.16,
+      "preload_m": 0.02,
+      "arb_n_per_m": 12800.0,
+      "bump_stop_n_per_m": 170000.0
+    },
+    {
+      "spring_n_per_m": 42400.0,
+      "damper_bump_ns_per_m": 2610.0,
+      "damper_rebound_ns_per_m": 3920.0,
+      "travel_m": 0.16,
+      "preload_m": 0.02,
+      "arb_n_per_m": 12800.0,
+      "bump_stop_n_per_m": 170000.0
+    },
+    {
+      "spring_n_per_m": 40300.0,
+      "damper_bump_ns_per_m": 2330.0,
+      "damper_rebound_ns_per_m": 3500.0,
+      "travel_m": 0.17,
+      "preload_m": 0.02,
+      "arb_n_per_m": 600.0,
+      "bump_stop_n_per_m": 170000.0
+    },
+    {
+      "spring_n_per_m": 40300.0,
+      "damper_bump_ns_per_m": 2330.0,
+      "damper_rebound_ns_per_m": 3500.0,
+      "travel_m": 0.17,
+      "preload_m": 0.02,
+      "arb_n_per_m": 600.0,
+      "bump_stop_n_per_m": 170000.0
+    }
+  ],
+  "brakes": {
+    "max_torque_front_nm": 3730.0,
+    "max_torque_rear_nm": 1220.0,
+    "bias_front": 0.5,
+    "handbrake_rear_nm": 1430.0
+  },
+  "steering": {
+    "ratio": 15.7,
+    "rack_speed_rad_per_s": 1.4,
+    "ffb_scale": 1.0
+  },
+  "aero_downforce_coeffs": [0.0, 0.0],
+  "lattice_id": "rampart_50",
+  "base_price": 42000,
+  "durability_class": 3,
+  "fuel_capacity_l": 60.0
+}
