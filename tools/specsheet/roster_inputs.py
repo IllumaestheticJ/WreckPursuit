@@ -381,7 +381,7 @@ CARS = [
         trans=dict(
             desc="3-speed automatic with torque converter, open live rear axle",
             layout="Rwd",
-            gears=[2.45, 1.45, 1.00], final=3.23, reverse=2.20, shift=0.65,
+            gears=[2.45, 1.45, 1.00], final=3.23, reverse=2.20, shift=0.4,
             torque_converter=dict(stall_rpm=2200, ratio=2.1, coupling_rpm=2800),
             diff_f="Open", diff_r="Open", clutch_factor=1.5,
         ),
@@ -638,7 +638,7 @@ CARS = [
         trans=dict(
             desc="6-speed automatic with lock-up torque converter, automatic-locking rear diff modelled as high-preload LSD; 4WD transfer case is a mod",
             layout="Rwd",
-            gears=[4.03, 2.36, 1.53, 1.15, 0.85, 0.67], final=3.42, reverse=3.06, shift=0.6,
+            gears=[4.03, 2.36, 1.53, 1.15, 0.85, 0.67], final=3.42, reverse=3.06, shift=0.3,
             torque_converter=dict(stall_rpm=2200, ratio=2.0, coupling_rpm=2600),
             diff_f="Open", diff_r=dict(preload=150.0, power=0.60, coast=0.20), clutch_factor=1.6,
         ),
@@ -707,7 +707,7 @@ CARS = [
         trans=dict(
             desc="5-speed automatic with torque converter, mild rear LSD (pursuit package, V8 final drive)",
             layout="Rwd",
-            gears=[3.59, 2.19, 1.41, 1.00, 0.83], final=3.07, reverse=3.16, shift=0.5,
+            gears=[3.59, 2.19, 1.41, 1.00, 0.83], final=3.07, reverse=3.16, shift=0.3,
             torque_converter=dict(stall_rpm=2300, ratio=2.0, coupling_rpm=2700),
             diff_f="Open", diff_r=dict(preload=40.0, power=0.30, coast=0.15), clutch_factor=1.6,
         ),
@@ -779,7 +779,7 @@ CARS = [
         trans=dict(
             desc="6-speed automatic with torque converter, on-demand AWD tuned for launches (90 % front until the fronts slip 2 %, then up to 50 % rear), open diffs",
             layout=("AwdOnDemand", 0.90, 0.50, 0.02),
-            gears=[4.48, 2.87, 1.84, 1.41, 1.00, 0.74], final=3.16, reverse=2.88, shift=0.45,
+            gears=[4.48, 2.87, 1.84, 1.41, 1.00, 0.74], final=3.16, reverse=2.88, shift=0.3,
             torque_converter=dict(stall_rpm=2600, ratio=1.9, coupling_rpm=3000),
             diff_f="Open", diff_r="Open", clutch_factor=1.6,
         ),
@@ -841,7 +841,7 @@ CARS = [
         trans=dict(
             desc="6-speed automatic with torque converter, open rear diff",
             layout="Rwd",
-            gears=[4.03, 2.36, 1.53, 1.15, 0.85, 0.67], final=3.08, reverse=3.06, shift=0.55,
+            gears=[4.03, 2.36, 1.53, 1.15, 0.85, 0.67], final=3.08, reverse=3.06, shift=0.3,
             torque_converter=dict(stall_rpm=2200, ratio=2.0, coupling_rpm=2600),
             diff_f="Open", diff_r="Open", clutch_factor=1.6,
         ),
@@ -1038,7 +1038,7 @@ CARS = [
         trans=dict(
             desc="4-speed automatic with lock-up torque converter, open rear differential",
             layout="Rwd",
-            gears=[3.06, 1.63, 1.00, 0.70], final=3.42, reverse=2.29, shift=0.7,
+            gears=[3.06, 1.63, 1.00, 0.70], final=3.42, reverse=2.29, shift=0.35,
             torque_converter=dict(stall_rpm=2000, ratio=2.0, coupling_rpm=2400),
             diff_f="Open", diff_r="Open", clutch_factor=1.6,
         ),

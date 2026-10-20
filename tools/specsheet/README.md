@@ -58,7 +58,9 @@ Never hand-edit the generated files; the next build overwrites them.
 - Engine braking = 10-12 % of peak torque; clutch capacity 1.35-1.6 × peak torque.
 - Stock shift time (`shift_time_s`, owner playtest row 97, 2026-10-20): manual sports 0.42-0.45 s,
   manual economy / hot hatch 0.45-0.50, muscle manual 0.50, light-truck manual 0.65, beater
-  0.70, converter automatics 0.60-0.70 (police packages 0.45-0.55), dual-clutch 0.18. Mods scale
+  0.70, dual-clutch 0.18. Converter automatics are still 0.30-0.40 s: their shift model gets
+  *faster* with a longer shift (bug reported to 02, `docs/integration/cars.md` row 97); planned
+  0.60-0.70 (police packages 0.45-0.55) once that is fixed. Mods scale
   it (`drivetrain.shift_time_scale`; the best tier of each line multiplies, ×0.28 fully modded,
   so a sports manual lands at ≈ 0.12 s); `VALIDATION.md` lists stock → fully modded per car.
 

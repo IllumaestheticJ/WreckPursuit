@@ -49,7 +49,7 @@
       }
     },
     "clutch_max_nm": 830.0,
-    "shift_time_s": 0.6,
+    "shift_time_s": 0.3,
     "torque_converter": {
       "stall_rpm": 2200.0,
       "stall_torque_ratio": 2.0,

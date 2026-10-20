@@ -81,7 +81,7 @@ Peak **276 kW @ 5475 rpm**, **535 N·m @ 4400 rpm**. Idle 600 / redline 5800 / l
 
 ## Drivetrain
 
-5-speed automatic with torque converter, mild rear LSD (pursuit package, V8 final drive). Layout **RWD**; front diff: open; rear diff: clutch LSD, preload 40 N·m, power ramp 0.30, coast ramp 0.15. Torque converter: stall 2300 rpm, 2.0× at stall, couples 1:1 from 2700 rpm (class-typical for the gearbox). Clutch capacity 1.60 × peak torque = 860 N·m. Shift time 0.50 s.
+5-speed automatic with torque converter, mild rear LSD (pursuit package, V8 final drive). Layout **RWD**; front diff: open; rear diff: clutch LSD, preload 40 N·m, power ramp 0.30, coast ramp 0.15. Torque converter: stall 2300 rpm, 2.0× at stall, couples 1:1 from 2700 rpm (class-typical for the gearbox). Clutch capacity 1.60 × peak torque = 860 N·m. Shift time 0.30 s.
 
 | Gear | Ratio | Overall | km/h @ redline |
 |---|---|---|---|
@@ -138,8 +138,8 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 6.3 s | 260 km/h | 40.3 m | 0.86 g | — |
-| estimate | 6.4 s | 267 km/h | 37.8 m | 0.91 g | 550 |
+| sim | 6.4 s | 260 km/h | 40.2 m | 0.86 g | — |
+| estimate | 6.2 s | 267 km/h | 37.8 m | 0.91 g | 559 |
 
 ## Damage lattice (`data/lattices/sentinel_cruiser.json`)
 

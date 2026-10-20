@@ -141,7 +141,11 @@ fn kickdown_on_full_throttle() {
     assert!(cruise_gear >= 4, "cruising in {cruise_gear}");
     // ...then the pedal is floored: one shift, at least two gears down, done within the
     // car's shift time plus 0.15 s to react (0.4 s at the old 0.25 s shift).
-    let s = shifts(&mut rig, &throttle(1.0), c.def.drivetrain.shift_time_s + 0.15);
+    let s = shifts(
+        &mut rig,
+        &throttle(1.0),
+        c.def.drivetrain.shift_time_s + 0.15,
+    );
     let now = rig.state().gear;
     assert_eq!(s, vec![-1], "{s:?}");
     assert!(
@@ -176,7 +180,11 @@ fn street_cars_shift_at_believable_stock_speeds() {
             continue;
         }
         let dual_clutch = c.def.id == "lindwurm_4t";
-        let band = if dual_clutch { 0.12..=0.25 } else { 0.35..=0.55 };
+        let band = if dual_clutch {
+            0.12..=0.25
+        } else {
+            0.35..=0.55
+        };
         assert!(
             band.contains(&d.shift_time_s),
             "{}: shift_time_s {}",

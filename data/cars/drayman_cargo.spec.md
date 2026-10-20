@@ -81,7 +81,7 @@ Peak **207 kW @ 5200 rpm**, **400 N·m @ 4400 rpm**. Idle 600 / redline 5600 / l
 
 ## Drivetrain
 
-4-speed automatic with lock-up torque converter, open rear differential. Layout **RWD**; front diff: open; rear diff: open. Torque converter: stall 2000 rpm, 2.0× at stall, couples 1:1 from 2400 rpm (class-typical for the gearbox). Clutch capacity 1.60 × peak torque = 640 N·m. Shift time 0.70 s.
+4-speed automatic with lock-up torque converter, open rear differential. Layout **RWD**; front diff: open; rear diff: open. Torque converter: stall 2000 rpm, 2.0× at stall, couples 1:1 from 2400 rpm (class-typical for the gearbox). Clutch capacity 1.60 × peak torque = 640 N·m. Shift time 0.35 s.
 
 | Gear | Ratio | Overall | km/h @ redline |
 |---|---|---|---|
@@ -135,8 +135,8 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 10.7 s | 202 km/h | 43.5 m | 0.67 g | — |
-| estimate | 11.2 s | 207 km/h | 42.6 m | 0.74 g | 376 |
+| sim | 10.9 s | 202 km/h | 43.5 m | 0.67 g | — |
+| estimate | 10.9 s | 207 km/h | 42.6 m | 0.74 g | 381 |
 
 ## Damage lattice (`data/lattices/drayman_cargo.json`)
 

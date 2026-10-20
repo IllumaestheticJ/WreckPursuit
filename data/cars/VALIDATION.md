@@ -25,17 +25,17 @@ Three layers of evidence per car:
 | Shiro Turbo | 5.6-6.6 | 6.6 | ✓ | 0.88-0.98 | 0.96 | ✓ | 34.0-38.0 | 37.7 | ✓ | 260 | 14.8 @ 160 | 0.42 → 0.12 | 6.2 / 1.01 / 34.5 |
 | Hakone GT | 4.8-5.8 | 6.0 | FAIL (slow) | 0.90-1.00 | 0.93 | ✓ | 33.0-38.0 | 38.9 | FAIL (long) | 282 | 14.3 @ 169 | 0.45 → 0.13 | 5.7 / 0.98 / 35.4 |
 | Rampart 5.0 | 4.5-5.0 | 6.2 | FAIL (slow) | 0.92-1.00 | 0.90 | FAIL (low) | 33.0-38.0 | 38.9 | FAIL (long) | 268 | 14.0 @ 176 | 0.50 → 0.14 | 5.6 / 0.96 / 36.0 |
-| Ironside 440 | 6.5-8.0 | 8.1 | FAIL (slow) | 0.70-0.80 | 0.64 | FAIL (low) | 45.0-60.0 | 53.0 | ✓ | 210 | 16.2 @ 155 | 0.65 → 0.18 | 7.9 / 0.71 / 49.9 |
+| Ironside 440 | 6.5-8.0 | 8.2 | FAIL (slow) | 0.70-0.80 | 0.64 | FAIL (low) | 45.0-60.0 | 53.0 | ✓ | 210 | 16.2 @ 155 | 0.40 → 0.11 | 7.7 / 0.71 / 49.9 |
 | Sperber 32 | 5.0-5.8 | 6.3 | FAIL (slow) | 0.90-1.00 | 0.95 | ✓ | 33.0-37.0 | 37.6 | FAIL (long) | 272 | 14.3 @ 166 | 0.42 → 0.12 | 5.8 / 0.99 / 35.2 |
 | Lindwurm 4T | 4.6-5.4 | 5.6 | FAIL (slow) | 0.90-1.00 | 0.94 | ✓ | 33.0-37.0 | 37.1 | FAIL (long) | 259 | 13.8 @ 166 | 0.18 → 0.05 | 5.5 / 0.97 / 36.1 |
 | Lucciola 350 | 4.3-5.0 | 4.7 | ✓ | 1.00-1.10 | 0.99 | FAIL (low) | 32.0-37.0 | 36.2 | ✓ | 290 | 12.9 @ 182 | 0.45 → 0.13 | 4.6 / 1.02 / 33.9 |
-| Hauler 1500 | 7.0-8.0 | 8.0 | FAIL (slow) | 0.68-0.76 | 0.65 | FAIL (low) | 42.0-50.0 | 44.9 | ✓ | 206 | 16.1 @ 147 | 0.60 → 0.17 | 8.3 / 0.71 / 45.1 |
-| Sentinel Cruiser | 6.2-7.2 | 6.3 | ✓ | 0.85-0.92 | 0.86 | ✓ | 38.0-43.0 | 40.3 | ✓ | 260 | 14.6 @ 164 | 0.50 → 0.14 | 6.4 / 0.91 / 37.8 |
-| Sentinel Wolfhound | 5.5-6.5 | 5.9 | ✓ | 0.85-0.92 | 0.87 | ✓ | 38.0-43.0 | 39.6 | ✓ | 244 | 14.2 @ 164 | 0.45 → 0.13 | 6.4 / 0.91 / 38.1 |
-| Sentinel Bastion | 7.5-9.0 | 7.9 | ✓ | 0.72-0.80 | 0.74 | ✓ | 40.0-46.0 | 43.5 | ✓ | 214 | 16.0 @ 144 | 0.55 → 0.15 | 7.8 / 0.81 / 40.2 |
+| Hauler 1500 | 7.0-8.0 | 8.1 | FAIL (slow) | 0.68-0.76 | 0.65 | FAIL (low) | 42.0-50.0 | 44.9 | ✓ | 206 | 16.2 @ 146 | 0.30 → 0.08 | 8.0 / 0.71 / 45.1 |
+| Sentinel Cruiser | 6.2-7.2 | 6.4 | ✓ | 0.85-0.92 | 0.86 | ✓ | 38.0-43.0 | 40.2 | ✓ | 260 | 14.7 @ 164 | 0.30 → 0.08 | 6.2 / 0.91 / 37.8 |
+| Sentinel Wolfhound | 5.5-6.5 | 5.9 | ✓ | 0.85-0.92 | 0.87 | ✓ | 38.0-43.0 | 39.5 | ✓ | 244 | 14.2 @ 164 | 0.30 → 0.08 | 6.1 / 0.91 / 38.1 |
+| Sentinel Bastion | 7.5-9.0 | 8.0 | ✓ | 0.72-0.80 | 0.75 | ✓ | 40.0-46.0 | 43.5 | ✓ | 214 | 16.0 @ 144 | 0.30 → 0.08 | 7.6 / 0.81 / 40.2 |
 | Junkyard Beater | 14.0-16.0 | 15.7 | ✓ | 0.68-0.78 | 0.69 | ✓ | 42.0-48.0 | 46.6 | ✓ | 146 (140-160 ✓) | 20.3 @ 112 | 0.70 → 0.20 | 14.3 / 0.77 / 43.6 |
 | Tansy 1.3 | 11.5-13.5 | 13.8 | FAIL (slow) | 0.78-0.88 | 0.81 | ✓ | 38.0-45.0 | 40.7 | ✓ | 162 | 19.3 @ 120 | 0.50 → 0.14 | 12.1 / 0.90 / 37.4 |
-| Drayman Cargo | 9.5-12.0 | 10.7 | ✓ | 0.64-0.74 | 0.67 | ✓ | 44.0-52.0 | 43.5 | FAIL (short) | 202 | 17.6 @ 134 | 0.70 → 0.20 | 11.2 / 0.74 / 42.6 |
+| Drayman Cargo | 9.5-12.0 | 10.9 | ✓ | 0.64-0.74 | 0.67 | ✓ | 44.0-52.0 | 43.5 | FAIL (short) | 202 | 17.7 @ 133 | 0.35 → 0.10 | 10.9 / 0.74 / 42.6 |
 | Furrow 2.4 | 10.0-12.5 | 11.3 | ✓ | 0.70-0.80 | 0.75 | ✓ | 42.0-50.0 | 42.7 | ✓ | 179 | 18.1 @ 124 | 0.65 → 0.18 | 10.7 / 0.83 / 38.4 |
 
 Target sources (type): vireo_xs: late-90s 1.6 NA hot hatch road tests; kestrel_ts: mid-2000s FF 2.0 T sedan road tests; shiro_turbo: early-2000s FR 2.0 T coupe road tests; hakone_gt: 90s FR 3.0 TT GT road tests (export trim); rampart_50: prompt 09 target; 2010s 5.0 V8 coupe road tests; ironside_440: period road tests of 7.2 L big-blocks on period tires (net-rated); sperber_32: 2000s 3.2 I6 sport sedan/coupe road tests; lindwurm_4t: 2010s AWD 2.0 T hot hatch road tests (dual-clutch); lucciola_350: prompt 09 target (skidpad >= 1.0 g); 90s 3.5 V8 MR road tests; hauler_1500: prompt 09 target (~7.5 s); 2010s half-ton 5.3 V8 pickup tests; sentinel_cruiser: fleet evaluation figures for RWD 5.7 V8 police sedans (pursuit package, round 6b); sentinel_wolfhound: fleet evaluation figures for AWD TT V6 pursuit vehicles; sentinel_bastion: fleet evaluation figures for RWD 5.3 V8 police SUVs; junkyard_beater: lead brief round 12b (0-100 14-16 s, ~150 km/h); period road tests of 1980s 1.6 L 4-speed economy sedans, derated for wear, on old hard tyres; tansy_13: road tests of 2000s 1.3 L superminis; drayman_cargo: road tests of 2000s full-size V8 cargo vans (empty); furrow_24: period road tests of 90s compact 2.4 L pickups (manual).
@@ -49,14 +49,14 @@ Target sources (type): vireo_xs: late-90s 1.6 NA hot hatch road tests; kestrel_t
 - **Rampart 5.0 0-100 6.2: FAIL (slow)** — A + traction. Measured: final drive 3.73, CG 0.48 m and a stronger LSD each change it by ≤ 0.03 s; semi-slicks only reach 5.5 s; 0.12 s shifts 5.6 s. The prompt-09 band (4.5-5.0) needs 02's launch/TCS to be less conservative. Row 97 stock shift 0.25 → 0.50 s: 5.83 → 6.18 s.
 - **Rampart 5.0 skidpad 0.90: FAIL (low)** — C — heavy nose on `sport` tires; semi-slicks give 0.97 g.
 - **Rampart 5.0 100-0 38.9: FAIL (long)** — A — 1 m over. Was 55.6 m in the lead's first run (rear starved by the bias semantics) and 45.6 m with the bias fixed but the full 6-piston caliper torque (ABS cannot modulate it); the ABS ceiling brings it to 39 m.
-- **Ironside 440 0-100 8.1: FAIL (slow)** — bias-ply traction: on 02's `vintage_bias` (longitudinal D 0.93) the 560 N·m launch spins the rears, so the converter (now simulated) only took it from 8.77 to 8.71 s. A clutch LSD (08 mod) or 02's `drag_radial` is the period fix.
+- **Ironside 440 0-100 8.2: FAIL (slow)** — bias-ply traction: on 02's `vintage_bias` (longitudinal D 0.93) the 560 N·m launch spins the rears, so the converter (now simulated) only took it from 8.77 to 8.71 s. A clutch LSD (08 mod) or 02's `drag_radial` is the period fix.
 - **Ironside 440 skidpad 0.64: FAIL (low)** — C — 02's `vintage_bias` (≈ 0.85 × street, half the cornering stiffness, as requested) on a soft, 0.55 m-CG chassis gives 0.62 g; period road tests put the archetype at 0.70-0.75 g. Joint re-tune with 02.
 - **Sperber 32 0-100 6.3: FAIL (slow)** — A — high-revving NA six on a TCS launch; row 97 (owner): stock shift times re-based to believable values (0.22 → 0.42 s): 6.05 → 6.33 s.
 - **Sperber 32 100-0 37.6: FAIL (long)** — A — 0.7 m over.
 - **Lindwurm 4T 0-100 5.6: FAIL (slow)** — On-demand AWD (`AwdOnDemand` 95 % front, up to 50 % rear at 5 % front slip) and row 97 (owner): stock shift times re-based to believable values: dual-clutch 0.08 → 0.18 s, 5.44 → 5.58 s.
 - **Lindwurm 4T 100-0 37.1: FAIL (long)** — A — 0.5 m over.
 - **Lucciola 350 skidpad 0.99: FAIL (low)** — C — 0.95 g on `sport`, 1.09 g on `semi_slick` (measured). A 90s exotic on its stock tires tested ≈ 0.95 g; the prompt-09 ≥ 1.0 g target needs either a stickier `sport` compound (02) or giving the Lucciola semi-slicks — lead's call.
-- **Hauler 1500 0-100 8.0: FAIL (slow)** — traction + B: 2WD with an empty bed on `all_terrain` (longitudinal D 0.98); the converter brought it from 9.45 to 8.98 s. The 4WD mod (08) should land it in band.
+- **Hauler 1500 0-100 8.1: FAIL (slow)** — traction + B: 2WD with an empty bed on `all_terrain` (longitudinal D 0.98); the converter brought it from 9.45 to 8.98 s. The 4WD mod (08) should land it in band.
 - **Hauler 1500 skidpad 0.65: FAIL (low)** — C — now on 02's `all_terrain` (≈ 0.9 × street, as requested): 0.63 g vs 0.68-0.76 published for half-tons on all-terrain tires. Joint re-tune with 02 (compound peak or cornering stiffness) rather than a chassis change.
 - **Tansy 1.3 0-100 13.8: FAIL (slow)** — Row 97 (owner): stock shift times re-based to believable values (5-speed manual 0.25 → 0.50 s): 13.40 → 13.79 s, 0.3 s over. Same reasoning as the Vireo: shared cause A plus the slower stock shift; mods recover it.
 - **Drayman Cargo 100-0 43.5: FAIL (short)** — 0.7 m short of the band (shorter since A's round-8 brake-pedal filter): an empty van on car-type `street` tires (no light-truck compound) with the 1.5 × lock-torque ABS ceiling stops slightly better than road tests of laden-sensitive LT tires. Tire-limited; an `lt_highway` compound (02) would land it in band.

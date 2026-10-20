@@ -80,7 +80,7 @@ Peak **265 kW @ 5600 rpm**, **519 N·m @ 4100 rpm**. Idle 600 / redline 5800 / l
 
 ## Drivetrain
 
-6-speed automatic with torque converter, open rear diff. Layout **RWD**; front diff: open; rear diff: open. Torque converter: stall 2200 rpm, 2.0× at stall, couples 1:1 from 2600 rpm (class-typical for the gearbox). Clutch capacity 1.60 × peak torque = 830 N·m. Shift time 0.55 s.
+6-speed automatic with torque converter, open rear diff. Layout **RWD**; front diff: open; rear diff: open. Torque converter: stall 2200 rpm, 2.0× at stall, couples 1:1 from 2600 rpm (class-typical for the gearbox). Clutch capacity 1.60 × peak torque = 830 N·m. Shift time 0.30 s.
 
 | Gear | Ratio | Overall | km/h @ redline |
 |---|---|---|---|
@@ -136,8 +136,8 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 7.9 s | 214 km/h | 43.5 m | 0.74 g | — |
-| estimate | 7.8 s | 224 km/h | 40.2 m | 0.81 g | 465 |
+| sim | 8.0 s | 214 km/h | 43.5 m | 0.75 g | — |
+| estimate | 7.6 s | 224 km/h | 40.2 m | 0.81 g | 472 |
 
 ## Damage lattice (`data/lattices/sentinel_bastion.json`)
 
