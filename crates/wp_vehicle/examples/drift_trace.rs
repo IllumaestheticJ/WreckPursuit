@@ -1,6 +1,6 @@
 //! Tick traces for Drift Lab B tuning.
 //! `cargo run --release -p wp_vehicle --example drift_trace -- drift <car> <driver> [help] [seed]`
-//! (driver: good | naive | sloppy | lift) or `-- kick <car> <kmh> <kick> [help] [counter]`.
+//! (driver: good | naive | into | sloppy | lift | flood) or `-- kick <car> <kmh> <kick> [help] [counter]`.
 
 use wp_contracts::{AssistProfile, VehicleInput};
 use wp_vehicle::drift_lab::{drift_run_with, slide_state, DriftDriver};
@@ -11,7 +11,7 @@ fn line(rig: &Rig, steer: f32, thr: f32, t: usize) {
     let n = slide_state(rig);
     let tel = rig.vehicle.telemetry();
     println!(
-        "t={:5.0}ms beta={:6.1} rear={:6.1} faa={:6.1} steer={:6.1} yaw={:5.2} v={:5.1} in=({steer:+.0},{thr:.0}) thr={:.2} mode={:?} env={:4.1} auth={:.2}",
+        "t={:5.0}ms beta={:6.1} rear={:6.1} faa={:6.1} steer={:6.1} yaw={:5.2} v={:5.1} in=({steer:+.0},{thr:.0}) thr={:.2} mode={:?} env={:4.1} auth={:.2} held={:4.1}",
         t as f32 / 0.24,
         n.body_slip.to_degrees(),
         n.rear_axle_slip.to_degrees(),
@@ -23,6 +23,7 @@ fn line(rig: &Rig, steer: f32, thr: f32, t: usize) {
         tel.drift.mode,
         tel.drift.envelope.to_degrees(),
         tel.drift.authority,
+        tel.drift.hold_angle.to_degrees(),
     );
 }
 
@@ -44,6 +45,7 @@ fn main() {
             "sloppy" => DriftDriver::Sloppy,
             "lift" => DriftDriver::AbruptLift,
             "flood" => DriftDriver::Flood,
+            "into" => DriftDriver::IntoTurn,
             _ => DriftDriver::Good,
         };
         let help: f32 = arg(3, "0.6").parse().unwrap();

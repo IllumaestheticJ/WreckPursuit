@@ -1,5 +1,6 @@
-//! Drift Lab B (owner rows 90 / 91): fast countersteer and the semi-intelligent keyboard drift
-//! assist. Steering angle and throttle shaping only: nothing here adds grip or a yaw torque.
+//! Drift Lab B / C (owner rows 90 / 91 / 104 / 106): fast countersteer and the semi-intelligent
+//! keyboard drift assist. Steering angle (and opt-in throttle shaping) only: nothing here adds
+//! grip or a yaw torque.
 //!
 //! - [`DriftTuning`]: the constants, with a process-wide runtime override for the testbed's
 //!   "tune" panel ([`set_tuning_override`]). The override is a developer tool: it is not part of
@@ -7,20 +8,26 @@
 //! - [`DriftState`]: per-vehicle state; [`DriftState::update`] reads the driver's intent each
 //!   tick and returns a [`DriftCommand`] for the steering and the throttle.
 //!
-//! Intent modes (keyboard full strength, gamepad half, the wheel never — see
-//! [`device_weight`]):
+//! Intent modes (Drift Lab C, row 106; keyboard full strength, gamepad half, the wheel never —
+//! see [`device_weight`]):
 //! - steering released → **Straighten**: the wheels align with the front axle's travel, a
 //!   little past it while the slide still grows ([`DriftTuning::straighten_gain`]);
-//! - key into the turn → **Hold**: the front wheels go to the angle that keeps the captured
-//!   slide angle ([`DriftTuning::hold_gain`] / `hold_damp` / `hold_base`), so a held key
-//!   gives a steady drift; taps and the throttle move the held angle;
-//! - key against the slide → **Catch**: fast countersteer plus extra lock;
+//! - countersteer key (against the slide) → **Hold**: the assist supplies the opposite lock
+//!   that keeps the slide angle captured when the key went down ([`DriftTuning::hold_gain`] /
+//!   `hold_damp` / `hold_base`) — never the key's full lock, so a held binary key neither
+//!   snaps the car straight nor over-corrects. Holding it longer slowly shrinks the held
+//!   angle ([`DriftTuning::hold_decay_dps`]); taps nudge it;
+//! - key into the turn → **AngleUp**: the held angle grows ([`DriftTuning::angle_up_dps`])
+//!   and the front tyres get more slip into the turn: more angle, a tighter line;
+//! - the throttle grows the held angle, a lift shrinks it (both modes);
 //! - past the slide-angle envelope ([`base_envelope`], widening after a stable hold,
 //!   narrowing with erratic input), or growing faster than it can cover → **Exceeded**: the
 //!   assist (step 1's fast countersteer included) backs off and the car can spin.
 //!
-//! Throttle shaping maps a 0/1 key to a partial throttle that tends to hold the angle;
-//! abrupt lifts are softened ([`DriftTuning::lift_soften`]), not cancelled. Both fade out
+//! Owner rule (row 104): with TCS off the driver gets exactly the throttle they press. The
+//! throttle shaping (a 0/1 key → a partial throttle that tends to hold the angle) and the
+//! abrupt-lift softening are therefore opt-in: [`DriftTuning::throttle_shape`] and
+//! [`DriftTuning::lift_soften`] default to 0 (the tune panel can turn them on). Both fade out
 //! past the envelope.
 //!
 //! How the steering uses it: [`crate::steering::slide_onset`] turns rear-axle slip and its
@@ -45,7 +52,7 @@ pub struct DriftTuning {
     /// Time for the rack to travel the car's full lock toward the countersteer side at the
     /// default 60 % countersteer slider, s (scales with the slider: 100 % → 0.6 × this).
     pub catch_lock_s: f32,
-    /// Intent modes on (step 3: hold, throttle shaping, envelope). Off = step 1 only.
+    /// Intent modes on (hold, angle-up, envelope, opt-in throttle shaping). Off = step 1 only.
     pub intent: bool,
     /// Hold: front slip angle (× the tyres' peak slip) given up per 0.1 rad (5.7°) the slide
     /// angle is past the held angle.
@@ -54,10 +61,29 @@ pub struct DriftTuning {
     pub hold_damp: f32,
     /// Hold: front slip angle into the turn at the held angle, × the tyres' peak slip.
     pub hold_base: f32,
-    /// Hold entered from grip (turning into a drift): the held angle starts at least here,
-    /// degrees, so the drift can build. Re-entering Hold from a tap keeps the current angle.
+    /// AngleUp entered from grip (turning into a drift): the held angle starts at least here,
+    /// degrees, so the drift can build. Entering from a tap keeps the current angle.
     pub hold_entry_deg: f32,
-    /// Throttle shaping strength, 0 (raw key) ..= 1.
+    /// Hold (countersteer key): the held angle shrinks this fast while the key stays down,
+    /// degrees per second (a longer hold slowly closes the slide).
+    pub hold_decay_dps: f32,
+    /// AngleUp (key into the turn): the held angle grows this fast while the key is down,
+    /// degrees per second (up to just inside the envelope).
+    pub angle_up_dps: f32,
+    /// AngleUp: extra front slip angle into the turn while the key is down, × the tyres' peak
+    /// slip (a tighter line).
+    pub angle_up_steer: f32,
+    /// AngleUp: front slip angle given up per rad/s the slide angle grows, s (as
+    /// [`DriftTuning::hold_damp`]; more, so a held key into the turn adds angle without
+    /// overshooting the envelope).
+    pub angle_up_damp: f32,
+    /// Off the throttle the held angle shrinks this fast, degrees per second (a lift closes
+    /// the slide).
+    pub lift_shrink_dps: f32,
+    /// Hold / AngleUp steering authority with the throttle released, 0..=1 (a lift loosens
+    /// the hold toward the plain fallback; 1 = the lift changes only the held angle).
+    pub lift_authority: f32,
+    /// Throttle shaping strength, 0 (raw key, the default: row 104) ..= 1.
     pub throttle_shape: f32,
     /// Shaped throttle at the held angle (a held key), 0..=1.
     pub throttle_hold: f32,
@@ -69,10 +95,8 @@ pub struct DriftTuning {
     /// Straighten: extra countersteer past the travel while the slide angle still grows,
     /// × the tyres' peak slip at 0.5 rad/s of growth.
     pub straighten_gain: f32,
-    /// Catch: extra countersteer lock past the travel, × the tyres' peak slip.
-    pub catch_extra: f32,
-    /// Abrupt-lift softening, 0 (raw pedal release) ..= 1 (a full lift takes
-    /// [`LIFT_SOFT_S`]).
+    /// Abrupt-lift softening, 0 (raw pedal release, the default: row 104) ..= 1 (a full lift
+    /// takes [`LIFT_SOFT_S`]).
     pub lift_soften: f32,
 }
 
@@ -88,13 +112,18 @@ impl Default for DriftTuning {
             hold_damp: 0.2,
             hold_base: 1.0,
             hold_entry_deg: 18.0,
-            throttle_shape: 0.7,
+            hold_decay_dps: 3.0,
+            angle_up_dps: 15.0,
+            angle_up_steer: 0.5,
+            angle_up_damp: 0.5,
+            lift_shrink_dps: 6.0,
+            lift_authority: 0.7,
+            throttle_shape: 0.0,
             throttle_hold: 0.7,
             throttle_gain: 3.0,
             envelope_deg: 35.0,
             straighten_gain: 1.0,
-            catch_extra: 0.5,
-            lift_soften: 0.5,
+            lift_soften: 0.0,
         }
     }
 }
@@ -133,17 +162,12 @@ pub const ENVELOPE_BONUS_RAD: f32 = 0.087;
 pub const ENVELOPE_ERRATIC_RAD: f32 = 0.26;
 /// Erratic-input score added per steering reversal (decays at 0.4 per second).
 pub const ERRATIC_PER_REVERSAL: f32 = 0.4;
-/// Hold's steering authority with the throttle released, fraction (a lift loosens the hold:
-/// the snap is softened, not cancelled).
-pub const HOLD_LIFT_AUTHORITY: f32 = 0.35;
 /// Full-lift time at `lift_soften` 1, s.
 pub const LIFT_SOFT_S: f32 = 0.5;
 /// Held angle follows the slide angle up with this time constant while on the throttle, s.
 pub const HOLD_FOLLOW_UP_S: f32 = 0.6;
 /// … and down with this one, s.
 pub const HOLD_FOLLOW_DOWN_S: f32 = 1.5;
-/// Off the throttle the held angle shrinks at this rate, rad/s (a lift closes the slide).
-pub const HOLD_LIFT_SHRINK_RPS: f32 = 0.25;
 
 /// Device weight of the intent modes from the speed sensitivity: keyboard (1.0) → 1,
 /// gamepad (0.7) → 0.5, wheel (0) → 0.
@@ -230,7 +254,7 @@ pub struct DriftCommand {
     /// Throttle multiplier, 0..=1.
     pub throttle_scale: f32,
     /// Hold's steering authority from the throttle: 1 on the throttle, down to
-    /// [`HOLD_LIFT_AUTHORITY`] off it.
+    /// [`DriftTuning::lift_authority`] off it.
     pub hold_throttle: f32,
     /// Shortest time a full lift may take, s (0 = raw).
     pub lift_time_s: f32,
@@ -336,49 +360,70 @@ impl DriftState {
             raw_mode
         };
 
-        // Held angle: captured on entering Hold, follows the slide while on the throttle
-        // (more throttle grows it), shrinks off the throttle (a lift closes it).
-        if cmd.mode == DriftMode::Hold {
-            let prev = DriftMode::from_code(self.mode);
-            if prev == DriftMode::Grip || prev == DriftMode::Off {
-                // Turning into a drift: let it build to the entry angle.
-                self.hold_angle = a.max(t.hold_entry_deg.to_radians().min(cmd.envelope));
-            } else if prev != DriftMode::Hold {
-                // Back on the key after a tap: hold what there is now.
-                self.hold_angle = a;
-            } else if inp.throttle > 0.1 {
-                let tau = if a > self.hold_angle {
-                    HOLD_FOLLOW_UP_S
+        // Held angle (row 106). Countersteer key (Hold): captured when the key goes down
+        // (taps nudge it), shrinking slowly while it stays down. Key into the turn (AngleUp):
+        // grows while the key is down. Both: on the throttle it follows the slide (more
+        // throttle grows it), off the throttle it shrinks (a lift closes the slide). Never
+        // past just inside the envelope.
+        let prev = DriftMode::from_code(self.mode);
+        let key = inp.driver.abs().min(1.0);
+        let cap = (cmd.envelope - ENVELOPE_REARM_RAD).max(0.0);
+        match cmd.mode {
+            DriftMode::Hold | DriftMode::AngleUp if prev != cmd.mode => {
+                self.hold_angle = if cmd.mode == DriftMode::AngleUp
+                    && (prev == DriftMode::Grip || prev == DriftMode::Off)
+                {
+                    // Turning into a drift: let it build to the entry angle.
+                    a.max(t.hold_entry_deg.to_radians())
                 } else {
-                    HOLD_FOLLOW_DOWN_S
-                };
-                self.hold_angle += (a - self.hold_angle) * (dt / tau).min(1.0);
-            } else {
-                self.hold_angle = (self.hold_angle - HOLD_LIFT_SHRINK_RPS * dt).max(0.0);
+                    a
+                }
+                .min(cap);
             }
-        } else if cmd.mode != DriftMode::Exceeded {
-            self.hold_angle = a;
+            DriftMode::Hold | DriftMode::AngleUp => {
+                if inp.throttle > 0.1 {
+                    let tau = if a > self.hold_angle {
+                        HOLD_FOLLOW_UP_S
+                    } else {
+                        HOLD_FOLLOW_DOWN_S
+                    };
+                    self.hold_angle += (a - self.hold_angle) * (dt / tau).min(1.0);
+                } else {
+                    self.hold_angle -= t.lift_shrink_dps.to_radians() * dt;
+                }
+                self.hold_angle += if cmd.mode == DriftMode::Hold {
+                    -t.hold_decay_dps.to_radians() * key * dt
+                } else {
+                    t.angle_up_dps.to_radians() * key * dt
+                };
+                self.hold_angle = self.hold_angle.clamp(0.0, cap);
+            }
+            DriftMode::Exceeded => {}
+            _ => self.hold_angle = a,
         }
         cmd.hold_angle = self.hold_angle;
-        cmd.hold_throttle =
-            HOLD_LIFT_AUTHORITY + (1.0 - HOLD_LIFT_AUTHORITY) * inp.throttle.clamp(0.0, 1.0);
+        let la = t.lift_authority.clamp(0.0, 1.0);
+        cmd.hold_throttle = la + (1.0 - la) * inp.throttle.clamp(0.0, 1.0);
 
-        // Throttle shaping: the key becomes a partial throttle that tends to hold the angle
-        // (more when the slide closes, less when it opens). Faded out past the envelope, so
-        // full throttle at a big angle still spins a powerful car.
+        // Throttle shaping (opt-in, default off — row 104): the key becomes a partial
+        // throttle that tends to hold the angle (more when the slide closes, less when it
+        // opens). Faded out past the envelope, so full throttle at a big angle still spins a
+        // powerful car. With `throttle_shape` 0 the scale is exactly 1.
         let shaped = match cmd.mode {
-            DriftMode::Hold => (t.throttle_hold + t.throttle_gain * (self.hold_angle - a)
+            DriftMode::Hold | DriftMode::AngleUp => (t.throttle_hold
+                + t.throttle_gain * (self.hold_angle - a)
                 - 0.5 * self.slide_rate.max(0.0))
             .clamp(0.2, 1.0),
-            DriftMode::Catch => 0.6,
             _ => 1.0,
         };
         let k = t.throttle_shape.clamp(0.0, 1.0) * cmd.authority * cmd.weight;
-        cmd.throttle_scale = 1.0 - (1.0 - shaped) * k;
-        // Abrupt lift: softened, not cancelled.
+        if k > 0.0 {
+            cmd.throttle_scale = 1.0 - (1.0 - shaped) * k;
+        }
+        // Abrupt lift (opt-in, default off): softened, not cancelled.
         if matches!(
             cmd.mode,
-            DriftMode::Hold | DriftMode::Straighten | DriftMode::Catch
+            DriftMode::Hold | DriftMode::Straighten | DriftMode::AngleUp
         ) {
             cmd.lift_time_s =
                 LIFT_SOFT_S * t.lift_soften.clamp(0.0, 1.0) * cmd.authority * cmd.weight;
@@ -437,10 +482,11 @@ pub enum DriftMode {
     Grip,
     /// Sliding, steering released: the wheels align with the front axle's travel.
     Straighten,
-    /// Sliding, steering into the turn: holding the slide angle.
+    /// Sliding, countersteer key (against the slide): the assist supplies the opposite lock
+    /// that holds the slide angle (row 106).
     Hold,
-    /// Sliding, steering against the slide: fast countersteer.
-    Catch,
+    /// Sliding, key into the turn: more angle, a tighter line.
+    AngleUp,
     /// Past the assist's envelope: it backs off and the car can spin.
     Exceeded,
 }
@@ -453,7 +499,7 @@ impl DriftMode {
             DriftMode::Grip => 1,
             DriftMode::Straighten => 2,
             DriftMode::Hold => 3,
-            DriftMode::Catch => 4,
+            DriftMode::AngleUp => 4,
             DriftMode::Exceeded => 5,
         }
     }
@@ -464,7 +510,7 @@ impl DriftMode {
             1 => DriftMode::Grip,
             2 => DriftMode::Straighten,
             3 => DriftMode::Hold,
-            4 => DriftMode::Catch,
+            4 => DriftMode::AngleUp,
             5 => DriftMode::Exceeded,
             _ => DriftMode::Off,
         }
@@ -486,20 +532,72 @@ pub struct DriftTelemetry {
     pub authority: f32,
     /// Multiplier the assist applied to the throttle, 0..=1 (1 = untouched).
     pub throttle_scale: f32,
+    /// Slide angle Hold / AngleUp keeps, rad.
+    pub hold_angle: f32,
+    /// Throttle key / pedal as pressed, 0..=1 (compare [`crate::Telemetry::throttle`], what
+    /// reached the engine).
+    pub throttle_key: f32,
 }
 
-/// Classify the steering intent for telemetry (and, from step 3, the assist): `driver` steer
-/// (+ = right), countersteer `side` (+ = wheels left), `onset` 0..=1.
+/// Classify the steering intent: `driver` steer (+ = right), countersteer `side` (+ = wheels
+/// left), `onset` 0..=1. Released → Straighten, countersteer key → Hold, key into the turn →
+/// AngleUp (Drift Lab C, row 106).
 pub fn intent(driver: f32, side: f32, onset: f32) -> DriftMode {
     if onset <= 0.0 {
         DriftMode::Grip
     } else if driver.abs() <= crate::steering::STEER_DEADZONE {
         DriftMode::Straighten
     } else if -driver * side > 0.0 {
-        DriftMode::Catch
-    } else {
         DriftMode::Hold
+    } else {
+        DriftMode::AngleUp
     }
+}
+
+/// Hold / AngleUp steering (Drift Lab C, row 106): `(target, weight)`. `target` is the centre
+/// road-wheel angle (rad, + = left) that keeps the held slide angle: along the front axle's
+/// travel plus a front slip angle into the turn that shrinks (to a countersteer past the
+/// travel) as the slide opens past the held angle or grows fast; AngleUp adds
+/// [`DriftTuning::angle_up_steer`] more into the turn. Off the throttle it loosens toward the
+/// front axle's travel ([`DriftTuning::lift_authority`]). Below 3–7° of slide it leans toward
+/// the entry fallback: the travel for Hold (a held counter key never asks for the key's full
+/// lock), the key's own target for AngleUp (so the entry still turns in). `weight`
+/// (authority × device weight) blends it with the key's own target `driver_target`; 0 = the
+/// plain key.
+pub fn hold_steer(
+    inp: &crate::steering::SteerInput,
+    driver_target: f32,
+    max_steer: f32,
+) -> (f32, f32) {
+    let cmd = inp.drift;
+    let t = &inp.tuning;
+    let (side, onset) = crate::steering::slide_onset(inp);
+    let peak = inp.front_peak_slip;
+    let (into, damp) = if cmd.mode == DriftMode::AngleUp {
+        (
+            1.0 + t.angle_up_steer * inp.driver.abs().min(1.0),
+            t.angle_up_damp,
+        )
+    } else {
+        (1.0, t.hold_damp)
+    };
+    let alpha = (t.hold_base * peak * into
+        - t.hold_gain * peak / 0.1 * (cmd.slide - cmd.hold_angle)
+        - damp * cmd.slide_rate)
+        .clamp(-2.0 * peak, 1.5 * peak);
+    let full = max_steer * inp.ratio_scale;
+    let hold = (inp.front_axle_angle - side * alpha).clamp(-full, full);
+    // Off the throttle the hold loosens toward the front axle's travel (straighten).
+    let travel = (inp.front_axle_angle * onset).clamp(-full, full);
+    let assisted = travel + (hold - travel) * cmd.hold_throttle;
+    let entry = if cmd.mode == DriftMode::Hold {
+        travel
+    } else {
+        driver_target
+    };
+    let k = ((cmd.slide - 0.05) / 0.07).clamp(0.0, 1.0);
+    let target = entry + (assisted - entry) * k;
+    (target, cmd.authority * cmd.weight)
 }
 
 #[cfg(test)]
@@ -531,18 +629,22 @@ mod tests {
 
     #[test]
     fn modes_follow_the_keys() {
-        // Rear sliding right (countersteer side −): left key (−1) is into the turn. (Start
-        // already at the angle: a jump from 0 reads as a slide growing past the envelope.)
+        // Rear sliding right (countersteer side −): the right key (+1) is the countersteer,
+        // the left key (−1) is into the turn. (Start already at the angle: a jump from 0 reads
+        // as a slide growing past the envelope.)
         let mut st = DriftState {
             prev_slide: 15f32.to_radians(),
             ..DriftState::default()
         };
-        assert_eq!(run(&mut st, &inputs(-1.0, 15.0), 10).mode, DriftMode::Hold);
+        assert_eq!(run(&mut st, &inputs(1.0, 15.0), 10).mode, DriftMode::Hold);
         assert_eq!(
             run(&mut st, &inputs(0.0, 15.0), 10).mode,
             DriftMode::Straighten
         );
-        assert_eq!(run(&mut st, &inputs(1.0, 15.0), 10).mode, DriftMode::Catch);
+        assert_eq!(
+            run(&mut st, &inputs(-1.0, 15.0), 10).mode,
+            DriftMode::AngleUp
+        );
         assert_eq!(
             run(&mut st, &inputs(1.0, 70.0), 10).mode,
             DriftMode::Exceeded
@@ -565,7 +667,7 @@ mod tests {
         assert!((base_envelope(&t, 1.0).to_degrees() - 45.0).abs() < 1e-3);
         // A stable hold widens it; sawing at the keys narrows it.
         let mut st = DriftState::default();
-        let calm = run(&mut st, &inputs(-1.0, 20.0), 600);
+        let calm = run(&mut st, &inputs(1.0, 20.0), 600);
         assert!(calm.envelope > base_envelope(&t, 0.6) + 0.05, "{calm:?}");
         let mut st = DriftState::default();
         let mut c = DriftCommand::default();
@@ -577,14 +679,52 @@ mod tests {
     }
 
     #[test]
-    fn throttle_is_shaped_in_hold_only_inside_the_envelope() {
+    fn throttle_is_raw_by_default() {
+        // Row 104: TCS off = the throttle you press. No shaping, no lift softening.
         let mut st = DriftState::default();
-        let hold = run(&mut st, &inputs(-1.0, 20.0), 120);
+        let hold = run(&mut st, &inputs(1.0, 20.0), 120);
+        assert_eq!(hold.throttle_scale, 1.0);
+        assert_eq!(hold.lift_time_s, 0.0);
+    }
+
+    #[test]
+    fn opt_in_throttle_is_shaped_only_inside_the_envelope() {
+        let t = DriftTuning {
+            throttle_shape: 1.0,
+            ..DriftTuning::default()
+        };
+        let mut st = DriftState::default();
+        let mut hold = DriftCommand::default();
+        for _ in 0..120 {
+            hold = st.update(&inputs(1.0, 20.0), &t, 1.0 / 240.0);
+        }
         assert!(hold.throttle_scale < 0.95, "{hold:?}");
         let mut st = DriftState::default();
-        let past = run(&mut st, &inputs(-1.0, 70.0), 120);
+        let mut past = DriftCommand::default();
+        for _ in 0..120 {
+            past = st.update(&inputs(1.0, 70.0), &t, 1.0 / 240.0);
+        }
         assert_eq!(past.throttle_scale, 1.0);
         assert_eq!(past.authority, 0.0);
+    }
+
+    #[test]
+    fn counter_key_slowly_shrinks_the_held_angle_into_key_grows_it() {
+        let start = DriftState {
+            prev_slide: 20f32.to_radians(),
+            mode: DriftMode::Straighten.code() as f32,
+            ..DriftState::default()
+        };
+        // 1 s of the countersteer key at 20°: captured at 20°, −3°/s.
+        let mut st = start;
+        let c = run(&mut st, &inputs(1.0, 20.0), 240);
+        let held = c.hold_angle.to_degrees();
+        assert!((15.0..19.5).contains(&held), "{held}");
+        // 0.5 s of the key into the turn: up by ~7°.
+        let mut st = start;
+        let c = run(&mut st, &inputs(-1.0, 20.0), 120);
+        let held = c.hold_angle.to_degrees();
+        assert!(held > 24.0 && held <= 30.0 + 1e-3, "{held}");
     }
 
     #[test]

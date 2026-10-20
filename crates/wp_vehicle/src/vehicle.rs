@@ -1142,6 +1142,8 @@ impl Vehicle {
                 dc.authority
             },
             throttle_scale: dc.throttle_scale,
+            hold_angle: dc.hold_angle,
+            throttle_key: thr_in,
         };
         let ts = if base_split[0] > 0.0 && self.corners[0].steerable {
             torque_steer(self.wheels[0].drive, self.wheels[1].drive)

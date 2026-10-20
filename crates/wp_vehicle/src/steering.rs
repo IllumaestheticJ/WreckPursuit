@@ -174,13 +174,7 @@ fn countersteer_lock(inp: &SteerInput, assists: &AssistProfile, max_steer: f32, 
         inp.front_mu,
         inp.front_peak_slip,
     );
-    // Catch (step 3): a little extra lock past the travel.
-    let extra = if inp.drift.mode == DriftMode::Catch {
-        inp.tuning.catch_extra * inp.front_peak_slip * inp.drift.weight
-    } else {
-        0.0
-    };
-    let needed = (inp.front_axle_angle.abs() + margin + extra).min(max_steer * inp.ratio_scale);
+    let needed = (inp.front_axle_angle.abs() + margin).min(max_steer * inp.ratio_scale);
     lock + (needed.max(lock) - lock) * slide
 }
 
@@ -232,27 +226,14 @@ pub fn steer_target(
         help > 0.0 && inp.speed > 3.0 && inp.driver.abs() <= STEER_DEADZONE && !inp.handbrake_hold;
     let (cs_side, cs_rate) = countersteer_rate(inp, assists, max_steer);
     let cmd = inp.drift;
-    if !aligning && cmd.mode == DriftMode::Hold && help > 0.0 {
-        // Hold (step 3): the front wheels go to the angle that keeps the captured slide
-        // angle — along the front axle's travel plus a front slip angle into the turn that
-        // shrinks (to a countersteer past the travel) as the slide opens past the held angle
-        // or grows fast. Blended with the plain key target by authority × device weight, and
-        // in from 3° to 7° of slide so the entry still turns in.
-        let (side, _) = slide_onset(inp);
-        let peak = inp.front_peak_slip;
-        let t = &inp.tuning;
-        let alpha = (t.hold_base * peak * inp.driver.abs().min(1.0)
-            - t.hold_gain * peak / 0.1 * (cmd.slide - cmd.hold_angle)
-            - t.hold_damp * cmd.slide_rate)
-            .clamp(-2.0 * peak, 1.5 * peak);
+    if !aligning && matches!(cmd.mode, DriftMode::Hold | DriftMode::AngleUp) && help > 0.0 {
+        // Hold (countersteer key) / AngleUp (key into the turn): the target that keeps the
+        // held slide angle ([`crate::drift::hold_steer`]), blended with the plain key target
+        // by authority × device weight.
+        let (hold, w) = crate::drift::hold_steer(inp, driver_target, max_steer);
         let full = max_steer * inp.ratio_scale;
-        let hold = (inp.front_axle_angle - side * alpha).clamp(-full, full);
-        let w = cmd.authority
-            * cmd.weight
-            * cmd.hold_throttle
-            * ((cmd.slide - 0.05) / 0.07).clamp(0.0, 1.0);
         let angle = (driver_target + (hold - driver_target) * w).clamp(-max_steer, max_steer);
-        let fast = full * help / (CATCH_REF_HELP * t.catch_lock_s.max(1e-3));
+        let fast = full * help / (CATCH_REF_HELP * inp.tuning.catch_lock_s.max(1e-3));
         return SteerTarget {
             angle,
             rate_boost: 1.0,

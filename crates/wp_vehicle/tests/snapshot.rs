@@ -119,6 +119,8 @@ fn set_state_is_a_close_approximation() {
     // at the grip limit (slip-targeted keyboard steering, playtest row 28). The public state
     // carries no pedal filter, auto-box timer or ESC reference, so the restored car re-ramps
     // its throttle from 0 and the slide diverges a little (0.27 m on main before the LSD and
-    // steering changes; 0.76 m with the 1.5-way clutch LSD; 0.66 m with both).
-    assert!(d < 1.0, "set_state drift after 1 s: {d} m");
+    // steering changes; 0.76 m with the 1.5-way clutch LSD; 0.66 m with both; 1.49 m with Drift
+    // Lab C's raw throttle in the slide — row 104, no drift-assist throttle shaping — which
+    // makes the re-ramped throttle matter more).
+    assert!(d < 2.0, "set_state drift after 1 s: {d} m");
 }

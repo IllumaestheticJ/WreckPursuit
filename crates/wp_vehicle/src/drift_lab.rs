@@ -1,6 +1,6 @@
-//! Drift Lab B measurements (owner rows 90 / 91): scripted slide drivers on a [`Rig`], used
-//! by `examples/drift_lab_b.rs`, `tests/drift_lab_b.rs` and the numbers in
-//! `docs/integration/drift-lab-b.md`.
+//! Drift Lab B / C measurements (owner rows 90 / 91 / 106): scripted slide drivers on a
+//! [`Rig`], used by `examples/drift_lab_b.rs`, `tests/drift_lab_b.rs` and the numbers in
+//! `docs/integration/drift-lab-b.md` / `drift-lab-c.md`.
 //!
 //! | measurement | manoeuvre |
 //! |---|---|
@@ -220,12 +220,18 @@ pub fn kick_catch(
 }
 
 /// Scripted drift drivers for [`drift_run`] (keyboard: steer and throttle are 0 / 1 keys).
+///
+/// Drift Lab C (row 106): holding a slide is the countersteer key. [`DriftDriver::Good`],
+/// [`DriftDriver::Naive`], [`DriftDriver::AbruptLift`] and [`DriftDriver::IntoTurn`] all
+/// enter the same way — key into the turn + throttle until the slide passes
+/// [`ENTRY_DEG`] — then do their own thing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DriftDriver {
-    /// Holds the key into the turn and the throttle, tapping off the key when the slide angle
-    /// gets past 30° and the throttle when it is past 35° (hold + modulate).
+    /// After the entry, holds the countersteer key and modulates the throttle key (off past
+    /// 32° of slide, back on below 25°); if the slide closes below 10° it taps the key into
+    /// the turn (AngleUp) until it is past 15° again (hold + modulate).
     Good,
-    /// Holds the key into the turn and full throttle the whole time.
+    /// After the entry, holds the countersteer key and full throttle the whole time.
     Naive,
     /// Enters like [`DriftDriver::Naive`], then from 0.8 s on random 0.15–0.5 s segments
     /// (seeded [`Rng`]): key into the turn + throttle 40 %, released + throttle 20 %, against
@@ -233,7 +239,7 @@ pub enum DriftDriver {
     /// then saws at the keys.
     Sloppy,
     /// Like [`DriftDriver::Good`] for 2 s, then lifts off the throttle at once and keeps the
-    /// key into the turn.
+    /// countersteer key.
     AbruptLift,
     /// The car is flicked into a big angle (a [`FLICK_RPS`] yaw kick into the turn), then the
     /// key into the turn and full throttle: floors it at a big angle.
@@ -241,7 +247,14 @@ pub enum DriftDriver {
     /// The same flick as [`DriftDriver::Flood`], then the keys released and the throttle
     /// lifted: the contrast case.
     FlickLift,
+    /// After the entry, keeps the key into the turn (AngleUp: more angle, a tighter line)
+    /// with [`DriftDriver::Good`]'s throttle modulation.
+    IntoTurn,
 }
+
+/// Slide angle where the scripted drivers switch from the entry (key into the turn +
+/// throttle) to their own inputs, degrees.
+pub const ENTRY_DEG: f32 = 12.0;
 
 /// Yaw kick of [`DriftDriver::Flood`] / [`DriftDriver::FlickLift`], rad/s.
 pub const FLICK_RPS: f32 = 2.0;
@@ -258,6 +271,11 @@ pub struct DriftRun {
     /// Largest body slip toward the other side (the tail swinging past straight: a snap),
     /// degrees.
     pub flip_deg: f32,
+    /// Mean slide angle while drifting (10–50°), degrees.
+    pub mean_deg: f32,
+    /// Steadiness: standard deviation of the slide angle while drifting (10–50°), degrees
+    /// (small = a steady drift).
+    pub sd_deg: f32,
     /// Spun: past 90° of body slip, or travelling backwards.
     pub spun: bool,
     /// Rig state hash at the end.
@@ -337,34 +355,45 @@ pub fn drift_run_with(
     let mut max_slip = 0.0f32;
     let mut flip = 0.0f32;
     let mut spun = false;
-    let mut steer_key = -1.0f32;
+    let (mut sum, mut sum2) = (0.0f64, 0.0f64);
     let mut thr_key = 1.0f32;
+    let mut entered = false;
+    let mut regain = false;
     for tick in 0..6 * TICKS_PER_S {
         let s = slide_state(&rig);
         // Left-hand corner: the slide angle is −body slip (velocity right of the heading).
         let angle = (-s.body_slip).to_degrees();
-        // Into the turn = left = −1.
+        entered |= angle > ENTRY_DEG;
+        // Throttle key with hysteresis, like a player modulating it.
+        if angle > 32.0 {
+            thr_key = 0.0;
+        } else if angle < 25.0 {
+            thr_key = 1.0;
+        }
+        if angle < 10.0 {
+            regain = true;
+        } else if angle > 15.0 {
+            regain = false;
+        }
+        // The good driver's steering: the countersteer key, or into the turn to regain angle.
+        let good = if regain { -1.0 } else { 1.0 };
+        // Into the turn = left = −1; the countersteer key = right = +1.
         let (steer, throttle) = match driver {
-            DriftDriver::Naive | DriftDriver::Flood => (-1.0, 1.0),
+            DriftDriver::Flood => (-1.0, 1.0),
             DriftDriver::FlickLift => (0.0, 0.0),
-            DriftDriver::Good | DriftDriver::AbruptLift => {
-                // Hysteresis taps, like a player modulating two keys.
-                if angle > 30.0 {
-                    steer_key = 0.0;
-                } else if angle < 22.0 {
-                    steer_key = -1.0;
-                }
-                if angle > 35.0 {
-                    thr_key = 0.0;
-                } else if angle < 25.0 {
-                    thr_key = 1.0;
-                }
-                if driver == DriftDriver::AbruptLift && tick >= 2 * TICKS_PER_S {
-                    (-1.0, 0.0)
-                } else {
-                    (steer_key, thr_key)
-                }
+            DriftDriver::Good
+            | DriftDriver::Naive
+            | DriftDriver::AbruptLift
+            | DriftDriver::IntoTurn
+                if !entered =>
+            {
+                (-1.0, 1.0)
             }
+            DriftDriver::Naive => (1.0, 1.0),
+            DriftDriver::Good => (good, thr_key),
+            DriftDriver::AbruptLift if tick >= 2 * TICKS_PER_S => (1.0, 0.0),
+            DriftDriver::AbruptLift => (good, thr_key),
+            DriftDriver::IntoTurn => (-1.0, thr_key),
             DriftDriver::Sloppy if tick < TICKS_PER_S * 8 / 10 => (-1.0, 1.0),
             DriftDriver::Sloppy => {
                 if sloppy_left == 0 {
@@ -400,13 +429,26 @@ pub fn drift_run_with(
         }
         if !spun && (10.0..=50.0).contains(&a) {
             drift += 1;
+            sum += a as f64;
+            sum2 += (a * a) as f64;
             run += 1;
             longest = longest.max(run);
         } else {
             run = 0;
         }
     }
+    let (mean, sd) = if drift > 0 {
+        let m = sum / drift as f64;
+        (
+            m as f32,
+            (sum2 / drift as f64 - m * m).max(0.0).sqrt() as f32,
+        )
+    } else {
+        (0.0, 0.0)
+    };
     DriftRun {
+        mean_deg: mean,
+        sd_deg: sd,
         drift_s: drift as f32 * PHYSICS_DT,
         longest_s: longest as f32 * PHYSICS_DT,
         max_slip_deg: max_slip,
