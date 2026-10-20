@@ -10,6 +10,7 @@
 // ?fx=low|med|high sets the crash effects quality (render/fx; default from ?gfx).
 // ?menu=1 opens the game menu's title screen on load (as the demo build does) with the developer
 // panels off by default; ?dev=0 / ?dev=1 forces the developer panels for this page.
+// ?drift=1 opens the drift lab (live slide-assist tuning, F8 hides the panel).
 import { loadWasm, sim, type DriverInput, type Scenario, type ScenarioResult } from "./wasm/sim";
 import { META_STRIDE, RACE_STRIDE, RI, RS, STATE_STRIDE, S, T, VEHICLE_KIND, W } from "./wasm/layout";
 import { POLICE_PAINT, TRAFFIC_PALETTE } from "./render/fleet";
@@ -47,6 +48,7 @@ import { FrameProfiler, tagFeature } from "./perf";
 import { CrashFx } from "./render/fx";
 import { RadioStrip } from "./radio_strip";
 import * as THREE from "three";
+import { DriftLab } from "./drift_lab";
 
 // v2: canonical simcli replay.bin (v1 held the retired WPR\x01 format).
 const LAST_REPLAY_KEY = "wp.testbed.lastReplay.v2";
@@ -116,6 +118,7 @@ async function main(): Promise<void> {
   // MSAA): no multisampled canvas needed (greybox picked later in the session then draws
   // without antialiasing).
   const scene = new SceneView(document.body, { postAA: initialStyle === "lowpoly" });
+  const driftLab = new DriftLab(scene.world);
   const rig = new CameraRig(scene.renderer.domElement);
   const hud = new Hud(overlay);
   const plots = new TelemetryPlots(overlay);
@@ -352,6 +355,8 @@ async function main(): Promise<void> {
   };
 
   const rebuildViews = () => {
+    // Any new session leaves the drift lab (startDriftLab re-enters it right after).
+    driftLab.stop();
     scene.warmLightVariants();
     crash.reset();
     for (const v of app.views.values()) v.dispose();
@@ -757,6 +762,14 @@ async function main(): Promise<void> {
   $("sc-garage").onclick = () => openGarage();
   addEventListener("pagehide", persistCareer);
   $("sc-races").onclick = () => raceView.openPicker();
+  /** Drift lab (owner rows 90 / 91 / 98): flat pad at noon (no traffic or police on the flat
+   * world), painted course, live tuning panel. */
+  const startDriftLab = () => {
+    startFreeDrive(undefined, undefined, false, 12);
+    driftLab.start(app.player);
+  };
+  $("sc-drift").onclick = () => startDriftLab();
+  $("sc-tune").onclick = () => (driftLab.running ? driftLab.togglePanel() : startDriftLab());
   ($("mode") as HTMLSelectElement).onchange = (e) => {
     // Live switch (Sim::set_mode_table), logged as a replay op; existing damage is kept.
     // A career run keeps the career's mode (pick it with "New career" in the garage).
@@ -1109,6 +1122,8 @@ async function main(): Promise<void> {
     startRace(params.get("race")!, DEFAULT_CAR);
   } else if (params.get("chase")) {
     startCityChase("debug_sedan", undefined, params.get("chase") === "rain");
+  } else if (params.get("drift")) {
+    startDriftLab();
   } else {
     startFreeDrive(DEFAULT_CAR);
   }
@@ -1231,6 +1246,7 @@ async function main(): Promise<void> {
     scene.addEvents(events);
     panelEvents(events);
     stepDebris(app.paused && !replay ? 0 : dt);
+    driftLab.update();
     if (!crash.playing) hud.pushEvents(events, wi[W.tick]);
     prof.lap("events");
     if (focusTel && focusRec >= 0) {
