@@ -13,7 +13,7 @@ use wp_sim::{Sim, SimConfig, Systems};
 
 use crate::data::{load_car, load_mode, load_world, DataSource};
 use crate::replay::{Checkpoint, EntityCheckpoint, InputEvent, OpEvent, OpKind, Replay};
-use crate::scenario::{tick_of, CitySpec, Driver, Expect, Scenario};
+use crate::scenario::{tick_of, CitySpec, Driver, Expect, OrderKind, Scenario};
 use crate::RunError;
 
 /// `wp_police` payload kind treated as "pursuit started" by [`Expect::PursuitStartedBefore`]
@@ -483,6 +483,12 @@ pub struct EntitySummary {
     /// Fraction of its `follow_route` route the entity covered (0 without one).
     #[serde(default)]
     pub route_progress: f32,
+    /// Worst spike-strip deflation of any tyre, 0 (inflated) ..= 1 (flat).
+    #[serde(default)]
+    pub max_spike_puncture: f32,
+    /// Tyres deflated by spikes to at least half (0..=4), at the end of the run.
+    #[serde(default)]
+    pub spiked_wheels: u32,
 }
 
 impl EntitySummary {
@@ -509,12 +515,14 @@ impl EntitySummary {
             "off_road_s" => self.off_road_s,
             "max_airborne_s" => self.max_airborne_s,
             "route_progress" => self.route_progress,
+            "max_spike_puncture" => self.max_spike_puncture,
+            "spiked_wheels" => self.spiked_wheels as f32,
             _ => return None,
         })
     }
 
     /// Every metric name [`EntitySummary::metric`] accepts.
-    pub const METRICS: [&'static str; 20] = [
+    pub const METRICS: [&'static str; 22] = [
         "final_speed_mps",
         "max_speed_mps",
         "distance_m",
@@ -535,6 +543,8 @@ impl EntitySummary {
         "off_road_s",
         "max_airborne_s",
         "route_progress",
+        "max_spike_puncture",
+        "spiked_wheels",
     ];
 }
 
@@ -590,6 +600,12 @@ pub struct WorldSummary {
     pub police_units_max: u32,
     /// Police units alive at the end.
     pub police_units_final: u32,
+    /// Most physical roadblock barriers at once.
+    pub roadblock_barriers_max: u32,
+    /// Most spike strips on the road at once.
+    pub spike_strips_max: u32,
+    /// Farthest any roadblock barrier was pushed from where it was placed, m (shows a hit).
+    pub barrier_displaced_max_m: f32,
 }
 
 impl WorldSummary {
@@ -607,12 +623,15 @@ impl WorldSummary {
             "static_boxes" => self.static_boxes as f32,
             "police_units_max" => self.police_units_max as f32,
             "police_units_final" => self.police_units_final as f32,
+            "roadblock_barriers_max" => self.roadblock_barriers_max as f32,
+            "spike_strips_max" => self.spike_strips_max as f32,
+            "barrier_displaced_max_m" => self.barrier_displaced_max_m,
             _ => return None,
         })
     }
 
     /// Every metric name [`WorldSummary::metric`] accepts.
-    pub const METRICS: [&'static str; 11] = [
+    pub const METRICS: [&'static str; 14] = [
         "traffic_agents_final",
         "traffic_agents_min",
         "traffic_moving_frac_final",
@@ -624,6 +643,9 @@ impl WorldSummary {
         "static_boxes",
         "police_units_max",
         "police_units_final",
+        "roadblock_barriers_max",
+        "spike_strips_max",
+        "barrier_displaced_max_m",
     ];
 }
 
@@ -635,6 +657,11 @@ struct WorldTracker {
     agents_min: Option<u32>,
     moving_min: Option<f32>,
     police_max: u32,
+    barriers_max: u32,
+    spikes_max: u32,
+    /// First-seen position of every barrier: `(tool, index within tool) -> pos`.
+    barrier_start: BTreeMap<(u32, u32), [f32; 3]>,
+    barrier_displaced_max: f32,
 }
 
 fn moving_frac(world: &wp_world::World) -> f32 {
@@ -646,6 +673,19 @@ fn moving_frac(world: &wp_world::World) -> f32 {
 }
 
 impl WorldTracker {
+    fn police_tools(&mut self, sim: &Sim) {
+        let barriers = sim.roadblock_barriers();
+        self.barriers_max = self.barriers_max.max(barriers.len() as u32);
+        self.spikes_max = self.spikes_max.max(sim.spike_strips().len() as u32);
+        let mut index: BTreeMap<u32, u32> = BTreeMap::new();
+        for b in &barriers {
+            let i = index.entry(b.tool).or_insert(0);
+            let start = *self.barrier_start.entry((b.tool, *i)).or_insert(b.pos);
+            *i += 1;
+            self.barrier_displaced_max = self.barrier_displaced_max.max(dist(start, b.pos));
+        }
+    }
+
     fn update(&mut self, world: &wp_world::World, tick: u64) {
         if tick < tick_of(WORLD_WARMUP_S) {
             return;
@@ -679,8 +719,22 @@ impl WorldTracker {
             static_boxes: sim.static_box_count() as u32,
             police_units_max: self.police_max,
             police_units_final: sim.police().units().len() as u32,
+            roadblock_barriers_max: self.barriers_max,
+            spike_strips_max: self.spikes_max,
+            barrier_displaced_max_m: self.barrier_displaced_max,
         }
     }
+}
+
+/// One police order and its outcome.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct OrderResult {
+    /// When it was given, s.
+    pub t_s: f32,
+    /// The order, as RON.
+    pub order: String,
+    /// `"ok"`, or `wp_police`'s refusal (`NotPursued`, `Locked { need_level: 3 }`, …).
+    pub result: String,
 }
 
 /// Result of one run (`summary.json`).
@@ -712,6 +766,8 @@ pub struct RunSummary {
     pub world: WorldSummary,
     /// Things the run could not do as asked (unsupported city, drivers, overrides).
     pub warnings: Vec<String>,
+    /// `police_orders` and what `wp_police` answered (`"ok"` or the refusal).
+    pub police_orders: Vec<OrderResult>,
     /// `expect` results.
     pub expectations: Vec<ExpectResult>,
     /// `expect_pending` results (never fail the run).
@@ -1009,11 +1065,14 @@ pub fn run_with_hook(
                 off_road_s: 0.0,
                 max_airborne_s: 0.0,
                 route_progress: 0.0,
+                max_spike_puncture: 0.0,
+                spiked_wheels: 0,
             },
         });
     }
     let names: Vec<String> = sc.entities.iter().map(|e| e.id.clone()).collect();
     let mut world_tr = WorldTracker::default();
+    let mut order_results: Vec<OrderResult> = Vec::new();
     let index_of = |id: EntityId| ids.iter().position(|x| *x == id);
 
     // Probe ticks for `speed_at` expectations: tick -> [(entity index, slot)].
@@ -1059,6 +1118,44 @@ pub fn run_with_hook(
                 op_cursor += 1;
             }
         }
+        // Police captain orders.
+        for o in sc.police_orders.iter().filter(|o| tick_of(o.t_s) == tick) {
+            let idx = sc
+                .entity_index(Some(o.order.target()))
+                .map_err(|e| RunError::Scenario(sc.name.clone(), e))?;
+            let target = ids[idx];
+            let result = match &o.order {
+                OrderKind::Roadblock { .. } => {
+                    sim.captain_command(wp_contracts::CaptainCommand::RequestRoadblock {
+                        target,
+                        road: None,
+                    })
+                }
+                OrderKind::Spikes { .. } => {
+                    sim.captain_command(wp_contracts::CaptainCommand::RequestSpikes {
+                        target,
+                        road: None,
+                    })
+                }
+                OrderKind::RoadblockAt { pos, dir, .. } => {
+                    sim.police_mut().place_roadblock_at(target, *pos, *dir);
+                    Ok(())
+                }
+                OrderKind::SpikesAt { pos, dir, .. } => {
+                    sim.police_mut().place_spikes_at(target, *pos, *dir);
+                    Ok(())
+                }
+            };
+            order_results.push(OrderResult {
+                t_s: o.t_s,
+                order: crate::scenario::to_ron_line(&o.order),
+                result: match result {
+                    Ok(()) => "ok".into(),
+                    Err(e) => format!("{e:?}"),
+                },
+            });
+        }
+
         // Inputs.
         if let Some(track) = &opts.input_track {
             while track_cursor < track.len() && track[track_cursor].tick == tick {
@@ -1146,6 +1243,10 @@ pub fn run_with_hook(
         for (idx, (id, s)) in states.iter().enumerate() {
             let tr = &mut trackers[idx];
             tr.update(s);
+            let spikes = sim.spike_puncture(*id);
+            tr.summary.max_spike_puncture = spikes
+                .iter()
+                .fold(tr.summary.max_spike_puncture, |m, p| m.max(*p));
             if s.wheel_states.iter().all(|w| !w.contact) {
                 tr.airborne_s += PHYSICS_DT;
                 tr.summary.max_airborne_s = tr.summary.max_airborne_s.max(tr.airborne_s);
@@ -1211,6 +1312,8 @@ pub fn run_with_hook(
             world_tr.update(sim.world(), now);
             world_tr.police_max = world_tr.police_max.max(sim.police().units().len() as u32);
         }
+        // Police tools exist on any world (`roadblock_at` / `spikes_at` work on the flat one).
+        world_tr.police_tools(&sim);
 
         // Hashes.
         let checkpoint = now.is_multiple_of(sc.hash_every) || now == ticks;
@@ -1256,8 +1359,13 @@ pub fn run_with_hook(
     // Final per-entity values.
     let states = scenario_states(&sim, &ids);
     let mut entities = Vec::new();
-    for (i, (tr, (_, s))) in trackers.iter_mut().zip(&states).enumerate() {
+    for (i, (tr, (id, s))) in trackers.iter_mut().zip(&states).enumerate() {
         tr.summary.final_speed_mps = s.speed_mps;
+        tr.summary.spiked_wheels = sim
+            .spike_puncture(*id)
+            .iter()
+            .filter(|p| **p >= 0.5)
+            .count() as u32;
         tr.summary.final_health = s.health;
         tr.summary.distance_m = dist([s.pos[0], s.pos[1], 0.0], [tr.spawn[0], tr.spawn[1], 0.0]);
         tr.summary.components_failed = tr.failed.len() as u32;
@@ -1288,6 +1396,7 @@ pub fn run_with_hook(
         },
         world: world_tr.finish(&sim, &sc.city),
         warnings,
+        police_orders: order_results,
         expectations: Vec::new(),
         pending: Vec::new(),
         failures,

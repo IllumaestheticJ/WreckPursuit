@@ -49,6 +49,7 @@ fn main() {
         police_presence: Some(1.0),
         systems: None,
         barriers: Vec::new(),
+        police_orders: Vec::new(),
         entities: vec![EntitySpec {
             id: "player".into(),
             car: "debug_sedan".into(),

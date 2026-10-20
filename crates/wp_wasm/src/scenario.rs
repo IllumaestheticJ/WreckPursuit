@@ -66,6 +66,7 @@ pub fn free_drive_in(car: &str, mode: DamageMode, city: CitySpec) -> Scenario {
         panels: true,
         systems: None,
         barriers: Vec::new(),
+        police_orders: Vec::new(),
         entities: vec![entity("player", car, [0.0; 3], 0.0)],
         duration_s: FREE_DRIVE_DURATION_S,
         sample_hz: 60.0,
