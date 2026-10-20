@@ -1,0 +1,26 @@
+// Parity suite: heavy RWD muscle car at 30 mph, steer right + full throttle to start a slide,
+// then the countersteer key held with full throttle (clip 1's core technique). The reference
+// holds a steady 30–45° drift for 4+ s without spinning; today the car spins (gap list,
+// Drift Lab C). expect_pending tracks "no spin": still moving forward at the end, moderate yaw.
+(
+    name: "parity_rampart_counter_drift",
+    mode: Arcade,
+    seed: 4,
+    assists: custom((abs: true, tcs: false, esc: false, steer_speed_sensitivity: 0.75, countersteer_help: 0.6, throttle_filter: 0.7, brake_filter: 0.6, auto_gears: false, auto_clutch: true)),
+    duration_s: 5.0,
+    entities: [
+        (
+            id: "car",
+            car: "rampart_50",
+            speed_mps: 13.41,
+            inputs: [
+                (t_s: 0.0, input: (steer: 1.0, throttle: 1.0)),
+                (t_s: 0.8, input: (steer: -1.0, throttle: 1.0)),
+            ],
+        ),
+    ],
+    // Measured 2026-10-20: spins (2.96 rad/s peak, rolling backwards at 5 s). `expect` only checks
+    // the run is sane; the reference behaviour is pending.
+    expect: [metric(name: "max_speed_mps", min: 12.0, max: 20.0), metric(name: "final_health", min: 0.99, max: 1.0)],
+    expect_pending: [speed_at(t_s: 5.0, min: 5.0, max: 30.0), metric(name: "max_yaw_rate_rps", min: 0.5, max: 1.6)],
+)
