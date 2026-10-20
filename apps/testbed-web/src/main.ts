@@ -442,8 +442,10 @@ async function main(): Promise<void> {
   /** One view per sim vehicle — scenario cars plus whatever the sim spawns itself (police
    * units, promoted traffic) — created and disposed as vehicles come and go. Promoted traffic
    * keeps the livery it had as an instanced agent (`trafficPaint`: entity → colour). */
+  const liveViews = new Set<number>();
   const syncViews = (meta: Float32Array = sim.vehicleMeta(), trafficPaint: Map<number, number> = new Map()) => {
-    const live = new Set<number>();
+    const live = liveViews;
+    live.clear();
     for (let o = 0; o < meta.length; o += META_STRIDE) {
       const id = meta[o];
       live.add(id);

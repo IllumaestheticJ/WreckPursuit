@@ -65,6 +65,7 @@ export class LodDirector {
   private readonly pool: DrawState[] = [];
   private used = 0;
   private readonly claimed = new Set<number>();
+  private readonly paints = new Map<number, number>();
   private readonly tKeys = new Map<number, string>();
   private readonly pKeys = new Map<number, string>();
   private readonly vKeys = new Map<number, string>();
@@ -76,9 +77,11 @@ export class LodDirector {
   trafficDrawM = Infinity;
   private readonly cam = new THREE.Vector3();
 
-  /** Traffic livery per sim entity (for colouring a promoted car's VehicleView). */
+  /** Traffic livery per sim entity (for colouring a promoted car's VehicleView). The map is
+   * reused: valid until the next call. */
   paintOfEntity(records: Float32Array): Map<number, number> {
-    const out = new Map<number, number>();
+    const out = this.paints;
+    out.clear();
     for (let o = 0; o < records.length; o += DRAW_STRIDE) {
       const e = records[o + D.entity];
       if (e > 0) out.set(e, trafficPaint(records[o + D.flags]));

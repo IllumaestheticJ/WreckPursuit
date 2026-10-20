@@ -286,17 +286,24 @@ const r = await page.evaluate(() => {
     reskinsPerFrame: ((p.PB?.reskins ?? 0) - p.reskins0) / frames,
   };
 });
-// Allocation profile: total sampled bytes and the top allocating functions (self).
+// Allocation profile: total sampled bytes and the top allocating functions (self). Bytes under
+// one-off work are counted apart as "transient": building a car view when traffic / police are
+// promoted (the VehicleView constructor), and a material's first shader-program binding or compile (getProgram,
+// prewarm). The rest is the steady per-frame cost of the loop.
+const TRANSIENT = new Set(["VehicleView", "getProgram", "prewarm", "acquireProgram", "onFirstUse"]);
 let total = 0;
+let transient = 0;
 const byFn = new Map();
-const walk = (n) => {
-  total += n.selfSize;
+const walk = (n, inTransient) => {
   const cf = n.callFrame;
+  const tr = inTransient || TRANSIENT.has(cf.functionName) || cf.functionName.endsWith(".prewarm");
+  total += n.selfSize;
+  if (tr) transient += n.selfSize;
   const key = `${cf.functionName || "(anon)"} ${cf.url.split("/").pop().split("?")[0]}:${cf.lineNumber + 1}`;
   byFn.set(key, (byFn.get(key) ?? 0) + n.selfSize);
-  for (const c of n.children) walk(c);
+  for (const c of n.children) walk(c, tr);
 };
-walk(profile.head);
+walk(profile.head, false);
 // STACKS=<function name>: print the call paths that allocate in that function (debugging).
 if (process.env.STACKS) {
   const paths = new Map();
@@ -313,8 +320,9 @@ if (process.env.STACKS) {
   for (const [k, v] of [...paths].sort((a, b) => b[1] - a[1]).slice(0, 8)) console.log(`${(v / 1024).toFixed(0)} KB  ${k}`);
 }
 const kbPerFrame = total / 1024 / r.frames;
+const steadyKBPerFrame = (total - transient) / 1024 / r.frames;
 const allocTop = [...byFn].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([k, v]) => [k, +(v / 1024 / r.frames).toFixed(1)]);
-const out = { which, viewport: `${vw}x${vh}`, ...r, allocKBPerFrame: kbPerFrame, allocTop, errors: errors.slice(0, 3) };
+const out = { which, viewport: `${vw}x${vh}`, ...r, allocKBPerFrame: kbPerFrame, steadyAllocKBPerFrame: steadyKBPerFrame, allocTop, errors: errors.slice(0, 3) };
 if (jsonOnly) console.log(JSON.stringify(out));
 else {
   const f = (x, d = 1) => (typeof x === "number" ? x.toFixed(d) : String(x));
@@ -330,7 +338,7 @@ else {
   console.log(`panel re-skins / frame ${f(r.reskinsPerFrame, 2)}`);
   console.log(`draw calls ${f(r.drawCalls, 0)} · triangles ${f(r.triangles, 0)} · programs ${r.programs} · vehicles ${r.vehicles} · agents ${r.agents}`);
   console.log(`wasm calls/frame ${f(r.wasmCallsPerFrame)}: ` + r.wasmTop.map(([k, n]) => `${k} ${n}`).join(", "));
-  console.log(`alloc ${f(kbPerFrame)} KB/frame; top: ` + allocTop.map(([k, v]) => `${k} ${v}`).join(" | "));
+  console.log(`alloc ${f(kbPerFrame)} KB/frame (steady ${f(steadyKBPerFrame)}, one-off view / shader builds ${f(kbPerFrame - steadyKBPerFrame)}); top: ` + allocTop.map(([k, v]) => `${k} ${v}`).join(" | "));
   if (out.errors.length) console.log("errors:", out.errors);
   console.log(JSON.stringify(out));
 }
