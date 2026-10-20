@@ -29,8 +29,8 @@ npm run typecheck
 | `src/render/fx/` | crash effects: sparks, smoke / steam / tyre smoke, glass shards, skid marks, debris chips; `?fx=low\|med\|high`, `__wp.fx.setQuality()` (`docs/integration/crash-fx.md`) |
 | `vite.config.ts` | serves `apps/simcli/scenarios` (simcli format v2) at `/scenarios/` and `data/` at `/data/` (+ listings) |
 | `e2e/run.mjs` | Playwright check; `SHOTS=dir` writes screenshots, `BENCH=1` measures 1/8/24 cars |
-| `e2e/presets.mjs` | `npm run e2e:presets`: Rookie / Street / Sim buttons set damage mode + assists in one click, a hand-ticked box shows "custom", the preset survives a reload |
 | `e2e/crash_fx.mjs` | crash effects check + `FX_SHOTS=dir` screenshots (run by `e2e/run.mjs` too) |
+| `e2e/presets.mjs` | `npm run e2e:presets`: Rookie / Street / Sim buttons set damage mode + assists in one click, a hand-ticked box shows "custom", the preset survives a reload |
 | `e2e/gamepad.mjs` | fake-gamepad + rebinding check (`npm run e2e:gamepad`; run by `e2e/run.mjs` too) |
 | `e2e/city_v2_shots.mjs` | Port Vesper v2 screenshots → `docs/media/city-v2/` (`node e2e/city_v2_shots.mjs [dir]`) |
 

@@ -854,10 +854,17 @@ when there's public safety calls for reckless driving."
 
 
 ### Assist presets merged with `lead/round12` (2026-10-20)
-`ws/police` now carries `origin/lead/round12` on top of the Rookie / Street / Sim presets.
-- Testbed: round 12's game menu and touch assists kept. An assist changed in the menu turns the preset into
-  "custom"; a preset click updates the menu's toggles (ABS/TCS/ESC/auto gears, steering help, countersteer);
-  touch uses the Gamepad presets. Checks: `e2e:presets`, `e2e:menu`, `e2e:touch` pass.
-- Goldens: not re-blessed. 33 fail on `lead/round12` itself; the merge adds none (the extra
-  `world_traffic_soak_vesper_observer` already failed on `ws/police` before the merge).
-- Still failing before and after: `wp_wasm` `short_sprint_with_ai_runs_to_results_and_pays_through_the_economy`.
+`ws/police` carries `origin/lead/round12` (the lead had already merged the presets there; its
+`main.ts` resolution is kept) plus two testbed fixes on top:
+- Touch looks presets up as a gamepad (`presetSource`), which fixes round 12's three `tsc` errors.
+- A box tick or preset click pushes its state into the game menu without the menu rebuilding the
+  assists from device defaults (`tellMenu`). Before, Street + ticking ESC rebuilt to exactly Rookie
+  (keyboard default countersteer 0.6), so `e2e:presets` failed. An assist changed in the menu itself
+  still rebuilds and makes the preset "custom"; a preset click updates the menu's toggles.
+- `cargo fmt` (module order in `wp_vehicle/src/lib.rs`, from round 12).
+
+Checks: `e2e:presets`, `e2e:touch`, `tsc`, fmt, clippy, wasm build pass. Fail identically on the
+`lead/round12` tip (not this merge): `e2e:menu` "countersteer slider disabled until the wasm setter
+exists" (the setter exists now); `wp_vehicle` `roster_diff_hashes_are_pinned`,
+`front_drive_cars_understeer_mildly`; `wp_wasm` `race_crash_replays_with_the_judge_and_no_crash_on_the_grid`,
+`simcli_golden_replays_play_back_in_the_browser_core`; 33 simcli goldens (none re-blessed here).

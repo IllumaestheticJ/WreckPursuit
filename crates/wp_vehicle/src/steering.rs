@@ -12,7 +12,6 @@
 use wp_contracts::AssistProfile;
 
 use crate::math::{atan, atan2, lerp, tan};
-use crate::slide::slide_amount;
 
 /// Steering inputs gathered once per tick.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -41,6 +40,13 @@ pub struct SteerInput {
     pub front_mu: f32,
     /// Front tyres' peak slip angle, rad.
     pub front_peak_slip: f32,
+    /// Direction of travel of the front axle relative to the heading, rad (+ = left): the
+    /// centre road-wheel angle that leaves the front tyres with no slip angle. See
+    /// [`front_axle_angle`].
+    pub front_axle_angle: f32,
+    /// Handbrake pulled, or released less than [`HANDBRAKE_GRACE_S`] ago: the self-aligning
+    /// countersteer stays out of the way (handbrake turns rotate freely).
+    pub handbrake_hold: bool,
 }
 
 /// Fraction of the target slip angle a keyboard (sensitivity 1) asks for at full input: a
@@ -89,17 +95,59 @@ pub fn driver_lock(inp: &SteerInput, assists: &AssistProfile, max_steer: f32) ->
     full.min(target * inp.ratio_scale)
 }
 
-/// While sliding, the driver's own input trims the countersteer target by this fraction of
-/// their steer, so throttle + small corrections hold or change the drift angle.
-const DRIVER_TRIM: f32 = 0.35;
-/// While sliding, the driver's available lock opens up to this × the rear-axle slip angle.
-const SLIDE_LOCK_MARGIN: f32 = 1.3;
-/// Rack speed multiplier at full help in a full slide (the rack "catches" quickly).
-const SLIDE_RACK_BOOST: f32 = 2.5;
+/// Driver steer inputs within this of 0 count as "not steering": released keys and a stick
+/// inside its deadzone (the input layer applies the stick deadzone and sends 0). Kept tiny so
+/// a slowly growing analog input steers from the first degree.
+pub const STEER_DEADZONE: f32 = 1.0e-3;
+/// After the handbrake is released, the self-aligning countersteer stays off this long, s.
+pub const HANDBRAKE_GRACE_S: f32 = 0.5;
+/// Rack-speed multiplier of the self-aligning countersteer at slider 100 % (`1 + this × help`:
+/// 25 % → 2×, 50 % → 3×, 100 % → 5×).
+pub const ALIGN_RATE_BOOST: f32 = 4.0;
+
+/// How far the self-aligning countersteer turns the wheels toward the front axle's direction
+/// of travel for slider value `help` (0..=1): `1 − (1 − help)²` (0 → none, 25 % → 0.44,
+/// 50 % → 0.75, 75 % → 0.94, 100 % → full alignment). Together with the rack speed
+/// ([`ALIGN_RATE_BOOST`]) each step of the slider is about as noticeable as the last: the low
+/// end mostly adds angle, the high end mostly speed.
+pub fn align_strength(help: f32) -> f32 {
+    let h = help.clamp(0.0, 1.0);
+    1.0 - (1.0 - h) * (1.0 - h)
+}
+
+/// Rear-axle slip angle (rad) where the countersteer lock starts / is fully open.
+const SLIDE_START: f32 = 0.06;
+const SLIDE_FULL: f32 = 0.16;
+
+/// Speed-sensitive lock while countersteering a slide: when the driver steers toward the side
+/// the rear slides to, the lock opens (blended by how much
+/// the rear slides) to that angle plus the slip-targeted margin, so the slip-limited lock never
+/// stops a countersteer. Grip cornering is untouched.
+fn countersteer_lock(inp: &SteerInput, assists: &AssistProfile, max_steer: f32, lock: f32) -> f32 {
+    // Countersteering = steering toward the side the rear axle slides to (a right-hand
+    // countersteer for the rear stepping out right). In ordinary cornering the driver steers
+    // the other way, so the lock is untouched there.
+    if assists.steer_speed_sensitivity <= 0.0 || -inp.driver * inp.rear_axle_slip <= 0.0 {
+        return lock;
+    }
+    let slide =
+        ((inp.rear_axle_slip.abs() - SLIDE_START) / (SLIDE_FULL - SLIDE_START)).clamp(0.0, 1.0);
+    if slide <= 0.0 {
+        return lock;
+    }
+    let margin = slip_target_lock(
+        assists.steer_speed_sensitivity,
+        1.0e3,
+        inp.wheelbase,
+        inp.front_mu,
+        inp.front_peak_slip,
+    );
+    let needed = (inp.front_axle_angle.abs() + margin).min(max_steer * inp.ratio_scale);
+    lock + (needed.max(lock) - lock) * slide
+}
 
 /// Where the steering is heading this tick: the centre road-wheel angle the rack moves toward
-/// (rad, + = left) and the rack-speed multiplier (> 1 while the countersteer help catches a
-/// slide). See [`update_center_angle`].
+/// (rad, + = left) and the rack-speed multiplier. See [`update_center_angle`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SteerTarget {
     /// Target centre road-wheel angle, rad (+ = left), within ±`max_steer`.
@@ -108,61 +156,78 @@ pub struct SteerTarget {
     pub rate_boost: f32,
 }
 
-/// The steering target for the current state (`current` = centre angle now, rad).
+/// The steering target for the current state (`current` = centre angle now, rad; unused,
+/// kept for callers).
 ///
-/// With `countersteer_help > 0` and the rear sliding, the target blends from the driver's
-/// angle toward the rear-axle slip angle (front wheels pointed where the rear is going) plus
-/// a trim from the driver's input, the rack moves faster (and always unwinds fast), and the
-/// speed-sensitive lock opens toward the countersteer needed, so a full countersteer key can
-/// catch a slide at speed. If the driver steers hard against the countersteer (into the
-/// slide) the help fades to 40%, so it does not fight a deliberate flick. With help 0 this is
+/// Countersteer help (`AssistProfile::countersteer_help`, the 0–100 % slider) is
+/// **self-aligning steering**, Wreckfest-style (owner rows 57 / 72): while the driver is not
+/// steering (|input| ≤ [`STEER_DEADZONE`]) and moving forward above 3 m/s, the wheels go to
+/// [`align_strength`] × the front axle's direction of travel ([`SteerInput::front_axle_angle`],
+/// within the car's lock) once the rear slides, to the centre while the tyres grip (blended by
+/// rear-axle slip, see [`ALIGN_SLIDE_START`]), and the rack moves up to [`ALIGN_RATE_BOOST`]
+/// faster. In a slide that is exactly the countersteer that cancels the front slip angle. It never acts while the driver steers (the
+/// speed-sensitive lock and rate apply as usual), nor while the handbrake is held or within
+/// [`HANDBRAKE_GRACE_S`] of releasing it, and it adds no yaw torque. With help 0 this is
 /// exactly the plain model.
 pub fn steer_target(
-    current: f32,
+    _current: f32,
     inp: &SteerInput,
     assists: &AssistProfile,
     max_steer: f32,
 ) -> SteerTarget {
-    let mut lock = driver_lock(inp, assists, max_steer);
-    let assisted = assists.countersteer_help > 0.0 && inp.speed > 3.0;
-    let slide = if assisted {
-        slide_amount(inp.rear_axle_slip)
-    } else {
-        0.0
-    };
-    if slide > 0.0 {
-        // Save-the-car lock: the speed-sensitive lock opens toward the countersteer the slide
-        // needs (rear-axle slip + margin), scaled by how much the rear slides.
-        let needed =
-            (inp.rear_axle_slip.abs() * SLIDE_LOCK_MARGIN).min(max_steer * inp.ratio_scale);
-        lock += (needed.max(lock) - lock) * slide;
-    }
+    let lock = countersteer_lock(
+        inp,
+        assists,
+        max_steer,
+        driver_lock(inp, assists, max_steer),
+    );
     let driver_target = -(inp.driver.clamp(-1.0, 1.0) + inp.pull) * lock;
-    let mut target = driver_target;
-    let mut rate_boost = 1.0;
-    if assisted {
-        // Higher-class (powerful RWD) cars get more: help moves toward 1 by `help × class`
-        // (keyboard 0.6 → 0.84 on a full-class car, gamepad 0.3 → 0.51).
-        let base = assists.countersteer_help.min(1.0);
-        let help = base + (1.0 - base) * base * inp.slide_class;
-        let catch = inp.rear_axle_slip.clamp(-max_steer, max_steer);
-        let opposing = if catch * driver_target < 0.0 {
-            ((inp.driver.abs() - 0.5) / 0.5).clamp(0.0, 1.0)
-        } else {
-            0.0
+    let help = assists.countersteer_help.clamp(0.0, 1.0);
+    let aligning =
+        help > 0.0 && inp.speed > 3.0 && inp.driver.abs() <= STEER_DEADZONE && !inp.handbrake_hold;
+    if !aligning {
+        return SteerTarget {
+            angle: driver_target.clamp(-max_steer, max_steer),
+            rate_boost: 1.0,
         };
-        let h = help * slide * (1.0 - 0.6 * opposing);
-        target = lerp(driver_target, catch + DRIVER_TRIM * driver_target, h);
-        // Unwinding toward centre (letting go after a catch) is always fast with help on, like
-        // the self-aligning torque spinning the wheel back through the driver's hands; a slow
-        // unwind leaves countersteer on as the car swings back (tank-slapper).
-        let unwinding = target.abs() < current.abs() || target * current < 0.0;
-        let catch_or_unwind = if unwinding { 1.0 } else { slide };
-        rate_boost = 1.0 + SLIDE_RACK_BOOST * help * catch_or_unwind;
     }
+    let full = max_steer * inp.ratio_scale;
+    let align = aligning_angle(inp).clamp(-full, full) * align_strength(help);
     SteerTarget {
-        angle: target.clamp(-max_steer, max_steer),
-        rate_boost,
+        angle: (align - inp.pull * lock).clamp(-max_steer, max_steer),
+        rate_boost: 1.0 + ALIGN_RATE_BOOST * help,
+    }
+}
+
+/// Rear-axle slip angle (rad) where the self-aligning countersteer starts turning the wheels
+/// toward the front axle's travel / turns them all the way (below it they return to centre).
+pub const ALIGN_SLIDE_START: f32 = 0.03;
+/// See [`ALIGN_SLIDE_START`].
+pub const ALIGN_SLIDE_FULL: f32 = 0.08;
+
+/// Where released keys point the wheels (rad, + = left) before [`align_strength`]: the
+/// centre while the tyres grip, the front axle's direction of travel in a slide, blended by
+/// how much the rear axle slides ([`ALIGN_SLIDE_START`] → [`ALIGN_SLIDE_FULL`]).
+///
+/// In grip driving the front axle's travel includes the car's own yaw (it is the steer angle
+/// of a car cornering with no front slip), so aligning to it would hold whatever turn the car
+/// is in: a kerb or a bump that yaws the car would keep turning it (the sidewalk drives in
+/// `wp_sim` were turned back onto the road that way).
+fn aligning_angle(inp: &SteerInput) -> f32 {
+    let slide = ((inp.rear_axle_slip.abs() - ALIGN_SLIDE_START)
+        / (ALIGN_SLIDE_FULL - ALIGN_SLIDE_START))
+        .clamp(0.0, 1.0);
+    inp.front_axle_angle * slide
+}
+
+/// Direction of travel of the front axle relative to the heading, rad (+ = left), from forward
+/// / leftward CG speed, yaw rate (+ = left) and the CG-to-front-axle distance. 0 below 1 m/s
+/// forward (and in reverse).
+pub fn front_axle_angle(v_forward: f32, v_left: f32, yaw_rate: f32, cg_to_front: f32) -> f32 {
+    if v_forward < 1.0 {
+        0.0
+    } else {
+        atan2(v_left + yaw_rate * cg_to_front, v_forward)
     }
 }
 
@@ -189,7 +254,13 @@ pub fn update_center_angle(
     }
     let s = assists.steer_speed_sensitivity;
     let base = if s > 0.0 {
-        let lock = driver_lock(inp, assists, max_steer);
+        // The rack covers the lock in use (opened while countersteering) in the ramp time.
+        let lock = countersteer_lock(
+            inp,
+            assists,
+            max_steer,
+            driver_lock(inp, assists, max_steer),
+        );
         (lock / (STEER_RAMP_S * s)).min(rack_speed * inp.ratio_scale)
     } else {
         rack_speed * inp.ratio_scale
@@ -261,6 +332,8 @@ mod tests {
             wheelbase: 2.6,
             front_mu: 1.1,
             front_peak_slip: 0.11,
+            front_axle_angle: 0.0,
+            handbrake_hold: false,
         }
     }
 
@@ -332,11 +405,12 @@ mod tests {
     }
 
     fn sliding(driver: f32) -> SteerInput {
-        // Left-hand power oversteer: rear axle moving right of the heading.
+        // Left-hand power oversteer: the front axle travels 0.25 rad right of the heading.
         SteerInput {
             body_slip: -0.15,
             rear_slip: -0.2,
             rear_axle_slip: -0.3,
+            front_axle_angle: -0.25,
             ..straight(driver, 15.0)
         }
     }
@@ -349,48 +423,74 @@ mod tests {
         c
     }
 
-    #[test]
-    fn countersteer_targets_rear_axle_and_driver_trims() {
-        let kb = AssistProfile::keyboard_default();
-        let neutral = settle(&sliding(0.0), &kb);
-        assert!(neutral < -0.15, "countersteers right: {neutral}");
-        // Steering further right (more countersteer) adds angle; a light input into the
-        // slide takes some away.
-        assert!(settle(&sliding(0.4), &kb) < neutral);
-        assert!(settle(&sliding(-0.4), &kb) > neutral);
-        // Full lock into the slide: the help fades, the driver gets most of their angle.
-        let flick = settle(&sliding(-1.0), &kb);
-        assert!(flick > 0.0, "{flick}");
+    fn help(h: f32) -> AssistProfile {
+        AssistProfile {
+            countersteer_help: h,
+            ..AssistProfile::keyboard_default()
+        }
     }
 
     #[test]
-    fn lock_opens_while_sliding_at_speed() {
-        let kb = AssistProfile::keyboard_default();
-        let fast = |rear_axle_slip| SteerInput {
-            speed: 140.0 / 3.6,
-            rear_axle_slip,
-            ..sliding(1.0)
+    fn released_keys_align_the_wheels_with_the_travel() {
+        // 0 %: plain return to centre. 100 %: the full front-axle angle. 50 %: in between.
+        assert_eq!(settle(&sliding(0.0), &help(0.0)), 0.0);
+        let full = settle(&sliding(0.0), &help(1.0));
+        assert!((full + 0.25).abs() < 1e-4, "{full}");
+        let half = settle(&sliding(0.0), &help(0.5));
+        assert!(half < -0.15 && half > full, "{half}");
+        // Driving straight it is ~0.
+        assert!(settle(&straight(0.0, 20.0), &help(1.0)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn released_keys_centre_the_wheels_while_the_tyres_grip() {
+        // A car yawing with the rear gripping (a kerb kick, a released corner): the wheels go to
+        // the centre, not along the front axle's travel (that would hold the turn).
+        let grip = |rear: f32| SteerInput {
+            rear_axle_slip: rear,
+            ..sliding(0.0)
         };
-        // Grip: full right key at 140 km/h gets the slip-targeted lock (≈ 0.14 rad).
-        let grip = settle(&fast(0.0), &kb);
+        assert!(settle(&grip(0.01), &help(1.0)).abs() < 1e-6);
+        let part = settle(&grip(-0.055), &help(1.0));
+        assert!(part < -0.1 && part > -0.15, "{part}");
+        assert!((settle(&grip(-0.1), &help(1.0)) + 0.25).abs() < 1e-4);
+    }
+
+    #[test]
+    fn the_slider_speeds_up_the_catch() {
+        // Ticks to reach 0.08 rad of countersteer (every setting from 25 % aims past it).
+        let t = |h: f32| {
+            let (mut c, mut n) = (0.0f32, 0);
+            while c > -0.08 {
+                c = update_center_angle(c, &sliding(0.0), &help(h), 0.6, 1.0, 0.004);
+                n += 1;
+            }
+            n
+        };
         assert!(
-            (grip + driver_lock(&fast(0.0), &kb, 0.6)).abs() < 1e-3,
-            "{grip}"
+            t(1.0) < t(0.5) && t(0.5) < t(0.25),
+            "{} {} {}",
+            t(1.0),
+            t(0.5),
+            t(0.25)
         );
-        // Sliding 0.35 rad: full countersteer key reaches well past it.
-        let slide = settle(&fast(-0.35), &kb);
-        assert!(slide < -0.35, "{slide}");
     }
 
     #[test]
-    fn rack_catches_faster_when_sliding() {
-        let kb = AssistProfile::keyboard_default();
-        let grip = SteerInput {
-            rear_axle_slip: 0.0,
-            ..sliding(1.0)
+    fn never_fights_the_driver_or_the_handbrake() {
+        let a = help(1.0);
+        // Any steer input: exactly the plain target (as with help 0).
+        for d in [0.3f32, -0.3, 1.0, -1.0] {
+            assert_eq!(
+                steer_target(0.0, &sliding(d), &a, 0.6),
+                steer_target(0.0, &sliding(d), &help(0.0), 0.6)
+            );
+        }
+        // Handbrake held (or just released): no alignment, plain return to centre.
+        let hb = SteerInput {
+            handbrake_hold: true,
+            ..sliding(0.0)
         };
-        let a = update_center_angle(0.0, &grip, &kb, 0.6, 1.0, 0.004).abs();
-        let b = update_center_angle(0.0, &sliding(0.0), &kb, 0.6, 1.0, 0.004).abs();
-        assert!(b > 2.0 * a, "{a} {b}");
+        assert_eq!(settle(&hb, &a), 0.0);
     }
 }

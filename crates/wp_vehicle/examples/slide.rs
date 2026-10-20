@@ -29,19 +29,41 @@ fn main() {
         tcs: false,
         ..AssistProfile::gamepad_default()
     };
+    // Countersteer slider (countersteer_help) at 0 / 50 / 100 % on the keyboard and gamepad
+    // presets, plus the wheel preset (no assists) as the reference.
+    let kb = |h: f32, tcs: bool| AssistProfile {
+        countersteer_help: h,
+        tcs,
+        esc: tcs,
+        ..AssistProfile::keyboard_default()
+    };
+    let gp = |h: f32| AssistProfile {
+        countersteer_help: h,
+        ..AssistProfile::gamepad_default()
+    };
+    let _ = (no_tcs, gp_no_tcs);
     let presets = [
+        ("keyboard cst 0", kb(0.0, true), DriverStyle::Keyboard),
+        ("keyboard cst 50", kb(0.5, true), DriverStyle::Keyboard),
+        ("keyboard cst 100", kb(1.0, true), DriverStyle::Keyboard),
         (
-            "keyboard",
-            AssistProfile::keyboard_default(),
+            "keyboard tcs/esc off cst 0",
+            kb(0.0, false),
             DriverStyle::Keyboard,
         ),
-        ("keyboard tcs/esc off", no_tcs, DriverStyle::Keyboard),
         (
-            "gamepad",
-            AssistProfile::gamepad_default(),
-            DriverStyle::Analog,
+            "keyboard tcs/esc off cst 50",
+            kb(0.5, false),
+            DriverStyle::Keyboard,
         ),
-        ("gamepad tcs off", gp_no_tcs, DriverStyle::Analog),
+        (
+            "keyboard tcs/esc off cst 100",
+            kb(1.0, false),
+            DriverStyle::Keyboard,
+        ),
+        ("gamepad cst 0", gp(0.0), DriverStyle::Analog),
+        ("gamepad cst 50", gp(0.5), DriverStyle::Analog),
+        ("gamepad cst 100", gp(1.0), DriverStyle::Analog),
         ("wheel", AssistProfile::wheel_default(), DriverStyle::Analog),
     ];
     println!("car | preset | gear | worst slip ° | recovered | per-case slip°");

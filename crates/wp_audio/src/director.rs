@@ -16,6 +16,10 @@ use crate::engine::{
     engine_lod, engine_synth, update_engine, EngineAudioState, EngineInput, EngineLayers,
     EngineLimits,
 };
+use crate::engine_model::{EngineFrame, EngineTune, EngineVoiceSpec};
+use crate::impact::{
+    body_params, glass_params, reduced_mass, scrape_force, scrape_rate_hz, CrunchState, Hit,
+};
 use crate::mixer::{CueRef, CueTable, Desire, MixerStats, VoiceMixer};
 use crate::scanner::{RadioLine, RadioPriority, Scanner, ScannerTier};
 use crate::siren::{update_siren, SirenMode, SirenPattern, SirenState};
@@ -103,12 +107,24 @@ struct CarAudio {
     supercharger: CueRef,
     pop: CueRef,
     horn: CueRef,
+    /// Police air horn (`horn/police`), used for police units whose car has a standard horn.
+    horn_police: CueRef,
     siren: [CueRef; 4],
     world: WorldCues,
     materials: MaterialMap,
     static_load_n: f32,
+    /// Vehicle mass, kg (impact energy, panel size, thump pitch).
+    mass_kg: f32,
+    /// Chassis-space box of the cabin (interior-camera detection), if the lattice has one.
+    cabin: Option<([f32; 3], [f32; 3])>,
     /// Loaded wheel radii FL, FR, RL, RR, m (wheelspin slip speed).
     wheel_radius_m: [f32; 4],
+    /// Gameplay class (exhaust geometry of the physical engine model).
+    class: wp_contracts::VehicleClass,
+    /// Final drive ratio (differential whine).
+    final_drive: f32,
+    /// Physical engine synth params of the stock car.
+    physical_stock: BTreeMap<String, f32>,
 }
 
 /// Cues of one world pack.
@@ -132,6 +148,10 @@ struct WorldCues {
     rattle: CueRef,
     /// Optional gear-shift clunk (`drivetrain/shift`); silent when the pack lacks it.
     shift: CueRef,
+    /// Optional synthesised panel impact (`impact/body`, owner row 74).
+    body: CueRef,
+    /// Optional granular crunch loop (`impact/crunch`).
+    crunch: CueRef,
 }
 
 impl WorldCues {
@@ -165,6 +185,8 @@ impl WorldCues {
             tire_burst: t.get(pack, cues::TIRE_BURST, false),
             rattle: t.get(pack, cues::BODY_RATTLE, true),
             shift: t.get(pack, cues::SHIFT, false),
+            body: t.get(pack, cues::IMPACT_BODY, false),
+            crunch: t.get(pack, cues::IMPACT_CRUNCH, true),
         }
     }
 }
@@ -183,6 +205,36 @@ struct VehicleRuntime {
     panel_damage: f32,
     /// Engine layers kept by the LOD last frame (layer indices), for its hysteresis.
     engine_lod: Vec<usize>,
+    /// Worst `RegionDamaged` severity per region (panel ring / buzz, horn health).
+    region_damage: BTreeMap<BodyRegion, f32>,
+    /// Deformation reservoir behind the crunch loop.
+    crunch: CrunchState,
+    /// Blow-offs fired so far (the physical engine voice fires one when it increments).
+    blowoffs: u32,
+}
+
+/// How engines are voiced.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+pub enum EngineModelMode {
+    /// Recorded / procedural layers crossfaded by rpm (every car). The default, and the
+    /// fallback when the backend has no physical engine synthesizer.
+    #[default]
+    Layers,
+    /// The focus car and the nearest `engine.physical_max_others` cars within
+    /// `engine.physical_radius_m` play the physically modelled engine (`engine/physical`, one
+    /// voice per car); every other car keeps the layers.
+    Physical,
 }
 
 /// Testbed / gameplay override of a vehicle's siren.
@@ -237,7 +289,23 @@ pub struct AudioDirector {
     pursuits: BTreeSet<EntityId>,
     one_shot_seq: u32,
     stats: DirectorStats,
+    engine_model: EngineModelMode,
+    /// Cars voiced by the physical engine model last frame (hysteresis).
+    physical_set: BTreeSet<EntityId>,
+    /// Installed sound-relevant mods per entity (exhaust, intake, kits).
+    tunes: BTreeMap<EntityId, EngineTune>,
+    /// Physical engine synth params per (car, tune) other than stock.
+    tuned_specs: BTreeMap<(String, EngineTune), BTreeMap<String, f32>>,
+    physical_cue: CueRef,
+    /// Total plastic energy per vehicle given by the caller this frame
+    /// ([`AudioDirector::set_plastic_energy`]), J.
+    plastic_in: BTreeMap<EntityId, f32>,
+    /// Vehicle whose cabin the listener is in this frame (interior camera).
+    interior: Option<EntityId>,
 }
+
+/// Pack holding the physically modelled engine cue.
+pub const PHYSICAL_ENGINE_PACK: &str = "engine_physical";
 
 const DEFAULT_WORLD_PACK: &str = "world_proc";
 const DEFAULT_SIREN_PACK: &str = "siren_proc";
@@ -247,6 +315,7 @@ impl AudioDirector {
     pub fn new(lib: AudioLibrary, seed: u64) -> Self {
         let mut cues = CueTable::from_library(&lib);
         let default_world = WorldCues::new(&mut cues, DEFAULT_WORLD_PACK);
+        let physical_cue = cues.get(PHYSICAL_ENGINE_PACK, cues::ENGINE_PHYSICAL, true);
         Self {
             lib,
             cues,
@@ -264,7 +333,55 @@ impl AudioDirector {
             pursuits: BTreeSet::new(),
             one_shot_seq: 0,
             stats: DirectorStats::default(),
+            engine_model: EngineModelMode::Layers,
+            physical_set: BTreeSet::new(),
+            tunes: BTreeMap::new(),
+            tuned_specs: BTreeMap::new(),
+            physical_cue,
+            plastic_in: BTreeMap::new(),
+            interior: None,
         }
+    }
+
+    /// Choose how engines are voiced (the backend switches to
+    /// [`EngineModelMode::Physical`] once its engine synthesizer is running). Voices move
+    /// over on the next frame.
+    pub fn set_engine_model(&mut self, mode: EngineModelMode) {
+        self.engine_model = mode;
+    }
+
+    /// Current engine voicing.
+    pub fn engine_model(&self) -> EngineModelMode {
+        self.engine_model
+    }
+
+    /// Installed sound-relevant mods of `entity` (louder / rawer exhaust, intake, kits).
+    /// Stock when never set.
+    pub fn set_engine_tune(&mut self, entity: EntityId, tune: EngineTune) {
+        if tune.is_stock() {
+            self.tunes.remove(&entity);
+        } else {
+            self.tunes.insert(entity, tune);
+        }
+    }
+
+    /// The physical engine synth params a car is voiced with (`tune` applied), if registered.
+    pub fn physical_engine_params(
+        &mut self,
+        car_id: &str,
+        tune: EngineTune,
+    ) -> Option<BTreeMap<String, f32>> {
+        let car = self.cars.get(car_id)?;
+        if tune.is_stock() {
+            return Some(car.physical_stock.clone());
+        }
+        let key = (car_id.to_string(), tune);
+        if let Some(p) = self.tuned_specs.get(&key) {
+            return Some(p.clone());
+        }
+        let p = physical_spec(car_id, car, &tune).to_synth_params();
+        self.tuned_specs.insert(key, p.clone());
+        Some(p)
     }
 
     /// The library in use.
@@ -310,6 +427,11 @@ impl AudioDirector {
             supercharger: t.get(ep, cues::SUPERCHARGER_WHINE, true),
             pop: t.get(ep, cues::EXHAUST_POP, false),
             horn: t.get(&def.world_pack, &def.horn_cue, true),
+            horn_police: if def.horn_cue == cues::HORN_STANDARD {
+                t.get(&def.world_pack, cues::HORN_POLICE, true)
+            } else {
+                t.get(&def.world_pack, &def.horn_cue, true)
+            },
             siren: SirenPattern::ALL.map(|p| {
                 t.get(
                     siren_pack.as_deref().unwrap_or(DEFAULT_SIREN_PACK),
@@ -320,10 +442,18 @@ impl AudioDirector {
             world: WorldCues::new(t, &def.world_pack),
             materials: MaterialMap::from_lattice(&car.lattice, &car.materials),
             static_load_n: car.def.mass_kg * GRAVITY_MPS2 * 0.25,
+            mass_kg: car.def.mass_kg,
+            cabin: cabin_box(&car.lattice),
             wheel_radius_m: car.def.wheels.each_ref().map(|w| w.radius_m),
+            class: car.def.class,
+            final_drive: car.def.drivetrain.final_drive,
+            physical_stock: BTreeMap::new(),
             layers,
             def,
         };
+        let mut car_audio = car_audio;
+        car_audio.physical_stock =
+            physical_spec(&car.def.id, &car_audio, &EngineTune::default()).to_synth_params();
         self.cars.insert(car.def.id.clone(), car_audio);
     }
 
@@ -347,6 +477,21 @@ impl AudioDirector {
     /// Queue a police radio line (until `PoliceEvent::Radio` exists in the contract).
     pub fn push_radio_line(&mut self, line: RadioLine) {
         self.scanner.push(&self.lib.config.scanner, line);
+    }
+
+    /// Total plastic (deformation) energy of a vehicle's lattice, J, for the next
+    /// [`update`](Self::update) (`wp_damage::DamageModel::total_plastic_energy_j`). The crunch
+    /// loop follows its growth; without it the director estimates the plastic work of each hit
+    /// from its collision energy.
+    pub fn set_plastic_energy(&mut self, entity: EntityId, total_plastic_j: f32) {
+        if total_plastic_j.is_finite() {
+            self.plastic_in.insert(entity, total_plastic_j);
+        }
+    }
+
+    /// Vehicle whose cabin the listener was in last frame (interior camera), if any.
+    pub fn interior(&self) -> Option<EntityId> {
+        self.interior
     }
 
     /// Debug counters from the last frame.
@@ -392,7 +537,15 @@ impl AudioDirector {
 
         // Drop state of vehicles that left (their voices stop in the mixer diff).
         self.vehicles.retain(|id, _| by_id.contains_key(id));
+        self.interior = frame.focus.and_then(|f| {
+            let v = by_id.get(&f)?;
+            let (lo, hi) = self.cars.get(v.car_id)?.cabin?;
+            let p = world_to_local(v.state.pos, v.state.rot, frame.listener.pos);
+            (0..3).all(|i| p[i] >= lo[i] && p[i] <= hi[i]).then_some(f)
+        });
+        let plastic_in = std::mem::take(&mut self.plastic_in);
 
+        self.select_physical(&vehicles, frame.focus, frame.listener.pos);
         let mut desires: Vec<Desire> = Vec::new();
         let mut unregistered = 0;
         for v in &vehicles {
@@ -400,9 +553,11 @@ impl AudioDirector {
                 unregistered += 1;
                 continue;
             }
+            let physical = self.physical_set.contains(&v.entity);
             self.vehicle_desires(
                 v,
                 frame.focus == Some(v.entity),
+                physical,
                 frame.listener.pos,
                 tick,
                 dt,
@@ -411,6 +566,15 @@ impl AudioDirector {
         }
         self.event_desires(frame.events, &by_id, tick, &mut desires);
         self.scrape_desires(&by_id, tick, &mut desires);
+        // Crunch after the events (they add estimated plastic work for unmeasured cars).
+        for v in &vehicles {
+            if self.cars.contains_key(v.car_id) {
+                self.crunch_desire(v, plastic_in.get(&v.entity).copied(), dt, &mut desires);
+            }
+        }
+        if let Some(own) = self.interior {
+            cabin_muffle(own, &mut desires);
+        }
 
         let cfg = &self.lib.config;
         let ms: MixerStats =
@@ -431,15 +595,60 @@ impl AudioDirector {
         out
     }
 
+    /// Pick the cars voiced by the physical engine model this frame: the focus car plus the
+    /// nearest `physical_max_others` within `physical_radius_m` (a car already voiced ranks
+    /// 20 % closer and stays out to 1.25 × the radius, so the set does not flicker).
+    fn select_physical(
+        &mut self,
+        vehicles: &[&VehicleAudioInput],
+        focus: Option<EntityId>,
+        listener_pos: [f32; 3],
+    ) {
+        if self.engine_model != EngineModelMode::Physical {
+            self.physical_set.clear();
+            return;
+        }
+        let cfg = &self.lib.config.engine;
+        let r = cfg.physical_radius_m;
+        let mut ranked: Vec<(f32, EntityId)> = Vec::new();
+        let mut set = BTreeSet::new();
+        for v in vehicles {
+            if !self.cars.contains_key(v.car_id) {
+                continue;
+            }
+            if Some(v.entity) == focus {
+                set.insert(v.entity);
+                continue;
+            }
+            let d = len(sub(v.state.pos, listener_pos));
+            let was = self.physical_set.contains(&v.entity);
+            let (limit, rank) = if was { (r * 1.25, d * 0.8) } else { (r, d) };
+            if d.is_finite() && d < limit {
+                ranked.push((rank, v.entity));
+            }
+        }
+        ranked.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+        set.extend(ranked.iter().take(cfg.physical_max_others).map(|x| x.1));
+        self.physical_set = set;
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn vehicle_desires(
         &mut self,
         v: &VehicleAudioInput,
         focus: bool,
+        physical: bool,
         listener_pos: [f32; 3],
         tick: u64,
         dt: f32,
         out: &mut Vec<Desire>,
     ) {
+        let tune = self.tunes.get(&v.entity).copied();
+        let physical_params = if physical {
+            self.physical_engine_params(v.car_id, tune.unwrap_or_default())
+        } else {
+            None
+        };
         let cfg = &self.lib.config;
         let car = &self.cars[v.car_id];
         let rt = self.vehicles.entry(v.entity).or_default();
@@ -461,10 +670,18 @@ impl AudioDirector {
             .get(&Component::Engine)
             .is_none_or(|h| *h > 0.0);
         if engine_alive {
+            let tuned_def;
+            let engine_def = match tune {
+                Some(t) => {
+                    tuned_def = t.apply(&car.def.engine);
+                    &tuned_def
+                }
+                None => &car.def.engine,
+            };
             let eo = update_engine(
                 &mut rt.engine,
                 &cfg.engine,
-                &car.def.engine,
+                engine_def,
                 car.limits,
                 &car.layers,
                 EngineInput {
@@ -487,91 +704,128 @@ impl AudioDirector {
             } else {
                 1.0
             };
-            // Engine LOD (playtest #47): the focus car keeps every layer; other cars keep the
-            // crossfade pair near the listener and one layer farther out, and their second
-            // layer yields to every other car's main layer when voices run out.
-            let layers = if focus {
-                eo.layers.clone()
-            } else {
-                let d = [
-                    pos[0] - listener_pos[0],
-                    pos[1] - listener_pos[1],
-                    pos[2] - listener_pos[2],
-                ];
-                let near = d[0] * d[0] + d[1] * d[1] + d[2] * d[2]
-                    < cfg.engine.lod_two_layer_m * cfg.engine.lod_two_layer_m;
-                let kept = engine_lod(&eo.layers, if near { 2 } else { 1 }, &rt.engine_lod);
-                rt.engine_lod = kept.iter().map(|l| l.0).collect();
-                kept
-            };
-            for (rank, (i, gain, pitch)) in layers.iter().enumerate() {
-                let l = &car.layers.layers[*i];
+            if eo.blowoff.is_some() {
+                rt.blowoffs = rt.blowoffs.wrapping_add(1);
+            }
+            let voiced_physically = physical_params.is_some();
+            if let Some(params) = physical_params {
+                // One voice: the synthesizer makes the firing pulses, exhaust, intake,
+                // mechanical noise, limiter, turbo, blow-off and crackle itself.
                 let mut d = Desire::new(
-                    VoiceId::new(e, slot::ENGINE_LAYER + l.index as u32),
+                    VoiceId::new(e, slot::ENGINE_PHYSICAL),
                     Bus::Engine,
-                    car.layer_cues[*i],
+                    self.physical_cue,
                     prio,
                     pos,
                     vel,
                 );
-                d.gain = *gain * kind_gain;
-                d.pitch = *pitch;
-                d.freq_hz = eo.firing_hz;
+                d.gain = cfg.engine.gain * engine_def.gain * kind_gain;
+                d.freq_hz = engine_def.firing_hz(s.engine_rpm);
                 d.load = eo.load;
-                d.synth = Some(engine_synth(&car.def.engine, l.root_rpm));
-                if !focus && rank > 0 {
-                    d.cull_scale = cfg.engine.second_layer_cull_scale;
-                }
+                d.synth = Some(params);
+                d.engine = Some(EngineFrame {
+                    rpm: s.engine_rpm.max(0.0),
+                    throttle: clamp01(v.throttle_applied.unwrap_or(v.throttle)),
+                    pedal: clamp01(v.throttle),
+                    gear: s.gear as f32,
+                    speed_mps: s.speed_mps.abs(),
+                    boost: rt.engine.boost,
+                    health: s
+                        .component_health
+                        .get(&Component::Engine)
+                        .copied()
+                        .unwrap_or(1.0),
+                    blowoffs: rt.blowoffs as f32,
+                });
                 out.push(d);
             }
-            if eo.limiter > 1e-3 {
-                let mut d = Desire::new(
-                    VoiceId::new(e, slot::ENGINE_LIMITER),
-                    Bus::Engine,
-                    car.limiter,
-                    prio,
-                    pos,
-                    vel,
-                );
-                d.gain = eo.limiter * kind_gain;
-                d.freq_hz = eo.firing_hz;
-                d.load = 1.0;
-                d.synth = Some(engine_synth(&car.def.engine, car.limits.rev_limit_rpm));
-                out.push(d);
-            }
-            for (slot_code, cue, v_) in [
-                (slot::TURBO, car.turbo, eo.turbo),
-                (slot::SUPERCHARGER, car.supercharger, eo.supercharger),
-            ] {
-                if let Some((gain, pitch)) = v_ {
+            if !voiced_physically {
+                // Engine LOD (playtest #47): the focus car keeps every layer; other cars keep the
+                // crossfade pair near the listener and one layer farther out, and their second
+                // layer yields to every other car's main layer when voices run out.
+                let layers = if focus {
+                    eo.layers.clone()
+                } else {
+                    let d = [
+                        pos[0] - listener_pos[0],
+                        pos[1] - listener_pos[1],
+                        pos[2] - listener_pos[2],
+                    ];
+                    let near = d[0] * d[0] + d[1] * d[1] + d[2] * d[2]
+                        < cfg.engine.lod_two_layer_m * cfg.engine.lod_two_layer_m;
+                    let kept = engine_lod(&eo.layers, if near { 2 } else { 1 }, &rt.engine_lod);
+                    rt.engine_lod = kept.iter().map(|l| l.0).collect();
+                    kept
+                };
+                for (rank, (i, gain, pitch)) in layers.iter().enumerate() {
+                    let l = &car.layers.layers[*i];
                     let mut d = Desire::new(
-                        VoiceId::new(e, slot_code),
+                        VoiceId::new(e, slot::ENGINE_LAYER + l.index as u32),
                         Bus::Engine,
-                        cue,
-                        up(Priority::Low),
+                        car.layer_cues[*i],
+                        prio,
                         pos,
                         vel,
                     );
-                    d.gain = gain;
-                    d.pitch = pitch;
-                    d.load = pitch;
+                    d.gain = *gain * kind_gain;
+                    d.pitch = *pitch;
+                    d.freq_hz = eo.firing_hz;
+                    d.load = eo.load;
+                    d.synth = Some(engine_synth(&car.def.engine, l.root_rpm));
+                    if !focus && rank > 0 {
+                        d.cull_scale = cfg.engine.second_layer_cull_scale;
+                    }
                     out.push(d);
                 }
-            }
-            for (cue, g) in [(car.blowoff, eo.blowoff), (car.pop, eo.pop)] {
-                if let Some(g) = g {
-                    self.one_shot_seq = self.one_shot_seq.wrapping_add(1);
+                if eo.limiter > 1e-3 {
                     let mut d = Desire::new(
-                        VoiceId::new(e, slot::one_shot(self.one_shot_seq)),
+                        VoiceId::new(e, slot::ENGINE_LIMITER),
                         Bus::Engine,
-                        cue,
-                        up(Priority::Normal),
+                        car.limiter,
+                        prio,
                         pos,
                         vel,
                     );
-                    d.gain = g;
-                    d.pitch = self.rng.range_f32(0.92, 1.08);
+                    d.gain = eo.limiter * kind_gain;
+                    d.freq_hz = eo.firing_hz;
+                    d.load = 1.0;
+                    d.synth = Some(engine_synth(&car.def.engine, car.limits.rev_limit_rpm));
                     out.push(d);
+                }
+                for (slot_code, cue, v_) in [
+                    (slot::TURBO, car.turbo, eo.turbo),
+                    (slot::SUPERCHARGER, car.supercharger, eo.supercharger),
+                ] {
+                    if let Some((gain, pitch)) = v_ {
+                        let mut d = Desire::new(
+                            VoiceId::new(e, slot_code),
+                            Bus::Engine,
+                            cue,
+                            up(Priority::Low),
+                            pos,
+                            vel,
+                        );
+                        d.gain = gain;
+                        d.pitch = pitch;
+                        d.load = pitch;
+                        out.push(d);
+                    }
+                }
+                for (cue, g) in [(car.blowoff, eo.blowoff), (car.pop, eo.pop)] {
+                    if let Some(g) = g {
+                        self.one_shot_seq = self.one_shot_seq.wrapping_add(1);
+                        let mut d = Desire::new(
+                            VoiceId::new(e, slot::one_shot(self.one_shot_seq)),
+                            Bus::Engine,
+                            cue,
+                            up(Priority::Normal),
+                            pos,
+                            vel,
+                        );
+                        d.gain = g;
+                        d.pitch = self.rng.range_f32(0.92, 1.08);
+                        out.push(d);
+                    }
                 }
             }
         }
@@ -704,17 +958,25 @@ impl AudioDirector {
             d.pitch = 0.8 + 0.4 * clamp01(len(vel) / 30.0);
             out.push(d);
         }
-        // Horn.
+        // Horn. Police units get the air horn when their car has a standard horn; a smashed
+        // front end (the horn sits behind the grille) or a dying battery makes it weak and
+        // rattly: `load` = horn damage 0..1.
         if v.horn {
+            let cue = if v.kind == DriverKind::Police && self.cues.info(car.horn_police).defined {
+                car.horn_police
+            } else {
+                car.horn
+            };
             let mut d = Desire::new(
                 VoiceId::new(e, slot::HORN),
                 Bus::World,
-                car.horn,
+                cue,
                 up(Priority::High),
                 pos,
                 vel,
             );
             d.gain = cfg.sirens.horn_gain;
+            d.load = horn_damage(&rt.region_damage, s);
             out.push(d);
         }
         // Siren.
@@ -820,6 +1082,12 @@ impl AudioDirector {
                             / (mix.scrape_speed_ref_mps - mix.scrape_min_speed_mps).max(0.1),
                     );
                     pst.frame_scrape = pst.frame_scrape.max(target);
+                    pst.slide_mps = pst.slide_mps.max(vt);
+                    pst.force = pst
+                        .force
+                        .max(scrape_force(&self.lib.config.impact_synth, *impulse_ns));
+                    pst.world =
+                        *b == wp_contracts::WORLD_ENTITY || *a == wp_contracts::WORLD_ENTITY;
                     pst.metal = !sides
                         .iter()
                         .all(|s| s.1 == wp_contracts::MaterialKind::Plastic)
@@ -857,8 +1125,21 @@ impl AudioDirector {
                             if let Some(r) = self.vehicles.get_mut(&ent) {
                                 r.broken_glass.insert(region);
                             }
+                            let strength = clamp01(*rel_speed / 15.0);
+                            self.glass_body(&world, ent, region, *point, [0.0; 3], strength, out);
                         }
                         let g = impact_gain(&mix, *impulse_ns, *rel_speed);
+                        self.body_hits(
+                            &sides,
+                            by_id,
+                            *point,
+                            *impulse_ns,
+                            *rel_speed,
+                            [va.map(|v| v.entity), vb.map(|v| v.entity)],
+                            g,
+                            &world,
+                            out,
+                        );
                         for l in layers {
                             let id = self.next_one_shot(owner_id);
                             let prio = if l == ImpactLayer::GlassShatter {
@@ -907,9 +1188,12 @@ impl AudioDirector {
                     region,
                     severity,
                 } => {
-                    if is_panel(*region) {
-                        if let Some(r) = self.vehicles.get_mut(vehicle) {
-                            r.panel_damage = r.panel_damage.max(clamp01(*severity));
+                    if let Some(r) = self.vehicles.get_mut(vehicle) {
+                        let sev = clamp01(*severity);
+                        let e = r.region_damage.entry(*region).or_insert(0.0);
+                        *e = e.max(sev);
+                        if is_panel(*region) {
+                            r.panel_damage = r.panel_damage.max(sev);
                         }
                     }
                 }
@@ -943,17 +1227,184 @@ impl AudioDirector {
         let p = v.state.pos;
         let point = [p[0] + o[0], p[1] + o[1], p[2] + o[2]];
         let cue = car.world.impacts[&ImpactLayer::GlassShatter];
+        let world = car.world.clone();
+        let vel = v.state.lin_vel;
         let id = self.next_one_shot(vehicle.0);
-        let mut d = Desire::new(
-            id,
-            Bus::World,
-            cue,
-            Priority::Critical,
-            point,
-            v.state.lin_vel,
-        );
+        let mut d = Desire::new(id, Bus::World, cue, Priority::Critical, point, vel);
         d.gain = self.lib.config.impacts.impact_gain;
         d.pitch = self.rng.range_f32(0.92, 1.08);
+        out.push(d);
+        self.glass_body(&world, vehicle, region, point, vel, 1.0, out);
+    }
+
+    /// Synthesised shatter onset + debris tail for broken glass (when the pack has `impact/body`).
+    #[allow(clippy::too_many_arguments)]
+    fn glass_body(
+        &mut self,
+        world: &WorldCues,
+        vehicle: EntityId,
+        region: BodyRegion,
+        point: [f32; 3],
+        vel: [f32; 3],
+        strength: f32,
+        out: &mut Vec<Desire>,
+    ) {
+        if !self.cues.info(world.body).defined {
+            return;
+        }
+        let id = self.next_one_shot(vehicle.0);
+        let seed = cosmetic_seed(self.one_shot_seq);
+        let mut d = Desire::new(id, Bus::World, world.body, Priority::Critical, point, vel);
+        d.gain = self.lib.config.impacts.impact_gain * (0.6 + 0.4 * clamp01(strength));
+        d.load = clamp01(strength);
+        d.synth = Some(glass_params(
+            region,
+            strength,
+            self.interior == Some(vehicle),
+            seed,
+        ));
+        out.push(d);
+    }
+
+    /// One synthesised `impact/body` voice per struck vehicle of a hit (both cars ring in a
+    /// car-to-car crash); world geometry alone gets one generic voice. Also books the hit's
+    /// estimated plastic work for cars whose deformation energy the caller does not measure.
+    #[allow(clippy::too_many_arguments)]
+    fn body_hits(
+        &mut self,
+        sides: &[(EntityId, wp_contracts::MaterialKind, BodyRegion)],
+        by_id: &BTreeMap<EntityId, &VehicleAudioInput>,
+        point: [f32; 3],
+        impulse_ns: f32,
+        speed: f32,
+        ents: [Option<EntityId>; 2],
+        gain: f32,
+        world: &WorldCues,
+        out: &mut Vec<Desire>,
+    ) {
+        let syn = self.lib.config.impact_synth.clone();
+        let cars = &self.cars;
+        let mass_of = |e: Option<EntityId>| {
+            e.and_then(|e| by_id.get(&e))
+                .and_then(|v| cars.get(v.car_id))
+                .map(|c| c.mass_kg)
+        };
+        let side_mass: Vec<Option<f32>> = sides.iter().map(|s| mass_of(Some(s.0))).collect();
+        let m_eff = reduced_mass(mass_of(ents[0]), mass_of(ents[1]));
+        let collision_j = 0.5 * m_eff * speed * speed;
+        let n_sides = sides.len().max(1) as f32;
+        for e in ents.into_iter().flatten() {
+            if !self.plastic_in.contains_key(&e) {
+                if let Some(r) = self.vehicles.get_mut(&e) {
+                    r.crunch
+                        .add_estimate(collision_j * syn.plastic_share_estimate / n_sides);
+                }
+            }
+        }
+        if !self.cues.info(world.body).defined {
+            return;
+        }
+        let mut hits: Vec<(u32, Hit)> = Vec::new();
+        for ((ent, kind, region), mass) in sides.iter().zip(side_mass) {
+            let rt = self.vehicles.get(ent);
+            let health = by_id.get(ent).map(|v| v.state.health).unwrap_or(1.0);
+            let dmg = rt
+                .and_then(|r| r.region_damage.get(region).copied())
+                .unwrap_or(0.0)
+                .max(0.5 * (1.0 - clamp01(health)));
+            hits.push((
+                ent.0,
+                Hit {
+                    region: Some(*region),
+                    material: *kind,
+                    speed_mps: speed,
+                    impulse_ns,
+                    eff_mass_kg: m_eff,
+                    mass_kg: mass.unwrap_or(syn.ref_mass_kg),
+                    panel_damage: dmg,
+                    interior: self.interior == Some(*ent),
+                    seed: 0,
+                },
+            ));
+        }
+        if hits.is_empty() {
+            hits.push((
+                ents.into_iter()
+                    .flatten()
+                    .next()
+                    .map(|e| e.0)
+                    .unwrap_or(u32::MAX),
+                Hit {
+                    region: None,
+                    material: wp_contracts::MaterialKind::Panel,
+                    speed_mps: speed,
+                    impulse_ns,
+                    eff_mass_kg: m_eff,
+                    mass_kg: syn.ref_mass_kg,
+                    panel_damage: 0.0,
+                    interior: false,
+                    seed: 0,
+                },
+            ));
+        }
+        for (owner, mut h) in hits {
+            let id = self.next_one_shot(owner);
+            h.seed = cosmetic_seed(self.one_shot_seq);
+            let params = body_params(&syn, &h);
+            let mut d = Desire::new(id, Bus::World, world.body, Priority::High, point, [0.0; 3]);
+            d.gain = gain;
+            d.load = params.get("strength").copied().unwrap_or(0.0);
+            d.synth = Some(params);
+            out.push(d);
+        }
+    }
+
+    /// The granular crunch loop of one vehicle: on while its lattice is being crushed.
+    fn crunch_desire(
+        &mut self,
+        v: &VehicleAudioInput,
+        measured_j: Option<f32>,
+        dt: f32,
+        out: &mut Vec<Desire>,
+    ) {
+        let cfg = &self.lib.config.impact_synth;
+        let Some(car) = self.cars.get(v.car_id) else {
+            return;
+        };
+        let Some(rt) = self.vehicles.get_mut(&v.entity) else {
+            return;
+        };
+        if let Some(j) = measured_j {
+            rt.crunch.measure(j);
+        }
+        let level = rt.crunch.step(cfg, dt);
+        if level <= 0.0 || !self.cues.info(car.world.crunch).defined {
+            return;
+        }
+        let mut d = Desire::new(
+            VoiceId::new(v.entity.0, slot::CRUNCH),
+            Bus::World,
+            car.world.crunch,
+            Priority::High,
+            v.state.pos,
+            v.state.lin_vel,
+        );
+        d.gain = cfg.crunch_gain * (0.35 + 0.65 * level);
+        d.load = level;
+        // Heavier cars: bigger, lower-pitched crumpling.
+        d.pitch = crate::impact::det_pow(
+            self.lib.config.impact_synth.ref_mass_kg / car.mass_kg.max(100.0),
+            0.25,
+        )
+        .clamp(0.75, 1.2);
+        d.synth = Some(BTreeMap::from([(
+            "interior".to_string(),
+            if self.interior == Some(v.entity) {
+                1.0
+            } else {
+                0.0
+            },
+        )]));
         out.push(d);
     }
 
@@ -1043,8 +1494,13 @@ impl AudioDirector {
             let age = tick.saturating_sub(p.last_contact_tick) as f32;
             if age == 0.0 {
                 p.scrape = p.frame_scrape;
+                p.frame_force = p.force;
             }
             p.frame_scrape = 0.0;
+            p.force = 0.0;
+            if age > 0.0 {
+                p.slide_mps *= 0.9;
+            }
             let level = p.scrape * clamp01(1.0 - age / release);
             if level < 0.02 {
                 continue;
@@ -1076,6 +1532,20 @@ impl AudioDirector {
             d.gain = mix.scrape_gain * level;
             d.pitch = 0.8 + 0.4 * level;
             d.load = level;
+            // Friction synthesis: stick-slip rate from the sliding speed, pressure from the
+            // contact impulse; metal on the road / walls throws sparks.
+            let syn = &self.lib.config.impact_synth;
+            d.freq_hz = scrape_rate_hz(syn, p.slide_mps);
+            d.phase = 0.0;
+            d.synth = Some(BTreeMap::from([
+                ("friction".to_string(), 1.0),
+                ("metal".to_string(), if p.metal { 1.0 } else { 0.0 }),
+                (
+                    "sparks".to_string(),
+                    if p.metal && p.world { 1.0 } else { 0.0 },
+                ),
+                ("force".to_string(), p.frame_force.max(0.15)),
+            ]));
             out.push(d);
         }
     }
@@ -1093,4 +1563,94 @@ fn is_panel(r: BodyRegion) -> bool {
             | BodyRegion::FrameRight
             | BodyRegion::Cabin
     )
+}
+
+/// The physical engine description of a registered car with `tune` applied.
+fn physical_spec(car_id: &str, car: &CarAudio, tune: &EngineTune) -> EngineVoiceSpec {
+    // Driven wheels: the rear pair's radius (the differential the cabin hears most).
+    let r = 0.5 * (car.wheel_radius_m[2] + car.wheel_radius_m[3]);
+    EngineVoiceSpec::new(
+        car_id,
+        &car.def.engine,
+        car.class,
+        car.limits,
+        car.final_drive,
+        r,
+        tune,
+    )
+}
+
+/// Chassis-space box of the cabin from the lattice: the `Cabin` nodes, up to the roof, shrunk a
+/// little so a camera on the hood or the bumper stays outside.
+fn cabin_box(lattice: &wp_contracts::LatticeDef) -> Option<([f32; 3], [f32; 3])> {
+    let mut lo = [f32::INFINITY; 3];
+    let mut hi = [f32::NEG_INFINITY; 3];
+    let mut any = false;
+    for n in &lattice.nodes {
+        if matches!(n.region, BodyRegion::Cabin | BodyRegion::Roof) {
+            any = true;
+            for i in 0..3 {
+                lo[i] = lo[i].min(n.pos_m[i]);
+                hi[i] = hi[i].max(n.pos_m[i]);
+            }
+        }
+    }
+    if !any {
+        return None;
+    }
+    let m = 0.08;
+    Some((
+        [lo[0] + m, lo[1] + m, lo[2]],
+        [hi[0] - m, hi[1] - m, hi[2] + 0.05],
+    ))
+}
+
+/// Horn damage 0..1: the worst front-end region (the horn sits behind the grille) or a weak
+/// battery.
+fn horn_damage(regions: &BTreeMap<BodyRegion, f32>, s: &VehicleState) -> f32 {
+    let front = [
+        BodyRegion::FrontBumper,
+        BodyRegion::Hood,
+        BodyRegion::FrontLeftFender,
+        BodyRegion::FrontRightFender,
+        BodyRegion::FrameFront,
+    ]
+    .iter()
+    .filter_map(|r| regions.get(r).copied())
+    .fold(0.0f32, f32::max);
+    let battery = s
+        .component_health
+        .get(&Component::Battery)
+        .map(|h| 1.0 - clamp01(*h))
+        .unwrap_or(0.0);
+    let radiator = s
+        .component_health
+        .get(&Component::Radiator)
+        .map(|h| 0.6 * (1.0 - clamp01(*h)))
+        .unwrap_or(0.0);
+    clamp01(front.max(battery).max(radiator))
+}
+
+/// Interior camera: the listener sits in `own`'s cabin. Other vehicles are heard through the
+/// body (low-passed, quieter); the own horn is under the hood (muffled). The own engine and
+/// impacts keep their sound (the impact synth gets `interior` and shapes itself).
+fn cabin_muffle(own: EntityId, desires: &mut [Desire]) {
+    for d in desires.iter_mut() {
+        if d.id.entity != own.0 {
+            d.lowpass_cap_hz = 2_200.0;
+            d.gain *= 0.55;
+        } else if d.id.slot == slot::HORN {
+            d.lowpass_cap_hz = 1_600.0;
+            d.gain *= 0.7;
+        } else if slot::is_one_shot(d.id.slot) && d.bus == Bus::World {
+            // Recorded impact layers: the cabin takes the top off the air-borne part.
+            d.lowpass_cap_hz = 3_500.0;
+        }
+    }
+}
+
+/// Seed for the backend's cosmetic scatter (grains, tinkles), from the one-shot counter so the
+/// director's pitch RNG sequence stays as it was.
+fn cosmetic_seed(seq: u32) -> u32 {
+    seq.wrapping_mul(0x9E37_79B1) >> 8
 }

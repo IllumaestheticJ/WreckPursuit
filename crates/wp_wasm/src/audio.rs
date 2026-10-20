@@ -10,6 +10,7 @@
 //! | `audio_set_scanner_tier(tier)` | `"None"` / `"Basic"` / `"Pro"` / `"Elite"` (wp_police tiers 0/1/2) |
 //! | `audio_radio(unit, priority, text)` | queue a scanner line (debug until `PoliceEvent::Radio` exists) |
 //! | `audio_reset()` | stop everything and forget transient state |
+//! | `audio_set_engine_model(mode)` | `"Physical"` (modelled engine for the focus + nearest cars) / `"Layers"` |
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -17,9 +18,9 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 use wp_audio::{
-    AudioCommand, AudioDirector, AudioFrame, AudioLibrary, DirectorStats, DriverKind, Listener,
-    RadioLine, RadioPriority, ScannerTier, SirenMode, SirenOverride, SirenPattern,
-    VehicleAudioInput,
+    AudioCommand, AudioDirector, AudioFrame, AudioLibrary, DirectorStats, DriverKind,
+    EngineModelMode, EngineTune, Listener, RadioLine, RadioPriority, ScannerTier, SirenMode,
+    SirenOverride, SirenPattern, VehicleAudioInput,
 };
 use wp_contracts::{EntityId, SimEvent};
 
@@ -115,6 +116,15 @@ pub(crate) fn frame_commands(
     focus: Option<EntityId>,
     events: &[SimEvent],
 ) -> Vec<AudioCommand> {
+    // A career run's car carries its installed mods (louder exhaust, intake, kits).
+    if let Some(run) = s.run() {
+        let tune = run
+            .account()
+            .try_car(run.car())
+            .map(|c| EngineTune::from_mods(&c.mods))
+            .unwrap_or_default();
+        d.set_engine_tune(run.player(), tune);
+    }
     let sim = s.sim();
     let states = sim.vehicle_states();
     let vehicles: BTreeMap<EntityId, &wp_sim::SimVehicle> =
@@ -133,6 +143,8 @@ pub(crate) fn frame_commands(
                 },
             }
         }
+        // Lattice deformation energy: the crunch follows its growth (owner row 74).
+        d.set_plastic_energy(*id, v.damage.total_plastic_energy_j());
         inputs.push(VehicleAudioInput {
             entity: *id,
             car_id: &v.car_id,
@@ -218,6 +230,21 @@ pub fn audio_reset() -> Result<String, JsValue> {
         let mut out = Vec::new();
         d.reset(&mut out);
         Ok(json(&out))
+    })
+}
+
+/// How engines are voiced: `"Physical"` (the backend's engine synthesizer is running: the focus
+/// car and the nearest cars get the modelled engine) or `"Layers"` (every car on layers).
+#[wasm_bindgen]
+pub fn audio_set_engine_model(mode: &str) -> Result<(), JsValue> {
+    let m = match mode {
+        "Physical" => EngineModelMode::Physical,
+        "Layers" => EngineModelMode::Layers,
+        other => return Err(err(format!("unknown engine model {other:?}"))),
+    };
+    with_audio(|d| {
+        d.set_engine_model(m);
+        Ok(())
     })
 }
 

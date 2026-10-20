@@ -120,6 +120,10 @@
           <label><input type="checkbox" data-a="esc" />ESC</label>
           <label><input type="checkbox" data-a="auto_gears" />auto gears</label>
           <label title="automatic: the car works the clutch (launch, stall prevention, shifts). manual: your clutch control is used directly; bind it in the controls panel (F9)">clutch <select id="clutch-mode"><option value="auto">automatic</option><option value="manual">manual</option></select></label>
+          <label title="Countersteer help: with the steering released the front wheels follow the car's travel (0 = plain return to centre, 50 = default, 100 = fast, full alignment). Never acts while you steer or during a handbrake turn."
+            >countersteer <input type="range" id="cstr" min="0" max="100" step="5" style="width: 80px" />
+            <span id="cstr-val" class="dim">–</span></label
+          >
         </div>
         <div class="row">
           replay

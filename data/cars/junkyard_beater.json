@@ -103,39 +103,39 @@
   ],
   "suspension": [
     {
-      "spring_n_per_m": 15600.0,
-      "damper_bump_ns_per_m": 610.0,
-      "damper_rebound_ns_per_m": 920.0,
+      "spring_n_per_m": 20900.0,
+      "damper_bump_ns_per_m": 1100.0,
+      "damper_rebound_ns_per_m": 2210.0,
+      "travel_m": 0.15,
+      "preload_m": 0.071,
+      "arb_n_per_m": 3700.0,
+      "bump_stop_n_per_m": 120000.0
+    },
+    {
+      "spring_n_per_m": 20900.0,
+      "damper_bump_ns_per_m": 1100.0,
+      "damper_rebound_ns_per_m": 2210.0,
+      "travel_m": 0.15,
+      "preload_m": 0.071,
+      "arb_n_per_m": 3700.0,
+      "bump_stop_n_per_m": 120000.0
+    },
+    {
+      "spring_n_per_m": 15500.0,
+      "damper_bump_ns_per_m": 730.0,
+      "damper_rebound_ns_per_m": 1470.0,
       "travel_m": 0.16,
-      "preload_m": 0.01,
-      "arb_n_per_m": 2900.0,
+      "preload_m": 0.039,
+      "arb_n_per_m": 1800.0,
       "bump_stop_n_per_m": 120000.0
     },
     {
-      "spring_n_per_m": 15600.0,
-      "damper_bump_ns_per_m": 610.0,
-      "damper_rebound_ns_per_m": 920.0,
+      "spring_n_per_m": 15500.0,
+      "damper_bump_ns_per_m": 730.0,
+      "damper_rebound_ns_per_m": 1470.0,
       "travel_m": 0.16,
-      "preload_m": 0.01,
-      "arb_n_per_m": 2900.0,
-      "bump_stop_n_per_m": 120000.0
-    },
-    {
-      "spring_n_per_m": 12100.0,
-      "damper_bump_ns_per_m": 430.0,
-      "damper_rebound_ns_per_m": 640.0,
-      "travel_m": 0.17,
-      "preload_m": 0.01,
-      "arb_n_per_m": 1200.0,
-      "bump_stop_n_per_m": 120000.0
-    },
-    {
-      "spring_n_per_m": 12100.0,
-      "damper_bump_ns_per_m": 430.0,
-      "damper_rebound_ns_per_m": 640.0,
-      "travel_m": 0.17,
-      "preload_m": 0.01,
-      "arb_n_per_m": 1200.0,
+      "preload_m": 0.039,
+      "arb_n_per_m": 1800.0,
       "bump_stop_n_per_m": 120000.0
     }
   ],
@@ -143,7 +143,7 @@
     "max_torque_front_nm": 1360.0,
     "max_torque_rear_nm": 430.0,
     "bias_front": 0.558,
-    "handbrake_rear_nm": 600.0
+    "handbrake_rear_nm": 830.0
   },
   "steering": {
     "ratio": 17.5,
