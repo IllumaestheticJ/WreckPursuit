@@ -67,7 +67,10 @@ gap to the player — pace is car capability × how much of it the driver dares 
   extrapolated 3 s, passed like anyone (planned 3.5 s ahead at the closing speed, the next
   lane is enough). Physical traffic and police cars are passed with the same margins.
   Anything standing still for 8 s counts as **parked** (passable on the opposing lanes where
-  the corridor has them; a car stuck in a traffic deadlock stays put for minutes). Perception
+  the corridor has them; a car stuck in a traffic deadlock stays put for minutes). A sim
+  vehicle (a police unit, another player) still counts as standing while it shuffles within
+  2.5 m of where it stopped below 1 m/s, and a parked one is squeezed past at a crawl with
+  0.2 m clearance (normal clearance by 15 m/s), 0.15 m nearer the road edge. Perception
   covers the whole road, opposing lanes included. **Junction awareness**: my swept strip
   through the box (my lane band × box length + my car) against each civilian's straight
   course through it; a civilian blocks only if its window in the strip overlaps mine (from
@@ -189,9 +192,9 @@ Full-sim tests (`tests/race.rs`, procedural 8×8 city, counter-clockwise arteria
 - Same seed ⇒ same sim + field hash; different seed ⇒ different field hash.
 - Wanted racer abandons and flees; others keep racing.
 - Open roads + traffic: a wanted-level event read from the sim's event stream makes a racer
-  abandon and drive ≥ 250 m of a flight route ending > 300 m from the police (or ≥ 150 m when
-  the flight ends early: caught by the sim's patrols, or at the route's end), no contacts. The
-  others may earn heat of their own at race pace past the live patrols and flee for it.
+  abandon and drive ≥ 250 m in the minute after the call (≥ 150 m when the sim's patrols
+  catch it first) on a flight route ending > 300 m from the police, no contacts. The others
+  may earn heat of their own at race pace past the live patrols and flee for it.
 - Junction gap acceptance unit test: cross traffic arriving together with me holds me; a
   crossing already through, one arriving well after me, and an oncoming car going straight on
   do not; one signalling a turn does.

@@ -12,7 +12,8 @@
 use serde_json::json;
 use wp_world::geom::{self, V2, V3};
 use wp_world::map::CityMap;
-use wp_world::network::{DistrictKind, LaneKind, RoadNetwork};
+use wp_world::network::{Building, BuildingKind, DecorKind, DistrictKind, LaneKind, RoadNetwork};
+use wp_world::residential;
 use wp_world::surface::{
     is_elevated, lane_bank, node_patches, sidewalk_mesh, surface_edges, surface_ribbon, TriMesh,
 };
@@ -417,6 +418,11 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
     let mut lot_skirt = Prim::new("lot_skirt", [0.50, 0.52, 0.44, 1.0]);
     let mut kerb = Prim::new("kerb", [0.70, 0.69, 0.66, 1.0]);
     let mut buildings = Prim::new("building", [0.75, 0.74, 0.72, 1.0]);
+    // Residential lots (playtest row 95): grass verges, pitched roofs, garages (trees,
+    // driveways, hedges and fences are instanced: `build_instanced`).
+    let mut verge = Prim::new("verge", [0.42, 0.52, 0.34, 1.0]);
+    let mut roof = Prim::new("roof", [0.46, 0.30, 0.28, 1.0]);
+    let mut garage = Prim::new("garage", [0.68, 0.66, 0.62, 1.0]);
     let mut wall = Prim::new("retaining_wall", [0.52, 0.50, 0.46, 1.0]);
     let mut bridge = Prim::new("bridge", [0.58, 0.58, 0.56, 1.0]);
     let mut rock = Prim::smooth("rock", [0.45, 0.42, 0.37, 1.0]);
@@ -476,6 +482,7 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
     // collides with.
     let walks = sidewalk_mesh(map);
     sidewalk.mesh(&walks.tops);
+    verge.mesh(&walks.verges);
     corner.mesh(&walks.corners);
     lot.mesh(&walks.lots);
     lot_skirt.mesh(&walks.skirts);
@@ -597,7 +604,13 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
         }
     }
     for b in &net.buildings {
-        buildings.prism(&b.footprint, b.base_z_m, b.roof_z());
+        let walls = if b.kind == BuildingKind::Garage {
+            &mut garage
+        } else {
+            &mut buildings
+        };
+        let r = &mut roof;
+        house(walls, r, b);
     }
     // Tunnels and covered roads (backlog B04): concrete walls, the roof deck, ceiling lights.
     // Colours follow docs/art/STYLE_DECISION.md's palette (retaining wall / bridge greys,
@@ -614,11 +627,14 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
         parking,
         bus,
         sidewalk,
+        verge,
         corner,
         lot,
         lot_skirt,
         kerb,
         buildings,
+        roof,
+        garage,
         wall,
         bridge,
         rock,
@@ -631,6 +647,262 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
     out.extend(ground);
     out.retain(|p| !p.indices.is_empty());
     out
+}
+
+/// Push triangle `a b c` into `p`, wound so its normal points along `out` (flat-shaded).
+fn tri_facing(p: &mut Prim, a: V3, b: V3, c: V3, out: V3) {
+    let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    let v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+    let n = [
+        u[1] * v[2] - u[2] * v[1],
+        u[2] * v[0] - u[0] * v[2],
+        u[0] * v[1] - u[1] * v[0],
+    ];
+    let i = p.vert(a, out);
+    p.vert(b, out);
+    p.vert(c, out);
+    if n[0] * out[0] + n[1] * out[1] + n[2] * out[2] >= 0.0 {
+        p.indices.extend_from_slice(&[i, i + 1, i + 2]);
+    } else {
+        p.indices.extend_from_slice(&[i, i + 2, i + 1]);
+    }
+}
+
+/// Vertex ids of a small shared-vertex mesh piece (one building's walls or roof).
+struct Shared<'a> {
+    p: &'a mut Prim,
+    ids: Vec<(V3, u32)>,
+}
+
+impl Shared<'_> {
+    fn id(&mut self, v: V3) -> u32 {
+        if let Some((_, i)) = self.ids.iter().find(|(q, _)| *q == v) {
+            return *i;
+        }
+        let i = self.p.vert(v, [0.0, 0.0, 1.0]);
+        self.ids.push((v, i));
+        i
+    }
+
+    /// Triangle wound so its normal points along `out`.
+    fn tri(&mut self, a: V3, b: V3, c: V3, out: V3) {
+        let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+        let v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+        let n = [
+            u[1] * v[2] - u[2] * v[1],
+            u[2] * v[0] - u[0] * v[2],
+            u[0] * v[1] - u[1] * v[0],
+        ];
+        let (ia, ib, ic) = (self.id(a), self.id(b), self.id(c));
+        if n[0] * out[0] + n[1] * out[1] + n[2] * out[2] >= 0.0 {
+            self.p.indices.extend_from_slice(&[ia, ib, ic]);
+        } else {
+            self.p.indices.extend_from_slice(&[ia, ic, ib]);
+        }
+    }
+}
+
+/// A building: walls up to the eaves, then a flat top or a gable / hip roof over its
+/// rectangle ([`Building::ridge`]; gable ends are wall). Vertices are shared within each
+/// building's walls and roof (the testbed flat-shades the greybox).
+fn house(walls: &mut Prim, roof: &mut Prim, b: &Building) {
+    let Some(ridge) = b.ridge() else {
+        walls.prism(&b.footprint, b.base_z_m, b.roof_z());
+        return;
+    };
+    let z = b.roof_z();
+    let f = &b.footprint;
+    let n = f.len();
+    let centre = [
+        f.iter().map(|q| q[0]).sum::<f32>() / n as f32,
+        f.iter().map(|q| q[1]).sum::<f32>() / n as f32,
+    ];
+    let near = |q: V2| {
+        if geom::dist(q, geom::xy(ridge[0])) <= geom::dist(q, geom::xy(ridge[1])) {
+            ridge[0]
+        } else {
+            ridge[1]
+        }
+    };
+    let mut w = Shared {
+        p: walls,
+        ids: Vec::new(),
+    };
+    let mut r = Shared {
+        p: roof,
+        ids: Vec::new(),
+    };
+    for i in 0..n {
+        let (qa, qb) = (f[i], f[(i + 1) % n]);
+        let (a, bb) = ([qa[0], qa[1], z], [qb[0], qb[1], z]);
+        let (a0, b0) = ([qa[0], qa[1], b.base_z_m], [qb[0], qb[1], b.base_z_m]);
+        let mid = [(qa[0] + qb[0]) * 0.5, (qa[1] + qb[1]) * 0.5];
+        let o = geom::normalize(geom::sub(mid, centre));
+        let out = [o[0], o[1], 0.0];
+        let up = [o[0], o[1], 1.0];
+        w.tri(a0, b0, bb, out);
+        w.tri(a0, bb, a, out);
+        let (ra, rb) = (near(qa), near(qb));
+        if ra == rb {
+            // Triangle: vertical gable end (ridge end above the edge) or a hip slope.
+            if geom::dist(geom::xy(ra), mid) < 0.05 {
+                w.tri(a, bb, ra, out);
+            } else {
+                r.tri(a, bb, ra, up);
+            }
+        } else {
+            r.tri(a, bb, rb, up);
+            r.tri(a, rb, ra, up);
+        }
+    }
+}
+
+/// A unit mesh drawn many times (glTF `EXT_mesh_gpu_instancing`): trees.
+#[derive(Debug, Clone, Default)]
+pub struct Instanced {
+    /// Mesh name.
+    pub name: String,
+    /// Parts (one primitive per material), world-style coordinates (+Z up) of the unit mesh.
+    pub parts: Vec<Prim>,
+    /// Per instance: base position (world), yaw about +Z, scale (x, y, z world axes).
+    pub instances: Vec<(V3, f32, V3)>,
+}
+
+/// Unit tree (1 m crown diameter, 1 m tall): a hexagonal trunk to 0.45 and a low-poly crown
+/// (an icosahedron stretched to 0.32..1.0).
+fn unit_tree() -> Vec<Prim> {
+    let mut trunk = Prim::new("tree_trunk", [0.36, 0.28, 0.22, 1.0]);
+    let mut crown = Prim::new("tree_crown", [0.27, 0.42, 0.25, 1.0]);
+    let r = 0.045;
+    let ring: Vec<V2> = (0..6)
+        .map(|k| {
+            let (s, c) = wp_math::sin_cos(k as f32 * std::f32::consts::TAU / 6.0);
+            [c * r, s * r]
+        })
+        .collect();
+    trunk.walls(&ring, -0.05, 0.45);
+    // Icosahedron.
+    let t = (1.0 + 5f32.sqrt()) * 0.5;
+    let raw: [[f32; 3]; 12] = [
+        [-1.0, t, 0.0],
+        [1.0, t, 0.0],
+        [-1.0, -t, 0.0],
+        [1.0, -t, 0.0],
+        [0.0, -1.0, t],
+        [0.0, 1.0, t],
+        [0.0, -1.0, -t],
+        [0.0, 1.0, -t],
+        [t, 0.0, -1.0],
+        [t, 0.0, 1.0],
+        [-t, 0.0, -1.0],
+        [-t, 0.0, 1.0],
+    ];
+    let faces: [[usize; 3]; 20] = [
+        [0, 11, 5],
+        [0, 5, 1],
+        [0, 1, 7],
+        [0, 7, 10],
+        [0, 10, 11],
+        [1, 5, 9],
+        [5, 11, 4],
+        [11, 10, 2],
+        [10, 7, 6],
+        [7, 1, 8],
+        [3, 9, 4],
+        [3, 4, 2],
+        [3, 2, 6],
+        [3, 6, 8],
+        [3, 8, 9],
+        [4, 9, 5],
+        [2, 4, 11],
+        [6, 2, 10],
+        [8, 6, 7],
+        [9, 8, 1],
+    ];
+    let len = (1.0 + t * t).sqrt();
+    let v: Vec<V3> = raw
+        .iter()
+        .map(|p| [p[0] / len * 0.5, p[1] / len * 0.5, 0.66 + p[2] / len * 0.34])
+        .collect();
+    for f in faces {
+        let (a, b, c) = (v[f[0]], v[f[1]], v[f[2]]);
+        let m = [
+            (a[0] + b[0] + c[0]) / 3.0,
+            (a[1] + b[1] + c[1]) / 3.0,
+            (a[2] + b[2] + c[2]) / 3.0 - 0.66,
+        ];
+        tri_facing(&mut crown, a, b, c, m);
+    }
+    vec![trunk, crown]
+}
+
+/// Unit box: x, y in -0.5..0.5, z in 0..1 (walls and top), one material.
+fn unit_box(material: &str, color: [f32; 4]) -> Prim {
+    let mut p = Prim::new(material, color);
+    let sq = [[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]];
+    p.block(&sq, 0.0, 1.0);
+    p
+}
+
+/// Instanced meshes of a city (residential lots, playtest row 95): every street and yard
+/// tree as one unit tree scaled to its crown and height, and driveways, hedges and fences as
+/// unit boxes. A box stands on its decor's base point (hedges and fences sunk 0.1 m); a
+/// driveway runs from its mouth across the lot, its top 3 cm above the lot, its sides 0.4 m
+/// deep (it never floats over the coarser drawn ground).
+pub fn build_instanced(map: &CityMap) -> Vec<Instanced> {
+    let decor = &map.net.decor;
+    let mut out = Vec::new();
+    let trees: Vec<(V3, f32, V3)> = decor
+        .iter()
+        .filter(|d| matches!(d.kind, DecorKind::StreetTree | DecorKind::YardTree))
+        .map(|d| (d.pos, d.yaw, [d.size[0], d.size[1], d.size[2]]))
+        .collect();
+    if !trees.is_empty() {
+        out.push(Instanced {
+            name: "trees".into(),
+            parts: unit_tree(),
+            instances: trees,
+        });
+    }
+    for (kind, name, color) in [
+        (DecorKind::Driveway, "driveway", [0.58, 0.57, 0.54, 1.0]),
+        (DecorKind::Hedge, "hedge", [0.24, 0.38, 0.22, 1.0]),
+        (DecorKind::Fence, "fence", [0.60, 0.55, 0.48, 1.0]),
+    ] {
+        let boxes: Vec<(V3, f32, V3)> = decor
+            .iter()
+            .filter(|d| d.kind == kind)
+            .map(|d| {
+                if kind == DecorKind::Driveway {
+                    let c = geom::add(
+                        [d.pos[0], d.pos[1]],
+                        geom::scale(residential::driveway_out(d), d.size[1] * 0.5),
+                    );
+                    let top = residential::driveway_top(d);
+                    ([c[0], c[1], top - 0.4], d.yaw, [d.size[0], d.size[1], 0.4])
+                } else {
+                    (
+                        [d.pos[0], d.pos[1], d.pos[2] - 0.1],
+                        d.yaw,
+                        [d.size[0], d.size[1], d.size[2] + 0.1],
+                    )
+                }
+            })
+            .collect();
+        if !boxes.is_empty() {
+            out.push(Instanced {
+                name: name.into(),
+                parts: vec![unit_box(name, color)],
+                instances: boxes,
+            });
+        }
+    }
+    out
+}
+
+/// The whole greybox `.glb` of a city: [`build_greybox`] plus [`build_instanced`].
+pub fn greybox_glb(map: &CityMap) -> Vec<u8> {
+    write_glb_instanced(&build_greybox(map), &build_instanced(map), &map.net.id)
 }
 
 /// One covered span: both walls (inner and outer faces, from below the road to the ceiling),
@@ -760,8 +1032,99 @@ fn split_u16(p: &Prim) -> Vec<Prim> {
     out
 }
 
+/// Append one primitive's vertex / index data to `bin` and its views and accessors; returns
+/// the glTF primitive (material `mi`).
+fn push_prim(
+    bin: &mut Vec<u8>,
+    views: &mut Vec<serde_json::Value>,
+    accessors: &mut Vec<serde_json::Value>,
+    p: &Prim,
+    mi: usize,
+) -> serde_json::Value {
+    let to_gl = |p: V3| [p[0], p[2], -p[1]];
+    let mut lo = [f32::INFINITY; 3];
+    let mut hi = [f32::NEG_INFINITY; 3];
+    let pos_off = bin.len();
+    for v in &p.positions {
+        let g = to_gl(*v);
+        for k in 0..3 {
+            lo[k] = lo[k].min(g[k]);
+            hi[k] = hi[k].max(g[k]);
+            bin.extend_from_slice(&g[k].to_le_bytes());
+        }
+    }
+    let pos_len = bin.len() - pos_off;
+    let nrm_off = bin.len();
+    for n in &p.normals {
+        for c in to_gl(*n) {
+            bin.extend_from_slice(&c.to_le_bytes());
+        }
+    }
+    let nrm_len = bin.len() - nrm_off;
+    let idx_off = bin.len();
+    for i in &p.indices {
+        bin.extend_from_slice(&(*i as u16).to_le_bytes());
+    }
+    let idx_len = bin.len() - idx_off;
+    // Keep the next float buffer view 4-byte aligned.
+    while !bin.len().is_multiple_of(4) {
+        bin.push(0);
+    }
+    let has_n = !p.normals.is_empty();
+    let pos_view = views.len();
+    views.push(json!({"buffer": 0, "byteOffset": pos_off, "byteLength": pos_len, "target": 34962}));
+    let nrm_view = views.len();
+    if has_n {
+        views.push(
+            json!({"buffer": 0, "byteOffset": nrm_off, "byteLength": nrm_len, "target": 34962}),
+        );
+    }
+    let idx_view = views.len();
+    views.push(json!({"buffer": 0, "byteOffset": idx_off, "byteLength": idx_len, "target": 34963}));
+    let pos_acc = accessors.len();
+    accessors.push(json!({"bufferView": pos_view, "componentType": 5126, "count": p.positions.len(), "type": "VEC3", "min": lo, "max": hi}));
+    let mut attributes = json!({ "POSITION": pos_acc });
+    if has_n {
+        attributes["NORMAL"] = json!(accessors.len());
+        accessors.push(json!({"bufferView": nrm_view, "componentType": 5126, "count": p.normals.len(), "type": "VEC3"}));
+    }
+    let idx_acc = accessors.len();
+    accessors.push(json!({"bufferView": idx_view, "componentType": 5123, "count": p.indices.len(), "type": "SCALAR"}));
+    json!({
+        "attributes": attributes,
+        "indices": idx_acc,
+        "material": mi,
+        "mode": 4
+    })
+}
+
+/// glTF material of a primitive.
+fn material_json(p: &Prim) -> serde_json::Value {
+    json!({
+        "name": p.material,
+        // Walls, kerbs and parapets are single quads: draw both faces.
+        "doubleSided": true,
+        // Lamps (`*_light`, e.g. tunnel ceiling lights) glow in their own colour.
+        "emissiveFactor": if p.material.ends_with("_light") {
+            [p.color[0], p.color[1], p.color[2]]
+        } else {
+            [0.0, 0.0, 0.0]
+        },
+        "pbrMetallicRoughness": {
+            "baseColorFactor": p.color,
+            "metallicFactor": 0.0,
+            "roughnessFactor": 0.9
+        }
+    })
+}
+
 /// Encode primitives as a `.glb` (positions converted to glTF +Y-up).
 pub fn write_glb(prims: &[Prim], name: &str) -> Vec<u8> {
+    write_glb_instanced(prims, &[], name)
+}
+
+/// [`write_glb`] plus instanced meshes (`EXT_mesh_gpu_instancing`).
+pub fn write_glb_instanced(prims: &[Prim], instanced: &[Instanced], name: &str) -> Vec<u8> {
     let parts: Vec<(usize, Prim)> = prims
         .iter()
         .enumerate()
@@ -772,96 +1135,71 @@ pub fn write_glb(prims: &[Prim], name: &str) -> Vec<u8> {
     let mut accessors = Vec::new();
     let mut materials = Vec::new();
     let mut primitives = Vec::new();
-    let to_gl = |p: V3| [p[0], p[2], -p[1]];
     for p in prims {
-        materials.push(json!({
-            "name": p.material,
-            // Walls, kerbs and parapets are single quads: draw both faces.
-            "doubleSided": true,
-            // Lamps (`*_light`, e.g. tunnel ceiling lights) glow in their own colour.
-            "emissiveFactor": if p.material.ends_with("_light") {
-                [p.color[0], p.color[1], p.color[2]]
-            } else {
-                [0.0, 0.0, 0.0]
-            },
-            "pbrMetallicRoughness": {
-                "baseColorFactor": p.color,
-                "metallicFactor": 0.0,
-                "roughnessFactor": 0.9
-            }
-        }));
+        materials.push(material_json(p));
     }
     for (mi, p) in &parts {
-        let mut lo = [f32::INFINITY; 3];
-        let mut hi = [f32::NEG_INFINITY; 3];
-        let pos_off = bin.len();
-        for v in &p.positions {
-            let g = to_gl(*v);
-            for k in 0..3 {
-                lo[k] = lo[k].min(g[k]);
-                hi[k] = hi[k].max(g[k]);
-                bin.extend_from_slice(&g[k].to_le_bytes());
+        primitives.push(push_prim(&mut bin, &mut views, &mut accessors, p, *mi));
+    }
+    let mut nodes = vec![json!({"name": name, "mesh": 0})];
+    let mut meshes = vec![json!({"name": name, "primitives": primitives})];
+    // Instanced meshes: one node each with EXT_mesh_gpu_instancing (translation, rotation
+    // about the up axis, scale per instance; glTF axes).
+    for inst in instanced {
+        let mut prims_i = Vec::new();
+        for part in &inst.parts {
+            let mi = materials.len();
+            materials.push(material_json(part));
+            prims_i.push(push_prim(&mut bin, &mut views, &mut accessors, part, mi));
+        }
+        let mut push_vecs = |vals: Vec<f32>, ty: &str| {
+            let off = bin.len();
+            for v in &vals {
+                bin.extend_from_slice(&v.to_le_bytes());
             }
+            let view = views.len();
+            views.push(json!({"buffer": 0, "byteOffset": off, "byteLength": bin.len() - off}));
+            let acc = accessors.len();
+            let n = if ty == "VEC4" { 4 } else { 3 };
+            accessors.push(json!({"bufferView": view, "componentType": 5126, "count": vals.len() / n, "type": ty}));
+            acc
+        };
+        let mut t = Vec::new();
+        let mut r = Vec::new();
+        let mut sc = Vec::new();
+        for (p, yaw, scale) in &inst.instances {
+            t.extend_from_slice(&[p[0], p[2], -p[1]]);
+            let (sn, cs) = wp_math::sin_cos(*yaw * 0.5);
+            r.extend_from_slice(&[0.0, sn, 0.0, cs]);
+            sc.extend_from_slice(&[scale[0], scale[2], scale[1]]);
         }
-        let pos_len = bin.len() - pos_off;
-        let nrm_off = bin.len();
-        for n in &p.normals {
-            for c in to_gl(*n) {
-                bin.extend_from_slice(&c.to_le_bytes());
-            }
-        }
-        let nrm_len = bin.len() - nrm_off;
-        let idx_off = bin.len();
-        for i in &p.indices {
-            bin.extend_from_slice(&(*i as u16).to_le_bytes());
-        }
-        let idx_len = bin.len() - idx_off;
-        // Keep the next float buffer view 4-byte aligned.
-        while !bin.len().is_multiple_of(4) {
-            bin.push(0);
-        }
-        let has_n = !p.normals.is_empty();
-        let pos_view = views.len();
-        views.push(
-            json!({"buffer": 0, "byteOffset": pos_off, "byteLength": pos_len, "target": 34962}),
+        let (ta, ra, sa) = (
+            push_vecs(t, "VEC3"),
+            push_vecs(r, "VEC4"),
+            push_vecs(sc, "VEC3"),
         );
-        let nrm_view = views.len();
-        if has_n {
-            views.push(
-                json!({"buffer": 0, "byteOffset": nrm_off, "byteLength": nrm_len, "target": 34962}),
-            );
-        }
-        let idx_view = views.len();
-        views.push(
-            json!({"buffer": 0, "byteOffset": idx_off, "byteLength": idx_len, "target": 34963}),
-        );
-        let pos_acc = accessors.len();
-        accessors.push(json!({"bufferView": pos_view, "componentType": 5126, "count": p.positions.len(), "type": "VEC3", "min": lo, "max": hi}));
-        let mut attributes = json!({ "POSITION": pos_acc });
-        if has_n {
-            attributes["NORMAL"] = json!(accessors.len());
-            accessors.push(json!({"bufferView": nrm_view, "componentType": 5126, "count": p.normals.len(), "type": "VEC3"}));
-        }
-        let idx_acc = accessors.len();
-        accessors.push(json!({"bufferView": idx_view, "componentType": 5123, "count": p.indices.len(), "type": "SCALAR"}));
-        primitives.push(json!({
-            "attributes": attributes,
-            "indices": idx_acc,
-            "material": mi,
-            "mode": 4
+        meshes.push(json!({"name": inst.name, "primitives": prims_i}));
+        nodes.push(json!({
+            "name": inst.name,
+            "mesh": meshes.len() - 1,
+            "extensions": {"EXT_mesh_gpu_instancing": {"attributes": {"TRANSLATION": ta, "ROTATION": ra, "SCALE": sa}}}
         }));
     }
-    let doc = json!({
+    let node_ids: Vec<usize> = (0..nodes.len()).collect();
+    let mut doc = json!({
         "asset": {"version": "2.0", "generator": "wreckpursuit city-import"},
         "scene": 0,
-        "scenes": [{"name": name, "nodes": [0]}],
-        "nodes": [{"name": name, "mesh": 0}],
-        "meshes": [{"name": name, "primitives": primitives}],
+        "scenes": [{"name": name, "nodes": node_ids}],
+        "nodes": nodes,
+        "meshes": meshes,
         "materials": materials,
         "buffers": [{"byteLength": bin.len()}],
         "bufferViews": views,
         "accessors": accessors
     });
+    if !instanced.is_empty() {
+        doc["extensionsUsed"] = json!(["EXT_mesh_gpu_instancing"]);
+    }
     let mut json_bytes = serde_json::to_vec(&doc).expect("gltf json");
     while !json_bytes.len().is_multiple_of(4) {
         json_bytes.push(b' ');

@@ -114,6 +114,21 @@ fn run_race_with(id: &str, max_s: u64, presence: Option<f32>) -> Raced {
         );
     }
     assert_eq!(sc.entities[0].pos[0], player_slot.pos[0]);
+    // Every slot starts inside the paved lanes, a car's half width plus the margin from their
+    // edge (not on a verge or shoulder past the kerb; a slot inside a junction box has no lane
+    // under it and is not checked).
+    for slot in &slots {
+        let d = slot.dir;
+        if let Some((lo, hi)) = catalog::paved_span(sim.world(), slot.pos, d, [d[1], -d[0]]) {
+            let edge = catalog::GRID_CAR_HALF_WIDTH_M + catalog::GRID_EDGE_MARGIN_M - 0.01;
+            assert!(
+                lo <= -edge && hi >= edge,
+                "{id}: grid slot {} at {:?} is outside the lanes ({lo:.2}..{hi:.2} m)",
+                slot.index,
+                slot.pos
+            );
+        }
+    }
     // Nobody starts nose to tail with a parked car: no parked car within a car's width of a
     // slot's first 30 m (a two-wide grid on a narrow street put a column in the parking lane).
     if sc.parked_cars {
@@ -485,8 +500,16 @@ fn loop9_circuit() {
         .filter(|x| matches!(x.status, RacerStatus::Dq(_)))
         .count();
     assert!(dqs <= 1, "{id}: {dqs} disqualified");
+    // "Left the grid" is a gate passed or 30 m of progress: since row 99 the AI races at its
+    // car's real pace through the Max-presence daytime traffic, and a racer that the police
+    // stop (or that flees them) 60–80 m into the run, before gate 1, did race. Seed sweep
+    // 1-6 + 31 on the merged tree: 3 of 7 pass both before and after row 99, failing on
+    // police outcomes / world deadlocks (see docs/integration/opponent-pace.md).
     for x in &r.results {
-        assert!(x.gates_passed >= 1, "{id}: {x:?} never left the grid");
+        assert!(
+            x.gates_passed >= 1 || x.progress_m >= 30.0,
+            "{id}: {x:?} never left the grid"
+        );
         assert!(
             matches!(
                 x.status,
@@ -556,8 +579,16 @@ fn lantern_checkpoint_draws_the_police() {
     // the whole field is busted or flees is a correct result. What must not happen is a racer
     // that never really raced (stuck on the grid in the parked cars: 0 gates) or one that
     // ends any other way than finishing or by the police.
+    // "Left the grid" is a gate passed or 30 m of progress: since row 99 the AI races at its
+    // car's real pace through the Max-presence daytime traffic, and a racer that the police
+    // stop (or that flees them) 60–80 m into the run, before gate 1, did race. Seed sweep
+    // 1-6 + 31 on the merged tree: 3 of 7 pass both before and after row 99, failing on
+    // police outcomes / world deadlocks (see docs/integration/opponent-pace.md).
     for x in &r.results {
-        assert!(x.gates_passed >= 1, "{id}: {x:?} never left the grid");
+        assert!(
+            x.gates_passed >= 1 || x.progress_m >= 30.0,
+            "{id}: {x:?} never left the grid"
+        );
         assert!(
             matches!(
                 x.status,

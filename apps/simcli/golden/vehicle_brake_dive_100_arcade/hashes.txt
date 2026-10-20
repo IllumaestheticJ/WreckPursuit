@@ -1,0 +1,9 @@
+# simcli hashes scenario=vehicle_brake_dive_100_arcade systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
+240 fe10704d84686bca
+480 e620bded9a5e827d
+720 919bf4aad8ffc22a
+960 91332a697f49cc52
+1200 429e3f6098bc4196
+1440 f4e3bc2bfc7261e0
+1680 1d1311ca24042bc6
+1800 e4c086af2e484548

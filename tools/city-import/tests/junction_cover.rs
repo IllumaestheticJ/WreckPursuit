@@ -142,6 +142,7 @@ fn check(name: &str, map: &CityMap) {
     let pts = samples(map);
     let (mut holes, mut not_paved, mut worst) = (Vec::new(), Vec::new(), 0.0f32);
     let mut in_building: Vec<u32> = Vec::new();
+    let mut seams = 0usize;
     for (node, q, z) in &pts {
         let from = z + 2.0;
         match phys.static_ground_z(*q, from, 40.0) {
@@ -153,10 +154,27 @@ fn check(name: &str, map: &CityMap) {
                 in_building.push(*node);
                 continue;
             }
-            other => holes.push(format!(
-                "node {node} at ({:.2}, {:.2}): physics {other:?}, path {z:.2}",
-                q[0], q[1]
-            )),
+            // A ray exactly on the seam between a ribbon and a junction patch can miss both
+            // (measure zero): a hole only if it is wider than a line (rays 1 cm across it miss too).
+            other => {
+                let ok: Vec<bool> = [[0.01, 0.0], [-0.01, 0.0], [0.0, 0.01], [0.0, -0.01]]
+                    .iter()
+                    .map(|o| {
+                        phys.static_ground_z([q[0] + o[0], q[1] + o[1]], from, 40.0)
+                            .is_some_and(|h| (h - z).abs() <= 0.2)
+                    })
+                    .collect();
+                // Zero width: both rays across the line (±x or ±y) land on the pavement.
+                let seam = (ok[0] && ok[1]) || (ok[2] && ok[3]);
+                if seam {
+                    seams += 1;
+                } else {
+                    holes.push(format!(
+                        "node {node} at ({:.2}, {:.2}): physics {other:?}, path {z:.2}",
+                        q[0], q[1]
+                    ));
+                }
+            }
         }
         match visual.top(*q, from) {
             Some((_, "asphalt" | "highway_concrete" | "parking" | "bus_lane")) => {}
@@ -168,7 +186,8 @@ fn check(name: &str, map: &CityMap) {
     }
     println!(
         "{name}: {} samples over {} node patches; physics within {worst:.3} m of the paths; \
-         {} misses, {} not drawn as pavement; {} in a building at nodes {:?}",
+         {} misses ({seams} exactly on a seam: rays 1 cm across it paved), {} not drawn as \
+         pavement; {} in a building at nodes {:?}",
         pts.len(),
         node_patches(map).len(),
         holes.len(),

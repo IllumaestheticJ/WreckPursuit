@@ -251,7 +251,9 @@ fn car_parked_across_a_two_lane_street_is_passed_or_turned_away_from() {
 
 #[test]
 fn multi_lane_road_changes_lane_around_a_stopped_car() {
-    let mut w = World::procedural(&ProcGenConfig::default(), cfg(4.0));
+    // 4.8 at noon on the round-13 curve (Commercial 0.75, the block this lane runs through) =
+    // the old 4.0 × 0.90: same cars.
+    let mut w = World::procedural(&ProcGenConfig::default(), cfg(4.8));
     let net = w.network().clone();
     // Arterial (2 per direction), right lane, long block.
     let lane = net
@@ -262,7 +264,8 @@ fn multi_lane_road_changes_lane_around_a_stopped_car() {
             l.kind == LaneKind::Through
                 && l.left.is_some()
                 && l.right.is_none()
-                && len_of(&net, *i) > 90.0
+                // A full block (89 m between the arterial junctions since the medians).
+                && len_of(&net, *i) > 80.0
         })
         .map(|(i, _)| i)
         .min_by(|&a, &b| {

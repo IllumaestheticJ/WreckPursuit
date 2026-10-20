@@ -8,13 +8,27 @@
 // ?style=greybox|lowpoly the art style (default low-poly dark, render/style.ts).
 // ?race=<id> starts a street race (&autopilot=1: the AI drives the player's car).
 // ?fx=low|med|high sets the crash effects quality (render/fx; default from ?gfx).
-// ?drift=c (or b)[&car=<id>] opens Drift Lab C (open pad, tune panel for the drift assist).
+// ?drift=w[&car=<id>] opens Drift Lab W (plain keyboard steering, reference-parity cars);
+// ?drift=c (or b) the old lab C (with its drift assists).
 // ?menu=1 opens the game menu's title screen on load (as the demo build does) with the developer
 // panels off by default; ?dev=0 / ?dev=1 forces the developer panels for this page.
-import { loadWasm, sim, type DriverInput, type Scenario, type ScenarioResult } from "./wasm/sim";
+import { loadWasm, sim, type AssistProfile, type DriverInput, type Scenario, type ScenarioResult } from "./wasm/sim";
 import { META_STRIDE, RACE_STRIDE, RI, RS, STATE_STRIDE, S, T, VEHICLE_KIND, W } from "./wasm/layout";
 import { POLICE_PAINT, TRAFFIC_PALETTE } from "./render/fleet";
-import { actionHeld, getBindings, installKeyboard, readInput, setInputBlocked, toggleHeadlights, type InputSource } from "./input";
+import {
+  actionHeld,
+  activeDevice,
+  getBindings,
+  getDeviceControls,
+  installKeyboard,
+  padDevice,
+  probeInput,
+  readInput,
+  setDeviceControls,
+  setInputBlocked,
+  toggleHeadlights,
+  type InputSource,
+} from "./input";
 import { actionsForKey, bindingsHelp, keyName, padName, type ActionId } from "./bindings";
 import { CrashReplayDirector, autoCrashReplay, onAutoCrashReplayChange, setAutoCrashReplay } from "./crash_replay";
 import { installTouch, setTouchSteerMode, touchSteerMode } from "./touch";
@@ -35,7 +49,7 @@ import { MapOverlay } from "./ui/map";
 import { HudLayout } from "./ui/layout";
 import { DRIFT_LAB, DriftLabPanel, driftLabScenario } from "./drift_lab_b";
 import { DRIFT_LAB_W, DRIFT_LAB_W_CAR, DriftLabWPanel, driftLabWScenario } from "./drift_lab_w";
-import { defaultGameSettings, hasStoredSettings, loadGameSettings, mountGameMenu, type GameSettings, type PlayChoice } from "../../ui-kit/src/live";
+import { defaultGameSettings, hasStoredSettings, loadGameSettings, mountGameMenu, type ControlDevice, type GameSettings, type PlayChoice } from "../../ui-kit/src/live";
 import { gfxMode } from "./render/quality";
 import { RunEndView } from "./ui/runEnd";
 import { CareerGarageView } from "../../ui-kit/src/garage/CareerGarage";
@@ -74,6 +88,8 @@ interface AppState {
   player: number;
   focus: number;
   source: InputSource;
+  /** Input-shaping profile in use (Settings → Controls): keyboard, gamepad or wheel. */
+  device: ControlDevice;
   paused: boolean;
   alpha: number;
   lastReplay: Uint8Array | null;
@@ -96,6 +112,7 @@ const app: AppState = {
   player: 1,
   focus: 1,
   source: "Keyboard",
+  device: "keyboard",
   paused: false,
   alpha: 0,
   lastReplay: null,
@@ -148,6 +165,11 @@ async function main(): Promise<void> {
   const controls = new ControlsPanel(overlay);
   const refreshHelp = () => hud.setControlsHelp(bindingsHelp(getBindings()));
   controls.onChange = refreshHelp;
+  // One source of truth for the input shaping: the game menu's settings (applied + saved there).
+  controls.shaping = {
+    get: () => gameSettings?.controls ?? getDeviceControls(),
+    set: (c) => (menu ? menu.update({ controls: c }) : setDeviceControls(c)),
+  };
   refreshHelp();
   $("controls-open").onclick = () => controls.toggle();
   // Parked cars and cones (playtest row 50): every physical prop is drawn (render/props.ts).
@@ -657,12 +679,26 @@ async function main(): Promise<void> {
     const p = store.get(PRESET_KEY);
     return p && sim.assistPresets().includes(p) ? p : null;
   };
+  /** Steering speed sensitivity for the player on `source` (Settings → Controls): the device
+   * profile's value with steering help on, 0 with it off; null for touch (TOUCH_ASSISTS) or
+   * before the menu settings exist (the preset's own value stays). */
+  const deviceSteerSpeed = (source: InputSource): number | null => {
+    if (!gameSettings || source === "Touch") return null;
+    if (!gameSettings.assists.steerHelp) return 0;
+    const device = source === "Keyboard" ? "keyboard" : padDevice();
+    return gameSettings.controls[device].steerSpeedSensitivity;
+  };
+  /** `p` with the device's steering speed sensitivity applied (see `deviceSteerSpeed`). */
+  const withDeviceSteer = (p: AssistProfile, source: InputSource): AssistProfile => {
+    const v = deviceSteerSpeed(source);
+    return v === null ? p : { ...p, steer_speed_sensitivity: v };
+  };
   const applyAssistPreset = (source: InputSource) => {
     if (isReplay()) return;
     try {
       const named = source === "Touch" ? null : storedPreset();
       if (named) {
-        sim.setAssists(app.player, sim.assistPresetNamed(named, presetSource(source)).assists);
+        sim.setAssists(app.player, withDeviceSteer(sim.assistPresetNamed(named, presetSource(source)).assists, source));
       } else {
         const preset = sim.assistPreset(source === "Touch" ? "Gamepad" : source) as unknown as Record<string, unknown>;
         // `steer_help` (game menu) is not a profile field: off zeroes the speed-sensitive steering.
@@ -670,6 +706,8 @@ async function main(): Promise<void> {
         const { steer_help: steerHelp, ...overrides } = chosen;
         Object.assign(preset, overrides);
         if (steerHelp === false) preset.steer_speed_sensitivity = 0;
+        const speed = deviceSteerSpeed(source);
+        if (speed !== null) preset.steer_speed_sensitivity = speed;
         sim.setAssists(app.player, preset as never);
       }
       if (gameSettings) {
@@ -702,13 +740,27 @@ async function main(): Promise<void> {
     }
     ($("mode") as HTMLSelectElement).value = p.mode;
     sim.setDamageMode(p.mode);
-    sim.setAssists(app.player, p.assists);
+    sim.setAssists(app.player, withDeviceSteer(p.assists, app.source));
     store.set(PRESET_KEY, name);
     store.set(ASSIST_KEY, "{}");
     syncAssistBoxes();
   };
+  /** The one-click preset the player's assists + damage mode match ("" = custom). Like
+   * `sim.assistPresetOf`, but the steering speed sensitivity only has to agree on on / off: its
+   * value is a per-device control setting (Settings → Controls), not part of the preset. */
+  const activePreset = (): string => {
+    const src = presetSource(app.source);
+    const norm = (a: AssistProfile) => JSON.stringify({ ...a, steer_speed_sensitivity: a.steer_speed_sensitivity > 0 });
+    const cur = norm(sim.assists(app.player));
+    const mode = modeName();
+    for (const name of sim.assistPresets()) {
+      const p = sim.assistPresetNamed(name, src);
+      if (p.mode === mode && norm(p.assists) === cur) return name;
+    }
+    return "";
+  };
   const syncPresetButtons = () => {
-    const active = isReplay() ? "" : sim.assistPresetOf(app.player, presetSource(app.source));
+    const active = isReplay() ? "" : activePreset();
     document.querySelectorAll<HTMLButtonElement>("button.preset").forEach((b) => {
       b.setAttribute("aria-pressed", String(b.dataset.p === active));
     });
@@ -1036,6 +1088,8 @@ async function main(): Promise<void> {
   const DEBUG_LAYERS = ["lattice", "stress", "tireForces", "suspension", "slipColour", "contacts", "cgVelocity", "intents", "components", "regions", "events", "telemetry", "inputs"];
   const applySettings = (next: GameSettings, prev: GameSettings | null) => {
     gameSettings = next;
+    setDeviceControls(next.controls);
+    controls.refreshShaping();
     const dev = devParam === "1" ? true : devParam === "0" ? false : next.developer;
     document.body.classList.toggle("wp-player", !dev);
     if (dev) document.body.classList.remove("demo");
@@ -1060,6 +1114,8 @@ async function main(): Promise<void> {
         applyAssistPreset(app.source);
       }
     }
+    // Per-device steering speed sensitivity: a control setting, so the preset stays chosen.
+    if (prev && JSON.stringify(prev.controls) !== JSON.stringify(next.controls) && !app.scenario && !app.bench) applyAssistPreset(app.source);
     const modeSel = $("mode") as HTMLSelectElement;
     if (!prev) modeSel.value = next.damageMode;
     else if (prev.damageMode !== next.damageMode && !isReplay() && !sim.careerRunActive()) {
@@ -1099,6 +1155,7 @@ async function main(): Promise<void> {
       },
       openControls: () => controls.open(),
       controlsOpen: () => controls.isOpen,
+      inputProbe: () => probeInput(),
       apply: applySettings,
       onOpenChange: (open) => {
         // Pause the sim (and a replay's playback) while any menu screen is up; block driving input.
@@ -1199,8 +1256,10 @@ async function main(): Promise<void> {
     const { input, source, edges } = readInput(dt);
     for (const a of edges) doAction(a);
     app.input = input;
-    if (source !== app.source) {
+    const device = activeDevice();
+    if (source !== app.source || device !== app.device) {
       app.source = source;
+      app.device = device;
       if (!app.scenario && !app.bench) applyAssistPreset(source);
     }
     // The full city map pauses driving input (the sim keeps running): coast with light brakes.
@@ -1236,6 +1295,7 @@ async function main(): Promise<void> {
     for (let o = 0; o < meta.length; o += META_STRIDE) app.views.get(meta[o])?.setMeta(meta[o + 2], tS);
     const cur = sim.states();
     const prev = sim.statesPrev();
+    const punctures = sim.tirePunctures();
     const forcesOn = layers.on("tireForces");
     let focusTel: Float32Array | null = null;
     let focusRec = -1;
@@ -1249,6 +1309,8 @@ async function main(): Promise<void> {
       // them (background traffic / police only when focused).
       const tel = view.focused || (forcesOn && !view.background) ? sim.telemetry(id) : NO_TEL;
       view.update(cur, o, prev.length > o ? prev : cur, o, app.alpha, tel, app.paused && !replay ? 0 : dt);
+      // tire_punctures() lists vehicles in the same order as vehicle_states().
+      view.setPunctures(punctures, i * 4);
       if (id === app.focus) {
         focusTel = tel;
         focusRec = o;
@@ -1312,6 +1374,7 @@ async function main(): Promise<void> {
     prof.lap("ui");
     scene.update(dt, sim.intents());
     scene.updateHelicopters(policeDraw, tS);
+    scene.updatePoliceTools(sim.policeTools(), tS);
     const wx = sim.weatherInfo();
     scene.setTimeOfDay(wi[W.night], wx[0] > 0.5 ? wx[7] : 1);
     prof.lap("traffic");
@@ -1529,8 +1592,13 @@ async function main(): Promise<void> {
     sim,
     app,
     scene,
-    /** Controls panel (rebinding) and the live bindings. */
+    /** Controls panel (rebinding, per-device shaping) and the live bindings. */
     controls,
+    /** Processed steering / pedals from what is held now (works under menus; fires nothing). */
+    inputProbe: probeInput,
+    /** Per-device input shaping in use (Settings → Controls) and the active device. */
+    deviceControls: getDeviceControls,
+    activeDevice,
     /** Instant crash replay director (`crash.phase`, `crash.last`, `crash.accept()`). */
     crash,
     /** Settings hook (pause menu): play crash replays without asking. */

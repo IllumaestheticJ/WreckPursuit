@@ -7,8 +7,15 @@
 //
 // Everything held is released when it could miss its release: window blur, tab hidden, context
 // menu, focus moving into a form control (keyboard), and the pad disconnecting.
+//
+// Per-device shaping (game menu → Settings → Controls; ui-kit `menu/controls.ts`): after the
+// keyboard ramps, or after the pad's deadzone + curve, steering goes through `shapeSteer` and
+// each pedal through `shapePedal` with the active device's profile. A pad whose id mentions
+// "wheel" uses the wheel profile. `probeInput` computes the same processed values from what is
+// held right now even while game input is blocked (menu / panel test bars), firing nothing.
 import type { DriverInput } from "./wasm/sim";
 import { ACTIONS, loadBindings, type ActionId, type Bindings, type PadControl } from "./bindings";
+import { defaultControls, shapePedal, shapeSteer, type ControlDevice, type DeviceControls, type InputProbe } from "../../ui-kit/src/menu/controls";
 
 export type InputSource = "Keyboard" | "Gamepad" | "Touch";
 
@@ -46,8 +53,32 @@ export function setInputBlocked(on: boolean): void {
 /** Is game input blocked by the settings panel? */
 export const inputBlocked = (): boolean => blocked;
 
+/** Per-device shaping profiles (the game menu's settings; main keeps them in step). */
+let deviceControls: Record<ControlDevice, DeviceControls> = defaultControls();
+
+/** Replace the per-device shaping profiles (game menu settings changed). */
+export function setDeviceControls(c: Record<ControlDevice, DeviceControls>): void {
+  deviceControls = c;
+}
+
+/** The live per-device shaping profiles. */
+export const getDeviceControls = (): Record<ControlDevice, DeviceControls> => deviceControls;
+
+/** Keys physically held right now, tracked before anything (menu, panel, rebinding) can swallow
+ * the event, and never cleared by blocking: the test bars read these. */
+const rawHeld = new Set<string>();
+
 /** `onKey` gets every game keydown (not repeats' edges; check `e.repeat`). */
 export function installKeyboard(onKey: (e: KeyboardEvent) => void): void {
+  // First listener of all (window, capture): the raw key state for `probeInput`.
+  window.addEventListener("keydown", (e) => rawHeld.add(e.code), { capture: true });
+  window.addEventListener("keyup", (e) => {
+    rawHeld.delete(e.code);
+    if (e.key === "Meta") rawHeld.clear();
+  });
+  const releaseRaw = () => rawHeld.clear();
+  window.addEventListener("blur", releaseRaw);
+  document.addEventListener("visibilitychange", releaseRaw);
   // Capture phase so a rebind swallows the key before anything else (audio, map, layers) sees it.
   window.addEventListener(
     "keydown",
@@ -140,6 +171,48 @@ function ramp(cur: number, target: number, up: number, down: number, dt: number)
   return Math.abs(d) <= step ? target : cur + Math.sign(d) * step;
 }
 
+/** Keyboard ramp state (steer -1..1, pedals 0..1, before shaping). */
+type KeyRamps = { steer: number; throttle: number; brake: number; clutch: number };
+
+/** Advance the keyboard ramps by `dt` from the actions `on(id)` reports held. */
+function stepKeyRamps(k: KeyRamps, on: (id: ActionId) => boolean, dt: number): void {
+  const left = on("steerLeft") ? 1 : 0;
+  const right = on("steerRight") ? 1 : 0;
+  // Steer keys go to the sim raw (−1 / 0 / +1), as in the owner's reference game: the key
+  // ramp is the car's steering model (wp_vehicle::steering::key_steer, or the plain rack in
+  // Drift Lab W), so replays, the AI and every client see the same steering path.
+  k.steer = right - left;
+  // Fast key ramp: the sim's keyboard assist preset filters the pedal again (~0.23 s).
+  // Drift Lab W: raw throttle key (0 / 1).
+  const thrKey = on("throttle") ? 1 : 0;
+  k.throttle = rawKeys ? thrKey : ramp(k.throttle, thrKey, 12.0, 12.0, dt);
+  k.brake = ramp(k.brake, on("brake") ? 1 : 0, 6.0, 10.0, dt);
+  // Clutch key: in fast (0.1 s), out over ~0.3 s so a key release can still launch the car.
+  k.clutch = ramp(k.clutch, on("clutch") ? 1 : 0, 10.0, 3.5, dt);
+}
+
+/** Steering + pedals through one device's shaping profile. */
+function shaped(v: KeyRamps, c: DeviceControls): KeyRamps {
+  return {
+    steer: shapeSteer(v.steer, c),
+    throttle: shapePedal(v.throttle, c.throttleDeadzone, c.throttleSaturation),
+    brake: shapePedal(v.brake, c.brakeDeadzone, c.brakeSaturation),
+    clutch: shapePedal(v.clutch, c.clutchDeadzone, c.clutchSaturation),
+  };
+}
+
+/** Profile for the connected pads: "wheel" when any connected device's id mentions a wheel
+ * (bindings read every pad together, so a wheel + separate pedals count as one wheel). */
+export function padDevice(pads: Gamepad[] = allPads()): "gamepad" | "wheel" {
+  return pads.some((p) => /wheel/i.test(p.id)) ? "wheel" : "gamepad";
+}
+
+/** Which shaping profile drives the player right now (touch has no profile: "gamepad"'s
+ * speed sensitivity is not used for touch, which keeps its own assists). */
+export function activeDevice(): ControlDevice {
+  return source === "Keyboard" ? "keyboard" : source === "Gamepad" ? padDevice() : "gamepad";
+}
+
 /** Every connected gamepad / wheel (a wheel's pedals can be a separate device). */
 export function allPads(): Gamepad[] {
   const pads = navigator.getGamepads ? navigator.getGamepads() : [];
@@ -160,6 +233,11 @@ export function padValue(pad: Gamepad, c: PadControl): number {
 /** Largest deadzoned value of an action's controls over every connected pad. Bindings are not
  * tied to one device, so a wheel's clutch pedal and a pad's stick can drive together. */
 function padAction(pads: Gamepad[], id: ActionId): number {
+  return padActionIn(pads, id);
+}
+
+/** `padAction` without side effects (shared by the game read and the probe). */
+function padActionIn(pads: Gamepad[], id: ActionId): number {
   let v = 0;
   for (const pad of pads) {
     for (const c of bindings.pad[id]) {
@@ -195,6 +273,12 @@ export function setTouchReader(fn: ((dt: number) => AnalogRead | null) | null): 
   touchReader = fn;
 }
 
+/** Pad steering (deadzone + curve) and pedals (deadzoned), before the device's shaping. */
+function padAnalog(values: Partial<Record<ActionId, number>>): KeyRamps {
+  const steer = (values.steerRight ?? 0) - (values.steerLeft ?? 0);
+  return { steer: curve(steer, bindings.padCurve), throttle: values.throttle ?? 0, brake: values.brake ?? 0, clutch: values.clutch ?? 0 };
+}
+
 function readGamepad(): PadRead | null {
   const pads = allPads();
   if (!pads.length) {
@@ -211,13 +295,13 @@ function readGamepad(): PadRead | null {
     if (a.kind === "edge" && now[a.id] && !padPrev[a.id] && a.id !== "gearUp" && a.id !== "gearDown") edges.push(a.id);
   }
   const rising = (id: ActionId) => !!now[id] && !padPrev[id];
-  const steer = (values.steerRight ?? 0) - (values.steerLeft ?? 0);
+  const v = shaped(padAnalog(values), deviceControls[padDevice(pads)]);
   const input: DriverInput = {
-    steer: curve(steer, bindings.padCurve),
-    throttle: values.throttle ?? 0,
-    brake: values.brake ?? 0,
+    steer: v.steer,
+    throttle: v.throttle,
+    brake: v.brake,
     handbrake: now.handbrake ? 1 : 0,
-    clutch: values.clutch ?? 0,
+    clutch: v.clutch,
     gearUp: rising("gearUp"),
     gearDown: rising("gearDown"),
     horn: !!now.horn,
@@ -227,6 +311,39 @@ function readGamepad(): PadRead | null {
   padHeld = values;
   const active = Object.values(values).some((v) => (v ?? 0) > 0) || pads.some((p) => p.buttons.some((b) => b.pressed));
   return { input, active, edges };
+}
+
+/** Actions whose keys make the keyboard the active source. */
+const DRIVE_ACTIONS: ActionId[] = ["steerLeft", "steerRight", "throttle", "brake", "handbrake", "clutch"];
+
+/** The probe's own keyboard ramps (the game's are zeroed while input is blocked). */
+const probeKb: KeyRamps = { steer: 0, throttle: 0, brake: 0, clutch: 0 };
+let probeLastMs: number | null = null;
+let probeSource: ControlDevice | null = null;
+
+/**
+ * Processed steering / pedals from what is held right now, through the same ramps and shaping
+ * as `readInput`, for the settings test bars. Works while game input is blocked (menu, controls
+ * panel); fires no actions and leaves the game's ramps, edges and pad state alone. Call it once
+ * per animation frame: the keyboard ramps advance by the real time since the previous call.
+ */
+export function probeInput(nowMs: number = performance.now()): InputProbe {
+  const dt = probeLastMs === null ? 0 : Math.min(0.1, Math.max(0, (nowMs - probeLastMs) / 1000));
+  probeLastMs = nowMs;
+  const on = (id: ActionId) => bindings.keys[id].some((c) => rawHeld.has(c));
+  stepKeyRamps(probeKb, on, dt);
+  const pads = allPads();
+  let pad: KeyRamps | null = null;
+  if (pads.length) {
+    const values: Partial<Record<ActionId, number>> = {};
+    for (const id of ["steerLeft", "steerRight", "throttle", "brake", "clutch"] as ActionId[]) values[id] = padActionIn(pads, id);
+    pad = padAnalog(values);
+    if (Object.values(values).some((x) => (x ?? 0) > 0)) probeSource = padDevice(pads);
+  }
+  if (DRIVE_ACTIONS.some(on)) probeSource = "keyboard";
+  const want: ControlDevice = probeSource ?? activeDevice();
+  if (want !== "keyboard" && pad) return { device: want, ...shaped(pad, deviceControls[want]) };
+  return { device: "keyboard", ...shaped(probeKb, deviceControls.keyboard) };
 }
 
 /** Read the current input. `dt` drives the keyboard ramps. Switches the source to whichever
@@ -240,26 +357,15 @@ export function readInput(dt: number): { input: DriverInput; source: InputSource
     kb.steer = kb.throttle = kb.brake = kb.clutch = 0;
     return { input: { ...NEUTRAL, headlights }, source, edges: [] };
   }
-  const left = keyAction("steerLeft") ? 1 : 0;
-  const right = keyAction("steerRight") ? 1 : 0;
-  const keyActive = left || right || keyAction("throttle") || keyAction("brake") || keyAction("handbrake") || keyAction("clutch");
-  // Steer keys go to the sim raw (−1 / 0 / +1), as in the owner's reference game: the key
-  // ramp (6/s in and out, row 102) is the car's steering model now
-  // (wp_vehicle::steering::key_steer), so replays, the AI and every client see the same
-  // steering path, and in a slide or under the handbrake the key acts at once.
-  kb.steer = right - left;
-  // Fast key ramp: the sim's keyboard assist preset filters the pedal again (~0.23 s).
-  const thrKey = keyAction("throttle") ? 1 : 0;
-  kb.throttle = rawKeys ? thrKey : ramp(kb.throttle, thrKey, 12.0, 12.0, dt);
-  kb.brake = ramp(kb.brake, keyAction("brake") ? 1 : 0, 6.0, 10.0, dt);
-  // Clutch key: in fast (0.1 s), out over ~0.3 s so a key release can still launch the car.
-  kb.clutch = ramp(kb.clutch, keyAction("clutch") ? 1 : 0, 10.0, 3.5, dt);
+  const keyActive = DRIVE_ACTIONS.some((id) => keyAction(id));
+  stepKeyRamps(kb, keyAction, dt);
+  const k = shaped(kb, deviceControls.keyboard);
   const keyboard: DriverInput = {
-    steer: kb.steer,
-    throttle: kb.throttle,
-    brake: kb.brake,
+    steer: k.steer,
+    throttle: k.throttle,
+    brake: k.brake,
     handbrake: keyAction("handbrake") ? 1 : 0,
-    clutch: kb.clutch,
+    clutch: k.clutch,
     gearUp: keyEdge("gearUp"),
     gearDown: keyEdge("gearDown"),
     horn: keyAction("horn"),

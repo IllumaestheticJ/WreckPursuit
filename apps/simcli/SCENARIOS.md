@@ -28,6 +28,7 @@ Parsing uses RON with `implicit_some`, so optional fields are written plainly
     slow: false,                     // true = minutes of a full city: debug `cargo test` skips it (release CI runs it)
     systems: "vehicle,damage,world", // optional; default all. --systems overrides. "net" adds the snapshot round trip
     barriers: [(pos: (0.0, 20.0, 0.75), size: (8.0, 1.0, 1.5), yaw: 0.0)],  // static boxes (rigid walls)
+    police_orders: [(t_s: 0.0, order: spikes_at(target: "car", pos: (0.0, 50.0), dir: (0.0, 1.0)))],
     weather: (kind: HeavyRain, intensity: 1.0, water_mm: 1.5, locked: true), // optional; see below
     entities: [ … ],                 // spawn order = entity id order (1, 2, 3, …); may be empty
     duration_s: 8.0,
@@ -80,6 +81,23 @@ route POIs `"<name> entry"`, `"<name> lay-by"` (mid-tunnel kerb lane) and `"<nam
 
 `barriers` are static boxes (`Sim::add_static_box`): centre `pos`, full `size` `[x, y, z]`,
 `yaw` about +Z. Contacts with them reach damage as static world geometry.
+
+`police_orders` deploy police tools at `t_s` (applied once, at tick `round(t_s/dt)`):
+- `roadblock(target: "car")` and `spikes(target: "car")` are captain orders
+  (`Sim::captain_command`). wp_police checks them: the target must be in a pursuit and wanted
+  enough (spikes from L2, roadblock from L3), and a refusal shows up in `summary.json` →
+  `police_orders[].result`.
+- `roadblock_at(target, pos: (x, y), dir: (dx, dy))` and `spikes_at(…)` place the tool
+  directly at `pos`, across a road heading `dir` (`PoliceSystem::place_roadblock_at` /
+  `place_spikes_at`). This works on the flat world and needs no pursuit, which makes it the
+  form to use for deterministic tests. `target` is the racer the tool is aimed at.
+
+Roadblock barriers are **dynamic rigid bodies** (mass from `data/police/tools.toml`): a car
+that hits one shoves it and takes damage from the contact. They are removed when the
+roadblock expires. A spike strip punctures every wheel of any racer that crosses it, and each
+punctured tyre deflates linearly over `deflate_s` (5 s): smaller rolling radius and less
+grip (`HandlingEffects::tire_puncture`). The barrier body poses are part of the state hash
+(spec v4).
 
 `weather` (optional; omitted = no weather system, dry and clear, as before) turns on
 `wp_weather` (`Sim::set_weather`): `kind` is `Clear | Overcast | LightRain | HeavyRain | Fog`,
@@ -162,6 +180,8 @@ from spawn), `path_length_m`, `final_health`, `max_lateral_g`, `max_long_g`,
 `total_loss` (0/1), `min_z_m`, `off_road_s` (time not on any lane, junction connector or
 junction box at about its height; city runs only), `max_airborne_s` (longest stretch with all
 four wheels off the ground), `route_progress` (fraction of a `follow_route` route covered, 0
+without one), `max_spike_puncture` (largest police spike deflation on any wheel, 0..1),
+`spiked_wheels` (wheels a spike strip has punctured, 0..4).
 without one), `max_los_lost_s` (longest stretch of a pursuit with no police line of sight on the
 entity, s; 0 without police).
 
@@ -174,7 +194,9 @@ lane changes made for it), `traffic_turnarounds` (civilians that turned around o
 to the last junction because their lane was blocked), `traffic_siren_yields` (civilians that
 pulled over for a siren unit coming up behind them), `props`
 (parked cars and cones turned into bodies), `static_boxes`, `police_units_max` (most police
-units alive at once), `police_units_final`.
+units alive at once), `police_units_final`, `roadblock_barriers_max` (most roadblock barrier bodies at once),
+`spike_strips_max`, `barrier_displaced_max_m` (furthest any barrier body was pushed from
+where it spawned). The police tool metrics also work on the flat world.
 
 Use ranges, never exact numbers: the hash goldens already pin exact behaviour, and ranges
 describe what "correct" means so they survive tuning.

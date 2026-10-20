@@ -113,6 +113,13 @@ export const VEHICLE_KIND = { player: 0, aiRacer: 1, police: 2, traffic: 3 } as 
 /** vehicle_meta() flag bits (from the input the vehicle drives with). */
 export const META_FLAG = { siren: 1, headlights: 2, brake: 4, horn: 8 } as const;
 
+/** Floats per record in police_tools(): [kind, x, y, z, qx, qy, qz, qw, hx, hy, hz]. */
+export const TOOL_STRIDE = 11;
+/** Offsets inside one police_tools() record (box centre, orientation, half extents). */
+export const TL = { kind: 0, x: 1, y: 2, z: 3, qx: 4, qy: 5, qz: 6, qw: 7, hx: 8, hy: 9, hz: 10 } as const;
+/** police_tools() kinds. */
+export const TOOL_KIND = { barrier: 0, spikes: 1 } as const;
+
 /** `race_standings()` record (wp_wasm::race::STANDING_STRIDE floats per racer). */
 export const RACE_STRIDE = 10;
 export const RS = {
@@ -156,3 +163,13 @@ export const P = { kind: 0, pos: 1, rot: 4, half: 8 } as const;
 export const PROP_KIND = { parkedCar: 0, cone: 1 } as const;
 /** Floats per record in props_moved(): [prop index, x, y, z, qx, qy, qz, qw]. */
 export const PROP_MOVED_STRIDE = 8;
+
+/** Wheel-centre height in chassis space for a reported compression (matches wp_vehicle: the
+ * hub sits at `position_m` at the static compression; playtest row 92 — drawing it at half
+ * the travel left wheels 1–3 cm off the road). */
+export function wheelCentreZ(
+  wi: { position_m: [number, number, number]; travel_m: number; static_compression_m?: number },
+  compression: number,
+): number {
+  return wi.position_m[2] + compression - (wi.static_compression_m ?? wi.travel_m * 0.5);
+}

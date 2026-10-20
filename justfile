@@ -48,6 +48,11 @@ server-bots n="32":
 sim scenario:
     cargo run --release -p simcli -- {{scenario}}
 
+# Reference-game parity suite: measure the owner's keyboard settings on three cars and
+# rewrite the table in docs/reference/wreckfest-parity.md (~3 s release).
+parity:
+    cargo run --release -p wp_vehicle --example parity -- --write
+
 # Regenerate JSON Schemas into schemas/ (integration lead only).
 schemas:
     cargo run -p wp_contracts --bin gen-schemas

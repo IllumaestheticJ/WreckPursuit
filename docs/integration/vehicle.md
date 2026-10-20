@@ -1090,3 +1090,160 @@ slide: release-the-keys power exits with TCS off (4 cars × 44, lat 0.5–0.8 g 
 0.2–1.2 s) fell from 132 to 109 (rampart 27 → 18), and with 0.015 → 0.05 a test case spun. Kept
 0.03 → 0.08. Not tried yet: an onset on yaw-rate error.
 
+
+## Drift lab, step 1 (A, 2026-10-20) — rows 90 / 91 / 98 workbench
+
+On the owner's keyboard-feel focus (lead: short cycles, light gate per push: `cargo test -p
+wp_vehicle`, wasm build, `tsc`; full gate once the owner is happy).
+
+- **Testbed "drift lab"** (`drift lab` button, `?drift=1`): flat asphalt free drive at noon (no
+  traffic, police or parked cars on the flat world), orange cones 12 m apart marking a course in
+  front of the spawn: 120 m run-up, 90° right (r 22 m), 70 m, 90° left (r 22 m), 60 m, long left
+  sweeper (r 70 m, 180°). Pick the car in the car selector and TCS / ESC in the assist row.
+- **Tuning panel** (F8 or `tune`): countersteer %, align onset / full slip, slew boost,
+  save-lock onset / full, and (inactive until rows 91 / 98 land) hold gain, throttle shaping,
+  envelope. Readout: slide angle, assist mode (off / straighten / catch; hold / exceeded with
+  row 91), envelope. A runtime override only: `wp_vehicle::DriftTuning` per vehicle
+  (`Vehicle::set_drift_tuning`), defaults = the shipped constants (goldens unchanged), not in
+  snapshots or replay ops (a tuned session does not replay bit-exactly); the panel remembers
+  its values in localStorage `wp.driftTuning`, "defaults" resets. Never written to data.
+- **New API:** `wp_vehicle::{DriftTuning, AssistMode, steering::assist_mode}`,
+  `Telemetry::{assist_mode, body_slip_deg, envelope_deg}`; `wp_wasm::set_drift_tuning(entity,
+  Float32Array[8])`, `drift_tuning(entity)`, `drift_state(entity)` (`[slip °, mode, envelope °]`),
+  `DRIFT_TUNING_FIELDS`.
+- **Outside my crates (minimal):** `wp_sim::Sim::set_drift_tuning` (lead's crate; no mutable
+  vehicle access existed), `wp_wasm::Session::set_drift_tuning` + `wp_vehicle` as a direct
+  `wp_wasm` dependency (workspace crate, wasm-clean), testbed (C's) `src/drift_lab.ts` (new),
+  `src/main.ts` (button, `?drift`, frame update), `src/wasm/sim.ts`, `index.html`,
+  `e2e/drift_lab.mjs` (new, in `npm run e2e`).
+
+## Owner row 91, step 2 (A, 2026-10-20) — drift "hold" mode
+
+Keyboard / gamepad (`steer_speed_sensitivity > 0`, help > 0; the wheel preset is untouched;
+same in both modes). Intent each tick: keys released → **straighten** (rows 57 / 90); key
+against the slide → **catch** (row 90); key **into** the turn with throttle while the rear
+slides past 0.17 rad (~10°) → **hold** (`wp_vehicle::drift`):
+
+- Steering: front-axle travel + a little bite toward the corner (0.5 × the front tyres' peak
+  slip) + `hold_gain × (β − β*)`, the correction bounded to ±0.06 rad. β* follows β with a
+  1/8 s time constant, so the hold resists quick changes of the slide angle and throttle still
+  grows / shrinks it. The rack moves at the fast catch rate.
+- Throttle (keyboard / gamepad pedal filter only): trimmed by up to 40 % × help while the
+  slide exceeds β*, fading to nothing over the last 40 % of the envelope.
+- Envelope: `envelope_deg × (0.6 + 0.4 × help)` (45° tuning → 37.8° at 60 %, 45° at 100 %),
+  up to +15 % after > 1 s of steady hold. Past it: mode **exceeded**, the assist lets go.
+- Allowed within the 0.5 s handbrake grace (a handbrake flick into a powered drift), never
+  while the handbrake is pulled; no grip added, no yaw torque. Hold state in the snapshot
+  (format 8). Drift lab: hold gain and envelope sliders are now live; the readout shows hold
+  (blue) / exceeded (red).
+
+Measured (`cargo run --release -p wp_vehicle --example drift`, `metrics::drift_run`: 30 m
+circle at 0.6 g, 0.35 s handbrake flick + full throttle into the corner, then 6 s; TCS / ESC
+off). Good = key into the turn, throttle on below 25° / off above (keys) or proportional
+(gamepad); sloppy = key into the turn + full throttle held; naive = keys released, off the
+throttle; lift = good for 2 s, then lift and let go. Before = the same build with the hold
+switched off.
+
+| car | preset | help | good: drift s / sd ° / spun | sloppy: drift s / max ° / spun | naive recovered | lift: max ° / recovered |
+|---|---|---|---|---|---|---|
+| shiro_turbo | keys | 30 % |  1.0 / 10.9 / spun  →  3.7 / 6.0 / no  |  0.9 / 165 / spun  →  4.9 / 26 / no  |  no  →  yes  |  180 / no  →  37 / no  |
+| shiro_turbo | keys | 60 % |  0.6 / 9.1 / spun  →  3.8 / 11.7 / no  |  0.6 / 162 / spun  →  5.4 / 28 / no  |  no  →  yes  |  180 / no  →  24 / yes  |
+| shiro_turbo | keys | 100 % |  0.5 / 9.6 / spun  →  4.0 / 11.1 / no  |  0.5 / 163 / spun  →  5.5 / 28 / no  |  yes  →  yes  |  180 / no  →  25 / yes  |
+| shiro_turbo | gamepad | 30 % |  0.6 / 10.6 / spun  →  5.4 / 3.1 / no  |  0.6 / 180 / spun  →  5.3 / 27 / no  |  no  →  yes  |  180 / no  →  42 / no  |
+| shiro_turbo | gamepad | 60 % |  0.6 / 10.6 / spun  →  5.4 / 3.1 / no  |  0.6 / 180 / spun  →  5.3 / 27 / no  |  no  →  yes  |  180 / no  →  23 / yes  |
+| shiro_turbo | gamepad | 100 % |  0.6 / 10.6 / spun  →  5.4 / 3.3 / no  |  0.6 / 180 / spun  →  5.2 / 27 / no  |  yes  →  yes  |  180 / no  →  23 / yes  |
+| sperber_32 | keys | 30 % |  0.6 / 9.2 / spun  →  3.3 / 8.3 / spun  |  0.6 / 162 / spun  →  6.0 / 28 / no  |  no  →  no  |  180 / no  →  27 / yes  |
+| sperber_32 | keys | 60 % |  0.5 / 8.7 / spun  →  1.9 / 6.5 / no  |  0.5 / 161 / spun  →  6.0 / 30 / no  |  no  →  yes  |  180 / no  →  39 / no  |
+| sperber_32 | keys | 100 % |  0.5 / 8.5 / spun  →  2.8 / 8.2 / spun  |  0.5 / 161 / spun  →  6.0 / 30 / no  |  no  →  yes  |  180 / no  →  35 / no  |
+| sperber_32 | gamepad | 30 % |  0.5 / 9.8 / spun  →  5.8 / 3.4 / no  |  0.5 / 180 / spun  →  6.0 / 28 / no  |  no  →  no  |  180 / no  →  56 / no  |
+| sperber_32 | gamepad | 60 % |  0.5 / 9.8 / spun  →  5.7 / 3.2 / no  |  0.5 / 180 / spun  →  5.9 / 27 / no  |  no  →  yes  |  180 / no  →  26 / yes  |
+| sperber_32 | gamepad | 100 % |  0.5 / 9.8 / spun  →  5.7 / 3.2 / no  |  0.5 / 180 / spun  →  5.8 / 28 / no  |  no  →  yes  |  180 / no  →  26 / yes  |
+| rampart_50 | keys | 30 % |  0.6 / 10.5 / spun  →  1.4 / 10.3 / no  |  0.6 / 154 / spun  →  6.0 / 33 / no  |  no  →  no  |  180 / no  →  54 / no  |
+| rampart_50 | keys | 60 % |  0.7 / 9.8 / spun  →  4.5 / 7.8 / no  |  0.7 / 153 / spun  →  6.0 / 32 / no  |  yes  →  yes  |  180 / no  →  33 / yes  |
+| rampart_50 | keys | 100 % |  1.0 / 12.6 / spun  →  5.0 / 7.5 / no  |  0.9 / 158 / spun  →  5.9 / 31 / no  |  yes  →  yes  |  180 / no  →  25 / yes  |
+| rampart_50 | gamepad | 30 % |  0.7 / 11.4 / spun  →  6.0 / 3.0 / no  |  0.7 / 179 / spun  →  6.0 / 32 / no  |  no  →  no  |  180 / no  →  32 / yes  |
+| rampart_50 | gamepad | 60 % |  0.7 / 11.3 / spun  →  6.0 / 3.0 / no  |  0.7 / 178 / spun  →  6.0 / 31 / no  |  yes  →  yes  |  180 / no  →  27 / yes  |
+| rampart_50 | gamepad | 100 % |  0.7 / 11.3 / spun  →  6.0 / 3.1 / no  |  0.7 / 178 / spun  →  6.0 / 32 / no  |  yes  →  yes  |  180 / no  →  26 / yes  |
+| debug_sedan | keys | 30 % |  1.2 / 2.9 / no  →  0.4 / 1.3 / no  |  1.2 / 20 / no  →  0.4 / 15 / no  |  no  →  yes  |  20 / yes  →  15 / yes  |
+| debug_sedan | keys | 60 % |  2.5 / 6.4 / no  →  0.4 / 2.3 / no  |  1.4 / 27 / no  →  0.4 / 18 / no  |  yes  →  yes  |  29 / no  →  18 / yes  |
+| debug_sedan | keys | 100 % |  2.3 / 8.2 / no  →  0.5 / 2.9 / no  |  1.5 / 31 / no  →  0.5 / 20 / no  |  yes  →  yes  |  34 / no  →  20 / yes  |
+| debug_sedan | gamepad | 30 % |  1.6 / 5.2 / no  →  0.4 / 2.5 / no  |  1.5 / 30 / no  →  0.4 / 19 / no  |  no  →  yes  |  29 / yes  →  19 / yes  |
+| debug_sedan | gamepad | 60 % |  1.6 / 5.2 / no  →  0.4 / 2.5 / no  |  1.5 / 30 / no  →  0.4 / 19 / no  |  yes  →  yes  |  29 / yes  →  19 / yes  |
+| debug_sedan | gamepad | 100 % |  1.6 / 5.2 / no  →  0.4 / 2.5 / no  |  1.5 / 30 / no  →  0.4 / 19 / no  |  yes  →  yes  |  29 / yes  →  19 / yes  |
+| junkyard_beater | keys | 30 % |  1.5 / 4.0 / no  →  0.4 / 2.9 / no  |  1.5 / 27 / no  →  0.4 / 20 / no  |  yes  →  yes  |  27 / yes  →  20 / yes  |
+| junkyard_beater | keys | 60 % |  1.9 / 8.6 / no  →  0.4 / 3.5 / no  |  1.5 / 33 / no  →  0.4 / 22 / no  |  yes  →  yes  |  35 / no  →  22 / yes  |
+| junkyard_beater | keys | 100 % |  1.8 / 9.5 / no  →  0.3 / 3.6 / no  |  1.5 / 35 / no  →  0.3 / 22 / no  |  yes  →  yes  |  42 / no  →  22 / yes  |
+| junkyard_beater | gamepad | 30 % |  1.8 / 5.3 / no  →  0.2 / 1.9 / no  |  1.6 / 26 / no  →  0.2 / 16 / no  |  yes  →  yes  |  27 / yes  →  16 / yes  |
+| junkyard_beater | gamepad | 60 % |  1.9 / 5.5 / no  →  0.2 / 1.8 / no  |  1.6 / 26 / no  →  0.2 / 16 / no  |  yes  →  yes  |  27 / yes  →  16 / yes  |
+| junkyard_beater | gamepad | 100 % |  1.9 / 5.5 / no  →  0.2 / 1.7 / no  |  1.6 / 26 / no  →  0.2 / 15 / no  |  yes  →  yes  |  27 / yes  →  15 / yes  |
+
+**Read:** RWD cars went from spinning within 0.5–1 s in every case to 1.4–6 s held drifts with
+3–12° wobble (keyboard taps are wobblier than the stick). The naive released-keys driver now
+recovers at 60 %+ on all three RWD cars (at 30 % on shiro only), and an abrupt lift snaps (to
+23–56°) and recovers at 60 %+ except sperber on keys (39° / 35°). **Open:**
+(1) the sloppy full-throttle driver no longer spins: the hold settles a held-W drift at
+26–33°, inside the envelope, so the punishment the brief asks for is not there yet for that
+mistake (tunable now: a smaller envelope or hold gain in the drift lab; candidate fix: let
+the trim fade start earlier, or back off on sustained full throttle at > 0.6 × envelope).
+(2) FWD (debug_sedan, junkyard_beater): drifts are shorter with the hold (they straighten),
+as a FWD car pulls out of a slide under power. (3) the keyboard good driver spins in 2 of 18
+RWD cases: its on/off throttle taps cause lift-off snaps.
+
+## Owner row 98, step 3 (A, 2026-10-20) — keyboard throttle smoothing with TCS off
+
+Step 2 of the lead's order (re-measure with only the row-90 steering fix) showed held-throttle
+TCS-off exits unchanged (rows 90 notes), so a light smoothing follows (`wp_vehicle::throttle`),
+only with TCS off and never on the wheel preset:
+
+- **Rise ramp:** pedal 0 → 1 no faster than `s × (0.25 + 0.65 × low-gear × (0.4 + 0.6 × slow) ×
+  power)` s (low-gear 1 in 1st/2nd, 0.5 in 3rd, 0.2 above; slow fades out by 20 m/s; power =
+  the car's slide class, i.e. power-to-weight × RWD share): ~0.87 s for a powerful RWD in 2nd
+  from rest at 100 %, < 0.4 s in 5th. Lifting is never slowed.
+- **Traction trim:** while the worst driven wheel's slip ratio runs past the tyre's peak, the
+  pedal target eases by up to 35 % × s (at twice the peak). Not TCS (no brakes, no cut); off
+  during a drift hold (row 91), so held full throttle in a slide can still spin.
+- **Amount:** `DriftTuning::throttle_shaping` (drift lab "throttle smoothing" slider, readout
+  shows what is in effect); default −1 = the preset's default: keyboard 60 %, gamepad 20 %,
+  wheel 0 (told apart by `steer_speed_sensitivity` until a contract field exists). Drift lab
+  storage key bumped to `wp.driftTuning.v2` (v1 had stored the 0 placeholder).
+
+Measured (`cargo run --release -p wp_vehicle --example throttle`, keyboard preset, TCS / ESC
+off; launch = key held from rest, auto gears; exits = 30 m circle, lat 0.5 / 0.7 g × steering
+held 0.3 / 0.8 / 2 s with full throttle, then released; "held 2 s" = holding W out of the
+corner):
+
+| car | smoothing | 0–100 s | wheelspin s | exits spun / recovered of 6 | held 2 s exits spun |
+|---|---|---|---|---|---|
+| shiro_turbo | 0 (before) | 7.70 | 1.37 | 2 / 4 | 2 of 2 |
+| shiro_turbo | default 60 % | 7.33 | 1.02 | 1 / 5 | 1 of 2 |
+| sperber_32 | 0 (before) | 7.34 | 1.20 | 1 / 5 | 1 of 2 |
+| sperber_32 | default 60 % | 7.05 | 1.25 | 0 / 6 | 0 of 2 |
+| rampart_50 | 0 (before) | 6.96 | 1.45 | 1 / 5 | 1 of 2 |
+| rampart_50 | default 60 % | 6.76 | 1.88 | 0 / 6 | 0 of 2 |
+| hakone_gt | 0 (before) | 7.23 | 1.47 | 1 / 5 | 1 of 2 |
+| hakone_gt | default 60 % | 6.88 | 1.02 | 1 / 5 | 1 of 2 |
+| debug_sedan | 0 (before) | 9.22 | 1.76 | 0 / 6 | 0 of 2 |
+| debug_sedan | default 60 % | 9.47 | 2.50 | 0 / 6 | 0 of 2 |
+
+Held-W exits spun 5 of 10 → 2 of 10 (rampart and sperber no longer spin; shiro and hakone
+still do in one of two), recoveries 25 → 28 of 30, and the launches are 0.2–0.4 s quicker on
+the four quick cars. Wheelspin time is not lower everywhere (rampart 1.45 → 1.88 s, debug_sedan
+1.76 → 2.50 s at a lower slip: the trim holds them near the peak longer instead of cutting).
+
+- **Lead (contracts), request #13:** add `AssistProfile::throttle_smoothing: f32` (0..=1;
+  keyboard 0.6, gamepad 0.2, wheel / AI / sim 0) so the presets carry it and the testbed's
+  assist row can show it next to countersteer (the brief asks for that slider there too; it is
+  only in the drift lab panel for now, since the assist-row overrides are AssistProfile
+  fields). Until then the code derives the default from `steer_speed_sensitivity`.
+
+## Lead decisions after rows 91 / 98 (A, 2026-10-20) — both default off
+
+The owner rejected the key-into-the-turn hold (rows 106 / 111) and asked for raw throttle with
+TCS off (row 104); contract request #13 is declined. So:
+- **Drift hold (row 91):** `DriftTuning::hold_enabled`, **default false** in every preset; the
+  drift lab panel has a "hold mode" toggle. With it off, `regression_grid_24` hashes are
+  byte-identical to before row 91 (golden restored in a `[bless]` commit).
+- **Throttle smoothing (row 98):** `DriftTuning::throttle_shaping` **default 0** in every
+  preset (no preset default any more); a lab-only slider. The row 98 table above compares 0
+  (now the default) with 60 % (lab).
+- Drift lab storage key `wp.driftTuning.v3` (older saved values are not reused).

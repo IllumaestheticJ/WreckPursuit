@@ -634,6 +634,42 @@ clip-1 match (parity_rwd_d held 41°, 5.3 s, sd 6.9). Clip 8 suggests the refere
 wheels follow the travel. That would need tyres where a wheel at the travel with the rear
 spinning holds an equilibrium: tyre-slip's domain, reported to them.
 
+## Merge of lead/round12 (9c947ebb) — lead's rules
+
+1. **W lineage wins** for drift-lab and keyboard steering: `drift.rs` (add/add: W's),
+   `steering.rs`, `snapshot.rs` (W's format; A's drift-hold fields not added), the lab panels,
+   `input.ts` raw keys. Round12's per-device input shaping (942cedca: `stepKeyRamps` +
+   `shaped`) is kept; its key ramp now passes the steer key raw (the sim's `key_steer` / the
+   plain rack ramp it), and the throttle key raw in Drift Lab W. Shaping maps ±1 to ±1 at the
+   default profile.
+2. **A's rejected drift lab dropped:** `throttle.rs` (keyboard throttle smoothing), A's
+   `steering::DriftTuning` / `AssistMode` / drift hold, `Vehicle::set_drift_tuning`,
+   `wp_sim::Sim::set_drift_tuning`, the wasm `set_drift_tuning` / `drift_tuning(entity)` /
+   `drift_state` and their `sim.ts` wrappers, `examples/drift.rs` / `throttle.rs`, A's metrics
+   additions (`metrics.rs` is W's), and its lab UI (`drift_lab.ts`, `#sc-drift` / `#sc-tune`,
+   `?drift=1`). Nothing outside A's own lab used them.
+3. **Kept:** everything non-drift. `vehicle.rs` is W's with round12's two non-drift
+   commits ported on top (af06f8c2 anti-dive / anti-lift + bump rubber + brake-dive hooks,
+   a87f21a5 rearward-only jacking). Also kept: brake_dive, police / world / race / sim-perf /
+   presets / goldens, and `roll_kick` (both sides had added the same function).
+4. **Checks:**
+   - `cargo test --workspace` on round12 itself: 1 red (`wp_opponent`
+     `wanted_ai_racer_flees_police_through_the_city`). After the merge: the same red, plus
+     C's `handbrake_stabs_add_rotation_and_drive_comes_back` (the known C + round12
+     interaction, drive back 0.125 s vs 0.1 s).
+   - Goldens: 8 differ (cars_beater_hard_turn, parity_rampart_counter_drift,
+     parity_shiro_handbrake_10mph, police_sideswipe_patrol_day / night, regression_grid_24,
+     smoke_coupe_circle, vehicle_coupe_slalom). **All are the keyboard / gamepad steering
+     path.** With each scenario's assists switched to `wheel` (1:1 steering, untouched by
+     either lineage), all 8 hash identically on the merge and on round12. Re-blessed (hashes
+     only; no golden replay changed).
+   - `wp_net` `four_clients_replicate_damage_deterministically` failed after the merge: the
+     final-state check ran right after the brake phase, but a resync may take up to 2 s (the
+     test asserts that). With the new steering the last dent lands in the final ticks. Fix:
+     2 s more before the final check (passes; client hashes still compared every tick).
+   - clippy --workspace --all-targets, determinism lint 0, wasm, tsc, ui-kit vitest 99/99.
+   - e2e: drift_lab_w 47, countersteer 9, presets 9, race 20, menu 37, all pass.
+
 ## Contract change requests
 
 None (`AssistProfile` unchanged; the lab's settings live in `wp_vehicle::plain::PlainSteer`).

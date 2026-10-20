@@ -1,14 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { decodeMapDynamic, DYN, EMPTY_FRAME, isWanted, UNIT_FLAG, unitBlinks } from "./data";
+import { decodeMapDynamic, DYN, EMPTY_FRAME, isWanted, RACER_FLAG, racersToDraw, UNIT_FLAG, unitBlinks } from "./data";
 
 /** Build a map_dynamic() array the way wp_wasm does. */
-function dyn(header: Record<number, number>, units: number[][], tools: number[][]): Float32Array {
+function dyn(header: Record<number, number>, units: number[][], tools: number[][], racers: number[][] = []): Float32Array {
   const h = new Array(DYN.HEADER).fill(0);
   h[0] = DYN.VERSION;
   h[1] = units.length;
   h[2] = tools.length;
+  h[20] = racers.length;
   for (const [k, v] of Object.entries(header)) h[Number(k)] = v;
-  return new Float32Array([...h, ...units.flat(), ...tools.flat()]);
+  return new Float32Array([...h, ...units.flat(), ...tools.flat(), ...racers.flat()]);
 }
 
 describe("decodeMapDynamic", () => {
@@ -59,6 +60,48 @@ describe("decodeMapDynamic", () => {
     const bad = dyn({}, [], []);
     bad[0] = 99;
     expect(() => decodeMapDynamic(bad)).toThrow(/layout/);
+  });
+
+  it("decodes racers after the units and tools, in position order", () => {
+    const f = decodeMapDynamic(
+      dyn(
+        {},
+        [[7, 100, 200, 0.1, 25, 3, 0, 0]],
+        [[0, 5, 6, 0, 1, 8]],
+        [
+          [3, 30, -3, 0.5, 1, 0],
+          [1, 10, -1, 0.25, 2, RACER_FLAG.PLAYER],
+          [2, 20, -2, 0, 3, RACER_FLAG.FINISHED],
+          [4, 40, -4, 0, 4, RACER_FLAG.DNF | RACER_FLAG.CAPTURED],
+          [5, 50, -5, 0, 5, RACER_FLAG.DQ],
+          [6, 60, -6, 1.5, 6, 0],
+        ],
+      ),
+    );
+    expect(f.units).toHaveLength(1);
+    expect(f.tools).toHaveLength(1);
+    expect(f.racers.map((r) => r.position)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(f.racers[0]).toEqual({ id: 3, x: 30, y: -3, yaw: 0.5, position: 1, finished: false, dnf: false, captured: false, dq: false, player: false });
+    expect(f.racers[1]).toMatchObject({ id: 1, player: true });
+    expect(f.racers[2]).toMatchObject({ id: 2, finished: true });
+    expect(f.racers[3]).toMatchObject({ id: 4, dnf: true, captured: true });
+    expect(f.racers[4]).toMatchObject({ id: 5, dq: true });
+    // Drawn: still racing and not the player (finished, DNF and DQ cars are hidden).
+    expect(racersToDraw(f).map((r) => r.id)).toEqual([3, 6]);
+  });
+
+  it("no race → no racers; a truncated racer block stops at the end of the array", () => {
+    expect(decodeMapDynamic(dyn({}, [], [])).racers).toEqual([]);
+    const a = dyn({}, [], [], [[3, 30, -3, 0.5, 1, 0]]);
+    a[20] = 2; // claims two racers, carries one
+    expect(decodeMapDynamic(a).racers).toHaveLength(1);
+    expect(EMPTY_FRAME.racers).toEqual([]);
+  });
+
+  it("a v1 array (no racer block) is rejected", () => {
+    const a = dyn({}, [], []);
+    a[0] = 1;
+    expect(() => decodeMapDynamic(a)).toThrow(/v1, expected v2/);
   });
 
   it("a wrecked unit with lights does not blink", () => {

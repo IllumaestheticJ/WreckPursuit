@@ -6,7 +6,7 @@
 //! | test | what it measures |
 //! |---|---|
 //! | [`axle_ride`] | per-axle ride frequency and bump/rebound damping ratio from the car data (no simulation) |
-//! | [`heave_kick`], [`pitch_kick`] | free body oscillation after a velocity kick at rest: damped and natural frequency, damping ratio |
+//! | [`heave_kick`], [`pitch_kick`], [`roll_kick`] | free body oscillation after a velocity kick at rest: damped and natural frequency, damping ratio |
 //! | [`kerb`] | driving over a kerb (square step, chassis cannot touch it, like city sidewalks) at a speed and angle: peak vertical speed, roll/pitch rate, airtime, overshoots, settle time |
 //! | [`slide_into_kerb`] | car sliding sideways into a kerb: peak roll rate/angle, wheel lift, rollover |
 //! | [`crest`] | a crest (grade up, grade down, vertical curves of a given length): airtime and how far the body rises above its normal ride height |
@@ -351,8 +351,8 @@ pub fn pitch_kick(car: &LoadedCar, dw: f32) -> Oscillation {
     fit_oscillation(&t, &e)
 }
 
-/// Roll: kick a car at rest about its forward axis by `dw` rad/s (+ = right side down) and
-/// fit the roll angle's free response (Drift Lab W ride tuning).
+/// Roll: kick a car at rest by `dw` rad/s about its longitudinal axis (right side down) and
+/// fit the roll angle's free response.
 pub fn roll_kick(car: &LoadedCar, dw: f32) -> Oscillation {
     let mut rig = settled_rig(car);
     let a = ride_assists();
