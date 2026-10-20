@@ -362,6 +362,17 @@ impl RoadGraph {
     /// Fastest legal route `from → to` by free-flow travel time (length / limit). Returns the
     /// node sequence including both ends. Deterministic: ties break on node id.
     pub fn shortest_path(&self, from: NodeId, to: NodeId) -> Option<Vec<NodeId>> {
+        self.shortest_path_avoiding(from, to, &[])
+    }
+
+    /// [`RoadGraph::shortest_path`] that never uses the segments in `blocked` (a unit
+    /// re-routing around where it got stuck).
+    pub fn shortest_path_avoiding(
+        &self,
+        from: NodeId,
+        to: NodeId,
+        blocked: &[SegmentId],
+    ) -> Option<Vec<NodeId>> {
         let n = self.nodes.len();
         let mut best = vec![u64::MAX; n];
         let mut prev: Vec<Option<NodeId>> = vec![None; n];
@@ -376,6 +387,9 @@ impl RoadGraph {
                 continue;
             }
             for &(s, next) in self.outgoing(NodeId(node)) {
+                if blocked.contains(&s) {
+                    continue;
+                }
                 let seg = self.segment(s);
                 // Travel time in milliseconds keeps the heap keys integral (deterministic).
                 let ms = (seg.length_m / seg.speed_limit_mps.max(1.0) * 1000.0) as u64 + 1;
@@ -398,6 +412,51 @@ impl RoadGraph {
         }
         path.reverse();
         Some(path)
+    }
+
+    /// Legal driving distance from every node to the road point nearest `p`, m (indexed by
+    /// `NodeId.0`; `f32::INFINITY` where `p` can't be reached). Follows one-way rules in the
+    /// direction a car drives *toward* `p`. Deterministic: integer millimetre heap keys.
+    pub fn distances_to(&self, p: [f32; 2]) -> Vec<f32> {
+        let n = self.nodes.len();
+        let mut best = vec![u64::MAX; n];
+        let Some(rp) = self.nearest_on_road(p) else {
+            return vec![f32::INFINITY; n];
+        };
+        let seg = *self.segment(rp.segment);
+        let mm = |m: f32| (m.max(0.0) * 1000.0) as u64;
+        let mut heap = BinaryHeap::new();
+        // Into the target's segment from either end, where that direction is legal.
+        for (from, part) in [(seg.a, rp.t), (seg.b, 1.0 - rp.t)] {
+            if self.can_travel(rp.segment, from) {
+                let c = mm(part * seg.length_m);
+                if c < best[from.0 as usize] {
+                    best[from.0 as usize] = c;
+                    heap.push(Reverse((c, from.0)));
+                }
+            }
+        }
+        while let Some(Reverse((cost, node))) = heap.pop() {
+            if cost > best[node as usize] {
+                continue;
+            }
+            for &(s, prev) in self.incoming(NodeId(node)) {
+                let c = cost + mm(self.segment(s).length_m) + 1;
+                if c < best[prev.0 as usize] {
+                    best[prev.0 as usize] = c;
+                    heap.push(Reverse((c, prev.0)));
+                }
+            }
+        }
+        best.into_iter()
+            .map(|c| {
+                if c == u64::MAX {
+                    f32::INFINITY
+                } else {
+                    c as f32 / 1000.0
+                }
+            })
+            .collect()
     }
 
     /// Free-flow travel time of a node route, s.
@@ -665,6 +724,30 @@ mod tests {
             assert!(a.segments.iter().any(|s| s.district == d), "{d:?}");
         }
         assert!(a.pois_of(PoiKind::Helipad).count() == 1);
+    }
+
+    #[test]
+    fn distances_to_follow_the_road_and_one_way_rules() {
+        // 0 —100 m— 1 —100 m— 2, and 2 → 3 one-way (100 m north of 2).
+        let mut g = RoadGraph::new();
+        let n0 = g.add_node([0.0, 0.0], District::Core);
+        let n1 = g.add_node([100.0, 0.0], District::Core);
+        let n2 = g.add_node([200.0, 0.0], District::Core);
+        let n3 = g.add_node([200.0, 100.0], District::Core);
+        g.add_segment(n0, n1, 13.9, RoadClass::Local, false);
+        g.add_segment(n1, n2, 13.9, RoadClass::Local, false);
+        g.add_segment(n2, n3, 13.9, RoadClass::Local, true);
+        // Target 25 m past node 0 on the first segment.
+        let d = g.distances_to([25.0, 1.0]);
+        assert!((d[0] - 25.0).abs() < 0.01, "{d:?}");
+        assert!((d[1] - 75.0).abs() < 0.01, "{d:?}");
+        assert!((d[2] - 175.0).abs() < 0.01, "{d:?}");
+        // Node 3 can't drive back down the one-way.
+        assert!(d[3].is_infinite(), "{d:?}");
+        // From node 3's side: target on the one-way, only reachable from node 2.
+        let d = g.distances_to([200.0, 40.0]);
+        assert!((d[2] - 40.0).abs() < 0.01, "{d:?}");
+        assert!(d[3].is_infinite(), "{d:?}");
     }
 
     #[test]

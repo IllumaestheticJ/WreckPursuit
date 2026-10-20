@@ -35,7 +35,12 @@
   starts the pursuit in the same `step` (events: `WantedLevelChanged`, `PursuitStarted { unit }`,
   `Radio` "Unit N: I've been hit! … assault on an officer."). `stats().assaults` counts them.
   Nothing new is needed from `wp_sim`: it already passes contacts and binds unit entities.
-- Unit lifecycle events: `UnitSpawned` / `UnitDespawned`.
+- Unit lifecycle events: `UnitSpawned` / `UnitDespawned`. Since round 12b units also spawn on
+  reckless-driving calls (`UnitRole::Responder`), out of every racer's sight and ≥ 120 m away;
+  despawns are out of sight too. `wp_sim` handles them like any unit (no change needed).
+- Stats (round 12b): `stats().calls` (`CallRecord`: racer, time, place, responder spawned),
+  `stats().spawns` (`SpawnRecord`: every ground unit after the session start, distance to the
+  nearest racer, in sight), `redispatches`, `pursuit_harm`, `pursuit_high_g_s`, `pursuit_no_risk_s`.
 - Queries: `wanted_level`, `racer`, `units`, `incidents`, `pool_count`, `tire_puncture(entity) -> [f32; 4]`,
   `static_colliders()`, `spike_strips()`, `roadblocks()`, `helicopters()`, `now() -> SimTime`, `state_hash()`, `stats()`.
 - Bounty (for prompt 08): `bounty`, `bounty_record`, `set_bounty_record`, `record_race_won`, `payout_scale`.
@@ -138,6 +143,10 @@ The reply is `Result<(), CaptainError>` with:
 - `Site(SiteError { NoSite, NotOnPath, BlindCorner, Highway })`.
 
 ## Changes outside my crates
+- **Round 12b:** `apps/simcli/examples/police_response.rs` (new measurement example: full sim,
+  physical police, call → first police car within 100 m, pop-in audit from the player's eye and
+  a chase camera). Read-only use of simcli / `wp_sim`. Goldens re-blessed for the scenarios this
+  change moves (see "Response to lead feedback", round 12b).
 - **Playtest row 24** (this round):
   - `crates/wp_sim/tests/police_assault.rs`: new test file only (no `wp_sim` code changed; the
     contact → `on_contact` → unit-entity path already worked).
@@ -183,6 +192,14 @@ The reply is `Result<(), CaptainError>` with:
 - The light used is the one `signal_state_ahead` reports for the unit's current lane (straight
   ahead), so a unit turning at a junction with separate turn phases may read the wrong one.
 - In the police-on soak two police cars touch at 4.5 m/s right after spawn (t = 3.9 s).
+- Never-in-view covers patrol refills, responders, reinforcements and every despawn. Roadblock
+  and spike units still appear where the tool rules put them (≥ 300 m ahead, ≥ 120 m approach
+  sight), so a racer can see them appear. Out-of-service helicopters vanish after 15 s.
+- The view check takes the spot at the racer's own height, so on a steep hill a spot below a
+  crest can count as visible (conservative) and one above it as hidden.
+- Night response has a long tail when the racer keeps turning away (worst 38-55 s headless);
+  the re-dispatch rule bounds it but a racer that turns at every junction can outrun the
+  prediction. Physical responders also slow for junctions like every unit.
 - Scripted racers don't react to PIT or box-ins; physics resolves those.
 - Night pursuit start varies per seed (4 of 8 runs under 60 s, mean 114 s); the tests assert means and ratios.
 
@@ -233,6 +250,75 @@ Tests:
   9.2 s from L1 reports; night: never).
 
 ## Response to lead feedback
+**Round 12b (on `lead/round12`), owner playtest "police spawn too far away": done.**
+1. **Dispatch-driven spawning.** A violation no unit saw is a reckless-driving call (civilian, or
+   a traffic camera); later calls move it to the racer's latest position. After the call delay
+   dispatch sends an available unit within the district's response radius *by road* that can
+   reach a junction on the racer's predicted path before the racer (a unit behind a fleeing
+   racer only chases it). If there is none, a **responder spawns** (`UnitRole::Responder`):
+   - 150–350 m of legal driving from the racer (+ 6 s of a fast racer's travel, so it can get
+     ahead on a long straight), never closer than 120 m (straight line);
+   - out of every racer's sight: line of sight from the driver's eye *and* from a chase-camera
+     point 6 m behind / 2.5 m above the car to a car body at the spot, any direction;
+   - clear of other vehicles, in the right-hand lane, facing the racer along the road; spots
+     that meet the racer on its predicted path first are preferred.
+
+   It drives with lights at `respond_speed_factor` (1.15 → 1.35) × limit to that meeting
+   junction (re-planned every 3 s). If the unit is still > 150 m away 10 s after taking the call
+   (the racer turned), the call is dispatched again. One radio line per call:
+   "Dispatch: caller reports reckless driver, Core. Unit 6 responding." (the bare call line only
+   when nobody can be sent). Uses `WorldQuery::line_of_sight` and the road graph (new
+   `RoadGraph::distances_to`: legal driving distance from every node to a point).
+2. **Response time** (`data/police/presence.toml [response]`): call delay Day 2 s / Dusk 3 /
+   Dawn 4 / Night 5, plus Core 0 / Suburb 4 / Industrial 6 s. Measured, call → first police car
+   within 100 m of the racer:
+
+   | Where | Day (12:00) mean / worst | Night (23:00) mean / worst |
+   |---|---|---|
+   | Headless, Core, racer at 2× limit (`response_*_core.ron`, 8 runs) | 3.1 / 7.6 s | 12.2 / 38.2 s |
+   | Headless, Suburb (`response_*_suburb.ron`, 8 runs) | 9.3 / 16.8 s | 21.3 / 55.0 s |
+   | Full sim, physical cars, Port Vesper, player at 22 m/s (`police_response` example, 4 runs) | 13.3 / 17.2 s | 28.2 / 34.0 s |
+   | Full sim, grid (4 runs; runs with a call reached in time) | 16.2 s | 12.8 s |
+
+   The long night tails are the scripted racer looping the city edge at 2× limit and U-turning;
+   the re-dispatch rule cut them (Suburb night worst 61 s = never → 55 s). Backup on escalation
+   is the reinforcement path, which now spawns the same way (fallback: the old ≥ 350 m node).
+3. **Population.** Patrol tables unchanged. Responders and reinforcements only spawn while ground
+   units < `max_units_by_level` = [16, 18, 20, 22, 24, 24] for L0..L5 (and `max_ground_units`).
+   Idle responders/reinforcements drive on and despawn once out of every racer's sight and
+   ≥ 150 m away; surplus patrols and out-of-service units obey the same rule (they used to vanish
+   at 250–300 m regardless of sight, reinforcements after 30 s idle). Patrol refills after the
+   session start also spawn out of sight; the opening patrols are the scene and are unchanged.
+4. **Scenarios** (`crates/wp_police/scenarios/response_{day,night}_{core,suburb}.ron`): expected
+   ranges for `call_to_unit_100m_s` / `_max_s` (Core day ≤ 15 / 25 s, Suburb day ≤ 20 / 35,
+   Core night ≤ 25 / 50, Suburb night ≤ 30 / 60), `spawns_in_view` = 0 (closer than 120 m, or in
+   the racer's ±60° view cone with line of sight), `despawns_in_sight` = 0, `spawn_min_racer_m`
+   ≥ 120, and responders spawned at night. Every police scenario now reports the audit: 0 of ~170
+   mid-session spawns and ~400 despawns were visible or within 120 m. Full sim (physical cars,
+   eye + chase camera): 0 of 15 spawns and 0 of 6 despawns visible on Port Vesper and the grid.
+   System tests: `reckless_call_with_no_unit_close_spawns_a_hidden_responder`,
+   `unit_cap_holds_responders_back`; graph test `distances_to_follow_the_road_and_one_way_rules`.
+   Tools: `cargo run --release -p wp_police --example response_probe -- <scenario>` (timeline),
+   `cargo run --release -p simcli --example police_response -- vesper|grid <hour> <runs> <secs>`.
+5. **4-player test / LOD.** GATE_NET. Spawned responders are ordinary units: `UnitSpawned` →
+   `wp_sim` gives them a car → `police_draw()` → the same fleet → full-view hand-over in
+   `render/lod.ts` as every police car (nothing changed there). The browser e2e prints the
+   closest police appear/vanish distance in its LOD line.
+
+Changed tests (both mine):
+- `police_scenarios::night_is_slower_than_day_…`: night pursuit start floor 60 → 40 s (mean is
+  now 53 s; ratio night/day still ≥ 3, measured 6.0). A night speeder is found sooner because
+  calls get a unit within seconds; it is still sparse and short-sighted.
+- `police_scenarios::risk_budget_and_caps_keep_cops_alive`: it asserted that a reckless config
+  does more harm than the default. That comparison was noise: on `lead/round12` itself 462 vs
+  475 events, with responders 464 vs 453 (junction rules and following distances since round 6
+  cap both configs alike). It now checks the < 10 % self-wreck rate (the prompt's bar) and that
+  the risk budget is spent (809 unit-seconds held to shadowing) and never with an unlimited budget.
+- `radio_city_chase`'s calm budget (≤ 4/min) held only after merging the call and the "responding"
+  line into one (they used to be 50 s apart at night).
+
+GATE_RESULTS
+
 **Round 12 (on `lead/round12`), done:**
 1. **`police/sideswipe_patrol_night.ron` passes again.** Cause: a near miss, not a police change.
    `probe_police` on `lead/round12` shows unit 3 on the same path and timing as before (south down

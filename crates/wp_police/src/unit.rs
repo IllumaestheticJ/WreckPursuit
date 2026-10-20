@@ -260,6 +260,9 @@ pub enum UnitRole {
     Pool(District),
     /// Spawned reinforcement.
     Reinforcement,
+    /// Spawned to answer a reckless-driving call (no unit was close enough); despawns out of
+    /// sight once the call is over.
+    Responder,
     /// Parked roadblock / spike unit.
     Tool,
     /// Helicopter.
@@ -378,6 +381,9 @@ pub struct Unit {
     pub controller: Option<DriveController>,
     /// Obstacle awareness: speed cap behind the vehicle ahead, passing state.
     pub avoid: AvoidState,
+    /// Stuck detection and recovery (physical units, [`crate::stuck`]).
+    #[serde(default)]
+    pub unstick: crate::stuck::UnstickState,
 }
 
 impl Unit {
@@ -423,6 +429,7 @@ impl Unit {
             geometry: SteerGeometry::default(),
             controller: None,
             avoid: AvoidState::default(),
+            unstick: crate::stuck::UnstickState::default(),
         }
     }
 
