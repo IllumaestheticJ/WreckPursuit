@@ -797,6 +797,93 @@ fn matrix() {
     car_lab::set_override(None);
 }
 
+/// Straight launch (owner: "spins off the line"): rest → full throttle for 3 s, steer 0, TCS /
+/// ESC off, manual gears (stays in 1st), plain steering. Returns (largest |heading change| °,
+/// largest |body slip| ° above 2 m/s, km/h at 3 s, peak driven slip ratio).
+fn straight_launch(c: &LoadedCar) -> (f32, f32, f32, f32) {
+    use wp_contracts::VehicleInput;
+    use wp_vehicle::math::{atan2, V3};
+    use wp_vehicle::rig::Rig;
+    let a = reference_assists();
+    let mut rig = Rig::new(c);
+    rig.teleport([0.0; 3], 0.0, 0.0, 0.0);
+    let heading = |rig: &Rig| {
+        let f = rig.vehicle.chassis().rot * V3::Y;
+        atan2(-f.x, f.y).to_degrees()
+    };
+    // Settle on the springs first (keys off).
+    for _ in 0..120 {
+        rig.step(&VehicleInput::default(), &a);
+    }
+    let h0 = heading(&rig);
+    // A real launch is never perfectly symmetric: LAUNCH_KICK rad/s of yaw at the start
+    // (default 0.02 ≈ 1 °/s; 0 = the perfectly symmetric car, which cannot yaw).
+    let kick: f32 = std::env::var("LAUNCH_KICK").map_or(0.02, |k| k.parse().expect("number"));
+    rig.kick([0.0; 3], [0.0, 0.0, kick]);
+    let (mut yaw, mut slip, mut kappa) = (0.0f32, 0.0f32, 0.0f32);
+    for _ in 0..3 * 240 {
+        rig.step(
+            &VehicleInput {
+                throttle: 1.0,
+                ..Default::default()
+            },
+            &a,
+        );
+        yaw = yaw.max((heading(&rig) - h0).abs());
+        let s = slide_state(&rig);
+        if s.v_fwd > 2.0 {
+            slip = slip.max(s.body_slip.to_degrees().abs());
+        }
+        let w = &rig.state().wheel_states;
+        kappa = kappa.max(w[2].slip_ratio.max(w[3].slip_ratio));
+    }
+    (yaw, slip, slide_state(&rig).v_fwd * 3.6, kappa)
+}
+
+/// `launch`: [`straight_launch`] for the RWD parity cars under data + presets (+ `TYRE`).
+fn launch_table() {
+    let mut configs = vec![
+        ("data".to_string(), CarTune::default()),
+        ("spin model".to_string(), spin()),
+        (
+            "spin + drift lock".to_string(),
+            CarTune::spin_lock_candidate(),
+        ),
+        (
+            "step-1 spin model (drive floor always on)".to_string(),
+            CarTune {
+                spin_fx_slide_from_deg: 0.0,
+                spin_fx_slide_full_deg: 0.0,
+                ..spin()
+            },
+        ),
+    ];
+    if let Ok(j) = std::env::var("TYRE") {
+        configs.push((
+            format!("TYRE {j}"),
+            serde_json::from_str(&j).expect("TYRE json"),
+        ));
+    }
+    println!("| car | config | max yaw ° (< 3) | max body slip ° | km/h at 3 s | peak rear κ |");
+    println!("|---|---|---|---|---|---|");
+    for id in [
+        "parity_rwd_a",
+        "parity_rwd_b",
+        "parity_rwd_d",
+        "rampart_50",
+        "shiro_turbo",
+    ] {
+        let c = car(id);
+        for (name, t) in &configs {
+            car_lab::set_override(Some(*t));
+            let (y, s, v, k) = straight_launch(&c);
+            let ok = if y < 3.0 { "" } else { " **FAIL**" };
+            println!("| {id} | {name} | {y:.2}{ok} | {s:.1} | {v:.0} | {k:.2} |");
+        }
+    }
+    car_lab::set_override(None);
+}
+
 fn trace(id: &str) {
     let c = car(id);
     let a = reference_assists();
@@ -843,7 +930,7 @@ fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let what = if args.first().is_some_and(|a| {
         [
-            "table", "grid", "trace", "search", "refine", "phase", "matrix",
+            "table", "grid", "trace", "search", "refine", "phase", "matrix", "launch",
         ]
         .contains(&a.as_str())
     }) {
@@ -866,6 +953,7 @@ fn main() {
         "trace" => trace(&args[0]),
         "phase" => phase(&args[0]),
         "matrix" => matrix(),
+        "launch" => launch_table(),
         _ => table(&args),
     }
 }
