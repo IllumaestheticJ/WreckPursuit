@@ -1102,7 +1102,9 @@ impl PoliceSystem {
             u.unstick.swing_ready = now.plus(stuck::SWING_COOLDOWN_S);
             u.unstick.slow_s = 0.0;
         }
+        // Lights on only (pursuit, intercept, response): a patrol turns round like traffic.
         let swing_wanted = matches!(u.unstick.phase, stuck::Phase::Drive)
+            && siren
             && want > stuck::WANT_MPS
             && !disabled
             && facing < stuck::SWING_BEHIND_COS

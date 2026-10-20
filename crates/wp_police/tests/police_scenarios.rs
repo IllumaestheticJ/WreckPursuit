@@ -57,9 +57,10 @@ fn night_is_slower_than_day_for_pursuit_and_reinforcements() {
     assert!(ratio >= 3.0, "pursuit start night/day = {ratio}");
     assert!(m(&day, "pursuit_start_max_s") <= 20.0);
     // Was > 60 s. Since round 12b reckless-driving calls get a unit (spawned out of sight if
-    // need be) within seconds, day or night, so a night speeder is found sooner (mean 100 s
-    // → 53 s); night is still sparse, short-sighted and > 3x slower than day.
-    assert!(m(&night, "pursuit_start_s") > 40.0);
+    // need be) within seconds, and blatant speeding right past a unit is recognised at once
+    // (`heat.blatant`, row 60), day or night, so a night speeder is found sooner (mean 126 s →
+    // 33 s); night is still sparse, short-sighted and > 3x slower than day.
+    assert!(m(&night, "pursuit_start_s") > 25.0);
     // Reinforcements take at least 2x as long to arrive.
     let rd = m(&day, "reinforcement_delay_s");
     let rn = m(&night, "reinforcement_delay_s");
