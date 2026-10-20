@@ -85,6 +85,9 @@ export interface PropStats {
   repicks: number;
   movedWrites: number;
   repickWrites: number;
+  /** Cost of `update()`: mean over frames and the worst frame (a re-pick), ms. */
+  updateMeanMs: number;
+  updateMaxMs: number;
 }
 
 export class PropView {
@@ -241,6 +244,7 @@ export class PropView {
   /** Per frame: apply `props_moved()` records, then re-pick the full-mesh set if the camera moved. */
   update(moved: Float32Array, camera: THREE.Camera): void {
     if (this.n === 0) return;
+    const t0 = performance.now();
     // Three (x, y, z) → sim (x, -z, y): `world` is rotated -90° about X.
     const c = camera.getWorldPosition(this.p);
     this.cam.set(c.x, -c.z, c.y);
@@ -253,7 +257,15 @@ export class PropView {
     }
     if (this.full && this.cam.distanceTo(this.lastPick) > REPICK_M) this.repick();
     this.flush();
+    const ms = performance.now() - t0;
+    this.updates++;
+    this.updateMsSum += ms;
+    this.updateMaxMs = Math.max(this.updateMaxMs, ms);
   }
+
+  private updates = 0;
+  private updateMsSum = 0;
+  private updateMaxMs = 0;
 
   /** Re-pick the nearest parked cars for the full mesh; rewrite only the ones that change drawer. */
   private repick(): void {
@@ -385,6 +397,8 @@ export class PropView {
       repicks: this.repicks,
       movedWrites: this.movedWrites,
       repickWrites: this.repickWrites,
+      updateMeanMs: this.updates ? this.updateMsSum / this.updates : 0,
+      updateMaxMs: this.updateMaxMs,
     };
   }
 
@@ -411,5 +425,8 @@ export class PropView {
     this.repicks = 0;
     this.movedWrites = 0;
     this.repickWrites = 0;
+    this.updates = 0;
+    this.updateMsSum = 0;
+    this.updateMaxMs = 0;
   }
 }

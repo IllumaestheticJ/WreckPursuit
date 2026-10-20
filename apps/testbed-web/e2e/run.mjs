@@ -479,7 +479,11 @@ check(
     }
     // Let the camera settle on the stopped car, then count what is drawn around it.
     for (let i = 0; i < 30; i++) await frame();
-    return { target, frames, maxErr, maxMove, undrawn, stats: wp.props.stats(wp.rig.camera, 150), model: wp.props.model };
+    // Cost of the per-frame wasm call with nothing moving.
+    const c0 = performance.now();
+    for (let i = 0; i < 200; i++) wp.sim.propsMoved();
+    const movedCallMs = (performance.now() - c0) / 200;
+    return { target, frames, maxErr, maxMove, undrawn, stats: wp.props.stats(wp.rig.camera, 150), model: wp.props.model, movedCallMs };
   });
   await shot("props_knock.png");
   const st = knock.stats;
@@ -488,7 +492,8 @@ check(
       (st.fullInRange === st.parkedInRange || st.fullInRange === 256),
     `props: ${st.parked} parked cars (${knock.model ?? "box stand-in"}) + ${st.cones} cones; drawn ${st.drawnFull} full + ${st.drawnProxy} proxy; ` +
       `${st.drawnInRange}/${st.inRange} props within 150 m drawn, ${st.fullInRange}/${st.parkedInRange} parked cars there with the full mesh ` +
-      `(${st.fullInFullRange}/${st.inFullRange} within ${250} m); ${st.repicks} re-picks, ${st.repickWrites} + ${st.movedWrites} matrix writes`,
+      `(${st.fullInFullRange}/${st.inFullRange} within ${250} m); ${st.repicks} re-picks, ${st.repickWrites} + ${st.movedWrites} matrix writes; ` +
+      `update ${st.updateMeanMs.toFixed(3)} ms mean / ${st.updateMaxMs.toFixed(2)} ms worst, props_moved() ${knock.movedCallMs.toFixed(3)} ms`,
   );
   check(
     knock.maxMove > 0.3 && knock.maxErr < 0.2 && knock.undrawn === 0,
