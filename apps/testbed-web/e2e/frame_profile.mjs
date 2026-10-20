@@ -144,6 +144,27 @@ const r = await page.evaluate(() => {
     ts.push(performance.now() - t0);
   }
   ts.sort((a, b) => a - b);
+  // Structure (machine-independent): point lights, city tiles, signal packing, and material
+  // version bumps over steady renders (a bump re-resolves the shader program every frame).
+  const mats = new Set();
+  let pointLights = 0;
+  wp.scene.scene.traverse((o) => {
+    if (o.isPointLight) pointLights++;
+    for (const m of [o.material].flat()) if (m) mats.add(m);
+  });
+  const ver = () => [...mats].reduce((a, m) => a + m.version, 0);
+  const v0 = ver();
+  for (let i = 0; i < 3; i++) ren.render(wp.scene.scene, wp.rig.camera);
+  // (Optional chaining: the same script also profiles the pre-pass build for before/after.)
+  const city = wp.scene.cityStats?.(wp.rig.camera) ?? { tiles: 0, drawn: 0 };
+  const structure = {
+    pointLights,
+    cityTiles: city.tiles,
+    cityTilesDrawn: city.drawn,
+    signalHeads: wp.scene.signals.count,
+    signalsDrawn: wp.scene.signals.drawnCount ?? wp.scene.signals.count,
+    programChurn: ver() - v0,
+  };
   wp.app.paused = false;
   return {
     frames,
@@ -166,7 +187,8 @@ const r = await page.evaluate(() => {
     wasmCallsPerFrame: totalCalls / frames,
     wasmTop: calls.slice(0, 14).map(([k, n]) => [k, +(n / frames).toFixed(2)]),
     vehicles: wp.sim.vehicleMeta().length / 3,
-    gfx: wp.scene.quality.label(),
+    gfx: wp.scene.quality?.label() ?? "pre-pass (MSAA, native res)",
+    structure,
     agents: wp.sim.trafficAgents().length / 5,
     audioRunning: window.__wpAudio?.ctx?.state === "running",
     audioVoicesPerS: ((window.__wpAudio?.pool?.created ?? 0) - p.voices0) / wall,
@@ -212,6 +234,7 @@ else {
   console.log(`frame ${f(r.frameMs)} ms = sections ${f(r.sectionsSum)} + raster/compositor wait ${f(r.rasterWaitMs)} · GPU-synced render ${f(r.syncedRenderMs)} ms`);
   console.log("sections ms/frame: " + Object.entries(r.sections).map(([k, v]) => `${k} ${f(v, 2)}`).join(" · "));
   console.log(`audio: ${f(r.audioVoicesPerS)} voices created/s (${r.audioStripsReused} node chains reused so far), ${f(r.audioMs, 2)} ms/frame · quality ${r.gfx}`);
+  console.log("structure: " + JSON.stringify(r.structure));
   console.log(`draw calls ${f(r.drawCalls, 0)} · triangles ${f(r.triangles, 0)} · programs ${r.programs} · vehicles ${r.vehicles} · agents ${r.agents}`);
   console.log(`wasm calls/frame ${f(r.wasmCallsPerFrame)}: ` + r.wasmTop.map(([k, n]) => `${k} ${n}`).join(", "));
   console.log(`alloc ${f(kbPerFrame)} KB/frame; top: ` + allocTop.map(([k, v]) => `${k} ${v}`).join(" | "));

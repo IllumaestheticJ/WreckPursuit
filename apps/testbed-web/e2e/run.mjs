@@ -6,8 +6,8 @@
 // recorded replay survives a page reload and re-simulates to the same hash with no drift,
 // crash scenarios run and report, the city (Port Vesper v2 by default, the old grid via the
 // selector) loads with traffic, signals (day/night, lamps change over time) and the city chase,
-// weather (e2e/weather.mjs: selector, rain, wet roads, spray, fog, wipers, rainy-night chase)
-// and (optionally) perf at 1/8/24 cars.
+// weather (e2e/weather.mjs: selector, rain, wet roads, spray, fog, wipers, rainy-night chase),
+// browser perf budgets (e2e/perf_check.mjs, PERF=0 skips) and (optionally) perf at 1/8/24 cars.
 import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -674,5 +674,14 @@ const wx = spawnSync("node", [join(here, "weather.mjs")], {
 });
 process.stdout.write(wx.stdout);
 check(wx.status === 0, `weather checks (e2e/weather.mjs)${wx.status === 0 ? "" : ": " + (wx.stderr || "").trim().split("\n").pop()}`);
+
+// 7. Browser perf (browser perf pass): city chase + rainy-night chase at 1280×720 must keep
+// near real time and stay within generous draw-call / triangle / allocation budgets
+// (e2e/perf_check.mjs; PERF=0 skips it).
+if (process.env.PERF !== "0") {
+  const perf = spawnSync("node", [join(here, "perf_check.mjs")], { cwd: root, encoding: "utf8", env: process.env });
+  process.stdout.write(perf.stdout);
+  check(perf.status === 0, `perf checks (e2e/perf_check.mjs)${perf.status === 0 ? "" : ": " + (perf.stderr || "").trim().split("\n").pop()}`);
+}
 console.log(failures ? `${failures} check(s) failed` : "all checks passed");
 process.exit(failures ? 1 : 0);

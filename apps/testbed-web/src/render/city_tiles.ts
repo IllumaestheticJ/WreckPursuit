@@ -111,6 +111,16 @@ export class CityTiles {
     this.spheres.push(m.geometry.boundingSphere!.clone().applyMatrix4(m.matrixWorld));
   }
 
+  /** Tiles that pass the draw distance and the camera frustum (what the GPU draws). */
+  drawn(camera: THREE.Camera): number {
+    const f = new THREE.Frustum().setFromProjectionMatrix(
+      new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse),
+    );
+    let n = 0;
+    for (let i = 0; i < this.meshes.length; i++) if (this.meshes[i].visible && f.intersectsSphere(this.spheres[i])) n++;
+    return n;
+  }
+
   /**
    * Hide tiles entirely beyond `far` m of the camera (Three world space). Cheap; only redone
    * when the camera moved more than 10 m or the distance changed.

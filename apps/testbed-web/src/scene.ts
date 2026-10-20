@@ -338,10 +338,10 @@ export class SceneView {
     return this.contacts.filter((c) => c.active).length;
   }
 
-  /** City tiles and draw calls of the last frame, for the HUD / automation. */
-  cityStats(): { tiles: number; hidden: number } {
+  /** City tiles: total, hidden by the draw distance, drawn (frustum too; needs the camera). */
+  cityStats(camera?: THREE.Camera): { tiles: number; hidden: number; drawn: number } {
     const t = this.cityShown ? this.cityTiles.get(this.cityShown) : undefined;
-    return { tiles: t?.meshes.length ?? 0, hidden: t?.hidden ?? 0 };
+    return { tiles: t?.meshes.length ?? 0, hidden: t?.hidden ?? 0, drawn: t && camera ? t.drawn(camera) : 0 };
   }
 
   render(camera: THREE.PerspectiveCamera): void {
