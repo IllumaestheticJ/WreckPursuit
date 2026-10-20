@@ -134,6 +134,13 @@ the schedule could hunt (1→2→1). New automatic (`crates/wp_vehicle/README.md
 | 57 | Countersteer assist as a slider with variable aggression | A (vehicle): 0–100 % slide-catch gain (driver override kept), wasm + testbed slider | dispatched |
 | 58 | Horn should sound for as long as the button is held | J (audio): looped horn sustain (recorded + procedural), release ≤ 50 ms | dispatched |
 | 59 | No option to map a clutch | C (testbed): `clutch` binding (key / pad / wheel pedal) + automatic/manual clutch setting; A: manual clutch + stall/restart in wp_vehicle | dispatched |
+| 60 | Sped right past a cop and no chase started; the cop doesn't reverse or turn around to chase | E (police): fast pass-by detection (sight rate, LOS with tunnels/terrain, heat threshold for blatant speeding), scenarios | dispatched |
+| 61 | Police should push civilians out of the way when stuck | E (police): low-speed controlled shove after 1.5 s blocked (sirens), civilians yield to sirens (D) | dispatched |
+| 62 | Traffic should get out of the way of police with sirens on | D (traffic AI): signal, slow, pull over, wait, merge back; LOD fleet too | dispatched |
+| 63 | Police are not aggressive enough | E (police): limit-pace chase driving, escalating PIT/ram/box/roadblock tactics by wanted level, flanking, short cooldowns; before/after table | dispatched |
+| 64 | Other police units don't spawn / converge during a chase | E (police): backup dispatch to intercept points, out-of-sight spawns up to a per-level cap, search at last-known position | dispatched |
+| 65 | R should reset and repair the car in place, not send it back to the spawn | C (testbed + wp_wasm): upright on the nearest lane, ghost 1 s, repaired outside career; heat/pursuit/race state kept | dispatched |
+| 66 | Cops should route around buildings (not drive into them) | E (police): road-graph pursuit unless clear LOS, static-obstacle feelers, intercept routing; lane paths through lots at Vesper nodes 78/97 = city generator (lead/fix-sidewalk-lots) | dispatched |
 
 ## 2026-10-19 — step 2: 4-player test on Port Vesper v2 (F, `ws/net`)
 Found by the new 3-minute 4-client test (`crates/wp_net/tests/vesper_e2e.rs`) and the
