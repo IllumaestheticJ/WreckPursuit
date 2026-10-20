@@ -30,13 +30,13 @@ All values are class-typical figures for the archetype, rounded; no single real 
 | Curb mass | 990 kg | class spec data (full tank) |
 | Fuel tank | 45 L | `fuel_capacity_l`; half a tank = 17 kg at 0.745 kg/L |
 | `mass_kg` | 1048 kg | curb − half tank + 75 kg driver (contract: fuel at 50 %) |
-| Front weight | 0.620 | axle loads 650 / 398 kg |
+| Front weight | 0.600 | axle loads 629 / 419 kg |
 | Wheelbase | 2.500 m | spec |
 | Track F / R | 1.430 / 1.420 m | spec |
 | Body W × L × H | 1.660 × 4.300 × 1.380 m | spec |
 | Ground clearance (lattice) | 0.14 m | class |
 | CG height | 0.50 m | small upright sedan; sedan band 0.45-0.52 m, upper end for the tall cabin |
-| CG position | y = +0.300 m | −L/2 + f·L (chassis origin = mid-wheelbase) |
+| CG position | y = +0.250 m | −L/2 + f·L (chassis origin = mid-wheelbase) |
 
 ## Inertia
 
@@ -108,12 +108,12 @@ Springs from ride frequency, `k = m_s·(2πf)²` with sprung corner mass `m_s = 
 
 | Axle | m_s | f | Wheel rate k | Bump c | Rebound c | Travel |
 |---|---|---|---|---|---|---|
-| Front | 310 kg | 1.15 Hz | 16200 N/m | 630 N·s/m | 940 N·s/m | 0.16 m |
-| Rear | 185 kg | 1.25 Hz | 11400 N/m | 410 N·s/m | 620 N·s/m | 0.17 m |
+| Front | 299 kg | 1.15 Hz | 15600 N/m | 610 N·s/m | 920 N·s/m | 0.16 m |
+| Rear | 196 kg | 1.25 Hz | 12100 N/m | 430 N·s/m | 640 N·s/m | 0.17 m |
 
-Anti-roll bars from a roll-gradient target of 6.5°/g with 60% of roll stiffness at the front. Roll arm h − h_rc = 0.405 m (roll centres 0.08 m F / 0.12 m R). Required total K_φ = m·g·arm/φ = 36693 N·m/rad; springs give k·t²/2 = 16546 F / 11516 R N·m/rad; bars supply the rest as `arb_n_per_m = K_bar/t²` = **2700 F / 1600 R N/m** (clamped at ≥ 0). Resulting gradient 6.5°/g, front share 60%. Bump stops 120000 N/m.
+Anti-roll bars from a roll-gradient target of 6.5°/g with 60% of roll stiffness at the front. Roll arm h − h_rc = 0.404 m (roll centres 0.08 m F / 0.12 m R). Required total K_φ = m·g·arm/φ = 36620 N·m/rad; springs give k·t²/2 = 15986 F / 12167 R N·m/rad; bars supply the rest as `arb_n_per_m = K_bar/t²` = **2900 F / 1200 R N/m** (clamped at ≥ 0). Resulting gradient 6.5°/g, front share 60%. Bump stops 120000 N/m.
 
-Alignment: camber -0.2° F / -0.5° R, toe +0.00° F / +0.10° R (+ = in), caster 2.0°.
+Alignment: camber -1.0° F / -0.5° R, toe +0.00° F / +0.00° R (+ = in), caster 2.0°.
 
 ## Brakes
 
@@ -122,9 +122,9 @@ Full-pedal line pressure 100 bar.
 - Front: 240 mm disc, pistons per side 51 mm → A = 20.4 cm², r_eff = D/2 − 25 mm = 95 mm, pad μ = 0.35: T = 2·μ·p·A·r_eff = 2·0.35·100 bar·20.4 cm²·0.095 m = **1358 N·m**
 - Rear: 200 mm leading/trailing drum, wheel cylinder 17.5 mm → A = 2.41 cm², drum radius 100 mm, brake factor 1.8 (includes lining μ): T = BF·p·A·r = **433 N·m**
 
-Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 1176 N·m/wheel (capacity 1.16×), rear needs 258 N·m/wheel (capacity 1.67×).
+Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 1147 N·m/wheel (capacity 1.19×), rear needs 287 N·m/wheel (capacity 1.50×).
 
-`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 299 N·m), never boosted above its caliper capacity. Rear capacity exceeds that, so `bias_front` = T_r/(T_r + ideal) = **0.590** → delivered 1360 N·m front / 299 N·m rear per wheel at full pedal. Handbrake 600 N·m per rear wheel.
+`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 340 N·m), never boosted above its caliper capacity. Rear capacity exceeds that, so `bias_front` = T_r/(T_r + ideal) = **0.558** → delivered 1360 N·m front / 341 N·m rear per wheel at full pedal. Handbrake 600 N·m per rear wheel.
 
 ## Steering
 
@@ -136,8 +136,8 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 13.8 s | 164 km/h | 38.8 m | 0.80 g | — |
-| estimate | 14.0 s | 150 km/h | 43.7 m | 0.77 g | 327 |
+| sim | 14.7 s | 146 km/h | 45.0 m | 0.72 g | — |
+| estimate | 14.0 s | 150 km/h | 43.6 m | 0.77 g | 327 |
 
 ## Damage lattice (`data/lattices/junkyard_beater.json`)
 

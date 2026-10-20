@@ -881,7 +881,7 @@ CARS = [
         profile="sedan",
         curb_kg=990.0,
         fuel_l=45,
-        front_frac=0.62,
+        front_frac=0.60,
         wheelbase=2.50,
         track_f=1.43,
         track_r=1.42,
@@ -915,7 +915,7 @@ CARS = [
         tires=dict(front="175/70R13", rear="175/70R13", compound="vintage_bias", unsprung=(15.0, 14.0)),
         susp=dict(hz=(1.15, 1.25), zeta=0.14, travel=(0.16, 0.17), roll_grad_deg_g=6.5,
                   roll_front_share=0.60, bump_stop=120000.0, preload=0.01),
-        align=dict(camber_deg=(-0.2, -0.5), toe_deg=(0.0, 0.1), caster_deg=2.0),
+        align=dict(camber_deg=(-1.0, -0.5), toe_deg=(0.0, 0.0), caster_deg=2.0),
         brakes=dict(
             front=dict(kind="disc", d_mm=240, pistons_mm=[51], pad_mu=0.35),
             rear=dict(kind="drum", d_mm=200, wheel_cyl_mm=17.5, brake_factor=1.8),
