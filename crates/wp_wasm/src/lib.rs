@@ -1083,6 +1083,63 @@ pub fn prop_pose(index: u32) -> Result<Vec<f32>, JsValue> {
 /// Floats per agent in `traffic_agents()`.
 pub const AGENT_STRIDE: usize = 5;
 
+/// Floats per record in `police_tools()`.
+pub const TOOL_STRIDE: usize = 11;
+
+/// Floats per record in `police_tools()`.
+#[wasm_bindgen]
+pub fn police_tool_stride() -> u32 {
+    TOOL_STRIDE as u32
+}
+
+/// Police tools on the road, as oriented boxes, 11 floats each:
+/// `[kind, x, y, z, qx, qy, qz, qw, hx, hy, hz]` (centre, orientation, half extents; box local
+/// +X across the road). `kind` 0 = roadblock barrier, a physics body whose pose changes when
+/// it is hit; 1 = spike strip, lying flat on the road (local +X along the strip).
+#[wasm_bindgen]
+pub fn police_tools() -> Result<Vec<f32>, JsValue> {
+    get(|s| {
+        let sim = s.sim();
+        let mut out = Vec::new();
+        for b in sim.roadblock_barriers() {
+            out.push(0.0);
+            out.extend_from_slice(&b.pos);
+            out.extend_from_slice(&b.rot);
+            out.extend_from_slice(&b.half_extents_m);
+        }
+        let map = sim.world().map();
+        for st in sim.spike_strips() {
+            let c = [(st.a[0] + st.b[0]) * 0.5, (st.a[1] + st.b[1]) * 0.5];
+            let d = [st.b[0] - st.a[0], st.b[1] - st.a[1]];
+            let half_len = 0.5 * (d[0] * d[0] + d[1] * d[1]).sqrt();
+            // Display only (not simulation), so std atan2 is fine here.
+            let (sn, cs) = (d[1].atan2(d[0]) * 0.5).sin_cos();
+            let z = map.ground_height(c, None) + 0.03;
+            out.extend_from_slice(&[1.0, c[0], c[1], z, 0.0, 0.0, sn, cs, half_len, 0.22, 0.03]);
+        }
+        out
+    })
+}
+
+/// Tyre deflation per vehicle, 4 floats each (FL, FR, RL, RR; 0 inflated … 1 flat), same order
+/// as `vehicle_states()`: the worse of spike-strip punctures and crash damage to the wheel.
+#[wasm_bindgen]
+pub fn tire_punctures() -> Result<Vec<f32>, JsValue> {
+    use wp_contracts::DamageSim;
+    get(|s| {
+        let sim = s.sim();
+        let mut out = Vec::with_capacity(sim.vehicles().len() * 4);
+        for v in sim.vehicles() {
+            let spikes = sim.spike_puncture(v.id);
+            let crash = v.damage.handling_effects().tire_puncture;
+            for i in 0..4 {
+                out.push(spikes[i].max(crash[i]));
+            }
+        }
+        out
+    })
+}
+
 /// Civilian traffic agents (empty without a city), 5 floats each:
 /// `[x, y, z, yaw, flags]` with flags = bits 1 physical LOD, 2 brake lights, 4 hazard lights,
 /// 8 yielding to a siren, 16 turn signal left, 32 turn signal right, 64 aggressive driver,

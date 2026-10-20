@@ -1263,6 +1263,7 @@ async function main(): Promise<void> {
     for (let o = 0; o < meta.length; o += META_STRIDE) app.views.get(meta[o])?.setMeta(meta[o + 2], tS);
     const cur = sim.states();
     const prev = sim.statesPrev();
+    const punctures = sim.tirePunctures();
     const forcesOn = layers.on("tireForces");
     let focusTel: Float32Array | null = null;
     let focusRec = -1;
@@ -1276,6 +1277,8 @@ async function main(): Promise<void> {
       // them (background traffic / police only when focused).
       const tel = view.focused || (forcesOn && !view.background) ? sim.telemetry(id) : NO_TEL;
       view.update(cur, o, prev.length > o ? prev : cur, o, app.alpha, tel, app.paused && !replay ? 0 : dt);
+      // tire_punctures() lists vehicles in the same order as vehicle_states().
+      view.setPunctures(punctures, i * 4);
       if (id === app.focus) {
         focusTel = tel;
         focusRec = o;
@@ -1340,6 +1343,7 @@ async function main(): Promise<void> {
     prof.lap("ui");
     scene.update(dt, sim.intents());
     scene.updateHelicopters(policeDraw, tS);
+    scene.updatePoliceTools(sim.policeTools(), tS);
     const wx = sim.weatherInfo();
     scene.setTimeOfDay(wi[W.night], wx[0] > 0.5 ? wx[7] : 1);
     prof.lap("traffic");

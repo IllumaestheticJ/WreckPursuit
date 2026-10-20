@@ -7,7 +7,7 @@ import * as THREE from "three";
 import { tagFeature } from "./perf";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { Barrier, SimEvent } from "./wasm/sim";
-import { D, DRAW_STRIDE, INTENT_STRIDE, POLICE_DRAW_FLAG } from "./wasm/layout";
+import { D, DRAW_STRIDE, INTENT_STRIDE, POLICE_DRAW_FLAG, TL, TOOL_KIND, TOOL_STRIDE } from "./wasm/layout";
 import { layers } from "./settings";
 import { SignalView } from "./signals_view";
 import { CityTiles } from "./render/city_tiles";
@@ -58,6 +58,9 @@ export class SceneView {
   detailDistanceM = Infinity;
   private readonly camPos = new THREE.Vector3();
   private readonly policeUnits: { obj: THREE.Group; red: THREE.MeshStandardMaterial; blue: THREE.MeshStandardMaterial }[] = [];
+  /** Roadblock barriers (police_tools()), pooled; see updatePoliceTools(). */
+  private readonly tools = new THREE.Group();
+  private readonly toolPool: { barrier: THREE.Group; body: THREE.Mesh; bulb: THREE.Mesh; lamp: THREE.MeshStandardMaterial }[] = [];
   /** Light-bar glow multiplier for the police helicopters (art style). */
   policeGlow = 1;
   /** Replaces renderer.render in render() (art style post stack); null = plain render. The
@@ -124,7 +127,7 @@ export class SceneView {
     axes.position.z = 0.02;
     this.sirenLight.visible = false;
     tagFeature(this.signals.group, "signals");
-    this.world.add(axes, this.barriers, this.intentGroup, this.signals.group, this.sirenLight);
+    this.world.add(axes, this.barriers, this.tools, this.intentGroup, this.signals.group, this.sirenLight);
     // The first contact marker exists from the start (hidden), so its shader programs are
     // prewarmed instead of compiled in the frame of the first contact (browser-perf.md 12b).
     const first = this.newContactMarker();
@@ -249,6 +252,46 @@ export class SceneView {
       n++;
     }
     this.policeUnits.forEach((u, i) => (u.obj.visible = i < n));
+  }
+
+  /**
+   * Draw roadblock barriers from police_tools() as red/white striped boxes with a flashing amber
+   * lamp. Their pose follows the physics body, so they visibly move when hit. Spike strips in
+   * the same list are skipped: render/police_tools.ts already draws them (from map_dynamic()).
+   */
+  updatePoliceTools(tools: Float32Array, timeS: number): void {
+    const barriers: number[] = [];
+    for (let o = 0; o < tools.length; o += TOOL_STRIDE) if (tools[o + TL.kind] === TOOL_KIND.barrier) barriers.push(o);
+    while (this.toolPool.length < barriers.length) {
+      const barrier = new THREE.Group();
+      const white = new THREE.MeshStandardMaterial({ color: 0xf2f2f2 });
+      const red = new THREE.MeshStandardMaterial({ color: 0xd01818 });
+      // Unit box scaled to the barrier size; the red bands are its children so they scale too.
+      const body = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), white);
+      for (let k = 0; k < 5; k += 2) {
+        const band = new THREE.Mesh(new THREE.BoxGeometry(0.2, 1.02, 0.5), red);
+        band.position.set(-0.4 + k * 0.2, 0, 0.1);
+        body.add(band);
+      }
+      const lamp = new THREE.MeshStandardMaterial({ color: 0x664400, emissive: 0x000000 });
+      const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8), lamp);
+      barrier.add(body, bulb);
+      this.tools.add(barrier);
+      this.toolPool.push({ barrier, body, bulb, lamp });
+    }
+    const flash = timeS % 1 < 0.5;
+    this.toolPool.forEach((t, i) => {
+      t.barrier.visible = i < barriers.length;
+      if (!t.barrier.visible) return;
+      const o = barriers[i];
+      t.barrier.position.set(tools[o + TL.x], tools[o + TL.y], tools[o + TL.z]);
+      t.barrier.quaternion.set(tools[o + TL.qx], tools[o + TL.qy], tools[o + TL.qz], tools[o + TL.qw]);
+      const hx = tools[o + TL.hx], hy = tools[o + TL.hy], hz = tools[o + TL.hz];
+      // The body (with its bands) scales to the barrier; the lamp sits on top at fixed size.
+      t.body.scale.set(2 * hx, 2 * hy, 2 * hz);
+      t.bulb.position.set(0, 0, hz + 0.09);
+      t.lamp.emissive.setHex(flash ? 0xffaa00 : 0x000000);
+    });
   }
 
   /** Siren light at `pos` (sim space) with this colour / intensity; `null` = no siren on. */
