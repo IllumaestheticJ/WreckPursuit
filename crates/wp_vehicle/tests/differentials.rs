@@ -336,13 +336,14 @@ fn every_diff_type_is_deterministic_and_snapshot_exact() {
 /// diff data changed: re-record in a `[bless]` commit with the reason.
 #[test]
 fn roster_diff_hashes_are_pinned() {
+    // Re-recorded [bless] in round 12b (ride rework: tyre compliance, dampers, car data).
     let pinned: [(&str, u64); 6] = [
-        ("shiro_turbo", 0x9a963f934195105a),
-        ("hakone_gt", 0xf68de2ec246a9a9),
-        ("sperber_32", 0x2ea77dfe02f24241),
-        ("lindwurm_4t", 0x29ee8b681129e2cf),
-        ("sentinel_wolfhound", 0x85dddf467bac926b),
-        ("junkyard_beater", 0xe9ef92e8d452f551),
+        ("shiro_turbo", 0xa1a8378f86d4297c),
+        ("hakone_gt", 0x93c112e33a42e872),
+        ("sperber_32", 0x6c089a606868e093),
+        ("lindwurm_4t", 0x9a5474b77c93bae7),
+        ("sentinel_wolfhound", 0x3d93cffb67dcee15),
+        ("junkyard_beater", 0x72a8eef4cb8c2001),
     ];
     let mut got = Vec::new();
     for (id, _) in pinned {
