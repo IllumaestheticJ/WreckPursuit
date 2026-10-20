@@ -8,7 +8,8 @@
 // selector) loads with traffic, signals (day/night, lamps change over time) and the city chase,
 // weather (e2e/weather.mjs: selector, rain, wet roads, spray, fog, wipers, rainy-night chase),
 // traffic / police LOD hand-overs are seamless (no missing mesh, < 0.5 m swap jump, no pop-in
-// within 300 m), and (optionally) perf at 1/8/24 cars.
+// within 300 m), browser perf budgets (e2e/perf_check.mjs, PERF=0 skips) and (optionally) perf
+// at 1/8/24 cars.
 import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -255,10 +256,12 @@ for (const [hour, label] of [
     drawn: window.__wp.scene.signals.drawnStates(),
     visible: window.__wp.scene.signals.group.visible,
   }));
+  // Only heads near the camera are drawn (SIGNAL_DRAW_M, browser perf pass); 255 = not drawn.
+  const shown = drawn.drawn.filter((c) => c !== 255).length;
   const lit = drawn.drawn.filter((c) => c >= 1 && c <= 3).length;
   check(
-    framed.n > 8 && drawn.visible && lit === framed.n,
-    `signals (${label}, ${drawn.hour.toFixed(1)} h): ${framed.n} heads drawn, ${lit} lit, framed head ${framed.head}`,
+    shown > 8 && drawn.visible && lit === shown && drawn.drawn[framed.head] !== 255,
+    `signals (${label}, ${drawn.hour.toFixed(1)} h): ${shown} of ${framed.n} heads drawn (near the camera), ${lit} lit, framed head ${framed.head}`,
   );
 }
 {
@@ -268,7 +271,10 @@ for (const [hour, label] of [
       (b) => {
         const now = window.__wp.scene.signals.drawnStates();
         const sim = Array.from(window.__wp.sim.signalStates());
-        return now.some((c, i) => c !== b[i]) && now.every((c, i) => c === sim[i]) ? now.filter((c, i) => c !== b[i]).length : false;
+        const drawn = (c, i) => c !== 255 && b[i] !== 255;
+        return now.some((c, i) => drawn(c, i) && c !== b[i]) && now.every((c, i) => c === 255 || c === sim[i])
+          ? now.filter((c, i) => drawn(c, i) && c !== b[i]).length
+          : false;
       },
       before,
       // Port Vesper under SwiftShader runs well below real time; a full signal cycle needs
@@ -742,5 +748,14 @@ const wx = spawnSync("node", [join(here, "weather.mjs")], {
 });
 process.stdout.write(wx.stdout);
 check(wx.status === 0, `weather checks (e2e/weather.mjs)${wx.status === 0 ? "" : ": " + (wx.stderr || "").trim().split("\n").pop()}`);
+
+// 7. Browser perf (browser perf pass): city chase + rainy-night chase at 1280×720 must keep
+// near real time and stay within generous draw-call / triangle / allocation budgets
+// (e2e/perf_check.mjs; PERF=0 skips it).
+if (process.env.PERF !== "0") {
+  const perf = spawnSync("node", [join(here, "perf_check.mjs")], { cwd: root, encoding: "utf8", env: process.env });
+  process.stdout.write(perf.stdout);
+  check(perf.status === 0, `perf checks (e2e/perf_check.mjs)${perf.status === 0 ? "" : ": " + (perf.stderr || "").trim().split("\n").pop()}`);
+}
 console.log(failures ? `${failures} check(s) failed` : "all checks passed");
 process.exit(failures ? 1 : 0);

@@ -77,6 +77,8 @@ export interface HudFrame {
   viewsMs: number;
   /** Real-time factor: sim seconds per wall second (1 = real time). */
   rtf: number;
+  /** Graphics quality label (render/quality.ts). */
+  gfx?: string;
   tick: number;
   hours: number;
   hash: string;
@@ -171,6 +173,7 @@ export class Hud {
       (f.rtf < RTF_WARN
         ? `<div class="rtf-warn">⚠ slow motion: ${f.rtf.toFixed(2)}× real time (browser can't keep up)</div>`
         : `<div class="dim">real time ${f.rtf.toFixed(2)}×</div>`) +
+      (f.gfx ? `<div class="dim">gfx ${f.gfx}</div>` : "") +
       `<div class="dim">tick ${f.tick} · ${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")} · cam ${f.camera} · hash ${f.hash}</div>` +
       `<div class="dim">health ${t ? (t[T.health] * 100).toFixed(0) : "–"}% · ${f.info?.display_name ?? ""} · F1 help</div>`;
 

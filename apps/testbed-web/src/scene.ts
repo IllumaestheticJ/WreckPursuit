@@ -9,32 +9,55 @@ import type { Barrier, SimEvent } from "./wasm/sim";
 import { D, DRAW_STRIDE, INTENT_STRIDE, POLICE_DRAW_FLAG } from "./wasm/layout";
 import { layers } from "./settings";
 import { SignalView } from "./signals_view";
+import { CityTiles } from "./render/city_tiles";
+import { Quality } from "./render/quality";
 
 const DAY_SKY = new THREE.Color(0x8fb8de);
 const NIGHT_SKY = new THREE.Color(0x070a14);
 
 interface ContactMarker {
   obj: THREE.Group;
+  dot: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>;
+  arrow: THREE.ArrowHelper;
   age: number;
+  active: boolean;
 }
 
 const CONTACT_LIFETIME_S = 1.5;
+/** Contact markers are pooled (a crash emits dozens of contacts per frame): oldest reused. */
+const MAX_CONTACT_MARKERS = 64;
+const CONTACT_DOT = new THREE.SphereGeometry(0.08, 8, 6);
+const tmpNormal = new THREE.Vector3();
 
 export class SceneView {
   readonly renderer: THREE.WebGLRenderer;
+  /** Graphics quality: MSAA, resolution scale (adaptive in auto mode), draw distance. */
+  readonly quality = new Quality();
   readonly scene = new THREE.Scene();
   readonly world = new THREE.Group();
   private readonly hemi: THREE.HemisphereLight;
   private readonly sun: THREE.DirectionalLight;
   private readonly barriers = new THREE.Group();
   private readonly contacts: ContactMarker[] = [];
+  private nextContact = 0;
   /** Contact markers created since the page loaded (for automation). */
   contactsSeen = 0;
   private readonly intentGroup = new THREE.Group();
   private readonly cities = new Map<string, THREE.Object3D>();
+  /** Tiled meshes of each loaded city (render/city_tiles.ts). */
+  private readonly cityTiles = new Map<string, CityTiles>();
+  private cityShown: string | null = null;
+  /** City tiles past this distance (m) are not drawn; fog can only shorten it. From the
+   * graphics quality (high: the camera's far plane, no visible change); `?draw=<m>` overrides. */
+  drawDistanceM = Infinity;
+  private readonly camPos = new THREE.Vector3();
   private readonly policeUnits: { obj: THREE.Group; red: THREE.MeshStandardMaterial; blue: THREE.MeshStandardMaterial }[] = [];
 
   private debugGrid!: THREE.GridHelper;
+  /** The one siren point light (browser perf pass): every point light costs every lit pixel,
+   * even at intensity 0, and a changing light count recompiles the lit shaders. It follows
+   * the nearest police car with its siren on and is hidden when no siren is on. */
+  private readonly sirenLight = new THREE.PointLight(0xff2244, 0, 18, 2);
   /** Traffic signal heads and stop lines (signals_view.ts). */
   readonly signals = new SignalView();
   /** The flat world's ground material (the weather view makes it wet-capable). */
@@ -43,8 +66,11 @@ export class SceneView {
   onCityLoaded: ((root: THREE.Object3D) => void) | null = null;
 
   constructor(parent: HTMLElement) {
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // MSAA, resolution and draw distance come from the graphics quality (render/quality.ts).
+    this.renderer = new THREE.WebGLRenderer({ antialias: this.quality.antialias, preserveDrawingBuffer: true });
+    this.quality.attach(this.renderer);
+    const draw = Number(new URLSearchParams(location.search).get("draw"));
+    this.drawDistanceM = draw > 0 ? draw : this.quality.drawDistanceM;
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     parent.appendChild(this.renderer.domElement);
     window.addEventListener("resize", () => this.renderer.setSize(window.innerWidth, window.innerHeight));
@@ -69,7 +95,8 @@ export class SceneView {
     // Axis hint at the origin: +X red, +Y (forward) green.
     const axes = new THREE.AxesHelper(3);
     axes.position.z = 0.02;
-    this.world.add(axes, this.barriers, this.intentGroup, this.signals.group);
+    this.sirenLight.visible = false;
+    this.world.add(axes, this.barriers, this.intentGroup, this.signals.group, this.sirenLight);
   }
 
   /**
@@ -79,6 +106,7 @@ export class SceneView {
    */
   async setCity(cityId: string | null): Promise<void> {
     for (const [id, obj] of this.cities) obj.visible = id === cityId;
+    this.cityShown = cityId;
     // The debug grid sits on the road surface and flickers through it; hide it in the city.
     this.debugGrid.visible = !cityId;
     if (!cityId || this.cities.has(cityId)) return;
@@ -115,6 +143,7 @@ export class SceneView {
         }
       });
       holder.add(gltf.scene);
+      this.cityTiles.set(cityId, new CityTiles(gltf.scene));
       this.onCityLoaded?.(gltf.scene);
     } catch (e) {
       console.warn("city greybox not available", cityId, e);
@@ -158,6 +187,15 @@ export class SceneView {
     this.policeUnits.forEach((u, i) => (u.obj.visible = i < n));
   }
 
+  /** Siren light at `pos` (sim space) with this colour / intensity; `null` = no siren on. */
+  setSiren(pos: THREE.Vector3 | null, colour = 0, intensity = 0): void {
+    this.sirenLight.visible = pos !== null;
+    if (!pos) return;
+    this.sirenLight.position.copy(pos);
+    this.sirenLight.color.setHex(colour);
+    this.sirenLight.intensity = intensity;
+  }
+
   /** Sky + light colour from the night factor (0 noon … 1 midnight); `sunDimming` (weather
    * clouds, 0..1, default 1) dims the sun and part of the sky light. */
   setTimeOfDay(night: number, sunDimming = 1): void {
@@ -191,40 +229,42 @@ export class SceneView {
         | { point: [number, number, number]; normal: [number, number, number]; impulse_ns: number }
         | undefined;
       if (!c) continue;
-      const g = new THREE.Group();
-      g.position.set(...c.point);
-      const dot = new THREE.Mesh(
-        new THREE.SphereGeometry(0.08, 8, 6),
-        new THREE.MeshBasicMaterial({ color: 0xff00ff, transparent: true, depthTest: false }),
-      );
       const len = Math.min(Math.max(c.impulse_ns / 2000, 0.2), 5);
-      const arrow = new THREE.ArrowHelper(new THREE.Vector3(...c.normal).normalize(), new THREE.Vector3(), len, 0xff00ff);
-      g.add(dot, arrow);
-      g.renderOrder = 6;
-      this.world.add(g);
-      this.contacts.push({ obj: g, age: 0 });
+      tmpNormal.set(...c.normal).normalize();
+      let m = this.contacts[this.nextContact];
+      if (!m) {
+        const g = new THREE.Group();
+        const dot = new THREE.Mesh(CONTACT_DOT, new THREE.MeshBasicMaterial({ color: 0xff00ff, transparent: true, depthTest: false }));
+        const arrow = new THREE.ArrowHelper(tmpNormal, new THREE.Vector3(), len, 0xff00ff);
+        for (const mat of [arrow.line.material, arrow.cone.material] as THREE.Material[]) mat.transparent = true;
+        g.add(dot, arrow);
+        g.renderOrder = 6;
+        this.world.add(g);
+        m = { obj: g, dot, arrow, age: 0, active: true };
+        this.contacts[this.nextContact] = m;
+      }
+      this.nextContact = (this.nextContact + 1) % MAX_CONTACT_MARKERS;
+      m.obj.position.set(...c.point);
+      m.arrow.setDirection(tmpNormal);
+      m.arrow.setLength(len);
+      m.age = 0;
+      m.active = true;
       this.contactsSeen++;
     }
   }
 
   update(dt: number, intents: Float32Array): void {
     const show = layers.on("contacts");
-    for (let i = this.contacts.length - 1; i >= 0; i--) {
-      const c = this.contacts[i];
+    for (const c of this.contacts) {
+      if (!c.active) continue;
       c.age += dt;
-      c.obj.visible = show;
       const fade = 1 - c.age / CONTACT_LIFETIME_S;
-      c.obj.traverse((o) => {
-        const m = (o as THREE.Mesh).material as THREE.Material | undefined;
-        if (m) {
-          m.transparent = true;
-          m.opacity = Math.max(fade, 0);
-        }
-      });
-      if (fade <= 0) {
-        c.obj.removeFromParent();
-        this.contacts.splice(i, 1);
-      }
+      if (fade <= 0) c.active = false;
+      c.obj.visible = show && c.active;
+      const o = Math.max(fade, 0);
+      c.dot.material.opacity = o;
+      (c.arrow.line.material as THREE.Material).opacity = o;
+      (c.arrow.cone.material as THREE.Material).opacity = o;
     }
     // Intent arrows: [entity, kind, from xyz, to xyz] (placeholder hook, empty for now).
     this.intentGroup.clear();
@@ -242,11 +282,34 @@ export class SceneView {
   }
 
   clearContacts(): void {
-    for (const c of this.contacts) c.obj.removeFromParent();
-    this.contacts.length = 0;
+    for (const c of this.contacts) {
+      c.active = false;
+      c.obj.visible = false;
+    }
   }
 
-  render(camera: THREE.Camera): void {
+  /** Contact markers currently shown (automation). */
+  activeContacts(): number {
+    return this.contacts.filter((c) => c.active).length;
+  }
+
+  /** City tiles: total, hidden by the draw distance, drawn (frustum too; needs the camera). */
+  cityStats(camera?: THREE.Camera): { tiles: number; hidden: number; drawn: number } {
+    const t = this.cityShown ? this.cityTiles.get(this.cityShown) : undefined;
+    return { tiles: t?.meshes.length ?? 0, hidden: t?.hidden ?? 0, drawn: t && camera ? t.drawn(camera) : 0 };
+  }
+
+  render(camera: THREE.PerspectiveCamera): void {
+    const tiles = this.cityShown ? this.cityTiles.get(this.cityShown) : undefined;
+    if (tiles) {
+      camera.getWorldPosition(this.camPos);
+      let far = Math.min(this.drawDistanceM, camera.far);
+      // Fully fogged geometry (FogExp2 factor > 0.999) looks like the fog-coloured sky.
+      const fog = this.scene.fog;
+      if (fog instanceof THREE.FogExp2 && fog.density > 0) far = Math.min(far, 2.7 / fog.density);
+      else if (fog instanceof THREE.Fog) far = Math.min(far, fog.far);
+      tiles.update(this.camPos, far);
+    }
     this.renderer.render(this.scene, camera);
   }
 }

@@ -147,6 +147,8 @@ export function packInput(i: DriverInput): Float32Array {
   return new Float32Array([i.steer, i.throttle, i.brake, i.handbrake, i.clutch, flags, 0]);
 }
 
+let lastEventsJson = "";
+
 export const sim = {
   /** Start a live session from scenario JSON; `scripted` = drive entities by their drivers. */
   init: (seed: number, scenarioJson: string, scripted: boolean): number[] =>
@@ -226,8 +228,14 @@ export const sim = {
   eventsDrain: (): SimEvent[] => {
     const bytes = wasm.events_drain();
     // Empty Vec<SimEvent> encodes as a single 0 byte; skip the decode round trip.
-    return bytes.length <= 1 ? [] : JSON.parse(wasm.events_decode(bytes));
+    lastEventsJson = bytes.length <= 1 ? "" : wasm.events_decode(bytes);
+    return lastEventsJson ? JSON.parse(lastEventsJson) : [];
   },
+  /** JSON text of the last `eventsDrain()` ("" when it had no events): the audio director takes
+   * the same JSON, so the frame loop passes this instead of re-stringifying the events. */
+  lastEventsJson: (): string => lastEventsJson,
+  /** Panel states of an entity, PANEL_STRIDE floats per panel (render/panels.ts). */
+  panelStates: (entity: number): Float32Array => wasm.panel_states(entity),
   telemetry: (entity: number): Float32Array => wasm.telemetry(entity),
   telemetryNames: (): string[] => JSON.parse(wasm.telemetry_names()),
   ffb: (entity: number): Float32Array => wasm.ffb(entity),
