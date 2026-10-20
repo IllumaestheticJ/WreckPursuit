@@ -133,6 +133,7 @@ the schedule could hunt (1→2→1). New automatic (`crates/wp_vehicle/README.md
 | 56 | Semi-auto (and auto): holding the handbrake also opens the clutch so the rear wheels lock | A (vehicle): auto-clutch decouples while the handbrake is held, smooth re-engage, no stall; both modes | dispatched |
 | 57 | Countersteer assist as a slider with variable aggression | A (vehicle): 0–100 % slide-catch gain (driver override kept), wasm + testbed slider | dispatched |
 | 58 | Horn should sound for as long as the button is held | J (audio): looped horn sustain (recorded + procedural), release ≤ 50 ms | dispatched |
+| 59 | No option to map a clutch | C (testbed): `clutch` binding (key / pad / wheel pedal) + automatic/manual clutch setting; A: manual clutch + stall/restart in wp_vehicle | dispatched |
 
 ## 2026-10-19 — step 2: 4-player test on Port Vesper v2 (F, `ws/net`)
 Found by the new 3-minute 4-client test (`crates/wp_net/tests/vesper_e2e.rs`) and the
