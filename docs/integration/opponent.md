@@ -339,3 +339,16 @@ trig).
 - **Report to K / race (judge)**: police units spawned during the race are not in the judge's
   police list, so a racer's low-speed bump with one (Hollins seed 5, unit 14 arriving at a
   capture) counts as a civilian hit (`civilian_hits`).
+- **Flee test on the round-12 tip (police give-way, grid fit, residential grid layout)**:
+  `wanted_ai_racer_flees_police_through_the_city` now asserts that racer 1 (injected L3)
+  flees and that **any other racer that flees has a record of its own**: traffic violations
+  by its own car (`Outcome::violations_by`, new), a wanted level the sim's police raised for
+  it, and its own `Abandoned` event at or below that level. On the new map seed 1 failed on
+  distance, not attribution: a left-turning civilian stood 45 s at the (141, −167) junction
+  across racer 1's flight route (≈2.2 m beside it for a 1.8 m car; civilians keep 0.4 m
+  clearance — letting the AI squeeze parked civilians too spread the grid-highway field badly,
+  so not done). Seed → 3 (`WP_FLEE_SEED` sweep 1–8: 2, 3, 7 pass; 1 civilian above; 4 247 m
+  of the 250 m bar; 5, 8 flight goal away from every known patrol, not only the injected
+  unit; 6 caught after 112 m). Seeds 3, 5, 7, 8 have racers 2 and 3 fleeing with 8–13
+  violations each and their own wanted level — all pass the new check.
+
