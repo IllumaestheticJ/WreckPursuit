@@ -235,7 +235,7 @@ distance and nearest road. Tests, scenarios and tools use `city::procedural(&Pro
 | Capture / safehouse (12×12 city) / total loss | Each rule fires in its scripted case |
 | Containment, two islands + one bridge (`tests/strategy.rs`) | The bridge is the only escape point; at L4 a unit parks on it 30 m in from the racer's side, lights on, while ≥ 1 unit stays on the racer |
 | Widening search (same city, racer vanishes at L4) | Search starts 4 s after contact is lost; spots picked after 20 s are > 50 m further out than those in the first 8 s; searchers ≥ 60 m apart; escape after 30 s |
-| Strategy on vs off (`strategy.toml` posts and search disabled), all scenarios | Every expectation holds either way. Night speeder: 0 escapes both, 20 posts, 24 searches re-found the racer; day speeder: 19 posts (median held 28 s) |
+| Strategy on vs off (`strategy.toml` posts and search disabled), all scenarios | Every expectation holds either way. Night speeder (8 runs): 0 escapes either way, 22 posts, searches re-found the racer 23 times; day speeder (5 runs): 29 posts (median held ≈ 28 s); escape scenario: 2 of 3 runs escape either way |
 
 | City traffic, physical cars (`cargo run --release -p simcli --example police_traffic_contacts -- patrol\|pursuit 300`) | Patrol 300 s: 0 police↔traffic contacts, 1 overlap with kinematic traffic caused by a moving unit. Hot pursuit 362 s: 0 contacts, 0 overlaps with lights on, 3 caused by moving units in total |
 
