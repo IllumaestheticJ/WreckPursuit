@@ -3,8 +3,9 @@
 //
 // URL parameters (handy for automation): ?scenario=crash/head_on.ron&speed=60 runs a scenario,
 // ?bench=24 spawns a 24-car benchmark, ?cam=orbit picks a camera, ?replay=last plays the last
-// stored replay, ?city=procedural_12x12 picks the city (default vesper_v2), ?chase=1 starts the
-// city chase.
+// stored replay, ?city=vesper_v2 / ?city=procedural_12x12 starts free drive in that city (without
+// it free drive starts on the flat world; the selector defaults to vesper_v2), ?chase=1 starts the
+// city chase (in the ?city= map when given).
 import { loadWasm, sim, type DriverInput, type Scenario, type ScenarioResult } from "./wasm/sim";
 import { META_STRIDE, STATE_STRIDE, S, T, VEHICLE_KIND, W } from "./wasm/layout";
 import { installKeyboard, isHeld, readInput, toggleHeadlights, type InputSource } from "./input";
@@ -97,7 +98,12 @@ async function main(): Promise<void> {
   });
   const citySel = $("city-map") as HTMLSelectElement;
   const cityParam = params.get("city");
-  if (cityParam && CITY_IDS.includes(cityParam)) citySel.value = cityParam;
+  if (cityParam && CITY_IDS.includes(cityParam)) {
+    citySel.value = cityParam;
+    // `?city=<id>` starts free drive in that city: selecting the map alone left the "city" box
+    // unticked, so the page opened on the flat world and the city never loaded.
+    ($("city") as HTMLInputElement).checked = true;
+  }
 
   // ----- session management --------------------------------------------------------------
 

@@ -129,6 +129,10 @@ export class SceneView {
       });
       holder.add(gltf.scene);
     } catch (e) {
+      // Forget the empty holder so the next session in this city tries again (a cached empty
+      // holder kept the city invisible for the rest of the page's life).
+      this.scene.remove(holder);
+      this.cities.delete(cityId);
       console.warn("city greybox not available", cityId, e);
     }
   }
