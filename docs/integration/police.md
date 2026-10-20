@@ -469,7 +469,50 @@ at 115 s (was 130 s; police arrive sooner). Comments updated in both files.
   is negative only when the unit is really reversing (below −1 m/s along its heading); otherwise
   it is the speed magnitude, as before (a fully signed speed broke `wp_race` `grid_highway_sprint`).
 
-ROUND13_GATE
+*Driving controller vs `lead/police-driver` (lead heads-up, round 12c).* Round 13 touched the
+low-level path→controls driving only where the tactics needed it, all in `unit_input` /
+`avoid.rs` and tuned from `[chase]` / `[avoid]` in `data/police/pursuit.toml`: chase cornering
+speed (`cornering_g`, `brake_mps2`, `speed_margin`, `cap_scale`), chase speeds at junctions / reds /
+turns (`chase_*_mps`), wall feelers (`wall_*`, `walls.rs`), the push-through phase
+(`push_*`, `stuck.rs` `Phase::Push`) and reverse caps (`REVERSE_MAX_MPS` 3, `SWING_REVERSE_MAX_MPS`
+5). The DriveController itself (pure pursuit + PID) is unchanged. The driver session can replace
+the speed planning and feelers; the tactic layer only needs `unit_input` to keep honouring the
+`Tactic` target, `AvoidState`, the shove phase and `PoliceStats::static_hits`.
+
+*Merged and re-checked on `lead/round12` 9409249 (2026-10-20).* The tables above were measured on
+the earlier base (commit `e4f8b56`); later commits: three-point turns reverse at up to 5 m/s
+(`67f6de5`), the wall index shared in an `Arc` (`e6b4ab4`), and the merges of the lead's car-data
+retune, testbed presets, audio impacts and touch perf pass. After the car-data retune (stiffer
+dampers on every car) the Founders Cut racer is caught and PIT'd on the Uptown Connector (≈ 71 s,
+L5 at ≈ 77 s, 40 s escape time); he is still lost inside the Cut (≈ 112.5 s) with the units
+holding the portals, so `tunnel_escape_founders_cut` now runs 170 s (escape window to 170 s) and
+escapes at ≈ 152 s. The control is still captured.
+
+*Gate (merged branch, `3ed3415` + this doc).*
+- `cargo fmt --check`, `cargo clippy --workspace -- -D warnings`, `cargo build --target
+  wasm32-unknown-unknown -p wp_wasm`, `lint-determinism` (0 errors): clean.
+- `cargo test --workspace`: everything passes except failures that also fail on
+  `lead/round12` 9409249 without this branch: `wp_wasm`
+  `crash_replay_tests::race_crash_replays_with_the_judge_and_no_crash_on_the_grid` and
+  `tests::simcli_golden_replays_play_back_in_the_browser_core` (`golden_tbone` replay drift);
+  `wp_race --test race_picker` `loop9_circuit` / `lantern_checkpoint_draws_the_police` (note for L
+  above); and `simcli --test scenarios goldens_match`, only for goldens that drift on the base too
+  (identical hashes with and without this branch: audio_sideswipe_scrape, the city hill / sidewalk
+  / siren / blocked-parked-vesper scenes and the other car-data-retune drift; for the lead to
+  bless), plus the two Founders Cut scenarios, which have no golden on the base either.
+- All 82 scenarios in `apps/simcli/scenarios` pass their expectations (including both Founders
+  Cut ones and the `city_siren_traffic_yields_*` ones that failed in round 12b).
+- `crates/wp_net/tests/vesper_e2e.rs`: pass (104 s).
+- Goldens: generated on `lead/round12` 9409249 and on this branch; the 21 hash files and 2 replays
+  that differ were blessed in `3ed3415` (all have physical police in them).
+- `just web-e2e`: WEB_E2E_RESULT
+
+*Lead requests received during the gate, not started (round 12c addenda).* Rows 75 (upside-down
+spawn / safe spawns), 78 (un-wrecked units reset themselves), 80 (a witnessed violation starts the
+pursuit; blatant at +20 km/h within 90 m), 84 (search reinforcements and sweep), 86 (no active unit
+parked in a jam; stopped-while-active watchdog), 89 (symmetric line-of-sight range, 350–400 m by
+day, ≥ 250 m at night) and 96 (oncoming units block the road). They arrived after the round-13
+scope was set; they are listed here so the next police session picks them up.
 
 **Round 12b (on `lead/round12`): owner playtest rows 44 / 55 / 60, plus the lead addenda on
 un-sticking and mode-keyed behaviour.**
