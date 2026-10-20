@@ -626,6 +626,7 @@ impl PoliceSystem {
                 text: line.text.clone(),
                 tier: line.tier,
                 duration_s: line.duration_s,
+                cut_in: line.cut_in,
             });
             while self.radio.len() > self.cfg.tools.gadgets.radio_log_len {
                 self.radio.pop_front();

@@ -165,7 +165,8 @@ impl Harness {
 
 /// No transmission starts before the previous one (plus the minimum silence) is over.
 fn assert_one_at_a_time(lines: &[RadioLine], min_gap: f32) {
-    for w in lines.windows(2) {
+    // Emergency traffic (an officer rammed, a captain's order) may cut the line on air.
+    for w in lines.windows(2).filter(|w| !w[1].cut_in) {
         let end = w[0].time.secs() + w[0].duration_s + min_gap;
         assert!(
             w[1].time.secs() + 1e-3 >= end,

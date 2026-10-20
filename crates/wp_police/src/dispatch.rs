@@ -779,14 +779,17 @@ impl PoliceSystem {
             });
         }
         let desc = self.racer_desc(racer);
-        self.radio(RadioCue::new(
-            RadioTier::Critical,
-            Some(unit),
-            format!(
-                "Unit {}, I've been hit! {desc} rammed my unit, assault on an officer.",
-                unit.0
-            ),
-        ));
+        self.radio(
+            RadioCue::new(
+                RadioTier::Critical,
+                Some(unit),
+                format!(
+                    "Unit {}, I've been hit! {desc} rammed my unit, assault on an officer.",
+                    unit.0
+                ),
+            )
+            .breaks_in(),
+        );
         // Who can act on it: the hit unit unless it is out of action, else the closest
         // in-service unit nearby that sees the racer.
         let able = |u: &Unit| {

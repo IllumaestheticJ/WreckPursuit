@@ -50,6 +50,11 @@ other hosts can call `set_road_names` / `set_tunnels`.
 - **Priority queue:** tier, then the cue's `prio`, then age. Lines expire (`stale_s` 6 s,
   `stale_critical_s` 15 s, or the cue's own life: bumper/PIT 2.5 s) and can be superseded
   (`RadioCue::supersedes(slot)`; `RadioDirector::withdraw(slot)`).
+- **Emergency traffic** (`RadioCue::breaks_in`): "Unit N, I've been hit!" (assault on an
+  officer) and captain priority orders cut a normal transmission and go out at once (flagged
+  `cut_in` in the log; the audio scanner chops the line it is playing for the same reason). A
+  break-in never cuts another break-in. This keeps the existing "assault line in the same
+  moment" behaviour (`wp_sim/tests/police_assault.rs`, `wp_net/tests/city_v03.rs`).
 - **More chatter as heat rises, quiet on patrol:** `global_gap_s = [8, 6.5, 5, 4, 3.5]` and
   `unit_gap_s = [30, 22, 16, 12, 10]` by the highest wanted level (L1..L5). **L1 = the row-6
   values (8 s / 30 s)**, calm stays 20 s with the 200 m earshot. No callout fires while nobody
@@ -120,6 +125,14 @@ you do and add a match arm in `chatter_events`; `Callout` has room. Your `covers
 Perf: chatter runs per step over the step's events and on think ticks over racers × units
 (distance checks); `place_phrase` (a linear nearest-road scan) runs only when a callout is raised.
 Not measurable in `police_bench` noise.
+
+## Gate (this branch)
+fmt, `clippy --workspace --all-targets -D warnings`, wasm build, ui-kit vitest + tsc, testbed tsc,
+`npm run e2e:radio`: clean. `cargo test --workspace` / `just scenarios`: the only failures are
+already red on `origin/lead/round12` with identical results — 20 goldens (same new hashes on
+both: this branch does not change the simulation), `wp_race` race_picker (hollins / loop9 /
+lantern), `wp_opponent` live police chase, and simcli `police/tunnel_escape_founders_cut{,_control}`
+(capture/escape timing; E re-aims them on `ws/police`).
 
 ## Known gaps
 - Speech is not band-passed (browser limitation, see above); recorded line packs would fix it.

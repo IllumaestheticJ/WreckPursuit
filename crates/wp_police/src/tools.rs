@@ -341,6 +341,9 @@ pub struct RadioLine {
     /// config's `min_gap_s`).
     #[serde(default)]
     pub duration_s: f32,
+    /// Emergency traffic that cut the line before it.
+    #[serde(default)]
+    pub cut_in: bool,
 }
 
 /// Helicopter view for renderers / the captain.

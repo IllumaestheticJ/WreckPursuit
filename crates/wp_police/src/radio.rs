@@ -82,6 +82,9 @@ pub struct RadioCue {
     /// Supersede slot: a newer line with the same slot replaces a held (unspoken) one, e.g.
     /// "now level 4" replaces a queued "now level 3" for the same racer.
     pub slot: Option<String>,
+    /// Emergency traffic: cut the transmission on air and go out at once (an officer rammed,
+    /// a captain's order). Never cuts another break-in.
+    pub break_in: bool,
 }
 
 impl RadioCue {
@@ -96,6 +99,7 @@ impl RadioCue {
             text,
             group: None,
             slot: None,
+            break_in: false,
         }
     }
 
@@ -115,6 +119,12 @@ impl RadioCue {
     /// Replace any held line with the same `slot` (it is out of date).
     pub fn supersedes(mut self, slot: String) -> Self {
         self.slot = Some(slot);
+        self
+    }
+
+    /// Emergency traffic: cut whatever is on air (see [`RadioCue::break_in`]).
+    pub fn breaks_in(mut self) -> Self {
+        self.break_in = true;
         self
     }
 
@@ -228,6 +238,8 @@ pub struct SpokenLine {
     pub tier: RadioTier,
     /// Estimated transmission length, s (the channel is busy this long plus `min_gap_s`).
     pub duration_s: f32,
+    /// Emergency traffic that cut the transmission on air (the only way two lines meet).
+    pub cut_in: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -245,6 +257,7 @@ struct Held {
     ttl_s: Option<f32>,
     group: Option<RadioGroup>,
     slot: Option<String>,
+    break_in: bool,
     members: Vec<Member>,
 }
 
@@ -255,6 +268,8 @@ pub struct RadioDirector {
     last_line: Option<SimTime>,
     /// The channel is busy (a transmission plus the silence after it) until then.
     busy_until: Option<SimTime>,
+    /// The transmission on air is a break-in (cannot be cut).
+    on_air_break_in: bool,
     last_unit: BTreeMap<UnitId, SimTime>,
     stats: RadioStats,
 }
@@ -322,6 +337,7 @@ impl RadioDirector {
             ttl_s: cue.ttl_s,
             group: cue.group,
             slot: cue.slot,
+            break_in: cue.break_in,
             members: vec![member],
         });
     }
@@ -350,8 +366,21 @@ impl RadioDirector {
                 k += 1;
             }
         }
-        // 2. One transmission at a time.
-        if self.busy_until.is_some_and(|t| now < t) {
+        // 2. One transmission at a time; emergency traffic cuts a normal transmission.
+        let busy = self.busy_until.is_some_and(|t| now < t);
+        if busy {
+            if self.on_air_break_in {
+                return spoken;
+            }
+            let Some(b) = (0..self.held.len()).find(|&k| self.held[k].break_in) else {
+                return spoken;
+            };
+            let h = self.held.remove(b);
+            let mut line = self.speak(cfg, now, h);
+            line.cut_in = true;
+            self.busy_until = Some(now.plus(line.duration_s + cfg.min_gap_s));
+            self.on_air_break_in = true;
+            spoken.push(line);
             return spoken;
         }
         let gap_open = self
@@ -395,8 +424,8 @@ impl RadioDirector {
                     continue;
                 }
             }
-            // Higher tier, then higher prio, then the older line (earlier index).
-            let key = |h: &Held| (h.tier, h.prio);
+            // Break-ins first, then higher tier, higher prio, then the older line.
+            let key = |h: &Held| (h.break_in, h.tier, h.prio);
             if best.is_none_or(|b| key(&self.held[k]) > key(&self.held[b])) {
                 best = Some(k);
             }
@@ -404,6 +433,7 @@ impl RadioDirector {
         }
         if let Some(b) = best {
             let h = self.held.remove(b);
+            self.on_air_break_in = h.break_in;
             let line = self.speak(cfg, now, h);
             self.busy_until = Some(now.plus(line.duration_s + cfg.min_gap_s));
             spoken.push(line);
@@ -441,6 +471,7 @@ impl RadioDirector {
             unit,
             tier: h.tier,
             duration_s: cfg.line_s(&text),
+            cut_in: false,
             text,
         }
     }
@@ -535,9 +566,10 @@ mod tests {
         out
     }
 
-    /// Every transmission ends (plus the minimum silence) before the next one starts.
+    /// Every transmission ends (plus the minimum silence) before the next one starts, unless
+    /// the next one is emergency traffic cutting it.
     fn assert_no_overlap(lines: &[(f32, SpokenLine)]) {
-        for w in lines.windows(2) {
+        for w in lines.windows(2).filter(|w| !w[1].1.cut_in) {
             let end = w[0].0 + w[0].1.duration_s + cfg().min_gap_s;
             assert!(
                 w[1].0 + 1e-3 >= end,
@@ -663,6 +695,38 @@ mod tests {
             .map(|l| l.1.text)
             .collect();
         assert_eq!(out, ["Dispatch: 10-80.", "Dispatch: now level 3."]);
+    }
+
+    #[test]
+    fn emergency_traffic_cuts_in_once() {
+        let mut d = RadioDirector::new();
+        let long =
+            "Dispatch: a long routine line that keeps the channel busy for quite a while now.";
+        d.raise(
+            SimTime::ZERO,
+            RadioCue::new(RadioTier::Critical, None, long.into()),
+        );
+        let mut out = run(&mut d, 0.0, 0.5, 3, near);
+        let hit = |n: u32| {
+            RadioCue::new(
+                RadioTier::Critical,
+                Some(UnitId(n)),
+                format!("Unit {n}, I've been hit!"),
+            )
+            .breaks_in()
+        };
+        d.raise(SimTime::from_secs(0.5), hit(4));
+        d.raise(SimTime::from_secs(0.5), hit(5));
+        out.extend(run(&mut d, 0.5, 20.0, 3, near));
+        let texts: Vec<&str> = out.iter().map(|l| l.1.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            [long, "Unit 4, I've been hit!", "Unit 5, I've been hit!"]
+        );
+        // Unit 4 cut the dispatcher at once; unit 5 waited for unit 4 (no cutting a break-in).
+        assert!(out[1].1.cut_in && (out[1].0 - 0.5).abs() < 0.11);
+        assert!(!out[2].1.cut_in);
+        assert_no_overlap(&out);
     }
 
     #[test]
