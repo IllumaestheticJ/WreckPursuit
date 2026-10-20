@@ -26,10 +26,10 @@
     // Parked cars make debug test runs very slow and take no part in the race.
     parked_cars: false,
     entities: [
-        (id: "ai_coupe", car: "debug_coupe", pos: (58.05, -440.0, 0.0)),
-        (id: "ai_sedan", car: "debug_sedan", pos: (63.05, -444.0, 0.0)),
-        (id: "ai_coupe_2", car: "debug_coupe", pos: (58.05, -448.0, 0.0)),
-        (id: "ai_sedan_2", car: "debug_sedan", pos: (63.05, -452.0, 0.0)),
+        (id: "ai_coupe", car: "debug_coupe", pos: (59.55, -440.0, 0.0)),
+        (id: "ai_sedan", car: "debug_sedan", pos: (64.55, -444.0, 0.0)),
+        (id: "ai_coupe_2", car: "debug_coupe", pos: (59.55, -448.0, 0.0)),
+        (id: "ai_sedan_2", car: "debug_sedan", pos: (64.55, -452.0, 0.0)),
     ],
     duration_s: 30.0,
     hash_every: 240,

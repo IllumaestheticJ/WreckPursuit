@@ -29,7 +29,7 @@
         (
             id: "player",
             car: "lindwurm_4t",
-            pos: (328.69238, 1417.6816, 23.712965),
+            pos: (328.56927, 1419.1766, 23.714773),
             yaw: 1.6529424,
             driver: scripted,
             inputs: [],
@@ -37,7 +37,7 @@
         (
             id: "ai_vic",
             car: "kestrel_ts",
-            pos: (309.1701, 1411.0574, 23.712965),
+            pos: (309.047, 1412.5524, 23.714773),
             yaw: 1.6529424,
             driver: scripted,
             inputs: [],
@@ -45,7 +45,7 @@
         (
             id: "ai_mara",
             car: "hakone_gt",
-            pos: (312.74634, 1416.3687, 23.712965),
+            pos: (312.62323, 1417.8636, 23.714773),
             yaw: 1.6529424,
             driver: scripted,
             inputs: [],
@@ -53,7 +53,7 @@
         (
             id: "ai_dez",
             car: "rampart_50",
-            pos: (317.14313, 1411.7137, 23.712965),
+            pos: (317.02002, 1413.2087, 23.714773),
             yaw: 1.6529424,
             driver: scripted,
             inputs: [],
@@ -61,7 +61,7 @@
         (
             id: "ai_juno",
             car: "shiro_turbo",
-            pos: (320.71936, 1417.0251, 23.712965),
+            pos: (320.59625, 1418.5201, 23.714773),
             yaw: 1.6529424,
             driver: scripted,
             inputs: [],
@@ -69,7 +69,7 @@
         (
             id: "ai_tito",
             car: "sperber_32",
-            pos: (325.11615, 1412.3702, 23.712965),
+            pos: (324.99304, 1413.8652, 23.714773),
             yaw: 1.6529424,
             driver: scripted,
             inputs: [],

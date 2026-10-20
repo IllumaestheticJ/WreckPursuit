@@ -749,7 +749,8 @@ fn pace_scenarios_hold_their_ranges() {
         density: None,
         solo: false,
         geometry: false,
-        trace: None,
+        // `WP_PACE_TRACE=<grid idx>` traces one car here too (with `WP_PACE_ONLY`).
+        trace: std::env::var("WP_PACE_TRACE").ok().and_then(|v| v.parse().ok()),
         seed: None,
     };
     let mut caps = BTreeMap::new();

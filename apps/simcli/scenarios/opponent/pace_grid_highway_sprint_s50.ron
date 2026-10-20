@@ -31,7 +31,7 @@
         (
             id: "player",
             car: "lindwurm_4t",
-            pos: (11.75, -361.9, 0.0),
+            pos: (13.25, -357.4, 0.0),
             yaw: 0.0,
             driver: scripted,
             inputs: [],
@@ -39,7 +39,7 @@
         (
             id: "ai_vic",
             car: "kestrel_ts",
-            pos: (6.75, -349.9, 0.0),
+            pos: (8.25, -345.4, 0.0),
             yaw: 0.0,
             driver: scripted,
             inputs: [],
@@ -47,7 +47,7 @@
         (
             id: "ai_juno",
             car: "shiro_turbo",
-            pos: (11.75, -353.9, 0.0),
+            pos: (13.25, -349.4, 0.0),
             yaw: 0.0,
             driver: scripted,
             inputs: [],
@@ -55,7 +55,7 @@
         (
             id: "ai_tito",
             car: "sperber_32",
-            pos: (6.75, -357.9, 0.0),
+            pos: (8.25, -353.4, 0.0),
             yaw: 0.0,
             driver: scripted,
             inputs: [],
