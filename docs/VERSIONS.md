@@ -21,5 +21,6 @@ version shows as a badge in the page corner and in every refresh report.
 | 0.12.12 | preview | Wreckfest-style countersteer (slider; gyro removed), handbrake turns, one-click Rookie/Street/Sim presets, modelled engine sound, modelled impacts/horns, police round 13 (backup, tactics, push-through, building feelers, tunnel search), parked cars unlit, spike strips drawn |
 | 0.12.13 | preview | Police round 13 (pass-by chases, longer sight, search reinforcements, head-on blocks, not stuck in jams, safe spawns + self-reset), police radio chatter (spoken, radio strip), siren v2, night traffic curve + fewer parked cars + jam fixes, Arcade damage −20–30 %, stock shift times + shift mods, faster countersteer, browser perf passes, beater fixes |
 | 0.12.14 | preview | AI racer pace (real car limits, junction gaps, traffic passing), siren traffic test re-scoped, round-13 test fixes |
-| 0.12.15 | preview | (next) |
+| 0.12.15 | preview | Physics cost back down (sim-perf), wider roads + residential districts, police turn-round loop fix, police roadblocks + spike strips (physical), reference-style controls settings + parity suite, vehicle drift lab (assists off by default) |
+| 0.12.16 | preview | (next) |
 | public demo | demo link | Snapshot of 0.12.3 with a start menu (refreshed only from a green main) |
