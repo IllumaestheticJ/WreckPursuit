@@ -12,6 +12,7 @@
 //! | [`power_oversteer_onset`] | steady 0.4 g on a 40 m circle, throttle ramped open-loop to 100%: throttle at which the rear slides (rear slip angle exceeds front by 2°) |
 //! | [`power_oversteer_exit`] | mid-corner on a circle, then full throttle while still steering in, then steering released with throttle held: peak body slip and whether the car straightens out (slide-control assists) |
 //! | [`high_speed_catch`] | straight at speed, sudden yaw-rate kick (a nudge from traffic), driver countersteers with keys / stick after 0.15 s: peak body slip and whether the car is caught |
+//! | [`catch_snap_back`] | straight at speed, yaw kick, keyboard driver holds the countersteer key until the car is nearly straight (and optionally a bit longer): peak slide, then peak slide the other way (the snap-back) |
 //! | [`top_speed_kmh`] | full throttle on a straight until acceleration stops |
 
 use wp_contracts::{AssistProfile, LoadedCar, VehicleInput, GRAVITY_MPS2, PHYSICS_DT};
@@ -588,6 +589,89 @@ pub fn high_speed_catch(
             && yaw_rate(&rig).abs() < 0.5
             && final_speed > 8.0,
         hash: rig.state_hash(),
+    }
+}
+
+/// Result of [`catch_snap_back`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SnapBack {
+    /// Peak body slip in the direction of the kick, degrees.
+    pub first_deg: f32,
+    /// Peak body slip the other way after the catch (the snap-back), degrees.
+    pub snap_deg: f32,
+    /// Body slip at the end of the run (4 s after the kick), degrees.
+    pub final_deg: f32,
+}
+
+/// Slide catch with a keyboard driver (owner playtest: "hard to catch a slide at speed
+/// without snap oversteer"): hold `speed_mps`, a sudden yaw-rate kick, the countersteer key
+/// held from 0.25 s until the body slip is under 3°, then for `late_s` more (a human lets go
+/// a little late), 30% throttle throughout.
+pub fn catch_snap_back(
+    car: &LoadedCar,
+    assists: &AssistProfile,
+    speed_mps: f32,
+    yaw_kick: f32,
+    late_s: f32,
+) -> SnapBack {
+    let mut rig = Rig::new(car);
+    rig.teleport([0.0; 3], 0.0, speed_mps, 0.0);
+    for _ in 0..TICKS_PER_S {
+        let (throttle, brake) = hold_speed(&rig, speed_mps);
+        rig.step(
+            &VehicleInput {
+                throttle,
+                brake,
+                ..Default::default()
+            },
+            assists,
+        );
+    }
+    {
+        let s = rig.state();
+        let fwd = rig.vehicle.chassis().rot * V3::Y;
+        let v = speed(&rig);
+        rig.teleport(s.pos, atan2(-fwd.x, fwd.y), v, yaw_kick);
+    }
+    let react = TICKS_PER_S / 4;
+    let late = (late_s * TICKS_PER_S as f32) as usize;
+    let mut first = 0.0f32;
+    let mut snap = 0.0f32;
+    let mut dir = 0.0f32;
+    let mut released: Option<usize> = None;
+    for tick in 0..4 * TICKS_PER_S {
+        let slip = body_slip_deg(&rig);
+        if dir == 0.0 && slip.abs() > 1.0 {
+            dir = slip.signum();
+        }
+        if slip * dir > 0.0 {
+            first = first.max(slip.abs());
+        } else {
+            snap = snap.max(slip.abs());
+        }
+        let mut steer = 0.0;
+        if tick >= react && dir != 0.0 {
+            if released.is_none() && slip * dir < 3.0 {
+                released = Some(tick);
+            }
+            if released.is_none_or(|r| tick < r + late) {
+                // Slip > 0 = sliding toward the left of the heading: steer right (+).
+                steer = -dir;
+            }
+        }
+        rig.step(
+            &VehicleInput {
+                steer,
+                throttle: 0.3,
+                ..Default::default()
+            },
+            assists,
+        );
+    }
+    SnapBack {
+        first_deg: first,
+        snap_deg: snap,
+        final_deg: body_slip_deg(&rig),
     }
 }
 
