@@ -325,7 +325,13 @@ whole map is active (headless tests). Every 0.25 s: despawn out-of-area, closed-
 zones with deficits on free lane spots (≥ 12 m gaps). **Sightline rule (prototype)**: nothing
 spawns or despawns within 320 m of a player's current position or of where it will be in 1 s
 (was 150 m / 400 m active until the LOD pop-in fix, playtest row 25: cars popped in and out
-in plain view on Port Vesper's highway and hill sightlines; `tests/lod_draw.rs` measures it).
+in plain view on Port Vesper's highway and hill sightlines; `tests/lod_draw.rs` measures it). Agents in
+view are left out of the per-zone counts; the part of the target that lies in view and is not
+yet filled by cars in view is added to the spawnable zones around the players (≤ 2×,
+`MAX_SPAWNABLE_BOOST`), so the active area still reaches its density target when a whole
+district is in view. A car left over the centre line outside a manoeuvre (a pass given up
+beside the obstruction) occupies the oncoming lane and holds oncoming traffic 22 m back
+(`traffic::blocked::STRAY_HOLD_BACK_M`).
 
 **Violations** (tracked vehicles, 60 Hz): speeding = over the limit by more than
 max(2.24 m/s, 10 %) for > 1 s (re-emitted every 5 s); red light = crossing the stop line of the

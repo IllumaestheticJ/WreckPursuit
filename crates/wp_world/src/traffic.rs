@@ -61,6 +61,10 @@ pub const LANE_CHANGE_SIGNAL_S: f32 = 0.5;
 /// `TrafficConfig::sight_radius_m`, is wider so cars never pop in or out in plain view).
 pub const POPULATE_SIGHT_RADIUS_M: f32 = 150.0;
 
+/// Upper bound on how much [`Traffic`] raises the density target of the out-of-sight part of
+/// the active area, to make up for the part in a player's view that cannot be spawned into.
+pub const MAX_SPAWNABLE_BOOST: f32 = 2.0;
+
 /// Siren reaction radius, m.
 pub const SIREN_RADIUS_M: f32 = 60.0;
 
@@ -1049,6 +1053,26 @@ impl Traffic {
         // Manoeuvring agents also occupy the lane they intrude into (oncoming lane while
         // passing, the far side while turning around): refresh where.
         self.update_intrusions(map);
+        for (i, opp, s) in self.stray_intrusions(map) {
+            let l = &mut self.lists[opp as usize];
+            if l.is_empty() {
+                self.touched.push(opp);
+            }
+            // The body, and a hold point further up the oncoming lane: traffic arriving later
+            // stops there, leaving the room a turn-around out of the spot needs.
+            let hold = s - blocked::STRAY_HOLD_BACK_M;
+            for es in [Some(s), (hold > 0.0).then_some(hold)]
+                .into_iter()
+                .flatten()
+            {
+                l.push(Entry {
+                    s: es,
+                    v: -self.agents[i].v,
+                    agent: i as u32,
+                    ghost: true,
+                });
+            }
+        }
         for (i, a) in self.agents.iter().enumerate() {
             let l = &mut self.lists[a.seg as usize];
             if l.is_empty() {
@@ -2559,10 +2583,81 @@ impl Traffic {
         counts
     }
 
+    /// Per-zone targets for the part of each zone a player cannot see (where spawning and
+    /// despawning are allowed), given the full [`Traffic::zone_targets`] and the number of
+    /// agents currently inside a player's sightline.
+    ///
+    /// Each zone keeps the share of its target that lies outside every sightline. The share
+    /// in view can only fill as cars drive into it, so whatever the cars in view fall short of
+    /// it is added to the spawnable shares *around the players* (within the active radius of a
+    /// player, not of a race route's focus points) in proportion, at most
+    /// [`MAX_SPAWNABLE_BOOST`]×. The total therefore still adds up to the density target: with
+    /// the 320 m sightline a whole downtown can be in view, and without this the city settled
+    /// about a quarter below target (`world_traffic_soak_observer`). With no player in the
+    /// inputs nothing is in view and the targets are returned unchanged.
+    fn spawnable_targets(&self, inp: &TrafficInputs, full: &[f32], seen_agents: u32) -> Vec<f32> {
+        if !inp.tracked.iter().any(|t| t.player) {
+            return full.to_vec();
+        }
+        let players: Vec<V2> = inp
+            .tracked
+            .iter()
+            .filter(|t| t.player)
+            .map(|t| geom::xy(t.pos))
+            .collect();
+        let mut focus = players.clone();
+        focus.extend_from_slice(inp.route_focus);
+        let ar = self.config.active_radius_m;
+        let mut out = vec![0.0f32; full.len()];
+        // Spawnable share of each zone's target that lies around a player.
+        let mut near = vec![0.0f32; full.len()];
+        let mut in_view_target = 0.0f32;
+        for (z, samples) in self.zone_samples.iter().enumerate() {
+            if full[z] <= 0.0 {
+                continue;
+            }
+            // Same sample weighting as `zone_targets`, split by visibility.
+            let (mut w_all, mut w_open, mut w_near) = (0.0f32, 0.0f32, 0.0f32);
+            for smp in samples {
+                if inp.closed.get(smp.seg as usize).copied().unwrap_or(false) {
+                    continue;
+                }
+                if !focus.iter().any(|f| geom::dist(*f, smp.pos) < ar) {
+                    continue;
+                }
+                w_all += smp.weight_km;
+                if !self.visible(smp.pos, inp.tracked) {
+                    w_open += smp.weight_km;
+                    if players.iter().any(|f| geom::dist(*f, smp.pos) < ar) {
+                        w_near += smp.weight_km;
+                    }
+                }
+            }
+            if w_all <= 0.0 {
+                out[z] = full[z];
+                continue;
+            }
+            out[z] = full[z] * w_open / w_all;
+            near[z] = full[z] * w_near / w_all;
+            in_view_target += full[z] - out[z];
+        }
+        let shortfall = (in_view_target - seen_agents as f32).max(0.0);
+        let near_total: f32 = near.iter().sum();
+        if shortfall > 0.0 && near_total > 0.0 {
+            // At most double the density where cars can appear, so a thin spawnable strip
+            // (player near the map edge, most of the area in view) does not clump.
+            let k = (1.0 + shortfall / near_total).min(MAX_SPAWNABLE_BOOST);
+            for (t, n) in out.iter_mut().zip(&near) {
+                *t += n * (k - 1.0);
+            }
+        }
+        out
+    }
+
     // Index loops: agents are mutated in place while parallel arrays are read.
     #[allow(clippy::needless_range_loop)]
     fn spawn_update(&mut self, map: &CityMap, inp: &TrafficInputs, budget: usize) {
-        let targets = self.zone_targets(map, inp);
+        let full_targets = self.zone_targets(map, inp);
         let mut focus: Vec<V2> = inp
             .tracked
             .iter()
@@ -2573,15 +2668,27 @@ impl Traffic {
         let global = focus.is_empty();
         let ar = self.config.active_radius_m;
 
-        let mut counts = vec![0u32; targets.len()];
+        // Agents inside a player's sightline can be neither spawned nor despawned, so the
+        // controller below only counts (and steers) the hidden-from-view part of each zone.
+        let mut counts = vec![0u32; full_targets.len()];
         let mut agent_zone: Vec<Option<ZoneId>> = Vec::with_capacity(self.agents.len());
+        let mut agent_seen: Vec<bool> = Vec::with_capacity(self.agents.len());
+        let mut seen_in_zones = 0u32;
         for i in 0..self.agents.len() {
-            let z = map.zone_at(geom::xy(self.poses[i].p));
+            let q = geom::xy(self.poses[i].p);
+            let z = map.zone_at(q);
+            let seen = self.visible(q, inp.tracked);
             if let Some(z) = z {
-                counts[z as usize] += 1;
+                if seen {
+                    seen_in_zones += 1;
+                } else {
+                    counts[z as usize] += 1;
+                }
             }
             agent_zone.push(z);
+            agent_seen.push(seen);
         }
+        let targets = self.spawnable_targets(inp, &full_targets, seen_in_zones);
         // District-level totals: zones are small, so control is per district kind with a
         // looser per-zone clamp against local clumps.
         let kind_of = |z: usize| map.net.zones[z].kind as usize;
@@ -2597,7 +2704,7 @@ impl Traffic {
         for i in 0..self.agents.len() {
             let q = geom::xy(self.poses[i].p);
             let a = &self.agents[i];
-            if a.despawn || a.physical.is_some() || self.visible(q, inp.tracked) {
+            if a.despawn || a.physical.is_some() || agent_seen[i] {
                 continue;
             }
             let in_connector = map.seg(a.seg).is_connector() || a.permit != NONE;

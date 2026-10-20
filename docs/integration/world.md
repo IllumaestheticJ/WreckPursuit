@@ -961,3 +961,49 @@ now draws the surface ribbons. Full write-up, numbers and the items left for you
 overlapping roads, turning paths through building lots at nodes 78 / 97, junction heights on
 saddles): `docs/integration/junctions.md`. Please merge `lead/fix-junction-holes` into
 `ws/world` once the lead has merged it.
+### Follow-up (2026-10-20): density back to target, stranded passers
+The lead found `world_traffic_soak_observer` failing on this branch (and on `lead/round12`):
+`traffic_agents_min` 310 (range 350–400). Cause and fix (`crates/wp_world/src/traffic.rs`,
+`traffic/blocked.rs`):
+- **Downtown in view never refilled.** Spawn control is per zone and nothing spawns or
+  despawns in view. With the 320 m sightline the parked observer sees the whole 12×12
+  downtown (9 zones, target 157 cars), which held ≈ 56: the city sat ≈ 90 below target from
+  `populate()` on (populate stalled at 299/400; the sightline check rejected most samples).
+  `spawn_update` now counts only out-of-sight agents per zone, and `spawnable_targets()` gives
+  each zone the out-of-sight share of its target **plus** the in-view shortfall (in-view target
+  minus cars in view), spread over the spawnable samples within the active radius of a
+  *player* (not of race-route focus points), at most `MAX_SPAWNABLE_BOOST` = 2×. Those cars
+  drift into view as before (spawns still only ≥ 320 m away). No player tracked → targets
+  unchanged.
+- **Stranded passers.** The denser start exposed a row-32 gap: a pass given up after stalling
+  beside the obstruction (`PASS_STALL_S`) left a *physical* car at a standstill, nose out in the
+  oncoming lane, with no lane entry (a physical car cannot steer back at 0 m/s). Oncoming cars
+  drove into it (`city_blocked_parked_player_grid`, seeds 5/7; already on `main` for
+  `..._vesper` seed 3). Now any car outside a manoeuvre with `lat < -STRAY_INTRUSION_LAT_M`
+  (0.8 m, the passing threshold) occupies the oncoming lane at its body and holds traffic
+  `STRAY_HOLD_BACK_M` = 22 m further up. Without the hold point the oncoming queue stopped 6 m
+  from it and it could neither pass nor turn (deadlock); with it, it turns around once its
+  patience runs out.
+| | `lead/round12` | this branch |
+|---|---|---|
+| `world_traffic_soak_observer` agents min (seeds 3/5/9/11) | 313 / 310 / 304 / 311 | 400 / 400 / 400 / 400 |
+| `world_traffic_soak_vesper_observer` | passes | passes (≈ 400 from 10 s on) |
+| `world_traffic_soak_observer` moving fraction min (seed 5) | 0.495 (lead's run) | 0.54 |
+| parked-player grid / vesper, 5 seeds each: collisions | 0,0,0,0,0 / 0,1,0,0,0 | 0 / 0 |
+| browser LOD e2e (`run.mjs`): closest appear / vanish | — | 322 m / 342 m, 0 missing-mesh frames, 0.000 m swap jump |
+All 61 scenarios pass (slow soaks included); native == wasm on every scenario.
+Browser (`npm run e2e`, headless Chromium): `run.mjs` 50/50 and `race.mjs` 19/19 on this
+build. One earlier `run.mjs` pass, run while the golden bless was using every core, failed
+"replay after reload" (all 1979 tick hashes matched, final state hash differed) and the scrub
+check; two later runs passed and `simcli replay` verified that same recording. Looks
+load-dependent in the page's record/replay path, not the sim; worth watching.
+Goldens: blessed only the 14 this change moves (list in the `[bless]` commit); 15 others were
+already stale on `lead/round12` and are left for the lead.
+**Open, not fixed here (for D / race owner):** `wp_race` `lantern_checkpoint_draws_the_police`
+(needs 2 of 3 AI racers to finish) fails on this branch. It is a knife-edge test in every
+configuration measured (`WP_RACE_SEED`): pre-pop-in radii 150/400 m pass 2 of 6 seeds
+(default, 1); `lead/round12` 2 of 5 (3, 4) plus default; this branch 0 of 6. In all of them one
+AI racer (P3) stays on the grid with 0 gates and many contacts, and others are captured or flee
+from the daytime meet patrol. Not tuned around one seed. Also failing on `lead/round12`
+itself, unrelated to traffic: `wp_sim` `vesper_v2_cars_drive_up_the_kerb_and_along_the_sidewalk`
+and `wp_wasm` `race_tests::a_capture_mid_race_is_a_dnf_and_hands_off_to_the_end_of_run_panel`.
