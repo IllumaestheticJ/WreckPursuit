@@ -358,7 +358,10 @@ fn drive(sim: &mut Sim, map: &CityMap, walks: &Walks, c: &Case, speed: f32, angl
         }
         let steer = if steering {
             // +1 steers right: steer towards the target line, damped by the lateral speed.
-            (-0.25 * (lat - target_lat) - 1.2 * v_lat / st.speed_mps.max(2.0)).clamp(-0.5, 0.5)
+            // (Damping 1.5, was 1.2: with released keys centring the wheels while the tyres
+            // grip (wp_vehicle, owner row 57) a car keeps more of its approach after the kerb
+            // and the old gain swung it back across the 3 m sidewalk at 40 km/h.)
+            (-0.25 * (lat - target_lat) - 1.5 * v_lat / st.speed_mps.max(2.0)).clamp(-0.5, 0.5)
         } else {
             0.0
         };

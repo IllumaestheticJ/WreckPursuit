@@ -163,9 +163,9 @@ pub struct SteerTarget {
 /// **self-aligning steering**, Wreckfest-style (owner rows 57 / 72): while the driver is not
 /// steering (|input| ≤ [`STEER_DEADZONE`]) and moving forward above 3 m/s, the wheels go to
 /// [`align_strength`] × the front axle's direction of travel ([`SteerInput::front_axle_angle`],
-/// within the car's lock) instead of to the centre, and the rack moves up to
-/// [`ALIGN_RATE_BOOST`] faster. In a slide that is exactly the countersteer that cancels the
-/// front slip angle; driving straight it is ~0. It never acts while the driver steers (the
+/// within the car's lock) once the rear slides, to the centre while the tyres grip (blended by
+/// rear-axle slip, see [`ALIGN_SLIDE_START`]), and the rack moves up to [`ALIGN_RATE_BOOST`]
+/// faster. In a slide that is exactly the countersteer that cancels the front slip angle. It never acts while the driver steers (the
 /// speed-sensitive lock and rate apply as usual), nor while the handbrake is held or within
 /// [`HANDBRAKE_GRACE_S`] of releasing it, and it adds no yaw torque. With help 0 this is
 /// exactly the plain model.
@@ -192,11 +192,32 @@ pub fn steer_target(
         };
     }
     let full = max_steer * inp.ratio_scale;
-    let align = inp.front_axle_angle.clamp(-full, full) * align_strength(help);
+    let align = aligning_angle(inp).clamp(-full, full) * align_strength(help);
     SteerTarget {
         angle: (align - inp.pull * lock).clamp(-max_steer, max_steer),
         rate_boost: 1.0 + ALIGN_RATE_BOOST * help,
     }
+}
+
+/// Rear-axle slip angle (rad) where the self-aligning countersteer starts turning the wheels
+/// toward the front axle's travel / turns them all the way (below it they return to centre).
+pub const ALIGN_SLIDE_START: f32 = 0.03;
+/// See [`ALIGN_SLIDE_START`].
+pub const ALIGN_SLIDE_FULL: f32 = 0.08;
+
+/// Where released keys point the wheels (rad, + = left) before [`align_strength`]: the
+/// centre while the tyres grip, the front axle's direction of travel in a slide, blended by
+/// how much the rear axle slides ([`ALIGN_SLIDE_START`] → [`ALIGN_SLIDE_FULL`]).
+///
+/// In grip driving the front axle's travel includes the car's own yaw (it is the steer angle
+/// of a car cornering with no front slip), so aligning to it would hold whatever turn the car
+/// is in: a kerb or a bump that yaws the car would keep turning it (the sidewalk drives in
+/// `wp_sim` were turned back onto the road that way).
+fn aligning_angle(inp: &SteerInput) -> f32 {
+    let slide = ((inp.rear_axle_slip.abs() - ALIGN_SLIDE_START)
+        / (ALIGN_SLIDE_FULL - ALIGN_SLIDE_START))
+        .clamp(0.0, 1.0);
+    inp.front_axle_angle * slide
 }
 
 /// Direction of travel of the front axle relative to the heading, rad (+ = left), from forward
@@ -419,6 +440,20 @@ mod tests {
         assert!(half < -0.15 && half > full, "{half}");
         // Driving straight it is ~0.
         assert!(settle(&straight(0.0, 20.0), &help(1.0)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn released_keys_centre_the_wheels_while_the_tyres_grip() {
+        // A car yawing with the rear gripping (a kerb kick, a released corner): the wheels go to
+        // the centre, not along the front axle's travel (that would hold the turn).
+        let grip = |rear: f32| SteerInput {
+            rear_axle_slip: rear,
+            ..sliding(0.0)
+        };
+        assert!(settle(&grip(0.01), &help(1.0)).abs() < 1e-6);
+        let part = settle(&grip(-0.055), &help(1.0));
+        assert!(part < -0.1 && part > -0.15, "{part}");
+        assert!((settle(&grip(-0.1), &help(1.0)) + 0.25).abs() < 1e-4);
     }
 
     #[test]

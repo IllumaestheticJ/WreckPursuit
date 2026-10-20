@@ -45,6 +45,9 @@ const HUB_FRICTION: f32 = 0.8;
 const CAMBER_THRUST: f32 = 0.15;
 /// Handbrake input above which the handbrake counts as pulled (declutch, steering assists).
 pub const HANDBRAKE_ON: f32 = 0.1;
+/// Above this forward speed (m/s) a handbrake declutch keeps the selected gear (no automatic
+/// shifts); below it the automatic box selects gears as usual.
+pub const HB_KEEP_GEAR_MPS: f32 = 1.0;
 /// Manual clutch: the engine stalls below this fraction of its idle speed (row 59).
 pub const STALL_FRAC: f32 = 0.5;
 /// Manual clutch: pressing the pedal at least this far re-cranks a stalled engine.
@@ -898,7 +901,11 @@ impl Vehicle {
         // overridden (`handbrake_disconnects_rear` still frees the rear axle there).
         let hb_declutch =
             handbrake > HANDBRAKE_ON && (assists.auto_clutch || self.converter.is_some());
-        if assists.auto_gears && !hb_declutch {
+        // The gear is kept only while moving: at a standstill on the handbrake the automatic
+        // box still selects first / reverse (the AI's crawl holds the handbrake and touches the
+        // throttle to engage first, `wp_world::manoeuvre::Crawl`).
+        let hb_keep_gear = hb_declutch && v_fwd.abs() > HB_KEEP_GEAR_MPS;
+        if assists.auto_gears && !hb_keep_gear {
             let inputs = ShiftInputs {
                 redline_rpm: self.def.engine.redline_rpm,
                 axle_omega,

@@ -84,3 +84,38 @@ fn handbrake_declutches_and_drive_resumes() {
         }
     }
 }
+
+#[test]
+fn the_automatic_box_still_engages_first_on_the_handbrake_at_a_standstill() {
+    // The AI's crawl (`wp_world::manoeuvre::Crawl`) holds the handbrake and touches the
+    // throttle at a standstill to engage first after reversing: the declutch keeps the gear
+    // only while moving, so the box still shifts out of reverse here.
+    use wp_contracts::VehicleInput;
+    use wp_vehicle::rig::Rig;
+    let a = AssistProfile::ai();
+    for id in ["debug_sedan", "sentinel_cruiser"] {
+        let mut rig = Rig::new(&car(id));
+        // Brake held at a standstill selects reverse.
+        for _ in 0..240 {
+            rig.step(
+                &VehicleInput {
+                    brake: 0.7,
+                    ..Default::default()
+                },
+                &a,
+            );
+        }
+        assert_eq!(rig.state().gear, -1, "{id}: reverse selected");
+        for _ in 0..240 {
+            rig.step(
+                &VehicleInput {
+                    throttle: 0.15,
+                    handbrake: 1.0,
+                    ..Default::default()
+                },
+                &a,
+            );
+        }
+        assert_eq!(rig.state().gear, 1, "{id}: first engaged on the handbrake");
+    }
+}
