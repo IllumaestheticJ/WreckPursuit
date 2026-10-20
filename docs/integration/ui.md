@@ -294,3 +294,16 @@ numbers). Market: an "Accel · Top · Corner" column per listing. Test: every ca
 with bars in 0–1. The kit e2e (`npm run e2e`) could not run in this container (Chromium crashed /
 hung on `repairBill` with and without this change); garage and market were checked by hand in
 headless Chromium (renders, no console errors).
+
+### Follow-up (2026-10-20): bars reflect installed mods
+
+`src/data/stats.ts` `buildStats(defId, mods, measured?)`: stock → the measured table; with mods →
+`GarageCar.stats` when a provider measured the build (new optional field; live providers fill it
+from `wp_wasm::car_stats_build_json`), else stock × the estimator's modded/stock ratio
+(`previewBuild`), so stock cars still show exactly the measured numbers. Kestrel TS + cold air
+intake + race ECU + semi-slicks: estimate 6.46 s / 255 km/h / 1.02 g, rig 6.54 s / 256 km/h /
+1.05 g (test keeps the estimate within 8 %). `CarStatBars` takes a `baseline` (tick + better/worse
+colour). Garage: build bars with a stock tick, labelled measured / estimated. Mod tree: the
+candidate build's bars with a tick at the current build. Known: the mod tree's delta table still
+shows the economy estimator's absolute 0–100 / top speed / grip, which differ from the bars
+(e.g. Shiro Turbo 5.74 s estimated vs 6.4 s measured stock).

@@ -30,9 +30,26 @@ export interface CarStats {
   bars: { acceleration: number; top_speed: number; cornering: number };
 }
 
+/** Bar scale ends of the table: `[empty, full]` per stat (`wp_vehicle::stats`). */
+export interface CarStatScales {
+  zero_to_100_s: [number, number];
+  top_speed_kmh: [number, number];
+  cornering_g: [number, number];
+  skidpad_radius_m: number;
+}
+
+const statTable = Object.values(statFiles)[0] as { scales?: CarStatScales; cars?: Record<string, CarStats> } | undefined;
+
 /** Stock stats by car id (empty if the table is missing). */
-export const CAR_STATS: Record<string, CarStats> =
-  (Object.values(statFiles)[0] as { cars?: Record<string, CarStats> } | undefined)?.cars ?? {};
+export const CAR_STATS: Record<string, CarStats> = statTable?.cars ?? {};
+
+/** Scales the stock bars were placed on (same defaults as `wp_vehicle::stats`). */
+export const CAR_STAT_SCALES: CarStatScales = statTable?.scales ?? {
+  zero_to_100_s: [16, 3.5],
+  top_speed_kmh: [140, 310],
+  cornering_g: [0.55, 1.05],
+  skidpad_radius_m: 50,
+};
 
 /** The lead's debug cars, hidden from the market. */
 export function isDebugCar(id: string): boolean {

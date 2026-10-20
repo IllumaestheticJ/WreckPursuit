@@ -9,7 +9,8 @@ import { useMemo, useState } from "preact/hooks";
 import { useSend, useSlice } from "../../model/GameModel";
 import { CARS, MODS, modBlocker, modTree, slotLabel, type ModDef } from "../../data/catalog";
 import { previewBuild, type ModPreview } from "../../data/estimate";
-import { Badge, Button, Delta, Money, Panel, ScreenHead, useEscape } from "../../ui/kit";
+import { buildStats } from "../../data/stats";
+import { Badge, Button, CarStatBars, Delta, Money, Panel, ScreenHead, useEscape } from "../../ui/kit";
 import { words } from "../../ui/format";
 import "./garage.css";
 
@@ -36,6 +37,9 @@ export function ModTree() {
     : [...car.mods.filter((m) => !(MODS[m]?.line === mod.line && MODS[m]?.slot === mod.slot)), sel];
   const before = previewBuild(def, car.mods);
   const after = previewBuild(def, candidate);
+  // Stat bars: the build now (provider-measured if available) vs the candidate build.
+  const statsNow = buildStats(car.defId, car.mods, car.stats);
+  const statsAfter = buildStats(car.defId, candidate);
   const slotEntry = tree.find((t) => t.slot === slot) ?? tree[0];
   const blocker = installed ? null : modBlocker(mod, car.mods, car.class, mode);
   const replaced = car.mods.find((m) => MODS[m]?.line === mod.line && MODS[m]?.slot === mod.slot && m !== sel);
@@ -101,6 +105,14 @@ export function ModTree() {
           )}
           {mod.modes?.length ? <Badge tone="warn">{mod.modes.join(" / ")} only</Badge> : null}
           {mod.class_whitelist?.length ? <Badge tone="info">{mod.class_whitelist.join(", ")}</Badge> : null}
+          {statsNow && statsAfter && (
+            <div class="wp-garage-stats" style={{ margin: "0.6em 0" }}>
+              <div class="wp-dim wp-mono wp-upper" style={{ fontSize: "0.68em" }}>
+                {installed ? "Without this mod" : "With this mod"} · tick = current build
+              </div>
+              <CarStatBars stats={statsAfter.stats} baseline={statsNow.stats} />
+            </div>
+          )}
           <DeltaTable before={before} after={after} />
           <div class="wp-row" style={{ justifyContent: "space-between", marginTop: "0.8em" }}>
             {blocker ? <span class="wp-danger wp-mono" style={{ fontSize: "0.85em" }}>{blocker}</span> : <span />}

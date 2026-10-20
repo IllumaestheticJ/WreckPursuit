@@ -284,19 +284,29 @@ export function statSummary(s: StatSource): string {
 
 /**
  * Acceleration / top speed / cornering bars, physics-measured. `compact`: three unlabelled bars
- * in that order (the table header names them), numbers in the tooltip.
+ * in that order (the table header names them), numbers in the tooltip. `baseline`: stats to
+ * compare with (stock, or the build before a change): a tick on each bar where the baseline
+ * sits, and the value coloured by better / worse.
  */
-export function CarStatBars(props: { stats: StatSource; compact?: boolean }) {
+export function CarStatBars(props: { stats: StatSource; baseline?: StatSource; compact?: boolean }) {
   const s = props.stats;
+  const base = props.baseline;
   return (
     <div class={`wp-statbars ${props.compact ? "wp-statbars--compact" : ""}`} title={statSummary(s)}>
-      {STAT_ROWS.map((r) => (
-        <div class="wp-statbar" key={r.key} data-stat={r.key}>
-          {!props.compact && <span class="wp-dim wp-mono wp-upper">{r.label}</span>}
-          <Meter value={s.bars[r.key]} segmented label={`${r.label}: ${r.value(s)}`} />
-          {!props.compact && <span class="wp-mono">{r.value(s)}</span>}
-        </div>
-      ))}
+      {STAT_ROWS.map((r) => {
+        const d = base ? s.bars[r.key] - base.bars[r.key] : 0;
+        const tone = Math.abs(d) < 0.002 ? "" : d > 0 ? "wp-ok" : "wp-danger";
+        return (
+          <div class="wp-statbar" key={r.key} data-stat={r.key}>
+            {!props.compact && <span class="wp-dim wp-mono wp-upper">{r.label}</span>}
+            <span class="wp-statbar-track">
+              <Meter value={s.bars[r.key]} segmented label={`${r.label}: ${r.value(s)}${base ? ` (was ${r.value(base)})` : ""}`} />
+              {base && <b class="wp-statbar-base" style={{ left: `${Math.min(1, Math.max(0, base.bars[r.key])) * 100}%` }} title={`was ${r.value(base)}`} />}
+            </span>
+            {!props.compact && <span class={`wp-mono ${tone}`}>{r.value(s)}</span>}
+          </div>
+        );
+      })}
     </div>
   );
 }

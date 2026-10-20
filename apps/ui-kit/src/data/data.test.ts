@@ -105,3 +105,29 @@ describe("pricing", () => {
     expect(salePrice({ ...shiro, totalLoss: false })).toBeLessThan(shiro.basePrice);
   });
 });
+
+describe("build stats", () => {
+  it("stock builds are the measured table; mods move the bars", async () => {
+    const { buildStats, barsFor } = await import("./stats");
+    const stock = buildStats("kestrel_ts", [])!;
+    expect(stock.source).toBe("measured");
+    expect(stock.stats).toEqual(CAR_STATS.kestrel_ts);
+    // Same build as wp_wasm's build_stats test, measured on the rig at 6.54 s / 256 km/h /
+    // 1.047 g (stock 7.08 / 248 / 0.93): the estimate must land near the physics.
+    const b = buildStats("kestrel_ts", ["engine_intake_1", "engine_ecu_2", "tires_semi_slick"])!;
+    expect(b.source).toBe("estimated");
+    expect(b.stats.zero_to_100_s!).toBeLessThan(stock.stats.zero_to_100_s!);
+    expect(b.stats.zero_to_100_s!).toBeGreaterThan(6.54 * 0.92);
+    expect(b.stats.zero_to_100_s!).toBeLessThan(6.54 * 1.08);
+    expect(b.stats.top_speed_kmh).toBeGreaterThan(248);
+    expect(b.stats.cornering_g).toBeGreaterThan(1.047 * 0.92);
+    expect(b.stats.cornering_g).toBeLessThan(1.047 * 1.08);
+    expect(b.stats.bars.cornering).toBeGreaterThan(stock.stats.bars.cornering);
+    // The kit's scale placement matches the table's (wp_vehicle::stats).
+    const s = CAR_STATS.lindwurm_4t;
+    const bars = barsFor(s);
+    for (const k of ["acceleration", "top_speed", "cornering"] as const) expect(Math.abs(bars[k] - s.bars[k])).toBeLessThan(0.002);
+    // A provider-measured build wins.
+    expect(buildStats("kestrel_ts", ["tires_semi_slick"], CAR_STATS.vireo_xs)!.source).toBe("measured");
+  });
+});

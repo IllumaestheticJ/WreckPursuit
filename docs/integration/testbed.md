@@ -639,3 +639,13 @@ Acceleration, top speed and cornering bars under the car `<select>`, computed fr
   picker change and on every rebuild; option tooltips carry the numbers. `e2e/run.mjs` step 1b.
 - Not yet in `apps/ui-kit` (garage / market lists use mock listings); the same table can feed
   them once G's garage picks real car ids.
+
+### Follow-up (2026-10-20): stats of a modded build
+
+`wp_wasm::build_stats` (new module, `wp_wasm` now depends on `wp_vehicle`): export
+`car_stats_build_json(car_id, mods_json, mode)` validates and applies the mods with
+`wp_economy::Economy::preview` (same path as installing), resolves the modified car against every
+embedded tire / material (`data::resolve_with`), runs `CarStats::measure`, and caches per (car,
+sorted mods, mode). ~0.3 s native, ~1 s in the browser per new build; an empty set returns the
+stock row. Illegal sets (missing requirement, unknown id, class) are refused. Not called by the
+testbed yet; it is what a live garage provider fills `GarageCar.stats` from (`docs/integration/ui.md`).
