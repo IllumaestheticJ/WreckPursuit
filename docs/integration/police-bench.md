@@ -1,7 +1,7 @@
 # Police benchmark integration notes
 
 - **Workstream / prompt:** P7 — police competency benchmark (`prompts/extra/P7_police_benchmark.md`)
-- **Branch:** `lead/police-bench` (pushed from the cloud session branch `claude/dazzling-mayer-ovag76`)
+- **Branch:** `claude/dazzling-mayer-ovag76` (the cloud session's branch; the prompt's name for it is `lead/police-bench`)
 - **Crates / folders owned:** `crates/wp_opponent/src/evader.rs`, `apps/simcli/src/police_bench.rs`,
   `apps/simcli/tests/police_bench.rs`, the `police-bench` subcommand in `apps/simcli/src/main.rs`,
   `just police-bench`, `docs/integration/police-bench*.md`
@@ -171,5 +171,31 @@ the first pursuit end, or after `--duration` (`TimeoutInPursuit` / `NeverEngaged
   `ws/police` merge.
 - Not drawn in the browser (no testbed hook); numbers only.
 
-## Gate (this branch, after merging `origin/ws/police`)
-(See the bottom of this file; updated with every push.)
+## Gate (2026-10-20, cloud container, 4 vCPU)
+
+Branch head = `lead/round12` (a3f2534) + this work + `origin/ws/police` (759d850) merged.
+
+| Check | Result |
+|---|---|
+| `cargo fmt --all -- --check` | pass |
+| `cargo clippy --workspace --all-targets -- -D warnings` | pass |
+| `cargo build --target wasm32-unknown-unknown -p wp_wasm`, `npm run wasm` (wasm-pack 0.13.1) | pass |
+| `crates/wp_net/tests/vesper_e2e.rs` | pass |
+| this branch's tests: `wp_opponent` evader unit tests (4), `simcli --test police_bench` (3) | pass |
+| `simcli run apps/simcli/scenarios --no-write` (release) | 78 / 79; fails `police/tunnel_escape_founders_cut` (Captured at 138.6 s; also fails on plain `lead/round12`) |
+| `cargo test --workspace --no-fail-fast` | 4 targets fail, **none from this work** (below) |
+| `npm run e2e` (`just web-e2e`) | every functional check passes; `perf_check.mjs` (software GL) misses frame-time limits: 4 checks under full CPU load, 1 when re-run alone (rain: 19 frames > 250 ms, limit 12). No browser code or wasm export changed here |
+
+Failing workspace tests, and where they come from (each reproduced without this work):
+
+| Test | Also fails on `lead/round12` a3f2534 | Also fails on `origin/ws/police` 759d850 |
+|---|---|---|
+| `simcli --test scenarios goldens_match` (19 goldens on the branch head) | yes (`simcli goldens`: 30) | yes (30) |
+| `wp_police --test system contact_tactics_escalate_with_the_wanted_level` | n/a (test is new on ws/police) | yes |
+| `wp_race --test race_picker` (`loop9_circuit`, `lantern_checkpoint_draws_the_police`) | yes | yes |
+| `wp_wasm --lib race_tests::short_sprint_with_ai_runs_to_results_and_pays_through_the_economy` | no: appears with the ws/police merge | not checked |
+| `wp_opponent --test race live_police_chase_ends_in_escape_or_capture_without_stuck_cars` | yes; **passes** after the ws/police merge | — |
+
+No goldens were re-blessed: this branch moves none (the bench adds new modules only and no
+scenario runs through them). The moved goldens belong to ws/police's in-progress work and to
+`lead/round12`'s current state; re-bless them where that work lands.
