@@ -295,3 +295,36 @@ fn kinematic_traffic_and_police_are_heard() {
         }
     }
 }
+
+#[test]
+fn horn_sounds_exactly_while_held() {
+    // Owner report #58: "horn needs to hold with the button".
+    for (car, kind) in roster()
+        .iter()
+        .flat_map(|c| ROLES.map(|(k, _)| (c.clone(), k)))
+    {
+        let frames = run_horn(&car, kind, HORN_HOLD_S, 0.5);
+        let held = (HORN_HOLD_S * FPS as f32) as usize;
+        for (i, f) in frames.iter().enumerate() {
+            let on = slot_gain(f, slot::HORN) > 0.0;
+            assert_eq!(
+                on,
+                i < held,
+                "{} {kind:?} frame {i} (t={:.3}): horn on = {on}",
+                car.def.id,
+                f.t
+            );
+        }
+        // One Play for the whole hold (a re-trigger would restart a recording) and one Stop.
+        let plays = frames
+            .iter()
+            .flat_map(|f| &f.commands)
+            .filter(|c| matches!(c, AudioCommand::Play { voice, .. } if voice.slot == slot::HORN))
+            .count();
+        assert_eq!(
+            plays, 1,
+            "{} {kind:?}: horn played {plays} times",
+            car.def.id
+        );
+    }
+}

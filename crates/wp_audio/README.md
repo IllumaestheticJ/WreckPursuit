@@ -54,6 +54,9 @@ packs carry a level boost on their layer cues (`tools/audio_packs/write_packs.py
 matched to the procedural fallback); a backend that plays a stand-in cue (the fallback) must
 use that cue's own gain (the Web Audio pool rescales by `fallback.gain / cue.gain`).
 
+**Release:** a cue may set `release_s` (pack JSON); its voice's `Stop` then fades over that
+instead of `audio_config.stop_fade_s`. The horn uses 0.03 s so it ends with the button.
+
 **Determinism:** time comes from ticks only (`AudioFrame::tick`), every map is a `BTreeMap`,
 ordering is total and tie-broken by `VoiceId`, randomness (cosmetic pitch variation, overrun
 pops) is a seeded `wp_math::Rng`, trig goes through `wp_math::sin_cos`, no other transcendental

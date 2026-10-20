@@ -406,3 +406,35 @@ tick 240) differ from their golden hashes. This branch only changes audio files 
 `origin/lead/round12` (`git diff --stat`), so the mismatch comes with the base, not this work.
 24-car bench (headless, software GL, 2.5 fps): audio frame 3.3 ms (director 0.64, Web Audio apply
 2.6 ms at ~25 sim ticks per frame), 35 + 7 voices of 48.
+
+### Lead addendum (row 58, 2026-10-20) — "horn needs to hold with the button"
+**Cause:** the recorded horns. `world_rec` `horn.ogg` / `horn_truck.ogg` were looped already,
+but the slice they loop is a short decaying beep (peaks ~50 ms in, then falls 30 dB), so a held
+horn pulsed "honk-honk-honk" ~4× a second (rendered: 12–14 dB dips inside every 20 ms of the
+hold); it was also 8 dB under the procedural horn, and a stop took ~120 ms to reach −40 dB.
+The input → sim → audio path was fine: probed in the real testbed, Q held 2 s keeps
+`VehicleInput::horn` (vehicle_meta flag 8) on every sample, the director plays the horn once
+and stops it on release; the director path is the same for every driver kind (no AI / police
+code sets `horn` today).
+
+**Fix:**
+- `tools/audio_packs/horn_sustain.py` (new, numpy + ffmpeg): takes the loud body of the honk,
+  flattens its envelope, cuts the loop at the best autocorrelation lag (32 ms standard, 46 ms
+  truck) and tiles it to ~0.5 s; both files regenerated from the shipped cuts
+  (`build_packs.py` uses `sustain()` too; `sources.json` / `LICENSES.md` updated).
+- `CueDef::release_s` (optional, `data/audio` pack contract, additive): the mixer's `Stop` uses
+  the cue's release instead of `stop_fade_s`; the horn cues (`world_proc` and `world_rec`) set
+  0.03 s.
+- `write_packs.py` `HORN_GAIN` +7 dB on the recorded horns.
+
+**Measured** (`e2e/audio_roster.mjs`, director stream, horn held 2.0 s, World bus): recorded /
+procedural standard horn audible 2.02 / 2.02 s at −20.7 / −20.2 dBFS, onset 0 ms, worst 20 ms
+dip −1.2 / −1.1 dB, −40 dB 40 ms after release; truck horn 2.02 s, −0.8 / −0.1 dB, 50 / 40 ms.
+Checks: audible from the press (≤ 30 ms), no 20 ms window 6 dB under the hold, −40 dB within
+60 ms of release, audible 2.0 ± 0.1 s, recorded vs procedural within 6 dB (old files: fail on
+the dips and the release). `tests/roster.rs::horn_sounds_exactly_while_held`: every car × driver
+kind, horn voice on exactly the held frames, one Play.
+
+**Seen while checking (for C / lead, not audio):** the horn key differs by page — testbed `Q`
+(`input.ts`, gamepad button 3), net page `H` (and `Q` toggles the siren there), and the UI kit's
+bindings model says horn `H` / gamepad button 10 and puts `Q` on gear-down.

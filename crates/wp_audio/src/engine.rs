@@ -408,6 +408,7 @@ mod tests {
                     looped: true,
                     duration_s: None,
                     root_speed_mps: None,
+                    release_s: None,
                 },
             );
         }
