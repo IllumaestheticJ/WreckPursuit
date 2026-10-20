@@ -10,6 +10,8 @@ use std::sync::RwLock;
 
 use wp_contracts::TireDef;
 
+use crate::tire::SpinGrip;
+
 /// Car / tyre lab knobs. [`CarTune::default`] = the data as is.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
@@ -30,16 +32,42 @@ pub struct CarTune {
     pub lock: f32,
     /// Rear differential locked (else the car's own diff).
     pub rear_locked: bool,
+    /// Rear differential open (tyre-slip test; `rear_locked` wins if both are set).
+    pub rear_open: bool,
     /// Engine torque scale.
     pub torque: f32,
     /// Diagnostic, **not physical**: a yaw damping torque `−k · m · L² · r` (k in 1/s, m the
     /// mass, L the wheelbase, r the yaw rate). 0 = off. Shows how much yaw damping a held drift
     /// would need; the physical knobs above are the ones to route.
     pub yaw_damping: f32,
+    /// Tyre model A/B (tyre-slip workstream): `true` = the combined-slip model with side force
+    /// that keeps rising with slip angle under drive wheelspin ([`crate::tire::SpinGrip`]);
+    /// `false` = the data's friction ellipse. Applies to all four tyres.
+    pub spin_model: bool,
+    /// [`crate::tire::SpinGrip::b0`].
+    pub spin_b0: f32,
+    /// [`crate::tire::SpinGrip::b2`], 1/rad.
+    pub spin_b2: f32,
+    /// [`crate::tire::SpinGrip::c`].
+    pub spin_c: f32,
+    /// [`crate::tire::SpinGrip::p`].
+    pub spin_p: f32,
+    /// [`crate::tire::SpinGrip::fx_yield`].
+    pub spin_fx_yield: f32,
+    /// [`crate::tire::SpinGrip::on_braking`].
+    pub spin_on_braking: bool,
+    /// [`crate::tire::SpinGrip::fx_slide`].
+    pub spin_fx_slide: f32,
+    /// Rear tyres' relaxation length scale (slip-angle lag; 1 = data).
+    pub rear_relax: f32,
+    /// Apply each tyre's self-aligning moment (pneumatic trail × side force) to the body as a
+    /// yaw torque (the data path only feeds it to force feedback).
+    pub aligning_on_body: bool,
 }
 
 impl Default for CarTune {
     fn default() -> Self {
+        let d = SpinGrip::default();
         Self {
             lat_under_spin: 1.0,
             combined_rear_only: true,
@@ -47,8 +75,19 @@ impl Default for CarTune {
             front_peak_slip: 1.0,
             lock: 1.0,
             rear_locked: false,
+            rear_open: false,
             torque: 1.0,
             yaw_damping: 0.0,
+            spin_model: false,
+            spin_b0: d.b0,
+            spin_b2: d.b2,
+            spin_c: d.c,
+            spin_p: d.p,
+            spin_fx_yield: d.fx_yield,
+            spin_on_braking: d.on_braking,
+            spin_fx_slide: d.fx_slide,
+            rear_relax: 1.0,
+            aligning_on_body: false,
         }
     }
 }
@@ -72,6 +111,19 @@ impl CarTune {
         !self.combined_rear_only || i >= 2
     }
 
+    /// The combined-slip model of corner `i` (`None` = the data's friction ellipse).
+    pub fn spin_grip(&self, _i: usize) -> Option<SpinGrip> {
+        self.spin_model.then_some(SpinGrip {
+            b0: self.spin_b0,
+            b2: self.spin_b2,
+            c: self.spin_c,
+            p: self.spin_p,
+            fx_yield: self.spin_fx_yield,
+            on_braking: self.spin_on_braking,
+            fx_slide: self.spin_fx_slide,
+        })
+    }
+
     /// `tire` with the peak slip angle scale of corner `i`.
     pub fn tire_for(&self, tire: &TireDef, i: usize) -> TireDef {
         let mut t = tire.clone();
@@ -84,6 +136,9 @@ impl CarTune {
         // Stretch the lateral curve along the slip axis: the peak moves to k × the slip angle.
         t.peak_slip_angle_rad *= k;
         t.lateral.b /= k;
+        if i >= 2 {
+            t.relaxation_length_m *= self.rear_relax.clamp(0.05, 10.0);
+        }
         t
     }
 }

@@ -31,8 +31,8 @@ use crate::steering::{
 use crate::surface::{conditions_grip, ConditionsSource, SurfaceConditions, TireWetProfile};
 use crate::suspension::{arb_force, static_compression, step_strut, TYRE_STATIC_DEFLECTION_M};
 use crate::tire::{
-    combined_forces_weighted, load_sensitive_mu, low_speed_lateral, pneumatic_trail, relax,
-    slip_angle, slip_ratio, surface_grip, SLIP_RATIO_V_MIN,
+    combined_forces_spin, combined_forces_weighted, load_sensitive_mu, low_speed_lateral,
+    pneumatic_trail, relax, slip_angle, slip_ratio, surface_grip, SLIP_RATIO_V_MIN,
 };
 use crate::TireDb;
 
@@ -794,6 +794,7 @@ impl Vehicle {
     fn rear_diff(&self) -> AxleDiff {
         match crate::car_lab::active() {
             Some(t) if t.rear_locked => AxleDiff::Locked,
+            Some(t) if t.rear_open => AxleDiff::Open,
             _ => self.diffs.rear,
         }
     }
@@ -1499,6 +1500,8 @@ impl Vehicle {
         });
         let mut force = V3::ZERO;
         let mut torque = V3::ZERO;
+        // Tyre-slip A/B (`crate::car_lab`): self-aligning moments on the body as well.
+        let aligning_on_body = crate::car_lab::active().is_some_and(|t| t.aligning_on_body);
         for i in 0..4 {
             let c = &self.corners[i];
             let w = &mut self.wheels[i];
@@ -1516,6 +1519,9 @@ impl Vehicle {
                 let side = if c.left { 1.0 } else { -1.0 };
                 let thrust = side * CAMBER_THRUST * camber * w.fz;
                 w.mz = -pneumatic_trail(&c.tire, w.alpha_lag) * w.fy;
+                if aligning_on_body {
+                    torque += up * w.mz;
+                }
                 up * w.fz + w.fwd * w.fx + w.lat * (w.fy + thrust)
             };
             force += f;
@@ -1810,7 +1816,7 @@ impl Vehicle {
                 continue;
             }
             let tuned;
-            let (tire, w_lat): (&wp_contracts::TireDef, f32) = match car_tune {
+            let (tire, w_lat, spin): (&wp_contracts::TireDef, f32, _) = match car_tune {
                 Some(t) => {
                     tuned = t.tire_for(&c.tire, i);
                     let w_lat = if t.combined_applies(i) {
@@ -1818,16 +1824,19 @@ impl Vehicle {
                     } else {
                         1.0
                     };
-                    (&tuned, w_lat)
+                    (&tuned, w_lat, t.spin_grip(i))
                 }
-                None => (&c.tire, 1.0),
+                None => (&c.tire, 1.0, None),
+            };
+            // Tyre-slip A/B: the spin-weighted combined-slip model replaces the ellipse.
+            let forces = |kappa: f32, alpha: f32, fz: f32, grip: f32| match &spin {
+                Some(m) => combined_forces_spin(tire, kappa, alpha, fz, grip, Some(m)),
+                None => combined_forces_weighted(tire, kappa, alpha, fz, grip, w_lat),
             };
             w.alpha = slip_angle(w.vx, w.vy);
             w.alpha_lag = relax(w.alpha_lag, w.alpha, w.vx, tire.relaxation_length_m, h);
             let (vx, r, fz, grip, alpha) = (w.vx, w.r_eff, w.fz, w.grip, w.alpha_lag);
-            let fx_at = |om: f32| {
-                combined_forces_weighted(tire, slip_ratio(om, r, vx), alpha, fz, grip, w_lat).0
-            };
+            let fx_at = |om: f32| forces(slip_ratio(om, r, vx), alpha, fz, grip).0;
             let fx0 = fx_at(w.omega);
             let eps = 0.002 * vx.abs().max(SLIP_RATIO_V_MIN) / r;
             let k = ((fx_at(w.omega + eps) - fx_at(w.omega - eps)) / (2.0 * eps)).max(0.0);
@@ -1841,7 +1850,7 @@ impl Vehicle {
             };
             w.omega = om;
             w.kappa = slip_ratio(om, r, vx);
-            let (fx, fy) = combined_forces_weighted(tire, w.kappa, alpha, fz, grip, w_lat);
+            let (fx, fy) = forces(w.kappa, alpha, fz, grip);
             let mu_y = load_sensitive_mu(
                 tire.lateral.d,
                 tire.load_sensitivity,

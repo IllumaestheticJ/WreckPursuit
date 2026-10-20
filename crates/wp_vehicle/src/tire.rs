@@ -93,6 +93,129 @@ pub fn combined_forces_weighted(
     (fx, fy)
 }
 
+/// Combined-slip model parameters (tyre-slip workstream, A/B in Drift Lab W). The default,
+/// `spin_model: false`, is the data's friction ellipse ([`combined_forces`], bit-identical).
+///
+/// With `spin_model` on, a tyre under **drive** wheelspin (`kappa > 0`) keeps the side force
+/// of a Pacejka-style combined weighting instead of the friction ellipse's:
+///
+/// `Fy = Fy0(α) · G_yκ`, `G_yκ = cos(C · atan(B(α) · σ))`, `B(α) = B0 / (1 + |B2·α|^p)`,
+/// `σ = κ / (1 + κ)` (theoretical slip)
+///
+/// (MF 5.2's `G_yκ` with `B_yκ = r_By1·cos(atan(r_By2·α))` has the same shape at `p = 2`;
+/// a larger `p` makes the fade sharper). At small slip angles a spinning tyre still loses most of its side
+/// force (power oversteer starts as before); as the slip angle grows, wheelspin costs less,
+/// so the side force keeps **rising with slip angle at high slip ratio**. That rising slope is
+/// the rear axle's cornering stiffness in a power slide, the physical yaw / sideslip damping a
+/// held countersteer needs. The side force is never less than the ellipse's. The drive force is
+/// the ellipse's, optionally pulled back into the friction ellipse (`spin_fx_yield`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SpinGrip {
+    /// `B0`: how fast drive slip ratio removes side force at zero slip angle.
+    pub b0: f32,
+    /// `B2`, 1/rad: how fast that sensitivity fades with slip angle.
+    pub b2: f32,
+    /// `C` (0..=1): the weighting's shape (1 = `1/sqrt(1 + (Bκ)²)`).
+    pub c: f32,
+    /// `p` (whole number 1..=8): sharpness of the fade with slip angle.
+    pub p: f32,
+    /// 0..=1: how much the drive force yields so `(Fx, Fy)` stays inside the friction ellipse
+    /// (0 = MF-style, the drive force is the ellipse model's; 1 = the ellipse is a hard cap).
+    pub fx_yield: f32,
+    /// Also apply to braking / locked slip (`kappa < 0`). Off: braking uses the ellipse.
+    pub on_braking: bool,
+    /// Past the longitudinal peak, the drive force's shape never falls below this fraction of
+    /// the peak (dry rubber keeps most of its friction while spinning; the data's curve can fall
+    /// to ~half). 0 = the data's curve.
+    pub fx_slide: f32,
+}
+
+impl Default for SpinGrip {
+    fn default() -> Self {
+        Self {
+            b0: 4.3,
+            b2: 5.6,
+            c: 1.0,
+            p: 2.0,
+            fx_yield: 0.0,
+            on_braking: false,
+            fx_slide: 0.0,
+        }
+    }
+}
+
+/// `G_yκ` of [`SpinGrip`]: the fraction of the pure side force `Fy0(α)` a tyre keeps at slip
+/// ratio `kappa` (already filtered for drive / braking) and slip angle `alpha`, 0..=1.
+pub fn spin_side_weight(m: &SpinGrip, kappa: f32, alpha: f32) -> f32 {
+    let ba = (m.b2 * alpha).abs();
+    // Integer power by repeated multiplication (deterministic; no libm `powf`).
+    let n = m.p.round().clamp(1.0, 8.0) as u32;
+    let fade = (0..n).fold(1.0f32, |acc, _| acc * ba);
+    let b = m.b0.max(0.0) / (1.0 + fade);
+    // Theoretical slip σ = κ / (1 + κ) (Pacejka): ≈ κ when gripping, saturating toward 1 under
+    // heavy wheelspin, so a spinning tyre's side force hardly depends on how fast it spins.
+    let k = kappa.abs();
+    let sigma = k / (1.0 + k);
+    let x = m.c.clamp(0.0, 1.0) * atan(b * sigma);
+    // cos(x) for x in 0..=π/2 via sin(π/2 − x) (crate::math has the deterministic sin).
+    sin(core::f32::consts::FRAC_PI_2 - x).max(0.0)
+}
+
+/// Combined-slip forces with the [`SpinGrip`] weighting (see there); `None` = [`combined_forces`].
+pub fn combined_forces_spin(
+    def: &TireDef,
+    kappa: f32,
+    alpha: f32,
+    fz: f32,
+    grip: f32,
+    m: Option<&SpinGrip>,
+) -> (f32, f32) {
+    let (fx, fy) = combined_forces(def, kappa, alpha, fz, grip);
+    let Some(m) = m else {
+        return (fx, fy);
+    };
+    let spin = if m.on_braking {
+        kappa.abs()
+    } else {
+        kappa.max(0.0)
+    };
+    if fz <= 0.0 || spin <= 0.0 {
+        return (fx, fy);
+    }
+    // Sliding drive grip floor: past the peak the longitudinal shape is at least `fx_slide`.
+    let fx = if m.fx_slide > 0.0 {
+        let sx = spin / def.peak_slip_ratio;
+        let sy = alpha / def.peak_slip_angle_rad;
+        let s = (sx * sx + sy * sy).sqrt();
+        if s > 1.0 {
+            let mu_x = load_sensitive_mu(def.longitudinal.d, def.load_sensitivity, fz, def.fz0_n);
+            let floor = mu_x * fz * grip * m.fx_slide.min(1.0) * (sx / s) * kappa.signum();
+            if floor.abs() > fx.abs() {
+                floor
+            } else {
+                fx
+            }
+        } else {
+            fx
+        }
+    } else {
+        fx
+    };
+    let fy0 = combined_forces(def, 0.0, alpha, fz, grip).1;
+    let fy_w = fy0 * spin_side_weight(m, spin, alpha);
+    let fy = if fy_w.abs() > fy.abs() { fy_w } else { fy };
+    let y = m.fx_yield.clamp(0.0, 1.0);
+    if y <= 0.0 {
+        return (fx, fy);
+    }
+    let mu_x = load_sensitive_mu(def.longitudinal.d, def.load_sensitivity, fz, def.fz0_n);
+    let mu_y = load_sensitive_mu(def.lateral.d, def.load_sensitivity, fz, def.fz0_n);
+    let ey = (fy / (mu_y * fz * grip).max(1e-6)).min(1.0);
+    let cap = mu_x * fz * grip * (1.0 - ey * ey).max(0.0).sqrt();
+    let fx_c = fx.clamp(-cap, cap);
+    (fx + (fx_c - fx) * y, fy)
+}
+
 /// Pneumatic trail for the aligning torque, m: 4 cm at zero slip, falling to 0 at peak slip.
 pub fn pneumatic_trail(def: &TireDef, alpha: f32) -> f32 {
     0.04 * (1.0 - alpha.abs() / def.peak_slip_angle_rad).max(0.0)
