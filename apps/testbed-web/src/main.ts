@@ -42,7 +42,7 @@ import { RaceView, type RaceFrame } from "./ui/race";
 import { RaceMarker, parseCourse } from "./race_marker";
 import { RealTimeMeter } from "./rtf";
 import { WeatherView } from "./render/weather";
-import { ArtStyle, STYLE_LABELS, type StyleId } from "./render/style";
+import { ArtStyle, STYLE_LABELS, makeHeadlightPool, type StyleId } from "./render/style";
 import { FrameProfiler, tagFeature } from "./perf";
 import { CrashFx } from "./render/fx";
 import * as THREE from "three";
@@ -154,6 +154,9 @@ async function main(): Promise<void> {
   const fx = new CrashFx(scene.quality.fx);
   scene.world.add(tagFeature(fx.group, "fx"));
   scene.prewarmRoots.push(fx.group);
+  // Car headlight pools only show at night with the lights on (often first on a promoted car
+  // mid-chase): compile their program up front (SceneView.prewarm; not added to the scene).
+  scene.prewarmRoots.push(makeHeadlightPool(1, 1));
   // End-of-run panel (lead): capture / wreck → result + "Repair & continue" / "Restart".
   const runEndEl = document.createElement("div");
   runEndEl.id = "ui-run-end";
@@ -1019,6 +1022,9 @@ async function main(): Promise<void> {
     const prof = app.prof;
     prof.begin();
     let replay = isReplay();
+    // Below ~8 fps (software rendering) the 2D HUD canvases (minimap, telemetry plots) redraw
+    // every other frame: each redraw is a canvas upload + composite of ~10 ms there.
+    const hudRest = fps < 8 && frameNo % 2 === 1;
 
     // Touch controls: hidden under menus / full-screen panels (they sit above #overlay), only
     // map + pause while paused or with the full map open.
@@ -1117,7 +1123,7 @@ async function main(): Promise<void> {
     if (!crash.playing) {
       ui.frame(wi[W.tick], app.player, events, wi[W.hours], wi[W.mode] > 0.5 ? "Simulation" : "Arcade");
       prof.lap("ui");
-      map.frame(app.player, now);
+      map.frame(app.player, now, hudRest);
       prof.lap("map");
       if (!replay) runEnd.update(sim.runResult(), now);
       // Career autosave: after each settlement (bust, escape, wreck) and every 20 s of a run.
@@ -1154,7 +1160,7 @@ async function main(): Promise<void> {
     const focusView = app.views.get(app.focus) ?? null;
     if (focusTel) {
       plots.push(wi[W.tick] / 240, focusTel);
-      if (layers.on("telemetry")) plots.draw();
+      if (layers.on("telemetry") && !hudRest) plots.draw();
     }
     plots.canvas.style.display = layers.on("telemetry") ? "" : "none";
     prof.lap("ui");

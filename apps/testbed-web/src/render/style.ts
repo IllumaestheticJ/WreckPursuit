@@ -318,12 +318,18 @@ const POOL_FS = /* glsl */ `
     gl_FragColor = vec4(vCol * a * a * uStrength, 1.0);
   }`;
 
+/** Headlight pool geometry per size. */
+const poolGeos = new Map<string, THREE.BufferGeometry>();
+
 /**
  * Headlight pool for one car (chassis space, +Y forward): an additive quad on the road ahead,
  * brightest near the car. Caller positions it and sets `uniforms.uStrength`.
  */
 export function makeHeadlightPool(width: number, length: number): THREE.Mesh {
-  const geo = new THREE.PlaneGeometry(width, length, 1, 1).translate(0, length / 2, 0);
+  // One geometry per size (a car view is built on every traffic / police promotion).
+  const gk = `${width} ${length}`;
+  let geo = poolGeos.get(gk);
+  if (!geo) poolGeos.set(gk, (geo = new THREE.PlaneGeometry(width, length, 1, 1).translate(0, length / 2, 0)));
   const mat = new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
@@ -437,10 +443,12 @@ export class ArtStyle {
     const skyMat = new THREE.ShaderMaterial({
       side: THREE.BackSide,
       depthWrite: false,
-      depthTest: false,
       fog: false,
       uniforms: this.skyUniforms,
-      vertexShader: /* glsl */ `varying vec3 vDir; void main() { vDir = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      // On the far plane (z = w): drawn after the opaque scene with the depth test, so only the
+      // pixels nothing covers are shaded (it was drawn first over the whole screen), and it
+      // never hides geometry past its radius.
+      vertexShader: /* glsl */ `varying vec3 vDir; void main() { vDir = position; vec4 p = projectionMatrix * modelViewMatrix * vec4(position, 1.0); gl_Position = p.xyww; }`,
       fragmentShader: /* glsl */ `
         uniform vec3 uTop, uHorizon, uBottom; varying vec3 vDir;
         void main() {
@@ -450,7 +458,7 @@ export class ArtStyle {
         }`,
     });
     this.sky = new THREE.Mesh(new THREE.SphereGeometry(1500, 24, 12), skyMat);
-    this.sky.renderOrder = -10;
+    this.sky.renderOrder = 1; // after the opaque scene (renderOrder 0), see the vertex shader
     this.sky.frustumCulled = false;
     this.sky.visible = false;
     view.scene.add(tagFeature(this.sky, "sky"));

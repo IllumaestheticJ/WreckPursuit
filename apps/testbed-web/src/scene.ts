@@ -51,6 +51,8 @@ export class SceneView {
   /** City tiles past this distance (m) are not drawn; fog can only shorten it. From the
    * graphics quality (high: the camera's far plane, no visible change); `?draw=<m>` overrides. */
   drawDistanceM = Infinity;
+  /** Small city detail (city_tiles.ts CITY_DETAIL) past this distance is not drawn, m. */
+  detailDistanceM = Infinity;
   private readonly camPos = new THREE.Vector3();
   private readonly policeUnits: { obj: THREE.Group; red: THREE.MeshStandardMaterial; blue: THREE.MeshStandardMaterial }[] = [];
   /** Light-bar glow multiplier for the police helicopters (art style). */
@@ -93,6 +95,7 @@ export class SceneView {
     this.quality.attach(this.renderer);
     const draw = Number(new URLSearchParams(location.search).get("draw"));
     this.drawDistanceM = draw > 0 ? draw : this.quality.drawDistanceM;
+    this.detailDistanceM = this.quality.cityDetailM;
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     parent.appendChild(this.renderer.domElement);
     window.addEventListener("resize", () => this.renderer.setSize(window.innerWidth, window.innerHeight));
@@ -416,7 +419,7 @@ export class SceneView {
     const tiles = this.cityShown ? this.cityTiles.get(this.cityShown) : undefined;
     if (tiles) {
       camera.getWorldPosition(this.camPos);
-      tiles.update(this.camPos, this.cullDistanceM(camera));
+      tiles.update(this.camPos, this.cullDistanceM(camera), this.detailDistanceM);
     }
     if (this.renderOverride) this.renderOverride(camera);
     else this.renderer.render(this.scene, camera);

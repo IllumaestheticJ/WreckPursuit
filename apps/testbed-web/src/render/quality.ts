@@ -103,10 +103,12 @@ interface Profile {
   /** Street-lamp poles within this distance (m) are drawn; the lit heads go to the draw
    * distance (render/style.ts). */
   lampPoleM: number;
+  /** Small city detail (kerbs, lot skirts, corner fills) within this distance (m). */
+  cityDetailM: number;
 }
 
 function profileFor(mode: GfxMode, software: boolean, touch: boolean): Profile {
-  const common = { maxPixelRatio: 2, trafficM: Infinity, fullLodM: 250, propFullMax: 24, propDrawM: Infinity, propProxyM: 300, signalM: 450, lampPoleM: Infinity };
+  const common = { maxPixelRatio: 2, trafficM: Infinity, fullLodM: 250, propFullMax: 24, propDrawM: Infinity, propProxyM: 300, signalM: 450, lampPoleM: Infinity, cityDetailM: Infinity };
   const high = { ...common, antialias: true, backdropBlur: true, rain: 1, scale: 1, minScale: 1, drawM: Infinity, adaptive: false };
   const low = { ...common, antialias: false, backdropBlur: false, rain: 0.3, scale: 0.5, minScale: 0.5, drawM: 900, adaptive: false };
   if (mode === "high") return high;
@@ -117,10 +119,12 @@ function profileFor(mode: GfxMode, software: boolean, touch: boolean): Profile {
   // meshes within 100 m (at most 8 parked), parked proxies within 150 m, signal heads within
   // 250 m (a lamp is ~2 px there).
   // Parked cars are drawn within 450 m (350 m on a phone), street-lamp poles within 300 m (the
-  // glowing heads to the draw distance).
-  const lean = { fullLodM: 100, propFullMax: 8, propProxyM: 150, signalM: 250, lampPoleM: 300 };
+  // glowing heads to the draw distance), kerbs / lot skirts / corner fills within 250 m.
+  const lean = { fullLodM: 100, propFullMax: 8, propProxyM: 150, signalM: 250, lampPoleM: 300, cityDetailM: 250 };
   if (touch) return { ...low, ...lean, rain: 0.2, minScale: 0.3, drawM: 600, adaptive: true, maxPixelRatio: 1, trafficM: 300, propDrawM: 350 };
-  return software ? { ...low, ...lean, minScale: 0.35, adaptive: true, propDrawM: 450 } : { ...high, minScale: 0.6, adaptive: true };
+  // Software GL: rain at 20 % (30 % cost ~25 ms a frame there) and the governor may go down to
+  // 0.3× (it only does while frames stay slow).
+  return software ? { ...low, ...lean, minScale: 0.3, rain: 0.2, adaptive: true, propDrawM: 450 } : { ...high, minScale: 0.6, adaptive: true };
 }
 
 /** Frame-time thresholds of the governor (ms, smoothed wall frame time). */
@@ -150,6 +154,8 @@ export class Quality {
   readonly signalDrawM: number;
   /** Street-lamp pole draw distance, m (render/style.ts). */
   readonly lampPoleDrawM: number;
+  /** Small city detail distance, m (SceneView.detailDistanceM). */
+  readonly cityDetailM: number;
   readonly rendererName: string;
   readonly antialias: boolean;
   /** The low profile (no MSAA, reduced resolution): optional art-style effects are skipped
@@ -184,6 +190,7 @@ export class Quality {
     this.propProxyM = this.profile.propProxyM;
     this.signalDrawM = this.profile.signalM;
     this.lampPoleDrawM = this.profile.lampPoleM;
+    this.cityDetailM = this.profile.cityDetailM;
     this.antialias = this.profile.antialias;
     this.lite = !this.profile.backdropBlur;
     this.drawDistanceM = this.profile.drawM;
