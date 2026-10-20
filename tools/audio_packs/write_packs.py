@@ -94,11 +94,17 @@ for k in r["cues"]:
     r["cues"][k] = samples("radio_rec", k.split("/")[1] + ".ogg", "radio_rec", k == "radio/static", 1.0 if k != "radio/static" else 0.5)
 save(r)
 
-# cars
+# cars: procedural engine pack -> its recorded pack. Idempotent (re-runs leave *_rec packs and
+# cars added since alone): only engine_proc_* is remapped, anything else is kept as is.
 m = {"engine_proc_i4": "engine_rec_i4", "engine_proc_i6": "engine_rec_i6", "engine_proc_v6": "engine_rec_v6", "engine_proc_v8": "engine_rec_v8"}
 for f in sorted(os.listdir(os.path.join(A, "cars"))):
+    if not f.endswith(".json"): continue
     p = os.path.join(A, "cars", f); d = json.load(open(p))
-    d["engine_pack"] = "engine_rec_turbo" if d["engine_pack"] == "engine_proc_i4" and d["engine"]["turbo"] else m[d["engine_pack"]]
+    ep = d["engine_pack"]
+    if ep == "engine_proc_i4" and d["engine"]["turbo"]: ep = "engine_rec_turbo"
+    d["engine_pack"] = m.get(ep, ep)
+    if d["engine_pack"] not in m.values() and d["engine_pack"] != "engine_rec_turbo":
+        print(f"warning: cars/{f}: engine_pack {d['engine_pack']} is not a recorded pack")
     d["world_pack"] = "world_rec"
     if d.get("siren"): d["siren"]["pack"] = "siren_rec"
     open(p, "w").write(json.dumps(d, indent=2, ensure_ascii=False) + "\n")
