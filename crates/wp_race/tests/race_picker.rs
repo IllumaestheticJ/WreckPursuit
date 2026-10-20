@@ -141,7 +141,7 @@ fn run_race_with(id: &str, max_s: u64, presence: Option<f32>) -> Raced {
         LiveEntrant {
             entity: ids[i],
             redline_rpm: car.def.engine.redline_rpm,
-            capability: CarCapability::geometry_only(car),
+            capability: CarCapability::for_car(car),
         }
     };
     let ai: Vec<LiveEntrant> = (1..ids.len()).map(entrant).collect();
@@ -239,6 +239,36 @@ fn run_race_with(id: &str, max_s: u64, presence: Option<f32>) -> Raced {
                 .collect();
         }
         if std::env::var("WP_RACE_TRACE").is_ok() && sim.tick().is_multiple_of(240 * 10) {
+            for (k, e) in live.ai().racers().iter().enumerate() {
+                let d = live.ai().field().debug_of(k);
+                if let wp_opponent::SpeedLimit::Obstacle(w) = d.limit {
+                    if let Some(v) = sim.vehicles().iter().find(|v| v.id.0 == w) {
+                        let st = v.vehicle.state();
+                        let unit = sim.police().units().iter().find(|u| u.entity == Some(v.id));
+                        eprintln!(
+                            "{id}     blocker {:?} {:?} pos ({:.0},{:.0}) v {:.1} siren {} unit {:?}",
+                            v.id,
+                            v.kind,
+                            st.pos[0],
+                            st.pos[1],
+                            st.speed_mps,
+                            v.input.siren,
+                            unit.map(|u| (&u.assignment, &u.tactic))
+                        );
+                    }
+                }
+                let pol = sim.police().racer(*e);
+                eprintln!(
+                    "{id}   ai {e:?} police {:?} s {:.0} n {:.1} v_target {:.1} {:?} {:?} {:?}",
+                    pol.map(|p| (p.heat as i32, p.level, p.status)),
+                    d.s,
+                    d.n,
+                    d.v_target,
+                    d.limit,
+                    live.ai().field().tactic_of(k),
+                    d.pass_checks
+                );
+            }
             for s in live.standings() {
                 let st = sim
                     .vehicles()
@@ -369,8 +399,18 @@ fn check(r: &Raced, winner_s: std::ops::Range<f32>, min_finish: usize) {
         .count();
     assert!(
         finished >= min_finish,
-        "{id}: only {finished} of {} finished",
-        r.results.len()
+        "{id}: only {finished} of {} finished: {:?}",
+        r.results.len(),
+        r.results
+            .iter()
+            .map(|x| (
+                x.racer,
+                x.status,
+                x.elapsed_s(),
+                x.gates_passed,
+                x.violations
+            ))
+            .collect::<Vec<_>>()
     );
     assert!(r.results.iter().all(|x| x.status != RacerStatus::Running));
     assert!(matches!(
