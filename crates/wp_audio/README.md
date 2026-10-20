@@ -98,9 +98,16 @@ classes) so a new car is never silent, but the tests require a file for every sh
 ## Sample-pack spec (for sound designers)
 
 A pack is one JSON file `data/audio/packs/<id>.json`; recorded files live next to it in
-`data/audio/packs/<id>/`. `id` must equal the file name. Shipped packs are procedural
-placeholders (`*_proc`); a recorded pack replaces `Synth` sources with `Samples` and keeps the
-cue names.
+`data/audio/packs/<id>/`. `id` must equal the file name. A recorded pack replaces `Synth`
+sources with `Samples` and keeps the cue names; `fallback_pack` (same kind) names the pack whose
+synth the backend plays for a cue while its file is loading or failed to decode.
+
+Shipped: `world_rec` (default world pack for every car) — recorded CC0 impacts (thud, plastic,
+panel dent, structural crunch, glass, cast clank), debris, tire bursts, engine failure, metal
+scrape / tire squeal / steam / horn loops, falling back to `world_proc`; built reproducibly by
+`tools/audio-packs/build.py` from `tools/audio-packs/world_rec.json`, sources and licences in
+`data/audio/packs/world_rec/CREDITS.md`. Engines, sirens, radio, surfaces, suspension, plastic
+scrape and body rattle are still procedural (`*_proc`).
 
 ```jsonc
 {
@@ -166,7 +173,7 @@ cargo test -p wp_audio
 ```
 
 Unit tests per module plus `tests/director.rs`: shipped data validates (and disk == embedded,
-every car has a def); **command stream determinism** on a real head-on crash with a siren,
+every car has a def, every `Samples` file exists); **command stream determinism** on a real head-on crash with a siren,
 horn and radio line through `wp_sim` (hash of the full JSON stream, two runs); **voice culling
 respects limits** (40 screaming cars + crash events: global and per-bus limits hold every
 frame, the stream is well-formed — no double plays, no set/stop of unknown voices — and the
@@ -182,6 +189,9 @@ proportional to history; per frame it is O(voices · log voices) plus O(contacts
 nodes) for material lookup.
 
 ## Known gaps
+
+- Engine, siren, radio and surface packs are still procedural; `world_rec` cuts were picked from
+  onset/decay analysis, not by ear (see `tools/audio-packs/README.md`).
 
 - Contact material is inferred from the lattice; contract request A-1 asks for it on the event.
 - `PoliceEvent::Radio` has no priority yet (A-2): priority is a heuristic. The scanner tier is

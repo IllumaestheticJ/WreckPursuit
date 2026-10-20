@@ -1,7 +1,8 @@
 // End-to-end check of the audio backend (workstream 13) in headless Chromium.
 // Usage: node e2e/audio.mjs  (needs the wasm package built first, like e2e/run.mjs).
 //
-// Checks: the AudioContext starts on a key press, driving plays engine + surface voices, a
+// Checks: the AudioContext starts on a key press, recorded sample files all decode, driving
+// plays engine + surface voices, a
 // forced siren plays, the head-on crash scenario produces impact sounds, a scanner line is
 // spoken after the tier delay, voice counts stay within the configured limits, no page errors.
 import { spawn } from "node:child_process";
@@ -59,6 +60,11 @@ const sum = (c, prefix) => Object.entries(c).filter(([k]) => k.startsWith(prefix
 await page.keyboard.press("KeyX");
 await page.waitForFunction(() => window.__wpAudio?.running(), null, { timeout: 10000 });
 check(true, "AudioContext running after a key press");
+await page
+  .waitForFunction(() => window.__wpAudio.samples()?.loading === 0, null, { timeout: 30000 })
+  .catch(() => {});
+const smp = await page.evaluate(() => window.__wpAudio.samples());
+check(smp && smp.ready > 0 && smp.failed === 0 && smp.loading === 0, `recorded samples decoded (${JSON.stringify(smp)})`);
 await page.keyboard.down("KeyW");
 await page.waitForTimeout(3000);
 await page.keyboard.up("KeyW");
@@ -95,6 +101,8 @@ await page.evaluate(() => window.__wp.runScenario("crash/head_on.ron", 50));
 await page.waitForFunction(() => window.__wp.sim.scenarioResult()?.done === true, null, { timeout: 60000 });
 c = await counts();
 check(sum(c, "impact/") > before, `head-on crash played impact sounds (${sum(c, "impact/") - before})`);
+const rec = await page.evaluate(() => window.__wpAudio.samples());
+check(rec.recorded > 0 && rec.fallback === 0, `crash used recorded samples (${rec.recorded} recorded, ${rec.fallback} fallback)`);
 st = await stats();
 check(st.looped + st.one_shots <= 40, `voice count within max_voices (${st.looped}+${st.one_shots})`);
 console.log("cue counts:", JSON.stringify(c));

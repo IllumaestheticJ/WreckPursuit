@@ -218,7 +218,7 @@ pub struct AudioDirector {
     stats: DirectorStats,
 }
 
-const DEFAULT_WORLD_PACK: &str = "world_proc";
+const DEFAULT_WORLD_PACK: &str = "world_rec";
 const DEFAULT_SIREN_PACK: &str = "siren_proc";
 
 impl AudioDirector {

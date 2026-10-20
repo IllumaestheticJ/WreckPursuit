@@ -411,7 +411,7 @@ fn one() -> f32 {
 }
 
 fn default_world_pack() -> String {
-    "world_proc".to_string()
+    "world_rec".to_string()
 }
 
 fn default_horn() -> String {
@@ -568,6 +568,10 @@ pub struct SamplePack {
     /// Free text for humans.
     #[serde(default)]
     pub description: String,
+    /// Pack of the same kind whose cue (same name) the backend plays while a recorded file
+    /// is still loading or failed to load — usually the procedural `*_proc` pack.
+    #[serde(default)]
+    pub fallback_pack: Option<String>,
     /// Engine layers (Engine packs only), any order.
     #[serde(default)]
     pub engine_layers: Vec<EngineLayerDef>,
@@ -790,6 +794,14 @@ impl AudioLibrary {
                     "packs/{}: engine_layers only allowed in Engine packs",
                     p.id
                 ));
+            }
+            if let Some(f) = &p.fallback_pack {
+                if self.packs.get(f).map(|fp| fp.kind) != Some(p.kind) || f == &p.id {
+                    errs.push(format!(
+                        "packs/{}: fallback_pack {f} missing, itself, or of another kind",
+                        p.id
+                    ));
+                }
             }
             for (name, c) in &p.cues {
                 if !c.looped && c.duration_s.is_none() {

@@ -84,6 +84,8 @@ export interface SamplePack {
   id: string;
   kind: "Engine" | "World" | "Siren" | "Radio";
   description: string;
+  /** Pack whose synth cue plays while a recorded file is loading or failed to decode. */
+  fallback_pack?: string | null;
   cues: Record<string, CueDef>;
 }
 

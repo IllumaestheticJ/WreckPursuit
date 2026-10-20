@@ -95,6 +95,8 @@ export class VoicePool {
   private samples = new Map<string, AudioBuffer | "loading" | "failed">();
   /** Voices created / released (debug). */
   created = 0;
+  /** Plays of `Samples` cues that used the recorded file vs. the fallback synth (debug, e2e). */
+  readonly recordedPlays = { recorded: 0, fallback: 0 };
 
   constructor(
     private ctx: AudioContext,
@@ -108,6 +110,16 @@ export class VoicePool {
     return this.voices.size;
   }
 
+  /** Recorded files by load state (debug, e2e). */
+  sampleStates(): { ready: number; loading: number; failed: number } {
+    const n = { ready: 0, loading: 0, failed: 0 };
+    for (const v of this.samples.values()) {
+      if (v instanceof AudioBuffer) n.ready++;
+      else n[v]++;
+    }
+    return n;
+  }
+
   private cue(pack: string, cue: string): CueDef | undefined {
     return this.lib.packs[pack]?.cues[cue];
   }
@@ -116,7 +128,7 @@ export class VoicePool {
     return `data/audio/packs/${pack}/${file}`;
   }
 
-  /** Fetch every recorded file referenced by a pack (none ship yet; synths cover them). */
+  /** Fetch every recorded file referenced by a pack (until one decodes, its fallback synth plays). */
   private preloadSamples(): void {
     for (const [packId, pack] of Object.entries(this.lib.packs)) {
       for (const c of Object.values(pack.cues)) {
@@ -173,9 +185,17 @@ export class VoicePool {
 
     let src: AudioBufferSourceNode | null = null;
     let syn: SynthVoice | null = null;
-    const source = def?.source;
+    let source = def?.source;
     const file = source && "Samples" in source ? source.Samples.files[Math.floor(Math.random() * source.Samples.files.length)] : null;
     const buf = file ? this.samples.get(this.sampleUrl(pack, file)) : undefined;
+    if (file && !(buf instanceof AudioBuffer)) {
+      // Recorded file still loading (or failed, e.g. no Vorbis decoder): play the fallback
+      // pack's synth for the same cue.
+      const fb = this.lib.packs[pack]?.fallback_pack;
+      const fbSource = fb ? this.cue(fb, cue)?.source : undefined;
+      if (fbSource && "Synth" in fbSource) source = fbSource;
+    }
+    if (file) this.recordedPlays[buf instanceof AudioBuffer ? "recorded" : "fallback"]++;
     if (buf instanceof AudioBuffer) {
       src = this.ctx.createBufferSource();
       src.buffer = buf;

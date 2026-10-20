@@ -127,6 +127,11 @@ export class AudioSystem {
     return this.ctx?.state === "running";
   }
 
+  /** Recorded sample files by load state, and plays that used them vs. their fallback synth. */
+  samples(): { ready: number; loading: number; failed: number; recorded: number; fallback: number } | null {
+    return this.pool ? { ...this.pool.sampleStates(), ...this.pool.recordedPlays } : null;
+  }
+
   /** Recent scanner lines, newest first. */
   radioLog(): unknown[] {
     return this.scanner?.log ?? [];

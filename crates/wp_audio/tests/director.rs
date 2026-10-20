@@ -50,6 +50,17 @@ fn shipped_data_is_valid_and_complete() {
         missing.is_empty(),
         "cars without data/audio/cars/<id>.json: {missing:?}"
     );
+    // Every recorded file a pack references ships next to it.
+    for p in lib.packs.values() {
+        for (name, c) in &p.cues {
+            if let wp_audio::data::CueSource::Samples { files } = &c.source {
+                for f in files {
+                    let path = repo().join(format!("data/audio/packs/{}/{f}", p.id));
+                    assert!(path.exists(), "packs/{}: cue {name}: missing {f}", p.id);
+                }
+            }
+        }
+    }
     // And no audio def for a car that does not exist.
     for id in lib.cars.keys() {
         assert!(
