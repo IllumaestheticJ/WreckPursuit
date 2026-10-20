@@ -32,13 +32,13 @@ export interface MeshPartJson {
   indices: number[];
   skin_nodes: number[];
   skin_weights: number[];
-  /** Hood / trunk lid / front fender crumple (format 3; tools/assets `FoldBinding`). */
+  /** Hood / trunk lid / front fender / rear quarter crumple (format 3; tools/assets `FoldBinding`). */
   fold?: FoldJson;
 }
 
 /**
  * How a sheet panel crumples (tools/assets/src/mesh.rs `FoldBinding`, visual only): chords from
- * the fixed end (hinge row, fender rear row) to the leading end; the leading end follows the
+ * the fixed end (hinge row; side panel door-side row) to the leading end; the leading end follows the
  * crushed front structure (`leads`), the shortening becomes a fold along `dir`.
  */
 export interface FoldJson {
