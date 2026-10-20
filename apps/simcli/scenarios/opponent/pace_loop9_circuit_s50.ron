@@ -97,6 +97,6 @@
         metric(name: "race_time_s", entity: "ai_dez", min: 171.9, max: 242.7),
         metric(name: "race_time_s", entity: "ai_juno", min: 174.5, max: 246.4),
         metric(name: "race_time_s", entity: "ai_tito", min: 176.5, max: 249.2),
-        metric(name: "race_time_s", entity: "player", min: 175.6, max: 247.9),
+        metric(name: "race_time_s", entity: "player", min: 175.6, max: 248.0),
     ],
 )

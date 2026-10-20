@@ -240,8 +240,27 @@ debug `cargo test` skips it). Causes and what was done:
 | Hollins picker (police) | default seed never finished | a racer busted on the hairpin stood in the lane (the standing timer skipped racers; busted cars stopped mid-lane; 0.25 throttle could not pull away uphill) | busted / fleeing / retired racers are ordinary cars, pull over to the kerb, creep from rest at 0.45 throttle: `WP_RACE_SEED` 1–8 15 → 19 of 32 finish; new police-free test (4/4) |
 | (table) | 3 cars > 2 % | brake-dive merge | only those rows updated; a full regeneration moves every row < 2 % and that alone flips race outcomes |
 
-Re-measured ranges (best_ratio cap = today + 0.05): city 1.13 / 1.10, grid highway 2.41 / 2.52,
-Hollins 1.19 / 1.12, Lantern 2.15 / 1.55, Loop 9 1.23 / 1.18 (s50 / s95). Grid highway and
+Re-measured ranges (best_ratio cap = today + 0.05), after merging the auto-clutch fix and the
+handbrake pivot aid: city 1.13 / 1.10, grid highway 2.41 / 2.47, Hollins 1.19 / 1.12,
+Lantern 1.71 / 1.80, Loop 9 1.23 / 1.18 (s50 / s95). Lantern s95 > s50 is traffic at its
+junctions (who reaches a queue first), not skill.
+
+Handbrake pivot aid (A, 89af45cd): `AssistProfile::ai` has `steer_speed_sensitivity` 0, so AI
+cars never get it. The browser autopilot drives the player's car with the player's assists,
+where it is live: measured, a stopped car on handbrake + full steer turns ~59° in 3 s with
+keyboard assists (0° with `ai`). The AI now holds the wheels straight while standing (< 0.3
+m/s) on the handbrake. (Straightening below 1.5 m/s cost Lantern s95 3 of 4 finishers: a car
+creeping to a stop must keep steering.)
+
+Fleeing cars: a fled racer that has to stop (end of its flight route, no route) pulls over to
+the kerb clear of junctions first, like a yielding or busted one; standing still it is a parked
+car to the field, which passes it (on the opposing lanes where the corridor has them) after
+8 s. `wp_race grid_highway_sprint` and `wp_wasm short_sprint…` (red on lead/assist-levels)
+pass on this branch.
+
+Loop 9 with police (report to E / race): every seed 1–6 has one `LeftCorridor` DQ: a racer
+yielding to an L1 pursuit at ~45 m/s near (−300, 1386) ends up ~20 m off the corridor after a
+contact with the pursuing unit; the judge disqualifies a car pulled over for the police. Grid highway and
 Lantern are dominated by the world (a red light, junction queues); the solo pace numbers
 above are unchanged in method. Remaining gaps: Hollins with police still loses ~40 % of the
 field to police stand-offs (reported to E); a racer that ends up in the opposing lane facing
