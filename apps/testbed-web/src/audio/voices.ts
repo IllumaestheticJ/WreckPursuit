@@ -197,6 +197,17 @@ export class VoicePool {
     return n;
   }
 
+  /**
+   * Looped director voices playing (engine-instrument members included; local ambience and
+   * fading voices not). Equals the director's `looped` count when nothing is stale.
+   */
+  get looping(): number {
+    let n = 0;
+    for (const v of this.voices.values()) if (v.endTime === Infinity && v.panner) n++;
+    for (const g of this.engines.values()) n += g.members.size;
+    return n;
+  }
+
   /** Recorded samples (default) or each pack's procedural `fallback`. */
   source: SoundSource = "recorded";
 

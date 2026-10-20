@@ -31,6 +31,8 @@ pub struct CueInfo {
     pub looped: bool,
     /// Recorded speed for surface loops, m/s.
     pub root_speed_mps: Option<f32>,
+    /// Stop fade override, s (`CueDef::release_s`).
+    pub release_s: Option<f32>,
     /// Whether the pack actually defines it (false = placeholder for a missing cue).
     pub defined: bool,
     /// The cue's procedural synth params (empty for samples).
@@ -65,6 +67,7 @@ impl CueTable {
                     },
                     looped: c.looped,
                     root_speed_mps: c.root_speed_mps,
+                    release_s: c.release_s,
                     defined: true,
                     synth_params,
                 });
@@ -93,6 +96,7 @@ impl CueTable {
             duration_s: if looped_hint { 0.0 } else { 1.0 },
             looped: looped_hint,
             root_speed_mps: None,
+            release_s: None,
             defined: false,
             synth_params: BTreeMap::new(),
         })
@@ -174,7 +178,7 @@ struct InFlight {
 #[derive(Debug, Clone, Default)]
 pub struct VoiceMixer {
     /// Looped voices currently playing.
-    active: BTreeMap<VoiceId, Bus>,
+    active: BTreeMap<VoiceId, (Bus, CueRef)>,
     /// One-shots still sounding (they hold a voice until their duration ends).
     in_flight: BTreeMap<VoiceId, InFlight>,
 }
@@ -276,11 +280,12 @@ impl VoiceMixer {
             .copied()
             .collect();
         for id in stopped {
-            self.active.remove(&id);
-            out.push(AudioCommand::Stop {
-                voice: id,
-                fade_s: cfg.stop_fade_s,
-            });
+            let fade_s = self
+                .active
+                .remove(&id)
+                .and_then(|(_, cue)| cues.info(cue).release_s)
+                .unwrap_or(cfg.stop_fade_s);
+            out.push(AudioCommand::Stop { voice: id, fade_s });
         }
         new_one_shots.sort_by_key(|a| a.0.id);
         let mut sets = Vec::new();
@@ -291,7 +296,7 @@ impl VoiceMixer {
                     params: *p,
                 });
             } else {
-                self.active.insert(*id, d.bus);
+                self.active.insert(*id, (d.bus, d.cue));
                 out.push(play(cues, d, *p));
             }
         }
@@ -310,7 +315,7 @@ impl VoiceMixer {
         out.extend(sets);
 
         let mut per_bus: BTreeMap<Bus, usize> = BTreeMap::new();
-        for b in self.active.values() {
+        for (b, _) in self.active.values() {
             *per_bus.entry(*b).or_default() += 1;
         }
         for f in self.in_flight.values() {

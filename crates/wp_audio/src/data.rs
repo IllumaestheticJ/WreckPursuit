@@ -606,6 +606,10 @@ pub struct CueDef {
     /// Speed the loop was recorded at (surface loops), m/s; pitch = speed / root.
     #[serde(default)]
     pub root_speed_mps: Option<f32>,
+    /// Fade when the voice stops, s (default: `audio_config.stop_fade_s`). Short for sounds
+    /// that must end with their button, e.g. the horn (owner report #58).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_s: Option<f32>,
 }
 
 /// A sample pack (`data/audio/packs/<id>.json`).
