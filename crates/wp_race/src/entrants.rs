@@ -134,6 +134,11 @@ impl AiEntrants {
             })
             .collect();
         let ai_route = run_off_route(world, &race.route).unwrap_or_else(|| race.route.clone());
+        // Past the judged finish (on the run-off leg) the cars are done racing.
+        let config = RaceConfig {
+            finish_m: (!race.route.closed_loop).then_some(race.route.length_m),
+            ..config
+        };
         let field = Field::from_route(world, &ai_route, &specs, config);
         let hold = entrants
             .iter()

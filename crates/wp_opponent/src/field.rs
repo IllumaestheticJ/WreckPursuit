@@ -64,6 +64,10 @@ pub struct RaceConfig {
     /// tow on straights and pull out with the run it gives. Leave off unless the sim loop
     /// really applies the drag multipliers (otherwise sitting that close only adds risk).
     pub draft: bool,
+    /// Where the judged finish line lies along a point-to-point corridor, m, when the
+    /// corridor runs on past it (run-off): racers beyond it are done racing (they cool down in
+    /// their lane and pass nobody). `None`: the corridor's end is the finish.
+    pub finish_m: Option<f32>,
 }
 
 impl Default for RaceConfig {
@@ -79,6 +83,7 @@ impl Default for RaceConfig {
             corridor: CorridorOptions::default(),
             signals: true,
             draft: false,
+            finish_m: None,
         }
     }
 }
@@ -1447,11 +1452,17 @@ impl Field {
             None => (&self.corridor, &self.lines[line_idx].1, &speed),
         };
         let draft = self.config.draft;
+        let finish_m = if flight.is_some() {
+            None
+        } else {
+            self.config.finish_m
+        };
         decide_racer(
             &mut self.racers[k],
             civs,
             signal,
             draft,
+            finish_m,
             k,
             corridor,
             line,
@@ -1507,6 +1518,7 @@ fn decide_racer(
     civs: &[Civ],
     signal: Option<SignalAhead>,
     draft: bool,
+    finish_m: Option<f32>,
     k: usize,
     corridor: &Corridor,
     line: &RacingLine,
@@ -1539,7 +1551,14 @@ fn decide_racer(
                 ds > -(hl + o.half_len) && ds < 60.0
             }
         });
+        // Done racing (finished, disqualified): cool down in my lane, no passing — a pass on
+        // the opposing lanes in front of a patrol after the flag is a needless violation.
+        let done_racing = matches!(
+            r.status,
+            RacerStatus::Finished { .. } | RacerStatus::Disqualified
+        ) || (!corridor.closed && finish_m.is_some_and(|f| r.progress >= f));
         let may_use_opposing = corridor.opposing == OpposingLanes::ForOvertaking
+            && !done_racing
             && (r.profile.risk >= 0.5 || parked_ahead);
         let pass_limits = |s: f32| {
             if may_use_opposing {
@@ -1818,6 +1837,7 @@ fn decide_racer(
                     && brake_dist > v * 1.5;
                 if (r.blocked_s > p.overtake_patience_s || momentum)
                     && x.o.v_s > -1.0
+                    && !done_racing
                     && (!start_phase || x.o.parked)
                 {
                     let ctx = PassCtx {
