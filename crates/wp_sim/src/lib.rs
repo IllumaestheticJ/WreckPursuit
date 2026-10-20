@@ -1274,7 +1274,7 @@ mod tests {
     #[test]
     fn ghost_passes_through_cars_but_not_the_world() {
         let run = |ghost: bool| {
-            let (mut sim, a, b) = two_sedan_sim(7);
+            let (mut sim, a, _b) = two_sedan_sim(7);
             sim.place_vehicle(a, [0.0; 3], 0.0, 10.0).unwrap();
             let hold = VehicleInput {
                 throttle: 0.3,
