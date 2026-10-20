@@ -170,6 +170,34 @@ branch: 60 % Good 4.74 · 0/3 → 4.72 · 0/3; Naive 5.23 · 0/3 → 5.23 · 0/3
 0/3 (Flood at 60 % drifts longer before it spins: 0.54 → 2.09 s). 30 % and 100 % within
 ±0.15 s and ±1 spin of the step-3 table.
 
+### Step 4 — re-based on `lead/drift-lab-b` ae313e2 (step 3b + `lead/round12` merge)
+
+Merged `origin/lead/drift-lab-b` (step 3b: throttle shaping opt-in, rows 101 / 104; the merge
+of `lead/round12`). That merge (930aff6) keeps B's steering.rs and does **not** layer machine
+A's row-90 rack-speed countering on top, and its input.ts keeps the 4/6 ramp; so the only
+fast-slew paths in the merged steering are B's (fast countersteer, Hold's fast rate, the
+self-align boost), all behind the confirmed-slide gate. A's key ramp is measured above
+(row-90 ramp row) and not used. Readout: `drift_readout` is now `[…, throttle_scale,
+key_throttle, engine_throttle, sliding]` (sliding = index 8).
+
+Re-measured, mean of 5 cars, "B now" = `origin/lead/drift-lab-b` ae313e2 (4/6 ramp):
+
+| case | B now: reversals/s · peak °/s · snap % | **twitch (merged, 6/6)** |
+|---|---|---|
+| lane change 80 | 8.40 · 219 · 1.9 | **5.64 · 65 · 0.0** |
+| lane change 130 | 5.88 · 187 · 1.0 | **3.48 · 55 · 0.0** |
+| slalom 60 | 6.75 · 330 · 2.1 | **6.12 · 193 · 0.0** |
+| sweeper 70 % grip | 8.74 · 375 · 1.4 | **8.69 · 202 · 0.0** |
+| kerb hit 100 | 0.80 · 376 · 0.9 | **0.80 · 59 · 0.0** |
+
+(Merged branch with the old 4/6 ramp: 8.24 · 65, 5.52 · 55, 6.95 · 171, 9.00 · 160,
+1.40 · 59.) Catch: B now released 90/90, late key 84/90; **twitch 90/90, 86/90**. Drift
+drivers (RWD, 60 %, drift s · spins), B now → twitch: Good 4.09 · 1/3 → 4.11 · 1/3; Naive
+4.37 · 2/3 → 4.97 · 1/3; Sloppy 2.11 · 24/60 → 2.02 · 23/60; AbruptLift 0/3 → 0/3; Flood
+3/3 → 3/3; FlickLift 0/3 → 0/3; 30 % / 100 % within ±0.1 s and ±2 spins. All `wp_vehicle`
+tests pass after the merge (the two base failures listed below are fixed by the round12
+merge).
+
 ## What to try (owner)
 
 Drift Lab B (`?drift=b&car=shiro_turbo`), keyboard, countersteer 60 %:
