@@ -131,6 +131,12 @@ not read). They are: city_blocked_parked_player_{grid,vesper}, city_hill_road_{a
 city_sidewalk_mount_{15,40}kmh, golden_city_chase, golden_night_pursuit_escape,
 panels_frontal_56_hood, weather_aquaplane_{control,puddle}, weather_fog_pursuit{,_clear},
 weather_wet_brake_100_0. Lead: please re-bless them on the round-12 base.
+Rear-quarter follow-up run (no sim change between the two runs): the mismatch set grew to 20 —
+the same 14 plus police_sideswipe_patrol_{day,night} and race_{grid_highway_sprint,hollins_sprint,
+lantern_checkpoint,loop9_circuit}. So some goldens on this base do not reproduce from one
+`cargo test --workspace` run to the next (possible nondeterminism in the city / police / race
+path); lead / I (harness): please check before re-blessing. Everything else passed again
+(e2e, panel scenarios 6/6, car-assets 14 tests, fmt, clippy, tsc, wasm).
 
 ## Gate status (2026-10-19)
 fmt, clippy `-D warnings`, `cargo test --workspace` (incl. goldens; only my two new goldens were
