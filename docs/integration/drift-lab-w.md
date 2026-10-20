@@ -207,6 +207,20 @@ merge); fixed by C's 335eeb3, merged here (0 errors). Clean here: `cargo fmt --c
 --workspace -- -D warnings`, `cargo clippy -p wp_vehicle -p wp_wasm --all-targets -- -D
 warnings`, `cargo test -p wp_vehicle`, wasm build + wasm-bindgen, `tsc --noEmit`.
 
+## Fix — browser start-up (lead: "cannot read panels/parity_rwd_d.json: not in data bundle")
+
+Free-drive sessions attach damage panels (`panels: true`), and the browser loads
+`data/panels/<car>.json` for them and `data/panels/meshes/<car>.json` for the body. The parity
+cars had neither. `tools/parity/build_parity_cars.py` now also copies the template car's panel
+spec and render mesh under the parity id (same lattice, so the node indices are valid):
+rampart_50 → parity_rwd_a / d, lucciola_350 → parity_rwd_b, kestrel_ts → parity_fwd_c.
+Regression test: `wp_wasm` `data::parity_session_tests::parity_cars_start_a_free_drive_session`
+(it reproduces the exact browser error with a panel file removed). Browser check:
+`npm run build && npm run e2e:drift-lab-w` (`e2e/drift_lab_w.mjs`, against `vite preview`):
+19 / 19 pass. It checks the lab, the default car and title, plain steering and ride defaults,
+the assists, the sliders, that a held key reaches full rack, the readout, the selector for every
+parity car, and no page errors.
+
 ## Merge of lead/drift-lab-c 335eeb3 (raw keys in the sim, clip 3/5 drivers, gate fixes)
 
 - `input.ts`: C's raw keyboard steer (always −1/0/+1) taken; W's `setRawKeyboard` now only

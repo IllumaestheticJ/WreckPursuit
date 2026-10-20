@@ -6,6 +6,7 @@ Parity-only cars with the owner's reference-car numbers (docs/reference/wreckfes
 suspension, brakes, geometry, lattice) comes from the nearest roster car, scaled with mass so
 ride frequencies and brake decel stay as in the template. Analogue names only (rule 9). They
 are NOT in the player roster: data/cars/parity/ is not scanned by the roster loaders.
+Also copies the template's panel spec and render mesh to data/panels/{,meshes/}<id>.json.
 
 Run from the repo root: python3 tools/parity/build_parity_cars.py
 """
@@ -110,6 +111,21 @@ def build(spec):
     return car, pk
 
 
+def copy_panels(spec):
+    """Panel spec + render mesh of the template car under the parity id (the browser loads
+    data/panels/<car>.json for damage panels and data/panels/meshes/<car>.json for the body).
+    Same lattice, so the template's node indices are valid as they are."""
+    for sub in ("", "meshes"):
+        src = os.path.join(ROOT, "data", "panels", sub, spec["template"] + ".json")
+        dst = os.path.join(ROOT, "data", "panels", sub, spec["id"] + ".json")
+        with open(src) as f:
+            text = f.read()
+        head = f'"id": "{spec["template"]}"'
+        assert head in text[:200], src
+        with open(dst, "w") as f:
+            f.write(text.replace(head, f'"id": "{spec["id"]}"', 1))
+
+
 def main():
     out = os.path.join(ROOT, "data", "cars", "parity")
     os.makedirs(out, exist_ok=True)
@@ -118,6 +134,7 @@ def main():
         with open(os.path.join(out, spec["id"] + ".json"), "w") as f:
             json.dump(car, f, indent=2, ensure_ascii=False)
             f.write("\n")
+        copy_panels(spec)
         print(f"{spec['id']}: peak {pk:.0f} kW, {pk * 1000 / spec['mass_kg']:.0f} W/kg")
 
 

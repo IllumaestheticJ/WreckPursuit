@@ -94,6 +94,7 @@ export class DriftLabWPanel {
       "position:absolute;left:272px;top:196px;z-index:30;font:12px/1.35 system-ui,sans-serif;color:#eee;pointer-events:auto;max-width:min(330px,calc(100vw - 24px));display:none";
     const btn = document.createElement("button");
     btn.textContent = "tune";
+    btn.id = "drift-w-tune";
     btn.title = `${DRIFT_LAB_W_TITLE}: plain steering constants and the test car`;
     btn.onclick = () => {
       this.open = !this.open;

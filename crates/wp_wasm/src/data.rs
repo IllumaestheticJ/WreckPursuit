@@ -136,3 +136,20 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod parity_session_tests {
+    use super::*;
+
+    /// Drift Lab W in the browser: a free-drive session with each parity car starts (car,
+    /// panels and all), as `?drift=w` does.
+    #[test]
+    fn parity_cars_start_a_free_drive_session() {
+        for id in parity_car_ids() {
+            let sc = crate::scenario::free_drive(&id, DamageMode::Arcade, false);
+            let mut s =
+                crate::session::Session::new(sc, false).unwrap_or_else(|e| panic!("{id}: {e}"));
+            s.step(1.0 / 60.0);
+        }
+    }
+}
