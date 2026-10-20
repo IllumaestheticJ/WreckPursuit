@@ -521,6 +521,7 @@ async function main(): Promise<void> {
     scene.updatePoliceUnits(sim.policeUnits(), tS);
     const wi = sim.worldInfo();
     scene.setTimeOfDay(wi[W.night]);
+    scene.updateHelicopterBeams(sim.policeHelicopters(), wi[W.night]);
     scene.signals.update(sim.signalStates(), wi[W.night]);
 
     const focusView = app.views.get(app.focus) ?? null;

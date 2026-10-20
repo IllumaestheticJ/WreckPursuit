@@ -26,6 +26,104 @@ const AGENT_SCALE = new THREE.Vector3(1.8, 4.4, 1.4);
 const tmpAgentColour = new THREE.Color();
 /** Floats per unit in police_units(). */
 const POLICE_UNIT_STRIDE = 6;
+/** Floats per helicopter in police_helicopters(). */
+const HELO_STRIDE = 8;
+/** The spotlight is on from this night factor (0 noon … 1 midnight). */
+const SPOTLIGHT_NIGHT = 0.35;
+
+interface PoliceCarView {
+  obj: THREE.Group;
+  red: THREE.MeshStandardMaterial;
+  blue: THREE.MeshStandardMaterial;
+}
+
+interface HeloAirframe {
+  obj: THREE.Group;
+  rotor: THREE.Object3D;
+  tailRotor: THREE.Object3D;
+  nav: THREE.MeshStandardMaterial;
+}
+
+interface HeloBeam {
+  light: THREE.SpotLight;
+  /** Visible beam: unit cone (apex at the origin, opening along +Z), scaled to length/radius. */
+  cone: THREE.Mesh;
+  /** Pool of light on the ground at the aim point. */
+  pool: THREE.Mesh;
+}
+
+/** Police helicopter: fuselage, tail boom, skids, main + tail rotor, a blinking nav light. */
+function makeHelicopter(): HeloAirframe {
+  const g = new THREE.Group();
+  const body = new THREE.MeshStandardMaterial({ color: 0x1d2433 });
+  const white = new THREE.MeshStandardMaterial({ color: 0xe9ebf0 });
+  const glass = new THREE.MeshStandardMaterial({ color: 0x223344, emissive: 0x0a1220 });
+  const fuselage = new THREE.Mesh(new THREE.BoxGeometry(2.2, 5.0, 2.2), body);
+  fuselage.position.set(0, 0.5, 1.6);
+  const stripe = new THREE.Mesh(new THREE.BoxGeometry(2.25, 4.0, 0.4), white);
+  stripe.position.set(0, 0.3, 1.4);
+  const nose = new THREE.Mesh(new THREE.BoxGeometry(1.9, 1.4, 1.5), glass);
+  nose.position.set(0, 3.4, 1.4);
+  const boom = new THREE.Mesh(new THREE.BoxGeometry(0.5, 5.5, 0.5), body);
+  boom.position.set(0, -4.6, 2.1);
+  const fin = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.9, 1.6), body);
+  fin.position.set(0, -7.2, 2.7);
+  const skidGeo = new THREE.BoxGeometry(0.15, 5.0, 0.15);
+  const skidL = new THREE.Mesh(skidGeo, white);
+  skidL.position.set(-1.2, 0.5, 0.1);
+  const skidR = new THREE.Mesh(skidGeo, white);
+  skidR.position.set(1.2, 0.5, 0.1);
+  const rotor = new THREE.Group();
+  const bladeMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+  for (let k = 0; k < 2; k++) {
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(10.5, 0.35, 0.06), bladeMat);
+    blade.rotation.z = (k * Math.PI) / 2;
+    rotor.add(blade);
+  }
+  rotor.position.set(0, 0.5, 2.95);
+  const tailRotor = new THREE.Group();
+  const tb = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.2, 1.8), bladeMat);
+  tailRotor.add(tb);
+  tailRotor.position.set(0.3, -7.2, 2.9);
+  const nav = new THREE.MeshStandardMaterial({ color: 0x400000, emissive: 0x000000 });
+  const beacon = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.25, 0.25), nav);
+  beacon.position.set(0, -1.2, 2.8);
+  g.add(fuselage, stripe, nose, boom, fin, skidL, skidR, rotor, tailRotor, beacon);
+  return { obj: g, rotor, tailRotor, nav };
+}
+
+function makeBeam(parent: THREE.Object3D): HeloBeam {
+  const light = new THREE.SpotLight(0xf4f1e0, 0, 0, 0.12, 0.35, 0);
+  parent.add(light, light.target);
+  // Unit cone: apex at the origin, opening along +Z (lookAt's axis), length 1, base radius 1.
+  // Three's cone has its apex at +Y 0.5; rotating -90° about X puts it at -Z 0.5.
+  const geo = new THREE.ConeGeometry(1, 1, 24, 1, true);
+  geo.rotateX(-Math.PI / 2);
+  geo.translate(0, 0, 0.5);
+  const cone = new THREE.Mesh(
+    geo,
+    new THREE.MeshBasicMaterial({
+      color: 0xfff6d8,
+      transparent: true,
+      opacity: 0.07,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
+  );
+  const pool = new THREE.Mesh(
+    new THREE.CircleGeometry(1, 32),
+    new THREE.MeshBasicMaterial({
+      color: 0xfff6d8,
+      transparent: true,
+      opacity: 0.22,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    }),
+  );
+  parent.add(cone, pool);
+  return { light, cone, pool };
+}
 
 export class SceneView {
   readonly renderer: THREE.WebGLRenderer;
@@ -39,7 +137,12 @@ export class SceneView {
   contactsSeen = 0;
   private readonly intentGroup = new THREE.Group();
   private readonly cities = new Map<string, THREE.Object3D>();
-  private readonly policeUnits: { obj: THREE.Group; red: THREE.MeshStandardMaterial; blue: THREE.MeshStandardMaterial }[] = [];
+  private readonly policeUnits: PoliceCarView[] = [];
+  private readonly helicopters: HeloAirframe[] = [];
+  private readonly beams: HeloBeam[] = [];
+  /** Helicopters drawn last frame and spotlights lit (for automation). */
+  helicoptersShown = 0;
+  spotlightsLit = 0;
   private readonly agentMesh = new THREE.InstancedMesh(
     new THREE.BoxGeometry(1, 1, 1),
     new THREE.MeshStandardMaterial({ color: 0xffffff }),
@@ -135,37 +238,103 @@ export class SceneView {
 
   /**
    * Draw police units that are not sim vehicles (police_units(): [x, y, z, yaw, speed, flags],
-   * flags 1 helicopter, 2 pursuing). Cars get a flashing light bar while pursuing.
+   * flags 1 helicopter, 2 pursuing). Cars get a flashing light bar while pursuing; helicopters
+   * are drawn as an airframe with a spinning rotor and a blinking beacon.
    */
   updatePoliceUnits(units: Float32Array, timeS: number): void {
     const n = units.length / POLICE_UNIT_STRIDE;
-    while (this.policeUnits.length < n) {
-      const g = new THREE.Group();
-      const body = new THREE.Mesh(new THREE.BoxGeometry(1.9, 4.8, 1.4), new THREE.MeshStandardMaterial({ color: 0xe9ebf0 }));
-      body.position.z = 0.7;
-      const red = new THREE.MeshStandardMaterial({ color: 0x661018 });
-      const blue = new THREE.MeshStandardMaterial({ color: 0x102266 });
-      const barR = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.25, 0.12), red);
-      barR.position.set(-0.32, -0.1, 1.48);
-      const barB = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.25, 0.12), blue);
-      barB.position.set(0.32, -0.1, 1.48);
-      g.add(body, barR, barB);
-      this.world.add(g);
-      this.policeUnits.push({ obj: g, red, blue });
-    }
-    this.policeUnits.forEach((u, i) => {
-      u.obj.visible = i < n;
-      if (i >= n) return;
+    let cars = 0;
+    let helos = 0;
+    for (let i = 0; i < n; i++) {
       const o = i * POLICE_UNIT_STRIDE;
+      const flags = units[o + 5];
+      if (flags & 1) {
+        if (this.helicopters.length <= helos) {
+          const h = makeHelicopter();
+          this.world.add(h.obj);
+          this.helicopters.push(h);
+        }
+        const h = this.helicopters[helos++];
+        h.obj.visible = true;
+        h.obj.position.set(units[o], units[o + 1], units[o + 2]);
+        h.obj.rotation.z = units[o + 3];
+        // Rotor speed is a look, not a simulation: about 6 rev/s main, 30 rev/s tail.
+        h.rotor.rotation.z = (timeS * 38) % (Math.PI * 2);
+        h.tailRotor.rotation.x = (timeS * 190) % (Math.PI * 2);
+        h.nav.emissive.setHex((timeS + i * 0.3) % 1 < 0.12 ? 0xff2020 : 0x000000);
+        continue;
+      }
+      if (this.policeUnits.length <= cars) {
+        const g = new THREE.Group();
+        const body = new THREE.Mesh(new THREE.BoxGeometry(1.9, 4.8, 1.4), new THREE.MeshStandardMaterial({ color: 0xe9ebf0 }));
+        body.position.z = 0.7;
+        const red = new THREE.MeshStandardMaterial({ color: 0x661018 });
+        const blue = new THREE.MeshStandardMaterial({ color: 0x102266 });
+        const barR = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.25, 0.12), red);
+        barR.position.set(-0.32, -0.1, 1.48);
+        const barB = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.25, 0.12), blue);
+        barB.position.set(0.32, -0.1, 1.48);
+        g.add(body, barR, barB);
+        this.world.add(g);
+        this.policeUnits.push({ obj: g, red, blue });
+      }
+      const u = this.policeUnits[cars++];
+      u.obj.visible = true;
       u.obj.position.set(units[o], units[o + 1], units[o + 2]);
       u.obj.rotation.z = units[o + 3];
-      const flags = units[o + 5];
-      u.obj.scale.setScalar(flags & 1 ? 1.4 : 1); // helicopters: bigger box at altitude
       const chasing = (flags & 2) !== 0;
       const phase = (timeS * 2.5 + i * 0.17) % 1;
       u.red.emissive.setHex(chasing && phase < 0.5 ? 0xff2040 : 0x000000);
       u.blue.emissive.setHex(chasing && phase >= 0.5 ? 0x2060ff : 0x000000);
+    }
+    for (let k = cars; k < this.policeUnits.length; k++) this.policeUnits[k].obj.visible = false;
+    for (let k = helos; k < this.helicopters.length; k++) this.helicopters[k].obj.visible = false;
+    this.helicoptersShown = helos;
+  }
+
+  /**
+   * Helicopter spotlights (police_helicopters(): [x, y, z, aimX, aimY, aimZ, coneHalfAngle,
+   * flags], flag 1 = has visual). At night each tracking helicopter lights its target: a real
+   * spot light, a faint visible beam and a pool on the road. Without visual the beam stays on
+   * the last known position, dimmer, so the player can see that the helicopter has lost them.
+   */
+  updateHelicopterBeams(helos: Float32Array, night: number): void {
+    const n = helos.length / HELO_STRIDE;
+    while (this.beams.length < n) this.beams.push(makeBeam(this.world));
+    const on = night >= SPOTLIGHT_NIGHT;
+    let lit = 0;
+    const from = new THREE.Vector3();
+    const to = new THREE.Vector3();
+    this.beams.forEach((b, i) => {
+      const show = on && i < n;
+      b.light.visible = b.cone.visible = b.pool.visible = show;
+      if (!show) {
+        b.light.intensity = 0;
+        return;
+      }
+      lit++;
+      const o = i * HELO_STRIDE;
+      from.set(helos[o], helos[o + 1], helos[o + 2]);
+      to.set(helos[o + 3], helos[o + 4], helos[o + 5]);
+      const half = helos[o + 6];
+      const visual = (helos[o + 7] & 1) !== 0;
+      const k = Math.min(1, (night - SPOTLIGHT_NIGHT) / 0.3) * (visual ? 1 : 0.45);
+      b.light.position.copy(from);
+      b.light.target.position.copy(to);
+      b.light.target.updateMatrixWorld();
+      b.light.angle = half;
+      b.light.intensity = 6 * k;
+      const len = from.distanceTo(to);
+      const r = Math.tan(half) * len;
+      b.cone.position.copy(from);
+      b.cone.lookAt(this.world.localToWorld(to.clone()));
+      b.cone.scale.set(r, r, len);
+      (b.cone.material as THREE.MeshBasicMaterial).opacity = 0.07 * k;
+      b.pool.position.set(to.x, to.y, to.z + 0.08);
+      b.pool.scale.setScalar(r);
+      (b.pool.material as THREE.MeshBasicMaterial).opacity = 0.22 * k;
     });
+    this.spotlightsLit = lit;
   }
 
   /** Draw civilian traffic from traffic_agents() ([x, y, z, yaw, flags] per agent). */

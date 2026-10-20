@@ -171,6 +171,8 @@ export const sim = {
   /** Wanted level / heat for a racer, or null when the session has no police. */
   /** Police units that are not sim vehicles: [x, y, z, yaw, speed, flags] each. */
   policeUnits: (): Float32Array => wasm.police_units(),
+  /** Tracking helicopters: [x, y, z, aimX, aimY, aimZ, coneHalfAngle, flags (1 visual)] each. */
+  policeHelicopters: (): Float32Array => wasm.police_helicopters(),
   policeStatus: (entity: number): PoliceStatus | null => JSON.parse(wasm.police_status(entity)),
   stateHash: (): string => wasm.state_hash(),
   latticeNodes: (entity: number): Float32Array => wasm.lattice_nodes(entity),
@@ -216,6 +218,8 @@ export const sim = {
   debugSetHeat: (entity: number, heat: number): void => wasm.debug_set_heat(entity, heat),
   /** Debug / e2e: park `entity` stopped `aheadM` in front of the first police car (throws if none yet). */
   debugParkNearPolice: (entity: number, aheadM: number): number => wasm.debug_park_near_police(entity, aheadM),
+  /** Put a police helicopter on a pursued racer now, offsetM away at altitude. Returns its unit id. */
+  debugLaunchHelicopter: (entity: number, offsetM: number): number => wasm.debug_launch_helicopter(entity, offsetM),
 };
 
 export type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";

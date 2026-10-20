@@ -621,3 +621,15 @@ Testbed: `src/ui/runEnd.tsx` (`RunEndView`, kit `Panel` / `Button` / `Money` / `
 `restartRun()`, both on `window.__wp`. `e2e/run.mjs`: a real capture (player parked in front of a
 patrol car at heat 30) → panel + bill → click **Repair & continue** → health 1.0, cash = after −
 cost, panel closed. C: the stubbed banner check and `ChaseEndDetector` are untouched.
+
+
+## Lead helper note (P9 helicopter, 2026-10-20)
+
+- `wp_wasm::police_helicopters()` → 8 floats per tracking helicopter `[x, y, z, aimX, aimY,
+  aimZ, coneHalfAngle, flags]` (flag 1 = has visual). Airframes still come from `police_units()`
+  (flag 1).
+- `scene.ts`: helicopters are drawn as an airframe (fuselage, boom, skids, spinning main and tail
+  rotor, blinking beacon) instead of a scaled car box; `updateHelicopterBeams` adds a night
+  spotlight (`SpotLight`, faint additive beam cone, light pool on the road) from night factor
+  0.35, dimmed to 45 % while the helicopter has lost visual (it stays on the last known spot).
+  `scene.helicoptersShown` / `scene.spotlightsLit` for automation.
