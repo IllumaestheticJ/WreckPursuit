@@ -643,3 +643,17 @@ loop, the substep tyre selection and the probe width. Its bar scales multiply on
 ## Contract change requests
 
 None.
+
+## Golden bless after the W re-merge (93b9a13d)
+
+8 simcli goldens failed on the merged base: `cars_beater_hard_turn`, `parity_rampart_counter_drift`,
+`parity_shiro_handbrake_10mph`, `police_sideswipe_patrol_{day,night}`, `regression_grid_24`,
+`smoke_coupe_circle`, `vehicle_coupe_slalom`. Not keyboard-only (AI, wheel, gamepad, custom
+assists), so the cause was traced before blessing:
+
+- 5 held W's hashes (W physics, no probe tilt fix); 3 held round12's (probe fix, round12 physics).
+  This branch is the first to combine W's physics with round12's `ground::discount_tilt`.
+- Proof: with `discount_tilt` switched off for one run and W's 8 golden files in place, all 8
+  match W's blessed hashes exactly. The probe fix is the only cause, and it is intended
+  (round12 7a1f3f75, already blessed there).
+- After `--bless`: only those 8 files changed; goldens 109/109; `cargo test -p simcli` green.
