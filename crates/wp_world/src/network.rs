@@ -19,7 +19,10 @@ pub const ROAD_MAGIC: [u8; 4] = *b"WPRD";
 /// Version of the road format. Bump on any layout change.
 /// v2 (city v2): road surfaces, terrain heightfield, building base heights.
 /// v3 (tunnels, backlog B04): covered spans ([`RoadNetwork::covered`]).
-pub const ROAD_FORMAT_VERSION: u32 = 3;
+/// v4 (residential streets, playtest rows 94–95): building kind and roof
+/// ([`Building::kind`], [`Building::roof`], [`Building::roof_rise_m`]) and street / yard
+/// furniture ([`RoadNetwork::decor`]).
+pub const ROAD_FORMAT_VERSION: u32 = 4;
 
 /// Index into [`RoadNetwork::nodes`].
 pub type NodeId = u32;
@@ -72,6 +75,11 @@ pub struct RoadNetwork {
     /// in or out of them (see [`crate::covered`]). Empty for cities without any.
     #[serde(default)]
     pub covered: Vec<CoveredSpan>,
+    /// Street and yard furniture: street trees, yard trees, hedges, fences, driveways
+    /// ([`Decor`]). Trees, hedges and fences are solid (`wp_sim` colliders); driveways are
+    /// drawn only.
+    #[serde(default)]
+    pub decor: Vec<Decor>,
 }
 
 /// What kind of cover a [`CoveredSpan`] is (drawing and radio flavour; line of sight treats
@@ -350,22 +358,140 @@ pub struct Poi {
     pub lane: Option<LaneId>,
 }
 
+/// What a building is (drawing: windows, materials).
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
+)]
+pub enum BuildingKind {
+    /// Generic block (offices, flats, warehouses).
+    #[default]
+    Block,
+    /// Detached or semi-detached house.
+    House,
+    /// Garage (detached, or the attached garage wing of a house).
+    Garage,
+    /// Corner shop in a residential district.
+    Shop,
+}
+
+/// Roof shape over a building's walls.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
+)]
+pub enum RoofShape {
+    /// Flat roof at the wall top.
+    #[default]
+    Flat,
+    /// Gable: a ridge along the footprint's longer axis (footprint must be a rectangle).
+    Gable,
+    /// Hip: four slopes, a shortened ridge along the longer axis (rectangle footprint).
+    Hip,
+}
+
 /// A building footprint extruded to a height.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Building {
     /// Footprint polygon (counter-clockwise), m.
     pub footprint: Vec<[f32; 2]>,
-    /// Roof height above `base_z_m`, m.
+    /// Wall (eave) height above `base_z_m`, m.
     pub height_m: f32,
     /// Ground height the walls start from (lowest ground under the footprint), m.
     pub base_z_m: f32,
+    /// What the building is.
+    #[serde(default)]
+    pub kind: BuildingKind,
+    /// Roof shape over the walls.
+    #[serde(default)]
+    pub roof: RoofShape,
+    /// Ridge height above the wall top for a pitched roof, m (0 for flat).
+    #[serde(default)]
+    pub roof_rise_m: f32,
 }
 
 impl Building {
-    /// Absolute roof height, m.
+    /// A flat-roofed block (the pre-v4 building).
+    pub fn block(footprint: Vec<[f32; 2]>, height_m: f32, base_z_m: f32) -> Self {
+        Self {
+            footprint,
+            height_m,
+            base_z_m,
+            kind: BuildingKind::Block,
+            roof: RoofShape::Flat,
+            roof_rise_m: 0.0,
+        }
+    }
+
+    /// Absolute wall-top (eave) height, m: what line of sight and the police feelers use.
     pub fn roof_z(&self) -> f32 {
         self.base_z_m + self.height_m
     }
+
+    /// Absolute top of the roof (ridge for pitched roofs), m.
+    pub fn ridge_z(&self) -> f32 {
+        match self.roof {
+            RoofShape::Flat => self.roof_z(),
+            RoofShape::Gable | RoofShape::Hip => self.roof_z() + self.roof_rise_m,
+        }
+    }
+
+    /// Ridge line (two points at [`Building::ridge_z`]) of a pitched roof over a rectangular
+    /// footprint, along its longer axis; `None` for flat roofs or other footprints. A hip
+    /// roof's ridge is shortened by the short side's width at each end.
+    pub fn ridge(&self) -> Option<[[f32; 3]; 2]> {
+        if self.roof == RoofShape::Flat || self.footprint.len() != 4 {
+            return None;
+        }
+        let f = &self.footprint;
+        let d = |a: [f32; 2], b: [f32; 2]| ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt();
+        let mid = |a: [f32; 2], b: [f32; 2]| [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5];
+        // Ridge between the midpoints of the two short sides.
+        let (e0, e1, short) = if d(f[0], f[1]) <= d(f[1], f[2]) {
+            (mid(f[0], f[1]), mid(f[2], f[3]), d(f[0], f[1]))
+        } else {
+            (mid(f[1], f[2]), mid(f[3], f[0]), d(f[1], f[2]))
+        };
+        let (a, b) = if self.roof == RoofShape::Hip {
+            let len = d(e0, e1).max(1e-3);
+            let k = (short * 0.5 / len).min(0.45);
+            (
+                [e0[0] + (e1[0] - e0[0]) * k, e0[1] + (e1[1] - e0[1]) * k],
+                [e1[0] + (e0[0] - e1[0]) * k, e1[1] + (e0[1] - e1[1]) * k],
+            )
+        } else {
+            (e0, e1)
+        };
+        let z = self.ridge_z();
+        Some([[a[0], a[1], z], [b[0], b[1], z]])
+    }
+}
+
+/// Kind of street / yard furniture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum DecorKind {
+    /// Street tree on a grass verge (trunk + crown; the trunk is solid).
+    StreetTree,
+    /// Tree in a front or back yard (trunk + crown; the trunk is solid).
+    YardTree,
+    /// Low hedge along a front lot line (solid box).
+    Hedge,
+    /// Low fence along a front or side lot line (solid box).
+    Fence,
+    /// Paved driveway from the sidewalk to a garage (drawn only; level with the yard).
+    Driveway,
+}
+
+/// One piece of street / yard furniture: an oriented box standing on the ground.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Decor {
+    /// Kind.
+    pub kind: DecorKind,
+    /// Centre of the base (ground point), m.
+    pub pos: [f32; 3],
+    /// Yaw about +Z (0 = the box's length along +Y), rad.
+    pub yaw: f32,
+    /// Full size: width (local X), length (local Y), height, m. Trees: crown diameter,
+    /// crown diameter, total height.
+    pub size: [f32; 3],
 }
 
 /// Errors loading or validating a road network.

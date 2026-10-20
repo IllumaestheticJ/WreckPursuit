@@ -262,7 +262,8 @@ fn multi_lane_road_changes_lane_around_a_stopped_car() {
             l.kind == LaneKind::Through
                 && l.left.is_some()
                 && l.right.is_none()
-                && len_of(&net, *i) > 90.0
+                // A full block (89 m between the arterial junctions since the medians).
+                && len_of(&net, *i) > 80.0
         })
         .map(|(i, _)| i)
         .min_by(|&a, &b| {

@@ -287,6 +287,7 @@ impl Built {
             surfaces: self.surfaces,
             terrain: None,
             covered: Vec::new(),
+            decor: Vec::new(),
         }
     }
 }
