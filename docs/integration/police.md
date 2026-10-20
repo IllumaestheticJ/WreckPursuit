@@ -351,3 +351,30 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
 4. Flip `scenarios/soak/traffic_soak_observer.ron` back to `police_cars: true` if your fix stops patrols ramming stopped cars, then tell I to promote the gate.
 
 5. **Parked test (lead, round 8):** see economy.md item 5. A stationary wanted racer, 3 am, `internal_driving: true`, is never found or captured with your round-6 changes (it was on ws/economy alone). Decide whether that is intended (no report → no search) and tell G.
+
+## Playtest fix (2026-10-20): cops stuck at spawn / sirens on but no chase
+Owner report (with screenshot, Port Vesper v2 city chase at 23:14): "cops get spawned into stuck spots, and with sirens on they aren't engaging a chase when they see you or see you doing something illegal". Playtest rows 24, 33 and 34.
+
+Root causes, measured in a 180 s headless Vesper city chase:
+1. **Sightlines started underground.** `PoliceSystem::sees` put both eyes at z = 1.3 m, but Vesper has terrain, and since city v2 `CityMap::line_of_sight` treats terrain as an occluder. Wherever the ground was above about 1.5 m (most of the city; the player's start is at 13 m), no unit could see anyone: 19 of 19 checks within 150 m were blocked. Fix: the eye height is now measured above the terrain at each end (`PoliceSystem::ground_z`, from the world's heightfield, which `for_world` keeps). The helicopter sightline is now terrain-relative too, matching how the testbed draws it (`ground + alt_m`). Flat cities have no heightfield, so nothing changes there.
+2. **Witnessing a violation never started a chase.** A pursuit started only after the racer reached wanted level 1 (heat 10) *and* a unit kept them within recognition range (40 m at night) for the recognition time (4 s at night). A first violation in front of a cop is 2–8 heat, so it never got there. Fixes:
+   - a violation that a ground unit watches (line of sight, within `witness_range_m` and `recognition_range_m`: 160 m by day, 40 m at night) raises heat to at least level 1 and starts the pursuit with that unit (`PoliceSystem::engage`). Cameras only add heat and call it in, as before;
+   - a unit responding to a report about a racer engages once it has that racer in sight within the same range (a siren-on responder now "sees you");
+   - a racer hitting a police unit at ≥ 3 m/s relative speed counts as a witnessed collision and starts the pursuit (row 24, "sideswiped a cop and no chase started"). Before, it only cost the unit risk budget. This applies to physical contacts only (`SimEvent::Contact`). The built-in driver's 2.4 m proximity "contacts" are too coarse and would start chases from cars passing at a junction.
+
+   Effect on the prompt-06 day/night scenarios: pursuit start is 5.5 s by day and 37.9 s at night (ratio 6.8, still ≥ 3). `night_core_speeder.ron`'s floor drops from 60 s to 30 s.
+3. **Units pinned against walls and parked cars with the throttle down, forever.** Five patrols spent 51–172 s of 180 s stuck. There were two causes:
+   - on curved roads, `wp_world::RoadNetworkIndex`'s edge "centreline" was made of the *first lane's* bends, which sit half a lane right of the centre. Police drive `LANE_OFFSET_M` (1.75 m) right of that line, so they drove along the parking lane's edge into the parked cars. Fix (in `wp_world`, see below): use the road surface's real centreline for interior bends;
+   - the police driver had no way out once pinned. `unit_input` now backs out: after 2 s with the throttle down and below 0.8 m/s, it reverses for 1.8 s with the wheel turned the other way, then carries on (the same move as `wp_opponent`'s `Tactic::Reverse`).
+
+   Total stuck time across the 5 patrols fell from 532 s to 76 s, and that remainder also counts waits at red lights.
+
+Tests: `wp_police/tests/system.rs` → `hitting_a_police_car_starts_a_pursuit`, `a_witnessed_violation_starts_a_pursuit`; `wp_wasm/src/police_tests.rs` (Port Vesper v2) → `vesper_cop_chases_a_racer_speeding_in_front_of_it`, `vesper_patrol_cars_do_not_stay_stuck`.
+
+Changes outside `wp_police`:
+- `crates/wp_world/src/roads.rs` (D): `RoadGraphView::from_map` builds edge polylines from the matching `RoadSurface::centre` (oriented a → b), and falls back to the first lane's bends when a network has no surfaces. `wp_police` is the only consumer of `RoadNetworkIndex` polylines.
+- `crates/wp_wasm/src/police_tests.rs` (new, test-only) and its `mod` line in `crates/wp_wasm/src/lib.rs`.
+- `crates/wp_race/tests/race_police.rs` (race workstream, test-only): pursuits started by the meet report itself are now recorded (a patrol watching the grid engages on the report). The control run became `without_the_meet_report_the_chase_starts_later`: racers speeding past a patrol may now be chased without a report, but later than with one. The header of `apps/simcli/scenarios/race/city_sprint_police.ron` says so.
+- Goldens re-blessed (`[bless]` commit): `race_city_sprint`, `opponent_circuit_8x5`, `opponent_flee_police`, `opponent_open_roads_traffic`, `opponent_reverse_grid_2laps`, `world_traffic_soak`, `world_traffic_soak_vesper`. On the base commit, a bless changes nothing; all seven move only because of this change.
+
+Still open: spawn clearance (`avoid::spawn_clear`) still checks moving vehicles only, not parked cars or props. With the centreline fix, spawn points sit in the travel lane, so this matters less.

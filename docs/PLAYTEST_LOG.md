@@ -110,7 +110,7 @@ the schedule could hunt (1→2→1). New automatic (`crates/wp_vehicle/README.md
 | 21 | Need a game map HUD with police | M (UI kit): rotating minimap with police dots, sight cones and search zone, plus a full city map (M/Tab) | dispatched |
 | 22 | Brake lights stopped working | lead: the panel meshes hide their own light parts inside the shell; lamp markers kept on, placed at the panel body nose/tail (R to fix light parts in the mesh generator) | fixed on link v12 |
 | 23 | Keys get stuck (a key stays "held") / buttons re-trigger | lead: release all keys on tab switch, context menu, focus into form controls, Cmd (macOS); clicked buttons give focus back, so Space/Enter no longer re-press them | fixed on link v12 |
-| 24 | Sideswiped a cop and no chase started | E (police) | dispatched |
+| 24 | Sideswiped a cop and no chase started | E (police) | fixed on `claude/quirky-fermi-f4mvd2`: a racer hitting a unit at ≥ 3 m/s starts the pursuit with it (see row 34) |
 | 25 | Some cars load their LOD too slowly (pop-in) | helper `lead/fix-lod-popin` (C testbed meshes + D traffic LOD) | dispatched |
 | 26 | Simulate LSDs in certain cars | A (vehicle) + H (car data) | dispatched |
 | 27 | Audio for wheelspin | J (audio) | dispatched |
@@ -119,3 +119,5 @@ the schedule could hunt (1→2→1). New automatic (`crates/wp_vehicle/README.md
 | 30 | Siren audio error broke the frame loop (found by the e2e after row 29) | lead: siren pitch curves no longer overlap (float rounding); a bad curve can no longer stop the page | fixed on link v13 |
 | 31 | Hood does not crumple; headlights stay in place in crashes | R (panels): hood skinning; light parts on the surface and moving with the crush (then the lead drops the lamp markers) | dispatched |
 | 32 | AI cars, when blocked by a stationary vehicle, should go around it or turn around | D (traffic AI) | dispatched |
+| 33 | Cops spawn into stuck spots | police (`claude/quirky-fermi-f4mvd2`) | fixed: on curved roads the police road graph used a lane's bends as the centreline, so cops drove half a lane right, into parked cars (`wp_world` roads view now uses the surface centreline); pinned cops back out after 2 s. Vesper patrol stuck time 532 s → 76 s over 180 s. To playtest |
+| 34 | Cops with sirens on don't engage when they see you or see you break the law | police (`claude/quirky-fermi-f4mvd2`) | fixed: sightlines started 1.3 m above z = 0, under Vesper's hills (now above the terrain); a violation a cop witnesses, or finding the racer it was sent for, starts the chase straight away instead of waiting for wanted level 1 plus 4 s recognition at night. To playtest |
