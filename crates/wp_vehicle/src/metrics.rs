@@ -476,7 +476,30 @@ pub fn power_oversteer_exit(
     lat_g: f32,
     react_s: f32,
 ) -> SlideExit {
+    power_oversteer_exit_tuned(
+        car,
+        assists,
+        style,
+        radius,
+        lat_g,
+        react_s,
+        crate::DriftTuning::default(),
+    )
+}
+
+/// [`power_oversteer_exit`] with an explicit drift-assist tuning (e.g. throttle smoothing 0 to
+/// compare against).
+pub fn power_oversteer_exit_tuned(
+    car: &LoadedCar,
+    assists: &AssistProfile,
+    style: DriverStyle,
+    radius: f32,
+    lat_g: f32,
+    react_s: f32,
+    tuning: crate::DriftTuning,
+) -> SlideExit {
     let mut rig = Rig::new(car);
+    rig.vehicle.set_drift_tuning(tuning);
     let mut follow = CircleFollower::new(radius);
     let v = (lat_g * GRAVITY_MPS2 * radius).sqrt();
     rig.teleport([0.0; 3], 0.0, v, v / radius);
@@ -1456,5 +1479,65 @@ pub fn drift_run(
             && body_slip_deg(&rig).abs() < 15.0
             && yaw_rate(&rig).abs() < 0.5
             && speed(&rig) > 5.0,
+    }
+}
+
+/// Result of [`keyboard_launch`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct KeyboardLaunch {
+    /// Seconds from rest to 100 km/h (`None` if not within 20 s).
+    pub to_100_s: Option<f32>,
+    /// Seconds with a driven wheel's slip ratio more than 50 % past its tyre's peak.
+    pub wheelspin_s: f32,
+}
+
+/// Standing start with the throttle key held (full pedal, automatic gears and clutch), the
+/// steering held straight, under `assists` and `tuning` (owner row 98: keyboard, TCS off).
+pub fn keyboard_launch(
+    car: &LoadedCar,
+    assists: &AssistProfile,
+    tuning: crate::DriftTuning,
+) -> KeyboardLaunch {
+    let mut rig = Rig::new(car);
+    rig.vehicle.set_drift_tuning(tuning);
+    for _ in 0..TICKS_PER_S / 2 {
+        rig.step(&VehicleInput::default(), assists);
+    }
+    let driven: &[usize] = match car.def.drivetrain.layout {
+        wp_contracts::DriveLayout::Fwd => &[0, 1],
+        wp_contracts::DriveLayout::Rwd => &[2, 3],
+        _ => &[0, 1, 2, 3],
+    };
+    let peaks: Vec<f32> = driven
+        .iter()
+        .map(|&i| rig.vehicle.corners[i].tire.peak_slip_ratio)
+        .collect();
+    let mut spin = 0usize;
+    for tick in 0..20 * TICKS_PER_S {
+        rig.step(
+            &VehicleInput {
+                throttle: 1.0,
+                ..Default::default()
+            },
+            assists,
+        );
+        let w = rig.state().wheel_states;
+        if driven
+            .iter()
+            .zip(&peaks)
+            .any(|(&i, p)| w[i].slip_ratio.abs() > 1.5 * p)
+        {
+            spin += 1;
+        }
+        if speed(&rig) >= 100.0 / 3.6 {
+            return KeyboardLaunch {
+                to_100_s: Some((tick + 1) as f32 / TICKS_PER_S as f32),
+                wheelspin_s: spin as f32 / TICKS_PER_S as f32,
+            };
+        }
+    }
+    KeyboardLaunch {
+        to_100_s: None,
+        wheelspin_s: spin as f32 / TICKS_PER_S as f32,
     }
 }

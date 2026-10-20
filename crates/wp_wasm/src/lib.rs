@@ -404,8 +404,9 @@ pub fn drift_tuning(entity: u32) -> Result<Vec<f32>, JsValue> {
     })
 }
 
-/// Drift readout of a vehicle: `[body slip °, assist mode, envelope °]`; mode 0 off,
-/// 1 straighten, 2 catch, 3 hold, 4 exceeded (`wp_vehicle::AssistMode::code`).
+/// Drift readout of a vehicle: `[body slip °, assist mode, envelope °, throttle smoothing in
+/// effect 0..=1]`; mode 0 off, 1 straighten, 2 catch, 3 hold, 4 exceeded
+/// (`wp_vehicle::AssistMode::code`).
 #[wasm_bindgen]
 pub fn drift_state(entity: u32) -> Result<Vec<f32>, JsValue> {
     with(|s| {
@@ -417,6 +418,7 @@ pub fn drift_state(entity: u32) -> Result<Vec<f32>, JsValue> {
             t.body_slip_deg,
             t.assist_mode.code() as f32,
             t.envelope_deg,
+            t.throttle_smoothing,
         ])
     })
 }

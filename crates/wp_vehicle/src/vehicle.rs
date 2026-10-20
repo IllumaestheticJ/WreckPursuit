@@ -31,6 +31,7 @@ use crate::steering::{
 };
 use crate::surface::{conditions_grip, ConditionsSource, SurfaceConditions, TireWetProfile};
 use crate::suspension::{arb_force, static_compression, step_strut, TYRE_STATIC_DEFLECTION_M};
+use crate::throttle::{effective_smoothing, ramp_time_s, traction_trim};
 use crate::tire::{
     combined_forces, load_sensitive_mu, low_speed_lateral, pneumatic_trail, relax, slip_angle,
     slip_ratio, surface_grip, SLIP_RATIO_V_MIN,
@@ -227,9 +228,10 @@ pub struct Telemetry {
     pub assist_mode: AssistMode,
     /// Body slip angle at the CG, degrees (+ = moving toward the left of the heading).
     pub body_slip_deg: f32,
-    /// Slide-angle envelope the assists help within, degrees (row 91; the tuning's value
-    /// scaled by the countersteer help until then).
+    /// Slide-angle envelope the drift hold helps within, degrees (row 91).
     pub envelope_deg: f32,
+    /// Keyboard throttle smoothing in effect, 0..=1 (row 98; 0 with TCS on).
+    pub throttle_smoothing: f32,
 }
 
 /// One simulated vehicle. See the crate docs for the integration contract with Rapier.
@@ -282,6 +284,7 @@ pub struct Vehicle {
     assist_mode: AssistMode,
     body_slip_deg: f32,
     envelope_deg: f32,
+    throttle_smoothing: f32,
 }
 
 impl Vehicle {
@@ -401,6 +404,7 @@ impl Vehicle {
             assist_mode: AssistMode::Off,
             body_slip_deg: 0.0,
             envelope_deg: 0.0,
+            throttle_smoothing: 0.0,
             corners,
         };
         v.converter = def
@@ -496,6 +500,23 @@ impl Vehicle {
     /// Telemetry from the last step.
     pub fn telemetry(&self) -> Telemetry {
         self.telemetry
+    }
+
+    /// Worst driven wheel's slip ratio past its tyre's peak, as a fraction of the peak
+    /// (0 = at or under the peak), from the last tick (throttle smoothing, row 98).
+    fn driven_slip_excess(&self) -> f32 {
+        let driven: &[usize] = match self.def.drivetrain.layout {
+            DriveLayout::Fwd => &[0, 1],
+            DriveLayout::Rwd => &[2, 3],
+            _ => &[0, 1, 2, 3],
+        };
+        driven
+            .iter()
+            .map(|&i| {
+                let peak = self.corners[i].tire.peak_slip_ratio.max(1e-3);
+                (self.wheels[i].kappa.abs() - peak) / peak
+            })
+            .fold(0.0f32, f32::max)
     }
 
     /// Set the drift-assist tuning (dev override for the testbed's drift lab; see
@@ -925,9 +946,28 @@ impl Vehicle {
         };
         // `scale` is exactly 1.0 unless the slide throttle / hold is active (bit-identical
         // otherwise).
-        let scale = st.scale * hold.throttle_scale;
+        // Keyboard throttle smoothing with TCS off (row 98, [`crate::throttle`]).
+        let smoothing = effective_smoothing(assists, self.drift_tuning.throttle_shaping);
+        let trim = if smoothing > 0.0 {
+            traction_trim(
+                smoothing,
+                self.driven_slip_excess(),
+                hold.mode == AssistMode::Hold,
+            )
+        } else {
+            1.0
+        };
+        let scale = st.scale * hold.throttle_scale * trim;
         let thr_target = if scale < 1.0 { thr_in * scale } else { thr_in };
+        let prev_thr = self.throttle_f;
         self.throttle_f = filter_pedal(self.throttle_f, thr_target, st.filter, dt);
+        if smoothing > 0.0 {
+            let ramp = ramp_time_s(smoothing, self.slide_class, self.gearbox.gear, v_fwd);
+            if ramp > 0.0 && self.throttle_f > prev_thr {
+                self.throttle_f = self.throttle_f.min(prev_thr + dt / ramp);
+            }
+        }
+        self.throttle_smoothing = smoothing;
         self.brake_f = filter_pedal(self.brake_f, brk_in, assists.brake_filter, dt);
         let handbrake = input.handbrake.clamp(0.0, 1.0);
         // Handbrake hold for the assists (steering alignment, ESC): on while pulled and for
@@ -1435,6 +1475,7 @@ impl Vehicle {
             assist_mode: self.assist_mode,
             body_slip_deg: self.body_slip_deg,
             envelope_deg: self.envelope_deg,
+            throttle_smoothing: self.throttle_smoothing,
         };
     }
 

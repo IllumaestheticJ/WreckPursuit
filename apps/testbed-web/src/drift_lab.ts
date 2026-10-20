@@ -1,13 +1,14 @@
 // Drift lab (owner rows 90 / 91 / 98): flat asphalt pad, day, no traffic or police, with a
 // painted course (two 90° corners and a long sweeper) and a live tuning panel for the slide
 // assists. The panel writes a runtime override (wp_wasm set_drift_tuning / set_countersteer);
-// it never changes the data files. Its values are kept in localStorage "wp.driftTuning".
+// it never changes the data files. Its values are kept in localStorage "wp.driftTuning.v2".
 import * as THREE from "three";
 import { sim } from "./wasm/sim";
 import { S, STATE_STRIDE } from "./wasm/layout";
 import { store } from "./settings";
 
-const TUNING_KEY = "wp.driftTuning";
+// v2: throttle smoothing went live (row 98); v1 had stored its 0 placeholder.
+const TUNING_KEY = "wp.driftTuning.v2";
 
 /** One tuning slider: index into the set_drift_tuning array (or -1 = countersteer %). */
 interface Knob {
@@ -30,7 +31,7 @@ const KNOBS: Knob[] = [
   { idx: 3, label: "save-lock onset", min: 0.005, max: 0.15, step: 0.005, show: (v) => `${(v * DEG).toFixed(1)}°`, hint: "rear-axle slip where the countersteer lock starts opening" },
   { idx: 4, label: "save-lock full", min: 0.02, max: 0.3, step: 0.005, show: (v) => `${(v * DEG).toFixed(1)}°`, hint: "rear-axle slip where it is fully open" },
   { idx: 5, label: "hold gain", min: 0, max: 3, step: 0.05, show: (v) => v.toFixed(2), hint: "hold mode: countersteer per rad of slide change (resists the angle growing / shrinking)" },
-  { idx: 6, label: "throttle shaping", min: 0, max: 1, step: 0.05, show: (v) => `${(v * 100).toFixed(0)}%`, hint: "(row 98, not active yet) keyboard throttle smoothing with TCS off" },
+  { idx: 6, label: "throttle smoothing", min: 0, max: 1, step: 0.05, show: (v) => `${(v * 100).toFixed(0)}%`, hint: "keyboard throttle smoothing with TCS off (row 98): slower pedal rise in low gears in powerful cars + a small traction trim; 0 = off (default: keyboard 60 %, gamepad 20 %)" },
   { idx: 7, label: "envelope @100%", min: 10, max: 90, step: 1, show: (v) => `${v.toFixed(0)}°`, hint: "slide angle the assist helps within at 100 % (× 0.6 + 0.4 × help); past it the hold lets go" },
 ];
 
@@ -158,18 +159,25 @@ export class DriftLab {
     } catch {
       return;
     }
-    const [slip, mode, env] = d;
+    const [slip, mode, env, thr] = d;
     const m = MODES[Math.round(mode)] ?? "?";
     const colour =
       m === "catch" ? "#ff9f43" : m === "straighten" ? "#2ecc71" : m === "hold" ? "#4aa3ff" : m === "exceeded" ? "#ff4136" : "#aaa";
     this.readout.innerHTML =
-      `slide <b>${Math.abs(slip).toFixed(1)}°</b> · mode <b style="color:${colour}">${m}</b> · envelope ${env.toFixed(0)}°`;
+      `slide <b>${Math.abs(slip).toFixed(1)}°</b> · mode <b style="color:${colour}">${m}</b> · envelope ${env.toFixed(0)}° · thr smoothing ${(thr * 100).toFixed(0)}%`;
   }
 
   /** Fill the sliders from the stored override (or the sim's defaults) and apply. */
   private loadFromSim(defaults: boolean): void {
     const base = sim.driftTuning(this.player);
     const cst = sim.countersteer(this.player);
+    // A negative throttle smoothing = the preset's default (wp_vehicle::throttle::
+    // default_smoothing: keyboard 0.6, gamepad 0.2, wheel 0). It only acts with TCS off; the
+    // readout shows what is in effect.
+    if (base[6] < 0) {
+        const sens = (sim.assists(this.player) as unknown as { steer_speed_sensitivity: number }).steer_speed_sensitivity;
+        base[6] = sens >= 0.95 ? 0.6 : sens > 0 ? 0.2 : 0;
+    }
     let stored: number[] | null = null;
     if (!defaults) {
       try {

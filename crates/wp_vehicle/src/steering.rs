@@ -57,7 +57,7 @@ pub struct SteerInput {
 /// Runtime tuning of the keyboard / gamepad slide assists (owner rows 90 / 91 / 98, the
 /// testbed's drift lab). A dev override set per vehicle (`Vehicle::set_drift_tuning`); it is
 /// not in the car data, not in replays or snapshots, and [`Default`] is exactly the shipped
-/// behaviour. Fields marked "(row 91)" / "(row 98)" are read by those features once they land.
+/// behaviour.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DriftTuning {
     /// Rear-axle slip, rad, where released keys start turning the wheels toward the front
@@ -74,7 +74,8 @@ pub struct DriftTuning {
     pub counter_lock_full_rad: f32,
     /// (row 91) Gain of the "hold" mode that keeps the body slip angle steady.
     pub hold_gain: f32,
-    /// (row 98) Keyboard throttle smoothing with TCS off, 0..=1.
+    /// Keyboard throttle smoothing with TCS off, 0..=1 (row 98, [`crate::throttle`]); negative
+    /// = the preset's default (keyboard 0.6, gamepad 0.2, wheel 0).
     pub throttle_shaping: f32,
     /// (row 91) Slide-angle envelope at countersteer help 100 %, degrees (scaled down with the
     /// slider).
@@ -90,7 +91,7 @@ impl Default for DriftTuning {
             counter_lock_onset_rad: SLIDE_START,
             counter_lock_full_rad: SLIDE_FULL,
             hold_gain: 1.0,
-            throttle_shaping: 0.0,
+            throttle_shaping: -1.0,
             envelope_deg: 45.0,
         }
     }

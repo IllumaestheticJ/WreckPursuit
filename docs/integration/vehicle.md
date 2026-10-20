@@ -1187,3 +1187,50 @@ the trim fade start earlier, or back off on sustained full throttle at > 0.6 × 
 (2) FWD (debug_sedan, junkyard_beater): drifts are shorter with the hold (they straighten),
 as a FWD car pulls out of a slide under power. (3) the keyboard good driver spins in 2 of 18
 RWD cases: its on/off throttle taps cause lift-off snaps.
+
+## Owner row 98, step 3 (A, 2026-10-20) — keyboard throttle smoothing with TCS off
+
+Step 2 of the lead's order (re-measure with only the row-90 steering fix) showed held-throttle
+TCS-off exits unchanged (rows 90 notes), so a light smoothing follows (`wp_vehicle::throttle`),
+only with TCS off and never on the wheel preset:
+
+- **Rise ramp:** pedal 0 → 1 no faster than `s × (0.25 + 0.65 × low-gear × (0.4 + 0.6 × slow) ×
+  power)` s (low-gear 1 in 1st/2nd, 0.5 in 3rd, 0.2 above; slow fades out by 20 m/s; power =
+  the car's slide class, i.e. power-to-weight × RWD share): ~0.87 s for a powerful RWD in 2nd
+  from rest at 100 %, < 0.4 s in 5th. Lifting is never slowed.
+- **Traction trim:** while the worst driven wheel's slip ratio runs past the tyre's peak, the
+  pedal target eases by up to 35 % × s (at twice the peak). Not TCS (no brakes, no cut); off
+  during a drift hold (row 91), so held full throttle in a slide can still spin.
+- **Amount:** `DriftTuning::throttle_shaping` (drift lab "throttle smoothing" slider, readout
+  shows what is in effect); default −1 = the preset's default: keyboard 60 %, gamepad 20 %,
+  wheel 0 (told apart by `steer_speed_sensitivity` until a contract field exists). Drift lab
+  storage key bumped to `wp.driftTuning.v2` (v1 had stored the 0 placeholder).
+
+Measured (`cargo run --release -p wp_vehicle --example throttle`, keyboard preset, TCS / ESC
+off; launch = key held from rest, auto gears; exits = 30 m circle, lat 0.5 / 0.7 g × steering
+held 0.3 / 0.8 / 2 s with full throttle, then released; "held 2 s" = holding W out of the
+corner):
+
+| car | smoothing | 0–100 s | wheelspin s | exits spun / recovered of 6 | held 2 s exits spun |
+|---|---|---|---|---|---|
+| shiro_turbo | 0 (before) | 7.70 | 1.37 | 2 / 4 | 2 of 2 |
+| shiro_turbo | default 60 % | 7.33 | 1.02 | 1 / 5 | 1 of 2 |
+| sperber_32 | 0 (before) | 7.34 | 1.20 | 1 / 5 | 1 of 2 |
+| sperber_32 | default 60 % | 7.05 | 1.25 | 0 / 6 | 0 of 2 |
+| rampart_50 | 0 (before) | 6.96 | 1.45 | 1 / 5 | 1 of 2 |
+| rampart_50 | default 60 % | 6.76 | 1.88 | 0 / 6 | 0 of 2 |
+| hakone_gt | 0 (before) | 7.23 | 1.47 | 1 / 5 | 1 of 2 |
+| hakone_gt | default 60 % | 6.88 | 1.02 | 1 / 5 | 1 of 2 |
+| debug_sedan | 0 (before) | 9.22 | 1.76 | 0 / 6 | 0 of 2 |
+| debug_sedan | default 60 % | 9.47 | 2.50 | 0 / 6 | 0 of 2 |
+
+Held-W exits spun 5 of 10 → 2 of 10 (rampart and sperber no longer spin; shiro and hakone
+still do in one of two), recoveries 25 → 28 of 30, and the launches are 0.2–0.4 s quicker on
+the four quick cars. Wheelspin time is not lower everywhere (rampart 1.45 → 1.88 s, debug_sedan
+1.76 → 2.50 s at a lower slip: the trim holds them near the peak longer instead of cutting).
+
+- **Lead (contracts), request #13:** add `AssistProfile::throttle_smoothing: f32` (0..=1;
+  keyboard 0.6, gamepad 0.2, wheel / AI / sim 0) so the presets carry it and the testbed's
+  assist row can show it next to countersteer (the brief asks for that slider there too; it is
+  only in the drift lab panel for now, since the assist-row overrides are AssistProfile
+  fields). Until then the code derives the default from `steer_speed_sensitivity`.

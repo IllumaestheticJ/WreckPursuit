@@ -1,6 +1,6 @@
 // Drift lab (owner rows 90 / 91 / 98): ?drift=1 opens a flat-world free drive at noon with the
 // painted course and the tuning panel; a slider writes the runtime tuning through wp_wasm and
-// is remembered in wp.driftTuning; the readout shows slide angle and assist mode; F8 hides the
+// is remembered in wp.driftTuning.v2; the readout shows slide angle and assist mode; F8 hides the
 // panel. Saves a screenshot to <tmpdir>/drift_lab.png. `node e2e/drift_lab.mjs`
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -45,8 +45,8 @@ const slew = page.locator("#drift-panel input[type=range]").nth(3);
 await slew.fill("6");
 await slew.dispatchEvent("input");
 check(Math.abs((await tuning())[2] - 6) < 1e-6, "slew boost slider → sim tuning");
-const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("wp.driftTuning") ?? "[]"));
-check(saved.length === 9 && saved[3] === 6, `saved in wp.driftTuning (${JSON.stringify(saved)})`);
+const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("wp.driftTuning.v2") ?? "[]"));
+check(saved.length === 9 && saved[3] === 6, `saved in wp.driftTuning.v2 (${JSON.stringify(saved)})`);
 const cst = page.locator("#drift-panel input[type=range]").nth(0);
 await cst.fill("80");
 await cst.dispatchEvent("input");

@@ -60,6 +60,7 @@ pub mod snapshot;
 pub mod steering;
 pub mod surface;
 pub mod suspension;
+pub mod throttle;
 pub mod tire;
 pub mod vehicle;
 
