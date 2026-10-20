@@ -23,5 +23,6 @@ version shows as a badge in the page corner and in every refresh report.
 | 0.12.14 | preview | AI racer pace (real car limits, junction gaps, traffic passing), siren traffic test re-scoped, round-13 test fixes |
 | 0.12.15 | preview | Physics cost back down (sim-perf), wider roads + residential districts, police turn-round loop fix, police roadblocks + spike strips (physical), reference-style controls settings + parity suite, vehicle drift lab (assists off by default) |
 | 0.12.16 | preview | Brake dive cut (anti-dive geometry + damping on 5 cars), racers on the minimap, AI creeps past parked police, junction permit fix (civilian crash), siren pull-over to the kerb |
-| 0.12.17 | preview | (next) |
+| 0.12.17 | preview | Race grids inside the paved lanes, police give way to racers and look before turning (Hollins hairpin), goldens re-blessed; all race tests green |
+| 0.12.18 | preview | (next) |
 | public demo | demo link | Snapshot of 0.12.3 with a start menu (refreshed only from a green main) |
