@@ -223,8 +223,125 @@ pub enum PlainDriver {
     },
 }
 
+/// Drift-hold metrics, **direction-aware** (the definition shared with `lead/tyre-slip`). From
+/// the per-tick slide angle on the intended side `a` (left-hand corner: `a = −body slip`,
+/// degrees; + = tail out of the turn as intended), up to the first tick with |a| ≥ 90° or
+/// travelling backwards (a spin):
+/// - `drift_s`: time with `a` in 10..=50° (the other side never counts);
+/// - `band_s`: time with `a` in 30..=45° (reference clip 1's band);
+/// - `side_swaps`: times the slide went from the intended side (`a` ≥ 10°) through to the
+///   other side (`a` ≤ −10°) — a swing through, counted as a failure;
+/// - `mean_deg` / `sd_deg`: of `a` while drifting;
+/// - `held`: not spun, no side swap, and `drift_s` ≥ half the run.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HoldMetrics {
+    /// Time on the intended side within 10–50°, s.
+    pub drift_s: f32,
+    /// Time on the intended side within 30–45°, s.
+    pub band_s: f32,
+    /// Swings from the intended side through to the other side.
+    pub side_swaps: usize,
+    /// Mean intended-side angle while drifting, degrees.
+    pub mean_deg: f32,
+    /// Standard deviation of it, degrees.
+    pub sd_deg: f32,
+    /// Spun (|a| ≥ 90° or backwards).
+    pub spun: bool,
+    /// Held: not spun, no side swap, `drift_s` ≥ half of `run_s`.
+    pub held: bool,
+    /// Length of the run, s.
+    pub run_s: f32,
+}
+
+impl HoldMetrics {
+    /// Metrics of intended-side angles `a` (degrees, one per tick) and per-tick "travelling
+    /// backwards" flags.
+    pub fn from_angles(a: &[f32], backwards: &[bool]) -> Self {
+        use wp_contracts::PHYSICS_DT;
+        let (mut drift, mut band, mut swaps) = (0usize, 0usize, 0usize);
+        let (mut sum, mut sum2) = (0.0f32, 0.0f32);
+        let mut spun = false;
+        let mut on_side = false;
+        for (k, &x) in a.iter().enumerate() {
+            if x.abs() >= 90.0 || backwards.get(k).copied().unwrap_or(false) {
+                spun = true;
+                break;
+            }
+            if (10.0..=50.0).contains(&x) {
+                drift += 1;
+                sum += x;
+                sum2 += x * x;
+            }
+            if (30.0..=45.0).contains(&x) {
+                band += 1;
+            }
+            if x >= 10.0 {
+                on_side = true;
+            } else if x <= -10.0 && on_side {
+                swaps += 1;
+                on_side = false;
+            }
+        }
+        let (mean, sd) = if drift > 0 {
+            let m = sum / drift as f32;
+            (m, (sum2 / drift as f32 - m * m).max(0.0).sqrt())
+        } else {
+            (0.0, 0.0)
+        };
+        let run_s = a.len() as f32 * PHYSICS_DT;
+        let drift_s = drift as f32 * PHYSICS_DT;
+        Self {
+            drift_s,
+            band_s: band as f32 * PHYSICS_DT,
+            side_swaps: swaps,
+            mean_deg: mean,
+            sd_deg: sd,
+            spun,
+            held: !spun && swaps == 0 && drift_s >= 0.5 * run_s,
+            run_s,
+        }
+    }
+
+    /// One table cell: `drift s / band s / mean ° sd ° / outcome`.
+    pub fn cell(&self) -> String {
+        let outcome = if self.spun {
+            "SPUN".to_string()
+        } else if self.side_swaps > 0 {
+            format!("SWAPPED ×{}", self.side_swaps)
+        } else if self.held {
+            "**held**".to_string()
+        } else {
+            "no hold".to_string()
+        };
+        format!(
+            "{:.1} / {:.1} / {:.0}° sd {:.1} / {outcome}",
+            self.drift_s, self.band_s, self.mean_deg, self.sd_deg
+        )
+    }
+}
+
+/// [`plain_drift_run`] scored with [`HoldMetrics`].
+pub fn plain_hold(
+    car: &LoadedCar,
+    assists: &AssistProfile,
+    driver: PlainDriver,
+    radius: f32,
+    lat_g: f32,
+) -> HoldMetrics {
+    use crate::drift_lab::slide_state;
+    let (mut a, mut back) = (Vec::with_capacity(1440), Vec::with_capacity(1440));
+    plain_drift_run_with(car, assists, driver, radius, lat_g, |rig, _, _| {
+        let s = slide_state(rig);
+        a.push(-s.body_slip.to_degrees());
+        back.push(s.v_fwd < 0.0);
+    });
+    HoldMetrics::from_angles(&a, &back)
+}
+
 /// Like [`crate::drift_lab::drift_run`] (40 m circle at `lat_g`, left-hand, 6 s) with a
 /// [`PlainDriver`]; also reports key changes per second (how busy the driver's hands are).
+/// `drift_s`, `longest_s`, `mean_deg`, `sd_deg` count the intended side only (see
+/// [`HoldMetrics`]; [`plain_hold`] adds the band and side swaps).
 pub fn plain_drift_run(
     car: &LoadedCar,
     assists: &AssistProfile,
@@ -301,11 +418,16 @@ pub fn plain_drift_run_with(
         on_tick(&rig, steer, throttle);
         let n = slide_state(&rig);
         let a = n.body_slip.to_degrees().abs();
+        // Direction-aware (shared with lead/tyre-slip, see [`HoldMetrics`]): only the intended
+        // side counts — left-hand corner, slide angle = −body slip; the other side is a swing
+        // through, not a drift.
+        let intended = -n.body_slip.to_degrees();
         max_slip = max_slip.max(a);
         flip = flip.max(n.body_slip.to_degrees());
         if a > 90.0 || n.v_fwd < 0.0 {
             spun = true;
         }
+        let a = intended;
         if !spun && (10.0..=50.0).contains(&a) {
             drift += 1;
             sum += a;
@@ -527,4 +649,25 @@ pub fn lane_change_slip(car: &LoadedCar, assists: &AssistProfile) -> f32 {
         max_slip = max_slip.max(slide_state(&rig).body_slip.to_degrees().abs());
     }
     max_slip
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hold_metrics_count_only_the_intended_side_and_swaps_fail() {
+        // 2 s at +30°, then a swing through to 2 s at −25°.
+        let mut a = vec![30.0f32; 480];
+        a.extend(std::iter::repeat_n(-25.0f32, 480));
+        let back = vec![false; a.len()];
+        let m = HoldMetrics::from_angles(&a, &back);
+        assert!((m.drift_s - 2.0).abs() < 1e-3, "{m:?}");
+        assert_eq!(m.side_swaps, 1);
+        assert!(!m.held && !m.spun);
+        // 4 s steady at 35°: held, all in the band.
+        let a = vec![35.0f32; 960];
+        let m = HoldMetrics::from_angles(&a, &vec![false; 960]);
+        assert!(m.held && (m.band_s - 4.0).abs() < 1e-3, "{m:?}");
+    }
 }

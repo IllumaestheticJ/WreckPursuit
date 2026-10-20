@@ -95,12 +95,11 @@ impl Default for CarTune {
 }
 
 impl CarTune {
-    /// Best "countersteer key held + full throttle" set found so far on parity_rwd_d
-    /// (docs/integration/drift-lab-w.md, step 4): rear side grip under spin 0.15, lock × 0.9,
-    /// diagnostic yaw damping 0.2 /s. Step 4 reported ~4.7 s held at 25–28°; the tyre-slip
-    /// re-measure (direction-aware) shows it holds the intended side only ~0.5 s, then swings
-    /// through and circles the other way on the held key.
-    pub fn drift_candidate() -> Self {
+    /// The step-4 test set (docs/integration/drift-lab-w.md, step 4): rear side grip under
+    /// spin 0.15, lock × 0.9, diagnostic yaw damping 0.2 /s. It does **not** hold the drift:
+    /// scored direction-aware, the held countersteer keeps the intended side only ~0.5 s, then
+    /// the car swings through and circles the other way. Kept as an A/B starting point.
+    pub fn spin_grip_damper() -> Self {
         Self {
             lat_under_spin: 0.15,
             lock: 0.9,

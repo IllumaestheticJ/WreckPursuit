@@ -1295,3 +1295,24 @@ Scenarios: 78 pass, 2 fail (the same Founders Cut pair as on lead/round12, ident
 `Dnf(FinishWindow)` 45 m short of the finish (the test allows only Finished / Captured / Fled).
 Another emergent race outcome from the new kerb layout; request to G to re-measure (or allow
 FinishWindow) against round 13. Contract change requests: none.
+
+### Response from D (round 13, after the lead/round12 merge @ ecf4d7b) — `city_siren_traffic_no_siren` collision
+**One line for the lead:** not from wp_world — it comes from the vehicle row-90 steering +
+`data/cars` retune; the control's `civilian_collisions` is re-scoped to ≤ 1 (strict 0 kept as
+`expect_pending`), and the handling regression goes to A.
+Details. Merged `origin/lead/round12` (fast-forward; the only wp_world changes in it are the
+road-name accessors, presentation only). There are no "jam fixes" on ws/world (row 85 is not
+started). Bisect on seed 2: lead/round12 with `crates/wp_vehicle` **and** `data/cars` from
+39baed1 → passes with the exact pre-merge hash (57478444…); with either one new → 1 collision.
+The collision: physical Casual civilian 41 takes a tight left turn at the comfort speed
+(4.3–5.1 m/s, curve speed 5.1) but its lateral error grows steadily from 0.07 m to 1.44 m over
+the end of the turn and into the straight, and it clips a car stopped in the opposite lane.
+Capping physical cars' turn speed at the comfort speed (no personality factor > 1) did not
+change it, so this is steering tracking, not speed; I did not keep that change. Across seeds 1–9
+of the control: physical cars more than 0.8 m wide within 8 m of a turn exit 7 → 11, worst
+1.34 → 1.50 m; collisions 0/9 → 1/9 seeds.
+**Request to A (vehicle):** check AI / traffic cars after row 90 (rack slew, countersteer onset)
+— a low-speed turn exit should settle on the lane, not drift 1.4 m out; repro
+`simcli run apps/simcli/scenarios/city/siren_traffic_no_siren.ron` (seed 2, agent 41, ~9 s in).
+The control's golden hash moved with the merge (not with my edit); left for the lead's bless.
+Scenarios on the merged tree (release): all 86 pass.

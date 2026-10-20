@@ -17,7 +17,7 @@ use wp_vehicle::car_lab::{self, CarTune};
 use wp_vehicle::drift_lab::{slide_state, tap_response};
 use wp_vehicle::drift_lab_w::{
     handbrake_pivot, lane_change_slip, load_any_car, plain_drift_run_with, reference_assists,
-    PlainDriver,
+    HoldMetrics, PlainDriver,
 };
 use wp_vehicle::plain::{self, PlainSteer};
 use wp_vehicle::ride_lab::{self, RideTune};
@@ -27,19 +27,20 @@ fn car(id: &str) -> LoadedCar {
     load_any_car(&data, id).unwrap()
 }
 
-/// One held-countersteer (or tapper) run, summarised on the slide-angle trace.
-#[derive(Debug, Clone, Copy, Default)]
+/// One held-countersteer (or tapper) run: Drift Lab W's shared [`HoldMetrics`] (intended
+/// side, 10–50° drift, 30–45° band, side swap = fail) plus steadiness over the last 3 s and
+/// the speeds.
+#[derive(Debug, Clone, Copy)]
 struct Hold {
-    /// Ticks with the slide in 10–50° before any spin, s (Drift Lab W's "drift s").
+    m: HoldMetrics,
+    /// Ticks with the slide in 10–50° on the intended side, s (= `m.drift_s`).
     drift_s: f32,
-    /// Time in the 30–45° band (clip 1), s.
+    /// Time in the 30–45° band (clip 1), s (= `m.band_s`).
     band_s: f32,
-    /// Mean / sd of the slide angle over the drift ticks, degrees.
-    mean: f32,
-    sd: f32,
-    /// Mean / sd over the last 3 s (if no spin), degrees.
+    /// Mean / sd of the slide angle over the last 3 s (NaN if spun or swapped), degrees.
     late_mean: f32,
     late_sd: f32,
+    /// Spun or swapped sides (both fail the hold).
     spun: bool,
     /// km/h at entry and at the end.
     v0: f32,
@@ -50,41 +51,30 @@ fn hold(c: &LoadedCar, d: PlainDriver) -> Hold {
     hold_at(c, d, 0.6)
 }
 
-/// [`hold`] entering from the 40 m circle at `lat_g` (0.5 / 0.6 / 0.7 g ≈ 51 / 55 / 60 km/h).
+/// [`hold`] entering from the 40 m circle at `lat_g` (0.3–0.7 g ≈ 39–60 km/h).
 fn hold_at(c: &LoadedCar, d: PlainDriver, lat_g: f32) -> Hold {
     let a = reference_assists();
-    let mut angles: Vec<f32> = Vec::with_capacity(1440);
+    let (mut angles, mut back) = (Vec::with_capacity(1440), Vec::with_capacity(1440));
     let mut v0 = None;
     let mut v1 = 0.0;
-    let (r, _) = plain_drift_run_with(c, &a, d, 40.0, lat_g, |rig, _, _| {
+    plain_drift_run_with(c, &a, d, 40.0, lat_g, |rig, _, _| {
         let s = slide_state(rig);
         angles.push((-s.body_slip).to_degrees());
+        back.push(s.v_fwd < 0.0);
         let v = s.v_fwd * 3.6;
         v0.get_or_insert(v);
         v1 = v;
     });
-    let late: Vec<f32> = angles[angles.len() - 3 * 240..].to_vec();
-    let (lm, ls) = stats(&late);
-    // Only the intended side counts (+ = tail out of the left-hand turn); a car that swings
-    // through and circles the other way on the held key is not holding the drift.
-    let band = angles
-        .iter()
-        .take_while(|a| a.abs() < 90.0)
-        .filter(|a| (30.0..=45.0).contains(*a))
-        .count();
-    let right_side = angles
-        .iter()
-        .take_while(|a| a.abs() < 90.0)
-        .filter(|a| (10.0..=50.0).contains(*a))
-        .count();
+    let m = HoldMetrics::from_angles(&angles, &back);
+    let fail = m.spun || m.side_swaps > 0;
+    let (lm, ls) = stats(&angles[angles.len() - 3 * 240..]);
     Hold {
-        drift_s: r.drift_s.min(right_side as f32 / 240.0),
-        band_s: band as f32 / 240.0,
-        mean: r.mean_deg,
-        sd: r.sd_deg,
-        late_mean: if r.spun { f32::NAN } else { lm },
-        late_sd: if r.spun { f32::NAN } else { ls },
-        spun: r.spun,
+        m,
+        drift_s: m.drift_s,
+        band_s: m.band_s,
+        late_mean: if fail { f32::NAN } else { lm },
+        late_sd: if fail { f32::NAN } else { ls },
+        spun: fail,
         v0: v0.unwrap_or(0.0),
         v1,
     }
@@ -99,14 +89,15 @@ fn stats(x: &[f32]) -> (f32, f32) {
 
 fn fmt_hold(h: &Hold) -> String {
     if h.spun {
-        format!(
-            "{:.1} s / band {:.1} / {:.0}° sd {:.1} / SPUN",
-            h.drift_s, h.band_s, h.mean, h.sd
-        )
+        h.m.cell()
     } else {
         format!(
-            "{:.1} s / band {:.1} / {:.0}° sd {:.1} / last 3 s {:.0}° sd {:.1} / {:.0}→{:.0} km/h",
-            h.drift_s, h.band_s, h.mean, h.sd, h.late_mean, h.late_sd, h.v0, h.v1
+            "{} / last 3 s {:.0}° sd {:.1} / {:.0}→{:.0} km/h",
+            h.m.cell(),
+            h.late_mean,
+            h.late_sd,
+            h.v0,
+            h.v1
         )
     }
 }
@@ -139,7 +130,7 @@ fn configs() -> Vec<(String, CarTune)> {
         ("spin model (`CarTune::spin_candidate`)".into(), spin()),
         (
             "step-4 drift candidate (side grip 0.15, lock 0.9, damper 0.2)".into(),
-            CarTune::drift_candidate(),
+            CarTune::spin_grip_damper(),
         ),
         (
             "rear diff open only".into(),

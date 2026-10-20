@@ -77,6 +77,7 @@ const pct = (x: number) => `${Math.round((x ?? 0) * 100)}%`;
 
 /** Lock fraction at `kmh` for constants `p` (mirrors wp_vehicle::plain::PlainSteer::lock_frac). */
 function lockFrac(p: Record<string, number>, kmh: number): number {
+  if ((p as Record<string, unknown>).sens_applies === "tyre") return 1;
   const s = Math.min(1, Math.max(0, p.speed_sensitivity));
   if (s <= 0) return 1;
   const halves = Math.round(Math.min(4, Math.max(1, p.sens_exponent)) * 2);
@@ -235,6 +236,24 @@ export class DriftLabWPanel {
       sel.onchange = () => this.restart(sel.value);
       row("car", "reference-parity test cars (parity_*) and roster cars; restarts the lab", sel, document.createElement("span"));
     }
+    // Speed sensitivity A/B (clip 8): lock shrinks with speed (rack) vs full lock, tyres limit.
+    {
+      const sel = document.createElement("select");
+      sel.id = "drift-lab-w-sens";
+      sel.add(new Option("rack (lock shrinks)", "rack"));
+      sel.add(new Option("tyre (full lock)", "tyre"));
+      sel.value = String((p as Record<string, unknown>).sens_applies ?? "rack");
+      sel.onchange = () => {
+        this.save({ ...(this.sim.plainSteer() ?? defaults), sens_applies: sel.value } as unknown as Record<string, number>);
+        this.curve();
+      };
+      row(
+        "sensitivity on",
+        "rack: the road-wheel lock shrinks with speed (the curve below); tyre: full road-wheel lock at every speed and the front tyres limit the car (clip 8: the reference's wheel turns as far at 150 km/h)",
+        sel,
+        document.createElement("span"),
+      );
+    }
     for (const [key, f] of Object.entries(FIELDS)) {
       const value = p[key] ?? defaults[key];
       const input = document.createElement("input");
@@ -364,7 +383,7 @@ export class DriftLabWPanel {
       btns.style.cssText = "display:flex;gap:6px;margin-top:4px";
       for (const [label, which, hint] of [
         ["tyre data", "data", "no change: the car and tyre files as they are"],
-        ["drift candidate", "candidate", "Drift Lab W step 4's set (side grip 0.15, lock 0.9, yaw damping 0.2 — the damper is not physical; re-measured: swings through to the other side)"],
+        ["spin grip + damper (test)", "spin_damper", "step-4 test set (side grip under spin 0.15, lock 0.9, yaw damping 0.2; the damper is not physical). It does NOT hold the drift: the car swings through to the other side"],
         ["spin model", "spin", "tyre-slip spin model on the rears, no damper (holds ~41–44° on the lab's standard entry; tuned to a knife edge)"],
       ] as const) {
         const b = document.createElement("button");
