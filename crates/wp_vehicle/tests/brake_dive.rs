@@ -11,7 +11,7 @@
 //! collider corners on the road.
 
 use wp_contracts::{AssistProfile, LoadedCar};
-use wp_vehicle::brake_dive::brake_dive;
+use wp_vehicle::brake_dive::{brake_dive, clearance_on_front_bump_stops};
 
 fn car(id: &str) -> LoadedCar {
     let p = format!("{}/../../data/cars/{id}.json", env!("CARGO_MANIFEST_DIR"));
@@ -73,5 +73,17 @@ fn holding_the_brake_into_reverse_does_not_bury_the_nose() {
         let r = brake_dive(&car(id), 100.0, true, &AssistProfile::keyboard_default());
         assert!(r.peak_pitch_deg <= 2.5, "{id}: {r:?}");
         assert!(r.min_clearance_m > 0.04, "{id}: {r:?}");
+    }
+}
+
+#[test]
+fn the_bump_stops_hold_the_nose_off_the_road() {
+    // Worst case geometry: both front struts at the end of their travel (on the progressive
+    // bump stops), rear at rest: the body ahead of the front axle is still above the road.
+    // Measured 1.2 cm (lucciola_350, low exotic) … 11 cm (hauler_1500); lindwurm_4t was 1.0
+    // cm before its front travel was shortened by 1.5 cm.
+    for id in ROSTER {
+        let c = clearance_on_front_bump_stops(&car(id));
+        assert!(c > 0.01, "{id}: {c:.3} m");
     }
 }

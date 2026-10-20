@@ -6,7 +6,7 @@
 
 use wp_contracts::AssistProfile;
 use wp_contracts::LoadedCar;
-use wp_vehicle::brake_dive::brake_dive;
+use wp_vehicle::brake_dive::{brake_dive, clearance_on_front_bump_stops};
 
 const ROSTER: [&str; 17] = [
     "vireo_xs",
@@ -44,6 +44,10 @@ fn main() {
     println!("|---|---|---|---|---|---|---|---|---|---|---|");
     for id in &ids {
         let car = load(id);
+        println!(
+            "| {id} | front struts on the bump stops: body {:.1} cm above the road |",
+            clearance_on_front_bump_stops(&car) * 100.0
+        );
         let presets = [
             ("wheel", AssistProfile::wheel_default()),
             ("keyboard", AssistProfile::keyboard_default()),

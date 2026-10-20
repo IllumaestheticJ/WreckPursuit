@@ -7,12 +7,11 @@
 //!   it, like a real valve blowing off, so a kerb or pothole hit (strut speeds of several m/s)
 //!   does not slam the body with tens of kN.
 //! - **Anti-dive / anti-lift** ([`ANTI_DIVE_FRONT`], [`ANTI_LIFT_REAR`]; playtest row 92): the
-//!   links carry part of the longitudinal load transfer, so the nose dives about 1–2° under a
-//!   1 g stop like a road car instead of riding onto the bump stops.
-//! - The bump stop is **progressive**: a bump rubber touches [`BUMP_RUBBER_M`] before the
-//!   end of the travel and stiffens to the data rate there (playtest row 92), then its rate
-//!   grows by the data rate every [`BUMP_STOP_PROGRESSION_M`] of squash. It gives back only
-//!   [`BUMP_STOP_REBOUND_FRACTION`] of its force while extending (rubber hysteresis), so bottoming out soaks up energy
+//!   links carry part of the braking load transfer, so the nose dives about 1–2° under a 1 g
+//!   stop like a road car instead of riding towards the bump stops.
+//! - The bump stop is **progressive** (its rate grows by the data rate every
+//!   [`BUMP_STOP_PROGRESSION_M`] of squash) and gives back only [`BUMP_STOP_REBOUND_FRACTION`]
+//!   of its force while extending (rubber hysteresis), so bottoming out soaks up energy
 //!   instead of springing the car back into the air.
 
 use wp_contracts::SuspensionDef;
@@ -29,8 +28,9 @@ pub const BUMP_STOP_REBOUND_FRACTION: f32 = 0.4;
 /// Extension speed over which the bump-stop hysteresis blends in, m/s.
 const BUMP_STOP_HYSTERESIS_MPS: f32 = 0.05;
 
-/// Anti-dive of the front suspension geometry: share of the braking pitch load transfer on the front axle carried by the links instead of the springs (playtest row
-/// 92, "headlights clip into the ground under braking"). Road cars run about 0.2–0.5.
+/// Anti-dive of the front suspension geometry: share of the braking pitch load transfer on the
+/// front axle carried by the links instead of the springs (playtest row 92, "headlights clip
+/// into the ground under braking"). Road cars run about 0.2–0.6.
 /// Default for every car until `SuspensionDef` carries it (contract change request in
 /// `docs/integration/brake-dive.md`).
 pub const ANTI_DIVE_FRONT: f32 = 0.55;
@@ -40,9 +40,8 @@ pub const ANTI_LIFT_REAR: f32 = 0.4;
 
 /// Jacking factor of one corner: the link force on the chassis at the wheel, along the
 /// strut, is `factor × fx` (fx = the braking part of the tyre's longitudinal force, + =
-/// forward). The tyre feels it
-/// too (its normal load is spring + link force), so the axle loads still shift by the full
-/// `m·a·h / L`; only the springs (and with them pitch) see less of it.
+/// forward). The tyre feels it too (its normal load is spring + link force), so the axle loads
+/// still shift by the full `m·a·h / L`; only the springs (and with them pitch) see less of it.
 ///
 /// Front: a braking force (fx < 0) pushes the body up; rear: it pulls the body down.
 pub fn anti_pitch_factor(front: bool, cg_height_m: f32, wheelbase_m: f32) -> f32 {
@@ -57,16 +56,7 @@ pub fn anti_pitch_factor(front: bool, cg_height_m: f32, wheelbase_m: f32) -> f32
 /// Static compression (from full droop) that supports `corner_load_n` at rest, m, clamped to
 /// the travel.
 pub fn static_compression(def: &SuspensionDef, corner_load_n: f32) -> f32 {
-    let linear = (corner_load_n / def.spring_n_per_m - def.preload_m).clamp(0.0, def.travel_m);
-    // A car whose rest load reaches into the bump rubber sits a little higher on it.
-    let mut x = linear;
-    for _ in 0..24 {
-        let f = def.spring_n_per_m * (x + def.preload_m)
-            + bump_stop_static(def.bump_stop_n_per_m, x - def.travel_m).0;
-        let k = def.spring_n_per_m + bump_stop_static(def.bump_stop_n_per_m, x - def.travel_m).1;
-        x = (x - (f - corner_load_n) / k).clamp(0.0, def.travel_m);
-    }
-    x
+    (corner_load_n / def.spring_n_per_m - def.preload_m).clamp(0.0, def.travel_m)
 }
 
 /// Digressive damper force for strut speed `v` (m/s, + = compressing) with low-speed rate
@@ -81,44 +71,15 @@ pub fn damper_force(c: f32, v: f32) -> f32 {
     f * v.signum()
 }
 
-/// Length of the bump rubber (jounce bumper) before the end of the travel, m: the bump stop
-/// starts touching this far before `travel_m` with zero rate, its rate growing linearly to the
-/// data rate at the end of the travel (playtest row 92: a hard stop met the steel end of the
-/// travel; now the last few centimetres stiffen progressively, as on a real strut).
-pub const BUMP_RUBBER_M: f32 = 0.025;
-
-/// Static bump-stop force and its rate (dF/dx) at `excess` m past the end of the travel
-/// (negative: still short of it; the rubber starts at `-BUMP_RUBBER_M`).
-fn bump_stop_static(rate_n_per_m: f32, excess: f32) -> (f32, f32) {
-    let e = excess + BUMP_RUBBER_M;
-    if e <= 0.0 {
-        (0.0, 0.0)
-    } else if e <= BUMP_RUBBER_M {
-        // Rubber: rate 0 → k over its length.
-        let r = rate_n_per_m / BUMP_RUBBER_M;
-        (0.5 * r * e * e, r * e)
-    } else {
-        // Past the end of the travel: progressive as before, on top of the rubber's force.
-        let d = e - BUMP_RUBBER_M;
-        (
-            0.5 * rate_n_per_m * BUMP_RUBBER_M
-                + rate_n_per_m * d * (1.0 + d / BUMP_STOP_PROGRESSION_M),
-            rate_n_per_m * (1.0 + 2.0 * d / BUMP_STOP_PROGRESSION_M),
-        )
-    }
-}
-
-/// Share of the bump-stop force left at strut speed `v` (hysteresis: less while extending).
-fn bump_stop_hysteresis(v: f32) -> f32 {
-    let extend = (-v / BUMP_STOP_HYSTERESIS_MPS).clamp(0.0, 1.0);
-    1.0 - (1.0 - BUMP_STOP_REBOUND_FRACTION) * extend
-}
-
-/// Bump-stop force at `excess` m past the end of the travel (the rubber already touches from
-/// `-BUMP_RUBBER_M`) and strut speed `v` (m/s, + = compressing): progressive, and reduced
-/// while extending (hysteresis).
+/// Bump-stop force at `excess` m past the end of the travel and strut speed `v` (m/s, + =
+/// compressing): progressive, and reduced while extending (hysteresis).
 pub fn bump_stop_force(rate_n_per_m: f32, excess: f32, v: f32) -> f32 {
-    bump_stop_static(rate_n_per_m, excess).0 * bump_stop_hysteresis(v)
+    if excess <= 0.0 {
+        return 0.0;
+    }
+    let f = rate_n_per_m * excess * (1.0 + excess / BUMP_STOP_PROGRESSION_M);
+    let extend = (-v / BUMP_STOP_HYSTERESIS_MPS).clamp(0.0, 1.0);
+    f * (1.0 - (1.0 - BUMP_STOP_REBOUND_FRACTION) * extend)
 }
 
 /// Suspension force along the strut (N, + pushes the chassis up) at compression `x` (m, from
@@ -221,8 +182,15 @@ pub fn step_strut(
         } else {
             0.0
         };
-        let bump =
-            bump_stop_static(def.bump_stop_n_per_m, x - def.travel_m).1 * bump_stop_hysteresis(v0);
+        let e = x - def.travel_m;
+        let bump = if e > 0.0 {
+            let extend = (-v0 / BUMP_STOP_HYSTERESIS_MPS).clamp(0.0, 1.0);
+            def.bump_stop_n_per_m
+                * (1.0 + 2.0 * e / BUMP_STOP_PROGRESSION_M)
+                * (1.0 - (1.0 - BUMP_STOP_REBOUND_FRACTION) * extend)
+        } else {
+            0.0
+        };
         spring + bump
     };
     // dv/df of the inverse damper at force f.
@@ -375,17 +343,10 @@ mod tests {
     #[test]
     fn bump_stop_is_progressive_and_lossy() {
         let k = 150000.0;
-        // Past the end of the travel the rate keeps growing (equal steps add more and more).
-        let f0 = bump_stop_force(k, 0.0, 0.0);
         let f1 = bump_stop_force(k, 0.01, 0.0);
         let f2 = bump_stop_force(k, 0.02, 0.0);
-        assert!(f2 - f1 > 1.5 * (f1 - f0), "progressive: {f0} {f1} {f2}");
-        assert_eq!(bump_stop_force(k, -BUMP_RUBBER_M - 0.001, 0.0), 0.0);
-        // The rubber touches before the end of the travel and stiffens smoothly.
-        let r1 = bump_stop_force(k, -0.02, 0.0);
-        let r2 = bump_stop_force(k, -0.01, 0.0);
-        let r3 = bump_stop_force(k, 0.0, 0.0);
-        assert!(r1 > 0.0 && r2 > 3.0 * r1 && r3 > r2, "{r1} {r2} {r3}");
+        assert!(f2 > 2.5 * f1, "progressive: {f1} {f2}");
+        assert_eq!(bump_stop_force(k, -0.01, 0.0), 0.0);
         // Extending gives back less than compressing at the same squash.
         let comp = bump_stop_force(k, 0.02, 0.5);
         let ext = bump_stop_force(k, 0.02, -0.5);

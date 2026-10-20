@@ -9,6 +9,9 @@
 //! nodes, which the panel meshes are skinned to and share their bottom with to within 5 mm;
 //! and the chassis collider's front corners) versus the road.
 //!
+//! [`clearance_on_front_bump_stops`] is the geometric worst case: the front struts on their
+//! bump stops.
+//!
 //! Real-car targets: about 1–2° of pitch under 1 g braking, and the bumper never touches.
 
 use wp_contracts::{AssistProfile, LoadedCar, VehicleInput};
@@ -189,4 +192,20 @@ pub fn brake_dive(
     let t = t_stop.unwrap_or(rig.time()) - t_start;
     out.decel_g = (v_start - 5.0 / 3.6) / t.max(1e-3) / wp_contracts::GRAVITY_MPS2;
     out
+}
+
+/// Lowest body point ahead of the front axle (lattice nodes) above the road with both front
+/// struts squashed to the end of their travel (on the bump stops) and the rear at its rest
+/// height, m: the bump stops must stop the nose before the body reaches the road.
+pub fn clearance_on_front_bump_stops(car: &LoadedCar) -> f32 {
+    let v = crate::vehicle::Vehicle::new(&car.def, &car.tires, [0.0; 3], 0.0);
+    let x_static = v.static_compression_m();
+    let travel = car.def.suspension[0].travel_m;
+    let drop = travel - x_static[0].min(x_static[1]);
+    let y_f = car.def.wheels[0].position_m[1];
+    let y_r = car.def.wheels[2].position_m[1];
+    front_body_points(car)
+        .iter()
+        .map(|p| p.z - drop * (p.y - y_r) / (y_f - y_r))
+        .fold(f32::INFINITY, f32::min)
 }

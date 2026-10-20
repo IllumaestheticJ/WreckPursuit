@@ -111,7 +111,7 @@
       "spring_n_per_m": 56800.0,
       "damper_bump_ns_per_m": 3620.0,
       "damper_rebound_ns_per_m": 7250.0,
-      "travel_m": 0.15,
+      "travel_m": 0.135,
       "preload_m": 0.02,
       "arb_n_per_m": 10900.0,
       "bump_stop_n_per_m": 170000.0
@@ -120,7 +120,7 @@
       "spring_n_per_m": 56800.0,
       "damper_bump_ns_per_m": 3620.0,
       "damper_rebound_ns_per_m": 7250.0,
-      "travel_m": 0.15,
+      "travel_m": 0.135,
       "preload_m": 0.02,
       "arb_n_per_m": 10900.0,
       "bump_stop_n_per_m": 170000.0
