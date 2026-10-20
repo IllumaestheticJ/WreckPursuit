@@ -488,12 +488,17 @@ async function main(): Promise<void> {
     }
   };
 
+  // Clutch automatic / manual (playtest row 59): the AssistProfile's `auto_clutch`. Manual uses
+  // the player's clutch binding directly (DriverInput.clutch). Default stays automatic; a change is
+  // remembered with the other assist overrides.
+  const clutchSel = $("clutch-mode") as HTMLSelectElement;
   const syncAssistBoxes = () => {
     if (isReplay()) return;
     const a = sim.assists(app.player) as unknown as Record<string, unknown>;
     document.querySelectorAll<HTMLInputElement>("#assist-row input").forEach((cb) => {
       cb.checked = Boolean(a[cb.dataset.a!]);
     });
+    clutchSel.value = a.auto_clutch === false ? "manual" : "auto";
   };
 
   // ----- replay ---------------------------------------------------------------------------
@@ -587,6 +592,17 @@ async function main(): Promise<void> {
       store.set(ASSIST_KEY, JSON.stringify(o));
     };
   });
+  clutchSel.onchange = () => {
+    if (isReplay()) return;
+    clutchSel.blur(); // hand the keys back to the game
+    const manual = clutchSel.value === "manual";
+    const a = sim.assists(app.player) as unknown as Record<string, unknown>;
+    a.auto_clutch = !manual;
+    sim.setAssists(app.player, a as never);
+    const o = assistOverrides();
+    o.auto_clutch = !manual;
+    store.set(ASSIST_KEY, JSON.stringify(o));
+  };
   document.querySelectorAll<HTMLButtonElement>(".bench").forEach((b) => {
     b.onclick = () => startBench(Number(b.dataset.n));
   });
@@ -661,7 +677,12 @@ async function main(): Promise<void> {
         rig.cycle(app.views.get(app.focus)?.root);
         break;
       case "reset":
-        if (!isReplay()) sim.reset(app.player);
+        // Reset in place (playtest row 65): upright on the nearest clear lane, repaired outside a
+        // career run; heat, pursuit and race progress carry on.
+        if (!isReplay()) {
+          const r = sim.resetInPlace(app.player);
+          hud.note(`${(sim.worldInfo()[W.tick] / 240).toFixed(2)}s reset in place${r.on_lane ? "" : " (no lane near)"} — ${r.repaired ? "repaired" : "career: repairs are bought in the garage"}`);
+        }
         break;
       case "headlights":
         toggleHeadlights();

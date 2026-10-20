@@ -146,6 +146,12 @@ export class Hud {
     this.feedLines.length = Math.min(this.feedLines.length, 12);
   }
 
+  /** Add one line of text to the top of the event feed. */
+  note(text: string): void {
+    this.feedLines.unshift(text);
+    this.feedLines.length = Math.min(this.feedLines.length, 12);
+  }
+
   clearEvents(): void {
     this.feedLines.length = 0;
   }
@@ -172,7 +178,7 @@ export class Hud {
       `<div>${badge(true, f.mode)}${f.replay ? badge(true, "REPLAY") : ""}${f.recording ? '<span class="badge rec">● REC</span>' : ""}</div>` +
       (a
         ? `<div>${badge(a.abs, "ABS")}${badge(a.tcs, "TCS")}${badge(a.esc, "ESC")}${badge(a.steer_speed_sensitivity > 0, "STEER")}` +
-          `${badge(a.countersteer_help > 0, "CSTR")}${badge(a.throttle_filter > 0, "THR-F")}${badge(a.auto_gears, "AUTO")}</div>`
+          `${badge(a.countersteer_help > 0, "CSTR")}${badge(a.throttle_filter > 0, "THR-F")}${badge(a.auto_gears, "AUTO")}${badge(a.auto_clutch, a.auto_clutch ? "A-CLU" : "M-CLU")}</div>`
         : "") +
       `<div class="dim">${f.fps.toFixed(0)} fps · sim ${f.simMs.toFixed(2)} ms · views ${f.viewsMs.toFixed(1)} ms · render ${f.renderMs.toFixed(2)} ms · ${f.vehicles} car(s)</div>` +
       (f.rtf < RTF_WARN
