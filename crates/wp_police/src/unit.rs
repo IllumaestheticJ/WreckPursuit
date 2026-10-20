@@ -378,6 +378,13 @@ pub struct Unit {
     pub controller: Option<DriveController>,
     /// Obstacle awareness: speed cap behind the vehicle ahead, passing state.
     pub avoid: AvoidState,
+    /// Seconds a physically driven unit has pushed on the throttle without moving (pinned
+    /// against a wall, kerb or prop).
+    #[serde(default)]
+    pub stuck_s: f32,
+    /// Seconds left of a back-out manoeuvre (reverse, wheel turned the other way).
+    #[serde(default)]
+    pub reverse_s: f32,
 }
 
 impl Unit {
@@ -423,6 +430,8 @@ impl Unit {
             geometry: SteerGeometry::default(),
             controller: None,
             avoid: AvoidState::default(),
+            stuck_s: 0.0,
+            reverse_s: 0.0,
         }
     }
 

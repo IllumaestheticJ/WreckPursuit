@@ -81,6 +81,7 @@ impl PoliceSystem {
                 ..Default::default()
             };
             let mut best_spot = f32::INFINITY;
+            let mut best_witness = f32::INFINITY;
             for u in &self.units {
                 if u.wrecked {
                     continue;
@@ -97,6 +98,18 @@ impl PoliceSystem {
                             // have their own ranges inside line-of-sight range.
                             o.seen = true;
                             o.witnessed |= d <= witness;
+                            if d <= witness && d < best_witness {
+                                best_witness = d;
+                                o.witness = Some(u.id);
+                                o.witness_m = d;
+                                o.witness_responding = matches!(
+                                    u.assignment,
+                                    Assignment::Respond { incident } if self.incidents.iter().any(|i| {
+                                        i.id == incident
+                                            && i.kind == crate::dispatch::IncidentKind::Report { racer: id }
+                                    })
+                                );
+                            }
                             if d <= recognise && d < best_spot {
                                 best_spot = d;
                                 o.spotter = Some(u.id);
@@ -108,8 +121,8 @@ impl PoliceSystem {
                             && d <= helo_range
                             // Looking down from altitude: only tall buildings block.
                             && world.line_of_sight(
-                                [u.body.pos[0], u.body.pos[1], u.body.alt_m],
-                                [p[0], p[1], crate::EYE_HEIGHT_M],
+                                [u.body.pos[0], u.body.pos[1], self.ground_z(u.body.pos) + u.body.alt_m],
+                                [p[0], p[1], self.ground_z(p) + crate::EYE_HEIGHT_M],
                             )
                         {
                             o.seen = true;
@@ -200,6 +213,37 @@ impl PoliceSystem {
                     self.start_pursuit(id, spotter);
                 }
             }
+            // A unit sent to a report about this racer engages as soon as it has the racer in
+            // sight within witness and recognition range (it knows what it is looking for, so
+            // no recognition time and no wanted level needed).
+            let recognise = self.cfg.heat.heat.recognition_range_m.get(self.phase);
+            if !self.racers[&id].pursued() && o.witness_responding && o.witness_m <= recognise {
+                if let Some(unit) = o.witness {
+                    self.engage(id, unit);
+                }
+            }
+        }
+    }
+
+    /// `unit` saw `racer` break the law (or found the racer it was sent for): the racer is at
+    /// least wanted level 1 and the pursuit starts with that unit.
+    pub(crate) fn engage(&mut self, racer: EntityId, unit: UnitId) {
+        let cfg = self.cfg.heat.clone();
+        let rec = self.racers.get_mut(&racer).expect("racer");
+        let before = rec.level;
+        let floor = cfg.heat.level_thresholds[0];
+        if rec.heat < floor {
+            rec.add_heat(floor - rec.heat, &cfg);
+        }
+        let after = rec.level;
+        if after != before {
+            self.pending.push(PoliceEvent::WantedLevelChanged {
+                racer,
+                level: after,
+            });
+        }
+        if !self.racers[&racer].pursued() {
+            self.start_pursuit(racer, unit);
         }
     }
 

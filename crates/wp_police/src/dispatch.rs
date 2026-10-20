@@ -82,6 +82,9 @@ pub struct HeloRequest {
     pub launch: SimTime,
 }
 
+/// A racer hitting a police unit at least this hard (relative speed, m/s) starts a pursuit.
+const COP_CONTACT_ENGAGE_MPS: f32 = 3.0;
+
 impl PoliceSystem {
     // -----------------------------------------------------------------------------------------
     // Event handlers
@@ -120,6 +123,16 @@ impl PoliceSystem {
                 racer,
                 level: after,
             });
+        }
+        // A unit that watched it happen close enough to recognise the car goes after the racer
+        // right away (a camera alone only adds heat and calls it in). Recognition range is
+        // short at night, so night pursuits still start later than day ones.
+        let recognise = self.cfg.heat.heat.recognition_range_m.get(self.phase);
+        if let Some(unit) = obs.witness.filter(|_| obs.witness_m <= recognise) {
+            if !self.racers[&racer].pursued() && !self.graph.nodes.is_empty() {
+                self.engage(racer, unit);
+                return;
+            }
         }
         if !obs.witnessed && !self.racers[&racer].pursued() && !self.graph.nodes.is_empty() {
             // No unit saw it: a civilian calls it in, or a traffic camera flags it, at the
@@ -209,6 +222,25 @@ impl PoliceSystem {
             .is_some_and(|t| now.since(*t) < 1.0)
         {
             return;
+        }
+        // Hitting a police car is a collision the unit witnessed first hand: it engages (a
+        // bump from a unit already chasing the racer changes nothing here). Physical contacts
+        // only: the built-in driver's proximity "contacts" (`apply_damage`) are too coarse and
+        // would start chases from cars merely passing at a junction.
+        let unit = self.units[i].id;
+        if !apply_damage
+            && self.units[i].player.is_none()
+            && !self.units[i].wrecked
+            && self.units[i].assignment != Assignment::OutOfService
+            && !self.racers.get(&racer).is_some_and(|r| r.pursued())
+            && rel_speed >= COP_CONTACT_ENGAGE_MPS
+            && !self.graph.nodes.is_empty()
+        {
+            let cfg = self.cfg.heat.clone();
+            if let Some(rec) = self.racers.get_mut(&racer) {
+                rec.add_violation(&ViolationKind::Collision, true, now, &cfg);
+            }
+            self.engage(racer, unit);
         }
         self.contact_cooldown.insert(key, now);
         self.stats.racer_contacts += 1;

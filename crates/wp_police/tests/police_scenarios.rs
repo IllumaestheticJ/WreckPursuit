@@ -56,7 +56,9 @@ fn night_is_slower_than_day_for_pursuit_and_reinforcements() {
     let ratio = m(&night, "pursuit_start_s") / m(&day, "pursuit_start_s");
     assert!(ratio >= 3.0, "pursuit start night/day = {ratio}");
     assert!(m(&day, "pursuit_start_max_s") <= 20.0);
-    assert!(m(&night, "pursuit_start_s") > 60.0);
+    // (> 60 s before 2026-10-20; a patrol that watches a violation from recognition range now
+    // engages at once, playtest row 34. Measured: day 5.5 s, night 37.9 s.)
+    assert!(m(&night, "pursuit_start_s") > 30.0);
     // Reinforcements take at least 2x as long to arrive.
     let rd = m(&day, "reinforcement_delay_s");
     let rn = m(&night, "reinforcement_delay_s");

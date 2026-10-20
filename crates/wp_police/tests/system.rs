@@ -615,3 +615,76 @@ fn camera_flagged_parked_racer_is_found_and_captured() {
     }
     assert!(captured, "parked racer never captured");
 }
+
+/// Bind the first pool unit to `entity` and park it `behind_m` behind the racer, facing it.
+fn bind_unit_behind_racer(h: &mut Harness, entity: EntityId, behind_m: f32) -> wp_police::UnitId {
+    let unit = h.police.units()[0].id;
+    let geom = SteerGeometry {
+        wheelbase_m: 2.7,
+        max_steer_rad: 0.6,
+    };
+    h.police.bind_unit_entity(unit, entity, geom);
+    let r = h.racer_view();
+    let d = h.path.dir_at(h.s).unwrap();
+    h.police.sync_unit(
+        unit,
+        UnitSync {
+            pos: [r.pos[0] - d[0] * behind_m, r.pos[1] - d[1] * behind_m, 0.0],
+            vel: [0.0; 3],
+            heading: d,
+            health: 1.0,
+            effects: HandlingEffects::NEUTRAL,
+        },
+    );
+    unit
+}
+
+/// Playtest row 24: sideswiping a police car starts a pursuit with that car, from no heat.
+#[test]
+fn hitting_a_police_car_starts_a_pursuit() {
+    let mut h = Harness::new(23.0, 11);
+    h.run(1.0, &[]);
+    let cop = EntityId(950);
+    let unit = bind_unit_behind_racer(&mut h, cop, 3.0);
+    assert_eq!(h.racer_status(), PursuitStatus::Clear);
+    let bump = SimEvent::Contact {
+        a: RACER,
+        b: cop,
+        point: [0.0; 3],
+        normal: [1.0, 0.0, 0.0],
+        impulse_ns: 4000.0,
+        rel_speed: 6.0,
+    };
+    h.run(0.1, &[bump]);
+    let r = h.police.racer(RACER).unwrap();
+    assert!(r.pursued(), "{:?}", r.status);
+    assert!(r.level >= WantedLevel::L1);
+    assert!(h
+        .events
+        .iter()
+        .any(|e| matches!(e, PoliceEvent::PursuitStarted { unit: Some(u), .. } if *u == unit)));
+}
+
+/// A violation a unit watches from close range starts a pursuit right away, even at night and
+/// from no heat (before, a small violation only added heat below wanted level 1).
+#[test]
+fn a_witnessed_violation_starts_a_pursuit() {
+    let mut h = Harness::new(23.0, 12);
+    h.run(1.0, &[]);
+    let unit = bind_unit_behind_racer(&mut h, EntityId(951), 20.0);
+    // One think step so the unit's sighting is observed.
+    h.run(0.3, &[]);
+    assert_eq!(h.racer_status(), PursuitStatus::Clear);
+    let p = h.racer_view().pos;
+    let speeding = SimEvent::TrafficViolation {
+        vehicle: RACER,
+        kind: ViolationKind::Speeding { over_mps: 3.0 },
+        pos: p,
+    };
+    h.run(0.1, &[speeding]);
+    assert!(h.police.racer(RACER).unwrap().pursued());
+    assert!(h
+        .events
+        .iter()
+        .any(|e| matches!(e, PoliceEvent::PursuitStarted { unit: Some(u), .. } if *u == unit)));
+}

@@ -37,6 +37,8 @@ pub mod session;
 pub mod signals;
 
 #[cfg(test)]
+mod police_tests;
+#[cfg(test)]
 mod run_tests;
 
 use std::cell::RefCell;

@@ -1,5 +1,8 @@
-// Same racer at 03:00: sparse patrols, short witness range, slow civilian reports. Pursuit takes
-// longer than 60 s on average (a patrol can still happen to be right there) and reinforcements arrive slower (ratios asserted in tests/police_scenarios.rs).
+// Same racer at 03:00: sparse patrols, short witness and recognition ranges, slow civilian reports.
+// Pursuit takes longer than 30 s on average (a patrol can still happen to be right there) and
+// reinforcements arrive slower (ratios asserted in tests/police_scenarios.rs). The floor was 60 s
+// until 2026-10-20: a patrol that watches a violation within recognition range (40 m at night) now
+// engages at once (playtest row 34); measured mean 37.9 s, day 5.5 s.
 (
     name: "police_night_core_speeder",
     seed: 100,
@@ -8,6 +11,6 @@
     runs: 8,
     racers: [(district: Core, speed_factor: 2.0)],
     expect: [
-        (metric: "pursuit_start_s", min: 60.0, max: 10000.0),
+        (metric: "pursuit_start_s", min: 30.0, max: 10000.0),
     ],
 )

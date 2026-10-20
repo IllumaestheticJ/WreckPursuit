@@ -194,6 +194,13 @@ pub(crate) struct RacerObs {
     pub(crate) witnessed: bool,
     /// Closest ground unit with line of sight within recognition range.
     pub(crate) spotter: Option<UnitId>,
+    /// Closest ground unit with line of sight within witness range. Within recognition range
+    /// too, it engages when it sees a violation or finds the racer a report sent it after.
+    pub(crate) witness: Option<UnitId>,
+    /// `witness` is responding to a report about this racer.
+    pub(crate) witness_responding: bool,
+    /// Distance to `witness`, m.
+    pub(crate) witness_m: f32,
     /// Nearest ground unit distance, m.
     pub(crate) nearest_unit_m: f32,
 }
@@ -237,6 +244,9 @@ pub struct PoliceSystem {
     pub(crate) ext_obstacles_set: bool,
     /// Everything units avoid this tick (rebuilt by `rebuild_obstacles`).
     pub(crate) obstacles: Vec<avoid::Obstacle>,
+    /// The city's terrain (hilly cities), so sightlines start and end at eye height above
+    /// the ground instead of above z = 0. `None` on flat cities.
+    pub(crate) terrain: Option<std::sync::Arc<wp_world::terrain::Heightfield>>,
 }
 
 impl Default for PoliceSystem {
@@ -261,7 +271,9 @@ impl PoliceSystem {
     /// [`RoadGraph::from_city`]. Pass the same `World` as `world` to [`PoliceSystem::step`] so
     /// line of sight uses its buildings.
     pub fn for_world(cfg: PoliceConfig, world: &wp_world::World, setup: PoliceSetup) -> Self {
-        Self::with_city(cfg, RoadGraph::from_city(world.map()), setup)
+        let mut p = Self::with_city(cfg, RoadGraph::from_city(world.map()), setup);
+        p.terrain = world.map().net.terrain.clone().map(std::sync::Arc::new);
+        p
     }
 
     /// Police on a road network.
@@ -306,6 +318,7 @@ impl PoliceSystem {
             ext_obstacles: Vec::new(),
             ext_obstacles_set: false,
             obstacles: Vec::new(),
+            terrain: None,
         }
     }
 
@@ -397,10 +410,20 @@ impl PoliceSystem {
     }
 
     /// Line of sight between two ground points at eye height: the police graph's own occluders
-    /// (procedural test city) and the world's buildings (`WorldQuery::line_of_sight`).
+    /// (procedural test city) and the world's buildings and terrain
+    /// (`WorldQuery::line_of_sight`). Eye height is above the ground at each end, so on hills
+    /// the sightline does not start underground.
     pub(crate) fn sees(&self, world: &dyn WorldQuery, a: [f32; 2], b: [f32; 2]) -> bool {
         self.graph.line_of_sight(a, b)
-            && world.line_of_sight([a[0], a[1], EYE_HEIGHT_M], [b[0], b[1], EYE_HEIGHT_M])
+            && world.line_of_sight(
+                [a[0], a[1], self.ground_z(a) + EYE_HEIGHT_M],
+                [b[0], b[1], self.ground_z(b) + EYE_HEIGHT_M],
+            )
+    }
+
+    /// Terrain height at `p` (0 on flat cities).
+    pub(crate) fn ground_z(&self, p: [f32; 2]) -> f32 {
+        self.terrain.as_ref().map_or(0.0, |t| t.height_at(p))
     }
 
     pub(crate) fn unit_index(&self, id: UnitId) -> Option<usize> {
@@ -799,13 +822,41 @@ impl PoliceSystem {
         let siren = u.cmd.siren;
         let ctl = u.controller();
         let steer = ctl.steer(pos, heading, [target[0], target[1], 0.0]);
-        let (mut throttle, mut brake) = ctl.pedals(v, acc, dt, disabled);
+        if u.reverse_s > 0.0 && !disabled {
+            // Backing out: brake at a standstill engages reverse, then drives backwards; the
+            // wheel turned the other way swings the nose toward the track.
+            u.reverse_s -= dt;
+            if u.reverse_s <= 0.0 {
+                u.reverse_s = 0.0;
+                u.controller().resync(0.0);
+            }
+            return Some(VehicleInput {
+                steer: -steer,
+                brake: UNSTICK_REVERSE_BRAKE,
+                siren,
+                headlights: true,
+                ..Default::default()
+            });
+        }
+        let (mut throttle, mut brake) = u.controller().pedals(v, acc, dt, disabled);
         let mut handbrake = 0.0;
         if hold {
             // The shared controller releases the brake below its hold speed; right behind
             // another vehicle or at a stop line the unit must not creep forwards either.
             throttle = 0.0;
             (brake, handbrake) = standstill_hold(v, brake.max(1.0));
+        }
+        // Pinned against a wall, kerb or prop (the pure-pursuit line cuts corners, and spawn
+        // points can sit next to street furniture): full throttle and no progress for a while
+        // → back out, then carry on.
+        if !disabled && throttle > 0.3 && v < UNSTICK_SPEED_MPS && want > 1.0 {
+            u.stuck_s += dt;
+            if u.stuck_s > UNSTICK_AFTER_S {
+                u.stuck_s = 0.0;
+                u.reverse_s = UNSTICK_REVERSE_S;
+            }
+        } else {
+            u.stuck_s = 0.0;
         }
         Some(VehicleInput {
             steer,
@@ -929,6 +980,19 @@ impl PoliceSystem {
 
 /// Pedal held at a standstill (below `wp_vehicle`'s auto-reverse threshold of 0.5).
 const STANDSTILL_BRAKE: f32 = 0.4;
+
+/// Below this speed with the throttle down a physically driven unit counts as stuck, m/s.
+const UNSTICK_SPEED_MPS: f32 = 0.8;
+
+/// Seconds stuck before a unit backs out.
+const UNSTICK_AFTER_S: f32 = 2.0;
+
+/// Length of the back-out manoeuvre, s (about 0.3 s of it engages reverse).
+const UNSTICK_REVERSE_S: f32 = 1.8;
+
+/// Brake pedal while backing out (past `wp_vehicle`'s 0.5 auto-reverse threshold; in reverse
+/// it drives the car backwards).
+const UNSTICK_REVERSE_BRAKE: f32 = 0.7;
 
 /// Brake and handbrake that keep a car stopped: above walking pace the requested `brake`; at a
 /// standstill a light pedal plus the handbrake, because `wp_vehicle`'s automatic gearbox
