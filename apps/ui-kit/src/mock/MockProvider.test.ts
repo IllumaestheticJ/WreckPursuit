@@ -125,7 +125,8 @@ describe("mock provider", () => {
   it("assist presets and bindings", () => {
     const m = manual();
     m.send({ type: "settings.assistPreset", preset: "sim" });
-    expect(m.get().settings.assists.tcs).toBe(false);
+    expect(m.get().settings.assists.tcs).toBe("Off");
+    expect(m.get().settings.assists.abs).toBe("Half");
     expect(m.get().settings.damageMode).toBe("Simulation");
     m.send({ type: "settings.assistPreset", preset: "rookie" });
     expect(m.get().settings.damageMode).toBe("Arcade");
@@ -134,7 +135,7 @@ describe("mock provider", () => {
     m.send({ type: "settings.damageMode", mode: "Simulation" });
     expect(m.get().settings.assistPreset).toBe("custom");
     m.send({ type: "settings.assistPreset", preset: "sim" });
-    m.send({ type: "settings.patch", patch: { assists: { ...m.get().settings.assists, tcs: true } } });
+    m.send({ type: "settings.patch", patch: { assists: { ...m.get().settings.assists, tcs: "Half" } } });
     expect(m.get().settings.assistPreset).toBe("custom");
     m.send({ type: "settings.unbind", action: "pause", device: "keyboard" });
     expect(m.get().notice?.kind).toBe("error");

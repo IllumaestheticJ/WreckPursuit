@@ -51,7 +51,7 @@ check(plain && Math.abs(plain.t_full_s - 0.28) < 1e-6 && Math.abs(plain.t_return
 const ride = await page.evaluate(() => window.__wp.sim.rideTune());
 check(ride && Math.abs(ride.arb - 0.25) < 1e-6, `ride lab default ${JSON.stringify(ride)}`);
 const a = await page.evaluate(() => window.__wp.sim.assists(window.__wp.app?.player ?? window.__wp.sim.entities()[0]));
-check(!a.tcs && !a.esc && !a.auto_gears, `assists TCS ${a.tcs} ESC ${a.esc} auto gears ${a.auto_gears}`);
+check(a.tcs === "Off" && !a.esc && !a.auto_gears, `assists TCS ${a.tcs} ESC ${a.esc} auto gears ${a.auto_gears}`);
 check(await page.locator("#drift-w-tune").isVisible(), "tune button shown");
 const sliders = await page.locator("#drift-lab-w input[type=range]").count();
 check(sliders >= 18, `${sliders} sliders (steering + suspension + car / tyre)`);
@@ -116,11 +116,24 @@ check((await page.evaluate(() => window.__wp.sim.plainSteer().velocity_relative)
 await page.locator("#drift-lab-w-vr").uncheck();
 check((await page.evaluate(() => window.__wp.sim.plainSteer().velocity_relative)) === false, "VR checkbox → off");
 const player = () => page.evaluate(() => window.__wp.app.player);
-check(!(await page.locator("#drift-lab-w-tcs").isChecked()) && !(await page.evaluate((id) => window.__wp.sim.assists(id).tcs, await player())), "TCS off by default");
-await page.locator("#drift-lab-w-tcs").check();
-check(await page.evaluate((id) => window.__wp.sim.assists(id).tcs, await player()), "TCS checkbox → assists.tcs on");
-await page.locator("#drift-lab-w-tcs").uncheck();
-check(!(await page.evaluate((id) => window.__wp.sim.assists(id).tcs, await player())), "TCS checkbox → off");
+{
+  const lv = async () => page.evaluate((id) => { const a = window.__wp.sim.assists(id); return [a.tcs, a.abs]; }, await player());
+  const [t0, a0] = await lv();
+  check((await page.locator("#drift-lab-w-tcs").inputValue()) === "Off" && t0 === "Off" && a0 === "Full", `TCS Off / ABS Full by default (${t0} / ${a0})`);
+  await page.locator("#drift-lab-w-tcs").selectOption("Half");
+  await page.locator("#drift-lab-w-abs").selectOption("Off");
+  const [t1, a1] = await lv();
+  check(t1 === "Half" && a1 === "Off", `level selects → assists (${t1} / ${a1})`);
+  await page.locator("#drift-lab-w-tcs").selectOption("Off");
+  await page.locator("#drift-lab-w-abs").selectOption("Full");
+  check((await lv()).join() === "Off,Full", "level selects back to Off / Full");
+  // Handbrake pivot aid knobs (round12 row 109) reach the drift tuning.
+  const pivot0 = await page.evaluate(() => window.__wp.sim.driftTuning().hb_pivot_accel);
+  check(pivot0 === 7, `pivot aid default 7 rad/s² (${pivot0})`);
+  await page.locator("#drift-lab-w-hb_pivot_accel").fill("0");
+  check((await page.evaluate(() => window.__wp.sim.driftTuning().hb_pivot_accel)) === 0, "pivot slider → drift tuning 0");
+  await page.locator("#drift-lab-w-hb_pivot_accel").fill("7");
+}
 // Owner bug: floored from rest, TCS off, no steering, on the lab map → straight (< 3° of yaw),
 // as the reference (clip 5). Restart the lab with the default car, then hold the throttle.
 await page.selectOption("#drift-lab-w select", "parity_rwd_a");

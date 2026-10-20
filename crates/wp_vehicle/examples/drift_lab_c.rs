@@ -26,7 +26,7 @@ fn kb(help: f32) -> AssistProfile {
     // driver holds the gear the automatic box picked while settling. AUTO_GEARS=1: automatic.
     AssistProfile {
         countersteer_help: help,
-        tcs: false,
+        tcs: wp_contracts::TcsLevel::Off,
         esc: false,
         auto_gears: std::env::var("AUTO_GEARS").is_ok(),
         ..base

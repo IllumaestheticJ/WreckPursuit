@@ -57,6 +57,7 @@ pub mod handling;
 pub mod launch;
 pub mod math;
 pub mod metrics;
+pub mod pivot;
 pub mod plain;
 pub mod presets;
 pub mod ride;

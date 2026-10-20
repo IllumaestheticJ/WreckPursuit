@@ -298,3 +298,23 @@ Combined with the clip-8 cockpit finding (the wheel is pulled toward counterstee
 - **Key held** (either direction) during a slide: the wheels are pulled toward the travel direction (velocity-relative), plus the key's offset. Holding the key keeps the drift controllable.
 - **No key:** the wheels return to the body's centre at the normal return rate, with **no** automatic countersteer. A powered RWD slide then keeps rotating **slowly** (a gradual over-rotation into a spin over ~1–2 s, not a snap).
 - So the player must keep a key held to keep the drift. Letting go is a mistake that spins you slowly.
+
+## Grip-driving balance: ours understeers far too much (owner, 2026-10-20)
+
+Owner: our cars "still understeer a ton when not drifting". What the reference clips show in normal grip cornering:
+- **Short taps (0.1–0.25 s) turn the car in promptly.** The nose follows the key at once; there's no "push wide, then bite".
+- **Lifting at turn-in rotates the car** (clip 3 FWD and clips 2/4 RWD), and power in a corner brings the tail round on RWD.
+- **Clip 8 (cockpit, ~96 mph):** a held key takes the wheel to about the same visible angle as at a standstill, and the car turns hard at that speed. Speed sensitivity doesn't appear to cut the road-wheel lock much. Our default "rack" mode cuts lock to 63 % at 100 km/h and 43 % at 150, which on its own produces strong understeer at speed.
+
+Targets:
+- near-neutral steady-state balance (understeer gradient ≈ 0–1 deg/g in a 60 m circle at 60 and 100 km/h, measured with the parity suite)
+- a lift-off yaw kick at turn-in
+- RWD power-on oversteer
+- tap response matching the reference (heading change starting within ~0.15 s)
+
+Suspects, in order:
+1. the rack-side speed sensitivity (try "tyre" mode or a much gentler curve)
+2. front vs rear tyre peak grip / cornering stiffness and load sensitivity
+3. the roll-stiffness split, since lab bars ×0.25 and data ARB front/rear bias both matter
+4. max lock
+5. static weight distribution and CoG height in the car data

@@ -766,6 +766,53 @@ priority. So the lab default stays the step-3 ride, and slow weight is a one-cli
 owner's A/B. Tyre-slip owns making the hold robust; once it is, slow weight can become the
 default.
 
+## Merge of lead/round12 (93d8c9f6) — TCS / ABS levels, handbrake pivot aid
+
+Same lead rules as the 9c947ebb merge (W lineage wins for drift / keyboard steering; A's drift
+hold, throttle smoothing and lab UI stay dropped), plus: **keep A's handbrake pivot aid.**
+
+1. **Pivot aid kept** (`wp_vehicle::pivot`, ws/vehicle 180b93ad / 89af45cd, owner row 109). A
+   put its knobs on A's `steering::DriftTuning`, which W does not have; they now live on W's
+   `drift::DriftTuning` (`hb_pivot_accel` 7 rad/s², `hb_pivot_cap` 3 rad/s — A's defaults), so
+   the process-wide drift-tuning override carries them. The yaw torque uses the body's yaw
+   inertia (the ride lab's yaw-inertia scale included). `hb_held_s` is in snapshots (W format
+   12; A had used 9). Also kept: the backwards-rolling clutch fix and the row-109 tests.
+2. **W panel handbrake row:** "handbrake pivot aid" (0–15 rad/s², 0 = off) and "pivot aid yaw
+   cap" sliders (`#drift-lab-w-hb_pivot_accel` / `-hb_pivot_cap`), saved per viewer
+   (`wp.driftLabW.pivot`). The Drift Lab C panel shows them too (it lists every DriftTuning
+   field).
+3. **TCS / ABS Off / Half / Full** (65addf7c, a2dbb48f): taken whole (contract, assists,
+   brakes, presets, UI selectors, HUD tags). Round12 removed the slide-throttle feathering, so
+   W's non-plain keyboard path now uses `throttle_filter_strength` (no pedal filter with TCS
+   Off). The W panel's TCS checkbox became **TCS and ABS selects** (`#drift-lab-w-tcs` /
+   `#drift-lab-w-abs`; default TCS Off / ABS Full; a saved old checkbox "1" reads as Full).
+4. **Tests adjusted, with numbers** (all are the keyboard steering lineage, not physics):
+   - `handbrake.rs` `a_hairpin_pivot_is_caught_with_throttle_and_opposite_lock`: on W's
+     keyboard lineage the rotation stops 0.55–0.93 s after the release (A: 0.43–0.60 s);
+     still caught and driving out. Limit 0.8 → 1.0 s.
+   - `the_clip_2_hairpin_pivots_with_the_aid_and_is_caught`: 139–143° by 1.2 s (A 139–145°);
+     kestrel_ts (AWD) calms after ~1.0 s of opposite lock, past A's 3 s window, so the run is
+     0.8 s longer (limit unchanged).
+   - `drift_lab_b` `held_counter_key_with_full_throttle_holds_too`: sperber_32 now holds 24.6°
+     mean (TCS Off has no pedal filter since round12); range 25–45° → 24–45°.
+5. **Measured, clip 2 (50 km/h, key + handbrake 1 s, then throttle, then opposite lock):**
+
+   | | aid 7 rad/s² | aid off |
+   |---|---|---|
+   | W lab (plain rack + spin model), parity_rwd_d | 137° by 1.2 s, caught at once | 83°, not calm |
+   | W lab, shiro / rampart / kestrel | 136–139°, caught 0–0.7 s | 82–91° |
+   | keyboard default (C lineage), 4 cars | 139–143°, caught 0–1.0 s | 87–102° |
+
+   The aid gives the reference's fast pivot in the W lab too (reference 150–180° in ~1.2 s).
+6. **Goldens:** only the two conflicted parity goldens (rampart_counter_drift,
+   shiro_handbrake_10mph) differ from round12's bless. With their assists switched to `wheel`
+   both hash identically here and on round12, so the difference is the keyboard path (W
+   steering lineage + the pivot aid, which is keyboard-only). Re-blessed.
+7. **Reds after the merge:** round12's own (`wp_opponent`
+   `wanted_ai_racer_flees_police_through_the_city`) and the known C + round12 one
+   (`handbrake_stabs_add_rotation_and_drive_comes_back`, drive back 0.125 s vs 0.1 s).
+   Lockstep passes.
+
 ## Contract change requests
 
 None (`AssistProfile` unchanged; the lab's settings live in `wp_vehicle::plain::PlainSteer`).

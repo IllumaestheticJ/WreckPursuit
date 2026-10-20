@@ -7,7 +7,7 @@
 import type * as THREE from "three";
 import { buildCourse } from "./drift_lab_b";
 import { setRawKeyboard } from "./input";
-import type { sim as Sim } from "./wasm/sim";
+import { assistLevel, type AssistLevel, type sim as Sim } from "./wasm/sim";
 
 /** Scenario name of the lab (sim.scenario().name). */
 export const DRIFT_LAB_W = "drift_lab_w";
@@ -91,7 +91,15 @@ const STORE = "wp.driftLabW.steer";
 // v2: the lab's default became the spin model (launches straight on the map's road crown); an
 // older saved "tyre data" must not override it.
 const CAR_STORE = "wp.driftLabW.car.v2";
+// TCS / ABS levels (round12 Off / Half / Full). The old "1" / "0" TCS checkbox value still reads.
 const TCS_STORE = "wp.driftLabW.tcs";
+const ABS_STORE = "wp.driftLabW.abs";
+// Handbrake pivot aid knobs (round12 row 109: `hb_pivot_accel` / `hb_pivot_cap` of the drift tuning).
+const PIVOT_STORE = "wp.driftLabW.pivot";
+const PIVOT_FIELDS: Record<string, { label: string; min: number; max: number; step: number; unit: string; hint: string }> = {
+  hb_pivot_accel: { label: "handbrake pivot aid", min: 0, max: 15, step: 0.5, unit: "rad/s²", hint: "round12 row 109: yaw acceleration added while the handbrake AND a steer key are held (builds over 0.4 s, full ≤ 55 km/h, gone at 75 km/h); 0 = off, pure tyre physics" },
+  hb_pivot_cap: { label: "pivot aid yaw cap", min: 0.5, max: 6, step: 0.25, unit: "rad/s", hint: "the aid fades out as the yaw rate toward the key reaches this (never adds to a fast spin)" },
+};
 const RIDE_STORE = "wp.driftLabW.ride";
 const pct = (x: number) => `${Math.round((x ?? 0) * 100)}%`;
 
@@ -195,26 +203,55 @@ export class DriftLabWPanel {
       } catch {
         this.sim.carTuneSet(JSON.stringify(this.sim.carTuneDefaults().spin));
       }
+      this.applyPivot();
       this.build();
     } else {
+      this.sim.driftTuningSet("");
       this.sim.plainSteerSet("");
       this.sim.rideTuneSet("");
       this.sim.carTuneSet("");
     }
   }
 
-  /** TCS on (the existing on/off assist) — the panel checkbox, default off (the owner's
-   * reference) until the Off / Half / Full levels land. */
-  private tcs(): boolean {
+  /** TCS level (panel select), default Off (the owner's reference). The old checkbox's
+   * "1" reads as Full. */
+  private tcs(): AssistLevel {
     try {
-      return localStorage.getItem(TCS_STORE) === "1";
+      const v = localStorage.getItem(TCS_STORE);
+      return v === "1" ? "Full" : assistLevel(v, "Off");
     } catch {
-      return false;
+      return "Off";
     }
   }
 
+  /** ABS level (panel select), default Full. */
+  private abs(): AssistLevel {
+    try {
+      return assistLevel(localStorage.getItem(ABS_STORE), "Full");
+    } catch {
+      return "Full";
+    }
+  }
+
+  /** Saved handbrake pivot knobs (only those two keys), or {}. */
+  private pivot(): Record<string, number> {
+    try {
+      const v = JSON.parse(localStorage.getItem(PIVOT_STORE) ?? "{}") as Record<string, unknown>;
+      const out: Record<string, number> = {};
+      for (const k of Object.keys(PIVOT_FIELDS)) if (typeof v[k] === "number") out[k] = v[k] as number;
+      return out;
+    } catch {
+      return {};
+    }
+  }
+
+  /** Drift tuning = the defaults + the saved pivot knobs (plain steering bypasses the rest). */
+  private applyPivot(p: Record<string, number> = this.pivot()): void {
+    this.sim.driftTuningSet(JSON.stringify({ ...this.sim.driftTuningDefaults(), ...p }));
+  }
+
   /** The lab's assists (call after any assist preset is applied): the owner's reference
-   * settings — TCS off (panel checkbox), ESC off, ABS on, manual gears (automatic clutch), no pedal filters, no
+   * settings — TCS Off / ABS Full (panel selects), ESC off, manual gears (automatic clutch), no pedal filters, no
    * countersteer help (it is bypassed by plain steering anyway). */
   applyAssists(): void {
     if (!this.active) return;
@@ -222,7 +259,7 @@ export class DriftLabWPanel {
     const a = this.sim.assists(id);
     this.sim.setAssists(id, {
       ...a,
-      abs: true,
+      abs: this.abs(),
       tcs: this.tcs(),
       esc: false,
       countersteer_help: 0,
@@ -281,21 +318,49 @@ export class DriftLabWPanel {
         document.createElement("span"),
       );
     }
-    // TCS (the existing on/off assist) until Off / Half / Full lands.
-    {
-      const input = document.createElement("input");
-      input.type = "checkbox";
-      input.id = "drift-lab-w-tcs";
-      input.checked = this.tcs();
-      input.onchange = () => {
+    // TCS / ABS levels (round12 Off / Half / Full).
+    for (const [name, id, store, get, hint] of [
+      ["TCS", "drift-lab-w-tcs", TCS_STORE, () => this.tcs(), "traction control Off / Half / Full (round12 levels); Off = the raw throttle key, as the owner drives"],
+      ["ABS", "drift-lab-w-abs", ABS_STORE, () => this.abs(), "ABS Off / Half / Full (round12 levels); default Full"],
+    ] as const) {
+      const sel = document.createElement("select");
+      sel.id = id;
+      for (const l of ["Off", "Half", "Full"]) sel.add(new Option(l, l));
+      sel.value = get();
+      sel.onchange = () => {
         try {
-          localStorage.setItem(TCS_STORE, input.checked ? "1" : "0");
+          localStorage.setItem(store, sel.value);
         } catch {
           /* ignore */
         }
         this.applyAssists();
       };
-      row("TCS", "traction control on / off (the reference's Off / Half / Full comes later); default off as the owner drives", input, document.createElement("span"));
+      row(name, hint, sel, document.createElement("span"));
+    }
+    // Handbrake row: round12's pivot aid (row 109), kept by the lead for W.
+    for (const [key, f] of Object.entries(PIVOT_FIELDS)) {
+      const defaults = this.sim.driftTuningDefaults() as Record<string, number>;
+      const value = this.pivot()[key] ?? defaults[key];
+      const input = document.createElement("input");
+      input.type = "range";
+      input.id = `drift-lab-w-${key}`;
+      input.min = String(f.min);
+      input.max = String(f.max);
+      input.step = String(f.step);
+      input.value = String(value);
+      const val = document.createElement("span");
+      val.textContent = `${Number(value).toFixed(2)} ${f.unit}`;
+      input.oninput = () => {
+        val.textContent = `${Number(input.value).toFixed(2)} ${f.unit}`;
+        const p = { ...this.pivot(), [key]: Number(input.value) };
+        try {
+          localStorage.setItem(PIVOT_STORE, JSON.stringify(p));
+        } catch {
+          /* ignore */
+        }
+        this.applyPivot(p);
+      };
+      row(f.label, `${f.hint} (default ${defaults[key]})`, input, val);
     }
     // Speed sensitivity A/B (clip 8): lock shrinks with speed (rack) vs full lock, tyres limit.
     {

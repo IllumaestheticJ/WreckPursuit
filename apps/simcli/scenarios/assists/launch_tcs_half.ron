@@ -1,0 +1,18 @@
+// TCS level Half (owner rows 104/105): heavy RWD muscle car, throttle floored from rest in 1st,
+// manual box, no steering. Owner's keyboard assists otherwise (ABS Full, ESC off).
+(
+    name: "assists_launch_tcs_half",
+    mode: Arcade,
+    seed: 1,
+    assists: custom((abs: "Full", tcs: "Half", esc: false, steer_speed_sensitivity: 0.75, countersteer_help: 0.6, throttle_filter: 0.7, brake_filter: 0.6, auto_gears: false, auto_clutch: true)),
+    duration_s: 4.0,
+    entities: [
+        (
+            id: "car",
+            car: "rampart_50",
+            inputs: [(t_s: 0.0, input: (throttle: 1.0))],
+        ),
+    ],
+    // Measured 2026-10-20: slip held ~0.3 through 1st (3.3 s above 0.2), 17.7 m/s, heading 0.0°.
+    expect: [metric(name: "wheelspin_s", min: 2.8, max: 3.7), metric(name: "max_heading_change_deg", min: 0.0, max: 3.0), speed_at(t_s: 4.0, min: 15.0, max: 20.0)],
+)

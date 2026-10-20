@@ -18,7 +18,9 @@
 //!                u8 flags (1 gear_up, 2 gear_down, 4 horn, 8 headlights, 16 siren), u8 tool_use
 //! ops (v2+)    u32 count, then per op: u64 tick, u16 entity index, u8 kind, payload:
 //!                0 reset: –
-//!                1 assists: u8 flags (1 abs, 2 tcs, 4 esc, 8 auto_gears, 16 auto_clutch),
+//!                1 assists: u8 flags (1 abs, 2 tcs, 4 esc, 8 auto_gears, 16 auto_clutch,
+//!                  32 abs is Half, 64 tcs is Half; abs / tcs set without their Half bit =
+//!                  Full, so files from before the levels read as Full / Off),
 //!                  f32 steer_speed_sensitivity, countersteer_help, throttle_filter, brake_filter
 //!                2 mode: u8 (0 Arcade, 1 Simulation)
 //!                3 repair: –
@@ -33,7 +35,7 @@
 //! The testbed (prompt 04) records the same format: setup scenario + the inputs and ops it
 //! applied. Version 1 files (no ops section) still decode.
 
-use wp_contracts::{AssistProfile, DamageMode, VehicleInput, PHYSICS_DT};
+use wp_contracts::{AbsLevel, AssistProfile, DamageMode, TcsLevel, VehicleInput, PHYSICS_DT};
 
 use crate::data::DataSource;
 use crate::run::{run, RunOptions, Selection};
@@ -198,11 +200,13 @@ impl Replay {
                 OpKind::Assists(p) => {
                     w.push(1);
                     w.push(
-                        p.abs as u8
-                            | (p.tcs as u8) << 1
+                        p.abs.is_on() as u8
+                            | (p.tcs.is_on() as u8) << 1
                             | (p.esc as u8) << 2
                             | (p.auto_gears as u8) << 3
-                            | (p.auto_clutch as u8) << 4,
+                            | (p.auto_clutch as u8) << 4
+                            | ((p.abs == AbsLevel::Half) as u8) << 5
+                            | ((p.tcs == TcsLevel::Half) as u8) << 6,
                     );
                     for f in [
                         p.steer_speed_sensitivity,
@@ -316,8 +320,16 @@ impl Replay {
                     1 => {
                         let flags = r.take(1)?[0];
                         OpKind::Assists(AssistProfile {
-                            abs: flags & 1 != 0,
-                            tcs: flags & 2 != 0,
+                            abs: match (flags & 1 != 0, flags & 32 != 0) {
+                                (false, _) => AbsLevel::Off,
+                                (true, true) => AbsLevel::Half,
+                                (true, false) => AbsLevel::Full,
+                            },
+                            tcs: match (flags & 2 != 0, flags & 64 != 0) {
+                                (false, _) => TcsLevel::Off,
+                                (true, true) => TcsLevel::Half,
+                                (true, false) => TcsLevel::Full,
+                            },
                             esc: flags & 4 != 0,
                             auto_gears: flags & 8 != 0,
                             auto_clutch: flags & 16 != 0,
@@ -657,6 +669,15 @@ mod tests {
                     op: OpKind::Assists(AssistProfile::gamepad_default()),
                 },
                 OpEvent {
+                    tick: 1,
+                    entity: 0,
+                    op: OpKind::Assists(AssistProfile {
+                        abs: AbsLevel::Half,
+                        tcs: TcsLevel::Half,
+                        ..AssistProfile::wheel_default()
+                    }),
+                },
+                OpEvent {
                     tick: 2,
                     entity: 0,
                     op: OpKind::Mode(DamageMode::Simulation),
@@ -699,6 +720,23 @@ mod tests {
     fn encode_decode_round_trip() {
         let r = sample();
         assert_eq!(Replay::decode(&r.encode()).unwrap(), r);
+    }
+
+    #[test]
+    fn legacy_assist_flags_read_as_full_or_off() {
+        // A pre-level file: abs + tcs bits only (no Half bits) → Full / Full; none → Off.
+        let mut r = sample();
+        r.ops = vec![OpEvent {
+            tick: 0,
+            entity: 0,
+            op: OpKind::Assists(AssistProfile::keyboard_default()),
+        }];
+        let bytes = r.encode();
+        let back = Replay::decode(&bytes).unwrap();
+        let OpKind::Assists(p) = back.ops[0].op else {
+            panic!("assists op")
+        };
+        assert_eq!((p.abs, p.tcs), (AbsLevel::Full, TcsLevel::Full));
     }
 
     #[test]

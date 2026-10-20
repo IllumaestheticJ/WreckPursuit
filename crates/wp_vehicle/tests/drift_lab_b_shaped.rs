@@ -15,7 +15,7 @@ fn shaping_holds_the_powerful_car_and_flooring_still_spins() {
     let car = wp_contracts::load_car(p).unwrap();
     let kb = AssistProfile {
         countersteer_help: 0.6,
-        tcs: false,
+        tcs: wp_contracts::TcsLevel::Off,
         esc: false,
         ..AssistProfile::keyboard_default()
     };

@@ -345,8 +345,8 @@ impl AssistSpec {
             AssistSpec::Wheel => AssistProfile::wheel_default(),
             AssistSpec::Ai => AssistProfile::ai(),
             AssistSpec::Off => AssistProfile {
-                abs: false,
-                tcs: false,
+                abs: wp_contracts::AbsLevel::Off,
+                tcs: wp_contracts::TcsLevel::Off,
                 esc: false,
                 steer_speed_sensitivity: 0.0,
                 countersteer_help: 0.0,

@@ -19,13 +19,13 @@ with assists and unfiltered on a wheel. Deterministic, 240 Hz with 2 sub-steps.
 | `engine.rs` | torque curve, idle controller, soft rev limiter, engine braking, turbo lag (`EngineExtras`) |
 | `drivetrain.rs` | gearbox (manual/auto: load-based schedule, kickdown, corner hold, rev-matched clutch shifts, auto-reverse), automatic clutch / launch control, torque converter |
 | `diff.rs` | differentials, axle + AWD centre: open, clutch-pack LSD (1 / 1.5 / 2-way), viscous, helical (torque-sensing), active e-diff, locked; per-car setups from `data/cars/differentials.toml` |
-| `brakes.rs` | bias, ABS (~15 Hz release cycle) |
+| `brakes.rs` | bias, ABS Off / Half / Full (~15 Hz release cycle; Half releases at 3× peak slip, Full at 1.4×) |
 | `steering.rs` | slip-targeted lock + rack rate (keyboard/gamepad), self-aligning countersteer help (0–100 % slider), countersteer lock, Ackermann, toe, damage pull, FWD torque steer |
 | `drift.rs` | Drift Lab B / C (rows 90 / 91 / 104 / 106): slide onset tuning + runtime override, intent modes (straighten / hold = countersteer key / angle-up = key into the turn / exceeded), opt-in throttle shaping and lift softening (default off), slide-angle envelope; steering angle (and opt-in throttle) only |
 | `drift_lab.rs` | scripted slide drivers for Drift Lab B / C (`kick_catch`, `drift_run`); tables via `--example drift_lab_c` |
 | `twitch_lab.rs` | keyboard twitch measurement (row 102): closed-loop key-tapping driver through lane changes, slalom, sweeper, kerb hit; tables via `--example drift_twitch` |
-| `assists.rs` | pedal filters, TCS (throttle cut + brake-based traction control), ESC (lagged ~1°/g reference) |
-| `presets.rs` | one-click `AssistPreset` Rookie / Street / Sim (GDD §6): damage mode + `AssistProfile` per input device; `matching` detects a customised setup |
+| `assists.rs` | pedal filters (none with TCS Off), TCS Off / Half / Full (throttle cut + brake-based traction control; Half = integral slip hold at 3.6× peak), ESC (lagged ~1°/g reference) |
+| `presets.rs` | one-click `AssistPreset` Rookie (TCS Full, ABS Full) / Street (TCS Half, ABS Full) / Sim (TCS Off, ABS Half) (GDD §6): damage mode + `AssistProfile` per input device; `matching` detects a customised setup |
 | `aero.rs` | drag, axle lift/downforce |
 | `ffb.rs` | rack torque (aligning torque + caster trail), road rumble, damper |
 | `rig.rs` | single-car Rapier test rig (same per-tick sequence as `wp_sim`) |
@@ -162,9 +162,9 @@ purist" presets are bit-identical to the plain model (tested against pinned hash
   the front axle's travel angle + the slip margin, blended by how much the rear slides (0.06 →
   0.16 rad). Grip cornering is untouched (handling-balance tests unchanged).
 - *ESC* stands down during the handbrake hold too.
-- *Slide throttle* (TCS off, throttle filter on, i.e. keyboard): unchanged — while sliding, the
-  pedal filter is up to 2.5× slower and the throttle target feathered by up to 35 % unless the
-  driver steers into the turn.
+- *Slide throttle*: **removed** (owner row 104, `lead/assist-levels`). It feathered a
+  keyboard throttle by up to 35 % in a slide with TCS off; TCS Off now means the throttle the
+  driver presses (no pedal filter either, see the assist levels below).
 - *Handbrake declutch* (row 56): with the automatic clutch or a converter box a pulled
   handbrake decouples the driveline (rears lock, engine idles, AWD fronts do not drag the
   rears, gear kept); after release the clutch re-engages once the driven wheels spin back up.
