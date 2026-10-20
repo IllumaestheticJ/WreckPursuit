@@ -5,8 +5,9 @@
 // ?bench=24 spawns a 24-car benchmark, ?cam=orbit picks a camera, ?replay=last plays the last
 // stored replay, ?city=procedural_12x12 picks the city (default vesper_v2), ?chase=1 starts the
 // city chase (?chase=rain the rainy night), ?weather=heavy_rain picks the weather.
+// ?race=<id> starts a street race (&autopilot=1: the AI drives the player's car).
 import { loadWasm, sim, type DriverInput, type Scenario, type ScenarioResult } from "./wasm/sim";
-import { META_STRIDE, STATE_STRIDE, S, T, VEHICLE_KIND, W } from "./wasm/layout";
+import { META_STRIDE, RACE_STRIDE, RI, RS, STATE_STRIDE, S, T, VEHICLE_KIND, W } from "./wasm/layout";
 import { installKeyboard, isHeld, readInput, toggleHeadlights, type InputSource } from "./input";
 import { layers, store, bytesToBase64, base64ToBytes } from "./settings";
 import { SceneView } from "./scene";
@@ -22,6 +23,8 @@ import { RunEndView } from "./ui/runEnd";
 import { CareerGarageView } from "../../ui-kit/src/garage/CareerGarage";
 import { downloadText, keepUnreadable, loadCareerText, saveCareerText, saveFileName } from "../../ui-kit/src/garage/store";
 import type { CareerApi, CareerView, RunKind } from "../../ui-kit/src/garage/types";
+import { RaceView, type RaceFrame } from "./ui/race";
+import { RaceMarker, parseCourse } from "./race_marker";
 import { RealTimeMeter } from "./rtf";
 import { WeatherView } from "./render/weather";
 
@@ -182,6 +185,17 @@ async function main(): Promise<void> {
   };
   let careerSavedSeq = -1;
   let careerSavedAt = 0;
+  // Street races (workstream 15): picker, HUD, results, and the next gate in the world.
+  const raceEl = document.createElement("div");
+  raceEl.id = "ui-race";
+  raceEl.style.cssText = "position:absolute;inset:0;pointer-events:none;";
+  overlay.appendChild(raceEl);
+  const raceMarker = new RaceMarker(scene.world);
+  const raceView = new RaceView(raceEl, {
+    start: (id) => startRace(id),
+    freeDrive: () => startFreeDrive(undefined, undefined, true),
+    list: () => sim.raceList(($("car") as HTMLSelectElement).value || DEFAULT_CAR, ($("mode") as HTMLSelectElement).value),
+  });
   const citySel = $("city-map") as HTMLSelectElement;
   const cityParam = params.get("city");
   if (cityParam && CITY_IDS.includes(cityParam)) citySel.value = cityParam;
@@ -220,6 +234,70 @@ async function main(): Promise<void> {
     if (app.scenarioFile) ($("sc-select") as HTMLSelectElement).value = app.scenarioFile;
     syncAssistBoxes();
     rig.setMode(rig.mode, app.views.get(app.focus)?.root);
+    resetRace(sc, ids);
+  };
+
+  /** Race sessions (scenario `race_<id>`): driver names, the course, the HUD. */
+  const resetRace = (sc: { name: string; mode: string; entities: { car: string }[] }, ids: number[]) => {
+    const info = sim.raceInfo();
+    const id = info.length > 0 && sc.name.startsWith("race_") ? sc.name.slice(5).replace("+autopilot", "") : "";
+    const names = new Map<number, string>();
+    let course = null;
+    if (id) {
+      const card = sim.raceList(sc.entities[0]?.car ?? DEFAULT_CAR, sc.mode).find((c) => c.id === id);
+      ids.forEach((e, i) => names.set(e, i === 0 ? "You" : (card?.drivers[i - 1]?.name ?? `#${e}`)));
+      course = parseCourse(sim.raceCourse());
+    }
+    raceMarker.setCourse(course);
+    raceView.reset(id, names, course);
+  };
+
+  /** Start street race `id` (the picker's "Race" button, `?race=`, "Race again"). */
+  const startRace = (
+    id: string,
+    car = ($("car") as HTMLSelectElement).value || DEFAULT_CAR,
+    mode = ($("mode") as HTMLSelectElement).value,
+    autopilot = params.get("autopilot") === "1",
+  ) => {
+    app.scenarioFile = null;
+    app.scenario = null;
+    app.result = null;
+    app.bench = null;
+    sim.raceStart(id, car, mode, autopilot);
+    rebuildViews();
+    applyAssistPreset(app.source);
+    rig.setMode(rig.preferred, app.views.get(app.focus)?.root);
+  };
+
+  /** Per-frame race state for the HUD and the gate marker. */
+  const raceFrame = (cur: Float32Array, meta: Float32Array, tS: number, withReport: boolean): void => {
+    const info = sim.raceInfo();
+    if (info.length === 0) return;
+    const standings = sim.raceStandings();
+    const player = info[RI.player];
+    let me = -1;
+    for (let o = 0; o + RACE_STRIDE <= standings.length; o += RACE_STRIDE) if (standings[o + RS.entity] === player) me = o;
+    const yawOf = (o: number) => {
+      const [qx, qy, qz, qw] = [cur[o + S.rot], cur[o + S.rot + 1], cur[o + S.rot + 2], cur[o + S.rot + 3]];
+      return Math.atan2(-2 * (qx * qy - qw * qz), 1 - 2 * (qx * qx + qz * qz));
+    };
+    let pose: RaceFrame["player"] = null;
+    const others: RaceFrame["others"] = [];
+    for (let o = 0, i = 0; o < cur.length; o += STATE_STRIDE, i++) {
+      const id = cur[o + S.entity];
+      const kind = meta[i * META_STRIDE + 1];
+      if (id === player) pose = { pos: [cur[o + S.pos], cur[o + S.pos + 1]], yaw: yawOf(o) };
+      else if (kind === VEHICLE_KIND.aiRacer || kind === VEHICLE_KIND.police)
+        others.push([id, cur[o + S.pos], cur[o + S.pos + 1], yawOf(o), kind === VEHICLE_KIND.police ? 2 : 1]);
+    }
+    const report = withReport || raceView.report ? sim.raceResult() : null;
+    raceView.update({ info, standings, report, player: pose, others }, performance.now());
+    const done = me < 0 || standings[me + RS.status] > 0 || info[RI.phase] === 2;
+    const next = done ? -1 : standings[me + RS.nextGate];
+    const gates = info[RI.gates];
+    const closed = info[RI.closed] > 0.5;
+    const final = closed ? next === 0 && standings[me + RS.lap] >= info[RI.laps] : next === gates - 1;
+    raceMarker.update(next, final, tS);
   };
 
   /** One view per sim vehicle — scenario cars plus whatever the sim spawns itself (police
@@ -325,6 +403,7 @@ async function main(): Promise<void> {
     const car = sc.entities[0]?.car;
     if (sc.name === "city_chase") startCityChase(car, sc.mode);
     else if (sc.name === "city_chase_rainy_night") startCityChase(car, sc.mode, true);
+    else if (raceView.raceId) startRace(raceView.raceId, car, sc.mode);
     else startFreeDrive(car, sc.mode);
   };
 
@@ -432,6 +511,7 @@ async function main(): Promise<void> {
   $("sc-chase").onclick = () => (careerOn() ? startCareerRun("chase") : startCityChase());
   $("sc-garage").onclick = () => openGarage();
   addEventListener("pagehide", persistCareer);
+  $("sc-races").onclick = () => raceView.openPicker();
   ($("mode") as HTMLSelectElement).onchange = (e) => {
     // Live switch (Sim::set_mode_table), logged as a replay op; existing damage is kept.
     // A career run keeps the career's mode (pick it with "New career" in the garage).
@@ -591,6 +671,8 @@ async function main(): Promise<void> {
   if (scParam) {
     scSel.value = scParam;
     await runScenario(scParam, Number(params.get("speed") ?? 0));
+  } else if (params.get("race")) {
+    startRace(params.get("race")!, DEFAULT_CAR);
   } else if (params.get("chase")) {
     startCityChase("debug_sedan", undefined, params.get("chase") === "rain");
   } else {
@@ -680,6 +762,7 @@ async function main(): Promise<void> {
         }
       }
     }
+    if (raceView.raceId) raceFrame(cur, meta, tS, frameNo % 6 === 0);
     scene.update(dt, sim.intents());
     // Promoted (physical) agents are drawn as sim vehicles once the sim spawns them.
     scene.updateAgents(sim.trafficAgents(), physicalTraffic);
@@ -891,6 +974,9 @@ async function main(): Promise<void> {
     openGarage,
     startCareerRun,
     persistCareer,
+    startRace,
+    raceView,
+    raceMarker,
     lookFrom: (eye: [number, number, number], target: [number, number, number]) => rig.lookFrom(eye, target),
   };
   requestAnimationFrame(frame);
