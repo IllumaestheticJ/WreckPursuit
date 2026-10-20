@@ -176,10 +176,12 @@ where one of them did move. Result identical (all 82 goldens matched after this 
 |---|---|
 | `cargo fmt --all -- --check` | pass |
 | `cargo clippy --workspace --all-targets -- -D warnings` | pass |
-| `cargo test --workspace --no-fail-fast` | see below |
+| `cargo test --workspace --no-fail-fast` | 147 test binaries ok; **4 failures, all identical on `lead/round12`** (re-run there): `wp_race` `race_picker` `hollins_hill_sprint` ("only 2 of 4 finished"), `loop9_circuit`, `lantern_checkpoint_draws_the_police` (the set browser-perf / art / props list as pre-existing) and `wp_wasm` `crash_replay_tests::race_crash_replays_with_the_judge_and_no_crash_on_the_grid` ("rear-ending a stopped racer is a big crash") |
 | `simcli run apps/simcli/scenarios` | 82 / 82 pass |
-| `simcli goldens` | 82 / 82 after the `[bless]` |
+| `simcli goldens` | 82 / 82 after the `[bless]` (and after the resting-props commit, unchanged) |
+| debug vs release (`tools/profile-determinism/compare.sh`: default set + `city/sidewalk_mount_*`, `city/loop_crest_at_limit`, `golden/city_chase`) | 22 / 22 identical |
 | native vs wasm (`tools/wasm-determinism/compare.sh`, subset above) | 34 / 34 |
 | `cargo build --target wasm32-unknown-unknown -p wp_wasm` | pass |
 | `npx tsc --noEmit` | pass |
-| `e2e` | see below |
+| `npm run e2e`: `e2e/run.mjs` | 206 checks pass; **fails only the perf step** on the machine-speed targets (RTF ≥ 0.9, ≤ 12 slow frames: raster-bound here, see Result) and the steady-allocation target (TypeScript side, not touched; same as browser-perf's gates). Every structural perf check passes |
+| `e2e/race.mjs` · `e2e/countersteer.mjs` | 19 / 19 · 9 / 9 |
