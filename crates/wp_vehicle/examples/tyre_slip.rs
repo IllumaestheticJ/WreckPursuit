@@ -397,6 +397,61 @@ fn sample(u: &mut impl FnMut(f32, f32) -> f32) -> CarTune {
     }
 }
 
+/// `vrsearch [n]`: seeded random search over Drift Lab W's velocity-relative steering knobs
+/// (`PlainSteer`), with `VR_TYRE=spin` (spin model) or the shipped tyres, ranked by [`robust`]
+/// minus 0.3 per % of grip change past 5 %.
+fn vrsearch(n: usize) {
+    let set = robust_set();
+    let d = car("parity_rwd_d");
+    plain::set_override(Some(PlainSteer::default()));
+    car_lab::set_override(Some(CarTune {
+        side_floor: 0.0,
+        ..CarTune::default()
+    }));
+    let g0 = grip(&d);
+    let tyre = if std::env::var("VR_TYRE").as_deref() == Ok("spin") {
+        spin()
+    } else {
+        CarTune::default()
+    };
+    car_lab::set_override(Some(tyre));
+    let mut rng = wp_math::Rng::new(5);
+    let mut rows = Vec::new();
+    for _ in 0..n {
+        let r: Vec<f32> = (0..5).map(|_| rng.next_f32()).collect();
+        let from = 5.0 + 20.0 * r[1];
+        let p = PlainSteer {
+            velocity_relative: true,
+            align_gain: 0.2 + 1.0 * r[0],
+            align_from_deg: from,
+            align_full_deg: from + 5.0 + 25.0 * r[2],
+            t_align_s: 0.15 + 0.7 * r[3],
+            slide_key_gain: 1.2 * r[4],
+            ..PlainSteer::default()
+        };
+        plain::set_override(Some(p));
+        let (mut sc, v) = robust(&set);
+        let worst = grip(&d)
+            .iter()
+            .zip(&g0)
+            .map(|(a, b)| ((a - b) / b.abs().max(1e-3) * 100.0).abs())
+            .fold(0.0f32, f32::max);
+        sc -= 0.3 * (worst - 5.0).max(0.0);
+        rows.push((sc, p, worst, v));
+    }
+    plain::set_override(Some(PlainSteer::default()));
+    car_lab::set_override(None);
+    rows.sort_by(|a, b| b.0.total_cmp(&a.0));
+    for (sc, p, worst, v) in rows.iter().take(6) {
+        let held = v.iter().filter(|h| h.m.held).count();
+        let band = v.iter().filter(|h| h.m.held && h.band_s >= 2.0).count();
+        println!(
+            "score {sc:.2} held {held}/27 (band ≥ 2 s {band}) grip {worst:.1} % PLAIN='{}'",
+            serde_json::to_string(p).unwrap()
+        );
+    }
+}
+
 /// `search [n]`: seeded random search, ranked by [`robust`].
 fn search(n: usize) {
     let set = robust_set();
@@ -735,7 +790,16 @@ fn matrix() {
     let set = robust_set();
     let d = car("parity_rwd_d");
     car_lab::set_override(None);
+    // Grip reference: the old tyres (floor 0) with the default plain steering.
+    let plain_now = plain::active();
+    plain::set_override(Some(PlainSteer::default()));
+    car_lab::set_override(Some(CarTune {
+        side_floor: 0.0,
+        ..CarTune::default()
+    }));
     let g0 = grip(&d);
+    car_lab::set_override(None);
+    plain::set_override(plain_now);
     let snap = hold_snapshot(&d);
     println!("| config | held / 27 | held cases (car entry° g) | grip max |Δ| % (worst) | basin edge → eq ° (width) | straight launch yaw < 3° (rwd a/b/d × 0° / 2° slope) |");
     println!("|---|---|---|---|---|---|");
@@ -1026,7 +1090,12 @@ fn trace(id: &str) {
 }
 
 fn main() {
-    plain::set_override(Some(PlainSteer::default()));
+    // PLAIN='{"velocity_relative":true}': Drift Lab W's plain steering constants (missing
+    // fields = defaults).
+    let plain_env: PlainSteer = std::env::var("PLAIN").map_or(PlainSteer::default(), |j| {
+        serde_json::from_str(&j).expect("PLAIN json")
+    });
+    plain::set_override(Some(plain_env));
     if std::env::var("RIDE").as_deref() != Ok("data") {
         ride_lab::set_override(Some(RideTune::lab_default()));
     }
@@ -1034,6 +1103,7 @@ fn main() {
     let what = if args.first().is_some_and(|a| {
         [
             "table", "grid", "trace", "search", "refine", "phase", "matrix", "launch", "roster",
+            "vrsearch",
         ]
         .contains(&a.as_str())
     }) {
@@ -1058,6 +1128,7 @@ fn main() {
         "matrix" => matrix(),
         "launch" => launch_table(),
         "roster" => roster(),
+        "vrsearch" => vrsearch(args[0].parse().unwrap_or(200)),
         _ => table(&args),
     }
 }

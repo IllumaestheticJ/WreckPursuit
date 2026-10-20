@@ -36,6 +36,35 @@ power-on straightening or the handbrake pivot.
    counter-lock angle. Rack compliance does not widen it; robustness target (27 cases) not
    met: 2 / 27 held (data 0 / 27).
 
+## Velocity-relative steering (Drift Lab W step 7) × tyres
+
+Merged lead/drift-lab-w @ c234d260. `tyre_slip -- matrix` with `PLAIN='{…}'` (grip reference
+always = old tyres + default plain steering); `tyre_slip -- vrsearch` = seeded search over W's
+knobs (`align_gain`, `align_from_deg`, `align_full_deg`, `t_align_s`, `slide_key_gain`), 27-case
+set, grip penalty past 5 %, `VR_TYRE=spin` for the spin model.
+
+| tyres | steering | held / 27 (≥ 2 s band) | grip max |Δ| | basin (r = 20 °/s) | straight launches |
+|---|---|---|---|---|---|
+| old ellipse | plain | 0 | — | 37 → none | 3 / 6 |
+| shipped (floor 0.4) | plain | 0 | 0.0 % | 37 → none | 6 / 6 |
+| spin model | plain | 2 (2) | 8.6 % | 39 → 42 (3°) | 6 / 6 |
+| spin + drift lock | plain | 14 (11) | 7.0 % | 26 → 36 (10°) | 6 / 6 |
+| old ellipse / shipped | VR, W defaults | 0 / 0 | 6.9 % | 22 / 27 → none | 3 / 6 · 6 / 6 |
+| spin model | VR, W defaults | 0 | 9.1 % | 21 → 22 (1°) | 6 / 6 |
+| shipped (floor 0.4) | VR, best of 250 searched | **0** | 2.1 % | 28 → none | 6 / 6 |
+| **spin model** | **VR tuned**: gain 0.5, fade 7 → 17°, t_align 0.26 s, slide key gain 0.31 | **13 (13)** | 7.4 % (lane change, the spin model's) | **30 → 45 (15°)** | 6 / 6 |
+| spin + drift lock | VR tuned | 14 (1) | 8.6 % | 42 → 43 (1°) | 6 / 6 |
+
+Findings: velocity-relative steering **alone does not hold** with the data / shipped tyres (0 / 27
+for every one of 250 knob sets): the rear still has no stable side-force balance, so pulling
+the fronts toward the travel only changes how the car spins or swings through. With the spin
+model it gives the widest basin so far (15°) and 13 / 27 holds that are all in the band
+(rwd_d and rwd_a over 6 / 12 / 20° and 0.3 / 0.5 / 0.7 g; rwd_b none) at 37–47° — but still not
+steady (standard entry: last 3 s 45° sd 8.0, 57 → 37 km/h) and short of ≥ 20 / 27. W's default
+gain (1.0, i.e. wheels exactly along the travel) over-catches; ~0.5 works. Do not combine
+with the drift-lock reduction (both reduce counter-lock; together the basin collapses).
+Suggested lab A/B for the owner: spin model + VR tuned as above.
+
 ## Spin side-force floor — candidate SHIPPED DEFAULT (lead, 2026-10-20 evening)
 
 The owner's off-the-line spin was with the default (data) tyres, so the main game has the bug:
