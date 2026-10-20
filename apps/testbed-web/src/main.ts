@@ -6,6 +6,7 @@
 // stored replay, ?city=procedural_12x12 picks the city (default vesper_v2), ?chase=1 starts the
 // city chase (?chase=rain the rainy night), ?weather=heavy_rain picks the weather.
 // ?race=<id> starts a street race (&autopilot=1: the AI drives the player's car).
+// ?drift=1 opens the drift lab (live slide-assist tuning, F8 hides the panel).
 import { loadWasm, sim, type DriverInput, type Scenario, type ScenarioResult } from "./wasm/sim";
 import { META_STRIDE, RACE_STRIDE, RI, RS, STATE_STRIDE, S, T, VEHICLE_KIND, W } from "./wasm/layout";
 import { POLICE_PAINT, TRAFFIC_PALETTE } from "./render/fleet";
@@ -29,6 +30,7 @@ import { RaceView, type RaceFrame } from "./ui/race";
 import { RaceMarker, parseCourse } from "./race_marker";
 import { RealTimeMeter } from "./rtf";
 import { WeatherView } from "./render/weather";
+import { DriftLab } from "./drift_lab";
 
 // v2: canonical simcli replay.bin (v1 held the retired WPR\x01 format).
 const LAST_REPLAY_KEY = "wp.testbed.lastReplay.v2";
@@ -89,6 +91,7 @@ async function main(): Promise<void> {
   await loadWasm();
   const overlay = $("overlay");
   const scene = new SceneView(document.body);
+  const driftLab = new DriftLab(scene.world);
   const rig = new CameraRig(scene.renderer.domElement);
   const hud = new Hud(overlay);
   const plots = new TelemetryPlots(overlay);
@@ -208,6 +211,8 @@ async function main(): Promise<void> {
   // ----- session management --------------------------------------------------------------
 
   const rebuildViews = () => {
+    // Any new session leaves the drift lab (startDriftLab re-enters it right after).
+    driftLab.stop();
     for (const v of app.views.values()) v.dispose();
     app.views.clear();
     clearDebris();
@@ -532,6 +537,14 @@ async function main(): Promise<void> {
   $("sc-garage").onclick = () => openGarage();
   addEventListener("pagehide", persistCareer);
   $("sc-races").onclick = () => raceView.openPicker();
+  /** Drift lab (owner rows 90 / 91 / 98): flat pad at noon (no traffic or police on the flat
+   * world), painted course, live tuning panel. */
+  const startDriftLab = () => {
+    startFreeDrive(undefined, undefined, false, 12);
+    driftLab.start(app.player);
+  };
+  $("sc-drift").onclick = () => startDriftLab();
+  $("sc-tune").onclick = () => (driftLab.running ? driftLab.togglePanel() : startDriftLab());
   ($("mode") as HTMLSelectElement).onchange = (e) => {
     // Live switch (Sim::set_mode_table), logged as a replay op; existing damage is kept.
     // A career run keeps the career's mode (pick it with "New career" in the garage).
@@ -705,6 +718,8 @@ async function main(): Promise<void> {
     startRace(params.get("race")!, DEFAULT_CAR);
   } else if (params.get("chase")) {
     startCityChase("debug_sedan", undefined, params.get("chase") === "rain");
+  } else if (params.get("drift")) {
+    startDriftLab();
   } else {
     startFreeDrive(DEFAULT_CAR);
   }
@@ -778,6 +793,7 @@ async function main(): Promise<void> {
     scene.addEvents(events);
     panelEvents(events);
     stepDebris(app.paused && !replay ? 0 : dt);
+    driftLab.update();
     hud.pushEvents(events, sim.worldInfo()[W.tick]);
     {
       const w = sim.worldInfo();

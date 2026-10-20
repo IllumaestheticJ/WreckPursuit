@@ -1089,3 +1089,29 @@ slide: release-the-keys power exits with TCS off (4 cars × 44, lat 0.5–0.8 g 
 0.2–1.2 s) fell from 132 to 109 (rampart 27 → 18), and with 0.015 → 0.05 a test case spun. Kept
 0.03 → 0.08. Not tried yet: an onset on yaw-rate error.
 
+
+## Drift lab, step 1 (A, 2026-10-20) — rows 90 / 91 / 98 workbench
+
+On the owner's keyboard-feel focus (lead: short cycles, light gate per push: `cargo test -p
+wp_vehicle`, wasm build, `tsc`; full gate once the owner is happy).
+
+- **Testbed "drift lab"** (`drift lab` button, `?drift=1`): flat asphalt free drive at noon (no
+  traffic, police or parked cars on the flat world), orange cones 12 m apart marking a course in
+  front of the spawn: 120 m run-up, 90° right (r 22 m), 70 m, 90° left (r 22 m), 60 m, long left
+  sweeper (r 70 m, 180°). Pick the car in the car selector and TCS / ESC in the assist row.
+- **Tuning panel** (F8 or `tune`): countersteer %, align onset / full slip, slew boost,
+  save-lock onset / full, and (inactive until rows 91 / 98 land) hold gain, throttle shaping,
+  envelope. Readout: slide angle, assist mode (off / straighten / catch; hold / exceeded with
+  row 91), envelope. A runtime override only: `wp_vehicle::DriftTuning` per vehicle
+  (`Vehicle::set_drift_tuning`), defaults = the shipped constants (goldens unchanged), not in
+  snapshots or replay ops (a tuned session does not replay bit-exactly); the panel remembers
+  its values in localStorage `wp.driftTuning`, "defaults" resets. Never written to data.
+- **New API:** `wp_vehicle::{DriftTuning, AssistMode, steering::assist_mode}`,
+  `Telemetry::{assist_mode, body_slip_deg, envelope_deg}`; `wp_wasm::set_drift_tuning(entity,
+  Float32Array[8])`, `drift_tuning(entity)`, `drift_state(entity)` (`[slip °, mode, envelope °]`),
+  `DRIFT_TUNING_FIELDS`.
+- **Outside my crates (minimal):** `wp_sim::Sim::set_drift_tuning` (lead's crate; no mutable
+  vehicle access existed), `wp_wasm::Session::set_drift_tuning` + `wp_vehicle` as a direct
+  `wp_wasm` dependency (workspace crate, wasm-clean), testbed (C's) `src/drift_lab.ts` (new),
+  `src/main.ts` (button, `?drift`, frame update), `src/wasm/sim.ts`, `index.html`,
+  `e2e/drift_lab.mjs` (new, in `npm run e2e`).

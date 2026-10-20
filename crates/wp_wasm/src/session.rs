@@ -459,6 +459,18 @@ impl Session {
         }
     }
 
+    /// Set a vehicle's drift-assist tuning (drift lab dev override; not logged, so a tuned
+    /// session does not replay bit-exactly).
+    pub fn set_drift_tuning(
+        &mut self,
+        id: EntityId,
+        tuning: wp_vehicle::DriftTuning,
+    ) -> Result<(), String> {
+        self.sim
+            .set_drift_tuning(id, tuning)
+            .map_err(|e| format!("{e:?}"))
+    }
+
     /// Set a vehicle's assists (logged op).
     pub fn set_assists(&mut self, id: EntityId, profile: AssistProfile) -> Result<(), String> {
         self.live_check()?;

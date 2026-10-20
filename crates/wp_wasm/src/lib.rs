@@ -344,6 +344,83 @@ pub fn engine_stalled(entity: u32) -> Result<bool, JsValue> {
     })
 }
 
+/// Drift-assist tuning fields, in the order [`set_drift_tuning`] / [`drift_tuning`] use
+/// (owner rows 90 / 91 / 98; see `wp_vehicle::DriftTuning`).
+pub const DRIFT_TUNING_FIELDS: [&str; 8] = [
+    "align_onset_rad",
+    "align_full_rad",
+    "slew_boost",
+    "counter_lock_onset_rad",
+    "counter_lock_full_rad",
+    "hold_gain",
+    "throttle_shaping",
+    "envelope_deg",
+];
+
+/// Set a vehicle's drift-assist tuning (the testbed drift lab's live tuning panel): the 8
+/// values of [`DRIFT_TUNING_FIELDS`] in order. A dev override only: it never touches the car
+/// data, and it is not logged as a replay op (a tuned session does not replay bit-exactly).
+#[wasm_bindgen]
+pub fn set_drift_tuning(entity: u32, values: &[f32]) -> Result<(), JsValue> {
+    if values.len() != DRIFT_TUNING_FIELDS.len() {
+        return Err(err(format!(
+            "drift tuning: want {} values ({:?}), got {}",
+            DRIFT_TUNING_FIELDS.len(),
+            DRIFT_TUNING_FIELDS,
+            values.len()
+        )));
+    }
+    let t = wp_vehicle::DriftTuning {
+        align_onset_rad: values[0],
+        align_full_rad: values[1],
+        slew_boost: values[2],
+        counter_lock_onset_rad: values[3],
+        counter_lock_full_rad: values[4],
+        hold_gain: values[5],
+        throttle_shaping: values[6],
+        envelope_deg: values[7],
+    };
+    with(|s| s.set_drift_tuning(EntityId(entity), t))
+}
+
+/// A vehicle's drift-assist tuning, the 8 values of [`DRIFT_TUNING_FIELDS`] in order.
+#[wasm_bindgen]
+pub fn drift_tuning(entity: u32) -> Result<Vec<f32>, JsValue> {
+    with(|s| {
+        let t = s
+            .vehicle(EntityId(entity))
+            .map(|v| v.vehicle.drift_tuning())
+            .ok_or_else(|| format!("unknown entity {entity}"))?;
+        Ok(vec![
+            t.align_onset_rad,
+            t.align_full_rad,
+            t.slew_boost,
+            t.counter_lock_onset_rad,
+            t.counter_lock_full_rad,
+            t.hold_gain,
+            t.throttle_shaping,
+            t.envelope_deg,
+        ])
+    })
+}
+
+/// Drift readout of a vehicle: `[body slip °, assist mode, envelope °]`; mode 0 off,
+/// 1 straighten, 2 catch, 3 hold, 4 exceeded (`wp_vehicle::AssistMode::code`).
+#[wasm_bindgen]
+pub fn drift_state(entity: u32) -> Result<Vec<f32>, JsValue> {
+    with(|s| {
+        let t = s
+            .vehicle(EntityId(entity))
+            .map(|v| v.vehicle.telemetry())
+            .ok_or_else(|| format!("unknown entity {entity}"))?;
+        Ok(vec![
+            t.body_slip_deg,
+            t.assist_mode.code() as f32,
+            t.envelope_deg,
+        ])
+    })
+}
+
 /// Return a vehicle to its spawn pose, pristine (logged as a replay op).
 #[wasm_bindgen]
 pub fn reset_vehicle(entity: u32) -> Result<(), JsValue> {

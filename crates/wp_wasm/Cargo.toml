@@ -26,6 +26,8 @@ wp_net.workspace = true
 # Audio director (workstream J); pure logic, wasm32-clean. Used only by src/audio.rs.
 wp_audio.workspace = true
 wp_weather.workspace = true
+# DriftTuning / AssistMode for the drift lab tuning panel (owner rows 90 / 91 / 98).
+wp_vehicle.workspace = true
 # Race picker (workstream 15): judge, AI entrants (wp_opponent), stakes; pure logic, wasm32-clean.
 wp_race.workspace = true
 wp_opponent.workspace = true

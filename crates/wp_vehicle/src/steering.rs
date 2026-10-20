@@ -47,6 +47,102 @@ pub struct SteerInput {
     /// Handbrake pulled, or released less than [`HANDBRAKE_GRACE_S`] ago: the self-aligning
     /// countersteer stays out of the way (handbrake turns rotate freely).
     pub handbrake_hold: bool,
+    /// Drift / countersteer tuning (dev override; defaults = the shipped constants).
+    pub tuning: DriftTuning,
+}
+
+/// Runtime tuning of the keyboard / gamepad slide assists (owner rows 90 / 91 / 98, the
+/// testbed's drift lab). A dev override set per vehicle (`Vehicle::set_drift_tuning`); it is
+/// not in the car data, not in replays or snapshots, and [`Default`] is exactly the shipped
+/// behaviour. Fields marked "(row 91)" / "(row 98)" are read by those features once they land.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DriftTuning {
+    /// Rear-axle slip, rad, where released keys start turning the wheels toward the front
+    /// axle's travel ([`ALIGN_SLIDE_START`]).
+    pub align_onset_rad: f32,
+    /// Rear-axle slip, rad, where that alignment is complete ([`ALIGN_SLIDE_FULL`]).
+    pub align_full_rad: f32,
+    /// Rack-speed boost per unit of countersteer help ([`ALIGN_RATE_BOOST`]): the aligning /
+    /// countersteering rack moves at `max(lock rate, rack speed) × (1 + this × help)`.
+    pub slew_boost: f32,
+    /// Rear-axle slip, rad, where the save-the-car countersteer lock starts opening.
+    pub counter_lock_onset_rad: f32,
+    /// Rear-axle slip, rad, where it is fully open.
+    pub counter_lock_full_rad: f32,
+    /// (row 91) Gain of the "hold" mode that keeps the body slip angle steady.
+    pub hold_gain: f32,
+    /// (row 98) Keyboard throttle smoothing with TCS off, 0..=1.
+    pub throttle_shaping: f32,
+    /// (row 91) Slide-angle envelope at countersteer help 100 %, degrees (scaled down with the
+    /// slider).
+    pub envelope_deg: f32,
+}
+
+impl Default for DriftTuning {
+    fn default() -> Self {
+        Self {
+            align_onset_rad: ALIGN_SLIDE_START,
+            align_full_rad: ALIGN_SLIDE_FULL,
+            slew_boost: ALIGN_RATE_BOOST,
+            counter_lock_onset_rad: SLIDE_START,
+            counter_lock_full_rad: SLIDE_FULL,
+            hold_gain: 1.0,
+            throttle_shaping: 0.0,
+            envelope_deg: 45.0,
+        }
+    }
+}
+
+/// What the slide assists are doing this tick (telemetry; the drift lab readout).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AssistMode {
+    /// Not acting (driver steering in grip, help 0, below 3 m/s, handbrake hold).
+    #[default]
+    Off,
+    /// Released keys in a slide: the wheels align with the front axle's travel.
+    Straighten,
+    /// The driver steers toward the side the rear slides to: fast rack, open lock.
+    Catch,
+    /// (row 91) Holding a steady drift angle.
+    Hold,
+    /// (row 91) Past the slide envelope: the assist has backed off.
+    Exceeded,
+}
+
+impl AssistMode {
+    /// Stable numeric code for the wasm readout: 0 off, 1 straighten, 2 catch, 3 hold,
+    /// 4 exceeded.
+    pub fn code(self) -> u8 {
+        match self {
+            AssistMode::Off => 0,
+            AssistMode::Straighten => 1,
+            AssistMode::Catch => 2,
+            AssistMode::Hold => 3,
+            AssistMode::Exceeded => 4,
+        }
+    }
+}
+
+/// The slide-assist mode for steering inputs `inp` under `assists` (see [`AssistMode`]).
+pub fn assist_mode(inp: &SteerInput, assists: &AssistProfile) -> AssistMode {
+    let help = assists.countersteer_help.clamp(0.0, 1.0);
+    if assists.steer_speed_sensitivity > 0.0 && countering(inp) {
+        AssistMode::Catch
+    } else if help > 0.0
+        && inp.speed > 3.0
+        && inp.driver.abs() <= STEER_DEADZONE
+        && !inp.handbrake_hold
+        && align_slide(inp) > 0.0
+    {
+        AssistMode::Straighten
+    } else {
+        AssistMode::Off
+    }
+}
+
+/// The driver steers toward the side the rear slides to while it slides.
+fn countering(inp: &SteerInput) -> bool {
+    -inp.driver * inp.rear_axle_slip > 0.0 && align_slide(inp) > 0.0
 }
 
 /// Fraction of the target slip angle a keyboard (sensitivity 1) asks for at full input: a
@@ -131,8 +227,10 @@ fn countersteer_lock(inp: &SteerInput, assists: &AssistProfile, max_steer: f32, 
     if assists.steer_speed_sensitivity <= 0.0 || -inp.driver * inp.rear_axle_slip <= 0.0 {
         return lock;
     }
-    let slide =
-        ((inp.rear_axle_slip.abs() - SLIDE_START) / (SLIDE_FULL - SLIDE_START)).clamp(0.0, 1.0);
+    let t = &inp.tuning;
+    let slide = ((inp.rear_axle_slip.abs() - t.counter_lock_onset_rad)
+        / (t.counter_lock_full_rad - t.counter_lock_onset_rad).max(1e-4))
+    .clamp(0.0, 1.0);
     if slide <= 0.0 {
         return lock;
     }
@@ -196,7 +294,7 @@ pub fn steer_target(
     let align = aligning_angle(inp).clamp(-full, full) * align_strength(help);
     SteerTarget {
         angle: (align - inp.pull * lock).clamp(-max_steer, max_steer),
-        rate_boost: 1.0 + ALIGN_RATE_BOOST * help,
+        rate_boost: 1.0 + inp.tuning.slew_boost * help,
     }
 }
 
@@ -221,8 +319,10 @@ fn aligning_angle(inp: &SteerInput) -> f32 {
 /// How much the rear slides for the self-aligning countersteer, 0..=1 (rear-axle slip
 /// [`ALIGN_SLIDE_START`] → [`ALIGN_SLIDE_FULL`]).
 fn align_slide(inp: &SteerInput) -> f32 {
-    ((inp.rear_axle_slip.abs() - ALIGN_SLIDE_START) / (ALIGN_SLIDE_FULL - ALIGN_SLIDE_START))
-        .clamp(0.0, 1.0)
+    let t = &inp.tuning;
+    ((inp.rear_axle_slip.abs() - t.align_onset_rad)
+        / (t.align_full_rad - t.align_onset_rad).max(1e-4))
+    .clamp(0.0, 1.0)
 }
 
 /// Direction of travel of the front axle relative to the heading, rad (+ = left), from forward
@@ -273,12 +373,11 @@ pub fn update_center_angle(
     // Catching a slide (owner row 90): the self-aligning countersteer, and the driver steering
     // toward the side the rear slides to, never move slower than the car's own rack (the
     // slip-targeted lock shrinks with speed, and so would the rate), times the slider's boost.
-    let countering = s > 0.0 && -inp.driver * inp.rear_axle_slip > 0.0 && align_slide(inp) > 0.0;
-    let (base, rate_boost) = if countering {
+    let (base, rate_boost) = if s > 0.0 && countering(inp) {
         let help = assists.countersteer_help.clamp(0.0, 1.0);
         (
             base.max(rack_speed * inp.ratio_scale),
-            1.0 + ALIGN_RATE_BOOST * help,
+            1.0 + inp.tuning.slew_boost * help,
         )
     } else if rate_boost > 1.0 {
         (base.max(rack_speed * inp.ratio_scale), rate_boost)
@@ -354,6 +453,7 @@ mod tests {
             front_peak_slip: 0.11,
             front_axle_angle: 0.0,
             handbrake_hold: false,
+            tuning: DriftTuning::default(),
         }
     }
 

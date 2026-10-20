@@ -69,6 +69,7 @@ pub use diff::{AxleDiff, CentreDiff, DiffSetup};
 pub use engine::EngineExtras;
 pub use ground::{ContractGround, FlatGround, GroundHit, RapierGround, WheelCaster, WheelProbe};
 pub use snapshot::{SnapshotError, VehicleSnapshot};
+pub use steering::{AssistMode, DriftTuning};
 pub use surface::{ConditionsSource, SurfaceConditions, TireWetProfile};
 pub use tire::TireForces;
 pub use vehicle::{Chassis, Telemetry, Vehicle, VehicleExtras};

@@ -25,8 +25,8 @@ use crate::launch::LaunchGuard;
 use crate::math::{arr, sin_cos, v3, yaw_quat, Quat, V3};
 use crate::slide::{slide_class_with_rear_lock, slide_throttle};
 use crate::steering::{
-    ackermann, body_slip, front_axle_angle, rear_axle_slip, steer_target, torque_steer,
-    update_center_angle, SteerInput, HANDBRAKE_GRACE_S,
+    ackermann, assist_mode, body_slip, front_axle_angle, rear_axle_slip, steer_target,
+    torque_steer, update_center_angle, AssistMode, DriftTuning, SteerInput, HANDBRAKE_GRACE_S,
 };
 use crate::surface::{conditions_grip, ConditionsSource, SurfaceConditions, TireWetProfile};
 use crate::suspension::{arb_force, static_compression, step_strut, TYRE_STATIC_DEFLECTION_M};
@@ -222,6 +222,13 @@ pub struct Telemetry {
     pub contact_lift_cut_mps: f32,
     /// Engine stalled (manual clutch; press the clutch to re-crank).
     pub stalled: bool,
+    /// What the slide assists are doing (drift lab readout, owner rows 90 / 91).
+    pub assist_mode: AssistMode,
+    /// Body slip angle at the CG, degrees (+ = moving toward the left of the heading).
+    pub body_slip_deg: f32,
+    /// Slide-angle envelope the assists help within, degrees (row 91; the tuning's value
+    /// scaled by the countersteer help until then).
+    pub envelope_deg: f32,
 }
 
 /// One simulated vehicle. See the crate docs for the integration contract with Rapier.
@@ -267,6 +274,11 @@ pub struct Vehicle {
     pub(crate) hb_grace: f32,
     /// Engine stalled (manual clutch only, see [`STALL_FRAC`]).
     pub(crate) stalled: bool,
+    /// Drift-assist tuning (dev override, see [`DriftTuning`]); not in snapshots.
+    pub(crate) drift_tuning: DriftTuning,
+    assist_mode: AssistMode,
+    body_slip_deg: f32,
+    last_help: f32,
 }
 
 impl Vehicle {
@@ -381,6 +393,10 @@ impl Vehicle {
             launch: LaunchGuard::default(),
             hb_grace: 0.0,
             stalled: false,
+            drift_tuning: DriftTuning::default(),
+            assist_mode: AssistMode::Off,
+            body_slip_deg: 0.0,
+            last_help: 0.0,
             corners,
         };
         v.converter = def
@@ -476,6 +492,17 @@ impl Vehicle {
     /// Telemetry from the last step.
     pub fn telemetry(&self) -> Telemetry {
         self.telemetry
+    }
+
+    /// Set the drift-assist tuning (dev override for the testbed's drift lab; see
+    /// [`DriftTuning`]). Not part of snapshots or replays.
+    pub fn set_drift_tuning(&mut self, tuning: DriftTuning) {
+        self.drift_tuning = tuning;
+    }
+
+    /// Current drift-assist tuning.
+    pub fn drift_tuning(&self) -> DriftTuning {
+        self.drift_tuning
     }
 
     /// Current gear (-1 reverse, 0 neutral, 1.. forward).
@@ -732,6 +759,7 @@ impl Vehicle {
                 self.def.wheels[0].position_m[1] - self.com_local.y,
             ),
             handbrake_hold: self.hb_grace > 0.0,
+            tuning: self.drift_tuning,
         }
     }
 
@@ -1098,6 +1126,9 @@ impl Vehicle {
 
         // --- Steering ---------------------------------------------------------------------
         let steer_in = self.steer_input(input.steer, v_fwd, v_left, rear_axle);
+        self.assist_mode = assist_mode(&steer_in, assists);
+        self.body_slip_deg = steer_in.body_slip.to_degrees();
+        self.last_help = assists.countersteer_help.clamp(0.0, 1.0);
         let max_steer = self.max_steer();
         self.center_steer = update_center_angle(
             self.center_steer,
@@ -1375,6 +1406,9 @@ impl Vehicle {
             tcs_brake_nm: tc_brake,
             contact_lift_cut_mps: launch_cut,
             stalled: self.stalled,
+            assist_mode: self.assist_mode,
+            body_slip_deg: self.body_slip_deg,
+            envelope_deg: self.drift_tuning.envelope_deg * self.last_help,
         };
     }
 

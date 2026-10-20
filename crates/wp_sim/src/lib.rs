@@ -668,6 +668,18 @@ impl Sim {
         Ok(())
     }
 
+    /// Set a vehicle's drift-assist tuning (dev override for the testbed's drift lab, owner
+    /// rows 90 / 91 / 98; see `wp_vehicle::DriftTuning`). Not recorded in replays or
+    /// snapshots: a tuned session does not replay bit-exactly.
+    pub fn set_drift_tuning(
+        &mut self,
+        id: EntityId,
+        tuning: wp_vehicle::DriftTuning,
+    ) -> Result<(), SimError> {
+        self.slot_mut(id)?.vehicle.set_drift_tuning(tuning);
+        Ok(())
+    }
+
     /// Return a vehicle to its spawn pose, pristine.
     pub fn reset_vehicle(&mut self, id: EntityId) -> Result<(), SimError> {
         let slot = self
