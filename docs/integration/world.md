@@ -1139,3 +1139,8 @@ made the siren-off control scrape cars, so it stays). Scenario threshold now
 zero-contact checks stay strict). Re-blessed only the two siren-on scenarios. On db11e64 + this
 branch all 79 scenarios pass (`simcli run apps/simcli/scenarios`, release); every other hash is
 identical to lead/round12. wp_world tests pass.
+## Lead helper: sidewalks level with lots and buildings (branch `lead/fix-sidewalk-lots`, 2026-10-20, playtest row 52)
+Built on `lead/fix-junction-holes`. D: changes in your crate are in `surface.rs` (level lots
+behind every sidewalk, skirts, corner fills out to the lots, wedge pull-back, rails on lot-less
+edges) and `vesper.rs` (carve up to the lots, building bases / placement, cul-de-sac direction:
+node 81). Details, numbers and known gaps for you: `docs/integration/sidewalk-lots.md`.

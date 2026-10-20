@@ -13,7 +13,7 @@ clock. Implements `wp_contracts::WorldQuery`. No renderer dependency; compiles f
 | `procgen` | Procedural fallback city (grid + ring + highway spine + 2 diagonals), flat |
 | `vesper` | Port Vesper v2 (`vesper_v2`): curved streets, hills, terrain, banked highway loop, grade separations |
 | `terrain` | `Heightfield` (stored with the network), value noise, bumps |
-| `surface` | Road trimesh (`road_mesh`: banked surface ribbons + `node_patches` — junction surfaces, bend strips, dead-end turnarounds sharing the ribbons' end edges), raised sidewalks + kerbs (`sidewalk_mesh`, exact corner fills along the kerb curves), deck rails — one geometry for physics and the greybox; `MapGround` wheel probe |
+| `surface` | Road trimesh (`road_mesh`: banked surface ribbons + `node_patches` — junction surfaces, bend strips, dead-end turnarounds sharing the ribbons' end edges), raised sidewalks + kerbs + level lots and skirts behind them (`sidewalk_mesh`, exact corner fills along the kerb curves), deck rails — one geometry for physics and the greybox; `MapGround` wheel probe |
 | `map` | Runtime map: connector curves, conflict sets, uniform-grid index, `WorldQuery` (incl. building line of sight) |
 | `surface` | Road trimesh for physics/greybox, deck rails, `MapGround` wheel probe |
 | `map` | Runtime map: connector curves, conflict sets, uniform-grid index, `WorldQuery` (incl. building, terrain and tunnel line of sight) |
@@ -236,6 +236,17 @@ so what you see is what you drive on (`tools/city-import/tests/surface_match.rs`
   (lane trimming, junction logic) is unchanged.
 - Sizes: Port Vesper 28 k top + 28 k kerb triangles (≈ 46 ms to build, release), the grid
   9.5 k + 11 k.
+
+### Lots behind the sidewalks (`surface`, playtest #52)
+- Every strip continues past the sidewalk's back edge as a **level lot** (`lot_width_m`: 3.5 m
+  with terrain, 9 m in a flat city), sharing the back-edge vertices, then a 1 m **skirt** 0.25 m
+  down into the ground (`SKIRT_W_M`, `SKIRT_DROP_M`). Corner fills reach the lots' outer lines.
+  No lot where the ground under its outer half is > 1 m below or > 8 cm above it (decks): there
+  `SidewalkMesh::bare_backs` get a guard rail in `wp_sim` and the greybox.
+- Port Vesper carves its ground up to just under the lots (`LOT_GROUND_GAP_M`) and builds
+  bases down to the lowest ground (plinths on slopes); buildings stand on lots, off other
+  streets' sidewalks and junction areas. `tools/city-import/tests/sidewalk_lots.rs` checks the
+  back edges and frontages; details `docs/integration/sidewalk-lots.md`.
 
 ## Traffic AI
 

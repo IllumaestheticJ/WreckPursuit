@@ -146,9 +146,9 @@ fn check(name: &str, map: &CityMap) {
         let from = z + 2.0;
         match phys.static_ground_z(*q, from, 40.0) {
             Some(h) if (h - z).abs() <= 0.2 => worst = worst.max((h - z).abs()),
-            // The ray starts inside (or just over) a building: Port Vesper lets a few turning
-            // paths cross a building lot (nodes 78 and 97, unrelated to the pavement); counted
-            // and printed, not a hole.
+            // The ray starts inside (or just over) a building: a turning path through a
+            // building lot (Port Vesper nodes 78 and 97 had some until buildings kept clear of
+            // junction areas, `docs/integration/sidewalk-lots.md`); must not happen.
             Some(h) if h >= from - 0.7 => {
                 in_building.push(*node);
                 continue;
@@ -183,6 +183,10 @@ fn check(name: &str, map: &CityMap) {
         holes.is_empty(),
         "{name}: {:?}",
         &holes[..holes.len().min(10)]
+    );
+    assert!(
+        in_building.is_empty(),
+        "{name}: turning paths through buildings at nodes {in_building:?}"
     );
     assert!(
         not_paved.is_empty(),
