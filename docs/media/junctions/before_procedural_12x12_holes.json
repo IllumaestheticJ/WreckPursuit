@@ -1,0 +1,1122 @@
+[
+ {
+  "node": 0,
+  "kind": "junction",
+  "holes_m2": 0.6500455255095465
+ },
+ {
+  "node": 1,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 2,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784127
+ },
+ {
+  "node": 3,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 4,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 5,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 6,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 7,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 8,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 9,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784127
+ },
+ {
+  "node": 10,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 11,
+  "kind": "junction",
+  "holes_m2": 0.6500455255095465
+ },
+ {
+  "node": 12,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 13,
+  "kind": "junction",
+  "holes_m2": 0.6500455255095465
+ },
+ {
+  "node": 14,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784127
+ },
+ {
+  "node": 15,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 16,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 17,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 18,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 19,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 20,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 21,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784127
+ },
+ {
+  "node": 22,
+  "kind": "junction",
+  "holes_m2": 0.6500455255095465
+ },
+ {
+  "node": 23,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 24,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784125
+ },
+ {
+  "node": 25,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784125
+ },
+ {
+  "node": 26,
+  "kind": "junction",
+  "holes_m2": 0.3238413988456443
+ },
+ {
+  "node": 27,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784125
+ },
+ {
+  "node": 28,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784125
+ },
+ {
+  "node": 29,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784125
+ },
+ {
+  "node": 30,
+  "kind": "junction",
+  "holes_m2": 1.5521862584875814
+ },
+ {
+  "node": 31,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784125
+ },
+ {
+  "node": 32,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784125
+ },
+ {
+  "node": 33,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784125
+ },
+ {
+  "node": 34,
+  "kind": "junction",
+  "holes_m2": 0.3238413988456443
+ },
+ {
+  "node": 35,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784125
+ },
+ {
+  "node": 36,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784125
+ },
+ {
+  "node": 37,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 38,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 39,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784127
+ },
+ {
+  "node": 40,
+  "kind": "junction",
+  "holes_m2": 0.6500455255095465
+ },
+ {
+  "node": 41,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 42,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 43,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 44,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 45,
+  "kind": "junction",
+  "holes_m2": 0.6500455255095465
+ },
+ {
+  "node": 46,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784127
+ },
+ {
+  "node": 47,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 48,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 49,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 50,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 51,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784127
+ },
+ {
+  "node": 52,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 53,
+  "kind": "junction",
+  "holes_m2": 0.6500455255095465
+ },
+ {
+  "node": 54,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 55,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 56,
+  "kind": "junction",
+  "holes_m2": 0.6500455255095465
+ },
+ {
+  "node": 57,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 58,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784127
+ },
+ {
+  "node": 59,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 60,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 61,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 62,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 63,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784127
+ },
+ {
+  "node": 64,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 65,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 66,
+  "kind": "junction",
+  "holes_m2": 0.8000560313963649
+ },
+ {
+  "node": 67,
+  "kind": "junction",
+  "holes_m2": 0.8869635762786179
+ },
+ {
+  "node": 68,
+  "kind": "junction",
+  "holes_m2": 0.6250437745284101
+ },
+ {
+  "node": 69,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 70,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 71,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784127
+ },
+ {
+  "node": 72,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 73,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 74,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 75,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 76,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784127
+ },
+ {
+  "node": 77,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 78,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 79,
+  "kind": "junction",
+  "holes_m2": 0.6250437745284101
+ },
+ {
+  "node": 80,
+  "kind": "junction",
+  "holes_m2": 0.8869631534171577
+ },
+ {
+  "node": 81,
+  "kind": "junction",
+  "holes_m2": 0.45003151766045524
+ },
+ {
+  "node": 82,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 83,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 84,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784127
+ },
+ {
+  "node": 85,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 86,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 87,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 88,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 89,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784127
+ },
+ {
+  "node": 90,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 91,
+  "kind": "junction",
+  "holes_m2": 0.6500455255095465
+ },
+ {
+  "node": 92,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 93,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 94,
+  "kind": "junction",
+  "holes_m2": 0.6500455255095465
+ },
+ {
+  "node": 95,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 96,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784127
+ },
+ {
+  "node": 97,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 98,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 99,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 100,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 101,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784127
+ },
+ {
+  "node": 102,
+  "kind": "junction",
+  "holes_m2": 0.6500455255095465
+ },
+ {
+  "node": 103,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 104,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 105,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 106,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 107,
+  "kind": "junction",
+  "holes_m2": 0.6500455255095465
+ },
+ {
+  "node": 108,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784127
+ },
+ {
+  "node": 109,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 110,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 111,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784125
+ },
+ {
+  "node": 112,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784125
+ },
+ {
+  "node": 113,
+  "kind": "junction",
+  "holes_m2": 0.3238413988456443
+ },
+ {
+  "node": 114,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784125
+ },
+ {
+  "node": 115,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784125
+ },
+ {
+  "node": 116,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784125
+ },
+ {
+  "node": 117,
+  "kind": "junction",
+  "holes_m2": 1.5521862584875814
+ },
+ {
+  "node": 118,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784125
+ },
+ {
+  "node": 119,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784125
+ },
+ {
+  "node": 120,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784125
+ },
+ {
+  "node": 121,
+  "kind": "junction",
+  "holes_m2": 0.3238413988456443
+ },
+ {
+  "node": 122,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784125
+ },
+ {
+  "node": 123,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784125
+ },
+ {
+  "node": 124,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 125,
+  "kind": "junction",
+  "holes_m2": 0.6500455255095465
+ },
+ {
+  "node": 126,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784127
+ },
+ {
+  "node": 127,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 128,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 129,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 130,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 131,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 132,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 133,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784127
+ },
+ {
+  "node": 134,
+  "kind": "junction",
+  "holes_m2": 0.6500455255095465
+ },
+ {
+  "node": 135,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 136,
+  "kind": "junction",
+  "holes_m2": 0.6500455255095465
+ },
+ {
+  "node": 137,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 138,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784127
+ },
+ {
+  "node": 139,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 140,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 141,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 142,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 143,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 144,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 145,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784127
+ },
+ {
+  "node": 146,
+  "kind": "junction",
+  "holes_m2": 0.3239999999999999
+ },
+ {
+  "node": 147,
+  "kind": "junction",
+  "holes_m2": 0.6500455255095465
+ },
+ {
+  "node": 148,
+  "kind": "junction",
+  "holes_m2": 0.4697999999999999
+ },
+ {
+  "node": 149,
+  "kind": "junction",
+  "holes_m2": 0.4697999999999999
+ },
+ {
+  "node": 150,
+  "kind": "junction",
+  "holes_m2": 0.4697999999999999
+ },
+ {
+  "node": 151,
+  "kind": "junction",
+  "holes_m2": 0.4697999999999999
+ },
+ {
+  "node": 152,
+  "kind": "junction",
+  "holes_m2": 0.4697999999999999
+ },
+ {
+  "node": 153,
+  "kind": "junction",
+  "holes_m2": 0.6155999999999998
+ },
+ {
+  "node": 154,
+  "kind": "junction",
+  "holes_m2": 0.4697999999999999
+ },
+ {
+  "node": 155,
+  "kind": "junction",
+  "holes_m2": 0.4697999999999999
+ },
+ {
+  "node": 156,
+  "kind": "junction",
+  "holes_m2": 0.4697999999999999
+ },
+ {
+  "node": 157,
+  "kind": "junction",
+  "holes_m2": 0.4697999999999999
+ },
+ {
+  "node": 158,
+  "kind": "junction",
+  "holes_m2": 0.4697999999999999
+ },
+ {
+  "node": 159,
+  "kind": "junction",
+  "holes_m2": 0.4697999999999999
+ },
+ {
+  "node": 160,
+  "kind": "junction",
+  "holes_m2": 0.4697999999999999
+ },
+ {
+  "node": 161,
+  "kind": "junction",
+  "holes_m2": 0.4697999999999999
+ },
+ {
+  "node": 162,
+  "kind": "junction",
+  "holes_m2": 0.4697999999999999
+ },
+ {
+  "node": 163,
+  "kind": "junction",
+  "holes_m2": 0.4697999999999999
+ },
+ {
+  "node": 164,
+  "kind": "junction",
+  "holes_m2": 0.6155999999999998
+ },
+ {
+  "node": 165,
+  "kind": "junction",
+  "holes_m2": 0.4697999999999999
+ },
+ {
+  "node": 166,
+  "kind": "junction",
+  "holes_m2": 0.4697999999999999
+ },
+ {
+  "node": 167,
+  "kind": "junction",
+  "holes_m2": 0.4697999999999999
+ },
+ {
+  "node": 168,
+  "kind": "junction",
+  "holes_m2": 0.4697999999999999
+ },
+ {
+  "node": 169,
+  "kind": "junction",
+  "holes_m2": 0.4697999999999999
+ },
+ {
+  "node": 170,
+  "kind": "junction",
+  "holes_m2": 0.5960166370638778
+ },
+ {
+  "node": 171,
+  "kind": "junction",
+  "holes_m2": 0.6863221881341623
+ },
+ {
+  "node": 172,
+  "kind": "junction",
+  "holes_m2": 2.277392569708475
+ },
+ {
+  "node": 173,
+  "kind": "junction",
+  "holes_m2": 2.277392569708475
+ },
+ {
+  "node": 174,
+  "kind": "junction",
+  "holes_m2": 1.242212592312503
+ },
+ {
+  "node": 175,
+  "kind": "junction",
+  "holes_m2": 1.242212592312503
+ },
+ {
+  "node": 176,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784127
+ },
+ {
+  "node": 177,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784127
+ },
+ {
+  "node": 178,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784127
+ },
+ {
+  "node": 179,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784127
+ },
+ {
+  "node": 180,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784127
+ },
+ {
+  "node": 181,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784127
+ },
+ {
+  "node": 182,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784127
+ },
+ {
+  "node": 183,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784127
+ },
+ {
+  "node": 184,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784127
+ },
+ {
+  "node": 185,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784127
+ },
+ {
+  "node": 186,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784127
+ },
+ {
+  "node": 187,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784127
+ },
+ {
+  "node": 188,
+  "kind": "junction",
+  "holes_m2": 1.242212592312503
+ },
+ {
+  "node": 189,
+  "kind": "junction",
+  "holes_m2": 1.242212592312503
+ },
+ {
+  "node": 190,
+  "kind": "junction",
+  "holes_m2": 2.277392569708474
+ },
+ {
+  "node": 191,
+  "kind": "junction",
+  "holes_m2": 2.277392569708474
+ },
+ {
+  "node": 192,
+  "kind": "junction",
+  "holes_m2": 0.5960166370638778
+ },
+ {
+  "node": 193,
+  "kind": "junction",
+  "holes_m2": 0.6863221881341623
+ },
+ {
+  "node": 194,
+  "kind": "junction",
+  "holes_m2": 0.6863221881341623
+ },
+ {
+  "node": 195,
+  "kind": "junction",
+  "holes_m2": 0.6863221881341623
+ },
+ {
+  "node": 196,
+  "kind": "junction",
+  "holes_m2": 2.2773925697084745
+ },
+ {
+  "node": 197,
+  "kind": "junction",
+  "holes_m2": 2.2773925697084745
+ },
+ {
+  "node": 198,
+  "kind": "junction",
+  "holes_m2": 1.242212592312503
+ },
+ {
+  "node": 199,
+  "kind": "junction",
+  "holes_m2": 1.2422125923125027
+ },
+ {
+  "node": 200,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784125
+ },
+ {
+  "node": 201,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784125
+ },
+ {
+  "node": 202,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784125
+ },
+ {
+  "node": 203,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784125
+ },
+ {
+  "node": 204,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784125
+ },
+ {
+  "node": 205,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784125
+ },
+ {
+  "node": 206,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784125
+ },
+ {
+  "node": 207,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784125
+ },
+ {
+  "node": 208,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784125
+ },
+ {
+  "node": 209,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784125
+ },
+ {
+  "node": 210,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784125
+ },
+ {
+  "node": 211,
+  "kind": "junction",
+  "holes_m2": 1.4680694272784125
+ },
+ {
+  "node": 212,
+  "kind": "junction",
+  "holes_m2": 1.242212592312503
+ },
+ {
+  "node": 213,
+  "kind": "junction",
+  "holes_m2": 1.2422125923125027
+ },
+ {
+  "node": 214,
+  "kind": "junction",
+  "holes_m2": 2.2773925697084745
+ },
+ {
+  "node": 215,
+  "kind": "junction",
+  "holes_m2": 2.2773925697084745
+ },
+ {
+  "node": 216,
+  "kind": "junction",
+  "holes_m2": 0.5960166370638778
+ },
+ {
+  "node": 217,
+  "kind": "junction",
+  "holes_m2": 0.5960166370638776
+ },
+ {
+  "node": 218,
+  "kind": "junction",
+  "holes_m2": 1.5521834217929114
+ },
+ {
+  "node": 219,
+  "kind": "junction",
+  "holes_m2": 1.5521834217929114
+ },
+ {
+  "node": 220,
+  "kind": "junction",
+  "holes_m2": 1.212982867935976
+ },
+ {
+  "node": 221,
+  "kind": "junction",
+  "holes_m2": 1.2129828679359764
+ },
+ {
+  "node": 222,
+  "kind": "junction",
+  "holes_m2": 1.2129828679359764
+ },
+ {
+  "node": 223,
+  "kind": "junction",
+  "holes_m2": 1.212982867935976
+ }
+]

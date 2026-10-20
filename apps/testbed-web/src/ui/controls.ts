@@ -14,7 +14,7 @@ import {
   type ActionId,
   type PadControl,
 } from "../bindings";
-import { captureKey, firstPad, getBindings, PAD_PRESS, setBindings, setInputBlocked } from "../input";
+import { allPads, captureKey, firstPad, getBindings, PAD_PRESS, setBindings, setInputBlocked } from "../input";
 
 type Device = "keys" | "pad";
 
@@ -75,7 +75,8 @@ export class ControlsPanel {
   open(): void {
     this.root.classList.remove("hidden");
     setInputBlocked(true);
-    this.status.textContent = firstPad() ? `gamepad: ${firstPad()!.id}` : "no gamepad connected (press a button to wake it)";
+    const pads = allPads();
+    this.status.textContent = pads.length ? `devices: ${pads.map((p) => p.id).join(" · ")}` : "no gamepad / wheel connected (press a button to wake it)";
     this.render();
     // Esc closes the panel when nothing is being rebound.
     captureKey((e) => this.onKey(e));
@@ -128,7 +129,7 @@ export class ControlsPanel {
   private startCapture(device: Device, action: ActionId, slot: number): void {
     this.stopCapture();
     this.capturing = { device, action, slot };
-    this.status.textContent = device === "keys" ? "press a key" : "press a pad button or move a stick / trigger";
+    this.status.textContent = device === "keys" ? "press a key" : "press a pad / wheel button or move a stick, trigger or pedal";
     if (device === "pad") this.watchPad();
     this.render();
   }
@@ -159,24 +160,33 @@ export class ControlsPanel {
     if (cap.device === "keys") this.finish(e.code);
   }
 
-  /** Poll the pad until a control moves past PAD_PRESS from where it rested when capture began. */
+  /** Poll every pad / wheel until a control moves past PAD_PRESS from where it rested when
+   * capture began. An axis that rested near one end (a wheel pedal) is stored as a full-range
+   * pedal axis; a centred axis as one stick direction. */
   private watchPad(): void {
-    const start = firstPad();
-    const restAxes = start ? [...start.axes] : [];
-    const restButtons = start ? start.buttons.map((b) => b.value) : [];
+    const rest = new Map<number, { axes: number[]; buttons: number[] }>();
+    const snap = (p: Gamepad) => ({ axes: [...p.axes], buttons: p.buttons.map((b) => b.value) });
+    for (const p of allPads()) rest.set(p.index, snap(p));
     const tick = () => {
       if (!this.capturing) return;
-      const pad = firstPad();
-      if (pad) {
-        const bi = pad.buttons.findIndex((b, i) => b.value > PAD_PRESS && (restButtons[i] ?? 0) <= PAD_PRESS);
+      for (const pad of allPads()) {
+        const r = rest.get(pad.index);
+        if (!r) {
+          // A device woke up after capture began: its current state is its rest pose.
+          rest.set(pad.index, snap(pad));
+          continue;
+        }
+        const bi = pad.buttons.findIndex((b, i) => b.value > PAD_PRESS && (r.buttons[i] ?? 0) <= PAD_PRESS);
         if (bi >= 0) return this.finish({ button: bi });
         for (let i = 0; i < pad.axes.length; i++) {
-          const d = pad.axes[i] - (restAxes[i] ?? 0);
-          if (Math.abs(d) > PAD_PRESS && Math.abs(pad.axes[i]) > PAD_PRESS) return this.finish({ axis: i, dir: pad.axes[i] > 0 ? 1 : -1 });
-        }
-        if (!start) {
-          // The pad woke up after capture began: take its current state as the rest pose.
-          return this.watchPad();
+          const r0 = r.axes[i] ?? 0;
+          const d = pad.axes[i] - r0;
+          if (Math.abs(r0) > 0.8) {
+            // Pedal: rests at one end; travelling half way is enough to bind it.
+            if (Math.abs(d) > 1.0) return this.finish({ axis: i, dir: d > 0 ? 1 : -1, full: true });
+          } else if (Math.abs(d) > PAD_PRESS && Math.abs(pad.axes[i]) > PAD_PRESS) {
+            return this.finish({ axis: i, dir: pad.axes[i] > 0 ? 1 : -1 });
+          }
         }
       }
       this.padRaf = requestAnimationFrame(tick);

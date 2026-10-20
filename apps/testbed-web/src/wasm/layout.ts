@@ -147,3 +147,12 @@ export const RI = {
   kind: 10,
   playerDone: 11,
 } as const;
+
+/** Floats per prop in props_static() (crates/wp_wasm/src/props.rs). */
+export const PROP_STRIDE = 11;
+/** Offsets inside one props_static() record: kind, box-centre pos xyz, rot quaternion xyzw, half extents xyz. */
+export const P = { kind: 0, pos: 1, rot: 4, half: 8 } as const;
+/** props_static() kind codes. */
+export const PROP_KIND = { parkedCar: 0, cone: 1 } as const;
+/** Floats per record in props_moved(): [prop index, x, y, z, qx, qy, qz, qw]. */
+export const PROP_MOVED_STRIDE = 8;

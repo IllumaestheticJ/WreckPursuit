@@ -91,6 +91,7 @@
             <option value="vesper_v2">Port Vesper v2 (hills, curves)</option>
             <option value="procedural_12x12">grid 12×12 (flat)</option>
           </select>
+          style <select id="style" title="art style: greybox (debug) or low-poly dark (docs/art/STYLE_DECISION.md)"></select>
           weather <select id="weather" title="restarts the session with this weather (the scenario's own weather on 'scenario')"><option value="auto">scenario</option></select>
           bench <button class="bench" data-n="1">1</button><button class="bench" data-n="8">8</button><button class="bench" data-n="24">24</button>
           <span id="bench-out" class="dim"></span>
@@ -101,6 +102,7 @@
           <label><input type="checkbox" data-a="tcs" />TCS</label>
           <label><input type="checkbox" data-a="esc" />ESC</label>
           <label><input type="checkbox" data-a="auto_gears" />auto gears</label>
+          <label title="automatic: the car works the clutch (launch, stall prevention, shifts). manual: your clutch control is used directly; bind it in the controls panel (F9)">clutch <select id="clutch-mode"><option value="auto">automatic</option><option value="manual">manual</option></select></label>
         </div>
         <div class="row">
           replay

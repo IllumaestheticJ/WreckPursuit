@@ -24,6 +24,8 @@ pub const TICKS_PER_FRAME: u64 = 4;
 pub const SWEEP_S: f32 = 1.6;
 /// Length of the wheelspin / slide part, s.
 pub const SPIN_S: f32 = 0.9;
+/// How long the horn is held in the horn cases, s.
+pub const HORN_HOLD_S: f32 = 2.0;
 
 /// Repo root.
 pub fn repo() -> PathBuf {
@@ -129,24 +131,46 @@ pub struct CaseFrame {
 
 /// Run one car in one role, alone, for the whole script.
 pub fn run_case(car: &LoadedCar, kind: DriverKind, dist: f32) -> Vec<CaseFrame> {
+    let n = ((SWEEP_S + SPIN_S) * FPS as f32).round() as u64;
+    run_frames(car, kind, n, |t| (state_at(car, t, dist), 1.0, false))
+}
+
+/// Horn test (owner report #58, "horn needs to hold with the button"): the car parked at idle
+/// 6 m from the listener, driven by `kind`, horn held for `hold_s`, then `tail_s` of silence.
+pub fn run_horn(car: &LoadedCar, kind: DriverKind, hold_s: f32, tail_s: f32) -> Vec<CaseFrame> {
+    let n = ((hold_s + tail_s) * FPS as f32).round() as u64;
+    run_frames(car, kind, n, |t| {
+        let mut st = state_at(car, 0.0, 6.0);
+        st.engine_rpm = car.def.engine.idle_rpm;
+        st.speed_mps = 0.0;
+        st.lin_vel = [0.0; 3];
+        (st, 0.0, t < hold_s)
+    })
+}
+
+/// Run the director for `n` frames on one entity; `input(t)` = (state, throttle, horn).
+fn run_frames(
+    car: &LoadedCar,
+    kind: DriverKind,
+    n: u64,
+    input: impl Fn(f32) -> (VehicleState, f32, bool),
+) -> Vec<CaseFrame> {
     let mut d = AudioDirector::new(AudioLibrary::embedded().expect("audio data"), 11);
     d.register_car(car);
     let entity = EntityId(7);
     let focus = (kind == DriverKind::Player).then_some(entity);
     let mut voices: BTreeMap<u32, (Bus, f32)> = BTreeMap::new();
-    let n = ((SWEEP_S + SPIN_S) * FPS as f32).round() as u64;
     let mut out = Vec::with_capacity(n as usize);
     for f in 0..n {
         let t = f as f32 / FPS as f32;
-        let st = state_at(car, t, dist);
-        let throttle = 1.0;
+        let (st, throttle, horn) = input(t);
         let inputs = [VehicleAudioInput {
             entity,
             car_id: &car.def.id,
             state: &st,
             throttle,
             throttle_applied: Some(throttle),
-            horn: false,
+            horn,
             siren: kind == DriverKind::Police,
             road_rumble: 0.0,
             kind,
@@ -213,9 +237,13 @@ pub fn siren_gain(f: &CaseFrame) -> f32 {
         .fold(0.0, f32::max)
 }
 
-/// JSON for `apps/testbed-web/e2e/audio_roster.mjs`: `{ library, cases: [{ car, role, dist,
-/// engine_pack, frames: [{ t, commands }] }] }`.
-pub fn render_json(cases: &[(&LoadedCar, DriverKind, f32, Vec<CaseFrame>)]) -> String {
+/// JSON for `apps/testbed-web/e2e/audio_roster.mjs`: `{ library, listener, cases: [{ car,
+/// role, dist, engine_pack, frames: [{ t, commands }] }], horns: [{ car, horn_cue, hold_s,
+/// frames }] }`.
+pub fn render_json(
+    cases: &[(&LoadedCar, DriverKind, f32, Vec<CaseFrame>)],
+    horns: &[(&LoadedCar, f32, Vec<CaseFrame>)],
+) -> String {
     let lib = AudioLibrary::embedded().expect("audio data");
     let cs: Vec<serde_json::Value> = cases
         .iter()
@@ -233,11 +261,27 @@ pub fn render_json(cases: &[(&LoadedCar, DriverKind, f32, Vec<CaseFrame>)]) -> S
             })
         })
         .collect();
+    let hs: Vec<serde_json::Value> = horns
+        .iter()
+        .map(|(car, hold_s, frames)| {
+            let fr: Vec<serde_json::Value> = frames
+                .iter()
+                .map(|f| serde_json::json!({ "t": f.t, "commands": f.commands }))
+                .collect();
+            serde_json::json!({
+                "car": car.def.id,
+                "horn_cue": lib.car_or_fallback(&car.def).horn_cue,
+                "hold_s": hold_s,
+                "frames": fr,
+            })
+        })
+        .collect();
     let l = listener();
     serde_json::json!({
         "library": { "config": lib.config, "packs": lib.packs },
         "listener": [l.pos, l.forward, l.up],
         "cases": cs,
+        "horns": hs,
     })
     .to_string()
 }

@@ -181,12 +181,14 @@ st = load("steam-release-sounds/steam_hisses.zip_x/steam hisses - Marker #2.wav"
 st = trim(st, -30)
 mid = st[int(0.2 * SR): int(0.2 * SR) + int(1.5 * SR)] if len(st) > 1.8 * SR else st
 loop(W, "steam_hiss.ogg", mid, "steam", "steam hisses - Marker #2.wav", "mono, sustained middle part", lufs=-24, xf=0.2)
-# horn: sustain loop from the middle of the honk; truck = same, pitched down
+# horn: a steady sustain loop (horn_sustain.py: the honk is a short decaying beep; a plain slice
+# of it pulsed when looped, owner report #58); truck = same, pitched down. The shipped files were
+# made by running horn_sustain.py on the previous 0.08–0.40 s / pitched cuts.
+from horn_sustain import sustain
 h = trim(load(f"{GG}/Car_Horn.ogg"), -30)
-core = h[int(0.08 * SR): int(0.40 * SR)]
-loop(W, "horn.ogg", core, "ggbotnet", "Car_Horn.ogg", "mono, sustained part 0.08–0.40 s", lufs=-16, xf=0.06)
+write(W, "horn.ogg", sustain(h[int(0.08 * SR): int(0.40 * SR)], sr=SR)[0], "ggbotnet", "Car_Horn.ogg", "mono, loud body of the honk, envelope flattened, autocorrelation loop (horn_sustain.py)", True)
 ht = trim(pitch(f"{GG}/Car_Horn.ogg", 0.7), -30)
-loop(W, "horn_truck.ogg", ht[int(0.11 * SR): int(0.57 * SR)], "ggbotnet", "Car_Horn.ogg", "mono, sustained part, pitch ×0.7", lufs=-16, xf=0.08)
+write(W, "horn_truck.ogg", sustain(ht[int(0.11 * SR): int(0.57 * SR)], sr=SR)[0], "ggbotnet", "Car_Horn.ogg", "mono, pitch ×0.7, loud body of the honk, envelope flattened, autocorrelation loop (horn_sustain.py)", True)
 # ambience: road traffic bed + crickets
 tr = load("high-traffic-road-sounds/gatve Varniu_2.ogg", 5, 40)
 cr = np.tile(load("crickets-ambient-noise-loopable/crickets_1.mp3"), 4)[: len(tr)]

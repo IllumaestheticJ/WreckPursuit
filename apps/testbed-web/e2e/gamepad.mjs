@@ -8,7 +8,9 @@
 // edge actions (camera cycle); a disconnect mid-drive releases everything; the controls panel
 // blocks driving input, rebinds a key and a pad button, and the rebind survives a reload (and
 // shows in the F1 help); reset to defaults; input latency (pad change → the sim's applied input)
-// stays within one frame.
+// stays within one frame. Clutch (playtest row 59): an old save without it migrates; bound to a
+// key and a wheel-style pedal axis, survives a reload; with clutch: manual, holding it gives
+// clt 1 and the engine revs while the car does not move, releasing it drives off.
 import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -49,7 +51,8 @@ await context.addInitScript(() => {
     connected: false,
     mapping: "standard",
     timestamp: 0,
-    axes: [0, 0, 0, 0],
+    // Axes 0–3 sticks; axis 5 a wheel-style clutch pedal resting at +1 (pressed = -1).
+    axes: [0, 0, 0, 0, 0, 1],
     buttons: Array.from({ length: 17 }, () => ({ pressed: false, touched: false, value: 0 })),
   };
   Object.defineProperty(Navigator.prototype, "getGamepads", {
@@ -65,6 +68,7 @@ await context.addInitScript(() => {
     },
     clear() {
       pad.axes.fill(0);
+      pad.axes[5] = 1;
       for (let i = 0; i < pad.buttons.length; i++) pad.buttons[i] = { pressed: false, touched: false, value: 0 };
       pad.timestamp++;
     },
@@ -234,6 +238,84 @@ await page.click("#bind-reset");
 const reset = await page.evaluate(() => ({ b: window.__wp.bindings(), stored: localStorage.getItem("wp.bindings.v1") }));
 await page.evaluate(() => window.__wp.controls.close());
 check(reset.b.keys.throttle[0] === "KeyW" && reset.stored === null, "reset to defaults clears the saved bindings");
+
+// 9. Clutch. An older save (no clutch entry) migrates: its bindings stay, the clutch gets defaults.
+await page.evaluate(() => {
+  const old = { keys: { horn: ["KeyQ"] }, pad: { horn: [{ button: 1 }] }, padDeadzone: 0.1, padCurve: 1.2 };
+  localStorage.setItem("wp.bindings.v1", JSON.stringify(old));
+});
+await page.reload();
+await ready();
+const mig = await page.evaluate(() => window.__wp.bindings());
+check(
+  Array.isArray(mig.keys.clutch) && mig.keys.clutch.length === 0 && mig.pad.horn[0].button === 1 && mig.padCurve === 1.2 && mig.keys.throttle[0] === "KeyW",
+  "an older wp.bindings.v1 save (no clutch) loads: its bindings kept, clutch unbound by default",
+);
+await page.evaluate(() => {
+  window.__pad.clear();
+  window.__pad.connect(true);
+});
+await page.keyboard.press("F9");
+await page.click('button.bind[data-d="keys"][data-a="clutch"][data-s="0"]');
+await page.keyboard.press("Backslash");
+await page.click('button.bind[data-d="pad"][data-a="clutch"][data-s="0"]');
+await frames(2);
+await page.evaluate(() => window.__pad.set({ axes: { 5: -1 } }));
+await frames(3);
+await page.evaluate(() => window.__pad.set({ axes: { 5: 1 } }));
+await page.keyboard.press("Escape");
+await page.selectOption("#clutch-mode", "manual");
+await page.reload();
+await ready();
+const cb = await page.evaluate(() => ({
+  b: window.__wp.bindings(),
+  mode: document.querySelector("#clutch-mode").value,
+  auto: window.__wp.sim.assists(window.__wp.app.player).auto_clutch,
+}));
+const pedal = cb.b.pad.clutch[0];
+check(
+  cb.b.keys.clutch[0] === "Backslash" && pedal?.axis === 5 && pedal?.dir === -1 && pedal?.full === true,
+  `clutch bound to a key and a pedal axis, survives a reload (${JSON.stringify(cb.b.keys.clutch)}, ${JSON.stringify(cb.b.pad.clutch)})`,
+);
+check(cb.mode === "manual" && cb.auto === false, `clutch: manual survives a reload and the sim's auto_clutch is off (${cb.mode}, auto_clutch ${cb.auto})`);
+// Pedal half way → clutch 0.5 on the input (full-range axis).
+await page.evaluate(() => {
+  window.__pad.connect(true);
+  window.__pad.set({ axes: { 5: 0 } });
+});
+await frames(3);
+const half = await page.evaluate(() => window.__wp.app.input.clutch);
+await page.evaluate(() => window.__pad.set({ axes: { 5: 1 } }));
+await frames(2);
+await page.evaluate(() => window.__pad.connect(false));
+check(Math.abs(half - 0.5) < 0.06, `wheel-style pedal axis: half travel → clutch ${half.toFixed(2)}`);
+// Standstill, clutch held, full throttle: the engine revs, the car stays put.
+await page.evaluate(() => window.__wp.sim.reset(window.__wp.app.player));
+await frames(10);
+// Clutch in first (as a driver would), then full throttle.
+await page.keyboard.down("Backslash");
+await page.waitForTimeout(400);
+const v0 = await speed();
+await page.keyboard.down("KeyW");
+await page.waitForTimeout(1500);
+const held = await page.evaluate(() => ({
+  clt: window.__wp.app.input.clutch,
+  rpm: window.__wp.sim.telemetry(window.__wp.app.player)[1],
+  v: window.__wp.sim.states()[14],
+}));
+await page.keyboard.up("Backslash");
+await page.waitForTimeout(2000);
+const released = await speed();
+await page.keyboard.up("KeyW");
+check(
+  held.clt === 1 && held.v - v0 < 0.3 && held.rpm > 2500,
+  `manual clutch held: clt ${held.clt}, engine ${held.rpm.toFixed(0)} rpm, car ${v0.toFixed(2)} → ${held.v.toFixed(2)} m/s over 1.5 s of full throttle (drive decoupled)`,
+);
+check(released > 2, `clutch released with throttle on: the car drives off (${released.toFixed(2)} m/s)`);
+await page.selectOption("#clutch-mode", "auto");
+const back = await page.evaluate(() => window.__wp.sim.assists(window.__wp.app.player).auto_clutch);
+check(back === true, "clutch: automatic restores the auto clutch");
+await page.evaluate(() => localStorage.removeItem("wp.bindings.v1"));
 
 check(errors.length === 0, `no page errors${errors.length ? ": " + errors.slice(0, 3).join(" | ") : ""}`);
 await browser.close();

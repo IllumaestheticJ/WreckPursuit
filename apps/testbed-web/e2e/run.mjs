@@ -9,7 +9,9 @@
 // weather (e2e/weather.mjs: selector, rain, wet roads, spray, fog, wipers, rainy-night chase),
 // traffic / police LOD hand-overs are seamless (no missing mesh, < 0.5 m swap jump, no pop-in
 // within 300 m), gamepad + rebindable controls (e2e/gamepad.mjs), browser perf budgets
-// (e2e/perf_check.mjs, PERF=0 skips) and (optionally) perf at 1/8/24 cars.
+// (e2e/perf_check.mjs, PERF=0 skips), parked cars and cones are drawn (every prop within 150 m
+// has exactly one drawn instance, near parked cars use the full mesh, a knocked parked car's drawn
+// pose follows the sim within 0.2 m), and (optionally) perf at 1/8/24 cars.
 import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -379,6 +381,42 @@ check(
     `banner ${chase.banner ?? "none"}, ${chase.police} police vehicles + ${chase.units} other units, ` +
     `${chase.violations} violation event(s) (in feed: ${chase.inFeed}) after ${chase.simS.toFixed(1)} s sim; wait ${chaseWait}`,
 );
+// Art style (machine S, render/style.ts): low-poly dark by default in the night chase (palette
+// fog, street lamps along the kerbs, post stack), the selector switches to greybox and back.
+const art = await page.evaluate(async () => {
+  const w = window.__wp;
+  const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  const { PALETTE } = await import("/src/render/palette.ts");
+  const low = { id: w.style.id, fog: w.scene.scene.fog?.density ?? 0, lamps: w.style.lampCount("vesper_v2"), override: !!w.scene.renderOverride };
+  const sel = document.getElementById("style");
+  sel.value = "greybox";
+  sel.dispatchEvent(new Event("change"));
+  await frame();
+  const grey = { id: w.style.id, fog: w.scene.scene.fog?.density ?? 0 };
+  sel.value = "lowpoly";
+  sel.dispatchEvent(new Event("change"));
+  await frame();
+  await frame();
+  const others = [PALETTE.lampGlow, PALETTE.signalGlow, PALETTE.headlightGlow, PALETTE.brakeGlow, PALETTE.windowGlow];
+  const brightest = Math.min(PALETTE.policeRedGlow, PALETTE.policeBlueGlow) >= 3 * Math.max(...others);
+  // Instanced fleet (render/fleet.ts): palette liveries and HDR light bars in low-poly dark.
+  const { styledPaint, styledLamp, TRAFFIC_PALETTE, BAR } = await import("/src/render/fleet.ts");
+  const fleetPaint = styledPaint(TRAFFIC_PALETTE[2]) === PALETTE.trafficPaints[2];
+  const bar = styledLamp(w.scene.hemi.color.clone(), BAR.blue);
+  const fleetBar = Math.max(bar.r, bar.g, bar.b) > 3;
+  const fleetRough = w.lod.fleet.mats.paint.roughness;
+  return { low, grey, back: w.style.id, brightest, fleetPaint, fleetBar, fleetRough };
+});
+check(
+  art.low.id === "lowpoly" && art.low.override && art.low.fog > 0.001 && art.low.lamps > 100 && art.grey.id === "greybox" && art.grey.fog === 0 && art.back === "lowpoly" && art.brightest,
+  `art style: low-poly dark in the chase (fog ${art.low.fog.toFixed(4)}, ${art.low.lamps} street lamps), greybox on the selector (fog ${art.grey.fog}), back to ${art.back}; police bars ≥ 3× every other glow: ${art.brightest}`,
+);
+check(
+  art.fleetPaint && art.fleetBar && art.fleetRough === 0.85,
+  `art style on the instanced fleet: palette livery ${art.fleetPaint}, HDR light bar ${art.fleetBar}, panel-matched paint roughness ${art.fleetRough}`,
+);
+await shot("city_chase_greybox_toggle.png");
+
 // City map HUD (workstream 16): the corner minimap shows the player and the police near them;
 // M / Tab open the full city map, M / Tab / Esc close it. The player is parked in front of a
 // patrol car so at least one police dot is inside the minimap.
@@ -475,6 +513,63 @@ check(
     lod.minAppearTraffic >= 300 && lod.minVanishTraffic >= 300,
     `LOD: traffic appears ≥ ${lod.minAppearTraffic.toFixed(0)} m and vanishes ≥ ${lod.minVanishTraffic.toFixed(0)} m from the player` +
       ` (police: appear ${lod.minAppearPolice.toFixed(0)} m, vanish ${lod.minVanishPolice.toFixed(0)} m)`,
+  );
+}
+// Props (playtest row 50 "hitting invisible objects"): every parked car / cone is a physical
+// body in the sim, so every one must be drawn. In a city chase: the instanced props match the
+// sim's prop list (each parked car drawn exactly once; every prop within 150 m of the camera
+// drawn; parked cars within 150 m use the full traffic mesh), and a parked car knocked by the
+// player is drawn where the sim has it (instance matrix read back vs prop_pose, every frame,
+// < 0.2 m) while it moves.
+{
+  await page.evaluate(() => window.__wp.startCityChase("debug_sedan", "Arcade"));
+  await page
+    .waitForFunction(() => window.__wp.props.count > 0 && window.__wp.sim.worldInfo()[0] > 240, null, { timeout: 120000, polling: 200 })
+    .catch(() => {});
+  const knock = await page.evaluate(async () => {
+    const wp = window.__wp;
+    const frame = () => new Promise((r) => requestAnimationFrame(r));
+    const target = wp.sim.debugKnockProp(wp.app.player, -1, 12);
+    const start = Array.from(wp.sim.propPose(target));
+    let maxErr = 0;
+    let maxMove = 0;
+    let frames = 0;
+    let undrawn = 0;
+    const t0 = wp.sim.worldInfo()[0];
+    while (wp.sim.worldInfo()[0] - t0 < 240 * 3 && frames < 600) {
+      await frame();
+      frames++;
+      const truth = Array.from(wp.sim.propPose(target));
+      const drawn = wp.props.drawnPose(target);
+      if (!drawn) {
+        undrawn++;
+        continue;
+      }
+      maxErr = Math.max(maxErr, Math.hypot(drawn[0] - truth[0], drawn[1] - truth[1], drawn[2] - truth[2]));
+      maxMove = Math.max(maxMove, Math.hypot(truth[0] - start[0], truth[1] - start[1], truth[2] - start[2]));
+    }
+    // Let the camera settle on the stopped car, then count what is drawn around it.
+    for (let i = 0; i < 30; i++) await frame();
+    // Cost of the per-frame wasm call with nothing moving.
+    const c0 = performance.now();
+    for (let i = 0; i < 200; i++) wp.sim.propsMoved();
+    const movedCallMs = (performance.now() - c0) / 200;
+    return { target, frames, maxErr, maxMove, undrawn, stats: wp.props.stats(wp.rig.camera, 150), model: wp.props.model, movedCallMs };
+  });
+  await shot("props_knock.png");
+  const st = knock.stats;
+  check(
+    st.parked > 1000 && st.drawnFull + st.drawnProxy === st.parked && st.inRange > 0 && st.drawnInRange === st.inRange &&
+      (st.fullInRange === st.parkedInRange || st.fullInRange === 256),
+    `props: ${st.parked} parked cars (${knock.model ?? "box stand-in"}) + ${st.cones} cones; drawn ${st.drawnFull} full + ${st.drawnProxy} proxy; ` +
+      `${st.drawnInRange}/${st.inRange} props within 150 m drawn, ${st.fullInRange}/${st.parkedInRange} parked cars there with the full mesh ` +
+      `(${st.fullInFullRange}/${st.inFullRange} within ${250} m); ${st.repicks} re-picks, ${st.repickWrites} + ${st.movedWrites} matrix writes; ` +
+      `update ${st.updateMeanMs.toFixed(3)} ms mean / ${st.updateMaxMs.toFixed(2)} ms worst, props_moved() ${knock.movedCallMs.toFixed(3)} ms`,
+  );
+  check(
+    knock.maxMove > 0.3 && knock.maxErr < 0.2 && knock.undrawn === 0,
+    `props: knocked parked car #${knock.target} moved ${knock.maxMove.toFixed(2)} m; drawn vs sim pose ≤ ${knock.maxErr.toFixed(3)} m over ${knock.frames} frames` +
+      (knock.undrawn ? `; ${knock.undrawn} frames undrawn` : ""),
   );
 }
 // Pursuit banner + capture → repair bill, driven by a stubbed police_status() (a real capture
@@ -654,7 +749,7 @@ check(
   await page.click("#sc-garage");
   await page.waitForSelector(G, { timeout: 10000 }).catch(() => {});
   const reloaded = await page.evaluate(() => window.__wp.careerApi.view());
-  await page.click(`${G} button[role="tab"]:has-text("Pound")`);
+  await page.click(`${G} button[role="tab"]:has-text("Impound")`);
   await page.click(`${G} button:has-text("Pay & release")`);
   await page.click(`${G} button[role="tab"]:has-text("Cars")`);
   const released = await page.evaluate(() => window.__wp.careerApi.view());
@@ -767,5 +862,11 @@ const gp = spawnSync("node", [join(here, "gamepad.mjs")], {
 });
 process.stdout.write(gp.stdout);
 check(gp.status === 0, `gamepad + controls checks (e2e/gamepad.mjs)${gp.status === 0 ? "" : ": " + (gp.stderr || "").trim().split("\n").pop()}`);
+
+// 8. Reset in place (e2e/reset.mjs, its own server and browser): R after a crash → upright,
+// within 15 m, repaired, replayable; city chase keeps heat; career run does not repair.
+const rs = spawnSync("node", [join(here, "reset.mjs")], { cwd: root, encoding: "utf8", env: process.env });
+process.stdout.write(rs.stdout);
+check(rs.status === 0, `reset-in-place checks (e2e/reset.mjs)${rs.status === 0 ? "" : ": " + (rs.stderr || "").trim().split("\n").pop()}`);
 console.log(failures ? `${failures} check(s) failed` : "all checks passed");
 process.exit(failures ? 1 : 0);

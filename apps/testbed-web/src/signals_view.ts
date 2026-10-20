@@ -48,6 +48,7 @@ export class SignalView {
   private lampPos = new Float32Array(0);
   private shown = new Uint8Array(0);
   private lastNight = -1;
+  private lampBoost = 1;
   /** Head count of the current city (0 without one). */
   count = 0;
   /** Every instance matrix of every part as built (full city), for re-packing near heads. */
@@ -108,6 +109,7 @@ export class SignalView {
     const lampGeo = new THREE.SphereGeometry(0.13, 10, 8);
     this.lamps = [0, 1, 2].map(() => {
       const m = instanced(lampGeo.clone(), new THREE.MeshBasicMaterial({ toneMapped: false }), inst);
+      (m.material as THREE.MeshBasicMaterial).color.setScalar(this.lampBoost);
       for (let i = 0; i < inst; i++) m.setColorAt(i, new THREE.Color(0, 0, 0));
       return m;
     });
@@ -279,6 +281,15 @@ export class SignalView {
     for (const l of this.lamps) if (l.instanceColor) l.instanceColor.needsUpdate = true;
     this.glow.instanceMatrix.needsUpdate = true;
     if (this.glow.instanceColor) this.glow.instanceColor.needsUpdate = true;
+  }
+
+  /**
+   * Lamp brightness multiplier (art style: > 1 so lit lamps reach the bloom pass; 1 = as
+   * before). Applies to the lamps of the current and later cities.
+   */
+  setLampBoost(k: number): void {
+    this.lampBoost = k;
+    for (const l of this.lamps) (l.material as THREE.MeshBasicMaterial).color.setScalar(k);
   }
 
   /** Current per-head state codes as last drawn (for automation; 255 = not drawn yet). */

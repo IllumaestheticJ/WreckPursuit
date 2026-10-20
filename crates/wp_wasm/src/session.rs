@@ -447,6 +447,82 @@ impl Session {
         Ok(())
     }
 
+    /// Reset in place (testbed R, playtest row 65): pick the nearest clear lane spot within
+    /// 15 m heading the car's own way ([`crate::reset::reset_pose`]), put the car there upright
+    /// and at rest, and repair it if `repair` (false in a career run). Logged as the replay op
+    /// `OpKind::ResetAt` carrying the pose, so playback does not redo the search. Police heat,
+    /// pursuit and the run carry on; a race is told the car moved on purpose (position and lap
+    /// kept).
+    pub fn reset_in_place(
+        &mut self,
+        id: EntityId,
+        repair: bool,
+    ) -> Result<crate::reset::ResetPose, String> {
+        use crate::reset::{reset_pose, travel_dir, Obstacle, OTHER_HALF};
+        self.live_check()?;
+        let idx = self.idx(id)?;
+        let st = self
+            .vehicle(id)
+            .map(|v| v.vehicle.state())
+            .ok_or_else(|| format!("unknown vehicle {id:?}"))?;
+        let yaw_of_rot = |q: [f32; 4]| {
+            let fx = 2.0 * (q[0] * q[1] - q[3] * q[2]);
+            let fy = 1.0 - 2.0 * (q[0] * q[0] + q[2] * q[2]);
+            wp_math::atan2(-fx, fy)
+        };
+        let mut obstacles: Vec<Obstacle> = Vec::new();
+        for v in self.sim.vehicles() {
+            if v.id == id {
+                continue;
+            }
+            let o = v.vehicle.state();
+            obstacles.push(Obstacle {
+                pos: o.pos,
+                yaw: yaw_of_rot(o.rot),
+                half: OTHER_HALF,
+            });
+        }
+        for b in &self.sc.barriers {
+            obstacles.push(Obstacle {
+                pos: b.pos,
+                yaw: b.yaw,
+                half: [b.size[0] * 0.5, b.size[1] * 0.5],
+            });
+        }
+        let world = self.sim.world();
+        for a in world.agents() {
+            obstacles.push(Obstacle {
+                pos: a.pos,
+                yaw: a.yaw,
+                half: OTHER_HALF,
+            });
+        }
+        for p in world.static_props() {
+            obstacles.push(Obstacle {
+                pos: p.pos,
+                yaw: p.yaw,
+                half: [p.half_extents[0], p.half_extents[1]],
+            });
+        }
+        let pose = reset_pose(
+            Some(world.map()),
+            st.pos,
+            travel_dir(st.rot, st.lin_vel),
+            &obstacles,
+        );
+        self.log_op(
+            idx,
+            OpKind::ResetAt {
+                xy: pose.xy,
+                yaw: pose.yaw,
+                near_z: pose.near_z,
+                repair,
+            },
+        )?;
+        self.relocate_racer(id);
+        Ok(pose)
+    }
+
     /// Tell the race (if any) that `id` was moved on purpose, so the judge does not read the
     /// jump as a teleport.
     fn relocate_racer(&mut self, id: EntityId) {
@@ -616,6 +692,62 @@ impl Session {
             .map_err(|e| e.to_string())?;
         self.relocate_racer(id);
         Ok(())
+    }
+
+    /// Debug / e2e: aim vehicle `id` at a parked car so it knocks it: placed 5.5 m off the
+    /// car's flank (a side with a drivable lane and no other prop), facing it, rolling at `speed_mps`.
+    /// `prop` = index into [`crate::props::static_list`], or `None` for the parked car nearest
+    /// the vehicle. Returns the prop index. Not in the replay log.
+    pub fn debug_knock_prop(
+        &mut self,
+        id: EntityId,
+        prop: Option<usize>,
+        speed_mps: f32,
+    ) -> Result<usize, String> {
+        self.live_check()?;
+        let here = self
+            .vehicle(id)
+            .map(|v| v.vehicle.state().pos)
+            .ok_or_else(|| format!("unknown vehicle {id:?}"))?;
+        let target = match prop {
+            Some(i) if i < self.sim.prop_count() => i,
+            Some(i) => return Err(format!("no prop {i}")),
+            None => crate::props::nearest_parked_car(&self.sim, [here[0], here[1]])
+                .ok_or("no parked cars in this session")?,
+        };
+        let (p, q) = self.sim.prop_pose(target).ok_or("no prop pose")?;
+        let r = crate::props::prop_right_xy(q);
+        // Come from a flank with a drivable lane next to it (the other is the kerb), from a
+        // spot no other prop is on (streets have parking on both sides).
+        const OFFSET_M: f32 = 5.5;
+        let map = self.sim.world().map();
+        let lane_at = |side: f32| {
+            let probe = [p[0] + r[0] * side * 3.5, p[1] + r[1] * side * 3.5, p[2]];
+            map.locate(probe, None, 0.0, true, false).is_some()
+        };
+        let spot = |side: f32| [p[0] + r[0] * side * OFFSET_M, p[1] + r[1] * side * OFFSET_M];
+        let clear = |side: f32| {
+            let xy = spot(side);
+            (0..self.sim.prop_count()).all(|i| {
+                i == target
+                    || self.sim.prop_pose(i).is_none_or(|(o, _)| {
+                        (o[0] - xy[0]).powi(2) + (o[1] - xy[1]).powi(2) > 4.5 * 4.5
+                    })
+            })
+        };
+        let side = [-1.0, 1.0]
+            .into_iter()
+            .find(|s| lane_at(*s) && clear(*s))
+            .or_else(|| [-1.0, 1.0].into_iter().find(|s| clear(*s)))
+            .ok_or("no clear spot next to that prop")?;
+        let xy = spot(side);
+        // Facing the prop: forward at yaw ψ is (−sin ψ, cos ψ) = −side · r.
+        let yaw = wp_math::atan2(side * r[0], -side * r[1]);
+        self.sim
+            .place_on_ground(id, xy, yaw, speed_mps, Some(p[2]))
+            .map_err(|e| e.to_string())?;
+        self.relocate_racer(id);
+        Ok(target)
     }
 
     /// The vehicle is held on the brakes because its run is over (capture or wreck).

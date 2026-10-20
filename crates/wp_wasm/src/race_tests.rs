@@ -189,31 +189,32 @@ fn race_replay_plays_back_without_drift() {
 
 #[test]
 fn a_capture_mid_race_is_a_dnf_and_hands_off_to_the_end_of_run_panel() {
-    // The checkpoint run has no corridor rule (any path), so the player can be parked in
-    // front of any patrol car without being DQ'd for leaving the route first.
+    // What this checks is the race's side of a capture: a `PursuitEnded { Captured }` for the
+    // player mid-race becomes `DNF Captured` and hands off to the end-of-run panel. How and
+    // when a patrol makes the arrest is wp_police's business (and keeps being retuned), so
+    // the capture is forced through E's public hook instead of waiting for a unit to box the
+    // player in: the player is made wanted (debug heat), then `capture_abandoned` ends the
+    // pursuit as `Captured` exactly like the capture rule does (same event, same reset).
     let def = wp_race::catalog::race("lantern_checkpoint").unwrap();
     let sc = race_scenario(&def, CAR, DamageMode::Arcade, false).unwrap();
     let mut s = Session::new(sc, false).unwrap();
-    s.run_ticks(240 * 4);
-    let mut parked = false;
-    for _ in 0..240 * 30 {
-        s.run_ticks(1);
-        if s.debug_park_near_police(PLAYER, 14.0).is_ok() {
-            s.debug_sim_mut()
-                .unwrap()
-                .police_mut()
-                .set_heat(PLAYER, 30.0);
-            parked = true;
-            break;
-        }
-    }
-    assert!(parked, "no police car spawned");
-    let brake = VehicleInput {
-        brake: 1.0,
-        ..Default::default()
-    };
-    for _ in 0..240 * 60 {
-        let _ = s.set_input(PLAYER, brake);
+    // Past the countdown and a few seconds into the race (the player stays on the grid).
+    s.run_ticks(240 * 6);
+    assert_eq!(s.race().unwrap().info(s.tick())[0], 1.0, "race running");
+    assert!(s.race_report().is_none());
+    let police = s.debug_sim_mut().unwrap().police_mut();
+    police.set_heat(PLAYER, 30.0);
+    assert!(
+        police.is_wanted_or_pursued(PLAYER),
+        "debug heat makes the player wanted"
+    );
+    assert!(
+        police.capture_abandoned(PLAYER).is_some(),
+        "the capture is accepted"
+    );
+    // The `PursuitEnded` event is drained on the next police step; the race and the run react
+    // after that tick.
+    for _ in 0..240 * 2 {
         s.run_ticks(1);
         if let Some(r) = s.race_report() {
             assert!(r.handoff_run_end, "{r:?}");
@@ -227,7 +228,7 @@ fn a_capture_mid_race_is_a_dnf_and_hands_off_to_the_end_of_run_panel() {
             return;
         }
     }
-    panic!("never captured");
+    panic!("the capture never reached the race");
 }
 
 /// `apps/simcli/scenarios/race/pick_<id>.ron`: each picker race as a simcli v2 scenario (the

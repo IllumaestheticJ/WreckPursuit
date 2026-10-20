@@ -124,13 +124,30 @@ the schedule could hunt (1→2→1). New automatic (`crates/wp_vehicle/README.md
 | 47 | Some cars are missing sounds (round-12 preview) | J (audio): find which cars/voices are silent; suspect the lead's J + J2 merge of `voices.ts` (resolve() now runs before the engine-instrument check) and per-car pack mapping | dispatched |
 | 48 | Police cars are too fragile | B (damage) + H (police package): Arcade wreck thresholds, police ≥ player sports car | dispatched |
 | 49 | Cars in general are too fragile in Arcade | B (damage): retune `data/modes/arcade.toml` to "punishing but survivable" | dispatched |
-| 50 | Hitting invisible objects (wrecks on an empty road) | lead: parked-car and cone props are physical but never drawn → helper `lead/draw-props` | dispatched |
+| 50 | Hitting invisible objects (wrecks on an empty road) | lead: parked-car and cone props are physical but never drawn → helper `lead/draw-props` | **fixed on `lead/draw-props`**: wp_wasm `props_static()` once + `props_moved()` per frame (only changed props); testbed draws parked cars as instanced traffic cars fitted to the collider box (full mesh within 250 m, proxy beyond, never hidden) and cones as instanced orange cones. Collider sweep (`wp_wasm/tests/drawn_colliders.rs`, 2-min city chase + free drive): 122 hard static contacts (> 2,000 N·s), 92 with parked cars (all previously invisible), 0 now undrawn; all 3,346 building and 362 deck-rail colliders match the greybox. The reported (-367.8, 172.1) contact was a drawn building wall. Signal masts are drawn but have no collider. Details: `docs/integration/props.md` |
 | 51 | The painted stop lines at traffic lights make the car jump and crash into the light | helper `lead/fix-junction-holes` (step in the collision surface where the lane meets the junction disc) | dispatched |
 | 52 | The sidewalk should be at the same height as the base of the buildings | helper `lead/fix-junction-holes` (building base meets the sidewalk top along frontages; plinths on slopes) | dispatched |
 | 53 | Hood doesn't crumple enough | R (panels): stronger visual buckling (fold lines, tenting, latch kink), visual only | dispatched |
 | 54 | Cars are too bouncy / light and get launched too easily | A (vehicle): damping, bump stops, inertia, restitution, kerb-strike impulses; arcade anti-launch assist | dispatched |
 | 55 | Police don't respond / spawn close enough, or get lost / damaged on the way | E (police): per-unit response log (spawn distance, route, failure cause), re-route / respawn out of sight; durability = B row 48 | dispatched (with row 44) |
 | 56 | Semi-auto (and auto): holding the handbrake also opens the clutch so the rear wheels lock | A (vehicle): auto-clutch decouples while the handbrake is held, smooth re-engage, no stall; both modes | dispatched |
+| 57 | Countersteer assist as a slider with variable aggression | A (vehicle): 0–100 % slide-catch gain (driver override kept), wasm + testbed slider | dispatched |
+| 58 | Horn should sound for as long as the button is held | J (audio): looped horn sustain (recorded + procedural), release ≤ 50 ms | dispatched |
+| 59 | No option to map a clutch | C (testbed): `clutch` binding (key / pad / wheel pedal) + automatic/manual clutch setting; A: manual clutch + stall/restart in wp_vehicle | dispatched |
+| 60 | Sped right past a cop and no chase started; the cop doesn't reverse or turn around to chase | E (police): fast pass-by detection (sight rate, LOS with tunnels/terrain, heat threshold for blatant speeding), scenarios | dispatched |
+| 61 | Police should push civilians out of the way when stuck | E (police): low-speed controlled shove after 1.5 s blocked (sirens), civilians yield to sirens (D) | dispatched |
+| 62 | Traffic should get out of the way of police with sirens on | D (traffic AI): signal, slow, pull over, wait, merge back; LOD fleet too | dispatched |
+| 63 | Police are not aggressive enough | E (police): limit-pace chase driving, escalating PIT/ram/box/roadblock tactics by wanted level, flanking, short cooldowns; before/after table | dispatched |
+| 64 | Other police units don't spawn / converge during a chase | E (police): backup dispatch to intercept points, out-of-sight spawns up to a per-level cap, search at last-known position | dispatched |
+| 65 | R should reset and repair the car in place, not send it back to the spawn | C (testbed + wp_wasm): upright on the nearest lane, ghost 1 s, repaired outside career; heat/pursuit/race state kept | dispatched |
+| 66 | Cops should route around buildings (not drive into them) | E (police): road-graph pursuit unless clear LOS, static-obstacle feelers, intercept routing; lane paths through lots at Vesper nodes 78/97 = city generator (lead/fix-sidewalk-lots) | dispatched |
+| 67 | Minimap overlaps the controls panel | M (ui) | dispatched |
+| 68 | A proper game menu: pause, main menu, settings (graphics, audio, assists, damage mode, units) | M (ui) | dispatched |
+| 69 | Crash effects: sparks, smoke, glass, skid marks, debris | helper `lead/crash-fx` | dispatched |
+| 70 | Instant crash replay (slow-mo, cinematic cameras) | helper `lead/crash-replay` | dispatched |
+| 71 | Touch controls for phones and tablets | helper `lead/touch-controls` | dispatched |
+| 72 | Handbrake locks the rears but the car won't rotate for quick direction changes | A (vehicle): assists stop resisting yaw while the handbrake is held, sliding lateral force on locked rears, AWD rear decoupling | dispatched |
+| 46 | Intersections still have holes in them (Port Vesper v2) | helper `lead/fix-junction-holes` (wp_world surface junction discs / bend connectors, greybox + colliders) | done on `lead/fix-junction-holes` (not merged): bends and dead ends were only partly paved (grass inside curves, under parking lanes, in U-turn bulbs), junction discs sat 8–15 cm off the road ends, sidewalk corners were 0.5 m staircases. Junctions, bends and dead ends are now exact patches sharing the road ends; enclosed holes Vesper 418 → 12.5 m², grid 191 → 0.5 m²; no ray miss over any junction in either city. Shots `docs/media/junctions/`, details `docs/integration/junctions.md`. Goldens blessed. To playtest |
 
 ## 2026-10-19 — step 2: 4-player test on Port Vesper v2 (F, `ws/net`)
 Found by the new 3-minute 4-client test (`crates/wp_net/tests/vesper_e2e.rs`) and the

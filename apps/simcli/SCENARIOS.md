@@ -130,6 +130,11 @@ failures.
     `wp_world::drive::PathFollower` with pursuit limits at up to `target_speed`, then holds at
     the finish. Inputs are logged as usual, so replays match. Other route-id styles warn and
     fall back to keyframes.
+    Optional: `lateral_offset_m` (drive this far right of the route's lane centre, negative =
+    left; e.g. `-1.55` rides the centre line like a siren unit passing yielding traffic) and
+    `keep_distance: true` (follow civilian traffic and the other entities with the shared
+    car-following law instead of driving through them). `siren`, `headlights` and `horn` still
+    come from the keyframes.
   - `ai_driver(target)`: needs the AI driver (prompts 05/06). Warns for now.
 
 ## Expectations (`expect`, `expect_pending`)
@@ -157,7 +162,8 @@ from spawn), `path_length_m`, `final_health`, `max_lateral_g`, `max_long_g`,
 `total_loss` (0/1), `min_z_m`, `off_road_s` (time not on any lane, junction connector or
 junction box at about its height; city runs only), `max_airborne_s` (longest stretch with all
 four wheels off the ground), `route_progress` (fraction of a `follow_route` route covered, 0
-without one).
+without one), `max_los_lost_s` (longest stretch of a pursuit with no police line of sight on the
+entity, s; 0 without police).
 
 World metrics for `world_metric(...)` (all 0 on the flat world): `traffic_agents_final`,
 `traffic_agents_min` (fewest agents at any tick after a 10 s warm-up), `traffic_moving_frac_final`
@@ -165,7 +171,8 @@ and `traffic_moving_frac_min` (fraction of agents above 0.5 m/s; the min is over
 after the warm-up), `civilian_collisions`, `traffic_spawned`, `traffic_stuck_recycled`,
 `traffic_go_arounds` (civilians that got around a stationary vehicle: oncoming-lane passes plus
 lane changes made for it), `traffic_turnarounds` (civilians that turned around or reversed back
-to the last junction because their lane was blocked), `props`
+to the last junction because their lane was blocked), `traffic_siren_yields` (civilians that
+pulled over for a siren unit coming up behind them), `props`
 (parked cars and cones turned into bodies), `static_boxes`, `police_units_max` (most police
 units alive at once), `police_units_final`.
 

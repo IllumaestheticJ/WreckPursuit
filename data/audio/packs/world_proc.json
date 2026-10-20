@@ -287,7 +287,8 @@
         }
       },
       "gain": 0.8,
-      "looped": true
+      "looped": true,
+      "release_s": 0.03
     },
     "horn/truck": {
       "source": {
@@ -300,7 +301,8 @@
         }
       },
       "gain": 0.9,
-      "looped": true
+      "looped": true,
+      "release_s": 0.03
     },
     "surface/asphalt": {
       "source": {

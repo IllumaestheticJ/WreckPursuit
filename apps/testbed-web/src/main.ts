@@ -4,7 +4,8 @@
 // URL parameters (handy for automation): ?scenario=crash/head_on.ron&speed=60 runs a scenario,
 // ?bench=24 spawns a 24-car benchmark, ?cam=orbit picks a camera, ?replay=last plays the last
 // stored replay, ?city=procedural_12x12 picks the city (default vesper_v2), ?chase=1 starts the
-// city chase (?chase=rain the rainy night), ?weather=heavy_rain picks the weather.
+// city chase (?chase=rain the rainy night), ?weather=heavy_rain picks the weather,
+// ?style=greybox|lowpoly the art style (default low-poly dark, render/style.ts).
 // ?race=<id> starts a street race (&autopilot=1: the AI drives the player's car).
 import { loadWasm, sim, type DriverInput, type Scenario, type ScenarioResult } from "./wasm/sim";
 import { META_STRIDE, RACE_STRIDE, RI, RS, STATE_STRIDE, S, T, VEHICLE_KIND, W } from "./wasm/layout";
@@ -17,6 +18,7 @@ import { SceneView } from "./scene";
 import { VehicleView } from "./vehicle_view";
 import { clearDebris, meshTimings, panelEvents, preloadCarMeshes, stepDebris } from "./render/panels";
 import { LodDirector } from "./render/lod";
+import { PropView } from "./render/props";
 import { CameraRig, CAMERA_MODES, cameraLabel, type CameraMode } from "./cameras";
 import { Hud } from "./hud";
 import { TelemetryPlots } from "./telemetry";
@@ -31,6 +33,7 @@ import { RaceView, type RaceFrame } from "./ui/race";
 import { RaceMarker, parseCourse } from "./race_marker";
 import { RealTimeMeter } from "./rtf";
 import { WeatherView } from "./render/weather";
+import { ArtStyle, STYLE_LABELS, type StyleId } from "./render/style";
 import { FrameProfiler } from "./perf";
 import * as THREE from "three";
 
@@ -95,7 +98,13 @@ const app: AppState = {
 async function main(): Promise<void> {
   await loadWasm();
   const overlay = $("overlay");
-  const scene = new SceneView(document.body);
+  // Art style (machine S): low-poly dark by default; the selector / ?style= switch to greybox.
+  const STYLE_KEY = "wp.testbed.style.v1";
+  const initialStyle: StyleId = (params.get("style") ?? store.get(STYLE_KEY)) === "greybox" ? "greybox" : "lowpoly";
+  // The low-poly post stack renders into its own MSAA target (when the graphics quality allows
+  // MSAA): no multisampled canvas needed (greybox picked later in the session then draws
+  // without antialiasing).
+  const scene = new SceneView(document.body, { postAA: initialStyle === "lowpoly" });
   const rig = new CameraRig(scene.renderer.domElement);
   const hud = new Hud(overlay);
   const plots = new TelemetryPlots(overlay);
@@ -110,6 +119,9 @@ async function main(): Promise<void> {
   controls.onChange = refreshHelp;
   refreshHelp();
   $("controls-open").onclick = () => controls.toggle();
+  // Parked cars and cones (playtest row 50): every physical prop is drawn (render/props.ts).
+  const props = new PropView();
+  scene.world.add(props.group);
   // End-of-run panel (lead): capture / wreck → result + "Repair & continue" / "Restart".
   const runEndEl = document.createElement("div");
   runEndEl.id = "ui-run-end";
@@ -125,7 +137,20 @@ async function main(): Promise<void> {
   const weather = new WeatherView(scene.scene, scene.renderer, overlay);
   weather.rainFraction = scene.quality.rainFraction;
   weather.attachMaterial(scene.groundMaterial);
-  scene.onCityLoaded = (root) => weather.attachCity(root);
+  const styleSel = $("style") as HTMLSelectElement;
+  for (const [id, label] of Object.entries(STYLE_LABELS)) styleSel.add(new Option(label, id));
+  const style = new ArtStyle(scene, initialStyle);
+  styleSel.value = style.id;
+  const setStyle = (id: StyleId) => {
+    style.set(id);
+    styleSel.value = id;
+    store.set(STYLE_KEY, id);
+  };
+  styleSel.onchange = () => setStyle(styleSel.value as StyleId);
+  scene.onCityLoaded = (root, cityId) => {
+    weather.attachCity(root);
+    style.attachCity(root, cityId);
+  };
   const weatherSel = $("weather") as HTMLSelectElement;
   for (const [id, label] of sim.weatherChoices()) weatherSel.add(new Option(label, id));
   const weatherParam = params.get("weather");
@@ -263,6 +288,7 @@ async function main(): Promise<void> {
     void scene.setCity(cityId || null);
     if (cityId && CITY_IDS.includes(cityId)) citySel.value = cityId;
     scene.signals.setHeads(sim.signalHeads());
+    props.set(sim.propsStatic(), lod.models, lod.fleet.mats);
     ($("city") as HTMLInputElement).checked = city;
     ($("mode") as HTMLSelectElement).value = modeName();
     const first = app.views.get(app.player);
@@ -483,12 +509,17 @@ async function main(): Promise<void> {
     }
   };
 
+  // Clutch automatic / manual (playtest row 59): the AssistProfile's `auto_clutch`. Manual uses
+  // the player's clutch binding directly (DriverInput.clutch). Default stays automatic; a change is
+  // remembered with the other assist overrides.
+  const clutchSel = $("clutch-mode") as HTMLSelectElement;
   const syncAssistBoxes = () => {
     if (isReplay()) return;
     const a = sim.assists(app.player) as unknown as Record<string, unknown>;
     document.querySelectorAll<HTMLInputElement>("#assist-row input").forEach((cb) => {
       cb.checked = Boolean(a[cb.dataset.a!]);
     });
+    clutchSel.value = a.auto_clutch === false ? "manual" : "auto";
   };
 
   // ----- replay ---------------------------------------------------------------------------
@@ -582,6 +613,17 @@ async function main(): Promise<void> {
       store.set(ASSIST_KEY, JSON.stringify(o));
     };
   });
+  clutchSel.onchange = () => {
+    if (isReplay()) return;
+    clutchSel.blur(); // hand the keys back to the game
+    const manual = clutchSel.value === "manual";
+    const a = sim.assists(app.player) as unknown as Record<string, unknown>;
+    a.auto_clutch = !manual;
+    sim.setAssists(app.player, a as never);
+    const o = assistOverrides();
+    o.auto_clutch = !manual;
+    store.set(ASSIST_KEY, JSON.stringify(o));
+  };
   document.querySelectorAll<HTMLButtonElement>(".bench").forEach((b) => {
     b.onclick = () => startBench(Number(b.dataset.n));
   });
@@ -656,7 +698,12 @@ async function main(): Promise<void> {
         rig.cycle(app.views.get(app.focus)?.root);
         break;
       case "reset":
-        if (!isReplay()) sim.reset(app.player);
+        // Reset in place (playtest row 65): upright on the nearest clear lane, repaired outside a
+        // career run; heat, pursuit and race progress carry on.
+        if (!isReplay()) {
+          const r = sim.resetInPlace(app.player);
+          hud.note(`${(sim.worldInfo()[W.tick] / 240).toFixed(2)}s reset in place${r.on_lane ? "" : " (no lane near)"} — ${r.repaired ? "repaired" : "career: repairs are bought in the garage"}`);
+        }
         break;
       case "headlights":
         toggleHeadlights();
@@ -892,8 +939,13 @@ async function main(): Promise<void> {
     prof.lap("audio");
     // Traffic and police after the camera moved: the fleet picks mesh detail by camera distance.
     lod.update(trafficDraw, policeDraw, app.views, rig.camera, app.views.get(app.player)?.root.position ?? null, tS);
+    props.update(sim.propsMoved(), rig.camera);
     prof.lap("traffic");
 
+    const inCity = wi[W.city] > 0.5;
+    const cityId = inCity ? sim.cityId() : null;
+    if (cityId) style.ensureCity(cityId, () => sim.mapStaticJson());
+    style.update(dt, wi[W.hours], wi[W.night], wx[0] > 0.5 ? wx[7] : 1, { on: wx[0] > 0.5, cloud: wx[6] }, rig.camera, cityId);
     const r0 = performance.now();
     scene.render(rig.camera);
     const r1 = performance.now();
@@ -1053,6 +1105,10 @@ async function main(): Promise<void> {
     startCityChase,
     startBench,
     weather,
+    /** Art style (render/style.ts): `style.id`, `style.baseFogDensity`, `style.lampCount(city)`. */
+    style,
+    /** Switch the art style ("greybox" | "lowpoly"; automation, docs shots). */
+    setStyle,
     /** Pick a weather choice and restart the session with it (automation, docs shots). */
     setWeather: (choice: string) => {
       weatherSel.value = choice;
@@ -1083,6 +1139,8 @@ async function main(): Promise<void> {
     lookFrom: (eye: [number, number, number], target: [number, number, number]) => rig.lookFrom(eye, target),
     /** LOD director: `lod.log.start()` records per-frame draw states, `lod.log.summary()`. */
     lod,
+    /** Parked cars / cones: `props.stats(rig.camera)`, `props.drawnPose(i)` (render/props.ts). */
+    props,
     /** Car mesh fetch + parse times (performance.now() ms) per car id. */
     meshTimings,
   };

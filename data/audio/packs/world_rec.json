@@ -79,8 +79,9 @@
           ]
         }
       },
-      "gain": 1.0,
-      "looped": true
+      "gain": 2.239,
+      "looped": true,
+      "release_s": 0.03
     },
     "horn/truck": {
       "source": {
@@ -90,8 +91,9 @@
           ]
         }
       },
-      "gain": 1.0,
-      "looped": true
+      "gain": 2.239,
+      "looped": true,
+      "release_s": 0.03
     },
     "impact/cast_clank": {
       "source": {

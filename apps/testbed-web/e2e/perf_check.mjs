@@ -40,7 +40,8 @@ const check = (ok, msg) => {
 for (const which of ["chase", "rain"]) {
   const r = spawnSync("node", [join(here, "frame_profile.mjs"), which, SECS], {
     cwd: join(here, ".."),
-    env: { ...process.env, JSON: "1", STRUCT: "1" },
+    // The art style's default (low-poly dark, render/style.ts) is what players get: measure it.
+    env: { ...process.env, JSON: "1", STRUCT: "1", QUERY: process.env.QUERY ?? "style=lowpoly" },
     encoding: "utf8",
     timeout: 300000,
   });
@@ -50,7 +51,7 @@ for (const which of ["chase", "rain"]) {
     continue;
   }
   const p = JSON.parse(line);
-  const tag = `perf ${which} @ ${p.viewport} [${p.gfx}]`;
+  const tag = `perf ${which} @ ${p.viewport} [${p.gfx}, ${p.style}]`;
   check(p.errors.length === 0, `${tag}: no page errors (${p.errors.join(" | ")})`);
   check(
     p.rtf >= LIMITS.minRtf,

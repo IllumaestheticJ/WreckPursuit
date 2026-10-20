@@ -105,6 +105,27 @@ fn run_race(id: &str, max_s: u64) -> Raced {
         );
     }
     assert_eq!(sc.entities[0].pos[0], player_slot.pos[0]);
+    // Nobody starts nose to tail with a parked car: no parked car within a car's width of a
+    // slot's first 30 m (a two-wide grid on a narrow street put a column in the parking lane).
+    if sc.parked_cars {
+        for slot in &slots {
+            for prop in sim.world().static_props() {
+                if prop.kind != wp_world::PropKind::ParkedCar {
+                    continue;
+                }
+                let rel = [prop.pos[0] - slot.pos[0], prop.pos[1] - slot.pos[1]];
+                let ahead = rel[0] * slot.dir[0] + rel[1] * slot.dir[1];
+                let side = (rel[0] * slot.dir[1] - rel[1] * slot.dir[0]).abs();
+                assert!(
+                    !((-3.0..33.0).contains(&ahead) && side < prop.half_extents[0] + 1.1),
+                    "{id}: grid slot {} at {:?} runs into a parked car at {:?}",
+                    slot.index,
+                    slot.pos,
+                    prop.pos
+                );
+            }
+        }
+    }
 
     let entrant = |i: usize| {
         let car = &built.cars[&sc.entities[i].car];

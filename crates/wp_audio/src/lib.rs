@@ -15,6 +15,7 @@
 //! | siren cadences (wail, yelp, phaser, hi-lo), auto pattern, horn | [`siren`] |
 //! | radio scanner queue (priority, tier delay, chop, music duck) | [`scanner`] |
 //! | distance attenuation, Doppler, air absorption | [`spatial`] |
+//! | audio state for body-less (kinematic) traffic and police | [`kinematic`] |
 //! | voice culling (priority × audibility, global + per-bus limits) and diffing | [`mixer`] |
 //! | config, per-car defs, sample-pack contract | [`data`] |
 //!
@@ -27,6 +28,7 @@ pub mod collision;
 pub mod data;
 pub mod director;
 pub mod engine;
+pub mod kinematic;
 pub mod mixer;
 pub mod scanner;
 pub mod siren;

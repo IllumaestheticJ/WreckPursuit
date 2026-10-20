@@ -13,8 +13,9 @@
 //   - recorded mode really plays the recordings (sample plays > 0),
 //   - the World bus carries the wheelspin / squeal while the wheels spin,
 //   - police units' siren is audible on the Police bus,
-// and for one car per engine pack: an engine that starts before its recordings decode stays
-// audible, switches to the recordings when they arrive, and leaves no stale voice behind.
+// for one car per engine pack: an engine that starts before its recordings decode stays
+// audible, switches to the recordings when they arrive, and leaves no stale voice behind; and a
+// horn held 2.0 s sounds for 2.0 s, steadily, starting and stopping with the button.
 import { spawnSync, spawn } from "node:child_process";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -273,6 +274,72 @@ if (verbose) {
         .padStart(8)} ${r.worldMinDb.toFixed(1).padStart(9)} ${r.role === "police" ? `${r.policeDb.toFixed(1)} / ${r.procSirenDb.toFixed(1)}` : ""}`,
     );
   }
+}
+
+// Horn held 2.0 s (owner report #58, "horn needs to hold with the button"): standard and truck
+// horn, recorded and procedural, World bus. Audible from the press (≤ 30 ms), steady while held
+// (no 20 ms window more than 6 dB under the hold's median: no gaps or pulsing loop), quiet
+// (−40 dB under it) within 60 ms of the release; audible duration 2.0 s ± 0.1 s.
+const hornDb = {};
+for (const source of ["recorded", "procedural"]) {
+  for (const h of trace.horns ?? []) {
+    const r = await page.evaluate(
+      async ({ trace, h, source }) => {
+        const len = h.frames.length / 60 + 0.4;
+        const { ctx, mixer, pool } = window.newRig(trace.library, len, source);
+        await window.waitDecoded(pool);
+        const [pos, fwd, up] = trace.listener;
+        WPA.setListener(ctx, pos, fwd, up);
+        const q = 128 / ctx.sampleRate;
+        const active = new Map();
+        h.frames.forEach((f, k) => {
+          const t = Math.round(f.t / q) * q;
+          if (k === 0) {
+            window.applyFrame(pool, mixer, f.commands, 1, active);
+            return;
+          }
+          ctx.suspend(t).then(() => {
+            window.applyFrame(pool, mixer, f.commands, 1, active);
+            ctx.resume();
+          });
+        });
+        const buf = await ctx.startRendering();
+        const SR = ctx.sampleRate;
+        const d = buf.getChannelData(1);
+        const w = Math.round(0.01 * SR);
+        const env = [];
+        for (let s = 0; s + w <= d.length; s += w) {
+          let sum = 0;
+          for (let i = s; i < s + w; i++) sum += d[i] * d[i];
+          env.push(20 * Math.log10(Math.max(Math.sqrt(sum / w), 1e-9)));
+        }
+        const hold = h.hold_s;
+        const held = env.slice(5, Math.round(hold * 100));
+        const med = [...held].sort((a, b) => a - b)[Math.floor(held.length / 2)];
+        // 20 ms windows during the hold (gaps / loop pulsing).
+        let worst20 = Infinity;
+        for (let i = 5; i + 2 <= Math.round(hold * 100); i += 2) worst20 = Math.min(worst20, Math.max(env[i], env[i + 1]));
+        const onsetMs = env.findIndex((x) => x > med - 20) * 10;
+        let lastLoud = -1;
+        env.forEach((x, i) => x > med - 20 && (lastLoud = i));
+        const quietAt = env.findIndex((x, i) => i * 10 >= hold * 1000 && env.slice(i).every((y) => y < med - 40));
+        return { med, worst20: worst20 - med, onsetMs, audibleS: (lastLoud + 1) / 100, releaseMs: quietAt * 10 - hold * 1000, plays: pool.played };
+      },
+      { trace, h, source },
+    );
+    hornDb[`${source} ${h.horn_cue}`] = r.med;
+    const ok = r.med > -60 && r.onsetMs <= 30 && r.worst20 > -6 && Math.abs(r.audibleS - h.hold_s) <= 0.1 && r.releaseMs <= 60;
+    check(
+      ok,
+      `${source} ${h.horn_cue} (${h.car}) held ${h.hold_s} s: audible ${r.audibleS.toFixed(2)} s at ${r.med.toFixed(1)} dBFS, ` +
+        `onset ${r.onsetMs} ms, steadiest-dip ${r.worst20.toFixed(1)} dB, quiet ${r.releaseMs.toFixed(0)} ms after release`,
+    );
+  }
+}
+
+for (const h of trace.horns ?? []) {
+  const d = hornDb[`recorded ${h.horn_cue}`] - hornDb[`procedural ${h.horn_cue}`];
+  check(Math.abs(d) <= 6, `recorded and procedural ${h.horn_cue} within 6 dB (${d.toFixed(1)} dB)`);
 }
 
 // Recordings arriving mid-drive: one car per engine pack, player role. Fetches are held until
