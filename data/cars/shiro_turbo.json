@@ -4,38 +4,38 @@
   "class": "Sport",
   "analog_of": "early-2000s Japanese FR coupe, 2.0 L turbocharged I4, clutch LSD",
   "body_size_m": [1.695, 4.445, 1.285],
-  "mass_kg": 1300.8,
+  "mass_kg": 1240.8,
   "front_weight_frac": 0.55,
   "wheelbase_m": 2.525,
   "track_front_m": 1.48,
   "track_rear_m": 1.47,
   "cg_height_m": 0.46,
-  "inertia_kgm2": [390.0, 2040.0, 2160.0],
+  "inertia_kgm2": [370.0, 1950.0, 2060.0],
   "drag_cd_a_m2": 0.531,
   "lift_front": 0.06,
   "lift_rear": 0.08,
   "engine": {
     "torque_curve_nm": [
-      [1000, 140],
-      [1500, 170],
-      [2000, 205],
-      [2500, 240],
-      [3000, 258],
-      [3500, 266],
-      [4000, 272],
-      [4500, 275],
-      [5000, 276],
-      [5500, 272],
-      [6000, 268],
-      [6500, 268],
-      [7000, 240],
-      [7500, 205]
+      [1000, 229],
+      [1500, 278],
+      [2000, 335],
+      [2500, 392],
+      [3000, 421],
+      [3500, 434],
+      [4000, 444],
+      [4500, 449],
+      [5000, 451],
+      [5500, 444],
+      [6000, 437],
+      [6500, 437],
+      [7000, 392],
+      [7500, 335]
     ],
     "idle_rpm": 850.0,
     "redline_rpm": 7200.0,
     "rev_limit_rpm": 7500.0,
     "inertia_kgm2": 0.13,
-    "engine_brake_nm": 33.0
+    "engine_brake_nm": 54.0
   },
   "drivetrain": {
     "layout": "Rwd",
@@ -50,7 +50,7 @@
         "ramp_coast": 0.3
       }
     },
-    "clutch_max_nm": 400.0,
+    "clutch_max_nm": 650.0,
     "shift_time_s": 0.22
   },
   "wheels": [
@@ -109,46 +109,46 @@
   ],
   "suspension": [
     {
-      "spring_n_per_m": 45600.0,
-      "damper_bump_ns_per_m": 2510.0,
-      "damper_rebound_ns_per_m": 3760.0,
+      "spring_n_per_m": 43400.0,
+      "damper_bump_ns_per_m": 2390.0,
+      "damper_rebound_ns_per_m": 3580.0,
       "travel_m": 0.13,
       "preload_m": 0.02,
-      "arb_n_per_m": 13400.0,
+      "arb_n_per_m": 12900.0,
       "bump_stop_n_per_m": 170000.0
     },
     {
-      "spring_n_per_m": 45600.0,
-      "damper_bump_ns_per_m": 2510.0,
-      "damper_rebound_ns_per_m": 3760.0,
+      "spring_n_per_m": 43400.0,
+      "damper_bump_ns_per_m": 2390.0,
+      "damper_rebound_ns_per_m": 3580.0,
       "travel_m": 0.13,
       "preload_m": 0.02,
-      "arb_n_per_m": 13400.0,
+      "arb_n_per_m": 12900.0,
       "bump_stop_n_per_m": 170000.0
     },
     {
-      "spring_n_per_m": 40600.0,
-      "damper_bump_ns_per_m": 2120.0,
-      "damper_rebound_ns_per_m": 3180.0,
+      "spring_n_per_m": 38600.0,
+      "damper_bump_ns_per_m": 2020.0,
+      "damper_rebound_ns_per_m": 3030.0,
       "travel_m": 0.14,
       "preload_m": 0.02,
-      "arb_n_per_m": 4200.0,
+      "arb_n_per_m": 4100.0,
       "bump_stop_n_per_m": 170000.0
     },
     {
-      "spring_n_per_m": 40600.0,
-      "damper_bump_ns_per_m": 2120.0,
-      "damper_rebound_ns_per_m": 3180.0,
+      "spring_n_per_m": 38600.0,
+      "damper_bump_ns_per_m": 2020.0,
+      "damper_rebound_ns_per_m": 3030.0,
       "travel_m": 0.14,
       "preload_m": 0.02,
-      "arb_n_per_m": 4200.0,
+      "arb_n_per_m": 4100.0,
       "bump_stop_n_per_m": 170000.0
     }
   ],
   "brakes": {
-    "max_torque_front_nm": 2550.0,
-    "max_torque_rear_nm": 1000.0,
-    "bias_front": 0.514,
+    "max_torque_front_nm": 2430.0,
+    "max_torque_rear_nm": 950.0,
+    "bias_front": 0.513,
     "handbrake_rear_nm": 1010.0
   },
   "steering": {

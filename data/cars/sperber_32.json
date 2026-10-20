@@ -2,41 +2,41 @@
   "id": "sperber_32",
   "display_name": "Sperber 32",
   "class": "Sport",
-  "analog_of": "2000s German FR sport sedan, 3.2 L high-revving naturally aspirated I6",
+  "analog_of": "2000s German FR sport sedan, 3.2 L high-revving I6",
   "body_size_m": [1.78, 4.49, 1.37],
-  "mass_kg": 1601.5,
+  "mass_kg": 1521.5,
   "front_weight_frac": 0.51,
   "wheelbase_m": 2.73,
   "track_front_m": 1.51,
   "track_rear_m": 1.52,
   "cg_height_m": 0.47,
-  "inertia_kgm2": [540.0, 2590.0, 2800.0],
+  "inertia_kgm2": [510.0, 2460.0, 2660.0],
   "drag_cd_a_m2": 0.655,
   "lift_front": 0.05,
   "lift_rear": 0.06,
   "engine": {
     "torque_curve_nm": [
-      [1000, 215],
-      [1500, 245],
-      [2000, 275],
-      [3000, 322],
-      [3500, 338],
-      [4000, 350],
-      [4500, 360],
-      [4900, 365],
-      [5500, 358],
-      [6000, 348],
-      [6500, 335],
-      [7000, 325],
-      [7500, 312],
-      [7900, 300],
-      [8100, 280]
+      [1000, 323],
+      [1500, 368],
+      [2000, 413],
+      [3000, 484],
+      [3500, 508],
+      [4000, 526],
+      [4500, 541],
+      [4900, 548],
+      [5500, 538],
+      [6000, 523],
+      [6500, 503],
+      [7000, 488],
+      [7500, 469],
+      [7900, 451],
+      [8100, 421]
     ],
     "idle_rpm": 800.0,
     "redline_rpm": 7900.0,
     "rev_limit_rpm": 8100.0,
     "inertia_kgm2": 0.15,
-    "engine_brake_nm": 36.0
+    "engine_brake_nm": 55.0
   },
   "drivetrain": {
     "layout": "Rwd",
@@ -51,7 +51,7 @@
         "ramp_coast": 0.4
       }
     },
-    "clutch_max_nm": 510.0,
+    "clutch_max_nm": 770.0,
     "shift_time_s": 0.22
   },
   "wheels": [
@@ -110,46 +110,46 @@
   ],
   "suspension": [
     {
-      "spring_n_per_m": 49300.0,
-      "damper_bump_ns_per_m": 2790.0,
-      "damper_rebound_ns_per_m": 4180.0,
+      "spring_n_per_m": 46700.0,
+      "damper_bump_ns_per_m": 2640.0,
+      "damper_rebound_ns_per_m": 3960.0,
       "travel_m": 0.14,
       "preload_m": 0.02,
-      "arb_n_per_m": 13900.0,
+      "arb_n_per_m": 13300.0,
       "bump_stop_n_per_m": 170000.0
     },
     {
-      "spring_n_per_m": 49300.0,
-      "damper_bump_ns_per_m": 2790.0,
-      "damper_rebound_ns_per_m": 4180.0,
+      "spring_n_per_m": 46700.0,
+      "damper_bump_ns_per_m": 2640.0,
+      "damper_rebound_ns_per_m": 3960.0,
       "travel_m": 0.14,
       "preload_m": 0.02,
-      "arb_n_per_m": 13900.0,
+      "arb_n_per_m": 13300.0,
       "bump_stop_n_per_m": 170000.0
     },
     {
-      "spring_n_per_m": 55100.0,
-      "damper_bump_ns_per_m": 2880.0,
-      "damper_rebound_ns_per_m": 4320.0,
+      "spring_n_per_m": 52200.0,
+      "damper_bump_ns_per_m": 2730.0,
+      "damper_rebound_ns_per_m": 4100.0,
       "travel_m": 0.15,
       "preload_m": 0.02,
-      "arb_n_per_m": 0.0,
+      "arb_n_per_m": 100.0,
       "bump_stop_n_per_m": 170000.0
     },
     {
-      "spring_n_per_m": 55100.0,
-      "damper_bump_ns_per_m": 2880.0,
-      "damper_rebound_ns_per_m": 4320.0,
+      "spring_n_per_m": 52200.0,
+      "damper_bump_ns_per_m": 2730.0,
+      "damper_rebound_ns_per_m": 4100.0,
       "travel_m": 0.15,
       "preload_m": 0.02,
-      "arb_n_per_m": 0.0,
+      "arb_n_per_m": 100.0,
       "bump_stop_n_per_m": 170000.0
     }
   ],
   "brakes": {
-    "max_torque_front_nm": 3090.0,
-    "max_torque_rear_nm": 1460.0,
-    "bias_front": 0.503,
+    "max_torque_front_nm": 2930.0,
+    "max_torque_rear_nm": 1380.0,
+    "bias_front": 0.502,
     "handbrake_rear_nm": 1230.0
   },
   "steering": {

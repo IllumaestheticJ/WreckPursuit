@@ -26,10 +26,10 @@ All values are class-typical figures for the archetype, rounded; no single real 
 
 | Quantity | Value | Derivation |
 |---|---|---|
-| Curb mass | 1300 kg | class spec data (full tank) |
+| Curb mass | 1250 kg | class spec data (full tank) |
 | Fuel tank | 82 L | `fuel_capacity_l`; half a tank = 31 kg at 0.745 kg/L |
-| `mass_kg` | 1344 kg | curb − half tank + 75 kg driver (contract: fuel at 50 %) |
-| Front weight | 0.420 | axle loads 565 / 780 kg |
+| `mass_kg` | 1294 kg | curb − half tank + 75 kg driver (contract: fuel at 50 %) |
+| Front weight | 0.420 | axle loads 544 / 751 kg |
 | Wheelbase | 2.450 m | spec |
 | Track F / R | 1.510 / 1.615 m | spec |
 | Body W × L × H | 1.900 × 4.250 × 1.170 m | spec |
@@ -49,9 +49,9 @@ I_yaw   = k_y · m·(W² + L²)/12
 
 | Axis | Box (kg·m²) | k | `inertia_kgm2` |
 |---|---|---|---|
-| roll | 558 | 0.78 | 440 |
-| pitch | 2177 | 0.75 | 1630 |
-| yaw | 2428 | 0.75 | 1820 |
+| roll | 537 | 0.78 | 420 |
+| pitch | 2096 | 0.75 | 1570 |
+| yaw | 2338 | 0.75 | 1750 |
 
 ## Aerodynamics
 
@@ -59,42 +59,42 @@ Frontal area A = 0.82·W·H = 1.82 m²; Cd = 0.33 → **CdA = 0.602 m²**. Lift 
 
 ## Engine
 
-3.5 L DOHC 40-valve flat-plane V8, naturally aspirated, dry sump. Class-typical 90s exotic flat-plane V8 (~80 kW/L), torque peaking high and power at 8250 rpm, per published spec-class data and owner dynos.
+3.5 L DOHC 40-valve flat-plane V8, dry sump, street spec (twin turbo). Street spec (2026-10 rebalance, `STREET_SPEC_W_PER_KG`): the class-typical 90s exotic flat-plane V8 curve (~80 kW/L, power at 8250 rpm per published spec-class data) scaled ×1.28 to ≈ 275 W/kg, so the exotic stays above the 240 W/kg sports/muscle pack; curb trimmed 1300 → 1250 kg.
 
 | rpm | N·m | kW |
 |---|---|---|
-| 1000 | 180 | 18.8 |
-| 2000 | 240 | 50.3 |
-| 3000 | 285 | 89.5 |
-| 3500 | 305 | 111.8 |
-| 4000 | 320 | 134.0 |
-| 4500 | 335 | 157.9 |
-| 5000 | 348 | 182.2 |
-| 5500 | 358 | 206.2 |
-| 6000 | 363 | 228.1 |
-| 6500 | 360 | 245.0 |
-| 7000 | 352 | 258.0 |
-| 7500 | 343 | 269.4 |
-| 8000 | 330 | 276.5 |
-| 8250 | 322 | 278.2 |
-| 8800 | 280 | 258.0 |
+| 1000 | 230 | 24.1 |
+| 2000 | 307 | 64.3 |
+| 3000 | 365 | 114.7 |
+| 3500 | 390 | 142.9 |
+| 4000 | 409 | 171.3 |
+| 4500 | 429 | 202.2 |
+| 5000 | 445 | 233.0 |
+| 5500 | 458 | 263.8 |
+| 6000 | 465 | 292.2 |
+| 6500 | 461 | 313.8 |
+| 7000 | 450 | 329.9 |
+| 7500 | 439 | 344.8 |
+| 8000 | 422 | 353.5 |
+| 8250 | 412 | 355.9 |
+| 8800 | 358 | 329.9 |
 
-Peak **278 kW @ 8250 rpm**, **363 N·m @ 6000 rpm**. Idle 1000 / redline 8500 / limiter 8800 rpm. Rotating inertia 0.12 kg·m² (class: 0.10 small four … 0.30 big-block). Engine braking 10% of peak torque = 36 N·m. Power-to-weight 207 kW/t.
+Peak **356 kW @ 8250 rpm**, **465 N·m @ 6000 rpm**. Idle 1000 / redline 8500 / limiter 8800 rpm. Rotating inertia 0.12 kg·m² (class: 0.10 small four … 0.30 big-block). Engine braking 10% of peak torque = 46 N·m. Power-to-weight 275 kW/t.
 
 ## Drivetrain
 
-6-speed manual (open gate), clutch-type rear LSD. Layout **RWD**; front diff: open; rear diff: clutch LSD, preload 60 N·m, power ramp 0.50, coast ramp 0.35. Clutch capacity 1.40 × peak torque = 510 N·m. Shift time 0.22 s.
+6-speed manual (open gate), clutch-type rear LSD. Layout **RWD**; front diff: open; rear diff: clutch LSD, preload 60 N·m, power ramp 0.50, coast ramp 0.35. Clutch capacity 1.40 × peak torque = 650 N·m. Shift time 0.22 s.
 
 | Gear | Ratio | Overall | km/h @ redline |
 |---|---|---|---|
-| 1 | 3.08 | 13.24 | 79 |
-| 2 | 2.16 | 9.29 | 112 |
-| 3 | 1.61 | 6.92 | 150 |
-| 4 | 1.27 | 5.46 | 190 |
-| 5 | 1.03 | 4.43 | 235 |
-| 6 | 0.84 | 3.61 | 288 |
+| 1 | 3.08 | 12.01 | 87 |
+| 2 | 2.16 | 8.42 | 123 |
+| 3 | 1.61 | 6.28 | 166 |
+| 4 | 1.27 | 4.95 | 210 |
+| 5 | 1.03 | 4.02 | 259 |
+| 6 | 0.84 | 3.28 | 317 |
 
-Final drive 4.30, reverse 2.92. Speeds use the driven-wheel loaded radius 0.325 m.
+Final drive 3.90, reverse 2.92. Speeds use the driven-wheel loaded radius 0.325 m.
 
 ## Wheels & tires
 
@@ -111,10 +111,10 @@ Springs from ride frequency, `k = m_s·(2πf)²` with sprung corner mass `m_s = 
 
 | Axle | m_s | f | Wheel rate k | Bump c | Rebound c | Travel |
 |---|---|---|---|---|---|---|
-| Front | 262 kg | 2.00 Hz | 41400 N/m | 2110 N·s/m | 3160 N·s/m | 0.12 m |
-| Rear | 366 kg | 2.15 Hz | 66800 N/m | 3160 N·s/m | 4740 N·s/m | 0.13 m |
+| Front | 252 kg | 2.00 Hz | 39800 N/m | 2030 N·s/m | 3040 N·s/m | 0.12 m |
+| Rear | 351 kg | 2.15 Hz | 64100 N/m | 3040 N·s/m | 4560 N·s/m | 0.13 m |
 
-Anti-roll bars from a roll-gradient target of 1.6°/g with 50% of roll stiffness at the front. Roll arm h − h_rc = 0.307 m (roll centres 0.08 m F / 0.12 m R). Required total K_φ = m·g·arm/φ = 144902 N·m/rad; springs give k·t²/2 = 47228 F / 87077 R N·m/rad; bars supply the rest as `arb_n_per_m = K_bar/t²` = **11100 F / 0 R N/m** (clamped at ≥ 0). Resulting gradient 1.5°/g, front share 45%. Bump stops 200000 N/m.
+Anti-roll bars from a roll-gradient target of 1.6°/g with 50% of roll stiffness at the front. Roll arm h − h_rc = 0.307 m (roll centres 0.08 m F / 0.12 m R). Required total K_φ = m·g·arm/φ = 139513 N·m/rad; springs give k·t²/2 = 45338 F / 83626 R N·m/rad; bars supply the rest as `arb_n_per_m = K_bar/t²` = **10700 F / 0 R N/m** (clamped at ≥ 0). Resulting gradient 1.5°/g, front share 45%. Bump stops 200000 N/m.
 
 Alignment: camber -1.0° F / -1.8° R, toe +0.00° F / +0.25° R (+ = in), caster 7.5°.
 
@@ -125,11 +125,11 @@ Full-pedal line pressure 100 bar.
 - Front: 330 mm disc, pistons per side 40 mm + 40 mm → A = 25.1 cm², r_eff = D/2 − 25 mm = 140 mm, pad μ = 0.45: T = 2·μ·p·A·r_eff = 2·0.45·100 bar·25.1 cm²·0.140 m = **3167 N·m**
 - Rear: 310 mm disc, pistons per side 36 mm + 36 mm → A = 20.4 cm², r_eff = D/2 − 25 mm = 130 mm, pad μ = 0.42: T = 2·μ·p·A·r_eff = 2·0.42·100 bar·20.4 cm²·0.130 m = **2223 N·m**
 
-ABS ceiling: caliper capacity 3167 / 2223 N·m exceeds 1.5 × the front lock torque on this car's tire (peak μ 1.20), which `wp_vehicle`'s ABS cannot modulate (it releases to a fraction of the commanded torque, so an oversized caliper keeps the wheel locked). Both axles scaled by 0.68 → **2150 / 1510 N·m**. Remove when 02's ABS modulates relative to lock torque.
+ABS ceiling: caliper capacity 3167 / 2223 N·m exceeds 1.5 × the front lock torque on this car's tire (peak μ 1.20), which `wp_vehicle`'s ABS cannot modulate (it releases to a fraction of the commanded torque, so an oversized caliper keeps the wheel locked). Both axles scaled by 0.66 → **2070 / 1460 N·m**. Remove when 02's ABS modulates relative to lock torque.
 
-Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 1197 N·m/wheel (capacity 1.80×), rear needs 883 N·m/wheel (capacity 1.71×).
+Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 1152 N·m/wheel (capacity 1.80×), rear needs 850 N·m/wheel (capacity 1.72×).
 
-`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 1586 N·m), never boosted above its caliper capacity. Rear capacity is below that (hardware-limited rear), so `bias_front` = **0.5**: both axles get full caliper torque → delivered 2150 N·m front / 1510 N·m rear per wheel at full pedal. Handbrake 1330 N·m per rear wheel.
+`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 1527 N·m), never boosted above its caliper capacity. Rear capacity is below that (hardware-limited rear), so `bias_front` = **0.5**: both axles get full caliper torque → delivered 2070 N·m front / 1460 N·m rear per wheel at full pedal. Handbrake 1330 N·m per rear wheel.
 
 ## Steering
 
@@ -141,14 +141,14 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 4.6 s | 290 km/h | 35.6 m | 0.96 g | — |
-| estimate | 4.4 s | 297 km/h | 33.9 m | 1.02 g | 713 |
+| sim | 4.3 s | 291 km/h | 35.5 m | 0.96 g | — |
+| estimate | 4.1 s | 325 km/h | 33.8 m | 1.02 g | 750 |
 
 ## Damage lattice (`data/lattices/lucciola_350.json`)
 
 263 nodes, 1691 beams, 6 detachables, 21 component mounts.
 
-- Generated with `gen-lattice --id lucciola_350 --profile coupe --width 1.9 --length 4.25 --height 1.17 --wheelbase 2.45 --mass 268.9 --car-mass 1344.5 --clearance 0.11 --front-overhang 0.85 --strength 0.8` (20% of vehicle mass in the lattice; strength from durability class 1).
+- Generated with `gen-lattice --id lucciola_350 --profile coupe --width 1.9 --length 4.25 --height 1.17 --wheelbase 2.45 --mass 258.9 --car-mass 1294.5 --clearance 0.11 --front-overhang 0.85 --strength 0.8` (20% of vehicle mass in the lattice; strength from durability class 1).
 - Era `90s` passenger cell: 138 cabin/sill, 143 cross-member, 10 pillar, 14 roof rail → hss × 0.75 section.
 - Aluminium body: 584 outer-panel beams mild_steel → aluminum.
 - Mid-engine: engine block moved behind the cabin bulkhead (y -0.92…-1.57 m), mounted to the rear rails and the bulkhead; 10 nodes behind the bulkhead relabelled FrameRear (engine bay, not cabin); 12 front-rail beams × 1.6 (no engine block in the nose: they get gen-lattice's rear-rail factor); 166 rear-subframe beams → aluminum ×1.5 section (sacrificial); gearbox and half-shafts at the rear axle, side fuel tanks at the sills behind the seats; engine fails at 0.12 m, gearbox 0.08 m.

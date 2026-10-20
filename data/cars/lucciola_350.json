@@ -4,44 +4,44 @@
   "class": "Exotic",
   "analog_of": "90s Italian mid-engine exotic coupe, 3.5 L flat-plane V8, transverse-mounted gearbox behind the engine",
   "body_size_m": [1.9, 4.25, 1.17],
-  "mass_kg": 1344.5,
+  "mass_kg": 1294.5,
   "front_weight_frac": 0.42,
   "wheelbase_m": 2.45,
   "track_front_m": 1.51,
   "track_rear_m": 1.615,
   "cg_height_m": 0.41,
-  "inertia_kgm2": [440.0, 1630.0, 1820.0],
+  "inertia_kgm2": [420.0, 1570.0, 1750.0],
   "drag_cd_a_m2": 0.602,
   "lift_front": -0.05,
   "lift_rear": -0.12,
   "engine": {
     "torque_curve_nm": [
-      [1000, 180],
-      [2000, 240],
-      [3000, 285],
-      [3500, 305],
-      [4000, 320],
-      [4500, 335],
-      [5000, 348],
-      [5500, 358],
-      [6000, 363],
-      [6500, 360],
-      [7000, 352],
-      [7500, 343],
-      [8000, 330],
-      [8250, 322],
-      [8800, 280]
+      [1000, 230],
+      [2000, 307],
+      [3000, 365],
+      [3500, 390],
+      [4000, 409],
+      [4500, 429],
+      [5000, 445],
+      [5500, 458],
+      [6000, 465],
+      [6500, 461],
+      [7000, 450],
+      [7500, 439],
+      [8000, 422],
+      [8250, 412],
+      [8800, 358]
     ],
     "idle_rpm": 1000.0,
     "redline_rpm": 8500.0,
     "rev_limit_rpm": 8800.0,
     "inertia_kgm2": 0.12,
-    "engine_brake_nm": 36.0
+    "engine_brake_nm": 46.0
   },
   "drivetrain": {
     "layout": "Rwd",
     "gear_ratios": [3.08, 2.16, 1.61, 1.27, 1.03, 0.84],
-    "final_drive": 4.3,
+    "final_drive": 3.9,
     "reverse_ratio": 2.92,
     "diff_front": "Open",
     "diff_rear": {
@@ -51,7 +51,7 @@
         "ramp_coast": 0.35
       }
     },
-    "clutch_max_nm": 510.0,
+    "clutch_max_nm": 650.0,
     "shift_time_s": 0.22
   },
   "wheels": [
@@ -110,36 +110,36 @@
   ],
   "suspension": [
     {
-      "spring_n_per_m": 41400.0,
-      "damper_bump_ns_per_m": 2110.0,
-      "damper_rebound_ns_per_m": 3160.0,
+      "spring_n_per_m": 39800.0,
+      "damper_bump_ns_per_m": 2030.0,
+      "damper_rebound_ns_per_m": 3040.0,
       "travel_m": 0.12,
       "preload_m": 0.02,
-      "arb_n_per_m": 11100.0,
+      "arb_n_per_m": 10700.0,
       "bump_stop_n_per_m": 200000.0
     },
     {
-      "spring_n_per_m": 41400.0,
-      "damper_bump_ns_per_m": 2110.0,
-      "damper_rebound_ns_per_m": 3160.0,
+      "spring_n_per_m": 39800.0,
+      "damper_bump_ns_per_m": 2030.0,
+      "damper_rebound_ns_per_m": 3040.0,
       "travel_m": 0.12,
       "preload_m": 0.02,
-      "arb_n_per_m": 11100.0,
+      "arb_n_per_m": 10700.0,
       "bump_stop_n_per_m": 200000.0
     },
     {
-      "spring_n_per_m": 66800.0,
-      "damper_bump_ns_per_m": 3160.0,
-      "damper_rebound_ns_per_m": 4740.0,
+      "spring_n_per_m": 64100.0,
+      "damper_bump_ns_per_m": 3040.0,
+      "damper_rebound_ns_per_m": 4560.0,
       "travel_m": 0.13,
       "preload_m": 0.02,
       "arb_n_per_m": 0.0,
       "bump_stop_n_per_m": 200000.0
     },
     {
-      "spring_n_per_m": 66800.0,
-      "damper_bump_ns_per_m": 3160.0,
-      "damper_rebound_ns_per_m": 4740.0,
+      "spring_n_per_m": 64100.0,
+      "damper_bump_ns_per_m": 3040.0,
+      "damper_rebound_ns_per_m": 4560.0,
       "travel_m": 0.13,
       "preload_m": 0.02,
       "arb_n_per_m": 0.0,
@@ -147,8 +147,8 @@
     }
   ],
   "brakes": {
-    "max_torque_front_nm": 2150.0,
-    "max_torque_rear_nm": 1510.0,
+    "max_torque_front_nm": 2070.0,
+    "max_torque_rear_nm": 1460.0,
     "bias_front": 0.5,
     "handbrake_rear_nm": 1330.0
   },

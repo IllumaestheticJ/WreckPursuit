@@ -5,14 +5,14 @@
 | Car | Id | Class | Layout | Mass kg | Power kW | kW/t | 0-100 est. s | Vmax est. km/h | Skidpad est. g | Class idx est. | Dur. | Price | Tire |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | Vireo XS | `vireo_xs` | Compact | FWD | 1108 | 103 | 93 | 8.0 | 213 | 0.91 | 474 | 2 | 7,500 | street |
-| Kestrel TS | `kestrel_ts` | Sport | FWD | 1453 | 181 | 125 | 6.6 | 255 | 0.98 | 552 | 3 | 22,000 | sport |
-| Shiro Turbo | `shiro_turbo` | Sport | RWD | 1301 | 182 | 140 | 6.0 | 271 | 1.01 | 591 | 2 | 28,000 | sport |
-| Hakone GT | `hakone_gt` | Sport | RWD | 1599 | 242 | 151 | 5.5 | 289 | 0.98 | 618 | 3 | 48,000 | sport |
-| Rampart 5.0 | `rampart_50` | Muscle | RWD | 1753 | 319 | 182 | 5.4 | 276 | 0.96 | 618 | 3 | 42,000 | sport |
-| Ironside 440 | `ironside_440` | Muscle | RWD | 1695 | 216 | 127 | 7.7 | 220 | 0.71 | 450 | 4 | 38,000 | vintage_bias |
-| Sperber 32 | `sperber_32` | Sport | RWD | 1602 | 248 | 155 | 5.6 | 279 | 0.99 | 613 | 3 | 36,000 | sport |
-| Lindwurm 4T | `lindwurm_4t` | Sport | AWD on-demand (≤ 50 % rear) | 1554 | 220 | 141 | 5.3 | 259 | 0.97 | 620 | 3 | 34,000 | sport |
-| Lucciola 350 | `lucciola_350` | Exotic | RWD | 1344 | 278 | 207 | 4.4 | 297 | 1.02 | 713 | 1 | 120,000 | sport |
+| Kestrel TS | `kestrel_ts` | Sport | FWD | 1383 | 318 | 230 | 5.8 | 266 | 0.99 | 593 | 3 | 22,000 | sport |
+| Shiro Turbo | `shiro_turbo` | Sport | RWD | 1241 | 297 | 240 | 5.1 | 316 | 1.02 | 663 | 2 | 28,000 | sport |
+| Hakone GT | `hakone_gt` | Sport | RWD | 1519 | 372 | 245 | 5.0 | 327 | 0.99 | 665 | 3 | 48,000 | sport |
+| Rampart 5.0 | `rampart_50` | Muscle | RWD | 1663 | 416 | 250 | 5.3 | 312 | 0.97 | 641 | 3 | 42,000 | sport |
+| Ironside 440 | `ironside_440` | Muscle | RWD | 1615 | 380 | 235 | 7.0 | 261 | 0.71 | 491 | 4 | 38,000 | vintage_bias |
+| Sperber 32 | `sperber_32` | Sport | RWD | 1522 | 373 | 245 | 5.0 | 324 | 1.00 | 671 | 3 | 36,000 | sport |
+| Lindwurm 4T | `lindwurm_4t` | Sport | AWD on-demand (≤ 50 % rear) | 1484 | 327 | 220 | 3.7 | 293 | 0.98 | 776 | 3 | 34,000 | sport |
+| Lucciola 350 | `lucciola_350` | Exotic | RWD | 1294 | 356 | 275 | 4.1 | 325 | 1.02 | 750 | 1 | 120,000 | sport |
 | Hauler 1500 | `hauler_1500` | Truck | RWD | 2438 | 265 | 109 | 8.0 | 221 | 0.71 | 440 | 5 | 32,000 | all_terrain |
 | Sentinel Cruiser | `sentinel_cruiser` | PoliceCruiser | RWD | 2048 | 276 | 135 | 6.2 | 267 | 0.91 | 559 | 5 | 30,000 | police_pursuit |
 | Sentinel Wolfhound | `sentinel_wolfhound` | PoliceInterceptor | AWD on-demand (≤ 50 % rear) | 2049 | 272 | 133 | 6.1 | 255 | 0.91 | 558 | 4 | 45,000 | police_pursuit |

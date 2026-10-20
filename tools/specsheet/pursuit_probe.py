@@ -6,7 +6,8 @@ nothing written to the repo):
 
 **Straight-line acceleration** — every car, full throttle from rest for 40 s on the flat (Arcade, metric-style assists: ABS + TCS, automatic gears). Reports the times to 100 km/h
    and to each `wp_police` pursuit speed cap (`data/police/pursuit.toml`: night 32, dawn/dusk
-   36, day 40 m/s), the 80 → 144 km/h rolling time and the speed reached. `--chase` adds a
+   36, day 40 m/s), the 80 → 144 km/h rolling time, 0-160 km/h (≈ 0-100 mph, the figure the
+   feel references are compared on) and the speed reached. `--chase` adds a
    straight-line chase: target 30 m ahead, both leaving a corner at 15 m/s with full throttle;
    the cruiser's speed is limited like `wp_police` limits it (`min(target·1.1, cap)`, here the
    day cap; column "+10%") or by the cap alone (column "cap": what the car itself can do) —
@@ -77,7 +78,8 @@ def first_t(rows, v):
 
 def accel(car: str, td: str) -> dict:
     rows = run_csv(ACCEL.format(car=car), "accel_" + car, td)
-    res = {"car": car, "t100": first_t(rows, 100 / 3.6), "t80": first_t(rows, 80 / 3.6)}
+    res = {"car": car, "t100": first_t(rows, 100 / 3.6), "t80": first_t(rows, 80 / 3.6),
+           "t160": first_t(rows, 160 / 3.6)}
     for k, v in CAPS_MPS.items():
         res["t_" + k] = first_t(rows, v)
     res["t144"] = res["t_day"]
@@ -124,12 +126,12 @@ def main(argv: list[str]) -> int:
         res = dict(zip(cars, ex.map(lambda c: accel(c, td), cars)))
         f = lambda x: f"{x:6.2f}" if x is not None else "   n/a"  # noqa: E731
         print(f"{'car':20s} {'0-100':>6s} {'0-115':>6s} {'0-130':>6s} {'0-144':>6s} "
-              f"{'80-144':>6s} {'v@40s':>6s}" + (f" {'+10%':>7s} {'cap':>7s}" if "--chase" in argv else ""))
+              f"{'80-144':>6s} {'0-160':>6s} {'v@40s':>6s}" + (f" {'+10%':>7s} {'cap':>7s}" if "--chase" in argv else ""))
         for c in cars:
             r = res[c]
             roll = r["t144"] - r["t80"] if r["t144"] and r["t80"] else None
             line = (f"{c:20s} {f(r['t100'])} {f(r['t_night'])} {f(r['t_dawn/dusk'])} "
-                    f"{f(r['t144'])} {f(roll)} {r['v40_kmh']:6.0f}")
+                    f"{f(r['t144'])} {f(roll)} {f(r['t160'])} {r['v40_kmh']:6.0f}")
             caught = free = None
             if "--chase" in argv and c != cop:
                 caught = chase(res[cop], r)

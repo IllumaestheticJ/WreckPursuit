@@ -5,6 +5,46 @@
 - **Crates / folders owned:** `data/cars/` (roster files), `data/lattices/` (roster car files, not the generator), `tools/specsheet/`; round 8: `data/tires/` edits the lead assigned to H (`PaintedLine`, `treaded`)
 - **Contract version built against:** 0.3.0
 
+## Street-spec power rebalance (2026-10-20)
+
+Owner feedback: compared with the sim-cade feel reference, our cars were heavier and had less
+torque, and ran 2-6 s slower 0-160 km/h (≈ 0-100 mph). The Sport and Muscle cars now carry a
+**street build at ≈ 240 W/kg** (`VehicleDef.mass_kg`, with driver and half a tank). Every car
+keeps its stock-class torque-curve *shape*: one scale factor per car, stated in its spec sheet's
+engine `why`. Curb mass is trimmed ≈ 5 %. Source of truth: `roster_inputs.py`
+(`STREET_SPEC_W_PER_KG`). Beaters, compacts, trucks and police are unchanged.
+
+| car | mass kg | kW | W/kg | 0-100 s | 0-160 s (`pursuit_probe.py`) | Vmax km/h |
+|---|---|---|---|---|---|---|
+| kestrel_ts | 1453 → 1383 | 181 → 318 | 125 → 230 | 7.08 → 5.98 | **15.85 → 10.58** | 248 → 260 |
+| shiro_turbo | 1301 → 1241 | 182 → 297 | 140 → 240 | 6.43 → 5.28 | **14.32 → 9.65** | 260 → 311 |
+| hakone_gt | 1599 → 1519 | 242 → 372 | 151 → 245 | 5.87 → 5.25 | **12.55 → 9.18** | 282 → 317 |
+| sperber_32 | 1602 → 1522 | 248 → 373 | 155 → 245 | 6.07 → 5.12 | **12.90 → 9.33** | 272 → 316 |
+| lindwurm_4t | 1555 → 1484 | 220 → 327 | 141 → 220 | 5.43 → 3.95 | **12.53 → 8.30** | 260 → 291 |
+| rampart_50 | 1753 → 1663 | 319 → 416 | 182 → 250 | 5.85 → 5.57 | **11.50 → 9.67** | 268 → 303 |
+| ironside_440 | 1695 → 1615 | 216 → 380 | 127 → 235 | 8.15 → 8.05 | **17.22 → 12.90** | 210 → 248 |
+| lucciola_350 (Exotic) | 1344 → 1294 | 278 → 356 | 207 → 275 | 4.57 → 4.35 | **9.58 → 8.12** | 290 → 319 |
+
+- **Ironside:** uniform scaling gave 985 N·m, which isn't credible. It is reshaped instead as a
+  street-built big-block: peak 700 N·m at 4000 rpm, 380 kW at 5900, redline 5200 → 6200,
+  limiter 5500 → 6500, idle 650 → 700. Its 0-100 barely moves because the bias-ply tires limit
+  the launch (still the known 8.1 s miss). The build shows from 100 km/h up.
+- **Lindwurm** sits at 220, not 240, on purpose. At 235 its AWD launch beat the exotic to 160 km/h.
+- **Lucciola** went above the pack (275 W/kg) so the exotic stays on top. Its final drive went
+  4.30 → 3.90 because it was rev-limited at 291 km/h, below the sports cars.
+- **0-100 bands** (`specsheet.py` TARGETS) moved to the street-spec figures. These are
+  traction-limited launches, so 0-160 is the figure the rebalance was tuned on. Skidpad and
+  100-0 bands are unchanged. Hakone and Sperber 100-0 are now in band (lighter). Rampart 100-0
+  is 0.2 m over (was 1 m).
+- **Unchanged:** barrier sweep 135/136 (the same Wolfhound offset near miss). Every car
+  smoke-sims deterministically. Nameplate check is clean. `pursuit_probe.py` gained a 0-160 column.
+- **Police (for E / lead):** catch outcomes are unchanged (the cruiser already could not catch
+  any sport/muscle car on a straight). The gap is wider now: cruiser 14.0 s and Wolfhound
+  13.2 s to 160 km/h, against 8.1-12.9 s for these cars. If pursuits get too easy to escape on
+  straights, the cop cars need the same treatment. Not done here (out of scope).
+- **For G (economy):** power went up a lot, so the class/performance index and `market_price`
+  derived from `CarSpec` move up for these 8 cars. See test results below.
+
 ## Response to lead feedback round 8 (2026-10-19)
 
 Merged `origin/main` at `d3effad` (contract v0.3.0) into `ws/cars`; no conflicts.

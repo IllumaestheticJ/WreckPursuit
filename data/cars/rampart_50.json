@@ -4,39 +4,39 @@
   "class": "Muscle",
   "analog_of": "2010s American muscle coupe, 5.0 L DOHC V8, independent rear suspension",
   "body_size_m": [1.92, 4.78, 1.38],
-  "mass_kg": 1752.7,
+  "mass_kg": 1662.7,
   "front_weight_frac": 0.54,
   "wheelbase_m": 2.72,
   "track_front_m": 1.58,
   "track_rear_m": 1.65,
   "cg_height_m": 0.5,
-  "inertia_kgm2": [650.0, 3250.0, 3570.0],
+  "inertia_kgm2": [620.0, 3090.0, 3380.0],
   "drag_cd_a_m2": 0.779,
   "lift_front": 0.08,
   "lift_rear": 0.1,
   "engine": {
     "torque_curve_nm": [
-      [1000, 350],
-      [1500, 395],
-      [2000, 430],
-      [2500, 460],
-      [3000, 485],
-      [3500, 505],
-      [4000, 522],
-      [4250, 529],
-      [4750, 525],
-      [5250, 515],
-      [5750, 500],
-      [6250, 482],
-      [6750, 452],
-      [7000, 435],
-      [7400, 395]
+      [1000, 455],
+      [1500, 514],
+      [2000, 559],
+      [2500, 598],
+      [3000, 631],
+      [3500, 657],
+      [4000, 679],
+      [4250, 688],
+      [4750, 683],
+      [5250, 670],
+      [5750, 650],
+      [6250, 627],
+      [6750, 588],
+      [7000, 566],
+      [7400, 514]
     ],
     "idle_rpm": 700.0,
     "redline_rpm": 7000.0,
     "rev_limit_rpm": 7400.0,
     "inertia_kgm2": 0.22,
-    "engine_brake_nm": 53.0
+    "engine_brake_nm": 69.0
   },
   "drivetrain": {
     "layout": "Rwd",
@@ -51,7 +51,7 @@
         "ramp_coast": 0.35
       }
     },
-    "clutch_max_nm": 710.0,
+    "clutch_max_nm": 930.0,
     "shift_time_s": 0.25
   },
   "wheels": [
@@ -110,36 +110,36 @@
   ],
   "suspension": [
     {
-      "spring_n_per_m": 42400.0,
-      "damper_bump_ns_per_m": 2610.0,
-      "damper_rebound_ns_per_m": 3920.0,
+      "spring_n_per_m": 40100.0,
+      "damper_bump_ns_per_m": 2470.0,
+      "damper_rebound_ns_per_m": 3700.0,
       "travel_m": 0.16,
       "preload_m": 0.02,
-      "arb_n_per_m": 12800.0,
+      "arb_n_per_m": 12200.0,
       "bump_stop_n_per_m": 170000.0
     },
     {
-      "spring_n_per_m": 42400.0,
-      "damper_bump_ns_per_m": 2610.0,
-      "damper_rebound_ns_per_m": 3920.0,
+      "spring_n_per_m": 40100.0,
+      "damper_bump_ns_per_m": 2470.0,
+      "damper_rebound_ns_per_m": 3700.0,
       "travel_m": 0.16,
       "preload_m": 0.02,
-      "arb_n_per_m": 12800.0,
+      "arb_n_per_m": 12200.0,
       "bump_stop_n_per_m": 170000.0
     },
     {
-      "spring_n_per_m": 40300.0,
-      "damper_bump_ns_per_m": 2330.0,
-      "damper_rebound_ns_per_m": 3500.0,
+      "spring_n_per_m": 38100.0,
+      "damper_bump_ns_per_m": 2200.0,
+      "damper_rebound_ns_per_m": 3300.0,
       "travel_m": 0.17,
       "preload_m": 0.02,
       "arb_n_per_m": 600.0,
       "bump_stop_n_per_m": 170000.0
     },
     {
-      "spring_n_per_m": 40300.0,
-      "damper_bump_ns_per_m": 2330.0,
-      "damper_rebound_ns_per_m": 3500.0,
+      "spring_n_per_m": 38100.0,
+      "damper_bump_ns_per_m": 2200.0,
+      "damper_rebound_ns_per_m": 3300.0,
       "travel_m": 0.17,
       "preload_m": 0.02,
       "arb_n_per_m": 600.0,
@@ -147,8 +147,8 @@
     }
   ],
   "brakes": {
-    "max_torque_front_nm": 3730.0,
-    "max_torque_rear_nm": 1220.0,
+    "max_torque_front_nm": 3540.0,
+    "max_torque_rear_nm": 1160.0,
     "bias_front": 0.5,
     "handbrake_rear_nm": 1430.0
   },

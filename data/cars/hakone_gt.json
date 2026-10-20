@@ -4,37 +4,37 @@
   "class": "Sport",
   "analog_of": "90s Japanese FR grand tourer, 3.0 L sequential twin-turbo I6",
   "body_size_m": [1.81, 4.515, 1.275],
-  "mass_kg": 1598.9,
+  "mass_kg": 1518.9,
   "front_weight_frac": 0.53,
   "wheelbase_m": 2.55,
   "track_front_m": 1.52,
   "track_rear_m": 1.53,
   "cg_height_m": 0.46,
-  "inertia_kgm2": [520.0, 2580.0, 2840.0],
+  "inertia_kgm2": [500.0, 2450.0, 2700.0],
   "drag_cd_a_m2": 0.601,
   "lift_front": 0.04,
   "lift_rear": 0.03,
   "engine": {
     "torque_curve_nm": [
-      [1000, 230],
-      [1500, 280],
-      [2000, 320],
-      [2500, 355],
-      [3000, 390],
-      [3500, 420],
-      [4000, 435],
-      [4500, 432],
-      [5000, 425],
-      [5500, 412],
-      [6000, 385],
-      [6500, 345],
-      [7000, 300]
+      [1000, 354],
+      [1500, 431],
+      [2000, 492],
+      [2500, 546],
+      [3000, 600],
+      [3500, 646],
+      [4000, 669],
+      [4500, 665],
+      [5000, 654],
+      [5500, 634],
+      [6000, 592],
+      [6500, 531],
+      [7000, 462]
     ],
     "idle_rpm": 750.0,
     "redline_rpm": 6800.0,
     "rev_limit_rpm": 7000.0,
     "inertia_kgm2": 0.18,
-    "engine_brake_nm": 48.0
+    "engine_brake_nm": 74.0
   },
   "drivetrain": {
     "layout": "Rwd",
@@ -49,7 +49,7 @@
         "ramp_coast": 0.25
       }
     },
-    "clutch_max_nm": 610.0,
+    "clutch_max_nm": 940.0,
     "shift_time_s": 0.25
   },
   "wheels": [
@@ -108,36 +108,36 @@
   ],
   "suspension": [
     {
-      "spring_n_per_m": 51100.0,
-      "damper_bump_ns_per_m": 2710.0,
-      "damper_rebound_ns_per_m": 4060.0,
+      "spring_n_per_m": 48400.0,
+      "damper_bump_ns_per_m": 2570.0,
+      "damper_rebound_ns_per_m": 3860.0,
       "travel_m": 0.14,
       "preload_m": 0.02,
-      "arb_n_per_m": 14000.0,
+      "arb_n_per_m": 13400.0,
       "bump_stop_n_per_m": 170000.0
     },
     {
-      "spring_n_per_m": 51100.0,
-      "damper_bump_ns_per_m": 2710.0,
-      "damper_rebound_ns_per_m": 4060.0,
+      "spring_n_per_m": 48400.0,
+      "damper_bump_ns_per_m": 2570.0,
+      "damper_rebound_ns_per_m": 3860.0,
       "travel_m": 0.14,
       "preload_m": 0.02,
-      "arb_n_per_m": 14000.0,
+      "arb_n_per_m": 13400.0,
       "bump_stop_n_per_m": 170000.0
     },
     {
-      "spring_n_per_m": 49800.0,
-      "damper_bump_ns_per_m": 2510.0,
-      "damper_rebound_ns_per_m": 3760.0,
+      "spring_n_per_m": 47200.0,
+      "damper_bump_ns_per_m": 2370.0,
+      "damper_rebound_ns_per_m": 3560.0,
       "travel_m": 0.15,
       "preload_m": 0.02,
       "arb_n_per_m": 0.0,
       "bump_stop_n_per_m": 170000.0
     },
     {
-      "spring_n_per_m": 49800.0,
-      "damper_bump_ns_per_m": 2510.0,
-      "damper_rebound_ns_per_m": 3760.0,
+      "spring_n_per_m": 47200.0,
+      "damper_bump_ns_per_m": 2370.0,
+      "damper_rebound_ns_per_m": 3560.0,
       "travel_m": 0.15,
       "preload_m": 0.02,
       "arb_n_per_m": 0.0,

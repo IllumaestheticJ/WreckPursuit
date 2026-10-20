@@ -25,6 +25,14 @@ FUEL_KG_PER_L = 0.745  # petrol
 # VehicleDef.mass_kg = curb (full tank, as manufacturer curb figures are quoted) − half a tank
 # + one driver: the contract (v0.2.0) puts fuel in mass_kg at 50 % fill.
 
+# Street spec (2026-10 rebalance): the Sport and Muscle cars (and the Exotic above them) are
+# not stock. Feel reference: on stock-class power and mass they were 2-6 s slower 0-160 km/h
+# than the sim-cade benchmark the handling is tuned against, so each one carries a street
+# build at ≈ 240 W/kg (VehicleDef.mass_kg, i.e. with driver and half a tank): the stock-class
+# torque curve scaled by one factor (shape kept, stated in each `why`) and curb mass trimmed
+# ≈ 5 % (lightweight panels, stripped interior). Beaters, compacts, trucks and police are stock.
+STREET_SPEC_W_PER_KG = 240.0
+
 # Brake line pressure at full pedal with ABS cycling, bar. Modern boosted systems reach
 # 100-120 bar in a panic stop; 70s single-diaphragm boosters with organic pads ~65 bar.
 P_MODERN = 100.0
@@ -103,7 +111,7 @@ CARS = [
         analog_of="mid-2000s Japanese FF sport sedan, 2.0 L turbocharged I4 (AWD variant via mod)",
         era="2000s",
         profile="sedan",
-        curb_kg=1400.0,
+        curb_kg=1330.0,
         fuel_l=60,
         front_frac=0.61,
         wheelbase=2.64,
@@ -120,12 +128,12 @@ CARS = [
         extra_cda=0.0,
         lift=(0.08, 0.10),
         engine=dict(
-            desc="2.0 L DOHC I4, single turbo, intercooled, plateau 2500-4500 rpm",
-            curve=[(1000, 150), (1500, 205), (2000, 280), (2500, 330), (3000, 335), (3500, 335),
-                   (4000, 333), (4500, 325), (5000, 310), (5500, 295), (6000, 288), (6500, 262),
-                   (6800, 240)],
+            desc="2.0 L DOHC I4, single turbo, intercooled, street spec (larger turbo, higher boost), plateau 2500-4500 rpm",
+            curve=[(1000, 264), (1500, 360), (2000, 492), (2500, 580), (3000, 589), (3500, 589),
+                   (4000, 585), (4500, 571), (5000, 545), (5500, 518), (6000, 506), (6500, 460),
+                   (6800, 422)],
             idle=800, redline=6500, limit=6800, inertia=0.13, brake_frac=0.11,
-            why="Class-typical 2000s 2.0 T: ~90 kW/L, torque plateau limited by the factory boost map; spool shape from owner dyno averages.",
+            why="Street spec (2026-10 rebalance, `STREET_SPEC_W_PER_KG`): the class-typical 2000s 2.0 T curve (~90 kW/L, spool shape from owner dyno averages) scaled ×1.76 for the ≈ 230 W/kg roster target, i.e. a big-turbo build; curb trimmed 1400 → 1330 kg.",
         ),
         trans=dict(
             desc="6-speed manual, mild clutch-type front LSD (AWD centre coupling is a mod)",
@@ -166,7 +174,7 @@ CARS = [
         analog_of="early-2000s Japanese FR coupe, 2.0 L turbocharged I4, clutch LSD",
         era="2000s",
         profile="coupe",
-        curb_kg=1250.0,
+        curb_kg=1190.0,
         fuel_l=65,
         front_frac=0.55,
         wheelbase=2.525,
@@ -183,12 +191,12 @@ CARS = [
         extra_cda=0.0,
         lift=(0.06, 0.08),
         engine=dict(
-            desc="2.0 L DOHC I4, single ball-bearing turbo, intercooled",
-            curve=[(1000, 140), (1500, 170), (2000, 205), (2500, 240), (3000, 258), (3500, 266),
-                   (4000, 272), (4500, 275), (5000, 276), (5500, 272), (6000, 268), (6500, 268),
-                   (7000, 240), (7500, 205)],
+            desc="2.0 L DOHC I4, single ball-bearing turbo, intercooled, street spec (big turbo)",
+            curve=[(1000, 229), (1500, 278), (2000, 335), (2500, 392), (3000, 421), (3500, 434),
+                   (4000, 444), (4500, 449), (5000, 451), (5500, 444), (6000, 437), (6500, 437),
+                   (7000, 392), (7500, 335)],
             idle=850, redline=7200, limit=7500, inertia=0.13, brake_frac=0.12,
-            why="Class-typical early-2000s 2.0 T coupe (~92 kW/L); late, flat torque from a larger turbo, per owner dyno averages.",
+            why="Street spec (2026-10 rebalance, `STREET_SPEC_W_PER_KG`): the class-typical early-2000s 2.0 T coupe curve (~92 kW/L; late, flat torque from a larger turbo, per owner dyno averages) scaled ×1.63 for the ≈ 240 W/kg roster target; curb trimmed 1250 → 1190 kg.",
         ),
         trans=dict(
             desc="6-speed manual, clutch-type 1.5-way rear LSD",
@@ -209,7 +217,7 @@ CARS = [
         price=28000,
         durability=2,
         note=("The drift scene's favourite: balanced, light, and with a 1.5-way LSD that locks on "
-              "and off throttle so it holds a slide. Not brutally fast, but the most "
+              "and off throttle so it holds a slide. The big-turbo build hits hard above 3500 rpm, and it is the most "
               "communicative chassis in the roster and the easiest to throw sideways on purpose."),
         breaks=("Light coupe shell with long doors and thin sills: side impacts reach the cabin "
                 "quickly. The front clip is cheap to replace (bumper, hood and fenders bolt on and "
@@ -228,7 +236,7 @@ CARS = [
         analog_of="90s Japanese FR grand tourer, 3.0 L sequential twin-turbo I6",
         era="90s",
         profile="coupe",
-        curb_kg=1550.0,
+        curb_kg=1470.0,
         fuel_l=70,
         front_frac=0.53,
         wheelbase=2.55,
@@ -245,12 +253,12 @@ CARS = [
         extra_cda=0.0,
         lift=(0.04, 0.03),
         engine=dict(
-            desc="3.0 L DOHC I6, sequential twin turbo, intercooled",
-            curve=[(1000, 230), (1500, 280), (2000, 320), (2500, 355), (3000, 390), (3500, 420),
-                   (4000, 435), (4500, 432), (5000, 425), (5500, 412), (6000, 385), (6500, 345),
-                   (7000, 300)],
+            desc="3.0 L DOHC I6, sequential twin turbo, intercooled, street spec (raised boost)",
+            curve=[(1000, 354), (1500, 431), (2000, 492), (2500, 546), (3000, 600), (3500, 646),
+                   (4000, 669), (4500, 665), (5000, 654), (5500, 634), (6000, 592), (6500, 531),
+                   (7000, 462)],
             idle=750, redline=6800, limit=7000, inertia=0.18, brake_frac=0.11,
-            why="Export-spec power class for 90s 3.0 TT straight-sixes (~80 kW/L); the second-turbo handover near 4000 rpm shows as the torque peak.",
+            why="Street spec (2026-10 rebalance, `STREET_SPEC_W_PER_KG`): the export-spec 90s 3.0 TT straight-six curve (~80 kW/L; the second-turbo handover near 4000 rpm shows as the torque peak) scaled ×1.54 for the ≈ 245 W/kg roster target; curb trimmed 1550 → 1470 kg.",
         ),
         trans=dict(
             desc="6-speed manual, clutch-type rear LSD",
@@ -291,7 +299,7 @@ CARS = [
         analog_of="2010s American muscle coupe, 5.0 L DOHC V8, independent rear suspension",
         era="2010s",
         profile="coupe",
-        curb_kg=1700.0,
+        curb_kg=1610.0,
         fuel_l=60,
         front_frac=0.54,
         wheelbase=2.72,
@@ -308,12 +316,12 @@ CARS = [
         extra_cda=0.0,
         lift=(0.08, 0.10),
         engine=dict(
-            desc="5.0 L DOHC 32-valve V8, naturally aspirated",
-            curve=[(1000, 350), (1500, 395), (2000, 430), (2500, 460), (3000, 485), (3500, 505),
-                   (4000, 522), (4250, 529), (4750, 525), (5250, 515), (5750, 500), (6250, 482),
-                   (6750, 452), (7000, 435), (7400, 395)],
+            desc="5.0 L DOHC 32-valve V8, positive-displacement supercharger (street spec)",
+            curve=[(1000, 455), (1500, 514), (2000, 559), (2500, 598), (3000, 631), (3500, 657),
+                   (4000, 679), (4250, 688), (4750, 683), (5250, 670), (5750, 650), (6250, 627),
+                   (6750, 588), (7000, 566), (7400, 514)],
             idle=700, redline=7000, limit=7400, inertia=0.22, brake_frac=0.10,
-            why="Class-typical 2010s NA 5.0 V8 (~64 kW/L) with the broad, flat torque curve owner dynos show for modern DOHC V8s.",
+            why="Street spec (2026-10 rebalance, `STREET_SPEC_W_PER_KG`): the class-typical 2010s NA 5.0 V8 curve (~64 kW/L, broad and flat as owner dynos show) scaled ×1.30 — a bolt-on supercharger keeps the flat shape — for the ≈ 250 W/kg roster target; curb trimmed 1700 → 1610 kg.",
         ),
         trans=dict(
             desc="6-speed manual, helical-gear-style rear LSD (modelled as clutch LSD)",
@@ -354,7 +362,7 @@ CARS = [
         analog_of="early-70s American big-block muscle coupe, 7.2 L pushrod V8, live rear axle",
         era="70s",
         profile="coupe",
-        curb_kg=1650.0,
+        curb_kg=1570.0,
         fuel_l=80,
         front_frac=0.56,
         wheelbase=2.95,
@@ -371,12 +379,12 @@ CARS = [
         extra_cda=0.0,
         lift=(0.15, 0.18),
         engine=dict(
-            desc="7.2 L OHV pushrod V8, 4-barrel carburettor (net rating)",
-            curve=[(800, 380), (1200, 450), (1600, 500), (2000, 530), (2400, 550), (2800, 558),
-                   (3200, 560), (3600, 552), (4000, 515), (4400, 465), (4800, 415), (5200, 365),
-                   (5500, 330)],
-            idle=650, redline=5200, limit=5500, inertia=0.30, brake_frac=0.12,
-            why="Net (installed, with accessories and exhaust) output class for early-70s 7.2 L big-blocks, i.e. well below the period gross ratings; torque peaks low as owner dynos show for long-runner carbureted big-blocks.",
+            desc="7.2 L OHV pushrod V8, 4-barrel carburettor, street-built (hot cam, ported heads, headers)",
+            curve=[(800, 470), (1200, 540), (1600, 590), (2000, 625), (2500, 655), (3000, 680),
+                   (3500, 695), (4000, 700), (4500, 690), (5000, 670), (5500, 640), (5900, 615),
+                   (6200, 580), (6500, 520)],
+            idle=700, redline=6200, limit=6500, inertia=0.30, brake_frac=0.12,
+            why="Street spec (2026-10 rebalance, `STREET_SPEC_W_PER_KG`), ≈ 235 W/kg: a street-built early-70s 7.2 L big-block, roughly the period gross rating plus a hot cam, ported heads and headers, so the torque peak moves up to 4000 rpm and power peaks near 5900 rpm instead of the stock net figure's 4000; curb trimmed 1650 → 1570 kg.",
         ),
         trans=dict(
             desc="3-speed automatic with torque converter, open live rear axle",
@@ -419,10 +427,10 @@ CARS = [
         id="sperber_32",
         display_name="Sperber 32",
         cls="Sport",
-        analog_of="2000s German FR sport sedan, 3.2 L high-revving naturally aspirated I6",
+        analog_of="2000s German FR sport sedan, 3.2 L high-revving I6",
         era="2000s",
         profile="sedan",
-        curb_kg=1550.0,
+        curb_kg=1470.0,
         fuel_l=63,
         front_frac=0.51,
         wheelbase=2.73,
@@ -439,12 +447,12 @@ CARS = [
         extra_cda=0.0,
         lift=(0.05, 0.06),
         engine=dict(
-            desc="3.2 L DOHC I6, naturally aspirated, individual throttle bodies, 8000 rpm",
-            curve=[(1000, 215), (1500, 245), (2000, 275), (3000, 322), (3500, 338), (4000, 350),
-                   (4500, 360), (4900, 365), (5500, 358), (6000, 348), (6500, 335), (7000, 325),
-                   (7500, 312), (7900, 300), (8100, 280)],
+            desc="3.2 L DOHC I6, individual throttle bodies, 8000 rpm, street spec (centrifugal supercharger)",
+            curve=[(1000, 323), (1500, 368), (2000, 413), (3000, 484), (3500, 508), (4000, 526),
+                   (4500, 541), (4900, 548), (5500, 538), (6000, 523), (6500, 503), (7000, 488),
+                   (7500, 469), (7900, 451), (8100, 421)],
             idle=800, redline=7900, limit=8100, inertia=0.15, brake_frac=0.10,
-            why="Class-typical 2000s high-specific-output NA six (~78 kW/L) with a high, flat top end per owner dyno averages.",
+            why="Street spec (2026-10 rebalance, `STREET_SPEC_W_PER_KG`): the class-typical 2000s high-specific-output NA six curve (~78 kW/L, high, flat top end per owner dyno averages) scaled ×1.50 for the ≈ 245 W/kg roster target; curb trimmed 1550 → 1470 kg.",
         ),
         trans=dict(
             desc="6-speed manual, variable-locking clutch rear LSD",
@@ -485,7 +493,7 @@ CARS = [
         analog_of="2010s German AWD hot hatch, 2.0 L turbocharged I4, on-demand clutch-pack AWD, dual-clutch gearbox",
         era="2010s",
         profile="hatch",
-        curb_kg=1500.0,
+        curb_kg=1430.0,
         fuel_l=55,
         front_frac=0.60,
         wheelbase=2.63,
@@ -502,12 +510,12 @@ CARS = [
         extra_cda=0.0,
         lift=(0.06, 0.04),
         engine=dict(
-            desc="2.0 L DOHC I4, single turbo, direct injection, plateau 1800-5500 rpm",
-            curve=[(1000, 200), (1500, 300), (1800, 380), (2500, 380), (3000, 380), (3500, 380),
-                   (4000, 380), (4500, 380), (5000, 380), (5500, 380), (6000, 350), (6500, 310),
-                   (6700, 290)],
+            desc="2.0 L DOHC I4, single turbo, direct injection, street spec (hybrid turbo, remap), plateau 1800-5500 rpm",
+            curve=[(1000, 297), (1500, 446), (1800, 565), (2500, 565), (3000, 565), (3500, 565),
+                   (4000, 565), (4500, 565), (5000, 565), (5500, 565), (6000, 520), (6500, 461),
+                   (6700, 431)],
             idle=750, redline=6500, limit=6700, inertia=0.12, brake_frac=0.10,
-            why="Class-typical 2010s 2.0 T (~110 kW/L) with the electronically flattened torque plateau owner dynos show.",
+            why="Street spec (2026-10 rebalance, `STREET_SPEC_W_PER_KG`): the class-typical 2010s 2.0 T curve (~110 kW/L, electronically flattened plateau as owner dynos show) scaled ×1.48 for ≈ 220 W/kg — under the 240 W/kg target on purpose, so AWD launches do not put it past the exotic to 160 km/h; curb trimmed 1500 → 1430 kg.",
         ),
         trans=dict(
             desc="6-speed dual-clutch, on-demand clutch-pack rear coupling (95 % front until the fronts slip 5 %, then up to 50 % rear), open diffs with brake-based torque vectoring (assist)",
@@ -548,7 +556,7 @@ CARS = [
         analog_of="90s Italian mid-engine exotic coupe, 3.5 L flat-plane V8, transverse-mounted gearbox behind the engine",
         era="90s",
         profile="mr",
-        curb_kg=1300.0,
+        curb_kg=1250.0,
         fuel_l=82,
         front_frac=0.42,
         wheelbase=2.45,
@@ -565,17 +573,17 @@ CARS = [
         extra_cda=0.0,
         lift=(-0.05, -0.12),
         engine=dict(
-            desc="3.5 L DOHC 40-valve flat-plane V8, naturally aspirated, dry sump",
-            curve=[(1000, 180), (2000, 240), (3000, 285), (3500, 305), (4000, 320), (4500, 335),
-                   (5000, 348), (5500, 358), (6000, 363), (6500, 360), (7000, 352), (7500, 343),
-                   (8000, 330), (8250, 322), (8800, 280)],
+            desc="3.5 L DOHC 40-valve flat-plane V8, dry sump, street spec (twin turbo)",
+            curve=[(1000, 230), (2000, 307), (3000, 365), (3500, 390), (4000, 409), (4500, 429),
+                   (5000, 445), (5500, 458), (6000, 465), (6500, 461), (7000, 450), (7500, 439),
+                   (8000, 422), (8250, 412), (8800, 358)],
             idle=1000, redline=8500, limit=8800, inertia=0.12, brake_frac=0.10,
-            why="Class-typical 90s exotic flat-plane V8 (~80 kW/L), torque peaking high and power at 8250 rpm, per published spec-class data and owner dynos.",
+            why="Street spec (2026-10 rebalance, `STREET_SPEC_W_PER_KG`): the class-typical 90s exotic flat-plane V8 curve (~80 kW/L, power at 8250 rpm per published spec-class data) scaled ×1.28 to ≈ 275 W/kg, so the exotic stays above the 240 W/kg sports/muscle pack; curb trimmed 1300 → 1250 kg.",
         ),
         trans=dict(
             desc="6-speed manual (open gate), clutch-type rear LSD",
             layout="Rwd",
-            gears=[3.08, 2.16, 1.61, 1.27, 1.03, 0.84], final=4.30, reverse=2.92, shift=0.22,
+            gears=[3.08, 2.16, 1.61, 1.27, 1.03, 0.84], final=3.90, reverse=2.92, shift=0.22,
             diff_f="Open", diff_r=dict(preload=60.0, power=0.50, coast=0.35), clutch_factor=1.4,
         ),
         tires=dict(front="225/40R18", rear="265/40R18", compound="sport", unsprung=(20.0, 24.0)),
