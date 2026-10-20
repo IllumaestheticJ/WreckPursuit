@@ -46,6 +46,22 @@ pub struct PlainSteer {
     /// wheels trail the slide). 0 = plain return to centre. An A/B switch: we have no reference
     /// data for released keys mid-drift.
     pub self_align: f32,
+    /// Where the speed sensitivity acts (lead A/B, clip 8: the reference's cockpit wheel turns
+    /// as far at 150 km/h as at a standstill).
+    pub sens_applies: SensApplies,
+}
+
+/// Where [`PlainSteer::speed_sensitivity`] acts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SensApplies {
+    /// The road-wheel lock shrinks with speed ([`PlainSteer::lock_frac`]): what a held key
+    /// asks for is smaller at speed.
+    #[default]
+    Rack,
+    /// The road wheels keep the full lock at every speed; the front tyres saturate and limit
+    /// the car by themselves (the curve is ignored).
+    Tyre,
 }
 
 impl Default for PlainSteer {
@@ -57,6 +73,7 @@ impl Default for PlainSteer {
             sens_ref_kmh: 113.0,
             sens_exponent: 2.0,
             self_align: 0.0,
+            sens_applies: SensApplies::Rack,
         }
     }
 }
@@ -66,6 +83,9 @@ impl PlainSteer {
     /// `1 / (1 + s × (v / v_ref)^p)`. Defaults (75 %, 113 km/h, p = 2): 1.00 at 5 km/h, 0.83 at
     /// 60, 0.63 at 100, 0.47 at 140, 0.40 at 160 km/h.
     pub fn lock_frac(&self, speed: f32) -> f32 {
+        if self.sens_applies == SensApplies::Tyre {
+            return 1.0;
+        }
         let s = self.speed_sensitivity.clamp(0.0, 1.0);
         if s <= 0.0 {
             return 1.0;
@@ -282,6 +302,18 @@ mod tests {
             a = update_center_angle(a, &rel, &p, DT);
         }
         assert_eq!(a, 0.0);
+    }
+
+    #[test]
+    fn tyre_mode_keeps_full_lock_at_speed() {
+        let p = PlainSteer {
+            sens_applies: SensApplies::Tyre,
+            ..PlainSteer::default()
+        };
+        assert_eq!(p.lock_frac(150.0 / 3.6), 1.0);
+        // Serialised lowercase for the testbed.
+        let j = serde_json::to_string(&p).unwrap();
+        assert!(j.contains(r#""sens_applies":"tyre""#), "{j}");
     }
 
     #[test]

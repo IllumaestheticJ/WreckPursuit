@@ -17,7 +17,7 @@ use wp_vehicle::drift_lab_w::{
     ROSTER_CARS,
 };
 use wp_vehicle::drift_lab_w::{roll_run, LANE_CHANGE_KEYS, S_BEND_KEYS};
-use wp_vehicle::plain::{self, PlainSteer};
+use wp_vehicle::plain::{self, PlainSteer, SensApplies};
 use wp_vehicle::ride::roll_kick;
 use wp_vehicle::ride_lab::{self, RideTune};
 
@@ -62,6 +62,7 @@ fn main() {
             "sweep",
             "ride",
             "carlab",
+            "sens",
             "ptrace",
             "tap",
             "handbrake",
@@ -88,6 +89,10 @@ fn main() {
     }
     if what == "ptrace" {
         ptrace(args.first().map_or("parity_rwd_d", String::as_str));
+        return;
+    }
+    if what == "sens" {
+        sens_table(&args);
         return;
     }
     if what == "carlab" {
@@ -671,4 +676,87 @@ fn ptrace(id: &str) {
         },
     );
     println!("{r:?}");
+}
+
+/// Speed sensitivity A/B (lead, clip 8): the lock shrinks with speed (rack) vs full road-wheel
+/// lock with the tyres limiting the car (tyre).
+fn sens_table(args: &[String]) {
+    let ids: Vec<String> = if args.is_empty() {
+        [
+            "parity_rwd_d",
+            "parity_rwd_b",
+            "parity_fwd_c",
+            "shiro_turbo",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+    } else {
+        args.to_vec()
+    };
+    println!("\n## Speed sensitivity: rack (lock × curve) vs tyre (full lock, tyres limit)");
+    println!("| car | applies to | km/h | lock % | tap 0.10 s: wheel ° / heading ° / slip ° | tap 0.15 s | tap 0.25 s | key held 1.0 s: heading ° / slip ° |");
+    println!("|---|---|---|---|---|---|---|---|");
+    let a = reference_assists();
+    let base = plain::active().unwrap_or_default();
+    for id in &ids {
+        let c = car(id);
+        for mode in [SensApplies::Rack, SensApplies::Tyre] {
+            let p = PlainSteer {
+                sens_applies: mode,
+                ..base
+            };
+            plain::set_override(Some(p));
+            for kmh in [60.0f32, 100.0, 150.0] {
+                let cells: Vec<String> = [0.1f32, 0.15, 0.25, 1.0]
+                    .iter()
+                    .map(|t| {
+                        let r = tap_response(&c, &a, kmh / 3.6, *t);
+                        if *t >= 1.0 {
+                            format!("{:.1} / {:.1}", r.heading_deg, r.max_slip_deg)
+                        } else {
+                            format!(
+                                "{:.1} / {:.1} / {:.1}",
+                                r.peak_wheel_deg, r.heading_deg, r.max_slip_deg
+                            )
+                        }
+                    })
+                    .collect();
+                println!(
+                    "| {id} | {mode:?} | {kmh:.0} | {:.0} | {} |",
+                    p.lock_frac(kmh / 3.6) * 100.0,
+                    cells.join(" | ")
+                );
+            }
+        }
+    }
+    println!("\n| car | applies to | lane change 100 km/h max slip ° | counter 6° + full thr: drift s / mean ° / spun |");
+    println!("|---|---|---|---|");
+    for id in &ids {
+        let c = car(id);
+        for mode in [SensApplies::Rack, SensApplies::Tyre] {
+            plain::set_override(Some(PlainSteer {
+                sens_applies: mode,
+                ..base
+            }));
+            let lc = wp_vehicle::drift_lab_w::lane_change_slip(&c, &a);
+            let (r, _) = plain_drift_run(
+                &c,
+                &a,
+                PlainDriver::HoldCounter {
+                    entry_deg: 6.0,
+                    throttle: 1.0,
+                },
+                40.0,
+                0.6,
+            );
+            println!(
+                "| {id} | {mode:?} | {lc:.1} | {:.1} / {:.0} / {} |",
+                r.drift_s,
+                r.mean_deg,
+                if r.spun { "spun" } else { "no" }
+            );
+        }
+    }
+    plain::set_override(Some(base));
 }

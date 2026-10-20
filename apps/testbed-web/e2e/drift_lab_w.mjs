@@ -71,6 +71,11 @@ await page.evaluate(() => {
 check(Math.abs((await page.evaluate(() => window.__wp.sim.plainSteer().t_full_s)) - 0.4) < 1e-6, "full lock time slider sets the override");
 await page.locator("#drift-lab-w button", { hasText: "defaults" }).click();
 check(Math.abs((await page.evaluate(() => window.__wp.sim.plainSteer().t_full_s)) - 0.28) < 1e-6, "defaults restore 0.28 s");
+// Speed sensitivity A/B: tyre = full lock.
+await page.selectOption("#drift-lab-w-sens", "tyre");
+check((await page.evaluate(() => window.__wp.sim.plainSteer().sens_applies)) === "tyre", "sensitivity on: tyre");
+await page.selectOption("#drift-lab-w-sens", "rack");
+check((await page.evaluate(() => window.__wp.sim.plainSteer().sens_applies)) === "rack", "sensitivity on: rack");
 // Hold the right key: the rack goes right and reaches full (raw key, constant-rate slew).
 await page.keyboard.down("KeyD");
 await page.waitForTimeout(700);

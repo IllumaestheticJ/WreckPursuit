@@ -223,7 +223,7 @@ rampart_50 → parity_rwd_a / d, lucciola_350 → parity_rwd_b, kestrel_ts → p
 Regression test: `wp_wasm` `data::parity_session_tests::parity_cars_start_a_free_drive_session`
 (it reproduces the exact browser error with a panel file removed). Browser check:
 `npm run build && npm run e2e:drift-lab-w` (`e2e/drift_lab_w.mjs`, against `vite preview`):
-19 / 19 pass (22 / 22 after step 4's car / tyre checks). It checks the lab, the default car and title, plain steering and ride defaults,
+19 / 19 pass (22 / 22 after step 4's car / tyre checks, 24 / 24 after step 5). It checks the lab, the default car and title, plain steering and ride defaults,
 the assists, the sliders, that a held key reaches full rack, the readout, the selector for every
 parity car, and no page errors.
 
@@ -396,6 +396,84 @@ the candidate holds > 3.5 s at 15–40°).
    lock × 0.9 is a small refinement with the candidate).
 4. The candidate is still **not steady** (slide angle sd ≈ 10° vs clip 1's "steady for several
    seconds"), and it trims tap response by ~25 %.
+
+## Step 5 — speed sensitivity: rack or tyre (lead, clip 8)
+
+Clip 8: at ~150 km/h the reference's cockpit wheel turns about as far as at a standstill.
+So either the reference shrinks the lock only at the road wheels (not visible), or it keeps
+the full lock and lets the front tyres limit the car. New A/B in the plain profile:
+`PlainSteer::sens_applies` = `"rack"` (default, unchanged: road-wheel lock × the 75 % curve) or
+`"tyre"` (full road-wheel lock at every speed; the curve is ignored). Panel: *sensitivity on*
+(rack / tyre). Rack timing (`t_full` / `t_return`) is the same at every speed in both.
+
+`cargo run --release -p wp_vehicle --example drift_lab_w -- sens` (lab ride default, plain
+steering 0.28 / 0.33 s; taps = one key tap holding speed, measured for 1.5 s):
+
+| car | applies to | km/h | lock % | tap 0.10 s: wheel ° / heading ° / slip ° | tap 0.15 s | tap 0.25 s | key held 1.0 s: heading ° / slip ° |
+|---|---|---|---|---|---|---|---|
+| parity_rwd_a | Rack | 60 | 83 | 11.1 / 4.4 / 0.8 | 16.7 / 8.2 / 0.8 | 27.8 / 15.3 / 1.2 | 34.9 / 1.1 |
+| parity_rwd_a | Rack | 100 | 63 | 8.5 / 5.3 / 1.3 | 12.7 / 10.2 / 2.3 | 21.3 / 17.4 / 3.4 | 25.0 / 2.6 |
+| parity_rwd_a | Rack | 150 | 43 | 5.9 / 6.5 / 2.0 | 8.8 / 23.4 / 5.6 | 14.6 / 31.5 / 12.9 | 18.1 / 5.5 |
+| parity_rwd_a | Tyre | 60 | 100 | 13.5 / 4.7 / 0.8 | 20.3 / 8.5 / 0.8 | 33.9 / 15.0 / 1.0 | 33.5 / 1.3 |
+| parity_rwd_a | Tyre | 100 | 100 | 13.5 / 6.0 / 1.5 | 20.3 / 10.4 / 2.3 | 33.9 / 14.8 / 2.7 | 23.2 / 2.0 |
+| parity_rwd_a | Tyre | 150 | 100 | 13.5 / 9.3 / 2.7 | 20.3 / 23.9 / 5.9 | 33.9 / 21.6 / 5.1 | 18.1 / 3.5 |
+| parity_rwd_b | Rack | 60 | 83 | 9.7 / 4.8 / 0.7 | 14.5 / 9.2 / 1.3 | 24.2 / 17.2 / 1.8 | 38.9 / 1.1 |
+| parity_rwd_b | Rack | 100 | 63 | 7.4 / 5.8 / 1.6 | 11.1 / 12.7 / 3.1 | 18.5 / 21.6 / 4.3 | 28.3 / 3.4 |
+| parity_rwd_b | Rack | 150 | 43 | 5.1 / 6.9 / 2.3 | 7.6 / 33.6 / 13.3 | 12.7 / 37.7 / 17.5 | 20.3 / 5.9 |
+| parity_rwd_b | Tyre | 60 | 100 | 11.8 / 5.2 / 0.8 | 17.7 / 9.6 / 1.4 | 29.5 / 16.9 / 1.7 | 37.6 / 1.0 |
+| parity_rwd_b | Tyre | 100 | 100 | 11.8 / 6.9 / 1.9 | 17.7 / 13.1 / 3.2 | 29.5 / 16.2 / 3.2 | 26.1 / 2.7 |
+| parity_rwd_b | Tyre | 150 | 100 | 11.8 / 12.3 / 3.5 | 17.7 / 34.7 / 14.2 | 29.5 / 24.2 / 5.2 | 20.8 / 4.0 |
+| parity_rwd_d | Rack | 60 | 83 | 11.1 / 4.4 / 0.8 | 16.6 / 8.2 / 0.9 | 27.8 / 15.0 / 1.2 | 34.0 / 1.0 |
+| parity_rwd_d | Rack | 100 | 63 | 8.5 / 5.3 / 1.3 | 12.7 / 10.2 / 2.4 | 21.3 / 17.3 / 3.4 | 24.5 / 2.6 |
+| parity_rwd_d | Rack | 150 | 43 | 5.8 / 6.3 / 2.0 | 8.7 / 20.5 / 5.1 | 14.6 / 28.6 / 10.4 | 17.5 / 5.2 |
+| parity_rwd_d | Tyre | 60 | 100 | 13.5 / 4.7 / 0.8 | 20.3 / 8.4 / 0.9 | 33.9 / 14.8 / 1.1 | 32.6 / 1.1 |
+| parity_rwd_d | Tyre | 100 | 100 | 13.5 / 6.0 / 1.5 | 20.3 / 10.4 / 2.4 | 33.9 / 14.5 / 2.7 | 22.6 / 2.1 |
+| parity_rwd_d | Tyre | 150 | 100 | 13.5 / 8.9 / 2.7 | 20.3 / 21.7 / 5.4 | 33.9 / 19.3 / 4.8 | 17.6 / 3.4 |
+| parity_fwd_c | Rack | 60 | 83 | 9.7 / 4.3 / 1.0 | 14.6 / 8.4 / 1.0 | 24.4 / 16.2 / 1.1 | 38.7 / 1.6 |
+| parity_fwd_c | Rack | 100 | 63 | 7.5 / 5.0 / 1.2 | 11.2 / 10.2 / 2.4 | 18.7 / 18.8 / 3.8 | 26.4 / 3.5 |
+| parity_fwd_c | Rack | 150 | 43 | 5.1 / 5.3 / 1.7 | 7.7 / 14.7 / 4.3 | 12.9 / 27.1 / 8.5 | 19.5 / 6.4 |
+| parity_fwd_c | Tyre | 60 | 100 | 11.8 / 4.7 / 1.0 | 17.7 / 8.8 / 1.0 | 29.6 / 16.3 / 1.0 | 38.0 / 1.8 |
+| parity_fwd_c | Tyre | 100 | 100 | 11.8 / 6.0 / 1.5 | 17.7 / 11.2 / 2.6 | 29.6 / 16.9 / 3.4 | 26.3 / 2.9 |
+| parity_fwd_c | Tyre | 150 | 100 | 11.8 / 8.5 / 2.6 | 17.7 / 20.5 / 5.5 | 29.6 / 22.0 / 6.1 | 18.8 / 4.5 |
+| shiro_turbo | Rack | 60 | 83 | 11.7 / 4.9 / 0.8 | 17.5 / 9.0 / 0.9 | 29.2 / 16.0 / 1.2 | 36.1 / 1.1 |
+| shiro_turbo | Rack | 100 | 63 | 8.9 / 6.0 / 1.5 | 13.4 / 11.8 / 2.8 | 22.4 / 17.7 / 3.4 | 26.2 / 2.6 |
+| shiro_turbo | Rack | 150 | 43 | 6.2 / 7.3 / 2.3 | 9.3 / 25.2 / 6.6 | 15.5 / 29.2 / 9.8 | 19.0 / 5.0 |
+| shiro_turbo | Tyre | 60 | 100 | 14.2 / 5.2 / 0.8 | 21.3 / 9.1 / 0.9 | 35.5 / 15.7 / 1.1 | 34.6 / 1.4 |
+| shiro_turbo | Tyre | 100 | 100 | 14.2 / 6.7 / 1.7 | 21.3 / 11.7 / 2.7 | 35.5 / 14.7 / 2.7 | 24.0 / 2.1 |
+| shiro_turbo | Tyre | 150 | 100 | 14.2 / 10.2 / 3.0 | 21.3 / 24.3 / 6.1 | 35.5 / 16.4 / 4.1 | 18.6 / 3.3 |
+| rampart_50 | Rack | 60 | 83 | 11.1 / 4.5 / 0.8 | 16.7 / 8.2 / 0.9 | 27.8 / 15.2 / 1.2 | 34.3 / 0.9 |
+| rampart_50 | Rack | 100 | 63 | 8.5 / 5.7 / 1.4 | 12.8 / 11.1 / 2.6 | 21.4 / 17.9 / 3.6 | 24.8 / 2.8 |
+| rampart_50 | Rack | 150 | 43 | 5.9 / 6.4 / 2.0 | 8.8 / 19.9 / 5.1 | 14.7 / 27.9 / 9.6 | 17.5 / 5.2 |
+| rampart_50 | Tyre | 60 | 100 | 13.5 / 4.8 / 0.8 | 20.3 / 8.4 / 0.9 | 33.9 / 14.8 / 1.1 | 32.9 / 1.1 |
+| rampart_50 | Tyre | 100 | 100 | 13.5 / 6.5 / 1.6 | 20.3 / 11.4 / 2.6 | 33.9 / 15.3 / 2.9 | 23.1 / 2.3 |
+| rampart_50 | Tyre | 150 | 100 | 13.5 / 8.9 / 2.7 | 20.3 / 20.0 / 5.1 | 33.9 / 18.4 / 4.6 | 17.6 / 3.4 |
+| car | applies to | lane change 100 km/h max slip ° | counter 6° + full thr: drift s / mean ° / spun |
+|---|---|---|---|
+| parity_rwd_a | Rack | 3.9 | 0.5 / 28 / spun |
+| parity_rwd_a | Tyre | 3.2 | 0.5 / 28 / spun |
+| parity_rwd_b | Rack | 4.1 | 0.5 / 28 / spun |
+| parity_rwd_b | Tyre | 3.0 | 0.5 / 28 / spun |
+| parity_rwd_d | Rack | 3.7 | 0.5 / 28 / spun |
+| parity_rwd_d | Tyre | 3.1 | 0.5 / 27 / spun |
+| parity_fwd_c | Rack | 4.3 | 0.0 / 0 / no |
+| parity_fwd_c | Tyre | 3.8 | 0.0 / 0 / no |
+| shiro_turbo | Rack | 3.6 | 1.4 / 25 / spun |
+| shiro_turbo | Tyre | 2.7 | 1.2 / 23 / spun |
+| rampart_50 | Rack | 3.9 | 0.6 / 27 / spun |
+| rampart_50 | Tyre | 3.1 | 0.6 / 28 / spun |
+
+**What it shows.** At low speed the two are nearly the same. At speed, **tyre is calmer, not
+twitchier**, on everything longer than a short tap. 150 km/h, parity_rwd_d: a 0.25 s tap gives 19°
+heading / 4.8° slip (rack: 29° / 10.4°), and a held key gives 3.4° of slip (rack: 5.2°). The
+lane change slides less in every car (e.g. 3.1° vs 3.7°). With full lock the front tyres go well
+past their peak slip and limit the yaw by themselves. The rack's smaller angle sits right at
+peak front grip, so it gives the most yaw and kicks the rear out. Short 0.1 s taps are a little
+sharper with tyre (150 km/h: 8.9° vs 6.3° heading), as the wheel is further out after 0.1 s.
+Drift hold is unchanged (it is decided by the rear; see step 4).
+
+**What to try (owner):** A/B *sensitivity on* at 100–150 km/h with taps and a held key. If the
+reference feels like "the wheel turns, the car limits itself" (clip 8), tyre is the closer model.
+Whichever wins, a road-wheel camera view of the reference at speed would settle it.
 
 ## Contract change requests
 
