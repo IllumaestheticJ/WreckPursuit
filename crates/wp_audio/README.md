@@ -64,6 +64,36 @@ functions. Same frames in → byte-identical commands out (tested on real physic
 
 ## Models
 
+- **Modelled engine** (`engine_model.rs`, row 73 "simulate accurate engine sounds"; the default
+  for the player car): when the backend runs its engine synthesizer it calls
+  `set_engine_model(EngineModelMode::Physical)`; the focus car and the
+  `engine.physical_max_others` (6) nearest cars within `engine.physical_radius_m` (60 m; sticky:
+  a voiced car ranks 20 % closer and stays to 1.25 × the radius) then get **one** voice,
+  `engine_physical` / `engine/physical` (slot `ENGINE_PHYSICAL`), instead of layers, limiter,
+  turbo, supercharger, blow-off and pop voices; every other car keeps the layers.
+  - Static, in the `Play`'s `synth` map: `EngineVoiceSpec::to_synth_params` — every combustion
+    event of the 720° cycle (crank angle `a<i>`, exhaust bank `b<i>`, header length `h<i>`,
+    fixed strength trim `k<i>`) from cylinders / layout / firing feel (I4 1-3-4-2 even, I6 even,
+    cross-plane V8 1-8-4-3-6-5-7-2 with odd cylinders on bank 0 → each bank fires 90-180-270-180°,
+    flat-plane V8 alternating banks → each bank an even 180°, odd-fire V6 90/150°, boxer rumble =
+    unequal header lengths, rotary = one event per rotor per output revolution), dual or single
+    exhaust (V8+ outside trucks / compacts run one pipe per bank), tailpipe length, muffler
+    damping and chamber resonance by class, intake / mechanical / whine levels, differential mesh
+    frequency per m/s (final drive, wheel radius), overrun crackle tendency, turbo / supercharger,
+    idle / redline / limiter rpm.
+  - Installed mods (`set_engine_tune(entity, EngineTune::from_mods(ids))`, filled by the wasm
+    bridge from a career run's car): `engine_exhaust_1` (cat-back) / `_2` (header-back) = louder,
+    less muffler, more crackle, equal-length headers; `engine_intake_*` = more induction;
+    `fi_turbo_*` / `fi_supercharger_*` = the kit's whistle / whine; `engine_v8_swap` = a
+    cross-plane V8.
+  - Per frame, `VoiceParams::engine` (`EngineFrame`): crank rpm, applied throttle, pedal, gear,
+    road speed, boost (the layer model's spool estimate), engine component health, blow-off
+    counter. Load is the voice's `load` (the same smoothed load with shift dips / blips).
+  - The synthesis itself is the browser's (`apps/testbed-web/src/audio/engine_worklet.ts`, see
+    that file and `docs/integration/audio.md`): pulses per event → per-bank header waveguide →
+    collector or dual pipes → muffler → tailpipe waveguide → open-end radiation, plus intake,
+    valvetrain, gear and diff whine, turbo / blow-off / supercharger, crackle (overrun, limiter
+    fuel cut, misfires below 70 % engine health: `misfire_probability`), interior / exterior.
 - **Engine** (`engine.rs`): per-car `EngineAudioDef` (cylinders, layout, firing feel,
   induction/exhaust balance, turbo, supercharger) + an engine pack's layers. Inputs per frame:
   the crank rpm (`VehicleState::engine_rpm`, never a wheel-derived speed), the pedal and the
@@ -210,7 +240,23 @@ intensity), `whine`/`tone` (`freq_hz`, `noise`), `squeal` (`freq_hz`, `wobble_hz
 ```
 cargo test -p wp_audio
 cargo test -p wp_audio --test samples   # recorded files exist, licensed, ≤ 15 MB
+cargo test -p wp_audio --test engine_physical
+node apps/testbed-web/e2e/audio_engine.mjs   # renders + spectra + budget (see below)
 ```
+
+`tests/engine_physical.rs` (row 73): every sweep car as the focus gets exactly one
+`engine/physical` voice (no layers / limiter / turbo / pop voices) with its firing events, and
+the scripted rpm / throttle / gear / speed / health in every frame; a turbo lift fires the
+blow-off counter; a shift carries the cut; exhaust / turbo mods change the description; the
+modelled set is the focus + 6 nearest within 60 m with hysteresis, and back to layers stops
+them; deterministic. `engine_model` unit tests: firing frequency (four-stroke, rotary), bank
+intervals (cross-plane 90/180/270/180, flat-plane 180), inline even and single-bank, odd-fire,
+boxer header lengths, mods, synth-map round trip, misfire curve.
+`examples/engine_sweeps.rs` writes the WOT / lift / shift / rpm-steps / damaged sweeps for an
+I4, I6, cross-plane V8, flat-plane V8 and turbo I4; `apps/testbed-web/e2e/audio_engine.mjs`
+renders them through the real voice pool + worklet, writes `docs/media/audio/*.wav|png` and
+checks pitch (≤ 1 %), harmonic structure, crackle / blow-off / limiter / misfires, clicks,
+denormals, level vs layers, interior vs exterior and the 1.5 ms budget.
 
 Unit tests per module plus `tests/director.rs`: shipped data validates (and disk == embedded,
 every car has a def); **command stream determinism** on a real head-on crash with a siren,
@@ -258,7 +304,10 @@ nodes) for material lookup.
 - Contact material is inferred from the lattice; contract request A-1 asks for it on the event.
 - `PoliceEvent::Radio` has no priority yet (A-2): priority is a heuristic. The scanner tier is
   set by the caller. Until B emits `GlassShattered`, glass is inferred from contacts.
-- No occlusion (buildings) or interior/exterior filtering yet; no reverb zones (tunnels).
+- No occlusion (buildings); no reverb zones (tunnels). Interior / exterior filtering exists for
+  the modelled engine only (tyres, wind and impacts are not muffled in the cockpit yet).
+- The modelled engine is browser-only (AudioWorklet); a native backend would port
+  `engine_worklet.ts`. Far cars (beyond the 6 nearest / 60 m) keep the layers.
 - No music system; the Music bus exists so the scanner can duck it.
 - Kinematic traffic and body-less police units are heard only once the wasm bridge feeds
   `kinematic::cruise_state` inputs (request R12b-1 in `docs/integration/audio.md`).
