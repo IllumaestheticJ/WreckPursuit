@@ -36,7 +36,7 @@ const BUMP_STOP_HYSTERESIS_MPS: f32 = 0.05;
 pub const ANTI_DIVE_FRONT: f32 = 0.7;
 /// Anti-lift of the rear geometry under braking, same meaning (anti-squat under drive is not
 /// modelled).
-pub const ANTI_LIFT_REAR: f32 = 0.75;
+pub const ANTI_LIFT_REAR: f32 = 0.6;
 
 /// Jacking factor of one corner: the link force on the chassis at the wheel, along the
 /// strut, is `factor × fx` (fx = the braking part of the tyre's longitudinal force, + =
