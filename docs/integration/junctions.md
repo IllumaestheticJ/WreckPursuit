@@ -77,14 +77,17 @@ built), close-ups (top, holes, street level) of Vesper bends 145 / 138, dead end
 42 / 81 and grid junctions 26 / 30, before and after.
 
 ## Known gaps (for D)
-- Turning paths through building lots: Port Vesper nodes 78 and 97 have turning paths crossing
-  a building footprint (123 ray samples start inside a building). Lot placement, unrelated to
-  the pavement and not changed here.
+- ~~Turning paths through building lots: Port Vesper nodes 78 and 97 have turning paths crossing
+  a building footprint (123 ray samples start inside a building).~~ Fixed on
+  `lead/fix-sidewalk-lots`: buildings keep clear of every junction area + a sidewalk;
+  `junction_cover` now fails on any such sample (`docs/integration/sidewalk-lots.md`).
 - Junction height is a plane through the corners (+ rim blending): on saddle-shaped junctions
   the lane connectors (linear between lane ends) are up to 0.15 m off the surface; kinematic
   traffic drawn on the connectors can float / sink that much in the middle of a junction.
-- One cell-filled corner (Port Vesper node 81, between two of its overlapping roads) and node 81's
-  overlapping ribbons (ribbons lie on the patch: small steps between them).
+- ~~One cell-filled corner (Port Vesper node 81, between two of its overlapping roads) and node
+  81's overlapping ribbons (ribbons lie on the patch: small steps between them).~~ Fixed on
+  `lead/fix-sidewalk-lots`: the Larkspur cul-de-sac there now leaves into the widest free angle;
+  no overlapping ends, no cell corners, node 81 in the 120 km/h stop-line test.
 - Sidewalk ends next to highways leave a tapering wedge of ground (≤ 30 cm) at the corner.
 - Highway corners pushed out by turning paths have a slightly toothed edge (2° steps).
 - `CityMap::ground_height` / `MapGround` still use the junction disc radius and flat node
@@ -137,8 +140,8 @@ ribbon meets the junction surface — the old flat disc's 8–15 cm step. Now:
   line whose profile changes grade by more than 3 % (7 lines): 0.000 s airborne.
 - Excluded, for D: **node 81**. Two roads leave it 6° apart and their ribbons overlap at their
   own heights for tens of metres (a road-layout issue in `vesper`, not the junction surface);
-  there a car at 120 km/h was airborne 0.23 s.
+  there a car at 120 km/h was airborne 0.23 s. (Fixed on `lead/fix-sidewalk-lots`, see above.)
 
 ## Playtest row 52 (sidewalk level with building bases)
-Not on this branch (a separate city-wide change to terrain, lots and building bases); agreed
-with the lead to do it on its own branch.
+Not on this branch (a separate city-wide change to terrain, lots and building bases); done on
+`lead/fix-sidewalk-lots` (built on this branch): `docs/integration/sidewalk-lots.md`.

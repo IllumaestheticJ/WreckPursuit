@@ -87,6 +87,8 @@ jobs:
           ./target/release/simcli determinism apps/simcli/scenarios
       - name: native vs wasm32 (Node)
         run: tools/wasm-determinism/compare.sh
+      - name: debug vs release profile (steering scenarios)
+        run: tools/profile-determinism/compare.sh
 
   goldens:
     name: golden hashes + golden replays

@@ -16,7 +16,7 @@ import { D, DRAW_STRIDE, AGENT_FLAG, POLICE_DRAW_FLAG } from "../wasm/layout";
 import type { SessionModels } from "../wasm/sim";
 import type { VehicleView } from "../vehicle_view";
 import { layers } from "../settings";
-import { BAR, FULL_LOD_M, Fleet, POLICE_PAINT, TAIL, TRAFFIC_PALETTE, type DrawMode } from "./fleet";
+import { BAR, Fleet, POLICE_PAINT, TAIL, TRAFFIC_PALETTE, type DrawMode } from "./fleet";
 
 /** How a car was drawn: by its view, by the fleet (full / proxy mesh), or not at all. */
 export type LodMode = "view" | DrawMode | "none";
@@ -59,6 +59,9 @@ export class LodDirector {
   models: SessionModels = { cars: [], traffic: null, police: null };
   /** Draw states of the last frame. */
   states: DrawState[] = [];
+  /** Instanced traffic past this distance from the camera (m) is not drawn (phones). Police and
+   * sim vehicles are always drawn. */
+  trafficDrawM = Infinity;
   private readonly cam = new THREE.Vector3();
 
   /** Traffic livery per sim entity (for colouring a promoted car's VehicleView). */
@@ -101,7 +104,8 @@ export class LodDirector {
       const key = `t${traffic[o + D.id]}`;
       const view = entity > 0 ? views.get(entity) : undefined;
       if (view) claimed.add(entity);
-      states.push(this.draw(key, entity, view, traffic, o, dist, showTraffic ? tModel : null, () => [trafficPaint(flags), tailOf(flags, timeS), null]));
+      const far = !view && dist(traffic[o + D.pos], traffic[o + D.pos + 1], traffic[o + D.pos + 2]) > this.trafficDrawM;
+      states.push(this.draw(key, entity, view, traffic, o, dist, showTraffic && !far ? tModel : null, () => [trafficPaint(flags), tailOf(flags, timeS), null]));
     }
 
     const pModel = this.models.police ? this.fleet.model(this.models.police, true) : null;
@@ -153,7 +157,7 @@ export class LodDirector {
     if (!model) return { key, mode: "none", fallback: false, entity, pos: truth, truth, dist: d };
     const [paint, tail, bar] = look();
     const mode = this.fleet.add(model, rec, o + D.pos, d, paint, tail, bar);
-    return { key, mode, fallback: mode === "proxy" && d < FULL_LOD_M && !model.full, entity, pos: truth, truth, dist: d };
+    return { key, mode, fallback: mode === "proxy" && d < this.fleet.fullLodM && !model.full, entity, pos: truth, truth, dist: d };
   }
 }
 

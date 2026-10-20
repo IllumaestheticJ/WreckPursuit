@@ -1122,3 +1122,42 @@ that fail identically on a clean lead/round12 checkout (checked one by one): sim
 `vesper_v2_cars_drive_up_the_kerb_and_along_the_sidewalk`, `wp_wasm`
 `race_tests::short_sprint_with_ai_runs_to_results_and_pays_through_the_economy`. The new siren
 scenarios pass `simcli determinism`.
+
+### Response from D (round 12b follow-up) — siren scenarios after the 12b merges
+Merged `origin/lead/round12` @ db11e64. Reproduced `traffic_siren_yields` = 3 (hash ee21009f…).
+A seed sweep (1–9) showed the count is only spawn luck (3–6: the 12b spawn/LOD changes moved
+which cars are on the route), but also a real problem: on 3 of 9 seeds the siren car stalled.
+**Cause:** a physical car pulling over stopped crawling once within 0.25 m of its kerb offset,
+so it could stand 0.4 m (not 0.65 m) from its lane centre — inside the passing car's path, and the
+pair waited on each other (the 15 s give-up released it, then it re-yielded in the same spot).
+**Fix** (`wp_world`): crawl sideways until within 0.1 m. Seeds 1–9 now: 3–6 pull-overs, 0
+contacts, 0 civilian collisions on all; 7 of 9 finish the route. Seeds 3 and 5 still stall at
+the route's multi-lane start, where pulled-over cars on both sides of a lane line leave 2.2 m
+from the car's line — inside simcli's 1.2 m keep-distance corridor (a narrower 1.05 m corridor
+made the siren-off control scrape cars, so it stays). Scenario threshold now
+`traffic_siren_yields` ≥ 2 (was 4; the count depends on spawns, the route completion and
+zero-contact checks stay strict). Re-blessed only the two siren-on scenarios. On db11e64 + this
+branch all 79 scenarios pass (`simcli run apps/simcli/scenarios`, release); every other hash is
+identical to lead/round12. wp_world tests pass.
+## Lead helper: sidewalks level with lots and buildings (branch `lead/fix-sidewalk-lots`, 2026-10-20, playtest row 52)
+Built on `lead/fix-junction-holes`. D: changes in your crate are in `surface.rs` (level lots
+behind every sidewalk, skirts, corner fills out to the lots, wedge pull-back, rails on lot-less
+edges) and `vesper.rs` (carve up to the lots, building bases / placement, cul-de-sac direction:
+node 81). Details, numbers and known gaps for you: `docs/integration/sidewalk-lots.md`.
+
+## Lead feedback (round 13, 2026-10-20) — owner playtest rows 76–77 (owner-requested)
+Base: `origin/lead/round12`. Both are direct owner requests from playing preview v0.12.11.
+1. **Row 76 — "traffic is too high for night-time."** Replace/extend `density.rs` `f_time()` with a
+   data-driven time-of-day curve (target civilian density vs daytime peak): 01–05 ≈ 15–20 %,
+   23:00 ≈ 35 %, 19–22 ≈ 60 %, 07–09 and 16–19 = 100 %, midday ≈ 75 %; district modifiers
+   (downtown/nightlife busier at night, industrial/suburb emptier). Cap the out-of-sight
+   `MAX_SPAWNABLE_BOOST` at the curve so the boost never lifts night traffic above it. Same curve for
+   the LOD/kinematic fleet. Despawns stay out of sight. Add a ~02:00 scenario with the night band;
+   adjust soak ranges only where the hour changes them (say why).
+2. **Row 77 — "too many parked cars."** Port Vesper v2 has ~3,300 parked-car props. Reduce to roughly
+   35–50 %: kerbside parking only where plausible (none on arterials/highways/bridges/tunnel
+   approaches, none within ~15 m of junctions, crossings, bus stops, driveways/lot entrances),
+   occupancy by district (downtown/residential medium, commercial/industrial lots clustered, keep the
+   main racing arterials clear), random 0–3 car-length gaps, data-driven table. Deterministic; the
+   drawn-props system stays as is. Re-check scenarios that park near props.
+Re-bless only goldens your change moves; gate as usual; push ws/world.

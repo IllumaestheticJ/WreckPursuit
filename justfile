@@ -90,10 +90,16 @@ goldens:
 bless:
     cargo run --release -p simcli -- goldens --bless
 
-# Determinism: twice in-process + fresh process, then native vs wasm32 under Node.
+# Determinism: twice in-process + fresh process, native vs wasm32 under Node, debug vs release.
 determinism:
     cargo run --release -p simcli -- determinism apps/simcli/scenarios
     tools/wasm-determinism/compare.sh
+    tools/profile-determinism/compare.sh
+
+# Debug vs release: rebuild simcli in both profiles and require identical hashes on the steering
+# scenarios (or the given scenario files/dirs).
+det-profiles *targets:
+    tools/profile-determinism/compare.sh {{targets}}
 
 # Grep-based determinism lint over the simulation crates.
 lint-det:

@@ -74,14 +74,17 @@ fn cars_stay_on_the_ground_across_stop_lines_at_120_kmh() {
     let speed = 120.0 / 3.6;
     let (mut drives, mut fails, mut worst_air) = (0, Vec::new(), 0.0f32);
     let mut seen = std::collections::BTreeSet::new();
-    // Port Vesper node 81: two roads leave it 6° apart and their ribbons overlap at their own
-    // heights for tens of metres (a road-layout issue, see docs/integration/junctions.md).
+    // No ribbon ends overlap any more (Port Vesper node 81's cul-de-sac used to leave 6° off
+    // a street: `docs/integration/sidewalk-lots.md`), so every approach is driven.
     let overlapping: Vec<u32> = wp_world::surface::node_patches(&map)
         .iter()
         .filter(|p| p.overlapping_ends)
         .map(|p| p.node)
         .collect();
-    assert_eq!(overlapping, vec![81], "nodes with overlapping ribbon ends");
+    assert!(
+        overlapping.is_empty(),
+        "overlapping ribbon ends at {overlapping:?}"
+    );
     for seg in map.segs.iter().filter(|g| g.drivable) {
         let SegKind::Connector {
             from, turn, node, ..

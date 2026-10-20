@@ -150,6 +150,34 @@ export class AudioSystem {
     if (pack) this.stopAmbience = pool.playLocal(pack, AMBIENCE_CUE, gain, "World");
   }
 
+  /**
+   * Player volumes from the game menu (0..=1 each): master, the Engine / World (effects) /
+   * Police (radio, sirens) buses and the ambience bed. Saved with the audio panel's settings.
+   */
+  setMix(v: { master: number; engine: number; effects: number; police: number; ambience: number }): void {
+    const s = this.panel.settings;
+    const ambienceChanged = s.ambience !== v.ambience;
+    s.master = v.master;
+    s.buses.Engine = v.engine;
+    s.buses.World = v.effects;
+    s.buses.Police = v.police;
+    s.ambience = v.ambience;
+    this.panel.save();
+    if (this.mixer && this.ctx) {
+      if (!this.muted) this.mixer.master.gain.setTargetAtTime(v.master, this.ctx.currentTime, 0.02);
+      this.mixer.setUserGain("Engine", v.engine);
+      this.mixer.setUserGain("World", v.effects);
+      this.mixer.setUserGain("Police", v.police);
+    }
+    if (ambienceChanged) this.restartAmbience();
+  }
+
+  /** Current player volumes (audio panel settings). */
+  mix(): { master: number; engine: number; effects: number; police: number; ambience: number } {
+    const s = this.panel.settings;
+    return { master: s.master, engine: s.buses.Engine, effects: s.buses.World, police: s.buses.Police, ambience: s.ambience };
+  }
+
   toggleMute(): void {
     this.muted = !this.muted;
     if (this.mixer && this.ctx) {

@@ -348,7 +348,9 @@ pub(crate) struct RacerObs {
 #[derive(Debug, Clone)]
 pub struct PoliceSystem {
     pub(crate) cfg: PoliceConfig,
-    pub(crate) graph: RoadGraph,
+    /// Never changes after construction; shared so clones (crash-replay snapshots, race
+    /// meet reports) stay cheap.
+    pub(crate) graph: std::sync::Arc<RoadGraph>,
     pub(crate) setup: PoliceSetup,
     pub(crate) rng: Rng,
     pub(crate) tick: u64,
@@ -491,7 +493,7 @@ impl PoliceSystem {
     pub fn with_city(cfg: PoliceConfig, graph: RoadGraph, setup: PoliceSetup) -> Self {
         Self {
             cfg,
-            graph,
+            graph: std::sync::Arc::new(graph),
             setup,
             rng: Rng::new(setup.seed),
             tick: 0,

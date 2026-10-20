@@ -1,0 +1,287 @@
+/*
+ * Game menu (main / pause / settings). Low-poly dark: near-black glass card, scanner-green focus,
+ * one red accent for the primary action. Colours come from the kit's theme variables (and so from
+ * the colour-blind palettes); when machine S's palette (apps/testbed-web/src/render/palette.ts)
+ * lands, map its UI tokens onto these variables in theme.css rather than here.
+ */
+.wp-gm-root {
+  position: absolute;
+  inset: 0;
+  z-index: 90;
+  pointer-events: auto;
+}
+.wp-gm-root[hidden] {
+  display: none;
+}
+.wp-gm {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  box-sizing: border-box;
+  background: radial-gradient(ellipse at 50% 30%, rgba(14, 22, 18, 0.78), rgba(4, 6, 5, 0.94));
+}
+.wp-gm[data-screen="pause"] {
+  background: rgba(4, 6, 5, 0.72);
+}
+.wp-gm-card {
+  width: min(34em, 100%);
+  max-height: 100%;
+  overflow: auto;
+  box-sizing: border-box;
+  padding: 1.6em 1.8em 1.3em;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-top: 2px solid var(--scan-dim);
+  border-radius: var(--r);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.6);
+}
+.wp-gm-settings {
+  width: min(40em, 100%);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.wp-gm-kicker {
+  color: var(--scan);
+  font-size: 0.75em;
+  letter-spacing: 0.22em;
+}
+.wp-gm-brand h1 {
+  margin: 0.08em 0 0;
+  font-size: 3em;
+  line-height: 0.95;
+  font-weight: 800;
+  font-style: italic;
+  letter-spacing: 0.02em;
+}
+.wp-gm-brand h1 span {
+  color: var(--danger);
+}
+.wp-gm-pause .wp-gm-brand h1 {
+  font-size: 2.2em;
+}
+.wp-gm-tag {
+  margin: 0.5em 0 1em;
+  color: var(--ink-2);
+}
+.wp-gm-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.45em;
+  margin-top: 0.9em;
+}
+.wp-gm-pause .wp-gm-list {
+  grid-template-columns: 1fr;
+}
+.wp-gm-item {
+  appearance: none;
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.65em 0.85em;
+  border: 1px solid var(--edge);
+  border-left: 3px solid var(--edge);
+  border-radius: var(--r);
+  background: var(--bg-2);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+.wp-gm-item-label {
+  display: block;
+  font-weight: 700;
+  font-size: 1.05em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.wp-gm-item small {
+  display: block;
+  margin-top: 0.15em;
+  color: var(--ink-3);
+  font-size: 0.78em;
+}
+.wp-gm-item.is-primary {
+  grid-column: 1 / -1;
+  border-left-color: var(--danger);
+}
+.wp-gm-item.is-danger .wp-gm-item-label {
+  color: var(--danger);
+}
+.wp-gm-item.is-small {
+  width: auto;
+  padding: 0.45em 1em;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.85em;
+}
+.wp-gm [data-nav]:focus {
+  outline: none;
+}
+.wp-gm-item:focus-visible,
+.wp-gm-item:focus,
+.wp-gm-cycle:focus,
+.wp-gm-switch:focus {
+  border-color: var(--scan);
+  border-left-color: var(--scan);
+  background: rgba(61, 255, 143, 0.08);
+  box-shadow: 0 0 0 1px var(--scan-dim);
+}
+.wp-gm-item:focus .wp-gm-item-label {
+  color: var(--scan);
+}
+.wp-gm-keys {
+  margin-top: 1.1em;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.2em 1em;
+  font-size: 0.82em;
+  color: var(--ink-2);
+}
+.wp-gm-keys b {
+  font-family: var(--font-mono);
+  color: var(--ink);
+  font-weight: 600;
+}
+.wp-gm-foot {
+  margin-top: 1em;
+  font-size: 0.72em;
+  color: var(--ink-3);
+  letter-spacing: 0.06em;
+}
+/* settings */
+.wp-gm-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1em;
+}
+.wp-gm-head h2 {
+  margin: 0;
+  font-size: 1.6em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.wp-gm-head span {
+  font-size: 0.72em;
+}
+.wp-gm-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  margin: 0.6em -0.4em 0;
+  padding: 0 0.4em;
+}
+.wp-gm-scroll h3 {
+  margin: 1em 0 0.3em;
+  font: 600 0.72em var(--font-mono);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--scan);
+  border-bottom: 1px solid var(--edge);
+  padding-bottom: 0.25em;
+}
+.wp-gm-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1em;
+  padding: 0.28em 0;
+}
+.wp-gm-row-label small {
+  display: block;
+  color: var(--ink-3);
+  font-size: 0.75em;
+}
+.wp-gm-row-ctl {
+  flex: 0 0 auto;
+}
+.wp-gm-cycle,
+.wp-gm-switch {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6em;
+  min-width: 11em;
+  padding: 0.3em 0.6em;
+  border: 1px solid var(--edge);
+  border-radius: var(--r);
+  background: var(--bg-2);
+  color: var(--ink-2);
+  font: inherit;
+  cursor: pointer;
+}
+.wp-gm-cycle b,
+.wp-gm-switch b {
+  color: var(--ink);
+  font-weight: 600;
+}
+.wp-gm-switch {
+  justify-content: flex-start;
+}
+.wp-gm-switch i {
+  width: 2em;
+  height: 1em;
+  border-radius: 1em;
+  background: var(--edge-hot);
+  position: relative;
+}
+.wp-gm-switch i::after {
+  content: "";
+  position: absolute;
+  top: 0.12em;
+  left: 0.12em;
+  width: 0.76em;
+  height: 0.76em;
+  border-radius: 50%;
+  background: var(--ink-2);
+  transition: left 0.12s;
+}
+.wp-gm-switch.is-on i {
+  background: var(--scan-dim);
+}
+.wp-gm-switch.is-on i::after {
+  left: 1.12em;
+  background: var(--scan);
+}
+.wp-gm-slider {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6em;
+  min-width: 11em;
+}
+.wp-gm-slider input {
+  width: 9em;
+  accent-color: var(--scan);
+}
+.wp-gm-slider input:focus {
+  outline: 1px solid var(--scan);
+  outline-offset: 3px;
+}
+.wp-gm-slider input:disabled {
+  opacity: 0.35;
+}
+.wp-gm-slider span {
+  min-width: 3em;
+  text-align: right;
+  color: var(--ink-2);
+  font-size: 0.85em;
+}
+.wp-gm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6em;
+  margin-top: 0.8em;
+}
+@media (max-height: 640px) {
+  .wp-gm-brand h1 {
+    font-size: 2.2em;
+  }
+  .wp-gm-keys {
+    display: none;
+  }
+}

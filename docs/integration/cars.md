@@ -55,6 +55,10 @@ blessed with the **debug** binary (`cargo test`'s `goldens_match`); `beater_acce
 `beater_top_speed` are identical in both builds. CI's release `simcli goldens` job will
 therefore flag `cars_beater_hard_turn` together with the base steering scenarios until the
 split is fixed or everything is re-blessed from one build.
+*Lead (2026-10-20, `lead/det-debug-release`): resolved — there is no split; the release
+binary was stale (built before the handling-balance merge). Fresh debug and release builds hash
+identically and `cars_beater_hard_turn` passes in both. See harness.md "Lead helper: debug vs
+release hashes".*
 
 **Checks (follow-up, cloud container):** fmt ✓, clippy `-D warnings` ✓, wasm build ✓,
 `handling_balance` 6/6 ✓, `differentials` ✓, nameplate (69 files, 0) ✓, `smoke_sim` ✓,
