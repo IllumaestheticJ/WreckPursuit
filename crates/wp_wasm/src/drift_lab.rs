@@ -7,7 +7,7 @@
 //! | `drift_tuning_json()` | the constants in effect (override or defaults), JSON |
 //! | `drift_tuning_defaults_json()` | the shipped defaults, JSON |
 //! | `drift_tuning_set(json)` | set the runtime override (`""` clears it); unknown fields are ignored, missing ones take the default |
-//! | `drift_readout(entity)` | `[mode, slide_deg, onset, envelope_deg, authority, throttle_scale, held_deg, throttle_key, throttle_applied]`, mode 0 off · 1 grip · 2 straighten · 3 hold (countersteer key) · 4 angle-up (key into the turn) · 5 exceeded |
+//! | `drift_readout(entity)` | `[mode, slide_deg, onset, envelope_deg, authority, throttle_scale, key_throttle, engine_throttle, held_deg]`, mode 0 off · 1 grip · 2 straighten · 3 hold (countersteer key) · 4 angle-up (key into the turn) · 5 exceeded; `key_throttle` = the driver's throttle input, `engine_throttle` = what reaches the engine (after shaping, pedal filter, TCS / ESC), `held_deg` = the slide angle Hold / AngleUp keeps |
 //!
 //! The override is process-wide and not logged in recordings (a developer tool; see
 //! `wp_vehicle::drift`).
@@ -43,8 +43,7 @@ pub fn drift_tuning_set(tuning_json: &str) -> Result<(), JsValue> {
 }
 
 /// Drift readout of a vehicle this tick: `[mode, slide_deg, onset, envelope_deg, authority,
-/// throttle_scale, held_deg, throttle_key, throttle_applied]` (mode codes in the module docs;
-/// `throttle_key` is the pedal / key as pressed, `throttle_applied` what reached the engine).
+/// throttle_scale, key_throttle, engine_throttle, held_deg]` (see the module docs).
 #[wasm_bindgen]
 pub fn drift_readout(entity: u32) -> Result<Vec<f32>, JsValue> {
     with(|s| {
@@ -60,9 +59,9 @@ pub fn drift_readout(entity: u32) -> Result<Vec<f32>, JsValue> {
             d.envelope.to_degrees(),
             d.authority,
             d.throttle_scale,
-            d.hold_angle.to_degrees(),
-            d.throttle_key,
+            v.input.throttle.clamp(0.0, 1.0),
             tel.throttle,
+            d.hold_angle.to_degrees(),
         ])
     })
 }

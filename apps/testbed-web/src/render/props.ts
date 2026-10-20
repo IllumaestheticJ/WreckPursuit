@@ -31,7 +31,8 @@ const MAX_FULL = 24;
 const REPICK_M = 12;
 /** Chunk edge, m. */
 const CHUNK_M = 96;
-/** Chunks nearer than this (camera to chunk sphere) draw proxies, farther ones boxes, m. */
+/** Chunks nearer than this (camera to chunk sphere) draw proxies, farther ones boxes, m
+ * (default; `PropView.proxyM`, lower in the low graphics profile). */
 const PROXY_M = 300;
 /** Bounding-sphere slack for knocked props and the car's own extent, m. */
 const SPHERE_PAD_M = 6;
@@ -140,6 +141,8 @@ export class PropView {
   /** Chunks farther than this are not drawn at all (phones only; Infinity = draw every prop,
    * which the desktop keeps so nothing that can be hit is ever invisible). */
   drawM = Infinity;
+  /** Chunks nearer than this (m) draw the low-poly proxy, farther ones the two-box car. */
+  proxyM = PROXY_M;
   /** Parent in sim space (+Z up); add to SceneView.world. */
   readonly group = new THREE.Group();
   private n = 0;
@@ -355,7 +358,7 @@ export class PropView {
     }
     for (const ch of this.chunks) {
       const d = ch.sphere.distanceToPoint(this.cam);
-      const near = d < PROXY_M;
+      const near = d < this.proxyM;
       if (near !== ch.near) this.showTier(ch, near);
       if (!near) ch.box.visible = d <= this.drawM;
     }

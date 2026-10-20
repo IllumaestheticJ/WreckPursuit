@@ -41,10 +41,10 @@ angle); off it the held angle shrinks at *lift shrink* (6°/s) and the hold loos
 front axle's travel (*lift authority* 0.7 = keeps 70 % of its hold). Was 14°/s and 35 % in B,
 which with a raw throttle closed the slide 30° → 5° in 0.6 s on every lift.
 
-**Throttle raw (rows 101 / 104).** `throttle_shape` default **0** and `lift_soften` default
-**0**: with the drift assist's defaults the throttle reaching the engine is the key the driver
-pressed (the B hold/catch caps — 0.7 at hold, 0.6 in catch — and the 0.25 s minimum lift are
-gone). The tune panel still has both sliders. The old `slide.rs` slide-throttle feathering and
+**Throttle raw (rows 101 / 104).** `throttle_shape` default **0**: with the drift assist's
+defaults the throttle reaching the engine is the key the driver pressed (the B hold/catch caps
+— 0.7 at hold, 0.6 in catch — and the 0.25 s minimum lift are gone). *(Superseded by the
+merge in step 1b: Drift Lab B step 3b's opt-in shaping is the one kept.)* The old `slide.rs` slide-throttle feathering and
 the keyboard throttle filter are machine A's (ws/vehicle); left as they are here (the readout
 still shows ~89–91 % applied for a held key in a slide: that is A's feathering, not this).
 
@@ -53,8 +53,8 @@ still shows ~89–91 % applied for a held key in a slide: that is A's feathering
 shown only when the opt-in shaping is on), authority, onset.
 
 **Tune panel** (new sliders): *hold decay (°/s)*, *angle-up rate (°/s)*, *angle-up steer*,
-*angle-up damping (s)*, *lift shrink (°/s)*, *lift authority*; *throttle shaping* and *lift
-soften* now default 0. Removed: *catch extra lock* (no catch mode). The remembered override
+*angle-up damping (s)*, *lift shrink (°/s)*, *lift authority*. Removed: *catch extra lock*
+(no catch mode). The remembered override
 moved to a new browser key, so an old B override does not bring B's shaping back.
 
 **Measured.** 40 m left-hander at 0.6 g, 6 s, keyboard preset with TCS/ESC off, `drift s` =
@@ -326,11 +326,27 @@ measurement:
    much the into key adds, *lift shrink / lift authority* for how hard a lift closes the slide,
    *throttle shaping* to bring back B's throttle help (opt-in).
 
+### Step 1b — merged `origin/lead/drift-lab-b` (B step 3b + `lead/round12`)
+
+The lead moved `lead/drift-lab-b` after C branched: B step 3b (throttle shaping opt-in,
+default off, no plateau: when on, a rise-rate limit in a slide and a trim only near the
+envelope; lift softening only with shaping on) and a merge of `lead/round12` (machine A's
+row-90 countersteer slew, perf passes, audio/cars fixes, an auto-clutch anti-stall in shifts).
+Kept **B's** throttle shaping (`throttle_rise_s`, `trim_margin_deg`, `trim_depth`; C's
+`throttle_hold` / `throttle_gain` dropped), applied in C's modes (straighten / hold /
+angle-up). Readout layout is B's (`[…, key_throttle, engine_throttle]`) with C's held angle
+appended as index 8. Tests: C's versions of the hold / abrupt-lift tests; B's
+`tests/drift_lab_b_shaped.rs` (shaping on: rampart_50 holds, flooring spins) passes with the C
+drivers. Re-measured: the keyboard tables above are unchanged to two decimals (shaping is off by
+default and the round12 changes do not touch these runs).
+
+**Owner, try:** as step 1; in the tune panel *throttle shaping (opt-in)* now brings back B
+step 3b's light help (rise limit + trim near the envelope), not B step 3's partial throttle.
+
 ## Known issues seen on the base branch (not from this work)
 
-`cargo test -p wp_vehicle` on `origin/lead/drift-lab-b` already fails
-`differentials::roster_diff_hashes_are_pinned` and
-`handling_balance::front_drive_cars_understeer_mildly` (from `lead/round12`); left alone.
+None in `cargo test -p wp_vehicle` after the step 1b merge (the two round12 failures B listed
+are fixed on round12).
 
 Changed test bounds (this work): `snapshot::set_state_is_a_close_approximation` 1.0 → 2.0 m
 (1.49 m now: the restored car re-ramps its throttle and with no throttle shaping that matters
@@ -348,5 +364,6 @@ data). None new.
 - Gamepad: only key-style scripted drivers are measured (an analog driver is the next
   measurement).
 - The tuning override is process-wide and not in recordings.
-- Machine A's TCS levels / slide-feathering removal were not on `lead/round12` when this was
-  measured; merge `origin/lead/round12` once they land.
+- Machine A's TCS levels (Off/Low/High) / slide-feathering removal / keyboard throttle
+  filter were not on `lead/round12` or `ws/vehicle` at the final push; merge
+  `origin/lead/round12` once they land (keep A's versions).

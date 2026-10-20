@@ -152,12 +152,13 @@ const FIELDS: Record<string, { label: string; min: number; max: number; step: nu
   angle_up_damp: { label: "angle-up damping (s)", min: 0, max: 1.5, step: 0.05, hint: "key into the turn: front slip given up per rad/s the slide grows (no overshoot)" },
   lift_shrink_dps: { label: "lift shrink (°/s)", min: 0, max: 30, step: 0.5, hint: "off the throttle the held angle shrinks this fast" },
   lift_authority: { label: "lift authority", min: 0, max: 1, step: 0.05, hint: "hold strength with the throttle released (lower = a lift straightens more)" },
-  throttle_shape: { label: "throttle shaping", min: 0, max: 1, step: 0.05, hint: "opt-in, default 0 (row 104: TCS off = the throttle you press). 1 = full shaping toward holding the angle" },
-  throttle_hold: { label: "throttle at hold", min: 0.2, max: 1, step: 0.05, hint: "shaped throttle of a held key at the held angle" },
-  throttle_gain: { label: "throttle gain", min: 0, max: 8, step: 0.25, hint: "shaped throttle change per rad short of / past the held angle" },
+  throttle_shape: { label: "throttle shaping (opt-in)", min: 0, max: 1, step: 0.05, hint: "opt-in, default 0 = exactly the throttle you press; >0 adds a rise limit in slides, a trim near the envelope and lift softening" },
+  throttle_rise_s: { label: "throttle rise (s)", min: 0, max: 1, step: 0.05, hint: "in a slide the throttle rises 0 → 100 % no faster than this (× shaping); never a fixed partial throttle" },
+  trim_margin_deg: { label: "trim zone (°)", min: 1, max: 20, step: 1, hint: "the throttle is trimmed only within this of the envelope" },
+  trim_depth: { label: "trim depth", min: 0, max: 1, step: 0.05, hint: "deepest trim at the envelope edge (× shaping)" },
   envelope_deg: { label: "envelope (° @60%)", min: 10, max: 70, step: 1, hint: "slide angle the assist helps up to at 60 % (±25° per 100 % of slider)" },
   straighten_gain: { label: "straighten extra", min: 0, max: 3, step: 0.05, hint: "released keys: extra countersteer past the travel while a slide grows (× peak slip)" },
-  lift_soften: { label: "lift soften", min: 0, max: 1, step: 0.05, hint: "opt-in, default 0: how much an abrupt lift is softened (0 = raw, 1 = a full lift takes 0.5 s)" },
+  lift_soften: { label: "lift soften", min: 0, max: 1, step: 0.05, hint: "only with throttle shaping on: how much an abrupt lift is softened (0 = raw, 1 = a full lift takes 0.5 s)" },
 };
 
 const MODES = ["off", "grip", "straighten", "hold", "angle-up", "exceeded"];
@@ -325,15 +326,14 @@ export class DriftLabPanel {
     const mode = MODES[r[0] | 0] ?? "?";
     const env = r[3] > 0 ? `${r[3].toFixed(0)}°` : "–";
     const sliding = mode === "hold" || mode === "angle-up" || mode === "straighten" || mode === "exceeded";
-    const held = mode === "hold" || mode === "angle-up" || mode === "exceeded" ? `${(r[6] ?? 0).toFixed(1)}°` : "–";
-    const key = r[7] ?? 0;
-    const applied = r[8] ?? 0;
+    const held = mode === "hold" || mode === "angle-up" || mode === "exceeded" ? `${(r[8] ?? 0).toFixed(1)}°` : "–";
+    const pct = (x: number) => `${Math.round((x ?? 0) * 100)}%`;
     this.readout.textContent =
       `${DRIFT_LAB_TITLE} · ${sliding ? mode.toUpperCase() : mode}\n` +
       `slide ${r[1].toFixed(1)}° · held ${held} · envelope ${env}\n` +
-      `throttle key ${(key * 100).toFixed(0)}% → applied ${(applied * 100).toFixed(0)}%` +
-      (r[5] < 0.999 ? ` (shaping ×${r[5].toFixed(2)})` : "") +
-      `\nauthority ${(r[4] * 100).toFixed(0)}% · onset ${r[2].toFixed(2)}`;
+      `throttle key ${pct(r[6])} → engine ${pct(r[7])}` +
+      (r[5] < 0.999 ? ` (trim ×${r[5].toFixed(2)})` : "") +
+      `\nauthority ${pct(r[4])} · onset ${r[2].toFixed(2)}`;
     this.readout.style.whiteSpace = "pre";
     this.readout.style.borderLeft = `4px solid ${mode === "exceeded" ? "#e04040" : mode === "hold" ? "#40c070" : mode === "angle-up" ? "#e0a030" : mode === "straighten" ? "#4090e0" : "#666"}`;
   }

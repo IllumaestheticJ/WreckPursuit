@@ -14,19 +14,21 @@ fn car(id: &str) -> LoadedCar {
     wp_contracts::load_car(p).unwrap()
 }
 
-/// RWD (muscle, sports), FWD (sedan, compact), AWD (on-demand sports, police interceptor).
-const CARS: [&str; 6] = [
+/// RWD (muscle, sports), FWD (sedan, compact, the tired beater), AWD (on-demand sports, police
+/// interceptor).
+const CARS: [&str; 7] = [
     "rampart_50",
     "hakone_gt",
     "kestrel_ts",
     "vireo_xs",
     "lindwurm_4t",
     "sentinel_wolfhound",
+    "junkyard_beater",
 ];
 
 #[test]
 fn handbrake_turns_rotate_and_plain_steering_stays_planted() {
-    // 60 km/h, 50 % steer, handbrake 0.6 s, default assists on. Measured: 94–120° in 1.5 s
+    // 60 km/h, 50 % steer, handbrake 0.6 s, default assists on. Measured: 92–123° in 1.5 s
     // (keyboard 36–46° before the fix), body slip 60–89°; the same steer without the
     // handbrake turns 42–51° with ≤ 8° slip.
     for id in CARS {
@@ -38,6 +40,13 @@ fn handbrake_turns_rotate_and_plain_steering_stays_planted() {
             let hb = handbrake_turn(&c, &a, 60.0 / 3.6, 0.5, 0.6, 1.5);
             let plain = handbrake_turn(&c, &a, 60.0 / 3.6, 0.5, 0.0, 1.5);
             assert!(hb.yaw_deg >= 70.0, "{id} {name}: {hb:?}");
+            // The engine holds at least idle through the pull and the release: the automatic
+            // clutch opens (also mid-downshift) before scrubbed driven wheels drag it down.
+            // (junkyard_beater dipped to 750 rpm, idle 850, before; 572 with H's data.)
+            assert!(
+                hb.min_rpm >= c.def.engine.idle_rpm - 1.0,
+                "{id} {name}: engine below idle {hb:?}"
+            );
             assert!(
                 hb.rear_omega_end < 0.5,
                 "{id} {name}: rears not locked {hb:?}"

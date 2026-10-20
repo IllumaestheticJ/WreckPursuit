@@ -69,6 +69,7 @@ fn countersteer_hold_gives_a_long_steady_drift() {
             );
         }
     }
+    // The shaped case lives in tests/drift_lab_b_shaped.rs (the override is process-wide).
 }
 
 #[test]
