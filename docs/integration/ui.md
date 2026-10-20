@@ -304,6 +304,7 @@ from `wp_wasm::car_stats_build_json`), else stock × the estimator's modded/stoc
 intake + race ECU + semi-slicks: estimate 6.46 s / 255 km/h / 1.02 g, rig 6.54 s / 256 km/h /
 1.05 g (test keeps the estimate within 8 %). `CarStatBars` takes a `baseline` (tick + better/worse
 colour). Garage: build bars with a stock tick, labelled measured / estimated. Mod tree: the
-candidate build's bars with a tick at the current build. Known: the mod tree's delta table still
-shows the economy estimator's absolute 0–100 / top speed / grip, which differ from the bars
-(e.g. Shiro Turbo 5.74 s estimated vs 6.4 s measured stock).
+candidate build's bars with a tick at the current build. The mod tree's delta table shows the
+bar values for 0–100, top speed and cornering (50 m) so they match the bars; class index, power,
+mass, power/weight and braking stay the economy estimator's (the class index is computed from the
+estimator, as in `wp_economy`). Cars without stats fall back to the estimator rows.
