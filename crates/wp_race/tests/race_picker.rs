@@ -421,8 +421,7 @@ fn loop9_circuit() {
 #[test]
 fn lantern_checkpoint_draws_the_police() {
     let r = run_race("lantern_checkpoint", 300);
-    // 665 m zig-zag through daytime downtown (signals, junction queues): slow but done.
-    check(&r, 40.0..170.0, 2);
+    let id = r.def.id;
     // A hot meet in broad daylight: a patrol is called to the grid, and every racer carries
     // the meet report's heat plus the illegal-daytime stake heat from the green light on.
     assert!(r
@@ -433,5 +432,48 @@ fn lantern_checkpoint_draws_the_police() {
     for h in &r.heat_after_green {
         assert!(*h >= 4.0, "heat after green {:?}", r.heat_after_green);
     }
-    eprintln!("lantern pursuits: {}", r.pursuits);
+    // Illegal daytime with Max presence is meant to bring every cop in town: pursuits start
+    // while the race is on (the loop stops counting when the race is judged over).
+    assert!(r.pursuits >= 1, "{id}: no pursuit during the race");
+    // The race is judged to the end and nobody wrecks.
+    assert!(r.finished_tick.is_some(), "{id}: never finished");
+    assert_eq!(r.results.len(), r.def.entrants());
+    assert!(r.results.iter().all(|x| x.status != RacerStatus::Running));
+    assert!(matches!(
+        r.signals.last(),
+        Some(RaceSignal::RaceFinished { .. })
+    ));
+    // How a racer's race ends is up to the police and the driver (wp_opponent: pull over and
+    // take the ticket below the flee level, abandon and run at or above it), so a run where
+    // the whole field is busted or flees is a correct result. What must not happen is a racer
+    // that never really raced (stuck on the grid in the parked cars: 0 gates) or one that
+    // ends any other way than finishing or by the police.
+    for x in &r.results {
+        assert!(x.gates_passed >= 1, "{id}: {x:?} never left the grid");
+        assert!(
+            matches!(
+                x.status,
+                RacerStatus::Finished
+                    | RacerStatus::Dnf(wp_race::DnfReason::Captured)
+                    | RacerStatus::Dnf(wp_race::DnfReason::Fled)
+            ),
+            "{id}: {x:?} ended by neither the flag nor the police"
+        );
+    }
+    // Anyone who does get through the 665 m daytime zig-zag (signals, junction queues) does
+    // it in a sensible time.
+    if let Some(w) = r.results.iter().find(|x| x.status == RacerStatus::Finished) {
+        let t = w.elapsed_s().unwrap();
+        assert!((40.0..170.0).contains(&t), "{id}: winner took {t:.1} s");
+    }
+    let police_outs = r
+        .results
+        .iter()
+        .filter(|x| x.status != RacerStatus::Finished)
+        .count();
+    eprintln!(
+        "lantern pursuits: {}, ended by the police: {police_outs}/{}",
+        r.pursuits,
+        r.results.len()
+    );
 }
