@@ -1625,7 +1625,12 @@ impl Traffic {
                     near = true;
                 }
                 let next = a.plan[0];
-                if any_siren && !seg.is_connector() && next != NONE && map.seg(next).is_connector()
+                // (Only cars near their stop line: the others are not about to enter.)
+                if any_siren
+                    && !seg.is_connector()
+                    && next != NONE
+                    && map.seg(next).is_connector()
+                    && seg.length - a.s < siren::JUNCTION_APPROACH_M
                 {
                     let (lp, _) = seg.point_at(seg.length);
                     jsiren = inp
@@ -1638,9 +1643,9 @@ impl Traffic {
                 let can_pull = !seg.is_connector() && pass.is_none();
                 let kerb = siren::kerb_offset_m(half_w * 2.0);
                 match behind {
-                    Some((_, lat_u, speed_u)) => {
+                    Some((back_u, lat_u, speed_u)) => {
                         // Away from the unit: to the kerb unless it comes up on the right.
-                        let side = siren::side_for(lat_u);
+                        let side = siren::side_for(back_u, lat_u);
                         match sy.phase {
                             YieldPhase::None => {
                                 sy = SirenYield {
@@ -1660,6 +1665,12 @@ impl Traffic {
                                 }
                             }
                             YieldPhase::PullingOver => {
+                                sy.side = side;
+                                sy.timer_s = 0.0;
+                            }
+                            // The unit turned out to come up on the other side: move over.
+                            YieldPhase::Waiting if side != sy.side => {
+                                sy.phase = YieldPhase::PullingOver;
                                 sy.side = side;
                                 sy.timer_s = 0.0;
                             }
@@ -1692,7 +1703,11 @@ impl Traffic {
                                     && !inp.closed.get(n as usize).copied().unwrap_or(false)
                             })
                         });
-                        if sy.phase != YieldPhase::None && neighbour && lat_u.abs() < half_w {
+                        if sy.phase != YieldPhase::None
+                            && neighbour
+                            && back_u < siren::SIDE_RANGE_M * 2.0
+                            && lat_u.abs() < half_w
+                        {
                             siren_lc = Some(lat_u <= 0.0);
                         }
                     }

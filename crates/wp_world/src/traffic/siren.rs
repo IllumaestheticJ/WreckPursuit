@@ -36,8 +36,13 @@ pub const BEHIND_RANGE_MAX_M: f32 = 120.0;
 pub const ONCOMING_RANGE_M: f32 = 100.0;
 /// Oncoming cars slow to this speed while a unit comes past, m/s.
 pub const ONCOMING_MPS: f32 = 4.0;
-/// Drivers do not enter a junction while a siren unit heading for it is this close to it, m.
+/// Drivers do not enter a junction while a siren unit heading for it is this close to it (or 6 s
+/// of its travel, up to [`JUNCTION_RANGE_MAX_M`]), m.
 pub const JUNCTION_RANGE_M: f32 = 70.0;
+/// Only drivers this close to their stop line consider the junction hold, m.
+pub const JUNCTION_APPROACH_M: f32 = 60.0;
+/// Upper limit of the junction hold range for fast units, m.
+pub const JUNCTION_RANGE_MAX_M: f32 = 120.0;
 /// A unit must move at least this fast to be "coming" (a parked unit at a scene is not), m/s.
 pub const MOVING_MPS: f32 = 2.0;
 /// After the unit has gone past, a yielding driver waits this long before merging back, s.
@@ -175,7 +180,8 @@ pub fn classify(t: &TrackedVehicle, q: V2, z: f32, f: V2) -> Option<SirenRel> {
             speed_mps: speed,
         });
     }
-    if speed >= MOVING_MPS
+    // Coming the other way (or facing this car close ahead, e.g. turning into its street).
+    if (speed >= MOVING_MPS || long < START_CLOSE_M)
         && along < -0.5
         && long > -HALF_L
         && long < ONCOMING_RANGE_M
@@ -196,15 +202,20 @@ pub fn starts_yield(rel: &SirenRel) -> bool {
         if *speed_mps >= MOVING_MPS || *back_m < START_CLOSE_M)
 }
 
-/// Side a driver pulls to for a unit `lat_m` to its right (negative = left): away from it, the
-/// kerb (+1) when the unit is behind in the same lane or on the left.
-pub fn side_for(lat_m: f32) -> f32 {
-    if lat_m > 0.5 {
+/// Side a driver pulls to for a unit `back_m` behind it and `lat_m` to its right (negative =
+/// left): the kerb (+1), unless the unit is close ([`SIDE_RANGE_M`]: further back, on a bend,
+/// the straight-line offset says nothing) and coming up on its right (more than 0.5 m right of
+/// it: e.g. riding the line to the lane on the right) — then away from it, to the left.
+pub fn side_for(back_m: f32, lat_m: f32) -> f32 {
+    if back_m < SIDE_RANGE_M && lat_m > 0.5 {
         -1.0
     } else {
         1.0
     }
 }
+
+/// A unit's lateral offset decides the pull-over side only this close behind, m.
+pub const SIDE_RANGE_M: f32 = 35.0;
 
 /// Whether siren unit `t` is heading for the junction whose stop line is at `line` (height `z`)
 /// closely enough that a driver must not enter it.
@@ -214,13 +225,14 @@ pub fn heads_for_junction(t: &TrackedVehicle, line: V2, z: f32) -> bool {
     }
     let r = geom::sub(line, geom::xy(t.pos));
     let d2 = geom::dot(r, r);
-    if d2 > JUNCTION_RANGE_M * JUNCTION_RANGE_M {
+    let speed = geom::len([t.vel[0], t.vel[1]]);
+    let range = (speed * 6.0).clamp(JUNCTION_RANGE_M, JUNCTION_RANGE_MAX_M);
+    if d2 > range * range {
         return false;
     }
     if d2 < 20.0 * 20.0 {
         return true;
     }
-    let speed = geom::len([t.vel[0], t.vel[1]]);
     speed >= MOVING_MPS && geom::dot(heading_of(t), r) > 0.0
 }
 
@@ -353,6 +365,13 @@ mod tests {
             classify(&t, Q, 0.0, F),
             Some(SirenRel::Oncoming { ahead_m: 60.0 })
         );
+        // Stopped facing this car close ahead: make room as for an oncoming one.
+        let mut t = unit([-1.0, 12.0], [0.0, 0.0], true);
+        t.forward = [0.0, -1.0];
+        assert_eq!(
+            classify(&t, Q, 0.0, F),
+            Some(SirenRel::Oncoming { ahead_m: 12.0 })
+        );
         // Already past.
         let t = unit([-3.5, -10.0], [0.0, -15.0], true);
         assert_eq!(classify(&t, Q, 0.0, F), None);
@@ -381,7 +400,13 @@ mod tests {
         ));
         // Far away or lights off.
         assert!(!heads_for_junction(
-            &unit([-90.0, 50.0], [15.0, 0.0], true),
+            &unit([-90.0, 50.0], [10.0, 0.0], true),
+            line,
+            0.0
+        ));
+        // A fast unit is held for from further out.
+        assert!(heads_for_junction(
+            &unit([-90.0, 50.0], [18.0, 0.0], true),
             line,
             0.0
         ));
@@ -394,9 +419,11 @@ mod tests {
 
     #[test]
     fn pull_away_from_the_unit() {
-        assert_eq!(side_for(0.0), 1.0);
-        assert_eq!(side_for(-1.7), 1.0);
-        assert_eq!(side_for(1.7), -1.0);
+        assert_eq!(side_for(20.0, 0.0), 1.0);
+        assert_eq!(side_for(20.0, -1.7), 1.0);
+        assert_eq!(side_for(20.0, 1.3), -1.0);
+        // Far back (maybe on a bend): the kerb.
+        assert_eq!(side_for(80.0, 1.95), 1.0);
     }
 
     #[test]
