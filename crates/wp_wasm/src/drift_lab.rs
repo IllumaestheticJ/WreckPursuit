@@ -208,12 +208,13 @@ pub fn car_tune_json() -> String {
     json(&wp_vehicle::car_lab::active())
 }
 
-/// `{ "data": <no change>, "spin_damper": <step-4 test set: side grip 0.15, lock 0.9, yaw damping 0.2 — does not hold> }`, JSON.
+/// `{ "data": <no change>, "spin_damper": <step-4 test set: side grip 0.15, lock 0.9, yaw damping 0.2 — does not hold>, "spin": <tyre-slip spin model> }`, JSON.
 #[wasm_bindgen]
 pub fn car_tune_defaults_json() -> String {
     json(&serde_json::json!({
         "data": wp_vehicle::car_lab::CarTune::default(),
         "spin_damper": wp_vehicle::car_lab::CarTune::spin_grip_damper(),
+        "spin": wp_vehicle::car_lab::CarTune::spin_candidate(),
     }))
 }
 
