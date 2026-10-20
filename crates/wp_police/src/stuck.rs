@@ -33,6 +33,9 @@ pub const STUCK_AFTER_S: f32 = 2.0;
 /// Seconds waiting behind a stopped vehicle (not a red-light queue) before a stuck event: a
 /// dead or abandoned car the unit can't pass, m.
 pub const HELD_AFTER_S: f32 = 20.0;
+/// Same for a pursuing / intercepting unit held behind a stopped racer or police car (two
+/// chase units nose to nose), s.
+pub const HELD_CHASE_S: f32 = 3.0;
 /// Reverse this far before driving on, m.
 pub const REVERSE_M: f32 = 4.0;
 /// A responder yielding to the racer it was sent for, nose to nose with it stopped this long,
@@ -170,6 +173,9 @@ pub(crate) enum Phase {
         until: SimTime,
         steer: f32,
     },
+    /// Push-through (owner playtest row 61): shoving a stopped civilian or parked car aside at
+    /// low speed, from where, until when.
+    Push { from: [f32; 2], until: SimTime },
     /// Backing out: from where, how far, until when, with which steer.
     Reverse {
         from: [f32; 2],
@@ -188,6 +194,9 @@ pub struct UnstickState {
     /// No new turn-round swing before this.
     #[serde(default)]
     pub(crate) swing_ready: SimTime,
+    /// No new push-through before this.
+    #[serde(default)]
+    pub(crate) push_ready: SimTime,
     /// Seconds holding behind a stopped vehicle outside a red-light queue.
     pub(crate) held_s: f32,
     pub(crate) phase: Phase,
@@ -209,6 +218,11 @@ impl UnstickState {
     /// Whether the unit is turning round (reverse swing or U-turn) right now.
     pub fn swinging(&self) -> bool {
         matches!(self.phase, Phase::Swing { .. } | Phase::UTurn { .. })
+    }
+
+    /// Whether the unit is pushing a blocker aside right now (row 61).
+    pub fn pushing(&self) -> bool {
+        matches!(self.phase, Phase::Push { .. })
     }
 
     /// Whether the unit is backing out right now.

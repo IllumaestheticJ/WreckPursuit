@@ -135,10 +135,20 @@ pub struct RacerRecord {
     pub last_seen: Option<SimTime>,
     /// Last position the police know, m.
     pub last_known: Option<[f32; 2]>,
+    /// Velocity at the last sighting, m/s (where a search heads; the racer's real velocity
+    /// once out of sight is not police knowledge).
+    #[serde(default)]
+    pub last_known_vel: [f32; 2],
     /// Seconds since line of sight was lost (Searching).
     pub los_lost_s: f32,
     /// Seconds stopped near a unit.
     pub stopped_s: f32,
+    /// Where the racer has stayed near since `pinned_s` started counting, m.
+    #[serde(default)]
+    pub pin_anchor: Option<[f32; 2]>,
+    /// Seconds held within `capture.pinned_radius_m` of `pin_anchor` with a unit close.
+    #[serde(default)]
+    pub pinned_s: f32,
     /// Seconds of quiet safehouse dwell.
     pub safehouse_s: f32,
     /// Last time each violation kind counted.
@@ -161,8 +171,11 @@ impl RacerRecord {
             status: PursuitStatus::Clear,
             last_seen: None,
             last_known: None,
+            last_known_vel: [0.0, 0.0],
             los_lost_s: 0.0,
             stopped_s: 0.0,
+            pin_anchor: None,
+            pinned_s: 0.0,
             safehouse_s: 0.0,
             last_violation: [None; 5],
             bounty: BountyRecord::default(),
@@ -209,6 +222,8 @@ impl RacerRecord {
         self.status = PursuitStatus::Pursuit;
         self.los_lost_s = 0.0;
         self.stopped_s = 0.0;
+        self.pin_anchor = None;
+        self.pinned_s = 0.0;
         self.pursuit_started = Some(now);
     }
 
@@ -221,6 +236,8 @@ impl RacerRecord {
         };
         self.los_lost_s = 0.0;
         self.stopped_s = 0.0;
+        self.pin_anchor = None;
+        self.pinned_s = 0.0;
         self.safehouse_s = 0.0;
         self.pursuit_started = None;
     }
@@ -231,6 +248,7 @@ impl RacerRecord {
         if inp.seen {
             self.last_seen = Some(inp.now);
             self.last_known = Some([self.pos[0], self.pos[1]]);
+            self.last_known_vel = [self.vel[0], self.vel[1]];
         }
         // Bounty integrates heat while wanted.
         if self.level > WantedLevel::None {
@@ -274,6 +292,25 @@ impl RacerRecord {
                 }
             } else {
                 self.stopped_s = 0.0;
+            }
+            // Pinned: boxed in and rocking back and forth, never getting away.
+            let p = [self.pos[0], self.pos[1]];
+            let close = inp.nearest_unit_m <= cfg.capture.unit_radius_m;
+            match self.pin_anchor {
+                Some(a)
+                    if close
+                        && (p[0] - a[0]) * (p[0] - a[0]) + (p[1] - a[1]) * (p[1] - a[1])
+                            <= cfg.capture.pinned_radius_m * cfg.capture.pinned_radius_m =>
+                {
+                    self.pinned_s += dt;
+                    if self.pinned_s >= cfg.capture.pinned_time_s {
+                        outcome = Some(RuleOutcome::Captured);
+                    }
+                }
+                _ => {
+                    self.pin_anchor = Some(p);
+                    self.pinned_s = 0.0;
+                }
             }
         }
         // Safehouse: inside for dwell_s with no unit within clear_radius (any wanted state).

@@ -29,8 +29,8 @@ use crate::events::{PoliceEvent, PursuitOutcome, UnitId, UnitKind};
 use crate::graph::{dist, dot, normalize, perp_left, scale, sub, xy, NodeId, PoiKind, SegmentId};
 use crate::heat::{PursuitStatus, RuleInputs, RuleOutcome, WantedLevel};
 use crate::unit::{
-    plan_unit_speed, step_ground, step_helo, Assignment, BoxSlot, DriveCommand, DriveEnv, Tactic,
-    Track, UnitRole, LANE_OFFSET_M,
+    plan_unit_speed, step_ground, step_helo, Assignment, BoxSlot, DriveCommand, DriveEnv, RamKind,
+    Tactic, Track, UnitRole, LANE_OFFSET_M,
 };
 use crate::{PoliceSystem, PursuitRecord, RacerObs};
 
@@ -43,6 +43,27 @@ const NEAR_RACER_M: f32 = 40.0;
 /// A responding unit re-routes when its call's position has moved this far from the end of
 /// its route (later calls about the same racer), m.
 const RESPOND_REROUTE_M: f32 = 40.0;
+
+/// A pursuer this close to the racer with line of sight drives the racer's own line; farther
+/// or out of sight it follows the roads ([`PoliceSystem::chase_route`]), m.
+const CLOSE_LOS_M: f32 = 70.0;
+
+/// A routed pursuer re-plans its road route at least this often, s.
+const CHASE_ROUTE_REFRESH_S: f32 = 1.5;
+
+/// A pursuer that reached the last known position with the racer out of sight this long
+/// starts searching (`Intercept` to search points), s.
+const LOST_SEARCH_AFTER_S: f32 = 2.0;
+
+/// Interceptors drive at up to this × the local limit (capped by the pursuit cap).
+const INTERCEPT_LIMIT_FACTOR: f32 = 2.2;
+
+/// An interceptor faster than this keeps its route rather than switch to one that starts with
+/// a turn-around, m/s.
+const INTERCEPT_KEEP_MPS: f32 = 6.0;
+
+/// A searching unit moves on to the next junction around the last known position this often, s.
+const SEARCH_SWEEP_S: f32 = 10.0;
 
 /// Braking a shadowing unit plans with when closing on its gap behind the racer, m/s².
 const SHADOW_CLOSE_DECEL_MPS2: f32 = 4.0;
@@ -603,6 +624,40 @@ impl PoliceSystem {
         to_report()
     }
 
+    /// Where unit `i` searches for a racer it lost sight of (row 64): the junction nearest the
+    /// last known position, the next junctions on the path it was taking, and the roads out of
+    /// that first junction. Units on the racer take different spots (by id), and every
+    /// [`SEARCH_SWEEP_S`] each moves on to the next one.
+    pub(crate) fn search_point(&self, i: usize, racer: EntityId) -> Option<(NodeId, [f32; 2])> {
+        let rec = self.racers.get(&racer)?;
+        let p = rec.last_known?;
+        let first = self.graph.nearest_node(p)?;
+        let mut nodes = vec![first];
+        let v = rec.last_known_vel;
+        let speed = crate::graph::len(v);
+        if speed > STOPPED_RACER_MPS {
+            let path = self.graph.predict_path(p, v, (speed * 12.0).max(120.0));
+            for leg in path.legs.iter().take(4) {
+                nodes.push(self.graph.other_end(leg.segment, leg.from_node));
+            }
+        }
+        for &(_, n) in self.graph.outgoing(first) {
+            nodes.push(n);
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        nodes.retain(|n| seen.insert(*n));
+        let me = self.units[i].id;
+        let ordinal = self
+            .units
+            .iter()
+            .filter(|u| u.assignment.target() == Some(racer) && u.kind == UnitKind::Car)
+            .position(|u| u.id == me)
+            .unwrap_or(0);
+        let sweep = (rec.los_lost_s / SEARCH_SWEEP_S) as usize;
+        let n = nodes[(ordinal + sweep) % nodes.len()];
+        Some((n, self.graph.node(n).pos))
+    }
+
     /// Where unit `i` can meet a racer last placed at `p` moving at `v`: see
     /// [`PoliceSystem::intercept_point`]. Responders to a reckless-driving call use the call's
     /// position.
@@ -628,7 +683,15 @@ impl PoliceSystem {
         let start = self.start_node(u.body.pos, u.body.heading)?;
         let factor = self.cfg.pursuit.respond_speed_factor;
         let mut fallback = None;
-        for k in 0..3 {
+        // Interceptors on the same racer aim at different points of its path (by id), so
+        // they don't queue for one junction: the n-th tries the later horizons first.
+        let me = u.id;
+        let nth = self.units.iter().filter(|o| {
+            o.id < me
+                && matches!(o.assignment, Assignment::Intercept { target, .. } if Some(target) == u.assignment.target())
+        }).count();
+        for j in 0..3 {
+            let k = (j + nth) % 3;
             let t = h.min + (h.max - h.min) * k as f32 * 0.5;
             let s = speed * t;
             let Some((leg, _)) = path.leg_at(s) else {
@@ -898,15 +961,71 @@ impl PoliceSystem {
                         && dist(u.body.pos, rp) < 120.0
                         && self.sees_at(world, u.body.pos, u.body.alt_m, rp, rec.pos[2])
                     {
+                        // Wanted level 3+: also ahead of the racer on its line, going its
+                        // way: it joins as a rolling block.
+                        let ahead_ok = rec.level.number() >= self.cfg.presence.unlocks.rolling_block_level
+                            && dot(u.body.heading, normalize([rec.vel[0], rec.vel[1]])) > 0.7;
                         let joins = self.pursuit_track(target).is_some_and(|(tr, racer_s)| {
                             let (s_u, lat) = tr.project(u.body.pos, racer_s, 200.0);
-                            lat < 12.0 && s_u <= racer_s + 5.0
+                            lat < 12.0
+                                && (s_u <= racer_s + 5.0 || (ahead_ok && s_u <= racer_s + 60.0))
                         });
                         if joins {
                             self.assign(i, Assignment::Pursue { target });
                             continue;
                         }
                     }
+                    // Lost: search around the last known position (row 64), spread over the
+                    // junctions it could have taken.
+                    if rec.status == PursuitStatus::Searching {
+                        if let Some((node, point)) = self.search_point(i, target) {
+                            let cur = match self.units[i].assignment {
+                                Assignment::Intercept { point, .. } => point,
+                                _ => [f32::MAX, f32::MAX],
+                            };
+                            let u = &self.units[i];
+                            let done = u.track_s > u.cmd.track.length() - 10.0;
+                            if dist(cur, point) > 1.0 || !u.cmd.track.is_drivable() || done {
+                                let t = self.route_track(i, node, None);
+                                self.units[i].assignment = Assignment::Intercept { target, point };
+                                self.units[i].set_command(DriveCommand {
+                                    track: t,
+                                    speed_mps: 0.0,
+                                    cornering_g: p.chase.cornering_g,
+                                    siren: true,
+                                    lane_offset_m: LANE_OFFSET_M,
+                                });
+                            }
+                        }
+                        let lim = self.limit_at(self.units[i].body.pos);
+                        self.units[i].cmd.speed_mps = lim * p.respond_speed_factor;
+                        continue;
+                    }
+                    let li = rec.level.table_index();
+                    let lim = self.limit_at(self.units[i].body.pos);
+                    let cap = p.pursuit_cap_mps.get(self.phase) * p.chase.cap_scale[li];
+                    let intercept_speed = (lim * INTERCEPT_LIMIT_FACTOR).min(cap);
+                    // Wanted level 3+: an interceptor that got to a junction on the racer's
+                    // path first parks across it (track ends there) until the racer arrives.
+                    let u = &self.units[i];
+                    if rec.level.number() >= p.chase.junction_block_level && u.cmd.track.is_drivable()
+                    {
+                        let end = u.cmd.track.point_at(u.cmd.track.length());
+                        let rv = [rec.vel[0], rec.vel[1]];
+                        let d_racer = dist(rp, end);
+                        let coming = dot(rv, sub(end, rp)) > 0.0 && d_racer < 250.0 && d_racer > 12.0;
+                        if coming && dist(u.body.pos, end) < 35.0 {
+                            if !matches!(u.tactic, Tactic::RollingBlock) {
+                                // Reuse RollingBlock as the "blocking" marker for views.
+                                self.units[i].tactic = Tactic::RollingBlock;
+                                self.stats.junction_blocks += 1;
+                            }
+                            self.units[i].cmd.speed_mps = intercept_speed;
+                            continue;
+                        }
+                    }
+                    self.units[i].tactic = Tactic::Shadow;
+                    let u = &self.units[i];
                     let held_for = now.since(u.assigned);
                     let stale = held_for > 0.0 && held_for % 3.0 < tdt;
                     if !u.cmd.track.is_drivable()
@@ -917,20 +1036,32 @@ impl PoliceSystem {
                             // A stopped racer: drive all the way to it, not just to the junction.
                             let v_r = (rec.vel[0] * rec.vel[0] + rec.vel[1] * rec.vel[1]).sqrt();
                             let fin = (v_r < STOPPED_RACER_MPS).then_some(point);
-                            let t = self.route_track(i, node, fin);
-                            self.units[i].assignment = Assignment::Intercept { target, point };
-                            self.units[i].set_command(DriveCommand {
-                                track: t,
-                                speed_mps: 0.0,
-                                cornering_g: p.pursuit_cornering_g,
-                                siren: true,
-                                lane_offset_m: LANE_OFFSET_M,
-                            });
+                            let u = &self.units[i];
+                            let end = fin.unwrap_or(self.graph.node(node).pos);
+                            let done = !u.cmd.track.is_drivable()
+                                || u.track_s > u.cmd.track.length() - 10.0;
+                            let same = !done
+                                && dist(u.cmd.track.point_at(u.cmd.track.length()), end) < 1.0;
+                            // Don't flip to a route that starts with a turn-around while still
+                            // driving the current one at speed (a moving racer moves the
+                            // intercept point back and forth).
+                            let flip = !done
+                                && u.body.speed > INTERCEPT_KEEP_MPS
+                                && self.route_from(u.body.pos, u.body.heading, node, fin).1;
+                            if !same && !flip {
+                                let t = self.route_track(i, node, fin);
+                                self.units[i].assignment = Assignment::Intercept { target, point };
+                                self.units[i].set_command(DriveCommand {
+                                    track: t,
+                                    speed_mps: 0.0,
+                                    cornering_g: p.chase.cornering_g,
+                                    siren: true,
+                                    lane_offset_m: LANE_OFFSET_M,
+                                });
+                            }
                         }
                     }
-                    let lim = self.limit_at(self.units[i].body.pos);
-                    let cap = p.pursuit_cap_mps.get(self.phase);
-                    self.units[i].cmd.speed_mps = (lim * p.respond_speed_factor * 1.15).min(cap);
+                    self.units[i].cmd.speed_mps = intercept_speed;
                 }
                 Assignment::Pursue { .. } => {} // coordinate_pursuits
                 Assignment::HeloTrack { target } => {
@@ -956,7 +1087,7 @@ impl PoliceSystem {
                 }
             }
         }
-        self.coordinate_pursuits();
+        self.coordinate_pursuits(world);
         // Corner planning and local speed limit (think rate).
         let brake = p.unit.brake_mps2;
         let limits: Vec<f32> = self
@@ -967,7 +1098,13 @@ impl PoliceSystem {
         for (u, lim) in self.units.iter_mut().zip(limits) {
             u.limit_mps = lim;
             if u.kind == UnitKind::Car {
-                u.planned_speed = plan_unit_speed(u, brake);
+                // Pursuing and intercepting units brake late (row 63).
+                let chasing = matches!(
+                    u.assignment,
+                    Assignment::Pursue { .. } | Assignment::Intercept { .. }
+                );
+                let b = if chasing { p.chase.brake_mps2 } else { brake };
+                u.planned_speed = plan_unit_speed(u, b);
             }
         }
     }
@@ -982,17 +1119,22 @@ impl PoliceSystem {
             .cloned()
             .unwrap_or_else(|| Track::new(vec![last]));
         let racer_s = trail.length();
-        let v = [rec.vel[0], rec.vel[1]];
+        let v = if rec.status == PursuitStatus::Searching {
+            rec.last_known_vel
+        } else {
+            [rec.vel[0], rec.vel[1]]
+        };
         let ahead = self.graph.predict_path(last, v, 250.0);
         let mut pts = trail.pts.clone();
         pts.extend(ahead.points().into_iter().skip(1));
         Some((Track::new(pts), racer_s))
     }
 
-    fn coordinate_pursuits(&mut self) {
+    fn coordinate_pursuits(&mut self, world: &dyn WorldQuery) {
         let now = self.now;
         let p = self.cfg.pursuit.clone();
         let t = &p.tactics;
+        let ch = &p.chase;
         let unlocks = self.cfg.presence.unlocks.clone();
         let racers: Vec<EntityId> = self
             .racers
@@ -1007,16 +1149,15 @@ impl PoliceSystem {
             let rec = self.racers[&racer].clone();
             let seen = rec.status == PursuitStatus::Pursuit;
             let level = rec.level.number();
+            let li = rec.level.table_index();
             let v_r = if seen {
                 (rec.vel[0] * rec.vel[0] + rec.vel[1] * rec.vel[1]).sqrt()
             } else {
                 0.0
             };
-            let cap = pursuit_speed_cap(
-                v_r,
-                p.target_speed_margin,
-                p.pursuit_cap_mps.get(self.phase),
-            );
+            let cap_abs = p.pursuit_cap_mps.get(self.phase) * ch.cap_scale[li];
+            let cap = pursuit_speed_cap(v_r, ch.speed_margin, cap_abs);
+            let rp = xy(rec.pos);
             // (gap along track, lateral, unit index)
             let mut pursuers: Vec<(f32, f32, usize)> = Vec::new();
             for i in 0..self.units.len() {
@@ -1045,11 +1186,17 @@ impl PoliceSystem {
                 pursuers.push((racer_s - s, lat, i));
             }
             pursuers.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.2.cmp(&b.2)));
-            // Units off the trail or far behind go intercept.
+            // Units off the trail or far behind go intercept; units that reached the last
+            // known position without finding the racer search around it (row 64).
             let mut active = Vec::new();
             for &(gap, lat, i) in &pursuers {
                 let held = now < self.units[i].captain_hold_until;
-                if !held && (lat > 30.0 || gap > t.intercept_min_gap_m + 100.0) {
+                let lost_here = !seen
+                    && rec.los_lost_s > LOST_SEARCH_AFTER_S
+                    && rec
+                        .last_known
+                        .is_some_and(|k| dist(k, self.units[i].body.pos) < 30.0);
+                if !held && (lat > 30.0 || gap > t.intercept_min_gap_m + 100.0 || lost_here) {
                     let point = rec.last_known.unwrap_or(self.units[i].body.pos);
                     self.assign(
                         i,
@@ -1065,7 +1212,7 @@ impl PoliceSystem {
             let straight_ahead = {
                 let mut ok = true;
                 let mut d = 0.0;
-                while d <= t.pit_min_straight_m {
+                while d <= ch.pit_min_straight_m {
                     if track.radius_at(racer_s + d, 10.0) < 300.0 {
                         ok = false;
                         break;
@@ -1074,55 +1221,86 @@ impl PoliceSystem {
                 }
                 ok
             };
+            // Civilians close to the racer hold back deliberate contact (less so at higher
+            // levels). Parked props (no entity, not moving) are not people.
+            let clear_m = ch.civilian_clear_m[li];
+            let civ_near = clear_m > 0.0
+                && self.obstacles.iter().any(|o| {
+                    o.unit.is_none()
+                        && o.entity != Some(racer)
+                        && !o.entity.is_some_and(|e| self.racers.contains_key(&e))
+                        && (o.entity.is_some() || crate::graph::len(o.vel) > 0.1)
+                        && dist(o.pos, rp) < clear_m
+                });
+            let contact_ok = seen && !civ_near && v_r > 3.0;
+            let budget_floor = -p.risk.budget * (ch.risk_budget_scale[li] - 1.0);
             let with_budget: Vec<(f32, usize)> = active
                 .iter()
                 .copied()
-                .filter(|(gap, i)| self.units[*i].risk > 0.0 && gap.abs() < 60.0)
+                .filter(|(gap, i)| self.units[*i].risk > budget_floor && gap.abs() < 60.0)
                 .collect();
             let boxin = seen
+                && !civ_near
                 && level >= unlocks.boxin_level
                 && v_r < t.boxin_max_kmh / 3.6
                 && v_r > 1.0
                 && with_budget.len() >= 2;
+            let pit_ok = level >= unlocks.pit_level
+                && ch.pit_max_kmh[li] > 0.0
+                && v_r < ch.pit_max_kmh[li] / 3.6
+                && straight_ahead;
             let mut shadow_rank = 0.0f32;
-            for (rank, &(gap, i)) in active.iter().enumerate() {
+            let mut behind_rank = 0usize;
+            for &(gap, i) in &active {
                 let u = &self.units[i];
-                let has_budget = u.risk > 0.0;
+                let has_budget = u.risk > budget_floor;
+                let ready = now >= u.pit_ready;
+                // Left (+) or right (-) of the racer's line, fixed per unit.
+                let side = if u.id.0 % 2 == 0 { 1.0 } else { -1.0 };
+                // Close and in sight: chase the racer's own line. Otherwise drive the roads
+                // (row 66: following the trail round a corner cuts it through the building).
+                let close = dist(u.body.pos, rp) < CLOSE_LOS_M
+                    && self.sees_at(world, u.body.pos, u.body.alt_m, rp, rec.pos[2]);
                 let tactic = if boxin && with_budget.iter().take(3).any(|x| x.1 == i) {
                     let k = with_budget.iter().position(|x| x.1 == i).unwrap_or(0);
                     Tactic::BoxIn(
                         [BoxSlot::Rear, BoxSlot::FrontLeft, BoxSlot::FrontRight][k.min(2)],
                     )
-                } else if gap < -5.0 && level >= unlocks.rolling_block_level && has_budget && seen {
-                    Tactic::RollingBlock
-                } else if rank == 0
-                    && seen
-                    && has_budget
-                    && level >= unlocks.pit_level
-                    && v_r < t.pit_max_kmh / 3.6
-                    && v_r > 3.0
-                    && straight_ahead
-                    && now >= u.pit_ready
-                    && gap < 40.0
+                } else if gap < -5.0 && level >= unlocks.rolling_block_level && has_budget && seen
                 {
-                    Tactic::Pit
+                    Tactic::RollingBlock
                 } else {
-                    Tactic::Shadow
+                    let rank = behind_rank;
+                    behind_rank += 1;
+                    let attack = contact_ok && has_budget && close && gap > -3.0 && gap < 35.0;
+                    if attack && rank == 0 && ready && pit_ok {
+                        Tactic::Pit
+                    } else if attack && rank == 0 && ready && level >= ch.hard_ram_level {
+                        Tactic::Ram(RamKind::Hard)
+                    } else if attack && rank == 0 && ready && level >= ch.rear_ram_level {
+                        Tactic::Ram(RamKind::RearQuarter)
+                    } else if attack && rank == 1 && level >= ch.flank_level {
+                        Tactic::Ram(RamKind::Side)
+                    } else {
+                        Tactic::Shadow
+                    }
                 };
                 let cornering = if has_budget {
-                    p.pursuit_cornering_g
+                    ch.cornering_g
                 } else {
                     p.shadow_cornering_g
                 };
+                let lim_here = self.limit_at(u.body.pos);
+                let mut routed = false;
                 let (cmd_track, speed) = match tactic {
                     Tactic::Shadow => {
-                        let mid = (t.shadow_m.min + t.shadow_m.max) * 0.5 + 12.0 * shadow_rank;
+                        let mid = (ch.shadow_min_m[li] + ch.shadow_max_m[li]) * 0.5
+                            + 8.0 * shadow_rank;
                         shadow_rank += 1.0;
                         // Close in for the arrest when the racer stops.
-                        let want_gap = if v_r < 3.0 && seen { 8.0 } else { mid };
-                        // Far behind: close the gap at up to the phase's pursuit cap, braking
-                        // in time to arrive at the shadow gap (row 60: a cop 200 m behind a
-                        // stopped racer used to crawl up at the racer's speed + 10 %).
+                        let want_gap = if v_r < 3.0 && seen { 6.0 } else { mid };
+                        // Far behind: close the gap at up to the pursuit cap, braking in time
+                        // to arrive at the shadow gap.
                         let excess = gap - want_gap;
                         let mut sp = if excess > 0.0 {
                             v_r + (2.0 * SHADOW_CLOSE_DECEL_MPS2 * excess).sqrt()
@@ -1130,23 +1308,60 @@ impl PoliceSystem {
                             v_r + 0.6 * excess
                         };
                         if !seen {
-                            // Lost contact: drive to the last known position at a measured pace.
-                            sp = self.limit_at(u.body.pos) * p.respond_speed_factor;
+                            // Lost contact: to the last known position at a measured pace.
+                            sp = lim_here * p.respond_speed_factor;
                         }
-                        let far = gap > t.shadow_m.max + 15.0;
-                        let base_cap = if far {
-                            p.pursuit_cap_mps.get(self.phase)
-                        } else {
-                            cap
-                        };
+                        let far = gap > ch.shadow_max_m[li] + 15.0;
+                        let base_cap = if far { cap_abs } else { cap };
                         let own_cap = if has_budget {
                             base_cap
                         } else {
-                            base_cap.min(self.limit_at(u.body.pos) * 1.3)
+                            base_cap.min(lim_here * 1.3)
                         };
-                        (track.clone(), sp.clamp(0.0, own_cap))
+                        let tr = if close {
+                            track.clone()
+                        } else {
+                            routed = true;
+                            self.chase_route(i, racer, &track, racer_s)
+                        };
+                        (tr, sp.clamp(0.0, own_cap))
                     }
-                    Tactic::Pit => (track.clone(), (v_r + 3.0).min(cap + 3.0)),
+                    Tactic::Pit => {
+                        // Line up beside the racer's rear quarter, then turn into it.
+                        let lined_up = gap <= ch.pit_turn_in_gap_m + 0.8;
+                        let (lat, sp) = if lined_up {
+                            (side * 0.3, v_r + 2.0)
+                        } else {
+                            let closing = (0.9 * (gap - ch.pit_turn_in_gap_m)).clamp(0.0, 6.0);
+                            (side * ch.pit_side_offset_m, v_r + closing)
+                        };
+                        (offset_track(&track, lat), sp.min(cap_abs + 6.0))
+                    }
+                    Tactic::Ram(kind) => {
+                        let (lat, sp) = match kind {
+                            RamKind::RearQuarter => (side * 0.9, v_r + ch.ram_closing_mps[0]),
+                            RamKind::Hard => (0.0, v_r + ch.ram_closing_mps[2]),
+                            RamKind::Side => {
+                                // Flank: alongside the racer; from the hard-ram level slam
+                                // into it once level with it.
+                                let slam = level >= ch.hard_ram_level && ready && gap.abs() < 1.5;
+                                if slam {
+                                    (side * 0.8, v_r + ch.ram_closing_mps[1])
+                                } else {
+                                    (
+                                        side * ch.flank_offset_m,
+                                        v_r + (0.8 * gap).clamp(-3.0, 6.0),
+                                    )
+                                }
+                            }
+                        };
+                        let tr = if lat == 0.0 {
+                            track.clone()
+                        } else {
+                            offset_track(&track, lat)
+                        };
+                        (tr, sp.clamp(0.0, cap_abs + 7.0))
+                    }
                     Tactic::RollingBlock => {
                         let ahead = -gap;
                         let sp = v_r * t.rolling_block_speed_factor
@@ -1171,6 +1386,9 @@ impl PoliceSystem {
                 let same = self.units[i].cmd.track.pts.first() == cmd_track.pts.first()
                     && self.units[i].tactic == tactic;
                 let u = &mut self.units[i];
+                if !routed {
+                    u.chase_route = None;
+                }
                 if u.tactic != tactic {
                     u.tactic = tactic;
                 }
@@ -1190,6 +1408,47 @@ impl PoliceSystem {
                 u.cmd.siren = true;
             }
         }
+    }
+
+    /// A road route from pursuing unit `i` to the racer (row 66): the legal route to the
+    /// junction the racer is heading for, through the racer's position, then on along the
+    /// pursuit `track` (its predicted path). Kept for [`CHASE_ROUTE_REFRESH_S`] unless the
+    /// racer heads for another junction, so the unit's progress along it is not reset.
+    fn chase_route(&mut self, i: usize, racer: EntityId, track: &Track, racer_s: f32) -> Track {
+        let now = self.now;
+        let rec = &self.racers[&racer];
+        let rp = rec.last_known.unwrap_or(xy(rec.pos));
+        let v = if rec.status == PursuitStatus::Pursuit {
+            [rec.vel[0], rec.vel[1]]
+        } else {
+            rec.last_known_vel
+        };
+        let node = self
+            .start_node(rp, v)
+            .or_else(|| self.graph.nearest_node(rp));
+        let Some(node) = node else {
+            return track.clone();
+        };
+        if let Some(c) = self.units[i].chase_route {
+            if c.node == node && now.since(c.at) < CHASE_ROUTE_REFRESH_S {
+                return self.units[i].cmd.track.clone();
+            }
+        }
+        let mut t = self.route_track(i, node, None);
+        // Then the racer's predicted path beyond that junction (no stop at the route's end).
+        let np = self.graph.node(node).pos;
+        let (s_node, _) = track.project(np, racer_s, 400.0);
+        let mut pts = t.pts.clone();
+        let mut s = s_node + 10.0;
+        while s < track.length() {
+            pts.push(track.point_at(s));
+            s += 10.0;
+        }
+        if pts.len() > t.pts.len() {
+            t = Track::new(pts);
+        }
+        self.units[i].chase_route = Some(crate::unit::ChaseRoute { node, at: now });
+        t
     }
 
     // -----------------------------------------------------------------------------------------
@@ -1289,7 +1548,6 @@ impl PoliceSystem {
                     let uv = self.units[i].body.vel();
                     let rel = sub(uv, v);
                     let rel_speed = (rel[0] * rel[0] + rel[1] * rel[1]).sqrt();
-                    let pit = self.units[i].tactic == Tactic::Pit;
                     let before = self.stats.racer_contacts;
                     let hit = crate::dispatch::RacerHit {
                         rel_speed,
@@ -1300,15 +1558,6 @@ impl PoliceSystem {
                     if self.stats.racer_contacts != before {
                         let u = &mut self.units[i];
                         u.body.speed = u.body.speed.min((v[0] * v[0] + v[1] * v[1]).sqrt()) * 0.8;
-                        if pit {
-                            u.pit_ready = self.now.plus(self.cfg.pursuit.tactics.pit_cooldown_s);
-                            let id = u.id;
-                            self.stats.pit_attempts += 1;
-                            self.pending.push(PoliceEvent::PitAttempt {
-                                unit: id,
-                                target: e,
-                            });
-                        }
                     }
                 }
             }

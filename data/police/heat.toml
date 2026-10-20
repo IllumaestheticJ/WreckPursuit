@@ -105,6 +105,10 @@ night = 0.7
 stop_speed_mps = 2.0
 stop_time_s = 4.0
 unit_radius_m = 15.0
+# Boxed in / pinned (owner playtest row 63): rocking back and forth within this radius for
+# pinned_time_s with a unit close is a capture too.
+pinned_radius_m = 4.0
+pinned_time_s = 6.0
 
 [safehouse]
 dwell_s = 10.0

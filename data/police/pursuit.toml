@@ -57,12 +57,6 @@ night = 0.3
 shadow_m = { min = 25.0, max = 40.0 }
 boxin_max_kmh = 60.0
 boxin_offset_m = [2.6, 6.0]
-# One value for both damage modes (owner rule 2026-10-20: modes differ only in car damage).
-# 60 km/h sits between the old Arcade 70 / Simulation 55 and near real-world PIT policy limits.
-pit_max_kmh = 60.0
-pit_min_straight_m = 60.0
-pit_engage_m = 12.0
-pit_cooldown_s = 8.0
 rolling_block_lead_m = 18.0
 rolling_block_speed_factor = 0.85
 intercept_horizon_s = { min = 10.0, max = 20.0 }
@@ -72,6 +66,36 @@ intercept_min_gap_m = 150.0
 disengage_health = { arcade = 0.15, simulation = 0.4 }
 bent_wheel_toe_rad = 0.02
 puncture_pull_over = 0.5
+
+# Pursuit aggression by wanted level (owner playtest row 63, 2026-10-20: "police are not
+# aggressive enough", "noticeably harder"). Arrays are L1..L5. One set of values for both damage
+# modes (owner rule: Arcade and Simulation differ only in car damage). This departs from the
+# PVPD doctrine's "contain, don't race" on purpose; see docs/integration/police.md.
+#   L1 traffic stop: tail close, box in when slow.
+#   L2 PIT as soon as the road allows (straight ahead), rear-quarter rams otherwise, a second
+#      unit flanks alongside.
+#   L3+ hard rams and side slams, rolling blocks with units ahead, junctions blocked ahead.
+[chase]
+cornering_g = 0.92
+brake_mps2 = 8.5
+speed_margin = 0.25
+cap_scale = [1.0, 1.1, 1.2, 1.25, 1.3]
+shadow_min_m = [10.0, 6.0, 4.0, 4.0, 4.0]
+shadow_max_m = [18.0, 12.0, 8.0, 8.0, 8.0]
+civilian_clear_m = [25.0, 15.0, 8.0, 4.0, 0.0]
+risk_budget_scale = [1.5, 2.5, 4.0, 6.0, 10.0]
+tactic_contact_cost = 1.0
+pit_max_kmh = [0.0, 100.0, 130.0, 150.0, 170.0]
+pit_min_straight_m = 40.0
+pit_side_offset_m = 1.9
+pit_turn_in_gap_m = 3.2
+reengage_s = 2.5
+rear_ram_level = 2
+hard_ram_level = 3
+flank_level = 2
+flank_offset_m = 2.6
+ram_closing_mps = [4.0, 1.5, 7.0]
+junction_block_level = 3
 
 # Obstacle awareness: units follow, wait behind or pass any vehicle in their lane, and spawn
 # clear of other vehicles (wp_police::avoid).
@@ -114,6 +138,29 @@ yield_max_s = 8.0
 yield_max_siren_s = 3.0
 # Units waiting on each other: after this the lower unit id creeps on.
 gridlock_s = 2.0
+# Pursuing / intercepting units drive at the limit: through junctions fast, reds barely
+# slowed, a short look for cross traffic, and quick passes.
+chase_junction_mps = 18.0
+chase_red_mps = 13.0
+chase_turn_mps = 9.0
+chase_yield_max_s = 0.6
+chase_decel_mps2 = 7.5
+chase_lateral_margin_m = -0.3
+chase_pass_wait_s = 0.5
+# Push-through (owner playtest row 61): blocked by a stopped civilian or parked car for
+# push_after_s with lights on and no way past, shove it aside below 15 km/h; if that does not
+# move it, back out / re-route / respawn as for any stuck unit.
+push_after_s = 1.5
+push_mps = 3.5
+push_max_s = 3.0
+push_min_progress_m = 1.5
+push_cooldown_s = 6.0
+# Static feelers (owner playtest row 66): rays ahead and either side against building
+# footprints and tunnel walls; brake to stop short of a wall, steer away from one at the side.
+wall_margin_m = 6.0
+wall_feeler_rad = 0.4
+wall_decel_mps2 = 7.0
+wall_shift_m = 1.2
 spawn_clear_m = 25.0
 spawn_path_s = 5.0
 spawn_path_half_width_m = 6.0
