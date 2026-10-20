@@ -20,6 +20,7 @@ with assists and unfiltered on a wheel. Deterministic, 240 Hz with 2 sub-steps.
 | `brakes.rs` | bias, ABS (~15 Hz release cycle) |
 | `steering.rs` | speed-sensitive lock/rate, countersteer help, Ackermann, toe, damage pull, FWD torque steer |
 | `assists.rs` | pedal filters, TCS, ESC |
+| `presets.rs` | one-click `AssistPreset` Rookie / Street / Sim (GDD §6): damage mode + `AssistProfile` per input device; `matching` detects a customised setup |
 | `aero.rs` | drag, axle lift/downforce |
 | `ffb.rs` | rack torque (aligning torque + caster trail), road rumble, damper |
 | `rig.rs` | single-car Rapier test rig (same per-tick sequence as `wp_sim`) |

@@ -145,6 +145,25 @@ The reply is `Result<(), CaptainError>` with:
 
   Its recorded fixture (`apps/ui-kit/fixtures/runs/police_pursuit`) was not regenerated.
 
+### Assist presets (backlog B10, done from this session at the owner's request)
+One-click **Rookie / Street / Sim** (GDD §6.1), with damage mode and assists still separate axes:
+- **`crates/wp_vehicle/src/presets.rs`** (new; owner: A/02): `AssistPreset { Rookie, Street, Sim }`
+  with `damage_mode()`, `assists(InputSource)`, `matching(..)` and `from_name`; re-exported as
+  `wp_vehicle::AssistPreset`. Keyboard keeps its pedal filters and speed-sensitive steering in
+  every preset (GDD §6.2). No serde derive, because `wp_vehicle` has no serde dependency.
+- **`crates/wp_wasm`** (owner: C/04): adds a direct `wp_vehicle` dependency; new exports
+  `assist_presets()`, `assist_preset_named(name, source)` → `{mode, assists}` and
+  `assist_preset_of(entity, source)`. There is a native session test.
+- **`apps/testbed-web`** (owner: C/04): a preset row above the assist boxes, wrappers in
+  `src/wasm/sim.ts`, and the `e2e/presets.mjs` check (`npm run e2e:presets`).
+- **`apps/ui-kit`** (owner: M/16): presets renamed to `rookie | street | sim | custom`, with values
+  equal to `wp_vehicle`'s keyboard presets. A preset sets the damage mode too, `presetOf(assists, mode)`
+  checks both, and the default is Street.
+- **Contract request (lead):** `AssistProfile::esc_strength: f32`. The GDD's Street preset wants
+  "ESC low", but `esc` is a switch, so Street leaves ESC off for now.
+- Not done: the GDD's "suggest Rookie after three crashes in five minutes" (needs a crash
+  counter in the run). simcli scenarios could gain `assists: Preset(..)` (owner: I).
+
 ## Perf numbers
 | Measurement | Machine | Native | Browser | Budget |
 |---|---|---|---|---|

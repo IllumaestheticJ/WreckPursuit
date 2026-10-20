@@ -155,6 +155,16 @@ export const sim = {
   setAssists: (entity: number, p: AssistProfile): void => wasm.set_assist_profile(entity, JSON.stringify(p)),
   assistPreset: (source: "Keyboard" | "Gamepad" | "Wheel"): AssistProfile => JSON.parse(wasm.assist_preset(source)),
   assists: (entity: number): AssistProfile => JSON.parse(wasm.assist_profile(entity)),
+  /** One-click presets in menu order: ["Rookie", "Street", "Sim"]. */
+  assistPresets: (): string[] => JSON.parse(wasm.assist_presets()),
+  /** Damage mode + assists of a one-click preset for a driver on `source`. */
+  assistPresetNamed: (
+    name: string,
+    source: "Keyboard" | "Gamepad" | "Wheel",
+  ): { mode: "Arcade" | "Simulation"; assists: AssistProfile } => JSON.parse(wasm.assist_preset_named(name, source)),
+  /** The preset a vehicle's assists + the session's damage mode match ("" = customised). */
+  assistPresetOf: (entity: number, source: "Keyboard" | "Gamepad" | "Wheel"): string =>
+    wasm.assist_preset_of(entity, source),
   reset: (entity: number): void => wasm.reset_vehicle(entity),
   entities: (): number[] => Array.from(wasm.entities()),
   states: (): Float32Array => wasm.vehicle_states(),

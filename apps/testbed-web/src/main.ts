@@ -228,16 +228,46 @@ async function main(): Promise<void> {
       return base;
     }
   };
+  // One-click presets (Rookie / Street / Sim, GDD §6): damage mode + assists together. The
+  // chosen preset is remembered per viewer and replaces the per-box overrides; ticking a box
+  // afterwards turns it into a custom setup (the preset is forgotten, the box is remembered).
+  const PRESET_KEY = "wp.assistPreset";
+  const storedPreset = (): string | null => {
+    const p = store.get(PRESET_KEY);
+    return p && sim.assistPresets().includes(p) ? p : null;
+  };
   const applyAssistPreset = (source: InputSource) => {
     if (isReplay()) return;
     try {
-      const preset = sim.assistPreset(source) as unknown as Record<string, unknown>;
-      Object.assign(preset, assistOverrides());
-      sim.setAssists(app.player, preset as never);
+      const named = storedPreset();
+      if (named) {
+        sim.setAssists(app.player, sim.assistPresetNamed(named, source).assists);
+      } else {
+        const preset = sim.assistPreset(source) as unknown as Record<string, unknown>;
+        Object.assign(preset, assistOverrides());
+        sim.setAssists(app.player, preset as never);
+      }
       syncAssistBoxes();
     } catch (e) {
       console.warn(e);
     }
+  };
+  const choosePreset = (name: string) => {
+    if (isReplay()) return;
+    const p = sim.assistPresetNamed(name, app.source);
+    ($("mode") as HTMLSelectElement).value = p.mode;
+    sim.setDamageMode(p.mode);
+    sim.setAssists(app.player, p.assists);
+    store.set(PRESET_KEY, name);
+    store.set(ASSIST_KEY, "{}");
+    syncAssistBoxes();
+  };
+  const syncPresetButtons = () => {
+    const active = isReplay() ? "" : sim.assistPresetOf(app.player, app.source);
+    document.querySelectorAll<HTMLButtonElement>("button.preset").forEach((b) => {
+      b.setAttribute("aria-pressed", String(b.dataset.p === active));
+    });
+    $("preset-state").textContent = isReplay() ? "" : active ? "" : "custom";
   };
 
   const syncAssistBoxes = () => {
@@ -246,6 +276,7 @@ async function main(): Promise<void> {
     document.querySelectorAll<HTMLInputElement>("#assist-row input").forEach((cb) => {
       cb.checked = Boolean(a[cb.dataset.a!]);
     });
+    syncPresetButtons();
   };
 
   // ----- replay ---------------------------------------------------------------------------
@@ -294,6 +325,7 @@ async function main(): Promise<void> {
     // Live switch (Sim::set_mode_table), logged as a replay op; existing damage is kept.
     if (isReplay()) return void (($("mode") as HTMLSelectElement).value = modeName());
     sim.setDamageMode((e.target as HTMLSelectElement).value);
+    syncPresetButtons();
   };
   ($("city") as HTMLInputElement).onchange = () => startFreeDrive();
   citySel.onchange = () => {
@@ -306,10 +338,17 @@ async function main(): Promise<void> {
       const a = sim.assists(app.player) as unknown as Record<string, unknown>;
       a[cb.dataset.a!] = cb.checked;
       sim.setAssists(app.player, a as never);
+      // A hand-picked box turns the preset into a custom setup: remember the current boxes.
       const o = assistOverrides();
+      if (storedPreset()) for (const k of ["abs", "tcs", "esc", "auto_gears"]) o[k] = Boolean(a[k]);
       o[cb.dataset.a!] = cb.checked;
       store.set(ASSIST_KEY, JSON.stringify(o));
+      store.set(PRESET_KEY, "");
+      syncPresetButtons();
     };
+  });
+  document.querySelectorAll<HTMLButtonElement>("button.preset").forEach((b) => {
+    b.onclick = () => choosePreset(b.dataset.p!);
   });
   document.querySelectorAll<HTMLButtonElement>(".bench").forEach((b) => {
     b.onclick = () => startBench(Number(b.dataset.n));
@@ -429,6 +468,10 @@ async function main(): Promise<void> {
   });
 
   // ----- start ----------------------------------------------------------------------------
+
+  // A remembered preset also picks the damage mode new sessions start in.
+  const remembered = storedPreset();
+  if (remembered) ($("mode") as HTMLSelectElement).value = sim.assistPresetNamed(remembered, app.source).mode;
 
   rig.onPadNext = () => rig.cycle(app.views.get(app.focus)?.root);
   const camParam = params.get("cam") as CameraMode | null;

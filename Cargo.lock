@@ -4425,6 +4425,7 @@ dependencies = [
  "wp_net",
  "wp_police",
  "wp_sim",
+ "wp_vehicle",
  "wp_world",
 ]
 
