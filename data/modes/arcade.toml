@@ -5,7 +5,8 @@
 # but survivable. A 50 km/h wall hit is cosmetic plus minor mechanical; a 70 km/h hit degrades
 # but stays drivable; about 4-6 hard hits end a car; police cars at least as tough as a sports
 # car. Round 13 made the consequences ~20-30 % softer than round 12b (components, failure
-# thresholds, cabin limit, wheels, structural health, bills) and left the dents alone.
+# thresholds, cabin limit, wheels, structural health) and left the dents alone; the repair price
+# scale stays 0.5 (wp_economy balance, request to G in docs/integration/damage.md).
 # Measured in the full sim (`cargo run --release -p simcli --example damage_toughness`, tables
 # in docs/integration/damage.md): sports car (hakone_gt) ended after 4.5 hard hits on average
 # (was 2.7), the police cruiser after 8.7 (was 5.0).
@@ -25,7 +26,7 @@ component_damage_scale = 0.24          # sim x 0.24  — components lose health 
 component_fail_threshold_scale = 4.0   # sim x 4.0   — components tolerate more intrusion (round 12b: 3.5)
 total_loss_health = 0.1                # sim 0.25 -> 0.10 — kept (wp_economy career proxy, see docs/integration/damage.md)
 cabin_intrusion_total_loss_m = 0.78    # sim x 3.1   — 0.25 m -> 0.78 m (round 12b: 0.6)
-repair_cost_scale = 0.4                # sim x 0.4   — cheaper repairs (round 12b: 0.5)
+repair_cost_scale = 0.5                # sim x 0.5   — cheaper repairs (round 13 proposed 0.4: wp_economy balance, request to G)
 wheel_detach_scale = 0.42              # sim x 0.42  — wheels stay on ~2.4x as long (round 12b: 0.5)
 engine_kill_on_total_loss = true       # same
 global_health_from_intrusion = true    # same

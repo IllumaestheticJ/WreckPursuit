@@ -550,7 +550,7 @@ fn mode_tables_load_and_arcade_is_derived_from_sim() {
     assert!(a.total_loss_health < s.total_loss_health);
     assert!((a.component_damage_scale - 0.24 * s.component_damage_scale).abs() < 1e-6);
     assert!((a.wheel_detach_scale - 0.42 * s.wheel_detach_scale).abs() < 1e-6);
-    assert!((a.repair_cost_scale - 0.4 * s.repair_cost_scale).abs() < 1e-6);
+    assert!((a.repair_cost_scale - 0.5 * s.repair_cost_scale).abs() < 1e-6);
     assert_eq!(s.cabin_intrusion_total_loss_m, 0.25);
     assert_eq!(a.cabin_intrusion_total_loss_m, 0.78);
 }
