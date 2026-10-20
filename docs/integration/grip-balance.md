@@ -58,6 +58,42 @@ Step 3 details (parity_rwd_d unless named):
 | tyre-load chatter in a 60 mph corner | 0.6–1.0 kN RMS | 0.00 kN |
 | FWD (parity_fwd_c) body slip 60 / 100 mph, gradient 60 / 100 km/h | 1.1 / 2.3°, +0.29 / +0.84 | 1.3 / 1.5°, +0.37 / +0.97 |
 
+## Merge of lead/drift-lab-w feea6bcc + "balance new" × "slow weight" (lead, 2026-10-20)
+
+Merged W step 8 (slow-weight preset, VR corrections, round12 9c947ebb). The ground probe was
+rewritten upstream (one pass, closed-form tyre sweep over triangles; the flat slab still uses
+GJK). The tilt fix moved into the new `RapierGround::cast_wheel`, still behind the switch, and
+`tests/probe_chatter.rs` still shows 934 N → < 60 N. W's later round12 re-merge was not on the
+remote yet; it will be merged when it lands.
+
+**They don't stack.** Slow weight (springs × 0.5, **no anti-roll bars**, travel × 1.7, yaw
+inertia × 1.5) already loosens the cars. No bars puts more of the lateral load transfer on the
+rear, and the extra yaw inertia lets an overshoot last. With "new"'s softer tyres on top, a held
+key at 60 mph spins.
+
+`RIDE=slow` / `RIDE=lab`, key held + cruise throttle, body slip (lat g); taps 60 mph heading; lift
+kick yaw at 0.6 s; drift = W standard entry; robust = the 27-entry set:
+
+| ride + balance | rwd_d 60 mph | rwd_d 100 mph | rampart 60 / 100 | taps 0.1 / 0.2 / 0.4 s | lift kick | lane change | robust |
+|---|---|---|---|---|---|---|---|
+| lab + before | 1.2° (0.76 g) | 2.4° | 1.1 / 2.1° | 5.0 / 13.0 / 16.4° | 16.7 → 19.6 | 3.4° | 2 |
+| lab + new | 5.0° (0.89 g) | 4.8° | 5.0 / 5.1° | 3.5 / 14.1 / 31.4° | 33.5 → 39.3 | 7.8° | 1 |
+| slow + before | 1.4° (0.72 g) | 2.8° | 1.3 / 2.4° | 4.8 / 13.2 / 20.1° | 19.8 → 22.5 | 4.2° | 1 |
+| slow + new | **spins** | **spins** | spins / 9.0° | 3.4 / 13.0 / 33.8° | 31.4 → 35.5 | 6.4° | 0 |
+| slow + **for slow weight** | 3.2° (0.80 g) | 2.9° (0.84 g) | 3.0 / 2.7° | 2.7 / 9.5 / 22.5° | 23.3 → 26.2 | 3.8° | **6** |
+
+- **Turn-in bite carries over** into slow weight: taps and the lift kick are within ~10 % of
+  the lab-ride numbers for the same balance.
+- **Drift hold:** the W standard entry spins with slow weight under every balance (W's note:
+  slow weight breaks the knife-edge hold). The 27-entry robustness count is best with slow
+  weight + "for slow weight" (6 / 27).
+- **New preset** `GripBalance::for_slow_weight()` (panel: *for slow weight*): smart lock
+  (margin +0.3 → +1.0 by 160 km/h) + rear downforce 0.8 m² + probe fix, data tyres. Softer
+  tyres on top of slow weight (× 0.8 / 0.7 up to × 0.6 / 0.45) spin at 60 or 100 mph, and
+  rear downforce up to 1.6 m² doesn't save them.
+- **Owner A/B:** suspension *slow weight (clip 4)* + grip *for slow weight*, vs suspension *lab
+  default* + grip *new*.
+
 ## Tyre-load chatter: fixed behind a switch (`probe_tilt_fix`), write-up for A
 
 **Bug.** In a corner every wheel's load jumps by 0.6–1.0 kN RMS from one tick to the next. Driving

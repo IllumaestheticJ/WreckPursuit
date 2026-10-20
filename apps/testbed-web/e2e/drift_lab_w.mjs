@@ -89,6 +89,8 @@ const gNew = await page.evaluate(() => window.__wp.sim.gripBalance());
 check(Math.abs(gNew.rear_stiffness - 0.45) < 1e-6 && gNew.tyres_rwd_only === true && gNew.probe_tilt_fix === true && Math.abs(gNew.rear_downforce - 0.8) < 1e-6, `new balance: softer RWD tyres, rear downforce, probe fix ${JSON.stringify(gNew)}`);
 await page.locator("#drift-lab-w button", { hasText: "step 2" }).click();
 check((await abText()) === "balance: step 2", `step 2 preset: "${await abText()}"`);
+await page.locator("#drift-lab-w button", { hasText: "for slow weight" }).click();
+check((await abText()) === "balance: for slow weight" && (await page.evaluate(() => window.__wp.sim.gripBalance().rear_stiffness)) === 1, `slow-weight balance preset: "${await abText()}"`);
 await page.locator("#drift-lab-w button", { hasText: "lock only (step 1)" }).click();
 check((await abText()) === "balance: lock only" && (await page.evaluate(() => window.__wp.sim.gripBalance().rear_stiffness)) === 1, `lock only preset: "${await abText()}"`);
 await page.locator("#drift-w-balance-ab").click(); // lock only → new

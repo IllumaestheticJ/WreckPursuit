@@ -203,6 +203,26 @@ impl GripBalance {
         }
     }
 
+    /// The balance to pair with Drift Lab W's "slow weight (clip 4)" ride preset
+    /// (`crate::ride_lab::RideTune::slow_weight`). Slow weight (no anti-roll bars, softer
+    /// springs, more yaw inertia) already loosens the cars, and on top of [`Self::lab_default`]'s
+    /// softer tyres a held key spins at 60 mph. So: the smart lock (margin +0.3, rising to
+    /// +1.0 by 160 km/h) + rear downforce 0.8 m² + the probe fix, with the data's tyres.
+    /// parity_rwd_d + slow weight: 3.2° body slip at 60 mph, 2.9° at 100 mph (stable), drift
+    /// robustness 6 / 27 (docs/integration/grip-balance.md).
+    pub fn for_slow_weight() -> Self {
+        Self {
+            lock_mode: LockMode::Smart,
+            smart_margin: 0.3,
+            smart_margin_hi: 1.0,
+            smart_slide_from_deg: 8.0,
+            smart_slide_full_deg: 15.0,
+            rear_downforce: 0.8,
+            probe_tilt_fix: true,
+            ..Self::default()
+        }
+    }
+
     /// Step 2's "new" balance (kept for the A/B): smart lock (margin −0.3 → +1.0 between 100
     /// and 160 km/h), RWD cornering stiffness × 0.75 / × 0.65, no downforce, no probe fix.
     pub fn step2() -> Self {

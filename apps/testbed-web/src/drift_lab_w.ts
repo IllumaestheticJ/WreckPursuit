@@ -550,7 +550,7 @@ export class DriftLabWPanel {
       const isNew = sameGrip(gt, gd.new);
       const ab = document.createElement("button");
       ab.id = "drift-w-balance-ab";
-      ab.textContent = `balance: ${isNew ? "new" : sameGrip(gt, gd.before) ? "before" : sameGrip(gt, gd.lock_only) ? "lock only" : sameGrip(gt, gd.step2) ? "step 2" : "custom"}`;
+      ab.textContent = `balance: ${isNew ? "new" : sameGrip(gt, gd.before) ? "before" : sameGrip(gt, gd.lock_only) ? "lock only" : sameGrip(gt, gd.step2) ? "step 2" : sameGrip(gt, gd.slow_weight) ? "for slow weight" : "custom"}`;
       ab.title = "A/B: before = the tyre data and the plain lock; new = the smart lock + softer-sidewall tyres on RWD cars + rear downforce + probe fix (the car rotates at the limit, stable at 100 mph)";
       ab.onclick = () => {
         // new → before; anything else (before, lock only, custom) → new.
@@ -571,9 +571,16 @@ export class DriftLabWPanel {
         saveGrip(gd.step2);
         this.build();
       };
+      const forSlow = document.createElement("button");
+      forSlow.textContent = "for slow weight";
+      forSlow.title = "the balance to use with the suspension section's slow weight (clip 4): smart lock + rear downforce, tyres as in the data (new's softer tyres spin with slow weight)";
+      forSlow.onclick = () => {
+        saveGrip(gd.slow_weight);
+        this.build();
+      };
       const abRow = document.createElement("div");
       abRow.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
-      abRow.append(ab, step2, lockOnly);
+      abRow.append(ab, forSlow, step2, lockOnly);
       this.body.appendChild(abRow);
       const sel = document.createElement("select");
       sel.id = "drift-w-lock-mode";
