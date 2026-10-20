@@ -291,7 +291,7 @@ pub struct UnitBody {
     pub pos: [f32; 2],
     /// Unit heading vector (XY).
     pub heading: [f32; 2],
-    /// Speed along the heading, m/s (negative while rolling backwards).
+    /// Speed, m/s (negative while rolling backwards faster than 1 m/s).
     pub speed: f32,
     /// Current lateral acceleration, g.
     pub lat_g: f32,
