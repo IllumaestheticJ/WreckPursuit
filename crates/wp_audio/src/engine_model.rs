@@ -225,14 +225,14 @@ fn firing_pattern(cyl: usize, layout: EngineLayout, firing: FiringFeel) -> Vec<(
                     .collect()
             }
             // Odd-fire (90° V6 with a common crankpin per bank pair): 90 / 150 alternating.
-            (_, FiringFeel::OddFire) if cyl % 2 == 0 => {
+            (_, FiringFeel::OddFire) if cyl.is_multiple_of(2) => {
                 let mut a = 0.0;
                 let short = 720.0 / cyl as f32 * 0.75;
                 let long = 2.0 * 720.0 / cyl as f32 - short;
                 (0..cyl)
                     .map(|i| {
                         let e = (a, (i % 2) as u8);
-                        a += if i % 2 == 0 { short } else { long };
+                        a += if i.is_multiple_of(2) { short } else { long };
                         e
                     })
                     .collect()
@@ -280,7 +280,7 @@ impl EngineVoiceSpec {
             .map(|(i, &(angle_deg, bank))| {
                 let mut header_m = cs.header_m;
                 if rumble {
-                    header_m += if (i / 2) % 2 == 0 { 0.0 } else { 0.5 };
+                    header_m += if (i / 2).is_multiple_of(2) { 0.0 } else { 0.5 };
                 } else {
                     header_m += rng.range_f32(-0.04, 0.04);
                 }

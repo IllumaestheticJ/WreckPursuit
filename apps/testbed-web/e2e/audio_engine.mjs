@@ -7,7 +7,7 @@
 //
 // 1. Offline render, headless Chromium: every sweep (I4, I6, cross-plane V8, flat-plane V8,
 //    turbo I4 × WOT idle → redline + limiter, lift-off, shift, rpm steps; damaged V8) goes
-//    through the real VoicePool + engine worklet. WAVs and spectrogram PNGs land in
+//    through the real VoicePool + engine worklet. WAVs and spectrogram JPEGs land in
 //    docs/media/audio/ with a README report (skip with --no-media).
 // 2. Checks on the rendered audio:
 //    - pitch: the firing harmonic (rpm / 60 × cylinders / 2) tracks the crank within 1 % on
@@ -139,6 +139,19 @@ const rmsOf = (x, s0 = 0, s1 = x.length) => {
   return Math.sqrt(s / Math.max(1, s1 - s0));
 };
 const dB = (v) => 20 * Math.log10(Math.max(v, 1e-12));
+/** Two cascaded one-pole low-passes at `fc` Hz. */
+const lowpass = (x, fc) => {
+  const k = 1 - Math.exp((-2 * Math.PI * fc) / SR);
+  const y = new Float32Array(x.length);
+  let a = 0;
+  let b = 0;
+  for (let i = 0; i < x.length; i++) {
+    a += (x[i] - a) * k;
+    b += (a - b) * k;
+    y[i] = b;
+  }
+  return y;
+};
 /** "Body" level of [t0, t1) s: median of 10 ms RMS windows (a pop or two does not move it). */
 const bodyOf = (x, t0, t1) => {
   const w = Math.round(0.01 * SR);
@@ -321,7 +334,7 @@ await page.evaluate((SR) => {
     return { pcm: btoa(bin), wallMs, blocks: Math.ceil(L.length / 128), counters, refused: pool.engineHost?.stats.refused ?? 0 };
   };
 
-  /** Draw a spectrogram (log frequency) with the expected firing frequency; returns a PNG data URL. */
+  /** Draw a spectrogram (log frequency) with the expected firing frequency; returns a JPEG data URL. */
   window.drawSpectrogram = (sg, fire, title) => {
     const W = sg.cols.length;
     const H = sg.cols[0].length;
@@ -359,7 +372,7 @@ await page.evaluate((SR) => {
     g.fillStyle = "#ddd";
     g.font = "12px sans-serif";
     g.fillText(title, 4, 13);
-    return c.toDataURL("image/png");
+    return c.toDataURL("image/jpeg", 0.85);
   };
 }, SR);
 
@@ -494,9 +507,11 @@ for (const c of physical) {
     check(dB(on) - dB(off) > 4, `${name}: lift-off drops the level (${(dB(on) - dB(off)).toFixed(1)} dB)`);
   }
   if (c.sweep === "shift") {
-    // The cut is heard: the level dips during the shift.
-    const pre = bodyOf(x, 0.9, 1.15);
-    const cut = bodyOf(x, 1.25, 1.42);
+    // The cut is heard: the exhaust note (< 800 Hz; a turbo's blow-off hiss fills the highs)
+    // dips during the shift.
+    const lp = lowpass(x, 800);
+    const pre = bodyOf(lp, 0.9, 1.15);
+    const cut = bodyOf(lp, 1.25, 1.42);
     row.shiftDipDb = dB(pre) - dB(cut);
     check(dB(pre) - dB(cut) > 3, `${name}: shift cut dips the level (${(dB(pre) - dB(cut)).toFixed(1)} dB)`);
   }
@@ -511,8 +526,8 @@ for (const c of physical) {
       fire,
       title: `${describe(c)} — ${c.sweep} (dashed: firing frequency)`,
     });
-    writeFileSync(join(mediaDir, `${base}.png`), Buffer.from(png.split(",")[1], "base64"));
-    row.files = [`${base}.wav`, `${base}.png`];
+    writeFileSync(join(mediaDir, `${base}.jpg`), Buffer.from(png.split(",")[1], "base64"));
+    row.files = [`${base}.wav`, `${base}.jpg`];
   }
 }
 
@@ -646,7 +661,7 @@ if (media) {
     if (r.shiftDipDb !== undefined) notes.push(`shift dip ${r.shiftDipDb.toFixed(1)} dB`);
     if (r.hiShareInterior !== undefined) notes.push(`> 1 kHz share ${r.hiShareInterior.toFixed(1)} dB inside vs ${r.hiShareExterior.toFixed(1)} dB outside`);
     if (r.msPerBlock !== undefined) notes.push(`${r.msPerBlock.toFixed(3)} ms / 128-frame block (best ${r.best.toFixed(3)})`);
-    const files = (r.files ?? []).map((f) => `[${f.endsWith(".png") ? "spectrogram" : "wav"}](${f})`).join(" · ");
+    const files = (r.files ?? []).map((f) => `[${f.endsWith(".jpg") ? "spectrogram" : "wav"}](${f})`).join(" · ");
     L.push(`| ${r.what} | ${r.sweep} | ${files} | ${pitch} | ${half} | ${notes.join("; ")} |`);
   }
   L.push("");
