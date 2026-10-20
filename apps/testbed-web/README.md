@@ -28,6 +28,7 @@ npm run typecheck
 | `src/settings.ts` | debug layer table (hotkeys, `localStorage`) |
 | `vite.config.ts` | serves `apps/simcli/scenarios` (simcli format v2) at `/scenarios/` and `data/` at `/data/` (+ listings) |
 | `e2e/run.mjs` | Playwright check; `SHOTS=dir` writes screenshots, `BENCH=1` measures 1/8/24 cars |
+| `e2e/presets.mjs` | `npm run e2e:presets`: Rookie / Street / Sim buttons set damage mode + assists in one click, a hand-ticked box shows "custom", the preset survives a reload |
 | `e2e/gamepad.mjs` | fake-gamepad + rebinding check (`npm run e2e:gamepad`; run by `e2e/run.mjs` too) |
 | `e2e/city_v2_shots.mjs` | Port Vesper v2 screenshots → `docs/media/city-v2/` (`node e2e/city_v2_shots.mjs [dir]`) |
 
@@ -38,6 +39,12 @@ Cities: the "city" box (free drive) and the city chase use the city selector —
 orbit camera in sim coordinates, `__wp.setClip(near, far)`.
 | `e2e/playtest_chase.mjs` | city chase playtest: screenshots, overlapping HUD panels, layer + camera keys, F1 help (`node e2e/playtest_chase.mjs [outDir] [WxH]`) |
 | `e2e/chase_perf.mjs` | city chase perf (sim / views / render ms, draw calls); `PANELS=0` A/B for panel meshes, `VIEWPORT=WxH` |
+
+Assist presets: the **preset** row (Rookie / Street / Sim, `wp_vehicle::AssistPreset`) sets the
+damage mode and the assists in one click and is remembered per viewer (`wp.assistPreset`). Any
+assist box ticked afterwards turns it into a custom setup, which is remembered as before
+(`wp.assistOverrides`). With no preset chosen, the owner's defaults still apply (TCS, ESC and auto
+gears off).
 
 Sim space is +Z up / +Y forward; the Three.js scene is +Y up, so all sim-space objects live under
 a `world` group rotated −90° about X.

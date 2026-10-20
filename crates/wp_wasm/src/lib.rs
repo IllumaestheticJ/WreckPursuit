@@ -12,7 +12,7 @@
 //! | group | functions |
 //! |---|---|
 //! | session | `init(seed, scenario_json, scripted)`, `free_drive_json(car, mode, city)`, `free_drive_city_json(car, mode, city_id)`, `city_chase_city_json(car, mode, city_id)`, `city_id()`, `scenario_from_ron(text)`, `scenario_with_speed(json, mps)`, `step(dt) -> alpha`, `set_damage_mode(str)`, `car_ids()` |
-//! | control | `spawn_vehicle(car_id, pos, yaw)`, `set_input(entity, f32[])`, `set_assist_profile(entity, json)`, `assist_preset(source)`, `reset_vehicle(entity)` |
+//! | control | `spawn_vehicle(car_id, pos, yaw)`, `set_input(entity, f32[])`, `set_assist_profile(entity, json)`, `assist_preset(source)`, `assist_presets()`, `assist_preset_named(name, source)`, `assist_preset_of(entity, source)`, `reset_vehicle(entity)` |
 //! | state | `entities()`, `vehicle_states()`, `vehicle_states_prev()`, `vehicle_info(entity)`, `world_info()`, `state_hash()`, `traffic_agents()`, `signal_heads()`, `signal_states()` |
 //! | damage | `lattice_nodes`, `lattice_rest`, `lattice_beams`, `lattice_node_regions`, `lattice_strain`, `region_energy`, `skin_binding_indices`, `skin_binding_weights` |
 //! | io | `events_drain() -> postcard`, `events_decode(bytes)`, `telemetry(entity)`, `telemetry_names()`, `ffb(entity)`, `intents()` |
@@ -267,6 +267,49 @@ pub fn assist_preset(source: &str) -> Result<String, JsValue> {
     let source: InputSource =
         serde_json::from_value(serde_json::Value::String(source.into())).map_err(err)?;
     Ok(json(&AssistProfile::for_source(source)))
+}
+
+/// Names of the one-click assist presets, in menu order: `["Rookie","Street","Sim"]`.
+#[wasm_bindgen]
+pub fn assist_presets() -> String {
+    let names: Vec<&str> = wp_vehicle::AssistPreset::ALL
+        .iter()
+        .map(|p| p.name())
+        .collect();
+    json(&names)
+}
+
+/// One-click preset `name` for a driver on `source`: JSON `{"mode": "Arcade"|"Simulation",
+/// "assists": AssistProfile}`. Apply both (`set_damage_mode` + `set_assist_profile`).
+#[wasm_bindgen]
+pub fn assist_preset_named(name: &str, source: &str) -> Result<String, JsValue> {
+    let preset = wp_vehicle::AssistPreset::from_name(name)
+        .ok_or_else(|| err(format!("unknown preset {name}")))?;
+    let source: InputSource =
+        serde_json::from_value(serde_json::Value::String(source.into())).map_err(err)?;
+    #[derive(Serialize)]
+    struct PresetJson {
+        mode: DamageMode,
+        assists: AssistProfile,
+    }
+    Ok(json(&PresetJson {
+        mode: preset.damage_mode(),
+        assists: preset.assists(source),
+    }))
+}
+
+/// The preset a vehicle's current assists and the session's damage mode match for `source`
+/// (`"Rookie"` | `"Street"` | `"Sim"`), or `""` when customised.
+#[wasm_bindgen]
+pub fn assist_preset_of(entity: u32, source: &str) -> Result<String, JsValue> {
+    let source: InputSource =
+        serde_json::from_value(serde_json::Value::String(source.into())).map_err(err)?;
+    get(|s| {
+        s.assists(EntityId(entity))
+            .and_then(|a| wp_vehicle::AssistPreset::matching(&a, s.mode(), source))
+            .map(|p| p.name().to_string())
+            .unwrap_or_default()
+    })
 }
 
 /// Current `AssistProfile` JSON of a vehicle.

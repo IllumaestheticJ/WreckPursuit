@@ -13,6 +13,8 @@ crate-type = ["cdylib", "rlib"]
 wp_contracts.workspace = true
 wp_math.workspace = true
 wp_sim.workspace = true
+# One-click assist presets (`wp_vehicle::AssistPreset`).
+wp_vehicle.workspace = true
 wp_police.workspace = true
 wp_world.workspace = true
 # Career garage (machine G): repairs the stored lattice of a car between runs

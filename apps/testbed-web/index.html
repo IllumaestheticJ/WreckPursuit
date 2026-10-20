@@ -48,6 +48,7 @@
       #controls .row { margin: 3px 0; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
       #controls button, #controls select, #controls input { font: 11px monospace; background: #222; color: #ddd; border: 1px solid #555; border-radius: 3px; padding: 1px 5px; }
       #controls button:hover { background: #333; }
+      #controls button.preset[aria-pressed="true"] { background: #2a6; color: #fff; border-color: #2a6; }
       #controls input[type="number"] { width: 50px; }
       #rp-scrub { flex: 1; min-width: 160px; }
       #sc-result .pass { color: #2ecc40; }
@@ -95,6 +96,13 @@
           weather <select id="weather" title="restarts the session with this weather (the scenario's own weather on 'scenario')"><option value="auto">scenario</option></select>
           bench <button class="bench" data-n="1">1</button><button class="bench" data-n="8">8</button><button class="bench" data-n="24">24</button>
           <span id="bench-out" class="dim"></span>
+        </div>
+        <div class="row" id="preset-row" title="one click: damage mode + assists together (GDD §6); any box below can still be changed">
+          preset
+          <button class="preset" data-p="Rookie" aria-pressed="false" title="Arcade damage, every assist on">Rookie</button>
+          <button class="preset" data-p="Street" aria-pressed="false" title="Arcade damage, ABS + TCS">Street</button>
+          <button class="preset" data-p="Sim" aria-pressed="false" title="Simulation damage, assists off, manual gears">Sim</button>
+          <span id="preset-state" class="dim"></span>
         </div>
         <div class="row" id="assist-row">
           assists
