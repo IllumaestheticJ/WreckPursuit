@@ -410,7 +410,7 @@ pub fn engine_stalled(entity: u32) -> Result<bool, JsValue> {
 
 /// Drift-assist tuning fields, in the order [`set_drift_tuning`] / [`drift_tuning`] use
 /// (owner rows 90 / 91 / 98; see `wp_vehicle::DriftTuning`).
-pub const DRIFT_TUNING_FIELDS: [&str; 9] = [
+pub const DRIFT_TUNING_FIELDS: [&str; 11] = [
     "align_onset_rad",
     "align_full_rad",
     "slew_boost",
@@ -420,9 +420,11 @@ pub const DRIFT_TUNING_FIELDS: [&str; 9] = [
     "throttle_shaping",
     "envelope_deg",
     "hold_enabled",
+    "hb_pivot_accel",
+    "hb_pivot_cap",
 ];
 
-/// Set a vehicle's drift-assist tuning (the testbed drift lab's live tuning panel): the 9
+/// Set a vehicle's drift-assist tuning (the testbed drift lab's live tuning panel): the 11
 /// values of [`DRIFT_TUNING_FIELDS`] in order. A dev override only: it never touches the car
 /// data, and it is not logged as a replay op (a tuned session does not replay bit-exactly).
 #[wasm_bindgen]
@@ -445,11 +447,13 @@ pub fn set_drift_tuning(entity: u32, values: &[f32]) -> Result<(), JsValue> {
         throttle_shaping: values[6],
         envelope_deg: values[7],
         hold_enabled: values[8] > 0.5,
+        hb_pivot_accel: values[9],
+        hb_pivot_cap: values[10],
     };
     with(|s| s.set_drift_tuning(EntityId(entity), t))
 }
 
-/// A vehicle's drift-assist tuning, the 9 values of [`DRIFT_TUNING_FIELDS`] in order.
+/// A vehicle's drift-assist tuning, the 11 values of [`DRIFT_TUNING_FIELDS`] in order.
 #[wasm_bindgen]
 pub fn drift_tuning(entity: u32) -> Result<Vec<f32>, JsValue> {
     with(|s| {
@@ -467,6 +471,8 @@ pub fn drift_tuning(entity: u32) -> Result<Vec<f32>, JsValue> {
             t.throttle_shaping,
             t.envelope_deg,
             if t.hold_enabled { 1.0 } else { 0.0 },
+            t.hb_pivot_accel,
+            t.hb_pivot_cap,
         ])
     })
 }
