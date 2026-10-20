@@ -641,6 +641,31 @@ export class PanelBody {
     }
   }
 
+  /**
+   * Centre (chassis space, current dented shape) of `region`'s parts (any region: `null`) made
+   * of `material` (`glass`, `headlight`, `taillight`), written to `out`. False when the mesh has
+   * none (or is not loaded). Used by the crash effects (render/fx) to burst shards there.
+   */
+  materialCentre(region: string | null, material: MeshPartJson["material"], out: THREE.Vector3): boolean {
+    let x = 0;
+    let y = 0;
+    let z = 0;
+    let n = 0;
+    for (const p of this.parts) {
+      if ((region !== null && p.def.region !== region) || p.def.material !== material) continue;
+      const pos = p.pos;
+      for (let i = 0; i < pos.length; i += 3) {
+        x += pos[i];
+        y += pos[i + 1];
+        z += pos[i + 2];
+      }
+      n += pos.length / 3;
+    }
+    if (n === 0) return false;
+    out.set(x / n, y / n, z / n);
+    return true;
+  }
+
   /** Move a detached region's parts out of the car into world-space debris. */
   private spawnDebris(region: number, worldVel: THREE.Vector3): void {
     const parent = this.root.parent?.parent; // VehicleView.root → world group

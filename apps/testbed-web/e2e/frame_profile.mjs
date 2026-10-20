@@ -159,7 +159,10 @@ const r = await page.evaluate(() => {
   });
   const ver = () => [...mats].reduce((a, m) => a + m.version, 0);
   const v0 = ver();
+  const before = new Map([...mats].map((m) => [m, m.version]));
   for (let i = 0; i < 3; i++) wp.scene.render(wp.rig.camera);
+  // Which materials bumped (debugging a churn failure): type and name.
+  const churned = [...mats].filter((m) => m.version !== before.get(m)).map((m) => `${m.type}:${m.name || "?"}`);
   // (Optional chaining: the same script also profiles the pre-pass build for before/after.)
   const city = wp.scene.cityStats?.(wp.rig.camera) ?? { tiles: 0, drawn: 0 };
   const structure = {
@@ -169,6 +172,9 @@ const r = await page.evaluate(() => {
     signalHeads: wp.scene.signals.count,
     signalsDrawn: wp.scene.signals.drawnCount ?? wp.scene.signals.count,
     programChurn: ver() - v0,
+    churned: churned.slice(0, 8),
+    // Crash effects (render/fx): quality, particles spawned in the window, draw calls now.
+    fx: wp.fx?.stats() ?? null,
   };
   wp.app.paused = false;
   return {

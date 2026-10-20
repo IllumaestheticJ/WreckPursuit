@@ -609,8 +609,24 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
         render_cover(span, &mut tunnel_wall, &mut tunnel_roof, &mut tunnel_light);
     }
     let mut out = vec![
-        asphalt, concrete, parking, bus, sidewalk, corner, lot, lot_skirt, kerb, buildings, wall,
-        bridge, rock, seabed, water, tunnel_wall, tunnel_roof, tunnel_light,
+        asphalt,
+        concrete,
+        parking,
+        bus,
+        sidewalk,
+        corner,
+        lot,
+        lot_skirt,
+        kerb,
+        buildings,
+        wall,
+        bridge,
+        rock,
+        seabed,
+        water,
+        tunnel_wall,
+        tunnel_roof,
+        tunnel_light,
     ];
     out.extend(ground);
     out.retain(|p| !p.indices.is_empty());
