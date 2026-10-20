@@ -1,6 +1,7 @@
 // Browser frame profile of the city chase (browser perf pass, docs/integration/browser-perf.md).
 // Usage: node e2e/frame_profile.mjs [chase|rain] [seconds]   (needs `npm run wasm`; own Vite)
 // Env: VIEWPORT=WxH (default 1280x720), CITY=<id> (default the app's default, vesper_v2),
+// QUERY=<url params> (e.g. gfx=high), EVAL=<js> run before measuring, STACKS=<fn> allocation paths,
 // JSON=1 prints only the JSON line.
 //
 // Per frame it reports: the frame-loop sections (src/perf.ts), the wall frame time and what is
@@ -16,7 +17,9 @@ import { chromium } from "playwright-core";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = Number(process.env.PORT ?? 5194);
-const URL = `http://localhost:${PORT}/${process.env.CITY ? `?city=${process.env.CITY}` : ""}`;
+// QUERY=gfx=high etc.: extra URL parameters (e.g. force a graphics quality profile).
+const qs = [process.env.CITY ? `city=${process.env.CITY}` : "", process.env.QUERY ?? ""].filter(Boolean).join("&");
+const URL = `http://localhost:${PORT}/${qs ? `?${qs}` : ""}`;
 const [which = "chase", secs = "12"] = process.argv.slice(2);
 const jsonOnly = process.env.JSON === "1";
 

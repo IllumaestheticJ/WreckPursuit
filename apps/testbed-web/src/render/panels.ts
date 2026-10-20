@@ -110,6 +110,9 @@ interface PartRT {
   maxFold: number;
 }
 
+const tmpSkin = new THREE.Vector3();
+const NO_HEIGHTS: { x: number; h: number }[] = [];
+
 /** Element-wise equality of two float arrays. */
 function sameFloats(a: Float32Array, b: Float32Array): boolean {
   if (a.length !== b.length) return false;
@@ -204,6 +207,7 @@ export class PanelBody {
   private onReady: (() => void) | null = null;
   /** Nodes array of the last re-skin (VehicleView swaps in a new array only when they move). */
   private skinnedNodes: Float32Array | null = null;
+  private readonly stateOf = new Map<number, number>();
 
   constructor(
     readonly entity: number,
@@ -334,9 +338,10 @@ export class PanelBody {
       }
     }
     const rn = this.restNodes;
-    const tmp = new THREE.Vector3();
+    const tmp = tmpSkin;
     // Panel state per region index (absent = no panel there, i.e. fixed structure).
-    const stateOf = new Map<number, number>();
+    const stateOf = this.stateOf;
+    stateOf.clear();
     for (let k = 0; k + PANEL_STRIDE <= this.states.length; k += PANEL_STRIDE) stateOf.set(this.states[k], this.states[k + 1]);
     for (const p of this.parts) {
       if (p.hidden) continue;
@@ -345,7 +350,7 @@ export class PanelBody {
       const nv = rest.length / 3;
       // Lid fold: height per chord from its lost length (rigid frames keep lengths, so the
       // current nodes are fine for swinging lids too).
-      const heights = p.fold.map((c) => ({
+      const heights = p.fold.length === 0 ? NO_HEIGHTS : p.fold.map((c) => ({
         x: c.x,
         h: foldHeight(nodeDist(rn, rn, c.a, c.b), nodeDist(nodes, nodes, c.a, c.b)),
       }));
