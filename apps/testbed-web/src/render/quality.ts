@@ -12,7 +12,8 @@
 //         so the game keeps real time (no slow motion) on weak machines.
 //         On a touch device (phone / tablet, src/touch.ts `prefersTouch`) auto = the touch
 //         profile: low, pixel ratio capped at 1, 600 m city / 300 m traffic draw distance, full
-//         car meshes only within 120 m (at most 24 parked cars), parked cars drawn within 350 m, 20 % rain, governor down to 0.6 px ratio (target 30 fps).
+//         car meshes within 120 m, parked-car proxies within 120 m, lamps within 300 m, promoted
+//         cars past 60 m drawn by the fleet, 20 % rain, governor down to 0.3× (target 30 fps).
 // MSAA is a WebGL context attribute: changing it needs a reload.
 //
 // Effects quality (`?fx=low|med|high`, else the stored choice `wp.fx`, else low on the low
@@ -110,8 +111,9 @@ function profileFor(mode: GfxMode, software: boolean, touch: boolean): Profile {
   const high = { ...common, antialias: true, backdropBlur: true, rain: 1, scale: 1, minScale: 1, drawM: Infinity, adaptive: false };
   // Low: a weak or no GPU (software rasterizers are vertex / draw-call bound: fewer, cheaper
   // car meshes and lamps matter more than pixels). Full car meshes within 150 m, traffic and
-  // parked cars within 600 m (proxies within 150 m, full meshes for the nearest 8), street
-  // lamps within 450 m, promoted traffic / police past 80 m drawn by the fleet.
+  // parked-car proxies within 150 m (two-box cars beyond; every prop stays drawn: no invisible
+  // collisions), street lamps within 450 m, promoted traffic / police past 80 m drawn by the
+  // fleet.
   const low = {
     ...common,
     antialias: false,
@@ -123,15 +125,13 @@ function profileFor(mode: GfxMode, software: boolean, touch: boolean): Profile {
     adaptive: false,
     trafficM: 600,
     fullLodM: 150,
-    propDrawM: 600,
     propProxyM: 150,
-    propFullMax: 8,
     lampDrawM: 450,
     viewDrawM: 80,
   };
   if (mode === "high") return high;
   if (mode === "low") return low;
-  if (touch) return { ...low, rain: 0.2, minScale: 0.3, drawM: 600, adaptive: true, maxPixelRatio: 1, trafficM: 300, fullLodM: 120, propFullMax: 8, propDrawM: 350, propProxyM: 120, lampDrawM: 300, viewDrawM: 60 };
+  if (touch) return { ...low, rain: 0.2, minScale: 0.3, drawM: 600, adaptive: true, maxPixelRatio: 1, trafficM: 300, fullLodM: 120, propProxyM: 120, lampDrawM: 300, viewDrawM: 60 };
   // Software GL starts at 0.35× (where the governor always ended up): every governor step
   // resizes the canvas and the post targets, a long hitch under a software rasterizer.
   return software ? { ...low, scale: 0.35, minScale: 0.25, adaptive: true } : { ...high, minScale: 0.6, adaptive: true };
