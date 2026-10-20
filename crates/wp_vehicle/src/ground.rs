@@ -87,6 +87,28 @@ pub fn sweep_hit_on_tyre(p: &WheelProbe, w: V3, normal: V3) -> Option<GroundHit>
     })
 }
 
+/// Take out of the sweep the lift a **tilted** tyre gets on smooth ground from its own tilt.
+/// The probe cylinder rolls with the body, so in a corner (a few degrees of roll) its edge
+/// reaches the road `half_width · |axle·n| / |dir·n|` before the tread centre does. Without
+/// this the sweep took over from the exact centre ray on flat ground in every corner, and its
+/// rim witness point (GJK against the large ground slab) made the tyre load jump 0.6–1 kN from
+/// tick to tick (docs/integration/grip-balance.md). Edges ahead of / behind the contact still
+/// lift the sweep far more than this, so kerbs keep working. Applied by [`RapierGround`] when
+/// the grip-balance lab's `probe_tilt_fix` is on (to become the default with the vehicle owner).
+pub fn discount_tilt(
+    p: &WheelProbe,
+    ray: Option<GroundHit>,
+    sweep: Option<GroundHit>,
+) -> Option<GroundHit> {
+    let (Some(r), Some(mut s)) = (ray, sweep) else {
+        return sweep;
+    };
+    let axle = p.rot * V3::Y;
+    let down = p.dir.dot(r.normal).abs().max(0.2);
+    s.distance += p.half_width * axle.dot(r.normal).abs() / down;
+    Some(s)
+}
+
 /// Envelope lift (sweep above the ray, m) beyond which the sweep is no longer trusted and
 /// fades out over the next 5 cm: nothing a tyre rolls over lifts it this far before the hub
 /// is above it, so it is a wall beside the tyre or another car's body overhead.
@@ -196,6 +218,13 @@ impl WheelCaster for RapierGround<'_> {
             Some((_, hit)) if hit.status == ShapeCastStatus::PenetratingOrWithinTargetDist => None,
             Some((_, hit)) => sweep_hit_on_tyre(p, hit.witness1, hit.normal1),
             None => None,
+        };
+        // Tilt fix: lab switch for now (crate::grip_lab::GripBalance::probe_tilt_fix); off =
+        // bit-identical to before.
+        let sweep = if crate::grip_lab::active().is_some_and(|g| g.probe_tilt_fix) {
+            discount_tilt(p, ray, sweep)
+        } else {
+            sweep
         };
         blend_envelope(ray, sweep)
     }

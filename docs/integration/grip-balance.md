@@ -12,7 +12,92 @@ separate from Drift Lab W's `car_lab` / `ride_lab` / `plain` knobs. It is proces
 replays or the netcode, and the same in Arcade and Simulation. With it off, the vehicle step is
 bit-identical.
 
-## Headline (step 2: the current "new")
+## Headline (step 3: the current "new", lead request 2026-10-20)
+
+**"new" = smart lock + softer RWD tyres + rear downforce + probe tilt fix.** The lead asked for
+looser at low / mid speed, stable at high speed, as arcade-sims do. Rear downforce (grows with
+v²) is the stabilising term:
+
+| RWD cars, key held + cruise throttle | before | step 2 | **step 3 (new)** |
+|---|---|---|---|
+| body slip 60 mph | 1.1–1.4° | 3.6–4.0° | **5.0–5.2°** |
+| body slip 100 mph | 2.1–2.6° (stable) | 4.0–4.6° (stable) | **4.8–5.1° (stable)** |
+| body slip 30 mph | −1.8 … −1.0° | −0.4 … 0.9° | **1.3–2.3°** (rear axle slip 5.3°, see below) |
+| lateral g 60 mph | 0.75–0.85 | 0.90–1.01 | 0.88–0.99 |
+| understeer gradient 60 / 100 km/h, 0.1–0.4 g | +0.2…0.4 / +0.6 | −0.3…−0.2 / +0.2 | −0.85…−0.7 / +0.04…0.13 |
+
+- **Smart lock:** 0.7 g corner angle + front peak slip × 0.7 up to 100 km/h, the margin rising
+  to +0.3 (front slip ~1.3× peak) by 160 km/h.
+- **RWD tyres:** cornering stiffness × 0.6 front / × 0.45 rear (peak slip 10.4° / 13.9°, same
+  peak μ).
+- **Rear downforce C·A 0.8 m²:** 0.35 kN at 60 mph, 1.0 kN at 100 mph. Without it this tyre
+  set spins a held key at 100 mph (32°). With it, 4.8° and stable. Step 2 needed the fronts at
+  2× peak slip at 100 mph to be stable; step 3 needs only 1.3×.
+- **Probe tilt fix** on (below).
+- **30 mph:** the 4–8° target is not met in body slip. On a 22 m circle the geometry alone
+  (`b/R` ≈ 3.8°) cancels most of the rear's 5.3° of slip. The rear is working (5.3° vs
+  3.6° step 2, 1.5° before). Neither the smart lock's corner allowance (0.3–1.0 g) nor its
+  margin moved it (1.0–1.4°). Getting there would need the rear past its peak at 30 mph,
+  which is a power slide.
+- **Cost:** low-speed linear range is mildly oversteery (−0.7 to −0.85 deg/g at 60 km/h). Drift
+  robustness 1 / 27 (before 2). Lane change 100 km/h 7.8° (before 3.4°). Lateral g at 100 mph
+  0.83 (before 0.85).
+
+Step 3 details (parity_rwd_d unless named):
+
+| | before | step 3 (new) |
+|---|---|---|
+| taps 60 mph, heading 0.1 / 0.2 / 0.4 s | 5.0 / 13.0 / 16.4° | 3.5 / 14.1 / 31.4° |
+| taps 100 mph, heading 0.1 / 0.2 / 0.4 s | 6.3 / 29.3 / 23.7° | 9.5 / 22.1 / 24.1° (calmer than step 2's 10.3 / 33.9 / 31.9) |
+| turn-in 60 mph yaw at 0.6 s, kept → lifted | 16.7 → 19.6 °/s | 33.5 → 39.3 °/s (peak slip 8.8° → 13.4°) |
+| mid-corner lift 60 mph, body slip | 1.1° → 1.5° | 5.7° → 5.9° |
+| power-on 35 mph (rampart_50) | −1.1° → 0.0° | 2.4° → 5.7° (rwd_d: tail out, spins, as before) |
+| lane change 100 km/h max slip (rwd_d / rampart / fwd_c) | 3.4 / 3.5 / 4.3° | 7.8 / 8.4 / 2.8° |
+| drift robustness / W standard entry | 2 / 27, held 5.3 s | 1 / 27, spun 1.0 s |
+| launch yaw flat / 1° slope | 0.0 / 0.4° | 0.0 / 1.0° (target < 3°) |
+| tyre-load chatter in a 60 mph corner | 0.6–1.0 kN RMS | 0.00 kN |
+| FWD (parity_fwd_c) body slip 60 / 100 mph, gradient 60 / 100 km/h | 1.1 / 2.3°, +0.29 / +0.84 | 1.3 / 1.5°, +0.37 / +0.97 |
+
+## Tyre-load chatter: fixed behind a switch (`probe_tilt_fix`), write-up for A
+
+**Bug.** In a corner every wheel's load jumps by 0.6–1.0 kN RMS from one tick to the next. Driving
+straight it is exactly zero. `tests/probe_chatter.rs`: rampart_50, 60 mph, steer 0.6 → 934 N
+RMS on the front-left.
+
+**Cause** (`crates/wp_vehicle/src/ground.rs`, `RapierGround::cast_wheel`). The wheel probe is
+the exact centre ray blended with a cylinder sweep (`blend_envelope`). The sweep takes over once
+it touches more than `ENVELOPE_BLEND_M` = 1.5 mm above the ray, which is meant for kerb edges
+ahead or behind. The probe cylinder rolls with the body (`WheelProbe::rot` from the chassis
+rotation, sweep along chassis −Z). At 3° of roll its edge reaches flat road
+`half_width · sin 3°` ≈ 5 mm before the tread centre, so in every corner the sweep wins on
+smooth road. Its witness point is on the cylinder's rim, and against the 10 km ground slab GJK
+places it loosely (the code comment: "only good to about a centimetre"). `sweep_hit_on_tyre`
+turns that rim point into a centre travel, so the travel, and through the 280 kN/m tyre spring
+the load, jitters every tick.
+
+**Fix** (`ground::discount_tilt`, 15 lines). Before blending, add to the sweep's distance the
+lift its own tilt gives on a plane through the ray's hit, `half_width · |axle·n| / |dir·n|`. On
+smooth road the ray wins again, exact and smooth. A kerb ahead lifts the sweep by centimetres,
+far more than the ~5 mm discount, so kerbs still work. In the test the chatter drops to < 60 N
+(from 934 N) on rampart_50, parity_rwd_d and parity_fwd_c, straight stays at 0, and the load
+transfer is unchanged.
+
+**Why it is behind a switch.** Made the default, it changes physics everywhere a car rolls:
+measured with it forced on, **58 of 86 simcli golden hashes**
+change (4 of them, `cars_beater_hard_turn`, `golden_city_chase`, `police_sideswipe_patrol_day /
+_night`, already differ on the base). Four other workstreams' tests trip:
+`slide_control::wheel_profile_is_bit_identical_to_the_plain_model` (a recorded hash, re-record
+with `[bless]`), `slide_control::self_aligning_steering_does_not_wobble_a_keyboard_corner`
+(sentinel_cruiser 0.2143 vs 0.2035 + 0.01, over by 0.0007), `snapshot::set_state_is_a_close_approximation`
+(2.05 m vs < 2.0 m, a chaotic slide replay), and `tyre_slip::spin_model_holds_the_clip_1_drift_where_the_ellipse_spins`
+(the knife-edge drift). The first is a re-record; the other three are near-threshold measurements
+that move with any physics change. The switch is `GripBalance::probe_tilt_fix` (on in W's "new"); with it off,
+everything is bit-identical. **For A:** make it unconditional in `RapierGround::cast_wheel`,
+re-record the four `wheel_profile_is_bit_identical_to_the_plain_model` hashes and bless the
+goldens (`simcli goldens --bless`, `[bless]` commit), and re-check the three near-threshold tests above with their owners. A
+`FlatGround` / centre-ray-only caster is not affected.
+
+## Headline (step 2)
 
 **"new" = smart lock + softer-sidewall tyres on the RWD cars.** At the limit with a key held, the
 RWD cars now run **3.6–4.0° of body slip at 60 mph and 4.0–4.6° at 100 mph** (before: 1.1–1.4°
@@ -132,7 +217,7 @@ Fixed throttle (`THR=fixed`; the car slows, so the speeds are lower), body slip:
 
 ## How to try it (owner)
 
-`?drift=w` → *tune* → **grip balance**: **balance: new / before** (A/B), **lock only (step 1)**
+`?drift=w` → *tune* → **grip balance**: **balance: new / before** (A/B), **step 2**, **lock only (step 1)**
 (the smart lock without the tyre change).
 1. 60 mph sweeper, key held: the car should take a set with the tail working a little (≈4°),
    not push wide.
@@ -346,6 +431,11 @@ rear grip.
 - `crates/wp_vehicle/src/vehicle.rs`: smart lock + track cap in the plain steering branch
   (rate-limited shrink), per-axle bar scale, grip-lab tyre scales in the substep (also without
   `car_lab`), probe width, `front_peak_slip()`, `wheel_loads()` (lab traces).
+- `crates/wp_vehicle/src/ground.rs`: `discount_tilt` (the probe tilt fix), applied in
+  `RapierGround::cast_wheel` when `probe_tilt_fix` is on.
+- `crates/wp_vehicle/tests/probe_chatter.rs`: the chatter is there without the fix (> 300 N)
+  and gone with it (< 60 N; straight < 5 N; load transfer kept), three cars.
+- `crates/wp_vehicle/src/vehicle.rs` (step 3): grip-lab front / rear downforce in the aero call.
 - `crates/wp_vehicle/examples/grip_balance.rs`: all tables above.
 - `crates/wp_wasm/src/drift_lab.rs`: `grip_balance_json`, `grip_balance_defaults_json`
   (`before` / `new` / `lock_only`), `grip_balance_set`.

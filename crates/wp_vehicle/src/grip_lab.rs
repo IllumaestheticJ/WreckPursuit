@@ -79,6 +79,16 @@ pub struct GripBalance {
     /// the tyre load chatters tick to tick (≈ 0.6–1 kN RMS at 0.9 g on every wheel, none when
     /// straight); a narrow probe (0.01) removes the chatter. Lab A/B for the vehicle owner.
     pub probe_width: f32,
+    /// Extra front downforce, C·A in m² (force = ½ρv² · C·A at the front axle; 0 = data).
+    pub front_downforce: f32,
+    /// Extra rear downforce, C·A in m² (0 = data). Grows with v²: a rear-stabilising term that
+    /// leaves low-speed balance alone (≈ 0.25 kN at 60 mph, 0.75 kN at 100 mph per 0.6 m²).
+    pub rear_downforce: f32,
+    /// The ground-probe **tilt fix** ([`crate::ground::discount_tilt`]): the sweep no longer
+    /// wins on smooth ground just because the body-fixed probe cylinder is tilted, which
+    /// removes the corner load chatter at the full probe width (kerbs still lift the sweep).
+    /// `false` = bit-identical to before. Proposed as the default for the vehicle owner.
+    pub probe_tilt_fix: bool,
     /// Keyboard lock at speed (plain profile only).
     pub lock_mode: LockMode,
     /// Smart lock: the lateral acceleration whose steady-corner steer angle is allowed on top
@@ -143,6 +153,9 @@ impl Default for GripBalance {
             front_arb: 1.0,
             rear_arb: 1.0,
             probe_width: 1.0,
+            front_downforce: 0.0,
+            rear_downforce: 0.0,
+            probe_tilt_fix: false,
             lock_mode: LockMode::Plain,
             smart_ay_g: 1.0,
             smart_margin: 0.3,
@@ -162,15 +175,37 @@ impl Default for GripBalance {
 }
 
 impl GripBalance {
-    /// The lab's "new" balance (docs/integration/grip-balance.md, step 2):
-    /// - the smart lock, tyre budget = front peak slip × 0.7 (margin −0.3) up to 100 km/h so
-    ///   the fronts work at their peak, rising to × 2 (margin +1.0) by 160 km/h so a held key
-    ///   at 100 mph stays stable (mild high-speed understeer); countersteer gets the plain lock
-    ///   back from 8° to 15° of body slip;
-    /// - on rear-wheel-drive cars, cornering stiffness × 0.75 front / × 0.65 rear (same peak
-    ///   grip at bigger slip angles: the rear works at the limit and the car rotates, with the
-    ///   linear-range balance kept near neutral). Front-drive cars keep their tyres.
+    /// The lab's "new" balance (docs/integration/grip-balance.md, step 3):
+    /// - the smart lock: a 0.7 g corner angle + front peak slip × 0.7 (margin −0.3) up to
+    ///   100 km/h, the margin rising to +0.3 by 160 km/h; countersteer gets the plain lock back
+    ///   from 8° to 15° of body slip;
+    /// - on rear-wheel-drive cars, cornering stiffness × 0.6 front / × 0.45 rear (same peak
+    ///   grip at bigger slip angles: the rear works and the car rotates at the limit);
+    /// - rear downforce C·A 0.8 m² (≈ 0.35 kN at 60 mph, 1 kN at 100 mph): the speed-dependent
+    ///   rear-stabilising term that keeps a held key stable at 100 mph;
+    /// - the ground-probe tilt fix (no tyre-load chatter in corners).
+    ///
+    /// Front-drive cars keep their tyres (the lock, the downforce and the probe fix apply).
     pub fn lab_default() -> Self {
+        Self {
+            lock_mode: LockMode::Smart,
+            smart_ay_g: 0.7,
+            smart_margin: -0.3,
+            smart_margin_hi: 0.3,
+            smart_slide_from_deg: 8.0,
+            smart_slide_full_deg: 15.0,
+            front_stiffness: 0.6,
+            rear_stiffness: 0.45,
+            tyres_rwd_only: true,
+            rear_downforce: 0.8,
+            probe_tilt_fix: true,
+            ..Self::default()
+        }
+    }
+
+    /// Step 2's "new" balance (kept for the A/B): smart lock (margin −0.3 → +1.0 between 100
+    /// and 160 km/h), RWD cornering stiffness × 0.75 / × 0.65, no downforce, no probe fix.
+    pub fn step2() -> Self {
         Self {
             lock_mode: LockMode::Smart,
             smart_margin: -0.3,
@@ -444,18 +479,18 @@ mod tests {
         GripBalance::lab_default().apply_tire(&mut t, 2, false);
         assert_eq!(t.lateral.b, 17.0);
         GripBalance::lab_default().apply_tire(&mut t, 2, true);
-        assert!((t.lateral.b - 17.0 * 0.65).abs() < 1e-4);
+        assert!((t.lateral.b - 17.0 * 0.45).abs() < 1e-4);
         // The high-speed margin blends in between 100 and 160 km/h.
         let n = GripBalance::lab_default();
         assert!((n.margin_at(80.0 / 3.6) + 0.3).abs() < 1e-6);
-        assert!((n.margin_at(130.0 / 3.6) - 0.35).abs() < 1e-4);
-        assert!((n.margin_at(200.0 / 3.6) - 1.0).abs() < 1e-6);
+        assert!(n.margin_at(130.0 / 3.6).abs() < 1e-4);
+        assert!((n.margin_at(200.0 / 3.6) - 0.3).abs() < 1e-6);
         assert_eq!(d.smart_lock(30.0, 2.7, 0.109, 0.66, false, 0.0), None);
         let s = GripBalance::lab_default();
         // Parking speed: the car's full lock.
         let lock = s.smart_lock(2.0, 2.7, 0.109, 0.66, false, 0.0).unwrap();
         assert!((lock - 0.66).abs() < 1e-6);
-        // 60 mph: ≈ 2° of geometry + 0.7 × 6.2° of tyre ≈ 6.5°.
+        // 60 mph: ≈ 1.5° of geometry (0.7 g) + 0.7 × 6.2° of tyre ≈ 5.9°.
         let lock = s
             .smart_lock(26.8, 2.7, 0.109, 0.66, false, 0.0)
             .unwrap()

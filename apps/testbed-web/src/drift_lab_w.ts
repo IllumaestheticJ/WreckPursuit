@@ -103,6 +103,8 @@ const GRIP_FIELDS: Record<string, { label: string; min: number; max: number; ste
   rear_lat_c: { label: "rear past-peak shape C", min: 0, max: 2, step: 0.05, hint: "0 = data (1.4); lower = side force falls less past the peak (cornering stiffness kept)" },
   front_arb: { label: "front bar ×", min: 0, max: 3, step: 0.05, hint: "front anti-roll bar, on top of the suspension section (less = more front grip)" },
   rear_arb: { label: "rear bar ×", min: 0, max: 30, step: 0.5, hint: "rear anti-roll bar, on top of the suspension section (more = looser); the data's rear bar is ~5 % of the front's" },
+  front_downforce: { label: "front downforce C·A", min: 0, max: 2, step: 0.05, unit: "m²", hint: "extra front downforce (½ρv² · C·A at the front axle)" },
+  rear_downforce: { label: "rear downforce C·A", min: 0, max: 2, step: 0.05, unit: "m²", hint: "extra rear downforce: grows with v², stabilises the rear at speed without touching low-speed balance (0.8 ≈ 0.35 kN at 60 mph, 1 kN at 100)" },
   probe_width: { label: "wheel probe width ×", min: 0, max: 1.5, step: 0.0125, hint: "ground probe cylinder width (1 = the vehicle's). It rolls with the body, so in a corner it touches on its edge and the tyre load chatters tick to tick; 0.0125 removes the chatter (A/B for the vehicle owner)" },
   smart_ay_g: { label: "smart lock: corner g", min: 0, max: 2, step: 0.05, unit: "g", hint: "steady-corner steer angle allowed on top of the front peak slip (L·a/v²)" },
   smart_margin: { label: "smart lock: past peak", min: -0.8, max: 2, step: 0.05, scale: 100, unit: "%", hint: "front slip allowed past the tyre's peak slip angle" },
@@ -520,8 +522,8 @@ export class DriftLabWPanel {
       const isNew = sameGrip(gt, gd.new);
       const ab = document.createElement("button");
       ab.id = "drift-w-balance-ab";
-      ab.textContent = `balance: ${isNew ? "new" : sameGrip(gt, gd.before) ? "before" : sameGrip(gt, gd.lock_only) ? "lock only" : "custom"}`;
-      ab.title = "A/B: before = the tyre data and the plain lock; new = the smart lock + softer-sidewall tyres on RWD cars (the car rotates at the limit)";
+      ab.textContent = `balance: ${isNew ? "new" : sameGrip(gt, gd.before) ? "before" : sameGrip(gt, gd.lock_only) ? "lock only" : sameGrip(gt, gd.step2) ? "step 2" : "custom"}`;
+      ab.title = "A/B: before = the tyre data and the plain lock; new = the smart lock + softer-sidewall tyres on RWD cars + rear downforce + probe fix (the car rotates at the limit, stable at 100 mph)";
       ab.onclick = () => {
         // new → before; anything else (before, lock only, custom) → new.
         saveGrip(sameGrip(this.sim.gripBalance(), gd.new) ? gd.before : gd.new);
@@ -534,9 +536,16 @@ export class DriftLabWPanel {
         saveGrip(gd.lock_only);
         this.build();
       };
+      const step2 = document.createElement("button");
+      step2.textContent = "step 2";
+      step2.title = "step 2's set: smart lock (more front scrub at speed), RWD tyres × 0.75 / × 0.65, no downforce, no probe fix";
+      step2.onclick = () => {
+        saveGrip(gd.step2);
+        this.build();
+      };
       const abRow = document.createElement("div");
-      abRow.style.cssText = "display:flex;gap:6px";
-      abRow.append(ab, lockOnly);
+      abRow.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
+      abRow.append(ab, step2, lockOnly);
       this.body.appendChild(abRow);
       const sel = document.createElement("select");
       sel.id = "drift-w-lock-mode";
@@ -572,6 +581,7 @@ export class DriftLabWPanel {
         row(f.label, f.hint, input, val);
       }
       for (const [key, label, hint] of [
+        ["probe_tilt_fix", "wheel probe tilt fix", "the ground probe no longer touches on its edge on smooth road when the body rolls: removes the tick-to-tick tyre load chatter in corners (kerbs unchanged); proposed as the default"],
         ["tyres_rwd_only", "tyre scales: RWD cars only", "the front / rear tyre scales apply to rear-drive cars only (front-drive cars keep their tyres); the lock and bars apply to all"],
         ["smart_angle_rate", "smart lock: plain wheel speed", "the wheels move at the plain rack's speed and stop at the smart lock (a 0.1 s tap turns them as far as before); off = full smart lock in the rack's 0.28 s"],
         ["smart_fade_both", "smart lock off in slides (both ways)", "the plain lock comes back with body slip for the into-turn side too (else only for countersteer)"],

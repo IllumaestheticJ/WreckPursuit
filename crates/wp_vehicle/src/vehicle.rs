@@ -1658,13 +1658,16 @@ impl Vehicle {
                 _ => torque += (w.point - ch.com).cross(f),
             }
         }
+        // Grip-balance lab: extra downforce per axle (C·A, m²), 0 = the data.
+        let (df_front, df_rear) =
+            crate::grip_lab::active().map_or((0.0, 0.0), |g| (g.front_downforce, g.rear_downforce));
         let aero = aero_forces(
             ch.lin_vel,
             fwd,
             self.def.drag_cd_a_m2,
             eff.drag_scale,
-            self.def.lift_front - self.def.aero_downforce_coeffs[0],
-            self.def.lift_rear - self.def.aero_downforce_coeffs[1],
+            self.def.lift_front - self.def.aero_downforce_coeffs[0] - df_front,
+            self.def.lift_rear - self.def.aero_downforce_coeffs[1] - df_rear,
         );
         force += aero.drag;
         for (y, lift) in [
