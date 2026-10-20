@@ -199,3 +199,13 @@ The reference game's "Test steering" bar on the keyboard jumps straight between 
 What this means for WreckPursuit:
 - Keyboard steering input should reach `DriverInput.steer` as a plain −1 / 0 / +1. Our testbed key ramp (`apps/testbed-web/src/input.ts`: 4/s in, 12/s out; drift-twitch's 6/s in and out) should go, or become ~instant. Rate limiting belongs in `wp_vehicle` steering, where it can behave differently for turn-in, return to centre, countersteer and slides.
 - Measuring the reference's actual front-wheel rate needs a camera that shows the front wheels, or the full cockpit steering wheel (owner asked).
+
+## Reference car specs (owner screenshots)
+
+The reference game's car names are kept out of this repo (rule 9); cars are labelled by role.
+
+| ref | role | power | torque | weight | gears | drive | class |
+|---|---|---|---|---|---|---|---|
+| **REF-RWD-A** (#49, clips 4–5) | full-size RWD muscle | 462 hp (345 kW) @ 4800 rpm | 585 lb-ft (793 N·m) @ 3200 rpm | 3018 lb (1369 kg) | 5 | RWD | A, rating 337 |
+
+The car is very torquey and has a high power-to-weight ratio, about **252 W/kg** (0.34 hp/lb). Our nearest roster analogue should be measured against it in the parity suite (docs/reference/wreckfest-parity.md).
