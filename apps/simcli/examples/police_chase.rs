@@ -88,6 +88,10 @@ struct RunReport {
     unit_wrecks: u32,
     max_units: u32,
     racer_replaced: u32,
+    /// Unit-seconds units with lights on sat stopped behind a civilian or parked car.
+    blocked_s: f32,
+    /// Longest such wait, s.
+    blocked_max_s: f32,
 }
 
 fn yaw_of(rot: [f32; 4]) -> f32 {
@@ -216,6 +220,7 @@ fn run_once(
     let (mut stuck_s, mut reverse_until, mut reverse_steer, mut last_steer) =
         (0.0f32, 0.0f32, 0.0f32, 0.0f32);
     let mut tries: Vec<f32> = Vec::new();
+    let mut blocked: BTreeMap<u32, f32> = BTreeMap::new();
     for tick in 0..ticks {
         let t = tick as f32 * PHYSICS_DT;
         let st = sim
@@ -401,6 +406,22 @@ fn run_once(
             }
         }
         prev_yaw = yaw;
+        // Row 61: units with lights on stopped behind a civilian / parked car.
+        for u in sim.police().units() {
+            let civ = match u.avoid.blocked_by {
+                Some(wp_police::avoid::BlockedBy::Traffic) => true,
+                Some(wp_police::avoid::BlockedBy::Vehicle(e)) => e != player,
+                _ => false,
+            };
+            let w = blocked.entry(u.id.0).or_insert(0.0);
+            if u.cmd.siren && civ && u.body.speed.abs() < 1.0 && !u.wrecked {
+                *w += PHYSICS_DT;
+                rep.blocked_s += PHYSICS_DT;
+                rep.blocked_max_s = rep.blocked_max_s.max(*w);
+            } else {
+                *w = 0.0;
+            }
+        }
         if let Some(id) = std::env::var("WP_TRACE_UNIT")
             .ok()
             .and_then(|v| v.parse::<u32>().ok())
@@ -628,7 +649,7 @@ fn main() {
             println!("run seed {seed}");
             if let Some(r) = run_once(&city, hour, seed, secs, speed, level, verbose) {
                 println!(
-                    "  first contact {:?}, contacts {}, PIT {}/{}, rams {}, captured {:?}, escaped {:?}, walls {} (fast {}, all units {}), props {}, pushes {}, wrecks {}, racer re-placed {}, near {:?}",
+                    "  first contact {:?}, contacts {}, PIT {}/{}, rams {}, captured {:?}, escaped {:?}, walls {} (fast {}, all units {}), props {}, pushes {}, wrecks {}, racer re-placed {}, blocked {:.1} s (max {:.1} s), near {:?}",
                     r.first_contact_s.map(|v| (v * 10.0).round() / 10.0),
                     r.contacts,
                     r.pit_success,
@@ -643,6 +664,8 @@ fn main() {
                     r.pushes,
                     r.unit_wrecks,
                     r.racer_replaced,
+                    r.blocked_s,
+                    r.blocked_max_s,
                     r.near.iter().map(|n| n.map_or(-1, |v| v as i32)).collect::<Vec<_>>()
                 );
                 reps.push(r);
