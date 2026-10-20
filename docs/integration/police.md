@@ -852,3 +852,12 @@ when there's public safety calls for reckless driving."
 5. Coordinate with the 4-player test (`crates/wp_net/tests/vesper_e2e.rs` must still pass) and
    the LOD hand-over (spawned police use the fleet → full view hand-over in render/lod.ts).
 
+
+### Assist presets merged with `lead/round12` (2026-10-20)
+`ws/police` now carries `origin/lead/round12` on top of the Rookie / Street / Sim presets.
+- Testbed: round 12's game menu and touch assists kept. An assist changed in the menu turns the preset into
+  "custom"; a preset click updates the menu's toggles (ABS/TCS/ESC/auto gears, steering help, countersteer);
+  touch uses the Gamepad presets. Checks: `e2e:presets`, `e2e:menu`, `e2e:touch` pass.
+- Goldens: not re-blessed. 33 fail on `lead/round12` itself; the merge adds none (the extra
+  `world_traffic_soak_vesper_observer` already failed on `ws/police` before the merge).
+- Still failing before and after: `wp_wasm` `short_sprint_with_ai_runs_to_results_and_pays_through_the_economy`.

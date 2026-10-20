@@ -581,6 +581,17 @@ async function main(): Promise<void> {
   const PRESET_KEY = "wp.assistPreset";
   /** Presets are defined for keyboard / gamepad / wheel; touch plays with the gamepad set. */
   const presetSource = (s: InputSource) => (s === "Touch" ? "Gamepad" : s);
+  /** True while the developer panel (assist boxes, preset row) pushes its state into the game
+   * menu: the panel already set the assists, so the menu only records them. */
+  let panelToMenu = false;
+  const tellMenu = (patch: Partial<GameSettings>) => {
+    panelToMenu = true;
+    try {
+      menu?.update(patch);
+    } finally {
+      panelToMenu = false;
+    }
+  };
   const storedPreset = (): string | null => {
     const p = store.get(PRESET_KEY);
     return p && sim.assistPresets().includes(p) ? p : null;
@@ -609,12 +620,12 @@ async function main(): Promise<void> {
   const choosePreset = (name: string) => {
     if (isReplay()) return;
     const p = sim.assistPresetNamed(name, presetSource(app.source));
-    // Keep the game menu's toggles in step. Its apply path treats this as a custom change, so
-    // it runs first and the preset is stored after it.
+    // Keep the game menu's toggles in step.
     const a = p.assists as unknown as Record<string, unknown>;
-    menu?.update({
+    if (menu) tellMenu({
       damageMode: p.mode as GameSettings["damageMode"],
-      assists: { ...menu.settings.assists, abs: Boolean(a.abs), tcs: Boolean(a.tcs), esc: Boolean(a.esc), autoGears: Boolean(a.auto_gears) },
+      assists: { ...menu.settings.assists, abs: Boolean(a.abs), tcs: Boolean(a.tcs), esc: Boolean(a.esc), autoGears: Boolean(a.auto_gears),
+        steerHelp: Number(a.steer_speed_sensitivity) > 0, countersteer: Number(a.countersteer_help) },
     });
     ($("mode") as HTMLSelectElement).value = p.mode;
     sim.setDamageMode(p.mode);
@@ -741,7 +752,7 @@ async function main(): Promise<void> {
       store.set(PRESET_KEY, "");
       syncPresetButtons();
       const key = ({ abs: "abs", tcs: "tcs", esc: "esc", auto_gears: "autoGears" } as const)[cb.dataset.a as "abs" | "tcs" | "esc" | "auto_gears"];
-      if (menu && key) menu.update({ assists: { ...menu.settings.assists, [key]: cb.checked } });
+      if (menu && key) tellMenu({ assists: { ...menu.settings.assists, [key]: cb.checked } });
     };
   });
   clutchSel.onchange = () => {
@@ -952,7 +963,7 @@ async function main(): Promise<void> {
       const o = assistOverrides() as Record<string, boolean>;
       Object.assign(o, { abs: next.assists.abs, tcs: next.assists.tcs, esc: next.assists.esc, auto_gears: next.assists.autoGears, steer_help: next.assists.steerHelp });
       store.set(ASSIST_KEY, JSON.stringify(o));
-      if (prev) {
+      if (prev && !panelToMenu) {
         // An assist changed in the game menu is a custom setup, like a hand-ticked box.
         store.set(PRESET_KEY, "");
         syncPresetButtons();
