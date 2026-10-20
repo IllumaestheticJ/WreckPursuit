@@ -234,3 +234,11 @@ The owner recorded the cockpit steering wheel at a standstill with the key overl
 **Conclusion.** The reference keyboard steering at standstill is a **simple constant-rate slew**: full lock in ~0.28 s, back in ~0.33 s. There is no input smoothing (row "keyboard input is raw"), and no visible easing or intent logic. So a 0.2 s tap is most of a full-lock flick at low speed. At speed, "steering speed sensitivity 75 %" scales the lock down (not yet measured at speed).
 
 This contrasts with our Drift Labs, which layer intent modes (hold / angle-up / transition / catch). Those may be the reason the owner says Drift Lab C "is nothing like" the reference: the reference likely gets its feel from **the car (tyres, weight, torque) plus a plain steering rate**, not from a smart assist.
+
+## Clip 8 (cockpit race lap, #49 car) — steering at speed
+
+The key overlay sits at a new position in this clip (arrows at x≈444–508, y≈1034–1066). Holding Right at ~96 mph (3rd gear, braking from 98 to 84 mph, 19.25 s onward): the wheel spoke reaches its final position **≈0.23 s** after the key press. That is the same constant-rate slew as at a standstill. The visible steering-wheel angle at 96 mph looks similar to the standstill lock, so "steering speed sensitivity" may act on the road wheels / tyre forces rather than on the cockpit wheel animation. **Unconfirmed**: a view of the front road wheels is still needed to measure the lock at speed.
+
+## Owner feedback: our suspension "feels far too switchy" (2026-10-20)
+
+In the reference footage the cars' body roll and pitch build and settle **smoothly and relatively slowly**, with heavy-feeling weight transfer and no quick back-and-forth rocking on direction changes. Our cars swap weight too quickly and too nervously. Targets: lower roll/pitch natural frequency, or more damping on transients, measured as roll angle vs time in a 60 mph lane change and an S-bend. Owners: Drift Lab W (lab feel / A-B) and machine A (ride model).
