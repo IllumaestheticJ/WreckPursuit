@@ -493,6 +493,10 @@ pub struct EntitySummary {
     /// Fraction of its `follow_route` route the entity covered (0 without one).
     #[serde(default)]
     pub route_progress: f32,
+    /// Longest stretch of a pursuit with no police line of sight on the entity
+    /// (`wp_police` `RacerRecord::los_lost_s`), s. 0 without police or pursuit.
+    #[serde(default)]
+    pub max_los_lost_s: f32,
 }
 
 impl EntitySummary {
@@ -519,12 +523,13 @@ impl EntitySummary {
             "off_road_s" => self.off_road_s,
             "max_airborne_s" => self.max_airborne_s,
             "route_progress" => self.route_progress,
+            "max_los_lost_s" => self.max_los_lost_s,
             _ => return None,
         })
     }
 
     /// Every metric name [`EntitySummary::metric`] accepts.
-    pub const METRICS: [&'static str; 20] = [
+    pub const METRICS: [&'static str; 21] = [
         "final_speed_mps",
         "max_speed_mps",
         "distance_m",
@@ -545,6 +550,7 @@ impl EntitySummary {
         "off_road_s",
         "max_airborne_s",
         "route_progress",
+        "max_los_lost_s",
     ];
 }
 
@@ -1031,6 +1037,7 @@ pub fn run_with_hook(
                 off_road_s: 0.0,
                 max_airborne_s: 0.0,
                 route_progress: 0.0,
+                max_los_lost_s: 0.0,
             },
         });
     }
@@ -1190,6 +1197,9 @@ pub fn run_with_hook(
         for (idx, (id, s)) in states.iter().enumerate() {
             let tr = &mut trackers[idx];
             tr.update(s);
+            if let Some(r) = sim.police().racer(*id) {
+                tr.summary.max_los_lost_s = tr.summary.max_los_lost_s.max(r.los_lost_s);
+            }
             if s.wheel_states.iter().all(|w| !w.contact) {
                 tr.airborne_s += PHYSICS_DT;
                 tr.summary.max_airborne_s = tr.summary.max_airborne_s.max(tr.airborne_s);

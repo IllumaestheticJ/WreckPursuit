@@ -157,7 +157,8 @@ from spawn), `path_length_m`, `final_health`, `max_lateral_g`, `max_long_g`,
 `total_loss` (0/1), `min_z_m`, `off_road_s` (time not on any lane, junction connector or
 junction box at about its height; city runs only), `max_airborne_s` (longest stretch with all
 four wheels off the ground), `route_progress` (fraction of a `follow_route` route covered, 0
-without one).
+without one), `max_los_lost_s` (longest stretch of a pursuit with no police line of sight on the
+entity, s; 0 without police).
 
 World metrics for `world_metric(...)` (all 0 on the flat world): `traffic_agents_final`,
 `traffic_agents_min` (fewest agents at any tick after a 10 s warm-up), `traffic_moving_frac_final`
