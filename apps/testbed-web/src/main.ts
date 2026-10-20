@@ -32,7 +32,6 @@ import { AudioSystem } from "./audio";
 import { UiOverlay } from "./ui/overlay";
 import { MapOverlay } from "./ui/map";
 import { HudLayout } from "./ui/layout";
-import * as wasmExports from "./wasm/pkg/wp_wasm.js";
 import { defaultGameSettings, hasStoredSettings, loadGameSettings, mountGameMenu, type GameSettings, type PlayChoice } from "../../ui-kit/src/live";
 import { gfxMode } from "./render/quality";
 import { RunEndView } from "./ui/runEnd";
