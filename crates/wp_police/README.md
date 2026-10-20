@@ -61,6 +61,11 @@ Pure Rust, no renderer, builds for `wasm32-unknown-unknown`.
   `BountyRecord` is persisted by prompt 08 (`bounty_record` / `set_bounty_record`). It sets
   reinforcement priority (up to `priority_max_reduction` faster response). Night stakes: `payout_scale()`.
 
+- **Blatant speeding** (`heat.blatant`, owner playtest row 60): speeding ≥ 40 km/h over within
+  60 m of an in-service unit with line of sight is recognised at once (L1 at least, pursuit by
+  that unit), day or night. Otherwise a night pursuit needs 40 m for 4 s, which a fast pass-by
+  never gives.
+
 ### Presence & dispatch (`dispatch.rs`)
 - Pool units per district per phase from `presence.toml [patrols.*]`. Shortfalls are spawned
   (after the session start, out of every racer's sight); surplus idle units retire once out of
@@ -106,6 +111,14 @@ Pure Rust, no renderer, builds for `wasm32-unknown-unknown`.
 
 Assignments: `Patrol`, `Respond(incident)`, `Pursue(target)`, `Intercept(point)`, `RoadblockAt`,
 `SpikeAt`, `HeloTrack`, `OutOfService`.
+
+### Turning round (physical units, lights on)
+A unit whose steering target is more than ~107° off its nose (the racer went past it) turns
+round: a forward U-turn at full lock from above 3 m/s (handbrake pulled for 0.6 s when fast,
+held near 6 m/s) or a reverse swing from a standstill (brake held engages reverse, lock that
+swings the nose toward the target), until it faces within 60°; 3 s cooldown. Shadowing units far
+behind the racer close at the phase's pursuit cap and brake (4 m/s²) to arrive at their gap.
+Tested with real cars in `crates/wp_sim/tests/police_passby.rs`.
 
 ### Un-sticking (`stuck.rs`, physical units)
 A unit that wants to move (planned > 1.5 m/s, not holding for a light or traffic) but stays
