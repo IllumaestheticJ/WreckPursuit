@@ -137,6 +137,33 @@ Cloud container, Intel Xeon @ 2.10 GHz, 4 cores, release, real vehicle + damage 
 - The lint is line-based: it can miss a transcendental called through a function pointer or a
   macro, and it stops at the first `#[cfg(test)]` in a file.
 
+## Run 9b — lead/round12 merged (2026-10-20, lead helper)
+
+Merged `origin/lead/round12` into `ws/harness` (merge commit). Conflict choices:
+- `Sim::state_hash` keeps v4 (roadblock barrier bodies) **and** round12's weather hash
+  (barriers first, then weather, then debris).
+- `wp_wasm::Session::run_tick`: the crash-replay snapshot at tick 0 is taken first, then the
+  scenario's police orders are applied (crash replays rerun `run_tick`, so orders reapply).
+- simcli: `police_orders` and `weather` scenario fields both kept; summary metrics
+  `max_spike_puncture`, `spiked_wheels`, `max_los_lost_s` (23 total); world metrics 17.
+- Testbed: round12 already draws spike strips (`render/police_tools.ts`, from
+  `map_dynamic()`), so `Scene.updatePoliceTools` now draws only the physical roadblock
+  barriers. Flat tyres scale the wheel `spin` group, so the panel-mesh wheels deflate too.
+- Goldens re-blessed `[bless]`. Before blessing, hashing as v3 (no barrier section) matched
+  every round12 golden bit-for-bit: the merge changes no round12 behaviour.
+  `golden_roadblock` / `golden_spike_strip` changed with round12's police and still pass.
+
+Gate: fmt ✓, `clippy --workspace -D warnings` ✓, wasm32 build ✓, lint-determinism 0 errors,
+`tsc` ✓, `npm run e2e:police` 7/7 (police are sim vehicles now; barriers still get shoved,
+tyres still go flat). `cargo test --workspace`: 1115 passed, 5 failed, all also failing on
+clean `origin/lead/round12` (not caused by this merge):
+`wp_opponent race::wanted_ai_racer_flees_police_through_the_city`,
+`wp_race race_picker::grid_highway_sprint` (never finishes),
+`wp_wasm race_tests::short_sprint_with_ai_…` (race not over in 120 s), and simcli
+`all_scenarios_pass…` / `goldens_match` through `city/siren_traffic_no_siren`
+(`civilian_collisions` 1, want 0). `clippy --all-targets` also flags
+`wp_audio/src/siren.rs:437` (`inconsistent_digit_grouping`, test code from round12).
+
 ## Run 9 — roadblocks and spike strips you can see and hit (2026-10-20)
 
 Request: "police barricades you can actually see and hit, and spikes that burst your tyres".
