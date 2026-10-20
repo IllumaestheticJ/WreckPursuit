@@ -18,6 +18,8 @@ export interface PanelSettings {
   ambience: number;
   /** Modelled engine synthesizer (default) or layers for every car. */
   engine: EngineVoicing;
+  /** Impacts & horns: modelled synthesis layered on the recordings (default) or recordings only. */
+  impacts: "synth" | "recorded";
 }
 
 function loadSettings(): PanelSettings {
@@ -30,6 +32,7 @@ function loadSettings(): PanelSettings {
     source: "recorded",
     ambience: 0.5,
     engine: "modelled",
+    impacts: "synth",
   };
   try {
     const s = JSON.parse(localStorage.getItem(STORE_KEY) ?? "{}");
@@ -50,6 +53,7 @@ export interface PanelHandlers {
   setSource(source: SoundSource): void;
   setAmbience(gain: number): void;
   setEngineVoicing(v: EngineVoicing): void;
+  setImpacts(mode: "synth" | "recorded"): void;
 }
 
 export class AudioPanel {
@@ -116,6 +120,12 @@ export class AudioPanel {
     });
     eng.id = "audio-engine";
     row("engines", eng).append(" ", Object.assign(document.createElement("span"), { className: "dim", textContent: "(modelled: player + 6 nearest)" }));
+    const imp = this.select(["synth", "recorded"], this.settings.impacts, (v) => {
+      this.settings.impacts = v === "recorded" ? "recorded" : "synth";
+      h.setImpacts(this.settings.impacts);
+    });
+    imp.id = "audio-impacts";
+    row("impacts & horns", imp);
     this.slider("ambience", this.settings.ambience, (v) => {
       this.settings.ambience = v;
       h.setAmbience(v);

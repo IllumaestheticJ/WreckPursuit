@@ -140,6 +140,9 @@ pub struct Desire {
     pub cull_scale: f32,
     /// Engine state for the physically modelled engine voice (passed through unchanged).
     pub engine: Option<crate::engine_model::EngineFrame>,
+    /// Extra low-pass cap, Hz (0 = none): the listener's cabin muffling outside sounds
+    /// (interior camera). The voice's air-absorption low-pass is limited to it.
+    pub lowpass_cap_hz: f32,
 }
 
 impl Desire {
@@ -167,6 +170,7 @@ impl Desire {
             synth: None,
             cull_scale: 1.0,
             engine: None,
+            lowpass_cap_hz: 0.0,
         }
     }
 }
@@ -239,7 +243,11 @@ impl VoiceMixer {
                 freq_hz: d.freq_hz * sp.doppler,
                 load: d.load,
                 phase: d.phase,
-                lowpass_hz: sp.lowpass_hz,
+                lowpass_hz: if d.lowpass_cap_hz > 0.0 {
+                    sp.lowpass_hz.min(d.lowpass_cap_hz)
+                } else {
+                    sp.lowpass_hz
+                },
                 doppler: sp.doppler,
                 pos: d.pos,
                 engine: d.engine,

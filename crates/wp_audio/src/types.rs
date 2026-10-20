@@ -92,6 +92,8 @@ pub mod slot {
     pub const STEAM: u32 = 0x0000_01A0;
     /// Loose / damaged body panels rattling over bumps.
     pub const BODY_RATTLE: u32 = 0x0000_01A1;
+    /// Granular crunch loop following the lattice's deformation power (`impact/crunch`).
+    pub const CRUNCH: u32 = 0x0000_01A2;
     /// Tire squeal loop (paved surfaces).
     pub const SQUEAL: u32 = 0x0000_0200;
     /// Loose-surface scrub loop (gravel, dirt, grass).

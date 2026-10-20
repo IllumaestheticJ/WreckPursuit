@@ -98,6 +98,13 @@ pub mod cues {
     pub const SHIFT: &str = "drivetrain/shift";
     /// Optional city ambience loop (World packs; played by the backend, not the director).
     pub const AMBIENT_CITY_NIGHT: &str = "ambient/city_night";
+    /// Optional synthesised body-panel impact (modal bank, thump, transient, glass tail); one
+    /// per hit on top of the recorded layers (`wp_audio::impact`).
+    pub const IMPACT_BODY: &str = "impact/body";
+    /// Optional granular crunch loop that follows the lattice's deformation power.
+    pub const IMPACT_CRUNCH: &str = "impact/crunch";
+    /// Optional police air horn (police units on cars whose horn is `horn/standard`).
+    pub const HORN_POLICE: &str = "horn/police";
 
     /// Every cue a `World` pack must define.
     pub fn world() -> Vec<&'static str> {
@@ -137,7 +144,7 @@ pub mod cues {
 }
 
 /// Synth names the procedural backend implements (`apps/testbed-web/src/audio/synth.ts`).
-pub const KNOWN_SYNTHS: [&str; 17] = [
+pub const KNOWN_SYNTHS: [&str; 22] = [
     "engine",
     "noise",
     "tone",
@@ -155,6 +162,12 @@ pub const KNOWN_SYNTHS: [&str; 17] = [
     "hiss",
     "spin",
     "engine_physical",
+    // Owner row 74 (`src/audio/impacts/`, `src/audio/horn.ts`).
+    "impact_body",
+    "crunch",
+    "friction",
+    "disc_horn",
+    "air_horn",
 ];
 
 // ----- config ------------------------------------------------------------------------------
@@ -382,6 +395,9 @@ pub struct AudioConfig {
     pub sirens: SirenConfig,
     /// Radio scanner.
     pub scanner: ScannerConfig,
+    /// Physically driven impact / crunch / scrape synthesis (optional, defaults in code).
+    #[serde(default)]
+    pub impact_synth: crate::impact::ImpactSynthConfig,
 }
 
 // ----- cars --------------------------------------------------------------------------------

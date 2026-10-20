@@ -13,6 +13,7 @@
 //! | physically modelled engine voice: firing events, exhaust geometry, mods, per-frame state | [`engine_model`] |
 //! | tire squeal from combined slip × load, loose-surface scrub, surface rolling, thumps | [`tires`] |
 //! | impacts by material × closing speed, glass, scrapes, debris | [`collision`] |
+//! | physically driven impact synthesis: panel modes, thump, crunch, glass tail, friction | [`impact`] |
 //! | siren cadences (wail, yelp, phaser, hi-lo), auto pattern, horn | [`siren`] |
 //! | radio scanner queue (priority, tier delay, chop, music duck) | [`scanner`] |
 //! | distance attenuation, Doppler, air absorption | [`spatial`] |
@@ -30,6 +31,7 @@ pub mod data;
 pub mod director;
 pub mod engine;
 pub mod engine_model;
+pub mod impact;
 pub mod kinematic;
 pub mod mixer;
 pub mod scanner;

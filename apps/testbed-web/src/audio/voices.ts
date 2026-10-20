@@ -5,6 +5,8 @@
 
 import type { EngineSynthHost } from "./engine_host";
 import { engineInstrument, makeSynth, type EngineMix, type EngineSynth, type SynthVoice } from "./synth";
+// Owner row 74: modelled impacts, crunch, friction scrapes and horns (docs/integration/audio-impacts.md).
+import { ImpactSynths, type ClockedSynth } from "./impacts";
 import {
   BUSES,
   voiceKey,
@@ -19,8 +21,13 @@ import {
 
 interface BusNodes {
   user: GainNode;
+  /** Impact sidechain: a big crash briefly ducks the other buses (owner row 74). */
+  side: GainNode;
   duck: GainNode;
 }
+
+/** Buses an impact's sidechain ducks (the impact itself plays on World). */
+const SIDECHAIN_BUSES: Bus[] = ["Engine", "Police", "Music"];
 
 /** Mixer buses with per-bus user gain (debug sliders) and a duck stage driven by the director. */
 export class AudioMixer {
@@ -28,6 +35,8 @@ export class AudioMixer {
   readonly buses: Record<Bus, BusNodes>;
   /** Radio EQ input (band-limited, slightly driven) feeding the Police bus. */
   readonly radioIn: AudioNode;
+  /** Last node before the destination (offline renders tap it). */
+  readonly out: AudioNode;
 
   constructor(readonly ctx: AudioContext) {
     this.master = ctx.createGain();
@@ -36,13 +45,27 @@ export class AudioMixer {
     const comp = ctx.createDynamicsCompressor();
     comp.threshold.value = -10;
     comp.ratio.value = 6;
-    this.master.connect(comp).connect(ctx.destination);
+    // Safety soft clip after it (owner row 74): a big crash's transient can still overshoot the
+    // compressor's attack; tanh keeps the output under full scale instead of hard clipping.
+    // Identity below 0.7, a tanh knee to 0.99 above (input range ±2 via the 0.5 pre-gain).
+    const pre = ctx.createGain();
+    pre.gain.value = 0.5;
+    const clip = ctx.createWaveShaper();
+    const cc = new Float32Array(4096);
+    for (let i = 0; i < cc.length; i++) {
+      const x = ((i / (cc.length - 1)) * 2 - 1) * 2;
+      cc[i] = Math.abs(x) < 0.7 ? x : Math.sign(x) * (0.7 + 0.29 * Math.tanh((Math.abs(x) - 0.7) / 0.29));
+    }
+    clip.curve = cc;
+    this.master.connect(comp).connect(pre).connect(clip).connect(ctx.destination);
+    this.out = clip;
     const buses = {} as Record<Bus, BusNodes>;
     for (const b of BUSES) {
       const user = ctx.createGain();
+      const side = ctx.createGain();
       const duck = ctx.createGain();
-      user.connect(duck).connect(this.master);
-      buses[b] = { user, duck };
+      user.connect(side).connect(duck).connect(this.master);
+      buses[b] = { user, side, duck };
     }
     this.buses = buses;
     const hp = ctx.createBiquadFilter();
@@ -80,6 +103,26 @@ export class AudioMixer {
 
   duck(bus: Bus, gain: number, fadeS: number): void {
     this.buses[bus].duck.gain.setTargetAtTime(gain, this.ctx.currentTime, Math.max(fadeS, 0.01) / 3);
+  }
+
+  /** Audio time until which the current sidechain duck holds, and its depth. */
+  private sideUntil = 0;
+  private sideDepth = 0;
+
+  /**
+   * Impact sidechain: duck the other buses by `depth` (0..1) within ~5 ms, hold `holdS`, recover
+   * over ~0.3 s. A weaker hit during a deeper duck changes nothing.
+   */
+  sidechain(depth: number, holdS: number, t: number): void {
+    if (t < this.sideUntil && depth <= this.sideDepth) return;
+    this.sideDepth = depth;
+    this.sideUntil = t + holdS;
+    for (const b of SIDECHAIN_BUSES) {
+      const g = this.buses[b].side.gain;
+      g.cancelScheduledValues(t);
+      g.setTargetAtTime(1 - depth, t, 0.002);
+      g.setTargetAtTime(1, t + holdS, 0.1);
+    }
   }
 }
 
@@ -183,12 +226,24 @@ export class VoicePool {
    * a skid starts several voices a second, each three new nodes). */
   private readonly freeStrips: { spatial: Strip[]; local: Strip[] } = { spatial: [], local: [] };
 
+  /** Modelled impacts / crunch / friction scrapes / horns (owner row 74); `enabled` = setting. */
+  readonly impacts: ImpactSynths;
+
   constructor(
     private ctx: AudioContext,
     private mixer: AudioMixer,
     private lib: AudioLibrary,
   ) {
+    this.impacts = new ImpactSynths(ctx, lib, (pack, cue) => this.decodedBuffers(pack, cue), (d, h, t) => mixer.sidechain(d, h, t));
     this.preloadSamples();
+  }
+
+  /** Decoded recordings of `pack`/`cue` (empty in procedural mode or while loading). */
+  private decodedBuffers(pack: string, cue: string): AudioBuffer[] {
+    if (this.source !== "recorded") return [];
+    const src = this.cue(pack, cue)?.source;
+    if (!src || !("Samples" in src)) return [];
+    return src.Samples.files.map((f) => this.samples.get(this.sampleUrl(pack, f))).filter((b): b is AudioBuffer => b instanceof AudioBuffer);
   }
 
   /** Playing voices, counting each engine layer folded into an instrument. */
@@ -340,6 +395,8 @@ export class VoicePool {
       return;
     }
     const t = this.ctx.currentTime;
+    const ext = this.impacts.build(voice, pack, cue, def, buf, params, synth, t);
+    if (ext === "skip") return;
     const dest = this.lib.packs[played]?.kind === "Radio" ? this.mixer.radioIn : this.mixer.input(bus);
     const { gain, lp, panner } = this.takeStrip(voice.entity !== LOCAL_ENTITY, t);
     gain.gain.setValueAtTime(looped ? 0 : params.gain, t);
@@ -351,7 +408,11 @@ export class VoicePool {
     let src: AudioBufferSourceNode | null = null;
     let syn: SynthVoice | null = null;
     const source = def?.source;
-    if (buf) {
+    if (ext) {
+      this.played.synth++;
+      syn = ext;
+      syn.output.connect(gain);
+    } else if (buf) {
       this.played.samples++;
       src = this.ctx.createBufferSource();
       src.buffer = buf;
@@ -412,8 +473,8 @@ export class VoicePool {
     // Sirens follow their own clock and must see every phase; others only on change.
     const synthChanged =
       changed(params.freq_hz, l.freq_hz) || pitchMoved || changed(params.load, l.load) || params.phase !== l.phase;
-    // The modelled engine reads every frame (throttle, gear, speed… change without the pitch).
-    if (v.synth && (synthChanged || params.engine)) v.synth.update(params, t);
+    // The modelled engine and clocked synths (impacts, horns) read every frame.
+    if (v.synth && (synthChanged || params.engine || (v.synth as ClockedSynth).everyFrame)) v.synth.update(params, t);
     if (synthChanged) {
       l.freq_hz = params.freq_hz;
       l.pitch = params.pitch;
