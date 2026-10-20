@@ -29,7 +29,29 @@ Tool changes (`tools/specsheet/`, mine): `build_roster.py` writes an optional
 
 ### Changes outside my folders (round 12b)
 - `docs/design/CARS_LORE.md` (P's design docs): the beater entry — the lead asked for the lore line.
-- `apps/simcli/scenarios/cars/` (new group, I's harness folder; CLAUDE.md puts scenario tests there).
+- `apps/simcli/scenarios/cars/` (new group, I's harness folder; CLAUDE.md puts scenario tests there)
+  and their goldens `apps/simcli/golden/cars_beater_*` (new only, `[bless]` commit).
+- `crates/wp_vehicle/tests/differentials.rs` (A): `roster_diff_hashes_are_pinned` pins a
+  `junkyard_beater` hash; re-recorded `0xe9ef92e8d452f551 → 0xb565bf983dfcffda` in a `[bless]`
+  commit (the test says to re-record on a car-data change). The other five cars are unchanged.
+
+**Checks (round 12b, cloud container):** `cargo fmt --check` ✓, `cargo clippy --workspace -- -D
+warnings` ✓, `cargo build --target wasm32-unknown-unknown -p wp_wasm` ✓, `nameplate_check.py`
+(69 files, 0 problems) ✓, `smoke_sim.py` (17 cars × 2 modes deterministic) ✓,
+`collect_results.py` / `pursuit_probe.py --chase` ✓, my 3 `cars/` scenarios ✓.
+`cargo test --workspace --no-fail-fast`: everything passes **except failures that are already on
+`origin/lead/round12` (05f92f8)**. I proved each one independent of my change by running it with
+the same binary and the old beater files swapped back in: identical result.
+- `simcli` `scenarios::all_scenarios_pass_and_are_deterministic_in_process`:
+  `city/blocked_parked_player_vesper` expects `traffic_turnarounds` ≥ 1, gets 0 (debug_sedan,
+  D's blocked-vehicle traffic work, `c29eeca` / `7f1a3ea`).
+- `simcli` `scenarios::goldens_match`: hash mismatches on `city_blocked_parked_player_{grid,vesper}`,
+  `golden_city_chase`, `golden_night_pursuit_escape`, `panels_frontal_56_hood`,
+  `police_sideswipe_patrol_day`, `weather_{aquaplane_control,aquaplane_puddle,fog_pursuit,
+  fog_pursuit_clear,wet_brake_100_0}` (debug build; the release `simcli goldens` lists 18, the same
+  18 with the old data). None of them spawns the beater. → lead: re-bless after the round-12 merges.
+- `wp_net` `vesper_e2e::four_clients_three_minutes_in_port_vesper`: p0 `Escaped`, expected
+  `Captured` (debug_coupe racer; same with the old data). → F / lead.
 
 ### New requests (round 12b)
 
