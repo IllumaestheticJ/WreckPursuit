@@ -41,6 +41,7 @@ const FIELDS: Record<string, { label: string; min: number; max: number; step: nu
   t_return_s: { label: "return time", min: 0.05, max: 0.8, step: 0.01, unit: "s", hint: "full lock → centre after release (reference ≈ 0.33 s)" },
   speed_sensitivity: { label: "speed sensitivity", min: 0, max: 1, step: 0.05, scale: 100, unit: "%", hint: "less lock at speed (the owner's reference setting: 75 %)" },
   sens_ref_kmh: { label: "sens. ref speed", min: 40, max: 250, step: 1, unit: "km/h", hint: "speed where lock = 1 / (1 + sensitivity) (75 %: 57 % lock)" },
+  counter_margin_deg: { label: "countersteer limit", min: 0, max: 5, step: 0.05, unit: "°", hint: "step 10 snap-back: in a slide a held counter key points the wheels at most this far past the front axle's travel, so the lock unwinds as the slide closes (0 = off, the 'before'; default 0.25°)" },
   sens_exponent: { label: "sens. exponent", min: 1, max: 4, step: 0.5, hint: "lock = 1 / (1 + s·(v / ref)^exp); 2 = like the angle a constant-g corner needs" },
   align_gain: { label: "VR: align gain", min: 0, max: 1.2, step: 0.05, hint: "velocity-relative steering: how far the wheels follow the front axle's travel in a slide (1 = along it)" },
   t_align_s: { label: "VR: slide align time", min: 0.05, max: 0.8, step: 0.01, unit: "s", hint: "velocity-relative steering: in a slide the wheels move at least full lock in this time" },
@@ -100,7 +101,8 @@ const PIVOT_FIELDS: Record<string, { label: string; min: number; max: number; st
   hb_pivot_accel: { label: "handbrake pivot aid", min: 0, max: 15, step: 0.5, unit: "rad/s²", hint: "round12 row 109: yaw acceleration added while the handbrake AND a steer key are held (builds over 0.4 s, full ≤ 55 km/h, gone at 75 km/h); 0 = off, pure tyre physics" },
   hb_pivot_cap: { label: "pivot aid yaw cap", min: 0.5, max: 6, step: 0.25, unit: "rad/s", hint: "the aid fades out as the yaw rate toward the key reaches this (never adds to a fast spin)" },
 };
-const RIDE_STORE = "wp.driftLabW.ride";
+// v2: step 10's default ride became medium weight (an older saved ride must not override it).
+const RIDE_STORE = "wp.driftLabW.ride.v2";
 const EVERYWHERE_STORE = "wp.driftLabW.everywhere";
 const pct = (x: number) => `${Math.round((x ?? 0) * 100)}%`;
 
@@ -237,9 +239,9 @@ export class DriftLabWPanel {
       /* storage blocked: defaults */
     }
     try {
-      this.sim.rideTuneSet(ride || JSON.stringify(this.sim.rideTuneDefaults().lab));
+      this.sim.rideTuneSet(ride || JSON.stringify(this.sim.rideTuneDefaults().medium_weight));
     } catch {
-      this.sim.rideTuneSet(JSON.stringify(this.sim.rideTuneDefaults().lab));
+      this.sim.rideTuneSet(JSON.stringify(this.sim.rideTuneDefaults().medium_weight));
     }
     let carTune = "";
     try {
@@ -353,6 +355,40 @@ export class DriftLabWPanel {
       if (current) sel.value = current;
       sel.onchange = () => this.restart(sel.value);
       row("car", "reference-parity test cars (parity_*) and roster cars; restarts the lab", sel, document.createElement("span"));
+    }
+    // Step 10 A/B (lead): "before" = steps 1–9 (no countersteer limit, lab ride) vs "new" =
+    // the default (countersteer limit 0.25°, medium weight). Tyres stay as set below.
+    {
+      const ab = document.createElement("div");
+      ab.style.cssText = "display:flex;gap:6px;align-items:center;margin:2px 0 4px";
+      const lbl = document.createElement("span");
+      lbl.textContent = "handling A/B:";
+      ab.appendChild(lbl);
+      for (const [label, id, margin, ride] of [
+        ["before", "drift-lab-w-before", 0, "lab"],
+        ["new", "drift-lab-w-new", (defaults as Record<string, number>).counter_margin_deg, "medium_weight"],
+      ] as const) {
+        const b = document.createElement("button");
+        b.id = id;
+        b.textContent = label;
+        b.title =
+          label === "before"
+            ? "steps 1–9: no countersteer limit (lifting off with the counter key held snaps the car back and can spin it), step-3 lab ride"
+            : "step 10 default: countersteer limit 0.25° past the travel (progressive recovery) + medium weight (slower weight transfer, keeps the hold)";
+        b.onclick = () => {
+          this.save({ ...(this.sim.plainSteer() ?? defaults), counter_margin_deg: margin });
+          const text = JSON.stringify(this.sim.rideTuneDefaults()[ride]);
+          this.sim.rideTuneSet(text);
+          try {
+            localStorage.setItem(RIDE_STORE, text);
+          } catch {
+            /* ignore */
+          }
+          this.restart(this.car);
+        };
+        ab.appendChild(b);
+      }
+      this.body.appendChild(ab);
     }
     // "Use W handling everywhere" (lead): free drive, city chase and races keep this profile.
     {
@@ -491,7 +527,7 @@ export class DriftLabWPanel {
         const val = document.createElement("span");
         const show = () => {
           val.textContent = `${Number(Number(input.value).toFixed(2))}${f.unit ? ` ${f.unit}` : ""}`;
-          val.style.color = Math.abs(Number(input.value) - rd.lab[key]) > 1e-6 ? "#ffd27a" : "";
+          val.style.color = Math.abs(Number(input.value) - rd.medium_weight[key]) > 1e-6 ? "#ffd27a" : "";
         };
         show();
         input.oninput = () => {
@@ -526,12 +562,14 @@ export class DriftLabWPanel {
         };
         row("keep ride height", "raise the spring preload so softer springs keep the data's static ride height (off the bump stops)", input, document.createElement("span"));
       }
-      for (const [label, which] of [["lab default", "lab"], ["slow weight (clip 4)", "slow_weight"], ["suspension data", "data"]] as const) {
+      for (const [label, which] of [["medium weight (new)", "medium_weight"], ["lab default (before)", "lab"], ["slow weight (clip 4)", "slow_weight"], ["suspension data", "data"]] as const) {
         const b = document.createElement("button");
         b.textContent = label;
         b.title =
-          which === "lab"
-            ? "calmer, slower weight transfer (springs 0.9, bars 0.25, dampers 1.4 / 1.8)"
+          which === "medium_weight"
+            ? "step 10 default: slower weight transfer that keeps the held drift (springs 0.7, bars 0.15, dampers 1.6 / 2.1, ride height kept, travel 1.4, roll / pitch inertia 1.8 / 1.6). Restarts the car"
+            : which === "lab"
+            ? "step 3 default: calmer, slower weight transfer (springs 0.9, bars 0.25, dampers 1.4 / 1.8)"
             : which === "slow_weight"
               ? "reference clip 4: roll builds over ~0.6 s to ~6°, no overshoot (soft springs, ride height kept, more travel and inertia). Breaks the spin model's knife-edge held drift. Restarts the car"
               : "no scaling: the car files as they are";

@@ -75,6 +75,18 @@ pub struct PlainSteer {
     /// same offset as in grip; blended in by the slide fade). Less = a held key asks for less
     /// angle relative to the travel in a slide.
     pub slide_key_gain: f32,
+    /// Snap-back (lead, step 10): in a slide, a held countersteer key may point the front
+    /// wheels at most this far past the front axle's direction of travel, degrees, so the lock
+    /// unwinds as the slide closes (what a wheel's self-aligning torque does in the driver's
+    /// hands) instead of staying at full counter-lock and yanking the nose the other way.
+    /// Faded in with body slip between `counter_from_deg` and `counter_full_deg` (no effect in
+    /// grip). 0 = off (no limit, the step 1–9 "before"); default 0.25° (step 10: the front
+    /// tyres' side force flips about 1° past the travel, peak at ~4°).
+    pub counter_margin_deg: f32,
+    /// Body slip, degrees, where the countersteer limit starts fading in.
+    pub counter_from_deg: f32,
+    /// Body slip, degrees, from which the countersteer limit is fully on.
+    pub counter_full_deg: f32,
 }
 
 /// Where [`PlainSteer::speed_sensitivity`] acts.
@@ -106,6 +118,9 @@ impl Default for PlainSteer {
             align_full_deg: 6.0,
             t_align_s: 0.28,
             slide_key_gain: 1.0,
+            counter_margin_deg: 0.25,
+            counter_from_deg: 3.0,
+            counter_full_deg: 8.0,
         }
     }
 }
@@ -266,8 +281,45 @@ pub fn update_center_angle(current: f32, inp: &PlainInput, p: &PlainSteer, dt: f
     } else {
         key
     };
+    let target = counter_limited(target, inp, p, lock);
     let rack = slew(rack, target, p, dt);
     -(rack + inp.pull) * lock
+}
+
+/// [`PlainSteer::counter_margin_deg`]: the rack target (−1..=1, + = right) limited so a held
+/// countersteer key points the wheels at most the margin past the front axle's travel in a
+/// slide. Unchanged when the limit is off, in grip, below 3 m/s or with the key released.
+fn counter_limited(target: f32, inp: &PlainInput, p: &PlainSteer, lock: f32) -> f32 {
+    if p.counter_margin_deg <= 0.0
+        || inp.speed.abs() < 3.0
+        || inp.driver.abs() <= crate::steering::STEER_DEADZONE
+        || lock <= 1e-6
+    {
+        return target;
+    }
+    let a = inp.body_slip.abs().to_degrees();
+    let (lo, hi) = (
+        p.counter_from_deg,
+        p.counter_full_deg.max(p.counter_from_deg + 0.1),
+    );
+    let t = ((a - lo) / (hi - lo)).clamp(0.0, 1.0);
+    let fade = t * t * (3.0 - 2.0 * t);
+    if fade <= 0.0 {
+        return target;
+    }
+    let travel = inp.front_axle_angle;
+    let wheel = -(target + inp.pull) * lock;
+    // Countersteer = the wheels on the travel's side; only that side is limited.
+    if wheel * travel <= 0.0 {
+        return target;
+    }
+    // Faded: at fade 0 the limit sits a full lock further out (no effect).
+    let limit = travel.abs() + p.counter_margin_deg.to_radians() + (1.0 - fade) * 2.0 * lock;
+    if wheel.abs() <= limit {
+        return target;
+    }
+    let w = travel.signum() * limit;
+    (-w / lock - inp.pull).clamp(-1.0, 1.0)
 }
 
 /// Velocity-relative steering (see [`PlainSteer::velocity_relative`]): the angle moves toward
@@ -505,5 +557,55 @@ mod tests {
             a = update_center_angle(a, &inp, &p, DT);
         }
         assert!((a - 0.2).abs() < 1e-4, "{a}");
+    }
+
+    #[test]
+    fn countersteer_limit_follows_the_travel_in_a_slide_only() {
+        let p = PlainSteer::default();
+        let off = PlainSteer {
+            counter_margin_deg: 0.0,
+            ..p
+        };
+        // Left-hand slide: the front axle travels 20° right of the heading (−); the right key
+        // (countersteer) would go to full lock (−0.6 rad × lock fraction).
+        let slide = PlainInput {
+            driver: 1.0,
+            speed: 12.0,
+            full_lock: 0.6,
+            pull: 0.0,
+            front_axle_angle: -20f32.to_radians(),
+            body_slip: -30f32.to_radians(),
+        };
+        let run = |inp: &PlainInput, p: &PlainSteer| {
+            let mut a = 0.0;
+            for _ in 0..480 {
+                a = update_center_angle(a, inp, p, DT);
+            }
+            a
+        };
+        let limit = -(20.0 + p.counter_margin_deg).to_radians();
+        assert!(
+            (run(&slide, &p) - limit).abs() < 1e-4,
+            "{}",
+            run(&slide, &p)
+        );
+        let lock = 0.6 * p.lock_frac(12.0);
+        assert!((run(&slide, &off) + lock).abs() < 1e-5);
+        // In grip (body slip 1°), into the turn, or released: no limit.
+        let grip = PlainInput {
+            body_slip: -1f32.to_radians(),
+            ..slide
+        };
+        assert!((run(&grip, &p) + lock).abs() < 1e-5);
+        let into = PlainInput {
+            driver: -1.0,
+            ..slide
+        };
+        assert!((run(&into, &p) - lock).abs() < 1e-5);
+        let rel = PlainInput {
+            driver: 0.0,
+            ..slide
+        };
+        assert_eq!(run(&rel, &p), 0.0);
     }
 }

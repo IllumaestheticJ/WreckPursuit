@@ -107,6 +107,25 @@ impl RideTune {
         }
     }
 
+    /// Drift Lab W step 10 "new" ride (lead: weight + snap-back as one default): a milder
+    /// [`RideTune::slow_weight`] that keeps the clip-1 hold — springs × 0.7, bars × 0.15,
+    /// dampers × 1.6 / 2.1 (ride height kept, travel × 1.4), roll / pitch inertia × 1.8 / 1.6,
+    /// yaw inertia unchanged (more yaw inertia breaks the hold). Measured: roll ≈ 1.05 Hz,
+    /// ζ ≈ 1.0, step-steer rise 0.40 s (lab default 0.31, slow weight 0.60), turn-in unchanged.
+    pub fn medium_weight() -> Self {
+        Self {
+            spring: 0.7,
+            arb: 0.15,
+            damper_bump: 1.6,
+            damper_rebound: 2.1,
+            keep_ride_height: true,
+            travel: 1.4,
+            roll_inertia: 1.8,
+            pitch_inertia: 1.6,
+            ..Self::default()
+        }
+    }
+
     /// `def` scaled ([`RideTune::scaled`]) for a corner carrying `corner_load_n` at rest:
     /// travel × [`RideTune::travel`] and, with [`RideTune::keep_ride_height`], the preload
     /// raised so the static compression stays as in the data.
@@ -266,6 +285,20 @@ mod tests {
         assert!(m.roll_zeta > 0.9, "{m:?}");
         let base = ride_model(&d, &RideTune::default());
         assert!(m.pitch_hz < base.pitch_hz, "{m:?}");
+    }
+
+    #[test]
+    fn medium_weight_sits_between_the_lab_default_and_slow_weight() {
+        let d = car();
+        let lab = ride_model(&d, &RideTune::lab_default());
+        let mid = ride_model(&d, &RideTune::medium_weight());
+        let slow = ride_model(&d, &RideTune::slow_weight());
+        assert!(
+            slow.roll_hz < mid.roll_hz && mid.roll_hz < lab.roll_hz,
+            "{mid:?}"
+        );
+        assert!(mid.roll_zeta > 0.85, "{mid:?}");
+        assert_eq!(RideTune::medium_weight().yaw_inertia, 1.0);
     }
 
     #[test]
