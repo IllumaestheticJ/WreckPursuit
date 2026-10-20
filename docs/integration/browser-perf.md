@@ -70,6 +70,13 @@ itself differs run to run (who crashes, how many police / promoted traffic cars)
 ¹ Per frame, and a frame at 1.7 fps covers 0.6 s of sim (more events, contacts and crashed-
 panel re-skins per frame); per sim second it is about a third of "before".
 
+**After merging the newer `lead/round12`** (fleet / LOD traffic and police meshes, races;
+same profile, auto quality): chase RTF **0.951** (5.3 fps, p50 183 ms, 755 draw calls, 339k
+triangles with ~18 cars drawn as real meshes, 54 wasm calls, 1116 KB/frame incl. shader
+compiles of arriving car models), rain RTF **0.992** (5.6 fps, 503 calls, 264k triangles,
+632 KB/frame). Structure unchanged: 1 point light, ~100 / 677 city tiles drawn, 20–29 / 94
+signal heads, 0 material bumps.
+
 wasm↔JS calls per frame scale with the cars on screen (telemetry, panel states and lattice
 nodes per car); fixed per-frame calls went 7 → 2 for `world_info`. JSON per frame: the events
 JSON is no longer parsed and re-stringified for the audio director (passed through), police
@@ -132,11 +139,11 @@ Not changed (and why):
 
 `node e2e/perf_check.mjs` (`npm run e2e:perf`; also step 7 of `e2e/run.mjs` = `just web-e2e`,
 `PERF=0` skips it) runs the profile on both chases and fails on: real-time factor < 0.75 (target
-0.95 printed), > 12 frames over 250 ms in 12 s, > 1200 draw calls, > 300k triangles, > 120
-wasm calls, > 1600 KB allocated per frame, more than one point light, an untiled city, all
+0.95 printed), > 12 frames over 250 ms in 12 s, > 1600 draw calls, > 700k triangles, > 120
+wasm calls, > 2400 KB allocated per frame, more than one point light, an untiled city, all
 signal heads drawn, or any material version bump in steady frames. Thresholds are ≈ 2× the
 measured values so a slow CI box does not flake; the structural ones are machine-independent.
-Last run: chase 0.989, rain 0.982 (both pass the 0.95 target).
+Before the round-12 merge: chase 0.989, rain 0.982; after it see the gates section.
 
 ## For machine S (ws/art, low-poly dark restyle) — merge notes
 

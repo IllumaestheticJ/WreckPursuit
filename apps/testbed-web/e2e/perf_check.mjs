@@ -14,17 +14,19 @@ const SECS = process.env.PERF_SECS ?? "12";
 
 /** Hard limits per run (fail) and the target real-time factor (reported). */
 const LIMITS = {
-  // Measured after the pass: 0.99–1.00 (chase), 0.97–0.99 (rain). Before: 0.23 / 0.2x.
+  // Measured after the pass (with round 12's fleet / LOD traffic merged): 0.95–0.99 (chase),
+  // 0.98–0.99 (rain). Before the pass: 0.25 / 0.22.
   minRtf: 0.75,
   targetRtf: 0.95,
-  // Measured ~560 / ~520; before ~355 (one mesh per city material, nothing culled).
-  maxDrawCalls: 1200,
-  // Measured ~145k / ~110k; before ~522k.
-  maxTriangles: 300000,
-  // Measured ~51 / ~52 (most of it: telemetry + panel states + lattice nodes per car).
+  // Measured ~755 / ~505; before ~355 (one mesh per city material, nothing culled).
+  maxDrawCalls: 1600,
+  // Measured ~340k / ~265k with the fleet meshes (~145k / ~113k without); before ~522k.
+  maxTriangles: 700000,
+  // Measured ~54 / ~44 (most of it: panel states + lattice nodes per car).
   maxWasmCallsPerFrame: 120,
-  // Measured ~550 / ~680 KB (the sampling profiler counts collected objects: GC pressure).
-  maxAllocKBPerFrame: 1600,
+  // Measured ~630–1120 KB (the sampling profiler counts collected objects: GC pressure; car
+  // models arriving compile shaders in the window).
+  maxAllocKBPerFrame: 2400,
   // Every frame over 250 ms loses sim time (slow motion); measured 0–3 in 12 s.
   maxFramesOver250: 12,
 };
