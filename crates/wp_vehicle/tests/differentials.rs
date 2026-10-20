@@ -324,7 +324,7 @@ fn every_diff_type_is_deterministic_and_snapshot_exact() {
 fn roster_diff_hashes_are_pinned() {
     // Re-recorded [bless] in round 12b (ride rework: tyre compliance, dampers, car data), and
     // for owner rows 56/57/72 (self-aligning countersteer: the launch holds its heading with
-    // released-key steering; handbrake data), and for owner row 92: lindwurm_4t / junkyard_beater
+    // released-key steering; handbrake data), for owner row 92: lindwurm_4t / junkyard_beater
     // suspension data, and sperber_32 (AWD: the TCS-braked ice wheel drags backwards, so
     // anti-dive jacks); the other three are unchanged.
     // Re-recorded [bless] for the spin side-force floor (the split-µ launch spins the

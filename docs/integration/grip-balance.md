@@ -58,6 +58,27 @@ Step 3 details (parity_rwd_d unless named):
 | tyre-load chatter in a 60 mph corner | 0.6–1.0 kN RMS | 0.00 kN |
 | FWD (parity_fwd_c) body slip 60 / 100 mph, gradient 60 / 100 km/h | 1.1 / 2.3°, +0.29 / +0.84 | 1.3 / 1.5°, +0.37 / +0.97 |
 
+## Merge of lead/tyre-slip e2c866a4 (transitions) + handbrake pivot aid restored
+
+- Tyre-slip's *transition: swing rack (test)* preset and the `swing_rate` / `swing_yaw_dps`
+  plain-steering knob (default off), merged. Both rows of buttons are kept (drift best +
+  transition). The side-force floor call is tyre-slip's (lab A/B `CarTune::side_floor`).
+- **Handbrake pivot aid restored** (owner row 109, owner-approved). The round12 merge
+  (a4709fca) had dropped it with A's drift code, because it kept its strength in A's
+  `DriftTuning`. Now `crate::pivot` has its own `PivotTuning` (round12's defaults: 7 rad/s²,
+  cap 3 rad/s), `Vehicle::hb_held_s` is back, and snapshot format 12 stores it.
+  `tests/handbrake.rs::the_clip_2_hairpin_pivots_with_the_aid_and_is_caught` passes again.
+- **Still failing** (`cargo test -p wp_vehicle`), all near-threshold or lineage-dependent, for
+  their owners:
+
+| test | value | owner |
+|---|---|---|
+| `drift_lab_b` held_counter_key, sloppy_driving; `drift_lab_b_shaped` | Drift Lab B assists lost round12's TCS-off feathering | W (lineage) |
+| `drift_lab_b::handbrake_stabs_add_rotation_and_drive_comes_back` | red on the base too | W |
+| `handbrake::a_hairpin_pivot_is_caught_with_throttle_and_opposite_lock` | rampart_50 caught after 0.825 s (bound 0.8 s) with W's keyboard steering | vehicle (row 109) |
+| `slide_control::self_aligning_steering_does_not_wobble_a_keyboard_corner` | sentinel_cruiser 0.2144 vs 0.2135, after the probe fix | slide assists / vehicle |
+| `tyre_slip::spin_model_holds_the_clip_1_drift_where_the_ellipse_spins` | spins after the probe fix (knife-edge drift) | tyre-slip |
+
 ## Round12 merge, owner's flat-rpm bug, "drift: best (test)" (2026-10-20, late)
 
 **Flat rpm in 3rd ("even with the clutch on manual").** Two causes:

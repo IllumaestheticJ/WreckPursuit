@@ -34,7 +34,7 @@ use crate::suspension::{
 };
 use crate::tire::{
     combined_forces_spin, combined_forces_weighted, load_sensitive_mu, low_speed_lateral,
-    pneumatic_trail, relax, slip_angle, slip_ratio, spin_side_floor, surface_grip,
+    pneumatic_trail, relax, slip_angle, slip_ratio, spin_side_floor, surface_grip, SpinSideFloor,
     SLIP_RATIO_V_MIN, SPIN_SIDE_FLOOR,
 };
 use crate::TireDb;
@@ -292,6 +292,8 @@ pub struct Vehicle {
     pub(crate) slide_gate: crate::steering::SlideGate,
     /// Keyboard steer input after the key ramp ([`crate::steering::key_steer`]).
     pub(crate) key_steer: f32,
+    /// How long the handbrake has been pulled, s (pivot aid build-up, row 109); in snapshots.
+    pub(crate) hb_held_s: f32,
 }
 
 impl Vehicle {
@@ -411,6 +413,7 @@ impl Vehicle {
             drift_cmd: crate::drift::DriftCommand::default(),
             slide_gate: crate::steering::SlideGate::default(),
             key_steer: 0.0,
+            hb_held_s: 0.0,
             stalled: false,
             corners,
         };
@@ -560,6 +563,7 @@ impl Vehicle {
         self.drift_cmd = crate::drift::DriftCommand::default();
         self.slide_gate = crate::steering::SlideGate::default();
         self.key_steer = 0.0;
+        self.hb_held_s = 0.0;
         self.stalled = false;
     }
 
@@ -1357,6 +1361,7 @@ impl Vehicle {
                     pull: steer_in.pull,
                     front_axle_angle: steer_in.front_axle_angle,
                     body_slip: steer_in.body_slip,
+                    yaw_rate: self.chassis.ang_vel.dot(self.chassis.rot * V3::Z),
                 },
                 &p,
                 dt,
@@ -1715,6 +1720,24 @@ impl Vehicle {
                 torque -= up * (t.yaw_damping * self.def.mass_kg * wheelbase * wheelbase * r);
             }
         }
+        // Handbrake pivot aid (row 109, owner-approved yaw-torque exception, `crate::pivot`).
+        self.hb_held_s = if handbrake > HANDBRAKE_ON {
+            self.hb_held_s + dt
+        } else {
+            0.0
+        };
+        let pivot = crate::pivot::pivot_yaw_accel(
+            &crate::pivot::PivotTuning::default(),
+            assists,
+            handbrake,
+            self.hb_held_s,
+            input.steer,
+            v_fwd,
+            yaw_rate,
+        );
+        if pivot != 0.0 {
+            torque += up * (self.def.inertia_kgm2[2] * pivot);
+        }
         self.force = force;
         self.torque = torque;
 
@@ -2045,15 +2068,15 @@ impl Vehicle {
             w.omega = om;
             w.kappa = slip_ratio(om, r, vx);
             let (fx, fy) = forces(w.kappa, alpha, fz, grip);
-            // Round 12: side-force floor under heavy drive wheelspin (straight launches on
-            // cambered roads). The lab's spin model has its own combined slip, so it is skipped
-            // there.
-            let fy = if spin.is_none() {
-                spin_side_floor(tire, w.kappa, alpha, fz, grip, fy, &SPIN_SIDE_FLOOR)
-            } else {
-                fy
+            // Side-force floor under heavy drive wheelspin (shipped default; lab can A/B).
+            let floor = match car_tune {
+                Some(t) => SpinSideFloor {
+                    floor: t.side_floor,
+                    ..SPIN_SIDE_FLOOR
+                },
+                None => SPIN_SIDE_FLOOR,
             };
-            let fy = fy * side_scale;
+            let fy = spin_side_floor(tire, w.kappa, alpha, fz, grip, fy, &floor) * side_scale;
             let mu_y = load_sensitive_mu(
                 tire.lateral.d,
                 tire.load_sensitivity,

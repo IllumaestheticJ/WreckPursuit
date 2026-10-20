@@ -397,6 +397,144 @@ fn sample(u: &mut impl FnMut(f32, f32) -> f32) -> CarTune {
     }
 }
 
+/// `vrsearch [n]`: seeded random search over Drift Lab W's velocity-relative steering knobs
+/// (`PlainSteer`), with `VR_TYRE=spin` (spin model) or the shipped tyres, ranked by [`robust`]
+/// minus 0.3 per % of grip change past 5 %.
+fn vrsearch(n: usize) {
+    let set = robust_set();
+    let d = car("parity_rwd_d");
+    plain::set_override(Some(PlainSteer::default()));
+    car_lab::set_override(Some(CarTune {
+        side_floor: 0.0,
+        ..CarTune::default()
+    }));
+    let g0 = grip(&d);
+    let tyre = if std::env::var("VR_TYRE").as_deref() == Ok("spin") {
+        spin()
+    } else {
+        CarTune::default()
+    };
+    car_lab::set_override(Some(tyre));
+    let mut rng = wp_math::Rng::new(5);
+    let mut rows = Vec::new();
+    for _ in 0..n {
+        let r: Vec<f32> = (0..5).map(|_| rng.next_f32()).collect();
+        let from = 5.0 + 20.0 * r[1];
+        let p = PlainSteer {
+            velocity_relative: true,
+            align_gain: 0.2 + 1.0 * r[0],
+            align_from_deg: from,
+            align_full_deg: from + 5.0 + 25.0 * r[2],
+            t_align_s: 0.15 + 0.7 * r[3],
+            slide_key_gain: 1.2 * r[4],
+            ..PlainSteer::default()
+        };
+        plain::set_override(Some(p));
+        let (mut sc, v) = robust(&set);
+        let worst = grip(&d)
+            .iter()
+            .zip(&g0)
+            .map(|(a, b)| ((a - b) / b.abs().max(1e-3) * 100.0).abs())
+            .fold(0.0f32, f32::max);
+        sc -= 0.3 * (worst - 5.0).max(0.0);
+        rows.push((sc, p, worst, v));
+    }
+    plain::set_override(Some(PlainSteer::default()));
+    car_lab::set_override(None);
+    rows.sort_by(|a, b| b.0.total_cmp(&a.0));
+    for (sc, p, worst, v) in rows.iter().take(6) {
+        let held = v.iter().filter(|h| h.m.held).count();
+        let band = v.iter().filter(|h| h.m.held && h.band_s >= 2.0).count();
+        println!(
+            "score {sc:.2} held {held}/27 (band ≥ 2 s {band}) grip {worst:.1} % PLAIN='{}'",
+            serde_json::to_string(p).unwrap()
+        );
+    }
+}
+
+/// Release score for the joint search: reference = a slow spin after the keys go up mid-drift.
+fn release_score() -> (f32, usize) {
+    let mut sc = 0.0;
+    let mut slow = 0;
+    for id in ["parity_rwd_d", "parity_rwd_a"] {
+        let c = car(id);
+        for rel in [1.5f32, 2.5] {
+            let (.., class) = release_case(&c, rel);
+            sc += match class {
+                "**slow spin** (reference)" => {
+                    slow += 1;
+                    2.0
+                }
+                "late spin" => 0.5,
+                "snap" => -1.0,
+                "holds" | "straightens" => -2.0,
+                _ => -0.5,
+            };
+        }
+    }
+    (sc, slow)
+}
+
+/// `joint [n]`: seeded search over velocity-relative steering + spin-model strength, scored by
+/// [`robust`] + [`release_score`] − grip penalty (past 5 %).
+fn joint(n: usize) {
+    let set = robust_set();
+    let d = car("parity_rwd_d");
+    plain::set_override(Some(PlainSteer::default()));
+    car_lab::set_override(Some(CarTune {
+        side_floor: 0.0,
+        ..CarTune::default()
+    }));
+    let g0 = grip(&d);
+    let mut rng = wp_math::Rng::new(9);
+    let mut rows = Vec::new();
+    for _ in 0..n {
+        let r: Vec<f32> = (0..12).map(|_| rng.next_f32()).collect();
+        let from = 4.0 + 16.0 * r[1];
+        let p = PlainSteer {
+            velocity_relative: r[11] < 0.85,
+            align_gain: 0.2 + 1.0 * r[0],
+            align_from_deg: from,
+            align_full_deg: from + 4.0 + 20.0 * r[2],
+            t_align_s: 0.15 + 0.6 * r[3],
+            slide_key_gain: 1.2 * r[4],
+            ..PlainSteer::default()
+        };
+        let t = CarTune {
+            spin_model: true,
+            spin_b0: 3.0 + 12.0 * r[5],
+            spin_b2: 1.2 + 2.5 * r[6],
+            spin_c: 0.6 + 0.4 * r[7],
+            spin_p: (2.0 + 6.0 * r[8]).round(),
+            spin_fx_slide: r[9],
+            side_floor: 0.4 * r[10] + 0.2,
+            ..CarTune::default()
+        };
+        plain::set_override(Some(p));
+        car_lab::set_override(Some(t));
+        let (rs, v) = robust(&set);
+        let (rel, slow) = release_score();
+        let worst = grip(&d)
+            .iter()
+            .zip(&g0)
+            .map(|(a, b)| ((a - b) / b.abs().max(1e-3) * 100.0).abs())
+            .fold(0.0f32, f32::max);
+        let sc = rs + rel - 0.3 * (worst - 5.0).max(0.0);
+        let held = v.iter().filter(|h| h.m.held && h.band_s >= 2.0).count();
+        rows.push((sc, p, t, held, slow, worst));
+    }
+    plain::set_override(Some(PlainSteer::default()));
+    car_lab::set_override(None);
+    rows.sort_by(|a, b| b.0.total_cmp(&a.0));
+    for (sc, p, t, held, slow, worst) in rows.iter().take(8) {
+        println!(
+            "score {sc:.2} held(band≥2s) {held}/27 slow-spin release {slow}/4 grip {worst:.1}%\n  PLAIN='{}'\n  TYRE='{}'",
+            serde_json::to_string(p).unwrap(),
+            serde_json::to_string(t).unwrap()
+        );
+    }
+}
+
 /// `search [n]`: seeded random search, ranked by [`robust`].
 fn search(n: usize) {
     let set = robust_set();
@@ -735,7 +873,16 @@ fn matrix() {
     let set = robust_set();
     let d = car("parity_rwd_d");
     car_lab::set_override(None);
+    // Grip reference: the old tyres (floor 0) with the default plain steering.
+    let plain_now = plain::active();
+    plain::set_override(Some(PlainSteer::default()));
+    car_lab::set_override(Some(CarTune {
+        side_floor: 0.0,
+        ..CarTune::default()
+    }));
     let g0 = grip(&d);
+    car_lab::set_override(None);
+    plain::set_override(plain_now);
     let snap = hold_snapshot(&d);
     println!("| config | held / 27 | held cases (car entry° g) | grip max |Δ| % (worst) | basin edge → eq ° (width) | straight launch yaw < 3° (rwd a/b/d × 0° / 2° slope) |");
     println!("|---|---|---|---|---|---|");
@@ -912,6 +1059,250 @@ fn launch_table() {
     car_lab::set_override(None);
 }
 
+/// `roster`: straight launches for every car in data/cars (+ parity cars) on 0 / 1 / 2 / 3°
+/// cross-slopes, the shipped side-force floor vs the old ellipse (`side_floor` 0) and
+/// `FLOORS=0.2,0.4` variants. Cells: max yaw ° at 0 / 1 / 2 / 3°.
+fn roster() {
+    let data = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data/cars");
+    let mut ids: Vec<String> = std::fs::read_dir(&data)
+        .unwrap()
+        .filter_map(|e| {
+            let p = e.ok()?.path();
+            if p.extension()? != "json" {
+                return None;
+            }
+            Some(p.file_stem()?.to_str()?.to_string())
+        })
+        .collect();
+    ids.sort();
+    ids.extend(
+        wp_vehicle::drift_lab_w::PARITY_CARS
+            .iter()
+            .map(|s| s.to_string()),
+    );
+    let mut floors: Vec<f32> = vec![0.0, wp_vehicle::tire::SPIN_SIDE_FLOOR.floor];
+    if let Ok(f) = std::env::var("FLOORS") {
+        floors.extend(f.split(',').map(|x| x.parse::<f32>().expect("number")));
+    }
+    print!("| car | layout |");
+    for f in &floors {
+        print!(" floor {f} (yaw ° at 0/1/2/3° slope) |");
+    }
+    println!(" km/h at 3 s (floor 0 → shipped) |");
+    print!("|---|---|");
+    for _ in &floors {
+        print!("---|");
+    }
+    println!("---|");
+    let (mut bad, mut n) = (vec![0usize; floors.len()], 0usize);
+    for id in &ids {
+        let c = car(id);
+        print!("| {id} | {:?} |", c.def.drivetrain.layout);
+        let mut v = Vec::new();
+        for (k, f) in floors.iter().enumerate() {
+            car_lab::set_override(Some(CarTune {
+                side_floor: *f,
+                ..CarTune::default()
+            }));
+            let cells: Vec<String> = [0.0f32, 1.0, 2.0, 3.0]
+                .iter()
+                .map(|&sl| {
+                    let (y, _, kmh, _) = straight_launch_on(&c, sl);
+                    if sl == 0.0 {
+                        v.push(kmh);
+                    }
+                    if y >= 3.0 {
+                        bad[k] += 1;
+                    }
+                    if y >= 3.0 {
+                        format!("**{y:.0}**")
+                    } else {
+                        format!("{y:.1}")
+                    }
+                })
+                .collect();
+            print!(" {} |", cells.join(" / "));
+        }
+        n += 4;
+        println!(" {:.0} → {:.0} |", v[0], v[1]);
+    }
+    car_lab::set_override(None);
+    print!("| **fails (yaw ≥ 3°)** | |");
+    for b in &bad {
+        print!(" {b} / {n} |");
+    }
+    println!(" |");
+}
+
+/// Keys released mid-drift (reference: "letting go of the steering mid-drift" = a slow spin,
+/// over-rotating for ~1–2 s, not a snap and not a straighten / hold). Counter key at 6° + full
+/// throttle until `release_s`, then both keys released, throttle held. Returns (slide ° at the
+/// release, slide ° 1 s / 2 s later, s from the release until |slide| > 90° (None = never in
+/// 3.5 s), class).
+fn release_case(c: &LoadedCar, release_s: f32) -> (f32, f32, f32, Option<f32>, &'static str) {
+    use wp_contracts::VehicleInput;
+    use wp_vehicle::drift_lab::{settle_on_circle, DRIFT_GEAR};
+    let a = reference_assists();
+    let mut rig = settle_on_circle(c, &a, 40.0, 0.6);
+    let mut entered = false;
+    let (mut at_rel, mut at1, mut at2, mut spin) = (f32::NAN, f32::NAN, f32::NAN, None);
+    let n_rel = (release_s * 240.0) as usize;
+    for tick in 0..n_rel + (3.5 * 240.0) as usize {
+        let angle = (-slide_state(&rig).body_slip).to_degrees();
+        entered |= angle > 6.0;
+        let steer = if tick >= n_rel {
+            0.0
+        } else if entered {
+            1.0
+        } else {
+            -1.0
+        };
+        rig.step(
+            &VehicleInput {
+                steer,
+                throttle: 1.0,
+                gear_down: rig.vehicle.gear() > DRIFT_GEAR,
+                ..Default::default()
+            },
+            &a,
+        );
+        let s = slide_state(&rig);
+        let ang = (-s.body_slip).to_degrees();
+        if tick == n_rel {
+            at_rel = ang;
+        }
+        if tick == n_rel + 240 {
+            at1 = ang;
+        }
+        if tick == n_rel + 480 {
+            at2 = ang;
+        }
+        if tick > n_rel && spin.is_none() && (ang.abs() > 90.0 || s.v_fwd < 0.0) {
+            spin = Some((tick - n_rel) as f32 / 240.0);
+        }
+    }
+    let class = if !(10.0..=60.0).contains(&at_rel) {
+        "not drifting at release"
+    } else {
+        match spin {
+            Some(t) if t < 0.7 => "snap",
+            Some(t) if t <= 2.5 => "**slow spin** (reference)",
+            Some(_) => "late spin",
+            None if at2.abs() < 10.0 => "straightens",
+            None => "holds",
+        }
+    };
+    (at_rel, at1, at2, spin, class)
+}
+
+/// `release`: [`release_case`] for the RWD parity cars under data + presets (+ `TYRE`), with
+/// `PLAIN` steering.
+fn release_table() {
+    let mut configs = vec![
+        ("shipped default".to_string(), CarTune::default()),
+        ("spin model".to_string(), spin()),
+        (
+            "spin + drift lock".to_string(),
+            CarTune::spin_lock_candidate(),
+        ),
+    ];
+    if let Ok(j) = std::env::var("TYRE") {
+        configs.push((
+            format!("TYRE {j}"),
+            serde_json::from_str(&j).expect("TYRE json"),
+        ));
+    }
+    println!(
+        "| car | tyres | release at | slide at release / +1 s / +2 s ° | spin after s | class |"
+    );
+    println!("|---|---|---|---|---|---|");
+    for id in ["parity_rwd_a", "parity_rwd_b", "parity_rwd_d"] {
+        let c = car(id);
+        for (name, t) in &configs {
+            car_lab::set_override(Some(*t));
+            for rel in [1.5f32, 2.5] {
+                let (a0, a1, a2, sp, class) = release_case(&c, rel);
+                println!(
+                    "| {id} | {name} | {rel} s | {a0:.0} / {a1:.0} / {a2:.0} | {} | {class} |",
+                    sp.map_or("—".into(), |t| format!("{t:.2}"))
+                );
+            }
+        }
+    }
+    car_lab::set_override(None);
+}
+
+/// `bleed [car]`: where the held drift's speed goes. Counter key at 6° + full throttle on the
+/// lab circle (active `TYRE` / `PLAIN`); over 1.5–6 s (or until a spin) the mean along-path
+/// force (+ = pushes the car along its travel) of the front tyres, the rear drive force
+/// (wheel-x) and the rear side force (wheel-y), kN; plus mean speed change, slide, rear κ,
+/// rear slip angle and engine rpm.
+fn bleed(id: &str) {
+    let c = car(id);
+    let a = reference_assists();
+    if let Ok(j) = std::env::var("TYRE") {
+        car_lab::set_override(Some(serde_json::from_str(&j).expect("TYRE json")));
+    }
+    let mut tick = 0usize;
+    let (mut n, mut ff, mut rx, mut ry) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+    let (mut sl, mut kap, mut al, mut rpm) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+    let (mut v0, mut v1, mut done) = (None, 0.0f32, false);
+    plain_drift_run_with(&c, &a, COUNTER6, 40.0, 0.6, |rig, _, _| {
+        tick += 1;
+        if done || tick < 360 {
+            return;
+        }
+        let s = slide_state(rig);
+        if s.body_slip.abs().to_degrees() > 80.0 || s.v_fwd < 1.0 {
+            done = true;
+            return;
+        }
+        let (sb, cb) = wp_vehicle::math::sin_cos(s.body_slip);
+        let st = rig.state();
+        let along = |i: usize| {
+            let w = &st.wheel_states[i];
+            let (sd, cd) = wp_vehicle::math::sin_cos(w.steer_rad);
+            let x = (w.fx_n * cd - w.fy_n * sd, w.fx_n * sd + w.fy_n * cd);
+            let xr = (w.fx_n * cd, w.fx_n * sd);
+            let yr = (-w.fy_n * sd, w.fy_n * cd);
+            (
+                x.0 * cb + x.1 * sb,
+                xr.0 * cb + xr.1 * sb,
+                yr.0 * cb + yr.1 * sb,
+            )
+        };
+        ff += along(0).0 + along(1).0;
+        rx += along(2).1 + along(3).1;
+        ry += along(2).2 + along(3).2;
+        sl += (-s.body_slip).to_degrees();
+        kap += 0.5 * (st.wheel_states[2].slip_ratio + st.wheel_states[3].slip_ratio);
+        al += (0.5 * (st.wheel_states[2].slip_angle + st.wheel_states[3].slip_angle))
+            .to_degrees()
+            .abs();
+        rpm += st.engine_rpm;
+        let v = s.v_fwd.hypot(s.v_fwd * wp_vehicle::math::tan(s.body_slip)) * 3.6;
+        v0.get_or_insert(v);
+        v1 = v;
+        n += 1.0;
+    });
+    car_lab::set_override(None);
+    let n = n.max(1.0);
+    println!(
+        "| {id} | {:.1} s | {:.0} → {:.0} km/h | {:+.2} | {:+.2} | {:+.2} | {:+.2} | {:.0}° | {:.2} | {:.0}° | {:.0} |",
+        n / 240.0,
+        v0.unwrap_or(0.0),
+        v1,
+        ff / n / 1000.0,
+        rx / n / 1000.0,
+        ry / n / 1000.0,
+        (ff + rx + ry) / n / 1000.0,
+        sl / n,
+        kap / n,
+        al / n,
+        rpm / n
+    );
+}
+
 fn trace(id: &str) {
     let c = car(id);
     let a = reference_assists();
@@ -951,14 +1342,20 @@ fn trace(id: &str) {
 }
 
 fn main() {
-    plain::set_override(Some(PlainSteer::default()));
+    // PLAIN='{"velocity_relative":true}': Drift Lab W's plain steering constants (missing
+    // fields = defaults).
+    let plain_env: PlainSteer = std::env::var("PLAIN").map_or(PlainSteer::default(), |j| {
+        serde_json::from_str(&j).expect("PLAIN json")
+    });
+    plain::set_override(Some(plain_env));
     if std::env::var("RIDE").as_deref() != Ok("data") {
         ride_lab::set_override(Some(RideTune::lab_default()));
     }
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let what = if args.first().is_some_and(|a| {
         [
-            "table", "grid", "trace", "search", "refine", "phase", "matrix", "launch",
+            "table", "grid", "trace", "search", "refine", "phase", "matrix", "launch", "roster",
+            "vrsearch", "release", "joint", "bleed",
         ]
         .contains(&a.as_str())
     }) {
@@ -982,6 +1379,11 @@ fn main() {
         "phase" => phase(&args[0]),
         "matrix" => matrix(),
         "launch" => launch_table(),
+        "roster" => roster(),
+        "release" => release_table(),
+        "bleed" => bleed(&args[0]),
+        "joint" => joint(args[0].parse().unwrap_or(300)),
+        "vrsearch" => vrsearch(args[0].parse().unwrap_or(200)),
         _ => table(&args),
     }
 }

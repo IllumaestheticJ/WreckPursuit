@@ -45,6 +45,8 @@ const FIELDS: Record<string, { label: string; min: number; max: number; step: nu
   align_gain: { label: "VR: align gain", min: 0, max: 1.2, step: 0.05, hint: "velocity-relative steering: how far the wheels follow the front axle's travel in a slide (1 = along it)" },
   t_align_s: { label: "VR: slide align time", min: 0.05, max: 0.8, step: 0.01, unit: "s", hint: "velocity-relative steering: in a slide the wheels move at least full lock in this time" },
   slide_key_gain: { label: "VR: key in slide ×", min: 0, max: 1, step: 0.05, hint: "velocity-relative steering: the key's offset from the travel in a full slide, × lock(speed)" },
+  swing_rate: { label: "swing rack ×", min: 1, max: 4, step: 0.1, hint: "drift transitions (tyre-slip): while the car swings (yaw rate past the threshold) and the key is held against the rotation or released, every rack rate is this many times faster; 1 = off" },
+  swing_yaw_dps: { label: "swing from yaw", min: 30, max: 200, step: 5, unit: "°/s", hint: "yaw rate where the swing rack acts (a held drift turns at ~30°/s, a swing through at 100–140°/s)" },
   self_align: { label: "self-align", min: 0, max: 1, step: 0.05, scale: 100, unit: "%", hint: "keys released: the rack returns toward the front axle's travel instead of the centre (A/B; default 0)" },
 };
 
@@ -74,6 +76,7 @@ const CAR_FIELDS: Record<string, { label: string; min: number; max: number; step
   spin_fx_slide: { label: "spin model: drive grip spinning", min: 0, max: 1, step: 0.01, hint: "fraction of peak drive force a spinning tyre keeps (0 = the tyre data's curve, ~0.55)" },
   spin_fx_slide_from_deg: { label: "spin model: drive grip from", min: 0, max: 30, step: 0.5, unit: "°", hint: "slip angle where the spinning drive-grip floor starts (straight-line launches below it keep the tyre data's curve)" },
   spin_fx_slide_full_deg: { label: "spin model: drive grip full at", min: 0, max: 45, step: 0.5, unit: "°", hint: "slip angle where the drive-grip floor is fully on" },
+  side_floor: { label: "side grip floor (spinning)", min: 0, max: 1, step: 0.05, hint: "SHIPPED DEFAULT 0.4: a tyre spinning far past its peak slip ratio keeps at least this share of its side force (fixes spinning off the line on cambered roads); 0 = the old friction ellipse" },
   drift_lock_extra: { label: "drift lock ±", min: -0.7, max: 1, step: 0.01, hint: "extra (or, negative, less) steering lock once the body slip passes 'drift lock from' (ramped over 10°); grip driving below it is unchanged. 0 = off" },
   drift_lock_from_deg: { label: "drift lock from", min: 0, max: 45, step: 0.5, unit: "°", hint: "body slip where the drift lock change starts" },
   front_deep_falloff: { label: "front deep-slip falloff", min: 0, max: 0.9, step: 0.01, hint: "fraction of front side force lost at large front slip angles (between the two angles below); grip driving untouched. 0 = off" },
@@ -549,6 +552,20 @@ export class DriftLabWPanel {
         };
         btns.appendChild(b);
       }
+      {
+        // Tyres + steering together (tyre-slip): spin model + velocity-relative steering at half gain.
+        const b = document.createElement("button");
+        b.textContent = "drift: spin + VR (test)";
+        b.title =
+          "tyre-slip test preset: spin model tyres + velocity-relative steering (gain 0.5, fade 7→17°, align 0.26 s, slide key 0.31). Holds 13 / 27 test entries in the 30–45° band; not steady (speed bleeds). Sets the steering too: use the steering defaults button to undo";
+        b.onclick = () => {
+          const d = this.sim.carTuneDefaults();
+          saveCar(d.spin);
+          this.save(d.spin_vr_plain);
+          this.build();
+        };
+        btns.appendChild(b);
+      }
       this.body.appendChild(btns);
     }
     // Grip-driving balance (wp_vehicle::grip_lab; docs/integration/grip-balance.md).
@@ -608,9 +625,30 @@ export class DriftLabWPanel {
         this.save({ ...(this.sim.plainSteer() ?? this.sim.plainSteerDefaults()), ...DRIFT_BEST_STEER } as unknown as Record<string, number>);
         this.build();
       };
+      // Drift transitions (tyre-slip; docs/integration/tyre-slip.md "Drift transitions").
+      const trans = document.createElement("button");
+      trans.textContent = "transition: swing rack (test)";
+      trans.title =
+        "tyre-slip test preset for drift transitions: balance new + the lab ride with yaw inertia × 1.5 + plain steering with the swing rack (× 2.5 from 80°/s) + spin model tyres. Catches 10 / 18 lift-started flicks on the transition test (0 / 18 without). Sets steering, suspension and tyres; restarts the car";
+      trans.onclick = () => {
+        saveGrip(gd.new);
+        const rd = this.sim.rideTuneDefaults();
+        const ride = JSON.stringify({ ...rd.lab, yaw_inertia: 1.5 });
+        const tyres = JSON.stringify(this.sim.carTuneDefaults().spin);
+        this.sim.rideTuneSet(ride);
+        this.sim.carTuneSet(tyres);
+        try {
+          localStorage.setItem(RIDE_STORE, ride);
+          localStorage.setItem(CAR_STORE, tyres);
+        } catch {
+          /* ignore */
+        }
+        this.save(this.sim.carTuneDefaults().transition_plain);
+        this.restart(this.car);
+      };
       const abRow = document.createElement("div");
       abRow.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
-      abRow.append(ab, forSlow, driftBest, step2, lockOnly);
+      abRow.append(ab, forSlow, driftBest, step2, lockOnly, trans);
       this.body.appendChild(abRow);
       const sel = document.createElement("select");
       sel.id = "drift-w-lock-mode";

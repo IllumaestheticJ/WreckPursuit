@@ -367,6 +367,49 @@ mod tests {
     }
 
     #[test]
+    fn spin_side_floor_only_acts_under_heavy_drive_spin() {
+        let t = street();
+        let f = SPIN_SIDE_FLOOR;
+        let fl = |k: f32, a: f32| {
+            let fy = combined_forces(&t, k, a, t.fz0_n, 1.0).1;
+            (fy, spin_side_floor(&t, k, a, t.fz0_n, 1.0, fy, &f))
+        };
+        // Grip driving, moderate wheelspin, braking and locked wheels: unchanged.
+        for (k, a) in [
+            (0.0f32, 0.05f32),
+            (0.1, 0.05),
+            (0.3, 0.1),
+            (-0.5, 0.1),
+            (-1.0, 0.3),
+        ] {
+            let (fy, out) = fl(k, a);
+            assert_eq!(fy, out, "k {k} a {a}");
+        }
+        // Heavy drive spin at a small slip angle: at least the floor share of the pure force.
+        let fy0 = combined_forces(&t, 0.0, 0.03, t.fz0_n, 1.0).1;
+        let (fy, out) = fl(6.0, 0.03);
+        assert!(fy.abs() < 0.1 * fy0.abs(), "ellipse {fy} vs pure {fy0}");
+        assert!(
+            (out - f.floor * fy0).abs() < 1.0,
+            "{out} vs {}",
+            f.floor * fy0
+        );
+        // Never below the ellipse, never above the pure side force; sign kept.
+        for k in [0.5f32, 1.0, 3.0] {
+            for a in [-0.4f32, -0.05, 0.02, 0.3] {
+                let (fy, out) = fl(k, a);
+                let pure = combined_forces(&t, 0.0, a, t.fz0_n, 1.0).1;
+                assert!(out.abs() >= fy.abs() - 1e-3 && out.abs() <= pure.abs() + 1e-3);
+                assert!(out * pure >= 0.0);
+            }
+        }
+        // Off = unchanged.
+        let off = SpinSideFloor { floor: 0.0, ..f };
+        let fy = combined_forces(&t, 6.0, 0.03, t.fz0_n, 1.0).1;
+        assert_eq!(spin_side_floor(&t, 6.0, 0.03, t.fz0_n, 1.0, fy, &off), fy);
+    }
+
+    #[test]
     fn spin_model_is_the_ellipse_without_drive_spin() {
         let t = street();
         let m = SpinGrip::default();
@@ -456,48 +499,5 @@ mod tests {
             load_sensitive_mu(1.0, 0.12, 8000.0, 4000.0)
                 < load_sensitive_mu(1.0, 0.12, 2000.0, 4000.0)
         );
-    }
-
-    #[test]
-    fn spin_side_floor_only_acts_under_heavy_drive_spin() {
-        let t = street();
-        let f = SPIN_SIDE_FLOOR;
-        let fl = |k: f32, a: f32| {
-            let fy = combined_forces(&t, k, a, t.fz0_n, 1.0).1;
-            (fy, spin_side_floor(&t, k, a, t.fz0_n, 1.0, fy, &f))
-        };
-        // Grip driving, moderate wheelspin, braking and locked wheels: unchanged.
-        for (k, a) in [
-            (0.0f32, 0.05f32),
-            (0.1, 0.05),
-            (0.3, 0.1),
-            (-0.5, 0.1),
-            (-1.0, 0.3),
-        ] {
-            let (fy, out) = fl(k, a);
-            assert_eq!(fy, out, "k {k} a {a}");
-        }
-        // Heavy drive spin at a small slip angle: at least the floor share of the pure force.
-        let fy0 = combined_forces(&t, 0.0, 0.03, t.fz0_n, 1.0).1;
-        let (fy, out) = fl(6.0, 0.03);
-        assert!(fy.abs() < 0.1 * fy0.abs(), "ellipse {fy} vs pure {fy0}");
-        assert!(
-            (out - f.floor * fy0).abs() < 1.0,
-            "{out} vs {}",
-            f.floor * fy0
-        );
-        // Never below the ellipse, never above the pure side force; sign kept.
-        for k in [0.5f32, 1.0, 3.0] {
-            for a in [-0.4f32, -0.05, 0.02, 0.3] {
-                let (fy, out) = fl(k, a);
-                let pure = combined_forces(&t, 0.0, a, t.fz0_n, 1.0).1;
-                assert!(out.abs() >= fy.abs() - 1e-3 && out.abs() <= pure.abs() + 1e-3);
-                assert!(out * pure >= 0.0);
-            }
-        }
-        // Off = unchanged.
-        let off = SpinSideFloor { floor: 0.0, ..f };
-        let fy = combined_forces(&t, 6.0, 0.03, t.fz0_n, 1.0).1;
-        assert_eq!(spin_side_floor(&t, 6.0, 0.03, t.fz0_n, 1.0, fy, &off), fy);
     }
 }
