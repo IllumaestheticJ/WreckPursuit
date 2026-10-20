@@ -96,7 +96,8 @@ await page.waitForFunction(() => window.__wp.sim.scenarioResult()?.done === true
 c = await counts();
 check(sum(c, "impact/") > before, `head-on crash played impact sounds (${sum(c, "impact/") - before})`);
 st = await stats();
-check(st.looped + st.one_shots <= 40, `voice count within max_voices (${st.looped}+${st.one_shots})`);
+const MAX_VOICES = (await page.evaluate(() => fetch("data/audio/audio_config.json").then((r) => r.json()))).max_voices;
+check(st.looped + st.one_shots <= MAX_VOICES, `voice count within max_voices (${st.looped}+${st.one_shots} of ${MAX_VOICES})`);
 console.log("cue counts:", JSON.stringify(c));
 
 // 5. Cost with 24 cars (informational; recorded in docs/integration/audio.md).
@@ -112,7 +113,7 @@ const fps = ((await page.evaluate(() => window.__wpAudio.frames)) - frames0) / 6
 console.log(`      24 cars: ${plays} plays in 6 s at ${fps.toFixed(1)} fps (headless, software GL)`);
 const perf = await page.evaluate(() => ({ ms: window.__wpAudio.frameMs, dir: window.__wpAudio.directorMs, app: window.__wpAudio.applyMs, st: window.__wpAudio.stats() }));
 console.log(`      24 cars: audio frame ${perf.ms.toFixed(3)} ms (director ${perf.dir.toFixed(3)} ms, apply ${perf.app.toFixed(3)} ms), voices ${perf.st.looped}+${perf.st.one_shots}, culled ${perf.st.culled}`);
-check(perf.st.looped + perf.st.one_shots <= 40, "24-car bench stays within max_voices");
+check(perf.st.looped + perf.st.one_shots <= MAX_VOICES, `24-car bench stays within max_voices (${perf.st.looped}+${perf.st.one_shots} of ${MAX_VOICES})`);
 
 // 6. Engine voices keep following slow rpm changes (playtest #19: from 2nd gear the note
 // froze because updates < 0.4 %/frame were dropped) and two procedural layers crossfading
