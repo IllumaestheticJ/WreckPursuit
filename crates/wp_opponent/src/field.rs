@@ -2111,11 +2111,14 @@ fn decide_racer(
         {
             r.tactic = Tactic::Park;
         }
-        // Pulling over for the police, or out of the race (busted, retired): roll on slowly
+        // Pulling over for the police, or out of the race (busted, retired, fled): roll on slowly
         // until at the kerb and clear of any junction, then stop there (a car stopped
         // mid-lane blocks everyone behind it — Hollins: a racer busted on a hairpin held the
         // rest of the field until the finish window closed).
-        let out_of_race = matches!(r.status, RacerStatus::Busted | RacerStatus::Retired);
+        let out_of_race = matches!(
+            r.status,
+            RacerStatus::Busted | RacerStatus::Retired | RacerStatus::Fled
+        );
         let pulling_over = (r.tactic == Tactic::Yield || (r.tactic == Tactic::Park && out_of_race))
             && {
                 let i0 = (r.s / CORRIDOR_STEP_M) as isize;
@@ -2500,7 +2503,9 @@ fn decide_racer(
             // The controller releases the brake pedal near a standstill (a held brake there
             // selects reverse): a car told to stop holds on the handbrake instead of idling
             // forward into whatever it stopped for.
-            if v < 1.5 && (v_target < 0.3 || matches!(r.tactic, Tactic::Park | Tactic::Yield)) {
+            let holding =
+                v < 1.5 && (v_target < 0.3 || matches!(r.tactic, Tactic::Park | Tactic::Yield));
+            if holding {
                 input.handbrake = 1.0;
                 th = 0.0;
             }
@@ -2517,7 +2522,10 @@ fn decide_racer(
             r.throttle = th;
             input.throttle = th;
             input.brake = br;
-            input.steer = steer;
+            // Wheels straight while standing on the handbrake: handbrake + steer is the
+            // keyboard / gamepad pivot aid (wp_vehicle::pivot), which turns a car the AI
+            // drives with a player's assists (autopilot) on the spot — about 60° in 3 s.
+            input.steer = if holding && v.abs() < 0.3 { 0.0 } else { steer };
         }
         r.input = input;
         r.debug = Debug {
