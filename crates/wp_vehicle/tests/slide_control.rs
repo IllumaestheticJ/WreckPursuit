@@ -141,13 +141,14 @@ fn wheel_profile_is_bit_identical_to_the_plain_model() {
     // [bless] on ws/vehicle (2026-10-19) when the differential model replaced the old LSD
     // (a drivetrain change, not a slide-code change), and again [bless] in round 12b (ride
     // rework: tyre compliance, dampers, car damper data; a suspension change, not a slide-code
-    // change). The wheel preset has countersteer_help 0, so none of the slide code may change a
+    // change), and again [bless] for the tyre-slip spin side-force floor (a tyre change: the
+    // unassisted exit spins, so the rears run past κ 0.3). The wheel preset has countersteer_help 0, so none of the slide code may change a
     // single bit. (With no help the naive driver spins: full sim, no safety net.)
     let cases = [
-        ("rampart_50", 0.5, 0.3, 0x9f758e911a35d298_u64),
-        ("rampart_50", 0.7, 0.8, 0x6090d6f8ac1e1867),
-        ("lucciola_350", 0.5, 0.3, 0xb0b0eb7b8b321b3b),
-        ("lucciola_350", 0.7, 0.8, 0x6ef3f84e1ecb1aa5),
+        ("rampart_50", 0.5, 0.3, 0x0a445561173191a8_u64),
+        ("rampart_50", 0.7, 0.8, 0xff1c96c9ca123352),
+        ("lucciola_350", 0.5, 0.3, 0x4cd0ac55ee1f2b90),
+        ("lucciola_350", 0.7, 0.8, 0x1dd4f7bafc7b1f99),
     ];
     for (id, lat_g, react, hash) in cases {
         // The steering-lock data change (playtest item 6b) is not a code change: pin the lock

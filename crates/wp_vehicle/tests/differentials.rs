@@ -324,13 +324,14 @@ fn every_diff_type_is_deterministic_and_snapshot_exact() {
 fn roster_diff_hashes_are_pinned() {
     // Re-recorded [bless] in round 12b (ride rework: tyre compliance, dampers, car data), and
     // for owner rows 56/57/72 (self-aligning countersteer: the launch holds its heading with
-    // released-key steering; handbrake data).
+    // released-key steering; handbrake data), and for the tyre-slip spin side-force floor (the
+    // split-µ launch spins the low-µ wheel past κ 0.3).
     let pinned: [(&str, u64); 6] = [
-        ("shiro_turbo", 0xa1a8378f86d4297c),
-        ("hakone_gt", 0x93c112e33a42e872),
-        ("sperber_32", 0xd578a45d1b0ab6aa),
+        ("shiro_turbo", 0x0a67863c34295311),
+        ("hakone_gt", 0x2796f7f441945760),
+        ("sperber_32", 0x8052a8a33eb842c5),
         ("lindwurm_4t", 0x9a5474b77c93bae7),
-        ("sentinel_wolfhound", 0x3d93cffb67dcee15),
+        ("sentinel_wolfhound", 0x592b053674d3f09d),
         ("junkyard_beater", 0xbe54b8910b0c86e8),
     ];
     let mut got = Vec::new();
