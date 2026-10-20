@@ -149,6 +149,7 @@ export class SceneView {
         parking: 2,
         sidewalk: 1,
         sidewalk_corner: 1,
+        verge: 1,
         lot: 1,
         lot_skirt: 1,
         asphalt: 1,

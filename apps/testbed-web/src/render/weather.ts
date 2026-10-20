@@ -55,6 +55,7 @@ const WET_MATERIALS = new Set([
   "sidewalk",
   "sidewalk_corner",
   "lot",
+  "driveway",
   "kerb",
   "bridge",
 ]);

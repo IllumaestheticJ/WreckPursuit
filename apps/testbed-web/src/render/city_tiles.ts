@@ -82,6 +82,12 @@ export class CityTiles {
     });
     root.updateMatrixWorld(true);
     for (const m of meshes) {
+      // Instanced meshes (trees, driveways, hedges, fences: glTF EXT_mesh_gpu_instancing)
+      // are split by instance position instead.
+      if ((m as THREE.InstancedMesh).isInstancedMesh) {
+        this.splitInstances(m as THREE.InstancedMesh, tileM);
+        continue;
+      }
       const parts = splitGeometry(m.geometry, tileM);
       if (parts.length === 1) {
         this.add(m);
@@ -103,6 +109,45 @@ export class CityTiles {
       m.geometry.dispose();
       m.removeFromParent();
     }
+  }
+
+  /**
+   * Replace an instanced mesh by one instanced mesh per tile (same geometry and material),
+   * each with its instances' bounding sphere, so frustum and distance culling work per tile.
+   */
+  private splitInstances(m: THREE.InstancedMesh, tileM: number): void {
+    const buckets = new Map<string, number[]>();
+    const mat = new THREE.Matrix4();
+    const pos = new THREE.Vector3();
+    for (let i = 0; i < m.count; i++) {
+      m.getMatrixAt(i, mat);
+      pos.setFromMatrixPosition(mat).applyMatrix4(m.matrixWorld);
+      const key = `${Math.floor(pos.x / tileM)},${Math.floor(pos.z / tileM)}`;
+      let b = buckets.get(key);
+      if (!b) buckets.set(key, (b = []));
+      b.push(i);
+    }
+    const parent = m.parent!;
+    [...buckets.keys()].sort().forEach((key, k) => {
+      const ids = buckets.get(key)!;
+      const t = new THREE.InstancedMesh(m.geometry, m.material, ids.length);
+      ids.forEach((src, dst) => {
+        m.getMatrixAt(src, mat);
+        t.setMatrixAt(dst, mat);
+      });
+      t.instanceMatrix.needsUpdate = true;
+      t.name = `${m.name}#${k}`;
+      t.position.copy(m.position);
+      t.quaternion.copy(m.quaternion);
+      t.scale.copy(m.scale);
+      t.userData = m.userData;
+      parent.add(t);
+      t.updateMatrixWorld(true);
+      t.computeBoundingSphere();
+      this.meshes.push(t);
+      this.spheres.push(t.boundingSphere!.clone().applyMatrix4(t.matrixWorld));
+    });
+    m.removeFromParent();
   }
 
   private add(m: THREE.Mesh): void {
