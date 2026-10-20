@@ -89,3 +89,30 @@ The lap: a 92 s street-circuit race (lap 1/3) in a lighter rear-drive sports car
 2. **Handbrake + key into the turn = free, fast pivot** (~150–180° in about 1 s at low speed). Throttle back on plus opposite lock **catches immediately** (row 108: no 0.5 s grace).
 3. **The feint (a short opposite tap before the turn-in)** should help load the car into the rotation, as it does physically. No assist should damp it out.
 4. Normal racing uses the brake; drifting arenas don't. Both have to feel good.
+
+## Clip 3 analysis (2026-10-20, owner race lap, front-wheel drive)
+
+The lap: a 73 s street-circuit race (lap 1/3) in a front-drive touring car (#96), arrow keys, Space = handbrake. Up to ~105 mph in 5th.
+
+**Inputs.** A much calmer style than the RWD laps.
+
+| | |
+|---|---|
+| Throttle | held **78 %**: long, flat-out stretches (median press 4.6 s, up to 14 s) |
+| Brake | 4 %: short, hard stops before slow corners (median 0.9 s) |
+| Left / Right | only 8 % / 15 % of the lap; **almost all taps**: median 0.14–0.15 s, p10 0.08 s, longest 1.0–1.6 s |
+| Reversals | 22; median 0.44 s (only 14 % under 0.2 s) |
+| Throttle while steering | 79 % |
+| Handbrake | 4 taps, median 0.35 s |
+
+**Brake + handbrake corner (41.0–45.0 s), step by step**
+
+1. 41.2 s: brake 1.3 s from ~101 mph to ~65 mph (5th → 3rd), with a brief Right tap while braking.
+2. 42.5 s: Right, then **Right + handbrake 0.3 s** (off the throttle). The front-drive car's tail steps out ~30–40°.
+3. 43.2 s: **full throttle** and a **0.35 s Left tap** (opposite lock). The driven front wheels pull the car straight. By ~44.5 s it is tidy again, exiting in 2nd at ~35–45 mph.
+
+**Targets for front-drive cars**
+
+1. FWD cars drive mostly on **short taps** at high speed: stability is the norm. A 0.15 s tap at 100+ mph gives a small lane-change-sized correction.
+2. A handbrake tap (0.3 s) on turn-in rotates a FWD car ~30–40°. **Full throttle then pulls it straight** with a short countersteer tap: the front wheels drag the nose along the travel. That makes the FWD power-on "straightening" the main recovery, rather than a long countersteer hold.
+3. Off throttle and turning in, a FWD car should rotate a little (lift-off), but not snap.
