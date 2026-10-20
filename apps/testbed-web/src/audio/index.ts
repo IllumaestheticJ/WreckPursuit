@@ -31,6 +31,7 @@ export class AudioSystem {
   private lastPos: THREE.Vector3 | null = null;
   private vel = new THREE.Vector3();
   private muted = false;
+  private paused = false;
   private failed = false;
   private focus = 0;
   private lineNo = 0;
@@ -80,7 +81,7 @@ export class AudioSystem {
   start(): void {
     if (this.failed) return;
     if (this.ctx) {
-      if (this.ctx.state === "suspended") void this.ctx.resume();
+      if (this.ctx.state === "suspended" && !this.paused) void this.ctx.resume();
       return;
     }
     try {
@@ -110,6 +111,23 @@ export class AudioSystem {
       this.mixer.master.gain.setTargetAtTime(this.muted ? 0 : this.panel.settings.master, this.ctx.currentTime, 0.02);
     }
     this.panel.setStatus(this.muted ? "muted (M)" : "unmuted");
+  }
+
+  /**
+   * Silence everything while the game is paused: suspends the AudioContext (looped engine /
+   * siren voices freeze instead of droning on) and pauses scanner TTS. Idempotent, so main.ts
+   * calls it every frame with `app.paused`.
+   */
+  setPaused(p: boolean): void {
+    if (p === this.paused) return;
+    this.paused = p;
+    if (typeof speechSynthesis !== "undefined") {
+      if (p) speechSynthesis.pause();
+      else speechSynthesis.resume();
+    }
+    if (!this.ctx) return;
+    if (p) void this.ctx.suspend();
+    else void this.ctx.resume();
   }
 
   /** Siren mode for the focused car: "Default" | "Off" | "Auto" | "Wail" | "Yelp" | "Phaser" | "HiLo". */

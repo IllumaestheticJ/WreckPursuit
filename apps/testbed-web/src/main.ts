@@ -537,6 +537,7 @@ async function main(): Promise<void> {
       dt,
       rig.mode === "cinematic" ? nearestPolice(focusView) : null,
     );
+    audio.setPaused(app.paused);
     audio.update(rig.camera, events, app.paused && !replay ? 0 : dt, app.focus);
 
     const r0 = performance.now();
