@@ -253,3 +253,8 @@ promoted. Requests: **lead** — re-measure the perf_check thresholds on the CI 
 frames over 250 ms relative to the reference); **world / police** — the promoted-vehicle count
 in the chase (sim cost per tick); **R (panels)** — `PanelBody.update` still allocates
 ~0.24–0.36 MB/frame (fold / frame fit) on crashed cars.
+
+Rust gate on this branch (no Rust / data changed vs `lead/round12` @ `608a50a`): fmt ✔, clippy
+`-D warnings` ✔, wasm build ✔; `cargo test --workspace`: 1001 pass, 5 fail on the base —
+simcli `goldens_match`, `live_police_chase_ends_in_escape_or_capture_without_stuck_cars`, race
+`hollins_hill_sprint`, `loop9_circuit`, `lantern_checkpoint_draws_the_police`.
