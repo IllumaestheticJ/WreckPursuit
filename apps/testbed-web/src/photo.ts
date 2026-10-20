@@ -136,6 +136,17 @@ export interface PhotoHost {
 
 const tmpV = new THREE.Vector3();
 
+/** The claude.ai artifact viewer's `downloads` capability (published testbed only). Inside the
+ * viewer a page cannot start a download itself; the viewer asks the person to confirm instead. */
+interface ArtifactDownloads {
+  save(req: { filename: string; data: Blob }): Promise<{ status: string }>;
+}
+type ClaudeHost = { use(name: string): Promise<unknown> };
+const artifactDownloads: Promise<ArtifactDownloads | null> = (() => {
+  const host = (window as unknown as { claude?: ClaudeHost }).claude;
+  return host?.use ? host.use("downloads").then((d) => (d as ArtifactDownloads) ?? null, () => null) : Promise.resolve(null);
+})();
+
 export class PhotoMode {
   active = false;
   readonly camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 3000);
@@ -342,15 +353,22 @@ export class PhotoMode {
     try {
       const { blob, width, height } = await this.capture();
       const name = `wreckpursuit-${this.host.fileStem()}.png`;
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = name;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      const viewer = await artifactDownloads;
+      if (viewer) {
+        // Published testbed: the viewer shows a confirmation; "declined" is the person's choice.
+        await viewer.save({ filename: name, data: blob });
+      } else {
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = name;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      }
       this.saved++;
       this.say(`saved ${name} (${width}×${height})`);
     } catch (e) {
-      this.say(`save failed: ${e}`);
+      const code = (e as { code?: string }).code;
+      this.say(code === "declined" ? "not saved" : `save failed: ${code ?? e}`);
     }
   }
 
