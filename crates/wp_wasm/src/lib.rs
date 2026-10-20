@@ -866,21 +866,13 @@ pub fn map_static_json() -> Result<String, JsValue> {
 }
 
 /// Per-frame map data for `player` ([`map::map_dynamic`]): a header (status, level, search
-/// zone, escape progress, sight ranges, player pose), then every police unit
-/// (`map::UNIT_STRIDE` floats) and every roadblock / spike strip (`map::TOOL_STRIDE`).
-/// Without police in the session the header only carries the player pose.
+/// zone, escape progress, sight ranges, player pose, racer count), then every police unit
+/// (`map::UNIT_STRIDE` floats), every roadblock / spike strip (`map::TOOL_STRIDE`) and,
+/// during a race, every racer in position order (`map::RACER_STRIDE`). Without police in
+/// the session there are no units or tools.
 #[wasm_bindgen]
 pub fn map_dynamic(player: u32) -> Result<Vec<f32>, JsValue> {
-    get(|s| {
-        let pose = s
-            .sim()
-            .vehicle_states()
-            .into_iter()
-            .find(|(id, _)| id.0 == player)
-            .map(|(_, st)| map::pose_of(&st));
-        let police = s.sim().systems().police.then(|| s.sim().police());
-        map::map_dynamic(police, EntityId(player), pose)
-    })
+    get(|s| map::map_dynamic_for(s, EntityId(player)))
 }
 
 /// End-of-run result as JSON ([`run::RunReport`]): outcome (`Escaped`, `Safehouse`,
