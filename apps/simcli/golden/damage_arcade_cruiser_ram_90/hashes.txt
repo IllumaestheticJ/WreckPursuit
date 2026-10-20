@@ -1,0 +1,13 @@
+# simcli hashes scenario=damage_arcade_cruiser_ram_90 systems=world,vehicle,damage,police,net hash_spec=3 contract=0.3.0
+60 5c43919ef27480b6
+120 fd35661518215603
+180 88e788b3119d2e57
+240 2969d83302368dfe
+300 121646251cded495
+360 67bdd7da066e0e4f
+420 7831c132d2352420
+480 f1a236724c39f994
+540 d8cfbc21f58d677d
+600 0ebc31d9813bae01
+660 65cde2a5ae839bd5
+720 59ab4b72af0bdc90
