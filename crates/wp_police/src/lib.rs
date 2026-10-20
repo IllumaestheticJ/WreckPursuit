@@ -1154,11 +1154,16 @@ impl PoliceSystem {
     pub fn sync_unit(&mut self, unit: UnitId, s: UnitSync) {
         if let Some(i) = self.unit_index(unit) {
             let u = &mut self.units[i];
-            // Signed: negative while rolling backwards. With an unsigned speed a unit going
+            // Negative while clearly rolling backwards. With an unsigned speed a unit going
             // backwards "too fast" braked, and in reverse gear the brake pedal drives backwards
             // (`wp_vehicle` swaps the pedals): a runaway reverse into buildings (row 66).
             let heading = graph::normalize(s.heading);
-            let speed = s.vel[0] * heading[0] + s.vel[1] * heading[1];
+            let along = s.vel[0] * heading[0] + s.vel[1] * heading[1];
+            let speed = if along < -BACKWARDS_MPS {
+                along
+            } else {
+                (s.vel[0] * s.vel[0] + s.vel[1] * s.vel[1]).sqrt()
+            };
             u.body = UnitBody {
                 pos: xy(s.pos),
                 heading,
@@ -1379,7 +1384,12 @@ impl PoliceSystem {
         if let stuck::Phase::Push { from, until } = u.unstick.phase {
             let moved = graph::dist(pos, from);
             if moved < PUSH_DONE_M && now < until && !disabled {
-                let tgt = unit::lane_point(&u.cmd.track, s + look.min(8.0), offset - PUSH_SIDE_M);
+                // Straight ahead, a little left (nudging the blocker to the kerb): a shove,
+                // not a turn (steering for the track swung units across the road).
+                let tgt = graph::add(
+                    graph::add(pos, graph::scale(heading, PUSH_AHEAD_M)),
+                    graph::scale(graph::perp_left(heading), PUSH_SIDE_M),
+                );
                 let ctl = u.controller();
                 let steer = ctl.steer(pos, heading, [tgt[0], tgt[1], 0.0]);
                 let acc = (av.push_mps - v).clamp(-brake, accel);
@@ -1615,8 +1625,15 @@ const GHOST_PASS_M: f32 = 150.0;
 /// A push-through ends once the unit has moved this far, m.
 const PUSH_DONE_M: f32 = 8.0;
 
+/// A pushing unit aims at a point this far ahead of it, m.
+const PUSH_AHEAD_M: f32 = 8.0;
+
 /// A pushing unit aims this far left of its line (nudging the blocker toward the kerb), m.
 const PUSH_SIDE_M: f32 = 0.8;
+
+/// A unit moving backwards faster than this reports a negative speed (below it, the speed
+/// magnitude, so settling and creeping at a standstill behave as before), m/s.
+const BACKWARDS_MPS: f32 = 1.0;
 
 /// Fastest a unit backs up in a manoeuvre (three-point turn, backing out), m/s.
 const REVERSE_MAX_MPS: f32 = 3.0;
