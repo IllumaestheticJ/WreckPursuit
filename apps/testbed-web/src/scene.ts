@@ -28,6 +28,9 @@ const CONTACT_LIFETIME_S = 1.5;
 const MAX_CONTACT_MARKERS = 64;
 const CONTACT_DOT = new THREE.SphereGeometry(0.08, 8, 6);
 const tmpNormal = new THREE.Vector3();
+const groundRay = new THREE.Raycaster();
+const groundFrom = new THREE.Vector3();
+const groundDown = new THREE.Vector3(0, -1, 0);
 
 export class SceneView {
   readonly renderer: THREE.WebGLRenderer;
@@ -168,6 +171,21 @@ export class SceneView {
     } catch (e) {
       console.warn("city greybox not available", cityId, e);
     }
+  }
+
+  /**
+   * Height of the shown city's surface under sim-space `(x, y)` (m), by a downward ray against
+   * the greybox; null without a city or a hit. For rarely placed objects (spike strips), not per
+   * frame per car.
+   */
+  groundZ(x: number, y: number): number | null {
+    const city = this.cityShown ? this.cities.get(this.cityShown) : null;
+    if (!city) return null;
+    // Sim (x, y, z) is Three (x, z, -y) (world rotated -90 deg about X).
+    groundRay.set(groundFrom.set(x, 2000, -y), groundDown);
+    groundRay.far = 4000;
+    const hit = groundRay.intersectObject(city, true)[0];
+    return hit ? hit.point.y : null;
   }
 
   /**

@@ -23,6 +23,7 @@ import { SceneView } from "./scene";
 import { VehicleView } from "./vehicle_view";
 import { clearDebris, meshTimings, panelEvents, preloadCarMeshes, stepDebris } from "./render/panels";
 import { LodDirector } from "./render/lod";
+import { PoliceToolsView } from "./render/police_tools";
 import { PropView } from "./render/props";
 import { CameraRig, CAMERAS, CAMERA_MODES, cameraLabel, type CameraMode } from "./cameras";
 import { Hud } from "./hud";
@@ -148,6 +149,9 @@ async function main(): Promise<void> {
   props.maxFull = scene.quality.propFullMax;
   props.drawM = scene.quality.propDrawM;
   scene.world.add(props.group);
+  // Spike strips on the road (playtest row 88).
+  const policeTools = new PoliceToolsView();
+  scene.world.add(policeTools.group);
   // Crash effects (owner row 69): sparks, smoke, glass, skid marks, debris (render/fx/).
   const fx = new CrashFx(scene.quality.fx);
   scene.world.add(fx.group);
@@ -1166,6 +1170,7 @@ async function main(): Promise<void> {
     // Traffic and police after the camera moved: the fleet picks mesh detail by camera distance.
     lod.update(trafficDraw, policeDraw, app.views, rig.camera, app.views.get(app.player)?.root.position ?? null, tS);
     props.update(sim.propsMoved(), rig.camera);
+    policeTools.update(() => sim.mapDynamic(app.player), (x, y) => scene.groundZ(x, y), now);
     prof.lap("traffic");
 
     const inCity = wi[W.city] > 0.5;
