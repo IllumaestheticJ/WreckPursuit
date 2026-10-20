@@ -140,6 +140,7 @@ the schedule could hunt (1→2→1). New automatic (`crates/wp_vehicle/README.md
 | 63 | Police are not aggressive enough | E (police): limit-pace chase driving, escalating PIT/ram/box/roadblock tactics by wanted level, flanking, short cooldowns; before/after table | dispatched |
 | 64 | Other police units don't spawn / converge during a chase | E (police): backup dispatch to intercept points, out-of-sight spawns up to a per-level cap, search at last-known position | dispatched |
 | 65 | R should reset and repair the car in place, not send it back to the spawn | C (testbed + wp_wasm): upright on the nearest lane, ghost 1 s, repaired outside career; heat/pursuit/race state kept | dispatched |
+| 66 | Cops should route around buildings (not drive into them) | E (police): road-graph pursuit unless clear LOS, static-obstacle feelers, intercept routing; lane paths through lots at Vesper nodes 78/97 = city generator (lead/fix-sidewalk-lots) | dispatched |
 
 ## 2026-10-19 — step 2: 4-player test on Port Vesper v2 (F, `ws/net`)
 Found by the new 3-minute 4-client test (`crates/wp_net/tests/vesper_e2e.rs`) and the
