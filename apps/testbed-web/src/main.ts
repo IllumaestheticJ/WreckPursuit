@@ -8,7 +8,7 @@
 // ?style=greybox|lowpoly the art style (default low-poly dark, render/style.ts).
 // ?race=<id> starts a street race (&autopilot=1: the AI drives the player's car).
 // ?fx=low|med|high sets the crash effects quality (render/fx; default from ?gfx).
-// ?drift=b[&car=<id>] opens Drift Lab B (open pad, tune panel for the drift assist).
+// ?drift=c (or b)[&car=<id>] opens Drift Lab C (open pad, tune panel for the drift assist).
 // ?menu=1 opens the game menu's title screen on load (as the demo build does) with the developer
 // panels off by default; ?dev=0 / ?dev=1 forces the developer panels for this page.
 import { loadWasm, sim, type DriverInput, type Scenario, type ScenarioResult } from "./wasm/sim";
@@ -33,7 +33,7 @@ import { AudioSystem } from "./audio";
 import { UiOverlay } from "./ui/overlay";
 import { MapOverlay } from "./ui/map";
 import { HudLayout } from "./ui/layout";
-import { DRIFT_LAB_B, DriftLabPanel, driftLabScenario } from "./drift_lab_b";
+import { DRIFT_LAB, DriftLabPanel, driftLabScenario } from "./drift_lab_b";
 import { defaultGameSettings, hasStoredSettings, loadGameSettings, mountGameMenu, type GameSettings, type PlayChoice } from "../../ui-kit/src/live";
 import { gfxMode } from "./render/quality";
 import { RunEndView } from "./ui/runEnd";
@@ -150,7 +150,7 @@ async function main(): Promise<void> {
   props.maxFull = scene.quality.propFullMax;
   props.drawM = scene.quality.propDrawM;
   scene.world.add(props.group);
-  // Drift Lab B: course paint + the tune panel / readout (shown only in the lab session).
+  // Drift Lab C: course paint + the tune panel / readout (shown only in the lab session).
   const driftLab = new DriftLabPanel(overlay, sim, scene.world, () => app.player);
   // Spike strips on the road (playtest row 88).
   const policeTools = new PoliceToolsView();
@@ -361,7 +361,8 @@ async function main(): Promise<void> {
     app.focus = app.player;
     const sc = sim.scenario();
     scene.setBarriers(sc.barriers ?? []);
-    driftLab.setActive(sc.name === DRIFT_LAB_B);
+    // drift_lab_b: recordings / sessions from before Drift Lab C.
+    driftLab.setActive(sc.name === DRIFT_LAB || sc.name === "drift_lab_b");
     const city = sim.worldInfo()[W.city] > 0.5;
     const cityId = city ? sim.cityId() : "";
     void scene.setCity(cityId || null);
@@ -494,7 +495,7 @@ async function main(): Promise<void> {
     applyAssistPreset(app.source);
   };
 
-  /** Drift Lab B (lead/drift-lab-b): open pad, 90° corners and a sweeper, no traffic or
+  /** Drift Lab C (lead/drift-lab-c, built on Drift Lab B): open pad, 90° corners and a sweeper, no traffic or
    * police, daytime; the "tune" panel and the drift readout come up with it. */
   const startDriftLabB = (car = ($("car") as HTMLSelectElement).value || DEFAULT_CAR, mode = ($("mode") as HTMLSelectElement).value) => {
     app.scenarioFile = null;
@@ -1075,8 +1076,8 @@ async function main(): Promise<void> {
     await runScenario(scParam, Number(params.get("speed") ?? 0));
   } else if (params.get("race")) {
     startRace(params.get("race")!, DEFAULT_CAR);
-  } else if (params.get("drift") === "b") {
-    // ?drift=b[&car=shiro_turbo] opens Drift Lab B.
+  } else if (params.get("drift") === "c" || params.get("drift") === "b") {
+    // ?drift=c[&car=shiro_turbo] opens Drift Lab C (?drift=b: the same lab, old links).
     startDriftLabB(params.get("car") ?? DEFAULT_CAR);
   } else if (params.get("chase")) {
     startCityChase("debug_sedan", undefined, params.get("chase") === "rain");
@@ -1442,7 +1443,7 @@ async function main(): Promise<void> {
     runScenario,
     startFreeDrive,
     startDriftLabB,
-    /** Drift Lab B tune panel / readout. */
+    /** Drift Lab C tune panel / readout. */
     driftLab,
     startCityChase,
     startBench,

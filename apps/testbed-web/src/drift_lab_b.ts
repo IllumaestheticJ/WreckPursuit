@@ -1,13 +1,17 @@
-// Drift Lab B (lead/drift-lab-b, owner rows 90 / 91): an open asphalt pad with three tight 90°
-// corners and one long sweeper (no traffic, no police, daytime), plus the "tune" panel for the
-// drift-assist constants (wp_vehicle::drift::DriftTuning, a runtime override via
-// wp_wasm drift_tuning_set) and a live readout of slide angle, assist mode and envelope.
+// Drift Lab C (lead/drift-lab-c, owner rows 104 / 106; built on Drift Lab B, rows 90 / 91): an
+// open asphalt pad with three tight 90° corners and one long sweeper (no traffic, no police,
+// daytime), plus the "tune" panel for the drift-assist constants
+// (wp_vehicle::drift::DriftTuning, a runtime override via wp_wasm drift_tuning_set) and a live
+// readout of the assist mode, held vs current slide angle, envelope and key vs applied throttle.
+// Keyboard: countersteer key = hold, keys released = straighten, key into the turn = more angle.
 // The course is paint and cones only (no physics): the car drives on the flat world's ground.
 import * as THREE from "three";
 import type { sim as Sim } from "./wasm/sim";
 
 /** Scenario name of the lab (sim.scenario().name). */
-export const DRIFT_LAB_B = "drift_lab_b";
+export const DRIFT_LAB = "drift_lab_c";
+/** Lab title / version badge. */
+export const DRIFT_LAB_TITLE = "Drift Lab C";
 
 /** Free-drive (flat world) scenario JSON turned into the lab: no traffic / parked cars /
  * police, noon with a slow clock. */
@@ -15,7 +19,7 @@ export function driftLabScenario(freeDriveJson: string): string {
   const sc = JSON.parse(freeDriveJson);
   return JSON.stringify({
     ...sc,
-    name: DRIFT_LAB_B,
+    name: DRIFT_LAB,
     time_of_day_h: 12,
     time_ratio: 1,
     traffic_cars: false,
@@ -141,18 +145,24 @@ const FIELDS: Record<string, { label: string; min: number; max: number; step: nu
   hold_gain: { label: "hold gain", min: 0, max: 2, step: 0.05, hint: "Hold: front slip given up per 5.7° past the held angle (× peak slip)" },
   hold_damp: { label: "hold damping (s)", min: 0, max: 0.6, step: 0.01, hint: "Hold: front slip given up per rad/s the slide angle grows" },
   hold_base: { label: "hold into-turn", min: 0, max: 2, step: 0.05, hint: "Hold: front slip angle into the turn at the held angle (× peak slip)" },
-  hold_entry_deg: { label: "hold entry (°)", min: 0, max: 40, step: 1, hint: "turning into a drift: the held angle starts at least here" },
-  throttle_shape: { label: "throttle shaping", min: 0, max: 1, step: 0.05, hint: "0 = raw key, 1 = full shaping toward holding the angle" },
+  hold_entry_deg: { label: "angle-up entry (°)", min: 0, max: 40, step: 1, hint: "key into the turn from grip: the held angle starts at least here" },
+  hold_decay_dps: { label: "hold decay (°/s)", min: 0, max: 15, step: 0.5, hint: "countersteer key held: the held angle shrinks this fast (taps nudge it)" },
+  angle_up_dps: { label: "angle-up rate (°/s)", min: 0, max: 40, step: 1, hint: "key into the turn: the held angle grows this fast" },
+  angle_up_steer: { label: "angle-up steer", min: 0, max: 2, step: 0.05, hint: "key into the turn: extra front slip into the turn (× peak slip) — a tighter line" },
+  angle_up_damp: { label: "angle-up damping (s)", min: 0, max: 1.5, step: 0.05, hint: "key into the turn: front slip given up per rad/s the slide grows (no overshoot)" },
+  lift_shrink_dps: { label: "lift shrink (°/s)", min: 0, max: 30, step: 0.5, hint: "off the throttle the held angle shrinks this fast" },
+  lift_authority: { label: "lift authority", min: 0, max: 1, step: 0.05, hint: "hold strength with the throttle released (lower = a lift straightens more)" },
+  throttle_shape: { label: "throttle shaping", min: 0, max: 1, step: 0.05, hint: "opt-in, default 0 (row 104: TCS off = the throttle you press). 1 = full shaping toward holding the angle" },
   throttle_hold: { label: "throttle at hold", min: 0.2, max: 1, step: 0.05, hint: "shaped throttle of a held key at the held angle" },
   throttle_gain: { label: "throttle gain", min: 0, max: 8, step: 0.25, hint: "shaped throttle change per rad short of / past the held angle" },
   envelope_deg: { label: "envelope (° @60%)", min: 10, max: 70, step: 1, hint: "slide angle the assist helps up to at 60 % (±25° per 100 % of slider)" },
   straighten_gain: { label: "straighten extra", min: 0, max: 3, step: 0.05, hint: "released keys: extra countersteer past the travel while a slide grows (× peak slip)" },
-  catch_extra: { label: "catch extra lock", min: 0, max: 2, step: 0.05, hint: "counter key: extra lock past the travel (× peak slip)" },
-  lift_soften: { label: "lift soften", min: 0, max: 1, step: 0.05, hint: "how much an abrupt lift is softened (0 = raw, 1 = a full lift takes 0.5 s)" },
+  lift_soften: { label: "lift soften", min: 0, max: 1, step: 0.05, hint: "opt-in, default 0: how much an abrupt lift is softened (0 = raw, 1 = a full lift takes 0.5 s)" },
 };
 
-const MODES = ["off", "grip", "straighten", "hold", "catch", "exceeded"];
-const STORE = "wp.driftLabB.tuning";
+const MODES = ["off", "grip", "straighten", "hold", "angle-up", "exceeded"];
+// New key for C: a remembered B override would bring back B's throttle shaping (now opt-in).
+const STORE = "wp.driftLabC.tuning";
 
 /** The "tune" button + panel and the readout. Call `frame(entity)` every rendered frame. */
 export class DriftLabPanel {
@@ -178,7 +188,7 @@ export class DriftLabPanel {
     const btn = document.createElement("button");
     btn.textContent = "tune";
     btn.id = "drift-tune";
-    btn.title = "Drift Lab B: tune the drift assist (runtime override, not the data files)";
+    btn.title = `${DRIFT_LAB_TITLE}: tune the drift assist (runtime override, not the data files)`;
     btn.onclick = () => this.toggle();
     this.readout = document.createElement("div");
     this.readout.style.cssText = "background:rgba(0,0,0,.6);padding:6px 8px;border-radius:6px;margin-top:4px;font-variant-numeric:tabular-nums";
@@ -260,7 +270,7 @@ export class DriftLabPanel {
         input.checked = value;
         const val = document.createElement("span");
         input.onchange = () => this.save({ ...this.sim.driftTuning(), [key]: input.checked });
-        row(key === "intent" ? "intent modes (step 3)" : key.replace(/_/g, " "), key === "intent" ? "off = step 1 only (fast countersteer, earlier onset)" : "on / off", input, val);
+        row(key === "intent" ? "intent modes" : key.replace(/_/g, " "), key === "intent" ? "off = Drift Lab B step 1 only (fast countersteer, earlier onset)" : "on / off", input, val);
         continue;
       }
       if (typeof value !== "number") continue;
@@ -314,9 +324,17 @@ export class DriftLabPanel {
     }
     const mode = MODES[r[0] | 0] ?? "?";
     const env = r[3] > 0 ? `${r[3].toFixed(0)}°` : "–";
+    const sliding = mode === "hold" || mode === "angle-up" || mode === "straighten" || mode === "exceeded";
+    const held = mode === "hold" || mode === "angle-up" || mode === "exceeded" ? `${(r[6] ?? 0).toFixed(1)}°` : "–";
+    const key = r[7] ?? 0;
+    const applied = r[8] ?? 0;
     this.readout.textContent =
-      `slide ${r[1].toFixed(1)}° · ${mode}\n` + `envelope ${env} · authority ${(r[4] * 100).toFixed(0)}% · throttle ×${r[5].toFixed(2)} · onset ${r[2].toFixed(2)}`;
+      `${DRIFT_LAB_TITLE} · ${sliding ? mode.toUpperCase() : mode}\n` +
+      `slide ${r[1].toFixed(1)}° · held ${held} · envelope ${env}\n` +
+      `throttle key ${(key * 100).toFixed(0)}% → applied ${(applied * 100).toFixed(0)}%` +
+      (r[5] < 0.999 ? ` (shaping ×${r[5].toFixed(2)})` : "") +
+      `\nauthority ${(r[4] * 100).toFixed(0)}% · onset ${r[2].toFixed(2)}`;
     this.readout.style.whiteSpace = "pre";
-    this.readout.style.borderLeft = `4px solid ${mode === "exceeded" ? "#e04040" : mode === "hold" ? "#40c070" : mode === "catch" ? "#e0a030" : mode === "straighten" ? "#4090e0" : "#666"}`;
+    this.readout.style.borderLeft = `4px solid ${mode === "exceeded" ? "#e04040" : mode === "hold" ? "#40c070" : mode === "angle-up" ? "#e0a030" : mode === "straighten" ? "#4090e0" : "#666"}`;
   }
 }

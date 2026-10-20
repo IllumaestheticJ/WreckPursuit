@@ -379,7 +379,7 @@ const PLAY: { id: PlayChoice; label: string; hint: string }[] = [
   { id: "chaseRain", label: "Rainy night", hint: "Same chase on a soaked road" },
   { id: "races", label: "Street races", hint: "Races against AI drivers" },
   { id: "free", label: "Free drive", hint: "Explore the city with traffic" },
-  { id: "driftLabB", label: "Drift Lab B", hint: "Open pad, 90° corners and a sweeper. Drift assist B with a tuning panel" },
+  { id: "driftLabB", label: "Drift Lab C", hint: "Open pad, 90° corners and a sweeper. Countersteer key holds the slide; tuning panel" },
   { id: "garage", label: "Garage", hint: "Your career: cars, repairs, mods" },
 ];
 
