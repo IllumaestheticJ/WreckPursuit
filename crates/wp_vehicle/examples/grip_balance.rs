@@ -27,9 +27,22 @@ use wp_vehicle::rig::Rig;
 const TPS: usize = 240;
 const MPH: f32 = 0.44704;
 
+/// Load a car; offline car-data experiments (set before spawn): `YAW_INERTIA=k` (yaw inertia
+/// × k), `FRONT_WEIGHT=f` (static front weight fraction), `CG_H=k` (CG height × k).
 fn car(id: &str) -> LoadedCar {
     let data = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data");
-    load_any_car(&data, id).unwrap()
+    let mut c = load_any_car(&data, id).unwrap();
+    let env = |k: &str| std::env::var(k).ok().map(|v| v.parse::<f32>().expect(k));
+    if let Some(k) = env("YAW_INERTIA") {
+        c.def.inertia_kgm2[2] *= k;
+    }
+    if let Some(f) = env("FRONT_WEIGHT") {
+        c.def.front_weight_frac = f;
+    }
+    if let Some(k) = env("CG_H") {
+        c.def.cg_height_m *= k;
+    }
+    c
 }
 
 /// Speed controller used by every run (the lab's "cruise throttle").
@@ -120,8 +133,15 @@ fn circle(c: &LoadedCar, mph: f32) -> Circle {
     let a = reference_assists();
     let mut tail = Vec::new();
     let mut spun = false;
+    // THR=fixed: the throttle stays at the straight-line cruise value (no speed controller).
+    let fixed = std::env::var("THR").as_deref() == Ok("fixed");
+    let thr0 = hold_speed(&rig, v).0;
     for tick in 0..6 * TPS {
-        let (throttle, brake) = hold_speed(&rig, v);
+        let (throttle, brake) = if fixed {
+            (thr0, 0.0)
+        } else {
+            hold_speed(&rig, v)
+        };
         rig.step(
             &VehicleInput {
                 steer: -1.0,
@@ -569,7 +589,7 @@ fn sweep(ids: &[String]) {
         v
     };
     println!("\n## Sweep (key held 60 mph circle: body slip ° / front axle slip ° / lat g; tap 60 mph peak yaw 0.2 → 0.4 s; turn-in lift yaw 0.6 s kept → lifted; counter-key drift)");
-    println!("| car | set | 30 mph circle | 60 mph circle | 100 mph circle | tap 60 0.2 → 0.4 s: peak yaw (heading) | lift kick | drift | launch 1° | lane change slip ° | robust /27 |");
+    println!("| car | set | 30 mph circle | 60 mph circle | 100 mph circle | tap 60 0.1 / 0.2 / 0.4 s: heading | lift kick | drift | launch 1° | lane change slip ° | robust /27 |");
     println!("|---|---|---|---|---|---|---|---|---|---|---|");
     let a = reference_assists();
     for id in ids {
@@ -584,6 +604,7 @@ fn sweep(ids: &[String]) {
             } else {
                 "–".into()
             };
+            let t1 = tap_response(&c, &a, 60.0 * MPH, 0.1);
             let t2 = tap_response(&c, &a, 60.0 * MPH, 0.2);
             let t4 = tap_response(&c, &a, 60.0 * MPH, 0.4);
             let ((yk, _), (yl, _)) = lift_off(&c, 60.0);
@@ -600,7 +621,7 @@ fn sweep(ids: &[String]) {
             let l1 = launch_yaw(&c, &a, 1.0);
             let lc = lane_change_slip(&c, &a);
             println!(
-                "| {id} | {name} | {:.1}° / {:.1}° / {:.2} g{} | {:.1}° / {:.1}° / {:.2} g{} | {:.1}° / {:.1}° / {:.2} g{} | {:.1} ({:.1}°) → {:.1} ({:.1}°) | {yk:.1} → {yl:.1} | {} | {l1:.1} | {lc:.1} | {rb} |",
+                "| {id} | {name} | {:.1}° / {:.1}° / {:.2} g{} | {:.1}° / {:.1}° / {:.2} g{} | {:.1}° / {:.1}° / {:.2} g{} | {:.1} / {:.1} / {:.1}° | {yk:.1} → {yl:.1} | {} | {l1:.1} | {lc:.1} | {rb} |",
                 c30.slip,
                 c30.front,
                 c30.ay_g,
@@ -613,9 +634,8 @@ fn sweep(ids: &[String]) {
                 c100.front,
                 c100.ay_g,
                 if c100.spun { " SPUN" } else { "" },
-                t2.peak_yaw_dps,
+                t1.heading_deg,
                 t2.heading_deg,
-                t4.peak_yaw_dps,
                 t4.heading_deg,
                 d.cell()
             );

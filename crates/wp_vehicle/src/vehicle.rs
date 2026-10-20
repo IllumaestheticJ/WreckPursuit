@@ -1315,15 +1315,17 @@ impl Vehicle {
                     steer_in.body_slip,
                 )
             });
+            // Angle-rate timing: the plain rack as it is, capped at the smart lock below.
+            let angle_rate = crate::grip_lab::active().is_some_and(|g| g.smart_angle_rate);
             let (p, full_lock) = match smart {
-                Some(l) => (
+                Some(l) if !angle_rate => (
                     crate::plain::PlainSteer {
                         sens_applies: crate::plain::SensApplies::Tyre,
                         ..p
                     },
                     l,
                 ),
-                None => (p, full_lock),
+                _ => (p, full_lock),
             };
             let a = crate::plain::update_center_angle(
                 self.center_steer,
@@ -1338,6 +1340,10 @@ impl Vehicle {
                 &p,
                 dt,
             );
+            let a = match smart {
+                Some(l) if angle_rate => a.clamp(-l, l),
+                _ => a,
+            };
             // Grip-balance lab: the track cap (fronts kept at their peak slip).
             let a = match crate::grip_lab::active() {
                 Some(g) if smart.is_some() => g.track_cap(
@@ -1906,6 +1912,7 @@ impl Vehicle {
         let car_tune = crate::car_lab::active();
         // Grip-balance lab (`crate::grip_lab`): front / rear tyre scales on top; `None` = data.
         let grip_tune = crate::grip_lab::active().filter(|g| g.changes_tyres());
+        let rwd = matches!(self.def.drivetrain.layout, DriveLayout::Rwd);
         for i in 0..4 {
             let c = &self.corners[i];
             let w = &mut self.wheels[i];
@@ -1937,7 +1944,7 @@ impl Vehicle {
                 Some(t) => {
                     tuned = t.tire_for(&c.tire, i);
                     if let Some(g) = grip_tune {
-                        g.apply_tire(&mut tuned, i);
+                        g.apply_tire(&mut tuned, i, rwd);
                     }
                     let w_lat = if t.combined_applies(i) {
                         t.lat_under_spin.clamp(0.0, 1.0)
@@ -1949,7 +1956,7 @@ impl Vehicle {
                 None => match grip_tune {
                     Some(g) => {
                         tuned = c.tire.clone();
-                        g.apply_tire(&mut tuned, i);
+                        g.apply_tire(&mut tuned, i, rwd);
                         (&tuned, 1.0, None)
                     }
                     None => (&c.tire, 1.0, None),

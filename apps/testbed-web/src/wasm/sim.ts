@@ -272,7 +272,11 @@ export const sim = {
   carTuneSet: (json: string): void => wasm.car_tune_set(json),
   /** Grip-balance lab in effect (null = data) / {before, new} (wp_vehicle::grip_lab::GripBalance). */
   gripBalance: (): Record<string, number | boolean | string> | null => JSON.parse(wasm.grip_balance_json()),
-  gripBalanceDefaults: (): { before: Record<string, number | boolean | string>; new: Record<string, number | boolean | string> } =>
+  gripBalanceDefaults: (): {
+    before: Record<string, number | boolean | string>;
+    new: Record<string, number | boolean | string>;
+    lock_only: Record<string, number | boolean | string>;
+  } =>
     JSON.parse(wasm.grip_balance_defaults_json()),
   /** Set the grip-balance lab ("" = the data). */
   gripBalanceSet: (json: string): void => wasm.grip_balance_set(json),

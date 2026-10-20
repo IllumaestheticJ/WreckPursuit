@@ -105,7 +105,10 @@ const GRIP_FIELDS: Record<string, { label: string; min: number; max: number; ste
   rear_arb: { label: "rear bar ×", min: 0, max: 30, step: 0.5, hint: "rear anti-roll bar, on top of the suspension section (more = looser); the data's rear bar is ~5 % of the front's" },
   probe_width: { label: "wheel probe width ×", min: 0, max: 1.5, step: 0.0125, hint: "ground probe cylinder width (1 = the vehicle's). It rolls with the body, so in a corner it touches on its edge and the tyre load chatters tick to tick; 0.0125 removes the chatter (A/B for the vehicle owner)" },
   smart_ay_g: { label: "smart lock: corner g", min: 0, max: 2, step: 0.05, unit: "g", hint: "steady-corner steer angle allowed on top of the front peak slip (L·a/v²)" },
-  smart_margin: { label: "smart lock: past peak", min: 0, max: 2, step: 0.05, scale: 100, unit: "%", hint: "front slip allowed past the tyre's peak slip angle" },
+  smart_margin: { label: "smart lock: past peak", min: -0.8, max: 2, step: 0.05, scale: 100, unit: "%", hint: "front slip allowed past the tyre's peak slip angle" },
+  smart_margin_hi: { label: "smart lock: past peak at speed", min: -0.8, max: 2, step: 0.05, scale: 100, unit: "%", hint: "the past-peak allowance at high speed (blended in between the two speeds below): fronts a little past their peak keep a held key stable at 100 mph" },
+  smart_hi_from_kmh: { label: "smart lock: speed blend from", min: 40, max: 200, step: 5, unit: "km/h", hint: "speed where the high-speed allowance starts to blend in" },
+  smart_hi_full_kmh: { label: "smart lock: speed blend to", min: 60, max: 250, step: 5, unit: "km/h", hint: "speed where the high-speed allowance is fully in" },
   smart_slide_from_deg: { label: "smart lock off from slip", min: 0, max: 30, step: 0.5, unit: "°", hint: "body slip where the plain lock starts to come back (slides steer as before)" },
   smart_slide_full_deg: { label: "smart lock off by slip", min: 0, max: 40, step: 0.5, unit: "°", hint: "body slip where the plain lock is fully back" },
 };
@@ -517,13 +520,24 @@ export class DriftLabWPanel {
       const isNew = sameGrip(gt, gd.new);
       const ab = document.createElement("button");
       ab.id = "drift-w-balance-ab";
-      ab.textContent = `balance: ${isNew ? "new" : sameGrip(gt, gd.before) ? "before" : "custom"}`;
-      ab.title = "A/B: before = the tyre data and the plain lock; new = the smart lock (fronts kept near their peak slip at speed)";
+      ab.textContent = `balance: ${isNew ? "new" : sameGrip(gt, gd.before) ? "before" : sameGrip(gt, gd.lock_only) ? "lock only" : "custom"}`;
+      ab.title = "A/B: before = the tyre data and the plain lock; new = the smart lock + softer-sidewall tyres on RWD cars (the car rotates at the limit)";
       ab.onclick = () => {
-        saveGrip(isNew ? gd.before : gd.new);
+        // new → before; anything else (before, lock only, custom) → new.
+        saveGrip(sameGrip(this.sim.gripBalance(), gd.new) ? gd.before : gd.new);
         this.build();
       };
-      this.body.appendChild(ab);
+      const lockOnly = document.createElement("button");
+      lockOnly.textContent = "lock only (step 1)";
+      lockOnly.title = "step 1's set: the smart lock alone, tyres as in the data";
+      lockOnly.onclick = () => {
+        saveGrip(gd.lock_only);
+        this.build();
+      };
+      const abRow = document.createElement("div");
+      abRow.style.cssText = "display:flex;gap:6px";
+      abRow.append(ab, lockOnly);
+      this.body.appendChild(abRow);
       const sel = document.createElement("select");
       sel.id = "drift-w-lock-mode";
       for (const m of ["plain", "smart"]) {
@@ -558,6 +572,8 @@ export class DriftLabWPanel {
         row(f.label, f.hint, input, val);
       }
       for (const [key, label, hint] of [
+        ["tyres_rwd_only", "tyre scales: RWD cars only", "the front / rear tyre scales apply to rear-drive cars only (front-drive cars keep their tyres); the lock and bars apply to all"],
+        ["smart_angle_rate", "smart lock: plain wheel speed", "the wheels move at the plain rack's speed and stop at the smart lock (a 0.1 s tap turns them as far as before); off = full smart lock in the rack's 0.28 s"],
         ["smart_fade_both", "smart lock off in slides (both ways)", "the plain lock comes back with body slip for the into-turn side too (else only for countersteer)"],
         ["smart_track", "smart lock: track the travel", "experimental: cap the into-turn angle at the front axle's travel + peak slip (fronts held at peak however the car rotates; it tends to spin at speed)"],
       ] as const) {

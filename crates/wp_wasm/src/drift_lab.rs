@@ -226,12 +226,14 @@ pub fn grip_balance_json() -> String {
     json(&wp_vehicle::grip_lab::active())
 }
 
-/// `{ "before": <the data as is>, "new": <the lab's new balance> }`, JSON.
+/// `{ "before": <the data as is>, "new": <the lab's new balance>, "lock_only": <step 1: the
+/// smart lock alone> }`, JSON.
 #[wasm_bindgen]
 pub fn grip_balance_defaults_json() -> String {
     json(&serde_json::json!({
         "before": wp_vehicle::grip_lab::GripBalance::default(),
         "new": wp_vehicle::grip_lab::GripBalance::lab_default(),
+        "lock_only": wp_vehicle::grip_lab::GripBalance::lock_only(),
     }))
 }
 

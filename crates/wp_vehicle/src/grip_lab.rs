@@ -65,6 +65,10 @@ pub struct GripBalance {
     /// Front tyres' lateral Magic Formula `C` override (0 = data); as
     /// [`GripBalance::rear_lat_c`].
     pub front_lat_c: f32,
+    /// The tyre scales (front and rear: μ, cornering stiffness, load sensitivity, relaxation,
+    /// past-peak C) apply to rear-wheel-drive cars only, so front-drive cars keep their tyres
+    /// (and their mild understeer); the smart lock and the bar scales apply to every car.
+    pub tyres_rwd_only: bool,
     /// Front anti-roll bar scale (after the ride lab's). Less front bar = less front lateral
     /// load transfer = more front grip.
     pub front_arb: f32,
@@ -83,6 +87,15 @@ pub struct GripBalance {
     /// Smart lock: front slip allowance past the tyre's peak slip angle, fraction (0.3 = 30 %
     /// past the peak, where the `sport` curve still gives ~98 % of its peak).
     pub smart_margin: f32,
+    /// Smart lock: the margin at high speed (blended from [`GripBalance::smart_margin`] between
+    /// [`GripBalance::smart_hi_from_kmh`] and [`GripBalance::smart_hi_full_kmh`]). More margin
+    /// at speed = the fronts a little past their peak = the held-key stability a car needs at
+    /// 100 mph (with the fronts at their peak the rear has no yaw moment to spare).
+    pub smart_margin_hi: f32,
+    /// Speed where the high-speed margin starts to blend in, km/h.
+    pub smart_hi_from_kmh: f32,
+    /// Speed where the high-speed margin is fully in, km/h.
+    pub smart_hi_full_kmh: f32,
     /// Smart lock: steering **toward the slide** (countersteer: the wheels turned toward the
     /// side the car is sliding to) gets the plain profile's lock back, faded in with body slip from
     /// this angle, degrees ...
@@ -93,6 +106,11 @@ pub struct GripBalance {
     /// Smart lock: the plain lock comes back in a slide for **both** directions (into the
     /// turn as well as countersteer), with the same body-slip fade.
     pub smart_fade_both: bool,
+    /// Smart lock timing: `false` (default) = the rack takes its full-lock time (0.28 s) to
+    /// reach the smart lock, so a short tap gives a smaller angle than before; `true` = the
+    /// rack keeps the plain profile's angle rate and stops at the smart lock (a 0.1 s tap
+    /// turns the wheels as far as before, the lock is reached sooner).
+    pub smart_angle_rate: bool,
     /// Smart lock, **track** cap: the wheels never turn into the corner further than the
     /// front axle's direction of travel + the front peak slip × (1 + margin), i.e. the fronts
     /// stay at their peak however the car is rotating (a driver's hands at the limit; the
@@ -121,15 +139,20 @@ impl Default for GripBalance {
             front_relax: 1.0,
             rear_lat_c: 0.0,
             front_lat_c: 0.0,
+            tyres_rwd_only: false,
             front_arb: 1.0,
             rear_arb: 1.0,
             probe_width: 1.0,
             lock_mode: LockMode::Plain,
             smart_ay_g: 1.0,
             smart_margin: 0.3,
+            smart_margin_hi: 0.3,
+            smart_hi_from_kmh: 100.0,
+            smart_hi_full_kmh: 160.0,
             smart_slide_from_deg: 3.0,
             smart_slide_full_deg: 8.0,
             smart_fade_both: false,
+            smart_angle_rate: false,
             smart_track: false,
             track_from_deg: 10.0,
             track_full_deg: 20.0,
@@ -139,10 +162,31 @@ impl Default for GripBalance {
 }
 
 impl GripBalance {
-    /// The lab's "new" balance (docs/integration/grip-balance.md, step 1): the smart lock
-    /// with the data's tyres; countersteer gets the plain lock back from 8° to 15° of body
-    /// slip (lower thresholds over-correct a 100 km/h lane change into a spin).
+    /// The lab's "new" balance (docs/integration/grip-balance.md, step 2):
+    /// - the smart lock, tyre budget = front peak slip × 0.7 (margin −0.3) up to 100 km/h so
+    ///   the fronts work at their peak, rising to × 2 (margin +1.0) by 160 km/h so a held key
+    ///   at 100 mph stays stable (mild high-speed understeer); countersteer gets the plain lock
+    ///   back from 8° to 15° of body slip;
+    /// - on rear-wheel-drive cars, cornering stiffness × 0.75 front / × 0.65 rear (same peak
+    ///   grip at bigger slip angles: the rear works at the limit and the car rotates, with the
+    ///   linear-range balance kept near neutral). Front-drive cars keep their tyres.
     pub fn lab_default() -> Self {
+        Self {
+            lock_mode: LockMode::Smart,
+            smart_margin: -0.3,
+            smart_margin_hi: 1.0,
+            smart_slide_from_deg: 8.0,
+            smart_slide_full_deg: 15.0,
+            front_stiffness: 0.75,
+            rear_stiffness: 0.65,
+            tyres_rwd_only: true,
+            ..Self::default()
+        }
+    }
+
+    /// Step 1's "new" balance (docs/integration/grip-balance.md): the smart lock alone
+    /// (margin +0.3 at every speed) with the data's tyres.
+    pub fn lock_only() -> Self {
         Self {
             lock_mode: LockMode::Smart,
             smart_slide_from_deg: 8.0,
@@ -168,9 +212,13 @@ impl GripBalance {
             || self.front_lat_c > 0.0
     }
 
-    /// `tire` with the scales of corner `i` (0 FL, 1 FR, 2 RL, 3 RR) applied in place.
-    pub fn apply_tire(&self, tire: &mut TireDef, i: usize) {
+    /// `tire` with the scales of corner `i` (0 FL, 1 FR, 2 RL, 3 RR) applied in place; `rwd` =
+    /// the car is rear-wheel drive (see [`GripBalance::tyres_rwd_only`]).
+    pub fn apply_tire(&self, tire: &mut TireDef, i: usize, rwd: bool) {
         let front = i < 2;
+        if self.tyres_rwd_only && !rwd {
+            return;
+        }
         let (mu, stiff, ls) = if front {
             (self.front_mu, self.front_stiffness, self.front_load_sens)
         } else {
@@ -208,6 +256,18 @@ impl GripBalance {
         }
     }
 
+    /// Smart lock margin at `speed` (m/s): [`GripBalance::smart_margin`] blended to
+    /// [`GripBalance::smart_margin_hi`] (linear in speed).
+    pub fn margin_at(&self, speed: f32) -> f32 {
+        let kmh = speed.abs() * 3.6;
+        let (lo, hi) = (
+            self.smart_hi_from_kmh,
+            self.smart_hi_full_kmh.max(self.smart_hi_from_kmh + 1.0),
+        );
+        let x = ((kmh - lo) / (hi - lo)).clamp(0.0, 1.0);
+        self.smart_margin + x * (self.smart_margin_hi - self.smart_margin)
+    }
+
     /// Smart lock at `speed` (m/s), rad: `L · a / v² + peak × (1 + margin)`, capped at
     /// `plain_lock` (the plain profile's lock at this speed). `None` unless
     /// [`LockMode::Smart`]. `toward_slide` (the wheels point, or the key asks for, the side the
@@ -227,7 +287,7 @@ impl GripBalance {
         }
         let v2 = (speed * speed).max(1.0);
         let geo = wheelbase * self.smart_ay_g.max(0.0) * wp_contracts::GRAVITY_MPS2 / v2;
-        let tyre = front_peak_slip * (1.0 + self.smart_margin.max(0.0));
+        let tyre = front_peak_slip * (1.0 + self.margin_at(speed)).max(0.2);
         let smart = (geo + tyre).min(plain_lock);
         if !toward_slide && !self.smart_fade_both {
             return Some(smart);
@@ -265,7 +325,7 @@ impl GripBalance {
         if keep <= 0.0 {
             return angle;
         }
-        let a = front_peak_slip * (1.0 + self.smart_margin.max(0.0));
+        let a = front_peak_slip * (1.0 + self.smart_margin).max(0.2);
         let floor = self.track_floor_deg.max(0.0).to_radians();
         // Into the turn = the side the wheel points to; the cap is travel + peak on that side.
         let s = angle.signum();
@@ -373,22 +433,39 @@ mod tests {
     fn default_changes_nothing_and_smart_lock_caps_at_speed() {
         let d = GripBalance::default();
         assert!(!d.changes_tyres());
+        assert!(GripBalance::lab_default().changes_tyres());
+        // The tyre scales skip front-drive cars when tyres_rwd_only is set.
+        let mut t: TireDef = serde_json::from_str(
+            r#"{"id":"t","lateral":{"b":17,"c":1.4,"d":1.1,"e":-0.3},"longitudinal":{"b":15,"c":1.65,"d":1.2,"e":0.2},
+            "load_sensitivity":0.13,"fz0_n":4000,"relaxation_length_m":0.3,"rolling_resistance":0.011,
+            "peak_slip_angle_rad":0.109,"peak_slip_ratio":0.101,"surface_multipliers":{},"wear_rate":0}"#,
+        )
+        .unwrap();
+        GripBalance::lab_default().apply_tire(&mut t, 2, false);
+        assert_eq!(t.lateral.b, 17.0);
+        GripBalance::lab_default().apply_tire(&mut t, 2, true);
+        assert!((t.lateral.b - 17.0 * 0.65).abs() < 1e-4);
+        // The high-speed margin blends in between 100 and 160 km/h.
+        let n = GripBalance::lab_default();
+        assert!((n.margin_at(80.0 / 3.6) + 0.3).abs() < 1e-6);
+        assert!((n.margin_at(130.0 / 3.6) - 0.35).abs() < 1e-4);
+        assert!((n.margin_at(200.0 / 3.6) - 1.0).abs() < 1e-6);
         assert_eq!(d.smart_lock(30.0, 2.7, 0.109, 0.66, false, 0.0), None);
         let s = GripBalance::lab_default();
         // Parking speed: the car's full lock.
         let lock = s.smart_lock(2.0, 2.7, 0.109, 0.66, false, 0.0).unwrap();
         assert!((lock - 0.66).abs() < 1e-6);
-        // 60 mph: ≈ 2° of geometry + 1.3 × 6.2° of tyre ≈ 10°.
+        // 60 mph: ≈ 2° of geometry + 0.7 × 6.2° of tyre ≈ 6.5°.
         let lock = s
             .smart_lock(26.8, 2.7, 0.109, 0.66, false, 0.0)
             .unwrap()
             .to_degrees();
-        assert!((9.0..11.5).contains(&lock), "{lock}");
+        assert!((5.5..7.5).contains(&lock), "{lock}");
         // Countersteer in a 20° slide: the plain lock again; into the turn: still limited ...
         let ctr = s.smart_lock(26.8, 2.7, 0.109, 0.66, true, 0.35).unwrap();
         assert!((ctr - 0.66).abs() < 1e-6);
         let into = s.smart_lock(26.8, 2.7, 0.109, 0.66, false, 0.35).unwrap();
-        assert!(into.to_degrees() < 11.5);
+        assert!(into.to_degrees() < 7.5);
         // ... unless the fade applies both ways.
         let both = GripBalance {
             smart_fade_both: true,

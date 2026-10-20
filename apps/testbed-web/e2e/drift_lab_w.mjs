@@ -85,6 +85,11 @@ check((await page.evaluate(() => window.__wp.sim.gripBalance()?.lock_mode)) === 
 check((await abText()) === "balance: before", `A/B button reads "${await abText()}" (balance: before)`);
 await page.locator("#drift-w-balance-ab").click();
 check((await page.evaluate(() => window.__wp.sim.gripBalance()?.lock_mode)) === "smart", "A/B → new again");
+const gNew = await page.evaluate(() => window.__wp.sim.gripBalance());
+check(Math.abs(gNew.rear_stiffness - 0.65) < 1e-6 && gNew.tyres_rwd_only === true, `new balance: softer RWD tyres ${JSON.stringify(gNew)}`);
+await page.locator("#drift-lab-w button", { hasText: "lock only (step 1)" }).click();
+check((await abText()) === "balance: lock only" && (await page.evaluate(() => window.__wp.sim.gripBalance().rear_stiffness)) === 1, `lock only preset: "${await abText()}"`);
+await page.locator("#drift-w-balance-ab").click(); // lock only → new
 await page.evaluate(() => {
   const inputs = [...document.querySelectorAll("#drift-lab-w input[type=range]")];
   const s = inputs.find((i) => i.parentElement.textContent.includes("rear grip (μ)"));
@@ -92,9 +97,8 @@ await page.evaluate(() => {
   s.dispatchEvent(new Event("input"));
 });
 check(Math.abs((await page.evaluate(() => window.__wp.sim.gripBalance().rear_mu)) - 0.9) < 1e-6, "rear grip slider sets the override");
-await page.locator("#drift-w-balance-ab").click(); // custom → before
-await page.locator("#drift-w-balance-ab").click(); // before → new
-check((await page.evaluate(() => window.__wp.sim.gripBalance().rear_mu)) === 1, "A/B restores the new balance");
+await page.locator("#drift-w-balance-ab").click(); // custom → new
+check((await page.evaluate(() => window.__wp.sim.gripBalance().rear_mu)) === 1 && (await abText()) === "balance: new", "A/B restores the new balance");
 // Steering slider → override.
 await page.evaluate(() => {
   const inputs = [...document.querySelectorAll("#drift-lab-w input[type=range]")];

@@ -12,7 +12,153 @@ separate from Drift Lab W's `car_lab` / `ride_lab` / `plain` knobs. It is proces
 replays or the netcode, and the same in Arcade and Simulation. With it off, the vehicle step is
 bit-identical.
 
-## Headline (step 1)
+## Headline (step 2: the current "new")
+
+**"new" = smart lock + softer-sidewall tyres on the RWD cars.** At the limit with a key held, the
+RWD cars now run **3.6–4.0° of body slip at 60 mph and 4.0–4.6° at 100 mph** (before: 1.1–1.4°
+and 2.1–2.6°), with **0.90–1.01 g** (before 0.75–0.85 g). The rear works and the car rotates
+instead of pushing wide. The linear-range balance stays near neutral (−0.3 … +0.5 deg/g). The
+FWD car keeps its tyres and stays mildly understeering (1.8° body slip, gradient +0.2/+0.7).
+
+1. **Smart lock** (step 1, re-tuned). The keyboard lock at speed = the 1 g corner angle
+   (`L·g/v²`) + the front tyre's peak slip × (1 + margin). The margin is **−0.3 up to 100
+   km/h** (fronts at their peak, not past it) and rises to **+1.0 by 160 km/h**. Countersteer
+   gets the plain lock back from 8° to 15° of body slip.
+2. **RWD tyres: cornering stiffness × 0.75 front / × 0.65 rear** (the same peak grip, reached at
+   bigger slip angles, like a taller or softer sidewall). The rear has to slip 4–5° to carry
+   the corner, so the car rotates at the limit. Softening only the rear gives the body slip but
+   makes the linear range oversteer (−1 deg/g, with a critical speed near 140 km/h). Softening
+   the front too keeps it near neutral.
+3. **Why the margin rises with speed.** With the fronts at their peak, the max front yaw moment
+   (a·F_f ≈ 1.25 m × 9.5 kN) equals the max rear restoring moment (b·F_r ≈ 1.47 m × 8.1 kN). A
+   neutral car has no spare rear moment to stop a turn-in yaw overshoot. At 100 mph the
+   overshoot is 2.5× the steady yaw rate, and a held key spins the car. A smaller lock doesn't
+   help. Only fronts a little past their peak at speed (front slip ~2× peak, i.e. mild
+   high-speed understeer) keep a held key stable at 100 mph. That's probably what the
+   reference's 75 % speed sensitivity does at the road wheels.
+4. **Turn-in and lift:** yaw 0.6 s after the key at 60 mph is **30.5 °/s, lifted 34.9 °/s**
+   (before 16.7 / 19.6). Peak body slip at turn-in is 6.9° → 11.3° with a lift (before 2.2° →
+   3.0°). So the lift-off now clearly rotates the car.
+5. **Taps** (60 mph, heading after 1.5 s): 0.1 / 0.2 / 0.4 s = **2.6 / 11.1 / 30.2°** (before
+   5.0 / 13.0 / 16.4°). A longer tap now gives clearly more yaw. The 0.1 s tap is softer: the
+   rack takes 0.28 s to the smaller smart lock. The *smart lock: plain wheel speed* checkbox
+   restores it (5.8°) but costs drift robustness (0 / 27) and lane-change calm (8.7°). At
+   100 mph taps are livelier than before: 0.1 s = 10.3° (before 6.3°).
+6. **Regression.** Drift robustness set: 2 / 27 (before 2 / 27). Lab standard entry (rwd_d,
+   counter key at 6°, 0.6 g): spun after 1.2 s (before held 5.3 s). rwd_b now holds it (4.5 s).
+   Straight launch: 0.0° flat / 0.6° on a 1° slope (before 0.4°). Lane change 100 km/h: 6.5°
+   max slip (before 3.4°; lively, recovers). Handbrake pivot unchanged (25°).
+7. **The 100 mph key-held circle with the cruise controller is a power test** for these cars.
+   parity_rwd_d's power-limited thrust at 100 mph (390 kW / 44.7 m/s ≈ 8.7 kN) equals its
+   rear grip, and the controller ends at full throttle as the car slows. The tables also give
+   the circles at a **fixed** cruise throttle (`THR=fixed`).
+
+### Key held, cruise throttle: lat g / body slip / front, rear axle slip (mean of the last 2 s)
+
+| car | balance | 30 mph | 60 mph | 100 mph |
+|---|---|---|---|---|
+| parity_rwd_d | before | 0.65 g / −1.7° / 29.2°, 1.5° | 0.76 g / 1.2° / 25.5°, 2.1° | 0.85 g / 2.4° / 17.5°, 2.7° |
+| parity_rwd_d | **new** | 0.85 g / −0.3° / 10.7°, 3.6° | **0.92 g / 3.7°** / 10.8°, 4.7° | **0.87 g / 4.0°** / 19.2°, 4.4° |
+| parity_rwd_a | before | 0.67 g / −1.7° | 0.78 g / 1.1° | 0.87 g / 2.4° |
+| parity_rwd_a | **new** | 0.87 g / −0.4° | 0.94 g / 3.7° | 0.89 g / 4.0° |
+| parity_rwd_b | before | 0.72 g / −1.0° | 0.85 g / 1.4° | 0.97 g / 2.6° |
+| parity_rwd_b | **new** | 0.95 g / 0.9° | 1.01 g / 4.0° | 1.01 g / 4.6° |
+| rampart_50 | before | 0.64 g / −1.8° | 0.75 g / 1.1° | 0.82 g / 2.1° |
+| rampart_50 | **new** | 0.85 g / −0.1° | 0.90 g / 3.6° | 0.85 g / 4.0° |
+| parity_fwd_c | before | 0.85 g / −2.7° | 0.86 g / 1.1° | 0.90 g / 2.3° |
+| parity_fwd_c | **new** (tyres unchanged) | 0.92 g / −2.3° | 0.96 g / 1.8° | 0.90 g / 2.3° |
+
+Fixed throttle (`THR=fixed`; the car slows, so the speeds are lower), body slip:
+
+| car | before 30 / 60 / 100 mph start | new |
+|---|---|---|
+| parity_rwd_d | −16.1° (12 mph) / 0.2° (44 mph) / 2.0° (84 mph) | −4.8° (20 mph) / 3.2° (54 mph) / 4.1° (81 mph) |
+| parity_rwd_b | −5.2° / 0.9° / 2.4° | −0.6° / 3.9° / 4.5° |
+| rampart_50 | −15.3° / 0.0° / 1.9° | −4.1° / 3.2° / 4.1° |
+| parity_fwd_c | −16.7° / −0.7° / 2.1° | −6.4° / 1.2° / 2.3° |
+
+### Understeer gradient, deg/g over 0.1–0.4 g / 0.4–0.7 g
+
+| car | before 60 km/h | before 100 km/h | new 60 km/h | new 100 km/h |
+|---|---|---|---|---|
+| parity_rwd_d | 0.36 / — | 0.59 / 0.69 | −0.19 / 0.52 | 0.20 / 0.32 |
+| parity_rwd_b | 0.20 / 0.33 | 0.55 / 0.38 | −0.29 / −0.03 | 0.26 / −0.10 |
+| rampart_50 | 0.32 / — | 0.62 / 0.54 | −0.25 / 0.40 | 0.18 / 0.09 |
+| parity_fwd_c | 0.29 / 0.71 | 0.84 / 0.60 | 0.18 / 0.74 | 0.66 / 0.68 |
+
+(— = the ramp ran into the scrub region and the fit is meaningless; 110 deg/g.)
+
+### Taps holding speed: heading ° after 1.5 s (peak body slip °)
+
+| car | mph | before 0.1 / 0.2 / 0.4 s | new 0.1 / 0.2 / 0.4 s |
+|---|---|---|---|
+| parity_rwd_d | 60 | 5.0 (1.2) / 13.0 (2.6) / 16.4 (2.2) | 2.6 (0.7) / 11.1 (2.6) / 30.2 (6.5) |
+| parity_rwd_d | 100 | 6.3 (2.1) / 29.3 (12.4) / 23.7 (7.0) | 10.3 (2.7) / 33.9 (17.3) / 31.9 (15.2) |
+| parity_rwd_b | 60 | 5.7 / 17.9 / 18.2 | 2.9 / 14.9 / 42.4 |
+| parity_fwd_c | 60 | 5.0 / 15.4 / 19.8 | 2.2 / 9.6 / 21.0 |
+| rampart_50 | 60 | 5.3 / 14.6 / 17.2 | 2.7 / 12.6 / 34.4 |
+
+### Lift-off and power-on (key held)
+
+| car | balance | turn-in 60 mph: yaw at 0.6 s / peak slip, kept → lifted | mid-corner lift 60 mph: slip before → after | power-on 35 mph |
+|---|---|---|---|---|
+| parity_rwd_d | before | 16.7 °/s / 2.2° → 19.6 °/s / 3.0° | 1.1° → 1.5° | tail out, spins |
+| parity_rwd_d | new | 30.5 °/s / 6.9° → 34.9 °/s / 11.3° | 4.3° → 4.4° | tail out, spins |
+| parity_rwd_b | new | 35.7 °/s / 9.7° → 42.1 °/s / 19.7° | 4.3° → 7.2° | 1.8° → 27° |
+| rampart_50 | new | 32.2 °/s / 8.3° → 35.3 °/s / 11.8° | 4.3° → 4.3° | 0.8° → 4.5° |
+| parity_fwd_c | new | 25.5 °/s / 3.8° → 28.5 °/s / 4.9° | 1.7° → 2.3° | none |
+
+### Regression
+
+| | before | new |
+|---|---|---|
+| robustness set (27 entries) | 2 held | 2 held |
+| W standard entry rwd_d (counter 6°, 0.6 g) | held 5.3 s | spun 1.2 s |
+| same entry, rwd_b | spun 2.4 s | **held 4.5 s** |
+| launch yaw flat / 1° slope (rwd_d) | 0.0° / 0.4° | 0.0° / 0.6° |
+| lane change 100 km/h, max slip (rwd_d / rwd_b / fwd_c) | 3.4 / 3.7 / 4.3° | 6.5 / 8.9 / 3.9° |
+| handbrake 40 km/h 0.6 s (rwd_d) | 25°, spins | 25°, no catch |
+| keys released mid-drift | spins slowly | same |
+
+## Car-data proposals for machine A
+
+| # | where | value | why |
+|---|---|---|---|
+| 1 | `wp_vehicle::steering` keyboard path (input device, all cars) | lock at speed = `L·g/v² + front peak slip × (1 + m(v))`, m = −0.3 to 100 km/h → +1.0 at 160 km/h; plain lock for countersteer past 8–15° of body slip | the push: a held key at 60 mph put 25° on the wheels against a 6.2° tyre peak |
+| 2 | `data/tires/` a "sport_rwd" analogue (or per-car tyre ids for the RWD cars: parity_rwd_*, rampart_50, lucciola_350, shiro_turbo …) | lateral `b` × 0.75 front, × 0.65 rear; `peak_slip_angle_rad` ÷ 0.75 / ÷ 0.65 (0.145 / 0.168 rad); `d`, `c`, `e` unchanged | rear works at 4–5° at the limit, car rotates, linear balance near neutral |
+| 3 | FWD cars | no tyre change | smart lock alone: 1.8° body slip, gradient +0.2 / +0.7 deg/g (mild understeer) |
+| 4 | vehicle ground probe | narrow the probe cylinder (or keep it at the road's camber) | 0.6–1 kN RMS tick-to-tick load chatter in corners |
+| 5 | roll split / bars / weight distribution / CoG height / yaw inertia | no change | measured: none of them moves the limit balance by more than ~0.5° of body slip (step 2 sweep) |
+
+## How to try it (owner)
+
+`?drift=w` → *tune* → **grip balance**: **balance: new / before** (A/B), **lock only (step 1)**
+(the smart lock without the tyre change).
+1. 60 mph sweeper, key held: the car should take a set with the tail working a little (≈4°),
+   not push wide.
+2. Lift at turn-in: a clear rotation.
+3. 0.1 / 0.2 / 0.4 s taps at 60 mph: the 0.1 s tap is gentle. Tick *smart lock: plain wheel
+   speed* if you want it sharper.
+4. 100 mph: a held key should stay on a wide line. The taps are livelier than before.
+5. RWD vs FWD (parity_fwd_c): the FWD car should still push mildly.
+
+## Step 2 sweep: car-data levers (parity_rwd_d on the new lock, `CARLAB` / `RIDE` defaults)
+
+| lever (offline env or knob) | 60 mph circle body slip | note |
+|---|---|---|
+| yaw inertia × 0.8 / × 1.25 (`YAW_INERTIA`) | 1.7° / 1.7° | no effect on the limit balance |
+| front weight 0.50 / 0.58 (`FRONT_WEIGHT`) | 1.8° / 1.6° | small |
+| CG height × 0.85 / × 1.15 (`CG_H`) | 1.7° / 1.8° | small (g ± 2 %) |
+| rear stiffness 0.65 alone (RWD) | 3.6° | gradient −1.0 deg/g at 60 km/h, spins at 100 mph |
+| front 0.75 / rear 0.65 (new) | 3.7° | gradient ~0, stable with the speed-blended margin |
+| front 0.7 / rear 0.6 | 4.0° | similar, lane change 7.0° |
+| front 0.6 / rear 0.55 | 4.6° | robust 1 / 27 |
+| margin −0.3 at all speeds | 3.7° | spins at 100 mph (cruise) |
+| margin +1.0 at all speeds | 2.8° | stable everywhere, more push |
+
+## Step 1 (superseded defaults; kept for the history)
+
+### Headline (step 1)
 
 1. **The understeer is mostly the keyboard lock, not the tyres.** With a key held at 60 mph the
    W rack (75 % speed sensitivity) puts **25° of road-wheel angle** on the car. The `sport`
@@ -48,7 +194,7 @@ bit-identical.
    Fading the smart lock out both ways at 2–5° of slip gets 4.3 s on that entry, but then the
    100 km/h lane change spins (71°), so not chosen.
 
-## How to try it (owner)
+### How to try step 1
 
 `?drift=w` → *tune* → **grip balance** section. **balance: new / before** button = the A/B
 (new = smart lock, before = the plain lock and tyre data). The section's sliders are the levers
@@ -61,7 +207,7 @@ below. *keyboard lock at speed* switches plain / smart.
 4. Try *rear grip (μ)* 0.95 → 0.92 for a looser car. It spins easily with a key held at speed.
    That's the next thing to fix.
 
-## Measurements (step 1)
+### Measurements (step 1)
 
 `cargo run --release -p wp_vehicle --example grip_balance [circle|ug|tap|lift|regress|robust|sweep|chatter|trace|ltrace|dtrace] [cars]`;
 `AB=1` = before and new, `GRIP=new`, `GRIP='{…}'`, `GRIP='[{…},{…}]'`; `RIDE=data` /
@@ -139,7 +285,7 @@ throttle, before and after).
 
 Full tables for all five cars: run `AB=1 … grip_balance all`.
 
-## What the tyre levers do (sweep, parity_rwd_d, on top of the smart lock)
+### What the tyre levers do (sweep, parity_rwd_d, on top of the smart lock)
 
 `GRIP='[…]' … grip_balance sweep parity_rwd_d` (one knob at a time on top of the new default):
 
@@ -173,7 +319,7 @@ Lowering rear cornering stiffness gives the body slip but removes the high-speed
 So the limit balance needs a rear that **saturates progressively and recovers**, not just less
 rear grip.
 
-## Car-data proposals for machine A (preliminary, step 1)
+### Car-data proposals (step 1, superseded by the table above)
 
 1. **Keyboard lock at speed** (input / steering data, not tyres): cap the plain profile's lock at
    `L·g·1.0/v² + 1.3 × front peak slip`, and give countersteer the full plain lock past 8–15° of
@@ -184,7 +330,7 @@ rear grip.
 3. Tyres / roll split: **no change proposed yet.** Every lever tried so far trades the push for a
    spin. Next step measures progressive-rear options (below).
 
-## Next (step 2)
+### Next (as planned after step 1)
 
 - Faster rack to the smart lock (keep the 0.1 s tap's wheel angle) as an A/B.
 - A rear that recovers: rear relaxation length, rear peak slip vs front, the spin model's
@@ -194,23 +340,25 @@ rear grip.
 
 ## Files
 
-- `crates/wp_vehicle/src/grip_lab.rs`: `GripBalance`, `LockMode`, smart lock, track cap,
-  tyre / bar / probe scales, sweep sets, unit test.
+- `crates/wp_vehicle/src/grip_lab.rs`: `GripBalance` (`lab_default` = new, `lock_only` = step 1),
+  `LockMode`, smart lock with the speed-blended margin (`margin_at`), angle-rate option, track
+  cap, tyre scales (RWD-only switch) / bar / probe scales, sweep sets, unit test.
 - `crates/wp_vehicle/src/vehicle.rs`: smart lock + track cap in the plain steering branch
   (rate-limited shrink), per-axle bar scale, grip-lab tyre scales in the substep (also without
   `car_lab`), probe width, `front_peak_slip()`, `wheel_loads()` (lab traces).
 - `crates/wp_vehicle/examples/grip_balance.rs`: all tables above.
-- `crates/wp_wasm/src/drift_lab.rs`: `grip_balance_json`, `grip_balance_defaults_json`,
-  `grip_balance_set`.
-- `apps/testbed-web/src/drift_lab_w.ts` (grip balance section, A/B button),
-  `src/wasm/sim.ts`, `e2e/drift_lab_w.mjs` (A/B + slider + off in free drive).
+- `crates/wp_wasm/src/drift_lab.rs`: `grip_balance_json`, `grip_balance_defaults_json`
+  (`before` / `new` / `lock_only`), `grip_balance_set`.
+- `apps/testbed-web/src/drift_lab_w.ts` (grip balance section: A/B button, *lock only (step 1)*,
+  sliders, checkboxes), `src/wasm/sim.ts`, `e2e/drift_lab_w.mjs` (A/B, presets, slider, off in
+  free drive).
 
-## Gate (step 1)
+## Gate (step 2)
 
 fmt, `clippy -p wp_vehicle -p wp_wasm --all-targets -D warnings`, `cargo test -p wp_vehicle
 --no-fail-fast` (all pass except `tests/drift_lab_b.rs::handbrake_stabs_add_rotation_and_drive_comes_back`,
 which fails on the base `lead/drift-lab-w` c234d260 too), `lint-determinism` (0 errors), wasm
-build, `tsc --noEmit`, `npm run e2e:drift-lab-w` (all pass).
+build, `tsc --noEmit`, `npm run e2e:drift-lab-w` (57 / 57 pass).
 
 ## Coordination
 
