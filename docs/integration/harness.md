@@ -198,6 +198,12 @@ Known gaps:
 - The AI dispatcher places roadblocks on real roads only in a city. Captain orders on the
   flat world are refused (`NotPursued`) because there are no units to start a pursuit.
 
+Checks: `cargo fmt`, `cargo clippy --workspace --all-targets -D warnings`, `cargo test
+--workspace --no-fail-fast` (784 passed, 0 failed, 15 ignored), wasm build (`npm run wasm`),
+`npm run typecheck`, `npm run e2e:police` (7/7), `simcli run apps/simcli/scenarios` (all pass),
+`simcli goldens` (all match), `simcli determinism apps/simcli/scenarios` (all deterministic),
+`tools/wasm-determinism/compare.sh` (native == wasm).
+
 ## Run 8 — response to lead feedback round 8 (2026-10-19)
 
 Merged `origin/main` (contract v0.3.0, `lead/test-speed`, round 8 docs) into `ws/harness`; no
