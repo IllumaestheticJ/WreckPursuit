@@ -70,10 +70,8 @@ export class AudioSystem {
     (window as unknown as { __wpAudio?: AudioSystem }).__wpAudio = this;
     const kick = () => this.start();
     window.addEventListener("pointerdown", kick);
-    window.addEventListener("keydown", (e) => {
-      if (e.code === "KeyV" && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement)) this.toggleMute();
-      kick();
-    });
+    // Mute is the rebindable "mute" action (main.ts dispatches it to toggleMute).
+    window.addEventListener("keydown", kick);
   }
 
   private safe(f: () => void): void {
@@ -157,7 +155,7 @@ export class AudioSystem {
     if (this.mixer && this.ctx) {
       this.mixer.master.gain.setTargetAtTime(this.muted ? 0 : this.panel.settings.master, this.ctx.currentTime, 0.02);
     }
-    this.panel.setStatus(this.muted ? "muted (M)" : "unmuted");
+    this.panel.setStatus(this.muted ? "muted" : "unmuted");
   }
 
   /** Siren mode for the focused car: "Default" | "Off" | "Auto" | "Wail" | "Yelp" | "Phaser" | "HiLo". */

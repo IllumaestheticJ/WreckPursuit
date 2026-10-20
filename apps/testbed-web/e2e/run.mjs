@@ -8,8 +8,8 @@
 // selector) loads with traffic, signals (day/night, lamps change over time) and the city chase,
 // weather (e2e/weather.mjs: selector, rain, wet roads, spray, fog, wipers, rainy-night chase),
 // traffic / police LOD hand-overs are seamless (no missing mesh, < 0.5 m swap jump, no pop-in
-// within 300 m), browser perf budgets (e2e/perf_check.mjs, PERF=0 skips) and (optionally) perf
-// at 1/8/24 cars.
+// within 300 m), gamepad + rebindable controls (e2e/gamepad.mjs), browser perf budgets
+// (e2e/perf_check.mjs, PERF=0 skips) and (optionally) perf at 1/8/24 cars.
 import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -757,5 +757,15 @@ if (process.env.PERF !== "0") {
   process.stdout.write(perf.stdout);
   check(perf.status === 0, `perf checks (e2e/perf_check.mjs)${perf.status === 0 ? "" : ": " + (perf.stderr || "").trim().split("\n").pop()}`);
 }
+// 8. Gamepad + rebindable controls (e2e/gamepad.mjs, its own server and browser): fake pad
+// drives and steers, assists follow the device, disconnect releases, rebind survives a reload,
+// input latency one frame.
+const gp = spawnSync("node", [join(here, "gamepad.mjs")], {
+  cwd: root,
+  encoding: "utf8",
+  env: { ...process.env, GAMEPAD_SHOTS: shots ?? "" },
+});
+process.stdout.write(gp.stdout);
+check(gp.status === 0, `gamepad + controls checks (e2e/gamepad.mjs)${gp.status === 0 ? "" : ": " + (gp.stderr || "").trim().split("\n").pop()}`);
 console.log(failures ? `${failures} check(s) failed` : "all checks passed");
 process.exit(failures ? 1 : 0);
