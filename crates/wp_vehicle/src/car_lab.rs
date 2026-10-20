@@ -192,6 +192,23 @@ impl CarTune {
         }
     }
 
+    /// The steering half of the "drift: spin + VR (test)" lab preset (tyres:
+    /// [`CarTune::spin_candidate`]): Drift Lab W's velocity-relative steering at half gain
+    /// (fade 7 → 17° of body slip, align time 0.26 s, slide key gain 0.31). With the spin model
+    /// it holds 13 / 27 of the robustness set, all in the 30–45° band (docs/integration/
+    /// tyre-slip.md, "Velocity-relative steering × tyres"); not steady, speed bleeds.
+    pub fn spin_vr_plain() -> crate::plain::PlainSteer {
+        crate::plain::PlainSteer {
+            velocity_relative: true,
+            align_gain: 0.5,
+            align_from_deg: 7.0,
+            align_full_deg: 17.0,
+            t_align_s: 0.26,
+            slide_key_gain: 0.31,
+            ..crate::plain::PlainSteer::default()
+        }
+    }
+
     /// Whether corner `i` (0 FL, 1 FR, 2 RL, 3 RR) uses [`CarTune::lat_under_spin`].
     pub fn combined_applies(&self, i: usize) -> bool {
         !self.combined_rear_only || i >= 2

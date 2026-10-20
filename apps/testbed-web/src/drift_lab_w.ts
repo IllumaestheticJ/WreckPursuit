@@ -483,6 +483,20 @@ export class DriftLabWPanel {
         };
         btns.appendChild(b);
       }
+      {
+        // Tyres + steering together (tyre-slip): spin model + velocity-relative steering at half gain.
+        const b = document.createElement("button");
+        b.textContent = "drift: spin + VR (test)";
+        b.title =
+          "tyre-slip test preset: spin model tyres + velocity-relative steering (gain 0.5, fade 7→17°, align 0.26 s, slide key 0.31). Holds 13 / 27 test entries in the 30–45° band; not steady (speed bleeds). Sets the steering too: use the steering defaults button to undo";
+        b.onclick = () => {
+          const d = this.sim.carTuneDefaults();
+          saveCar(d.spin);
+          this.save(d.spin_vr_plain);
+          this.build();
+        };
+        btns.appendChild(b);
+      }
       this.body.appendChild(btns);
     }
     const curve = document.createElement("div");
