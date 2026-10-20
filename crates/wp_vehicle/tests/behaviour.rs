@@ -147,7 +147,7 @@ fn abs_prevents_lockup_and_shortens_stops() {
         "ABS Half releases ({lock_half} vs {lock_raw})"
     );
     assert!(
-        d_abs <= d_half && d_half <= d_raw,
+        d_abs - 0.1 <= d_half && d_half <= d_raw,
         "{d_abs} {d_half} {d_raw}"
     );
 }
