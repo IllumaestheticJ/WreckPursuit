@@ -1291,3 +1291,56 @@ rejected: no declutch with the throttle held + engine held at road-speed revs in
 (no rev flare, 1.5–3.5 mph less speed lost to the stabs, but the drive came back in
 0.18–0.20 s instead of 0.07 s, and the parity gap did not move). Test:
 `tests/handbrake.rs::a_handbrake_stab_on_the_throttle_gives_the_drive_straight_back`.
+
+### Row 109, step 2 — handbrake pivot aid (owner-approved exception to row 57)
+
+The owner approved a yaw aid for the handbrake hairpin (2026-10-20, "OK the hairpin fix for
+me"): **an explicit exception to the row-57 rule that no assist adds yaw torque, for this case
+only** (also recorded in `docs/PLAYTEST_LOG.md` row 109). Re-test at the corrected clip-2 entry
+speed first (the handbrake goes on at ~28 mph ≈ 45 km/h): without the aid 67–78° by the end of
+the 1.0 s pull at 45–55 km/h, the rest as an uncaught spin — about half the reference's rate.
+
+**`wp_vehicle::pivot`** (`pivot_yaw_accel`, applied as a chassis yaw torque `Iz × accel`):
+- only while the handbrake is pulled (> 0.1) **and** a steer key is held (> 0.1); turns the
+  way the key points, × key × handbrake;
+- builds up over the first 0.4 s of the pull (`BUILD_UP_S`), so short taps and stabs stay mild;
+- full up to 55 km/h, fading to nothing at 75 km/h. (The lead's first spec, 60 → 100 km/h, made
+  a 0.3 s tap at 80 km/h double its peak body slip, 38–57° → 80–100°, instead of a mild kick.);
+- fades out as the yaw rate toward the key nears the cap (3 rad/s): it never adds to a spin
+  that is already that fast;
+- off the moment the handbrake is released: the catch stays purely physical;
+- keyboard and gamepad only (`steer_speed_sensitivity > 0`); the wheel preset never gets it.
+- Tunable: `DriftTuning::hb_pivot_accel` (default 7 rad/s², 0 = off) and `hb_pivot_cap`
+  (3 rad/s); drift lab sliders "hb pivot" / "hb pivot cap" (storage key `wp.driftTuning.v4`).
+  Deterministic, the same in Arcade and Simulation. Handbrake-held time is in the snapshot
+  (format 9).
+
+**Clutch fix found on the way:** the automatic clutch counted driven wheels turning *against*
+the selected gear (a spun car rolling backwards in a forward gear) as "rolling", re-engaged and
+dragged the engine to 0.9 × idle. Now signed: wheels must turn the gear's way (reverse has a
+negative ratio). Wheel-preset pinned hashes re-recorded for this (a drivetrain change; the aid
+is off on the wheel preset).
+
+**Measured** (owner keys: TCS / ESC off, 75 % speed sensitivity, raw keys; clip-2 sequence:
+right + handbrake 1.0 s off the throttle, throttle + right 0.8 s, then left + throttle):
+
+| | without the aid | with the aid (7 rad/s², cap 3) |
+|---|---|---|
+| rotation 1.2 s after handbrake-on, 50 km/h (rampart / shiro / sperber / kestrel) | 90 / 102 / 104 / 87° | 139 / 143 / 144 / 139° (reference 150–180°) |
+| total rotation by the catch (50 km/h without; 50 / 55 km/h with) | 168–195° | 155–221° (kestrel at 55 km/h 258°) |
+| caught (yaw < 0.5 rad/s for 0.25 s) after the opposite lock | 0.31–0.55 s | 0–0.95 s, no spin |
+| 0.3 s tap + key at 80 km/h, keys released: peak body slip | 38–57° | unchanged (aid faded out) |
+| throttle-held stabs 0.25 + 0.1 s at 50 mph (parity `hb_stab_extra_deg`) | 10–26° | 11–28° (aid faded out above 75 km/h) |
+| 0.3 s tap + key at 30 mph, keys released, rotation 1.5 s later (parity) | 27–49° | **90–103°** |
+
+**Open for the owner's feel:** a short handbrake tap at ~50 km/h with the keys released now
+turns the car a lot more (last row): any extra yaw tips this no-countersteer run into a spin.
+A longer build-up (0.6 s) barely changed it. The "hb pivot" slider in the drift lab is the knob.
+The immediate-opposite-lock catch at 25 km/h now takes 0.43–0.60 s (was 0.22–0.28 s; the car
+carries more rotation). The parity scenario `parity_shiro_handbrake_10mph` peak yaw rate rose
+from ~0.9 to 1.58 rad/s (its pending target is 2.6).
+
+Tests: `pivot.rs` unit tests (key + handbrake only, wheel preset off, build-up, speed fade,
+yaw cap), `tests/handbrake.rs::the_clip_2_hairpin_pivots_with_the_aid_and_is_caught` (≥ 130° by
+1.2 s, caught < 1.2 s, no spin-on), the 25 km/h catch test (< 0.8 s). Goldens re-blessed
+(hash-only: two parity scenarios, a frontal crash golden + its replay, a panels frontal, a cruiser ram); all 103 scenarios pass.

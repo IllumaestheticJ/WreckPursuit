@@ -40,11 +40,14 @@ fn handbrake_turns_rotate_and_plain_steering_stays_planted() {
             let hb = handbrake_turn(&c, &a, 60.0 / 3.6, 0.5, 0.6, 1.5);
             let plain = handbrake_turn(&c, &a, 60.0 / 3.6, 0.5, 0.0, 1.5);
             assert!(hb.yaw_deg >= 70.0, "{id} {name}: {hb:?}");
-            // The engine holds at least idle through the pull and the release: the automatic
-            // clutch opens (also mid-downshift) before scrubbed driven wheels drag it down.
-            // (junkyard_beater dipped to 750 rpm, idle 850, before; 572 with H's data.)
+            // The engine holds idle through the pull and the release: the automatic clutch opens
+            // (also mid-downshift, and when a spun car rolls backwards in a forward gear) before
+            // the driven wheels drag it down. (junkyard_beater dipped to 750 rpm, idle 850,
+            // before; 572 with H's data.) 3 % margin: a torque-converter box sags a few rpm at
+            // idle while coupled (sentinel_wolfhound 645 rpm at a 650 rpm idle since the row-109
+            // pivot aid makes this turn a ~130° spin).
             assert!(
-                hb.min_rpm >= c.def.engine.idle_rpm - 1.0,
+                hb.min_rpm >= 0.97 * c.def.engine.idle_rpm,
                 "{id} {name}: engine below idle {hb:?}"
             );
             assert!(
@@ -198,9 +201,9 @@ fn a_handbrake_stab_on_the_throttle_gives_the_drive_straight_back() {
 #[test]
 fn a_hairpin_pivot_is_caught_with_throttle_and_opposite_lock() {
     // Reference clip 2: key into the turn + handbrake 1.0 s off the throttle, then throttle +
-    // opposite lock. Measured at 25 km/h: 52–65° by the release (the reference pivots
-    // 150–180°: see docs/integration/vehicle.md, row 109), the rotation stops 0.22–0.28 s after
-    // the release, body slip after the release ≤ 27°: caught, no donut.
+    // opposite lock at once. At 25 km/h the rotation stops 0.43–0.60 s after the release with
+    // the row-109 pivot aid (0.22–0.28 s without it, when the car had turned only 52–65°): caught,
+    // no donut.
     use wp_contracts::VehicleInput;
     use wp_vehicle::rig::Rig;
     for id in ["shiro_turbo", "rampart_50", "kestrel_ts"] {
@@ -240,7 +243,95 @@ fn a_hairpin_pivot_is_caught_with_throttle_and_opposite_lock() {
             }
         }
         let s = stopped.unwrap_or(f32::INFINITY);
-        assert!(s < 0.5, "{id}: rotation stopped after {s} s");
+        assert!(s < 0.8, "{id}: rotation stopped after {s} s");
         assert!(rig.state().speed_mps > 2.0, "{id}: drives out");
+    }
+}
+
+#[test]
+fn the_clip_2_hairpin_pivots_with_the_aid_and_is_caught() {
+    // Owner row 109 (owner-approved pivot aid, `wp_vehicle::pivot`): 50 km/h, right key +
+    // handbrake 1.0 s off the throttle, then throttle + right 0.8 s, then left (opposite lock) +
+    // throttle, as in the reference clip 2. Measured: 139–145° by 1.2 s after the handbrake goes
+    // on (67–78° without the aid; the reference 150–180°), 155–200° in all, the rotation calm
+    // (< 0.5 rad/s) within 0–0.9 s of the opposite lock, no spin.
+    use wp_contracts::VehicleInput;
+    use wp_vehicle::rig::Rig;
+    let heading = |rig: &Rig| {
+        let f = rig.vehicle.chassis().rot * wp_vehicle::math::V3::Y;
+        (-f.x).atan2(f.y)
+    };
+    for id in ["shiro_turbo", "rampart_50", "kestrel_ts"] {
+        let c = car(id);
+        let a = owner_keys();
+        let mut rig = Rig::new(&c);
+        rig.teleport([0.0; 3], 0.0, 50.0 / 3.6, 0.0);
+        for _ in 0..240 {
+            let s = rig.state().speed_mps;
+            rig.step(
+                &VehicleInput {
+                    throttle: if s < 50.0 / 3.6 { 0.4 } else { 0.0 },
+                    ..Default::default()
+                },
+                &a,
+            );
+        }
+        let (mut prev, mut rot) = (heading(&rig), 0.0f32);
+        let (mut at_1_2, mut at_catch, mut calm, mut caught) = (0.0f32, 0.0f32, 0usize, None);
+        for t in 0..720usize {
+            let k = if t < 240 {
+                VehicleInput {
+                    steer: 1.0,
+                    handbrake: 1.0,
+                    ..Default::default()
+                }
+            } else if t < 432 {
+                VehicleInput {
+                    steer: 1.0,
+                    throttle: 1.0,
+                    ..Default::default()
+                }
+            } else {
+                VehicleInput {
+                    steer: if caught.is_none() { -1.0 } else { 0.0 },
+                    throttle: 1.0,
+                    ..Default::default()
+                }
+            };
+            rig.step(&k, &a);
+            let h = heading(&rig);
+            let mut d = h - prev;
+            if d > std::f32::consts::PI {
+                d -= std::f32::consts::TAU;
+            } else if d < -std::f32::consts::PI {
+                d += std::f32::consts::TAU;
+            }
+            rot += d;
+            prev = h;
+            if t == 287 {
+                at_1_2 = rot.abs().to_degrees();
+            }
+            if t == 431 {
+                at_catch = rot.abs().to_degrees();
+            }
+            if t >= 432 {
+                calm = if rig.state().ang_vel[2].abs() < 0.5 {
+                    calm + 1
+                } else {
+                    0
+                };
+                if caught.is_none() && calm >= 60 {
+                    caught = Some((t - 431 - 59) as f32 / 240.0);
+                }
+            }
+        }
+        assert!(at_1_2 >= 130.0, "{id}: {at_1_2}° by 1.2 s");
+        let c_s = caught.unwrap_or(f32::INFINITY);
+        assert!(c_s < 1.2, "{id}: caught after {c_s} s");
+        assert!(
+            rot.abs().to_degrees() - at_catch < 90.0,
+            "{id}: spun on ({at_catch} → {})",
+            rot.abs().to_degrees()
+        );
     }
 }
