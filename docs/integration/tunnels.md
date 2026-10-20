@@ -138,6 +138,12 @@ first-mismatch ticks and same new hashes on base and branch) and
 changes **no golden hash** and has no `[bless]` commit; re-blessing the round-12 goldens is a
 lead-round job.
 
+Re-run after merging round 12b (2026-10-20): fmt, clippy, wasm build + `npm run wasm`, tsc,
+`npm run e2e` (110 PASS, tunnel check 688 / 704 / 216 vertices) ✓; `cargo test --workspace` ✓
+except `goldens_match` — 17 stale goldens on `origin/lead/round12` itself (identical list,
+ticks and hashes on base and branch; `all_scenarios_pass…` now passes). Still no `[bless]`
+from this branch: its changes move no hash.
+
 ## Contract change requests
 
 | # | Change | Why | Who is affected | Status |
