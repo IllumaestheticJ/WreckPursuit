@@ -372,7 +372,7 @@ export class DriftLabWPanel {
       btns.style.cssText = "display:flex;gap:6px;margin-top:4px";
       for (const [label, which, hint] of [
         ["tyre data", "data", "no change: the car and tyre files as they are"],
-        ["drift candidate", "candidate", "best held-countersteer set so far (side grip 0.15, lock 0.9, yaw damping 0.2 — the damper is not physical)"],
+        ["spin grip + damper (test)", "spin_damper", "step-4 test set (side grip under spin 0.15, lock 0.9, yaw damping 0.2; the damper is not physical). It does NOT hold the drift: the car swings through to the other side"],
       ] as const) {
         const b = document.createElement("button");
         b.textContent = label;

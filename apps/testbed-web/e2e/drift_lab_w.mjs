@@ -56,9 +56,9 @@ check(await page.locator("#drift-w-tune").isVisible(), "tune button shown");
 const sliders = await page.locator("#drift-lab-w input[type=range]").count();
 check(sliders >= 18, `${sliders} sliders (steering + suspension + car / tyre)`);
 check((await page.evaluate(() => window.__wp.sim.carTune()?.lat_under_spin)) === 1, "car / tyre experiments start at the data");
-await page.locator("#drift-lab-w button", { hasText: "drift candidate" }).click();
+await page.locator("#drift-lab-w button", { hasText: "spin grip + damper" }).click();
 const cand = await page.evaluate(() => window.__wp.sim.carTune());
-check(Math.abs(cand.lat_under_spin - 0.15) < 1e-6 && Math.abs(cand.yaw_damping - 0.2) < 1e-6, `drift candidate ${JSON.stringify(cand)}`);
+check(Math.abs(cand.lat_under_spin - 0.15) < 1e-6 && Math.abs(cand.yaw_damping - 0.2) < 1e-6, `spin grip + damper ${JSON.stringify(cand)}`);
 await page.locator("#drift-lab-w button", { hasText: "tyre data" }).click();
 check((await page.evaluate(() => window.__wp.sim.carTune().yaw_damping)) === 0, "car data restores");
 // Steering slider → override.

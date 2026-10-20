@@ -125,9 +125,12 @@ faster rack than the reference. Self-align changes nothing in held-key driving (
 released keys); it helps the tapper a little in shiro_turbo.
 
 Throttle diagnostic (counter key at 6° held, throttle fixed after the entry): with the default
-rack, every RWD car spins at 100 / 70 / 50 %. At 30 %, rampart_50 holds 4.7 s with an instant
-rack; the others still spin. shiro_turbo stops sliding at ≤ 50 % with an instant rack. Full
-table: `… -- sweep`.
+rack, every RWD car spins at 100 / 70 / 50 / 30 %. (An earlier version said rampart_50 held
+4.7 s at 30 % with an instant rack: scored direction-aware it swings through to the other
+side.) shiro_turbo stops sliding at ≤ 50 % with an instant rack. Full table: `… -- sweep`.
+Re-checked with the direction-aware metric (step 6): the tapper holds above (parity_rwd_d and
+shiro_turbo with a 0.15 s or instant rack) are real holds; the shiro_turbo self-align 50 % tapper
+row is 2.8 s on the intended side, i.e. no hold.
 
 ### Tap response (one steering-key tap, holding speed)
 
@@ -328,7 +331,7 @@ the scales above, or per car the absolute rates they give.
 
 Lab-only override `crates/wp_vehicle/src/car_lab.rs` (`CarTune`; process-wide like the others,
 bit-identical when off: the C test values are unchanged to the last digit). Panel section "car /
-tyre experiments" (starts at the data; *drift candidate* / *tyre data* buttons). wasm:
+tyre experiments" (starts at the data; *spin grip + damper (test)* / *tyre data* buttons). wasm:
 `car_tune_json()`, `car_tune_defaults_json()`, `car_tune_set(json)`. Knobs:
 
 - **side grip under spin** (`lat_under_spin`, 1 = data): how much a tyre's longitudinal slip
@@ -350,52 +353,53 @@ faster), so their ≈ 6 kN keeps pushing the nose *into* the turn. With rear sid
 (`lat_under_spin` 0.25 + lock 1.3) the held key **does** catch the slide, then over-corrects:
 the car swings through and spins the other way. There is no damping from the saturated rear.
 
-**Single knobs** (parity_rwd_d, plain steering, lab ride default; drift = 6 s on the 40 m
-circle, `drift s / mean ° / sd ° / spun`; sanity = 0.25 s tap at 100 km/h heading / slip,
-keyboard lane change max slip, 0.6 s handbrake at 40 km/h pivot / caught):
+> **Correction (step 6):** the first version of this step scored drifts with |slide| in
+> 10–50°, either side, and reported that side grip 0.15 + lock 0.9 + yaw damping 0.2 "holds
+> 4.7 s". The tyre-slip session found that the car keeps the intended side only ~0.5 s, then
+> swings through and circles the other way on the held key. All tables below are re-run with
+> the direction-aware metric ([`HoldMetrics`](../../crates/wp_vehicle/src/drift_lab_w.rs),
+> step 6). That set is now labelled *spin grip + damper (test)* and does **not** hold.
+
+**Single knobs** (parity_rwd_d, plain steering, lab ride default; 6 s on the 40 m circle,
+intended side: `drift s / band 30–45° s / mean ° sd ° / outcome`; sanity = 0.25 s tap at
+100 km/h heading / slip, keyboard lane change max slip, 0.6 s handbrake at 40 km/h pivot /
+caught):
 
 | knobs | counter 6° + full throttle | counter 12° | tapper | tap 100 | lane change slip | handbrake |
 |---|---|---|---|---|---|---|
-| data | 0.5 / 28 / 11.6 / spun | 0.5 / 28 / 11.6 / spun | 0.5 / spun | 17.3° / 3.4° | 3.7° | 25° / spun |
-| side grip under spin 0.5 | 0.6 / spun | 0.6 / spun | 0.6 / spun | 16.3 / 3.2 | 3.4 | 24 / spun |
-| side grip under spin 0.25 | 1.5 / 25 / 9.1 / spun | 1.2 / spun | **4.2 / 20 / 6.2 / held** | 16.1 / 3.2 | 3.4 | 22 / spun |
+| data | 0.5 / 0.2 / 28° sd 11.6 / SPUN | 0.5 / 0.2 / 28° sd 11.6 / SPUN | 0.5 / 0.2 / 28° sd 11.6 / SPUN | 17.3° / 3.4° | 3.7° | 25° / spun |
+| side grip under spin 0.5 | 0.6 / 0.2 / 28° / SPUN | 0.6 / 0.2 / 28° / SPUN | 0.6 / 0.2 / 28° / SPUN | 16.3 / 3.2 | 3.4 | 24 / spun |
+| side grip under spin 0.25 | 1.1 / 0.4 / 24° sd 7.6 / SPUN | 1.2 / 0.4 / 33° / SPUN | **4.2 / 0.4 / 20° sd 6.2 / held** | 16.1 / 3.2 | 3.4 | 22 / spun |
 | side grip under spin 0 | no slide at all | no slide | no slide | 16.3 / 3.2 | 3.4 | 17 / caught |
-| rear peak slip × 1.5 / × 2 | spun | spun | spun | 32.8 / 7.0 · 37.8 / 11.5 | 6.5 · 8.8 | spun |
-| lock × 1.3 (≈ 50°) | spun | spun | spun | 15.6 / 3.0 | 3.4 | spun |
-| rear diff locked | spun | spun | spun | 16.5 / 3.2 | 3.7 | spun |
-| torque × 0.7 | 1.0 / spun | 0.7 / spun | 3.3 / spun | 17.2 / 3.3 | 3.8 | spun |
-| yaw inertia × 1.3 / × 1.6 (offline) | spun | spun | spun | 17.7 / 3.2 | 4.1 | spun |
-| yaw damping 0.5 /s (diag) | 2.1 / spun | 1.6 / spun | 5.5 / 27 / 4.8 / held | 11.1 / 1.7 | 1.9 | 19 / no |
-| yaw damping 1.5 /s (diag) | **3.7 / 19 / 4.8 / held** | 3.7 / 17 / 3.9 / held | 4.9 / held | 8.2 / 0.7 | 1.0 | 12 / caught |
+| rear peak slip × 1.5 / × 2 | SPUN | SPUN | SPUN | 32.8 / 7.0 · 37.8 / 11.5 | 6.5 · 8.8 | spun |
+| lock × 1.3 (≈ 50°) | SPUN | SPUN | SPUN | 15.6 / 3.0 | 3.4 | spun |
+| rear diff locked | SPUN | SPUN | SPUN | 16.5 / 3.2 | 3.7 | spun |
+| torque × 0.7 | 1.0 / 0.5 / 32° / SPUN | 0.7 / 0.2 / 27° / SPUN | 3.3 / 1.2 / 35° / SPUN | 17.2 / 3.3 | 3.8 | spun |
+| yaw inertia × 1.3 / × 1.6 (offline) | SPUN | SPUN | SPUN | 17.7 / 3.2 | 4.1 | spun |
+| yaw damping 0.5 /s (diag) | 1.4 / 0.4 / 24° / SPUN | 1.6 / 0.8 / 35° / SPUN | **5.5 / 2.0 / 27° sd 4.8 / held** | 11.1 / 1.7 | 1.9 | 19 / no |
+| yaw damping 1.5 /s (diag) | 0.5 / 0 / 12° / SWAPPED | 1.3 / 0 / 14° / SWAPPED | **4.9 / 0 / 22° sd 5.3 / held** | 8.2 / 0.7 | 1.0 | 12 / caught |
+| spin grip + damper (side grip 0.15, lock 0.9, yaw damping 0.2) | 0.5 / 0 / 13° / SWAPPED | 1.0 / 0 / 14° / SWAPPED | **5.1 / 0 / 19° sd 2.3 / held** | 13.3 / 2.4 | 2.5 | 19 / caught |
 
-**Combinations** (grid of side grip 0.15 / 0.25 / 0.35 × lock 0.75 / 0.9 / 1.0 × yaw damping
-0 / 0.2, plus rear peak slip and yaw inertia): the held counter key only stops spinning with
-**side grip under spin ≈ 0.15 + yaw damping 0.2**. Best set (`CarTune::drift_candidate()`,
-the panel's *drift candidate*): side grip 0.15, lock × 0.9, yaw damping 0.2 /s:
+**Result: no knob or combination makes the held countersteer + full throttle hold the intended
+side.** It either spins (the data and most knobs) or catches the slide, swings through and
+drifts the other way (side grip kept + yaw damping). The only holds are the **tapper's**: the
+driver keeps changing keys (2–8 key changes / s). Those happen at 19–27°, below clip 1's 30–45°
+band, and need either rear side grip under spin (0.25) or the non-physical damper. Rear peak
+slip × 2–3 makes grip driving loose. Yaw inertia slows the slide but doesn't damp it. Test:
+`tests/drift_lab_w_car.rs` (the data spins; the spin grip + damper set doesn't hold either).
 
-| | counter 6° + full throttle | counter 12° | tapper | tap 100 | lane change slip | handbrake 0.6 s |
-|---|---|---|---|---|---|---|
-| drift candidate | **4.7 s / 25° / sd 9.7 / held** | 4.8 / 28 / 11.0 / held | 5.1 / 19 / 2.3 / held | 13.3° / 2.4° (data 17.3) | 2.5° | 19° / caught |
-
-Rear peak slip × 2–3 on top makes it worse (grip driving gets loose). Yaw inertia doesn't help:
-it slows the slide down but doesn't damp it. Test: `tests/drift_lab_w_car.rs` (the data spins,
-the candidate holds > 3.5 s at 15–40°).
-
-**Conclusions for A (tyre / car data owner):**
-1. Two things are missing at once: **rear side force under wheelspin** (our friction ellipse
-   gives a spinning rear almost no side grip) and **yaw damping in a slide** (once the rear is
-   saturated nothing resists yaw rate). Fix one without the other and the held key either
-   still spins (side grip only) or the car can't slide at all (side grip 0).
-2. The physical source of the damping is still open. Our rear force is flat past ≈ 6° of slip
-   in a slide, so it can't damp. Something has to make it grow with slip angle or yaw rate. A
-   later / wider peak does that but ruins grip driving here. Candidates to try in the tyre
-   model: a combined-slip shape where side force keeps rising with slip angle at high slip ratio
-   (not just a smaller longitudinal weight), and a tyre lag / relaxation that doesn't
-   destabilise.
-3. Steering lock, diff locking, torque and yaw inertia are not the lever (none helps alone;
-   lock × 0.9 is a small refinement with the candidate).
-4. The candidate is still **not steady** (slide angle sd ≈ 10° vs clip 1's "steady for several
-   seconds"), and it trims tap response by ~25 %.
+**Conclusions for A (tyre / car data owner)** (lead/tyre-slip owns the tyre model now):
+1. **Rear side force under wheelspin is missing**: our friction ellipse gives a spinning rear
+   almost no side grip. With it kept, the held key catches the slide; without it, nothing does.
+2. **What's missing next is a stable equilibrium**, not just damping. With the rear's side
+   grip kept, a fixed full counter lock over-corrects: the car straightens and swings through.
+   Clip 1's car sits still at 30–45° with the key held, so at full counter lock its fronts and
+   rears balance at that angle. Ours balance nowhere on the intended side. Candidates: the
+   rear side force must keep rising with slip angle at high slip ratio (the physical source of
+   both the damping and the equilibrium), and the front / rear balance at full counter lock
+   (lock, front grip past peak).
+3. Steering lock, diff locking, torque and yaw inertia are not the lever alone.
+4. The diagnostic damper also trims tap response by ~25 %; it is not a way out.
 
 ## Step 5 — speed sensitivity: rack or tyre (lead, clip 8)
 
@@ -447,20 +451,20 @@ steering 0.28 / 0.33 s; taps = one key tap holding speed, measured for 1.5 s):
 | rampart_50 | Tyre | 60 | 100 | 13.5 / 4.8 / 0.8 | 20.3 / 8.4 / 0.9 | 33.9 / 14.8 / 1.1 | 32.9 / 1.1 |
 | rampart_50 | Tyre | 100 | 100 | 13.5 / 6.5 / 1.6 | 20.3 / 11.4 / 2.6 | 33.9 / 15.3 / 2.9 | 23.1 / 2.3 |
 | rampart_50 | Tyre | 150 | 100 | 13.5 / 8.9 / 2.7 | 20.3 / 20.0 / 5.1 | 33.9 / 18.4 / 4.6 | 17.6 / 3.4 |
-| car | applies to | lane change 100 km/h max slip ° | counter 6° + full thr: drift s / mean ° / spun |
+| car | applies to | lane change 100 km/h max slip ° | counter 6° + full thr: drift s / band s / mean ° sd ° / outcome |
 |---|---|---|---|
-| parity_rwd_a | Rack | 3.9 | 0.5 / 28 / spun |
-| parity_rwd_a | Tyre | 3.2 | 0.5 / 28 / spun |
-| parity_rwd_b | Rack | 4.1 | 0.5 / 28 / spun |
-| parity_rwd_b | Tyre | 3.0 | 0.5 / 28 / spun |
-| parity_rwd_d | Rack | 3.7 | 0.5 / 28 / spun |
-| parity_rwd_d | Tyre | 3.1 | 0.5 / 27 / spun |
-| parity_fwd_c | Rack | 4.3 | 0.0 / 0 / no |
-| parity_fwd_c | Tyre | 3.8 | 0.0 / 0 / no |
-| shiro_turbo | Rack | 3.6 | 1.4 / 25 / spun |
-| shiro_turbo | Tyre | 2.7 | 1.2 / 23 / spun |
-| rampart_50 | Rack | 3.9 | 0.6 / 27 / spun |
-| rampart_50 | Tyre | 3.1 | 0.6 / 28 / spun |
+| parity_rwd_a | Rack | 3.9 | 0.5 / 0.2 / 28° sd 11.7 / SPUN |
+| parity_rwd_a | Tyre | 3.2 | 0.5 / 0.2 / 28° sd 11.5 / SPUN |
+| parity_rwd_b | Rack | 4.1 | 0.5 / 0.2 / 28° sd 11.6 / SPUN |
+| parity_rwd_b | Tyre | 3.0 | 0.5 / 0.2 / 28° sd 11.7 / SPUN |
+| parity_rwd_d | Rack | 3.7 | 0.5 / 0.2 / 28° sd 11.6 / SPUN |
+| parity_rwd_d | Tyre | 3.1 | 0.5 / 0.2 / 27° sd 11.6 / SPUN |
+| parity_fwd_c | Rack | 4.3 | 0.0 / 0.0 / 0° sd 0.0 / no hold |
+| parity_fwd_c | Tyre | 3.8 | 0.0 / 0.0 / 0° sd 0.0 / no hold |
+| shiro_turbo | Rack | 3.6 | 1.1 / 0.3 / 24° sd 7.6 / SPUN |
+| shiro_turbo | Tyre | 2.7 | 0.9 / 0.0 / 21° sd 6.4 / SPUN |
+| rampart_50 | Rack | 3.9 | 0.6 / 0.2 / 27° sd 11.6 / SPUN |
+| rampart_50 | Tyre | 3.1 | 0.6 / 0.2 / 28° sd 11.9 / SPUN |
 
 **What it shows.** At low speed the two are nearly the same. At speed, **tyre is calmer, not
 twitchier**, on everything longer than a short tap. 150 km/h, parity_rwd_d: a 0.25 s tap gives 19°
@@ -474,6 +478,31 @@ Drift hold is unchanged (it is decided by the rear; see step 4).
 **What to try (owner):** A/B *sensitivity on* at 100–150 km/h with taps and a held key. If the
 reference feels like "the wheel turns, the car limits itself" (clip 8), tyre is the closer model.
 Whichever wins, a road-wheel camera view of the reference at speed would settle it.
+
+## Step 6 — direction-aware drift metric (shared with lead/tyre-slip)
+
+Every drift number in this file is now scored with `wp_vehicle::drift_lab_w::HoldMetrics`, the
+same definition `lead/tyre-slip` uses (its `examples/tyre_slip.rs` `hold_at`). Per tick, the
+slide angle on the **intended** side is `a = −body slip` in the left-hand corner (degrees,
++ = tail out of the turn as intended). It is sampled until the first tick with |a| ≥ 90° or
+travelling backwards (a spin). Then:
+
+- `drift s` = time with `a` in 10–50° (**the other side never counts**);
+- `band s` = time with `a` in 30–45° (clip 1's band);
+- `side swaps` = swings from `a` ≥ 10° through to `a` ≤ −10°, each one a **failure**;
+- `mean ° / sd °` of `a` while drifting;
+- outcome: SPUN, SWAPPED ×n, **held** (no spin, no swap, `drift s` ≥ half the run), or no hold.
+
+`plain_hold(car, assists, driver, radius, lat_g)` runs a plain driver and scores it.
+`plain_drift_run` / `_with`'s `DriftRun` now also counts the intended side only. The
+C-era `drift_run` table (`… -- drift`) is re-scored with `HoldMetrics` too, except the Sloppy
+seeds, which keep C's either-side number (labelled). Unit test:
+`hold_metrics_count_only_the_intended_side_and_swaps_fail`.
+
+What changed: step 4's headline set and two step-2 rows (rampart_50 at 30 % throttle with an
+instant rack, shiro_turbo self-align 50 % tapper) were not holds. The panel button is relabelled
+*spin grip + damper (test)* (`CarTune::spin_grip_damper()`), with a hint that it does not hold.
+Step 2's and step 5's conclusions are unchanged (everything there spun anyway).
 
 ## Contract change requests
 

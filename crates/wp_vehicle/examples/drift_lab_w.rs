@@ -13,8 +13,8 @@ use wp_vehicle::drift_lab::{
     drift_run, drift_run_with, hairpin, slide_state, tap_response, DriftDriver,
 };
 use wp_vehicle::drift_lab_w::{
-    handbrake_pivot, load_any_car, plain_drift_run, reference_assists, PlainDriver, PARITY_CARS,
-    ROSTER_CARS,
+    handbrake_pivot, load_any_car, plain_drift_run, plain_hold, reference_assists, HoldMetrics,
+    PlainDriver, PARITY_CARS, ROSTER_CARS,
 };
 use wp_vehicle::drift_lab_w::{roll_run, LANE_CHANGE_KEYS, S_BEND_KEYS};
 use wp_vehicle::plain::{self, PlainSteer, SensApplies};
@@ -122,9 +122,9 @@ fn main() {
 fn drift_table(args: &[String]) {
     println!("\n## Drift hold: 40 m circle at 0.6 g, enter with the key into the turn + throttle, then 6 s");
     println!(
-        "| car | driver | drift s (of 6) | longest s | mean ° | sd ° | max ° | flip ° | spun |"
+        "| car | driver | intended side: drift s / band s / mean ° sd ° / outcome | max ° (either side) |"
     );
-    println!("|---|---|---|---|---|---|---|---|---|");
+    println!("|---|---|---|---|");
     let a = reference_assists();
     for id in args {
         let c = car(id);
@@ -134,17 +134,14 @@ fn drift_table(args: &[String]) {
             ("AbruptLift", DriftDriver::AbruptLift),
             ("IntoTurn", DriftDriver::IntoTurn),
         ] {
-            let r = drift_run(&c, &a, d, 40.0, 0.6, 1);
-            println!(
-                "| {id} | {name} | {:.2} | {:.2} | {:.1} | {:.1} | {:.0} | {:.0} | {} |",
-                r.drift_s,
-                r.longest_s,
-                r.mean_deg,
-                r.sd_deg,
-                r.max_slip_deg,
-                r.flip_deg,
-                if r.spun { "SPUN" } else { "no" }
-            );
+            let (mut ang, mut back) = (Vec::new(), Vec::new());
+            let r = drift_run_with(&c, &a, d, 40.0, 0.6, 1, |rig, _, _| {
+                let s = slide_state(rig);
+                ang.push(-s.body_slip.to_degrees());
+                back.push(s.v_fwd < 0.0);
+            });
+            let m = HoldMetrics::from_angles(&ang, &back);
+            println!("| {id} | {name} | {} | {:.0} |", m.cell(), r.max_slip_deg);
         }
         let seeds = [1u64, 2, 3, 4, 5];
         let rs: Vec<_> = seeds
@@ -154,7 +151,7 @@ fn drift_table(args: &[String]) {
         let spins = rs.iter().filter(|r| r.spun).count();
         let mean_drift = rs.iter().map(|r| r.drift_s).sum::<f32>() / rs.len() as f32;
         println!(
-            "| {id} | Sloppy (5 seeds) | {mean_drift:.2} (mean) | – | – | – | {:.0} | – | {spins}/5 |",
+            "| {id} | Sloppy (5 seeds; C metric, either side) | {mean_drift:.2} s mean, {spins}/5 spun | {:.0} |",
             rs.iter().map(|r| r.max_slip_deg).fold(0.0f32, f32::max)
         );
     }
@@ -284,29 +281,22 @@ const PLAIN_DRIVERS: [(&str, PlainDriver); 4] = [
 
 fn plain_table(args: &[String]) {
     println!("\n## Plain-lab drivers: 40 m circle at 0.6 g, key into the turn + throttle to the entry angle, then 6 s");
-    println!("| car | driver | drift s (of 6) | longest s | mean ° | sd ° | max ° | key changes /s | spun |");
-    println!("|---|---|---|---|---|---|---|---|---|");
+    println!("| car | driver | intended side: drift s / band 30–45° s / mean ° sd ° / outcome | key changes /s |");
+    println!("|---|---|---|---|");
     let a = reference_assists();
     for id in args {
         let c = car(id);
         for (name, d) in PLAIN_DRIVERS {
-            let (r, k) = plain_drift_run(&c, &a, d, 40.0, 0.6);
-            println!(
-                "| {id} | {name} | {:.2} | {:.2} | {:.1} | {:.1} | {:.0} | {k:.1} | {} |",
-                r.drift_s,
-                r.longest_s,
-                r.mean_deg,
-                r.sd_deg,
-                r.max_slip_deg,
-                if r.spun { "SPUN" } else { "no" }
-            );
+            let (_, k) = plain_drift_run(&c, &a, d, 40.0, 0.6);
+            let m = plain_hold(&c, &a, d, 40.0, 0.6);
+            println!("| {id} | {name} | {} | {k:.1} |", m.cell());
         }
     }
 }
 
 /// Diagnostic: counter key at 6° held with part throttle, default rack and instant rack.
 fn throttle_diag(args: &[String]) {
-    println!("\n## Diagnostic: counter key at 6° held, throttle fixed after the entry — drift s (of 6) / spun");
+    println!("\n## Diagnostic: counter key at 6° held, throttle fixed after the entry — intended-side drift s / band s / mean ° sd ° / outcome");
     println!("| car | rack | 100 % | 70 % | 50 % | 30 % |");
     println!("|---|---|---|---|---|---|");
     let a = reference_assists();
@@ -332,13 +322,7 @@ fn throttle_diag(args: &[String]) {
                         entry_deg: 6.0,
                         throttle: *t,
                     };
-                    let (r, _) = plain_drift_run(&c, &a, dr, 40.0, 0.6);
-                    format!(
-                        "{:.1}{} (mean {:.0}°)",
-                        r.drift_s,
-                        if r.spun { " SPUN" } else { "" },
-                        r.mean_deg
-                    )
+                    plain_hold(&c, &a, dr, 40.0, 0.6).cell()
                 })
                 .collect();
             println!("| {id} | {name} | {} |", cells.join(" | "));
@@ -390,7 +374,9 @@ fn sweep(args: &[String]) {
             },
         ),
     ];
-    println!("\n## Sweep: drift s (of 6) / spun, per plain driver");
+    println!(
+        "\n## Sweep: intended-side drift s / band s / mean ° sd ° / outcome, per plain driver"
+    );
     println!("| car | constants | counter 3° | counter 6° | counter 12° | tapper |");
     println!("|---|---|---|---|---|---|");
     let a = reference_assists();
@@ -400,10 +386,7 @@ fn sweep(args: &[String]) {
             plain::set_override(Some(p));
             let cells: Vec<String> = PLAIN_DRIVERS
                 .iter()
-                .map(|(_, dr)| {
-                    let (r, _) = plain_drift_run(&c, &a, *dr, 40.0, 0.6);
-                    format!("{:.1}{}", r.drift_s, if r.spun { " SPUN" } else { "" })
-                })
+                .map(|(_, dr)| plain_hold(&c, &a, *dr, 40.0, 0.6).cell())
                 .collect();
             println!("| {id} | {name} | {} |", cells.join(" | "));
         }
@@ -582,23 +565,14 @@ fn carlab_table(args: &[String]) {
         args.to_vec()
     };
     println!("\n## Car / tyre lab: drift hold (6 s, 40 m circle, 2nd) + sanity");
-    println!("| car | knobs | counter 6° + full thr: drift s / mean ° / sd ° / spun | counter 12° + full thr | tapper | tap 100 km/h 0.25 s: heading ° / slip ° | lane change: slip ° | handbrake 40 km/h 0.6 s: pivot ° / caught |");
+    println!("| car | knobs | counter 6° + full thr: drift s / band s / mean ° sd ° / outcome | counter 12° + full thr | tapper | tap 100 km/h 0.25 s: heading ° / slip ° | lane change: slip ° | handbrake 40 km/h 0.6 s: pivot ° / caught |");
     println!("|---|---|---|---|---|---|---|---|");
     let a = reference_assists();
     for id in &ids {
         let c = car(id);
         for (name, t) in carlab_configs() {
             car_lab::set_override(Some(t));
-            let cell = |d: PlainDriver| {
-                let (r, _) = plain_drift_run(&c, &a, d, 40.0, 0.6);
-                format!(
-                    "{:.1} / {:.0} / {:.1} / {}",
-                    r.drift_s,
-                    r.mean_deg,
-                    r.sd_deg,
-                    if r.spun { "SPUN" } else { "no" }
-                )
-            };
+            let cell = |d: PlainDriver| plain_hold(&c, &a, d, 40.0, 0.6).cell();
             let c6 = cell(PlainDriver::HoldCounter {
                 entry_deg: 6.0,
                 throttle: 1.0,
@@ -730,7 +704,7 @@ fn sens_table(args: &[String]) {
             }
         }
     }
-    println!("\n| car | applies to | lane change 100 km/h max slip ° | counter 6° + full thr: drift s / mean ° / spun |");
+    println!("\n| car | applies to | lane change 100 km/h max slip ° | counter 6° + full thr: drift s / band s / mean ° sd ° / outcome |");
     println!("|---|---|---|---|");
     for id in &ids {
         let c = car(id);
@@ -740,7 +714,7 @@ fn sens_table(args: &[String]) {
                 ..base
             }));
             let lc = wp_vehicle::drift_lab_w::lane_change_slip(&c, &a);
-            let (r, _) = plain_drift_run(
+            let m = plain_hold(
                 &c,
                 &a,
                 PlainDriver::HoldCounter {
@@ -750,12 +724,7 @@ fn sens_table(args: &[String]) {
                 40.0,
                 0.6,
             );
-            println!(
-                "| {id} | {mode:?} | {lc:.1} | {:.1} / {:.0} / {} |",
-                r.drift_s,
-                r.mean_deg,
-                if r.spun { "spun" } else { "no" }
-            );
+            println!("| {id} | {mode:?} | {lc:.1} | {} |", m.cell());
         }
     }
     plain::set_override(Some(base));
