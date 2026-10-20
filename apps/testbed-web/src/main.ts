@@ -576,16 +576,29 @@ async function main(): Promise<void> {
   /** Touch play (owner request row 71): the gamepad (analogue) preset plus automatic gears,
    * traction control and stronger steer help; boxes the viewer ticked still win. */
   const TOUCH_ASSISTS: Record<string, unknown> = { tcs: true, auto_gears: true, auto_clutch: true, steer_speed_sensitivity: 1.0, countersteer_help: 0.6 };
+  // One-click presets (Rookie / Street / Sim, GDD §6): damage mode + assists together. The
+  // chosen preset is remembered per viewer and replaces the per-box overrides; ticking a box
+  // afterwards turns it into a custom setup (the preset is forgotten, the box is remembered).
+  const PRESET_KEY = "wp.assistPreset";
+  const storedPreset = (): string | null => {
+    const p = store.get(PRESET_KEY);
+    return p && sim.assistPresets().includes(p) ? p : null;
+  };
   const applyAssistPreset = (source: InputSource) => {
     if (isReplay()) return;
     try {
-      const preset = sim.assistPreset(source === "Touch" ? "Gamepad" : source) as unknown as Record<string, unknown>;
-      // `steer_help` (game menu) is not a profile field: off zeroes the speed-sensitive steering.
-      const chosen = (source === "Touch" ? { ...TOUCH_ASSISTS, ...savedAssistOverrides() } : assistOverrides()) as Record<string, unknown>;
-      const { steer_help: steerHelp, ...overrides } = chosen;
-      Object.assign(preset, overrides);
-      if (steerHelp === false) preset.steer_speed_sensitivity = 0;
-      sim.setAssists(app.player, preset as never);
+      const named = source === "Touch" ? null : storedPreset();
+      if (named) {
+        sim.setAssists(app.player, sim.assistPresetNamed(named, source as "Keyboard" | "Gamepad" | "Wheel").assists);
+      } else {
+        const preset = sim.assistPreset(source === "Touch" ? "Gamepad" : source) as unknown as Record<string, unknown>;
+        // `steer_help` (game menu) is not a profile field: off zeroes the speed-sensitive steering.
+        const chosen = (source === "Touch" ? { ...TOUCH_ASSISTS, ...savedAssistOverrides() } : assistOverrides()) as Record<string, unknown>;
+        const { steer_help: steerHelp, ...overrides } = chosen;
+        Object.assign(preset, overrides);
+        if (steerHelp === false) preset.steer_speed_sensitivity = 0;
+        sim.setAssists(app.player, preset as never);
+      }
       if (gameSettings) {
         const menuCs = gameSettings.assists.countersteer;
         if (lastMenuCountersteer !== null && menuCs !== lastMenuCountersteer) {
@@ -600,6 +613,23 @@ async function main(): Promise<void> {
     } catch (e) {
       console.warn(e);
     }
+  };
+  const choosePreset = (name: string) => {
+    if (isReplay()) return;
+    const p = sim.assistPresetNamed(name, app.source);
+    ($("mode") as HTMLSelectElement).value = p.mode;
+    sim.setDamageMode(p.mode);
+    sim.setAssists(app.player, p.assists);
+    store.set(PRESET_KEY, name);
+    store.set(ASSIST_KEY, "{}");
+    syncAssistBoxes();
+  };
+  const syncPresetButtons = () => {
+    const active = isReplay() ? "" : sim.assistPresetOf(app.player, app.source);
+    document.querySelectorAll<HTMLButtonElement>("button.preset").forEach((b) => {
+      b.setAttribute("aria-pressed", String(b.dataset.p === active));
+    });
+    $("preset-state").textContent = isReplay() ? "" : active ? "" : "custom";
   };
 
   // Clutch automatic / manual (playtest row 59): the AssistProfile's `auto_clutch`. Manual uses
@@ -616,6 +646,7 @@ async function main(): Promise<void> {
     const pct = Math.round(Number(a.countersteer_help ?? 0) * 100);
     ($("cstr") as HTMLInputElement).value = String(pct);
     $("cstr-val").textContent = `${pct}%`;
+    syncPresetButtons();
   };
 
   // ----- replay ---------------------------------------------------------------------------
@@ -686,6 +717,7 @@ async function main(): Promise<void> {
     if (isReplay() || sim.careerRunActive()) return void (($("mode") as HTMLSelectElement).value = modeName());
     sim.setDamageMode((e.target as HTMLSelectElement).value);
     menu?.update({ damageMode: (e.target as HTMLSelectElement).value as GameSettings["damageMode"] });
+    syncPresetButtons();
   };
   ($("city") as HTMLInputElement).onchange = () => startFreeDrive();
   citySel.onchange = () => {
@@ -715,11 +747,15 @@ async function main(): Promise<void> {
       const a = sim.assists(app.player) as unknown as Record<string, unknown>;
       a[cb.dataset.a!] = cb.checked;
       sim.setAssists(app.player, a as never);
+      // A hand-picked box turns the preset into a custom setup: remember the current boxes.
       const o = assistOverrides();
+      if (storedPreset()) for (const k of ["abs", "tcs", "esc", "auto_gears"]) o[k] = Boolean(a[k]);
       o[cb.dataset.a!] = cb.checked;
       store.set(ASSIST_KEY, JSON.stringify(o));
       const key = ({ abs: "abs", tcs: "tcs", esc: "esc", auto_gears: "autoGears" } as const)[cb.dataset.a as "abs" | "tcs" | "esc" | "auto_gears"];
       if (menu && key) menu.update({ assists: { ...menu.settings.assists, [key]: cb.checked } });
+      store.set(PRESET_KEY, "");
+      syncPresetButtons();
     };
   });
   clutchSel.onchange = () => {
@@ -732,7 +768,12 @@ async function main(): Promise<void> {
     const o = assistOverrides();
     o.auto_clutch = !manual;
     store.set(ASSIST_KEY, JSON.stringify(o));
+    store.set(PRESET_KEY, "");
+    syncPresetButtons();
   };
+  document.querySelectorAll<HTMLButtonElement>("button.preset").forEach((b) => {
+    b.onclick = () => choosePreset(b.dataset.p!);
+  });
   document.querySelectorAll<HTMLButtonElement>(".bench").forEach((b) => {
     b.onclick = () => startBench(Number(b.dataset.n));
   });
@@ -1000,6 +1041,10 @@ async function main(): Promise<void> {
   }
 
   // ----- start ----------------------------------------------------------------------------
+
+  // A remembered preset also picks the damage mode new sessions start in.
+  const remembered = storedPreset();
+  if (remembered) ($("mode") as HTMLSelectElement).value = sim.assistPresetNamed(remembered, app.source).mode;
 
   const camParam = params.get("cam") as CameraMode | null;
   if (camParam && CAMERA_MODES.includes(camParam)) rig.mode = camParam;

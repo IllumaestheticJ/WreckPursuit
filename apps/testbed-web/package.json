@@ -23,7 +23,8 @@
     "e2e:reset": "node e2e/reset.mjs",
     "e2e:touch": "node e2e/touch.mjs",
     "e2e:menu": "node e2e/menu.mjs",
-    "profile": "node e2e/frame_profile.mjs"
+    "profile": "node e2e/frame_profile.mjs",
+    "e2e:presets": "node e2e/presets.mjs"
   },
   "dependencies": {
     "three": "0.180.0",

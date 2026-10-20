@@ -16,10 +16,15 @@
 // should not depend on.
 //
 // The same run with `covered_los: false` (tunnel_escape_founders_cut_control.ron) is captured
-// instead: the helicopter keeps watching the parked car until ground units arrive. Measured
-// (lead round 12b, racer target 22 / 25 / 28 m/s): escape at 129.5 / 122.4 / 117.6 s with
-// 21.4-21.6 s unseen here; the control is captured at 168.9 / 157.4 / 150.7 s and is never
-// unseen for more than 11.7 s. Re-aim with `examples/probe_tunnel_chase.rs`.
+// instead: the helicopter keeps watching the parked car until ground units arrive.
+//
+// Round 13 (rows 63 / 64, faster police that converge and search): pursuit heat now takes him
+// to L4 (30 s escape time) at ≈ 97 s, just before the Cut, and searching units used to drive
+// into the Cut and find him at ≈ 127 s (captured 138.6 s). Searching units now hold both
+// portals of a covered road the racer was lost in (PVPD doctrine §5: nobody chases inside), so
+// he escapes at 130.4 s after 30 s unseen, units ≈ 145 m away at the portals. Measured
+// (round 13, racer target 25 m/s): lost at ≈ 100 s, Escaped 130.4 s; control Captured 134.9 s,
+// never unseen long. Re-aim with `examples/probe_tunnel_chase.rs`.
 (
     name: "police_tunnel_escape_founders_cut",
     seed: 51,

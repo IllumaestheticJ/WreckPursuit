@@ -240,6 +240,16 @@ export const sim = {
   setClutchMode: (entity: number, mode: "auto" | "manual"): void => wasm.set_clutch_mode(entity, mode),
   clutchMode: (entity: number): string => wasm.clutch_mode(entity),
   engineStalled: (entity: number): boolean => wasm.engine_stalled(entity),
+  /** One-click presets in menu order: ["Rookie", "Street", "Sim"]. */
+  assistPresets: (): string[] => JSON.parse(wasm.assist_presets()),
+  /** Damage mode + assists of a one-click preset for a driver on `source`. */
+  assistPresetNamed: (
+    name: string,
+    source: "Keyboard" | "Gamepad" | "Wheel",
+  ): { mode: "Arcade" | "Simulation"; assists: AssistProfile } => JSON.parse(wasm.assist_preset_named(name, source)),
+  /** The preset a vehicle's assists + the session's damage mode match ("" = customised). */
+  assistPresetOf: (entity: number, source: "Keyboard" | "Gamepad" | "Wheel"): string =>
+    wasm.assist_preset_of(entity, source),
   /** Back to the spawn pose, pristine (scenario restart). */
   reset: (entity: number): void => wasm.reset_vehicle(entity),
   /** Reset in place (R): upright at rest on the nearest clear lane within 15 m, heading its own

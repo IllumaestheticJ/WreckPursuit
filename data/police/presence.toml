@@ -32,27 +32,39 @@ dusk = 180.0
 night = 120.0
 
 [reinforcement]
-# Ground units wanted on one racer per wanted level L1..L5.
-units_per_level = [1, 2, 3, 4, 6]
+# Ground units on one racer per wanted level L1..L5 (owner playtest row 64: L1 2, L2 4, L3 6,
+# L4+ 8). Idle and patrolling units within backup_radius_m by road join at once and drive to
+# the racer's predicted position; the rest spawn out of sight ahead of / around the racer
+# after response_s.
+units_per_level = [2, 4, 6, 8, 8]
+backup_radius_m = [450.0, 600.0, 800.0, 1100.0, 1500.0]
+# Units on the racer farther than backup_radius_m + far_margin_m (straight line) don't count
+# toward the level's units (so closer ones spawn), and are stood down if still that far
+# far_release_s after joining.
+far_margin_m = 250.0
+far_release_s = 20.0
+# Below this level backup comes only from the racer's own district.
+backup_all_districts_level = 2
 # High-bounty racers get reinforcements up to this much sooner.
 priority_max_reduction = 0.3
 # Reinforcements spawn like responders ([response] window, out of sight); if no hidden spot
 # is in that window: the nearest node at least this far from the racer, out of its sight.
 spawn_min_distance_m = 350.0
 
-# Reinforcement response time (uniformly sampled), s.
+# Reinforcement spawn delay (uniformly sampled), s: the time a unit that wasn't nearby takes to
+# get into the area. Short by day, longer at night.
 [reinforcement.response_s.dawn]
-min = 40.0
-max = 90.0
+min = 8.0
+max = 16.0
 [reinforcement.response_s.day]
-min = 20.0
-max = 40.0
+min = 4.0
+max = 10.0
 [reinforcement.response_s.dusk]
-min = 30.0
-max = 70.0
+min = 6.0
+max = 14.0
 [reinforcement.response_s.night]
-min = 60.0
-max = 150.0
+min = 12.0
+max = 30.0
 
 # Response to reckless-driving calls (owner playtest 2026-10-20: "the police spawn too far").
 # A violation no unit saw is a call (civilian or traffic camera). After the call delay the
@@ -119,5 +131,5 @@ night = 0.25
 spikes_level = 2
 roadblock_level = 3
 pit_level = 2
-boxin_level = 2
+boxin_level = 1
 rolling_block_level = 3
