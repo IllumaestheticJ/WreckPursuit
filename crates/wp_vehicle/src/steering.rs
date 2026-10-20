@@ -115,9 +115,10 @@ pub fn align_strength(help: f32) -> f32 {
     1.0 - (1.0 - h) * (1.0 - h)
 }
 
-/// Rear-axle slip angle (rad) where the countersteer lock starts / is fully open.
-const SLIDE_START: f32 = 0.06;
-const SLIDE_FULL: f32 = 0.16;
+/// Rear-axle slip angle (rad) where the countersteer lock starts / is fully open (0.06 → 0.16
+/// before owner row 90: the save-the-car lock now opens as the slide begins).
+const SLIDE_START: f32 = 0.03;
+const SLIDE_FULL: f32 = 0.10;
 
 /// Speed-sensitive lock while countersteering a slide: when the driver steers toward the side
 /// the rear slides to, the lock opens (blended by how much
@@ -214,10 +215,14 @@ pub const ALIGN_SLIDE_FULL: f32 = 0.08;
 /// is in: a kerb or a bump that yaws the car would keep turning it (the sidewalk drives in
 /// `wp_sim` were turned back onto the road that way).
 fn aligning_angle(inp: &SteerInput) -> f32 {
-    let slide = ((inp.rear_axle_slip.abs() - ALIGN_SLIDE_START)
-        / (ALIGN_SLIDE_FULL - ALIGN_SLIDE_START))
-        .clamp(0.0, 1.0);
-    inp.front_axle_angle * slide
+    inp.front_axle_angle * align_slide(inp)
+}
+
+/// How much the rear slides for the self-aligning countersteer, 0..=1 (rear-axle slip
+/// [`ALIGN_SLIDE_START`] → [`ALIGN_SLIDE_FULL`]).
+fn align_slide(inp: &SteerInput) -> f32 {
+    ((inp.rear_axle_slip.abs() - ALIGN_SLIDE_START) / (ALIGN_SLIDE_FULL - ALIGN_SLIDE_START))
+        .clamp(0.0, 1.0)
 }
 
 /// Direction of travel of the front axle relative to the heading, rad (+ = left), from forward
@@ -264,6 +269,21 @@ pub fn update_center_angle(
         (lock / (STEER_RAMP_S * s)).min(rack_speed * inp.ratio_scale)
     } else {
         rack_speed * inp.ratio_scale
+    };
+    // Catching a slide (owner row 90): the self-aligning countersteer, and the driver steering
+    // toward the side the rear slides to, never move slower than the car's own rack (the
+    // slip-targeted lock shrinks with speed, and so would the rate), times the slider's boost.
+    let countering = s > 0.0 && -inp.driver * inp.rear_axle_slip > 0.0 && align_slide(inp) > 0.0;
+    let (base, rate_boost) = if countering {
+        let help = assists.countersteer_help.clamp(0.0, 1.0);
+        (
+            base.max(rack_speed * inp.ratio_scale),
+            1.0 + ALIGN_RATE_BOOST * help,
+        )
+    } else if rate_boost > 1.0 {
+        (base.max(rack_speed * inp.ratio_scale), rate_boost)
+    } else {
+        (base, rate_boost)
     };
     let rate = base * rate_boost;
     current + (target - current).clamp(-rate * dt, rate * dt)
@@ -474,6 +494,30 @@ mod tests {
             t(0.5),
             t(0.25)
         );
+    }
+
+    #[test]
+    fn a_countersteer_key_moves_at_least_at_the_rack_speed_scaled_by_the_slider() {
+        // Owner row 90: at 100 km/h the slip-targeted lock is small, so the keyboard rate tied
+        // to it took ~130 ms to swing into a countersteer. Now: never slower than the rack,
+        // times 1 + 4 × help.
+        let inp = SteerInput {
+            speed: 100.0 / 3.6,
+            ..sliding(1.0)
+        };
+        let ticks = |h: f32| {
+            let (mut c, mut n) = (0.05f32, 0);
+            while c > -0.1 && n < 1000 {
+                c = update_center_angle(c, &inp, &help(h), 0.6, 1.4, 1.0 / 240.0);
+                n += 1;
+            }
+            n
+        };
+        let full_rack = (0.15 / 1.4 * 240.0) as usize;
+        assert!(ticks(0.0) <= full_rack + 1, "{}", ticks(0.0));
+        assert!(ticks(0.3) < ticks(0.0) && ticks(1.0) < ticks(0.3));
+        // 60 %: under 50 ms (3.4 × the rack).
+        assert!(ticks(0.6) <= 12, "{}", ticks(0.6));
     }
 
     #[test]
