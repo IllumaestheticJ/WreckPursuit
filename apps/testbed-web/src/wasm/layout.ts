@@ -96,6 +96,13 @@ export const AGENT_FLAG = {
   aggressive: 64,
 } as const;
 
+/** Floats per record in traffic_draw() / police_draw() (crates/wp_wasm/src/lod.rs). */
+export const DRAW_STRIDE = 10;
+/** Offsets inside a draw record: id (agent / unit), entity (0 = none), pos xyz, rot quaternion xyzw, flags. */
+export const D = { id: 0, entity: 1, pos: 2, rot: 5, flags: 9 } as const;
+/** police_draw() flag bits. */
+export const POLICE_DRAW_FLAG = { helicopter: 1, chasing: 2 } as const;
+
 /** Floats per intent arrow in intents(). */
 export const INTENT_STRIDE = 8;
 
@@ -105,3 +112,38 @@ export const META_STRIDE = 3;
 export const VEHICLE_KIND = { player: 0, aiRacer: 1, police: 2, traffic: 3 } as const;
 /** vehicle_meta() flag bits (from the input the vehicle drives with). */
 export const META_FLAG = { siren: 1, headlights: 2, brake: 4, horn: 8 } as const;
+
+/** `race_standings()` record (wp_wasm::race::STANDING_STRIDE floats per racer). */
+export const RACE_STRIDE = 10;
+export const RS = {
+  entity: 0,
+  position: 1,
+  /** 0 running, 1 finished, 2 DNF, 3 DQ. */
+  status: 2,
+  lap: 3,
+  nextGate: 4,
+  gatesPassed: 5,
+  progressM: 6,
+  /** −1 = none. */
+  gapAheadS: 7,
+  gapBehindS: 8,
+  elapsedS: 9,
+} as const;
+
+/** `race_info()` fields. */
+export const RI = {
+  /** 0 countdown, 1 running, 2 finished. */
+  phase: 0,
+  countdownS: 1,
+  elapsedS: 2,
+  laps: 3,
+  gates: 4,
+  player: 5,
+  racers: 6,
+  closed: 7,
+  lengthM: 8,
+  autopilot: 9,
+  /** 0 sprint, 1 circuit, 2 checkpoint, 3 other. */
+  kind: 10,
+  playerDone: 11,
+} as const;

@@ -73,3 +73,9 @@ with `list_sessions`.
 ## Owner switches
 - Pause: tell the lead "pause automation" (it disables the scheduled task).
 - Keep a workstream local: say so; the lead stops dispatching it and lists its prompt instead.
+
+## Publishing note (2026-10-20)
+The release wasm grew past the artifact's 15 MB per-file limit (15.8 MB). Before publishing,
+strip the wasm `name` custom section from the copy in `dist/assets` (function names only; −2.3 MB;
+behaviour unchanged). `CARGO_PROFILE_RELEASE_DEBUG=0` alone does not shrink it.
+

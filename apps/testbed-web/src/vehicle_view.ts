@@ -8,6 +8,7 @@ import { sim } from "./wasm/sim";
 import { layers } from "./settings";
 import { autoHullSkin, SkinnedBody, skinFromBinding } from "./skin";
 import { PanelBody } from "./render/panels";
+import { proxyGeoms } from "./render/fleet";
 
 /** Newtons per metre of tire-force arrow. */
 const FORCE_SCALE = 1 / 4000;
@@ -87,14 +88,23 @@ export class VehicleView {
   private readonly tailMat: THREE.MeshStandardMaterial;
   /** Per-panel car mesh (workstream R, render/panels.ts); replaces box, lamps and tires once loaded. */
   readonly panels: PanelBody;
+  /** Sim-spawned traffic / police car: per-car debug overlays (tire forces, slip colours,
+   * suspension bars, CG + velocity) stay off unless it is the focused car, so a promotion does
+   * not sprout debug arrows (playtest row 25). */
+  readonly background: boolean;
+  /** The camera's focus car (set by main.ts every frame). */
+  focused = false;
   private readonly lamps: THREE.Mesh[] = [];
   /** Wheel children currently shown for the panel mesh (true) or the debug wheel (false). */
   private wheelPartsShown: boolean | null = null;
+  /** Low-poly stand-in (render/fleet.ts proxy) shown while the panel mesh is still loading. */
+  private readonly proxy: THREE.Group;
 
   constructor(readonly entity: number, colour: number) {
     this.info = sim.info(entity);
     const [w, l, h] = this.info.body_size_m;
     const police = this.info.kind === "Police";
+    this.background = police || this.info.kind === "Traffic";
 
     const bodyMat = new THREE.MeshStandardMaterial({ color: colour, transparent: true, opacity: 1, side: THREE.DoubleSide });
     this.box = new THREE.Mesh(new THREE.BoxGeometry(w, l, h * 0.9), bodyMat);
@@ -200,6 +210,18 @@ export class VehicleView {
       this.wheels.push({ pivot, spin, tire, material, angle: 0, fx, fy, susp });
     }
 
+    // Stand-in until the panel mesh arrives (normally never seen: meshes are preloaded at
+    // session start, render/fleet.ts): the far-LOD proxy in this car's livery.
+    this.proxy = new THREE.Group();
+    {
+      const g = proxyGeoms({ car_id: this.info.car_id, body_size_m: this.info.body_size_m, wheels: this.info.wheels });
+      const paint = new THREE.MeshStandardMaterial({ color: colour, vertexColors: true, flatShading: true, metalness: 0.25, roughness: 0.55 });
+      const detail = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.6 });
+      this.proxy.add(new THREE.Mesh(g.paint, paint), new THREE.Mesh(g.detail, detail), new THREE.Mesh(g.tail, this.tailMat));
+      this.proxy.visible = false;
+      this.root.add(this.proxy);
+    }
+
     // Per-panel mesh: its wheel parts spin with the wheel groups above.
     this.panels = new PanelBody(entity, this.info.car_id, colour, this.headMat, this.tailMat);
     this.root.add(this.panels.root);
@@ -270,7 +292,10 @@ export class VehicleView {
       this.panels.paint.depthWrite = !this.panels.paint.transparent;
     }
 
-    if (panelsOn) {
+    // Panel meshes wanted but not loaded yet: the proxy, not the debug box / lattice hull.
+    const waiting = bodyOn && layers.on("panels") && !this.panels.ready && !latticeOn && !stressOn;
+    this.proxy.visible = waiting;
+    if (panelsOn || waiting) {
       if (this.skinned) this.skinned.object.visible = false;
       this.box.visible = false;
     } else if (this.skinned) {
@@ -280,7 +305,7 @@ export class VehicleView {
     } else {
       this.box.visible = bodyOn;
     }
-    this.nose.visible = bodyOn && !panelsOn && layers.on("panels");
+    this.nose.visible = bodyOn && !panelsOn && !waiting && layers.on("panels");
     const bodyMat = this.box.material as THREE.MeshStandardMaterial;
     bodyMat.opacity = latticeOn || stressOn ? 0.35 : 1;
     bodyMat.depthWrite = bodyMat.opacity === 1;
@@ -315,9 +340,10 @@ export class VehicleView {
     }
 
     // Wheels.
-    const forces = layers.on("tireForces");
-    const susp = layers.on("suspension");
-    const slip = layers.on("slipColour");
+    const debug = !this.background || this.focused;
+    const forces = debug && layers.on("tireForces");
+    const susp = debug && layers.on("suspension");
+    const slip = debug && layers.on("slipColour");
     this.wheels.forEach((w, i) => {
       const wb = o + S.wheelBase + i * S.wheelStride;
       const tb = T.wheelBase + i * T.wheelStride;
@@ -356,7 +382,7 @@ export class VehicleView {
     });
 
     // CG + velocity.
-    const cgOn = layers.on("cgVelocity");
+    const cgOn = debug && layers.on("cgVelocity");
     this.cg.visible = cgOn;
     this.velocity.visible = cgOn;
     if (cgOn) {
@@ -372,6 +398,15 @@ export class VehicleView {
         this.velocity.setLength(Math.min(speed * 0.25, 12), 0.4, 0.25);
       }
     }
+  }
+
+  /**
+   * The car can be shown as intended: its panel mesh is loaded (or the panel layer is off).
+   * Sim-spawned traffic and police views stay hidden until then and the instanced fleet
+   * (render/fleet.ts) draws them instead, so they never pop in as a placeholder.
+   */
+  get drawable(): boolean {
+    return this.panels.ready || !(layers.on("body") && layers.on("panels"));
   }
 
   /** Lights from `vehicle_meta()` flags; `timeS` drives the siren flash pattern. */

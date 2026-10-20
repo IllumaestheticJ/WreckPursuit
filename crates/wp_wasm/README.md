@@ -27,7 +27,12 @@ cargo build --target wasm32-unknown-unknown -p wp_wasm  # wasm check
 cd apps/testbed-web && npm run wasm                     # wasm-pack release package into src/wasm/pkg
 ```
 
-Dependencies are wasm32-clean: `simcli` (lib), `wp_world`, `wp_weather`, `postcard` (no_std + alloc), `serde_json`, `wasm-bindgen`.
+Dependencies are wasm32-clean: `simcli` (lib), `wp_world`, `wp_weather`, `wp_race` + `wp_opponent` (street races, `src/race.rs`), `postcard` (no_std + alloc), `serde_json`, `wasm-bindgen`.
+
+Street races (workstream 15): `race_list`, `race_start`, `race_info`, `race_standings`,
+`race_course`, `race_result_json`; a scenario named `race_<id>` gets a `race::RaceRun` (AI field
+before each tick, judge after it, buy-in/payout on the player's run). See
+`docs/integration/race.md` → Step 2.
 
 ## Perf
 Real vehicle + damage, headless Chromium (SwiftShader), release wasm: 0.09 / 0.62 / 3.0 ms of
@@ -40,5 +45,5 @@ Weather (`weather.rs`): +0.1 ms of sim per frame in heavy rain on the flat world
 - Sandbox runs (car selector, `startFreeDrive(car)`) keep the end-of-run account in memory only; career runs (`career.rs`) persist it (the testbed saves the career to `localStorage`).
 - Replays of a career run whose car has mods or started damaged do not verify (the replay rebuilds the stock, pristine car).
 - Region energy / strain are proxies until contract request TB-2 lands; `intents()` is empty (TB-5).
-- `simcli replay` cannot verify city recordings until the CLI turns on `RunOptions::load_city`.
+- `simcli replay` cannot verify city recordings until the CLI turns on `RunOptions::load_city`; race recordings also need the race (AI kinds, meet report) re-applied, which only the browser's playback does.
 - `cargo test -p wp_wasm` takes ~2 min in debug (real physics).

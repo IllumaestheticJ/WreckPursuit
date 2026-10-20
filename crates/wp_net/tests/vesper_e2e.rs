@@ -228,6 +228,45 @@ fn drive(bot: &mut BotDriver, s: &VehicleState, target_mps: f32) -> VehicleInput
     input
 }
 
+/// Gets a bot car out of a wall it drove into: a car pressing the throttle at walking pace
+/// for `STUCK_S` backs out with opposite lock for `BACK_OUT_S` (wp_vehicle's auto gearbox
+/// engages reverse when the brake is held at a standstill; the brake then drives backwards).
+#[derive(Default)]
+struct Unstick {
+    stuck_steps: u64,
+    back_out_steps: u64,
+    steer: f32,
+}
+
+impl Unstick {
+    const STUCK_S: u64 = 1;
+    const BACK_OUT_S: u64 = 2;
+
+    /// The input to send instead of `input` (60 Hz steps).
+    fn filter(&mut self, s: &VehicleState, input: VehicleInput) -> VehicleInput {
+        if self.back_out_steps > 0 {
+            self.back_out_steps -= 1;
+            return VehicleInput {
+                steer: self.steer,
+                brake: 1.0,
+                headlights: true,
+                ..Default::default()
+            };
+        }
+        if input.throttle > 0.5 && s.speed_mps.abs() < 0.5 {
+            self.stuck_steps += 1;
+        } else {
+            self.stuck_steps = 0;
+        }
+        if self.stuck_steps > Self::STUCK_S * 60 + 30 {
+            self.stuck_steps = 0;
+            self.back_out_steps = Self::BACK_OUT_S * 60 + 30;
+            self.steer = -input.steer.signum();
+        }
+        input
+    }
+}
+
 #[derive(Default)]
 struct Measured {
     states_compared: u64,
@@ -357,6 +396,8 @@ fn four_clients_three_minutes_in_port_vesper() {
     let give_up_step = total_steps * 2 / 3;
     let mut give_up_at: Option<u64> = None;
     let mut pursuit_started_step: Option<u64> = None;
+    let mut cop_unstick = Unstick::default();
+    let mut cop_was_close = false;
     // Cop tool requests: seq → 0 roadblock / 1 spikes, replies, success per tool.
     let mut cop_tool_seqs: BTreeMap<u32, usize> = BTreeMap::new();
     let mut cop_tool_replies: Vec<(usize, Result<(), wp_contracts::CaptainError>)> = Vec::new();
@@ -399,6 +440,7 @@ fn four_clients_three_minutes_in_port_vesper() {
                     // Close: drive at a point 9 m behind racer 0 (as the cop's client sees it)
                     // and match its speed; stop behind it when it has stopped.
                     Some(r) if dist2(s.pos, r.pos) < 70.0 * 70.0 => {
+                        cop_was_close = true;
                         let f = wp_net::quant::rotate(r.rot, [0.0, 1.0, 0.0]);
                         let aim = [r.pos[0] - 9.0 * f[0], r.pos[1] - 9.0 * f[1]];
                         let gap = dist2(s.pos, [aim[0], aim[1], 0.0]).sqrt();
@@ -412,9 +454,30 @@ fn four_clients_three_minutes_in_port_vesper() {
                         chase.crash_chance_per_s = 0.0;
                         drive(&mut chase, &s, target)
                     }
-                    // Far: follow the loop.
-                    _ => drive(bot, &s, 18.0),
+                    // Far: follow the loop (racer 0's loop too), from the nearest point on
+                    // it when the cop just fell back (e.g. after backing out of a wall).
+                    _ => {
+                        if std::mem::take(&mut cop_was_close) {
+                            let (_, _, s_near) = routes[2]
+                                .iter()
+                                .min_by(|a, b| {
+                                    dist2([a.0[0], a.0[1], 0.0], s.pos)
+                                        .total_cmp(&dist2([b.0[0], b.0[1], 0.0], s.pos))
+                                })
+                                .expect("route points");
+                            *bot = BotDriver::new(13, route_from(routes[2], *s_near));
+                            bot.crash_chance_per_s = 0.0;
+                        }
+                        drive(bot, &s, 18.0)
+                    }
                 },
+            };
+            // Since the differentials (round 12) the cop can run wide where racer 0 turns
+            // off the loop and wedge itself against the kerb wall: back out and carry on.
+            let input = if i == 2 {
+                cop_unstick.filter(&s, input)
+            } else {
+                input
             };
             h.peers[i].manual_input = input;
         }
@@ -521,24 +584,6 @@ fn four_clients_three_minutes_in_port_vesper() {
                 "reconnect kept racer 1's car"
             );
             reconnected = true;
-        }
-
-        if std::env::var("WP_VESPER_DEBUG").is_ok() && step % 300 == 0 {
-            let st: BTreeMap<EntityId, VehicleState> =
-                h.server.sim().vehicles().into_iter().collect();
-            let police = h.server.sim().sim().police();
-            let u = police.units().iter().find(|u| u.id == cop_unit);
-            println!(
-                "dbg step {step}: r0 {:?} v {:.1} lvl {:?} | cop {:?} v {:.1} unit {:?} | p0 holds cop {:?} p2 holds r0 {}",
-                st.get(&racer0).map(|s| s.pos),
-                st.get(&racer0).map_or(0.0, |s| s.speed_mps),
-                police.wanted_level(racer0),
-                st.get(&cop).map(|s| s.pos),
-                st.get(&cop).map_or(0.0, |s| s.speed_mps),
-                u.map(|u| (u.body.pos, u.wrecked, format!("{:?}", u.assignment))),
-                h.peers[0].client.remotes().get(&cop.0).map(|r| (r.kind, r.buffer.latest().map(|(t, _)| t), tick)),
-                h.peers[2].client.remotes().contains_key(&racer0.0),
-            );
         }
 
         if std::env::var("WP_VESPER_DEBUG").is_ok() && step % 300 == 0 {

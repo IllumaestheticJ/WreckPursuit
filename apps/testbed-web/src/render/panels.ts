@@ -67,17 +67,39 @@ export interface CarMeshJson {
 }
 
 const meshCache = new Map<string, Promise<CarMeshJson | null>>();
+/** Meshes that finished loading (null = file missing), so a new car builds on its first frame. */
+const meshLoaded = new Map<string, CarMeshJson | null>();
+/** Fetch + parse time per car mesh, ms (`performance.now()` stamps), for the HUD / e2e. */
+export const meshTimings = new Map<string, { start: number; end: number | null; ok: boolean }>();
 
 /** Fetch (once per car) a car's panel mesh; null if the file is missing. */
 export function loadCarMesh(carId: string): Promise<CarMeshJson | null> {
   let p = meshCache.get(carId);
   if (!p) {
+    const timing = { start: performance.now(), end: null as number | null, ok: false };
+    meshTimings.set(carId, timing);
     p = fetch(`data/panels/meshes/${carId}.json`)
       .then((r) => (r.ok ? (r.json() as Promise<CarMeshJson>) : null))
-      .catch(() => null);
+      .catch(() => null)
+      .then((m) => {
+        meshLoaded.set(carId, m);
+        timing.end = performance.now();
+        timing.ok = m !== null;
+        return m;
+      });
     meshCache.set(carId, p);
   }
   return p;
+}
+
+/** A car's mesh if it has already loaded (undefined while loading or never requested). */
+export function carMeshNow(carId: string): CarMeshJson | null | undefined {
+  return meshLoaded.get(carId);
+}
+
+/** Start loading every listed car mesh; resolves when all have arrived (or failed). */
+export function preloadCarMeshes(carIds: string[]): Promise<void> {
+  return Promise.all(carIds.map((id) => loadCarMesh(id))).then(() => undefined);
 }
 
 /** Panel states of an entity, PANEL_STRIDE floats per panel (empty if the build or scenario has none). */
@@ -208,6 +230,7 @@ export class PanelBody {
   /** Nodes array of the last re-skin (VehicleView swaps in a new array only when they move). */
   private skinnedNodes: Float32Array | null = null;
   private readonly stateOf = new Map<number, number>();
+  private disposed = false;
 
   constructor(
     readonly entity: number,
@@ -234,7 +257,20 @@ export class PanelBody {
     };
     this.brokenLamp = std({ color: 0x2a2a2c, roughness: 0.6, metalness: 0.4 });
     bodies.set(entity, this);
-    void loadCarMesh(carId).then((m) => m && this.build(m));
+    // Preloaded (session start, render/fleet.ts): build now, so the car never shows a frame
+    // without its mesh. Otherwise build when the file arrives — unless the car is gone by then
+    // (a promoted traffic car demoted again between two frames; the view is disposed next frame).
+    const now = carMeshNow(carId);
+    if (now) this.build(now);
+    else if (now === undefined)
+      void loadCarMesh(carId).then((m) => {
+        if (!m || this.disposed || bodies.get(entity) !== this) return;
+        try {
+          this.build(m);
+        } catch {
+          // wp_wasm: unknown entity — the sim already removed the vehicle.
+        }
+      });
   }
 
   /** Called once the mesh has loaded (immediately if it already has). */
@@ -487,7 +523,8 @@ export class PanelBody {
   }
 
   dispose(): void {
-    bodies.delete(this.entity);
+    this.disposed = true;
+    if (bodies.get(this.entity) === this) bodies.delete(this.entity);
     this.root.removeFromParent();
   }
 }

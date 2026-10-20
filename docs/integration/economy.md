@@ -480,3 +480,23 @@ in one page; for C / lead). Run on a fresh page, the lead's end-of-run block and
 "career:" checks pass (capture → Repair & continue; beater bought $4 500 → $2 700, chase with the
 career car; busted → garage, saved v1 with the car impounded; reload → release $2 340 → $2 150 →
 repair, health 1; new run with the repaired car, export → import identical).
+
+## Lead feedback (round 12b, 2026-10-20) — owner playtest: buy-low / sell-high exploit
+Base: `origin/lead/round12` (not main). Owner: "I can buy a used car and sell it for more right now."
+Cause (lead read of `wp_economy::garage`): `sale_price` pays `dealer_buy_frac (0.7) × base_price`
+regardless of the condition the car was bought in, while `market_price` charges
+`base_price × condition` (Used 0.8, Worn 0.6). Buying a Worn car (0.6) and selling it at once
+returns 0.7 → +17 % profit. The floor car is worse: price 1 500, base 3 000 → sells for 2 100.
+1. Selling must never return more than was paid for the same car in the same state. Record the
+   purchase condition (or price paid) on `OwnedCar` and value resale from it (e.g. 0.7 × market
+   price in the bought condition), with mods and damage as now. Floor car: resale ≤ its price.
+   If this needs a `wp_contracts` field, write the request below and keep a local field meanwhile.
+2. Property test: for every roster car × condition × mod set, buy → sell immediately ≤ cost; and
+   buy → repair → sell ≤ cost + repair spent. Also check the insurance path can't be farmed
+   (premium vs payout on a car you crash on purpose: payout must stay below repair cost; damage
+   while wanted is already excluded).
+3. In the garage screen, show the sale price before confirming, and a one-line "how insurance
+   works" note next to the insurance buttons (basic: 50 % of the repair bill above $500, $X/day;
+   full: 80 % above $250; nothing if the damage happened while wanted).
+4. Keep career saves loading (version bump + migration for old saves without the new field).
+

@@ -158,3 +158,19 @@ Done on `ws/panels`:
   unbroken, red glow, no lamp markers.
 - Shots: `docs/media/panels/before_frontal_56_hood.png` → `frontal_56_hood_buckled.png`,
   `before_brake_lights.png` (lead markers) → `brake_lights_on.png` (panel lenses).
+
+## Lead feedback (round 12b, 2026-10-20) — owner playtest: the hood doesn't crumple enough
+Base: `origin/lead/round12` (not main). Owner, playing the round-12 preview: "hood doesn't crumple
+enough" (after row 31's hood skinning landed). B is retuning Arcade *mechanical* damage to be
+more survivable on ws/damage at the same time, so keep visible deformation independent of
+mechanical health.
+1. Measure hood deformation (max and mean vertex displacement, fold count) for frontal hits at
+   30 / 50 / 70 km/h into a barrier and a car, on a sports car, a sedan and the police cruiser.
+2. Make it read strongly in chase cam: the hood should buckle upward along 1–2 fold lines and
+   tent at the centre in a 50 km/h frontal, pull back from the headlights, and pop open/kink
+   at the latch in a hard hit; the leading edge follows the crushed front lattice nodes fully
+   (no stiff panel floating over a crushed front). Exaggerate visual crumple (a visual gain on
+   panel skinning per region is fine) without changing the lattice or mechanical damage.
+3. Same check for fenders and bumper so the front doesn't look inconsistent.
+4. Before/after screenshots at 30 m and 8 m in docs/media/panels/; e2e/visual check updated.
+

@@ -12,14 +12,15 @@
 use serde_json::json;
 use wp_world::geom::{self, V2, V3};
 use wp_world::map::{CityMap, SegKind};
-use wp_world::network::{DistrictKind, Lane, LaneKind, RoadNetwork};
-use wp_world::surface::{is_elevated, surface_edges};
+use wp_world::network::{DistrictKind, LaneKind, RoadNetwork};
+use wp_world::surface::{
+    is_elevated, junction_paved_radii, junction_polygon, lane_bank, sidewalk_mesh, surface_edges,
+    TriMesh,
+};
 use wp_world::terrain::Heightfield;
 
-/// Sidewalk width, m.
-const SIDEWALK_M: f32 = 3.0;
-/// Sidewalk (curb) height, m.
-const CURB_M: f32 = 0.15;
+/// Sidewalk width and kerb height (shared with the physics colliders).
+use wp_world::surface::{KERB_H_M as CURB_M, SIDEWALK_W_M as SIDEWALK_M};
 /// Render terrain vertex spacing (cities with terrain), m.
 const TERRAIN_RENDER_M: f32 = 10.0;
 /// Sea level drawn as water, m.
@@ -65,6 +66,29 @@ impl Prim {
             self.normals.push(n);
         }
         (self.positions.len() - 1) as u32
+    }
+
+    /// Append an indexed mesh: the same triangles and winding, vertices at identical
+    /// positions shared.
+    fn mesh(&mut self, m: &TriMesh) {
+        let mut seen: std::collections::BTreeMap<[u32; 3], u32> = std::collections::BTreeMap::new();
+        let ids: Vec<u32> = m
+            .positions
+            .iter()
+            .map(|p| {
+                let key = p.map(f32::to_bits);
+                *seen
+                    .entry(key)
+                    .or_insert_with(|| self.vert(*p, [0.0, 0.0, 1.0]))
+            })
+            .collect();
+        for t in &m.indices {
+            self.indices.extend_from_slice(&[
+                ids[t[0] as usize],
+                ids[t[1] as usize],
+                ids[t[2] as usize],
+            ]);
+        }
     }
 
     /// Up-facing strip between two edge polylines, sharing vertices between quads.
@@ -293,24 +317,6 @@ fn district_color(k: DistrictKind) -> [f32; 4] {
     }
 }
 
-/// Cross slope of `lane` per polyline point, in its own direction (from its road surface).
-fn lane_bank(net: &RoadNetwork, lane: &Lane) -> Vec<f32> {
-    let Some(s) = net.surfaces.get(lane.road as usize) else {
-        return Vec::new();
-    };
-    let n = s.centre.len();
-    if s.road != lane.road || n != lane.polyline.len() {
-        return Vec::new();
-    }
-    let p0 = geom::xy(lane.polyline[0]);
-    let fwd = geom::dist(p0, geom::xy(s.centre[0])) <= geom::dist(p0, geom::xy(s.centre[n - 1]));
-    if fwd {
-        s.bank.clone()
-    } else {
-        s.bank.iter().rev().map(|b| -b).collect()
-    }
-}
-
 /// Render terrain: every `k`-th vertex, each lowered to the minimum of the fine heights around
 /// it, so the coarse surface never rises above the fine one (and so never above a road).
 fn render_terrain(
@@ -447,43 +453,16 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
             _ => &mut asphalt,
         };
         prim.ribbon_banked(&l.polyline, half, half, 0.0, &bank);
-        if l.kind != LaneKind::Highway {
-            let edge = |side: f32| -> Vec<V3> {
-                let mut e = geom::offset_polyline(&l.polyline, side * half);
-                for (k, p) in e.iter_mut().enumerate() {
-                    p[2] += bank.get(k).copied().unwrap_or(0.0) * side * half;
-                }
-                e
-            };
-            if l.edge_right {
-                sidewalk.ribbon_banked(&l.polyline, -half, half + SIDEWALK_M, CURB_M, &bank);
-                let top: Vec<V3> = edge(1.0)
-                    .iter()
-                    .map(|p| [p[0], p[1], p[2] + CURB_M])
-                    .collect();
-                let bottom: Vec<f32> = edge(1.0).iter().map(|p| p[2]).collect();
-                kerb.curtain(&top, &bottom, false);
-            }
-            if l.edge_left {
-                sidewalk.ribbon_banked(&l.polyline, half + SIDEWALK_M, -half, CURB_M, &bank);
-                let top: Vec<V3> = edge(-1.0)
-                    .iter()
-                    .map(|p| [p[0], p[1], p[2] + CURB_M])
-                    .collect();
-                let bottom: Vec<f32> = edge(-1.0).iter().map(|p| p[2]).collect();
-                kerb.curtain(&top, &bottom, true);
-            }
-        }
     }
+    // Raised sidewalks and kerb faces: the very triangles `wp_sim` collides with.
+    let walks = sidewalk_mesh(map);
+    sidewalk.mesh(&walks.tops);
+    kerb.mesh(&walks.kerbs);
     // Junction boxes (16-gons) and bend connectors.
-    for ix in &net.intersections {
+    let radii = junction_paved_radii(net);
+    for (ix, r) in net.intersections.iter().zip(&radii) {
         let c = net.nodes[ix.node as usize].pos;
-        let poly: Vec<V2> = (0..16)
-            .map(|k| {
-                let (s, co) = wp_math::sin_cos(k as f32 / 16.0 * std::f32::consts::TAU);
-                [c[0] + co * ix.radius_m, c[1] + s * ix.radius_m]
-            })
-            .collect();
+        let poly = junction_polygon(geom::xy(c), *r);
         asphalt.polygon(&poly, c[2] - 0.01);
     }
     for s in &map.segs {

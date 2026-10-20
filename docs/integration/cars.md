@@ -5,6 +5,24 @@
 - **Crates / folders owned:** `data/cars/` (roster files), `data/lattices/` (roster car files, not the generator), `tools/specsheet/`; round 8: `data/tires/` edits the lead assigned to H (`PaintedLine`, `treaded`)
 - **Contract version built against:** 0.3.0
 
+## Lead helper note (`lead/handling-balance`, playtest row 28) — no car data changed
+
+"All cars understeer too much" was the keyboard/gamepad steering mapping and ESC, not car
+data (fixed in `wp_vehicle`, see `docs/integration/vehicle.md` → "Handling balance"). For the
+record, so H can judge setup changes against measurements (`cargo run --release -p wp_vehicle
+--example handling`, wheel preset = chassis, with A's differentials):
+
+- Chassis understeer gradient at 80 km/h: RWD 0.07–0.35 deg/g, AWD 0.32–0.33, FWD 0.35–0.63
+  (junkyard_beater 1.42), heavy 0.49–1.77. Regression ranges per class are in
+  `crates/wp_vehicle/tests/handling_balance.rs` (a setup change that leaves them fails there).
+- Anti-roll bars are a weak lever here (measured on main before the diffs): front −40 % / rear
+  +40 % on rampart_50, shiro_turbo, hakone_gt (−20/+20 % on kestrel_ts) moved the gradient
+  ≤ 0.01 deg/g and the limit balance (front slip/peak ÷ rear) from 2.09–2.35 to 1.85–2.30. The
+  diff model did more (RWD gradient 0.45–0.61 → 0.07–0.35), so `differentials.toml` is the
+  knob for "RWD rotates at the limit", not bars.
+- VALIDATION skidpad / 0-100 / 100-0 are not changed by this branch (metric runs are
+  bit-identical), so not re-collected here.
+
 ## Response to lead feedback round 8 (2026-10-19)
 
 Merged `origin/main` at `d3effad` (contract v0.3.0) into `ws/cars`; no conflicts.

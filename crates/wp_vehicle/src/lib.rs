@@ -48,6 +48,7 @@ pub mod drivetrain;
 pub mod engine;
 pub mod ffb;
 pub mod ground;
+pub mod handling;
 pub mod math;
 pub mod metrics;
 pub mod rig;

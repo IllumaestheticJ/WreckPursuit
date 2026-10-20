@@ -7,7 +7,9 @@
 // crash scenarios run and report, the city (Port Vesper v2 by default, the old grid via the
 // selector) loads with traffic, signals (day/night, lamps change over time) and the city chase,
 // weather (e2e/weather.mjs: selector, rain, wet roads, spray, fog, wipers, rainy-night chase),
-// browser perf budgets (e2e/perf_check.mjs, PERF=0 skips) and (optionally) perf at 1/8/24 cars.
+// traffic / police LOD hand-overs are seamless (no missing mesh, < 0.5 m swap jump, no pop-in
+// within 300 m), browser perf budgets (e2e/perf_check.mjs, PERF=0 skips) and (optionally) perf
+// at 1/8/24 cars.
 import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -401,6 +403,49 @@ check(
   check(
     opened.open && opened.shown && opened.player && opened.units >= 1 && opened.districts >= 6 && !closedM.open && !closedM.shown && openedTab.open && !closedEsc.open,
     `full map: M opens (${opened.units} units, ${opened.districts} districts, ${opened.pois} POIs), M closes, Tab opens, Esc closes`,
+  );
+}
+// LOD hand-over (playtest row 25): in a fresh chase, every traffic agent / police unit / sim
+// vehicle is drawn with its real mesh on every frame after the first second (no placeholder,
+// no gap); promotions and demotions (instanced fleet <-> full VehicleView) keep the pose: the
+// drawn car moves < 0.5 m relative to its sim pose at the swap (frame-rate independent; the sim
+// pose's own tick-by-tick continuity is wp_wasm's lod::tests); traffic never appears or vanishes
+// within 300 m of the player.
+{
+  await page.evaluate(() => {
+    window.__wp.startCityChase("debug_sedan", "Arcade");
+    window.__wp.lod.log.start(0);
+  });
+  await page.keyboard.down("KeyW");
+  const lodWait = await page
+    .waitForFunction(
+      () => {
+        const s = window.__wp.lod.log.summary();
+        return window.__wp.sim.worldInfo()[0] / 240 > 12 && s.swaps >= 2;
+      },
+      null,
+      { timeout: 240000, polling: 500 },
+    )
+    .then(() => "ready")
+    .catch(() => "timed out");
+  await page.keyboard.up("KeyW");
+  const lod = await page.evaluate(() => ({ ...window.__wp.lod.log.summary(), simS: window.__wp.sim.worldInfo()[0] / 240 }));
+  await shot("lod_chase.png");
+  const worst = lod.worstSwaps[0];
+  check(
+    lod.missing === 0,
+    `LOD: no car drawn without its mesh after the first second (${lod.frames} frames, ${lod.cars} cars, ${lod.missing} missing` +
+      `${lod.missing ? ": " + JSON.stringify(lod.missingSamples.slice(0, 3)) : ""}; longest placeholder ${lod.maxPlaceholderS.toFixed(2)} s)`,
+  );
+  check(
+    lodWait === "ready" && lod.swaps >= 2 && lod.maxSwapJump < 0.5,
+    `LOD: ${lod.swaps} promotion/demotion swaps in ${lod.simS.toFixed(1)} s sim, max hand-over jump (drawn vs sim pose) ${lod.maxSwapJump.toFixed(3)} m` +
+      (worst ? ` (${worst.key} ${worst.from}→${worst.to})` : "") + `; wait ${lodWait}`,
+  );
+  check(
+    lod.minAppearTraffic >= 300 && lod.minVanishTraffic >= 300,
+    `LOD: traffic appears ≥ ${lod.minAppearTraffic.toFixed(0)} m and vanishes ≥ ${lod.minVanishTraffic.toFixed(0)} m from the player` +
+      ` (police: appear ${lod.minAppearPolice.toFixed(0)} m, vanish ${lod.minVanishPolice.toFixed(0)} m)`,
   );
 }
 // Pursuit banner + capture → repair bill, driven by a stubbed police_status() (a real capture
