@@ -271,6 +271,11 @@ impl PhysicsWorld {
         );
     }
 
+    /// Handles of the awake (non-sleeping) dynamic and kinematic bodies.
+    pub fn active_bodies(&self) -> impl Iterator<Item = RigidBodyHandle> + '_ {
+        self.islands.active_bodies()
+    }
+
     /// The narrow phase (contact pairs of the last step).
     pub fn narrow_phase(&self) -> &NarrowPhase {
         &self.narrow_phase
