@@ -549,7 +549,7 @@ fn perf_400_agents_under_budget() {
 // ---------------------------------------------------------------------------------------------
 
 #[test]
-fn civilians_stop_behind_a_stationary_player_and_yield_to_sirens() {
+fn civilians_stop_behind_a_stationary_car_and_ignore_a_parked_siren() {
     let mut w = world(
         TrafficConfig {
             density_scale: 4.0,
@@ -562,7 +562,7 @@ fn civilians_stop_behind_a_stationary_player_and_yield_to_sirens() {
     w.populate();
     let mut ev = Vec::new();
     run(&mut w, 2.0, &mut ev);
-    // Park a (non-player) police car with siren in front of the fastest mid-lane agent.
+    // Park a (non-player) police car in front of the fastest mid-lane agent.
     let a = w
         .agents()
         .filter(|a| a.speed_mps > 8.0)
@@ -578,26 +578,98 @@ fn civilians_stop_behind_a_stationary_player_and_yield_to_sirens() {
         player: false,
     };
     w.set_tracked_vehicles(&[obstacle]);
-    run(&mut w, 12.0, &mut ev);
-    let after = w.agents().find(|x| x.id == a.id);
-    if let Some(after) = after {
-        let d = geom::dist(geom::xy(after.pos), geom::xy(obstacle.pos));
-        assert!(d > 4.4, "civilian drove into the stopped car ({d} m)");
+    // Civilians queue behind it or edge past it, but never drive into it.
+    let parked = geom::Obb {
+        c: geom::xy(obstacle.pos),
+        f,
+        hl: 2.25,
+        hw: 0.95,
+    };
+    let hits = |x: &wp_world::AgentView| {
+        let b = geom::Obb {
+            c: geom::xy(x.pos),
+            f: geom::dir_of_yaw(x.yaw),
+            hl: 2.2,
+            hw: 0.9,
+        };
+        (x.pos[2] - obstacle.pos[2]).abs() < 3.0 && geom::obb_overlap(&parked, &b)
+    };
+    // (Ignore any agent the test car was dropped onto.)
+    let under: Vec<u32> = w.agents().filter(|x| hits(x)).map(|x| x.id).collect();
+    for _ in 0..(12.0 / PHYSICS_DT) as usize {
+        w.step(PHYSICS_DT, &mut ev);
+        for x in w
+            .agents()
+            .filter(|x| x.lod == Lod::Kinematic && !under.contains(&x.id))
+        {
+            assert!(!hits(&x), "civilian drove into the stopped car: {x:?}");
+        }
     }
-    // Siren: nearby agents start yielding and slow down.
+    // Siren on but standing still (a scene): only the car right in front of it pulls over;
+    // nobody else is held back (holding junctions for it gridlocked them).
     let mut cop = obstacle;
     cop.siren = true;
     w.set_tracked_vehicles(&[cop]);
     run(&mut w, 4.0, &mut ev);
-    let near: Vec<_> = w
+    let yielding: Vec<_> = w
         .agents()
-        .filter(|x| geom::dist(geom::xy(x.pos), geom::xy(cop.pos)) < 40.0)
+        .filter(|x| x.yielding)
+        .filter(|x| {
+            let r = geom::sub(geom::xy(x.pos), geom::xy(cop.pos));
+            let ahead = geom::dot(r, f);
+            !(0.0..20.0).contains(&ahead) || geom::dot(geom::dir_of_yaw(x.yaw), f) < 0.7
+        })
         .collect();
-    assert!(!near.is_empty());
-    assert!(near.iter().all(|x| x.yielding));
-    // Fast highway cars may still be braking; on average everyone near has slowed right down.
-    let mean = near.iter().map(|x| x.speed_mps).sum::<f32>() / near.len() as f32;
-    assert!(mean < 5.0, "{near:?}");
+    assert!(yielding.is_empty(), "{yielding:?}");
+}
+
+#[test]
+fn civilians_pull_over_for_a_siren_coming_up_behind() {
+    let mut w = world(
+        TrafficConfig {
+            density_scale: 2.0,
+            sight_radius_m: 0.0,
+            ..Default::default()
+        },
+        12.0,
+        1.0,
+    );
+    w.populate();
+    let mut ev = Vec::new();
+    run(&mut w, 2.0, &mut ev);
+    // A police car with lights closing in on a moving agent from behind, in its lane.
+    let a = w
+        .agents()
+        .filter(|a| a.speed_mps > 8.0)
+        .max_by(|x, y| x.speed_mps.total_cmp(&y.speed_mps))
+        .unwrap();
+    let v0 = a.speed_mps;
+    let mut yielded = false;
+    for i in 0..(8.0 / PHYSICS_DT) as usize {
+        let Some(x) = w.agents().find(|x| x.id == a.id) else {
+            return; // despawned (left the map)
+        };
+        let f = geom::dir_of_yaw(x.yaw);
+        let cop = TrackedVehicle {
+            entity: EntityId(9),
+            pos: [x.pos[0] - f[0] * 20.0, x.pos[1] - f[1] * 20.0, x.pos[2]],
+            vel: [f[0] * (v0 + 6.0), f[1] * (v0 + 6.0), 0.0],
+            forward: f,
+            siren: true,
+            player: false,
+        };
+        w.set_tracked_vehicles(&[cop]);
+        w.step(PHYSICS_DT, &mut ev);
+        yielded |= x.yielding;
+        if i % 240 == 0 {
+            // Never speeding up while a siren is right behind.
+            assert!(x.speed_mps <= v0 + 0.5, "{x:?}");
+        }
+    }
+    let x = w.agents().find(|x| x.id == a.id).unwrap();
+    assert!(yielded && x.yielding, "{x:?}");
+    // Stopped at the kerb, or moved a lane right and slowing down.
+    assert!(x.speed_mps < 0.5 * v0, "{x:?} (was {v0} m/s)");
 }
 
 #[test]
@@ -1128,4 +1200,61 @@ fn driver_parameters_vary_between_drivers() {
     assert!((5.0..12.0).contains(&frac(hesitant)));
     assert!((20.0..40.0).contains(&frac(amber_go)));
     assert!(frac(eager) > 10.0);
+}
+
+#[test]
+fn siren_reaction_depends_on_where_the_siren_is_going() {
+    use wp_world::traffic::{siren_reaction, SirenReaction};
+    // Car at the origin heading +Y at 10 m/s.
+    let car = [0.0, 0.0, 0.0];
+    let f = [0.0, 1.0];
+    let siren = |pos: [f32; 3], vel: [f32; 2]| TrackedVehicle {
+        entity: EntityId(9),
+        pos,
+        vel: [vel[0], vel[1], 0.0],
+        forward: geom::normalize(if vel == [0.0, 0.0] { [0.0, 1.0] } else { vel }),
+        siren: true,
+        player: false,
+    };
+    let r = |t: TrackedVehicle| siren_reaction(&t, car, f, 10.0);
+    // Coming up behind in the same lane: clear the way.
+    assert_eq!(
+        r(siren([0.0, -30.0, 0.0], [0.0, 25.0])),
+        Some(SirenReaction::Clear)
+    );
+    // Behind in the next lane over: slow down, keep the lane.
+    assert_eq!(
+        r(siren([-3.5, -30.0, 0.0], [0.0, 25.0])),
+        Some(SirenReaction::Slow)
+    );
+    // Oncoming on the same road: slow down.
+    assert_eq!(
+        r(siren([-3.5, 40.0, 0.0], [0.0, -20.0])),
+        Some(SirenReaction::Slow)
+    );
+    // Ahead and going away: only stay out of junctions.
+    assert_eq!(
+        r(siren([0.0, 30.0, 0.0], [0.0, 20.0])),
+        Some(SirenReaction::Hold)
+    );
+    // Crossing ahead.
+    assert_eq!(
+        r(siren([30.0, 20.0, 0.0], [-20.0, 0.0])),
+        Some(SirenReaction::Hold)
+    );
+    // Stopped at a scene ahead: nothing (it is not coming through).
+    assert_eq!(r(siren([4.0, 30.0, 0.0], [0.0, 0.0])), None);
+    // Stopped right behind (a queue at a light): pull over to let it through.
+    assert_eq!(
+        r(siren([0.0, -8.0, 0.0], [0.0, 0.0])),
+        Some(SirenReaction::Clear)
+    );
+    // Far away, or on an overpass: nothing.
+    assert_eq!(r(siren([0.0, -150.0, 0.0], [0.0, 20.0])), None);
+    assert_eq!(r(siren([0.0, -20.0, 8.0], [0.0, 25.0])), None);
+    // A fast one is noticed earlier than the base radius (closing at 30 m/s: 150 m → capped).
+    assert_eq!(
+        r(siren([0.0, -120.0, 0.0], [0.0, 40.0])),
+        Some(SirenReaction::Clear)
+    );
 }

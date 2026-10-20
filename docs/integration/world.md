@@ -592,3 +592,18 @@ when convenient.
   SwiftShader; prop wake-ups); `vesper_v2.greybox.b64.txt` is 9.1 MB on the published link.
 **Contract change requests:** none needed (no `wp_contracts` change). Optional for v0.3.0: the
 `TrafficAgentSnapshot` pitch/roll above.
+
+## Lead: siren yielding (2026-10-20, branch `claude/happy-knuth-g39ogc`)
+Owner playtest row 33 ("traffic needs to get out of the way of cops"). `traffic::siren_reaction`
+replaces "any siren within 60 m → everyone crawls at 3 m/s, 1 m right": the reaction depends on
+where the siren car is and where it is going (`SirenReaction::{Clear, Slow, Hold}`; see the
+README). New: `Agent::clear_for_siren` forces a lane change to the right on multi-lane roads;
+`PULL_OVER_M` (1.6 m) in the rightmost lane; agents in a junction crawl out instead of stopping;
+the reaction radius grows with the closing speed (`SIREN_WARNING_S`, `SIREN_MAX_RADIUS_M`);
+nothing reacts across levels (overpasses). A stopped tracked vehicle in the lane is passed like
+debris when the lane allows (`STOPPED_TRACKED_RADIUS_M`), else queued behind at a car length —
+this fixed standoffs where a cop waited for a civilian that waited for the cop (also row 32,
+partly: no turning around yet). `wp_sim` reports pulled-over civilians to the police as
+nudge-past obstacles. Tests: `civilians_pull_over_for_a_siren_coming_up_behind`,
+`civilians_stop_behind_a_stationary_car_and_ignore_a_parked_siren`,
+`siren_reaction_depends_on_where_the_siren_is_going`.

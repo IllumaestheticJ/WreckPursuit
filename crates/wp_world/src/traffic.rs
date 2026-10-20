@@ -19,8 +19,12 @@
 //! - Lane changes: MOBIL (safety + politeness-weighted incentive, keep-right bias) on multi-lane
 //!   roads away from junctions; the changing car leaves a ghost in its old lane until clear.
 //! - Hazards: emergency braking on time-to-collision with a tracked vehicle approaching head-on
-//!   or crossing; sirens within 60 m make agents pull right, slow down and not enter junctions;
-//!   debris ahead makes them swerve lightly (or stop if it cannot be passed).
+//!   or crossing; debris ahead makes them swerve lightly (or stop if it cannot be passed).
+//! - Sirens ([`siren_reaction`]): an emergency vehicle coming up behind in a car's path makes
+//!   it move a lane right (multi-lane roads) or pull over to the kerb and stop until it has
+//!   passed; one behind in another lane, or oncoming, makes it keep right and slow down. Any
+//!   siren close by keeps agents out of junctions. Drivers notice a siren from
+//!   [`SIREN_RADIUS_M`], or [`SIREN_WARNING_S`] ahead of a fast one.
 //! - LOD: kinematic agents integrate along their path at 60 Hz. Agents within the physical
 //!   radius of a player or active race route become `wp_vehicle` instances driven by a
 //!   pure-pursuit + PID controller; promotion/demotion copy pose and speed.
@@ -54,6 +58,14 @@ pub const LANE_CHANGE_SIGNAL_S: f32 = 0.5;
 
 /// Siren reaction radius, m.
 pub const SIREN_RADIUS_M: f32 = 60.0;
+/// A fast emergency vehicle is noticed this long before it arrives (radius grows with the
+/// closing speed up to [`SIREN_MAX_RADIUS_M`]), s.
+pub const SIREN_WARNING_S: f32 = 5.0;
+/// Largest siren reaction radius, m.
+pub const SIREN_MAX_RADIUS_M: f32 = 140.0;
+/// How far right of the lane centre a car pulls over for a siren in the rightmost lane, m (car
+/// edge about 0.8 m over a 3.5 m lane's edge: onto the shoulder or the parking lane's edge).
+pub const PULL_OVER_M: f32 = 1.6;
 
 const NONE: u32 = NO_SEG;
 const HALF_L: f32 = CAR_LENGTH_M * 0.5;
@@ -307,6 +319,12 @@ enum HazardEffect {
     Blocked(f32),
 }
 
+/// A tracked vehicle slower than this counts as stopped: drivers edge past it like debris, m/s.
+const STOPPED_TRACKED_MPS: f32 = 0.5;
+/// Footprint radius used for a stopped tracked vehicle passed like debris, m (its half width
+/// plus a little: drivers pass alongside, where the width is what matters).
+const STOPPED_TRACKED_RADIUS_M: f32 = 1.2;
+
 /// Largest sideways shift within the lane drivers make for debris, m.
 const MAX_SWERVE_M: f32 = 1.5;
 
@@ -341,6 +359,86 @@ fn hazard_effect(h: &Hazard, q: V2, f: V2, lat: f32, v: f32) -> Option<HazardEff
         Some(HazardEffect::Blocked(long - h.radius_m - HALF_L))
     } else {
         None // already alongside: braking cannot help
+    }
+}
+
+/// How a driver reacts to one emergency vehicle with its siren on ([`siren_reaction`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SirenReaction {
+    /// Coming up behind in this car's path: get out of the way (a lane right, or pull over to
+    /// the kerb) and stop until it has passed.
+    Clear,
+    /// Coming up behind in another lane, or oncoming on this road: keep right, slow down.
+    Slow,
+    /// Close, but crossing or going away: just don't enter a junction.
+    Hold,
+}
+
+/// Reaction of a car at `p` facing `f` at speed `v` to the siren vehicle `t`, or `None` when
+/// it is out of earshot ([`SIREN_RADIUS_M`], more for a fast one closing in:
+/// [`SIREN_WARNING_S`]) or on another level (overpass).
+pub fn siren_reaction(t: &TrackedVehicle, p: V3, f: V2, v: f32) -> Option<SirenReaction> {
+    if (t.pos[2] - p[2]).abs() > 4.0 {
+        return None;
+    }
+    let r = geom::sub(geom::xy(t.pos), geom::xy(p)); // car → siren
+    let d = geom::len(r);
+    let tv = [t.vel[0], t.vel[1]];
+    let rel = geom::sub(tv, geom::scale(f, v));
+    let closing = -geom::dot(r, rel) / d.max(0.1);
+    let reach = SIREN_RADIUS_M
+        .max(closing * SIREN_WARNING_S)
+        .min(SIREN_MAX_RADIUS_M);
+    if d > reach {
+        return None;
+    }
+    let long = geom::dot(r, f); // + ahead of the car
+    let lat = geom::dot(r, geom::right_of(f)); // + right of the car
+    let along = geom::dot(tv, f); // its speed along the car's heading
+                                  // Behind (up to alongside) and coming up the same way: it wants past.
+    if long < HALF_L && along > 2.0 && (along > v + 0.5 || long > -15.0) {
+        // In this car's path (its lane, or straddling): clear it. Next lane over: slow down.
+        return Some(if lat.abs() < CAR_WIDTH_M + 1.2 {
+            SirenReaction::Clear
+        } else if lat.abs() < 12.0 {
+            SirenReaction::Slow
+        } else {
+            SirenReaction::Hold
+        });
+    }
+    // Waiting right behind the car (a queue at a light): pull over to let it through.
+    let same_way = geom::dot(t.forward, f) > 0.7;
+    if long < 0.0
+        && long > -(CAR_LENGTH_M + 12.0)
+        && same_way
+        && lat.abs() < CAR_WIDTH_M + 1.2
+        && geom::len(tv) < 2.0
+    {
+        return Some(SirenReaction::Clear);
+    }
+    // Ahead and coming towards the car on the same road.
+    if long > 0.0 && along < -2.0 && lat.abs() < 12.0 {
+        return Some(SirenReaction::Slow);
+    }
+    // A stopped one (at a scene, waiting to get by) is not coming through the junction:
+    // holding traffic back for it only gridlocks the junction around it.
+    if geom::len(tv) < 1.0 {
+        return None;
+    }
+    Some(SirenReaction::Hold)
+}
+
+/// How far right of its lane centre a car may pull over for a siren, m: [`PULL_OVER_M`] in the
+/// rightmost lane; within the lane (about half a metre) when a moving lane is to its right.
+fn pull_over_room(map: &CityMap, lane: Option<&crate::network::Lane>) -> f32 {
+    let Some(l) = lane else {
+        return 0.5;
+    };
+    match l.right {
+        Some(r) if map.net.lanes[r as usize].kind.drivable() => {
+            ((l.width_m - CAR_WIDTH_M) * 0.5).clamp(0.2, 0.8)
+        }
+        _ => PULL_OVER_M,
     }
 }
 
@@ -468,6 +566,9 @@ pub struct Agent {
     pub emergency: bool,
     /// Currently yielding to a siren.
     pub yielding: bool,
+    /// An emergency vehicle is coming up behind in this car's path: move a lane right if there
+    /// is one (forced lane change), else pull over.
+    clear_for_siren: bool,
     /// Disabled (wrecked or lost control): stopped with hazard lights.
     pub disabled: bool,
     /// Visual variant for the renderer.
@@ -1355,20 +1456,50 @@ impl Traffic {
 
             // Sirens.
             let mut siren = false;
+            let mut yielding = false;
+            let mut clear_for_siren = false;
+            let lane = seg.lane().map(|l| &map.net.lanes[l as usize]);
+            // A same-direction lane to the right to move into.
+            let lane_right = lane
+                .and_then(|l| l.right)
+                .filter(|r| map.net.lanes[*r as usize].kind.drivable());
             for t in inp.tracked.iter().filter(|t| t.siren) {
-                let r = geom::sub(geom::xy(t.pos), q);
-                let d = geom::len(r);
-                if d < SIREN_RADIUS_M {
-                    siren = true;
-                    v0 = v0.min(3.0);
-                    // Slow down promptly (≈ 4 m/s²) rather than coasting down comfortably.
-                    acc = acc.min(-((v - 3.0) * 1.5).clamp(0.0, 4.0));
-                    if !seg.is_connector() {
-                        lat_target = 1.0;
+                let Some(r) = siren_reaction(t, pose.p, pose.f, v) else {
+                    continue;
+                };
+                siren = true;
+                match r {
+                    SirenReaction::Clear => {
+                        yielding = true;
+                        if seg.is_connector() {
+                            // Never stop in a junction: crawl on out of it.
+                            v0 = v0.min(4.0);
+                            acc = acc.min(-((v - 4.0) * 1.2).clamp(0.0, 3.5));
+                        } else {
+                            if lane_right.is_some() && a.physical.is_none() {
+                                // Move a lane right (forced change), slowing meanwhile.
+                                clear_for_siren = true;
+                                let slow = (v0 * 0.5).max(4.0);
+                                v0 = v0.min(slow);
+                                acc = acc.min(-((v - slow) * 1.2).clamp(0.0, 3.0));
+                            } else {
+                                // Pull over and brake firmly to a stop (≈ 3.5 m/s²).
+                                lat_target = lat_target.max(pull_over_room(map, lane));
+                                v0 = 0.0;
+                                acc = acc.min(-(v * 0.9).clamp(0.0, 3.5));
+                            }
+                        }
                     }
-                    if geom::dot(r, pose.f) < 0.0 && d < 25.0 {
-                        acc = acc.min(idm(v, v0, 1.0 + p.min_gap_m, 0.0, &p));
+                    SirenReaction::Slow => {
+                        yielding = true;
+                        let slow = (v0 * 0.5).max(4.0);
+                        v0 = v0.min(slow);
+                        acc = acc.min(-((v - slow) * 1.2).clamp(0.0, 3.0));
+                        if !seg.is_connector() {
+                            lat_target = lat_target.max(0.8_f32.min(pull_over_room(map, lane)));
+                        }
                     }
+                    SirenReaction::Hold => {}
                 }
             }
 
@@ -1394,7 +1525,27 @@ impl Traffic {
                 let long = geom::dot(r, pose.f);
                 let latd = geom::dot(r, right);
                 let tv = [t.vel[0], t.vel[1]];
-                if long > 0.0 && long < 80.0 && latd.abs() < CAR_WIDTH_M + 0.4 {
+                if geom::dot(tv, tv) < STOPPED_TRACKED_MPS * STOPPED_TRACKED_MPS {
+                    // Stopped (a police car at a scene or waiting to get by, a wrecked player):
+                    // edge past it in the lane like past debris; queue only if that is
+                    // impossible (it may be waiting for this car).
+                    let h = Hazard::new(t.pos, STOPPED_TRACKED_RADIUS_M);
+                    match hazard_effect(&h, q, pose.f, a.lat, v) {
+                        Some(HazardEffect::Swerve(shift)) if !seg.is_connector() => {
+                            if lat_target == 0.0 || shift.abs() > lat_target.abs() {
+                                lat_target = shift;
+                            }
+                            v0 = v0.min(seg.speed_limit * 0.4);
+                        }
+                        Some(HazardEffect::Swerve(_)) => v0 = v0.min(seg.speed_limit * 0.4),
+                        // Queue behind it as behind any car (the footprint circle is shorter
+                        // than the car).
+                        Some(HazardEffect::Blocked(_)) => {
+                            acc = acc.min(idm(v, v0, long - CAR_LENGTH_M, 0.0, &p));
+                        }
+                        None => {}
+                    }
+                } else if long > 0.0 && long < 80.0 && latd.abs() < CAR_WIDTH_M + 0.4 {
                     acc = acc.min(idm(v, v0, long - CAR_LENGTH_M, geom::dot(tv, pose.f), &p));
                 }
                 let w = geom::sub(tv, pose.vel);
@@ -1518,7 +1669,8 @@ impl Traffic {
                 self.stats.emergency_brakes += 1;
             }
             a.emergency = emergency;
-            a.yielding = siren;
+            a.yielding = yielding;
+            a.clear_for_siren = clear_for_siren;
             a.start_wait_s = start_wait;
             a.acc = acc.clamp(-9.0, p.max_accel);
             a.lat_target = lat_target;
@@ -1575,7 +1727,10 @@ impl Traffic {
                     Some(HazardEffect::Blocked(_))
                 )
             });
+            // A siren coming up behind forces a change to the right (any speed, no timers).
+            let siren_clear = a.clear_for_siren && !blocked;
             if !blocked
+                && !siren_clear
                 && (a.s < 15.0
                     || d_end < 60.0
                     || a.v < 3.0
@@ -1585,7 +1740,7 @@ impl Traffic {
             {
                 continue;
             }
-            if blocked && (d_end < 15.0 || a.yielding) {
+            if (blocked && (d_end < 15.0 || a.yielding)) || (siren_clear && d_end < 15.0) {
                 continue;
             }
             let p = a.params;
@@ -1608,6 +1763,9 @@ impl Traffic {
             let mut best: Option<(f32, SegId, f32, bool)> = None;
             for (cand, to_right) in [(l.left, false), (l.right, true)] {
                 let Some(c) = cand else { continue };
+                if siren_clear && !to_right {
+                    continue;
+                }
                 let cl = &map.net.lanes[c as usize];
                 if !cl.kind.drivable() || inp.closed.get(c as usize).copied().unwrap_or(false) {
                     continue;
@@ -1617,7 +1775,7 @@ impl Traffic {
                     continue;
                 }
                 let s2 = a.s * cs.length / seg.length.max(1e-3);
-                if cs.length - s2 < if blocked { 15.0 } else { 60.0 } {
+                if cs.length - s2 < if blocked || siren_clear { 15.0 } else { 60.0 } {
                     continue;
                 }
                 // The target lane must not be blocked by debris too.
@@ -1669,7 +1827,7 @@ impl Traffic {
                 } else {
                     -p.keep_right_bias
                 };
-                let forced = if blocked { 10.0 } else { 0.0 };
+                let forced = if blocked || siren_clear { 10.0 } else { 0.0 };
                 let incentive =
                     a_c2 - a_c + p.politeness * (a_n2 - a_n + a_o2 - a_o) + bias + forced;
                 // Hysteresis: a change already being indicated goes ahead at half the threshold.
@@ -2281,6 +2439,7 @@ impl Traffic {
                 acc: 0.0,
                 lat: 0.0,
                 lat_target: 0.0,
+                clear_for_siren: false,
                 plan: [plan0, plan1],
                 permit: NONE,
                 stopped_since: None,

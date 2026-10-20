@@ -251,8 +251,13 @@ lane it is in. `TrafficStats::{lane_changes, lane_changes_left}`.
 
 **Hazards**: emergency braking (−8 m/s², hazard lights) when a tracked vehicle in front or
 alongside has time-to-closest-approach < 3 s with miss distance < 3 m at > 5 m/s relative
-speed (head-on or crossing); sirens within 60 m → pull 1 m right, slow to 3 m/s at up to
-4 m/s², stop if the siren is within 25 m behind, never enter a junction; debris ahead (`Hazard`,
+speed (head-on or crossing); sirens (`siren_reaction`, from 60 m or 5 s ahead of a fast one, up
+to 140 m, same level only): coming up behind in the car's path → move a lane right
+(multi-lane, forced change) or pull over 1.6 m right and stop until it has passed; behind in
+another lane or oncoming → keep right, slow to half speed; crossing / going away → don't enter
+a junction; a stopped siren car holds nobody (except the car right in front of it, which pulls
+over); a stopped tracked vehicle in the lane (cop at a scene, wrecked player) is edged past like
+debris when possible, else queued behind; debris ahead (`Hazard`,
 extrapolated along its velocity up to 2 s) → swerve within the lane by up to 1.5 m (planned in
 the lane frame, held until the rear bumper is past) at 60 % of the limit; debris that blocks the
 lane → change to a free neighbour lane (forced MOBIL change, safety still checked) or stop;
