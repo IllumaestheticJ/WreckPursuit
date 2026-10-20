@@ -111,6 +111,17 @@ pass with `PERF=0`; its `perf_check.mjs` step fails 8 software-GL budgets (real-
 waiting for sim time while other jobs loaded the machine, passed alone); `siren.mjs` 23/23 pass.
 Also re-run: `e2e/audio.mjs`, `e2e/audio_roster.mjs` (19 cars × 4 roles) all pass.
 
+## Merge with lead/round12 (2026-10-20)
+
+Merged `origin/lead/round12` (J's modelled engine, audio-impacts helper's impacts / police horn /
+cabin muffle, police radio v2, kinematic traffic feed) keeping every side. The siren's interior
+muffle now also uses the director's cabin-box test (`AudioDirector::interior`), with the 0.7 m
+radius as the fallback for cars without a cabin box. Re-run after the merge: `cargo test -p
+wp_audio` ✓, clippy ✓, tsc ✓, `e2e/siren.mjs` 23/23, `e2e/audio.mjs` (incl. scanner/radio) 12/12,
+`e2e/audio_impacts.mjs` 49/49, `e2e/audio_engine.mjs` 125/125 (one run failed a single
+`shiro_turbo` even-firing timbre threshold, −13.8 vs ≤ −15 dB; passed on re-run — flaky, not
+siren code).
+
 ## Perf numbers
 
 | Measurement | Machine | Native | Browser | Budget |
