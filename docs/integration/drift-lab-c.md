@@ -48,9 +48,9 @@ merge in step 1b: Drift Lab B step 3b's opt-in shaping is the one kept.)* The ol
 the keyboard throttle filter are machine A's (ws/vehicle); left as they are here (the readout
 still shows ~89–91 % applied for a held key in a slide: that is A's feathering, not this).
 
+**Readout.** `Drift Lab C · HOLD` (mode: straighten / hold / angle-up / exceeded), *slide* vs
 *held* angle, envelope, *throttle key %* → *engine %* (what reached the engine; *trim ×* is
-*held* angle, envelope, *throttle key %* → *applied %* (what reached the engine; *shaping ×* is
-shown only when the opt-in shaping is on), authority, onset.
+shown only when the opt-in shaping trims), authority, onset.
 
 **Tune panel** (new sliders): *hold decay (°/s)*, *angle-up rate (°/s)*, *angle-up steer*,
 *angle-up damping (s)*, *lift shrink (°/s)*, *lift authority*. Removed: *catch extra lock*
