@@ -70,7 +70,7 @@ suite).
 | G7 | **ABS levels Off / Half / Full** (run 5 setup; clip 5 drives ABS Half + rear brake bias: braking from 82 mph with a tap stays straight and settles) | ABS is on/off. **Full:** 60–0 in 2.7–2.9 s; braking from 80 mph with a 0.2 s tap turns the car 1–14° by the stop, max 2.6–5.1° of slip, no spin. **Off:** 3.4–3.6 s / 46–49 m with the wheels locked, and the same tap does nothing (0.4–0.8°: locked fronts don't steer) | no Half level. Half should sit between: shorter than Off, with some steering left | **A** (ABS levels, request WP-3; machine A already has TCS levels) |
 | G8 | **Handbrake stabs on the throttle** (0.1–0.3 s, throttle + key held) add rotation and keep the drive (clip 5) | stabs of 0.25 + 0.1 s at 50 mph add 1–25° of rotation by 1.2 s but cost **4–20 mph**. On the torquey RWD cars (`parity_rwd_a/b/d`) the drive force stays under half for **0.8–0.9 s** after the last stab: the row-56 handbrake declutch opens the clutch and it re-engages slowly | the drive drops out for most of a second instead of staying on | A (handbrake declutch: keep the clutch for short stabs with the throttle held, or re-engage at once) + Drift Lab C |
 | G9 | Throttle on with the key held, out of a slow corner, RWD (clip 2 exits with opposite lock + throttle) | full throttle in 1st or 2nd out of a 20 mph hairpin, key held 1 s, no countersteer: **every RWD car spins**; the FWD cars gain 14–19 mph at 6–8° of slip | our driver doesn't countersteer, so this isn't a like-for-like comparison. It shows how little margin there is | Drift Lab C (catch) / A |
-| G10 | **Free per-car tune screen**: four 5-step sliders (suspension soft↔stiff, gear ratio short↔long, differential open↔limited↔locked, brake balance rear↔front), separate from the mod tree, set per car (run 5 setup) | none (only the paid mod tree) | missing feature. Design proposal below; the suite already measures the owner's tune with the proposed mapping (`parity_rwd_a_tuned`) | ui-kit (garage screen) + `wp_economy` (saved per car) + spawn glue (`wp_sim`); mapping values H (cars) |
+| G10 | **Free per-car tune screen**: four 5-step sliders (suspension soft↔stiff, gear ratio short↔long, differential open↔limited↔locked, brake balance rear↔front), separate from the mod tree, set per car (run 5 setup) | **built** (2026-10-20): garage → Cars → Tune, saved per car, applied at spawn; developer row for quick runs (`docs/integration/tune.md`) | closed in the game. Contract move WP-4 and net spawn pending; the suite still uses its own `apply_tune` copy (`parity_rwd_a_tuned`) | ui-kit (garage screen) + `wp_economy` (saved per car) + spawn glue (`wp_sim`); mapping values H (cars) |
 | G11 | Body roll and pitch build and settle smoothly and slowly; our suspension "feels far too switchy" (owner) | not measured here yet | needs a roll-angle-vs-time metric (60 mph lane change, S-bend) | Drift Lab W + A (ride model) |
 
 Not a gap: lift-off in a 60 mph corner (key held) gives a 2–5 °/s yaw kick and 2–6° of slip, no
@@ -79,6 +79,10 @@ clips (`kestrel_ts` 5th tops out at 136 mph and `parity_fwd_c` at 158 mph; clip 
 5th). Upshifts cut the drive for 0.38–0.58 s, close to the car data's 0.42–0.50 s `shift_time_s`.
 
 ## Tune screen (G10): proposed design
+
+> **Built 2026-10-20** as designed below (`docs/integration/tune.md`). Differences: `CarTune`
+> lives in `wp_vehicle` / `wp_economy` until the lead applies WP-4; the diff slider on AWD cars
+> changes the rear axle; heavy trucks have a narrower suspension range in `steps.toml`.
 
 **What the player gets.** In the garage, every owned car has a free *Tune* page next to its mods:
 four sliders of 5 steps, 3 = stock, with a short line under each saying what it does. A *Reset*
