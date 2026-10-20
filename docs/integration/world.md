@@ -583,7 +583,8 @@ when convenient.
   authoritative, so it only corrects). Needs F + lead.
 - Buildings now block cars in city v2 only; the grid keeps its old behaviour (no building
   colliders) so its goldens stay put.
-- Loop junctions are signalised T-junctions (no ramps/merges yet); Route 40 W/N end at
+- ~~Loop junctions are signalised T-junctions (no ramps/merges yet)~~ — done: Loop 9 is a
+  freeway with six diamond interchanges (see "Loop 9 freeway" below). Route 40 W/N still end at
   the map edge with U-turns.
 - `surface_at` / `ground_height` / police `nearest_on_road` project onto whole polylines; the
   curved city has up to 281 points per lane (≈ 0.5 µs per query, fine today; index pieces in
@@ -592,3 +593,62 @@ when convenient.
   SwiftShader; prop wake-ups); `vesper_v2.greybox.b64.txt` is 9.1 MB on the published link.
 **Contract change requests:** none needed (no `wp_contracts` change). Optional for v0.3.0: the
 `TrafficAgentSnapshot` pitch/roll above.
+
+## Loop 9 freeway (2026-10-20, owner request "a properly designed/built highway loop")
+Loop 9 is now a fully access-controlled freeway; the at-grade loop junctions are gone.
+- **Mainline:** two one-way carriageways (3 × 3.7 m lanes, 55 mph, banked ≤ 6 %) either side of
+  a 4 m median on the old loop line: outer = counter-clockwise, inner = clockwise. No junction,
+  signal, stop, yield or left turn on either; each carriageway's left lane runs unbroken all
+  the way round (tested).
+- **Six diamond interchanges** (`VesperReport::interchanges`): Harbor Boulevard west (moved
+  120 m south to make room), Route 40 West (same crossing point as before; Lantern Way's west
+  end now joins Route 40 West inside the loop), Port Connector (also serves Terminal Avenue,
+  whose old junction 380 m away was too close for a second interchange — Terminal Avenue now
+  ends at the quay), Harbor Boulevard east, Bluff Road (re-aligned to come into its terminal
+  from the west), Uptown Connector. The crossroad runs from a signalised terminal 50 m inside
+  the loop, under both carriageways (each rises 7.5 m onto a deck — 12 new grade separations;
+  Route 40 North still dips under both), to a signalised terminal 50 m outside. Per carriageway
+  a one-lane **off-ramp (40 mph)** leaves 250 m before the crossroad and an **on-ramp (45
+  mph)** joins 250 m after it; smootherstep tapers (radius ≥ 120 m), banked, ≤ 6 % grade, 40 m
+  parallel run into the terminal so the ramps meet the crossroad square.
+- **Merges / diverges (lane balance):** the on-ramp's lane continues as an auxiliary fourth
+  lane to the next interchange and leaves there as the off-ramp. Every gore is a pure lane
+  add or lane drop. New builder support (`wp_world::builder`): `ControlHint::Merge` gore nodes
+  are not junctions — lanes are wired `Straight` to the leaving lane in line with them,
+  setback `BuildOptions::gore_setback_m` (3 m), connectors paved like bends — and
+  `RoadSpec::shift` moves a road's lane layout sideways off its centreline (auxiliary sections
+  keep three lanes in line with the carriageway; a ramp's lane sits beside the carriageway at
+  its gore). So the traffic AI needed **no changes**: nobody yields at a gore, cars move between
+  through and auxiliary lanes with ordinary MOBIL lane changes, and ramp terminals are ordinary
+  signalised junctions.
+- **Profiles:** crossings of one road < 40 m apart share one level; node-height relaxation
+  now also pulls road ends to within grade reach of their deck anchors. Every road still meets
+  its grade cap and the 0.35 g crest gate.
+- **Consumers:** road format unchanged (no new enum variant; `RoadSpec::shift` is builder input
+  only). Police see one-way ramps/carriageways through `RoadNetworkQuery` as before. Race grids
+  `Loop 9 sprint` / `north` / `west` sit on the outer carriageway's rightmost *through* lane
+  (an auxiliary section's fourth lane exits at the next interchange). The deck probe point in
+  `wp_world/tests/city_v2.rs` and `wp_sim/tests/city_v2.rs` moved from (−1517, 91) — now the
+  median — to (−1524, 91) on the outer carriageway.
+
+| Check | Before | After |
+|---|---|---|
+| Network | 950 lanes, 133 junctions (27 signalised), 2 grade separations, 157 lane-km | 1042 lanes, 139 junctions (33 signalised), 14 grade separations, 178 lane-km |
+| 10-min traffic bench, 400 agents, seed 1 / 2 at 0 %, seed 1 at 5 % aggressive (collision diagnostics on) | 0 / 0 / 0 collisions, 0 / 0 / 0 stuck, moving 305 / 299 / 296, mean 5.8 / 5.8 / 5.4 m/s, 0.227–0.229 ms/frame | 0 / 0 / 0 collisions, 0 / 0 / 0 stuck, moving 298 / 296 / 283, mean 5.7 / 5.8 / 5.4 m/s, 0.230–0.238 ms/frame |
+| Same, highway speed / limit p50 | 0.93 / 0.90 / 0.93 | 0.95 / 0.90 / 0.96 |
+| 3-min bench, no diagnostics (two runs) | 0.065–0.068 ms/frame, mean 6.2 m/s | 0.064–0.070 ms/frame, mean 6.6 m/s |
+| `tests/city_v2.rs` 1-min soak | 0 collisions, min 400 agents | 0 collisions, 0 stuck, min 400 agents; 1706 mainline + 342 ramp agent samples |
+| `city/loop_crest_at_limit` | 2.7 km in 111 s | 1.9 km route (the outer-carriageway road between the Uptown on-ramp and the Route 40 W off-ramp), route_progress 1.0, 0 s off road / airborne, max 24.8 m/s |
+
+New tests (`vesper.rs`): `loop_mainline_is_access_controlled_and_continuous`,
+`every_interchange_has_off_and_on_ramps_both_ways` (signalised terminals, off-ramps only from
+the right/auxiliary lane, on-ramps only into it, 35–45 mph, radius ≥ 120 m, gore connectors
+< 6.5 m with no sideways jump), `lane_graph_is_strongly_connected` (connections + lane
+changes), crossings = 2 per interchange + 2; `tests/city_v2.rs` soak now also gates stuck = 0
+and ramp/mainline use.
+**Changes outside `wp_world`:** `tools/city-import` (mine): `RoadSpec::shift` in the OSM
+importer's literal, gore connectors drawn in concrete; `data/city/vesper_v2.greybox.*`
+regenerated (7.2 MB `.glb`). `crates/wp_sim/tests/city_v2.rs`: deck probe point (above).
+Goldens for the Vesper scenarios re-blessed (`[bless]` commit). Grid city and its goldens are
+untouched (builder output is identical without `Merge` hints / `shift`).
+**Contract change requests:** none.

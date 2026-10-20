@@ -208,6 +208,12 @@ pub fn trim_polyline(pts: &[V3], start: f32, end: f32) -> Vec<V3> {
 
 /// Offset a polyline sideways by `off` metres (positive = right of travel), with mitred joins.
 pub fn offset_polyline(pts: &[V3], off: f32) -> Vec<V3> {
+    offset_polyline_by(pts, |_| off)
+}
+
+/// Offset a polyline sideways by `off(i)` metres at point `i` (positive = right of travel),
+/// with mitred joins. Heights are kept.
+pub fn offset_polyline_by(pts: &[V3], off: impl Fn(usize) -> f32) -> Vec<V3> {
     let n = pts.len();
     let mut out = Vec::with_capacity(n);
     for i in 0..n {
@@ -232,6 +238,7 @@ pub fn offset_polyline(pts: &[V3], off: f32) -> Vec<V3> {
             (None, Some(b)) => right_of(b),
             (None, None) => [0.0, 0.0],
         };
+        let off = off(i);
         out.push([
             pts[i][0] + nrm[0] * off,
             pts[i][1] + nrm[1] * off,

@@ -11,7 +11,7 @@ clock. Implements `wp_contracts::WorldQuery`. No renderer dependency; compiles f
 | `network` | The road file format (`.road.bin` / `.road.json`), validation |
 | `builder` | Abstract road graph → lanes, connections, junction control, signal plans |
 | `procgen` | Procedural fallback city (grid + ring + highway spine + 2 diagonals), flat |
-| `vesper` | Port Vesper v2 (`vesper_v2`): curved streets, hills, terrain, banked highway loop, grade separations |
+| `vesper` | Port Vesper v2 (`vesper_v2`): curved streets, hills, terrain, Loop 9 freeway with diamond interchanges, grade separations |
 | `terrain` | `Heightfield` (stored with the network), value noise, bumps |
 | `surface` | Road trimesh for physics/greybox, deck rails, `MapGround` wheel probe |
 | `map` | Runtime map: connector curves, conflict sets, uniform-grid index, `WorldQuery` (incl. building line of sight) |
@@ -136,6 +136,14 @@ separation). About 4 % of road samples are paint on Port Vesper v2 (`painted_sha
   priority (higher class has right of way) when classes differ; all-way stop otherwise.
 - Signal plan: opposite approaches share a phase; green 14–30 s by class; yellow
   `clamp(1 + v / 6.1, 3, 5)` s (ITE); all-red 1.5 s (2 s above 20 m/s).
+- Freeway gores (`NodeSpec::control = Some(ControlHint::Merge)`, one-way roads merging,
+  diverging, gaining or dropping a lane): not junctions. Every road end is trimmed by
+  `BuildOptions::gore_setback_m` (3 m), each arriving lane connects `Straight` to the leaving
+  lane most nearly in line with it, no `Intersection` is made (connectors are paved like bend
+  connectors, so nothing yields there). `RoadSpec::shift` (per centreline point, + = right)
+  shifts a road's lane layout and surface off its centreline: a four-lane auxiliary section
+  keeps its left three lanes in line with a three-lane carriageway (shift = half a lane), and a
+  ramp whose centreline ends at the gore node has its lane beside the carriageway there.
 
 ## Procedural city (`gen-city --grid 12x12 --seed N`)
 Grid of streets at 110 m centred on the origin. Rows/columns 2 and 9 are 2+2 arterials
@@ -160,10 +168,27 @@ After `docs/design/CITY.md`, scaled to ≈ 3.3 × 2.9 km (`MAP_LO..MAP_HI`), 5 m
   the quay; Canal Flats industrial grid; organic districts as warped grids with curved edges,
   dropped edges and cul-de-sacs (Larkspur west, Mercer north, Eastgate east, Bayview on the
   north-east plateau); Hollins Drive (6 switchbacks up Hollins Knob, ≈ 110 m), Ridge Road back
-  down over the crests, the Knob lot; Bluff Road along the plateau edge; Loop 9, a 3+3
-  highway loop (filleted control polygon, radius ≥ 420 m sweepers) with 7 signalised
-  junctions; Route 40 West (dead-ends at the map edge, passes **under** the loop: overpass)
-  and Route 40 North (cut **under** the loop: underpass).
+  down over the crests, the Knob lot; Bluff Road along the plateau edge; Loop 9, a freeway
+  ring (filleted control polygon, radius ≥ 420 m sweepers) with six diamond interchanges (see
+  below); Route 40 West (through an interchange to the map edge) and Route 40 North (cut
+  **under** both carriageways: underpass).
+- **Loop 9 freeway:** two one-way carriageways (3 × 3.7 m lanes, 55 mph, banked ≤ 6 %)
+  either side of a 4 m median — outer counter-clockwise, inner clockwise — with no junction,
+  signal, stop or left turn on them. Diamond interchanges at Harbor Boulevard west and east,
+  Route 40 West, the Port Connector (also serving Terminal Avenue, whose old junction was too
+  close to it), Bluff Road and the Uptown Connector: the crossroad runs between two signalised
+  ramp terminals 50 m either side of the loop and passes under both carriageways (each rises
+  7.5 m onto a deck); per carriageway a one-lane off-ramp (40 mph) leaves 250 m before the
+  crossroad and an on-ramp (45 mph) joins 250 m after it. Ramps peel away on smootherstep
+  tapers (radius ≥ 120 m, no curvature jump at the gore), banked ≤ 6 %, graded ≤ 6 %, and
+  meet the crossroad square after a 40 m parallel run. Lane balance: the on-ramp's lane runs
+  on as an auxiliary fourth lane and leaves as the next interchange's off-ramp, so every gore
+  is a lane add or lane drop wired straight across (builder `ControlHint::Merge`); traffic
+  enters and leaves the through lanes by ordinary MOBIL lane changes and the mainline never
+  yields. Interchanges are ≥ 2 × 250 m + ~150 m apart (`VesperReport::interchanges` lists
+  terminals, ramps, crossroad and gores). Crossings of one road < 40 m apart (a crossroad
+  under both carriageways) share one level; node-height relaxation also pulls road ends close
+  enough to reach their deck anchors within the grade cap.
 - **Terrain:** natural ground = northward rise + authored hill (`bump`) + plateau + two
   octaves of seeded value noise (damped downtown, none on the port flat) + sea at the south and
   east edges.
@@ -186,9 +211,9 @@ After `docs/design/CITY.md`, scaled to ≈ 3.3 × 2.9 km (`MAP_LO..MAP_HI`), 5 m
   `Loop 9 north`, `Loop 9 west`; 3 precincts + helipad, 3 garages, 4 safehouses (incl.
   `Knob Observatory Lot`).
 
-950 lanes, 133 junctions (27 signalised), 3346 buildings, 2 grade separations, terrain
-681 × 611 vertices (−3 … 111 m); generation ≈ 0.12 s release (0.4 s debug), `CityMap::new`
-≈ 10 ms. `cargo run --release -p wp_world --example vesper_stats` prints grades, crest/sag g
+1042 lanes, 139 junctions (33 signalised), 3311 buildings, 14 grade separations (12 at
+interchanges, 2 for Route 40 North), ≈ 178 drivable lane-km, terrain 681 × 611 vertices
+(−3 … 111 m); generation ≈ 0.17 s release, `CityMap::new` ≈ 10 ms. `cargo run --release -p wp_world --example vesper_stats` prints grades, crest/sag g
 at the limit and banks per road.
 
 ## Traffic AI
@@ -345,6 +370,9 @@ Physical agents use the `wp_vehicle` stub (negligible); re-measure when prompt 0
 Port Vesper v2, same settings (`CITY=vesper_v2 just traffic-bench`): avg 0.061 ms, p99 0.16 ms
 per 60 Hz frame (0.27 ms avg with collision diagnostics); 10-min soaks × 3 seeds × {0 %, 5 %}
 aggressive: 0 civilian–civilian collisions (`tests/city_v2.rs`, ignored).
+With the Loop 9 freeway (2026-10-20, 3-min bench, no diagnostics, two runs each): avg 0.064–0.070
+ms vs 0.065–0.068 ms before, p99 0.38–0.41 ms vs 0.34 ms; 10-min benches (seeds 1, 2 at 0 %, seed
+1 at 5 % aggressive): 0 collisions, 0 stuck, 283–298 of 400 moving (296–305 before).
 
 ## Known gaps
 - Physical agents are `wp_vehicle` instances, but `wp_sim` does not yet create rigid bodies /
@@ -361,3 +389,9 @@ aggressive: 0 civilian–civilian collisions (`tests/city_v2.rs`, ignored).
   slopes; the testbed draws kinematic cars level).
 - City v2: `WorldQuery::surface_at` and `CityMap::ground_height` project onto whole lane
   polylines (≈ 0.5 µs on the curved city); terrain LOS samples every 8 m.
+- Loop 9: traffic picks exits at random (agents have no destinations), so who leaves at an
+  off-ramp is whoever drifted into the auxiliary lane. Auxiliary lanes run the whole way
+  between interchanges (up to ≈ 3 km on the north side) instead of dropping after an
+  acceleration length — a lane drop would need a yield-to-merge rule the traffic AI does not
+  have. Gore connectors report `Asphalt` to `surface_at` like any connector; the greybox draws
+  them in concrete. No median barrier.

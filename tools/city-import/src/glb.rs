@@ -487,9 +487,14 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
         asphalt.polygon(&poly, c[2] - 0.01);
     }
     for s in &map.segs {
-        if let SegKind::Connector { node, .. } = s.kind {
+        if let SegKind::Connector { node, from, to, .. } = s.kind {
             if net.nodes[node as usize].intersection.is_none() {
-                asphalt.ribbon(&s.pts, s.width * 0.5, s.width * 0.5, -0.005);
+                // Freeway gores (highway lane to highway lane) stay concrete like the lanes.
+                let highway = [from, to]
+                    .iter()
+                    .all(|l| net.lanes[*l as usize].kind == LaneKind::Highway);
+                let prim = if highway { &mut concrete } else { &mut asphalt };
+                prim.ribbon(&s.pts, s.width * 0.5, s.width * 0.5, -0.005);
             }
         }
     }

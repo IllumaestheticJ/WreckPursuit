@@ -86,8 +86,8 @@ fn spots() -> Vec<(&'static str, [f32; 2], Option<f32>)> {
     vec![
         ("hill road", [hollins[0], hollins[1]], Some(hollins[2])),
         ("loop", [loop_grid[0], loop_grid[1]], Some(loop_grid[2])),
-        ("deck", [-1517.0, 91.0], Some(1000.0)),
-        ("under the deck", [-1517.0, 91.0], Some(-1000.0)),
+        ("deck", [-1524.0, 91.0], Some(1000.0)),
+        ("under the deck", [-1524.0, 91.0], Some(-1000.0)),
         ("junction", [junction[0], junction[1]], None),
         ("hillside", [-1000.0, 900.0], None),
     ]

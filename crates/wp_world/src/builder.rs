@@ -8,6 +8,12 @@
 //!    lane connections,
 //! 4. creates intersections with a control rule (signals / priority / all-way stop) and a
 //!    fixed-time signal plan pairing opposite approaches into phases.
+//!
+//! Freeway gores (merges, diverges, lane gains and drops between one-way roads) are nodes
+//! tagged [`ControlHint::Merge`]: they are not junctions. Every arriving lane continues
+//! straight into the leaving lane in line with it, so ramps and auxiliary lanes join or leave
+//! the carriageway without anyone yielding. [`RoadSpec::shift`] lets a ramp's lane start beside
+//! the carriageway's outer lane even though its centreline ends at the gore node.
 
 use std::collections::BTreeSet;
 
@@ -83,6 +89,12 @@ pub enum ControlHint {
     Priority,
     /// Force no control.
     Uncontrolled,
+    /// Freeway gore between one-way roads (merge, diverge, lane gain or lane drop): not a
+    /// junction. Road ends are trimmed by [`BuildOptions::gore_setback_m`] only, each arriving
+    /// lane connects straight to the leaving lane most nearly in line with it, and no
+    /// [`Intersection`] is created (connectors are drawn like bends). Lay the lanes out so they
+    /// line up across the node (see [`RoadSpec::shift`]).
+    Merge,
 }
 
 /// A graph node to build.
@@ -140,6 +152,12 @@ pub struct RoadSpec {
     pub turn_lanes_fwd: Vec<TurnSet>,
     /// Explicit `turn:lanes` for b → a, left to right (empty = defaults).
     pub turn_lanes_bwd: Vec<TurnSet>,
+    /// Lateral shift of the lanes and the paved surface from the centreline at each
+    /// centreline point `[a, via.., b]` (m, + = right of a → b; empty = none). Meant for
+    /// one-way freeway pieces: an auxiliary-lane section keeps its left lanes in line with the
+    /// three-lane carriageway, and a ramp whose centreline ends at a gore node still has its
+    /// lane beside the carriageway's outer lane there.
+    pub shift: Vec<f32>,
 }
 
 impl RoadSpec {
@@ -159,6 +177,7 @@ impl RoadSpec {
             bus_lane: false,
             turn_lanes_fwd: Vec::new(),
             turn_lanes_bwd: Vec::new(),
+            shift: Vec::new(),
         }
     }
 }
@@ -178,6 +197,8 @@ pub struct BuildOptions {
     pub allow_rtor: bool,
     /// Extra junction setback for crosswalks, m.
     pub crosswalk_m: f32,
+    /// Setback of every road end at a [`ControlHint::Merge`] gore node, m.
+    pub gore_setback_m: f32,
 }
 
 impl Default for BuildOptions {
@@ -189,6 +210,7 @@ impl Default for BuildOptions {
             parking_width_m: 2.5,
             allow_rtor: true,
             crosswalk_m: 2.0,
+            gore_setback_m: 3.0,
         }
     }
 }
@@ -318,10 +340,11 @@ fn road_points(nodes: &[NodeSpec], r: &RoadSpec) -> Vec<V3> {
         .collect()
 }
 
-/// Bank (cross slope) at each point of `trimmed`, which starts `s0` metres into the road's
-/// full centreline `full` (interpolated by arc length; 0 without bank data).
-fn trimmed_bank(r: &RoadSpec, full: &[V3], trimmed: &[V3], s0: f32) -> Vec<f32> {
-    if r.bank.len() != full.len() {
+/// A per-point series of the road's full centreline `full` (bank, shift) at each point of
+/// `trimmed`, which starts `s0` metres into `full` (interpolated by arc length; 0 when the
+/// series is missing).
+fn trimmed_series(series: &[f32], full: &[V3], trimmed: &[V3], s0: f32) -> Vec<f32> {
+    if series.len() != full.len() {
         return vec![0.0; trimmed.len()];
     }
     let cum_full = geom::cumulative(full);
@@ -336,7 +359,7 @@ fn trimmed_bank(r: &RoadSpec, full: &[V3], trimmed: &[V3], s0: f32) -> Vec<f32> 
             };
             let len = (cum_full[i + 1] - cum_full[i]).max(1e-6);
             let t = ((s - cum_full[i]) / len).clamp(0.0, 1.0);
-            r.bank[i] + (r.bank[i + 1] - r.bank[i]) * t
+            series[i] + (series[i + 1] - series[i]) * t
         })
         .collect()
 }
@@ -409,7 +432,17 @@ pub fn build(nodes: &[NodeSpec], roads: &[RoadSpec], opt: &BuildOptions) -> Buil
     for (ni, list) in inc.iter().enumerate() {
         let deg = list.len();
         let mut sb = vec![0.0f32; deg];
-        if deg >= 3 {
+        if nodes[ni].control == Some(ControlHint::Merge) {
+            // Gore: lanes continue in line, no junction box (node radius stays 0).
+            for x in list {
+                if x.at_a {
+                    setback_a[x.road] = opt.gore_setback_m;
+                } else {
+                    setback_b[x.road] = opt.gore_setback_m;
+                }
+            }
+            continue;
+        } else if deg >= 3 {
             for i in 0..deg {
                 sb[i] = hw[list[i].road] + opt.crosswalk_m;
             }
@@ -466,14 +499,24 @@ pub fn build(nodes: &[NodeSpec], roads: &[RoadSpec], opt: &BuildOptions) -> Buil
     let mut road_lanes: Vec<RoadLanes> = vec![RoadLanes::default(); roads.len()];
     let mut surfaces: Vec<RoadSurface> = Vec::with_capacity(roads.len());
     for (ri, r) in roads.iter().enumerate() {
-        let trimmed = geom::trim_polyline(&pts[ri], setback_a[ri], setback_b[ri]);
+        let mut trimmed = geom::trim_polyline(&pts[ri], setback_a[ri], setback_b[ri]);
         let total = *geom::cumulative(&pts[ri]).last().unwrap();
         let s0 = if setback_a[ri] + setback_b[ri] < total - 0.5 {
             setback_a[ri]
         } else {
             total * 0.5 - 0.25
         };
-        let bank_fwd = trimmed_bank(r, &pts[ri], &trimmed, s0);
+        let bank_fwd = trimmed_series(&r.bank, &pts[ri], &trimmed, s0);
+        if r.shift.len() == pts[ri].len() {
+            // Shifted layout: lanes and surface are laid out around the shifted line, which
+            // lies on the banked surface plane (heights stay consistent).
+            let shift = trimmed_series(&r.shift, &pts[ri], &trimmed, s0);
+            let mut moved = geom::offset_polyline_by(&trimmed, |k| shift[k]);
+            for (k, p) in moved.iter_mut().enumerate() {
+                p[2] += bank_fwd[k] * shift[k];
+            }
+            trimmed = moved;
+        }
         let mut bank_rev = bank_fwd.clone();
         bank_rev.reverse();
         let mut rev = trimmed.clone();
@@ -604,7 +647,11 @@ pub fn build(nodes: &[NodeSpec], roads: &[RoadSpec], opt: &BuildOptions) -> Buil
         }
     };
     let mut new_conns: Vec<(LaneId, LaneConnection)> = Vec::new();
-    for list in inc.iter() {
+    for (ni, list) in inc.iter().enumerate() {
+        if nodes[ni].control == Some(ControlHint::Merge) {
+            wire_gore(list, &road_lanes, &lanes, &mut new_conns);
+            continue;
+        }
         let deg = list.len();
         for (ai, app) in list.iter().enumerate() {
             let in_lanes = incoming_of(app);
@@ -745,7 +792,7 @@ pub fn build(nodes: &[NodeSpec], roads: &[RoadSpec], opt: &BuildOptions) -> Buil
     let mut intersections = Vec::new();
     let mut signals = Vec::new();
     for (ni, list) in inc.iter().enumerate() {
-        if list.len() < 3 {
+        if list.len() < 3 || nodes[ni].control == Some(ControlHint::Merge) {
             continue;
         }
         let ranks: Vec<u8> = list.iter().map(|x| roads[x.road].class.rank()).collect();
@@ -792,6 +839,7 @@ pub fn build(nodes: &[NodeSpec], roads: &[RoadSpec], opt: &BuildOptions) -> Buil
             ControlHint::AllWayStop => IntersectionControl::AllWayStop,
             ControlHint::Priority => IntersectionControl::Priority,
             ControlHint::Uncontrolled => IntersectionControl::Uncontrolled,
+            ControlHint::Merge => unreachable!("gore nodes are not junctions"),
         };
         out_nodes[ni].intersection = Some(ix_id);
         intersections.push(Intersection {
@@ -810,6 +858,60 @@ pub fn build(nodes: &[NodeSpec], roads: &[RoadSpec], opt: &BuildOptions) -> Buil
         signals,
         road_lanes,
         surfaces,
+    }
+}
+
+/// Wire a freeway gore ([`ControlHint::Merge`]): every arriving lane continues straight into
+/// the leaving lane whose start lies most nearly in line with it (smallest sideways offset from
+/// the arriving lane's end direction, ahead of it). Lanes thereby keep their lateral position
+/// across merges, diverges, lane gains and lane drops.
+fn wire_gore(
+    list: &[Incidence],
+    road_lanes: &[RoadLanes],
+    lanes: &[Lane],
+    out: &mut Vec<(LaneId, LaneConnection)>,
+) {
+    let mut arriving: Vec<LaneId> = Vec::new();
+    let mut leaving: Vec<LaneId> = Vec::new();
+    for x in list {
+        let rl = &road_lanes[x.road];
+        let (i, o) = if x.at_a {
+            (&rl.bwd, &rl.fwd)
+        } else {
+            (&rl.fwd, &rl.bwd)
+        };
+        arriving.extend(i.iter().copied());
+        leaving.extend(o.iter().copied());
+    }
+    for l in arriving {
+        let pl = &lanes[l as usize].polyline;
+        let n = pl.len();
+        let end = geom::xy(pl[n - 1]);
+        let dir = geom::normalize(geom::sub(end, geom::xy(pl[n - 2])));
+        // Sideways offset of a leaving lane's start; lanes starting behind the end lose.
+        let offset = |o: LaneId| {
+            let rel = geom::sub(geom::xy(lanes[o as usize].polyline[0]), end);
+            let behind = if geom::dot(rel, dir) < 0.0 {
+                1.0e3
+            } else {
+                0.0
+            };
+            geom::cross(dir, rel).abs() + behind
+        };
+        let best = leaving
+            .iter()
+            .copied()
+            .filter(|o| lanes[*o as usize].kind.drivable())
+            .min_by(|a, b| offset(*a).total_cmp(&offset(*b)).then(a.cmp(b)));
+        if let Some(to) = best {
+            out.push((
+                l,
+                LaneConnection {
+                    to,
+                    turn: TurnKind::Straight,
+                },
+            ));
+        }
     }
 }
 
@@ -1012,6 +1114,52 @@ mod tests {
                 assert_eq!(l.connections[0].turn, TurnKind::UTurn);
             }
         }
+    }
+
+    /// A three-lane one-way freeway gains an auxiliary lane on the right at gore `g`, and the
+    /// auxiliary lane leaves as a one-lane ramp at gore `d`.
+    #[test]
+    fn gores_wire_lanes_in_line_without_junctions() {
+        let mut nodes = vec![
+            node(0.0, 0.0),
+            node(200.0, 0.0),
+            node(400.0, 0.0),
+            node(600.0, 0.0),
+            node(600.0, -60.0),
+        ];
+        nodes[1].control = Some(ControlHint::Merge);
+        nodes[2].control = Some(ControlHint::Merge);
+        let w = BuildOptions::default().highway_lane_width_m;
+        let main = RoadSpec::new(0, 1, RoadClass::Highway, 3, 0);
+        let mut aux = RoadSpec::new(1, 2, RoadClass::Highway, 4, 0);
+        aux.shift = vec![0.5 * w; 2];
+        let after = RoadSpec::new(2, 3, RoadClass::Highway, 3, 0);
+        let mut ramp = RoadSpec::new(2, 4, RoadClass::Highway, 1, 0);
+        // The ramp leaves parallel to the carriageway, its lane in the auxiliary-lane position
+        // (two lanes right of centre), then turns away.
+        ramp.via = vec![[460.0, 0.0]];
+        ramp.shift = vec![2.0 * w, 2.0 * w, 0.0];
+        let b = build(&nodes, &[main, aux, after, ramp], &BuildOptions::default());
+        assert!(b.intersections.is_empty(), "gores are not junctions");
+        let rl = &b.road_lanes;
+        for k in 0..3 {
+            let c = &b.lanes[rl[0].fwd[k] as usize].connections;
+            assert_eq!(c.len(), 1);
+            assert_eq!((c[0].to, c[0].turn), (rl[1].fwd[k], TurnKind::Straight));
+            let c = &b.lanes[rl[1].fwd[k] as usize].connections;
+            assert_eq!(c[0].to, rl[2].fwd[k]);
+        }
+        // The auxiliary lane (new on the right) feeds only the ramp.
+        let aux_lane = &b.lanes[rl[1].fwd[3] as usize];
+        assert_eq!(aux_lane.connections.len(), 1);
+        assert_eq!(aux_lane.connections[0].to, rl[3].fwd[0]);
+        // Lanes line up across both gores (start y = end y): no sideways jump.
+        for (from, to) in [(rl[0].fwd[2], rl[1].fwd[2]), (rl[1].fwd[3], rl[3].fwd[0])] {
+            let e = b.lanes[from as usize].polyline.last().unwrap()[1];
+            let s = b.lanes[to as usize].polyline[0][1];
+            assert!((e - s).abs() < 0.05, "lane jumps {e} -> {s}");
+        }
+        assert!((b.lanes[rl[1].fwd[3] as usize].polyline[0][1] + 2.0 * w).abs() < 0.05);
     }
 
     #[test]
