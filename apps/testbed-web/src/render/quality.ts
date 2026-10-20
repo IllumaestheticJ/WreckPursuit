@@ -11,6 +11,10 @@
 //         the resolution down while frames stay slow (and back up when they are fast again),
 //         so the game keeps real time (no slow motion) on weak machines.
 // MSAA is a WebGL context attribute: changing it needs a reload.
+//
+// Effects quality (`?fx=low|med|high`, else the stored choice `wp.fx`, else low on the low
+// profile and high otherwise) is separate: the crash effects (render/fx) read it at start and
+// `CrashFx.setQuality()` changes it live (settings screen).
 import type * as THREE from "three";
 import { store } from "../settings";
 
@@ -46,6 +50,25 @@ export function glRendererName(): string {
   } catch {
     return "";
   }
+}
+
+/** Crash effects quality (render/fx): particle caps, emission rates, skid-mark length and
+ * lifetime. Independent of the GPU profile, which only picks the default. */
+export type FxLevel = "low" | "med" | "high";
+const FX_KEY = "wp.fx";
+const FX_LEVELS: FxLevel[] = ["low", "med", "high"];
+
+/** The selected effects quality: URL `?fx=` first, then the stored choice, else `fallback`. */
+export function fxLevel(fallback: FxLevel): FxLevel {
+  const p = new URLSearchParams(location.search).get("fx") as FxLevel | null;
+  if (p && FX_LEVELS.includes(p)) return p;
+  const s = store.get(FX_KEY) as FxLevel | null;
+  return s && FX_LEVELS.includes(s) ? s : fallback;
+}
+
+/** Remember an effects quality (the settings screen applies it live via `CrashFx.setQuality`). */
+export function setFxLevel(level: FxLevel): void {
+  store.set(FX_KEY, level);
 }
 
 /** Static settings for a mode: MSAA, resolution scale range, draw distance (m). */
@@ -86,6 +109,8 @@ export class Quality {
   readonly drawDistanceM: number;
   /** Fraction of the rain streak pool drawn (WeatherView.rainFraction). */
   readonly rainFraction: number;
+  /** Crash effects quality at start (`?fx=`, stored, else low on the low profile, high otherwise). */
+  readonly fx: FxLevel;
   /** Resolution scale (1 = native, capped at device pixel ratio 2). */
   scale: number;
   private readonly profile: Profile;
@@ -105,6 +130,7 @@ export class Quality {
     this.drawDistanceM = this.profile.drawM;
     this.rainFraction = this.profile.rain;
     this.scale = this.profile.scale;
+    this.fx = fxLevel(this.profile.antialias ? "high" : "low");
   }
 
   /** Native pixel ratio cap. */

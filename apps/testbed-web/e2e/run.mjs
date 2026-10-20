@@ -11,7 +11,8 @@
 // within 300 m), gamepad + rebindable controls (e2e/gamepad.mjs), browser perf budgets
 // (e2e/perf_check.mjs, PERF=0 skips), parked cars and cones are drawn (every prop within 150 m
 // has exactly one drawn instance, near parked cars use the full mesh, a knocked parked car's drawn
-// pose follows the sim within 0.2 m), and (optionally) perf at 1/8/24 cars.
+// pose follows the sim within 0.2 m), crash effects (e2e/crash_fx.mjs: sparks, glass, debris,
+// smoke, skid marks, no steady-state allocation), and (optionally) perf at 1/8/24 cars.
 import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -826,5 +827,15 @@ const gp = spawnSync("node", [join(here, "gamepad.mjs")], {
 });
 process.stdout.write(gp.stdout);
 check(gp.status === 0, `gamepad + controls checks (e2e/gamepad.mjs)${gp.status === 0 ? "" : ": " + (gp.stderr || "").trim().split("\n").pop()}`);
+// 9. Crash effects (e2e/crash_fx.mjs, its own server and browser): a scripted head-on throws
+// sparks, glass and debris, a Simulation barrier crash smokes, a burnout lays skid marks, the
+// effects allocate nothing in steady state and switch quality live.
+const cfx = spawnSync("node", [join(here, "crash_fx.mjs")], {
+  cwd: root,
+  encoding: "utf8",
+  env: { ...process.env, FX_SHOTS: shots ? join(shots, "fx") : "" },
+});
+process.stdout.write(cfx.stdout);
+check(cfx.status === 0, `crash effects checks (e2e/crash_fx.mjs)${cfx.status === 0 ? "" : ": " + (cfx.stderr || "").trim().split("\n").pop()}`);
 console.log(failures ? `${failures} check(s) failed` : "all checks passed");
 process.exit(failures ? 1 : 0);

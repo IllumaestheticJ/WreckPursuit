@@ -6,6 +6,7 @@
 // stored replay, ?city=procedural_12x12 picks the city (default vesper_v2), ?chase=1 starts the
 // city chase (?chase=rain the rainy night), ?weather=heavy_rain picks the weather.
 // ?race=<id> starts a street race (&autopilot=1: the AI drives the player's car).
+// ?fx=low|med|high sets the crash effects quality (render/fx; default from ?gfx).
 import { loadWasm, sim, type DriverInput, type Scenario, type ScenarioResult } from "./wasm/sim";
 import { META_STRIDE, RACE_STRIDE, RI, RS, STATE_STRIDE, S, T, VEHICLE_KIND, W } from "./wasm/layout";
 import { POLICE_PAINT, TRAFFIC_PALETTE } from "./render/fleet";
@@ -33,6 +34,7 @@ import { RaceMarker, parseCourse } from "./race_marker";
 import { RealTimeMeter } from "./rtf";
 import { WeatherView } from "./render/weather";
 import { FrameProfiler } from "./perf";
+import { CrashFx } from "./render/fx";
 import * as THREE from "three";
 
 // v2: canonical simcli replay.bin (v1 held the retired WPR\x01 format).
@@ -114,6 +116,9 @@ async function main(): Promise<void> {
   // Parked cars and cones (playtest row 50): every physical prop is drawn (render/props.ts).
   const props = new PropView();
   scene.world.add(props.group);
+  // Crash effects (owner row 69): sparks, smoke, glass, skid marks, debris (render/fx/).
+  const fx = new CrashFx(scene.quality.fx);
+  scene.world.add(fx.group);
   // End-of-run panel (lead): capture / wreck → result + "Repair & continue" / "Restart".
   const runEndEl = document.createElement("div");
   runEndEl.id = "ui-run-end";
@@ -241,6 +246,7 @@ async function main(): Promise<void> {
     for (const v of app.views.values()) v.dispose();
     app.views.clear();
     clearDebris();
+    fx.reset();
     regions.clear();
     rests.clear();
     scene.clearContacts();
@@ -842,6 +848,12 @@ async function main(): Promise<void> {
     stepDebris(app.paused && !replay ? 0 : dt);
     hud.pushEvents(events, wi[W.tick]);
     prof.lap("events");
+    if (focusTel && focusRec >= 0) {
+      const fv = app.views.get(app.focus);
+      if (fv) fx.componentHealth(app.focus, focusTel, T.componentBase, fv.info.components);
+    }
+    fx.frame(events, cur, app.views, app.paused && !replay ? 0 : dt, wi[W.night]);
+    prof.lap("fx");
     {
       ui.frame(wi[W.tick], app.player, events, wi[W.hours], wi[W.mode] > 0.5 ? "Simulation" : "Arcade");
       map.frame(app.player, now);
@@ -1093,6 +1105,8 @@ async function main(): Promise<void> {
     props,
     /** Car mesh fetch + parse times (performance.now() ms) per car id. */
     meshTimings,
+    /** Crash effects: `fx.stats()`, `fx.setQuality("low" | "med" | "high")` (render/fx). */
+    fx,
   };
   requestAnimationFrame(frame);
   if (abandonedBust) openGarage(abandonedBust);

@@ -29,6 +29,10 @@ const LIMITS = {
   maxAllocKBPerFrame: 2400,
   // Every frame over 250 ms loses sim time (slow motion); measured 0–3 in 12 s.
   maxFramesOver250: 12,
+  // Crash effects (render/fx, "low" on this profile): CPU per frame incl. emitters and upload
+  // prep; measured ~0.05–0.1 ms (docs/integration/crash-fx.md). Draw calls: one per effect kind.
+  maxFxMsPerFrame: 0.5,
+  maxFxDrawCalls: 5,
 };
 
 let failures = 0;
@@ -72,7 +76,15 @@ for (const which of ["chase", "rain"]) {
   check(s.pointLights <= 1, `${tag}: ${s.pointLights} point light(s) in the scene (one shared siren light)`);
   check(s.cityTiles > 50 && s.cityTilesDrawn < s.cityTiles, `${tag}: city drawn as ${s.cityTiles} tiles, ${s.cityTilesDrawn} drawn this frame`);
   check(s.signalHeads === 0 || s.signalsDrawn < s.signalHeads, `${tag}: ${s.signalsDrawn} of ${s.signalHeads} signal heads drawn (near the camera)`);
-  check(s.programChurn === 0, `${tag}: no shader program re-resolve in steady frames (${s.programChurn} material version bumps over 3 renders)`);
+  if (s.fx) {
+    const fxMs = p.sections.fx ?? 0;
+    check(
+      fxMs <= LIMITS.maxFxMsPerFrame && s.fx.drawCalls <= LIMITS.maxFxDrawCalls,
+      `${tag}: crash effects [${s.fx.quality}] ${fxMs.toFixed(3)} ms/frame (≤ ${LIMITS.maxFxMsPerFrame}), ${s.fx.drawCalls} draw calls (≤ ${LIMITS.maxFxDrawCalls}); ` +
+        `${s.fx.sparks} sparks, ${s.fx.smoke} puffs, ${s.fx.shards} shards, ${s.fx.chips} chips, ${s.fx.skidSegments} skid segments this session`,
+    );
+  }
+  check(s.programChurn === 0, `${tag}: no shader program re-resolve in steady frames (${s.programChurn} material version bumps over 3 renders${s.churned?.length ? ": " + s.churned.join(", ") : ""})`);
 }
 
 console.log(failures === 0 ? "\nperf check passed" : `\n${failures} perf check(s) FAILED`);
