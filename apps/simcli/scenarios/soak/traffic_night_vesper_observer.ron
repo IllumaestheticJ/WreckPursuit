@@ -1,0 +1,33 @@
+// Night band (owner playtest row 76): the same Port Vesper v2 observer as
+// `world_traffic_soak_vesper_observer` (player car parked downtown on Lantern Row), at 02:00 and
+// the default traffic density. The time-of-day curve (`data/city/traffic_time.json`) puts the
+// small hours at ~15-20 % of the daytime peak (downtown nightlife a little more) and the
+// out-of-sight spawn boost is off, so the active area holds a small fraction of the 400-agent
+// cap. Ranges, not exact numbers.
+(
+    name: "world_traffic_night_vesper_observer",
+    seed: 5,
+    city: preset(name: "vesper_v2", seed: 1),
+    time_of_day_h: 2.0,
+    time_ratio: 1.0,
+    police_cars: false,
+    assists: ai,
+    entities: [
+        (
+            id: "observer",
+            car: "debug_sedan",
+            pos: (-150.0, 48.25, 9.6),
+            yaw: -1.5708,
+            // Parked on a gentle grade: handbrake on.
+            inputs: [(t_s: 0.0, input: (handbrake: 1.0))],
+        ),
+    ],
+    duration_s: 60.0,
+    expect: [
+        world_metric(name: "civilian_collisions", min: 0.0, max: 2.0),
+        world_metric(name: "traffic_agents_min", min: 10.0, max: 120.0),
+        world_metric(name: "traffic_agents_final", min: 10.0, max: 120.0),
+        world_metric(name: "traffic_moving_frac_min", min: 0.5, max: 1.0),
+        metric(name: "distance_m", min: 0.0, max: 0.5),
+    ],
+)

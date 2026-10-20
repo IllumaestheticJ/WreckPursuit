@@ -350,7 +350,8 @@ fn single_lane_one_way_followers_reverse_and_reroute() {
         })
         .expect("one-way lane");
     let b = blocker_on(&net, one_way, len_of(&net, one_way) * 0.7, false, false);
-    let mut w = World::new(net.clone(), cfg(1.5));
+    // 1.0 at noon on the round-13 curve (Residential 0.75) = the old 1.5 × 0.5: same cars.
+    let mut w = World::new(net.clone(), cfg(1.0));
     w.set_tracked_vehicles(&[b]);
     w.populate();
     let r = blocked_run(&mut w, b, &net.lanes[one_way].polyline, 240.0);

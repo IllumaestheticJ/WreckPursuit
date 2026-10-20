@@ -423,7 +423,8 @@ fn siren_unit_gets_past_six_queued_cars_within_ten_seconds() {
     // Wait for six cars queued at the red on a 1+1 approach to the crossroads, with room for the
     // unit 30 m behind the sixth.
     for seed in [1u64, 2, 3] {
-        let mut w = World::new(signal_grid(), cfg(3.0, seed));
+        // 2.0 at noon on the round-13 curve (Residential 0.75) = the old 3.0 × 0.5: same cars.
+        let mut w = World::new(signal_grid(), cfg(2.0, seed));
         w.populate();
         let net = w.network().clone();
         let lanes: Vec<usize> = (0..net.lanes.len())

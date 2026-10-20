@@ -1161,3 +1161,136 @@ Base: `origin/lead/round12`. Both are direct owner requests from playing preview
    main racing arterials clear), random 0–3 car-length gaps, data-driven table. Deterministic; the
    drawn-props system stays as is. Re-check scenarios that park near props.
 Re-bless only goldens your change moves; gate as usual; push ws/world.
+
+### Response from D (round 13) — night traffic curve + fewer parked cars (owner rows 76–77)
+Merged `origin/lead/round12` @ 363004c into `ws/world`.
+
+**1. Row 76 — night traffic.** `density::f_time` now reads a data table,
+`data/city/traffic_time.json` (`density::TimeCurve`, embedded with `include_str!`, so the browser
+build gets it too): one hourly curve relative to the daytime peak — 07–09 and 16–19 = 1.0,
+midday 0.75, 19:00 0.62 → 22:00 0.50, 23:00 0.33, 01–05 0.15–0.20 — times an hourly multiplier
+row per district. Core keeps nightlife until ~02:00 (×1.1–1.4 from 19:00 to 02:00) and then drops
+into the same trough (×0.8 at 03–04, so prompt 05's noon ≥ 5× 03:00 still holds: 6.25×);
+Industrial and Suburb ×0.6 at night, Port ×0.75, Residential ×0.85, Commercial follows the curve;
+every district is equal by day. Kinematic (LOD) and physical agents share the same zone targets,
+so the far fleet follows the curve too. **Out-of-sight boost capped at night:**
+`traffic::max_spawnable_boost(f)` — none at f ≤ 0.2 (`BOOST_OFF_AT_F_TIME`, the small hours),
+the full `MAX_SPAWNABLE_BOOST` (2×) at f ≥ 0.6 (`BOOST_FULL_AT_F_TIME`, every daytime hour, so
+the day soaks are unchanged by this), linear between; applied per zone. Despawns are unchanged
+(still never in sight).
+Measured, Port Vesper observer downtown (Lantern Row), default density, agents after 60 s
+(base = lead/round12 → this branch): 02:00 109 → 53, 23:00 215 → 144, 21:00 257 → 248,
+noon 384 → 302, 08:00 360 → 396 (cap 400). Against the cap-limited 08:00 peak: 02:00 13 %,
+23:00 36 %, 21:00 63 %, noon 76 %. Note: daytime *downtown* is now lower than before (the old
+Core curve was 1.0 at noon; the owner band says midday ≈ 75 %), while residential/suburb
+streets are busier at midday than before (0.45–0.5 → 0.75).
+New scenario `soak/traffic_night_vesper_observer.ron` (02:00, default density): 55–61 agents,
+0 civilian collisions, moving ≥ 0.6; gates 10–120 agents. Test
+`tests/world.rs::night_traffic_around_a_player_stays_at_the_curve` (grid, player in town:
+02:00 58 agents vs noon 394, count within the target). Soak ranges: none changed — the noon
+soaks still pass with the same gates.
+
+**2. Row 77 — parked cars.** `props::parked_cars` now follows `data/city/parking.json`
+(`props::ParkingTable`): parking lanes only (collector/local streets; arterials, highways,
+hill/bluff/service/port roads never had them), and no car within 15 m of either end of a parking
+lane (junction setback + crosswalk), 20 m of any POI (garages, police stations, race grids,
+safehouses — the lot entrances we have), 40 m of a tunnel portal, inside a covered span, or on a
+bridge deck (lane > 1.5 m above the terrain); no parking above 14 m/s. Cars come in clusters
+(chance per free 6.5 m slot by district: Core 0.28 / 1–3 cars, Commercial 0.13 / 2–5, Residential
+0.29 / 1–3, Industrial 0.08 / 2–5, Port 0.05 / 2–4, Suburb 0.20 / 1–2; ×0.5 on 30 mph collectors
+so the busier streets stay clearer), bumper gaps 0.8–1.6 m, then a random 0–3 car-length gap.
+Deterministic per seed (same RNG stream construction). **Port Vesper v2: 3,760 → 1,578 cars
+(42 %)** (simcli `props` on the Vesper observer, traffic seed 5: 3,846 → 1,697, 44 %).
+Test `props::tests::vesper_parked_cars_fewer_and_clear_of_junctions` gates 35–50 % of
+the old rule, junction / POI / tunnel clearances, no overlaps, determinism. The drawn-props
+path is unchanged (`wp_wasm` still reads `World::static_props`). Scenarios that park near props
+(`blocked_parked_player_*`, sidewalk-mount, tunnels, races) all pass.
+
+**Siren regression found and fixed (wp_world).** The new noon mix moved
+`city_siren_traffic_yields_*` from 7/9 to 3/9 seeds finishing. Two deadlocks in
+`traffic.rs`, both fixed:
+- a car still *pulling over* that had stopped (something ahead; a physical car only moves
+  sideways while rolling) never ran the 15 s give-up timer, which only ran once it was waiting
+  at the kerb; now it runs in both phases;
+- a yielding car may not enter a junction (round 12b), so a car at the stop line with the unit
+  stopped right behind it waited forever; now the hold applies only while the unit is moving —
+  once it has stopped behind the car, the car goes when it may (signal/gap rules unchanged).
+Seeds 1–9 after the fixes: still 3/9 finish (2, 4, 5); the remaining stalls are the round-12b
+geometry case — a pulled-over car a few cm short of its kerb offset and slightly angled reaches
+~0.1 m into simcli's 1.2 m keep-distance corridor — and seed 7 where a physical car cutting a
+turn (1.1 m off its path) clips another. The three siren scenarios moved to **seed 2** (passes:
+4 pull-overs, route done, 0 contacts; control 40 % of the route, passes on all 9 seeds).
+Proposal for the lead: either accept seed 2, or let the keep-distance corridor shrink to 1.05 m
+only beside a car flagged `yielding` (the round-12b attempt narrowed it for everyone and the
+siren-off control scraped).
+**Re-blessed:** `world_traffic_night_vesper_observer` (new), `city_siren_traffic_yields_arcade`,
+`city_siren_traffic_yields_sim`, `city_siren_traffic_no_siren` (seed changed). Every other
+golden my change moves (all city/traffic scenarios) was already stale on `lead/round12`
+(33 golden mismatches on the base, same list on this branch, none newly failing), so they are
+left for the lead's post-merge bless.
+**Tests changed for the hour:** `tests/blocked.rs` one-way ladder density 1.5 → 1.0 and
+`tests/siren.rs` grid queue density 3.0 → 2.0 — both Residential at noon, 0.5 → 0.75 on the new
+curve, so the same number of cars.
+**Changes outside wp_world:** `data/city/{traffic_time,parking}.json` (+ README), scenarios
+`soak/traffic_night_vesper_observer.ron` (new), `city/siren_traffic_*.ron` (seed + notes),
+goldens above.
+**Known gaps.** No bus stops, driveways or crosswalks between junctions exist in the network,
+so those clearances are not applied (crosswalks at junctions are covered by the 15 m lane-end
+rule); race routes are planned at run time, so "keep the racing arterials clear" is the
+no-parking rule on arterials plus half occupancy on collectors.
+**Contract change requests:** none.
+**Tests in other crates that this round's traffic moves (requests to their owners, not
+edited):** each passes on a clean `lead/round12` checkout and fails here; all are emergent race
+outcomes tuned on the old traffic. Restoring only the old `density.rs` makes the first two pass
+again, so they are the hour's traffic, not a bug I can see:
+- `wp_opponent` `tests/race.rs::wanted_ai_racer_flees_police_through_the_city` (noon, traffic
+  0.25): a racer other than the wanted one ends `Fled` (the test allows Racing/Busted).
+- `wp_wasm` `crash_replay_tests::race_crash_replays_with_the_judge_and_no_crash_on_the_grid`
+  (`grid_highway_sprint`, 23:00): `debug_park_in_front_of` + 14 m/s no longer produces the
+  "big crash" within 240 ticks.
+- `wp_wasm` `race_tests::short_sprint_with_ai_runs_to_results_and_pays_through_the_economy`
+  (same race): the player wins but the purse is 1,377 vs 5,031 advertised (outside the R5
+  0.75–1.34 band), i.e. the player is wanted at the finish (wanted purse multiplier); with only
+  the old curve restored it fails earlier (finishers / winner time) — so it moves with the
+  parked cars and with the hour.
+Suggested for A/G/F: re-measure against round 13 traffic (night races now run with ~half the
+cars) or pin these tests' traffic/parking (`parked_cars: false`, explicit `traffic_density`).
+*Gate (ws/world @ round 13, on lead/round12 363004c).* fmt, `clippy --workspace --all-targets
+-D warnings`, wasm32 build of `wp_wasm`: pass. `simcli run apps/simcli/scenarios` (release): 78
+pass, 2 fail — the same 2 as on lead/round12 with identical hashes
+(`police_tunnel_escape_founders_cut`, `…_control`). `simcli determinism` on the new/changed
+scenarios: ok. `cargo test --workspace --no-fail-fast`: all wp_world tests pass; failures:
+simcli `goldens_match` (33 goldens stale on the base too) and `wp_race`
+`race_picker::loop9_circuit` (fails on the base too), plus the three above.
+
+### Response from D (round 13 addendum) — row 93 "still too many parked cars"
+Row 77's table moved to the low end, with visible empty kerb. Changes in `data/city/parking.json`
+(+ `props::ParkingTable::{empty_stretch_chance, empty_stretch_m}`, serde-defaulted): collectors
+×0.3 (was ×0.5), and after 35 % of clusters a 30–80 m empty stretch instead of the 0–3
+car-length gap. Rules stay keyed to lane kind, speed limit, lane ends, POIs, tunnels and the
+terrain — no road or lane widths — so `lead/city-residential`'s wider roads need no change here
+(the car sits on the parking lane's centreline).
+
+| Port Vesper v2 (seed 1) | lead/round12 | round 13 (row 77) | + row 93 |
+|---|---|---|---|
+| Parked cars | 3,760 | 1,578 (42 %) | **1,219 (32 %)** |
+| Cars per km of kerb (45.7 km) | 82.2 | 34.5 | **26.7** |
+| — collectors (8.7 km) | 81.1 | — | **14.4** |
+| — local streets (37.0 km) | 82.5 | — | **29.5** |
+| Kerb with no car within 10 m (a ≥ 20 m empty stretch) | 7 % | — | **59 %** |
+
+(Counts from `props::tests::vesper_parked_cars_fewer_and_clear_of_junctions`, which now gates
+30–40 % of the old rule and ≥ 50 % empty kerb. No screenshots from this headless session; the
+per-km numbers above are the measure.)
+**Found while re-gating:** `world_traffic_soak_vesper` got 1 civilian collision with the new
+parked layout: a kinematic car stopped 0.3 m into its lane and made a blocked-lane change from
+standstill with its tail still in the junction, clipping a car turning through. Fix
+(`traffic.rs`): no blocked-lane change before the car is a full car length into the lane. Soak
+passes again (0 collisions).
+**Gate (ws/world after row 93):** fmt, clippy `--all-targets -D warnings`, wasm32 build: pass.
+Scenarios: 78 pass, 2 fail (the same Founders Cut pair as on lead/round12, identical hashes).
+`cargo test --workspace`: as in the round-13 gate above, plus `wp_race`
+`race_picker::lantern_checkpoint_draws_the_police`, which passed before row 93: one racer ends
+`Dnf(FinishWindow)` 45 m short of the finish (the test allows only Finished / Captured / Fled).
+Another emergent race outcome from the new kerb layout; request to G to re-measure (or allow
+FinishWindow) against round 13. Contract change requests: none.
