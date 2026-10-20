@@ -141,6 +141,24 @@ pub(crate) struct Snapshot {
     pub(crate) mode: DamageMode,
 }
 
+/// One stepped live tick as the detector sees it.
+pub(crate) struct PlayerTick<'a> {
+    /// Tick just stepped to.
+    pub(crate) now: u64,
+    /// The player's car.
+    pub(crate) player: EntityId,
+    /// Its mass, kg.
+    pub(crate) mass_kg: f32,
+    /// Its state before the step.
+    pub(crate) before: Option<&'a VehicleState>,
+    /// Its state after the step.
+    pub(crate) after: Option<&'a VehicleState>,
+    /// The tick's sim events.
+    pub(crate) events: &'a [SimEvent],
+    /// The player may crash now (no race countdown, not finished, not held by the run).
+    pub(crate) armed: bool,
+}
+
 /// One tick with player contacts.
 #[derive(Debug, Clone, Copy)]
 struct Sample {
@@ -243,18 +261,10 @@ impl CrashRecorder {
             .or_else(|| self.snapshots.front())
     }
 
-    /// Feed one stepped live tick. `armed` = the player may crash now (no countdown, not
-    /// finished, not held); `before` / `after` = the player's state around the step.
-    pub(crate) fn observe(
-        &mut self,
-        now: u64,
-        player: EntityId,
-        mass_kg: f32,
-        before: Option<&VehicleState>,
-        after: Option<&VehicleState>,
-        events: &[SimEvent],
-        armed: bool,
-    ) {
+    /// Feed one stepped live tick of the player's car.
+    pub(crate) fn observe(&mut self, o: &PlayerTick) {
+        let (now, player, mass_kg, events, armed) = (o.now, o.player, o.mass_kg, o.events, o.armed);
+        let (before, after) = (o.before, o.after);
         if self.disabled {
             return;
         }
@@ -403,68 +413,65 @@ mod tests {
         }
     }
 
+    /// Feed tick `now`: one contact, health `h0` → `h1`.
+    fn feed(r: &mut CrashRecorder, now: u64, h: (f32, f32), ev: SimEvent, armed: bool) {
+        let (b, a) = (state(h.0), state(h.1));
+        r.observe(&PlayerTick {
+            now,
+            player: EntityId(1),
+            mass_kg: 1300.0,
+            before: Some(&b),
+            after: Some(&a),
+            events: &[ev],
+            armed,
+        });
+    }
+
     #[test]
     fn hard_hit_is_a_crash_scrape_and_landing_are_not() {
-        let p = EntityId(1);
         // Scrape: lots of impulse over time, low closing speed.
         let mut r = CrashRecorder::default();
         for t in 1..=40 {
-            r.observe(
-                t,
-                p,
-                1300.0,
-                Some(&state(1.0)),
-                Some(&state(1.0)),
-                &[contact(1, 7, 400.0, 1.5, 0.0)],
-                true,
-            );
+            feed(&mut r, t, (1.0, 1.0), contact(1, 7, 400.0, 1.5, 0.0), true);
         }
         assert!(r.take().is_none(), "a scrape is not a crash");
         // Landing from a jump: fast vertical ground contact, no damage.
         let mut r = CrashRecorder::default();
-        r.observe(
+        feed(
+            &mut r,
             5,
-            p,
-            1300.0,
-            Some(&state(1.0)),
-            Some(&state(1.0)),
-            &[contact(1, u32::MAX, 9000.0, 9.0, 1.0)],
+            (1.0, 1.0),
+            contact(1, u32::MAX, 9000.0, 9.0, 1.0),
             true,
         );
         assert!(r.take().is_none(), "a clean landing is not a crash");
         // Head-on into a car at 15 m/s.
         let mut r = CrashRecorder::default();
-        r.observe(
+        feed(
+            &mut r,
             9,
-            p,
-            1300.0,
-            Some(&state(1.0)),
-            Some(&state(0.9)),
-            &[contact(1, 7, 9000.0, 15.0, 0.0)],
+            (1.0, 0.9),
+            contact(1, 7, 9000.0, 15.0, 0.0),
             true,
         );
         let m = r.take().expect("crash");
         assert_eq!((m.tick, m.other, m.side), (9, Some(7), ImpactSide::Front));
         // Cooldown: the next hit straight after is the same crash.
-        r.observe(
+        feed(
+            &mut r,
             20,
-            p,
-            1300.0,
-            Some(&state(0.9)),
-            Some(&state(0.8)),
-            &[contact(7, 1, 9000.0, 12.0, 0.0)],
+            (0.9, 0.8),
+            contact(7, 1, 9000.0, 12.0, 0.0),
             true,
         );
         assert!(r.take().is_none());
         // Not armed (countdown / finished): nothing.
         let mut r = CrashRecorder::default();
-        r.observe(
+        feed(
+            &mut r,
             9,
-            p,
-            1300.0,
-            Some(&state(1.0)),
-            Some(&state(0.9)),
-            &[contact(1, 7, 9000.0, 15.0, 0.0)],
+            (1.0, 0.9),
+            contact(1, 7, 9000.0, 15.0, 0.0),
             false,
         );
         assert!(r.take().is_none());

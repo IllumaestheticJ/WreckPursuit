@@ -11,7 +11,8 @@
 // within 300 m), gamepad + rebindable controls (e2e/gamepad.mjs), browser perf budgets
 // (e2e/perf_check.mjs, PERF=0 skips), parked cars and cones are drawn (every prop within 150 m
 // has exactly one drawn instance, near parked cars use the full mesh, a knocked parked car's drawn
-// pose follows the sim within 0.2 m), and (optionally) perf at 1/8/24 cars.
+// pose follows the sim within 0.2 m), instant crash replays (e2e/crash_replay.mjs), and
+// (optionally) perf at 1/8/24 cars.
 import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -826,5 +827,15 @@ const gp = spawnSync("node", [join(here, "gamepad.mjs")], {
 });
 process.stdout.write(gp.stdout);
 check(gp.status === 0, `gamepad + controls checks (e2e/gamepad.mjs)${gp.status === 0 ? "" : ": " + (gp.stderr || "").trim().split("\n").pop()}`);
+// 9. Instant crash replay (lead, row 70; e2e/crash_replay.mjs, its own server and browser): a
+// scripted crash offers the replay, accepting plays it and returns to live play with the same
+// tick and hash, auto mode and skip, no replays on benches.
+const cr = spawnSync("node", [join(here, "crash_replay.mjs")], {
+  cwd: root,
+  encoding: "utf8",
+  env: { ...process.env, CRASH_SHOTS: shots ? join(shots, "crash_replay") : "" },
+});
+process.stdout.write(cr.stdout);
+check(cr.status === 0, `crash replay checks (e2e/crash_replay.mjs)${cr.status === 0 ? "" : ": " + (cr.stderr || "").trim().split("\n").pop()}`);
 console.log(failures ? `${failures} check(s) failed` : "all checks passed");
 process.exit(failures ? 1 : 0);

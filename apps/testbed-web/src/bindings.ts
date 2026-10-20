@@ -27,7 +27,8 @@ export type ActionId =
   | "help"
   | "controls"
   | "mute"
-  | "repairBill";
+  | "repairBill"
+  | "replayCrash";
 
 /** How an action is read: `analog` 0..1 every frame, `held` on/off every frame, `edge` once
  * per press. */
@@ -77,6 +78,7 @@ export const ACTIONS: ActionDef[] = [
   { id: "controls", label: "controls (this panel)", kind: "edge" },
   { id: "mute", label: "audio mute", kind: "edge" },
   { id: "repairBill", label: "repair bill", kind: "edge" },
+  { id: "replayCrash", label: "crash replay: play / skip", kind: "edge" },
 ];
 
 /** Defaults. Look-back keeps V (driving); audio mute moved to F8 so the two no longer share V. */
@@ -102,6 +104,7 @@ export function defaultBindings(): Bindings {
       controls: ["F9"],
       mute: ["F8"],
       repairBill: ["KeyF"],
+      replayCrash: ["Enter", "NumpadEnter"],
     },
     // Standard mapping: 0 A, 1 B, 2 X, 3 Y, 4 LB, 5 RB, 6 LT, 7 RT, 8 View, 9 Menu, 10 L3, 11 R3,
     // 12–15 d-pad up/down/left/right.
@@ -125,6 +128,8 @@ export function defaultBindings(): Bindings {
       controls: [],
       mute: [],
       repairBill: [],
+      // D-pad up: R2 / RT is the throttle, and one control never drives two actions.
+      replayCrash: [{ button: 12 }],
     },
     padDeadzone: 0.12,
     padCurve: 1.0,

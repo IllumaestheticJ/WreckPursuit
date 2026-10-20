@@ -961,8 +961,15 @@ impl Session {
         let armed = !race_quiet && !self.held(player);
         let mass = self.car(player).map_or(1500.0, |c| c.def.mass_kg);
         let after = self.vehicle(player).map(|v| v.vehicle.state());
-        self.crash
-            .observe(tick, player, mass, before, after.as_ref(), events, armed);
+        self.crash.observe(&crate::crash_replay::PlayerTick {
+            now: tick,
+            player,
+            mass_kg: mass,
+            before,
+            after: after.as_ref(),
+            events,
+            armed,
+        });
     }
 
     /// Feed one tick's events to the player's economy (read-only on the sim) and settle a

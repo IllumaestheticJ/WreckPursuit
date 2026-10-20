@@ -108,6 +108,7 @@ Car data (`data/{cars,lattices,tires,materials,modes}`) is embedded at build tim
 | `replay_play` | `speed` | – | 0 = pause, max 16. |
 | `replay_status` | – | JSON or `null` | `{tick, end_tick, speed, verified_ticks, drift_count, drift_ticks[≤64], state_hash, recorded_final_hash, scenario, mode, contract_version, hash_spec}`. |
 | `replay_export_csv` | bytes, `entity`, `every_n_ticks` | CSV | Headless re-simulation; header `tick,t_s,<telemetry_names>`. |
+| `crash_take`, `crash_replay_start(seq)`, `crash_replay_stop`, `crash_replay_active`, `crash_tuning_json` / `_set`, `crash_detect_enable`, `crash_buffer_ticks` | | | Instant crash replay (lead): see `docs/integration/crash-replay.md`. |
 | `scenario_json` | – | JSON | The session's v2 scenario (entities incl. tick-0 spawns, barriers). |
 | `scenario_result` | – | JSON or `null` | Scripted sessions: `{name, done, tick, end_tick, pass, live_hash, matches_simcli, summary}`; `summary` is simcli's `RunSummary` (`expectations` / `pending`: `{expect, actual, passed}`). |
 
@@ -181,6 +182,7 @@ help lists the live bindings. Defaults (`src/bindings.ts`):
 | controls panel | F9 | – |
 | audio mute | **F8** (was V, which also held look-back) | – |
 | repair bill | F | – |
+| crash replay: play / skip (lead, `docs/integration/crash-replay.md`) | Enter | d-pad ↑ (R2 / RT is the throttle) |
 
 Fixed keys:
 
