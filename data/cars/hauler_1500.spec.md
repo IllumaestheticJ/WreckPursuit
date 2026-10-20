@@ -80,7 +80,7 @@ Peak **265 kW @ 5600 rpm**, **519 N·m @ 4100 rpm**. Idle 600 / redline 5800 / l
 
 ## Drivetrain
 
-6-speed automatic with lock-up torque converter, automatic-locking rear diff modelled as high-preload LSD; 4WD transfer case is a mod. Layout **RWD**; front diff: open; rear diff: clutch LSD, preload 150 N·m, power ramp 0.60, coast ramp 0.20. Torque converter: stall 2200 rpm, 2.0× at stall, couples 1:1 from 2600 rpm (class-typical for the gearbox). Clutch capacity 1.60 × peak torque = 830 N·m. Shift time 0.30 s.
+6-speed automatic with lock-up torque converter, automatic-locking rear diff modelled as high-preload LSD; 4WD transfer case is a mod. Layout **RWD**; front diff: open; rear diff: clutch LSD, preload 150 N·m, power ramp 0.60, coast ramp 0.20. Torque converter: stall 2200 rpm, 2.0× at stall, couples 1:1 from 2600 rpm (class-typical for the gearbox). Clutch capacity 1.60 × peak torque = 830 N·m. Shift time 0.60 s.
 
 | Gear | Ratio | Overall | km/h @ redline |
 |---|---|---|---|
@@ -136,8 +136,8 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 8.1 s | 206 km/h | 44.9 m | 0.65 g | — |
-| estimate | 8.0 s | 221 km/h | 45.1 m | 0.71 g | 440 |
+| sim | 8.0 s | 206 km/h | 44.9 m | 0.65 g | — |
+| estimate | 8.3 s | 221 km/h | 45.1 m | 0.71 g | 432 |
 
 ## Damage lattice (`data/lattices/hauler_1500.json`)
 

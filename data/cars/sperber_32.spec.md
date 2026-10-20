@@ -83,7 +83,7 @@ Peak **248 kW @ 7900 rpm**, **365 N·m @ 4900 rpm**. Idle 800 / redline 7900 / l
 
 ## Drivetrain
 
-6-speed manual, variable-locking clutch rear LSD. Layout **RWD**; front diff: open; rear diff: clutch LSD, preload 40 N·m, power ramp 0.50, coast ramp 0.40. Clutch capacity 1.40 × peak torque = 510 N·m. Shift time 0.22 s.
+6-speed manual, variable-locking clutch rear LSD. Layout **RWD**; front diff: open; rear diff: clutch LSD, preload 40 N·m, power ramp 0.50, coast ramp 0.40. Clutch capacity 1.40 × peak torque = 510 N·m. Shift time 0.42 s.
 
 | Gear | Ratio | Overall | km/h @ redline |
 |---|---|---|---|
@@ -141,8 +141,8 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 6.1 s | 272 km/h | 37.5 m | 0.95 g | — |
-| estimate | 5.6 s | 279 km/h | 35.2 m | 0.99 g | 613 |
+| sim | 6.3 s | 272 km/h | 37.6 m | 0.95 g | — |
+| estimate | 5.8 s | 279 km/h | 35.2 m | 0.99 g | 602 |
 
 ## Damage lattice (`data/lattices/sperber_32.json`)
 

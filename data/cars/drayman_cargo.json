@@ -44,7 +44,7 @@
     "diff_front": "Open",
     "diff_rear": "Open",
     "clutch_max_nm": 640.0,
-    "shift_time_s": 0.35,
+    "shift_time_s": 0.7,
     "torque_converter": {
       "stall_rpm": 2000.0,
       "stall_torque_ratio": 2.0,

@@ -81,7 +81,7 @@ Peak **216 kW @ 4050 rpm**, **560 N·m @ 3200 rpm**. Idle 650 / redline 5200 / l
 
 ## Drivetrain
 
-3-speed automatic with torque converter, open live rear axle. Layout **RWD**; front diff: open; rear diff: open. Torque converter: stall 2200 rpm, 2.1× at stall, couples 1:1 from 2800 rpm (class-typical for the gearbox). Clutch capacity 1.50 × peak torque = 840 N·m. Shift time 0.40 s.
+3-speed automatic with torque converter, open live rear axle. Layout **RWD**; front diff: open; rear diff: open. Torque converter: stall 2200 rpm, 2.1× at stall, couples 1:1 from 2800 rpm (class-typical for the gearbox). Clutch capacity 1.50 × peak torque = 840 N·m. Shift time 0.65 s.
 
 | Gear | Ratio | Overall | km/h @ redline |
 |---|---|---|---|
@@ -134,8 +134,8 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 8.2 s | 210 km/h | 53.0 m | 0.64 g | — |
-| estimate | 7.7 s | 220 km/h | 49.9 m | 0.71 g | 450 |
+| sim | 8.1 s | 210 km/h | 53.0 m | 0.64 g | — |
+| estimate | 7.9 s | 220 km/h | 49.9 m | 0.71 g | 443 |
 
 ## Damage lattice (`data/lattices/ironside_440.json`)
 
