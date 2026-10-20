@@ -1,0 +1,97 @@
+{
+  "id": "siren_v2",
+  "kind": "Siren",
+  "description": "Siren v2 (playtest row 82): synthesized electronic siren driver into a horn speaker \u2014 trapezoid square drive, horn-flare high-pass and resonances, soft clipping, PA band-limit \u2014 for wail / yelp / phaser / hi-lo, plus the whoop chirp and the air-horn blast. Cadence and per-unit spread come from audio_config.json via the voice's synth params.",
+  "cues": {
+    "siren/airhorn": {
+      "source": {
+        "Synth": {
+          "synth": "siren",
+          "params": {
+            "driver": 1.0,
+            "kind": 2.0,
+            "bright": 0.7
+          }
+        }
+      },
+      "gain": 1.0,
+      "looped": false,
+      "duration_s": 0.5
+    },
+    "siren/hilo": {
+      "source": {
+        "Synth": {
+          "synth": "siren",
+          "params": {
+            "driver": 1.0,
+            "kind": 0.0,
+            "bright": 0.55
+          }
+        }
+      },
+      "gain": 1.0,
+      "looped": true,
+      "release_s": 0.15
+    },
+    "siren/phaser": {
+      "source": {
+        "Synth": {
+          "synth": "siren",
+          "params": {
+            "driver": 1.0,
+            "kind": 0.0,
+            "bright": 0.7
+          }
+        }
+      },
+      "gain": 1.0,
+      "looped": true,
+      "release_s": 0.15
+    },
+    "siren/wail": {
+      "source": {
+        "Synth": {
+          "synth": "siren",
+          "params": {
+            "driver": 1.0,
+            "kind": 0.0,
+            "bright": 0.6
+          }
+        }
+      },
+      "gain": 1.0,
+      "looped": true,
+      "release_s": 0.15
+    },
+    "siren/whoop": {
+      "source": {
+        "Synth": {
+          "synth": "siren",
+          "params": {
+            "driver": 1.0,
+            "kind": 1.0,
+            "bright": 0.6
+          }
+        }
+      },
+      "gain": 0.9,
+      "looped": false,
+      "duration_s": 0.7
+    },
+    "siren/yelp": {
+      "source": {
+        "Synth": {
+          "synth": "siren",
+          "params": {
+            "driver": 1.0,
+            "kind": 0.0,
+            "bright": 0.65
+          }
+        }
+      },
+      "gain": 1.0,
+      "looped": true,
+      "release_s": 0.15
+    }
+  }
+}

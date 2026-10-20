@@ -316,6 +316,10 @@ pub struct SirenConfig {
     pub gain: f32,
     /// Horn gain.
     pub horn_gain: f32,
+    /// Siren v2: police-state cues, whoop / air horn, per-unit spread, siren limit and the
+    /// acoustic space (`crate::siren_unit`, `crate::siren_space`). Optional in the file.
+    #[serde(default)]
+    pub v2: crate::siren_unit::SirenV2Config,
 }
 
 /// Global audio tuning (`data/audio/audio_config.json`).
@@ -514,7 +518,7 @@ impl CarAudioDef {
             }
             .to_string(),
             siren: police.then(|| SirenDef {
-                pack: "siren_proc".to_string(),
+                pack: "siren_v2".to_string(),
                 default_mode: SirenMode::Auto,
             }),
         }
