@@ -188,6 +188,9 @@ pub struct CityMap {
     ix_grid: Grid,
     zone_grid: Grid,
     building_grid: Grid,
+    /// Bridge-deck pieces that occlude line of sight ([`crate::surface::deck_slabs`]).
+    decks: Vec<crate::surface::DeckSlab>,
+    deck_grid: Grid,
 }
 
 impl CityMap {
@@ -343,6 +346,17 @@ impl CityMap {
             let (blo, bhi) = bbox2(&b.footprint);
             building_grid.insert_box(blo, bhi, i as u32);
         }
+        let decks = crate::surface::deck_slabs(&net);
+        let mut deck_grid = Grid::new(lo, hi);
+        for (i, d) in decks.iter().enumerate() {
+            let pad = d.left_m.max(d.right_m);
+            let (a, b) = (geom::xy(d.a), geom::xy(d.b));
+            deck_grid.insert_box(
+                [a[0].min(b[0]) - pad, a[1].min(b[1]) - pad],
+                [a[0].max(b[0]) + pad, a[1].max(b[1]) + pad],
+                i as u32,
+            );
+        }
         let mut map = Self {
             zone_lane_km: vec![0.0; net.zones.len()],
             net,
@@ -354,6 +368,8 @@ impl CityMap {
             ix_grid,
             zone_grid,
             building_grid,
+            decks,
+            deck_grid,
         };
         // Drivable lane-km per zone (sampled every 10 m).
         for i in 0..nl {
@@ -673,7 +689,9 @@ impl CityMap {
     /// Buildings are extruded footprints from the ground to their height; the segment is
     /// blocked if any part of it inside a footprint is below the roof. Only buildings in grid
     /// cells the segment crosses are tested. With terrain, the ground occludes too (sampled
-    /// every 8 m; ends excluded). Roads, parked cars and traffic do not occlude.
+    /// every 8 m; ends excluded), and so do bridge decks with room for a car under them
+    /// ([`crate::surface::deck_slabs`]): from the air, the road under an overpass is hidden.
+    /// Other road surfaces, parked cars and traffic do not occlude.
     pub fn line_of_sight(&self, a: V3, b: V3) -> bool {
         if let Some(t) = &self.net.terrain {
             let len = geom::dist(geom::xy(a), geom::xy(b));
@@ -686,10 +704,24 @@ impl CityMap {
                 }
             }
         }
+        let mut cells = Vec::new();
+        if !self.decks.is_empty() {
+            self.deck_grid
+                .cells_on_segment(geom::xy(a), geom::xy(b), &mut cells);
+            let mut cands: Vec<u32> = cells
+                .iter()
+                .flat_map(|c| self.deck_grid.cells[*c].iter().copied())
+                .collect();
+            cands.sort_unstable();
+            cands.dedup();
+            if cands.iter().any(|&i| self.decks[i as usize].blocks(a, b)) {
+                return false;
+            }
+        }
         if self.net.buildings.is_empty() {
             return true;
         }
-        let mut cells = Vec::new();
+        cells.clear();
         self.building_grid
             .cells_on_segment(geom::xy(a), geom::xy(b), &mut cells);
         let mut cands: Vec<u32> = cells
@@ -702,6 +734,11 @@ impl CityMap {
             let bld = &self.net.buildings[i as usize];
             bld.footprint.len() >= 3 && segment_hits_building(a, b, &bld.footprint, bld.roof_z())
         })
+    }
+
+    /// Bridge-deck pieces that occlude line of sight (empty without terrain).
+    pub fn decks(&self) -> &[crate::surface::DeckSlab] {
+        &self.decks
     }
 }
 

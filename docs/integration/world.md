@@ -592,3 +592,16 @@ when convenient.
   SwiftShader; prop wake-ups); `vesper_v2.greybox.b64.txt` is 9.1 MB on the published link.
 **Contract change requests:** none needed (no `wp_contracts` change). Optional for v0.3.0: the
 `TrafficAgentSnapshot` pitch/roll above.
+
+
+## Lead helper note (P9 helicopter, 2026-10-20)
+
+`CityMap::line_of_sight` now treats **bridge decks** as occluders: `surface::deck_slabs(net)` —
+surface centreline pieces whose whole cross-section is ≥ `DECK_COVER_CLEARANCE_M` (3 m) above
+the terrain at both ends — each a thin plane over the paved width (bank ignored), indexed in a
+32 m grid like buildings; `DeckSlab::blocks(p, q)` solves the single crossing in closed form.
+Effect: a helicopter cannot see a car under Port Vesper's overpass or in the underpass; cars on
+the deck stay visible. Ground-level sight lines are unaffected (horizontal rays under a deck do not
+cross its plane). Tests: `surface::tests::*` (slab geometry), `vesper::tests::overpass_decks_hide_the_road_below_from_the_air`.
+A real tunnel (road under uncarved terrain) is already covered by the terrain test; CITY.md C5's
+`covered` lane flag is not needed for decks.
