@@ -65,6 +65,45 @@ engine `why`. Curb mass is trimmed ≈ 5 %. Source of truth: `roster_inputs.py`
   `wp_wasm`, `cargo test --workspace --release --no-fail-fast`. The only failures were the 3
   above, all now passing. No simcli golden changed.
 
+## Street-spec rebalance, police cars (2026-10-20, follow-up)
+
+The owner asked for the same treatment on the police cars. Same method: curb mass trimmed ≈ 5 %
+(2000 → 1900 kg, Bastion 2600 → 2470) and one torque scale factor per car. Each engine is now a
+supercharged / bigger-turbo build. Order kept: interceptor fastest, SUV slowest.
+
+| car | mass kg | kW | W/kg | 0-100 s | 0-160 s | Vmax km/h |
+|---|---|---|---|---|---|---|
+| sentinel_wolfhound | 2049 → 1949 | 272 → 468 | 133 → 240 | 5.55 → 3.98 | **13.15 → 7.85** | 244 → 311 |
+| sentinel_cruiser | 2048 → 1948 | 276 → 458 | 135 → 235 | 6.38 → 5.62 | **14.03 → 9.87** | 260 → 296 |
+| sentinel_bastion | 2638 → 2508 | 265 → 502 | 100 → 200 | 7.97 → 5.50 | **20.15 → 10.68** | 214 → 270 |
+
+- **Bastion at 200, not 240:** on 2.5 t, 240 W/kg would need > 1000 N·m from a truck V8. It is
+  the heavy rammer, not a chaser. Raise it in `roster_inputs.py` if wanted.
+- **Validation:** the police 0-100 bands moved to the street-spec figures. All three cars are now
+  in every band (the old Wolfhound and Bastion skidpad near-misses are gone). Barrier sweep
+  unchanged: 135/136, with the same Wolfhound offset near miss. Smoke sim deterministic.
+  Nameplate check clean.
+- **Durability (`ram-probe`, 3 cars × 2 modes × 4 ram kinds × 3 speeds):** health after each ram
+  moves ≤ 0.03. The disengage ram or total-loss ram moved by one ram in 6 of 72 cases, in both
+  directions. Effectively unchanged.
+- **For E (police) / lead — the speed cap is now what limits pursuits.** Straight-line catch
+  results (`pursuit_probe.py --chase`) did not change: the cruiser and the Wolfhound still catch
+  the traffic/cheap cars and no sport/muscle car. The cop cars now accelerate like the racers,
+  so the limit is `wp_police`'s pursuit speed `min(target × 1.10, cap)` with the 40 m/s
+  (144 km/h) day cap. Every street-spec car passes 144 km/h in 6.9-11.5 s and keeps going. If
+  pursuits should catch racers on open roads, the caps in `data/police/pursuit.toml` need
+  raising (not my file; not changed).
+- **Slide assist (for A):** `wp_vehicle::slide::slide_class` scales slide help with
+  power-to-weight from 120 to 250 W/kg. So every street-spec RWD car, the Bastion included
+  (0.71), now gets near-full help on keyboard/gamepad profiles. Its unit test
+  `class_favours_powerful_rwd` used the Bastion as its "slow RWD → floor" example; it now uses
+  `hauler_1500` (109 W/kg, test-only change).
+- **Goldens re-blessed** in a separate `[bless]` commit: 11 city/race/traffic scenarios that spawn
+  `sentinel_cruiser` as the city police car (golden_city_chase, golden_night_pursuit_escape,
+  opponent_{circuit_8x5, flee_police, open_roads_traffic, reverse_grid_2laps},
+  race_city_sprint{,_police}, world_traffic_soak{,_observer,_vesper}). Every scenario's own
+  range expectations still pass; only the state hashes moved.
+
 ## Response to lead feedback round 8 (2026-10-19)
 
 Merged `origin/main` at `d3effad` (contract v0.3.0) into `ws/cars`; no conflicts.

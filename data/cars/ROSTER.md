@@ -14,9 +14,9 @@
 | Lindwurm 4T | `lindwurm_4t` | Sport | AWD on-demand (≤ 50 % rear) | 1484 | 327 | 220 | 3.7 | 293 | 0.98 | 776 | 3 | 34,000 | sport |
 | Lucciola 350 | `lucciola_350` | Exotic | RWD | 1294 | 356 | 275 | 4.1 | 325 | 1.02 | 750 | 1 | 120,000 | sport |
 | Hauler 1500 | `hauler_1500` | Truck | RWD | 2438 | 265 | 109 | 8.0 | 221 | 0.71 | 440 | 5 | 32,000 | all_terrain |
-| Sentinel Cruiser | `sentinel_cruiser` | PoliceCruiser | RWD | 2048 | 276 | 135 | 6.2 | 267 | 0.91 | 559 | 5 | 30,000 | police_pursuit |
-| Sentinel Wolfhound | `sentinel_wolfhound` | PoliceInterceptor | AWD on-demand (≤ 50 % rear) | 2049 | 272 | 133 | 6.1 | 255 | 0.91 | 558 | 4 | 45,000 | police_pursuit |
-| Sentinel Bastion | `sentinel_bastion` | PoliceSuv | RWD | 2638 | 265 | 100 | 7.6 | 224 | 0.81 | 472 | 5 | 48,000 | police_pursuit |
+| Sentinel Cruiser | `sentinel_cruiser` | PoliceCruiser | RWD | 1948 | 458 | 235 | 5.6 | 308 | 0.92 | 613 | 5 | 30,000 | police_pursuit |
+| Sentinel Wolfhound | `sentinel_wolfhound` | PoliceInterceptor | AWD on-demand (≤ 50 % rear) | 1949 | 468 | 240 | 4.3 | 312 | 0.92 | 707 | 4 | 45,000 | police_pursuit |
+| Sentinel Bastion | `sentinel_bastion` | PoliceSuv | RWD | 2508 | 502 | 200 | 5.3 | 280 | 0.82 | 599 | 5 | 48,000 | police_pursuit |
 | Junkyard Beater | `junkyard_beater` | Beater | FWD | 1058 | 61 | 58 | 12.3 | 169 | 0.90 | 377 | 2 | 3,000 | street |
 | Tansy 1.3 | `tansy_13` | Compact | FWD | 1058 | 66 | 62 | 11.6 | 176 | 0.90 | 388 | 2 | 7,000 | street |
 | Drayman Cargo | `drayman_cargo` | Truck | RWD | 2481 | 207 | 83 | 10.9 | 207 | 0.74 | 381 | 4 | 20,000 | street |

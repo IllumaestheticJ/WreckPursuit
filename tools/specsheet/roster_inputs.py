@@ -30,7 +30,8 @@ FUEL_KG_PER_L = 0.745  # petrol
 # than the sim-cade benchmark the handling is tuned against, so each one carries a street
 # build at ≈ 240 W/kg (VehicleDef.mass_kg, i.e. with driver and half a tank): the stock-class
 # torque curve scaled by one factor (shape kept, stated in each `why`) and curb mass trimmed
-# ≈ 5 % (lightweight panels, stripped interior). Beaters, compacts, trucks and police are stock.
+# ≈ 5 % (lightweight panels, stripped interior). The police cars got the same treatment
+# (Wolfhound 240, Cruiser 235, Bastion 200 W/kg). Beaters, compacts and trucks are stock.
 STREET_SPEC_W_PER_KG = 240.0
 
 # Brake line pressure at full pedal with ABS cycling, bar. Modern boosted systems reach
@@ -685,7 +686,7 @@ CARS = [
         analog_of="2010s American full-size RWD police sedan, 5.7 L pushrod V8, pursuit package",
         era="2010s",
         profile="sedan",
-        curb_kg=2000.0,
+        curb_kg=1900.0,
         fuel_l=72,
         front_frac=0.55,
         wheelbase=3.05,
@@ -702,15 +703,17 @@ CARS = [
         extra_cda=0.05,
         lift=(0.10, 0.12),
         engine=dict(
-            desc="5.7 L OHV 16-valve V8, naturally aspirated, pursuit calibration (no cylinder deactivation)",
-            curve=[(800, 400), (1200, 440), (1600, 470), (2000, 490), (2500, 505), (3000, 515),
-                   (3500, 525), (4000, 533), (4400, 535), (4800, 528), (5200, 505), (5600, 470),
-                   (5900, 440)],
+            desc="5.7 L OHV 16-valve V8, pursuit calibration (no cylinder deactivation), street spec (positive-displacement supercharger)",
+            curve=[(800, 664), (1200, 731), (1600, 780), (2000, 814), (2500, 838), (3000, 855),
+                   (3500, 872), (4000, 885), (4400, 888), (4800, 877), (5200, 838), (5600, 780),
+                   (5900, 731)],
             idle=600, redline=5800, limit=5900, inertia=0.24, brake_frac=0.10,
             why=("Class-typical 2010s 5.7 L pushrod police V8 (~48 kW/L, 276 kW at 5200 rpm, "
                  "~535 N·m at 4400) per fleet spec-class data and owner dynos. Pursuit tuning "
                  "(round 6b): the V6 cruiser could not catch the traffic sedan to the 144 km/h "
-                 "pursuit cap; the V8 package is the period-correct fix."),
+                 "pursuit cap; the V8 package is the period-correct fix. Street spec (2026-10 "
+                 "rebalance, `STREET_SPEC_W_PER_KG`): curve scaled ×1.66 for ≈ 235 W/kg, so the "
+                 "cruiser keeps pace with the street-spec racers; curb trimmed 2000 → 1900 kg."),
         ),
         trans=dict(
             desc="5-speed automatic with torque converter, mild rear LSD (pursuit package, V8 final drive)",
@@ -760,7 +763,7 @@ CARS = [
         analog_of="2010s American AWD police pursuit sedan, 3.5 L twin-turbo V6",
         era="2010s",
         profile="sedan",
-        curb_kg=2000.0,
+        curb_kg=1900.0,
         fuel_l=70,
         front_frac=0.56,
         wheelbase=2.87,
@@ -777,12 +780,12 @@ CARS = [
         extra_cda=0.05,
         lift=(0.08, 0.10),
         engine=dict(
-            desc="3.5 L DOHC V6, twin turbo, direct injection",
-            curve=[(800, 260), (1200, 330), (1600, 400), (2000, 455), (2500, 495), (3000, 495),
-                   (3500, 495), (4000, 495), (4500, 490), (5000, 490), (5500, 472), (6000, 420),
-                   (6300, 380)],
+            desc="3.5 L DOHC V6, twin turbo, direct injection, street spec (larger turbos, pursuit map)",
+            curve=[(800, 447), (1200, 568), (1600, 688), (2000, 783), (2500, 852), (3000, 852),
+                   (3500, 852), (4000, 852), (4500, 843), (5000, 843), (5500, 812), (6000, 723),
+                   (6300, 654)],
             idle=650, redline=6000, limit=6300, inertia=0.18, brake_frac=0.10,
-            why="Class-typical 2010s 3.5 TT V6 (~78 kW/L), boost plateau from 2500 rpm per fleet spec-class data and owner dynos.",
+            why="Street spec (2026-10 rebalance, `STREET_SPEC_W_PER_KG`): the class-typical 2010s 3.5 TT V6 curve (~78 kW/L, boost plateau from 2500 rpm per fleet spec-class data and owner dynos) scaled ×1.72 for ≈ 240 W/kg — the interceptor matches the sport/muscle pack; curb trimmed 2000 → 1900 kg.",
         ),
         trans=dict(
             desc="6-speed automatic with torque converter, on-demand AWD tuned for launches (90 % front until the fronts slip 2 %, then up to 50 % rear), open diffs",
@@ -823,7 +826,7 @@ CARS = [
         analog_of="2010s American full-size police SUV, 5.3 L pushrod V8, body-on-frame, RWD",
         era="2010s",
         profile="suv",
-        curb_kg=2600.0,
+        curb_kg=2470.0,
         fuel_l=98,
         front_frac=0.53,
         wheelbase=2.95,
@@ -840,11 +843,11 @@ CARS = [
         extra_cda=0.05,
         lift=(0.20, 0.15),
         engine=dict(
-            desc="5.3 L OHV pushrod V8, naturally aspirated, police calibration",
-            curve=[(800, 360), (1200, 400), (1600, 440), (2000, 465), (2500, 485), (3000, 500),
-                   (3500, 512), (4100, 519), (4500, 510), (5000, 485), (5600, 452), (6000, 410)],
+            desc="5.3 L OHV pushrod V8, police calibration, street spec (positive-displacement supercharger)",
+            curve=[(800, 681), (1200, 757), (1600, 833), (2000, 880), (2500, 918), (3000, 946),
+                   (3500, 969), (4100, 982), (4500, 965), (5000, 918), (5600, 856), (6000, 776)],
             idle=600, redline=5800, limit=6000, inertia=0.25, brake_frac=0.12,
-            why="Same class engine as the Hauler (2010s 5.3 L truck V8).",
+            why="Street spec (2026-10 rebalance, `STREET_SPEC_W_PER_KG`): the Hauler's class engine (2010s 5.3 L truck V8) scaled ×1.89 for ≈ 200 W/kg — below the 240 target on purpose: it is the heavy rammer, and 240 W/kg on 2.5 t would need > 1000 N·m; curb trimmed 2600 → 2470 kg.",
         ),
         trans=dict(
             desc="6-speed automatic with torque converter, open rear diff",
