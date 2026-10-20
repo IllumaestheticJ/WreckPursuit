@@ -199,7 +199,9 @@ impl Default for SpinGrip {
     /// keep the data's curve).
     fn default() -> Self {
         Self {
-            b0: 6.99,
+            // 6.99 → 7.5 (round12 merge: the probe tilt fix moved the knife-edge clip-1 hold
+            // into a spin; 7.5 holds it at 43°, sd 4; docs/integration/tyre-slip.md).
+            b0: 7.5,
             b2: 1.627,
             c: 0.85,
             p: 8.0,

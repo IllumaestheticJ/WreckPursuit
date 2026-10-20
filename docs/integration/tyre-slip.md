@@ -135,6 +135,17 @@ drift *within* μ (so lifting frees grip) — which needs the hold rebuilt on a 
 (less drive floor, more rear side force share), i.e. a re-tune of the spin model around
 `spin_ellipse` 1. That is a bigger step than a preset; proposed as the next round.
 
+### Re-tune after the round12 / grip-balance merge (93b9a13d)
+
+The probe tilt fix (on by default) moved the knife-edge clip-1 hold into a spin
+(`tests/tyre_slip.rs`: band 0.90 s, spun). `tyre_slip -- clip1` (the test's own run, `SWEEP` list)
+over `spin_b0` 6.5–9.5 × `spin_b2` 1.5 / 1.627 × `spin_c` 0.8–0.9 and `fx_slide`, `rear_relax`:
+only `spin_b0` 7.5 holds (43°, sd 4, 3.58 s in 30–45°; 8.0: 3.37 s; everything else spins or
+leaves the band). **`SpinGrip` default `b0` 6.99 → 7.5.** Robust set (grip_balance robust):
+VR + drift best 25 → 25 / 27, VR + balance new 17 → 19, VR on the data 15 → 12. Goldens: the same
+8 failures as the merged base (spin model is lab-only). Still a knife edge (8.0 already drops
+under the test's 3.5 s): the friction-budget re-tune proposed above is the real fix.
+
 ### debug_coupe ("slide transition is very violent", owner via lead)
 
 Transition tool with `CARS=<id> INIT=lift` (0.2 / 0.4 s lift, gaps 0.05 / 0.15 / 0.3 s, 6 flicks
