@@ -127,8 +127,32 @@ Status 2026-10-20: **`world_rec` shipped** (the network now reaches kenney.nl an
   `e2e/audio.mjs` checks all files decode in Chromium and the head-on crash plays recorded
   samples (38 recorded, 0 fallback).
 
-Still procedural: engines (`engine_rec_*` need clean steady-rpm loops — none found at CC0 quality
-yet), sirens, radio, surfaces, suspension, plastic scrape, body rattle.
+### Recorded engines and sirens (2026-10-20, follow-up)
+- `engine_rec_i4` (8 cars), `engine_rec_v8` (7), `engine_rec_i6` (inline sixes and the V6
+  police car, 4) and `siren_rec` (3 police cars) — every car def and `CarAudioDef::fallback`
+  now use them; the `*_proc` packs stay as `fallback_pack`.
+- Sources (CC0, pages checked): an engine-bay four under load + idle, a four revving interior
+  and outside, a cross-plane muscle-car V8, a hot-rod V8, a turbo six on a chassis dyno, three
+  backfire recordings (exhaust pops), one studio-recorded electronic police siren (wail, yelp,
+  high-speed sweep) and a two-tone hi-lo. Rows in each pack's `CREDITS.md`.
+- Engine layers: cut where the recording passes the layer's rpm, firing frequency tracked
+  (`tools/audio-packs/pitch.py`, harmonic-sum salience + Viterbi) and resampled to a constant rpm,
+  looped over whole engine cycles. Verified: each loop's tracked firing frequency is within 1 %
+  of its layer, seams below the 99th-percentile sample step. Limiter = top layer flattened to
+  the redline + 12–16 Hz fuel-cut gate (the director plays the limiter at pitch 1, no code change).
+- Sirens: `audio_config.json` cadences are now **measured from the recordings** (wail 5.047 s
+  775→1575 Hz rise 0.45, yelp 0.379 s 770→1530, phaser 0.075 s 950→1450, hi-lo 0.997 s 584/425),
+  loops are whole cycles from phase 0 and the backend starts them at `phase × cycle_s`; the
+  procedural fallback follows the same cadence. Unit tests use their own cadence fixture.
+- Backend: a looped voice that started on its fallback synth before its file decoded now
+  switches to the recording with a 30 ms crossfade (before, it stayed procedural until re-played).
+  e2e: 105 files decode, everything after loading plays recorded, the 2 early loops upgrade.
+- Car layer spacing (`data/cars` idle/redline): ≤ 1500 rpm for most cars (1750 on the
+  highest-revving four). V8 recordings top out at ≈ 3350 rpm, so V8s near the limiter play the
+  top layer pitched up to 1.6× — the main candidate for a better source.
+
+Still procedural: turbo whistle, blow-off, supercharger whine, radio, surfaces, suspension,
+plastic scrape, body rattle.
 
 ## Perf numbers
 | Measurement | Machine | Native | Browser | Budget |
@@ -148,11 +172,11 @@ yet), sirens, radio, surfaces, suspension, plastic scrape, body rattle.
 - TTS via `speechSynthesis` bypasses the Web Audio radio EQ (browser limitation); squelch and
   static go through it. Recorded line packs will use the EQ.
 - No music player; the Music bus exists and is ducked by the scanner.
-- Engine / siren / radio / surface packs are procedural placeholders: recognisably engine-like
-  (firing frequency, harmonics, cross-plane burble, limiter chop), not realistic. Collisions,
-  glass, debris, scrapes, squeal and horns are recorded (`world_rec`).
-- `world_rec` cut points and gains come from onset/decay analysis, not listening; tune by ear in
-  `tools/audio-packs/world_rec.json`.
+- Engines, sirens, collisions, glass, debris, scrapes, squeal and horns are recorded; radio,
+  surfaces and forced-induction sounds are procedural placeholders. V8s above ≈ 3350 rpm are
+  pitch-stretched recordings.
+- Recorded cut points and gains come from onset/decay/pitch analysis, not listening; tune by ear in
+  `tools/audio-packs/<pack>.json`.
 
 ## Lead feedback
 (Written by the integration lead: failing tests, expected vs actual.)
