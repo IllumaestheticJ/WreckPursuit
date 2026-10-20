@@ -208,6 +208,7 @@ The reference game's car names are kept out of this repo (rule 9); cars are labe
 |---|---|---|---|---|---|---|---|
 | **REF-RWD-A** (#49, clips 4–5) | full-size RWD muscle | 462 hp (345 kW) @ 4800 rpm | 585 lb-ft (793 N·m) @ 3200 rpm | 3018 lb (1369 kg) | 5 | RWD | A, rating 337 |
 | **REF-RWD-B** (#44, clip 2) | midsize RWD sports | 340 hp (254 kW) @ 6400 rpm | 299 lb-ft (405 N·m) @ 4200 rpm | 2308 lb (1047 kg) | 6 | RWD | A, rating 324 |
+| **REF-FWD-C** (#96, clip 3) | compact FWD touring | 162 hp (121 kW) @ 7900 rpm | 132 lb-ft (179 N·m) @ 5800 rpm | 2164 lb (982 kg) | 5 | FWD | C, rating 164 |
 
 Both reference RWD cars sit at about **245–252 W/kg**, and both are light for their class. Our nearest analogues are heavier and less torquey:
 
@@ -215,5 +216,6 @@ Both reference RWD cars sit at about **245–252 W/kg**, and both are light for 
 |---|---|---|---|---|
 | rampart_50 (vs REF-RWD-A) | 1753 kg | 319 kW | 529 N·m | ~182 |
 | lucciola_350 (vs REF-RWD-B) | 1345 kg | 278 kW | 363 N·m | ~207 |
+| kestrel_ts (vs REF-FWD-C, ~123 W/kg) | 1453 kg | 181 kW | 335 N·m | ~125 (similar ratio, but ~470 kg heavier) |
 
 That is a likely part of the feel gap: the reference cars have more torque per kg, so they light up the rears and power-oversteer far more readily. The parity suite should measure the reference specs directly. One way is a parity-only test car JSON with the reference numbers, kept out of the player roster or given analogue names, so physics behaviour can be compared like for like.
