@@ -5,7 +5,7 @@
   "analog_of": "1980s compact FF sedan, 1.6 L SOHC I4, 4-speed manual, high mileage (tired engine, sagging springs, worn dampers, old tyres)",
   "body_size_m": [1.66, 4.3, 1.38],
   "mass_kg": 1048.2,
-  "front_weight_frac": 0.62,
+  "front_weight_frac": 0.6,
   "wheelbase_m": 2.5,
   "track_front_m": 1.43,
   "track_rear_m": 1.42,
@@ -57,7 +57,7 @@
       "steerable": true,
       "max_steer_rad": 0.634,
       "ackermann_frac": 0.7,
-      "camber_rad": -0.0035,
+      "camber_rad": -0.0175,
       "toe_rad": 0.0,
       "caster_rad": 0.0349
     },
@@ -70,7 +70,7 @@
       "steerable": true,
       "max_steer_rad": 0.634,
       "ackermann_frac": 0.7,
-      "camber_rad": -0.0035,
+      "camber_rad": -0.0175,
       "toe_rad": 0.0,
       "caster_rad": 0.0349
     },
@@ -84,7 +84,7 @@
       "max_steer_rad": 0.0,
       "ackermann_frac": 0.0,
       "camber_rad": -0.0087,
-      "toe_rad": 0.0017,
+      "toe_rad": 0.0,
       "caster_rad": 0.0
     },
     {
@@ -97,52 +97,52 @@
       "max_steer_rad": 0.0,
       "ackermann_frac": 0.0,
       "camber_rad": -0.0087,
-      "toe_rad": 0.0017,
+      "toe_rad": 0.0,
       "caster_rad": 0.0
     }
   ],
   "suspension": [
     {
-      "spring_n_per_m": 16200.0,
-      "damper_bump_ns_per_m": 630.0,
-      "damper_rebound_ns_per_m": 940.0,
+      "spring_n_per_m": 15600.0,
+      "damper_bump_ns_per_m": 610.0,
+      "damper_rebound_ns_per_m": 920.0,
       "travel_m": 0.16,
       "preload_m": 0.01,
-      "arb_n_per_m": 2700.0,
+      "arb_n_per_m": 2900.0,
       "bump_stop_n_per_m": 120000.0
     },
     {
-      "spring_n_per_m": 16200.0,
-      "damper_bump_ns_per_m": 630.0,
-      "damper_rebound_ns_per_m": 940.0,
+      "spring_n_per_m": 15600.0,
+      "damper_bump_ns_per_m": 610.0,
+      "damper_rebound_ns_per_m": 920.0,
       "travel_m": 0.16,
       "preload_m": 0.01,
-      "arb_n_per_m": 2700.0,
+      "arb_n_per_m": 2900.0,
       "bump_stop_n_per_m": 120000.0
     },
     {
-      "spring_n_per_m": 11400.0,
-      "damper_bump_ns_per_m": 410.0,
-      "damper_rebound_ns_per_m": 620.0,
+      "spring_n_per_m": 12100.0,
+      "damper_bump_ns_per_m": 430.0,
+      "damper_rebound_ns_per_m": 640.0,
       "travel_m": 0.17,
       "preload_m": 0.01,
-      "arb_n_per_m": 1600.0,
+      "arb_n_per_m": 1200.0,
       "bump_stop_n_per_m": 120000.0
     },
     {
-      "spring_n_per_m": 11400.0,
-      "damper_bump_ns_per_m": 410.0,
-      "damper_rebound_ns_per_m": 620.0,
+      "spring_n_per_m": 12100.0,
+      "damper_bump_ns_per_m": 430.0,
+      "damper_rebound_ns_per_m": 640.0,
       "travel_m": 0.17,
       "preload_m": 0.01,
-      "arb_n_per_m": 1600.0,
+      "arb_n_per_m": 1200.0,
       "bump_stop_n_per_m": 120000.0
     }
   ],
   "brakes": {
     "max_torque_front_nm": 1360.0,
     "max_torque_rear_nm": 430.0,
-    "bias_front": 0.59,
+    "bias_front": 0.558,
     "handbrake_rear_nm": 600.0
   },
   "steering": {
