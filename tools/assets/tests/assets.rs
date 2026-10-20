@@ -185,6 +185,41 @@ fn front_crumples_and_follows_the_crushed_front() {
     }
 }
 
+/// Rear-ended at 50 km/h: both rear quarters buckle outward with a fold line, their tail edges
+/// sit on the crushed rear structure, and the trunk lid (where there is one) folds.
+#[test]
+fn rear_quarters_crumple_and_follow_the_crushed_tail() {
+    let root = repo_root();
+    for car in ["debug_sedan", "sentinel_cruiser", "vireo_xs"] {
+        let def = load_car(&root, car).unwrap();
+        let mesh = load_mesh(&mesh_path(&root, car)).unwrap();
+        let mut c = crash::rear_ended(car, &def.lattice, &mesh, 50.0, "Arcade", 8);
+        let pose = Pose {
+            lattice: &def.lattice,
+            rest: &c.rest,
+            nodes: &c.now,
+            states: &c.states,
+        };
+        for (i, p) in mesh.parts.iter().enumerate() {
+            let quarter = matches!(p.name.as_str(), "quarter_rl" | "quarter_rr");
+            // Hatch tailgates have every node on the hinge line, so no trunk binding there.
+            if !quarter && (p.name != "trunk" || p.fold.is_none()) {
+                continue;
+            }
+            assert!(p.fold.is_some(), "{car}/{}: no crumple binding", p.name);
+            let (moved, detail) = render_detail(p, &pose, Some(&mut c.memory[i]));
+            let q = measure(p, &moved, &detail, &pose);
+            eprintln!("{car}/{}: {q:?}", p.name);
+            let min_fold = if quarter { 0.05 } else { 0.08 };
+            assert!(q.max_fold_m >= min_fold, "{car}/{}: {q:?}", p.name);
+            assert!(q.fold_lines >= 1, "{car}/{}: {q:?}", p.name);
+            // Hatch quarters (vireo_xs) reach 23 cm past the lattice's last node row; their tail
+            // edge is averaged against lead nodes at other heights, so allow 5 cm there.
+            assert!(q.lead_gap_m <= 0.05, "{car}/{}: floats {q:?}", p.name);
+        }
+    }
+}
+
 /// The crumple must not depend on the browser's frame rate: a bumper that crushes and lets go
 /// between two frames still counts (its hanging pose is rotated back to the crushed one).
 #[test]

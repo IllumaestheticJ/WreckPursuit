@@ -2,7 +2,7 @@
 //
 //   top-left      speedo + input panel (.left-col), then the race HUD stacked under it
 //   top-centre    chase readout, the weather line under it (between the side columns, wrapping
-//                 if it must), pursuit banner
+//                 if it must), the police radio strip under those, pursuit banner
 //   top-right     damage silhouette, components, regions, event feed (.right-col), capped so it
 //                 ends above the minimap / telemetry
 //   bottom-right  minimap (UI kit)
@@ -116,6 +116,32 @@ export class HudLayout {
       Object.assign(wx.style, { top: `${Math.round(top)}px`, transform: "none", whiteSpace: "normal", maxWidth: `${Math.max(120, hi - lo)}px`, boxSizing: "border-box" });
       const w = wx.getBoundingClientRect().width;
       wx.style.left = `${Math.round(Math.max(lo, Math.min(hi - w, vw / 2 - w / 2)))}px`;
+    }
+
+    // Police radio strip (row 79): under the chase readout and weather line, centred between
+    // the side columns; ends above the pursuit banner and the minimap.
+    const strip = q("#radio-strip");
+    if (strip instanceof HTMLElement) {
+      const chase = q(".wp-chase-col");
+      let top = MARGIN + 4;
+      if (shown(chase)) top = chase.getBoundingClientRect().bottom + GAP;
+      if (shown(wx)) top = Math.max(top, wx.getBoundingClientRect().bottom + GAP);
+      const lo = shown(left) ? left.getBoundingClientRect().right + GAP : MARGIN;
+      const hi = shown(right) ? right.getBoundingClientRect().left - GAP : vw - MARGIN;
+      const width = Math.max(160, Math.min(520, hi - lo));
+      let bottom = vh - MARGIN;
+      const banner = q("#pursuit-banner");
+      if (shown(banner)) {
+        const b = banner.getBoundingClientRect();
+        if (b.top > top) bottom = Math.min(bottom, b.top - GAP);
+      }
+      if (mm && mm.left < vw / 2 + width / 2) bottom = Math.min(bottom, mm.top - GAP);
+      Object.assign(strip.style, {
+        top: `${Math.round(top)}px`,
+        left: `${Math.round(Math.max(lo, Math.min(hi - width, vw / 2 - width / 2)))}px`,
+        width: `${Math.round(width)}px`,
+        maxHeight: `${Math.max(0, Math.floor(bottom - top))}px`,
+      });
     }
   }
 }

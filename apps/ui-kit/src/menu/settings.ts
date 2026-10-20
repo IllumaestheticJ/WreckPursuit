@@ -50,6 +50,9 @@ export interface GameSettings {
   /** m; 0 = from the quality level. */
   drawDistanceM: number;
   volumes: Volumes;
+  /** Speak police radio lines (browser speech; owner playtest row 79). Off = squelch, static
+   * and the radio strip's text only. The volume is the Police radio slider. */
+  radioVoice: boolean;
   assists: AssistSettings;
   damageMode: "Arcade" | "Simulation";
   units: SpeedUnits;
@@ -69,6 +72,7 @@ export function defaultGameSettings(developer = true): GameSettings {
     gfx: "auto",
     drawDistanceM: 0,
     volumes: { master: 0.8, engine: 1, effects: 1, police: 1, ambience: 0.5 },
+    radioVoice: true,
     assists: { abs: true, tcs: false, esc: false, autoGears: false, steerHelp: true, countersteer: 0.5 },
     damageMode: "Arcade",
     units: "kmh",
@@ -98,6 +102,7 @@ export function normalizeSettings(raw: unknown, base: GameSettings): GameSetting
       police: clamp01(v.police, base.volumes.police),
       ambience: clamp01(v.ambience, base.volumes.ambience),
     },
+    radioVoice: bool(r.radioVoice, base.radioVoice),
     assists: {
       abs: bool(a.abs, base.assists.abs),
       tcs: bool(a.tcs, base.assists.tcs),

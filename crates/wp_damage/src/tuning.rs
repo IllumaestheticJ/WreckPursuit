@@ -173,7 +173,7 @@ impl Default for DamageTuning {
             arcade_settle_fraction: 0.3,
             arcade_settle_s: 20.0,
             arcade_alignment_scale: 0.09,
-            arcade_structural_health_scale: 0.5,
+            arcade_structural_health_scale: 0.42,
             arcade_failed_steer_ratio: 0.5,
         }
     }

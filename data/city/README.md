@@ -9,6 +9,13 @@ Owned by workstream 05. Per city `<id>`:
 | `<id>.greybox.glb` | Greybox mesh (roads, junction boxes, sidewalks + kerbs, district ground or terrain, buildings; city v2 adds sea, retaining walls, bridge decks/piers), glTF 2.0, +Y up, metres, 16-bit indices. World (x, y, z) = glTF (x, −z, y). |
 | `<id>.greybox.b64.txt` | The same `.glb` bytes base64-encoded: the published testbed build cannot serve binary files and falls back to this (`apps/testbed-web/src/scene.ts`). Written together with the `.glb`. |
 
+City-independent tables (embedded into `wp_world` at build time):
+
+| File | What |
+|---|---|
+| `traffic_time.json` | Civilian density vs time of day (hourly curve + per-district hourly multipliers), `wp_world::density::TimeCurve` (owner row 76). |
+| `parking.json` | Kerbside parked-car rules and per-district clustering, `wp_world::props::ParkingTable` (owner row 77). |
+
 Format spec: `crates/wp_world/README.md`. Coordinates: metres, +X east, +Y north, +Z up.
 
 - `procedural_12x12.*` — procedural grid city (flat), regenerate with `just city`

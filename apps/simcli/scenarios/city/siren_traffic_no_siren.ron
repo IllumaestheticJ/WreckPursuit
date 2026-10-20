@@ -9,7 +9,7 @@
 // siren flag, damage mode Arcade).
 (
     name: "city_siren_traffic_no_siren",
-    seed: 7,
+    seed: 2,
     city: file("city/procedural_12x12.road.json"),
     mode: Arcade,
     time_of_day_h: 12.0,
@@ -34,8 +34,9 @@
     ],
     duration_s: 45.0,
     expect: [
-        // Measured (seed 7): nobody pulls over; the car is held up behind traffic (52 % of the
-        // route vs 100 % with the siren on), 0 contacts.
+        // Measured (seed 2, round 13; same seed as the siren-on runs): nobody pulls over; the
+        // car is held up behind traffic (40 % of the route vs 100 % with the siren on), 0
+        // contacts. Passes on seeds 1-9.
         world_metric(name: "civilian_collisions", min: 0.0, max: 0.0),
         world_metric(name: "traffic_siren_yields", min: 0.0, max: 0.0),
         metric(name: "route_progress", min: 0.0, max: 0.8),
