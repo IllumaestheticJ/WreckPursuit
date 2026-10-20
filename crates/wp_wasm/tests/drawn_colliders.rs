@@ -4,15 +4,23 @@
 //! Drives a city chase and a free drive in Port Vesper v2 headless (a seeded wander at full
 //! throttle that hits kerbs, walls, buildings and traffic, plus a parked car knocked every
 //! few seconds), collects every hard static-world contact (`SimEvent::Contact` with the world,
-//! > 2,000 N·s in one tick) and checks each lies within 1 m of something the browser draws:
-//! the city greybox the testbed loads (`data/city/vesper_v2.greybox.glb`, parsed here: roads,
-//! sidewalks, kerbs, buildings, walls, bridges, terrain) or a prop from `props_static()`
-//! (parked cars, cones; drawn by `apps/testbed-web/src/render/props.ts`).
+//! over 2,000 N·s in one tick), finds the collider it hit (the nearest of the sim's static city
+//! colliders, rebuilt with `wp_sim::city_ground_colliders`, and the props at their current
+//! sim poses) and checks that collider is drawn where the contact is:
+//! * a prop must be in `props_static()` (drawn by `apps/testbed-web/src/render/props.ts`, which
+//!   the e2e test checks) and the contact within 1 m of its box;
+//! * a city collider (terrain, road, sidewalk / kerb, building, deck rail) must have the city
+//!   greybox the testbed loads (`data/city/vesper_v2.greybox.glb`, parsed here) within 1 m of
+//!   the point of it that was hit.
+//!
+//! A second test samples every building and deck rail collider (not just the ones the drive
+//! reached) against the greybox.
 //!
 //! `cargo test -p wp_wasm --test drawn_colliders -- --nocapture` prints the per-kind tally.
 
 use std::collections::BTreeMap;
 
+use rapier3d::prelude::{Collider, Group, ShapeType, Vector};
 use simcli::scenario::CitySpec;
 use wp_contracts::{DamageMode, EntityId, SimEvent, VehicleInput, WORLD_ENTITY};
 use wp_math::Rng;
@@ -249,20 +257,86 @@ fn nearest_prop(s: &Session, half: &[V3], p: V3) -> f32 {
     best
 }
 
+/// Kind of static city collider (`wp_sim::city_ground_colliders` order and shapes).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Kind {
+    Terrain,
+    Road,
+    SidewalkKerb,
+    Building,
+    DeckRail,
+    Other,
+}
+
+fn kind_of(c: &Collider) -> Kind {
+    match c.shape().shape_type() {
+        ShapeType::HeightField => Kind::Terrain,
+        // Roads are in every group; sidewalks and kerbs in their own.
+        ShapeType::TriMesh if c.collision_groups().memberships == Group::ALL => Kind::Road,
+        ShapeType::TriMesh => Kind::SidewalkKerb,
+        ShapeType::ConvexPolyhedron => Kind::Building,
+        ShapeType::Cuboid => Kind::DeckRail,
+        _ => Kind::Other,
+    }
+}
+
+/// The sim's static city colliders, rebuilt from the map exactly as `Sim::set_world` does.
+struct CityColliders {
+    cols: Vec<(Collider, Kind, V3, V3)>,
+}
+
+impl CityColliders {
+    fn new(map: &wp_world::CityMap) -> Self {
+        let (cols, _) = wp_sim::city_ground_colliders(map).expect("a city with terrain");
+        let cols = cols
+            .into_iter()
+            .map(|c| {
+                let bb = c.compute_aabb();
+                let k = kind_of(&c);
+                (c, k, bb.mins.to_array(), bb.maxs.to_array())
+            })
+            .collect();
+        Self { cols }
+    }
+
+    /// Nearest collider to `p` within `reach`: distance, kind, and the point on it.
+    fn nearest(&self, p: V3, reach: f32) -> Option<(f32, Kind, V3)> {
+        let mut best: Option<(f32, Kind, V3)> = None;
+        for (c, k, lo, hi) in &self.cols {
+            let out: f32 = (0..3)
+                .map(|i| (lo[i] - p[i]).max(p[i] - hi[i]).max(0.0).powi(2))
+                .sum::<f32>()
+                .sqrt();
+            if out > reach || best.is_some_and(|b| out > b.0) {
+                continue;
+            }
+            let proj = c
+                .shape()
+                .project_point(c.position(), Vector::from_array(p), true);
+            let q = proj.point.to_array();
+            let d = len(sub(q, p));
+            if d <= reach && best.is_none_or(|b| d < b.0) {
+                best = Some((d, *k, q));
+            }
+        }
+        best
+    }
+}
+
 #[derive(Default)]
 struct Tally {
     hard: usize,
-    /// Hard contacts per what they were nearest to (greybox material or "prop").
+    /// Hard contacts per collider hit ("prop" or a city collider kind).
     by_kind: BTreeMap<String, usize>,
-    /// Hard contacts only a prop explains (invisible before props were drawn).
-    prop_only: usize,
-    invisible: Vec<(V3, f32, String, f32, f32)>,
+    /// Hard contacts with nothing drawn within 1 m of what was hit: point, N·s, what, gap m.
+    invisible: Vec<(V3, f32, String, f32)>,
     max_ns: f32,
 }
 
 /// Drive `sc` for `seconds` with a seeded wander; knock a parked car every `knock_s`.
 fn sweep(name: &str, sc: simcli::Scenario, seconds: f32, knock_s: f32, drawn: &Drawn) -> Tally {
     let mut s = Session::new(sc, false).unwrap();
+    let city = CityColliders::new(s.sim().world().map());
     let list = props::static_list(s.sim());
     let half: Vec<V3> = list
         .chunks(PROP_STRIDE)
@@ -339,34 +413,35 @@ fn sweep(name: &str, sc: simcli::Scenario, seconds: f32, knock_s: f32, drawn: &D
             }
             tally.hard += 1;
             tally.max_ns = tally.max_ns.max(impulse_ns);
-            let (dg, mat) = drawn.nearest(point, DRAWN_WITHIN_M + 1.0);
+            // What was hit: the nearest prop box or city collider (the point lies on it).
             let dp = nearest_prop(&s, &half, point);
-            let kind = if dp <= dg {
-                "prop".to_string()
-            } else {
-                mat.to_string()
+            let world = city.nearest(point, 3.0);
+            let (what, gap) = match world {
+                Some((dw, kind, q)) if dw < dp => {
+                    // A city collider: the greybox must draw it where it was hit.
+                    let (dg, mat) = drawn.nearest(q, DRAWN_WITHIN_M + 1.0);
+                    (format!("{kind:?} (greybox {mat})"), dg)
+                }
+                // A prop: always in props_static() (and so drawn); the point is on its box.
+                _ if dp.is_finite() => ("prop".to_string(), dp),
+                _ => ("unknown".to_string(), f32::INFINITY),
             };
-            *tally.by_kind.entry(kind).or_default() += 1;
-            if dp <= DRAWN_WITHIN_M && dg > DRAWN_WITHIN_M {
-                tally.prop_only += 1;
-            }
-            if dg.min(dp) > DRAWN_WITHIN_M {
-                tally
-                    .invisible
-                    .push((point, impulse_ns, mat.to_string(), dg, dp));
+            let key = what.split(' ').next().unwrap_or("?").to_string();
+            *tally.by_kind.entry(key).or_default() += 1;
+            if gap > DRAWN_WITHIN_M {
                 eprintln!(
-                    "{name}: t={t:.1}s invisible hard contact {impulse_ns:.0} N·s at ({:.1}, {:.1}, {:.1}): greybox {dg:.2} m ({mat}), prop {dp:.2} m",
+                    "{name}: t={t:.1}s hard contact {impulse_ns:.0} N·s at ({:.1}, {:.1}, {:.1}) with {what}: nothing drawn within {gap:.2} m",
                     point[0], point[1], point[2]
                 );
+                tally.invisible.push((point, impulse_ns, what, gap));
             }
         }
     }
     eprintln!(
-        "{name}: {} hard static contacts (max {:.0} N·s); nearest drawn: {:?}; {} explained only by a prop; {} invisible",
+        "{name}: {} hard static contacts (max {:.0} N·s); hit: {:?}; {} with nothing drawn",
         tally.hard,
         tally.max_ns,
         tally.by_kind,
-        tally.prop_only,
         tally.invisible.len()
     );
     tally
@@ -409,22 +484,98 @@ fn every_hard_static_contact_is_near_something_drawn() {
     }
 }
 
+/// Corner points of a collider worth checking against the greybox: convex hull vertices
+/// (buildings) or box corners (rails).
+fn sample_points(c: &Collider) -> Vec<V3> {
+    let pose = c.position();
+    if let Some(h) = c.shape().as_convex_polyhedron() {
+        return h.points().iter().map(|p| (*pose * *p).to_array()).collect();
+    }
+    if let Some(b) = c.shape().as_cuboid() {
+        let e = b.half_extents;
+        let mut out = Vec::new();
+        for sx in [-1.0, 1.0] {
+            for sy in [-1.0, 1.0] {
+                // Top edge corners: the part a car's body hits.
+                out.push((*pose * Vector::new(sx * e.x, sy * e.y, e.z)).to_array());
+            }
+        }
+        return out;
+    }
+    Vec::new()
+}
+
 #[test]
-fn the_reported_crash_site_has_a_parked_car() {
-    // Playtest row 50: 66,800 N·s static contact at ~150 km/h around (-367.8, 172.1) in the
-    // city chase. A parked car (now drawn) is within reach of that point.
+fn every_building_and_rail_collider_is_drawn() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/city");
+    let drawn = Drawn::load(&dir.join("vesper_v2.greybox.glb"));
+    let s = Session::new(
+        scenario::city_chase("debug_sedan", DamageMode::Arcade),
+        false,
+    )
+    .unwrap();
+    let city = CityColliders::new(s.sim().world().map());
+    let mut checked: BTreeMap<Kind, (usize, usize, f32)> = BTreeMap::new();
+    for (c, k, _, _) in &city.cols {
+        if !matches!(k, Kind::Building | Kind::DeckRail) {
+            continue;
+        }
+        let e = checked.entry(*k).or_insert((0, 0, 0.0));
+        e.0 += 1;
+        let worst = sample_points(c)
+            .into_iter()
+            .map(|p| drawn.nearest(p, DRAWN_WITHIN_M + 1.0).0)
+            .fold(0.0f32, f32::max);
+        e.2 = e.2.max(worst.min(99.0));
+        if worst > DRAWN_WITHIN_M {
+            e.1 += 1;
+            if e.1 <= 5 {
+                let t = c.translation();
+                eprintln!(
+                    "{k:?} at ({:.1}, {:.1}, {:.1}): a corner is {worst:.2} m from the greybox",
+                    t.x, t.y, t.z
+                );
+            }
+        }
+    }
+    eprintln!("colliders vs greybox (count, undrawn, worst corner gap m): {checked:?}");
+    for (k, (n, bad, _)) in &checked {
+        assert!(*n > 0);
+        assert_eq!(*bad, 0, "{bad} of {n} {k:?} colliders are not drawn");
+    }
+}
+
+#[test]
+fn the_reported_crash_site_is_drawn() {
+    // Playtest row 50: a 66,800 N·s static contact at ~150 km/h around (-367.8, 172.1) in the
+    // city chase. Whatever collider is there is drawn within 1 m.
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/city");
+    let drawn = Drawn::load(&dir.join("vesper_v2.greybox.glb"));
     let s = Session::new(
         scenario::city_chase("lindwurm_4t", DamageMode::Arcade),
         false,
     )
     .unwrap();
+    let map = s.sim().world().map();
+    let city = CityColliders::new(map);
     let list = props::static_list(s.sim());
-    let near = list
+    let near_prop = list
         .chunks(PROP_STRIDE)
         .map(|r| ((r[1] + 367.8).powi(2) + (r[2] - 172.1).powi(2)).sqrt())
         .fold(f32::INFINITY, f32::min);
-    assert!(
-        near < 4.0,
-        "nearest prop to the crash site is {near:.1} m away"
-    );
+    let z = map.ground_height([-367.8, 172.1], None);
+    for dz in [0.3, 0.8, 1.5] {
+        let p = [-367.8, 172.1, z + dz];
+        let (dw, kind, q) = city
+            .nearest(p, 6.0)
+            .expect("a collider near the crash site");
+        let (dg, mat) = drawn.nearest(q, 3.0);
+        eprintln!(
+            "crash site +{dz} m: nearest collider {kind:?} {dw:.2} m away, greybox {mat} {dg:.2} m from it; nearest prop {near_prop:.1} m"
+        );
+        assert!(
+            dg <= DRAWN_WITHIN_M,
+            "{kind:?} at the crash site is not drawn ({dg:.2} m)"
+        );
+    }
 }

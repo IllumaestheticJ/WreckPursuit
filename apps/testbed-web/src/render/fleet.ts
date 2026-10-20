@@ -190,7 +190,7 @@ export function proxyGeoms(info: CarModelInfo): Geoms {
 }
 
 /** One set of instanced meshes (paint / detail / tail, optional light bar). */
-class InstancedCar {
+export class InstancedCar {
   readonly paint: THREE.InstancedMesh;
   readonly detail: THREE.InstancedMesh;
   readonly tail: THREE.InstancedMesh;
@@ -223,7 +223,11 @@ class InstancedCar {
   }
 
   add(m: THREE.Matrix4, paint: THREE.Color, tail: THREE.Color, bar: THREE.Color | null): void {
-    const i = this.count++;
+    this.put(this.count++, m, paint, tail, bar);
+  }
+
+  /** Write instance `i` (matrix and colours) without touching the others. */
+  put(i: number, m: THREE.Matrix4, paint: THREE.Color, tail: THREE.Color, bar: THREE.Color | null): void {
     for (const mesh of this.meshes) mesh.setMatrixAt(i, m);
     this.paint.setColorAt(i, paint);
     this.tail.setColorAt(i, tail);
@@ -247,7 +251,8 @@ class InstancedCar {
   }
 }
 
-interface FleetMaterials {
+/** Materials shared by every instanced car (fleet and parked props look the same). */
+export interface FleetMaterials {
   paint: THREE.Material;
   detail: THREE.Material;
   lamp: THREE.Material;
@@ -302,7 +307,7 @@ class FleetModel {
 export class Fleet {
   readonly group = new THREE.Group();
   private readonly models = new Map<string, FleetModel>();
-  private readonly mats: FleetMaterials = {
+  readonly mats: FleetMaterials = {
     paint: new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, metalness: 0.25, roughness: 0.55 }),
     detail: new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.6 }),
     lamp: new THREE.MeshBasicMaterial({ color: 0xffffff }),

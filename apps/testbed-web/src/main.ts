@@ -15,6 +15,7 @@ import { SceneView } from "./scene";
 import { VehicleView } from "./vehicle_view";
 import { clearDebris, meshTimings, panelEvents, preloadCarMeshes, stepDebris } from "./render/panels";
 import { LodDirector } from "./render/lod";
+import { PropView } from "./render/props";
 import { CameraRig, CAMERA_MODES, cameraLabel, type CameraMode } from "./cameras";
 import { Hud } from "./hud";
 import { TelemetryPlots } from "./telemetry";
@@ -98,6 +99,9 @@ async function main(): Promise<void> {
   // Traffic / police at every LOD: instanced fleet + hand-over to full views (render/lod.ts).
   const lod = new LodDirector();
   scene.world.add(lod.fleet.group);
+  // Parked cars and cones (playtest row 50): every physical prop is drawn (render/props.ts).
+  const props = new PropView();
+  scene.world.add(props.group);
   // End-of-run panel (lead): capture / wreck → result + "Repair & continue" / "Restart".
   const runEndEl = document.createElement("div");
   runEndEl.id = "ui-run-end";
@@ -237,6 +241,7 @@ async function main(): Promise<void> {
     void scene.setCity(cityId || null);
     if (cityId && CITY_IDS.includes(cityId)) citySel.value = cityId;
     scene.signals.setHeads(sim.signalHeads());
+    props.set(sim.propsStatic(), lod.models, lod.fleet.mats);
     ($("city") as HTMLInputElement).checked = city;
     ($("mode") as HTMLSelectElement).value = modeName();
     const first = app.views.get(app.player);
@@ -814,6 +819,7 @@ async function main(): Promise<void> {
     audio.update(rig.camera, events, app.paused && !replay ? 0 : dt, app.focus);
     // Traffic and police after the camera moved: the fleet picks mesh detail by camera distance.
     lod.update(trafficDraw, policeDraw, app.views, rig.camera, app.views.get(app.player)?.root.position ?? null, tS);
+    props.update(sim.propsMoved(), rig.camera);
 
     const r0 = performance.now();
     scene.render(rig.camera);
@@ -997,6 +1003,8 @@ async function main(): Promise<void> {
     lookFrom: (eye: [number, number, number], target: [number, number, number]) => rig.lookFrom(eye, target),
     /** LOD director: `lod.log.start()` records per-frame draw states, `lod.log.summary()`. */
     lod,
+    /** Parked cars / cones: `props.stats(rig.camera)`, `props.drawnPose(i)` (render/props.ts). */
+    props,
     /** Car mesh fetch + parse times (performance.now() ms) per car id. */
     meshTimings,
   };

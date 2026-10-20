@@ -789,7 +789,7 @@ pub fn debug_park_near_police(entity: u32, ahead_m: f32) -> Result<u32, JsValue>
     })
 }
 
-/// Debug / e2e: aim `entity` at a parked car so it knocks it at `speed_mps` (placed 9 m off
+/// Debug / e2e: aim `entity` at a parked car so it knocks it at `speed_mps` (placed 5.5 m off
 /// the car's flank, facing it). `prop` < 0 picks the parked car nearest the vehicle. Returns
 /// the prop index (into `props_static()`). Not recorded in replays.
 #[wasm_bindgen]
