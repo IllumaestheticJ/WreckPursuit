@@ -85,7 +85,8 @@ export function frictionScrape(ctx: BaseAudioContext, rec: AudioBuffer | null, s
     gritBp.frequency.setTargetAtTime((metal ? 500 : 250) + (metal ? 14 : 6) * v, now, tau);
     gritLp.frequency.setTargetAtTime(1200 + 9000 * lvl * press, now, tau);
     gritG.gain.setTargetAtTime(0.45 * press * (0.3 + 0.7 * lvl), now, tau);
-    sparkG?.gain.setTargetAtTime(0.9 * lvl * lvl * press, now, tau);
+    // Sparks track speed more than level: present from moderate grinding on.
+    sparkG?.gain.setTargetAtTime(1.4 * lvl * press, now, tau);
   };
   apply(p, t, 0.005);
   return {
