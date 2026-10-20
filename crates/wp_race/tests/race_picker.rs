@@ -470,6 +470,13 @@ fn hollins_hill_sprint() {
 }
 
 #[test]
+fn hollins_hill_sprint_pace_without_police() {
+    let r = run_race_with("hollins_sprint", 200, Some(0.0));
+    check(&r, 40.0..110.0, 3);
+    assert_eq!(r.pursuits, 0);
+}
+
+#[test]
 fn loop9_circuit() {
     let r = run_race("loop9_circuit", 600);
     let id = r.def.id;
