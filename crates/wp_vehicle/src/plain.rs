@@ -49,6 +49,29 @@ pub struct PlainSteer {
     /// Where the speed sensitivity acts (lead A/B, clip 8: the reference's cockpit wheel turns
     /// as far at 150 km/h as at a standstill).
     pub sens_applies: SensApplies,
+    /// Velocity-relative steering (reference clip 8 "the steering wheel during a drift"): in a
+    /// slide the wheels are pulled toward the front axle's direction of travel and the key
+    /// adds `key × lock(speed)` on top, so the key steers relative to where the car is going.
+    /// The wheel target is `align_gain × fade × front-axle travel − key × lock`, clamped to the
+    /// car's full lock, where `fade` comes in with body slip from [`PlainSteer::align_from_deg`]
+    /// to [`PlainSteer::align_full_deg`] (grip driving and standstill are the plain profile).
+    /// `false` (default) = the plain profile only. Off by default: measured in step 7, it acts
+    /// as a strong catch (swing-through) and breaks the spin model's held drift.
+    pub velocity_relative: bool,
+    /// Velocity-relative steering: how far the wheels follow the front axle's travel in a slide
+    /// (1 = exactly along it).
+    pub align_gain: f32,
+    /// Body slip where the alignment starts to fade in, degrees.
+    pub align_from_deg: f32,
+    /// Body slip where the alignment is full, degrees.
+    pub align_full_deg: f32,
+    /// In a slide the wheels move at least this fast: full lock in this time, s (the
+    /// reference's wheel swung from full lock to near centre in ≈ 0.4 s, clip 8).
+    pub t_align_s: f32,
+    /// Velocity-relative steering: the key's offset in a full slide, × lock(speed) (1 = the
+    /// same offset as in grip; blended in by the slide fade). Less = a held key asks for less
+    /// angle relative to the travel in a slide.
+    pub slide_key_gain: f32,
 }
 
 /// Where [`PlainSteer::speed_sensitivity`] acts.
@@ -74,6 +97,12 @@ impl Default for PlainSteer {
             sens_exponent: 2.0,
             self_align: 0.0,
             sens_applies: SensApplies::Rack,
+            velocity_relative: false,
+            align_gain: 1.0,
+            align_from_deg: 2.0,
+            align_full_deg: 6.0,
+            t_align_s: 0.28,
+            slide_key_gain: 1.0,
         }
     }
 }
@@ -193,12 +222,34 @@ pub struct PlainInput {
     pub full_lock: f32,
     /// Damage pull (key-equivalent offset, + = right).
     pub pull: f32,
-    /// Front axle's direction of travel, rad (+ = left; for [`PlainSteer::self_align`]).
+    /// Front axle's direction of travel, rad (+ = left; for [`PlainSteer::self_align`] and
+    /// velocity-relative steering).
     pub front_axle_angle: f32,
+    /// Body slip at the CG, rad (velocity-relative steering's fade).
+    pub body_slip: f32,
+}
+
+/// Velocity-relative steering's slide fade, 0..=1, for `body_slip` (rad) at `speed` (m/s):
+/// smoothstep from [`PlainSteer::align_from_deg`] to [`PlainSteer::align_full_deg`]; 0 below
+/// 3 m/s (standstill = plain lock).
+pub fn align_fade(p: &PlainSteer, body_slip: f32, speed: f32) -> f32 {
+    if !p.velocity_relative || speed.abs() < 3.0 {
+        return 0.0;
+    }
+    let a = body_slip.abs().to_degrees();
+    let (lo, hi) = (
+        p.align_from_deg,
+        p.align_full_deg.max(p.align_from_deg + 0.1),
+    );
+    let t = ((a - lo) / (hi - lo)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
 }
 
 /// Advance the centre road-wheel angle (rad, + = left) one tick under the plain profile.
 pub fn update_center_angle(current: f32, inp: &PlainInput, p: &PlainSteer, dt: f32) -> f32 {
+    if p.velocity_relative {
+        return velocity_relative_angle(current, inp, p, dt);
+    }
     let lock = inp.full_lock * p.lock_frac(inp.speed);
     let rack = rack_of(current, lock, inp.pull);
     let key = inp.driver.clamp(-1.0, 1.0);
@@ -214,6 +265,56 @@ pub fn update_center_angle(current: f32, inp: &PlainInput, p: &PlainSteer, dt: f
     };
     let rack = slew(rack, target, p, dt);
     -(rack + inp.pull) * lock
+}
+
+/// Velocity-relative steering (see [`PlainSteer::velocity_relative`]): the angle moves toward
+/// `align_gain × fade × travel − (key + pull) × lock(speed)` (clamped to full lock). It moves at
+/// lock(speed) / `t_full` away from the centre and lock(speed) / `t_return` back, i.e. the plain
+/// timing in grip; in a slide it moves at least full lock / `t_align`, blended by the fade.
+/// With fade 0 (grip, standstill) this is the plain profile's motion in angle units.
+fn velocity_relative_angle(current: f32, inp: &PlainInput, p: &PlainSteer, dt: f32) -> f32 {
+    let lock = inp.full_lock * p.lock_frac(inp.speed);
+    let key = inp.driver.clamp(-1.0, 1.0);
+    let fade = align_fade(p, inp.body_slip, inp.speed);
+    let full = inp.full_lock.max(1e-6);
+    let key_gain = 1.0 + fade * (p.slide_key_gain.max(0.0) - 1.0);
+    let target = (p.align_gain.max(0.0) * fade * inp.front_axle_angle
+        - (key * key_gain + inp.pull) * lock)
+        .clamp(-full, full);
+    let out_rate = lock / p.t_full_s.max(0.01);
+    let back_rate = lock / p.t_return_s.max(0.01);
+    let slide_rate = full / p.t_align_s.max(0.01);
+    let blend = |r: f32| r + fade * (slide_rate.max(r) - r);
+    let (out_rate, back_rate) = (blend(out_rate), blend(back_rate));
+    // Two phases at most: back toward the centre, then out (like [`slew`]).
+    let mut a = current;
+    let mut t = dt;
+    for _ in 0..2 {
+        if t <= 0.0 || a == target {
+            break;
+        }
+        let toward_centre = a != 0.0 && (target - a).signum() != a.signum();
+        if toward_centre {
+            let stop = if target * a > 0.0 { target } else { 0.0 };
+            let need = (stop - a).abs() / back_rate.max(1e-6);
+            if need <= t {
+                a = stop;
+                t -= need;
+            } else {
+                a += (stop - a).signum() * back_rate * t;
+                t = 0.0;
+            }
+        } else {
+            let need = (target - a).abs() / out_rate.max(1e-6);
+            if need <= t {
+                a = target;
+            } else {
+                a += (target - a).signum() * out_rate * t;
+            }
+            t = 0.0;
+        }
+    }
+    a
 }
 
 /// Readout values for the lab: `(rack, lock_frac)` for centre angle `center` at `speed`.
@@ -288,6 +389,7 @@ mod tests {
             full_lock: 0.6,
             pull: 0.0,
             front_axle_angle: 0.0,
+            body_slip: 0.0,
         };
         let mut a = 0.0;
         for _ in 0..240 {
@@ -317,8 +419,50 @@ mod tests {
     }
 
     #[test]
+    fn velocity_relative_follows_the_travel_in_a_slide_and_is_plain_in_grip() {
+        let p = PlainSteer {
+            velocity_relative: true,
+            ..PlainSteer::default()
+        };
+        let run = |inp: &PlainInput| {
+            let mut a = 0.0;
+            for _ in 0..480 {
+                a = update_center_angle(a, inp, &p, DT);
+            }
+            a
+        };
+        // Grip (1° of body slip): the plain target, key right = −lock.
+        let grip = PlainInput {
+            driver: 1.0,
+            speed: 15.0,
+            full_lock: 0.6,
+            pull: 0.0,
+            front_axle_angle: 0.3,
+            body_slip: 1f32.to_radians(),
+        };
+        assert!((run(&grip) + 0.6 * p.lock_frac(15.0)).abs() < 1e-5);
+        // Slide (20°), keys released: the wheels point along the travel.
+        let slide = PlainInput {
+            driver: 0.0,
+            body_slip: 20f32.to_radians(),
+            ..grip
+        };
+        assert!((run(&slide) - 0.3).abs() < 1e-5, "{}", run(&slide));
+        // Slide, key into the travel side (left = −1) adds lock on top, clamped to full lock.
+        let into = PlainInput {
+            driver: -1.0,
+            ..slide
+        };
+        assert!((run(&into) - 0.6).abs() < 1e-5);
+        // Standstill: plain full lock.
+        let still = PlainInput { speed: 0.0, ..into };
+        assert!((run(&still) - 0.6).abs() < 1e-5);
+    }
+
+    #[test]
     fn self_align_returns_toward_the_travel() {
         let p = PlainSteer {
+            velocity_relative: false,
             self_align: 1.0,
             ..PlainSteer::default()
         };
@@ -328,6 +472,7 @@ mod tests {
             full_lock: 0.6,
             pull: 0.0,
             front_axle_angle: 0.2,
+            body_slip: 0.0,
         };
         let mut a = 0.0;
         for _ in 0..240 {

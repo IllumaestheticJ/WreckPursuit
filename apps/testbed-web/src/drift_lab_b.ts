@@ -11,7 +11,7 @@ import type { sim as Sim } from "./wasm/sim";
 /** Scenario name of the lab (sim.scenario().name). */
 export const DRIFT_LAB = "drift_lab_c";
 /** Lab title / version badge. */
-export const DRIFT_LAB_TITLE = "Drift Lab C";
+export const DRIFT_LAB_TITLE = "old lab C (assists)";
 
 /** Free-drive (flat world) scenario JSON turned into the lab: no traffic / parked cars /
  * police, noon with a slow clock. */

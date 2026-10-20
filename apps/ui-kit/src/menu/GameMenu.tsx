@@ -22,7 +22,7 @@ import "../ui/theme.css";
 import "./menu.css";
 
 /** What the main menu can start. */
-export type PlayChoice = "chase" | "chaseRain" | "races" | "free" | "driftLabB" | "driftLabW" | "garage";
+export type PlayChoice = "chase" | "chaseRain" | "races" | "free" | "driftLabW" | "garage";
 
 /** Which screen is showing ("closed" = none). */
 export type MenuScreen = "closed" | "main" | "pause" | "settings";
@@ -379,7 +379,6 @@ const PLAY: { id: PlayChoice; label: string; hint: string }[] = [
   { id: "chaseRain", label: "Rainy night", hint: "Same chase on a soaked road" },
   { id: "races", label: "Street races", hint: "Races against AI drivers" },
   { id: "free", label: "Free drive", hint: "Explore the city with traffic" },
-  { id: "driftLabB", label: "Drift Lab C", hint: "Open pad, 90° corners and a sweeper. Countersteer key holds the slide; tuning panel" },
   { id: "driftLabW", label: "Drift Lab W", hint: "Same pad, plain keyboard steering (raw keys, constant-rate rack), reference-parity test cars" },
   { id: "garage", label: "Garage", hint: "Your career: cars, repairs, mods" },
 ];

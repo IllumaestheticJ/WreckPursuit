@@ -74,7 +74,7 @@ pub fn drift_readout(entity: u32) -> Result<Vec<f32>, JsValue> {
 // | `plain_steer_json()` | the plain steering constants in effect (`null` = plain off), JSON |
 // | `plain_steer_defaults_json()` | the defaults (`wp_vehicle::plain::PlainSteer`), JSON |
 // | `plain_steer_set(json)` | turn plain steering on with these constants (`""` = off); missing fields take the default |
-// | `plain_readout(entity)` | `[steer_key, rack, lock_frac, slide_deg, throttle_key, engine_throttle, gear, speed_kmh, wheel_deg]` (see `plain_readout`) |
+// | `plain_readout(entity)` | `[steer_key, rack, lock_frac, slide_deg, throttle_key, engine_throttle, gear, speed_kmh, wheel_deg, heading_deg]` (see `plain_readout`) |
 // | `parity_car_ids()` | JSON array of the parity test cars (not in `car_ids()`) |
 
 /// The plain steering constants in effect (`null` when plain steering is off), JSON.
@@ -105,7 +105,7 @@ pub fn plain_steer_set(steer_json: &str) -> Result<(), JsValue> {
 /// Drift Lab W readout of a vehicle: `[steer_key (−1..=1, + = right), rack (−1..=1, + =
 /// right; NaN when plain steering is off), lock_frac (0..=1; NaN when off), slide_deg (body
 /// slip, + = moving toward the left of the heading), throttle_key, engine_throttle, gear,
-/// speed_kmh, wheel_deg (centre road-wheel angle, + = left)]`.
+/// speed_kmh, wheel_deg (centre road-wheel angle, + = left), heading_deg (yaw, + = left)]`.
 #[wasm_bindgen]
 pub fn plain_readout(entity: u32) -> Result<Vec<f32>, JsValue> {
     with(|s| {
@@ -134,6 +134,7 @@ pub fn plain_readout(entity: u32) -> Result<Vec<f32>, JsValue> {
             v.vehicle.gear() as f32,
             ch.lin_vel.length() * 3.6,
             tel.steer_rad.to_degrees(),
+            wp_vehicle::math::atan2(-fwd.x, fwd.y).to_degrees(),
         ])
     })
 }

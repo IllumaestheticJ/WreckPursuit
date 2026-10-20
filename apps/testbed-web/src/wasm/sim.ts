@@ -250,7 +250,7 @@ export const sim = {
   plainSteerDefaults: (): Record<string, number> => JSON.parse(wasm.plain_steer_defaults_json()),
   /** Turn plain steering on with these constants ("" = off). */
   plainSteerSet: (json: string): void => wasm.plain_steer_set(json),
-  /** [steer_key, rack, lock_frac, slide_deg, throttle_key, engine_throttle, gear, speed_kmh, wheel_deg]. */
+  /** [steer_key, rack, lock_frac, slide_deg, throttle_key, engine_throttle, gear, speed_kmh, wheel_deg, heading_deg]. */
   plainReadout: (entity: number): Float32Array => wasm.plain_readout(entity),
   /** Drift Lab W ride tuning in effect (null = car data) / {data, lab} defaults (wp_vehicle::ride_lab::RideTune). */
   rideTune: (): Record<string, number> | null => JSON.parse(wasm.ride_tune_json()),

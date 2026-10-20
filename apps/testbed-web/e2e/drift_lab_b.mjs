@@ -53,7 +53,7 @@ await page.keyboard.down("KeyW");
 await page.waitForTimeout(2500);
 await page.keyboard.up("KeyW");
 const text = await page.locator("#drift-lab-b").innerText();
-check(/Drift Lab C/.test(text) && /slide .*° · held/.test(text), `readout: ${text.split("\n").slice(1, 4).join(" | ")}`);
+check(/old lab C \(assists\)/.test(text) && /slide .*° · held/.test(text), `readout: ${text.split("\n").slice(1, 4).join(" | ")}`);
 check(/throttle key \d+% → engine \d+%/.test(text), "readout shows key → engine throttle");
 check((await page.evaluate(() => window.__wp.sim.driftTuning().throttle_shape)) === 0, "throttle shaping off by default");
 if (process.env.SHOT) await page.screenshot({ path: process.env.SHOT });

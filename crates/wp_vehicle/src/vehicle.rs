@@ -1286,6 +1286,7 @@ impl Vehicle {
                     full_lock: max_steer * steer_in.ratio_scale,
                     pull: steer_in.pull,
                     front_axle_angle: steer_in.front_axle_angle,
+                    body_slip: steer_in.body_slip,
                 },
                 &p,
                 dt,

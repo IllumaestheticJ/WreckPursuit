@@ -62,6 +62,7 @@ fn main() {
             "sweep",
             "ride",
             "carlab",
+            "vr",
             "sens",
             "ptrace",
             "tap",
@@ -93,6 +94,10 @@ fn main() {
     }
     if what == "sens" {
         sens_table(&args);
+        return;
+    }
+    if what == "vr" {
+        vr_table(&args);
         return;
     }
     if what == "carlab" {
@@ -727,5 +732,74 @@ fn sens_table(args: &[String]) {
             println!("| {id} | {mode:?} | {lc:.1} | {} |", m.cell());
         }
     }
+    plain::set_override(Some(base));
+}
+
+/// Velocity-relative steering (reference clip 8) A/B, with the data tyres and the spin model.
+fn vr_table(args: &[String]) {
+    use wp_vehicle::drift_lab_w::{launch_yaw, plain_hold, HoldMetrics};
+    let ids: Vec<String> = if args.is_empty() {
+        [
+            "parity_rwd_d",
+            "parity_rwd_a",
+            "parity_rwd_b",
+            "rampart_50",
+            "shiro_turbo",
+            "parity_fwd_c",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+    } else {
+        args.to_vec()
+    };
+    let base = plain::active().unwrap_or_default();
+    let configs = [
+        ("plain, data", false, CarTune::default()),
+        ("**VR**, data", true, CarTune::default()),
+        ("plain, spin model", false, CarTune::spin_candidate()),
+        ("**VR**, spin model", true, CarTune::spin_candidate()),
+    ];
+    println!("\n## Velocity-relative steering (VR) vs plain, data tyres vs spin model (40 m circle, 2nd, 6 s; intended side: drift s / band s / mean ° sd ° / outcome)");
+    println!("| car | setup | counter key + full thr (clip 1) | into-turn key held (clip 8) | keys released (end °) | tap 100 0.15 / 0.25 s: heading ° (slip °) | lane change slip ° | launch yaw ° flat / 1° slope | handbrake 40 km/h 0.6 s: pivot ° / caught |");
+    println!("|---|---|---|---|---|---|---|---|---|");
+    let a = reference_assists();
+    for id in &ids {
+        let c = car(id);
+        for (name, vr, t) in configs {
+            plain::set_override(Some(PlainSteer {
+                velocity_relative: vr,
+                ..base
+            }));
+            car_lab::set_override(Some(t));
+            let hold = |d: PlainDriver| -> HoldMetrics { plain_hold(&c, &a, d, 40.0, 0.6) };
+            let ctr = hold(PlainDriver::HoldCounter {
+                entry_deg: 6.0,
+                throttle: 1.0,
+            });
+            let into = hold(PlainDriver::IntoTurnHeld { entry_deg: 12.0 });
+            let rel = hold(PlainDriver::Released { entry_deg: 12.0 });
+            let t15 = tap_response(&c, &a, 100.0 / 3.6, 0.15);
+            let t25 = tap_response(&c, &a, 100.0 / 3.6, 0.25);
+            let lc = wp_vehicle::drift_lab_w::lane_change_slip(&c, &a);
+            let l0 = launch_yaw(&c, &a, 0.0);
+            let l1 = launch_yaw(&c, &a, 1.0);
+            let hb = handbrake_pivot(&c, &a, 40.0 / 3.6, 0.6);
+            println!(
+                "| {id} | {name} | {} | {} | {} (end {:.0}°) | {:.1} ({:.1}) / {:.1} ({:.1}) | {lc:.1} | {l0:.1} / {l1:.1} | {:.0} / {} |",
+                ctr.cell(),
+                into.cell(),
+                rel.cell(),
+                rel.end_deg,
+                t15.heading_deg,
+                t15.max_slip_deg,
+                t25.heading_deg,
+                t25.max_slip_deg,
+                hb.pivot_deg,
+                if hb.spun { "spun" } else if hb.catch_s.is_some() { "yes" } else { "no" }
+            );
+        }
+    }
+    car_lab::set_override(None);
     plain::set_override(Some(base));
 }

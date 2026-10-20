@@ -773,7 +773,8 @@ async function main(): Promise<void> {
   }
   $("sc-run").onclick = () => scSel.value && runScenario(scSel.value, Number(($("sc-speed") as HTMLInputElement).value));
   $("sc-free").onclick = () => startFreeDrive();
-  $("sc-drift-b").onclick = () => startDriftLabB();
+  // Drift Lab W (the old lab C, with its drift assists, stays reachable via ?drift=c only).
+  $("sc-drift-w").onclick = () => startDriftLabW();
   $("sc-chase").onclick = () => startCityChase();
   $("sc-chase-rain").onclick = () => startCityChase(undefined, undefined, true);
   /** Restart whatever is running with the selected weather (weather is part of the scenario,
@@ -1085,7 +1086,6 @@ async function main(): Promise<void> {
         if (choice === "chase") startCityChase();
         else if (choice === "chaseRain") startCityChase(undefined, undefined, true);
         else if (choice === "free") startFreeDrive(undefined, undefined, true);
-        else if (choice === "driftLabB") startDriftLabB();
         else if (choice === "driftLabW") startDriftLabW();
         else if (choice === "races") raceView.openPicker();
         else openGarage();
@@ -1555,6 +1555,7 @@ async function main(): Promise<void> {
     runScenario,
     startFreeDrive,
     startDriftLabB,
+    startDriftLabW,
     /** Drift Lab C tune panel / readout. */
     driftLab,
     startCityChase,

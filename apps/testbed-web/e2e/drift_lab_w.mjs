@@ -55,7 +55,7 @@ check(!a.tcs && !a.esc && !a.auto_gears, `assists TCS ${a.tcs} ESC ${a.esc} auto
 check(await page.locator("#drift-w-tune").isVisible(), "tune button shown");
 const sliders = await page.locator("#drift-lab-w input[type=range]").count();
 check(sliders >= 18, `${sliders} sliders (steering + suspension + car / tyre)`);
-check((await page.evaluate(() => window.__wp.sim.carTune()?.lat_under_spin)) === 1, "car / tyre experiments start at the data");
+check((await page.evaluate(() => window.__wp.sim.carTune()?.spin_model)) === true, "car / tyre experiments start at the spin model (W default)");
 await page.locator("#drift-lab-w button", { hasText: "spin grip + damper" }).click();
 const cand = await page.evaluate(() => window.__wp.sim.carTune());
 check(Math.abs(cand.lat_under_spin - 0.15) < 1e-6 && Math.abs(cand.yaw_damping - 0.2) < 1e-6, `spin grip + damper ${JSON.stringify(cand)}`);
@@ -100,6 +100,53 @@ check(held[0] === 1 && held[1] > 0.95, `key right → rack ${held[1]?.toFixed(2)
 const text = await page.locator("#drift-lab-w").innerText();
 check(/Drift Lab W · plain steering/.test(text) && /rack/.test(text) && /roll .* Hz/.test(text), `readout: ${text.split("\n").slice(0, 5).join(" | ")}`);
 if (process.env.SHOT) await page.screenshot({ path: process.env.SHOT });
+// Velocity-relative steering checkbox (default off) and TCS checkbox (default off).
+check(!(await page.locator("#drift-lab-w-vr").isChecked()), "velocity-relative steering off by default");
+await page.locator("#drift-lab-w-vr").check();
+check((await page.evaluate(() => window.__wp.sim.plainSteer().velocity_relative)) === true, "VR checkbox → on");
+await page.locator("#drift-lab-w-vr").uncheck();
+check((await page.evaluate(() => window.__wp.sim.plainSteer().velocity_relative)) === false, "VR checkbox → off");
+const player = () => page.evaluate(() => window.__wp.app.player);
+check(!(await page.locator("#drift-lab-w-tcs").isChecked()) && !(await page.evaluate((id) => window.__wp.sim.assists(id).tcs, await player())), "TCS off by default");
+await page.locator("#drift-lab-w-tcs").check();
+check(await page.evaluate((id) => window.__wp.sim.assists(id).tcs, await player()), "TCS checkbox → assists.tcs on");
+await page.locator("#drift-lab-w-tcs").uncheck();
+check(!(await page.evaluate((id) => window.__wp.sim.assists(id).tcs, await player())), "TCS checkbox → off");
+// Owner bug: floored from rest, TCS off, no steering, on the lab map → straight (< 3° of yaw),
+// as the reference (clip 5). Restart the lab with the default car, then hold the throttle.
+await page.selectOption("#drift-lab-w select", "parity_rwd_a");
+await page.waitForFunction(() => window.__wp.sim.scenario().entities?.[0]?.car === "parity_rwd_a", null, { timeout: 30000 }).catch(() => {});
+await page.selectOption("#drift-lab-w select", "parity_rwd_d");
+await page.waitForFunction(() => window.__wp.sim.scenario().entities?.[0]?.car === "parity_rwd_d", null, { timeout: 30000 }).catch(() => {});
+await page.waitForTimeout(1500);
+const launch = async () => {
+  const read = () => page.evaluate(() => Array.from(window.__wp.sim.plainReadout(window.__wp.app.player)));
+  const r0 = await read();
+  await page.keyboard.down("KeyW");
+  let maxYaw = 0;
+  let last = r0;
+  for (let i = 0; i < 40; i++) {
+    await page.waitForTimeout(125);
+    last = await read();
+    let d = last[9] - r0[9];
+    d = ((d + 540) % 360) - 180;
+    maxYaw = Math.max(maxYaw, Math.abs(d));
+  }
+  await page.keyboard.up("KeyW");
+  return { maxYaw, kmh: last[7], gear: last[6] };
+};
+const l = await launch();
+check(l.maxYaw < 3 && l.kmh > 20, `launch, floored from rest (spin model): yaw ${l.maxYaw.toFixed(2)}° at ${l.kmh.toFixed(0)} km/h, gear ${l.gear}`);
+// For the record (not a check): the same launch on the tyre data — the owner's bug.
+await page.locator("#drift-lab-w button", { hasText: "tyre data" }).click();
+await page.selectOption("#drift-lab-w select", "parity_rwd_a");
+await page.waitForFunction(() => window.__wp.sim.scenario().entities?.[0]?.car === "parity_rwd_a", null, { timeout: 30000 }).catch(() => {});
+await page.selectOption("#drift-lab-w select", "parity_rwd_d");
+await page.waitForFunction(() => window.__wp.sim.scenario().entities?.[0]?.car === "parity_rwd_d", null, { timeout: 30000 }).catch(() => {});
+await page.waitForTimeout(1500);
+const ld = await launch();
+console.log(`INFO  launch on the tyre data (owner's bug): yaw ${ld.maxYaw.toFixed(1)}° at ${ld.kmh.toFixed(0)} km/h`);
+await page.locator("#drift-lab-w button", { hasText: "spin model" }).first().click();
 // Every parity car starts from the selector.
 for (const car of ["parity_rwd_a", "parity_rwd_b", "parity_fwd_c", "shiro_turbo", "parity_rwd_d"]) {
   await page.selectOption("#drift-lab-w select", car);
@@ -107,6 +154,40 @@ for (const car of ["parity_rwd_a", "parity_rwd_b", "parity_fwd_c", "shiro_turbo"
   sc = await sim();
   check(sc.name === "drift_lab_w" && sc.entities?.[0]?.car === car, `selector → ${car}`);
 }
+// From free drive, the testbed's "drift lab W" button lands in W (not the old lab C).
+const freeDrive = async () => {
+  await page.goto(`http://localhost:${PORT}/`);
+  await page.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 90000 });
+  await page.keyboard.press("Escape").catch(() => {});
+};
+await freeDrive();
+check((await sim()).name !== "drift_lab_w", `page load = ${(await sim()).name}`);
+check((await page.evaluate(() => window.__wp.sim.plainSteer())) === null, "free drive: plain steering off");
+check((await page.locator("#sc-drift-w").innerText()).trim() === "drift lab W", "button labelled drift lab W");
+// The career garage can sit over free drive on load; the button's own click handler is
+// what the owner hits from the testbed panel.
+await page.evaluate(() => document.getElementById("sc-drift-w").click());
+await page.waitForFunction(() => window.__wp.sim.scenario().name === "drift_lab_w", null, { timeout: 30000 }).catch(() => {});
+sc = await sim();
+check(sc.name === "drift_lab_w" && sc.entities?.[0]?.car === "parity_rwd_d", `button → ${sc.name} / ${sc.entities?.[0]?.car}`);
+check((await page.evaluate(() => window.__wp.sim.plainSteer())) !== null, "button → plain steering on");
+check((await page.title()) === "Drift Lab W", `button → title "${await page.title()}"`);
+await page.waitForTimeout(500);
+const visible = await page.evaluate(() => document.body.innerText);
+check(!/drift lab c/i.test(visible) && (await page.getByText(/drift lab c/i).count()) === 0, "no visible 'Drift Lab C' anywhere (incl. shadow roots)");
+check(/Drift Lab W · plain steering/.test(await page.locator("#drift-lab-w").innerText()), "button → W readout");
+// The start menu's entry: "Drift Lab W" (no "Drift Lab C" entry) launches W.
+await freeDrive();
+await page.evaluate(() => window.__wp.menu.openMain());
+await page.getByText("Drift Lab W", { exact: true }).first().waitFor({ timeout: 10000 }).catch(() => {});
+// The menu renders in a shadow root: locators pierce it, body.innerText does not.
+const wEntries = await page.getByText("Drift Lab W", { exact: true }).count();
+const cEntries = await page.getByText(/drift lab c/i).count();
+check(wEntries > 0 && cEntries === 0, `menu lists Drift Lab W (${wEntries}), no Drift Lab C (${cEntries})`);
+await page.getByText("Drift Lab W", { exact: true }).first().click();
+await page.waitForFunction(() => window.__wp.sim.scenario().name === "drift_lab_w", null, { timeout: 30000 }).catch(() => {});
+sc = await sim();
+check(sc.name === "drift_lab_w" && sc.entities?.[0]?.car === "parity_rwd_d", `menu → ${sc.name} / ${sc.entities?.[0]?.car}`);
 check(errors.length === 0, `no page errors ${errors.join(" | ")}`);
 await browser.close();
 server.kill("SIGTERM");

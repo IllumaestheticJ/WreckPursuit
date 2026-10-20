@@ -33,8 +33,10 @@ car itself does when the steering is as simple as the reference's.
    "throttle / power" → the parity cars give the reference's W/kg, and the runaway happens at
    every throttle.
 
-**How to try it:** `?drift=w` (default car `parity_rwd_d`, the clip-1 drift car), or
-`?drift=w&car=parity_rwd_a`, or the start menu's *Drift Lab W*. The *tune* panel has the car
+**How to try it:** the testbed panel's *drift lab W* button, the start menu's *Drift Lab W*, or
+`?drift=w` (default car `parity_rwd_d`, the clip-1 drift car; `?drift=w&car=parity_rwd_a`). The
+old Drift Lab C (with its drift assists) is reachable only via `?drift=c`, titled *old lab C
+(assists)*. The *tune* panel has the car
 selector and the steering constants.
 
 ## Step 1 — raw keys, plain constant-rate rack, reference cars
@@ -180,13 +182,18 @@ spins (300–500° total); parity_fwd_c gets round 53–74° and is caught in 0.
    the extra torque per kg feel like the reference's power?
 6. Handbrake: 0.3–1.0 s pulls at 40 km/h. How far does the reference car rotate while the lever
    is held?
-7. **Try: spin model** (tyre-slip's physical drift hold; `lead/tyre-slip` be8b7790, merged
+7. **Try: spin model** (now the W default; *tyre data* to compare) (tyre-slip's physical drift hold; `lead/tyre-slip` be8b7790, merged
    here). Tune panel → car / tyre experiments → *spin model* button (or tick *spin model
-   (tyre-slip)*; off by default = the tyre data). With parity_rwd_d in 2nd, get sideways and
+   (tyre-slip)*; since step 7 it is on by default, *tyre data* turns it off). With parity_rwd_d in 2nd, get sideways and
    hold the countersteer key with full throttle. On the lab's standard entry it holds ~41–44°
    with no damper. It is tuned to a **knife edge**, so a different entry speed or angle can still
    spin or swing through. Does the held drift feel like clip 1? Untick it / *tyre data* for the
    comparison. (The *spin grip + damper (test)* button is step 4's set: it does not hold.)
+8. **Velocity-relative steering** (checkbox, off by default): clip 8's "wheels follow the travel
+   in a slide". Measured, it catches every slide (swing-through) and breaks the spin model's
+   held drift (step 7). Worth a feel A/B. Does the reference feel like this in a slide?
+9. **Floored launch** from rest (TCS off, no steering) should go straight; *TCS* checkbox for the
+   A/B. If it still spins for you, note the car, the map / where on it, and the tyre setting.
 
 ## Files
 
@@ -520,6 +527,112 @@ comes back as the slip angle grows; `CarTune::spin_model` and its `spin_*` knobs
 now calls `spin_grip_damper()`. Panel: *spin model (tyre-slip)* checkbox (off by default) and
 *spin model* preset button (tyre-slip's). e2e covers the button, *tyre data* turning it off, and
 the checkbox on / off. `tire.rs` / the tyre model are tyre-slip's from here on.
+
+## Fix — the build said "Drift Lab C" (owner, via lead)
+
+The testbed button `#sc-drift-b` ("drift lab C") and the start menu's *Drift Lab C* entry still
+launched C, and W was reachable only via `?drift=w`. Now:
+- The button is `#sc-drift-w` "drift lab W" and launches W (plain profile, parity_rwd_d).
+- The menu has *Drift Lab W* only; the `driftLabB` choice is removed.
+- C's readout title (`drift_lab_b.ts` `DRIFT_LAB_TITLE`) is "old lab C (assists)", and C opens
+  only via `?drift=c` / `?drift=b`.
+- With W active, every visible title says Drift Lab W (readout, page title).
+
+e2e (`e2e/drift_lab_w.mjs`, built site, 40 / 40) adds: from a free-drive page load, the button
+lands in W (scenario, car, plain steering on, title, readout); no visible "Drift Lab C" anywhere,
+shadow roots included; the menu lists Drift Lab W and no C, and its entry lands in W. C's e2e
+(`drift_lab_b.mjs`, `?drift=c`) still passes with the new title.
+
+Also merged `lead/tyre-slip` step 3 (3014d7b8, "spin + drift lock" preset, panel button from
+tyre-slip). The conflicts were adjacent additions only.
+
+## Step 7 — launch spin, TCS checkbox, velocity-relative steering (clip 8 cockpit)
+
+### Launch ("spins off the line", owner)
+
+Rest → full throttle 3 s, steer 0, TCS / ESC off, manual 1st (`drift_lab_w::launch_yaw`, the
+same definition as tyre-slip's `launch_yaw`). Results:
+- **Flat** (rig and browser lab pad): straight in every car, with the data tyres too (≤ 0.1°;
+  browser lab pad parity_rwd_d 0.6° on the data, 0.48° on the spin model).
+- **1° road slope** (sideways g·sin θ, tyre-slip's emulation of road crown): the data tyres
+  spin every RWD car (59–137°); the spin model keeps it at 0.3–0.4°.
+- I could **not** reproduce the owner's spin on the lab pad in the browser: floored from rest
+  in W and in the old lab C, parity_rwd_d / rwd_a / rampart_50 / shiro_turbo stay within 1.5°.
+
+The physics cause is tyre-slip's: with the friction ellipse a rear spinning at the limiter has
+almost no side force, so any small sideways force (road crown, a bump) swings the tail. The
+plain rack at rest, the diff split and the drive floor are not it: zero yaw on the flat. The
+spin model applies no side-grip loss at zero slip angle (it equals the ellipse there).
+
+**Lab fix:** the W panel's car / tyre experiments now **start at the spin model**. The storage
+key is bumped (`wp.driftLabW.car.v2`) so an older saved "tyre data" doesn't override it;
+*tyre data* is the A/B. Browser e2e: floored launch from rest on the lab map, yaw < 3° (0.48°).
+The same launch on the tyre data is logged for the record.
+
+### TCS checkbox
+
+Panel *TCS* (the existing on / off assist), default off; stored per viewer. e2e: off by default,
+on → `assists.tcs` true, off again. It stands in for TCS Off / Half / Full until A's levels land.
+
+### Velocity-relative steering (lead / reference clip 8 cockpit)
+
+`PlainSteer::velocity_relative` (panel checkbox *velocity-relative steering*, sliders *VR: align
+gain*, *VR: slide align time*, *VR: key in slide ×*). The wheel target is `align_gain × fade ×
+front-axle travel − key × slide_key_gain_blend × lock(speed)`, clamped to the car's full lock.
+`fade` comes in with body slip 2° → 6°, and is 0 below 3 m/s. Rates are the plain t_full /
+t_return in grip, at least full lock / `t_align` in a slide. Throttle stays raw. Off = the
+plain profile bit for bit (unit test).
+
+Measured (`cargo run --release -p wp_vehicle --example drift_lab_w -- vr`, lab ride default;
+6 s on the 40 m circle in 2nd, intended side: drift s / band 30–45° s / mean ° sd ° / outcome):
+
+| car | setup | counter key + full thr (clip 1) | into-turn key held (clip 8) | keys released (end °) | tap 100 0.15 / 0.25 s: heading ° (slip °) | lane change slip ° | launch yaw ° flat / 1° slope | handbrake 40 km/h 0.6 s: pivot ° / caught |
+|---|---|---|---|---|---|---|---|---|
+| parity_rwd_a | plain, data | 0.5 / 0.2 / 28° sd 11.7 / SPUN | 0.5 / 0.2 / 28° sd 11.6 / SPUN | 0.5 / 0.2 / 28° sd 11.5 / SPUN (end -0°) | 10.2 (2.3) / 17.4 (3.4) | 3.9 | 0.0 / 67.0 | 26 / spun |
+| parity_rwd_a | **VR**, data | 0.5 / 0.2 / 29° sd 12.3 / SPUN | 0.5 / 0.2 / 28° sd 11.6 / SPUN | 0.5 / 0.2 / 28° sd 11.5 / SPUN (end 1°) | 10.2 (2.3) / 16.0 (3.4) | 3.9 | 0.0 / 21.5 | 25 / spun |
+| parity_rwd_a | plain, spin model | 4.2 / 2.0 / 39° sd 9.9 / SPUN | 0.8 / 0.3 / 29° sd 12.0 / SPUN | 0.8 / 0.2 / 28° sd 11.9 / SPUN (end 0°) | 10.1 (2.3) / 16.3 (3.1) | 3.5 | 0.0 / 0.3 | 26 / spun |
+| parity_rwd_a | **VR**, spin model | 0.9 / 0.0 / 22° sd 6.1 / SPUN | 0.7 / 0.2 / 28° sd 12.0 / SPUN | 1.3 / 0.7 / 28° sd 10.0 / SWAPPED ×1 (end 0°) | 10.0 (2.3) / 15.6 (3.2) | 3.5 | 0.0 / 0.3 | 26 / spun |
+| parity_rwd_b | plain, data | 0.5 / 0.2 / 28° sd 11.6 / SPUN | 0.5 / 0.2 / 28° sd 11.7 / SPUN | 0.5 / 0.2 / 28° sd 11.5 / SPUN (end 0°) | 12.7 (3.1) / 21.6 (4.3) | 4.1 | 0.0 / 136.8 | 39 / spun |
+| parity_rwd_b | **VR**, data | 0.5 / 0.2 / 28° sd 12.0 / SPUN | 0.5 / 0.2 / 28° sd 11.6 / SPUN | 0.5 / 0.2 / 28° sd 11.5 / SPUN (end -31°) | 11.8 (3.2) / 15.7 (4.2) | 9.2 | 0.0 / 18.4 | 39 / spun |
+| parity_rwd_b | plain, spin model | 2.4 / 1.2 / 33° sd 10.7 / SPUN | 0.8 / 0.2 / 28° sd 12.0 / SPUN | 0.7 / 0.2 / 28° sd 11.9 / SPUN (end -0°) | 12.4 (3.2) / 19.8 (4.1) | 3.7 | 0.0 / 0.4 | 39 / spun |
+| parity_rwd_b | **VR**, spin model | 0.6 / 0.0 / 17° sd 4.0 / SPUN | 0.7 / 0.2 / 28° sd 12.0 / SPUN | 1.5 / 0.8 / 29° sd 9.4 / SWAPPED ×1 (end -0°) | 11.6 (3.1) / 15.8 (4.1) | 7.9 | 0.0 / 0.4 | 39 / spun |
+| parity_rwd_d | plain, data | 0.5 / 0.2 / 28° sd 11.6 / SPUN | 0.5 / 0.2 / 28° sd 11.5 / SPUN | 0.5 / 0.2 / 28° sd 11.5 / SPUN (end -0°) | 10.2 (2.4) / 17.3 (3.4) | 3.7 | 0.0 / 70.9 | 25 / spun |
+| parity_rwd_d | **VR**, data | 0.6 / 0.2 / 29° sd 12.3 / SPUN | 0.5 / 0.2 / 28° sd 11.6 / SPUN | 0.5 / 0.2 / 27° sd 11.5 / SPUN (end -0°) | 10.2 (2.4) / 15.7 (3.4) | 3.8 | 0.0 / 22.2 | 25 / spun |
+| parity_rwd_d | plain, spin model | 5.3 / 4.9 / 41° sd 6.9 / **held** | 0.8 / 0.3 / 28° sd 12.0 / SPUN | 0.8 / 0.2 / 28° sd 11.9 / SPUN (end 0°) | 10.0 (2.3) / 16.4 (3.2) | 3.4 | 0.0 / 0.4 | 25 / spun |
+| parity_rwd_d | **VR**, spin model | 0.8 / 0.0 / 20° sd 5.4 / SPUN | 0.8 / 0.2 / 28° sd 11.9 / SPUN | 1.3 / 0.6 / 28° sd 9.7 / SWAPPED ×1 (end -0°) | 10.0 (2.3) / 15.3 (3.1) | 3.5 | 0.0 / 0.4 | 25 / spun |
+| parity_fwd_c | plain, data | 0.0 / 0.0 / 0° sd 0.0 / no hold | 0.0 / 0.0 / 0° sd 0.0 / no hold | 0.0 / 0.0 / 0° sd 0.0 / no hold (end 1°) | 10.2 (2.4) / 18.8 (3.8) | 4.3 | 0.1 / 1.3 | 25 / yes |
+| parity_fwd_c | **VR**, data | 0.0 / 0.0 / 0° sd 0.0 / no hold | 0.0 / 0.0 / 0° sd 0.0 / no hold | 0.0 / 0.0 / 0° sd 0.0 / no hold (end 1°) | 10.1 (2.3) / 16.0 (3.8) | 4.5 | 0.1 / 1.3 | 25 / yes |
+| parity_fwd_c | plain, spin model | 0.0 / 0.0 / 0° sd 0.0 / no hold | 0.0 / 0.0 / 0° sd 0.0 / no hold | 0.0 / 0.0 / 0° sd 0.0 / no hold (end 1°) | 10.3 (2.4) / 18.5 (3.8) | 4.3 | 0.1 / 1.3 | 25 / yes |
+| parity_fwd_c | **VR**, spin model | 0.0 / 0.0 / 0° sd 0.0 / no hold | 0.0 / 0.0 / 0° sd 0.0 / no hold | 0.0 / 0.0 / 0° sd 0.0 / no hold (end 1°) | 10.2 (2.4) / 16.1 (3.9) | 4.5 | 0.1 / 1.3 | 25 / yes |
+| shiro_turbo | plain, data | 1.1 / 0.3 / 24° sd 7.6 / SPUN | 0.7 / 0.2 / 26° sd 11.5 / SPUN | 0.7 / 0.2 / 26° sd 11.5 / SPUN (end -0°) | 11.8 (2.8) / 17.7 (3.4) | 3.6 | 0.0 / 69.2 | 28 / spun |
+| shiro_turbo | **VR**, data | 0.7 / 0.0 / 18° sd 4.3 / SPUN | 0.7 / 0.2 / 26° sd 11.5 / SPUN | 1.5 / 0.7 / 28° sd 10.3 / SWAPPED ×1 (end 0°) | 11.4 (2.7) / 15.9 (3.5) | 4.3 | 0.0 / 20.5 | 28 / spun |
+| shiro_turbo | plain, spin model | 0.0 / 0.0 / 0° sd 0.0 / no hold | 0.0 / 0.0 / 0° sd 0.0 / no hold | 0.0 / 0.0 / 0° sd 0.0 / no hold (end 1°) | 11.6 (2.7) / 17.0 (3.3) | 3.2 | 0.0 / 0.3 | 28 / no |
+| shiro_turbo | **VR**, spin model | 0.0 / 0.0 / 0° sd 0.0 / no hold | 0.0 / 0.0 / 0° sd 0.0 / no hold | 0.0 / 0.0 / 0° sd 0.0 / no hold (end 1°) | 11.4 (2.7) / 15.8 (3.3) | 3.3 | 0.0 / 0.3 | 28 / no |
+| rampart_50 | plain, data | 0.6 / 0.2 / 27° sd 11.6 / SPUN | 0.6 / 0.2 / 28° sd 11.6 / SPUN | 0.6 / 0.2 / 28° sd 11.6 / SPUN (end -21°) | 11.1 (2.6) / 17.9 (3.6) | 3.9 | 0.0 / 59.4 | 25 / spun |
+| rampart_50 | **VR**, data | 0.8 / 0.3 / 34° sd 13.0 / SPUN | 0.6 / 0.2 / 28° sd 11.7 / SPUN | 0.6 / 0.2 / 28° sd 11.7 / SPUN (end -52°) | 10.9 (2.6) / 16.0 (3.6) | 3.9 | 0.0 / 21.0 | 25 / spun |
+| rampart_50 | plain, spin model | 1.0 / 0.1 / 22° sd 6.5 / SPUN | 1.6 / 0.4 / 27° sd 11.7 / SWAPPED ×1 | 0.9 / 0.3 / 28° sd 12.0 / SPUN (end 0°) | 10.9 (2.6) / 17.9 (3.6) | 3.5 | 0.0 / 0.3 | 25 / spun |
+| rampart_50 | **VR**, spin model | 0.6 / 0.0 / 17° sd 3.5 / SPUN | 0.9 / 0.3 / 28° sd 12.0 / SPUN | 1.3 / 0.5 / 25° sd 8.3 / SWAPPED ×1 (end 0°) | 10.8 (2.6) / 15.8 (3.5) | 3.6 | 0.0 / 0.3 | 25 / spun |
+
+**Result: velocity-relative steering as specified does not produce the clip-1 / clip-8
+behaviour in our physics.** It is a strong **catch**:
+- **Counter key held:** the target is travel + a full key offset, i.e. ~9° beyond the travel at
+  full lock. The fronts snap the car straight, it swings through, and the held key then steers
+  into the new side (trace). With the spin model it turns parity_rwd_d's held 41° drift
+  (plain) into a spin.
+- **Keys released:** the car straightens and swings through, or spins.
+- **Into-turn key held (clip 8):** spins in every combination, except VR + spin model with
+  *key in slide ×* 0.15 (parity_rwd_d, 3.8 s at 34°). There the counter key spins instead.
+- **Data tyres:** VR fixes none of the slide drivers. It cuts the data's 1° slope launch yaw
+  (71° → 22°) by countersteering automatically, but doesn't make it straight.
+- **Grip:** taps and lane changes are nearly unchanged (0.25 s tap at 100 km/h 15.7° vs 17.3°
+  heading; parity_rwd_b's lane change 9.2° vs 4.1° slip is the exception).
+- **Sweeps** (align gain 1.2, slide align 0.12 s, earlier fade 1–3°, key-in-slide 0.15–0.5,
+  speed sensitivity 100 %): none holds clip 1's counter key.
+
+So it ships **off by default** (A/B toggle). The spin model + plain steering stays the best
+clip-1 match (parity_rwd_d held 41°, 5.3 s, sd 6.9). Clip 8 suggests the reference's front
+wheels follow the travel. That would need tyres where a wheel at the travel with the rear
+spinning holds an equilibrium: tyre-slip's domain, reported to them.
 
 ## Contract change requests
 

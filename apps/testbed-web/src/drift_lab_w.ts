@@ -42,6 +42,9 @@ const FIELDS: Record<string, { label: string; min: number; max: number; step: nu
   speed_sensitivity: { label: "speed sensitivity", min: 0, max: 1, step: 0.05, scale: 100, unit: "%", hint: "less lock at speed (the owner's reference setting: 75 %)" },
   sens_ref_kmh: { label: "sens. ref speed", min: 40, max: 250, step: 1, unit: "km/h", hint: "speed where lock = 1 / (1 + sensitivity) (75 %: 57 % lock)" },
   sens_exponent: { label: "sens. exponent", min: 1, max: 4, step: 0.5, hint: "lock = 1 / (1 + s·(v / ref)^exp); 2 = like the angle a constant-g corner needs" },
+  align_gain: { label: "VR: align gain", min: 0, max: 1.2, step: 0.05, hint: "velocity-relative steering: how far the wheels follow the front axle's travel in a slide (1 = along it)" },
+  t_align_s: { label: "VR: slide align time", min: 0.05, max: 0.8, step: 0.01, unit: "s", hint: "velocity-relative steering: in a slide the wheels move at least full lock in this time" },
+  slide_key_gain: { label: "VR: key in slide ×", min: 0, max: 1, step: 0.05, hint: "velocity-relative steering: the key's offset from the travel in a full slide, × lock(speed)" },
   self_align: { label: "self-align", min: 0, max: 1, step: 0.05, scale: 100, unit: "%", hint: "keys released: the rack returns toward the front axle's travel instead of the centre (A/B; default 0)" },
 };
 
@@ -82,7 +85,10 @@ const CAR_FIELDS: Record<string, { label: string; min: number; max: number; step
 };
 
 const STORE = "wp.driftLabW.steer";
-const CAR_STORE = "wp.driftLabW.car";
+// v2: the lab's default became the spin model (launches straight on the map's road crown); an
+// older saved "tyre data" must not override it.
+const CAR_STORE = "wp.driftLabW.car.v2";
+const TCS_STORE = "wp.driftLabW.tcs";
 const RIDE_STORE = "wp.driftLabW.ride";
 const pct = (x: number) => `${Math.round((x ?? 0) * 100)}%`;
 
@@ -182,9 +188,9 @@ export class DriftLabWPanel {
         /* storage blocked: data */
       }
       try {
-        this.sim.carTuneSet(carTune || JSON.stringify(this.sim.carTuneDefaults().data));
+        this.sim.carTuneSet(carTune || JSON.stringify(this.sim.carTuneDefaults().spin));
       } catch {
-        this.sim.carTuneSet(JSON.stringify(this.sim.carTuneDefaults().data));
+        this.sim.carTuneSet(JSON.stringify(this.sim.carTuneDefaults().spin));
       }
       this.build();
     } else {
@@ -194,8 +200,18 @@ export class DriftLabWPanel {
     }
   }
 
+  /** TCS on (the existing on/off assist) — the panel checkbox, default off (the owner's
+   * reference) until the Off / Half / Full levels land. */
+  private tcs(): boolean {
+    try {
+      return localStorage.getItem(TCS_STORE) === "1";
+    } catch {
+      return false;
+    }
+  }
+
   /** The lab's assists (call after any assist preset is applied): the owner's reference
-   * settings — TCS off, ESC off, ABS on, manual gears (automatic clutch), no pedal filters, no
+   * settings — TCS off (panel checkbox), ESC off, ABS on, manual gears (automatic clutch), no pedal filters, no
    * countersteer help (it is bypassed by plain steering anyway). */
   applyAssists(): void {
     if (!this.active) return;
@@ -204,7 +220,7 @@ export class DriftLabWPanel {
     this.sim.setAssists(id, {
       ...a,
       abs: true,
-      tcs: false,
+      tcs: this.tcs(),
       esc: false,
       countersteer_help: 0,
       throttle_filter: 0,
@@ -246,6 +262,37 @@ export class DriftLabWPanel {
       if (current) sel.value = current;
       sel.onchange = () => this.restart(sel.value);
       row("car", "reference-parity test cars (parity_*) and roster cars; restarts the lab", sel, document.createElement("span"));
+    }
+    // Velocity-relative steering (clip 8 cockpit): A/B, default off (step 7: it over-catches).
+    {
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.id = "drift-lab-w-vr";
+      input.checked = Boolean((p as Record<string, unknown>).velocity_relative);
+      input.onchange = () =>
+        this.save({ ...(this.sim.plainSteer() ?? defaults), velocity_relative: input.checked } as unknown as Record<string, number>);
+      row(
+        "velocity-relative steering",
+        "clip 8: in a slide the wheels follow the front axle's travel and the key adds lock on top (A/B; measured: a strong catch that swings through — see drift-lab-w.md step 7)",
+        input,
+        document.createElement("span"),
+      );
+    }
+    // TCS (the existing on/off assist) until Off / Half / Full lands.
+    {
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.id = "drift-lab-w-tcs";
+      input.checked = this.tcs();
+      input.onchange = () => {
+        try {
+          localStorage.setItem(TCS_STORE, input.checked ? "1" : "0");
+        } catch {
+          /* ignore */
+        }
+        this.applyAssists();
+      };
+      row("TCS", "traction control on / off (the reference's Off / Half / Full comes later); default off as the owner drives", input, document.createElement("span"));
     }
     // Speed sensitivity A/B (clip 8): lock shrinks with speed (rack) vs full lock, tyres limit.
     {
