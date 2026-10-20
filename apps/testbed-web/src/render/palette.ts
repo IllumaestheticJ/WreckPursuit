@@ -47,9 +47,8 @@ export const PALETTE = {
   // ---- residential lots (playtest row 95) ----
   /** Grass verge between kerb and walkway, residential streets. */
   verge: 0x2f3c31,
-  /** Pitched roofs: two tones (slate / clay). */
+  /** Pitched roofs (clay). */
   roof: 0x3d3234,
-  roofAlt: 0x2e333d,
   garage: 0x46434a,
   driveway: 0x44464f,
   hedge: 0x27362a,
@@ -156,7 +155,6 @@ export const CITY_MATERIAL_COLOURS: Record<string, Hex> = {
   kerb: PALETTE.kerb,
   verge: PALETTE.verge,
   roof: PALETTE.roof,
-  roof_alt: PALETTE.roofAlt,
   garage: PALETTE.garage,
   driveway: PALETTE.driveway,
   hedge: PALETTE.hedge,

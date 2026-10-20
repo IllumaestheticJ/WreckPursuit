@@ -11,6 +11,12 @@ import * as THREE from "three";
 /** Tile edge, m. ~10 materials × tiles in view stays around a hundred draw calls. */
 export const CITY_TILE_M = 320;
 
+/**
+ * Tile edge for instanced meshes (trees, driveways, hedges, fences), m: their unit meshes are
+ * tiny, so fewer, bigger tiles cost less (draw calls) than the culling saves.
+ */
+export const INSTANCE_TILE_M = 640;
+
 /** Split one indexed or non-indexed geometry into tiles keyed by the triangle centroid (x, z). */
 function splitGeometry(geo: THREE.BufferGeometry, tileM: number): THREE.BufferGeometry[] {
   const pos = geo.getAttribute("position");
@@ -85,7 +91,7 @@ export class CityTiles {
       // Instanced meshes (trees, driveways, hedges, fences: glTF EXT_mesh_gpu_instancing)
       // are split by instance position instead.
       if ((m as THREE.InstancedMesh).isInstancedMesh) {
-        this.splitInstances(m as THREE.InstancedMesh, tileM);
+        this.splitInstances(m as THREE.InstancedMesh, tileM * (INSTANCE_TILE_M / CITY_TILE_M));
         continue;
       }
       const parts = splitGeometry(m.geometry, tileM);

@@ -422,7 +422,6 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
     // driveways, hedges and fences are instanced: `build_instanced`).
     let mut verge = Prim::new("verge", [0.42, 0.52, 0.34, 1.0]);
     let mut roof = Prim::new("roof", [0.46, 0.30, 0.28, 1.0]);
-    let mut roof_alt = Prim::new("roof_alt", [0.34, 0.36, 0.40, 1.0]);
     let mut garage = Prim::new("garage", [0.68, 0.66, 0.62, 1.0]);
     let mut wall = Prim::new("retaining_wall", [0.52, 0.50, 0.46, 1.0]);
     let mut bridge = Prim::new("bridge", [0.58, 0.58, 0.56, 1.0]);
@@ -604,18 +603,13 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
             bridge.quad(i0, o0, o1, i1, [0.0, 0.0, 1.0]);
         }
     }
-    for (i, b) in net.buildings.iter().enumerate() {
+    for b in &net.buildings {
         let walls = if b.kind == BuildingKind::Garage {
             &mut garage
         } else {
             &mut buildings
         };
-        // Two roof colours, alternating by a hash of the index.
-        let r = if (i as u32).wrapping_mul(2_654_435_761) >> 31 == 0 {
-            &mut roof
-        } else {
-            &mut roof_alt
-        };
+        let r = &mut roof;
         house(walls, r, b);
     }
     // Tunnels and covered roads (backlog B04): concrete walls, the roof deck, ceiling lights.
@@ -640,7 +634,6 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
         kerb,
         buildings,
         roof,
-        roof_alt,
         garage,
         wall,
         bridge,
