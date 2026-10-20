@@ -417,11 +417,21 @@ pub const META_STRIDE: usize = 3;
 /// Per-vehicle render metadata, same order as `vehicle_states()`, 3 floats each:
 /// `[entity, kind (0 player, 1 AI racer, 2 police, 3 physical traffic), flags]` with flags
 /// 1 siren, 2 headlights, 4 braking, 8 horn (from the input the vehicle is driving with; a
-/// police car's siren and light bar follow its unit's assignment, see [`police::siren_on`]).
+/// police car's siren and light bar follow its unit's assignment, see [`police::siren_on`]),
+/// 16 left turn signal, 32 right turn signal, 64 hazard lights (police: [`police::turn_signal`];
+/// physical traffic: its agent's indicators).
 #[wasm_bindgen]
 pub fn vehicle_meta() -> Result<Vec<f32>, JsValue> {
     get(|s| {
         let mut out = Vec::with_capacity(s.sim().vehicles().len() * META_STRIDE);
+        // Physical traffic agents' indicators and hazards, by agent id.
+        let lamps: std::collections::BTreeMap<wp_world::AgentId, (i8, bool)> = s
+            .sim()
+            .world()
+            .agents()
+            .filter(|a| a.lod == wp_world::Lod::Physical)
+            .map(|a| (a.id, (a.turn_signal, a.hazard_lights)))
+            .collect();
         for v in s.sim().vehicles() {
             let kind = match v.kind {
                 wp_sim::VehicleKind::Player => 0.0,
@@ -430,10 +440,18 @@ pub fn vehicle_meta() -> Result<Vec<f32>, JsValue> {
                 wp_sim::VehicleKind::Traffic => 3.0,
             };
             let i = &v.input;
+            let (signal, hazards) = match (v.police_unit, v.traffic_agent) {
+                (Some(_), _) => (police::turn_signal(s.sim(), v), false),
+                (None, Some(a)) => lamps.get(&a).copied().unwrap_or((0, false)),
+                (None, None) => (0, false),
+            };
             let flags = police::siren_on(s.sim(), v) as u32
                 | (i.headlights as u32) << 1
                 | ((i.brake > 0.1) as u32) << 2
-                | (i.horn as u32) << 3;
+                | (i.horn as u32) << 3
+                | ((signal < 0) as u32) << 4
+                | ((signal > 0) as u32) << 5
+                | (hazards as u32) << 6;
             out.extend_from_slice(&[v.id.0 as f32, kind, flags as f32]);
         }
         out

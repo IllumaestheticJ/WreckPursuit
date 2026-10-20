@@ -72,7 +72,7 @@ Car data (`data/{cars,lattices,tires,materials,modes}`) is embedded at build tim
 | `entities` | – | `Uint32Array` | Scenario entities, scenario order (vehicles the sim spawns itself — police units, promoted traffic — are not listed; see `vehicle_meta`). |
 | `state_stride` | – | `50` | |
 | `vehicle_states` | – | `Float32Array` (layout **S**) × vehicles | **Every** sim vehicle, ascending entity (scenario cars, then sim-spawned police / traffic as they appear and disappear). |
-| `vehicle_meta` | – | `Float32Array` 3 × vehicles | Same order as `vehicle_states`: `[entity, kind (0 player, 1 AI racer, 2 police, 3 physical traffic), flags]`, flags 1 siren, 2 headlights, 4 braking, 8 horn (from the input the vehicle drives with). |
+| `vehicle_meta` | – | `Float32Array` 3 × vehicles | Same order as `vehicle_states`: `[entity, kind (0 player, 1 AI racer, 2 police, 3 physical traffic), flags]`, flags 1 siren, 2 headlights, 4 braking, 8 horn (from the input the vehicle drives with), 16 / 32 left / right turn signal, 64 hazards (police: `Unit::turn_signal`, off with lights; physical traffic: its agent). The testbed blinks amber corner lamps at 1.5 Hz (`blinkOn`, also on the instanced traffic boxes). |
 | `vehicle_states_prev` | – | same | State before the last tick of the latest `step()`. |
 | `vehicle_info` | `entity` | JSON | `kind`, scenario `name` (sim-spawned: `police7`, `traffic12`), `body_size_m`, wheels, `cg_m`, redline, lattice sizes, name tables `regions` / `components` / `surfaces`, `mounted_components`, `spawn_pos`. |
 | `world_info` | – | `Float32Array[8]` | `[tick, time_of_day_h, night_factor, mode (0/1 Sim), replay, recording, city, scripted]`. |

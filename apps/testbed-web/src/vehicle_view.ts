@@ -2,7 +2,7 @@
 // in sim/chassis coordinates (+Z up, +Y forward, +X right); the scene maps that to Three's
 // Y-up by parenting under a rotated `world` group (see scene.ts).
 import * as THREE from "three";
-import { META_FLAG, S, SW, T, TW } from "./wasm/layout";
+import { META_FLAG, S, SW, T, TW, blinkOn } from "./wasm/layout";
 import type { VehicleInfo } from "./wasm/sim";
 import { sim } from "./wasm/sim";
 import { layers } from "./settings";
@@ -74,6 +74,9 @@ export class VehicleView {
   private readonly sirenLight: THREE.PointLight | null = null;
   private readonly headMat: THREE.MeshStandardMaterial;
   private readonly tailMat: THREE.MeshStandardMaterial;
+  /** Amber indicator lamps, left and right side (front + rear corner each). */
+  private readonly leftMat: THREE.MeshStandardMaterial;
+  private readonly rightMat: THREE.MeshStandardMaterial;
   /** Per-panel car mesh (workstream R, render/panels.ts); replaces box, lamps and tires once loaded. */
   readonly panels: PanelBody;
   private readonly lamps: THREE.Mesh[] = [];
@@ -104,6 +107,18 @@ export class VehicleView {
       tail.position.set(sx * (w / 2 - 0.25), -l / 2 - 0.01, h * 0.5);
       this.root.add(head, tail);
       this.lamps.push(head, tail);
+    }
+    // Turn signals: amber lamps at the outer corners, front and rear.
+    this.leftMat = new THREE.MeshStandardMaterial({ color: 0x664000, emissive: 0x000000 });
+    this.rightMat = new THREE.MeshStandardMaterial({ color: 0x664000, emissive: 0x000000 });
+    for (const sx of [-1, 1]) {
+      const mat = sx < 0 ? this.leftMat : this.rightMat;
+      for (const sy of [-1, 1]) {
+        const ind = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.06, 0.12), mat);
+        ind.position.set(sx * (w / 2 - 0.04), sy * (l / 2 + 0.01), h * 0.5);
+        this.root.add(ind);
+        this.lamps.push(ind);
+      }
     }
 
     // Police: roof light bar (red left, blue right) + one point light that flashes with the siren.
@@ -381,6 +396,12 @@ export class VehicleView {
     const headlights = (flags & META_FLAG.headlights) !== 0;
     this.headMat.emissive.setHex(headlights ? 0xfff2c0 : 0x000000);
     this.tailMat.emissive.setHex(flags & META_FLAG.brake ? 0xff1010 : headlights ? 0x400000 : 0x000000);
+    const blink = blinkOn(timeS);
+    const hazard = (flags & META_FLAG.hazard) !== 0;
+    const left = blink && (hazard || (flags & META_FLAG.turnLeft) !== 0);
+    const right = blink && (hazard || (flags & META_FLAG.turnRight) !== 0);
+    this.leftMat.emissive.setHex(left ? 0xffa000 : 0x000000);
+    this.rightMat.emissive.setHex(right ? 0xffa000 : 0x000000);
     if (!this.lightBar) return;
     const siren = (flags & META_FLAG.siren) !== 0;
     // Alternating red/blue at 2.5 Hz with a double strobe on each side.

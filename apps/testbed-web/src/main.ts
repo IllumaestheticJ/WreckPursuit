@@ -517,7 +517,7 @@ async function main(): Promise<void> {
     }
     scene.update(dt, sim.intents());
     // Promoted (physical) agents are drawn as sim vehicles once the sim spawns them.
-    scene.updateAgents(sim.trafficAgents(), physicalTraffic);
+    scene.updateAgents(sim.trafficAgents(), physicalTraffic, tS);
     scene.updatePoliceUnits(sim.policeUnits(), tS);
     const wi = sim.worldInfo();
     scene.setTimeOfDay(wi[W.night]);

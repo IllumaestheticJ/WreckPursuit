@@ -6,7 +6,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { Barrier, SimEvent } from "./wasm/sim";
-import { AGENT_FLAG, AGENT_STRIDE, INTENT_STRIDE } from "./wasm/layout";
+import { AGENT_FLAG, AGENT_STRIDE, INTENT_STRIDE, blinkOn } from "./wasm/layout";
 import { layers } from "./settings";
 import { SignalView } from "./signals_view";
 
@@ -24,6 +24,12 @@ const MAX_AGENTS = 1024;
 /** Traffic car box size [w, l, h], m. */
 const AGENT_SCALE = new THREE.Vector3(1.8, 4.4, 1.4);
 const tmpAgentColour = new THREE.Color();
+/** Indicator lamp instances: up to 4 per agent (hazards light all corners). */
+const MAX_AGENT_LAMPS = MAX_AGENTS * 4;
+/** Indicator lamp corners in the agent box frame (+X right, +Y forward), m; z above the road. */
+const LAMP_X = AGENT_SCALE.x / 2 + 0.02;
+const LAMP_Y = AGENT_SCALE.y / 2 - 0.1;
+const LAMP_Z = 0.95;
 /** Floats per unit in police_units(). */
 const POLICE_UNIT_STRIDE = 6;
 
@@ -44,6 +50,14 @@ export class SceneView {
     new THREE.BoxGeometry(1, 1, 1),
     new THREE.MeshStandardMaterial({ color: 0xffffff }),
     MAX_AGENTS,
+  );
+
+  /** Lit turn-signal / hazard lamps of the instanced traffic boxes (amber, unlit material so
+   * they read at night too). */
+  private readonly agentLamps = new THREE.InstancedMesh(
+    new THREE.BoxGeometry(0.12, 0.3, 0.14),
+    new THREE.MeshBasicMaterial({ color: 0xffa000 }),
+    MAX_AGENT_LAMPS,
   );
 
   private debugGrid!: THREE.GridHelper;
@@ -82,7 +96,9 @@ export class SceneView {
     axes.position.z = 0.02;
     this.agentMesh.count = 0;
     this.agentMesh.frustumCulled = false;
-    this.world.add(axes, this.barriers, this.intentGroup, this.agentMesh, this.signals.group);
+    this.agentLamps.count = 0;
+    this.agentLamps.frustumCulled = false;
+    this.world.add(axes, this.barriers, this.intentGroup, this.agentMesh, this.agentLamps, this.signals.group);
   }
 
   /**
@@ -168,15 +184,21 @@ export class SceneView {
     });
   }
 
-  /** Draw civilian traffic from traffic_agents() ([x, y, z, yaw, flags] per agent). */
-  updateAgents(agents: Float32Array, skipPhysical = false): void {
+  /** Draw civilian traffic from traffic_agents() ([x, y, z, yaw, flags] per agent); turn
+   * signals and hazards blink on sim time `timeS`. */
+  updateAgents(agents: Float32Array, skipPhysical = false, timeS = 0): void {
     const total = agents.length / AGENT_STRIDE;
     const show = layers.on("traffic");
     this.agentMesh.visible = show && total > 0;
+    this.agentLamps.visible = this.agentMesh.visible;
     if (!this.agentMesh.visible) return;
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const zAxis = new THREE.Vector3(0, 0, 1);
+    const lampScale = new THREE.Vector3(1, 1, 1);
+    const corner = new THREE.Vector3();
+    const blink = blinkOn(timeS);
+    let lamps = 0;
     let n = 0;
     for (let a = 0; a < total && n < MAX_AGENTS; a++) {
       const o = a * AGENT_STRIDE;
@@ -195,7 +217,24 @@ export class SceneView {
               ? 0xffd040
               : 0xb8bcc4;
       this.agentMesh.setColorAt(i, tmpAgentColour.setHex(c));
+      if (!blink) continue;
+      const hazard = (flags & AGENT_FLAG.hazard) !== 0;
+      for (const sx of [-1, 1]) {
+        const on = hazard || (flags & (sx < 0 ? AGENT_FLAG.turnLeft : AGENT_FLAG.turnRight)) !== 0;
+        if (!on) continue;
+        for (const sy of [-1, 1]) {
+          if (lamps >= MAX_AGENT_LAMPS) break;
+          corner.set(sx * LAMP_X, sy * LAMP_Y, LAMP_Z).applyQuaternion(q);
+          corner.x += agents[o];
+          corner.y += agents[o + 1];
+          corner.z += agents[o + 2];
+          m.compose(corner, q, lampScale);
+          this.agentLamps.setMatrixAt(lamps++, m);
+        }
+      }
     }
+    this.agentLamps.count = lamps;
+    this.agentLamps.instanceMatrix.needsUpdate = true;
     this.agentMesh.count = n;
     this.agentMesh.instanceMatrix.needsUpdate = true;
     if (this.agentMesh.instanceColor) this.agentMesh.instanceColor.needsUpdate = true;

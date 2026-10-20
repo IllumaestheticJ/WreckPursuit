@@ -103,5 +103,11 @@ export const INTENT_STRIDE = 8;
 export const META_STRIDE = 3;
 /** vehicle_meta() kinds (`wp_sim::VehicleKind`). */
 export const VEHICLE_KIND = { player: 0, aiRacer: 1, police: 2, traffic: 3 } as const;
-/** vehicle_meta() flag bits (from the input the vehicle drives with). */
-export const META_FLAG = { siren: 1, headlights: 2, brake: 4, horn: 8 } as const;
+/** vehicle_meta() flag bits (from the input the vehicle drives with; turn signals and hazards
+ * from the police unit / traffic agent behind the vehicle). */
+export const META_FLAG = { siren: 1, headlights: 2, brake: 4, horn: 8, turnLeft: 16, turnRight: 32, hazard: 64 } as const;
+
+/** Turn signals / hazards blink at this rate, Hz (on for the first half of each period). */
+export const BLINK_HZ = 1.5;
+/** Whether blinking lamps are lit at sim time `timeS` (one shared phase, like a real flasher). */
+export const blinkOn = (timeS: number): boolean => (timeS * BLINK_HZ) % 1 < 0.5;
