@@ -3135,6 +3135,7 @@ dependencies = [
  "wp_damage",
  "wp_math",
  "wp_net",
+ "wp_opponent",
  "wp_police",
  "wp_sim",
  "wp_weather",

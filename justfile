@@ -64,6 +64,13 @@ city-v2:
 traffic-bench minutes="2":
     cargo run --release -p wp_world --example traffic_bench -- {{minutes}} 400 12
 
+# Police competency benchmark (see docs/integration/police-bench.md): an AI escapee vs the
+# police across cities, day/night, clear/rain, wanted L1-L3 and three skills. Prints a table and
+# writes docs/integration/police-bench-results.md. Extra args go to simcli, e.g.
+# `just police-bench --full`, `just police-bench --city vesper --seeds 4 --no-write`.
+police-bench *args:
+    cargo run --release -p simcli -- police-bench {{args}}
+
 # Regenerate the debug lattices in data/lattices/ (gen-lattice sedan/coupe profiles).
 lattices:
     cargo run -p wp_damage --bin gen-lattice -- --debug
