@@ -466,7 +466,8 @@ at 115 s (was 130 s; police arrive sooner). Comments updated in both files.
 - **Lead**: `PoliceStats` gained `static_hits`, `pushes`, `backup_joins`, `rams`,
   `junction_blocks`; `Tactic::Ram(RamKind)` is a new variant (captain view shows "ram");
   `PoliceSystem::begin_pursuit`, `racers_iter`, `set_walls`, `set_feelers` are new. `UnitBody::speed`
-  is now signed (negative backwards).
+  is negative only when the unit is really reversing (below −1 m/s along its heading); otherwise
+  it is the speed magnitude, as before (a fully signed speed broke `wp_race` `grid_highway_sprint`).
 
 ROUND13_GATE
 
