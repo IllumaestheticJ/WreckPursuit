@@ -223,6 +223,19 @@ impl GripBalance {
         }
     }
 
+    /// "drift: best (test)" (lead, with tyre-slip's measurements): the smart lock alone
+    /// ([`Self::lock_only`]) + rear downforce 0.8 m² + RWD rear cornering stiffness × 0.45. With
+    /// tyre-slip's tuned velocity-relative steering (the panel button sets both) it held 20 / 27
+    /// of the drift robustness set, the best so far (docs/integration/grip-balance.md).
+    pub fn drift_best() -> Self {
+        Self {
+            rear_downforce: 0.8,
+            rear_stiffness: 0.45,
+            tyres_rwd_only: true,
+            ..Self::lock_only()
+        }
+    }
+
     /// Step 2's "new" balance (kept for the A/B): smart lock (margin −0.3 → +1.0 between 100
     /// and 160 km/h), RWD cornering stiffness × 0.75 / × 0.65, no downforce, no probe fix.
     pub fn step2() -> Self {

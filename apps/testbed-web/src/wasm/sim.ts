@@ -297,6 +297,7 @@ export const sim = {
     new: Record<string, number | boolean | string>;
     step2: Record<string, number | boolean | string>;
     slow_weight: Record<string, number | boolean | string>;
+    drift_best: Record<string, number | boolean | string>;
     lock_only: Record<string, number | boolean | string>;
   } =>
     JSON.parse(wasm.grip_balance_defaults_json()),

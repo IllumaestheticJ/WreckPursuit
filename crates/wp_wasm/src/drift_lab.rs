@@ -250,7 +250,7 @@ pub fn grip_balance_json() -> String {
 }
 
 /// `{ "before": <the data as is>, "new": <the lab's new balance>, "step2": <step 2's set>,
-/// "slow_weight": <the balance for the slow-weight ride preset>,
+/// "slow_weight": <the balance for the slow-weight ride preset>, "drift_best": <drift: best (test)>,
 /// "lock_only": <step 1: the smart lock alone> }`, JSON.
 #[wasm_bindgen]
 pub fn grip_balance_defaults_json() -> String {
@@ -259,6 +259,7 @@ pub fn grip_balance_defaults_json() -> String {
         "new": wp_vehicle::grip_lab::GripBalance::lab_default(),
         "step2": wp_vehicle::grip_lab::GripBalance::step2(),
         "slow_weight": wp_vehicle::grip_lab::GripBalance::for_slow_weight(),
+        "drift_best": wp_vehicle::grip_lab::GripBalance::drift_best(),
         "lock_only": wp_vehicle::grip_lab::GripBalance::lock_only(),
     }))
 }

@@ -89,6 +89,13 @@ const gNew = await page.evaluate(() => window.__wp.sim.gripBalance());
 check(Math.abs(gNew.rear_stiffness - 0.45) < 1e-6 && gNew.tyres_rwd_only === true && gNew.probe_tilt_fix === true && Math.abs(gNew.rear_downforce - 0.8) < 1e-6, `new balance: softer RWD tyres, rear downforce, probe fix ${JSON.stringify(gNew)}`);
 await page.locator("#drift-lab-w button", { hasText: "step 2" }).click();
 check((await abText()) === "balance: step 2", `step 2 preset: "${await abText()}"`);
+await page.locator("#drift-w-drift-best").click();
+const db = await page.evaluate(() => ({ g: window.__wp.sim.gripBalance(), p: window.__wp.sim.plainSteer() }));
+check((await abText()) === "balance: drift best" && Math.abs(db.g.rear_stiffness - 0.45) < 1e-6 && Math.abs(db.g.rear_downforce - 0.8) < 1e-6 && db.p.velocity_relative === true && Math.abs(db.p.slide_key_gain - 0.31) < 1e-6, `drift: best (test) sets the balance and the VR steering ${JSON.stringify(db)}`);
+await page.evaluate(() => {
+  const vr = document.getElementById("drift-lab-w-vr");
+  if (vr.checked) vr.click();
+});
 await page.locator("#drift-lab-w button", { hasText: "for slow weight" }).click();
 check((await abText()) === "balance: for slow weight" && (await page.evaluate(() => window.__wp.sim.gripBalance().rear_stiffness)) === 1, `slow-weight balance preset: "${await abText()}"`);
 await page.locator("#drift-lab-w button", { hasText: "lock only (step 1)" }).click();

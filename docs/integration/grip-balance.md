@@ -58,6 +58,58 @@ Step 3 details (parity_rwd_d unless named):
 | tyre-load chatter in a 60 mph corner | 0.6–1.0 kN RMS | 0.00 kN |
 | FWD (parity_fwd_c) body slip 60 / 100 mph, gradient 60 / 100 km/h | 1.1 / 2.3°, +0.29 / +0.84 | 1.3 / 1.5°, +0.37 / +0.97 |
 
+## Round12 merge, owner's flat-rpm bug, "drift: best (test)" (2026-10-20, late)
+
+**Flat rpm in 3rd ("even with the clutch on manual").** Two causes:
+1. The auto-clutch launch slip, fixed on round12 by a5956954 (merged).
+2. Drift Lab W's `applyAssists` forced `auto_clutch: true` (and manual gears) over the testbed's
+   clutch select every time the lab started or a preset was applied.
+
+Now the lab takes the viewer's saved testbed choices (clutch, gears, TCS / ABS levels) and
+only fills its reference settings where nothing was chosen. The W TCS checkbox wins once used.
+The readout adds clutch auto / manual, engagement %, locked, engine rpm, driven-wheel rpm and the
+clutch pedal.
+
+- **Native check** (`grip_balance -- pull`): full throttle in 3rd from 40 km/h, before and new
+  balance, auto and manual clutch, on debug_coupe, parity_rwd_d and rampart_50. The revs follow
+  road speed (debug_coupe 2353 → 5732 rpm over 5 s, slip ≤ 0.04).
+- **e2e:** the manual clutch survives a lab restart, and a 3rd-gear pull on the manual clutch
+  goes 1455 → 3229 rpm at 40 → 87 km/h.
+
+**Merge of origin/lead/round12 7a1f3f75**, by W's a9581851 rule (W drift / steering lineage wins,
+non-drift round12 kept):
+- **Dropped:** A's drift hold, throttle smoothing, pivot aid and drift-tuning UI.
+- **Kept from round12:** the side floor (data path only), TCS / ABS levels and the probe tilt fix
+  (now on by default, so `probe_tilt_fix` is a no-op).
+- **Failing tests:** three legacy Drift Lab B tests now fail (`drift_lab_b` held_counter_key /
+  sloppy_driving, `drift_lab_b_shaped`). B's assists relied on the TCS-off slide feathering that
+  round12 removed. `handbrake_stabs` was already red. Left for W's re-merge to decide.
+- **Goldens:** round12's hashes, not re-blessed for the W keyboard path.
+
+**Drift robustness after the merge** (`grip_balance -- robust`, 27 entries; VR = tyre-slip's
+tuned velocity-relative steering):
+
+| balance | plain steering | VR steering |
+|---|---|---|
+| before (data) | 2 | 15 |
+| new | 1 | 17 |
+| **drift: best (test)** = lock only + rear downforce 0.8 + RWD rear × 0.45 | 2 | **25** |
+
+"drift: best (test)" is a drift test set. In grip driving it is twitchy:
+- a 0.1 s tap at 60 mph gives 12.4° of heading (new 3.5°, before 4.9°)
+- the 100 km/h lane change reaches 9.9° of slip
+- grip is 0.83 g at 60 mph
+
+So it is a one-click preset (it also sets the VR steering), not the default. VR changes none of
+the grip-driving numbers (it only acts in a slide). **New + VR** keeps all of new's grip
+driving, holds the W standard entry 5.5 s, and holds 17 / 27.
+
+**Default balance stays "new".** The owner's "handling is great" was on step 14, which opened on
+the lab-default ride + "new". "new" with slow weight spins a held key at 60 mph, which the owner
+would have noticed. "for slow weight", "drift: best (test)", "step 2" and "lock only" stay as
+A/B buttons. Worth an owner A/B: new + VR (the steering section's checkbox with tyre-slip's
+constants) for the drift transitions.
+
 ## Merge of lead/drift-lab-w feea6bcc + "balance new" × "slow weight" (lead, 2026-10-20)
 
 Merged W step 8 (slow-weight preset, VR corrections, round12 9c947ebb). The ground probe was

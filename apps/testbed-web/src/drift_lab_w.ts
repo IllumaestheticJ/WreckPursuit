@@ -94,6 +94,9 @@ const CAR_STORE = "wp.driftLabW.car.v2";
 const TCS_STORE = "wp.driftLabW.tcs";
 const RIDE_STORE = "wp.driftLabW.ride";
 const GRIP_STORE = "wp.driftLabW.grip";
+/** Tyre-slip's tuned velocity-relative steering ("drift: spin + VR (test)",
+ * CarTune::spin_vr_plain() on lead/tyre-slip), used by the "drift: best (test)" preset. */
+const DRIFT_BEST_STEER = { velocity_relative: true, align_gain: 0.5, align_from_deg: 7.0, align_full_deg: 17.0, t_align_s: 0.26, slide_key_gain: 0.31 };
 
 /** Grip-balance lab sliders (wp_vehicle::grip_lab::GripBalance). */
 const GRIP_FIELDS: Record<string, { label: string; min: number; max: number; step: number; scale?: number; unit?: string; hint: string }> = {
@@ -568,7 +571,7 @@ export class DriftLabWPanel {
       const isNew = sameGrip(gt, gd.new);
       const ab = document.createElement("button");
       ab.id = "drift-w-balance-ab";
-      ab.textContent = `balance: ${isNew ? "new" : sameGrip(gt, gd.before) ? "before" : sameGrip(gt, gd.lock_only) ? "lock only" : sameGrip(gt, gd.step2) ? "step 2" : sameGrip(gt, gd.slow_weight) ? "for slow weight" : "custom"}`;
+      ab.textContent = `balance: ${isNew ? "new" : sameGrip(gt, gd.before) ? "before" : sameGrip(gt, gd.lock_only) ? "lock only" : sameGrip(gt, gd.step2) ? "step 2" : sameGrip(gt, gd.slow_weight) ? "for slow weight" : sameGrip(gt, gd.drift_best) ? "drift best" : "custom"}`;
       ab.title = "A/B: before = the tyre data and the plain lock; new = the smart lock + softer-sidewall tyres on RWD cars + rear downforce + probe fix (the car rotates at the limit, stable at 100 mph)";
       ab.onclick = () => {
         // new → before; anything else (before, lock only, custom) → new.
@@ -596,9 +599,18 @@ export class DriftLabWPanel {
         saveGrip(gd.slow_weight);
         this.build();
       };
+      const driftBest = document.createElement("button");
+      driftBest.id = "drift-w-drift-best";
+      driftBest.textContent = "drift: best (test)";
+      driftBest.title = "smart lock + rear downforce + RWD rear tyres × 0.45, with tyre-slip's tuned velocity-relative steering (steering section): 20 / 27 of the drift robustness set";
+      driftBest.onclick = () => {
+        saveGrip(gd.drift_best);
+        this.save({ ...(this.sim.plainSteer() ?? this.sim.plainSteerDefaults()), ...DRIFT_BEST_STEER } as unknown as Record<string, number>);
+        this.build();
+      };
       const abRow = document.createElement("div");
       abRow.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
-      abRow.append(ab, forSlow, step2, lockOnly);
+      abRow.append(ab, forSlow, driftBest, step2, lockOnly);
       this.body.appendChild(abRow);
       const sel = document.createElement("select");
       sel.id = "drift-w-lock-mode";
