@@ -132,7 +132,14 @@ fn flooring_it_at_a_big_angle_spins_lifting_saves() {
     // saves it. (With the automatic box the upshift saves the floored car since step 4.)
     for id in RWD {
         let flood = drift_run(&car(id), &reference(0.6), DriftDriver::Flood, 40.0, 0.6, 1);
-        let lift = drift_run(&car(id), &reference(0.6), DriftDriver::FlickLift, 40.0, 0.6, 1);
+        let lift = drift_run(
+            &car(id),
+            &reference(0.6),
+            DriftDriver::FlickLift,
+            40.0,
+            0.6,
+            1,
+        );
         assert!(flood.spun, "{id} floored: {flood:?}");
         assert!(!lift.spun, "{id} lifted: {lift:?}");
     }
