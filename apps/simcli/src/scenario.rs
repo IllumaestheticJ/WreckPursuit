@@ -359,6 +359,14 @@ pub enum Driver {
         route_id: String,
         /// Target speed, m/s.
         target_speed: f32,
+        /// Drive this far right of the route's lane centre (negative = left), m. A siren car
+        /// passing yielding traffic hugs the centre line (e.g. `-1.55` on a 3.5 m lane).
+        #[serde(default, skip_serializing_if = "is_zero")]
+        lateral_offset_m: f32,
+        /// Keep distance from vehicles ahead (civilian traffic and the other entities) with the
+        /// shared car-following law instead of driving through them.
+        #[serde(default, skip_serializing_if = "is_false")]
+        keep_distance: bool,
     },
     /// Chase/attack another entity with the AI driver. Needs the AI driver (prompts 05/06).
     AiDriver {
