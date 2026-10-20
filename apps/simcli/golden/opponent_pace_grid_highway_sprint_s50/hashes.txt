@@ -1,0 +1,11 @@
+# simcli hashes scenario=opponent_pace_grid_highway_sprint_s50 systems=world,vehicle,damage,police,net hash_spec=3 contract=0.3.0
+240 25420689a6cda63d
+480 d3eaaad6a30085bf
+720 98a4259706ffb875
+960 78505216fd2ef350
+1200 4786d285be6fa347
+1440 6fbae916d972a46f
+1680 60ed3012f16350a9
+1920 2e5dcce60673aab7
+2160 65dd1dcb626bf242
+2400 1694f7f923663827

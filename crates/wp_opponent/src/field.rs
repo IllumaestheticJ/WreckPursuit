@@ -281,6 +281,9 @@ struct Obstacle {
     /// for a siren or with its hazards on): a fixed obstacle anyone may pass, using the
     /// opposing lanes where the corridor allows overtaking there.
     parked: bool,
+    /// Its heading along the corridor (cosine to the corridor direction; −1 = facing me
+    /// head on).
+    facing: f32,
 }
 
 /// An obstacle relative to one racer: arc distance ahead (`ds` < 0 = behind) and the
@@ -1325,6 +1328,7 @@ impl Field {
                             unstable,
                             passing: r.tactic == Tactic::Overtake,
                             parked: matches!(r.tactic, Tactic::Park | Tactic::Yield),
+                            facing: 1.0,
                         });
                         continue;
                     }
@@ -1557,9 +1561,20 @@ fn decide_racer(
             r.status,
             RacerStatus::Finished { .. } | RacerStatus::Disqualified
         ) || (!corridor.closed && finish_m.is_some_and(|f| r.progress >= f));
+        // A non-racer crawling along ahead (under 70 % of my own pace here, or 6 m/s: a car
+        // that just turned round, a slow climber) that has held me up for 4 s: even a careful
+        // driver goes round it on the opposing lanes when the pass checks find them clear.
+        let crawl_mps = (0.7 * corridor.interp(&profile.v, r.s + 30.0)).max(6.0);
+        let crawler_ahead = r.blocked_s > 4.0
+            && obstacles.iter().any(|o| {
+                !matches!(o.who, Who::Racer(_)) && o.v_s > 0.5 && o.v_s < crawl_mps && {
+                    let ds = corridor.delta_s(r.s, o.s);
+                    ds > 0.0 && ds < 40.0
+                }
+            });
         let may_use_opposing = corridor.opposing == OpposingLanes::ForOvertaking
             && !done_racing
-            && (r.profile.risk >= 0.5 || parked_ahead);
+            && (r.profile.risk >= 0.5 || parked_ahead || crawler_ahead);
         let pass_limits = |s: f32| {
             if may_use_opposing {
                 to_limits(corridor.pass_bounds(s))
@@ -1665,13 +1680,15 @@ fn decide_racer(
                 .any(|x| x.ds > 0.0 && x.gap < 4.0 && x.o.v_s.abs() < 1.0);
             // Nose to nose in the opposing lanes (passed into a lane a car then stopped in,
             // facing me): nobody can move until I back out into my own lane.
-            let head_on = r.n < lim_lo - 1.0
-                && r.debug.v_target < 0.5
+            // Or in my own lane facing a standing car that faces me (a civilian waiting to
+            // turn across a hairpin, waiting in turn for me to move).
+            let head_on = r.debug.v_target < 0.5
                 && rel.iter().any(|x| {
                     x.ds > 0.0
                         && x.gap < 8.0
                         && x.o.v_s.abs() < 1.0
                         && !matches!(x.o.who, Who::Racer(_))
+                        && (r.n < lim_lo - 1.0 || x.o.facing < -0.3)
                 });
             if r.tactic != Tactic::Reverse
                 && v.abs() < 0.8
@@ -2495,6 +2512,7 @@ fn vehicle_obstacle(
         unstable: v_long > 8.0 && v_lat.abs() > 0.2 * v_long,
         passing: false,
         parked: false,
+        facing: geom::dot(fwd, t),
     })
 }
 
@@ -2544,6 +2562,7 @@ fn civilians_on(
             // Pulled over for a siren (or broken down) and stopped: it stays put while a
             // police car is near, possibly for minutes, so treat it like a parked car.
             parked: a.speed_mps.abs() < 0.5 && (a.yielding || a.hazard_lights),
+            facing: geom::dot(f, t),
         });
     }
     out
