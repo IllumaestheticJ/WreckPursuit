@@ -192,6 +192,11 @@ page starts in low-poly dark), so AA costs about what it did before, at twice th
 - Switching to greybox after starting in low-poly dark draws greybox without canvas AA (reload
   with `?style=greybox` for the old look exactly).
 
+## Published build
+Low-poly dark testbed (ws/art @ 200102b, private, owner): https://claude.ai/artifact/8js9e6J6bjWNFP3Lz6PmTa
+— separate from the main testbed link. Built with `vite build --base=./`; the wasm went through
+`wasm-opt -Oz` (15.9 → 12.2 MB) to fit the 15 MB per-file limit.
+
 ## Lead feedback (round 12, 2026-10-19) — first assignment
 The owner picked **stylised low-poly dark** (`docs/art/STYLE_DECISION.md`). Base this round on
 `origin/lead/round12` (it holds the newest testbed: weather, panels, minimap, garage), not main.
