@@ -401,8 +401,10 @@ voice limits above keep the voice count bounded however many agents there are.
 --workspace --all-targets -D warnings`, `cargo build --target wasm32-unknown-unknown -p wp_wasm`,
 `tsc`, `just web-e2e` (run / weather / race: all pass), `e2e/audio.mjs`, `e2e/audio_samples.mjs`,
 `e2e/audio_roster.mjs`: all pass. `cargo test --workspace`: everything passes except simcli
-`goldens_match` — 11 `city_*` scenarios (e.g. `city_blocked_parked_player_grid`, first mismatch at
-tick 240) differ from their golden hashes. This branch only changes audio files relative to
+`goldens_match` — 20 scenarios (city ×6, golden city_chase / night_pursuit_escape, panels
+frontal_56_hood, police sideswipe ×2, race ×4, weather ×5; e.g. `city_blocked_parked_player_grid`,
+first mismatch at tick 240) differ from their golden hashes (re-checked after the row-58 horn
+work: same list). This branch only changes audio files relative to
 `origin/lead/round12` (`git diff --stat`), so the mismatch comes with the base, not this work.
 24-car bench (headless, software GL, 2.5 fps): audio frame 3.3 ms (director 0.64, Web Audio apply
 2.6 ms at ~25 sim ticks per frame), 35 + 7 voices of 48.
