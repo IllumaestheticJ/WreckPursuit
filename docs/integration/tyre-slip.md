@@ -36,6 +36,61 @@ power-on straightening or the handbrake pivot.
    counter-lock angle. Rack compliance does not widen it; robustness target (27 cases) not
    met: 2 / 27 held (data 0 / 27).
 
+## Spin side-force floor — candidate SHIPPED DEFAULT (lead, 2026-10-20 evening)
+
+The owner's off-the-line spin was with the default (data) tyres, so the main game has the bug:
+any RWD car floored on a cambered road spins. Fix, **on by default for every car**, separate
+from the drift-hold lab work (`spin_model`, drift lock, front falloff stay lab-only):
+
+`wp_vehicle::tire::SpinSideFloor` / `SPIN_SIDE_FLOOR` / `spin_side_floor` (tyre substep in
+`vehicle.rs`): under **drive** wheelspin past `kappa_from` = 0.3 (full from `kappa_full` =
+1.0, smoothstep), the side force may not fall below `floor` = **0.4** × the pure side force
+`Fy0(α)`. Below κ 0.3 (grip driving, TCS, moderate wheelspin) and under braking / locked
+wheels (handbrake, ABS off) nothing changes; it never lowers a force, never exceeds the pure
+side force. Lab A/B: `CarTune::side_floor` (default = the shipped 0.4, 0 = the old ellipse;
+panel "side grip floor (spinning)"). No contract change (constants in `wp_vehicle`).
+
+**Roster launch** (`cargo run --release -p wp_vehicle --example tyre_slip -- roster`; rest →
+full throttle 3 s, steer 0, TCS / ESC off, 1st, 0.02 rad/s start disturbance, road cross-slope
+emulated as g·sin θ sideways; max heading change °, target < 3; 19 roster cars + 4 parity cars
+× 0 / 1 / 2 / 3°): **old ellipse 44 / 92 fail** (every RWD road car 35–180° from 1°; kestrel_ts,
+debug_sedan, sentinel_wolfhound 4–10° at 2–3°); floor 0.2: 18 fail; 0.3: 3 fail (3–4° at 3°);
+**0.4: 0 / 92** (worst 2.7°, sentinel_wolfhound at 3°). Launch speed at 3 s unchanged for every
+car (the floor only touches side force).
+
+**Parity suite** (old ellipse → floor 0.4, 707 rows, 59 change): grip (circle 30 / 60, taps
+0.1 / 0.2 / 0.4 s at 60 / 100 mph, lift-off, lane change), braking (ABS on / off, brake taps)
+and handbrake pivots: **unchanged** (FWD `hb_1.0_30_total_deg` 175 → 177°). Launch / TCS:
+0–60 / 0–100, TCS off and full, within **0.4 %**; `launch_spin_full_s` (time at slip > 0.2 with
+TCS full) 0.19 → 0.27 s on parity_rwd_a_tuned, 0.74 → 0.67 on rwd_d (others ≤ 0.01 s). FWD
+power-on straightening (`hb_power_straight_s`) unchanged. What moves: cases that already spin
+(power-on hairpin exits that end at 180°: speed gained −18 → −25 mph; handbrake-stab drive gap
+± 0.05 s; the suite's counter-drift 0.55 → 0.60 s). The held-drift matrix is unchanged (data
+0 / 27, basin edge 37°; spin presets 2 / 27 and 14 / 27).
+
+**Goldens it moves** (`cargo run --release -p simcli -- goldens`): 49 differ vs 7 on
+lead/drift-lab-w @ d2ba10ba (those 7, marked †, already differ there). New with the floor (42):
+cars_beater_hard_turn, city_blocked_parked_player_grid, city_hill_road_descent,
+city_siren_traffic_no_siren, crash_barrier_frontal, crash_barrier_frontal_sim, crash_head_on,
+damage_arcade_beater_frontal_50, damage_arcade_cruiser_frontal_90, damage_arcade_cruiser_ram_90,
+damage_arcade_cruiser_tbone_50, damage_arcade_sports_frontal_50, damage_arcade_sports_frontal_70,
+damage_arcade_sports_frontal_90, golden_barrier_56kmh, golden_barrier_56kmh_arcade,
+golden_city_chase, golden_frontal_56kmh, golden_night_pursuit_escape, golden_rwd_power_slide,
+golden_tbone, golden_tbone_sim, opponent_circuit_8x5, opponent_flee_police,
+opponent_open_roads_traffic, opponent_reverse_grid_2laps, panels_frontal_50_barrier_arcade,
+panels_frontal_50_car_arcade, panels_frontal_56_hood, panels_frontal_bumper_hang,
+panels_rear_50_car_arcade, police_sideswipe_patrol_day, police_sideswipe_patrol_night,
+police_tunnel_escape_founders_cut, police_tunnel_escape_founders_cut_control, race_city_sprint,
+race_city_sprint_police, race_grid_highway_sprint, race_hollins_sprint, race_lantern_checkpoint,
+race_loop9_circuit, regression_grid_24, smoke_coupe_circle, world_traffic_soak,
+world_traffic_soak_observer, world_traffic_soak_vesper, vehicle_coupe_slalom, weather_fog_pursuit,
+weather_fog_pursuit_clear. Mostly crash / damage / race / pursuit scenarios that floor the
+throttle from rest or out of corners (heavy wheelspin). Re-bless after review (`just bless`).
+
+Tests: `tire::tests::spin_side_floor_only_acts_under_heavy_drive_spin`,
+`tests/tyre_slip.rs::launches_straight_on_a_cambered_road` (old ellipse spins on a 2° slope;
+shipped default and both spin presets < 3°).
+
 ## Straight launches (owner: "spins off the line", lead 2026-10-20 evening)
 
 Owner, Drift Lab W: TCS off, floored from rest, no steering → the car spins at once; the

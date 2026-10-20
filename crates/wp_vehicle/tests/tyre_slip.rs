@@ -115,25 +115,31 @@ fn launch_yaw(c: &LoadedCar, slope_deg: f32) -> f32 {
 }
 
 #[test]
-fn spin_model_launches_straight_on_a_cambered_road() {
+fn launches_straight_on_a_cambered_road() {
     // Owner (Drift Lab W): "spins off the line, TCS off, no steering"; the reference smokes
-    // the rears dead straight. With the friction ellipse a rear spinning at κ ≈ 6–8 has almost
-    // no side force, so a 2° road slope swings the tail out; the spin model keeps a side-force
-    // floor under spin and launches straight.
+    // the rears dead straight. With the old friction ellipse (side floor 0) a rear spinning at
+    // κ ≈ 6–8 has almost no side force, so a 2° road slope swings the tail out. The shipped
+    // side-force floor (no override) and both spin presets launch straight.
     let _lab = LAB.lock().unwrap_or_else(|e| e.into_inner());
     let c = car("parity_rwd_d");
     plain::set_override(Some(PlainSteer::default()));
     ride_lab::set_override(None);
-    car_lab::set_override(None);
-    let data = launch_yaw(&c, 2.0);
+    car_lab::set_override(Some(CarTune {
+        side_floor: 0.0,
+        ..CarTune::default()
+    }));
+    let old = launch_yaw(&c, 2.0);
     assert!(
-        data > 30.0,
-        "data on a 2° slope: {data}° (expected to spin)"
+        old > 30.0,
+        "old ellipse on a 2° slope: {old}° (expected to spin)"
     );
+    car_lab::set_override(None);
+    let shipped = launch_yaw(&c, 2.0);
+    assert!(shipped < 3.0, "shipped floor on a 2° slope: {shipped}°");
     for t in [CarTune::spin_candidate(), CarTune::spin_lock_candidate()] {
         car_lab::set_override(Some(t));
         let y = launch_yaw(&c, 2.0);
-        assert!(y < 3.0, "spin model on a 2° slope: {y}°");
+        assert!(y < 3.0, "spin preset on a 2° slope: {y}°");
         assert!(launch_yaw(&c, 0.0) < 0.1);
     }
     car_lab::set_override(None);

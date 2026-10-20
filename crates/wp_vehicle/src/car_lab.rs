@@ -97,6 +97,10 @@ pub struct CarTune {
     pub front_deep_from_deg: f32,
     /// Slip angle where the front deep-slip falloff is complete, degrees.
     pub front_deep_full_deg: f32,
+    /// Side-force floor under heavy drive wheelspin ([`crate::tire::SpinSideFloor::floor`]).
+    /// Default = the shipped value ([`crate::tire::SPIN_SIDE_FLOOR`]); 0 = off (the old
+    /// friction ellipse, for A/B).
+    pub side_floor: f32,
 }
 
 impl Default for CarTune {
@@ -133,6 +137,7 @@ impl Default for CarTune {
             front_deep_falloff: 0.0,
             front_deep_from_deg: 8.0,
             front_deep_full_deg: 20.0,
+            side_floor: crate::tire::SPIN_SIDE_FLOOR.floor,
         }
     }
 }

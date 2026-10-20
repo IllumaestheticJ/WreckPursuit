@@ -32,7 +32,8 @@ use crate::surface::{conditions_grip, ConditionsSource, SurfaceConditions, TireW
 use crate::suspension::{arb_force, static_compression, step_strut, TYRE_STATIC_DEFLECTION_M};
 use crate::tire::{
     combined_forces_spin, combined_forces_weighted, load_sensitive_mu, low_speed_lateral,
-    pneumatic_trail, relax, slip_angle, slip_ratio, surface_grip, SLIP_RATIO_V_MIN,
+    pneumatic_trail, relax, slip_angle, slip_ratio, spin_side_floor, surface_grip, SpinSideFloor,
+    SLIP_RATIO_V_MIN, SPIN_SIDE_FLOOR,
 };
 use crate::TireDb;
 
@@ -1891,7 +1892,15 @@ impl Vehicle {
             w.omega = om;
             w.kappa = slip_ratio(om, r, vx);
             let (fx, fy) = forces(w.kappa, alpha, fz, grip);
-            let fy = fy * side_scale;
+            // Side-force floor under heavy drive wheelspin (shipped default; lab can A/B).
+            let floor = match car_tune {
+                Some(t) => SpinSideFloor {
+                    floor: t.side_floor,
+                    ..SPIN_SIDE_FLOOR
+                },
+                None => SPIN_SIDE_FLOOR,
+            };
+            let fy = spin_side_floor(tire, w.kappa, alpha, fz, grip, fy, &floor) * side_scale;
             let mu_y = load_sensitive_mu(
                 tire.lateral.d,
                 tire.load_sensitivity,

@@ -67,6 +67,7 @@ const CAR_FIELDS: Record<string, { label: string; min: number; max: number; step
   spin_fx_slide: { label: "spin model: drive grip spinning", min: 0, max: 1, step: 0.01, hint: "fraction of peak drive force a spinning tyre keeps (0 = the tyre data's curve, ~0.55)" },
   spin_fx_slide_from_deg: { label: "spin model: drive grip from", min: 0, max: 30, step: 0.5, unit: "°", hint: "slip angle where the spinning drive-grip floor starts (straight-line launches below it keep the tyre data's curve)" },
   spin_fx_slide_full_deg: { label: "spin model: drive grip full at", min: 0, max: 45, step: 0.5, unit: "°", hint: "slip angle where the drive-grip floor is fully on" },
+  side_floor: { label: "side grip floor (spinning)", min: 0, max: 1, step: 0.05, hint: "SHIPPED DEFAULT 0.4: a tyre spinning far past its peak slip ratio keeps at least this share of its side force (fixes spinning off the line on cambered roads); 0 = the old friction ellipse" },
   drift_lock_extra: { label: "drift lock ±", min: -0.7, max: 1, step: 0.01, hint: "extra (or, negative, less) steering lock once the body slip passes 'drift lock from' (ramped over 10°); grip driving below it is unchanged. 0 = off" },
   drift_lock_from_deg: { label: "drift lock from", min: 0, max: 45, step: 0.5, unit: "°", hint: "body slip where the drift lock change starts" },
   front_deep_falloff: { label: "front deep-slip falloff", min: 0, max: 0.9, step: 0.01, hint: "fraction of front side force lost at large front slip angles (between the two angles below); grip driving untouched. 0 = off" },

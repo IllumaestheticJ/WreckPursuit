@@ -912,6 +912,81 @@ fn launch_table() {
     car_lab::set_override(None);
 }
 
+/// `roster`: straight launches for every car in data/cars (+ parity cars) on 0 / 1 / 2 / 3°
+/// cross-slopes, the shipped side-force floor vs the old ellipse (`side_floor` 0) and
+/// `FLOORS=0.2,0.4` variants. Cells: max yaw ° at 0 / 1 / 2 / 3°.
+fn roster() {
+    let data = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data/cars");
+    let mut ids: Vec<String> = std::fs::read_dir(&data)
+        .unwrap()
+        .filter_map(|e| {
+            let p = e.ok()?.path();
+            if p.extension()? != "json" {
+                return None;
+            }
+            Some(p.file_stem()?.to_str()?.to_string())
+        })
+        .collect();
+    ids.sort();
+    ids.extend(
+        wp_vehicle::drift_lab_w::PARITY_CARS
+            .iter()
+            .map(|s| s.to_string()),
+    );
+    let mut floors: Vec<f32> = vec![0.0, wp_vehicle::tire::SPIN_SIDE_FLOOR.floor];
+    if let Ok(f) = std::env::var("FLOORS") {
+        floors.extend(f.split(',').map(|x| x.parse::<f32>().expect("number")));
+    }
+    print!("| car | layout |");
+    for f in &floors {
+        print!(" floor {f} (yaw ° at 0/1/2/3° slope) |");
+    }
+    println!(" km/h at 3 s (floor 0 → shipped) |");
+    print!("|---|---|");
+    for _ in &floors {
+        print!("---|");
+    }
+    println!("---|");
+    let (mut bad, mut n) = (vec![0usize; floors.len()], 0usize);
+    for id in &ids {
+        let c = car(id);
+        print!("| {id} | {:?} |", c.def.drivetrain.layout);
+        let mut v = Vec::new();
+        for (k, f) in floors.iter().enumerate() {
+            car_lab::set_override(Some(CarTune {
+                side_floor: *f,
+                ..CarTune::default()
+            }));
+            let cells: Vec<String> = [0.0f32, 1.0, 2.0, 3.0]
+                .iter()
+                .map(|&sl| {
+                    let (y, _, kmh, _) = straight_launch_on(&c, sl);
+                    if sl == 0.0 {
+                        v.push(kmh);
+                    }
+                    if y >= 3.0 {
+                        bad[k] += 1;
+                    }
+                    if y >= 3.0 {
+                        format!("**{y:.0}**")
+                    } else {
+                        format!("{y:.1}")
+                    }
+                })
+                .collect();
+            print!(" {} |", cells.join(" / "));
+        }
+        n += 4;
+        println!(" {:.0} → {:.0} |", v[0], v[1]);
+    }
+    car_lab::set_override(None);
+    print!("| **fails (yaw ≥ 3°)** | |");
+    for b in &bad {
+        print!(" {b} / {n} |");
+    }
+    println!(" |");
+}
+
 fn trace(id: &str) {
     let c = car(id);
     let a = reference_assists();
@@ -958,7 +1033,7 @@ fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let what = if args.first().is_some_and(|a| {
         [
-            "table", "grid", "trace", "search", "refine", "phase", "matrix", "launch",
+            "table", "grid", "trace", "search", "refine", "phase", "matrix", "launch", "roster",
         ]
         .contains(&a.as_str())
     }) {
@@ -982,6 +1057,7 @@ fn main() {
         "phase" => phase(&args[0]),
         "matrix" => matrix(),
         "launch" => launch_table(),
+        "roster" => roster(),
         _ => table(&args),
     }
 }
