@@ -118,8 +118,22 @@ pub fn car(id: &str) -> LoadedCar {
 /// `wp_vehicle` metric assists when `None`.
 pub fn run(car_id: &str, script: &[Segment], assists: Option<AssistProfile>) -> Vec<Frame> {
     let lib = AudioLibrary::embedded().expect("audio data");
+    // Engine-layer gains are recorded with the pack's level divided out (its idle layer's cue
+    // gain: 1.0 in the procedural packs, the LEVEL_DB boost in the recorded ones), so the checks
+    // see the engine model and the layers' relative balance, whatever the pack's loudness.
+    let cue_gain = |pack: &str, cue: &str| {
+        if !cue.starts_with("engine/") || cue == "engine/limiter" {
+            return 1.0;
+        }
+        lib.packs
+            .get(pack)
+            .and_then(|p| p.cues.get("engine/idle"))
+            .map_or(1.0, |c| c.gain)
+            .max(1e-6)
+    };
+    let mut slot_gain: BTreeMap<u32, f32> = BTreeMap::new();
     let c = car(car_id);
-    let mut dir = AudioDirector::new(lib, 7);
+    let mut dir = AudioDirector::new(lib.clone(), 7);
     dir.register_car(&c);
     let mut rig = Rig::new(&c);
     let a = assists.unwrap_or_else(metric_assists);
@@ -188,20 +202,23 @@ pub fn run(car_id: &str, script: &[Segment], assists: Option<AssistProfile>) -> 
                 match c {
                     AudioCommand::Play {
                         voice,
+                        pack,
                         cue,
                         looped,
                         params,
                         ..
                     } if voice.entity == entity.0 => {
+                        let k = cue_gain(&pack, &cue);
                         if looped {
-                            voices.insert(voice.slot, view(&params));
+                            slot_gain.insert(voice.slot, k);
+                            voices.insert(voice.slot, view(&params, k));
                         } else {
-                            f.one_shots.push((cue, params.gain));
+                            f.one_shots.push((cue, params.gain / k));
                         }
                     }
                     AudioCommand::Set { voice, params } if voice.entity == entity.0 => {
                         if let Some(v) = voices.get_mut(&voice.slot) {
-                            *v = view(&params);
+                            *v = view(&params, slot_gain.get(&voice.slot).copied().unwrap_or(1.0));
                         }
                     }
                     AudioCommand::Stop { voice, .. }
@@ -219,9 +236,10 @@ pub fn run(car_id: &str, script: &[Segment], assists: Option<AssistProfile>) -> 
     frames
 }
 
-fn view(p: &VoiceParams) -> VoiceView {
+/// `cue_gain`: the pack level, divided out of the commanded gain.
+fn view(p: &VoiceParams, cue_gain: f32) -> VoiceView {
     VoiceView {
-        gain: p.gain,
+        gain: p.gain / cue_gain,
         pitch: p.pitch,
         freq_hz: p.freq_hz,
         load: p.load,
