@@ -145,6 +145,41 @@ impl WallIndex {
     }
 }
 
+/// A covered road (tunnel) as police knows it: line of sight doesn't pass in or out, so a
+/// racer lost inside one is searched for at its portals.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CoverSpan {
+    /// Centreline, portal to portal, m.
+    pub centre: Vec<[f32; 2]>,
+    /// Centreline to wall, m.
+    pub half_width_m: f32,
+}
+
+impl CoverSpan {
+    /// Whether `p` is inside (within the half width of the centreline, between the portals).
+    pub fn contains(&self, p: [f32; 2]) -> bool {
+        self.centre.windows(2).any(|w| {
+            let (t, q) = crate::graph::closest_on_segment(w[0], w[1], p);
+            let interior = (0.0..=1.0).contains(&t);
+            interior && crate::graph::dist(q, p) <= self.half_width_m + 1.0
+        })
+    }
+
+    /// Points `out_m` outside each portal along the road.
+    pub fn outside_portals(&self, out_m: f32) -> [[f32; 2]; 2] {
+        let n = self.centre.len();
+        if n < 2 {
+            let p = self.centre.first().copied().unwrap_or([0.0, 0.0]);
+            return [p, p];
+        }
+        let a = self.centre[0];
+        let b = self.centre[n - 1];
+        let da = normalize(sub(a, self.centre[1]));
+        let db = normalize(sub(b, self.centre[n - 2]));
+        [add(a, scale(da, out_m)), add(b, scale(db, out_m))]
+    }
+}
+
 /// What the feelers say for one unit: a speed cap and a lateral shift (+ right), m/s and m.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct WallFeel {
@@ -232,6 +267,19 @@ mod tests {
         // A 10 m square building centred at (0, 30).
         let o = vec![[-5.0, 25.0], [5.0, 25.0], [5.0, 35.0], [-5.0, 35.0]];
         WallIndex::new(WallIndex::from_outlines(std::iter::once(o.as_slice())))
+    }
+
+    #[test]
+    fn cover_span_inside_and_portals() {
+        let c = CoverSpan {
+            centre: vec![[0.0, 0.0], [0.0, 100.0]],
+            half_width_m: 5.0,
+        };
+        assert!(c.contains([2.0, 50.0]));
+        assert!(!c.contains([20.0, 50.0]));
+        assert!(!c.contains([0.0, 120.0]));
+        let [a, b] = c.outside_portals(30.0);
+        assert!((a[1] + 30.0).abs() < 1e-4 && (b[1] - 130.0).abs() < 1e-4);
     }
 
     #[test]

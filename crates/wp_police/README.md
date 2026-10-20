@@ -179,7 +179,9 @@ call: spawned or not, start and road distance, stuck events, outcome (`Arrived`,
   stood down after `far_release_s`.
 - **Search** (row 64): with the racer out of sight, units that reach the last known position
   and interceptors spread over the junctions around it (nearest, the next ones on the path it was
-  taking, the roads out of the first), moving on every 10 s. Prediction while unseen uses the
+  taking, the roads out of the first), moving on every 10 s. A racer lost inside a covered road
+  (tunnel) is searched for at its two portals, 30 m outside (PVPD doctrine §5: nobody chases
+  inside), so hiding in a tunnel still breaks contact. Prediction while unseen uses the
   velocity at the last sighting, not the racer's real one.
 - **Capture**: stopped (< 2 m/s for 4 s) with a unit within 15 m, a total loss while wanted, or
   **pinned**: never more than `pinned_radius_m` from one spot for `pinned_time_s` with a unit

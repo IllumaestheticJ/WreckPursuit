@@ -399,6 +399,8 @@ pub struct PoliceSystem {
     pub(crate) walls: walls::WallIndex,
     /// Static feelers on (default); off only for before/after measurements.
     pub(crate) feelers: bool,
+    /// Covered roads (tunnels): a racer lost inside one is searched for at its portals.
+    pub(crate) covers: Vec<walls::CoverSpan>,
 }
 
 impl Default for PoliceSystem {
@@ -448,6 +450,10 @@ impl PoliceSystem {
         for c in &world.map().net.covered {
             let centre: Vec<[f32; 2]> = c.centre.iter().map(|q| [q[0], q[1]]).collect();
             segs.extend(walls::WallIndex::from_corridor(&centre, c.half_width_m));
+            p.covers.push(walls::CoverSpan {
+                centre,
+                half_width_m: c.half_width_m,
+            });
         }
         p.set_walls(walls::WallIndex::new(segs));
         p
@@ -457,6 +463,11 @@ impl PoliceSystem {
     /// for ([`walls`]). [`PoliceSystem::for_world`] sets them.
     pub fn set_walls(&mut self, walls: walls::WallIndex) {
         self.walls = walls;
+    }
+
+    /// Covered road (tunnel) containing `p`, if any (index into `covers`).
+    pub(crate) fn cover_at(&self, p: [f32; 2]) -> Option<usize> {
+        self.covers.iter().position(|c| c.contains(p))
     }
 
     /// Switch the static feelers on (default) or off (before/after measurements).
@@ -525,6 +536,7 @@ impl PoliceSystem {
             unstick_recovery: true,
             walls: walls::WallIndex::default(),
             feelers: true,
+            covers: Vec::new(),
         }
     }
 

@@ -62,6 +62,9 @@ const INTERCEPT_KEEP_MPS: f32 = 6.0;
 /// PIT needs the racer's path ahead to stay within ≈ 15° of its line now (cosine).
 const PIT_STRAIGHT_COS: f32 = 0.966;
 
+/// Units searching for a racer lost in a tunnel hold this far outside its portals, m.
+const PORTAL_HOLD_M: f32 = 30.0;
+
 /// A searching unit moves on to the next junction around the last known position this often, s.
 const SEARCH_SWEEP_S: f32 = 10.0;
 
@@ -631,6 +634,21 @@ impl PoliceSystem {
     pub(crate) fn search_point(&self, i: usize, racer: EntityId) -> Option<(NodeId, [f32; 2])> {
         let rec = self.racers.get(&racer)?;
         let p = rec.last_known?;
+        let me = self.units[i].id;
+        let ordinal = self
+            .units
+            .iter()
+            .filter(|u| u.assignment.target() == Some(racer) && u.kind == UnitKind::Car)
+            .position(|u| u.id == me)
+            .unwrap_or(0);
+        // Lost inside a tunnel / covered road: hold its portals (PVPD doctrine §5: units go to
+        // both portals, nobody chases inside), alternating units between them.
+        if let Some(k) = self.cover_at(p) {
+            let portals = self.covers[k].outside_portals(PORTAL_HOLD_M);
+            let q = portals[ordinal % 2];
+            let n = self.graph.nearest_node(q)?;
+            return Some((n, self.graph.node(n).pos));
+        }
         let first = self.graph.nearest_node(p)?;
         let mut nodes = vec![first];
         let v = rec.last_known_vel;
@@ -646,13 +664,6 @@ impl PoliceSystem {
         }
         let mut seen = std::collections::BTreeSet::new();
         nodes.retain(|n| seen.insert(*n));
-        let me = self.units[i].id;
-        let ordinal = self
-            .units
-            .iter()
-            .filter(|u| u.assignment.target() == Some(racer) && u.kind == UnitKind::Car)
-            .position(|u| u.id == me)
-            .unwrap_or(0);
         let sweep = (rec.los_lost_s / SEARCH_SWEEP_S) as usize;
         let n = nodes[(ordinal + sweep) % nodes.len()];
         Some((n, self.graph.node(n).pos))
@@ -1194,11 +1205,12 @@ impl PoliceSystem {
             let mut active = Vec::new();
             for &(gap, lat, i) in &pursuers {
                 let held = now < self.units[i].captain_hold_until;
+                // Lost in a tunnel: straight to its portals, not in after him.
                 let lost_here = !seen
                     && rec.los_lost_s > LOST_SEARCH_AFTER_S
-                    && rec
-                        .last_known
-                        .is_some_and(|k| dist(k, self.units[i].body.pos) < 30.0);
+                    && rec.last_known.is_some_and(|k| {
+                        dist(k, self.units[i].body.pos) < 30.0 || self.cover_at(k).is_some()
+                    });
                 if !held && (lat > 30.0 || gap > t.intercept_min_gap_m + 100.0 || lost_here) {
                     let point = rec.last_known.unwrap_or(self.units[i].body.pos);
                     self.assign(
