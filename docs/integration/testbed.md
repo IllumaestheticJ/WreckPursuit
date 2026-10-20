@@ -743,3 +743,6 @@ table only):
 
 ≈ 10 % fewer triangles, ≈ 5 % faster frames headless. Promotions happen 80 m from the player, so
 the hand-over is still full instanced mesh → full VehicleView.
+Gate at 150 m (rebased on the lead's density follow-up): wasm build, tsc, `npm run e2e` all pass
+(LOD: 0 frames without a mesh, 3 swaps with 0.000 m hand-over jump, traffic appears ≥ 321 m /
+vanishes ≥ 373 m from the player; weather and race e2e also pass).
