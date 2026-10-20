@@ -146,6 +146,12 @@ export class Hud {
     this.feedLines.length = Math.min(this.feedLines.length, 12);
   }
 
+  /** Add one line of text to the top of the event feed. */
+  note(text: string): void {
+    this.feedLines.unshift(text);
+    this.feedLines.length = Math.min(this.feedLines.length, 12);
+  }
+
   clearEvents(): void {
     this.feedLines.length = 0;
   }

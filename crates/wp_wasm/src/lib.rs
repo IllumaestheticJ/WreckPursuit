@@ -39,6 +39,7 @@ pub mod map;
 pub mod pack;
 pub mod police;
 pub mod race;
+pub mod reset;
 pub mod run;
 pub mod scenario;
 pub mod session;
@@ -277,6 +278,20 @@ pub fn assist_profile(entity: u32) -> Result<String, JsValue> {
 #[wasm_bindgen]
 pub fn reset_vehicle(entity: u32) -> Result<(), JsValue> {
     with(|s| s.reset_vehicle(EntityId(entity)))
+}
+
+/// Reset in place (testbed R, playtest row 65): the car goes back on its wheels at rest on the
+/// nearest clear lane within 15 m, heading its own way, and is fully repaired — except in a
+/// career run, where repairs are bought in the garage. Heat, pursuit and race progress carry
+/// on. Logged as a replay op. Returns `{ x, y, yaw, on_lane, repaired }` as JSON.
+#[wasm_bindgen]
+pub fn reset_in_place(entity: u32) -> Result<String, JsValue> {
+    let repair = !career::career_run_active();
+    with(|s| s.reset_in_place(EntityId(entity), repair)).map(|p| {
+        json(&serde_json::json!({
+            "x": p.xy[0], "y": p.xy[1], "yaw": p.yaw, "on_lane": p.on_lane, "repaired": repair,
+        }))
+    })
 }
 
 // ----- state -------------------------------------------------------------------------------

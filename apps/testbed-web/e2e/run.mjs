@@ -767,5 +767,11 @@ const gp = spawnSync("node", [join(here, "gamepad.mjs")], {
 });
 process.stdout.write(gp.stdout);
 check(gp.status === 0, `gamepad + controls checks (e2e/gamepad.mjs)${gp.status === 0 ? "" : ": " + (gp.stderr || "").trim().split("\n").pop()}`);
+
+// 8. Reset in place (e2e/reset.mjs, its own server and browser): R after a crash → upright,
+// within 15 m, repaired, replayable; city chase keeps heat; career run does not repair.
+const rs = spawnSync("node", [join(here, "reset.mjs")], { cwd: root, encoding: "utf8", env: process.env });
+process.stdout.write(rs.stdout);
+check(rs.status === 0, `reset-in-place checks (e2e/reset.mjs)${rs.status === 0 ? "" : ": " + (rs.stderr || "").trim().split("\n").pop()}`);
 console.log(failures ? `${failures} check(s) failed` : "all checks passed");
 process.exit(failures ? 1 : 0);

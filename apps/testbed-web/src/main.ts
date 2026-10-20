@@ -672,7 +672,12 @@ async function main(): Promise<void> {
         rig.cycle(app.views.get(app.focus)?.root);
         break;
       case "reset":
-        if (!isReplay()) sim.reset(app.player);
+        // Reset in place (playtest row 65): upright on the nearest clear lane, repaired outside a
+        // career run; heat, pursuit and race progress carry on.
+        if (!isReplay()) {
+          const r = sim.resetInPlace(app.player);
+          hud.note(`${(sim.worldInfo()[W.tick] / 240).toFixed(2)}s reset in place${r.on_lane ? "" : " (no lane near)"} — ${r.repaired ? "repaired" : "career: repairs are bought in the garage"}`);
+        }
         break;
       case "headlights":
         toggleHeadlights();

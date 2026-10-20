@@ -4,6 +4,16 @@ import initWasm, * as wasm from "./pkg/wp_wasm.js";
 import type { PoliceStatus } from "../police";
 
 /** Driver input in the testbed (packed to Float32Array for set_input). */
+/** Result of `resetInPlace`. */
+export interface ResetInPlace {
+  x: number;
+  y: number;
+  yaw: number;
+  /** Landed on a lane (false: set upright where it was, no lane within 15 m). */
+  on_lane: boolean;
+  repaired: boolean;
+}
+
 export interface DriverInput {
   steer: number;
   throttle: number;
@@ -187,7 +197,11 @@ export const sim = {
   setAssists: (entity: number, p: AssistProfile): void => wasm.set_assist_profile(entity, JSON.stringify(p)),
   assistPreset: (source: "Keyboard" | "Gamepad" | "Wheel"): AssistProfile => JSON.parse(wasm.assist_preset(source)),
   assists: (entity: number): AssistProfile => JSON.parse(wasm.assist_profile(entity)),
+  /** Back to the spawn pose, pristine (scenario restart). */
   reset: (entity: number): void => wasm.reset_vehicle(entity),
+  /** Reset in place (R): upright at rest on the nearest clear lane within 15 m, heading its own
+   * way; repaired unless a career run is active. Heat, pursuit and race progress carry on. */
+  resetInPlace: (entity: number): ResetInPlace => JSON.parse(wasm.reset_in_place(entity)),
   entities: (): number[] => Array.from(wasm.entities()),
   states: (): Float32Array => wasm.vehicle_states(),
   statesPrev: (): Float32Array => wasm.vehicle_states_prev(),

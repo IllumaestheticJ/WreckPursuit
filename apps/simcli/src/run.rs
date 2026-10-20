@@ -427,6 +427,17 @@ pub fn apply_op(
         OpKind::Assists(p) => sim.set_assists(id, p)?,
         OpKind::Mode(m) => sim.set_mode_table(load_mode(data, m)?),
         OpKind::Repair => sim.repair_vehicle(id)?,
+        OpKind::ResetAt {
+            xy,
+            yaw,
+            near_z,
+            repair,
+        } => {
+            sim.place_on_ground(id, xy, yaw, 0.0, Some(near_z))?;
+            if repair {
+                sim.repair_vehicle(id)?;
+            }
+        }
     }
     Ok(())
 }
