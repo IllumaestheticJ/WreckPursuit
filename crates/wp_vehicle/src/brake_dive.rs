@@ -213,7 +213,7 @@ pub fn clearance_on_front_bump_stops(car: &LoadedCar) -> f32 {
 /// gears off — the setup row 92 was reported with.
 pub fn owner_default_assists() -> AssistProfile {
     AssistProfile {
-        tcs: false,
+        tcs: wp_contracts::TcsLevel::Off,
         esc: false,
         auto_gears: false,
         ..AssistProfile::keyboard_default()

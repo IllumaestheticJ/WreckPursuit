@@ -21,7 +21,7 @@ fn car(id: &str) -> LoadedCar {
 /// Keyboard assists with TCS and ESC off: the case the slide help exists for.
 fn keyboard_no_tcs() -> AssistProfile {
     AssistProfile {
-        tcs: false,
+        tcs: wp_contracts::TcsLevel::Off,
         esc: false,
         ..AssistProfile::keyboard_default()
     }

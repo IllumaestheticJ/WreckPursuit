@@ -18,7 +18,7 @@ fn car(id: &str) -> LoadedCar {
 
 fn no_tcs() -> AssistProfile {
     AssistProfile {
-        tcs: false,
+        tcs: wp_contracts::TcsLevel::Off,
         ..metric_assists()
     }
 }

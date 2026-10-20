@@ -135,7 +135,7 @@ fn the_automatic_box_still_engages_first_on_the_handbrake_at_a_standstill() {
 /// Keyboard preset as the owner drives it (TCS / ESC off, 75 % steering speed sensitivity).
 fn owner_keys() -> AssistProfile {
     AssistProfile {
-        tcs: false,
+        tcs: wp_contracts::TcsLevel::Off,
         esc: false,
         steer_speed_sensitivity: 0.75,
         ..AssistProfile::keyboard_default()

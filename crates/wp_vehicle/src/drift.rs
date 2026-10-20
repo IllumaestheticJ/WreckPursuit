@@ -154,7 +154,8 @@ pub fn hold_update(
     // The trim fades out toward the envelope: full throttle held at a big angle still grows
     // the slide past it, and the car can spin (punishment for mistakes).
     let room = ((env - beta.abs().to_degrees()) / (TRIM_FADE * env)).clamp(0.0, 1.0);
-    let trim = if assists.throttle_filter > 0.0 {
+    // Never with TCS Off: the driver gets the throttle they press (row 104).
+    let trim = if crate::assists::throttle_filter_strength(assists) > 0.0 {
         THROTTLE_TRIM_MAX * (excess / TRIM_FULL_RAD).min(1.0) * help * room
     } else {
         0.0
