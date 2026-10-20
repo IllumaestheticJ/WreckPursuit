@@ -79,3 +79,11 @@ The release wasm grew past the artifact's 15 MB per-file limit (15.8 MB). Before
 strip the wasm `name` custom section from the copy in `dist/assets` (function names only; −2.3 MB;
 behaviour unchanged). `CARGO_PROFILE_RELEASE_DEBUG=0` alone does not shrink it.
 
+
+## Public demo (2026-10-20, owner request)
+A clean shareable build at https://claude.ai/artifact/RWysDBxKzRA1FQFU6cEhVF (the owner makes it
+public from its Share menu). Same files as the preview; only `index.html` differs: dev panels
+hidden (`body.demo`), a start menu (city chase / rainy night / races / free drive / garage),
+quick play runs outside the career, first-time assists auto gears + TCS. Reference page:
+`tools/demo/index.demo.html` (re-point its `assets/main-*.js` / `*.css` tags to the new build's
+names when refreshing). Refresh the demo only from a green `main`, not from round previews.
