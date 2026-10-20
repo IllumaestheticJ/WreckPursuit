@@ -19,8 +19,8 @@ use wp_sim::Sim;
 
 use simcli::replay::{Checkpoint, EntityCheckpoint, InputEvent, OpEvent, OpKind, Replay};
 use simcli::run::{
-    apply_op, build_sim, driver_input, scenario_states, world_config, BuiltSim, RunOptions,
-    Selection,
+    apply_op, apply_police_orders, build_sim, driver_input, scenario_states, world_config,
+    BuiltSim, RunOptions, Selection,
 };
 use simcli::scenario::{CitySpec, EntitySpec};
 use simcli::{RunSummary, Scenario};
@@ -849,6 +849,9 @@ impl Session {
         if tick == 0 {
             self.crash_snapshot();
         }
+        // 0. Then the scenario's police orders (roadblocks, spikes) due now; refusals are ignored
+        // here (simcli lists them in its summary).
+        let _ = apply_police_orders(&self.sc, &mut self.sim, &self.ids, tick);
         // 1. Inputs for this tick: replay track, scenario drivers, or (live) already applied.
         if let Some(mut p) = self.playback.take() {
             let r = &p.replay;

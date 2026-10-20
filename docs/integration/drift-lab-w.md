@@ -190,8 +190,11 @@ spins (300–500° total); parity_fwd_c gets round 53–74° and is caught in 0.
    spin or swing through. Does the held drift feel like clip 1? Untick it / *tyre data* for the
    comparison. (The *spin grip + damper (test)* button is step 4's set: it does not hold.)
 8. **Velocity-relative steering** (checkbox, off by default): clip 8's "wheels follow the travel
-   in a slide". Measured, it catches every slide (swing-through) and breaks the spin model's
-   held drift (step 7). Worth a feel A/B. Does the reference feel like this in a slide?
+   while a key is held"; released keys go back to centre and the car slowly spins (step 8).
+   Measured, a held key over-catches the drift. Worth a feel A/B.
+10. **Slow weight (clip 4)** (suspension section button): body roll builds over ~0.6 s to ~6°
+   with no rocking. Does the weight transfer now look like clip 4? (It breaks the knife-edge
+   held drift, so it isn't the default yet.)
 9. **Floored launch** from rest (TCS off, no steering) should go straight; *TCS* checkbox for the
    A/B. If it still spins for you, note the car, the map / where on it, and the tyre setting.
 
@@ -633,6 +636,135 @@ So it ships **off by default** (A/B toggle). The spin model + plain steering sta
 clip-1 match (parity_rwd_d held 41°, 5.3 s, sd 6.9). Clip 8 suggests the reference's front
 wheels follow the travel. That would need tyres where a wheel at the travel with the rear
 spinning holds an equilibrium: tyre-slip's domain, reported to them.
+
+## Merge of lead/round12 (9c947ebb) — lead's rules
+
+1. **W lineage wins** for drift-lab and keyboard steering: `drift.rs` (add/add: W's),
+   `steering.rs`, `snapshot.rs` (W's format; A's drift-hold fields not added), the lab panels,
+   `input.ts` raw keys. Round12's per-device input shaping (942cedca: `stepKeyRamps` +
+   `shaped`) is kept; its key ramp now passes the steer key raw (the sim's `key_steer` / the
+   plain rack ramp it), and the throttle key raw in Drift Lab W. Shaping maps ±1 to ±1 at the
+   default profile.
+2. **A's rejected drift lab dropped:** `throttle.rs` (keyboard throttle smoothing), A's
+   `steering::DriftTuning` / `AssistMode` / drift hold, `Vehicle::set_drift_tuning`,
+   `wp_sim::Sim::set_drift_tuning`, the wasm `set_drift_tuning` / `drift_tuning(entity)` /
+   `drift_state` and their `sim.ts` wrappers, `examples/drift.rs` / `throttle.rs`, A's metrics
+   additions (`metrics.rs` is W's), and its lab UI (`drift_lab.ts`, `#sc-drift` / `#sc-tune`,
+   `?drift=1`). Nothing outside A's own lab used them.
+3. **Kept:** everything non-drift. `vehicle.rs` is W's with round12's two non-drift
+   commits ported on top (af06f8c2 anti-dive / anti-lift + bump rubber + brake-dive hooks,
+   a87f21a5 rearward-only jacking). Also kept: brake_dive, police / world / race / sim-perf /
+   presets / goldens, and `roll_kick` (both sides had added the same function).
+4. **Checks:**
+   - `cargo test --workspace` on round12 itself: 1 red (`wp_opponent`
+     `wanted_ai_racer_flees_police_through_the_city`). After the merge: the same red, plus
+     C's `handbrake_stabs_add_rotation_and_drive_comes_back` (the known C + round12
+     interaction, drive back 0.125 s vs 0.1 s).
+   - Goldens: 8 differ (cars_beater_hard_turn, parity_rampart_counter_drift,
+     parity_shiro_handbrake_10mph, police_sideswipe_patrol_day / night, regression_grid_24,
+     smoke_coupe_circle, vehicle_coupe_slalom). **All are the keyboard / gamepad steering
+     path.** With each scenario's assists switched to `wheel` (1:1 steering, untouched by
+     either lineage), all 8 hash identically on the merge and on round12. Re-blessed (hashes
+     only; no golden replay changed).
+   - `wp_net` `four_clients_replicate_damage_deterministically` failed after the merge: the
+     final-state check ran right after the brake phase, but a resync may take up to 2 s (the
+     test asserts that). With the new steering the last dent lands in the final ticks. Fix:
+     2 s more before the final check (passes; client hashes still compared every tick).
+   - clippy --workspace --all-targets, determinism lint 0, wasm, tsc, ui-kit vitest 99/99.
+   - e2e: drift_lab_w 47, countersteer 9, presets 9, race 20, menu 37, all pass.
+
+## Step 8 — VR correction (release = slow spin), slow weight transfer (clip 4)
+
+### Velocity-relative steering, corrected (lead / owner "letting go of the steering mid-drift")
+
+The pull toward the travel now acts **only while a steer key is held**. With no key, the wheels
+return to the body's centre at `t_return` with no automatic countersteer (the old
+released-keys align is gone; the *self-align* slider stays 0). Unit test: released keys in a
+20° slide → 0 angle; key held with key-in-slide 0 → along the travel. Still an A/B checkbox,
+default off.
+
+Re-measured (`… -- vr`, lab ride default). The new column: **keys released mid-drift, throttle
+held**, and the time from the release to the spin / side swap (target: keeps rotating slowly,
+spins after ~1–2 s):
+
+| car | setup | counter key + full thr (clip 1) | into-turn key held (clip 8) | keys released mid-drift, throttle held | tap 100 0.15 / 0.25 s: heading ° (slip °) | lane change slip ° | launch yaw ° flat / 1° slope | handbrake 40 km/h 0.6 s: pivot ° / caught |
+|---|---|---|---|---|---|---|---|---|
+| parity_rwd_d | plain, data | 0.5 / 0.2 / 28° sd 11.6 / SPUN | 0.5 / 0.2 / 28° sd 11.5 / SPUN | 0.5 / 0.2 / 28° sd 11.5 / SPUN (release → spin/swap 0.8 s) | 10.2 (2.4) / 17.3 (3.4) | 3.7 | 0.0 / 70.9 | 25 / spun |
+| parity_rwd_d | **VR**, data | 0.6 / 0.2 / 29° sd 12.3 / SPUN | 0.5 / 0.2 / 28° sd 11.6 / SPUN | 0.5 / 0.2 / 28° sd 11.6 / SPUN (release → spin/swap 0.8 s) | 10.2 (2.4) / 17.3 (3.4) | 3.8 | 0.0 / 70.9 | 25 / spun |
+| parity_rwd_d | plain, spin model | 5.3 / 4.9 / 41° sd 6.9 / **held** | 0.8 / 0.3 / 28° sd 12.0 / SPUN | 0.8 / 0.2 / 28° sd 11.9 / SPUN (release → spin/swap 1.4 s) | 10.0 (2.3) / 16.4 (3.2) | 3.4 | 0.0 / 0.4 | 25 / spun |
+| parity_rwd_d | **VR**, spin model | 0.8 / 0.0 / 20° sd 5.4 / SPUN | 0.8 / 0.2 / 28° sd 11.9 / SPUN | 0.7 / 0.2 / 28° sd 11.9 / SPUN (release → spin/swap 1.4 s) | 10.0 (2.3) / 16.1 (3.1) | 3.5 | 0.0 / 0.4 | 25 / spun |
+| parity_rwd_a | plain, data | 0.5 / 0.2 / 28° sd 11.7 / SPUN | 0.5 / 0.2 / 28° sd 11.6 / SPUN | 0.5 / 0.2 / 28° sd 11.5 / SPUN (release → spin/swap 0.8 s) | 10.2 (2.3) / 17.4 (3.4) | 3.9 | 0.0 / 67.0 | 26 / spun |
+| parity_rwd_a | **VR**, data | 0.5 / 0.2 / 29° sd 12.3 / SPUN | 0.5 / 0.2 / 28° sd 11.6 / SPUN | 0.5 / 0.2 / 28° sd 11.6 / SPUN (release → spin/swap 0.8 s) | 10.2 (2.3) / 17.4 (3.3) | 3.9 | 0.0 / 67.0 | 26 / spun |
+| parity_rwd_a | plain, spin model | 4.2 / 2.0 / 39° sd 9.9 / SPUN | 0.8 / 0.3 / 29° sd 12.0 / SPUN | 0.8 / 0.2 / 28° sd 11.9 / SPUN (release → spin/swap 1.4 s) | 10.1 (2.3) / 16.3 (3.1) | 3.5 | 0.0 / 0.3 | 26 / spun |
+| parity_rwd_a | **VR**, spin model | 0.9 / 0.0 / 22° sd 6.1 / SPUN | 0.7 / 0.2 / 28° sd 12.0 / SPUN | 0.7 / 0.2 / 28° sd 11.9 / SPUN (release → spin/swap 1.4 s) | 10.0 (2.3) / 16.5 (3.2) | 3.5 | 0.0 / 0.3 | 26 / spun |
+| rampart_50 | plain, data | 0.6 / 0.2 / 27° sd 11.6 / SPUN | 0.6 / 0.2 / 28° sd 11.6 / SPUN | 0.6 / 0.2 / 28° sd 11.6 / SPUN (release → spin/swap 0.9 s) | 11.1 (2.6) / 17.9 (3.6) | 3.9 | 0.0 / 59.4 | 25 / spun |
+| rampart_50 | **VR**, data | 0.8 / 0.3 / 34° sd 13.0 / SPUN | 0.6 / 0.2 / 28° sd 11.7 / SPUN | 0.6 / 0.2 / 27° sd 11.6 / SPUN (release → spin/swap 0.8 s) | 11.1 (2.6) / 18.1 (3.6) | 3.9 | 0.0 / 59.4 | 25 / spun |
+| rampart_50 | plain, spin model | 1.0 / 0.1 / 22° sd 6.5 / SPUN | 1.6 / 0.4 / 27° sd 11.7 / SWAPPED ×1 | 0.9 / 0.3 / 28° sd 12.0 / SPUN (release → spin/swap 1.6 s) | 10.9 (2.6) / 17.9 (3.6) | 3.5 | 0.0 / 0.3 | 25 / spun |
+| rampart_50 | **VR**, spin model | 0.6 / 0.0 / 17° sd 3.5 / SPUN | 0.9 / 0.3 / 28° sd 12.0 / SPUN | 0.8 / 0.3 / 27° sd 12.0 / SPUN (release → spin/swap 1.6 s) | 11.0 (2.6) / 17.5 (3.5) | 3.6 | 0.0 / 0.3 | 25 / spun |
+| shiro_turbo | plain, data | 1.1 / 0.3 / 24° sd 7.6 / SPUN | 0.7 / 0.2 / 26° sd 11.5 / SPUN | 0.7 / 0.2 / 26° sd 11.5 / SPUN (release → spin/swap 1.0 s) | 11.8 (2.8) / 17.7 (3.4) | 3.6 | 0.0 / 69.2 | 28 / spun |
+| shiro_turbo | **VR**, data | 0.7 / 0.0 / 18° sd 4.3 / SPUN | 0.7 / 0.2 / 26° sd 11.5 / SPUN | 0.7 / 0.2 / 26° sd 11.5 / SPUN (release → spin/swap 1.0 s) | 11.7 (2.7) / 17.7 (3.5) | 4.7 | 0.0 / 69.2 | 29 / spun |
+| shiro_turbo | plain, spin model | 0.0 / 0.0 / 0° sd 0.0 / no hold | 0.0 / 0.0 / 0° sd 0.0 / no hold | 0.0 / 0.0 / 0° sd 0.0 / no hold (release → spin/swap none) | 11.6 (2.7) / 17.0 (3.3) | 3.2 | 0.0 / 0.3 | 29 / no |
+| shiro_turbo | **VR**, spin model | 0.0 / 0.0 / 0° sd 0.0 / no hold | 0.0 / 0.0 / 0° sd 0.0 / no hold | 0.0 / 0.0 / 0° sd 0.0 / no hold (release → spin/swap none) | 11.7 (2.7) / 17.0 (3.3) | 3.3 | 0.0 / 0.3 | 28 / no |
+| parity_rwd_b | plain, data | 0.5 / 0.2 / 28° sd 11.6 / SPUN | 0.5 / 0.2 / 28° sd 11.7 / SPUN | 0.5 / 0.2 / 28° sd 11.5 / SPUN (release → spin/swap 0.8 s) | 12.7 (3.1) / 21.6 (4.3) | 4.1 | 0.0 / 136.8 | 39 / spun |
+| parity_rwd_b | **VR**, data | 0.5 / 0.2 / 28° sd 12.0 / SPUN | 0.5 / 0.2 / 28° sd 11.6 / SPUN | 0.5 / 0.2 / 28° sd 11.6 / SPUN (release → spin/swap 0.7 s) | 12.7 (3.2) / 21.5 (4.3) | 87.5 | 0.0 / 136.8 | 39 / spun |
+| parity_rwd_b | plain, spin model | 2.4 / 1.2 / 33° sd 10.7 / SPUN | 0.8 / 0.2 / 28° sd 12.0 / SPUN | 0.7 / 0.2 / 28° sd 11.9 / SPUN (release → spin/swap 1.4 s) | 12.4 (3.2) / 19.8 (4.1) | 3.7 | 0.0 / 0.4 | 39 / spun |
+| parity_rwd_b | **VR**, spin model | 0.6 / 0.0 / 17° sd 4.0 / SPUN | 0.7 / 0.2 / 28° sd 12.0 / SPUN | 0.7 / 0.2 / 28° sd 11.9 / SPUN (release → spin/swap 1.4 s) | 12.4 (3.1) / 20.0 (4.1) | 73.2 | 0.0 / 0.4 | 39 / spun |
+
+- **Keys released:** with the spin model the car spins 1.4–1.6 s after the release (the
+  reference's slow spin); with the data, 0.7–1.0 s. VR and plain now behave the same there.
+- **Counter key held + throttle** (the counter-check): only plain + spin model holds
+  (parity_rwd_d 41°). VR still over-catches and spins.
+- **Into-turn key held:** spins in every setup.
+
+### Slow weight transfer (owner "weight transitions way too fast", reference clip 4)
+
+New ride-lab knobs (panel, suspension section):
+- *keep ride height*: the preload is raised so softer springs keep the data's static
+  compression, i.e. the bump-stop gap at rest (unit test);
+- *suspension travel ×*;
+- *roll / pitch / yaw inertia ×*: applied when the body is built, so changing them restarts
+  the car.
+
+Preset *slow weight (clip 4)* (`RideTune::slow_weight()`): springs × 0.5, bars 0, dampers × 1.8
+/ 2.4, keep ride height, travel × 1.7, roll / pitch / yaw inertia × 2.4 / 2.0 / 1.5.
+
+Measured (`… -- weight`; step = right key held 1.5 s at 80 km/h ≈ 50 mph; lab steering;
+spin model for the hold column):
+
+| car | ride | model roll Hz / ζ / °/g · pitch Hz / ζ | step: roll delay s / 10→90 % rise s / peak roll ° / overshoot % / lat g / heading starts s / max travel | lane change 100: peak roll ° / rate °/s / rocks | tap 100 0.15 s heading ° | counter hold (spin model) |
+|---|---|---|---|---|---|---|
+| parity_rwd_a | data | 1.76 / 0.48 / 3.7 · 1.43 / 0.50 | 0.06 / 0.19 / 3.2 / 16 / 1.06 / 0.12 / 0.92 | 3.4 / 35 / 2 | 9.9 | 1.5 / 0.8 / 27° sd 8.6 / SPUN |
+| parity_rwd_a | lab default (step 3) | 1.50 / 0.94 / 5.1 · 1.36 / 0.87 | 0.07 / 0.32 / 3.7 / 8 / 1.08 / 0.12 / 1.07 | 4.3 / 29 / 0 | 10.1 | 4.2 / 2.0 / 39° sd 9.9 / SPUN |
+| parity_rwd_a | **slow weight (step 8)** | 0.76 / 1.34 / 10.9 · 0.73 / 1.14 | 0.12 / 0.58 / 6.4 / 1 / 0.99 / 0.15 / 0.82 | 5.8 / 19 / 0 | 9.5 | 1.9 / 1.0 / 28° sd 8.4 / SPUN |
+| parity_rwd_d | data | 1.76 / 0.48 / 3.7 · 1.43 / 0.50 | 0.06 / 0.17 / 3.0 / 12 / 1.04 / 0.12 / 0.91 | 3.3 / 32 / 2 | 9.9 | 1.4 / 0.6 / 26° sd 8.2 / SPUN |
+| parity_rwd_d | lab default (step 3) | 1.50 / 0.94 / 5.1 · 1.36 / 0.87 | 0.07 / 0.31 / 3.7 / 9 / 1.06 / 0.13 / 1.06 | 4.0 / 28 / 1 | 10.0 | 5.3 / 4.9 / 41° sd 6.9 / **held** |
+| parity_rwd_d | **slow weight (step 8)** | 0.76 / 1.34 / 10.9 · 0.73 / 1.14 | 0.12 / 0.60 / 6.2 / 5 / 0.98 / 0.15 / 0.81 | 5.8 / 17 / 0 | 9.4 | 1.6 / 0.6 / 25° sd 7.7 / SPUN |
+| rampart_50 | data | 1.76 / 0.48 / 3.7 · 1.43 / 0.50 | 0.06 / 0.18 / 3.0 / 15 / 1.04 / 0.12 / 0.91 | 3.3 / 34 / 2 | 11.0 | 0.8 / 0.0 / 18° sd 4.7 / SPUN |
+| rampart_50 | lab default (step 3) | 1.50 / 0.94 / 5.1 · 1.36 / 0.87 | 0.07 / 0.31 / 3.7 / 5 / 1.07 / 0.13 / 1.07 | 4.1 / 27 / 1 | 10.9 | 1.0 / 0.1 / 22° sd 6.5 / SPUN |
+| rampart_50 | **slow weight (step 8)** | 0.76 / 1.34 / 10.9 · 0.73 / 1.14 | 0.12 / 0.60 / 6.2 / 2 / 0.99 / 0.15 / 0.81 | 5.7 / 18 / 0 | 10.2 | 1.2 / 0.0 / 22° sd 6.4 / SPUN |
+
+Against the clip-4 targets, slow weight vs data:
+- 10→90 % roll rise **0.58–0.60 s** (target 0.6–0.8; data 0.17–0.19);
+- peak roll **6.2–6.4° at ~1 g** (target 5–7° at ~0.8 g; data 3.0–3.2);
+- overshoot ≤ 5 % (data 12–16 %);
+- no bump-stop contact (≤ 82 % of the travel; data 0.91, and the step-3 default **1.06–1.07,
+  on the bump stops** in this step);
+- lane change: no rocking, peak roll rate 17–19 °/s (data 32–35);
+- model roll 0.76 Hz / ζ 1.34, pitch 0.73 Hz / ζ 1.14 (targets 0.9–1.1 Hz / ζ 0.9–1.1: a
+  little slower and more damped than the target; the measured rise is what the clip shows);
+- taps barely change (0.15 s tap at 100 km/h: 9.4–10.2° vs 9.9–11.0°).
+
+Misses: the roll delay is 0.12 s (target 0.2–0.3) and the heading starts at 0.15 s (target
+0.3–0.4). Both are set by how fast the lateral g builds (rack 0.28 s), and only yaw inertia
+moved them a little. Measuring the reference's lateral g build would tell whether the steering
+or the car is slower there.
+
+**Not the W default:** every ride change tried breaks parity_rwd_d's spin-model held drift. That
+includes the slow-weight preset, yaw inertia alone, roll / pitch inertia alone, and a softer
+middle setting. The hold is the knife-edge one tyre-slip reported, and the drift work is the
+priority. So the lab default stays the step-3 ride, and slow weight is a one-click preset for the
+owner's A/B. Tyre-slip owns making the hold robust; once it is, slow weight can become the
+default.
 
 ## Contract change requests
 

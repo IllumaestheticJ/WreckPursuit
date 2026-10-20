@@ -2,7 +2,7 @@
 // in sim/chassis coordinates (+Z up, +Y forward, +X right); the scene maps that to Three's
 // Y-up by parenting under a rotated `world` group (see scene.ts).
 import * as THREE from "three";
-import { META_FLAG, S, SW, T, TW } from "./wasm/layout";
+import { META_FLAG, S, SW, T, TW, wheelCentreZ } from "./wasm/layout";
 import type { VehicleInfo } from "./wasm/sim";
 import { sim } from "./wasm/sim";
 import { layers } from "./settings";
@@ -365,7 +365,7 @@ export class VehicleView {
       const detached = cur[wb + SW.detached] > 0.5;
       w.pivot.visible = !detached;
       const compression = cur[wb + SW.compression];
-      w.pivot.position.z = wi.position_m[2] + (compression - wi.travel_m * 0.5);
+      w.pivot.position.z = wheelCentreZ(wi, compression);
       w.pivot.rotation.z = cur[wb + SW.steer];
       w.angle += cur[wb + SW.omega] * dt;
       w.spin.rotation.x = w.angle;
@@ -484,6 +484,19 @@ export class VehicleView {
    */
   get drawable(): boolean {
     return this.panels.ready || !(layers.on("body") && layers.on("panels"));
+  }
+
+  /**
+   * Flat tyres from tire_punctures() (`p[base + i]`, FL FR RL RR, 0 inflated … 1 flat): the
+   * wheel shrinks radially by 30 % × deflation, matching the physics' smaller rolling radius.
+   * Scales the spin group, so the panel mesh's wheel parts (parented there) shrink too.
+   */
+  setPunctures(p: ArrayLike<number>, base: number): void {
+    this.wheels.forEach((w, i) => {
+      const r = 1 - 0.3 * Math.min(Math.max(p[base + i] ?? 0, 0), 1);
+      // Axle along X: the radius lies in the Y/Z plane, so this commutes with the spin about X.
+      w.spin.scale.set(1, r, r);
+    });
   }
 
   /** Lights from `vehicle_meta()` flags; `timeS` drives the siren flash pattern. */

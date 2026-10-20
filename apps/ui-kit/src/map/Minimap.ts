@@ -6,8 +6,8 @@
  * Units outside the view sit on the rim as edge markers.
  */
 import type { MapFrame, MapStatic } from "./data";
-import { isWanted } from "./data";
-import { buildRoadCache, drawPoi, drawPlayer, drawSearch, drawSight, drawTool, drawUnit, readPalette, type MapPalette, type RoadCache } from "./draw";
+import { isWanted, racersToDraw } from "./data";
+import { buildRoadCache, drawPoi, drawPlayer, drawRacer, drawSearch, drawSight, drawTool, drawUnit, readPalette, type MapPalette, type RoadCache } from "./draw";
 import { angleDelta, clampToCircle, compose, glyphRotation, minimapMatrix, radiusForSpeed, smooth, worldToMinimap, type MinimapView } from "./projection";
 
 /** Minimap options. */
@@ -24,6 +24,8 @@ export interface MinimapStats {
   units: number;
   /** Units drawn with lights (blinking). */
   blinking: number;
+  /** Race opponents drawn (inside the disc or on the rim). */
+  racers: number;
   /** Roadblocks / spike strips drawn. */
   tools: number;
   /** Search zone drawn. */
@@ -44,7 +46,7 @@ export class MinimapRenderer {
   private lastMs = NaN;
   private ctx: CanvasRenderingContext2D | null;
   /** Last frame's stats. */
-  stats: MinimapStats = { player: false, units: 0, blinking: 0, tools: 0, search: false, escape: 0, radiusM: 0 };
+  stats: MinimapStats = { player: false, units: 0, blinking: 0, racers: 0, tools: 0, search: false, escape: 0, radiusM: 0 };
   options: MinimapOptions;
 
   constructor(
@@ -95,7 +97,7 @@ export class MinimapRenderer {
     const view: MinimapView = { cx: p?.x ?? 0, cy: p?.y ?? 0, yaw: this.yaw, pxPerM: inner / this.radiusM, sx: R, sy: R };
     const m = minimapMatrix(view);
     const k = view.pxPerM;
-    const stats: MinimapStats = { player: false, units: 0, blinking: 0, tools: 0, search: false, escape: 0, radiusM: this.radiusM };
+    const stats: MinimapStats = { player: false, units: 0, blinking: 0, racers: 0, tools: 0, search: false, escape: 0, radiusM: this.radiusM };
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, size, size);
@@ -154,6 +156,15 @@ export class MinimapRenderer {
         drawUnit(ctx, u, c.x, c.y, glyphRotation(u.yaw, view.yaw), c.outside ? us * 0.75 : us, nowMs, pal);
         stats.units++;
         if (u.lights && !u.wrecked) stats.blinking++;
+      }
+      // race opponents (rim markers for the ones outside), back of the field first so the
+      // leader is drawn on top
+      const rs = 5.5 * dpr;
+      for (const r of racersToDraw(f).reverse()) {
+        const [sx, sy] = worldToMinimap(view, r.x, r.y);
+        const c = clampToCircle(R, R, inner - rs * 1.4, sx, sy);
+        drawRacer(ctx, r, c.x, c.y, glyphRotation(r.yaw, view.yaw), c.outside ? rs * 0.75 : rs, pal);
+        stats.racers++;
       }
       drawPlayer(ctx, R, R, 0, 7 * dpr, pal);
       stats.player = true;

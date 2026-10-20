@@ -34,6 +34,9 @@ export interface WheelInfo {
   width_m: number;
   steerable: boolean;
   travel_m: number;
+  /** Strut compression at rest, m (the wheel centre sits at position_m there). Optional for
+   * stand-in models (props); fall back to half the travel. */
+  static_compression_m?: number;
   tire_id: string;
 }
 
@@ -254,7 +257,8 @@ export const sim = {
   plainReadout: (entity: number): Float32Array => wasm.plain_readout(entity),
   /** Drift Lab W ride tuning in effect (null = car data) / {data, lab} defaults (wp_vehicle::ride_lab::RideTune). */
   rideTune: (): Record<string, number> | null => JSON.parse(wasm.ride_tune_json()),
-  rideTuneDefaults: (): { data: Record<string, number>; lab: Record<string, number> } => JSON.parse(wasm.ride_tune_defaults_json()),
+  rideTuneDefaults: (): { data: Record<string, number>; lab: Record<string, number>; slow_weight: Record<string, number> } =>
+    JSON.parse(wasm.ride_tune_defaults_json()),
   /** Set the ride tuning ("" = car data as is). */
   rideTuneSet: (json: string): void => wasm.ride_tune_set(json),
   /** [roll_hz, roll_zeta, roll_deg_per_g, pitch_hz, pitch_zeta, body_roll_deg]. */
@@ -319,6 +323,10 @@ export const sim = {
   /** Wanted level / heat for a racer, or null when the session has no police. */
   /** Police units that are not sim vehicles: [x, y, z, yaw, speed, flags] each. */
   policeUnits: (): Float32Array => wasm.police_units(),
+  /** Roadblock barriers and spike strips as oriented boxes (layout.ts TOOL_STRIDE, TL, TOOL_KIND). */
+  policeTools: (): Float32Array => wasm.police_tools(),
+  /** Tyre deflation per vehicle, 4 floats each (FL, FR, RL, RR), same order as states(). */
+  tirePunctures: (): Float32Array => wasm.tire_punctures(),
   /** Every traffic agent at any LOD (layout.ts DRAW_STRIDE / D): id, entity, ground-seated pose, flags. */
   trafficDraw: (): Float32Array => wasm.traffic_draw(),
   /** Every police unit, bound or not (layout.ts DRAW_STRIDE / D). */

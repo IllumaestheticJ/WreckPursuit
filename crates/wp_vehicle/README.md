@@ -217,7 +217,7 @@ tables in `docs/integration/vehicle.md` → round 12b. Causes found and what rep
 
 | Cause | Fix |
 |---|---|
-| Wheel = one ray down from the hub: a kerb was an instant step the moment the hub crossed it | `RapierGround::cast_wheel` also sweeps the tyre as a cylinder (axle-aligned, 80 % of the width) and blends it with the ray (`ground::blend_envelope`): the ray on smooth ground (exact), the sweep where its envelope is clearly higher (an edge ahead or behind), so a kerb lifts the wheel over the tyre's approach distance. The sweep starts 0.3 m higher so a kerb never overlaps its start. GJK against the 10 km ground slab is only cm-accurate, so the lift is solved exactly from the witness point on the tyre circle (`sweep_hit_on_tyre`), and witnesses off the tread are rejected |
+| Wheel = one ray down from the hub: a kerb was an instant step the moment the hub crossed it | `RapierGround::cast_wheel` also sweeps the tyre as a cylinder (axle-aligned, 80 % of the width) and blends it with the ray (`ground::blend_envelope`): the ray on smooth ground (exact), the sweep where its envelope is clearly higher (an edge ahead or behind), so a kerb lifts the wheel over the tyre's approach distance. The sweep starts 0.3 m higher so a kerb never overlaps its start. GJK against the 10 km ground slab is only cm-accurate, so the lift is solved exactly from the witness point on the tyre circle (`sweep_hit_on_tyre`), and witnesses off the tread are rejected. Mesh and heightfield triangles (city roads, kerbs, terrain) are swept in closed form (`TyreFrame::sweep_triangle`, sim-perf pass) |
 | Rigid, massless tyre: the whole step went straight into the strut and its bump stop | Tyre vertical rate in series (`static corner load / 15 mm`, rim strike past 6 cm, ×8). The wheel stays massless, so tyre force = strut force at every instant: the strut compression is a state solved per tick by backward Euler (`suspension::step_strut`, safeguarded Newton), its speed is the damper speed that balances tyre against spring + bump stop. Road input reaches the damper physically; the tyre soaks up what the strut cannot follow |
 | Linear, undamped bump stop: bottoming out stored energy and sprang the car into the air | Progressive (`k·δ·(1 + δ/2 cm)`) with hysteresis: 40 % of the force while extending |
 | Linear dampers (a kerb strut speed of 5–9 m/s asked for 20+ kN) | Digressive above 0.5 m/s (40 % slope): body motion unchanged, impacts capped |
@@ -234,6 +234,23 @@ Checked and **not** a cause: the inertia tensor (radii of gyration 0.55–0.77 m
 **No mode-dependent physics** (owner rule 2026-10-20): every fix above applies identically in
 Arcade and Simulation; `wp_vehicle` never reads `DamageMode`. (An arcade-only anti-launch
 assist was tried this round and withdrawn.)
+
+## Brake dive and anti-dive (playtest row 92)
+
+Hard stops used to dive 1.7–3.8° and put the nose on the road (front body down to 0.4 cm): every
+braking load transfer went through the springs. `suspension::ANTI_DIVE_FRONT` (0.7) and
+`ANTI_LIFT_REAR` (0.6) now let the links carry that share: per wheel a jacking force
+`anti_pitch_factor × fx` acts on the chassis at the wheel and on the tyre's normal load (axle
+loads still shift by the full `m·a·h/L`). Only rearward `fx` the brake torque can hold
+counts (drive, engine braking, TCS on a driving wheel and kerb strikes jack nothing), faded in from 1 to 2 m/s. Six
+soft cars also got damper / spring / travel data (see `docs/integration/brake-dive.md`).
+
+Measure: `cargo run --release -p wp_vehicle --example brake_dive [car …]` (peak / steady pitch,
+front strut use, front body and collider clearance at 100 and 60 km/h, wheel and keyboard
+presets, holding the brake into reverse, and the body height with the front struts on their
+bump stops). Now: peak 1.2–2.52°, front body ≥ 5.4 cm, collider ≥ 3.7 cm, no bump stop reached.
+Roll / pitch free-response damping: `--example body_damping [car …]` (`ride::roll_kick`).
+Tests: `tests/brake_dive.rs`; both damage modes through `wp_sim/tests/brake_dive.rs`.
 
 ## Keyboard/gamepad steering and ESC (playtest row 28)
 
@@ -378,6 +395,7 @@ cargo run --release -p wp_vehicle --example bench          # per-car cost
 cargo run --release -p wp_vehicle --example handling       # roster × keyboard/gamepad/wheel handling table
 cargo run --release -p wp_vehicle --example handling -- --causes   # + one-assist-off keyboard variants
 cargo run --release -p wp_vehicle --example diff_demo      # differential numbers per car + per type
+cargo run --release -p wp_vehicle --example parity         # reference-game parity table (owner's keyboard settings, 3 cars, ~3 s); `-- --write` / `just parity` updates docs/reference/wreckfest-parity.md
 ```
 
 `tests/ride.rs` holds the ride / launch ranges (ride frequency and damping, 10 cm and 15 cm
@@ -433,7 +451,24 @@ Scenarios live in
 rig's 10 km ground slab; with a half-space ground the rig measured 15.5 µs/tick (suggested to
 the lead, not changed: `wp_sim` parks the slab under hilly cities).
 
-Browser not measured yet (expect ~2×; budget 0.30 ms).
+**Sim perf pass (`lead/sim-perf`, 2026-10-20, `docs/integration/sim-perf.md`).** In the city
+the 12b tyre sweep cost ~7 µs per wheel (Rapier GJK against every road / kerb triangle and
+terrain cell under the tyre): the city chase sim step doubled. `RapierGround::probe` now sweeps
+trimesh and heightfield triangles in closed form and takes the centre ray from the same pass
+(boxes and hulls, including the flat slab, keep the exact Rapier calls: flat results are
+bit-identical).
+
+| Cost (release, cloud container) | Before the 12b ride merge | `lead/round12` | Sim perf pass | Budget |
+|---|---|---|---|---|
+| One wheel probe, Port Vesper lanes (`wp_sim --example probe_cost`) | 0.57 µs (ray) | 7.8–8.4 µs | **1.31 µs** | — |
+| Vehicle + probes, Port Vesper, 1 · 8 · 24 cars (`simcli --example vehicle_cost`) | 0.092 · 0.071 · 0.046 ms/car/frame | 0.245 · 0.231 · 0.297 | **0.062–0.077 · 0.063–0.070 · 0.057–0.067** | 0.15 |
+| Same, flat ground | 0.033 · 0.029 · 0.027 | 0.060 · 0.062 · 0.063 | 0.055–0.065 (unchanged: GJK vs the slab) | 0.15 |
+| City chase (`wp_wasm --example chase_bench`), ms/frame | 1.54–1.60 | 3.04–3.22 | **1.45–1.73** | — |
+| **Browser / wasm:** same chase in Node (V8), ms per 60 Hz frame | 2.20–2.32 | 4.31–4.72 | **2.28–2.52** | 0.30 ms/car |
+| **Browser:** headless Chromium chase (23 vehicles, `e2e/chase_perf.mjs`), sim ms per 60 Hz frame | — | 10.4–11.3 | **5.5–6.3** | — |
+
+Closed-form vs GJK sweep: mean |Δ| 0.011 mm over 20 000 wheel positions; where they differ by
+more than 0.5 mm, a brute-force check sides with the closed form (`ground.rs` tests).
 
 ## Tuning notes — what each parameter does to feel
 

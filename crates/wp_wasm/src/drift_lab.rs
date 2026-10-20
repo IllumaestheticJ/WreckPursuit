@@ -154,12 +154,13 @@ pub fn ride_tune_json() -> String {
     json(&wp_vehicle::ride_lab::active())
 }
 
-/// `{ "data": <no scaling>, "lab": <Drift Lab W default> }`, JSON.
+/// `{ "data": <no scaling>, "lab": <Drift Lab W default>, "slow_weight": <clip-4 preset> }`, JSON.
 #[wasm_bindgen]
 pub fn ride_tune_defaults_json() -> String {
     json(&serde_json::json!({
         "data": wp_vehicle::ride_lab::RideTune::default(),
         "lab": wp_vehicle::ride_lab::RideTune::lab_default(),
+        "slow_weight": wp_vehicle::ride_lab::RideTune::slow_weight(),
     }))
 }
 

@@ -278,3 +278,31 @@ fn race_scenario_files_match_the_picker() {
         );
     }
 }
+
+#[test]
+fn map_shows_every_racer_during_a_race() {
+    use crate::map::{self, h, racer_flag, HEADER, RACER_STRIDE, TOOL_STRIDE, UNIT_STRIDE};
+    let mut s = sprint(true);
+    s.run_ticks(240 * 8);
+    let d = map::map_dynamic_for(&s, PLAYER);
+    let n = d[h::N_RACERS] as usize;
+    let def = wp_race::catalog::race("grid_highway_sprint").unwrap();
+    assert_eq!(n, def.entrants(), "every entrant on the map");
+    let o = HEADER + d[h::N_UNITS] as usize * UNIT_STRIDE + d[h::N_TOOLS] as usize * TOOL_STRIDE;
+    assert_eq!(d.len(), o + n * RACER_STRIDE);
+    let rows: Vec<&[f32]> = d[o..].chunks(RACER_STRIDE).collect();
+    // Position order, the player flagged, poses from the sim.
+    for (i, r) in rows.iter().enumerate() {
+        assert_eq!(r[4] as usize, i + 1, "{rows:?}");
+        let e = EntityId(r[0] as u32);
+        assert_eq!(r[5] as u32 & racer_flag::PLAYER != 0, e == PLAYER);
+        let p = pos(&s, e);
+        assert!((r[1] - p[0]).abs() < 1e-3 && (r[2] - p[1]).abs() < 1e-3);
+    }
+    assert_eq!(
+        rows.iter()
+            .filter(|r| r[5] as u32 & racer_flag::PLAYER != 0)
+            .count(),
+        1
+    );
+}

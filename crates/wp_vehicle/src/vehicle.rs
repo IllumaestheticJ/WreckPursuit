@@ -29,7 +29,9 @@ use crate::steering::{
     update_center_angle, SteerInput, HANDBRAKE_GRACE_S,
 };
 use crate::surface::{conditions_grip, ConditionsSource, SurfaceConditions, TireWetProfile};
-use crate::suspension::{arb_force, static_compression, step_strut, TYRE_STATIC_DEFLECTION_M};
+use crate::suspension::{
+    anti_pitch_factor, arb_force, static_compression, step_strut, TYRE_STATIC_DEFLECTION_M,
+};
 use crate::tire::{
     combined_forces_spin, combined_forces_weighted, load_sensitive_mu, low_speed_lateral,
     pneumatic_trail, relax, slip_angle, slip_ratio, surface_grip, SLIP_RATIO_V_MIN,
@@ -72,6 +74,10 @@ fn tyre_normal(n: V3, up: V3) -> V3 {
         t
     }
 }
+/// Contact speed below which the anti-dive / anti-lift jacking is off, m/s; it reaches full
+/// strength at twice this speed.
+const ANTI_PITCH_FADE_MPS: f32 = 1.0;
+
 /// Mechanical efficiency of gearbox + final drive for driving torque (engine braking passes
 /// through unchanged).
 pub const DRIVETRAIN_EFFICIENCY: f32 = 0.85;
@@ -131,6 +137,8 @@ impl Chassis {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Corner {
     pub hub: V3,
+    /// Anti-dive / anti-lift jacking factor (see [`anti_pitch_factor`]).
+    pub anti_pitch: f32,
     pub x_static: f32,
     pub susp: SuspensionDef,
     pub radius: f32,
@@ -335,6 +343,7 @@ impl Vehicle {
                     .clone(),
                 wet: TireWetProfile::new(&tires[&w.tire_id], w.width_m),
                 left: i % 2 == 0,
+                anti_pitch: anti_pitch_factor(front, def.cg_height_m, def.wheelbase_m),
             }
         });
         let y_f = def.wheels[0].position_m[1];
@@ -486,6 +495,18 @@ impl Vehicle {
     /// Centre of mass in chassis space, m.
     pub fn com_local(&self) -> V3 {
         self.com_local
+    }
+
+    /// Strut compression per wheel (FL, FR, RL, RR) from full droop, m. Past the data's
+    /// `travel_m` the strut is on its bump stop. Unlike `WheelState::compression_m` this does
+    /// not include the tyre's extra squash.
+    pub fn strut_compression_m(&self) -> [f32; 4] {
+        std::array::from_fn(|i| self.wheels[i].x)
+    }
+
+    /// Static strut compression per wheel at the car's rest load, m.
+    pub fn static_compression_m(&self) -> [f32; 4] {
+        std::array::from_fn(|i| self.corners[i].x_static)
     }
 
     /// Net force (world, at the centre of mass, N) and torque (world, about the centre of
@@ -1739,6 +1760,8 @@ impl Vehicle {
         world: &dyn WorldQuery,
         dt: f32,
     ) {
+        // The pedal's brake torque on this wheel (ABS release cycles only dip it briefly).
+        let service = service_torques(&self.def.brakes, self.brake_f)[i];
         let c = &self.corners[i];
         let lost = self.effects.wheel_lost[i];
         let w = &mut self.wheels[i];
@@ -1772,7 +1795,12 @@ impl Vehicle {
             }
             return;
         }
-        let travel = c.susp.travel_m;
+        // Drift Lab W ride tuning: travel scale (the static compression is kept, see
+        // `ride_lab::RideTune::scaled_at`).
+        let travel = match crate::ride_lab::active() {
+            Some(t) => c.susp.travel_m * t.travel.clamp(0.5, 3.0),
+            None => c.susp.travel_m,
+        };
         let top = c.hub + V3::Z * (travel - c.x_static);
         let origin = ch.to_world(top);
         // The tyre sweep starts PROBE_LIFT_M higher so a kerb edge ahead never overlaps the
@@ -1792,12 +1820,35 @@ impl Vehicle {
         let reach = hit.map(|h| travel - (h.distance - PROBE_LIFT_M) + TYRE_STATIC_DEFLECTION_M);
         // Drift Lab W ride tuning (lab override): scaled springs / dampers.
         let st = match crate::ride_lab::active() {
-            Some(t) => step_strut(&t.scaled(&c.susp), c.tyre_rate, w.x, w.vcomp, reach, dt),
+            Some(t) => step_strut(
+                &t.scaled_at(&c.susp, crate::ride_lab::corner_load(&self.def, i)),
+                c.tyre_rate,
+                w.x,
+                w.vcomp,
+                reach,
+                dt,
+            ),
             None => step_strut(&c.susp, c.tyre_rate, w.x, w.vcomp, reach, dt),
         };
         w.x = st.x;
         w.vcomp = st.v;
-        w.fz = st.fz;
+        // Anti-dive / anti-lift: the links' share of the braking load transfer (from last
+        // tick's tyre force) acts on the chassis at the wheel and loads the tyre with it. Only
+        // the part of the tyre force the brake torque reacts through the suspension counts:
+        // drive and engine braking (anti-squat is not modelled) and a kerb strike's push on a
+        // free-rolling wheel jack nothing, so kerbs do not launch the nose (rows 54/55).
+        // Faded in with speed: at a standstill there is no dive to resist, and the held tyre's
+        // stiff grip would couple heave into the links.
+        let brake = w.brake.max(service) / c.radius.max(0.05);
+        let moving = ((w.vx.abs() - ANTI_PITCH_FADE_MPS) / ANTI_PITCH_FADE_MPS).clamp(0.0, 1.0);
+        // Only a rearward (braking) tyre force, up to what the brake can hold: a TCS / ESC
+        // brake on a driven wheel that still pushes forward jacks nothing.
+        let fx_geom = moving * w.fx.clamp(-brake, 0.0);
+        w.fz = if st.fz > 0.0 {
+            (st.fz + c.anti_pitch * fx_geom).max(0.0)
+        } else {
+            0.0
+        };
         w.x_wheel = match reach {
             Some(r) if st.fz > 0.0 => r - TYRE_STATIC_DEFLECTION_M,
             _ => st.x,

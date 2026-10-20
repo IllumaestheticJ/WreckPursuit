@@ -34,7 +34,11 @@ impl Vehicle {
         let def = self.def();
         let [w, l, h] = def.body_size_m;
         let clearance = BODY_CLEARANCE_M.min(h * 0.3);
-        let i = def.inertia_kgm2;
+        // Drift Lab W ride tuning: body inertia scales (lab override; data otherwise).
+        let i = match crate::ride_lab::active() {
+            Some(t) => t.inertia(def.inertia_kgm2),
+            None => def.inertia_kgm2,
+        };
         // Contract order is [roll (about Y), pitch (about X), yaw (about Z)].
         let mprops =
             MassProperties::new(self.com_local(), def.mass_kg, Vector::new(i[1], i[0], i[2]));

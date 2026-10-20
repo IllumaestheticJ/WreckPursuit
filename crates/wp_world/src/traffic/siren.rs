@@ -34,6 +34,9 @@ use crate::geom::{self, V2};
 pub const BEHIND_RANGE_MAX_M: f32 = 120.0;
 /// A unit coming the other way is reacted to within this distance ahead, m.
 pub const ONCOMING_RANGE_M: f32 = 100.0;
+/// An oncoming unit counts only this far to the side, m: the far lane of a 2+2 arterial
+/// across its 3 m painted median (playtest row 94) is 13.5 m from the near one.
+pub const ONCOMING_LATERAL_M: f32 = 15.0;
 /// Oncoming cars slow to this speed while a unit comes past, m/s.
 pub const ONCOMING_MPS: f32 = 4.0;
 /// Drivers do not enter a junction while a moving siren unit heading for it is this close to it
@@ -185,7 +188,7 @@ pub fn classify(t: &TrackedVehicle, q: V2, z: f32, f: V2) -> Option<SirenRel> {
         && along < -0.5
         && long > -HALF_L
         && long < ONCOMING_RANGE_M
-        && lat.abs() < 12.0
+        && lat.abs() < ONCOMING_LATERAL_M
     {
         return Some(SirenRel::Oncoming { ahead_m: long });
     }

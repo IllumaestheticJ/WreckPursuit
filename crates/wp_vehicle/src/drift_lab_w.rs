@@ -708,6 +708,125 @@ pub fn launch_yaw(car: &LoadedCar, assists: &AssistProfile, slope_deg: f32) -> f
     yaw
 }
 
+/// Result of [`step_steer_roll`] (reference clip 4, "weight transfer speed").
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StepRoll {
+    /// Time from the key press until the roll passes 10 % of its peak, s (clip 4: no visible
+    /// roll for 0.2–0.3 s).
+    pub roll_delay_s: f32,
+    /// 10 → 90 % roll rise time, s (target 0.6–0.8 s).
+    pub rise_s: f32,
+    /// Peak roll while the key is held, degrees (target 5–7° at ~0.8 g).
+    pub peak_roll_deg: f32,
+    /// Roll overshoot past the value at the end of the hold, % (target ≈ 0).
+    pub overshoot_pct: f32,
+    /// Peak lateral acceleration while the key is held, g.
+    pub peak_lat_g: f32,
+    /// Time from the key press until the heading has changed by 1°, s (clip 4: 0.3–0.4 s).
+    pub heading_start_s: f32,
+    /// Largest roll rate, degrees per second.
+    pub peak_roll_rate_dps: f32,
+    /// Largest suspension compression as a fraction of the travel (≥ 1 = on the bump stop).
+    pub max_travel_frac: f32,
+}
+
+/// Clip 4's move as a keyboard script: straight at `speed_mps` holding speed, then one steering
+/// key held for `hold_s` (throttle holding speed), measured while held.
+pub fn step_steer_roll(
+    car: &LoadedCar,
+    assists: &AssistProfile,
+    speed_mps: f32,
+    hold_s: f32,
+) -> StepRoll {
+    use crate::math::{atan2, V3};
+    use wp_contracts::{VehicleInput, PHYSICS_DT};
+    const TPS: usize = 240;
+    let mut rig = crate::rig::Rig::new(car);
+    rig.teleport([0.0; 3], 0.0, speed_mps, 0.0);
+    let auto = AssistProfile {
+        auto_gears: true,
+        ..*assists
+    };
+    let hold = |rig: &crate::rig::Rig| {
+        let err = speed_mps - rig.state().speed_mps;
+        if err > -1.0 {
+            ((0.25 + 0.35 * err).clamp(0.0, 1.0), 0.0)
+        } else {
+            (0.0, (-0.2 * err).clamp(0.0, 1.0))
+        }
+    };
+    for _ in 0..2 * TPS {
+        let (throttle, brake) = hold(&rig);
+        rig.step(
+            &VehicleInput {
+                throttle,
+                brake,
+                ..Default::default()
+            },
+            &auto,
+        );
+    }
+    let heading = |rig: &crate::rig::Rig| {
+        let f = rig.vehicle.chassis().rot * V3::Y;
+        atan2(-f.x, f.y)
+    };
+    let h0 = heading(&rig);
+    let r0 = body_roll(&rig);
+    let n = (hold_s * TPS as f32) as usize;
+    let (mut rolls, mut lat_g, mut head_t, mut rate, mut trav) =
+        (Vec::with_capacity(n), 0.0f32, f32::NAN, 0.0f32, 0.0f32);
+    let mut prev = r0;
+    let (throttle, _) = hold(&rig);
+    for tick in 0..n {
+        rig.step(
+            &VehicleInput {
+                steer: 1.0,
+                throttle,
+                ..Default::default()
+            },
+            assists,
+        );
+        let r = body_roll(&rig) - r0;
+        rate = rate.max(((r - prev) / PHYSICS_DT).to_degrees().abs());
+        prev = r;
+        rolls.push(r.to_degrees().abs());
+        let ch = rig.vehicle.chassis();
+        let right = ch.rot * V3::X;
+        lat_g = lat_g.max(ch.lin_vel.cross(ch.ang_vel).dot(right).abs() / 9.81);
+        if head_t.is_nan() && (heading(&rig) - h0).to_degrees().abs() > 1.0 {
+            head_t = (tick + 1) as f32 * PHYSICS_DT;
+        }
+        for (k, ws) in rig.state().wheel_states.iter().enumerate() {
+            let travel = car.def.suspension[k].travel_m
+                * crate::ride_lab::active().map_or(1.0, |t| t.travel.clamp(0.5, 3.0));
+            trav = trav.max(ws.compression_m / travel);
+        }
+    }
+    let peak = rolls.iter().copied().fold(0.0f32, f32::max);
+    let end = *rolls.last().unwrap_or(&0.0);
+    let t_at = |frac: f32| {
+        rolls
+            .iter()
+            .position(|&x| x >= frac * peak)
+            .map_or(f32::NAN, |k| (k + 1) as f32 * PHYSICS_DT)
+    };
+    let (t10, t90) = (t_at(0.1), t_at(0.9));
+    StepRoll {
+        roll_delay_s: t10,
+        rise_s: t90 - t10,
+        peak_roll_deg: peak,
+        overshoot_pct: if end > 1e-3 {
+            (peak / end - 1.0) * 100.0
+        } else {
+            0.0
+        },
+        peak_lat_g: lat_g,
+        heading_start_s: head_t,
+        peak_roll_rate_dps: rate,
+        max_travel_frac: trav,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

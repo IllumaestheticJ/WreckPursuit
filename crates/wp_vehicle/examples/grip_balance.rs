@@ -373,6 +373,9 @@ fn main() {
     // RIDE=data: the suspension data instead of the lab's ride default (comparison only).
     if std::env::var("RIDE").as_deref() == Ok("data") {
         ride_lab::set_override(None);
+    } else if std::env::var("RIDE").as_deref() == Ok("slow") {
+        // Drift Lab W's "slow weight (clip 4)" preset.
+        ride_lab::set_override(Some(RideTune::slow_weight()));
     } else {
         ride_lab::set_override(Some(RideTune::lab_default()));
     }

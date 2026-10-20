@@ -13,6 +13,7 @@
 mod contacts;
 mod physics;
 mod police_link;
+mod police_tools;
 mod props;
 mod systems;
 mod traffic_link;
@@ -24,6 +25,7 @@ pub use physics::{
     PhysicsWorld, SAFETY_FLOOR_Z,
 };
 pub use police_link::POLICE_SLOT_RESERVE;
+pub use police_tools::{BarrierView, SpikeStripView};
 pub use systems::{SystemId, Systems};
 pub use traffic_link::TRAFFIC_SLOT_RESERVE;
 pub use weather_link::{WEATHER_CELL_M, WEATHER_GRID_MARGIN_M};
@@ -189,6 +191,8 @@ pub struct Sim {
     record_contacts: bool,
     applied_contacts: Vec<(EntityId, Vec<wp_contracts::ContactImpulse>)>,
     debris: Vec<rapier3d::prelude::RigidBodyHandle>,
+    /// Roadblock barrier bodies (see `police_tools`).
+    tool_bodies: Vec<police_tools::ToolBody>,
     city_colliders: CityColliders,
     /// Tick until which new props settle (their first contacts take a few ticks; drops during
     /// that time are not hits).
@@ -198,6 +202,9 @@ pub struct Sim {
         rapier3d::prelude::RigidBodyHandle,
         rapier3d::prelude::ColliderHandle,
     )>,
+    /// The bodies of `resting_props` (raw handle parts), for the per-tick "did one start
+    /// moving" test.
+    resting_bodies: std::collections::BTreeSet<(u32, u32)>,
     /// Weather (`None` = none: dry road, clear air), see [`Sim::set_weather`].
     weather: Option<weather_link::WeatherLink>,
 }
@@ -226,8 +233,10 @@ impl Sim {
             record_contacts: false,
             applied_contacts: Vec::new(),
             debris: Vec::new(),
+            tool_bodies: Vec::new(),
             city_colliders: CityColliders::default(),
             resting_props: Vec::new(),
+            resting_bodies: Default::default(),
             props_settle_until: 0,
             weather: None,
         }
@@ -357,6 +366,7 @@ impl Sim {
             self.props.add(body, prop.pos, radius);
             if hilly {
                 self.resting_props.push((body, ch));
+                self.resting_bodies.insert(body.into_raw_parts());
             }
         }
         self.props_settle_until = self.tick + PROP_SETTLE_TICKS;
@@ -414,7 +424,24 @@ impl Sim {
             return;
         }
         let bodies = &self.physics.bodies;
+        // Only an awake body can be moving: look among the awake set (the vehicles and the
+        // few props in motion) instead of reading every resting prop's body each tick (~3800
+        // in Port Vesper, ~11 % of the browser sim step). The scan below runs only on a tick
+        // where one of them did start moving, so the result is the same.
+        let moving = |b: &rapier3d::prelude::RigidBodyHandle| {
+            bodies
+                .get(*b)
+                .is_some_and(|rb| !rb.is_sleeping() && rb.linvel().length() > 0.5)
+        };
+        if !self
+            .physics
+            .active_bodies()
+            .any(|b| self.resting_bodies.contains(&b.into_raw_parts()) && moving(&b))
+        {
+            return;
+        }
         let colliders = &mut self.physics.colliders;
+        let resting_bodies = &mut self.resting_bodies;
         self.resting_props.retain(|(b, c)| {
             let awake = bodies
                 .get(*b)
@@ -423,6 +450,7 @@ impl Sim {
                 if let Some(col) = colliders.get_mut(*c) {
                     col.set_collision_groups(rapier3d::prelude::InteractionGroups::all());
                 }
+                resting_bodies.remove(&b.into_raw_parts());
             }
             !awake
         });
@@ -499,6 +527,7 @@ impl Sim {
     /// starting heat (`PoliceSystem::for_world(cfg, self.world(), setup)`). Call after
     /// `set_world` (which rebuilds police) and before the first tick so replays match.
     pub fn set_police(&mut self, police: PoliceSystem) {
+        self.clear_police_tools();
         self.police = police;
     }
 
@@ -955,6 +984,7 @@ impl Sim {
             self.police
                 .step(world_q, &racers, &tick_events, dt, &mut out);
             self.reconcile_police_units();
+            self.sync_police_tools();
         }
         self.last_tick_events = out.len();
         self.events.extend(out);
@@ -1048,9 +1078,10 @@ impl Sim {
             .ok_or(SimError::UnknownEntity(id))
     }
 
-    /// Stable hash of the whole simulation state (hash spec v3, see `docs/integration/harness.md`):
+    /// Stable hash of the whole simulation state (hash spec v4, see `docs/integration/harness.md`):
     /// FNV-1a 64 over `HASH_SPEC_VERSION`, tick, in-game clock (1 ms), [`World::state_hash`]
-    /// (signals + traffic), `PoliceSystem::state_hash` (units, heat, pursuits), the weather
+    /// (signals + traffic), `PoliceSystem::state_hash` (units, heat, pursuits), roadblock
+    /// barrier bodies (count, then tool id + position 1e-3 m each), the weather
     /// (`WeatherSim::hash_into`, only when [`Sim::set_weather`] was called), debris count and every debris body position (1e-3 m) in spawn order,
     /// vehicle count, then every [`Sim::entity_hashes`] value in ascending entity order.
     pub fn state_hash(&self) -> u64 {
@@ -1060,6 +1091,13 @@ impl Sim {
         h.write_f32_q(self.world.clock.time.seconds_since_midnight, 1e3);
         h.write_u64(self.world.state_hash());
         h.write_u64(self.police.state_hash());
+        h.write_u32(self.tool_bodies.len() as u32);
+        for t in &self.tool_bodies {
+            h.write_u32(t.tool.0);
+            for x in self.physics.bodies[t.body].translation().to_array() {
+                h.write_f32_q(x, 1e3);
+            }
+        }
         self.hash_weather(&mut h);
         h.write_u32(self.debris.len() as u32);
         for d in &self.debris {
@@ -1147,7 +1185,7 @@ fn hash_nodes_lockstep(hashers: &mut [StateHasher], nodes: &[&[[f32; 3]]]) {
 
 /// Version of the [`Sim::state_hash`] layout. Bump when the hashed fields change; every golden
 /// must then be re-blessed.
-pub const HASH_SPEC_VERSION: u32 = 3;
+pub const HASH_SPEC_VERSION: u32 = 4;
 
 #[cfg(test)]
 mod tests {

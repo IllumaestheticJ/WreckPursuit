@@ -434,7 +434,7 @@ mod tests {
         // Row 30 regression: hours of 0.1 s segments, odd origins, jittery frame times.
         for (origin, seg) in [
             (0.0, 0.1),
-            (12345.678_901, 0.1),
+            (12_345.678_901, 0.1),
             (0.3, 0.033_333),
             (1e5 + 0.1, 0.2),
         ] {

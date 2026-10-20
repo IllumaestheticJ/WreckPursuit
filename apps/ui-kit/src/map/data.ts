@@ -1,7 +1,11 @@
 /**
  * Map data from `wp_wasm` (workstream 16 glue in `crates/wp_wasm/src/map.rs`):
  * `map_static_json()` once per city and `map_dynamic(player)` every frame. Keep the layout
- * constants in step with that file (`HEADER`, `UNIT_STRIDE`, `TOOL_STRIDE`, `h::*`, `flag::*`).
+ * constants in step with that file (`VERSION`, `HEADER`, `UNIT_STRIDE`, `TOOL_STRIDE`,
+ * `RACER_STRIDE`, `h::*`, `flag::*`, `racer_flag::*`).
+ *
+ * Layout v2: header (21 floats; `[20]` = racer count), then units, then tools, then racers
+ * (`[entity, x, y, yaw, position, flags]` each, in race-position order).
  */
 
 /** Road class index in `MapRoad.class` (contract `RoadClass` order). */
@@ -45,10 +49,11 @@ export interface MapStatic {
 
 /** Layout of `map_dynamic()`. */
 export const DYN = {
-  VERSION: 1,
-  HEADER: 20,
+  VERSION: 2,
+  HEADER: 21,
   UNIT_STRIDE: 8,
   TOOL_STRIDE: 6,
+  RACER_STRIDE: 6,
 } as const;
 
 /** Unit state (flags bits 0–3). */
@@ -57,6 +62,29 @@ export type UnitState = (typeof UNIT_STATES)[number];
 
 /** Unit flag bits above the state code. */
 export const UNIT_FLAG = { HELI: 1 << 4, LIGHTS: 1 << 5, ON_PLAYER: 1 << 6, WRECKED: 1 << 7, HUMAN: 1 << 8, HAS_TARGET: 1 << 9 } as const;
+
+/** Racer flag bits (`racer_flag::*`). */
+export const RACER_FLAG = { FINISHED: 1, DNF: 1 << 1, CAPTURED: 1 << 2, DQ: 1 << 3, PLAYER: 1 << 4 } as const;
+
+/** One racer this frame (during a race). */
+export interface MapRacer {
+  /** Racer entity id. */
+  id: number;
+  x: number;
+  y: number;
+  /** Yaw about +Z, 0 = +Y (north), counter-clockwise, rad. */
+  yaw: number;
+  /** Race position, 1-based (provisional while running). */
+  position: number;
+  finished: boolean;
+  /** Did not finish (any reason). */
+  dnf: boolean;
+  /** Captured by the police (with `dnf`). */
+  captured: boolean;
+  dq: boolean;
+  /** The player's own car. */
+  player: boolean;
+}
 
 /** Player pursuit status from the header. */
 export const MAP_STATUS = ["clear", "wanted", "pursuit", "searching"] as const;
@@ -106,6 +134,8 @@ export interface MapFrame {
   player: { x: number; y: number; yaw: number; speed: number } | null;
   units: MapUnit[];
   tools: MapTool[];
+  /** Racers in position order (empty outside a race). */
+  racers: MapRacer[];
 }
 
 /** An empty frame (no player, no police). */
@@ -121,6 +151,7 @@ export const EMPTY_FRAME: MapFrame = {
   player: null,
   units: [],
   tools: [],
+  racers: [],
 };
 
 /** Decode `map_dynamic()`. Throws on a layout version it does not know. */
@@ -129,6 +160,7 @@ export function decodeMapDynamic(a: ArrayLike<number>): MapFrame {
   if (a[0] !== DYN.VERSION) throw new Error(`map_dynamic layout v${a[0]}, expected v${DYN.VERSION}`);
   const nUnits = a[1] | 0;
   const nTools = a[2] | 0;
+  const nRacers = a[20] | 0;
   const units: MapUnit[] = [];
   let o = DYN.HEADER;
   for (let i = 0; i < nUnits; i++, o += DYN.UNIT_STRIDE) {
@@ -152,6 +184,22 @@ export function decodeMapDynamic(a: ArrayLike<number>): MapFrame {
   for (let i = 0; i < nTools; i++, o += DYN.TOOL_STRIDE) {
     tools.push({ kind: a[o] === 1 ? "spikes" : "roadblock", x: a[o + 1], y: a[o + 2], dir: [a[o + 3], a[o + 4]], halfLenM: a[o + 5] });
   }
+  const racers: MapRacer[] = [];
+  for (let i = 0; i < nRacers && o + DYN.RACER_STRIDE <= a.length; i++, o += DYN.RACER_STRIDE) {
+    const f = a[o + 5] | 0;
+    racers.push({
+      id: a[o],
+      x: a[o + 1],
+      y: a[o + 2],
+      yaw: a[o + 3],
+      position: a[o + 4] | 0,
+      finished: (f & RACER_FLAG.FINISHED) !== 0,
+      dnf: (f & RACER_FLAG.DNF) !== 0,
+      captured: (f & RACER_FLAG.CAPTURED) !== 0,
+      dq: (f & RACER_FLAG.DQ) !== 0,
+      player: (f & RACER_FLAG.PLAYER) !== 0,
+    });
+  }
   return {
     status: MAP_STATUS[a[3] | 0] ?? "clear",
     level: a[4] | 0,
@@ -164,12 +212,21 @@ export function decodeMapDynamic(a: ArrayLike<number>): MapFrame {
     player: a[19] > 0.5 ? { x: a[15], y: a[16], yaw: a[17], speed: a[18] } : null,
     units,
     tools,
+    racers,
   };
 }
 
 /** Whether a unit's dot blinks (lights on) rather than shows steady (patrol, idle). */
 export function unitBlinks(u: MapUnit): boolean {
   return u.lights && !u.wrecked;
+}
+
+/**
+ * Racers drawn on the map: still in the race (not finished, DNF or disqualified) and not the
+ * player (drawn as the player arrow).
+ */
+export function racersToDraw(f: MapFrame): MapRacer[] {
+  return f.racers.filter((r) => !r.player && !r.finished && !r.dnf && !r.dq);
 }
 
 /** The player is wanted (sight areas and search zone are drawn). */

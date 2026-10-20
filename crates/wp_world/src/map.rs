@@ -54,6 +54,10 @@ pub struct Segment {
     pub speed_limit: f32,
     /// Width, m.
     pub width: f32,
+    /// Paved width beside the lane's left / right edge that belongs to no other lane: half
+    /// the median of a divided road on the inner side, a highway's shoulder on the outer
+    /// side, m (playtest row 94). 0 for connectors.
+    pub paved_side: [f32; 2],
     /// Civilians may drive here.
     pub drivable: bool,
     /// Successor segments (lane → its connectors; connector → its target lane).
@@ -215,6 +219,7 @@ impl CityMap {
                 pts: l.polyline.clone(),
                 speed_limit: l.speed_limit_mps,
                 width: l.width_m,
+                paved_side: lane_paved_side(&net, l),
                 drivable: l.kind.drivable(),
                 next: Vec::new(),
                 prev: Vec::new(),
@@ -245,6 +250,7 @@ impl CityMap {
                     length,
                     speed_limit: limit,
                     width: l.width_m.min(to.width_m),
+                    paved_side: [0.0; 2],
                     drivable: l.kind.drivable() && to.kind.drivable(),
                     next: vec![c.to],
                     prev: vec![i as SegId],
@@ -498,7 +504,8 @@ impl CityMap {
         for &id in self.seg_grid.at(p) {
             let s = &self.segs[id as usize];
             let pr = s.project(p);
-            if pr.dist > s.width * 0.5 + 0.5 {
+            let pad = s.paved_side[usize::from(pr.lateral > 0.0)];
+            if pr.dist > s.width * 0.5 + pad + 0.5 {
                 continue;
             }
             let z = s.point_at(pr.s.clamp(0.0, s.length)).0[2];
@@ -519,6 +526,63 @@ impl CityMap {
     pub fn district_at(&self, p: V2) -> Option<DistrictKind> {
         self.zone_at(p).map(|z| self.net.zones[z as usize].kind)
     }
+}
+
+/// [`Segment::paved_side`] of a lane: the paved surface of its road beyond the lane's left
+/// edge (outermost-left lane only: to the centreline of a two-way road, to the surface edge
+/// of a one-way one) and beyond its right edge (outermost-right lane only), measured at the
+/// lane's middle; at most 4 m.
+fn lane_paved_side(net: &RoadNetwork, l: &Lane) -> [f32; 2] {
+    let Some(sf) = net.surfaces.iter().find(|s| s.road == l.road) else {
+        return [0.0; 2];
+    };
+    let n = l.polyline.len();
+    if n < 2 || sf.centre.len() < 2 {
+        return [0.0; 2];
+    }
+    let mid = geom::xy(l.polyline[n / 2]);
+    let ldir = geom::normalize(geom::sub(
+        geom::xy(l.polyline[(n / 2).max(1)]),
+        geom::xy(l.polyline[(n / 2).max(1) - 1]),
+    ));
+    let cum = geom::cumulative(&sf.centre);
+    let pr = geom::project(&sf.centre, &cum, mid);
+    let (_, cdir) = geom::point_at(
+        &sf.centre,
+        &cum,
+        pr.s.clamp(0.0, *cum.last().unwrap_or(&0.0)),
+    );
+    // Lane frame: +1 when the lane runs a → b along the surface.
+    let sigma = if geom::dot(ldir, cdir) >= 0.0 {
+        1.0
+    } else {
+        -1.0
+    };
+    let off = sigma * pr.lateral;
+    let (lo, hi) = if sigma > 0.0 {
+        (-sf.left_m, sf.right_m)
+    } else {
+        (-sf.right_m, sf.left_m)
+    };
+    let half = l.width_m * 0.5;
+    let two_way = net
+        .lanes
+        .iter()
+        .any(|o| o.road == l.road && o.from_node == l.to_node && o.to_node == l.from_node);
+    let left = if l.left.is_none() && l.kind != LaneKind::Parking {
+        let bound = if two_way { 0.0 } else { lo };
+        (off - half - bound).clamp(0.0, 4.0)
+    } else {
+        0.0
+    };
+    let right = if l.right.is_none() {
+        (hi - (off + half)).clamp(0.0, 4.0)
+    } else {
+        0.0
+    };
+    // Below a few cm it is rounding, not a strip.
+    let tidy = |v: f32| if v < 0.05 { 0.0 } else { v };
+    [tidy(left), tidy(right)]
 }
 
 fn conn_ends(s: &Segment) -> (LaneId, LaneId) {
@@ -759,7 +823,8 @@ impl WorldQuery for CityMap {
                 continue;
             }
             let half = s.width * 0.5;
-            if pr.dist <= half {
+            // The lane, or the median half / shoulder beside it.
+            if pr.dist <= half + s.paved_side[usize::from(pr.lateral > 0.0)] {
                 return match s.kind {
                     SegKind::Lane { lane }
                         if self.net.lanes[lane as usize].kind == LaneKind::Highway =>
@@ -840,11 +905,7 @@ mod tests {
     }
 
     fn block(x0: f32, y0: f32, x1: f32, y1: f32, h: f32) -> Building {
-        Building {
-            footprint: vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1]],
-            height_m: h,
-            base_z_m: 0.0,
-        }
+        Building::block(vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1]], h, 0.0)
     }
 
     /// Brute force over every building (reference for the grid walk).
@@ -852,7 +913,7 @@ mod tests {
         !map.net
             .buildings
             .iter()
-            .any(|bl| segment_hits_building(a, b, &bl.footprint, bl.height_m))
+            .any(|bl| segment_hits_building(a, b, &bl.footprint, bl.roof_z()))
     }
 
     #[test]

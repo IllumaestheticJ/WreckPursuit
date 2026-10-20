@@ -66,6 +66,12 @@ pub struct Scenario {
     /// Static boxes (barriers, walls) added before the first tick.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub barriers: Vec<Barrier>,
+    /// Police captain orders issued at set times (`Sim::captain_command`), e.g. a roadblock
+    /// ahead of a pursued racer. `wp_police` validates them (pursuit, unlock level, cooldown,
+    /// site; `roadblock`/`spikes` need a city with police), or placed at an exact spot
+    /// (`roadblock_at`/`spikes_at`, any world). Results are listed in `summary.json`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub police_orders: Vec<PoliceOrder>,
     /// Weather (workstream 14, `wp_weather`). `None` = no weather system: dry road, clear air
     /// (every scenario written before weather existed; hashes unchanged).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -251,6 +257,64 @@ pub struct Barrier {
     /// Heading, rad about +Z.
     #[serde(default)]
     pub yaw: f32,
+}
+
+/// A police captain order at time `t_s`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PoliceOrder {
+    /// Time the order is given, s.
+    pub t_s: f32,
+    /// What to do.
+    pub order: OrderKind,
+}
+
+/// Police captain order kinds.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OrderKind {
+    /// Roadblock ahead of the target (wanted level 3+; `wp_police` picks the site).
+    Roadblock {
+        /// Scenario-local entity id of the pursued racer.
+        target: String,
+    },
+    /// Spike strip ahead of the target (wanted level 2+).
+    Spikes {
+        /// Scenario-local entity id of the pursued racer.
+        target: String,
+    },
+    /// Roadblock barriers placed exactly at `pos` across traffic heading `dir`, bypassing the
+    /// dispatch rules (`PoliceSystem::place_roadblock_at`). Works on the flat world too.
+    RoadblockAt {
+        /// Scenario-local entity id the tool is aimed at.
+        target: String,
+        /// Centre on the road, world XY m.
+        pos: [f32; 2],
+        /// Direction the target travels, XY (normalised).
+        dir: [f32; 2],
+    },
+    /// Spike strip placed exactly at `pos` across traffic heading `dir`, bypassing the
+    /// dispatch rules (`PoliceSystem::place_spikes_at`). Any racer crossing it is spiked.
+    SpikesAt {
+        /// Scenario-local entity id the tool is aimed at.
+        target: String,
+        /// Centre on the road, world XY m.
+        pos: [f32; 2],
+        /// Direction the target travels, XY (normalised).
+        dir: [f32; 2],
+    },
+}
+
+impl OrderKind {
+    /// The targeted entity.
+    pub fn target(&self) -> &String {
+        match self {
+            OrderKind::Roadblock { target }
+            | OrderKind::Spikes { target }
+            | OrderKind::RoadblockAt { target, .. }
+            | OrderKind::SpikesAt { target, .. } => target,
+        }
+    }
 }
 
 /// Assist profile selection.
@@ -613,6 +677,9 @@ impl Scenario {
             if let Driver::AiDriver { target } = &e.driver {
                 self.entity_index(Some(target))?;
             }
+        }
+        for o in &self.police_orders {
+            self.entity_index(Some(o.order.target()))?;
         }
         for x in self.expect.iter().chain(&self.expect_pending) {
             if self.entities.is_empty() && x.is_per_entity() {
