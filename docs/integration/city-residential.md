@@ -215,7 +215,7 @@ only comparable with each other). Base = `origin/lead/round12` built the same wa
 | Browser chase, `node e2e/frame_profile.mjs chase`, 3 interleaved runs each: real-time factor | 0.565 / 0.564 / 0.609 | 0.559 / 0.538 / 0.600 | target 0.95 (neither reaches it in this container) |
 | same: sim / render JS per frame, ms | 123–139 / 65–71 | 114–120 / 43–60 | |
 | same: draw calls / triangles per frame | 705–727 / 424–433 k | 725–773 / 456–473 k | ≤ 1 600 / ≤ 700 k |
-| `node e2e/perf_check.mjs` | 7 checks fail (RTF, frames > 250 ms, alloc / frame, rain shader re-resolve) | 8 fail: the same + the chase's "shader re-resolve" (crash-effect `MeshBasicMaterial`, the same message the base gets in its rain run: the chase now hits hedges / trees, so effects fire) | |
+| `node e2e/perf_check.mjs` | fails in this container (RTF, frames > 250 ms, alloc / frame, crash-effect `MeshBasicMaterial` re-resolve) | the same checks fail (in the full `just web-e2e` runs both fail the identical set) | |
 | Native city chase frame, all systems (`cargo run --release -p simcli --example city_frame_cost`, 2 runs) | 3.19 / 3.46 ms | 2.90 / 3.42 ms | — |
 | Native city build (same example) | 497 / 1 030 ms | 786 / 926 ms | once at load |
 | Port Vesper static colliders | 2 953 buildings, 0 decor | 3 812 buildings + 6 974 decor (trunks, hedges, fences) | |
@@ -226,6 +226,16 @@ Instancing: trees, driveways, hedges and fences are GPU instances in 640 m tiles
 Houses stay in the merged greybox meshes (one draw per material per 320 m tile, like every
 other building; no extra draw calls per house). One roof material (a second roof tone cost a
 draw call per tile).
+
+## Gate (this branch)
+| Check | Result |
+|---|---|
+| `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| `cargo run -p lint-determinism` | 0 errors |
+| `cargo build --target wasm32-unknown-unknown -p wp_wasm` (`npm run wasm`), `tsc --noEmit` | ok |
+| `just scenarios` | 82 / 82 pass |
+| `cargo test --workspace --no-fail-fast` (`CARGO_INCREMENTAL=0`, no debug info) | everything new / touched passes; failing exactly as on the base: simcli `goldens_match` (stale goldens on the base), `wp_audio` `rev_matched_downshifts_blip`, `wp_vehicle` `roster_diff_hashes_are_pinned`, `front_drive_cars_understeer_mildly`, `wp_race` `loop9_circuit`, `lantern_checkpoint_draws_the_police`, `wp_wasm` crash-replay race test and golden replay playback |
+| `just web-e2e` | 191 pass; the same 13 fail on the base build in this container (career health 0.9999997, perf thresholds under software GL, burnout skid count, countersteer slider, menu) |
 
 ## Known gaps (for D)
 - **Dropped kerbs:** driveways are drawn across the lot, but the kerb in front of them is the
