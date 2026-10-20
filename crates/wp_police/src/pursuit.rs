@@ -750,9 +750,10 @@ impl PoliceSystem {
                         // Nose to nose with the racer stopped in front (it waits for us on a
                         // narrow road): back out of its way.
                         if ahead && d < 20.0 && v_r < 1.0 && !u.internal {
+                            let room = self.room_behind(i, crate::stuck::YIELD_REVERSE_M);
                             let u = &mut self.units[i];
                             u.unstick.yield_s += tdt;
-                            if u.unstick.yield_s >= crate::stuck::YIELD_DEADLOCK_S {
+                            if u.unstick.yield_s >= crate::stuck::YIELD_DEADLOCK_S && room {
                                 u.unstick.yield_s = 0.0;
                                 let steer = -u.unstick.last_steer.signum();
                                 u.unstick.phase = crate::stuck::Phase::Reverse {

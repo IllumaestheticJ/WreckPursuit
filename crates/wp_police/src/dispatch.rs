@@ -284,6 +284,7 @@ impl PoliceSystem {
         });
         let segment = self.graph.nearest_on_road(pos).map(|r| r.segment);
         let (id, heading) = (u.id, u.body.heading);
+        let behind_clear = self.room_behind(i, stuck::REVERSE_M);
         let recovery = self.unstick_recovery;
         let st = &mut self.units[i].unstick;
         st.slow_s = 0.0;
@@ -302,7 +303,10 @@ impl PoliceSystem {
         st.attempts += 1;
         let (first_at, first_pos) = *st.first.get_or_insert((now, pos));
         let mut step = UnstickStep::Reverse;
-        if held || st.attempts >= 2 && dist(first_pos, pos) <= stuck::SAME_SPOT_M {
+        // Held behind a stopped vehicle with cars queued behind too: a jam, not a dead car.
+        // Wait; turning around would cut across the traffic.
+        let jam = held && !behind_clear;
+        if !jam && (held || st.attempts >= 2 && dist(first_pos, pos) <= stuck::SAME_SPOT_M) {
             if let Some(s) = segment {
                 st.blocked.retain(|(b, until)| *b != s && now < *until);
                 st.blocked.push((s, now.plus(stuck::BLOCK_SEGMENT_S)));
@@ -330,12 +334,14 @@ impl PoliceSystem {
                 })
                 .unwrap_or(0.0)
         };
-        st.phase = Phase::Reverse {
-            from: pos,
-            dist_m: stuck::REVERSE_M,
-            until: now.plus(stuck::REVERSE_MAX_S),
-            steer,
-        };
+        if behind_clear {
+            st.phase = Phase::Reverse {
+                from: pos,
+                dist_m: stuck::REVERSE_M,
+                until: now.plus(stuck::REVERSE_MAX_S),
+                steer,
+            };
+        }
         self.stats.stuck.push(stuck::StuckRecord {
             unit: id,
             at: now,
@@ -353,6 +359,23 @@ impl PoliceSystem {
         {
             r.stuck_events += 1;
         }
+    }
+
+    /// Whether unit `i` can back up `dist_m`: no vehicle or prop in the corridor behind it.
+    pub(crate) fn room_behind(&self, i: usize, dist_m: f32) -> bool {
+        let u = &self.units[i];
+        let (id, entity, pos, heading) = (u.id, u.entity, u.body.pos, u.body.heading);
+        !self.obstacles.iter().any(|o| {
+            if o.unit == Some(id) || (o.entity.is_some() && o.entity == entity) {
+                return false;
+            }
+            let rel = sub(o.pos, pos);
+            let along = crate::graph::dot(rel, heading);
+            let lat = crate::graph::cross(heading, rel).abs();
+            along < 0.0
+                && along > -(dist_m + 2.0 * crate::avoid::UNIT_HALF_LENGTH_M + o.half_len)
+                && lat < 1.0 + o.half_wid
+        })
     }
 
     /// Think-rate part of un-sticking: re-plan routes around blocked segments, and despawn
@@ -1330,8 +1353,16 @@ impl PoliceSystem {
     }
 
     /// Ground units allowed at once: `response.max_units_by_level` at the highest wanted
-    /// level, never above `max_ground_units`.
+    /// level, never above `max_ground_units`; none at all where the patrol table has no unit
+    /// for this phase (a city without police, e.g. simcli `police_cars: false`).
     pub(crate) fn unit_cap(&self) -> u32 {
+        let patrols: u32 = District::ALL
+            .iter()
+            .map(|d| self.cfg.presence.patrols.get(*d).get(self.phase))
+            .sum();
+        if patrols == 0 {
+            return 0;
+        }
         let level = self
             .racers
             .values()

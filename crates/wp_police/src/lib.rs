@@ -1081,17 +1081,20 @@ impl PoliceSystem {
         } else if v.abs() > 2.0 * stuck::SLOW_MPS {
             u.unstick.slow_s = 0.0;
         }
-        // Waiting behind a stopped vehicle, not in a red-light queue.
+        // Waiting behind a stopped racer or police car (a wreck, a stand-off on a narrow road),
+        // not in a red-light queue. Civilian traffic jams clear by themselves: no turning
+        // around across them.
         let red_ahead = u
             .avoid
             .junction
             .is_some_and(|j| j.light == Some(avoid::Light::Stop) && j.s - u.track_s < 80.0);
-        if hold
-            && !disabled
-            && u.avoid.blocked_by.is_some()
-            && !red_ahead
-            && v.abs() < stuck::SLOW_MPS
-        {
+        let behind_racer_or_unit = match u.avoid.blocked_by {
+            Some(avoid::BlockedBy::Unit(_)) => true,
+            Some(avoid::BlockedBy::Vehicle(e)) => self.racers.contains_key(&e),
+            _ => false,
+        };
+        let u = &mut self.units[i];
+        if hold && !disabled && behind_racer_or_unit && !red_ahead && v.abs() < stuck::SLOW_MPS {
             u.unstick.held_s += dt;
         } else {
             u.unstick.held_s = 0.0;
