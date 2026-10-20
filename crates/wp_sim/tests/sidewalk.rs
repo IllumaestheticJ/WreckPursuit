@@ -465,7 +465,7 @@ fn vesper_cases(map: &CityMap, len: f32) -> Vec<Case> {
 
 fn run_cases(name: &str, net: &RoadNetwork, cases: &[Case]) {
     let map = CityMap::new(net.clone());
-    let walks = Walks::new(&sidewalk_mesh(&map).tops);
+    let walks = Walks::new(&sidewalk_mesh(&map).flush());
     let mut s = sim(net);
     let mut worst = f32::INFINITY;
     let mut fails = Vec::new();
@@ -534,7 +534,7 @@ fn kerb_step_is_the_visual_kerb() {
     let net = grid();
     let s = sim(net);
     let map = CityMap::new(net.clone());
-    let walks = Walks::new(&sidewalk_mesh(&map).tops);
+    let walks = Walks::new(&sidewalk_mesh(&map).flush());
     let (_, c) = stretches(net, 30.0)[0];
     let r = geom::right_of(c.dir);
     let at = |lat: f32| {

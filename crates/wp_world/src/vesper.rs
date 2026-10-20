@@ -30,7 +30,7 @@ use crate::builder::{self, BuildOptions, Built, NodeSpec, RoadClass, RoadSpec};
 use crate::density::default_density_base;
 use crate::geom::{self, Obb, V2, V3};
 use crate::network::*;
-use crate::surface::is_elevated;
+use crate::surface::{is_elevated, KERB_H_M, LOT_W_M, SIDEWALK_W_M};
 use crate::terrain::{bump, smoothstep, Heightfield, ValueNoise};
 
 /// City id of this preset (file stem for its data files).
@@ -42,8 +42,36 @@ pub const CROSSING_CLEARANCE_M: f32 = 7.5;
 /// Terrain sits this far below an at-grade road surface, m.
 pub const CARVE_BELOW_M: f32 = 0.12;
 
-/// Full-strength carve corridor beyond the paved edge (sidewalk + verge), m.
+/// Full-strength carve corridor beyond a highway's paved edge, m.
 const SHOULDER_M: f32 = 7.5;
+
+/// Under a sidewalk road's lots (playtest #52) the ground is carved to this far below the lot
+/// top, m: the lot (`wp_world::surface::sidewalk_mesh`) is level with the sidewalk's back edge
+/// and the ground beyond it starts within a few cm of that level.
+const LOT_GROUND_GAP_M: f32 = 0.12;
+
+/// Sidewalk + lot behind a street's paved edge, m.
+const FLUSH_W_M: f32 = SIDEWALK_W_M + LOT_W_M;
+
+/// Full-strength carve corridor beyond a street's paved edge, m: sidewalk, lot, skirt and one
+/// terrain cell more before the slope to the natural ground starts, so no terrain triangle
+/// under the lot or skirt reaches up the slope (it would poke through the lot).
+const STREET_SHOULDER_M: f32 = FLUSH_W_M + 1.0 + 5.0;
+
+/// Beyond its paved radius a junction disc carves at full strength only this far (the
+/// streets' lots take over from there), m.
+const NODE_SHOULDER_M: f32 = 1.5;
+
+/// Carve height under a street at lateral distance `d_out` beyond its paved edge, relative to
+/// the lot level there: the road's own `- CARVE_BELOW_M` under the kerb, rising across the
+/// sidewalk and lot to `- LOT_GROUND_GAP_M` just inside the lot's outer edge.
+fn street_carve_offset(d_out: f32) -> f32 {
+    let t = ((d_out - 1.0) / (FLUSH_W_M - 1.5)).clamp(0.0, 1.0);
+    -(KERB_H_M + CARVE_BELOW_M) + t * (KERB_H_M + CARVE_BELOW_M - LOT_GROUND_GAP_M)
+}
+
+/// Smallest angle between a dead-end stub and the other roads at its start node, rad.
+const MIN_STUB_ANGLE_RAD: f32 = 0.7;
 
 /// Generator parameters.
 #[derive(Debug, Clone, PartialEq)]
@@ -675,10 +703,59 @@ impl Gen {
         ids
     }
 
-    /// Dead-end stub from `from` towards `towards` (`len` m), slightly curved.
+    /// Unit directions in which the roads laid so far leave node `n` (15 m along each).
+    fn headings_at(&self, n: usize) -> Vec<V2> {
+        let c = self.pos(n);
+        let mut out = Vec::new();
+        for d in &self.drafts {
+            if d.a != n && d.b != n {
+                continue;
+            }
+            let path: Vec<V2> = if d.a == n {
+                d.path.clone()
+            } else {
+                d.path.iter().rev().copied().collect()
+            };
+            let cum = cum2(&path);
+            let (p, _) = point_on(&path, &cum, 15f32.min(cum[cum.len() - 1]));
+            out.push(geom::normalize(geom::sub(p, c)));
+        }
+        out
+    }
+
+    /// Dead-end stub from `from` towards `towards` (`len` m), slightly curved. A stub that
+    /// would leave within [`MIN_STUB_ANGLE_RAD`] of a road already at `from` (their ribbons
+    /// and sidewalks would overlap: Port Vesper node 81) is turned to the middle of the widest
+    /// free angle there instead.
     fn cul_de_sac(&mut self, from: usize, towards: V2, len: f32, name: &'static str) {
         let a = self.pos(from);
-        let d = geom::normalize(geom::sub(towards, a));
+        let mut d = geom::normalize(geom::sub(towards, a));
+        let heads = self.headings_at(from);
+        let angle = |u: V2| wp_math::atan2(u[1], u[0]);
+        let gap = |x: f32, y: f32| (y - x).rem_euclid(std::f32::consts::TAU);
+        let near = heads.iter().any(|h| {
+            let g = gap(angle(*h), angle(d));
+            g.min(std::f32::consts::TAU - g) < MIN_STUB_ANGLE_RAD
+        });
+        if near && !heads.is_empty() {
+            let mut hs: Vec<f32> = heads.iter().map(|h| angle(*h)).collect();
+            hs.sort_by(f32::total_cmp);
+            let (mut best, mut widest) = (0.0f32, -1.0f32);
+            for k in 0..hs.len() {
+                let (x, y) = (hs[k], hs[(k + 1) % hs.len()]);
+                let g = if hs.len() == 1 {
+                    std::f32::consts::TAU
+                } else {
+                    gap(x, y)
+                };
+                if g > widest {
+                    widest = g;
+                    best = x + g * 0.5;
+                }
+            }
+            let (sn, cs) = wp_math::sin_cos(best);
+            d = [cs, sn];
+        }
         let end = geom::add(a, geom::scale(d, len));
         let b = self.node(end);
         let bulge = self.rng.range_f32(-8.0, 8.0);
@@ -1349,6 +1426,39 @@ fn plan_crossings(g: &mut Gen) -> Vec<Crossing> {
 // Terrain carving
 // ------------------------------------------------------------------------------------------
 
+/// Paved radius of every node's junction / bend area: reaching the trimmed road ends (their
+/// centre distance plus half width) and at least the intersection radius; 0 for unused nodes.
+fn node_radii(built: &Built, nodes: &[NodeSpec]) -> Vec<f32> {
+    let mut radius = vec![0.0f32; nodes.len()];
+    for (s, rl) in built.surfaces.iter().zip(&built.road_lanes) {
+        let _ = rl;
+        let lane0 = built.lanes.iter().find(|l| l.road == s.road);
+        let Some(lane0) = lane0 else { continue };
+        let (na, nb) = if lane0.from_node as usize == lane0.to_node as usize {
+            (lane0.from_node as usize, lane0.to_node as usize)
+        } else {
+            // Surface centre runs a → b of the source road; find which node is which by
+            // distance.
+            let (f, t) = (lane0.from_node as usize, lane0.to_node as usize);
+            let c0 = geom::xy(s.centre[0]);
+            if geom::dist(c0, nodes[f].pos) <= geom::dist(c0, nodes[t].pos) {
+                (f, t)
+            } else {
+                (t, f)
+            }
+        };
+        let w = s.left_m.max(s.right_m);
+        radius[na] = radius[na].max(geom::dist(geom::xy(s.centre[0]), nodes[na].pos) + w);
+        let e = geom::xy(s.centre[s.centre.len() - 1]);
+        radius[nb] = radius[nb].max(geom::dist(e, nodes[nb].pos) + w);
+    }
+    for ix in &built.intersections {
+        let n = ix.node as usize;
+        radius[n] = radius[n].max(ix.radius_m);
+    }
+    radius
+}
+
 /// Carve `hf` (natural ground) to the built road surfaces and junction areas. `deck(road,
 /// point index)` says whether a surface point is a bridge deck (left uncarved).
 fn carve(
@@ -1378,14 +1488,15 @@ fn carve(
                          core_min: &mut [f32],
                          acc_w: &mut [f32],
                          acc_wt: &mut [f32],
+                         shoulder: f32,
                          blend: f32| {
         for &v in touched.iter() {
             let d = best_d[v];
             let t = best_t[v];
-            if d <= SHOULDER_M {
+            if d <= shoulder {
                 core_min[v] = core_min[v].min(t);
             } else {
-                let w = smoothstep(SHOULDER_M + blend, SHOULDER_M, d);
+                let w = smoothstep(shoulder + blend, shoulder, d);
                 acc_w[v] += w;
                 acc_wt[v] += w * t;
             }
@@ -1425,7 +1536,12 @@ fn carve(
     let mut source = 0u32;
     for (ri, s) in built.surfaces.iter().enumerate() {
         let blend = if s.highway { 22.0 } else { 15.0 };
-        let reach = s.left_m.max(s.right_m) + SHOULDER_M + blend;
+        let shoulder = if s.highway {
+            SHOULDER_M
+        } else {
+            STREET_SHOULDER_M
+        };
+        let reach = s.left_m.max(s.right_m) + shoulder + blend;
         for k in 0..s.centre.len() - 1 {
             let (a, b) = (s.centre[k], s.centre[k + 1]);
             if deck(ri, k) || deck(ri, k + 1) {
@@ -1449,7 +1565,14 @@ fn carve(
                 let d = (d_out * d_out + d_end * d_end).sqrt();
                 let zc = a[2] + (b[2] - a[2]) * t;
                 let bank = bank_a + (bank_b - bank_a) * t;
-                let tz = zc + bank * lat.clamp(-s.left_m, s.right_m) - CARVE_BELOW_M;
+                let tz = if s.highway || d_out <= 0.0 {
+                    zc + bank * lat.clamp(-s.left_m, s.right_m) - CARVE_BELOW_M
+                } else {
+                    // Streets: up to just under the sidewalk / lot level (the sidewalk
+                    // continues the bank to its back edge; the lot is level beyond).
+                    let lat_walk = lat.signum() * (edge + d_out.min(SIDEWALK_W_M));
+                    zc + bank * lat_walk + KERB_H_M + street_carve_offset(d_out)
+                };
                 (d, tz)
             };
             visit(
@@ -1470,45 +1593,33 @@ fn carve(
             &mut core_min,
             &mut acc_w,
             &mut acc_wt,
+            shoulder,
             blend,
         );
         source += 1;
     }
     // Junction and bend areas: a disc per node reaching the trimmed road ends.
-    let mut radius = vec![0.0f32; nodes.len()];
-    for (s, rl) in built.surfaces.iter().zip(&built.road_lanes) {
-        let _ = rl;
-        let lane0 = built.lanes.iter().find(|l| l.road == s.road);
-        let Some(lane0) = lane0 else { continue };
-        let (na, nb) = if lane0.from_node as usize == lane0.to_node as usize {
-            (lane0.from_node as usize, lane0.to_node as usize)
-        } else {
-            // Surface centre runs a → b of the source road; find which node is which by
-            // distance.
-            let (f, t) = (lane0.from_node as usize, lane0.to_node as usize);
-            let c0 = geom::xy(s.centre[0]);
-            if geom::dist(c0, nodes[f].pos) <= geom::dist(c0, nodes[t].pos) {
-                (f, t)
-            } else {
-                (t, f)
-            }
-        };
-        let w = s.left_m.max(s.right_m);
-        radius[na] = radius[na].max(geom::dist(geom::xy(s.centre[0]), nodes[na].pos) + w);
-        let e = geom::xy(s.centre[s.centre.len() - 1]);
-        radius[nb] = radius[nb].max(geom::dist(e, nodes[nb].pos) + w);
-    }
-    for ix in &built.intersections {
-        let n = ix.node as usize;
-        radius[n] = radius[n].max(ix.radius_m);
+    let radius = node_radii(built, nodes);
+    // Nodes where a street meets: their lots take over just past the paved radius.
+    let mut street_node = vec![false; nodes.len()];
+    for l in &built.lanes {
+        if l.kind != LaneKind::Highway {
+            street_node[l.from_node as usize] = true;
+            street_node[l.to_node as usize] = true;
+        }
     }
     for (n, node) in nodes.iter().enumerate() {
         if radius[n] <= 0.0 {
             continue;
         }
         let blend = 15.0;
+        let shoulder = if street_node[n] {
+            NODE_SHOULDER_M
+        } else {
+            SHOULDER_M
+        };
         let r = radius[n];
-        let reach = r + SHOULDER_M + blend;
+        let reach = r + shoulder + blend;
         let c = node.pos;
         let lo = [c[0] - reach, c[1] - reach];
         let hi = [c[0] + reach, c[1] + reach];
@@ -1531,6 +1642,7 @@ fn carve(
             &mut core_min,
             &mut acc_w,
             &mut acc_wt,
+            shoulder,
             blend,
         );
         source += 1;
@@ -1725,14 +1837,48 @@ fn obb_corners(o: &Obb) -> [V2; 4] {
     ]
 }
 
+/// Facade setback behind the sidewalk's back edge (on the lot), m.
+const FRONT_SETBACK_M: f32 = 1.5;
+
+/// Clearance from every paved edge a building corner keeps: the sidewalk and a metre more,
+/// so no building stands on another street's sidewalk, m.
+const BUILDING_CLEARANCE_M: f32 = SIDEWALK_W_M + 1.0;
+
+/// Centre height and cross slope of surface `s` at arc length `at` along its centre line
+/// (`cum` = [`cum2`] of its xy points).
+fn surface_z_bank(s: &RoadSurface, cum: &[f32], at: f32) -> (f32, f32) {
+    let n = s.centre.len();
+    let at = at.clamp(0.0, cum[n - 1]);
+    let k = cum.partition_point(|c| *c <= at).clamp(1, n - 1);
+    let t = ((at - cum[k - 1]) / (cum[k] - cum[k - 1]).max(1e-6)).clamp(0.0, 1.0);
+    (
+        s.centre[k - 1][2] + (s.centre[k][2] - s.centre[k - 1][2]) * t,
+        s.bank[k - 1] + (s.bank[k] - s.bank[k - 1]) * t,
+    )
+}
+
+/// Buildings along every street, facades [`FRONT_SETBACK_M`] behind the sidewalk on the level
+/// lot (playtest #52): the base reaches down to the lowest ground under the footprint (a
+/// plinth on the downhill side), never above the lot at the frontage. Lots that would stand
+/// next to a bridge deck (no lot there), on another street's sidewalk, in a junction's
+/// turning area or at a dead end's turnaround are skipped.
 fn buildings(
     rng: &mut Rng,
     built: &Built,
+    nodes: &[NodeSpec],
     zones: &[Zone],
     hf: &Heightfield,
     dead_ends: &[V2],
 ) -> Vec<Building> {
     let grid = SurfaceGrid::new(built);
+    // Junction / bend areas with the turning paths through them, plus a sidewalk.
+    let node_r = node_radii(built, nodes);
+    let junctions: Vec<(V2, f32)> = nodes
+        .iter()
+        .zip(&node_r)
+        .filter(|(_, r)| **r > 0.0)
+        .map(|(n, r)| (n.pos, r + BUILDING_CLEARANCE_M))
+        .collect();
     let mut placed: Vec<Obb> = Vec::new();
     let mut bgrid: BTreeMap<(i32, i32), Vec<usize>> = BTreeMap::new();
     let key = |p: V2| ((p[0] / 50.0).floor() as i32, (p[1] / 50.0).floor() as i32);
@@ -1746,8 +1892,14 @@ fn buildings(
         let len = cum[cum.len() - 1];
         for side in [1.0f32, -1.0] {
             let edge = if side > 0.0 { s.right_m } else { s.left_m };
+            // Top of the lot behind this side's sidewalk at arc length `a`.
+            let lot_z = |a: f32| {
+                let (zc, bank) = surface_z_bank(s, &cum, a);
+                zc + bank * side * (edge + SIDEWALK_W_M) + KERB_H_M
+            };
             let mut at = 8.0;
             while at < len - 8.0 {
+                let at0 = at;
                 let (p, t) = point_on(&pts, &cum, at);
                 let kind = zone_kind(zones, p);
                 let (lot, depth, gap) = match kind {
@@ -1758,7 +1910,7 @@ fn buildings(
                     DistrictKind::Industrial | DistrictKind::Port => (42.0, 30.0, 6.0),
                 };
                 let n = geom::scale(geom::right_of(t), side);
-                let front = edge + 4.5;
+                let front = edge + SIDEWALK_W_M + FRONT_SETBACK_M;
                 let c = geom::add(p, geom::scale(n, front + depth * 0.5));
                 let o = Obb {
                     c,
@@ -1769,7 +1921,17 @@ fn buildings(
                 at += lot;
                 let corners = obb_corners(&o);
                 let probes = [corners[0], corners[1], corners[2], corners[3], c];
-                if probes.iter().any(|q| grid.clearance(built, *q) < 3.0) {
+                if probes
+                    .iter()
+                    .any(|q| grid.clearance(built, *q) < BUILDING_CLEARANCE_M)
+                {
+                    continue;
+                }
+                // Keep junction turning areas (and their sidewalks) clear.
+                if probes
+                    .iter()
+                    .any(|q| junctions.iter().any(|(c, r)| geom::dist(*q, *c) < *r))
+                {
                     continue;
                 }
                 // Keep dead-end turnarounds clear (U-turns swing past the road end).
@@ -1796,6 +1958,25 @@ fn buildings(
                 if zmax - zmin > 8.0 || zmin < 1.0 {
                     continue;
                 }
+                // The frontage stands on the lot: the lot top along the facade, and the ground
+                // carved to it there (not a deck or its approach, where there is no lot).
+                let half_len = o.hl;
+                let fronts = [at0 - half_len, at0, at0 + half_len];
+                let lot_min = fronts
+                    .iter()
+                    .map(|a| lot_z(*a))
+                    .fold(f32::INFINITY, f32::min);
+                let facade = |a: f32| {
+                    let (q, tq) = point_on(&pts, &cum, a.clamp(0.0, len));
+                    let nq = geom::scale(geom::right_of(tq), side);
+                    geom::add(q, geom::scale(nq, front))
+                };
+                if fronts
+                    .iter()
+                    .any(|a| (hf.height_at(facade(*a)) - lot_z(*a)).abs() > 0.3)
+                {
+                    continue;
+                }
                 let storeys = match kind {
                     DistrictKind::Core => {
                         if rng.next_f32() < 0.18 {
@@ -1813,7 +1994,10 @@ fn buildings(
                 if signed_area(&fp) < 0.0 {
                     fp.reverse();
                 }
-                let base = zmin - 0.3;
+                // Down to the lowest ground under the footprint, and under the lot at the
+                // frontage (the walls meet the lot; on the downhill side they continue down
+                // as a plinth).
+                let base = zmin.min(lot_min) - 0.3;
                 out.push(Building {
                     footprint: fp,
                     height_m: storeys as f32 * 3.2 + rng.range_f32(0.0, 1.0) + (zmax - base),
@@ -1935,7 +2119,7 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
         .filter(|n| degree[*n] == 1)
         .map(|n| g.nodes[n].pos)
         .collect();
-    let buildings = buildings(&mut g.rng, &built, &zones, &hf, &dead_ends);
+    let buildings = buildings(&mut g.rng, &built, &g.nodes, &zones, &hf, &dead_ends);
 
     // POIs. The first race grid is the city-chase / free-drive spawn.
     let mut pois = Vec::new();

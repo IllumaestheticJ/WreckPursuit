@@ -4,8 +4,10 @@
 //!   [`node_patches`] between their ends (junction surfaces, bend strips, dead-end
 //!   turnarounds), sharing the ribbons' end edges so nothing is left unpaved;
 //! - [`sidewalk_mesh`]: raised sidewalks (3 m wide, 0.15 m kerb) along every edge lane that
-//!   is not a highway, with the vertical kerb faces — the greybox draws exactly these
-//!   triangles and `wp_sim` collides with exactly these triangles;
+//!   is not a highway, with the vertical kerb faces, the level lots behind them (flush with
+//!   the sidewalk out to the building line or a verge, [`lot_width_m`]) and a short skirt down
+//!   to the ground beyond — the greybox draws exactly these triangles and `wp_sim` collides
+//!   with exactly these triangles;
 //! - [`deck_rails`]: guard-rail lines along bridge decks;
 //! - [`MapGround`]: a wheel ground probe over roads and terrain without a physics engine.
 
@@ -25,6 +27,41 @@ pub const SIDEWALK_W_M: f32 = 3.0;
 
 /// Kerb height: the sidewalk top sits this far above the road edge, m.
 pub const KERB_H_M: f32 = 0.15;
+
+/// Level lot behind every sidewalk in a city with terrain, m: flush with the sidewalk's back
+/// edge, out past the building line (Port Vesper's facades stand 1.5 m behind the sidewalk)
+/// and wide enough for a ≥ 3 m verge where no building stands (playtest #52).
+pub const LOT_W_M: f32 = 3.5;
+
+/// [`LOT_W_M`] in a flat city, m: the grid's facades stand 4–8 m behind the sidewalk.
+pub const FLAT_LOT_W_M: f32 = 9.0;
+
+/// Skirt beyond a lot's outer edge: this wide (m), sloping down by [`SKIRT_DROP_M`] into the
+/// ground, so leaving the lot is a gentle slope, never a step.
+pub const SKIRT_W_M: f32 = 1.0;
+
+/// How far a skirt drops over [`SKIRT_W_M`], m (ends below the ground it meets; further where
+/// the ground is lower, e.g. next to a deck approach: the skirt then reaches down to it).
+pub const SKIRT_DROP_M: f32 = 0.25;
+
+/// A lot is left out (only the sidewalk is built, with a guard rail along its back edge:
+/// [`SidewalkMesh::bare_backs`]) where the ground under its outer half is more than this far
+/// below the lot top — bridge decks and their approaches, m.
+pub const LOT_MAX_DROP_M: f32 = 1.0;
+
+/// Nor where the ground rises more than this above the lot top (an uncarved slope next to a
+/// deck), m.
+pub const LOT_MAX_RISE_M: f32 = 0.08;
+
+/// Width of the level lot behind every sidewalk of `net`, m ([`LOT_W_M`], or [`FLAT_LOT_W_M`]
+/// without terrain).
+pub fn lot_width_m(net: &RoadNetwork) -> f32 {
+    if net.terrain.is_some() {
+        LOT_W_M
+    } else {
+        FLAT_LOT_W_M
+    }
+}
 
 /// Indexed triangle mesh, world space (+Z up), counter-clockwise seen from above.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -215,27 +252,82 @@ pub fn lane_sidewalks(lane: &Lane) -> [bool; 2] {
     [on && lane.edge_left, on && lane.edge_right]
 }
 
-/// Raised sidewalks: the walkable tops and the kerb faces between them and the road.
+/// Raised sidewalks: the walkable tops, the level lots behind them, the skirts beyond the
+/// lots and the kerb faces between the sidewalks and the road.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SidewalkMesh {
     /// Sidewalk tops, facing up: from the kerb line out to [`SIDEWALK_W_M`], [`KERB_H_M`]
     /// above the road edge and continuing the road's bank.
     pub tops: TriMesh,
+    /// Corner fills between the strip ends at junctions, bends and dead ends, at kerb height
+    /// (they reach out to the lots' outer lines).
+    pub corners: TriMesh,
+    /// Lots, facing up: from each strip's back edge (sharing its vertices) out by
+    /// [`lot_width_m`], level with the back edge. None where the ground falls away
+    /// ([`LOT_MAX_DROP_M`]: bridge decks).
+    pub lots: TriMesh,
+    /// Skirts beyond the lots' outer edges, [`SKIRT_W_M`] wide, dropping [`SKIRT_DROP_M`] into
+    /// the ground; left out over pavement or another walkable top.
+    pub skirts: TriMesh,
     /// Vertical kerb faces from the road edge up to the sidewalk top.
     pub kerbs: TriMesh,
+    /// Outer (bottom) edges of the skirt triangles built, `(a, b)` with the skirt on the left
+    /// of a → b: where the greybox hangs its retaining walls down to the drawn ground.
+    pub skirt_feet: Vec<(V3, V3)>,
+    /// Sidewalk back edges without a lot (bridge decks), `(a, b)` with the sidewalk on the
+    /// left of a → b: where the greybox hangs its walls.
+    pub bare_backs: Vec<(V3, V3)>,
     /// Node centres of the corners filled in [`TRIM_CELL_M`] cells (a sidewalk end degenerate
     /// against the kerb curve, e.g. lying along it): the only places where the sidewalk edge
     /// follows the pavement in steps (≤ 0.35 m slivers) instead of exactly.
     pub cell_corners: Vec<V2>,
 }
 
+impl SidewalkMesh {
+    /// The level walkable surface: sidewalk tops, corner fills and lots, one mesh (their shared
+    /// edges have bit-identical vertices).
+    pub fn flush(&self) -> TriMesh {
+        let mut m = self.tops.clone();
+        m.append(&self.corners);
+        m.append(&self.lots);
+        m
+    }
+
+    /// Everything `wp_sim` collides with: [`SidewalkMesh::flush`], skirts and kerb faces.
+    pub fn all(&self) -> TriMesh {
+        let mut m = self.flush();
+        m.append(&self.skirts);
+        m.append(&self.kerbs);
+        m
+    }
+}
+
 /// Every raised sidewalk of a city ([`lane_sidewalks`]): a top strip and a kerb strip along
-/// each sidewalk edge of a lane, following the lane polyline and its bank. Where a sidewalk
-/// would run onto pavement — the crossing road or junction disc at a tight or skewed corner —
-/// it is trimmed in [`TRIM_CELL_M`] cells, so no kerb step ever sits inside a roadway. Used by
+/// each sidewalk edge of a lane, following the lane polyline and its bank, with the level lot
+/// behind it ([`lot_width_m`]) and a skirt beyond the lot. Where a sidewalk or lot would run
+/// onto pavement — the crossing road or junction disc at a tight or skewed corner — it is
+/// trimmed in [`TRIM_CELL_M`] cells, so no kerb step ever sits inside a roadway. Used by
 /// the greybox (drawn) and by `wp_sim` (collided), so the two always agree.
 pub fn sidewalk_mesh(map: &CityMap) -> SidewalkMesh {
     let net = &map.net;
+    let lot_w = lot_width_m(net);
+    // Whether the ground under `p` holds a lot at height `p.z` (no terrain: always): not far
+    // below it (a deck) nor poking up through it (an uncarved slope).
+    let supported = |p: V3| {
+        net.terrain.as_ref().is_none_or(|t| {
+            let drop = p[2] - t.height_at(geom::xy(p));
+            (-LOT_MAX_RISE_M..=LOT_MAX_DROP_M).contains(&drop)
+        })
+    };
+    let geo = WalkGeometry {
+        lot_w,
+        max_pull_back: if net.terrain.is_some() {
+            MAX_WEDGE_PULL_BACK_M
+        } else {
+            MAX_PULL_BACK_M + lot_w
+        },
+        wedges: net.terrain.is_some(),
+    };
     let patches = node_patches(map);
     let paved = PavedIndex::new(&road_mesh_with(map, &patches));
     let rims: BTreeMap<u32, &[Vec<V3>]> = patches
@@ -265,10 +357,21 @@ pub fn sidewalk_mesh(map: &CityMap) -> SidewalkMesh {
             if !on {
                 continue;
             }
+            let back = line(side * (half + SIDEWALK_W_M), KERB_H_M);
+            // The lot's outer line, level with the back edge.
+            let mut outer =
+                geom::offset_polyline(&l.polyline, side * (half + SIDEWALK_W_M + lot_w));
+            for (o, b) in outer.iter_mut().zip(&back) {
+                o[2] = b[2];
+            }
+            // Every segment has a lot until the ends are pulled back (below).
+            let lot = vec![true; back.len().saturating_sub(1)];
             let walk = SideWalk {
                 kerb_top: line(side * half, KERB_H_M),
-                outer: line(side * (half + SIDEWALK_W_M), KERB_H_M),
+                back,
+                outer,
                 kerb_foot: line(side * half, 0.0),
+                lot,
                 // Tops face up: the strip's left edge must be on the left of its direction.
                 outer_is_left: side < 0.0,
             };
@@ -277,7 +380,7 @@ pub fn sidewalk_mesh(map: &CityMap) -> SidewalkMesh {
                 continue;
             }
             walks.push(Strip {
-                corners: [walk.kerb_top[0], walk.kerb_top[n - 1]],
+                kerb: walk.kerb_top.clone(),
                 walk,
                 road: l.road,
                 nodes: [l.from_node, l.to_node],
@@ -289,30 +392,135 @@ pub fn sidewalk_mesh(map: &CityMap) -> SidewalkMesh {
     // when the crosswalk setback is shorter than the sidewalk is wide), pull both back until
     // they clear: overlapping strips of differently graded roads would step and flicker; the
     // corner fill paves the rest.
-    pull_back_ends(&mut walks, &paved);
+    pull_back_ends(&mut walks, &paved, &geo);
+    // Segments with a lot: the ground holds the lot's outer half all along (not a deck or
+    // its approach; nearer the road the ground may sit lower, under the sidewalk). Checked
+    // after the pull-back, so a strip end no longer reaches over the crossing street's
+    // sidewalk, where the ground is carved lower.
+    for w in &mut walks {
+        let sw = &mut w.walk;
+        for k in 0..sw.lot.len() {
+            let (b0, b1, o0, o1) = (sw.back[k], sw.back[k + 1], sw.outer[k], sw.outer[k + 1]);
+            let len = geom::dist(geom::xy(b0), geom::xy(b1));
+            let n = ((len / 4.0).ceil() as usize).max(1);
+            sw.lot[k] = (0..=n).all(|i| {
+                let t = i as f32 / n as f32;
+                let lerp = |a: V3, b: V3| {
+                    [
+                        a[0] + (b[0] - a[0]) * t,
+                        a[1] + (b[1] - a[1]) * t,
+                        a[2] + (b[2] - a[2]) * t,
+                    ]
+                };
+                let (b, o) = (lerp(b0, b1), lerp(o0, o1));
+                let half_way = [(b[0] + o[0]) * 0.5, (b[1] + o[1]) * 0.5, b[2]];
+                supported(o) && supported(half_way)
+            });
+        }
+    }
     let mut ends: BTreeMap<u32, Vec<WalkEnd>> = BTreeMap::new();
+    // Skirt candidates: (top edge, outward unit side: +1 right of the edge's direction).
+    let mut skirt_edges: Vec<Vec<V3>> = Vec::new();
     for w in &walks {
         w.walk.emit(&paved, &mut out);
+        skirt_edges.extend(w.walk.skirt_edges());
+        out.bare_backs.extend(w.walk.bare_backs());
         for (i, at_start) in [(0, true), (1, false)] {
             if let Some(mut e) = w.walk.end(w.road, at_start) {
-                e.corner = w.corners[i];
+                e.tail = kerb_tail(&w.kerb, w.pulled[i], at_start);
+                e.corner = *e.tail.last().unwrap_or(&e.inner);
                 ends.entry(w.nodes[i]).or_default().push(e);
             }
         }
     }
-    let strips = PavedIndex::new(&out.tops);
+    let strips = PavedIndex::new(&out.flush());
     for (node, es) in &ends {
         let node_rims = rims.get(node).copied().unwrap_or(&[]);
-        fill_corners(map, *node, es, node_rims, &paved, &strips, &mut out);
+        let mut fill = CornerFill {
+            paved: &paved,
+            strips: &strips,
+            geo: &geo,
+            out: &mut out,
+            skirt_edges: &mut skirt_edges,
+        };
+        fill_corners(map, *node, es, node_rims, &mut fill);
     }
     // A strip folds back over itself where its lane bends tighter than the strip's offset:
     // drop the folded (down-facing) top triangles; the neighbouring quads cover that spot.
-    let tops = &mut out.tops;
-    tops.indices.retain(|t| {
-        let [a, b, c] = t.map(|i| geom::xy(tops.positions[i as usize]));
+    for m in [&mut out.tops, &mut out.corners, &mut out.lots] {
+        drop_folded(m);
+    }
+    // Skirts: down from every lot / corner outer edge on supported ground, except over
+    // pavement or another walkable top (a corner fill, a neighbouring strip).
+    let flush = PavedIndex::new(&out.flush());
+    for edge in &skirt_edges {
+        if edge.len() < 2 || !edge.iter().all(|p| supported(*p)) {
+            continue;
+        }
+        let ground = |q: V2| net.terrain.as_ref().map(|t| t.height_at(q));
+        let foot: Vec<V3> = geom::offset_polyline(edge, SKIRT_W_M)
+            .into_iter()
+            .map(|p| {
+                let z = p[2] - SKIRT_DROP_M;
+                let z = ground(geom::xy(p)).map_or(z, |g| z.min(g - 0.03));
+                [p[0], p[1], z]
+            })
+            .collect();
+        // A triangle is kept when it faces up and its centroid is over open ground.
+        let open = |t: [V3; 3]| {
+            let [a, b, c] = t;
+            let up = geom::cross(
+                geom::sub(geom::xy(b), geom::xy(a)),
+                geom::sub(geom::xy(c), geom::xy(a)),
+            ) > 0.0;
+            let q = [(a[0] + b[0] + c[0]) / 3.0, (a[1] + b[1] + c[1]) / 3.0];
+            let z = (a[2] + b[2] + c[2]) / 3.0;
+            up && !paved.covers(q, z) && !flush.covers(q, z)
+        };
+        for k in 0..edge.len() - 1 {
+            // The quad's two triangles as `TriMesh::strip` builds them (edge on the left).
+            let (e0, e1, f0, f1) = (edge[k], edge[k + 1], foot[k], foot[k + 1]);
+            let outer_tri = [f0, f1, e1];
+            if open(outer_tri) {
+                out.skirts.fan(&outer_tri);
+                out.skirt_feet.push((f0, f1));
+            }
+            let inner_tri = [f0, e1, e0];
+            if open(inner_tri) {
+                out.skirts.fan(&inner_tri);
+            }
+        }
+    }
+    out
+}
+
+/// Drop the folded (down-facing, seen from above) and degenerate triangles of `m`.
+fn drop_folded(m: &mut TriMesh) {
+    let pos = &m.positions;
+    m.indices.retain(|t| {
+        let [a, b, c] = t.map(|i| geom::xy(pos[i as usize]));
         geom::cross(geom::sub(b, a), geom::sub(c, a)) > 0.0
     });
-    out
+}
+
+/// Width-dependent limits of [`sidewalk_mesh`] for one city.
+struct WalkGeometry {
+    /// Lot width behind the sidewalk, m.
+    lot_w: f32,
+    /// Largest pull-back of a strip end, m.
+    max_pull_back: f32,
+    /// Whether strip ends are pulled back out of a neighbour's band (cities with terrain:
+    /// overlapping lots there lie at different heights; in a flat city they coincide).
+    wedges: bool,
+}
+
+/// What the corner fills of [`sidewalk_mesh`] check against and write to.
+struct CornerFill<'a> {
+    paved: &'a PavedIndex,
+    strips: &'a PavedIndex,
+    geo: &'a WalkGeometry,
+    out: &'a mut SidewalkMesh,
+    skirt_edges: &'a mut Vec<Vec<V3>>,
 }
 
 /// One sidewalk strip of [`sidewalk_mesh`] with where it belongs.
@@ -321,14 +529,45 @@ struct Strip {
     road: u32,
     /// Start and finish node.
     nodes: [u32; 2],
-    /// Kerb-line points at the lane's start and finish (before any pulling back).
-    corners: [V3; 2],
+    /// The whole kerb line (kerb-top height) before any pulling back.
+    kerb: Vec<V3>,
     /// How far each end has been pulled back, m.
     pulled: [f32; 2],
 }
 
-/// Largest distance a strip end is pulled back to clear a crossing neighbour, m.
+/// The stretch of kerb line `kerb` a strip end gave up by being pulled back `pulled` metres at
+/// its start (`at_start`) or finish: its points from the strip's new end (exclusive) out to
+/// the original end (inclusive), in that order. Empty when not pulled back.
+fn kerb_tail(kerb: &[V3], pulled: f32, at_start: bool) -> Vec<V3> {
+    if pulled <= 0.0 || kerb.len() < 2 {
+        return Vec::new();
+    }
+    // Walk from the original end towards the strip; keep points closer than `pulled`.
+    let ordered: Vec<V3> = if at_start {
+        kerb.to_vec()
+    } else {
+        kerb.iter().rev().copied().collect()
+    };
+    let mut acc = 0.0f32;
+    let mut out: Vec<V3> = vec![ordered[0]];
+    for w in ordered.windows(2) {
+        acc += geom::dist(geom::xy(w[0]), geom::xy(w[1]));
+        if acc >= pulled - 1e-3 {
+            break;
+        }
+        out.push(w[1]);
+    }
+    out.reverse();
+    out
+}
+
+/// Largest distance a strip end is pulled back to clear a crossing neighbour, m, plus the
+/// city's lot width ([`WalkGeometry::max_pull_back`]).
 const MAX_PULL_BACK_M: f32 = 6.0;
+
+/// Largest pull-back in a city with terrain, where strip ends also clear the bands of streets
+/// diverging at an acute angle, m.
+const MAX_WEDGE_PULL_BACK_M: f32 = 30.0;
 
 /// Clearance left between the end edges of two strips at a node, m: strips of differently
 /// graded roads meet at different heights, so the corner fill needs room to slope between
@@ -339,7 +578,8 @@ const PULL_BACK_CLEARANCE_M: f32 = 0.5;
 /// lies over pavement (another road running past a tight corner), and the ends of strips of
 /// different roads at the same node whose end edges cross or come within
 /// [`PULL_BACK_CLEARANCE_M`], until none do.
-fn pull_back_ends(walks: &mut [Strip], paved: &PavedIndex) {
+fn pull_back_ends(walks: &mut [Strip], paved: &PavedIndex, geo: &WalkGeometry) {
+    let max_pull = geo.max_pull_back;
     // Over pavement (kerb-line point excluded: it is on the road's own edge).
     let on_paved = |w: &Strip, end: usize| -> bool {
         let Some(e) = w.walk.end(w.road, end == 0) else {
@@ -357,7 +597,7 @@ fn pull_back_ends(walks: &mut [Strip], paved: &PavedIndex) {
     };
     for w in walks.iter_mut() {
         for end in 0..2 {
-            while on_paved(w, end) && w.pulled[end] + 0.25 <= MAX_PULL_BACK_M {
+            while on_paved(w, end) && w.pulled[end] + 0.25 <= max_pull {
                 match w.walk.pulled_back(0.25, end == 0) {
                     Some(nw) => {
                         w.walk = nw;
@@ -379,7 +619,7 @@ fn pull_back_ends(walks: &mut [Strip], paved: &PavedIndex) {
         Some((geom::xy(e.inner), geom::xy(e.outer)))
     };
     for list in at.values() {
-        for _ in 0..(MAX_PULL_BACK_M / 0.25) as usize {
+        for _ in 0..(max_pull / 0.25) as usize {
             let mut moved = false;
             for (x, &(i, ei)) in list.iter().enumerate() {
                 for &(j, ej) in &list[x + 1..] {
@@ -391,12 +631,34 @@ fn pull_back_ends(walks: &mut [Strip], paved: &PavedIndex) {
                     else {
                         continue;
                     };
-                    if geom::segment_distance(a0, a1, b0, b1) >= PULL_BACK_CLEARANCE_M {
+                    // End edges crossing or too close: pull both back. An end edge across the
+                    // other strip's band (streets diverging at an acute angle, their lots
+                    // overlapping at different heights): pull that one back, so the corner
+                    // fill blends the two levels across the whole wedge.
+                    let close = geom::segment_distance(a0, a1, b0, b1) < PULL_BACK_CLEARANCE_M;
+                    let into = |(p0, p1): (V2, V2), w: &SideWalk| {
+                        geo.wedges
+                            && [&w.kerb_top, &w.outer].iter().any(|line| {
+                                line.windows(2).any(|q| {
+                                    geom::segments_intersect(p0, p1, geom::xy(q[0]), geom::xy(q[1]))
+                                })
+                            })
+                    };
+                    let pull = [
+                        close || into((a0, a1), &walks[j].walk),
+                        close || into((b0, b1), &walks[i].walk),
+                    ];
+                    if !pull[0] && !pull[1] {
                         continue;
                     }
-                    for (k, ek) in [(i, ei), (j, ej)] {
+                    for (k, ek) in [(i, ei), (j, ej)]
+                        .into_iter()
+                        .zip(pull)
+                        .filter(|(_, p)| *p)
+                        .map(|(e, _)| e)
+                    {
                         let w = &mut walks[k];
-                        if w.pulled[ek] + 0.25 > MAX_PULL_BACK_M {
+                        if w.pulled[ek] + 0.25 > max_pull {
                             continue;
                         }
                         if let Some(nw) = w.walk.pulled_back(0.25, ek == 0) {
@@ -416,16 +678,21 @@ fn pull_back_ends(walks: &mut [Strip], paved: &PavedIndex) {
 
 /// The end of one sidewalk strip at a node: kerb-line point, outer point and the direction
 /// of the strip away from the node.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct WalkEnd {
     road: u32,
     inner: V3,
     outer: V3,
+    /// The sidewalk's back edge on the end edge, where the end has a lot (a vertex of the
+    /// strip's end edge between `inner` and `outer` that a fill must share).
+    back: Option<V3>,
     /// Unit direction along the strip, pointing away from the node.
     dir: V2,
     /// Kerb-line point at the lane end (the pavement's corner); `inner` when the strip was
     /// not pulled back from it.
     corner: V3,
+    /// The kerb line given up by pulling the end back, from just past `inner` to `corner`.
+    tail: Vec<V3>,
 }
 
 /// Fill the gaps between the sidewalk ends at one node — junction corners, the top of a T,
@@ -433,16 +700,9 @@ struct WalkEnd {
 /// strips' kerb and outer lines (extended to where they meet), in [`TRIM_CELL_M`] cells,
 /// leaving out pavement and what the strips already cover. Kerb faces line the cells that
 /// border pavement.
-fn fill_corners(
-    map: &CityMap,
-    node: u32,
-    ends: &[WalkEnd],
-    rims: &[Vec<V3>],
-    paved: &PavedIndex,
-    strips: &PavedIndex,
-    out: &mut SidewalkMesh,
-) {
+fn fill_corners(map: &CityMap, node: u32, ends: &[WalkEnd], rims: &[Vec<V3>], f: &mut CornerFill) {
     let net = &map.net;
+    let lot_w = f.geo.lot_w;
     let c = geom::xy(net.nodes[node as usize].pos);
     let angle = |p: V2| {
         let d = geom::sub(p, c);
@@ -505,7 +765,7 @@ fn fill_corners(
             .map(|r| (r, e1, e2))
             .or_else(|| rim_between(rims, e2, e1).map(|r| (r, e2, e1)));
         if let Some((rim, e1, e2)) = rim {
-            if exact_fill(c, e1, e2, rim, paved, strips, out) {
+            if exact_fill(c, e1, e2, rim, f) {
                 continue;
             }
         }
@@ -521,12 +781,12 @@ fn fill_corners(
             continue;
         }
         if (e1.inner[2] - e2.inner[2]).abs() > 1.0
-            || geom::dist(geom::xy(e1.inner), geom::xy(e2.inner)) > 30.0
+            || geom::dist(geom::xy(e1.inner), geom::xy(e2.inner)) > 30.0 + 2.0 * lot_w
         {
             continue;
         }
-        out.cell_corners.push(c);
-        fill_patch(c, e1, e2, paved, strips, out);
+        f.out.cell_corners.push(c);
+        fill_patch(c, e1, e2, f);
     }
 }
 
@@ -544,15 +804,7 @@ fn rim_between<'a>(rims: &'a [Vec<V3>], e1: &WalkEnd, e2: &WalkEnd) -> Option<&'
 /// width) and back along the rim, at kerb height, with a kerb face along the rim. False
 /// (nothing emitted) when that polygon is not simple or would cover pavement or another
 /// sidewalk; the caller then falls back to [`fill_patch`].
-fn exact_fill(
-    c: V2,
-    e1: &WalkEnd,
-    e2: &WalkEnd,
-    rim: &[V3],
-    paved: &PavedIndex,
-    strips: &PavedIndex,
-    out: &mut SidewalkMesh,
-) -> bool {
+fn exact_fill(c: V2, e1: &WalkEnd, e2: &WalkEnd, rim: &[V3], f: &mut CornerFill) -> bool {
     let n = rim.len();
     let lift = |p: V3| [p[0], p[1], p[2] + KERB_H_M];
     let plane = fit_plane(&[e1.inner, e1.outer, e2.inner, e2.outer], c);
@@ -560,15 +812,9 @@ fn exact_fill(
     let (o1, o2) = (geom::xy(e1.outer), geom::xy(e2.outer));
     let (i1, i2) = (geom::xy(e1.inner), geom::xy(e2.inner));
     // The kerb from e2's strip end back to e1's: e2's pulled-back stretch, the rim, e1's.
-    let pulled = |e: &WalkEnd| geom::dist(geom::xy(e.inner), geom::xy(e.corner)) > 0.01;
-    let mut rim_back: Vec<V3> = Vec::new();
-    if pulled(e2) {
-        rim_back.push(e2.corner);
-    }
+    let mut rim_back: Vec<V3> = e2.tail.clone();
     rim_back.extend(rim.iter().take(n - 1).skip(1).rev().map(|p| lift(*p)));
-    if pulled(e1) {
-        rim_back.push(e1.corner);
-    }
+    rim_back.extend(e1.tail.iter().rev());
     // The whole kerb line from e1's strip end to e2's, at kerb-top height.
     let mut kerb_line: Vec<V3> = vec![e1.inner];
     kerb_line.extend(rim_back.iter().rev().copied());
@@ -583,30 +829,37 @@ fn exact_fill(
         if let Some(x) = line_cross(i1, d1, i2, d2) {
             let mut poly: Vec<V3> = vec![e1.inner, [x[0], x[1], z_at(x)], e2.inner];
             poly.extend_from_slice(&rim_back);
-            if emit_exact(&poly, &kerb_line, paved, strips, out) {
+            if emit_exact(&poly, &kerb_line, &[], f) {
                 return true;
             }
         }
     }
-    // Around the kerb: the rim offset outwards (to its right) by the sidewalk width.
-    let ring = |out: &mut SidewalkMesh| {
-        let outer = geom::offset_polyline(&kerb_line, SIDEWALK_W_M);
+    // Around the kerb: the rim offset outwards (to its right) by the strips' width (the
+    // narrower end's: a deck end has no lot).
+    let width = geom::dist(i1, o1).min(geom::dist(i2, o2));
+    let ring = |f: &mut CornerFill| {
+        let outer = geom::offset_polyline(&kerb_line, width);
         let m = outer.len();
-        let mut poly: Vec<V3> = vec![e1.inner, e1.outer];
-        poly.extend(outer.iter().take(m - 1).skip(1).copied());
-        poly.push(e2.outer);
+        let mut chain: Vec<V3> = vec![e1.outer];
+        chain.extend(outer.iter().take(m - 1).skip(1).copied());
+        chain.push(e2.outer);
+        let mut poly: Vec<V3> = vec![e1.inner];
+        poly.extend(e1.back);
+        poly.extend_from_slice(&chain);
+        poly.extend(e2.back);
         poly.push(e2.inner);
         poly.extend_from_slice(&rim_back);
-        emit_exact(&poly, &kerb_line, paved, strips, out)
+        emit_exact(&poly, &kerb_line, &chain, f)
     };
     if e1.road == e2.road {
         // A dead end's turnaround.
-        return ring(out);
+        return ring(f);
     }
     // Out to where the two outer lines meet, or straight across between the outer ends, or
     // around the kerb: the first that is simple and covers nothing else.
+    // The polygon and its outer chain (e1's outer end, the apex if any, e2's outer end).
     let with_apex = |apex: Option<V2>| {
-        let mut poly: Vec<V3> = vec![e1.inner, e1.outer];
+        let mut chain: Vec<V3> = vec![e1.outer];
         if let Some(a) = apex {
             // Past a strip's end the apex lies on that strip's outer edge: take its height
             // there (the strips end level across); else the corner plane.
@@ -617,32 +870,38 @@ fn exact_fill(
             } else {
                 z_at(a)
             };
-            poly.push([a[0], a[1], z]);
+            chain.push([a[0], a[1], z]);
         }
-        poly.push(e2.outer);
+        chain.push(e2.outer);
+        let mut poly: Vec<V3> = vec![e1.inner];
+        poly.extend(e1.back);
+        poly.extend_from_slice(&chain);
+        poly.extend(e2.back);
         poly.push(e2.inner);
         poly.extend_from_slice(&rim_back);
-        poly
+        (poly, chain)
     };
     // (Not when it is one of the outer ends already.)
+    let reach = 40.0 + 1.5 * f.geo.lot_w;
     let apex = line_cross(o1, e1.dir, o2, e2.dir).filter(|a| {
-        geom::dist(*a, c) < 40.0 && geom::dist(*a, o1) > 0.05 && geom::dist(*a, o2) > 0.05
+        geom::dist(*a, c) < reach && geom::dist(*a, o1) > 0.05 && geom::dist(*a, o2) > 0.05
     });
-    (apex.is_some() && emit_exact(&with_apex(apex), &kerb_line, paved, strips, out))
-        || emit_exact(&with_apex(None), &kerb_line, paved, strips, out)
-        || ring(out)
+    if apex.is_some() {
+        let (poly, chain) = with_apex(apex);
+        if emit_exact(&poly, &kerb_line, &chain, f) {
+            return true;
+        }
+    }
+    let (poly, chain) = with_apex(None);
+    emit_exact(&poly, &kerb_line, &chain, f) || ring(f)
 }
 
 /// Emit the sidewalk polygon `poly` (kerb height) and the kerb face under `kerb_line` (its
-/// kerb-top edge, pavement on its left; see [`exact_fill`]); false (nothing emitted) when
-/// `poly` is not simple or covers pavement or a sidewalk strip.
-fn emit_exact(
-    poly: &[V3],
-    kerb_line: &[V3],
-    paved: &PavedIndex,
-    strips: &PavedIndex,
-    out: &mut SidewalkMesh,
-) -> bool {
+/// kerb-top edge, pavement on its left; see [`exact_fill`]), and queue a skirt along `chain`
+/// (the polygon's outer edge, outside on its right); false (nothing emitted) when `poly` is
+/// not simple or covers pavement or a sidewalk strip.
+fn emit_exact(poly: &[V3], kerb_line: &[V3], chain: &[V3], f: &mut CornerFill) -> bool {
+    let (paved, strips) = (f.paved, f.strips);
     let mut tops = TriMesh::default();
     if !nodes::polygon_mesh(&mut tops, poly) {
         return false;
@@ -657,12 +916,15 @@ fn emit_exact(
             return false;
         }
     }
-    out.tops.append(&tops);
+    f.out.corners.append(&tops);
     // Kerb face down to the pavement (on the line's left; a vertical strip faces the right of
     // its top line, so walk it backwards).
     let top: Vec<V3> = kerb_line.iter().rev().copied().collect();
     let foot: Vec<V3> = top.iter().map(|p| [p[0], p[1], p[2] - KERB_H_M]).collect();
-    out.kerbs.strip_vertical(&top, &foot);
+    f.out.kerbs.strip_vertical(&top, &foot);
+    if chain.len() >= 2 {
+        f.skirt_edges.push(chain.to_vec());
+    }
     true
 }
 
@@ -677,21 +939,17 @@ fn line_cross(p1: V2, d1: V2, p2: V2, d2: V2) -> Option<V2> {
 }
 
 /// One corner patch between the sidewalk ends `e1` and `e2` around node centre `c`.
-fn fill_patch(
-    c: V2,
-    e1: &WalkEnd,
-    e2: &WalkEnd,
-    paved: &PavedIndex,
-    strips: &PavedIndex,
-    out: &mut SidewalkMesh,
-) {
+fn fill_patch(c: V2, e1: &WalkEnd, e2: &WalkEnd, f: &mut CornerFill) {
+    let (paved, strips) = (f.paved, f.strips);
+    let reach = 25.0 + 1.5 * f.geo.lot_w;
+    let out = &mut *f.out;
     let (i1, o1, i2, o2) = (
         geom::xy(e1.inner),
         geom::xy(e1.outer),
         geom::xy(e2.inner),
         geom::xy(e2.outer),
     );
-    let near = |p: Option<V2>| p.filter(|q| geom::dist(*q, c) < 25.0);
+    let near = |p: Option<V2>| p.filter(|q| geom::dist(*q, c) < reach);
     let poly: Vec<V2> = match (
         near(line_cross(i1, e1.dir, i2, e2.dir)),
         near(line_cross(o1, e1.dir, o2, e2.dir)),
@@ -753,7 +1011,7 @@ fn fill_patch(
             }
             let (xa, xb) = (run0 as f32 * cell, ix as f32 * cell);
             // Counter-clockwise from above: faces up.
-            out.tops.quad(
+            out.corners.quad(
                 corner(xa, y0),
                 corner(xb, y0),
                 corner(xb, y1),
@@ -856,11 +1114,22 @@ fn fit_plane(pts: &[V3], c: V2) -> [f32; 3] {
 /// across, the sidewalk is split in `SIDEWALK_W_M / TRIM_CELL_M` cells).
 pub const TRIM_CELL_M: f32 = 0.5;
 
-/// One sidewalk strip along a lane edge.
+/// Largest fan (angle between the end cross-sections) of one sidewalk / lot quad on a bend,
+/// rad: keeps the lot level along its cross-sections within a few mm on the steepest grades.
+const MAX_FAN_RAD: f32 = 0.025;
+
+/// One sidewalk strip along a lane edge, with its lot.
 struct SideWalk {
+    /// Kerb line at sidewalk-top height.
     kerb_top: Vec<V3>,
+    /// Sidewalk back edge ([`SIDEWALK_W_M`] out): where the lot starts.
+    back: Vec<V3>,
+    /// The lot's outer line (level with `back`).
     outer: Vec<V3>,
+    /// Kerb line at road height.
     kerb_foot: Vec<V3>,
+    /// Per segment: whether it has a lot (else the sidewalk ends at its back edge, railed).
+    lot: Vec<bool>,
     outer_is_left: bool,
 }
 
@@ -872,15 +1141,23 @@ impl SideWalk {
             return None;
         }
         let (k, k2) = if at_start { (0, 1) } else { (n - 1, n - 2) };
+        // The end segment's outer edge: the lot's, or the sidewalk's back edge without one.
+        let seg = if at_start { 0 } else { n - 2 };
         Some(WalkEnd {
             road,
             inner: self.kerb_top[k],
-            outer: self.outer[k],
+            outer: if self.lot[seg] {
+                self.outer[k]
+            } else {
+                self.back[k]
+            },
+            back: self.lot[seg].then_some(self.back[k]),
             dir: geom::normalize(geom::sub(
                 geom::xy(self.kerb_top[k2]),
                 geom::xy(self.kerb_top[k]),
             )),
             corner: self.kerb_top[k],
+            tail: Vec::new(),
         })
     }
 
@@ -889,11 +1166,17 @@ impl SideWalk {
     /// paired. `None` when that would leave less than 1 m.
     fn pulled_back(&self, d: f32, at_start: bool) -> Option<SideWalk> {
         let rev = |v: &[V3]| v.iter().rev().copied().collect::<Vec<V3>>();
-        let (kt, ou, kf) = if at_start {
-            (rev(&self.kerb_top), rev(&self.outer), rev(&self.kerb_foot))
+        let (kt, bk, ou, kf) = if at_start {
+            (
+                rev(&self.kerb_top),
+                rev(&self.back),
+                rev(&self.outer),
+                rev(&self.kerb_foot),
+            )
         } else {
             (
                 self.kerb_top.clone(),
+                self.back.clone(),
                 self.outer.clone(),
                 self.kerb_foot.clone(),
             )
@@ -917,22 +1200,75 @@ impl SideWalk {
             ]);
             out
         };
-        let (mut kt, mut ou, mut kf) = (cut(&kt), cut(&ou), cut(&kf));
+        let (mut kt, mut bk, mut ou, mut kf) = (cut(&kt), cut(&bk), cut(&ou), cut(&kf));
+        // Segment flags in the same (finish-oriented) order: the first k survive, the last cut.
+        let mut lot = if at_start {
+            self.lot.iter().rev().copied().collect::<Vec<bool>>()
+        } else {
+            self.lot.clone()
+        };
+        lot.truncate(k);
         if at_start {
             kt.reverse();
+            bk.reverse();
             ou.reverse();
             kf.reverse();
+            lot.reverse();
         }
         Some(SideWalk {
             kerb_top: kt,
+            back: bk,
             outer: ou,
             kerb_foot: kf,
+            lot,
             outer_is_left: self.outer_is_left,
         })
     }
 
+    /// Back-edge segments without a lot, the sidewalk on their left.
+    fn bare_backs(&self) -> Vec<(V3, V3)> {
+        (0..self.lot.len())
+            .filter(|k| !self.lot[*k])
+            .map(|k| {
+                let (a, b) = (self.back[k], self.back[k + 1]);
+                if self.outer_is_left {
+                    (b, a)
+                } else {
+                    (a, b)
+                }
+            })
+            .collect()
+    }
+
+    /// The outline of every run of lot segments away from the road — across the run's first
+    /// cross-section, along the lot's outer line, back across its last — oriented with the
+    /// outside on its right (skirt candidates; the parts over a corner fill or the next strip
+    /// are dropped later).
+    fn skirt_edges(&self) -> Vec<Vec<V3>> {
+        let mut out: Vec<Vec<V3>> = Vec::new();
+        let mut k = 0;
+        while k < self.lot.len() {
+            if !self.lot[k] {
+                k += 1;
+                continue;
+            }
+            let k0 = k;
+            while k < self.lot.len() && self.lot[k] {
+                k += 1;
+            }
+            // Points k0 ..= k.
+            let mut run: Vec<V3> = vec![self.back[k0]];
+            run.extend_from_slice(&self.outer[k0..=k]);
+            run.push(self.back[k]);
+            if self.outer_is_left {
+                run.reverse();
+            }
+            out.push(run);
+        }
+        out
+    }
+
     fn emit(&self, paved: &PavedIndex, out: &mut SidewalkMesh) {
-        let across = (SIDEWALK_W_M / TRIM_CELL_M).round().max(1.0) as usize;
         let lerp = |a: V3, b: V3, t: f32| -> V3 {
             [
                 a[0] + (b[0] - a[0]) * t,
@@ -942,11 +1278,40 @@ impl SideWalk {
         };
         for k in 0..self.kerb_top.len().saturating_sub(1) {
             let (i0, i1) = (self.kerb_top[k], self.kerb_top[k + 1]);
-            let (o0, o1) = (self.outer[k], self.outer[k + 1]);
+            let (m0, m1) = (self.back[k], self.back[k + 1]);
+            let (o0, o1) = if self.lot[k] {
+                (self.outer[k], self.outer[k + 1])
+            } else {
+                (m0, m1)
+            };
             let (f0, f1) = (self.kerb_foot[k], self.kerb_foot[k + 1]);
+            // Cells across, and the fraction of the width that is sidewalk (the rest is lot).
+            let width =
+                geom::dist(geom::xy(i0), geom::xy(o0)).max(geom::dist(geom::xy(i1), geom::xy(o1)));
+            let across = (width / TRIM_CELL_M).round().max(1.0) as usize;
+            let walk_frac = |t: f32| {
+                let (ii, mm, oo) = (lerp(i0, i1, t), lerp(m0, m1, t), lerp(o0, o1, t));
+                let w = geom::dist(geom::xy(ii), geom::xy(oo));
+                if w < 1e-3 {
+                    1.0
+                } else {
+                    geom::dist(geom::xy(ii), geom::xy(mm)) / w
+                }
+            };
             let len =
                 geom::dist(geom::xy(i0), geom::xy(i1)).max(geom::dist(geom::xy(o0), geom::xy(o1)));
             let rows = ((len / TRIM_CELL_M).ceil() as usize).max(1);
+            // On a bend the cross-sections at the two ends fan out, and one quad from the kerb
+            // to the lot's outer edge is then not level along the cross-sections in between
+            // on a grade: merge clean rows into quads spanning at most MAX_FAN_RAD of fan.
+            let fan = geom::cross(
+                geom::normalize(geom::sub(geom::xy(o0), geom::xy(i0))),
+                geom::normalize(geom::sub(geom::xy(o1), geom::xy(i1))),
+            )
+            .abs()
+            .asin();
+            let pieces = ((fan / MAX_FAN_RAD).ceil() as usize).clamp(1, rows);
+            let max_merge = rows.div_ceil(pieces);
             // Pavement that reaches past the kerb line onto this stretch of sidewalk (the
             // lane's own road ends at the kerb line, so it never counts).
             let quad = [geom::xy(i0), geom::xy(i1), geom::xy(o1), geom::xy(o0)];
@@ -971,35 +1336,42 @@ impl SideWalk {
             while r < rows {
                 if kept[r].iter().all(|k| *k) {
                     let r0 = r;
-                    while r < rows && kept[r].iter().all(|k| *k) {
+                    while r < rows && r - r0 < max_merge && kept[r].iter().all(|k| *k) {
                         r += 1;
                     }
                     let (t0, t1) = (at(r0), at(r));
-                    self.quad(
-                        out,
-                        lerp(i0, i1, t0),
-                        lerp(i0, i1, t1),
-                        lerp(o0, o1, t0),
-                        lerp(o0, o1, t1),
-                    );
+                    let (b0, b1) = (lerp(m0, m1, t0), lerp(m0, m1, t1));
+                    self.quad(&mut out.tops, lerp(i0, i1, t0), lerp(i0, i1, t1), b0, b1);
+                    let (q0, q1) = (lerp(o0, o1, t0), lerp(o0, o1, t1));
+                    if geom::dist(geom::xy(b0), geom::xy(q0)) > 1e-3
+                        || geom::dist(geom::xy(b1), geom::xy(q1)) > 1e-3
+                    {
+                        self.quad(&mut out.lots, b0, b1, q0, q1);
+                    }
                     continue;
                 }
                 let (t0, t1) = (at(r), at(r + 1));
                 let (a0, a1) = (lerp(i0, i1, t0), lerp(i0, i1, t1));
                 let (b0, b1) = (lerp(o0, o1, t0), lerp(o0, o1, t1));
-                let cols: Vec<i32> = (0..across)
-                    .filter(|c| kept[r][*c])
-                    .map(|c| c as i32)
-                    .collect();
-                for (c0, c1) in runs(&cols) {
-                    let (u0, u1) = (c0 as f32 / across as f32, c1 as f32 / across as f32);
-                    self.quad(
-                        out,
-                        lerp(a0, b0, u0),
-                        lerp(a1, b1, u0),
-                        lerp(a0, b0, u1),
-                        lerp(a1, b1, u1),
-                    );
+                // Cells of this row on the sidewalk / on the lot (by the cell centre).
+                let split = walk_frac((t0 + t1) * 0.5);
+                for lot in [false, true] {
+                    let cols: Vec<i32> = (0..across)
+                        .filter(|c| kept[r][*c])
+                        .filter(|c| ((*c as f32 + 0.5) / across as f32 > split) == lot)
+                        .map(|c| c as i32)
+                        .collect();
+                    let mesh = if lot { &mut out.lots } else { &mut out.tops };
+                    for (c0, c1) in runs(&cols) {
+                        let (u0, u1) = (c0 as f32 / across as f32, c1 as f32 / across as f32);
+                        self.quad(
+                            mesh,
+                            lerp(a0, b0, u0),
+                            lerp(a1, b1, u0),
+                            lerp(a0, b0, u1),
+                            lerp(a1, b1, u1),
+                        );
+                    }
                 }
                 r += 1;
             }
@@ -1031,12 +1403,13 @@ impl SideWalk {
         }
     }
 
-    /// Top quad from the inner edge (`in0` → `in1`) to the outer edge (`out0` → `out1`).
-    fn quad(&self, out: &mut SidewalkMesh, in0: V3, in1: V3, out0: V3, out1: V3) {
+    /// Top quad (into `m`) from the inner edge (`in0` → `in1`) to the outer edge (`out0` →
+    /// `out1`).
+    fn quad(&self, m: &mut TriMesh, in0: V3, in1: V3, out0: V3, out1: V3) {
         if self.outer_is_left {
-            out.tops.strip(&[out0, out1], &[in0, in1]);
+            m.strip(&[out0, out1], &[in0, in1]);
         } else {
-            out.tops.strip(&[in0, in1], &[out0, out1]);
+            m.strip(&[in0, in1], &[out0, out1]);
         }
     }
 }
@@ -1334,7 +1707,7 @@ mod tests {
     /// Points across every drivable lane and junction turning path (`margin` inside its
     /// edges) where a sidewalk top lies over it: a kerb step inside the roadway.
     fn sidewalk_on_roadway(map: &CityMap, margin: f32) -> (usize, usize, Vec<V2>) {
-        let tops = PavedIndex::new(&sidewalk_mesh(map).tops);
+        let tops = PavedIndex::new(&sidewalk_mesh(map).flush());
         let (mut n, mut bad, mut examples) = (0, 0, Vec::new());
         for s in map.segs.iter().filter(|s| s.drivable) {
             let half = s.width * 0.5 - margin;
@@ -1436,7 +1809,7 @@ mod tests {
         for (name, map) in cities() {
             let patches = node_patches(&map);
             let road = PavedIndex::new(&road_mesh_with(&map, &patches));
-            let tops = PavedIndex::new(&sidewalk_mesh(&map).tops);
+            let tops = PavedIndex::new(&sidewalk_mesh(&map).flush());
             let (mut n, mut holes, mut walks, mut worst) = (0usize, Vec::new(), Vec::new(), 0f32);
             for patch in &patches {
                 let c = map.net.nodes[patch.node as usize].pos;
@@ -1547,7 +1920,7 @@ mod tests {
             let patches = node_patches(&map);
             let road_m = road_mesh_with(&map, &patches);
             let walks = sidewalk_mesh(&map);
-            let walk_m = walks.tops;
+            let walk_m = walks.flush();
             let (road, walk) = (PavedIndex::new(&road_m), PavedIndex::new(&walk_m));
             // Known exceptions, counted and capped: corners filled in cells and junctions whose
             // ribbon ends overlap.
@@ -1582,7 +1955,7 @@ mod tests {
                         .iter()
                         .map(|q| geom::dist(geom::xy(*q), c))
                         .fold(0.0f32, f32::max);
-                    (c, r + SIDEWALK_W_M + 1.0)
+                    (c, r + SIDEWALK_W_M + lot_width_m(&map.net) + 1.0)
                 })
                 .collect();
             let mut cracks: Vec<String> = Vec::new();
@@ -1673,7 +2046,7 @@ mod tests {
         for (name, map) in cities() {
             for (what, m) in [
                 ("road", road_mesh(&map)),
-                ("sidewalk", sidewalk_mesh(&map).tops),
+                ("sidewalk", sidewalk_mesh(&map).flush()),
             ] {
                 let down: Vec<V3> = m
                     .indices
@@ -1717,8 +2090,9 @@ mod tests {
             ]
         };
         // Tops face up; kerb faces are vertical, KERB_H_M tall.
-        for t in &w.tops.indices {
-            assert!(normal(&w.tops, t)[2] > 0.0, "top facing down: {t:?}");
+        let flush = w.flush();
+        for t in &flush.indices {
+            assert!(normal(&flush, t)[2] > 0.0, "top facing down: {t:?}");
         }
         for t in &w.kerbs.indices {
             let n = normal(&w.kerbs, t);

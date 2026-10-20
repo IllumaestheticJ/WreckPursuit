@@ -30,7 +30,10 @@ enum Kind {
 fn kind_of(material: &str) -> Kind {
     match material {
         "asphalt" | "highway_concrete" | "parking" | "bus_lane" => Kind::Paved,
-        "sidewalk" => Kind::Sidewalk,
+        // Sidewalks, corner fills and the level lots behind them: walkable, must agree.
+        "sidewalk" | "sidewalk_corner" | "lot" => Kind::Sidewalk,
+        // The skirt from a lot down into the ground is ground: physics may not be lower.
+        "lot_skirt" => Kind::Terrain,
         m if m.starts_with("ground_") || m == "rock" || m == "seabed" => Kind::Terrain,
         _ => Kind::Other,
     }
@@ -146,10 +149,22 @@ struct Sample {
     at_kerb: bool,
 }
 
-/// Sample points: across every sidewalk-edged lane (road side, kerb line, sidewalk, past the
-/// sidewalk) every 2 m, plus a 1 m grid around every junction (corners).
+/// Sample points: across every sidewalk-edged lane (road side, kerb line, sidewalk, lot,
+/// skirt, past the skirt) every 2 m, plus a 1 m grid around every junction (corners).
 fn sample_points(map: &CityMap) -> Vec<(V2, f32, bool)> {
     let net = &map.net;
+    let walk = wp_world::surface::SIDEWALK_W_M;
+    let lot = wp_world::surface::lot_width_m(net);
+    let skirt = wp_world::surface::SKIRT_W_M;
+    let mut offsets: Vec<f32> = vec![
+        -0.6f32, -0.15, -0.03, 0.03, 0.15, 0.4, 1.0, 1.7, 2.4, 2.9, 3.4,
+    ];
+    offsets.extend(
+        [0.25f32, 0.5, 0.95]
+            .iter()
+            .map(|f| walk + lot * f)
+            .chain([0.3f32, 0.7, 1.4].iter().map(|d| walk + lot + skirt * d)),
+    );
     let mut pts = Vec::new();
     for l in &net.lanes {
         if l.kind == LaneKind::Highway || !(l.edge_left || l.edge_right) {
@@ -174,9 +189,7 @@ fn sample_points(map: &CityMap) -> Vec<(V2, f32, bool)> {
                 if !on {
                     continue;
                 }
-                for off in [
-                    -0.6f32, -0.15, -0.03, 0.03, 0.15, 0.4, 1.0, 1.7, 2.4, 2.9, 3.4,
-                ] {
+                for &off in &offsets {
                     let lat = side * (half + off);
                     let p = geom::add(geom::xy(c), geom::scale(r, lat));
                     pts.push((p, c[2] + 2.5, off.abs() < 0.05));
@@ -187,7 +200,7 @@ fn sample_points(map: &CityMap) -> Vec<(V2, f32, bool)> {
     }
     for ix in &net.intersections {
         let c = net.nodes[ix.node as usize].pos;
-        let reach = ix.radius_m + 4.0;
+        let reach = ix.radius_m + 4.0 + lot;
         let n = (reach * 2.0) as i32;
         for j in 0..=n {
             for i in 0..=n {
@@ -204,23 +217,58 @@ fn sample_points(map: &CityMap) -> Vec<(V2, f32, bool)> {
     pts
 }
 
-/// Whether `p` is within 0.25 m of a deck guard rail (the visible parapet: physics hits the
-/// rail top there, the greybox draws it as a wall without a top face).
-fn near_rail(rails: &[(V3, V3)], p: V2) -> bool {
-    rails
-        .iter()
-        .any(|(a, b)| geom::point_segment_distance(p, geom::xy(*a), geom::xy(*b)) < 0.25)
+/// Line segments bucketed by xy (16 m), for "is this point near one of them?".
+#[derive(Default)]
+struct Lines(BTreeMap<(i32, i32), Vec<(V2, V2)>>);
+
+impl Lines {
+    fn add(&mut self, a: V2, c: V2) {
+        for bx in ((a[0].min(c[0]) - 1.0) / 16.0).floor() as i32
+            ..=((a[0].max(c[0]) + 1.0) / 16.0).floor() as i32
+        {
+            for by in ((a[1].min(c[1]) - 1.0) / 16.0).floor() as i32
+                ..=((a[1].max(c[1]) + 1.0) / 16.0).floor() as i32
+            {
+                self.0.entry((bx, by)).or_default().push((a, c));
+            }
+        }
+    }
+
+    fn near(&self, p: V2, d: f32) -> bool {
+        let key = ((p[0] / 16.0).floor() as i32, (p[1] / 16.0).floor() as i32);
+        self.0.get(&key).is_some_and(|v| {
+            v.iter()
+                .any(|(a, b)| geom::point_segment_distance(p, *a, *b) < d)
+        })
+    }
 }
 
 fn sweep(map: &CityMap) -> Vec<Sample> {
     let visual = Visual::new(&build_greybox(map));
-    let rails = wp_world::surface::deck_rails(&map.net);
+    // Guard rails (the visible parapets: physics hits the rail top there, the greybox draws
+    // it as walls): along deck edges, and just outside lot-less sidewalk edges.
+    let mut rails = Lines::default();
+    for (a, b) in wp_world::surface::deck_rails(&map.net)
+        .into_iter()
+        .chain(wp_world::surface::sidewalk_mesh(map).bare_backs)
+    {
+        rails.add(geom::xy(a), geom::xy(b));
+    }
+    // Building walls (a ray down a wall line grazes it at any height; buildings stand on the
+    // lots this sweep samples).
+    let mut walls = Lines::default();
+    for b in &map.net.buildings {
+        let n = b.footprint.len();
+        for k in 0..n {
+            walls.add(b.footprint[k], b.footprint[(k + 1) % n]);
+        }
+    }
     let mut phys = wp_sim::PhysicsWorld::new();
     phys.set_city_ground(map);
     sample_points(map)
         .into_iter()
         .filter_map(|(p, from, at_kerb)| {
-            if near_rail(&rails, p) {
+            if rails.near(p, 0.35) || walls.near(p, 0.1) {
                 return None;
             }
             let (z, kind) = visual.top(p, from)?;
