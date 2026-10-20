@@ -131,7 +131,7 @@ processing is in `data/audio/LICENSES.md` (+ machine-readable `data/audio/source
 | `engine_rec_v6`, `engine_rec_i6` (`engine_proc_v6` / `_i6`) | 4-pitch loops of one public-domain car recording; i6 reuses the v6 files | domasx2 (CC0) |
 | `engine_rec_v8` (`engine_proc_v8`) | heavy engine loop at 4 speeds | Nayckron (CC-BY 3.0) |
 | `world_rec` (`world_proc`) | squeal loop, impacts light/medium/heavy metal, plastic, glass ×7, cast clank, thud/thump/land, scrape loops (metal/plastic), part tear, wheel off, engine fail, steam hiss, horn + truck horn, **gear-shift clunks**, **city night ambience** | Kenney Impact Sounds (CC0), qubodup, rubberduck, TinyWorlds, AntumDeluge, Ziph, BMacZero, GGBotNet, IgnasD, Wolfgang_ (all CC0) |
-| `siren_rec` (`siren_proc`) | wail (rise + fall), yelp, phaser, hi-lo loops | aquinn (CC0, electronic) |
+| `siren_rec` (`siren_v2`) | wail, yelp, fast phaser and two-tone hi-lo loops: whole natural cycles of real recordings (whoop / air horn stay synthesized); what police cars play since `docs/integration/siren-recorded.md` | Heggyhomolit (CC0), Work With Sounds / Konrad Gutkowski (CC-BY 4.0) |
 | `radio_rec` (`radio_proc`) | squelch on/off bursts + static bed from a real scanner (Uniden SDS100) | Kresiek The Furry (CC0) |
 
 **Honest gaps (best available on these two sites):** no multi-RPM recordings of distinct engines exist
