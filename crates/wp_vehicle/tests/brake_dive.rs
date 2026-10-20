@@ -1,0 +1,77 @@
+//! Brake dive (owner playtest row 92, v0.12.12: "headlights clip into the ground under
+//! braking"). Every roster car, full brake from 100 and 60 km/h on flat asphalt, wheel preset
+//! (a step on the pedal, the worst case) and keyboard preset (as the owner drives): the nose
+//! dives like a road car (≤ ~2.5° peak; real cars 1–2° at 1 g) and the body ahead of the front
+//! axle never reaches the road. Physics is the same in Arcade and Simulation (CLAUDE.md); the
+//! two-mode check through `wp_sim` is `crates/wp_sim/tests/brake_dive.rs`.
+//!
+//! Measured (`cargo run --release -p wp_vehicle --example brake_dive`): peak 1.2–2.49°, front
+//! body clearance ≥ 5.7 cm, collider corners ≥ 4.4 cm, bump stops never squashed past the end
+//! of the travel. Before (lead/round12): peak 1.7–3.8°, clearance down to 0.4 cm, five cars'
+//! collider corners on the road.
+
+use wp_contracts::{AssistProfile, LoadedCar};
+use wp_vehicle::brake_dive::brake_dive;
+
+fn car(id: &str) -> LoadedCar {
+    let p = format!("{}/../../data/cars/{id}.json", env!("CARGO_MANIFEST_DIR"));
+    wp_contracts::load_car(p).unwrap()
+}
+
+const ROSTER: [&str; 17] = [
+    "vireo_xs",
+    "kestrel_ts",
+    "shiro_turbo",
+    "hakone_gt",
+    "rampart_50",
+    "ironside_440",
+    "sperber_32",
+    "lindwurm_4t",
+    "lucciola_350",
+    "hauler_1500",
+    "sentinel_cruiser",
+    "sentinel_wolfhound",
+    "sentinel_bastion",
+    "junkyard_beater",
+    "tansy_13",
+    "drayman_cargo",
+    "furrow_24",
+];
+
+#[test]
+fn hard_stops_dive_like_a_road_car_and_never_touch_the_road() {
+    let presets = [
+        ("wheel", AssistProfile::wheel_default()),
+        ("keyboard", AssistProfile::keyboard_default()),
+    ];
+    for id in ROSTER {
+        let c = car(id);
+        for (name, a) in &presets {
+            for kmh in [100.0, 60.0] {
+                let r = brake_dive(&c, kmh, false, a);
+                let what = format!("{id} {name} {kmh} km/h: {r:?}");
+                assert!(r.decel_g > 0.6, "brakes work: {what}");
+                assert!(r.peak_pitch_deg <= 2.5, "peak pitch: {what}");
+                assert!(r.steady_pitch_deg <= 2.2, "steady pitch: {what}");
+                assert!(r.peak_pitch_deg > 0.8, "still dives visibly: {what}");
+                assert!(r.min_clearance_m > 0.04, "front body clearance: {what}");
+                assert!(r.min_collider_m > 0.03, "chassis collider: {what}");
+                assert!(
+                    r.bump_stop_m <= 0.0,
+                    "never past the end of the travel: {what}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn holding_the_brake_into_reverse_does_not_bury_the_nose() {
+    // Keyboard drivers hold the brake key through the stop: the automatic box engages
+    // reverse and the same key drives backwards, which also loads the front.
+    for id in ["kestrel_ts", "junkyard_beater", "sentinel_bastion"] {
+        let r = brake_dive(&car(id), 100.0, true, &AssistProfile::keyboard_default());
+        assert!(r.peak_pitch_deg <= 2.5, "{id}: {r:?}");
+        assert!(r.min_clearance_m > 0.04, "{id}: {r:?}");
+    }
+}

@@ -42,6 +42,7 @@
 pub mod aero;
 pub mod assists;
 pub mod body;
+pub mod brake_dive;
 pub mod brakes;
 pub mod diff;
 pub mod drivetrain;
@@ -52,8 +53,8 @@ pub mod handling;
 pub mod launch;
 pub mod math;
 pub mod metrics;
-pub mod ride;
 pub mod presets;
+pub mod ride;
 pub mod rig;
 pub mod slide;
 pub mod snapshot;
