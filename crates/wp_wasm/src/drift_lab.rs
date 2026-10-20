@@ -1,12 +1,13 @@
-//! Drift Lab B (lead helper `lead/drift-lab-b`, owner rows 90 / 91): the testbed's "tune"
-//! panel and readout for the drift assist in `wp_vehicle::drift`.
+//! Drift Lab B / C (lead helpers `lead/drift-lab-b`, `lead/drift-lab-c`; owner rows 90 / 91 /
+//! 104 / 106): the testbed's "tune" panel and readout for the drift assist in
+//! `wp_vehicle::drift`.
 //!
 //! | function | what |
 //! |---|---|
 //! | `drift_tuning_json()` | the constants in effect (override or defaults), JSON |
 //! | `drift_tuning_defaults_json()` | the shipped defaults, JSON |
 //! | `drift_tuning_set(json)` | set the runtime override (`""` clears it); unknown fields are ignored, missing ones take the default |
-//! | `drift_readout(entity)` | `[mode, slide_deg, onset, envelope_deg, authority, throttle_scale]`, mode 0 off · 1 grip · 2 straighten · 3 hold · 4 catch · 5 exceeded |
+//! | `drift_readout(entity)` | `[mode, slide_deg, onset, envelope_deg, authority, throttle_scale, held_deg, throttle_key, throttle_applied]`, mode 0 off · 1 grip · 2 straighten · 3 hold (countersteer key) · 4 angle-up (key into the turn) · 5 exceeded |
 //!
 //! The override is process-wide and not logged in recordings (a developer tool; see
 //! `wp_vehicle::drift`).
@@ -42,14 +43,16 @@ pub fn drift_tuning_set(tuning_json: &str) -> Result<(), JsValue> {
 }
 
 /// Drift readout of a vehicle this tick: `[mode, slide_deg, onset, envelope_deg, authority,
-/// throttle_scale]` (mode codes in the module docs).
+/// throttle_scale, held_deg, throttle_key, throttle_applied]` (mode codes in the module docs;
+/// `throttle_key` is the pedal / key as pressed, `throttle_applied` what reached the engine).
 #[wasm_bindgen]
 pub fn drift_readout(entity: u32) -> Result<Vec<f32>, JsValue> {
     with(|s| {
         let v = s
             .vehicle(EntityId(entity))
             .ok_or_else(|| format!("unknown entity {entity}"))?;
-        let d = v.vehicle.telemetry().drift;
+        let tel = v.vehicle.telemetry();
+        let d = tel.drift;
         Ok(vec![
             d.mode.code() as f32,
             d.slide_angle.to_degrees(),
@@ -57,6 +60,9 @@ pub fn drift_readout(entity: u32) -> Result<Vec<f32>, JsValue> {
             d.envelope.to_degrees(),
             d.authority,
             d.throttle_scale,
+            d.hold_angle.to_degrees(),
+            d.throttle_key,
+            tel.throttle,
         ])
     })
 }
