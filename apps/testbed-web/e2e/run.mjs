@@ -9,7 +9,9 @@
 // weather (e2e/weather.mjs: selector, rain, wet roads, spray, fog, wipers, rainy-night chase),
 // traffic / police LOD hand-overs are seamless (no missing mesh, < 0.5 m swap jump, no pop-in
 // within 300 m), gamepad + rebindable controls (e2e/gamepad.mjs), browser perf budgets
-// (e2e/perf_check.mjs, PERF=0 skips) and (optionally) perf at 1/8/24 cars.
+// (e2e/perf_check.mjs, PERF=0 skips), parked cars and cones are drawn (every prop within 150 m
+// has exactly one drawn instance, near parked cars use the full mesh, a knocked parked car's drawn
+// pose follows the sim within 0.2 m), and (optionally) perf at 1/8/24 cars.
 import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -475,6 +477,63 @@ check(
     lod.minAppearTraffic >= 300 && lod.minVanishTraffic >= 300,
     `LOD: traffic appears ≥ ${lod.minAppearTraffic.toFixed(0)} m and vanishes ≥ ${lod.minVanishTraffic.toFixed(0)} m from the player` +
       ` (police: appear ${lod.minAppearPolice.toFixed(0)} m, vanish ${lod.minVanishPolice.toFixed(0)} m)`,
+  );
+}
+// Props (playtest row 50 "hitting invisible objects"): every parked car / cone is a physical
+// body in the sim, so every one must be drawn. In a city chase: the instanced props match the
+// sim's prop list (each parked car drawn exactly once; every prop within 150 m of the camera
+// drawn; parked cars within 150 m use the full traffic mesh), and a parked car knocked by the
+// player is drawn where the sim has it (instance matrix read back vs prop_pose, every frame,
+// < 0.2 m) while it moves.
+{
+  await page.evaluate(() => window.__wp.startCityChase("debug_sedan", "Arcade"));
+  await page
+    .waitForFunction(() => window.__wp.props.count > 0 && window.__wp.sim.worldInfo()[0] > 240, null, { timeout: 120000, polling: 200 })
+    .catch(() => {});
+  const knock = await page.evaluate(async () => {
+    const wp = window.__wp;
+    const frame = () => new Promise((r) => requestAnimationFrame(r));
+    const target = wp.sim.debugKnockProp(wp.app.player, -1, 12);
+    const start = Array.from(wp.sim.propPose(target));
+    let maxErr = 0;
+    let maxMove = 0;
+    let frames = 0;
+    let undrawn = 0;
+    const t0 = wp.sim.worldInfo()[0];
+    while (wp.sim.worldInfo()[0] - t0 < 240 * 3 && frames < 600) {
+      await frame();
+      frames++;
+      const truth = Array.from(wp.sim.propPose(target));
+      const drawn = wp.props.drawnPose(target);
+      if (!drawn) {
+        undrawn++;
+        continue;
+      }
+      maxErr = Math.max(maxErr, Math.hypot(drawn[0] - truth[0], drawn[1] - truth[1], drawn[2] - truth[2]));
+      maxMove = Math.max(maxMove, Math.hypot(truth[0] - start[0], truth[1] - start[1], truth[2] - start[2]));
+    }
+    // Let the camera settle on the stopped car, then count what is drawn around it.
+    for (let i = 0; i < 30; i++) await frame();
+    // Cost of the per-frame wasm call with nothing moving.
+    const c0 = performance.now();
+    for (let i = 0; i < 200; i++) wp.sim.propsMoved();
+    const movedCallMs = (performance.now() - c0) / 200;
+    return { target, frames, maxErr, maxMove, undrawn, stats: wp.props.stats(wp.rig.camera, 150), model: wp.props.model, movedCallMs };
+  });
+  await shot("props_knock.png");
+  const st = knock.stats;
+  check(
+    st.parked > 1000 && st.drawnFull + st.drawnProxy === st.parked && st.inRange > 0 && st.drawnInRange === st.inRange &&
+      (st.fullInRange === st.parkedInRange || st.fullInRange === 256),
+    `props: ${st.parked} parked cars (${knock.model ?? "box stand-in"}) + ${st.cones} cones; drawn ${st.drawnFull} full + ${st.drawnProxy} proxy; ` +
+      `${st.drawnInRange}/${st.inRange} props within 150 m drawn, ${st.fullInRange}/${st.parkedInRange} parked cars there with the full mesh ` +
+      `(${st.fullInFullRange}/${st.inFullRange} within ${250} m); ${st.repicks} re-picks, ${st.repickWrites} + ${st.movedWrites} matrix writes; ` +
+      `update ${st.updateMeanMs.toFixed(3)} ms mean / ${st.updateMaxMs.toFixed(2)} ms worst, props_moved() ${knock.movedCallMs.toFixed(3)} ms`,
+  );
+  check(
+    knock.maxMove > 0.3 && knock.maxErr < 0.2 && knock.undrawn === 0,
+    `props: knocked parked car #${knock.target} moved ${knock.maxMove.toFixed(2)} m; drawn vs sim pose ≤ ${knock.maxErr.toFixed(3)} m over ${knock.frames} frames` +
+      (knock.undrawn ? `; ${knock.undrawn} frames undrawn` : ""),
   );
 }
 // Pursuit banner + capture → repair bill, driven by a stubbed police_status() (a real capture

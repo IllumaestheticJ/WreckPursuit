@@ -4422,6 +4422,7 @@ name = "wp_wasm"
 version = "0.1.0"
 dependencies = [
  "postcard",
+ "rapier3d",
  "serde",
  "serde_json",
  "simcli",
