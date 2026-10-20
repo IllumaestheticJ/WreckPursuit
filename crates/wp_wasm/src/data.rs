@@ -72,10 +72,10 @@ pub fn car_stats() -> Result<&'static simcli::car_stats::CarStatsTable, String> 
                 None => simcli::car_stats::table(BTreeMap::new()),
             };
             for id in car_ids() {
-                if !table.cars.contains_key(&id) {
-                    let row = simcli::car_stats::measure_car(mem_data(), &id)
+                if let std::collections::btree_map::Entry::Vacant(slot) = table.cars.entry(id) {
+                    let row = simcli::car_stats::measure_car(mem_data(), slot.key())
                         .map_err(|e| e.to_string())?;
-                    table.cars.insert(id, row);
+                    slot.insert(row);
                 }
             }
             Ok(table)
