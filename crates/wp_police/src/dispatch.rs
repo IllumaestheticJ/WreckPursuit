@@ -473,6 +473,27 @@ impl PoliceSystem {
                 u.cmd.track = crate::unit::Track::default();
                 u.track_s = 0.0;
             }
+            // Turned round MAX_TURNS times on one spot: stop trying. A unit on a call hands it
+            // back (Idle: siren off, so traffic stops yielding to it) and, like any unit that
+            // gave up, despawns once nobody can see it.
+            if self.units[i].unstick.turn_loop {
+                self.units[i].unstick.turn_loop = false;
+                self.units[i].unstick.give_up = true;
+                self.stats.turn_loops += 1;
+                if let Assignment::Respond { incident } = self.units[i].assignment {
+                    let id = self.units[i].id;
+                    self.end_response(
+                        id,
+                        crate::ResponseOutcome::Stuck(crate::stuck::StuckCause::NoContact),
+                    );
+                    for inc in self.incidents.iter_mut() {
+                        if inc.id == incident {
+                            inc.unit = None;
+                        }
+                    }
+                    self.assign(i, Assignment::Idle);
+                }
+            }
             // No progress GIVE_UP_S after the first event (even between events): give up.
             let now = self.now;
             let st = &mut self.units[i].unstick;

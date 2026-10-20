@@ -825,6 +825,11 @@ impl PoliceSystem {
                         crate::dispatch::IncidentKind::Crash => None,
                     };
                     if let Some((rp, rv)) = follow {
+                        // Following a reported car to see who it is, not chasing it: no siren
+                        // (lights and siren come with a pursuit). With it, the traffic round
+                        // the racer stopped for the siren and held him up (lead
+                        // r13-test-fixes §4: a race stalled at the finish).
+                        self.units[i].cmd.siren = false;
                         let u = &self.units[i];
                         // The racer coming straight at it: pull over to the right and stop,
                         // let it pass, then follow (no head-on meeting on a narrow road).
@@ -838,8 +843,13 @@ impl PoliceSystem {
                             let room = self.room_behind(i, crate::stuck::YIELD_REVERSE_M);
                             let u = &mut self.units[i];
                             u.unstick.yield_s += tdt;
-                            if u.unstick.yield_s >= crate::stuck::YIELD_DEADLOCK_S && room {
+                            if u.unstick.yield_s >= crate::stuck::YIELD_DEADLOCK_S
+                                && room
+                                && u.unstick.may_turn(now)
+                            {
                                 u.unstick.yield_s = 0.0;
+                                let pos = u.body.pos;
+                                u.unstick.note_turn(pos, now);
                                 let steer = -u.unstick.last_steer.signum();
                                 u.unstick.phase = crate::stuck::Phase::Reverse {
                                     from: u.body.pos,
@@ -874,7 +884,7 @@ impl PoliceSystem {
                                 track: t,
                                 speed_mps: 0.0,
                                 cornering_g: p.pursuit_cornering_g,
-                                siren: true,
+                                siren: false,
                                 lane_offset_m: LANE_OFFSET_M,
                             });
                         }
@@ -940,6 +950,9 @@ impl PoliceSystem {
                             lane_offset_m: LANE_OFFSET_M,
                         });
                     }
+                    // On the way to the call (lights and siren; off only while following
+                    // the racer in sight, above).
+                    self.units[i].cmd.siren = true;
                     let lim = self.limit_at(self.units[i].body.pos);
                     self.units[i].cmd.speed_mps = lim * p.respond_speed_factor;
                     // Meeting the racer at a junction means waiting short of it, not driving

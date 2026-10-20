@@ -470,6 +470,7 @@ impl Unit {
     /// Available for a new job (not busy with a tool, not out of service).
     pub fn available(&self) -> bool {
         !self.wrecked
+            && !self.unstick.give_up
             && self.kind == UnitKind::Car
             && matches!(
                 self.assignment,

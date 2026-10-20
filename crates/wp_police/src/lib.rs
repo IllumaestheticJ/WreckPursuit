@@ -298,6 +298,10 @@ pub struct PoliceStats {
     pub blatant: u32,
     /// Turn-round reverse swings by physical units (target behind them).
     pub swings: u32,
+    /// Units that gave up turning round after [`stuck::MAX_TURNS`] tries on one spot: their
+    /// call was handed back (siren off) and they despawn out of sight.
+    #[serde(default)]
+    pub turn_loops: u32,
     /// Ground units spawned after the session start (pool refills, responders,
     /// reinforcements, tool units).
     pub spawns: Vec<SpawnRecord>,
@@ -1298,6 +1302,7 @@ impl PoliceSystem {
             && facing < stuck::SWING_BEHIND_COS
             && v < stuck::SWING_MAX_MPS
             && now >= u.unstick.swing_ready
+            && u.unstick.may_turn(now)
             && graph::dist(pos, [target[0], target[1]]) > 6.0;
         // Room for the turning circle (row 66: full-lock turns on narrow streets hit buildings):
         // forward round a centre on the target's side, backwards round one on the other side.
@@ -1343,6 +1348,7 @@ impl PoliceSystem {
                 until: now.plus(stuck::UTURN_MAX_S),
                 steer,
             };
+            u.unstick.note_turn(pos, now);
             self.stats.swings += 1;
             return Some(VehicleInput {
                 steer,
@@ -1362,6 +1368,7 @@ impl PoliceSystem {
                 until: now.plus(stuck::SWING_MAX_S),
                 steer,
             };
+            u.unstick.note_turn(pos, now);
             self.stats.swings += 1;
             return Some(VehicleInput {
                 steer,
