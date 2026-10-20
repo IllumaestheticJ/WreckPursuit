@@ -14,8 +14,8 @@
 //!   minute, PIT attempts (a contact while the unit's tactic is `Pit`) and successes (the racer
 //!   turns > 60° or drops below 4 m/s within 3 s), captures within the run;
 //! - **push-through (row 61)**: shoves of blocking civilians / parked cars;
-//! - **buildings (row 66)**: police contacts with building footprints and tunnel walls (within
-//!   1.5 m of one; "fast" = at 3 m/s or more) and with parked props per pursuit minute
+//! - **buildings (row 66)**: police contacts with building footprints and tunnel walls (a tall
+//!   contact within 1.5 m of one; "fast" = at 3 m/s or more) and with parked props per pursuit minute
 //!   (`PoliceStats::static_hits`).
 //!
 //! ```sh
@@ -503,9 +503,12 @@ fn run_once(
     let walls = wall_segments(sim.world());
     let police = sim.police();
     for h in &police.stats().static_hits[hits_before..] {
-        let on_building = walls
-            .iter()
-            .any(|w| seg_dist(w[0], w[1], h.pos) <= BUILDING_HIT_M);
+        // Tall contacts on a building footprint or tunnel wall (kerbs and junction steps in
+        // front of a building are not building hits).
+        let on_building = h.kind == StuckCause::Wall
+            && walls
+                .iter()
+                .any(|w| seg_dist(w[0], w[1], h.pos) <= BUILDING_HIT_M);
         if on_building {
             rep.wall_hits_all += 1;
         }
@@ -513,7 +516,7 @@ fn run_once(
             continue;
         }
         match h.kind {
-            StuckCause::Wall | StuckCause::Kerb | StuckCause::JunctionStep if on_building => {
+            StuckCause::Wall if on_building => {
                 rep.wall_hits += 1;
                 rep.wall_hits_fast += (h.speed_mps >= FAST_HIT_MPS) as u32;
             }
@@ -522,13 +525,15 @@ fn run_once(
         }
         if verbose && (on_building || h.kind == StuckCause::ParkedProp) {
             println!(
-                "  {:6.1} s  unit {} hit {:?} at ({:.0}, {:.0}) at {:.1} m/s",
+                "  {:6.1} s  unit {} hit {:?}{} at ({:.0}, {:.0}) at {:.1} m/s{}",
                 h.at.secs(),
                 h.unit.0,
                 h.kind,
+                if on_building { " (building)" } else { "" },
                 h.pos[0],
                 h.pos[1],
-                h.speed_mps
+                h.speed_mps,
+                if h.turning { " turning" } else { "" }
             );
         }
     }

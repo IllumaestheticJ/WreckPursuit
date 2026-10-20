@@ -693,6 +693,7 @@ impl PoliceSystem {
             speed_mps: u.body.speed,
             pursuing,
             building,
+            turning: u.unstick.swinging() || u.unstick.reversing(),
         });
     }
 

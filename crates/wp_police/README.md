@@ -146,7 +146,7 @@ call: spawned or not, start and road distance, stuck events, outcome (`Arrived`,
   the racer heads for, then its predicted path), so a unit never follows the trail through a
   corner it would cut into a building (row 66).
 - **Chase driving** (`[chase]` in `pursuit.toml`, row 63): corners planned at `cornering_g`
-  (0.92 g), braking at `brake_mps2` (8.5), closing at up to the racer's speed × (1 +
+  (0.82 g), braking at `brake_mps2` (8.5), closing at up to the racer's speed × (1 +
   `speed_margin`) and `pursuit_cap_mps[phase]` × `cap_scale[level]`; through junctions at
   `chase_junction_mps`, reds at `chase_red_mps`, a 0.6 s look for cross traffic, passes after
   0.5 s; interceptors at up to 2.2 × the limit.

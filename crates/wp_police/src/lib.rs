@@ -234,6 +234,9 @@ pub struct StaticHit {
     /// 1.5 m): what row 66 counts. Other `Wall` contacts are steps, kerbs and rails.
     #[serde(default)]
     pub building: bool,
+    /// The unit was turning round (U-turn or reverse swing) or backing out.
+    #[serde(default)]
+    pub turning: bool,
 }
 
 /// Counters for tests, tuning and the README perf/behaviour tables.
@@ -1252,9 +1255,43 @@ impl PoliceSystem {
             && v < stuck::SWING_MAX_MPS
             && now >= u.unstick.swing_ready
             && graph::dist(pos, [target[0], target[1]]) > 6.0;
+        // Room for the turning circle (row 66: full-lock turns on narrow streets hit buildings):
+        // forward round a centre on the target's side, backwards round one on the other side.
+        let left_t = graph::cross(heading, to_t) > 0.0;
+        let side = |left: bool| {
+            let l = graph::perp_left(heading);
+            if left {
+                l
+            } else {
+                graph::scale(l, -1.0)
+            }
+        };
+        let room = |centre: [f32; 2]| {
+            self.walls
+                .nearest(centre)
+                .is_none_or(|d| d >= TURN_RADIUS_M + TURN_CLEAR_M)
+        };
+        let fwd_room = room(graph::add(pos, graph::scale(side(left_t), TURN_RADIUS_M)));
+        let back_room = room(graph::add(pos, graph::scale(side(!left_t), TURN_RADIUS_M)));
+        if swing_wanted && v >= stuck::UTURN_MIN_MPS && !fwd_room {
+            // No room to U-turn here: stop, then three-point it (or drive on if no room for
+            // that either).
+            let u = &mut self.units[i];
+            u.unstick.swing_ready = now.plus(if back_room {
+                0.0
+            } else {
+                stuck::SWING_COOLDOWN_S
+            });
+            return Some(VehicleInput {
+                brake: 0.8,
+                siren,
+                headlights: true,
+                ..Default::default()
+            });
+        }
         if swing_wanted && v >= stuck::UTURN_MIN_MPS {
             // Still rolling: U-turn forward, full lock toward the target's side.
-            let left = graph::cross(heading, to_t) > 0.0;
+            let left = left_t;
             let steer = if left { -1.0 } else { 1.0 };
             let u = &mut self.units[i];
             u.unstick.phase = stuck::Phase::UTurn {
@@ -1272,7 +1309,7 @@ impl PoliceSystem {
                 ..Default::default()
             });
         }
-        if swing_wanted && self.room_behind(i, 6.0) {
+        if swing_wanted && back_room && self.room_behind(i, 6.0) {
             // Reversing with right lock swings the nose left, and the other way round.
             let left = graph::cross(heading, to_t) > 0.0;
             let steer = if left { 1.0 } else { -1.0 };
@@ -1542,6 +1579,12 @@ impl PoliceSystem {
 
 /// A pursuer this close to a stopped racer ignores other stopped police cars, m.
 const ARREST_CLOSE_M: f32 = 45.0;
+
+/// Turning-circle radius of a police car at full lock (centre to the car's centre line), m.
+const TURN_RADIUS_M: f32 = 5.0;
+
+/// A turning circle needs walls at least this much farther than its radius from its centre, m.
+const TURN_CLEAR_M: f32 = 2.0;
 
 /// A chasing unit this far from every racer ignores kinematic (collider-less) traffic, m.
 const GHOST_PASS_M: f32 = 150.0;

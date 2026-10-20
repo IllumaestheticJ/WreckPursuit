@@ -76,7 +76,7 @@ puncture_pull_over = 0.5
 #      unit flanks alongside.
 #   L3+ hard rams and side slams, rolling blocks with units ahead, junctions blocked ahead.
 [chase]
-cornering_g = 0.92
+cornering_g = 0.82
 brake_mps2 = 8.5
 speed_margin = 0.25
 cap_scale = [1.0, 1.1, 1.2, 1.25, 1.3]

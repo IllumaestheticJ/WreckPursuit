@@ -167,6 +167,8 @@ impl Default for WallFeel {
 const FRONT_M: f32 = 2.3;
 /// A side feeler hit this close sideways to the bumper's line is a wall about to be scraped, m.
 const SCRAPE_LATERAL_M: f32 = 2.5;
+/// Slowest a unit is held to for a wall at its side, m/s.
+const SCRAPE_MIN_MPS: f32 = 5.0;
 /// Stop this far short of a wall, m.
 const STOP_SHORT_M: f32 = 2.5;
 
@@ -210,6 +212,13 @@ pub fn feel(
     if near.is_finite() && lateral < SCRAPE_LATERAL_M && (dl - dr).abs() > 1.0 {
         let k = (1.0 - lateral / SCRAPE_LATERAL_M).clamp(0.0, 1.0);
         out.shift_m = if dl < dr { 1.0 } else { -1.0 } * cfg.wall_shift_m * (0.5 + 0.5 * k);
+        // Cutting a corner into a building: slow for it too (never below a crawl).
+        let room = (near * cs - STOP_SHORT_M).max(0.0);
+        out.limit_mps = out.limit_mps.min(
+            (2.0 * cfg.wall_decel_mps2 * room)
+                .sqrt()
+                .max(SCRAPE_MIN_MPS),
+        );
     }
     out
 }
