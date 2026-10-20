@@ -172,7 +172,9 @@ await page.evaluate(() => {
 await page.evaluate((rain) => window.__wp.startCityChase(undefined, "Arcade", rain), which === "rain");
 // The key press also starts the AudioContext (recorded packs load in the warm-up).
 await page.keyboard.down("KeyW");
-await page.waitForTimeout(5000);
+// WARMUP_S=<s>: chase time before measuring (default 5). At 3–4 fps much of the JIT warm-up of the
+// frame loop (Three's render path, the app's per-car loops) is still going on after 5 s.
+await page.waitForTimeout(Number(process.env.WARMUP_S ?? 5) * 1000);
 // EVAL=<js>: run in the page before measuring (A/B experiments, e.g. hide a layer).
 if (process.env.EVAL) await page.evaluate(process.env.EVAL);
 

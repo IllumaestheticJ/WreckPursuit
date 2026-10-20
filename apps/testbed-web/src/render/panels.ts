@@ -145,6 +145,8 @@ interface PartData {
   index: Uint16Array | Uint32Array;
   /** Wheel parts are never re-skinned: one geometry for every car of the model. */
   wheelGeom: THREE.BufferGeometry | null;
+  /** The crumple binding packed for `chordFoldsInto` (null: the part does not fold). */
+  foldPack: FoldPack | null;
 }
 const partData = new WeakMap<MeshPartJson, PartData>();
 function dataOf(def: MeshPartJson): PartData {
@@ -165,7 +167,8 @@ function dataOf(def: MeshPartJson): PartData {
     wheelGeom.setAttribute("position", new THREE.BufferAttribute(rest, 3));
     wheelGeom.setIndex(new THREE.BufferAttribute(index, 1));
   }
-  d = { rest, weights, foldW, nodes: new Uint16Array(def.skin_nodes), index, wheelGeom };
+  const foldPack = def.fold && def.fold.chords.length > 0 ? packFold(def.fold) : null;
+  d = { rest, weights, foldW, nodes: new Uint16Array(def.skin_nodes), index, wheelGeom, foldPack };
   partData.set(def, d);
   return d;
 }
@@ -228,6 +231,8 @@ interface PartRT {
    * (m). Sheet metal does not spring back; cleared once the car is back at rest (repaired).
    */
   foldMem: Float32Array;
+  /** `fold` packed into typed arrays (`chordFoldsInto`); null when `fold` is. */
+  foldPack: FoldPack | null;
   /** Light lenses: broken (crushed or their bumper hangs), drawn dark without glow. */
   broken: boolean;
   /** Largest vertex displacement from rest at the last update, m (lights: break check; tests). */
@@ -473,6 +478,54 @@ function warmSkinVertices(): void {
     sp[SP_REAR] = n % 3 === 0 ? FOLD_REAR_LIFT : 0.5 * FOLD_REAR_LIFT;
     skinVertices(rest, pos, ids, weights, nodes, rn, sp, chords, foldW, out);
   }
+  // chordFoldsInto: a three-chord fold whose leads sit on panels that are attached, hanging
+  // (rotated back about the pivot), detached (skipped) or absent; at rest and dented.
+  const fp = packFold({
+    chords: [
+      [0, 3],
+      [1, 4],
+      [2, 5],
+    ],
+    leads: [
+      [6, 7, 8],
+      [9, 10, 11],
+      [8, 9, 10],
+    ],
+    across: 0,
+    dir: [0.05, 0.08, 0.99],
+    gain: 1.37,
+    max_m: 0.123,
+    pop_m: 0.031,
+    weights: [],
+  });
+  const foldMem = new Float32Array(6);
+  const regions = new Uint8Array(nn);
+  for (let i = 0; i < nn; i++) regions[i] = i < 6 ? 1 : 2 + (i % 4);
+  const regionState = new Int8Array(256);
+  const states = new Float32Array(4 * PANEL_STRIDE);
+  for (let k = 0; k < 4; k++) {
+    const o = k * PANEL_STRIDE;
+    states[o] = 2 + k;
+    states[o + 1] = k;
+    states[o + 2] = 0.173 + 0.01 * k;
+    states[o + 3] = 0.5;
+    states[o + 4] = 0.31;
+    states[o + 5] = -0.42;
+    states[o + 6] = 0.53;
+    states[o + 7] = 0.11;
+    states[o + 8] = 0.07;
+    states[o + 9] = 0.99;
+  }
+  const atRest = new Float32Array(rn);
+  // Enough calls that V8 optimises it here (it then runs only a few times a frame).
+  for (let n = 0; n < 3000; n++) {
+    regionState.fill(-1);
+    // Rotate which region is attached / unlatched / hanging / detached; one round all absent.
+    if (n % 9 !== 0) for (let k = 0; k < 4; k++) regionState[2 + k] = (k + n) % 4;
+    regionState[1] = n % 3 === 0 ? -1 : (n % 2) as number;
+    sp[SP_FRAME] = n % 2;
+    chordFoldsInto(fp, foldMem, rn, n % 5 === 0 ? atRest : nodes, sp, n % 3 === 1, regionState, regions, states, chords);
+  }
 }
 
 /**
@@ -579,13 +632,18 @@ export class PanelBody {
   /** Region index → three node ids spanning the panel (frame fit), for panel regions. */
   private readonly tri = new Map<number, [number, number, number]>();
   private readonly frames = new Map<number, Frame>();
+  /** One reusable `Frame` per free panel region (`frames` holds this re-skin's). */
+  private readonly framePool = new Map<number, Frame>();
   private readonly spawned = new Set<number>();
   private readonly mats: Record<MeshPartJson["material"], THREE.Material>;
   private onReady: (() => void) | null = null;
   /** Nodes array of the last re-skin (VehicleView swaps in a new array only when they move). */
   private skinnedNodes: Float32Array | null = null;
   private readonly stateOf = new Map<number, number>();
-  /** Packed chord folds of the part being re-skinned (`chordFolds`, CHORD_STRIDE per chord). */
+  /** Panel state code per region index, -1 = no panel (`stateOf` as a typed array, for
+   * `chordFoldsInto`). */
+  private readonly regionState = new Int8Array(256);
+  /** Packed chord folds of the part being re-skinned (`chordFoldsInto`, CHORD_STRIDE per chord). */
   private chordBuf = new Float64Array(CHORD_STRIDE * 4);
   private disposed = false;
 
@@ -716,6 +774,7 @@ export class PanelBody {
         fold,
         foldW: d.foldW,
         foldMem: new Float32Array((fold?.chords.length ?? 0) * 2),
+        foldPack: fold ? d.foldPack : null,
         broken: false,
         maxDisp: 0,
         maxFold: 0,
@@ -831,7 +890,14 @@ export class PanelBody {
       const state = this.states[k + 1];
       if (state === PANEL_STATE.unlatched || state === PANEL_STATE.hanging) {
         const tri = this.tri.get(region);
-        if (tri) this.frames.set(region, fitFrame(this.restNodes, nodes, tri));
+        if (tri) {
+          let f = this.framePool.get(region);
+          if (!f) {
+            f = { r: new THREE.Matrix3(), rt: new THREE.Matrix3(), t: new THREE.Vector3() };
+            this.framePool.set(region, f);
+          }
+          this.frames.set(region, fitFrame(this.restNodes, nodes, tri, f));
+        }
       } else if (state === PANEL_STATE.detached && !this.spawned.has(region)) {
         this.spawned.add(region);
         if (dt > 0) this.spawnDebris(region, worldVel ?? new THREE.Vector3());
@@ -843,6 +909,9 @@ export class PanelBody {
     const stateOf = this.stateOf;
     stateOf.clear();
     for (let k = 0; k + PANEL_STRIDE <= this.states.length; k += PANEL_STRIDE) stateOf.set(this.states[k], this.states[k + 1]);
+    const regionState = this.regionState;
+    regionState.fill(-1);
+    for (let k = 0; k + PANEL_STRIDE <= this.states.length; k += PANEL_STRIDE) regionState[this.states[k]] = this.states[k + 1];
     for (const p of this.parts) {
       if (p.hidden) continue;
       const f = p.region >= 0 ? this.frames.get(p.region) : undefined;
@@ -863,7 +932,8 @@ export class PanelBody {
         sp[SP_T + 2] = f.t.z;
       } else sp[SP_FRAME] = 0;
       const fold = p.fold;
-      sp[SP_CHORDS] = fold ? this.chordFolds(p, nodes, f, free, stateOf) : 0;
+      if (p.foldPack && this.chordBuf.length < p.foldPack.nc * CHORD_STRIDE) this.chordBuf = new Float64Array(p.foldPack.nc * CHORD_STRIDE);
+      sp[SP_CHORDS] = p.foldPack ? chordFoldsInto(p.foldPack, p.foldMem, rn, nodes, sp, free, this.regionState, this.nodeRegions, this.states, this.chordBuf) : 0;
       sp[SP_ACROSS] = fold ? fold.across : 0;
       sp[SP_DIR] = fold ? fold.dir[0] : 0;
       sp[SP_DIR + 1] = fold ? fold.dir[1] : 0;
@@ -889,105 +959,6 @@ export class PanelBody {
       b.dirty = false;
       b.position.needsUpdate = true;
     }
-  }
-
-  /**
-   * Fold values per chord of a crumpling part (mirrors tools/assets `skin::chord_folds`): the
-   * larger of the own chord loss (panel frame) and the lead push (chassis space, a hanging
-   * bumper's nodes taken back to their attached pose), times the visual gain, ratcheted in the
-   * part's crumple memory. Written into `chordBuf` (CHORD_STRIDE floats per chord, no
-   * allocation); returns the chord count.
-   */
-  private chordFolds(p: PartRT, nodes: Float32Array, f: Frame | undefined, free: boolean, stateOf: Map<number, number>): number {
-    const fold = p.fold!;
-    const rn = this.restNodes;
-    const nc = fold.chords.length;
-    if (this.chordBuf.length < nc * CHORD_STRIDE) this.chordBuf = new Float64Array(nc * CHORD_STRIDE);
-    const out = this.chordBuf;
-    let atRest = true;
-    for (let c = 0; atRest && c < nc; c++) {
-      const ch = fold.chords[c];
-      atRest = restOff(nodes, rn, ch[0]) <= FOLD_REST_EPS_M && restOff(nodes, rn, ch[1]) <= FOLD_REST_EPS_M;
-    }
-    for (let c = 0; atRest && c < fold.leads.length; c++) {
-      const l = fold.leads[c];
-      for (let j = 0; atRest && j < l.length; j++) atRest = restOff(nodes, rn, l[j]) <= FOLD_REST_EPS_M;
-    }
-    if (atRest) p.foldMem.fill(0);
-    const la_ = cfA;
-    const lb = cfB;
-    const at = cfLead;
-    const dl = cfDl;
-    for (let c = 0; c < nc; c++) {
-      const a = fold.chords[c][0];
-      const b = fold.chords[c][1];
-      const ru0 = rn[b * 3] - rn[a * 3];
-      const ru1 = rn[b * 3 + 1] - rn[a * 3 + 1];
-      const ru2 = rn[b * 3 + 2] - rn[a * 3 + 2];
-      const la = Math.max(Math.hypot(ru0, ru1, ru2), 1e-4);
-      const o = c * CHORD_STRIDE;
-      out[o + 4] = ru0 / la;
-      out[o + 5] = ru1 / la;
-      out[o + 6] = ru2 / la;
-      chordLocal(nodes, f, a, la_);
-      chordLocal(nodes, f, b, lb);
-      const own = la - Math.hypot(lb[0] - la_[0], lb[1] - la_[1], lb[2] - la_[2]);
-      let pushLatch = 0;
-      for (let k = 0; k < 3; k++) pushLatch -= (lb[k] - rn[b * 3 + k] - (la_[k] - rn[a * 3 + k])) * out[o + 4 + k];
-      dl[0] = 0;
-      dl[1] = 0;
-      dl[2] = 0;
-      let n = 0;
-      const leads = fold.leads[c];
-      for (let j = 0; j < leads.length; j++) {
-        const l = leads[j];
-        if (!this.leadPos(l, nodes, stateOf, at)) continue;
-        for (let k = 0; k < 3; k++) dl[k] += at[k] - rn[l * 3 + k];
-        n++;
-      }
-      let pushLead = pushLatch;
-      if (n > 0) {
-        pushLead = 0;
-        for (let k = 0; k < 3; k++) pushLead -= (dl[k] / n - (nodes[a * 3 + k] - rn[a * 3 + k])) * out[o + 4 + k];
-      }
-      const eff = Math.max(fold.gain * Math.max(own, pushLead), p.foldMem[c * 2]);
-      const extra = Math.max(pushLead - pushLatch, 0, p.foldMem[c * 2 + 1]);
-      p.foldMem[c * 2] = eff;
-      p.foldMem[c * 2 + 1] = extra;
-      out[o] = rn[b * 3 + fold.across];
-      out[o + 1] = Math.min(FOLD_SPLIT * foldHeight(la, eff), fold.max_m);
-      out[o + 2] = Math.min(extra, FOLD_PULL_MAX * la);
-      out[o + 3] = free ? fold.pop_m : 0;
-    }
-    return nc;
-  }
-
-  /**
-   * Lead node `i` as if its panel were still attached, into `out`: a hanging panel's node
-   * rotated back by its hang angle about its pivot (the sim captures the hanging pose at angle
-   * 0, so this is the crushed pose it was released in); false once its panel fell off
-   * (tools/assets `lead_pos`).
-   */
-  private leadPos(i: number, nodes: Float32Array, stateOf: Map<number, number>, out: Float64Array): boolean {
-    const r = this.nodeRegions[i];
-    const st = stateOf.get(r);
-    if (st === PANEL_STATE.detached) return false;
-    out[0] = nodes[i * 3];
-    out[1] = nodes[i * 3 + 1];
-    out[2] = nodes[i * 3 + 2];
-    if (st !== PANEL_STATE.hanging) return true;
-    const s = this.states;
-    for (let k = 0; k + PANEL_STRIDE <= s.length; k += PANEL_STRIDE) {
-      if (s[k] !== r) continue;
-      cfPivot.set(s[k + 4], s[k + 5], s[k + 6]);
-      cfAxis.set(s[k + 7], s[k + 8], s[k + 9]);
-      cfV.set(out[0], out[1], out[2]).sub(cfPivot).applyAxisAngle(cfAxis, -s[k + 2]).add(cfPivot);
-      out[0] = cfV.x;
-      out[1] = cfV.y;
-      out[2] = cfV.z;
-      return true;
-    }
-    return true;
   }
 
   /**
@@ -1098,12 +1069,37 @@ export class PanelBody {
   }
 }
 
-/** Scratch of `chordFolds` / `leadPos` (one re-skin at a time). */
+/** A part's crumple binding (`FoldJson`) packed into typed arrays, built once per part model. */
+interface FoldPack {
+  nc: number;
+  /** Per chord: fixed-end node, leading-end node. */
+  chords: Int32Array;
+  /** Lead node lists: group g is `leads[leadStart[g] .. leadStart[g + 1]]` (one per chord). */
+  leads: Int32Array;
+  leadStart: Int32Array;
+  /** gain, max_m, pop_m, across. */
+  scal: Float64Array;
+}
+function packFold(fold: FoldJson): FoldPack {
+  const nc = fold.chords.length;
+  const chords = new Int32Array(nc * 2);
+  for (let c = 0; c < nc; c++) {
+    chords[c * 2] = fold.chords[c][0];
+    chords[c * 2 + 1] = fold.chords[c][1];
+  }
+  const ng = fold.leads.length;
+  const leadStart = new Int32Array(ng + 1);
+  for (let g = 0; g < ng; g++) leadStart[g + 1] = leadStart[g] + fold.leads[g].length;
+  const leads = new Int32Array(leadStart[ng]);
+  for (let g = 0; g < ng; g++) for (let j = 0; j < fold.leads[g].length; j++) leads[leadStart[g] + j] = fold.leads[g][j];
+  return { nc, chords, leads, leadStart, scal: new Float64Array([fold.gain, fold.max_m, fold.pop_m, fold.across]) };
+}
+
+/** Scratch of `chordFoldsInto` (one re-skin at a time). */
 const cfA = new Float64Array(3);
 const cfB = new Float64Array(3);
 const cfLead = new Float64Array(3);
 const cfDl = new Float64Array(3);
-const cfTmp = new THREE.Vector3();
 const cfPivot = new THREE.Vector3();
 const cfAxis = new THREE.Vector3();
 const cfV = new THREE.Vector3();
@@ -1113,18 +1109,128 @@ function restOff(nodes: Float32Array, rn: Float32Array, i: number): number {
   return Math.hypot(nodes[i * 3] - rn[i * 3], nodes[i * 3 + 1] - rn[i * 3 + 1], nodes[i * 3 + 2] - rn[i * 3 + 2]);
 }
 
-/** Node `i` in the panel's own frame `f` (chassis space when attached), into `out`. */
-function chordLocal(nodes: Float32Array, f: Frame | undefined, i: number, out: Float64Array): void {
-  if (!f) {
+/** Node `i` in the panel's own frame (`sp` SP_FRAME / SP_RT / SP_T; chassis space when
+ * attached), into `out` (= `Vector3.applyMatrix3(rt)` of the node minus `t`). */
+function chordLocal(nodes: Float32Array, sp: Float64Array, i: number, out: Float64Array): void {
+  if (sp[SP_FRAME] === 0) {
     out[0] = nodes[i * 3];
     out[1] = nodes[i * 3 + 1];
     out[2] = nodes[i * 3 + 2];
     return;
   }
-  cfTmp.set(nodes[i * 3] - f.t.x, nodes[i * 3 + 1] - f.t.y, nodes[i * 3 + 2] - f.t.z).applyMatrix3(f.rt);
-  out[0] = cfTmp.x;
-  out[1] = cfTmp.y;
-  out[2] = cfTmp.z;
+  const x = nodes[i * 3] - sp[SP_T];
+  const y = nodes[i * 3 + 1] - sp[SP_T + 1];
+  const z = nodes[i * 3 + 2] - sp[SP_T + 2];
+  out[0] = sp[SP_RT] * x + sp[SP_RT + 3] * y + sp[SP_RT + 6] * z;
+  out[1] = sp[SP_RT + 1] * x + sp[SP_RT + 4] * y + sp[SP_RT + 7] * z;
+  out[2] = sp[SP_RT + 2] * x + sp[SP_RT + 5] * y + sp[SP_RT + 8] * z;
+}
+
+/**
+ * Lead node `i` as if its panel were still attached, into `out`: a hanging panel's node
+ * rotated back by its hang angle about its pivot (the sim captures the hanging pose at angle
+ * 0, so this is the crushed pose it was released in); false once its panel fell off
+ * (tools/assets `lead_pos`).
+ */
+function leadPos(i: number, nodes: Float32Array, regionState: Int8Array, nodeRegions: Uint8Array, s: Float32Array, out: Float64Array): boolean {
+  const r = nodeRegions[i];
+  const st = regionState[r];
+  if (st === PANEL_STATE.detached) return false;
+  out[0] = nodes[i * 3];
+  out[1] = nodes[i * 3 + 1];
+  out[2] = nodes[i * 3 + 2];
+  if (st !== PANEL_STATE.hanging) return true;
+  for (let k = 0; k + PANEL_STRIDE <= s.length; k += PANEL_STRIDE) {
+    if (s[k] !== r) continue;
+    cfPivot.set(s[k + 4], s[k + 5], s[k + 6]);
+    cfAxis.set(s[k + 7], s[k + 8], s[k + 9]);
+    cfV.set(out[0], out[1], out[2]).sub(cfPivot).applyAxisAngle(cfAxis, -s[k + 2]).add(cfPivot);
+    out[0] = cfV.x;
+    out[1] = cfV.y;
+    out[2] = cfV.z;
+    return true;
+  }
+  return true;
+}
+
+/**
+ * Fold values per chord of a crumpling part (mirrors tools/assets `skin::chord_folds`): the
+ * larger of the own chord loss (panel frame, from `sp`) and the lead push (chassis space, a
+ * hanging bumper's nodes taken back to their attached pose), times the visual gain, ratcheted
+ * in the part's crumple memory `foldMem`. Written into `out` (CHORD_STRIDE floats per chord);
+ * returns the chord count. Typed arrays only and warmed with the skinning (`warmSkinVertices`):
+ * as a method reading the fold JSON it ran a few times a frame and never left the tier where
+ * every float operation allocates (~10 KB a frame, allocation pass 2026-10-20).
+ */
+function chordFoldsInto(
+  fp: FoldPack,
+  foldMem: Float32Array,
+  rn: Float32Array,
+  nodes: Float32Array,
+  sp: Float64Array,
+  free: boolean,
+  regionState: Int8Array,
+  nodeRegions: Uint8Array,
+  states: Float32Array,
+  out: Float64Array,
+): number {
+  const nc = fp.nc;
+  const ch = fp.chords;
+  const leads = fp.leads;
+  const ls = fp.leadStart;
+  const gain = fp.scal[0];
+  const maxM = fp.scal[1];
+  const popM = fp.scal[2];
+  const across = fp.scal[3] | 0;
+  let atRest = true;
+  for (let c = 0; atRest && c < nc; c++) atRest = restOff(nodes, rn, ch[c * 2]) <= FOLD_REST_EPS_M && restOff(nodes, rn, ch[c * 2 + 1]) <= FOLD_REST_EPS_M;
+  for (let j = 0; atRest && j < leads.length; j++) atRest = restOff(nodes, rn, leads[j]) <= FOLD_REST_EPS_M;
+  if (atRest) foldMem.fill(0);
+  const la_ = cfA;
+  const lb = cfB;
+  const at = cfLead;
+  const dl = cfDl;
+  for (let c = 0; c < nc; c++) {
+    const a = ch[c * 2];
+    const b = ch[c * 2 + 1];
+    const ru0 = rn[b * 3] - rn[a * 3];
+    const ru1 = rn[b * 3 + 1] - rn[a * 3 + 1];
+    const ru2 = rn[b * 3 + 2] - rn[a * 3 + 2];
+    const la = Math.max(Math.hypot(ru0, ru1, ru2), 1e-4);
+    const o = c * CHORD_STRIDE;
+    out[o + 4] = ru0 / la;
+    out[o + 5] = ru1 / la;
+    out[o + 6] = ru2 / la;
+    chordLocal(nodes, sp, a, la_);
+    chordLocal(nodes, sp, b, lb);
+    const own = la - Math.hypot(lb[0] - la_[0], lb[1] - la_[1], lb[2] - la_[2]);
+    let pushLatch = 0;
+    for (let k = 0; k < 3; k++) pushLatch -= (lb[k] - rn[b * 3 + k] - (la_[k] - rn[a * 3 + k])) * out[o + 4 + k];
+    dl[0] = 0;
+    dl[1] = 0;
+    dl[2] = 0;
+    let n = 0;
+    for (let j = ls[c]; j < ls[c + 1]; j++) {
+      const l = leads[j];
+      if (!leadPos(l, nodes, regionState, nodeRegions, states, at)) continue;
+      for (let k = 0; k < 3; k++) dl[k] += at[k] - rn[l * 3 + k];
+      n++;
+    }
+    let pushLead = pushLatch;
+    if (n > 0) {
+      pushLead = 0;
+      for (let k = 0; k < 3; k++) pushLead -= (dl[k] / n - (nodes[a * 3 + k] - rn[a * 3 + k])) * out[o + 4 + k];
+    }
+    const eff = Math.max(gain * Math.max(own, pushLead), foldMem[c * 2]);
+    const extra = Math.max(pushLead - pushLatch, 0, foldMem[c * 2 + 1]);
+    foldMem[c * 2] = eff;
+    foldMem[c * 2 + 1] = extra;
+    out[o] = rn[b * 3 + across];
+    out[o + 1] = Math.min(FOLD_SPLIT * foldHeight(la, eff), maxM);
+    out[o + 2] = Math.min(extra, FOLD_PULL_MAX * la);
+    out[o + 3] = free ? popM : 0;
+  }
+  return nc;
 }
 
 /** Three nodes of `region` spanning the largest triangle (rest pose). */
@@ -1151,22 +1257,31 @@ function spanTriangle(rest: Float32Array, regions: Uint8Array, region: number): 
   return best;
 }
 
-/** Orthonormal frame of a node triangle as columns. */
-function triFrame(p: Float32Array, [i, j, k]: [number, number, number]): { m: THREE.Matrix3; o: THREE.Vector3 } {
-  const o = new THREE.Vector3().fromArray(p, i * 3);
-  const e1 = new THREE.Vector3().fromArray(p, j * 3).sub(o).normalize();
-  const c = new THREE.Vector3().fromArray(p, k * 3).sub(o);
-  const e3 = new THREE.Vector3().crossVectors(e1, c).normalize();
-  const e2 = new THREE.Vector3().crossVectors(e3, e1);
-  const m = new THREE.Matrix3().set(e1.x, e2.x, e3.x, e1.y, e2.y, e3.y, e1.z, e2.z, e3.z);
-  return { m, o };
+/** Orthonormal frame of a node triangle as columns, into `out` (scratch vectors below). */
+function triFrame(p: Float32Array, [i, j, k]: [number, number, number], out: { m: THREE.Matrix3; o: THREE.Vector3 }): void {
+  const o = out.o.fromArray(p, i * 3);
+  const e1 = tfE1.fromArray(p, j * 3).sub(o).normalize();
+  const c = tfC.fromArray(p, k * 3).sub(o);
+  const e3 = tfE3.crossVectors(e1, c).normalize();
+  const e2 = tfE2.crossVectors(e3, e1);
+  out.m.set(e1.x, e2.x, e3.x, e1.y, e2.y, e3.y, e1.z, e2.z, e3.z);
 }
+const tfE1 = new THREE.Vector3();
+const tfC = new THREE.Vector3();
+const tfE2 = new THREE.Vector3();
+const tfE3 = new THREE.Vector3();
+const tfA = { m: new THREE.Matrix3(), o: new THREE.Vector3() };
+const tfB = { m: new THREE.Matrix3(), o: new THREE.Vector3() };
+const tfAt = new THREE.Matrix3();
+const tfV = new THREE.Vector3();
 
-/** Rigid transform taking the triangle's rest frame to its current frame. */
-function fitFrame(rest: Float32Array, cur: Float32Array, tri: [number, number, number]): Frame {
-  const a = triFrame(rest, tri);
-  const b = triFrame(cur, tri);
-  const r = b.m.clone().multiply(a.m.clone().transpose());
-  const t = b.o.clone().sub(a.o.clone().applyMatrix3(r));
-  return { r, rt: r.clone().transpose(), t };
+/** Rigid transform taking the triangle's rest frame to its current frame, into `out` (no
+ * allocation: it runs for every free panel on each re-skin). */
+function fitFrame(rest: Float32Array, cur: Float32Array, tri: [number, number, number], out: Frame): Frame {
+  triFrame(rest, tri, tfA);
+  triFrame(cur, tri, tfB);
+  const r = out.r.copy(tfB.m).multiply(tfAt.copy(tfA.m).transpose());
+  out.t.copy(tfB.o).sub(tfV.copy(tfA.o).applyMatrix3(r));
+  out.rt.copy(r).transpose();
+  return out;
 }

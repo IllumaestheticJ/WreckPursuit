@@ -207,6 +207,15 @@ export class VoicePool {
   private engines = new Map<number, EngineGroup>();
   /** Released instruments still fading out. */
   private dying: Voice[] = [];
+  /** `collect`'s clock for `reapVoice`. */
+  private collectT = 0;
+  /** Recycle a voice that has ended (`collect`, through `Map.forEach`). */
+  private readonly reapVoice = (v: Voice, k: string): void => {
+    if (v.endTime <= this.collectT) {
+      this.recycle(v);
+      this.voices.delete(k);
+    }
+  };
   private samples = new Map<string, AudioBuffer | "loading" | "failed">();
   /**
    * Looped voices playing a pack's procedural fallback only because their recording was not
@@ -675,17 +684,18 @@ export class VoicePool {
     if (this.decoded) this.upgrade();
     for (const g of this.engines.values()) if (g.dirty) this.flushEngine(g);
     const t = this.ctx.currentTime;
-    for (const [k, v] of this.voices) {
-      if (v.endTime <= t) {
-        this.recycle(v);
-        this.voices.delete(k);
-      }
+    // Per frame: no [key, voice] entry arrays, no filtered copy of `dying` (allocation pass
+    // 2026-10-20). Same order and effect as the for-of / filter it replaces.
+    this.collectT = t;
+    this.voices.forEach(this.reapVoice);
+    const dying = this.dying;
+    let keep = 0;
+    for (let i = 0; i < dying.length; i++) {
+      const v = dying[i];
+      if (v.endTime > t) dying[keep++] = v;
+      else (v.panner ?? v.lp).disconnect();
     }
-    this.dying = this.dying.filter((v) => {
-      if (v.endTime > t) return true;
-      (v.panner ?? v.lp).disconnect();
-      return false;
-    });
+    dying.length = keep;
     this.engineHost?.flush();
   }
 

@@ -302,25 +302,28 @@ export class InstancedCar {
   putHex(i: number, m: THREE.Matrix4, paint: Hex, tail: Hex, bar: Hex | null, lit = true): void {
     const meshes = this.meshes;
     for (let k = 0; k < meshes.length; k++) meshes[k].setMatrixAt(i, m);
+    // Colours come from a per-style memo of the instance-buffer floats (`rgbMemo`): the same
+    // values `setColorAt(i, color)` would write, copied without going through Color objects.
+    syncRgbMemo();
     if (!lit) {
       const low = artStyle.lowpoly;
-      this.paint.setColorAt(i, tmpPaint.setHex(low ? styledPaint(paint) : paint));
-      this.tail.setColorAt(i, tmpTail.setHex(UNLIT_TAIL));
-      this.head.setColorAt(i, tmpHeadStyled.setHex(UNLIT_HEAD));
-      if (this.bar) this.bar.setColorAt(i, low ? styledLamp(tmpBar, BAR.off) : tmpBar.setHex(BAR.off));
+      putRgb(this.paint, i, paintRgb(low ? styledPaint(paint) : paint));
+      putRgb(this.tail, i, paintRgb(UNLIT_TAIL));
+      putRgb(this.head, i, paintRgb(UNLIT_HEAD));
+      if (this.bar) putRgb(this.bar, i, low ? lampRgb(BAR.off) : paintRgb(BAR.off));
       return;
     }
     if (artStyle.lowpoly) {
-      this.paint.setColorAt(i, tmpPaint.setHex(styledPaint(paint)));
-      this.tail.setColorAt(i, styledLamp(tmpTail, tail));
-      this.head.setColorAt(i, styledLamp(tmpHeadStyled, HEAD));
-      if (this.bar) this.bar.setColorAt(i, styledLamp(tmpBar, bar ?? BAR.off));
+      putRgb(this.paint, i, paintRgb(styledPaint(paint)));
+      putRgb(this.tail, i, lampRgb(tail));
+      putRgb(this.head, i, lampRgb(HEAD));
+      if (this.bar) putRgb(this.bar, i, lampRgb(bar ?? BAR.off));
       return;
     }
-    this.paint.setColorAt(i, tmpPaint.setHex(paint));
-    this.tail.setColorAt(i, tmpTail.setHex(tail));
-    this.head.setColorAt(i, tmpHead);
-    if (this.bar) this.bar.setColorAt(i, tmpBar.setHex(bar ?? BAR.off));
+    putRgb(this.paint, i, paintRgb(paint));
+    putRgb(this.tail, i, paintRgb(tail));
+    putRgb(this.head, i, paintRgb(HEAD));
+    if (this.bar) putRgb(this.bar, i, paintRgb(bar ?? BAR.off));
   }
 
   end(): void {
@@ -349,11 +352,46 @@ export interface FleetMaterials {
 /** Lens colours of a car with its lights off (below 1, so they never reach the bloom pass). */
 const UNLIT_TAIL = 0x3a0c0c;
 const UNLIT_HEAD = 0x3c3b36;
-const tmpBar = new THREE.Color();
-const tmpHead = new THREE.Color(HEAD);
-const tmpPaint = new THREE.Color();
-const tmpTail = new THREE.Color();
-const tmpHeadStyled = new THREE.Color();
+/**
+ * Instance colours per hex as the instance buffer stores them (Float32 linear RGB), so `putHex`
+ * (per car per frame) copies three floats instead of a Color round trip through
+ * `setHex` / `setColorAt` (~10 KB a frame at 3–4 fps, allocation pass 2026-10-20). `paintRgb`
+ * = `Color.setHex(hex)`; `lampRgb` = `styledLamp(hex)`, which also depends on the art style
+ * and on night > 0.2: that memo is cleared when either changes.
+ */
+const paintMemo = new Map<number, Float32Array>();
+const lampMemo = new Map<number, Float32Array>();
+let lampMemoState = -1;
+const memoColor = new THREE.Color();
+function syncRgbMemo(): void {
+  const state = (artStyle.lowpoly ? 1 : 0) + (artStyle.night > 0.2 ? 2 : 0);
+  if (state === lampMemoState) return;
+  lampMemoState = state;
+  lampMemo.clear();
+}
+function paintRgb(hex: Hex): Float32Array {
+  let c = paintMemo.get(hex);
+  if (!c) {
+    c = new Float32Array(3);
+    memoColor.setHex(hex).toArray(c);
+    paintMemo.set(hex, c);
+  }
+  return c;
+}
+function lampRgb(hex: Hex): Float32Array {
+  let c = lampMemo.get(hex);
+  if (!c) {
+    c = new Float32Array(3);
+    styledLamp(memoColor, hex).toArray(c);
+    lampMemo.set(hex, c);
+  }
+  return c;
+}
+/** `mesh.setColorAt(i, rgb)` for a colour already in instance-buffer floats. */
+function putRgb(mesh: THREE.InstancedMesh, i: number, rgb: Float32Array): void {
+  if (mesh.instanceColor === null) mesh.setColorAt(i, memoColor.fromArray(rgb));
+  else (mesh.instanceColor.array as Float32Array).set(rgb, i * 3);
+}
 
 /** One car model: full and proxy instance sets. */
 class FleetModel {

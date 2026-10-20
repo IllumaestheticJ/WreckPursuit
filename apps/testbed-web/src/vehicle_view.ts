@@ -93,6 +93,10 @@ function sameValues(a: Float32Array, b: Float32Array): boolean {
   return true;
 }
 
+/** Scratch of the CG / velocity debug layer (per car per frame; copied out right away). */
+const cgScratch = new THREE.Vector3();
+const velScratch = new THREE.Vector3();
+
 export class VehicleView {
   readonly root = new THREE.Group();
   readonly info: VehicleInfo;
@@ -407,11 +411,11 @@ export class VehicleView {
     this.cg.visible = cgOn;
     this.velocity.visible = cgOn;
     if (cgOn) {
-      const cgWorld = this.cg.getWorldPosition(new THREE.Vector3());
+      const cgWorld = this.cg.getWorldPosition(cgScratch);
       const parent = this.velocity.parent;
       if (parent) parent.worldToLocal(cgWorld);
       this.velocity.position.copy(cgWorld);
-      const v = new THREE.Vector3(cur[o + S.linVel], cur[o + S.linVel + 1], cur[o + S.linVel + 2]);
+      const v = velScratch.set(cur[o + S.linVel], cur[o + S.linVel + 1], cur[o + S.linVel + 2]);
       const speed = v.length();
       this.velocity.visible = speed > 0.1;
       if (speed > 0.1) {
