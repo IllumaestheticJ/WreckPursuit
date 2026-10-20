@@ -191,8 +191,9 @@ function stepKeyRamps(k: KeyRamps, on: (id: ActionId) => boolean, dt: number): v
   // ramp is the car's steering model (wp_vehicle::steering::key_steer, or the plain rack in
   // Drift Lab W), so replays, the AI and every client see the same steering path.
   k.steer = right - left;
-  // Fast key ramp: the sim's keyboard assist preset filters the pedal again (~0.23 s).
-  // Raw throttle key (0 / 1) in Drift Lab W, and with TCS Off (row 104).
+  // Fast key ramp: the sim's keyboard assist preset filters the pedal again (~0.23 s). With TCS
+  // Off neither applies: the key is raw (row 104; the reference game's keyboard input is raw).
+  // Drift Lab W: always the raw throttle key (0 / 1).
   const thrKey = on("throttle") ? 1 : 0;
   k.throttle = rawKeys || rawThrottle ? thrKey : ramp(k.throttle, thrKey, 12.0, 12.0, dt);
   k.brake = ramp(k.brake, on("brake") ? 1 : 0, 6.0, 10.0, dt);

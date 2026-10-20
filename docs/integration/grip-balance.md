@@ -58,6 +58,28 @@ Step 3 details (parity_rwd_d unless named):
 | tyre-load chatter in a 60 mph corner | 0.6–1.0 kN RMS | 0.00 kN |
 | FWD (parity_fwd_c) body slip 60 / 100 mph, gradient 60 / 100 km/h | 1.1 / 2.3°, +0.29 / +0.84 | 1.3 / 1.5°, +0.37 / +0.97 |
 
+## Merge of lead/drift-lab-w cdae5de9 (W's own round12 re-merge)
+
+W's lineage now carries round12 itself, so where W and this branch did the same thing, W's
+version is taken:
+- **Pivot aid:** W's version (`crate::pivot` reading `crate::drift::DriftTuning::hb_pivot_*`,
+  yaw inertia from the ride lab, W panel sliders `#drift-lab-w-hb_pivot_*`). This branch's
+  separate `PivotTuning` override and its sliders / wasm `pivot_tune_*` are removed.
+- **Snapshot, tyres, input comments:** W's.
+- **TCS / ABS:** W's level selects in the lab panel. They decide once used; until then the
+  testbed's TCS / ABS levels apply.
+- **Clutch and gears:** the viewer's testbed choices (this branch's fix).
+
+Kept from this branch: the grip lab, presets and readout, and tyre-slip's `transition_plain`.
+
+`cargo test -p wp_vehicle` is down to four reds:
+- `drift_lab_b` handbrake_stabs and sloppy_driving (legacy Drift Lab B, W's call)
+- `slide_control` self-aligning wobble and `tyre_slip` clip-1 drift (near-threshold, moved by
+  the probe fix)
+
+The handbrake hairpin catch and the other B tests pass with W's wiring. e2e 72 / 72. Balance
+numbers unchanged (new: 5.0° body slip at 60 mph, 0.89 g).
+
 ## Merge of lead/tyre-slip e2c866a4 (transitions) + handbrake pivot aid restored
 
 - Tyre-slip's *transition: swing rack (test)* preset and the `swing_rate` / `swing_yaw_dps`
@@ -68,6 +90,14 @@ Step 3 details (parity_rwd_d unless named):
   `DriftTuning`. Now `crate::pivot` has its own `PivotTuning` (round12's defaults: 7 rad/s²,
   cap 3 rad/s), `Vehicle::hb_held_s` is back, and snapshot format 12 stores it.
   `tests/handbrake.rs::the_clip_2_hairpin_pivots_with_the_aid_and_is_caught` passes again.
+- Pivot aid knobs in the W lab: panel section *handbrake pivot aid (row 109)*, sliders
+  *pivot strength* (rad/s², shipped 7) and *pivot yaw cap* (rad/s, shipped 3). Process-wide
+  lab override `wp_vehicle::pivot::set_override` (wasm `pivot_tune_json` / `_defaults_json` /
+  `_set`). Keyboard / gamepad only, as A built it (`steer_speed_sensitivity > 0`). Tests: the
+  three `pivot.rs` unit tests and `tests/handbrake.rs`.
+- The legacy Drift Lab B tests (superseded by W): the lead suggested deleting or ignoring them
+  in the W lineage. Left in place and failing here; that's for Drift Lab W / the lead to decide,
+  not for this workstream to silence.
 - **Still failing** (`cargo test -p wp_vehicle`), all near-threshold or lineage-dependent, for
   their owners:
 

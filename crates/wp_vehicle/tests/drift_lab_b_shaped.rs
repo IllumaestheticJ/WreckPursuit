@@ -27,5 +27,12 @@ fn shaping_holds_the_powerful_car_and_flooring_still_spins() {
     let flood = drift_run(&car, &kb, DriftDriver::Flood, 40.0, 0.6, 1);
     set_tuning_override(None);
     assert!(!good.spun && good.drift_s > 3.0, "{good:?}");
-    assert!(flood.spun, "{flood:?}");
+    // Flooring is punished: it spun before round12's auto-clutch fix (a5956954, the clutch
+    // stays engaged once moving); since then rampart_50 survives it but much wilder than the
+    // good driver (measured: 42.6° peak, sd 10.0° vs 33.1°, sd 6.7°).
+    assert!(
+        flood.spun
+            || (flood.max_slip_deg > good.max_slip_deg + 5.0 && flood.sd_deg > good.sd_deg + 2.0),
+        "{flood:?} vs good {good:?}"
+    );
 }

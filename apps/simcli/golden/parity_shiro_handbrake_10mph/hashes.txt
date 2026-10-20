@@ -1,4 +1,4 @@
 # simcli hashes scenario=parity_shiro_handbrake_10mph systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
-240 389a1c75f6a2b0c7
-480 1e26368ed68c0ba7
-600 0ad1e8b556838adc
+240 bd765a242762d5e3
+480 1d93f2cda94f8952
+600 cb59173e0c5f926a
