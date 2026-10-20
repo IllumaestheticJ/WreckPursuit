@@ -460,6 +460,11 @@ pub struct Field {
 }
 
 impl Racer {
+    /// Still racing on the race corridor: not fleeing (own route), busted or retired.
+    fn in_race(&self) -> bool {
+        self.flight.is_none() && !matches!(self.status, RacerStatus::Busted | RacerStatus::Retired)
+    }
+
     /// How far ahead this driver notices cars and civilians, m: the awareness range, but
     /// never less than 1.3× the braking distance from the present speed plus 30 m (at
     /// 60 m/s on a highway a stalled car must be seen ~250 m out).
@@ -913,7 +918,12 @@ impl Field {
             }
         }
         for v in vehicles {
-            if self.racer_index(v.entity).is_some() {
+            // Racers still in the race are tracked by the field itself; one out of it
+            // (fleeing, busted, retired) is just another car that may stand in the road.
+            if self
+                .racer_index(v.entity)
+                .is_some_and(|k| self.racers[k].in_race())
+            {
                 continue;
             }
             let p = geom::xy(v.state.pos);
@@ -1350,8 +1360,10 @@ impl Field {
             let who = match self.racer_index(v.entity) {
                 Some(k) => {
                     let r = &self.racers[k];
-                    if r.flight.is_some() {
-                        // A fleeing racer is just another vehicle on the race corridor.
+                    if !r.in_race() {
+                        // A fleeing, busted or retired racer is just another vehicle on the
+                        // race corridor (parked once it has stood still long enough: a car
+                        // busted on a hairpin is passed like any car stopped there).
                         Who::Vehicle(r.entity)
                     } else {
                         // Sliding, running wide or reversing (it swings out): give it room.
@@ -2099,13 +2111,20 @@ fn decide_racer(
         {
             r.tactic = Tactic::Park;
         }
-        // Pulling over for the police: roll on slowly until at the kerb and clear of any
-        // junction, then stop there (a car stopped mid-lane blocks everyone behind it).
-        let pulling_over = r.tactic == Tactic::Yield && {
-            let i0 = (r.s / CORRIDOR_STEP_M) as isize;
-            let near_junction = (-3..=12).any(|j| corridor.sample(i0 + j).junction);
-            (r.n - lim_hi).abs() > 0.5 || near_junction
-        };
+        // Pulling over for the police, or out of the race (busted, retired, fled): roll on slowly
+        // until at the kerb and clear of any junction, then stop there (a car stopped
+        // mid-lane blocks everyone behind it — Hollins: a racer busted on a hairpin held the
+        // rest of the field until the finish window closed).
+        let out_of_race = matches!(
+            r.status,
+            RacerStatus::Busted | RacerStatus::Retired | RacerStatus::Fled
+        );
+        let pulling_over = (r.tactic == Tactic::Yield || (r.tactic == Tactic::Park && out_of_race))
+            && {
+                let i0 = (r.s / CORRIDOR_STEP_M) as isize;
+                let near_junction = (-3..=12).any(|j| corridor.sample(i0 + j).junction);
+                (r.n - lim_hi).abs() > 0.5 || near_junction
+            };
         match r.tactic {
             // Rejoin at a crawl when pointing the wrong way, briskly when merely beside the
             // corridor and pointing along it.
@@ -2114,7 +2133,9 @@ fn decide_racer(
                 let aligned = ((geom::dot(r.fwd, t) - 0.9) / 0.1).clamp(0.0, 1.0);
                 cap_to(&mut v_target, 7.0 + 10.0 * aligned, SpeedLimit::Mode)
             }
-            Tactic::Yield if pulling_over => cap_to(&mut v_target, 6.0, SpeedLimit::Mode),
+            Tactic::Yield | Tactic::Park if pulling_over => {
+                cap_to(&mut v_target, 6.0, SpeedLimit::Mode)
+            }
             Tactic::Park | Tactic::Yield => cap_to(
                 &mut v_target,
                 (v - 3.0 * dt * 4.0).max(0.0),
@@ -2423,8 +2444,15 @@ fn decide_racer(
         // heading 0.2 s on), so lane changes at highway speed don't overshoot and weave; the
         // lookahead stretches above 25 m/s for the same reason.
         const STEER_LAG_S: f32 = 0.2;
-        let ld = r.ctrl.lookahead(v) + 0.3 * (v - 25.0).max(0.0);
-        let s_t = r.s + ld + v * STEER_LAG_S;
+        let mut ld = r.ctrl.lookahead(v) + 0.3 * (v - 25.0).max(0.0) + v * STEER_LAG_S;
+        // Held up and slowing (a car or a light ahead): aim no further than where I stop.
+        // A target around the next corner turns the car in early, across the inside lane —
+        // queued at a junction that is the oncoming lane (Lantern Row, round-12 tip: a racer
+        // braking behind a queue ended nose to nose with a stopped oncoming car).
+        if matches!(limit, SpeedLimit::Obstacle(_) | SpeedLimit::Signal) && v_target < v - 0.5 {
+            ld = ld.min(1.5 + v * v / (2.0 * a_brk));
+        }
+        let s_t = r.s + ld;
         let (t_lo, t_hi) = if r.tactic == Tactic::Overtake {
             pass_limits(s_t)
         } else {
@@ -2475,7 +2503,9 @@ fn decide_racer(
             // The controller releases the brake pedal near a standstill (a held brake there
             // selects reverse): a car told to stop holds on the handbrake instead of idling
             // forward into whatever it stopped for.
-            if v < 1.5 && (v_target < 0.3 || matches!(r.tactic, Tactic::Park | Tactic::Yield)) {
+            let holding =
+                v < 1.5 && (v_target < 0.3 || matches!(r.tactic, Tactic::Park | Tactic::Yield));
+            if holding {
                 input.handbrake = 1.0;
                 th = 0.0;
             }
@@ -2483,15 +2513,19 @@ fn decide_racer(
                 th = th.min(0.2);
             }
             // Creeping (round a standing car, up to a queue): feather the throttle so the
-            // crawl does not overshoot into whatever is a metre away.
+            // crawl does not overshoot into whatever is a metre away — but enough to pull
+            // away from rest on a steep hill (Hollins hairpins).
             if v_target < 3.0 && limit != SpeedLimit::Profile {
-                th = th.min(0.25);
+                th = th.min(if v.abs() < 0.5 { 0.45 } else { 0.25 });
             }
             th = th.min(r.throttle + p.throttle_rate_per_s * dt);
             r.throttle = th;
             input.throttle = th;
             input.brake = br;
-            input.steer = steer;
+            // Wheels straight while standing on the handbrake: handbrake + steer is the
+            // keyboard / gamepad pivot aid (wp_vehicle::pivot), which turns a car the AI
+            // drives with a player's assists (autopilot) on the spot — about 60° in 3 s.
+            input.steer = if holding && v.abs() < 0.3 { 0.0 } else { steer };
         }
         r.input = input;
         r.debug = Debug {

@@ -8,8 +8,9 @@
 // builds) and checks them: `finishers` (every car finishes), `best_ratio` (best time over
 // that car's ideal time: its speed profile at 100 % of its measured limits; at most today's
 // + 0.05, never under 0.97), `race_time_s` per car (today's time −15 % .. +15 %, +20 % at
-// skill 0.50). Measured 2026-10-20 on lead/opponent-pace; re-measure and widen only with a
-// reason (docs/integration/opponent-pace.md).
+// skill 0.50). Measured 2026-10-20 on lead/opponent-pace; re-measured the same day on the
+// round-12 tip (today's grids, residential grid city, police give-way; reasons in
+// docs/integration/opponent-pace.md). Re-measure and widen only with a reason.
 (
     name: "opponent_pace_loop9_circuit_s95",
     seed: 9,
@@ -29,7 +30,7 @@
         (
             id: "player",
             car: "lindwurm_4t",
-            pos: (328.69238, 1417.6816, 23.712965),
+            pos: (328.56927, 1419.1766, 23.714773),
             yaw: 1.6529424,
             driver: scripted,
             inputs: [],
@@ -37,7 +38,7 @@
         (
             id: "ai_vic",
             car: "kestrel_ts",
-            pos: (309.1701, 1411.0574, 23.712965),
+            pos: (309.047, 1412.5524, 23.714773),
             yaw: 1.6529424,
             driver: scripted,
             inputs: [],
@@ -45,7 +46,7 @@
         (
             id: "ai_mara",
             car: "hakone_gt",
-            pos: (312.74634, 1416.3687, 23.712965),
+            pos: (312.62323, 1417.8636, 23.714773),
             yaw: 1.6529424,
             driver: scripted,
             inputs: [],
@@ -53,7 +54,7 @@
         (
             id: "ai_dez",
             car: "rampart_50",
-            pos: (317.14313, 1411.7137, 23.712965),
+            pos: (317.02002, 1413.2087, 23.714773),
             yaw: 1.6529424,
             driver: scripted,
             inputs: [],
@@ -61,7 +62,7 @@
         (
             id: "ai_juno",
             car: "shiro_turbo",
-            pos: (320.71936, 1417.0251, 23.712965),
+            pos: (320.59625, 1418.5201, 23.714773),
             yaw: 1.6529424,
             driver: scripted,
             inputs: [],
@@ -69,7 +70,7 @@
         (
             id: "ai_tito",
             car: "sperber_32",
-            pos: (325.11615, 1412.3702, 23.712965),
+            pos: (324.99304, 1413.8652, 23.714773),
             yaw: 1.6529424,
             driver: scripted,
             inputs: [],
@@ -90,12 +91,12 @@
     ],
     expect_pending: [
         metric(name: "finishers", min: 6, max: 6),
-        metric(name: "best_ratio", min: 0.97, max: 1.2),
-        metric(name: "race_time_s", entity: "ai_vic", min: 174.8, max: 236.6),
-        metric(name: "race_time_s", entity: "ai_mara", min: 175.8, max: 238.0),
-        metric(name: "race_time_s", entity: "ai_dez", min: 180.4, max: 244.3),
-        metric(name: "race_time_s", entity: "ai_juno", min: 198.6, max: 268.8),
-        metric(name: "race_time_s", entity: "ai_tito", min: 182.1, max: 246.5),
-        metric(name: "race_time_s", entity: "player", min: 188.0, max: 254.4),
+        metric(name: "best_ratio", min: 0.97, max: 1.18),
+        metric(name: "race_time_s", entity: "ai_vic", min: 163.6, max: 221.4),
+        metric(name: "race_time_s", entity: "ai_mara", min: 154.4, max: 208.9),
+        metric(name: "race_time_s", entity: "ai_dez", min: 164.4, max: 222.5),
+        metric(name: "race_time_s", entity: "ai_juno", min: 165.2, max: 223.6),
+        metric(name: "race_time_s", entity: "ai_tito", min: 168.5, max: 227.9),
+        metric(name: "race_time_s", entity: "player", min: 167.6, max: 226.8),
     ],
 )
