@@ -819,3 +819,49 @@ wp_vehicle `front_drive_cars_understeer_mildly`, and the lead's race glue tests 
 `race_tests::{short_sprint_with_ai_runs_to_results…, a_capture_mid_race_is_a_dnf…}` (player
 DNF `FinishWindow`; "never captured"). The vehicle handling test failing too suggests a round-12
 physics change behind most of them. Lead: please take these at the gate; I have not touched them.
+
+### Response — round 12c reset in place (2026-10-20, lead follow-up, playtest row 65)
+**R (and its pad binding, default Y) now resets in place** instead of sending the car to its
+spawn:
+- `crates/wp_wasm/src/reset.rs` (pure, deterministic) picks the pose: the nearest drivable
+  lane within **15 m**, heading along it in the car's direction of travel (velocity when moving,
+  else chassis forward; lanes running against it cost +4 m and the car still faces its own
+  way). It uses the first spot along that lane (0, ±6, ±12, ±18 m) whose footprint (2.4 × 5.6 m)
+  is clear of other sim vehicles, kinematic traffic agents, static props (parked cars, cones)
+  and scenario barriers (oriented-box separating-axis test). With no clear lane spot (open
+  ground, no city), the car is set upright where it is, or up to 8 m along its heading if that
+  spot is blocked.
+- `Session::reset_in_place(id, repair)` / wasm `reset_in_place(entity)` → JSON
+  `{ x, y, yaw, on_lane, repaired }`. Upright at rest via `Sim::place_on_ground` (pitched to the
+  road on hilly cities; `place_body` zeroes velocity and resets the vehicle). The car is repaired
+  in free drive, city chase, races and scenarios, **but not in a career run**
+  (`career_run_active()`; repairs are bought in the garage). Police heat, pursuit and the
+  economy run are untouched. A race is told the car moved on purpose (`relocate_racer`, as for
+  the old reset), so position and lap carry on. The event feed notes
+  "reset in place — repaired / career: …".
+- `reset_vehicle` (back to spawn, pristine) stays for scenario restarts.
+
+**Change outside my crates (minimal, for replays): `apps/simcli`** — new replay op
+`OpKind::ResetAt { xy, yaw, near_z, repair }` (byte tag 4: f32 x, y, yaw, near_z, u8 repair) →
+`Sim::place_on_ground(id, xy, yaw, 0, Some(near_z))` then `repair_vehicle` if `repair`. It is in
+`apply_op` and the encode/decode round-trip test, with the format notes updated. The op carries
+the chosen pose, so playback (browser and `simcli replay`) needs no lane search. Old replays
+decode unchanged; goldens unchanged. Owner of simcli (I) / lead: please review.
+
+**Request to the lead (wp_sim): the ~1 s ghost / no-collision window is not done.** `Sim`
+has no public way to change a vehicle's collision groups for a while (`set_contact_filter`
+only filters damage, not physics). Proposal: `Sim::set_ghost(id, ticks)`: the chassis collider
+interacts only with the ground/terrain groups until the countdown ends, counted in
+`step_fixed` (deterministic). Then `ResetAt` gains a `ghost_ticks` byte (240). Until then the
+clearance check keeps the reset out of other cars, agents, props and barriers. Note also:
+`place_on_ground` on terrain cities overwrites the slot's `spawn`, so a later spawn reset goes
+to the last in-place reset spot.
+
+Tests: native `reset::tests` (box overlap, travel direction, open-ground fallback);
+`tests::reset_in_place_repairs_near_the_crash_and_replays` (barrier crash → R → within 15 m,
+clear of the barrier, upright, at rest, health 1.0; with `repair = false` the damage stays;
+`ResetAt` in the replay, `simcli` verify matches); `tests::reset_in_place_in_the_city_snaps_to_
+a_lane_and_keeps_heat`. e2e `e2e/reset.mjs` (run by `npm run e2e`, alone `npm run e2e:reset`):
+barrier crash (health 85 %) → R → upright, 4.0 m from the crash, 0 m/s, health 100 %, the feed
+notes it; the recording with the reset plays back with 0 drift; city chase → lane 0.2 m away,
+heat 0.6 → 0.6; career run → `repaired: false`.
