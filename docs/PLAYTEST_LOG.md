@@ -147,6 +147,8 @@ the schedule could hunt (1→2→1). New automatic (`crates/wp_vehicle/README.md
 | 70 | Instant crash replay (slow-mo, cinematic cameras) | helper `lead/crash-replay` | dispatched |
 | 71 | Touch controls for phones and tablets | helper `lead/touch-controls` | dispatched |
 | 72 | Handbrake locks the rears but the car won't rotate for quick direction changes | A (vehicle): assists stop resisting yaw while the handbrake is held, sliding lateral force on locked rears, AWD rear decoupling | dispatched |
+| 73 | Accurate, simulated engine sounds | J (audio): per-cylinder firing + exhaust waveguide synth in an AudioWorklet, interior/exterior, turbo/overrun | dispatched |
+| 74 | Better impact and horn sounds | helper `lead/audio-impacts`: modal panel resonators, chassis thump, deformation-driven crunch, glass, friction scrapes, modelled dual-disc horns | dispatched |
 | 46 | Intersections still have holes in them (Port Vesper v2) | helper `lead/fix-junction-holes` (wp_world surface junction discs / bend connectors, greybox + colliders) | done on `lead/fix-junction-holes` (not merged): bends and dead ends were only partly paved (grass inside curves, under parking lanes, in U-turn bulbs), junction discs sat 8–15 cm off the road ends, sidewalk corners were 0.5 m staircases. Junctions, bends and dead ends are now exact patches sharing the road ends; enclosed holes Vesper 418 → 12.5 m², grid 191 → 0.5 m²; no ray miss over any junction in either city. Shots `docs/media/junctions/`, details `docs/integration/junctions.md`. Goldens blessed. To playtest |
 
 ## 2026-10-19 — step 2: 4-player test on Port Vesper v2 (F, `ws/net`)
