@@ -55,6 +55,7 @@ pub mod ffb;
 pub mod grip_lab;
 pub mod ground;
 pub mod handling;
+pub mod lab_scope;
 pub mod launch;
 pub mod math;
 pub mod metrics;

@@ -63,6 +63,8 @@ fn main() {
             "ride",
             "carlab",
             "weight",
+            "snap",
+            "snapsweep",
             "vr",
             "sens",
             "ptrace",
@@ -103,6 +105,14 @@ fn main() {
     }
     if what == "weight" {
         weight_table(&args);
+        return;
+    }
+    if what == "snap" {
+        snap_table(&args);
+        return;
+    }
+    if what == "snapsweep" {
+        snap_sweep(&args);
         return;
     }
     if what == "carlab" {
@@ -844,6 +854,271 @@ fn vr_table(args: &[String]) {
 /// Weight transfer speed (owner / reference clip 4): ride tunings compared on the clip-4 step
 /// (one key held 1.5 s at 80 km/h), the 100 km/h lane change, taps and the drift drivers.
 /// `RIDE='{...}'` adds a row.
+/// Snap-back table (lead: peak yaw acceleration and yaw-rate overshoot when leaving a 30–40°
+/// drift). `CARLAB` / `RIDE` (JSON) / `PLAIN` add a config row; the default rows are the W
+/// default (spin model + lab ride) and the slow-weight ride.
+fn snap_table(args: &[String]) {
+    use wp_vehicle::drift_lab_w::{plain_hold, snap_back, SnapExit};
+    let ids: Vec<String> = if args.is_empty() {
+        [
+            "parity_rwd_d",
+            "parity_rwd_a",
+            "parity_rwd_b",
+            "rampart_50",
+            "shiro_turbo",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+    } else {
+        args.to_vec()
+    };
+    let base_plain = plain::active();
+    let mut configs: Vec<(String, CarTune, RideTune, Option<PlainSteer>)> = vec![
+        (
+            "W default (spin, lab ride)".into(),
+            CarTune::spin_candidate(),
+            RideTune::lab_default(),
+            base_plain,
+        ),
+        (
+            "spin, slow weight".into(),
+            CarTune::spin_candidate(),
+            RideTune::slow_weight(),
+            base_plain,
+        ),
+    ];
+    if let Ok(j) = std::env::var("CARLAB") {
+        let t: CarTune = serde_json::from_str(&j).expect("CARLAB json");
+        let r = match std::env::var("RIDE") {
+            Ok(r) => serde_json::from_str(&r).expect("RIDE json"),
+            Err(_) => RideTune::lab_default(),
+        };
+        configs.push((format!("CARLAB {j}"), t, r, base_plain));
+    }
+    println!(
+        "\n## Snap-back: leave a held 30–40° drift (40 m, 0.6 g, counter key + full throttle)"
+    );
+    println!("| car | config | hold 30–45 s | exit | at ° | peak yaw acc rad/s² | yaw overshoot rad/s | slip overshoot ° | settle s |");
+    println!("|---|---|---|---|---|---|---|---|---|");
+    let a = reference_assists();
+    for id in &ids {
+        for (name, t, r, p) in &configs {
+            car_lab::set_override(Some(*t));
+            ride_lab::set_override(Some(*r));
+            plain::set_override(*p);
+            let c = car(id);
+            let h = plain_hold(
+                &c,
+                &a,
+                PlainDriver::HoldCounter {
+                    entry_deg: 6.0,
+                    throttle: 1.0,
+                },
+                40.0,
+                0.6,
+            );
+            for e in SnapExit::ALL {
+                let sb = snap_back(&c, &a, e);
+                if !sb.reached {
+                    println!(
+                        "| {id} | {name} | {:.1} | {} | no 30–40° hold | | | | |",
+                        h.band_s,
+                        e.name()
+                    );
+                    continue;
+                }
+                println!(
+                    "| {id} | {name} | {:.1} | {} | {:.0} | {:.1} | {:.2} | {:.1} | {}{} |",
+                    h.band_s,
+                    e.name(),
+                    sb.exit_deg,
+                    sb.peak_yaw_acc,
+                    sb.yaw_overshoot,
+                    sb.slip_overshoot_deg,
+                    if sb.settle_s.is_finite() {
+                        format!("{:.2}", sb.settle_s)
+                    } else {
+                        "—".into()
+                    },
+                    if sb.spun { " SPUN" } else { "" }
+                );
+            }
+        }
+    }
+    car_lab::set_override(None);
+    ride_lab::set_override(None);
+    plain::set_override(base_plain);
+}
+
+/// Snap-back candidates (lead: slide-only rack behaviour, front falloff, rear relaxation, yaw
+/// inertia) against the W default: snap-back, the drift hold, and turn-in.
+fn snap_sweep(args: &[String]) {
+    use wp_vehicle::drift_lab_w::{plain_hold, snap_back, step_steer_roll, SnapExit};
+    let ids: Vec<String> = if args.is_empty() {
+        ["parity_rwd_d", "parity_rwd_a", "parity_rwd_b"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
+    } else {
+        args.to_vec()
+    };
+    let margin = |m: f32| PlainSteer {
+        counter_margin_deg: m,
+        ..PlainSteer::default()
+    };
+    let spin = CarTune::spin_candidate();
+    let lab = RideTune::lab_default();
+    let m: f32 = std::env::var("MARGIN")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0.5);
+    let configs: Vec<(String, PlainSteer, CarTune, RideTune)> = vec![
+        (
+            "before (W default)".into(),
+            PlainSteer::default(),
+            spin,
+            lab,
+        ),
+        (format!("counter limit {m}°"), margin(m), spin, lab),
+        (
+            "limit + yaw inertia 1.3".to_string(),
+            margin(m),
+            spin,
+            RideTune {
+                yaw_inertia: 1.3,
+                ..lab
+            },
+        ),
+        (
+            "limit + rear relax ×2".to_string(),
+            margin(m),
+            CarTune {
+                rear_relax: 2.0,
+                ..spin
+            },
+            lab,
+        ),
+        (
+            "limit + rear relax ×3".to_string(),
+            margin(m),
+            CarTune {
+                rear_relax: 3.0,
+                ..spin
+            },
+            lab,
+        ),
+        (
+            "limit + front falloff 0.3".to_string(),
+            margin(m),
+            CarTune {
+                front_deep_falloff: 0.3,
+                front_deep_from_deg: 8.0,
+                front_deep_full_deg: 20.0,
+                ..spin
+            },
+            lab,
+        ),
+        (
+            "limit + slow weight".to_string(),
+            margin(m),
+            spin,
+            RideTune::slow_weight(),
+        ),
+        (
+            "**new: limit + medium weight**".to_string(),
+            margin(m),
+            spin,
+            RideTune::medium_weight(),
+        ),
+        (
+            "yaw inertia 1.3 only".into(),
+            PlainSteer::default(),
+            spin,
+            RideTune {
+                yaw_inertia: 1.3,
+                ..lab
+            },
+        ),
+        (
+            "rear relax ×3 only".into(),
+            PlainSteer::default(),
+            CarTune {
+                rear_relax: 3.0,
+                ..spin
+            },
+            lab,
+        ),
+    ];
+    println!("\n## Snap-back candidates");
+    println!("| car | config | hold 30–45 s / held | counter+lift: yaw acc / yaw over / slip over / settle | release+lift: yaw acc / yaw over / settle | turn-in: tap 0.15 s @100 heading ° / step heading start s |");
+    println!("|---|---|---|---|---|---|");
+    let a = reference_assists();
+    let fmt_s = |x: f32| {
+        if x.is_finite() {
+            format!("{x:.2}")
+        } else {
+            "—".into()
+        }
+    };
+    for id in &ids {
+        for (name, p, t, r) in &configs {
+            plain::set_override(Some(*p));
+            car_lab::set_override(Some(*t));
+            ride_lab::set_override(Some(*r));
+            let c = car(id);
+            let h = plain_hold(
+                &c,
+                &a,
+                PlainDriver::HoldCounter {
+                    entry_deg: 6.0,
+                    throttle: 1.0,
+                },
+                40.0,
+                0.6,
+            );
+            let cl = snap_back(&c, &a, SnapExit::CounterLift);
+            let rl = snap_back(&c, &a, SnapExit::ReleaseLift);
+            let tap = tap_response(&c, &a, 100.0 / 3.6, 0.15);
+            let st = step_steer_roll(&c, &a, 80.0 / 3.6, 1.5);
+            let snap = |b: &wp_vehicle::drift_lab_w::SnapBack, full: bool| {
+                if !b.reached {
+                    "no hold".to_string()
+                } else if full {
+                    format!(
+                        "{:.1} / {:.2} / {:.0}° / {}{}",
+                        b.peak_yaw_acc,
+                        b.yaw_overshoot,
+                        b.slip_overshoot_deg,
+                        fmt_s(b.settle_s),
+                        if b.spun { " SPUN" } else { "" }
+                    )
+                } else {
+                    format!(
+                        "{:.1} / {:.2} / {}{}",
+                        b.peak_yaw_acc,
+                        b.yaw_overshoot,
+                        fmt_s(b.settle_s),
+                        if b.spun { " SPUN" } else { "" }
+                    )
+                }
+            };
+            println!(
+                "| {id} | {name} | {:.1} / {} | {} | {} | {:.1} / {:.2} |",
+                h.band_s,
+                if h.held { "yes" } else { "no" },
+                snap(&cl, true),
+                snap(&rl, false),
+                tap.heading_deg,
+                st.heading_start_s
+            );
+        }
+    }
+    car_lab::set_override(None);
+    ride_lab::set_override(None);
+    plain::set_override(Some(PlainSteer::default()));
+}
+
 fn weight_table(args: &[String]) {
     use wp_vehicle::drift_lab_w::{plain_hold, roll_run, step_steer_roll, LANE_CHANGE_KEYS};
     let ids: Vec<String> = if args.is_empty() {

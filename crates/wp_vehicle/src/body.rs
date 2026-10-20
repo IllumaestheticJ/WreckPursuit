@@ -25,6 +25,24 @@ pub struct VehicleBody {
 }
 
 impl Vehicle {
+    /// The chassis body's mass properties: the car data's mass and inertia, the inertia scaled
+    /// by the Drift Lab W ride override when it applies ([`Vehicle::body_inertia`]).
+    fn body_mass_properties(&self) -> MassProperties {
+        let i = self.body_inertia();
+        // Contract order is [roll (about Y), pitch (about X), yaw (about Z)].
+        MassProperties::new(
+            self.com_local(),
+            self.def().mass_kg,
+            Vector::new(i[1], i[0], i[2]),
+        )
+    }
+
+    /// Re-apply [`Vehicle::body_inertia`] to an existing chassis body (after
+    /// [`Vehicle::set_lab_tagged`] or a ride-lab inertia change).
+    pub fn apply_body_inertia(&self, rb: &mut RigidBody) {
+        rb.set_additional_mass_properties(self.body_mass_properties(), true);
+    }
+
     /// Create the chassis rigid body + box collider at the vehicle's current chassis pose.
     pub fn build_body(
         &self,
@@ -34,14 +52,7 @@ impl Vehicle {
         let def = self.def();
         let [w, l, h] = def.body_size_m;
         let clearance = BODY_CLEARANCE_M.min(h * 0.3);
-        // Drift Lab W ride tuning: body inertia scales (lab override; data otherwise).
-        let i = match crate::ride_lab::active() {
-            Some(t) => t.inertia(def.inertia_kgm2),
-            None => def.inertia_kgm2,
-        };
-        // Contract order is [roll (about Y), pitch (about X), yaw (about Z)].
-        let mprops =
-            MassProperties::new(self.com_local(), def.mass_kg, Vector::new(i[1], i[0], i[2]));
+        let mprops = self.body_mass_properties();
         let ch = self.chassis();
         let rb = RigidBodyBuilder::dynamic()
             .pose(Pose::from_parts(ch.pos, ch.rot))

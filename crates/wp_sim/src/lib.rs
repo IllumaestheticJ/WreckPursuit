@@ -613,6 +613,20 @@ impl Sim {
         Ok(())
     }
 
+    /// Tag a vehicle for the Drift Lab W lab overrides (`wp_vehicle::lab_scope`; the testbed's
+    /// "use W handling everywhere"), re-applying its body inertia. Lab-only: not a replay op.
+    pub fn set_lab_tagged(&mut self, id: EntityId, on: bool) -> Result<(), SimError> {
+        let slot = self
+            .vehicles
+            .iter_mut()
+            .find(|v| v.id == id)
+            .ok_or(SimError::UnknownEntity(id))?;
+        slot.vehicle.set_lab_tagged(on);
+        slot.vehicle
+            .apply_body_inertia(&mut self.physics.bodies[slot.body.body]);
+        Ok(())
+    }
+
     /// Remove a vehicle and its physics body. Its id is never reused. Debris it already shed
     /// stays in the world.
     pub fn despawn_vehicle(&mut self, id: EntityId) -> Result<(), SimError> {

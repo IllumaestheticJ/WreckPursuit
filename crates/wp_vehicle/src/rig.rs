@@ -172,6 +172,14 @@ impl<W: WorldQuery> Rig<W> {
         }
     }
 
+    /// Tag the car for the Drift Lab W overrides ([`crate::lab_scope`]) and re-apply its body
+    /// inertia.
+    pub fn set_lab_tagged(&mut self, on: bool) {
+        self.vehicle.set_lab_tagged(on);
+        self.vehicle
+            .apply_body_inertia(&mut self.bodies[self.handles.body]);
+    }
+
     /// Full dynamic state of the car (see [`crate::snapshot`]). Rapier's own caches are not
     /// included; with the car touching only the ground they carry no state between ticks.
     pub fn snapshot(&self) -> VehicleSnapshot {

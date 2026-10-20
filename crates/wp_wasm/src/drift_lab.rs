@@ -7,6 +7,7 @@
 //! | `drift_tuning_json()` | the constants in effect (override or defaults), JSON |
 //! | `drift_tuning_defaults_json()` | the shipped defaults, JSON |
 //! | `drift_tuning_set(json)` | set the runtime override (`""` clears it); unknown fields are ignored, missing ones take the default |
+//! | `lab_scope_set_tagged_only(on)` / `set_lab_tagged(entity, on)` | "use W handling everywhere": the lab overrides on the tagged (player) car only |
 //! | `drift_readout(entity)` | `[mode, slide_deg, onset, envelope_deg, authority, throttle_scale, key_throttle, engine_throttle, held_deg, sliding]`, mode 0 off · 1 grip · 2 straighten · 3 hold (countersteer key) · 4 angle-up (key into the turn) · 5 exceeded · 6 transition; `key_throttle` = the driver's throttle input, `engine_throttle` = what reaches the engine (after shaping, pedal filter, TCS / ESC), `held_deg` = the slide angle Hold / AngleUp keeps, `sliding` 1 = a slide is confirmed (the steering's slide help is on, row 102) |
 //!
 //! The override is process-wide and not logged in recordings (a developer tool; see
@@ -176,13 +177,15 @@ pub fn ride_tune_json() -> String {
     json(&wp_vehicle::ride_lab::active())
 }
 
-/// `{ "data": <no scaling>, "lab": <Drift Lab W default>, "slow_weight": <clip-4 preset> }`, JSON.
+/// `{ "data": <no scaling>, "lab": <step 3 default, the "before">, "slow_weight": <clip-4
+/// preset>, "medium_weight": <step 10 default, the "new"> }`, JSON.
 #[wasm_bindgen]
 pub fn ride_tune_defaults_json() -> String {
     json(&serde_json::json!({
         "data": wp_vehicle::ride_lab::RideTune::default(),
         "lab": wp_vehicle::ride_lab::RideTune::lab_default(),
         "slow_weight": wp_vehicle::ride_lab::RideTune::slow_weight(),
+        "medium_weight": wp_vehicle::ride_lab::RideTune::medium_weight(),
     }))
 }
 
@@ -290,4 +293,36 @@ pub fn car_tune_set(tune_json: &str) -> Result<(), JsValue> {
     let t: wp_vehicle::car_lab::CarTune = serde_json::from_str(tune_json).map_err(err)?;
     wp_vehicle::car_lab::set_override(Some(t));
     Ok(())
+}
+
+/// "Use W handling everywhere" (Drift Lab W): `true` limits the lab overrides (plain
+/// steering, ride, car / tyre, drift tuning) to tagged vehicles ([`set_lab_tagged`]), so AI
+/// racers, police and traffic keep the stock handling; `false` (the default) applies them to
+/// every vehicle (`wp_vehicle::lab_scope`).
+#[wasm_bindgen]
+pub fn lab_scope_set_tagged_only(on: bool) {
+    wp_vehicle::lab_scope::set_tagged_only(on);
+}
+
+/// Whether the lab overrides are limited to tagged vehicles.
+#[wasm_bindgen]
+pub fn lab_scope_tagged_only() -> bool {
+    wp_vehicle::lab_scope::tagged_only()
+}
+
+/// Tag (or untag) a vehicle for the lab overrides (re-applies its body inertia). Not in the
+/// replay log; the testbed tags the player at every session start, replays included.
+#[wasm_bindgen]
+pub fn set_lab_tagged(entity: u32, on: bool) -> Result<(), JsValue> {
+    with(|s| s.set_lab_tagged(EntityId(entity), on))
+}
+
+/// Whether a vehicle is tagged for the lab overrides.
+#[wasm_bindgen]
+pub fn lab_tagged(entity: u32) -> Result<bool, JsValue> {
+    with(|s| {
+        s.vehicle(EntityId(entity))
+            .map(|v| v.vehicle.lab_tagged())
+            .ok_or_else(|| format!("unknown entity {entity}"))
+    })
 }

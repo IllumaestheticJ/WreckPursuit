@@ -195,8 +195,15 @@ spins (300–500° total); parity_fwd_c gets round 53–74° and is caught in 0.
 10. **Slow weight (clip 4)** (suspension section button): body roll builds over ~0.6 s to ~6°
    with no rocking. Does the weight transfer now look like clip 4? (It breaks the knife-edge
    held drift, so it isn't the default yet.)
-9. **Floored launch** from rest (TCS off, no steering) should go straight; *TCS* checkbox for the
+9. **Floored launch** from rest (TCS off, no steering) should go straight; *TCS* select for the
    A/B. If it still spins for you, note the car, the map / where on it, and the tyre setting.
+11. **Snap-back (step 10), "before" / "new" buttons** (top of the panel). Hold a drift with the
+   counter key + full throttle, then **lift with the counter key still held** and let go of the
+   key as the car straightens. "before": the car snaps back the other way and often spins.
+   "new" (the default): it comes back progressively. Also check that the hold still holds and
+   that turn-in still bites. The *countersteer limit* slider tunes it (0 = before).
+12. **W handling everywhere** (checkbox, on by default): free drive, the city chase and races use
+   this profile on your car, shown by the "W handling" tag. Untick it for the stock handling.
 
 ## Files
 
@@ -838,6 +845,124 @@ hold, throttle smoothing and lab UI stay dropped), plus: **keep A's handbrake pi
   same way on round12 3cd43db7 itself** (AI racers DNF / race not over in 120 s).
 - e2e: drift_lab_w 52, countersteer 9, presets 13, race 20, menu 40 — all pass (presets'
   HUD-tag check flaked once on the first merge, passing on reruns).
+
+## Step 9 — "use W handling everywhere" (lead)
+
+A W-panel checkbox **"use W handling everywhere"** (`#drift-lab-w-everywhere`). It is on by
+default in the W build and saved per viewer (`wp.driftLabW.everywhere`, `"0"` = off). With it
+on, free drive, the city chase and street races run the W profile on **the player's car**:
+plain steering, ride, car / tyre (spin model by default), the handbrake pivot knobs and raw
+keys, all from the saved panel values. AI racers, police and traffic keep the stock handling.
+A small "W handling" tag (bottom left) shows when it is on outside the lab. The toggle takes
+effect on the next session. Drift Lab C sessions never get it (C owns the drift tuning there).
+
+How it works:
+
+- `wp_vehicle::lab_scope`: `set_tagged_only(true)` limits every lab override (plain, ride,
+  car_lab, drift tuning) to vehicles tagged with `Vehicle::set_lab_tagged`. Untagged vehicles
+  see `None` / the shipped `DriftTuning`. The default (false) applies the overrides to all
+  vehicles, as before, so the unit tests and the lab pad are unchanged.
+- The body inertia (ride lab's roll / pitch / yaw scales) now comes from
+  `Vehicle::body_inertia()`; `apply_body_inertia(rb)` re-applies it after tagging.
+- `wp_sim::Sim::set_lab_tagged(id, on)`: **minimal change in the lead's crate.** It tags the
+  vehicle and re-applies its body inertia. Not a replay op.
+- wasm: `lab_scope_set_tagged_only`, `lab_scope_tagged_only`, `set_lab_tagged`, `lab_tagged`.
+  The testbed tags the player at every session start, replays included, so a recording made
+  with W handling plays back with it (the reset e2e's replay check caught this).
+- Test: `tests/lab_scope.rs`. In tagged-only mode the tagged car's 3 s drive hashes exactly as
+  under the overrides, and an untagged car's exactly as without them.
+- e2e (`drift_lab_w.mjs`, 57 checks):
+  - free drive → W on the player;
+  - start chase → W profile active (plain + spin model + tagged-only + tag), tag shown;
+  - toggle off → stock in the chase;
+  - race → W on the player, 3 AI racers stock.
+
+  Other suites still pass with it on by default: countersteer, presets, race, menu, touch,
+  brake_dive, gamepad, reset.
+
+Known gaps:
+
+- Multiplayer: the overrides are local to the browser sim, so a W-handling client predicts
+  differently from a stock server.
+- A wheel or gamepad player also gets the plain rack. It is a keyboard profile; a device gate
+  is a small follow-up if wanted.
+
+## Step 10 — snap-back (lead): metric, candidates, the combined "new" default
+
+**Metric** (`drift_lab_w::snap_back`, example mode `snap` / `snapsweep`):
+
+- Setup: 40 m left-hander at 0.6 g. The owner's hold (counter key + full throttle) runs until
+  the slide has been inside 30–45° for 0.5 s.
+- Then one of three exits for 3 s:
+  - *counter+lift*: counter key held, throttle lifted, key let go under 15°;
+  - *release*: key released, throttle kept;
+  - *release+lift*.
+- Measured: peak yaw acceleration (40 ms difference), yaw-rate overshoot (yaw against the
+  drift's rotation), body-slip overshoot to the other side, and settle time (slide < 3° and
+  yaw < 0.3 rad/s for 0.25 s).
+
+**Cause** (traced, parity_rwd_d, counter+lift):
+
+1. After the lift the slide holds ~1.2 s, then closes. The rack sits at full counter-lock
+   (−33°) while the front axle's travel closes from −40° toward 0.
+2. About 1° past the travel the front side force flips, reaching −10 kN at ~4° (the front peak
+   slip). Together with the re-gripping rear, that yanks the nose the other way: yaw −2.2 rad/s.
+3. The car swings 84° to the other side and spins.
+
+The key release (rack return 0.33 s) comes too late to stop it.
+
+**Candidates** (snapsweep; counter+lift as yaw acc rad/s² / yaw overshoot rad/s / slip
+overshoot ° / settle s; hold = s inside 30–45°):
+
+| config | parity_rwd_d | parity_rwd_a | parity_rwd_b |
+|---|---|---|---|
+| before (W step 9) | 6.0 / 2.22 / 84 / spun; hold 3.9 | 5.8 / 2.16 / 31 / —; hold 2.1 | 8.3 / 2.33 / 84 / spun; hold 1.2 |
+| countersteer limit 0.25° | 5.7 / 1.65 / 6 / 2.41; hold 4.2 | 6.7 / 1.60 / 3 / 2.53 | 5.9 / 1.66 / 6 / 1.15 |
+| limit 0.5° | 5.5 / 1.71 / 7 / 2.67 | 6.5 / 1.67 / 4 / 2.57 | 5.7 / 1.74 / 8 / 1.82 |
+| limit 0.5° + yaw inertia 1.3 | 3.9 / 1.49 / 49 / —; **hold 1.0** | | |
+| limit 0.5° + rear relax ×2 / ×3 | 4.8 / 1.77 / 21 / —, 4.7 / 1.79 / 18 / — | | |
+| limit 0.5° + front falloff 0.3 | **no hold** | no hold | no hold |
+| limit 0.5° + slow weight | 3.9 / 1.34 / 24 / —; **hold 0.9** | | no hold |
+| **new: limit 0.25° + medium weight** | 5.1 / 1.63 / 11 / —; hold 3.0 held | 6.5 / 1.59 / 3 / 2.53; hold 2.7 **held** | 6.7 / 1.36 / 0 / —; hold 2.2 **held** |
+
+- **Turn-in is unchanged by all of them:** tap 0.15 s at 100 km/h 9.9–10.0° (rwd_d), step-steer
+  heading starts 0.12–0.13 s. The limit never acts in grip.
+- **Yaw inertia, front falloff and slow weight** lower the yaw rates but break the knife-edge
+  hold.
+- **Rear relaxation** does not help.
+
+**Shipped default ("new"):**
+
+- **Countersteer limit** (`PlainSteer::counter_margin_deg`, default 0.25°). In a slide (fade
+  3→8° of body slip), a held counter key may point the front wheels at most 0.25° past the
+  front axle's travel, so the lock unwinds as the slide closes, as a wheel's self-aligning
+  torque does in the driver's hands. No effect in grip, into the turn, or with the key
+  released (the owner's "release = slow spin" stays).
+- **Medium weight** (`RideTune::medium_weight`): springs 0.7, bars 0.15, dampers 1.6 / 2.1,
+  ride height kept, travel 1.4, roll / pitch inertia 1.8 / 1.6, yaw inertia unchanged.
+  - Roll 1.06 Hz / ζ 1.04 (lab default 1.50 Hz; slow weight 0.76 Hz).
+  - Step-steer rise 0.40 s (0.31 s lab; 0.60 s slow), peak roll 4.7° (3.7° / 6.2°).
+  - Heading starts 0.12 s, the same as before.
+  - The hold improves: rwd_a and rwd_b are now held; rwd_d is 3.0 s in band (was 3.9 s).
+
+**A/B in the panel:**
+
+- **before** = limit 0 + step-3 lab ride; **new** = limit 0.25° + medium weight. Both restart
+  the car; tyres stay as set.
+- New slider: *countersteer limit*. New ride button: *medium weight (new)*.
+- Ride storage key bumped to `wp.driftLabW.ride.v2`, so the new default applies.
+
+**Known:**
+
+- rwd_d's exit with the new combo still swings 11° to the other side and settles after the 3 s
+  window (limit only: 6°, 2.4 s).
+- parity_rwd_b spins *into* the turn on release+lift with medium weight (lift-off oversteer,
+  not snap-back; yaw overshoot 0).
+- The yaw-rate overshoot is ~25 % lower, not gone: the rear's re-grip is physical.
+
+Tests: `tests/drift_lab_w_snap.rs` (before snaps or spins on rwd_d / rwd_b; new: no spin,
+< 25° to the other side, yaw overshoot ≤ 85 % of before, hold kept), the `plain` unit test
+for the limit, and `ride_lab` medium-weight ordering. e2e drift_lab_w: 60 checks.
 
 ## Contract change requests
 
