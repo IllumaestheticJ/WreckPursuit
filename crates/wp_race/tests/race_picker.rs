@@ -114,6 +114,21 @@ fn run_race_with(id: &str, max_s: u64, presence: Option<f32>) -> Raced {
         );
     }
     assert_eq!(sc.entities[0].pos[0], player_slot.pos[0]);
+    // Every slot starts inside the paved lanes, a car's half width plus the margin from their
+    // edge (not on a verge or shoulder past the kerb; a slot inside a junction box has no lane
+    // under it and is not checked).
+    for slot in &slots {
+        let d = slot.dir;
+        if let Some((lo, hi)) = catalog::paved_span(sim.world(), slot.pos, d, [d[1], -d[0]]) {
+            let edge = catalog::GRID_CAR_HALF_WIDTH_M + catalog::GRID_EDGE_MARGIN_M - 0.01;
+            assert!(
+                lo <= -edge && hi >= edge,
+                "{id}: grid slot {} at {:?} is outside the lanes ({lo:.2}..{hi:.2} m)",
+                slot.index,
+                slot.pos
+            );
+        }
+    }
     // Nobody starts nose to tail with a parked car: no parked car within a car's width of a
     // slot's first 30 m (a two-wide grid on a narrow street put a column in the parking lane).
     if sc.parked_cars {

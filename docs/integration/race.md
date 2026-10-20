@@ -538,3 +538,38 @@ call. I have not done it.
     triangle count does not depend on the machine (render content: LOD / props / art merges,
     FYI lead / testbed). The frame-time misses are partly the container's software GL.
     `perf_check.mjs` changed on `lead/round12` after db11e64 (now 608a50a), so re-check there.
+
+## Round 12b (lead): grid slots inside the paved lanes (by `lead/city-residential`, cleared by lead)
+**Bug:** the picker's grids are laid out around the route's lane (`Course::grid`), so on a
+street with one lane each way a staggered grid's right column started 2.5 m right of the lane
+centre, 0.75 m past the kerb on the verge. After the round-12b merges, `hollins_hill_sprint`
+finished 2 of 4: the new verge street trees (playtest row 94) stand on that line on Hollins
+Drive, and the opponent AI (holds its line inside the judged corridor) drove racer 3 into one.
+It then pinned there, and the player autopilot behind backed off and stalled. Each change
+alone passed.
+
+**Fix (`wp_race`):**
+- `catalog::fit_grid` (called by `plan_course`) and `catalog::fit_grid_to_road` (for courses
+  built outside the picker, e.g. `tests/race_vesper.rs`) measure the paved span across the
+  field's slots and the 30 m run-up, sampled every 5 m along the centreline. The span is the
+  lanes alongside in both directions, plus shoulders and half a painted median (`Segment::paved_side`);
+  parking lanes, verges and sidewalks are excluded. Points inside a junction box are skipped.
+- The grid is shifted sideways as little as possible (`Course::grid_shift_m`, serde default 0)
+  so that every slot is a car's half width + 0.5 m inside that span.
+- Columns that don't fit close up, to no less than 2.6 m; below that the field lines up
+  single file.
+- Grids that already fit do not move. Of the picker races only Hollins moved: columns 5.0 →
+  4.0 m apart, left column 1.25 m and right column 2.25 m further left, so both now start in a lane.
+  `pick_hollins_sprint.ron` was regenerated (`WP_RACE_WRITE_SCENARIOS=1`);
+  `vesper_hollins_sprint.ron` was edited to the same slots.
+- `race_picker` now asserts every slot is inside the lanes.
+
+**Results:**
+- All `wp_race` tests pass, as do the `wp_wasm` race tests (11).
+- Hollins on `WP_RACE_SEED` 1–5: 1, 2 and 4 pass. 3 and 5 never finish: every racer leaves the
+  grid, but all four end up queued, stopped, behind police cars standing in the road at
+  (−819, 1064–1111). Nobody is captured, so the race never ends (police / opponent, FYI).
+- Before the fix, seeds 3 and 5 failed on the verge tree (2 of 4 never left the grid).
+- Shoulders count as paved on purpose. A lanes-only first version also moved the Grid highway
+  and Loop 9 grids (outer column on the new highway shoulder) by about 2.2 m, and that alone
+  turned `loop9_circuit` red (police-heavy and seed-fragile; see opponent-pace.md).

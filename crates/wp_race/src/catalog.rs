@@ -355,12 +355,177 @@ pub fn plan_course(world: &World, def: &RaceDef) -> Option<CityRace> {
         g.width_m = g.width_m.max(span);
     }
     course.grid_layout = street_grid_layout(world, &course, def);
+    fit_grid(world, &mut course, def);
     Some(CityRace { route, course })
+}
+
+/// Clearance kept between a grid car's side and the edge of the drivable lanes, m.
+pub const GRID_EDGE_MARGIN_M: f32 = 0.5;
+
+/// Narrowest column gap a two-wide grid closes up to before it lines up single file, m
+/// (two 2 m cars with 0.6 m between them; the right column also sits half a row back).
+const GRID_MIN_COLUMN_GAP_M: f32 = 2.6;
+
+/// Keep every grid slot inside the drivable lanes. The grid is laid out around the route's
+/// lane, so on a street with one lane each way a two-wide grid's right column started past
+/// the kerb on the verge (Hollins Drive: an AI racer held that line into a street tree,
+/// playtest row 94 follow-up). Shifts the grid sideways as little as possible so every
+/// column is [`GRID_EDGE_MARGIN_M`] inside the paved lanes; where the columns do not fit at
+/// the kind's gap they close up (down to [`GRID_MIN_COLUMN_GAP_M`]), and below that the field
+/// lines up single file. Grids that already fit do not move.
+pub fn fit_grid(world: &World, course: &mut Course, def: &RaceDef) {
+    let rules = RaceData::embedded().rules.for_kind(def.kind);
+    fit_grid_to_road(
+        world,
+        course,
+        rules.kind_rules.grid,
+        rules.kind_rules.max_racers as usize,
+        def.entrants(),
+    );
+}
+
+/// [`fit_grid`] for a course built outside the picker: `kind_grid` is the race kind's grid
+/// layout (used unless the course has its own), `max_racers` the kind's capacity (side-by-side
+/// grids are centred on it, as the judge lays them out) and `entrants` the field (whose depth
+/// is checked).
+pub fn fit_grid_to_road(
+    world: &World,
+    course: &mut Course,
+    kind_grid: GridLayout,
+    max_racers: usize,
+    entrants: usize,
+) {
+    let layout = course.grid_layout.unwrap_or(kind_grid);
+    let cap = max_racers.max(entrants);
+    let n = entrants;
+    // Column offsets of the layout from the centreline, and how far back the field's last
+    // slot is (measured at the slots: a car's tail may reach into a junction box).
+    let (cols, depth, row_gap) = match layout {
+        GridLayout::Staggered {
+            row_gap_m,
+            column_gap_m,
+        } => (
+            vec![-column_gap_m * 0.5, column_gap_m * 0.5],
+            3.0 + (n.saturating_sub(1) / 2) as f32 * row_gap_m
+                + if n >= 2 { row_gap_m * 0.5 } else { 0.0 },
+            row_gap_m,
+        ),
+        GridLayout::SideBySide { lane_gap_m } => (
+            (0..cap)
+                .map(|i| (i as f32 - (cap as f32 - 1.0) * 0.5) * lane_gap_m)
+                .collect(),
+            3.0,
+            8.0,
+        ),
+        GridLayout::SingleFile { gap_m } => {
+            (vec![0.0], 3.0 + n.saturating_sub(1) as f32 * gap_m, gap_m)
+        }
+    };
+    // Paved span across the grid and its run-up, relative to the centreline: the narrowest
+    // one found (before the start the centreline's first segment is extended backwards).
+    let mut span = (f32::NEG_INFINITY, f32::INFINITY);
+    let mut k = -depth;
+    while k <= GRID_RUN_UP_M + 1e-3 {
+        let (p, d) = course.point_at(k);
+        // (No lane under a point inside a junction box: nothing to keep inside there.)
+        if let Some((lo, hi)) = paved_span(world, p, d, v2::right(d)) {
+            span = (span.0.max(lo), span.1.min(hi));
+        }
+        k += 5.0;
+    }
+    let edge = GRID_CAR_HALF_WIDTH_M + GRID_EDGE_MARGIN_M;
+    let (a, b) = (span.0 + edge, span.1 - edge);
+    if !span.0.is_finite() || !span.1.is_finite() || a > b {
+        // No lanes found, or not even one car fits with the margin: leave the grid alone.
+        return;
+    }
+    let (cmin, cmax) = cols
+        .iter()
+        .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), &c| {
+            (lo.min(c), hi.max(c))
+        });
+    let width = cmax - cmin;
+    if width <= b - a {
+        // Fits: the smallest shift that puts every column inside.
+        course.grid_shift_m = 0.0f32.clamp(a - cmin, b - cmax);
+        return;
+    }
+    // Close the columns up, centred on the paved span.
+    let ncols = cols.len();
+    let gap = (b - a) / (ncols as f32 - 1.0).max(1.0);
+    if ncols > 1 && gap >= GRID_MIN_COLUMN_GAP_M {
+        course.grid_layout = Some(match layout {
+            GridLayout::Staggered { row_gap_m, .. } => GridLayout::Staggered {
+                row_gap_m,
+                column_gap_m: gap,
+            },
+            _ => GridLayout::SideBySide { lane_gap_m: gap },
+        });
+        course.grid_shift_m = (a + b) * 0.5;
+    } else {
+        course.grid_layout = Some(GridLayout::SingleFile { gap_m: row_gap });
+        course.grid_shift_m = 0.0f32.clamp(a, b);
+    }
+}
+
+/// The paved lanes across the road at `p` (heading `d`, right `r`): the lateral interval,
+/// relative to `p` (+ right), covered by the lanes alongside that touch the one under `p`,
+/// with their shoulders / painted medians (both directions; parking lanes, verges and
+/// sidewalks excluded). `None` when no lane is under `p`.
+pub fn paved_span(world: &World, p: [f32; 3], d: [f32; 2], r: [f32; 2]) -> Option<(f32, f32)> {
+    use wp_world::network::LaneKind;
+    let map = world.map();
+    let q = v2::xy(p);
+    let mut spans: Vec<(f32, f32)> = Vec::new();
+    for (i, l) in map.net.lanes.iter().enumerate() {
+        if l.kind == LaneKind::Parking {
+            continue;
+        }
+        let seg = map.seg(i as u32);
+        let pr = seg.project(q);
+        if pr.s < 0.0 || pr.s > seg.length || pr.dist > 15.0 {
+            continue;
+        }
+        let (c, t) = seg.point_at(pr.s);
+        if v2::dot(t, d).abs() < 0.9 || (c[2] - p[2]).abs() > 3.0 {
+            continue;
+        }
+        // The lane plus the paving beside it that belongs to no other lane (a highway's
+        // shoulder, half a painted median), in this frame (a lane the other way round has its
+        // left side on our right).
+        let off = v2::dot(v2::sub(v2::xy(c), q), r);
+        let half = l.width_m * 0.5;
+        let [side_l, side_r] = seg.paved_side;
+        spans.push(if v2::dot(t, d) > 0.0 {
+            (off - half - side_l, off + half + side_r)
+        } else {
+            (off - half - side_r, off + half + side_l)
+        });
+    }
+    spans.sort_by(|x, y| x.0.total_cmp(&y.0));
+    let start = spans.iter().position(|s| s.0 <= 0.0 && s.1 >= 0.0)?;
+    let (mut lo, mut hi) = spans[start];
+    // Grow both ways over touching lanes (0.3 m slack for painted gaps and medians' lines).
+    let mut grown = true;
+    while grown {
+        grown = false;
+        for s in &spans {
+            if s.1 > hi && s.0 <= hi + 0.3 {
+                hi = s.1;
+                grown = true;
+            }
+            if s.0 < lo && s.1 >= lo - 0.3 {
+                lo = s.0;
+                grown = true;
+            }
+        }
+    }
+    Some((lo, hi))
 }
 
 /// Half a car's width plus a little clearance, m: a grid slot this close to a parking lane
 /// starts in it (or scrapes the parked cars on the way out).
-const GRID_CAR_HALF_WIDTH_M: f32 = 1.0;
+pub const GRID_CAR_HALF_WIDTH_M: f32 = 1.0;
 
 /// How far ahead of each grid slot the run-up must be clear of parking lanes, m.
 const GRID_RUN_UP_M: f32 = 30.0;

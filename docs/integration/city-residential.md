@@ -247,11 +247,10 @@ time-of-day curve and the new opponent AI), and what was done:
 | `wp_world` blocked `multi_lane_road_changes_lane_around_a_stopped_car`: go-arounds 1 | D's curve: noon factor 0.75 (Commercial was 0.90), so fewer cars behind the stopped one. | Density 4.0 → 4.8 (same cars; passes 4.4–5.2). |
 | simcli `city_siren_traffic_yields_arcade/_sim`: route_progress 0.33 | Seed-sensitive (D: 3 of 9 seeds finish on the old roads, 1 of 9 on the new). At seed 2, a pulled-over car on the 3.5 m turn lane stopped 6 cm short of its kerb offset (tolerance 0.1 m), inside the corridor of the unit riding the line at −1.55 m in the same lane: the unit waited `STALL_S` behind it. | `traffic`: pull-overs crawl until within 3 cm. Seeds 1–9 now 4 of 9 (2, 4, 8, 9); the rest wait behind cars queued at a red light in the turn bay or behind slower traffic (`simcli` keep-distance corridor; D's area). |
 | `wp_world` world `civilians_stop_behind_a_stationary_player_and_yield_to_sirens` (not on the lead's list) | (1) The fastest car is now on the sparse highway: it passes the parked unit and leaves nobody near. (2) A car level with or just past a stopped unit classifies it as `Behind` and, while still reacting (`Noticing`), neither slowed nor counted as yielding. (3) A car spawned on the last tick had not decided yet. | `traffic`: a stopped unit within `NEAR_M` classified `Behind` also sets `near` (slow past it, as the rule says). Test: picks a city-street car (8–18 m/s), ignores cars spawned in the last 0.1 s, checks the `NEAR_MPS` passing speed. Passes at density 3.6–6.0. |
-| `wp_race` `hollins_hill_sprint`: 2 of 4 finish | **Not fixed (needs a decision).** Passes on this branch before the merge and on round 12 before it (83cc6484); fails only with both. The staggered grid is centred on the course line (lane 944's centre), so the right column starts 2.5 m right of it, 0.75 m past the kerb on the verge. The old opponent AI eased back into the lane; the new one (lead/opponent-pace, "stay in the judged corridor") holds the line, and a new verge street tree stands on it 19.5 m ahead: racer 3 hits it at 9.7 m/s and pins there; the player autopilot behind it backs off and stalls. | Options: centre the grid on the road (wp_race `Course::grid`, moves every race's grid + scenarios), or have the AI rejoin its lane off the grid (wp_opponent), or keep street trees clear of race grids (data-coupled; not done). |
+| `wp_race` `hollins_hill_sprint`: 2 of 4 finish | Passed on this branch before the merge and on round 12 before it (83cc6484); failed only with both. The staggered grid was centred on the course line (lane 944's centre), so the right column started 2.5 m right of it, 0.75 m past the kerb on the verge. The old opponent AI eased back into the lane; the new one (lead/opponent-pace) held the line into a new verge street tree 19.5 m ahead. | **Fixed (lead chose "grid inside the lanes"):** `wp_race::catalog::fit_grid` shifts or closes up the grid so every slot is ≥ 0.5 m inside the paved lanes (shoulders count). Only Hollins moves. Seeds 1–5: 1, 2 and 4 pass; on 3 and 5 every racer leaves the grid but the field ends up queued behind police cars standing in the road, and nobody is captured. Details: docs/integration/race.md, round 12b. |
 
-Goldens are **not** re-blessed: the lead asked for a bless only once these pass, and most of
-the 43 stale goldens move with the merged branches (opponent AI, police, races), not with
-these fixes.
+Goldens: re-blessed in one [bless] commit after the Hollins fix, with the branch that moved
+each group listed in it (attributed by blessing at each merge step of round 12b and diffing).
 
 ## Known gaps (for D)
 - **Dropped kerbs:** driveways are drawn across the lot, but the kerb in front of them is the
@@ -269,6 +268,11 @@ these fixes.
 - Residential sidewalks are not drivable end to end (street trees every 13 m on the verge):
   intended, but the police / AI racers' off-road shortcuts there now hit trees.
 - Greybox `.b64.txt` for the published build grew to 12.1 MB.
+
+## Changes outside my crates (round 12b follow-up)
+- `wp_race` (cleared by the lead): `Course::grid_shift_m`, `catalog::fit_grid` /
+  `fit_grid_to_road` / `paved_span`, the race_picker slot check, `race_vesper.rs` uses the fit.
+  Regenerated `pick_hollins_sprint.ron`; `vesper_hollins_sprint.ron` slots edited to match.
 
 ## Contract change requests
 None.
