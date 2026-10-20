@@ -87,6 +87,12 @@ world_traffic_soak_observer, world_traffic_soak_vesper, vehicle_coupe_slalom, we
 weather_fog_pursuit_clear. Mostly crash / damage / race / pursuit scenarios that floor the
 throttle from rest or out of corners (heavy wheelspin). Re-bless after review (`just bless`).
 
+Other tests it moves: pinned in-crate hashes `slide_control::wheel_profile_is_bit_identical_to_the_plain_model`
+and `differentials::roster_diff_hashes_are_pinned` (re-recorded in the `[bless]` commit after
+the floor); `wp_wasm::tests::simcli_golden_replays_play_back_in_the_browser_core` (replays the
+moved goldens; passes again after the simcli re-bless). On lead/drift-lab-w @ d2ba10ba only
+`simcli goldens_match` and `drift_lab_b::handbrake_stabs…` fail (known); same here plus those.
+
 Tests: `tire::tests::spin_side_floor_only_acts_under_heavy_drive_spin`,
 `tests/tyre_slip.rs::launches_straight_on_a_cambered_road` (old ellipse spins on a 2° slope;
 shipped default and both spin presets < 3°).
