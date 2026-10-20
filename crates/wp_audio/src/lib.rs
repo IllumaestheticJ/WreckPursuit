@@ -10,6 +10,7 @@
 //! | piece | module |
 //! |---|---|
 //! | engine layers (idle/low/mid/high/limiter × on/off throttle), turbo, supercharger, pops | [`engine`] |
+//! | physically modelled engine voice: firing events, exhaust geometry, mods, per-frame state | [`engine_model`] |
 //! | tire squeal from combined slip × load, loose-surface scrub, surface rolling, thumps | [`tires`] |
 //! | impacts by material × closing speed, glass, scrapes, debris | [`collision`] |
 //! | siren cadences (wail, yelp, phaser, hi-lo), auto pattern, horn | [`siren`] |
@@ -28,6 +29,7 @@ pub mod collision;
 pub mod data;
 pub mod director;
 pub mod engine;
+pub mod engine_model;
 pub mod kinematic;
 pub mod mixer;
 pub mod scanner;
@@ -38,8 +40,10 @@ pub mod types;
 
 pub use data::{AudioConfig, AudioLibrary, CarAudioDef, EngineAudioDef, SamplePack};
 pub use director::{
-    AudioDirector, AudioFrame, DirectorStats, DriverKind, SirenOverride, VehicleAudioInput,
+    AudioDirector, AudioFrame, DirectorStats, DriverKind, EngineModelMode, SirenOverride,
+    VehicleAudioInput, PHYSICAL_ENGINE_PACK,
 };
+pub use engine_model::{EngineFrame, EngineTune, EngineVoiceSpec};
 pub use scanner::{RadioLine, RadioPriority, ScannerTier};
 pub use siren::{SirenMode, SirenPattern};
 pub use types::{AudioCommand, Bus, Listener, Priority, VoiceId, VoiceParams};

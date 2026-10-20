@@ -35,6 +35,9 @@ pub mod cues {
     pub const SUPERCHARGER_WHINE: &str = "supercharger/whine";
     /// Overrun exhaust pop one-shot.
     pub const EXHAUST_POP: &str = "exhaust/pop";
+    /// The physically modelled engine (one looped voice per car, `Model` pack): firing
+    /// pulses, exhaust waveguides, intake, mechanical noise, turbo, crackle.
+    pub const ENGINE_PHYSICAL: &str = "engine/physical";
 
     /// Tire squeal loop on paved surfaces.
     pub const SQUEAL: &str = "tire/squeal";
@@ -134,9 +137,24 @@ pub mod cues {
 }
 
 /// Synth names the procedural backend implements (`apps/testbed-web/src/audio/synth.ts`).
-pub const KNOWN_SYNTHS: [&str; 16] = [
-    "engine", "noise", "tone", "siren", "horn", "impact", "glass", "thump", "squeal", "whine",
-    "blowoff", "pop", "squelch", "clatter", "hiss", "spin",
+pub const KNOWN_SYNTHS: [&str; 17] = [
+    "engine",
+    "noise",
+    "tone",
+    "siren",
+    "horn",
+    "impact",
+    "glass",
+    "thump",
+    "squeal",
+    "whine",
+    "blowoff",
+    "pop",
+    "squelch",
+    "clatter",
+    "hiss",
+    "spin",
+    "engine_physical",
 ];
 
 // ----- config ------------------------------------------------------------------------------
@@ -214,6 +232,22 @@ pub struct EngineMix {
     /// Culling score multiplier of a non-focus car's second engine layer: every car's main
     /// layer is kept before another car's second layer.
     pub second_layer_cull_scale: f32,
+    /// Physically modelled engine (when the backend enables it): besides the focus car, this
+    /// many of the nearest cars get the model; every other car keeps the layers.
+    #[serde(default = "default_physical_max_others")]
+    pub physical_max_others: usize,
+    /// Physically modelled engine: only cars closer than this get it (others keep the
+    /// layers), m. A car keeps the model out to 1.25 × this.
+    #[serde(default = "default_physical_radius_m")]
+    pub physical_radius_m: f32,
+}
+
+fn default_physical_max_others() -> usize {
+    6
+}
+
+fn default_physical_radius_m() -> f32 {
+    60.0
 }
 
 /// Tire, surface and suspension tuning.
@@ -534,6 +568,9 @@ pub enum PackKind {
     Siren,
     /// Scanner squelch and static.
     Radio,
+    /// Procedural models driven by per-frame state instead of layers or samples (the
+    /// physically modelled engine, `engine/physical`).
+    Model,
 }
 
 /// The rpm a layer was recorded / tuned at.
@@ -809,6 +846,7 @@ impl AudioLibrary {
                 PackKind::World => cues::world(),
                 PackKind::Siren => cues::SIREN.to_vec(),
                 PackKind::Radio => cues::RADIO.to_vec(),
+                PackKind::Model => vec![cues::ENGINE_PHYSICAL],
             };
             for c in required {
                 if !p.cues.contains_key(c) {
