@@ -1,11 +1,11 @@
-# simcli hashes scenario=opponent_pace_loop9_circuit_s50 systems=world,vehicle,damage,police,net hash_spec=3 contract=0.3.0
-240 4f6b523ad57d3855
-480 479b0b7a3ef18f77
-720 76490df4d588616b
-960 515bbb97686a99f9
-1200 b5d1f5872a8bcae2
-1440 71c35b724ec93bb8
-1680 b160cdf6c1031e7a
-1920 0cb2a17d656a5683
-2160 709d3b83b5471819
-2400 26100c7ba5a991e5
+# simcli hashes scenario=opponent_pace_loop9_circuit_s50 systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
+240 bbee40c5971d7b96
+480 e89ca778e54dff50
+720 3c640a936bfe4bb9
+960 1262475a2c91b9df
+1200 7e6431efd8243c6d
+1440 2fb9de9a8cbe9653
+1680 153223959bad30e5
+1920 01e9ac4c4bfd3a70
+2160 02435e94091d50f1
+2400 db7b82ca426222ee
