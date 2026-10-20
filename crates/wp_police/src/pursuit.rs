@@ -44,6 +44,9 @@ const NEAR_RACER_M: f32 = 40.0;
 /// its route (later calls about the same racer), m.
 const RESPOND_REROUTE_M: f32 = 40.0;
 
+/// Braking a shadowing unit plans with when closing on its gap behind the racer, m/s².
+const SHADOW_CLOSE_DECEL_MPS2: f32 = 4.0;
+
 /// A responder this close to the reported racer, with it in sight, follows it, m.
 const RESPOND_FOLLOW_M: f32 = 150.0;
 
@@ -1117,15 +1120,29 @@ impl PoliceSystem {
                         shadow_rank += 1.0;
                         // Close in for the arrest when the racer stops.
                         let want_gap = if v_r < 3.0 && seen { 8.0 } else { mid };
-                        let mut sp = v_r + 0.6 * (gap - want_gap);
+                        // Far behind: close the gap at up to the phase's pursuit cap, braking
+                        // in time to arrive at the shadow gap (row 60: a cop 200 m behind a
+                        // stopped racer used to crawl up at the racer's speed + 10 %).
+                        let excess = gap - want_gap;
+                        let mut sp = if excess > 0.0 {
+                            v_r + (2.0 * SHADOW_CLOSE_DECEL_MPS2 * excess).sqrt()
+                        } else {
+                            v_r + 0.6 * excess
+                        };
                         if !seen {
                             // Lost contact: drive to the last known position at a measured pace.
                             sp = self.limit_at(u.body.pos) * p.respond_speed_factor;
                         }
-                        let own_cap = if has_budget {
-                            cap
+                        let far = gap > t.shadow_m.max + 15.0;
+                        let base_cap = if far {
+                            p.pursuit_cap_mps.get(self.phase)
                         } else {
-                            cap.min(self.limit_at(u.body.pos) * 1.3)
+                            cap
+                        };
+                        let own_cap = if has_budget {
+                            base_cap
+                        } else {
+                            base_cap.min(self.limit_at(u.body.pos) * 1.3)
                         };
                         (track.clone(), sp.clamp(0.0, own_cap))
                     }

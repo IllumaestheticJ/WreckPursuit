@@ -264,6 +264,10 @@ pub struct PoliceStats {
     pub calls: Vec<CallRecord>,
     /// Calls taken off a unit that fell behind the racer and dispatched again.
     pub redispatches: u32,
+    /// Blatant speeding right past a unit, recognised at once (`heat.blatant`).
+    pub blatant: u32,
+    /// Turn-round reverse swings by physical units (target behind them).
+    pub swings: u32,
     /// Ground units spawned after the session start (pool refills, responders,
     /// reinforcements, tool units).
     pub spawns: Vec<SpawnRecord>,
@@ -1052,8 +1056,99 @@ impl PoliceSystem {
         let acc = (want - v).clamp(-brake, accel);
         let disabled = u.wrecked || u.assignment == Assignment::OutOfService;
         let siren = u.cmd.siren;
-        // Un-sticking ([`stuck`]): back out first; otherwise watch for no progress.
+        // Turning round toward a target behind (row 60): a reverse swing, not a wide forward
+        // U-turn or a drive round the block.
         let now = self.now;
+        let to_t = graph::normalize(graph::sub([target[0], target[1]], pos));
+        let facing = graph::dot(heading, to_t);
+        if let stuck::Phase::UTurn {
+            since,
+            until,
+            steer,
+        } = u.unstick.phase
+        {
+            if facing < stuck::SWING_DONE_COS && now < until && !disabled {
+                let fast = v > stuck::UTURN_MPS;
+                let handbrake = if fast && now.since(since) < stuck::UTURN_HANDBRAKE_S {
+                    1.0
+                } else {
+                    0.0
+                };
+                return Some(VehicleInput {
+                    steer,
+                    throttle: if fast { 0.0 } else { 0.5 },
+                    brake: if fast { 0.5 } else { 0.0 },
+                    handbrake,
+                    siren,
+                    headlights: true,
+                    ..Default::default()
+                });
+            }
+            u.unstick.phase = stuck::Phase::Drive;
+            u.unstick.swing_ready = now.plus(stuck::SWING_COOLDOWN_S);
+            u.unstick.slow_s = 0.0;
+        }
+        if let stuck::Phase::Swing { until, steer } = u.unstick.phase {
+            if facing < stuck::SWING_DONE_COS && now < until && !disabled {
+                return Some(VehicleInput {
+                    steer,
+                    brake: 1.0,
+                    siren,
+                    headlights: true,
+                    ..Default::default()
+                });
+            }
+            u.unstick.phase = stuck::Phase::Drive;
+            u.unstick.swing_ready = now.plus(stuck::SWING_COOLDOWN_S);
+            u.unstick.slow_s = 0.0;
+        }
+        let swing_wanted = matches!(u.unstick.phase, stuck::Phase::Drive)
+            && want > stuck::WANT_MPS
+            && !disabled
+            && facing < stuck::SWING_BEHIND_COS
+            && v < stuck::SWING_MAX_MPS
+            && now >= u.unstick.swing_ready
+            && graph::dist(pos, [target[0], target[1]]) > 6.0;
+        if swing_wanted && v >= stuck::UTURN_MIN_MPS {
+            // Still rolling: U-turn forward, full lock toward the target's side.
+            let left = graph::cross(heading, to_t) > 0.0;
+            let steer = if left { -1.0 } else { 1.0 };
+            let u = &mut self.units[i];
+            u.unstick.phase = stuck::Phase::UTurn {
+                since: now,
+                until: now.plus(stuck::UTURN_MAX_S),
+                steer,
+            };
+            self.stats.swings += 1;
+            return Some(VehicleInput {
+                steer,
+                brake: 0.5,
+                handbrake: 1.0,
+                siren,
+                headlights: true,
+                ..Default::default()
+            });
+        }
+        if swing_wanted && self.room_behind(i, 6.0) {
+            // Reversing with right lock swings the nose left, and the other way round.
+            let left = graph::cross(heading, to_t) > 0.0;
+            let steer = if left { 1.0 } else { -1.0 };
+            let u = &mut self.units[i];
+            u.unstick.phase = stuck::Phase::Swing {
+                until: now.plus(stuck::SWING_MAX_S),
+                steer,
+            };
+            self.stats.swings += 1;
+            return Some(VehicleInput {
+                steer,
+                brake: 1.0,
+                siren,
+                headlights: true,
+                ..Default::default()
+            });
+        }
+        let u = &mut self.units[i];
+        // Un-sticking ([`stuck`]): back out first; otherwise watch for no progress.
         if let stuck::Phase::Reverse {
             from,
             dist_m,

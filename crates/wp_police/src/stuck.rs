@@ -40,6 +40,25 @@ pub const REVERSE_M: f32 = 4.0;
 pub const YIELD_DEADLOCK_S: f32 = 2.0;
 /// See [`YIELD_DEADLOCK_S`], m.
 pub const YIELD_REVERSE_M: f32 = 8.0;
+/// A unit whose steering target is behind it (cosine of the angle below this) turns round
+/// with a reverse swing instead of a wide forward U-turn (row 60).
+pub const SWING_BEHIND_COS: f32 = -0.3;
+/// ...when slower than this, m/s (faster, it brakes into the swing).
+pub const SWING_MAX_MPS: f32 = 8.0;
+/// The swing ends when the car faces the target this well (cosine) or after this long, s.
+pub const SWING_DONE_COS: f32 = 0.5;
+/// See [`SWING_DONE_COS`].
+pub const SWING_MAX_S: f32 = 3.5;
+/// No new swing for this long after one, s (no reverse/forward oscillation).
+pub const SWING_COOLDOWN_S: f32 = 3.0;
+/// Faster than this, a unit turns round with a forward U-turn instead of a reverse swing, m/s.
+pub const UTURN_MIN_MPS: f32 = 3.0;
+/// Speed held through a U-turn, m/s.
+pub const UTURN_MPS: f32 = 6.0;
+/// Handbrake pulled for this long at the start of a U-turn from above `UTURN_MPS`, s.
+pub const UTURN_HANDBRAKE_S: f32 = 0.6;
+/// A U-turn gives up after this long, s.
+pub const UTURN_MAX_S: f32 = 4.5;
 /// Give up reversing after this long, s.
 pub const REVERSE_MAX_S: f32 = 3.0;
 /// A second event this close to the first one re-routes around the segment, m.
@@ -141,6 +160,16 @@ pub(crate) enum Phase {
     /// Normal driving.
     #[default]
     Drive,
+    /// Turning round toward a target behind the car (J / three-point turn, owner playtest
+    /// row 60): reversing with lock until it faces the target or `until`.
+    Swing { until: SimTime, steer: f32 },
+    /// Turning round from speed: a forward U-turn at full lock (handbrake pulled at the start),
+    /// until it faces the target or `until`; `since` is when it began.
+    UTurn {
+        since: SimTime,
+        until: SimTime,
+        steer: f32,
+    },
     /// Backing out: from where, how far, until when, with which steer.
     Reverse {
         from: [f32; 2],
@@ -156,6 +185,9 @@ pub struct UnstickState {
     pub(crate) slow_s: f32,
     /// Seconds yielding nose to nose with a stopped racer.
     pub(crate) yield_s: f32,
+    /// No new turn-round swing before this.
+    #[serde(default)]
+    pub(crate) swing_ready: SimTime,
     /// Seconds holding behind a stopped vehicle outside a red-light queue.
     pub(crate) held_s: f32,
     pub(crate) phase: Phase,
@@ -174,6 +206,11 @@ pub struct UnstickState {
 }
 
 impl UnstickState {
+    /// Whether the unit is turning round (reverse swing or U-turn) right now.
+    pub fn swinging(&self) -> bool {
+        matches!(self.phase, Phase::Swing { .. } | Phase::UTurn { .. })
+    }
+
     /// Whether the unit is backing out right now.
     pub fn reversing(&self) -> bool {
         matches!(self.phase, Phase::Reverse { .. })

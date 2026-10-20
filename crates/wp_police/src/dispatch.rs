@@ -164,6 +164,14 @@ impl PoliceSystem {
         if added <= 0.0 {
             return;
         }
+        if let ViolationKind::Speeding { over_mps } = kind {
+            if *over_mps >= cfg.heat.blatant.over_mps
+                && !self.racers[&racer].pursued()
+                && self.on_blatant_speeding(world, racer, *over_mps, before)
+            {
+                return;
+            }
+        }
         if after != before {
             self.pending.push(PoliceEvent::WantedLevelChanged {
                 racer,
@@ -213,6 +221,73 @@ impl PoliceSystem {
                 // On the radio together with the unit sent (`radio_text`), a few seconds on.
             }
         }
+    }
+
+    /// Speeding `over_mps` over the limit right past a unit that sees it (row 60): that unit
+    /// recognises the racer at once and starts a pursuit; wanted at least `blatant.min_level`.
+    /// `false` if no in-service unit is close enough with line of sight.
+    fn on_blatant_speeding(
+        &mut self,
+        world: &dyn WorldQuery,
+        racer: EntityId,
+        over_mps: f32,
+        before: WantedLevel,
+    ) -> bool {
+        let b = self.cfg.heat.heat.blatant.clone();
+        let r = &self.racers[&racer];
+        let (rp, rz) = (xy(r.pos), r.pos[2]);
+        let mut best: Option<(f32, usize)> = None;
+        for (i, u) in self.units.iter().enumerate() {
+            if u.kind != UnitKind::Car
+                || u.wrecked
+                || u.player.is_some()
+                || u.assignment == Assignment::OutOfService
+            {
+                continue;
+            }
+            let d = dist(u.body.pos, rp);
+            if d <= b.range_m
+                && best.is_none_or(|x| d < x.0)
+                && self.sees_at(world, u.body.pos, u.body.alt_m, rp, rz)
+            {
+                best = Some((d, i));
+            }
+        }
+        let Some((_, i)) = best else {
+            return false;
+        };
+        let now = self.now;
+        let cfg = self.cfg.heat.clone();
+        let after = {
+            let rec = self.racers.get_mut(&racer).expect("racer exists");
+            let floor = cfg.heat.level_thresholds[(b.min_level.clamp(1, 5) - 1) as usize];
+            if rec.heat < floor {
+                rec.add_heat(floor - rec.heat, &cfg);
+            }
+            rec.last_seen = Some(now);
+            rec.last_known = Some(rp);
+            rec.level
+        };
+        if after != before {
+            self.pending.push(PoliceEvent::WantedLevelChanged {
+                racer,
+                level: after,
+            });
+        }
+        self.stats.blatant += 1;
+        let unit = self.units[i].id;
+        let desc = self.racer_desc(racer);
+        self.radio(RadioCue::new(
+            RadioTier::Critical,
+            Some(unit),
+            format!(
+                "Unit {}: {desc} just blew past me at {:.0} over, I'm on it.",
+                unit.0,
+                over_mps * 3.6
+            ),
+        ));
+        self.start_pursuit(racer, unit);
+        true
     }
 
     pub(crate) fn on_racer_total_loss(&mut self, racer: EntityId) {

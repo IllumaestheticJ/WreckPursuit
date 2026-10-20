@@ -147,6 +147,23 @@ pub struct HeatConfig {
     pub cop_disabled_heat: f32,
     /// Hitting a police car (assaulting an officer).
     pub assault: AssaultConfig,
+    /// Blatant speeding right past a unit (owner playtest row 60).
+    pub blatant: BlatantConfig,
+}
+
+/// Speeding far over the limit right past a unit that can see it is recognised at once, day or
+/// night (owner playtest row 60, "I sped right by a cop with no chase": at night a pursuit
+/// otherwise needs the racer within `recognition_range_m` (40 m) for `recognition_time_s`
+/// (4 s), which a car passing at 150 km/h never is).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BlatantConfig {
+    /// Speeding at least this far over the limit, m/s.
+    pub over_mps: f32,
+    /// ...within this distance of an in-service ground unit with line of sight, m.
+    pub range_m: f32,
+    /// Wanted level (1–5) the racer is raised to at least.
+    pub min_level: u8,
 }
 
 /// A racer hitting a police unit is assaulting an officer (owner playtest row 24): heat jumps
