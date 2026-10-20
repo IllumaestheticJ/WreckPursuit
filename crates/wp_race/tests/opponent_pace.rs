@@ -102,6 +102,8 @@ const BUCKETS: [&str; 11] = [
 /// One car's result.
 #[derive(Debug, Clone)]
 pub struct CarPace {
+    /// Scenario entity id.
+    pub entity: String,
     /// Car id.
     pub car: String,
     /// Judged time (None = DNF / not finished).
@@ -219,7 +221,18 @@ pub fn race_pace(
     } else {
         repo().join(format!("apps/simcli/scenarios/race/pick_{id}.ron"))
     };
-    let mut sc = load_scenario(&path).unwrap();
+    race_pace_in(load_scenario(&path).unwrap(), id, skill, opts, caps)
+}
+
+/// [`race_pace`] on a given scenario (a picker race's, or a pace scenario's from
+/// `apps/simcli/scenarios/opponent/`).
+pub fn race_pace_in(
+    mut sc: simcli::Scenario,
+    id: &str,
+    skill: f32,
+    opts: &PaceOpts,
+    caps: &mut BTreeMap<String, CarCapability>,
+) -> Vec<CarPace> {
     if !opts.police {
         sc.police_presence = Some(0.0);
         sc.police_cars = false;
@@ -249,6 +262,7 @@ pub fn race_pace(
     let mut entrants = Vec::new();
     let mut measured = Vec::new();
     let mut car_ids = Vec::new();
+    let mut entity_ids = Vec::new();
     for &i in &order {
         let spec = &sc.entities[i];
         let car: &LoadedCar = &built.cars[&spec.car];
@@ -267,6 +281,7 @@ pub fn race_pace(
             .or_insert_with(|| CarCapability::for_car(car));
         measured.push(m);
         car_ids.push(spec.car.clone());
+        entity_ids.push(spec.id.clone());
         entrants.push(AiEntrant {
             racer: ids[i],
             profile: DriverProfile {
@@ -588,6 +603,7 @@ pub fn race_pace(
                 measured[k].accel_mps2 * params.usage.accel,
             );
             CarPace {
+                entity: entity_ids[k].clone(),
                 car: car_ids[k].clone(),
                 time_s: r.elapsed_s(),
                 ideal_s,
@@ -669,4 +685,113 @@ fn trace_every() -> u64 {
         .and_then(|v| v.parse().ok())
         .unwrap_or(2);
     (240 / hz.clamp(1, 240)).max(1)
+}
+
+/// `opponent_pace_<race id>_s<skill %>` → (race id, skill).
+fn parse_pace_name(name: &str) -> Option<(String, f32)> {
+    let rest = name.strip_prefix("opponent_pace_")?;
+    let (race, skill) = rest.rsplit_once("_s")?;
+    let pct: f32 = skill.parse().ok()?;
+    Some((race.to_string(), pct / 100.0))
+}
+
+/// The value of a pace metric (`expect_pending: [metric(name: ..)]` of a pace scenario).
+/// Per entity: `race_time_s` (judged time; +inf when it did not finish), `race_ratio` (time
+/// over the car's ideal time), `race_finished` (0/1), `wall_hits` (≥ 400 N·s static
+/// contacts while racing), `rejoins`. Field-wide (no entity): `best_ratio`, `finishers`.
+fn pace_metric(cars: &[CarPace], name: &str, entity: Option<&str>) -> Option<f32> {
+    let car = |e: Option<&str>| cars.iter().find(|c| Some(c.entity.as_str()) == e);
+    let time = |c: &CarPace| c.time_s.unwrap_or(f32::INFINITY);
+    Some(match name {
+        "best_ratio" => cars
+            .iter()
+            .map(|c| time(c) / c.ideal_s)
+            .fold(f32::INFINITY, f32::min),
+        "finishers" => cars.iter().filter(|c| c.time_s.is_some()).count() as f32,
+        "race_time_s" => time(car(entity)?),
+        "race_ratio" => {
+            let c = car(entity)?;
+            time(c) / c.ideal_s
+        }
+        "race_finished" => f32::from(u8::from(car(entity)?.time_s.is_some())),
+        "wall_hits" => car(entity)?.wall_hits as f32,
+        "rejoins" => car(entity)?.rejoins as f32,
+        _ => return None,
+    })
+}
+
+/// Pace lock-in (playtest row 99): every `apps/simcli/scenarios/opponent/pace_*.ron` is a
+/// picker race (traffic as in the picker, police off) raced here by `wp_opponent` with every
+/// seat at the skill in its name; its `expect_pending` ranges (simcli itself cannot drive AI
+/// racers, so they are pending there) are checked against the result. Release only: whole
+/// courses in the full sim (~3 min).
+#[test]
+#[cfg_attr(debug_assertions, ignore = "races whole picker courses (release only)")]
+fn pace_scenarios_hold_their_ranges() {
+    let dir = repo().join("apps/simcli/scenarios/opponent");
+    let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("pace_") && n.ends_with(".ron"))
+        })
+        .collect();
+    files.sort();
+    assert!(!files.is_empty(), "no pace scenarios in {dir:?}");
+    if let Ok(only) = std::env::var("WP_PACE_ONLY") {
+        files.retain(|f| f.to_string_lossy().contains(&only));
+    }
+    let opts = PaceOpts {
+        // The scenario file decides police and traffic.
+        police: true,
+        density: None,
+        solo: false,
+        geometry: false,
+        trace: None,
+        seed: None,
+    };
+    let mut caps = BTreeMap::new();
+    let mut fails = Vec::new();
+    for f in &files {
+        let sc = load_scenario(f).unwrap();
+        let (race, skill) =
+            parse_pace_name(&sc.name).unwrap_or_else(|| panic!("{f:?}: bad pace name"));
+        let expects = sc.expect_pending.clone();
+        let cars = race_pace_in(sc.clone(), &race, skill, &opts, &mut caps);
+        for c in &cars {
+            eprintln!(
+                "{}: {} ({}) time {:?} ideal {:.1} ratio {:.3} walls {} rejoins {}",
+                sc.name,
+                c.entity,
+                c.car,
+                c.time_s,
+                c.ideal_s,
+                c.time_s.map_or(f32::INFINITY, |t| t / c.ideal_s),
+                c.wall_hits,
+                c.rejoins
+            );
+        }
+        for x in &expects {
+            let simcli::scenario::Expect::Metric {
+                name,
+                entity,
+                min,
+                max,
+            } = x
+            else {
+                continue;
+            };
+            match pace_metric(&cars, name, entity.as_deref()) {
+                Some(v) if v >= *min && v <= *max => {}
+                Some(v) => fails.push(format!(
+                    "{}: {name}({entity:?}) = {v:.3}, want {min}..={max}",
+                    sc.name
+                )),
+                None => fails.push(format!("{}: unknown pace metric {name:?}", sc.name)),
+            }
+        }
+    }
+    assert!(fails.is_empty(), "{fails:#?}");
 }

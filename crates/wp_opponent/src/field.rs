@@ -450,6 +450,19 @@ pub struct Field {
     still: BTreeMap<u64, f32>,
 }
 
+impl Racer {
+    /// How far ahead this driver notices cars and civilians, m: the awareness range, but
+    /// never less than 1.3× the braking distance from the present speed plus 30 m (at
+    /// 60 m/s on a highway a stalled car must be seen ~250 m out).
+    fn ahead_m(&self) -> f32 {
+        let v = self.v.max(0.0);
+        let a = self.speed.a_brake.max(3.0);
+        self.params
+            .perception_ahead_m
+            .max(1.3 * v * v / (2.0 * a) + 30.0)
+    }
+}
+
 /// Key offset of sim vehicles in [`Field`]'s standing-still bookkeeping.
 const STILL_VEHICLE_KEY: u64 = 1 << 40;
 
@@ -1285,11 +1298,7 @@ impl Field {
     /// Step 2 for the shared corridor: every vehicle and nearby civilian as an obstacle.
     fn perceive_all(&mut self, world: &World, vehicles: &[VehicleObs]) -> Vec<Obstacle> {
         let mut out = Vec::new();
-        let range = self
-            .racers
-            .iter()
-            .fold(0.0f32, |m, r| m.max(r.params.perception_ahead_m))
-            + 20.0;
+        let range = self.racers.iter().fold(0.0f32, |m, r| m.max(r.ahead_m())) + 20.0;
         for v in vehicles {
             let who = match self.racer_index(v.entity) {
                 Some(k) => {
@@ -1354,7 +1363,7 @@ impl Field {
                 continue;
             }
             let pos = geom::xy(v.state.pos);
-            if geom::dist(pos, me.pos) > me.params.perception_ahead_m + 20.0 {
+            if geom::dist(pos, me.pos) > me.ahead_m() + 20.0 {
                 continue;
             }
             let cp = corridor.project(pos, Some(me.hint), 80);
@@ -1364,13 +1373,7 @@ impl Field {
             }
         }
         let only_me = std::slice::from_ref(me);
-        let mut civ = civilians_on(
-            corridor,
-            only_me,
-            world,
-            me.params.perception_ahead_m + 20.0,
-            true,
-        );
+        let mut civ = civilians_on(corridor, only_me, world, me.ahead_m() + 20.0, true);
         for o in &mut civ {
             if let Who::Civilian(id) = o.who {
                 o.parked |= self.is_still(id as u64);
@@ -1557,7 +1560,7 @@ fn decide_racer(
                 let gap = ds.abs() - hl - o.half_len;
                 Rel { o: *o, ds, gap }
             })
-            .filter(|x| x.ds > -p.mirror_range_m && x.ds < p.perception_ahead_m)
+            .filter(|x| x.ds > -p.mirror_range_m && x.ds < r.ahead_m())
             .collect();
         let is_civ = |o: &Obstacle| matches!(o.who, Who::Civilian(_));
 
@@ -1929,9 +1932,13 @@ fn decide_racer(
             }
         };
         let rate = match r.tactic {
-            // Lane changes take about as long at speed as in town (same steering angle).
+            // Lane changes run a little quicker at speed (up to 1.6×), but taper off above
+            // 30 m/s: a lane change at highway speed while braking hard has to stay gentle or
+            // the car overshoots the target lane.
             Tactic::Overtake | Tactic::Defend => {
-                (1.4 + 1.0 * r.profile.aggression) * (v / 15.0).clamp(1.0, 2.2)
+                (1.4 + 1.0 * r.profile.aggression)
+                    * (v / 15.0).clamp(1.0, 1.6)
+                    * (30.0 / v.max(30.0))
             }
             Tactic::Park | Tactic::Yield => 0.8,
             _ => 0.9,
@@ -2058,7 +2065,9 @@ fn decide_racer(
                 let den = (1.0 - kc * n_path).max(0.2);
                 let k = (kc / den).abs();
                 if k > 1e-4 {
-                    let v_off = (profile.a_lat / k).sqrt();
+                    // 85 % of the grip used on the line: an off-line path is tighter, not
+                    // optimised, and usually has a car beside it to run wide into.
+                    let v_off = (0.85 * profile.a_lat / k).sqrt();
                     let cap = (v_off * v_off + 2.0 * a_brk * x).sqrt();
                     cap_to(&mut v_target, cap, SpeedLimit::Mode);
                 }
