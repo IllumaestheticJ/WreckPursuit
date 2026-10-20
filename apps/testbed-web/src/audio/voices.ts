@@ -93,6 +93,8 @@ interface Voice {
   endTime: number;
   /** Parameters last applied (skip automation calls when nothing changed). */
   last: VoiceParams;
+  /** Commanded gain → played gain (a stand-in cue's own gain; see `resolve`). */
+  scale: number;
 }
 
 /** wp_audio slot codes (crates/wp_audio/src/types.rs `slot`): engine layers and limiter. */
@@ -107,6 +109,8 @@ interface EngineMember {
   off: number;
   noise: number;
   limiter: boolean;
+  /** Commanded gain → member gain (see `Voice.scale`). */
+  scale: number;
 }
 
 /**
@@ -122,6 +126,17 @@ interface EngineGroup extends Voice {
   pending: VoiceParams;
   mix: EngineMix;
   dirty: boolean;
+}
+
+/** A looped voice waiting for its recording to decode (see `VoicePool.waiting`). */
+interface Waiting {
+  voice: VoiceId;
+  bus: Bus;
+  pack: string;
+  cue: string;
+  synth: Record<string, number>;
+  /** Latest commanded parameters. */
+  params: VoiceParams;
 }
 
 /** Entity id of voices played outside the director (non-spatial). */
@@ -140,8 +155,18 @@ export class VoicePool {
   /** Released instruments still fading out. */
   private dying: Voice[] = [];
   private samples = new Map<string, AudioBuffer | "loading" | "failed">();
+  /**
+   * Looped voices playing a pack's procedural fallback only because their recording was not
+   * decoded yet. When it decodes they are re-played from the recording (playtest #47: before,
+   * an engine that started early stayed on the fallback synth for good).
+   */
+  private waiting = new Map<string, Waiting>();
+  /** A sample finished decoding since the last `collect()`. */
+  private decoded = false;
   /** Voices created / released (debug). */
   created = 0;
+  /** Plays performed from a recording / by a synth (debug, e2e). */
+  readonly played = { samples: 0, synth: 0, upgraded: 0 };
 
   constructor(
     private ctx: AudioContext,
@@ -169,20 +194,30 @@ export class VoicePool {
    * The cue to perform for `pack`/`cue`: in procedural mode (or while a recorded file is not
    * decoded yet / failed to load) the pack's `fallback` cue of the same name, if it has one.
    */
-  private resolve(pack: string, cue: string): { def: CueDef | undefined; buf: AudioBuffer | null; pack: string } {
+  private resolve(
+    pack: string,
+    cue: string,
+  ): { def: CueDef | undefined; buf: AudioBuffer | null; pack: string; loading: boolean; scale: number } {
     const def = this.cue(pack, cue);
     const fb = this.lib.packs[pack]?.fallback;
     const fbDef = fb ? this.cue(fb, cue) : undefined;
-    if (this.source === "procedural" && fbDef) return { def: fbDef, buf: null, pack: fb! };
+    // The director folds the commanded cue's gain into every gain it sends; a stand-in cue
+    // plays at its own gain instead (recorded engine layers carry a level boost the synths
+    // must not get).
+    const scale = def && fbDef && def.gain > 0 ? fbDef.gain / def.gain : 1;
+    if (this.source === "procedural" && fbDef) return { def: fbDef, buf: null, pack: fb!, loading: false, scale };
     const src = def?.source;
     if (src && "Samples" in src) {
       const files = src.Samples.files;
-      const file = files[Math.floor(Math.random() * files.length)];
-      const buf = this.samples.get(this.sampleUrl(pack, file));
-      if (buf instanceof AudioBuffer) return { def, buf, pack };
-      if (fbDef) return { def: fbDef, buf: null, pack: fb! };
+      // Prefer a decoded file; pick among them at random (round robin variety).
+      const bufs = files.map((f) => this.samples.get(this.sampleUrl(pack, f))).filter((b) => b instanceof AudioBuffer);
+      if (bufs.length) return { def, buf: bufs[Math.floor(Math.random() * bufs.length)] as AudioBuffer, pack, loading: false, scale: 1 };
+      const loading = files.some((f) => this.samples.get(this.sampleUrl(pack, f)) === "loading");
+      if (fbDef) return { def: fbDef, buf: null, pack: fb!, loading, scale };
+      // No fallback and nothing decoded: nothing sensible to play.
+      return { def: undefined, buf: null, pack, loading, scale: 1 };
     }
-    return { def, buf: null, pack };
+    return { def, buf: null, pack, loading: false, scale: 1 };
   }
 
   /** Whether `pack` defines `cue` (optional cues such as the city ambience). */
@@ -212,7 +247,10 @@ export class VoicePool {
           fetch(url)
             .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(`HTTP ${r.status}`))))
             .then((b) => this.ctx.decodeAudioData(b))
-            .then((buf) => this.samples.set(url, buf))
+            .then((buf) => {
+              this.samples.set(url, buf);
+              this.decoded = true;
+            })
             .catch((e) => {
               console.warn("audio sample failed:", url, e);
               this.samples.set(url, "failed");
@@ -250,14 +288,20 @@ export class VoicePool {
   }
 
   play(voice: VoiceId, bus: Bus, pack: string, cue: string, looped: boolean, params: VoiceParams, synth: Record<string, number>): void {
-    const { def, buf, pack: played } = this.resolve(pack, cue);
+    const { def, buf, pack: played, loading, scale } = this.resolve(pack, cue);
+    const key = voiceKey(voice);
+    const commanded = params;
+    params = { ...params, gain: params.gain * scale };
+    // Whatever holds this slot now goes, whichever path it took: a slot can move between the
+    // car's engine instrument (synth) and a sample voice, and a stale one would play on, stuck.
+    this.free(voice, 0.02);
+    if (looped && loading) this.waiting.set(key, { voice, bus, pack, cue, synth, params: { ...commanded } });
+    if (!def) return;
     if (this.isEngineSynth(voice, bus, def)) {
-      this.enginePlay(voice, def!, params, synth);
+      this.played.synth++;
+      this.enginePlay(voice, def, params, synth, scale);
       return;
     }
-    const key = voiceKey(voice);
-    const old = this.voices.get(key);
-    if (old) this.release(old, this.ctx.currentTime, 0.02);
     const t = this.ctx.currentTime;
     const gain = this.ctx.createGain();
     gain.gain.setValueAtTime(looped ? 0 : params.gain, t);
@@ -282,6 +326,7 @@ export class VoicePool {
     let syn: SynthVoice | null = null;
     const source = def?.source;
     if (buf) {
+      this.played.samples++;
       src = this.ctx.createBufferSource();
       src.buffer = buf;
       src.loop = looped;
@@ -289,6 +334,7 @@ export class VoicePool {
       src.connect(gain);
       src.start(t);
     } else {
+      this.played.synth++;
       const name = source && "Synth" in source ? source.Synth.synth : "noise";
       const sp = { ...(source && "Synth" in source ? source.Synth.params : {}), ...synth };
       syn = makeSynth(this.ctx, name, sp, params, t);
@@ -296,22 +342,24 @@ export class VoicePool {
     }
     // A recorded one-shot can outlast the director's estimate: keep the voice until it ends.
     const dur = Math.max(def?.duration_s ?? 1, buf && !looped ? buf.duration / Math.max(params.pitch, 0.25) : 0);
-    this.voices.set(key, { synth: syn, src, gain, lp, panner, endTime: looped ? Infinity : t + dur + 0.5, last: params });
+    this.voices.set(key, { synth: syn, src, gain, lp, panner, endTime: looped ? Infinity : t + dur + 0.5, last: params, scale });
     this.created++;
   }
 
   set(voice: VoiceId, params: VoiceParams): void {
+    const w = this.waiting.get(voiceKey(voice));
+    if (w) w.params = params;
     const g = this.engines.get(voice.entity);
     const m = g?.members.get(voice.slot);
     if (g && m) {
-      m.gain = params.gain;
+      m.gain = params.gain * m.scale;
       g.pending = params;
       g.dirty = true;
       return;
     }
     const v = this.voices.get(voiceKey(voice));
     if (!v) return;
-    this.applyParams(v, params);
+    this.applyParams(v, v.scale === 1 ? params : { ...params, gain: params.gain * v.scale });
   }
 
   /** Re-automate whatever moved since it was last applied. */
@@ -359,7 +407,7 @@ export class VoicePool {
     );
   }
 
-  private enginePlay(voice: VoiceId, def: CueDef, params: VoiceParams, synth: Record<string, number>): void {
+  private enginePlay(voice: VoiceId, def: CueDef, params: VoiceParams, synth: Record<string, number>, scale: number): void {
     const sp = { ...("Synth" in def.source ? def.source.Synth.params : {}), ...synth };
     const member: EngineMember = {
       gain: params.gain,
@@ -367,6 +415,7 @@ export class VoicePool {
       off: sp.off ? 1 : 0,
       noise: sp.noise ?? 0.1,
       limiter: !!sp.chop_hz,
+      scale,
     };
     let g = this.engines.get(voice.entity);
     if (!g) {
@@ -393,6 +442,7 @@ export class VoicePool {
         endTime: Infinity,
         // Gain starts at 0 and is ramped in by the first flush.
         last: { ...params, gain: 0, pos: [...params.pos] as [number, number, number] },
+        scale: 1,
         members: new Map(),
         pending: params,
         mix,
@@ -439,6 +489,12 @@ export class VoicePool {
   }
 
   stop(voice: VoiceId, fadeS: number): void {
+    this.waiting.delete(voiceKey(voice));
+    this.free(voice, fadeS);
+  }
+
+  /** Release whatever plays `voice`: an engine-instrument member and / or a voice. */
+  private free(voice: VoiceId, fadeS: number): void {
     const g = this.engines.get(voice.entity);
     if (g && g.members.delete(voice.slot)) {
       if (g.members.size === 0) {
@@ -448,12 +504,30 @@ export class VoicePool {
       } else {
         g.dirty = true;
       }
-      return;
     }
     const key = voiceKey(voice);
     const v = this.voices.get(key);
     if (!v) return;
     this.release(v, this.ctx.currentTime, fadeS);
+    // Keep it until its fade ends, but under a key nothing addresses any more.
+    this.voices.delete(key);
+    this.dying.push(v);
+  }
+
+  /** Re-play voices whose recording has decoded since they started on the fallback. */
+  private upgrade(): void {
+    this.decoded = false;
+    if (this.source !== "recorded") return;
+    for (const [key, w] of [...this.waiting]) {
+      const r = this.resolve(w.pack, w.cue);
+      if (r.buf) {
+        this.waiting.delete(key);
+        this.play(w.voice, w.bus, w.pack, w.cue, true, w.params, w.synth);
+        this.played.upgraded++;
+      } else if (!r.loading) {
+        this.waiting.delete(key); // failed: stays on the fallback
+      }
+    }
   }
 
   private release(v: Voice, t: number, fadeS: number): void {
@@ -471,6 +545,7 @@ export class VoicePool {
 
   /** Disconnect finished voices. Call once per frame. */
   collect(): void {
+    if (this.decoded) this.upgrade();
     for (const g of this.engines.values()) if (g.dirty) this.flushEngine(g);
     const t = this.ctx.currentTime;
     for (const [k, v] of this.voices) {
@@ -488,12 +563,17 @@ export class VoicePool {
 
   stopAll(): void {
     const t = this.ctx.currentTime;
-    for (const v of this.voices.values()) this.release(v, t, 0.05);
+    for (const v of this.voices.values()) {
+      this.release(v, t, 0.05);
+      this.dying.push(v);
+    }
+    this.voices.clear();
     for (const g of this.engines.values()) {
       this.release(g, t, 0.05);
       this.dying.push(g);
     }
     this.engines.clear();
+    this.waiting.clear();
   }
 
   /**

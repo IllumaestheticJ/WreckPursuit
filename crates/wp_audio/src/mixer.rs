@@ -131,6 +131,9 @@ pub struct Desire {
     pub vel: [f32; 3],
     /// Extra synth params sent with `Play` (per-car engine timbre, siren cadence).
     pub synth: Option<BTreeMap<String, f32>>,
+    /// Culling score multiplier (1 = normal). Below 1 the voice loses ties against other
+    /// entities' voices of the same priority and loudness (a car's second engine layer).
+    pub cull_scale: f32,
 }
 
 impl Desire {
@@ -156,6 +159,7 @@ impl Desire {
             pos,
             vel,
             synth: None,
+            cull_scale: 1.0,
         }
     }
 }
@@ -237,7 +241,7 @@ impl VoiceMixer {
             } else {
                 1.0
             };
-            let score = cfg.priority_weights[d.priority.index()] * gain * keep;
+            let score = cfg.priority_weights[d.priority.index()] * gain * keep * d.cull_scale;
             cands.push((score, d, params));
         }
         cands.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.id.cmp(&b.1.id)));
