@@ -943,3 +943,9 @@ now draws the surface ribbons. Full write-up, numbers and the items left for you
 overlapping roads, turning paths through building lots at nodes 78 / 97, junction heights on
 saddles): `docs/integration/junctions.md`. Please merge `lead/fix-junction-holes` into
 `ws/world` once the lead has merged it.
+
+## Lead helper: sidewalks level with lots and buildings (branch `lead/fix-sidewalk-lots`, 2026-10-20, playtest row 52)
+Built on `lead/fix-junction-holes`. D: changes in your crate are in `surface.rs` (level lots
+behind every sidewalk, skirts, corner fills out to the lots, wedge pull-back, rails on lot-less
+edges) and `vesper.rs` (carve up to the lots, building bases / placement, cul-de-sac direction:
+node 81). Details, numbers and known gaps for you: `docs/integration/sidewalk-lots.md`.

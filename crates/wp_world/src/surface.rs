@@ -1304,12 +1304,11 @@ impl SideWalk {
             // On a bend the cross-sections at the two ends fan out, and one quad from the kerb
             // to the lot's outer edge is then not level along the cross-sections in between
             // on a grade: merge clean rows into quads spanning at most MAX_FAN_RAD of fan.
-            let fan = geom::cross(
+            let (u0, u1) = (
                 geom::normalize(geom::sub(geom::xy(o0), geom::xy(i0))),
                 geom::normalize(geom::sub(geom::xy(o1), geom::xy(i1))),
-            )
-            .abs()
-            .asin();
+            );
+            let fan = wp_math::atan2(geom::cross(u0, u1).abs(), geom::dot(u0, u1));
             let pieces = ((fan / MAX_FAN_RAD).ceil() as usize).clamp(1, rows);
             let max_merge = rows.div_ceil(pieces);
             // Pavement that reaches past the kerb line onto this stretch of sidewalk (the
