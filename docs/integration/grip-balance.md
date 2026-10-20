@@ -94,6 +94,50 @@ kick yaw at 0.6 s; drift = W standard entry; robust = the 27-entry set:
 - **Owner A/B:** suspension *slow weight (clip 4)* + grip *for slow weight*, vs suspension *lab
   default* + grip *new*.
 
+## Drift robustness with the VR steering (tyre-slip, 2026-10-20)
+
+The 1 / 27 vs 2 / 27 above is with `PlainSteer::default()`, which barely drifts. With the
+velocity-relative steering of tyre-slip's *drift: spin + VR (test)* preset (`PLAIN='{"velocity_relative":true,"align_gain":0.5,"align_from_deg":7.0,"align_full_deg":17.0,"t_align_s":0.26,"slide_key_gain":0.31}'`,
+`CarTune::spin_vr_plain()` on `lead/tyre-slip`), the balance sets **help** the drift. Measured
+by tyre-slip on c7cf0209, held / 27, plain → VR:
+
+| ride | data | new | lock only | lock + downforce | lock + df + RWD rear × 0.45 | for slow weight |
+|---|---|---|---|---|---|---|
+| lab default | 2 → 13 | 1 → 17 | 2 → 12 | 3 → 13 | 0 → **20** | — |
+| slow weight | 1 → 8 | 0 → 16 | — | — | 0 → 15 | 6 → 16 |
+
+Tyre-slip: no spin-model parameter scales with the rear `B` (its weighting runs on raw α, and the
+drift lives at 43–51° of rear slip, past either peak), so the softer RWD rear tyres need no
+"below 10° only" variant. Drift should be judged with the VR steering. Full table in
+docs/integration/tyre-slip.md ("Grip-balance × spin model") on `lead/tyre-slip`.
+
+## Probe tilt fix for round12 (lead request): `docs/integration/patches/probe-tilt-round12.patch`
+
+One commit, prepared on `origin/lead/round12` b5fcfcf8 (it applies with `git am` on 3cd43db7,
+docs-only since). The fix is **on by default** (`RapierGround::cast_wheel` →
+`ground::discount_tilt`, no switch). Also `Vehicle::wheel_loads()`, `tests/probe_chatter.rs`
+(953 N → < 60 N), and the `slide_control` wheel-profile hashes re-recorded `[bless]`.
+`[bless]` 64 simcli goldens (64 hashes + 8 replays): **109 / 109 green before and after**. All
+scenario expected ranges pass, `cargo test -p wp_vehicle` and `-p wp_wasm` pass, clippy, lint and
+wasm build are clean. Its own write-up is `docs/integration/probe-tilt.md` inside the patch.
+
+This session pushes only `lead/grip-balance`, so the patch is a file here rather than a
+`lead/probe-tilt` branch: `git checkout -b lead/probe-tilt origin/lead/round12 && git am
+docs/integration/patches/probe-tilt-round12.patch`.
+
+On round12 only the pinned wheel-profile hash needed updating. These near-threshold tests exist
+on `lead/drift-lab-w` / `lead/tyre-slip` (not on round12) and trip when the fix is forced on
+there; their owners should re-check after merging the patch:
+
+| test | value with the fix | owner |
+|---|---|---|
+| `slide_control::self_aligning_steering_does_not_wobble_a_keyboard_corner` | sentinel_cruiser 0.2143 vs limit 0.2135 (off + 0.01) | slide assists (Drift Lab C/W lineage, vehicle) |
+| `snapshot::set_state_is_a_close_approximation` | 2.05 m vs < 2.0 m (chaotic slide replay) | vehicle (snapshot / net) |
+| `tyre_slip::spin_model_holds_the_clip_1_drift_where_the_ellipse_spins` | spins (knife-edge drift) | tyre-slip |
+
+On this branch the fix stays behind `probe_tilt_fix` (on in W's "new" / "for slow weight") until
+the patch lands in round12 and comes back through a merge.
+
 ## Tyre-load chatter: fixed behind a switch (`probe_tilt_fix`), write-up for A
 
 **Bug.** In a corner every wheel's load jumps by 0.6–1.0 kN RMS from one tick to the next. Driving
