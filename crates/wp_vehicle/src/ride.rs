@@ -351,6 +351,31 @@ pub fn pitch_kick(car: &LoadedCar, dw: f32) -> Oscillation {
     fit_oscillation(&t, &e)
 }
 
+/// Roll: kick a car at rest about its forward axis by `dw` rad/s (+ = right side down) and
+/// fit the roll angle's free response (Drift Lab W ride tuning).
+pub fn roll_kick(car: &LoadedCar, dw: f32) -> Oscillation {
+    let mut rig = settled_rig(car);
+    let a = ride_assists();
+    let idle = VehicleInput {
+        brake: 1.0,
+        ..VehicleInput::default()
+    };
+    let roll = |rig: &Rig| {
+        let right = rig.vehicle.chassis().rot * V3::X;
+        right.z.clamp(-1.0, 1.0)
+    };
+    let r0 = roll(&rig);
+    let fwd = rig.vehicle.chassis().rot * V3::Y;
+    rig.kick([0.0; 3], (fwd * dw).to_array());
+    let (mut t, mut e) = (Vec::new(), Vec::new());
+    for _ in 0..3 * TICKS_PER_S {
+        rig.step(&idle, &a);
+        t.push(rig.time());
+        e.push(roll(&rig) - r0);
+    }
+    fit_oscillation(&t, &e)
+}
+
 /// Result of a kerb run.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct KerbRun {

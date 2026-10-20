@@ -1,0 +1,201 @@
+//! Drift Lab W ride tuning (owner 2026-10-20: "suspension feels far too switchy"): a
+//! process-wide **lab override** that scales every car's springs, anti-roll bars and dampers
+//! and moves where the tyre forces act on the body (roll-centre / pitch-centre height), so
+//! the weight transfer can be made calmer and slower in the lab and good values routed to the
+//! car data owner. Like [`crate::plain`] it is a developer tool: not in the replay log or the
+//! netcode, never set by the server, the same in Arcade and Simulation.
+//!
+//! Without the override the vehicle step is unchanged (bit-identical).
+//!
+//! Roll / pitch centre: our tyre forces act on the body at the contact patch, i.e. a roll
+//! centre at the ground, so all of the lateral load transfer goes through the springs and the
+//! body rolls about the ground. Raising the point where the lateral (longitudinal) tyre force
+//! acts by `roll_centre_m` (`pitch_centre_m`) shortens the lever to the CG: less roll (pitch)
+//! for the same cornering (braking / acceleration). Caveat: in this model the part of the load
+//! transfer the links would carry is not added back to the tyres, so a high roll centre also
+//! lowers the total lateral load transfer a little (slightly more grip).
+
+use std::sync::RwLock;
+
+use wp_contracts::{SuspensionDef, VehicleDef, GRAVITY_MPS2};
+
+/// Ride tuning scales (Drift Lab W tune panel). [`RideTune::default`] = the car data as is.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct RideTune {
+    /// Spring rate scale (all corners).
+    pub spring: f32,
+    /// Anti-roll bar rate scale (both axles: the front / rear balance is kept).
+    pub arb: f32,
+    /// Damper scale, bump (compression).
+    pub damper_bump: f32,
+    /// Damper scale, rebound (extension).
+    pub damper_rebound: f32,
+    /// Height above the ground where the tyres' lateral force acts on the body, m (0 = the
+    /// contact patch, the data's behaviour); clamped to the CG height.
+    pub roll_centre_m: f32,
+    /// Height above the ground where the tyres' longitudinal force acts on the body, m
+    /// (anti-dive / anti-squat feel); clamped to the CG height.
+    pub pitch_centre_m: f32,
+}
+
+impl Default for RideTune {
+    fn default() -> Self {
+        Self {
+            spring: 1.0,
+            arb: 1.0,
+            damper_bump: 1.0,
+            damper_rebound: 1.0,
+            roll_centre_m: 0.0,
+            pitch_centre_m: 0.0,
+        }
+    }
+}
+
+impl RideTune {
+    /// Drift Lab W's default (owner: calmer, slower weight transfer): springs × 0.9 (keeps
+    /// ≥ 50 mm of bump travel at rest), anti-roll bars × 0.25, dampers × 1.4 bump / × 1.8
+    /// rebound. Muscle cars: roll 1.76 → 1.50 Hz, ζ 0.48 → 0.94 (model); no rocking after a
+    /// keyboard lane change (docs/integration/drift-lab-w.md, step 3).
+    pub fn lab_default() -> Self {
+        Self {
+            spring: 0.9,
+            arb: 0.25,
+            damper_bump: 1.4,
+            damper_rebound: 1.8,
+            ..Self::default()
+        }
+    }
+
+    /// `def` with this tuning's scales applied.
+    pub fn scaled(&self, def: &SuspensionDef) -> SuspensionDef {
+        let mut s = def.clone();
+        s.spring_n_per_m *= self.spring.max(0.05);
+        s.arb_n_per_m *= self.arb.max(0.0);
+        s.damper_bump_ns_per_m *= self.damper_bump.max(0.0);
+        s.damper_rebound_ns_per_m *= self.damper_rebound.max(0.0);
+        s
+    }
+}
+
+static OVERRIDE: RwLock<Option<RideTune>> = RwLock::new(None);
+
+/// Set (`Some`) or clear (`None`) the ride tuning override for every vehicle in this process.
+/// Testbed Drift Lab W and its measurements only; see the module docs.
+pub fn set_override(t: Option<RideTune>) {
+    if let Ok(mut o) = OVERRIDE.write() {
+        *o = t;
+    }
+}
+
+/// The ride tuning in effect, or `None` (the car data as is).
+pub fn active() -> Option<RideTune> {
+    OVERRIDE.read().ok().and_then(|o| *o)
+}
+
+/// Linear roll / pitch model of a car under `tune` (springs and bars at the wheels, motion
+/// ratio 1 as in our strut model; the body rolls about the roll centre and pitches about the
+/// pitch centre; the tyres are rigid).
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
+pub struct RideModel {
+    /// Roll stiffness (springs + bars, less the CG's gravity moment), N·m/rad.
+    pub roll_stiffness: f32,
+    /// Roll natural frequency, Hz.
+    pub roll_hz: f32,
+    /// Roll damping ratio, bump/rebound mean (1 = critical).
+    pub roll_zeta: f32,
+    /// Steady roll gradient, degrees per g of lateral acceleration.
+    pub roll_deg_per_g: f32,
+    /// Pitch natural frequency, Hz.
+    pub pitch_hz: f32,
+    /// Pitch damping ratio, bump/rebound mean.
+    pub pitch_zeta: f32,
+}
+
+/// [`RideModel`] of `def` under `tune`.
+pub fn ride_model(def: &VehicleDef, tune: &RideTune) -> RideModel {
+    let s: Vec<SuspensionDef> = def.suspension.iter().map(|d| tune.scaled(d)).collect();
+    let m = def.mass_kg;
+    let h = def.cg_height_m;
+    let h_roll = (h - tune.roll_centre_m.clamp(0.0, h)).max(0.0);
+    let h_pitch = (h - tune.pitch_centre_m.clamp(0.0, h)).max(0.0);
+    let tf = def.track_front_m;
+    let tr = def.track_rear_m;
+    // Per axle: two springs at ±t/2 → k·t²/2; a bar of rate a (force a·(xl − xr) on each
+    // wheel) → a·t² (its moment per radian of roll: a · t·φ · t).
+    let k_roll = s[0].spring_n_per_m * tf * tf / 2.0
+        + s[0].arb_n_per_m * tf * tf
+        + s[2].spring_n_per_m * tr * tr / 2.0
+        + s[2].arb_n_per_m * tr * tr;
+    let c = |d: &SuspensionDef| 0.5 * (d.damper_bump_ns_per_m + d.damper_rebound_ns_per_m);
+    let c_roll = c(&s[0]) * tf * tf / 2.0 + c(&s[2]) * tr * tr / 2.0;
+    let k_eff = (k_roll - m * GRAVITY_MPS2 * h_roll).max(1.0);
+    let i_roll = def.inertia_kgm2[0] + m * h_roll * h_roll;
+    let roll_w = (k_eff / i_roll).sqrt();
+    // Pitch: axle distances from the CG along the wheelbase.
+    let a = def.wheelbase_m * (1.0 - def.front_weight_frac);
+    let b = def.wheelbase_m * def.front_weight_frac;
+    let k_pitch = 2.0 * (s[0].spring_n_per_m * a * a + s[2].spring_n_per_m * b * b);
+    let c_pitch = 2.0 * (c(&s[0]) * a * a + c(&s[2]) * b * b);
+    let k_pitch_eff = (k_pitch - m * GRAVITY_MPS2 * h_pitch).max(1.0);
+    let i_pitch = def.inertia_kgm2[1] + m * h_pitch * h_pitch;
+    let pitch_w = (k_pitch_eff / i_pitch).sqrt();
+    RideModel {
+        roll_stiffness: k_eff,
+        roll_hz: roll_w / std::f32::consts::TAU,
+        roll_zeta: c_roll / (2.0 * (k_eff * i_roll).sqrt()),
+        roll_deg_per_g: (m * GRAVITY_MPS2 * h_roll / k_eff).to_degrees(),
+        pitch_hz: pitch_w / std::f32::consts::TAU,
+        pitch_zeta: c_pitch / (2.0 * (k_pitch_eff * i_pitch).sqrt()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn car() -> VehicleDef {
+        let p = format!(
+            "{}/../../data/cars/rampart_50.json",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        wp_contracts::load_vehicle_def(p).unwrap()
+    }
+
+    #[test]
+    fn default_scales_leave_the_data_alone() {
+        let d = car();
+        let t = RideTune::default();
+        for s in &d.suspension {
+            assert_eq!(&t.scaled(s), s);
+        }
+    }
+
+    #[test]
+    fn softer_bars_and_more_damping_calm_the_roll() {
+        let d = car();
+        let base = ride_model(&d, &RideTune::default());
+        let calm = ride_model(
+            &d,
+            &RideTune {
+                arb: 0.6,
+                damper_bump: 1.4,
+                damper_rebound: 1.4,
+                ..RideTune::default()
+            },
+        );
+        assert!(calm.roll_hz < base.roll_hz);
+        assert!(calm.roll_zeta > base.roll_zeta);
+        assert!(calm.roll_deg_per_g > base.roll_deg_per_g);
+        // A higher roll centre: less roll per g.
+        let rc = ride_model(
+            &d,
+            &RideTune {
+                roll_centre_m: 0.15,
+                ..RideTune::default()
+            },
+        );
+        assert!(rc.roll_deg_per_g < base.roll_deg_per_g);
+        assert!(base.roll_hz > 0.5 && base.roll_hz < 5.0, "{base:?}");
+    }
+}

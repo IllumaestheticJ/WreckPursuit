@@ -1324,9 +1324,10 @@ impl Vehicle {
                 self.conditions[i] = SurfaceConditions::from_local(&local);
             }
         }
+        let arb_scale = crate::ride_lab::active().map_or(1.0, |t| t.arb.max(0.0));
         for (l, r) in [(0usize, 1usize), (2, 3)] {
             let f = arb_force(
-                self.corners[l].susp.arb_n_per_m,
+                self.corners[l].susp.arb_n_per_m * arb_scale,
                 self.wheels[l].x,
                 self.wheels[r].x,
             );
@@ -1474,6 +1475,15 @@ impl Vehicle {
         let inv = 1.0 / n_sub as f32;
 
         // --- Chassis force & torque ------------------------------------------------------
+        // Drift Lab W ride tuning: heights above the contact patch where the lateral /
+        // longitudinal tyre forces act (roll / pitch centre); `None` = the contact patch.
+        let centres = crate::ride_lab::active().map(|t| {
+            let h = self.def.cg_height_m.max(0.0);
+            (
+                t.roll_centre_m.clamp(0.0, h),
+                t.pitch_centre_m.clamp(0.0, h),
+            )
+        });
         let mut force = V3::ZERO;
         let mut torque = V3::ZERO;
         for i in 0..4 {
@@ -1496,7 +1506,19 @@ impl Vehicle {
                 up * w.fz + w.fwd * w.fx + w.lat * (w.fy + thrust)
             };
             force += f;
-            torque += (w.point - ch.com).cross(f);
+            match centres {
+                Some((rc, pc)) if !eff.wheel_lost[i] => {
+                    // Split by direction: lateral at the roll centre, longitudinal at the
+                    // pitch centre, the rest at the contact patch (same total force).
+                    let lat = w.lat * w.lat.dot(f);
+                    let lon = w.fwd * w.fwd.dot(f);
+                    let rest = f - lat - lon;
+                    let arm = w.point - ch.com;
+                    torque +=
+                        arm.cross(rest) + (arm + up * rc).cross(lat) + (arm + up * pc).cross(lon);
+                }
+                _ => torque += (w.point - ch.com).cross(f),
+            }
         }
         let aero = aero_forces(
             ch.lin_vel,
@@ -1618,7 +1640,11 @@ impl Vehicle {
         // Rigid-tyre compression plus the tyre's static deflection (data radius = loaded).
         let hit = ground.cast_wheel(&probe);
         let reach = hit.map(|h| travel - (h.distance - PROBE_LIFT_M) + TYRE_STATIC_DEFLECTION_M);
-        let st = step_strut(&c.susp, c.tyre_rate, w.x, w.vcomp, reach, dt);
+        // Drift Lab W ride tuning (lab override): scaled springs / dampers.
+        let st = match crate::ride_lab::active() {
+            Some(t) => step_strut(&t.scaled(&c.susp), c.tyre_rate, w.x, w.vcomp, reach, dt),
+            None => step_strut(&c.susp, c.tyre_rate, w.x, w.vcomp, reach, dt),
+        };
         w.x = st.x;
         w.vcomp = st.v;
         w.fz = st.fz;

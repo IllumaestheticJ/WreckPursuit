@@ -144,3 +144,58 @@ pub fn plain_readout(entity: u32) -> Result<Vec<f32>, JsValue> {
 pub fn parity_car_ids() -> String {
     json(&crate::data::parity_car_ids())
 }
+
+// --- Drift Lab W ride tuning (wp_vehicle::ride_lab) --------------------------------------
+
+/// The ride tuning override in effect (`null` = the car data as is), JSON.
+#[wasm_bindgen]
+pub fn ride_tune_json() -> String {
+    json(&wp_vehicle::ride_lab::active())
+}
+
+/// `{ "data": <no scaling>, "lab": <Drift Lab W default> }`, JSON.
+#[wasm_bindgen]
+pub fn ride_tune_defaults_json() -> String {
+    json(&serde_json::json!({
+        "data": wp_vehicle::ride_lab::RideTune::default(),
+        "lab": wp_vehicle::ride_lab::RideTune::lab_default(),
+    }))
+}
+
+/// Set the ride tuning override from JSON (missing fields = no scaling), or clear it with `""`.
+/// Process-wide, not logged in recordings.
+#[wasm_bindgen]
+pub fn ride_tune_set(tune_json: &str) -> Result<(), JsValue> {
+    if tune_json.trim().is_empty() {
+        wp_vehicle::ride_lab::set_override(None);
+        return Ok(());
+    }
+    let t: wp_vehicle::ride_lab::RideTune = serde_json::from_str(tune_json).map_err(err)?;
+    wp_vehicle::ride_lab::set_override(Some(t));
+    Ok(())
+}
+
+/// Roll / pitch model of a vehicle's car under the tuning in effect:
+/// `[roll_hz, roll_zeta, roll_deg_per_g, pitch_hz, pitch_zeta, body_roll_deg]`
+/// (`body_roll_deg` = the body's roll now, + = right side down).
+#[wasm_bindgen]
+pub fn ride_readout(entity: u32) -> Result<Vec<f32>, JsValue> {
+    with(|s| {
+        let v = s
+            .vehicle(EntityId(entity))
+            .ok_or_else(|| format!("unknown entity {entity}"))?;
+        let t = wp_vehicle::ride_lab::active().unwrap_or_default();
+        let m = wp_vehicle::ride_lab::ride_model(v.vehicle.def(), &t);
+        let right = v.vehicle.chassis().rot * wp_vehicle::math::V3::X;
+        let roll =
+            -wp_vehicle::math::atan2(right.z, (right.x * right.x + right.y * right.y).sqrt());
+        Ok(vec![
+            m.roll_hz,
+            m.roll_zeta,
+            m.roll_deg_per_g,
+            m.pitch_hz,
+            m.pitch_zeta,
+            roll.to_degrees(),
+        ])
+    })
+}

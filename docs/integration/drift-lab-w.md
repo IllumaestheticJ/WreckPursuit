@@ -180,6 +180,11 @@ spins (300–500° total); parity_fwd_c gets round 53–74° and is caught in 0.
 
 ## Files
 
+Step 3 adds: `crates/wp_vehicle/src/ride_lab.rs` (override + roll / pitch model), `ride.rs`
+(`roll_kick`), `vehicle.rs` (scaled struts / bars, force application heights),
+`drift_lab_w.rs` (`roll_run`, `LANE_CHANGE_KEYS`, `S_BEND_KEYS`), `crates/wp_wasm/src/drift_lab.rs`
+(ride functions), `apps/testbed-web/src/drift_lab_w.ts` (suspension section, roll readout).
+
 `crates/wp_vehicle/src/plain.rs` (profile), `vehicle.rs` (plain branch in the throttle and
 steering blocks, `Vehicle::plain_readout`), `drift_lab_w.rs` (parity-car loader, reference
 assists, `handbrake_pivot`, `PlainDriver` / `plain_drift_run`), `drift_lab.rs`
@@ -196,8 +201,8 @@ Checked on the merge commit before any Drift Lab W change (`8074782b`, C + round
 `race_tests::short_sprint_with_ai_runs_to_results_and_pays_through_the_economy` and
 `tests::simcli_golden_replays_play_back_in_the_browser_core` fail there too (goldens, as in
 drift-lab-c.md). `cargo clippy --workspace --all-targets` fails in test code of `wp_audio`
-(`siren.rs:437`, digit grouping) and `wp_sim` (`lib.rs:1277`, unused variable), both from
-round12. `lint-determinism` reported 3 errors in `wp_vehicle/src/twitch_lab.rs` (the drift-twitch
+(`siren.rs:437`, digit grouping; still there after the second round12 merge) and `wp_sim`
+(`lib.rs:1277`, unused variable; fixed by round12's r13-test-fixes, merged). `lint-determinism` reported 3 errors in `wp_vehicle/src/twitch_lab.rs` (the drift-twitch
 merge); fixed by C's 335eeb3, merged here (0 errors). Clean here: `cargo fmt --check`, `cargo clippy
 --workspace -- -D warnings`, `cargo clippy -p wp_vehicle -p wp_wasm --all-targets -- -D
 warnings`, `cargo test -p wp_vehicle`, wasm build + wasm-bindgen, `tsc --noEmit`.
@@ -217,6 +222,87 @@ warnings`, `cargo test -p wp_vehicle`, wasm build + wasm-bindgen, `tsc --noEmit`
   `lead/drift-lab-c` and fails on `lead/drift-lab-c` + `lead/round12` with none of W's commits,
   so it is a round12 interaction (likely the drivetrain / clutch changes there). Not changed
   here; reported to the lead.
+
+## Step 3 — suspension knobs (owner: "far too switchy") and steering at speed (clip 8)
+
+**Steering at speed (clip 8):** the plain rack already works that way: `t_full` / `t_return`
+are the same at every speed, and the speed sensitivity scales only the lock (amount), never the
+time. Covered by `tests/drift_lab_w.rs` (full lock time at walking pace, lock fraction at
+160 km/h).
+
+**Ride tuning override** (`crates/wp_vehicle/src/ride_lab.rs`, lab only, process-wide like
+the plain steering, unchanged/bit-identical when off): scales for springs, anti-roll bars,
+damper bump, damper rebound (all corners), and the **roll-centre / pitch-centre height**:
+where the tyres' lateral / longitudinal force acts on the body (0 = contact patch = the data).
+Panel section "suspension" with *lab default* / *car data* buttons; the readout shows the
+body roll now and the roll / pitch model (Hz, ζ, °/g) of the current car. wasm:
+`ride_tune_json()`, `ride_tune_defaults_json()`, `ride_tune_set(json)`, `ride_readout(entity)`.
+Caveat on the roll centre: the link-borne load transfer is not added back to the tyres, so a
+high roll centre also lowers total lateral load transfer a little.
+
+**Lab default** (`RideTune::lab_default()`): springs × 0.9, bars × 0.25, dampers × 1.4 bump /
+× 1.8 rebound, roll / pitch centre 0. Why not softer: at springs × 0.65 the front sits 1–12 mm
+from the bump stop at rest and the body rides the stops (a stiff 2.3–2.5 Hz mode shows up in the
+roll kick). Going below ~1.4 Hz needs softer springs **with ride height / preload compensated**,
+which is a car-data change. Bars and dampers alone can't get below ~1.4–1.5 Hz because the
+springs carry most of the roll stiffness.
+
+**Before / after** (`cargo run --release -p wp_vehicle --example drift_lab_w -- ride`):
+*model* = linear roll model (springs + bars at the wheels, roll about the ground, rigid tyres);
+*kick* = fitted free response of the real model to a 0.15 rad/s roll kick at rest (0 / 1.00 =
+no overshoot: at or past critical); lane change = keyboard left 0.3 s / right 0.45 s / left
+0.15 s at 100 km/h (≈60 mph); S-bend = left 0.6 / release 0.2 / right 1.0 / release 0.2 /
+left 0.6 s at 70 km/h. *rocks* = roll-rate reversals after the keys are released.
+
+| car | ride tune | model roll Hz / ζ / °/g | kick roll Hz / ζ | bump travel left F / R mm | lane change: peak roll ° / peak rate °/s / to peak s / rocks / settle s / offset m | S-bend: peak ° / rate °/s / rocks / settle s |
+|---|---|---|---|---|---|---|
+| parity_rwd_a | data (as is) | 1.76 / 0.48 / 3.7 | 1.65 / 0.39 | 71 / 92 | 3.4 / 34 / 0.43 / 2 / 0.63 / 10.1 | 3.1 / 32 / 1 / 0.76 |
+| parity_rwd_a | **lab default** | 1.50 / 0.94 / 5.1 | 0.00 / 1.00 | 58 / 81 | 4.2 / 28 / 0.65 / 0 / 0.73 / 12.6 | 3.8 / 28 / 1 / 0.85 |
+| parity_rwd_a | bars 0.6, dampers 1.4 | 1.67 / 0.71 / 4.1 | 1.76 / 0.62 | 71 / 92 | 3.8 / 29 / 0.63 / 1 / 0.66 / 11.5 | 3.4 / 30 / 1 / 0.79 |
+| parity_rwd_a | springs 0.8, bars 0.5, dampers 1.5 | 1.48 / 0.86 / 5.2 | 0.00 / 1.00 | 43 / 67 | 4.0 / 28 / 0.43 / 1 / 0.71 / 11.4 | 3.7 / 28 / 1 / 0.82 |
+| parity_rwd_a | bars 0.6, dampers 1.4 / 1.8, rc 0.10 m | 1.82 / 0.91 / 3.3 | 0.00 / 1.00 | 71 / 92 | 2.8 / 23 / 0.63 / 1 / 0.65 / 11.0 | 2.5 / 21 / 0 / 0.78 |
+| parity_rwd_b | data (as is) | 2.42 / 0.58 / 2.0 | 2.43 / 0.44 | 73 / 93 | 2.2 / 20 / 0.28 / 1 / 0.58 / 10.7 | 2.1 / 19 / 0 / 0.65 |
+| parity_rwd_b | **lab default** | 2.15 / 1.09 / 2.5 | 0.00 / 1.00 | 66 / 86 | 2.7 / 18 / 0.63 / 1 / 0.58 / 13.4 | 2.3 / 17 / 0 / 0.69 |
+| parity_rwd_b | bars 0.6, dampers 1.4 | 2.34 / 0.84 / 2.2 | 2.83 / 0.64 | 73 / 93 | 2.4 / 19 / 0.47 / 1 / 0.57 / 12.2 | 2.1 / 17 / 0 / 0.67 |
+| parity_rwd_b | springs 0.8, bars 0.5, dampers 1.5 | 2.09 / 1.01 / 2.7 | 0.00 / 1.00 | 56 / 78 | 2.8 / 20 / 0.40 / 1 / 0.60 / 12.0 | 2.3 / 17 / 0 / 0.70 |
+| parity_rwd_b | bars 0.6, dampers 1.4 / 1.8, rc 0.10 m | 2.54 / 1.08 / 1.6 | 0.00 / 1.00 | 73 / 93 | 1.7 / 13 / 0.32 / 1 / 0.57 / 10.9 | 1.6 / 11 / 0 / 0.63 |
+| parity_rwd_d | data (as is) | 1.76 / 0.48 / 3.7 | 1.63 / 0.39 | 70 / 92 | 3.4 / 33 / 0.62 / 2 / 0.65 / 9.7 | 2.9 / 32 / 1 / 0.75 |
+| parity_rwd_d | **lab default** | 1.50 / 0.94 / 5.1 | 0.00 / 1.00 | 58 / 81 | 4.1 / 27 / 0.63 / 0 / 0.74 / 11.8 | 3.7 / 27 / 1 / 0.86 |
+| parity_rwd_d | bars 0.6, dampers 1.4 | 1.67 / 0.71 / 4.1 | 1.77 / 0.63 | 70 / 92 | 3.7 / 30 / 0.64 / 1 / 0.68 / 10.9 | 3.3 / 30 / 1 / 0.79 |
+| parity_rwd_d | springs 0.8, bars 0.5, dampers 1.5 | 1.48 / 0.86 / 5.2 | 0.00 / 1.00 | 43 / 67 | 3.8 / 27 / 0.44 / 1 / 0.73 / 10.8 | 3.6 / 27 / 1 / 0.81 |
+| parity_rwd_d | bars 0.6, dampers 1.4 / 1.8, rc 0.10 m | 1.82 / 0.91 / 3.3 | 0.00 / 1.00 | 70 / 92 | 2.8 / 24 / 0.57 / 1 / 0.66 / 10.6 | 2.4 / 23 / 0 / 0.77 |
+| parity_fwd_c | data (as is) | 1.74 / 0.42 / 3.9 | 1.59 / 0.36 | 64 / 86 | 4.1 / 41 / 0.29 / 2 / 0.59 / 15.9 | 4.1 / 41 / 1 / 0.75 |
+| parity_fwd_c | **lab default** | 1.40 / 0.87 / 6.1 | 0.00 / 1.00 | 51 / 74 | 5.0 / 37 / 0.38 / 1 / 0.70 / 14.8 | 5.0 / 34 / 1 / 0.83 |
+| parity_fwd_c | bars 0.6, dampers 1.4 | 1.60 / 0.64 / 4.6 | 1.64 / 0.58 | 64 / 86 | 4.5 / 36 / 0.43 / 2 / 0.63 / 15.4 | 4.4 / 38 / 0 / 0.77 |
+| parity_fwd_c | springs 0.8, bars 0.5, dampers 1.5 | 1.43 / 0.77 / 5.8 | 0.00 / 1.00 | 35 / 59 | 4.6 / 34 / 0.32 / 2 / 0.65 / 15.2 | 4.5 / 35 / 1 / 0.81 |
+| parity_fwd_c | bars 0.6, dampers 1.4 / 1.8, rc 0.10 m | 1.75 / 0.82 / 3.7 | 0.00 / 1.00 | 64 / 86 | 3.6 / 30 / 0.48 / 1 / 0.59 / 14.7 | 3.5 / 31 / 1 / 0.73 |
+| shiro_turbo | data (as is) | 2.19 / 0.49 / 2.7 | 2.04 / 0.39 | 73 / 89 | 2.7 / 30 / 0.25 / 2 / 0.65 / 8.1 | 2.5 / 31 / 1 / 0.69 |
+| shiro_turbo | **lab default** | 1.83 / 0.99 / 3.8 | 0.00 / 1.00 | 64 / 81 | 3.6 / 31 / 0.53 / 1 / 0.70 / 9.9 | 3.1 / 29 / 1 / 0.77 |
+| shiro_turbo | bars 0.6, dampers 1.4 | 2.06 / 0.74 / 3.0 | 2.19 / 0.61 | 73 / 89 | 3.0 / 31 / 0.44 / 1 / 0.67 / 8.9 | 2.7 / 28 / 1 / 0.74 |
+| shiro_turbo | springs 0.8, bars 0.5, dampers 1.5 | 1.83 / 0.89 / 3.8 | 0.00 / 1.00 | 54 / 72 | 3.4 / 29 / 0.56 / 1 / 0.71 / 9.0 | 3.0 / 29 / 0 / 0.76 |
+| shiro_turbo | bars 0.6, dampers 1.4 / 1.8, rc 0.10 m | 2.26 / 0.95 / 2.3 | 2.95 / 0.67 | 73 / 89 | 2.4 / 24 / 0.37 / 1 / 0.66 / 8.6 | 2.0 / 21 / 1 / 0.67 |
+| rampart_50 | data (as is) | 1.76 / 0.48 / 3.7 | 1.63 / 0.39 | 71 / 92 | 3.3 / 32 / 0.45 / 2 / 0.66 / 9.3 | 3.0 / 31 / 1 / 0.74 |
+| rampart_50 | **lab default** | 1.50 / 0.94 / 5.1 | 0.00 / 1.00 | 58 / 81 | 4.0 / 27 / 0.64 / 0 / 0.75 / 11.3 | 3.6 / 27 / 1 / 0.83 |
+| rampart_50 | bars 0.6, dampers 1.4 | 1.67 / 0.71 / 4.1 | 1.76 / 0.62 | 71 / 92 | 3.6 / 30 / 0.62 / 1 / 0.68 / 10.3 | 3.2 / 30 / 1 / 0.78 |
+| rampart_50 | springs 0.8, bars 0.5, dampers 1.5 | 1.48 / 0.86 / 5.2 | 0.00 / 1.00 | 43 / 67 | 3.9 / 27 / 0.41 / 1 / 0.74 / 10.2 | 3.4 / 28 / 1 / 0.79 |
+| rampart_50 | bars 0.6, dampers 1.4 / 1.8, rc 0.10 m | 1.82 / 0.91 / 3.3 | 0.00 / 1.00 | 71 / 92 | 2.8 / 23 / 0.64 / 1 / 0.68 / 10.3 | 2.4 / 22 / 0 / 0.75 |
+
+Summary, data → lab default:
+
+| car | roll natural freq (model / kick) | roll damping ratio (model / kick) | lane change peak roll rate | rocks after |
+|---|---|---|---|---|
+| parity_rwd_a / d, rampart_50 | 1.76 / 1.63 Hz → 1.50 Hz / no overshoot | 0.48 / 0.39 → 0.94 / ≥ 1 | 32–34 → 27–28 °/s | 2 → 0 |
+| parity_rwd_b | 2.42 / 2.43 Hz → 2.15 Hz / no overshoot | 0.58 / 0.44 → 1.09 / ≥ 1 | 20 → 18 °/s | 1 → 1 |
+| parity_fwd_c | 1.74 / 1.59 Hz → 1.40 Hz / no overshoot | 0.42 / 0.36 → 0.87 / ≥ 1 | 41 → 37 °/s | 2 → 1 |
+| shiro_turbo | 2.19 / 2.04 Hz → 1.83 Hz / no overshoot | 0.49 / 0.39 → 0.99 / ≥ 1 | 30 → 31 °/s | 2 → 1 |
+
+What it does: no rocking (the roll overshoot is gone), the first roll peak comes later in the
+muscle cars (0.43–0.62 → 0.63–0.65 s), and the roll is ~20–35 % bigger (bars × 0.25: 3.7 →
+5.1°/g), i.e. heavier-looking weight transfer. It does **not** cut the peak roll *rate* much
+(the body follows the lateral g, which builds as fast as the keys), and it does not change the
+drift results (plain drivers with `RIDE_LAB=1`: same spins). The bars change the handling balance
+(less front roll stiffness = less understeer): for the car data owner to weigh. Values to route:
+the scales above, or per car the absolute rates they give.
 
 ## Contract change requests
 

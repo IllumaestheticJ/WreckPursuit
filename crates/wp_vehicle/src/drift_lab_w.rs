@@ -322,3 +322,138 @@ pub fn plain_drift_run(
         changes as f32 / 6.0,
     )
 }
+
+/// Roll response of a keyboard manoeuvre ([`roll_run`]): how big, how fast and how calm the
+/// body roll is (owner: "suspension feels far too switchy").
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RollRun {
+    /// Largest roll angle, degrees.
+    pub peak_roll_deg: f32,
+    /// Largest roll rate, degrees per second.
+    pub peak_roll_rate_dps: f32,
+    /// Time from the first key press to the first roll peak (how fast the weight transfers), s.
+    pub time_to_peak_s: f32,
+    /// Roll-rate sign changes (|rate| past 3°/s between them) after the last key is released:
+    /// rocking back and forth (0 or 1 = settles, more = switchy).
+    pub rocks_after: usize,
+    /// Time from the last key release until the roll stays within 0.3° with |rate| < 2°/s, s.
+    pub settle_s: f32,
+    /// Lateral offset at the end, m (the manoeuvre's size).
+    pub lateral_m: f32,
+}
+
+/// Roll angle of the rig's body, rad (+ = right side down).
+pub fn body_roll(rig: &crate::rig::Rig) -> f32 {
+    use crate::math::V3;
+    let right = rig.vehicle.chassis().rot * V3::X;
+    -crate::math::atan2(right.z, (right.x * right.x + right.y * right.y).sqrt())
+}
+
+/// Lane change (owner: 60 mph) as keyboard keys: straight at `speed_mps` holding speed, then
+/// `keys` = `[(steer key, seconds), …]` (−1 left, +1 right, 0 released), then 2.5 s released;
+/// the throttle holds the speed throughout.
+pub fn roll_run(
+    car: &LoadedCar,
+    assists: &AssistProfile,
+    speed_mps: f32,
+    keys: &[(f32, f32)],
+) -> RollRun {
+    use wp_contracts::{VehicleInput, PHYSICS_DT};
+    const TPS: usize = 240;
+    let mut rig = crate::rig::Rig::new(car);
+    rig.teleport([0.0; 3], 0.0, speed_mps, 0.0);
+    let auto = AssistProfile {
+        auto_gears: true,
+        ..*assists
+    };
+    let hold = |rig: &crate::rig::Rig| {
+        let err = speed_mps - rig.state().speed_mps;
+        if err > -1.0 {
+            ((0.25 + 0.35 * err).clamp(0.0, 1.0), 0.0)
+        } else {
+            (0.0, (-0.2 * err).clamp(0.0, 1.0))
+        }
+    };
+    for _ in 0..2 * TPS {
+        let (throttle, brake) = hold(&rig);
+        rig.step(
+            &VehicleInput {
+                throttle,
+                brake,
+                ..Default::default()
+            },
+            &auto,
+        );
+    }
+    let x0 = rig.vehicle.chassis().pos.x;
+    let script: Vec<f32> = keys
+        .iter()
+        .flat_map(|&(k, s)| std::iter::repeat_n(k, (s * TPS as f32) as usize))
+        .collect();
+    let release = script.len();
+    let total = release + TPS * 5 / 2;
+    let (mut peak, mut peak_rate, mut t_peak) = (0.0f32, 0.0f32, None::<f32>);
+    let mut prev = body_roll(&rig);
+    let mut prev_rate = 0.0f32;
+    let mut last_sign = 0.0f32;
+    let mut rocks = 0usize;
+    let mut settled_at: Option<usize> = None;
+    for tick in 0..total {
+        let steer = script.get(tick).copied().unwrap_or(0.0);
+        let (throttle, brake) = hold(&rig);
+        rig.step(
+            &VehicleInput {
+                steer,
+                throttle,
+                brake,
+                ..Default::default()
+            },
+            assists,
+        );
+        let r = body_roll(&rig);
+        let rate = (r - prev) / PHYSICS_DT;
+        prev = r;
+        let rd = r.to_degrees().abs();
+        if rd > peak {
+            peak = rd;
+        }
+        peak_rate = peak_rate.max(rate.to_degrees().abs());
+        // First roll peak: the roll rate changes sign once the body has rolled.
+        if t_peak.is_none() && rd > 0.2 && rate * prev_rate < 0.0 {
+            t_peak = Some(tick as f32 * PHYSICS_DT);
+        }
+        prev_rate = rate;
+        if tick >= release {
+            let rdps = rate.to_degrees();
+            if rdps.abs() > 3.0 {
+                let sgn = rdps.signum();
+                if last_sign != 0.0 && sgn != last_sign {
+                    rocks += 1;
+                }
+                last_sign = sgn;
+            }
+            let calm = rd < 0.3 && rate.to_degrees().abs() < 2.0;
+            if calm {
+                settled_at.get_or_insert(tick);
+            } else {
+                settled_at = None;
+            }
+        }
+    }
+    RollRun {
+        peak_roll_deg: peak,
+        peak_roll_rate_dps: peak_rate,
+        time_to_peak_s: t_peak.unwrap_or(f32::NAN),
+        rocks_after: rocks,
+        settle_s: settled_at.map_or(f32::NAN, |t| (t - release) as f32 * PHYSICS_DT),
+        lateral_m: (rig.vehicle.chassis().pos.x - x0).abs(),
+    }
+}
+
+/// Keyboard lane change at 100 km/h (60 mph): left 0.3 s, right 0.45 s, left 0.15 s.
+pub const LANE_CHANGE_KEYS: [(f32, f32); 3] = [(-1.0, 0.3), (1.0, 0.45), (-1.0, 0.15)];
+
+/// Keyboard S-bend (the lab's 40 m S, 40° / 80° / 40° at ~70 km/h): left 0.6 s, release 0.2 s,
+/// right 1.0 s, release 0.2 s, left 0.6 s.
+pub const S_BEND_KEYS: [(f32, f32); 5] =
+    [(-1.0, 0.6), (0.0, 0.2), (1.0, 1.0), (0.0, 0.2), (-1.0, 0.6)];

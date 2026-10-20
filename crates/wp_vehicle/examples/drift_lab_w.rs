@@ -2,7 +2,8 @@
 //! (`wp_vehicle::plain`), TCS / ESC off, manual gears.
 //! `cargo run --release -p wp_vehicle --example drift_lab_w [drift|tap|handbrake|hairpin] [car_id ...]`
 //! Env: `PLAIN='{"t_full_s":0.2}'` (constants; missing fields = defaults), `PLAIN=off` (the
-//! normal steering model with the same assists, for comparison).
+//! normal steering model with the same assists, for comparison), `RIDE_LAB=1` (the lab's
+//! ride tuning default; `ride` sets its own), `RIDE='{...}'` (an extra row in `ride`).
 
 use std::path::PathBuf;
 
@@ -14,7 +15,10 @@ use wp_vehicle::drift_lab_w::{
     handbrake_pivot, load_any_car, plain_drift_run, reference_assists, PlainDriver, PARITY_CARS,
     ROSTER_CARS,
 };
+use wp_vehicle::drift_lab_w::{roll_run, LANE_CHANGE_KEYS, S_BEND_KEYS};
 use wp_vehicle::plain::{self, PlainSteer};
+use wp_vehicle::ride::roll_kick;
+use wp_vehicle::ride_lab::{self, RideTune};
 
 fn car(id: &str) -> LoadedCar {
     let data = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data");
@@ -27,7 +31,12 @@ fn main() {
         Ok(j) => plain::set_override(Some(serde_json::from_str(j).expect("PLAIN json"))),
         Err(_) => plain::set_override(Some(PlainSteer::default())),
     }
+    if std::env::var("RIDE_LAB").is_ok() {
+        // The lab's ride default (springs 0.9, bars 0.25, dampers 1.4 / 1.8).
+        ride_lab::set_override(Some(RideTune::lab_default()));
+    }
     println!("plain steering: {:?}", plain::active());
+    println!("ride tuning: {:?}", ride_lab::active());
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().map(String::as_str) == Some("trace") {
         // trace <car> [naive|good|into]: every 0.05 s of a drift_run.
@@ -41,7 +50,16 @@ fn main() {
         return;
     }
     let what = if args.first().is_some_and(|a| {
-        ["drift", "plain", "sweep", "tap", "handbrake", "hairpin"].contains(&a.as_str())
+        [
+            "drift",
+            "plain",
+            "sweep",
+            "ride",
+            "tap",
+            "handbrake",
+            "hairpin",
+        ]
+        .contains(&a.as_str())
     }) {
         args.remove(0)
     } else {
@@ -59,6 +77,10 @@ fn main() {
     }
     if what == "all" || what == "plain" {
         plain_table(&args);
+    }
+    if what == "ride" {
+        ride_table(&args);
+        return;
     }
     if what == "sweep" {
         sweep(&args);
@@ -366,4 +388,93 @@ fn sweep(args: &[String]) {
         }
     }
     plain::set_override(Some(d));
+}
+
+/// Ride tunings compared in `ride` (`RIDE='{...}'` adds one).
+fn ride_configs() -> Vec<(String, RideTune)> {
+    let d = RideTune::default();
+    let mut v = vec![
+        ("data (as is)".to_string(), d),
+        ("**lab default**".to_string(), RideTune::lab_default()),
+        (
+            "bars 0.6, dampers 1.4".to_string(),
+            RideTune {
+                arb: 0.6,
+                damper_bump: 1.4,
+                damper_rebound: 1.4,
+                ..d
+            },
+        ),
+        (
+            "springs 0.8, bars 0.5, dampers 1.5".to_string(),
+            RideTune {
+                spring: 0.8,
+                arb: 0.5,
+                damper_bump: 1.5,
+                damper_rebound: 1.5,
+                ..d
+            },
+        ),
+        (
+            "bars 0.6, dampers 1.4 / 1.8, rc 0.10 m".to_string(),
+            RideTune {
+                arb: 0.6,
+                damper_bump: 1.4,
+                damper_rebound: 1.8,
+                roll_centre_m: 0.1,
+                ..d
+            },
+        ),
+    ];
+    if let Ok(j) = std::env::var("RIDE") {
+        v.push((
+            "RIDE env".to_string(),
+            serde_json::from_str(&j).expect("RIDE json"),
+        ));
+    }
+    v
+}
+
+fn ride_table(args: &[String]) {
+    println!("\n## Ride: roll model, roll kick (free response), keyboard lane change 100 km/h and S-bend 70 km/h");
+    println!("| car | ride tune | model roll Hz / ζ / °/g | kick roll Hz / ζ | bump travel left F / R mm | lane change: peak roll ° / peak rate °/s / to peak s / rocks / settle s / offset m | S-bend: peak ° / rate °/s / rocks / settle s |");
+    println!("|---|---|---|---|---|---|---|");
+    let a = reference_assists();
+    for id in args {
+        let c = car(id);
+        for (name, t) in ride_configs() {
+            ride_lab::set_override(Some(t));
+            let m = ride_lab::ride_model(&c.def, &t);
+            let k = roll_kick(&c, 0.15);
+            // Bump travel left at static ride height under this tune (front, rear), mm.
+            let mut scaled = c.clone();
+            for sd in &mut scaled.def.suspension {
+                *sd = t.scaled(sd);
+            }
+            let ar = wp_vehicle::ride::axle_ride(&scaled);
+            let lc = roll_run(&c, &a, 100.0 / 3.6, &LANE_CHANGE_KEYS);
+            let sb = roll_run(&c, &a, 70.0 / 3.6, &S_BEND_KEYS);
+            println!(
+                "| {id} | {name} | {:.2} / {:.2} / {:.1} | {:.2} / {:.2} | {:.0} / {:.0} | {:.1} / {:.0} / {:.2} / {} / {:.2} / {:.1} | {:.1} / {:.0} / {} / {:.2} |",
+                m.roll_hz,
+                m.roll_zeta,
+                m.roll_deg_per_g,
+                k.natural_hz,
+                k.damping_ratio,
+                ar[0].bump_travel_m * 1000.0,
+                ar[1].bump_travel_m * 1000.0,
+                lc.peak_roll_deg,
+                lc.peak_roll_rate_dps,
+                lc.time_to_peak_s,
+                lc.rocks_after,
+                lc.settle_s,
+                lc.lateral_m,
+                sb.peak_roll_deg,
+                sb.peak_roll_rate_dps,
+                sb.rocks_after,
+                sb.settle_s,
+            );
+        }
+    }
+    ride_lab::set_override(None);
 }

@@ -45,7 +45,17 @@ const FIELDS: Record<string, { label: string; min: number; max: number; step: nu
   self_align: { label: "self-align", min: 0, max: 1, step: 0.05, scale: 100, unit: "%", hint: "keys released: the rack returns toward the front axle's travel instead of the centre (A/B; default 0)" },
 };
 
+const RIDE_FIELDS: Record<string, { label: string; min: number; max: number; step: number; unit?: string; hint: string }> = {
+  spring: { label: "springs ×", min: 0.5, max: 1.5, step: 0.05, hint: "spring rate scale, all corners (below ~0.85 some cars sit near the bump stops)" },
+  arb: { label: "anti-roll bars ×", min: 0, max: 1.5, step: 0.05, hint: "anti-roll bar scale, both axles (front / rear balance kept)" },
+  damper_bump: { label: "dampers bump ×", min: 0.5, max: 3, step: 0.05, hint: "damper scale, compression" },
+  damper_rebound: { label: "dampers rebound ×", min: 0.5, max: 3, step: 0.05, hint: "damper scale, extension" },
+  roll_centre_m: { label: "roll centre", min: 0, max: 0.3, step: 0.01, unit: "m", hint: "height where the tyres' side force acts on the body (0 = contact patch, the data); higher = less roll" },
+  pitch_centre_m: { label: "pitch centre", min: 0, max: 0.3, step: 0.01, unit: "m", hint: "height where drive / brake forces act on the body (anti-dive / anti-squat feel)" },
+};
+
 const STORE = "wp.driftLabW.steer";
+const RIDE_STORE = "wp.driftLabW.ride";
 const pct = (x: number) => `${Math.round((x ?? 0) * 100)}%`;
 
 /** Lock fraction at `kmh` for constants `p` (mirrors wp_vehicle::plain::PlainSteer::lock_frac). */
@@ -124,9 +134,21 @@ export class DriftLabWPanel {
       } catch {
         this.sim.plainSteerSet(JSON.stringify(this.sim.plainSteerDefaults()));
       }
+      let ride = "";
+      try {
+        ride = localStorage.getItem(RIDE_STORE) ?? "";
+      } catch {
+        /* storage blocked: defaults */
+      }
+      try {
+        this.sim.rideTuneSet(ride || JSON.stringify(this.sim.rideTuneDefaults().lab));
+      } catch {
+        this.sim.rideTuneSet(JSON.stringify(this.sim.rideTuneDefaults().lab));
+      }
       this.build();
     } else {
       this.sim.plainSteerSet("");
+      this.sim.rideTuneSet("");
     }
   }
 
@@ -205,6 +227,59 @@ export class DriftLabWPanel {
       };
       row(f.label, f.hint, input, val);
     }
+    // Suspension (ride tuning override, wp_vehicle::ride_lab).
+    {
+      const h = document.createElement("div");
+      h.textContent = "suspension (lab override; × the car data)";
+      h.style.cssText = "margin:8px 0 2px;color:#9cf";
+      this.body.appendChild(h);
+      const rd = this.sim.rideTuneDefaults();
+      const rt = this.sim.rideTune() ?? rd.data;
+      for (const [key, f] of Object.entries(RIDE_FIELDS)) {
+        const input = document.createElement("input");
+        input.type = "range";
+        input.min = String(f.min);
+        input.max = String(f.max);
+        input.step = String(f.step);
+        input.value = String(rt[key] ?? rd.data[key]);
+        const val = document.createElement("span");
+        const show = () => {
+          val.textContent = `${Number(Number(input.value).toFixed(2))}${f.unit ? ` ${f.unit}` : ""}`;
+          val.style.color = Math.abs(Number(input.value) - rd.lab[key]) > 1e-6 ? "#ffd27a" : "";
+        };
+        show();
+        input.oninput = () => {
+          show();
+          const text = JSON.stringify({ ...(this.sim.rideTune() ?? rd.data), [key]: Number(input.value) });
+          this.sim.rideTuneSet(text);
+          try {
+            localStorage.setItem(RIDE_STORE, text);
+          } catch {
+            /* ignore */
+          }
+        };
+        row(f.label, f.hint, input, val);
+      }
+      const rideBtns = document.createElement("div");
+      rideBtns.style.cssText = "display:flex;gap:6px;margin-top:4px";
+      for (const [label, which] of [["lab default", "lab"], ["car data", "data"]] as const) {
+        const b = document.createElement("button");
+        b.textContent = label;
+        b.title = which === "lab" ? "calmer, slower weight transfer (springs 0.9, bars 0.25, dampers 1.4 / 1.8)" : "no scaling: the car files as they are";
+        b.onclick = () => {
+          const text = JSON.stringify(this.sim.rideTuneDefaults()[which]);
+          this.sim.rideTuneSet(text);
+          try {
+            localStorage.setItem(RIDE_STORE, text);
+          } catch {
+            /* ignore */
+          }
+          this.build();
+        };
+        rideBtns.appendChild(b);
+      }
+      this.body.appendChild(rideBtns);
+    }
     const curve = document.createElement("div");
     curve.id = "drift-lab-w-curve";
     curve.style.cssText = "margin-top:4px;color:#bbb;font-variant-numeric:tabular-nums";
@@ -225,8 +300,8 @@ export class DriftLabWPanel {
     };
     const copy = document.createElement("button");
     copy.textContent = "copy JSON";
-    copy.title = "copy the current constants (paste them into the owner's notes)";
-    copy.onclick = () => void navigator.clipboard?.writeText(JSON.stringify(this.sim.plainSteer(), null, 1));
+    copy.title = "copy the steering + suspension constants (paste them into the owner's notes)";
+    copy.onclick = () => void navigator.clipboard?.writeText(JSON.stringify({ steer: this.sim.plainSteer(), ride: this.sim.rideTune() }, null, 1));
     actions.append(reset, copy);
     this.body.appendChild(actions);
   }
@@ -252,11 +327,19 @@ export class DriftLabWPanel {
     const rack = Number.isNaN(r[1]) ? "off" : `${r[1] >= 0 ? "R" : "L"} ${Math.abs(Math.round(r[1] * 100))}%`;
     const gear = r[6] < 0 ? "R" : r[6] === 0 ? "N" : String(r[6]);
     const slide = Math.abs(r[3]);
+    let ride = "";
+    try {
+      const m = this.sim.rideReadout(this.player());
+      ride = `\nroll ${m[5].toFixed(1)}° · roll ${m[0].toFixed(2)} Hz ζ ${m[1].toFixed(2)} (${m[2].toFixed(1)}°/g) · pitch ${m[3].toFixed(2)} Hz ζ ${m[4].toFixed(2)}`;
+    } catch {
+      /* readout unavailable */
+    }
     this.readout.textContent =
       `${DRIFT_LAB_W_TITLE} · plain steering · TCS off · ESC off · manual\n` +
       `key ${key.padEnd(5)} rack ${rack.padEnd(7)} lock ${Number.isNaN(r[2]) ? "–" : pct(r[2])} · wheel ${r[8].toFixed(1)}°\n` +
       `slide ${slide.toFixed(1)}° · throttle key ${pct(r[4])} → engine ${pct(r[5])}\n` +
-      `gear ${gear} · ${r[7].toFixed(0)} km/h`;
+      `gear ${gear} · ${r[7].toFixed(0)} km/h` +
+      ride;
     this.readout.style.borderLeftColor = slide > 50 ? "#e04040" : slide > 10 ? "#40c070" : "#40a0e0";
   }
 }

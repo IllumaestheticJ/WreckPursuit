@@ -252,6 +252,13 @@ export const sim = {
   plainSteerSet: (json: string): void => wasm.plain_steer_set(json),
   /** [steer_key, rack, lock_frac, slide_deg, throttle_key, engine_throttle, gear, speed_kmh, wheel_deg]. */
   plainReadout: (entity: number): Float32Array => wasm.plain_readout(entity),
+  /** Drift Lab W ride tuning in effect (null = car data) / {data, lab} defaults (wp_vehicle::ride_lab::RideTune). */
+  rideTune: (): Record<string, number> | null => JSON.parse(wasm.ride_tune_json()),
+  rideTuneDefaults: (): { data: Record<string, number>; lab: Record<string, number> } => JSON.parse(wasm.ride_tune_defaults_json()),
+  /** Set the ride tuning ("" = car data as is). */
+  rideTuneSet: (json: string): void => wasm.ride_tune_set(json),
+  /** [roll_hz, roll_zeta, roll_deg_per_g, pitch_hz, pitch_zeta, body_roll_deg]. */
+  rideReadout: (entity: number): Float32Array => wasm.ride_readout(entity),
   /** Drift Lab W reference-parity test cars (not in carIds()). */
   parityCarIds: (): string[] => JSON.parse(wasm.parity_car_ids()),
   /** Clutch mode "auto" | "manual" (owner row 59). */

@@ -58,6 +58,7 @@ pub mod metrics;
 pub mod plain;
 pub mod presets;
 pub mod ride;
+pub mod ride_lab;
 pub mod rig;
 pub mod slide;
 pub mod snapshot;

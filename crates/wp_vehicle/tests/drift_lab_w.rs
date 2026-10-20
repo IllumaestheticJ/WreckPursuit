@@ -132,3 +132,32 @@ fn plain_throttle_is_raw() {
     // One tick after the key: the engine sees the full key (no pedal filter, no shaping).
     assert_eq!(rig.vehicle.telemetry().throttle, 1.0);
 }
+
+#[test]
+fn ride_lab_default_calms_the_roll_without_bottoming() {
+    use wp_vehicle::ride_lab::{ride_model, RideTune};
+    for id in [
+        "parity_rwd_d",
+        "parity_rwd_b",
+        "parity_fwd_c",
+        "rampart_50",
+        "shiro_turbo",
+    ] {
+        let c = car(id);
+        let base = ride_model(&c.def, &RideTune::default());
+        let lab = ride_model(&c.def, &RideTune::lab_default());
+        assert!(lab.roll_hz < base.roll_hz, "{id}: {base:?} → {lab:?}");
+        assert!(
+            lab.roll_zeta > 0.8 && lab.roll_zeta > base.roll_zeta + 0.3,
+            "{id}: {lab:?}"
+        );
+        // At least 40 mm of bump travel left at rest.
+        let mut scaled = c.clone();
+        for s in &mut scaled.def.suspension {
+            *s = RideTune::lab_default().scaled(s);
+        }
+        for a in wp_vehicle::ride::axle_ride(&scaled) {
+            assert!(a.bump_travel_m > 0.04, "{id}: {a:?}");
+        }
+    }
+}
