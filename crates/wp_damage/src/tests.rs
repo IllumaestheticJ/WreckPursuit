@@ -545,13 +545,13 @@ fn mode_tables_load_and_arcade_is_derived_from_sim() {
     assert_eq!(a.mode, DamageMode::Arcade);
     assert!((a.impulse_to_lattice_scale - 0.45 * s.impulse_to_lattice_scale).abs() < 1e-6);
     assert!(
-        (a.component_fail_threshold_scale - 1.8 * s.component_fail_threshold_scale).abs() < 1e-6
+        (a.component_fail_threshold_scale - 3.5 * s.component_fail_threshold_scale).abs() < 1e-6
     );
     assert!(a.total_loss_health < s.total_loss_health);
     assert!((a.wheel_detach_scale - 0.5 * s.wheel_detach_scale).abs() < 1e-6);
     assert!((a.repair_cost_scale - 0.5 * s.repair_cost_scale).abs() < 1e-6);
     assert_eq!(s.cabin_intrusion_total_loss_m, 0.25);
-    assert_eq!(a.cabin_intrusion_total_loss_m, 0.5);
+    assert_eq!(a.cabin_intrusion_total_loss_m, 0.6);
 }
 
 #[test]
@@ -972,51 +972,86 @@ fn arcade_light_and_medium_hits_are_cosmetic() {
     }
 }
 
+/// Undrivable: total loss, dead engine, a lost wheel or almost no power.
+fn wrecked(m: &DamageModel) -> bool {
+    let e = m.handling_effects();
+    m.is_total_loss() || e.engine_dead || e.wheel_lost.iter().any(|w| *w) || e.power_scale < 0.35
+}
+
 #[test]
 fn arcade_hard_hits_degrade_and_several_wreck_the_car() {
+    // Round 12b semantics (owner playtest: Arcade too fragile): a hard hit degrades clearly but
+    // the car stays drivable; it takes about 3–4 hard hits to end it.
     let car = sedan();
     let mode = arcade_mode();
     let mut m = DamageModel::new(&car.lattice, &car.materials);
     crash_and_settle(&mut m, &car, ImpactKind::Frontal, 56.0, &mode);
-    let e = m.handling_effects();
     assert!(!m.is_total_loss());
     assert!(
-        m.health() < 0.85,
+        m.health() < 0.95,
         "one hard hit noticeably degrades: {}",
         m.health()
     );
-    assert!(!handling_is_neutral_except_drag(&e));
-    // Several hard hits wreck the car. With the shipped total_loss_health (0.10) Arcade health
-    // plateaus near 0.2 instead of totalling; 0.23 is proposed but needs wp_economy's career
-    // proxy retuned first (see docs/integration/damage.md).
-    for k in [ImpactKind::Side, ImpactKind::Rear, ImpactKind::Offset] {
-        crash_and_settle(&mut m, &car, k, 56.0, &mode);
-    }
-    assert!(
-        m.health() < 0.25,
-        "several hard hits wreck the car: {}",
-        m.health()
-    );
-    let mut strict = mode.clone();
-    strict.total_loss_health = 0.23;
-    let mut s = DamageModel::new(&car.lattice, &car.materials);
+    assert!(!handling_is_neutral_except_drag(&m.handling_effects()));
+    let mut m = DamageModel::new(&car.lattice, &car.materials);
+    crash_and_settle(&mut m, &car, ImpactKind::Frontal, 80.0, &mode);
+    let e = m.handling_effects();
+    assert!(!wrecked(&m), "one 80 km/h hit stays drivable");
+    assert!(e.steer_ratio_scale > 0.6 && e.power_scale > 0.6, "{e:?}");
+    assert!((0.5..0.9).contains(&m.health()), "health {}", m.health());
+    let mut m = DamageModel::new(&car.lattice, &car.materials);
     let mut hits = 0;
     for k in [
         ImpactKind::Frontal,
         ImpactKind::Side,
-        ImpactKind::Rear,
         ImpactKind::Offset,
+        ImpactKind::Rear,
+        ImpactKind::Frontal,
     ] {
-        crash_and_settle(&mut s, &car, k, 56.0, &strict);
+        crash_and_settle(&mut m, &car, k, 80.0, &mode);
         hits += 1;
-        if s.is_total_loss() {
+        if wrecked(&m) {
             break;
         }
     }
     assert!(
-        s.is_total_loss() && hits >= 3,
-        "proposed 0.23: ended after {hits} hits"
+        wrecked(&m) && (3..=4).contains(&hits),
+        "80 km/h hits ended the car after {hits}"
     );
+}
+
+#[test]
+fn arcade_50kmh_hits_never_end_the_car() {
+    let car = sedan();
+    let mode = arcade_mode();
+    for kind in [ImpactKind::Frontal, ImpactKind::Side] {
+        let mut m = DamageModel::new(&car.lattice, &car.materials);
+        for hit in 1..=8 {
+            crash_and_settle(&mut m, &car, kind, 50.0, &mode);
+            assert!(!wrecked(&m), "{kind:?} 50 km/h: wrecked on hit {hit}");
+        }
+    }
+}
+
+#[test]
+fn arcade_alignment_is_scaled_and_sim_is_not() {
+    let car = sedan();
+    let (mut a, mut s) = (
+        DamageModel::new(&car.lattice, &car.materials),
+        DamageModel::new(&car.lattice, &car.materials),
+    );
+    crash_and_settle(&mut a, &car, ImpactKind::Side, 80.0, &arcade_mode());
+    crash_and_settle(&mut s, &car, ImpactKind::Side, 80.0, &sim_mode());
+    let toe = |m: &DamageModel| {
+        m.handling_effects()
+            .toe_delta
+            .iter()
+            .fold(0.0f32, |a, t| a.max(t.abs()))
+    };
+    // Raw alignment is clamped at 0.2 rad; Arcade reports it × arcade_alignment_scale, below
+    // wp_police's 0.02 rad pull-over limit.
+    assert!(toe(&s) > 0.05, "sim toe {}", toe(&s));
+    assert!(toe(&a) > 0.0 && toe(&a) < 0.02, "arcade toe {}", toe(&a));
 }
 
 #[test]

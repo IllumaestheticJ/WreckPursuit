@@ -1,20 +1,28 @@
 # Arcade damage table = Simulation (sim.toml) x the multipliers noted on each line.
 # Same code path, different numbers. Owned by workstream 03 (damage) for tuning.
 #
-# Result (debug_sedan, crates/wp_damage/scenarios/*_arcade.ron): punishing but survivable.
-#   Light/medium hits (closing speed < ~41 km/h) are cosmetic: the body dents and is billed,
-#   but handling, alignment and component health are untouched (wp_damage
-#   DamageTuning::arcade_mechanical_min_closing_mps = 11.5 m/s until ModeTable has the field).
-#   56 km/h frontal -> ~0.34 m crush, health ~0.76, drivable; health ~0.22 after three hard hits.
-#   After a hard hit 30 % of the lost handling comes back over 20 s ("limp-mode settle").
+# Target (CLAUDE.md, owner playtest round 12b): punishing but survivable. Sideswipes, PITs and
+# 30-50 km/h hits never end a car; a hard 70-90 km/h frontal degrades clearly but stays
+# drivable; about 3-4 hard hits end it; police cars at least as tough as a sports car.
+# Measured in the full sim (`cargo run --release -p simcli --example damage_toughness`,
+# table in docs/integration/damage.md): sports car (hakone_gt) into a rigid wall wrecks on hit
+# 4 at 90 km/h, 6 at 70, never (8+) at 30-50; the police cruiser on hits 7 / 8+ / 8+.
+# Light hits (closing speed < ~41 km/h) are cosmetic: dents and a bill, no mechanical damage
+# (wp_damage DamageTuning::arcade_mechanical_min_closing_mps = 11.5 m/s). After a hard hit 30 %
+# of the lost handling comes back over 20 s ("limp-mode settle").
+# Also Arcade-only in wp_damage::DamageTuning until ModeTable has the fields (contract request
+# #10): toe/camber x 0.09 (arcade_alignment_scale), structural health from plastic energy x 0.5
+# (arcade_structural_health_scale), a failed steering rack keeps half the lock
+# (arcade_failed_steer_ratio 0.5 vs 0.3). The visible deformation (impulse/plasticity scales)
+# is unchanged by round 12b.
 mode = "Arcade"
 impulse_to_lattice_scale = 0.45        # sim x 0.45  — 45 % of the collision energy deforms the car
 plasticity_scale = 0.8                 # sim x 0.8   — dents set a little less (more springback)
 beam_break_scale = 1.5                 # sim x 1.5   — beams/parts tougher before breaking
-component_damage_scale = 0.6           # sim x 0.6   — components lose health slower
-component_fail_threshold_scale = 1.8   # sim x 1.8   — components tolerate more intrusion
-total_loss_health = 0.1                # sim 0.25 -> 0.10 — more hits before the car is done (0.23 proposed, see docs/integration/damage.md)
-cabin_intrusion_total_loss_m = 0.5     # sim x 2.0   — 0.25 m -> 0.5 m
+component_damage_scale = 0.3           # sim x 0.3   — components lose health slower
+component_fail_threshold_scale = 3.5   # sim x 3.5   — components tolerate more intrusion
+total_loss_health = 0.1                # sim 0.25 -> 0.10 — kept (wp_economy career proxy, see docs/integration/damage.md)
+cabin_intrusion_total_loss_m = 0.6     # sim x 2.4   — 0.25 m -> 0.6 m
 repair_cost_scale = 0.5                # sim x 0.5   — cheaper repairs
 wheel_detach_scale = 0.5               # sim x 0.5   — wheels stay on twice as long
 engine_kill_on_total_loss = true       # same

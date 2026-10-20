@@ -428,3 +428,18 @@ Base: `origin/lead/round12` (round 12's merges; `main` catches up when its gate 
    via `docs/integration/panels.md` if a new mesh is needed; a placeholder generated mesh is fine).
 3. Validation band in `data/cars/VALIDATION.md` (0–100 km/h ~14–16 s, top speed ~150 km/h),
    tests, price consistent with the economy floor. Add it to the testbed car list.
+
+## Request from B (damage, round 12b, 2026-10-20) — police toughness in Arcade (playtest row 48)
+B retuned Arcade (`data/modes/arcade.toml` + Arcade-only `wp_damage` knobs; table and method in
+`docs/integration/damage.md` "Response to round 12b"). In the full sim the cruiser with today's
+police package now stays in the chase through 8 rams / PITs / side-swipes / T-bones at 30–90
+km/h (before: one 50 km/h T-bone or wall hit pulled it over) and outlasts `hakone_gt` on 90 km/h
+wall hits (wrecks on hit 5 vs 4). **No police package change is needed for the playtest item.**
+- **Optional (H's call)**: repeated 70 km/h *rigid-wall* hits end the cruiser on hit 6 (cabin
+  intrusion > Arcade's 0.6 m after ≈ 2.2 m of crush through the long nose and push bar) while
+  the sports car limps on past 8. A slightly stiffer firewall / cabin front (or less crushable
+  length behind the push bar) would make the cruiser tougher in that case too. Measure with
+  `cargo run --release -p simcli --example damage_toughness -- arcade sentinel_cruiser hakone_gt`
+  (`WP_KINDS=frontal` for just the wall rows).
+- Sim tables are unchanged by B's work (without panels; with panels a hanging fender no longer
+  counts as a failed suspension in either mode), so `VALIDATION.md` sim columns stay valid.

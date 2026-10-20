@@ -16,8 +16,10 @@
         speed_at(entity: "coupe", t_s: 3.0, min: 12.5, max: 15.0),
         metric(entity: "sedan", name: "distance_m", min: 18.0, max: 30.0),
         metric(entity: "coupe", name: "distance_m", min: 28.0, max: 40.0),
-        metric(entity: "sedan", name: "final_health", min: 0.2, max: 0.8),
-        metric(entity: "coupe", name: "final_health", min: 0.2, max: 0.8),
+        // Round 12b Arcade retune (B): a 50+50 km/h head-on degrades but is far from a wreck
+        // (0.88 / 0.89; was 0.2-0.8 before).
+        metric(entity: "sedan", name: "final_health", min: 0.6, max: 0.97),
+        metric(entity: "coupe", name: "final_health", min: 0.6, max: 0.97),
         // Structural crush 0.28 m (round 8; the any-node max read 0.53).
         crush_depth(entity: "sedan", min: 0.2, max: 0.8),
         total_loss(entity: "sedan", expected: false),

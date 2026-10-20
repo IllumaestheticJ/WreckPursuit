@@ -107,7 +107,7 @@ beams). Effects:
 |---|---|
 | Engine | `power_scale` × (0.35 + 0.65·h); failed → 0 and `engine_dead` |
 | Radiator | failed → `overheating` ramps 0 → 1 over `overheat_ramp_s` (45 s) |
-| SteeringRack | `steer_ratio_scale` 0.5 + 0.5·h (failed 0.3); `steer_pull` = seeded sign × [0.7, 1.3] × 0.15 × damage |
+| SteeringRack | `steer_ratio_scale` 0.5 + 0.5·h (failed 0.3, Arcade 0.5); `steer_pull` = seeded sign × [0.7, 1.3] × 0.15 × damage |
 | SuspensionXX | `toe_delta`/`camber_delta` from the *actual* mount node displacement (upper vs lower node lateral → camber; inward/set-back → toe-out), `grip_scale` |
 | WheelXX | failed → `wheel_lost` + `WheelDetached` + wheel debris; health < 0.5 → `tire_puncture` |
 | BrakeXX | `brake_scale` 0.3 + 0.7·h (failed 0.2) |
@@ -132,6 +132,19 @@ becomes per-component offsets afterwards; only `arcade_cosmetic_health_share` (2
 plastic energy counts toward health. After a hard episode, `arcade_settle_fraction` (30 %) of the
 lost handling of working components returns over `arcade_settle_s` (20 s). Simulation: every hit
 is mechanical, no settle. Gated on `ModeTable::mode` until `ModeTable` gets the fields.
+
+Round 12b (owner: Arcade cars and police too fragile) added three more Arcade-only knobs, same
+gating (contract request #10): `arcade_alignment_scale` 0.09 (toe/camber reported in
+`HandlingEffects`; the stored geometry stays physical), `arcade_structural_health_scale` 0.5
+(structural health counts half the plastic energy) and `arcade_failed_steer_ratio` 0.5 (a failed
+rack keeps half the lock instead of 0.3). With `arcade.toml` (components × 0.3 damage, × 3.5 fail
+threshold, 0.6 m cabin limit) a sports car survives 8+ hits at 30–50 km/h and wrecks on the 4th
+90 km/h wall hit; the cruiser is tougher. Full table: `docs/integration/damage.md`; measure with
+`cargo run --release -p simcli --example damage_toughness -- [arcade|sim] [car …]`.
+
+Nodes of a panel that is no longer latched (workstream R) are ignored for component intrusion,
+alignment and "part detached → failed": the front fender carries the strut-top node, and a
+hanging fender must not read as a bent or failed suspension.
 
 ### Repair estimate (`repair.rs`)
 Line per damaged region (severity = plastic energy / energy to strain all its beams by
