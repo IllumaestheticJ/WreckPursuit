@@ -5,6 +5,63 @@
 - **Crates / folders owned:** `data/cars/` (roster files), `data/lattices/` (roster car files, not the generator), `tools/specsheet/`; round 8: `data/tires/` edits the lead assigned to H (`PaintedLine`, `treaded`)
 - **Contract version built against:** 0.3.0
 
+## Four new cars (2026-10-20)
+
+Request: a 90s hot hatch, a 70s muscle sedan, an AWD rally saloon and a delivery van. Full
+pipeline for each (inputs in `roster_inputs.py` → car JSON + spec sheet + lattice; audio def;
+`gen-panels` + `gen-car-mesh` panel spec and mesh; validated, smoke-simmed). Picked to sit
+next to the existing cars without copying them:
+
+| Id | Name | Class | Archetype | vs. the existing car | Price | Dur. |
+|---|---|---|---|---|---|---|
+| `stoat_16v` | Stoat 16V | Compact | early-90s FF 2.0 16V NA hot hatch | Vireo is a peaky 1.6; this one is torquey, shorter, lift-off happy | 9 500 | 2 |
+| `bulwark_400` | Bulwark 400 | Muscle | early-70s 6.6 L HO V8 four-door sedan, clutch-LSD live axle, early radials | Ironside is a 7.2 L coupe on bias-plies, open diff | 26 000 | 4 |
+| `arashi_t4` | Arashi T4 | Sport | mid-90s AWD 2.0 T rally-homologation saloon, 40/60 permanent AWD, rear LSD | Lindwurm is front-biased on-demand AWD; first roster car on fixed-split `Awd` | 32 000 | 3 |
+| `satchel_20` | Satchel 2.0 | Truck | 2000s FWD 2.0 I4 high-roof panel van, unibody | Drayman is a RWD V8 body-on-frame van | 20 000 | 3 |
+
+**Sim results** (`collect_results.py`; all in their class bands, all 8 barrier tests pass for
+all four):
+
+| car | 0-100 s (band) | skidpad g (band) | 100-0 m (band) | Vmax km/h |
+|---|---|---|---|---|
+| stoat_16v | 8.8 (7.8-9.0) | 0.85 (0.82-0.90) | 38.9 (38-44) | 204 |
+| bulwark_400 | 7.9 (7.5-9.0) | 0.72 (0.70-0.80) | 43.3 (42-52) | 201 |
+| arashi_t4 | 5.4 (4.8-5.8) | 0.97 (0.88-0.97) | 36.3 (35-39) | 248 |
+| satchel_20 | 18.5 (15-19) | 0.68 (0.66-0.76) | 45.3 (44-52) | 146 |
+
+Pursuit (`pursuit_probe.py --chase`): the cruiser catches the Stoat (11.0 s, +10 % margin) and
+the Satchel (13.2 s) like the other slow cars; it does not catch the Arashi or the Bulwark on a
+straight (same `wp_police` cap issue as the Ironside/Kestrel, see round 6b).
+
+Design decisions worth knowing:
+- **Bulwark tires and power.** It started as a mid-70s 156 kW sedan on `vintage_bias`; that gave
+  class index 227 at a Muscle-band price and failed `wp_economy`'s `pricier_cars_are_not_slower`
+  (cheaper hot hatches have a higher index), and 0.61 g on the skidpad (the Ironside's known
+  `vintage_bias` gap). Fixed in the car rather than in G's test: early-70s high-output tune
+  (205 kW net) on optional radials (`street`). Index 332 at 26 000, all three bands met.
+- **Satchel price** 20 000: `market.toml`'s Truck band floor (12 000) applies to Worn (× 0.6),
+  so a Truck cannot list below 20 000. Cheap vans want a lower floor or a `Van` class (see below).
+- **Bulwark rear 40 km/h**: the 70s tank sits behind the axle as on the Ironside, but behind a
+  1.38 m rear overhang (Ironside 1.25 m); a 40 km/h rear hit crushes 0.38 m and does not reach
+  it, so the "rear fuel tank failed" barrier expectation stays Ironside-only.
+
+Tool changes (my folder only): `build_roster.py`'s live-axle component tweak is now a lattice
+flag `live_axle=True` instead of `id == "ironside_440"` (Ironside output byte-identical); every
+existing car's generated JSON, spec sheet, lattice, panel spec and mesh is unchanged.
+`specsheet.py` has the four targets.
+
+Known gaps:
+- gen-lattice's `hatch` profile has four doors, so the three-door Stoat gets rear door panels.
+  Same for the Vireo; a `--doors 2` option for B.
+- `tools/tuning-dash/presets/mode_hits_to_total_loss.yaml` (tuning-dash) lists cars by hand and
+  does not include the four new ones yet.
+
+| To | Request |
+|---|---|
+| lead | A `Van` class (repeat of round 6b): the Satchel and Drayman are `Truck` today and the Truck price band forces a 20 000 minimum on a cheap FWD van. |
+| 03 damage (B) | `gen-lattice --doors 2` for three-door hatches (Stoat, Vireo). |
+| tuning-dash | Add `stoat_16v`, `bulwark_400`, `arashi_t4`, `satchel_20` to `mode_hits_to_total_loss`. |
+
 ## Response to lead feedback round 8 (2026-10-19)
 
 Merged `origin/main` at `d3effad` (contract v0.3.0) into `ws/cars`; no conflicts.
