@@ -220,3 +220,17 @@ The reference RWD cars sit at about **239–252 W/kg** (REF-RWD-D: 239), and bot
 | kestrel_ts (vs REF-FWD-C, ~123 W/kg) | 1453 kg | 181 kW | 335 N·m | ~125 (similar ratio, but ~470 kg heavier) |
 
 That is a likely part of the feel gap: the reference cars have more torque per kg, so they light up the rears and power-oversteer far more readily. The parity suite should measure the reference specs directly. One way is a parity-only test car JSON with the reference numbers, kept out of the player roster or given analogue names, so physics behaviour can be compared like for like.
+
+## Steering-wheel timing (clip 7, cockpit view, standing still, 2026-10-20)
+
+The owner recorded the cockpit steering wheel at a standstill with the key overlay. A spoke on the wheel shows its rotation frame by frame (60 fps).
+
+| test | key | wheel response |
+|---|---|---|
+| hold Left 1.23 s (5.27–6.50 s) | raw, on | the spoke starts moving ~1 frame after the key; it sweeps at a near-constant fast rate and reaches the final lock ≈ **0.25–0.30 s** after the press, with a small settle; it holds steady after that |
+| release (6.50 s) | raw, off | returns to centre over ≈ **0.30–0.35 s**, again near-constant rate |
+| tap Left 0.23 s (3.50–3.73 s) | raw | reaches **near-full lock** by the time of release, then returns in ~0.3 s |
+
+**Conclusion.** The reference keyboard steering at standstill is a **simple constant-rate slew**: full lock in ~0.28 s, back in ~0.33 s. There is no input smoothing (row "keyboard input is raw"), and no visible easing or intent logic. So a 0.2 s tap is most of a full-lock flick at low speed. At speed, "steering speed sensitivity 75 %" scales the lock down (not yet measured at speed).
+
+This contrasts with our Drift Labs, which layer intent modes (hold / angle-up / transition / catch). Those may be the reason the owner says Drift Lab C "is nothing like" the reference: the reference likely gets its feel from **the car (tyres, weight, torque) plus a plain steering rate**, not from a smart assist.
