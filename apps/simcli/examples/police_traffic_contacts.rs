@@ -36,6 +36,10 @@ struct Tally {
     overlaps: [u32; 2],
     /// Overlaps with the police car stopped (traffic drove into it).
     overlaps_police_stopped: u32,
+    /// Contacts between a driving police car (not a parked roadblock / spike unit) and the
+    /// world: parked cars, cones, kerbs, buildings (above 1 m/s closing speed, once per car per
+    /// 2 s); `[lights off, lights on]`.
+    world: [u32; 2],
     max_rel_mps: f32,
     sim_s: f32,
     pursued_s: f32,
@@ -99,6 +103,7 @@ fn run_once(base: &Scenario, seed: u64, racer_start: Option<f32>, secs: f32, t: 
     let ticks = (secs / PHYSICS_DT).round() as u64;
     let gap = (2.0 / PHYSICS_DT) as u64;
     let mut last_contact: BTreeMap<(u32, u32), u64> = BTreeMap::new();
+    let mut last_world: BTreeMap<u32, u64> = BTreeMap::new();
     let mut last_overlap: BTreeMap<(u32, u32), u64> = BTreeMap::new();
     let mut was_pursued = false;
     let t_of = |tick: u64| tick as f32 * PHYSICS_DT;
@@ -126,6 +131,20 @@ fn run_once(base: &Scenario, seed: u64, racer_start: Option<f32>, secs: f32, t: 
                 (v.id, (v.input.siren, st.pos, f, st.speed_mps))
             })
             .collect();
+        // Parked tool units (roadblocks, spikes) sit against their own barriers.
+        let parked: Vec<EntityId> = sim
+            .police()
+            .units()
+            .iter()
+            .filter(|u| {
+                matches!(
+                    u.assignment,
+                    wp_police::Assignment::RoadblockAt { .. }
+                        | wp_police::Assignment::SpikeAt { .. }
+                )
+            })
+            .filter_map(|u| u.entity)
+            .collect();
         let traffic: Vec<EntityId> = sim
             .vehicles()
             .iter()
@@ -139,6 +158,23 @@ fn run_once(base: &Scenario, seed: u64, racer_start: Option<f32>, secs: f32, t: 
             else {
                 continue;
             };
+            if b == wp_contracts::WORLD_ENTITY && rel_speed > 1.0 && !parked.contains(&a) {
+                if let Some(c) = cops.get(&a) {
+                    if last_world.get(&a.0).is_none_or(|l| tick - l > gap) {
+                        t.world[c.0 as usize] += 1;
+                        println!(
+                            "  seed {seed} t={:.1} s  contact police {}/world at ({:.0},{:.0}) rel {rel_speed:.1} m/s lights {}",
+                            t_of(tick),
+                            a.0,
+                            c.1[0],
+                            c.1[1],
+                            c.0
+                        );
+                    }
+                    last_world.insert(a.0, tick);
+                }
+                continue;
+            }
             let cop = match (cops.get(&a), cops.get(&b)) {
                 (Some(c), None) if traffic.contains(&b) => c,
                 (None, Some(c)) if traffic.contains(&a) => c,
@@ -236,6 +272,13 @@ fn main() {
             per5(t.overlaps[i])
         );
     }
+    println!(
+        "  world contacts (parked cars, cones, kerbs, buildings) > 1 m/s: lights off {} ({:.1} per 5 min), lights on {} ({:.1} per 5 min)",
+        t.world[0],
+        per5(t.world[0]),
+        t.world[1],
+        per5(t.world[1])
+    );
     println!(
         "  overlaps with the police car stopped (traffic drove into it): {}; max contact rel speed {:.1} m/s",
         t.overlaps_police_stopped, t.max_rel_mps
