@@ -4,7 +4,7 @@
  * state of its own: every action returns the new `CareerView` and the screen redraws.
  *
  * Tabs: Cars (condition, value, repair per item at a district shop, insurance, sell, mods),
-* Dealer (roster cars by class band, the economy-floor beater), Impound (release or let the
+ * Dealer (roster cars by class band, the economy-floor beater), Impound (release or let the
  * auction countdown run), Ledger. The head has cash / debt / rep / bounty / carried heat and
  * starts the next run (free drive or city chase) with the active car.
  */
