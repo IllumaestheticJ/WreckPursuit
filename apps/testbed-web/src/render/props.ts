@@ -314,12 +314,12 @@ export class PropView {
     const fs = this.fullSlot[i];
     this.paint.setHex(parkedPaint(i));
     if (fs >= 0 && this.full) {
-      this.full.car.put(fs, this.carMatrix(i, this.full.fit), this.paint, this.tail, null);
+      this.full.car.put(fs, this.carMatrix(i, this.full.fit), this.paint, this.tail, null, false);
       this.full.car.end();
-      ch.proxy.put(k, ZERO, this.paint, this.tail, null);
+      ch.proxy.put(k, ZERO, this.paint, this.tail, null, false);
       ch.box.setMatrixAt(k, ZERO);
     } else {
-      ch.proxy.put(k, this.carMatrix(i, this.proxyFit), this.paint, this.tail, null);
+      ch.proxy.put(k, this.carMatrix(i, this.proxyFit), this.paint, this.tail, null, false);
       ch.box.setMatrixAt(k, this.carMatrix(i, UNIT_FIT));
     }
     // A knocked car may leave its chunk's sphere: grow it (culling must never drop it).
