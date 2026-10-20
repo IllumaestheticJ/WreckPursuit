@@ -12,11 +12,24 @@
 ## 1. Parity measurement suite
 
 `just parity` (= `cargo run --release -p wp_vehicle --example parity -- --write`) measures the
-owner's keyboard settings on `rampart_50` (heavy RWD muscle, clips 1 and 4), `shiro_turbo` (light
-RWD sports, clip 2) and `kestrel_ts` (FWD touring, clip 3). It rewrites the table in
-[docs/reference/wreckfest-parity.md](../reference/wreckfest-parity.md). The run takes about 3 s
-release on one core of the cloud container (the budget was < 2 min). The page also has the setup
-and the **gap list**.
+owner's keyboard settings on eight cars. It rewrites the table in
+[docs/reference/wreckfest-parity.md](../reference/wreckfest-parity.md). The run takes about 7 s
+release on one core of the cloud container (the budget was < 2 min). The page also has the
+setup, the "car data or model?" comparison, the **gap list** and the tune-screen proposal. The
+cars:
+- the roster analogues `rampart_50` (heavy RWD muscle, clips 1 and 4), `shiro_turbo` (light RWD
+  sports, clip 2) and `kestrel_ts` (FWD touring, clip 3);
+- four parity-only reference cars built to the owner's specs: `parity_rwd_a/b/d` and
+  `parity_fwd_c`. `parity_rwd_d` is the primary drift-hold car;
+- `parity_rwd_a_tuned`, which applies the owner's clip-5 tune through the proposed mapping.
+
+- **Parity-only cars:** `crates/wp_vehicle/examples/parity_cars.toml` (a test fixture, not
+  `data/cars`). Each one is a roster `base` with the reference mass, torque curve and gearing.
+  Inertias, springs, dampers, ARBs and brakes scale with mass. They aren't in the roster, so the
+  roster checks, the economy and spawn lists never see them. When the lead adds more specs,
+  add a `[[car]]` block.
+- **Tune mapping:** `Tune` / `apply_tune` in `parity.rs` is the proposed 5-step mapping (table
+  in the parity doc). It is measurement-only until G10 is built.
 
 - Reference values: `docs/reference/wreckfest-parity-reference.toml`, one `[[ref]]` per
   (metric id, car). Numbers, ranges, bounds (≥ / ≤), ≈ values, yes/no, or free text. The lead
@@ -89,6 +102,32 @@ pedal:  t = x ≤ dz ? 0 : min(1, (x − dz) / (sat − dz))
 No contract field is needed. Shaping happens before `VehicleInput` (so replays and the net
 carry the shaped values), and speed sensitivity reuses `steer_speed_sensitivity`.
 
+**Keyboard: what is meaningful (lead note, owner test 2026-10-20).** The reference's "Test
+steering" bar on the keyboard jumps straight between −100 % and +100 %: its keyboard input is
+raw, and all smoothing happens in the car's steering. Drift Lab C is moving our keyboard
+smoothing into `wp_vehicle` steering too. So:
+- The test bars show the **processed `DriverInput`**, the value sent to the sim. Today, for the
+  keyboard, that still includes the testbed's 4/s key ramp, so a held key climbs over 0.25 s.
+  Once the ramp is gone, the bars jump −1 / 0 / +1 like the reference's. Nothing in the bars
+  needs to change.
+- On a binary key, steering **dead zone, saturation and sensitivity are mostly cosmetic**. A
+  dead zone below 100 % passes a full key unchanged, and saturation and sensitivity only
+  reshape the values in between. Today those are the ramp's in-between values, so for example
+  saturation 50 % halves the time to full lock; with raw keys there are none. The same holds
+  for the pedal dead zone and saturation on keys. They matter for gamepads and wheels.
+- **Steering speed sensitivity (75 %) is the meaningful keyboard setting**. It sets how much
+  lock a held key gets at speed, inside `wp_vehicle`.
+
+**Merged UI work** (helper session, commits `4c0e1b53`, `942cedca`, `5b140bfd`): the menu's
+Settings → Controls section has a device cycle, sliders, *Reset device*, live bars, and a *Test
+input* toggle. While it is on, the menu ignores navigation keys and Esc ends it. The testbed
+controls panel has the same sliders and bars, through `menu.update({controls})`. `input.ts` has
+the shaping plus `probeInput` (works while game input is blocked). On the debug hook:
+`__wp.inputProbe` / `deviceControls()` / `activeDevice()`. The preset highlight
+(`activePreset()` in `main.ts`) ignores the speed-sensitivity *value* and compares only on/off,
+because it is a per-device setting, not part of a preset. `e2e/gamepad.mjs`'s preset check now
+skips that one field for the same reason. e2e: `npm run e2e:controls`.
+
 ## Exposes
 - `cargo run --release -p wp_vehicle --example parity [-- --write]` / `just parity`;
   `PARITY_SPEED_SENS=<0..1>` for A/B runs.
@@ -97,7 +136,9 @@ carry the shaped values), and speed sensitivity reuses `steer_speed_sensitivity`
   `GameSettings.controls`, `GameMenuHost.inputProbe`.
 
 ## Needs
-- **A (`ws/vehicle`):** `TcsLevel` (row 105) so the TCS Half rows can be measured (WP-1).
+- **A (`ws/vehicle`):** `TcsLevel` (row 105) so the TCS Half rows can be measured (WP-1), ABS
+  levels (WP-3), and the handbrake declutch keeping the drive for short stabs with the throttle
+  held (G8).
 - **Drift Lab C:** merge into the lead branch, then this suite switches to its drivers (G1, G3).
 - **Owner:** recordings of the reference game's test bars (keyboard tap / hold) to pin its key
   ramp rates and sensitivity curve; dedicated clips for braking (G6) and taps at a known speed
@@ -106,6 +147,9 @@ carry the shaped values), and speed sensitivity reuses `steer_speed_sensitivity`
 ## Contract change requests
 | # | Change (type / field / variant) | Why | Who is affected | Status |
 |---|---|---|---|---|
+| WP-2 | `AssistProfile::keyboard_default().steer_speed_sensitivity` 1.0 → **0.75** (the owner's value) | the testbed now sends 0.75 for the keyboard. simcli `assists: keyboard`, replays and other hosts still get 1.0 from the contract default, so the two differ | wp_contracts, simcli keyboard scenarios (goldens using `keyboard`), wp_vehicle presets tests | requested (optional; the testbed doesn't need it) |
+| WP-3 | `AssistProfile::abs: bool` → `AbsLevel { Off, Half, Full }` (legacy bool: `false` → Off, `true` → Full) | run 5 / clip 5 use ABS Half; G7 | A (implements: Half = a looser slip target / slower release cycle), wp_wasm, testbed + ui-kit (3-way control), simcli assists, wp_net | requested |
+| WP-4 | `CarTune { suspension, gearing, diff, brake_balance: u8 }` (1..=5, 3 = stock) + an optional per-entity spawn field | tune screen G10: server, net spawn and replays must apply the same tune | wp_sim (spawn), wp_net, simcli (entity field), wp_economy (garage state), ui-kit | proposal (design in the parity doc) |
 | WP-1 | `AssistProfile::tcs: bool` → `TcsLevel { Off, Half, Full }` (legacy bool accepted: `false` → Off, `true` → Full). This is the already-approved row 105 change; the request is about naming: **Half / Full** as in the reference game (row 105 says Low / High) | clip 4 is driven with TCS Half. The parity rows `launch_*_half` read "n/a" until it exists | A (implements), wp_wasm, testbed + ui-kit (3-way control), simcli scenario/replay assists, wp_net | requested |
 
 ## Changes outside my crates
@@ -115,9 +159,13 @@ carry the shaped values), and speed sensitivity reuses `steer_speed_sensitivity`
 ## Perf numbers
 | Measurement | Machine | Native | Browser | Budget |
 |---|---|---|---|---|
-| `just parity` (3 cars, ~80 manoeuvres) | cloud container, 1 core | 2.6 s release | — | < 2 min |
+| `just parity` (8 cars, ~250 manoeuvres) | cloud container, 1 core | 7.3 s release | — | < 2 min |
 
 ## Known gaps
+- `e2e/run.mjs` → `perf_check.mjs` failed in the helper's run (real-time factor 0.6–0.78, needs ≥ 0.9),
+  with the machine at load ≈ 17 on 4 cores while other builds ran. It is unconfirmed whether
+  the per-frame shaping costs anything measurable (a few small objects in `readInput`).
+  Re-run perf on a quiet machine before merging to main.
 - TCS Half isn't measurable yet (WP-1).
 - The countersteer drift row uses a script equal to Drift Lab C's "Naive" driver, not the lab's
   own code (not merged).

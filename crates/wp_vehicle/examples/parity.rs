@@ -1147,11 +1147,35 @@ fn rows_for(id: &str, car: &LoadedCar) -> Vec<Row> {
     }
 
     let (bt, bd) = braking(car, true);
-    rows.num("brake_60_0_s", "60–0 mph braking time, s (ABS full)", Some(bt), 2, A);
-    rows.num("brake_60_0_m", "60–0 mph braking distance, m (ABS full)", Some(bd), 1, A);
+    rows.num(
+        "brake_60_0_s",
+        "60–0 mph braking time, s (ABS full)",
+        Some(bt),
+        2,
+        A,
+    );
+    rows.num(
+        "brake_60_0_m",
+        "60–0 mph braking distance, m (ABS full)",
+        Some(bd),
+        1,
+        A,
+    );
     let (bt0, bd0) = braking(car, false);
-    rows.num("brake_60_0_noabs_s", "60–0 mph braking time, s (ABS off)", Some(bt0), 2, ABS);
-    rows.num("brake_60_0_noabs_m", "60–0 mph braking distance, m (ABS off)", Some(bd0), 1, ABS);
+    rows.num(
+        "brake_60_0_noabs_s",
+        "60–0 mph braking time, s (ABS off)",
+        Some(bt0),
+        2,
+        ABS,
+    );
+    rows.num(
+        "brake_60_0_noabs_m",
+        "60–0 mph braking distance, m (ABS off)",
+        Some(bd0),
+        1,
+        ABS,
+    );
     rows.text(
         "brake_60_0_abs_half_s",
         "60–0 mph braking time, s (ABS half)",
@@ -1350,7 +1374,12 @@ fn rows_for(id: &str, car: &LoadedCar) -> Vec<Row> {
         2,
         DRIFT,
     );
-    rows.text("hb_stab_spun", "… spun within 2 s (no countersteer)", yes_no(stab.3), DRIFT);
+    rows.text(
+        "hb_stab_spun",
+        "… spun within 2 s (no countersteer)",
+        yes_no(stab.3),
+        DRIFT,
+    );
     rows.text(
         "hb_stab_control_spun",
         "… control run without stabs spun within 2 s",

@@ -5,7 +5,7 @@ its measurable behaviour. WreckPursuit stays an original game: no names, assets,
 copy from it in the product. This page measures how far we are, metric by metric.
 
 **Re-run:** `just parity` (= `cargo run --release -p wp_vehicle --example parity -- --write`,
-about 3 s release, single-threaded, deterministic). It rewrites the table between the markers
+about 7 s release, single-threaded, deterministic). It rewrites the table between the markers
 below. Without `--write` it only prints. `PARITY_SPEED_SENS=1` repeats the run with the old
 keyboard preset's speed sensitivity for an A/B comparison.
 
@@ -23,11 +23,13 @@ become hard checks once the owning workstream lands the fix.
 
 | | |
 |---|---|
-| Cars (closest roster analogues) | `rampart_50`: heavy RWD muscle car, 1753 kg, 5.0 L V8 (clips 1 and 4) · `shiro_turbo`: light RWD sports coupe, 1301 kg (clip 2) · `kestrel_ts`: FWD touring / sport sedan, 1453 kg (clip 3) |
+| Roster analogues | `rampart_50`: heavy RWD muscle car, 1753 kg, 319 kW / 529 N·m (clips 1, 4) · `shiro_turbo`: light RWD sports coupe, 1301 kg (clip 2) · `kestrel_ts`: FWD touring / sport sedan, 1453 kg (clip 3) |
+| Parity-only reference cars | built to the owner's reference-car specs from a roster base (`crates/wp_vehicle/examples/parity_cars.toml`; not in the player roster, no `data/cars` file): `parity_rwd_a` = REF-RWD-A (345 kW / 793 N·m / 1369 kg, 5-speed, clips 4–5), `parity_rwd_b` = REF-RWD-B (254 kW / 405 N·m / 1047 kg, 6-speed, clip 2), `parity_rwd_d` = REF-RWD-D (390 kW / 807 N·m / 1633 kg, 4-speed, **clip 1's drift car, the primary drift-hold car**), `parity_fwd_c` = REF-FWD-C (121 kW / 179 N·m / 982 kg, 5-speed, clip 3). Mass, torque curve (peak torque and peak power at the spec rpm) and gearing come from the spec. Inertias, springs, dampers, ARBs and brake torques scale with mass, so ride frequency and braking deceleration stay at our defaults. Tyres, geometry and steering come from the base car |
+| Tuned car | `parity_rwd_a_tuned` = REF-RWD-A with the owner's clip-5 tune (stiff 5/5, long 5/5, diff 4/5, brake balance 2/5) through the **proposed** tune mapping below |
 | Pad | flat dry asphalt, `wp_vehicle::rig::Rig` (bit-identical to `wp_sim` on flat ground) |
-| Assists (the owner's settings) | keyboard preset (`AssistProfile::keyboard_default`) with **manual gears**, **ABS on**, **ESC off**, **TCS off** (TCS full where a row says so; TCS half cannot be measured yet, see the gap list). `countersteer_help` stays at the keyboard default 0.6 |
+| Assists (the owner's settings) | keyboard preset (`AssistProfile::keyboard_default`) with **manual gears**, **ABS on** (= Full; off where a row says so), **ESC off**, **TCS off** (full where a row says so). Half levels of TCS and ABS can't be measured yet (gap list). `countersteer_help` stays at the keyboard default 0.6 |
 | Controls (the owner's keyboard values) | steering dead zone 0 %, saturation 100 %, sensitivity 100 %, **steering speed sensitivity 75 %** (→ `steer_speed_sensitivity` 0.75, mapping in [wf-parity.md](../integration/wf-parity.md)); pedals dead zone 0 %, saturation 100 % |
-| Keyboard layer | a copy of `apps/testbed-web/src/input.ts`: ramps updated once per 60 Hz frame (steer 4/s in and out, throttle 12/s, brake 6/s in / 10/s out), then the per-device shaping. The sim's keyboard pedal filters (throttle 0.7, brake 0.6) apply on top, as in the game |
+| Keyboard layer | a copy of `apps/testbed-web/src/input.ts`: ramps updated once per 60 Hz frame (steer 4/s in and out, throttle 12/s, brake 6/s in / 10/s out), then the per-device shaping. The sim's keyboard pedal filters (throttle 0.7, brake 0.6) apply on top, as in the game. The reference's keyboard input is **raw** (−100 % / +100 %, no ramp; owner test). When the testbed ramp goes (Drift Lab C moves the smoothing into `wp_vehicle` steering), update `Keyboard` in `parity.rs` in the same merge |
 | Driver | scripted keys. Where a manoeuvre needs a steady speed, an analogue cruise controller drives the throttle instead of the key (the rows say "cruise"). Full-throttle runs upshift at the redline once the driven wheels have hooked up (slip ratio < 0.3) |
 | Drift drivers | Drift Lab C's drivers are not merged into this branch's base (`lead/round12`), so the countersteer drift row uses an equivalent script: Drift Lab C's "Naive" driver (key into the turn + full throttle until 12° of slip, then the countersteer key + full throttle) |
 
@@ -36,6 +38,22 @@ change. *Spun* = body slip past 90°. *Yaw-rate kick* = peak yaw rate in the sec
 minus the steady value. *Slip ratio* = the largest driven wheel's longitudinal slip ratio
 (tyre peak ≈ 0.1). Speeds are in mph, as in the clips.
 
+## Car data or model? (what the reference-spec cars show)
+
+The parity cars have the reference cars' weight, torque and gearing on our tyre, suspension and
+steering model. Where they behave like our roster cars, the gap is in the **model** (steering,
+tyres, assists). Where they differ, it is in the **car data**.
+
+| behaviour | roster analogues | reference-spec cars | so the gap is in |
+|---|---|---|---|
+| countersteer key + full throttle (G1) | spin after 0.52–0.73 s | spin after 0.45–0.48 s (`parity_rwd_d`: 0.46 s); the owner's tune doesn't help (0.45 s) | **model** (steering / slide behaviour) |
+| 1.0 s handbrake pivot at 10 mph (G3) | 33–38° | 29–39° | **model** (handbrake / low-speed rotation) |
+| taps at 100 mph (G4) | 0.1 s → 3.6–4.3° heading, 4.5–5.4 m | 4.0–4.4°, 5.0–5.5 m (`parity_fwd_c` 4.2°, 5.2 m) | **model** (steering lock / rack) |
+| acceleration | 0–100 mph 12.4–16.5 s (TCS full) | 10.4–10.7 s for the RWD cars | **car data**: the reference cars carry 25–40 % less mass per kW and much more torque per kg |
+| launch wheelspin, TCS full | 0.12–0.25 s | 0.13–0.74 s RWD, **2.2 s** `parity_fwd_c` | car data (torque/kg) plus TCS tuning (FWD light car) |
+| handbrake stabs on the throttle (G8) | drive under half for 0.04–0.35 s | **0.8–0.9 s** for the torquey RWD cars | model: the handbrake declutch (row 56) |
+| FWD power-on straightening (G2) | `kestrel_ts` 1.20 s | `parity_fwd_c` 0.97 s, peak slip 16° | close in both |
+
 ## Gap list (biggest known differences)
 
 Numbers come from the table below (run 2026-10-20 on `lead/wf-parity` = `lead/round12` + this
@@ -43,18 +61,62 @@ suite).
 
 | # | Reference behaviour (clip) | WreckPursuit today | Gap | Owner |
 |---|---|---|---|---|
-| G1 | **RWD countersteer key + full throttle holds a 30–45° drift** for 4+ s without spinning (clip 1, heavy muscle car, 2nd gear) | rampart_50 / shiro_turbo **spin** about 0.5–0.7 s after the countersteer key goes down (max slip 180°). The entry already reaches 75–110 °/s of yaw, and the rear keeps going past full opposite lock | core technique missing on this base | **Drift Lab C** (`lead/drift-lab-c`: on its branch "Naive" holds 5.2 s, 0/3 spins). Merge it, then re-run this suite |
-| G2 | **FWD power-on straightening**: a 0.3 s handbrake tap rotates the car 30–40°; full throttle + a 0.35 s counter tap pulls it straight by ~1.3 s (clip 3) | kestrel_ts: **straight in 1.20 s** after throttle-on (in line). The 0.3 s pull at 65 mph gives 41° of peak slip (in range). At 50 mph it gives only 17° | close. The low-speed rotation is a little small | A (`wp_vehicle`): keep. Drift Lab C handbrake for the 50 mph case |
-| G3 | **Handbrake pivot 150–180° in 1 s at low speed** (clip 2, light RWD, ~5–10 mph, key + handbrake) | 10 mph, 1.0 s: **33–38°** of rotation at release (shiro_turbo 38°), peak yaw 0.9 rad/s. At 30 mph, 1.0 s turns 64–76° by the release, then the car spins on to 171–184° with no catch | about **4× too little rotation** at low speed. At 30 mph it rotates, but nothing catches it | **Drift Lab C** (step 3 handbrake catch, row 108) + A (low-speed handbrake torque / rear grip, rotation while declutched) |
-| G4 | **Taps of 0.1–0.25 s give a modest, proportional steer**; a 0.15 s tap at 100+ mph is about a lane change, ≤ 3.5 m (clips 2, 3) | at 100 mph, 0.1 / 0.2 / 0.4 s taps turn the heading **3.6–4.3° / 6.6–6.7° / 8.9–9.2°**: **4.5–5.4 / 8.3–8.4 / 10.8–11.3 m** off line 2 s later. Peak yaw rate saturates from 0.2 s (≈ 0.4 s). The owner's 75 % speed sensitivity makes 0.1 s taps ~10 % stronger than the old 100 % preset | taps are about **1.5–2.5× too strong** at high speed, and not proportional past 0.2 s | A (steering: slip-targeted lock, rack rate) + testbed keyboard ramp (`lead/drift-twitch` changes it to 6/s, row 102) |
-| G5 | **TCS Half still smokes a feathered launch** in 1st and into 2nd (clip 4, heavy muscle) | no TCS level yet (`AssistProfile::tcs` is a bool). **Off:** a held key gives **3.2–3.7 s** of wheelspin (slip ratio > 0.2; peak 3.6–6.1); the feathered launch gives 1.6–2.2 s. **Full:** 0.12–0.25 s held / 0.4–1.0 s feathered | Half cannot be measured. Off gives a long burnout on a held key: 0–60 mph takes 7.2 s instead of 5.8 s with TCS full (rampart) | A (row 105 `TcsLevel` Off / Half / Full, see the contract change request in [wf-parity.md](../integration/wf-parity.md)) |
-| G6 | Hard braking: clip 3 goes from 101 to ~65 mph in 1.3 s (≈ 1.26 g, with downshifts) | 60–0 mph on the brake key: **2.76–2.90 s, 37–39 m** (≈ 0.95–1.0 g mean) | maybe ~25 % softer. The reference figure is rough (it includes downshifts and aero at 100 mph) | A (ABS / brake filter) + H (brake torque). Measure with a dedicated clip first |
-| G7 | Throttle on with the key held, out of a slow corner, RWD (clip 2 exits with opposite lock + throttle) | full throttle in 1st or 2nd out of a 20 mph hairpin, key held 1 s, no countersteer: **both RWD cars spin**; kestrel_ts gains 14–19 mph at 7° of slip | our driver doesn't countersteer, so this isn't a like-for-like comparison. It shows how little margin there is | Drift Lab C (catch) / A |
+| G1 | **RWD countersteer key + full throttle holds a 30–45° drift** for 4+ s without spinning (clip 1, REF-RWD-D, 2nd gear) | every RWD car **spins** 0.45–0.73 s after the countersteer key goes down (max slip 180°). That includes `parity_rwd_d` built to the clip-1 car's specs (0.46 s) and the tuned REF-RWD-A. The entry already reaches 75–110 °/s of yaw, and the rear keeps going past full opposite lock | core technique missing on this base, and it is not the car data | **Drift Lab C** (`lead/drift-lab-c`: on its branch "Naive" holds 5.2 s, 0/3 spins). Merge it, then re-run this suite with `parity_rwd_d` as the primary car |
+| G2 | **FWD power-on straightening**: a 0.3 s handbrake tap rotates the car 30–40°; full throttle + a 0.35 s counter tap pulls it straight by ~1.3 s (clip 3) | straight **1.20 s** (`kestrel_ts`) / **0.97 s** (`parity_fwd_c`) after throttle-on. The 0.3 s pull at 65 mph gives 41° / 35° of peak slip (in range). At 50 mph it gives only 16–17° | close. The low-speed rotation is a little small | A (`wp_vehicle`): keep. Drift Lab C handbrake for the 50 mph case |
+| G3 | **Handbrake pivot 150–180° in 1 s at low speed** (clip 2, light RWD, ~5–10 mph, key + handbrake) | 10 mph, 1.0 s: **28–39°** of rotation at release on every car (`parity_rwd_b` 39°), peak yaw 0.9 rad/s. At 30 mph, 1.0 s turns 64–78° by the release, then the car spins on to 169–184° with no catch | about **4× too little rotation** at low speed. At 30 mph it rotates, but nothing catches it | **Drift Lab C** (step 3 handbrake catch, row 108) + A (low-speed handbrake torque / rear grip, rotation while declutched) |
+| G4 | **Taps of 0.1–0.25 s give a modest, proportional steer**; a 0.15 s tap at 100+ mph is about a lane change, ≤ 3.5 m (clips 2, 3). The reference steering wheel slews at a constant rate: full lock in ~0.25–0.30 s, back in ~0.33 s (clips 7, 8) | at 100 mph, 0.1 / 0.2 / 0.4 s taps turn the heading **3.6–4.4° / 4.8–7.0° / 7.0–9.7°**: **4.5–5.5 / 6.7–8.7 / 9.8–11.8 m** off line 2 s later. Peak yaw rate saturates from 0.2 s (≈ 0.4 s). The owner's 75 % speed sensitivity makes 0.1 s taps ~10 % stronger than the old 100 % preset | taps are about **1.5–2.5× too strong** at high speed, and not proportional past 0.2 s | A (steering: slip-targeted lock, rack rate) + Drift Lab C (keyboard smoothing moves into `wp_vehicle`, raw keys) |
+| G5 | **TCS Half still smokes a feathered launch** in 1st and into 2nd (clip 4, REF-RWD-A) | no TCS level yet (`AssistProfile::tcs` is a bool). **Off:** a held key gives **3.2–3.8 s** of wheelspin (slip ratio > 0.2; peak 3.1–8.3); the feathered launch gives 1.5–2.6 s. **Full:** 0.12–0.74 s held (RWD), but 2.2 s on the light FWD `parity_fwd_c` | Half cannot be measured. Off gives a long burnout on a held key: 0–60 mph takes 7.2 s instead of 5.8 s with TCS full (rampart) | A (row 105 `TcsLevel` Off / Half / Full, request WP-1) |
+| G6 | Hard braking: clip 3 goes from 101 to ~65 mph in 1.3 s (≈ 1.26 g, with downshifts) | 60–0 mph on the brake key, ABS full: **2.69–2.90 s, 36–39 m** (≈ 0.95–1.0 g mean) | maybe ~25 % softer. The reference figure is rough (it includes downshifts and aero at 100 mph) | A (ABS / brake filter) + H (brake torque). Measure with a dedicated clip first |
+| G7 | **ABS levels Off / Half / Full** (run 5 setup; clip 5 drives ABS Half + rear brake bias: braking from 82 mph with a tap stays straight and settles) | ABS is on/off. **Full:** 60–0 in 2.7–2.9 s; braking from 80 mph with a 0.2 s tap turns the car 1–14° by the stop, max 2.6–5.1° of slip, no spin. **Off:** 3.4–3.6 s / 46–49 m with the wheels locked, and the same tap does nothing (0.4–0.8°: locked fronts don't steer) | no Half level. Half should sit between: shorter than Off, with some steering left | **A** (ABS levels, request WP-3; machine A already has TCS levels) |
+| G8 | **Handbrake stabs on the throttle** (0.1–0.3 s, throttle + key held) add rotation and keep the drive (clip 5) | stabs of 0.25 + 0.1 s at 50 mph add 1–25° of rotation by 1.2 s but cost **4–20 mph**. On the torquey RWD cars (`parity_rwd_a/b/d`) the drive force stays under half for **0.8–0.9 s** after the last stab: the row-56 handbrake declutch opens the clutch and it re-engages slowly | the drive drops out for most of a second instead of staying on | A (handbrake declutch: keep the clutch for short stabs with the throttle held, or re-engage at once) + Drift Lab C |
+| G9 | Throttle on with the key held, out of a slow corner, RWD (clip 2 exits with opposite lock + throttle) | full throttle in 1st or 2nd out of a 20 mph hairpin, key held 1 s, no countersteer: **every RWD car spins**; the FWD cars gain 14–19 mph at 6–8° of slip | our driver doesn't countersteer, so this isn't a like-for-like comparison. It shows how little margin there is | Drift Lab C (catch) / A |
+| G10 | **Free per-car tune screen**: four 5-step sliders (suspension soft↔stiff, gear ratio short↔long, differential open↔limited↔locked, brake balance rear↔front), separate from the mod tree, set per car (run 5 setup) | none (only the paid mod tree) | missing feature. Design proposal below; the suite already measures the owner's tune with the proposed mapping (`parity_rwd_a_tuned`) | ui-kit (garage screen) + `wp_economy` (saved per car) + spawn glue (`wp_sim`); mapping values H (cars) |
+| G11 | Body roll and pitch build and settle smoothly and slowly; our suspension "feels far too switchy" (owner) | not measured here yet | needs a roll-angle-vs-time metric (60 mph lane change, S-bend) | Drift Lab W + A (ride model) |
 
-Not a gap: lift-off in a 60 mph corner (key held) gives a 2–3 °/s yaw kick and ~2° of slip, no
+Not a gap: lift-off in a 60 mph corner (key held) gives a 2–5 °/s yaw kick and 2–6° of slip, no
 snap (clip 3 asks for "a little, not snap"). Top speed and gearing look plausible against the
-clips (kestrel_ts 5th tops out at 136 mph, clip 3 sees ~105 mph in 5th). Upshifts cut the drive
-for 0.38–0.46 s, close to the car data's 0.42–0.50 s `shift_time_s`.
+clips (`kestrel_ts` 5th tops out at 136 mph and `parity_fwd_c` at 158 mph; clip 3 sees ~105 mph in
+5th). Upshifts cut the drive for 0.38–0.58 s, close to the car data's 0.42–0.50 s `shift_time_s`.
+
+## Tune screen (G10): proposed design
+
+**What the player gets.** In the garage, every owned car has a free *Tune* page next to its mods:
+four sliders of 5 steps, 3 = stock, with a short line under each saying what it does. A *Reset*
+button restores stock. Changes apply to the next spawn. Stat bars (acceleration / top speed /
+cornering, as in the reference) can come later from the parity metrics.
+
+**Mapping onto our car data** (implemented as `apply_tune` in `parity.rs` for measurement. The
+values are a first proposal for H to tune):
+
+| slider | 1 | 2 | 3 (stock) | 4 | 5 | fields changed |
+|---|---|---|---|---|---|---|
+| Suspension soft ↔ stiff | ×0.70 | ×0.85 | ×1.00 | ×1.18 | ×1.40 | `spring_n_per_m` and `arb_n_per_m` × scale; both dampers × √scale (keeps the damping ratio); bump stops and travel unchanged |
+| Gear ratio short ↔ long | ×1.12 | ×1.06 | ×1.00 | ×0.94 | ×0.88 | `final_drive` × scale (long = numerically lower; ±12 % ≈ one gear's spacing at the top) |
+| Differential open ↔ locked | open | LSD: preload ×0.5, ramps ×0.6 | the car's stock diff | LSD: preload ×2.5, power ramp ≥ 0.75, coast ramp ≥ 0.6 | locked | the driven axle's diff (`differentials.toml` entry, else `diff_*`); FWD cars change the front axle |
+| Brake balance rear ↔ front | −0.10 | −0.05 | 0 | +0.05 | +0.10 | `brakes.bias_front` + offset, clamped 0.3–0.8 |
+
+Measured with the owner's tune (stiff 5, long 5, diff 4, brakes 2) on REF-RWD-A against stock:
+0–100 mph with TCS full 11.06 s vs 10.44 s (the long gearing costs pull), top speed 168 vs
+150 mph, 60–0 2.83 vs 2.73 s, and the drift-hold still spins (0.45 s). The tune changes what you
+would expect, but it doesn't close G1.
+
+**How it flows.**
+1. **Data:** `data/tune/steps.toml` holds the scale tables above (one place, owned by H). A
+   car can override a row (e.g. trucks get a smaller suspension range).
+2. **Type:** `CarTune { suspension, gearing, diff, brake_balance: u8 }` (1..=5, default 3).
+   It belongs in `wp_contracts` (request WP-4), because the server, the net spawn message and
+   replays must all apply the same tune.
+3. **Apply at spawn:** `wp_vehicle::tune::apply(&mut VehicleDef, &mut DiffSetup, CarTune,
+   &TuneSteps)` before `Vehicle::new`. It is deterministic, done once per spawn, and costs
+   nothing per tick. Arcade and Simulation use the same path.
+4. **Save:** `wp_economy` garage state stores a `CarTune` per `CarUid` (free, no money), and
+   the career save keeps it. Quick races outside the career use the last tune for that car id
+   (per-viewer storage).
+5. **UI:** ui-kit garage (`CareerGarage.tsx`) gets a Tune tab using the menu's slider and
+   cycle controls, keyboard and gamepad navigable. The testbed developer panel gets the same
+   four sliders for A/B work.
+6. **Tests:** `apply` unit tests (stock = identity; every step changes only its fields), and
+   parity rows for stock vs the owner's tune (already in this suite).
 
 ## Table
 
