@@ -296,7 +296,7 @@ pub fn build_sim(
         if !cars.contains_key(&spec.car) {
             cars.insert(spec.car.clone(), load_car(data, &spec.car)?);
         }
-        let id = sim.spawn_vehicle(&cars[&spec.car], spec.pos, spec.yaw)?;
+        let id = sim.spawn_vehicle_tuned(&cars[&spec.car], spec.pos, spec.yaw, spec.tune)?;
         if spec.speed_mps != 0.0 {
             sim.place_vehicle(id, spec.pos, spec.yaw, spec.speed_mps)?;
         }

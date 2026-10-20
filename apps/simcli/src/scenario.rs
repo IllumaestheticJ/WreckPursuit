@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use wp_contracts::{AssistProfile, DamageMode, VehicleInput, PHYSICS_DT};
+use wp_sim::CarTune;
 
 use crate::RunError;
 
@@ -385,6 +386,10 @@ pub struct EntitySpec {
     /// Assists for this entity (default: the scenario's).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assists: Option<AssistSpec>,
+    /// The free per-car tune (`wp_vehicle::tune`; default stock). RON:
+    /// `tune: (suspension: 5, gearing: 5, diff: 4, brake_balance: 2)`; missing sliders are stock.
+    #[serde(default, skip_serializing_if = "CarTune::is_stock")]
+    pub tune: CarTune,
     /// Who drives. Input keyframes always apply on top of `scripted`; other drivers ignore them.
     #[serde(default)]
     pub driver: Driver,
