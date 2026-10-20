@@ -150,6 +150,15 @@ function releasePad(): void {
   if (!firstPad()) source = "Keyboard";
 }
 
+/** TCS Off = the throttle you press (owner row 104): no key ramp on the throttle. Set by main
+ * whenever the player's assists change. */
+let rawThrottle = false;
+
+/** Make the keyboard throttle raw (TCS Off) or ramped (TCS Half / Full). */
+export function setRawThrottle(on: boolean): void {
+  rawThrottle = on;
+}
+
 /** Toggle headlights. */
 export function toggleHeadlights(): void {
   headlights = !headlights;
@@ -170,8 +179,9 @@ function stepKeyRamps(k: KeyRamps, on: (id: ActionId) => boolean, dt: number): v
   const left = on("steerLeft") ? 1 : 0;
   const right = on("steerRight") ? 1 : 0;
   k.steer = ramp(k.steer, right - left, 4.0, 6.0, dt);
-  // Fast key ramp: the sim's keyboard assist preset filters the pedal again (~0.23 s).
-  k.throttle = ramp(k.throttle, on("throttle") ? 1 : 0, 12.0, 12.0, dt);
+  // Fast key ramp: the sim's keyboard assist preset filters the pedal again (~0.23 s). With TCS
+  // Off neither applies: the key is raw (row 104; the reference game's keyboard input is raw).
+  k.throttle = rawThrottle ? (on("throttle") ? 1 : 0) : ramp(k.throttle, on("throttle") ? 1 : 0, 12.0, 12.0, dt);
   k.brake = ramp(k.brake, on("brake") ? 1 : 0, 6.0, 10.0, dt);
   // Clutch key: in fast (0.1 s), out over ~0.3 s so a key release can still launch the car.
   k.clutch = ramp(k.clutch, on("clutch") ? 1 : 0, 10.0, 3.5, dt);
