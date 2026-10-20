@@ -1043,14 +1043,34 @@ impl PoliceSystem {
         by_level[level.min(by_level.len() - 1)].min(self.cfg.presence.max_ground_units)
     }
 
-    /// Whether any racer can see `p` (line of sight from the racer's eye to a car's at `p`,
-    /// any direction, any distance the world allows), or is closer than
-    /// `response.never_closer_m`. Units never appear or vanish where this is true.
+    /// Whether any racer can see `p`, or is closer than `response.never_closer_m`. Seeing
+    /// means line of sight, in any direction and as far as the world allows, from the
+    /// driver's eye or from a chase camera behind and above the car to a car body at `p`
+    /// (taken at the racer's height). Units never appear or vanish where this is true.
     pub(crate) fn in_racer_view(&self, world: &dyn WorldQuery, p: [f32; 2]) -> bool {
+        /// Driver's eye and chase camera above the racer's chassis, camera distance behind
+        /// it, and the height of the car body looked at, m.
+        const EYE_UP_M: f32 = 1.3;
+        const CAM_UP_M: f32 = 2.5;
+        const CAM_BACK_M: f32 = 6.0;
+        const BODY_UP_M: f32 = 1.0;
         let near = self.cfg.presence.response.never_closer_m;
         self.racers.values().any(|r| {
             let rp = xy(r.pos);
-            dist(rp, p) < near || self.sees_at(world, rp, r.pos[2], p, r.pos[2])
+            if dist(rp, p) < near {
+                return true;
+            }
+            let z = r.pos[2];
+            let body = [p[0], p[1], z + BODY_UP_M];
+            let mut views = vec![[rp[0], rp[1], z + EYE_UP_M]];
+            let v = [r.vel[0], r.vel[1]];
+            if crate::graph::len(v) > 1.0 {
+                let c = sub(rp, scale(normalize(v), CAM_BACK_M));
+                views.push([c[0], c[1], z + CAM_UP_M]);
+            }
+            views.iter().any(|eye| {
+                self.graph.line_of_sight([eye[0], eye[1]], p) && world.line_of_sight(*eye, body)
+            })
         })
     }
 
@@ -1120,7 +1140,17 @@ impl PoliceSystem {
             let a = self.graph.node(seg.a).pos;
             let b = self.graph.node(seg.b).pos;
             let len = seg.length_m;
-            if len < 2.0 * JUNCTION_CLEAR_M {
+            // Keep out of junction boxes; bend nodes (curved roads come as many short
+            // segments) need no clearance.
+            let clear = |n: crate::graph::NodeId| {
+                if self.graph.node(n).junction {
+                    JUNCTION_CLEAR_M
+                } else {
+                    0.0
+                }
+            };
+            let (lo, hi) = (clear(seg.a), len - clear(seg.b));
+            if hi - lo < 2.0 {
                 continue;
             }
             // Cheap reject: the whole segment is outside the window.
@@ -1128,9 +1158,14 @@ impl PoliceSystem {
             if da.min(db) > max_m || da.min(db) + len < rs.spawn_min_m {
                 continue;
             }
-            let n = ((len - 2.0 * JUNCTION_CLEAR_M) / STEP_M).floor() as usize + 1;
+            // Every STEP_M from `lo`, or the middle of a short span.
+            let n = ((hi - lo) / STEP_M).floor() as usize + 1;
             for j in 0..n {
-                let off = JUNCTION_CLEAR_M + j as f32 * STEP_M;
+                let off = if hi - lo < STEP_M {
+                    (lo + hi) * 0.5
+                } else {
+                    lo + j as f32 * STEP_M
+                };
                 let t = off / len;
                 let centre = lerp2(a, b, t);
                 // Drive toward a (leaving b) or toward b (leaving a), whichever is shorter
