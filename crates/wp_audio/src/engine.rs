@@ -14,6 +14,10 @@ use wp_math::{clamp01, sin_cos, smoothstep, Rng};
 use crate::data::{EngineAudioDef, EngineMix, RpmAnchor, SamplePack, ThrottleSide};
 
 const HALF_PI: f32 = 1.570_796_4;
+/// How long a throttle lift may take (from above half to below 0.2) and still count as one
+/// blow-off: the clutch shift's ignition cut ramps the throttle out over 40 % of the shift
+/// time, ≈ 0.13-0.18 s for the stock turbo cars' 0.42-0.45 s shifts (owner row 97). Was 0.15.
+const BLOWOFF_LIFT_WINDOW_S: f32 = 0.35;
 
 /// An engine layer with its root rpm resolved for one car.
 #[derive(Debug, Clone, PartialEq)]
@@ -339,7 +343,7 @@ pub fn update_engine(
             out.pop = Some(gain * rng.range_f32(0.4, 1.0));
         }
     }
-    st.prev_throttle = applied.max(st.prev_throttle - dt / 0.15);
+    st.prev_throttle = applied.max(st.prev_throttle - dt / BLOWOFF_LIFT_WINDOW_S);
     out
 }
 

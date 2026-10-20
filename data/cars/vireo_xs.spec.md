@@ -83,7 +83,7 @@ Peak **103 kW @ 7000 rpm**, **152 N·m @ 6000 rpm**. Idle 800 / redline 7600 / l
 
 ## Drivetrain
 
-5-speed manual, open front differential. Layout **FWD**; front diff: open; rear diff: open. Clutch capacity 1.40 × peak torque = 210 N·m. Shift time 0.25 s.
+5-speed manual, open front differential. Layout **FWD**; front diff: open; rear diff: open. Clutch capacity 1.40 × peak torque = 210 N·m. Shift time 0.45 s.
 
 | Gear | Ratio | Overall | km/h @ redline |
 |---|---|---|---|
@@ -138,8 +138,8 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 9.5 s | 207 km/h | 38.2 m | 0.87 g | — |
-| estimate | 8.0 s | 213 km/h | 37.4 m | 0.91 g | 474 |
+| sim | 9.8 s | 206 km/h | 38.5 m | 0.87 g | — |
+| estimate | 8.2 s | 213 km/h | 37.4 m | 0.91 g | 468 |
 
 ## Damage lattice (`data/lattices/vireo_xs.json`)
 

@@ -14,34 +14,34 @@ Sweeps (3 s): **wot** idle → redline at full throttle in 2nd, last 0.4 s on th
 | car | sweep | files | pitch (steps: worst plateau / sweep: median) | half orders vs firing | notes |
 |---|---|---|---|---|---|
 | debug_sedan (4-cyl Inline Even) | wot | [wav](engine_debug_sedan_wot.wav) · [spectrogram](engine_debug_sedan_wot.jpg) | 0.41 % (p90 1.37 %) | (steps: -32.9 dB) | level vs layers -5.4 dB; 87 limiter cuts |
-| debug_sedan (4-cyl Inline Even) | lift | [wav](engine_debug_sedan_lift.wav) · [spectrogram](engine_debug_sedan_lift.jpg) |  |  | 0 pops; lift drop 20.1 dB |
+| debug_sedan (4-cyl Inline Even) | lift | [wav](engine_debug_sedan_lift.wav) · [spectrogram](engine_debug_sedan_lift.jpg) |  |  | 0 pops; lift drop 20.0 dB |
 | debug_sedan (4-cyl Inline Even) | shift | [wav](engine_debug_sedan_shift.wav) · [spectrogram](engine_debug_sedan_shift.jpg) |  |  | shift dip 6.8 dB |
 | debug_sedan (4-cyl Inline Even) | steps |  | 0.13 % | -32.9 dB |  |
-| sperber_32 (6-cyl Inline Even) | wot | [wav](engine_sperber_32_wot.wav) · [spectrogram](engine_sperber_32_wot.jpg) | 0.43 % (p90 1.20 %) | (steps: -29.5 dB) | level vs layers 0.5 dB; 155 limiter cuts |
-| sperber_32 (6-cyl Inline Even) | lift | [wav](engine_sperber_32_lift.wav) · [spectrogram](engine_sperber_32_lift.jpg) |  |  | 5 pops; lift drop 17.0 dB |
-| sperber_32 (6-cyl Inline Even) | shift | [wav](engine_sperber_32_shift.wav) · [spectrogram](engine_sperber_32_shift.jpg) |  |  | shift dip 11.5 dB |
+| sperber_32 (6-cyl Inline Even) | wot | [wav](engine_sperber_32_wot.wav) · [spectrogram](engine_sperber_32_wot.jpg) | 0.44 % (p90 1.12 %) | (steps: -29.5 dB) | level vs layers 0.5 dB; 154 limiter cuts |
+| sperber_32 (6-cyl Inline Even) | lift | [wav](engine_sperber_32_lift.wav) · [spectrogram](engine_sperber_32_lift.jpg) |  |  | 1 pops; lift drop 17.2 dB |
+| sperber_32 (6-cyl Inline Even) | shift | [wav](engine_sperber_32_shift.wav) · [spectrogram](engine_sperber_32_shift.jpg) |  |  | shift dip 11.1 dB |
 | sperber_32 (6-cyl Inline Even) | steps |  | 0.05 % | -29.5 dB |  |
-| rampart_50 (8-cyl V CrossPlane) | wot | [wav](engine_rampart_50_wot.wav) · [spectrogram](engine_rampart_50_wot.jpg) | 0.74 % (p90 1.70 %) | (steps: -10.4 dB) | level vs layers -0.6 dB; 189 limiter cuts |
-| rampart_50 (8-cyl V CrossPlane) | lift | [wav](engine_rampart_50_lift.wav) · [spectrogram](engine_rampart_50_lift.jpg) |  |  | 4 pops; lift drop 20.4 dB |
+| rampart_50 (8-cyl V CrossPlane) | wot | [wav](engine_rampart_50_wot.wav) · [spectrogram](engine_rampart_50_wot.jpg) | 0.73 % (p90 1.61 %) | (steps: -10.4 dB) | level vs layers -0.6 dB; 189 limiter cuts |
+| rampart_50 (8-cyl V CrossPlane) | lift | [wav](engine_rampart_50_lift.wav) · [spectrogram](engine_rampart_50_lift.jpg) |  |  | 7 pops; lift drop 20.3 dB |
 | rampart_50 (8-cyl V CrossPlane) | shift | [wav](engine_rampart_50_shift.wav) · [spectrogram](engine_rampart_50_shift.jpg) |  |  | shift dip 10.1 dB |
 | rampart_50 (8-cyl V CrossPlane) | steps |  | 0.04 % | -10.4 dB |  |
-| rampart_50 (8-cyl V CrossPlane) | damaged | [wav](engine_rampart_50_damaged.wav) · [spectrogram](engine_rampart_50_damaged.jpg) | 0.82 % (p90 2.01 %) |  | 189 limiter cuts; 123/1069 misfires |
+| rampart_50 (8-cyl V CrossPlane) | damaged | [wav](engine_rampart_50_damaged.wav) · [spectrogram](engine_rampart_50_damaged.jpg) | 0.81 % (p90 2.06 %) |  | 189 limiter cuts; 126/1069 misfires |
 | lucciola_350 (8-cyl V Even) | wot | [wav](engine_lucciola_350_wot.wav) · [spectrogram](engine_lucciola_350_wot.jpg) | 0.58 % (p90 1.09 %) | (steps: -27.9 dB) | level vs layers 1.0 dB; 224 limiter cuts |
 | lucciola_350 (8-cyl V Even) | lift | [wav](engine_lucciola_350_lift.wav) · [spectrogram](engine_lucciola_350_lift.jpg) |  |  | 6 pops; lift drop 20.7 dB |
-| lucciola_350 (8-cyl V Even) | shift | [wav](engine_lucciola_350_shift.wav) · [spectrogram](engine_lucciola_350_shift.jpg) |  |  | shift dip 11.8 dB |
+| lucciola_350 (8-cyl V Even) | shift | [wav](engine_lucciola_350_shift.wav) · [spectrogram](engine_lucciola_350_shift.jpg) |  |  | shift dip 12.0 dB |
 | lucciola_350 (8-cyl V Even) | steps |  | 0.06 % | -27.9 dB |  |
-| shiro_turbo (4-cyl Inline Even turbo) | wot | [wav](engine_shiro_turbo_wot.wav) · [spectrogram](engine_shiro_turbo_wot.jpg) | 0.39 % (p90 0.95 %) | (steps: -16.3 dB) | level vs layers -2.8 dB; 94 limiter cuts |
+| shiro_turbo (4-cyl Inline Even turbo) | wot | [wav](engine_shiro_turbo_wot.wav) · [spectrogram](engine_shiro_turbo_wot.jpg) | 0.40 % (p90 0.96 %) | (steps: -16.3 dB) | level vs layers -2.8 dB; 95 limiter cuts |
 | shiro_turbo (4-cyl Inline Even turbo) | lift | [wav](engine_shiro_turbo_lift.wav) · [spectrogram](engine_shiro_turbo_lift.jpg) |  |  | 5 pops; 1 blow-off; lift drop 20.8 dB |
 | shiro_turbo (4-cyl Inline Even turbo) | shift | [wav](engine_shiro_turbo_shift.wav) · [spectrogram](engine_shiro_turbo_shift.jpg) |  |  | 1 blow-off; shift dip 9.7 dB |
 | shiro_turbo (4-cyl Inline Even turbo) | steps |  | 0.07 % | -16.3 dB |  |
 | interior perspective | wot (interior) | [wav](engine_rampart_50_wot_interior.wav) |  |  | > 1 kHz share -19.9 dB inside vs -8.8 dB outside |
-| player + 6 nearby | budget |  |  |  | 0.679 ms / 128-frame block (best 0.635) |
+| player + 6 nearby | budget |  |  |  | 0.717 ms / 128-frame block (best 0.636) |
 
 Engine orders at the 40 % redline plateau (dB relative to the firing order; crank order 1 =
 rpm / 60):
 
-- **debug_sedan (4-cyl Inline Even)**: 0.5: -58.6, 1: -35.7, 1.5: -42.4, 2: 0, 2.5: -33.2, 3: -28.4, 3.5: -32.9, 4: 6.1
-- **sperber_32 (6-cyl Inline Even)**: 0.5: -56.6, 1: -51.8, 1.5: -57.3, 2: -46.5, 2.5: -48.9, 3: 0, 3.5: -29.5, 4: -41.8, 4.5: -29.8, 5: -30.5, 5.5: -37, 6: -6.6
-- **rampart_50 (8-cyl V CrossPlane)**: 0.5: -61.3, 1: -38.1, 1.5: -41.5, 2: -30.7, 2.5: -12, 3: -27.4, 3.5: -17.6, 4: 0, 4.5: -25.6, 5: -23.6, 5.5: -10.4, 6: -30.7, 6.5: -12.3, 7: -39.3, 7.5: -27.6, 8: -13.6
-- **lucciola_350 (8-cyl V Even)**: 0.5: -66.7, 1: -51.8, 1.5: -53.3, 2: -8.7, 2.5: -38.3, 3: -33.4, 3.5: -35.3, 4: 0, 4.5: -27.9, 5: -19.7, 5.5: -29.2, 6: -1.9, 6.5: -32.7, 7: -35.6, 7.5: -32.9, 8: -10
-- **shiro_turbo (4-cyl Inline Even turbo)**: 0.5: -47, 1: -32.4, 1.5: -31.4, 2: 0, 2.5: -31.9, 3: -18.9, 3.5: -16.3, 4: 9.9
+- **debug_sedan (4-cyl Inline Even)**: 0.5: -58.6, 1: -35.7, 1.5: -42.3, 2: 0, 2.5: -33.2, 3: -28.4, 3.5: -32.9, 4: 6.1
+- **sperber_32 (6-cyl Inline Even)**: 0.5: -56.6, 1: -51.9, 1.5: -57.2, 2: -46.5, 2.5: -48.9, 3: 0, 3.5: -29.5, 4: -41.8, 4.5: -29.8, 5: -30.5, 5.5: -37, 6: -6.6
+- **rampart_50 (8-cyl V CrossPlane)**: 0.5: -61.4, 1: -38.1, 1.5: -41.5, 2: -30.7, 2.5: -12, 3: -27.4, 3.5: -17.6, 4: 0, 4.5: -25.6, 5: -23.6, 5.5: -10.4, 6: -30.7, 6.5: -12.2, 7: -39.2, 7.5: -27.6, 8: -13.5
+- **lucciola_350 (8-cyl V Even)**: 0.5: -66.7, 1: -51.8, 1.5: -53.3, 2: -8.7, 2.5: -38.4, 3: -33.4, 3.5: -35.3, 4: 0, 4.5: -27.9, 5: -19.7, 5.5: -29.2, 6: -1.9, 6.5: -32.7, 7: -35.6, 7.5: -32.9, 8: -9.9
+- **shiro_turbo (4-cyl Inline Even turbo)**: 0.5: -47.1, 1: -32.4, 1.5: -31.4, 2: 0, 2.5: -31.9, 3: -18.9, 3.5: -16.3, 4: 9.9

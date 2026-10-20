@@ -267,6 +267,9 @@ fn every_wot_upshift_dips_and_re_rises() {
             let after = window(fr, f.t + 0.45, f.t + 0.6)
                 .map(amp)
                 .fold(0.0, f32::max);
+            // The re-rise check needs the pedal held through its window: the scripted drive
+            // lifts at a fixed time, which a slower stock shift (owner row 97) can reach first.
+            let held = window(fr, f.t, f.t + 0.6).all(|w| w.pedal > 0.9);
             let dip = db(pre) - db(low);
             assert!(
                 (1.2..=9.0).contains(&dip),
@@ -277,7 +280,7 @@ fn every_wot_upshift_dips_and_re_rises() {
                 f.t
             );
             assert!(
-                db(pre) - db(after) <= 1.0,
+                !held || db(pre) - db(after) <= 1.0,
                 "{} {}->{} at {:.2}s: level {:.1} dB 0.5 s after the shift vs {:.1} before",
                 tr.car,
                 p.gear,
