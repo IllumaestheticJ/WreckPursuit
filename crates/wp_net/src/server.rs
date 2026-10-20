@@ -50,6 +50,10 @@ use crate::{Channel, DOWNLINK_BUDGET_BPS, TICKS_PER_NET_TICK, TICK_HZ};
 /// number lives. Players who are not wanted keep [`ServerConfig::reconnect_window_ticks`].
 pub const WANTED_DISCONNECT_GRACE_TICKS: u64 = 60 * TICK_HZ;
 
+/// Notice sent when a wanted racer asks for another role (B05).
+pub const WANTED_ROLE_SWITCH_REFUSED: &str =
+    "you are wanted: lose the police or get caught before switching role";
+
 /// Net ticks between bit-exact own-vehicle snapshots (12 → 5 Hz).
 pub const OWN_FULL_EVERY_NET_TICKS: u64 = 12;
 
@@ -207,6 +211,8 @@ pub struct ServerStats {
     pub abandoned_captures: u64,
     /// Busts settled on player accounts (fine / impound), abandoned ones included.
     pub busts_settled: u64,
+    /// Role requests refused because the racer was wanted or pursued (B05).
+    pub role_switches_refused: u64,
     /// Lattice snapshots sent in response to hash mismatches.
     pub lattice_resyncs: u64,
     /// Final lattice snapshots sent after a provisional one (model settled since).
@@ -523,6 +529,16 @@ impl<S: NetSim> ServerInstance<S> {
                 self.players.get_mut(&pid).expect("player").wanted_hold = true;
             }
         }
+    }
+
+    /// Whether the player is seated as a racer and their car is wanted or pursued.
+    fn wanted_racer_seat(&self, pid: PlayerId) -> bool {
+        self.roles.role(pid) == Some(Role::Racer)
+            && self
+                .players
+                .get(&pid)
+                .and_then(|p| p.vehicle)
+                .is_some_and(|v| self.is_wanted_racer(v))
     }
 
     /// Whether `v` is a racer seat whose driver is wanted or in a pursuit.
@@ -893,6 +909,15 @@ impl<S: NetSim> ServerInstance<S> {
                 self.accept_inputs(pid, first_tick, &ClientMsg::inputs_dequantised(&inputs));
             }
             ClientMsg::RoleRequest { role } => {
+                if role != Role::Racer && self.wanted_racer_seat(pid) {
+                    // Switching away drops the racer car: while wanted that would be an
+                    // escape (B05). Refused like other role refusals: the current role again,
+                    // with the reason as a notice.
+                    self.send_role(pid, Role::Racer);
+                    self.notice(pid, WANTED_ROLE_SWITCH_REFUSED);
+                    self.stats.role_switches_refused += 1;
+                    return;
+                }
                 let events = self.roles.request(pid, role, tick);
                 self.apply_role_events(events);
             }
