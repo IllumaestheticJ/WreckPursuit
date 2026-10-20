@@ -1,9 +1,9 @@
 // Control for tunnel_escape_founders_cut.ron (backlog B04): the identical run with covered
 // roads not blocking line of sight (`covered_los: false`; the tunnel geometry is unchanged).
 // The helicopter keeps the racer in view all the way into Founders Cut and while he waits at
-// the lay-by, so the escape timer never runs long; ground units arrive and the first pursuit
-// ends in a capture, never an escape. Round 13: police converge faster (rows 63 / 64), so the
-// capture comes sooner, 134.9 s at 25 m/s (was 150.7-168.9 s); the window starts at 115 s.
+// the lay-by, so he is never unseen for long, and the backup captures him sooner than in the
+// tunnel run (measured, heat 50, racer 22 / 25 / 28 m/s: unseen 0.0 / 0.1 / 3.8 s, captured
+// at 129.4 / 126.7 / 124.3 s vs 130.3 / 133.8 / 127.1 s with cover).
 (
     name: "police_tunnel_escape_founders_cut_control",
     seed: 51,
@@ -26,16 +26,16 @@
             driver: follow_route(route_id: "Lantern Run -> Founders Cut lay-by", target_speed: 25.0),
         ),
     ],
-    duration_s: 190.0,
+    duration_s: 170.0,
     hash_every: 240,
     expect: [
         pursuit_started_before(t_s: 15.0),
         // wp_police HeloLaunched (kind 12).
         police_event_before(kind: 12, t_s: 80.0),
         metric(entity: "racer", name: "route_progress", min: 0.97, max: 1.0),
-        // Never out of sight long enough to escape.
-        metric(entity: "racer", name: "max_los_lost_s", min: 0.0, max: 16.0),
-        first_pursuit_end(entity: "racer", outcome: "Captured", min_s: 115.0, max_s: 190.0),
+        // The helicopter never loses him for long.
+        metric(entity: "racer", name: "max_los_lost_s", min: 0.0, max: 8.0),
+        first_pursuit_end(entity: "racer", outcome: "Captured", min_s: 110.0, max_s: 140.0),
         total_loss(entity: "racer", expected: false),
     ],
 )
