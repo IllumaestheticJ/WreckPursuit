@@ -324,25 +324,33 @@ agents per instance).
 
 ---
 
-## 9. Onboarding (first 30 minutes)
+## 9. Onboarding (first 15 minutes)
 
-Goal: teach driving, damage and the money loop without a tutorial wall. Every step happens in the
-real city.
+Goal: teach driving, damage, the money loop and the police without a tutorial wall. Every step
+happens in the real city, on the real systems; the flow only places things and reacts to what
+the player does. Every outcome leads on to the next step. Built by prompt 22 (`ws/onboarding`).
 
-1. **Cold open (2 min):** night, the player drives a borrowed Rampart 5.0 in a scripted-free but
-   staged chase on the Loop: one patrol, helicopter overhead, Calloway Tunnel ahead. The player
-   learns that breaking line of sight works. The car is not theirs; whatever happens to it is free.
-2. **Junkyard (1 min):** wake up with 4 000 and the junkyard beater offer. Buy it.
-3. **Test lot (3 min):** drive, brake, a 30 km/h barrier tap. The damage silhouette and the repair
-   quote appear. Choose "drive damaged" or repair: both are valid.
-4. **First meet (5 min):** Mercer Meet (R10): free entry, short, tuned so a careful beater can
-   place. Payout screen explains purse, clean bonus, rep.
-5. **First heat (5 min):** a scripted-free trigger: the next run passes a stationary patrol. The
-   radar and heat meter tutorial fires on the first real violation. Escape to the nearest
-   safehouse (the HUD highlights the two nearest).
-6. **First garage visit:** repair bill, a legit vs crooked shop choice explained in one line.
-7. **Choice of path:** at the end, the game offers a cop shift (with a probationary cruiser) as an
-   equal alternative. Role choice is never locked.
+1. **Intro crash (2 min):** night, the player drives a borrowed Rampart 5.0 down a short street
+   towards a signalled junction; a traffic car runs the red. The crash is physical, not canned
+   (a player who avoids it gets a "near miss" and meets the damage lesson in the race). The
+   camera holds on the damage. The car is not theirs: whatever happens to it is free.
+2. **Junkyard car (1 min):** wake up with 4 000 and the junkyard beater offer (1 500, Worn).
+   Buy it and drive it out of the yard: first throttle, brake and turn.
+3. **First race (5 min):** a free meet, short (≤ 4 km), against beginner AI in cheap cars, tuned
+   so a careful beater can place. The payout screen explains purse, clean bonus and rep. A DNF is
+   allowed and explained.
+4. **First police chase (5 min):** the drive to the garage passes a parked patrol. The radar and
+   heat-meter hints fire on the first real, witnessed violation; the HUD highlights the two
+   nearest safehouses. Escape, safehouse or capture all continue (capture through the real
+   impound). A player who drives clean never gets chased, and is told so.
+5. **Garage:** the repair bill for everything that happened, legit vs crooked shop explained in
+   one line (crooked is suggested only while wanted). Repair, repair some or drive damaged; debt
+   is possible and explained. Then the garage screen. Onboarding ends with one card offering
+   another meet, free roam, or a cop shift with a probationary cruiser (role choice is never
+   locked).
+
+Every step is skippable from the pause menu, and returning players can skip the intro. Progress
+is saved after each step.
 
 Assist preset defaults to Street; the game suggests Rookie if the player crashes three times in the
 first five minutes, and never changes it silently.
