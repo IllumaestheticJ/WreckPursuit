@@ -712,6 +712,10 @@ SwiftShader frame time is dominated by rasterising the city and is unchanged; re
 roughly doubles (instance buffers of the full-mesh fleet: up to 192 instances × ~4k triangles per
 model within 250 m). On a real GPU this is a handful of instanced draws; if it shows up in a
 browser profile, lower `FULL_LOD_M` (render/fleet.ts) to ~150 m.
+Follow-up 2026-10-20: with the 320 m sightline the city no longer reached its traffic target
+(`world_traffic_soak_observer`); fixed in `wp_world` without moving the spawn ring (see
+`docs/integration/world.md`, "Follow-up"). `npm run e2e` LOD checks on that build: 0 frames
+without a mesh, swap jump 0.000 m, traffic appears ≥ 322 m / vanishes ≥ 342 m from the player.
 ### Known gaps
 - Proxy → full instanced mesh switches at 250 m from the camera (a small far-LOD change, by design).
 - Damage done while physical is lost on demotion (the instanced mesh is undented); traffic
