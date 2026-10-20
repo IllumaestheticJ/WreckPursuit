@@ -1114,7 +1114,12 @@ mod tests {
     }
 
     fn kerbside(pos: [f32; 2], fwd: [f32; 2]) -> Obstacle {
-        Obstacle::from_view(&ObstacleView::parked([pos[0], pos[1], 0.0], fwd, 2.25, 0.95))
+        Obstacle::from_view(&ObstacleView::parked(
+            [pos[0], pos[1], 0.0],
+            fwd,
+            2.25,
+            0.95,
+        ))
     }
 
     #[test]
@@ -1143,7 +1148,11 @@ mod tests {
         }
         assert!(off < 0.0, "passes the parked car: {off}");
         // Parked cars never block a spawn or a junction.
-        assert!(spawn_clear([1.75, 40.0], &[kerbside([4.0, 40.0], [0.0, 1.0])], &c));
+        assert!(spawn_clear(
+            [1.75, 40.0],
+            &[kerbside([4.0, 40.0], [0.0, 1.0])],
+            &c
+        ));
     }
 
     #[test]
@@ -1163,7 +1172,13 @@ mod tests {
         );
         assert!(scan(&m, &t, 1.75, 40.0, &[waiting], &c, true).is_none());
         // Right at the bumper it still counts.
-        let close = Obstacle::car(Some(EntityId(3)), None, [4.2, 100.2], [0.0, 0.0], [-1.0, 0.0]);
+        let close = Obstacle::car(
+            Some(EntityId(3)),
+            None,
+            [4.2, 100.2],
+            [0.0, 0.0],
+            [-1.0, 0.0],
+        );
         assert!(scan(&m, &t, 1.75, 40.0, &[close], &c, true).is_some());
     }
 
@@ -1184,6 +1199,9 @@ mod tests {
         let queue = [parked(2, [1.75, 9.0]), parked(3, [1.75, 15.5])];
         assert!(run(&lone, false) < 0.0, "passes a lone stopped car");
         assert_eq!(run(&queue, false), 1.75, "waits in a queue");
-        assert!(run(&queue, true) < 0.0, "with lights it goes round the queue");
+        assert!(
+            run(&queue, true) < 0.0,
+            "with lights it goes round the queue"
+        );
     }
 }
