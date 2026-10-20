@@ -121,10 +121,11 @@ fn shifts_are_rev_matched_and_the_torque_gap_is_short() {
         }
     }
     assert!(checked >= 6, "only {checked} shifts checked");
-    // Drive is cut only in the neutral middle of a shift (40% of 0.25 s = 0.1 s).
+    // Drive is cut only in the neutral middle of a shift (40 % of the shift time) plus a
+    // fixed ≈ 30 ms while the clutch bites again (measured 0.208 s at the 0.45 s stock shift).
     let gap_s = longest_gap as f32 / 240.0;
     assert!(
-        gap_s <= 0.45 * dt.shift_time_s,
+        gap_s <= 0.4 * dt.shift_time_s + 0.04,
         "longest drive-torque gap {gap_s:.3} s"
     );
 }
@@ -138,8 +139,9 @@ fn kickdown_on_full_throttle() {
     let _ = shifts(&mut rig, &throttle(0.15), 4.0);
     let cruise_gear = rig.state().gear;
     assert!(cruise_gear >= 4, "cruising in {cruise_gear}");
-    // ...then the pedal is floored: one shift, at least two gears down, within 0.4 s.
-    let s = shifts(&mut rig, &throttle(1.0), 0.4);
+    // ...then the pedal is floored: one shift, at least two gears down, done within the
+    // car's shift time plus 0.15 s to react (0.4 s at the old 0.25 s shift).
+    let s = shifts(&mut rig, &throttle(1.0), c.def.drivetrain.shift_time_s + 0.15);
     let now = rig.state().gear;
     assert_eq!(s, vec![-1], "{s:?}");
     assert!(
@@ -149,9 +151,12 @@ fn kickdown_on_full_throttle() {
 }
 
 #[test]
-fn street_cars_shift_crisply() {
-    // Street cars with a clutch automatic shift in at most 250 ms (the dual-clutch Lindwurm
-    // takes 80 ms); torque-converter cars, trucks and the beater are exempt.
+fn street_cars_shift_at_believable_stock_speeds() {
+    // Owner playtest row 97 (2026-10-20): stock shifts were "a little too fast"; mods make
+    // them faster (`drivetrain.shift_time_scale`, ×0.28 fully modded). Stock street cars with
+    // a clutch gearbox take 0.35-0.55 s, a dual-clutch (lindwurm_4t, 0.18 s) 0.12-0.25 s;
+    // torque-converter cars, trucks and the beater are exempt. The lead's debug cars keep
+    // their old values.
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/cars");
     for e in std::fs::read_dir(dir).unwrap() {
         let p = e.unwrap().path();
@@ -167,11 +172,13 @@ fn street_cars_shift_crisply() {
                 | VehicleClass::Muscle
                 | VehicleClass::Exotic
         );
-        if !street || d.torque_converter.is_some() {
+        if !street || d.torque_converter.is_some() || c.def.id.starts_with("debug_") {
             continue;
         }
+        let dual_clutch = c.def.id == "lindwurm_4t";
+        let band = if dual_clutch { 0.12..=0.25 } else { 0.35..=0.55 };
         assert!(
-            d.shift_time_s > 0.0 && d.shift_time_s <= 0.25,
+            band.contains(&d.shift_time_s),
             "{}: shift_time_s {}",
             c.def.id,
             d.shift_time_s
