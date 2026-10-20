@@ -124,6 +124,15 @@ export function toggleHeadlights(): void {
   headlights = !headlights;
 }
 
+/** Drift Lab W: steer and throttle keys reach the sim raw (−1 / 0 / +1, 0 / 1), as in the
+ * reference ("keyboard input is raw"); the rack slew lives in wp_vehicle::plain. */
+let rawKeys = false;
+
+/** Turn raw keyboard steer / throttle on (Drift Lab W) or back to the normal key ramps. */
+export function setRawKeyboard(on: boolean): void {
+  rawKeys = on;
+}
+
 function ramp(cur: number, target: number, up: number, down: number, dt: number): number {
   const rate = Math.abs(target) > Math.abs(cur) || Math.sign(target) !== Math.sign(cur) ? up : down;
   const d = target - cur;
@@ -239,9 +248,11 @@ export function readInput(dt: number): { input: DriverInput; source: InputSource
   // corrected (lane change at 80 km/h: 8.2 → 5.6 steering reversals/s, path error 0.50 →
   // 0.23 m; docs/integration/drift-twitch.md). Row 90's reversal-from-centre and 12/s
   // release measured no better (more reversals in a slalom), so they are not used.
-  kb.steer = ramp(kb.steer, right - left, 6.0, 6.0, dt);
+  // Drift Lab W: raw keys (no ramp at all).
+  kb.steer = rawKeys ? right - left : ramp(kb.steer, right - left, 6.0, 6.0, dt);
   // Fast key ramp: the sim's keyboard assist preset filters the pedal again (~0.23 s).
-  kb.throttle = ramp(kb.throttle, keyAction("throttle") ? 1 : 0, 12.0, 12.0, dt);
+  const thrKey = keyAction("throttle") ? 1 : 0;
+  kb.throttle = rawKeys ? thrKey : ramp(kb.throttle, thrKey, 12.0, 12.0, dt);
   kb.brake = ramp(kb.brake, keyAction("brake") ? 1 : 0, 6.0, 10.0, dt);
   // Clutch key: in fast (0.1 s), out over ~0.3 s so a key release can still launch the car.
   kb.clutch = ramp(kb.clutch, keyAction("clutch") ? 1 : 0, 10.0, 3.5, dt);

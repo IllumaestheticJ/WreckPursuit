@@ -769,6 +769,23 @@ impl Vehicle {
         (self.corners[0].tire.lateral.d * grip).max(0.1)
     }
 
+    /// Drift Lab W readout under the plain steering profile ([`crate::plain`]):
+    /// `(rack −1..=1 (+ = right), lock fraction at the current speed)`, or `None` when the
+    /// plain profile is off.
+    pub fn plain_readout(&self) -> Option<(f32, f32)> {
+        let p = crate::plain::active()?;
+        let ch = &self.chassis;
+        let v_fwd = ch.lin_vel.dot(ch.rot * V3::Y);
+        let eff = self.effects;
+        Some(crate::plain::readout(
+            self.center_steer,
+            v_fwd,
+            self.max_steer() * eff.steer_ratio_scale.max(0.05),
+            eff.steer_pull,
+            &p,
+        ))
+    }
+
     fn max_steer(&self) -> f32 {
         self.corners[0].max_steer.max(self.corners[1].max_steer)
     }
@@ -946,29 +963,45 @@ impl Vehicle {
             &tuning,
             dt,
         );
-        let st = slide_throttle(assists, self.slide_class, rear_axle, input.steer);
-        // `scale` is exactly 1.0 unless the slide throttle is active (bit-identical otherwise).
-        let thr_target = if st.scale < 1.0 {
-            thr_in * st.scale
-        } else {
-            thr_in
-        };
-        // Drift assist throttle shaping (exactly 1.0 when inactive: bit-identical otherwise).
-        let dc = self.drift_cmd;
-        let thr_target = if dc.throttle_scale < 1.0 {
-            thr_target * dc.throttle_scale
-        } else {
-            thr_target
-        };
-        let prev_thr = self.throttle_f;
-        self.throttle_f = filter_pedal(self.throttle_f, thr_target, st.filter, dt);
-        if dc.lift_time_s > 0.0 && self.throttle_f < prev_thr {
-            // Abrupt lift in a slide: softened (a full lift takes `lift_time_s`), not cancelled.
-            self.throttle_f = self.throttle_f.max(prev_thr - dt / dc.lift_time_s);
+        // Drift Lab W (plain keyboard steering, `crate::plain`): no drift intent modes, no
+        // slide-throttle feathering, no throttle shaping, no pedal filter — the throttle key
+        // reaches the engine as pressed (TCS / ESC still apply if the profile turns them on).
+        let plain = crate::plain::active();
+        if plain.is_some() {
+            self.drift_cmd = crate::drift::DriftCommand {
+                throttle_scale: 1.0,
+                ..Default::default()
+            };
         }
-        if dc.rise_time_s > 0.0 && self.throttle_f > prev_thr {
-            // In a slide the throttle rises no faster than 0 → 1 in `rise_time_s`.
-            self.throttle_f = self.throttle_f.min(prev_thr + dt / dc.rise_time_s);
+        let dc = self.drift_cmd;
+        if plain.is_some() {
+            self.throttle_f = thr_in;
+        } else {
+            let st = slide_throttle(assists, self.slide_class, rear_axle, input.steer);
+            // `scale` is exactly 1.0 unless the slide throttle is active (bit-identical
+            // otherwise).
+            let thr_target = if st.scale < 1.0 {
+                thr_in * st.scale
+            } else {
+                thr_in
+            };
+            // Drift assist throttle shaping (exactly 1.0 when inactive: bit-identical otherwise).
+            let thr_target = if dc.throttle_scale < 1.0 {
+                thr_target * dc.throttle_scale
+            } else {
+                thr_target
+            };
+            let prev_thr = self.throttle_f;
+            self.throttle_f = filter_pedal(self.throttle_f, thr_target, st.filter, dt);
+            if dc.lift_time_s > 0.0 && self.throttle_f < prev_thr {
+                // Abrupt lift in a slide: softened (a full lift takes `lift_time_s`), not
+                // cancelled.
+                self.throttle_f = self.throttle_f.max(prev_thr - dt / dc.lift_time_s);
+            }
+            if dc.rise_time_s > 0.0 && self.throttle_f > prev_thr {
+                // In a slide the throttle rises no faster than 0 → 1 in `rise_time_s`.
+                self.throttle_f = self.throttle_f.min(prev_thr + dt / dc.rise_time_s);
+            }
         }
         self.brake_f = filter_pedal(self.brake_f, brk_in, assists.brake_filter, dt);
         let handbrake = input.handbrake.clamp(0.0, 1.0);
@@ -1188,14 +1221,29 @@ impl Vehicle {
         // --- Steering ---------------------------------------------------------------------
         let steer_in = self.steer_input(input.steer, v_fwd, v_left, rear_axle);
         let max_steer = self.max_steer();
-        self.center_steer = update_center_angle(
-            self.center_steer,
-            &steer_in,
-            assists,
-            max_steer,
-            self.def.steering.rack_speed_rad_per_s,
-            dt,
-        );
+        self.center_steer = if let Some(p) = plain {
+            crate::plain::update_center_angle(
+                self.center_steer,
+                &crate::plain::PlainInput {
+                    driver: input.steer,
+                    speed: v_fwd,
+                    full_lock: max_steer * steer_in.ratio_scale,
+                    pull: steer_in.pull,
+                    front_axle_angle: steer_in.front_axle_angle,
+                },
+                &p,
+                dt,
+            )
+        } else {
+            update_center_angle(
+                self.center_steer,
+                &steer_in,
+                assists,
+                max_steer,
+                self.def.steering.rack_speed_rad_per_s,
+                dt,
+            )
+        };
         let drift_tel = crate::drift::DriftTelemetry {
             mode: dc.mode,
             slide_angle: dc.slide,

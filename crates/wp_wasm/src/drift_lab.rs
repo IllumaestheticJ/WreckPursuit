@@ -66,3 +66,81 @@ pub fn drift_readout(entity: u32) -> Result<Vec<f32>, JsValue> {
         ])
     })
 }
+
+// --- Drift Lab W (lead/drift-lab-w): plain keyboard steering, reference-parity cars -------
+//
+// | function | what |
+// |---|---|
+// | `plain_steer_json()` | the plain steering constants in effect (`null` = plain off), JSON |
+// | `plain_steer_defaults_json()` | the defaults (`wp_vehicle::plain::PlainSteer`), JSON |
+// | `plain_steer_set(json)` | turn plain steering on with these constants (`""` = off); missing fields take the default |
+// | `plain_readout(entity)` | `[steer_key, rack, lock_frac, slide_deg, throttle_key, engine_throttle, gear, speed_kmh, wheel_deg]` (see `plain_readout`) |
+// | `parity_car_ids()` | JSON array of the parity test cars (not in `car_ids()`) |
+
+/// The plain steering constants in effect (`null` when plain steering is off), JSON.
+#[wasm_bindgen]
+pub fn plain_steer_json() -> String {
+    json(&wp_vehicle::plain::active())
+}
+
+/// The default plain steering constants, JSON.
+#[wasm_bindgen]
+pub fn plain_steer_defaults_json() -> String {
+    json(&wp_vehicle::plain::PlainSteer::default())
+}
+
+/// Turn the plain keyboard steering profile on with the constants in `json` (missing fields
+/// take the default), or off with `""`. Process-wide, not logged in recordings.
+#[wasm_bindgen]
+pub fn plain_steer_set(steer_json: &str) -> Result<(), JsValue> {
+    if steer_json.trim().is_empty() {
+        wp_vehicle::plain::set_override(None);
+        return Ok(());
+    }
+    let p: wp_vehicle::plain::PlainSteer = serde_json::from_str(steer_json).map_err(err)?;
+    wp_vehicle::plain::set_override(Some(p));
+    Ok(())
+}
+
+/// Drift Lab W readout of a vehicle: `[steer_key (−1..=1, + = right), rack (−1..=1, + =
+/// right; NaN when plain steering is off), lock_frac (0..=1; NaN when off), slide_deg (body
+/// slip, + = moving toward the left of the heading), throttle_key, engine_throttle, gear,
+/// speed_kmh, wheel_deg (centre road-wheel angle, + = left)]`.
+#[wasm_bindgen]
+pub fn plain_readout(entity: u32) -> Result<Vec<f32>, JsValue> {
+    with(|s| {
+        let v = s
+            .vehicle(EntityId(entity))
+            .ok_or_else(|| format!("unknown entity {entity}"))?;
+        let tel = v.vehicle.telemetry();
+        let ch = v.vehicle.chassis();
+        let fwd = ch.rot * wp_vehicle::math::V3::Y;
+        let right = ch.rot * wp_vehicle::math::V3::X;
+        let v_fwd = ch.lin_vel.dot(fwd);
+        let v_left = -ch.lin_vel.dot(right);
+        let slide = if v_fwd.abs() < 1.0 {
+            0.0
+        } else {
+            wp_vehicle::math::atan2(v_left, v_fwd.abs()).to_degrees()
+        };
+        let (rack, frac) = v.vehicle.plain_readout().unwrap_or((f32::NAN, f32::NAN));
+        Ok(vec![
+            v.input.steer,
+            rack,
+            frac,
+            slide,
+            v.input.throttle.clamp(0.0, 1.0),
+            tel.throttle,
+            v.vehicle.gear() as f32,
+            ch.lin_vel.length() * 3.6,
+            tel.steer_rad.to_degrees(),
+        ])
+    })
+}
+
+/// JSON array of the Drift Lab W reference-parity test cars (`data/cars/parity/`), which are
+/// not in `car_ids()`.
+#[wasm_bindgen]
+pub fn parity_car_ids() -> String {
+    json(&crate::data::parity_car_ids())
+}

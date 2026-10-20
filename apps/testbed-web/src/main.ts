@@ -34,6 +34,7 @@ import { UiOverlay } from "./ui/overlay";
 import { MapOverlay } from "./ui/map";
 import { HudLayout } from "./ui/layout";
 import { DRIFT_LAB, DriftLabPanel, driftLabScenario } from "./drift_lab_b";
+import { DRIFT_LAB_W, DRIFT_LAB_W_CAR, DriftLabWPanel, driftLabWScenario } from "./drift_lab_w";
 import { defaultGameSettings, hasStoredSettings, loadGameSettings, mountGameMenu, type GameSettings, type PlayChoice } from "../../ui-kit/src/live";
 import { gfxMode } from "./render/quality";
 import { RunEndView } from "./ui/runEnd";
@@ -170,6 +171,8 @@ async function main(): Promise<void> {
   scene.world.add(tagFeature(props.group, "props"));
   // Drift Lab C: course paint + the tune panel / readout (shown only in the lab session).
   const driftLab = new DriftLabPanel(overlay, sim, scene.world, () => app.player);
+  // Drift Lab W: plain keyboard steering, reference-parity cars (restarts with the chosen car).
+  const driftLabW = new DriftLabWPanel(overlay, sim, scene.world, () => app.player, (car) => startDriftLabW(car));
   // Spike strips on the road (playtest row 88).
   const policeTools = new PoliceToolsView();
   scene.world.add(policeTools.group);
@@ -386,6 +389,8 @@ async function main(): Promise<void> {
     scene.setBarriers(sc.barriers ?? []);
     // drift_lab_b: recordings / sessions from before Drift Lab C.
     driftLab.setActive(sc.name === DRIFT_LAB || sc.name === "drift_lab_b");
+    if (sc.name === DRIFT_LAB_W) driftLabW.car = sc.entities?.[0]?.car ?? DRIFT_LAB_W_CAR;
+    driftLabW.setActive(sc.name === DRIFT_LAB_W);
     const city = sim.worldInfo()[W.city] > 0.5;
     const cityId = city ? sim.cityId() : "";
     void scene.setCity(cityId || null);
@@ -532,6 +537,18 @@ async function main(): Promise<void> {
     applyAssistPreset(app.source);
   };
 
+  /** Drift Lab W (lead/drift-lab-w): Drift Lab C's course with plain keyboard steering (raw
+   * keys, constant-rate rack), TCS / ESC off, manual gears; default car = parity_rwd_d. */
+  const startDriftLabW = (car = DRIFT_LAB_W_CAR, mode = ($("mode") as HTMLSelectElement).value) => {
+    app.scenarioFile = null;
+    app.scenario = null;
+    app.result = null;
+    app.bench = null;
+    sim.init(1, driftLabWScenario(sim.freeDriveJson(car, mode, false)), false);
+    rebuildViews();
+    applyAssistPreset(app.source);
+  };
+
   /** City chase preset: procedural city at 23:00, police + traffic, player already speeding.
    * `rain` = the rainy-night variant (downpour, soaked road; the weather selector can still
    * override it). */
@@ -665,6 +682,8 @@ async function main(): Promise<void> {
         }
         lastMenuCountersteer = menuCs;
       }
+      // Drift Lab W keeps its reference assists (TCS / ESC off, manual) over any preset.
+      driftLabW.applyAssists();
       syncAssistBoxes();
     } catch (e) {
       console.warn(e);
@@ -1067,6 +1086,7 @@ async function main(): Promise<void> {
         else if (choice === "chaseRain") startCityChase(undefined, undefined, true);
         else if (choice === "free") startFreeDrive(undefined, undefined, true);
         else if (choice === "driftLabB") startDriftLabB();
+        else if (choice === "driftLabW") startDriftLabW();
         else if (choice === "races") raceView.openPicker();
         else openGarage();
       },
@@ -1127,6 +1147,9 @@ async function main(): Promise<void> {
     await runScenario(scParam, Number(params.get("speed") ?? 0));
   } else if (params.get("race")) {
     startRace(params.get("race")!, DEFAULT_CAR);
+  } else if (params.get("drift") === "w") {
+    // ?drift=w[&car=parity_rwd_a] opens Drift Lab W (plain steering, parity cars).
+    startDriftLabW(params.get("car") ?? DRIFT_LAB_W_CAR);
   } else if (params.get("drift") === "c" || params.get("drift") === "b") {
     // ?drift=c[&car=shiro_turbo] opens Drift Lab C (?drift=b: the same lab, old links).
     startDriftLabB(params.get("car") ?? DEFAULT_CAR);
@@ -1399,6 +1422,7 @@ async function main(): Promise<void> {
       updatePanels(replay);
     }
     driftLab.frame();
+    driftLabW.frame();
     radioStrip.frame(now);
     prof.lap("ui");
     layout.frame(now);

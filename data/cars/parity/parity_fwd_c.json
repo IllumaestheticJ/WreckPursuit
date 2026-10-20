@@ -1,0 +1,227 @@
+{
+  "id": "parity_fwd_c",
+  "display_name": "Parity FWD-C",
+  "class": "Sport",
+  "analog_of": "reference-parity test car: compact FWD touring, 121 kW @ 7900, 179 N·m @ 5800, 982 kg, 5-speed (owner clip 3)",
+  "body_size_m": [
+    1.77,
+    4.6,
+    1.45
+  ],
+  "mass_kg": 982.0,
+  "front_weight_frac": 0.61,
+  "wheelbase_m": 2.64,
+  "track_front_m": 1.53,
+  "track_rear_m": 1.52,
+  "cg_height_m": 0.52,
+  "inertia_kgm2": [
+    344.8,
+    1710.2,
+    1831.9
+  ],
+  "drag_cd_a_m2": 0.668,
+  "lift_front": 0.08,
+  "lift_rear": 0.1,
+  "engine": {
+    "torque_curve_nm": [
+      [
+        1000,
+        110
+      ],
+      [
+        2000,
+        135
+      ],
+      [
+        3000,
+        150
+      ],
+      [
+        4000,
+        162
+      ],
+      [
+        5000,
+        172
+      ],
+      [
+        5800,
+        179
+      ],
+      [
+        6500,
+        175
+      ],
+      [
+        7200,
+        158
+      ],
+      [
+        7900,
+        146
+      ],
+      [
+        8200,
+        136
+      ],
+      [
+        8500,
+        125
+      ]
+    ],
+    "idle_rpm": 900.0,
+    "redline_rpm": 8200.0,
+    "rev_limit_rpm": 8500.0,
+    "inertia_kgm2": 0.13,
+    "engine_brake_nm": 17.9
+  },
+  "drivetrain": {
+    "layout": "Fwd",
+    "gear_ratios": [
+      3.23,
+      2.08,
+      1.48,
+      1.13,
+      0.92
+    ],
+    "final_drive": 4.4,
+    "reverse_ratio": 3.3,
+    "diff_front": {
+      "Lsd": {
+        "preload_nm": 40.0,
+        "ramp_power": 0.3,
+        "ramp_coast": 0.1
+      }
+    },
+    "diff_rear": "Open",
+    "clutch_max_nm": 240.0,
+    "shift_time_s": 0.42
+  },
+  "wheels": [
+    {
+      "position_m": [
+        -0.765,
+        1.32,
+        0.308
+      ],
+      "radius_m": 0.308,
+      "width_m": 0.225,
+      "mass_kg": 22.0,
+      "tire_id": "sport",
+      "steerable": true,
+      "max_steer_rad": 0.578,
+      "ackermann_frac": 0.6,
+      "camber_rad": -0.0122,
+      "toe_rad": 0.0,
+      "caster_rad": 0.0785
+    },
+    {
+      "position_m": [
+        0.765,
+        1.32,
+        0.308
+      ],
+      "radius_m": 0.308,
+      "width_m": 0.225,
+      "mass_kg": 22.0,
+      "tire_id": "sport",
+      "steerable": true,
+      "max_steer_rad": 0.578,
+      "ackermann_frac": 0.6,
+      "camber_rad": -0.0122,
+      "toe_rad": 0.0,
+      "caster_rad": 0.0785
+    },
+    {
+      "position_m": [
+        -0.76,
+        -1.32,
+        0.308
+      ],
+      "radius_m": 0.308,
+      "width_m": 0.225,
+      "mass_kg": 20.0,
+      "tire_id": "sport",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": -0.0209,
+      "toe_rad": 0.0026,
+      "caster_rad": 0.0
+    },
+    {
+      "position_m": [
+        0.76,
+        -1.32,
+        0.308
+      ],
+      "radius_m": 0.308,
+      "width_m": 0.225,
+      "mass_kg": 20.0,
+      "tire_id": "sport",
+      "steerable": false,
+      "max_steer_rad": 0.0,
+      "ackermann_frac": 0.0,
+      "camber_rad": -0.0209,
+      "toe_rad": 0.0026,
+      "caster_rad": 0.0
+    }
+  ],
+  "suspension": [
+    {
+      "spring_n_per_m": 25280.0,
+      "damper_bump_ns_per_m": 1930.0,
+      "damper_rebound_ns_per_m": 3860.0,
+      "travel_m": 0.16,
+      "preload_m": 0.02,
+      "arb_n_per_m": 5680.0,
+      "bump_stop_n_per_m": 150000.0
+    },
+    {
+      "spring_n_per_m": 25280.0,
+      "damper_bump_ns_per_m": 1930.0,
+      "damper_rebound_ns_per_m": 3860.0,
+      "travel_m": 0.16,
+      "preload_m": 0.02,
+      "arb_n_per_m": 5680.0,
+      "bump_stop_n_per_m": 150000.0
+    },
+    {
+      "spring_n_per_m": 17980.0,
+      "damper_bump_ns_per_m": 1290.0,
+      "damper_rebound_ns_per_m": 2580.0,
+      "travel_m": 0.17,
+      "preload_m": 0.02,
+      "arb_n_per_m": 6220.0,
+      "bump_stop_n_per_m": 150000.0
+    },
+    {
+      "spring_n_per_m": 17980.0,
+      "damper_bump_ns_per_m": 1290.0,
+      "damper_rebound_ns_per_m": 2580.0,
+      "travel_m": 0.17,
+      "preload_m": 0.02,
+      "arb_n_per_m": 6220.0,
+      "bump_stop_n_per_m": 150000.0
+    }
+  ],
+  "brakes": {
+    "max_torque_front_nm": 1720.0,
+    "max_torque_rear_nm": 700.0,
+    "bias_front": 0.63,
+    "handbrake_rear_nm": 870.0
+  },
+  "steering": {
+    "ratio": 15.0,
+    "rack_speed_rad_per_s": 1.4,
+    "ffb_scale": 1.0
+  },
+  "aero_downforce_coeffs": [
+    0.0,
+    0.0
+  ],
+  "lattice_id": "kestrel_ts",
+  "base_price": 0,
+  "durability_class": 3,
+  "fuel_capacity_l": 60.0
+}

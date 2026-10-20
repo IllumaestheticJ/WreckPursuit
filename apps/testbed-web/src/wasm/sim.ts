@@ -245,6 +245,15 @@ export const sim = {
   driftTuningSet: (json: string): void => wasm.drift_tuning_set(json),
   /** [mode, slide_deg, onset, envelope_deg, authority, throttle_scale, key_throttle, engine_throttle]; mode 0 off … 5 exceeded. */
   driftReadout: (entity: number): Float32Array => wasm.drift_readout(entity),
+  /** Drift Lab W: plain keyboard steering constants in effect (null = off) / defaults (wp_vehicle::plain::PlainSteer). */
+  plainSteer: (): Record<string, number> | null => JSON.parse(wasm.plain_steer_json()),
+  plainSteerDefaults: (): Record<string, number> => JSON.parse(wasm.plain_steer_defaults_json()),
+  /** Turn plain steering on with these constants ("" = off). */
+  plainSteerSet: (json: string): void => wasm.plain_steer_set(json),
+  /** [steer_key, rack, lock_frac, slide_deg, throttle_key, engine_throttle, gear, speed_kmh, wheel_deg]. */
+  plainReadout: (entity: number): Float32Array => wasm.plain_readout(entity),
+  /** Drift Lab W reference-parity test cars (not in carIds()). */
+  parityCarIds: (): string[] => JSON.parse(wasm.parity_car_ids()),
   /** Clutch mode "auto" | "manual" (owner row 59). */
   setClutchMode: (entity: number, mode: "auto" | "manual"): void => wasm.set_clutch_mode(entity, mode),
   clutchMode: (entity: number): string => wasm.clutch_mode(entity),
