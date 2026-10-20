@@ -195,3 +195,7 @@ Phone profile on the merged tree (740×360, touch): RTF **0.71** unthrottled / 0
 (was 12), SwiftShader raster 164 ms (was ~100), 659 draw calls — the new art / effects pass,
 shared with desktop. **Request (lead / S):** look at the round-12b render-submit and raster
 regression; the touch profile's own settings are unchanged.
+**Answered (lead/browser-perf, round 12b pass):** render submit 36 → 7–9 ms, draw calls 659 →
+~264, GPU-synced render ~250 → ~160 ms, RTF 0.71–0.76 → 0.81–0.89 unthrottled on this container
+(the touch profile now also has the lean distances and 8 full-mesh parked cars); details and the
+remaining gap in `docs/integration/browser-perf.md` → "Round 12b regression pass".

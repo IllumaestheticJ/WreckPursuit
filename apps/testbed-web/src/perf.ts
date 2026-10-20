@@ -34,6 +34,8 @@ export class FrameProfiler {
   readonly ms: Record<Section, number>;
   /** Raw ms per section since the last `resetAcc()`. */
   readonly acc: Record<Section, number>;
+  /** Worst single frame per section since the last `resetAcc()`, ms (spikes: GC, a compile). */
+  readonly peak: Record<Section, number>;
   /** Frames counted in `acc`. */
   frames = 0;
   private last = 0;
@@ -43,6 +45,7 @@ export class FrameProfiler {
     const zero = () => Object.fromEntries(SECTIONS.map((s) => [s, 0])) as Record<Section, number>;
     this.ms = zero();
     this.acc = zero();
+    this.peak = zero();
     this.frameMs = zero();
   }
 
@@ -65,12 +68,13 @@ export class FrameProfiler {
       const v = this.frameMs[s];
       this.ms[s] += (v - this.ms[s]) * 0.1;
       this.acc[s] += v;
+      if (v > this.peak[s]) this.peak[s] = v;
     }
     this.frames++;
   }
 
   resetAcc(): void {
-    for (const s of SECTIONS) this.acc[s] = 0;
+    for (const s of SECTIONS) this.acc[s] = this.peak[s] = 0;
     this.frames = 0;
   }
 }

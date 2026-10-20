@@ -37,8 +37,9 @@ const LIMITS = {
   // Measured ~45 (most of it: panel states + lattice nodes per car).
   maxWasmCallsPerFrame: 120,
   // Crash effects (render/fx, "low" on this profile): CPU per frame incl. emitters and upload
-  // prep; measured 0.3–0.9 ms at ~3 fps. One draw call per effect kind.
-  maxFxMsPerFrame: 1.5,
+  // prep, mean without the single worst frame (a GC pause in that lap moved the mean to 1.8);
+  // measured 0.3–0.6 ms at ~3–4 fps. One draw call per effect kind.
+  maxFxMsPerFrame: 1.0,
   maxFxDrawCalls: 5,
 };
 
@@ -94,7 +95,7 @@ for (const run of RUNS) {
   check(s.cityTiles > 50 && s.cityTilesDrawn < s.cityTiles, `${tag}: city drawn as ${s.cityTiles} tiles, ${s.cityTilesDrawn} drawn this frame`);
   check(s.signalHeads === 0 || s.signalsDrawn < s.signalHeads, `${tag}: ${s.signalsDrawn} of ${s.signalHeads} signal heads drawn (near the camera)`);
   if (s.fx) {
-    const fxMs = p.sections.fx ?? 0;
+    const fxMs = p.sectionsTrim?.fx ?? p.sections.fx ?? 0;
     check(
       fxMs <= LIMITS.maxFxMsPerFrame && s.fx.drawCalls <= LIMITS.maxFxDrawCalls,
       `${tag}: crash effects [${s.fx.quality}] ${fxMs.toFixed(3)} ms/frame (≤ ${LIMITS.maxFxMsPerFrame}), ${s.fx.drawCalls} draw calls (≤ ${LIMITS.maxFxDrawCalls}); ` +
@@ -106,6 +107,8 @@ for (const run of RUNS) {
   const sections = Object.fromEntries(Object.entries(p.sections).filter(([, v]) => v >= 0.05).sort((a, b) => b[1] - a[1]));
   info(`${tag}: frame ${p.frameMs.toFixed(0)} ms = JS sections ${p.sectionsSum.toFixed(0)} + raster / compositor ${p.rasterWaitMs.toFixed(0)}; GPU-synced render ${p.syncedRenderMs.toFixed(0)} ms`);
   info(`${tag}: JS ms/frame by section: ${fmt(sections, 2)}`);
+  const peaks = Object.fromEntries(Object.entries(p.peaks ?? {}).filter(([, v]) => v >= 5).sort((a, b) => b[1] - a[1]));
+  info(`${tag}: worst single frame by section, ms: ${fmt(peaks, 0)}`);
   info(`${tag}: draw calls by feature: ${fmt(p.featureCalls, 0)}`);
   info(`${tag}: k triangles by feature: ${fmt(p.featureKTris, 1)}`);
   info(`${tag}: raster ms by feature (synced render with it hidden, A/B; ±10 ms noise): ${fmt(p.featureMs, 0)}`);

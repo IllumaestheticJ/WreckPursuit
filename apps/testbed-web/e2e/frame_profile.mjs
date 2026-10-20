@@ -173,6 +173,9 @@ const r = await page.evaluate(() => {
   const prof = wp.app.prof;
   const frames = prof.frames;
   const sections = Object.fromEntries(Object.entries(prof.acc).map(([k, v]) => [k, v / frames]));
+  // Per section: worst frame, and the mean without it (one GC pause or compile moves a mean).
+  const peaks = Object.fromEntries(Object.entries(prof.peak ?? {}).map(([k, v]) => [k, v]));
+  const sectionsTrim = Object.fromEntries(Object.entries(prof.acc).map(([k, v]) => [k, frames > 1 ? (v - (prof.peak?.[k] ?? 0)) / (frames - 1) : v]));
   const sum = Object.values(sections).reduce((a, b) => a + b, 0);
   const calls = Object.entries(window.__wasmCalls).sort((a, b) => b[1] - a[1]);
   const totalCalls = calls.reduce((a, [, n]) => a + n, 0);
@@ -260,6 +263,8 @@ const r = await page.evaluate(() => {
     frameMax: iv[iv.length - 1] ?? 0,
     framesOver250: iv.filter((x) => x > 250).length,
     sections,
+    sectionsTrim,
+    peaks,
     sectionsSum: sum,
     rasterWaitMs: (wall * 1000) / frames - sum,
     syncedRenderMs: ts[1],

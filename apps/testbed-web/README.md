@@ -55,6 +55,12 @@ city + ~190 traffic agents 0.27 ms sim. City chase after warm-up: grid 1.5 ms, P
 2.8 ms sim per 60 Hz frame (its 6.8 MB greybox parses in ≈ 2 s under SwiftShader). Re-measure in
 desktop Chrome with a GPU.
 
+Browser frame budget (city chase, low-poly dark): `npm run profile` (`e2e/frame_profile.mjs`)
+prints JS ms per frame-loop section, draw calls / triangles / raster ms per render feature
+(`tagFeature` roots in `src/perf.ts`), steady vs one-off allocation and the top allocators;
+`npm run e2e:perf` (`e2e/perf_check.mjs`) checks desktop chase / rain and the phone profile.
+Numbers and history: `docs/integration/browser-perf.md`.
+
 ## Known gaps
 See `docs/integration/testbed.md` → Known gaps.
 ## Multiplayer page (workstream 07)
