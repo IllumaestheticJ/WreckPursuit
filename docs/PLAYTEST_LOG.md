@@ -118,6 +118,8 @@ the schedule could hunt (1→2→1). New automatic (`crates/wp_vehicle/README.md
 | 34 | Step 2: a garage and a career that persist between runs | G (economy): `wp_wasm::career` + `wp_economy::profile`, garage screen `apps/ui-kit/src/garage/`, testbed `garage` button + `career` box; cash, ledger, cars with saved dents and mods, pound, insurance, heat carry-over in `localStorage` (export / import as a file); free drive and city chase use the career car; new players start with 4 500 (a worn beater + three busted nights), escapes pay cash | done on `ws/economy` (awaiting merge); native tests `wp_wasm::career_tests`, browser e2e "career:" lines; numbers in `docs/integration/economy.md` |
 | 42 | (found by J) With TCS off the automatic box hunts 1↔2 during a burnout / wheelspin launch (rampart_50) | helper `lead/handling-balance` (shift logic; A for the diff side) | open |
 | 43 | Economy exploit: buy a used car and sell it for more | G (economy): resale from the purchase condition, property tests | dispatched |
+| 44 | Police spawn too far away; spawn them in response to reckless-driving calls | E (police): dispatch-driven spawning out of sight, 10–25 s response | dispatched |
+| 45 | Still falling into sidewalks (on the round-12 preview) | helper `lead/fix-sidewalk-fall` (merged into `lead/round12` 2026-10-20, after the preview was built) | fixed on `lead/round12`; next preview / link |
 
 ## 2026-10-19 — step 2: 4-player test on Port Vesper v2 (F, `ws/net`)
 Found by the new 3-minute 4-client test (`crates/wp_net/tests/vesper_e2e.rs`) and the

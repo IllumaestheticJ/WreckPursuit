@@ -483,3 +483,22 @@ run the full gate there, push your `ws/*` branch, and the lead merges it.
    rather than a fixed script) or re-time it, and check the day variant still passes. Keep the
    assault → pursuit behaviour itself unchanged. Re-bless only what your change moves, in a
    `[bless]` commit with the reason.
+
+## Lead feedback (round 12b, 2026-10-20) — owner playtest: police spawn too far away
+Base: `origin/lead/round12` (not main). Owner: "the police spawn too far — we should spawn them in
+when there's public safety calls for reckless driving."
+1. Dispatch-driven spawning: when a 911-style call / traffic violation / reckless-driving report
+   raises heat (the "Dispatch: caller reports reckless driver" line already exists), dispatch
+   assigns a responding unit and, if no idle unit is within a response radius, **spawns** one
+   just out of the player's sight (behind a corner / over a crest, never in view, never closer
+   than ~120 m, typically 150–350 m away along the road graph) heading toward the call. Use
+   `line_of_sight` and the road network; no pop-in in view.
+2. Response time should feel like seconds, not minutes: first unit on scene within ~10–25 s of
+   a reckless-driving call in the core districts (district-dependent), backup on escalation.
+3. Keep the patrol population (wandering units) but cap total units by heat level; despawn
+   units far out of sight when they are not needed (same never-in-view rule).
+4. Scenario(s) with expected ranges: time from first reckless-driving call to first unit within
+   100 m; no spawn inside the player's view cone or < 120 m. Goldens in a [bless] commit.
+5. Coordinate with the 4-player test (`crates/wp_net/tests/vesper_e2e.rs` must still pass) and
+   the LOD hand-over (spawned police use the fleet → full view hand-over in render/lod.ts).
+
