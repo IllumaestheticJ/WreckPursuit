@@ -12,6 +12,9 @@ use crate::vehicle::{Chassis, Vehicle};
 /// Height of the bottom of the chassis collider above the chassis reference point, m.
 pub const BODY_CLEARANCE_M: f32 = 0.15;
 
+/// Restitution of the chassis collider, combined with the other collider's by `Min`.
+pub const CHASSIS_RESTITUTION: f32 = 0.1;
+
 /// Rapier handles owned by one vehicle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VehicleBody {
@@ -50,7 +53,11 @@ impl Vehicle {
             .translation(Vector::new(0.0, 0.0, clearance + half_h))
             .density(0.0)
             .friction(0.4)
-            .restitution(0.1)
+            // Bounce only against other cars (0.1 each, so 0.1): the Min rule makes the
+            // static world (restitution 0) a dead stop, so a landing or a kerb face never
+            // springs the body back up (playtest row 54).
+            .restitution(CHASSIS_RESTITUTION)
+            .restitution_combine_rule(CoefficientCombineRule::Min)
             .build();
         let collider = colliders.insert_with_parent(col, body, bodies);
         VehicleBody { body, collider }
@@ -108,6 +115,7 @@ impl Vehicle {
         } else {
             self.set_rolling(speed);
         }
+        self.forget_motion();
         self.read_body(rb);
     }
 }

@@ -211,6 +211,25 @@ impl<W: WorldQuery> Rig<W> {
         }
     }
 
+    /// Apply an instantaneous impulse (N·s, world space) at world point `point` to the chassis
+    /// body, e.g. a scripted side impact for [`crate::ride`]. The vehicle mirror is refreshed.
+    pub fn apply_impulse_at_point(&mut self, point: [f32; 3], impulse: [f32; 3]) {
+        let rb = &mut self.bodies[self.handles.body];
+        rb.apply_impulse_at_point(Vector::from_array(impulse), Vector::from_array(point), true);
+        self.vehicle.read_body(rb);
+    }
+
+    /// Add `dv` (m/s) to the chassis linear velocity and `dw` (rad/s) to its angular velocity,
+    /// world space (ride-frequency kick tests in [`crate::ride`]).
+    pub fn kick(&mut self, dv: [f32; 3], dw: [f32; 3]) {
+        let rb = &mut self.bodies[self.handles.body];
+        let v = rb.linvel() + Vector::from_array(dv);
+        let w = rb.angvel() + Vector::from_array(dw);
+        rb.set_linvel(v, true);
+        rb.set_angvel(w, true);
+        self.vehicle.read_body(rb);
+    }
+
     /// Set the tick counter (e.g. to the server tick after a restore).
     pub fn set_ticks(&mut self, ticks: u64) {
         self.ticks = ticks;

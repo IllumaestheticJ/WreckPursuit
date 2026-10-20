@@ -126,10 +126,10 @@ async function main(): Promise<void> {
   // Game menu (built below, once everything it drives exists) and its current settings.
   let menu: ReturnType<typeof mountGameMenu> | null = null;
   let gameSettings: GameSettings | null = null;
-  // Countersteer strength setter (machine A, wp_wasm); the menu slider is disabled until it lands.
-  const countersteerSetter = Object.entries(wasmExports).find(([k, v]) => /countersteer/i.test(k) && typeof v === "function")?.[1] as
-    | ((entity: number, strength: number) => void)
-    | undefined;
+  // Countersteer strength (owner row 57): the menu slider (0..1) and the developer panel slider
+  // (0..100 %) both drive wp_wasm's set_countersteer. The menu value is applied only when the
+  // viewer moves it (so the input preset / panel slider keep their value otherwise).
+  let lastMenuCountersteer: number | null = null;
   // Traffic / police at every LOD: instanced fleet + hand-over to full views (render/lod.ts).
   const lod = new LodDirector();
   scene.world.add(lod.fleet.group);
@@ -563,15 +563,17 @@ async function main(): Promise<void> {
 
   // Owner default (playtest row 29): TCS, ESC and automatic gears start OFF; any assist box the
   // viewer ticks or unticks is remembered (localStorage) and wins over the preset.
+  // The countersteer slider (owner row 57) is stored there too, as a number 0..1
+  // (`countersteer_help`).
   const ASSIST_KEY = "wp.assistOverrides";
-  const savedAssistOverrides = (): Record<string, boolean> => {
+  const savedAssistOverrides = (): Record<string, boolean | number> => {
     try {
-      return JSON.parse(store.get(ASSIST_KEY) ?? "{}") as Record<string, boolean>;
+      return JSON.parse(store.get(ASSIST_KEY) ?? "{}") as Record<string, boolean | number>;
     } catch {
       return {};
     }
   };
-  const assistOverrides = (): Record<string, boolean> => ({ tcs: false, esc: false, auto_gears: false, ...savedAssistOverrides() });
+  const assistOverrides = (): Record<string, boolean | number> => ({ tcs: false, esc: false, auto_gears: false, ...savedAssistOverrides() });
   /** Touch play (owner request row 71): the gamepad (analogue) preset plus automatic gears,
    * traction control and stronger steer help; boxes the viewer ticked still win. */
   const TOUCH_ASSISTS: Record<string, unknown> = { tcs: true, auto_gears: true, auto_clutch: true, steer_speed_sensitivity: 1.0, countersteer_help: 0.6 };
@@ -585,7 +587,16 @@ async function main(): Promise<void> {
       Object.assign(preset, overrides);
       if (steerHelp === false) preset.steer_speed_sensitivity = 0;
       sim.setAssists(app.player, preset as never);
-      if (countersteerSetter && gameSettings) countersteerSetter(app.player, gameSettings.assists.countersteer);
+      if (gameSettings) {
+        const menuCs = gameSettings.assists.countersteer;
+        if (lastMenuCountersteer !== null && menuCs !== lastMenuCountersteer) {
+          sim.setCountersteer(app.player, menuCs * 100);
+          const o = assistOverrides();
+          o.countersteer_help = menuCs;
+          store.set(ASSIST_KEY, JSON.stringify(o));
+        }
+        lastMenuCountersteer = menuCs;
+      }
       syncAssistBoxes();
     } catch (e) {
       console.warn(e);
@@ -599,10 +610,13 @@ async function main(): Promise<void> {
   const syncAssistBoxes = () => {
     if (isReplay()) return;
     const a = sim.assists(app.player) as unknown as Record<string, unknown>;
-    document.querySelectorAll<HTMLInputElement>("#assist-row input").forEach((cb) => {
+    document.querySelectorAll<HTMLInputElement>("#assist-row input[type=checkbox]").forEach((cb) => {
       cb.checked = Boolean(a[cb.dataset.a!]);
     });
     clutchSel.value = a.auto_clutch === false ? "manual" : "auto";
+    const pct = Math.round(Number(a.countersteer_help ?? 0) * 100);
+    ($("cstr") as HTMLInputElement).value = String(pct);
+    $("cstr-val").textContent = `${pct}%`;
   };
 
   // ----- replay ---------------------------------------------------------------------------
@@ -686,7 +700,17 @@ async function main(): Promise<void> {
     else if (name === "city_chase_rainy_night") startCityChase(undefined, undefined, true);
     else if (($("city") as HTMLInputElement).checked) startFreeDrive();
   };
-  document.querySelectorAll<HTMLInputElement>("#assist-row input").forEach((cb) => {
+  const cstr = $("cstr") as HTMLInputElement;
+  cstr.oninput = () => {
+    if (isReplay()) return;
+    const pct = Number(cstr.value);
+    $("cstr-val").textContent = `${pct}%`;
+    sim.setCountersteer(app.player, pct);
+    const o = assistOverrides();
+    o.countersteer_help = pct / 100;
+    store.set(ASSIST_KEY, JSON.stringify(o));
+  };
+  document.querySelectorAll<HTMLInputElement>("#assist-row input[type=checkbox]").forEach((cb) => {
     cb.onchange = () => {
       if (isReplay()) return;
       const a = sim.assists(app.player) as unknown as Record<string, unknown>;
@@ -922,7 +946,7 @@ async function main(): Promise<void> {
   menu = mountGameMenu(overlay, {
     settings: loadGameSettings(seed()),
     developerDefault: devDefault,
-    countersteer: !!countersteerSetter,
+    countersteer: true,
     cameras: CAMERAS.filter((c) => c.mode !== "orbit").map((c) => ({ id: c.mode, label: c.label })),
     host: {
       play: (choice: PlayChoice) => {

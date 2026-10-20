@@ -540,3 +540,37 @@ wall hits (wrecks on hit 5 vs 4). **No police package change is needed for the p
   (`WP_KINDS=frontal` for just the wall rows).
 - Sim tables are unchanged by B's work (without panels; with panels a hanging fender no longer
   counts as a failed suspension in either mode), so `VALIDATION.md` sim columns stay valid.
+## Round 12b (A, 2026-10-20) — ride data changes for "too bouncy / launched too easily"
+Made by A in coordination (lead round 12b feedback to 02, playtest row 54); H owns the files
+and is welcome to retune within the targets. Measured with
+`cargo run --release -p wp_vehicle --example ride all` (see `docs/integration/vehicle.md` →
+"Round 12b response").
+1. **Dampers, all 19 cars:** `damper_bump_ns_per_m` × 1.2, `damper_rebound_ns_per_m` × 1.6
+   (rounded to 10 N·s/m). Damping ratio was 0.17–0.31 bump / 0.26–0.47 rebound; now
+   0.21–0.38 / 0.42–0.75 (rebound ≈ 2× bump, real-car practice). Each car keeps its
+   character relative to the others (the beater and ironside_440 stay the softest). The data
+   values are now the dampers' **low-speed** rates: the model blows off above 0.5 m/s.
+2. **Preload** where a car sat on its bump stops at rest (static bump travel < 35 % of the
+   travel → 45 %): drayman_cargo F 0.03 → 0.059; furrow_24 F 0.02 → 0.06; ironside_440 F 0.03
+   → 0.11, R 0.03 → 0.076; junkyard_beater F 0.01 → 0.071, R 0.01 → 0.039; tansy_13 F 0.01 →
+   0.061, R 0.01 → 0.031. Spring rates and ride height are unchanged (the model places the
+   static point by the hub position); only where the car rests within its travel moves. Bump
+   travel left at rest was 6 mm (beater front), 10 mm (ironside front), 17 mm (tansy front).
+3. No other fields changed. Ride frequencies were already car-like (1.06–2.08 Hz) and the
+   inertia tensors are fine (75–97 % of a solid box of the body size).
+Please mirror these in the `*.spec.md` sheets and `VALIDATION.md` (handling numbers moved
+slightly: understeer gradient −0.37 to +0.04 deg/g, held-key g −0.01 to +0.03; table in
+`vehicle.md`). Rule of thumb for new cars: rebound ≈ 2× bump, bump ≈ 0.35 of critical, ≥ 45 %
+of the travel left to the bump stop at rest; `tests/ride.rs` checks all three for the roster.
+## Rows 56 / 72 (A, 2026-10-20) — handbrake torque
+`brakes.handbrake_rear_nm` raised on 18 of 19 cars to ≥ 1.5 × the static rear lock torque
+(rear corner load × rolling radius), so a pulled handbrake locks the rears on every car (owner
+row 72: "I do see the rear wheels lock" — on most cars they did not: 14–25 rad/s left after a
+0.6 s pull at 60 km/h). Before → after, N·m per wheel: debug_coupe 1500 → 1750, debug_sedan
+1200 → 1310, drayman_cargo 1540 → 2980, furrow_24 870 → 1340, hauler_1500 1620 → 2970,
+ironside_440 600 → 1890, junkyard_beater 600 → 830, kestrel_ts 830 → 1280, lindwurm_4t 1100 →
+1410, lucciola_350 1330 → 1860, rampart_50 1430 → 2020, sentinel_bastion 1620 → 3280,
+sentinel_cruiser 1440 → 2390, sentinel_wolfhound 1440 → 2330, shiro_turbo 1010 → 1330,
+sperber_32 1230 → 1850, tansy_13 600 → 840, vireo_xs 600 → 900 (hakone_gt unchanged, 1780).
+Rule of thumb for new cars: `handbrake_rear_nm ≥ 1.5 × m × (1 − front_weight_frac) / 2 × g ×
+rear radius`. Please mirror in the spec sheets.
