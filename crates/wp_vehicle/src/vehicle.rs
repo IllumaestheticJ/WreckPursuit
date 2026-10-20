@@ -37,7 +37,7 @@ use crate::suspension::{
 use crate::throttle::{effective_smoothing, ramp_time_s, traction_trim};
 use crate::tire::{
     combined_forces, load_sensitive_mu, low_speed_lateral, pneumatic_trail, relax, slip_angle,
-    slip_ratio, surface_grip, SLIP_RATIO_V_MIN,
+    slip_ratio, spin_side_floor, surface_grip, SLIP_RATIO_V_MIN, SPIN_SIDE_FLOOR,
 };
 use crate::TireDb;
 
@@ -1772,6 +1772,8 @@ impl Vehicle {
             w.omega = om;
             w.kappa = slip_ratio(om, r, vx);
             let (fx, fy) = combined_forces(&c.tire, w.kappa, alpha, fz, grip);
+            // Side-force floor under heavy drive wheelspin (straight launches on cambered roads).
+            let fy = spin_side_floor(&c.tire, w.kappa, alpha, fz, grip, fy, &SPIN_SIDE_FLOOR);
             let mu_y = load_sensitive_mu(
                 c.tire.lateral.d,
                 c.tire.load_sensitivity,
