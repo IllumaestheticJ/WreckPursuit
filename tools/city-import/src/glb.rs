@@ -11,11 +11,10 @@
 
 use serde_json::json;
 use wp_world::geom::{self, V2, V3};
-use wp_world::map::{CityMap, SegKind};
+use wp_world::map::CityMap;
 use wp_world::network::{DistrictKind, LaneKind, RoadNetwork};
 use wp_world::surface::{
-    is_elevated, junction_paved_radii, junction_polygon, lane_bank, sidewalk_mesh, surface_edges,
-    TriMesh,
+    is_elevated, lane_bank, node_patches, sidewalk_mesh, surface_edges, TriMesh,
 };
 use wp_world::terrain::Heightfield;
 
@@ -458,18 +457,13 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
     let walks = sidewalk_mesh(map);
     sidewalk.mesh(&walks.tops);
     kerb.mesh(&walks.kerbs);
-    // Junction boxes (16-gons) and bend connectors.
-    let radii = junction_paved_radii(net);
-    for (ix, r) in net.intersections.iter().zip(&radii) {
-        let c = net.nodes[ix.node as usize].pos;
-        let poly = junction_polygon(geom::xy(c), *r);
-        asphalt.polygon(&poly, c[2] - 0.01);
-    }
-    for s in &map.segs {
-        if let SegKind::Connector { node, .. } = s.kind {
-            if net.nodes[node as usize].intersection.is_none() {
-                asphalt.ribbon(&s.pts, s.width * 0.5, s.width * 0.5, -0.005);
-            }
+    // Pavement between the ribbon ends (junctions, bends, dead ends): the very triangles
+    // `wp_sim` collides with.
+    for p in node_patches(map) {
+        if p.highway {
+            concrete.mesh(&p.mesh);
+        } else {
+            asphalt.mesh(&p.mesh);
         }
     }
     // Hilly cities: retaining walls where a road edge stands above the (render) ground, and
