@@ -12,7 +12,8 @@ import { loadWasm, sim, type DriverInput, type Scenario, type ScenarioResult } f
 import { META_STRIDE, RACE_STRIDE, RI, RS, STATE_STRIDE, S, T, VEHICLE_KIND, W } from "./wasm/layout";
 import { POLICE_PAINT, TRAFFIC_PALETTE } from "./render/fleet";
 import { actionHeld, getBindings, installKeyboard, readInput, toggleHeadlights, type InputSource } from "./input";
-import { actionsForKey, bindingsHelp, type ActionId } from "./bindings";
+import { actionsForKey, bindingsHelp, keyName, padName, type ActionId } from "./bindings";
+import { CrashReplayDirector, autoCrashReplay, onAutoCrashReplayChange, setAutoCrashReplay } from "./crash_replay";
 import { ControlsPanel } from "./ui/controls";
 import { layers, store, bytesToBase64, base64ToBytes } from "./settings";
 import { SceneView } from "./scene";
@@ -236,8 +237,35 @@ async function main(): Promise<void> {
     },
   };
   const garage = new CareerGarageView(garageEl, careerApi);
+  // Instant crash replay (lead, row 70): offer after a big crash, replay, resume live play.
+  const crash = new CrashReplayDirector(
+    document.body,
+    overlay,
+    sim,
+    {
+      // Not on benches, in the garage, with the full map open or while paused. A wreck's
+      // end-of-run panel waits behind the replay (the overlay is hidden while it plays).
+      allowed: () => !app.bench && !app.paused && !garage.open && !map.isOpen,
+      sessionSwapped: (entering) => {
+        swapSessionViews();
+        if (!entering) rig.setMode(rig.mode, app.views.get(app.focus)?.root);
+      },
+      playerRoot: () => app.views.get(app.player)?.root ?? null,
+    },
+    () => {
+      const b = getBindings();
+      const k = b.keys.replayCrash[0];
+      const p = b.pad.replayCrash[0];
+      return [k ? keyName(k) : "", p ? padName(p) : ""].filter(Boolean).join(" / ") || "unbound";
+    },
+  );
+  const autoBox = $("rp-auto-crash") as HTMLInputElement;
+  autoBox.checked = autoCrashReplay();
+  autoBox.onchange = () => setAutoCrashReplay(autoBox.checked);
+  onAutoCrashReplayChange((on) => (autoBox.checked = on));
   /** Garage: ends a career run in progress (its result goes into the career), pauses. */
   const openGarage = (message: string | null = null) => {
+    crash.reset();
     if (sim.careerRunActive()) sim.careerEndRun();
     persistCareer();
     runEnd.reset();
@@ -263,7 +291,21 @@ async function main(): Promise<void> {
 
   // ----- session management --------------------------------------------------------------
 
+  /** Crash replay in / out: the vehicles, debris, contacts and props of the other session. */
+  const swapSessionViews = () => {
+    for (const v of app.views.values()) v.dispose();
+    app.views.clear();
+    clearDebris();
+    regions.clear();
+    rests.clear();
+    scene.clearContacts();
+    plots.clear();
+    syncViews();
+    props.set(sim.propsStatic(), lod.models, lod.fleet.mats);
+  };
+
   const rebuildViews = () => {
+    crash.reset();
     for (const v of app.views.values()) v.dispose();
     app.views.clear();
     clearDebris();
@@ -662,7 +704,7 @@ async function main(): Promise<void> {
   };
   const scrub = $("rp-scrub") as HTMLInputElement;
   scrub.oninput = () => {
-    if (!isReplay()) return;
+    if (!isReplay() || crash.playing) return;
     sim.replaySeek(Number(scrub.value));
     plots.clear();
   };
@@ -672,7 +714,8 @@ async function main(): Promise<void> {
     if (isReplay()) sim.replayPlay(app.paused ? 0 : Number(($("rp-speed") as HTMLSelectElement).value));
   };
   const frameStep = (ticks: number) => {
-    if (!isReplay()) return;
+    // Crash replays play a fixed window (a backwards seek would re-simulate the session).
+    if (!isReplay() || crash.playing) return;
     app.paused = true;
     sim.replayPlay(0);
     const st = sim.replayStatus();
@@ -682,6 +725,8 @@ async function main(): Promise<void> {
   const startBench = (n: number) => {
     // Spawns happen before the first tick, so they become part of the (replayable) scenario.
     startFreeDrive("debug_sedan", ($("mode") as HTMLSelectElement).value, false);
+    // No crash replays on benches (and no snapshot cost in the numbers).
+    sim.crashDetectEnable(false);
     const cars = sim.carIds();
     for (let i = 1; i < n; i++) {
       const col = i % 6;
@@ -728,6 +773,9 @@ async function main(): Promise<void> {
       }
       case "repairBill":
         ui.toggleBill();
+        break;
+      case "replayCrash":
+        crash.action();
         break;
       case "help":
         hud.toggleHelp();
@@ -817,7 +865,7 @@ async function main(): Promise<void> {
     scene.quality.frame(wallDt * 1000);
     const prof = app.prof;
     prof.begin();
-    const replay = isReplay();
+    let replay = isReplay();
 
     const { input, source, edges } = readInput(dt);
     for (const a of edges) doAction(a);
@@ -831,9 +879,18 @@ async function main(): Promise<void> {
 
     prof.lap("input");
     const t0 = performance.now();
+    crash.beforeStep(app.paused);
     if (!app.paused || replay) app.alpha = sim.step(app.paused && !replay ? 0 : dt);
     const t1 = performance.now();
     simMs += (t1 - t0 - simMs) * 0.1;
+    // Crash replay: leave at the end of its window; live: a new crash, the offer, auto play.
+    crash.afterStep();
+    if (!sim.crashReplayActive() && !isReplay()) {
+      const c = sim.crashTake();
+      if (c) crash.onCrash(c);
+      crash.liveFrame(sim.worldInfo()[W.tick]);
+    }
+    replay = isReplay();
     // One world_info() per frame after the step (it was fetched ~7 times a frame).
     const wi = sim.worldInfo();
     rtf.push(wallDt, wi[W.tick], !app.paused && !replay && !app.bench);
@@ -888,7 +945,7 @@ async function main(): Promise<void> {
     scene.addEvents(events);
     panelEvents(events);
     stepDebris(app.paused && !replay ? 0 : dt);
-    hud.pushEvents(events, wi[W.tick]);
+    if (!crash.playing) hud.pushEvents(events, wi[W.tick]);
     prof.lap("events");
     if (focusTel && focusRec >= 0) {
       const fv = app.views.get(app.focus);
@@ -896,7 +953,8 @@ async function main(): Promise<void> {
     }
     fx.frame(events, cur, app.views, app.paused && !replay ? 0 : dt, wi[W.night]);
     prof.lap("fx");
-    {
+    // The game UI is hidden during a crash replay (and must not count its events twice).
+    if (!crash.playing) {
       ui.frame(wi[W.tick], app.player, events, wi[W.hours], wi[W.mode] > 0.5 ? "Simulation" : "Arcade");
       map.frame(app.player, now);
       if (!replay) runEnd.update(sim.runResult(), now);
@@ -910,7 +968,7 @@ async function main(): Promise<void> {
         }
       }
     }
-    if (raceView.raceId) raceFrame(cur, meta, tS, frameNo % 6 === 0);
+    if (raceView.raceId && !crash.playing) raceFrame(cur, meta, tS, frameNo % 6 === 0);
     prof.lap("ui");
     scene.update(dt, sim.intents());
     scene.updateHelicopters(policeDraw, tS);
@@ -939,13 +997,15 @@ async function main(): Promise<void> {
     plots.canvas.style.display = layers.on("telemetry") ? "" : "none";
     prof.lap("ui");
     rig.lookBack = actionHeld("lookBack");
-    rig.update(
-      focusView?.root ?? null,
-      focusView?.info.body_size_m ?? [2, 4.5, 1.4],
-      focusRec >= 0 ? cur[focusRec + S.speed] : 0,
-      dt,
-      rig.mode === "cinematic" ? nearestPolice(focusView) : null,
-    );
+    if (crash.playing) crash.camera(rig.camera, wi[W.tick], dt);
+    else
+      rig.update(
+        focusView?.root ?? null,
+        focusView?.info.body_size_m ?? [2, 4.5, 1.4],
+        focusRec >= 0 ? cur[focusRec + S.speed] : 0,
+        dt,
+        rig.mode === "cinematic" ? nearestPolice(focusView) : null,
+      );
     prof.lap("camera");
     audio.update(rig.camera, sim.lastEventsJson(), app.paused && !replay ? 0 : dt, app.focus);
     prof.lap("audio");
@@ -970,7 +1030,7 @@ async function main(): Promise<void> {
     p.frameMs += (wallDt * 1000 - p.frameMs) * 0.1;
     p.rtf = rtf.factor;
 
-    if (frameNo++ % 6 === 0 || !focusView) {
+    if (!crash.playing && (frameNo++ % 6 === 0 || !focusView)) {
       hud.update({
         info: focusView?.info ?? null,
         tel: focusTel,
@@ -1106,6 +1166,10 @@ async function main(): Promise<void> {
     scene,
     /** Controls panel (rebinding) and the live bindings. */
     controls,
+    /** Instant crash replay director (`crash.phase`, `crash.last`, `crash.accept()`). */
+    crash,
+    /** Settings hook (pause menu): play crash replays without asking. */
+    setAutoCrashReplay,
     bindings: getBindings,
     /** City map HUD (UI kit): `map.hud.stats()`, `map.toggle()`. */
     map,

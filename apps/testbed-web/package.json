@@ -16,6 +16,7 @@
     "e2e:weather": "node e2e/weather.mjs",
     "e2e:net": "node e2e/net_two_tabs.mjs",
     "e2e:race": "node e2e/race.mjs",
+    "e2e:crash-replay": "node e2e/crash_replay.mjs",
     "e2e:perf": "node e2e/perf_check.mjs",
     "e2e:fx": "node e2e/crash_fx.mjs",
     "e2e:gamepad": "node e2e/gamepad.mjs",

@@ -82,6 +82,28 @@ pub fn resting_prop_groups() -> InteractionGroups {
     )
 }
 
+/// A full copy of the Rapier state. `PhysicsPipeline` only holds per-step scratch buffers and
+/// counters, so the copy gets a fresh one (stepping it gives the same results).
+impl Clone for PhysicsWorld {
+    fn clone(&self) -> Self {
+        Self {
+            gravity: self.gravity,
+            params: self.params,
+            bodies: self.bodies.clone(),
+            colliders: self.colliders.clone(),
+            pipeline: PhysicsPipeline::new(),
+            islands: self.islands.clone(),
+            broad_phase: self.broad_phase.clone(),
+            narrow_phase: self.narrow_phase.clone(),
+            impulse_joints: self.impulse_joints.clone(),
+            multibody_joints: self.multibody_joints.clone(),
+            soft_bodies: self.soft_bodies.clone(),
+            ccd: self.ccd.clone(),
+            ground: self.ground,
+        }
+    }
+}
+
 impl PhysicsWorld {
     /// New world with a static ground slab whose top face is the plane z = 0.
     pub fn new() -> Self {

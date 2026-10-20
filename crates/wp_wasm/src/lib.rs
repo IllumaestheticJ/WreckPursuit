@@ -18,6 +18,7 @@
 //! | io | `events_drain() -> postcard`, `events_decode(bytes)`, `telemetry(entity)`, `telemetry_names()`, `ffb(entity)`, `intents()` |
 //! | replay | `record_start()`, `record_stop()`, `recording()`, `replay_load(bytes)`, `replay_seek(tick)`, `replay_play(speed)`, `replay_status()`, `replay_export_csv(bytes, entity, every)` |
 //! | scenario | `scenario_json()`, `scenario_result()` |
+//! | crash replay (lead) | `crash_take()`, `crash_tuning_json()`, `crash_tuning_set(json)`, `crash_detect_enable(on)`, `crash_buffer_ticks()`, `crash_replay_start(seq)`, `crash_replay_active()`, `crash_replay_stop()` — see [`crash_replay`] |
 //! | race (15) | `race_list(car, mode)`, `race_start(id, car, mode, autopilot)`, `race_info()`, `race_standings()`, `race_course()`, `race_result_json()` — see [`race`] |
 //! | run (lead) | `run_result_json()`, `run_ledger_json()`, `run_account_json()`, `run_repair_continue()`, `debug_set_heat(entity, heat)`, `debug_park_near_police(entity, ahead_m)` — see [`run`] |
 //! | props (lead) | `props_static()` once per session, `props_moved()` per frame, `prop_stride()`, `prop_moved_stride()`, `prop_pose(i)`, `debug_knock_prop(entity, prop, speed)` — see [`props`] |
@@ -33,6 +34,7 @@ pub mod net;
 
 pub mod audio;
 pub mod career;
+pub mod crash_replay;
 pub mod data;
 pub mod garage;
 pub mod lod;
@@ -51,6 +53,8 @@ pub mod weather;
 #[cfg(test)]
 mod career_tests;
 #[cfg(test)]
+mod crash_replay_tests;
+#[cfg(test)]
 mod race_tests;
 #[cfg(test)]
 mod run_tests;
@@ -67,6 +71,8 @@ thread_local! {
     static SESSION: RefCell<Option<Session>> = const { RefCell::new(None) };
     /// What the browser was last told about the session's props (`props_moved`).
     static PROP_SYNC: RefCell<props::PropSync> = RefCell::new(props::PropSync::default());
+    /// The live session while a crash replay plays in `SESSION` (see [`crash_replay`]).
+    static PARKED: RefCell<Option<Session>> = const { RefCell::new(None) };
 }
 
 fn err(e: impl std::fmt::Display) -> JsValue {
@@ -80,9 +86,13 @@ fn with<T>(f: impl FnOnce(&mut Session) -> Result<T, String>) -> Result<T, JsVal
     })
 }
 
-/// Run `f` with the current session, if any (career glue: works with no session too).
+/// Run `f` with the current *live* session, if any (career glue: works with no session too).
+/// During a crash replay that is the parked live session, not the replay.
 fn with_session_opt<T, E>(f: impl FnOnce(Option<&mut Session>) -> Result<T, E>) -> Result<T, E> {
-    SESSION.with(|s| f(s.borrow_mut().as_mut()))
+    PARKED.with(|p| match p.borrow_mut().as_mut() {
+        Some(live) => f(Some(live)),
+        None => SESSION.with(|s| f(s.borrow_mut().as_mut())),
+    })
 }
 
 fn get<T>(f: impl FnOnce(&mut Session) -> T) -> Result<T, JsValue> {
@@ -93,6 +103,10 @@ fn install(mut session: Session) -> Vec<u32> {
     let ids = session.entities().iter().map(|e| e.0).collect();
     SESSION.with(|s| {
         let mut slot = s.borrow_mut();
+        // A crash replay being replaced: the live session it parked is the one that ends.
+        if let Some(live) = PARKED.with(|p| p.borrow_mut().take()) {
+            *slot = Some(live);
+        }
         if let Some(prev) = slot.as_mut() {
             if prev.is_career() {
                 // A career run being replaced ends: the career absorbs it (machine G).
@@ -1205,6 +1219,117 @@ pub fn export_csv(bytes: &[u8], entity: u32, every: u64) -> Result<String, Strin
         s.run_ticks(every.min(end - tick));
     }
     Ok(csv)
+}
+
+// ----- crash replay (lead) -----------------------------------------------------------------
+
+/// The big crash detected since the last call, as JSON ([`crash_replay::CrashMark`]), or
+/// `null`. Live sessions only (`null` during any replay).
+#[wasm_bindgen]
+pub fn crash_take() -> Result<String, JsValue> {
+    get(|s| json(&s.crash_take()))
+}
+
+/// Crash thresholds JSON ([`crash_replay::CrashTuning`]).
+#[wasm_bindgen]
+pub fn crash_tuning_json() -> Result<String, JsValue> {
+    with_live(|s| Ok(json(&s.crash().tuning())))
+}
+
+/// Set crash thresholds from JSON (missing fields keep their defaults).
+#[wasm_bindgen]
+pub fn crash_tuning_set(tuning_json: &str) -> Result<(), JsValue> {
+    let t: crash_replay::CrashTuning = serde_json::from_str(tuning_json).map_err(err)?;
+    with_live(|s| {
+        s.crash_mut().set_tuning(t);
+        Ok(())
+    })
+}
+
+/// Turn the replay buffer + crash detection on or off for this session (on by default; the
+/// testbed turns it off for benches). Off drops the buffer.
+#[wasm_bindgen]
+pub fn crash_detect_enable(on: bool) -> Result<(), JsValue> {
+    with_live(|s| {
+        s.crash_mut().set_enabled(on);
+        Ok(())
+    })
+}
+
+/// Ticks of the buffered snapshots (oldest first) of the live session.
+#[wasm_bindgen]
+pub fn crash_buffer_ticks() -> Result<Vec<f64>, JsValue> {
+    with_live(|s| {
+        Ok(s.crash()
+            .snapshot_ticks()
+            .into_iter()
+            .map(|t| t as f64)
+            .collect())
+    })
+}
+
+/// Play crash `seq` (the latest crash, from `crash_take`) again: parks the live session and
+/// installs a playback session for `impact − 3 s .. impact + 2 s` (`replay_play` /
+/// `replay_status` / `step` drive it like any replay). Returns
+/// [`crash_replay::CrashReplayInfo`] JSON. The live session is not stepped or changed until
+/// [`crash_replay_stop`].
+#[wasm_bindgen]
+pub fn crash_replay_start(seq: u32) -> Result<String, JsValue> {
+    if crash_replay_active() {
+        return Err(err("a crash replay is already playing"));
+    }
+    let (replay, info) = with(|live| {
+        let mark = live
+            .crash()
+            .last()
+            .filter(|m| m.seq == seq)
+            .cloned()
+            .ok_or_else(|| format!("no crash #{seq} in this session"))?;
+        live.crash_replay(&mark)
+    })?;
+    SESSION.with(|s| {
+        let mut slot = s.borrow_mut();
+        let live = slot.replace(replay);
+        PROP_SYNC.with(|p| {
+            p.borrow_mut()
+                .reset(slot.as_ref().expect("installed").sim())
+        });
+        PARKED.with(|p| *p.borrow_mut() = live);
+    });
+    Ok(json(&info))
+}
+
+/// Whether a crash replay is playing (the live session is parked).
+#[wasm_bindgen]
+pub fn crash_replay_active() -> bool {
+    PARKED.with(|p| p.borrow().is_some())
+}
+
+/// End the crash replay: the parked live session comes back exactly as it was. Returns
+/// `{"tick": n, "hash": "<hex>"}` of the live session, or `null` when no replay was playing.
+#[wasm_bindgen]
+pub fn crash_replay_stop() -> String {
+    let Some(live) = PARKED.with(|p| p.borrow_mut().take()) else {
+        return "null".into();
+    };
+    let out = serde_json::json!({
+        "tick": live.tick(),
+        "hash": format!("{:016x}", live.sim().state_hash()),
+    })
+    .to_string();
+    SESSION.with(|s| {
+        PROP_SYNC.with(|p| p.borrow_mut().reset(live.sim()));
+        *s.borrow_mut() = Some(live);
+    });
+    out
+}
+
+/// Run `f` on the live session (the parked one during a crash replay).
+fn with_live<T>(f: impl FnOnce(&mut Session) -> Result<T, String>) -> Result<T, JsValue> {
+    with_session_opt(|s| match s {
+        Some(s) => f(s).map_err(err),
+        None => Err(err("call init() first")),
+    })
 }
 
 // ----- scenario ----------------------------------------------------------------------------
