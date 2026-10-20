@@ -901,5 +901,11 @@ const tc = spawnSync("node", [join(here, "touch.mjs")], {
 });
 process.stdout.write(tc.stdout);
 check(tc.status === 0, `touch controls checks (e2e/touch.mjs)${tc.status === 0 ? "" : ": " + (tc.stderr || "").trim().split("\n").pop()}`);
+// 12. Game menu + HUD layout (UI kit, e2e/menu.mjs, its own server and browser): no HUD overlaps
+// at 1280×720 / 1366×768 / 1920×1080 with the developer panels on and off, Esc pauses and
+// resumes, keyboard + gamepad navigation, a setting survives a reload, ?menu=1 title screen.
+const mn = spawnSync("node", [join(here, "menu.mjs")], { cwd: root, encoding: "utf8", env: { ...process.env, MENU_SHOTS: shots ?? "" } });
+process.stdout.write(mn.stdout);
+check(mn.status === 0, `game menu + layout checks (e2e/menu.mjs)${mn.status === 0 ? "" : ": " + (mn.stderr || "").trim().split("\n").pop()}`);
 console.log(failures ? `${failures} check(s) failed` : "all checks passed");
 process.exit(failures ? 1 : 0);

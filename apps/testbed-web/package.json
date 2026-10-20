@@ -22,6 +22,7 @@
     "e2e:gamepad": "node e2e/gamepad.mjs",
     "e2e:reset": "node e2e/reset.mjs",
     "e2e:touch": "node e2e/touch.mjs",
+    "e2e:menu": "node e2e/menu.mjs",
     "profile": "node e2e/frame_profile.mjs"
   },
   "dependencies": {

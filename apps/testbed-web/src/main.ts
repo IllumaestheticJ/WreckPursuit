@@ -8,10 +8,12 @@
 // ?style=greybox|lowpoly the art style (default low-poly dark, render/style.ts).
 // ?race=<id> starts a street race (&autopilot=1: the AI drives the player's car).
 // ?fx=low|med|high sets the crash effects quality (render/fx; default from ?gfx).
+// ?menu=1 opens the game menu's title screen on load (as the demo build does) with the developer
+// panels off by default; ?dev=0 / ?dev=1 forces the developer panels for this page.
 import { loadWasm, sim, type DriverInput, type Scenario, type ScenarioResult } from "./wasm/sim";
 import { META_STRIDE, RACE_STRIDE, RI, RS, STATE_STRIDE, S, T, VEHICLE_KIND, W } from "./wasm/layout";
 import { POLICE_PAINT, TRAFFIC_PALETTE } from "./render/fleet";
-import { actionHeld, getBindings, installKeyboard, readInput, toggleHeadlights, type InputSource } from "./input";
+import { actionHeld, getBindings, installKeyboard, readInput, setInputBlocked, toggleHeadlights, type InputSource } from "./input";
 import { actionsForKey, bindingsHelp, keyName, padName, type ActionId } from "./bindings";
 import { CrashReplayDirector, autoCrashReplay, onAutoCrashReplayChange, setAutoCrashReplay } from "./crash_replay";
 import { installTouch, setTouchSteerMode, touchSteerMode } from "./touch";
@@ -22,12 +24,16 @@ import { VehicleView } from "./vehicle_view";
 import { clearDebris, meshTimings, panelEvents, preloadCarMeshes, stepDebris } from "./render/panels";
 import { LodDirector } from "./render/lod";
 import { PropView } from "./render/props";
-import { CameraRig, CAMERA_MODES, cameraLabel, type CameraMode } from "./cameras";
+import { CameraRig, CAMERAS, CAMERA_MODES, cameraLabel, type CameraMode } from "./cameras";
 import { Hud } from "./hud";
 import { TelemetryPlots } from "./telemetry";
 import { AudioSystem } from "./audio";
 import { UiOverlay } from "./ui/overlay";
 import { MapOverlay } from "./ui/map";
+import { HudLayout } from "./ui/layout";
+import * as wasmExports from "./wasm/pkg/wp_wasm.js";
+import { defaultGameSettings, hasStoredSettings, loadGameSettings, mountGameMenu, type GameSettings, type PlayChoice } from "../../ui-kit/src/live";
+import { gfxMode } from "./render/quality";
 import { RunEndView } from "./ui/runEnd";
 import { CareerGarageView } from "../../ui-kit/src/garage/CareerGarage";
 import { downloadText, keepUnreadable, loadCareerText, saveCareerText, saveFileName } from "../../ui-kit/src/garage/store";
@@ -115,6 +121,14 @@ async function main(): Promise<void> {
   const audio = new AudioSystem(scene.world, overlay);
   const ui = new UiOverlay(overlay);
   const map = new MapOverlay(overlay);
+  const layout = new HudLayout();
+  // Game menu (built below, once everything it drives exists) and its current settings.
+  let menu: ReturnType<typeof mountGameMenu> | null = null;
+  let gameSettings: GameSettings | null = null;
+  // Countersteer strength setter (machine A, wp_wasm); the menu slider is disabled until it lands.
+  const countersteerSetter = Object.entries(wasmExports).find(([k, v]) => /countersteer/i.test(k) && typeof v === "function")?.[1] as
+    | ((entity: number, strength: number) => void)
+    | undefined;
   // Traffic / police at every LOD: instanced fleet + hand-over to full views (render/lod.ts).
   const lod = new LodDirector();
   scene.world.add(lod.fleet.group);
@@ -561,9 +575,13 @@ async function main(): Promise<void> {
     if (isReplay()) return;
     try {
       const preset = sim.assistPreset(source === "Touch" ? "Gamepad" : source) as unknown as Record<string, unknown>;
-      if (source === "Touch") Object.assign(preset, TOUCH_ASSISTS, savedAssistOverrides());
-      else Object.assign(preset, assistOverrides());
+      // `steer_help` (game menu) is not a profile field: off zeroes the speed-sensitive steering.
+      const chosen = (source === "Touch" ? { ...TOUCH_ASSISTS, ...savedAssistOverrides() } : assistOverrides()) as Record<string, unknown>;
+      const { steer_help: steerHelp, ...overrides } = chosen;
+      Object.assign(preset, overrides);
+      if (steerHelp === false) preset.steer_speed_sensitivity = 0;
       sim.setAssists(app.player, preset as never);
+      if (countersteerSetter && gameSettings) countersteerSetter(app.player, gameSettings.assists.countersteer);
       syncAssistBoxes();
     } catch (e) {
       console.warn(e);
@@ -650,6 +668,7 @@ async function main(): Promise<void> {
     // A career run keeps the career's mode (pick it with "New career" in the garage).
     if (isReplay() || sim.careerRunActive()) return void (($("mode") as HTMLSelectElement).value = modeName());
     sim.setDamageMode((e.target as HTMLSelectElement).value);
+    menu?.update({ damageMode: (e.target as HTMLSelectElement).value as GameSettings["damageMode"] });
   };
   ($("city") as HTMLInputElement).onchange = () => startFreeDrive();
   citySel.onchange = () => {
@@ -672,6 +691,8 @@ async function main(): Promise<void> {
       const o = assistOverrides();
       o[cb.dataset.a!] = cb.checked;
       store.set(ASSIST_KEY, JSON.stringify(o));
+      const key = ({ abs: "abs", tcs: "tcs", esc: "esc", auto_gears: "autoGears" } as const)[cb.dataset.a as "abs" | "tcs" | "esc" | "auto_gears"];
+      if (menu && key) menu.update({ assists: { ...menu.settings.assists, [key]: cb.checked } });
     };
   });
   clutchSel.onchange = () => {
@@ -773,7 +794,9 @@ async function main(): Promise<void> {
         toggleHeadlights();
         break;
       case "pause":
-        togglePause();
+        // Replays: play / pause. Driving: the pause menu (gamepad Start / P).
+        if (isReplay() || !menu) togglePause();
+        else if (canOpenMenu()) menu.openPause();
         break;
       case "map":
         map.toggle();
@@ -836,6 +859,117 @@ async function main(): Promise<void> {
     }
   });
 
+  // ----- game menu (UI kit, playtest row 68) ---------------------------------------------
+  // Main / pause / settings for players. The developer panels stay behind Settings → Developer
+  // (on by default in the testbed preview, off in the demo build and with ?menu=1).
+  const demo = document.body.classList.contains("demo");
+  const menuOnLoad = demo || params.get("menu") === "1";
+  const devParam = params.get("dev");
+  const devDefault = !menuOnLoad;
+  // First run: seed the menu from what this browser already chose (assist boxes, audio panel, gfx).
+  const seed = (): GameSettings => {
+    const d = defaultGameSettings(devDefault);
+    if (hasStoredSettings()) return d;
+    const o = assistOverrides();
+    const a = sim.assistPreset(app.source === "Touch" ? "Gamepad" : app.source) as unknown as Record<string, unknown>;
+    d.assists = { ...d.assists, abs: Boolean(o.abs ?? a.abs), tcs: Boolean(o.tcs), esc: Boolean(o.esc), autoGears: Boolean(o.auto_gears) };
+    d.volumes = audio.mix();
+    d.gfx = gfxMode();
+    return d;
+  };
+  const DEBUG_LAYERS = ["lattice", "stress", "tireForces", "suspension", "slipColour", "contacts", "cgVelocity", "intents", "components", "regions", "events", "telemetry", "inputs"];
+  const applySettings = (next: GameSettings, prev: GameSettings | null) => {
+    gameSettings = next;
+    const dev = devParam === "1" ? true : devParam === "0" ? false : next.developer;
+    document.body.classList.toggle("wp-player", !dev);
+    if (dev) document.body.classList.remove("demo");
+    layers.suppress(dev ? [] : DEBUG_LAYERS);
+    // Graphics (an explicit ?gfx= wins on load).
+    if (prev || !params.get("gfx")) scene.quality.setMode(next.gfx);
+    const drawParam = Number(params.get("draw"));
+    scene.drawDistanceM = next.drawDistanceM > 0 ? next.drawDistanceM : drawParam > 0 ? drawParam : scene.quality.drawDistanceM;
+    weather.rainFraction = scene.quality.rainFraction;
+    audio.setMix(next.volumes);
+    map.hud.setUnits(next.units);
+    // Assists go through the same overrides as the developer panel's boxes.
+    if (!prev || JSON.stringify(prev.assists) !== JSON.stringify(next.assists)) {
+      const o = assistOverrides() as Record<string, boolean>;
+      Object.assign(o, { abs: next.assists.abs, tcs: next.assists.tcs, esc: next.assists.esc, auto_gears: next.assists.autoGears, steer_help: next.assists.steerHelp });
+      store.set(ASSIST_KEY, JSON.stringify(o));
+      if (prev) applyAssistPreset(app.source);
+    }
+    const modeSel = $("mode") as HTMLSelectElement;
+    if (!prev) modeSel.value = next.damageMode;
+    else if (prev.damageMode !== next.damageMode && !isReplay() && !sim.careerRunActive()) {
+      modeSel.value = next.damageMode;
+      sim.setDamageMode(next.damageMode);
+    }
+    if (next.camera && (!prev || prev.camera !== next.camera) && CAMERA_MODES.includes(next.camera as CameraMode)) {
+      rig.choose(next.camera as CameraMode, app.views.get(app.focus)?.root);
+    }
+    layout.update();
+  };
+  /** Something else owns the screen or the Esc key right now. */
+  const canOpenMenu = () => !menu?.isOpen && !map.isOpen && !controls.isOpen && !garage.open && !runEnd.open && !raceView.cards && !isReplay();
+  let menuPausedBefore = false;
+  let menuShown = false;
+  menu = mountGameMenu(overlay, {
+    settings: loadGameSettings(seed()),
+    developerDefault: devDefault,
+    countersteer: !!countersteerSetter,
+    cameras: CAMERAS.filter((c) => c.mode !== "orbit").map((c) => ({ id: c.mode, label: c.label })),
+    host: {
+      play: (choice: PlayChoice) => {
+        // Quick play runs outside the career; the career lives behind Garage.
+        if (choice === "chase") startCityChase();
+        else if (choice === "chaseRain") startCityChase(undefined, undefined, true);
+        else if (choice === "free") startFreeDrive(undefined, undefined, true);
+        else if (choice === "races") raceView.openPicker();
+        else openGarage();
+      },
+      restart: () => restartRun(),
+      garage: () => openGarage(),
+      quitToMain: () => {
+        if (sim.careerRunActive()) sim.careerEndRun();
+        persistCareer();
+        runEnd.reset();
+      },
+      openControls: () => controls.open(),
+      controlsOpen: () => controls.isOpen,
+      apply: applySettings,
+      onOpenChange: (open) => {
+        // Pause the sim (and a replay's playback) while any menu screen is up; block driving input.
+        if (open && !menuShown) {
+          menuPausedBefore = app.paused;
+          app.paused = true;
+          if (isReplay()) sim.replayPlay(0);
+        } else if (!open && menuShown) {
+          app.paused = menuPausedBefore;
+          if (isReplay() && !app.paused) sim.replayPlay(Number(($("rp-speed") as HTMLSelectElement).value));
+        }
+        menuShown = open;
+        setInputBlocked(open);
+      },
+    },
+  });
+  // Esc opens the pause menu, unless the map, a panel or the garage takes it (they close on Esc).
+  // Capture phase and registered before them, so this sees the state before they react.
+  window.addEventListener(
+    "keydown",
+    (e) => {
+      if (e.code !== "Escape" || e.repeat || !canOpenMenu()) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      menu!.openPause();
+    },
+    { capture: true },
+  );
+  if (demo) {
+    // The demo page's own start menu is replaced by the game menu.
+    document.getElementById("demo-menu")?.remove();
+    document.getElementById("demo-open")?.remove();
+  }
+
   // ----- start ----------------------------------------------------------------------------
 
   const camParam = params.get("cam") as CameraMode | null;
@@ -856,6 +990,7 @@ async function main(): Promise<void> {
   // falls back to the proxy and swaps in when it arrives).
   await Promise.race([preloadCarMeshes(lod.models.cars), new Promise((r) => setTimeout(r, 5000))]);
   if (params.get("replay") === "last") $("rp-last").click();
+  if (menuOnLoad) menu.openMain();
 
   // ----- frame loop -----------------------------------------------------------------------
 
@@ -1072,9 +1207,11 @@ async function main(): Promise<void> {
         regionsOfNodes: focusView ? regionsCache(app.focus) : null,
         rest: focusView ? restCache(app.focus) : null,
         camera: cameraLabel(rig.mode) + (rig.lookBack && rig.mode !== "orbit" && rig.mode !== "cinematic" ? " (look back)" : ""),
+        units: gameSettings?.units,
       });
       updatePanels(replay);
     }
+    layout.frame(now);
     prof.lap("ui");
     prof.end();
     if (app.bench) benchTick(t1 - t0, r1 - r0);
@@ -1192,6 +1329,10 @@ async function main(): Promise<void> {
     touch,
     setTouchSteerMode,
     touchSteerMode,
+    /** Game menu (UI kit): `menu.openPause()`, `menu.screen`, `menu.settings`. */
+    menu,
+    /** HUD layout pass (src/ui/layout.ts). */
+    layout,
     ready: true,
     stopRecording,
     loadReplay,

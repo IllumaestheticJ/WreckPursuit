@@ -117,7 +117,7 @@ const FAST_MS = 22;
  * frame time. Call `frame(wallMs)` once per frame.
  */
 export class Quality {
-  readonly mode: GfxMode;
+  mode: GfxMode;
   readonly software: boolean;
   /** Touch device (phone / tablet): the touch profile in auto mode. */
   readonly touch: boolean;
@@ -135,14 +135,14 @@ export class Quality {
    * (render/style.ts: street-lamp light pools). */
   readonly lite: boolean;
   /** City draw distance, m (SceneView.drawDistanceM). */
-  readonly drawDistanceM: number;
+  drawDistanceM: number;
   /** Fraction of the rain streak pool drawn (WeatherView.rainFraction). */
-  readonly rainFraction: number;
+  rainFraction: number;
   /** Crash effects quality at start (`?fx=`, stored, else low on the low profile, high otherwise). */
   readonly fx: FxLevel;
   /** Resolution scale (1 = native, capped at device pixel ratio 2). */
   scale: number;
-  private readonly profile: Profile;
+  private profile: Profile;
   private renderer: THREE.WebGLRenderer | null = null;
   private emaMs = 16.7;
   private slowS = 0;
@@ -182,11 +182,37 @@ export class Quality {
     this.renderer = renderer;
     renderer.setPixelRatio(this.ratio(this.scale));
     document.documentElement.dataset.gfx = this.mode;
-    if (!this.profile.backdropBlur) {
-      const style = document.createElement("style");
-      style.id = "gfx-no-backdrop";
-      style.textContent = "* { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }";
-      document.head.appendChild(style);
+    this.applyBackdrop();
+  }
+
+  private applyBackdrop(): void {
+    const old = document.getElementById("gfx-no-backdrop");
+    if (this.profile.backdropBlur) return void old?.remove();
+    if (old) return;
+    const style = document.createElement("style");
+    style.id = "gfx-no-backdrop";
+    style.textContent = "* { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }";
+    document.head.appendChild(style);
+  }
+
+  /**
+   * Switch the level now (game menu, UI kit): resolution scale, governor, rain density, backdrop
+   * blur and draw distance follow at once; MSAA (a context attribute) only after a reload. The
+   * choice is stored. Callers copy `drawDistanceM` / `rainFraction` to the scene and weather.
+   */
+  setMode(mode: GfxMode): void {
+    setGfxMode(mode);
+    if (mode === this.mode) return;
+    this.mode = mode;
+    this.profile = profileFor(mode, this.software, this.touch);
+    this.drawDistanceM = this.profile.drawM;
+    this.rainFraction = this.profile.rain;
+    this.scale = this.profile.scale;
+    this.slowS = this.fastS = 0;
+    if (this.renderer) {
+      this.renderer.setPixelRatio(Quality.native() * this.scale);
+      document.documentElement.dataset.gfx = mode;
+      this.applyBackdrop();
     }
   }
 
