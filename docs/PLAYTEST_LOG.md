@@ -136,6 +136,7 @@ the schedule could hunt (1→2→1). New automatic (`crates/wp_vehicle/README.md
 | 59 | No option to map a clutch | C (testbed): `clutch` binding (key / pad / wheel pedal) + automatic/manual clutch setting; A: manual clutch + stall/restart in wp_vehicle | dispatched |
 | 60 | Sped right past a cop and no chase started; the cop doesn't reverse or turn around to chase | E (police): fast pass-by detection (sight rate, LOS with tunnels/terrain, heat threshold for blatant speeding), scenarios | dispatched |
 | 61 | Police should push civilians out of the way when stuck | E (police): low-speed controlled shove after 1.5 s blocked (sirens), civilians yield to sirens (D) | dispatched |
+| 62 | Traffic should get out of the way of police with sirens on | D (traffic AI): signal, slow, pull over, wait, merge back; LOD fleet too | dispatched |
 
 ## 2026-10-19 — step 2: 4-player test on Port Vesper v2 (F, `ws/net`)
 Found by the new 3-minute 4-client test (`crates/wp_net/tests/vesper_e2e.rs`) and the

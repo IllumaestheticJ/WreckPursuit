@@ -934,3 +934,22 @@ at 480 m, which is why the active radius is 440 m).
 - Kinematic agents move in 60 Hz traffic steps; `wp_wasm::lod::traffic_draw` carries them
   forward along their heading between steps (read-only), so the browser no longer judders.
   A `World` accessor for "time since the last traffic step" would let it stop recomputing that.
+
+## Lead feedback (round 12b, 2026-10-20) — owner: traffic yields to police sirens
+Base: `origin/lead/round12` (not main). Owner: "traffic will get out of the way of cops if siren is
+on" (rows 61–62; E is adding siren units pushing through stuck traffic on ws/police).
+1. Civilian drivers yield to any vehicle with its siren on (police units now; the player cop in
+   multiplayer too): when a siren unit approaches from behind or ahead in the same direction
+   within ~60–120 m (or is detected at a junction), the driver signals, slows and pulls to the
+   kerb / the right-hand side (or the nearest shoulder / out of the lane the unit needs), stops,
+   and waits until the unit has passed + ~2 s, then merges back carefully. At red lights, creep
+   into the junction only if safe to make room; never block the junction. Oncoming traffic
+   slows. Driver personality may vary reaction time (0.5–2 s) but everyone yields.
+2. Expose the siren state D needs (from wp_police / wp_sim; if a contract field is needed, write a
+   request under "Contract change requests" and use a local query meanwhile).
+3. The LOD fleet (kinematic far traffic) must yield too, cheaply (e.g. stop on the shoulder when
+   a siren unit is within range), so far cars don't block the road when they are promoted.
+4. Scenarios with expected ranges: a siren unit behind 6 cars on a 2-lane street passes all of
+   them within ~10 s; with sirens off they don't yield. Same in both damage modes.
+5. Keep the 400-agent traffic budget (≤ 2 ms native).
+
