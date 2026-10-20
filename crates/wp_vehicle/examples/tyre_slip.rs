@@ -737,8 +737,12 @@ fn matrix() {
     car_lab::set_override(None);
     let g0 = grip(&d);
     let snap = hold_snapshot(&d);
-    println!("| config | held / 27 | held cases (car entry° g) | grip max |Δ| % (worst) | basin edge → eq ° (width) |");
-    println!("|---|---|---|---|---|");
+    println!("| config | held / 27 | held cases (car entry° g) | grip max |Δ| % (worst) | basin edge → eq ° (width) | straight launch yaw < 3° (rwd a/b/d × 0° / 2° slope) |");
+    println!("|---|---|---|---|---|---|");
+    let launch_cars: Vec<LoadedCar> = ["parity_rwd_a", "parity_rwd_b", "parity_rwd_d"]
+        .iter()
+        .map(|id| car(id))
+        .collect();
     for (name, t) in configs {
         car_lab::set_override(Some(t));
         let (_, v) = robust(&set);
@@ -785,8 +789,19 @@ fn matrix() {
             (Some(a), Some(b)) => format!("{:.0}", b - a),
             _ => "none".into(),
         };
+        let mut straight = 0;
+        let mut worst_yaw = 0.0f32;
+        for lc in &launch_cars {
+            for slope in [0.0f32, 2.0] {
+                let (y, ..) = straight_launch_on(lc, slope);
+                worst_yaw = worst_yaw.max(y);
+                if y < 3.0 {
+                    straight += 1;
+                }
+            }
+        }
         println!(
-            "| {name} | {n_held} (band ≥ 2 s: {}) | {} | {worst:.1} ({}) | {} → {} ({width}) |",
+            "| {name} | {n_held} (band ≥ 2 s: {}) | {} | {worst:.1} ({}) | {} → {} ({width}) | {straight} / 6 (worst {worst_yaw:.1}°) |",
             held.len(),
             held.join(", "),
             labels[wi],
@@ -801,6 +816,13 @@ fn matrix() {
 /// ESC off, manual gears (stays in 1st), plain steering. Returns (largest |heading change| °,
 /// largest |body slip| ° above 2 m/s, km/h at 3 s, peak driven slip ratio).
 fn straight_launch(c: &LoadedCar) -> (f32, f32, f32, f32) {
+    let camber: f32 =
+        std::env::var("LAUNCH_CAMBER_DEG").map_or(0.0, |k| k.parse().expect("number"));
+    straight_launch_on(c, camber)
+}
+
+/// [`straight_launch`] on a road cross-slope of `camber` degrees.
+fn straight_launch_on(c: &LoadedCar, camber: f32) -> (f32, f32, f32, f32) {
     use wp_contracts::VehicleInput;
     use wp_vehicle::math::{atan2, V3};
     use wp_vehicle::rig::Rig;
@@ -821,7 +843,13 @@ fn straight_launch(c: &LoadedCar) -> (f32, f32, f32, f32) {
     let kick: f32 = std::env::var("LAUNCH_KICK").map_or(0.02, |k| k.parse().expect("number"));
     rig.kick([0.0; 3], [0.0, 0.0, kick]);
     let (mut yaw, mut slip, mut kappa) = (0.0f32, 0.0f32, 0.0f32);
+    // LAUNCH_CAMBER_DEG: a road cross-slope, emulated as the sideways part of gravity
+    // (g·sin θ along world +X) added each tick.
+    let side_dv = 9.81 * wp_vehicle::math::sin(camber.to_radians()) / 240.0;
     for _ in 0..3 * 240 {
+        if side_dv != 0.0 {
+            rig.kick([side_dv, 0.0, 0.0], [0.0; 3]);
+        }
         rig.step(
             &VehicleInput {
                 throttle: 1.0,

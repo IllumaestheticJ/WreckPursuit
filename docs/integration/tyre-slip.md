@@ -36,6 +36,40 @@ power-on straightening or the handbrake pivot.
    counter-lock angle. Rack compliance does not widen it; robustness target (27 cases) not
    met: 2 / 27 held (data 0 / 27).
 
+## Straight launches (owner: "spins off the line", lead 2026-10-20 evening)
+
+Owner, Drift Lab W: TCS off, floored from rest, no steering → the car spins at once; the
+reference (clip 5) smokes the rears dead straight 0 → 40 mph.
+
+`cargo run --release -p wp_vehicle --example tyre_slip -- launch` (rest → full throttle 3 s,
+steer 0, TCS / ESC off, manual gears = 1st, plain steering, lab ride default;
+`LAUNCH_KICK` = yaw disturbance at the start, default 0.02 rad/s; `LAUNCH_CAMBER_DEG` = road
+cross-slope, emulated as g·sin θ sideways each tick). Max heading change, ° (target < 3):
+
+| car | data | spin model | spin + drift lock | step-1 spin model (floor always on, = W's merge be8b7790) |
+|---|---|---|---|---|
+| flat, kick 0.02: all RWD | 0.03–0.42 | 0.03 | 0.03–0.04 | 0.03 |
+| flat, kick 0.2: parity_rwd_b / rampart_50 | **5.6** / 2.1 | 0.33 / 0.41 | 0.33 / 0.41 | 0.33 / 0.41 |
+| 1° slope: rwd_a / b / d / rampart / shiro | **67 / 136 / 71 / 59 / 69** | 0.37 / 0.45 / 0.38 / 0.36 / 0.34 | ≤ 0.37 | ≤ 0.52 |
+| 2° slope | **105–180** | 0.67–0.88 | 0.54–0.72 | 0.41–1.02 |
+| 3° slope | **140–180** | 0.99–1.32 | 0.80–1.07 | 0.60–1.53 |
+
+**Cause: the tyre data, not the spin model.** With the friction ellipse a rear spinning at
+κ ≈ 6–8 (1st gear, limiter) has almost no side force, so the smallest sideways force (road
+crown / camber on the free-drive map Drift Lab W uses, a bump, the LSD) swings the tail out and
+the car spins. The spin model keeps a side-force floor under any wheelspin (`C` = 0.82 →
+≥ 28 % of the pure side force, ~42 % at κ ≈ 7 and small slip angles), so it launches straight.
+At zero slip angle the spin model is the ellipse bit for bit (the drive floor fades in from 1°;
+unit test), so it adds no yaw of its own. Drift Lab W has my step-1 commit (floor always on):
+that also launches straight here; the only effect is a quicker launch (0–60 km/h in 3 s).
+If the owner's spins were with the spin model **on**, the cause is something these runs don't
+contain (the browser input path, damage, the map's ground); please send the car / settings.
+
+Matrix column added (`… -- matrix`): straight launches yaw < 3° for rwd_a / b / d × 0° / 2°
+slope: **data 3 / 6 (worst 180°), spin model 6 / 6 (0.9°), spin + drift lock 6 / 6 (0.7°)**.
+Test: `tests/tyre_slip.rs::spin_model_launches_straight_on_a_cambered_road` (data spins on a
+2° slope, both spin presets < 3°).
+
 ## Step 3 (lead: lock / entry side, inertia, front large-slip; target ≥ 20 / 27 held, grip ≤ 5 %)
 
 New lab knobs (`CarTune`, panel "car / tyre experiments", all off by default):

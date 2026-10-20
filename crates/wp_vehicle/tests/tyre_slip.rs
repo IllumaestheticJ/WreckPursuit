@@ -11,6 +11,9 @@ use wp_vehicle::drift_lab_w::{load_any_car, plain_drift_run_with, reference_assi
 use wp_vehicle::plain::{self, PlainSteer};
 use wp_vehicle::ride_lab::{self, RideTune};
 
+/// The lab overrides are process-wide: tests in this binary take this lock.
+static LAB: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn car(id: &str) -> LoadedCar {
     let data = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data");
     load_any_car(&data, id).unwrap()
@@ -46,6 +49,7 @@ fn hold(c: &LoadedCar) -> (f32, f32, f32, bool, u64) {
 
 #[test]
 fn spin_model_holds_the_clip_1_drift_where_the_ellipse_spins() {
+    let _lab = LAB.lock().unwrap_or_else(|e| e.into_inner());
     let c = car("parity_rwd_d");
     plain::set_override(Some(PlainSteer::default()));
     ride_lab::set_override(Some(RideTune::lab_default()));
@@ -74,5 +78,64 @@ fn spin_model_holds_the_clip_1_drift_where_the_ellipse_spins() {
     );
     car_lab::set_override(None);
     ride_lab::set_override(None);
+    plain::set_override(None);
+}
+
+/// Rest → full throttle for 3 s, steer 0, TCS off, on a road cross-slope of `slope_deg`
+/// (sideways gravity g·sin θ added each tick): largest heading change, degrees.
+fn launch_yaw(c: &LoadedCar, slope_deg: f32) -> f32 {
+    use wp_contracts::VehicleInput;
+    use wp_vehicle::math::{atan2, sin, V3};
+    use wp_vehicle::rig::Rig;
+    let a = reference_assists();
+    let mut rig = Rig::new(c);
+    rig.teleport([0.0; 3], 0.0, 0.0, 0.0);
+    for _ in 0..120 {
+        rig.step(&VehicleInput::default(), &a);
+    }
+    let heading = |rig: &Rig| {
+        let f = rig.vehicle.chassis().rot * V3::Y;
+        atan2(-f.x, f.y).to_degrees()
+    };
+    let h0 = heading(&rig);
+    let side_dv = 9.81 * sin(slope_deg.to_radians()) / 240.0;
+    let mut yaw = 0.0f32;
+    for _ in 0..3 * 240 {
+        rig.kick([side_dv, 0.0, 0.0], [0.0; 3]);
+        rig.step(
+            &VehicleInput {
+                throttle: 1.0,
+                ..Default::default()
+            },
+            &a,
+        );
+        yaw = yaw.max((heading(&rig) - h0).abs());
+    }
+    yaw
+}
+
+#[test]
+fn spin_model_launches_straight_on_a_cambered_road() {
+    // Owner (Drift Lab W): "spins off the line, TCS off, no steering"; the reference smokes
+    // the rears dead straight. With the friction ellipse a rear spinning at κ ≈ 6–8 has almost
+    // no side force, so a 2° road slope swings the tail out; the spin model keeps a side-force
+    // floor under spin and launches straight.
+    let _lab = LAB.lock().unwrap_or_else(|e| e.into_inner());
+    let c = car("parity_rwd_d");
+    plain::set_override(Some(PlainSteer::default()));
+    ride_lab::set_override(None);
+    car_lab::set_override(None);
+    let data = launch_yaw(&c, 2.0);
+    assert!(
+        data > 30.0,
+        "data on a 2° slope: {data}° (expected to spin)"
+    );
+    for t in [CarTune::spin_candidate(), CarTune::spin_lock_candidate()] {
+        car_lab::set_override(Some(t));
+        let y = launch_yaw(&c, 2.0);
+        assert!(y < 3.0, "spin model on a 2° slope: {y}°");
+        assert!(launch_yaw(&c, 0.0) < 0.1);
+    }
+    car_lab::set_override(None);
     plain::set_override(None);
 }
