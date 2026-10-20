@@ -492,3 +492,4 @@ is about how fast cars become undrivable / wrecked and how much handling they lo
    wreck thresholds, not the visible deformation.
 4. Scenarios with expected ranges for the above; goldens in a [bless] commit with the reason.
 
+**Owner rule (2026-10-20, CLAUDE.md):** Arcade and Simulation differ only in car damage; physics is identical. Your Arcade retune (rows 48–49) stays in the damage tables; police durability is a car property and applies in both modes.
