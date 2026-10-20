@@ -162,8 +162,11 @@ functions. Same frames in → byte-identical commands out (tested on real physic
   else Routine); `PursuitStarted/Ended` track that; `SpikeHit` plays a `tire/burst` per wheel.
 - **Sirens** (`siren.rs`): wail (650→1600 Hz, 4 s cycle, 2.4 s rise), yelp (same range, 0.3 s),
   phaser (750→1700 Hz, 0.1 s), hi-lo (770/960 Hz, 0.55 s each) — cadences in
-  `audio_config.json`. Phase is computed from ticks, the synth runs the cadence itself
-  phase-locked to it (`CurvePlan`: back-to-back pitch curves that cannot overlap, row 30).
+  `audio_config.json`. Sweeps use a smoothstep rise and fall (no corner at the peak or trough;
+  the old ease-out/ease-in shape made the yelp "laugh"). Phase is computed from ticks; the
+  browser synth starts at that phase and then runs the cadence on the audio clock (pitch only,
+  constant amplitude, no re-locking: per-frame re-locks to a jittery sim phase caused pitch
+  hiccups) (`CurvePlan`: back-to-back pitch curves that cannot overlap, row 30).
   Horn from `VehicleInput::horn`.
 - **Siren v2** (`siren_unit.rs`, `siren_space.rs`, playtest row 82; full notes in
   `docs/integration/siren-v2.md`): the bridge sets each police car's `SirenCue` (from its AI

@@ -397,50 +397,56 @@ export function sirenFreqAtPhase(s: Params, phase: number): number {
   if (s.two_tone) {
     x = p < 0.5 ? 1 : 0;
   } else {
+    // Smoothstep rise and fall: glides at both turnarounds (no corner at the peak, no dwell
+    // at the bottom; that shape made the yelp sound like laughing).
     const r = Math.min(0.99, Math.max(0.01, s.rise_frac ?? 0.5));
-    if (p < r) {
-      const u = p / r;
-      x = 1 - (1 - u) * (1 - u);
-    } else {
-      const u = (p - r) / (1 - r);
-      x = (1 - u) * (1 - u);
-    }
+    const ease = (u: number) => u * u * (3 - 2 * u);
+    x = p < r ? ease(p / r) : 1 - ease((p - r) / (1 - r));
   }
   const lo = s.lo_hz ?? 650;
   const hi = s.hi_hz ?? 1500;
   return lo + (hi - lo) * x;
 }
 
-/** Siren: runs the cadence locally (phase-locked to the director's phase), scheduling the
- * frequency curve a little ahead so even the 10 Hz phaser sweeps cleanly. */
+/** Siren (v1 packs): a continuous tone whose pitch follows the cadence on the audio clock.
+ * Only the PITCH is modulated; the amplitude never changes for the life of the voice.
+ *
+ * The cadence free-runs from the director's phase at creation. It used to re-lock to the
+ * director's phase whenever they disagreed by more than 5 % of a cycle, but the director's
+ * phase comes from sim ticks sampled once per rendered frame: frame jitter, the fixed-step
+ * remainder and a sim running slower than real time (the city) put it 10-40 ms off the audio
+ * clock all the time. For the yelp (0.3 s cycle, 5 % = 15 ms) that meant a phase jump every
+ * few frames, i.e. pitch hiccups a few times a second on top of the sweep. Each curve was
+ * also computed for a time 1 ms earlier than where it was placed, so the local clock slipped
+ * and forced more re-locks. A new pattern is a new voice, so the voice keeps its own clock.
+ * (Siren v2 packs, `driver: 1`, use `siren.ts`, which works the same way.) */
 function siren(ctx: BaseAudioContext, s: Params, p: VoiceParams): SynthVoice {
   const out = gain(ctx, 1);
-  const o = osc(ctx, s.wave && s.wave >= 1 ? "square" : "triangle", sirenFreqAtPhase(s, p.phase));
-  const o2 = osc(ctx, "sawtooth", sirenFreqAtPhase(s, p.phase));
+  const t0 = ctx.currentTime;
+  const phase0 = p.phase;
+  const cycle = Math.max(0.02, s.cycle_s ?? 1);
+  const freqAt = (t: number) => sirenFreqAtPhase(s, phase0 + (t - t0) / cycle);
+  const o = osc(ctx, s.wave && s.wave >= 1 ? "square" : "triangle", freqAt(t0));
+  const o2 = osc(ctx, "sawtooth", freqAt(t0));
   const lp = filter(ctx, "lowpass", 4500);
   o.connect(gain(ctx, 0.35)).connect(lp);
   o2.connect(gain(ctx, 0.15)).connect(lp);
   lp.connect(out);
-  const cycle = Math.max(0.02, s.cycle_s ?? 1);
   const seg = Math.min(cycle, 0.2);
-  // Phase clock: phase at audio time t = phase0 + (t - t0) / cycle.
-  let t0 = ctx.currentTime;
-  let phase0 = p.phase;
-  let scheduledUntil = ctx.currentTime;
+  // At least ~64 points per cadence cycle so even the 10 Hz phaser sweeps cleanly.
+  const n = Math.max(24, Math.ceil((64 * seg) / cycle));
+  let scheduledUntil = t0;
   let doppler = p.doppler || 1;
   const schedule = (now: number) => {
     if (scheduledUntil < now) scheduledUntil = now;
     while (scheduledUntil < now + 0.3) {
-      const n = 24;
-      const curve = new Float32Array(n);
-      for (let i = 0; i < n; i++) {
-        const t = scheduledUntil + (seg * i) / (n - 1);
-        curve[i] = sirenFreqAtPhase(s, phase0 + (t - t0) / cycle) * doppler;
-      }
-      // Back-to-back curves must not overlap: float rounding in `scheduledUntil += seg` can put
-      // a start a hair before the previous curve's end, which throws NotSupportedError and stops
-      // the frame loop. Leave a 1 ms gap and never let one bad curve break the page.
+      // Back-to-back curves must not overlap: float rounding in the running end time can put
+      // a start a hair before the previous curve's end, which throws NotSupportedError and
+      // stops the frame loop. Leave a 1 ms gap, but sample the cadence at the curve's real
+      // times so the gap does not shift the sweep.
       const start = scheduledUntil + 0.001;
+      const curve = new Float32Array(n);
+      for (let i = 0; i < n; i++) curve[i] = freqAt(start + (seg * i) / (n - 1)) * doppler;
       for (const node of [o, o2]) {
         try {
           node.frequency.setValueCurveAtTime(curve, start, seg);
@@ -451,19 +457,12 @@ function siren(ctx: BaseAudioContext, s: Params, p: VoiceParams): SynthVoice {
       scheduledUntil = start + seg;
     }
   };
-  schedule(ctx.currentTime);
+  schedule(t0);
   return {
     output: out,
     update(p2, t) {
+      // Doppler applies from the next curve on; the cadence keeps its own clock.
       doppler = p2.doppler || 1;
-      // Resync if the local clock drifted more than 5 % of a cycle from the director's phase.
-      const local = phase0 + (t - t0) / cycle;
-      let d = p2.phase - (local - Math.floor(local));
-      d -= Math.round(d);
-      if (Math.abs(d) > 0.05) {
-        t0 = t;
-        phase0 = p2.phase;
-      }
       schedule(t);
     },
     stop: (t) => stopAll([o, o2], t),

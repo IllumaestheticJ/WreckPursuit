@@ -639,3 +639,17 @@ docs, and the kinematic-traffic bridge which reads `&Session` only): simcli `gol
 `wp_wasm` `crash_replay_tests::race_crash_replays_with_the_judge_and_no_crash_on_the_grid` and
 `tests::simcli_golden_replays_play_back_in_the_browser_core` (golden_tbone drift) — neither
 `wp_wasm` test touches audio. These look like round-13 vehicle changes waiting for a `[bless]`.
+
+## Sirens sweep smoothly instead of "laughing" (port of 2e64f096 onto round12, 2026-10-20)
+
+Both browser siren voices (`siren.ts` sirenLoop for siren v2 packs, `synth.ts` siren for v1)
+re-locked their cadence to the director's per-frame sim phase whenever it drifted > 5 % of a
+cycle (15 ms on the yelp): frame jitter and a sim slower than real time tripped that
+constantly, so the pitch stepped several times a second. They now start at the director's phase
+and free-run on the audio clock (Doppler is the only per-update input; pitch only, constant
+amplitude), with ≥ 64 curve points per cycle. The sweep shape (`SirenCadence::freq_at_phase`,
+`cadenceFreq`, `sirenFreqAtPhase`, the `e2e/siren.mjs` model) is a smoothstep rise and fall
+(the old ease-out / ease-in shape fell at full speed off the peak and dwelt at the bottom, a
+"ha" contour at yelp rate); `phase_for_freq` inverts it by bisection. Test:
+`siren::tests::sweep_turnarounds_are_smooth`.
+
