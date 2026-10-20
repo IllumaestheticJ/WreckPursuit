@@ -63,11 +63,11 @@ pub use heat::{BountyRecord, PursuitStatus, RacerRecord, WantedLevel};
 pub use radio::{RadioConfig, RadioStats, RadioTier};
 pub use time::SimTime;
 pub use tools::{HeloView, RadarBlip, RadioLine, Roadblock, SpikeStrip, StaticCollider};
-pub use unit::{Assignment, DriveCommand, SteerGeometry, Tactic, Unit};
+pub use unit::{Assignment, DriveCommand, SteerGeometry, Tactic, Unit, UnitRole};
 
 use graph::xy;
 use tools::Puncture;
-use unit::{UnitBody, UnitRole};
+use unit::UnitBody;
 
 /// Height of a driver's eyes / a car's roof for line-of-sight queries, m.
 pub const EYE_HEIGHT_M: f32 = 1.3;
@@ -136,6 +136,37 @@ pub struct PursuitRecord {
     pub outcome: Option<PursuitOutcome>,
 }
 
+/// One reckless-driving call (a violation no unit saw that opened a report), for statistics.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct CallRecord {
+    /// Reported racer.
+    pub racer: EntityId,
+    /// When the call came in.
+    pub at: SimTime,
+    /// Where (the violation), m.
+    pub pos: [f32; 2],
+    /// A responder was spawned for it (no available unit within `response.radius_m`).
+    pub spawned: bool,
+}
+
+/// One ground unit appearing after the session start, for statistics: how close to (and
+/// whether in sight of) a racer it popped in.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct SpawnRecord {
+    /// Unit.
+    pub unit: UnitId,
+    /// Why it exists.
+    pub role: UnitRole,
+    /// When.
+    pub at: SimTime,
+    /// Where, m.
+    pub pos: [f32; 2],
+    /// Straight-line distance to the nearest racer, m (`f32::MAX` with no racers).
+    pub nearest_racer_m: f32,
+    /// Some racer had line of sight to it.
+    pub in_sight: bool,
+}
+
 /// Counters for tests, tuning and the README perf/behaviour tables.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct PoliceStats {
@@ -175,6 +206,22 @@ pub struct PoliceStats {
     pub traffic_collisions: u32,
     /// Built-in driver: ran wide and crashed.
     pub run_wide_crashes: u32,
+    /// Built-in driver: near misses, traffic collisions and run-wide crashes by units while
+    /// pursuing or intercepting (what the risk budget and pursuit caps govern).
+    pub pursuit_harm: u32,
+    /// Built-in driver: seconds pursuing / intercepting units spent cornering above
+    /// `pursuit.risk.lateral_g`, summed over units.
+    pub pursuit_high_g_s: f32,
+    /// Seconds pursuing / intercepting units spent with their risk budget used up (held to
+    /// shadowing and gentle cornering), summed over units.
+    pub pursuit_no_risk_s: f32,
+    /// Reckless-driving calls (reports opened).
+    pub calls: Vec<CallRecord>,
+    /// Calls taken off a unit that fell behind the racer and dispatched again.
+    pub redispatches: u32,
+    /// Ground units spawned after the session start (pool refills, responders,
+    /// reinforcements, tool units).
+    pub spawns: Vec<SpawnRecord>,
 }
 
 /// Captain bookkeeping (human or AI).

@@ -261,10 +261,45 @@ pub struct ReinforcementConfig {
     pub priority_max_reduction: f32,
     /// Ground units wanted on a racer per wanted level L1..L5.
     pub units_per_level: [u32; 5],
-    /// Reinforcements spawn at least this far from the racer, m.
+    /// Fallback spawn for a reinforcement when [`ResponseConfig`] finds no hidden spot in its
+    /// window: the nearest node at least this far from the racer, out of its sight, m.
     pub spawn_min_distance_m: f32,
-    /// Delay before a civilian report (unseen violations) gets a unit dispatched, s.
-    pub report_dispatch_delay_s: PhaseTable<f32>,
+}
+
+/// Dispatch-driven response to reckless-driving calls (owner playtest 2026-10-20: "spawn them
+/// in when there's public safety calls"). A call (a violation no unit saw) is assigned to the
+/// nearest available unit within `radius_m`; if there is none, a responder **spawns** out of
+/// every racer's sight, `spawn_min_m..spawn_max_m` along the roads, and drives at the racer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResponseConfig {
+    /// Call taken → unit assigned, s, per phase (the dispatcher's part of the response time).
+    pub call_delay_s: PhaseTable<f32>,
+    /// Added to `call_delay_s` per district (stations are downtown), s.
+    pub district_delay_s: DistrictTable<f32>,
+    /// An available unit closer than this (straight line) takes the call; otherwise one
+    /// spawns, per district, m.
+    pub radius_m: DistrictTable<f32>,
+    /// Spawn window along the roads (legal driving distance to the racer), m.
+    pub spawn_min_m: f32,
+    /// See `spawn_min_m`, m.
+    pub spawn_max_m: f32,
+    /// A fast racer stretches `spawn_max_m` by this many seconds of its travel, so a
+    /// responder can still appear ahead of it (out of sight on a long straight), s.
+    pub spawn_lead_s: f32,
+    /// A unit never appears (or vanishes) closer than this to any racer, straight line, m.
+    pub never_closer_m: f32,
+    /// Ground units allowed at once by the highest wanted level, L0..L5 (patrols included;
+    /// also capped by `max_ground_units`). Responders and reinforcements wait for room.
+    pub max_units_by_level: [u32; 6],
+    /// Idle responders, reinforcements and surplus patrols despawn once out of every racer's
+    /// sight and at least this far away, m.
+    pub despawn_min_m: f32,
+    /// A call's unit still farther than `redispatch_far_m` from the racer this long after
+    /// taking it is released and the call dispatched again (the racer turned away), s.
+    pub redispatch_s: f32,
+    /// See `redispatch_s`, m.
+    pub redispatch_far_m: f32,
 }
 
 /// Helicopter availability.
@@ -307,6 +342,8 @@ pub struct PresenceFile {
     pub max_ground_units: u32,
     /// Reinforcements.
     pub reinforcement: ReinforcementConfig,
+    /// Response to reckless-driving calls (responder spawning).
+    pub response: ResponseConfig,
     /// Helicopter.
     pub helicopter: HeloAvailability,
     /// Tool unlocks by wanted level.
@@ -788,6 +825,15 @@ impl PoliceConfig {
             if r.min > r.max || r.min < 0.0 {
                 return bad("reinforcement.response_s ranges must have 0 <= min <= max");
             }
+        }
+        let rs = &self.presence.response;
+        if !(rs.never_closer_m >= 0.0
+            && rs.spawn_min_m >= rs.never_closer_m
+            && rs.spawn_max_m >= rs.spawn_min_m
+            && rs.despawn_min_m >= rs.never_closer_m)
+            || rs.max_units_by_level.windows(2).any(|w| w[0] > w[1])
+        {
+            return bad("response: need never_closer_m <= spawn_min_m <= spawn_max_m, despawn_min_m >= never_closer_m, unit caps ascending");
         }
         if self.tools.roadblock.units[0] == 0
             || self.tools.roadblock.units[0] > self.tools.roadblock.units[1]

@@ -260,6 +260,9 @@ pub enum UnitRole {
     Pool(District),
     /// Spawned reinforcement.
     Reinforcement,
+    /// Spawned to answer a reckless-driving call (no unit was close enough); despawns out of
+    /// sight once the call is over.
+    Responder,
     /// Parked roadblock / spike unit.
     Tool,
     /// Helicopter.
