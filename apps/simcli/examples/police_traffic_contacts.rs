@@ -119,6 +119,22 @@ fn run_once(base: &Scenario, seed: u64, racer_start: Option<f32>, secs: f32, t: 
         }
         sim.step_fixed();
         t.sim_s += PHYSICS_DT;
+        if let Ok(spec) = std::env::var("WP_TRACE_COP") {
+            let mut it = spec.split(',');
+            let (sd, ent): (u64, u32) = (
+                it.next().unwrap().parse().unwrap(),
+                it.next().unwrap().parse().unwrap(),
+            );
+            if sd == seed && tick % 24 == 0 {
+                if let Some(v) = sim.vehicles().iter().find(|v| v.id.0 == ent) {
+                    let st = v.vehicle.state();
+                    let u = sim.police().units().iter().find(|u| u.entity == Some(v.id));
+                    if let Some(u) = u {
+                        eprintln!("TRACE t={:.1} pos=({:.1},{:.1}) v={:.1} in={:.2}/{:.2}/{:.2}/{:.1} plan={:.1} lim={:.1} cmd={:.1} {} lane={:.1} s={:.0}/{:.0}", t_of(tick), st.pos[0], st.pos[1], st.speed_mps, v.input.steer, v.input.throttle, v.input.brake, v.input.handbrake, u.planned_speed, u.avoid.limit_mps, u.cmd.speed_mps, u.assignment.name(), u.cmd.lane_offset_m, u.track_s, u.cmd.track.length());
+                    }
+                }
+            }
+        }
         // Police cars: entity → (lights on, position, forward, speed).
         let cops: BTreeMap<EntityId, (bool, [f32; 3], [f32; 2], f32)> = sim
             .vehicles()

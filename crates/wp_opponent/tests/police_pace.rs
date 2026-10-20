@@ -85,6 +85,9 @@ fn arterial_square(laps: u32) -> Course {
     }
 }
 
+/// A course builder.
+type CourseFn = fn() -> Course;
+
 /// Three laps of the arterial square.
 fn arterial_square_3() -> Course {
     arterial_square(3)
@@ -151,6 +154,8 @@ struct Run {
     max_slip: f32,
     /// Ticks spent sliding (police only).
     slide_ticks: u32,
+    /// Wall time inside the police driver per call (harness measurement only), µs.
+    driver_us: f64,
 }
 
 impl Run {
@@ -313,6 +318,7 @@ fn run_with(c: Course, car_id: &str, who: Who, wet: bool) -> Run {
     let mut events: Vec<SimEvent> = Vec::new();
     let mut s_ref = 0.0f32;
     let mut last_split_tick = 0u64;
+    let mut calls = 0u64;
     let dt = wp_contracts::PHYSICS_DT;
     while sim.tick() < (max_s * 240.0) as u64 && run.splits.len() < want {
         let v = &sim.vehicles()[0];
@@ -376,7 +382,10 @@ fn run_with(c: Course, car_id: &str, who: Who, wet: bool) -> Run {
                     racing_line: true,
                     disabled: false,
                 };
+                let t0 = std::time::Instant::now();
                 let out = pro.drive(&ctx, &track, room.as_ref(), dt);
+                calls += 1;
+                run.driver_us += t0.elapsed().as_secs_f64() * 1e6;
                 // WP_LINE_DUMP=<tick>: print the line window with the room at that tick.
                 if std::env::var("WP_LINE_DUMP")
                     .ok()
@@ -456,6 +465,7 @@ fn run_with(c: Course, car_id: &str, who: Who, wet: bool) -> Run {
             last_split_tick = sim.tick();
         }
     }
+    run.driver_us /= calls.max(1) as f64;
     run
 }
 
@@ -476,7 +486,7 @@ fn compare(course: fn() -> Course, car: &str, label: &str) -> (Run, Run) {
     );
     eprintln!(
         "{label} {car}: race AI {:?} best {:.2} s (hits {}, max slip {:.3}) | police {:?} best \
-         {:.2} s ({:+.1} %), hits {}, max slip {:.3} rad, slide ticks {}",
+         {:.2} s ({:+.1} %), hits {}, max slip {:.3} rad, slide ticks {}, {:.1} µs/call",
         ai.splits,
         ai.best(),
         ai.wall_hits,
@@ -486,7 +496,8 @@ fn compare(course: fn() -> Course, car: &str, label: &str) -> (Run, Run) {
         100.0 * (cop.best() / ai.best() - 1.0),
         cop.wall_hits,
         cop.max_slip,
-        cop.slide_ticks
+        cop.slide_ticks,
+        cop.driver_us
     );
     (ai, cop)
 }
@@ -517,7 +528,7 @@ fn police_sprint_within_five_percent_of_the_race_ai_up_hollins_drive() {
 
 #[test]
 fn police_drive_clean_in_the_wet() {
-    let courses: [(&str, fn() -> Course, usize); 2] = [
+    let courses: [(&str, CourseFn, usize); 2] = [
         ("arterial square", arterial_square_3, 3),
         ("Hollins Drive", hollins_drive, 1),
     ];

@@ -20,8 +20,8 @@
 //! - **Slide control.** Body slip past a dead band is countersteered (front wheels toward the
 //!   velocity); past [`ProParams::slide_slip_rad`] the driver lifts and its confidence drops.
 //!   Running wide of the line in a corner lifts too.
-//! - **Recovery.** Stuck nose-in (throttle on, not moving) or facing away from the track at a
-//!   crawl: a short reverse at opposite lock, then on again.
+//! - **Recovery.** Facing away from the line: turn round at a crawl. Stuck nose-in (throttle
+//!   on, not moving): reverse at opposite lock until the nose points at the line, then on.
 //!
 //! Deterministic: f32 only, fixed iteration order, polynomial `atan` (`wp_world::geom`), no
 //! RNG.
@@ -33,7 +33,7 @@ use wp_world::drive::{DriveController, DriveGains};
 use crate::graph::{
     add, closest_on_segment, cross, dot, len, normalize, scale, sub, RoadClass, RoadGraph,
 };
-use crate::unit::{SteerGeometry, Track};
+use crate::unit::{lane_point, SteerGeometry, Track};
 
 /// What a car can do (measured on the dry, undamaged; `wp_vehicle::metrics`).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -128,10 +128,12 @@ pub struct ProParams {
     pub run_wide_m: f32,
     /// Speed while turning around to face the line, m/s.
     pub turn_around_mps: f32,
-    /// Stuck: throttle on and slower than 0.5 m/s for this long, s.
+    /// Stuck: throttle on and slower than 0.5 m/s for this long, s (then reverse).
     pub stuck_s: f32,
-    /// Reverse manoeuvre length, s.
+    /// Longest reverse manoeuvre, s.
     pub reverse_s: f32,
+    /// Shortest reverse manoeuvre (it ends once the nose points at the line), s.
+    pub reverse_min_s: f32,
 }
 
 impl Default for ProParams {
@@ -174,7 +176,8 @@ impl Default for ProParams {
             run_wide_m: 1.2,
             turn_around_mps: 4.0,
             stuck_s: 1.5,
-            reverse_s: 1.2,
+            reverse_s: 2.5,
+            reverse_min_s: 1.5,
         }
     }
 }
@@ -200,6 +203,9 @@ impl RoomQuery for FixedRoom {
         (self.left_m, self.right_m)
     }
 }
+
+/// Below this speed nothing counts as a slide (no countersteer, no lift), m/s.
+const SLIDE_MIN_MPS: f32 = 5.0;
 
 /// A junction box reaches this far past the widest road's lanes (parking lane + crosswalk), m.
 const JUNCTION_EXTRA_M: f32 = 4.5;
@@ -547,7 +553,7 @@ pub struct ProOutput {
     pub planned_mps: f32,
     /// Lateral offset of the line at the car (+ right of the track), m.
     pub line_offset_m: f32,
-    /// Body slip, rad (+ = velocity left of the nose).
+    /// Body slip beyond the rolling (kinematic) slip, rad (+ = velocity left of the nose).
     pub slip_rad: f32,
     /// Sliding (past [`ProParams::slide_slip_rad`]) this tick.
     pub sliding: bool,
@@ -851,12 +857,14 @@ impl ProDriver {
         let (s, _) = track.project_ahead(ctx.pos, self.s_hint, 3.0, 40.0);
         self.s_hint = s;
         out.s = s;
-        let tt = normalize(sub(track.point_at(s + 1.0), track.point_at(s - 1.0)));
 
-        // Body slip (+ = velocity left of the nose).
-        let slip = if speed > 3.0 {
+        // Body slip (+ = velocity left of the nose), less the slip a car rolling without any
+        // tyre slip has at its centre (the rear axle's path is inside the centre's: half a
+        // wheelbase × yaw rate / speed; large in a tight turn at a crawl, not a slide).
+        let slip = if speed > SLIDE_MIN_MPS {
             let vd = scale(ctx.vel, 1.0 / speed);
-            wp_world::geom::atan2(cross(ctx.heading, vd), dot(ctx.heading, vd))
+            let body = wp_world::geom::atan2(cross(ctx.heading, vd), dot(ctx.heading, vd));
+            body - 0.5 * self.ctrl.wheelbase_m * ctx.yaw_rate / speed
         } else {
             0.0
         };
@@ -903,9 +911,12 @@ impl ProDriver {
         let lead = s + fwd_speed.max(0.0) * p.lead_s;
         let mut v_ref = self.win.sample(&self.win.v, lead);
         // Facing away from where the line goes: turn around at a crawl first.
-        let look_pt = self.win.point_at(s + 8.0);
-        let to_line = sub(look_pt, ctx.pos);
-        if len(to_line) > 1.0 && dot(normalize(to_line), ctx.heading) < 0.3 {
+        // (Measured against the lane on the track itself: a line re-planned from a car
+        // pointing the wrong way starts sideways and would hold it at full lock.)
+        let lane = ctx.pass_offset_m.unwrap_or(ctx.lane_offset_m);
+        let to_line = sub(lane_point(track, s + 8.0, lane), ctx.pos);
+        let turning_round = len(to_line) > 1.0 && dot(normalize(to_line), ctx.heading) < 0.3;
+        if turning_round {
             v_ref = v_ref.min(p.turn_around_mps);
         }
         out.planned_mps = v_ref;
@@ -921,8 +932,18 @@ impl ProDriver {
         acc = acc.clamp(-1.3 * a_brk, 2.0 * self.limits.accel_mps2.max(1.0));
 
         // ---- Steering ----
-        let look = self.ctrl.lookahead(fwd_speed.max(0.0).min(v_ref.max(5.0)));
-        let target = self.win.point_at(s + look);
+        let on_line = ctx.racing_line && ctx.pass_offset_m.is_none() && !turning_round;
+        let target = if on_line {
+            let look = self.ctrl.lookahead(fwd_speed.max(0.0).min(v_ref.max(5.0)));
+            self.win.point_at(s + look)
+        } else {
+            // In the lane (patrol, passing, traffic ahead, turning round): exactly the lane
+            // tracking every unit had before, the traffic look-ahead on the lane itself.
+            let g = DriveGains::TRAFFIC;
+            let look = (g.lookahead_base_m + g.lookahead_per_mps * fwd_speed.abs())
+                .clamp(g.lookahead_min_m, g.lookahead_max_m);
+            lane_point(track, s + look, lane)
+        };
         let to = sub(target, ctx.pos);
         let mut steer = self
             .ctrl
@@ -938,28 +959,32 @@ impl ProDriver {
         // Countersteer past the dead band: + slip (velocity to the left) wants the wheels left
         // (negative steer input).
         let excess = slip.signum() * (slip.abs() - p.slip_deadband_rad).max(0.0);
-        if fwd_speed > 3.0 {
+        if fwd_speed > SLIDE_MIN_MPS {
             steer -= p.countersteer_gain * excess / self.ctrl.max_steer_rad;
         }
         let steer = steer.clamp(-1.0, 1.0);
 
-        // ---- Stuck / facing away: reverse out ----
-        let facing_away = dot(ctx.heading, tt) < -0.2 && speed < 3.0;
+        // ---- Stuck: reverse out ----
         if self.reverse_left_s > 0.0 {
             self.reverse_left_s -= dt;
-            out.reversing = true;
-            out.input = VehicleInput {
-                steer: -steer,
-                throttle: 0.0,
-                // A held brake at a standstill selects reverse; then it drives backwards.
-                brake: 0.7,
-                ..Default::default()
-            };
-            self.throttle = 0.0;
-            if self.reverse_left_s <= 0.0 {
+            let reversed_s = p.reverse_s - self.reverse_left_s;
+            // Back out until the nose points at the line again (at least `reverse_min_s`).
+            let aligned = len(to_line) > 1.0 && dot(normalize(to_line), ctx.heading) > 0.7;
+            if self.reverse_left_s <= 0.0 || (aligned && reversed_s >= p.reverse_min_s) {
+                self.reverse_left_s = 0.0;
                 self.ctrl.resync(0.0);
+            } else {
+                out.reversing = true;
+                out.input = VehicleInput {
+                    steer: -steer,
+                    throttle: 0.0,
+                    // A held brake at a standstill selects reverse; then it drives backwards.
+                    brake: 0.7,
+                    ..Default::default()
+                };
+                self.throttle = 0.0;
+                return out;
             }
-            return out;
         }
 
         let (mut throttle, mut brake) = self.ctrl.pedals(fwd_speed, acc, dt, ctx.disabled);
@@ -980,7 +1005,9 @@ impl ProDriver {
         throttle = throttle.min(self.throttle + 6.0 * dt);
         self.throttle = throttle;
         let trying = throttle > 0.4 && fwd_speed.abs() < 0.5 && v_ref > 2.0;
-        if (trying || facing_away) && !ctx.disabled {
+        // Only a car that wants to go and cannot is stuck (one held at a line, or turning
+        // round at a crawl, is not: reversing blindly hits whatever is behind it).
+        if trying && !ctx.disabled {
             self.stuck_s += dt;
         } else {
             self.stuck_s = 0.0;

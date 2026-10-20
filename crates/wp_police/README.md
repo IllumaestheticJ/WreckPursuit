@@ -94,14 +94,17 @@ racers share. Each unit owns one, created with its `SteerGeometry` (wheelbase, f
 Police keep only the speed planning (corner speeds, caps, tactics).
 
 ### Pro driving (`pro.rs`, lead P8)
-Physical AI units drive like trained pursuit drivers: within ~5 % of the best race AI and
-(almost) never into a wall, dry or wet. `ProDriver::drive(ctx, track, room, dt)`:
+Physical AI units with lights on (pursuit, intercept, response) drive like trained pursuit
+drivers: within ~5 % of the best race AI and (almost) never into a wall, dry or wet. Without
+lights (patrol, returning) units keep the calm lane driver they always had (pure pursuit on the
+lane, `patrol_cornering_g`, `unit.brake_mps2`). `ProDriver::drive(ctx, track, room, dt)`:
 - **Racing line** (lights on, no other vehicle within `traffic_clear_m` ahead): the next
   `window_m` of the track, resampled every `step_m`, its polyline corners rounded
   (`corner_round_passes`), then a lateral offset per sample minimising the summed squared
   curvature (projected Gauss–Seidel, strides 4 → 1) inside the **drivable room**. The window
-  starts at the car's own lateral position (no jump on a re-plan, every `replan_s`). Without
-  lights, while passing an obstacle or with traffic ahead the line is the command's lane.
+  starts at the car's own lateral position (no jump on a re-plan, every `replan_s`). While
+  passing an obstacle, with traffic ahead or while turning round the unit tracks its lane
+  (traffic look-ahead) and only the speed profile is the pro driver's.
 - **Room** (`RoadRoom`, `RoomQuery`): built from the city's paved surfaces and lanes
   (`RoadRoom::from_city`; the contract road network's polylines follow a lane, so they are
   not used for widths): own-direction lanes (bus lanes yes, parking no) plus `opposing_m`
@@ -112,18 +115,20 @@ Physical AI units drive like trained pursuit drivers: within ~5 % of the best ra
   `brake_g × brake_usage`, both × the **road grip** the sim reports (`sync_unit_feel`: wet,
   cold, paint, aquaplaning via `wp_vehicle::Vehicle::conditions_grip`) × damage grip ×
   **confidence** (drops `confidence_drop` per slide or run-wide, floor `confidence_min`,
-  regains `confidence_regain_per_s`). Patrol and shadowing keep `patrol_cornering_g` /
-  `shadow_cornering_g` and `unit.brake_mps2` as caps; a pursuit or a response uses the limit.
-  Obstacle and junction caps (`avoid`) still apply on top.
+  regains `confidence_regain_per_s`). Shadowing (risk budget spent) keeps
+  `shadow_cornering_g` as a cap; a pursuit or a response uses the limit. Obstacle and junction
+  caps (`avoid`, e.g. `siren_junction_mps`) still apply on top.
 - **Late braking**: the pedal command adds the profile's own deceleration a few metres ahead
   (feed-forward), read `lead_s` ahead in time.
-- **Slide control**: body slip past `slip_deadband_rad` is countersteered
+- **Slide control** (above 5 m/s; body slip less the rolling slip `½·wheelbase·yaw/v`, which
+  is large in a tight turn at a crawl): slip past `slip_deadband_rad` is countersteered
   (`countersteer_gain`, front wheels toward the velocity); past `slide_slip_rad` the driver
   lifts to `slide_throttle`. On the way out of a corner the throttle is capped by the friction
   ellipse from the measured lateral load (`exit_throttle_min` at full load), so the rear stays
   planted. Running `run_wide_m` outside the line in a corner lifts too.
-- **Recovery**: stuck (throttle on, not moving for `stuck_s`) or facing away at a crawl →
-  `reverse_s` of reverse at opposite lock; facing away from the line → `turn_around_mps`.
+- **Recovery**: facing away from the lane ahead → turn round at `turn_around_mps`; stuck
+  (throttle on, not moving for `stuck_s`) → reverse at opposite lock until the nose points
+  at the lane (`reverse_min_s`..`reverse_s`).
 - **Car limits**: `set_unit_limits(unit, CarLimits)` (`wp_sim::Sim::set_police_car_limits`);
   default `[pro] default_limits` = the Sentinel Cruiser measured with `wp_vehicle::metrics`.
 
@@ -138,9 +143,16 @@ their own-direction lanes, full `wp_sim` loop):
 | Arterial square, fully wet (0.5 mm) | — | 59.22 s (+12.3 % vs dry) | 0 | 0.039 rad |
 | Hollins Drive, fully wet | — | 71.78 s (+17.5 % vs dry) | 0 | 0.033 rad |
 
-Before the pro driver (pure pursuit on the lane centre, corners planned at
-`pursuit_cornering_g` 0.65 g, braking at 6.5 m/s²): see "Before / after" in
-`docs/integration/police.md`.
+The pre-P8 driver (pure pursuit on the lane, corners planned at `pursuit_cornering_g` 0.65 g,
+braking at 6.5 m/s², emulated in the same test): arterial square 60.51 s (+13.5 %), Hollins
+Drive not finished (6 hits, stuck at a hairpin).
+
+In the city with traffic (`cargo run --release -p simcli --example police_traffic_contacts --
+pursuit 900`, 12×12 city at noon, now also counting police↔world hits), per 5 min of pursuit,
+lights on: wall hits 5.7 (`main` before P8) → 2.1; traffic contacts 0.3 → 2.4, of which 7 of 8
+are one low-speed stand-off (0.3–0.6 m/s, a held unit and a traffic car at a junction) counted
+every few seconds. Patrol (lights off) is unchanged by construction (`patrol 300`: 3 wall hits,
+as before).
 
 ### Obstacle awareness (`avoid.rs`)
 Every tick each ground unit (physical or headless) looks ahead on its own track:
@@ -248,6 +260,10 @@ racers on D's small city, with exact building line of sight and obstacle awarene
 (native, release, cloud Xeon 2.1 GHz). Budget 0.5 ms native / 1.0 ms browser. Browser not
 measured yet.
 
+Pro driver (physical units with lights on): 2.2–3.1 µs per physics tick per unit including
+the line re-plans (`police_pace` test, release, same machine) → ≈ 12 µs per unit per 60 Hz
+frame, ≈ 0.1 ms for 8 chasing units.
+
 ## Determinism
 Absolute time is integer `SimTime` microseconds (`src/time.rs`); durations are `f32` seconds.
 The crate uses no `f64`, no `HashMap` iteration and no libm transcendentals (only `wp_math::sin_cos`
@@ -267,6 +283,10 @@ cargo run --release -p wp_police --example police_scenario -- <file.ron> [--tabl
   places one at every third signalised junction). `RoadNetworkQuery` has no signalised-junction
   flag yet, so `from_network` takes the list separately (contract request #7).
 - The headless kinematic body and its traffic-hazard model stand in for physical cars and real traffic.
+- Pro driving (P8): the racing line only sees vehicles within `traffic_clear_m` ahead; a car
+  alongside in the next own-direction lane is not in the line's room. Junction caps
+  (`siren_junction_mps` 11 m/s) still hold pursuits back at every junction. Turning round in a
+  junction is a full-lock crawl, which can touch a kerb on narrow roads.
 - Obstacle awareness sees vehicles only: parked cars and cones (`wp_world` static props) are not
   in the list, so a unit off its lane can still clip one. Passing assumes the other lane exists.
 - `PoliceSystem::new()` (used by `wp_sim` today) has no road network, so it tracks heat but spawns no units.

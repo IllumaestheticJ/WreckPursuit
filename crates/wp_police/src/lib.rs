@@ -793,7 +793,7 @@ impl PoliceSystem {
     /// with lights on a racing line inside its own-direction lanes, a grip-limit speed profile
     /// (road grip from [`PoliceSystem::sync_unit_feel`], damage, the car's
     /// [`pro::CarLimits`]), late braking and slide control, on `wp_world`'s shared pure-pursuit
-    /// + PID controller; patrol keeps its lane and gentle corner budget. Call once per physics
+    /// and PID controller; patrol keeps its lane and gentle corner budget. Call once per physics
     /// tick with that tick's `dt`, after [`PoliceSystem::sync_unit`]. `None` for player units
     /// and unknown ids.
     pub fn unit_input(&mut self, unit: UnitId, dt: f32) -> Option<VehicleInput> {
@@ -819,7 +819,10 @@ impl PoliceSystem {
         }
         let (s, _) = u.cmd.track.project_ahead(u.body.pos, u.track_s, 3.0, 40.0);
         u.track_s = s;
-        self.update_avoid(i, dt);
+        let offset = self.update_avoid(i, dt);
+        if !self.units[i].cmd.siren {
+            return Some(self.lane_input(i, offset, dt));
+        }
         // Traffic close ahead: keep to the lane (obstacle awareness looks along the lane), no
         // racing line through other cars' lanes.
         let traffic_ahead = self.traffic_near_line(i);
@@ -844,10 +847,10 @@ impl PoliceSystem {
             damage_grip: u.grip_scale(),
             power_scale: u.effects.power_scale,
             target_mps: want.max(0.0),
-            // Patrol and shadowing keep their gentle corner budget; a pursuit or response
-            // drives at the grip limit.
+            // Shadowing (risk budget spent) keeps its gentle corner budget; a pursuit or a
+            // response drives at the grip limit.
             cornering_cap_g: (u.cmd.cornering_g < full_g - 1e-3).then_some(u.cmd.cornering_g),
-            braking_cap_mps2: (!siren).then_some(brake),
+            braking_cap_mps2: None,
             lane_offset_m: u.cmd.lane_offset_m,
             pass_offset_m: u.avoid.pass_offset_m,
             racing_line: siren && !traffic_ahead,
@@ -872,6 +875,48 @@ impl PoliceSystem {
         input.siren = siren;
         input.headlights = true;
         Some(input)
+    }
+
+    /// Calm driving without lights (patrol, returning): pure pursuit on the lane at `offset`
+    /// and PID pedals toward the think-rate corner plan (`planned_speed`,
+    /// `patrol_cornering_g`) and the obstacle cap, with comfortable braking.
+    fn lane_input(&mut self, i: usize, offset: f32, dt: f32) -> VehicleInput {
+        let (accel, brake) = (
+            self.cfg.pursuit.unit.accel_mps2,
+            self.cfg.pursuit.unit.brake_mps2,
+        );
+        let u = &mut self.units[i];
+        let v = u.body.speed;
+        let s = u.track_s;
+        let look = u.controller().lookahead(v);
+        let target = unit::lane_point(&u.cmd.track, s + look, offset);
+        let (pos, heading) = (u.body.pos, u.body.heading);
+        let want = u.cmd.speed_mps.min(u.planned_speed).min(u.avoid.limit_mps);
+        let hold = u.avoid.limit_mps <= 0.0;
+        let acc = (want - v).clamp(-brake, accel);
+        let disabled = u.wrecked || u.assignment == Assignment::OutOfService;
+        let siren = u.cmd.siren;
+        let ctl = u.controller();
+        let steer = ctl.steer(pos, heading, [target[0], target[1], 0.0]);
+        let (mut throttle, mut brake) = ctl.pedals(v, acc, dt, disabled);
+        let mut handbrake = 0.0;
+        if hold {
+            // The shared controller releases the brake below its hold speed; right behind
+            // another vehicle or at a stop line the unit must not creep forwards either.
+            throttle = 0.0;
+            (brake, handbrake) = standstill_hold(v, brake.max(1.0));
+        }
+        // The pro driver picks up from here when the lights go on.
+        u.pro = None;
+        VehicleInput {
+            steer,
+            throttle,
+            brake,
+            handbrake,
+            siren,
+            headlights: true,
+            ..Default::default()
+        }
     }
 
     /// Whether another vehicle is close ahead of unit `i` near its road (within
