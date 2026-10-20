@@ -16,18 +16,22 @@ mod police_link;
 mod props;
 mod systems;
 mod traffic_link;
+mod weather_link;
 
 pub use contacts::CONTACT_EVENT_MIN_IMPULSE_NS;
-pub use physics::{CityColliders, PhysicsWorld, SAFETY_FLOOR_Z};
+pub use physics::{
+    city_ground_colliders, parked_slab_collider, CityColliders, PhysicsWorld, SAFETY_FLOOR_Z,
+};
 pub use police_link::POLICE_SLOT_RESERVE;
 pub use systems::{SystemId, Systems};
 pub use traffic_link::TRAFFIC_SLOT_RESERVE;
+pub use weather_link::{WEATHER_CELL_M, WEATHER_GRID_MARGIN_M};
 
 use rapier3d::prelude::QueryFilter;
 use thiserror::Error;
 use wp_contracts::{
     AssistProfile, DamageSim, EntityId, LoadedCar, ModeTable, SimEvent, TimeOfDay, VehicleInput,
-    VehicleSim, VehicleState, MAX_VEHICLES, PHYSICS_DT,
+    VehicleSim, VehicleState, WorldQuery, MAX_VEHICLES, PHYSICS_DT,
 };
 use wp_damage::DamageModel;
 use wp_math::{FixedStep, Rng, StateHasher};
@@ -97,11 +101,13 @@ pub struct SimVehicle {
     pub body: VehicleBody,
     /// Who drives it (see [`Sim::set_vehicle_kind`]).
     pub kind: VehicleKind,
-    /// The `wp_police` unit this car embodies (AI police cars only).
+    /// The `wp_police` unit this car embodies (AI police cars and player cop seats).
     pub police_unit: Option<wp_police::UnitId>,
     /// The `wp_world` traffic agent this car embodies (physical traffic only).
     pub traffic_agent: Option<wp_world::AgentId>,
     spawn: ([f32; 3], f32),
+    /// Player driving this police seat (`Sim::bind_player_police`).
+    player_police: Option<wp_contracts::PlayerId>,
     /// Wheel radius / width (m) for debris cylinders when a wheel tears off.
     wheel_size: (f32, f32),
     /// `DamageModel::hull_version` the chassis collider was last built from.
@@ -175,6 +181,8 @@ pub struct Sim {
         rapier3d::prelude::RigidBodyHandle,
         rapier3d::prelude::ColliderHandle,
     )>,
+    /// Weather (`None` = none: dry road, clear air), see [`Sim::set_weather`].
+    weather: Option<weather_link::WeatherLink>,
 }
 
 impl Sim {
@@ -204,6 +212,7 @@ impl Sim {
             city_colliders: CityColliders::default(),
             resting_props: Vec::new(),
             props_settle_until: 0,
+            weather: None,
         }
     }
 
@@ -262,6 +271,7 @@ impl Sim {
             police_unit: None,
             traffic_agent: None,
             spawn: (pos, yaw),
+            player_police: None,
             wheel_size: (car.def.wheels[0].radius_m, car.def.wheels[0].width_m),
             hull_version,
             collider_floor_z,
@@ -333,6 +343,7 @@ impl Sim {
         self.props_settle_until = self.tick + PROP_SETTLE_TICKS;
         self.world = world;
         self.rebuild_police();
+        self.rebuild_weather();
     }
 
     /// Props still resting on the road mesh without terrain pairs (hilly cities; diagnostics).
@@ -498,6 +509,10 @@ impl Sim {
             .position(|v| v.id == id)
             .ok_or(SimError::UnknownEntity(id))?;
         let slot = self.vehicles.remove(i);
+        if let Some(unit) = slot.police_unit {
+            // Player cop seats (`bind_player_police`); AI units are retired by `wp_police`.
+            self.police.remove_player_unit(unit);
+        }
         self.physics.remove_body(slot.body.body);
         Ok(())
     }
@@ -654,10 +669,18 @@ impl Sim {
             self.apply_traffic_lod();
             self.drive_traffic();
         }
+        // Weather after the world (current clock), before vehicles read it.
+        self.step_weather(&mut out);
         if sys.police {
             self.drive_police_units();
         }
         if sys.vehicle {
+            // Weather reaches every wheel through `weather_at` (the plain world without weather).
+            let wx = self.weather.as_ref().map(|w| w.query(&self.world));
+            let world_q: &dyn WorldQuery = match &wx {
+                Some(q) => q,
+                None => &self.world,
+            };
             for slot in &mut self.vehicles {
                 let filter = QueryFilter::default().exclude_rigid_body(slot.body.body);
                 let ground = RapierGround {
@@ -666,7 +689,7 @@ impl Sim {
                 slot.vehicle.step_with_ground(
                     &slot.input,
                     &slot.assists,
-                    &self.world,
+                    world_q,
                     &ground,
                     dt,
                     &mut out,
@@ -745,8 +768,15 @@ impl Sim {
         if sys.police {
             let racers = self.racer_views();
             let tick_events = out.clone();
+            // Fog and rain cap police line of sight at `visibility_m` (the adapter's
+            // `line_of_sight`); clear air (800 m) is longer than every police range.
+            let wx = self.weather.as_ref().map(|w| w.query(&self.world));
+            let world_q: &dyn WorldQuery = match &wx {
+                Some(q) => q,
+                None => &self.world,
+            };
             self.police
-                .step(&self.world, &racers, &tick_events, dt, &mut out);
+                .step(world_q, &racers, &tick_events, dt, &mut out);
             self.reconcile_police_units();
         }
         self.last_tick_events = out.len();
@@ -843,7 +873,8 @@ impl Sim {
 
     /// Stable hash of the whole simulation state (hash spec v3, see `docs/integration/harness.md`):
     /// FNV-1a 64 over `HASH_SPEC_VERSION`, tick, in-game clock (1 ms), [`World::state_hash`]
-    /// (signals + traffic), `PoliceSystem::state_hash` (units, heat, pursuits), debris count and every debris body position (1e-3 m) in spawn order,
+    /// (signals + traffic), `PoliceSystem::state_hash` (units, heat, pursuits), the weather
+    /// (`WeatherSim::hash_into`, only when [`Sim::set_weather`] was called), debris count and every debris body position (1e-3 m) in spawn order,
     /// vehicle count, then every [`Sim::entity_hashes`] value in ascending entity order.
     pub fn state_hash(&self) -> u64 {
         let mut h = StateHasher::new();
@@ -852,6 +883,7 @@ impl Sim {
         h.write_f32_q(self.world.clock.time.seconds_since_midnight, 1e3);
         h.write_u64(self.world.state_hash());
         h.write_u64(self.police.state_hash());
+        self.hash_weather(&mut h);
         h.write_u32(self.debris.len() as u32);
         for d in &self.debris {
             for x in self.physics.bodies[*d].translation().to_array() {

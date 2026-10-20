@@ -6,6 +6,7 @@
 // recorded replay survives a page reload and re-simulates to the same hash with no drift,
 // crash scenarios run and report, the city (Port Vesper v2 by default, the old grid via the
 // selector) loads with traffic, signals (day/night, lamps change over time) and the city chase,
+// weather (e2e/weather.mjs: selector, rain, wet roads, spray, fog, wipers, rainy-night chase)
 // and (optionally) perf at 1/8/24 cars.
 import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -342,6 +343,61 @@ check(
     `banner ${chase.banner ?? "none"}, ${chase.police} police vehicles + ${chase.units} other units, ` +
     `${chase.violations} violation event(s) (in feed: ${chase.inFeed}) after ${chase.simS.toFixed(1)} s sim; wait ${chaseWait}`,
 );
+// City map HUD (workstream 16): the corner minimap shows the player and the police near them;
+// M / Tab open the full city map, M / Tab / Esc close it. The player is parked in front of a
+// patrol car so at least one police dot is inside the minimap.
+{
+  const parked = await page
+    .waitForFunction(
+      () => {
+        try {
+          window.__wp.sim.debugSetHeat(window.__wp.app.player, 0);
+          window.__wp.sim.debugParkNearPolice(window.__wp.app.player, 40);
+          return true;
+        } catch (e) {
+          window.__mapParkError = String(e);
+          return false;
+        }
+      },
+      null,
+      { timeout: 120000, polling: 100 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  // Wait for a drawn frame with the parked player (the sim runs well below real time here).
+  await page
+    .waitForFunction(() => window.__wp.map.hud.stats().minimap.units >= 1, null, { timeout: 30000, polling: 200 })
+    .catch(() => {});
+  const mini = await page.evaluate(() => {
+    const s = window.__wp.map.hud.stats();
+    const el = document.getElementById("wp-minimap");
+    const r = el?.getBoundingClientRect();
+    return { ...s.minimap, err: window.__mapParkError ?? null, city: s.city, district: s.district, visible: !!r && r.width > 100 && !el.hidden, total: window.__wp.sim.mapDynamic(window.__wp.app.player)[1] };
+  });
+  await shot("map_minimap_city_chase.png");
+  check(
+    parked && mini.visible && mini.player && mini.units >= 1 && mini.city === "vesper_v2",
+    `minimap${parked ? "" : ` (park near police failed: ${mini.err})`}: player + ${mini.units} police dot(s) of ${mini.total} units (${mini.blinking} blinking), radius ${mini.radiusM.toFixed(0)} m, district ${mini.district ?? "?"}`,
+  );
+  const state = () => page.evaluate(() => ({ open: window.__wp.map.isOpen, shown: !document.getElementById("wp-map-full").hidden, ...window.__wp.map.hud.stats().full }));
+  await page.keyboard.press("KeyM");
+  await page.waitForTimeout(300);
+  const opened = await state();
+  await shot("map_full_city.png");
+  await page.keyboard.press("KeyM");
+  await page.waitForTimeout(100);
+  const closedM = await state();
+  await page.keyboard.press("Tab");
+  await page.waitForTimeout(100);
+  const openedTab = await state();
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(100);
+  const closedEsc = await state();
+  check(
+    opened.open && opened.shown && opened.player && opened.units >= 1 && opened.districts >= 6 && !closedM.open && !closedM.shown && openedTab.open && !closedEsc.open,
+    `full map: M opens (${opened.units} units, ${opened.districts} districts, ${opened.pois} POIs), M closes, Tab opens, Esc closes`,
+  );
+}
 // Pursuit banner + capture → repair bill, driven by a stubbed police_status() (a real capture
 // needs minutes of driving; the outcome plumbing is unit-tested in wp_wasm::police).
 {
@@ -455,6 +511,98 @@ check(
     `"Repair & continue": health ${after.health}, cash $${before.cashAfter} → $${after.cash} (paid $${before.cost}), panel closed`,
   );
 }
+// Career (machine G): garage → buy a beater → city chase with the career car → busted → garage
+// (car in the pound, saved to localStorage) → reload (the career survives) → release → repair
+// all → a new run uses the repaired car.
+{
+  const G = '[data-testid="career-garage"]';
+  const fresh = await page.evaluate(() => window.__wp.careerApi.newCareer("Arcade"));
+  await page.click("#sc-garage");
+  const opened = await page.waitForSelector(G, { timeout: 10000 }).then(() => true).catch(() => false);
+  await page.click(`${G} button[role="tab"]:has-text("Dealer")`);
+  await page.click(`${G} tr[data-car="junkyard_beater"] td:last-child button`);
+  const bought = await page.evaluate(() => window.__wp.careerApi.view());
+  await shot("career_garage_bought.png");
+  await page.click(`${G} button:has-text("City chase")`);
+  const run = await page.evaluate(() => {
+    const wp = window.__wp;
+    return { active: wp.sim.careerRunActive(), car: wp.sim.scenario().entities[0].car, open: wp.garage.open };
+  });
+  check(
+    opened && fresh.cash > 0 && bought.cars.length === 1 && bought.cash === fresh.cash - bought.dealer.find((d) => d.def_id === "junkyard_beater").price_worn &&
+      run.active && run.car === "junkyard_beater" && !run.open,
+    `career: garage opens, beater bought ($${fresh.cash} → $${bought.cash}), city chase runs the career car (${run.car})`,
+  );
+  const parked = await page
+    .waitForFunction(
+      () => {
+        const wp = window.__wp;
+        try {
+          wp.sim.debugParkNearPolice(wp.app.player, 14);
+          wp.sim.debugSetHeat(wp.app.player, 30);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      null,
+      { timeout: 120000, polling: 100 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  const busted = await page
+    .waitForFunction(
+      () => window.__wp.runEnd.open && [...document.querySelectorAll("#ui-run-end button")].some((b) => b.textContent.includes("Garage")),
+      null,
+      { timeout: 240000, polling: 250 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  await page.click('#ui-run-end button:has-text("Garage")').catch(() => {});
+  await page.waitForSelector(G, { timeout: 10000 }).catch(() => {});
+  const stored = await page.evaluate(() => {
+    const p = JSON.parse(localStorage.getItem("wp.career.v1") ?? "null");
+    return { location: p?.account?.garage?.[0]?.location ?? null, captures: p?.account?.heat_history?.captures ?? 0, version: p?.version };
+  });
+  await shot("career_garage_after_bust.png");
+  check(
+    parked && busted && stored.version === 1 && stored.captures === 1 && stored.location && typeof stored.location === "object" && "Impound" in stored.location,
+    `career: busted → garage, saved (v${stored.version}): captures ${stored.captures}, car ${JSON.stringify(stored.location)}`,
+  );
+
+  await page.reload();
+  await ready();
+  await page.click("#sc-garage");
+  await page.waitForSelector(G, { timeout: 10000 }).catch(() => {});
+  const reloaded = await page.evaluate(() => window.__wp.careerApi.view());
+  await page.click(`${G} button[role="tab"]:has-text("Pound")`);
+  await page.click(`${G} button:has-text("Pay & release")`);
+  await page.click(`${G} button[role="tab"]:has-text("Cars")`);
+  const released = await page.evaluate(() => window.__wp.careerApi.view());
+  await page.click(`${G} button:has-text("Repair all")`).catch(() => {});
+  const repaired = await page.evaluate(() => window.__wp.careerApi.view());
+  check(
+    reloaded.cars[0]?.location === "Impound" && released.cars[0]?.location === "Garage" && released.cash < reloaded.cash &&
+      (repaired.cars[0]?.repair_lines.length ?? 1) === 0 && repaired.cars[0]?.health === 1 && repaired.can_start,
+    `career: survives a reload (car ${reloaded.cars[0]?.location}), released ($${reloaded.cash} → $${released.cash}), repaired (health ${repaired.cars[0]?.health})`,
+  );
+  await page.click(`${G} button:has-text("Free drive")`);
+  await page.waitForTimeout(500);
+  const again = await page.evaluate(() => {
+    const wp = window.__wp;
+    const out = { active: wp.sim.careerRunActive(), car: wp.sim.scenario().entities[0].car, health: wp.sim.states()[17] };
+    wp.openGarage();
+    const save = wp.sim.careerSave();
+    const view = wp.careerApi.view();
+    const back = wp.careerApi.importSave(save);
+    return { ...out, reimported: back.cash === view.cash && back.day === view.day && wp.sim.careerSave() === save };
+  });
+  check(
+    again.active && again.car === "junkyard_beater" && again.health === 1 && again.reimported,
+    `career: new run with the repaired car (${again.car}, health ${again.health}); export → import keeps the career`,
+  );
+  await page.evaluate(() => window.__wp.careerApi.close());
+}
 // The selector keeps the old flat grid: the chase restarts there.
 await page.evaluate(() => {
   const sel = document.getElementById("city-map");
@@ -504,5 +652,15 @@ if (process.env.BENCH) {
 check(errors.length === 0, `no page errors${errors.length ? ": " + errors.slice(0, 3).join(" | ") : ""}`);
 await browser.close();
 stopServer();
+
+// 6. Weather (lead): selector, rain, wet roads, spray, fog, wipers, rainy-night chase, a rainy
+// replay verified by simcli (e2e/weather.mjs, its own server and browser).
+const wx = spawnSync("node", [join(here, "weather.mjs")], {
+  cwd: root,
+  encoding: "utf8",
+  env: { ...process.env, WEATHER_SHOTS: shots ? join(shots, "weather") : "" },
+});
+process.stdout.write(wx.stdout);
+check(wx.status === 0, `weather checks (e2e/weather.mjs)${wx.status === 0 ? "" : ": " + (wx.stderr || "").trim().split("\n").pop()}`);
 console.log(failures ? `${failures} check(s) failed` : "all checks passed");
 process.exit(failures ? 1 : 0);

@@ -328,6 +328,9 @@ pub struct BountyRules {
     pub escape: BTreeMap<WantedLevel, u32>,
     /// Rep for escaping at this level.
     pub escape_rep: BTreeMap<WantedLevel, i64>,
+    /// Cash for escaping at this level (the crew pays the driver who loses the cops), × the
+    /// day phase's bounty multiplier. Chases are the risky fast money of a career run.
+    pub escape_cash: BTreeMap<WantedLevel, Money>,
     /// Base cash reward to the capturing cop by wanted level.
     pub cop_base_reward: BTreeMap<WantedLevel, Money>,
     /// Share of the racer's bounty paid to the capturing cop.
@@ -378,6 +381,24 @@ pub struct ConsequenceTables {
     pub cop_xp: CopXpTable,
     /// XP needed for cop rank 1, 2, 3... (increasing).
     pub cop_rank_thresholds: Vec<u32>,
+    /// What a single-player career carries from one run to the next.
+    pub career: CareerRules,
+}
+
+/// Career carry-over between runs (`consequences.toml [career]`, see [`crate::profile`]).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CareerRules {
+    /// Heat left when a run ends free (escaped, or quit to the garage while still wanted) is
+    /// multiplied by this for the next run: a night off cools the police down.
+    pub heat_carry_frac: f32,
+    /// Carried heat is capped here (police heat scale; 30 = L2, 50 = L3).
+    pub heat_carry_max: f32,
+    /// Carried heat below this is forgotten.
+    pub heat_carry_min: f32,
+    /// Ledger lines kept in a saved profile (older lines are dropped; the account keeps its
+    /// sequence numbers).
+    pub ledger_keep: usize,
 }
 
 /// Fine per violation kind.
@@ -748,6 +769,17 @@ impl Economy {
 
     /// Check every table is complete and in range.
     pub fn validate(&self) -> Result<(), DataError> {
+        let k = &self.consequences.career;
+        require_frac("consequences.career.heat_carry_frac", k.heat_carry_frac)?;
+        if !(k.heat_carry_min >= 0.0 && k.heat_carry_min <= k.heat_carry_max) {
+            return Err(invalid(
+                "consequences.career",
+                "need 0 <= heat_carry_min <= heat_carry_max",
+            ));
+        }
+        if k.ledger_keep == 0 {
+            return Err(invalid("consequences.career.ledger_keep", "must be > 0"));
+        }
         let p = &self.prices;
         require_positive("prices.labour_hours_per_item", p.labour_hours_per_item)?;
         require_frac("prices.repair_parts_fraction", p.repair_parts_fraction)?;
@@ -826,6 +858,11 @@ impl Economy {
         require_keys(
             "stakes.bounty.escape_rep",
             &s.bounty.escape_rep,
+            &ALL_LEVELS,
+        )?;
+        require_keys(
+            "stakes.bounty.escape_cash",
+            &s.bounty.escape_cash,
             &ALL_LEVELS,
         )?;
         require_keys(

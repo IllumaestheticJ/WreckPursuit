@@ -80,12 +80,16 @@ impl EngineLayers {
         i as f32 + t
     }
 
-    /// Weight of every layer (same order as `self.layers`) at `rpm` and `load` 0..=1.
+    /// Weight of every layer (same order as `self.layers`) at `rpm` with `on_share` 0..=1 of
+    /// the energy in the on-throttle set (the rest in the off-throttle set).
     /// Energy-preserving: the squared weights sum to 1.
-    pub fn weights(&self, rpm: f32, load: f32) -> Vec<f32> {
-        let load = clamp01(load);
+    pub fn weights(&self, rpm: f32, on_share: f32) -> Vec<f32> {
+        let on_share = clamp01(on_share);
         let mut energy = vec![0.0f32; self.layers.len()];
-        for (side, share) in [(ThrottleSide::On, load), (ThrottleSide::Off, 1.0 - load)] {
+        for (side, share) in [
+            (ThrottleSide::On, on_share),
+            (ThrottleSide::Off, 1.0 - on_share),
+        ] {
             if share <= 0.0 {
                 continue;
             }
@@ -139,8 +143,26 @@ pub struct EngineAudioState {
     pub load: f32,
     /// Turbo boost 0..=1.
     pub boost: f32,
-    /// Throttle seen last frame.
+    /// Recent applied throttle: follows it up at once, falls back 1/0.15 s per second
+    /// (blow-off detection sees a lift spread over a few frames, e.g. a clutch shift's cut).
     pub prev_throttle: f32,
+    /// Engine rpm seen last frame.
+    pub prev_rpm: f32,
+    /// Smoothed rpm rate, rpm/s (shift cues).
+    pub rpm_rate: f32,
+    /// `prev_rpm` holds a real sample (false before the first frame).
+    pub primed: bool,
+}
+
+/// What the engine model reads for one vehicle this frame.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct EngineInput {
+    /// Engine rpm (`VehicleState::engine_rpm`: the crank, not a wheel-derived speed).
+    pub rpm: f32,
+    /// Driver's throttle pedal 0..=1 (limiter chop: the driver holding it on the cut).
+    pub pedal: f32,
+    /// Throttle reaching the engine 0..=1 (after TCS and the gearbox's shift cut); drives load.
+    pub applied: f32,
 }
 
 /// What the engine model wants to play this frame (gains before spatialisation).
@@ -162,6 +184,11 @@ pub struct EngineOutput {
     pub firing_hz: f32,
     /// Smoothed load (synth brightness).
     pub load: f32,
+    /// Share of the on-throttle layers 0..=1 (the rest is off-throttle / overrun).
+    pub on_share: f32,
+    /// Shift cue this frame: < 0 upshift dip (rpm falling under throttle), > 0 downshift blip
+    /// (rpm rising with the throttle closed), 0 none. Magnitude 0..=1.
+    pub shift: f32,
 }
 
 /// Engine limits of one car.
@@ -175,7 +202,31 @@ pub struct EngineLimits {
     pub rev_limit_rpm: f32,
 }
 
+/// Values this small are set to 0 so decaying filters never reach subnormal floats.
+fn flush(x: f32) -> f32 {
+    if x.abs() < 1e-6 {
+        0.0
+    } else {
+        x
+    }
+}
+
+/// `x` if finite, else `fallback`.
+fn finite_or(x: f32, fallback: f32) -> f32 {
+    if x.is_finite() {
+        x
+    } else {
+        fallback
+    }
+}
+
 /// Advance the engine model by `dt` and return what to play.
+///
+/// Load follows the *applied* throttle, so a clutch shift's cut and TCS are heard. On top of
+/// that the rpm rate gives every gearbox a shift note: rpm falling fast under throttle
+/// (upshift, also converter shifts without a cut) dips the load by up to
+/// `shift_dip_depth`; rpm rising fast with the throttle closed (rev-matched downshift) raises
+/// it toward `blip_load`.
 #[allow(clippy::too_many_arguments)]
 pub fn update_engine(
     st: &mut EngineAudioState,
@@ -183,23 +234,51 @@ pub fn update_engine(
     def: &EngineAudioDef,
     limits: EngineLimits,
     layers: &EngineLayers,
-    rpm: f32,
-    throttle: f32,
+    input: EngineInput,
     dt: f32,
     rng: &mut Rng,
 ) -> EngineOutput {
-    let throttle = clamp01(throttle);
-    let target_load = mix.min_load + (1.0 - mix.min_load) * throttle;
-    st.load += (target_load - st.load) * smooth_k(dt, mix.load_tau_s);
+    let pedal = clamp01(finite_or(input.pedal, 0.0));
+    let applied = clamp01(finite_or(input.applied, pedal));
+    let rpm = finite_or(input.rpm, st.prev_rpm).max(0.0);
 
-    let weights = layers.weights(
-        rpm,
+    // Shift cues from the rpm rate.
+    if st.primed && dt > 0.0 {
+        let raw = (rpm - st.prev_rpm) / dt;
+        st.rpm_rate += (raw - st.rpm_rate) * smooth_k(dt, mix.rpm_rate_tau_s);
+        st.rpm_rate = flush(st.rpm_rate);
+    }
+    st.prev_rpm = rpm;
+    st.primed = true;
+    let cue = smoothstep(
+        mix.shift_rate_onset_rpm_s,
+        mix.shift_rate_full_rpm_s
+            .max(mix.shift_rate_onset_rpm_s + 1.0),
+        st.rpm_rate.abs(),
+    );
+    let (target, shift) = if st.rpm_rate < 0.0 {
+        let dip = cue * applied;
+        (applied * (1.0 - mix.shift_dip_depth * cue), -dip)
+    } else {
+        let blip = cue * (1.0 - applied);
+        (applied.max(mix.blip_load * cue), blip)
+    };
+
+    let target_load = mix.min_load + (1.0 - mix.min_load) * target;
+    st.load += (target_load - st.load) * smooth_k(dt, mix.load_tau_s);
+    let on_share = smoothstep(
+        0.0,
+        mix.on_full_load.max(1e-3),
         (st.load - mix.min_load) / (1.0 - mix.min_load).max(1e-3),
     );
+
+    let weights = layers.weights(rpm, on_share);
     let gain = mix.gain * def.gain;
     let mut out = EngineOutput {
         firing_hz: def.firing_hz(rpm),
         load: st.load,
+        on_share,
+        shift,
         ..Default::default()
     };
     for (i, w) in weights.iter().enumerate() {
@@ -209,9 +288,9 @@ pub fn update_engine(
                 .push((i, gain * w * (0.55 + 0.45 * st.load), pitch));
         }
     }
-    // Limiter: fades in over the last `limiter_window_rpm` below the cut, on throttle only.
+    // Limiter: fades in over the last `limiter_window_rpm` below the cut, pedal held.
     let lim_lo = limits.rev_limit_rpm - mix.limiter_window_rpm;
-    out.limiter = gain * smoothstep(lim_lo, limits.rev_limit_rpm, rpm) * throttle;
+    out.limiter = gain * smoothstep(lim_lo, limits.rev_limit_rpm, rpm) * pedal;
 
     let redline = limits.redline_rpm.max(1.0);
     if def.turbo {
@@ -220,38 +299,39 @@ pub fn update_engine(
             mix.turbo_full_frac * redline,
             rpm,
         );
-        let target = throttle * spool;
+        let target = applied * spool;
         let tau = if target > st.boost {
             mix.turbo_spool_tau_s
         } else {
             mix.turbo_fall_tau_s
         };
         let was = st.boost;
-        st.boost += (target - st.boost) * smooth_k(dt, tau);
+        st.boost = flush(st.boost + (target - st.boost) * smooth_k(dt, tau));
         if st.boost > 0.02 {
             out.turbo = Some((mix.forced_induction_gain * st.boost, 0.6 + 0.9 * st.boost));
         }
-        // Lift under boost: blow-off once per lift.
-        if st.prev_throttle > 0.5 && throttle < 0.2 && was >= mix.blowoff_min_boost {
+        // Lift under boost (driver or shift cut): blow-off once per lift.
+        if st.prev_throttle > 0.5 && applied < 0.2 && was >= mix.blowoff_min_boost {
             out.blowoff = Some(mix.forced_induction_gain * was);
             st.boost *= 0.3;
+            st.prev_throttle = 0.0;
         }
     }
     if def.supercharger {
         let r = clamp01(rpm / redline);
         out.supercharger = Some((
-            mix.forced_induction_gain * r * (0.3 + 0.7 * throttle),
+            mix.forced_induction_gain * r * (0.3 + 0.7 * applied),
             0.5 + 1.2 * r,
         ));
     }
     // Overrun pops: off throttle, high rpm, Poisson-ish via the seeded rng.
-    if throttle < 0.05 && rpm > mix.pop_min_redline_frac * redline && dt > 0.0 {
+    if applied < 0.05 && rpm > mix.pop_min_redline_frac * redline && dt > 0.0 {
         let p = (mix.pop_rate_per_s * dt).min(1.0);
         if rng.chance(p) {
             out.pop = Some(gain * rng.range_f32(0.4, 1.0));
         }
     }
-    st.prev_throttle = throttle;
+    st.prev_throttle = applied.max(st.prev_throttle - dt / 0.15);
     out
 }
 
@@ -303,6 +383,7 @@ mod tests {
             id: "t".into(),
             kind: PackKind::Engine,
             description: String::new(),
+            fallback: None,
             engine_layers: vec![
                 layer("high_on", RpmAnchor::RedlineFrac(0.85), ThrottleSide::On),
                 layer("idle", RpmAnchor::Idle, ThrottleSide::Both),
@@ -345,9 +426,16 @@ mod tests {
         assert!((w[lo] - w[mid]).abs() < 1e-3);
     }
 
-    #[test]
-    fn blowoff_on_lift_under_boost() {
-        let mix = EngineMix {
+    fn inp(rpm: f32, throttle: f32) -> EngineInput {
+        EngineInput {
+            rpm,
+            pedal: throttle,
+            applied: throttle,
+        }
+    }
+
+    fn test_mix() -> EngineMix {
+        EngineMix {
             gain: 1.0,
             load_tau_s: 0.05,
             min_load: 0.1,
@@ -361,38 +449,175 @@ mod tests {
             pop_min_redline_frac: 0.6,
             forced_induction_gain: 0.5,
             traffic_gain: 0.6,
-        };
-        let def = EngineAudioDef {
+            on_full_load: 0.3,
+            rpm_rate_tau_s: 0.03,
+            shift_rate_onset_rpm_s: 3000.0,
+            shift_rate_full_rpm_s: 7000.0,
+            shift_dip_depth: 0.6,
+            blip_load: 0.8,
+        }
+    }
+
+    fn test_def(turbo: bool) -> EngineAudioDef {
+        EngineAudioDef {
             cylinders: 4,
             layout: crate::data::EngineLayout::Inline,
             firing: crate::data::FiringFeel::Even,
             induction_exhaust_balance: 0.5,
-            turbo: true,
+            turbo,
             supercharger: false,
             gain: 1.0,
-        };
-        let limits = EngineLimits {
+        }
+    }
+
+    fn test_limits() -> EngineLimits {
+        EngineLimits {
             idle_rpm: 800.0,
             redline_rpm: 7000.0,
             rev_limit_rpm: 7200.0,
+        }
+    }
+
+    /// Run `frames` 60 Hz frames of `rpm(i)` / `applied(i)`; returns the outputs.
+    fn drive(
+        st: &mut EngineAudioState,
+        frames: usize,
+        rpm: impl Fn(usize) -> f32,
+        applied: impl Fn(usize) -> f32,
+    ) -> Vec<EngineOutput> {
+        let (mix, def, limits) = (test_mix(), test_def(false), test_limits());
+        let layers = EngineLayers::resolve(&pack(), 800.0, 7000.0);
+        let mut rng = Rng::new(3);
+        (0..frames)
+            .map(|i| {
+                update_engine(
+                    st,
+                    &mix,
+                    &def,
+                    limits,
+                    &layers,
+                    EngineInput {
+                        rpm: rpm(i),
+                        pedal: 1.0,
+                        applied: applied(i),
+                    },
+                    1.0 / 60.0,
+                    &mut rng,
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn rpm_falling_under_throttle_dips_the_load_and_it_re_rises() {
+        // Converter-style upshift: full throttle throughout, rpm 6000 -> 4000 in 0.3 s.
+        let mut st = EngineAudioState::default();
+        let rpm = |i: usize| match i {
+            0..=59 => 6000.0,
+            60..=77 => 6000.0 - (i - 59) as f32 * 2000.0 / 18.0,
+            _ => 4000.0,
         };
+        let out = drive(&mut st, 120, rpm, |_| 1.0);
+        let steady = out[59].load;
+        let low = out[60..80].iter().map(|o| o.load).fold(1.0, f32::min);
+        assert!(steady > 0.95);
+        assert!(low < 0.8 * steady, "dip to {low} from {steady}");
+        assert!(out[60..80].iter().any(|o| o.shift < -0.5));
+        assert!(out[119].load > 0.95, "re-rises to {}", out[119].load);
+        assert_eq!(out[119].shift, 0.0);
+    }
+
+    #[test]
+    fn rpm_rising_with_throttle_closed_blips() {
+        // Rev-matched downshift: throttle 0, rpm 2300 -> 2850 in 0.1 s.
+        let mut st = EngineAudioState::default();
+        let rpm = |i: usize| match i {
+            0..=59 => 2300.0,
+            60..=65 => 2300.0 + (i - 59) as f32 * 550.0 / 6.0,
+            _ => 2850.0,
+        };
+        let out = drive(&mut st, 120, rpm, |_| 0.0);
+        let idle_load = out[59].load;
+        let peak = out[60..75].iter().map(|o| o.load).fold(0.0, f32::max);
+        assert!(peak > idle_load + 0.15, "blip {idle_load} -> {peak}");
+        assert!(out[60..75]
+            .iter()
+            .any(|o| o.shift > 0.5 && o.on_share > 0.5));
+        assert!((out[119].load - idle_load).abs() < 0.02);
+    }
+
+    #[test]
+    fn part_throttle_is_mostly_on_layers() {
+        let mut st = EngineAudioState::default();
+        let out = drive(&mut st, 120, |_| 3000.0, |_| 0.35);
+        assert!(out[119].on_share > 0.95, "{}", out[119].on_share);
+        let mut st = EngineAudioState::default();
+        let out = drive(&mut st, 120, |_| 3000.0, |_| 0.0);
+        assert_eq!(out[119].on_share, 0.0);
+    }
+
+    #[test]
+    fn bad_inputs_stay_finite_and_decays_never_go_denormal() {
+        let mut st = EngineAudioState::default();
+        let bad = [f32::NAN, f32::INFINITY, -1.0, 5000.0];
+        let out = drive(&mut st, 40, |i| bad[i % 4], |i| bad[(i + 1) % 4]);
+        // Long steady overrun: every decaying state settles on exact values.
+        let out2 = drive(&mut st, 20_000, |_| 3000.0, |_| 0.0);
+        for o in out.iter().chain(out2.iter()) {
+            for x in [o.load, o.on_share, o.shift, o.firing_hz, o.limiter]
+                .into_iter()
+                .chain(o.layers.iter().flat_map(|l| [l.1, l.2]))
+            {
+                assert!(x.is_finite(), "{o:?}");
+            }
+        }
+        for x in [st.load, st.boost, st.rpm_rate, st.prev_throttle] {
+            assert!(x == 0.0 || x.abs() >= f32::MIN_POSITIVE, "denormal {x}");
+        }
+        assert_eq!(st.rpm_rate, 0.0);
+    }
+
+    #[test]
+    fn blowoff_on_lift_under_boost() {
+        let (mix, def, limits) = (test_mix(), test_def(true), test_limits());
         let layers = EngineLayers::resolve(&pack(), 800.0, 7000.0);
         let mut st = EngineAudioState::default();
         let mut rng = Rng::new(1);
         let dt = 1.0 / 60.0;
         for _ in 0..120 {
             let o = update_engine(
-                &mut st, &mix, &def, limits, &layers, 5500.0, 1.0, dt, &mut rng,
+                &mut st,
+                &mix,
+                &def,
+                limits,
+                &layers,
+                inp(5500.0, 1.0),
+                dt,
+                &mut rng,
             );
             assert!(o.blowoff.is_none());
         }
         assert!(st.boost > 0.9);
         let o = update_engine(
-            &mut st, &mix, &def, limits, &layers, 5500.0, 0.0, dt, &mut rng,
+            &mut st,
+            &mix,
+            &def,
+            limits,
+            &layers,
+            inp(5500.0, 0.0),
+            dt,
+            &mut rng,
         );
         assert!(o.blowoff.is_some());
         let o = update_engine(
-            &mut st, &mix, &def, limits, &layers, 5500.0, 0.0, dt, &mut rng,
+            &mut st,
+            &mix,
+            &def,
+            limits,
+            &layers,
+            inp(5500.0, 0.0),
+            dt,
+            &mut rng,
         );
         assert!(o.blowoff.is_none(), "one blow-off per lift");
     }

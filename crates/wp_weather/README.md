@@ -88,6 +88,12 @@ dry `Sim` 42.9 m = dry rig 42.9 m = weather-on-but-clear 42.9 m (bit-identical);
 
 Browser: not measured yet (expected ≤ 2× native; the update is one linear pass over `f32`s).
 
+## In the game (lead, 2026-10-19)
+`wp_sim` owns a `WeatherSim` (`Sim::set_weather`), simcli has the `weather:` scenario field and
+the browser renders rain, wet roads, spray and fog — see `docs/integration/weather.md` → "Lead
+integration". Lead glue in this crate: `WetnessGrid::flood_rect` / `WeatherSim::flood_rect`
+(scenario puddles) and `WeatherSim::revision` (hash caching; bump it on any new state change).
+
 ## Known gaps
 
 - The wet simcli scenario waits for `wp_sim`/simcli wiring (integration doc steps 1/1b); only

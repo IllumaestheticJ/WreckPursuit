@@ -9,7 +9,6 @@
 import type { VoicePool } from "./voices";
 import type { RadioPriority } from "./types";
 
-const RADIO_PACK = "radio_proc";
 
 export interface RadioLog {
   line: number;
@@ -28,12 +27,17 @@ export class ScannerPlayer {
   /** Scanner volume 0..1 (applied to TTS, which bypasses the mixer). */
   volume = 0.9;
 
-  constructor(private pool: VoicePool) {}
+  /** Recorded radio pack when shipped (the pool swaps in its procedural fallback on request). */
+  private readonly pack: string;
+
+  constructor(private pool: VoicePool) {
+    this.pack = pool.has("radio_rec", "radio/static") ? "radio_rec" : "radio_proc";
+  }
 
   say(line: number, unit: number, text: string, priority: RadioPriority, pitch: number): void {
     this.end(this.current?.line ?? -1, true);
-    this.pool.playLocal(RADIO_PACK, "radio/squelch_on", 0.6);
-    const stopStatic = this.pool.playLocal(RADIO_PACK, "radio/static", 0.12);
+    this.pool.playLocal(this.pack, "radio/squelch_on", 0.6);
+    const stopStatic = this.pool.playLocal(this.pack, "radio/static", 0.12);
     this.current = { line, stopStatic };
     this.log.unshift({ line, unit, text, priority, interrupted: false });
     this.log.length = Math.min(this.log.length, 8);
@@ -49,7 +53,7 @@ export class ScannerPlayer {
   end(line: number, interrupted: boolean): void {
     if (!this.current || this.current.line !== line) return;
     this.current.stopStatic();
-    this.pool.playLocal(RADIO_PACK, "radio/squelch_off", 0.5);
+    this.pool.playLocal(this.pack, "radio/squelch_off", 0.5);
     if (interrupted && typeof speechSynthesis !== "undefined") speechSynthesis.cancel();
     const entry = this.log.find((l) => l.line === line);
     if (entry) entry.interrupted = interrupted;

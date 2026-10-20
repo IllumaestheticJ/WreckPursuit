@@ -594,3 +594,48 @@ on the lead branch `claude/laughing-newton-0xqr6q` without any weather change (n
 lead): `wp_economy` `pursuit_wiring::real_police_capture_settles_through_the_economy` ("level at
 capture, not after the reset", line 130) and `wp_race` `simcli_races::city_sprint_on_real_roads`
 (index out of bounds, line 28). `weather_dry_brake_100_0` PASS, hashes match its golden.
+
+## Lead integration: weather in the game (branch `lead/weather-in-game`, 2026-10-19)
+Steps 1, 1b and 6 of the hook list are done by the lead; K's `weather_in_sim.rs` `WeatherLink`
+moved into `crates/wp_sim/src/weather_link.rs` almost unchanged.
+
+- **`wp_sim`**: `Sim::set_weather(WeatherConfig)` / `clear_weather` / `weather()` /
+  `weather_mut()` / `force_weather(regime, immediate, locked)`. Stepped every tick after the
+  world (sim vehicles + traffic agents dry their lanes); `set_world` rebuilds the 8 m grid over
+  the new road network (+50 m). Vehicles and police get `WithWeather` with
+  **`interim_surface = false`**: A's hook reads `weather_at` per wheel (water film + standing
+  water → `water_depth_mm`, road temperature), painted lines come from D's `surface_at`
+  (`PaintedLine`), so the full wet / cold / ice / paint / aquaplaning model is live. Police
+  `line_of_sight` is cut at `visibility_m`. `drain_changes()` → `SimEvent::WeatherChanged`.
+  The weather enters `Sim::state_hash` only when enabled, so weather-less hashes are unchanged.
+- **simcli (W-7)**: Part A + B applied (`weather: (kind, intensity, water_mm, locked, season,
+  seed)`), plus `puddles: [(min, max, water_mm)]` (standing-water boxes) and a
+  `travel_between(from_s, to_s, min, max)` expectation (braking distance).
+- **Scenarios** (`apps/simcli/scenarios/weather/`): `wet_brake_100_0` un-pended (51.6 m / 3.80 s
+  vs 40.0 m / 2.93 s dry, ranges 46–62 m vs 35–45 m); `aquaplane_puddle` / `aquaplane_control`
+  (33 m/s into 6 mm of water while steering: yaw rate 0.21 vs 0.37 rad/s, lateral offset 2.4 vs
+  11.6 m); `fog_pursuit` / `fog_pursuit_clear` (noon city chase layout: first pursuit at 1.9 s in
+  thick fog vs 0.3 s clear). `apps/simcli/tests/scenarios.rs` compares the twins.
+- **Browser** (`wp_wasm::weather`, `apps/testbed-web/src/render/weather.ts`): selector, rain,
+  wet roads + puddle sheen from the water grid, spray (`spray_intensity`), fog from visibility,
+  wipers, HUD; "rainy night" city chase. Weather is part of the scenario, so replays carry it.
+
+### Changes in `wp_weather` (K's crate; minimal glue, please keep or replace)
+- `WetnessGrid::flood_rect(min, max, water_mm, &SurfaceTable)` and `WeatherSim::flood_rect`:
+  flood the cells whose centres are in an XY box (raises their capacity to hold it; scenario
+  puddles for the aquaplaning test).
+- `WeatherSim::revision()`: bumped by `update`, `force`, `set_all_water_mm`, `flood_rect` and
+  `apply_snapshot`. The browser hashes the sim every tick and streaming the whole grid into
+  each hash cost 7 ms per frame in wasm; `wp_sim` now hashes `state_hash()` once per revision
+  (0.24 ms per frame in rain vs 0.14 ms dry). If you add a state change, bump `revision`.
+
+### Still open (owners)
+- D: traffic slows in rain/fog — `wp_world` has no weather or global speed-factor hook yet;
+  request filed in `docs/integration/world.md` (lead request W-D1). Traffic agents' grip on
+  physical LOD is already weathered (they are `wp_sim` vehicles).
+- E: speed caps / incident rate setter (step 4) and the explicit `visibility_m` cap on each
+  phase range; LOS is already cut by the adapter.
+- G: race purse multipliers (step 5). F: weather snapshot on the wire (W-5 message exists).
+- Observation for K/E: the golden city chase layout with `HeavyRain` + 1.5 mm does not start a
+  pursuit within 20 s (patrol AI on the wet road misses the night 40 m / 4 s window). Not a
+  weather bug; worth a look when tuning police on wet roads.

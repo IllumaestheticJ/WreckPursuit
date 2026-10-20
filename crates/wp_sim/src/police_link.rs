@@ -65,6 +65,50 @@ impl Sim {
         self.police.set_human_captain(seated);
     }
 
+    /// Make vehicle `id` a **player-driven** police chase car (added by 07 for player cop
+    /// seats): it becomes `VehicleKind::Police` (not a racer for `wp_police`) and a
+    /// `wp_police` player unit, so it spots racers, starts pursuits, counts for captures and
+    /// can be given orders by the captain. The player keeps full control of the car
+    /// ([`PoliceSystem::unit_input`] is `None` for player units). Despawning the vehicle
+    /// removes the unit. Idempotent: an already bound vehicle returns its unit.
+    pub fn bind_player_police(
+        &mut self,
+        id: EntityId,
+        player: wp_contracts::PlayerId,
+    ) -> Result<UnitId, crate::SimError> {
+        let slot = self.slot_mut(id)?;
+        slot.kind = VehicleKind::Police;
+        slot.player_police = Some(player);
+        let bound = slot.police_unit;
+        let s = slot.vehicle.state();
+        if let Some(unit) = bound {
+            if self.police.units().iter().any(|u| u.id == unit) {
+                return Ok(unit);
+            }
+        }
+        let q = s.rot;
+        let fx = 2.0 * (q[0] * q[1] - q[3] * q[2]);
+        let fy = 1.0 - 2.0 * (q[0] * q[0] + q[2] * q[2]);
+        let n = (fx * fx + fy * fy).sqrt().max(1e-6);
+        let unit = self
+            .police
+            .add_player_unit(player, id, s.pos, [fx / n, fy / n]);
+        self.slot_mut(id)?.police_unit = Some(unit);
+        Ok(unit)
+    }
+
+    /// Undo [`Sim::bind_player_police`] (the seat became a racer): the unit is removed and
+    /// the vehicle is a `Player` again.
+    pub fn unbind_player_police(&mut self, id: EntityId) -> Result<(), crate::SimError> {
+        let slot = self.slot_mut(id)?;
+        slot.kind = VehicleKind::Player;
+        slot.player_police = None;
+        if let Some(unit) = slot.police_unit.take() {
+            self.police.remove_player_unit(unit);
+        }
+        Ok(())
+    }
+
     /// Before the vehicle step: AI police drivers set their cars' inputs.
     pub(crate) fn drive_police_units(&mut self) {
         // Obstacle awareness (E, round 6): every vehicle and kinematic traffic car, so units
@@ -121,6 +165,18 @@ impl Sim {
     /// After the police step: despawn retired units, spawn cars for new ground units, and
     /// report every police car's physical state back.
     pub(crate) fn reconcile_police_units(&mut self) {
+        let live: Vec<UnitId> = self.police.units().iter().map(|u| u.id).collect();
+        // Player cop seats whose unit vanished (a new police system was installed): register
+        // them again rather than despawning a player's car.
+        let orphaned: Vec<(EntityId, wp_contracts::PlayerId)> = self
+            .vehicles
+            .iter()
+            .filter(|v| v.police_unit.is_some_and(|u| !live.contains(&u)))
+            .filter_map(|v| v.player_police.map(|p| (v.id, p)))
+            .collect();
+        for (id, player) in orphaned {
+            let _ = self.bind_player_police(id, player);
+        }
         let live: Vec<UnitId> = self.police.units().iter().map(|u| u.id).collect();
         let retired: Vec<EntityId> = self
             .vehicles

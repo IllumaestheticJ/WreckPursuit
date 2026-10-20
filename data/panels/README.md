@@ -51,10 +51,16 @@ part of the front-door mesh; see `docs/integration/panels.md`, contract request 
 
 ## Mesh (`meshes/<car>.json`)
 
-`{ id, lattice_id, format: 1, tri_count, parts: [...] }`, one part per line. Part fields:
+`{ id, lattice_id, format: 2, tri_count, parts: [...] }`, one part per line. Part fields:
 `name`, `region` (BodyRegion or `null` for wheels), `kind` (`panel | glass | light | mirror |
 body | interior | tire | rim`), `material` (`paint | glass | trim | headlight | taillight | rubber
 | metal | interior`), `wheel` (0–3 FL FR RL RR, wheel parts only, hub space with the axle on +X),
 `positions_mm` (xyz ints, mm, chassis space), `uvs` (u, v in 1/65535; U 0–0.5 reserved for
 liveries), `indices` (CCW from outside), `skin_nodes` (4 lattice node ids per vertex) and
-`skin_weights` (4 per vertex in 1/255, summing to 255). Renderer: `apps/testbed-web/src/render/panels.ts`.
+`skin_weights` (4 per vertex in 1/255, summing to 255). Format 2 adds, on hood and trunk-lid
+parts only, `fold_chords` (lattice node pairs from the hinge row to the latch row, sorted by rest
+x) and `fold_weights` (2 per vertex in 1/255: crease shape, rear-edge lift); the renderer turns
+the length a chord loses in a crash into a fold height (`car_assets::mesh::fold_height`, an
+inextensible strip pushed into a tent; 1.5 cm dead zone, ≤ 0.3 m) so a crushed lid buckles.
+Light lenses (`kind: light`) have region `FrameFront` / `FrameRear` and are skinned to the nearest
+bumper, hood/trunk, same-side fender/quarter and frame nodes. Renderer: `apps/testbed-web/src/render/panels.ts`.

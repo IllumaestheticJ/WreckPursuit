@@ -87,6 +87,8 @@ pub struct RunReport {
     pub mode: DamageMode,
     /// Bounty earned by an escape (`Escape` ledger lines).
     pub bounty_payout: i64,
+    /// Cash paid for an escape (`Escape` ledger lines).
+    pub escape_cash: i64,
     /// Rep change.
     pub rep_delta: i64,
     /// Fines charged.
@@ -255,6 +257,18 @@ impl PlayerRun {
                 uid
             }
         };
+        Self::bound(econ, acct, ledger, player, uid, mode, seed)
+    }
+
+    fn bound(
+        econ: Economy,
+        mut acct: PlayerAccount,
+        ledger: Vec<EconomyEvent>,
+        player: EntityId,
+        uid: CarUid,
+        mode: DamageMode,
+        seed: u64,
+    ) -> Self {
         acct.active_car = Some(uid);
         let mut config = SessionConfig::new(mode);
         config.repair = RepairPolicy::QuoteOnly;
@@ -274,6 +288,35 @@ impl PlayerRun {
             seq: 0,
             over: false,
         }
+    }
+
+    /// Career run (machine G, `crate::career`): `player` drives the account's car `uid`
+    /// (which must be in the garage). Same as [`PlayerRun::with_account`] otherwise.
+    pub fn for_career_car(
+        econ: Economy,
+        acct: PlayerAccount,
+        ledger: Vec<EconomyEvent>,
+        player: EntityId,
+        uid: CarUid,
+        mode: DamageMode,
+        seed: u64,
+    ) -> Result<Self, String> {
+        let car = acct.try_car(uid).map_err(|e| e.to_string())?;
+        if car.location != CarLocation::Garage {
+            return Err(format!("car {} is not in the garage", uid.0));
+        }
+        Ok(Self::bound(econ, acct, ledger, player, uid, mode, seed))
+    }
+
+    /// The player's car was wanted at some point in this run (insurance will not pay for
+    /// damage from it).
+    pub fn was_wanted(&self) -> bool {
+        self.session.was_wanted(self.player)
+    }
+
+    /// The account's car this run is bound to.
+    pub fn car(&self) -> CarUid {
+        self.car
     }
 
     /// Hand the account and its ledger to the next run (restart).
@@ -412,6 +455,12 @@ impl PlayerRun {
             .filter(|e| matches!(e.reason, EventReason::Escape { .. }))
             .map(|e| e.bounty_delta)
             .sum();
+        let escape_cash = r
+            .events
+            .iter()
+            .filter(|e| matches!(e.reason, EventReason::Escape { .. }))
+            .map(|e| e.cash_delta)
+            .sum();
         let continue_cost = impound.map_or(0, |i| i.fee) + repair_cost;
         let gone = matches!(car_status, CarStatus::Seized | CarStatus::Destroyed);
         self.ledger.extend(r.events.iter().cloned());
@@ -425,6 +474,7 @@ impl PlayerRun {
             level,
             mode: self.mode,
             bounty_payout,
+            escape_cash,
             rep_delta: r.rep_delta,
             fines: r.fines,
             bail: r.bail,

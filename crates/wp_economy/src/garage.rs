@@ -374,6 +374,18 @@ impl Economy {
         })
     }
 
+    /// Drop a car's insurance policy (no refund; the premium already paid covers today).
+    pub fn cancel_insurance(&self, acct: &mut PlayerAccount, car: CarUid) -> EconResult<()> {
+        if acct.try_car(car)?.insurance.is_none() {
+            return Err(EconomyError::InvalidInput("the car is not insured".into()));
+        }
+        transact(acct, |tx| {
+            tx.car_mut(car)?.insurance = None;
+            tx.note(EventReason::InsuranceLapsed, Some(car), Delta::default());
+            Ok(())
+        })
+    }
+
     /// Admin / test adjustment (positive credit or voluntary-style debit).
     pub fn adjust(&self, acct: &mut PlayerAccount, cash: Money, note: &str) -> EconResult<()> {
         transact(acct, |tx| {

@@ -1,0 +1,17 @@
+// Playtest row 24 counter-case: a 5 km/h parking-lot bump against a paused patrol car is not
+// an assault (below heat.assault's impulse, closing speed and racer speed). No heat, no
+// pursuit, day and night alike (runs at noon; the thresholds don't depend on the phase).
+(
+    name: "police_parking_bump",
+    seed: 640,
+    time_of_day_h: 12.0,
+    duration_s: 25.0,
+    runs: 3,
+    racers: [(district: Core, speed_factor: 1.0, violations: false, hit_unit_at_s: Some(20.0), hit_kmh: 5.0)],
+    expect: [
+        (metric: "hits", min: 3.0, max: 3.0),
+        (metric: "assaults", min: 0.0, max: 0.0),
+        (metric: "pursuits", min: 0.0, max: 0.0),
+        (metric: "max_wanted_level", min: 0.0, max: 0.0),
+    ],
+)

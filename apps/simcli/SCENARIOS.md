@@ -27,6 +27,7 @@ Parsing uses RON with `implicit_some`, so optional fields are written plainly
     slow: false,                     // true = minutes of a full city: debug `cargo test` skips it (release CI runs it)
     systems: "vehicle,damage,world", // optional; default all. --systems overrides. "net" adds the snapshot round trip
     barriers: [(pos: (0.0, 20.0, 0.75), size: (8.0, 1.0, 1.5), yaw: 0.0)],  // static boxes (rigid walls)
+    weather: (kind: HeavyRain, intensity: 1.0, water_mm: 1.5, locked: true), // optional; see below
     entities: [ … ],                 // spawn order = entity id order (1, 2, 3, …); may be empty
     duration_s: 8.0,
     sample_hz: 60.0,                 // metrics.csv rate (default 60)
@@ -72,6 +73,17 @@ kinematic traffic and its physical near-player cars.
 
 `barriers` are static boxes (`Sim::add_static_box`): centre `pos`, full `size` `[x, y, z]`,
 `yaw` about +Z. Contacts with them reach damage as static world geometry.
+
+`weather` (optional; omitted = no weather system, dry and clear, as before) turns on
+`wp_weather` (`Sim::set_weather`): `kind` is `Clear | Overcast | LightRain | HeavyRain | Fog`,
+`intensity` 0..=1 (default 1), `water_mm` the water film on every road cell at the first tick
+(default 0 = dry; 1.5 = soaked), `locked` holds the regime for the whole run (default true),
+`season` (`Spring | Summer | Autumn | Winter`, default `Autumn`) and `seed` (default: the
+scenario seed) drive the schedule when unlocked. `puddles: [(min: (x, y), max: (x, y),
+water_mm: 6.0)]` floods the wetness cells whose centres fall in each XY box (standing water
+for aquaplaning; capped at 10 mm). Wet roads cost grip per wheel, fog and rain cap police
+line of sight at the visibility, and regime changes emit `WeatherChanged`. Examples:
+`scenarios/weather/`.
 
 Features a crate does not support yet (police presence override, `follow_route` with a
 route id that is not `"<start POI> -> <finish POI>"`, `ai_driver`) run anyway and add a **warning** to the summary; `--strict` turns warnings into
@@ -121,6 +133,7 @@ All ranges are inclusive. `entity` defaults to the first entity; a scenario with
 |---|---|
 | `metric(name, entity, min, max)` | any per-entity summary metric (list below) |
 | `speed_at(entity, t_s, min, max)` | forward speed (m/s) right after tick `round(t_s/dt)` |
+| `travel_between(entity, from_s, to_s, min, max)` | path length (m) driven between the two times, e.g. a braking distance |
 | `max_lateral_g(entity, min, max)` | max \|lateral accel\| in g over 1/60 s windows |
 | `crush_depth(entity, min, max)` | max structural crush, m (`DamageModel::structural_crush_m`: largest displacement of an attached node that is not glass or bumper cover) |
 | `components_failed(entity, min, max)` | distinct components with a `ComponentFailed` event |
@@ -141,7 +154,10 @@ without one).
 World metrics for `world_metric(...)` (all 0 on the flat world): `traffic_agents_final`,
 `traffic_agents_min` (fewest agents at any tick after a 10 s warm-up), `traffic_moving_frac_final`
 and `traffic_moving_frac_min` (fraction of agents above 0.5 m/s; the min is over 1 Hz samples
-after the warm-up), `civilian_collisions`, `traffic_spawned`, `traffic_stuck_recycled`, `props`
+after the warm-up), `civilian_collisions`, `traffic_spawned`, `traffic_stuck_recycled`,
+`traffic_go_arounds` (civilians that got around a stationary vehicle: oncoming-lane passes plus
+lane changes made for it), `traffic_turnarounds` (civilians that turned around or reversed back
+to the last junction because their lane was blocked), `props`
 (parked cars and cones turned into bodies), `static_boxes`, `police_units_max` (most police
 units alive at once), `police_units_final`.
 

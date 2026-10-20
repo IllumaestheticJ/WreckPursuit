@@ -6,7 +6,7 @@ use wp_contracts::{BodyRegion, LoadedCar};
 use wp_damage::PanelSpec;
 
 use crate::mesh::{CarMesh, PartKind, MESH_FORMAT, TRI_BUDGET};
-use crate::skin::candidates;
+use crate::skin::part_candidates;
 
 /// Exterior regions that must have a mesh part whenever the lattice has nodes in them.
 pub const EXTERIOR_REGIONS: [BodyRegion; 17] = [
@@ -93,7 +93,7 @@ pub fn validate(car: &LoadedCar, mesh: &CarMesh, panels: Option<&PanelSpec>) -> 
                     errs.push(format!("{tag}: not skinned (run bind-skin)"));
                     continue;
                 }
-                let allowed: BTreeSet<u16> = candidates(lattice, region).into_iter().collect();
+                let allowed: BTreeSet<u16> = part_candidates(lattice, p).into_iter().collect();
                 if p.skin_nodes.iter().any(|i| !allowed.contains(i)) {
                     errs.push(format!(
                         "{tag}: bound to a node outside {region:?} and its fallbacks"
@@ -104,6 +104,19 @@ pub fn validate(car: &LoadedCar, mesh: &CarMesh, panels: Option<&PanelSpec>) -> 
                     .any(|w| w.iter().map(|&x| x as u32).sum::<u32>() != 255)
                 {
                     errs.push(format!("{tag}: weights must sum to 255"));
+                }
+                if !p.fold_chords.is_empty() && p.fold_weights.len() != n * 2 {
+                    errs.push(format!("{tag}: fold weights need 2 per vertex"));
+                }
+                if p.fold_chords.is_empty() != p.fold_weights.is_empty() {
+                    errs.push(format!("{tag}: fold chords and weights come together"));
+                }
+                if p.fold_chords
+                    .iter()
+                    .flatten()
+                    .any(|&i| lattice.nodes.get(i as usize).map(|nd| nd.region) != Some(region))
+                {
+                    errs.push(format!("{tag}: fold chord node outside {region:?}"));
                 }
                 for v in 0..n {
                     let q = p.vertex(v);

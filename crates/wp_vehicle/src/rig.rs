@@ -93,6 +93,7 @@ pub struct Rig<W: WorldQuery = FlatWorld> {
     ccd: CCDSolver,
     params: IntegrationParameters,
     ticks: u64,
+    ground: Option<ColliderHandle>,
 }
 
 impl Rig<FlatWorld> {
@@ -119,7 +120,7 @@ impl<W: WorldQuery> Rig<W> {
     ) -> Self {
         let mut bodies = RigidBodySet::new();
         let mut colliders = ColliderSet::new();
-        colliders.insert(ground_collider());
+        let ground = colliders.insert(ground_collider());
         let mut pipeline = PhysicsPipeline::new();
         let mut islands = IslandManager::new();
         let mut broad_phase = BroadPhaseBvh::new();
@@ -167,6 +168,7 @@ impl<W: WorldQuery> Rig<W> {
             ccd,
             params,
             ticks: 0,
+            ground: Some(ground),
         }
     }
 
@@ -182,6 +184,31 @@ impl<W: WorldQuery> Rig<W> {
         self.vehicle
             .write_chassis_to_body(&mut self.bodies[self.handles.body]);
         Ok(())
+    }
+
+    /// Replace the flat ground slab by static city colliders (cities with terrain: pass
+    /// `wp_sim::city_ground_colliders` plus `wp_sim::parked_slab_collider`, which is what
+    /// `wp_sim` itself uses), so client prediction drives on the server's exact ground.
+    /// Colliders are registered with the broad phase immediately. Call once, any time.
+    /// (Added by workstream F for `wp_net` prediction on Port Vesper v2, additive.)
+    pub fn set_city_ground(&mut self, colliders: impl IntoIterator<Item = Collider>) {
+        if let Some(g) = self.ground.take() {
+            self.colliders.remove(
+                g,
+                &mut self.islands,
+                &mut self.bodies,
+                &mut self.soft_bodies,
+                false,
+            );
+        }
+        let mut added = Vec::new();
+        for c in colliders {
+            added.push(self.colliders.insert(c));
+        }
+        for h in added {
+            let aabb = self.colliders[h].compute_aabb();
+            self.broad_phase.set_aabb(&self.params, h, aabb);
+        }
     }
 
     /// Set the tick counter (e.g. to the server tick after a restore).

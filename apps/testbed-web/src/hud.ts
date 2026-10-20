@@ -1,5 +1,6 @@
 // DOM/canvas HUD: speed, rpm bar, gear, mode + assist badges, perf, damage silhouette,
 // component health, region energy, input display with rack-torque bar, help overlay.
+import { AUDIO_CREDITS } from "./audio/credits";
 import { T } from "./wasm/layout";
 import type { AssistProfile, DriverInput, SimEvent, VehicleInfo } from "./wasm/sim";
 import { layers, LAYERS } from "./settings";
@@ -115,13 +116,15 @@ export class Hud {
     this.help.innerHTML =
       `<b>WreckPursuit testbed — keys</b><br>` +
       `W/S or ↑/↓ throttle/brake · A/D or ←/→ steer · Space handbrake · Shift/Ctrl gear up/down<br>` +
-      `R reset · O headlights · Q horn · M mute · Tab follow the next car<br>` +
+      `R reset · O headlights · Q horn · V mute · \` (backquote) follow the next car<br>` +
+      `M or Tab city map (drag / wheel / arrows / + − / 0 whole city / F follow inside it; driving input is paused while it is open)<br>` +
       `<b>Cameras</b> ${CAMERA_HELP}<br>` +
       `F1 or ? this help · P pause · . frame step (replay) · [ / ] replay speed · F repair bill<br><br>` +
       `<b>Slide control</b> (keyboard/gamepad assists): the car catches power slides itself — ` +
       `centre the steering and it straightens up; steer into the turn to hold a drift, ` +
       `countersteer to straighten faster. Strongest on powerful RWD cars; off on wheel.<br><br>` +
-      LAYERS.map((l) => `${l.key.replace(/^(Key|Digit)/, "")} — ${l.label}`).join("<br>");
+      LAYERS.map((l) => `${l.key.replace(/^(Key|Digit)/, "")} — ${l.label}`).join("<br>") +
+      `<br><br>${AUDIO_CREDITS}`;
   }
 
   /** Append notable sim events (damage, detachment, violations) to the event feed. */

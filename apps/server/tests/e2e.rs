@@ -49,6 +49,7 @@ async fn client_joins_drives_and_admin_reports_it() {
         cars,
         modes,
         damage_factory: default_damage_factory,
+        city_ground: None,
     });
     let start = Instant::now();
     client.connect(0.0, 0);
@@ -162,6 +163,7 @@ async fn city_flag_runs_bots_in_a_police_city() {
         cars,
         modes,
         damage_factory: default_damage_factory,
+        city_ground: None,
     });
     let start = Instant::now();
     client.connect(0.0, 0);

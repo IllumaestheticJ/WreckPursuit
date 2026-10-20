@@ -246,6 +246,23 @@ level / heat readout is M's UI-kit chase HUD (`apps/ui-kit/src/live`, mounted by
 capture, or the end of a scripted scenario, pops up the repair bill; a bill that popped up
 closes on the next session, one the user opened (F) stays.
 
+### Weather (lead, `lead/weather-in-game`)
+**weather** selector (`scenario` = the scenario's own weather, off, clear, overcast, rain, heavy
+rain, fog, dynamic) restarts the running session with that weather written into its scenario
+(`scenario_with_weather`), so replays and `simcli replay` carry it; **rainy night** = the city
+chase in a downpour on a soaked road (`city_chase_rain_json`; `?chase=rain`, `?weather=<id>`).
+`src/render/weather.ts`: instanced rain streaks animated in the vertex shader (one draw, ≤ 5000
+lines), wet road materials (`asphalt`, `highway_concrete`, `parking`, `sidewalk`, `kerb`, `bridge`
+and the flat ground: darker, glossier, sky-dome reflections, puddle sheen) driven by the 8 m
+water grid (`weather_grid()`, RG8 texture refreshed at 1 Hz), spray points behind cars
+(`weather_spray()`), `FogExp2` density 3 / visibility, cloud-dimmed sun, wipers in hood /
+bumper / cockpit cameras, and a HUD line (`#weather-hud`) with regime, rain rate, visibility,
+temperature, road state and an aquaplaning warning (player car's `Telemetry::aquaplane`).
+Exports (`crates/wp_wasm/src/weather.rs`): `weather_choices`, `scenario_with_weather`,
+`scenario_weather_choice`, `city_chase_rain_json`, `weather_info` (18 floats, `WX` in
+`render/weather.ts`), `weather_grid_meta`, `weather_grid`, `weather_spray`. Check:
+`npm run e2e:weather` (also run by `npm run e2e`); screenshots in `docs/media/weather/`.
+
 ## Native testbed stub (`apps/testbed-native`)
 Default build = headless smoke run printing FFB (the only thing CI builds); it now runs the
 real vehicle and prints non-zero rack torque. `--features window` opens a winit + softbuffer
@@ -621,3 +638,14 @@ Testbed: `src/ui/runEnd.tsx` (`RunEndView`, kit `Panel` / `Button` / `Money` / `
 `restartRun()`, both on `window.__wp`. `e2e/run.mjs`: a real capture (player parked in front of a
 patrol car at heat 30) → panel + bill → click **Repair & continue** → health 1.0, cash = after −
 cost, panel closed. C: the stubbed banner check and `ChaseEndDetector` are untouched.
+
+## Note from M (UI kit, round 9, 2026-10-19): city map HUD
+
+Owner request "we need a game map HUD with police". Small glue in your crate/app, please review
+(details in `docs/integration/ui.md` → "City map HUD"): `crates/wp_wasm/src/map.rs`
+(`map_static_json()`, `map_dynamic(player)`, read-only), `src/ui/map.ts` mounting the kit's
+`mountMapHud`, `main.ts` wiring (M / Tab toggle the full map, neutral input while it is open),
+two layers (`'` minimap, `;` minimap signals), `e2e/run.mjs` map checks, `e2e/map_shots.mjs`.
+**Key change:** audio mute is now **V** (was M) and "follow the next car" is **backquote** (was
+Tab). The minimap sits in the left column under the input panel (top 312 px) because your
+bottom-right holds the event feed and the audio panel; move it with `minimapPlacement`.

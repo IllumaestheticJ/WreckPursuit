@@ -194,24 +194,6 @@ export class VehicleView {
     this.root.add(this.panels.root);
     this.panels.whenReady(() => {
       this.wheels.forEach((w, i) => this.panels.wheelParts[i].forEach((m) => w.spin.add(m)));
-      // The panel body is longer than the debug box: move the lamp markers onto its nose and
-      // tail so head and brake lights show (the mesh's own light parts sit inside the shell).
-      this.root.updateWorldMatrix(true, true);
-      const inv = new THREE.Matrix4().copy(this.root.matrixWorld).invert();
-      const box = new THREE.Box3();
-      this.panels.root.traverse((o) => {
-        const m = o as THREE.Mesh;
-        if (!m.isMesh || !m.geometry) return;
-        m.geometry.computeBoundingBox();
-        const b = m.geometry.boundingBox!.clone().applyMatrix4(m.matrixWorld).applyMatrix4(inv);
-        box.union(b);
-      });
-      if (box.isEmpty()) return;
-      for (const lamp of this.lamps) {
-        const front = lamp.position.y > 0;
-        lamp.position.y = front ? box.max.y + 0.01 : box.min.y - 0.01;
-        lamp.scale.set(1.3, 1, 1.4);
-      }
     });
 
     // CG marker (+ velocity arrow, which lives in world space; see update()).
@@ -254,9 +236,9 @@ export class VehicleView {
     const rebuild = this.shapeDirty;
     if (needNodes) this.shapeDirty = false;
     this.panels.root.visible = panelsOn;
-    // The panel meshes' own light parts sit inside the shell (machine R to fix in the mesh
-    // generator), so the lamp markers stay on with panels too: brake and head lights stay visible.
-    for (const lamp of this.lamps) lamp.visible = bodyOn;
+    // Panel meshes carry their own head/tail light lenses (shared head/tail materials, so the
+    // glow below still works); the box lamps only belong to the debug box body.
+    for (const lamp of this.lamps) lamp.visible = bodyOn && !panelsOn;
     for (const w of this.wheels)
       for (const c of w.spin.children) {
         const ours = this.panels.wheelParts.some((p) => p.includes(c as THREE.Mesh));

@@ -12,7 +12,9 @@ use wp_police::PoliceEvent;
 
 use crate::collision::{impact_gain, impact_layers, pair_key, ImpactLayer, MaterialMap, PairState};
 use crate::data::{cues, AudioLibrary, CarAudioDef};
-use crate::engine::{engine_synth, update_engine, EngineAudioState, EngineLayers, EngineLimits};
+use crate::engine::{
+    engine_synth, update_engine, EngineAudioState, EngineInput, EngineLayers, EngineLimits,
+};
 use crate::mixer::{CueRef, CueTable, Desire, MixerStats, VoiceMixer};
 use crate::scanner::{RadioLine, RadioPriority, Scanner, ScannerTier};
 use crate::siren::{update_siren, SirenMode, SirenPattern, SirenState};
@@ -57,6 +59,11 @@ pub struct VehicleAudioInput<'a> {
     pub state: &'a VehicleState,
     /// Throttle the vehicle received, 0..=1 (`VehicleInput::throttle` after assists if known).
     pub throttle: f32,
+    /// Throttle actually reaching the engine (`wp_vehicle::Telemetry::throttle`: after the
+    /// pedal filter, TCS and the gearbox's shift cut / blip), if the caller has it. The engine
+    /// sound uses it for load so shift dips, TCS cuts and rev-match blips are heard; `None`
+    /// falls back to `throttle`.
+    pub throttle_applied: Option<f32>,
     /// Horn held (`VehicleInput::horn`).
     pub horn: bool,
     /// Siren requested (`VehicleInput::siren`).
@@ -99,6 +106,8 @@ struct CarAudio {
     world: WorldCues,
     materials: MaterialMap,
     static_load_n: f32,
+    /// Loaded wheel radii FL, FR, RL, RR, m (wheelspin slip speed).
+    wheel_radius_m: [f32; 4],
 }
 
 /// Cues of one world pack.
@@ -106,6 +115,8 @@ struct CarAudio {
 struct WorldCues {
     squeal: CueRef,
     scrub: CueRef,
+    spin: CueRef,
+    spin_loose: CueRef,
     surfaces: [CueRef; 8],
     thump: CueRef,
     land: CueRef,
@@ -118,6 +129,8 @@ struct WorldCues {
     steam: CueRef,
     tire_burst: CueRef,
     rattle: CueRef,
+    /// Optional gear-shift clunk (`drivetrain/shift`); silent when the pack lacks it.
+    shift: CueRef,
 }
 
 impl WorldCues {
@@ -136,6 +149,8 @@ impl WorldCues {
         Self {
             squeal: t.get(pack, cues::SQUEAL, true),
             scrub: t.get(pack, cues::SCRUB, true),
+            spin: t.get(pack, cues::SPIN, true),
+            spin_loose: t.get(pack, cues::SPIN_LOOSE, true),
             surfaces: cues::SURFACES.map(|c| t.get(pack, c, true)),
             thump: t.get(pack, cues::THUMP, false),
             land: t.get(pack, cues::LAND, false),
@@ -148,6 +163,7 @@ impl WorldCues {
             steam: t.get(pack, cues::STEAM_HISS, true),
             tire_burst: t.get(pack, cues::TIRE_BURST, false),
             rattle: t.get(pack, cues::BODY_RATTLE, true),
+            shift: t.get(pack, cues::SHIFT, false),
         }
     }
 }
@@ -156,6 +172,8 @@ impl WorldCues {
 #[derive(Debug, Clone, Default)]
 struct VehicleRuntime {
     car_id: String,
+    /// Gear seen last frame (`None` until the first frame), for the shift clunk.
+    last_gear: Option<i8>,
     engine: EngineAudioState,
     tires: TireAudioState,
     siren: SirenState,
@@ -299,6 +317,7 @@ impl AudioDirector {
             world: WorldCues::new(t, &def.world_pack),
             materials: MaterialMap::from_lattice(&car.lattice, &car.materials),
             static_load_n: car.def.mass_kg * GRAVITY_MPS2 * 0.25,
+            wheel_radius_m: car.def.wheels.each_ref().map(|w| w.radius_m),
             layers,
             def,
         };
@@ -437,8 +456,11 @@ impl AudioDirector {
                 &car.def.engine,
                 car.limits,
                 &car.layers,
-                s.engine_rpm,
-                v.throttle,
+                EngineInput {
+                    rpm: s.engine_rpm,
+                    pedal: v.throttle,
+                    applied: v.throttle_applied.unwrap_or(v.throttle),
+                },
                 dt,
                 &mut self.rng,
             );
@@ -540,12 +562,29 @@ impl AudioDirector {
             }
         }
 
+        // Gear-shift clunk, only when the world pack defines `drivetrain/shift`.
+        let shifted = rt.last_gear.is_some_and(|g| g != s.gear);
+        rt.last_gear = Some(s.gear);
+        if shifted && self.cues.info(car.world.shift).defined {
+            self.one_shot_seq = self.one_shot_seq.wrapping_add(1);
+            let d = Desire::new(
+                VoiceId::new(e, slot::one_shot(self.one_shot_seq)),
+                Bus::World,
+                car.world.shift,
+                up(Priority::Low),
+                pos,
+                vel,
+            );
+            out.push(d);
+        }
+
         // Tires, surfaces, suspension.
         let to = update_tires(
             &mut rt.tires,
             &cfg.tires,
             s,
             car.static_load_n,
+            car.wheel_radius_m,
             v.road_rumble,
             tick,
             dt,
@@ -563,6 +602,25 @@ impl AudioDirector {
             d.pitch = pitch;
             d.load = k;
             out.push(d);
+        }
+        for (slot_code, cue, spin) in [
+            (slot::SPIN, car.world.spin, to.spin),
+            (slot::SPIN_LOOSE, car.world.spin_loose, to.spin_loose),
+        ] {
+            if let Some((gain, pitch, k)) = spin {
+                let mut d = Desire::new(
+                    VoiceId::new(e, slot_code),
+                    Bus::World,
+                    cue,
+                    up(Priority::Normal),
+                    pos,
+                    vel,
+                );
+                d.gain = gain;
+                d.pitch = pitch;
+                d.load = k;
+                out.push(d);
+            }
         }
         if let Some((gain, k)) = to.scrub {
             let mut d = Desire::new(

@@ -76,6 +76,7 @@ impl PoliceSystem {
         let ids: Vec<EntityId> = self.racers.keys().copied().collect();
         for id in ids {
             let p = xy(self.racers[&id].pos);
+            let pz = self.racers[&id].pos[2];
             let mut o = RacerObs {
                 nearest_unit_m: f32::INFINITY,
                 ..Default::default()
@@ -92,7 +93,7 @@ impl PoliceSystem {
                         if u.assignment == Assignment::OutOfService {
                             continue;
                         }
-                        if d <= los_range && self.sees(world, u.body.pos, p) {
+                        if d <= los_range && self.sees_at(world, u.body.pos, u.body.alt_m, p, pz) {
                             // Recognition (pursuit start) and witnessing (full violation heat)
                             // have their own ranges inside line-of-sight range.
                             o.seen = true;
@@ -203,7 +204,7 @@ impl PoliceSystem {
         }
     }
 
-    fn start_pursuit(&mut self, racer: EntityId, unit: UnitId) {
+    pub(crate) fn start_pursuit(&mut self, racer: EntityId, unit: UnitId) {
         let now = self.now;
         let p = xy(self.racers[&racer].pos);
         {
@@ -608,7 +609,10 @@ impl PoliceSystem {
                     let u = &self.units[i];
                     // Join the chase only once on the racer's line and behind it (hysteresis with
                     // the off-trail check in coordinate_pursuits).
-                    if seen && dist(u.body.pos, rp) < 120.0 && self.sees(world, u.body.pos, rp) {
+                    if seen
+                        && dist(u.body.pos, rp) < 120.0
+                        && self.sees_at(world, u.body.pos, u.body.alt_m, rp, rec.pos[2])
+                    {
                         let joins = self.pursuit_track(target).is_some_and(|(tr, racer_s)| {
                             let (s_u, lat) = tr.project(u.body.pos, racer_s, 200.0);
                             lat < 12.0 && s_u <= racer_s + 5.0
@@ -894,7 +898,7 @@ impl PoliceSystem {
     // Per-tick driving
     // -----------------------------------------------------------------------------------------
 
-    pub(crate) fn drive_units(&mut self, dt: f32) {
+    pub(crate) fn drive_units(&mut self, world: &dyn WorldQuery, dt: f32) {
         if self.units.is_empty() {
             return;
         }
@@ -957,12 +961,12 @@ impl PoliceSystem {
                 }
             }
         }
-        self.internal_racer_contacts();
+        self.internal_racer_contacts(world);
     }
 
     /// Proximity contacts between internally driven units and racers (physical units get
     /// `SimEvent::Contact` from Rapier instead).
-    fn internal_racer_contacts(&mut self) {
+    fn internal_racer_contacts(&mut self, world: &dyn WorldQuery) {
         let racers: Vec<(EntityId, [f32; 2], [f32; 2])> = self
             .racers
             .values()
@@ -980,7 +984,12 @@ impl PoliceSystem {
                     let rel_speed = (rel[0] * rel[0] + rel[1] * rel[1]).sqrt();
                     let pit = self.units[i].tactic == Tactic::Pit;
                     let before = self.stats.racer_contacts;
-                    self.unit_racer_contact(i, e, rel_speed, true);
+                    let hit = crate::dispatch::RacerHit {
+                        rel_speed,
+                        impulse_ns: 0.0,
+                        physical: false,
+                    };
+                    self.unit_racer_contact(world, i, e, hit, true);
                     if self.stats.racer_contacts != before {
                         let u = &mut self.units[i];
                         u.body.speed = u.body.speed.min((v[0] * v[0] + v[1] * v[1]).sqrt()) * 0.8;

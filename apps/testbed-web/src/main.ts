@@ -4,7 +4,7 @@
 // URL parameters (handy for automation): ?scenario=crash/head_on.ron&speed=60 runs a scenario,
 // ?bench=24 spawns a 24-car benchmark, ?cam=orbit picks a camera, ?replay=last plays the last
 // stored replay, ?city=procedural_12x12 picks the city (default vesper_v2), ?chase=1 starts the
-// city chase.
+// city chase (?chase=rain the rainy night), ?weather=heavy_rain picks the weather.
 import { loadWasm, sim, type DriverInput, type Scenario, type ScenarioResult } from "./wasm/sim";
 import { META_STRIDE, STATE_STRIDE, S, T, VEHICLE_KIND, W } from "./wasm/layout";
 import { installKeyboard, isHeld, readInput, toggleHeadlights, type InputSource } from "./input";
@@ -17,8 +17,13 @@ import { Hud } from "./hud";
 import { TelemetryPlots } from "./telemetry";
 import { AudioSystem } from "./audio";
 import { UiOverlay } from "./ui/overlay";
+import { MapOverlay } from "./ui/map";
 import { RunEndView } from "./ui/runEnd";
+import { CareerGarageView } from "../../ui-kit/src/garage/CareerGarage";
+import { downloadText, keepUnreadable, loadCareerText, saveCareerText, saveFileName } from "../../ui-kit/src/garage/store";
+import type { CareerApi, CareerView, RunKind } from "../../ui-kit/src/garage/types";
 import { RealTimeMeter } from "./rtf";
+import { WeatherView } from "./render/weather";
 
 // v2: canonical simcli replay.bin (v1 held the retired WPR\x01 format).
 const LAST_REPLAY_KEY = "wp.testbed.lastReplay.v2";
@@ -84,6 +89,7 @@ async function main(): Promise<void> {
   const plots = new TelemetryPlots(overlay);
   const audio = new AudioSystem(scene.world, overlay);
   const ui = new UiOverlay(overlay);
+  const map = new MapOverlay(overlay);
   // End-of-run panel (lead): capture / wreck → result + "Repair & continue" / "Restart".
   const runEndEl = document.createElement("div");
   runEndEl.id = "ui-run-end";
@@ -94,7 +100,88 @@ async function main(): Promise<void> {
     restart: () => restartRun(),
     onOpen: () => ui.setBill(true),
     onClose: () => ui.setBill(false),
+    garage: () => (sim.careerRunActive() ? () => openGarage() : null),
   });
+  const weather = new WeatherView(scene.scene, scene.renderer, overlay);
+  weather.attachMaterial(scene.groundMaterial);
+  scene.onCityLoaded = (root) => weather.attachCity(root);
+  const weatherSel = $("weather") as HTMLSelectElement;
+  for (const [id, label] of sim.weatherChoices()) weatherSel.add(new Option(label, id));
+  const weatherParam = params.get("weather");
+  if (weatherParam && [...weatherSel.options].some((o) => o.value === weatherParam)) weatherSel.value = weatherParam;
+  /** Scenario JSON with the selector's weather ("scenario" keeps the scenario's own). */
+  const withWeather = (json: string) => (weatherSel.value === "auto" ? json : sim.scenarioWithWeather(json, weatherSel.value));
+
+  // ----- career (machine G): persistent account between runs, garage screen ---------------
+  // The career lives in wp_wasm (`career_*`); this file stores it (localStorage, versioned)
+  // and starts runs with the career car. See docs/integration/economy.md.
+  const persistCareer = () => {
+    try {
+      saveCareerText(sim.careerSave());
+    } catch (e) {
+      console.warn("career not saved", e);
+    }
+  };
+  {
+    const text = loadCareerText();
+    let loaded = false;
+    if (text) {
+      try {
+        sim.careerLoad(text);
+        loaded = true;
+      } catch (e) {
+        console.warn("career save unreadable; kept aside, starting a new career", e);
+        keepUnreadable(text);
+      }
+    }
+    if (!loaded) {
+      sim.careerNew("Arcade");
+      persistCareer();
+    }
+  }
+  const garageEl = document.createElement("div");
+  garageEl.id = "ui-garage";
+  garageEl.style.cssText = "position:absolute;inset:0;pointer-events:none;";
+  overlay.appendChild(garageEl);
+  const act = (f: () => CareerView): CareerView => {
+    const v = f();
+    persistCareer();
+    return v;
+  };
+  const careerApi: CareerApi = {
+    view: () => sim.careerView(),
+    mods: (uid) => sim.careerMods(uid),
+    quote: (uid, req) => sim.careerQuote(uid, req),
+    buy: (id, c) => act(() => sim.careerBuy(id, c)),
+    floorCar: () => act(() => sim.careerFloorCar()),
+    sell: (uid) => act(() => sim.careerSell(uid)),
+    setActive: (uid) => act(() => sim.careerSetActive(uid)),
+    install: (uid, id) => act(() => sim.careerInstall(uid, id)),
+    uninstall: (uid, id) => act(() => sim.careerUninstall(uid, id)),
+    repair: (uid, req) => act(() => sim.careerRepair(uid, req)),
+    release: (uid) => act(() => sim.careerRelease(uid)),
+    insure: (uid, tier) => act(() => sim.careerInsure(uid, tier)),
+    nextNight: () => act(() => sim.careerNextNight()),
+    newCareer: (mode) => act(() => sim.careerNew(mode)),
+    exportSave: () => downloadText(saveFileName(sim.careerView().day), sim.careerSave()),
+    importSave: (text) => act(() => sim.careerLoad(text)),
+    startRun: (kind) => void startCareerRun(kind),
+    close: () => {
+      garage.hide();
+      app.paused = false;
+    },
+  };
+  const garage = new CareerGarageView(garageEl, careerApi);
+  /** Garage: ends a career run in progress (its result goes into the career), pauses. */
+  const openGarage = (message: string | null = null) => {
+    if (sim.careerRunActive()) sim.careerEndRun();
+    persistCareer();
+    runEnd.reset();
+    app.paused = true;
+    garage.show(message);
+  };
+  let careerSavedSeq = -1;
+  let careerSavedAt = 0;
   const citySel = $("city-map") as HTMLSelectElement;
   const cityParam = params.get("city");
   if (cityParam && CITY_IDS.includes(cityParam)) citySel.value = cityParam;
@@ -112,7 +199,9 @@ async function main(): Promise<void> {
     app.eventCounts = {};
     plots.clear();
     ui.reset();
+    map.reset();
     runEnd.reset();
+    weather.reset();
     syncViews();
     const ids = sim.entities();
     app.player = ids[0] ?? 1;
@@ -175,33 +264,67 @@ async function main(): Promise<void> {
     let json = city ? sim.freeDriveCityJson(car, mode, citySel.value) : sim.freeDriveJson(car, mode, false);
     // Optional start hour (automation: day/night screenshots).
     if (hour !== undefined) json = JSON.stringify({ ...JSON.parse(json), time_of_day_h: hour });
-    sim.init(1, json, false);
+    sim.init(1, withWeather(json), false);
     app.scenario = null;
     rebuildViews();
     applyAssistPreset(app.source);
   };
 
-  /** City chase preset: procedural city at 23:00, police + traffic, player already speeding. */
+  /** City chase preset: procedural city at 23:00, police + traffic, player already speeding.
+   * `rain` = the rainy-night variant (downpour, soaked road; the weather selector can still
+   * override it). */
   const startCityChase = (
     car = ($("car") as HTMLSelectElement).value || DEFAULT_CAR,
     mode = ($("mode") as HTMLSelectElement).value,
+    rain = false,
   ) => {
     app.scenarioFile = null;
     app.scenario = null;
     app.result = null;
     app.bench = null;
-    sim.init(0, sim.cityChaseCityJson(car, mode, citySel.value), false);
+    const json = rain ? sim.cityChaseRainJson(car, mode, citySel.value) : sim.cityChaseCityJson(car, mode, citySel.value);
+    sim.init(0, withWeather(json), false);
     rebuildViews();
     applyAssistPreset(app.source);
     // Back to the viewer's own angle (near chase unless they picked another one).
     rig.setMode(rig.preferred, app.views.get(app.focus)?.root);
   };
 
+  /** A career run: the city chase or a free drive (city box) with the career car, its saved
+   * damage and mods. Opens the garage instead when the car cannot go out. */
+  const startCareerRun = (kind: RunKind): boolean => {
+    const json =
+      kind === "chase"
+        ? sim.cityChaseCityJson(DEFAULT_CAR, "Arcade", citySel.value)
+        : ($("city") as HTMLInputElement).checked
+          ? sim.freeDriveCityJson(DEFAULT_CAR, "Arcade", citySel.value)
+          : sim.freeDriveJson(DEFAULT_CAR, "Arcade", false);
+    app.scenarioFile = null;
+    app.scenario = null;
+    app.result = null;
+    app.bench = null;
+    try {
+      sim.careerStartRun(withWeather(json));
+    } catch (e) {
+      openGarage(String(e).replace(/^(Error: )?wp_wasm: /, ""));
+      return false;
+    }
+    garage.hide();
+    app.paused = false;
+    persistCareer();
+    rebuildViews();
+    applyAssistPreset(app.source);
+    if (kind === "chase") rig.setMode(rig.preferred, app.views.get(app.focus)?.root);
+    return true;
+  };
+
   /** "Restart" on the end-of-run panel: the same session again (the account carries over). */
   const restartRun = () => {
     const sc = sim.scenario();
+    if (sim.careerRunActive()) return void startCareerRun(sc.name === "city_chase" ? "chase" : "free");
     const car = sc.entities[0]?.car;
     if (sc.name === "city_chase") startCityChase(car, sc.mode);
+    else if (sc.name === "city_chase_rainy_night") startCityChase(car, sc.mode, true);
     else startFreeDrive(car, sc.mode);
   };
 
@@ -212,7 +335,7 @@ async function main(): Promise<void> {
     app.scenarioFile = file;
     app.result = null;
     app.bench = null;
-    sim.init(0, json, true);
+    sim.init(0, withWeather(json), true);
     app.scenario = sim.scenario();
     rebuildViews();
   };
@@ -290,9 +413,29 @@ async function main(): Promise<void> {
   $("sc-run").onclick = () => scSel.value && runScenario(scSel.value, Number(($("sc-speed") as HTMLInputElement).value));
   $("sc-free").onclick = () => startFreeDrive();
   $("sc-chase").onclick = () => startCityChase();
+  $("sc-chase-rain").onclick = () => startCityChase(undefined, undefined, true);
+  /** Restart whatever is running with the selected weather (weather is part of the scenario,
+   * so replays carry it). */
+  weatherSel.onchange = () => {
+    if (isReplay()) return;
+    const name = sim.scenario()?.name;
+    if (sim.careerRunActive()) {
+      sim.careerEndRun();
+      void startCareerRun(name === "city_chase" ? "chase" : "free");
+    } else if (app.scenarioFile) void runScenario(app.scenarioFile);
+    else if (name === "city_chase") startCityChase();
+    else if (name === "city_chase_rainy_night") startCityChase(undefined, undefined, true);
+    else startFreeDrive();
+  };
+  const careerOn = () => ($("career") as HTMLInputElement).checked;
+  $("sc-free").onclick = () => (careerOn() ? startCareerRun("free") : startFreeDrive());
+  $("sc-chase").onclick = () => (careerOn() ? startCareerRun("chase") : startCityChase());
+  $("sc-garage").onclick = () => openGarage();
+  addEventListener("pagehide", persistCareer);
   ($("mode") as HTMLSelectElement).onchange = (e) => {
     // Live switch (Sim::set_mode_table), logged as a replay op; existing damage is kept.
-    if (isReplay()) return void (($("mode") as HTMLSelectElement).value = modeName());
+    // A career run keeps the career's mode (pick it with "New career" in the garage).
+    if (isReplay() || sim.careerRunActive()) return void (($("mode") as HTMLSelectElement).value = modeName());
     sim.setDamageMode((e.target as HTMLSelectElement).value);
   };
   ($("city") as HTMLInputElement).onchange = () => startFreeDrive();
@@ -410,8 +553,12 @@ async function main(): Promise<void> {
         sel.dispatchEvent(new Event("change"));
         break;
       }
-      case "Tab": {
+      case "KeyM":
+      case "Tab":
         e.preventDefault();
+        map.toggle();
+        break;
+      case "Backquote": {
         const ids = [...app.views.keys()];
         app.focus = ids[(ids.indexOf(app.focus) + 1) % ids.length];
         rig.setMode(rig.mode, app.views.get(app.focus)?.root);
@@ -438,7 +585,7 @@ async function main(): Promise<void> {
     scSel.value = scParam;
     await runScenario(scParam, Number(params.get("speed") ?? 0));
   } else if (params.get("chase")) {
-    startCityChase("debug_sedan");
+    startCityChase("debug_sedan", undefined, params.get("chase") === "rain");
   } else {
     startFreeDrive(DEFAULT_CAR);
   }
@@ -469,7 +616,8 @@ async function main(): Promise<void> {
       app.source = source;
       if (!app.scenario && !app.bench) applyAssistPreset(source);
     }
-    if (!replay && !app.bench) sim.setInput(app.player, input);
+    // The full city map pauses driving input (the sim keeps running): coast with light brakes.
+    if (!replay && !app.bench) sim.setInput(app.player, map.isOpen ? { ...input, throttle: 0, steer: 0, brake: 0.35, handbrake: 0, gearUp: false, gearDown: false } : input);
 
     const t0 = performance.now();
     if (!app.paused || replay) app.alpha = sim.step(app.paused && !replay ? 0 : dt);
@@ -513,14 +661,35 @@ async function main(): Promise<void> {
     {
       const w = sim.worldInfo();
       ui.frame(w[W.tick], app.player, events, w[W.hours], modeName());
+      map.frame(app.player, now);
       if (!replay) runEnd.update(sim.runResult(), now);
+      // Career autosave: after each settlement (bust, escape, wreck) and every 20 s of a run.
+      if (!replay && sim.careerRunActive()) {
+        const seq = runEnd.report?.seq ?? 0;
+        if (seq !== careerSavedSeq || now - careerSavedAt > 20000) {
+          careerSavedSeq = seq;
+          careerSavedAt = now;
+          persistCareer();
+        }
+      }
     }
     scene.update(dt, sim.intents());
     // Promoted (physical) agents are drawn as sim vehicles once the sim spawns them.
     scene.updateAgents(sim.trafficAgents(), physicalTraffic);
     scene.updatePoliceUnits(sim.policeUnits(), tS);
     const wi = sim.worldInfo();
-    scene.setTimeOfDay(wi[W.night]);
+    const wx = sim.weatherInfo();
+    scene.setTimeOfDay(wi[W.night], wx[0] > 0.5 ? wx[7] : 1);
+    weather.update(
+      app.paused && !replay ? 0 : dt,
+      rig.camera,
+      wx,
+      wi[W.night],
+      () => ({ meta: sim.weatherGridMeta(), bytes: sim.weatherGrid() }),
+      cur,
+      sim.weatherSpray(),
+      rig.mode === "hood" || rig.mode === "bumper" || rig.mode === "cockpit",
+    );
     scene.signals.update(sim.signalStates(), wi[W.night]);
 
     const focusView = app.views.get(app.focus) ?? null;
@@ -681,6 +850,8 @@ async function main(): Promise<void> {
     sim,
     app,
     scene,
+    /** City map HUD (UI kit): `map.hud.stats()`, `map.toggle()`. */
+    map,
     ready: true,
     stopRecording,
     loadReplay,
@@ -688,6 +859,12 @@ async function main(): Promise<void> {
     startFreeDrive,
     startCityChase,
     startBench,
+    weather,
+    /** Pick a weather choice and restart the session with it (automation, docs shots). */
+    setWeather: (choice: string) => {
+      weatherSel.value = choice;
+      weatherSel.dispatchEvent(new Event("change"));
+    },
     setCamera: (m: CameraMode, offset?: [number, number, number]) => rig.setMode(m, app.views.get(app.focus)?.root, offset),
     cameraModes: CAMERA_MODES,
     rig,
@@ -702,6 +879,11 @@ async function main(): Promise<void> {
     ui,
     runEnd,
     restartRun,
+    garage,
+    careerApi,
+    openGarage,
+    startCareerRun,
+    persistCareer,
     lookFrom: (eye: [number, number, number], target: [number, number, number]) => rig.lookFrom(eye, target),
   };
   requestAnimationFrame(frame);

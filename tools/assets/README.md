@@ -30,8 +30,8 @@ cargo test -p car-assets                             # every car valid + meshes 
   into a body region: bumpers, hood, fenders (to the front-door hinge), doors (front door to the
   rear-door hinge; door windows ride with their door), rear doors / 2-door side strips, sills
   (`FrameLeft/Right`), roof, windshield, rear glass (or a cab-back wall), trunk lid or deck,
-  quarters, pillars (`Cabin`). Plus head/tail lights (on the fenders / quarters, so a hanging
-  bumper leaves them), door mirrors (on the front doors), a minimal interior, the underbody and
+  quarters, pillars (`Cabin`). Plus head/tail light lenses on the outer surface of the nose /
+  tail face (15 mm proud, facing out, 5 cm deep; region `FrameFront` / `FrameRear`), door mirrors (on the front doors), a minimal interior, the underbody and
   per-wheel tire + star rim parts (hub space, not skinned).
 - 3.5k–4.6k triangles per car (budget 3–6k, prompt 11). Metres, +Y forward, +Z up, origin = the
   chassis origin. Deterministic (no RNG; `wp_math::sin_cos`).
@@ -40,12 +40,18 @@ cargo test -p car-assets                             # every car valid + meshes 
 4 nearest nodes of the part's own region, weights ∝ 1/(d² + 1e-4), quantised to 1/255 summing
 to 255. Region-aware: a hood vertex never follows a fender node. Regions with fewer than four
 nodes (glass, 2-door side strips) borrow from their fallback regions (roof/cabin, quarter).
+Light lenses bind to the 4 nearest nodes of their end of the car (bumper, hood/trunk, same-side
+fender/quarter, frame), so they crush and move with the bumper and hood. Hood and trunk lids also
+get a fold binding (`bind_fold`): hinge-row → latch-row node chords and per-vertex crease and
+rear-lift weights (see `data/panels/README.md`). `skin::deform` is the Rust reference of the
+browser skinning (tests use it).
 Writes into the mesh file (not `LatticeDef::skin_binding`, which would bloat the lattices; the
 contract field stays available for hand-made meshes).
 
 ## validate-car-asset (`src/validate.rs`)
 ids and lattice match, format, triangle budget, unique lower_snake_case names, index ranges,
-every skinned vertex bound to allowed nodes with weights summing to 255, four wheels with tire and
+every skinned vertex bound to allowed nodes with weights summing to 255, fold chords inside their
+region with 2 weights per vertex, four wheels with tire and
 rim, every exterior region with lattice nodes has a part, every panel in the spec has a painted
 part, glass parts use glass, mesh size within the declared `body_size_m` (pivot/scale check).
 

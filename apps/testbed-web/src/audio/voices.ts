@@ -3,8 +3,18 @@
 // their entity); distance attenuation and Doppler are already folded into the parameters by
 // the Rust director, so panners only pan (rolloff 0).
 
-import { makeSynth, type SynthVoice } from "./synth";
-import { BUSES, voiceKey, type AudioLibrary, type Bus, type CueDef, type VoiceId, type VoiceParams } from "./types";
+import { engineInstrument, makeSynth, type EngineMix, type EngineSynth, type SynthVoice } from "./synth";
+import {
+  BUSES,
+  voiceKey,
+  type AudioLibrary,
+  type Bus,
+  type CueDef,
+  type SampleStatus,
+  type SoundSource,
+  type VoiceId,
+  type VoiceParams,
+} from "./types";
 
 interface BusNodes {
   user: GainNode;
@@ -77,12 +87,45 @@ interface Voice {
   src: AudioBufferSourceNode | null;
   gain: GainNode;
   lp: BiquadFilterNode;
-  panner: PannerNode;
+  /** Null for local (non-spatial) voices: scanner sounds, ambience. */
+  panner: PannerNode | null;
   /** Audio time after which the voice is disconnected (one-shots and stopped loops). */
   endTime: number;
   /** Parameters last applied (skip automation calls when nothing changed). */
   last: VoiceParams;
 }
+
+/** wp_audio slot codes (crates/wp_audio/src/types.rs `slot`): engine layers and limiter. */
+const SLOT_ENGINE_LAYER = 0x100;
+const SLOT_ENGINE_LIMITER = 0x180;
+
+/** One procedural engine layer (or the limiter) folded into its car's engine instrument. */
+interface EngineMember {
+  /** Commanded gain (distance and cue gain included). */
+  gain: number;
+  bright: number;
+  off: number;
+  noise: number;
+  limiter: boolean;
+}
+
+/**
+ * All procedural engine layers of one entity, played by a single `engineInstrument`.
+ * The director still sends one voice per layer (sample packs need that: each recording has its
+ * own root rpm); for synth layers the backend sums their energy into one gain and blends their
+ * timbre, because separate synths at the same firing frequency interfere.
+ */
+interface EngineGroup extends Voice {
+  synth: EngineSynth;
+  members: Map<number, EngineMember>;
+  /** Latest params from any member (frequency, load, position, air absorption). */
+  pending: VoiceParams;
+  mix: EngineMix;
+  dirty: boolean;
+}
+
+/** Entity id of voices played outside the director (non-spatial). */
+const LOCAL_ENTITY = 0xfffffffe;
 
 /** Relative change above which a parameter is re-automated. */
 const EPS = 0.004;
@@ -92,6 +135,10 @@ const moved = (a: number[], b: number[]) => Math.abs(a[0] - b[0]) + Math.abs(a[1
 /** Executes voice commands. */
 export class VoicePool {
   private voices = new Map<string, Voice>();
+  /** Procedural engine instruments by entity. */
+  private engines = new Map<number, EngineGroup>();
+  /** Released instruments still fading out. */
+  private dying: Voice[] = [];
   private samples = new Map<string, AudioBuffer | "loading" | "failed">();
   /** Voices created / released (debug). */
   created = 0;
@@ -104,19 +151,56 @@ export class VoicePool {
     this.preloadSamples();
   }
 
+  /** Playing voices, counting each engine layer folded into an instrument. */
   get size(): number {
-    return this.voices.size;
+    let n = this.voices.size;
+    for (const g of this.engines.values()) n += g.members.size;
+    return n;
   }
+
+  /** Recorded samples (default) or each pack's procedural `fallback`. */
+  source: SoundSource = "recorded";
 
   private cue(pack: string, cue: string): CueDef | undefined {
     return this.lib.packs[pack]?.cues[cue];
   }
 
-  private sampleUrl(pack: string, file: string): string {
-    return `data/audio/packs/${pack}/${file}`;
+  /**
+   * The cue to perform for `pack`/`cue`: in procedural mode (or while a recorded file is not
+   * decoded yet / failed to load) the pack's `fallback` cue of the same name, if it has one.
+   */
+  private resolve(pack: string, cue: string): { def: CueDef | undefined; buf: AudioBuffer | null; pack: string } {
+    const def = this.cue(pack, cue);
+    const fb = this.lib.packs[pack]?.fallback;
+    const fbDef = fb ? this.cue(fb, cue) : undefined;
+    if (this.source === "procedural" && fbDef) return { def: fbDef, buf: null, pack: fb! };
+    const src = def?.source;
+    if (src && "Samples" in src) {
+      const files = src.Samples.files;
+      const file = files[Math.floor(Math.random() * files.length)];
+      const buf = this.samples.get(this.sampleUrl(pack, file));
+      if (buf instanceof AudioBuffer) return { def, buf, pack };
+      if (fbDef) return { def: fbDef, buf: null, pack: fb! };
+    }
+    return { def, buf: null, pack };
   }
 
-  /** Fetch every recorded file referenced by a pack (none ship yet; synths cover them). */
+  /** Whether `pack` defines `cue` (optional cues such as the city ambience). */
+  has(pack: string, cue: string): boolean {
+    return !!this.cue(pack, cue);
+  }
+
+  /** Relative URL (works on the dev server and the published link): `data/audio/packs/<pack>/<file>`. */
+  private sampleUrl(pack: string, file: string): string {
+    const parts: string[] = [];
+    for (const seg of `${pack}/${file}`.split("/")) {
+      if (seg === "..") parts.pop();
+      else if (seg && seg !== ".") parts.push(seg);
+    }
+    return `data/audio/packs/${parts.join("/")}`;
+  }
+
+  /** Fetch and decode every recorded file referenced by a pack (shared files load once). */
   private preloadSamples(): void {
     for (const [packId, pack] of Object.entries(this.lib.packs)) {
       for (const c of Object.values(pack.cues)) {
@@ -126,13 +210,27 @@ export class VoicePool {
           if (this.samples.has(url)) continue;
           this.samples.set(url, "loading");
           fetch(url)
-            .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(String(r.status)))))
+            .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(`HTTP ${r.status}`))))
             .then((b) => this.ctx.decodeAudioData(b))
             .then((buf) => this.samples.set(url, buf))
-            .catch(() => this.samples.set(url, "failed"));
+            .catch((e) => {
+              console.warn("audio sample failed:", url, e);
+              this.samples.set(url, "failed");
+            });
         }
       }
     }
+  }
+
+  /** Loading progress of the recorded samples. */
+  sampleStatus(): SampleStatus {
+    const st: SampleStatus = { total: this.samples.size, loaded: 0, loading: 0, failed: [] };
+    for (const [url, v] of this.samples) {
+      if (v instanceof AudioBuffer) st.loaded++;
+      else if (v === "loading") st.loading++;
+      else st.failed.push(url);
+    }
+    return st;
   }
 
   private setPanner(p: PannerNode, pos: [number, number, number], t: number, smooth: boolean): void {
@@ -152,31 +250,38 @@ export class VoicePool {
   }
 
   play(voice: VoiceId, bus: Bus, pack: string, cue: string, looped: boolean, params: VoiceParams, synth: Record<string, number>): void {
+    const { def, buf, pack: played } = this.resolve(pack, cue);
+    if (this.isEngineSynth(voice, bus, def)) {
+      this.enginePlay(voice, def!, params, synth);
+      return;
+    }
     const key = voiceKey(voice);
     const old = this.voices.get(key);
     if (old) this.release(old, this.ctx.currentTime, 0.02);
     const t = this.ctx.currentTime;
-    const def = this.cue(pack, cue);
     const gain = this.ctx.createGain();
     gain.gain.setValueAtTime(looped ? 0 : params.gain, t);
     if (looped) gain.gain.setTargetAtTime(params.gain, t, 0.02);
     const lp = this.ctx.createBiquadFilter();
     lp.type = "lowpass";
     lp.frequency.value = Math.min(params.lowpass_hz || 18000, 18000);
-    const panner = this.ctx.createPanner();
-    panner.panningModel = "equalpower";
-    panner.distanceModel = "linear";
-    panner.rolloffFactor = 0;
-    this.setPanner(panner, params.pos, t, false);
-    const dest = this.lib.packs[pack]?.kind === "Radio" ? this.mixer.radioIn : this.mixer.input(bus);
-    gain.connect(lp).connect(panner).connect(dest);
+    const dest = this.lib.packs[played]?.kind === "Radio" ? this.mixer.radioIn : this.mixer.input(bus);
+    let panner: PannerNode | null = null;
+    if (voice.entity === LOCAL_ENTITY) {
+      gain.connect(lp).connect(dest);
+    } else {
+      panner = this.ctx.createPanner();
+      panner.panningModel = "equalpower";
+      panner.distanceModel = "linear";
+      panner.rolloffFactor = 0;
+      this.setPanner(panner, params.pos, t, false);
+      gain.connect(lp).connect(panner).connect(dest);
+    }
 
     let src: AudioBufferSourceNode | null = null;
     let syn: SynthVoice | null = null;
     const source = def?.source;
-    const file = source && "Samples" in source ? source.Samples.files[Math.floor(Math.random() * source.Samples.files.length)] : null;
-    const buf = file ? this.samples.get(this.sampleUrl(pack, file)) : undefined;
-    if (buf instanceof AudioBuffer) {
+    if (buf) {
       src = this.ctx.createBufferSource();
       src.buffer = buf;
       src.loop = looped;
@@ -189,30 +294,162 @@ export class VoicePool {
       syn = makeSynth(this.ctx, name, sp, params, t);
       syn.output.connect(gain);
     }
-    const dur = def?.duration_s ?? 1;
+    // A recorded one-shot can outlast the director's estimate: keep the voice until it ends.
+    const dur = Math.max(def?.duration_s ?? 1, buf && !looped ? buf.duration / Math.max(params.pitch, 0.25) : 0);
     this.voices.set(key, { synth: syn, src, gain, lp, panner, endTime: looped ? Infinity : t + dur + 0.5, last: params });
     this.created++;
   }
 
   set(voice: VoiceId, params: VoiceParams): void {
+    const g = this.engines.get(voice.entity);
+    const m = g?.members.get(voice.slot);
+    if (g && m) {
+      m.gain = params.gain;
+      g.pending = params;
+      g.dirty = true;
+      return;
+    }
     const v = this.voices.get(voiceKey(voice));
     if (!v) return;
+    this.applyParams(v, params);
+  }
+
+  /** Re-automate whatever moved since it was last applied. */
+  private applyParams(v: Voice, params: VoiceParams): void {
     const t = this.ctx.currentTime;
+    // `l` holds the values last *applied*, field by field. Comparing against the previous
+    // frame instead would drop every slow change for good: an engine climbing < 0.4 % per
+    // frame (2nd gear onwards) froze its pitch and layer gains at the last shift (playtest #19).
     const l = v.last;
-    if (changed(params.gain, l.gain)) v.gain.gain.setTargetAtTime(params.gain, t, 0.02);
+    if (changed(params.gain, l.gain)) {
+      v.gain.gain.setTargetAtTime(params.gain, t, 0.02);
+      l.gain = params.gain;
+    }
     if (changed(params.lowpass_hz, l.lowpass_hz)) {
       v.lp.frequency.setTargetAtTime(Math.min(params.lowpass_hz || 18000, 18000), t, 0.05);
+      l.lowpass_hz = params.lowpass_hz;
     }
-    if (moved(params.pos, l.pos)) this.setPanner(v.panner, params.pos, t, true);
-    if (v.src && changed(params.pitch, l.pitch)) v.src.playbackRate.setTargetAtTime(params.pitch, t, 0.02);
+    if (v.panner && moved(params.pos, l.pos)) {
+      this.setPanner(v.panner, params.pos, t, true);
+      l.pos = params.pos;
+    }
+    const pitchMoved = changed(params.pitch, l.pitch);
+    if (v.src && pitchMoved) v.src.playbackRate.setTargetAtTime(params.pitch, t, 0.02);
     // Sirens follow their own clock and must see every phase; others only on change.
     const synthChanged =
-      changed(params.freq_hz, l.freq_hz) || changed(params.pitch, l.pitch) || changed(params.load, l.load) || params.phase !== l.phase;
+      changed(params.freq_hz, l.freq_hz) || pitchMoved || changed(params.load, l.load) || params.phase !== l.phase;
     if (v.synth && synthChanged) v.synth.update(params, t);
-    v.last = params;
+    if (synthChanged) {
+      l.freq_hz = params.freq_hz;
+      l.pitch = params.pitch;
+      l.load = params.load;
+      l.phase = params.phase;
+    }
+    l.doppler = params.doppler;
+  }
+
+  private isEngineSynth(voice: VoiceId, bus: Bus, def: CueDef | undefined): boolean {
+    return (
+      bus === "Engine" &&
+      voice.slot >= SLOT_ENGINE_LAYER &&
+      voice.slot <= SLOT_ENGINE_LIMITER &&
+      !!def &&
+      "Synth" in def.source &&
+      def.source.Synth.synth === "engine"
+    );
+  }
+
+  private enginePlay(voice: VoiceId, def: CueDef, params: VoiceParams, synth: Record<string, number>): void {
+    const sp = { ...("Synth" in def.source ? def.source.Synth.params : {}), ...synth };
+    const member: EngineMember = {
+      gain: params.gain,
+      bright: sp.bright ?? 0.5,
+      off: sp.off ? 1 : 0,
+      noise: sp.noise ?? 0.1,
+      limiter: !!sp.chop_hz,
+    };
+    let g = this.engines.get(voice.entity);
+    if (!g) {
+      const t = this.ctx.currentTime;
+      const mix = { bright: member.bright, off: member.off, noise: member.noise, chop: member.limiter ? 1 : 0 };
+      const syn = engineInstrument(this.ctx, sp, params, mix);
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0, t);
+      const lp = this.ctx.createBiquadFilter();
+      lp.type = "lowpass";
+      lp.frequency.value = Math.min(params.lowpass_hz || 18000, 18000);
+      const panner = this.ctx.createPanner();
+      panner.panningModel = "equalpower";
+      panner.distanceModel = "linear";
+      panner.rolloffFactor = 0;
+      this.setPanner(panner, params.pos, t, false);
+      syn.output.connect(gain).connect(lp).connect(panner).connect(this.mixer.input("Engine"));
+      g = {
+        synth: syn,
+        src: null,
+        gain,
+        lp,
+        panner,
+        endTime: Infinity,
+        // Gain starts at 0 and is ramped in by the first flush.
+        last: { ...params, gain: 0, pos: [...params.pos] as [number, number, number] },
+        members: new Map(),
+        pending: params,
+        mix,
+        dirty: true,
+      };
+      this.engines.set(voice.entity, g);
+      this.created++;
+    }
+    g.members.set(voice.slot, member);
+    g.pending = params;
+    g.dirty = true;
+  }
+
+  /** Fold the members' gains and timbres into the instrument (once per frame). */
+  private flushEngine(g: EngineGroup): void {
+    let e = 0;
+    let bright = 0;
+    let off = 0;
+    let noise = 0;
+    let chop = 0;
+    for (const m of g.members.values()) {
+      const w = m.gain * m.gain;
+      e += w;
+      bright += w * m.bright;
+      off += w * m.off;
+      noise += w * m.noise;
+      if (m.limiter) chop += w;
+    }
+    if (e > 1e-12) {
+      const mix = { bright: bright / e, off: off / e, noise: noise / e, chop: chop / e };
+      const c = g.mix;
+      if (
+        Math.abs(mix.bright - c.bright) > 0.004 ||
+        Math.abs(mix.off - c.off) > 0.004 ||
+        Math.abs(mix.noise - c.noise) > 0.001 ||
+        Math.abs(mix.chop - c.chop) > 0.004
+      ) {
+        g.synth.setMix(mix, this.ctx.currentTime);
+        g.mix = mix;
+      }
+    }
+    this.applyParams(g, { ...g.pending, gain: Math.sqrt(e) });
+    g.dirty = false;
   }
 
   stop(voice: VoiceId, fadeS: number): void {
+    const g = this.engines.get(voice.entity);
+    if (g && g.members.delete(voice.slot)) {
+      if (g.members.size === 0) {
+        this.engines.delete(voice.entity);
+        this.release(g, this.ctx.currentTime, fadeS);
+        this.dying.push(g);
+      } else {
+        g.dirty = true;
+      }
+      return;
+    }
     const key = voiceKey(voice);
     const v = this.voices.get(key);
     if (!v) return;
@@ -234,28 +471,43 @@ export class VoicePool {
 
   /** Disconnect finished voices. Call once per frame. */
   collect(): void {
+    for (const g of this.engines.values()) if (g.dirty) this.flushEngine(g);
     const t = this.ctx.currentTime;
     for (const [k, v] of this.voices) {
       if (v.endTime <= t) {
-        v.panner.disconnect();
+        (v.panner ?? v.lp).disconnect();
         this.voices.delete(k);
       }
     }
+    this.dying = this.dying.filter((v) => {
+      if (v.endTime > t) return true;
+      (v.panner ?? v.lp).disconnect();
+      return false;
+    });
   }
 
   stopAll(): void {
     const t = this.ctx.currentTime;
     for (const v of this.voices.values()) this.release(v, t, 0.05);
+    for (const g of this.engines.values()) {
+      this.release(g, t, 0.05);
+      this.dying.push(g);
+    }
+    this.engines.clear();
   }
 
-  /** Play a cue outside the director (scanner squelch / static). Returns a stop function. */
-  playLocal(pack: string, cue: string, gain: number): () => void {
-    const id: VoiceId = { entity: 0xfffffffe, slot: Math.floor(Math.random() * 0x7fffffff) };
+  /**
+   * Play a cue outside the director (scanner squelch / static, city ambience), non-spatial at
+   * the listener. Returns a stop function.
+   */
+  playLocal(pack: string, cue: string, gain: number, bus: Bus = "Police"): () => void {
+    const id: VoiceId = { entity: LOCAL_ENTITY, slot: Math.floor(Math.random() * 0x7fffffff) };
     const def = this.cue(pack, cue);
     const params: VoiceParams = { gain, pitch: 1, freq_hz: 0, load: 0, phase: 0, lowpass_hz: 18000, doppler: 1, pos: [0, 0, 0] };
-    this.play(id, "Police", pack, cue, def?.looped ?? false, params, {});
+    this.play(id, bus, pack, cue, def?.looped ?? false, params, {});
     return () => this.stop(id, 0.15);
   }
+
 }
 
 /** Point the Web Audio listener at the camera (sim world space). */

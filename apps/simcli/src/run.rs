@@ -323,6 +323,15 @@ pub fn build_sim(
         }
         None => false,
     };
+    // Weather after the city (the wetness grid covers its road network).
+    if let Some(w) = &sc.weather {
+        sim.set_weather(w.config(sc.seed));
+        if let Some(ws) = sim.weather_mut() {
+            for p in &w.puddles {
+                ws.flood_rect(p.min, p.max, p.water_mm);
+            }
+        }
+    }
     // Hilly cities: every entity sits on the ground under its (x, y) (z = a hint for which
     // level at grade separations), pitched to the slope. Flat cities keep `pos` exactly.
     if sim.has_terrain() {
@@ -582,6 +591,12 @@ pub struct WorldSummary {
     pub traffic_spawned: u64,
     /// Agents recycled because they were stuck.
     pub traffic_stuck_recycled: u64,
+    /// Civilians that got around a stationary vehicle: oncoming-lane passes plus lane changes
+    /// made for it (`wp_world` blocked-vehicle logic, playtest row 32).
+    pub traffic_go_arounds: u64,
+    /// Civilians that turned around (U-turn / k-point turn, finished) or reversed back to the
+    /// last junction because their lane was blocked.
+    pub traffic_turnarounds: u64,
     /// City props turned into physics bodies (parked cars, cones).
     pub props: u32,
     /// Static boxes from `barriers`.
@@ -603,6 +618,8 @@ impl WorldSummary {
             "civilian_collisions" => self.civilian_collisions as f32,
             "traffic_spawned" => self.traffic_spawned as f32,
             "traffic_stuck_recycled" => self.traffic_stuck_recycled as f32,
+            "traffic_go_arounds" => self.traffic_go_arounds as f32,
+            "traffic_turnarounds" => self.traffic_turnarounds as f32,
             "props" => self.props as f32,
             "static_boxes" => self.static_boxes as f32,
             "police_units_max" => self.police_units_max as f32,
@@ -612,7 +629,7 @@ impl WorldSummary {
     }
 
     /// Every metric name [`WorldSummary::metric`] accepts.
-    pub const METRICS: [&'static str; 11] = [
+    pub const METRICS: [&'static str; 13] = [
         "traffic_agents_final",
         "traffic_agents_min",
         "traffic_moving_frac_final",
@@ -620,6 +637,8 @@ impl WorldSummary {
         "civilian_collisions",
         "traffic_spawned",
         "traffic_stuck_recycled",
+        "traffic_go_arounds",
+        "traffic_turnarounds",
         "props",
         "static_boxes",
         "police_units_max",
@@ -675,6 +694,8 @@ impl WorldTracker {
             civilian_collisions: stats.civilian_collisions,
             traffic_spawned: stats.spawned,
             traffic_stuck_recycled: stats.stuck_recycled,
+            traffic_go_arounds: stats.oncoming_passes + stats.go_around_lane_changes,
+            traffic_turnarounds: stats.turnarounds_completed + stats.reverses,
             props: sim.prop_count() as u32,
             static_boxes: sim.static_box_count() as u32,
             police_units_max: self.police_max,
@@ -1026,6 +1047,23 @@ pub fn run_with_hook(
             probes.insert((idx, tick_of(*t_s)), f32::NAN);
         }
     }
+    // Probe ticks for `travel_between`: path length at each end.
+    let mut travel: BTreeMap<(usize, u64), f32> = BTreeMap::new();
+    for x in sc.expect.iter().chain(&sc.expect_pending) {
+        if let Expect::TravelBetween {
+            entity,
+            from_s,
+            to_s,
+            ..
+        } = x
+        {
+            let idx = sc
+                .entity_index(entity.as_ref())
+                .map_err(|e| RunError::Scenario(sc.name.clone(), e))?;
+            travel.insert((idx, tick_of(*from_s)), f32::NAN);
+            travel.insert((idx, tick_of(*to_s)), f32::NAN);
+        }
+    }
 
     let ticks = sc.ticks();
     let sample_every = sc.sample_every();
@@ -1157,6 +1195,9 @@ pub fn run_with_hook(
             }
             if let Some(slot) = probes.get_mut(&(idx, now)) {
                 *slot = s.speed_mps;
+            }
+            if let Some(slot) = travel.get_mut(&(idx, now)) {
+                *slot = tr.summary.path_length_m;
             }
             if sc.panels {
                 let panels = sim.vehicles()[idx].damage.panel_states();
@@ -1297,6 +1338,7 @@ pub fn run_with_hook(
         sc,
         summary: &summary,
         probes: &probes,
+        travel: &travel,
         police_first: &police_first,
         event_counts: &event_counts,
         ids: &ids,
@@ -1331,6 +1373,7 @@ struct EvalCtx<'a> {
     sc: &'a Scenario,
     summary: &'a RunSummary,
     probes: &'a BTreeMap<(usize, u64), f32>,
+    travel: &'a BTreeMap<(usize, u64), f32>,
     police_first: &'a BTreeMap<u16, u64>,
     event_counts: &'a [(&'static str, Vec<EntityId>)],
     ids: &'a [EntityId],
@@ -1370,6 +1413,25 @@ impl EvalCtx<'_> {
                 match self.probes.get(&(idx, tick_of(*t_s))) {
                     Some(v) if !v.is_nan() => range(*v, *min, *max),
                     _ => (format!("t_s {t_s} is outside the run"), false),
+                }
+            }
+            Expect::TravelBetween {
+                entity,
+                from_s,
+                to_s,
+                min,
+                max,
+            } => {
+                let (idx, _) = self.ent(entity.as_ref());
+                let at = |t: f32| {
+                    self.travel
+                        .get(&(idx, tick_of(t)))
+                        .copied()
+                        .filter(|v| !v.is_nan())
+                };
+                match (at(*from_s), at(*to_s)) {
+                    (Some(a), Some(b)) => range(b - a, *min, *max),
+                    _ => (format!("{from_s}..{to_s} s is outside the run"), false),
                 }
             }
             Expect::MaxLateralG { entity, min, max } => {

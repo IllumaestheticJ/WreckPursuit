@@ -145,6 +145,22 @@ export const sim = {
   /** Id of the session's city ("" on the flat world): data/city/<id>.greybox.glb. */
   cityId: (): string => wasm.city_id(),
   scenarioFromRon: (text: string): string => wasm.scenario_from_ron(text),
+  /** Weather selector choices `[id, label]` (wp_wasm::weather::CHOICES). */
+  weatherChoices: (): [string, string][] => JSON.parse(wasm.weather_choices()),
+  /** Scenario JSON with a selector choice's weather ("none", "clear", …, "dynamic"). */
+  scenarioWithWeather: (json: string, choice: string): string => wasm.scenario_with_weather(json, choice),
+  /** The selector choice matching a scenario's weather ("none", a choice id or "custom"). */
+  scenarioWeatherChoice: (json: string): string => wasm.scenario_weather_choice(json),
+  /** "Rainy night" city chase JSON (downpour, soaked road). */
+  cityChaseRainJson: (car: string, mode: string, cityId: string): string => wasm.city_chase_rain_json(car, mode, cityId),
+  /** Per-frame weather state (render/weather.ts WX offsets). */
+  weatherInfo: (): Float32Array => wasm.weather_info(),
+  /** Wetness grid placement [origin_x, origin_y, cell_m, nx, ny] (empty without weather). */
+  weatherGridMeta: (): Float32Array => wasm.weather_grid_meta(),
+  /** Wetness grid, 2 bytes per cell: wetness × 255, standing water mm × 40. ~1 Hz. */
+  weatherGrid: (): Uint8Array => wasm.weather_grid(),
+  /** Spray 0..1 per sim vehicle, same order as states(). */
+  weatherSpray: (): Float32Array => wasm.weather_spray(),
   scenarioWithSpeed: (json: string, mps: number): string => wasm.scenario_with_speed(json, mps),
   step: (dt: number): number => wasm.step(dt),
   setDamageMode: (mode: string): void => wasm.set_damage_mode(mode),
@@ -172,6 +188,10 @@ export const sim = {
   /** Police units that are not sim vehicles: [x, y, z, yaw, speed, flags] each. */
   policeUnits: (): Float32Array => wasm.police_units(),
   policeStatus: (entity: number): PoliceStatus | null => JSON.parse(wasm.police_status(entity)),
+  /** Static city map for the UI kit's minimap / full map (`wp_wasm::map`); `null` on the flat world. Once per city. */
+  mapStaticJson: (): string => wasm.map_static_json(),
+  /** Per-frame map data for `player` (units, tools, search zone; layout in ui-kit `src/map/data.ts`). */
+  mapDynamic: (player: number): Float32Array => wasm.map_dynamic(player),
   stateHash: (): string => wasm.state_hash(),
   latticeNodes: (entity: number): Float32Array => wasm.lattice_nodes(entity),
   latticeRest: (entity: number): Float32Array => wasm.lattice_rest(entity),
@@ -216,7 +236,33 @@ export const sim = {
   debugSetHeat: (entity: number, heat: number): void => wasm.debug_set_heat(entity, heat),
   /** Debug / e2e: park `entity` stopped `aheadM` in front of the first police car (throws if none yet). */
   debugParkNearPolice: (entity: number, aheadM: number): number => wasm.debug_park_near_police(entity, aheadM),
+
+  // ----- career (machine G; crates/wp_wasm/src/career.rs). Every call throws on refusal. ---
+  careerNew: (mode: string): CareerView => JSON.parse(wasm.career_new(mode)),
+  careerLoad: (text: string): CareerView => JSON.parse(wasm.career_load_json(text)),
+  careerSave: (): string => wasm.career_save_json(),
+  careerExists: (): boolean => wasm.career_exists(),
+  careerView: (): CareerView => JSON.parse(wasm.career_view_json()),
+  careerMods: (uid: number): ModTreeView => JSON.parse(wasm.career_mods_json(uid)),
+  careerRunActive: (): boolean => wasm.career_run_active(),
+  /** Start a career run of a scenario (the first entity becomes the career car). */
+  careerStartRun: (scenarioJson: string): number[] => Array.from(wasm.career_start_run(scenarioJson)),
+  /** End the career run (back to the garage; one night passes). */
+  careerEndRun: (): RunClose | null => JSON.parse(wasm.career_end_run()),
+  careerBuy: (defId: string, condition: string): CareerView => JSON.parse(wasm.career_buy_car(defId, condition)),
+  careerFloorCar: (): CareerView => JSON.parse(wasm.career_floor_car()),
+  careerSell: (uid: number): CareerView => JSON.parse(wasm.career_sell_car(uid)),
+  careerSetActive: (uid: number): CareerView => JSON.parse(wasm.career_set_active(uid)),
+  careerInstall: (uid: number, modId: string): CareerView => JSON.parse(wasm.career_install_mod(uid, modId)),
+  careerUninstall: (uid: number, modId: string): CareerView => JSON.parse(wasm.career_uninstall_mod(uid, modId)),
+  careerQuote: (uid: number, req: ShopRequest): RepairQuote => JSON.parse(wasm.career_quote_json(uid, JSON.stringify(req))),
+  careerRepair: (uid: number, req: ShopRequest): CareerView => JSON.parse(wasm.career_repair(uid, JSON.stringify(req))),
+  careerRelease: (uid: number): CareerView => JSON.parse(wasm.career_release(uid)),
+  careerInsure: (uid: number, tier: string): CareerView => JSON.parse(wasm.career_insure(uid, tier)),
+  careerNextNight: (): CareerView => JSON.parse(wasm.career_next_night()),
 };
+
+import type { CareerView, ModTreeView, RepairQuote, RunClose, ShopRequest } from "../../../ui-kit/src/garage/types";
 
 export type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
 import type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
