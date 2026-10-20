@@ -1,15 +1,14 @@
 // Drift lab (owner rows 90 / 91 / 98): flat asphalt pad, day, no traffic or police, with a
 // painted course (two 90° corners and a long sweeper) and a live tuning panel for the slide
 // assists. The panel writes a runtime override (wp_wasm set_drift_tuning / set_countersteer);
-// it never changes the data files. Its values are kept in localStorage "wp.driftTuning.v3".
+// it never changes the data files. Its values are kept in localStorage "wp.driftTuning.v4".
 import * as THREE from "three";
 import { sim } from "./wasm/sim";
 import { S, STATE_STRIDE } from "./wasm/layout";
 import { store } from "./settings";
 
-// v3: hold mode toggle added and the defaults are off (owner rows 104 / 106); v2 / v1 values
-// are not reused.
-const TUNING_KEY = "wp.driftTuning.v3";
+// v4: handbrake pivot aid sliders (row 109); v3 and older values are not reused.
+const TUNING_KEY = "wp.driftTuning.v4";
 
 /** One tuning slider: index into the set_drift_tuning array (or -1 = countersteer %). */
 interface Knob {
@@ -34,6 +33,8 @@ const KNOBS: Knob[] = [
   { idx: 5, label: "hold gain", min: 0, max: 3, step: 0.05, show: (v) => v.toFixed(2), hint: "hold mode: countersteer per rad of slide change (resists the angle growing / shrinking)" },
   { idx: 6, label: "throttle smoothing", min: 0, max: 1, step: 0.05, show: (v) => `${(v * 100).toFixed(0)}%`, hint: "keyboard throttle smoothing with TCS off (row 98): slower pedal rise in low gears in powerful cars + a small traction trim; default 0 = raw throttle (owner row 104), a lab-only option" },
   { idx: 8, label: "hold mode (row 91)", min: 0, max: 1, step: 1, show: (v) => (v > 0.5 ? "on" : "off"), hint: "key into the turn + throttle holds the drift angle; off by default (owner rows 106 / 111)" },
+  { idx: 9, label: "hb pivot", min: 0, max: 15, step: 0.5, show: (v) => `${v.toFixed(1)} rad/s²`, hint: "handbrake pivot aid (row 109, owner-approved yaw torque): yaw acceleration with handbrake + key held, building up over 0.4 s, full ≤ 55 km/h, gone by 75 km/h; 0 = off" },
+  { idx: 10, label: "hb pivot cap", min: 0.5, max: 6, step: 0.1, show: (v) => `${v.toFixed(1)} rad/s`, hint: "yaw rate toward the key at which the pivot aid has faded out" },
   { idx: 7, label: "envelope @100%", min: 10, max: 90, step: 1, show: (v) => `${v.toFixed(0)}°`, hint: "slide angle the assist helps within at 100 % (× 0.6 + 0.4 × help); past it the hold lets go" },
 ];
 
@@ -194,7 +195,7 @@ export class DriftLab {
   /** Send the sliders to the sim and remember them. */
   private apply(): void {
     const values = KNOBS.map((_, i) => Number(this.inputs[i].value));
-    const tuning = new Float32Array(9);
+    const tuning = new Float32Array(11);
     KNOBS.forEach((k, i) => {
       if (k.idx >= 0) tuning[k.idx] = values[i];
     });

@@ -1247,3 +1247,100 @@ TCS off (row 104); contract request #13 is declined. So:
   preset (no preset default any more); a lab-only slider. The row 98 table above compares 0
   (now the default) with 60 % (lab).
 - Drift lab storage key `wp.driftTuning.v3` (older saved values are not reused).
+
+## Owner row 109 (A, 2026-10-20) — handbrake hairpin pivot, catch, stabs
+
+Reference: clip 2 (key + handbrake 1.0 s off the throttle at 1st-gear speed → 150–180° pivot,
+then throttle + opposite lock catches it) and clip 5 (0.1–0.3 s handbrake stabs with the
+throttle and key held add rotation, the drive is back at once). Owner keyboard: TCS / ESC off,
+75 % steering speed sensitivity. Same in Arcade and Simulation. **No physics change was
+kept**: two of the three targets already hold, the third needs a design decision.
+
+**1. Pivot: 52–65° by the release at 25 km/h (target 150–180°), not reachable with tyre
+physics.** Measured on shiro / rampart / sperber / hakone / kestrel / debug_sedan (25 km/h,
+1.0 s, key + handbrake, throttle off): 65 / 58 / 64 / 62 / 56 / 52°; 40 km/h: 56–76°. What
+limits it, measured on shiro_turbo:
+- Speed drains: 7.2 → 2.5 m/s in the 1 s (locked rears brake at ~0.76 μ, the fronts scrub),
+  and yaw rate falls with speed. Peak yaw rate 1.8 rad/s.
+- Not the steering: an instant full lock (wheel preset) rotates *less* (52–56°), the fronts
+  scrub more.
+- Not the rear grip alone: the locked rears' friction × 0.6 → 69–77°, × 0.3 → 73–84°.
+- Energy: at the reference's 5–10 mph a ~1050 kg car carries 2.6–10.6 kJ; a 180° turn in 1 s
+  at a yaw inertia of ~1700 kg·m² needs about 8–13 kJ of rotation (more than the car has, before
+  any tyre losses). With the throttle off, tyres cannot supply that: the reference adds rotation
+  somewhere.
+
+**Decision needed (lead / owner):** reaching 150–180° needs a handbrake yaw aid: a yaw torque
+while the handbrake is pulled with a steer key held, scaled down with speed (or a far lighter
+yaw inertia). That breaks the row-57 rule "no assist adds yaw torque", so I have not built it.
+If wanted, it would sit in `wp_vehicle` as a car-physics term (both modes, every preset or
+keyboard only, your call) with a test at 25 km/h.
+
+**2. Catch: works today.** Throttle + opposite lock after the 1 s pivot stops the rotation
+0.22–0.28 s after the release at 25 km/h (body slip after the release ≤ 27°) and 0.56–1.0 s at
+40 km/h (≤ 73°); no spin, no donut. The parity suite's "nothing catches it" at 30 mph is its
+driver, who holds the into-turn key and never countersteers. Test:
+`tests/handbrake.rs::a_hairpin_pivot_is_caught_with_throttle_and_opposite_lock`.
+
+**3. Stabs keep the drive: already true.** After a 0.25 s stab at 80 km/h with throttle + key
+held, the driven-wheel force is positive again 0.07–0.08 s after the release on RWD (at once on
+FWD): the freed rear axle lets the engine rev up and it goes straight back into the drive. The
+parity suite's 0.8–0.9 s "drive under half" on the torquey parity cars comes after they spin
+(again no countersteer): it is wheelspin in a spinning car, not a drive dropout. Tried and
+rejected: no declutch with the throttle held + engine held at road-speed revs in the stab
+(no rev flare, 1.5–3.5 mph less speed lost to the stabs, but the drive came back in
+0.18–0.20 s instead of 0.07 s, and the parity gap did not move). Test:
+`tests/handbrake.rs::a_handbrake_stab_on_the_throttle_gives_the_drive_straight_back`.
+
+### Row 109, step 2 — handbrake pivot aid (owner-approved exception to row 57)
+
+The owner approved a yaw aid for the handbrake hairpin (2026-10-20, "OK the hairpin fix for
+me"): **an explicit exception to the row-57 rule that no assist adds yaw torque, for this case
+only** (also recorded in `docs/PLAYTEST_LOG.md` row 109). Re-test at the corrected clip-2 entry
+speed first (the handbrake goes on at ~28 mph ≈ 45 km/h): without the aid 67–78° by the end of
+the 1.0 s pull at 45–55 km/h, the rest as an uncaught spin — about half the reference's rate.
+
+**`wp_vehicle::pivot`** (`pivot_yaw_accel`, applied as a chassis yaw torque `Iz × accel`):
+- only while the handbrake is pulled (> 0.1) **and** a steer key is held (> 0.1); turns the
+  way the key points, × key × handbrake;
+- builds up over the first 0.4 s of the pull (`BUILD_UP_S`), so short taps and stabs stay mild;
+- full up to 55 km/h, fading to nothing at 75 km/h. (The lead's first spec, 60 → 100 km/h, made
+  a 0.3 s tap at 80 km/h double its peak body slip, 38–57° → 80–100°, instead of a mild kick.);
+- fades out as the yaw rate toward the key nears the cap (3 rad/s): it never adds to a spin
+  that is already that fast;
+- off the moment the handbrake is released: the catch stays purely physical;
+- keyboard and gamepad only (`steer_speed_sensitivity > 0`); the wheel preset never gets it.
+- Tunable: `DriftTuning::hb_pivot_accel` (default 7 rad/s², 0 = off) and `hb_pivot_cap`
+  (3 rad/s); drift lab sliders "hb pivot" / "hb pivot cap" (storage key `wp.driftTuning.v4`).
+  Deterministic, the same in Arcade and Simulation. Handbrake-held time is in the snapshot
+  (format 9).
+
+**Clutch fix found on the way:** the automatic clutch counted driven wheels turning *against*
+the selected gear (a spun car rolling backwards in a forward gear) as "rolling", re-engaged and
+dragged the engine to 0.9 × idle. Now signed: wheels must turn the gear's way (reverse has a
+negative ratio). Wheel-preset pinned hashes re-recorded for this (a drivetrain change; the aid
+is off on the wheel preset).
+
+**Measured** (owner keys: TCS / ESC off, 75 % speed sensitivity, raw keys; clip-2 sequence:
+right + handbrake 1.0 s off the throttle, throttle + right 0.8 s, then left + throttle):
+
+| | without the aid | with the aid (7 rad/s², cap 3) |
+|---|---|---|
+| rotation 1.2 s after handbrake-on, 50 km/h (rampart / shiro / sperber / kestrel) | 90 / 102 / 104 / 87° | 139 / 143 / 144 / 139° (reference 150–180°) |
+| total rotation by the catch (50 km/h without; 50 / 55 km/h with) | 168–195° | 155–221° (kestrel at 55 km/h 258°) |
+| caught (yaw < 0.5 rad/s for 0.25 s) after the opposite lock | 0.31–0.55 s | 0–0.95 s, no spin |
+| 0.3 s tap + key at 80 km/h, keys released: peak body slip | 38–57° | unchanged (aid faded out) |
+| throttle-held stabs 0.25 + 0.1 s at 50 mph (parity `hb_stab_extra_deg`) | 10–26° | 11–28° (aid faded out above 75 km/h) |
+| 0.3 s tap + key at 30 mph, keys released, rotation 1.5 s later (parity) | 27–49° | **90–103°** |
+
+**Open for the owner's feel:** a short handbrake tap at ~50 km/h with the keys released now
+turns the car a lot more (last row): any extra yaw tips this no-countersteer run into a spin.
+A longer build-up (0.6 s) barely changed it. The "hb pivot" slider in the drift lab is the knob.
+The immediate-opposite-lock catch at 25 km/h now takes 0.43–0.60 s (was 0.22–0.28 s; the car
+carries more rotation). The parity scenario `parity_shiro_handbrake_10mph` peak yaw rate rose
+from ~0.9 to 1.58 rad/s (its pending target is 2.6).
+
+Tests: `pivot.rs` unit tests (key + handbrake only, wheel preset off, build-up, speed fade,
+yaw cap), `tests/handbrake.rs::the_clip_2_hairpin_pivots_with_the_aid_and_is_caught` (≥ 130° by
+1.2 s, caught < 1.2 s, no spin-on), the 25 km/h catch test (< 0.8 s). Goldens re-blessed
+(hash-only: two parity scenarios, a frontal crash golden + its replay, a panels frontal, a cruiser ram); all 103 scenarios pass.

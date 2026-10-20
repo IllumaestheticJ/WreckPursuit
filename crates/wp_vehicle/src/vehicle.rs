@@ -24,6 +24,7 @@ use crate::ffb::{self, FfbWheel};
 use crate::ground::{WheelCaster, WheelProbe};
 use crate::launch::LaunchGuard;
 use crate::math::{arr, sin_cos, v3, yaw_quat, Quat, V3};
+use crate::pivot::pivot_yaw_accel;
 use crate::slide::{slide_class_with_rear_lock, slide_throttle};
 use crate::steering::{
     ackermann, assist_mode, body_slip, front_axle_angle, rear_axle_slip, steer_target,
@@ -289,6 +290,8 @@ pub struct Vehicle {
     pub(crate) drift_tuning: DriftTuning,
     /// Drift hold state (owner row 91, [`crate::drift`]); in snapshots.
     pub(crate) drift_hold: DriftHold,
+    /// How long the handbrake has been pulled, s (pivot aid build-up, row 109); in snapshots.
+    pub(crate) hb_held_s: f32,
     assist_mode: AssistMode,
     body_slip_deg: f32,
     envelope_deg: f32,
@@ -410,6 +413,7 @@ impl Vehicle {
             stalled: false,
             drift_tuning: DriftTuning::default(),
             drift_hold: DriftHold::default(),
+            hb_held_s: 0.0,
             assist_mode: AssistMode::Off,
             body_slip_deg: 0.0,
             envelope_deg: 0.0,
@@ -587,6 +591,7 @@ impl Vehicle {
         self.launch.forget();
         self.hb_grace = 0.0;
         self.drift_hold = DriftHold::default();
+        self.hb_held_s = 0.0;
         self.stalled = false;
     }
 
@@ -1052,14 +1057,17 @@ impl Vehicle {
             // Just after a handbrake declutch the driven wheels may still be stopped (locked
             // rears): re-engage only once they have spun back up, so the engine is not dragged
             // below idle.
-            (ratio_now * axle_omega).abs() * RPM_PER_RADPS
+            (ratio_now * axle_omega).max(0.0) * RPM_PER_RADPS
         } else {
             // The slower of ground speed and the driven wheels: wheelspin does not count, and
             // driven wheels slowed under the car (scrubbed in a big slide, braked) open the
             // clutch before they drag the engine below idle.
-            let ground = (ratio_now * v_fwd / self.corners[driven_corner].radius).abs();
-            ground.min((ratio_now * axle_omega).abs()) * RPM_PER_RADPS
+            let ground = ratio_now * v_fwd / self.corners[driven_corner].radius;
+            ground.min(ratio_now * axle_omega).max(0.0) * RPM_PER_RADPS
         };
+        // (Signed: wheels turning against the selected gear, e.g. a car rolling backwards in a
+        // forward gear after a spin, are not "rolling" — the clutch must not drag the engine
+        // backwards. Reverse has a negative ratio, so reversing counts as rolling.)
         self.clutch = if self.converter.is_some() {
             // Torque-converter automatic: the converter replaces the launch clutch; the clutch
             // value is the lock-up clutch's availability. Shifts happen under power (the
@@ -1457,6 +1465,24 @@ impl Vehicle {
         }
         if launch_cut > 0.0 && dt > 0.0 {
             force -= V3::Z * (self.def.mass_kg * launch_cut / dt);
+        }
+        // Handbrake pivot aid (row 109, owner-approved yaw-torque exception, `crate::pivot`).
+        self.hb_held_s = if handbrake > HANDBRAKE_ON {
+            self.hb_held_s + dt
+        } else {
+            0.0
+        };
+        let pivot = pivot_yaw_accel(
+            &self.drift_tuning,
+            assists,
+            handbrake,
+            self.hb_held_s,
+            input.steer,
+            v_fwd,
+            yaw_rate,
+        );
+        if pivot != 0.0 {
+            torque += up * (self.def.inertia_kgm2[2] * pivot);
         }
         self.force = force;
         self.torque = torque;

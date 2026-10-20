@@ -91,8 +91,8 @@ fn snapshot_guards() {
         Err(SnapshotError::Malformed)
     );
     assert_eq!(
-        s2.restore(&VehicleSnapshot::from_bytes(vec![9])),
-        Err(SnapshotError::Format(9))
+        s2.restore(&VehicleSnapshot::from_bytes(vec![99])),
+        Err(SnapshotError::Format(99))
     );
 }
 

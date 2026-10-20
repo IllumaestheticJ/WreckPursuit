@@ -1,6 +1,6 @@
 // Drift lab (owner rows 90 / 91 / 98): ?drift=1 opens a flat-world free drive at noon with the
 // painted course and the tuning panel; a slider writes the runtime tuning through wp_wasm and
-// is remembered in wp.driftTuning.v3; the readout shows slide angle and assist mode; F8 hides the
+// is remembered in wp.driftTuning.v4; the readout shows slide angle and assist mode; F8 hides the
 // panel. Saves a screenshot to <tmpdir>/drift_lab.png. `node e2e/drift_lab.mjs`
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -39,14 +39,14 @@ check(await page.locator("#drift-panel").isVisible(), "tuning panel open");
 const info = await page.evaluate(() => ({ city: window.__wp.sim.cityId(), n: window.__wp.sim.entities().length }));
 check(info.city === "" && info.n === 1, `flat world, player only (${JSON.stringify(info)})`);
 const t0 = await tuning();
-check(t0.length === 9 && Math.abs(t0[0] - 0.03) < 1e-6 && t0[6] === 0 && t0[8] === 0, `defaults from the sim, smoothing and hold off (${t0.map((v) => v.toFixed(3))})`);
+check(t0.length === 11 && Math.abs(t0[9] - 7) < 1e-6 && Math.abs(t0[0] - 0.03) < 1e-6 && t0[6] === 0 && t0[8] === 0, `defaults from the sim, smoothing and hold off (${t0.map((v) => v.toFixed(3))})`);
 // Third slider = slew boost (index 2 of the tuning array).
 const slew = page.locator("#drift-panel input[type=range]").nth(3);
 await slew.fill("6");
 await slew.dispatchEvent("input");
 check(Math.abs((await tuning())[2] - 6) < 1e-6, "slew boost slider → sim tuning");
-const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("wp.driftTuning.v3") ?? "[]"));
-check(saved.length === 10 && saved[3] === 6, `saved in wp.driftTuning.v3 (${JSON.stringify(saved)})`);
+const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("wp.driftTuning.v4") ?? "[]"));
+check(saved.length === 12 && saved[3] === 6, `saved in wp.driftTuning.v4 (${JSON.stringify(saved)})`);
 const cst = page.locator("#drift-panel input[type=range]").nth(0);
 await cst.fill("80");
 await cst.dispatchEvent("input");
