@@ -1167,13 +1167,20 @@ impl DamageModel {
     /// Raw (un-offset) intrusion, toe and camber of component `ci` from the current nodes.
     pub(crate) fn component_raw(&self, ci: usize) -> (f32, f32, f32) {
         let c = &self.components[ci];
+        // Nodes carried by a free panel (workstream R) follow the panel, not the structure.
+        let nodes: Vec<u32> = c
+            .nodes
+            .iter()
+            .copied()
+            .filter(|&i| !self.node_on_free_panel(i as usize))
+            .collect();
         let mut intrusion = 0.0;
-        for &i in &c.nodes {
+        for &i in &nodes {
             intrusion += self.node_intrusion(i as usize);
         }
-        intrusion /= c.nodes.len().max(1) as f32;
+        intrusion /= nodes.len().max(1) as f32;
         let (toe, camber) = if is_suspension(c.kind) {
-            self.alignment_change(&c.nodes)
+            self.alignment_change(&nodes)
         } else {
             (0.0, 0.0)
         };
@@ -1193,7 +1200,9 @@ impl DamageModel {
             let kind = self.components[ci].kind;
             let nodes = self.components[ci].nodes.clone();
             let (raw, raw_toe, raw_camber) = self.component_raw(ci);
-            let any_detached = nodes.iter().any(|&i| self.detached[i as usize]);
+            let any_detached = nodes
+                .iter()
+                .any(|&i| self.detached[i as usize] && !self.node_on_free_panel(i as usize));
             // A wheel whose hub node lost every beam is gone, whatever its intrusion.
             let mount_broken = is_wheel(kind)
                 && self.node_beams[nodes[0] as usize]
@@ -1383,7 +1392,10 @@ impl DamageModel {
     }
 
     pub(crate) fn update_health(&mut self, mode: &ModeTable, out: &mut Vec<SimEvent>) {
-        let raw = self.raw_health(mode.global_health_from_intrusion);
+        let raw = self.raw_health(
+            mode.global_health_from_intrusion,
+            mode.mode == DamageMode::Arcade,
+        );
         if raw < self.health {
             self.health = raw.max(0.0);
         }
@@ -1403,6 +1415,17 @@ impl DamageModel {
         let mut e = HandlingEffects::NEUTRAL;
         let mut power = 1.0f32;
         let settle = self.settle_fraction(mode);
+        let arcade = mode.mode == DamageMode::Arcade;
+        let align = if arcade {
+            self.tuning.arcade_alignment_scale
+        } else {
+            1.0
+        };
+        let failed_steer = if arcade {
+            self.tuning.arcade_failed_steer_ratio
+        } else {
+            0.3
+        };
         for c in &self.components {
             // Arcade limp-mode settle: part of the lost health / alignment of components that
             // still work comes back over time after a hard hit (effects only; the repair bill
@@ -1429,7 +1452,11 @@ impl DamageModel {
                 }
                 Component::SteeringRack => {
                     let dmg = 1.0 - h;
-                    e.steer_ratio_scale = if c.failed { 0.3 } else { 0.5 + 0.5 * h };
+                    e.steer_ratio_scale = if c.failed {
+                        failed_steer
+                    } else {
+                        0.5 + 0.5 * h
+                    };
                     e.steer_pull = (self.steer_pull_bias * 0.15 * dmg).clamp(-1.0, 1.0);
                 }
                 Component::SuspensionFL
@@ -1437,8 +1464,8 @@ impl DamageModel {
                 | Component::SuspensionRL
                 | Component::SuspensionRR => {
                     let w = corner_of(c.kind).unwrap_or(0);
-                    e.toe_delta[w] = c.toe * (1.0 - settle);
-                    e.camber_delta[w] = c.camber * (1.0 - settle);
+                    e.toe_delta[w] = c.toe * align * (1.0 - settle);
+                    e.camber_delta[w] = c.camber * align * (1.0 - settle);
                     e.grip_scale[w] *= if c.failed { 0.6 } else { 1.0 - 0.3 * (1.0 - h) };
                 }
                 Component::WheelFL
