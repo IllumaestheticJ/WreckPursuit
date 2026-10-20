@@ -61,14 +61,168 @@ pub struct VehicleInput {
     pub tool_use: u8,
 }
 
+/// Defines an Off / Half / Full assist level enum (TCS, ABS). Serialised as the strings `"Off"`,
+/// `"Half"`, `"Full"` (also in RON: write `tcs: "Half"`, a bare `Half` is not accepted);
+/// deserialisation also accepts the legacy bool (`true` → `Full`, `false` → `Off`) so
+/// saves, replays, scenarios and data written before the levels existed still load.
+macro_rules! assist_level {
+    ($(#[$doc:meta])* $name:ident) => {
+        $(#[$doc])*
+        #[derive(
+            Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, JsonSchema,
+        )]
+        pub enum $name {
+            /// No intervention.
+            #[default]
+            Off,
+            /// Partial intervention (the reference game's "Half").
+            Half,
+            /// Full intervention.
+            Full,
+        }
+
+        impl $name {
+            /// All levels, in menu order.
+            pub const ALL: [$name; 3] = [$name::Off, $name::Half, $name::Full];
+
+            /// True unless `Off`.
+            pub fn is_on(self) -> bool {
+                self != $name::Off
+            }
+
+            /// Display / wire name: `"Off"`, `"Half"`, `"Full"`.
+            pub fn name(self) -> &'static str {
+                match self {
+                    $name::Off => "Off",
+                    $name::Half => "Half",
+                    $name::Full => "Full",
+                }
+            }
+
+            /// Parse a name (case-insensitive, `"Off"` / `"Half"` / `"Full"`; also `"true"` →
+            /// `Full` and `"false"` → `Off`).
+            pub fn from_name(name: &str) -> Option<Self> {
+                let n = name.trim();
+                if n.eq_ignore_ascii_case("true") {
+                    return Some($name::Full);
+                }
+                if n.eq_ignore_ascii_case("false") {
+                    return Some($name::Off);
+                }
+                Self::ALL.into_iter().find(|l| l.name().eq_ignore_ascii_case(n))
+            }
+
+            /// Legacy bool mapping: `true` → `Full`, `false` → `Off`.
+            pub fn from_bool(on: bool) -> Self {
+                if on {
+                    $name::Full
+                } else {
+                    $name::Off
+                }
+            }
+        }
+
+        impl std::fmt::Display for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str(self.name())
+            }
+        }
+
+        impl From<bool> for $name {
+            fn from(on: bool) -> Self {
+                Self::from_bool(on)
+            }
+        }
+
+        // A plain string in every format (RON included: `tcs: "Half"`), so a level round-trips
+        // through `deserialize_any`, which is what lets the legacy bool load too.
+        impl Serialize for $name {
+            fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+                s.serialize_str(self.name())
+            }
+        }
+
+        impl<'de> Deserialize<'de> for $name {
+            fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+                d.deserialize_any(LevelVisitor).map($name::from_index)
+            }
+        }
+
+        impl $name {
+            fn from_index(i: u8) -> Self {
+                Self::ALL[i as usize]
+            }
+        }
+    };
+}
+
+/// Accepts a level as a bool (legacy), a string / identifier, or a unit enum variant, and
+/// returns its index (0 Off, 1 Half, 2 Full).
+struct LevelVisitor;
+
+const LEVEL_NAMES: [&str; 3] = ["Off", "Half", "Full"];
+
+fn level_index<E: serde::de::Error>(v: &str) -> Result<u8, E> {
+    let n = v.trim();
+    if n.eq_ignore_ascii_case("true") {
+        return Ok(2);
+    }
+    if n.eq_ignore_ascii_case("false") {
+        return Ok(0);
+    }
+    LEVEL_NAMES
+        .iter()
+        .position(|l| l.eq_ignore_ascii_case(n))
+        .map(|i| i as u8)
+        .ok_or_else(|| E::unknown_variant(v, &LEVEL_NAMES))
+}
+
+impl<'de> serde::de::Visitor<'de> for LevelVisitor {
+    type Value = u8;
+
+    fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str("\"Off\", \"Half\", \"Full\" or a bool")
+    }
+
+    fn visit_bool<E: serde::de::Error>(self, v: bool) -> Result<u8, E> {
+        Ok(if v { 2 } else { 0 })
+    }
+
+    fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<u8, E> {
+        level_index(v)
+    }
+
+    fn visit_enum<A: serde::de::EnumAccess<'de>>(self, data: A) -> Result<u8, A::Error> {
+        use serde::de::VariantAccess;
+        let (name, variant): (String, _) = data.variant()?;
+        variant.unit_variant()?;
+        level_index(&name)
+    }
+}
+
+assist_level!(
+    /// Traction control level (owner rows 104/105, reference Off / Half / Full).
+    /// `Off` = the throttle the driver presses: no cut, no brake-TC, no pedal filter.
+    /// `Half` lets the driven wheels spin a few times further past the tyre's peak than `Full`
+    /// (visible wheelspin and smoke on a floored launch); `Full` keeps them near the peak.
+    TcsLevel
+);
+
+assist_level!(
+    /// Anti-lock brake level (reference Off / Half / Full). `Half` lets a wheel slip further
+    /// and lock briefly before releasing, `Full` keeps it near the tyre's peak.
+    AbsLevel
+);
+
 /// Driver assists. Independent of [`DamageMode`]. Nothing in the physics may depend on these
 /// being on; each is individually toggleable.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct AssistProfile {
-    /// Anti-lock brakes.
-    pub abs: bool,
-    /// Traction control (throttle cut on driven-wheel slip).
-    pub tcs: bool,
+    /// Anti-lock brakes level (legacy bool accepted: true = Full, false = Off).
+    pub abs: AbsLevel,
+    /// Traction control level (throttle cut + brake TC on driven-wheel slip; legacy bool
+    /// accepted: true = Full, false = Off).
+    pub tcs: TcsLevel,
     /// Electronic stability control (per-wheel brake yaw correction).
     pub esc: bool,
     /// Speed-sensitive steering lock/rate reduction strength, 0 (off) ..= 1 (full).
@@ -89,8 +243,8 @@ impl AssistProfile {
     /// Default assists for keyboard drivers: everything on, strong filtering.
     pub fn keyboard_default() -> Self {
         Self {
-            abs: true,
-            tcs: true,
+            abs: AbsLevel::Full,
+            tcs: TcsLevel::Full,
             esc: true,
             steer_speed_sensitivity: 1.0,
             countersteer_help: 0.6,
@@ -104,8 +258,8 @@ impl AssistProfile {
     /// Default assists for gamepad drivers: ABS/TCS on, mild filtering, light countersteer help.
     pub fn gamepad_default() -> Self {
         Self {
-            abs: true,
-            tcs: true,
+            abs: AbsLevel::Full,
+            tcs: TcsLevel::Full,
             esc: false,
             steer_speed_sensitivity: 0.7,
             countersteer_help: 0.3,
@@ -119,8 +273,8 @@ impl AssistProfile {
     /// Default assists for wheel drivers: ABS only, 1:1 steering, no filtering.
     pub fn wheel_default() -> Self {
         Self {
-            abs: true,
-            tcs: false,
+            abs: AbsLevel::Full,
+            tcs: TcsLevel::Off,
             esc: false,
             steer_speed_sensitivity: 0.0,
             countersteer_help: 0.0,
@@ -135,8 +289,8 @@ impl AssistProfile {
     /// (AI controllers produce smooth input themselves).
     pub fn ai() -> Self {
         Self {
-            abs: true,
-            tcs: true,
+            abs: AbsLevel::Full,
+            tcs: TcsLevel::Full,
             esc: true,
             steer_speed_sensitivity: 0.0,
             countersteer_help: 0.0,
@@ -388,5 +542,51 @@ impl WantedLevel {
     /// Index 0..=4 into per-level tables (`None` maps to L1's entry).
     pub fn table_index(self) -> usize {
         (self.number().max(1) - 1) as usize
+    }
+}
+
+#[cfg(test)]
+mod assist_level_tests {
+    use super::*;
+
+    #[test]
+    fn legacy_bools_still_load() {
+        let mut v = serde_json::to_value(AssistProfile::keyboard_default()).unwrap();
+        assert_eq!(v["tcs"], "Full");
+        assert_eq!(v["abs"], "Full");
+        v["tcs"] = serde_json::Value::Bool(false);
+        v["abs"] = serde_json::Value::Bool(true);
+        let p: AssistProfile = serde_json::from_value(v.clone()).unwrap();
+        assert_eq!((p.tcs, p.abs), (TcsLevel::Off, AbsLevel::Full));
+        v["tcs"] = "Half".into();
+        v["abs"] = "half".into();
+        let p: AssistProfile = serde_json::from_value(v.clone()).unwrap();
+        assert_eq!((p.tcs, p.abs), (TcsLevel::Half, AbsLevel::Half));
+        v["tcs"] = "Medium".into();
+        assert!(serde_json::from_value::<AssistProfile>(v).is_err());
+    }
+
+    #[test]
+    fn ron_accepts_bools_and_strings() {
+        let base = "esc: false, steer_speed_sensitivity: 0.0, countersteer_help: 0.0, \
+                    throttle_filter: 0.0, brake_filter: 0.0, auto_gears: false, auto_clutch: true";
+        let legacy: AssistProfile =
+            ron::from_str(&format!("(abs: true, tcs: false, {base})")).unwrap();
+        assert_eq!((legacy.tcs, legacy.abs), (TcsLevel::Off, AbsLevel::Full));
+        let levels: AssistProfile =
+            ron::from_str(&format!("(abs: \"Half\", tcs: \"half\", {base})")).unwrap();
+        assert_eq!((levels.tcs, levels.abs), (TcsLevel::Half, AbsLevel::Half));
+        let round: AssistProfile = ron::from_str(&ron::to_string(&levels).unwrap()).unwrap();
+        assert_eq!(round, levels);
+    }
+
+    #[test]
+    fn level_names_round_trip() {
+        for l in TcsLevel::ALL {
+            assert_eq!(TcsLevel::from_name(l.name()), Some(l));
+        }
+        assert_eq!(AbsLevel::from_name("TRUE"), Some(AbsLevel::Full));
+        assert_eq!(TcsLevel::from(false), TcsLevel::Off);
+        assert!(!TcsLevel::Off.is_on() && TcsLevel::Half.is_on());
     }
 }

@@ -40,7 +40,7 @@ fn main() {
             for help in [0.3f32, 0.6, 1.0] {
                 let a = AssistProfile {
                     countersteer_help: help,
-                    tcs: false,
+                    tcs: wp_contracts::TcsLevel::Off,
                     esc: false,
                     ..base
                 };

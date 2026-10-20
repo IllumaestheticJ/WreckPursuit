@@ -386,15 +386,31 @@ pub fn launch_rpm(idle_rpm: f32, redline_rpm: f32, throttle: f32) -> f32 {
     idle_rpm + throttle.clamp(0.0, 1.0) * 0.45 * (redline_rpm - idle_rpm)
 }
 
-/// Automatic clutch / launch control. Returns the new engagement 0..=1:
-/// - rolling (gearbox input speed implied by *ground* speed above 1.2 × idle and 90% of the
-///   launch rpm): engage fully at 10/s;
-/// - driver on the throttle below that: centrifugal-style engagement
-///   `((rpm − idle) / (launch − idle))² · torque_ratio`, where `torque_ratio` = 1.2 × peak
-///   engine torque / clutch capacity, so clutch torque reaches engine torque near
-///   [`launch_rpm`] and the engine settles there (TCS trims clutch torque during this phase,
-///   see `Vehicle`);
-/// - off the throttle at crawl speed: open (no stall when stopping).
+/// Gearbox input speed, × idle, above which a moving car's automatic clutch stays (or
+/// becomes) fully engaged: the anti-stall line. Below it the clutch may slip / open so the
+/// engine does not drop under idle.
+pub const AUTO_CLUTCH_HOLD_IDLE_FRAC: f32 = 1.2;
+/// Lowest forward gear that never launch-slips while rolling (owner row 117): 3rd and up
+/// engage fully as soon as the ground turns the gearbox input above
+/// [`AUTO_CLUTCH_HOLD_IDLE_FRAC`] × idle.
+pub const AUTO_CLUTCH_TALL_GEAR: i8 = 3;
+
+/// Automatic clutch / launch control. Returns the new engagement 0..=1. `input_rpm` is the
+/// gearbox input speed implied by the ground (signed; wheelspin does not count), `gear` the
+/// selected gear.
+/// - **Engaged and moving** (engagement ≈ 1, input above [`AUTO_CLUTCH_HOLD_IDLE_FRAC`] ×
+///   idle): stays fully engaged in any gear, so the revs follow road speed and a tall gear bogs
+///   instead of slipping (owner row 117: 3rd gear held a constant rpm while the car accelerated,
+///   a "CVT" feel, because the clutch dropped back into launch slip after every shift).
+/// - **Tall gear rolling** (3rd and up, input above that line): engages fully at 10/s.
+/// - **Launch rolling** (input above 1.2 × idle and 90% of the launch rpm): engages fully at
+///   10/s.
+/// - **Pulling away** (driver on the throttle below that, clutch not yet engaged):
+///   centrifugal-style engagement `((rpm − idle) / (launch − idle))² · torque_ratio`, where
+///   `torque_ratio` = 1.2 × peak engine torque / clutch capacity, so clutch torque reaches
+///   engine torque near [`launch_rpm`] and the engine settles there (TCS trims clutch torque
+///   during this phase, see `Vehicle`). Only from (near) standstill or after the clutch opened.
+/// - Off the throttle at crawl speed: open (no stall when stopping).
 #[allow(clippy::too_many_arguments)]
 pub fn auto_clutch_update(
     engagement: f32,
@@ -404,11 +420,15 @@ pub fn auto_clutch_update(
     redline_rpm: f32,
     throttle: f32,
     torque_ratio: f32,
+    gear: i8,
     dt: f32,
 ) -> f32 {
     let launch = launch_rpm(idle_rpm, redline_rpm, throttle);
-    let rolling = input_rpm >= (idle_rpm * 1.2).max(launch * 0.9);
-    if rolling {
+    let above_idle = input_rpm >= idle_rpm * AUTO_CLUTCH_HOLD_IDLE_FRAC;
+    let held = engagement >= 0.999 && above_idle;
+    let tall = gear >= AUTO_CLUTCH_TALL_GEAR && above_idle;
+    let rolling = above_idle && input_rpm >= launch * 0.9;
+    if held || tall || rolling {
         (engagement + 10.0 * dt).min(1.0)
     } else if throttle > 0.02 {
         let x = ((engine_rpm - idle_rpm) / (launch - idle_rpm).max(200.0)).clamp(0.0, 1.0);
@@ -708,15 +728,32 @@ mod tests {
         let dt = 0.01;
         // Standing start: engagement follows engine rpm toward the launch rpm.
         assert_eq!(
-            auto_clutch_update(0.0, 0.0, 800.0, 800.0, 6500.0, 1.0, 0.7, dt),
+            auto_clutch_update(0.0, 0.0, 800.0, 800.0, 6500.0, 1.0, 0.7, 1, dt),
             0.0
         );
-        let mid = auto_clutch_update(0.0, 0.0, 2500.0, 800.0, 6500.0, 1.0, 0.7, dt);
+        let mid = auto_clutch_update(0.0, 0.0, 2500.0, 800.0, 6500.0, 1.0, 0.7, 1, dt);
         assert!(mid > 0.0 && mid < 1.0);
         // Rolling: engages fully; crawling off throttle: open.
-        assert!(auto_clutch_update(0.5, 4000.0, 4000.0, 800.0, 6500.0, 1.0, 0.7, dt) > 0.5);
+        assert!(auto_clutch_update(0.5, 4000.0, 4000.0, 800.0, 6500.0, 1.0, 0.7, 1, dt) > 0.5);
         assert_eq!(
-            auto_clutch_update(1.0, 500.0, 900.0, 800.0, 6500.0, 0.0, 0.7, dt),
+            auto_clutch_update(1.0, 500.0, 900.0, 800.0, 6500.0, 0.0, 0.7, 1, dt),
+            0.0
+        );
+        // Row 117: engaged and moving above the anti-stall line stays engaged at full
+        // throttle in any gear (2000 rpm < 90% of the 3365 rpm launch rpm).
+        assert_eq!(
+            auto_clutch_update(1.0, 2000.0, 2000.0, 800.0, 6500.0, 1.0, 0.7, 2, dt),
+            1.0
+        );
+        // 3rd and up engage at 10/s once rolling above it, even from an open clutch…
+        let tall = auto_clutch_update(0.0, 1200.0, 3000.0, 800.0, 6500.0, 1.0, 0.7, 3, dt);
+        assert!((tall - 10.0 * dt).abs() < 1e-6, "{tall}");
+        // …while 1st / 2nd from an open clutch still launch-slip up to the launch rpm.
+        let launch = auto_clutch_update(0.0, 1200.0, 2000.0, 800.0, 6500.0, 1.0, 0.7, 2, dt);
+        assert!(launch < 1.0);
+        // Below the anti-stall line an engaged clutch lets go off the throttle.
+        assert_eq!(
+            auto_clutch_update(1.0, 900.0, 900.0, 800.0, 6500.0, 0.0, 0.7, 3, dt),
             0.0
         );
     }

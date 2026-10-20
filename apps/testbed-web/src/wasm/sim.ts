@@ -81,9 +81,24 @@ export interface VehicleInfo {
   spawn_pos: [number, number, number];
 }
 
+/** TCS / ABS level (contract `TcsLevel` / `AbsLevel`). The sim also accepts a legacy bool
+ * (true = Full, false = Off) but always returns a level. */
+export type AssistLevel = "Off" | "Half" | "Full";
+
+/** A level from anything stored or typed (legacy bool, any case); `d` otherwise. */
+export function assistLevel(v: unknown, d: AssistLevel = "Off"): AssistLevel {
+  if (v === true) return "Full";
+  if (v === false) return "Off";
+  if (typeof v === "string") {
+    const l = v.trim().toLowerCase();
+    if (l === "off" || l === "half" || l === "full") return (l[0].toUpperCase() + l.slice(1)) as AssistLevel;
+  }
+  return d;
+}
+
 export interface AssistProfile {
-  abs: boolean;
-  tcs: boolean;
+  abs: AssistLevel;
+  tcs: AssistLevel;
   esc: boolean;
   steer_speed_sensitivity: number;
   countersteer_help: number;
@@ -245,7 +260,7 @@ export const sim = {
   setClutchMode: (entity: number, mode: "auto" | "manual"): void => wasm.set_clutch_mode(entity, mode),
   clutchMode: (entity: number): string => wasm.clutch_mode(entity),
   engineStalled: (entity: number): boolean => wasm.engine_stalled(entity),
-  /** Drift-assist tuning (drift lab dev override; 9 values, see wp_wasm DRIFT_TUNING_FIELDS). */
+  /** Drift-assist tuning (drift lab dev override; 11 values, see wp_wasm DRIFT_TUNING_FIELDS). */
   setDriftTuning: (entity: number, values: Float32Array): void => wasm.set_drift_tuning(entity, values),
   driftTuning: (entity: number): number[] => Array.from(wasm.drift_tuning(entity)),
   /** [body slip °, assist mode (0 off, 1 straighten, 2 catch, 3 hold, 4 exceeded), envelope °, throttle smoothing in effect]. */

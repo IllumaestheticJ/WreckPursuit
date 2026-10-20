@@ -79,7 +79,7 @@ The lap: a 92 s street-circuit race (lap 1/3) in a lighter rear-drive sports car
 **Handbrake hairpin (37.2–40.5 s), step by step**
 
 1. 37.17 s: a **feint**: a 0.3 s Left tap on the throttle.
-2. 37.5 s: **Right + handbrake** (throttle off) for 1.0 s. The car pivots ~150–180° around the hairpin at 1st-gear speed (~5–10 mph). Rotation is free and fast.
+2. 37.5 s: **Right + handbrake** (throttle off) for 1.0 s. The car pivots ~150–180° around the hairpin; the speedo reads **~28 mph at handbrake-on**, falling 18 → 10 → 5 mph during the pivot (correction 2026-10-20: the entry is ~45–55 km/h, not 5–10 mph). Rotation is free and fast.
 3. 38.5 s: **throttle back on**, still holding Right, while the handbrake is released.
 4. 39.3 s: **Left (opposite lock) + throttle** for ~1 s. This catches the rotation and the car drives out of the hairpin in a short power slide.
 
@@ -246,3 +246,75 @@ In the reference footage the cars' body roll and pitch build and settle **smooth
 ## Clip 5 note: ABS levels
 
 The owner's clip 5 uses **ABS Half**. WreckPursuit should offer ABS **Off / Half / Full**, alongside TCS Off / Half / Full (assigned to machine A).
+
+## Clip 8: the steering wheel during a drift — the reference steers relative to the slide (2026-10-20)
+
+The owner's hypothesis is that the reference has **no throttle limiting at all, and all stabilisation is in the steering**. The cockpit clip supports the steering half.
+
+Clip 8, 34.15–37.0 s: a left hairpin in 2nd at 30–37 mph, power-sliding (the view swings left with motion blur; tail out to the right). The **Left key is held continuously for 2.9 s** (with throttle, plus 2 handbrake stabs). The cockpit wheel:
+
+| t after Left pressed | Left key | wheel |
+|---|---|---|
+| 0.1 s | held | full left lock (spoke at the top, as at standstill) |
+| 0.5–1.1 s | held | **back near centre** while the car rotates into the slide |
+| 1.5–2.0 s | held | about half left |
+| 2.4–2.8 s | held | **past centre toward the right**, i.e. countersteer |
+| released | — | centre |
+
+So in a slide the reference's front wheels do **not** follow the key: they are pulled toward the direction of travel, and the key only adds an offset. At a standstill (clip 7) the same key gives a plain full lock. This is consistent with **velocity-relative steering**: front-wheel angle (body frame) ≈ −(front-axle slip direction) + key × lock(speed), clamped to the steering lock. Meaning:
+- the key steers relative to where the car is *going*
+- releasing the keys points the wheels along the travel (a natural catch / hold)
+- the counter key goes further into opposite lock
+
+That explains why counter key + full throttle holds a steady drift in clip 1, and why holding the into-turn key mid-slide doesn't spin the car.
+
+Throttle: no visible limiting. Clip 5 floors it from rest (TCS off) and goes straight, and keyboard Test Throttle is raw 0/100 %.
+
+## Weight transfer speed (owner: "the car weight transitions way too fast", 2026-10-20)
+
+Reference, clip 4 (#49 muscle car, chase cam, 8.1–9.6 s): a Right key press at 8.3 s at ~50 mph with a brake dab. Read from the rear bumper and tail-light line in 10 fps frames:
+- **No visible body roll for ~0.2–0.3 s** after the key.
+- Roll builds **smoothly over ~0.8–0.9 s** to its peak, about 1.1 s after the press.
+- **Large peak roll, roughly 5–7°**, and the car leans visibly onto its outside wheels.
+- **No overshoot or rocking.** The body holds the lean and the tail slides out on top of it.
+- Heading change starts ~0.3–0.4 s after the key and builds over about a second.
+
+Targets for WreckPursuit (lab first, then car data):
+- roll natural frequency ~0.9–1.1 Hz (ours: 1.5 Hz lab default, 1.76 Hz data)
+- near-critical damping (ζ ≈ 0.9–1.1)
+- 10→90 % roll rise time ~0.6–0.8 s in a 100 km/h lane change
+- peak roll ~5–7° at about 0.8 g
+- the same slower build for pitch under braking and throttle
+
+This needs softer roll stiffness (springs + bars) **with** enough travel or ride height to stay off the bump stops, more roll inertia if the body inertia is low, and a slower yaw build.
+
+## Letting go of the steering mid-drift (owner, 2026-10-20)
+
+Owner: **in the reference, releasing the steering keys mid-drift makes the car slowly spin.** It does **not** straighten or hold the drift. Clips agree:
+- **Clip 1, 44.7 s:** after a 4.3 s Left hold (a right-hand drift), the keys are released for 0.8 s with the throttle on. The car keeps rotating, and the tail keeps coming round until Right is pressed at 45.5 s.
+- **Clip 1, 21.5 s:** keys released after a 1.1 s Left hold. The car keeps yawing round at falling speed.
+
+Combined with the clip-8 cockpit finding (the wheel is pulled toward countersteer *while a key is held*), this gives the target behaviour for keyboard:
+- **Key held** (either direction) during a slide: the wheels are pulled toward the travel direction (velocity-relative), plus the key's offset. Holding the key keeps the drift controllable.
+- **No key:** the wheels return to the body's centre at the normal return rate, with **no** automatic countersteer. A powered RWD slide then keeps rotating **slowly** (a gradual over-rotation into a spin over ~1–2 s, not a snap).
+- So the player must keep a key held to keep the drift. Letting go is a mistake that spins you slowly.
+
+## Grip-driving balance: ours understeers far too much (owner, 2026-10-20)
+
+Owner: our cars "still understeer a ton when not drifting". What the reference clips show in normal grip cornering:
+- **Short taps (0.1–0.25 s) turn the car in promptly.** The nose follows the key at once; there's no "push wide, then bite".
+- **Lifting at turn-in rotates the car** (clip 3 FWD and clips 2/4 RWD), and power in a corner brings the tail round on RWD.
+- **Clip 8 (cockpit, ~96 mph):** a held key takes the wheel to about the same visible angle as at a standstill, and the car turns hard at that speed. Speed sensitivity doesn't appear to cut the road-wheel lock much. Our default "rack" mode cuts lock to 63 % at 100 km/h and 43 % at 150, which on its own produces strong understeer at speed.
+
+Targets:
+- near-neutral steady-state balance (understeer gradient ≈ 0–1 deg/g in a 60 m circle at 60 and 100 km/h, measured with the parity suite)
+- a lift-off yaw kick at turn-in
+- RWD power-on oversteer
+- tap response matching the reference (heading change starting within ~0.15 s)
+
+Suspects, in order:
+1. the rack-side speed sensitivity (try "tyre" mode or a much gentler curve)
+2. front vs rear tyre peak grip / cornering stiffness and load sensitivity
+3. the roll-stiffness split, since lab bars ×0.25 and data ARB front/rear bias both matter
+4. max lock
+5. static weight distribution and CoG height in the car data

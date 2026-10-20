@@ -7,6 +7,21 @@ Every session reads this file at start.
 
 ## v0.3.0 — applied 2026-10-19 (branch `lead/contract-v0.3.0`)
 
+- Amendment (**lead-approved**, owner request 2026-10-20, rows 104/105; branch `lead/assist-levels`):
+  `TcsLevel { Off, Half, Full }` and `AbsLevel { Off, Half, Full }` replace the `tcs` / `abs`
+  bools in `AssistProfile` (the reference game's levels). Wire / data compatible: a level
+  serialises as the string `"Off"` / `"Half"` / `"Full"` (JSON and RON alike; in RON write
+  `tcs: "Half"`), and deserialisation still accepts the legacy bool (`true` → `Full`,
+  `false` → `Off`), so saves, scenarios and replays written before load
+  unchanged. simcli `replay.bin` keeps its format: assists-op flags gain bit 32 (ABS is Half)
+  and 64 (TCS is Half); old files read as Full / Off. Helpers: `ALL`, `is_on`, `name`,
+  `from_name`, `from_bool`, `From<bool>`, `Display`. Device defaults keep their old meaning
+  (`true` → `Full`), so no golden hash changed from the contract itself. **Who updates:** any
+  code matching `assists.tcs` / `assists.abs` as bools (done in this branch for A, C, F, I, J,
+  10 and the UI kit); TS: `AssistProfile.tcs` / `.abs` are `"Off" | "Half" | "Full"`
+  (`apps/ui-kit/src/generated/contracts.ts` regenerated). Version kept at 0.3.0 like the other
+  amendments (no wire or data break). Behaviour lives in `wp_vehicle` (see
+  `docs/integration/assist-levels.md`).
 - Amendment (lead round 8): `LocalConditions::visibility_m` + `CLEAR_VISIBILITY_M` (machine K; fog/rain sight for police LOS).
 - Amendment (lead round 8, additive): `DnfReason::Fled` (AI entrants abandoning a race to flee police; machine L).
 

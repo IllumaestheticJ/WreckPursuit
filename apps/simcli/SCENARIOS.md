@@ -176,7 +176,8 @@ All ranges are inclusive. `entity` defaults to the first entity; a scenario with
 
 Metrics for `metric(...)`: `final_speed_mps`, `max_speed_mps`, `distance_m` (horizontal,
 from spawn), `path_length_m`, `final_health`, `max_lateral_g`, `max_long_g`,
-`max_yaw_rate_rps`, `crush_depth_m`, `components_failed`, `parts_detached`, `wheels_detached`,
+`max_yaw_rate_rps`, `wheelspin_s` (time with any ground-contact wheel's |slip ratio| > 0.2),
+`max_heading_change_deg` (largest |heading change| from the first tick), `crush_depth_m`, `components_failed`, `parts_detached`, `wheels_detached`,
 `total_loss` (0/1), `min_z_m`, `off_road_s` (time not on any lane, junction connector or
 junction box at about its height; city runs only), `max_airborne_s` (longest stretch with all
 four wheels off the ground), `route_progress` (fraction of a `follow_route` route covered, 0

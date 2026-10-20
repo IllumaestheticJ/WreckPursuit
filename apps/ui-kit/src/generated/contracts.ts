@@ -5,6 +5,24 @@
  */
 
 /**
+ * Anti-lock brake level (reference Off / Half / Full). `Half` lets a wheel slip further
+ * and lock briefly before releasing, `Full` keeps it near the tyre's peak.
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "AbsLevel".
+ */
+export type AbsLevel = "Off" | "Half" | "Full";
+/**
+ * Traction control level (owner rows 104/105, reference Off / Half / Full).
+ * `Off` = the throttle the driver presses: no cut, no brake-TC, no pedal filter.
+ * `Half` lets the driven wheels spin a few times further past the tyre's peak than `Full`
+ * (visible wheelspin and smoke on a floored launch); `Full` keeps them near the peak.
+ *
+ * This interface was referenced by `WpContractsBundle`'s JSON-Schema
+ * via the `definition` "TcsLevel".
+ */
+export type TcsLevel = "Off" | "Half" | "Full";
+/**
  * Messages from a client to the authoritative server.
  *
  * This interface was referenced by `WpContractsBundle`'s JSON-Schema
@@ -1352,10 +1370,7 @@ export interface WpContractsBundle {
  * via the `definition` "AssistProfile".
  */
 export interface AssistProfile {
-  /**
-   * Anti-lock brakes.
-   */
-  abs: boolean;
+  abs: AbsLevel;
   /**
    * Automatic clutch (launch, stall prevention, shifts).
    */
@@ -1380,10 +1395,7 @@ export interface AssistProfile {
    * Speed-sensitive steering lock/rate reduction strength, 0 (off) ..= 1 (full).
    */
   steer_speed_sensitivity: number;
-  /**
-   * Traction control (throttle cut on driven-wheel slip).
-   */
-  tcs: boolean;
+  tcs: TcsLevel;
   /**
    * Throttle input smoothing strength, 0 (raw) ..= 1 (heavy ramp).
    */

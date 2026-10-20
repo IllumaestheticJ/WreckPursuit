@@ -523,6 +523,11 @@ pub struct EntitySummary {
     pub max_long_g: f32,
     /// Maximum |yaw rate|, rad/s.
     pub max_yaw_rate_rps: f32,
+    /// Time with any ground-contact wheel's |slip ratio| above 0.2, s (launch wheelspin,
+    /// braking lock-ups).
+    pub wheelspin_s: f32,
+    /// Largest |heading change| from the first tick, degrees (a straight launch stays < 3).
+    pub max_heading_change_deg: f32,
     /// Maximum lattice node displacement from rest, m.
     pub crush_depth_m: f32,
     /// Distinct components failed.
@@ -574,6 +579,8 @@ impl EntitySummary {
             "max_lateral_g" => self.max_lateral_g,
             "max_long_g" => self.max_long_g,
             "max_yaw_rate_rps" => self.max_yaw_rate_rps,
+            "wheelspin_s" => self.wheelspin_s,
+            "max_heading_change_deg" => self.max_heading_change_deg,
             "crush_depth_m" => self.crush_depth_m,
             "components_failed" => self.components_failed as f32,
             "parts_detached" => self.parts_detached as f32,
@@ -594,7 +601,7 @@ impl EntitySummary {
     }
 
     /// Every metric name [`EntitySummary::metric`] accepts.
-    pub const METRICS: [&'static str; 23] = [
+    pub const METRICS: [&'static str; 25] = [
         "final_speed_mps",
         "max_speed_mps",
         "distance_m",
@@ -603,6 +610,8 @@ impl EntitySummary {
         "max_lateral_g",
         "max_long_g",
         "max_yaw_rate_rps",
+        "wheelspin_s",
+        "max_heading_change_deg",
         "crush_depth_m",
         "components_failed",
         "parts_detached",
@@ -1058,6 +1067,8 @@ struct Tracker {
     last_pos: [f32; 3],
     lat_g: f32,
     long_g: f32,
+    /// Heading at the first tick, rad (`None` before it).
+    heading0: Option<f32>,
     summary: EntitySummary,
     failed: BTreeSet<Component>,
 }
@@ -1067,6 +1078,23 @@ impl Tracker {
         let e = &mut self.summary;
         e.max_speed_mps = e.max_speed_mps.max(s.speed_mps);
         e.max_yaw_rate_rps = e.max_yaw_rate_rps.max(s.ang_vel[2].abs());
+        if s.wheel_states
+            .iter()
+            .any(|w| w.contact && w.slip_ratio.abs() > 0.2)
+        {
+            e.wheelspin_s += PHYSICS_DT;
+        }
+        // Report-only metric (never fed back into the sim), so plain atan2 is fine here.
+        let fwd = rotate(s.rot, [0.0, 1.0, 0.0]);
+        let heading = fwd[0].atan2(fwd[1]);
+        let h0 = *self.heading0.get_or_insert(heading);
+        let mut d = (heading - h0).to_degrees();
+        if d > 180.0 {
+            d -= 360.0;
+        } else if d < -180.0 {
+            d += 360.0;
+        }
+        e.max_heading_change_deg = e.max_heading_change_deg.max(d.abs());
         e.min_z_m = e.min_z_m.min(s.pos[2]);
         e.path_length_m += dist(
             [s.pos[0], s.pos[1], 0.0],
@@ -1180,6 +1208,7 @@ pub fn run_with_hook(
             last_pos: start,
             lat_g: 0.0,
             long_g: 0.0,
+            heading0: None,
             failed: BTreeSet::new(),
             summary: EntitySummary {
                 id: spec.id.clone(),
@@ -1193,6 +1222,8 @@ pub fn run_with_hook(
                 max_lateral_g: 0.0,
                 max_long_g: 0.0,
                 max_yaw_rate_rps: 0.0,
+                wheelspin_s: 0.0,
+                max_heading_change_deg: 0.0,
                 crush_depth_m: 0.0,
                 components_failed: 0,
                 parts_detached: 0,
