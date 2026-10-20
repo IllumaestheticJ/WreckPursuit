@@ -839,6 +839,47 @@ hold, throttle smoothing and lab UI stay dropped), plus: **keep A's handbrake pi
 - e2e: drift_lab_w 52, countersteer 9, presets 13, race 20, menu 40 — all pass (presets'
   HUD-tag check flaked once on the first merge, passing on reruns).
 
+## Step 9 — "use W handling everywhere" (lead)
+
+A W-panel checkbox **"use W handling everywhere"** (`#drift-lab-w-everywhere`). It is on by
+default in the W build and saved per viewer (`wp.driftLabW.everywhere`, `"0"` = off). With it
+on, free drive, the city chase and street races run the W profile on **the player's car**:
+plain steering, ride, car / tyre (spin model by default), the handbrake pivot knobs and raw
+keys, all from the saved panel values. AI racers, police and traffic keep the stock handling.
+A small "W handling" tag (bottom left) shows when it is on outside the lab. The toggle takes
+effect on the next session. Drift Lab C sessions never get it (C owns the drift tuning there).
+
+How it works:
+
+- `wp_vehicle::lab_scope`: `set_tagged_only(true)` limits every lab override (plain, ride,
+  car_lab, drift tuning) to vehicles tagged with `Vehicle::set_lab_tagged`. Untagged vehicles
+  see `None` / the shipped `DriftTuning`. The default (false) applies the overrides to all
+  vehicles, as before, so the unit tests and the lab pad are unchanged.
+- The body inertia (ride lab's roll / pitch / yaw scales) now comes from
+  `Vehicle::body_inertia()`; `apply_body_inertia(rb)` re-applies it after tagging.
+- `wp_sim::Sim::set_lab_tagged(id, on)`: **minimal change in the lead's crate.** It tags the
+  vehicle and re-applies its body inertia. Not a replay op.
+- wasm: `lab_scope_set_tagged_only`, `lab_scope_tagged_only`, `set_lab_tagged`, `lab_tagged`.
+  The testbed tags the player at every session start, replays included, so a recording made
+  with W handling plays back with it (the reset e2e's replay check caught this).
+- Test: `tests/lab_scope.rs`. In tagged-only mode the tagged car's 3 s drive hashes exactly as
+  under the overrides, and an untagged car's exactly as without them.
+- e2e (`drift_lab_w.mjs`, 57 checks):
+  - free drive → W on the player;
+  - start chase → W profile active (plain + spin model + tagged-only + tag), tag shown;
+  - toggle off → stock in the chase;
+  - race → W on the player, 3 AI racers stock.
+
+  Other suites still pass with it on by default: countersteer, presets, race, menu, touch,
+  brake_dive, gamepad, reset.
+
+Known gaps:
+
+- Multiplayer: the overrides are local to the browser sim, so a W-handling client predicts
+  differently from a stock server.
+- A wheel or gamepad player also gets the plain rack. It is a keyboard profile; a device gate
+  is a small follow-up if wanted.
+
 ## Contract change requests
 
 None (`AssistProfile` unchanged; the lab's settings live in `wp_vehicle::plain::PlainSteer`).

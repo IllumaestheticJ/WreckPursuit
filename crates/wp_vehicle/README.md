@@ -21,6 +21,7 @@ with assists and unfiltered on a wheel. Deterministic, 240 Hz with 2 sub-steps.
 | `diff.rs` | differentials, axle + AWD centre: open, clutch-pack LSD (1 / 1.5 / 2-way), viscous, helical (torque-sensing), active e-diff, locked; per-car setups from `data/cars/differentials.toml` |
 | `brakes.rs` | bias, ABS Off / Half / Full (~15 Hz release cycle; Half releases at 3× peak slip, Full at 1.4×) |
 | `steering.rs` | slip-targeted lock + rack rate (keyboard/gamepad), self-aligning countersteer help (0–100 % slider), countersteer lock, Ackermann, toe, damage pull, FWD torque steer |
+| `lab_scope.rs` | Drift Lab W "use W handling everywhere": limit the lab overrides (plain / ride / car_lab / drift tuning) to tagged vehicles (`Vehicle::set_lab_tagged`, the player) |
 | `drift.rs` | Drift Lab B / C (rows 90 / 91 / 104 / 106): slide onset tuning + runtime override, intent modes (straighten / hold = countersteer key / angle-up = key into the turn / exceeded), opt-in throttle shaping and lift softening (default off), slide-angle envelope; steering angle (and opt-in throttle) only |
 | `drift_lab.rs` | scripted slide drivers for Drift Lab B / C (`kick_catch`, `drift_run`); tables via `--example drift_lab_c` |
 | `twitch_lab.rs` | keyboard twitch measurement (row 102): closed-loop key-tapping driver through lane changes, slalom, sweeper, kerb hit; tables via `--example drift_twitch` |

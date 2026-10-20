@@ -184,7 +184,15 @@ const freeDrive = async () => {
 };
 await freeDrive();
 check((await sim()).name !== "drift_lab_w", `page load = ${(await sim()).name}`);
-check((await page.evaluate(() => window.__wp.sim.plainSteer())) === null, "free drive: plain steering off");
+// "Use W handling everywhere" (default ON): free drive keeps the W profile on the player only.
+{
+  const w = await page.evaluate(() => {
+    const s = window.__wp.sim;
+    const p = window.__wp.app.player;
+    return { plain: s.plainSteer() !== null, only: s.labScopeTaggedOnly(), tagged: s.labTagged(p), badge: getComputedStyle(document.getElementById("drift-lab-w-badge")).display };
+  });
+  check(w.plain && w.only && w.tagged && w.badge !== "none", `free drive: W handling on the player (${JSON.stringify(w)})`);
+}
 check((await page.locator("#sc-drift-w").innerText()).trim() === "drift lab W", "button labelled drift lab W");
 // The career garage can sit over free drive on load; the button's own click handler is
 // what the owner hits from the testbed panel.
@@ -198,6 +206,7 @@ await page.waitForTimeout(500);
 const visible = await page.evaluate(() => document.body.innerText);
 check(!/drift lab c/i.test(visible) && (await page.getByText(/drift lab c/i).count()) === 0, "no visible 'Drift Lab C' anywhere (incl. shadow roots)");
 check(/Drift Lab W · plain steering/.test(await page.locator("#drift-lab-w").innerText()), "button → W readout");
+check(await page.locator("#drift-lab-w-everywhere").isChecked(), "panel: 'use W handling everywhere' on by default");
 // The start menu's entry: "Drift Lab W" (no "Drift Lab C" entry) launches W.
 await freeDrive();
 await page.evaluate(() => window.__wp.menu.openMain());
@@ -210,6 +219,47 @@ await page.getByText("Drift Lab W", { exact: true }).first().click();
 await page.waitForFunction(() => window.__wp.sim.scenario().name === "drift_lab_w", null, { timeout: 30000 }).catch(() => {});
 sc = await sim();
 check(sc.name === "drift_lab_w" && sc.entities?.[0]?.car === "parity_rwd_d", `menu → ${sc.name} / ${sc.entities?.[0]?.car}`);
+// City chase with "use W handling everywhere" on: the player's car runs the W profile, the
+// police / traffic cars do not; off → stock handling.
+const chase = async () => {
+  await page.goto(`http://localhost:${PORT}/?chase=1`);
+  await page.waitForFunction(() => window.__wp?.ready === true && window.__wp.sim.scenario().name === "city_chase", null, { timeout: 90000 }).catch(() => {});
+  await page.waitForTimeout(3000);
+  return page.evaluate(() => {
+    const s = window.__wp.sim;
+    const p = window.__wp.app.player;
+    const others = s.entities().filter((e) => e !== p);
+    return {
+      name: s.scenario().name,
+      plain: s.plainSteer() !== null,
+      spin: s.carTune()?.spin_model === true,
+      only: s.labScopeTaggedOnly(),
+      tagged: s.labTagged(p),
+      others: others.length,
+      othersTagged: others.filter((e) => s.labTagged(e)).length,
+      badge: getComputedStyle(document.getElementById("drift-lab-w-badge")).display,
+    };
+  });
+};
+{
+  const c = await chase();
+  check(c.name === "city_chase" && c.plain && c.spin && c.only && c.tagged, `start chase → W profile active on the player (${JSON.stringify(c)})`);
+  check(c.badge !== "none", "chase: 'W handling' tag shown");
+  await page.evaluate(() => localStorage.setItem("wp.driftLabW.everywhere", "0"));
+  const off = await chase();
+  check(off.name === "city_chase" && !off.plain && !off.only && !off.tagged && off.badge === "none", `toggle off → stock handling in the chase (${JSON.stringify(off)})`);
+  await page.evaluate(() => localStorage.removeItem("wp.driftLabW.everywhere"));
+  // A street race: the AI racers keep the stock handling, the player gets W.
+  await page.goto(`http://localhost:${PORT}/?race=grid_highway_sprint`);
+  await page.waitForFunction(() => window.__wp?.ready === true && window.__wp.sim.scenario().name.startsWith("race_"), null, { timeout: 90000 }).catch(() => {});
+  const r = await page.evaluate(() => {
+    const s = window.__wp.sim;
+    const p = window.__wp.app.player;
+    const others = s.entities().filter((e) => e !== p);
+    return { name: s.scenario().name, tagged: s.labTagged(p), only: s.labScopeTaggedOnly(), others: others.length, othersTagged: others.filter((e) => s.labTagged(e)).length };
+  });
+  check(r.name.startsWith("race_") && r.tagged && r.only && r.others > 0 && r.othersTagged === 0, `race: W on the player, ${r.others} AI racers stock (${JSON.stringify(r)})`);
+}
 check(errors.length === 0, `no page errors ${errors.join(" | ")}`);
 await browser.close();
 server.kill("SIGTERM");

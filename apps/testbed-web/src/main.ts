@@ -413,7 +413,8 @@ async function main(): Promise<void> {
     // drift_lab_b: recordings / sessions from before Drift Lab C.
     driftLab.setActive(sc.name === DRIFT_LAB || sc.name === "drift_lab_b");
     if (sc.name === DRIFT_LAB_W) driftLabW.car = sc.entities?.[0]?.car ?? DRIFT_LAB_W_CAR;
-    driftLabW.setActive(sc.name === DRIFT_LAB_W);
+    // W handling also outside the lab when "use W handling everywhere" is on (not in lab C).
+    driftLabW.setActive(sc.name === DRIFT_LAB_W, sc.name === DRIFT_LAB || sc.name === "drift_lab_b");
     const city = sim.worldInfo()[W.city] > 0.5;
     const cityId = city ? sim.cityId() : "";
     void scene.setCity(cityId || null);

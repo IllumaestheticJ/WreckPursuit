@@ -261,6 +261,12 @@ export const sim = {
   driftTuningDefaults: (): Record<string, number | boolean> => JSON.parse(wasm.drift_tuning_defaults_json()),
   /** Set the runtime override from JSON ("" = defaults). */
   driftTuningSet: (json: string): void => wasm.drift_tuning_set(json),
+  /** Drift Lab W "use W handling everywhere": lab overrides on tagged vehicles only (wp_vehicle::lab_scope). */
+  labScopeSetTaggedOnly: (on: boolean): void => wasm.lab_scope_set_tagged_only(on),
+  labScopeTaggedOnly: (): boolean => wasm.lab_scope_tagged_only(),
+  /** Tag a vehicle for the lab overrides (re-applies its body inertia; live sessions only). */
+  setLabTagged: (entity: number, on: boolean): void => wasm.set_lab_tagged(entity, on),
+  labTagged: (entity: number): boolean => wasm.lab_tagged(entity),
   /** [mode, slide_deg, onset, envelope_deg, authority, throttle_scale, key_throttle, engine_throttle]; mode 0 off … 5 exceeded. */
   driftReadout: (entity: number): Float32Array => wasm.drift_readout(entity),
   /** Drift Lab W: plain keyboard steering constants in effect (null = off) / defaults (wp_vehicle::plain::PlainSteer). */

@@ -101,6 +101,7 @@ const PIVOT_FIELDS: Record<string, { label: string; min: number; max: number; st
   hb_pivot_cap: { label: "pivot aid yaw cap", min: 0.5, max: 6, step: 0.25, unit: "rad/s", hint: "the aid fades out as the yaw rate toward the key reaches this (never adds to a fast spin)" },
 };
 const RIDE_STORE = "wp.driftLabW.ride";
+const EVERYWHERE_STORE = "wp.driftLabW.everywhere";
 const pct = (x: number) => `${Math.round((x ?? 0) * 100)}%`;
 
 /** Lock fraction at `kmh` for constants `p` (mirrors wp_vehicle::plain::PlainSteer::lock_frac). */
@@ -120,6 +121,8 @@ export class DriftLabWPanel {
   private readonly readout: HTMLDivElement;
   private readonly course: THREE.Group;
   private active = false;
+  private handling = false;
+  private readonly badge: HTMLDivElement;
   private shown = false;
   private open = true;
   /** The lab's current car id (set by the session start). */
@@ -153,10 +156,39 @@ export class DriftLabWPanel {
     this.body.style.cssText = "background:rgba(0,0,0,.72);padding:8px;border-radius:6px;margin-top:4px;max-height:60vh;overflow:auto";
     this.root.append(btn, this.readout, this.body);
     parent.appendChild(this.root);
+    // Outside the lab: a small tag while the W profile drives the player's car.
+    this.badge = document.createElement("div");
+    this.badge.id = "drift-lab-w-badge";
+    this.badge.textContent = "W handling";
+    this.badge.title = `${DRIFT_LAB_W_TITLE} handling on your car ("use W handling everywhere" in the lab panel)`;
+    this.badge.style.cssText =
+      "position:absolute;left:12px;bottom:12px;z-index:30;font:11px system-ui,sans-serif;color:#cfe8ff;background:rgba(0,0,0,.55);border-left:3px solid #40a0e0;padding:2px 6px;border-radius:4px;pointer-events:none;display:none";
+    parent.appendChild(this.badge);
   }
 
-  /** Whether the lab session is running: plain steering + raw keys on, course shown. */
-  setActive(on: boolean): void {
+  /** "Use W handling everywhere" (lead): keep the W steering / tyre / suspension / pivot
+   * profile on the player's car outside the lab (free drive, city chase, races). Saved per
+   * viewer; default ON in the W build. */
+  everywhere(): boolean {
+    try {
+      return localStorage.getItem(EVERYWHERE_STORE) !== "0";
+    } catch {
+      return true;
+    }
+  }
+
+  /** Whether the W handling profile is on for this session (in the lab, or everywhere). */
+  handlingOn(): boolean {
+    return this.handling;
+  }
+
+  /** A session started. `on` = it is the lab session (panel, course, reference assists);
+   * `otherLab` = another drift lab owns the drift tuning (no W handling there). With
+   * "use W handling everywhere" on, every other session keeps the W profile on the player's
+   * car only (AI, police and traffic stay stock: `wp_vehicle::lab_scope`). */
+  setActive(on: boolean, otherLab = false): void {
+    this.setHandling(on || (this.everywhere() && !otherLab));
+    this.badge.style.display = this.handling && !on ? "block" : "none";
     if (on === this.active) {
       if (on) this.build();
       return;
@@ -166,50 +198,69 @@ export class DriftLabWPanel {
     if (on && !this.shown) this.world.add(this.course);
     if (!on && this.shown) this.world.remove(this.course);
     this.shown = on;
-    setRawKeyboard(on);
     if (on) this.prevTitle = document.title;
     document.title = on ? DRIFT_LAB_W_TITLE : this.prevTitle;
-    if (on) {
-      let saved = "";
-      try {
-        saved = localStorage.getItem(STORE) ?? "";
-      } catch {
-        /* storage blocked: defaults */
-      }
-      try {
-        this.sim.plainSteerSet(saved || JSON.stringify(this.sim.plainSteerDefaults()));
-      } catch {
-        this.sim.plainSteerSet(JSON.stringify(this.sim.plainSteerDefaults()));
-      }
-      let ride = "";
-      try {
-        ride = localStorage.getItem(RIDE_STORE) ?? "";
-      } catch {
-        /* storage blocked: defaults */
-      }
-      try {
-        this.sim.rideTuneSet(ride || JSON.stringify(this.sim.rideTuneDefaults().lab));
-      } catch {
-        this.sim.rideTuneSet(JSON.stringify(this.sim.rideTuneDefaults().lab));
-      }
-      let carTune = "";
-      try {
-        carTune = localStorage.getItem(CAR_STORE) ?? "";
-      } catch {
-        /* storage blocked: data */
-      }
-      try {
-        this.sim.carTuneSet(carTune || JSON.stringify(this.sim.carTuneDefaults().spin));
-      } catch {
-        this.sim.carTuneSet(JSON.stringify(this.sim.carTuneDefaults().spin));
-      }
-      this.applyPivot();
-      this.build();
-    } else {
+    if (on) this.build();
+  }
+
+  /** Turn the W profile on / off: the lab overrides (saved panel values), raw keys, and the
+   * player's car tagged as the only car they apply to. */
+  private setHandling(on: boolean): void {
+    const was = this.handling;
+    this.handling = on;
+    if (!on) {
+      // Only undo what W set (another lab may own the drift tuning now).
+      if (!was) return;
+      setRawKeyboard(false);
+      this.sim.labScopeSetTaggedOnly(false);
       this.sim.driftTuningSet("");
       this.sim.plainSteerSet("");
       this.sim.rideTuneSet("");
       this.sim.carTuneSet("");
+      return;
+    }
+    let saved = "";
+    try {
+      saved = localStorage.getItem(STORE) ?? "";
+    } catch {
+      /* storage blocked: defaults */
+    }
+    try {
+      this.sim.plainSteerSet(saved || JSON.stringify(this.sim.plainSteerDefaults()));
+    } catch {
+      this.sim.plainSteerSet(JSON.stringify(this.sim.plainSteerDefaults()));
+    }
+    let ride = "";
+    try {
+      ride = localStorage.getItem(RIDE_STORE) ?? "";
+    } catch {
+      /* storage blocked: defaults */
+    }
+    try {
+      this.sim.rideTuneSet(ride || JSON.stringify(this.sim.rideTuneDefaults().lab));
+    } catch {
+      this.sim.rideTuneSet(JSON.stringify(this.sim.rideTuneDefaults().lab));
+    }
+    let carTune = "";
+    try {
+      carTune = localStorage.getItem(CAR_STORE) ?? "";
+    } catch {
+      /* storage blocked: data */
+    }
+    try {
+      this.sim.carTuneSet(carTune || JSON.stringify(this.sim.carTuneDefaults().spin));
+    } catch {
+      this.sim.carTuneSet(JSON.stringify(this.sim.carTuneDefaults().spin));
+    }
+    this.applyPivot();
+    setRawKeyboard(true);
+    // Only the player's car: AI racers, police and traffic keep the stock handling.
+    this.sim.labScopeSetTaggedOnly(true);
+    try {
+      this.sim.setLabTagged(this.player(), true);
+    } catch (e) {
+      // Replays / non-live sessions: the overrides then reach nobody (tagged-only, no tag).
+      console.warn("W handling: cannot tag the player", e);
     }
   }
 
@@ -302,6 +353,26 @@ export class DriftLabWPanel {
       if (current) sel.value = current;
       sel.onchange = () => this.restart(sel.value);
       row("car", "reference-parity test cars (parity_*) and roster cars; restarts the lab", sel, document.createElement("span"));
+    }
+    // "Use W handling everywhere" (lead): free drive, city chase and races keep this profile.
+    {
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.id = "drift-lab-w-everywhere";
+      input.checked = this.everywhere();
+      input.onchange = () => {
+        try {
+          localStorage.setItem(EVERYWHERE_STORE, input.checked ? "1" : "0");
+        } catch {
+          /* ignore */
+        }
+      };
+      row(
+        "use W handling everywhere",
+        "free drive, city chase and races use this steering / tyre / suspension / handbrake profile on your car (AI, police and traffic stay stock); takes effect on the next session",
+        input,
+        document.createElement("span"),
+      );
     }
     // Velocity-relative steering (clip 8 cockpit): A/B, default off (step 7: it over-catches).
     {

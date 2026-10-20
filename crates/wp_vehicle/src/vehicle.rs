@@ -295,6 +295,9 @@ pub struct Vehicle {
     pub(crate) key_steer: f32,
     /// How long the handbrake has been pulled, s (pivot aid build-up, row 109); in snapshots.
     pub(crate) hb_held_s: f32,
+    /// Drift Lab W "use W handling everywhere": the lab overrides apply to this vehicle when
+    /// they are limited to tagged vehicles ([`crate::lab_scope`]). Lab-only; not in snapshots.
+    pub(crate) lab_tagged: bool,
 }
 
 impl Vehicle {
@@ -416,6 +419,7 @@ impl Vehicle {
             key_steer: 0.0,
             stalled: false,
             hb_held_s: 0.0,
+            lab_tagged: false,
             corners,
         };
         v.converter = def
@@ -790,7 +794,7 @@ impl Vehicle {
                 rear_axle,
             ),
             rear_slip_rate: self.drift.rear_slip_rate,
-            tuning: crate::drift::tuning(),
+            tuning: crate::lab_scope::drift(self.lab_tagged),
             drift: self.drift_cmd,
             slide_gate: self.slide_gate.amount,
             align_travel: self.slide_gate.travel,
@@ -808,7 +812,7 @@ impl Vehicle {
     /// `(rack −1..=1 (+ = right), lock fraction at the current speed)`, or `None` when the
     /// plain profile is off.
     pub fn plain_readout(&self) -> Option<(f32, f32)> {
-        let p = crate::plain::active()?;
+        let p = crate::lab_scope::plain(self.lab_tagged)?;
         let ch = &self.chassis;
         let v_fwd = ch.lin_vel.dot(ch.rot * V3::Y);
         let eff = self.effects;
@@ -821,9 +825,31 @@ impl Vehicle {
         ))
     }
 
+    /// Tag this vehicle for the Drift Lab W overrides ([`crate::lab_scope`]): with
+    /// [`crate::lab_scope::set_tagged_only`] on, only tagged vehicles get them. The body's
+    /// inertia ([`Vehicle::body_inertia`]) follows on the next body build, or set it with
+    /// [`Vehicle::apply_body_inertia`].
+    pub fn set_lab_tagged(&mut self, on: bool) {
+        self.lab_tagged = on;
+    }
+
+    /// Whether this vehicle is tagged for the Drift Lab W overrides.
+    pub fn lab_tagged(&self) -> bool {
+        self.lab_tagged
+    }
+
+    /// Body inertia [roll, pitch, yaw], kg·m²: the car data's, scaled by the ride lab when its
+    /// override applies to this vehicle.
+    pub fn body_inertia(&self) -> [f32; 3] {
+        match crate::lab_scope::ride(self.lab_tagged) {
+            Some(t) => t.inertia(self.def.inertia_kgm2),
+            None => self.def.inertia_kgm2,
+        }
+    }
+
     /// The rear axle's differential (Drift Lab W's `car_lab` can lock it).
     fn rear_diff(&self) -> AxleDiff {
-        match crate::car_lab::active() {
+        match crate::lab_scope::car(self.lab_tagged) {
             Some(t) if t.rear_locked => AxleDiff::Locked,
             Some(t) if t.rear_open => AxleDiff::Open,
             _ => self.diffs.rear,
@@ -832,7 +858,7 @@ impl Vehicle {
 
     fn max_steer(&self) -> f32 {
         let m = self.corners[0].max_steer.max(self.corners[1].max_steer);
-        match crate::car_lab::active() {
+        match crate::lab_scope::car(self.lab_tagged) {
             Some(t) => m * t.lock.clamp(0.3, 2.0),
             None => m,
         }
@@ -906,7 +932,7 @@ impl Vehicle {
         if self.effects.engine_dead || self.fuel <= 0.0 {
             0.0
         } else {
-            let lab = crate::car_lab::active().map_or(1.0, |t| t.torque.max(0.0));
+            let lab = crate::lab_scope::car(self.lab_tagged).map_or(1.0, |t| t.torque.max(0.0));
             (self.effects.power_scale * (1.0 - self.heat) * lab).max(0.0)
         }
     }
@@ -967,7 +993,7 @@ impl Vehicle {
         let cg_to_rear = self.com_local.y - self.def.wheels[2].position_m[1];
         let rear_axle = rear_axle_slip(v_fwd, v_left, ch.ang_vel.dot(up), cg_to_rear);
         self.drift.update_slip(rear_axle, dt);
-        let tuning = crate::drift::tuning();
+        let tuning = crate::lab_scope::drift(self.lab_tagged);
         let (cs_side, onset) =
             crate::steering::onset_of(rear_axle, self.drift.rear_slip_rate, &tuning);
         // Row 102: the onset only counts once the slide is confirmed.
@@ -996,7 +1022,7 @@ impl Vehicle {
         // lift-off transition or under the handbrake the key acts at once.
         // Drift Lab W (plain keyboard steering, `crate::plain`): the key reaches the plain
         // rack as pressed (the rack's constant-rate slew is the only smoothing); no key ramp.
-        let plain = crate::plain::active();
+        let plain = crate::lab_scope::plain(self.lab_tagged);
         self.key_steer = if plain.is_some() {
             input.steer.clamp(-1.0, 1.0)
         } else {
@@ -1294,7 +1320,7 @@ impl Vehicle {
         let max_steer = self.max_steer();
         // Tyre-slip lab: drift-only lock extension (extra lock once the body slip is past
         // `drift_lock_from_deg`, ramped over 10°, as drift cars with extended lock). Off = 0.
-        let max_steer = match crate::car_lab::active() {
+        let max_steer = match crate::lab_scope::car(self.lab_tagged) {
             Some(t) if t.drift_lock_extra != 0.0 => {
                 let slip = body_slip(v_fwd, v_left).abs().to_degrees();
                 let x = ((slip - t.drift_lock_from_deg) / 10.0).clamp(0.0, 1.0);
@@ -1345,7 +1371,7 @@ impl Vehicle {
         // axis (aligning moment + caster trail × side force, as in force feedback; last tick's
         // forces) turns the road wheels by `compliance × moment` through a first-order lag, so
         // the wheels yield toward the front axle's travel. Off (0) = rigid rack.
-        self.rack_yield = match crate::car_lab::active() {
+        self.rack_yield = match crate::lab_scope::car(self.lab_tagged) {
             Some(t) if t.rack_compliance > 0.0 => {
                 let axis: f32 = (0..2)
                     .filter(|&i| self.corners[i].steerable)
@@ -1404,7 +1430,7 @@ impl Vehicle {
                 self.conditions[i] = SurfaceConditions::from_local(&local);
             }
         }
-        let arb_scale = crate::ride_lab::active().map_or(1.0, |t| t.arb.max(0.0));
+        let arb_scale = crate::lab_scope::ride(self.lab_tagged).map_or(1.0, |t| t.arb.max(0.0));
         for (l, r) in [(0usize, 1usize), (2, 3)] {
             let f = arb_force(
                 self.corners[l].susp.arb_n_per_m * arb_scale,
@@ -1562,7 +1588,7 @@ impl Vehicle {
         // --- Chassis force & torque ------------------------------------------------------
         // Drift Lab W ride tuning: heights above the contact patch where the lateral /
         // longitudinal tyre forces act (roll / pitch centre); `None` = the contact patch.
-        let centres = crate::ride_lab::active().map(|t| {
+        let centres = crate::lab_scope::ride(self.lab_tagged).map(|t| {
             let h = self.def.cg_height_m.max(0.0);
             (
                 t.roll_centre_m.clamp(0.0, h),
@@ -1572,7 +1598,8 @@ impl Vehicle {
         let mut force = V3::ZERO;
         let mut torque = V3::ZERO;
         // Tyre-slip A/B (`crate::car_lab`): self-aligning moments on the body as well.
-        let aligning_on_body = crate::car_lab::active().is_some_and(|t| t.aligning_on_body);
+        let aligning_on_body =
+            crate::lab_scope::car(self.lab_tagged).is_some_and(|t| t.aligning_on_body);
         for i in 0..4 {
             let c = &self.corners[i];
             let w = &mut self.wheels[i];
@@ -1631,7 +1658,7 @@ impl Vehicle {
         if launch_cut > 0.0 && dt > 0.0 {
             force -= V3::Z * (self.def.mass_kg * launch_cut / dt);
         }
-        if let Some(t) = crate::car_lab::active() {
+        if let Some(t) = crate::lab_scope::car(self.lab_tagged) {
             if t.yaw_damping > 0.0 {
                 // Diagnostic yaw damper (not physical): −k·m·L²·r about the body's up axis.
                 let r = ch.ang_vel.dot(up);
@@ -1645,7 +1672,7 @@ impl Vehicle {
             0.0
         };
         let pivot = pivot_yaw_accel(
-            &crate::drift::tuning(),
+            &crate::lab_scope::drift(self.lab_tagged),
             assists,
             handbrake,
             self.hb_held_s,
@@ -1655,11 +1682,7 @@ impl Vehicle {
         );
         if pivot != 0.0 {
             // Yaw acceleration × the body's yaw inertia (the ride lab may scale it).
-            let izz = match crate::ride_lab::active() {
-                Some(t) => t.inertia(self.def.inertia_kgm2)[2],
-                None => self.def.inertia_kgm2[2],
-            };
-            torque += up * (izz * pivot);
+            torque += up * (self.body_inertia()[2] * pivot);
         }
         self.force = force;
         self.torque = torque;
@@ -1748,7 +1771,7 @@ impl Vehicle {
         }
         // Drift Lab W ride tuning: travel scale (the static compression is kept, see
         // `ride_lab::RideTune::scaled_at`).
-        let travel = match crate::ride_lab::active() {
+        let travel = match crate::lab_scope::ride(self.lab_tagged) {
             Some(t) => c.susp.travel_m * t.travel.clamp(0.5, 3.0),
             None => c.susp.travel_m,
         };
@@ -1768,7 +1791,7 @@ impl Vehicle {
         let hit = ground.cast_wheel(&probe);
         let reach = hit.map(|h| travel - (h.distance - PROBE_LIFT_M) + TYRE_STATIC_DEFLECTION_M);
         // Drift Lab W ride tuning (lab override): scaled springs / dampers.
-        let st = match crate::ride_lab::active() {
+        let st = match crate::lab_scope::ride(self.lab_tagged) {
             Some(t) => step_strut(
                 &t.scaled_at(&c.susp, crate::ride_lab::corner_load(&self.def, i)),
                 c.tyre_rate,
@@ -1912,7 +1935,7 @@ impl Vehicle {
         let x_diff = self.solve_diffs(&mut drive, wheel_side, reflected, split, s_sum, kin, h);
 
         // Drift Lab W car / tyre lab override (`crate::car_lab`); `None` = the data.
-        let car_tune = crate::car_lab::active();
+        let car_tune = crate::lab_scope::car(self.lab_tagged);
         for i in 0..4 {
             let c = &self.corners[i];
             let w = &mut self.wheels[i];
