@@ -132,6 +132,15 @@ const EPS = 0.004;
 const changed = (a: number, b: number) => Math.abs(a - b) > EPS * Math.max(Math.abs(a), Math.abs(b), 1e-3);
 const moved = (a: number[], b: number[]) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]) > 0.03;
 
+/** gain → lowpass (→ panner) → bus: the per-voice node chain, pooled across voices. */
+interface Strip {
+  gain: GainNode;
+  lp: BiquadFilterNode;
+  panner: PannerNode | null;
+}
+/** Free strips kept per kind (spatial / local); more are dropped for the GC. */
+const STRIP_POOL_MAX = 24;
+
 /** Executes voice commands. */
 export class VoicePool {
   private voices = new Map<string, Voice>();
@@ -142,6 +151,11 @@ export class VoicePool {
   private samples = new Map<string, AudioBuffer | "loading" | "failed">();
   /** Voices created / released (debug). */
   created = 0;
+  /** Strips taken from the pool instead of creating three nodes (debug, perf checks). */
+  stripsReused = 0;
+  /** Finished voices' node chains, ready for the next one-shot (browser perf pass: a crash or
+   * a skid starts several voices a second, each three new nodes). */
+  private readonly freeStrips: { spatial: Strip[]; local: Strip[] } = { spatial: [], local: [] };
 
   constructor(
     private ctx: AudioContext,
@@ -257,26 +271,19 @@ export class VoicePool {
     }
     const key = voiceKey(voice);
     const old = this.voices.get(key);
-    if (old) this.release(old, this.ctx.currentTime, 0.02);
+    if (old) {
+      this.release(old, this.ctx.currentTime, 0.02);
+      // Disconnected once faded (it used to stay in the graph after being replaced).
+      this.dying.push(old);
+    }
     const t = this.ctx.currentTime;
-    const gain = this.ctx.createGain();
+    const dest = this.lib.packs[played]?.kind === "Radio" ? this.mixer.radioIn : this.mixer.input(bus);
+    const { gain, lp, panner } = this.takeStrip(voice.entity !== LOCAL_ENTITY, t);
     gain.gain.setValueAtTime(looped ? 0 : params.gain, t);
     if (looped) gain.gain.setTargetAtTime(params.gain, t, 0.02);
-    const lp = this.ctx.createBiquadFilter();
-    lp.type = "lowpass";
-    lp.frequency.value = Math.min(params.lowpass_hz || 18000, 18000);
-    const dest = this.lib.packs[played]?.kind === "Radio" ? this.mixer.radioIn : this.mixer.input(bus);
-    let panner: PannerNode | null = null;
-    if (voice.entity === LOCAL_ENTITY) {
-      gain.connect(lp).connect(dest);
-    } else {
-      panner = this.ctx.createPanner();
-      panner.panningModel = "equalpower";
-      panner.distanceModel = "linear";
-      panner.rolloffFactor = 0;
-      this.setPanner(panner, params.pos, t, false);
-      gain.connect(lp).connect(panner).connect(dest);
-    }
+    lp.frequency.setValueAtTime(Math.min(params.lowpass_hz || 18000, 18000), t);
+    if (panner) this.setPanner(panner, params.pos, t, false);
+    (panner ?? lp).connect(dest);
 
     let src: AudioBufferSourceNode | null = null;
     let syn: SynthVoice | null = null;
@@ -469,13 +476,48 @@ export class VoicePool {
     v.endTime = Math.min(v.endTime, end + 0.05);
   }
 
+  /** A node chain: from the pool (automation cleared) or new. Not connected to a bus yet. */
+  private takeStrip(spatial: boolean, t: number): Strip {
+    const free = spatial ? this.freeStrips.spatial : this.freeStrips.local;
+    const s = free.pop();
+    if (s) {
+      this.stripsReused++;
+      s.gain.gain.cancelScheduledValues(t);
+      s.lp.frequency.cancelScheduledValues(t);
+      if (s.panner?.positionX) for (const p of [s.panner.positionX, s.panner.positionY, s.panner.positionZ]) p.cancelScheduledValues(t);
+      return s;
+    }
+    const gain = this.ctx.createGain();
+    const lp = this.ctx.createBiquadFilter();
+    lp.type = "lowpass";
+    gain.connect(lp);
+    let panner: PannerNode | null = null;
+    if (spatial) {
+      panner = this.ctx.createPanner();
+      panner.panningModel = "equalpower";
+      panner.distanceModel = "linear";
+      panner.rolloffFactor = 0;
+      lp.connect(panner);
+    }
+    return { gain, lp, panner };
+  }
+
+  /** A finished voice: detach its source and bus, keep its node chain for the next voice. */
+  private recycle(v: Voice): void {
+    v.src?.disconnect();
+    v.synth?.output.disconnect();
+    (v.panner ?? v.lp).disconnect();
+    const free = v.panner ? this.freeStrips.spatial : this.freeStrips.local;
+    if (free.length < STRIP_POOL_MAX) free.push({ gain: v.gain, lp: v.lp, panner: v.panner });
+  }
+
   /** Disconnect finished voices. Call once per frame. */
   collect(): void {
     for (const g of this.engines.values()) if (g.dirty) this.flushEngine(g);
     const t = this.ctx.currentTime;
     for (const [k, v] of this.voices) {
       if (v.endTime <= t) {
-        (v.panner ?? v.lp).disconnect();
+        this.recycle(v);
         this.voices.delete(k);
       }
     }

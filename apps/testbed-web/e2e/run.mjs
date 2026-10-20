@@ -254,10 +254,12 @@ for (const [hour, label] of [
     drawn: window.__wp.scene.signals.drawnStates(),
     visible: window.__wp.scene.signals.group.visible,
   }));
+  // Only heads near the camera are drawn (SIGNAL_DRAW_M, browser perf pass); 255 = not drawn.
+  const shown = drawn.drawn.filter((c) => c !== 255).length;
   const lit = drawn.drawn.filter((c) => c >= 1 && c <= 3).length;
   check(
-    framed.n > 8 && drawn.visible && lit === framed.n,
-    `signals (${label}, ${drawn.hour.toFixed(1)} h): ${framed.n} heads drawn, ${lit} lit, framed head ${framed.head}`,
+    shown > 8 && drawn.visible && lit === shown && drawn.drawn[framed.head] !== 255,
+    `signals (${label}, ${drawn.hour.toFixed(1)} h): ${shown} of ${framed.n} heads drawn (near the camera), ${lit} lit, framed head ${framed.head}`,
   );
 }
 {
@@ -267,7 +269,10 @@ for (const [hour, label] of [
       (b) => {
         const now = window.__wp.scene.signals.drawnStates();
         const sim = Array.from(window.__wp.sim.signalStates());
-        return now.some((c, i) => c !== b[i]) && now.every((c, i) => c === sim[i]) ? now.filter((c, i) => c !== b[i]).length : false;
+        const drawn = (c, i) => c !== 255 && b[i] !== 255;
+        return now.some((c, i) => drawn(c, i) && c !== b[i]) && now.every((c, i) => c === 255 || c === sim[i])
+          ? now.filter((c, i) => drawn(c, i) && c !== b[i]).length
+          : false;
       },
       before,
       // Port Vesper under SwiftShader runs well below real time; a full signal cycle needs

@@ -17,6 +17,13 @@ const SLIP_RED = 0.15;
 const STRAIN_RED = 0.05;
 
 const tmpColor = new THREE.Color();
+// Per-frame scratch (VehicleView.update runs for every car every frame: no allocation).
+const tmpQa = new THREE.Quaternion();
+const tmpQb = new THREE.Quaternion();
+const tmpV = new THREE.Vector3();
+const tmpDir = new THREE.Vector3();
+const FX_DIR = new THREE.Vector3(0, 1, 0);
+const FY_DIR = new THREE.Vector3(-1, 0, 0);
 
 /** Blue→green→yellow→red ramp for t in 0..1. */
 export function heat(t: number, out = tmpColor): THREE.Color {
@@ -71,12 +78,18 @@ export class VehicleView {
   private readonly lightBar: THREE.Group | null = null;
   private readonly barRed: THREE.MeshStandardMaterial | null = null;
   private readonly barBlue: THREE.MeshStandardMaterial | null = null;
-  private readonly sirenLight: THREE.PointLight | null = null;
+  /** Siren state from the last `setMeta` (police only). The scene owns the one siren point
+   * light (SceneView.setSiren) and puts it on the nearest car with `sirenOn`. */
+  sirenOn = false;
+  sirenColour = 0x2060ff;
+  sirenIntensity = 0;
   private readonly headMat: THREE.MeshStandardMaterial;
   private readonly tailMat: THREE.MeshStandardMaterial;
   /** Per-panel car mesh (workstream R, render/panels.ts); replaces box, lamps and tires once loaded. */
   readonly panels: PanelBody;
   private readonly lamps: THREE.Mesh[] = [];
+  /** Wheel children currently shown for the panel mesh (true) or the debug wheel (false). */
+  private wheelPartsShown: boolean | null = null;
 
   constructor(readonly entity: number, colour: number) {
     this.info = sim.info(entity);
@@ -117,9 +130,7 @@ export class VehicleView {
       blue.position.x = w * 0.17;
       this.lightBar.add(red, blue);
       this.lightBar.position.set(0, -0.1, h + 0.08);
-      this.sirenLight = new THREE.PointLight(0xff2244, 0, 18, 2);
-      this.sirenLight.position.set(0, 0, h + 0.6);
-      this.root.add(this.lightBar, this.sirenLight);
+      this.root.add(this.lightBar);
     }
 
     const rest = sim.latticeRest(entity);
@@ -194,6 +205,7 @@ export class VehicleView {
     this.root.add(this.panels.root);
     this.panels.whenReady(() => {
       this.wheels.forEach((w, i) => this.panels.wheelParts[i].forEach((m) => w.spin.add(m)));
+      this.wheelPartsShown = null;
     });
 
     // CG marker (+ velocity arrow, which lives in world space; see update()).
@@ -210,10 +222,14 @@ export class VehicleView {
   /** Apply interpolated pose + per-frame debug data. `rec`/`prev` are the entity's state
    * records (offset `o` / `po`), `alpha` the interpolation factor, `tel` its telemetry. */
   update(cur: Float32Array, o: number, prev: Float32Array, po: number, alpha: number, tel: Float32Array, dt: number): void {
-    const lerp = (i: number) => prev[po + i] + (cur[o + i] - prev[po + i]) * alpha;
-    this.root.position.set(lerp(S.pos), lerp(S.pos + 1), lerp(S.pos + 2));
-    const qa = new THREE.Quaternion(prev[po + S.rot], prev[po + S.rot + 1], prev[po + S.rot + 2], prev[po + S.rot + 3]);
-    const qb = new THREE.Quaternion(cur[o + S.rot], cur[o + S.rot + 1], cur[o + S.rot + 2], cur[o + S.rot + 3]);
+    const p = S.pos;
+    this.root.position.set(
+      prev[po + p] + (cur[o + p] - prev[po + p]) * alpha,
+      prev[po + p + 1] + (cur[o + p + 1] - prev[po + p + 1]) * alpha,
+      prev[po + p + 2] + (cur[o + p + 2] - prev[po + p + 2]) * alpha,
+    );
+    const qa = tmpQa.set(prev[po + S.rot], prev[po + S.rot + 1], prev[po + S.rot + 2], prev[po + S.rot + 3]);
+    const qb = tmpQb.set(cur[o + S.rot], cur[o + S.rot + 1], cur[o + S.rot + 2], cur[o + S.rot + 3]);
     this.root.quaternion.copy(qa.slerp(qb, alpha));
 
     const bodyOn = layers.on("body");
@@ -239,13 +255,15 @@ export class VehicleView {
     // Panel meshes carry their own head/tail light lenses (shared head/tail materials, so the
     // glow below still works); the box lamps only belong to the debug box body.
     for (const lamp of this.lamps) lamp.visible = bodyOn && !panelsOn;
-    for (const w of this.wheels)
-      for (const c of w.spin.children) {
-        const ours = this.panels.wheelParts.some((p) => p.includes(c as THREE.Mesh));
-        c.visible = ours ? panelsOn : !panelsOn;
-      }
+    if (panelsOn !== this.wheelPartsShown) {
+      this.wheelPartsShown = panelsOn;
+      this.wheels.forEach((w, i) => {
+        const ours = this.panels.wheelParts[i];
+        for (const c of w.spin.children) c.visible = ours.includes(c as THREE.Mesh) ? panelsOn : !panelsOn;
+      });
+    }
     if (panelsOn) {
-      const v = new THREE.Vector3(cur[o + S.linVel], cur[o + S.linVel + 1], cur[o + S.linVel + 2]);
+      const v = tmpV.set(cur[o + S.linVel], cur[o + S.linVel + 1], cur[o + S.linVel + 2]);
       this.panels.update(this.nodes, dt, v);
       this.panels.paint.opacity = latticeOn || stressOn ? 0.35 : 1;
       this.panels.paint.transparent = this.panels.paint.opacity < 1;
@@ -315,16 +333,14 @@ export class VehicleView {
       else w.material.color.setHex(0x222222);
 
       // Applied tire forces in the steered wheel frame: Fx along +Y, Fy toward the wheel's left (-X).
-      const fx = tel[tb + TW.fx];
-      const fy = tel[tb + TW.fyLeft];
-      for (const [arrow, f, dir] of [
-        [w.fx, fx, new THREE.Vector3(0, 1, 0)],
-        [w.fy, fy, new THREE.Vector3(-1, 0, 0)],
-      ] as const) {
+      // Telemetry is only fetched for other cars while the force arrows are on (`tel` empty).
+      for (let k = 0; k < 2; k++) {
+        const arrow = k === 0 ? w.fx : w.fy;
+        const f = tel.length > 0 ? tel[tb + (k === 0 ? TW.fx : TW.fyLeft)] : 0;
         const len = Math.abs(f) * FORCE_SCALE;
         arrow.visible = forces && len > 0.02;
         if (arrow.visible) {
-          arrow.setDirection(dir.clone().multiplyScalar(Math.sign(f) || 1));
+          arrow.setDirection(tmpDir.copy(k === 0 ? FX_DIR : FY_DIR).multiplyScalar(Math.sign(f) || 1));
           arrow.setLength(len, Math.min(0.3, len * 0.3), Math.min(0.15, len * 0.2));
         }
       }
@@ -372,8 +388,14 @@ export class VehicleView {
     const blueOn = siren && phase >= 0.5 && strobe;
     this.barRed!.emissive.setHex(redOn ? 0xff2040 : 0x000000);
     this.barBlue!.emissive.setHex(blueOn ? 0x2060ff : 0x000000);
-    this.sirenLight!.color.setHex(redOn ? 0xff2040 : 0x2060ff);
-    this.sirenLight!.intensity = redOn || blueOn ? 25 : 0;
+    this.sirenOn = siren;
+    this.sirenColour = redOn ? 0xff2040 : 0x2060ff;
+    this.sirenIntensity = redOn || blueOn ? 25 : 0;
+  }
+
+  /** Where the siren light sits (sim space, the scene's `world` group): above the roof. */
+  sirenPosition(out: THREE.Vector3): THREE.Vector3 {
+    return out.set(0, 0, this.info.body_size_m[2] + 0.6).applyQuaternion(this.root.quaternion).add(this.root.position);
   }
 
   dispose(): void {

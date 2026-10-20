@@ -24,6 +24,8 @@ import { downloadText, keepUnreadable, loadCareerText, saveCareerText, saveFileN
 import type { CareerApi, CareerView, RunKind } from "../../ui-kit/src/garage/types";
 import { RealTimeMeter } from "./rtf";
 import { WeatherView } from "./render/weather";
+import { FrameProfiler } from "./perf";
+import * as THREE from "three";
 
 // v2: canonical simcli replay.bin (v1 held the retired WPR\x01 format).
 const LAST_REPLAY_KEY = "wp.testbed.lastReplay.v2";
@@ -58,6 +60,8 @@ interface AppState {
   bench: { n: number; frames: number; sim: number; render: number; t0: number; tick0: number } | null;
   /** Frame-time breakdown (ms, smoothed) and real-time factor; read by the HUD and e2e. */
   perf: { simMs: number; viewsMs: number; renderMs: number; frameMs: number; rtf: number };
+  /** Per-section frame cost (src/perf.ts): smoothed `ms`, raw `acc` / `frames` for automation. */
+  prof: FrameProfiler;
   /** Sim events seen this session, by kind (`TrafficViolation`, `Police`, …). The event feed
    * keeps only 12 lines, so automation waits on these counts instead of the feed text. */
   eventCounts: Record<string, number>;
@@ -77,6 +81,7 @@ const app: AppState = {
   input: { steer: 0, throttle: 0, brake: 0, handbrake: 0, clutch: 0, gearUp: false, gearDown: false, horn: false, headlights: false },
   bench: null,
   perf: { simMs: 0, viewsMs: 0, renderMs: 0, frameMs: 0, rtf: 1 },
+  prof: new FrameProfiler(),
   eventCounts: {},
 };
 
@@ -103,6 +108,7 @@ async function main(): Promise<void> {
     garage: () => (sim.careerRunActive() ? () => openGarage() : null),
   });
   const weather = new WeatherView(scene.scene, scene.renderer, overlay);
+  weather.rainFraction = scene.quality.rainFraction;
   weather.attachMaterial(scene.groundMaterial);
   scene.onCityLoaded = (root) => weather.attachCity(root);
   const weatherSel = $("weather") as HTMLSelectElement;
@@ -607,6 +613,8 @@ async function main(): Promise<void> {
   let renderMs = 0;
   let frameNo = 0;
   const rtf = new RealTimeMeter();
+  const sirenPos = new THREE.Vector3();
+  const NO_TEL = new Float32Array(0);
 
   function frame(now: number): void {
     const wallDt = (now - last) / 1000;
@@ -615,6 +623,9 @@ async function main(): Promise<void> {
     const dt = Math.min(wallDt, 0.25);
     last = now;
     fps += (1 / Math.max(dt, 1e-3) - fps) * 0.05;
+    scene.quality.frame(wallDt * 1000);
+    const prof = app.prof;
+    prof.begin();
     const replay = isReplay();
 
     const { input, source } = readInput(dt);
@@ -626,22 +637,27 @@ async function main(): Promise<void> {
     // The full city map pauses driving input (the sim keeps running): coast with light brakes.
     if (!replay && !app.bench) sim.setInput(app.player, map.isOpen ? { ...input, throttle: 0, steer: 0, brake: 0.35, handbrake: 0, gearUp: false, gearDown: false } : input);
 
+    prof.lap("input");
     const t0 = performance.now();
     if (!app.paused || replay) app.alpha = sim.step(app.paused && !replay ? 0 : dt);
     const t1 = performance.now();
     simMs += (t1 - t0 - simMs) * 0.1;
-    rtf.push(wallDt, sim.worldInfo()[W.tick], !app.paused && !replay && !app.bench);
+    // One world_info() per frame after the step (it was fetched ~7 times a frame).
+    const wi = sim.worldInfo();
+    rtf.push(wallDt, wi[W.tick], !app.paused && !replay && !app.bench);
+    prof.lap("sim");
 
     const meta = sim.vehicleMeta();
     syncViews(meta);
     let physicalTraffic = false;
-    const tS = sim.worldInfo()[W.tick] / 240;
+    const tS = wi[W.tick] / 240;
     for (let o = 0; o < meta.length; o += META_STRIDE) {
       app.views.get(meta[o])?.setMeta(meta[o + 2], tS);
       physicalTraffic ||= meta[o + 1] === VEHICLE_KIND.traffic;
     }
     const cur = sim.states();
     const prev = sim.statesPrev();
+    const forcesOn = layers.on("tireForces");
     let focusTel: Float32Array | null = null;
     let focusRec = -1;
     for (let o = 0, i = 0; o < cur.length; o += STATE_STRIDE, i++) {
@@ -649,12 +665,28 @@ async function main(): Promise<void> {
       const view = app.views.get(id);
       if (!view) continue;
       // vehicle_states_prev() lists the same entities in the same (ascending) order.
-      const tel = sim.telemetry(id);
+      // Telemetry: the focus car (HUD, plots) and, with the force arrows on, every car.
+      const tel = id === app.focus || forcesOn ? sim.telemetry(id) : NO_TEL;
       view.update(cur, o, prev.length > o ? prev : cur, o, app.alpha, tel, app.paused && !replay ? 0 : dt);
       if (id === app.focus) {
         focusTel = tel;
         focusRec = o;
       }
+    }
+    prof.lap("views");
+    // One siren light, on the siren car nearest the camera (sim space: Three (x, y, z) = (x, -z, y)).
+    {
+      const c = rig.camera.position;
+      let best: VehicleView | null = null;
+      let bestD = Infinity;
+      for (const v of app.views.values()) {
+        if (!v.sirenOn) continue;
+        const p = v.root.position;
+        const d = (p.x - c.x) ** 2 + (p.y + c.z) ** 2 + (p.z - c.y) ** 2;
+        if (d < bestD) [best, bestD] = [v, d];
+      }
+      if (best) scene.setSiren(best.sirenPosition(sirenPos), best.sirenColour, best.sirenIntensity);
+      else scene.setSiren(null);
     }
     const events = sim.eventsDrain();
     for (const ev of events) {
@@ -664,10 +696,10 @@ async function main(): Promise<void> {
     scene.addEvents(events);
     panelEvents(events);
     stepDebris(app.paused && !replay ? 0 : dt);
-    hud.pushEvents(events, sim.worldInfo()[W.tick]);
+    hud.pushEvents(events, wi[W.tick]);
+    prof.lap("events");
     {
-      const w = sim.worldInfo();
-      ui.frame(w[W.tick], app.player, events, w[W.hours], modeName());
+      ui.frame(wi[W.tick], app.player, events, wi[W.hours], wi[W.mode] > 0.5 ? "Simulation" : "Arcade");
       map.frame(app.player, now);
       if (!replay) runEnd.update(sim.runResult(), now);
       // Career autosave: after each settlement (bust, escape, wreck) and every 20 s of a run.
@@ -680,13 +712,14 @@ async function main(): Promise<void> {
         }
       }
     }
+    prof.lap("ui");
     scene.update(dt, sim.intents());
     // Promoted (physical) agents are drawn as sim vehicles once the sim spawns them.
     scene.updateAgents(sim.trafficAgents(), physicalTraffic);
     scene.updatePoliceUnits(sim.policeUnits(), tS);
-    const wi = sim.worldInfo();
     const wx = sim.weatherInfo();
     scene.setTimeOfDay(wi[W.night], wx[0] > 0.5 ? wx[7] : 1);
+    prof.lap("traffic");
     weather.update(
       app.paused && !replay ? 0 : dt,
       rig.camera,
@@ -697,7 +730,9 @@ async function main(): Promise<void> {
       sim.weatherSpray(),
       rig.mode === "hood" || rig.mode === "bumper" || rig.mode === "cockpit",
     );
-    scene.signals.update(sim.signalStates(), wi[W.night]);
+    prof.lap("weather");
+    scene.signals.update(sim.signalStates(), wi[W.night], rig.camera.position);
+    prof.lap("traffic");
 
     const focusView = app.views.get(app.focus) ?? null;
     if (focusTel) {
@@ -705,6 +740,7 @@ async function main(): Promise<void> {
       if (layers.on("telemetry")) plots.draw();
     }
     plots.canvas.style.display = layers.on("telemetry") ? "" : "none";
+    prof.lap("ui");
     rig.lookBack = isHeld("KeyV");
     rig.update(
       focusView?.root ?? null,
@@ -713,11 +749,14 @@ async function main(): Promise<void> {
       dt,
       rig.mode === "cinematic" ? nearestPolice(focusView) : null,
     );
-    audio.update(rig.camera, events, app.paused && !replay ? 0 : dt, app.focus);
+    prof.lap("camera");
+    audio.update(rig.camera, sim.lastEventsJson(), app.paused && !replay ? 0 : dt, app.focus);
+    prof.lap("audio");
 
     const r0 = performance.now();
     scene.render(rig.camera);
     const r1 = performance.now();
+    prof.lap("render");
     renderMs += (r1 - r0 - renderMs) * 0.1;
     const p = app.perf;
     p.simMs = simMs;
@@ -736,13 +775,14 @@ async function main(): Promise<void> {
           : app.input,
         source: replay ? "replay" : app.source,
         assists: replay ? null : sim.assists(app.player),
-        mode: modeName(),
+        mode: wi[W.mode] > 0.5 ? "Simulation" : "Arcade",
         rack: focusView ? sim.ffb(app.focus)[0] : 0,
         fps,
         simMs,
         renderMs,
         viewsMs: p.viewsMs,
         rtf: rtf.factor,
+        gfx: scene.quality.label(),
         tick: wi[W.tick],
         hours: wi[W.hours],
         hash: sim.stateHash(),
@@ -756,6 +796,8 @@ async function main(): Promise<void> {
       });
       updatePanels(replay);
     }
+    prof.lap("ui");
+    prof.end();
     if (app.bench) benchTick(t1 - t0, r1 - r0);
     requestAnimationFrame(frame);
   }
