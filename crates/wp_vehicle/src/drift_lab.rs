@@ -7,6 +7,8 @@
 //! | [`kick_catch`] | straight at speed, a yaw-rate kick; the driver releases the keys, or holds the countersteer key after a reaction time: countersteer slew, onset-to-aligned time, caught or spun |
 //! | [`drift_run`] | a power-oversteer drift on a circle held by a scripted driver ([`DriftDriver`]): drift time inside the window, spun or not |
 //! | [`handbrake_entry`] | straight at speed, key into the turn + a handbrake tap, then the countersteer key + throttle (row 108): release-to-aligned time, caught or spun |
+//! | [`tap_response`] | straight at speed, one steering-key tap (row 98 / clip 2): peak wheel angle, peak yaw rate, heading change |
+//! | [`hairpin`] | clip 2's handbrake hairpin: feint, key into the turn + handbrake 1 s, throttle, countersteer key + throttle: rotation, catch |
 //! | [`transition_run`] | a left drift, a lift-off swing into a right drift (S-bend, row 107): transition time, overshoot, wobbles, spun or not |
 //!
 //! Definitions (fixed here, independent of the assist's own tuning):
@@ -765,5 +767,204 @@ pub fn handbrake_entry_with(
         drift_s: drift as f32 * PHYSICS_DT,
         caught: !spun,
         hash: rig.state_hash(),
+    }
+}
+
+/// Result of [`tap_response`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TapResponse {
+    /// Largest centre road-wheel angle, degrees.
+    pub peak_wheel_deg: f32,
+    /// Largest yaw rate, degrees per second.
+    pub peak_yaw_dps: f32,
+    /// Heading change 1.5 s after the tap started, degrees.
+    pub heading_deg: f32,
+    /// Largest body slip, degrees.
+    pub max_slip_deg: f32,
+}
+
+/// One steering-key tap (owner clip 2: racing steering is mostly 0.1–0.25 s taps): straight
+/// at `speed_mps` holding speed, then the left key for `tap_s` (throttle held as before),
+/// measured for 1.5 s.
+pub fn tap_response(
+    car: &LoadedCar,
+    assists: &AssistProfile,
+    speed_mps: f32,
+    tap_s: f32,
+) -> TapResponse {
+    let mut rig = Rig::new(car);
+    rig.teleport([0.0; 3], 0.0, speed_mps, 0.0);
+    let auto = AssistProfile {
+        auto_gears: true,
+        ..*assists
+    };
+    for _ in 0..TICKS_PER_S {
+        let (throttle, brake) = hold_speed(&rig, speed_mps);
+        rig.step(
+            &VehicleInput {
+                throttle,
+                brake,
+                ..Default::default()
+            },
+            &auto,
+        );
+    }
+    let heading = |rig: &Rig| {
+        let f = rig.vehicle.chassis().rot * V3::Y;
+        atan2(-f.x, f.y)
+    };
+    let h0 = heading(&rig);
+    let (throttle, _) = hold_speed(&rig, speed_mps);
+    let tap = (tap_s * TICKS_PER_S as f32) as usize;
+    let (mut wheel, mut yaw, mut slip) = (0.0f32, 0.0f32, 0.0f32);
+    for tick in 0..TICKS_PER_S * 3 / 2 {
+        rig.step(
+            &VehicleInput {
+                steer: if tick < tap { -1.0 } else { 0.0 },
+                throttle,
+                ..Default::default()
+            },
+            assists,
+        );
+        let n = slide_state(&rig);
+        wheel = wheel.max(n.steer.abs());
+        yaw = yaw.max(n.yaw_rate.abs());
+        slip = slip.max(n.body_slip.abs());
+    }
+    TapResponse {
+        peak_wheel_deg: wheel.to_degrees(),
+        peak_yaw_dps: yaw.to_degrees(),
+        heading_deg: (heading(&rig) - h0).to_degrees(),
+        max_slip_deg: slip.to_degrees(),
+    }
+}
+
+/// Result of [`hairpin`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Hairpin {
+    /// Heading change while the handbrake is held, degrees.
+    pub pivot_deg: f32,
+    /// Heading change from the feint to the end, degrees.
+    pub total_deg: f32,
+    /// Time from the countersteer key until the car is caught (body slip < 15° and |yaw
+    /// rate| < 0.5 rad/s), s (`None`: not within the run).
+    pub catch_s: Option<f32>,
+    /// Speed at the end, km/h.
+    pub exit_kmh: f32,
+    /// Spun: travelling backwards after the catch phase started, or past 120° of slip then.
+    pub spun: bool,
+}
+
+/// Owner clip 2's handbrake hairpin, scripted: approach at `speed_mps` (holding speed),
+/// a 0.3 s feint (the key away from the turn, throttle on), then the key into a right-hand
+/// turn + handbrake for 1.0 s with the throttle off, then the throttle on still holding the
+/// key into the turn for 0.8 s, then the countersteer key + throttle until caught (at most
+/// 2 s) and the keys released + throttle for 1 s.
+pub fn hairpin(car: &LoadedCar, assists: &AssistProfile, speed_mps: f32) -> Hairpin {
+    let mut rig = Rig::new(car);
+    rig.teleport([0.0; 3], 0.0, speed_mps, 0.0);
+    let auto = AssistProfile {
+        auto_gears: true,
+        ..*assists
+    };
+    for _ in 0..TICKS_PER_S {
+        let (throttle, brake) = hold_speed(&rig, speed_mps);
+        rig.step(
+            &VehicleInput {
+                throttle,
+                brake,
+                ..Default::default()
+            },
+            &auto,
+        );
+    }
+    let heading = |rig: &Rig| {
+        let f = rig.vehicle.chassis().rot * V3::Y;
+        atan2(-f.x, f.y)
+    };
+    let unwrap = |d: f32| {
+        if d > std::f32::consts::PI {
+            d - std::f32::consts::TAU
+        } else if d < -std::f32::consts::PI {
+            d + std::f32::consts::TAU
+        } else {
+            d
+        }
+    };
+    let (feint, pivot, power) = (TICKS_PER_S * 3 / 10, TICKS_PER_S, TICKS_PER_S * 8 / 10);
+    let mut prev = heading(&rig);
+    let (mut total, mut pivot_deg) = (0.0f32, 0.0f32);
+    let mut catch_start: Option<usize> = None;
+    let mut caught: Option<usize> = None;
+    let mut spun = false;
+    let end = feint + pivot + power + 3 * TICKS_PER_S;
+    for tick in 0..end {
+        let s = slide_state(&rig);
+        // Right-hand turn: key into the turn = right (+1); the countersteer key = left (−1).
+        let input = if tick < feint {
+            VehicleInput {
+                steer: -1.0,
+                throttle: 0.5,
+                ..Default::default()
+            }
+        } else if tick < feint + pivot {
+            VehicleInput {
+                steer: 1.0,
+                handbrake: 1.0,
+                ..Default::default()
+            }
+        } else if tick < feint + pivot + power {
+            VehicleInput {
+                steer: 1.0,
+                throttle: 1.0,
+                ..Default::default()
+            }
+        } else if caught.is_none() && tick < feint + pivot + power + 2 * TICKS_PER_S {
+            catch_start.get_or_insert(tick);
+            VehicleInput {
+                steer: -1.0,
+                throttle: 1.0,
+                ..Default::default()
+            }
+        } else {
+            VehicleInput {
+                throttle: 1.0,
+                ..Default::default()
+            }
+        };
+        rig.step(&input, assists);
+        let h = heading(&rig);
+        let d = unwrap(h - prev);
+        prev = h;
+        total += d;
+        if (feint..feint + pivot).contains(&tick) {
+            pivot_deg += d;
+        }
+        let n = slide_state(&rig);
+        if let Some(t0) = catch_start {
+            if n.v_fwd < -1.0 || n.body_slip.abs().to_degrees() > 120.0 {
+                spun = true;
+            }
+            if caught.is_none()
+                && tick > t0
+                && n.body_slip.abs().to_degrees() < 15.0
+                && n.yaw_rate.abs() < 0.5
+                && n.v_fwd > 2.0
+            {
+                caught = Some(tick);
+            }
+        }
+        let _ = s;
+    }
+    Hairpin {
+        // Right-hand turn: heading decreases.
+        pivot_deg: -pivot_deg.to_degrees(),
+        total_deg: -total.to_degrees(),
+        catch_s: match (catch_start, caught) {
+            (Some(a), Some(b)) => Some((b - a) as f32 * PHYSICS_DT),
+            _ => None,
+        },
+        exit_kmh: rig.state().speed_mps * 3.6,
+        spun,
     }
 }

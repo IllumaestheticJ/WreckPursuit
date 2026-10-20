@@ -76,9 +76,16 @@ fn countersteer_hold_gives_a_long_steady_drift() {
 
 #[test]
 fn held_counter_key_with_full_throttle_holds_too() {
+    // Owner clip 1, the primary criterion: the countersteer key + full throttle holds a
+    // steady drift (2nd gear, no TCS) without spinning.
     for id in RWD {
-        let r = drift_run(&car(id), &kb(0.6), DriftDriver::Naive, 40.0, 0.6, 1);
-        assert!(!r.spun && r.drift_s > 4.0, "{id}: {r:?}");
+        for a in [kb(0.6), reference(0.6)] {
+            let r = drift_run(&car(id), &a, DriftDriver::Naive, 40.0, 0.6, 1);
+            assert!(
+                !r.spun && r.drift_s > 4.5 && (25.0..=45.0).contains(&r.mean_deg),
+                "{id}: {r:?}"
+            );
+        }
     }
 }
 
@@ -109,11 +116,23 @@ fn sloppy_driving_still_spins_sometimes() {
     assert!((3..=20).contains(&spins), "{spins} of 30");
 }
 
+/// The owner's reference (Wreckfest: TCS off, ESC off, manual shifting): manual gears, the
+/// drift drivers shift down to 2nd.
+fn reference(help: f32) -> AssistProfile {
+    AssistProfile {
+        auto_gears: false,
+        ..kb(help)
+    }
+}
+
 #[test]
 fn flooring_it_at_a_big_angle_spins_lifting_saves() {
+    // Reference settings (2nd gear, no TCS): flicked into a big angle and floored with the
+    // key into the turn, the angle creeps past the 48° envelope and the car spins; lifting
+    // saves it. (With the automatic box the upshift saves the floored car since step 4.)
     for id in RWD {
-        let flood = drift_run(&car(id), &kb(0.6), DriftDriver::Flood, 40.0, 0.6, 1);
-        let lift = drift_run(&car(id), &kb(0.6), DriftDriver::FlickLift, 40.0, 0.6, 1);
+        let flood = drift_run(&car(id), &reference(0.6), DriftDriver::Flood, 40.0, 0.6, 1);
+        let lift = drift_run(&car(id), &reference(0.6), DriftDriver::FlickLift, 40.0, 0.6, 1);
         assert!(flood.spun, "{id} floored: {flood:?}");
         assert!(!lift.spun, "{id} lifted: {lift:?}");
     }

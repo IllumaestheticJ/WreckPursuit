@@ -101,7 +101,8 @@ pub struct DriftTuning {
     pub trim_margin_deg: f32,
     /// Deepest trim at the envelope edge, fraction of the throttle (× shaping strength).
     pub trim_depth: f32,
-    /// Slide-angle envelope at the 60 % slider, degrees (+25° per +100 % of slider).
+    /// Slide-angle envelope at the 60 % slider, degrees (+25° per +100 % of slider). 48° by
+    /// default (owner clip 1: a held countersteer key + full throttle holds 30–45°).
     pub envelope_deg: f32,
     /// Straighten: extra countersteer past the travel while the slide angle still grows,
     /// × the tyres' peak slip at 0.5 rad/s of growth.
@@ -134,7 +135,7 @@ impl Default for DriftTuning {
             throttle_rise_s: 0.35,
             trim_margin_deg: 8.0,
             trim_depth: 0.6,
-            envelope_deg: 35.0,
+            envelope_deg: 48.0,
             straighten_gain: 1.0,
             lift_soften: 0.5,
         }
@@ -181,6 +182,9 @@ pub const LIFT_SOFT_S: f32 = 0.5;
 pub const HOLD_FOLLOW_UP_S: f32 = 0.6;
 /// … and down with this one, s.
 pub const HOLD_FOLLOW_DOWN_S: f32 = 1.5;
+
+/// Below this forward speed the intent modes are off (step 1 only), m/s.
+pub const INTENT_MIN_SPEED_MPS: f32 = 5.0;
 
 /// Slide angle that counts as a side for the lift-off transition, rad (2°).
 pub const TRANSITION_SIDE_RAD: f32 = 0.035;
@@ -386,7 +390,7 @@ impl DriftState {
         } else {
             intent(inp.driver, inp.side, inp.onset.max(1e-3))
         };
-        if !t.intent || inp.speed < 5.0 || inp.handbrake_hold {
+        if !t.intent || inp.speed < INTENT_MIN_SPEED_MPS || inp.handbrake_hold {
             // Step 1 only (or slow / handbrake): no envelope, no hold, no shaping.
             cmd.mode = raw_mode;
             self.reset_hold();
@@ -826,8 +830,8 @@ mod tests {
     #[test]
     fn envelope_by_slider_and_behaviour() {
         let t = DriftTuning::default();
-        assert!((base_envelope(&t, 0.6).to_degrees() - 35.0).abs() < 1e-3);
-        assert!((base_envelope(&t, 1.0).to_degrees() - 45.0).abs() < 1e-3);
+        assert!((base_envelope(&t, 0.6).to_degrees() - 48.0).abs() < 1e-3);
+        assert!((base_envelope(&t, 1.0).to_degrees() - 58.0).abs() < 1e-3);
         // A stable hold widens it; sawing at the keys narrows it.
         let mut st = DriftState::default();
         let calm = run(&mut st, &inputs(1.0, 20.0), 600);
@@ -865,14 +869,14 @@ mod tests {
             prev_slide: deg.to_radians(),
             ..DriftState::default()
         };
-        // Well inside (20° of 35°): no trim, only a rise-rate limit (no plateau).
+        // Well inside (20° of 48°): no trim, only a rise-rate limit (no plateau).
         let mut st = settled(20.0);
         let hold = run_with(&mut st, &inputs(-1.0, 20.0), 120, &on);
         assert_eq!(hold.throttle_scale, 1.0, "{hold:?}");
         assert!(hold.rise_time_s > 0.1, "{hold:?}");
-        // Near the edge (33°): trimmed.
-        let mut st = settled(33.0);
-        let near = run_with(&mut st, &inputs(-1.0, 33.0), 120, &on);
+        // Near the edge (46°): trimmed.
+        let mut st = settled(46.0);
+        let near = run_with(&mut st, &inputs(-1.0, 46.0), 120, &on);
         assert!(near.throttle_scale < 0.8, "{near:?}");
         // Past it: raw throttle, no help at all.
         let mut st = settled(70.0);

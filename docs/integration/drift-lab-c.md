@@ -875,6 +875,232 @@ Reading it:
    keeps rotating if you keep the key into the turn after the release.
 4. The S-bend and drift tips from steps 1–2 hold in 2nd gear.
 
+### Step 4 — the owner's Wreckfest clips (envelope 48°, tap and hairpin measurements)
+
+The lead analysed two owner clips (`docs/reference/wreckfest-keyboard.md` on `lead/round12`,
+"Clip 1 / Clip 2 analysis"). Primary criterion from clip 1: **the countersteer key held +
+full throttle holds a steady ~30–45° drift** in a powerful RWD car in 2nd gear without
+spinning, at the default strength; the envelope should cover ~45–50°; only excessive input
+spins. Clip 2: racing steering is mostly 0.1–0.25 s taps; a handbrake hairpin pivots
+150–180° in ~1 s and is caught at once with the countersteer key + throttle; a feint before
+turn-in should not be damped.
+
+**Changed.** `DriftTuning::envelope_deg` **35° → 48°** at the 60 % slider (30 % → 40.5°,
+100 % → 58°; still ±25° per 100 %). The held angle's cap (5° inside the envelope) rises with
+it to 43°. Nothing else: no throttle or yaw help (the owner plays with TCS and ESC off).
+`drift::INTENT_MIN_SPEED_MPS` (5 m/s) is now a named constant (tried 3 m/s for the hairpin
+exit: no better, kept 5).
+
+**Measured (reference settings: manual gears, drift in 2nd, TCS/ESC off), RWD summary:**
+
+| slider | driver | drift s (mean of cars) | longest s (best) | mean angle ° | sd ° (steadiness) | spins |
+|---|---|---|---|---|---|---|
+| 30 % | Good | 5.34 | 5.45 | 25 | 5.6 | 0/3 |
+| 30 % | Naive | 5.34 | 5.45 | 30 | 7.5 | 0/3 |
+| 30 % | IntoTurn | 5.34 | 5.45 | 26 | 5.6 | 0/3 |
+| 30 % | Sloppy | 2.69 | 5.37 | 22 | 8.0 | 40/60 |
+| 30 % | AbruptLift | 2.62 | 2.65 | 19 | 5.1 | 0/3 |
+| 30 % | Flood | 1.88 | 2.57 | 31 | 8.3 | 3/3 |
+| 30 % | FlickLift | 0.93 | 1.08 | 32 | 10.7 | 2/3 |
+| 60 % | Good | 5.34 | 5.45 | 25 | 5.6 | 0/3 |
+| 60 % | Naive | 5.34 | 5.45 | 29 | 7.6 | 0/3 |
+| 60 % | IntoTurn | 5.34 | 5.45 | 27 | 6.1 | 0/3 |
+| 60 % | Sloppy | 3.81 | 5.45 | 22 | 6.4 | 16/60 |
+| 60 % | AbruptLift | 2.59 | 2.61 | 19 | 5.1 | 0/3 |
+| 60 % | Flood | 3.14 | 3.43 | 34 | 8.4 | 3/3 |
+| 60 % | FlickLift | 0.63 | 0.79 | 18 | 4.1 | 0/3 |
+| 100 % | Good | 5.34 | 5.45 | 25 | 5.6 | 0/3 |
+| 100 % | Naive | 5.34 | 5.45 | 29 | 7.6 | 0/3 |
+| 100 % | IntoTurn | 5.34 | 5.45 | 27 | 6.3 | 0/3 |
+| 100 % | Sloppy | 2.87 | 5.45 | 18 | 4.9 | 2/60 |
+| 100 % | AbruptLift | 2.61 | 2.63 | 19 | 5.1 | 0/3 |
+| 100 % | Flood | 2.96 | 3.17 | 34 | 8.5 | 3/3 |
+| 100 % | FlickLift | 0.55 | 0.65 | 20 | 4.4 | 0/3 |
+
+All five cars at 60 %:
+
+| car | help | driver | drift s (mean) | longest s | max slip ° | snap ° | mean ° | sd ° | spins |
+|---|---|---|---|---|---|---|---|---|---|
+| shiro_turbo | 60 % | Good | 5.18 | 5.18 | 32 | 1 | 24 | 5.7 | 0/1 |
+| shiro_turbo | 60 % | Naive | 5.18 | 5.18 | 39 | 1 | 29 | 8.0 | 0/1 |
+| shiro_turbo | 60 % | IntoTurn | 5.18 | 5.18 | 36 | 1 | 26 | 6.1 | 0/1 |
+| shiro_turbo | 60 % | Sloppy | 3.34 | 5.18 | 87 | 73 | 20 | 5.5 | 6/20 |
+| shiro_turbo | 60 % | AbruptLift | 2.33 | 2.06 | 25 | 15 | 17 | 4.4 | 0/1 |
+| shiro_turbo | 60 % | Flood | 3.33 | 3.33 | 86 | 11 | 34 | 8.5 | 1/1 |
+| shiro_turbo | 60 % | FlickLift | 0.57 | 0.57 | 23 | 1 | 18 | 3.9 | 0/1 |
+| sperber_32 | 60 % | Good | 5.39 | 5.39 | 32 | 1 | 25 | 5.7 | 0/1 |
+| sperber_32 | 60 % | Naive | 5.39 | 5.39 | 38 | 1 | 29 | 7.8 | 0/1 |
+| sperber_32 | 60 % | IntoTurn | 5.39 | 5.39 | 33 | 1 | 27 | 6.3 | 0/1 |
+| sperber_32 | 60 % | Sloppy | 3.77 | 5.39 | 87 | 57 | 22 | 6.4 | 4/20 |
+| sperber_32 | 60 % | AbruptLift | 2.61 | 2.61 | 26 | 2 | 19 | 5.1 | 0/1 |
+| sperber_32 | 60 % | Flood | 3.43 | 3.43 | 86 | 7 | 33 | 9.2 | 1/1 |
+| sperber_32 | 60 % | FlickLift | 0.53 | 0.53 | 22 | 1 | 17 | 3.5 | 0/1 |
+| rampart_50 | 60 % | Good | 5.45 | 5.45 | 33 | 1 | 25 | 5.4 | 0/1 |
+| rampart_50 | 60 % | Naive | 5.45 | 5.45 | 38 | 1 | 30 | 7.0 | 0/1 |
+| rampart_50 | 60 % | IntoTurn | 5.45 | 5.45 | 35 | 1 | 27 | 5.8 | 0/1 |
+| rampart_50 | 60 % | Sloppy | 4.31 | 5.45 | 87 | 76 | 25 | 7.2 | 6/20 |
+| rampart_50 | 60 % | AbruptLift | 2.82 | 2.58 | 28 | 14 | 20 | 5.6 | 0/1 |
+| rampart_50 | 60 % | Flood | 2.66 | 2.66 | 86 | 5 | 36 | 7.5 | 1/1 |
+| rampart_50 | 60 % | FlickLift | 0.79 | 0.79 | 27 | 1 | 20 | 5.0 | 0/1 |
+| debug_sedan | 60 % | Good | 0.00 | 0.00 | 1 | 1 | 0 | 0.0 | 0/1 |
+| debug_sedan | 60 % | Naive | 0.00 | 0.00 | 1 | 1 | 0 | 0.0 | 0/1 |
+| debug_sedan | 60 % | IntoTurn | 0.00 | 0.00 | 1 | 1 | 0 | 0.0 | 0/1 |
+| debug_sedan | 60 % | Sloppy | 0.00 | 0.00 | 7 | 3 | 0 | 0.0 | 0/20 |
+| debug_sedan | 60 % | AbruptLift | 0.00 | 0.00 | 1 | 1 | 0 | 0.0 | 0/1 |
+| debug_sedan | 60 % | Flood | 0.90 | 0.90 | 34 | 2 | 25 | 7.1 | 0/1 |
+| debug_sedan | 60 % | FlickLift | 1.02 | 1.02 | 32 | 1 | 24 | 6.7 | 0/1 |
+| junkyard_beater | 60 % | Good | 0.00 | 0.00 | 3 | 0 | 0 | 0.0 | 0/1 |
+| junkyard_beater | 60 % | Naive | 0.00 | 0.00 | 3 | 0 | 0 | 0.0 | 0/1 |
+| junkyard_beater | 60 % | IntoTurn | 0.00 | 0.00 | 3 | 0 | 0 | 0.0 | 0/1 |
+| junkyard_beater | 60 % | Sloppy | 0.00 | 0.05 | 10 | 8 | 1 | 0.0 | 0/20 |
+| junkyard_beater | 60 % | AbruptLift | 0.00 | 0.00 | 3 | 0 | 0 | 0.0 | 0/1 |
+| junkyard_beater | 60 % | Flood | 1.17 | 1.17 | 34 | 2 | 24 | 7.1 | 0/1 |
+| junkyard_beater | 60 % | FlickLift | 1.12 | 1.12 | 31 | 1 | 23 | 6.4 | 0/1 |
+
+Reading it:
+- **Primary criterion met: Naive (countersteer key + full throttle) drifts 5.2–5.5 s of 6 s
+  at 29–31° mean (peak 38–39°), 0 spins, at 30 / 60 / 100 %.** Good the same at 25°.
+  (`tests/drift_lab_b.rs::held_counter_key_with_full_throttle_holds_too` checks 25–45° mean,
+  no spin, automatic and manual.)
+- **IntoTurn** (into key held) now holds too (0/3 at every slider): with the bigger envelope
+  more angle is no longer a mistake.
+- **Flood** (flicked +2 rad/s, into key + full throttle) drifts ~3 s at 34° before the angle
+  creeps past the envelope and it spins (3/3) — excessive input still costs. With the
+  automatic box (`cargo test` setup) the upshift saves it now.
+- **Sloppy** spins 16/60 at 60 % (was 39/60), 40/60 at 30 %, 2/60 at 100 %.
+
+Handbrake entry (row 108) and transitions (row 107) with the 48° envelope:
+
+counter key 30 %: caught 28/30, release→aligned mean 101 ms (29 aligned)
+counter key 60 %: caught 30/30, release→aligned mean 45 ms (30 aligned)
+counter key 100 %: caught 30/30, release→aligned mean 27 ms (30 aligned)
+keys released 30 %: caught 12/30, release→aligned mean 358 ms (30 aligned)
+keys released 60 %: caught 27/30, release→aligned mean 69 ms (30 aligned)
+keys released 100 %: caught 30/30, release→aligned mean 56 ms (30 aligned)
+
+30 %: spins 0/5, wobbles 0, new drift 1.35 s mean
+60 %: spins 0/5, wobbles 0, new drift 2.02 s mean
+100 %: spins 0/5, wobbles 0, new drift 2.00 s mean
+
+**Tap response (clip 2)** — one key tap on the straight, holding speed, 60 % (no change made:
+the keyboard ramp and rack rate are in `steering.rs`, which the parallel `lead/drift-twitch`
+session owns; the numbers are for that work):
+
+| car | km/h | tap s | peak wheel ° | peak yaw °/s | heading after 1.5 s ° | max slip ° |
+|---|---|---|---|---|---|---|
+| shiro_turbo | 60 | 0.1 | 7.7 | 19.2 | 2.4 | 0.7 |
+| shiro_turbo | 60 | 0.2 | 12.4 | 31.5 | 6.7 | 0.7 |
+| shiro_turbo | 60 | 0.4 | 12.5 | 36.1 | 13.6 | 1.6 |
+| shiro_turbo | 100 | 0.1 | 5.6 | 16.9 | 2.6 | 0.7 |
+| shiro_turbo | 100 | 0.2 | 8.9 | 28.4 | 5.7 | 2.0 |
+| shiro_turbo | 100 | 0.4 | 8.9 | 30.1 | 9.0 | 3.7 |
+| shiro_turbo | 140 | 0.1 | 4.9 | 16.3 | 3.0 | 1.0 |
+| shiro_turbo | 140 | 0.2 | 7.9 | 26.8 | 4.4 | 2.6 |
+| shiro_turbo | 140 | 0.4 | 7.9 | 27.9 | 5.9 | 4.7 |
+| sperber_32 | 60 | 0.1 | 8.0 | 19.7 | 2.4 | 0.6 |
+| sperber_32 | 60 | 0.2 | 12.8 | 31.6 | 6.7 | 0.8 |
+| sperber_32 | 60 | 0.4 | 12.9 | 35.5 | 13.3 | 1.7 |
+| sperber_32 | 100 | 0.1 | 5.7 | 17.5 | 2.7 | 0.8 |
+| sperber_32 | 100 | 0.2 | 9.1 | 28.9 | 5.6 | 2.2 |
+| sperber_32 | 100 | 0.4 | 9.1 | 30.6 | 9.0 | 4.1 |
+| sperber_32 | 140 | 0.1 | 5.0 | 16.8 | 3.2 | 1.1 |
+| sperber_32 | 140 | 0.2 | 8.0 | 27.4 | 4.1 | 2.7 |
+| sperber_32 | 140 | 0.4 | 8.0 | 28.8 | 5.7 | 5.2 |
+| rampart_50 | 60 | 0.1 | 7.9 | 17.2 | 2.2 | 0.7 |
+| rampart_50 | 60 | 0.2 | 12.8 | 29.2 | 6.3 | 0.8 |
+| rampart_50 | 60 | 0.4 | 12.9 | 33.2 | 12.9 | 1.5 |
+| rampart_50 | 100 | 0.1 | 5.7 | 15.0 | 2.5 | 0.6 |
+| rampart_50 | 100 | 0.2 | 9.1 | 26.0 | 5.6 | 1.9 |
+| rampart_50 | 100 | 0.4 | 9.1 | 28.4 | 8.7 | 3.6 |
+| rampart_50 | 140 | 0.1 | 5.0 | 14.3 | 2.8 | 0.9 |
+| rampart_50 | 140 | 0.2 | 8.0 | 25.0 | 4.5 | 2.4 |
+| rampart_50 | 140 | 0.4 | 8.0 | 25.8 | 5.8 | 4.4 |
+| debug_sedan | 60 | 0.1 | 8.0 | 15.3 | 2.3 | 0.8 |
+| debug_sedan | 60 | 0.2 | 13.6 | 27.4 | 6.7 | 0.9 |
+| debug_sedan | 60 | 0.4 | 13.7 | 32.8 | 11.8 | 2.6 |
+| debug_sedan | 100 | 0.1 | 6.4 | 14.0 | 2.8 | 0.7 |
+| debug_sedan | 100 | 0.2 | 10.3 | 25.3 | 5.0 | 2.2 |
+| debug_sedan | 100 | 0.4 | 10.3 | 28.2 | 7.0 | 4.3 |
+| debug_sedan | 140 | 0.1 | 5.9 | 13.5 | 3.3 | 1.1 |
+| debug_sedan | 140 | 0.2 | 9.4 | 24.0 | 3.5 | 2.7 |
+| debug_sedan | 140 | 0.4 | 9.4 | 26.6 | 3.9 | 5.2 |
+| junkyard_beater | 60 | 0.1 | 6.3 | 10.2 | 1.9 | 0.7 |
+| junkyard_beater | 60 | 0.2 | 12.6 | 26.7 | 4.5 | 2.5 |
+| junkyard_beater | 60 | 0.4 | 13.4 | 34.2 | 9.3 | 4.7 |
+| junkyard_beater | 100 | 0.1 | 6.3 | 11.3 | 3.0 | 1.1 |
+| junkyard_beater | 100 | 0.2 | 10.6 | 26.4 | 2.5 | 3.3 |
+| junkyard_beater | 100 | 0.4 | 10.7 | 32.5 | 4.8 | 6.7 |
+| junkyard_beater | 140 | 0.1 | 6.2 | 11.6 | 3.5 | 1.6 |
+| junkyard_beater | 140 | 0.2 | 9.9 | 25.8 | 1.1 | 3.6 |
+| junkyard_beater | 140 | 0.4 | 11.1 | 31.4 | 2.0 | 7.3 |
+
+A 0.2 s tap at 100 km/h gives **~9° at the wheels, ~26–28°/s peak yaw, ~5.6° of heading**
+— modest, no full-lock flick, no dead zone. 0.1 s gives ~60 % of it. 0.2 s and 0.4 s reach the
+same peak wheel angle (the key ramp reaches the speed-limited lock in ~0.16 s) and differ
+only in how long it is held; at 140 km/h a 0.4 s tap yaws 26°/s. *For drift-twitch:* if the
+owner wants 0.1 → 0.2 → 0.4 s to feel more graded, the ramp time (`STEER_RAMP_S` 0.16 s) is the
+knob; nothing in the drift assist acts on grip-driving taps (mode *grip*).
+
+**Handbrake hairpin (clip 2)** — new scripted driver `drift_lab::hairpin`: approach at 30 /
+50 km/h, 0.3 s feint (the key away from the turn, half throttle), the key into the turn +
+handbrake 1.0 s (throttle off), the throttle on still holding the key into the turn for 0.8 s,
+then the countersteer key + throttle until caught (≤ 2 s), then keys released + throttle.
+*pivot* = heading change while the handbrake is held; *catch* = countersteer key → body slip
+< 15° and |yaw| < 0.5 rad/s:
+
+| car | approach km/h | help | pivot ° (handbrake 1 s) | total ° | catch s | exit km/h | spun |
+|---|---|---|---|---|---|---|---|
+| shiro_turbo | 30 | 30 % | 19 | 334 | – | 7 | no |
+| shiro_turbo | 30 | 60 % | 22 | 335 | – | 10 | no |
+| shiro_turbo | 30 | 100 % | 24 | 349 | – | 7 | no |
+| shiro_turbo | 50 | 30 % | 44 | 266 | 2.76 | 10 | SPUN |
+| shiro_turbo | 50 | 60 % | 49 | 257 | 2.60 | 12 | SPUN |
+| shiro_turbo | 50 | 100 % | 54 | 251 | 2.52 | 12 | SPUN |
+| sperber_32 | 30 | 30 % | 24 | 297 | – | 18 | no |
+| sperber_32 | 30 | 60 % | 28 | 343 | – | 7 | no |
+| sperber_32 | 30 | 100 % | 31 | 343 | – | 6 | no |
+| sperber_32 | 50 | 30 % | 48 | 260 | 2.63 | 11 | SPUN |
+| sperber_32 | 50 | 60 % | 56 | 250 | 2.47 | 13 | SPUN |
+| sperber_32 | 50 | 100 % | 59 | 245 | 2.41 | 14 | SPUN |
+| rampart_50 | 30 | 30 % | 15 | 341 | – | 1 | SPUN |
+| rampart_50 | 30 | 60 % | 18 | 363 | – | -9 | SPUN |
+| rampart_50 | 30 | 100 % | 21 | 344 | – | -9 | SPUN |
+| rampart_50 | 50 | 30 % | 34 | 280 | – | 5 | SPUN |
+| rampart_50 | 50 | 60 % | 41 | 275 | – | 7 | SPUN |
+| rampart_50 | 50 | 100 % | 45 | 272 | 2.98 | 7 | SPUN |
+| debug_sedan | 30 | 30 % | 6 | 139 | 1.69 | 50 | no |
+| debug_sedan | 30 | 60 % | 9 | 147 | 1.81 | 48 | no |
+| debug_sedan | 30 | 100 % | 12 | 152 | 1.85 | 47 | no |
+| debug_sedan | 50 | 30 % | 22 | 69 | 1.11 | 58 | no |
+| debug_sedan | 50 | 60 % | 31 | 78 | 1.26 | 52 | no |
+| debug_sedan | 50 | 100 % | 35 | 82 | 1.31 | 50 | no |
+| junkyard_beater | 30 | 30 % | 1 | 142 | 1.67 | 40 | no |
+| junkyard_beater | 30 | 60 % | 11 | 166 | 1.88 | 39 | no |
+| junkyard_beater | 30 | 100 % | 16 | 180 | 2.05 | 38 | no |
+| junkyard_beater | 50 | 30 % | 19 | 120 | 2.73 | 22 | no |
+| junkyard_beater | 50 | 60 % | 30 | 212 | – | 1 | SPUN |
+| junkyard_beater | 50 | 100 % | 34 | 233 | – | -0 | SPUN |
+
+**This one does not match the clip yet, and it is not the drift assist.** The 1 s handbrake
+pivot is only 15–60° (clip: 150–180°) — at 30–50 km/h the locked rears stop the car before it
+rotates much — and in the RWD cars the 0.8 s of throttle with the key into the turn then
+turns it into a low-speed donut (250–360° in total) that the countersteer key + full
+throttle cannot catch below ~15 km/h (the drift assist is off below 5 m/s, and lowering that
+did not help: it is wheelspin at full lock). The front-drive cars pivot less and mostly drive out
+(caught in 1.1–2.7 s; junkyard_beater spins at 50 km/h, 60 % / 100 %). The pivot rate under the handbrake and low-speed power oversteer are vehicle
+physics (`ws/vehicle`: handbrake torque / rear lock, low-speed tyre model, 1st-gear torque),
+so this is a finding to hand over, not tuned here.
+
+**Owner, try (Drift Lab C, shiro_turbo / rampart_50, TCS off, ESC off, manual in 2nd, 60 %):**
+1. Turn in with the key into the turn + throttle, then **hold the countersteer key and keep
+   the throttle floored**: a steady drift around 30° (readout *HOLD*, envelope 48°) that does
+   not spin.
+2. Tap the key into the turn (0.1–0.4 s) to add angle; tap the throttle off to shorten it.
+3. Floor it with the key *into* the turn after a big flick: it holds a few seconds, then the
+   angle creeps past the envelope (*EXCEEDED*) and spins.
+4. On the straight: short taps at 100 km/h should give small, calm heading changes.
+5. Hairpins with the handbrake: known not to pivot as far as Wreckfest yet (see above).
+
 ## Known issues seen on the base branch (not from this work)
 
 On `origin/lead/drift-lab-b` (ae313e2, checked in a clean worktree): `cargo test -p simcli

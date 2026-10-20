@@ -5,7 +5,8 @@
 
 use wp_contracts::{AssistProfile, LoadedCar};
 use wp_vehicle::drift_lab::{
-    drift_run, handbrake_entry, kick_catch, transition_run, CatchDriver, DriftDriver,
+    drift_run, hairpin, handbrake_entry, kick_catch, tap_response, transition_run, CatchDriver,
+    DriftDriver,
 };
 
 fn car(id: &str) -> LoadedCar {
@@ -40,10 +41,17 @@ fn main() {
         ));
     }
     let mut args: Vec<String> = std::env::args().skip(1).collect();
-    let what = if args
-        .first()
-        .is_some_and(|a| ["catch", "drift", "transition", "handbrake"].contains(&a.as_str()))
-    {
+    let what = if args.first().is_some_and(|a| {
+        [
+            "catch",
+            "drift",
+            "transition",
+            "handbrake",
+            "tap",
+            "hairpin",
+        ]
+        .contains(&a.as_str())
+    }) {
         args.remove(0)
     } else {
         "all".into()
@@ -59,13 +67,19 @@ fn main() {
         .map(String::from)
         .to_vec();
     }
+    if what == "all" || what == "tap" {
+        tap_table(&args);
+    }
+    if what == "all" || what == "hairpin" {
+        hairpin_table(&args);
+    }
     if what == "all" || what == "handbrake" {
         handbrake_table(&args);
     }
     if what == "all" || what == "transition" {
         transition_table(&args);
     }
-    if what == "transition" || what == "handbrake" {
+    if ["transition", "handbrake", "tap", "hairpin"].contains(&what.as_str()) {
         return;
     }
     if what != "drift" {
@@ -299,6 +313,49 @@ fn handbrake_table(args: &[String]) {
                 caught[k][i],
                 if m > 0 { sum / m as f32 } else { 0.0 }
             );
+        }
+    }
+}
+
+fn tap_table(args: &[String]) {
+    println!("\n## Tap response (clip 2): one steering-key tap at speed, countersteer 60 %");
+    println!(
+        "| car | km/h | tap s | peak wheel ° | peak yaw °/s | heading after 1.5 s ° | max slip ° |"
+    );
+    println!("|---|---|---|---|---|---|---|");
+    for id in args {
+        let c = car(id);
+        for kmh in [60.0f32, 100.0, 140.0] {
+            for tap in [0.1f32, 0.2, 0.4] {
+                let r = tap_response(&c, &kb(0.6), kmh / 3.6, tap);
+                println!(
+                    "| {id} | {kmh:.0} | {tap:.1} | {:.1} | {:.1} | {:.1} | {:.1} |",
+                    r.peak_wheel_deg, r.peak_yaw_dps, r.heading_deg, r.max_slip_deg
+                );
+            }
+        }
+    }
+}
+
+fn hairpin_table(args: &[String]) {
+    println!("\n## Handbrake hairpin (clip 2): feint, key into the turn + handbrake 1 s, throttle, countersteer + throttle");
+    println!("| car | approach km/h | help | pivot ° (handbrake 1 s) | total ° | catch s | exit km/h | spun |");
+    println!("|---|---|---|---|---|---|---|---|");
+    for id in args {
+        let c = car(id);
+        for kmh in [30.0f32, 50.0] {
+            for help in [0.3f32, 0.6, 1.0] {
+                let r = hairpin(&c, &kb(help), kmh / 3.6);
+                println!(
+                    "| {id} | {kmh:.0} | {:.0} % | {:.0} | {:.0} | {} | {:.0} | {} |",
+                    help * 100.0,
+                    r.pivot_deg,
+                    r.total_deg,
+                    r.catch_s.map_or("–".to_string(), |t| format!("{t:.2}")),
+                    r.exit_kmh,
+                    if r.spun { "SPUN" } else { "no" }
+                );
+            }
         }
     }
 }
