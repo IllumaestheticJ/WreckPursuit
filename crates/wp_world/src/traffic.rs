@@ -1755,7 +1755,8 @@ impl Traffic {
                 match sy.phase {
                     YieldPhase::PullingOver | YieldPhase::Waiting if can_pull => {
                         lat_target = sy.side * kerb;
-                        let sideways = (a.lat - lat_target).abs() > 0.25;
+                        // Physical cars only move sideways while rolling: crawl until within 0.1 m.
+                        let sideways = (a.lat - lat_target).abs() > 0.1;
                         let vt = if sideways {
                             siren::PULL_OVER_CRAWL_MPS
                         } else {
