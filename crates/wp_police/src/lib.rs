@@ -302,6 +302,10 @@ pub struct PoliceStats {
     /// call was handed back (siren off) and they despawn out of sight.
     #[serde(default)]
     pub turn_loops: u32,
+    /// Units backing out of the way of a slow racer they weren't after
+    /// ([`stuck::GIVE_WAY_S`]).
+    #[serde(default)]
+    pub give_ways: u32,
     /// Ground units spawned after the session start (pool refills, responders,
     /// reinforcements, tool units).
     pub spawns: Vec<SpawnRecord>,
@@ -1198,6 +1202,28 @@ impl PoliceSystem {
         }
     }
 
+    /// Whether another car is closing on unit `i` and would reach it within
+    /// [`TURN_LOOK_S`]: a unit not chasing anyone doesn't start turning across the road then (opponent-pace: units
+    /// turning round on the Hollins hairpin, just after the race leader passed, ended up across
+    /// both lanes in front of the next racer).
+    fn traffic_closing(&self, i: usize) -> bool {
+        let u = &self.units[i];
+        let (id, entity, pos) = (u.id, u.entity, u.body.pos);
+        self.obstacles.iter().any(|o| {
+            if o.ghost || o.unit == Some(id) || (o.entity.is_some() && o.entity == entity) {
+                return false;
+            }
+            let r = graph::sub(o.pos, pos);
+            let d2 = graph::dot(r, r);
+            if !(1e-4..=TURN_LOOK_M * TURN_LOOK_M).contains(&d2) {
+                return false;
+            }
+            // Closing speed along the line between them, times the distance: c·d.
+            let cd = -graph::dot(r, o.vel);
+            cd > TURN_LOOK_MIN_MPS * d2.sqrt() && d2 < cd * TURN_LOOK_S
+        })
+    }
+
     /// Driver input for an externally driven AI unit, from `wp_world`'s shared
     /// [`DriveController`](wp_world::drive::DriveController): pure-pursuit steering toward the
     /// unit's track and PID pedals toward its planned speed. Call once per physics tick with
@@ -1305,7 +1331,11 @@ impl PoliceSystem {
             && v < stuck::SWING_MAX_MPS
             && now >= u.unstick.swing_ready
             && u.unstick.may_turn(now)
-            && graph::dist(pos, [target[0], target[1]]) > 6.0;
+            && graph::dist(pos, [target[0], target[1]]) > 6.0
+            && (matches!(
+                u.assignment,
+                Assignment::Pursue { .. } | Assignment::Intercept { .. }
+            ) || !self.traffic_closing(i));
         // Room for the turning circle (row 66: full-lock turns on narrow streets hit buildings):
         // forward round a centre on the target's side, backwards round one on the other side.
         let left_t = graph::cross(heading, to_t) > 0.0;
@@ -1405,6 +1435,103 @@ impl PoliceSystem {
             u.unstick.phase = stuck::Phase::Drive;
             u.unstick.slow_s = 0.0;
         }
+        // Give way (opponent-pace): standing blocked by a slow racer it isn't after, back out
+        // of its way, swinging the nose back along the lane, then wait there (avoid still
+        // holds it) so the racer can get past. Counts as a turn-round try.
+        // Gave way: wait for that racer to get past (it is still in front and close).
+        if let Some((e, until)) = u.unstick.give_way_to {
+            let waiting = now < until
+                && !disabled
+                && self.racers.get(&e).is_some_and(|r| {
+                    let d = graph::sub([r.pos[0], r.pos[1]], pos);
+                    graph::dot(d, heading) > 0.0
+                        && graph::dot(d, d) < stuck::GIVE_WAY_HOLD_M * stuck::GIVE_WAY_HOLD_M
+                });
+            if waiting {
+                let (_, b) = self.units[i].controller().pedals(v, -brake, dt, true);
+                let (brake, handbrake) = standstill_hold(v, b);
+                return Some(VehicleInput {
+                    brake,
+                    handbrake,
+                    siren: siren_out,
+                    headlights: true,
+                    ..Default::default()
+                });
+            }
+            self.units[i].unstick.give_way_to = None;
+        }
+        let u = &mut self.units[i];
+        // The slow racer it is in the way of: the one blocking it, or (blocked by anything)
+        // one standing close by, the two of them stuck round the same car (Hollins hairpin).
+        let after = |e: EntityId| {
+            matches!(
+                u.assignment,
+                Assignment::Pursue { target, .. } | Assignment::Intercept { target, .. }
+                    if target == e
+            )
+        };
+        let slow = stuck::GIVE_WAY_RACER_MPS * stuck::GIVE_WAY_RACER_MPS;
+        let near = stuck::GIVE_WAY_NEAR_M * stuck::GIVE_WAY_NEAR_M;
+        let give_way_racer = match u.avoid.blocked_by {
+            Some(avoid::BlockedBy::Vehicle(e))
+                if self.racers.get(&e).is_some_and(|r| {
+                    !after(e) && r.vel[0] * r.vel[0] + r.vel[1] * r.vel[1] < slow
+                }) =>
+            {
+                Some(e)
+            }
+            Some(_) => self
+                .racers
+                .iter()
+                .filter(|(e, r)| {
+                    let d = graph::sub([r.pos[0], r.pos[1]], pos);
+                    !after(**e)
+                        && graph::dot(d, d) < near
+                        && r.vel[0] * r.vel[0] + r.vel[1] * r.vel[1] < slow
+                })
+                .map(|(e, _)| *e)
+                .next(),
+            None => None,
+        };
+        let racer_block = give_way_racer.is_some();
+        let u = &mut self.units[i];
+        if racer_block && v.abs() < 0.5 && !disabled {
+            u.unstick.give_way_s += dt;
+        } else {
+            u.unstick.give_way_s = 0.0;
+        }
+        if u.unstick.give_way_s >= stuck::GIVE_WAY_S
+            && u.unstick.may_turn(now)
+            && self.room_behind(i, stuck::GIVE_WAY_M)
+        {
+            let u = &mut self.units[i];
+            u.unstick.give_way_s = 0.0;
+            u.unstick.note_turn(pos, now);
+            if let Some(e) = give_way_racer {
+                u.unstick.give_way_to = Some((
+                    e,
+                    now.plus(2.0 * stuck::REVERSE_MAX_S + stuck::GIVE_WAY_HOLD_S),
+                ));
+            }
+            // Straight back: make room in front (steering round near a hairpin swung it
+            // across the road).
+            let steer = 0.0;
+            u.unstick.phase = stuck::Phase::Reverse {
+                from: pos,
+                dist_m: stuck::GIVE_WAY_M,
+                until: now.plus(2.0 * stuck::REVERSE_MAX_S),
+                steer,
+            };
+            self.stats.give_ways += 1;
+            return Some(VehicleInput {
+                steer,
+                brake: 1.0,
+                siren: siren_out,
+                headlights: true,
+                ..Default::default()
+            });
+        }
+        let u = &mut self.units[i];
         // Push-through (row 61): with lights on, blocked by a stopped civilian or parked car
         // it can't pass, shove it aside at low speed; if that doesn't move it, un-stick.
         let av = self.cfg.pursuit.avoid.clone();
@@ -1666,6 +1793,12 @@ const BACKWARDS_MPS: f32 = 1.0;
 const REVERSE_MAX_MPS: f32 = 3.0;
 
 /// Fastest a unit reverses in a three-point turn (slower and the turn doesn't come round in
+/// A car closing on a unit this soon stops it from starting a turn-round, s.
+const TURN_LOOK_S: f32 = 4.0;
+/// ... looking this far, m.
+const TURN_LOOK_M: f32 = 80.0;
+/// ... and closing at least this fast, m/s.
+const TURN_LOOK_MIN_MPS: f32 = 2.0;
 /// its time), m/s.
 const SWING_REVERSE_MAX_MPS: f32 = 5.0;
 

@@ -84,6 +84,13 @@ const RESPOND_HOLD_RACER_M: f32 = 250.0;
 /// A responder with the reported racer coming head-on this close pulls over and stops, m.
 const RESPOND_YIELD_M: f32 = 70.0;
 
+/// A yielding responder stops only this well lined up with its lane (cos 15°); before that it
+/// creeps on at [`RESPOND_YIELD_CREEP_MPS`].
+const RESPOND_YIELD_ALIGNED_COS: f32 = 0.966;
+
+/// See [`RESPOND_YIELD_ALIGNED_COS`], m/s.
+const RESPOND_YIELD_CREEP_MPS: f32 = 2.0;
+
 /// How far further right a yielding responder pulls over, m.
 const RESPOND_YIELD_SHIFT_M: f32 = 1.2;
 
@@ -867,7 +874,21 @@ impl PoliceSystem {
                         let head_on = dot(rv, u.body.heading) < -3.0;
                         self.units[i].unstick.yield_s = 0.0;
                         if d < RESPOND_YIELD_M && ahead && head_on {
-                            self.units[i].cmd.speed_mps = 0.0;
+                            // Stop only lined up with the lane: stopped half way round a bend
+                            // it stood across the road (opponent-pace, Hollins hairpin).
+                            // Until then creep on along it.
+                            let u = &self.units[i];
+                            let t = &u.cmd.track;
+                            let a = crate::unit::lane_point(t, u.track_s, 0.0);
+                            let b = crate::unit::lane_point(t, u.track_s + 2.0, 0.0);
+                            let along = crate::graph::normalize(sub(b, a));
+                            let aligned = !t.is_drivable()
+                                || dot(along, u.body.heading) >= RESPOND_YIELD_ALIGNED_COS;
+                            self.units[i].cmd.speed_mps = if aligned {
+                                0.0
+                            } else {
+                                RESPOND_YIELD_CREEP_MPS
+                            };
                             self.units[i].cmd.lane_offset_m = LANE_OFFSET_M + RESPOND_YIELD_SHIFT_M;
                             continue;
                         }
