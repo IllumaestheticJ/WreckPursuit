@@ -75,8 +75,9 @@ const rows = await page.evaluate(async (n) => {
   const plain = sc.renderOverride;
   sc.renderOverride = (c) => sc.renderer.render(sc.scene, c);
   row("− post stack (plain render)", () => (sc.renderOverride = plain));
+  const bloom = s.bloom;
   s.bloom = false;
-  row("− bloom", () => (s.bloom = true));
+  row(bloom ? "− bloom" : "(bloom already off)", () => (s.bloom = bloom));
   row("− street lamps", hide(find((o) => o.name === "style-street-lamps")));
   row("− light pools", hide(find((o) => o.isInstancedMesh && o.renderOrder === 2)));
   row("− sky dome", hide(find((o) => o.renderOrder === -10)));

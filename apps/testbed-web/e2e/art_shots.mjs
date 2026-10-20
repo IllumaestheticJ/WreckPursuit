@@ -34,7 +34,9 @@ const page = await (await browser.newContext({ viewport: { width: vw, height: vh
 const errors = [];
 page.on("pageerror", (e) => errors.push(String(e)));
 page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
-await page.goto(`${URL}?style=lowpoly`);
+// gfx=high: the full look (native resolution, MSAA, light pools, bloom) as on a hardware GPU;
+// headless Chromium is a software rasterizer, where "auto" picks the low profile.
+await page.goto(`${URL}?style=lowpoly&gfx=${process.env.GFX ?? "high"}`);
 await page.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 30000 });
 
 /** City chase in Port Vesper at `hour` (the preset is 23:00), optionally rainy. */
@@ -100,7 +102,9 @@ const cop = await page.evaluate(() => {
   if (best) {
     const v = w.app.views.get(best);
     const set = v.setMeta.bind(v);
-    v.setMeta = (flags, t) => set(flags | 1 | 2, t); // siren + headlights
+    // Siren + headlights; `__copT` pins the strobe phase (screenshots at ~1 fps would otherwise
+    // sample it at random).
+    v.setMeta = (flags, t) => set(flags | 1 | 2, window.__copT ?? t);
   }
   return best;
 });
@@ -112,10 +116,16 @@ if (cop) {
     w.setCamera("chase");
   }, cop);
   await page.waitForTimeout(1500);
+  // Phases of the 2.5 Hz pattern (vehicle_view.ts setMeta): red strobe, blue strobe, gap.
+  const phases = [0.05, 0.55, 0.16];
   for (let i = 0; i < 3; i++) {
+    await page.evaluate(async (t) => {
+      window.__copT = t / 2.5;
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    }, phases[i]);
     await page.screenshot({ path: join(out, `night_police_${i}.png`) });
-    await page.waitForTimeout(170);
   }
+  await page.evaluate(() => delete window.__copT);
   await page.evaluate(() => {
     const w = window.__wp;
     w.app.focus = w.app.player;
