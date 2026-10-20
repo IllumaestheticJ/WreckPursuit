@@ -1,26 +1,33 @@
 //! Drift Lab C measurement tables (docs/integration/drift-lab-c.md; B's are in drift-lab-b.md).
 //! `cargo run --release -p wp_vehicle --example drift_lab_c [catch|drift] [car_id ...]`
-//! Env: `GAMEPAD=1` (gamepad preset), `DRIFT_TUNING='{...}'` (constants override).
+//! Env: `GAMEPAD=1` (gamepad preset), `AUTO_GEARS=1` (automatic box; default manual, the
+//! owner's reference), `DRIFT_TUNING='{...}'` (constants override).
 
 use wp_contracts::{AssistProfile, LoadedCar};
-use wp_vehicle::drift_lab::{drift_run, kick_catch, transition_run, CatchDriver, DriftDriver};
+use wp_vehicle::drift_lab::{
+    drift_run, handbrake_entry, kick_catch, transition_run, CatchDriver, DriftDriver,
+};
 
 fn car(id: &str) -> LoadedCar {
     let p = format!("{}/../../data/cars/{id}.json", env!("CARGO_MANIFEST_DIR"));
     wp_contracts::load_car(p).unwrap()
 }
 
-/// Keyboard preset (GAMEPAD=1: gamepad preset), TCS / ESC off, countersteer `help`.
+/// Keyboard preset (GAMEPAD=1: gamepad preset), TCS / ESC off, manual gears, countersteer
+/// `help`.
 fn kb(help: f32) -> AssistProfile {
     let base = if std::env::var("GAMEPAD").is_ok() {
         AssistProfile::gamepad_default()
     } else {
         AssistProfile::keyboard_default()
     };
+    // The owner's reference (Wreckfest: TCS off, ESC off, manual shifting): manual gears, the
+    // driver holds the gear the automatic box picked while settling. AUTO_GEARS=1: automatic.
     AssistProfile {
         countersteer_help: help,
         tcs: false,
         esc: false,
+        auto_gears: std::env::var("AUTO_GEARS").is_ok(),
         ..base
     }
 }
@@ -35,7 +42,7 @@ fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let what = if args
         .first()
-        .is_some_and(|a| a == "catch" || a == "drift" || a == "transition")
+        .is_some_and(|a| ["catch", "drift", "transition", "handbrake"].contains(&a.as_str()))
     {
         args.remove(0)
     } else {
@@ -52,10 +59,13 @@ fn main() {
         .map(String::from)
         .to_vec();
     }
+    if what == "all" || what == "handbrake" {
+        handbrake_table(&args);
+    }
     if what == "all" || what == "transition" {
         transition_table(&args);
     }
-    if what == "transition" {
+    if what == "transition" || what == "handbrake" {
         return;
     }
     if what != "drift" {
@@ -234,5 +244,61 @@ fn transition_table(args: &[String]) {
             "\n{help} %: spins {sp}/{n}, wobbles {w}, new drift {:.2} s mean",
             d / n as f32
         );
+    }
+}
+
+fn handbrake_table(args: &[String]) {
+    println!("\n## Handbrake entry (row 108): key into the turn + handbrake tap, then countersteer key (or keys released) + throttle");
+    println!("| car | km/h | tap s | counter key: release→aligned ms (30 / 60 / 100 %) | keys released: release→aligned ms (30 / 60 / 100 %) | caught counter (30/60/100) | caught released (30/60/100) |");
+    println!("|---|---|---|---|---|---|---|");
+    let helps = [0.3f32, 0.6, 1.0];
+    let mut caught = [[0usize; 3]; 2];
+    let mut aligned = [[(0.0f32, 0usize); 3]; 2];
+    let mut n = 0usize;
+    for id in args {
+        let c = car(id);
+        for kmh in [50.0f32, 80.0] {
+            for tap in [0.3f32, 0.45, 0.6] {
+                n += 1;
+                let mut cells = Vec::new();
+                let mut caughts = Vec::new();
+                for (k, counter) in [true, false].into_iter().enumerate() {
+                    let rs: Vec<_> = helps
+                        .iter()
+                        .map(|h| handbrake_entry(&c, &kb(*h), kmh / 3.6, tap, counter))
+                        .collect();
+                    let mut al = Vec::new();
+                    let mut cs = Vec::new();
+                    for (i, r) in rs.iter().enumerate() {
+                        caught[k][i] += r.caught as usize;
+                        match r.release_to_aligned_s {
+                            Some(t) => {
+                                aligned[k][i].0 += t * 1000.0;
+                                aligned[k][i].1 += 1;
+                                al.push(format!("{:.0}", t * 1000.0));
+                            }
+                            None => al.push("–".into()),
+                        }
+                        cs.push(if r.caught { "y" } else { "SPUN" });
+                    }
+                    cells.push(al.join(" / "));
+                    caughts.push(cs.join(" / "));
+                }
+                println!(
+                    "| {id} | {kmh:.0} | {tap:.2} | {} | {} | {} | {} |",
+                    cells[0], cells[1], caughts[0], caughts[1]
+                );
+            }
+        }
+    }
+    for (k, name) in ["counter key", "keys released"].into_iter().enumerate() {
+        for (i, h) in [30, 60, 100].into_iter().enumerate() {
+            let (sum, m) = aligned[k][i];
+            println!(
+                "\n{name} {h} %: caught {}/{n}, release→aligned mean {:.0} ms ({m} aligned)",
+                caught[k][i],
+                if m > 0 { sum / m as f32 } else { 0.0 }
+            );
+        }
     }
 }

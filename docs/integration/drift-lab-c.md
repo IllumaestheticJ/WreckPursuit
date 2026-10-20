@@ -466,16 +466,421 @@ Cones mark the inside of each corner (left-handers included).
    transition), as in step 1.
 5. Untick *lift-off transitions* in the tune panel to feel step 1 again.
 
+### Step 3 — handbrake catch (row 108) + the owner's reference settings
+
+Owner: *"it also steers too slow to catch handbrake initiations."* Lead, reference data: the
+owner's Wreckfest settings are TCS off, ESC off, **manual shifting** — the keyboard feel comes
+from the steering model alone. From this step every table is measured that way.
+
+**Measured cause** (`handbrake_entry`, new driver: straight at 50 / 80 km/h, key into a left
+turn + handbrake 0.3 / 0.45 / 0.6 s, then the handbrake released and either the countersteer
+key or the keys released, throttle key modulated, 3 s). With the **countersteer key** the
+catch was already fast (step 1's fast rack works under the handbrake too: wheels at the
+travel 45 ms after the release at 60 %, 30/30 caught). With the **keys released** — the
+self-aligning catch — the assists stayed off for `HANDBRAKE_GRACE_S` = 0.5 s after the
+release (rows 56 / 72), the wheels crept back on the slow key ramp, and only 12 of 30 entries
+were caught at 60 %, the wheels reaching the travel ~0.5–1.3 s after the release. Before:
+
+counter key 30 %: caught 27/30, release→aligned mean 101 ms (29 aligned)
+counter key 60 %: caught 30/30, release→aligned mean 45 ms (30 aligned)
+counter key 100 %: caught 30/30, release→aligned mean 27 ms (30 aligned)
+keys released 30 %: caught 9/30, release→aligned mean 517 ms (27 aligned)
+keys released 60 %: caught 12/30, release→aligned mean 481 ms (26 aligned)
+keys released 100 %: caught 15/30, release→aligned mean 506 ms (27 aligned)
+
+**Changed** (`drift.rs::handbrake_assist_hold`, used by `vehicle.rs` for the steering
+assists only; ESC and the automatic clutch keep the 0.5 s grace):
+- handbrake **held**: unchanged — self-align off, handbrake turns rotate freely; the
+  countersteer key gets the fast rack and the opened lock as before;
+- **released, keys released**: the assists are back after **80 ms**
+  (`HANDBRAKE_ASSIST_GRACE_S`);
+- **released, countersteer key**: back at once (Hold);
+- **released, key still into the turn**: the whole 0.5 s grace as before (the handbrake turn
+  goes on rotating freely — `tests/handbrake.rs`, row 72, still passes);
+- the drift a handbrake entry starts gets the fresh-drift grace of step 2 (0.6 s without the
+  envelope look-ahead): the slide is growing fast by design, and without it the counter key's
+  Hold tripped *exceeded* and dropped the catch (29 → 24 / 30 in an intermediate try).
+
+**Measured after** (manual gears, TCS/ESC off; *release→aligned* = first time the wheels are
+within 3° of the front axle's travel after the release):
+
+| car | km/h | tap s | counter key: release→aligned ms (30 / 60 / 100 %) | keys released: release→aligned ms (30 / 60 / 100 %) | caught counter (30/60/100) | caught released (30/60/100) |
+|---|---|---|---|---|---|---|
+| shiro_turbo | 50 | 0.30 | 46 / 25 / 17 | 46 / 25 / 17 | y / y / y | y / y / y |
+| shiro_turbo | 50 | 0.45 | 83 / 38 / 21 | 83 / 38 / 21 | y / y / y | SPUN / y / y |
+| shiro_turbo | 50 | 0.60 | 163 / 67 / 38 | 988 / 100 / 92 | y / y / y | SPUN / y / y |
+| shiro_turbo | 80 | 0.30 | 46 / 21 / 13 | 46 / 21 / 13 | y / y / y | y / y / y |
+| shiro_turbo | 80 | 0.45 | 100 / 42 / 25 | 1142 / 104 / 92 | y / y / y | SPUN / y / y |
+| shiro_turbo | 80 | 0.60 | – / 79 / 46 | 825 / 142 / 117 | SPUN / y / y | SPUN / SPUN / y |
+| sperber_32 | 50 | 0.30 | 54 / 29 / 17 | 54 / 29 / 17 | y / y / y | y / y / y |
+| sperber_32 | 50 | 0.45 | 96 / 42 / 25 | 96 / 42 / 25 | y / y / y | SPUN / y / y |
+| sperber_32 | 50 | 0.60 | 1188 / 79 / 46 | 921 / 104 / 96 | y / y / y | SPUN / y / y |
+| sperber_32 | 80 | 0.30 | 50 / 25 / 17 | 50 / 25 / 17 | y / y / y | SPUN / y / y |
+| sperber_32 | 80 | 0.45 | 117 / 46 / 29 | 1062 / 108 / 96 | y / y / y | SPUN / y / y |
+| sperber_32 | 80 | 0.60 | – / 92 / 50 | 742 / 904 / 121 | SPUN / SPUN / y | SPUN / SPUN / SPUN |
+| rampart_50 | 50 | 0.30 | 50 / 25 / 17 | 50 / 25 / 17 | y / y / y | y / y / y |
+| rampart_50 | 50 | 0.45 | 79 / 38 / 21 | 79 / 38 / 21 | y / y / y | SPUN / y / y |
+| rampart_50 | 50 | 0.60 | 142 / 62 / 38 | 142 / 92 / 88 | y / y / y | SPUN / y / y |
+| rampart_50 | 80 | 0.30 | 46 / 21 / 13 | 46 / 21 / 13 | y / y / y | y / y / y |
+| rampart_50 | 80 | 0.45 | 88 / 38 / 25 | 121 / 96 / 92 | y / y / y | SPUN / y / y |
+| rampart_50 | 80 | 0.60 | – / 71 / 42 | 1021 / 133 / 108 | SPUN / y / y | SPUN / SPUN / y |
+| debug_sedan | 50 | 0.30 | 58 / 29 / 21 | 58 / 29 / 21 | y / y / y | y / y / y |
+| debug_sedan | 50 | 0.45 | 75 / 38 / 21 | 75 / 38 / 21 | y / y / y | y / y / y |
+| debug_sedan | 50 | 0.60 | 125 / 54 / 33 | 125 / 54 / 33 | y / y / y | y / y / y |
+| debug_sedan | 80 | 0.30 | 50 / 25 / 17 | 50 / 25 / 17 | y / y / y | y / y / y |
+| debug_sedan | 80 | 0.45 | 88 / 38 / 25 | 104 / 92 / 88 | y / y / y | y / y / y |
+| debug_sedan | 80 | 0.60 | 163 / 67 / 38 | 1279 / 121 / 104 | y / y / y | SPUN / y / y |
+| junkyard_beater | 50 | 0.30 | 58 / 29 / 17 | 58 / 29 / 17 | y / y / y | y / y / y |
+| junkyard_beater | 50 | 0.45 | 83 / 38 / 25 | 83 / 38 / 25 | y / y / y | y / y / y |
+| junkyard_beater | 50 | 0.60 | 142 / 62 / 38 | 142 / 96 / 92 | y / y / y | SPUN / y / y |
+| junkyard_beater | 80 | 0.30 | 54 / 25 / 17 | 54 / 25 / 17 | y / y / y | y / y / y |
+| junkyard_beater | 80 | 0.45 | 96 / 42 / 25 | 117 / 96 / 88 | y / y / y | SPUN / y / y |
+| junkyard_beater | 80 | 0.60 | 183 / 71 / 42 | 1113 / 129 / 108 | SPUN / y / y | SPUN / SPUN / y |
+
+counter key 30 %: caught 26/30, release→aligned mean 130 ms (27 aligned)
+
+counter key 60 %: caught 29/30, release→aligned mean 45 ms (30 aligned)
+
+counter key 100 %: caught 30/30, release→aligned mean 27 ms (30 aligned)
+
+keys released 30 %: caught 13/30, release→aligned mean 359 ms (30 aligned)
+
+keys released 60 %: caught 26/30, release→aligned mean 94 ms (30 aligned)
+
+keys released 100 %: caught 29/30, release→aligned mean 56 ms (30 aligned)
+
+At 60 %: keys released **12 → 26 / 30 caught, ~480 → 94 ms** to the travel; counter key 30 →
+29 / 30 (sperber_32 at 80 km/h after a 0.6 s tap — a 60°+ rotation — is the miss), 45 ms.
+The remaining misses are the longest taps at 80 km/h: the car has rotated past what the
+envelope covers.
+
+**Reference settings in the tables.** `examples/drift_lab_c.rs` now uses manual gears (TCS
+off, ESC off) by default: the automatic box picks the gear while the scripted drivers settle,
+then the drift drivers shift down to 2nd for the drift (`drift_lab::DRIFT_GEAR`) and hold it,
+as a manual player would; the handbrake / catch drivers keep the gear they cruise in.
+`AUTO_GEARS=1` gives the old automatic tables. (Without the downshift, shiro_turbo and
+sperber_32 sit in 3rd–4th and barely drift: 8° average.) The `cargo test` checks still use the
+keyboard preset with the automatic box.
+
+Re-measured, reference settings (manual, TCS/ESC off), keyboard:
+
+| slider | driver | drift s (mean of cars) | longest s (best) | mean angle ° | sd ° (steadiness) | spins |
+|---|---|---|---|---|---|---|
+| 30 % | Good | 5.34 | 5.45 | 25 | 5.4 | 0/3 |
+| 30 % | Naive | 5.34 | 5.45 | 27 | 5.7 | 0/3 |
+| 30 % | IntoTurn | 1.77 | 1.90 | 23 | 10.1 | 3/3 |
+| 30 % | Sloppy | 1.78 | 3.64 | 22 | 9.5 | 51/60 |
+| 30 % | AbruptLift | 2.63 | 2.69 | 18 | 4.8 | 0/3 |
+| 30 % | Flood | 0.44 | 0.46 | 29 | 11.4 | 3/3 |
+| 30 % | FlickLift | 0.61 | 0.66 | 30 | 11.5 | 3/3 |
+| 60 % | Good | 5.34 | 5.45 | 25 | 5.6 | 0/3 |
+| 60 % | Naive | 5.34 | 5.45 | 29 | 7.6 | 0/3 |
+| 60 % | IntoTurn | 2.79 | 2.96 | 27 | 10.2 | 1/3 |
+| 60 % | Sloppy | 2.86 | 5.27 | 22 | 7.5 | 39/60 |
+| 60 % | AbruptLift | 2.59 | 2.61 | 19 | 5.1 | 0/3 |
+| 60 % | Flood | 0.78 | 1.25 | 30 | 9.9 | 3/3 |
+| 60 % | FlickLift | 0.70 | 0.91 | 23 | 6.1 | 0/3 |
+| 100 % | Good | 5.34 | 5.45 | 25 | 5.6 | 0/3 |
+| 100 % | Naive | 5.34 | 5.45 | 29 | 7.6 | 0/3 |
+| 100 % | IntoTurn | 5.34 | 5.45 | 27 | 5.9 | 0/3 |
+| 100 % | Sloppy | 2.63 | 4.12 | 18 | 4.9 | 10/60 |
+| 100 % | AbruptLift | 2.61 | 2.63 | 19 | 5.1 | 0/3 |
+| 100 % | Flood | 2.89 | 3.20 | 33 | 7.8 | 3/3 |
+| 100 % | FlickLift | 0.55 | 0.65 | 20 | 4.4 | 0/3 |
+
+All five cars at 60 %:
+
+| car | help | driver | drift s (mean) | longest s | max slip ° | snap ° | mean ° | sd ° | spins |
+|---|---|---|---|---|---|---|---|---|---|
+| shiro_turbo | 60 % | Good | 5.18 | 5.18 | 32 | 1 | 24 | 5.7 | 0/1 |
+| shiro_turbo | 60 % | Naive | 5.18 | 5.18 | 39 | 1 | 29 | 8.0 | 0/1 |
+| shiro_turbo | 60 % | IntoTurn | 3.20 | 2.96 | 65 | 1 | 27 | 10.9 | 0/1 |
+| shiro_turbo | 60 % | Sloppy | 2.84 | 5.18 | 87 | 84 | 20 | 6.5 | 9/20 |
+| shiro_turbo | 60 % | AbruptLift | 2.33 | 2.06 | 25 | 15 | 17 | 4.4 | 0/1 |
+| shiro_turbo | 60 % | Flood | 0.58 | 0.58 | 86 | 25 | 30 | 10.7 | 1/1 |
+| shiro_turbo | 60 % | FlickLift | 0.63 | 0.63 | 24 | 1 | 18 | 4.0 | 0/1 |
+| sperber_32 | 60 % | Good | 5.39 | 5.39 | 32 | 1 | 25 | 5.7 | 0/1 |
+| sperber_32 | 60 % | Naive | 5.39 | 5.39 | 38 | 1 | 29 | 7.8 | 0/1 |
+| sperber_32 | 60 % | IntoTurn | 2.85 | 2.81 | 73 | 40 | 27 | 10.2 | 0/1 |
+| sperber_32 | 60 % | Sloppy | 2.90 | 5.27 | 87 | 84 | 20 | 6.8 | 10/20 |
+| sperber_32 | 60 % | AbruptLift | 2.61 | 2.61 | 26 | 2 | 19 | 5.1 | 0/1 |
+| sperber_32 | 60 % | Flood | 1.25 | 1.25 | 86 | 20 | 31 | 8.1 | 1/1 |
+| sperber_32 | 60 % | FlickLift | 0.55 | 0.55 | 22 | 1 | 17 | 3.6 | 0/1 |
+| rampart_50 | 60 % | Good | 5.45 | 5.45 | 33 | 1 | 25 | 5.4 | 0/1 |
+| rampart_50 | 60 % | Naive | 5.45 | 5.45 | 38 | 1 | 30 | 7.0 | 0/1 |
+| rampart_50 | 60 % | IntoTurn | 2.33 | 2.33 | 85 | 1 | 27 | 9.6 | 1/1 |
+| rampart_50 | 60 % | Sloppy | 2.83 | 4.72 | 87 | 84 | 25 | 9.2 | 20/20 |
+| rampart_50 | 60 % | AbruptLift | 2.82 | 2.58 | 28 | 14 | 20 | 5.6 | 0/1 |
+| rampart_50 | 60 % | Flood | 0.50 | 0.50 | 86 | 29 | 30 | 11.0 | 1/1 |
+| rampart_50 | 60 % | FlickLift | 0.91 | 0.91 | 72 | 0 | 33 | 10.5 | 0/1 |
+| debug_sedan | 60 % | Good | 0.00 | 0.00 | 1 | 1 | 0 | 0.0 | 0/1 |
+| debug_sedan | 60 % | Naive | 0.00 | 0.00 | 1 | 1 | 0 | 0.0 | 0/1 |
+| debug_sedan | 60 % | IntoTurn | 0.00 | 0.00 | 1 | 1 | 0 | 0.0 | 0/1 |
+| debug_sedan | 60 % | Sloppy | 0.00 | 0.00 | 7 | 3 | 0 | 0.0 | 0/20 |
+| debug_sedan | 60 % | AbruptLift | 0.00 | 0.00 | 1 | 1 | 0 | 0.0 | 0/1 |
+| debug_sedan | 60 % | Flood | 3.93 | 3.19 | 83 | 31 | 22 | 8.4 | 0/1 |
+| debug_sedan | 60 % | FlickLift | 0.60 | 0.60 | 84 | 1 | 31 | 11.1 | 1/1 |
+| junkyard_beater | 60 % | Good | 0.00 | 0.00 | 3 | 0 | 0 | 0.0 | 0/1 |
+| junkyard_beater | 60 % | Naive | 0.00 | 0.00 | 3 | 0 | 0 | 0.0 | 0/1 |
+| junkyard_beater | 60 % | IntoTurn | 0.00 | 0.00 | 3 | 0 | 0 | 0.0 | 0/1 |
+| junkyard_beater | 60 % | Sloppy | 0.00 | 0.05 | 10 | 8 | 1 | 0.0 | 0/20 |
+| junkyard_beater | 60 % | AbruptLift | 0.00 | 0.00 | 3 | 0 | 0 | 0.0 | 0/1 |
+| junkyard_beater | 60 % | Flood | 0.55 | 0.55 | 85 | 31 | 32 | 10.9 | 1/1 |
+| junkyard_beater | 60 % | FlickLift | 0.69 | 0.69 | 85 | 4 | 32 | 10.7 | 1/1 |
+
+Lift-off transitions (step 2), reference settings — at 60 % **0.73–0.84 s swaps, no spin, no
+wobble, 3.2–3.3 s of new drift**:
+
+| car | help | transition s | peak new-side slide ° | peak yaw rad/s | wobbles | new drift s | spun |
+|---|---|---|---|---|---|---|---|
+| shiro_turbo | 30 % | 0.91 | 81 | 2.52 | 0 | 1.04 | no |
+| shiro_turbo | 60 % | 0.73 | 29 | 2.35 | 0 | 3.27 | no |
+| shiro_turbo | 100 % | 0.64 | 25 | 2.29 | 0 | 3.36 | no |
+| sperber_32 | 30 % | 0.83 | 63 | 2.42 | 0 | 1.52 | no |
+| sperber_32 | 60 % | 0.75 | 27 | 2.42 | 0 | 3.25 | no |
+| sperber_32 | 100 % | 0.64 | 24 | 2.32 | 0 | 3.36 | no |
+| rampart_50 | 30 % | 0.88 | 56 | 2.22 | 0 | 1.89 | no |
+| rampart_50 | 60 % | 0.84 | 30 | 2.28 | 0 | 3.16 | no |
+| rampart_50 | 100 % | 0.73 | 28 | 2.20 | 0 | 3.27 | no |
+| debug_sedan | 30 % | never | 0 | 0.55 | 0 | 0.00 | no |
+| debug_sedan | 60 % | never | 0 | 0.54 | 0 | 0.00 | no |
+| debug_sedan | 100 % | never | 0 | 0.55 | 0 | 0.00 | no |
+| junkyard_beater | 30 % | 0.97 | 11 | 0.81 | 0 | 0.45 | no |
+| junkyard_beater | 60 % | 0.95 | 11 | 0.81 | 0 | 0.41 | no |
+| junkyard_beater | 100 % | never | 0 | 0.82 | 0 | 0.00 | no |
+
+30 %: spins 0/5, wobbles 0, new drift 0.98 s mean
+
+60 %: spins 0/5, wobbles 0, new drift 2.02 s mean
+
+100 %: spins 0/5, wobbles 0, new drift 2.00 s mean
+
+…and with `transition` off (step 1 behaviour), same settings:
+
+| car | help | transition s | peak new-side slide ° | peak yaw rad/s | wobbles | new drift s | spun |
+|---|---|---|---|---|---|---|---|
+| shiro_turbo | 30 % | 2.95 | 81 | 0.00 | 0 | 0.00 | spun |
+| shiro_turbo | 60 % | never | 0 | 0.00 | 0 | 0.00 | no |
+| shiro_turbo | 100 % | 1.78 | 25 | 0.87 | 0 | 2.22 | no |
+| sperber_32 | 30 % | 2.38 | 23 | 0.83 | 0 | 1.62 | no |
+| sperber_32 | 60 % | never | 0 | 0.00 | 0 | 0.00 | no |
+| sperber_32 | 100 % | 1.83 | 23 | 0.85 | 0 | 2.17 | no |
+| rampart_50 | 30 % | never | 0 | 0.01 | 0 | 0.00 | no |
+| rampart_50 | 60 % | never | 0 | 0.00 | 0 | 0.00 | no |
+| rampart_50 | 100 % | never | 0 | 0.05 | 0 | 0.00 | no |
+
+30 %: spins 1/3, wobbles 0, new drift 0.54 s mean
+
+60 %: spins 0/3, wobbles 0, new drift 0.00 s mean
+
+100 %: spins 0/3, wobbles 0, new drift 1.46 s mean
+
+Catch (yaw kicks), reference settings — released keys 90/90, late key 88/90:
+
+| car | km/h | CS slew °/s (late key) | onset→aligned ms (released, caught runs: mean, n aligned) | peak align err ° (caught) | released caught | late-key caught |
+|---|---|---|---|---|---|---|
+| shiro_turbo | 60 | 398 | 364 (6/6) | 5.8 | 6/6 | 6/6 |
+| shiro_turbo | 100 | 398 | 388 (6/6) | 5.1 | 6/6 | 6/6 |
+| shiro_turbo | 140 | 398 | 358 (6/6) | 4.9 | 6/6 | 6/6 |
+| sperber_32 | 60 | 381 | 350 (6/6) | 6.8 | 6/6 | 6/6 |
+| sperber_32 | 100 | 381 | 375 (6/6) | 5.2 | 6/6 | 6/6 |
+| sperber_32 | 140 | 381 | 344 (6/6) | 5.0 | 6/6 | 6/6 |
+| rampart_50 | 60 | 379 | 445 (6/6) | 6.2 | 6/6 | 6/6 |
+| rampart_50 | 100 | 379 | 483 (6/6) | 5.1 | 6/6 | 6/6 |
+| rampart_50 | 140 | 379 | 451 (6/6) | 5.0 | 6/6 | 6/6 |
+| debug_sedan | 60 | 355 | 547 (6/6) | 6.7 | 6/6 | 6/6 |
+| debug_sedan | 100 | 355 | 583 (6/6) | 6.1 | 6/6 | 6/6 |
+| debug_sedan | 140 | 355 | 676 (6/6) | 6.1 | 6/6 | 6/6 |
+| junkyard_beater | 60 | 363 | 566 (6/6) | 7.0 | 6/6 | 6/6 |
+| junkyard_beater | 100 | 363 | 611 (6/6) | 6.7 | 6/6 | 6/6 |
+| junkyard_beater | 140 | 363 | 643 (6/6) | 6.6 | 6/6 | 4/6 |
+
+Automatic gears (`AUTO_GEARS=1`) for comparison (RWD summary):
+
+| slider | driver | drift s (mean of cars) | longest s (best) | mean angle ° | sd ° (steadiness) | spins |
+|---|---|---|---|---|---|---|
+| 30 % | Good | 5.26 | 5.37 | 23 | 6.0 | 0/3 |
+| 30 % | Naive | 5.26 | 5.37 | 26 | 6.1 | 0/3 |
+| 30 % | IntoTurn | 2.77 | 2.54 | 21 | 9.5 | 2/3 |
+| 30 % | Sloppy | 2.10 | 5.37 | 21 | 8.7 | 45/60 |
+| 30 % | AbruptLift | 2.39 | 2.53 | 16 | 3.4 | 0/3 |
+| 30 % | Flood | 0.45 | 0.46 | 29 | 11.4 | 3/3 |
+| 30 % | FlickLift | 0.62 | 0.67 | 30 | 11.5 | 3/3 |
+| 60 % | Good | 5.24 | 5.39 | 23 | 6.0 | 0/3 |
+| 60 % | Naive | 5.24 | 5.39 | 27 | 7.2 | 0/3 |
+| 60 % | IntoTurn | 4.00 | 5.18 | 24 | 9.1 | 1/3 |
+| 60 % | Sloppy | 2.75 | 5.39 | 18 | 5.4 | 22/60 |
+| 60 % | AbruptLift | 2.44 | 2.55 | 16 | 3.8 | 0/3 |
+| 60 % | Flood | 0.90 | 1.58 | 31 | 9.9 | 3/3 |
+| 60 % | FlickLift | 0.69 | 0.90 | 23 | 6.0 | 0/3 |
+| 100 % | Good | 5.24 | 5.38 | 23 | 6.1 | 0/3 |
+| 100 % | Naive | 5.24 | 5.38 | 28 | 7.1 | 0/3 |
+| 100 % | IntoTurn | 5.24 | 5.38 | 23 | 6.9 | 0/3 |
+| 100 % | Sloppy | 2.28 | 4.48 | 16 | 3.7 | 4/60 |
+| 100 % | AbruptLift | 2.45 | 2.56 | 17 | 3.9 | 0/3 |
+| 100 % | Flood | 4.28 | 5.92 | 30 | 8.4 | 2/3 |
+
+Gamepad preset, reference settings (RWD summary):
+
+| slider | driver | drift s (mean of cars) | longest s (best) | mean angle ° | sd ° (steadiness) | spins |
+|---|---|---|---|---|---|---|
+| 30 % | Good | 0.64 | 0.71 | 28 | 11.7 | 3/3 |
+| 30 % | Naive | 0.74 | 0.85 | 28 | 11.1 | 3/3 |
+| 30 % | IntoTurn | 0.61 | 0.68 | 27 | 11.7 | 3/3 |
+| 30 % | Sloppy | 0.74 | 2.04 | 27 | 11.3 | 59/60 |
+| 30 % | AbruptLift | 0.64 | 0.71 | 28 | 11.7 | 3/3 |
+| 30 % | Flood | 0.39 | 0.40 | 29 | 11.5 | 3/3 |
+| 30 % | FlickLift | 0.60 | 0.64 | 30 | 11.4 | 3/3 |
+| 60 % | Good | 1.30 | 1.02 | 26 | 10.1 | 3/3 |
+| 60 % | Naive | 1.28 | 0.98 | 23 | 9.6 | 3/3 |
+| 60 % | IntoTurn | 0.61 | 0.68 | 27 | 11.6 | 3/3 |
+| 60 % | Sloppy | 0.85 | 2.57 | 26 | 11.1 | 58/60 |
+| 60 % | AbruptLift | 1.25 | 1.23 | 22 | 7.7 | 1/3 |
+| 60 % | Flood | 0.39 | 0.40 | 29 | 11.4 | 3/3 |
+| 60 % | FlickLift | 0.78 | 0.89 | 23 | 6.3 | 1/3 |
+| 100 % | Good | 2.76 | 0.91 | 19 | 5.6 | 0/3 |
+| 100 % | Naive | 1.21 | 0.83 | 23 | 9.7 | 3/3 |
+| 100 % | IntoTurn | 0.61 | 0.68 | 27 | 11.7 | 3/3 |
+| 100 % | Sloppy | 1.03 | 2.00 | 25 | 9.6 | 46/60 |
+| 100 % | AbruptLift | 1.43 | 0.92 | 20 | 7.5 | 1/3 |
+| 100 % | Flood | 0.39 | 0.40 | 29 | 11.4 | 3/3 |
+
+<details><summary>Full keyboard drift table, reference settings (5 cars)</summary>
+
+| car | help | driver | drift s (mean) | longest s | max slip ° | snap ° | mean ° | sd ° | spins |
+|---|---|---|---|---|---|---|---|---|---|
+| shiro_turbo | 30 % | Good | 5.19 | 5.19 | 32 | 1 | 24 | 5.6 | 0/1 |
+| shiro_turbo | 30 % | Naive | 5.19 | 5.19 | 33 | 1 | 26 | 6.1 | 0/1 |
+| shiro_turbo | 30 % | IntoTurn | 1.90 | 1.90 | 86 | 1 | 22 | 9.9 | 1/1 |
+| shiro_turbo | 30 % | Sloppy | 1.83 | 3.64 | 87 | 84 | 21 | 8.5 | 14/20 |
+| shiro_turbo | 30 % | AbruptLift | 2.33 | 2.03 | 24 | 16 | 17 | 4.3 | 0/1 |
+| shiro_turbo | 30 % | Flood | 0.44 | 0.44 | 86 | 25 | 29 | 11.4 | 1/1 |
+| shiro_turbo | 30 % | FlickLift | 0.63 | 0.63 | 84 | 2 | 30 | 11.5 | 1/1 |
+| shiro_turbo | 60 % | Good | 5.18 | 5.18 | 32 | 1 | 24 | 5.7 | 0/1 |
+| shiro_turbo | 60 % | Naive | 5.18 | 5.18 | 39 | 1 | 29 | 8.0 | 0/1 |
+| shiro_turbo | 60 % | IntoTurn | 3.20 | 2.96 | 65 | 1 | 27 | 10.9 | 0/1 |
+| shiro_turbo | 60 % | Sloppy | 2.84 | 5.18 | 87 | 84 | 20 | 6.5 | 9/20 |
+| shiro_turbo | 60 % | AbruptLift | 2.33 | 2.06 | 25 | 15 | 17 | 4.4 | 0/1 |
+| shiro_turbo | 60 % | Flood | 0.58 | 0.58 | 86 | 25 | 30 | 10.7 | 1/1 |
+| shiro_turbo | 60 % | FlickLift | 0.63 | 0.63 | 24 | 1 | 18 | 4.0 | 0/1 |
+| shiro_turbo | 100 % | Good | 5.19 | 5.19 | 32 | 1 | 24 | 5.7 | 0/1 |
+| shiro_turbo | 100 % | Naive | 5.19 | 5.19 | 39 | 1 | 29 | 8.0 | 0/1 |
+| shiro_turbo | 100 % | IntoTurn | 5.19 | 5.19 | 35 | 1 | 26 | 6.0 | 0/1 |
+| shiro_turbo | 100 % | Sloppy | 2.36 | 3.64 | 86 | 83 | 17 | 4.5 | 2/20 |
+| shiro_turbo | 100 % | AbruptLift | 2.33 | 2.07 | 25 | 15 | 17 | 4.5 | 0/1 |
+| shiro_turbo | 100 % | Flood | 3.03 | 3.03 | 86 | 9 | 32 | 8.0 | 1/1 |
+| shiro_turbo | 100 % | FlickLift | 0.52 | 0.52 | 24 | 3 | 19 | 4.2 | 0/1 |
+| sperber_32 | 30 % | Good | 5.37 | 5.37 | 33 | 1 | 25 | 5.7 | 0/1 |
+| sperber_32 | 30 % | Naive | 5.37 | 5.37 | 33 | 1 | 27 | 5.9 | 0/1 |
+| sperber_32 | 30 % | IntoTurn | 1.80 | 1.80 | 86 | 1 | 23 | 10.2 | 1/1 |
+| sperber_32 | 30 % | Sloppy | 1.82 | 3.02 | 87 | 84 | 22 | 9.8 | 17/20 |
+| sperber_32 | 30 % | AbruptLift | 2.69 | 2.69 | 25 | 2 | 18 | 4.8 | 0/1 |
+| sperber_32 | 30 % | Flood | 0.46 | 0.46 | 85 | 25 | 29 | 11.5 | 1/1 |
+| sperber_32 | 30 % | FlickLift | 0.66 | 0.66 | 84 | 2 | 30 | 11.5 | 1/1 |
+| sperber_32 | 60 % | Good | 5.39 | 5.39 | 32 | 1 | 25 | 5.7 | 0/1 |
+| sperber_32 | 60 % | Naive | 5.39 | 5.39 | 38 | 1 | 29 | 7.8 | 0/1 |
+| sperber_32 | 60 % | IntoTurn | 2.85 | 2.81 | 73 | 40 | 27 | 10.2 | 0/1 |
+| sperber_32 | 60 % | Sloppy | 2.90 | 5.27 | 87 | 84 | 20 | 6.8 | 10/20 |
+| sperber_32 | 60 % | AbruptLift | 2.61 | 2.61 | 26 | 2 | 19 | 5.1 | 0/1 |
+| sperber_32 | 60 % | Flood | 1.25 | 1.25 | 86 | 20 | 31 | 8.1 | 1/1 |
+| sperber_32 | 60 % | FlickLift | 0.55 | 0.55 | 22 | 1 | 17 | 3.6 | 0/1 |
+| sperber_32 | 100 % | Good | 5.38 | 5.38 | 32 | 1 | 25 | 5.7 | 0/1 |
+| sperber_32 | 100 % | Naive | 5.38 | 5.38 | 38 | 1 | 29 | 7.8 | 0/1 |
+| sperber_32 | 100 % | IntoTurn | 5.38 | 5.38 | 33 | 1 | 27 | 6.2 | 0/1 |
+| sperber_32 | 100 % | Sloppy | 2.46 | 3.54 | 87 | 57 | 17 | 4.6 | 3/20 |
+| sperber_32 | 100 % | AbruptLift | 2.61 | 2.61 | 26 | 9 | 19 | 5.1 | 0/1 |
+| sperber_32 | 100 % | Flood | 3.20 | 3.20 | 86 | 8 | 32 | 8.4 | 1/1 |
+| sperber_32 | 100 % | FlickLift | 0.48 | 0.48 | 22 | 2 | 18 | 3.7 | 0/1 |
+| rampart_50 | 30 % | Good | 5.45 | 5.45 | 32 | 1 | 25 | 4.9 | 0/1 |
+| rampart_50 | 30 % | Naive | 5.45 | 5.45 | 33 | 1 | 28 | 5.2 | 0/1 |
+| rampart_50 | 30 % | IntoTurn | 1.60 | 1.60 | 86 | 1 | 25 | 10.0 | 1/1 |
+| rampart_50 | 30 % | Sloppy | 1.69 | 3.02 | 87 | 84 | 24 | 10.0 | 20/20 |
+| rampart_50 | 30 % | AbruptLift | 2.89 | 2.67 | 27 | 13 | 20 | 5.3 | 0/1 |
+| rampart_50 | 30 % | Flood | 0.43 | 0.43 | 86 | 46 | 29 | 11.4 | 1/1 |
+| rampart_50 | 30 % | FlickLift | 0.55 | 0.55 | 84 | 0 | 30 | 11.4 | 1/1 |
+| rampart_50 | 60 % | Good | 5.45 | 5.45 | 33 | 1 | 25 | 5.4 | 0/1 |
+| rampart_50 | 60 % | Naive | 5.45 | 5.45 | 38 | 1 | 30 | 7.0 | 0/1 |
+| rampart_50 | 60 % | IntoTurn | 2.33 | 2.33 | 85 | 1 | 27 | 9.6 | 1/1 |
+| rampart_50 | 60 % | Sloppy | 2.83 | 4.72 | 87 | 84 | 25 | 9.2 | 20/20 |
+| rampart_50 | 60 % | AbruptLift | 2.82 | 2.58 | 28 | 14 | 20 | 5.6 | 0/1 |
+| rampart_50 | 60 % | Flood | 0.50 | 0.50 | 86 | 29 | 30 | 11.0 | 1/1 |
+| rampart_50 | 60 % | FlickLift | 0.91 | 0.91 | 72 | 0 | 33 | 10.5 | 0/1 |
+| rampart_50 | 100 % | Good | 5.45 | 5.45 | 33 | 1 | 25 | 5.4 | 0/1 |
+| rampart_50 | 100 % | Naive | 5.45 | 5.45 | 38 | 1 | 30 | 7.0 | 0/1 |
+| rampart_50 | 100 % | IntoTurn | 5.45 | 5.45 | 35 | 1 | 27 | 5.6 | 0/1 |
+| rampart_50 | 100 % | Sloppy | 3.08 | 4.12 | 87 | 83 | 20 | 5.7 | 5/20 |
+| rampart_50 | 100 % | AbruptLift | 2.89 | 2.63 | 28 | 14 | 20 | 5.8 | 0/1 |
+| rampart_50 | 100 % | Flood | 2.42 | 2.42 | 86 | 4 | 35 | 7.1 | 1/1 |
+| rampart_50 | 100 % | FlickLift | 0.65 | 0.65 | 28 | 4 | 22 | 5.4 | 0/1 |
+| debug_sedan | 30 % | Good | 0.00 | 0.00 | 1 | 1 | 0 | 0.0 | 0/1 |
+| debug_sedan | 30 % | Naive | 0.00 | 0.00 | 1 | 1 | 0 | 0.0 | 0/1 |
+| debug_sedan | 30 % | IntoTurn | 0.00 | 0.00 | 1 | 1 | 0 | 0.0 | 0/1 |
+| debug_sedan | 30 % | Sloppy | 0.00 | 0.00 | 7 | 3 | 0 | 0.0 | 0/20 |
+| debug_sedan | 30 % | AbruptLift | 0.00 | 0.00 | 1 | 1 | 0 | 0.0 | 0/1 |
+| debug_sedan | 30 % | Flood | 0.46 | 0.46 | 85 | 26 | 31 | 11.5 | 1/1 |
+| debug_sedan | 30 % | FlickLift | 0.52 | 0.52 | 84 | 1 | 30 | 11.4 | 1/1 |
+| debug_sedan | 60 % | Good | 0.00 | 0.00 | 1 | 1 | 0 | 0.0 | 0/1 |
+| debug_sedan | 60 % | Naive | 0.00 | 0.00 | 1 | 1 | 0 | 0.0 | 0/1 |
+| debug_sedan | 60 % | IntoTurn | 0.00 | 0.00 | 1 | 1 | 0 | 0.0 | 0/1 |
+| debug_sedan | 60 % | Sloppy | 0.00 | 0.00 | 7 | 3 | 0 | 0.0 | 0/20 |
+| debug_sedan | 60 % | AbruptLift | 0.00 | 0.00 | 1 | 1 | 0 | 0.0 | 0/1 |
+| debug_sedan | 60 % | Flood | 3.93 | 3.19 | 83 | 31 | 22 | 8.4 | 0/1 |
+| debug_sedan | 60 % | FlickLift | 0.60 | 0.60 | 84 | 1 | 31 | 11.1 | 1/1 |
+| debug_sedan | 100 % | Good | 0.00 | 0.00 | 1 | 1 | 0 | 0.0 | 0/1 |
+| debug_sedan | 100 % | Naive | 0.00 | 0.00 | 1 | 1 | 0 | 0.0 | 0/1 |
+| debug_sedan | 100 % | IntoTurn | 0.00 | 0.00 | 1 | 1 | 0 | 0.0 | 0/1 |
+| debug_sedan | 100 % | Sloppy | 0.00 | 0.00 | 7 | 3 | 0 | 0.0 | 0/20 |
+| debug_sedan | 100 % | AbruptLift | 0.00 | 0.00 | 1 | 1 | 0 | 0.0 | 0/1 |
+| debug_sedan | 100 % | Flood | 0.88 | 0.88 | 33 | 2 | 24 | 6.8 | 0/1 |
+| debug_sedan | 100 % | FlickLift | 0.83 | 0.83 | 34 | 7 | 26 | 7.1 | 0/1 |
+| junkyard_beater | 30 % | Good | 0.00 | 0.00 | 3 | 0 | 0 | 0.0 | 0/1 |
+| junkyard_beater | 30 % | Naive | 0.00 | 0.00 | 3 | 0 | 0 | 0.0 | 0/1 |
+| junkyard_beater | 30 % | IntoTurn | 0.00 | 0.00 | 3 | 0 | 0 | 0.0 | 0/1 |
+| junkyard_beater | 30 % | Sloppy | 0.00 | 0.00 | 9 | 8 | 0 | 0.0 | 0/20 |
+| junkyard_beater | 30 % | AbruptLift | 0.00 | 0.00 | 3 | 0 | 0 | 0.0 | 0/1 |
+| junkyard_beater | 30 % | Flood | 0.43 | 0.43 | 86 | 80 | 30 | 11.6 | 1/1 |
+| junkyard_beater | 30 % | FlickLift | 0.55 | 0.55 | 85 | 3 | 30 | 11.2 | 1/1 |
+| junkyard_beater | 60 % | Good | 0.00 | 0.00 | 3 | 0 | 0 | 0.0 | 0/1 |
+| junkyard_beater | 60 % | Naive | 0.00 | 0.00 | 3 | 0 | 0 | 0.0 | 0/1 |
+| junkyard_beater | 60 % | IntoTurn | 0.00 | 0.00 | 3 | 0 | 0 | 0.0 | 0/1 |
+| junkyard_beater | 60 % | Sloppy | 0.00 | 0.05 | 10 | 8 | 1 | 0.0 | 0/20 |
+| junkyard_beater | 60 % | AbruptLift | 0.00 | 0.00 | 3 | 0 | 0 | 0.0 | 0/1 |
+| junkyard_beater | 60 % | Flood | 0.55 | 0.55 | 85 | 31 | 32 | 10.9 | 1/1 |
+| junkyard_beater | 60 % | FlickLift | 0.69 | 0.69 | 85 | 4 | 32 | 10.7 | 1/1 |
+| junkyard_beater | 100 % | Good | 0.00 | 0.00 | 3 | 0 | 0 | 0.0 | 0/1 |
+| junkyard_beater | 100 % | Naive | 0.00 | 0.00 | 3 | 0 | 0 | 0.0 | 0/1 |
+| junkyard_beater | 100 % | IntoTurn | 0.00 | 0.00 | 3 | 0 | 0 | 0.0 | 0/1 |
+| junkyard_beater | 100 % | Sloppy | 0.01 | 0.10 | 10 | 8 | 1 | 0.0 | 0/20 |
+| junkyard_beater | 100 % | AbruptLift | 0.00 | 0.00 | 3 | 0 | 0 | 0.0 | 0/1 |
+| junkyard_beater | 100 % | Flood | 1.11 | 1.11 | 33 | 2 | 23 | 6.8 | 0/1 |
+| junkyard_beater | 100 % | FlickLift | 0.97 | 0.97 | 34 | 4 | 26 | 7.1 | 0/1 |
+
+</details>
+
+Reading it:
+- **Good countersteer-hold: 5.3–5.4 s of 6 s, 0 spins at 30 / 60 / 100 %**, steadier and a
+  little bigger (25°) than with the automatic box (which upshifts mid-drift).
+- **Sloppy spins 39/60 at 60 %** (51/60 at 30 %, 10/60 at 100 %), **Flood 3/3** at every
+  slider: mistakes cost more in 2nd gear with no TCS — the owner's reference.
+- **IntoTurn** (into key held): long drift at 100 %, 1/3 spins at 60 %, 3/3 at 30 %.
+- Handbrake: see above. Transitions: see above.
+
+**Owner, try (Drift Lab C, shiro_turbo / rampart_50, TCS off, ESC off, manual gears in 2nd,
+60 %):**
+1. 80 km/h on the long straight: key into the turn + handbrake tap, release the handbrake and
+   **let go of the steering** — the wheels should snap to the travel within ~0.1 s and catch
+   it (readout *STRAIGHTEN*).
+2. Same, but press the countersteer key as you release: *HOLD* at once, the slide held.
+3. Hold the handbrake and the key into the turn: still rotates freely (a handbrake turn), and
+   keeps rotating if you keep the key into the turn after the release.
+4. The S-bend and drift tips from steps 1–2 hold in 2nd gear.
+
 ## Known issues seen on the base branch (not from this work)
 
-None in `cargo test -p wp_vehicle` after the step 1b merge (the two round12 failures B listed
-are fixed on round12).
-
-Changed test bounds (this work): `snapshot::set_state_is_a_close_approximation` 1.0 → 2.0 m
-(1.49 m now: the restored car re-ramps its throttle and with no throttle shaping that matters
-more in a power slide; it passes at 0.7 shaping); `drift_lab_b::late_counter_key_catches_kicks_at_speed`
-slew floor 300 → 250 °/s (the counter key is Hold now: it aims at the holding opposite lock,
-less travel at the same rate; all kicks still caught).
+On `origin/lead/drift-lab-b` (ae313e2, checked in a clean worktree): `cargo test -p simcli
+--test scenarios goldens_match` fails 26 goldens and `wp_race::race_picker::hollins_hill_sprint`
+fails ("only 2 of 4 finished"); `lead/drift-lab-c` shows the same. Goldens are lead-owned
+(`[bless]` commits): not re-blessed here. `cargo test -p wp_vehicle` passes.
 
 ## Contract change requests
 
@@ -485,7 +890,9 @@ data). None new.
 ## Known gaps
 
 - Gamepad: only key-style scripted drivers are measured (an analog driver is the next
-  measurement).
+  measurement); with manual gears the key-style gamepad driver spins most first drifts.
+- The `cargo test` drift checks use the automatic box; the tables use the owner's reference
+  (manual gears).
 - The tuning override is process-wide and not in recordings.
 - Machine A's TCS levels (Off/Low/High) / slide-feathering removal / keyboard throttle
   filter were not on `lead/round12` or `ws/vehicle` at the final push; merge

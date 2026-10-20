@@ -5,7 +5,9 @@
 //! for the full tables).
 
 use wp_contracts::{AssistProfile, LoadedCar};
-use wp_vehicle::drift_lab::{drift_run, kick_catch, transition_run, CatchDriver, DriftDriver};
+use wp_vehicle::drift_lab::{
+    drift_run, handbrake_entry, kick_catch, transition_run, CatchDriver, DriftDriver,
+};
 
 fn car(id: &str) -> LoadedCar {
     let p = format!("{}/../../data/cars/{id}.json", env!("CARGO_MANIFEST_DIR"));
@@ -146,5 +148,19 @@ fn lift_off_transition_swaps_smoothly() {
         assert!(!r.spun && r.wobbles == 0, "{id}: {r:?}");
         assert!(r.transition_s.is_some_and(|t| t < 1.2), "{id}: {r:?}");
         assert!(r.new_drift_s > 2.5 && r.peak_new_deg < 40.0, "{id}: {r:?}");
+    }
+}
+
+#[test]
+fn released_keys_catch_a_handbrake_entry() {
+    // Row 108: after a handbrake tap the self-aligning catch is back within ~0.1 s (it was off
+    // for 0.5 s and released keys caught 12 of 30 entries at 60 %). 80 km/h, 0.45 s tap.
+    for id in RWD {
+        let r = handbrake_entry(&car(id), &kb(0.6), 80.0 / 3.6, 0.45, false);
+        assert!(r.caught, "{id}: {r:?}");
+        let t = r.release_to_aligned_s.expect("aligned");
+        assert!(t < 0.2, "{id}: aligned {t} s after the release");
+        let c = handbrake_entry(&car(id), &kb(0.6), 80.0 / 3.6, 0.45, true);
+        assert!(c.caught, "{id} counter key: {c:?}");
     }
 }

@@ -6,6 +6,7 @@
 //! |---|---|
 //! | [`kick_catch`] | straight at speed, a yaw-rate kick; the driver releases the keys, or holds the countersteer key after a reaction time: countersteer slew, onset-to-aligned time, caught or spun |
 //! | [`drift_run`] | a power-oversteer drift on a circle held by a scripted driver ([`DriftDriver`]): drift time inside the window, spun or not |
+//! | [`handbrake_entry`] | straight at speed, key into the turn + a handbrake tap, then the countersteer key + throttle (row 108): release-to-aligned time, caught or spun |
 //! | [`transition_run`] | a left drift, a lift-off swing into a right drift (S-bend, row 107): transition time, overshoot, wobbles, spun or not |
 //!
 //! Definitions (fixed here, independent of the assist's own tuning):
@@ -24,6 +25,15 @@ use crate::rig::Rig;
 use crate::steering::{front_axle_angle, rear_axle_slip};
 
 const TICKS_PER_S: usize = 240;
+
+/// With manual gears ([`AssistProfile::auto_gears`] off, the owner's reference) the scripted
+/// drift drivers shift down to this gear for the drift, as a player would.
+pub const DRIFT_GEAR: i8 = 2;
+
+/// Gear-down key for a manual-gear drift driver: down until [`DRIFT_GEAR`].
+fn drift_gear_down(rig: &Rig, assists: &AssistProfile) -> bool {
+    !assists.auto_gears && rig.vehicle.gear() > DRIFT_GEAR
+}
 
 /// Rear-axle slip that counts as the start of a slide for the measurements, rad.
 pub const ONSET_MEASURE_RAD: f32 = 0.02;
@@ -126,6 +136,11 @@ pub fn kick_catch(
 ) -> KickCatch {
     let mut rig = Rig::new(car);
     rig.teleport([0.0; 3], 0.0, speed_mps, 0.0);
+    // With manual gears the automatic box picks the cruising gear; the driver keeps it.
+    let auto = AssistProfile {
+        auto_gears: true,
+        ..*assists
+    };
     for _ in 0..TICKS_PER_S {
         let (throttle, brake) = hold_speed(&rig, speed_mps);
         rig.step(
@@ -134,7 +149,7 @@ pub fn kick_catch(
                 brake,
                 ..Default::default()
             },
-            assists,
+            &auto,
         );
     }
     {
@@ -305,10 +320,13 @@ fn settle_on_circle(car: &LoadedCar, assists: &AssistProfile, radius: f32, lat_g
     rig.teleport([0.0; 3], 0.0, v, v / radius);
     let center = V3::new(-radius, 0.0, 0.0);
     // Settle on the circle with a 1:1 pure-pursuit follower.
+    // The automatic box picks the gear while settling; with manual gears the driver then
+    // holds it through the drift (as a player would).
     let settle = AssistProfile {
         steer_speed_sensitivity: 0.0,
         countersteer_help: 0.0,
         throttle_filter: 0.0,
+        auto_gears: true,
         ..*assists
     };
     for _ in 0..2 * TICKS_PER_S {
@@ -422,6 +440,7 @@ pub fn drift_run_with(
             &VehicleInput {
                 steer,
                 throttle,
+                gear_down: drift_gear_down(&rig, assists),
                 ..Default::default()
             },
             assists,
@@ -570,6 +589,7 @@ pub fn transition_run_with(
             &VehicleInput {
                 steer,
                 throttle,
+                gear_down: drift_gear_down(&rig, assists),
                 ..Default::default()
             },
             assists,
@@ -619,6 +639,131 @@ pub fn transition_run_with(
         wobbles,
         new_drift_s: new_drift as f32 * PHYSICS_DT,
         spun,
+        hash: rig.state_hash(),
+    }
+}
+
+/// Result of [`handbrake_entry`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HandbrakeEntry {
+    /// Time from the handbrake release until the wheels first reach the front axle's travel
+    /// (within 3°), s (`None`: not within 1.5 s).
+    pub release_to_aligned_s: Option<f32>,
+    /// Fastest centre road-wheel slew toward the countersteer side in the 0.4 s after the
+    /// release, °/s.
+    pub cs_slew_dps: f32,
+    /// Largest body slip, degrees.
+    pub max_slip_deg: f32,
+    /// Time drifting (10–50° of body slip) after the release, s.
+    pub drift_s: f32,
+    /// Caught: never past 90° of body slip and never backwards (the car is driving on, in a
+    /// drift or straight).
+    pub caught: bool,
+    /// Rig state hash at the end.
+    pub hash: u64,
+}
+
+/// Handbrake entry (owner row 108): straight at `speed_mps`, then the key into a left turn +
+/// the handbrake for `tap_s` (throttle off), then the handbrake released and — `counter` —
+/// the countersteer key (released once the slide is under 5°), or — not `counter` — the
+/// steering keys released (the self-aligning catch); throttle key off past 32° of slide, on
+/// below 25°; for 3 s.
+pub fn handbrake_entry(
+    car: &LoadedCar,
+    assists: &AssistProfile,
+    speed_mps: f32,
+    tap_s: f32,
+    counter: bool,
+) -> HandbrakeEntry {
+    handbrake_entry_with(car, assists, speed_mps, tap_s, counter, |_, _, _| {})
+}
+
+/// [`handbrake_entry`] calling `on_tick(rig, steer, throttle)` after every tick (traces).
+pub fn handbrake_entry_with(
+    car: &LoadedCar,
+    assists: &AssistProfile,
+    speed_mps: f32,
+    tap_s: f32,
+    counter: bool,
+    mut on_tick: impl FnMut(&Rig, f32, f32),
+) -> HandbrakeEntry {
+    let mut rig = Rig::new(car);
+    rig.teleport([0.0; 3], 0.0, speed_mps, 0.0);
+    let auto = AssistProfile {
+        auto_gears: true,
+        ..*assists
+    };
+    for _ in 0..TICKS_PER_S {
+        let (throttle, brake) = hold_speed(&rig, speed_mps);
+        rig.step(
+            &VehicleInput {
+                throttle,
+                brake,
+                ..Default::default()
+            },
+            &auto,
+        );
+    }
+    let tap = (tap_s * TICKS_PER_S as f32) as usize;
+    let mut thr_key = 1.0f32;
+    let (mut aligned, mut slew, mut max_slip) = (None, 0.0f32, 0.0f32);
+    let mut drift = 0usize;
+    let mut spun = false;
+    let mut prev = slide_state(&rig);
+    for tick in 0..tap + 3 * TICKS_PER_S {
+        let s = slide_state(&rig);
+        // Left turn: slide angle = −body slip; the countersteer key is right (+1).
+        let angle = (-s.body_slip).to_degrees();
+        if angle > 32.0 {
+            thr_key = 0.0;
+        } else if angle < 25.0 {
+            thr_key = 1.0;
+        }
+        let input = if tick < tap {
+            VehicleInput {
+                steer: -1.0,
+                handbrake: 1.0,
+                ..Default::default()
+            }
+        } else {
+            VehicleInput {
+                steer: if counter && angle > 5.0 { 1.0 } else { 0.0 },
+                throttle: thr_key,
+                ..Default::default()
+            }
+        };
+        rig.step(&input, assists);
+        on_tick(&rig, input.steer, input.throttle);
+        let n = slide_state(&rig);
+        let deg = n.body_slip.to_degrees().abs();
+        max_slip = max_slip.max(deg);
+        if deg > 90.0 || n.v_fwd < 0.0 {
+            spun = true;
+        }
+        if tick >= tap {
+            let since = tick - tap;
+            if since < TICKS_PER_S * 4 / 10 {
+                let side = prev.rear_axle_slip.signum();
+                slew = slew.max((n.steer - prev.steer) * side / PHYSICS_DT);
+            }
+            if aligned.is_none()
+                && since < TICKS_PER_S * 3 / 2
+                && (n.steer - n.front_axle_angle).abs() < 3f32.to_radians()
+            {
+                aligned = Some((since + 1) as f32 * PHYSICS_DT);
+            }
+            if !spun && (10.0..=50.0).contains(&deg) {
+                drift += 1;
+            }
+        }
+        prev = n;
+    }
+    HandbrakeEntry {
+        release_to_aligned_s: aligned,
+        cs_slew_dps: slew.to_degrees(),
+        max_slip_deg: max_slip,
+        drift_s: drift as f32 * PHYSICS_DT,
+        caught: !spun,
         hash: rig.state_hash(),
     }
 }

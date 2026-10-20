@@ -194,6 +194,34 @@ pub const TRANSITION_GRACE_S: f32 = 0.6;
 /// transition, s.
 pub const TRANSITION_LOOKAHEAD_S: f32 = 0.4;
 
+/// After the handbrake is released, the steering assists (self-align, the intent modes) stay
+/// off this long, s (row 108; they were off for the whole
+/// [`crate::steering::HANDBRAKE_GRACE_S`], 0.5 s, and released keys could not catch a
+/// handbrake entry). ESC and the clutch keep the longer grace.
+pub const HANDBRAKE_ASSIST_GRACE_S: f32 = 0.08;
+
+/// Whether the steering assists treat the handbrake as held (row 108): while it is pulled
+/// (`held`, or `hb_grace` at its full [`crate::steering::HANDBRAKE_GRACE_S`]) — handbrake turns
+/// rotate freely. After the release it depends on the key (`driver` steer, + = right, against
+/// the rear-axle slip `rear_axle_slip`, + = rear sliding left): the countersteer key brings
+/// the assists back at once, released keys after [`HANDBRAKE_ASSIST_GRACE_S`] (the
+/// self-aligning catch), and the key still into the turn keeps the whole grace (the handbrake
+/// turn goes on rotating freely, rows 56 / 72).
+pub fn handbrake_assist_hold(hb_grace: f32, held: bool, driver: f32, rear_axle_slip: f32) -> bool {
+    let full = crate::steering::HANDBRAKE_GRACE_S;
+    if held || hb_grace >= full {
+        return true;
+    }
+    if hb_grace <= 0.0 {
+        return false;
+    }
+    if driver.abs() <= crate::steering::STEER_DEADZONE {
+        return full - hb_grace < HANDBRAKE_ASSIST_GRACE_S;
+    }
+    // Into the turn: the whole grace; countersteering: back at once.
+    -driver * rear_axle_slip <= 0.0
+}
+
 /// Device weight of the intent modes from the speed sensitivity: keyboard (1.0) → 1,
 /// gamepad (0.7) → 0.5, wheel (0) → 0.
 pub fn device_weight(steer_speed_sensitivity: f32) -> f32 {
@@ -362,6 +390,11 @@ impl DriftState {
             // Step 1 only (or slow / handbrake): no envelope, no hold, no shaping.
             cmd.mode = raw_mode;
             self.reset_hold();
+            if t.intent && inp.handbrake_hold {
+                // A handbrake entry is a deliberate rotation: the drift it starts gets the
+                // fresh-drift grace (no envelope look-ahead) once the assists are back (row 108).
+                self.transition = -TRANSITION_GRACE_S;
+            }
             self.mode = cmd.mode.code() as f32;
             return cmd;
         }
@@ -901,6 +934,21 @@ mod tests {
         };
         run(&mut st, &inputs(1.0, 25.0), 30);
         assert_eq!(run(&mut st, &lifted(1.0, 25.0), 5).mode, DriftMode::Hold);
+    }
+
+    #[test]
+    fn handbrake_assists_come_back_quickly() {
+        let full = crate::steering::HANDBRAKE_GRACE_S;
+        // Pulled: off (free rotation), whatever the keys.
+        assert!(handbrake_assist_hold(full, true, 1.0, -0.3));
+        // 40 ms after the release, keys released: still off; 100 ms: back.
+        assert!(handbrake_assist_hold(full - 0.04, false, 0.0, -0.3));
+        assert!(!handbrake_assist_hold(full - 0.1, false, 0.0, -0.3));
+        // Already countersteering (rear sliding right, key right): back at once.
+        assert!(!handbrake_assist_hold(full - 0.01, false, 1.0, -0.3));
+        // Key into the turn after the release: off for the whole grace (the turn goes on).
+        assert!(handbrake_assist_hold(full - 0.3, false, -1.0, -0.3));
+        assert!(!handbrake_assist_hold(0.0, false, -1.0, -0.3));
     }
 
     #[test]
