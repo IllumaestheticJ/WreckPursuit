@@ -42,6 +42,11 @@ pub struct Scenario {
     /// but spawns no units. Ignored on the flat world, which has no roads for police.
     #[serde(default = "yes", skip_serializing_if = "is_true")]
     pub police_cars: bool,
+    /// Whether tunnels and covered roads block line of sight (default on). `false` is the
+    /// control run of a tunnel scenario: same geometry, but sightlines ignore the cover
+    /// (`wp_world::World::set_covered_los`).
+    #[serde(default = "yes", skip_serializing_if = "is_true")]
+    pub covered_los: bool,
     /// Police patrol multiplier on `data/police/presence.toml`'s per-district, per-phase patrol
     /// counts (1 = default, 0 = no patrols); `None` = 1. Needs a city.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -466,6 +471,22 @@ pub enum Expect {
         /// Deadline, s.
         t_s: f32,
     },
+    /// The entity's first pursuit ended with `outcome` (a `PursuitOutcome` name: `"Escaped"`,
+    /// `"Captured"`, `"CapturedTotalLoss"`, `"Safehouse"`, `"CalledOff"`) between `min_s` and
+    /// `max_s`; `outcome: "None"` = no pursuit of it ended during the run.
+    FirstPursuitEnd {
+        /// Entity (default: the first entity).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        entity: Option<String>,
+        /// Expected outcome name, or `"None"`.
+        outcome: String,
+        /// Earliest end time, s (default 0).
+        #[serde(default)]
+        min_s: f32,
+        /// Latest end time, s (default: end of the run).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_s: Option<f32>,
+    },
     /// A world/traffic metric (see `SCENARIOS.md`, e.g. `"traffic_agents_min"`) in `[min, max]`.
     WorldMetric {
         /// Metric name.
@@ -654,7 +675,8 @@ impl Expect {
             | Expect::CrushDepth { entity, .. }
             | Expect::ComponentsFailed { entity, .. }
             | Expect::TotalLoss { entity, .. }
-            | Expect::EventCount { entity, .. } => entity.as_ref(),
+            | Expect::EventCount { entity, .. }
+            | Expect::FirstPursuitEnd { entity, .. } => entity.as_ref(),
             Expect::PursuitStartedBefore { .. }
             | Expect::PoliceEventBefore { .. }
             | Expect::WorldMetric { .. } => None,

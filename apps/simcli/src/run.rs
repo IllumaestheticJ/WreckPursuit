@@ -305,6 +305,7 @@ pub fn build_sim(
             // `set_world` rebuilds police on the city, so the scenario's police (config,
             // starting heat) are installed after it. Police cars are real vehicles (lead run 5);
             // `police_cars: false` keeps heat and wanted levels with no patrols.
+            world.set_covered_los(sc.covered_los);
             sim.set_world(world);
             if sc.police_cars {
                 sim.set_police(police_for_city(sc, sim.world(), &ids));
@@ -1080,6 +1081,8 @@ pub fn run_with_hook(
     let mut events_total = 0u64;
     let mut max_events_per_tick = 0u64;
     let mut police_first: BTreeMap<u16, u64> = BTreeMap::new();
+    // (tick, racer, outcome) of every PursuitEnded, in order.
+    let mut pursuit_ends: Vec<(u64, EntityId, wp_contracts::PursuitOutcome)> = Vec::new();
     let mut event_counts: Vec<(&'static str, Vec<EntityId>)> = Vec::new();
     let mut net_rt = crate::net::NetRoundTrip::default();
     let mut failures = Vec::new();
@@ -1146,6 +1149,9 @@ pub fn run_with_hook(
             match e {
                 SimEvent::Police(p) => {
                     police_first.entry(p.kind()).or_insert(now);
+                    if let wp_contracts::PoliceEvent::PursuitEnded { racer, outcome, .. } = p {
+                        pursuit_ends.push((now, *racer, *outcome));
+                    }
                 }
                 SimEvent::ComponentFailed { vehicle, component } => {
                     if let Some(i) = index_of(*vehicle) {
@@ -1340,6 +1346,7 @@ pub fn run_with_hook(
         probes: &probes,
         travel: &travel,
         police_first: &police_first,
+        pursuit_ends: &pursuit_ends,
         event_counts: &event_counts,
         ids: &ids,
     };
@@ -1375,6 +1382,7 @@ struct EvalCtx<'a> {
     probes: &'a BTreeMap<(usize, u64), f32>,
     travel: &'a BTreeMap<(usize, u64), f32>,
     police_first: &'a BTreeMap<u16, u64>,
+    pursuit_ends: &'a [(u64, EntityId, wp_contracts::PursuitOutcome)],
     event_counts: &'a [(&'static str, Vec<EntityId>)],
     ids: &'a [EntityId],
 }
@@ -1460,6 +1468,23 @@ impl EvalCtx<'_> {
             },
             Expect::PursuitStartedBefore { t_s } => self.police_before(PURSUIT_STARTED_KIND, *t_s),
             Expect::PoliceEventBefore { kind, t_s } => self.police_before(*kind, *t_s),
+            Expect::FirstPursuitEnd {
+                entity,
+                outcome,
+                min_s,
+                max_s,
+            } => {
+                let id = self.ids[self.ent(entity.as_ref()).0];
+                match self.pursuit_ends.iter().find(|(_, r, _)| *r == id) {
+                    Some((tick, _, o)) => {
+                        let t = *tick as f32 * PHYSICS_DT;
+                        let name = format!("{o:?}");
+                        let in_time = t >= *min_s && max_s.is_none_or(|m| t <= m);
+                        (format!("{name} at {t:.3} s"), name == *outcome && in_time)
+                    }
+                    None => ("no pursuit ended".into(), outcome == "None"),
+                }
+            }
             Expect::EventCount {
                 event,
                 entity,
