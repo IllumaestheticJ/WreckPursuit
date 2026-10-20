@@ -329,6 +329,11 @@ fn reset_in_place_repairs_near_the_crash_and_replays() {
             before.health
         );
         let pose = s.reset_in_place(p, repair).unwrap();
+        assert_eq!(
+            s.sim().ghost_ticks(p),
+            Some(u32::from(crate::reset::GHOST_TICKS)),
+            "a reset car is a ghost for 1 s"
+        );
         let d =
             ((pose.xy[0] - before.pos[0]).powi(2) + (pose.xy[1] - before.pos[1]).powi(2)).sqrt();
         assert!(d <= crate::reset::SNAP_RADIUS_M, "moved {d} m");
@@ -372,6 +377,16 @@ fn reset_in_place_repairs_near_the_crash_and_replays() {
         assert!(rp.ops.iter().any(
             |o| matches!(o.op, simcli::replay::OpKind::ResetAt { repair: r, .. } if r == repair)
         ));
+        assert!(rp.ops.iter().any(|o| matches!(
+            o.op,
+            simcli::replay::OpKind::Ghost { ticks } if ticks == crate::reset::GHOST_TICKS
+        )));
+        // 240 ticks ran since the reset: the window is over (the car is clear of the barrier).
+        assert_eq!(
+            s.sim().ghost_ticks(p),
+            Some(0),
+            "solid again after the window"
+        );
         let report = replay::verify(&rp, mem_data()).unwrap();
         assert!(report.matched, "{}", report.to_text());
     }

@@ -530,6 +530,13 @@ impl Session {
                 repair,
             },
         )?;
+        // Ghost for 1 s so the car cannot land stuck in (or be hit by) traffic.
+        self.log_op(
+            idx,
+            OpKind::Ghost {
+                ticks: crate::reset::GHOST_TICKS,
+            },
+        )?;
         self.relocate_racer(id);
         Ok(pose)
     }

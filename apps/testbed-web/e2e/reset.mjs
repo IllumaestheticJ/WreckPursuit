@@ -4,7 +4,8 @@
 //
 // Checks: after the barrier crash scenario, R puts the car upright at rest within 15 m of the
 // crash point, repaired (health 100 %), and the R is a replay op that plays back without drift;
-// in the city chase R lands on a lane and keeps the police heat; in a career run R does not
+// in the city chase R lands on a lane, keeps the police heat and makes the car a blinking ghost
+// for 1 s; in a career run R does not
 // repair (repairs are bought in the garage).
 import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
@@ -112,6 +113,26 @@ check(
   `city chase: reset lands on a lane ${dist2d([r.x, r.y], c0.pos).toFixed(1)} m away, upright`,
 );
 check(heat0 !== null && heat0 > 0 && heat1 === heat0, `city chase: heat unchanged by the reset (${heat0} → ${heat1})`);
+// Ghost window: 1 s through traffic (wp_sim GhostHooks; pass-through is proven natively in
+// wp_sim's tests), the car blinks meanwhile, then it is solid again.
+const ghost = await page.evaluate(async () => {
+  const wp = window.__wp;
+  const p = wp.app.player;
+  const at0 = wp.sim.ghostTicks(p);
+  const seen = new Set();
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => requestAnimationFrame(r));
+    seen.add(wp.app.views.get(p).root.visible);
+  }
+  const t0 = performance.now();
+  while (wp.sim.ghostTicks(p) > 0 && performance.now() - t0 < 8000) await new Promise((r) => setTimeout(r, 100));
+  await new Promise((r) => requestAnimationFrame(r));
+  return { at0, blinked: seen.size === 2, after: wp.sim.ghostTicks(p), visible: wp.app.views.get(p).root.visible };
+});
+check(
+  r.ghost_ticks === 240 && ghost.blinked && ghost.after === 0 && ghost.visible,
+  `city chase: the reset car is a ghost for 1 s and blinks, then solid and drawn again (ghost ${r.ghost_ticks} ticks, blinked ${ghost.blinked}, after ${ghost.after})`,
+);
 
 // 3. Career run: reset in place, no repair.
 const career = await page.evaluate(() => {
