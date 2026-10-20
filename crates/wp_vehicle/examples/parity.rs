@@ -39,7 +39,8 @@ const TICKS_PER_FRAME: u64 = 4;
 const MPH: f32 = 0.447_04;
 const RPM_PER_RADPS: f32 = 60.0 / std::f32::consts::TAU;
 
-/// The three reference cars: (id, what it stands in for).
+/// The three roster analogues: (id, what it stands in for). The parity-only test cars built to
+/// the reference specs come from `examples/parity_cars.toml` (see [`cars`]).
 const CARS: [(&str, &str); 3] = [
     ("rampart_50", "heavy RWD muscle (clips 1, 4)"),
     ("shiro_turbo", "light RWD sports (clip 2)"),
@@ -403,9 +404,10 @@ fn launch(car: &LoadedCar, tcs: bool, feather: bool) -> (f32, f32, f32) {
     (spin, peak, r.speed() / MPH)
 }
 
-/// 60–0 mph on the brake key (ABS): (time s, distance m).
-fn braking(car: &LoadedCar) -> (f32, f32) {
+/// 60–0 mph on the brake key, ABS on or off: (time s, distance m).
+fn braking(car: &LoadedCar, abs: bool) -> (f32, f32) {
     let mut r = Run::rolling(car, false, 60.0 * MPH);
+    r.assists.abs = abs;
     let p0 = r.pos();
     let t0 = r.t();
     for _ in 0..ticks(10.0) {
@@ -680,18 +682,88 @@ fn counter_drift(car: &LoadedCar) -> (f32, f32, f32, bool) {
     )
 }
 
+/// Braking from 80 mph on the brake key with a 0.2 s right tap 0.3 s in (clip 5: ABS + rear
+/// bias stays controllable). Returns (peak |body slip| °, spun, heading change at the stop °).
+fn brake_tap(car: &LoadedCar, abs: bool) -> (f32, bool, f32) {
+    let mut r = Run::rolling(car, false, 80.0 * MPH);
+    r.assists.abs = abs;
+    let (mut slip, mut spun) = (0.0f32, false);
+    for tick in 0..ticks(10.0) {
+        r.step(&Keys {
+            brake: true,
+            right: (ticks(0.3)..ticks(0.5)).contains(&tick),
+            ..Default::default()
+        });
+        slip = slip.max(r.slip_deg().abs());
+        spun |= r.spun();
+        if r.speed().abs() < 1.0 {
+            break;
+        }
+    }
+    (slip, spun, r.heading_deg().abs())
+}
+
+/// Handbrake stabs on the throttle (clip 5): 50 mph in 2nd on the cruise for 1 s, then the
+/// throttle key + left key held for 2 s with handbrake stabs of 0.25 s (at 0.3 s) and 0.1 s
+/// (at 0.9 s) when `stabs`. Returns (rotation at 1.2 s °, speed at 1.2 s m/s, time in 1.0–2.0 s
+/// with the driven wheels' drive force under half its pre-stab value s, spun within 2 s). The
+/// driver never countersteers, so a later spin is about the power-on exit (see the hairpin
+/// rows), not the stabs; rotation and speed are read just after the last stab.
+fn hb_stabs(car: &LoadedCar, stabs: bool) -> (f32, f32, f32, bool) {
+    let target = 50.0 * MPH;
+    let mut r = Run::rolling(car, false, target);
+    for _ in 0..ticks(1.0) {
+        let (cruise, brake) = r.cruise(target);
+        let mut k = Keys {
+            cruise,
+            brake,
+            ..Default::default()
+        };
+        r.select_gear(&mut k, 2);
+        r.step(&k);
+    }
+    let h0 = r.heading_deg();
+    let (mut fx_before, mut gap, mut spun) = (0.0f32, 0.0f32, false);
+    let (mut rot, mut v) = (0.0f32, 0.0f32);
+    for tick in 0..ticks(2.0) {
+        let hb = stabs
+            && ((ticks(0.3)..ticks(0.55)).contains(&tick)
+                || (ticks(0.9)..ticks(1.0)).contains(&tick));
+        r.step(&Keys {
+            left: true,
+            throttle: true,
+            handbrake: hb,
+            ..Default::default()
+        });
+        let fx = driven_fx(&r);
+        if tick < ticks(0.3) {
+            fx_before = fx_before.max(fx);
+        } else if tick >= ticks(1.0) && fx < 0.5 * fx_before {
+            gap += PHYSICS_DT;
+        }
+        spun |= r.spun();
+        if tick + 1 == ticks(1.2) {
+            rot = (r.heading_deg() - h0).abs();
+            v = r.speed();
+        }
+    }
+    (rot, v, gap, spun)
+}
+
+/// Summed longitudinal force of the driven wheels, N.
+fn driven_fx(r: &Run) -> f32 {
+    let tel = r.rig.vehicle.telemetry();
+    match r.rig.vehicle.def().drivetrain.layout {
+        DriveLayout::Fwd => tel.fx[0] + tel.fx[1],
+        DriveLayout::Rwd => tel.fx[2] + tel.fx[3],
+        _ => tel.fx.iter().sum(),
+    }
+}
+
 /// Upshift 2→3 at full throttle: time from the key press until the driven wheels' summed
 /// longitudinal force is back to half its pre-shift value, s.
 fn shift_gap(car: &LoadedCar) -> Option<f32> {
     let mut r = Run::new(car, true);
-    let driven_fx = |r: &Run| -> f32 {
-        let tel = r.rig.vehicle.telemetry();
-        match r.rig.vehicle.def().drivetrain.layout {
-            DriveLayout::Fwd => tel.fx[0] + tel.fx[1],
-            DriveLayout::Rwd => tel.fx[2] + tel.fx[3],
-            _ => tel.fx.iter().sum(),
-        }
-    };
     // (press time, pre-shift force, force has dipped under half yet)
     let mut pressed: Option<(f32, f32, bool)> = None;
     for _ in 0..ticks(30.0) {
@@ -727,7 +799,7 @@ fn gear_top_speeds(car: &LoadedCar) -> Vec<f32> {
         DriveLayout::Fwd => 0,
         _ => 2,
     };
-    let radius = car.def.wheels[driven].position_m[2];
+    let radius = car.def.wheels[driven].radius_m;
     let limit = car.def.engine.rev_limit_rpm;
     dt.gear_ratios
         .iter()
@@ -758,13 +830,208 @@ fn top_speed(car: &LoadedCar) -> f32 {
     best / MPH
 }
 
+// ----- test cars and the tune mapping ---------------------------------------------------
+
+/// One parity-only test car from `examples/parity_cars.toml`.
+#[derive(Debug, Clone, serde::Deserialize)]
+struct ParityCar {
+    id: String,
+    #[serde(rename = "ref")]
+    reference: String,
+    role: String,
+    base: String,
+    mass_kg: f32,
+    power_kw: f32,
+    power_rpm: f32,
+    torque_nm: f32,
+    torque_rpm: f32,
+    gear_ratios: Vec<f32>,
+    final_drive: f32,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ParityCars {
+    car: Vec<ParityCar>,
+}
+
+/// Full-load torque curve with `torque_nm` at `torque_rpm` and `power_kw` at `power_rpm` (the
+/// power peak), falling off past it; redline 8 % above the power peak, limiter +300 rpm.
+fn reference_curve(c: &ParityCar, idle: f32) -> (Vec<(f32, f32)>, f32, f32) {
+    let tp = c.power_kw * 1000.0 / (c.power_rpm / RPM_PER_RADPS);
+    let redline = c.power_rpm * 1.08;
+    let limit = redline + 300.0;
+    let low = idle.max(800.0) + 200.0;
+    let curve = vec![
+        (low, 0.55 * c.torque_nm),
+        (0.6 * c.torque_rpm, 0.85 * c.torque_nm),
+        (c.torque_rpm, c.torque_nm),
+        (0.5 * (c.torque_rpm + c.power_rpm), 0.5 * (c.torque_nm + tp)),
+        (c.power_rpm, tp),
+        (redline, 0.95 * tp * c.power_rpm / redline),
+        (limit, 0.8 * tp * c.power_rpm / redline),
+    ];
+    (curve, redline, limit)
+}
+
+/// Build a parity car from its roster base (see the header of `parity_cars.toml`).
+fn build_parity_car(root: &str, c: &ParityCar) -> LoadedCar {
+    let mut car = wp_contracts::load_car(format!("{root}/data/cars/{}.json", c.base))
+        .expect("base car loads");
+    let d = &mut car.def;
+    let k = c.mass_kg / d.mass_kg;
+    d.id = c.id.clone();
+    d.display_name = format!("Parity {}", c.reference);
+    d.mass_kg = c.mass_kg;
+    for v in &mut d.inertia_kgm2 {
+        *v *= k;
+    }
+    for s in &mut d.suspension {
+        s.spring_n_per_m *= k;
+        s.damper_bump_ns_per_m *= k;
+        s.damper_rebound_ns_per_m *= k;
+        s.arb_n_per_m *= k;
+    }
+    d.brakes.max_torque_front_nm *= k;
+    d.brakes.max_torque_rear_nm *= k;
+    d.brakes.handbrake_rear_nm *= k;
+    let (curve, redline, limit) = reference_curve(c, d.engine.idle_rpm);
+    d.engine.torque_curve_nm = curve;
+    d.engine.redline_rpm = redline;
+    d.engine.rev_limit_rpm = limit;
+    d.drivetrain.gear_ratios = c.gear_ratios.clone();
+    d.drivetrain.final_drive = c.final_drive;
+    d.drivetrain.clutch_max_nm = d.drivetrain.clutch_max_nm.max(1.35 * c.torque_nm);
+    wp_contracts::validate_vehicle_def(d).expect("parity car is a valid VehicleDef");
+    car
+}
+
+/// The reference game's free tune screen: four 5-step sliders, 3 = stock. This is the
+/// **proposed** mapping onto our car data (docs/reference/wreckfest-parity.md → "Tune screen");
+/// the suite applies it to measure the owner's tune.
+#[derive(Debug, Clone, Copy)]
+struct Tune {
+    /// Suspension, 1 soft … 5 stiff.
+    suspension: u8,
+    /// Gear ratio, 1 short … 5 long.
+    gearing: u8,
+    /// Differential, 1 open … 3 stock (limited) … 5 locked.
+    diff: u8,
+    /// Brake balance, 1 rear … 5 front.
+    brake_balance: u8,
+}
+
+/// Spring / anti-roll bar scale per suspension step (dampers get the square root, which keeps
+/// the damping ratio).
+const TUNE_SPRING: [f32; 5] = [0.70, 0.85, 1.0, 1.18, 1.40];
+/// Final-drive scale per gearing step (long = numerically lower).
+const TUNE_FINAL: [f32; 5] = [1.12, 1.06, 1.0, 0.94, 0.88];
+/// Front brake-bias offset per balance step.
+const TUNE_BIAS: [f32; 5] = [-0.10, -0.05, 0.0, 0.05, 0.10];
+
+/// Apply a [`Tune`] to `car` (its id gets a `_tuned` suffix, so a stock
+/// `differentials.toml` entry no longer overrides the tuned differential).
+fn apply_tune(car: &LoadedCar, t: Tune) -> LoadedCar {
+    use wp_contracts::DiffDef;
+    let mut car = car.clone();
+    let d = &mut car.def;
+    let step = |v: u8| (v.clamp(1, 5) - 1) as usize;
+    let ks = TUNE_SPRING[step(t.suspension)];
+    for s in &mut d.suspension {
+        s.spring_n_per_m *= ks;
+        s.arb_n_per_m *= ks;
+        s.damper_bump_ns_per_m *= ks.sqrt();
+        s.damper_rebound_ns_per_m *= ks.sqrt();
+    }
+    d.drivetrain.final_drive *= TUNE_FINAL[step(t.gearing)];
+    d.brakes.bias_front = (d.brakes.bias_front + TUNE_BIAS[step(t.brake_balance)]).clamp(0.3, 0.8);
+    // The differential of the driven axle as the car runs it today (differentials.toml wins
+    // over the car file), reduced to the contract's Open / Lsd / Locked.
+    let stock = match wp_vehicle::DiffSetup::for_car(d).rear {
+        wp_vehicle::AxleDiff::Open => DiffDef::Open,
+        wp_vehicle::AxleDiff::Locked => DiffDef::Locked,
+        wp_vehicle::AxleDiff::Clutch {
+            preload_nm,
+            accel,
+            decel,
+        } => DiffDef::Lsd {
+            preload_nm,
+            ramp_power: accel,
+            ramp_coast: decel,
+        },
+        _ => d.drivetrain.diff_rear.clone(),
+    };
+    let lsd = |pre: f32, power: f32, coast: f32| DiffDef::Lsd {
+        preload_nm: pre,
+        ramp_power: power,
+        ramp_coast: coast,
+    };
+    let (pre, pw, co) = match stock {
+        DiffDef::Lsd {
+            preload_nm,
+            ramp_power,
+            ramp_coast,
+        } => (preload_nm, ramp_power, ramp_coast),
+        _ => (60.0, 0.4, 0.25),
+    };
+    let rear = match step(t.diff) {
+        0 => DiffDef::Open,
+        1 => lsd(0.5 * pre, 0.6 * pw, 0.6 * co),
+        2 => lsd(pre, pw, co),
+        3 => lsd(2.5 * pre, pw.max(0.75), co.max(0.6)),
+        _ => DiffDef::Locked,
+    };
+    if !matches!(d.drivetrain.layout, DriveLayout::Fwd) {
+        d.drivetrain.diff_rear = rear;
+    }
+    d.id = format!("{}_tuned", d.id);
+    car
+}
+
+/// Every car the suite measures: the roster analogues, the parity-only reference cars, and
+/// REF-RWD-A with the owner's clip-5 tune. (id, description, car).
+fn cars(root: &str) -> Vec<(String, String, LoadedCar)> {
+    let mut out = Vec::new();
+    for (id, what) in CARS {
+        let car = wp_contracts::load_car(format!("{root}/data/cars/{id}.json")).expect("car loads");
+        out.push((id.to_string(), what.to_string(), car));
+    }
+    let path = format!("{}/examples/parity_cars.toml", env!("CARGO_MANIFEST_DIR"));
+    let text = std::fs::read_to_string(&path).expect("parity_cars.toml");
+    let list: ParityCars = toml::from_str(&text).expect("parity_cars.toml parses");
+    for c in &list.car {
+        let car = build_parity_car(root, c);
+        out.push((c.id.clone(), format!("{}: {}", c.reference, c.role), car));
+    }
+    // The owner's run-5 tune on REF-RWD-A: stiff 5/5, long 5/5, diff 4/5, brake balance 2/5.
+    let a = out
+        .iter()
+        .find(|(id, _, _)| id == "parity_rwd_a")
+        .map(|(_, _, c)| c.clone())
+        .expect("parity_rwd_a defined");
+    let tuned = apply_tune(
+        &a,
+        Tune {
+            suspension: 5,
+            gearing: 5,
+            diff: 4,
+            brake_balance: 2,
+        },
+    );
+    out.push((
+        tuned.def.id.clone(),
+        "REF-RWD-A with the owner's tune (stiff 5, long 5, diff 4, brakes 2)".to_string(),
+        tuned,
+    ));
+    out
+}
+
 // ----- table -----------------------------------------------------------------------------
 
 /// One measured row.
 struct Row {
     id: String,
     label: String,
-    car: &'static str,
+    car: String,
     value: String,
     num: Option<f32>,
     owner: &'static str,
@@ -775,11 +1042,12 @@ const A_STEER: &str = "wp_vehicle steering (A) + testbed input";
 const DRIFT: &str = "wp_vehicle drift (Drift Lab C)";
 const CARS_H: &str = "data/cars (H)";
 const TCS: &str = "wp_vehicle assists (A, row 105)";
+const ABS: &str = "wp_vehicle brakes / ABS levels (A)";
 
 /// Rows of one car.
 struct Rows {
     out: Vec<Row>,
-    car: &'static str,
+    car: String,
 }
 
 impl Rows {
@@ -792,7 +1060,7 @@ impl Rows {
         self.out.push(Row {
             id: id.into(),
             label: label.into(),
-            car: self.car,
+            car: self.car.clone(),
             value,
             num,
             owner,
@@ -804,7 +1072,7 @@ impl Rows {
         self.out.push(Row {
             id: id.into(),
             label: label.into(),
-            car: self.car,
+            car: self.car.clone(),
             value,
             num: None,
             owner,
@@ -812,10 +1080,10 @@ impl Rows {
     }
 }
 
-fn rows_for(id: &'static str, car: &LoadedCar) -> Vec<Row> {
+fn rows_for(id: &str, car: &LoadedCar) -> Vec<Row> {
     let mut rows = Rows {
         out: Vec::new(),
-        car: id,
+        car: id.to_string(),
     };
     let (t60, t100) = accel(car, false);
     rows.num("accel_0_60_s", "0–60 mph, s (TCS off)", t60, 2, A);
@@ -878,21 +1146,42 @@ fn rows_for(id: &'static str, car: &LoadedCar) -> Vec<Row> {
         }
     }
 
-    let (bt, bd) = braking(car);
-    rows.num(
-        "brake_60_0_s",
-        "60–0 mph braking time, s (ABS)",
-        Some(bt),
-        2,
-        A,
+    let (bt, bd) = braking(car, true);
+    rows.num("brake_60_0_s", "60–0 mph braking time, s (ABS full)", Some(bt), 2, A);
+    rows.num("brake_60_0_m", "60–0 mph braking distance, m (ABS full)", Some(bd), 1, A);
+    let (bt0, bd0) = braking(car, false);
+    rows.num("brake_60_0_noabs_s", "60–0 mph braking time, s (ABS off)", Some(bt0), 2, ABS);
+    rows.num("brake_60_0_noabs_m", "60–0 mph braking distance, m (ABS off)", Some(bd0), 1, ABS);
+    rows.text(
+        "brake_60_0_abs_half_s",
+        "60–0 mph braking time, s (ABS half)",
+        "n/a — no ABS level yet (bool `abs`)".into(),
+        ABS,
     );
-    rows.num(
-        "brake_60_0_m",
-        "60–0 mph braking distance, m (ABS)",
-        Some(bd),
-        1,
-        A,
-    );
+    for abs in [true, false] {
+        let name = if abs { "full" } else { "off" };
+        let (slip, spun, stop) = brake_tap(car, abs);
+        rows.num(
+            &format!("brake_tap_80_{name}_slip_deg"),
+            &format!("braking from 80 mph + 0.2 s tap (ABS {name}): peak body slip °"),
+            Some(slip),
+            1,
+            ABS,
+        );
+        rows.text(
+            &format!("brake_tap_80_{name}_spun"),
+            &format!("braking from 80 mph + 0.2 s tap (ABS {name}): spun"),
+            yes_no(spun),
+            ABS,
+        );
+        rows.num(
+            &format!("brake_tap_80_{name}_heading_deg"),
+            &format!("braking from 80 mph + 0.2 s tap (ABS {name}): heading change at the stop °"),
+            Some(stop),
+            1,
+            ABS,
+        );
+    }
 
     for mph in [30.0, 60.0] {
         let (yaw, radius, slip) = circle(car, mph);
@@ -1038,6 +1327,37 @@ fn rows_for(id: &'static str, car: &LoadedCar) -> Vec<Row> {
         A,
     );
 
+    let stab = hb_stabs(car, true);
+    let ctrl = hb_stabs(car, false);
+    rows.num(
+        "hb_stab_extra_deg",
+        "50 mph 2nd, throttle + key held, handbrake stabs 0.25 s + 0.1 s: extra rotation vs no stabs at 1.2 s, °",
+        Some(stab.0 - ctrl.0),
+        0,
+        DRIFT,
+    );
+    rows.num(
+        "hb_stab_speed_loss_mph",
+        "… speed lost vs no stabs at 1.2 s, mph",
+        Some((ctrl.1 - stab.1) / MPH),
+        1,
+        DRIFT,
+    );
+    rows.num(
+        "hb_stab_drive_gap_s",
+        "… time the drive force is under half in the second after the last stab, s",
+        Some(stab.2),
+        2,
+        DRIFT,
+    );
+    rows.text("hb_stab_spun", "… spun within 2 s (no countersteer)", yes_no(stab.3), DRIFT);
+    rows.text(
+        "hb_stab_control_spun",
+        "… control run without stabs spun within 2 s",
+        yes_no(ctrl.3),
+        DRIFT,
+    );
+
     if !matches!(car.def.drivetrain.layout, DriveLayout::Fwd) {
         let (drift, mean, max, spun) = counter_drift(car);
         rows.num(
@@ -1113,7 +1433,7 @@ fn yes_no(b: bool) -> String {
 #[derive(Debug, Clone, serde::Deserialize)]
 struct Reference {
     metric: String,
-    /// Car id, or `"*"` for every car.
+    /// Car id, several ids separated by commas, or `"*"` for every car.
     car: String,
     /// `"1.3"`, `"30–45"` / `"30-45"`, `"≈2.2"`, `"no"`, or any text.
     value: String,
@@ -1184,7 +1504,10 @@ fn main() {
         .unwrap_or_default();
     let mut by_key: BTreeMap<(String, String), Reference> = BTreeMap::new();
     for r in refs.refs {
-        by_key.insert((r.metric.clone(), r.car.clone()), r);
+        // `car` may list several ids: "rampart_50, parity_rwd_d".
+        for car in r.car.split(',') {
+            by_key.insert((r.metric.clone(), car.trim().to_string()), r.clone());
+        }
     }
 
     let mut table = String::new();
@@ -1194,11 +1517,9 @@ fn main() {
     )
     .unwrap();
     writeln!(table, "|---|---|---|---|---|---|").unwrap();
-    for (id, what) in CARS {
-        let path = format!("{root}/data/cars/{id}.json");
-        let car = wp_contracts::load_car(path).expect("car loads");
+    for (id, what, car) in cars(&root) {
         eprintln!("measuring {id} ({what}) …");
-        for row in rows_for(id, &car) {
+        for row in rows_for(&id, &car) {
             let r = by_key
                 .get(&(row.id.clone(), row.car.to_string()))
                 .or_else(|| by_key.get(&(row.id.clone(), "*".to_string())));
