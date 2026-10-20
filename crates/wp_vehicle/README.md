@@ -216,17 +216,18 @@ assist was tried this round and withdrawn.)
 ## Brake dive and anti-dive (playtest row 92)
 
 Hard stops used to dive 1.7–3.8° and put the nose on the road (front body down to 0.4 cm): every
-braking load transfer went through the springs. `suspension::ANTI_DIVE_FRONT` (0.55) and
-`ANTI_LIFT_REAR` (0.4) now let the links carry that share: per wheel a jacking force
+braking load transfer went through the springs. `suspension::ANTI_DIVE_FRONT` (0.7) and
+`ANTI_LIFT_REAR` (0.6) now let the links carry that share: per wheel a jacking force
 `anti_pitch_factor × fx` acts on the chassis at the wheel and on the tyre's normal load (axle
-loads still shift by the full `m·a·h/L`). Only the part of `fx` the brake torque can react
-counts (drive, engine braking and kerb strikes jack nothing), faded in from 1 to 2 m/s. Six
+loads still shift by the full `m·a·h/L`). Only rearward `fx` the brake torque can hold
+counts (drive, engine braking, TCS on a driving wheel and kerb strikes jack nothing), faded in from 1 to 2 m/s. Six
 soft cars also got damper / spring / travel data (see `docs/integration/brake-dive.md`).
 
 Measure: `cargo run --release -p wp_vehicle --example brake_dive [car …]` (peak / steady pitch,
 front strut use, front body and collider clearance at 100 and 60 km/h, wheel and keyboard
 presets, holding the brake into reverse, and the body height with the front struts on their
-bump stops). Now: peak 1.2–2.49°, front body ≥ 5.7 cm, collider ≥ 4.4 cm, no bump stop reached.
+bump stops). Now: peak 1.2–2.52°, front body ≥ 5.4 cm, collider ≥ 3.7 cm, no bump stop reached.
+Roll / pitch free-response damping: `--example body_damping [car …]` (`ride::roll_kick`).
 Tests: `tests/brake_dive.rs`; both damage modes through `wp_sim/tests/brake_dive.rs`.
 
 ## Keyboard/gamepad steering and ESC (playtest row 28)

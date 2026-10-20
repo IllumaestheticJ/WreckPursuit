@@ -23,7 +23,9 @@ not the body — §3.)
 
 **Physics:** measured with `cargo run --release -p wp_vehicle --example brake_dive` (new
 `wp_vehicle::brake_dive`: settle, cruise, full brake to a stop, wheel preset = a pedal step;
-keyboard preset ramps it and gives the same numbers within 0.05°). Before (`origin/lead/round12`):
+keyboard preset ramps it and gives the same numbers within 0.06°). Before (first measured on
+`origin/lead/round12` @ ea90bf7; after round12's beater rework the beater was worse — 4.1°, front
+body 1.0 cm into the road, §4):
 
 - **No anti-dive geometry.** Every tyre force acts at the contact patch and every bit of the
   braking load transfer (`m·a·h/L`) went through the springs. Peak nose-down pitch
@@ -46,14 +48,18 @@ keyboard preset ramps it and gives the same numbers within 0.05°). Before (`ori
 ## 2. Fix
 
 `wp_vehicle::suspension` (identical in Arcade and Simulation; the crate never reads the mode):
-- **Anti-dive / anti-lift** (`ANTI_DIVE_FRONT = 0.55`, `ANTI_LIFT_REAR = 0.4`,
-  `anti_pitch_factor`): the links carry that share of the braking load transfer. Per wheel, a
+- **Anti-dive / anti-lift** (`ANTI_DIVE_FRONT = 0.7`, `ANTI_LIFT_REAR = 0.6`,
+  `anti_pitch_factor`; first 0.55 / 0.4, raised after the round12 merge so the soft cars need
+  damping, not stiffer springs; 0.75 rear was tried and flipped the chaotic
+  `police_tunnel_escape_founders_cut` chase, so 0.6): the links carry that share of the braking load transfer. Per wheel, a
   jacking force `factor × fx_brake` (factor = ∓anti·h/L) acts on the chassis at the wheel *and*
   on the tyre's normal load, so axle loads still shift by the full `m·a·h/L` (grip and braking
   balance unchanged); only the springs, and with them pitch, see less. `fx_brake` is the tyre's
-  longitudinal force clamped to what the brake torque (the pedal's service torque, so ABS
-  release cycles don't flicker it) can react: drive / engine braking and a kerb strike's push on
-  a free-rolling wheel jack nothing (rows 54/55: no launch from kerbs), anti-squat is not
+  longitudinal force, **rearward only**, clamped to what the brake torque (the pedal's service
+  torque, so ABS release cycles don't flicker it) can hold: a TCS / ESC brake on a driven wheel
+  that still pushes forward jacks nothing, so full-throttle launches are bit-identical to
+  `lead/round12`; drive / engine braking and a kerb strike's push on a free-rolling wheel jack
+  nothing (rows 54/55: no launch from kerbs), anti-squat is not
   modelled. Faded in between 1 and 2 m/s contact speed: at a standstill the held tyre's stiff
   grip otherwise coupled heave into the links (kestrel heave ζ fell to 0.06 before the fade).
 - **Bump stops: no code change.** They were already progressive with hysteresis (round 12b).
@@ -65,18 +71,26 @@ keyboard preset ramps it and gives the same numbers within 0.05°). Before (`ori
   at rest) the body ahead of the front axle is still 1.2 cm (lucciola_350) … 11 cm (hauler_1500)
   above the road (`brake_dive::clearance_on_front_bump_stops`, test > 1 cm).
 
-`data/cars` (H's folder; the five cars still above ≈ 2.5° with the geometry alone, all soft
-"character" cars): ironside_440 and furrow_24 dampers ×1.35; tansy_13 dampers ×1.35 (rear
-rebound ×1.8) and springs ×1.1; junkyard_beater front dampers ×1.3, rear bump ×1.6 / rebound
-×2.0 (still the softest-damped car); sentinel_bastion dampers ×1.3, springs ×1.12.
-**Travel:** lindwurm_4t front `travel_m` 0.15 → 0.135 (bump stop 1.5 cm earlier: body on the bump stops 1.0 → 3.0 cm off the road;
-7.4 cm bump room left at rest). The same on lucciola_350 (1.2 cm) made it airborne on the 15 cm
-kerb, so it keeps its data. Ride frequency / damping / bump-room bands in `tests/ride.rs` hold
-(bump ζ ≤ 0.45, rebound > 1.6 × bump, > 5 cm bump room).
+`data/cars` (H's folder) — **more damping, not stiffer** (lead, after the owner's "far too
+switchy" and Drift Lab W's damping-up defaults). Multipliers on `lead/round12`'s data:
+
+| car | front bump / rebound | rear bump / rebound | other |
+|---|---|---|---|
+| ironside_440 | ×1.35 / ×1.35 | ×1.35 / ×1.35 | |
+| furrow_24 | ×1.35 / ×1.35 | ×1.35 / ×1.35 | |
+| tansy_13 | ×1.35 / ×1.35 | ×1.35 / ×1.8 | |
+| junkyard_beater (round12's reworked beater) | ×2.0 / ×2.0 | ×2.0 / ×2.8 | |
+| sentinel_bastion | ×1.3 / ×1.8 | ×1.3 / ×2.0 | |
+| lindwurm_4t | | | front `travel_m` 0.15 → 0.135 |
+
+No spring is stiffer (the first pass had bastion ×1.12 / tansy ×1.1; reverted). Bump ζ stays
+inside the ride-test band (≤ 0.45), rebound > 1.6 × bump. lindwurm_4t: bump stop 1.5 cm
+earlier, body on the bump stops 1.0 → 3.0 cm off the road, 7.4 cm bump room left at rest (the
+same on lucciola_350 made it airborne on the 15 cm kerb, so it keeps its data).
 **H:** please carry these into the `*.spec.md` files and `VALIDATION.md`.
 
 No ride-height change was needed: with the fix the minimum front body clearance in a stop is
-5.7 cm and the collider corners stay ≥ 4.4 cm off the road.
+5.4 cm and the collider corners stay ≥ 3.7 cm off the road.
 
 ## 3. Rendering fix (wheels)
 
@@ -87,7 +101,7 @@ the hub at `position_m` at the **static** compression, so tyres floated or sank 
 and the skid-mark contact in `render/fx/index.ts` (falls back to travel/2 for stand-in props).
 Measured in the browser: drawn tyre bottoms within −0.1…0.5 cm of the road through the stop.
 
-## 4. Before → after (every roster car, flat asphalt, wheel preset, 100 → 0 and 60 → 0)
+## 4. Before (`origin/lead/round12` @ 848465d3) → after (every roster car, flat asphalt, wheel preset, 100 → 0 and 60 → 0)
 
 Peak / steady pitch: nose-down relative to the car at rest (steady = mean between 80 % and 20 %
 of the start speed). Front strut: largest compression / travel. Front body: lowest lattice node
@@ -96,104 +110,120 @@ bottom corners.
 
 | car | km/h | decel g | peak pitch ° | steady pitch ° | front strut / travel | front body clearance cm (at rest) | collider corner cm |
 |---|---|---|---|---|---|---|---|
-| vireo_xs | 100 | 1.00 → **1.01** | 2.52 → **1.92** | 2.08 → **1.64** | 0.85 → **0.74** | 4.9 → **8.2** (14.0) | 6.2 → **9.4** |
-| vireo_xs | 60 | 0.99 → **0.99** | 2.41 → **1.82** | 2.13 → **1.66** | 0.84 → **0.73** | 5.3 → **8.2** (14.0) | 6.6 → **9.4** |
-| kestrel_ts | 100 | 1.00 → **1.01** | 2.84 → **2.17** | 2.27 → **1.79** | 0.94 → **0.79** | 3.1 → **7.0** (14.0) | 4.0 → **7.9** |
-| kestrel_ts | 60 | 0.98 → **0.98** | 2.73 → **2.08** | 2.35 → **1.82** | 0.93 → **0.79** | 3.5 → **7.2** (14.0) | 4.4 → **8.1** |
-| shiro_turbo | 100 | 1.02 → **1.02** | 1.95 → **1.44** | 1.55 → **1.19** | 0.73 → **0.62** | 5.4 → **8.0** (13.0) | 7.2 → **9.9** |
-| shiro_turbo | 60 | 0.98 → **0.99** | 1.85 → **1.40** | 1.52 → **1.17** | 0.72 → **0.62** | 5.8 → **8.0** (13.0) | 7.6 → **9.9** |
-| hakone_gt | 100 | 0.98 → **0.99** | 1.98 → **1.47** | 1.52 → **1.15** | 0.73 → **0.62** | 4.8 → **7.5** (13.0) | 6.7 → **9.5** |
-| hakone_gt | 60 | 0.95 → **0.95** | 1.88 → **1.39** | 1.48 → **1.12** | 0.72 → **0.62** | 5.2 → **7.8** (13.0) | 7.1 → **9.7** |
-| rampart_50 | 100 | 0.98 → **0.99** | 2.39 → **1.78** | 1.89 → **1.44** | 0.90 → **0.77** | 2.9 → **6.3** (13.0) | 4.5 → **8.0** |
-| rampart_50 | 60 | 0.94 → **0.94** | 2.27 → **1.69** | 1.86 → **1.40** | 0.88 → **0.76** | 3.4 → **6.5** (13.0) | 5.1 → **8.3** |
-| ironside_440 | 100 | 0.74 → **0.75** | 3.28 → **2.33** | 2.53 → **1.98** | 0.95 → **0.77** | 0.7 → **6.1** (15.0) | 0.0 → **5.6** |
-| ironside_440 | 60 | 0.72 → **0.73** | 3.26 → **2.39** | 2.55 → **2.00** | 0.95 → **0.79** | 0.7 → **5.7** (15.0) | 0.0 → **5.2** |
-| sperber_32 | 100 | 1.02 → **1.03** | 1.68 → **1.25** | 1.37 → **1.03** | 0.72 → **0.62** | 5.8 → **8.2** (13.0) | 7.7 → **10.1** |
-| sperber_32 | 60 | 0.99 → **0.99** | 1.62 → **1.20** | 1.35 → **1.02** | 0.71 → **0.61** | 6.1 → **8.3** (13.0) | 8.0 → **10.2** |
-| lindwurm_4t | 100 | 1.04 → **1.04** | 2.13 → **1.61** | 1.79 → **1.39** | 0.67 → **0.62** | 5.0 → **7.9** (13.0) | 7.3 → **10.0** |
-| lindwurm_4t | 60 | 1.02 → **1.03** | 2.14 → **1.61** | 1.78 → **1.39** | 0.67 → **0.62** | 4.9 → **7.8** (13.0) | 7.2 → **10.1** |
-| lucciola_350 | 100 | 1.06 → **1.06** | 1.73 → **1.29** | 1.35 → **1.02** | 0.73 → **0.62** | 3.4 → **5.7** (11.0) | 7.3 → **9.5** |
-| lucciola_350 | 60 | 1.02 → **1.02** | 1.65 → **1.23** | 1.32 → **0.99** | 0.71 → **0.61** | 3.8 → **5.9** (11.0) | 7.6 → **9.8** |
-| hauler_1500 | 100 | 0.86 → **0.86** | 2.35 → **1.73** | 1.89 → **1.43** | 0.96 → **0.83** | 9.8 → **14.2** (22.0) | 2.2 → **6.8** |
-| hauler_1500 | 60 | 0.83 → **0.84** | 2.29 → **1.69** | 1.90 → **1.43** | 0.95 → **0.83** | 10.0 → **14.3** (22.0) | 2.4 → **6.8** |
-| sentinel_cruiser | 100 | 0.95 → **0.96** | 2.05 → **1.53** | 1.71 → **1.30** | 0.92 → **0.80** | 4.6 → **7.7** (14.0) | 5.5 → **8.7** |
-| sentinel_cruiser | 60 | 0.92 → **0.92** | 1.95 → **1.45** | 1.68 → **1.28** | 0.91 → **0.80** | 5.0 → **7.9** (14.0) | 5.9 → **8.8** |
-| sentinel_wolfhound | 100 | 0.96 → **0.95** | 2.53 → **1.90** | 1.98 → **1.48** | 0.91 → **0.77** | 4.0 → **7.7** (15.0) | 3.6 → **7.4** |
-| sentinel_wolfhound | 60 | 0.93 → **0.91** | 2.40 → **1.80** | 1.96 → **1.47** | 0.89 → **0.76** | 4.5 → **8.0** (15.0) | 4.1 → **7.8** |
-| sentinel_bastion | 100 | 0.88 → **0.89** | 3.26 → **2.49** | 3.15 → **2.16** | 0.99 → **0.79** | 7.9 → **12.1** (22.0) | 0.0 → **4.4** |
-| sentinel_bastion | 60 | 0.85 → **0.86** | 3.18 → **2.38** | 3.04 → **2.13** | 0.99 → **0.79** | 7.9 → **12.2** (22.0) | 0.0 → **4.6** |
-| junkyard_beater | 100 | 0.84 → **0.85** | 3.80 → **2.45** | 2.52 → **2.00** | 0.97 → **0.76** | 0.4 → **6.1** (14.0) | 1.4 → **7.1** |
-| junkyard_beater | 60 | 0.79 → **0.80** | 3.41 → **2.18** | 2.43 → **1.89** | 0.93 → **0.75** | 1.7 → **6.7** (14.0) | 2.7 → **7.7** |
-| tansy_13 | 100 | 0.97 → **0.98** | 3.66 → **2.36** | 2.97 → **2.13** | 1.00 → **0.70** | 1.7 → **6.9** (14.0) | 3.1 → **8.1** |
-| tansy_13 | 60 | 0.96 → **0.97** | 3.49 → **2.36** | 3.06 → **2.13** | 0.98 → **0.70** | 2.3 → **6.9** (14.0) | 3.6 → **8.1** |
-| drayman_cargo | 100 | 0.89 → **0.90** | 2.76 → **2.02** | 2.18 → **1.63** | 0.99 → **0.81** | 6.1 → **11.2** (20.0) | -0.0 → **5.4** |
-| drayman_cargo | 60 | 0.86 → **0.86** | 2.67 → **1.95** | 2.20 → **1.63** | 0.97 → **0.80** | 6.5 → **11.4** (20.0) | 0.4 → **5.6** |
-| furrow_24 | 100 | 0.86 → **0.87** | 3.50 → **2.40** | 2.58 → **1.99** | 1.01 → **0.81** | 5.9 → **11.8** (20.0) | 0.0 → **6.2** |
-| furrow_24 | 60 | 0.80 → **0.81** | 3.35 → **2.26** | 2.49 → **1.89** | 1.00 → **0.81** | 6.3 → **11.9** (20.0) | 0.5 → **6.3** |
+| vireo_xs | 100 | 0.99 → **0.98** | 2.52 → **1.77** | 2.02 → **1.48** | 0.85 → **0.74** | 4.8 → **8.1** (14.0) | 6.2 → **9.4** |
+| vireo_xs | 60 | 0.95 → **0.97** | 2.25 → **1.77** | 2.04 → **1.49** | 0.82 → **0.74** | 5.8 → **8.0** (14.0) | 7.1 → **9.2** |
+| kestrel_ts | 100 | 0.98 → **0.96** | 2.84 → **1.99** | 2.22 → **1.61** | 0.94 → **0.80** | 3.1 → **7.3** (14.0) | 4.0 → **8.2** |
+| kestrel_ts | 60 | 0.94 → **0.98** | 2.55 → **2.03** | 2.22 → **1.69** | 0.91 → **0.80** | 4.2 → **7.4** (14.0) | 5.1 → **8.3** |
+| shiro_turbo | 100 | 1.02 → **1.01** | 1.95 → **1.36** | 1.55 → **1.06** | 0.73 → **0.62** | 5.4 → **8.0** (13.0) | 7.2 → **9.9** |
+| shiro_turbo | 60 | 0.98 → **0.98** | 1.85 → **1.37** | 1.52 → **1.04** | 0.72 → **0.62** | 5.8 → **8.0** (13.0) | 7.6 → **9.8** |
+| hakone_gt | 100 | 0.98 → **0.98** | 1.98 → **1.36** | 1.52 → **1.03** | 0.73 → **0.62** | 4.8 → **7.7** (13.0) | 6.7 → **9.6** |
+| hakone_gt | 60 | 0.94 → **0.95** | 1.88 → **1.37** | 1.47 → **1.01** | 0.72 → **0.62** | 5.2 → **7.7** (13.0) | 7.1 → **9.6** |
+| rampart_50 | 100 | 0.98 → **0.99** | 2.39 → **1.58** | 1.87 → **1.30** | 0.90 → **0.76** | 2.9 → **6.8** (13.0) | 4.5 → **8.6** |
+| rampart_50 | 60 | 0.93 → **0.96** | 2.27 → **1.56** | 1.81 → **1.29** | 0.88 → **0.76** | 3.3 → **6.9** (13.0) | 5.0 → **8.6** |
+| ironside_440 | 100 | 0.74 → **0.75** | 3.28 → **2.10** | 2.53 → **1.75** | 0.95 → **0.76** | 0.7 → **7.0** (15.0) | 0.0 → **6.6** |
+| ironside_440 | 60 | 0.72 → **0.72** | 3.26 → **2.02** | 2.55 → **1.74** | 0.95 → **0.75** | 0.7 → **7.4** (15.0) | 0.0 → **7.0** |
+| sperber_32 | 100 | 1.02 → **1.01** | 1.68 → **1.20** | 1.36 → **0.92** | 0.72 → **0.62** | 5.8 → **8.2** (13.0) | 7.7 → **10.1** |
+| sperber_32 | 60 | 0.98 → **0.98** | 1.61 → **1.20** | 1.34 → **0.90** | 0.71 → **0.62** | 6.1 → **8.2** (13.0) | 8.0 → **10.1** |
+| lindwurm_4t | 100 | 1.03 → **1.01** | 2.11 → **1.50** | 1.76 → **1.22** | 0.66 → **0.63** | 5.1 → **7.8** (13.0) | 7.3 → **10.0** |
+| lindwurm_4t | 60 | 1.00 → **1.00** | 2.08 → **1.49** | 1.76 → **1.21** | 0.66 → **0.63** | 5.1 → **7.8** (13.0) | 7.4 → **9.9** |
+| lucciola_350 | 100 | 1.04 → **1.04** | 1.73 → **1.23** | 1.33 → **0.89** | 0.73 → **0.61** | 3.4 → **5.9** (11.0) | 7.2 → **9.8** |
+| lucciola_350 | 60 | 1.00 → **1.00** | 1.66 → **1.24** | 1.30 → **0.87** | 0.71 → **0.61** | 3.8 → **5.9** (11.0) | 7.6 → **9.8** |
+| hauler_1500 | 100 | 0.86 → **0.86** | 2.35 → **1.59** | 1.89 → **1.27** | 0.96 → **0.83** | 9.8 → **14.4** (22.0) | 2.2 → **7.0** |
+| hauler_1500 | 60 | 0.83 → **0.84** | 2.29 → **1.58** | 1.90 → **1.27** | 0.95 → **0.83** | 10.0 → **14.5** (22.0) | 2.4 → **7.0** |
+| sentinel_cruiser | 100 | 0.95 → **0.95** | 2.05 → **1.46** | 1.71 → **1.15** | 0.92 → **0.80** | 4.6 → **7.8** (14.0) | 5.5 → **8.8** |
+| sentinel_cruiser | 60 | 0.92 → **0.93** | 1.95 → **1.43** | 1.68 → **1.15** | 0.91 → **0.80** | 5.0 → **7.9** (14.0) | 5.9 → **8.9** |
+| sentinel_wolfhound | 100 | 0.96 → **0.95** | 2.53 → **1.72** | 1.98 → **1.32** | 0.91 → **0.76** | 4.0 → **8.5** (15.0) | 3.6 → **8.2** |
+| sentinel_wolfhound | 60 | 0.93 → **0.93** | 2.40 → **1.70** | 1.96 → **1.33** | 0.89 → **0.76** | 4.5 → **8.5** (15.0) | 4.1 → **8.2** |
+| sentinel_bastion | 100 | 0.88 → **0.89** | 3.26 → **2.52** | 3.15 → **2.12** | 0.99 → **0.89** | 7.9 → **11.4** (22.0) | 0.0 → **3.7** |
+| sentinel_bastion | 60 | 0.85 → **0.86** | 3.18 → **2.50** | 3.04 → **2.04** | 0.99 → **0.89** | 7.9 → **11.5** (22.0) | 0.0 → **3.8** |
+| junkyard_beater | 100 | 0.81 → **0.83** | 4.13 → **2.49** | 3.16 → **2.36** | 1.03 → **0.82** | -1.0 → **5.4** (14.0) | 0.0 → **6.4** |
+| junkyard_beater | 60 | 0.75 → **0.81** | 3.99 → **2.48** | 2.98 → **2.26** | 1.03 → **0.82** | -0.7 → **5.5** (14.0) | 0.3 → **6.5** |
+| tansy_13 | 100 | 0.93 → **0.94** | 3.68 → **2.41** | 2.83 → **2.09** | 1.00 → **0.80** | 1.7 → **6.6** (14.0) | 3.0 → **7.9** |
+| tansy_13 | 60 | 0.92 → **0.95** | 3.56 → **2.41** | 2.86 → **2.14** | 0.99 → **0.80** | 2.0 → **6.6** (14.0) | 3.4 → **7.8** |
+| drayman_cargo | 100 | 0.89 → **0.89** | 2.76 → **1.80** | 2.18 → **1.45** | 0.99 → **0.80** | 6.1 → **11.8** (20.0) | -0.0 → **6.1** |
+| drayman_cargo | 60 | 0.86 → **0.86** | 2.67 → **1.80** | 2.20 → **1.43** | 0.97 → **0.80** | 6.5 → **11.6** (20.0) | 0.4 → **5.9** |
+| furrow_24 | 100 | 0.89 → **0.91** | 3.50 → **2.17** | 2.60 → **1.81** | 1.01 → **0.81** | 5.9 → **11.9** (20.0) | 0.0 → **6.4** |
+| furrow_24 | 60 | 0.83 → **0.85** | 3.35 → **2.17** | 2.52 → **1.73** | 1.00 → **0.81** | 6.3 → **11.9** (20.0) | 0.5 → **6.3** |
 
-Real-car target ≈ 1–2° at 1 g: sports/sedans now 1.2–2.2°, soft muscle / SUV / beater / vans
-2.0–2.5°. No bump stop is reached any more (front struts ≤ 83 % of their travel; was 85–101 %, 2 mm
-of bump-stop squash on furrow_24).
+Real-car target ≈ 1–2° at 1 g: sports / sedans / police now 1.2–2.0°, soft muscle / SUV /
+beater / economy 2.0–2.52°. Before, round12's softer beater reached 4.1° and put its front
+body **1.0 cm into the road**. No bump stop is reached any more (front struts ≤ 89 % of their travel; was up to 103 %).
 Braking deceleration unchanged (±0.01 g).
 
-**Keyboard preset** (pedal ramp) gives the same peaks within 0.05°; **holding the brake into
+**Keyboard preset** (pedal ramp) gives the same peaks within 0.06°; the **owner default** (keyboard, TCS / ESC /
+automatic gears off — manual gears, so engine braking adds to the stop) peaks at 2.51° (bastion,
+beater); **holding the brake into
 reverse** (keyboard) never exceeds the stop itself.
 
 **Through `wp_sim`, both modes** (`crates/wp_sim/tests/brake_dive.rs`, all 17 cars × Arcade /
-Simulation, 100 → 0): peak ≤ 2.5°, front lattice body > 4 cm, zero chassis contacts with the
-road. `vehicle/brake_dive_100_arcade.ron` and `_sim.ron` give the **same state hash**
-(921b9c1133fca428) — physics identical in both modes.
+Simulation, 100 → 0): peak ≤ 2.55°, front lattice body > 4 cm, zero chassis contacts with the
+road. `vehicle/brake_dive_100_arcade.ron` and `_sim.ron` give the **same state hash** — physics identical in both modes.
 
 **Browser** (`npm run e2e:brake-dive`, headless Chromium, both scenarios, drawn panel-mesh
 vertices every frame): lowest drawn front body vertex 7.2 cm (ironside_440), 7.4 cm
 (junkyard_beater), 13.2 cm (sentinel_bastion) above the road; drawn nose dive 2.4–2.6° (from the
 first frame, which is still slightly nose-up from cruising); tyres on the road ±0.5 cm.
 
-## 5. Handling balance and ride (rows 28, 54/55)
+## 5. Handling, ride, body damping (rows 28, 54/55, Drift Lab W)
 
 Handling (`--example handling`, wheel preset, 80 km/h; before = `origin/lead/round12`). Anti-dive
-acts only on brake-reacted force, so cornering without the brake is changed only by the six
-cars' damper / spring / travel data. Last column: body ahead of the front axle above the road
-with both front struts on their bump stops (geometry, after).
+acts only on rearward brake-held tyre force, so cornering without the brake changes only through
+the six cars' data. Last column: body ahead of the front axle above the road with both front
+struts on their bump stops (geometry, after).
 
 | car | US gradient deg/g | ramp max g | full-input g | body on front bump stops cm |
 |---|---|---|---|---|
 | vireo_xs | 0.42 → **0.42** | 0.87 → **0.87** | 0.75 → **0.75** | 4.6 |
-| kestrel_ts | 0.31 → **0.31** | 0.94 → **0.94** | 0.80 → **0.80** | 5.3 |
+| kestrel_ts | 0.40 → **0.40** | 0.94 → **0.94** | 0.80 → **0.80** | 5.3 |
 | shiro_turbo | 0.34 → **0.34** | 0.96 → **0.96** | 0.66 → **0.66** | 3.1 |
-| hakone_gt | 0.15 → **0.15** | 0.94 → **0.94** | 0.66 → **0.66** | 2.2 |
-| rampart_50 | 0.22 → **0.22** | 0.90 → **0.90** | 0.64 → **0.64** | 3.5 |
+| hakone_gt | 0.12 → **0.12** | 0.94 → **0.94** | 0.66 → **0.66** | 2.2 |
+| rampart_50 | 0.23 → **0.23** | 0.90 → **0.90** | 0.59 → **0.59** | 3.5 |
 | ironside_440 | 1.40 → **1.39** | 0.64 → **0.64** | 0.37 → **0.37** | 2.9 |
-| sperber_32 | 0.18 → **0.18** | 0.95 → **0.95** | 0.65 → **0.65** | 2.7 |
-| lindwurm_4t | 0.32 → **0.32** | 0.95 → **0.95** | 0.75 → **0.75** | 3.0 |
+| sperber_32 | 0.18 → **0.18** | 0.96 → **0.96** | 0.65 → **0.65** | 2.7 |
+| lindwurm_4t | 0.31 → **0.31** | 0.95 → **0.95** | 0.75 → **0.75** | 3.0 |
 | lucciola_350 | 0.07 → **0.07** | 1.00 → **1.00** | 0.71 → **0.71** | 1.2 |
 | hauler_1500 | 1.44 → **1.44** | 0.66 → **0.66** | 0.52 → **0.52** | 11.1 |
 | sentinel_cruiser | 0.29 → **0.29** | 0.86 → **0.86** | 0.64 → **0.64** | 5.2 |
 | sentinel_wolfhound | 0.26 → **0.26** | 0.88 → **0.88** | 0.72 → **0.72** | 5.0 |
-| sentinel_bastion | 0.41 → **0.40** | 0.75 → **0.76** | 0.58 → **0.58** | 8.7 |
-| junkyard_beater | 1.60 → **1.59** | 0.71 → **0.71** | 0.45 → **0.45** | 4.0 |
-| tansy_13 | 0.50 → **0.48** | 0.82 → **0.81** | 0.70 → **0.70** | 3.4 |
+| sentinel_bastion | 0.41 → **0.42** | 0.75 → **0.76** | 0.58 → **0.58** | 11.1 |
+| junkyard_beater | 1.58 → **1.51** | 0.70 → **0.70** | 0.44 → **0.44** | 4.2 |
+| tansy_13 | 0.50 → **0.49** | 0.81 → **0.81** | 0.70 → **0.70** | 5.1 |
 | drayman_cargo | 0.69 → **0.69** | 0.68 → **0.68** | 0.52 → **0.52** | 8.6 |
-| furrow_24 | 0.47 → **0.49** | 0.75 → **0.75** | 0.58 → **0.58** | 9.6 |
+| furrow_24 | 0.48 → **0.49** | 0.75 → **0.76** | 0.58 → **0.59** | 9.6 |
 
-`tests/handling_balance.rs` **passes** (on `origin/lead/round12` it fails:
-junkyard_beater 1.60x deg/g > 1.6 in `front_drive_cars_understeer_mildly`; now 1.59).
+`tests/handling_balance.rs` passes. Ride (`tests/ride.rs`, kerbs / crests / slides / side hits)
+passes; kerb strikes are unchanged (no brake, so no jacking; `vehicle/kerb_strike_*` goldens
+match round12's).
 
-Ride (`--example ride`, the four reference cars: kerbs 10/15 cm at 30/60, crests, slides into
-kerbs, side impacts, heave/pitch kicks): **identical** to `origin/lead/round12` (no brake in
-those runs, so no jacking; their data is unchanged). `tests/ride.rs` passes for the roster.
+**Roll and pitch damping of the touched cars** (lead request; `--example body_damping`: a
+0.3 rad/s kick at rest, damping ratio from the first two extrema; "no overshoot" = ζ ≳ 0.9;
+before = round12's suspension data, same code). More damping on every axis, no stiffer spring:
+
+| car | roll before → after | pitch before → after |
+|---|---|---|
+| ironside_440 | 1.05 Hz ζ 0.28 → **1.06 Hz ζ 0.36** | 1.09 Hz ζ 0.35 → **1.11 Hz ζ 0.48** |
+| furrow_24 | 1.50 Hz ζ 0.26 → **1.54 Hz ζ 0.34** | 1.41 Hz ζ 0.38 → **ζ ≈ 0.4–0.5** (fit reads 0.26 Hz ζ 0.39: the second extremum is a slow settle, not a cycle) |
+| tansy_13 | 1.28 Hz ζ 0.46 → **no overshoot** | 1.41 Hz ζ 0.38 → **no overshoot** |
+| junkyard_beater | 0.97 Hz ζ 0.41 → **no overshoot** | 1.10 Hz ζ 0.25 → **no overshoot** |
+| sentinel_bastion | 1.48 Hz ζ 0.26 → **1.25 Hz ζ 0.44** | 1.27 Hz ζ 0.43 → **no overshoot** |
+| lindwurm_4t (travel only) | 2.07 Hz ζ 0.54 → 2.07 Hz ζ 0.54 | 2.11 Hz ζ 0.51 → 2.11 Hz ζ 0.51 |
+
+Roll is still ζ 0.34–0.44 on ironside / furrow / bastion: their bump ζ sits at 0.35–0.43 and the
+ride test caps bump ζ at 0.45. Drift Lab W's ×1.4 bump / ×1.8 rebound (ζ ≈ 0.95) would need that
+band (and its ARB ×0.25) changed roster-wide; that's W's / A's call, not this row's.
 
 ## 6. Tests and scenarios
-- `crates/wp_vehicle/tests/brake_dive.rs`: every roster car, wheel + keyboard, 100 and 60 km/h:
-  peak ≤ 2.5°, steady ≤ 2.2°, still dives > 0.8°, front body > 4 cm, collider > 3 cm, never past
-  the end of the travel, decel > 0.6 g; holding the brake into reverse ≤ 2.5°.
+- `crates/wp_vehicle/tests/brake_dive.rs`: every roster car, wheel (manual gears), keyboard and
+  owner default (keyboard, manual gears, TCS / ESC off), 100 and 60 km/h: peak ≤ 2.55° (target
+  ≈ 2.5°), steady ≤ 2.4°, still dives > 0.8°, front body > 4 cm, collider > 3 cm, never past the
+  end of the travel, decel > 0.6 g; holding the brake into reverse ≤ 2.55°;
+  `the_bump_stops_hold_the_nose_off_the_road` (geometry, every car > 1 cm).
 - `crates/wp_sim/tests/brake_dive.rs`: the two-mode game-loop check above (fails on the old
   physics: vireo_xs already 2.50° with anti-dive off).
 - `apps/simcli/scenarios/vehicle/brake_dive_100_{arcade,sim}.ron`: three soft cars, stop
   distance 38–65 m, no crush (pitch is in the wp_sim test: simcli has no pitch metric).
 - `apps/testbed-web/e2e/brake_dive.mjs` (`npm run e2e:brake-dive`; not added to `npm run e2e`
   to keep that run's length; lead's call).
-- Same file: `the_bump_stops_hold_the_nose_off_the_road` (geometry, every car > 1 cm).
 
 ## Contract change requests
 | # | Change | Why | Who is affected | Status |
@@ -202,6 +232,7 @@ those runs, so no jacking; their data is unchanged). `tests/ride.rs` passes for 
 
 ## Changes outside wp_vehicle
 - `crates/wp_wasm/src/lib.rs`: `WheelInfo::static_compression_m` (lead crate; additive JSON field).
+- `crates/wp_vehicle/Cargo.toml`: `serde_json` dev-dependency (the `body_damping` example only).
 - `apps/testbed-web`: `wasm/layout.ts` (`wheelCentreZ`), `wasm/sim.ts` (type), `vehicle_view.ts`,
   `render/fx/index.ts`, `e2e/brake_dive.mjs`, `package.json` (`e2e:brake-dive`).
 - `data/cars/*.json`: 5 cars (above). Goldens + pinned hashes re-recorded in a `[bless]` commit.
@@ -210,46 +241,51 @@ those runs, so no jacking; their data is unchanged). `tests/ride.rs` passes for 
 - Anti-squat under acceleration is not modelled (drive torque jacks nothing).
 - The chassis collider is still a box with its bottom 0.15 m over the full body length (the
   tall cars' drawn body is 20–22 cm up): a lower-than-drawn collider can scrape on crests; now
-  ≥ 4.4 cm away under braking. A per-car floor from the lattice would match the drawn body.
+  ≥ 3.7 cm away under braking. A per-car floor from the lattice would match the drawn body.
 - Lattice bottoms are 11–15 cm on the cars (real bumpers ~15–20 cm); not changed (B/H's data).
   lucciola_350 has only 1.2 cm left with its front struts on the bump stops (a hard kerb or
   landing can still squash the bump stop that far); a higher nose in its lattice/mesh would fix
   it without touching its ride.
 
 ## Requests
-- **F (net):** `wp_net/tests/vesper_e2e.rs::four_clients_three_minutes_in_port_vesper` fails
-  here (passes on `origin/lead/round12`): "p1 never saw racer 0's pursuit end". Traced: racer 0
-  is now captured at step 2854, inside the test's scripted disconnect of client p1 (steps
-  2700–2880); p0/p2/p3 get the `PursuitEnded` at 2854–2856. Game events queued while a client is
-  offline are never replayed on reconnect (`Server::send` returns when `conn` is `None`), so p1
-  cannot see it. The vehicle change only moved the capture earlier (the racer is boxed in
-  before its scripted give-up at 3185). Suggest replaying the events a reconnecting player
-  missed (at least `PursuitEnded` / `WantedLevelChanged` for their own racer and pursuits they
-  took part in), or keeping the capture out of the drop window in the test.
 - **H (cars):** carry the six cars' data changes (§2) into the `*.spec.md` files and
   `VALIDATION.md`.
-- **Lead (contracts):** request #1 above.
+- **Lead (contracts):** request #1 above (per-car anti-dive / anti-lift).
 - **Lead:** decide whether `e2e/brake_dive.mjs` joins `npm run e2e`.
+- **W / A (suspension feel):** roll on ironside / furrow / bastion stays ζ 0.34–0.44 because the
+  ride test caps bump ζ at 0.45 (§5); Drift Lab W's damping-up defaults need that band moved.
+- **F (net), from the first pass:** `vesper_e2e::four_clients_three_minutes_in_port_vesper`
+  failed there because racer 0 was captured inside the test's scripted disconnect of p1 (steps
+  2700–2880), and events sent while a client is offline are never replayed on reconnect. It
+  passes on the merged branch (timing moved), but the gap stays: a capture during a reconnect
+  window is lost for that client.
 
-## Checks (`lead/brake-dive`, 2026-10-20; CARGO_INCREMENTAL=0, no debug info)
-- `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+## Checks (`lead/brake-dive` after merging `origin/lead/round12` @ 848465d3; CARGO_INCREMENTAL=0, no debug info)
+- `cargo fmt --check`, `cargo clippy --workspace -- -D warnings`: clean. (`--all-targets` also
+  flags `wp_audio/src/siren.rs:437` `12345.678_901` in a lib test — round12's code, untouched.)
 - `cargo build --target wasm32-unknown-unknown -p wp_wasm`, `npm run wasm`, `tsc --noEmit`: ok.
-- `npm run e2e:brake-dive` (headless Chromium): all checks pass (numbers in §4).
-- `simcli run apps/simcli/scenarios` (84): all pass except `police_tunnel_escape_founders_cut`
-  (racer captured at 135 s instead of escaping) — **fails identically on `origin/lead/round12`**
-  (captured at 133.8 s).
-- `simcli goldens` after the `[bless]`: all match except the four scenarios that have **no golden
-  on `origin/lead/round12` either** (`city_tunnel_{founders_cut,hollins}_drive_through`,
-  `police_tunnel_escape_founders_cut{,_control}`; not added here).
-- `cargo test --workspace --no-fail-fast` (debug): 147 test binaries ok; failures:
-  - `wp_audio engine_shift::rev_matched_downshifts_blip` (1.1 dB < 2): **same on the base**
-    (known since round 12b, J).
-  - `wp_race race_picker`: `loop9_circuit` (**fails on the base too**), `grid_highway_sprint`,
-    `hollins_hill_sprint` (pass on the base; two AI racers DNF at gate 3 queued behind
-    traffic, the pattern round 12b recorded for `grid_highway_sprint`), and `wp_wasm
-    race_tests::short_sprint_…` (the same grid sprint; round 12b: fails on round12 too). On the
-    base `lantern_checkpoint_draws_the_police` fails instead. These are 1–5 minute AI-in-traffic
-    races: any vehicle change reshuffles them (L / N).
-  - `wp_net vesper_e2e::four_clients_three_minutes_in_port_vesper`: see Requests (F).
-- Determinism: `vehicle/brake_dive_100_arcade` and `_sim` produce the same hash in both modes;
-  the goldens re-run after the bless match (in-process determinism).
+- `npm run e2e:brake-dive` (headless Chromium, both modes): pass; lowest drawn front body vertex
+  6.7 cm (beater), 7.8 cm (ironside), 12.7 cm (bastion); drawn dive 2.2–2.7° from the first
+  (cruising, slightly nose-up) frame; tyres on the road ±0.4 cm.
+- Goldens: reference reset to round12's (my earlier bless was on the old base), then `[bless]`
+  (commits 3b85bbed, 1092d99d, 77120bdf). Kept unchanged vs round12: full-throttle launches
+  (`vehicle_coupe_accel_*`), kerb strikes, frontal barrier / sports frontals, `golden_fwd_liftoff`,
+  `golden_rwd_power_slide` — no brake, no jacking. Moved: everything that brakes (driver, ESC /
+  TCS, AI / traffic stops) or drives one of the six re-tuned cars. After the bless
+  `simcli goldens` matches all but `city_siren_traffic_no_siren` (its expectation, below).
+- `simcli run apps/simcli/scenarios`: all pass except `city_siren_traffic_no_siren`
+  (`civilian_collisions` 1): **identical on round12** — a run equal to round12 bit for bit
+  (anti-dive off, round12 car data: hash 0d6d6e6c… = round12's golden) fails the same way
+  (traffic agents 41 / 133 at traffic step 2208). Rear anti-lift 0.75 was tried and flipped
+  `police_tunnel_escape_founders_cut{,_control}` (captured at 55.6 s), so it stays 0.6.
+- `cargo test --workspace --no-fail-fast` (debug): 149 binaries ok. Failures, each checked on a
+  clean `origin/lead/round12` checkout:
+  - `simcli` `all_scenarios_pass…` / `goldens_match`: the siren expectation above (round12 too).
+  - `wp_opponent race::wanted_ai_racer_flees_police_through_the_city`: **fails on round12 too**.
+  - `wp_race race_picker::grid_highway_sprint`: **fails on round12 too**; `wp_wasm
+    race_tests::short_sprint_…` (same grid sprint): **fails on round12 too**.
+  - `wp_race race_picker::hollins_hill_sprint`: passes on round12, fails here — two AI racers
+    DNF at gate 3 queued behind traffic (finish window), the pattern of the grid sprint. A
+    1-minute AI-in-traffic race that braking changes reshuffle; L / N.
+- Determinism: `vehicle/brake_dive_100_arcade` and `_sim` give the same hash; goldens re-run
+  after each bless match.
