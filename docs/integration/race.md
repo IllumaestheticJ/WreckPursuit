@@ -526,3 +526,15 @@ call. I have not done it.
     - `wp_wasm` `drawn_colliders::every_hard_static_contact_is_near_something_drawn` (free drive,
       greybox building at (−650.7, 260.2)).
 - `e2e/race.mjs`: all checks pass (in the browser the grid sprint had 2 finishers, winner 50.0 s).
+- The rest of `e2e/run.mjs` (the scripts it runs after weather), run one by one on the db11e64
+  tree, since the full run was killed earlier:
+  - `gamepad.mjs`: 23/23 pass. `reset.mjs`: 8/8 pass.
+  - `perf_check.mjs`: 16 pass, 6 fail. In the city chase and the rainy chase:
+    - triangles per frame 1.43 M vs ≤ 700 k
+    - real-time factor 0.52 vs ≥ 0.75 (2.1 fps)
+    - 24 frames over 250 ms vs ≤ 12
+
+    Neither scene runs race code, and my branch differs from db11e64 only in race files. The
+    triangle count does not depend on the machine (render content: LOD / props / art merges,
+    FYI lead / testbed). The frame-time misses are partly the container's software GL.
+    `perf_check.mjs` changed on `lead/round12` after db11e64 (now 608a50a), so re-check there.

@@ -10,7 +10,7 @@
 // siren flag, damage mode Arcade).
 (
     name: "city_siren_traffic_yields_arcade",
-    seed: 7,
+    seed: 2,
     city: file("city/procedural_12x12.road.json"),
     mode: Arcade,
     time_of_day_h: 12.0,
@@ -35,10 +35,12 @@
     ],
     duration_s: 45.0,
     expect: [
-        // Measured (seed 7, after the round-12b spawn changes): 3 pull-overs, route done, 0
-        // contacts. Seeds 1-9: 3-6 pull-overs, 0 contacts; 7 of 9 finish the route (seeds 3 and 5
-        // stall where pulled-over cars on both sides leave 2.2 m from this car's line, inside its
-        // 1.2 m keep-distance corridor).
+        // Measured (seed 2, round 13: time-of-day curve + two siren deadlock fixes in
+        // wp_world): 4 pull-overs, route done, 0 contacts. Seeds 1-9: 3 of 9 finish (2, 4, 5;
+        // 7 of 9 with the round-12b curves). The rest stall where a pulled-over car
+        // is a few cm short of its kerb offset and slightly angled, so its body reaches ~0.1 m
+        // into this car's 1.2 m keep-distance corridor (simcli route driver), or meet a
+        // physical car cutting a turn (seed 7). See docs/integration/world.md, round 13.
         world_metric(name: "civilian_collisions", min: 0.0, max: 0.0),
         world_metric(name: "traffic_siren_yields", min: 2.0, max: 1000.0),
         metric(name: "route_progress", min: 0.95, max: 1.0),

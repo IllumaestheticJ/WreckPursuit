@@ -7,7 +7,7 @@
 //         blur behind UI panels (re-blurring the 3D view every frame cost ~90 ms a frame under
 //         SwiftShader; 5000 streaks ~60 ms).
 //   auto  high on a hardware GPU; low on a software rasterizer (SwiftShader, llvmpipe: no
-//         usable GPU, e.g. headless Chromium or a blocklisted driver). Then a governor scales
+//         usable GPU, e.g. headless Chromium or a blocklisted driver; less far geometry, see profileFor). Then a governor scales
 //         the resolution down while frames stay slow (and back up when they are fast again),
 //         so the game keeps real time (no slow motion) on weak machines.
 //         On a touch device (phone / tablet, src/touch.ts `prefersTouch`) auto = the touch
@@ -104,10 +104,14 @@ interface Profile {
   /** Promoted traffic / police cars past this distance (m) are drawn by the fleet, not their
    * own per-panel view (render/lod.ts). */
   viewDrawM: number;
+  /** Traffic signal heads within this distance (m) are drawn (signals_view.ts). */
+  signalM: number;
+  /** Small city detail (kerbs, lot skirts, corner fills) within this distance (m). */
+  cityDetailM: number;
 }
 
 function profileFor(mode: GfxMode, software: boolean, touch: boolean): Profile {
-  const common = { maxPixelRatio: 2, trafficM: Infinity, fullLodM: 250, propFullMax: 24, propDrawM: Infinity, propProxyM: 300, lampDrawM: Infinity, viewDrawM: Infinity };
+  const common = { maxPixelRatio: 2, trafficM: Infinity, fullLodM: 250, propFullMax: 24, propDrawM: Infinity, propProxyM: 300, lampDrawM: Infinity, viewDrawM: Infinity, signalM: 450, cityDetailM: Infinity };
   const high = { ...common, antialias: true, backdropBlur: true, rain: 1, scale: 1, minScale: 1, drawM: Infinity, adaptive: false };
   // Low: a weak or no GPU (software rasterizers are vertex / draw-call bound: fewer, cheaper
   // car meshes and lamps matter more than pixels). Full car meshes within 150 m, traffic and
@@ -128,13 +132,18 @@ function profileFor(mode: GfxMode, software: boolean, touch: boolean): Profile {
     propProxyM: 150,
     lampDrawM: 450,
     viewDrawM: 80,
+    // Signal heads within 250 m (a lamp is ~2 px there), kerbs / lot skirts / corner fills
+    // within 250 m (city_tiles.ts CITY_DETAIL).
+    signalM: 250,
+    cityDetailM: 250,
   };
   if (mode === "high") return high;
   if (mode === "low") return low;
   if (touch) return { ...low, rain: 0.2, minScale: 0.3, drawM: 600, adaptive: true, maxPixelRatio: 1, trafficM: 300, fullLodM: 120, propProxyM: 120, lampDrawM: 300, viewDrawM: 60 };
   // Software GL starts at 0.35× (where the governor always ended up): every governor step
-  // resizes the canvas and the post targets, a long hitch under a software rasterizer.
-  return software ? { ...low, scale: 0.35, minScale: 0.25, adaptive: true } : { ...high, minScale: 0.6, adaptive: true };
+  // resizes the canvas and the post targets, a long hitch under a software rasterizer. Rain at
+  // 20 % there (30 % cost ~25 ms a frame, browser-perf.md round 12b).
+  return software ? { ...low, scale: 0.35, minScale: 0.25, rain: 0.2, adaptive: true } : { ...high, minScale: 0.6, adaptive: true };
 }
 
 /** Frame-time thresholds of the governor (ms, smoothed wall frame time). */
@@ -164,6 +173,10 @@ export class Quality {
   lampDrawM: number;
   /** Promoted car view distance, m (LodDirector.viewDrawM). */
   viewDrawM: number;
+  /** Signal head draw distance, m (SignalView.drawM). */
+  signalDrawM: number;
+  /** Small city detail distance, m (SceneView.detailDistanceM). */
+  cityDetailM: number;
   /** Called after `setMode` changed the profile (main re-applies the LOD distances). */
   onChange: (() => void) | null = null;
   readonly rendererName: string;
@@ -194,6 +207,7 @@ export class Quality {
     this.touch = prefersTouch();
     this.profile = profileFor(this.mode, this.software, this.touch);
     this.trafficDrawM = this.fullLodM = this.propFullMax = this.propDrawM = this.propProxyM = this.lampDrawM = this.viewDrawM = 0;
+    this.signalDrawM = this.cityDetailM = 0;
     this.applyLod();
     this.antialias = this.profile.antialias;
     this.lite = !this.profile.backdropBlur;
@@ -212,6 +226,8 @@ export class Quality {
     this.propProxyM = this.profile.propProxyM;
     this.lampDrawM = this.profile.lampDrawM;
     this.viewDrawM = this.profile.viewDrawM;
+    this.signalDrawM = this.profile.signalM;
+    this.cityDetailM = this.profile.cityDetailM;
   }
 
   /** Native pixel ratio cap. */

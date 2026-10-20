@@ -92,15 +92,15 @@ pub struct MeshPart {
     /// 4 weights per vertex in 1/255 (`bind-skin`); empty for wheel parts.
     #[serde(default)]
     pub skin_weights: Vec<u8>,
-    /// Sheet buckling of a hood / trunk lid or front fender (`bind-skin`, format 3); `None`
+    /// Sheet buckling of a hood / trunk lid, front fender or rear quarter (`bind-skin`, format 3); `None`
     /// for every other part. See [`FoldBinding`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fold: Option<FoldBinding>,
 }
 
 /// How a sheet panel crumples in the renderer (visual only; the lattice, hull and repair bill
-/// never see it). The panel runs from a fixed end (a lid's hinge row, a fender's rear row) to a
-/// leading end (the latch row, the fender's nose). Per chord (fixed node → leading node):
+/// never see it). The panel runs from a fixed end (a lid hinge row; a side panel door-side row) to a
+/// leading end (the latch row; the fender nose / quarter tail). Per chord (fixed node → leading node):
 /// - the leading end follows the crushed front structure: when the `leads` nodes (bumper,
 ///   frame, fender noses next to the leading node) move toward the fixed end further than the
 ///   panel's own leading node, the panel's vertices are pulled back by the difference
@@ -138,7 +138,7 @@ pub struct FoldBinding {
 pub const FOLD_DEAD_ZONE_M: f32 = 0.015;
 /// Largest fold height of a hood / trunk lid, m.
 pub const FOLD_MAX_M: f32 = 0.28;
-/// Largest outward buckle of a front fender, m.
+/// Largest outward buckle of a front fender or rear quarter, m.
 pub const FENDER_FOLD_MAX_M: f32 = 0.12;
 /// Share of the single-tent height each of the lid's ridges gets (the shortening is split
 /// over two ridges).
@@ -151,7 +151,7 @@ pub const LID_POP_M: f32 = 0.09;
 pub const HOOD_CRUMPLE_GAIN: f32 = 1.8;
 /// Visual crumple gain on a trunk lid's own chord loss.
 pub const TRUNK_CRUMPLE_GAIN: f32 = 1.4;
-/// Visual crumple gain on a front fender's own chord loss.
+/// Visual crumple gain on a front fender or rear quarter.
 pub const FENDER_CRUMPLE_GAIN: f32 = 1.5;
 
 /// Fold height (m) of a sheet whose fixed→leading chord measured `rest_m` and is now

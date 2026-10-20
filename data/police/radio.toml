@@ -1,20 +1,36 @@
 # Police radio pacing (wp_police::radio). Sim seconds; no wall clock.
-# Playtest row 6 ("the dispatcher and cops are way too talkative"). Budget: <= 4 lines/min with
-# nobody wanted, <= 10 lines/min in a hot pursuit (wp_police scenarios radio_*.ron check it).
 #
-# Critical lines (pursuit start, wanted level up, roadblock/spikes set, suspect lost, capture,
-# captain orders) always play. Tactical lines (en route, intercepts, backup, helicopter) and
-# routine lines (resuming patrol, clear, unrelated incidents) obey the gaps below.
+# Playtest row 6 ("the dispatcher and cops are way too talkative"): budget <= 4 lines/min with
+# nobody wanted, <= 10 lines/min in a hot pursuit (wp_police scenarios radio_*.ron check it).
+# Playtest row 79 ("cops don't talk with each other"): units call out what they see
+# (wp_police::chatter), one transmission at a time, a bit more chatter as the wanted level
+# rises. Level 1 keeps the row-6 gaps.
+#
+# Critical lines (pursuit start, wanted level up, roadblock/spikes set, lost visual, suspect
+# lost, capture, unit down, captain orders) skip the gaps but still wait for the channel.
+# Tactical lines (en route, intercepts, backup, helicopter, unit callouts) and routine lines
+# (resuming patrol, clear, unrelated incidents) obey the gaps below.
 
-# After any spoken line, no tactical/routine line for this long while a racer is wanted, s.
-global_gap_s = 8.0
+# After any spoken line, no tactical/routine line for this long, by the highest wanted level of
+# any racer (L1..L5), s. L1 = the row-6 value.
+global_gap_s = [8.0, 6.5, 5.0, 4.0, 3.5]
 # ... and while nobody is wanted, s.
 global_gap_calm_s = 20.0
-# One unit says at most one tactical/routine line per this long, s.
-unit_gap_s = 30.0
+# One unit says at most one tactical/routine line per this long, by wanted level (L1..L5; nobody
+# wanted uses L1), s. L1 = the row-6 value.
+unit_gap_s = [30.0, 22.0, 16.0, 12.0, 10.0]
 # Tactical/routine lines wait this long so duplicates from several units merge into one, s.
 collapse_window_s = 1.0
-# Held tactical/routine lines older than this are dropped, s.
+# Held tactical/routine lines older than this are dropped (callouts may set a shorter life), s.
 stale_s = 6.0
+# Held critical lines older than this are dropped, s.
+stale_critical_s = 15.0
 # With nobody wanted, routine chatter plays only from units within this range of a racer, m.
 earshot_m = 200.0
+
+# One transmission at a time: a line keeps the channel for words / words_per_s + line_pad_s,
+# then min_gap_s of silence. words_per_s and line_pad_s match wp_audio's scanner
+# (data/audio/audio_config.json) so the spoken lines never overlap either.
+min_gap_s = 2.5
+words_per_s = 2.6
+line_pad_s = 0.7

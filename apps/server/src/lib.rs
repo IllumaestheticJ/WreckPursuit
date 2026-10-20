@@ -283,6 +283,7 @@ pub async fn run_with(cfg: AppConfig, log: LogFn, meta_vars: MetaVars) -> Result
             None => None,
             Some(c) => {
                 let c = c?;
+                let bracket = c.register.bracket.clone();
                 let worker =
                     tokio::task::spawn_blocking(move || wp_meta::instance::MetaWorker::start(&c))
                         .await
@@ -293,7 +294,7 @@ pub async fn run_with(cfg: AppConfig, log: LogFn, meta_vars: MetaVars) -> Result
                     vec![("instance", worker.instance_id().to_string())],
                 );
                 server_cfg.require_join_token = true;
-                Some(worker)
+                Some((worker, bracket))
             }
         }
     };
@@ -346,7 +347,8 @@ pub async fn run_with(cfg: AppConfig, log: LogFn, meta_vars: MetaVars) -> Result
                 log.clone(),
                 net_hz,
                 {
-                    let mut hook = meta.map(|w| meta::MetaHook::new(w, log.clone()));
+                    let mut hook =
+                        meta.map(|(w, bracket)| meta::MetaHook::new(w, log.clone(), mode, bracket));
                     move |inst: &mut ServerInstance<WpSim>| {
                         if let Some(h) = hook.as_mut() {
                             h.tick(inst);

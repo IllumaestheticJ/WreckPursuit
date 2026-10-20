@@ -5,7 +5,7 @@
 //!
 //! Light lenses are the exception: they bind to the nearest nodes of the end of the car they
 //! sit on (bumper, hood / trunk, the fender / quarter on their side, the frame), so they crush
-//! and move with the bumper and hood. Hood and trunk lids and the front fenders also get a fold
+//! and move with the bumper and hood. Hood and trunk lids, front fenders and rear quarters get a fold
 //! binding ([`bind_fold`]) so a crushed panel buckles and follows the crushed front instead of
 //! sliding back flat.
 
@@ -201,6 +201,7 @@ pub fn lead_regions(region: BodyRegion) -> Option<&'static [BodyRegion]> {
         Hood => &[FrontBumper, FrameFront, FrontLeftFender, FrontRightFender],
         Trunk => &[RearBumper, FrameRear, RearLeftQuarter, RearRightQuarter],
         FrontLeftFender | FrontRightFender => &[FrontBumper, FrameFront],
+        RearLeftQuarter | RearRightQuarter => &[RearBumper, FrameRear],
         _ => return None,
     })
 }
@@ -218,7 +219,7 @@ fn nearest_leads(lattice: &LatticeDef, regions: &[BodyRegion], to: u16) -> Optio
     (c.len() >= 3).then(|| [c[0].1, c[1].1, c[2].1])
 }
 
-/// Fold binding of a hood / trunk lid or front fender part (see [`FoldBinding`]); `None` for
+/// Fold binding of a hood / trunk lid, front fender or rear quarter part (see [`FoldBinding`]); `None` for
 /// other parts and for lids whose nodes all sit on the hinge line (hatch and pickup tailgates).
 /// Lid chords run hinge row → latch row (from the lattice detachable's hinge nodes), spread
 /// across x; fender chords run rear row → front row of each height row, spread across z.
@@ -246,11 +247,22 @@ pub fn bind_fold(lattice: &LatticeDef, part: &MeshPart) -> Option<FoldBinding> {
         let mean_y = nodes.iter().map(|n| n.pos_m[1]).sum::<f32>() / nodes.len() as f32;
         (hinge_y, if mean_y >= hinge_y { 1.0 } else { -1.0 })
     } else {
-        // Front fenders: fixed at the rear (door) row, leading at the nose.
-        (
-            nodes.iter().map(|n| n.pos_m[1]).fold(f32::MAX, f32::min),
-            1.0,
-        )
+        // Side panels: fixed at the door row, leading at the car's end (front fenders: the
+        // nose, +Y; rear quarters: the tail, −Y).
+        if matches!(
+            region,
+            BodyRegion::RearLeftQuarter | BodyRegion::RearRightQuarter
+        ) {
+            (
+                nodes.iter().map(|n| n.pos_m[1]).fold(f32::MIN, f32::max),
+                -1.0,
+            )
+        } else {
+            (
+                nodes.iter().map(|n| n.pos_m[1]).fold(f32::MAX, f32::min),
+                1.0,
+            )
+        }
     };
     let d = |n: &wp_contracts::LatticeNode| (n.pos_m[1] - fixed_y) * sign;
     let d_min = nodes.iter().map(|n| d(n)).fold(f32::MAX, f32::min);
@@ -318,7 +330,7 @@ pub fn bind_fold(lattice: &LatticeDef, part: &MeshPart) -> Option<FoldBinding> {
     let (gain, max_m, pop_m, dir) = match region {
         BodyRegion::Hood => (HOOD_CRUMPLE_GAIN, FOLD_MAX_M, LID_POP_M, [0.0, 0.0, 1.0]),
         BodyRegion::Trunk => (TRUNK_CRUMPLE_GAIN, FOLD_MAX_M, LID_POP_M, [0.0, 0.0, 1.0]),
-        // Fenders buckle outward and up.
+        // Front fenders and rear quarters buckle outward and up.
         _ => {
             let sx = if part_centre(part)[0] < 0.0 {
                 -0.8

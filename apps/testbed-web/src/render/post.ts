@@ -143,6 +143,20 @@ export class LowPolyPost {
     renderer.render(this.fsScene, this.fsCam);
   }
 
+  /**
+   * Compile every material of `scene` (lit by `lights`) for the HDR scene target (the colour space differs from
+   * the canvas, so this is the program variant `render` uses) without drawing.
+   */
+  compile(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, lights: THREE.Scene = scene): void {
+    renderer.getDrawingBufferSize(this.size);
+    const w = this.size.x, h = this.size.y;
+    if (!this.sceneRT || this.sceneRT.width !== w || this.sceneRT.height !== h) this.resize(w, h);
+    const prev = renderer.getRenderTarget();
+    renderer.setRenderTarget(this.sceneRT);
+    renderer.compile(scene, camera, lights);
+    renderer.setRenderTarget(prev);
+  }
+
   /** Render `scene` from `camera` through the post stack onto the canvas. */
   render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, p: PostParams, dt: number): void {
     renderer.getDrawingBufferSize(this.size);

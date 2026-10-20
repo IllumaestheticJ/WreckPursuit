@@ -623,3 +623,12 @@ sentinel_cruiser 1440 → 2390, sentinel_wolfhound 1440 → 2330, shiro_turbo 10
 sperber_32 1230 → 1850, tansy_13 600 → 840, vireo_xs 600 → 900 (hakone_gt unchanged, 1780).
 Rule of thumb for new cars: `handbrake_rear_nm ≥ 1.5 × m × (1 − front_weight_frac) / 2 × g ×
 rear radius`. Please mirror in the spec sheets.
+## Request from B (damage, round 13, 2026-10-20) — cruiser driveshaft (playtest row 87)
+B softened Arcade damage consequences ~20–30 % (`docs/integration/damage.md` "Round 13"). The
+cruiser now outlasts `hakone_gt` in every measured row except three 100 km/h hits in a row
+(wall, offset wall, angled wall), where it ends on hit 3 and the sports car on hit 7: its
+**driveshaft** fails (`intrusion_fail_m` 0.10, the civilian value; the police package already
+has radiator / rack thresholds ×1.5). **Request (optional, H's call):** `sentinel_cruiser`
+driveshaft `intrusion_fail_m` 0.10 → ~0.14 (and `intrusion_total_m` to match). The 0.6 m cabin
+case from round 12b is covered: Arcade's limit is now 0.78 m. Measure with
+`WP_KINDS=mixed,wall-angle WP_SPEEDS=100 cargo run --release -p simcli --example damage_toughness -- arcade sentinel_cruiser hakone_gt`.

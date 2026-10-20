@@ -1164,3 +1164,33 @@ fn driver_parameters_vary_between_drivers() {
     assert!((20.0..40.0).contains(&frac(amber_go)));
     assert!(frac(eager) > 10.0);
 }
+
+/// Owner row 76: with a player in town at 02:00, traffic around them stays at the night curve
+/// (the out-of-sight boost is off in the small hours) and well below the noon level.
+#[test]
+fn night_traffic_around_a_player_stays_at_the_curve() {
+    use wp_world::traffic::{max_spawnable_boost, MAX_SPAWNABLE_BOOST};
+    assert_eq!(max_spawnable_boost(0.15), 1.0);
+    assert_eq!(max_spawnable_boost(0.75), MAX_SPAWNABLE_BOOST);
+    let total = |hour: f32| -> (f32, u32) {
+        let mut w = world(TrafficConfig::default(), hour, 1.0);
+        let me = player([0.0, 0.0, 0.0], [1.0, 0.0], 0.0);
+        w.set_tracked_vehicles(&[me]);
+        w.populate();
+        let mut ev = Vec::new();
+        run(&mut w, 30.0, &mut ev);
+        let (t, c) = w.zone_density();
+        (t.iter().sum(), c.iter().sum())
+    };
+    let (t_night, c_night) = total(2.0);
+    let (t_noon, c_noon) = total(12.0);
+    println!("02:00 target {t_night:.1} count {c_night}; noon target {t_noon:.1} count {c_noon}");
+    assert!(
+        c_night as f32 <= t_night * 1.1 + 2.0,
+        "{c_night} vs {t_night}"
+    );
+    assert!(
+        c_night as f32 <= 0.35 * c_noon as f32,
+        "{c_night} vs {c_noon}"
+    );
+}

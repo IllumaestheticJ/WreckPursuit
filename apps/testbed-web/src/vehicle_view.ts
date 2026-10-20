@@ -28,6 +28,31 @@ const tmpDir = new THREE.Vector3();
 const FX_DIR = new THREE.Vector3(0, 1, 0);
 const FY_DIR = new THREE.Vector3(-1, 0, 0);
 
+/**
+ * Geometry and material shared by every view (browser perf, round 12b: traffic and police are
+ * promoted to full views about once a second in a chase, and each one built ~25 geometries and
+ * ~45 materials, ~1 MB of garbage and a shader-program lookup per material). Geometries are
+ * keyed by their dimensions; views never dispose them.
+ */
+const sharedGeo = new Map<string, THREE.BufferGeometry>();
+function geo(key: string, make: () => THREE.BufferGeometry): THREE.BufferGeometry {
+  let g = sharedGeo.get(key);
+  if (!g) sharedGeo.set(key, (g = make()));
+  return g;
+}
+const box = (x: number, y: number, z: number) => geo(`box ${x} ${y} ${z}`, () => new THREE.BoxGeometry(x, y, z));
+/** Materials no view changes per car (debug markers, nose, spokes, lattice, proxy detail). */
+const SHARED = {
+  nose: new THREE.MeshStandardMaterial({ color: 0xffee88 }),
+  spoke: new THREE.MeshStandardMaterial({ color: 0xbbbbbb }),
+  cg: new THREE.MeshBasicMaterial({ color: 0xffff00, depthTest: false }),
+  lattice: new THREE.LineBasicMaterial({ vertexColors: true, depthTest: false, transparent: true }),
+  stress: new THREE.PointsMaterial({ size: 0.12, vertexColors: true, depthTest: false }),
+  proxyDetail: new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.6 }),
+};
+/** Proxy stand-in geometry per car model and size. */
+const proxyCache = new Map<string, ReturnType<typeof proxyGeoms>>();
+
 /** Blue→green→yellow→red ramp for t in 0..1. */
 export function heat(t: number, out = tmpColor): THREE.Color {
   const x = Math.min(Math.max(t, 0), 1);
@@ -45,9 +70,20 @@ interface WheelView {
   tire: THREE.Mesh;
   material: THREE.MeshStandardMaterial;
   angle: number;
-  fx: THREE.ArrowHelper;
-  fy: THREE.ArrowHelper;
-  susp: THREE.Mesh;
+  /** Debug overlays, created the first time their layer shows on this car. */
+  fx: THREE.ArrowHelper | null;
+  fy: THREE.ArrowHelper | null;
+  susp: THREE.Mesh | null;
+}
+
+/** Lattice wireframe + stress heat-map points of one car (debug layers). */
+interface LatticeView {
+  lattice: THREE.LineSegments;
+  pos: Float32Array;
+  col: Float32Array;
+  beams: Uint32Array;
+  points: THREE.Points;
+  stressCol: Float32Array;
 }
 
 /** Element-wise equality of two node arrays (cheaper than rebuilding geometry). */
@@ -62,14 +98,13 @@ export class VehicleView {
   readonly info: VehicleInfo;
   private readonly box: THREE.Mesh;
   private readonly nose: THREE.Mesh;
-  private readonly skinned: SkinnedBody | null;
+  /** Skinned debug body (shown when the panel mesh is off); built on first use. */
+  private skinned: SkinnedBody | null = null;
+  private skinTried = false;
+  private readonly rest: Float32Array;
   private readonly wheels: WheelView[] = [];
-  private readonly lattice: THREE.LineSegments;
-  private readonly latticePos: Float32Array;
-  private readonly latticeCol: Float32Array;
-  private readonly beams: Uint32Array;
-  private readonly stressPoints: THREE.Points;
-  private readonly stressCol: Float32Array;
+  /** Lattice wireframe and stress points: built the first time those layers are on. */
+  private latticeView: LatticeView | null = null;
   private readonly cg: THREE.Mesh;
   readonly velocity: THREE.ArrowHelper;
   /** Latest lattice nodes (chassis space). */
@@ -96,6 +131,9 @@ export class VehicleView {
   readonly background: boolean;
   /** The camera's focus car (set by main.ts every frame). */
   focused = false;
+  /** Far enough that the instanced fleet draws this car instead (render/lod.ts; the root is
+   * hidden and the lattice / panel re-skin is skipped until it comes back). */
+  lodFar = false;
   private readonly lamps: THREE.Mesh[] = [];
   /** Greybox paint (the colour the view was created with). */
   private readonly greyPaint: THREE.Color;
@@ -119,12 +157,9 @@ export class VehicleView {
 
     // forceSinglePass: transparent + DoubleSide would re-resolve the program twice per frame.
     const bodyMat = new THREE.MeshStandardMaterial({ color: colour, transparent: true, opacity: 1, side: THREE.DoubleSide, forceSinglePass: true });
-    this.box = new THREE.Mesh(new THREE.BoxGeometry(w, l, h * 0.9), bodyMat);
+    this.box = new THREE.Mesh(box(w, l, h * 0.9), bodyMat);
     this.box.position.z = h * 0.55;
-    const nose = new THREE.Mesh(
-      new THREE.BoxGeometry(w * 0.6, 0.3, 0.05),
-      new THREE.MeshStandardMaterial({ color: 0xffee88 }),
-    );
+    const nose = new THREE.Mesh(box(w * 0.6, 0.3, 0.05), SHARED.nose);
     nose.position.set(0, l / 2 - 0.25, h + 0.03);
     this.nose = nose;
     this.root.add(this.box, nose);
@@ -133,9 +168,9 @@ export class VehicleView {
     this.headMat = new THREE.MeshStandardMaterial({ color: 0xfff6d0, emissive: 0x000000 });
     this.tailMat = new THREE.MeshStandardMaterial({ color: 0x550000, emissive: 0x000000 });
     for (const sx of [-1, 1]) {
-      const head = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.05, 0.14), this.headMat);
+      const head = new THREE.Mesh(box(0.3, 0.05, 0.14), this.headMat);
       head.position.set(sx * (w / 2 - 0.25), l / 2 + 0.01, h * 0.45);
-      const tail = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.05, 0.12), this.tailMat);
+      const tail = new THREE.Mesh(box(0.3, 0.05, 0.12), this.tailMat);
       tail.position.set(sx * (w / 2 - 0.25), -l / 2 - 0.01, h * 0.5);
       this.root.add(head, tail);
       this.lamps.push(head, tail);
@@ -146,80 +181,33 @@ export class VehicleView {
       this.lightBar = new THREE.Group();
       this.barRed = new THREE.MeshStandardMaterial({ color: 0x661018, emissive: 0x000000 });
       this.barBlue = new THREE.MeshStandardMaterial({ color: 0x102266, emissive: 0x000000 });
-      const red = new THREE.Mesh(new THREE.BoxGeometry(w * 0.32, 0.25, 0.12), this.barRed);
+      const red = new THREE.Mesh(box(w * 0.32, 0.25, 0.12), this.barRed);
       red.position.x = -w * 0.17;
-      const blue = new THREE.Mesh(new THREE.BoxGeometry(w * 0.32, 0.25, 0.12), this.barBlue);
+      const blue = new THREE.Mesh(box(w * 0.32, 0.25, 0.12), this.barBlue);
       blue.position.x = w * 0.17;
       this.lightBar.add(red, blue);
       this.lightBar.position.set(0, -0.1, h + 0.08);
       this.root.add(this.lightBar);
     }
 
-    const rest = sim.latticeRest(entity);
-    this.nodes = rest.slice();
-    const skin =
-      skinFromBinding(sim.skinIndices(entity), sim.skinWeights(entity)) ?? autoHullSkin(rest);
-    this.skinned = skin ? new SkinnedBody(skin, bodyMat) : null;
-    if (this.skinned) {
-      this.root.add(this.skinned.object);
-      this.skinned.update(rest);
-    }
+    this.rest = sim.latticeRest(entity);
+    this.nodes = this.rest.slice();
 
-    // Lattice wireframe.
-    this.beams = sim.latticeBeams(entity);
-    this.latticePos = new Float32Array(this.beams.length * 3);
-    this.latticeCol = new Float32Array(this.beams.length * 3).fill(0.6);
-    const lg = new THREE.BufferGeometry();
-    lg.setAttribute("position", new THREE.BufferAttribute(this.latticePos, 3));
-    lg.setAttribute("color", new THREE.BufferAttribute(this.latticeCol, 3));
-    this.lattice = new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ vertexColors: true, depthTest: false, transparent: true }));
-    this.lattice.renderOrder = 2;
-    this.root.add(this.lattice);
-    // Nodes stay near the body box (chassis space) even when crushed: a fixed bounding sphere
-    // instead of recomputing one for every car every frame.
-    const bound = new THREE.Sphere(new THREE.Vector3(0, 0, h / 2), 0.5 * Math.hypot(w, l, h) + 1);
-    lg.boundingSphere = bound;
-
-    // Stress heat-map points.
-    const sg = new THREE.BufferGeometry();
-    sg.setAttribute("position", new THREE.BufferAttribute(this.nodes, 3));
-    this.stressCol = new Float32Array(this.nodes.length);
-    sg.setAttribute("color", new THREE.BufferAttribute(this.stressCol, 3));
-    sg.boundingSphere = bound;
-    this.stressPoints = new THREE.Points(sg, new THREE.PointsMaterial({ size: 0.12, vertexColors: true, depthTest: false }));
-    this.stressPoints.renderOrder = 3;
-    this.root.add(this.stressPoints);
-
-    // Wheels.
+    // Wheels (debug tire + spoke; the force arrows and suspension bar come with their layers).
     for (const wi of this.info.wheels) {
       const pivot = new THREE.Group();
       pivot.position.set(...wi.position_m);
       const spin = new THREE.Group();
       const material = new THREE.MeshStandardMaterial({ color: 0x222222 });
-      const geo = new THREE.CylinderGeometry(wi.radius_m, wi.radius_m, wi.width_m, 20);
-      geo.rotateZ(Math.PI / 2); // axle along X
-      const tire = new THREE.Mesh(geo, material);
+      // Axle along X.
+      const cyl = geo(`tire ${wi.radius_m} ${wi.width_m}`, () => new THREE.CylinderGeometry(wi.radius_m, wi.radius_m, wi.width_m, 20).rotateZ(Math.PI / 2));
+      const tire = new THREE.Mesh(cyl, material);
       // Spoke so rotation is visible.
-      const spoke = new THREE.Mesh(
-        new THREE.BoxGeometry(wi.width_m * 1.05, wi.radius_m * 1.6, 0.06),
-        new THREE.MeshStandardMaterial({ color: 0xbbbbbb }),
-      );
+      const spoke = new THREE.Mesh(box(wi.width_m * 1.05, wi.radius_m * 1.6, 0.06), SHARED.spoke);
       spin.add(tire, spoke);
       pivot.add(spin);
-      const fx = new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), new THREE.Vector3(), 1, 0x33ff66);
-      const fy = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), 1, 0xff3366);
-      for (const a of [fx, fy]) {
-        a.position.z = -wi.radius_m + 0.02;
-        pivot.add(a);
-      }
-      const susp = new THREE.Mesh(
-        new THREE.BoxGeometry(0.06, 0.06, 1),
-        new THREE.MeshBasicMaterial({ color: 0x66ccff, depthTest: false }),
-      );
-      susp.renderOrder = 4;
-      this.root.add(susp);
       this.root.add(pivot);
-      this.wheels.push({ pivot, spin, tire, material, angle: 0, fx, fy, susp });
+      this.wheels.push({ pivot, spin, tire, material, angle: 0, fx: null, fy: null, susp: null });
     }
 
     // Headlight pool: on the road just ahead of the front bumper.
@@ -233,10 +221,11 @@ export class VehicleView {
     // session start, render/fleet.ts): the far-LOD proxy in this car's livery.
     this.proxy = new THREE.Group();
     {
-      const g = proxyGeoms({ car_id: this.info.car_id, body_size_m: this.info.body_size_m, wheels: this.info.wheels });
+      const key = `${this.info.car_id} ${this.info.body_size_m.join(" ")}`;
+      let g = proxyCache.get(key);
+      if (!g) proxyCache.set(key, (g = proxyGeoms({ car_id: this.info.car_id, body_size_m: this.info.body_size_m, wheels: this.info.wheels })));
       this.proxyPaint = new THREE.MeshStandardMaterial({ color: colour, vertexColors: true, flatShading: true, metalness: 0.25, roughness: 0.55 });
-      const detail = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.6 });
-      this.proxy.add(new THREE.Mesh(g.paint, this.proxyPaint), new THREE.Mesh(g.detail, detail), new THREE.Mesh(g.tail, this.tailMat));
+      this.proxy.add(new THREE.Mesh(g.paint, this.proxyPaint), new THREE.Mesh(g.detail, SHARED.proxyDetail), new THREE.Mesh(g.tail, this.tailMat));
       this.proxy.visible = false;
       this.root.add(this.proxy);
     }
@@ -251,8 +240,8 @@ export class VehicleView {
 
     // CG marker (+ velocity arrow, which lives in world space; see update()).
     this.cg = new THREE.Mesh(
-      new THREE.SphereGeometry(0.12, 12, 8),
-      new THREE.MeshBasicMaterial({ color: 0xffff00, depthTest: false }),
+      geo("cg", () => new THREE.SphereGeometry(0.12, 12, 8)),
+      SHARED.cg,
     );
     this.cg.renderOrder = 5;
     this.cg.position.set(...this.info.cg_m);
@@ -278,7 +267,9 @@ export class VehicleView {
     const panelsOn = bodyOn && layers.on("panels") && this.panels.ready;
     const latticeOn = layers.on("lattice") || (bodyOn && !layers.on("panels"));
     const stressOn = layers.on("stress");
-    const needNodes = latticeOn || stressOn || (bodyOn && this.skinned) || panelsOn;
+    // Handed to the fleet (far): nothing of the body is drawn, so skip the node fetch and the
+    // panel re-skin; they catch up on the frame it comes back.
+    const needNodes = !this.lodFar && (latticeOn || stressOn || bodyOn);
     if (needNodes) {
       // Nodes only move when the car is dented: rebuild the wireframe / skin on change only.
       const fresh = sim.latticeNodes(this.entity);
@@ -303,7 +294,7 @@ export class VehicleView {
         for (const c of w.spin.children) c.visible = ours.includes(c as THREE.Mesh) ? panelsOn : !panelsOn;
       });
     }
-    if (panelsOn) {
+    if (panelsOn && !this.lodFar) {
       const v = tmpV.set(cur[o + S.linVel], cur[o + S.linVel + 1], cur[o + S.linVel + 2]);
       this.panels.update(this.nodes, dt, v);
       this.panels.paint.opacity = latticeOn || stressOn ? 0.35 : 1;
@@ -317,10 +308,11 @@ export class VehicleView {
     if (panelsOn || waiting) {
       if (this.skinned) this.skinned.object.visible = false;
       this.box.visible = false;
-    } else if (this.skinned) {
-      this.skinned.object.visible = bodyOn;
+    } else if (bodyOn ? this.ensureSkin() : this.skinned) {
+      const sk = this.skinned!;
+      sk.object.visible = bodyOn;
       this.box.visible = false;
-      if (bodyOn && rebuild) this.skinned.update(this.nodes);
+      if (bodyOn && rebuild) sk.update(this.nodes);
     } else {
       this.box.visible = bodyOn;
     }
@@ -329,32 +321,35 @@ export class VehicleView {
     bodyMat.opacity = latticeOn || stressOn ? 0.35 : 1;
     bodyMat.depthWrite = bodyMat.opacity === 1;
 
-    this.lattice.visible = latticeOn;
-    this.stressPoints.visible = stressOn;
-    if (latticeOn || stressOn) {
+    const lv = latticeOn || stressOn ? this.ensureLattice() : this.latticeView;
+    if (lv) {
+      lv.lattice.visible = latticeOn;
+      lv.points.visible = stressOn;
+    }
+    if (lv && (latticeOn || stressOn)) {
       // Strain colours change every frame; positions only when the nodes did.
       const strain = stressOn ? sim.latticeStrain(this.entity) : null;
       if (rebuild || strain || this.strainShown) {
-        const pos = this.latticePos;
-        const col = this.latticeCol;
-        for (let b = 0; b < this.beams.length; b++) {
-          const n = this.beams[b] * 3;
+        const pos = lv.pos;
+        const col = lv.col;
+        for (let b = 0; b < lv.beams.length; b++) {
+          const n = lv.beams[b] * 3;
           pos[b * 3] = this.nodes[n];
           pos[b * 3 + 1] = this.nodes[n + 1];
           pos[b * 3 + 2] = this.nodes[n + 2];
           if (strain) heat(strain[n / 3] / STRAIN_RED).toArray(col, b * 3);
           else col[b * 3] = col[b * 3 + 1] = col[b * 3 + 2] = 0.75;
         }
-        this.lattice.geometry.attributes.position.needsUpdate = true;
-        this.lattice.geometry.attributes.color.needsUpdate = true;
+        lv.lattice.geometry.attributes.position.needsUpdate = true;
+        lv.lattice.geometry.attributes.color.needsUpdate = true;
         this.strainShown = strain !== null;
       }
       if (strain) {
-        const pos = this.stressPoints.geometry.attributes.position as THREE.BufferAttribute;
+        const pos = lv.points.geometry.attributes.position as THREE.BufferAttribute;
         (pos.array as Float32Array).set(this.nodes);
         pos.needsUpdate = true;
-        for (let i = 0; i < strain.length; i++) heat(strain[i] / STRAIN_RED).toArray(this.stressCol, i * 3);
-        this.stressPoints.geometry.attributes.color.needsUpdate = true;
+        for (let i = 0; i < strain.length; i++) heat(strain[i] / STRAIN_RED).toArray(lv.stressCol, i * 3);
+        lv.points.geometry.attributes.color.needsUpdate = true;
       }
     }
 
@@ -379,8 +374,10 @@ export class VehicleView {
 
       // Applied tire forces in the steered wheel frame: Fx along +Y, Fy toward the wheel's left (-X).
       // Telemetry is only fetched for other cars while the force arrows are on (`tel` empty).
+      if (forces && !w.fx) this.addForceArrows(w, wi.radius_m);
       for (let k = 0; k < 2; k++) {
         const arrow = k === 0 ? w.fx : w.fy;
+        if (!arrow) continue;
         const f = tel.length > 0 ? tel[tb + (k === 0 ? TW.fx : TW.fyLeft)] : 0;
         const len = Math.abs(f) * FORCE_SCALE;
         arrow.visible = forces && len > 0.02;
@@ -390,8 +387,13 @@ export class VehicleView {
         }
       }
 
-      w.susp.visible = susp;
-      if (susp) {
+      if (susp && !w.susp) {
+        w.susp = new THREE.Mesh(box(0.06, 0.06, 1), new THREE.MeshBasicMaterial({ color: 0x66ccff, depthTest: false }));
+        w.susp.renderOrder = 4;
+        this.root.add(w.susp);
+      }
+      if (w.susp) w.susp.visible = susp;
+      if (susp && w.susp) {
         const frac = Math.min(Math.max(compression / Math.max(wi.travel_m, 1e-3), 0), 1);
         const hgt = 0.05 + frac * 0.6;
         w.susp.scale.set(1, 1, hgt);
@@ -416,6 +418,62 @@ export class VehicleView {
         this.velocity.setDirection(v.normalize());
         this.velocity.setLength(Math.min(speed * 0.25, 12), 0.4, 0.25);
       }
+    }
+  }
+
+  /** Skinned debug body on first use (null when the car has no skin). */
+  private ensureSkin(): SkinnedBody | null {
+    if (!this.skinTried) {
+      this.skinTried = true;
+      const skin = skinFromBinding(sim.skinIndices(this.entity), sim.skinWeights(this.entity)) ?? autoHullSkin(this.rest);
+      if (skin) {
+        this.skinned = new SkinnedBody(skin, this.box.material as THREE.Material);
+        this.root.add(this.skinned.object);
+        this.skinned.update(this.nodes);
+      }
+    }
+    return this.skinned;
+  }
+
+  /** Lattice wireframe + stress points on first use. */
+  private ensureLattice(): LatticeView {
+    if (this.latticeView) return this.latticeView;
+    const [w, l, h] = this.info.body_size_m;
+    const beams = sim.latticeBeams(this.entity);
+    const pos = new Float32Array(beams.length * 3);
+    const col = new Float32Array(beams.length * 3).fill(0.6);
+    const lg = new THREE.BufferGeometry();
+    lg.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    lg.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    const lattice = new THREE.LineSegments(lg, SHARED.lattice);
+    lattice.renderOrder = 2;
+    // Nodes stay near the body box (chassis space) even when crushed: a fixed bounding sphere
+    // instead of recomputing one for every car every frame.
+    const bound = new THREE.Sphere(new THREE.Vector3(0, 0, h / 2), 0.5 * Math.hypot(w, l, h) + 1);
+    lg.boundingSphere = bound;
+    // Stress heat-map points.
+    const sg = new THREE.BufferGeometry();
+    sg.setAttribute("position", new THREE.BufferAttribute(this.nodes.slice(), 3));
+    const stressCol = new Float32Array(this.nodes.length);
+    sg.setAttribute("color", new THREE.BufferAttribute(stressCol, 3));
+    sg.boundingSphere = bound;
+    const points = new THREE.Points(sg, SHARED.stress);
+    points.renderOrder = 3;
+    this.root.add(lattice, points);
+    // The wireframe takes the current nodes on its first update.
+    this.shapeDirty = true;
+    this.latticeView = { lattice, pos, col, beams, points, stressCol };
+    return this.latticeView;
+  }
+
+  /** Tire force arrows of one wheel on first use. */
+  private addForceArrows(w: WheelView, radius: number): void {
+    w.fx = new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), new THREE.Vector3(), 1, 0x33ff66);
+    w.fy = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), 1, 0xff3366);
+    for (const a of [w.fx, w.fy]) {
+      a.position.z = -radius + 0.02;
+      a.visible = false;
+      w.pivot.add(a);
     }
   }
 

@@ -42,9 +42,10 @@ import { RaceView, type RaceFrame } from "./ui/race";
 import { RaceMarker, parseCourse } from "./race_marker";
 import { RealTimeMeter } from "./rtf";
 import { WeatherView } from "./render/weather";
-import { ArtStyle, STYLE_LABELS, type StyleId } from "./render/style";
-import { FrameProfiler } from "./perf";
+import { ArtStyle, STYLE_LABELS, makeHeadlightPool, type StyleId } from "./render/style";
+import { FrameProfiler, tagFeature } from "./perf";
 import { CrashFx } from "./render/fx";
+import { RadioStrip } from "./radio_strip";
 import * as THREE from "three";
 
 // v2: canonical simcli replay.bin (v1 held the retired WPR\x01 format).
@@ -120,6 +121,12 @@ async function main(): Promise<void> {
   const plots = new TelemetryPlots(overlay);
   const audio = new AudioSystem(scene.world, overlay);
   const ui = new UiOverlay(overlay);
+  // Police radio strip (row 79): what the scanner says, in sync with the voice; police events
+  // directly while the audio is not running.
+  const radioStrip = new RadioStrip(overlay);
+  audio.onRadioSay = (unit, text) => {
+    if (!crash.playing) radioStrip.push(unit || null, text);
+  };
   const map = new MapOverlay(overlay);
   const layout = new HudLayout();
   // Game menu (built below, once everything it drives exists) and its current settings.
@@ -131,7 +138,7 @@ async function main(): Promise<void> {
   let lastMenuCountersteer: number | null = null;
   // Traffic / police at every LOD: instanced fleet + hand-over to full views (render/lod.ts).
   const lod = new LodDirector();
-  scene.world.add(lod.fleet.group);
+  scene.world.add(tagFeature(lod.fleet.group, "fleet"));
 
   // On-screen touch controls (src/touch.ts): shown on touch devices, read through readInput.
   const touch = installTouch();
@@ -153,16 +160,21 @@ async function main(): Promise<void> {
     props.maxFull = q.propFullMax;
     props.drawM = q.propDrawM;
     props.proxyM = q.propProxyM;
+    scene.signals.drawM = q.signalDrawM;
+    scene.detailDistanceM = q.cityDetailM;
   };
   applyLod();
   scene.quality.onChange = applyLod;
-  scene.world.add(props.group);
+  scene.world.add(tagFeature(props.group, "props"));
   // Spike strips on the road (playtest row 88).
   const policeTools = new PoliceToolsView();
   scene.world.add(policeTools.group);
   // Crash effects (owner row 69): sparks, smoke, glass, skid marks, debris (render/fx/).
   const fx = new CrashFx(scene.quality.fx);
-  scene.world.add(fx.group);
+  scene.world.add(tagFeature(fx.group, "fx"));
+  // Car headlight pools only show at night with the lights on (often first on a promoted car
+  // mid-chase): compile their program up front (SceneView.prewarm; not added to the scene).
+  scene.prewarmRoots.push(makeHeadlightPool(1, 1));
   // End-of-run panel (lead): capture / wreck → result + "Repair & continue" / "Restart".
   const runEndEl = document.createElement("div");
   runEndEl.id = "ui-run-end";
@@ -353,6 +365,7 @@ async function main(): Promise<void> {
     app.eventCounts = {};
     plots.clear();
     ui.reset();
+    radioStrip.clear();
     map.reset();
     runEnd.reset();
     weather.reset();
@@ -449,8 +462,10 @@ async function main(): Promise<void> {
   /** One view per sim vehicle — scenario cars plus whatever the sim spawns itself (police
    * units, promoted traffic) — created and disposed as vehicles come and go. Promoted traffic
    * keeps the livery it had as an instanced agent (`trafficPaint`: entity → colour). */
+  const liveViews = new Set<number>();
   const syncViews = (meta: Float32Array = sim.vehicleMeta(), trafficPaint: Map<number, number> = new Map()) => {
-    const live = new Set<number>();
+    const live = liveViews;
+    live.clear();
     for (let o = 0; o < meta.length; o += META_STRIDE) {
       const id = meta[o];
       live.add(id);
@@ -463,7 +478,7 @@ async function main(): Promise<void> {
             ? (trafficPaint.get(id) ?? TRAFFIC_PALETTE[0])
             : COLOURS[(id - 1) % COLOURS.length];
       const v = new VehicleView(id, colour);
-      scene.world.add(v.root);
+      scene.world.add(tagFeature(v.root, "cars"));
       scene.world.add(v.velocity);
       app.views.set(id, v);
     }
@@ -975,6 +990,7 @@ async function main(): Promise<void> {
     const a = sim.assistPreset(app.source === "Touch" ? "Gamepad" : app.source) as unknown as Record<string, unknown>;
     d.assists = { ...d.assists, abs: Boolean(o.abs ?? a.abs), tcs: Boolean(o.tcs), esc: Boolean(o.esc), autoGears: Boolean(o.auto_gears) };
     d.volumes = audio.mix();
+    d.radioVoice = audio.radioVoice();
     d.gfx = gfxMode();
     return d;
   };
@@ -991,6 +1007,7 @@ async function main(): Promise<void> {
     scene.drawDistanceM = next.drawDistanceM > 0 ? next.drawDistanceM : drawParam > 0 ? drawParam : scene.quality.drawDistanceM;
     weather.rainFraction = scene.quality.rainFraction;
     audio.setMix(next.volumes);
+    audio.setRadioVoice(next.radioVoice);
     map.hud.setUnits(next.units);
     // Assists go through the same overrides as the developer panel's boxes.
     if (!prev || JSON.stringify(prev.assists) !== JSON.stringify(next.assists)) {
@@ -1125,6 +1142,9 @@ async function main(): Promise<void> {
     const prof = app.prof;
     prof.begin();
     let replay = isReplay();
+    // Below ~8 fps (software rendering) the 2D HUD canvases (minimap, telemetry plots) redraw
+    // every other frame: each redraw is a canvas upload + composite of ~10 ms there.
+    const hudRest = fps < 8 && frameNo % 2 === 1;
 
     // Touch controls: hidden under menus / full-screen panels (they sit above #overlay), only
     // map + pause while paused or with the full map open.
@@ -1141,11 +1161,13 @@ async function main(): Promise<void> {
     if (!replay && !app.bench) sim.setInput(app.player, map.isOpen ? { ...input, throttle: 0, steer: 0, brake: 0.35, handbrake: 0, gearUp: false, gearDown: false } : input);
 
     prof.lap("input");
-    const t0 = performance.now();
     crash.beforeStep(app.paused);
+    prof.lap("crash");
+    const t0 = performance.now();
     if (!app.paused || replay) app.alpha = sim.step(app.paused && !replay ? 0 : dt);
     const t1 = performance.now();
     simMs += (t1 - t0 - simMs) * 0.1;
+    prof.lap("sim");
     // Crash replay: leave at the end of its window; live: a new crash, the offer, auto play.
     crash.afterStep();
     if (!sim.crashReplayActive() && !isReplay()) {
@@ -1153,6 +1175,7 @@ async function main(): Promise<void> {
       if (c) crash.onCrash(c);
       crash.liveFrame(sim.worldInfo()[W.tick]);
     }
+    prof.lap("crash");
     replay = isReplay();
     // One world_info() per frame after the step (it was fetched ~7 times a frame).
     const wi = sim.worldInfo();
@@ -1219,7 +1242,15 @@ async function main(): Promise<void> {
     // The game UI is hidden during a crash replay (and must not count its events twice).
     if (!crash.playing) {
       ui.frame(wi[W.tick], app.player, events, wi[W.hours], wi[W.mode] > 0.5 ? "Simulation" : "Arcade");
-      map.frame(app.player, now);
+      if (!audio.hearsRadio()) {
+        for (const ev of events as unknown as { Police?: { Radio?: { unit: number | null; text: string } } }[]) {
+          const r = ev.Police?.Radio;
+          if (r) radioStrip.push(r.unit, r.text);
+        }
+      }
+      prof.lap("ui");
+      map.frame(app.player, now, hudRest);
+      prof.lap("map");
       if (!replay) runEnd.update(sim.runResult(), now);
       // Career autosave: after each settlement (bust, escape, wreck) and every 20 s of a run.
       if (!replay && sim.careerRunActive()) {
@@ -1252,10 +1283,15 @@ async function main(): Promise<void> {
     scene.signals.update(sim.signalStates(), wi[W.night], rig.camera.position);
     prof.lap("traffic");
 
+    // A car reset in place is a ghost for ~1 s (passes through traffic): it blinks meanwhile.
+    {
+      const pv = app.views.get(app.player);
+      if (pv) pv.root.visible = sim.ghostTicks(app.player) === 0 || Math.floor(now / 125) % 2 === 0;
+    }
     const focusView = app.views.get(app.focus) ?? null;
     if (focusTel) {
       plots.push(wi[W.tick] / 240, focusTel);
-      if (layers.on("telemetry")) plots.draw();
+      if (layers.on("telemetry") && !hudRest) plots.draw();
     }
     plots.canvas.style.display = layers.on("telemetry") ? "" : "none";
     prof.lap("ui");
@@ -1274,14 +1310,20 @@ async function main(): Promise<void> {
     prof.lap("audio");
     // Traffic and police after the camera moved: the fleet picks mesh detail by camera distance.
     lod.update(trafficDraw, policeDraw, app.views, rig.camera, app.views.get(app.player)?.root.position ?? null, tS);
+    prof.lap("fleet");
     props.update(sim.propsMoved(), rig.camera);
     policeTools.update(() => sim.mapDynamic(app.player), (x, y) => scene.groundZ(x, y), now);
-    prof.lap("traffic");
+    prof.lap("props");
 
     const inCity = wi[W.city] > 0.5;
     const cityId = inCity ? sim.cityId() : null;
     if (cityId) style.ensureCity(cityId, () => sim.mapStaticJson());
     style.update(dt, wi[W.hours], wi[W.night], wx[0] > 0.5 ? wx[7] : 1, { on: wx[0] > 0.5, cloud: wx[6] }, rig.camera, cityId);
+    prof.lap("render");
+    // Compile both siren-light variants of any new shader program now, not in the frame the
+    // first siren comes on (SceneView.prewarm). At most once a second; only new materials.
+    scene.prewarmEvery(rig.camera, now);
+    prof.lap("shaders");
     const r0 = performance.now();
     scene.render(rig.camera);
     // Crash effects stay hidden until the first crash: compile their shaders now (after a few
@@ -1333,8 +1375,10 @@ async function main(): Promise<void> {
       });
       updatePanels(replay);
     }
-    layout.frame(now);
+    radioStrip.frame(now);
     prof.lap("ui");
+    layout.frame(now);
+    prof.lap("layout");
     prof.end();
     if (app.bench) benchTick(t1 - t0, r1 - r0);
     requestAnimationFrame(frame);
@@ -1455,6 +1499,8 @@ async function main(): Promise<void> {
     menu,
     /** HUD layout pass (src/ui/layout.ts). */
     layout,
+    /** Police radio strip (src/radio_strip.ts): `radioStrip.count`, `radioStrip.recent`. */
+    radioStrip,
     ready: true,
     stopRecording,
     loadReplay,

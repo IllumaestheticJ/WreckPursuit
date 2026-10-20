@@ -258,3 +258,10 @@ Rust gate on this branch (no Rust / data changed vs `lead/round12` @ `608a50a`):
 `-D warnings` ✔, wasm build ✔; `cargo test --workspace`: 1001 pass, 5 fail on the base —
 simcli `goldens_match`, `live_police_chase_ends_in_escape_or_capture_without_stuck_cars`, race
 `hollins_hill_sprint`, `loop9_circuit`, `lantern_checkpoint_draws_the_police`.
+
+**On top of this (lead/browser-perf, merged after it):** batched panel parts per material,
+shared car-view geometry / materials and lazy debug overlays, pooled LOD states, incremental
+shader prewarm for materials that appear later (promoted car models, headlight pools, contact
+markers), sky on the far plane, city detail / signal distances on the low profiles, HUD canvases
+at half rate below 8 fps; numbers in `docs/integration/browser-perf.md` → "Round 12b regression
+pass" (merge notes at the end of that section).

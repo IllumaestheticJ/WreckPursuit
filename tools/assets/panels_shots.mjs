@@ -3,7 +3,8 @@
 // Needs the testbed's node_modules and wasm pkg (`just wasm`). Starts Vite itself.
 // Checks: panel meshes load for every car, the side-swipe scenario swings a door open on its
 // hinge, the frontal hit leaves the bumper hanging, the 56 km/h barrier and 50 km/h car hits
-// crumple the hood and fenders; saves screenshots of each.
+// crumple the hood and fenders, a 50 km/h rear-end crumples the quarters and trunk; saves
+// screenshots of each.
 import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -120,6 +121,20 @@ check(
   `frontal 50 km/h into a car: hood buckles and follows the crushed nose, fenders buckle (${JSON.stringify(front)})`,
 );
 await page.screenshot({ path: join(out, "frontal_50_car_hood_crumpled.png") });
+await page.keyboard.press("KeyP");
+
+// Rear-ended at 50 km/h (parked sedan): both rear quarters buckle and follow the crushed tail.
+st = await scenarioAt("panels/rear_50_car_arcade.ron", 2.2, "orbit", [-5.6, -2.2, 5.0]);
+const rear = await page.evaluate(() => {
+  const v = [...window.__wp.app.views.values()][0];
+  const m = (n) => v.panels.partMotion?.(n) ?? null;
+  return { trunk: m("trunk"), rl: m("quarter_rl"), rr: m("quarter_rr") };
+});
+check(
+  rear.rl?.fold >= 0.05 && rear.rr?.fold >= 0.05 && rear.rl?.pull >= 0.05 && rear.rr?.pull >= 0.05 && rear.trunk?.fold >= 0.08,
+  `rear-ended at 50 km/h: quarters buckle and follow the crushed tail, trunk folds (${JSON.stringify(rear)})`,
+);
+await page.screenshot({ path: join(out, "rear_50_car_quarters_crumpled.png") });
 await page.keyboard.press("KeyP");
 
 // Brake lights: the taillight lenses use the shared tail material, glow red while braking, and

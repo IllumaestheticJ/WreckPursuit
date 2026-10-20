@@ -23,7 +23,7 @@ clock. Implements `wp_contracts::WorldQuery`. No renderer dependency; compiles f
 | `density` | Density model (`f_time`, `f_distance`, district bases) |
 | `violations` | Speeding / red light / wrong way / reckless / collision detection |
 | `routes` | Lane-legal race routes, circuits, checkpoints, closures |
-| `props` | Parked cars and cones (static colliders) |
+| `props` | Parked cars (rules from `data/city/parking.json`, `ParkingTable`) and cones (static colliders) |
 | `clock` | `WorldClock`, `sun_direction` |
 | `geom` | Deterministic geometry (polylines, OBB, Bézier; re-exports `wp_math::{atan, atan2}`) |
 | `drive` | Shared AI driving: `DriveController` (pure pursuit + PID) and `PathFollower` (`follow_path` along any `DrivePath`) for traffic, police and racers |
@@ -175,6 +175,11 @@ After `docs/design/CITY.md`, scaled to ≈ 3.3 × 2.9 km (`MAP_LO..MAP_HI`), 5 m
   highway loop (filleted control polygon, radius ≥ 420 m sweepers) with 7 signalised
   junctions; Route 40 West (dead-ends at the map edge, passes **under** the loop: overpass)
   and Route 40 North (cut **under** the loop: underpass).
+- **Road names:** `World::vesper` keeps the generator's name per source road
+  (`World::road_names`; presentation only, not in the road format or the state hash), and
+  `World::edge_names()` names every road-graph edge (`RoadEdgeId`) after its road. The police
+  radio uses them for places ("northbound on Harbor Boulevard at Lantern Way", playtest row 79).
+  Cities without names (the grid, loaded `.road.bin`) return empty names.
 - **Terrain:** natural ground = northward rise + authored hill (`bump`) + plateau + two
   octaves of seeded value noise (damped downtown, none on the port flat) + sea at the south and
   east edges.
@@ -323,12 +328,28 @@ path. A physical agent that leaves the road (> 6 m or facing away) or is wrecked
 (`apply_agent_damage` with a dead engine / lost wheel) is disabled (stopped, hazards) and is
 removed once out of sight. The sim loop gets `LodChange::{Promoted, Demoted, Despawned}`.
 
+**Parked cars** (`props::parked_cars`, owner row 77): only on parking lanes (collector and
+local streets; arterials, highways, hill roads and service roads have none) and never within
+15 m of a lane end (junctions and their crosswalks), 20 m of a POI (garage, station, race grid:
+the lot entrances), 40 m of a tunnel portal, inside a tunnel or on a bridge deck. Cars come in
+clusters (1–3 downtown/residential, 2–5 in commercial/industrial lots, chance per district,
+×0.3 on 30 mph collectors) with a random 0–3 car-length gap after each, or (35 %) a 30–80 m
+empty stretch (owner row 93). Port Vesper v2: 1,219 cars (was 3,760, 32 %): 26.7 cars per km of
+kerb (was 82.2; collectors 14.4, local streets 29.5), 59 % of the kerb with no car within 10 m
+(was 7 %). Rules key off lane kind, speed limit, lane ends and the map, not road widths;
+deterministic per seed. No bus stops or driveways exist in the network
+yet, so those clearances are not applied.
+
 **Density & spawning**: target per zone = Σ over its lane samples (10 m) of
 `lane_km · density_base · f_distance(d_core) · f_time(time, district)` × `density_scale`,
 scaled down so the active area never exceeds `max_agents` (400). `f_distance =
-max(0.2, 1 / (1 + (d/600 m)²))`; `f_time` = hourly piecewise-linear curves with commute
-bumps (07–09, 16–18) for Residential/Commercial/Suburb, shift peaks for Industrial, a deep
-01:00–05:00 trough, and Core nightlife until ~02:00 (noon/03:00 = 10×). The active area is
+max(0.2, 1 / (1 + (d/600 m)²))`; `f_time` comes from the data table
+`data/city/traffic_time.json` (`density::TimeCurve`, embedded at build time; owner row 76):
+one hourly curve relative to the daytime peak (07–09 and 16–19 = 100 %, midday 75 %, 19–22
+≈ 50–60 %, 23:00 ≈ 33 %, 01–05 15–20 %) × an hourly multiplier per district (Core nightlife until
+~02:00, then the same trough, noon/03:00 ≈ 6×; Industrial/Suburb ×0.6 and Port ×0.75 at night,
+Residential ×0.85; every district equal by day). Kinematic (LOD) and physical agents share these
+targets. The active area is
 440 m around each player and around active route samples; with no players and no routes the
 whole map is active (headless tests). Every 0.25 s: despawn out-of-area, closed-lane, stuck
 (> 120 s) and surplus agents (district total > target + 4 % or zone > 1.5× target), spawn into
@@ -338,7 +359,8 @@ spawns or despawns within 320 m of a player's current position or of where it wi
 in plain view on Port Vesper's highway and hill sightlines; `tests/lod_draw.rs` measures it). Agents in
 view are left out of the per-zone counts; the part of the target that lies in view and is not
 yet filled by cars in view is added to the spawnable zones around the players (≤ 2×,
-`MAX_SPAWNABLE_BOOST`), so the active area still reaches its density target when a whole
+`MAX_SPAWNABLE_BOOST`; at night less, `max_spawnable_boost(f_time)`: none at or below 0.2 —
+the small hours — full at 0.6 and above, so the boost never lifts night traffic over the curve), so the active area still reaches its density target when a whole
 district is in view. A car left over the centre line outside a manoeuvre (a pass given up
 beside the obstruction) occupies the oncoming lane and holds oncoming traffic 22 m back
 (`traffic::blocked::STRAY_HOLD_BACK_M`).

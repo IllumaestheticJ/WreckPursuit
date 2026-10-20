@@ -151,7 +151,7 @@ All in `apps/testbed-web`: `main.ts` (hooks above, `__wp.fx`, `?fx=` in the head
 |---|---|
 | `cargo fmt --all -- --check` | pass |
 | `cargo clippy --workspace -- -D warnings` | pass |
-| `cargo test --workspace` | **1 failure, pre-existing:** `simcli` `goldens_match` — `city_blocked_parked_player_grid` (tick 19920), `city_blocked_parked_player_vesper` (tick 240), `golden_city_chase` (tick 24), `golden_night_pursuit_escape` (tick 24) no longer match their goldens. This branch changes no Rust, `data/` or golden file (`git diff origin/lead/round12 -- . ':!apps/testbed-web' ':!docs'` is empty), so the base `091cd34` fails the same; it looks like the round-12b city / props merges landed without a re-bless. Not re-blessed here (lead decision, `[bless]` commit). Everything else passes. |
+| `cargo test --workspace` | **1 failure, pre-existing:** `simcli` `goldens_match` — 16 goldens (city, siren, chase, races, weather, panels, police) no longer matched on the base `091cd34` (an earlier version of this line said 4: a truncated log). This branch changes no Rust, `data/` or golden file. Re-blessed on `lead/round12` in `b95fc4f` (49 goldens, scenarios tests 11/11). Everything else passes. |
 | `cargo build --target wasm32-unknown-unknown -p wp_wasm` | pass |
 | `npm run typecheck` (tsc) | pass |
 | `just web-e2e` | 103 checks pass, incl. **crash effects (e2e/crash_fx.mjs)** and every effects line of the perf check; **fails only the perf check's pre-existing lines** (real-time factor 0.46 / 0.46, 21 frames > 250 ms, 1.39–1.43 M triangles: same as the base, see Perf). `e2e/race.mjs` (not reached because `run.mjs` exits 1) run separately: all race checks pass. |
