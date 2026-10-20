@@ -292,11 +292,6 @@ export const sim = {
     JSON.parse(wasm.car_tune_defaults_json()),
   /** Set the car / tyre experiments ("" = the data). */
   carTuneSet: (json: string): void => wasm.car_tune_set(json),
-  /** Handbrake pivot aid (owner row 109) in effect / shipped ({accel rad/s², cap rad/s}). */
-  pivotTune: (): Record<string, number> => JSON.parse(wasm.pivot_tune_json()),
-  pivotTuneDefaults: (): Record<string, number> => JSON.parse(wasm.pivot_tune_defaults_json()),
-  /** Override the pivot aid ("" = shipped). */
-  pivotTuneSet: (json: string): void => wasm.pivot_tune_set(json),
   /** Grip-balance lab in effect (null = data) / {before, new} (wp_vehicle::grip_lab::GripBalance). */
   gripBalance: (): Record<string, number | boolean | string> | null => JSON.parse(wasm.grip_balance_json()),
   gripBalanceDefaults: (): {

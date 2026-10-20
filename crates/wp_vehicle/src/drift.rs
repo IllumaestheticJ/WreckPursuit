@@ -110,7 +110,17 @@ pub struct DriftTuning {
     /// Abrupt-lift softening, 0 (raw pedal release) ..= 1 (a full lift takes
     /// [`LIFT_SOFT_S`]). Only with throttle shaping on ([`DriftTuning::throttle_shape`] > 0).
     pub lift_soften: f32,
+    /// Handbrake pivot aid (round12 row 109, [`crate::pivot`]; owner-approved exception to
+    /// the no-yaw-torque rule): yaw acceleration at full key + handbrake, rad/s². 0 = off.
+    pub hb_pivot_accel: f32,
+    /// Yaw rate (rad/s) toward the key at which the pivot aid has faded out.
+    pub hb_pivot_cap: f32,
 }
+
+/// Default handbrake pivot aid strength, rad/s² (see [`crate::pivot`]).
+pub const HB_PIVOT_ACCEL: f32 = 7.0;
+/// Default yaw-rate cap of the pivot aid, rad/s.
+pub const HB_PIVOT_CAP: f32 = 3.0;
 
 impl Default for DriftTuning {
     fn default() -> Self {
@@ -138,6 +148,8 @@ impl Default for DriftTuning {
             envelope_deg: 48.0,
             straighten_gain: 1.0,
             lift_soften: 0.5,
+            hb_pivot_accel: HB_PIVOT_ACCEL,
+            hb_pivot_cap: HB_PIVOT_CAP,
         }
     }
 }

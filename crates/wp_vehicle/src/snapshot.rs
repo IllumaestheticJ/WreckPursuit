@@ -21,7 +21,7 @@ use crate::vehicle::{Chassis, Vehicle, Wheel};
 /// the drift side and lift-off transition flag (Drift Lab C, row 107). Format 10: plus the
 /// confirmed-slide gate of the steering (row 102). Format 11: plus the keyboard key ramp
 /// (keys arrive raw, Drift Lab C step 6). Format 12: plus the handbrake-held time (pivot aid,
-/// owner row 109).
+/// owner row 109; round12 used 9 for that on A's lineage).
 const FORMAT: u8 = 12;
 
 /// Opaque full-state snapshot of one [`Vehicle`].

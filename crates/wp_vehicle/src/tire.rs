@@ -111,7 +111,7 @@ pub struct SpinSideFloor {
     pub kappa_full: f32,
 }
 
-/// The shipped side-force floor (docs/integration/side-floor.md).
+/// The shipped side-force floor (docs/integration/tyre-slip.md, "Spin side-force floor").
 pub const SPIN_SIDE_FLOOR: SpinSideFloor = SpinSideFloor {
     floor: 0.4,
     kappa_from: 0.3,

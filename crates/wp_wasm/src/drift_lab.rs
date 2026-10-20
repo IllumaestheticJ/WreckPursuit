@@ -245,31 +245,6 @@ pub fn car_tune_defaults_json() -> String {
     }))
 }
 
-/// The handbrake pivot aid in effect (owner row 109; `wp_vehicle::pivot::PivotTuning`), JSON.
-#[wasm_bindgen]
-pub fn pivot_tune_json() -> String {
-    json(&wp_vehicle::pivot::active())
-}
-
-/// The shipped pivot aid (`{ "accel": rad/s², "cap": rad/s }`), JSON.
-#[wasm_bindgen]
-pub fn pivot_tune_defaults_json() -> String {
-    json(&wp_vehicle::pivot::PivotTuning::default())
-}
-
-/// Override the pivot aid from JSON (missing fields = shipped), or clear it with `""`.
-/// Process-wide, lab only, not logged in recordings.
-#[wasm_bindgen]
-pub fn pivot_tune_set(json_text: &str) -> Result<(), JsValue> {
-    if json_text.trim().is_empty() {
-        wp_vehicle::pivot::set_override(None);
-        return Ok(());
-    }
-    let t: wp_vehicle::pivot::PivotTuning = serde_json::from_str(json_text).map_err(err)?;
-    wp_vehicle::pivot::set_override(Some(t));
-    Ok(())
-}
-
 /// The grip-balance lab override in effect (`null` = the data), JSON.
 #[wasm_bindgen]
 pub fn grip_balance_json() -> String {

@@ -84,17 +84,6 @@ await spinBox.check();
 check((await page.evaluate(() => window.__wp.sim.carTune().spin_model)) === true, "spin model checkbox → on");
 await spinBox.uncheck();
 check((await page.evaluate(() => window.__wp.sim.carTune().spin_model)) === false, "spin model checkbox → off");
-// Handbrake pivot aid (owner row 109): the shipped aid, adjustable in the lab.
-const pv = await page.evaluate(() => window.__wp.sim.pivotTune());
-check(Math.abs(pv.accel - 7) < 1e-6 && Math.abs(pv.cap - 3) < 1e-6, `pivot aid shipped values ${JSON.stringify(pv)}`);
-await page.evaluate(() => {
-  const inputs = [...document.querySelectorAll("#drift-lab-w input[type=range]")];
-  const s = inputs.find((i) => i.parentElement.textContent.includes("pivot strength"));
-  s.value = "10";
-  s.dispatchEvent(new Event("input"));
-});
-check(Math.abs((await page.evaluate(() => window.__wp.sim.pivotTune().accel)) - 10) < 1e-6, "pivot strength slider sets the aid");
-await page.evaluate(() => window.__wp.sim.pivotTuneSet(JSON.stringify({ accel: 7, cap: 3 })));
 // Grip balance (wp_vehicle::grip_lab): starts at "new" (smart lock); the A/B button flips it.
 check((await page.evaluate(() => window.__wp.sim.gripBalance()?.lock_mode)) === "smart", "grip balance starts at new (smart lock)");
 const abText = async () => (await page.locator("#drift-w-balance-ab").innerText()).trim();
@@ -169,11 +158,24 @@ check((await page.evaluate(() => window.__wp.sim.plainSteer().velocity_relative)
 await page.locator("#drift-lab-w-vr").uncheck();
 check((await page.evaluate(() => window.__wp.sim.plainSteer().velocity_relative)) === false, "VR checkbox → off");
 const player = () => page.evaluate(() => window.__wp.app.player);
-check(!(await page.locator("#drift-lab-w-tcs").isChecked()) && ["Off", false].includes(await page.evaluate((id) => window.__wp.sim.assists(id).tcs, await player())), "TCS off by default");
-await page.locator("#drift-lab-w-tcs").check();
-check(["Full", true].includes(await page.evaluate((id) => window.__wp.sim.assists(id).tcs, await player())), "TCS checkbox → assists.tcs on");
-await page.locator("#drift-lab-w-tcs").uncheck();
-check(["Off", false].includes(await page.evaluate((id) => window.__wp.sim.assists(id).tcs, await player())), "TCS checkbox → off");
+{
+  const lv = async () => page.evaluate((id) => { const a = window.__wp.sim.assists(id); return [a.tcs, a.abs]; }, await player());
+  const [t0, a0] = await lv();
+  check((await page.locator("#drift-lab-w-tcs").inputValue()) === "Off" && t0 === "Off" && a0 === "Full", `TCS Off / ABS Full by default (${t0} / ${a0})`);
+  await page.locator("#drift-lab-w-tcs").selectOption("Half");
+  await page.locator("#drift-lab-w-abs").selectOption("Off");
+  const [t1, a1] = await lv();
+  check(t1 === "Half" && a1 === "Off", `level selects → assists (${t1} / ${a1})`);
+  await page.locator("#drift-lab-w-tcs").selectOption("Off");
+  await page.locator("#drift-lab-w-abs").selectOption("Full");
+  check((await lv()).join() === "Off,Full", "level selects back to Off / Full");
+  // Handbrake pivot aid knobs (round12 row 109) reach the drift tuning.
+  const pivot0 = await page.evaluate(() => window.__wp.sim.driftTuning().hb_pivot_accel);
+  check(pivot0 === 7, `pivot aid default 7 rad/s² (${pivot0})`);
+  await page.locator("#drift-lab-w-hb_pivot_accel").fill("0");
+  check((await page.evaluate(() => window.__wp.sim.driftTuning().hb_pivot_accel)) === 0, "pivot slider → drift tuning 0");
+  await page.locator("#drift-lab-w-hb_pivot_accel").fill("7");
+}
 // Owner bug: floored from rest, TCS off, no steering, on the lab map → straight (< 3° of yaw),
 // as the reference (clip 5). Restart the lab with the default car, then hold the throttle.
 await page.selectOption("#drift-lab-w select", "parity_rwd_a");

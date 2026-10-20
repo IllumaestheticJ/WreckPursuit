@@ -23,6 +23,7 @@ use crate::ffb::{self, FfbWheel};
 use crate::ground::{WheelCaster, WheelProbe};
 use crate::launch::LaunchGuard;
 use crate::math::{arr, sin_cos, v3, yaw_quat, Quat, V3};
+use crate::pivot::pivot_yaw_accel;
 use crate::slide::slide_class_with_rear_lock;
 use crate::steering::{
     ackermann, body_slip, front_axle_angle, rear_axle_slip, steer_target, torque_steer,
@@ -413,8 +414,8 @@ impl Vehicle {
             drift_cmd: crate::drift::DriftCommand::default(),
             slide_gate: crate::steering::SlideGate::default(),
             key_steer: 0.0,
-            hb_held_s: 0.0,
             stalled: false,
+            hb_held_s: 0.0,
             corners,
         };
         v.converter = def
@@ -1066,14 +1067,14 @@ impl Vehicle {
         if plain.is_some() {
             self.throttle_f = thr_in;
         } else {
-            // Round 12: slide-throttle feathering removed; TCS Off = no pedal filter (row 104).
+            // TCS Off = the throttle the driver presses (owner row 104): no pedal filter; the
+            // slide-throttle feathering was removed (round12).
             let thr_filter = throttle_filter_strength(assists);
-            let thr_target = thr_in;
             // Drift assist throttle shaping (exactly 1.0 when inactive: bit-identical otherwise).
             let thr_target = if dc.throttle_scale < 1.0 {
-                thr_target * dc.throttle_scale
+                thr_in * dc.throttle_scale
             } else {
-                thr_target
+                thr_in
             };
             let prev_thr = self.throttle_f;
             self.throttle_f = filter_pedal(self.throttle_f, thr_target, thr_filter, dt);
@@ -1726,8 +1727,8 @@ impl Vehicle {
         } else {
             0.0
         };
-        let pivot = crate::pivot::pivot_yaw_accel(
-            &crate::pivot::active(),
+        let pivot = pivot_yaw_accel(
+            &crate::drift::tuning(),
             assists,
             handbrake,
             self.hb_held_s,
@@ -1736,7 +1737,12 @@ impl Vehicle {
             yaw_rate,
         );
         if pivot != 0.0 {
-            torque += up * (self.def.inertia_kgm2[2] * pivot);
+            // Yaw acceleration × the body's yaw inertia (the ride lab may scale it).
+            let izz = match crate::ride_lab::active() {
+                Some(t) => t.inertia(self.def.inertia_kgm2)[2],
+                None => self.def.inertia_kgm2[2],
+            };
+            torque += up * (izz * pivot);
         }
         self.force = force;
         self.torque = torque;
