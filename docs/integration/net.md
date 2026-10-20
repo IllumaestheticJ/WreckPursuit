@@ -16,7 +16,11 @@
   `approve_join(conn, display_name, meta_reconnect_token)`, `reject_join(conn, reason)`;
   **step 2 host hooks**: `assign_role(pid, role)`, `kick(pid, reason)`,
   `connected_players()`, `owner_of(entity)`, `player_of_unit(UnitId)`,
-  `set_event_tap(on)` / `take_tapped_events()`.
+  `set_event_tap(on)` / `take_tapped_events()`; **external accounts** (meta economy):
+  `expect_external_account(pid)`, `set_external_account(pid, PlayerAccount)`,
+  `take_economy_commits() -> Vec<EconomyCommit>`, `credit_player`, `player_account`;
+  `take_finished_races() -> Vec<FinishedRace>` (results + clean racers: no damaging contact,
+  no violation beyond speeding).
   Forwards typed `SimEvent::{Police, Race, Economy, WeatherChanged}`; lobby money changes are
   ledger `EconomyEvent`s (`StakeCharged` / `RacePayout` / `RaceRep`).
 - `netsim::NetSim` — what the server needs from a simulation (spawn/despawn, per-tick input,
@@ -62,7 +66,9 @@ network, physical traffic, AI police; players spawn on lanes), seed, time ratio,
 mode, `--bots N`, `--arena R`, data dir), `GET /status` admin JSON, JSON-lines logs. Library
 API `wp_server::{run, run_with, MetaVars, AppConfig, json_log, null_log, status_json}` for
 tests/tools. **Meta link** (`WP_META_URL`, `src/meta.rs`): register, join-token verification
-(name, reserved role, meta reconnect token), presence heartbeats, kicks, pursuit reports.
+(name, reserved role, meta reconnect token), presence heartbeats, kicks, economy
+write-through (load on join, one commit in flight per account, reload + re-apply on
+`seq_conflict`), race reports (position, time, clean), pursuit reports.
 
 ### `wp_wasm` functions added (in a separate module, `crates/wp_wasm/src/net.rs`)
 `net_create, net_connect, net_connect_join, net_receive, net_update, net_take_outgoing,
@@ -179,8 +185,9 @@ figures from run 1 (stub) have not been re-measured.
 - Server weather does not change server grip yet (NET-N12).
 - The in-instance lobby keeps its own `RaceUpdate`/`RaceProgress`/`RaceResults`; contract
   `RaceEvent`s are forwarded only when the sim emits them (no `wp_race` in `wp_sim` yet).
-- Meta link: economy write-through (meta step 5) and race reports (step 6) are not wired;
-  accounts stay in memory per instance.
+- Meta link: territory reports (meta step 8) are not wired (no district-control source).
+  After a commit conflict the re-applied changes land after any change made during the
+  reload (totals are right; ledger order differs slightly).
 - Player police seats are `VehicleKind::Police` in the sim: no traffic spawns around a lone
   player cop (NET-N9). Roadblocks / spikes are refused in grid districts (NET-N14).
 - Placeholders: heat grid, stakes/payout split.
@@ -466,3 +473,24 @@ run the full gate there, push your `ws/*` branch, and the lead merges it.
    and how the cop car reaches it. Find the cause; fix the test's cop/racer behaviour (e.g. the
    giving-up racer must actually come to a stop near the cop, the cop must close in) or report a
    real police bug to E in your integration doc. Do not weaken the Captured assertion.
+
+## Follow-up (2026-10-20): meta economy write-through and race reports
+Owner request. `apps/server/src/meta.rs` now does meta hookup steps 5 and 6:
+- **Economy**: a verified player's account is loaded from meta (`LoadAccount`) and installed
+  as the instance's copy (`ServerInstance::set_external_account`; money changes made while it
+  loads wait). Every stake / payout / rep change is one ledger event carrying the durable
+  account id, committed to meta in order. Only one commit per account is in flight: the
+  first version pipelined them, and when the payout commit conflicted with an admin
+  adjustment, meta accepted the *next* commit (right sequence number, stale balance) and the
+  adjustment was lost — found by the test. On `seq_conflict` the account is reloaded and the
+  unconfirmed changes are applied again on top.
+- **Races**: `take_finished_races` hands the host each finished lobby race after its payouts;
+  the hook reports position, time (`ticks_to_ms`) and the clean flag per meta player,
+  `report_key = <instance>-race-<id>`, route id = FNV hash of laps + checkpoints.
+- Test: `apps/server/tests/meta_link.rs::race_money_and_results_are_written_through_to_meta`
+  (real meta in-process, two matchmade racers, websocket clients drive a lobby sprint):
+  meta ends with start − stake + adjustment + purse for the winner and start − stake + purse
+  for the runner-up, the server shows the same, both are rated on `clean_rating`.
+
+Checks: fmt, clippy `--workspace --all-targets -D warnings` clean; `cargo test -p wp_net
+-p wp_server` all pass (incl. the Vesper e2e).
