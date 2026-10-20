@@ -272,7 +272,7 @@ distance and nearest road. Tests, scenarios and tools use `city::procedural(&Pro
 
 ## Perf
 `cargo run --release -p wp_police --example police_bench`: 13 patrols + reinforcements, 4 wanted
-racers on D's small city, with exact building line of sight and obstacle awareness → **0.074 ms per 60 Hz frame** (0.055 before round 6)
+racers on D's small city, with exact building line of sight and obstacle awareness → **0.055 ms per 60 Hz frame** (round 12b; 0.074 ms in round 6)
 (native, release, cloud Xeon 2.1 GHz). Budget 0.5 ms native / 1.0 ms browser. Browser not
 measured yet.
 

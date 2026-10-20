@@ -180,7 +180,7 @@ The reply is `Result<(), CaptainError>` with:
 ## Perf numbers
 | Measurement | Machine | Native | Browser | Budget |
 |---|---|---|---|---|
-| `PoliceSystem::step` per 60 Hz frame, 13 patrols + reinforcements, 4 wanted racers, D's small city with exact building LOS, obstacle awareness on (`police_bench`) | Cloud Xeon 2.1 GHz, release | 0.074 ms (0.055 before round 6) | not measured | 0.5 ms / 1.0 ms |
+| `PoliceSystem::step` per 60 Hz frame, 13 patrols + reinforcements, 4 wanted racers, D's small city with exact building LOS, obstacle awareness on (`police_bench`) | Cloud Xeon 2.1 GHz, release | 0.055 ms (round 12b; 0.074 ms in round 6) | not measured | 0.5 ms / 1.0 ms |
 
 ## Known gaps
 - Assault isn't judged by fault: a moving racer that a patrol car drives into (rare with obstacle
@@ -357,7 +357,20 @@ buildings.
 Changed tests (mine): `night_is_slower_than_day_…` night floor 60 → 25 s (mean 126 → 33 s, still
 ≥ 3× day); `risk_budget_and_caps_keep_cops_alive` now checks the self-wreck bar and that the risk
 budget is spent (the old harm comparison was within noise: 462 vs 475 on `lead/round12`).
-GATE_RESULTS
+**Round 12b gate** (`ws/police` = `lead/round12` (edeebdc) + this work + two `[bless]` commits):
+fmt clean, clippy `-D warnings` clean, wasm build OK, `cargo test --workspace --no-fail-fast`:
+945 passed, 6 failed, 19 ignored. Mine: none. The 6:
+- `wp_race --test race_picker`: `loop9_circuit`, `lantern_checkpoint_draws_the_police`
+  (faster police; request to L above).
+- `simcli --test scenarios` / `goldens_match`: goldens that already drift on `lead/round12`
+  (the 17 this work moves are re-blessed; a run of `lead/round12` itself was the reference).
+- `wp_sim --test sidewalk` (Vesper), `wp_vehicle --test handling_balance`
+  (`front_drive_cars_understeer_mildly`), `wp_wasm` `race_tests::a_capture_mid_race_…`: all
+  fail the same way on `lead/round12`.
+- `wp_net --test vesper_e2e` (4 players) passes. `simcli run apps/simcli/scenarios` (release):
+  71 pass; fails: the two Founders Cut scenarios (above) and `soak/traffic_soak_observer`'s
+  agent count (as on the base).
+- `police_bench`: 0.055 ms per 60 Hz frame (was 0.074 ms; budget 0.5 ms).
 
 **Round 12 (on `lead/round12`), done:**
 1. **`police/sideswipe_patrol_night.ron` passes again.** Cause: a near miss, not a police change.
