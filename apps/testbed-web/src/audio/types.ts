@@ -11,6 +11,18 @@ export interface VoiceId {
   slot: number;
 }
 
+/** Per-frame engine state of an `engine/physical` voice (wp_audio::engine_model::EngineFrame). */
+export interface EngineFrame {
+  rpm: number;
+  throttle: number;
+  pedal: number;
+  gear: number;
+  speed_mps: number;
+  boost: number;
+  health: number;
+  blowoffs: number;
+}
+
 /** Final per-frame voice parameters (distance gain and Doppler already applied). */
 export interface VoiceParams {
   gain: number;
@@ -21,6 +33,8 @@ export interface VoiceParams {
   lowpass_hz: number;
   doppler: number;
   pos: [number, number, number];
+  /** Only on the physically modelled engine voice. */
+  engine?: EngineFrame;
 }
 
 export type AudioCommand =
@@ -82,7 +96,7 @@ export interface CueDef {
 
 export interface SamplePack {
   id: string;
-  kind: "Engine" | "World" | "Siren" | "Radio";
+  kind: "Engine" | "World" | "Siren" | "Radio" | "Model";
   description: string;
   /** Procedural pack played instead when the user picks the procedural fallback. */
   fallback?: string;
@@ -98,6 +112,12 @@ export const voiceKey = (v: VoiceId): string => `${v.entity}:${v.slot}`;
 
 /** Where cue audio comes from: recorded samples (default) or the procedural fallback packs. */
 export type SoundSource = "recorded" | "procedural";
+
+/**
+ * How engines are voiced: the physically modelled synthesizer (default; the player and the
+ * nearest cars, others keep layers) or the layers of the sound source for every car.
+ */
+export type EngineVoicing = "modelled" | "layers";
 
 /** Sample loading progress (panel + e2e). */
 export interface SampleStatus {

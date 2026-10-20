@@ -108,6 +108,7 @@ Car data (`data/{cars,lattices,tires,materials,modes}`) is embedded at build tim
 | `replay_play` | `speed` | – | 0 = pause, max 16. |
 | `replay_status` | – | JSON or `null` | `{tick, end_tick, speed, verified_ticks, drift_count, drift_ticks[≤64], state_hash, recorded_final_hash, scenario, mode, contract_version, hash_spec}`. |
 | `replay_export_csv` | bytes, `entity`, `every_n_ticks` | CSV | Headless re-simulation; header `tick,t_s,<telemetry_names>`. |
+| `crash_take`, `crash_replay_start(seq)`, `crash_replay_stop`, `crash_replay_active`, `crash_tuning_json` / `_set`, `crash_detect_enable`, `crash_buffer_ticks` | | | Instant crash replay (lead): see `docs/integration/crash-replay.md`. |
 | `scenario_json` | – | JSON | The session's v2 scenario (entities incl. tick-0 spawns, barriers). |
 | `scenario_result` | – | JSON or `null` | Scripted sessions: `{name, done, tick, end_tick, pass, live_hash, matches_simcli, summary}`; `summary` is simcli's `RunSummary` (`expectations` / `pending`: `{expect, actual, passed}`). |
 
@@ -182,6 +183,7 @@ help lists the live bindings. Defaults (`src/bindings.ts`):
 | controls panel | F9 | – |
 | audio mute | **F8** (was V, which also held look-back) | – |
 | repair bill | F | – |
+| crash replay: play / skip (lead, `docs/integration/crash-replay.md`) | Enter | d-pad ↑ (R2 / RT is the throttle) |
 
 Fixed keys:
 
@@ -870,3 +872,20 @@ a_lane_and_keeps_heat`. e2e `e2e/reset.mjs` (run by `npm run e2e`, alone `npm ru
 barrier crash (health 85 %) → R → upright, 4.0 m from the crash, 0 m/s, health 100 %, the feed
 notes it; the recording with the reset plays back with 0 drift; city chase → lane 0.2 m away,
 heat 0.6 → 0.6; career run → `repaired: false`.
+## Note from M (UI kit, round 12, 2026-10-20): HUD layout + game menu — for C to review
+Owner rows 67 / 68, details in `docs/integration/ui.md` → "Round 12". Small glue in your app:
+- **Layout:** minimap now bottom-right; the **audio panel moved bottom-left above `#controls`**;
+  race HUD stacks under the speedo; the right column caps itself above the minimap. Run-time
+  sizes by `src/ui/layout.ts` (writes `top` / `max-height` / `left` on `.wp-race-hud`,
+  `#controls`, `#audio-panel`, `canvas.telemetry`, `.right-col`, `#weather-hud`). If you add a HUD
+  element, add its selector to `e2e/hud_layout.mjs` so the overlap check covers it.
+- **Game menu** (kit): `main.ts` mounts it. **Key change:** the rebindable "pause" action (P / pad
+  Menu) now opens the pause menu while driving (replays keep play/pause), and **Esc** opens it when
+  nothing else (map, controls panel, garage, run-end panel, race picker) is on screen. Its
+  Controls button calls your `controls.open()` unchanged (your clutch / reset-in-place work should
+  merge cleanly: `controls.ts` and `bindings.ts` are untouched).
+- **Player mode** (`body.wp-player`, Settings → Developer off; default with `?menu=1` and the
+  demo): hides the developer panels and suppresses the 3D debug layers via the new
+  `layers.suppress(ids)` in `settings.ts`.
+- `HudFrame.units` in `hud.ts` (km/h / mph).
+- `e2e/menu.mjs` runs at the end of `npm run e2e` (36 checks).

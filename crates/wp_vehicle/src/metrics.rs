@@ -851,3 +851,218 @@ pub fn report(car: &LoadedCar) -> MetricsReport {
         top_speed_kmh: top_speed_kmh(car),
     }
 }
+
+/// Result of [`handbrake_turn`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HandbrakeTurn {
+    /// Heading change after `window_s`, degrees (+ = toward the steered side).
+    pub yaw_deg: f32,
+    /// Largest |body slip angle| over the run, degrees.
+    pub max_slip_deg: f32,
+    /// Rear wheels' mean |angular speed| at the end of the handbrake pull, rad/s.
+    pub rear_omega_end: f32,
+    /// Engine rpm at its lowest during the run.
+    pub min_rpm: f32,
+    /// Rig state hash at the end.
+    pub hash: u64,
+}
+
+/// Handbrake turn (playtest row 72): rolling straight at `speed_mps`, the driver lifts, holds
+/// `steer` (+ = right, any preset input) and pulls the handbrake for `handbrake_s` (0 = no
+/// handbrake: the control case), then keeps the steer; the heading change after `window_s`.
+pub fn handbrake_turn(
+    car: &LoadedCar,
+    assists: &AssistProfile,
+    speed_mps: f32,
+    steer: f32,
+    handbrake_s: f32,
+    window_s: f32,
+) -> HandbrakeTurn {
+    let mut rig = Rig::new(car);
+    rig.teleport([0.0; 3], 0.0, speed_mps, 0.0);
+    // Settle rolling straight for a second at speed.
+    for _ in 0..TICKS_PER_S {
+        let (throttle, brake) = hold_speed(&rig, speed_mps);
+        rig.step(
+            &VehicleInput {
+                throttle,
+                brake,
+                ..Default::default()
+            },
+            assists,
+        );
+    }
+    let heading = |rig: &Rig| {
+        let f = rig.vehicle.chassis().rot * V3::Y;
+        atan2(-f.x, f.y)
+    };
+    let h0 = heading(&rig);
+    let mut prev = h0;
+    let mut yaw = 0.0f32;
+    let mut max_slip = 0.0f32;
+    let mut rear_end = 0.0;
+    let mut min_rpm = f32::MAX;
+    let hb_ticks = (handbrake_s * TICKS_PER_S as f32) as usize;
+    for tick in 0..(window_s * TICKS_PER_S as f32) as usize {
+        rig.step(
+            &VehicleInput {
+                steer,
+                handbrake: if tick < hb_ticks { 1.0 } else { 0.0 },
+                ..Default::default()
+            },
+            assists,
+        );
+        let h = heading(&rig);
+        let mut d = h - prev;
+        if d > std::f32::consts::PI {
+            d -= std::f32::consts::TAU;
+        } else if d < -std::f32::consts::PI {
+            d += std::f32::consts::TAU;
+        }
+        yaw += d;
+        prev = h;
+        max_slip = max_slip.max(body_slip_deg(&rig).abs());
+        min_rpm = min_rpm.min(rig.state().engine_rpm);
+        if tick + 1 == hb_ticks {
+            let w = rig.state().wheel_states;
+            rear_end = 0.5 * (w[2].omega.abs() + w[3].omega.abs());
+        }
+    }
+    // Steering right (+) turns the heading clockwise (negative about +Z).
+    HandbrakeTurn {
+        yaw_deg: -yaw.to_degrees() * steer.signum(),
+        max_slip_deg: max_slip,
+        rear_omega_end: rear_end,
+        min_rpm,
+        hash: rig.state_hash(),
+    }
+}
+
+/// Result of [`handbrake_pull`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HandbrakePull {
+    /// Time from pulling the handbrake until both rear wheels stop, s (`None`: never).
+    pub rear_lock_s: Option<f32>,
+    /// Lowest engine rpm while the handbrake is held.
+    pub min_rpm_held: f32,
+    /// Lowest engine rpm in the second after release (throttle applied).
+    pub min_rpm_after: f32,
+    /// Gear when the handbrake was pulled / when it was released.
+    pub gear: (i8, i8),
+    /// Forward speed change over the second after release, m/s (> 0 = drive resumed).
+    pub speed_gain_after: f32,
+}
+
+/// Straight-line handbrake pull (owner row 56): rolling at `speed_mps` in `gear`, the driver
+/// lifts and holds the handbrake for `hold_s`, then releases it with half throttle for 1 s.
+pub fn handbrake_pull(
+    car: &LoadedCar,
+    assists: &AssistProfile,
+    speed_mps: f32,
+    gear: i8,
+    hold_s: f32,
+) -> HandbrakePull {
+    let mut rig = Rig::new(car);
+    rig.teleport([0.0; 3], 0.0, speed_mps, 0.0);
+    {
+        let v = &mut rig.vehicle;
+        v.gearbox.set(gear);
+        let dtd = &v.def.drivetrain;
+        let w = speed_mps / v.corners[0].radius;
+        let rpm = w
+            * crate::drivetrain::Gearbox::ratio_of(dtd, gear)
+            * dtd.final_drive
+            * crate::engine::RPM_PER_RADPS;
+        v.engine.omega = rpm.max(v.def.engine.idle_rpm) / crate::engine::RPM_PER_RADPS;
+        v.clutch = 1.0;
+        v.clutch_locked = true;
+    }
+    let idle_rpm = car.def.engine.idle_rpm;
+    let gear_in = rig.vehicle.gear();
+    let mut lock = None;
+    let mut min_held = f32::MAX;
+    let hold = (hold_s * TICKS_PER_S as f32) as usize;
+    for t in 0..hold {
+        rig.step(
+            &VehicleInput {
+                handbrake: 1.0,
+                ..Default::default()
+            },
+            assists,
+        );
+        let s = rig.state();
+        min_held = min_held.min(s.engine_rpm);
+        if lock.is_none()
+            && s.wheel_states[2].omega.abs() < 0.5
+            && s.wheel_states[3].omega.abs() < 0.5
+        {
+            lock = Some((t + 1) as f32 * PHYSICS_DT);
+        }
+    }
+    let gear_out = rig.vehicle.gear();
+    let v0 = speed(&rig);
+    let mut min_after = f32::MAX;
+    for _ in 0..TICKS_PER_S {
+        rig.step(
+            &VehicleInput {
+                throttle: 0.5,
+                ..Default::default()
+            },
+            assists,
+        );
+        min_after = min_after.min(rig.state().engine_rpm);
+    }
+    let _ = idle_rpm;
+    HandbrakePull {
+        rear_lock_s: lock,
+        min_rpm_held: min_held,
+        min_rpm_after: min_after,
+        gear: (gear_in, gear_out),
+        speed_gain_after: speed(&rig) - v0,
+    }
+}
+
+/// Steady keyboard corner (rows 57 / 72: the self-aligning countersteer must not make a
+/// tapping keyboard driver oscillate): follow a `radius` circle at `lat_g` for 6 s with the
+/// keyboard key tapper; returns the standard deviation of the yaw rate over the last 4 s,
+/// rad/s, and the largest distance from the line, m.
+pub fn keyboard_corner_wobble(
+    car: &LoadedCar,
+    assists: &AssistProfile,
+    radius: f32,
+    lat_g: f32,
+) -> (f32, f32) {
+    let mut rig = Rig::new(car);
+    let mut follow = CircleFollower::new(radius);
+    let v = (lat_g * GRAVITY_MPS2 * radius).sqrt();
+    rig.teleport([0.0; 3], 0.0, v, v / radius);
+    let mut rates = Vec::new();
+    let mut worst = 0.0f32;
+    for tick in 0..6 * TICKS_PER_S {
+        let (steer, err) = follow.steer(&rig);
+        let key = if steer > 0.15 {
+            1.0
+        } else if steer < -0.15 {
+            -1.0
+        } else {
+            0.0
+        };
+        let (throttle, brake) = hold_speed(&rig, v);
+        rig.step(
+            &VehicleInput {
+                steer: key,
+                throttle,
+                brake,
+                ..Default::default()
+            },
+            assists,
+        );
+        if tick >= 2 * TICKS_PER_S {
+            rates.push(yaw_rate(&rig));
+            worst = worst.max(err.abs());
+        }
+    }
+    let mean = rates.iter().sum::<f32>() / rates.len() as f32;
+    let var = rates.iter().map(|r| (r - mean) * (r - mean)).sum::<f32>() / rates.len() as f32;
+    (var.sqrt(), worst)
+}

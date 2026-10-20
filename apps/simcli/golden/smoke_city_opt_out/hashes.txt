@@ -1,6 +1,6 @@
 # simcli hashes scenario=smoke_city_opt_out systems=world,vehicle,damage,police,net hash_spec=3 contract=0.3.0
-240 8d0914081c0de66d
-480 0f07b07a81442cad
-720 c486e284dcc18e9f
-960 25c13e9629b37cf0
-1200 f5ec80dba5464087
+240 9c9f4359b438a43d
+480 36f06d9bc370af8b
+720 6cb3f3f11f24892f
+960 aa20189ca12e2af6
+1200 4cf8d8b70c6457f9

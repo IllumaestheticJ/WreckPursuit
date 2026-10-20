@@ -28,6 +28,9 @@ const CONTACT_LIFETIME_S = 1.5;
 const MAX_CONTACT_MARKERS = 64;
 const CONTACT_DOT = new THREE.SphereGeometry(0.08, 8, 6);
 const tmpNormal = new THREE.Vector3();
+const groundRay = new THREE.Raycaster();
+const groundFrom = new THREE.Vector3();
+const groundDown = new THREE.Vector3(0, -1, 0);
 
 export class SceneView {
   readonly renderer: THREE.WebGLRenderer;
@@ -136,11 +139,21 @@ export class SceneView {
       }
       // glTF is +Y up, same as Three: add to the scene, not the Z-up world group.
       // Layers that share a plane in the greybox (bus lanes and parking painted on asphalt,
-      // sidewalks on zone ground) draw over the layer below instead of flickering.
+      // sidewalks, their corner fills and the level lots behind them on zone ground) draw over
+      // the layer below instead of flickering.
       // City v2 adds terrain (ground_* / rock / seabed, smooth-shaded) and a sea plane 0.25 m
       // above sea level (no polygon offset: at long range it would win against the land);
       // walls, kerbs and decks come without normals and are flat-shaded.
-      const layer: Record<string, number> = { bus_lane: 2, parking: 2, sidewalk: 1, asphalt: 1, highway_concrete: 1 };
+      const layer: Record<string, number> = {
+        bus_lane: 2,
+        parking: 2,
+        sidewalk: 1,
+        sidewalk_corner: 1,
+        lot: 1,
+        lot_skirt: 1,
+        asphalt: 1,
+        highway_concrete: 1,
+      };
       gltf.scene.traverse((o) => {
         const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
         for (const mat of m ? (Array.isArray(m) ? m : [m]) : []) {
@@ -158,6 +171,21 @@ export class SceneView {
     } catch (e) {
       console.warn("city greybox not available", cityId, e);
     }
+  }
+
+  /**
+   * Height of the shown city's surface under sim-space `(x, y)` (m), by a downward ray against
+   * the greybox; null without a city or a hit. For rarely placed objects (spike strips), not per
+   * frame per car.
+   */
+  groundZ(x: number, y: number): number | null {
+    const city = this.cityShown ? this.cities.get(this.cityShown) : null;
+    if (!city) return null;
+    // Sim (x, y, z) is Three (x, z, -y) (world rotated -90 deg about X).
+    groundRay.set(groundFrom.set(x, 2000, -y), groundDown);
+    groundRay.far = 4000;
+    const hit = groundRay.intersectObject(city, true)[0];
+    return hit ? hit.point.y : null;
   }
 
   /**

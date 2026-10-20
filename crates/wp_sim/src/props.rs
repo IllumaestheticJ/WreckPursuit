@@ -39,7 +39,7 @@ impl Mover {
 }
 
 /// The prop bodies and the spatial index used to wake them.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct Props {
     pub(crate) bodies: Vec<RigidBodyHandle>,
     /// Bounding-sphere radius per prop, m.

@@ -23,7 +23,16 @@
       .bar { display: inline-block; position: relative; width: 140px; height: 9px; background: #222; margin-left: 6px; vertical-align: middle; }
       .bar i { position: absolute; top: 0; bottom: 0; left: 0; }
       .bar b { position: absolute; top: -2px; bottom: -2px; left: 50%; width: 1px; background: #888; }
-      .right-col { position: absolute; top: 8px; right: 8px; display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+      /* HUD corners (playtest row 67; stacks sized at run time by src/ui/layout.ts): top-left speedo +
+         race HUD, top-centre chase readout / banner, top-right damage column, bottom-right minimap,
+         bottom-left developer + audio panels, telemetry between them. */
+      .right-col { position: absolute; top: 8px; right: 8px; display: flex; flex-direction: column; gap: 6px; align-items: flex-end; overflow: hidden; }
+      .right-col > canvas { flex: 0 0 auto; }
+      .right-col > .comps, .right-col > .regions, .right-col > .feed { flex: 0 1 auto; min-height: 0; }
+      /* Player mode (game menu, developer panels off): only the game HUD. */
+      body.wp-player #controls, body.wp-player .telemetry, body.wp-player .comps, body.wp-player .regions,
+      body.wp-player .feed, body.wp-player .inputs, body.wp-player #audio-panel, body.wp-player #error,
+      body.wp-player .hud-main .dim { display: none !important; }
       #pursuit-banner { position: absolute; top: 34%; left: 50%; transform: translate(-50%, -50%); text-align: center; pointer-events: none; text-shadow: 0 2px 6px #000; }
       #pursuit-banner b { display: block; font: 900 44px/1 system-ui, sans-serif; letter-spacing: 0.12em; }
       #pursuit-banner span { display: block; margin-top: 4px; font-size: 13px; color: #ddd; }
@@ -111,6 +120,10 @@
           <label><input type="checkbox" data-a="esc" />ESC</label>
           <label><input type="checkbox" data-a="auto_gears" />auto gears</label>
           <label title="automatic: the car works the clutch (launch, stall prevention, shifts). manual: your clutch control is used directly; bind it in the controls panel (F9)">clutch <select id="clutch-mode"><option value="auto">automatic</option><option value="manual">manual</option></select></label>
+          <label title="Countersteer help: with the steering released the front wheels follow the car's travel (0 = plain return to centre, 50 = default, 100 = fast, full alignment). Never acts while you steer or during a handbrake turn."
+            >countersteer <input type="range" id="cstr" min="0" max="100" step="5" style="width: 80px" />
+            <span id="cstr-val" class="dim">–</span></label
+          >
         </div>
         <div class="row">
           replay
@@ -121,6 +134,7 @@
           <button id="rp-dl">download</button>
           <button id="rp-csv">csv</button>
           <button id="rp-exit">exit</button>
+          <label class="dim" title="after a big crash, play the instant replay without asking"><input id="rp-auto-crash" type="checkbox" /> auto crash replay</label>
         </div>
         <div class="row" id="rp-bar">
           <button id="rp-play">⏯</button>

@@ -103,8 +103,11 @@ fn held_key_or_stick_reaches_the_grip_limit() {
         let limit = ramp_steer(&c, &wheel(), V).max_lat_g;
         let k = ramp_steer(&c, &kb.1, V);
         let g = ramp_steer(&c, &gp.1, V);
+        // ironside_440 (soft, nose-heavy 1970s muscle car): 0.898 since the slide gyro was
+        // withdrawn (owner rows 57 / 72; it steadied the rear at the limit, 0.910 before).
+        let floor = if id == "ironside_440" { 0.88 } else { 0.9 };
         assert!(
-            k.full_input_g >= 0.9 * limit,
+            k.full_input_g >= floor * limit,
             "{id} keyboard {:.2} g of {limit:.2}",
             k.full_input_g
         );

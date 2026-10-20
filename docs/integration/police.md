@@ -858,3 +858,19 @@ when there's public safety calls for reckless driving."
 5. Coordinate with the 4-player test (`crates/wp_net/tests/vesper_e2e.rs` must still pass) and
    the LOD hand-over (spawned police use the fleet → full view hand-over in render/lod.ts).
 
+
+### Assist presets merged with `lead/round12` (2026-10-20)
+`ws/police` carries `origin/lead/round12` (the lead had already merged the presets there; its
+`main.ts` resolution is kept) plus two testbed fixes on top:
+- Touch looks presets up as a gamepad (`presetSource`), which fixes round 12's three `tsc` errors.
+- A box tick or preset click pushes its state into the game menu without the menu rebuilding the
+  assists from device defaults (`tellMenu`). Before, Street + ticking ESC rebuilt to exactly Rookie
+  (keyboard default countersteer 0.6), so `e2e:presets` failed. An assist changed in the menu itself
+  still rebuilds and makes the preset "custom"; a preset click updates the menu's toggles.
+- `cargo fmt` (module order in `wp_vehicle/src/lib.rs`, from round 12).
+
+Checks: `e2e:presets`, `e2e:touch`, `tsc`, fmt, clippy, wasm build pass. Fail identically on the
+`lead/round12` tip (not this merge): `e2e:menu` "countersteer slider disabled until the wasm setter
+exists" (the setter exists now); `wp_vehicle` `roster_diff_hashes_are_pinned`,
+`front_drive_cars_understeer_mildly`; `wp_wasm` `race_crash_replays_with_the_judge_and_no_crash_on_the_grid`,
+`simcli_golden_replays_play_back_in_the_browser_core`; 52 simcli goldens on the round-12 tip of 2026-10-20 (same set with and without this merge; `ws/police` before it: 19; none re-blessed here).

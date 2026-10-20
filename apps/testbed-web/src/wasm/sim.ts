@@ -145,6 +145,42 @@ export interface ReplayStatus {
   hash_spec: number;
 }
 
+/** A detected big crash (crates/wp_wasm/src/crash_replay.rs `CrashMark`). */
+export interface CrashMark {
+  seq: number;
+  /** Impact tick (strongest contact). */
+  tick: number;
+  player: number;
+  /** Other entity, null = static world. */
+  other: number | null;
+  closing_mps: number;
+  delta_v_mps: number;
+  health_drop: number;
+  /** World contact point (sim space). */
+  point: [number, number, number];
+  /** Unit vector car centre → contact point, chassis space. */
+  dir_local: [number, number, number];
+  side: "front" | "rear" | "left" | "right" | "top";
+}
+
+/** crash_replay_start() JSON (`CrashReplayInfo`). */
+export interface CrashReplayInfo {
+  crash: CrashMark;
+  start_tick: number;
+  end_tick: number;
+  live_tick: number;
+  live_hash: string;
+}
+
+/** Big-crash thresholds (`CrashTuning`). */
+export interface CrashTuning {
+  min_closing_mps: number;
+  min_delta_v_mps: number;
+  min_health_drop: number;
+  window_ticks: number;
+  cooldown_ticks: number;
+}
+
 /** SimEvent as decoded by events_decode (serde externally tagged). */
 export type SimEvent = Record<string, Record<string, unknown>>;
 
@@ -197,6 +233,13 @@ export const sim = {
   setAssists: (entity: number, p: AssistProfile): void => wasm.set_assist_profile(entity, JSON.stringify(p)),
   assistPreset: (source: "Keyboard" | "Gamepad" | "Wheel"): AssistProfile => JSON.parse(wasm.assist_preset(source)),
   assists: (entity: number): AssistProfile => JSON.parse(wasm.assist_profile(entity)),
+  /** Countersteer help slider, 0..100 % (owner row 57). */
+  setCountersteer: (entity: number, percent: number): void => wasm.set_countersteer(entity, percent),
+  countersteer: (entity: number): number => wasm.countersteer(entity),
+  /** Clutch mode "auto" | "manual" (owner row 59). */
+  setClutchMode: (entity: number, mode: "auto" | "manual"): void => wasm.set_clutch_mode(entity, mode),
+  clutchMode: (entity: number): string => wasm.clutch_mode(entity),
+  engineStalled: (entity: number): boolean => wasm.engine_stalled(entity),
   /** One-click presets in menu order: ["Rookie", "Street", "Sim"]. */
   assistPresets: (): string[] => JSON.parse(wasm.assist_presets()),
   /** Damage mode + assists of a one-click preset for a driver on `source`. */
@@ -277,6 +320,18 @@ export const sim = {
   replaySeek: (tick: number): void => wasm.replay_seek(tick),
   replayPlay: (speed: number): void => wasm.replay_play(speed),
   replayStatus: (): ReplayStatus | null => JSON.parse(wasm.replay_status()),
+  /** Big crash detected since the last call (live sessions), or null. */
+  crashTake: (): CrashMark | null => JSON.parse(wasm.crash_take()),
+  crashTuning: (): CrashTuning => JSON.parse(wasm.crash_tuning_json()),
+  crashTuningSet: (t: Partial<CrashTuning>): void => wasm.crash_tuning_set(JSON.stringify(t)),
+  /** Replay buffer + crash detection on/off for this session (off for benches). */
+  crashDetectEnable: (on: boolean): void => wasm.crash_detect_enable(on),
+  crashBufferTicks: (): number[] => Array.from(wasm.crash_buffer_ticks()),
+  /** Park the live session and play crash `seq` (impact − 3 s … + 2 s) as a replay. */
+  crashReplayStart: (seq: number): CrashReplayInfo => JSON.parse(wasm.crash_replay_start(seq)),
+  crashReplayActive: (): boolean => wasm.crash_replay_active(),
+  /** Back to the parked live session, exactly as it was: its tick and state hash. */
+  crashReplayStop: (): { tick: number; hash: string } | null => JSON.parse(wasm.crash_replay_stop()),
   replayCsv: (bytes: Uint8Array, entity: number, everyNTicks: number): string =>
     wasm.replay_export_csv(bytes, entity, everyNTicks),
   scenario: (): Scenario => JSON.parse(wasm.scenario_json()),

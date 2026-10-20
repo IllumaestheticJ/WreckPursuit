@@ -47,7 +47,7 @@ city.rotation.x = Math.PI / 2;
 scene.add(city);
 const meshes = [];
 city.traverse((o) => { if (o.isMesh) meshes.push(o); });
-const roadish = new Set(["asphalt", "highway_concrete", "parking", "bus_lane", "sidewalk", "kerb"]);
+const roadish = new Set(["asphalt", "highway_concrete", "parking", "bus_lane", "sidewalk", "sidewalk_corner", "kerb"]);
 function mode(m) {
   for (const o of meshes) {
     const name = o.material.name;

@@ -89,6 +89,8 @@ export interface HudFrame {
   regionsOfNodes: Uint8Array | null;
   rest: Float32Array | null;
   camera: string;
+  /** Speed units (game menu setting; default km/h). */
+  units?: "kmh" | "mph";
 }
 
 export class Hud {
@@ -126,9 +128,9 @@ export class Hud {
       `<br>Inside the city map: drag / wheel / arrows / + − / 0 whole city / F follow (driving input is paused while it is open)<br>` +
       `<b>Cameras</b> ${CAMERA_HELP}<br>` +
       `. frame step (replay) · [ / ] replay speed<br><br>` +
-      `<b>Slide control</b> (keyboard/gamepad assists): the car catches power slides itself — ` +
-      `centre the steering and it straightens up; steer into the turn to hold a drift, ` +
-      `countersteer to straighten faster. Strongest on powerful RWD cars; off on wheel.<br><br>` +
+      `<b>Countersteer help</b> (slider, keyboard/gamepad): let go of the steering and the front ` +
+      `wheels follow the car's travel, which catches a slide by itself (0 % off, 50 % default, ` +
+      `100 % fast). It never fights your input, and the handbrake turns the car freely.<br><br>` +
       `<b>Debug layers</b><br>` +
       LAYERS.map((l) => `${l.key.replace(/^(Key|Digit)/, "")} — ${l.label}`).join("<br>") +
       `<br><br>${AUDIO_CREDITS}`;
@@ -162,7 +164,8 @@ export class Hud {
 
   update(f: HudFrame): void {
     const t = f.tel;
-    const speed = t ? t[T.speed] * 3.6 : 0;
+    const mph = f.units === "mph";
+    const speed = t ? t[T.speed] * (mph ? 2.236936 : 3.6) : 0;
     const rpm = t ? t[T.rpm] : 0;
     const gear = t ? t[T.gear] : 0;
     const redline = f.info?.redline_rpm ?? 7000;
@@ -173,7 +176,7 @@ export class Hud {
     const hh = Math.floor(f.hours);
     const mm = Math.floor((f.hours - hh) * 60);
     this.main.innerHTML =
-      `<div class="speed">${speed.toFixed(0)}<small> km/h</small> <span class="gear">${gearTxt}</span></div>` +
+      `<div class="speed">${Math.abs(speed).toFixed(0)}<small> ${mph ? "mph" : "km/h"}</small> <span class="gear">${gearTxt}</span></div>` +
       `<div>rpm ${rpm.toFixed(0)} ${bar(rpm / limit, rpm > redline ? "#ff4040" : "#40c0ff")}</div>` +
       `<div>${badge(true, f.mode)}${f.replay ? badge(true, "REPLAY") : ""}${f.recording ? '<span class="badge rec">● REC</span>' : ""}</div>` +
       (a

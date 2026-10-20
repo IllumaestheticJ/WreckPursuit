@@ -25,6 +25,9 @@ use simcli::run::{
 use simcli::scenario::{CitySpec, EntitySpec};
 use simcli::{RunSummary, Scenario};
 
+use crate::crash_replay::{
+    CrashMark, CrashRecorder, CrashReplayInfo, Snapshot, POST_IMPACT_TICKS, PRE_IMPACT_TICKS,
+};
 use crate::data::mem_data;
 use crate::race::RaceRun;
 use crate::run::{ContinueReport, PlayerCar, PlayerRun};
@@ -96,6 +99,8 @@ pub struct Session {
     career: bool,
     /// A picker race (scenario `race_<id>`, live or replayed; see [`crate::race`]).
     race: Option<RaceRun>,
+    /// Rolling snapshot buffer + big-crash detector (live sessions; see [`crate::crash_replay`]).
+    crash: CrashRecorder,
 }
 
 fn opts(systems: Option<Selection>) -> RunOptions {
@@ -174,7 +179,13 @@ impl Session {
             )?),
             _ => None,
         };
+        let crash = if playback.is_some() {
+            CrashRecorder::off()
+        } else {
+            CrashRecorder::default()
+        };
         Ok(Self {
+            crash,
             race,
             run,
             career: false,
@@ -644,6 +655,8 @@ impl Session {
     /// made here are not in the replay log.
     pub fn debug_sim_mut(&mut self) -> Result<&mut Sim, String> {
         self.live_check()?;
+        // The change is not in the log: the crash-replay buffer starts again later.
+        self.crash.clear_snapshots();
         Ok(&mut self.sim)
     }
 
@@ -691,13 +704,14 @@ impl Session {
             .place_on_ground(id, xy, yaw, 0.0, Some(st.pos[2]))
             .map_err(|e| e.to_string())?;
         self.relocate_racer(id);
+        self.crash_resnapshot();
         Ok(())
     }
 
     /// Debug / e2e: aim vehicle `id` at a parked car so it knocks it: placed 5.5 m off the
-    /// car's flank (a side with a drivable lane and no other prop), facing it, rolling at `speed_mps`.
-    /// `prop` = index into [`crate::props::static_list`], or `None` for the parked car nearest
-    /// the vehicle. Returns the prop index. Not in the replay log.
+    /// car's flank (on a drivable lane, no other prop there), facing it, rolling at `speed_mps`.
+    /// `prop` = index into [`crate::props::static_list`], or `None` for the nearest parked car
+    /// that has such a spot. Returns the prop index. Not in the replay log.
     pub fn debug_knock_prop(
         &mut self,
         id: EntityId,
@@ -709,45 +723,56 @@ impl Session {
             .vehicle(id)
             .map(|v| v.vehicle.state().pos)
             .ok_or_else(|| format!("unknown vehicle {id:?}"))?;
-        let target = match prop {
-            Some(i) if i < self.sim.prop_count() => i,
+        // With no prop given, the nearest parked car that has a usable approach.
+        let candidates: Vec<usize> = match prop {
+            Some(i) if i < self.sim.prop_count() => vec![i],
             Some(i) => return Err(format!("no prop {i}")),
-            None => crate::props::nearest_parked_car(&self.sim, [here[0], here[1]])
-                .ok_or("no parked cars in this session")?,
+            None => crate::props::parked_cars_by_distance(&self.sim, [here[0], here[1]])
+                .into_iter()
+                .take(64)
+                .collect(),
         };
-        let (p, q) = self.sim.prop_pose(target).ok_or("no prop pose")?;
-        let r = crate::props::prop_right_xy(q);
-        // Come from a flank with a drivable lane next to it (the other is the kerb), from a
-        // spot no other prop is on (streets have parking on both sides).
-        const OFFSET_M: f32 = 5.5;
-        let map = self.sim.world().map();
-        let lane_at = |side: f32| {
-            let probe = [p[0] + r[0] * side * 3.5, p[1] + r[1] * side * 3.5, p[2]];
-            map.locate(probe, None, 0.0, true, false).is_some()
-        };
-        let spot = |side: f32| [p[0] + r[0] * side * OFFSET_M, p[1] + r[1] * side * OFFSET_M];
-        let clear = |side: f32| {
-            let xy = spot(side);
-            (0..self.sim.prop_count()).all(|i| {
-                i == target
-                    || self.sim.prop_pose(i).is_none_or(|(o, _)| {
-                        (o[0] - xy[0]).powi(2) + (o[1] - xy[1]).powi(2) > 4.5 * 4.5
-                    })
-            })
-        };
-        let side = [-1.0, 1.0]
+        let (target, xy, yaw, z) = candidates
             .into_iter()
-            .find(|s| lane_at(*s) && clear(*s))
-            .or_else(|| [-1.0, 1.0].into_iter().find(|s| clear(*s)))
-            .ok_or("no clear spot next to that prop")?;
-        let xy = spot(side);
-        // Facing the prop: forward at yaw ψ is (−sin ψ, cos ψ) = −side · r.
-        let yaw = wp_math::atan2(side * r[0], -side * r[1]);
+            .find_map(|i| self.knock_approach(i).map(|(xy, yaw, z)| (i, xy, yaw, z)))
+            .ok_or("no parked car with a clear lane beside it")?;
         self.sim
-            .place_on_ground(id, xy, yaw, speed_mps, Some(p[2]))
+            .place_on_ground(id, xy, yaw, speed_mps, Some(z))
             .map_err(|e| e.to_string())?;
         self.relocate_racer(id);
+        self.crash_resnapshot();
         Ok(target)
+    }
+
+    /// Where to put a car to knock prop `target`: 5.5 m off one of its flanks, on a drivable
+    /// lane (so never on a sidewalk or inside a building), with no other prop within 4.5 m;
+    /// facing the prop. `(xy, yaw, z hint)`, or `None` when neither flank qualifies.
+    fn knock_approach(&self, target: usize) -> Option<([f32; 2], f32, f32)> {
+        const OFFSET_M: f32 = 5.5;
+        let (p, q) = self.sim.prop_pose(target)?;
+        let r = crate::props::prop_right_xy(q);
+        let map = self.sim.world().map();
+        let spot = |side: f32| [p[0] + r[0] * side * OFFSET_M, p[1] + r[1] * side * OFFSET_M];
+        let usable = |side: f32| {
+            let xy = spot(side);
+            // The whole run-up (car centre, and its far end 2.5 m further out) is road.
+            let on_lane = [0.0, 2.5].iter().all(|back| {
+                let d = OFFSET_M + back;
+                let pt = [p[0] + r[0] * side * d, p[1] + r[1] * side * d, p[2]];
+                map.locate(pt, None, 0.0, true, false).is_some()
+            });
+            on_lane
+                && (0..self.sim.prop_count()).all(|i| {
+                    i == target
+                        || self.sim.prop_pose(i).is_none_or(|(o, _)| {
+                            (o[0] - xy[0]).powi(2) + (o[1] - xy[1]).powi(2) > 4.5 * 4.5
+                        })
+                })
+        };
+        let side = [-1.0f32, 1.0].into_iter().find(|s| usable(*s))?;
+        // Facing the prop: forward at yaw ψ is (−sin ψ, cos ψ) = −side · r.
+        let yaw = wp_math::atan2(side * r[0], -side * r[1]);
+        Some((spot(side), yaw, p[2]))
     }
 
     /// The vehicle is held on the brakes because its run is over (capture or wreck).
@@ -812,6 +837,11 @@ impl Session {
 
     fn run_tick(&mut self, capture_prev: bool) {
         let tick = self.sim.tick();
+        // The crash-replay buffer starts with the session's first state (inputs and ops
+        // logged at tick 0 are applied again on top of it, which leaves it unchanged).
+        if tick == 0 {
+            self.crash_snapshot();
+        }
         // 1. Inputs for this tick: replay track, scenario drivers, or (live) already applied.
         if let Some(mut p) = self.playback.take() {
             let r = &p.replay;
@@ -878,6 +908,13 @@ impl Session {
         // All sim vehicles (city police / traffic cars are drawn and interpolated too);
         // scripting and replay checkpoints use scenario entities only.
         let before = self.sim.vehicle_states();
+        let player = self.ids.first().copied();
+        let player_before = player.and_then(|p| {
+            before
+                .iter()
+                .find(|(id, _)| *id == p)
+                .map(|(_, s)| s.clone())
+        });
         if capture_prev {
             for (id, s) in &before {
                 self.extras.entry(*id).or_default().prev_state = Some(s.clone());
@@ -896,6 +933,11 @@ impl Session {
         self.observe_run(&extra);
         if let Some(race) = &mut self.race {
             race.settle(self.run.as_mut());
+        }
+        if self.playback.is_none() {
+            if let Some(p) = player {
+                self.observe_crash(p, player_before.as_ref(), &drained);
+            }
         }
         self.events.extend(drained);
         self.events.extend(extra);
@@ -959,8 +1001,61 @@ impl Session {
                         }
                     }
                 }
+                // Crash-replay buffer: a snapshot at the end of the tick, after everything
+                // this tick logs (inputs logged later carry tick `now` and are replayed).
+                if self.crash.snapshot_due(now) {
+                    self.crash_snapshot();
+                }
             }
         }
+    }
+
+    /// Push a crash-replay snapshot of the current state (see [`crate::crash_replay`]).
+    fn crash_snapshot(&mut self) {
+        if !self.crash.enabled() || self.playback.is_some() {
+            return;
+        }
+        let snap = Snapshot {
+            tick: self.sim.tick(),
+            sim: self.sim.clone(),
+            race: self.race.clone(),
+            last_input: self.last_input.clone(),
+            extras: self.extras.clone(),
+            mode: self.mode,
+        };
+        self.crash.push_snapshot(snap);
+    }
+
+    /// A debug tool moved something outside the log: older snapshots would replay without
+    /// it, so the buffer restarts from the current state.
+    fn crash_resnapshot(&mut self) {
+        self.crash.clear_snapshots();
+        self.crash_snapshot();
+    }
+
+    /// Feed the crash detector one stepped live tick of the player's car.
+    fn observe_crash(
+        &mut self,
+        player: EntityId,
+        before: Option<&VehicleState>,
+        events: &[SimEvent],
+    ) {
+        let tick = self.sim.tick();
+        let race_quiet = self.race.as_ref().is_some_and(|r| {
+            r.live().player() == player && (r.holds_player(tick) || r.report(false).is_some())
+        });
+        let armed = !race_quiet && !self.held(player);
+        let mass = self.car(player).map_or(1500.0, |c| c.def.mass_kg);
+        let after = self.vehicle(player).map(|v| v.vehicle.state());
+        self.crash.observe(&crate::crash_replay::PlayerTick {
+            now: tick,
+            player,
+            mass_kg: mass,
+            before,
+            after: after.as_ref(),
+            events,
+            armed,
+        });
     }
 
     /// Feed one tick's events to the player's economy (read-only on the sim) and settle a
@@ -1121,6 +1216,91 @@ impl Session {
         let p = self.playback.as_mut().ok_or("no replay loaded")?;
         p.speed = speed.clamp(0.0, 16.0);
         Ok(())
+    }
+
+    // ----- crash replay (lead; see `crate::crash_replay`) -----------------------------------
+
+    /// The crash recorder (tuning, buffered snapshot ticks, last crash).
+    pub fn crash(&self) -> &CrashRecorder {
+        &self.crash
+    }
+
+    /// The crash recorder, mutable (tuning, on/off).
+    pub fn crash_mut(&mut self) -> &mut CrashRecorder {
+        &mut self.crash
+    }
+
+    /// Take the big crash detected since the last call (live sessions).
+    pub fn crash_take(&mut self) -> Option<CrashMark> {
+        self.crash.take()
+    }
+
+    /// A playback session showing crash `crash` (`impact − 3 s .. impact + 2 s`, clamped to the
+    /// buffer), built from the buffered snapshot before it and this session's log. `self` is
+    /// not changed. Ticks past the current live tick replay the last logged inputs.
+    pub fn crash_replay(&self, crash: &CrashMark) -> Result<(Session, CrashReplayInfo), String> {
+        self.live_check()?;
+        let now = self.sim.tick();
+        if crash.tick > now {
+            return Err("that crash has not happened yet".into());
+        }
+        let want = crash.tick.saturating_sub(PRE_IMPACT_TICKS);
+        let snap = self
+            .crash
+            .snapshot_for(want)
+            .ok_or("no replay buffer (crash replays are off in this session)")?;
+        if snap.tick > crash.tick {
+            return Err("that crash is no longer in the replay buffer".into());
+        }
+        let start = want.max(snap.tick);
+        let end = crash.tick + POST_IMPACT_TICKS;
+        let mut replay = self.log.clone();
+        replay.ticks = end;
+        let input_cursor = replay.inputs.partition_point(|e| e.tick < snap.tick);
+        let op_cursor = replay.ops.partition_point(|e| e.tick < snap.tick);
+        let n = self.ids.len();
+        let mut s = Session {
+            sc: self.sc.clone(),
+            scripted: self.scripted,
+            script_end: self.script_end,
+            load_city: self.load_city,
+            systems: self.systems,
+            sim: snap.sim.clone(),
+            ids: self.ids.clone(),
+            cars: self.cars.clone(),
+            extras: snap.extras.clone(),
+            last_input: snap.last_input.clone(),
+            fixed: FixedStep::new(PHYSICS_DT, MAX_TICKS_PER_STEP),
+            log: Replay::new(&self.sc, &self.systems.to_string(), n),
+            recording: false,
+            events: Vec::new(),
+            playback: Some(Playback {
+                replay,
+                input_cursor,
+                op_cursor,
+                speed: 1.0,
+                verified: 0,
+                drift_ticks: Vec::new(),
+                drift_count: 0,
+            }),
+            mode: snap.mode,
+            live_end_hash: None,
+            outcome: None,
+            run: None,
+            career: false,
+            race: snap.race.clone(),
+            crash: CrashRecorder::off(),
+        };
+        s.run_ticks(start - snap.tick);
+        s.events.clear();
+        let info = CrashReplayInfo {
+            crash: crash.clone(),
+            start_tick: start,
+            end_tick: end,
+            live_tick: now,
+            live_hash: format!("{:016x}", self.sim.state_hash()),
+        };
+        Ok((s, info))
     }
 
     /// Replay progress.

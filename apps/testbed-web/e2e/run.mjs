@@ -8,10 +8,13 @@
 // selector) loads with traffic, signals (day/night, lamps change over time) and the city chase,
 // weather (e2e/weather.mjs: selector, rain, wet roads, spray, fog, wipers, rainy-night chase),
 // traffic / police LOD hand-overs are seamless (no missing mesh, < 0.5 m swap jump, no pop-in
-// within 300 m), gamepad + rebindable controls (e2e/gamepad.mjs), browser perf budgets
+// within 300 m), gamepad + rebindable controls (e2e/gamepad.mjs), touch controls
+// (e2e/touch.mjs), browser perf budgets
 // (e2e/perf_check.mjs, PERF=0 skips), parked cars and cones are drawn (every prop within 150 m
 // has exactly one drawn instance, near parked cars use the full mesh, a knocked parked car's drawn
-// pose follows the sim within 0.2 m), and (optionally) perf at 1/8/24 cars.
+// pose follows the sim within 0.2 m), crash effects (e2e/crash_fx.mjs: sparks, glass, debris,
+// smoke, skid marks, no steady-state allocation), instant crash replays (e2e/crash_replay.mjs),
+// and (optionally) perf at 1/8/24 cars.
 import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -559,9 +562,9 @@ await shot("city_chase_greybox_toggle.png");
   await shot("props_knock.png");
   const st = knock.stats;
   check(
-    st.parked > 1000 && st.drawnFull + st.drawnProxy === st.parked && st.inRange > 0 && st.drawnInRange === st.inRange &&
-      (st.fullInRange === st.parkedInRange || st.fullInRange === 256),
-    `props: ${st.parked} parked cars (${knock.model ?? "box stand-in"}) + ${st.cones} cones; drawn ${st.drawnFull} full + ${st.drawnProxy} proxy; ` +
+    st.parked > 1000 && st.drawnFull + st.drawnProxy + st.drawnBox === st.parked && st.inRange > 0 && st.drawnInRange === st.inRange &&
+      (st.fullInRange === st.parkedInRange || st.fullInRange === 24),
+    `props: ${st.parked} parked cars (${knock.model ?? "box stand-in"}) in ${st.chunks} chunks + ${st.cones} cones; drawn ${st.drawnFull} full + ${st.drawnProxy} proxy + ${st.drawnBox} box; ` +
       `${st.drawnInRange}/${st.inRange} props within 150 m drawn, ${st.fullInRange}/${st.parkedInRange} parked cars there with the full mesh ` +
       `(${st.fullInFullRange}/${st.inFullRange} within ${250} m); ${st.repicks} re-picks, ${st.repickWrites} + ${st.movedWrites} matrix writes; ` +
       `update ${st.updateMeanMs.toFixed(3)} ms mean / ${st.updateMaxMs.toFixed(2)} ms worst, props_moved() ${knock.movedCallMs.toFixed(3)} ms`,
@@ -868,5 +871,41 @@ check(gp.status === 0, `gamepad + controls checks (e2e/gamepad.mjs)${gp.status =
 const rs = spawnSync("node", [join(here, "reset.mjs")], { cwd: root, encoding: "utf8", env: process.env });
 process.stdout.write(rs.stdout);
 check(rs.status === 0, `reset-in-place checks (e2e/reset.mjs)${rs.status === 0 ? "" : ": " + (rs.stderr || "").trim().split("\n").pop()}`);
+// 9. Crash effects (e2e/crash_fx.mjs, its own server and browser): a scripted head-on throws
+// sparks, glass and debris, a Simulation barrier crash smokes, a burnout lays skid marks, the
+// effects allocate nothing in steady state and switch quality live.
+const cfx = spawnSync("node", [join(here, "crash_fx.mjs")], {
+  cwd: root,
+  encoding: "utf8",
+  env: { ...process.env, FX_SHOTS: shots ? join(shots, "fx") : "" },
+});
+process.stdout.write(cfx.stdout);
+check(cfx.status === 0, `crash effects checks (e2e/crash_fx.mjs)${cfx.status === 0 ? "" : ": " + (cfx.stderr || "").trim().split("\n").pop()}`);
+// 10. Instant crash replay (lead, row 70; e2e/crash_replay.mjs, its own server and browser): a
+// scripted crash offers the replay, accepting plays it and returns to live play with the same
+// tick and hash, auto mode and skip, no replays on benches.
+const cr = spawnSync("node", [join(here, "crash_replay.mjs")], {
+  cwd: root,
+  encoding: "utf8",
+  env: { ...process.env, CRASH_SHOTS: shots ? join(shots, "crash_replay") : "" },
+});
+process.stdout.write(cr.stdout);
+check(cr.status === 0, `crash replay checks (e2e/crash_replay.mjs)${cr.status === 0 ? "" : ": " + (cr.stderr || "").trim().split("\n").pop()}`);
+// 11. Touch controls (e2e/touch.mjs, its own server and browser): an emulated phone shows the
+// controls, a swipe on the throttle accelerates, steering (buttons + tilt), edge buttons, no
+// HUD overlaps at phone sizes, rotate hint in portrait; a desktop shows no touch UI.
+const tc = spawnSync("node", [join(here, "touch.mjs")], {
+  cwd: root,
+  encoding: "utf8",
+  env: { ...process.env, TOUCH_SHOTS: shots ? join(shots, "touch") : "" },
+});
+process.stdout.write(tc.stdout);
+check(tc.status === 0, `touch controls checks (e2e/touch.mjs)${tc.status === 0 ? "" : ": " + (tc.stderr || "").trim().split("\n").pop()}`);
+// 12. Game menu + HUD layout (UI kit, e2e/menu.mjs, its own server and browser): no HUD overlaps
+// at 1280×720 / 1366×768 / 1920×1080 with the developer panels on and off, Esc pauses and
+// resumes, keyboard + gamepad navigation, a setting survives a reload, ?menu=1 title screen.
+const mn = spawnSync("node", [join(here, "menu.mjs")], { cwd: root, encoding: "utf8", env: { ...process.env, MENU_SHOTS: shots ?? "" } });
+process.stdout.write(mn.stdout);
+check(mn.status === 0, `game menu + layout checks (e2e/menu.mjs)${mn.status === 0 ? "" : ": " + (mn.stderr || "").trim().split("\n").pop()}`);
 console.log(failures ? `${failures} check(s) failed` : "all checks passed");
 process.exit(failures ? 1 : 0);

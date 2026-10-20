@@ -47,8 +47,15 @@ function load(): Record<string, boolean> {
 
 const state: Record<string, boolean> = { ...Object.fromEntries(LAYERS.map((l) => [l.id, l.default])), ...load() };
 
+/** Layers forced off regardless of their toggle (player mode hides the debug drawing). */
+let suppressed = new Set<string>();
+
 export const layers = {
-  on: (id: string): boolean => state[id] ?? false,
+  on: (id: string): boolean => !suppressed.has(id) && (state[id] ?? false),
+  /** Force these layers off (player mode, game menu); `[]` lifts it. Toggles keep their state. */
+  suppress(ids: Iterable<string>): void {
+    suppressed = new Set(ids);
+  },
   toggle(id: string): void {
     state[id] = !state[id];
     try {

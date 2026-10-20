@@ -17,9 +17,9 @@ export class MapOverlay {
   private lastFrame = -Infinity;
 
   constructor(parent: HTMLElement, onOpenChange?: (open: boolean) => void) {
-    // Left column, under the input panel: the testbed's bottom-right corner holds the event feed
-    // and the audio panel.
-    this.hud = mountMapHud(parent, { onOpenChange, minimapPlacement: { left: "8px", top: "312px", right: "auto", bottom: "auto" } });
+    // Bottom-right corner (playtest row 67): clear of the developer panel (bottom-left), the race
+    // HUD (top-left), the pursuit banner (centre) and the damage silhouette (top-right).
+    this.hud = mountMapHud(parent, { onOpenChange, minimapPlacement: { right: "8px", bottom: "8px", left: "auto", top: "auto" } });
   }
 
   /** New session: fetch the static map when the city changed. */

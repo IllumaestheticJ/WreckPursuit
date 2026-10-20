@@ -16,6 +16,7 @@ import { CITY_NAMES, districtName, zoneAt } from "./districts";
 import { drawPlayer, drawPoi, drawTool, drawUnit, readPalette, ROAD_COLOR, DECK_CASING } from "./draw";
 import { FullMapRenderer, type FullMapStats } from "./FullMap";
 import { MinimapRenderer, type MinimapStats } from "./Minimap";
+import { speedIn, unitLabel, type SpeedUnits } from "../menu/settings";
 import "../ui/theme.css";
 import "./map.css";
 
@@ -68,6 +69,7 @@ export class MapHud {
   private map: MapStatic | null = null;
   private frameData: MapFrame = EMPTY_FRAME;
   private openFlag = false;
+  private units: SpeedUnits = "kmh";
   private follow = false;
   private district: string | null = null;
   private lastCaptionMs = -Infinity;
@@ -140,7 +142,7 @@ export class MapHud {
       this.lastCaptionMs = nowMs;
       const z = f.player ? zoneAt(this.map, f.player.x, f.player.y) : -1;
       this.district = z >= 0 ? districtName(this.map.city, this.map.zones[z]) : null;
-      const speed = f.player ? `${Math.round(f.player.speed * 3.6)} km/h` : "";
+      const speed = f.player ? `${Math.round(speedIn(this.units, f.player.speed))} ${unitLabel(this.units)}` : "";
       this.caption.textContent = [this.district?.toUpperCase(), speed].filter(Boolean).join(" · ");
     }
     if (this.openFlag) {
@@ -186,7 +188,13 @@ export class MapHud {
     this.miniEl.classList.toggle("wp-hidden", !on);
   }
 
-  /** Traffic signals on the minimap. */
+  /** Speed units of the minimap caption (game menu setting). */
+  setUnits(units: SpeedUnits): void {
+    this.units = units;
+    this.lastCaptionMs = -Infinity;
+  }
+
+  /** Draw traffic signals on the minimap. */
   setSignals(on: boolean): void {
     this.mini.options.signals = on;
   }
