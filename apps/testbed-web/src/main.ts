@@ -580,8 +580,8 @@ async function main(): Promise<void> {
   // chosen preset is remembered per viewer and replaces the per-box overrides; ticking a box
   // afterwards turns it into a custom setup (the preset is forgotten, the box is remembered).
   const PRESET_KEY = "wp.assistPreset";
-  /** Presets are defined for keyboard / gamepad / wheel; touch looks them up as a gamepad. */
-  const presetSource = (s: InputSource) => (s === "Touch" ? "Gamepad" : s);
+  /** Presets are defined for keyboard / gamepad / wheel; touch uses the gamepad ones. */
+  const presetSource = (src: InputSource): "Keyboard" | "Gamepad" | "Wheel" => (src === "Touch" ? "Gamepad" : src);
   /** True while the developer panel (assist boxes, preset row) pushes its state into the game
    * menu: the panel already set the assists, so the menu only records them. */
   let panelToMenu = false;

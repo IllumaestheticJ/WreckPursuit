@@ -326,7 +326,7 @@ fn roster_diff_hashes_are_pinned() {
         ("sperber_32", 0xd578a45d1b0ab6aa),
         ("lindwurm_4t", 0x9a5474b77c93bae7),
         ("sentinel_wolfhound", 0x3d93cffb67dcee15),
-        ("junkyard_beater", 0x72a8eef4cb8c2001),
+        ("junkyard_beater", 0xbe54b8910b0c86e8),
     ];
     let mut got = Vec::new();
     for (id, _) in pinned {

@@ -387,7 +387,7 @@ CARS = [
         ),
         tires=dict(front="235/70R15", rear="235/70R15", compound="vintage_bias", unsprung=(30.0, 45.0)),
         susp=dict(hz=(1.10, 1.20), zeta=0.22, travel=(0.20, 0.22), roll_grad_deg_g=6.0,
-                  roll_front_share=0.70, bump_stop=120000.0, preload=0.03),
+                  roll_front_share=0.70, bump_stop=120000.0, preload=(0.11, 0.076)),
         align=dict(camber_deg=(0.25, 0.0), toe_deg=(0.1, 0.0), caster_deg=2.0),
         brakes=dict(
             front=dict(kind="disc", d_mm=279, pistons_mm=[70], pad_mu=0.30),
@@ -913,9 +913,9 @@ CARS = [
             diff_f="Open", diff_r="Open", clutch_factor=1.3,
         ),
         tires=dict(front="175/70R13", rear="175/70R13", compound="vintage_bias", unsprung=(15.0, 14.0)),
-        susp=dict(hz=(1.15, 1.25), zeta=0.14, travel=(0.16, 0.17), roll_grad_deg_g=6.5,
-                  roll_front_share=0.60, bump_stop=120000.0, preload=0.01),
-        align=dict(camber_deg=(-1.0, -0.5), toe_deg=(0.0, 0.0), caster_deg=2.0),
+        susp=dict(hz=(1.15, 1.25), zeta=0.18, travel=(0.16, 0.17), roll_grad_deg_g=6.5,
+                  roll_front_share=0.70, bump_stop=120000.0, preload=(0.11, 0.08)),
+        align=dict(camber_deg=(-1.3, 0.0), toe_deg=(0.0, -0.15), caster_deg=2.0),
         brakes=dict(
             front=dict(kind="disc", d_mm=240, pistons_mm=[51], pad_mu=0.35),
             rear=dict(kind="drum", d_mm=200, wheel_cyl_mm=17.5, brake_factor=1.8),
@@ -981,7 +981,7 @@ CARS = [
         ),
         tires=dict(front="175/65R14", rear="175/65R14", compound="street", unsprung=(15.0, 14.0)),
         susp=dict(hz=(1.35, 1.50), zeta=0.27, travel=(0.15, 0.16), roll_grad_deg_g=5.5,
-                  roll_front_share=0.62, bump_stop=120000.0, preload=0.01),
+                  roll_front_share=0.62, bump_stop=120000.0, preload=(0.061, 0.031)),
         align=dict(camber_deg=(-0.5, -1.0), toe_deg=(0.0, 0.15), caster_deg=3.0),
         brakes=dict(
             front=dict(kind="disc", d_mm=256, pistons_mm=[54], pad_mu=0.38),
@@ -1044,7 +1044,7 @@ CARS = [
         ),
         tires=dict(front="245/75R16", rear="245/75R16", compound="street", unsprung=(40.0, 60.0)),
         susp=dict(hz=(1.25, 1.55), zeta=0.27, travel=(0.20, 0.22), roll_grad_deg_g=5.5,
-                  roll_front_share=0.70, bump_stop=300000.0, preload=0.03),
+                  roll_front_share=0.70, bump_stop=300000.0, preload=(0.059, 0.03)),
         align=dict(camber_deg=(0.0, 0.0), toe_deg=(0.1, 0.0), caster_deg=4.0),
         brakes=dict(
             front=dict(kind="disc", d_mm=325, pistons_mm=[57, 57], pad_mu=0.40),
@@ -1107,7 +1107,7 @@ CARS = [
         ),
         tires=dict(front="215/70R14", rear="215/70R14", compound="street", unsprung=(30.0, 50.0)),
         susp=dict(hz=(1.30, 1.60), zeta=0.25, travel=(0.18, 0.20), roll_grad_deg_g=5.5,
-                  roll_front_share=0.72, bump_stop=200000.0, preload=0.02),
+                  roll_front_share=0.72, bump_stop=200000.0, preload=(0.06, 0.02)),
         align=dict(camber_deg=(0.0, 0.0), toe_deg=(0.1, 0.0), caster_deg=3.0),
         brakes=dict(
             front=dict(kind="disc", d_mm=274, pistons_mm=[60], pad_mu=0.38),

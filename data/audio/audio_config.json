@@ -47,6 +47,7 @@
     "shift_rate_full_rpm_s": 7000.0,
     "shift_dip_depth": 0.6,
     "blip_load": 0.8,
+    "blip_ref_rpm": 4000.0,
     "lod_two_layer_m": 40.0,
     "second_layer_cull_scale": 0.25,
     "physical_max_others": 6,
