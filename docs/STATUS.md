@@ -5,7 +5,7 @@ _Last updated: lead integration round 8, 2026-10-19. Contract **v0.3.0** (applie
 Machines are named by letter: **A–I = prompts 02–10**, **J–Q = prompts 13–20** (started 2026-10-19 as
 cloud sessions: J audio `ws/audio`, K weather `ws/weather`, L race/crews `ws/race`, M UI kit `ws/ui`,
 N opponent AI `ws/opponent`, O meta services `ws/meta`, P design docs `ws/design-docs`, Q tuning
-dashboard `ws/tuning-dash`).
+dashboard `ws/tuning-dash`); **R = prompt 21** (`ws/panels`), **S = prompt 22** (`ws/onboarding`).
 
 ## Workstreams
 
@@ -29,6 +29,7 @@ dashboard `ws/tuning-dash`).
 | P | 19 | Design docs | `ws/design-docs` | merged run 3 | GDD, city zones, feature backlog (`docs/design/`) | — |
 | Q | 20 | Tuning dashboard | `ws/tuning-dash` | merged (run 3–4) | sweep runner + presets (`tools/tuning-dash`) | integration doc |
 | R | 21 | Car models & panels | `ws/panels` | started 2026-10-19 | — | per-panel meshes, hinged doors/hood/trunk swing, dangling bumpers |
+| S | 22 | Onboarding flow | `ws/onboarding` | prompt written 2026-10-20, not started | — | intro crash → junkyard car → first race → first police chase → garage (backlog B08); best started after L's race-in-city wiring |
 | Lead | 12 | Integration | `main` | — | Contacts → damage, debris, hull, static boxes, city loading; contract v0.2.0 | police units as sim vehicles, F's `wp_sim` hooks, physical traffic, v0.3.0 |
 
 ## What you can play right now
