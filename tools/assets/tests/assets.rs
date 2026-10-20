@@ -1,7 +1,12 @@
 //! Every car has an up-to-date, valid mesh and panel spec; meshes deform with the lattice and
 //! hinged parts line up with their hinge nodes.
 
-use car_assets::mesh::{PartKind, TRI_BUDGET};
+#[path = "common/crash.rs"]
+mod crash;
+
+use car_assets::crumple::{measure, render_detail, PartCrumple, Pose};
+use car_assets::mesh::{PartKind, FOLD_MAX_M, LID_POP_M, TRI_BUDGET};
+use car_assets::skin::{deform_detail, FoldMemory};
 use car_assets::{
     build_mesh, car_ids, load_car, load_mesh, mesh_path, panel_path, repo_root, validate::validate,
 };
@@ -108,114 +113,266 @@ fn hinged_parts_start_at_their_hinge_line() {
     }
 }
 
-/// Lattice rest nodes, final nodes and final panel states after `car` drives into a
-/// full-width rigid barrier at `kmh` (the real sim: Rapier contacts, lattice, panels).
-fn frontal_hit(
+/// Hood / fender motion of `car` after a frontal hit, as the browser draws it.
+fn crumple_after(
     car: &str,
     kmh: f32,
+    target: &str,
     mode: &str,
-) -> (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<wp_damage::PanelStatus>) {
-    use wp_contracts::DamageSim;
-    let v = kmh / 3.6;
-    let ron = format!(
-        "(name: \"hood_buckle\", seed: 7, mode: {mode}, assists: ai, panels: true,
-          barriers: [(pos: (0.0, 8.0, 0.75), size: (6.0, 1.0, 1.5))],
-          entities: [(id: \"car\", car: \"{car}\", speed_mps: {v}, driver: cruise(target_mps: {v}))],
-          duration_s: 1.5, hash_every: 240)"
-    );
-    let sc = simcli::Scenario::from_ron("hood_buckle.ron", &ron).unwrap();
-    let data = simcli::FsData {
-        root: repo_root().join("data"),
-    };
-    let mut rest = Vec::new();
-    let mut now = Vec::new();
-    let mut states = Vec::new();
-    let mut hook = |t: &simcli::TickView| -> Result<(), String> {
-        let d = &t.sim.vehicles()[0].damage;
-        if rest.is_empty() {
-            rest = (0..d.lattice().nodes.len())
-                .map(|i| d.rest_position(i))
-                .collect();
-        }
-        now = d.node_positions().to_vec();
-        states = d.panel_states();
-        Ok(())
-    };
-    simcli::run_with_hook(&sc, &data, &simcli::RunOptions::default(), &mut hook).unwrap();
-    (rest, now, states)
-}
-
-/// Largest vertex displacement and largest fold (rise above the plain skinned surface) of a
-/// part after a hit.
-fn hood_motion(
-    part: &car_assets::mesh::MeshPart,
-    rest: &[[f32; 3]],
-    now: &[[f32; 3]],
-    unlatched: bool,
-) -> (f32, f32) {
-    let moved = car_assets::skin::deform(part, rest, now, unlatched);
-    let mut flat = part.clone();
-    flat.fold_chords.clear();
-    let skinned = car_assets::skin::deform(&flat, rest, now, unlatched);
-    let mut disp = 0.0f32;
-    let mut fold = 0.0f32;
-    for v in 0..part.vertex_count() {
-        let r = part.vertex(v);
-        let m = moved[v];
-        let d = ((m[0] - r[0]).powi(2) + (m[1] - r[1]).powi(2) + (m[2] - r[2]).powi(2)).sqrt();
-        disp = disp.max(d);
-        fold = fold.max(m[2] - skinned[v][2]);
-    }
-    (disp, fold)
-}
-
-#[test]
-fn hood_buckles_in_a_56_kmh_frontal() {
+    frame_ticks: u64,
+) -> (PartCrumple, PartCrumple, PartCrumple) {
     let root = repo_root();
-    for (car, kmh, mode, min_fold) in [
-        ("debug_sedan", 56.0, "Simulation", 0.10),
-        ("sentinel_cruiser", 56.0, "Simulation", 0.08),
-        ("debug_sedan", 40.0, "Arcade", 0.04),
+    let def = load_car(&root, car).unwrap();
+    let mesh = load_mesh(&mesh_path(&root, car)).unwrap();
+    let mut c = crash::frontal(
+        car,
+        &def.lattice,
+        &mesh,
+        kmh,
+        target,
+        mode,
+        2.0,
+        frame_ticks,
+    );
+    let pose = Pose {
+        lattice: &def.lattice,
+        rest: &c.rest,
+        nodes: &c.now,
+        states: &c.states,
+    };
+    let mut m = |name: &str| {
+        let i = mesh.parts.iter().position(|p| p.name == name).unwrap();
+        let (moved, detail) = render_detail(&mesh.parts[i], &pose, Some(&mut c.memory[i]));
+        measure(&mesh.parts[i], &moved, &detail, &pose)
+    };
+    let out = (m("hood"), m("fender_fl"), m("fender_fr"));
+    eprintln!(
+        "{car} {kmh} km/h {target} {mode} @{frame_ticks} ticks: hood {:?}",
+        out.0
+    );
+    out
+}
+
+/// Lead feedback round 12b ("the hood doesn't crumple enough"): in a 50 km/h frontal the hood
+/// buckles into a visible fold with at least one fold line, its leading edge sits on the
+/// crushed front (no stiff panel floating over a crushed nose), and the fenders buckle too.
+/// Renderer frames every 8 ticks (30 fps), the harder case for the crumple memory.
+#[test]
+fn front_crumples_and_follows_the_crushed_front() {
+    for (car, kmh, target, mode, min_fold) in [
+        ("debug_sedan", 50.0, "car", "Arcade", 0.12),
+        ("debug_sedan", 50.0, "barrier", "Arcade", 0.15),
+        ("shiro_turbo", 50.0, "car", "Arcade", 0.12),
+        ("sentinel_cruiser", 50.0, "barrier", "Arcade", 0.15),
+        ("debug_sedan", 56.0, "barrier", "Simulation", 0.2),
     ] {
-        let mesh = load_mesh(&mesh_path(&root, car)).unwrap();
-        let hood = mesh
-            .parts
-            .iter()
-            .find(|p| p.region == Some(BodyRegion::Hood) && p.kind == PartKind::Panel)
-            .unwrap();
+        let (hood, fl, fr) = crumple_after(car, kmh, target, mode, 8);
+        let tag = format!("{car} {kmh} km/h {target} {mode}");
+        assert!(hood.max_fold_m >= min_fold, "{tag}: hood fold {hood:?}");
         assert!(
-            !hood.fold_chords.is_empty(),
-            "{car}: hood has no fold binding"
-        );
-        let (rest, now, states) = frontal_hit(car, kmh, mode);
-        let unlatched = states
-            .iter()
-            .any(|p| p.region == BodyRegion::Hood && p.state != wp_damage::PanelState::Attached);
-        let (disp, fold) = hood_motion(hood, &rest, &now, unlatched);
-        eprintln!("{car} {kmh} km/h {mode}: hood moved {disp:.3} m, fold {fold:.3} m, unlatched {unlatched}");
-        // Hood vertices move ≥ 10 cm and the hood buckles into a visible peak.
-        assert!(
-            disp >= 0.10,
-            "{car} {kmh} km/h: hood vertices moved only {disp} m"
+            hood.max_fold_m <= FOLD_MAX_M + LID_POP_M + 0.01,
+            "{tag}: {hood:?}"
         );
         assert!(
-            fold >= min_fold,
-            "{car} {kmh} km/h: hood fold only {fold} m"
+            (1..=6).contains(&hood.fold_lines),
+            "{tag}: hood fold lines {hood:?}"
         );
-        assert!(fold <= car_assets::mesh::FOLD_MAX_M * 1.5);
+        assert!(hood.lead_gap_m <= 0.03, "{tag}: hood floats {hood:?}");
+        for f in [fl, fr] {
+            assert!(f.max_fold_m >= 0.04, "{tag}: fender {f:?}");
+            assert!(f.lead_gap_m <= 0.03, "{tag}: fender floats {f:?}");
+        }
     }
 }
 
+/// The crumple must not depend on the browser's frame rate: a bumper that crushes and lets go
+/// between two frames still counts (its hanging pose is rotated back to the crushed one).
 #[test]
-fn a_parked_car_has_a_flat_hood() {
-    // No crush, no fold: rest nodes give the rest mesh.
+fn crumple_does_not_depend_on_frame_rate() {
+    let (fast, _, _) = crumple_after("debug_sedan", 50.0, "car", "Arcade", 4);
+    let (slow, _, _) = crumple_after("debug_sedan", 50.0, "car", "Arcade", 16);
+    assert!(
+        (fast.max_fold_m - slow.max_fold_m).abs() <= 0.03,
+        "{fast:?} vs {slow:?}"
+    );
+}
+
+/// Harder hits crumple more (up to the cap).
+#[test]
+fn harder_hits_crumple_more() {
+    let (soft, _, _) = crumple_after("debug_sedan", 30.0, "car", "Arcade", 4);
+    let (hard, _, _) = crumple_after("debug_sedan", 70.0, "car", "Arcade", 4);
+    assert!(soft.max_fold_m > 0.02, "{soft:?}");
+    assert!(
+        hard.max_fold_m > soft.max_fold_m + 0.03,
+        "{soft:?} vs {hard:?}"
+    );
+}
+
+#[test]
+fn a_parked_car_has_a_flat_front() {
+    // No crush, no fold: rest nodes give the rest mesh (with or without crumple memory).
     let root = repo_root();
     let car = load_car(&root, "debug_sedan").unwrap();
     let mesh = build_mesh(&car);
     let rest: Vec<[f32; 3]> = car.lattice.nodes.iter().map(|n| n.pos_m).collect();
-    for part in mesh.parts.iter().filter(|p| !p.fold_chords.is_empty()) {
-        let (disp, fold) = hood_motion(part, &rest, &rest, true);
-        assert!(disp < 1e-6 && fold.abs() < 1e-6, "{}", part.name);
+    for part in mesh.parts.iter().filter(|p| p.fold.is_some()) {
+        let mut memory = FoldMemory::new();
+        let (moved, detail) = deform_detail(
+            part,
+            &rest,
+            &rest,
+            &rest,
+            false,
+            &|n| Some(rest[n as usize]),
+            Some(&mut memory),
+        );
+        for (v, m) in moved.iter().enumerate() {
+            assert_eq!(*m, part.vertex(v), "{}", part.name);
+        }
+        assert!(detail.iter().all(|d| d[0] == 0.0 && d[1] == 0.0));
+    }
+}
+
+/// Bumper nodes of `car` pushed back by `dy` (m).
+fn crushed_bumper(car: &wp_contracts::LoadedCar, dy: f32) -> Vec<[f32; 3]> {
+    car.lattice
+        .nodes
+        .iter()
+        .map(|n| {
+            let mut p = n.pos_m;
+            if n.region == BodyRegion::FrontBumper {
+                p[1] -= dy;
+            }
+            p
+        })
+        .collect()
+}
+
+#[test]
+fn the_hood_nose_follows_a_crushed_bumper_and_the_memory_holds_until_repair() {
+    let root = repo_root();
+    let car = load_car(&root, "debug_sedan").unwrap();
+    let mesh = build_mesh(&car);
+    let hood = mesh.parts.iter().find(|p| p.name == "hood").unwrap();
+    let rest: Vec<[f32; 3]> = car.lattice.nodes.iter().map(|n| n.pos_m).collect();
+    let crushed = crushed_bumper(&car, 0.2);
+    let mut memory = FoldMemory::new();
+    let run = |nodes: &[[f32; 3]], memory: &mut FoldMemory| {
+        let pose = Pose {
+            lattice: &car.lattice,
+            rest: &rest,
+            nodes,
+            states: &[],
+        };
+        let (moved, detail) = render_detail(hood, &pose, Some(memory));
+        measure(hood, &moved, &detail, &pose)
+    };
+    let hit = run(&crushed, &mut memory);
+    // The hood's own nodes did not move; it still folds and its nose comes back with the bumper.
+    assert!(hit.max_fold_m > 0.1, "{hit:?}");
+    assert!(hit.max_pull_m > 0.1, "{hit:?}");
+    // Bumper springs halfway back (or is replaced by a less crushed pose): the hood stays bent.
+    let half = crushed_bumper(&car, 0.1);
+    let held = run(&half, &mut memory);
+    assert!((held.max_fold_m - hit.max_fold_m).abs() < 1e-4, "{held:?}");
+    // Repaired: every node at rest clears the memory.
+    let fixed = run(&rest, &mut memory);
+    assert_eq!(fixed.max_fold_m, 0.0);
+    assert_eq!(fixed.max_disp_m, 0.0);
+}
+
+#[test]
+fn a_hanging_bumper_still_counts_as_crushed() {
+    // Crush the bumper 20 cm, then let it hang from its left end, swung 0.6 rad: the hood folds
+    // exactly as with the bumper still attached.
+    let root = repo_root();
+    let car = load_car(&root, "debug_sedan").unwrap();
+    let mesh = build_mesh(&car);
+    let hood = mesh.parts.iter().find(|p| p.name == "hood").unwrap();
+    let rest: Vec<[f32; 3]> = car.lattice.nodes.iter().map(|n| n.pos_m).collect();
+    let crushed = crushed_bumper(&car, 0.2);
+    let pivot = car
+        .lattice
+        .nodes
+        .iter()
+        .filter(|n| n.region == BodyRegion::FrontBumper)
+        .min_by(|a, b| a.pos_m[0].total_cmp(&b.pos_m[0]))
+        .map(|n| crushed[n.id as usize])
+        .unwrap();
+    let (axis, angle) = ([0.0, 1.0, 0.0], 0.6f32);
+    let (s, c) = (angle.sin(), angle.cos());
+    let hanging: Vec<[f32; 3]> = car
+        .lattice
+        .nodes
+        .iter()
+        .map(|n| {
+            let p = crushed[n.id as usize];
+            if n.region != BodyRegion::FrontBumper {
+                return p;
+            }
+            // Rotate about +Y through the pivot (x, z plane).
+            let (x, z) = (p[0] - pivot[0], p[2] - pivot[2]);
+            [pivot[0] + x * c + z * s, p[1], pivot[2] - x * s + z * c]
+        })
+        .collect();
+    let status = wp_damage::PanelStatus {
+        region: BodyRegion::FrontBumper,
+        kind: wp_damage::PanelKind::Bumper,
+        state: wp_damage::PanelState::HangingByOne,
+        angle_rad: angle,
+        omega_rad_s: 0.0,
+        pivot,
+        axis,
+        hinge_load_ns: 0.0,
+    };
+    let fold = |nodes: &[[f32; 3]], states: &[wp_damage::PanelStatus]| {
+        let pose = Pose {
+            lattice: &car.lattice,
+            rest: &rest,
+            nodes,
+            states,
+        };
+        let (moved, detail) = render_detail(hood, &pose, None);
+        measure(hood, &moved, &detail, &pose)
+    };
+    let attached = fold(&crushed, &[]);
+    let hung = fold(&hanging, &[status]);
+    assert!(attached.max_fold_m > 0.1);
+    assert!(
+        (attached.max_fold_m - hung.max_fold_m).abs() < 2e-3,
+        "{attached:?} vs {hung:?}"
+    );
+    // Gone (detached): only the frame and fenders count, which did not move.
+    let gone = wp_damage::PanelStatus {
+        state: wp_damage::PanelState::Detached,
+        ..status
+    };
+    assert!(fold(&hanging, &[gone]).max_fold_m < 1e-4);
+}
+
+#[test]
+fn an_unlatched_hood_pops_at_the_latch() {
+    let root = repo_root();
+    let car = load_car(&root, "debug_sedan").unwrap();
+    let mesh = build_mesh(&car);
+    let hood = mesh.parts.iter().find(|p| p.name == "hood").unwrap();
+    let rest: Vec<[f32; 3]> = car.lattice.nodes.iter().map(|n| n.pos_m).collect();
+    let moved = car_assets::skin::deform(hood, &rest, &rest, true);
+    let ys: Vec<f32> = (0..hood.vertex_count())
+        .map(|v| hood.vertex(v)[1])
+        .collect();
+    let (lo, hi) = ys
+        .iter()
+        .fold((f32::MAX, f32::MIN), |a, &y| (a.0.min(y), a.1.max(y)));
+    for (v, m) in moved.iter().enumerate() {
+        let rise = m[2] - hood.vertex(v)[2];
+        if ys[v] > hi - 0.01 {
+            assert!((rise - LID_POP_M).abs() < 0.01, "latch edge rose {rise}");
+        }
+        if ys[v] < lo + 0.01 {
+            assert!(rise.abs() < 1e-4, "hinge edge rose {rise}");
+        }
     }
 }
 
