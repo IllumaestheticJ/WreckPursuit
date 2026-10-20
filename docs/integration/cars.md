@@ -47,14 +47,14 @@ Re-recorded in a `[bless]` commit: the beater's pinned hash in
 goldens. Note for the helper: the comment in `front_drive_cars_understeer_mildly` still says
 "the junkyard beater 1.42"; it is 1.50 now.
 
-**Debug ≠ release hashes on this base (→ lead / A).** Any scenario with steering now hashes
-differently in debug and release builds: base `vehicle/coupe_slalom` and `smoke/coupe_circle` too
-(their goldens match **debug**), and my `cars_beater_hard_turn` (it matched both builds in
-my first 12b run, before the round-12 handling-balance merge). Following the base, that golden is
-blessed with the **debug** binary (`cargo test`'s `goldens_match`); `beater_accel` and
-`beater_top_speed` are identical in both builds. CI's release `simcli goldens` job will
-therefore flag `cars_beater_hard_turn` together with the base steering scenarios until the
-split is fixed or everything is re-blessed from one build.
+**Correction (2026-10-20): there is no debug/release hash split.** An earlier version of this
+section reported that steering scenarios hash differently in debug and release builds. That was
+my measuring error: the release `simcli` binary was stale, built before the `c982c82` merge,
+while the debug one was current. After `cargo build --release -p simcli` on the same commit,
+`vehicle/coupe_slalom`, `smoke/coupe_circle` and all three `cars_beater_*` scenarios hash
+identically in both builds, and release `simcli goldens` fails on exactly the same 33 base
+scenarios as debug (none of them `cars_*`). The `cars_beater_hard_turn` golden is valid for
+both builds and CI's release goldens job.
 
 **Checks (follow-up, cloud container):** fmt ✓, clippy `-D warnings` ✓, wasm build ✓,
 `handling_balance` 6/6 ✓, `differentials` ✓, nameplate (69 files, 0) ✓, `smoke_sim` ✓,
