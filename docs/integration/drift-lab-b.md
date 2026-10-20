@@ -518,6 +518,23 @@ Before the step-3b merge, untouched `origin/lead/round12` failed
 `differentials::roster_diff_hashes_are_pinned` and
 `handling_balance::front_drive_cars_understeer_mildly`; the current `lead/round12` fixes both.
 
+## Final gate (after the step-3b merge, vs `lead/round12` @ 3f540ce)
+
+- `cargo clippy --workspace -- -D warnings`: clean. `cargo fmt --check`: clean. Determinism
+  (`simcli determinism`): all scenarios deterministic. wasm build + `tsc`: clean;
+  `e2e/drift_lab_b.mjs`: pass.
+- **[bless] on this branch (6 goldens):** `cars_beater_hard_turn`,
+  `police_sideswipe_patrol_day`, `police_sideswipe_patrol_night`, `regression_grid_24`,
+  `smoke_coupe_circle`, `vehicle_coupe_slalom` — all drive keyboard / gamepad assisted cars,
+  so Drift Lab B's steering (fast countersteer, onset, intent modes) moves their hashes; their
+  scenario expectations all pass. `vehicle_coupe_slalom` had just been re-blessed on
+  round12 for machine A's row-90 rack, which this branch does not carry.
+- **Also failing on base 3f540ce, identically, left alone:** 29 other goldens (not re-blessed
+  here), scenario `police_tunnel_escape_founders_cut` (Captured at 133.8 s, same hash),
+  `wp_race` `race_picker` (hollins_hill_sprint, loop9_circuit,
+  lantern_checkpoint_draws_the_police) and `wp_wasm`
+  `crash_replay_tests::race_crash_replays_with_the_judge_and_no_crash_on_the_grid`.
+
 ## Contract change requests
 
 1. `AssistProfile.device` (keyboard / gamepad / wheel / touch): the assist infers the device
