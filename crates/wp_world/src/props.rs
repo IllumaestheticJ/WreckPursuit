@@ -78,6 +78,13 @@ pub struct ParkingTable {
     pub districts: BTreeMap<DistrictKind, DistrictParking>,
     /// Clustering outside every district.
     pub default_district: DistrictParking,
+    /// Chance that a cluster is followed by a long empty stretch of kerb instead of the
+    /// short gap (owner row 93: visible empty kerb).
+    #[serde(default)]
+    pub empty_stretch_chance: f32,
+    /// Length of such an empty stretch, range, m.
+    #[serde(default)]
+    pub empty_stretch_m: [f32; 2],
 }
 
 impl ParkingTable {
@@ -184,8 +191,12 @@ pub fn parked_cars_with(map: &CityMap, table: &ParkingTable, seed: u64) -> Vec<S
                 s += table.car_length_m
                     + rng.range_f32(table.bumper_gap_m[0], table.bumper_gap_m[1]);
             }
-            s += table.car_length_m
-                * rng.range_f32(table.gap_car_lengths[0], table.gap_car_lengths[1]);
+            s += if rng.chance(table.empty_stretch_chance) {
+                rng.range_f32(table.empty_stretch_m[0], table.empty_stretch_m[1])
+            } else {
+                table.car_length_m
+                    * rng.range_f32(table.gap_car_lengths[0], table.gap_car_lengths[1])
+            };
         }
     }
     out
@@ -208,7 +219,7 @@ mod tests {
     use crate::vesper::{generate, VesperConfig};
 
     /// The rule before owner row 77: a car every 6.5 m slot from 4 m in, by district chance.
-    fn legacy_count(map: &CityMap, seed: u64) -> usize {
+    fn legacy_cars(map: &CityMap, seed: u64) -> Vec<V3> {
         let occ = |k: Option<DistrictKind>| match k {
             Some(DistrictKind::Core) => 0.35,
             Some(DistrictKind::Commercial) => 0.5,
@@ -218,7 +229,7 @@ mod tests {
             Some(DistrictKind::Suburb) | None => 0.5,
         };
         let mut rng = Rng::new(seed ^ 0x9A2C_ED00);
-        let mut n = 0;
+        let mut n = Vec::new();
         for (i, l) in map.net.lanes.iter().enumerate() {
             if l.kind != LaneKind::Parking {
                 continue;
@@ -228,12 +239,33 @@ mod tests {
             while s + 4.0 < seg.length {
                 let (p, _) = seg.point_at(s);
                 if rng.chance(occ(map.district_at(geom::xy(p)))) {
-                    n += 1;
+                    n.push(p);
                 }
                 s += 6.5;
             }
         }
         n
+    }
+
+    /// Share of parking-lane length (sampled every 2 m) with no parked car within `r` m.
+    fn empty_kerb_share(map: &CityMap, cars: &[V3], r: f32) -> f32 {
+        let (mut empty, mut all) = (0usize, 0usize);
+        for (i, l) in map.net.lanes.iter().enumerate() {
+            if l.kind != LaneKind::Parking {
+                continue;
+            }
+            let seg = &map.segs[i];
+            let mut s = 0.0;
+            while s < seg.length {
+                let q = geom::xy(seg.point_at(s).0);
+                all += 1;
+                if !cars.iter().any(|c| geom::dist(geom::xy(*c), q) < r) {
+                    empty += 1;
+                }
+                s += 2.0;
+            }
+        }
+        empty as f32 / all.max(1) as f32
     }
 
     fn vesper() -> CityMap {
@@ -255,17 +287,60 @@ mod tests {
         let map = vesper();
         let t = ParkingTable::builtin();
         let cars = parked_cars(&map, 1);
-        let old = legacy_count(&map, 1);
+        let old_cars = legacy_cars(&map, 1);
+        let old = old_cars.len();
         let ratio = cars.len() as f32 / old as f32;
         let mut by_kind: BTreeMap<Option<DistrictKind>, usize> = BTreeMap::new();
         for c in &cars {
             *by_kind.entry(map.district_at(geom::xy(c.pos))).or_default() += 1;
         }
+        let kerb_km: f32 = map
+            .net
+            .lanes
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| l.kind == LaneKind::Parking)
+            .map(|(i, _)| map.segs[i].length / 1000.0)
+            .sum();
+        let pos: Vec<V3> = cars.iter().map(|c| c.pos).collect();
+        let empty = empty_kerb_share(&map, &pos, 10.0);
+        let empty_old = empty_kerb_share(&map, &old_cars, 10.0);
         println!(
-            "parked {} (was {old}, {ratio:.2}); by district {by_kind:?}",
-            cars.len()
+            "parked {} (was {old}, {ratio:.2}); kerb {kerb_km:.1} km: {:.1} cars/km (was {:.1}); \
+             kerb with no car within 10 m: {:.0} % (was {:.0} %); by district {by_kind:?}",
+            cars.len(),
+            cars.len() as f32 / kerb_km,
+            old as f32 / kerb_km,
+            empty * 100.0,
+            empty_old * 100.0
         );
-        assert!((0.35..=0.5).contains(&ratio), "{} vs {old}", cars.len());
+        // Collectors (faster streets) vs local streets, cars per km of kerb.
+        let fast = t.fast_street_mps;
+        for (name, is_fast) in [("collector", true), ("local", false)] {
+            let lanes: Vec<usize> = (0..map.net.lanes.len())
+                .filter(|&i| {
+                    let l = &map.net.lanes[i];
+                    l.kind == LaneKind::Parking && (l.speed_limit_mps > fast) == is_fast
+                })
+                .collect();
+            let km: f32 = lanes.iter().map(|&i| map.segs[i].length / 1000.0).sum();
+            let near = |p: &V3| {
+                lanes.iter().any(|&i| {
+                    let pr = map.segs[i].project(geom::xy(*p));
+                    pr.dist < 1.0
+                })
+            };
+            let n_new = pos.iter().filter(|p| near(p)).count();
+            let n_old = old_cars.iter().filter(|p| near(p)).count();
+            println!(
+                "{name}: {km:.1} km kerb, {:.1} cars/km (was {:.1})",
+                n_new as f32 / km.max(0.001),
+                n_old as f32 / km.max(0.001)
+            );
+        }
+        // Owner rows 77 / 93: the low end of 35–50 %, with visible empty kerb.
+        assert!((0.3..=0.4).contains(&ratio), "{} vs {old}", cars.len());
+        assert!(empty >= 0.5, "empty kerb share {empty}");
         assert_eq!(cars, parked_cars(&map, 1), "deterministic");
         assert_ne!(cars, parked_cars(&map, 2), "seeded");
         // Junction and crosswalk clearance: every intersection node is well clear (the lane

@@ -328,8 +328,11 @@ local streets; arterials, highways, hill roads and service roads have none) and 
 15 m of a lane end (junctions and their crosswalks), 20 m of a POI (garage, station, race grid:
 the lot entrances), 40 m of a tunnel portal, inside a tunnel or on a bridge deck. Cars come in
 clusters (1–3 downtown/residential, 2–5 in commercial/industrial lots, chance per district,
-half on 30 mph collectors) with random 0–3 car-length gaps after each. Port Vesper v2: 1,578
-cars (was 3,760, 42 %); deterministic per seed. No bus stops or driveways exist in the network
+×0.3 on 30 mph collectors) with a random 0–3 car-length gap after each, or (35 %) a 30–80 m
+empty stretch (owner row 93). Port Vesper v2: 1,219 cars (was 3,760, 32 %): 26.7 cars per km of
+kerb (was 82.2; collectors 14.4, local streets 29.5), 59 % of the kerb with no car within 10 m
+(was 7 %). Rules key off lane kind, speed limit, lane ends and the map, not road widths;
+deterministic per seed. No bus stops or driveways exist in the network
 yet, so those clearances are not applied.
 
 **Density & spawning**: target per zone = Σ over its lane samples (10 m) of
