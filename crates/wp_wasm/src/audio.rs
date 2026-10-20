@@ -133,6 +133,8 @@ pub(crate) fn frame_commands(
                 },
             }
         }
+        // Lattice deformation energy: the crunch follows its growth (owner row 74).
+        d.set_plastic_energy(*id, v.damage.total_plastic_energy_j());
         inputs.push(VehicleAudioInput {
             entity: *id,
             car_id: &v.car_id,
