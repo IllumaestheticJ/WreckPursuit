@@ -116,3 +116,34 @@ The lap: a 73 s street-circuit race (lap 1/3) in a front-drive touring car (#96)
 1. FWD cars drive mostly on **short taps** at high speed: stability is the norm. A 0.15 s tap at 100+ mph gives a small lane-change-sized correction.
 2. A handbrake tap (0.3 s) on turn-in rotates a FWD car ~30–40°. **Full throttle then pulls it straight** with a short countersteer tap: the front wheels drag the nose along the travel. That makes the FWD power-on "straightening" the main recovery, rather than a long countersteer hold.
 3. Off throttle and turning in, a FWD car should rotate a little (lift-off), but not snap.
+
+## Owner's keyboard "Advanced" controller settings (screenshot, 2026-10-20)
+
+| setting | value |
+|---|---|
+| Controller | Keyboard |
+| Vibration strength | 0 % |
+| Steering dead zone | 0 % |
+| Steering saturation | 100 % |
+| Steering sensitivity | 100 % |
+| **Steering speed sensitivity** | **75 %** |
+| Accelerator / brake / clutch saturation | 100 % |
+| Accelerator / brake / clutch dead zone | 0 % |
+
+The screen also has **Test steering / throttle / braking / clutch** bars that show the processed input live. Recording them while tapping and holding keys gives Wreckfest's exact keyboard ramp rates (requested from the owner). "Steering speed sensitivity" is the same idea as our `steer_speed_sensitivity` (less lock at speed): the owner's value is 75 %.
+
+## Clip 4 analysis (2026-10-20, heavy RWD muscle car, **TCS Half**)
+
+The owner's difficulty for this lap: Custom, Manual, ABS Full, **Traction control Half**, Stability Off. A 70 s street race in a heavy rear-drive muscle car (#49), with a stretch of cockpit camera.
+
+**Inputs**
+
+| | |
+|---|---|
+| Throttle | 80 % (median press 0.65 s) |
+| Brake | 2 % |
+| Left / Right | 24 % / 20 %, median 0.19 / 0.31 s taps, longest 2.9 s |
+| Handbrake | 4 taps, ~0.3 s |
+
+- **Launch:** the player feathers the throttle key at the start (0.8–2.8 s: six taps of 0.1–0.4 s), then holds. With TCS Half there is still **visible wheelspin and smoke** in 1st and into 2nd (28–45 mph), and a little tail movement. That matches our planned **TCS Low** (row 105). Wreckfest's levels are **Off / Half / Full**, so we should use the same names.
+- **Racing:** like clip 2, short taps and frequent quick corrections. Throttle stays on through most corners.
