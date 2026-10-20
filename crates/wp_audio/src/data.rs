@@ -450,9 +450,9 @@ impl CarAudioDef {
                 gain: 1.0,
             },
             engine_pack: if big {
-                "engine_proc_v8"
+                "engine_rec_v8"
             } else {
-                "engine_proc_i4"
+                "engine_rec_i4"
             }
             .to_string(),
             world_pack: default_world_pack(),
@@ -463,7 +463,7 @@ impl CarAudioDef {
             }
             .to_string(),
             siren: police.then(|| SirenDef {
-                pack: "siren_proc".to_string(),
+                pack: "siren_rec".to_string(),
                 default_mode: SirenMode::Auto,
             }),
         }

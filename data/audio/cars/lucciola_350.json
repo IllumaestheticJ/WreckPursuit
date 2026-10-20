@@ -9,7 +9,7 @@
     "supercharger": false,
     "gain": 1.1
   },
-  "engine_pack": "engine_proc_v8",
+  "engine_pack": "engine_rec_v8",
   "world_pack": "world_rec",
   "horn_cue": "horn/standard"
 }

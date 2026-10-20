@@ -128,7 +128,7 @@ export class AudioSystem {
   }
 
   /** Recorded sample files by load state, and plays that used them vs. their fallback synth. */
-  samples(): { ready: number; loading: number; failed: number; recorded: number; fallback: number } | null {
+  samples(): { ready: number; loading: number; failed: number; recorded: number; fallback: number; upgraded: number } | null {
     return this.pool ? { ...this.pool.sampleStates(), ...this.pool.recordedPlays } : null;
   }
 

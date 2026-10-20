@@ -219,7 +219,7 @@ pub struct AudioDirector {
 }
 
 const DEFAULT_WORLD_PACK: &str = "world_rec";
-const DEFAULT_SIREN_PACK: &str = "siren_proc";
+const DEFAULT_SIREN_PACK: &str = "siren_rec";
 
 impl AudioDirector {
     /// New director over `lib` with a seed for the (purely cosmetic) pitch variation.

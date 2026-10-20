@@ -74,7 +74,7 @@ check(sum(c, "surface/") > 0, `surface rolling noise played (${sum(c, "surface/"
 let st = await stats();
 check(st && st.looped > 0, `director has looped voices (${st?.looped})`);
 
-// 2. Siren on the player car.
+// 2. Siren on the player car (recorded loop, started in phase).
 await page.evaluate(() => window.__wpAudio.setSiren("Yelp"));
 await page.waitForTimeout(500);
 c = await counts();
@@ -102,7 +102,8 @@ await page.waitForFunction(() => window.__wp.sim.scenarioResult()?.done === true
 c = await counts();
 check(sum(c, "impact/") > before, `head-on crash played impact sounds (${sum(c, "impact/") - before})`);
 const rec = await page.evaluate(() => window.__wpAudio.samples());
-check(rec.recorded > 0 && rec.fallback === 0, `crash used recorded samples (${rec.recorded} recorded, ${rec.fallback} fallback)`);
+check(rec.recorded > 0 && rec.fallback === smp.fallback, `after loading only recorded samples play (${rec.recorded} recorded, ${rec.fallback} fallback, all before decode)`);
+check(rec.upgraded > 0 || smp.fallback === 0, `loops started before decode switched to the recording (${rec.upgraded} upgraded)`);
 st = await stats();
 check(st.looped + st.one_shots <= 40, `voice count within max_voices (${st.looped}+${st.one_shots})`);
 console.log("cue counts:", JSON.stringify(c));

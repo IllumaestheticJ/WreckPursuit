@@ -74,8 +74,8 @@ functions. Same frames in → byte-identical commands out (tested on real physic
 - **Police events** (`wp_police::PoliceEvent`, decoded from `SimEvent::PoliceEvent`): `Radio`
   lines go to the scanner (priority: Dispatch for dispatch, Pursuit while a pursuit is active,
   else Routine); `PursuitStarted/Ended` track that; `SpikeHit` plays a `tire/burst` per wheel.
-- **Sirens** (`siren.rs`): wail (≈650→1500 Hz, 4.6 s), yelp (same range, 0.33 s), phaser
-  (0.1 s), hi-lo (770/960 Hz, 0.55 s each) — cadences in `audio_config.json`. `Auto` wails above
+- **Sirens** (`siren.rs`): wail (≈775→1575 Hz, 5.05 s), yelp (770→1530 Hz, 0.38 s), phaser
+  (0.075 s), hi-lo (584/425 Hz, 0.5 s each), measured from `siren_rec` — cadences in `audio_config.json`. `Auto` wails above
   16 m/s and yelps below 9 m/s with hysteresis. Phase is computed from ticks, the procedural
   synth runs the cadence itself phase-locked to it. Horn from `VehicleInput::horn`.
 - **Scanner** (`scanner.rs`): lines queued by `RadioPriority`, released after the tier delay
@@ -102,12 +102,23 @@ A pack is one JSON file `data/audio/packs/<id>.json`; recorded files live next t
 sources with `Samples` and keeps the cue names; `fallback_pack` (same kind) names the pack whose
 synth the backend plays for a cue while its file is loading or failed to decode.
 
-Shipped: `world_rec` (default world pack for every car) — recorded CC0 impacts (thud, plastic,
-panel dent, structural crunch, glass, cast clank), debris, tire bursts, engine failure, metal
-scrape / tire squeal / steam / horn loops, falling back to `world_proc`; built reproducibly by
-`tools/audio-packs/build.py` from `tools/audio-packs/world_rec.json`, sources and licences in
-`data/audio/packs/world_rec/CREDITS.md`. Engines, sirens, radio, surfaces, suspension, plastic
-scrape and body rattle are still procedural (`*_proc`).
+Shipped recorded packs (all CC0, built reproducibly by `tools/audio-packs/build.py` from
+`tools/audio-packs/<pack>.json`; sources and licences in `data/audio/packs/<pack>/CREDITS.md`):
+
+| Pack | Used by | What is recorded (falls back to) |
+|---|---|---|
+| `world_rec` | every car | impacts (thud, plastic, panel dent, structural crunch, glass, cast clank), debris, tire bursts, engine failure, metal scrape / tire squeal / steam / horn loops (`world_proc`) |
+| `engine_rec_i4` | inline fours | idle, 4 on-load + 2 overrun layers, limiter, exhaust pops (`engine_proc_i4`) |
+| `engine_rec_v8` | V8s | idle, 4 on + 2 off layers (top layer ≈ 3350 rpm), limiter, pops (`engine_proc_v8`) |
+| `engine_rec_i6` | inline sixes and V6s | turbo six dyno pull: idle, 5 on + 2 off layers, limiter, pops (`engine_proc_i6`) |
+| `siren_rec` | police | wail / yelp / phaser / hi-lo, whole cadence cycles from phase 0 (`siren_proc`) |
+
+Engine layers are cut where the recording passes the layer's rpm and resampled to a constant
+rpm (firing frequency tracked by `tools/audio-packs/pitch.py`), looped over whole engine
+cycles. The siren cadences in `audio_config.json` are measured from the `siren_rec` files and
+the backend starts a recorded siren loop at `phase × cycle_s`, so recording, director phase and
+fallback synth agree. Still procedural: turbo whistle, blow-off, supercharger whine, radio,
+surfaces, suspension, plastic scrape, body rattle.
 
 ```jsonc
 {
@@ -190,8 +201,10 @@ nodes) for material lookup.
 
 ## Known gaps
 
-- Engine, siren, radio and surface packs are still procedural; `world_rec` cuts were picked from
-  onset/decay analysis, not by ear (see `tools/audio-packs/README.md`).
+- Recorded cuts were picked from pitch/onset analysis, not by ear (see
+  `tools/audio-packs/README.md`). V8 recordings top out near 3350 rpm, so V8s near the limiter
+  play the top layer pitched up to ~1.6×. Turbo/blow-off/supercharger, radio and surfaces are
+  still procedural.
 
 - Contact material is inferred from the lattice; contract request A-1 asks for it on the event.
 - `PoliceEvent::Radio` has no priority yet (A-2): priority is a heuristic. The scanner tier is

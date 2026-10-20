@@ -82,6 +82,8 @@ interface Voice {
   endTime: number;
   /** Parameters last applied (skip automation calls when nothing changed). */
   last: VoiceParams;
+  /** Looped fallback synth standing in for this recorded file until it decodes. */
+  pending: { url: string; pack: string; synth: Record<string, number>; synthGain: GainNode } | null;
 }
 
 /** Relative change above which a parameter is re-automated. */
@@ -95,8 +97,9 @@ export class VoicePool {
   private samples = new Map<string, AudioBuffer | "loading" | "failed">();
   /** Voices created / released (debug). */
   created = 0;
-  /** Plays of `Samples` cues that used the recorded file vs. the fallback synth (debug, e2e). */
-  readonly recordedPlays = { recorded: 0, fallback: 0 };
+  /** Plays of `Samples` cues that used the recorded file vs. the fallback synth, and fallback
+   * loops later switched to the recording (debug, e2e). */
+  readonly recordedPlays = { recorded: 0, fallback: 0, upgraded: 0 };
 
   constructor(
     private ctx: AudioContext,
@@ -196,22 +199,67 @@ export class VoicePool {
       if (fbSource && "Synth" in fbSource) source = fbSource;
     }
     if (file) this.recordedPlays[buf instanceof AudioBuffer ? "recorded" : "fallback"]++;
+    let pending: Voice["pending"] = null;
     if (buf instanceof AudioBuffer) {
-      src = this.ctx.createBufferSource();
-      src.buffer = buf;
-      src.loop = looped;
-      src.playbackRate.value = params.pitch;
-      src.connect(gain);
-      src.start(t);
+      src = this.startBuffer(buf, pack, looped, params, synth, gain, t);
     } else {
       const name = source && "Synth" in source ? source.Synth.synth : "noise";
       const sp = { ...(source && "Synth" in source ? source.Synth.params : {}), ...synth };
       syn = makeSynth(this.ctx, name, sp, params, t);
-      syn.output.connect(gain);
+      if (file && looped && buf === "loading") {
+        // Swapped for the recording once it decodes (see `upgrade`).
+        const synthGain = this.ctx.createGain();
+        syn.output.connect(synthGain).connect(gain);
+        pending = { url: this.sampleUrl(pack, file), pack, synth, synthGain };
+      } else {
+        syn.output.connect(gain);
+      }
     }
     const dur = def?.duration_s ?? 1;
-    this.voices.set(key, { synth: syn, src, gain, lp, panner, endTime: looped ? Infinity : t + dur + 0.5, last: params });
+    this.voices.set(key, { synth: syn, src, gain, lp, panner, endTime: looped ? Infinity : t + dur + 0.5, last: params, pending });
     this.created++;
+  }
+
+  /** Start a recorded buffer into `dest` at `t`. */
+  private startBuffer(
+    buf: AudioBuffer,
+    pack: string,
+    looped: boolean,
+    params: VoiceParams,
+    synth: Record<string, number>,
+    dest: AudioNode,
+    t: number,
+  ): AudioBufferSourceNode {
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    src.loop = looped;
+    src.playbackRate.value = params.pitch;
+    src.connect(dest);
+    // Recorded siren loops are whole cadence cycles starting at phase 0: start in phase with
+    // the director's cadence clock.
+    const cycle = synth.cycle_s;
+    const offset = this.lib.packs[pack]?.kind === "Siren" && cycle > 0 ? (params.phase * cycle) % buf.duration : 0;
+    src.start(t, offset);
+    return src;
+  }
+
+  /** A looped voice started on its fallback synth switches to the recording once decoded. */
+  private upgrade(v: Voice, params: VoiceParams, t: number): void {
+    const p = v.pending;
+    if (!p) return;
+    const buf = this.samples.get(p.url);
+    if (buf === "loading") return;
+    v.pending = null;
+    if (!(buf instanceof AudioBuffer)) return; // failed: keep the synth
+    const fadeIn = this.ctx.createGain();
+    fadeIn.gain.setValueAtTime(0, t);
+    fadeIn.gain.setTargetAtTime(1, t, 0.03);
+    fadeIn.connect(v.gain);
+    v.src = this.startBuffer(buf, p.pack, true, params, p.synth, fadeIn, t);
+    p.synthGain.gain.setTargetAtTime(0, t, 0.03);
+    v.synth?.stop(t + 0.25);
+    v.synth = null;
+    this.recordedPlays.upgraded++;
   }
 
   set(voice: VoiceId, params: VoiceParams): void {
@@ -224,6 +272,7 @@ export class VoicePool {
       v.lp.frequency.setTargetAtTime(Math.min(params.lowpass_hz || 18000, 18000), t, 0.05);
     }
     if (moved(params.pos, l.pos)) this.setPanner(v.panner, params.pos, t, true);
+    this.upgrade(v, params, t);
     if (v.src && changed(params.pitch, l.pitch)) v.src.playbackRate.setTargetAtTime(params.pitch, t, 0.02);
     // Sirens follow their own clock and must see every phase; others only on change.
     const synthChanged =

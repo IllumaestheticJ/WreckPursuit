@@ -76,30 +76,30 @@
   "sirens": {
     "cadence": {
       "Wail": {
-        "lo_hz": 650.0,
-        "hi_hz": 1500.0,
-        "cycle_s": 4.6,
-        "rise_frac": 0.55,
+        "lo_hz": 775.0,
+        "hi_hz": 1575.0,
+        "cycle_s": 5.0471,
+        "rise_frac": 0.45,
         "shape": "Sweep"
       },
       "Yelp": {
-        "lo_hz": 650.0,
-        "hi_hz": 1500.0,
-        "cycle_s": 0.33,
+        "lo_hz": 770.0,
+        "hi_hz": 1530.0,
+        "cycle_s": 0.3793,
         "rise_frac": 0.5,
         "shape": "Sweep"
       },
       "Phaser": {
-        "lo_hz": 750.0,
-        "hi_hz": 1600.0,
-        "cycle_s": 0.1,
-        "rise_frac": 0.85,
+        "lo_hz": 950.0,
+        "hi_hz": 1450.0,
+        "cycle_s": 0.0751,
+        "rise_frac": 0.45,
         "shape": "Sweep"
       },
       "HiLo": {
-        "lo_hz": 770.0,
-        "hi_hz": 960.0,
-        "cycle_s": 1.1,
+        "lo_hz": 425.0,
+        "hi_hz": 584.0,
+        "cycle_s": 0.9966,
         "rise_frac": 0.5,
         "shape": "TwoTone"
       }
