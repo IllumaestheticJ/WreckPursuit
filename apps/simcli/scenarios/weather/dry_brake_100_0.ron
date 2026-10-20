@@ -1,4 +1,4 @@
-// Control for weather/wet_brake_100_0.ron.pending: identical car, inputs and timing on a dry
+// Control for weather/wet_brake_100_0.ron: identical car, inputs and timing on a dry
 // road. Owned by workstream 14 (weather). Rig measurement (wp_weather tests/vehicle_grip.rs):
 // 100→0 in ~3.1 s / ~43 m dry, ~3.9 s / ~54 m soaked.
 (
@@ -12,5 +12,7 @@
         speed_at(t_s: 13.9, min: 27.0, max: 28.6),
         // Dry: stopped ~3.1 s after the pedal (measured 0.1 m/s at 17.1 s). The wet twin is still at 3–12 m/s here.
         speed_at(t_s: 17.2, min: -0.5, max: 1.0),
+        // Braking distance: measured 40.0 m in 2.93 s (wet twin 51.6 m).
+        travel_between(from_s: 14.0, to_s: 18.0, min: 35.0, max: 45.0),
     ],
 )

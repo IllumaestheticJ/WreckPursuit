@@ -42,6 +42,11 @@ pub struct Scenario {
     /// but spawns no units. Ignored on the flat world, which has no roads for police.
     #[serde(default = "yes", skip_serializing_if = "is_true")]
     pub police_cars: bool,
+    /// Whether tunnels and covered roads block line of sight (default on). `false` is the
+    /// control run of a tunnel scenario: same geometry, but sightlines ignore the cover
+    /// (`wp_world::World::set_covered_los`).
+    #[serde(default = "yes", skip_serializing_if = "is_true")]
+    pub covered_los: bool,
     /// Police patrol multiplier on `data/police/presence.toml`'s per-district, per-phase patrol
     /// counts (1 = default, 0 = no patrols); `None` = 1. Needs a city.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -61,6 +66,10 @@ pub struct Scenario {
     /// Static boxes (barriers, walls) added before the first tick.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub barriers: Vec<Barrier>,
+    /// Weather (workstream 14, `wp_weather`). `None` = no weather system: dry road, clear air
+    /// (every scenario written before weather existed; hashes unchanged).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub weather: Option<WeatherSpec>,
     /// Vehicles to spawn, in spawn order (entity ids are allocated in this order).
     pub entities: Vec<EntitySpec>,
     /// Simulated duration, s.
@@ -82,6 +91,66 @@ pub struct Scenario {
 
 fn yes() -> bool {
     true
+}
+
+fn one() -> f32 {
+    1.0
+}
+
+/// Scenario weather (K's W-7): a regime held from the first tick (`locked`, the default) or a
+/// seeded schedule starting from it. Maps onto `wp_weather::WeatherConfig`
+/// ([`WeatherSpec::config`]).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WeatherSpec {
+    /// Starting regime: `Clear`, `Overcast`, `LightRain`, `HeavyRain` or `Fog`.
+    pub kind: wp_weather::WeatherKind,
+    /// Regime intensity, 0..=1 (default 1).
+    #[serde(default = "one")]
+    pub intensity: f32,
+    /// Water film on every road cell at the first tick, mm (default 0 = dry road; 1.5 = soaked).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub water_mm: f32,
+    /// Hold the regime for the whole run (default true: scenarios want fixed weather). `false`
+    /// lets the seeded schedule change it.
+    #[serde(default = "yes", skip_serializing_if = "is_true")]
+    pub locked: bool,
+    /// Season for the schedule and temperatures (default `Autumn`).
+    #[serde(default)]
+    pub season: wp_weather::Season,
+    /// Weather RNG seed; `None` = the scenario seed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed: Option<u64>,
+    /// Standing water patches added before the first tick (aquaplaning tests, flooded dips).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub puddles: Vec<PuddleSpec>,
+}
+
+/// A rectangle of standing water (`WeatherSim::flood_rect`): every wetness cell whose centre is
+/// inside `min..max` (world XY, m) holds `water_mm` (capped at `max_water_mm`, 10 mm).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PuddleSpec {
+    /// Minimum corner, world XY, m.
+    pub min: [f32; 2],
+    /// Maximum corner, world XY, m.
+    pub max: [f32; 2],
+    /// Water depth, mm (the first 0.5 mm is the film; the rest is standing water).
+    pub water_mm: f32,
+}
+
+impl WeatherSpec {
+    /// The `wp_weather` config for a scenario with master seed `scenario_seed`.
+    pub fn config(&self, scenario_seed: u64) -> wp_weather::WeatherConfig {
+        wp_weather::WeatherConfig {
+            seed: self.seed.unwrap_or(scenario_seed),
+            season: self.season,
+            start: wp_weather::Regime::new(self.kind, self.intensity),
+            start_water_mm: self.water_mm,
+            locked: self.locked,
+            ..Default::default()
+        }
+    }
 }
 
 fn is_false(v: &bool) -> bool {
@@ -290,6 +359,14 @@ pub enum Driver {
         route_id: String,
         /// Target speed, m/s.
         target_speed: f32,
+        /// Drive this far right of the route's lane centre (negative = left), m. A siren car
+        /// passing yielding traffic hugs the centre line (e.g. `-1.55` on a 3.5 m lane).
+        #[serde(default, skip_serializing_if = "is_zero")]
+        lateral_offset_m: f32,
+        /// Keep distance from vehicles ahead (civilian traffic and the other entities) with the
+        /// shared car-following law instead of driving through them.
+        #[serde(default, skip_serializing_if = "is_false")]
+        keep_distance: bool,
     },
     /// Chase/attack another entity with the AI driver. Needs the AI driver (prompts 05/06).
     AiDriver {
@@ -334,6 +411,21 @@ pub enum Expect {
         /// Inclusive minimum, m/s.
         min: f32,
         /// Inclusive maximum, m/s.
+        max: f32,
+    },
+    /// Path length driven between `from_s` and `to_s` in `[min, max]` m (e.g. a braking
+    /// distance: brake at `from_s`, stopped by `to_s`).
+    TravelBetween {
+        /// Entity (default: the first entity).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        entity: Option<String>,
+        /// Start time, s.
+        from_s: f32,
+        /// End time, s.
+        to_s: f32,
+        /// Inclusive minimum, m.
+        min: f32,
+        /// Inclusive maximum, m.
         max: f32,
     },
     /// Maximum |lateral acceleration| over the run in `[min, max]` g.
@@ -386,6 +478,22 @@ pub enum Expect {
         kind: u16,
         /// Deadline, s.
         t_s: f32,
+    },
+    /// The entity's first pursuit ended with `outcome` (a `PursuitOutcome` name: `"Escaped"`,
+    /// `"Captured"`, `"CapturedTotalLoss"`, `"Safehouse"`, `"CalledOff"`) between `min_s` and
+    /// `max_s`; `outcome: "None"` = no pursuit of it ended during the run.
+    FirstPursuitEnd {
+        /// Entity (default: the first entity).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        entity: Option<String>,
+        /// Expected outcome name, or `"None"`.
+        outcome: String,
+        /// Earliest end time, s (default 0).
+        #[serde(default)]
+        min_s: f32,
+        /// Latest end time, s (default: end of the run).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_s: Option<f32>,
     },
     /// A world/traffic metric (see `SCENARIOS.md`, e.g. `"traffic_agents_min"`) in `[min, max]`.
     WorldMetric {
@@ -460,6 +568,25 @@ impl Scenario {
                 return Err(format!("barrier size {:?} must be positive", b.size));
             }
         }
+        if let Some(w) = &self.weather {
+            if !(w.intensity.is_finite() && (0.0..=1.0).contains(&w.intensity)) {
+                return Err(format!(
+                    "weather.intensity = {} must be in 0..=1",
+                    w.intensity
+                ));
+            }
+            if !(w.water_mm.is_finite() && w.water_mm >= 0.0) {
+                return Err(format!("weather.water_mm = {} must be >= 0", w.water_mm));
+            }
+            for p in &w.puddles {
+                if !(p.water_mm.is_finite() && p.water_mm >= 0.0) {
+                    return Err(format!("puddle water_mm = {} must be >= 0", p.water_mm));
+                }
+                if !(p.min[0] <= p.max[0] && p.min[1] <= p.max[1]) {
+                    return Err(format!("puddle min {:?} must be <= max {:?}", p.min, p.max));
+                }
+            }
+        }
         if let Some(p) = self.police_presence {
             if !(p.is_finite() && p >= 0.0) {
                 return Err(format!("police_presence = {p} must be >= 0"));
@@ -532,6 +659,7 @@ impl Expect {
             self,
             Expect::Metric { .. }
                 | Expect::SpeedAt { .. }
+                | Expect::TravelBetween { .. }
                 | Expect::MaxLateralG { .. }
                 | Expect::CrushDepth { .. }
                 | Expect::ComponentsFailed { .. }
@@ -550,11 +678,13 @@ impl Expect {
         match self {
             Expect::Metric { entity, .. }
             | Expect::SpeedAt { entity, .. }
+            | Expect::TravelBetween { entity, .. }
             | Expect::MaxLateralG { entity, .. }
             | Expect::CrushDepth { entity, .. }
             | Expect::ComponentsFailed { entity, .. }
             | Expect::TotalLoss { entity, .. }
-            | Expect::EventCount { entity, .. } => entity.as_ref(),
+            | Expect::EventCount { entity, .. }
+            | Expect::FirstPursuitEnd { entity, .. } => entity.as_ref(),
             Expect::PursuitStartedBefore { .. }
             | Expect::PoliceEventBefore { .. }
             | Expect::WorldMetric { .. } => None,
@@ -586,6 +716,38 @@ mod tests {
         duration_s: 1.0,
         expect: [speed_at(entity: "a", t_s: 0.5, min: 0.0, max: 100.0)],
     )"#;
+
+    #[test]
+    fn weather_field_parses_defaults_round_trips_and_validates() {
+        let sc = Scenario::from_ron("t", MINIMAL).unwrap();
+        assert_eq!(sc.weather, None);
+        assert!(
+            !sc.to_ron().contains("weather"),
+            "no weather → field omitted"
+        );
+        let wet = MINIMAL.replace(
+            "seed: 1,",
+            "seed: 7, weather: (kind: HeavyRain, water_mm: 1.5, \
+             puddles: [(min: (-2.0, 10.0), max: (2.0, 30.0), water_mm: 6.0)]),",
+        );
+        let sc = Scenario::from_ron("t", &wet).unwrap();
+        let w = sc.weather.clone().unwrap();
+        assert_eq!(w.kind, wp_weather::WeatherKind::HeavyRain);
+        assert_eq!((w.intensity, w.water_mm, w.locked), (1.0, 1.5, true));
+        assert_eq!(w.puddles.len(), 1);
+        let cfg = w.config(sc.seed);
+        assert_eq!((cfg.seed, cfg.locked, cfg.start_water_mm), (7, true, 1.5));
+        assert_eq!(Scenario::from_ron("t", &sc.to_ron()).unwrap(), sc);
+        let bad = MINIMAL.replace("seed: 1,", "seed: 1, weather: (kind: Fog, intensity: 2.0),");
+        assert!(Scenario::from_ron("t", &bad).is_err());
+        let typo = MINIMAL.replace("seed: 1,", "seed: 1, weather: (kind: Fog, wet: 1.0),");
+        assert!(Scenario::from_ron("t", &typo).is_err());
+        let flipped = MINIMAL.replace(
+            "seed: 1,",
+            "seed: 1, weather: (kind: Fog, puddles: [(min: (1.0, 1.0), max: (0.0, 0.0), water_mm: 1.0)]),",
+        );
+        assert!(Scenario::from_ron("t", &flipped).is_err());
+    }
 
     #[test]
     fn minimal_scenario_parses_with_defaults() {

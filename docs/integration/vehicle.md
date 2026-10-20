@@ -75,6 +75,8 @@ For prompt 04, the two calls worth exposing are `sim.vehicles()[i].vehicle.telem
 | 5 | AWD on-demand coupling: `DriveLayout::AwdOnDemand { base_front_split, max_rear_split, engage_slip }` | prompt 09's "Haldex-style" car | 09 | open |
 | 6 | Optional `VehicleState::ffb: FfbOutput` (or keep `VehicleSim::ffb`) | net/testbed want it in one snapshot | 04, 07 | open, low priority |
 | 7 | Optional `VehicleDef::slide_assist: Option<f32>` (0..1, overrides the derived slide class) | per-car tuning knob for the slide-control assists; `VehicleDef` has `deny_unknown_fields`, so today it lives in `wp_vehicle::slide::SLIDE_CLASS_OVERRIDES` keyed by car id | 09 (car data), lead | open, low priority |
+| 8 | `DiffDef` gains `Viscous { nm_per_rads, max_nm }`, `Helical { tbr, tbr_coast, preload_nm }`, `Active { max_nm, preload_nm, accel, decel, slip_gain }`; document `Lsd { preload_nm, ramp_power, ramp_coast }` as a clutch-pack LSD whose ramps are **standard lock fractions** `(T_slow − T_fast)/T_in` (0.45 = TBR 2.6; the old implementation effectively doubled them) and `preload_nm` as the wheel-to-wheel breakaway torque | owner request (playtest 26): realistic diffs per car. Until then `data/cars/differentials.toml` (embedded by `wp_vehicle::diff`) carries them, keyed by car id; field names there match this request | 09 (car data), 08 (diff mods), lead (schema) | open |
+| 9 | `DrivetrainDef::diff_center: Option<CenterDiffDef>` with `Viscous { nm_per_rads, max_nm } / Helical { tbr } / Locked` (`None` = the layout's own split / on-demand coupling) | AWD centre diffs (viscous centre on `sentinel_wolfhound`) | 09, lead | open |
 
 ## Changes outside my crates
 
@@ -111,6 +113,16 @@ For prompt 04, the two calls worth exposing are `sim.vehicles()[i].vehicle.telem
   `interim_remap_off_gives_the_same_wet_stop` (remap on vs `interim_surface = false`: within
   5 %).
 
+- (Differentials, 2026-10-19) `data/cars/differentials.toml` — new file in H's folder, H owns
+  it from now on (see "Differentials" below). `apps/simcli/scenarios/race/city_sprint.ron`
+  (L's scenario): `police_cars: false`. A police patrol crossed the junction at y ≈ −108 in
+  front of the coupe at ~170 km/h; whether the coupe survived the clip was a coin toss (on the
+  old code a coupe brake time of 14.0 s already failed, on the new code 15.0 s did). With
+  police off it passes on old and new code for brake times 14.0–15.5 s; the police variant is
+  `city_sprint_police.ron`. **L / I:** please review; revert if the patrol was intended.
+  `[bless]` 04cd217: 38 goldens + the slide-control wheel-profile hashes (reasons in the
+  commit message).
+
 ## Perf numbers
 
 | Measurement | Machine | Native | Browser | Budget |
@@ -118,6 +130,7 @@ For prompt 04, the two calls worth exposing are `sim.vehicles()[i].vehicle.telem
 | Vehicle model, per car | cloud container, release | 4.1 µs/tick = 0.016 ms/frame | not measured | 0.15 ms native / 0.30 browser |
 | Vehicle model, 24-car field (roster cycled), round 6b | same | 0.019–0.021 ms/car/frame (0.45–0.50 ms for 24); wet + puddles 0.016–0.018 | not measured | 0.15 ms/car |
 | Vehicle + Rapier step, 1-car rig | same | 9.7 µs/tick = 0.039 ms/frame | not measured | — |
+| Vehicle model with differentials + brake-TC (2026-10-19) | same | 5.1 µs/tick = 0.021 ms/frame; 24-car field 0.019 (dry) / 0.021 (wet) ms/car/frame (was 0.018 / 0.018 in the same run) | not measured | 0.15 ms/car |
 
 ## Recommended `AssistProfile` presets
 
@@ -460,3 +473,239 @@ you merge your converter work, `auto_shift` now takes `&ShiftInputs`.
 `smoke_coupe_circle`, `vehicle_coupe_slalom`) — caused only by the slide-gyro gravity fix
 (keyboard help while sliding); with that commit reverted 0 goldens fail, so the `weather_at`
 wiring is bit-identical on every scenario. All scenario range expectations pass.
+
+## Differentials (owner request, playtest row 26) — A, 2026-10-19
+
+"We need to simulate LSDs in certain cars." Done on `ws/vehicle`; details in
+`crates/wp_vehicle/README.md` → "Differentials".
+
+**Model** (`wp_vehicle::diff`, solved every drivetrain sub-step, f32, stateless): open,
+clutch-pack plate LSD (preload + accel / decel ramp lock fractions → 1-way, 1.5-way, 2-way),
+viscous (speed-difference based), helical / torque-sensing (torque bias ratio from the
+low-traction wheel's actual reaction, so it acts open with a wheel in the air or on ice),
+active e-diff (commanded clutch: free on entry, locks excess inside-wheel slip on exit),
+locked / welded. AWD centre: layout default (fixed split / on-demand coupling), viscous,
+helical, locked. Each diff moves torque from the faster to the slower side, never more than
+would equalise them within the sub-step (stick–slip clutch, stable at any lock).
+
+**Interactions:** brake-based traction control (part of TCS) on driven axles that can slip —
+feed-forward + proportional brake on the spinning wheel, full on front axles, faded out on rear
+axles between 6 and 12 m/s; the throttle cut leaves a wheel the brakes are holding to the
+brakes. ESC moves rear understeer braking to the front on a locked rear. Slide-help class is
+scaled by the rear diff's lock (open 0.85 … locked 1.15 of the power term). Engine braking
+(lift-off, downshifts) selects the decel ramp; neutral in a clutch shift leaves only preload.
+Snapshot format 3 → **4** (brake-TC state; F: opaque blob, ~16 bytes bigger).
+
+**Data — for H (cars):** `data/cars/differentials.toml` is new, in your folder, and **yours
+from now on** (first version by me, one line of reason per car, analog names only). It is
+read at build time (`include_str!`), keyed by car id; it wins over the car file's
+`diff_front` / `diff_rear`; axles it does not list fall back to the car file. Validated by
+`cargo test -p wp_vehicle diff::tests` (parses, ids exist, reasons present, ramps sane). Two
+asks: add `data/cars/*.toml` to `nameplate_check.py`'s `SCAN` (I ran it by hand: clean), and
+when contract requests 8–9 land, move these into the car JSON via `roster_inputs.py` and
+delete the table. `tools/ci/data_coverage.sh` will warn that the file has no schema
+(informational; covered by the crate test until request 8). The car files' old `Lsd` values
+are now shadowed for every roster car; debug cars (lead) still use theirs.
+
+| Car | Front | Rear | Centre | Why |
+|---|---|---|---|---|
+| `vireo_xs` | open | — | — | late-90s FF hatch on a budget; a plate LSD is a garage upgrade (G: `VehicleExtras::diffs` can apply a mod) |
+| `kestrel_ts` | helical TBR 2.2 / 1.5 | — | — | FF turbo sedan with a factory helical front diff |
+| `shiro_turbo` | — | clutch 1.5-way 60 N·m, 45 % / 25 % | — | period street/drift setup |
+| `hakone_gt` | — | helical TBR 2.5 / 1.8 | — | 90s FR twin-turbo GT, smooth and progressive |
+| `rampart_50` | — | clutch 1.5-way 80 N·m, 35 % / 20 % | — | V8 muscle performance pack |
+| `ironside_440` | — | clutch 2-way 150 N·m, 20 % / 20 % | — | early-70s spring-preloaded limited-slip, mostly preload |
+| `sperber_32` | — | viscous 40 N·m/(rad/s), max 1200 | — | 2000s I6 sport sedan, speed-sensing rear |
+| `lindwurm_4t` | open | active e-diff (max 1200, 30 % / 5 %, slip gain 150) | on-demand coupling (car file) | modern AWD hot hatch with a rear e-diff |
+| `lucciola_350` | — | clutch 1.5-way 50 N·m, 40 % / 20 % | — | 90s mid-engine V8 |
+| `hauler_1500` | — | clutch 1-way 100 N·m, 45 % / 0 | — | towing-package locking rear: bites under drive, free when coasting |
+| `sentinel_cruiser` | — | clutch 2-way 80 N·m, 25 % / 25 % | — | police package: low-lock, preloaded, no snap on wet exits |
+| `sentinel_wolfhound` | open | open | viscous 600 N·m/(rad/s), max 3000, on the 90/10 base split | AWD pursuit sedan: viscous centre, open axles + brake-TC |
+| `sentinel_bastion` | — | open | — | police SUV fleet spec, relies on brake-TC |
+| `junkyard_beater` | **welded** | — | — | junkyard special: scrubs and pushes in tight turns |
+| `tansy_13`, `drayman_cargo`, `furrow_24` | open | open | — | traffic |
+
+### Before / after
+
+Same car, same manoeuvre, only the rear diff changed (`shiro_turbo`,
+`cargo run --release -p wp_vehicle --example diff_demo`). Split-µ = left wheels on ice,
+right on dry asphalt, from a standstill, heading held. Hairpin exit = steady 0.6 g on a 20 m
+circle, then full throttle for 2 s following the line.
+
+| `shiro_turbo` rear diff | split-µ 60 %, TCS off: m in 4 s / ice-wheel spin m/s | split-µ 100 %, TCS on: m / spin m/s | hairpin exit, slide help, TCS off: inside slip / exit km/h / peak slip ° | hairpin exit, TCS on: inside slip / km/h / slip ° | lift-off curvature ratio |
+|---|---|---|---|---|---|
+| open | 4.2 / 50.4 | 15.5 / 1.1 | 0.97 / 52 / 6 | 0.21 / 53 / 4 | 1.046 |
+| clutch 1-way | 11.2 / 9.3 | 19.2 / 2.0 | 0.21 / 58 / 12 | 0.21 / 38 / 33 | 1.069 |
+| clutch 1.5-way | 11.4 / 8.8 | 19.2 / 2.0 | 0.21 / 58 / 12 | 0.21 / 38 / 33 | 1.059 |
+| clutch 2-way | 11.5 / 8.5 | 19.2 / 2.0 | 0.21 / 58 / 12 | 0.21 / 38 / 33 | 1.052 |
+| viscous | 12.4 / 6.5 | 19.7 / 1.7 | 0.38 / 57 / 14 | 0.21 / 51 / 10 | 1.043 |
+| helical | 6.4 / 36.4 | 19.4 / 2.0 | 0.21 / 58 / 13 | 0.22 / 38 / 32 | 1.054 |
+| active e-diff | 13.1 / 3.3 | 18.9 / 2.0 | 0.21 / 58 / 12 | 0.21 / 38 / 32 | 1.060 |
+| locked | 13.6 / 2.1 | 21.0 / 1.5 | 0.21 / 58 / 12 | 0.22 / 37 / 34 | 1.026 |
+
+Roster, **old code → new code** (the old "LSD" capped half the torque difference at
+`preload + ramp·T`, i.e. it was nearly locked; open-diff cars had throttle-only TCS):
+
+| Car | split-µ 60 %, TCS off: m in 4 s | split-µ 100 %, TCS on: m in 4 s | hairpin (slide help, TCS off): inside slip / exit km/h / peak slip ° | lift-off curvature ratio |
+|---|---|---|---|---|
+| `shiro_turbo` | 13.8 → 11.4 | 21.0 → 19.2 | 0.21 / 58 / 12 → 0.21 / 58 / 12 | 1.069 → 1.059 |
+| `rampart_50` | 12.5 → 11.6 | 20.7 → 18.5 | 0.40 / 55 / 13 → 0.39 / 55 / 13 | 1.090 → 1.073 |
+| `hakone_gt` | 13.8 → 7.0 | 21.3 → 19.5 | 0.38 / 56 / 21 → 0.39 / 56 / 21 | 1.078 → 1.061 |
+| `sperber_32` | 14.4 → 12.5 | 22.1 → 19.2 | 0.30 / 58 / 19 → 0.48 / 56 / 19 | 1.068 → 1.044 |
+| `lucciola_350` | 22.6 → 14.3 | 25.5 → 24.0 | 0.35 / 63 / 18 → 0.35 / 62 / 18 | 1.073 → 1.058 |
+| `ironside_440` | 7.3 → 9.0 | 1.4 → 11.4 | 2.93 / 29 / 48 → 2.20 / 30 / 43 | 1.304 → 1.304 |
+| `sentinel_cruiser` | 11.7 → 11.5 | 9.7 → 16.5 | 0.93 / 46 / 36 → 0.93 / 46 / 36 | 1.088 → 1.066 |
+| `sentinel_bastion` | 7.0 → 7.0 | 2.1 → 19.0 | 0.82 / 54 / 13 → 0.82 / 54 / 13 | 1.069 → 1.069 |
+| `hauler_1500` | 10.7 → 11.4 | 15.1 → 14.5 | 0.66 / 47 / 28 → 0.64 / 47 / 29 | 1.448 → 1.468 |
+| `kestrel_ts` | 14.0 → 6.4 | 12.0 → 20.5 | 0.26 / 60 / 3 → 0.38 / 57 / 3 | 1.112 → 1.071 |
+| `vireo_xs` | 4.4 → 4.4 | 3.3 → 18.4 | 0.16 / 53 / 3 → 0.16 / 53 / 3 | 1.074 → 1.074 |
+| `junkyard_beater` | 3.7 → 14.6 | 3.1 → 20.5 | 0.14 / 48 / 2 → 0.09 / 48 / 3 | 1.105 → 0.991 |
+| `lindwurm_4t` | 8.0 → 11.7 | 5.3 → 35.2 | 0.32 / 67 / 3 → 0.32 / 67 / 3 | 1.051 → 1.052 |
+| `sentinel_wolfhound` | 10.8 → 10.8 | 5.6 → 25.3 | 0.78 / 64 / 3 → 0.52 / 63 / 3 | 1.074 → 1.075 |
+| `debug_coupe` | 13.6 → 12.8 | 21.8 → 19.9 | 0.45 / 57 / 16 → 0.46 / 58 / 16 | 1.072 → 1.058 |
+
+Roster metrics (`--example metrics`, VALIDATION columns) old → new: 0–100 within ±0.03 s for
+every car except `sentinel_wolfhound` 5.54 → 5.90 s (viscous centre instead of the
+launch-precharged coupling; band 5.5–6.5 ✓). Skidpad within ±0.01 g except `junkyard_beater`
+0.80 → 0.84, `sperber_32` 0.91 → 0.94, `lucciola_350` 0.96 → 0.98 (all toward or inside
+their bands). 100–0 unchanged. No car moves out of a band; the existing VALIDATION FAILs
+(H's table) are unchanged. Understeer gradients drop 0.07–0.13 °/g on LSD cars (the old
+near-locked LSD pushed); `ironside_440` 1.28 → 1.74 (open → preloaded 2-way pushes);
+`junkyard_beater` −0.20 (welded front: scrub costs most steer at low g).
+
+Honest caveats: with **TCS on but no slide help** (wheel/AI-style, analog follower), RWD
+cars with an LSD still rotate a lot on a full-throttle hairpin exit (shiro 33°), exactly as
+before (the old near-locked LSD: 33°); TCS only cuts on wheelspin, not on yaw. The open-diff
+version stays straight (4°) because its inside wheel flares and TCS cuts.
+
+### Checks (differentials)
+`cargo fmt`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace
+--no-fail-fast` (only the golden-hash tests and `race_city_sprint` failed before the
+`[bless]` / scenario commits; re-run green after), `cargo build --target
+wasm32-unknown-unknown -p wp_wasm`, `cargo run -p lint-determinism` (0 errors, no
+`wp_vehicle` findings), all 45 simcli scenarios pass in release (same "pending" list as the
+old code), goldens re-blessed, `tools/wasm-determinism/compare.sh` 45/45 native == wasm,
+`simcli determinism apps/simcli/scenarios` 45/45 deterministic. Nameplate check run by hand
+over the new files: clean.
+## Lead note: weather in the game (2026-10-19, `lead/weather-in-game`)
+Your `weather_at` hook is used as-is: `wp_sim` hands vehicles `wp_weather::WithWeather` with the
+interim `WetAsphalt` remap **off**, so `SurfaceConditions::from_local` drives wet grip, cold/ice,
+painted lines (D's `PaintedLine`) and aquaplaning. No change in `wp_vehicle` was needed.
+Measured in simcli: 100→0 braking 40.0 m dry vs 51.6 m soaked (debug_sedan, ABS); 33 m/s into a
+6 mm flooded stretch while steering: yaw rate 0.21 vs 0.37 rad/s on the merely wet road. The
+browser HUD reads `Telemetry::aquaplane` for its aquaplaning warning.
+## Handling balance (lead helper `lead/handling-balance`, playtest row 28, 2026-10-19)
+Owner: "all cars understeer too much". Branch merges `origin/ws/vehicle` (A's differentials)
+and `origin/main`; my commits: `wp_vehicle` code + tests, `[bless]` goldens, docs, and after
+the merge re-measured ranges + a second `[bless]`. No contract change, no car/tyre data
+change, `drivetrain.rs` / `diff.rs` untouched.
+**Measured first** (`cargo run --release -p wp_vehicle --example handling -- --causes`, new
+`wp_vehicle::handling` module; every roster car × keyboard / gamepad / wheel preset, plus
+keyboard with one assist switched off). Tests: ramp steer at 80 km/h (road-wheel angle ramped
+0.6°/s, then full input held), 40 m and 80 m constant radius (speed ramped), step steer at
+80 km/h (full key; analog: the input for 0.4 g), 18 m slalom, a 90° 15 m-radius city corner at
+35 km/h (following driver, and key held). Keyboard driver = sigma-delta key tapper (≥ 50 ms per
+press/release); analog driver knows the input→angle mapping. Where the understeer came from
+(numbers on `ws/vehicle` a4c054c unless marked "main" = b1c06b7, before A's diffs):
+| Cause | Finding |
+|---|---|
+| (a) speed-sensitive lock | Not too little lock: too much. Full input = fixed lock fraction (100 % → 25 %, 30–150 km/h) ≈ 0.4 rad at 80 km/h, ~3× the slip the front tyres can use. A held key made only **70–92 %** of the car's grip (gamepad full stick 66–91 %; wheel preset at full lock 57–87 %). Keyboard with the lock reduction switched off (main): worse, 61–86 %. |
+| (b) rack rate / filtering | Not a cause: keyboard full-key yaw rise 0.11–0.19 s vs 0.16–0.32 s for the analog presets. |
+| (c) ESC | Yes. Reference car had 3.7°/g understeer (K = 0.0025), more than any roster car, so normal cornering read as oversteer: outer-front braking ∝ the whole yaw rate + half throttle in **39–66 %** of the city corner (keyboard), up to +0.29 deg/g of gradient in a smooth ramp. A tapped key also tripped it both ways (main: Tansy could not accelerate past 73 km/h on the 80 m circle). |
+| (d) tyres | Not a cause: every car runs the same compound front and rear; peak slip 0.109–0.209 rad, load sensitivity 0.10–0.14. |
+| (e) setup | Not a cause: chassis gradient (wheel preset, 1:1) RWD 0.07–0.35 deg/g, AWD 0.32–0.33, FWD 0.35–0.63 (junkyard_beater 1.42), heavy 0.49–1.77, i.e. close to neutral except the trucks and the bias-ply big-block. Anti-roll bars are a weak lever (main): front −40 % / rear +40 % on rampart_50, shiro_turbo, hakone_gt (−20/+20 % on kestrel_ts) moved the gradient ≤ 0.01 deg/g and the limit balance (front slip/peak ÷ rear) by −0.05 to −0.24. On main the diffs pushed the inner driven wheel (lucciola_350 at 0.93 g: inner rear +986 N drive, outer +108 N), so RWD and FWD had the same limit balance (≈ 2); A's differentials moved the RWD chassis gradient from 0.45–0.61 to 0.07–0.35 deg/g (limit balance 1.67–2.09). |
+**Fixes** (details in `crates/wp_vehicle/README.md` → "Keyboard/gamepad steering and ESC"):
+slip-targeted lock for keyboard/gamepad (`L·μ·g/v²` + front peak slip × 1.1 / 1.27, capped by the
+car's lock), rack covers it in 0.16 s × sensitivity (never faster than the car's rack); ESC
+reference ≈ 1°/g, capped at μ·g/v, lagged 0.2 s, braking proportional to the excess. Wheel
+preset and metric runs bit-identical (slide_control's pinned wheel hashes match; VALIDATION
+skidpad / 0–100 / 100–0 unchanged by this branch, so not re-collected here).
+**Before → after** (`before` = `ws/vehicle` a4c054c, i.e. main + A's differentials; 80 km/h;
+δ = centre road-wheel angle; "limit" = the car's ramp max g, wheel preset; input = fraction of
+full key / stick):
+| Car | Class | US gradient deg/g, keyboard (wheel = chassis) | δ at 0.6 g, deg: keyboard taps, R80 | Input at 0.6 g: keyboard / gamepad | Held key g at 80 km/h (limit) | Full stick g (gamepad) | Turn-in rise s: full key / gamepad 0.4 g | City corner ESC share (keyboard) |
+|---|---|---|---|---|---|---|---|---|
+| vireo_xs | Compact FWD | 0.49 → **0.46** (0.46) | 3.55 → **2.93** | 0.10 → **0.19** / 0.07 → **0.17** | 0.79 → **0.85** (0.87) | 0.78 → **0.85** | 0.17 → **0.15** / 0.20 → **0.20** | 0.57 → **0.07** |
+| kestrel_ts | Sport FWD | 0.36 → **0.37** (0.35) | 3.24 → **3.25** | 0.11 → **0.22** / 0.08 → **0.19** | 0.84 → **0.91** (0.93) | 0.83 → **0.90** | 0.16 → **0.15** / 0.20 → **0.20** | 0.58 → **0.07** |
+| shiro_turbo | Sport RWD | 0.39 → **0.34** (0.34) | 3.29 → **2.80** | 0.09 → **0.21** / 0.07 → **0.19** | 0.75 → **0.91** (0.95) | 0.72 → **0.90** | 0.13 → **0.15** / 0.19 → **0.19** | 0.58 → **0.23** |
+| hakone_gt | Sport RWD | 0.34 → **0.18** (0.18) | 3.15 → **2.80** | 0.10 → **0.20** / 0.07 → **0.18** | 0.74 → **0.87** (0.92) | 0.71 → **0.86** | 0.13 → **0.15** / 0.21 → **0.21** | 0.62 → **0.09** |
+| rampart_50 | Muscle RWD | 0.32 → **0.32** (0.32) | 3.60 → **3.25** | 0.10 → **0.22** / 0.08 → **0.20** | 0.71 → **0.84** (0.88) | 0.68 → **0.83** | 0.13 → **0.15** / 0.21 → **0.20** | 0.53 → **0.22** |
+| ironside_440 | Muscle RWD | 1.77 → **1.77** (1.77) | — → **—** | 0.25 → **0.45** / 0.20 → **0.38** | 0.43 → **0.55** (0.61) | 0.40 → **0.53** | 0.17 → **0.17** / 0.32 → **0.31** | 0.59 → **0.51** |
+| sperber_32 | Sport RWD | 0.50 → **0.21** (0.21) | 3.12 → **2.76** | 0.10 → **0.20** / 0.07 → **0.18** | 0.74 → **0.89** (0.94) | 0.71 → **0.88** | 0.12 → **0.14** / 0.18 → **0.17** | 0.61 → **0.09** |
+| lindwurm_4t | Sport AWD | 0.40 → **0.33** (0.33) | 3.34 → **2.85** | 0.11 → **0.21** / 0.08 → **0.19** | 0.83 → **0.90** (0.94) | 0.82 → **0.89** | 0.14 → **0.15** / 0.18 → **0.18** | 0.63 → **0.14** |
+| lucciola_350 | Exotic RWD | 0.18 → **0.07** (0.07) | 3.28 → **2.65** | 0.10 → **0.19** / 0.07 → **0.17** | 0.78 → **0.93** (0.99) | 0.76 → **0.91** | 0.11 → **0.13** / 0.18 → **0.18** | 0.66 → **0.15** |
+| hauler_1500 | Truck RWD | 1.74 → **1.74** (1.74) | 5.57 → **6.69** | 0.19 → **0.29** / 0.17 → **0.25** | 0.57 → **0.62** (0.64) | 0.55 → **0.60** | 0.19 → **0.18** / 0.28 → **0.28** | 0.41 → **0.33** |
+| sentinel_cruiser | PoliceCruiser RWD | 0.43 → **0.35** (0.35) | 3.65 → **3.58** | 0.12 → **0.22** / 0.09 → **0.20** | 0.70 → **0.81** (0.85) | 0.68 → **0.80** | 0.16 → **0.16** / 0.21 → **0.21** | 0.52 → **0.04** |
+| sentinel_wolfhound | PoliceInterceptor AWD | 0.41 → **0.32** (0.32) | 3.38 → **3.28** | 0.12 → **0.21** / 0.09 → **0.19** | 0.77 → **0.82** (0.85) | 0.76 → **0.82** | 0.17 → **0.16** / 0.24 → **0.23** | 0.50 → **0.08** |
+| sentinel_bastion | PoliceSuv RWD | 0.64 → **0.49** (0.49) | 3.91 → **3.93** | 0.13 → **0.23** / 0.10 → **0.21** | 0.62 → **0.70** (0.72) | 0.60 → **0.68** | 0.15 → **0.14** / 0.23 → **0.23** | 0.44 → **0.08** |
+| junkyard_beater | Beater FWD | 1.42 → **1.42** (1.42) | — → **3.38** | 0.11 → **0.24** / 0.09 → **0.21** | 0.75 → **0.82** (0.83) | 0.73 → **0.81** | 0.18 → **0.15** / 0.18 → **0.18** | 0.52 → **0.48** |
+| tansy_13 | Compact FWD | 0.64 → **0.63** (0.63) | — → **3.08** | 0.10 → **0.20** / 0.08 → **0.18** | 0.73 → **0.79** (0.79) | 0.72 → **0.78** | 0.17 → **0.14** / 0.18 → **0.18** | 0.57 → **0.11** |
+| drayman_cargo | Truck RWD | 0.78 → **0.78** (0.78) | 5.69 → **5.67** | 0.14 → **0.28** / 0.12 → **0.25** | 0.57 → **0.63** (0.66) | 0.54 → **0.62** | 0.16 → **0.15** / 0.23 → **0.23** | 0.39 → **0.33** |
+| furrow_24 | Truck RWD | 0.57 → **0.54** (0.54) | 3.93 → **3.58** | 0.12 → **0.22** / 0.09 → **0.20** | 0.62 → **0.70** (0.73) | 0.60 → **0.69** | 0.16 → **0.15** / 0.22 → **0.22** | 0.40 → **0.14** |
+Summary: held key 70–92 % → **90–100 %** of the grip, full stick 66–91 % → **87–99 %**, 0.6 g
+now needs 19–45 % key / 17–38 % stick instead of 9–25 % / 7–20 % (more resolution), keyboard
+ESC adds 0.00–0.02 deg/g (was up to 0.29), turn-in unchanged (0.13–0.18 s full key). The
+scripted tapping driver (not the held key) runs a little wider in the city corner: −0.2 to
++0.25 m, ironside_440 +0.4 m (1.70 → 2.12 m), because ESC now rarely brakes the inner rear on
+taps (it never fires with ESC off, the testbed default since row 29).
+**Tests added:** `tests/handling_balance.rs` (per-class gradient ranges: FWD 0.25–1.6, RWD
+0.0–0.6 with lucciola_350 below every front-driver, AWD 0.1–0.6, heavy 0.35–2.3 with the pickup
+≥ 0.5 above a sports car; held key ≥ 90 % / full stick ≥ 85 % of the limit; keyboard ESC adds
+< 0.15 deg/g; held key makes the city corner within 0.5 m, ironside_440 2 m — 1.65 m, as
+before), unit tests for the lock, rack rate and ESC (ordinary cornering untouched, taps
+ignored). `tests/slide_control.rs` unchanged and passing (no spin past 90°, catches at
+110/130 km/h).
+**Snapshot:** format 5 = A's format 4 (brake-TC) + `Esc::reference`. `set_state` seeds it from
+the restored steer; `tests/snapshot.rs` `set_state` drift (bound 1.0 m, raised by A and me
+independently): 0.66 m with both changes.
+**Checks (after merging `ws/vehicle` + `main`):** `cargo fmt --check`, `clippy --workspace
+--all-targets -D warnings`, wasm build, determinism lint (0 errors), `compare.sh` (native ==
+wasm, 45/45), `npm run wasm && npm run e2e` (all 29 checks; the first run lost the headless tab
+— "Target crashed" in the city-chase capture step — and the rerun passed), `simcli goldens`
+45/45 after the second `[bless]`. `cargo test --workspace --no-fail-fast`: 121 binaries pass,
+**1 test fails, outside my crates**:
+- `wp_net` `city_e2e::four_players_in_a_police_city`: "p1: a replica built only from contacts
+  diverged" (it passes on `ws/vehicle`). Damage replicas consume only the server's contact
+  impulses, so vehicle code cannot change them directly; the new driving produces a different
+  crash sequence that breaks the "contact-only replicas never mismatch" invariant. Before the
+  merge, `lockstep::four_clients_replicate_damage_deterministically` showed the same (vehicle 1,
+  tick 14876, after 14848 contact steps from a pristine snapshot at tick 28; passes after the
+  merge). Ruled out: hinged panels (`set_chassis_motion` off: identical), resets/repairs (none in
+  the run), contact quantisation (the server applies the same round trip). Repro:
+  `cargo test -p wp_net --test city_e2e` on this branch. Needs F (wp_net) / B (wp_damage).
+- Before the merge `wp_opponent` `race::live_police_chase_…` also failed (racer 3 queued 93 s,
+  limit 90, behind a stopped civilian and then a police unit — playtest row 32); it passes on
+  the merged code.
+**Notes for others:**
+- Lead / F: `wp_sim` spawns vehicles with `AssistProfile::default()` (= keyboard) and
+  `wp_net::bot` drives with it; `wp_world::DriveController` maps angle → input as
+  `δ / max_steer`, which is only right for sensitivity 0. AI that drives through a keyboard
+  preset now gets a smaller angle at speed (it already got 25–100 % before). AI/traffic/police
+  set `AssistProfile::ai()` and are unaffected by the lock change (the ESC change applies).
+- H (cars): no data change needed; numbers in `docs/integration/cars.md`.
+
+## Lead feedback (round 12b, 2026-10-20) — owner playtest: cars too bouncy / light, launched too easily
+Base: `origin/lead/round12` (not main; it has your diffs, the handling-balance helper's understeer
+tuning, and the sidewalk-collider fix). Owner: "the car is currently too bouncy/light and gets
+launched too easily." Related geometry bugs are being fixed elsewhere (junction stop-line step,
+row 51; sidewalk back-edge drop, row 52, both on `lead/fix-junction-holes`), so separate the
+vehicle side from the road side.
+1. Measure on `lead/round12`, for 4 cars (sports, sedan, muscle, police cruiser): body
+   bounce after a 10 cm kerb at 30/60 km/h (overshoots, settle time), heave/pitch natural
+   frequencies and damping ratios, airtime and peak height over a 3 % crest at 120 km/h,
+   and the vertical/roll velocity a car gets from a side impact or a kerb strike at speed.
+   Compare to real-car targets (ride ~1.2–1.8 Hz, damping ratio ~0.3–0.5 bump / higher
+   rebound; a kerb strike should not launch a car off the ground at 60 km/h).
+2. Fix the causes, not just the symptom: damper bump/rebound split and rebound strength,
+   bump stops (progressive, not a hard spring), tyre vertical stiffness/damping, the chassis
+   mass/inertia and CoG height used by Rapier (check the inertia tensor isn't too small, which
+   makes cars flip/spin light), collision restitution of chassis vs static world (should be
+   ~0), contact softness for kerbs, and clamping of contact impulses' vertical component
+   from thin kerb/step edges (no "launch ramps" from a 10–15 cm kerb).
+3. ~~Arcade-only anti-launch assist~~ — withdrawn (owner rule 2026-10-20, CLAUDE.md): physics is
+   identical in Arcade and Simulation; only damage differs. Every fix applies to both. Also audit
+   wp_vehicle / wp_sim for anything keyed on DamageMode that changes physics and remove it.
+4. Scenarios with expected ranges (kerb strike, crest jump, settle time); goldens in a
+   [bless] commit with the reason. Coordinate with the handling-balance numbers so understeer
+   doesn't regress.
+

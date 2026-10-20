@@ -314,6 +314,8 @@ def derive(c: dict) -> tuple[dict, dict]:
             "diff_rear": diff_json(c["trans"]["diff_r"]),
             "clutch_max_nm": r(d["engine"]["clutch"], 0),
             "shift_time_s": r(c["trans"]["shift"], 3),
+            # Optional: only cars with a non-default (e.g. worn) gearbox state it; `None` = 0.85.
+            **({"efficiency": r(c["trans"]["efficiency"], 3)} if c["trans"].get("efficiency") else {}),
             **({"torque_converter": {
                 "stall_rpm": r(c["trans"]["torque_converter"]["stall_rpm"], 0),
                 "stall_torque_ratio": r(c["trans"]["torque_converter"]["ratio"], 2),
@@ -871,6 +873,8 @@ def spec_md(c: dict, j: dict, d: dict, est: dict, lat_log: list[str], lat: dict)
                 f"{tr['torque_converter']['ratio']:.1f}× at stall, couples 1:1 from "
                 f"{tr['torque_converter']['coupling_rpm']} rpm (class-typical for the gearbox). "
                 if tr.get("torque_converter") else "")
+             + (f"Drivetrain efficiency {tr['efficiency']:.2f} (default 0.85): "
+                f"{tr['efficiency_why']}. " if tr.get("efficiency") else "")
              + f"Clutch capacity "
              f"{tr['clutch_factor']:.2f} × peak torque = {de['clutch']:.0f} N·m. Shift time "
              f"{tr['shift']:.2f} s.\n")

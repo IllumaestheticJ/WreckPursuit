@@ -14,7 +14,8 @@
 //!   length and a low-speed guard ([`tire`]).
 //! - **Drivetrain:** engine (curve, idle control, soft limiter, engine braking, turbo lag),
 //!   clutch (auto or pedal, slip/lock model with anti-stall), gearbox (manual/auto, shift
-//!   cut, kickdown, auto-reverse), open/LSD/locked diffs, AWD split, handbrake declutch.
+//!   cut, kickdown, auto-reverse), differentials ([`diff`]: open, clutch 1/1.5/2-way, viscous,
+//!   helical, active, locked; axle and AWD centre), handbrake declutch.
 //!   Wheel spin is integrated semi-implicitly against tire slip stiffness, 2 sub-steps per
 //!   tick ([`wp_contracts::VEHICLE_SUBSTEPS`]).
 //! - **Road conditions** per wheel ([`surface::SurfaceConditions`], read from
@@ -42,10 +43,12 @@ pub mod aero;
 pub mod assists;
 pub mod body;
 pub mod brakes;
+pub mod diff;
 pub mod drivetrain;
 pub mod engine;
 pub mod ffb;
 pub mod ground;
+pub mod handling;
 pub mod math;
 pub mod metrics;
 pub mod presets;
@@ -61,6 +64,7 @@ pub mod vehicle;
 use std::collections::BTreeMap;
 
 pub use body::VehicleBody;
+pub use diff::{AxleDiff, CentreDiff, DiffSetup};
 pub use engine::EngineExtras;
 pub use ground::{ContractGround, FlatGround, GroundHit, RapierGround, WheelCaster};
 pub use presets::AssistPreset;

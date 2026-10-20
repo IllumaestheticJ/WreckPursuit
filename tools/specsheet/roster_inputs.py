@@ -876,12 +876,12 @@ CARS = [
         id="junkyard_beater",
         display_name="Junkyard Beater",
         cls="Beater",
-        analog_of="late-80s compact FF sedan, 1.6 L SOHC I4, high mileage (tired engine, worn dampers)",
+        analog_of="1980s compact FF sedan, 1.6 L SOHC I4, 4-speed manual, high mileage (tired engine, sagging springs, worn dampers, old tyres)",
         era="80s",
         profile="sedan",
-        curb_kg=1000.0,
+        curb_kg=990.0,
         fuel_l=45,
-        front_frac=0.62,
+        front_frac=0.60,
         wheelbase=2.50,
         track_f=1.43,
         track_r=1.42,
@@ -896,23 +896,26 @@ CARS = [
         extra_cda=0.0,
         lift=(0.12, 0.14),
         engine=dict(
-            desc="1.6 L SOHC 8-valve I4, throttle-body injection, worn (≈ 10 % down on its new rating)",
-            curve=[(800, 85), (1200, 98), (1600, 108), (2000, 115), (2500, 120), (3000, 124),
-                   (3500, 125), (4000, 123), (4500, 119), (5000, 114), (5500, 106), (6000, 95),
-                   (6300, 86)],
-            idle=850, redline=6000, limit=6300, inertia=0.11, brake_frac=0.12,
+            desc="1.6 L SOHC 8-valve I4, twin-choke carburettor, worn (≈ 10 % down on its new rating)",
+            curve=[(800, 82), (1200, 94), (1600, 103), (2000, 110), (2500, 116), (3000, 120),
+                   (3500, 123), (4000, 124), (4500, 123), (5000, 121), (5500, 113), (5800, 104),
+                   (6000, 96)],
+            idle=850, redline=5800, limit=6000, inertia=0.12, brake_frac=0.12,
             why="Class-typical late-80s 1.6 SOHC economy engine (~45 kW/L new), derated ~10 % for wear (compression loss) per owner dyno sheets of high-mileage examples.",
         ),
         trans=dict(
-            desc="5-speed manual with a tired synchro (slow shifts), open front differential",
+            desc="4-speed manual with a tired second-gear synchro (slow shifts), open front differential",
             layout="Fwd",
-            gears=[3.25, 1.89, 1.25, 0.92, 0.73], final=4.06, reverse=3.15, shift=0.35,
+            gears=[3.17, 1.84, 1.26, 0.97], final=4.33, reverse=3.17, shift=0.55,
+            efficiency=0.78,
+            efficiency_why=("worn CV joints, tired wheel bearings and dragging front calipers; "
+                            "class-typical 0.85 minus ≈ 8 % for high mileage"),
             diff_f="Open", diff_r="Open", clutch_factor=1.3,
         ),
-        tires=dict(front="175/70R13", rear="175/70R13", compound="street", unsprung=(15.0, 14.0)),
-        susp=dict(hz=(1.30, 1.45), zeta=0.18, travel=(0.15, 0.16), roll_grad_deg_g=5.0,
+        tires=dict(front="175/70R13", rear="175/70R13", compound="vintage_bias", unsprung=(15.0, 14.0)),
+        susp=dict(hz=(1.15, 1.25), zeta=0.14, travel=(0.16, 0.17), roll_grad_deg_g=6.5,
                   roll_front_share=0.60, bump_stop=120000.0, preload=0.01),
-        align=dict(camber_deg=(-0.2, -0.5), toe_deg=(0.0, 0.1), caster_deg=2.0),
+        align=dict(camber_deg=(-1.0, -0.5), toe_deg=(0.0, 0.0), caster_deg=2.0),
         brakes=dict(
             front=dict(kind="disc", d_mm=240, pistons_mm=[51], pad_mu=0.35),
             rear=dict(kind="drum", d_mm=200, wheel_cyl_mm=17.5, brake_factor=1.8),
@@ -922,15 +925,19 @@ CARS = [
         price=3000,
         durability=2,
         note=("The economy floor: always affordable, never fast. Sagging springs and worn "
-              "dampers make it bounce and lean, the tired four needs every one of its 6000 rpm, "
-              "and the slow gearshift punishes hurry. It is what you drive after the impound "
-              "took your real car — and a surprisingly good teacher of weight transfer."),
+              "dampers make it lean hard and bob over every crest, the old hard tyres squeal "
+              "long before they let go, and the tired four needs every one of its 5800 rpm "
+              "through a long-throw 4-speed with a slow shift. Flat out it buzzes on the limiter "
+              "at about 150 km/h. It is what you drive after the impound took your real car — "
+              "slow, but it tells you exactly what the weight is doing, so it is a surprisingly "
+              "good teacher."),
         breaks=("A thin late-80s shell with a weak passenger cell: modest crumple rails and "
                 "light pillars mean a hard frontal reaches the cabin (Simulation lethality is "
                 "high), but panels are cheap and everything bolts back on. Small radiator right "
                 "behind a plastic bumper — nose taps overheat it quickly."),
-        sources=["manufacturer spec-class data for late-80s 1.6 L FF compact sedans",
-                 "owner dyno sheets for high-mileage 1.6 SOHC engines",
+        sources=["manufacturer spec-class data for 1980s 1.6 L FF compact sedans (4-speed manual / 3-speed automatic trims)",
+                 "owner dyno sheets for high-mileage 1.6 SOHC carburettor engines",
+                 "tyre test data for aged (hardened) radials: ≈ 0.85 × new street grip, earlier and louder breakaway",
                  "engineering tables (tire radius, ride frequency, disc/drum brake hydraulics)"],
         lattice=dict(mass_frac=0.22, bumper="plastic", hood="steel", pushbar=False),
     ),

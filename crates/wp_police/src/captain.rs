@@ -142,6 +142,7 @@ fn tactic_name(t: Tactic) -> &'static str {
         Tactic::BoxIn(_) => "box-in",
         Tactic::Pit => "pit",
         Tactic::RollingBlock => "rolling-block",
+        Tactic::Ram(_) => "ram",
     }
 }
 

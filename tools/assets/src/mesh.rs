@@ -9,9 +9,13 @@ use wp_contracts::{BodyRegion, LatticeDef, VehicleDef};
 use crate::profile::BodyProfile;
 
 /// Mesh file format version (`CarMesh::format`).
-pub const MESH_FORMAT: u32 = 1;
+pub const MESH_FORMAT: u32 = 3;
 /// Station spacing of the loft, m.
 pub const STATION_STEP_M: f32 = 0.06;
+/// How far a light lens stands proud of the nose / tail face, m.
+pub const LIGHT_PROUD_M: f32 = 0.015;
+/// How deep a light lens is sunk into the body behind the nose / tail face, m.
+pub const LIGHT_DEPTH_M: f32 = 0.05;
 /// Triangle budget (prompt 11).
 pub const TRI_BUDGET: (u32, u32) = (3000, 6000);
 
@@ -88,6 +92,80 @@ pub struct MeshPart {
     /// 4 weights per vertex in 1/255 (`bind-skin`); empty for wheel parts.
     #[serde(default)]
     pub skin_weights: Vec<u8>,
+    /// Sheet buckling of a hood / trunk lid or front fender (`bind-skin`, format 3); `None`
+    /// for every other part. See [`FoldBinding`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fold: Option<FoldBinding>,
+}
+
+/// How a sheet panel crumples in the renderer (visual only; the lattice, hull and repair bill
+/// never see it). The panel runs from a fixed end (a lid's hinge row, a fender's rear row) to a
+/// leading end (the latch row, the fender's nose). Per chord (fixed node → leading node):
+/// - the leading end follows the crushed front structure: when the `leads` nodes (bumper,
+///   frame, fender noses next to the leading node) move toward the fixed end further than the
+///   panel's own leading node, the panel's vertices are pulled back by the difference
+///   (weight 3), so the panel never floats over a crushed front;
+/// - the effective shortening, `gain × max(own chord loss, lead push) −` [`FOLD_DEAD_ZONE_M`],
+///   becomes a fold height (`FOLD_SPLIT ×` [`fold_height`], capped at `max_m`) along `dir`,
+///   shaped by the crease weight (weight 1: two ridges with a valley, tented at the centre);
+/// - once the panel is unlatched or hangs, the fixed end bows up by [`FOLD_REAR_LIFT`] of the
+///   fold (weight 2) and the leading edge pops up by `pop_m` (weight 3 squared).
+///
+/// Values between chords are interpolated linearly along the `across` axis (the chords' rest
+/// coordinate on it, from their leading node).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FoldBinding {
+    /// Lattice node pairs fixed end → leading end, sorted by their rest `across` coordinate.
+    pub chords: Vec<[u16; 2]>,
+    /// Per chord: three front-structure nodes (other regions) nearest its leading node.
+    pub leads: Vec<[u16; 3]>,
+    /// Axis the chords are spread along: 0 = x (lids), 2 = z (fenders).
+    pub across: u8,
+    /// Direction the sheet buckles toward, chassis space at rest (unit).
+    pub dir: [f32; 3],
+    /// Visual gain on the shortening (own chord loss or lead push, whichever is larger).
+    pub gain: f32,
+    /// Largest fold height, m.
+    pub max_m: f32,
+    /// Leading-edge pop of an unlatched / hanging lid, m (0 for bolted panels).
+    pub pop_m: f32,
+    /// 3 weights per vertex in 1/255: crease shape, fixed-end lift, leading-end follow.
+    pub weights: Vec<u8>,
+}
+
+/// Lost chord length a panel absorbs in-plane before it buckles, m.
+pub const FOLD_DEAD_ZONE_M: f32 = 0.015;
+/// Largest fold height of a hood / trunk lid, m.
+pub const FOLD_MAX_M: f32 = 0.28;
+/// Largest outward buckle of a front fender, m.
+pub const FENDER_FOLD_MAX_M: f32 = 0.12;
+/// Share of the single-tent height each of the lid's ridges gets (the shortening is split
+/// over two ridges).
+pub const FOLD_SPLIT: f32 = 0.7;
+/// Share of the fold height the fixed (hinge) edge bows up by once the panel is unlatched.
+pub const FOLD_REAR_LIFT: f32 = 0.45;
+/// Leading-edge pop of a lid whose latch let go, m.
+pub const LID_POP_M: f32 = 0.09;
+/// Visual crumple gain on a hood's own chord loss.
+pub const HOOD_CRUMPLE_GAIN: f32 = 1.8;
+/// Visual crumple gain on a trunk lid's own chord loss.
+pub const TRUNK_CRUMPLE_GAIN: f32 = 1.4;
+/// Visual crumple gain on a front fender's own chord loss.
+pub const FENDER_CRUMPLE_GAIN: f32 = 1.5;
+
+/// Fold height (m) of a sheet whose fixed→leading chord measured `rest_m` and is now
+/// effectively `lost_m` shorter: an inextensible strip pushed together rises into a tent of
+/// that height (uncapped; see [`FoldBinding`]). The browser (`render/panels.ts`) uses the same
+/// formula.
+pub fn fold_height(rest_m: f32, lost_m: f32) -> f32 {
+    if rest_m <= 1e-3 {
+        return 0.0;
+    }
+    let lost = (lost_m - FOLD_DEAD_ZONE_M).max(0.0);
+    let c = (lost / rest_m).min(0.5);
+    let k = 1.0 - c;
+    0.5 * rest_m * (1.0 - k * k).sqrt()
 }
 
 impl MeshPart {
@@ -596,41 +674,39 @@ pub fn generate(def: &VehicleDef, lattice: &LatticeDef) -> CarMesh {
         }
     }
 
-    // Lights (bound to the fenders / quarters so a hanging bumper leaves them in place).
+    // Lights: lenses on the outer surface of the nose / tail face, LIGHT_PROUD_M proud of the
+    // paint and facing out, sunk LIGHT_DEPTH_M into the body. Their region is the front /
+    // rear frame (never a free panel); `bind-skin` binds them to the nearest bumper, hood /
+    // trunk, fender / quarter and frame nodes so they crush with the end of the car.
     let hl_z = p.belt(p.y_nose - 0.05) - 0.07;
     let tl_z = p.belt(p.y_tail + 0.05) - 0.08;
     for right in [false, true] {
         let sx = if right { 1.0 } else { -1.0 };
-        let wf = p.half_width(p.y_nose - 0.04);
-        let x0 = sx * (wf - 0.08);
-        let x1 = sx * (wf - 0.40);
-        let (fl, rl) = if right {
-            (BodyRegion::FrontRightFender, BodyRegion::RearRightQuarter)
-        } else {
-            (BodyRegion::FrontLeftFender, BodyRegion::RearLeftQuarter)
-        };
+        let wf = p.half_width(p.y_nose);
+        let x0 = sx * (wf - 0.07);
+        let x1 = sx * (wf - 0.42);
         b.cube(
             &(
                 side_name("headlight", right),
-                Some(fl),
+                Some(BodyRegion::FrameFront),
                 PartKind::Light,
                 MaterialSlot::Headlight,
             ),
-            [x0.min(x1), p.y_nose - 0.07, hl_z - 0.05],
-            [x0.max(x1), p.y_nose + 0.005, hl_z + 0.05],
+            [x0.min(x1), p.y_nose - LIGHT_DEPTH_M, hl_z - 0.06],
+            [x0.max(x1), p.y_nose + LIGHT_PROUD_M, hl_z + 0.06],
         );
-        let wt = p.half_width(p.y_tail + 0.04);
+        let wt = p.half_width(p.y_tail);
         let t0 = sx * (wt - 0.06);
-        let t1 = sx * (wt - 0.36);
+        let t1 = sx * (wt - 0.38);
         b.cube(
             &(
                 side_name("taillight", right),
-                Some(rl),
+                Some(BodyRegion::FrameRear),
                 PartKind::Light,
                 MaterialSlot::Taillight,
             ),
-            [t0.min(t1), p.y_tail - 0.005, tl_z - 0.05],
-            [t0.max(t1), p.y_tail + 0.07, tl_z + 0.05],
+            [t0.min(t1), p.y_tail - LIGHT_PROUD_M, tl_z - 0.06],
+            [t0.max(t1), p.y_tail + LIGHT_DEPTH_M, tl_z + 0.06],
         );
         // Mirror on the front door, just behind its hinge at the belt.
         let door = if right {
@@ -700,6 +776,7 @@ pub fn generate(def: &VehicleDef, lattice: &LatticeDef) -> CarMesh {
             indices: idx,
             skin_nodes: Vec::new(),
             skin_weights: Vec::new(),
+            fold: None,
         });
     }
     parts.sort_by(|a, b| a.name.cmp(&b.name));
@@ -760,6 +837,7 @@ fn wheel_parts(index: u8, radius: f32, width: f32) -> Vec<MeshPart> {
         indices: idx,
         skin_nodes: Vec::new(),
         skin_weights: Vec::new(),
+        fold: None,
     };
     // Rim: 10-point star on both faces at the sidewall inner radius.
     let mut rpos: Vec<[f32; 3]> = Vec::new();
@@ -796,6 +874,7 @@ fn wheel_parts(index: u8, radius: f32, width: f32) -> Vec<MeshPart> {
         indices: ridx,
         skin_nodes: Vec::new(),
         skin_weights: Vec::new(),
+        fold: None,
     };
     vec![tire, rim]
 }

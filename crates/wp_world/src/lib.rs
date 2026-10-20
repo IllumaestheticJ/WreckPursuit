@@ -12,6 +12,7 @@
 //!   spawning, kinematic/physical LOD).
 //! - [`drive`]: the shared AI driving controller (pure pursuit + PID) used by physical
 //!   traffic, racers (`wp_opponent`) and police.
+//! - [`covered`]: tunnels and covered roads (line of sight in and out is blocked).
 //! - [`density`], [`signals`], [`clock`], [`violations`], [`routes`], [`props`].
 //!
 //! [`World`] composes them. The sim loop calls [`World::set_tracked_vehicles`] (players,
@@ -22,10 +23,12 @@
 
 pub mod builder;
 pub mod clock;
+pub mod covered;
 pub mod density;
 pub mod drive;
 pub mod geom;
 pub mod leader;
+pub mod manoeuvre;
 pub mod map;
 pub mod markings;
 pub mod network;
@@ -132,6 +135,7 @@ fn empty_network() -> RoadNetwork {
         buildings: Vec::new(),
         surfaces: Vec::new(),
         terrain: None,
+        covered: Vec::new(),
     }
 }
 
@@ -193,6 +197,17 @@ impl World {
     /// Generate Port Vesper v2 (curves, elevation, terrain; `vesper::CITY_ID`) in memory.
     pub fn vesper(vc: &vesper::VesperConfig, cfg: WorldConfig) -> Self {
         Self::new(vesper::generate(vc), cfg)
+    }
+
+    /// Index of the tunnel / covered road containing `p` (into `network().covered`), if any.
+    pub fn covered_at(&self, p: [f32; 3]) -> Option<usize> {
+        self.map.covered_at(p)
+    }
+
+    /// Turn the line-of-sight effect of covered spans on or off (default on). Off is the
+    /// control run of tunnel scenarios: same geometry, sightlines ignore the cover.
+    pub fn set_covered_los(&mut self, on: bool) {
+        self.map.covered_los = on;
     }
 
     /// Car used for physical (near-LOD) traffic. Without one, traffic stays kinematic.

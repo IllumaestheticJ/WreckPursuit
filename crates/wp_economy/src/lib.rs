@@ -25,6 +25,7 @@
 //!   police events ([`PoliceSignal::from_sim_event`]).
 //! - [`session`] — end-of-run glue for `wp_sim`: sim events + damage reports → one settled
 //!   [`RunResult`].
+//! - [`profile`] — the single-player career save (versioned, with carry-over rules).
 //! - [`career`] — scripted multi-night career simulation used for tuning.
 
 #![warn(missing_docs)]
@@ -38,6 +39,7 @@ pub mod garage;
 pub mod ledger;
 pub mod mods;
 pub mod payouts;
+pub mod profile;
 pub mod pursuit;
 pub mod repair;
 pub mod session;
@@ -45,7 +47,7 @@ pub mod session;
 pub mod sqlite;
 
 pub use capture::{CaptureContext, CaptureOutcome, CarFate, CopAction, ImpoundStatus};
-pub use data::{DataSources, Economy};
+pub use data::{CareerRules, DataSources, Economy};
 pub use error::{DataError, EconomyError};
 pub use estimate::PerfMetrics;
 pub use garage::{CarSpec, Condition, Preview};
@@ -56,6 +58,7 @@ pub use ledger::{
 };
 pub use mods::{ModCatalog, ModDef, ModEffect, ModSlot, ToolLoadout};
 pub use payouts::{PinkSlipConsent, RaceResult, RaceSettlement, RaceSetup, RaceType};
+pub use profile::{AbandonedRun, CareerProfile, CareerStats, CarryOver, ProfileError, RunEnd};
 pub use pursuit::{PoliceSignal, PursuitEnd, PursuitResolution, PursuitSettlement, PursuitTracker};
 pub use repair::{
     district_from_key, district_key, DamageReport, RepairOption, RepairOrder, RepairQuote,

@@ -222,7 +222,7 @@ feedback) and the code on `main` + the lead branch, 2026-10-19.
 | **I** Harness | ✓ `golden/city_chase` merged | ✗ re-aim the golden (the racer rear-ends a patrol car at 0.11 s; checks parked in `expect_pending`); ○ observer soak with police on, after E's fix | yes (proof) |
 | **J** Audio | ✓ engine, tires, sirens, radio in the browser | ✗ sirens follow pursuit state (with lead); ○ radio lines from `POLICE_DOCTRINE.md` on pursuit start/end | partly |
 | **K** Weather | ✓ crate | — (demo is dry) | no |
-| **L** Race | ✓ rules, events | ○ `city_sprint_police` (a race that draws police) | no |
+| **L** Race | ✓ rules, events, `city_sprint_police`; ✓ **step 2:** street races in the browser (**races** button: picker with 4 races on Port Vesper and the grid, AI racers, countdown, race HUD with minimap and next-gate marker, results + G's payout, capture → end-of-run panel) | ○ (step 2) reset onto the course instead of the grid slot; illegal-daytime heat strong enough to start pursuits (E) | no |
 | **M** UI kit | ✓ chase HUD and repair bill mounted in the testbed | ✗ one heat / wanted / pursuit readout (with C); ✗ bill wired to G's quote + fine + impound | yes |
 | **N** Opponent AI | ✓ AI racers | ○ racers react to police | no |
 | **O** Meta | ✓ API | — | no |

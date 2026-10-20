@@ -25,7 +25,13 @@ use crate::wire::{ByteReader, ByteWriter};
 use crate::NetError;
 
 /// Protocol version; bumped on any wire change. Checked in `Hello`.
-pub const PROTOCOL_VERSION: u16 = 4;
+pub const PROTOCOL_VERSION: u16 = 5;
+
+/// Most entity ids one `Inputs` message may report as missing a baseline.
+pub const MAX_MISSING_PER_MSG: usize = 64;
+
+/// Largest damage state a `LatticeSnapshot` may carry, bytes.
+pub const MAX_DAMAGE_STATE_BYTES: usize = 64 * 1024;
 /// Longest accepted player name, bytes.
 pub const MAX_NAME_LEN: usize = 32;
 /// Longest accepted meta join / reconnect token, bytes (MC-6).
@@ -386,6 +392,10 @@ pub enum ClientMsg {
         first_tick: u64,
         /// Quantised inputs.
         inputs: Vec<QInput>,
+        /// Entities whose last snapshot delta could not be applied (baseline missing, e.g.
+        /// the `EntityEnter` was still in flight): the server forgets their baselines and
+        /// sends them in full next (v5). Without this an entity freezes for that client.
+        missing: Vec<u32>,
     },
     /// `0x03` `u8 role`.
     RoleRequest {
@@ -534,7 +544,8 @@ pub enum ServerMsg {
         hash: u32,
     },
     /// `0x8A` R. `varint vehicle, varint tick, LatticeSnapshot` (node bitmap + exact f32
-    /// positions of displaced nodes), `varint damage_steps + 1` (0 = unknown).
+    /// positions of displaced nodes), `varint damage_steps + 1` (0 = unknown), `u8 flags`
+    /// (bit 0 = state follows, bit 1 = provisional) [+ `bytes state`] (v5).
     LatticeSnapshot {
         /// Vehicle.
         vehicle: u32,
@@ -545,6 +556,13 @@ pub enum ServerMsg {
         /// Damage steps the server's model has run (`None` = unknown). Lets a replica match
         /// the server's solver phase (`wp_damage` solves every `solver_divider` steps).
         damage_steps: Option<u64>,
+        /// Full internal damage state of a damaged car (beam rest lengths, plastic strain,
+        /// broken beams, components, detached parts; NET-N5), sparse against the pristine car
+        /// ([`crate::lattice::encode_damage_state`]). `None` for undamaged cars.
+        state: Option<Vec<u8>>,
+        /// The server's model had an impact in progress: the replica is approximate until a
+        /// final (non-provisional) snapshot follows, sent once the model settles.
+        provisional: bool,
     },
     /// `0x8B` U. `u32 client_ms, varint server_tick`.
     Pong {
@@ -685,6 +703,7 @@ impl ClientMsg {
                 ack_snapshot_tick,
                 first_tick,
                 inputs,
+                missing,
             } => {
                 w.u8(0x02);
                 w.varint(*ack_snapshot_tick);
@@ -699,6 +718,9 @@ impl ClientMsg {
                     w.u8(i.buttons);
                     w.u8(i.tool_use);
                 }
+                let missing = &missing[..missing.len().min(MAX_MISSING_PER_MSG)];
+                w.varint(missing.len() as u64);
+                missing.iter().for_each(|e| w.varint(*e as u64));
             }
             Self::RoleRequest { role } => {
                 w.u8(0x03);
@@ -770,10 +792,16 @@ impl ClientMsg {
                         tool_use: r.u8()?,
                     });
                 }
+                let m = r.len(MAX_MISSING_PER_MSG)?;
+                let mut missing = Vec::with_capacity(m);
+                for _ in 0..m {
+                    missing.push(r.varint_u32()?);
+                }
                 Self::Inputs {
                     ack_snapshot_tick,
                     first_tick,
                     inputs,
+                    missing,
                 }
             }
             0x03 => Self::RoleRequest {
@@ -1078,12 +1106,18 @@ impl ServerMsg {
                 tick,
                 snapshot,
                 damage_steps,
+                state,
+                provisional,
             } => {
                 w.u8(0x8A);
                 w.varint(*vehicle as u64);
                 w.varint(*tick);
                 snapshot.encode(w);
                 w.varint(damage_steps.map_or(0, |s| s + 1));
+                w.u8(u8::from(state.is_some()) | (u8::from(*provisional) << 1));
+                if let Some(b) = state {
+                    w.bytes(b);
+                }
             }
             Self::Pong {
                 client_ms,
@@ -1304,12 +1338,29 @@ impl ServerMsg {
                 tick: r.varint()?,
                 hash: r.u32()?,
             },
-            0x8A => Self::LatticeSnapshot {
-                vehicle: r.varint_u32()?,
-                tick: r.varint()?,
-                snapshot: LatticeSnapshot::decode(&mut r)?,
-                damage_steps: r.varint()?.checked_sub(1),
-            },
+            0x8A => {
+                let vehicle = r.varint_u32()?;
+                let tick = r.varint()?;
+                let snapshot = LatticeSnapshot::decode(&mut r)?;
+                let damage_steps = r.varint()?.checked_sub(1);
+                let flags = r.u8()?;
+                if flags > 3 {
+                    return Err(NetError::Decode("lattice snapshot flags".into()));
+                }
+                let state = if flags & 1 != 0 {
+                    Some(r.bytes(MAX_DAMAGE_STATE_BYTES)?)
+                } else {
+                    None
+                };
+                Self::LatticeSnapshot {
+                    vehicle,
+                    tick,
+                    snapshot,
+                    damage_steps,
+                    state,
+                    provisional: flags & 2 != 0,
+                }
+            }
             0x8B => Self::Pong {
                 client_ms: r.u32()?,
                 server_tick: r.varint()?,
@@ -1490,6 +1541,7 @@ mod tests {
                 });
                 3
             ],
+            missing: vec![7, 300],
         });
         rt_client(ClientMsg::RoleRequest {
             role: Role::PoliceCaptain,
@@ -1633,6 +1685,8 @@ mod tests {
                 displaced: vec![(1, [0.5, -0.25, 0.125])],
             },
             damage_steps: Some(12_345),
+            state: Some(vec![1, 2, 3]),
+            provisional: true,
         });
         rt_server(ServerMsg::Pong {
             client_ms: 42,

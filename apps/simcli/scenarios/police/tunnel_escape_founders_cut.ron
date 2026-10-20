@@ -1,0 +1,61 @@
+// Backlog B04: shaking the helicopter in a tunnel. Midday in Port Vesper v2, a racer already at
+// wanted level L3 (heat 50, the bottom of L3) follows the route from the Lantern Run grid
+// through downtown and Mercer, up the Uptown Connector and into Founders Cut (the 250 m covered
+// trench), and stops at the "Founders Cut lay-by" in the middle of it. The route driver seeks
+// the lay-by with wp_world's path follower (speed planned for the curves and junctions), so a
+// change in junction geometry shifts the timing a little but not the story. A downtown patrol
+// starts the pursuit within seconds; the helicopter launches at ≈ 58 s and sits over the racer
+// from ≈ 65 s while the ground units fall 300-500 m behind. Inside the Cut nothing outside can
+// see in: the helicopter loses the racer as it enters (≈ 100 s) and the L3 day escape time
+// (22 s) runs out at ≈ 122 s → Escaped, while the nearest ground unit is still ≈ 400 m away
+// (a unit that later drives into the Cut sees him inside the same tunnel).
+//
+// Heat 50 rather than 55: pursuit heat (0.25/s while seen) took a heat-55 racer to L4 (30 s
+// escape time) just before the Cut, and after the round-12b junction fix (≈ 3 s later arrival)
+// the first unit drove into the Cut 0.5 s before that timer ran out — a race this scenario
+// should not depend on.
+//
+// The same run with `covered_los: false` (tunnel_escape_founders_cut_control.ron) is captured
+// instead: the helicopter keeps watching the parked car until ground units arrive.
+//
+// Round 13 (rows 63 / 64, faster police that converge and search): pursuit heat now takes him
+// to L4 (30 s escape time) at ≈ 97 s, just before the Cut, and searching units used to drive
+// into the Cut and find him at ≈ 127 s (captured 138.6 s). Searching units now hold both
+// portals of a covered road the racer was lost in (PVPD doctrine §5: nobody chases inside), so
+// he escapes at 130.4 s after 30 s unseen, units ≈ 145 m away at the portals. Measured
+// (round 13, racer target 25 m/s): lost at ≈ 100 s, Escaped 130.4 s; control Captured 134.9 s,
+// never unseen long. Re-aim with `examples/probe_tunnel_chase.rs`.
+(
+    name: "police_tunnel_escape_founders_cut",
+    seed: 51,
+    city: preset(name: "vesper_v2", seed: 1),
+    time_of_day_h: 12.0,
+    time_ratio: 1.0,
+    mode: Arcade,
+    traffic_density: 0.0,
+    parked_cars: false,
+    police_presence: 1.0,
+    assists: ai,
+    slow: true,
+    entities: [
+        (
+            id: "racer",
+            car: "debug_coupe",
+            police_heat: 50.0,
+            speed_mps: 20.0,
+            driver: follow_route(route_id: "Lantern Run -> Founders Cut lay-by", target_speed: 25.0),
+        ),
+    ],
+    duration_s: 150.0,
+    hash_every: 240,
+    expect: [
+        pursuit_started_before(t_s: 15.0),
+        // wp_police HeloLaunched (kind 12).
+        police_event_before(kind: 12, t_s: 80.0),
+        metric(entity: "racer", name: "route_progress", min: 0.97, max: 1.0),
+        // The tunnel hides him long enough for the escape timer (22 s at L3 by day).
+        metric(entity: "racer", name: "max_los_lost_s", min: 18.0, max: 60.0),
+        first_pursuit_end(entity: "racer", outcome: "Escaped", min_s: 105.0, max_s: 150.0),
+        total_loss(entity: "racer", expected: false),
+    ],
+)

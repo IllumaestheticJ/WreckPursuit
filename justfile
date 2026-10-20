@@ -23,6 +23,11 @@ web: wasm
 web-e2e: wasm
     cd apps/testbed-web && npm run e2e
 
+# Two browser tabs on a local wp-server: both see 2 player cars, a crash deforms both on both.
+web-e2e-net: wasm
+    cargo build --release -p wp_server
+    cd apps/testbed-web && WP_SERVER=../../target/release/wp-server npm run e2e:net
+
 # Native testbed stub window (add `--features window,ffb` manually for an SDL2 FFB wheel).
 native:
     cargo run --release -p testbed-native --features window

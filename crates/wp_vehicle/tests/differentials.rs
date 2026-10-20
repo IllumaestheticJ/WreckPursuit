@@ -1,0 +1,354 @@
+//! Differential behaviour (owner request, playtest row 26): split-µ launch, corner-exit
+//! power, lift-off by ramp type, the helical diff with an unloaded wheel, AWD centre,
+//! brake-based traction control and determinism. All in the single-car Rapier rig.
+
+use wp_contracts::{AssistProfile, HandlingEffects, LoadedCar, VehicleInput};
+use wp_vehicle::diff::{AxleDiff, CentreDiff, DiffSetup};
+use wp_vehicle::metrics::{
+    exit_on_circle_with, lift_off_with, metric_assists, power_oversteer_exit, split_mu_launch_with,
+    DriverStyle,
+};
+use wp_vehicle::rig::Rig;
+use wp_vehicle::VehicleExtras;
+
+fn car(id: &str) -> LoadedCar {
+    let p = format!("{}/../../data/cars/{id}.json", env!("CARGO_MANIFEST_DIR"));
+    wp_contracts::load_car(p).unwrap()
+}
+
+fn no_tcs() -> AssistProfile {
+    AssistProfile {
+        tcs: false,
+        ..metric_assists()
+    }
+}
+
+/// `car`'s own setup with the rear (`rear = true`) or front axle replaced.
+fn with_axle(c: &LoadedCar, rear: bool, d: AxleDiff) -> VehicleExtras {
+    let mut s = DiffSetup::for_car(&c.def);
+    if rear {
+        s.rear = d;
+    } else {
+        s.front = d;
+    }
+    VehicleExtras {
+        diffs: Some(s),
+        ..VehicleExtras::default()
+    }
+}
+
+const CLUTCH_15: AxleDiff = AxleDiff::Clutch {
+    preload_nm: 60.0,
+    accel: 0.45,
+    decel: 0.25,
+};
+
+#[test]
+fn split_mu_open_spins_the_ice_wheel_lsd_drives_off() {
+    // RWD and FWD, 60 % throttle, TCS off, heading held, 4 s.
+    for (id, rear) in [("shiro_turbo", true), ("vireo_xs", false)] {
+        let c = car(id);
+        let open =
+            split_mu_launch_with(&c, with_axle(&c, rear, AxleDiff::Open), &no_tcs(), 0.6, 4.0);
+        let lsd = split_mu_launch_with(&c, with_axle(&c, rear, CLUTCH_15), &no_tcs(), 0.6, 4.0);
+        let locked = split_mu_launch_with(
+            &c,
+            with_axle(&c, rear, AxleDiff::Locked),
+            &no_tcs(),
+            0.6,
+            4.0,
+        );
+        assert!(
+            open.ice_wheel_slip_mps > 25.0 && open.distance_m < 6.0,
+            "{id} open diff should spin the ice wheel and crawl: {open:?}"
+        );
+        assert!(
+            lsd.distance_m > 2.0 * open.distance_m && lsd.ice_wheel_slip_mps < 15.0,
+            "{id} LSD should drive off: open {open:?} lsd {lsd:?}"
+        );
+        assert!(
+            locked.distance_m >= lsd.distance_m && locked.ice_wheel_slip_mps < 5.0,
+            "{id} locked: {locked:?} vs lsd {lsd:?}"
+        );
+    }
+}
+
+#[test]
+fn brake_based_tc_lets_an_open_diff_pull_away_on_split_mu() {
+    // Open diff, full throttle: TCS's brake on the spinning ice wheel passes torque to the dry
+    // wheel (the throttle cut alone would just bog the car down).
+    for (id, rear) in [("vireo_xs", false), ("sentinel_bastion", true)] {
+        let c = car(id);
+        let x = with_axle(&c, rear, AxleDiff::Open);
+        let off = split_mu_launch_with(&c, x, &no_tcs(), 1.0, 4.0);
+        let on = split_mu_launch_with(&c, x, &metric_assists(), 1.0, 4.0);
+        assert!(
+            on.distance_m > 5.0 && on.distance_m > 1.2 * off.distance_m,
+            "{id}: TCS off {off:?} on {on:?}"
+        );
+        assert!(on.ice_wheel_slip_mps < 4.0, "{id}: {on:?}");
+    }
+}
+
+#[test]
+fn clutch_lsd_cuts_inside_wheelspin_and_adds_controllable_oversteer_on_corner_exit() {
+    // Hairpin exit: steady 0.6 g on a 20 m circle, then full throttle for 2 s following the
+    // line, keyboard-level slide help with TCS off.
+    let help = AssistProfile {
+        countersteer_help: 0.6,
+        ..no_tcs()
+    };
+    for id in ["shiro_turbo", "rampart_50", "lucciola_350"] {
+        let c = car(id);
+        let open = exit_on_circle_with(
+            &c,
+            with_axle(&c, true, AxleDiff::Open),
+            20.0,
+            0.6,
+            1.0,
+            2.0,
+            &help,
+        );
+        let lsd = exit_on_circle_with(
+            &c,
+            with_axle(&c, true, CLUTCH_15),
+            20.0,
+            0.6,
+            1.0,
+            2.0,
+            &help,
+        );
+        assert!(
+            lsd.inside_slip < 0.6 * open.inside_slip,
+            "{id} inside-wheel spin: open {open:?} lsd {lsd:?}"
+        );
+        assert!(
+            lsd.peak_body_slip_deg > open.peak_body_slip_deg + 2.0,
+            "{id} LSD should add power oversteer: open {open:?} lsd {lsd:?}"
+        );
+        assert!(
+            lsd.peak_body_slip_deg < 30.0,
+            "{id} the oversteer stays controllable: {lsd:?}"
+        );
+        assert!(
+            lsd.exit_speed_mps > open.exit_speed_mps,
+            "{id} exit speed: open {open:?} lsd {lsd:?}"
+        );
+    }
+    // With its own 1.5-way, the keyboard driver still catches a full-throttle power slide.
+    let r = power_oversteer_exit(
+        &car("shiro_turbo"),
+        &AssistProfile::keyboard_default(),
+        DriverStyle::Keyboard,
+        30.0,
+        0.7,
+        0.8,
+    );
+    assert!(r.recovered, "{r:?}");
+}
+
+#[test]
+fn lift_off_rotates_a_one_way_more_than_a_two_way() {
+    // 0.7 g on a 40 m circle, gear held (engine braking), throttle off for 1 s.
+    let held = AssistProfile {
+        auto_gears: false,
+        ..no_tcs()
+    };
+    let one_way = AxleDiff::Clutch {
+        preload_nm: 60.0,
+        accel: 0.45,
+        decel: 0.0,
+    };
+    let two_way = AxleDiff::Clutch {
+        preload_nm: 60.0,
+        accel: 0.45,
+        decel: 0.45,
+    };
+    for id in ["shiro_turbo", "rampart_50", "lucciola_350"] {
+        let c = car(id);
+        let one = lift_off_with(&c, with_axle(&c, true, one_way), 40.0, 0.7, &held);
+        let two = lift_off_with(&c, with_axle(&c, true, two_way), 40.0, 0.7, &held);
+        let locked = lift_off_with(&c, with_axle(&c, true, AxleDiff::Locked), 40.0, 0.7, &held);
+        assert!(
+            one.curvature_ratio > two.curvature_ratio + 0.01,
+            "{id}: 1-way {one:?} 2-way {two:?}"
+        );
+        assert!(
+            two.curvature_ratio > locked.curvature_ratio,
+            "{id}: 2-way {two:?} locked {locked:?}"
+        );
+    }
+}
+
+/// Launch 3 s at 60 % throttle with the right rear tire nearly gripless (an "unloaded"
+/// wheel: it resists almost no torque). Distance covered, m.
+fn launch_with_unloaded_rr(c: &LoadedCar, rear: AxleDiff, assists: &AssistProfile) -> f32 {
+    let mut rig = Rig::with_extras(c, with_axle(c, true, rear));
+    let mut eff = HandlingEffects::NEUTRAL;
+    eff.grip_scale[3] = 0.02;
+    rig.set_effects(&eff);
+    for _ in 0..3 * 240 {
+        // Heading hold (+ steer = right).
+        let fwd = rig.vehicle.chassis().rot * wp_vehicle::math::V3::Y;
+        let heading = wp_vehicle::math::atan2(-fwd.x, fwd.y);
+        let steer = (3.0 * heading + 0.5 * rig.state().ang_vel[2]).clamp(-1.0, 1.0);
+        rig.step(
+            &VehicleInput {
+                throttle: 0.6,
+                steer,
+                ..Default::default()
+            },
+            assists,
+        );
+    }
+    rig.state().pos[1]
+}
+
+#[test]
+fn helical_diff_acts_open_with_an_unloaded_wheel_until_the_brake_helps() {
+    let c = car("hakone_gt");
+    let helical = AxleDiff::Helical {
+        tbr: 2.5,
+        tbr_coast: 1.8,
+        preload_nm: 0.0,
+    };
+    let open = launch_with_unloaded_rr(&c, AxleDiff::Open, &no_tcs());
+    let hel = launch_with_unloaded_rr(&c, helical, &no_tcs());
+    let clutch = launch_with_unloaded_rr(&c, CLUTCH_15, &no_tcs());
+    let hel_tc = launch_with_unloaded_rr(&c, helical, &metric_assists());
+    // The torque-sensing diff multiplies a reaction that is barely there: it crawls like an
+    // open diff (open 1.8 m, helical 3.0 m when recorded).
+    assert!(
+        hel < 2.0 * open,
+        "helical {hel} vs open {open} clutch {clutch} tc {hel_tc}"
+    );
+    // A clutch LSD's preload and ramp still drive the loaded wheel (6.1 m).
+    assert!(clutch > 1.7 * hel, "clutch {clutch} vs helical {hel}");
+    // Brake-based TC loads the free wheel through its brake, and the bias comes back (9.1 m).
+    assert!(hel_tc > 2.5 * hel, "helical with TCS {hel_tc} vs off {hel}");
+}
+
+#[test]
+fn awd_viscous_centre_sends_torque_rearward_when_the_front_slips() {
+    let c = car("sentinel_wolfhound");
+    assert!(matches!(
+        DiffSetup::for_car(&c.def).centre,
+        CentreDiff::Viscous { .. }
+    ));
+    let mut rig = Rig::new(&c);
+    let mut rear_transfer = 0.0f32;
+    for _ in 0..240 {
+        rig.step(
+            &VehicleInput {
+                throttle: 1.0,
+                ..Default::default()
+            },
+            &no_tcs(),
+        );
+        rear_transfer = rear_transfer.max(rig.vehicle.telemetry().diff_transfer_nm[2]);
+    }
+    assert!(
+        rear_transfer > 100.0,
+        "centre moved {rear_transfer} N·m rearward"
+    );
+}
+
+#[test]
+fn every_diff_type_is_deterministic_and_snapshot_exact() {
+    let c = car("shiro_turbo");
+    let types = [
+        AxleDiff::Open,
+        CLUTCH_15,
+        AxleDiff::Viscous {
+            nm_per_rads: 40.0,
+            max_nm: 1200.0,
+        },
+        AxleDiff::Helical {
+            tbr: 2.5,
+            tbr_coast: 1.8,
+            preload_nm: 0.0,
+        },
+        AxleDiff::Active {
+            max_nm: 1500.0,
+            preload_nm: 0.0,
+            accel: 0.3,
+            decel: 0.05,
+            slip_gain: 150.0,
+        },
+        AxleDiff::Locked,
+    ];
+    let mut hashes = Vec::new();
+    for d in types {
+        let x = with_axle(&c, true, d);
+        let a = split_mu_launch_with(&c, x, &metric_assists(), 1.0, 2.0);
+        let b = split_mu_launch_with(&c, x, &metric_assists(), 1.0, 2.0);
+        assert_eq!(a.hash, b.hash, "{d:?}");
+        let e1 = exit_on_circle_with(&c, x, 20.0, 0.6, 1.0, 1.0, &no_tcs());
+        let e2 = exit_on_circle_with(&c, x, 20.0, 0.6, 1.0, 1.0, &no_tcs());
+        assert_eq!(e1.hash, e2.hash, "{d:?}");
+        hashes.push(a.hash);
+    }
+    hashes.sort_unstable();
+    hashes.dedup();
+    assert_eq!(hashes.len(), types.len(), "every diff type changes the run");
+
+    // Snapshot mid-launch (brake-TC holding the ice wheel), restore, replay: bit-exact.
+    let ice = wp_vehicle::SurfaceConditions {
+        water_depth_mm: 0.6,
+        temperature_c: -4.0,
+        ..wp_vehicle::SurfaceConditions::DRY
+    };
+    let mut rig = Rig::with_extras(&c, with_axle(&c, true, AxleDiff::Open));
+    rig.vehicle.set_wheel_conditions(2, ice);
+    let full = VehicleInput {
+        throttle: 1.0,
+        ..Default::default()
+    };
+    for _ in 0..240 {
+        rig.step(&full, &metric_assists());
+    }
+    assert!(
+        rig.vehicle.telemetry().tcs_brake_nm[2] > 0.0,
+        "brake-TC active"
+    );
+    let snap = rig.snapshot();
+    let ticks = rig.ticks();
+    for _ in 0..240 {
+        rig.step(&full, &metric_assists());
+    }
+    let truth = rig.state_hash();
+    rig.restore(&snap).unwrap();
+    rig.set_ticks(ticks);
+    for _ in 0..240 {
+        rig.step(&full, &metric_assists());
+    }
+    assert_eq!(rig.state_hash(), truth);
+}
+
+/// Determinism hashes for the roster's own setups (split-µ launch with TCS, 2 s), recorded on
+/// `ws/vehicle` with the differential rework. A change here means the drivetrain or a car's
+/// diff data changed: re-record in a `[bless]` commit with the reason.
+#[test]
+fn roster_diff_hashes_are_pinned() {
+    let pinned: [(&str, u64); 6] = [
+        ("shiro_turbo", 0x9a963f934195105a),
+        ("hakone_gt", 0xf68de2ec246a9a9),
+        ("sperber_32", 0x2ea77dfe02f24241),
+        ("lindwurm_4t", 0x29ee8b681129e2cf),
+        ("sentinel_wolfhound", 0x85dddf467bac926b),
+        ("junkyard_beater", 0xc8ab6690a927e4c2),
+    ];
+    let mut got = Vec::new();
+    for (id, _) in pinned {
+        let r = split_mu_launch_with(
+            &car(id),
+            VehicleExtras::default(),
+            &metric_assists(),
+            1.0,
+            2.0,
+        );
+        got.push((id, r.hash));
+    }
+    let expected: Vec<(&str, u64)> = pinned.to_vec();
+    assert_eq!(got, expected, "hashes: {got:#x?}");
+}

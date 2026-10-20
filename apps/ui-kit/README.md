@@ -142,6 +142,24 @@ Since contract v0.3.0 police, economy and race events are typed (`SimEvent::Poli
 them directly from the generated types. `src/model/police.ts` re-exports those and keeps a hand
 mirror only of `wp_police`'s captain view (`CaptainView`, not in the contract — UI-3).
 
+### Live hosts: city map HUD (`src/map/`)
+
+Corner minimap (heading up, zoom by speed, police blinking red/blue when responding or pursuing,
+sight areas and search zone while wanted, roadblocks / spikes, helicopter, garages / safehouses,
+escape ring) and a full city map with districts, POIs, pan / zoom and a legend. Canvas 2D; the
+minimap's roads come from one offscreen canvas per city. Data from `wp_wasm`:
+
+```ts
+import { mountMapHud } from "../../ui-kit/src/live";
+const map = mountMapHud(overlayEl, { onOpenChange: (open) => (inputPaused = open) });
+map.setStatic(wasm.map_static_json());               // once per city
+map.frame(wasm.map_dynamic(player), performance.now()); // every frame
+// host keys: M / Tab → map.toggle(); the map handles Esc, arrows, + / −, 0, F itself while open
+```
+
+Layouts: `src/map/data.ts` (mirrors `crates/wp_wasm/src/map.rs`). Tests: `src/map/*.test.ts`.
+Screenshots: `docs/media/map/`.
+
 ### Live hosts: chase end
 
 `src/live/chaseEnd.ts` `ChaseEndDetector.update(racer, status, level, events, freshOutcome?)`
@@ -207,4 +225,5 @@ tools/record-police         Rust: records a real wp_police run as a fixture
 - The binding flow is tested with the keyboard in CI; gamepad/wheel capture uses the Gamepad API
   and was not exercised headless (no device).
 - Display font falls back to system condensed sans (no web fonts are bundled).
-- The kit is not wired into `apps/testbed-web` (owned by 04): it provides the mount API and demo.
+- The demo page has no map screen (no static map fixture); the testbed is the map's surface.
+- District names for Port Vesper v2 are a UI-side table until zones carry names (CITY.md C2).

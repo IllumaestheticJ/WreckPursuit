@@ -13,6 +13,38 @@ Everything is a method on `wp_economy::Economy` (immutable data bundle). Mutatin
 `&mut PlayerAccount` and return `Result<(T, Vec<EconomyEvent>), EconomyError>`; a refused call
 never changes the account. Persist with `AccountStore::commit(&account, &events)`.
 
+### Browser career (step 2) — `wp_wasm::career` + `wp_economy::profile`
+A single-player career that persists between runs in the browser. The career owns the account
+between runs; during a run the session's `PlayerRun` holds it and the career takes it back when
+the run ends.
+
+| wasm export | Notes |
+|---|---|
+| `career_new(mode)`, `career_load_json(text)`, `career_save_json()`, `career_exists()` | save = `CareerProfile` JSON (versioned; `migrate` refuses newer saves). During a run `career_save_json` includes the live account and the car's current damage |
+| `career_view_json()` | `CareerView`: cash / debt / rep / bounty / net worth, carried heat + level, cars (condition, value, sale + scrap price, mods, insurance, `RepairAll` quote, priced repair lines, pound status, PI / mass / 0–100 / top speed), dealer (street roster, New/Used/Worn prices), floor car, insurance tiers, district labour, stats, ledger tail |
+| `career_mods_json(uid)` | mod tree for the car's class and mode: installed, allowed + reason, same-line replacement, stats after the change |
+| `career_start_run(scenario_json)` | any live scenario (free drive, city chase, a race): entity 0 becomes the active car with its mods (overlay data, same car id), saved lattice restored, career mode, carried heat as `police_heat`; ends a career run in progress first |
+| `career_end_run()` | `RunClose { end: Free/Captured/Wrecked, carried_heat, cash, ledger }`; stores the car's damage, applies carry-over, one night passes. Replacing the session (`init`, another start) also ends it |
+| `career_run_active()` | |
+| `career_buy_car(def, cond)`, `career_floor_car()`, `career_sell_car(uid)`, `career_set_active(uid)` | dealer = roster minus `debug_*` and police |
+| `career_install_mod(uid, id)`, `career_uninstall_mod(uid, id)` | a mod that changes the lattice structure (cages) is refused while the body is dented |
+| `career_quote_json(uid, req)`, `career_repair(uid, req)` | `req = { option?: RepairAll / {RepairSelected:[items]} / Scrap, district?: DistrictId, shop?: Legit/Crooked }`; the stored lattice is repaired with `DamageSim::apply_repair` (full repair = pristine body); a legit shop reporting a wanted car raises carried heat |
+| `career_release(uid)`, `career_next_night()` | pound release; a night without driving (auction countdown, premiums) |
+| `career_insure(uid, tier)` | `"basic"`, `"full"`, `""` = drop the policy |
+
+Rules: each finished run is a night; capture / wreck clears heat; a free end carries heat × 0.5
+(≤ 45, < 5 forgotten); bounty, rep, debt and the pound clock live in the account. Career runs
+keep the career's damage mode (`set_damage_mode` is refused). Lattice blobs are
+`wp_damage::FullDamageSnapshot` JSON text per car uid (exact round trip).
+
+Testbed (`apps/testbed-web`): `garage` button and a `career` box (on by default) in the
+controls: with it, **free drive** and **city chase** start career runs; the car selector and
+`window.__wp.startFreeDrive(car, …)` / `startCityChase(car, …)` stay sandbox runs. Saved to
+`localStorage["wp.career.v1"]` (try/catch everywhere; an unreadable save is kept under
+`wp.career.v1.unreadable`) after every garage action, every settlement and every 20 s of a run;
+export / import as a file from the garage. The end-of-run panel gets a **Garage** button on
+career runs.
+
 ### End-of-run glue for `wp_sim` (`wp_economy::session`) — round 6b
 | Call | Notes |
 |---|---|
@@ -152,6 +184,13 @@ per seed). `apps/simcli` (workstream 10) may wrap it as an economy scenario.
 | 15 race (L) | **R5 agreed mapping (round 8):** the economy prices every `RaceKind` itself from `stakes.toml [race_kinds]` (same type mapping as your `bridge::economy_race_type`: Outrun → Touge, TimeAttack → Circuit, Checkpoint / Cannonball / Delivery → Sprint; multipliers keep your `data/events/stakes.toml [kinds]` purse ratios within 15 %, checked by `tests/race_kinds.rs`, which reads your file) and `[legality]` (sanctioned ×0.8 purse / ×1.2 buy-in, illegal daytime ×4.5 ≈ 2.5× a night street race). Your `Stake.purse` stays the lobby's advertised number; the payout is the economy's. I added `kind: Some(kind), legality` to the `RaceSetup` literal in `bridge::economy_setup` (compile fix); you may replace the body with `econ.race_setup(..)` if you have an `Economy` there. If you change the kind → race type mapping or the relative `base_purse`s, `race_kinds.rs` fails: tell me and I retune. Still open from R5: charge `cargo_damage_cost` and apply `CrewCut` at the call site (server) — economy calls exist (`Adjustment` / a new reason if you want one: say which). | — |
 | 10 harness | CI line `cargo test -p wp_economy --features native` so the SQLite store is tested in CI | run locally |
 
+### Needs (step 2)
+| From | What | Workaround now |
+|---|---|---|
+| I (harness) / lead | A replay of a career run whose car has mods or started damaged does not verify (replay rebuilds the stock, pristine car). Proposal: scenario `EntitySpec` gains optional `car_def` / `lattice_def` overrides and an initial `damage: FullDamageSnapshot`, applied by `build_sim`; or a replay op | stock, undamaged career cars replay fine; documented |
+| L (race menu) | Start races from the menu with `career_start_run(scenario_json)` when the career is on, so races use the career car; race payouts then flow through the run's `PlayerRun` (needs a race-result call there, lead) | free drive / city chase only |
+| B (damage) | Contract request #9 (`DamageSnapshotExt` into `DamageSnapshot`) would let the career store the contract type instead of `FullDamageSnapshot` | `FullDamageSnapshot` JSON |
+
 ## Contract change requests
 | # | Change (type / field / variant) | Why | Who is affected | Status |
 |---|---|---|---|---|
@@ -222,6 +261,29 @@ Police / net consumers: `InformantTip`, `ShopReported`, `BountyCleared` change h
 `CarImpounded`/`CarSeized`/`CarDestroyed` mean the car must not spawn.
 
 ## Changes outside my crates
+**Step 2 (career), authorized minimal glue:**
+- `crates/wp_wasm` (C): new `src/career.rs` + `src/career_tests.rs` (mine); `session.rs`:
+  `Session::new_with_data` (cars read through a data overlay), `is_career` / `begin_career` /
+  `end_career` / `sim_before_start_mut`, `set_mode` refused in career runs; `lib.rs`: `install`
+  ends a replaced career run (`career::absorb`), `with_session_opt`, module lines; `run.rs`
+  (lead): `PlayerRun::for_career_car`, `was_wanted`, `car`, `RunReport::escape_cash`;
+  `run_tests.rs`: the escape test now expects escape cash; `Cargo.toml`: `wp_damage` (already in
+  the tree via `wp_sim`).
+- `apps/testbed-web` (C): `index.html` (`career` box, `garage` button), `main.ts` (career
+  load/save, garage mount, career runs, autosave, `__wp.{garage, careerApi, openGarage,
+  startCareerRun, persistCareer}`), `wasm/sim.ts` (`career*` wrappers), `ui/runEnd.tsx`
+  (Garage button, escape cash in the toast), `e2e/run.mjs` (career loop check).
+- `apps/ui-kit` (M): new files only, `src/garage/{CareerGarage.tsx, types.ts, store.ts,
+  garage.css}`; they use `ui/kit.tsx`, `ui/format.ts` and `ui/theme.css`, nothing else.
+
+
+Round 12b (minimal fixes for the new `OwnedCar::purchase_price` field / save v2):
+- `apps/testbed-web/e2e/run.mjs` (C, my career block): the bust check expects save `version === 2`.
+- `crates/wp_wasm/src/run.rs` (lead): the demo's handed-out car gets `purchase_price: Some(0)`
+  (it was free, so it resells for its mods only — no money from nothing).
+- `crates/wp_wasm/src/garage.rs` (C): the throwaway quote car gets `purchase_price: None`
+  (only quoted, never sold).
+
 **By the lead in `wp_economy` (`lead/demo-endrun`, 2026-10-19):** `EconomySession::set_mode(mode)` (the testbed switches damage mode mid-run; `finish` and quotes use it). Additive, no behaviour change. The demo calls the session from `crates/wp_wasm/src/run.rs` with `RepairPolicy::QuoteOnly`, then `retrieve_from_impound` + `repair(RepairAll)` on "Repair & continue".
 
 Round 8 (minimal compile fixes for new fields, nothing else):
@@ -375,3 +437,119 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
 Gate on `ws/economy` after merging `origin/main` (round 8): `cargo fmt --check`, workspace clippy
 `--all-targets -D warnings`, `cargo test --workspace` (all green, no failures),
 `cargo test -p wp_economy --features native`, wasm build of `wp_wasm` (no `rusqlite` in its tree).
+
+
+## Step 2 response (economy, 2026-10-19) — persistent career in the browser
+
+1. **Persistence:** cash, ledger (last 200 lines), owned cars with full lattice damage
+   (`FullDamageSnapshot` via `save_full`/`restore_full`), mods, insurance, impound status,
+   carried heat, bounty / rep / debt, career and lifetime stats. `localStorage` (versioned key,
+   try/catch, unreadable saves kept aside, migration stub in `store.ts` for keys and in
+   `wp_economy::profile::migrate` for the JSON) plus export / import as a file. Free drive and
+   city chase start career runs with the career car, its mods and its saved damage; the
+   end-of-run settlement goes into the career.
+2. **Garage screen** (`apps/ui-kit/src/garage/CareerGarage.tsx`, the testbed's `garage` button):
+   car list with condition and value; repair all or per item at a district (labour ×) legit or
+   crooked shop, scrap; dealer with New / Used / Worn prices in the class bands and the floor
+   beater; sell; mod tree (performance / durability / tool / cosmetic) with PI, mass, 0–100, top
+   speed, grip and brake deltas, install / swap / remove; pound with fee, fee per night and
+   auction countdown, release or "let a night pass"; insurance none / basic / full; ledger and
+   stats; new career (Arcade / Simulation).
+3. **Economy sanity** (`tests/browser_career.rs`, `cargo test -p wp_economy --test browser_career -- --nocapture`):
+   start cash 4 000 → **4 500**; worn beater 1 800 leaves 2 700 ≥ three busted L1 nights in it
+   (≈ 736 each; L2 ≈ 1 096). New `[bounty.escape_cash]`: night escape L1 455 / L2 1 040 /
+   L3 2 080. Arcade busts: Sport L2 1 806, Sport L3 2 586; Simulation Sport L3 4 413. So one L2
+   escape out-earns an L1 beater bust, but a bust in a real car costs more than the escape at the
+   same level. 20-night career still solvent in Arcade (median 63 447 from 22 000, 0/64 in debt)
+   and marginal in Simulation (median 23 782).
+4. **Tests:** `crates/wp_wasm/src/career_tests.rs` (10, native): a run uses the career car and
+   carries its damage over (restored model == saved); save → load → same profile and stable
+   re-save (also through the wasm exports); full repair → pristine body bit-for-bit in the next
+   run; partial repair == `apply_repair(items)` on the saved model, the rest one by one ends
+   pristine; buy / sell / mod flows (prices, refunds, stat deltas as promised, modded car driven,
+   cage refused while dented, durability adds mass and beams); floor car; capture → garage →
+   pound fee grows a night → release → repair → new run with the repaired car; auction; heat
+   carry; mode lock. Browser e2e (`apps/testbed-web/e2e/run.mjs`, "career:" lines): garage →
+   buy beater → city chase → busted → Garage → saved → reload → release → repair all → free
+   drive with the repaired car → export/import round trip.
+
+Known gaps: replays of modded / pre-damaged career runs (Needs → I); races in the career (L's
+menu); escape payouts are the only career income until races land; the dealer's car names come
+from `display_name` (analog names); the in-run HUD shows the run account, not net worth.
+
+Gate on `ws/economy` (step 2, after merging `origin/main`): `cargo fmt --check`, workspace clippy
+`--all-targets -D warnings`, `cargo test --workspace` (all green, determinism lint 0 errors),
+`cargo build --target wasm32-unknown-unknown -p wp_wasm`, wasm-pack release build, `tsc` in
+`apps/testbed-web` and `apps/ui-kit`. **web-e2e:** every check up to "pursuit banner" passes,
+then headless Chromium's renderer crashes ("Target crashed") at the lead's end-of-run block —
+**the same crash on unmodified `origin/main` in this container** (SwiftShader, after many sessions
+in one page; for C / lead). Run on a fresh page, the lead's end-of-run block and all four
+"career:" checks pass (capture → Repair & continue; beater bought $4 500 → $2 700, chase with the
+career car; busted → garage, saved v1 with the car impounded; reload → release $2 340 → $2 150 →
+repair, health 1; new run with the repaired car, export → import identical).
+
+## Lead feedback (round 12b, 2026-10-20) — owner playtest: buy-low / sell-high exploit
+Base: `origin/lead/round12` (not main). Owner: "I can buy a used car and sell it for more right now."
+Cause (lead read of `wp_economy::garage`): `sale_price` pays `dealer_buy_frac (0.7) × base_price`
+regardless of the condition the car was bought in, while `market_price` charges
+`base_price × condition` (Used 0.8, Worn 0.6). Buying a Worn car (0.6) and selling it at once
+returns 0.7 → +17 % profit. The floor car is worse: price 1 500, base 3 000 → sells for 2 100.
+1. Selling must never return more than was paid for the same car in the same state. Record the
+   purchase condition (or price paid) on `OwnedCar` and value resale from it (e.g. 0.7 × market
+   price in the bought condition), with mods and damage as now. Floor car: resale ≤ its price.
+   If this needs a `wp_contracts` field, write the request below and keep a local field meanwhile.
+2. Property test: for every roster car × condition × mod set, buy → sell immediately ≤ cost; and
+   buy → repair → sell ≤ cost + repair spent. Also check the insurance path can't be farmed
+   (premium vs payout on a car you crash on purpose: payout must stay below repair cost; damage
+   while wanted is already excluded).
+3. In the garage screen, show the sale price before confirming, and a one-line "how insurance
+   works" note next to the insurance buttons (basic: 50 % of the repair bill above $500, $X/day;
+   full: 80 % above $250; nothing if the damage happened while wanted).
+4. Keep career saves loading (version bump + migration for old saves without the new field).
+
+### Round 12b response (economy, 2026-10-20)
+Base: `origin/lead/round12` merged into `ws/economy` (clean).
+1. **Resale from the price paid.** New `wp_economy::OwnedCar::purchase_price: Option<Money>`
+   (local field; `OwnedCar` lives in `wp_economy`, so no contract change) set by `buy_car`
+   (dealer price in the bought condition) and `issue_floor_car` (what was actually paid,
+   `min(1 500, cash)`). `sale_price = 0.7 × resale_basis + 0.4 × mods`, scaled by damage, where
+   `Economy::resale_basis` is the price paid (old-save cars: cheapest condition, floor price for
+   the floor model). Scrap salvage of the body is capped at `0.7 × resale_basis` too (a free
+   floor car could otherwise be scrapped for 960). Numbers: Worn 0.6 × base → sells 0.42 × base;
+   floor car 1 500 → 1 050 (was 2 100); a floor car given to a broke player for 300 → 210.
+2. **Tests:** `crates/wp_economy/tests/resale.rs` — three proptests (192 cases each: every
+   roster car × New/Used/Worn × random mod sets × Arcade/Sim): buy → sell / scrap < spent; buy →
+   (no / basic / full insurance) → random crash → repair at a legit or crooked shop → sell <
+   everything spent, and `insurance_covers < gross`, `player_pays > 0`; floor car for any cash
+   0–20 000 sells / scraps ≤ paid. Plus the owner's repro cases, v1-save valuation, and every
+   insurance tier paying < any bill (coverage < 1, deductible > 0). Damage while wanted stays
+   excluded (`garage_repair::insurance_pays_unless_damage_was_wanted`).
+3. **Garage screen:** Sell and Scrap now ask first — "Sell it to the dealer for $X? You paid $Y
+   for the car (mods return 40 %)." / "Scrap it for $X (bought for $Y)?" with Sell / Cancel
+   (`data-testid="career-confirm"`). The insurance panel has a one-line note built from the data
+   (`data-testid="insurance-note"`): "Basic: pays 50 % of the repair bill above $500, $X/night.
+   Full: pays 80 % of the repair bill above $250, $Y/night. Nothing for damage taken while
+   wanted." `CareerView.cars[].paid` added (= `resale_basis`).
+4. **Saves:** `PROFILE_VERSION` 1 → 2 with a real migration step (`step_1_to_2` adds
+   `purchase_price: null` to every car); unit test loads a v1 save, values its floor car ≤ 1 500
+   and re-saves as v2. The localStorage key (`wp.career.v1`) is unchanged — the JSON version
+   inside it carries the migration.
+
+Requests (outside my folders):
+- **UI mock (M):** `apps/ui-kit/src/data/economy.ts::salePrice` still ports the old rule
+  (`0.7 × basePrice`); the mock Market / Garage screens will show resale above the price paid
+  for used cars. Port: body = `0.7 × pricePaid` (and cap scrap body at the same).
+- **Testbed e2e (C / lead):** optional extra check in `e2e/run.mjs` career block: after buying
+  the beater, `view().cars[0].sale_price < fresh.cash - bought.cash`.
+
+
+Checks run (2026-10-20): `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`
+clean; wasm build + `npm run wasm` OK; `tsc --noEmit` clean in `apps/ui-kit` and
+`apps/testbed-web`; `just web-e2e` (`run.mjs` + `race.mjs`) all checks pass. `cargo test
+--workspace --no-fail-fast`: everything in `wp_economy` / `wp_wasm::career` passes; red outside
+my crates, from sim behaviour on the `lead/round12` base (my diff touches no sim, physics, AI or
+data file they read): `simcli` `goldens_match` (5 city scenarios: hashes diverge from tick 240),
+`wp_race --test race_picker` `grid_highway_sprint`, `wp_sim --test sidewalk` (1 test),
+`wp_wasm` `race_tests::{short_sprint_with_ai_runs_to_results_and_pays_through_the_economy
+(player DNF FinishWindow), a_capture_mid_race_is_a_dnf_and_hands_off_to_the_end_of_run_panel
+(never captured)}`. For the lead / owners of those crates.

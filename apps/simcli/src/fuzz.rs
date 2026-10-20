@@ -114,6 +114,7 @@ pub fn gen_case(cfg: &FuzzConfig, index: u64) -> Scenario {
     Scenario {
         name: format!("fuzz_{:016x}_{index}", cfg.seed),
         barriers,
+        weather: None,
         seed: rng.next_u64(),
         city: Default::default(),
         time_of_day_h: rng.range_f32(0.0, 24.0),
@@ -129,6 +130,7 @@ pub fn gen_case(cfg: &FuzzConfig, index: u64) -> Scenario {
         traffic_cars: true,
         parked_cars: true,
         police_cars: true,
+        covered_los: true,
         slow: false,
         panels: false,
         systems: None,

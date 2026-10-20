@@ -7,6 +7,8 @@
 
 #![warn(missing_docs)]
 
+pub mod meta;
+
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -19,7 +21,9 @@ use tokio::net::TcpListener;
 use wp_contracts::{DamageMode, LoadedCar, ModeTable, Role, TimeOfDay};
 use wp_net::bot::{random_route, BotDriver};
 use wp_net::client::{default_damage_factory, Client, ClientConfig, Phase};
-use wp_net::native::{connect_ws, serve_ws, spawn_game_loop, LogFn, StatusReport};
+use wp_net::native::{
+    connect_ws, serve_ws, spawn_game_loop, spawn_game_loop_with, LogFn, StatusReport,
+};
 use wp_net::netsim::{lane_spawn_points, server_world_config, CitySetup, WpSim};
 use wp_net::server::{ServerConfig, ServerInstance};
 use wp_net::testkit::{load_data, ArenaSim, ToyLattice, AI_POLICE_CAR, TRAFFIC_CAR};
@@ -36,7 +40,8 @@ usage: wp-server [--config FILE.toml] [--port N] [--admin-port N] [--bind ADDR]
   --port         websocket port (default 8080; 0 = any)
   --admin-port   admin HTTP port, GET /status (default 8081; 0 = any)
   --max-players  instance size (default 32)
-  --city         city: a .road.json / .road.bin file, or `procedural` (12x12 blocks);
+  --city         city: a .road.json / .road.bin file, `procedural` (12x12 blocks) or
+                 `vesper_v2` (Port Vesper v2, terrain + elevation);
                  adds physical traffic and AI police cars, players spawn on its lanes
   --seed         instance seed (default 1)
   --time-ratio   in-game seconds per real second (default 10)
@@ -48,7 +53,12 @@ usage: wp-server [--config FILE.toml] [--port N] [--admin-port N] [--bind ADDR]
   --weather      with --city: run server weather starting in KIND (clear, overcast,
                  light_rain, heavy_rain, fog; schedule runs), replicated to clients
   --data         data directory (default data)
-A TOML file may set the same keys (snake_case, e.g. admin_port = 9000); flags win.";
+A TOML file may set the same keys (snake_case, e.g. admin_port = 9000); flags win.
+
+Meta service (accounts, matchmaking): set WP_META_URL and WP_META_INSTANCE_KEY (optional
+WP_META_INSTANCE_NAME, WP_META_REGION, WP_META_CITY, WP_META_BRACKET, WP_META_PUBLIC_ADDRESS).
+The server then registers, admits only players with a valid matchmaking join token, heartbeats
+its population, carries out kicks and reports pursuits.";
 
 /// Server application configuration (TOML keys = field names).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -62,7 +72,8 @@ pub struct AppConfig {
     pub bind: String,
     /// Instance size.
     pub max_players: usize,
-    /// City: a `.road.json` / `.road.bin` path or `procedural`; `None` = flat world.
+    /// City: a `.road.json` / `.road.bin` path, `procedural` or `vesper_v2`; `None` = flat
+    /// world.
     pub city: Option<String>,
     /// Instance seed.
     pub seed: u64,
@@ -189,8 +200,17 @@ pub struct Running {
     pub status: Arc<Mutex<StatusReport>>,
 }
 
-/// Start everything; returns once the sockets are bound.
+/// Variable lookup for the meta link (`WP_META_*`); see [`run_with`].
+pub type MetaVars = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
+
+/// Start everything; returns once the sockets are bound. Links to the meta service when
+/// `WP_META_URL` is set in the environment.
 pub async fn run(cfg: AppConfig, log: LogFn) -> Result<Running, String> {
+    run_with(cfg, log, Arc::new(|k: &str| std::env::var(k).ok())).await
+}
+
+/// [`run`] with an explicit `WP_META_*` variable lookup (tests run meta in-process).
+pub async fn run_with(cfg: AppConfig, log: LogFn, meta_vars: MetaVars) -> Result<Running, String> {
     let mode = cfg.damage_mode()?;
     let data_dir = PathBuf::from(&cfg.data_dir);
     let (cars, modes) =
@@ -230,6 +250,8 @@ pub async fn run(cfg: AppConfig, log: LogFn) -> Result<Running, String> {
         }
         None => None,
     };
+    // Bots predict on the city's own ground (cities with terrain).
+    let city_ground = world.as_ref().and_then(wp_net::netsim::city_ground);
     // Bots drive around the first spawn point (the origin without a city).
     let bot_center = server_cfg
         .spawn_points
@@ -246,9 +268,43 @@ pub async fn run(cfg: AppConfig, log: LogFn) -> Result<Running, String> {
     let ws_addr = ws.local_addr().map_err(|e| e.to_string())?;
     let admin_addr = admin.local_addr().map_err(|e| e.to_string())?;
 
+    // Meta link: register now (fails loudly on a bad URL or key), then verify every join.
+    let meta = {
+        let slots = wp_meta::api::RoleCounts {
+            racer: cfg.max_players as u32,
+            police_chase: (cfg.max_players as f32 * server_cfg.roles.police_ratio) as u32,
+            police_captain: 1,
+            spectator: cfg.max_players as u32,
+        };
+        let address = format!("ws://{ws_addr}");
+        let vars = meta_vars.clone();
+        match wp_meta::instance::MetaLinkConfig::from_vars(move |k| vars(k), mode, slots, &address)
+        {
+            None => None,
+            Some(c) => {
+                let c = c?;
+                let worker =
+                    tokio::task::spawn_blocking(move || wp_meta::instance::MetaWorker::start(&c))
+                        .await
+                        .map_err(|e| e.to_string())?
+                        .map_err(|e| format!("meta registration failed: {e}"))?;
+                log(
+                    "meta_registered",
+                    vec![("instance", worker.instance_id().to_string())],
+                );
+                server_cfg.require_join_token = true;
+                Some(worker)
+            }
+        }
+    };
+
+    let tap_events = meta.is_some();
     let status = Arc::new(Mutex::new(StatusReport::default()));
     let (tx, rx) = std_mpsc::channel();
     let net_hz = wp_contracts::NET_TICK_HZ;
+    if meta.is_some() && cfg.arena_radius_m.is_some() {
+        return Err("the meta link needs the real sim (drop --arena)".into());
+    }
     match cfg.arena_radius_m {
         Some(radius) => {
             let cars = cars.clone();
@@ -262,7 +318,7 @@ pub async fn run(cfg: AppConfig, log: LogFn) -> Result<Running, String> {
         }
         None => {
             let cars = cars.clone();
-            spawn_game_loop(
+            spawn_game_loop_with(
                 move || {
                     let sim = match world {
                         Some(world) => {
@@ -281,12 +337,22 @@ pub async fn run(cfg: AppConfig, log: LogFn) -> Result<Running, String> {
                         }
                         None => WpSim::new(sim_cfg, cars),
                     };
-                    ServerInstance::new(server_cfg, sim)
+                    let mut inst = ServerInstance::new(server_cfg, sim);
+                    inst.set_event_tap(tap_events);
+                    inst
                 },
                 rx,
                 status.clone(),
                 log.clone(),
                 net_hz,
+                {
+                    let mut hook = meta.map(|w| meta::MetaHook::new(w, log.clone()));
+                    move |inst: &mut ServerInstance<WpSim>| {
+                        if let Some(h) = hook.as_mut() {
+                            h.tick(inst);
+                        }
+                    }
+                },
             );
         }
     }
@@ -307,6 +373,7 @@ pub async fn run(cfg: AppConfig, log: LogFn) -> Result<Running, String> {
     for i in 0..cfg.bots {
         let bot = BotSpec {
             index: i,
+            city_ground: city_ground.clone(),
             seed: cfg.seed.wrapping_mul(1000) + i as u64,
             route_center: bot_center,
             route_radius: cfg
@@ -339,9 +406,16 @@ pub fn parse_weather(name: &str) -> Result<wp_contracts::WeatherKind, String> {
         .ok_or_else(|| format!("unknown weather {name}"))
 }
 
-/// Load a city for the server: `procedural` (the 12×12 procedural city) or a road file.
+/// Load a city for the server: `procedural` (the 12×12 procedural city), `vesper_v2` (Port
+/// Vesper v2: curves, elevation, terrain) or a road file.
 pub fn load_city(city: &str, sim_cfg: &SimConfig) -> Result<wp_world::World, String> {
     let wcfg = server_world_config(sim_cfg);
+    if city == wp_world::vesper::CITY_ID || city == "vesper" {
+        return Ok(wp_world::World::vesper(
+            &wp_world::vesper::VesperConfig::default(),
+            wcfg,
+        ));
+    }
     if city == "procedural" {
         let pg = wp_world::procgen::ProcGenConfig::default();
         return Ok(wp_world::World::procedural(&pg, wcfg));
@@ -408,6 +482,7 @@ async fn serve_admin(listener: TcpListener, status: Arc<Mutex<StatusReport>>) {
 
 struct BotSpec {
     index: usize,
+    city_ground: Option<wp_net::predict::CityGround>,
     seed: u64,
     route_center: [f32; 2],
     route_radius: f32,
@@ -441,6 +516,7 @@ async fn run_bot(
         } else {
             default_damage_factory
         },
+        city_ground: spec.city_ground.clone(),
     });
     let mut driver = BotDriver::new(
         spec.seed,

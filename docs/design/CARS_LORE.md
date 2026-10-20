@@ -23,16 +23,19 @@ come from that document.
 
 ## 2. The roster
 
-### Junkyard Beater — `junkyard_beater` · Beater · FWD (proposed) · 3 000 base / 1 500 floor price
-*No car file yet* (the economy's floor car; `market.toml` references it, workstream 09 owes the
-file). Some years ago it was a family sedan. Now it is one colour on the doors, another on the
+### Junkyard Beater — `junkyard_beater` · Beater · FWD · 3 000 base / 1 500 floor price
+*The economy's floor car (`market.toml [floor_car]`). A tired 1980s 1.6 L four-door with a
+4-speed stick, about 65 kW on a good day, 0-100 km/h in about 15 s and flat out near 150 km/h.*
+Some years ago it was a family sedan. Now it is one colour on the doors, another on the
 hood, and a third where the primer shows through. Every beater in Port Vesper comes from the same
 place: the scrap dealers behind the Westline Yards, who will sell you anything with four wheels
 and a title for whatever you have in your pocket. It is slow, it pulls left, and the heater is
 stuck on. It is also the reason nobody's career ever really ends: when the pound auctions your car
 and the bank account says zero, the beater is still there. Plenty of the scene's names did their
 first Mercer Meet in one. Light hits fold it like paper, but nobody cares because nothing on it
-is worth fixing.
+is worth fixing. The springs sag, the dampers gave up years ago and the tyres are older than
+some of the drivers, so it leans like a boat and squeals at every corner — which is exactly why
+the old heads say you learn more in a beater than in anything you can buy.
 - **Scene role:** the floor. Debt-grinding, Mercer Meets, first night.
 - **Best routes:** R10, R07.
 

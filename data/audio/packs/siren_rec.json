@@ -1,0 +1,52 @@
+{
+  "id": "siren_rec",
+  "kind": "Siren",
+  "description": "Electronic siren loops cut from aquinn's 'Sirens and Alarm Noise' (CC0): wail (rise + fall), yelp, phaser, hi-lo. Play at their own cadence.",
+  "fallback": "siren_proc",
+  "cues": {
+    "siren/wail": {
+      "source": {
+        "Samples": {
+          "files": [
+            "wail.ogg"
+          ]
+        }
+      },
+      "gain": 1.995,
+      "looped": true
+    },
+    "siren/yelp": {
+      "source": {
+        "Samples": {
+          "files": [
+            "yelp.ogg"
+          ]
+        }
+      },
+      "gain": 1.995,
+      "looped": true
+    },
+    "siren/phaser": {
+      "source": {
+        "Samples": {
+          "files": [
+            "phaser.ogg"
+          ]
+        }
+      },
+      "gain": 1.995,
+      "looped": true
+    },
+    "siren/hilo": {
+      "source": {
+        "Samples": {
+          "files": [
+            "hilo.ogg"
+          ]
+        }
+      },
+      "gain": 1.995,
+      "looped": true
+    }
+  }
+}

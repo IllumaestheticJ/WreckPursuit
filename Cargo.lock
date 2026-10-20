@@ -496,6 +496,7 @@ dependencies = [
  "osmpbf",
  "serde_json",
  "wp_math",
+ "wp_sim",
  "wp_world",
 ]
 
@@ -3136,6 +3137,7 @@ dependencies = [
  "wp_net",
  "wp_police",
  "wp_sim",
+ "wp_weather",
  "wp_world",
 ]
 
@@ -4218,6 +4220,7 @@ dependencies = [
  "wp_math",
  "wp_police",
  "wp_sim",
+ "wp_vehicle",
 ]
 
 [[package]]
@@ -4306,6 +4309,7 @@ version = "0.1.0"
 dependencies = [
  "futures-util",
  "postcard",
+ "rapier3d",
  "serde",
  "thiserror 2.0.21",
  "tokio",
@@ -4379,6 +4383,7 @@ dependencies = [
  "tokio",
  "toml",
  "wp_contracts",
+ "wp_meta",
  "wp_net",
  "wp_sim",
  "wp_world",
@@ -4396,6 +4401,7 @@ dependencies = [
  "wp_math",
  "wp_police",
  "wp_vehicle",
+ "wp_weather",
  "wp_world",
 ]
 
@@ -4404,7 +4410,9 @@ name = "wp_vehicle"
 version = "0.1.0"
 dependencies = [
  "rapier3d",
+ "serde",
  "thiserror 2.0.21",
+ "toml",
  "wp_contracts",
  "wp_math",
 ]
@@ -4414,18 +4422,23 @@ name = "wp_wasm"
 version = "0.1.0"
 dependencies = [
  "postcard",
+ "rapier3d",
  "serde",
  "serde_json",
  "simcli",
  "wasm-bindgen",
  "wp_audio",
  "wp_contracts",
+ "wp_damage",
  "wp_economy",
  "wp_math",
  "wp_net",
+ "wp_opponent",
  "wp_police",
+ "wp_race",
  "wp_sim",
  "wp_vehicle",
+ "wp_weather",
  "wp_world",
 ]
 

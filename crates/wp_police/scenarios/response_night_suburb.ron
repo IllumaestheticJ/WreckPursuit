@@ -1,0 +1,24 @@
+// Lead feedback round 12b (owner: "the police spawn too far"): a racer doing 2x the limit
+// through Suburb at 23:00. Each unseen violation is a reckless-driving call; dispatch sends an
+// available unit that can meet the racer within response.radius_m, or spawns a responder out
+// of sight 150-350 m away along the roads (data/police/presence.toml [response]). Checks the
+// call -> first unit within 100 m time and that no unit appears in a racer's view cone or
+// closer than 120 m. One run of this seed set has the racer looping the city edge at 2x the
+// limit and U-turning, so it isn't held to a worst case: 6 of 8 calls within 25 s.
+(
+    name: "police_response_night_suburb",
+    seed: 300,
+    time_of_day_h: 23.0,
+    duration_s: 60.0,
+    runs: 8,
+    racers: [(district: Suburb, speed_factor: 2.0)],
+    expect: [
+        (metric: "calls", min: 1.0, max: 10000.0),
+        (metric: "call_reached_25s_frac", min: 0.75, max: 1.0),
+        (metric: "call_to_unit_100m_s", min: 0.0, max: 30.0),
+        (metric: "responder_spawns", min: 1.0, max: 1000.0),
+        (metric: "spawns_in_view", min: 0.0, max: 0.0),
+        (metric: "despawns_in_sight", min: 0.0, max: 0.0),
+        (metric: "spawn_min_racer_m", min: 120.0, max: 10000.0),
+    ],
+)

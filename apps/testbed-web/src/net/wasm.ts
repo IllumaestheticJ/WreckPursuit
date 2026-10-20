@@ -127,6 +127,16 @@ export interface NetStats {
   predicted_tick: number | null;
 }
 
+/** One damage replica (`net_damage_json`). */
+export interface DamageInfo {
+  entity: number;
+  /** Nodes more than 1 mm from rest. */
+  dented_nodes: number;
+  max_disp_m: number;
+  /** `wp_net::lattice::lattice_hash`: equal on every client holding the same damage. */
+  hash: number;
+}
+
 export interface MapUnit {
   entity: number;
   kind: EntityKind;
@@ -179,6 +189,10 @@ export const raceJoin = (race: number, nowMs: number): void => wasm.net_race_joi
 export const raceStart = (race: number, nowMs: number): void => wasm.net_race_start(race, nowMs);
 export const raceLeave = (race: number, nowMs: number): void => wasm.net_race_leave(race, nowMs);
 export const bye = (nowMs: number): void => wasm.net_bye(nowMs);
+/** How dented each replicated car is. */
+export const damage = (): DamageInfo[] => JSON.parse(wasm.net_damage_json());
+/** A replica's lattice nodes, chassis space, flat xyz (empty if none). */
+export const latticeNodes = (entity: number): Float32Array => wasm.net_lattice_nodes(entity);
 
 /** Split `net_take_outgoing()` (u32 LE length + bytes records) into frames. */
 export function takeOutgoing(): Uint8Array[] {

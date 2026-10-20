@@ -31,6 +31,8 @@ export interface RunReport {
   level: string;
   mode: "Arcade" | "Simulation";
   bounty_payout: number;
+  /** Cash paid for an escape (machine G). */
+  escape_cash: number;
   rep_delta: number;
   fines: number;
   bail: number;
@@ -100,7 +102,7 @@ function Ledger({ lines }: { lines: LedgerLine[] }) {
   );
 }
 
-function RunEndPanel(props: { report: RunReport; error: string | null; onRepair: () => void; onRestart: () => void }) {
+function RunEndPanel(props: { report: RunReport; error: string | null; onRepair: () => void; onRestart: () => void; onGarage?: () => void }) {
   const r = props.report;
   const caught = r.outcome === "Captured" || r.outcome === "CapturedTotalLoss";
   return (
@@ -138,6 +140,7 @@ function RunEndPanel(props: { report: RunReport; error: string | null; onRepair:
             Repair &amp; continue (<Money value={r.continue_cost} />)
           </Button>
           <Button onClick={props.onRestart}>Restart</Button>
+          {props.onGarage && <Button onClick={props.onGarage}>Garage</Button>}
         </div>
       </Panel>
     </div>
@@ -148,7 +151,8 @@ function Toast({ report }: { report: RunReport }) {
   return (
     <div class="wp-ui wp-root" style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
       <div class="wp-toast" data-kind="ok" data-testid="run-toast">
-        {TITLE[report.outcome]} at {report.level} · bounty +{report.bounty_payout.toLocaleString("en-US")}
+        {TITLE[report.outcome]} at {report.level}
+        {report.escape_cash > 0 && ` · +$${report.escape_cash.toLocaleString("en-US")}`} · bounty +{report.bounty_payout.toLocaleString("en-US")}
       </div>
     </div>
   );
@@ -168,7 +172,14 @@ export class RunEndView {
 
   constructor(
     private readonly el: HTMLElement,
-    private readonly actions: { repair: () => ContinueReport; restart: () => void; onOpen: () => void; onClose: () => void },
+    private readonly actions: {
+      repair: () => ContinueReport;
+      restart: () => void;
+      onOpen: () => void;
+      onClose: () => void;
+      /** Career runs (machine G): "Garage" ends the run and opens the garage; `null` hides it. */
+      garage?: () => (() => void) | null;
+    },
   ) {}
 
   /** Call every frame with `run_result_json()`. */
@@ -216,7 +227,13 @@ export class RunEndView {
     if (r && this.open) {
       render(
         <div class="wp-ui wp-root" style={{ position: "absolute", inset: 0, pointerEvents: "none" }} data-testid="run-end">
-          <RunEndPanel report={r} error={this.error} onRepair={() => this.repair()} onRestart={() => this.actions.restart()} />
+          <RunEndPanel
+            report={r}
+            error={this.error}
+            onRepair={() => this.repair()}
+            onRestart={() => this.actions.restart()}
+            onGarage={this.actions.garage?.() ?? undefined}
+          />
         </div>,
         this.el,
       );

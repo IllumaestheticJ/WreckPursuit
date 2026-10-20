@@ -13,13 +13,16 @@ import { audioBridge } from "./bridge";
 import { AudioPanel } from "./panel";
 import { ScannerPlayer } from "./scanner";
 import { AudioMixer, setListener, VoicePool } from "./voices";
-import type { AudioCommand, AudioLibrary, Bus, DirectorStats, RadioPriority } from "./types";
+import type { AudioCommand, AudioLibrary, Bus, DirectorStats, RadioPriority, SampleStatus, SoundSource } from "./types";
 
 const TEST_LINES: Record<string, string[]> = {
   Routine: ["Unit fourteen, respond to a fender bender on Harbor and Fifth.", "Copy dispatch, fourteen en route."],
   Pursuit: ["Twelve in pursuit, grey coupe northbound on the expressway, speeds over one twenty.", "Suspect vehicle took the off ramp, heading downtown."],
   Urgent: ["All units, air one has visual on the suspect, deploy spikes at the bridge.", "Officer needs assistance, Fifth and Market!"],
 };
+
+/** City ambience loop (optional World-pack cue, played by the backend, not the director). */
+const AMBIENCE_CUE = "ambient/city_night";
 
 export class AudioSystem {
   private ctx: AudioContext | null = null;
@@ -35,7 +38,10 @@ export class AudioSystem {
   private focus = 0;
   private lineNo = 0;
   private lastStats: DirectorStats | null = null;
+  private stopAmbience: (() => void) | null = null;
   private readonly listenerArr = new Float32Array(12);
+  private readonly scratch = Array.from({ length: 7 }, () => new THREE.Vector3());
+  private readonly scratchQ = new THREE.Quaternion();
   /** Smoothed cost of one audio frame (director in wasm + JSON + Web Audio calls), ms. */
   frameMs = 0;
   /** Smoothed cost of the wasm director call alone (incl. JSON), ms. */
@@ -58,14 +64,14 @@ export class AudioSystem {
       },
       setSiren: (m) => this.setSiren(m),
       testRadio: (p) => this.testRadio(p),
+      setSource: (src) => this.setSource(src),
+      setAmbience: () => this.restartAmbience(),
     });
     (window as unknown as { __wpAudio?: AudioSystem }).__wpAudio = this;
     const kick = () => this.start();
     window.addEventListener("pointerdown", kick);
-    window.addEventListener("keydown", (e) => {
-      if (e.code === "KeyM" && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement)) this.toggleMute();
-      kick();
-    });
+    // Mute is the rebindable "mute" action (main.ts dispatches it to toggleMute).
+    window.addEventListener("keydown", kick);
   }
 
   private safe(f: () => void): void {
@@ -93,6 +99,7 @@ export class AudioSystem {
     this.ctx = new AudioContext({ latencyHint: "interactive" });
     this.mixer = new AudioMixer(this.ctx);
     this.pool = new VoicePool(this.ctx, this.mixer, this.lib);
+    this.pool.source = this.panel.settings.source;
     this.scanner = new ScannerPlayer(this.pool);
     const s = this.panel.settings;
     this.mixer.master.gain.value = s.master;
@@ -100,8 +107,47 @@ export class AudioSystem {
     this.scanner.tts = s.tts;
     this.safe(() => audioBridge.setScannerTier(s.tier));
     // Forget anything the director thinks is playing: it re-plays every loop next frame.
-    this.safe(() => void audioBridge.reset());
+    this.resetDirector();
+    this.restartAmbience();
     this.panel.setStatus(`${this.ctx.sampleRate} Hz · max ${this.lib.config.max_voices} voices`);
+  }
+
+  /** Recorded samples (default) or the procedural fallback packs; loops restart with the new source. */
+  setSource(source: SoundSource): void {
+    this.panel.settings.source = source;
+    if (!this.pool) return;
+    this.pool.source = source;
+    this.resetDirector();
+    this.restartAmbience();
+  }
+
+  /**
+   * Reset the director and apply the Stop commands it returns (it re-plays every loop on the
+   * next frame). Dropping them left the old loops playing next to the new ones.
+   */
+  private resetDirector(): void {
+    this.safe(() => this.apply(audioBridge.reset()));
+  }
+
+  /** Current sound source. */
+  soundSource(): SoundSource {
+    return this.pool?.source ?? this.panel.settings.source;
+  }
+
+  /** Recorded sample loading progress (null before the AudioContext starts). */
+  sampleStatus(): SampleStatus | null {
+    return this.pool?.sampleStatus() ?? null;
+  }
+
+  /** (Re)start the city ambience bed: recorded only, non-spatial, on the World bus. */
+  private restartAmbience(): void {
+    this.stopAmbience?.();
+    this.stopAmbience = null;
+    const pool = this.pool;
+    const gain = this.panel.settings.ambience;
+    if (!pool || gain <= 0 || pool.source !== "recorded") return;
+    const pack = Object.keys(this.lib?.packs ?? {}).find((p) => pool.has(p, AMBIENCE_CUE));
+    if (pack) this.stopAmbience = pool.playLocal(pack, AMBIENCE_CUE, gain, "World");
   }
 
   toggleMute(): void {
@@ -109,7 +155,7 @@ export class AudioSystem {
     if (this.mixer && this.ctx) {
       this.mixer.master.gain.setTargetAtTime(this.muted ? 0 : this.panel.settings.master, this.ctx.currentTime, 0.02);
     }
-    this.panel.setStatus(this.muted ? "muted (M)" : "unmuted");
+    this.panel.setStatus(this.muted ? "muted" : "unmuted");
   }
 
   /** Siren mode for the focused car: "Default" | "Off" | "Auto" | "Wail" | "Yelp" | "Phaser" | "HiLo". */
@@ -139,25 +185,28 @@ export class AudioSystem {
     this.safe(() => audioBridge.radio(12 + (this.lineNo % 3), p, text));
   }
 
-  /** Per-frame update. `events` = this frame's drained SimEvents (as decoded JSON). */
-  update(camera: THREE.Camera, events: unknown[], dt: number, focus: number): void {
+  /** Per-frame update. `events` = this frame's drained SimEvents: decoded, or the JSON text the
+   * sim produced (`sim.lastEventsJson()`, passed through without a re-stringify). */
+  update(camera: THREE.Camera, events: unknown[] | string, dt: number, focus: number): void {
     this.focus = focus;
     const ctx = this.ctx;
     if (!ctx || ctx.state !== "running" || !this.pool || !this.mixer || !this.scanner) return;
     // Camera → sim world space (the scene's world group is rotated Z-up → Y-up).
-    const camPos = camera.getWorldPosition(new THREE.Vector3());
-    const pos = this.worldFrame.worldToLocal(camPos.clone());
-    const fwdW = camera.getWorldDirection(new THREE.Vector3());
-    const upW = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.getWorldQuaternion(new THREE.Quaternion()));
-    const fwd = this.worldFrame.worldToLocal(camPos.clone().add(fwdW)).sub(pos).normalize();
-    const up = this.worldFrame.worldToLocal(camPos.clone().add(upW)).sub(pos).normalize();
+    // Scratch vectors (no allocation per frame).
+    const [camPos, pos, fwdW, upW, fwd, up, v] = this.scratch;
+    camera.getWorldPosition(camPos);
+    this.worldFrame.worldToLocal(pos.copy(camPos));
+    camera.getWorldDirection(fwdW);
+    upW.set(0, 1, 0).applyQuaternion(camera.getWorldQuaternion(this.scratchQ));
+    this.worldFrame.worldToLocal(fwd.copy(camPos).add(fwdW)).sub(pos).normalize();
+    this.worldFrame.worldToLocal(up.copy(camPos).add(upW)).sub(pos).normalize();
     if (this.lastPos && dt > 0) {
-      const v = pos.clone().sub(this.lastPos).divideScalar(dt);
+      v.copy(pos).sub(this.lastPos).divideScalar(dt);
       // Camera cuts teleport: ignore absurd speeds instead of a Doppler squawk.
       if (v.length() < 120) this.vel.lerp(v, 0.3);
       else this.vel.set(0, 0, 0);
     }
-    this.lastPos = pos.clone();
+    this.lastPos = (this.lastPos ?? new THREE.Vector3()).copy(pos);
     const a = this.listenerArr;
     a.set([pos.x, pos.y, pos.z, this.vel.x, this.vel.y, this.vel.z, fwd.x, fwd.y, fwd.z, up.x, up.y, up.z]);
     setListener(ctx, [pos.x, pos.y, pos.z], [fwd.x, fwd.y, fwd.z], [up.x, up.y, up.z]);
@@ -165,7 +214,8 @@ export class AudioSystem {
     const t0 = performance.now();
     let out;
     try {
-      out = audioBridge.frame(a, events.length ? JSON.stringify(events) : "", focus);
+      const json = typeof events === "string" ? events : events.length ? JSON.stringify(events) : "";
+      out = audioBridge.frame(a, json, focus);
     } catch (e) {
       this.failed = true;
       this.panel.setStatus(`audio stopped: ${e}`);
@@ -181,7 +231,7 @@ export class AudioSystem {
     this.frameMs += (performance.now() - t0 - this.frameMs) * 0.1;
     this.frames++;
     this.lastStats = out.stats;
-    this.panel.update(out.stats, this.pool.size, this.scanner.log);
+    this.panel.update(out.stats, this.pool.size, this.scanner.log, this.pool.sampleStatus());
   }
 
   private apply(cmds: AudioCommand[]): void {
@@ -204,6 +254,12 @@ export class AudioSystem {
         this.scanner!.end(c.RadioEnd.line, c.RadioEnd.interrupted);
       }
     }
+  }
+
+  /** Looped voices the backend plays vs the director's count (e2e: no stale voices). */
+  loopCounts(): { backend: number; director: number } | null {
+    if (!this.pool || !this.lastStats) return null;
+    return { backend: this.pool.looping, director: this.lastStats.looped };
   }
 
   /** Last director counters (e2e / HUD). */

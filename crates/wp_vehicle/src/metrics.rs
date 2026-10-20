@@ -12,6 +12,8 @@
 //! | [`power_oversteer_onset`] | steady 0.4 g on a 40 m circle, throttle ramped open-loop to 100%: throttle at which the rear slides (rear slip angle exceeds front by 2°) |
 //! | [`power_oversteer_exit`] | mid-corner on a circle, then full throttle while still steering in, then steering released with throttle held: peak body slip and whether the car straightens out (slide-control assists) |
 //! | [`high_speed_catch`] | straight at speed, sudden yaw-rate kick (a nudge from traffic), driver countersteers with keys / stick after 0.15 s: peak body slip and whether the car is caught |
+//! | [`split_mu_launch`] | standing start with the left wheels on ice, right on dry asphalt, heading held: distance, speed and ice-side wheelspin (differentials) |
+//! | [`exit_on_circle`] | steady lateral g on a circle, then full throttle while following the line: inside/outside driven-wheel slip, exit speed, peak body slip (differentials) |
 //! | [`top_speed_kmh`] | full throttle on a straight until acceleration stops |
 
 use wp_contracts::{AssistProfile, LoadedCar, VehicleInput, GRAVITY_MPS2, PHYSICS_DT};
@@ -273,11 +275,30 @@ pub fn lift_off(car: &LoadedCar, radius: f32) -> LiftOff {
 
 /// Lift-off test on a circle of `radius` at `lat_g` steady lateral acceleration.
 pub fn lift_off_at(car: &LoadedCar, radius: f32, lat_g: f32) -> LiftOff {
-    let mut rig = Rig::new(car);
+    lift_off_with(
+        car,
+        crate::VehicleExtras::default(),
+        radius,
+        lat_g,
+        &no_tcs(),
+    )
+}
+
+/// [`lift_off_at`] with explicit [`crate::VehicleExtras`] (e.g. a differential override) and
+/// assists (e.g. `auto_gears: false` holds the gear the car starts in, so engine braking is
+/// not lost to an upshift).
+pub fn lift_off_with(
+    car: &LoadedCar,
+    extras: crate::VehicleExtras,
+    radius: f32,
+    lat_g: f32,
+    assists: &AssistProfile,
+) -> LiftOff {
+    let mut rig = Rig::with_extras(car, extras);
     let mut follow = CircleFollower::new(radius);
     let v = (lat_g * GRAVITY_MPS2 * radius).sqrt();
     rig.teleport([0.0; 3], 0.0, v, v / radius);
-    let a = no_tcs();
+    let a = *assists;
     let mut steer_hist = Vec::new();
     for _ in 0..6 * TICKS_PER_S {
         let (steer, _) = follow.steer(&rig);
@@ -508,6 +529,186 @@ pub fn power_oversteer_exit(
             && final_slip.abs() < 15.0
             && yaw_rate(&rig).abs() < 0.5
             && final_speed > 8.0,
+        hash: rig.state_hash(),
+    }
+}
+
+/// Result of [`split_mu_launch`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SplitMuLaunch {
+    /// Distance covered, m.
+    pub distance_m: f32,
+    /// Forward speed at the end, m/s.
+    pub speed_mps: f32,
+    /// Mean wheelspin of the ice-side driven wheel(s) over the run, m/s (surface speed minus
+    /// ground speed).
+    pub ice_wheel_slip_mps: f32,
+    /// Rig state hash at the end (determinism checks).
+    pub hash: u64,
+}
+
+/// Split-µ standing start: the left wheels (FL, RL) on ice (−4 °C, wet), the right wheels on
+/// dry asphalt, `throttle` held for `seconds` while the driver steers to hold the heading.
+pub fn split_mu_launch(
+    car: &LoadedCar,
+    assists: &AssistProfile,
+    throttle: f32,
+    seconds: f32,
+) -> SplitMuLaunch {
+    split_mu_launch_with(
+        car,
+        crate::VehicleExtras::default(),
+        assists,
+        throttle,
+        seconds,
+    )
+}
+
+/// [`split_mu_launch`] with explicit [`crate::VehicleExtras`] (e.g. a differential override).
+pub fn split_mu_launch_with(
+    car: &LoadedCar,
+    extras: crate::VehicleExtras,
+    assists: &AssistProfile,
+    throttle: f32,
+    seconds: f32,
+) -> SplitMuLaunch {
+    let mut rig = Rig::with_extras(car, extras);
+    let ice = crate::SurfaceConditions {
+        water_depth_mm: 0.6,
+        temperature_c: -4.0,
+        ..crate::SurfaceConditions::DRY
+    };
+    rig.vehicle.set_wheel_conditions(0, ice);
+    rig.vehicle.set_wheel_conditions(2, ice);
+    let def = rig.vehicle.def().clone();
+    let driven: Vec<usize> = [0usize, 2]
+        .into_iter()
+        .filter(|i| match def.drivetrain.layout {
+            wp_contracts::DriveLayout::Fwd => *i == 0,
+            wp_contracts::DriveLayout::Rwd => *i == 2,
+            _ => true,
+        })
+        .collect();
+    let mut slip_sum = 0.0f32;
+    let ticks = (seconds * TICKS_PER_S as f32) as usize;
+    for _ in 0..ticks {
+        // Heading hold (+ steer = right): the yaw moment of unequal traction is caught.
+        let fwd = rig.vehicle.chassis().rot * V3::Y;
+        let heading = atan2(-fwd.x, fwd.y);
+        let steer = (3.0 * heading + 0.5 * yaw_rate(&rig)).clamp(-1.0, 1.0);
+        rig.step(
+            &VehicleInput {
+                throttle,
+                steer,
+                ..Default::default()
+            },
+            assists,
+        );
+        let s = rig.state();
+        for i in &driven {
+            slip_sum += s.wheel_states[*i].omega * def.wheels[*i].radius_m - s.speed_mps;
+        }
+    }
+    SplitMuLaunch {
+        distance_m: rig.state().pos[1],
+        speed_mps: speed(&rig),
+        ice_wheel_slip_mps: slip_sum / (ticks * driven.len()).max(1) as f32,
+        hash: rig.state_hash(),
+    }
+}
+
+/// Result of [`exit_on_circle`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CornerExit {
+    /// Mean slip ratio of the inside driven wheel(s) while on the throttle.
+    pub inside_slip: f32,
+    /// Mean slip ratio of the outside driven wheel(s) while on the throttle.
+    pub outside_slip: f32,
+    /// Forward speed at the end of the throttle phase, m/s.
+    pub exit_speed_mps: f32,
+    /// Largest body slip angle while on the throttle, degrees (power oversteer).
+    pub peak_body_slip_deg: f32,
+    /// Rig state hash at the end (determinism checks).
+    pub hash: u64,
+}
+
+/// Corner-exit power: steady `lat_g` on a counter-clockwise circle of `radius` (left turn,
+/// inside = left), then `throttle` for `seconds` while the circle follower keeps steering
+/// for the line.
+pub fn exit_on_circle(
+    car: &LoadedCar,
+    radius: f32,
+    lat_g: f32,
+    throttle: f32,
+    seconds: f32,
+    assists: &AssistProfile,
+) -> CornerExit {
+    exit_on_circle_with(
+        car,
+        crate::VehicleExtras::default(),
+        radius,
+        lat_g,
+        throttle,
+        seconds,
+        assists,
+    )
+}
+
+/// [`exit_on_circle`] with explicit [`crate::VehicleExtras`].
+pub fn exit_on_circle_with(
+    car: &LoadedCar,
+    extras: crate::VehicleExtras,
+    radius: f32,
+    lat_g: f32,
+    throttle: f32,
+    seconds: f32,
+    assists: &AssistProfile,
+) -> CornerExit {
+    let mut rig = Rig::with_extras(car, extras);
+    let mut follow = CircleFollower::new(radius);
+    let v = (lat_g * GRAVITY_MPS2 * radius).sqrt();
+    rig.teleport([0.0; 3], 0.0, v, v / radius);
+    for _ in 0..4 * TICKS_PER_S {
+        let (steer, _) = follow.steer(&rig);
+        let (throttle, brake) = hold_speed(&rig, v);
+        rig.step(
+            &VehicleInput {
+                steer,
+                throttle,
+                brake,
+                ..Default::default()
+            },
+            assists,
+        );
+    }
+    let (inside, outside): (Vec<usize>, Vec<usize>) = match car.def.drivetrain.layout {
+        wp_contracts::DriveLayout::Fwd => (vec![0], vec![1]),
+        wp_contracts::DriveLayout::Rwd => (vec![2], vec![3]),
+        _ => (vec![0, 2], vec![1, 3]),
+    };
+    let (mut si, mut so, mut peak) = (0.0f32, 0.0f32, 0.0f32);
+    let ticks = (seconds * TICKS_PER_S as f32) as usize;
+    for _ in 0..ticks {
+        let (steer, _) = follow.steer(&rig);
+        rig.step(
+            &VehicleInput {
+                steer,
+                throttle,
+                ..Default::default()
+            },
+            assists,
+        );
+        let w = rig.state().wheel_states;
+        si += inside.iter().map(|i| w[*i].slip_ratio).sum::<f32>() / inside.len() as f32;
+        so += outside.iter().map(|i| w[*i].slip_ratio).sum::<f32>() / outside.len() as f32;
+        peak = peak.max(body_slip_deg(&rig).abs());
+    }
+    let n = ticks.max(1) as f32;
+    CornerExit {
+        inside_slip: si / n,
+        outside_slip: so / n,
+        exit_speed_mps: speed(&rig),
+        peak_body_slip_deg: peak,
         hash: rig.state_hash(),
     }
 }

@@ -1,7 +1,7 @@
 // Audio debug panel: master + per-bus sliders, mute (M), scanner tier, siren mode for the
 // focused car, test radio lines, voice/culling counters and the radio log.
 
-import { BUSES, type Bus, type DirectorStats, type RadioPriority } from "./types";
+import { BUSES, type Bus, type DirectorStats, type RadioPriority, type SampleStatus, type SoundSource } from "./types";
 import type { RadioLog } from "./scanner";
 
 const STORE_KEY = "wp.testbed.audio.v1";
@@ -12,6 +12,10 @@ export interface PanelSettings {
   tier: string;
   tts: boolean;
   open: boolean;
+  /** Recorded samples (default) or the procedural fallback packs. */
+  source: SoundSource;
+  /** City ambience bed gain (0 = off). */
+  ambience: number;
 }
 
 function loadSettings(): PanelSettings {
@@ -21,6 +25,8 @@ function loadSettings(): PanelSettings {
     tier: "Pro",
     tts: true,
     open: false,
+    source: "recorded",
+    ambience: 0.5,
   };
   try {
     const s = JSON.parse(localStorage.getItem(STORE_KEY) ?? "{}");
@@ -38,6 +44,8 @@ export interface PanelHandlers {
   setTts(on: boolean): void;
   setSiren(mode: string): void;
   testRadio(priority: RadioPriority): void;
+  setSource(source: SoundSource): void;
+  setAmbience(gain: number): void;
 }
 
 export class AudioPanel {
@@ -63,7 +71,7 @@ export class AudioPanel {
     });
     const head = document.createElement("div");
     head.style.cursor = "pointer";
-    head.innerHTML = "<b>audio</b> <span class='dim'>(M mute, click to fold)</span>";
+    head.innerHTML = "<b>audio</b> <span class='dim'>(F8 mute — rebindable, click to fold)</span>";
     this.status = document.createElement("div");
     this.status.className = "dim";
     this.body = document.createElement("div");
@@ -92,6 +100,16 @@ export class AudioPanel {
       this.body.append(r);
       return r;
     };
+    const src = this.select(["recorded", "procedural"], this.settings.source, (v) => {
+      this.settings.source = v as SoundSource;
+      h.setSource(this.settings.source);
+    });
+    src.id = "audio-source";
+    row("sounds", src).append(" ", Object.assign(document.createElement("span"), { className: "dim", textContent: "(procedural = fallback)" }));
+    this.slider("ambience", this.settings.ambience, (v) => {
+      this.settings.ambience = v;
+      h.setAmbience(v);
+    });
     const tier = this.select(["None", "Basic", "Pro", "Elite"], this.settings.tier, (v) => {
       this.settings.tier = v;
       h.setTier(v);
@@ -177,13 +195,15 @@ export class AudioPanel {
     this.status.textContent = text;
   }
 
-  update(st: DirectorStats, backendVoices: number, radio: RadioLog[]): void {
+  update(st: DirectorStats, backendVoices: number, radio: RadioLog[], samples: SampleStatus): void {
     if (!this.settings.open) return;
+    const smp = `samples ${samples.loaded}/${samples.total}` + (samples.failed.length ? ` (${samples.failed.length} failed)` : "");
     const bus = BUSES.map((b) => `${b.toLowerCase()} ${st.per_bus[b] ?? 0}`).join("  ");
     this.stats.textContent =
       `voices ${st.looped} loop + ${st.one_shots} shot (culled ${st.culled})  backend ${backendVoices}\n` +
       `${bus}\n` +
-      `vehicles ${st.vehicles}  contact pairs ${st.contact_pairs}  radio q ${st.radio_queued} dropped ${st.radio_dropped}`;
+      `vehicles ${st.vehicles}  contact pairs ${st.contact_pairs}  radio q ${st.radio_queued} dropped ${st.radio_dropped}\n` +
+      `${smp}  source ${this.settings.source}`;
     this.log.textContent = radio
       .map((l) => `[${l.priority}] unit ${l.unit}: ${l.text}${l.interrupted ? " (cut)" : ""}`)
       .join("\n");

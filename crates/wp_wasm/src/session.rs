@@ -26,6 +26,7 @@ use simcli::scenario::{CitySpec, EntitySpec};
 use simcli::{RunSummary, Scenario};
 
 use crate::data::mem_data;
+use crate::race::RaceRun;
 use crate::run::{ContinueReport, PlayerCar, PlayerRun};
 use crate::scenario::entity;
 
@@ -90,6 +91,11 @@ pub struct Session {
     outcome: Option<RunSummary>,
     /// The player's economy (live sessions with police; see [`crate::run`]).
     run: Option<PlayerRun>,
+    /// This is a career run (machine G, [`crate::career`]): the player drives a career car
+    /// and the account belongs to the career.
+    career: bool,
+    /// A picker race (scenario `race_<id>`, live or replayed; see [`crate::race`]).
+    race: Option<RaceRun>,
 }
 
 fn opts(systems: Option<Selection>) -> RunOptions {
@@ -126,19 +132,20 @@ impl Session {
         scripted: bool,
         systems: Option<Selection>,
         playback: Option<Replay>,
+        data: &dyn simcli::data::DataSource,
     ) -> Result<Self, String> {
         let load_city = sc.city != CitySpec::Flat;
         let BuiltSim {
-            sim,
+            mut sim,
             ids,
             cars,
             selection,
             ..
-        } = build_sim(&sc, mem_data(), &opts(systems)).map_err(|e| e.to_string())?;
+        } = build_sim(&sc, data, &opts(systems)).map_err(|e| e.to_string())?;
         let log = Replay::new(&sc, &selection.to_string(), ids.len());
         let n = ids.len();
         // The player's economy: live (not replayed, not scripted) sessions with police.
-        let run = match (ids.first(), &sc.entities.first()) {
+        let mut run = match (ids.first(), &sc.entities.first()) {
             (Some(&player), Some(spec))
                 if playback.is_none() && !scripted && sim.systems().police =>
             {
@@ -154,8 +161,23 @@ impl Session {
             }
             _ => None,
         };
+        // A picker race: judged next to the sim, live and in playback (not scripted menu runs).
+        let race = match crate::race::race_for_scenario(&sc.name) {
+            Some((def, autopilot)) if !scripted => Some(RaceRun::new(
+                &def,
+                autopilot,
+                &mut sim,
+                &ids,
+                &cars,
+                &sc,
+                run.as_mut(),
+            )?),
+            _ => None,
+        };
         Ok(Self {
+            race,
             run,
+            career: false,
             script_end: if scripted { sc.ticks() } else { 0 },
             mode: sc.mode,
             sc,
@@ -188,9 +210,21 @@ impl Session {
     /// Live session. `scripted` = drive every entity by its scenario driver until
     /// `duration_s` (menu scenarios); otherwise every entity is live-controlled (free drive).
     /// A free-drive city session spawns the first entity on the city's race start grid.
-    pub fn new(mut sc: Scenario, scripted: bool) -> Result<Self, String> {
+    pub fn new(sc: Scenario, scripted: bool) -> Result<Self, String> {
+        Self::new_with_data(sc, scripted, mem_data())
+    }
+
+    /// [`Session::new`] with the scenario's cars read from `data` (the career's modded car
+    /// overlays the embedded files; city, tires and materials come from `data` too).
+    pub fn new_with_data(
+        mut sc: Scenario,
+        scripted: bool,
+        data: &dyn simcli::data::DataSource,
+    ) -> Result<Self, String> {
         sc.validate()?;
-        if !scripted && sc.city != CitySpec::Flat {
+        // Race scenarios already stand on their grid.
+        let race = crate::race::race_for_scenario(&sc.name).is_some();
+        if !scripted && !race && sc.city != CitySpec::Flat {
             let city = simcli::data::load_world(mem_data(), &sc.city, world_config(&sc))
                 .map_err(|e| e.to_string())?;
             if let Some(world) = city {
@@ -205,7 +239,7 @@ impl Session {
                 }
             }
         }
-        Self::build(sc, scripted, None, None)
+        Self::build(sc, scripted, None, None, data)
     }
 
     /// Playback session for `replay.bin` bytes.
@@ -218,7 +252,7 @@ impl Session {
     pub fn from_replay(replay: Replay) -> Result<Self, String> {
         let sc = replay.scenario().map_err(|e| e.to_string())?;
         let systems = Selection::parse(&replay.systems)?;
-        Self::build(sc, false, Some(systems), Some(replay))
+        Self::build(sc, false, Some(systems), Some(replay), mem_data())
     }
 
     /// The scenario this session runs (entities include tick-0 spawns).
@@ -371,11 +405,33 @@ impl Session {
     pub fn set_input(&mut self, id: EntityId, input: VehicleInput) -> Result<bool, String> {
         self.live_check()?;
         let idx = self.idx(id)?;
-        if self.script_running() || self.last_input[idx] == input || self.held(id) {
+        if self.script_running()
+            || self.last_input[idx] == input
+            || self.held(id)
+            || self.race_holds(id)
+        {
             return Ok(false);
         }
         self.log_input(idx, input);
         Ok(true)
+    }
+
+    /// The race holds this car's input (the player during the countdown, or on autopilot).
+    fn race_holds(&self, id: EntityId) -> bool {
+        self.race
+            .as_ref()
+            .is_some_and(|r| r.live().player() == id && r.holds_player(self.sim.tick()))
+    }
+
+    /// The picker race attached to this session, if any.
+    pub fn race(&self) -> Option<&RaceRun> {
+        self.race.as_ref()
+    }
+
+    /// The race's results panel (once the player is no longer racing).
+    pub fn race_report(&self) -> Option<crate::race::RaceReport> {
+        let over = self.run.as_ref().is_some_and(PlayerRun::is_over);
+        self.race.as_ref().and_then(|r| r.report(over))
     }
 
     fn script_running(&self) -> bool {
@@ -386,7 +442,97 @@ impl Session {
     pub fn reset_vehicle(&mut self, id: EntityId) -> Result<(), String> {
         self.live_check()?;
         let idx = self.idx(id)?;
-        self.log_op(idx, OpKind::Reset)
+        self.log_op(idx, OpKind::Reset)?;
+        self.relocate_racer(id);
+        Ok(())
+    }
+
+    /// Reset in place (testbed R, playtest row 65): pick the nearest clear lane spot within
+    /// 15 m heading the car's own way ([`crate::reset::reset_pose`]), put the car there upright
+    /// and at rest, and repair it if `repair` (false in a career run). Logged as the replay op
+    /// `OpKind::ResetAt` carrying the pose, so playback does not redo the search. Police heat,
+    /// pursuit and the run carry on; a race is told the car moved on purpose (position and lap
+    /// kept).
+    pub fn reset_in_place(
+        &mut self,
+        id: EntityId,
+        repair: bool,
+    ) -> Result<crate::reset::ResetPose, String> {
+        use crate::reset::{reset_pose, travel_dir, Obstacle, OTHER_HALF};
+        self.live_check()?;
+        let idx = self.idx(id)?;
+        let st = self
+            .vehicle(id)
+            .map(|v| v.vehicle.state())
+            .ok_or_else(|| format!("unknown vehicle {id:?}"))?;
+        let yaw_of_rot = |q: [f32; 4]| {
+            let fx = 2.0 * (q[0] * q[1] - q[3] * q[2]);
+            let fy = 1.0 - 2.0 * (q[0] * q[0] + q[2] * q[2]);
+            wp_math::atan2(-fx, fy)
+        };
+        let mut obstacles: Vec<Obstacle> = Vec::new();
+        for v in self.sim.vehicles() {
+            if v.id == id {
+                continue;
+            }
+            let o = v.vehicle.state();
+            obstacles.push(Obstacle {
+                pos: o.pos,
+                yaw: yaw_of_rot(o.rot),
+                half: OTHER_HALF,
+            });
+        }
+        for b in &self.sc.barriers {
+            obstacles.push(Obstacle {
+                pos: b.pos,
+                yaw: b.yaw,
+                half: [b.size[0] * 0.5, b.size[1] * 0.5],
+            });
+        }
+        let world = self.sim.world();
+        for a in world.agents() {
+            obstacles.push(Obstacle {
+                pos: a.pos,
+                yaw: a.yaw,
+                half: OTHER_HALF,
+            });
+        }
+        for p in world.static_props() {
+            obstacles.push(Obstacle {
+                pos: p.pos,
+                yaw: p.yaw,
+                half: [p.half_extents[0], p.half_extents[1]],
+            });
+        }
+        let pose = reset_pose(
+            Some(world.map()),
+            st.pos,
+            travel_dir(st.rot, st.lin_vel),
+            &obstacles,
+        );
+        self.log_op(
+            idx,
+            OpKind::ResetAt {
+                xy: pose.xy,
+                yaw: pose.yaw,
+                near_z: pose.near_z,
+                repair,
+            },
+        )?;
+        self.relocate_racer(id);
+        Ok(pose)
+    }
+
+    /// Tell the race (if any) that `id` was moved on purpose, so the judge does not read the
+    /// jump as a teleport.
+    fn relocate_racer(&mut self, id: EntityId) {
+        let tick = self.sim.tick();
+        if let (Some(race), Some(v)) = (
+            &mut self.race,
+            self.sim.vehicles().iter().find(|v| v.id == id),
+        ) {
+            race.relocate(id, v.vehicle.state().pos, tick);
+        }
     }
 
     /// Set a vehicle's assists (logged op).
@@ -399,6 +545,9 @@ impl Session {
     /// Switch the damage mode without restarting (logged op; existing damage is kept).
     pub fn set_mode(&mut self, mode: DamageMode) -> Result<(), String> {
         self.live_check()?;
+        if self.career && mode != self.mode {
+            return Err("a career run keeps the career's damage mode".into());
+        }
         self.log_op(0, OpKind::Mode(mode))?;
         self.mode = mode;
         if let Some(r) = &mut self.run {
@@ -444,6 +593,51 @@ impl Session {
             self.mode,
             self.sc.seed,
         ));
+        // The race's buy-in was charged on the fresh account: charge the adopted one instead.
+        if let (Some(race), Some(run)) = (&mut self.race, &mut self.run) {
+            race.reenter(run);
+        }
+    }
+
+    // ----- career (machine G; see `crate::career`) -----------------------------------------
+
+    /// This session is a career run.
+    pub fn is_career(&self) -> bool {
+        self.career
+    }
+
+    /// Make this live session a career run, with `run` as the player's economy (the career's
+    /// account bound to the career car; `None` for sessions without police).
+    pub fn begin_career(&mut self, run: Option<PlayerRun>) -> Result<(), String> {
+        self.live_check()?;
+        if self.sim.tick() != 0 {
+            return Err("a career run starts before the first tick".into());
+        }
+        if let Some(run) = run {
+            if self.run.is_none() {
+                return Err("this session has no economy run (no police)".into());
+            }
+            self.run = Some(run);
+        }
+        self.career = true;
+        Ok(())
+    }
+
+    /// End the career run: the session goes on as a plain session; returns its economy run
+    /// (the career absorbs it).
+    pub fn end_career(&mut self) -> Option<PlayerRun> {
+        self.career = false;
+        self.run.take()
+    }
+
+    /// The sim before the first tick (the career restores the car's saved damage). Not in
+    /// the replay log: replays of a run that started damaged do not verify.
+    pub fn sim_before_start_mut(&mut self) -> Result<&mut Sim, String> {
+        self.live_check()?;
+        if self.sim.tick() != 0 {
+            return Err("only before the first tick".into());
+        }
+        Ok(&mut self.sim)
     }
 
     /// Mutable sim for debug tools (`debug_set_heat`) and tests. Live sessions only; changes
@@ -467,9 +661,25 @@ impl Session {
             .vehicles()
             .iter()
             .find(|v| v.kind == wp_sim::VehicleKind::Police)
-            .map(|v| (v.id, v.vehicle.state()))
+            .map(|v| v.id)
             .ok_or("no police car yet")?;
-        let (cop, st) = (cop.0, cop.1);
+        self.debug_park_in_front_of(id, cop, ahead_m)?;
+        Ok(cop)
+    }
+
+    /// Debug / e2e: park vehicle `id` (stopped) `ahead_m` in front of vehicle `other`, in its
+    /// lane. Not in the replay log; a race (if any) is told the car was moved on purpose.
+    pub fn debug_park_in_front_of(
+        &mut self,
+        id: EntityId,
+        other: EntityId,
+        ahead_m: f32,
+    ) -> Result<(), String> {
+        self.live_check()?;
+        let st = self
+            .vehicle(other)
+            .map(|v| v.vehicle.state())
+            .ok_or_else(|| format!("unknown vehicle {other:?}"))?;
         let q = st.rot;
         // Chassis +Y in world (XY), then yaw about +Z with 0 = +Y.
         let fx = 2.0 * (q[0] * q[1] - q[3] * q[2]);
@@ -480,7 +690,64 @@ impl Session {
         self.sim
             .place_on_ground(id, xy, yaw, 0.0, Some(st.pos[2]))
             .map_err(|e| e.to_string())?;
-        Ok(cop)
+        self.relocate_racer(id);
+        Ok(())
+    }
+
+    /// Debug / e2e: aim vehicle `id` at a parked car so it knocks it: placed 5.5 m off the
+    /// car's flank (a side with a drivable lane and no other prop), facing it, rolling at `speed_mps`.
+    /// `prop` = index into [`crate::props::static_list`], or `None` for the parked car nearest
+    /// the vehicle. Returns the prop index. Not in the replay log.
+    pub fn debug_knock_prop(
+        &mut self,
+        id: EntityId,
+        prop: Option<usize>,
+        speed_mps: f32,
+    ) -> Result<usize, String> {
+        self.live_check()?;
+        let here = self
+            .vehicle(id)
+            .map(|v| v.vehicle.state().pos)
+            .ok_or_else(|| format!("unknown vehicle {id:?}"))?;
+        let target = match prop {
+            Some(i) if i < self.sim.prop_count() => i,
+            Some(i) => return Err(format!("no prop {i}")),
+            None => crate::props::nearest_parked_car(&self.sim, [here[0], here[1]])
+                .ok_or("no parked cars in this session")?,
+        };
+        let (p, q) = self.sim.prop_pose(target).ok_or("no prop pose")?;
+        let r = crate::props::prop_right_xy(q);
+        // Come from a flank with a drivable lane next to it (the other is the kerb), from a
+        // spot no other prop is on (streets have parking on both sides).
+        const OFFSET_M: f32 = 5.5;
+        let map = self.sim.world().map();
+        let lane_at = |side: f32| {
+            let probe = [p[0] + r[0] * side * 3.5, p[1] + r[1] * side * 3.5, p[2]];
+            map.locate(probe, None, 0.0, true, false).is_some()
+        };
+        let spot = |side: f32| [p[0] + r[0] * side * OFFSET_M, p[1] + r[1] * side * OFFSET_M];
+        let clear = |side: f32| {
+            let xy = spot(side);
+            (0..self.sim.prop_count()).all(|i| {
+                i == target
+                    || self.sim.prop_pose(i).is_none_or(|(o, _)| {
+                        (o[0] - xy[0]).powi(2) + (o[1] - xy[1]).powi(2) > 4.5 * 4.5
+                    })
+            })
+        };
+        let side = [-1.0, 1.0]
+            .into_iter()
+            .find(|s| lane_at(*s) && clear(*s))
+            .or_else(|| [-1.0, 1.0].into_iter().find(|s| clear(*s)))
+            .ok_or("no clear spot next to that prop")?;
+        let xy = spot(side);
+        // Facing the prop: forward at yaw ψ is (−sin ψ, cos ψ) = −side · r.
+        let yaw = wp_math::atan2(side * r[0], -side * r[1]);
+        self.sim
+            .place_on_ground(id, xy, yaw, speed_mps, Some(p[2]))
+            .map_err(|e| e.to_string())?;
+        self.relocate_racer(id);
+        Ok(target)
     }
 
     /// The vehicle is held on the brakes because its run is over (capture or wreck).
@@ -592,6 +859,21 @@ impl Session {
             }
         }
 
+        // 1b. Race: the AI field drives its cars (and the player's grid hold). In playback the
+        //     field still runs (its decisions feed the judge) but the log supplies the inputs.
+        if let Some(inputs) = self.race.as_mut().map(|r| r.pre_step(&self.sim)) {
+            if self.playback.is_none() {
+                for (e, input) in inputs {
+                    if self.held(e) {
+                        continue;
+                    }
+                    if let Some(idx) = self.index(e) {
+                        self.log_input(idx, input);
+                    }
+                }
+            }
+        }
+
         // 2. Step, keeping the pre-tick state for interpolation and acceleration.
         // All sim vehicles (city police / traffic cars are drawn and interpolated too);
         // scripting and replay checkpoints use scenario entities only.
@@ -605,7 +887,18 @@ impl Session {
         self.sync_cars();
         let drained = self.sim.drain_events();
         self.observe_run(&drained);
+        // Race judging, outside the step: SimEvent::Race signals (and the police events of a
+        // delivered meet report) join this tick's events.
+        let extra = match &mut self.race {
+            Some(race) => race.post_step(&mut self.sim, &drained),
+            None => Vec::new(),
+        };
+        self.observe_run(&extra);
+        if let Some(race) = &mut self.race {
+            race.settle(self.run.as_mut());
+        }
         self.events.extend(drained);
+        self.events.extend(extra);
         if self.events.len() > MAX_BUFFERED_EVENTS {
             let excess = self.events.len() - MAX_BUFFERED_EVENTS;
             self.events.drain(..excess);

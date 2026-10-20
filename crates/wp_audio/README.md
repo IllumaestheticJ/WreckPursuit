@@ -39,6 +39,24 @@ in `types::slot`.
 `max_voices` and each bus's limit play; one-shots still sounding hold their slot until their
 `duration_s` ends. The focused car's engine is `Critical` and never loses its slot.
 
+**Engine LOD** (playtest #47, a crowd silenced cars): every car but the focus keeps its two
+loudest engine layers within `engine.lod_two_layer_m` (40 m) and one beyond, with the dropped
+layers' energy moved into the kept ones (`engine::engine_lod`; loudness unchanged, sticky near a
+crossover); its second layer scores × `engine.second_layer_cull_scale` (`Desire::cull_scale`),
+so every car's main layer is kept before another car's second one.
+
+**Body-less vehicles:** `kinematic::cruise_state(def, pos, yaw, speed)` builds a plausible
+`VehicleState` (cruising gear and rpm from the car's gearing, rolling wheels) so kinematic
+traffic and police units on `wp_police`'s internal driving can be fed to the director.
+
+**Pack level:** the director folds each cue's `gain` into the gains it sends. Recorded engine
+packs carry a level boost on their layer cues (`tools/audio_packs/write_packs.py` `LEVEL_DB`,
+matched to the procedural fallback); a backend that plays a stand-in cue (the fallback) must
+use that cue's own gain (the Web Audio pool rescales by `fallback.gain / cue.gain`).
+
+**Release:** a cue may set `release_s` (pack JSON); its voice's `Stop` then fades over that
+instead of `audio_config.stop_fade_s`. The horn uses 0.03 s so it ends with the button.
+
 **Determinism:** time comes from ticks only (`AudioFrame::tick`), every map is a `BTreeMap`,
 ordering is total and tie-broken by `VoiceId`, randomness (cosmetic pitch variation, overrun
 pops) is a seeded `wp_math::Rng`, trig goes through `wp_math::sin_cos`, no other transcendental
@@ -47,19 +65,38 @@ functions. Same frames in → byte-identical commands out (tested on real physic
 ## Models
 
 - **Engine** (`engine.rs`): per-car `EngineAudioDef` (cylinders, layout, firing feel,
-  induction/exhaust balance, turbo, supercharger) + an engine pack's layers. Layers of the
-  on-throttle set (and separately the off-throttle set) are sorted by root rpm; the two that
-  bracket the current rpm are crossfaded with an equal-power curve; on/off sets mix by smoothed
-  load (`sqrt(load)` / `sqrt(1-load)`), so squared weights always sum to 1. Each layer plays at
-  `pitch = rpm / root_rpm`. Limiter layer fades in over the last `limiter_window_rpm` on
-  throttle. Turbo boost spools with throttle × rpm (whistle loop, one blow-off per lift above
-  `blowoff_min_boost`); supercharger whine follows rpm; overrun pops are Poisson via the seeded
-  rng. Engine sound stops when `Component::Engine` health is 0; radiator damage adds a hiss.
+  induction/exhaust balance, turbo, supercharger) + an engine pack's layers. Inputs per frame:
+  the crank rpm (`VehicleState::engine_rpm`, never a wheel-derived speed), the pedal and the
+  **applied throttle** (`VehicleAudioInput::throttle_applied` = `wp_vehicle::Telemetry::throttle`:
+  after the pedal filter, TCS and the gearbox's shift cut; the wasm bridge fills it).
+  Layers of the on-throttle set (and separately the off-throttle set) are sorted by root rpm;
+  the two that bracket the current rpm are crossfaded with an equal-power curve; the on/off
+  sets split the energy by `on_share = smoothstep(0, on_full_load, load)` of the smoothed load,
+  so part throttle (≥ ~30 %) sounds on-load and only a closed throttle sounds like overrun;
+  squared weights always sum to 1. Each layer plays at `pitch = rpm / root_rpm`.
+  **Shift note** from the smoothed rpm rate (works for clutch, DCT and converter boxes alike):
+  rpm falling faster than `shift_rate_onset_rpm_s` under throttle dips the load by up to
+  `shift_dip_depth` (dip, then re-rise as the new gear pulls); rpm rising that fast with the
+  throttle closed (the gearbox rev-matching a downshift) raises it toward `blip_load` (blip).
+  Limiter layer fades in over the last `limiter_window_rpm` with the pedal held. Turbo boost
+  spools with applied throttle × rpm (whistle loop, one blow-off per lift above
+  `blowoff_min_boost`, including a shift's throttle cut — lifts are seen over 0.15 s);
+  supercharger whine follows rpm; overrun pops are Poisson via the seeded rng. Inputs are
+  NaN-safe and decaying state is flushed to 0 below 1e-6 (no denormals). Engine sound stops
+  when `Component::Engine` health is 0; radiator damage adds a hiss.
 - **Tires** (`tires.rs`): combined slip `sqrt((κ/κ_peak)² + (α/α_peak)²)`; squeal above
   `squeal_threshold`, scaled by `sqrt(Fz / static Fz)` (loudest wheel + 25 % of the others),
   quieter on wet asphalt; gravel/dirt/grass scrub instead. Rolling noise per dominant
   `SurfaceType` (one loop per surface so changes crossfade), plus `FfbOutput::road_rumble`.
   Suspension thump on compression rate > `thump_rate_mps`; landing after `land_airtime_s`.
+  **Wheelspin** (playtest #27) is its own loop, `tire/spin` (paved) / `tire/spin_loose`
+  (gravel roost): per wheel the driving slip ratio above `spin_ratio_onset` times the slip speed
+  `ω·r − vx` (inverted exactly from `wp_vehicle`'s slip ratio with the car's wheel radii) above
+  `spin_speed_onset_mps`; intensity and pitch rise with slip speed, weighted by
+  `sqrt(Fz / static)` and surface (`wet_spin_scale` on wet asphalt); loudest wheel + 35 % of the
+  others, so two spinning wheels (LSD / locked) beat a one-wheel peel; 30 ms attack, 80 ms
+  release. Squeal and scrub only hear the braking (negative) slip ratio and the slip angle, so a
+  burnout does not squeal and a power slide squeals from its slip angle while the spin howls.
 - **Collisions** (`collision.rs`): the material at a contact is recovered from the lattice
   (nearest node, dominant beam material; glass-region nodes with glass beams are glass). Layers
   by material × closing speed: thud (slow), plastic crack, panel dent (+ structural crunch at
@@ -90,6 +127,12 @@ functions. Same frames in → byte-identical commands out (tested on real physic
 | `data/audio/audio_config.json` | all tuning: voice limits, priority weights, spatial model, engine/tire/impact/siren/scanner mix |
 | `data/audio/cars/<car_id>.json` | `CarAudioDef`: engine description, engine pack, world pack, horn cue, optional siren |
 | `data/audio/packs/<id>.json` | sample packs (below) |
+
+**Recorded packs** (`*_rec*`, the default for every shipped car) hold OGG files under
+`data/audio/packs/<id>/` and name their procedural twin in `"fallback"`; the browser plays the
+fallback cue (same name) when the player picks "procedural" or a file has not loaded. Licences and
+sources: `data/audio/LICENSES.md`; tooling: `tools/audio_packs/`. Optional World-pack cues:
+`drivetrain/shift` (one-shot on gear change, director) and `ambient/city_night` (backend loop).
 
 Cars without a file get `CarAudioDef::fallback` (I4, or V8 for muscle/trucks; sirens on police
 classes) so a new car is never silent, but the tests require a file for every shipped car.
@@ -146,15 +189,18 @@ one-shots peak −1 dBFS; balance between cues with `gain`, overall mix lives in
 | kind | cues |
 |---|---|
 | Engine | the layers above, `engine/limiter`, `turbo/whistle`, `turbo/blowoff`, `supercharger/whine`, `exhaust/pop` |
-| World | `tire/squeal`, `tire/burst`, `body/rattle`, `tire/scrub_loose`, `surface/{asphalt,wet_asphalt,concrete,gravel,grass,dirt,curb,metal}`, `suspension/{thump,land}`, `impact/{thud,plastic_crack,panel_dent,structural_crunch,glass_shatter,cast_clank}`, `scrape/{metal,plastic}`, `debris/{part_tear,wheel_off}`, `mech/{engine_fail,steam_hiss}`, `horn/{standard,truck}` |
+| World | `tire/squeal`, `tire/spin`, `tire/spin_loose`, `tire/burst`, `body/rattle`, `tire/scrub_loose`, `surface/{asphalt,wet_asphalt,concrete,gravel,grass,dirt,curb,metal}`, `suspension/{thump,land}`, `impact/{thud,plastic_crack,panel_dent,structural_crunch,glass_shatter,cast_clank}`, `scrape/{metal,plastic}`, `debris/{part_tear,wheel_off}`, `mech/{engine_fail,steam_hiss}`, `horn/{standard,truck}` |
 | Siren | `siren/{wail,yelp,phaser,hilo}` — seamless loops of one cadence cycle (or several), started in phase with the director's `phase` |
 | Radio | `radio/squelch_on`, `radio/squelch_off`, `radio/static` |
 
 **Procedural synths** (`Synth { synth, params }`, implemented in
 `apps/testbed-web/src/audio/synth.ts`): `engine` (h1..h4 harmonic amps at orders ½,1,2,3,
 `noise`, `drive`, `bright`, `off`, `chop_hz`; car adds `cylinders`, `uneven`, `balance`,
-`root_rpm`), `noise` (`lowpass_hz`, `highpass_hz`, `bandpass_hz`, `rumble`, `crackle`,
-`ripple_hz`), `whine`/`tone` (`freq_hz`, `noise`), `squeal` (`freq_hz`, `wobble_hz`), `horn`
+`root_rpm`; the backend plays all `engine`-synth layers and the limiter of one car as **one**
+instrument — gain `sqrt(Σ gain²)`, timbre blended by energy — because separate synths at the
+same firing frequency interfere; sample layers stay separate voices), `noise` (`lowpass_hz`, `highpass_hz`, `bandpass_hz`, `rumble`, `crackle`,
+`ripple_hz`), `spin` (`freq_hz`, `chirp_hz`, `hiss`; `pitch` = slip speed, `load` =
+intensity), `whine`/`tone` (`freq_hz`, `noise`), `squeal` (`freq_hz`, `wobble_hz`), `horn`
 (`f1`, `f2`), `hiss`, `siren` (`wave`; cadence comes from the director), `impact` (`freq_hz`,
 `decay_s`, `noise`, `crack`, `ring`), `glass` (`decay_s`, `tinkles`), `thump` (`freq_hz`,
 `decay_s`, `noise`), `blowoff`, `pop`, `squelch`, `clatter` (`hits`, `decay_s`, `freq_hz`).
@@ -163,6 +209,7 @@ one-shots peak −1 dBFS; balance between cues with `gain`, overall mix lives in
 
 ```
 cargo test -p wp_audio
+cargo test -p wp_audio --test samples   # recorded files exist, licensed, ≤ 15 MB
 ```
 
 Unit tests per module plus `tests/director.rs`: shipped data validates (and disk == embedded,
@@ -173,6 +220,31 @@ frame, the stream is well-formed — no double plays, no set/stop of unknown voi
 focused engine is never culled); **engine layer selection monotone in rpm** for every car
 (band position and dominant layer never go down, weights energy-preserving); reset on time
 going backwards; the crate passes `lint-determinism`.
+
+`tests/engine_shift.rs` (owner playtest #19, "2nd gear onwards doesn't sound right") drives five
+cars — I4 sedan, V8 muscle car, turbo clutch car, turbo DCT, converter automatic — on the flat
+`wp_vehicle` rig through idle, WOT 1→5, lift, brake, a 35 % cruise and a kickdown, runs the
+director at 60 Hz and checks the dumped engine voices: values finite, normal (no NaN/denormal)
+and within limits; synth frequency and sample pitch follow the crank rpm every frame; no level
+jumps, layers start/stop at their band edges; every WOT upshift dips 1.2–9 dB and is back
+within 1 dB 0.5 s later; rev-matched downshifts blip ≥ 2 dB; part throttle on-load / overrun
+off-load; every layer audible and only leading near its root; turbo cars blow off on upshifts.
+`tests/wheelspin.rs` (playtest #27): a standstill burnout and full-throttle launches with TCS
+off (RWD V8, RWD turbo, FWD sedan) and a TCS launch — the spin loop is ≥ 0.2 after 0.1 s of
+hard spin (slip ratio ≥ 0.5, ≥ 3 m/s), silent after 0.5 s of grip, pitch rises with slip speed,
+and straight-line spin does not squeal. `tests/roster.rs` (playtest #47): every car in `data/cars` as player, AI racer, police unit
+and traffic gets an audible engine, squeal, wheelspin and (police) siren; a 24-car crowd keeps
+every engine to 140 m with the LOD's layer counts; the LOD keeps loudness; kinematic cruise
+states are heard. The same scenarios rendered through the browser's voice pool, recorded and
+procedural: `cargo run -p wp_audio --example roster_trace -- r.json` +
+`node apps/testbed-web/e2e/audio_roster.mjs r.json --verbose` (or no argument: it builds the
+trace). Same signals as a table/CSV (`--burnout` for the
+wheelspin script) and the command stream for an offline browser render:
+
+```
+cargo run --release -p wp_audio --example engine_trace -- <car_id> [out.csv [render.json]] [--burnout]
+node apps/testbed-web/e2e/engine_render.mjs render.json [out.wav] [report.json]
+```
 
 ## Perf
 
@@ -188,7 +260,12 @@ nodes) for material lookup.
   set by the caller. Until B emits `GlassShattered`, glass is inferred from contacts.
 - No occlusion (buildings) or interior/exterior filtering yet; no reverb zones (tunnels).
 - No music system; the Music bus exists so the scanner can duck it.
+- Kinematic traffic and body-less police units are heard only once the wasm bridge feeds
+  `kinematic::cruise_state` inputs (request R12b-1 in `docs/integration/audio.md`).
 - TTS (`speechSynthesis`) bypasses the Web Audio radio EQ (browser limitation); recorded line
   packs will go through it.
-- Throttle comes from `VehicleInput` (pre-assist); TCS cuts are not audible until `VehicleState`
-  carries the applied throttle.
+- The applied throttle reaches audio through the wasm bridge (`Telemetry::throttle`); a
+  networked client only sees the replicated `VehicleInput` until `VehicleState` carries it (A-5).
+- Rev-matched downshift blips are inferred from the rpm rate (`wp_vehicle` rev-matches
+  kinematically, its telemetry throttle stays 0); converter automatics downshift without a
+  blip.

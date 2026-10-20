@@ -90,6 +90,31 @@ where
     S: NetSim + 'static,
     F: FnOnce() -> ServerInstance<S> + Send + 'static,
 {
+    spawn_game_loop_with(
+        make,
+        events,
+        status,
+        log,
+        net_hz,
+        |_: &mut ServerInstance<S>| {},
+    )
+}
+
+/// [`spawn_game_loop`] with a host hook run on the game thread after every net tick, before
+/// output is flushed (e.g. the meta service link: join verification, kicks, reports).
+pub fn spawn_game_loop_with<S, F, H>(
+    make: F,
+    events: std_mpsc::Receiver<IoEvent>,
+    status: Arc<Mutex<StatusReport>>,
+    log: LogFn,
+    net_hz: u32,
+    mut hook: H,
+) -> JoinHandle<()>
+where
+    S: NetSim + 'static,
+    F: FnOnce() -> ServerInstance<S> + Send + 'static,
+    H: FnMut(&mut ServerInstance<S>) + Send + 'static,
+{
     std::thread::Builder::new()
         .name("wp-game-loop".into())
         .spawn(move || {
@@ -132,6 +157,7 @@ where
                 }
                 let t0 = Instant::now();
                 inst.net_tick();
+                hook(&mut inst);
                 for out in inst.drain_outgoing() {
                     let Some(sock) = conns.get(&out.conn) else {
                         continue;

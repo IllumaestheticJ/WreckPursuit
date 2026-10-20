@@ -17,8 +17,8 @@ use std::collections::BTreeMap;
 
 use wp_contracts::{
     AssistProfile, CaptainCommand, CaptainError, ContactImpulse, DamageMode, DamageSim, EntityId,
-    LoadedCar, SimEvent, TimeOfDay, TrafficAgentSnapshot, UnitId, VehicleInput, VehicleState,
-    WeatherKind, WeatherSnapshot, WorldQuery, PHYSICS_DT,
+    LoadedCar, PlayerId, SimEvent, TimeOfDay, TrafficAgentSnapshot, UnitId, VehicleInput,
+    VehicleState, WantedLevel, WeatherKind, WeatherSnapshot, WorldQuery, PHYSICS_DT,
 };
 use wp_sim::{Sim, SimConfig, VehicleKind};
 
@@ -70,6 +70,10 @@ pub trait NetSim {
     fn wanted_level(&self, _id: EntityId) -> u8 {
         0
     }
+    /// A racer's bounty from `wp_police` (cash value of its heat history). Default: 0.
+    fn bounty(&self, _id: EntityId) -> u32 {
+        0
+    }
     /// Bit-exact full state of a vehicle (`wp_vehicle::VehicleSnapshot` bytes) for the owning
     /// client's prediction rewind. Default: none (clients fall back to `set_state`).
     fn vehicle_snapshot(&self, _id: EntityId) -> Option<Vec<u8>> {
@@ -81,9 +85,22 @@ pub trait NetSim {
     fn damage_steps(&self, _id: EntityId) -> Option<u64> {
         None
     }
-    /// Tell the sim who drives a vehicle the net layer spawned (racer seat or police seat).
+    /// True when a lattice snapshot taken now reproduces the vehicle's damage model exactly:
+    /// it was never hit, or it has settled since (no impact in progress). Otherwise the
+    /// server marks the snapshot provisional and sends a final one once it settles.
+    /// Default: true.
+    fn damage_settled(&self, _id: EntityId) -> bool {
+        true
+    }
+    /// Full internal damage state of a damaged vehicle for lattice resyncs
+    /// ([`crate::lattice::ReplicaDamage::save_state`] bytes, NET-N5). Default: none.
+    fn damage_state(&self, _id: EntityId) -> Option<Vec<u8>> {
+        None
+    }
+    /// Tell the sim who drives a vehicle the net layer spawned (racer seat or police seat)
+    /// and which player owns it.
     /// Default: ignored.
-    fn set_owned_kind(&mut self, _id: EntityId, _kind: EntityKind) {}
+    fn set_owned_kind(&mut self, _id: EntityId, _kind: EntityKind, _player: PlayerId) {}
     /// Kinematic (not physical) traffic agents, ascending id. Physical agents are vehicles.
     /// Default: none.
     fn traffic_agents(&self) -> Vec<TrafficAgentSnapshot> {
@@ -103,6 +120,33 @@ pub trait NetSim {
     fn police_unit(&self, _id: EntityId) -> Option<UnitId> {
         None
     }
+    /// True when a racer is wanted or in an active pursuit: its player disconnecting gets the
+    /// capture grace ([`crate::server::WANTED_DISCONNECT_GRACE_TICKS`]). Default: wanted
+    /// level above 0.
+    fn wanted_or_pursued(&self, id: EntityId) -> bool {
+        self.wanted_level(id) > 0
+    }
+    /// Freeze (`true`) or release a racer's heat and pursuit while its player is
+    /// disconnected (`wp_police::PoliceSystem::set_racer_held`). Default: ignored.
+    fn hold_racer(&mut self, _id: EntityId, _held: bool) {}
+    /// End an abandoned racer's pursuit as `Captured` (disconnect grace ran out, or the
+    /// player quit while wanted): returns the wanted level at the capture and the capturing
+    /// unit (nearest pursuing unit, or none). The `PursuitEnded` event follows in the next
+    /// step's events. `None` when the racer was not wanted. Default: `None`.
+    fn capture_abandoned(&mut self, _id: EntityId) -> Option<(WantedLevel, Option<UnitId>)> {
+        None
+    }
+    /// Economy spec (class, base price) of a car id, for the server's capture settlement.
+    /// Default: none (the server uses the economy's floor car class and price).
+    fn car_spec(&self, _car_id: &str) -> Option<wp_economy::CarSpec> {
+        None
+    }
+
+    /// Whether `p` is inside a tunnel / covered road (`wp_world::World::covered_at`): the
+    /// captain map stops updating a racer there. Default: never.
+    fn covered_at(&self, _p: [f32; 3]) -> bool {
+        false
+    }
 }
 
 /// [`NetSim`] over the real `wp_sim::Sim`.
@@ -116,6 +160,8 @@ pub struct WpSim {
     weather: Option<(wp_weather::WeatherSim, f32)>,
     /// `WeatherChanged` events not yet drained.
     weather_events: Vec<SimEvent>,
+    /// Vehicles that took a damage-relevant contact since they spawned.
+    hit: std::collections::BTreeSet<EntityId>,
 }
 
 impl WpSim {
@@ -138,6 +184,7 @@ impl WpSim {
             damage_steps,
             weather: None,
             weather_events: Vec::new(),
+            hit: Default::default(),
         }
     }
 
@@ -293,6 +340,18 @@ pub fn lane_spawn_points(world: &wp_world::World, n: usize) -> Vec<([f32; 3], f3
     out
 }
 
+/// The static ground of a city with terrain for client prediction rigs
+/// ([`crate::client::ClientConfig::city_ground`]): `wp_sim`'s parked safety slab plus
+/// `wp_sim::city_ground_colliders`, identical to what the server's sim drives on. `None` for
+/// flat cities (the rig's slab already matches).
+pub fn city_ground(world: &wp_world::World) -> Option<crate::predict::CityGround> {
+    let (colliders, _) = wp_sim::city_ground_colliders(world.map())?;
+    let mut all = Vec::with_capacity(colliders.len() + 1);
+    all.push(wp_sim::parked_slab_collider());
+    all.extend(colliders);
+    Some(std::sync::Arc::new(all))
+}
+
 /// `wp_sim` contact filter: replace a contact with its wire round trip, so the authority's
 /// damage applies exactly what clients will replay.
 fn quantise_contact(c: &mut ContactImpulse) {
@@ -324,6 +383,14 @@ impl NetSim for WpSim {
             .sim
             .spawn_vehicle(car, pos, yaw)
             .map_err(|e| e.to_string())?;
+        if self.sim.has_terrain() {
+            // Cities with terrain: settle on the road / terrain under the spawn point (the
+            // spawn height is a hint for grade separation, 0 = lowest surface).
+            let near = (pos[2] != 0.0).then_some(pos[2]);
+            self.sim
+                .place_on_ground(id, [pos[0], pos[1]], yaw, 0.0, near)
+                .map_err(|e| e.to_string())?;
+        }
         self.damage_steps.insert(id, 0);
         Ok(id)
     }
@@ -331,6 +398,7 @@ impl NetSim for WpSim {
     fn despawn(&mut self, id: EntityId) {
         let _ = self.sim.despawn_vehicle(id);
         self.damage_steps.remove(&id);
+        self.hit.remove(&id);
     }
 
     fn set_input(&mut self, id: EntityId, input: VehicleInput) {
@@ -384,6 +452,14 @@ impl NetSim for WpSim {
         events
     }
 
+    fn damage_settled(&self, id: EntityId) -> bool {
+        !self.hit.contains(&id) || self.slot(id).is_none_or(|v| !v.damage.is_awake())
+    }
+
+    fn damage_state(&self, id: EntityId) -> Option<Vec<u8>> {
+        crate::lattice::ReplicaDamage::save_state(&self.slot(id)?.damage)
+    }
+
     fn vehicle_snapshot(&self, id: EntityId) -> Option<Vec<u8>> {
         self.slot(id)
             .map(|v| v.vehicle.snapshot().as_bytes().to_vec())
@@ -401,6 +477,7 @@ impl NetSim for WpSim {
             if relevant.is_empty() {
                 continue;
             }
+            self.hit.insert(id);
             // Several batches of one vehicle in one step stay separate (they were separate
             // damage steps); `wp_sim` records one per vehicle per tick.
             out.push((id, relevant));
@@ -426,20 +503,27 @@ impl NetSim for WpSim {
         self.damage_steps.get(&id).copied()
     }
 
+    fn bounty(&self, id: EntityId) -> u32 {
+        let police = self.sim.police();
+        police.racer(id).map_or(0, |r| {
+            r.bounty.bounty(&police.config().heat).max(0.0) as u32
+        })
+    }
+
     fn wanted_level(&self, id: EntityId) -> u8 {
         self.sim.police().wanted_level(id).number()
     }
 
-    fn set_owned_kind(&mut self, id: EntityId, kind: EntityKind) {
-        // Player police seats must not be treated as racers by `wp_police` (they would earn
-        // heat and be chased). `VehicleKind::Police` also drops them from the traffic spawn
-        // ring; see NET-N9 in docs/integration/net.md.
-        let k = if kind.is_police() {
-            VehicleKind::Police
+    fn set_owned_kind(&mut self, id: EntityId, kind: EntityKind, player: PlayerId) {
+        // Player police seats are `wp_police` player units (they spot racers, start
+        // pursuits, count for captures, take captain orders) and `VehicleKind::Police`, so
+        // AI police never chase them. That kind also drops them from the traffic spawn ring
+        // (NET-N9 in docs/integration/net.md).
+        if kind.is_police() {
+            let _ = self.sim.bind_player_police(id, player);
         } else {
-            VehicleKind::Player
-        };
-        let _ = self.sim.set_vehicle_kind(id, k);
+            let _ = self.sim.unbind_player_police(id);
+        }
     }
 
     fn traffic_agents(&self) -> Vec<TrafficAgentSnapshot> {
@@ -475,6 +559,28 @@ impl NetSim for WpSim {
     fn police_unit(&self, id: EntityId) -> Option<UnitId> {
         self.slot(id).and_then(|v| v.police_unit)
     }
+
+    fn wanted_or_pursued(&self, id: EntityId) -> bool {
+        self.sim.police().is_wanted_or_pursued(id)
+    }
+
+    fn hold_racer(&mut self, id: EntityId, held: bool) {
+        self.sim.police_mut().set_racer_held(id, held);
+    }
+
+    fn capture_abandoned(&mut self, id: EntityId) -> Option<(WantedLevel, Option<UnitId>)> {
+        self.sim.police_mut().capture_abandoned(id)
+    }
+
+    fn car_spec(&self, car_id: &str) -> Option<wp_economy::CarSpec> {
+        self.cars
+            .get(car_id)
+            .map(|c| wp_economy::CarSpec::from(&c.def))
+    }
+
+    fn covered_at(&self, p: [f32; 3]) -> bool {
+        self.sim.world().covered_at(p).is_some()
+    }
 }
 
 #[cfg(test)]
@@ -504,7 +610,7 @@ mod tests {
             seed: 1,
             ..Default::default()
         };
-        sim.set_world(wp_world::World::procedural(
+        let mut world = wp_world::World::procedural(
             &pg,
             wp_world::WorldConfig {
                 seed: 3,
@@ -516,12 +622,26 @@ mod tests {
                 },
                 parked_cars: false,
             },
-        ));
+        );
+        // Fill the streets around the spawn point before the first tick, as simcli does (live
+        // spawns keep wp_world's sightline radius, 320 m, so traffic would take a while to
+        // drive into promotion range).
+        let spawn = [53.25, 300.0, 0.0];
+        world.set_tracked_vehicles(&[wp_world::TrackedVehicle {
+            entity: wp_contracts::EntityId(1),
+            pos: spawn,
+            vel: [0.0; 3],
+            forward: [0.0, -1.0],
+            siren: false,
+            player: true,
+        }]);
+        world.populate();
+        sim.set_world(world);
         sim.set_police_car(police);
         sim.set_traffic_car(cars["debug_sedan"].clone());
         let mut net = WpSim::from_sim(sim, cars.clone());
         let me = net
-            .spawn("debug_coupe", [53.25, 300.0, 0.0], std::f32::consts::PI)
+            .spawn("debug_coupe", spawn, std::f32::consts::PI)
             .unwrap();
         for _ in 0..3 {
             net.step();
@@ -568,5 +688,71 @@ mod tests {
             checked >= 3 && traffic >= 1 && police >= 1,
             "{checked} {traffic} {police}"
         );
+    }
+
+    /// A player police seat is a `wp_police` player unit: it spots a wanted racer right in
+    /// front of it and the pursuit starts with *its* unit; swapping in a new police system
+    /// keeps the seat (re-registered, not despawned); despawning removes the unit.
+    #[test]
+    fn player_cop_seat_starts_a_pursuit_and_leaves_cleanly() {
+        let (cars, modes) = load_data(&repo_data_dir()).unwrap();
+        let config = SimConfig {
+            seed: 5,
+            mode: modes[&DamageMode::Arcade].clone(),
+            time_of_day: TimeOfDay::from_hours(12.0),
+            time_ratio: 1.0,
+        };
+        let pg = wp_world::procgen::ProcGenConfig {
+            nx: 4,
+            ny: 4,
+            spacing_m: 110.0,
+            seed: 1,
+            ..Default::default()
+        };
+        let mut wcfg = server_world_config(&config);
+        wcfg.traffic.enabled = false;
+        let world = wp_world::World::procedural(&pg, wcfg);
+        let city = CitySetup {
+            world,
+            police_car: None,
+            traffic_car: None,
+        };
+        let mut net = WpSim::with_city(config, cars, city);
+        let racer = net
+            .spawn("debug_coupe", [53.25, 200.0, 0.0], std::f32::consts::PI)
+            .unwrap();
+        let cop = net
+            .spawn("debug_sedan", [53.25, 225.0, 0.0], std::f32::consts::PI)
+            .unwrap();
+        net.set_owned_kind(racer, EntityKind::Racer, PlayerId(1));
+        net.set_owned_kind(cop, EntityKind::PoliceChase, PlayerId(2));
+        let unit = net.police_unit(cop).expect("cop seat is a police unit");
+        assert!(net.sim().police().units().iter().any(|u| u.id == unit));
+        // A new police system (tests, admin tools): the seat is registered again.
+        let fresh = wp_police::PoliceSystem::for_world(
+            wp_police::PoliceConfig::builtin(),
+            net.sim().world(),
+            wp_police::PoliceSetup::default(),
+        );
+        net.sim_mut().set_police(fresh);
+        net.sim_mut().police_mut().set_heat(racer, 55.0);
+        let mut started = None;
+        for _ in 0..240 * 6 {
+            net.step();
+            for e in net.drain_events() {
+                if let SimEvent::Police(wp_contracts::PoliceEvent::PursuitStarted {
+                    racer: r,
+                    unit,
+                }) = e
+                {
+                    started.get_or_insert((r, unit));
+                }
+            }
+        }
+        assert!(net.vehicles().iter().any(|(e, _)| *e == cop), "seat kept");
+        let unit = net.police_unit(cop).expect("re-registered");
+        assert_eq!(started, Some((racer, Some(unit))), "the player cop spotted");
+        net.despawn(cop);
+        assert!(!net.sim().police().units().iter().any(|u| u.id == unit));
     }
 }

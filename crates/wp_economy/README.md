@@ -94,6 +94,14 @@ Data: `data/economy/{prices,stakes,consequences,market}.toml`, `data/mods/*.json
   winnings pay the debt down. Pink slips are blocked too.
 - **Economy floor:** a player with no usable car can always get the junkyard beater for
   `min(price, cash)`. It never creates debt.
+- **Resale never beats what you paid** (round 12b): each `OwnedCar` records
+  `purchase_price` (the dealer price in the bought condition, or what the floor car cost; mods
+  excluded). The dealer pays `dealer_buy_frac (0.7) × purchase_price + mod_resale_frac (0.4) ×
+  mods`, scaled down by outstanding damage; scrap salvage of the body is capped at the same
+  `0.7 × purchase_price`. Cars from v1 saves (no price) use the cheapest price the player could
+  have paid (`Economy::resale_basis`: cheapest condition, or the floor price for the floor
+  model). Insurance pays `coverage < 1` of the bill above a deductible > 0, so it always pays
+  less than the repair.
 
 ### Repairs ("you pay for what you break")
 - `wp_damage` prices damage with the `PriceTable` from `Economy::price_table(class, value)`:
@@ -126,10 +134,26 @@ Data: `data/economy/{prices,stakes,consequences,market}.toml`, `data/mods/*.json
   the car is destroyed.
 - Pound: retrieval = base fee + per-day fee by class; after 10 days the car is auctioned (the
   owner gets 10 % of value minus fees).
-- Escapes add bounty and rep by level (× day-phase bounty multiplier).
+- Escapes add bounty, rep **and cash** by level (× day-phase bounty multiplier;
+  `stakes.toml [bounty.escape_cash]`: night L1 455, L2 1 040, L3 2 080). Cash for losing the
+  cops is the career's fast, risky money until races run in the browser: an L2 night escape
+  beats an Arcade L1 bust in a beater (≈ 740) but not an L2 bust in a Sport car (≈ 1 810).
 - Cop side: XP for captures/assists/clean minutes, losses for civilian hits, self-wrecks and
   overspending prompt 06's risk budget; cash reward = base by level + 25 % of the racer's
   bounty (assists 30 % of that). `cop_level(xp)` from thresholds.
+
+### Career between runs (`profile`, step 2)
+- `CareerProfile` is the browser save: account, ledger tail (`career.ledger_keep` = 200 lines),
+  carried heat, career counters and each car's lattice damage (opaque text from the damage
+  system). JSON with `format: "wreckpursuit-career"` and `version`; `migrate` refuses newer
+  saves and steps older ones up (v1 → v2 adds `purchase_price: null` to every car).
+- Each finished run is one in-game night (`close_run` → `end_of_day`: premiums, pound storage,
+  auctions); `next_night` lets a night pass without driving.
+- Heat: a capture or a wreck clears it; a run that ends free carries `heat × 0.5`, capped at
+  45 (never above L2), forgotten below 5 (`consequences.toml [career]`). A legit shop that
+  reports a wanted car raises the carried heat to that level's threshold (browser career).
+- A new career starts with 4 500: a worn beater (1 800) leaves room for three busted L1 nights
+  in it (≈ 740 each); `tests/browser_career.rs` keeps that true.
 
 ### Payouts
 `winner purse = max(min, per_km × km) × class × day phase × mode × wanted`; places 1–4 get
@@ -186,7 +210,9 @@ debug coupe = 559 (B). Monotone in power and in lower mass (property-tested).
 | `mode.Simulation.seizure_chance`, `total_loss_destroys_car` | consequences.toml | Sim can take your car |
 | `impound.*` | consequences.toml | retrieve within a few days or lose it |
 | `debt.max_entry_fee`, `race_types.Meet` | stakes.toml | debt is a slow grind out, not a game over |
-| `starting_cash`, `floor_car`, `class_bands`, `condition`, resale fractions | market.toml | always a way back onto the street |
+| `starting_cash`, `floor_car`, `class_bands`, `condition`, resale fractions | market.toml | always a way back onto the street; a new player affords a beater and a few runs |
+| `bounty.escape_cash` | stakes.toml | an escape is fast money; a bust in a real car costs more than the escape pays |
+| `career.heat_carry_*` | consequences.toml | the police remember last night, but a night off cools them |
 
 ### Prices against the car roster
 
@@ -279,6 +305,11 @@ cargo test -p wp_economy --test career -- --nocapture   # print the tuning numbe
   stat (on four cars and random builds); installed mod sets always stay legal
   (whitelist/requirements/modes); class index monotone in power and weight.
 - `tests/garage_repair.rs`, `tests/capture_payouts.rs`: behaviour of every API.
+- `tests/browser_career.rs`: step-2 guardrails (a new player affords a beater and three busted
+  nights; an L2 night escape out-earns an L1 beater bust, a Sport bust costs more than the
+  escape at the same level, Simulation busts cost more). `src/profile.rs` unit tests: save
+  round trip, version checks, defaults, carry-over rules. The browser career itself is tested
+  in `crates/wp_wasm/src/career_tests.rs`.
 - `tests/data_tables.rs`: data completeness, embedded copy == `data/`, every mod applies.
 - `tests/stores.rs`: in-memory + SQLite stores, sequence conflicts, `SimEvent` round trip.
 - `tests/pursuit_wiring.rs`: a real `PoliceSystem` capture settled through the economy (both modes), escape / safehouse / called-off settlement, tracker event-order rules.
@@ -295,6 +326,11 @@ cargo test -p wp_economy --test career -- --nocapture   # print the tuning numbe
 - `tests/race_kinds.rs`: every contract `RaceKind` maps onto `wp_race`'s race type and stays
   within 15 % of `wp_race`'s relative purse; legality order; outrun recorded as touge.
 - `tests/roster_prices.rs`: feel targets on every roster car (table above).
+- `tests/resale.rs` (proptest): every roster car × condition × random mods × mode: buy → sell
+  or scrap at once returns less than was spent; buy → (insure) → crash → repair (legit or
+  crooked) → sell returns less than everything spent, and insurance pays less than the bill;
+  the floor car never sells or scraps above what was paid (any cash); v1-save cars use the
+  cheapest price; the owner's two repro cases.
 - `tests/career.rs`: the 20-night scenario + determinism + the roster sweep.
 
 ## Performance
@@ -318,9 +354,9 @@ build (`cargo test -p wp_economy --release --test perf -- --ignored --nocapture`
 Browser numbers not measured yet (expect ~2× native).
 
 ## Known gaps
-- Lattice-state blobs and partial repairs need `DamageSim::{save_state, restore_state,
-  apply_repair}` (contract v0.3.0). Until the sim calls `record_damage` with real estimates, the
-  career scenario uses `reference_estimate` (same pricing as `wp_damage`, synthetic severities).
+- The browser career (`wp_wasm::career`) keeps lattice damage per car and repairs it with
+  `apply_repair`; the server path still stores no lattice blob. The scripted career scenario
+  uses `reference_estimate` (same pricing as `wp_damage`, synthetic severities).
 - The career's win rate does not depend on the car (see the roster sweep).
 - No `wp_vehicle::metrics` yet, so `preview` uses the built-in estimator (comparative, not
   lap-time accurate).

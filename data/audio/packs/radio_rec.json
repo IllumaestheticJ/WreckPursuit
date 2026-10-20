@@ -1,0 +1,43 @@
+{
+  "id": "radio_rec",
+  "kind": "Radio",
+  "description": "Scanner squelch bursts and static bed cut from a real scanner recording (Kresiek The Furry, Uniden SDS100, CC0).",
+  "fallback": "radio_proc",
+  "cues": {
+    "radio/squelch_on": {
+      "source": {
+        "Samples": {
+          "files": [
+            "squelch_on.ogg"
+          ]
+        }
+      },
+      "gain": 1.0,
+      "looped": false,
+      "duration_s": 0.19
+    },
+    "radio/squelch_off": {
+      "source": {
+        "Samples": {
+          "files": [
+            "squelch_off.ogg"
+          ]
+        }
+      },
+      "gain": 1.0,
+      "looped": false,
+      "duration_s": 0.33
+    },
+    "radio/static": {
+      "source": {
+        "Samples": {
+          "files": [
+            "static.ogg"
+          ]
+        }
+      },
+      "gain": 0.5,
+      "looped": true
+    }
+  }
+}

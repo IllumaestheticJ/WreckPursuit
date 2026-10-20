@@ -15,6 +15,7 @@ canonical `replay.bin` files that `simcli replay` verifies.
 | `scenario.rs` | free-drive scenario generator, `.ron` parsing, cruise-speed override (all simcli v2) |
 | `pack.rs` | packed typed-array layouts, beam strain, region energy |
 | `run.rs` | the player's economy (lead): drained events → G's `EconomySession`, end-of-run `RunReport`, "Repair & continue"; tests in `run_tests.rs` |
+| `career.rs` | the browser career (machine G): persistent account, garage actions, career runs with the career car's mods and saved lattice damage, `career_*` exports; tests in `career_tests.rs` (see `docs/integration/economy.md`) |
 | `police.rs` / `garage.rs` / `audio.rs` | police read-outs + siren rule, live repair bill, audio director glue |
 | `data.rs` + `build.rs` | every file in `data/{cars,lattices,tires,materials,modes}` embedded at build time, also as a simcli `MemData` bundle |
 
@@ -26,15 +27,23 @@ cargo build --target wasm32-unknown-unknown -p wp_wasm  # wasm check
 cd apps/testbed-web && npm run wasm                     # wasm-pack release package into src/wasm/pkg
 ```
 
-Dependencies are wasm32-clean: `simcli` (lib), `wp_world`, `postcard` (no_std + alloc), `serde_json`, `wasm-bindgen`.
+Dependencies are wasm32-clean: `simcli` (lib), `wp_world`, `wp_weather`, `wp_race` + `wp_opponent` (street races, `src/race.rs`), `postcard` (no_std + alloc), `serde_json`, `wasm-bindgen`.
+
+Street races (workstream 15): `race_list`, `race_start`, `race_info`, `race_standings`,
+`race_course`, `race_result_json`; a scenario named `race_<id>` gets a `race::RaceRun` (AI field
+before each tick, judge after it, buy-in/payout on the player's run). See
+`docs/integration/race.md` → Step 2.
 
 ## Perf
 Real vehicle + damage, headless Chromium (SwiftShader), release wasm: 0.09 / 0.62 / 3.0 ms of
 sim per 60 Hz frame at 1 / 8 / 24 cars; 0.27 ms in the 12×12 city with ~190 traffic agents. See
 `docs/integration/testbed.md`.
+Weather (`weather.rs`): +0.1 ms of sim per frame in heavy rain on the flat world (0.24 vs 0.14 ms,
+1 car, 62 500-cell grid); `weather_info` 0.005 ms, `weather_grid` 0.8 ms (called at 1 Hz).
 
 ## Known gaps
-- The end-of-run economy (`run.rs`) keeps the account in memory only (lost on reload); the lattice blob in `DamageReport` is empty (the live sim keeps the dents).
+- Sandbox runs (car selector, `startFreeDrive(car)`) keep the end-of-run account in memory only; career runs (`career.rs`) persist it (the testbed saves the career to `localStorage`).
+- Replays of a career run whose car has mods or started damaged do not verify (the replay rebuilds the stock, pristine car).
 - Region energy / strain are proxies until contract request TB-2 lands; `intents()` is empty (TB-5).
-- `simcli replay` cannot verify city recordings until the CLI turns on `RunOptions::load_city`.
+- `simcli replay` cannot verify city recordings until the CLI turns on `RunOptions::load_city`; race recordings also need the race (AI kinds, meet report) re-applied, which only the browser's playback does.
 - `cargo test -p wp_wasm` takes ~2 min in debug (real physics).

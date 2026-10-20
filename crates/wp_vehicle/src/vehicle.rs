@@ -5,22 +5,27 @@
 //! collisions.
 
 use wp_contracts::{
-    AssistProfile, Component, DiffDef, DriveLayout, EntityId, FfbOutput, HandlingEffects, SimEvent,
+    AssistProfile, Component, DriveLayout, EntityId, FfbOutput, HandlingEffects, SimEvent,
     SurfaceType, SuspensionDef, TireDef, VehicleDef, VehicleInput, VehicleSim, VehicleState,
     WheelState, WorldQuery, GRAVITY_MPS2, VEHICLE_SUBSTEPS,
 };
 
 use crate::aero::aero_forces;
-use crate::assists::{esc, filter_pedal, Tcs};
+use crate::assists::{
+    btc_rear_authority, esc_reference, filter_pedal, BtcAxle, Esc, Tcs, BTC_MAX_FRAC,
+    TCS_BRAKE_ACTIVE_NM, TCS_BRAKE_HANDOFF,
+};
 use crate::brakes::{service_torques, Abs};
-use crate::drivetrain::{auto_clutch_update, diff_transfer, Converter, Gearbox, ShiftInputs};
+use crate::diff::{axle_transfer, centre_transfer, AxleDiff, CentreDiff, DiffInput, DiffSetup};
+use crate::drivetrain::{auto_clutch_update, Converter, Gearbox, ShiftInputs};
 use crate::engine::{Engine, EngineExtras, RPM_PER_RADPS};
 use crate::ffb::{self, FfbWheel};
 use crate::ground::WheelCaster;
 use crate::math::{arr, sin_cos, v3, yaw_quat, Quat, V3};
-use crate::slide::{gyro_yaw_torque, slide_class, slide_throttle, GyroInput};
+use crate::slide::{gyro_yaw_torque, slide_class_with_rear_lock, slide_throttle, GyroInput};
 use crate::steering::{
-    ackermann, body_slip, rear_axle_slip, torque_steer, update_center_angle, SteerInput,
+    ackermann, body_slip, rear_axle_slip, steer_target, torque_steer, update_center_angle,
+    SteerInput,
 };
 use crate::surface::{conditions_grip, ConditionsSource, SurfaceConditions, TireWetProfile};
 use crate::suspension::{arb_force, static_compression, strut_force};
@@ -50,6 +55,9 @@ pub struct VehicleExtras {
     pub engine: EngineExtras,
     /// Pulling the handbrake declutches the rear axle (rally/drift-style hydraulic handbrake).
     pub handbrake_disconnects_rear: bool,
+    /// Differential override (tests, tuning, mods). `None` = the car's own setup
+    /// ([`DiffSetup::for_car`]: `data/cars/differentials.toml`, else the car file).
+    pub diffs: Option<DiffSetup>,
 }
 
 impl Default for VehicleExtras {
@@ -57,6 +65,7 @@ impl Default for VehicleExtras {
         Self {
             engine: EngineExtras::default(),
             handbrake_disconnects_rear: true,
+            diffs: None,
         }
     }
 }
@@ -168,6 +177,11 @@ pub struct Telemetry {
     pub aquaplane: [f32; 4],
     /// Slide-gyro yaw torque applied this tick, N·m (+ = left; 0 with countersteer help off).
     pub slide_gyro_nm: f32,
+    /// Torque each differential moved this tick (front, rear, centre), N·m: half the
+    /// left-right (or front-rear) wheel-torque difference, + = toward the right (rear) side.
+    pub diff_transfer_nm: [f32; 3],
+    /// Brake-based traction control torque per wheel, N·m.
+    pub tcs_brake_nm: [f32; 4],
 }
 
 /// One simulated vehicle. See the crate docs for the integration contract with Rapier.
@@ -185,12 +199,14 @@ pub struct Vehicle {
     pub(crate) launch_torque_ratio: f32,
     pub(crate) converter: Option<Converter>,
     pub(crate) awd_coupling: f32,
+    pub(crate) diffs: DiffSetup,
     pub(crate) center_steer: f32,
     /// Slide-assist class from the car data (constant; see [`crate::slide::slide_class`]).
     pub(crate) slide_class: f32,
     pub(crate) throttle_f: f32,
     pub(crate) brake_f: f32,
     pub(crate) tcs: Tcs,
+    pub(crate) esc: Esc,
     pub(crate) abs: Abs,
     pub(crate) effects: HandlingEffects,
     pub(crate) heat: f32,
@@ -266,6 +282,7 @@ impl Vehicle {
         );
         let rot = yaw_quat(yaw);
         let pos = v3(pos);
+        let diffs = extras.diffs.unwrap_or_else(|| DiffSetup::for_car(def));
         let mut v = Self {
             def: def.clone(),
             extras,
@@ -286,11 +303,13 @@ impl Vehicle {
                 .min(1.0),
             converter: None,
             awd_coupling: 0.0,
+            diffs,
             center_steer: 0.0,
-            slide_class: slide_class(def),
+            slide_class: slide_class_with_rear_lock(def, diffs.rear.power_lock()),
             throttle_f: 0.0,
             brake_f: 0.0,
             tcs: Tcs::default(),
+            esc: Esc::default(),
             abs: Abs::default(),
             effects: HandlingEffects::NEUTRAL,
             heat: 0.0,
@@ -366,6 +385,11 @@ impl Vehicle {
         &self.conditions
     }
 
+    /// The differentials in use (see [`crate::diff`]).
+    pub fn diffs(&self) -> &DiffSetup {
+        &self.diffs
+    }
+
     /// The definition this vehicle was built from.
     pub fn def(&self) -> &VehicleDef {
         &self.def
@@ -428,6 +452,7 @@ impl Vehicle {
         self.throttle_f = 0.0;
         self.brake_f = 0.0;
         self.tcs = Tcs::default();
+        self.esc = Esc::default();
         self.abs = Abs::default();
         self.heat = 0.0;
         self.heat_reported = 0.0;
@@ -478,6 +503,14 @@ impl Vehicle {
         if n > 0 {
             self.center_steer = sum / n as f32;
         }
+        // ESC reference (not in the contract state): assume it had caught up with the steering.
+        let v_fwd = self.chassis.lin_vel.dot(self.chassis.rot * V3::Y);
+        self.esc.reference = esc_reference(
+            self.center_steer,
+            v_fwd,
+            self.def.wheelbase_m,
+            self.front_mu(),
+        );
         self.gearbox.set(s.gear);
         self.engine.omega = s.engine_rpm / RPM_PER_RADPS;
         let split = self.drive_split(0.0);
@@ -538,6 +571,13 @@ impl Vehicle {
                 (1.0 - front_split) * 0.5,
             ],
             DriveLayout::AwdOnDemand {
+                base_front_split, ..
+            } if self.diffs.centre != CentreDiff::Default => {
+                // A centre diff from the table replaces the clutch coupling: static split.
+                let f = base_front_split.clamp(0.0, 1.0);
+                [f * 0.5, f * 0.5, (1.0 - f) * 0.5, (1.0 - f) * 0.5]
+            }
+            DriveLayout::AwdOnDemand {
                 base_front_split,
                 max_rear_split,
                 ..
@@ -562,6 +602,10 @@ impl Vehicle {
             self.awd_coupling = 0.0;
             return;
         };
+        if self.diffs.centre != CentreDiff::Default {
+            self.awd_coupling = 0.0;
+            return;
+        }
         let lin = |i: usize| (self.wheels[i].omega * self.corners[i].radius).abs();
         let front = 0.5 * (lin(0) + lin(1));
         let rear = 0.5 * (lin(2) + lin(3));
@@ -596,6 +640,55 @@ impl Vehicle {
             s[3] = 0.0;
         }
         s
+    }
+
+    /// Steering-model inputs for driver steer `driver` in the current state.
+    fn steer_input(&self, driver: f32, v_fwd: f32, v_left: f32, rear_axle: f32) -> SteerInput {
+        let eff = self.effects;
+        SteerInput {
+            driver,
+            speed: v_fwd,
+            body_slip: body_slip(v_fwd, v_left),
+            rear_slip: 0.5 * (self.wheels[2].alpha_lag + self.wheels[3].alpha_lag),
+            rear_axle_slip: rear_axle,
+            slide_class: self.slide_class,
+            pull: eff.steer_pull,
+            ratio_scale: eff.steer_ratio_scale.max(0.05),
+            wheelbase: self.def.wheelbase_m,
+            front_mu: self.front_mu(),
+            front_peak_slip: self.corners[0].tire.peak_slip_angle_rad,
+        }
+    }
+
+    /// Front tyres' available friction: lateral peak μ × the mean front grip multiplier from
+    /// the last tick (surface, weather, damage), floored at 0.1.
+    fn front_mu(&self) -> f32 {
+        let grip = 0.5 * (self.wheels[0].grip + self.wheels[1].grip);
+        (self.corners[0].tire.lateral.d * grip).max(0.1)
+    }
+
+    fn max_steer(&self) -> f32 {
+        self.corners[0].max_steer.max(self.corners[1].max_steer)
+    }
+
+    /// Peak slip angle of wheel `i`'s tire, rad.
+    pub fn tire_peak_slip(&self, i: usize) -> f32 {
+        self.corners[i].tire.peak_slip_angle_rad
+    }
+
+    /// Centre road-wheel angle (rad, + = left) the steering would head for if the driver
+    /// held steer input `driver` (-1..=1) now, under `assists` (see
+    /// [`crate::steering::steer_target`]). For tools and test drivers that need to know what
+    /// an input does; it does not change the vehicle.
+    pub fn steer_target_for(&self, driver: f32, assists: &AssistProfile) -> f32 {
+        let ch = self.chassis;
+        let up = ch.rot * V3::Z;
+        let v_fwd = ch.lin_vel.dot(ch.rot * V3::Y);
+        let v_left = -ch.lin_vel.dot(ch.rot * V3::X);
+        let cg_to_rear = self.com_local.y - self.def.wheels[2].position_m[1];
+        let rear_axle = rear_axle_slip(v_fwd, v_left, ch.ang_vel.dot(up), cg_to_rear);
+        let inp = self.steer_input(driver, v_fwd, v_left, rear_axle);
+        steer_target(self.center_steer, &inp, assists, self.max_steer()).angle
     }
 
     fn axle_omega(&self, split: &[f32; 4]) -> f32 {
@@ -778,20 +871,61 @@ impl Vehicle {
         };
 
         // --- Assists ----------------------------------------------------------------------
-        let driven: Vec<usize> = (0..4).filter(|i| base_split[*i] > 0.0).collect();
-        // TCS watches the worst driven wheel (an open diff lets one wheel spin alone).
-        let driven_slip = driven
-            .iter()
-            .filter(|i| self.wheels[**i].contact)
-            .map(|i| self.wheels[*i].kappa)
-            .fold(0.0f32, f32::max);
-        let peak_slip = driven
-            .first()
-            .map(|i| self.corners[*i].tire.peak_slip_ratio)
+        let peak_slip = (0..4)
+            .find(|i| base_split[*i] > 0.0)
+            .map(|i| self.corners[i].tire.peak_slip_ratio)
             .unwrap_or(0.1);
+        // TCS throttle cut watches the driven wheels in contact. While brake-based TC is
+        // braking the faster wheel of an axle (one wheel spinning alone on an open diff) and
+        // has brake to spare, that spin is the brakes' job: the throttle reacts to the slower
+        // wheel. As brake-TC nears its limit, the faster wheel is blended back in.
+        let mut driven_slip = 0.0f32;
+        for (l, r, max_brake) in [
+            (0usize, 1usize, self.def.brakes.max_torque_front_nm),
+            (2, 3, self.def.brakes.max_torque_rear_nm),
+        ] {
+            let k = |i: usize| {
+                (base_split[i] > 0.0 && self.wheels[i].contact).then_some(self.wheels[i].kappa)
+            };
+            let s = match (k(l), k(r)) {
+                (Some(a), Some(b)) => {
+                    let fast = if a >= b { l } else { r };
+                    let held = self.tcs.brake[fast];
+                    // 0 = brakes holding the spin … 1 = brakes saturated / not acting.
+                    let w = if assists.tcs && held > TCS_BRAKE_ACTIVE_NM {
+                        let use_frac = held / (BTC_MAX_FRAC * max_brake).max(1.0);
+                        ((use_frac - TCS_BRAKE_HANDOFF) / (1.0 - TCS_BRAKE_HANDOFF)).clamp(0.0, 1.0)
+                    } else {
+                        1.0
+                    };
+                    let (lo, hi) = (a.min(b), a.max(b));
+                    lo + (hi - lo) * w
+                }
+                (Some(a), None) | (None, Some(a)) => a,
+                (None, None) => 0.0,
+            };
+            driven_slip = driven_slip.max(s);
+        }
         let tcs_mult = self.tcs.update(assists.tcs, driven_slip, peak_slip, dt);
         let yaw_rate = ch.ang_vel.dot(up);
-        let esc_out = esc(assists.esc, yaw_rate, self.center_steer, v_fwd, wheelbase);
+        let front_mu = self.front_mu();
+        let mut esc_out = self.esc.update(
+            assists.esc,
+            yaw_rate,
+            self.center_steer,
+            v_fwd,
+            wheelbase,
+            front_mu,
+            dt,
+        );
+        if self.diffs.rear == AxleDiff::Locked && base_split[2] > 0.0 && base_split[3] > 0.0 {
+            // A locked rear shares a single-wheel brake between both rears (no yaw moment):
+            // ESC brakes the front wheel on the same side instead.
+            for (rear, front) in [(2usize, 0usize), (3, 1)] {
+                esc_out.brake[front] += esc_out.brake[rear];
+                esc_out.brake[rear] = 0.0;
+            }
+        }
         // TCS acts on engine torque once the clutch is locked; during an automatic-clutch
         // launch (slipping) wheel torque equals clutch torque, so TCS trims the clutch instead.
         let launching = self.auto_clutch && !self.clutch_locked && self.converter.is_none();
@@ -812,17 +946,8 @@ impl Vehicle {
         let clutch_trim = if launching { tcs_mult } else { 1.0 };
 
         // --- Steering ---------------------------------------------------------------------
-        let steer_in = SteerInput {
-            driver: input.steer,
-            speed: v_fwd,
-            body_slip: body_slip(v_fwd, v_left),
-            rear_slip: 0.5 * (self.wheels[2].alpha_lag + self.wheels[3].alpha_lag),
-            rear_axle_slip: rear_axle,
-            slide_class: self.slide_class,
-            pull: eff.steer_pull,
-            ratio_scale: eff.steer_ratio_scale.max(0.05),
-        };
-        let max_steer = self.corners[0].max_steer.max(self.corners[1].max_steer);
+        let steer_in = self.steer_input(input.steer, v_fwd, v_left, rear_axle);
+        let max_steer = self.max_steer();
         self.center_steer = update_center_angle(
             self.center_steer,
             &steer_in,
@@ -927,8 +1052,63 @@ impl Vehicle {
         }
         brake[2] += handbrake * self.def.brakes.handbrake_rear_nm;
         brake[3] += handbrake * self.def.brakes.handbrake_rear_nm;
+        // Brake-based traction control (part of TCS) on driven axles whose diff can slip.
+        let dir = if self.gearbox.gear < 0 { -1.0 } else { 1.0 };
+        let mut tc_axles = [BtcAxle {
+            l: 0,
+            r: 1,
+            v_l: 0.0,
+            v_r: 0.0,
+            v_kin: 0.0,
+            ff: [0.0; 2],
+            max_nm: 0.0,
+            authority: 0.0,
+        }; 2];
+        let mut n_tc = 0;
+        for (l, r, d, track, max) in [
+            (
+                0usize,
+                1usize,
+                self.diffs.front,
+                self.def.track_front_m,
+                self.def.brakes.max_torque_front_nm,
+            ),
+            (
+                2,
+                3,
+                self.diffs.rear,
+                self.def.track_rear_m,
+                self.def.brakes.max_torque_rear_nm,
+            ),
+        ] {
+            if base_split[l] > 0.0 && base_split[r] > 0.0 && d != AxleDiff::Locked {
+                let v = |i: usize| self.wheels[i].omega * self.wheels[i].r_eff * dir;
+                tc_axles[n_tc] = BtcAxle {
+                    l,
+                    r,
+                    v_l: v(l),
+                    v_r: v(r),
+                    v_kin: -yaw_rate * track * dir,
+                    ff: [l, r].map(|i| {
+                        let w = &self.wheels[i];
+                        ((w.drive - w.fx * w.r_eff) * dir).max(0.0)
+                    }),
+                    max_nm: BTC_MAX_FRAC * max,
+                    authority: if l >= 2 {
+                        btc_rear_authority(v_fwd)
+                    } else {
+                        1.0
+                    },
+                };
+                n_tc += 1;
+            }
+        }
+        let tc_driving = self.throttle_f > 0.05 && self.brake_f < 0.05 && handbrake < 0.1;
+        let tc_brake =
+            self.tcs
+                .update_brakes(assists.tcs, tc_driving, &tc_axles[..n_tc], v_fwd, dt);
         for (i, b) in brake.iter_mut().enumerate() {
-            *b += esc_out.brake[i];
+            *b += esc_out.brake[i] + tc_brake[i];
             self.wheels[i].brake = *b;
         }
 
@@ -936,15 +1116,25 @@ impl Vehicle {
         let n_sub = VEHICLE_SUBSTEPS.max(1);
         let h = dt / n_sub as f32;
         let split = self.drive_split(handbrake);
+        // Wheel-speed difference (left − right, rad/s) the cornering geometry asks for, per
+        // axle: the inside wheel turns slower (active diffs lock only beyond it).
+        let kin = [
+            -yaw_rate * self.def.track_front_m / self.corners[0].radius.max(0.05),
+            -yaw_rate * self.def.track_rear_m / self.corners[2].radius.max(0.05),
+        ];
         let mut acc_fx = [0.0f32; 4];
         let mut acc_fy = [0.0f32; 4];
         let mut acc_drive = [0.0f32; 4];
+        let mut acc_x = [0.0f32; 3];
         for _ in 0..n_sub {
-            let drive = self.substep(throttle, clutch_trim, power_scale, &split, h);
+            let (drive, x) = self.substep(throttle, clutch_trim, power_scale, &split, kin, h);
             for i in 0..4 {
                 acc_fx[i] += self.wheels[i].fx;
                 acc_fy[i] += self.wheels[i].fy;
                 acc_drive[i] += drive[i];
+            }
+            for k in 0..3 {
+                acc_x[k] += x[k];
             }
         }
         let inv = 1.0 / n_sub as f32;
@@ -1047,6 +1237,8 @@ impl Vehicle {
             fuel: self.fuel,
             aquaplane,
             slide_gyro_nm: gyro,
+            diff_transfer_nm: acc_x.map(|x| x * inv),
+            tcs_brake_nm: tc_brake,
         };
     }
 
@@ -1118,16 +1310,18 @@ impl Vehicle {
     }
 
     /// One drivetrain/wheel sub-step of length `h`; `clutch_trim` scales clutch capacity
-    /// (launch-phase TCS). Returns the drive torque given to each
-    /// wheel.
+    /// (launch-phase TCS), `kin` is the per-axle cornering speed difference (front, rear).
+    /// Returns the drive torque given to each wheel and the torque each diff moved (front,
+    /// rear, centre).
     fn substep(
         &mut self,
         throttle: f32,
         clutch_trim: f32,
         power_scale: f32,
         split: &[f32; 4],
+        kin: [f32; 2],
         h: f32,
-    ) -> [f32; 4] {
+    ) -> ([f32; 4], [f32; 3]) {
         let ratio = self.gearbox.total_ratio(&self.def.drivetrain);
         let s_sum: f32 = split.iter().sum();
         let axle = self.axle_omega(split);
@@ -1203,25 +1397,7 @@ impl Vehicle {
                 drive[i] = wheel_side * split[i] / s_sum;
             }
         }
-        let diffs = [
-            (0usize, 1usize, self.def.drivetrain.diff_front),
-            (2, 3, self.def.drivetrain.diff_rear),
-        ];
-        for (l, r, diff) in diffs {
-            if split[l] + split[r] <= 0.0 || matches!(diff, DiffDef::Open) {
-                continue;
-            }
-            let k_eq = (self.corners[l].inertia + reflected * split[l] / s_sum) / h * 0.5;
-            let x = diff_transfer(
-                &diff,
-                drive[l] + drive[r],
-                self.wheels[l].omega,
-                self.wheels[r].omega,
-                k_eq,
-            );
-            drive[l] -= x;
-            drive[r] += x;
-        }
+        let x_diff = self.solve_diffs(&mut drive, wheel_side, reflected, split, s_sum, kin, h);
 
         for i in 0..4 {
             let c = &self.corners[i];
@@ -1325,7 +1501,98 @@ impl Vehicle {
             self.engine.omega += h * t_e / i_e;
         }
         self.engine.omega = self.engine.omega.max(0.0);
-        drive
+        (drive, x_diff)
+    }
+
+    /// Centre then axle differentials for one sub-step (see [`crate::diff`]): moves torque
+    /// within `drive` (per-wheel, already split by `split`) and returns the transfers
+    /// (front, rear, centre). `wheel_side` is the total torque entering the driveline at the
+    /// wheels, `reflected` the engine inertia seen at the wheels (shared by `split`).
+    #[allow(clippy::too_many_arguments)]
+    fn solve_diffs(
+        &self,
+        drive: &mut [f32; 4],
+        wheel_side: f32,
+        reflected: f32,
+        split: &[f32; 4],
+        s_sum: f32,
+        kin: [f32; 2],
+        h: f32,
+    ) -> [f32; 3] {
+        let mut xs = [0.0f32; 3];
+        if s_sum <= 0.0 {
+            return xs;
+        }
+        let inertia = |i: usize| self.corners[i].inertia + reflected * split[i] / s_sum;
+        // Torque the wheel resists against drive in direction `sense` (tire + brake).
+        let react = |i: usize, sense: f32| {
+            let w = &self.wheels[i];
+            (w.fx * w.r_eff * sense).max(0.0) + w.brake
+        };
+        let sense_of = |t: f32| if t < 0.0 { -1.0 } else { 1.0 };
+
+        // Centre (front = "left", rear = "right"), speeds compared at the tire surface.
+        let (fs, rs) = (split[0] + split[1], split[2] + split[3]);
+        if fs > 0.0 && rs > 0.0 && self.diffs.centre != CentreDiff::Default {
+            let axle = |a: usize, b: usize, sh: f32| {
+                let w = (split[a] * self.wheels[a].omega + split[b] * self.wheels[b].omega) / sh;
+                let r = (split[a] * self.wheels[a].r_eff + split[b] * self.wheels[b].r_eff) / sh;
+                (w, r)
+            };
+            let (wf, rf) = axle(0, 1, fs);
+            let (wr, rr) = axle(2, 3, rs);
+            let rm = (0.5 * (rf + rr)).max(0.05);
+            let (i_f, i_r) = (inertia(0) + inertia(1), inertia(2) + inertia(3));
+            let sense = sense_of(wheel_side);
+            let x = centre_transfer(
+                &self.diffs.centre,
+                &DiffInput {
+                    t_in: wheel_side,
+                    omega_l: wf * rf / rm,
+                    omega_r: wr * rr / rm,
+                    k_eq: 1.0 / (h * (1.0 / i_f.max(1e-3) + 1.0 / i_r.max(1e-3))),
+                    react_l: react(0, sense) + react(1, sense),
+                    react_r: react(2, sense) + react(3, sense),
+                    dw_kin: 0.0,
+                },
+            );
+            for i in 0..4 {
+                if i < 2 {
+                    drive[i] -= x * split[i] / fs;
+                } else {
+                    drive[i] += x * split[i] / rs;
+                }
+            }
+            xs[2] = x;
+        }
+
+        // Axles: both sides must be connected (a lost wheel or a declutched axle has no diff).
+        for (k, (l, r, d)) in [(0usize, 1usize, self.diffs.front), (2, 3, self.diffs.rear)]
+            .into_iter()
+            .enumerate()
+        {
+            if split[l] <= 0.0 || split[r] <= 0.0 || d == AxleDiff::Open {
+                continue;
+            }
+            let t_in = drive[l] + drive[r];
+            let sense = sense_of(t_in);
+            let x = axle_transfer(
+                &d,
+                &DiffInput {
+                    t_in,
+                    omega_l: self.wheels[l].omega,
+                    omega_r: self.wheels[r].omega,
+                    k_eq: inertia(l) / h * 0.5,
+                    react_l: react(l, sense),
+                    react_r: react(r, sense),
+                    dw_kin: kin[k],
+                },
+            );
+            drive[l] -= x;
+            drive[r] += x;
+            xs[k] = x;
+        }
+        xs
     }
 }
 

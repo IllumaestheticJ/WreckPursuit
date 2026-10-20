@@ -61,6 +61,9 @@ pub struct ClientConfig {
     pub modes: BTreeMap<DamageMode, ModeTable>,
     /// Damage replica constructor.
     pub damage_factory: DamageFactory,
+    /// Static ground of the server's city for own-car prediction (cities with terrain, e.g.
+    /// Port Vesper v2; build with [`crate::netsim::city_ground`]). `None` = flat slab.
+    pub city_ground: Option<crate::predict::CityGround>,
 }
 
 /// Connection phase.
@@ -153,6 +156,8 @@ pub struct ClientStats {
     pub resyncs: u64,
     /// Longest time from a mismatch to its resync, server ticks.
     pub max_resync_ticks: u64,
+    /// Lattice snapshots restored with the server's full damage state (NET-N5).
+    pub full_restores: u64,
     /// Frames that failed to decode.
     pub decode_errors: u64,
 }
@@ -215,6 +220,8 @@ pub struct Client {
     replicas: BTreeMap<u32, Replica>,
     pending_resync: BTreeMap<u32, u64>,
     last_snapshot_tick: u64,
+    /// Entities whose delta could not be applied since the last `Inputs` (sent as `missing`).
+    missing_baselines: std::collections::BTreeSet<u32>,
     input_ack: u64,
     last_acked_sent: u64,
     outgoing: Vec<(Channel, Vec<u8>)>,
@@ -279,6 +286,7 @@ impl Client {
             replicas: BTreeMap::new(),
             pending_resync: BTreeMap::new(),
             last_snapshot_tick: 0,
+            missing_baselines: Default::default(),
             input_ack: 0,
             last_acked_sent: 0,
             outgoing: Vec::new(),
@@ -376,6 +384,16 @@ impl Client {
         self.replicas
             .get(&vehicle)
             .map(|r| r.damage.node_positions())
+    }
+
+    /// Rest node positions of a replica's lattice (chassis space), for damage display.
+    pub fn replica_rest(&self, vehicle: u32) -> Option<&[[f32; 3]]> {
+        self.replicas.get(&vehicle).map(|r| r.rest.as_slice())
+    }
+
+    /// Vehicles with a damage replica (own car and tracked remotes), ascending.
+    pub fn replica_ids(&self) -> Vec<u32> {
+        self.replicas.keys().copied().collect()
     }
 
     /// Test hook: overwrite a replica's nodes (simulates a desync).
@@ -517,12 +535,19 @@ impl Client {
             first_tick = now_tick - inputs.len() as u64;
         }
         // Always send (even with no inputs): the snapshot ack drives delta baselines.
-        if !inputs.is_empty() || self.last_snapshot_tick != self.last_acked_sent {
+        if !inputs.is_empty()
+            || self.last_snapshot_tick != self.last_acked_sent
+            || !self.missing_baselines.is_empty()
+        {
             self.last_acked_sent = self.last_snapshot_tick;
+            let missing: Vec<u32> = std::mem::take(&mut self.missing_baselines)
+                .into_iter()
+                .collect();
             let msg = ClientMsg::Inputs {
                 ack_snapshot_tick: self.last_snapshot_tick,
                 first_tick,
                 inputs,
+                missing,
             };
             self.send(&msg, Channel::Unreliable, now_ms);
         }
@@ -641,6 +666,7 @@ impl Client {
                 self.input_ack = self.input_ack.max(input_ack);
                 for d in entities {
                     let Some(rv) = self.remotes.get_mut(&d.entity) else {
+                        self.missing_baselines.insert(d.entity);
                         continue;
                     };
                     let base = if d.baseline_age > 0 {
@@ -651,6 +677,7 @@ impl Client {
                             Some(b) => Some(*b),
                             None => {
                                 self.stats.missing_baselines += 1;
+                                self.missing_baselines.insert(d.entity);
                                 continue;
                             }
                         }
@@ -721,7 +748,16 @@ impl Client {
                 tick,
                 snapshot,
                 damage_steps,
-            } => self.on_lattice_snapshot(vehicle, tick, &snapshot, damage_steps),
+                state,
+                provisional,
+            } => self.on_lattice_snapshot(
+                vehicle,
+                tick,
+                &snapshot,
+                damage_steps,
+                state.as_deref(),
+                provisional,
+            ),
             ServerMsg::Pong {
                 client_ms,
                 server_tick,
@@ -804,7 +840,8 @@ impl Client {
         let time = self.time_of_day;
         let Some(pred) = self.predictor.as_mut() else {
             if let Some(car) = self.cfg.cars.get(&self.own_car) {
-                let mut pred = Predictor::new(car, assists, state, tick, time);
+                let ground = self.cfg.city_ground.as_ref();
+                let mut pred = Predictor::on_ground(car, assists, state, tick, time, ground);
                 if let Some(bytes) = exact {
                     pred.restore_exact(bytes);
                 }
@@ -837,6 +874,8 @@ impl Client {
         tick: u64,
         snapshot: &crate::lattice::LatticeSnapshot,
         damage_steps: Option<u64>,
+        state: Option<&[u8]>,
+        provisional: bool,
     ) {
         if !self.replicas.contains_key(&vehicle) {
             let car_id = if Some(EntityId(vehicle)) == self.own_vehicle {
@@ -870,9 +909,16 @@ impl Client {
                 r.step(&[], mode);
             }
         }
-        r.restored_dented |= !snapshot.is_pristine();
+        // A dented or provisional snapshot may not carry the model's whole state (NET-N5);
+        // only replicas built from exact snapshots plus contacts must never diverge.
+        r.restored_dented = !snapshot.is_pristine() || provisional;
         let nodes = snapshot.positions(&r.rest);
-        r.damage.restore_nodes(&nodes);
+        // Full state when the server sent it (NET-N5), node positions otherwise.
+        let full = state.is_some_and(|b| r.damage.restore_state(b, &nodes));
+        if !full {
+            r.damage.restore_nodes(&nodes);
+        }
+        self.stats.full_restores += u64::from(full);
         r.tick = tick;
         if let Some(at) = self.pending_resync.remove(&vehicle) {
             self.stats.resyncs += 1;

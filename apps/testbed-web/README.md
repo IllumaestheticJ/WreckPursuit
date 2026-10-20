@@ -19,14 +19,17 @@ npm run typecheck
 | `src/scene.ts` | renderer, sky from time of day, ground + 10 m grid, `data/city/*.glb`, barriers, contacts, intents |
 | `src/vehicle_view.ts` | body box / skinned body, wheels (steer + spin), lattice, stress, tire forces, suspension, CG + velocity |
 | `src/skin.ts` | skin binding blend; synthesised hull binding for grid lattices |
-| `src/cameras.ts` | near / far chase (car-relative spring), hood, bumper, cockpit, side tracking, TV / cinematic, orbit; C cycles, V look back |
+| `src/cameras.ts` | near / far chase (car-relative spring), hood, bumper, cockpit, side tracking, TV / cinematic, orbit; camera cycle / look-back are rebindable actions; right stick looks around |
 | `src/hud.ts` | speed/rpm/gear, badges, perf, damage silhouette, components, region energy, input + rack torque, help |
 | `src/telemetry.ts` | rolling 10 s canvas plots |
-| `src/input.ts` | keyboard ramps + Gamepad API with deadzones |
+| `src/input.ts` | keyboard ramps + Gamepad API (deadzone + steering curve, analogue pass-through), read through the bindings; release on blur / pad disconnect |
+| `src/bindings.ts` | rebindable actions, defaults, `wp.bindings.v1` load/save, display names, F1 help lines |
+| `src/ui/controls.ts` | controls panel (F9 / “controls” button): rebind keys and pad controls, deadzone / curve, reset to defaults |
 | `src/settings.ts` | debug layer table (hotkeys, `localStorage`) |
 | `vite.config.ts` | serves `apps/simcli/scenarios` (simcli format v2) at `/scenarios/` and `data/` at `/data/` (+ listings) |
 | `e2e/run.mjs` | Playwright check; `SHOTS=dir` writes screenshots, `BENCH=1` measures 1/8/24 cars |
 | `e2e/presets.mjs` | `npm run e2e:presets`: Rookie / Street / Sim buttons set damage mode + assists in one click, a hand-ticked box shows "custom", the preset survives a reload |
+| `e2e/gamepad.mjs` | fake-gamepad + rebinding check (`npm run e2e:gamepad`; run by `e2e/run.mjs` too) |
 | `e2e/city_v2_shots.mjs` | Port Vesper v2 screenshots → `docs/media/city-v2/` (`node e2e/city_v2_shots.mjs [dir]`) |
 
 Cities: the "city" box (free drive) and the city chase use the city selector — Port Vesper v2

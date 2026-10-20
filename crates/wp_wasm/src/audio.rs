@@ -138,6 +138,8 @@ pub(crate) fn frame_commands(
             car_id: &v.car_id,
             state: st,
             throttle: v.input.throttle,
+            // What reaches the engine (filters, TCS, the gearbox's shift cut): shift notes.
+            throttle_applied: Some(v.vehicle.telemetry().throttle),
             horn: v.input.horn,
             siren: crate::police::siren_on(sim, v),
             road_rumble: s.ffb(*id).map(|f| f.road_rumble).unwrap_or(0.0),
