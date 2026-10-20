@@ -558,6 +558,10 @@ pub struct HeloConfig {
     pub spotlight_half_angle_rad: f32,
     /// Max time on a single track before returning to refuel, s.
     pub max_track_s: f32,
+    /// While it keeps visual, the helicopter radios the racer's position this often, s.
+    pub position_report_s: f32,
+    /// Visual counts as lost (radio "lost visual") after this long without line of sight, s.
+    pub lost_visual_after_s: f32,
 }
 
 /// Racer-side gadgets.
@@ -743,6 +747,10 @@ impl PoliceConfig {
             || self.tools.roadblock.units[0] > self.tools.roadblock.units[1]
         {
             return bad("roadblock.units must be [min>=1, max>=min]");
+        }
+        let h = &self.tools.helicopter;
+        if !(h.position_report_s > 0.0 && h.lost_visual_after_s >= 0.0) {
+            return bad("helicopter: position_report_s must be > 0, lost_visual_after_s >= 0");
         }
         if self.tools.gadgets.radar_range_m.is_empty()
             || self.tools.gadgets.scanner_delay_s.is_empty()

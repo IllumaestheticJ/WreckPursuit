@@ -351,3 +351,25 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
 4. Flip `scenarios/soak/traffic_soak_observer.ron` back to `police_cars: true` if your fix stops patrols ramming stopped cars, then tell I to promote the gate.
 
 5. **Parked test (lead, round 8):** see economy.md item 5. A stationary wanted racer, 3 am, `internal_driving: true`, is never found or captured with your round-6 changes (it was on ws/economy alone). Decide whether that is intended (no report → no search) and tell G.
+
+
+## Lead helper note (P9 helicopter, 2026-10-20, `claude/hopeful-cray-0dtq2z`)
+
+Owner backlog item **P9 — Helicopter**: joins at wanted level 3, flies overhead, keeps you in
+sight, spotlight at night, radios your position to ground units; tunnels and covered roads break
+its line of sight. Done by a lead helper in your crate (small, listed here so you can review):
+
+- `pursuit::update_observations`: the helicopter's sight line now uses the racer's real height
+  (`racer z + altitude_m` → `racer z + 1.0 m`) instead of a flat 1.3 m target, so hills do not
+  hide the car and decks above it do. Ground units still use `EYE_HEIGHT_M` at z = 1.3 m on both
+  ends (on Port Vesper's hills the terrain test can wrongly block them — worth a look: units have
+  no z; `RacerRecord::pos[2]` and a ground lookup would fix it).
+- `dispatch::helo_reports` + `PoliceSystem::helo_sight` (per tracking helicopter: line of sight,
+  visual as radioed, next report). New `tools.toml [helicopter]` keys `position_report_s = 30`
+  and `lost_visual_after_s = 3` (validated); `spotlight_half_angle_rad` 0.35 → 0.12 (drawing
+  only). `HeloView` gained `has_visual` and a real aim height.
+- Test: `pursuit::tests::helicopter_joins_at_level_3_keeps_visual_and_loses_it_under_an_overpass`
+  (Port Vesper, both grade separations: none at L2, launches at L3, overhead, "eyes on", last
+  known position follows, lost under the deck after 3 s, last known stays outside, reacquired).
+- `wp_world` (D): bridge decks occlude `line_of_sight` (see `docs/integration/world.md`).
+- `wp_wasm`/testbed (C): `police_helicopters()` and the drawn helicopter + night spotlight.
