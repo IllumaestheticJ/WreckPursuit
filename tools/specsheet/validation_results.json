@@ -100,10 +100,10 @@
       "rear 40 km/h": "PASS: crush 0.46 m, cabin 0.00 m, health 0.53; failed Exhaust",
       "side (T-bone) 40 km/h": "PASS: crush 0.21 m, cabin 0.20 m, health 0.74; failed SuspensionFL, WheelFL, BrakeFL"
     },
-    "brake_100_0_m": 45.51841,
-    "skidpad_g": 0.71514344,
-    "t0100_s": 14.700001,
-    "understeer_deg_per_g": 0.2020669,
+    "brake_100_0_m": 44.98339,
+    "skidpad_g": 0.71733314,
+    "t0100_s": 14.725,
+    "understeer_deg_per_g": 0.025128385,
     "vmax_converged": true,
     "vmax_kmh": 146.0
   },

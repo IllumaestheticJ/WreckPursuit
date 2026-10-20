@@ -22,6 +22,52 @@ record, so H can judge setup changes against measurements (`cargo run --release 
   knob for "RWD rotates at the limit", not bars.
 - VALIDATION skidpad / 0-100 / 100-0 are not changed by this branch (metric runs are
   bit-identical), so not re-collected here.
+## Lead follow-up round 12b (2026-10-20) — beater understeer gradient
+
+Gate on `lead/round12`: `wp_vehicle/tests/handling_balance.rs::front_drive_cars_understeer_mildly`
+measured the retuned beater at **1.71 °/g** (band 0.25-1.6). Merged `origin/lead/round12` at
+`c982c82` (fast-forward). **Retuned the car; the test band is unchanged.**
+
+What the gradient responds to (ramp steer, wheel preset, 80 km/h): almost only tyre cornering
+stiffness × axle load. Roll-stiffness split 0.40 / 0.50 / 0.60 / 0.70 gave 1.65 / 1.73 / 1.71 /
+1.61 °/g (no use); newer `street` tyres on the front only gave −2.6 °/g of *limit oversteer* on
+the skidpad (rejected: not readable). What went in (`roster_inputs.py`):
+
+| Change | Why it is honest | Effect |
+|---|---|---|
+| front weight 0.62 → **0.60** | small 1.6 FF four-door with a long boot; 60/40 is mid-class | main lever |
+| front camber −0.2° → **−1.0°** | sagging MacPherson struts gain negative camber | 1.71 → 1.64 alone |
+| rear toe-in 0.10° → **0** | worn rear bushes | small |
+
+Result: **1.50 °/g** (still the most understeery front-driver: Vireo 0.46, Kestrel 0.35), skidpad
+0.72 g, 0-100 14.7 s, Vmax 146 km/h, 100-0 45.0 m, barriers 8/8; tyres (`vintage_bias`), soft
+springs, ζ 0.14 and 6.5 °/g roll unchanged, so it still feels tired. Lattice unchanged (panels fit).
+Re-recorded in a `[bless]` commit: the beater's pinned hash in
+`wp_vehicle/tests/differentials.rs` (→ `0xc8ab6690a927e4c2`) and the three `cars_beater_*`
+goldens. Note for the helper: the comment in `front_drive_cars_understeer_mildly` still says
+"the junkyard beater 1.42"; it is 1.50 now.
+
+**Debug ≠ release hashes on this base (→ lead / A).** Any scenario with steering now hashes
+differently in debug and release builds: base `vehicle/coupe_slalom` and `smoke/coupe_circle` too
+(their goldens match **debug**), and my `cars_beater_hard_turn` (it matched both builds in
+my first 12b run, before the round-12 handling-balance merge). Following the base, that golden is
+blessed with the **debug** binary (`cargo test`'s `goldens_match`); `beater_accel` and
+`beater_top_speed` are identical in both builds. CI's release `simcli goldens` job will
+therefore flag `cars_beater_hard_turn` together with the base steering scenarios until the
+split is fixed or everything is re-blessed from one build.
+
+**Checks (follow-up, cloud container):** fmt ✓, clippy `-D warnings` ✓, wasm build ✓,
+`handling_balance` 6/6 ✓, `differentials` ✓, nameplate (69 files, 0) ✓, `smoke_sim` ✓,
+`collect_results` / `pursuit_probe` ✓, my 3 scenarios ✓. `cargo test --workspace --no-fail-fast`:
+remaining failures are all on `lead/round12` `c982c82` — each re-run with the pre-retune beater
+files swapped back in gives the same result: `wp_race::race_picker::grid_highway_sprint`,
+`wp_sim::sidewalk::vesper_v2_cars_drive_up_the_kerb_and_along_the_sidewalk`,
+`wp_wasm::race_tests::{short_sprint_with_ai_runs_to_results_and_pays_through_the_economy,
+a_capture_mid_race_is_a_dnf_and_hands_off_to_the_end_of_run_panel}` and `simcli`
+`goldens_match` / `all_scenarios_…` (debug `simcli goldens`: the same 33 failures with old and
+new beater data, none of them a `cars_*` scenario; e.g. `city_sidewalk_mount_*` `min_z_m` 2.37 vs
+2.47-2.53, `blocked_parked_player_vesper` turnarounds 0, race picks, weather, police sideswipes).
+
 ## Response to lead feedback round 12b (2026-10-19) — junkyard beater (B06)
 Merged `origin/lead/round12` at `05f92f8` into `ws/cars` (not main, per the brief); no conflicts.
 `junkyard_beater` already existed (round 6b, as the economy floor) but missed the new brief
