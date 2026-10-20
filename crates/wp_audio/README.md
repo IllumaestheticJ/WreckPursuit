@@ -340,8 +340,8 @@ nodes) for material lookup.
 - The modelled engine is browser-only (AudioWorklet); a native backend would port
   `engine_worklet.ts`. Far cars (beyond the 6 nearest / 60 m) keep the layers.
 - No music system; the Music bus exists so the scanner can duck it.
-- Kinematic traffic and body-less police units are heard only once the wasm bridge feeds
-  `kinematic::cruise_state` inputs (request R12b-1 in `docs/integration/audio.md`).
+- Body-less police units are not fed to the director yet (kinematic traffic is, via
+  `kinematic::cruise_state` in the wasm bridge; see R12b-1 in `docs/integration/audio.md`).
 - TTS (`speechSynthesis`) bypasses the Web Audio radio EQ (browser limitation); recorded line
   packs will go through it.
 - The applied throttle reaches audio through the wasm bridge (`Telemetry::throttle`); a

@@ -62,6 +62,13 @@ export class LodDirector {
   /** Instanced traffic past this distance from the camera (m) is not drawn (phones). Police and
    * sim vehicles are always drawn. */
   trafficDrawM = Infinity;
+  /** Promoted traffic / police sim vehicles farther than this from the camera (m) are drawn by
+   * the fleet (one instanced draw for all of them) instead of their own view (~40 draw calls
+   * each, per panel). Low / touch graphics profiles only; the player and AI racers always use
+   * their view. 10 m of hysteresis so a car on the boundary does not flip drawers every frame. */
+  viewDrawM = Infinity;
+  /** Entities currently handed to the fleet by `viewDrawM`. */
+  private readonly farViews = new Set<number>();
   private readonly cam = new THREE.Vector3();
 
   /** Traffic livery per sim entity (for colouring a promoted car's VehicleView). */
@@ -143,12 +150,20 @@ export class LodDirector {
   ): DrawState {
     // A sim vehicle's view draws it once its mesh is ready; until then it stays hidden and the
     // fleet draws the car (no placeholder box, no empty frame).
-    const ready = view?.drawable ?? false;
-    if (view) view.root.visible = ready;
+    let ready = view?.drawable ?? false;
     const x = rec[o + D.pos];
     const y = rec[o + D.pos + 1];
     const z = rec[o + D.pos + 2];
     const truth: [number, number, number] = [x, y, z];
+    if (view && ready && model && Number.isFinite(this.viewDrawM)) {
+      const p = view.root.position;
+      const dv = dist(p.x, p.y, p.z);
+      const far = this.farViews.has(entity) ? dv > this.viewDrawM : dv > this.viewDrawM + 10;
+      if (far) this.farViews.add(entity);
+      else this.farViews.delete(entity);
+      if (far) ready = false;
+    }
+    if (view) view.root.visible = ready;
     if (view && ready) {
       const p = view.root.position;
       return { key, mode: "view", fallback: false, entity, pos: [p.x, p.y, p.z], truth, dist: dist(p.x, p.y, p.z) };

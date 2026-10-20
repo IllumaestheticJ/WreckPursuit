@@ -104,16 +104,16 @@ Unloaded r = rim/2 + width·aspect; loaded r = 0.97 × unloaded (static deflecti
 
 ## Suspension
 
-Springs from ride frequency, `k = m_s·(2πf)²` with sprung corner mass `m_s = axle load/2 − unsprung`; dampers `c = 2ζ·√(k·m_s)`, ζ = 0.14 bump, rebound = 1.5 × bump.
+Springs from ride frequency, `k = m_s·(2πf)²` with sprung corner mass `m_s = axle load/2 − unsprung`; dampers `c = 2ζ·√(k·m_s)`, ζ = 0.18 bump, rebound = 1.5 × bump.
 
 | Axle | m_s | f | Wheel rate k | Bump c | Rebound c | Travel |
 |---|---|---|---|---|---|---|
-| Front | 299 kg | 1.15 Hz | 15600 N/m | 610 N·s/m | 920 N·s/m | 0.16 m |
-| Rear | 196 kg | 1.25 Hz | 12100 N/m | 430 N·s/m | 640 N·s/m | 0.17 m |
+| Front | 299 kg | 1.15 Hz | 15600 N/m | 780 N·s/m | 1170 N·s/m | 0.16 m |
+| Rear | 196 kg | 1.25 Hz | 12100 N/m | 550 N·s/m | 820 N·s/m | 0.17 m |
 
-Anti-roll bars from a roll-gradient target of 6.5°/g with 60% of roll stiffness at the front. Roll arm h − h_rc = 0.404 m (roll centres 0.08 m F / 0.12 m R). Required total K_φ = m·g·arm/φ = 36620 N·m/rad; springs give k·t²/2 = 15986 F / 12167 R N·m/rad; bars supply the rest as `arb_n_per_m = K_bar/t²` = **2900 F / 1200 R N/m** (clamped at ≥ 0). Resulting gradient 6.5°/g, front share 60%. Bump stops 120000 N/m.
+Anti-roll bars from a roll-gradient target of 6.5°/g with 70% of roll stiffness at the front. Roll arm h − h_rc = 0.404 m (roll centres 0.08 m F / 0.12 m R). Required total K_φ = m·g·arm/φ = 36620 N·m/rad; springs give k·t²/2 = 15986 F / 12167 R N·m/rad; bars supply the rest as `arb_n_per_m = K_bar/t²` = **4700 F / 0 R N/m** (clamped at ≥ 0). Resulting gradient 6.3°/g, front share 68%. Bump stops 120000 N/m.
 
-Alignment: camber -1.0° F / -0.5° R, toe +0.00° F / +0.00° R (+ = in), caster 2.0°.
+Alignment: camber -1.3° F / +0.0° R, toe +0.00° F / -0.15° R (+ = in), caster 2.0°.
 
 ## Brakes
 
@@ -124,7 +124,7 @@ Full-pedal line pressure 100 bar.
 
 Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 1147 N·m/wheel (capacity 1.19×), rear needs 287 N·m/wheel (capacity 1.50×).
 
-`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 340 N·m), never boosted above its caliper capacity. Rear capacity exceeds that, so `bias_front` = T_r/(T_r + ideal) = **0.558** → delivered 1360 N·m front / 341 N·m rear per wheel at full pedal. Handbrake 600 N·m per rear wheel.
+`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 340 N·m), never boosted above its caliper capacity. Rear capacity exceeds that, so `bias_front` = T_r/(T_r + ideal) = **0.558** → delivered 1360 N·m front / 341 N·m rear per wheel at full pedal. Handbrake 860 N·m per rear wheel.
 
 ## Steering
 
@@ -136,8 +136,8 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 14.7 s | 146 km/h | 45.0 m | 0.72 g | — |
-| estimate | 14.0 s | 150 km/h | 43.6 m | 0.77 g | 327 |
+| sim | 15.5 s | 146 km/h | 46.5 m | 0.69 g | — |
+| estimate | 14.0 s | 150 km/h | 43.6 m | 0.77 g | 326 |
 
 ## Damage lattice (`data/lattices/junkyard_beater.json`)
 

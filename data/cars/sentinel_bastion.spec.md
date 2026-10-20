@@ -124,7 +124,7 @@ Full-pedal line pressure 100 bar.
 
 Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 3637 N·m/wheel (capacity 1.56×), rear needs 1021 N·m/wheel (capacity 2.65×).
 
-`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 1594 N·m), never boosted above its caliper capacity. Rear capacity exceeds that, so `bias_front` = T_r/(T_r + ideal) = **0.629** → delivered 5680 N·m front / 1593 N·m rear per wheel at full pedal. Handbrake 1620 N·m per rear wheel.
+`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 1594 N·m), never boosted above its caliper capacity. Rear capacity exceeds that, so `bias_front` = T_r/(T_r + ideal) = **0.629** → delivered 5680 N·m front / 1593 N·m rear per wheel at full pedal. Handbrake 3280 N·m per rear wheel.
 
 ## Steering
 
@@ -136,7 +136,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 8.0 s | 214 km/h | 42.7 m | 0.72 g | — |
+| sim | 8.0 s | 214 km/h | 43.5 m | 0.75 g | — |
 | estimate | 7.6 s | 224 km/h | 40.2 m | 0.81 g | 472 |
 
 ## Damage lattice (`data/lattices/sentinel_bastion.json`)

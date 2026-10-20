@@ -106,7 +106,9 @@ pub fn audio_frame(listener: &[f32], events_json: &str, focus: u32) -> Result<St
 
 /// One director frame against the live session (native-testable core of [`audio_frame`]).
 /// Applied input and driver kind come from each sim vehicle, so AI racers, police units and
-/// physical traffic (spawned by the sim, not the session) are heard truthfully. Cars the
+/// physical traffic (spawned by the sim, not the session) are heard truthfully; kinematic
+/// traffic agents (no body) are added with an estimated cruising state, see
+/// [`kinematic_traffic`]. Cars the
 /// director does not know yet are registered from the session or the embedded data; an
 /// unknown car is skipped rather than silencing everything.
 pub(crate) fn frame_commands(
@@ -129,7 +131,23 @@ pub(crate) fn frame_commands(
     let states = sim.vehicle_states();
     let vehicles: BTreeMap<EntityId, &wp_sim::SimVehicle> =
         sim.vehicles().iter().map(|v| (v.id, v)).collect();
-    let mut inputs: Vec<VehicleAudioInput> = Vec::with_capacity(states.len());
+    // Kinematic traffic (R12b-1): body-less agents beyond the physical radius, nearest first.
+    let kinematic = kinematic_traffic(sim, &vehicles, listener.pos, d);
+    let mut inputs: Vec<VehicleAudioInput> =
+        Vec::with_capacity(states.len() + kinematic.cars.len());
+    for (entity, st, throttle) in &kinematic.cars {
+        inputs.push(VehicleAudioInput {
+            entity: *entity,
+            car_id: &kinematic.car_id,
+            state: st,
+            throttle: *throttle,
+            throttle_applied: None,
+            horn: false,
+            siren: false,
+            road_rumble: 0.0,
+            kind: DriverKind::Traffic,
+        });
+    }
     for (id, st) in &states {
         let Some(v) = vehicles.get(id) else {
             continue;
@@ -165,6 +183,92 @@ pub(crate) fn frame_commands(
         vehicles: &inputs,
         events,
     })
+}
+
+/// Entity ids of kinematic traffic agents: `KINEMATIC_TRAFFIC_BASE | agent id`. Sim entities
+/// count up from 1, so the ranges never meet.
+pub const KINEMATIC_TRAFFIC_BASE: u32 = 0x4000_0000;
+
+/// At most this many kinematic agents are fed to the director per frame (the nearest within
+/// the audible range); the director's engine LOD and voice limits do the rest.
+pub const MAX_KINEMATIC_TRAFFIC: usize = 16;
+
+/// Kinematic traffic for one frame: the traffic car model and `(entity, state, throttle)`.
+struct KinematicTraffic {
+    car_id: String,
+    cars: Vec<(EntityId, wp_contracts::VehicleState, f32)>,
+}
+
+thread_local! {
+    /// Traffic car model used for kinematic agents (loaded once per id).
+    static TRAFFIC_MODEL: RefCell<Option<wp_contracts::LoadedCar>> = const { RefCell::new(None) };
+}
+
+/// Audio inputs for kinematic traffic agents (request R12b-1, playtest #47: far traffic was
+/// silent). The model is the one physical traffic uses (any sim vehicle of kind Traffic), else
+/// the testbed default `simcli::run::TRAFFIC_CAR`; states come from
+/// `wp_audio::kinematic::cruise_state` (cruising gear and rpm from the car's gearing).
+fn kinematic_traffic(
+    sim: &wp_sim::Sim,
+    vehicles: &BTreeMap<EntityId, &wp_sim::SimVehicle>,
+    listener: [f32; 3],
+    d: &mut AudioDirector,
+) -> KinematicTraffic {
+    let none = || KinematicTraffic {
+        car_id: String::new(),
+        cars: Vec::new(),
+    };
+    let max_d = d.library().config.spatial.max_distance_m;
+    let mut near: Vec<(f32, wp_world::AgentView)> = sim
+        .world()
+        .agents()
+        .filter(|a| a.lod == wp_world::Lod::Kinematic)
+        .filter_map(|a| {
+            let dx = [
+                a.pos[0] - listener[0],
+                a.pos[1] - listener[1],
+                a.pos[2] - listener[2],
+            ];
+            let d2 = dx[0] * dx[0] + dx[1] * dx[1] + dx[2] * dx[2];
+            (d2 < max_d * max_d).then_some((d2, a))
+        })
+        .collect();
+    if near.is_empty() {
+        return none();
+    }
+    near.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.id.cmp(&b.1.id)));
+    near.truncate(MAX_KINEMATIC_TRAFFIC);
+    let car_id = vehicles
+        .values()
+        .find(|v| v.kind == wp_sim::VehicleKind::Traffic)
+        .map_or_else(
+            || simcli::run::TRAFFIC_CAR.to_string(),
+            |v| v.car_id.clone(),
+        );
+    let def = TRAFFIC_MODEL.with(|m| {
+        let mut m = m.borrow_mut();
+        if m.as_ref().is_none_or(|c| c.def.id != car_id) {
+            *m = crate::data::load_car(&car_id).ok();
+        }
+        m.as_ref().map(|car| {
+            if !d.has_car(&car.def.id) {
+                d.register_car(car);
+            }
+            car.def.clone()
+        })
+    });
+    let Some(def) = def else {
+        return none();
+    };
+    let cars = near
+        .into_iter()
+        .map(|(_, a)| {
+            let st = wp_audio::kinematic::cruise_state(&def, a.pos, a.yaw, a.speed_mps);
+            let throttle = if a.brake_lights { 0.0 } else { 0.3 };
+            (EntityId(KINEMATIC_TRAFFIC_BASE | a.id), st, throttle)
+        })
+        .collect();
+    KinematicTraffic { car_id, cars }
 }
 
 /// Override an entity's siren: `""`/`"Default"` = follow input and car default, `"Off"`,
@@ -352,5 +456,73 @@ mod tests {
             traffic_engine,
             "physical traffic engines play at low priority"
         );
+    }
+
+    /// R12b-1: kinematic traffic agents (beyond the physical radius) are heard — engine voices
+    /// on ids in the `KINEMATIC_TRAFFIC_BASE` range, at most `MAX_KINEMATIC_TRAFFIC` per frame,
+    /// never on a sim entity id — and the frame stays deterministic.
+    #[test]
+    fn kinematic_traffic_engines_are_heard() {
+        let run = || {
+            let mut s = Session::new(free_drive("debug_sedan", DamageMode::Arcade, true), false)
+                .expect("city session");
+            let player = EntityId(1);
+            let mut d = AudioDirector::new(AudioLibrary::embedded().unwrap(), AUDIO_SEED);
+            let mut engines = std::collections::BTreeSet::new();
+            let mut max_fed = 0;
+            let mut all = Vec::new();
+            for _ in 0..60 * 3 {
+                s.step(1.0 / 60.0);
+                let events = s.drain_events();
+                let sim = s.sim();
+                let pos = sim
+                    .vehicle_states()
+                    .iter()
+                    .find(|(id, _)| *id == player)
+                    .map(|(_, st)| st.pos)
+                    .unwrap_or([0.0; 3]);
+                let lis = Listener {
+                    pos,
+                    vel: [0.0; 3],
+                    forward: [0.0, 1.0, 0.0],
+                    up: [0.0, 0.0, 1.0],
+                };
+                let sim_ids: std::collections::BTreeSet<u32> =
+                    sim.vehicles().iter().map(|v| v.id.0).collect();
+                assert!(sim_ids.iter().all(|id| *id < KINEMATIC_TRAFFIC_BASE));
+                let kin = kinematic_traffic(
+                    sim,
+                    &sim.vehicles().iter().map(|v| (v.id, v)).collect(),
+                    pos,
+                    &mut d,
+                );
+                max_fed = max_fed.max(kin.cars.len());
+                let cmds = frame_commands(&s, &mut d, lis, Some(player), &events);
+                for c in &cmds {
+                    if let AudioCommand::Play { voice, bus, .. } = c {
+                        if voice.entity >= KINEMATIC_TRAFFIC_BASE
+                            && (slot::ENGINE_LAYER..slot::ENGINE_LIMITER).contains(&voice.slot)
+                        {
+                            assert_eq!(*bus, Bus::Engine);
+                            engines.insert(voice.entity);
+                        }
+                    }
+                }
+                assert_eq!(d.stats().unregistered, 0);
+                all.push(json(&cmds));
+            }
+            (engines, max_fed, all)
+        };
+        let (engines, max_fed, a) = run();
+        assert!(
+            !engines.is_empty(),
+            "no kinematic traffic engine played in 3 s of city driving"
+        );
+        assert!(
+            max_fed > 0 && max_fed <= MAX_KINEMATIC_TRAFFIC,
+            "fed {max_fed}"
+        );
+        let (_, _, b) = run();
+        assert_eq!(a, b, "command stream differs between two runs");
     }
 }

@@ -237,6 +237,10 @@ pub struct EngineMix {
     pub shift_dip_depth: f32,
     /// Downshift blip: rpm rising fast with the throttle closed raises the load to this.
     pub blip_load: f32,
+    /// The blip's rpm-rate thresholds hold at this rpm; below it a rising rate counts
+    /// `blip_ref_rpm / rpm` times (≤ 2.5×), since a rev-match's rpm step scales with rpm.
+    #[serde(default = "default_blip_ref_rpm")]
+    pub blip_ref_rpm: f32,
     /// Engine LOD for every car except the focus: closer than this it keeps its two loudest
     /// layers (the crossfade pair), farther only the loudest one; the dropped layers' energy
     /// moves into the kept ones, so loudness is unchanged. Saves Engine-bus voices so a crowd
@@ -253,6 +257,10 @@ pub struct EngineMix {
     /// layers), m. A car keeps the model out to 1.25 × this.
     #[serde(default = "default_physical_radius_m")]
     pub physical_radius_m: f32,
+}
+
+fn default_blip_ref_rpm() -> f32 {
+    4000.0
 }
 
 fn default_physical_max_others() -> usize {

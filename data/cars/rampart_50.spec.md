@@ -129,7 +129,7 @@ ABS ceiling: caliper capacity 5456 / 1781 N·m exceeds 1.5 × the front lock tor
 
 Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 2072 N·m/wheel (capacity 1.80×), rear needs 809 N·m/wheel (capacity 1.51×).
 
-`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 1456 N·m), never boosted above its caliper capacity. Rear capacity is below that (hardware-limited rear), so `bias_front` = **0.5**: both axles get full caliper torque → delivered 3730 N·m front / 1220 N·m rear per wheel at full pedal. Handbrake 1430 N·m per rear wheel.
+`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 1456 N·m), never boosted above its caliper capacity. Rear capacity is below that (hardware-limited rear), so `bias_front` = **0.5**: both axles get full caliper torque → delivered 3730 N·m front / 1220 N·m rear per wheel at full pedal. Handbrake 2020 N·m per rear wheel.
 
 ## Steering
 
@@ -141,7 +141,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 5.8 s | 268 km/h | 38.4 m | 0.88 g | — |
+| sim | 5.8 s | 268 km/h | 38.7 m | 0.90 g | — |
 | estimate | 5.4 s | 276 km/h | 36.0 m | 0.96 g | 618 |
 
 ## Damage lattice (`data/lattices/rampart_50.json`)

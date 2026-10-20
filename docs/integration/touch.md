@@ -195,3 +195,66 @@ Phone profile on the merged tree (740×360, touch): RTF **0.71** unthrottled / 0
 (was 12), SwiftShader raster 164 ms (was ~100), 659 draw calls — the new art / effects pass,
 shared with desktop. **Request (lead / S):** look at the round-12b render-submit and raster
 regression; the touch profile's own settings are unchanged.
+
+## Desktop perf regression after round 12b (2026-10-20, owner: "fix the desktop perf regression too")
+`e2e/perf_check.mjs` (1280×720, headless SwiftShader = the software-GL `auto` profile) failed 6–7
+checks on the merged `lead/round12`. Same-container reference: `lead/browser-perf` (the perf pass,
+which passed where it was written) built and profiled here gets chase RTF 0.87 / 18 frames >
+250 ms, rain 0.95 / 12 — **this container is slower than the one the thresholds were set on**,
+so "frames over 250 ms" is partly machine-dependent.
+
+Found (probes: GPU-synced render per scene group, per-frame timeline, CPU profile, program log):
+1. **Skid marks re-resolved their shader every frame** (transparent + DoubleSide without
+   `forceSinglePass`: Three flips `side` twice per draw; with its `onBeforeCompile` that is
+   ~0.4 MB/frame of string `replace` and the intermittent "material version bumps" failure).
+   Fixed there and in the same pattern on the race-gate beam and the debug body box.
+2. **The siren light recompiled every lit material mid-chase** (Three bakes the point-light
+   count into lit shaders; the first police lights built ~13 programs at once, seconds under
+   SwiftShader). `SceneView` now does one hidden render with the siren in the other state a few
+   frames after each session start / city load (`warmLightVariants`). A first attempt with
+   `renderer.compile` also compiled every *hidden* debug helper (it walks invisible objects):
+   dropped.
+3. **Crash effects compiled their shaders on the first crash** (meshes hidden until used).
+   `SceneView.precompile(fx.group)` draws only that subtree (others hidden; empty instanced
+   meshes build programs without drawing) for both siren states, a few frames after load.
+4. **Geometry / draw-call bound raster** (the render barely scales with pixels): the low
+   profile (software GL `auto`, `?gfx=low`) now has its own LOD distances — full car meshes
+   within 150 m (was 250), traffic drawn within 600 m, parked cars: proxies within 150 m (was a
+   fixed 300; two-box cars beyond — every parked car stays drawn, the props rule against
+   invisible collisions; a 600 m cutoff and an 8-full-mesh cap were tried and reverted because
+   `e2e/run.mjs` enforces that rule), street lamps within 450 m,
+   and promoted traffic / police cars past 80 m drawn by the fleet (one instanced draw) instead of
+   their own view (~40 draw calls each; `LodDirector.viewDrawM`, 10 m hysteresis). The touch
+   profile gets tighter values (60 m views, 120 m proxies, 300 m lamps, 300 m traffic). High profile (a real GPU)
+   unchanged. The LOD distances now also follow a live graphics change from the game menu
+   (`Quality.onChange`), and `setMode` keeps the touch pixel-ratio cap (it had been lost in the
+   merge).
+5. **Governor resizes**: software GL started at 0.5× and stepped down 15 % at a time, each step
+   resizing the canvas and post targets (~0.7 s of `setSize` in an 8 s window). It now starts at
+   0.35× (where it always ended) with a floor of 0.25×.
+
+Results (same container, perf_check / frame_profile, 12 s windows):
+
+| | chase RTF · >250 ms · KB/frame | rain RTF · >250 ms · KB/frame |
+|---|---|---|
+| merged `lead/round12` before | 0.63–0.70 · 23 · 2480–2500 | 0.59–0.69 · 23 · 2790–2850 |
+| after this pass | **0.89 · 18 · 1700** | **0.80–0.86 · 21–24 · 2030–2260** |
+| reference `lead/browser-perf` | 0.87 · 18 · 1990 | 0.95 · 12 · 980 |
+
+Full `just web-e2e` after the pass (same container): **198 PASS**; perf_check chase RTF 0.865,
+rain 0.773, 570 / 517 draw calls, 336k / 310k triangles, 0 material bumps; fails: frames over
+250 ms (18 / 23) and once rain allocation 2439 KB (≤ 2400; 2030–2260 in other runs); and
+`e2e/crash_fx.mjs` "burnout lays skid marks" (6 segments, needs 8 in 3.2 s — fails the same on
+the untouched merged base: frame-rate dependent). perf_check now fails only "frames over 250 ms" (both chases; ≤ 12 allowed), which the reference
+build fails here too for the chase. What is left is not render-side: late in the chase 15–22
+traffic / police cars are promoted to full sim vehicles and the wasm sim step grows from ~0.65 to
+~1.4 ms per tick (sim ~55–80 ms of a ~230 ms frame), plus one-off mesh uploads when cars are
+promoted. Requests: **lead** — re-measure the perf_check thresholds on the CI box (or count
+frames over 250 ms relative to the reference); **world / police** — the promoted-vehicle count
+in the chase (sim cost per tick); **R (panels)** — `PanelBody.update` still allocates
+~0.24–0.36 MB/frame (fold / frame fit) on crashed cars.
+
+Rust gate on this branch (no Rust / data changed vs `lead/round12` @ `608a50a`): fmt ✔, clippy
+`-D warnings` ✔, wasm build ✔; `cargo test --workspace`: 1001 pass, 5 fail on the base —
+simcli `goldens_match`, `live_police_chase_ends_in_escape_or_capture_without_stuck_cars`, race
+`hollins_hill_sprint`, `loop9_circuit`, `lantern_checkpoint_draws_the_police`.
