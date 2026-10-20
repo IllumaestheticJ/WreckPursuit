@@ -21,6 +21,19 @@ deterministic (f32, no wall clock), no yaw torque, no grip added; the wheel pres
 Re-run every table: `cargo run --release -p wp_vehicle --example drift_lab_b` (`catch` or
 `drift` for one half). Keyboard preset with TCS/ESC off unless noted.
 
+> **Status: closed (2026-10-20).** Drift Lab B stops at `20bee3a7` + this note. Not merged
+> with `lead/round12` @ `dc9a599b`: that branch carries machine A's own drift implementation
+> (`wp_vehicle::drift`, `throttle`, a drift lab page; 14 conflicts incl. an add/add on
+> `drift.rs`), and the owner has since moved away from this design — rows 106 / 111 reject the
+> intent modes and hold assist in favour of plain reference-style steering (Drift Lab C / W,
+> row 114 `lead/tyre-slip`). Row 104's code items (remove `slide::slide_throttle` feathering,
+> faster keyboard `throttle_filter`) were not on round12 at that point and are not applied here.
+>
+> Possibly worth carrying elsewhere: the step-1 measurements (rack slew was capped at the car's
+> rack speed, ~100 °/s, so a 150 ms-late counter key caught 62/90 kicks; an absolute slew of full
+> lock in 0.10 s caught 84/90), `drift_lab.rs`'s scripted catch / drift drivers, and the 6
+> golden re-blesses being B-steering-only (not needed on round12).
+
 ## Changelog
 
 ### Step 1 — countersteer response speed (row 90)
