@@ -19,7 +19,7 @@ use wp_world::surface::{
 use wp_world::terrain::Heightfield;
 
 /// Sidewalk width and kerb height (shared with the physics colliders).
-use wp_world::surface::{KERB_H_M as CURB_M, SIDEWALK_W_M as SIDEWALK_M};
+use wp_world::surface::KERB_H_M as CURB_M;
 /// Height of the parking / bus lane tint above the road surface, m.
 const LANE_TINT_DZ_M: f32 = 0.01;
 /// Render terrain vertex spacing (cities with terrain), m.
@@ -469,10 +469,44 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
             &bank,
         );
     }
-    // Raised sidewalks and kerb faces: the very triangles `wp_sim` collides with.
+    // Raised sidewalks (the flush band behind every kerb) and kerb faces: the very triangles
+    // `wp_sim` collides with.
     let walks = sidewalk_mesh(map);
     sidewalk.mesh(&walks.tops);
     kerb.mesh(&walks.kerbs);
+    // Faces from the band's outer edge down to the ground beyond it (retaining walls on
+    // slopes, a kerb-height edge on flat ground); none where the band is a bridge deck.
+    for band in &walks.bands {
+        if band.len() < 2 {
+            continue;
+        }
+        let top: Vec<V3> = band.iter().map(|[_, o]| *o).collect();
+        let bottom: Vec<f32> = band
+            .iter()
+            .map(|[k, o]| match terrain {
+                Some(t) => {
+                    let road = k[2] - CURB_M;
+                    let deck = road - t.height_at(geom::xy(*k)) > 1.5
+                        && road - t.height_at(geom::xy(*o)) > 1.5;
+                    if deck {
+                        o[2]
+                    } else {
+                        (t.height_at(geom::xy(*o)) - 1.5).min(o[2])
+                    }
+                }
+                None => o[2].min(-0.05),
+            })
+            .collect();
+        // Face away from the road: right of the strip direction when the band is on its right.
+        let d = geom::sub(geom::xy(band[1][0]), geom::xy(band[0][0]));
+        let out = geom::sub(geom::xy(band[0][1]), geom::xy(band[0][0]));
+        let prim = if terrain.is_some() {
+            &mut wall
+        } else {
+            &mut kerb
+        };
+        prim.curtain(&top, &bottom, geom::cross(d, out) < 0.0);
+    }
     // Pavement between the ribbon ends (junctions, bends, dead ends): the very triangles
     // `wp_sim` collides with.
     for p in node_patches(map) {
@@ -490,14 +524,18 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
             let (l, r) = surface_edges(s);
             let n = s.centre.len();
             let deck: Vec<bool> = (0..n).map(|k| is_elevated(s, k, &ground_z, 1.5)).collect();
-            // Retaining walls on the outer kerb line (sidewalk roads) or the paved edge.
-            let out = if s.highway { 0.3 } else { SIDEWALK_M };
-            for (side, edge) in [(-1.0f32, &l), (1.0, &r)] {
+            // Retaining walls on the paved edge of a side without a sidewalk (sidewalk sides:
+            // the band's outer edge, above).
+            for (i, (side, edge)) in [(-1.0f32, &l), (1.0, &r)].into_iter().enumerate() {
+                if !s.highway && s.sidewalk[i] {
+                    continue;
+                }
+                let out = 0.3;
                 let line = geom::offset_polyline(edge, side * out);
                 let top: Vec<V3> = line
                     .iter()
                     .zip(edge.iter())
-                    .map(|(p, e)| [p[0], p[1], e[2] + if s.highway { 0.0 } else { CURB_M }])
+                    .map(|(p, e)| [p[0], p[1], e[2]])
                     .collect();
                 let bottom: Vec<f32> = top
                     .iter()
