@@ -114,7 +114,7 @@ slip, full from 6.9°, or full while the slip grows fast): sweeper peak 202 → 
 | sweeper 70 % grip | reversals/s | 9.89 | 8.46 | 8.40 | **8.57** |
 | | peak rack °/s | 170 | 273 | 375 | **202** |
 | | snap % not sliding | 6.6 | 0.6 | 1.6 | **0.0** |
-| | yaw overshoot °/s | 13.4 | 15.5 | 18.2 | **18.9** |
+| | yaw overshoot °/s | 13.4 | 15.5 | 18.2 | **19.0** |
 | | rms err m | 0.36 | 0.44 | 0.37 | **0.45** |
 | kerb hit 100 | reversals/s | 1.00 | 1.80 | 0.80 | **0.80** |
 | | peak rack °/s | 123 | 273 | 376 | **59** |
@@ -147,7 +147,7 @@ Reading it:
 - Row 90's reversal-from-centre + 12/s release adds reversals (lane change 80 8.6 → 10.3,
   slalom 6.9 → 9.2) and tracks worse; not used.
 - Left above main: slalom / sweeper **peak** (204 / 202 vs 186 / 170 °/s) and sweeper yaw
-  overshoot (18.9 vs 13.4 °/s). The traces show these are confirmed small oversteer moments
+  overshoot (19.0 vs 13.4 °/s). The traces show these are confirmed small oversteer moments
   (3.6–4.8° body slip at 70 % grip, readout *sliding: yes*): the fast countersteer catching a
   slide, limited to the travel. Lane change 130 overshoot 8.5 vs 7.5 °/s.
 
@@ -190,8 +190,11 @@ Drift Lab B (`?drift=b&car=shiro_turbo`), keyboard, countersteer 60 %:
 `handling_balance::front_drive_cars_understeer_mildly` on `lead/drift-lab-b` /
 `lead/round12` (listed in drift-lab-b.md); left alone. `cargo test --workspace` also fails
 `simcli::scenarios::goldens_match` (the goldens were not re-blessed after Drift Lab B step 1;
-this branch changes the hashes again) and `wp_audio::engine_shift::rev_matched_downshifts_blip`
-— both fail identically on untouched `lead/drift-lab-b`. Not re-blessed here: bless once when
+this branch changes the hashes again), `wp_wasm` `simcli_golden_replays_play_back_in_the_browser_core`
+and `race_crash_replays_with_the_judge_and_no_crash_on_the_grid`, `wp_race::race_picker`
+`loop9_circuit` and `lantern_checkpoint_draws_the_police`, and
+`wp_audio::engine_shift::rev_matched_downshifts_blip` — all fail the same way on untouched
+`lead/drift-lab-b`. Not re-blessed here: bless once when
 the owner picks which drift branch merges (`cargo run -p simcli -- goldens --bless`, `[bless]`
 commit).
 
