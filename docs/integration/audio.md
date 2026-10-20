@@ -396,3 +396,13 @@ with `register_car`. Pose: `traffic_draw`'s ground pose, or `AgentView::{pos, ya
 directly. The `0x4000_0000 | id` (traffic) / `0x5000_0000 | id` (police) entity ranges must not
 collide with sim entities. Cost: ~0.004 ms per car in the director (perf table); the LOD and
 voice limits above keep the voice count bounded however many agents there are.
+
+**Checks run (round 12b, on `ws/audio` = `lead/round12` + this work):** `cargo fmt`, `cargo clippy
+--workspace --all-targets -D warnings`, `cargo build --target wasm32-unknown-unknown -p wp_wasm`,
+`tsc`, `just web-e2e` (run / weather / race: all pass), `e2e/audio.mjs`, `e2e/audio_samples.mjs`,
+`e2e/audio_roster.mjs`: all pass. `cargo test --workspace`: everything passes except simcli
+`goldens_match` — 11 `city_*` scenarios (e.g. `city_blocked_parked_player_grid`, first mismatch at
+tick 240) differ from their golden hashes. This branch only changes audio files relative to
+`origin/lead/round12` (`git diff --stat`), so the mismatch comes with the base, not this work.
+24-car bench (headless, software GL, 2.5 fps): audio frame 3.3 ms (director 0.64, Web Audio apply
+2.6 ms at ~25 sim ticks per frame), 35 + 7 voices of 48.
