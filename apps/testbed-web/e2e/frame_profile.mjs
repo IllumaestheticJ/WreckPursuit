@@ -294,6 +294,7 @@ const TRANSIENT = new Set(["VehicleView", "getProgram", "prewarm", "acquireProgr
 let total = 0;
 let transient = 0;
 const byFn = new Map();
+const steadyByFn = new Map();
 const walk = (n, inTransient) => {
   const cf = n.callFrame;
   const tr = inTransient || TRANSIENT.has(cf.functionName) || cf.functionName.endsWith(".prewarm");
@@ -301,6 +302,7 @@ const walk = (n, inTransient) => {
   if (tr) transient += n.selfSize;
   const key = `${cf.functionName || "(anon)"} ${cf.url.split("/").pop().split("?")[0]}:${cf.lineNumber + 1}`;
   byFn.set(key, (byFn.get(key) ?? 0) + n.selfSize);
+  if (!tr) steadyByFn.set(key, (steadyByFn.get(key) ?? 0) + n.selfSize);
   for (const c of n.children) walk(c, tr);
 };
 walk(profile.head, false);
@@ -321,8 +323,9 @@ if (process.env.STACKS) {
 }
 const kbPerFrame = total / 1024 / r.frames;
 const steadyKBPerFrame = (total - transient) / 1024 / r.frames;
+const steadyTop = [...steadyByFn].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([k, v]) => [k, +(v / 1024 / r.frames).toFixed(1)]);
 const allocTop = [...byFn].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([k, v]) => [k, +(v / 1024 / r.frames).toFixed(1)]);
-const out = { which, viewport: `${vw}x${vh}`, ...r, allocKBPerFrame: kbPerFrame, steadyAllocKBPerFrame: steadyKBPerFrame, allocTop, errors: errors.slice(0, 3) };
+const out = { which, viewport: `${vw}x${vh}`, ...r, allocKBPerFrame: kbPerFrame, steadyAllocKBPerFrame: steadyKBPerFrame, allocTop, steadyTop, errors: errors.slice(0, 3) };
 if (jsonOnly) console.log(JSON.stringify(out));
 else {
   const f = (x, d = 1) => (typeof x === "number" ? x.toFixed(d) : String(x));
@@ -339,6 +342,7 @@ else {
   console.log(`draw calls ${f(r.drawCalls, 0)} · triangles ${f(r.triangles, 0)} · programs ${r.programs} · vehicles ${r.vehicles} · agents ${r.agents}`);
   console.log(`wasm calls/frame ${f(r.wasmCallsPerFrame)}: ` + r.wasmTop.map(([k, n]) => `${k} ${n}`).join(", "));
   console.log(`alloc ${f(kbPerFrame)} KB/frame (steady ${f(steadyKBPerFrame)}, one-off view / shader builds ${f(kbPerFrame - steadyKBPerFrame)}); top: ` + allocTop.map(([k, v]) => `${k} ${v}`).join(" | "));
+  console.log(`steady alloc top: ` + steadyTop.map(([k, v]) => `${k} ${v}`).join(" | "));
   if (out.errors.length) console.log("errors:", out.errors);
   console.log(JSON.stringify(out));
 }
