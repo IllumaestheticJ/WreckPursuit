@@ -204,8 +204,8 @@ pub const GATE_OUT_S: f32 = 0.15;
 /// Time constant of the self-aligning target's travel filter outside a confirmed slide, s.
 pub const ALIGN_TRAVEL_TAU_S: f32 = 0.06;
 
-/// Oversteer balance, rad: how much more the rear axle slips than the front tyres, signed so
-/// + = oversteer (the car yawing more than the wheels ask: `r·L/v − δ` toward the slide).
+/// Oversteer balance, rad: how much more the rear axle slips than the front tyres, positive
+/// for oversteer (the car yawing more than the wheels ask: `r·L/v − δ` toward the slide).
 /// `rear_axle_slip` and `front_axle_angle` as in [`SteerInput`], `steer` the centre road-wheel
 /// angle (all rad, + = left). Grip cornering is ≈ 0 (neutral) or negative (understeer); a
 /// slide, also while countersteered along the travel, is about the rear-axle slip.

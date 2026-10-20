@@ -188,7 +188,12 @@ Drift Lab B (`?drift=b&car=shiro_turbo`), keyboard, countersteer 60 %:
 
 `cargo test -p wp_vehicle` already fails `differentials::roster_diff_hashes_are_pinned` and
 `handling_balance::front_drive_cars_understeer_mildly` on `lead/drift-lab-b` /
-`lead/round12` (listed in drift-lab-b.md); left alone.
+`lead/round12` (listed in drift-lab-b.md); left alone. `cargo test --workspace` also fails
+`simcli::scenarios::goldens_match` (the goldens were not re-blessed after Drift Lab B step 1;
+this branch changes the hashes again) and `wp_audio::engine_shift::rev_matched_downshifts_blip`
+— both fail identically on untouched `lead/drift-lab-b`. Not re-blessed here: bless once when
+the owner picks which drift branch merges (`cargo run -p simcli -- goldens --bless`, `[bless]`
+commit).
 
 ## Contract change requests
 
