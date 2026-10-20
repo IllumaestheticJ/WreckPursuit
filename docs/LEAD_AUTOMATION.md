@@ -98,3 +98,7 @@ names when refreshing). Refresh the demo only from a green `main`, not from roun
   times a day; only a green full gate moves `main`, the main testbed link and the public demo.
 - Scheduled rounds: do the preview track every time something is ready; run the main track when
   the round branch has been quiet (no new merges) for ~1 h or once a day.
+- Lesson (2026-10-20): a branch whose session had pushed only docs at merge time "merged" as a
+  no-op, and the preview went out without its code (parked cars). Always `git fetch` right
+  before merging, check `git merge-base --is-ancestor origin/<branch> HEAD` after, and verify the
+  feature in the browser smoke (count it), not just "page loads".
