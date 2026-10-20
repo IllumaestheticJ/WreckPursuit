@@ -67,20 +67,30 @@ Pure Rust, no renderer, builds for `wasm32-unknown-unknown`.
   sight and ≥ `response.despawn_min_m` away.
 - **Reckless-driving calls** (round 12b, `presence.toml [response]`): a violation no unit saw
   opens a report (civilian call or traffic camera; later calls move it to the racer's latest
-  position). After `call_delay_s[phase] + district_delay_s[district]` (Core by day: 2 s) dispatch
-  sends an available unit within `radius_m[district]` by road that can reach a junction on the
-  racer's predicted path before it. If there is none, a **responder spawns**:
+  position; a report within 200 m of an open call joins it, so a racing pack is one call).
+  After `call_delay_s[phase] + district_delay_s[district]` (Core: 2 s by day, 3 s at night)
+  dispatch sends an available unit within `radius_m[district]` by road that can reach a
+  junction on the racer's predicted path before it. If there is none, a **responder spawns**:
   `spawn_min_m..spawn_max_m` (150–350 m, + `spawn_lead_s` of a fast racer's travel) of legal
-  driving from the racer, never closer than `never_closer_m` (120 m), out of every racer's sight
-  (driver's eye and chase camera), clear of other vehicles, facing the racer. Spots that meet the
-  racer on its predicted path come first. Responders drive with lights at
-  `respond_speed_factor` × limit to the meeting junction (refreshed every 3 s). A unit still
-  > `redispatch_far_m` away `redispatch_s` after taking the call is released and the call goes
-  out again. One radio line: "Dispatch: caller reports reckless driver, Core. Unit 6 responding."
+  driving from the racer, never closer than `never_closer_m` (120 m), out of every racer's sight,
+  clear of other vehicles and parked cars, facing the racer. Spots that meet the racer on its
+  predicted path come first. "Out of sight": no line of sight from the driver's eye or a chase
+  camera (behind along the velocity and on every side, since police don't know which way a car
+  faces), now or 1 s on, to a car body there.
+- **Responders** drive with lights at `respond_speed_factor` (1.6) × limit to the meeting
+  junction (re-planned every 3 s) and **hold short of it** while the racer is coming. With the
+  racer in sight within 150 m they **follow** it (so it can be recognised, which starts a
+  pursuit); with the racer coming head-on within 70 m they pull right and stop, and nose to
+  nose with it stopped (a narrow road) they back out 8 m. A unit still > `redispatch_far_m`
+  (150 m) away `redispatch_s` (6 s) after taking the call is released and the call goes out
+  again. One radio line per call: "Dispatch: caller reports reckless driver, Core. Unit 6
+  responding." No responders in a city whose patrol table is empty for the phase.
 - **Unit cap**: responders and reinforcements only spawn while ground units <
   `max_units_by_level[highest wanted level]` (and `max_ground_units`).
 - **Despawns**: idle responders and reinforcements drive on and vanish once out of every racer's
   sight and ≥ `despawn_min_m` away; out-of-service units the same after 20 s (60 s wrecked).
+- **Parked cars and cones** (`PoliceSystem::set_props`, set by `for_world`) are obstacles for
+  every ground unit (follow, wait behind, pass), like a stopped car.
 - **Crash scenes** (`report_crash_scene`, or automatically from contacts) hold the nearest unit
   for `crash_scene_s[phase]`.
 - **Reinforcements**: each pursued racer wants `units_per_level[level]` ground units. A deficit
@@ -96,6 +106,21 @@ Pure Rust, no renderer, builds for `wasm32-unknown-unknown`.
 
 Assignments: `Patrol`, `Respond(incident)`, `Pursue(target)`, `Intercept(point)`, `RoadblockAt`,
 `SpikeAt`, `HeloTrack`, `OutOfService`.
+
+### Un-sticking (`stuck.rs`, physical units)
+A unit that wants to move (planned > 1.5 m/s, not holding for a light or traffic) but stays
+< 1 m/s for 2 s is stuck; so is one that has waited 20 s behind a stopped racer or police car
+(not a red-light queue; a civilian jam clears itself). Each event is logged in `stats().stuck`
+with a cause from the unit's last contacts: `Damage`, `Vehicle`, `ParkedProp` (the contact point
+on a prop footprint), `JunctionStep` / `Kerb` (a low, horizontal contact, near a junction or
+not), `Wall`, `Terrain` (vertical normal), `NoContact`. Recovery: back out 4 m with opposite lock
+(brake held at a standstill engages reverse) if there is room behind; on a repeat within 15 m
+(or held behind a dead car with room behind) re-route with that segment blocked for 30 s, which
+turns the unit around; 8 s after the first event, despawn once out of every racer's sight (a
+call it had goes out again; a patrol is refilled out of sight). `set_unstick_recovery(false)`
+keeps detection and logging only, for measurements. `stats().responses` logs every trip to a
+call: spawned or not, start and road distance, stuck events, outcome (`Arrived`, `FellBehind`,
+`Stuck(cause)`, `Wrecked`, `CallEnded`).
 
 ### Pursuit (`pursuit.rs`, `unit.rs`)
 - Pursuers follow the racer's **breadcrumb trail**, which is recorded only while the racer is
@@ -219,9 +244,9 @@ distance and nearest road. Tests, scenarios and tools use `city::procedural(&Pro
 |---|---|
 | Patrol presence (4 phases) | Exact table counts after warm-up |
 | Day speeder, Core, 2× limit (5 runs) | Pursuit at 8.8 s mean (≤ 12.8 s every run); reinforcement 29 s |
-| Night speeder, 03:00 (8 runs) | Pursuit at 53 s mean (126 s before round 12b's responders); reinforcement 104 s |
-| Reckless-driving call → first unit within 100 m, racer at 2× limit (`response_*.ron`, 8 runs each) | Core noon 3.1 s mean / 7.6 s worst; Suburb noon 9.3 / 16.8 s; Core 23:00 12.2 / 38.2 s; Suburb 23:00 21.3 / 55.0 s |
-| Pop-in audit, every scenario | 0 of ~170 mid-session spawns and ~400 despawns in a racer's sight or within 120 m |
+| Night speeder, 03:00 (8 runs) | Pursuit at 51 s mean (126 s before round 12b's responders); reinforcement 102 s |
+| Reckless-driving call → first unit within 100 m, racer at 2× limit (`response_*.ron`, 8 runs each) | Core noon 3.2 s mean / 7.6 s worst; Suburb noon 9.3 / 16.8 s; Core 23:00 7.1 / 17.6 s; Suburb 23:00 19.3 s mean, 6 of 8 within 25 s (one run: the racer loops the city edge and U-turns) |
+| Pop-in audit, every scenario | 0 of 105 mid-session spawns and 0 of 333 despawns in a racer's view cone / sight or within 120 m |
 | Cop self-wreck, Simulation (20 pursuits) | 0% of engaged units; careful units spend their risk budget (809 unit-seconds held to shadowing), an unlimited budget never does |
 | Tool placement (5 runs, L4) | 35 tools, minimum sight 120.1 m |
 | Escape (dusk, below helicopter level) | 2 of 3 runs escape |
