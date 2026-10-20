@@ -108,41 +108,27 @@ tests. Check: `node apps/testbed-web/e2e/audio.mjs` (after the wasm build).
   embedded data). The bridge core is now `audio::frame_commands` (native-testable); the test
   takes ~75 s in a debug build because it runs the full city physics.
 
-## Recorded CC0 packs (playtest #5, "use real open source sounds") — BLOCKED on network policy
-Status 2026-10-19: **not started — no audio was downloaded or committed.** This container's egress
-proxy refuses every sound-library host (`connect_rejected` from the agent proxy for each one below;
-only GitHub and the package registries are reachable). Per the brief, nothing was fetched from
-unverified mirrors (GitHub re-uploads, npm packages) because their provenance/licence can't be
-checked against the original page.
+## Recorded CC0 packs (playtest #5, "use real open source sounds")
+Status 2026-10-20: **`world_rec` shipped** (the network now reaches kenney.nl and freesound.org).
+- `data/audio/packs/world_rec.json` + 55 Ogg files (≈ 1 MB) in `data/audio/packs/world_rec/`:
+  `impact/{thud,plastic_crack,panel_dent,structural_crunch,glass_shatter,cast_clank}`,
+  `debris/{part_tear,wheel_off}`, `tire/burst`, `mech/engine_fail` (2–8 variants each) and loops
+  `scrape/metal`, `tire/squeal`, `mech/steam_hiss`, `horn/{standard,truck}`. Every other cue
+  is copied from `world_proc`.
+- Sources: 38 Freesound sounds (HQ previews; each page checked to say CC0 1.0, uploader matches) + Kenney "Impact
+  Sounds" (CC0). Rows in `data/audio/packs/world_rec/CREDITS.md`.
+- Reproducible: `python3 tools/audio-packs/build.py tools/audio-packs/world_rec.json` (manifest
+  = source URLs + cut points; processing in `tools/audio-packs/README.md`).
+- Every car def (and the default for cars without a def) now uses `world_rec`.
+- New optional `SamplePack::fallback_pack` (wp_audio data, not a contract type): the browser
+  plays that pack's synth for the same cue while a file loads or if it can't decode (old Safari
+  has no Vorbis). Validated: must exist and be the same kind.
+- Tests: `shipped_data_is_valid_and_complete` also checks every `Samples` file exists;
+  `e2e/audio.mjs` checks all files decode in Chromium and the head-on crash plays recorded
+  samples (38 recorded, 0 fallback).
 
-**Hosts the environment's network policy must allow** (HTTPS, port 443):
-
-| Host | Used for | Licence of what we'd take |
-|---|---|---|
-| `kenney.nl`, `www.kenney.nl` | Kenney audio packs (impact, UI, sci-fi/vehicle) — zip downloads | CC0 |
-| `opengameart.org` | CC0 engine loops, sirens, crashes (files under `/sites/default/files/`) | CC0 / CC-BY only (filter out NC/SA) |
-| `freesound.org` | search + licence metadata (API `/apiv2/`, needs a free API key for original-quality downloads) | CC0 / CC-BY only |
-| `cdn.freesound.org` | Freesound preview/download files | as above |
-| `sonniss.com` | GDC royalty-free bundle pages + licence text (download links point at the mirror named on that page) | Sonniss royalty-free licence (verify text) |
-| `archive.org`, `*.us.archive.org` | public-domain / CC0 sound collections (fallback) | CC0 / PD |
-| `upload.wikimedia.org`, `commons.wikimedia.org` | public-domain siren/horn recordings (fallback) | PD / CC0 / CC-BY |
-
-Minimum useful set: `kenney.nl` + `opengameart.org` + `freesound.org` + `cdn.freesound.org`.
-Network access is changed in the session's cloud environment menu → Edit → Network access (add the
-hosts under Allowed domains, keep "Allow package managers" ticked), see
-https://code.claude.com/docs/en/cloud-environments#network-access.
-
-**Plan once the hosts are open** (no code change needed for playback — `source: Samples` already loads
-`/data/audio/packs/<pack>/<file>`):
-1. Download into a scratch dir, keep the original page URL, author and licence for each file.
-2. `ffmpeg`: mono, trim, loudness-normalise (EBU R128, −16 LUFS one-shots / −20 LUFS loops), seamless
-   loop points, OGG Vorbis q3 (MP3 fallback for Safari); target < 15 MB total.
-3. New packs `engine_rec_{i4,v6,v8,turbo}` (4–6 RPM points each + whistle/blow-off), `world_rec`
-   (shift clunk, squeal/skid, light/medium/heavy metal, glass, plastic, scrape loops, horn),
-   `siren_rec` (wail/yelp/hi-lo), `radio_rec` (squelch/static), `ambient_city_night`.
-4. `data/audio/LICENSES.md` row per file; CC-BY authors in the testbed F1/help screen.
-5. Car defs point at the `*_rec` packs by default; audio panel gets a "Procedural (fallback)" toggle
-   that swaps back to the existing `*_proc` packs.
+Still procedural: engines (`engine_rec_*` need clean steady-rpm loops — none found at CC0 quality
+yet), sirens, radio, surfaces, suspension, plastic scrape, body rattle.
 
 ## Perf numbers
 | Measurement | Machine | Native | Browser | Budget |
@@ -162,9 +148,11 @@ https://code.claude.com/docs/en/cloud-environments#network-access.
 - TTS via `speechSynthesis` bypasses the Web Audio radio EQ (browser limitation); squelch and
   static go through it. Recorded line packs will use the EQ.
 - No music player; the Music bus exists and is ducked by the scanner.
-- Procedural packs are placeholders: recognisably engine-like (firing frequency, harmonics,
-  cross-plane burble, limiter chop), not realistic. Recorded packs plug in by changing
-  `source` to `Samples` — no code change.
+- Engine / siren / radio / surface packs are procedural placeholders: recognisably engine-like
+  (firing frequency, harmonics, cross-plane burble, limiter chop), not realistic. Collisions,
+  glass, debris, scrapes, squeal and horns are recorded (`world_rec`).
+- `world_rec` cut points and gains come from onset/decay analysis, not listening; tune by ear in
+  `tools/audio-packs/world_rec.json`.
 
 ## Lead feedback
 (Written by the integration lead: failing tests, expected vs actual.)
