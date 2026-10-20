@@ -1642,6 +1642,12 @@ impl Traffic {
                                 speed_mps,
                             },
                         ) => {
+                            // A stopped unit level with or just behind this car is also one
+                            // it is passing: slow past it (as for `Near`) while still
+                            // reacting, instead of driving on at speed until the pull-over.
+                            if speed_mps < siren::MOVING_MPS && back_m < siren::NEAR_M {
+                                near = true;
+                            }
                             let fresh = matches!(
                                 sy.phase,
                                 YieldPhase::None | YieldPhase::Noticing | YieldPhase::MergingBack
@@ -1785,8 +1791,11 @@ impl Traffic {
                 match sy.phase {
                     YieldPhase::PullingOver | YieldPhase::Waiting if can_pull => {
                         lat_target = sy.side * kerb;
-                        // Physical cars only move sideways while rolling: crawl until within 0.1 m.
-                        let sideways = (a.lat - lat_target).abs() > 0.1;
+                        // Physical cars only move sideways while rolling: crawl until within
+                        // 3 cm. (At 0.1 m a car on a 3.5 m lane could stop 6-10 cm short of the
+                        // kerb offset, its body inside the corridor of a unit riding the line
+                        // at -1.55 m in the same lane, which then waited STALL_S behind it.)
+                        let sideways = (a.lat - lat_target).abs() > 0.03;
                         let vt = if sideways {
                             siren::PULL_OVER_CRAWL_MPS
                         } else {
@@ -2073,7 +2082,14 @@ impl Traffic {
                     // but once the unit has stopped behind it (waiting for room: a car at the
                     // stop line cannot pull over) it goes when it may, to clear the way.
                     let hold = jsiren || (sy.active() && !unit_waiting);
-                    if (limit > 0.0 && need <= limit)
+                    // A permit is only good while it is this car's reservation and the car is
+                    // first in its lane: a car that cut in ahead takes the same connector, and
+                    // leaving it clears the reservation, so the permit behind would be stale
+                    // and conflicting movements would see the junction free (a left-turner
+                    // and an oncoming car met in the box, grid 1+1 blocked-lane test).
+                    let stale = self.reservations[next as usize] != a.id || !self.is_front(i);
+                    if stale
+                        || (limit > 0.0 && need <= limit)
                         || (hold && need <= 5.0)
                         || (self.tv_block[next as usize] && need <= 8.0)
                     {

@@ -578,10 +578,12 @@ fn civilians_stop_behind_a_stationary_player_and_yield_to_sirens() {
     w.populate();
     let mut ev = Vec::new();
     run(&mut w, 2.0, &mut ev);
-    // Park a (non-player) police car with siren in front of the fastest mid-lane agent.
+    // Park a (non-player) police car with siren in front of the fastest mid-lane agent on a
+    // city street (below 18 m/s: on the sparse highway the car passes the stopped one and
+    // drives off, leaving nobody near it to check the siren with).
     let a = w
         .agents()
-        .filter(|a| a.speed_mps > 8.0)
+        .filter(|a| a.speed_mps > 8.0 && a.speed_mps < 18.0)
         .max_by(|x, y| x.speed_mps.total_cmp(&y.speed_mps))
         .unwrap();
     let f = geom::dir_of_yaw(a.yaw);
@@ -619,19 +621,37 @@ fn civilians_stop_behind_a_stationary_player_and_yield_to_sirens() {
     let mut cop = obstacle;
     cop.siren = true;
     w.set_tracked_vehicles(&[cop]);
-    run(&mut w, 4.0, &mut ev);
+    run(&mut w, 3.9, &mut ev);
+    // (A car spawned in the last moment has not decided anything yet.)
+    let present: std::collections::BTreeSet<_> = w.agents().map(|x| x.id).collect();
+    run(&mut w, 0.1, &mut ev);
     // Within `siren::NEAR_M` of the stopped unit (beyond it, a driver on the other
     // carriageway of the divided highway that has already passed it drives on).
     let near: Vec<_> = w
         .agents()
+        .filter(|x| present.contains(&x.id))
         .filter(|x| geom::dist(geom::xy(x.pos), geom::xy(cop.pos)) < 30.0)
         .collect();
+    for x in &near {
+        let d = geom::sub(geom::xy(x.pos), geom::xy(cop.pos));
+        eprintln!(
+            "NEAR id={} long={:.1} lat={:.1} fwd·f={:.2} v={:.1} y={}",
+            x.id,
+            geom::dot(d, f),
+            d[0] * f[1] - d[1] * f[0],
+            geom::dot(geom::dir_of_yaw(x.yaw), f),
+            x.speed_mps,
+            x.yielding
+        );
+    }
     assert!(!near.is_empty());
     assert!(near.iter().all(|x| x.yielding));
-    // Fast highway cars may still be braking; on average everyone near has slowed right down.
+    // Fast highway cars may still be braking; on average everyone near has slowed down to at
+    // most the speed for passing a stopped unit (a car passing it in the next lane does not
+    // stop).
     let mean = near.iter().map(|x| x.speed_mps).sum::<f32>() / near.len() as f32;
     assert!(
-        mean < 5.0 || near.iter().all(|x| x.brake_lights),
+        mean < wp_world::traffic::siren::NEAR_MPS || near.iter().all(|x| x.brake_lights),
         "{near:?}"
     );
 }
