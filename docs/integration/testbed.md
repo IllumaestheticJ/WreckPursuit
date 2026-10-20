@@ -166,6 +166,7 @@ help lists the live bindings. Defaults (`src/bindings.ts`):
 |---|---|---|
 | steer left / right | A / D, ← / → (ramped) | left stick X (analogue; deadzone 12 %, curve 1.0, both adjustable) |
 | throttle / brake | W / S, ↑ / ↓ (ramped) | RT / LT (analogue, 5 % deadzone) |
+| clutch (used with **clutch: manual**) | unbound — bind any key (ramped in 0.1 s / out 0.3 s) | unbound — bind a button, trigger, stick direction or a **wheel pedal axis** (full range) |
 | handbrake | Space | A or X |
 | shift up / down | Shift / Ctrl | RB / LB |
 | horn | Q | L3 |
@@ -781,3 +782,40 @@ simcli `all_scenarios_pass…` (`blocked_parked_player_vesper`: `traffic_turnaro
 `Captured`). Lead: probably needs re-blessed goldens / re-tuned expectations after round 12's
 merges.
 Changes outside my folders: none.
+
+### Response — round 12c clutch (2026-10-20, lead follow-up, playtest row 59)
+Base: merged `origin/lead/round12` @ `6b9fa40`.
+1. **`clutch` action** (`src/bindings.ts`, analogue): shown in the F9 panel and the F1 help,
+   saved in `wp.bindings.v1`. Default **unbound** on keyboard and pad: every letter key is already
+   a game or debug-layer key (E is the region-energy layer) and the pad's triggers / shoulders
+   are taken. Older saves migrate in place (missing actions take their defaults; e2e checks an
+   old save keeps its other bindings). Wheels: the reader now takes **every connected
+   pad/wheel** (pedals can be a separate device), and the panel binds an axis that rests at one
+   end as a **full-range pedal axis** (`{ axis, dir, full: true }`, 0 at rest → 1 at full press).
+2. `DriverInput.clutch` gets it (keyboard ramp 10/s in, 3.5/s out; pad/pedal raw, 5 % deadzone);
+   the HUD's `clt` bar shows it.
+3. **clutch: automatic / manual** select next to the assist boxes = `AssistProfile.auto_clutch`.
+   Default automatic (today's auto-clutch). Manual uses the player's clutch directly. The choice is
+   remembered with the other assist overrides (`wp.assistOverrides`), applied over every device
+   preset. A HUD badge shows `A-CLU` / `M-CLU`.
+4. e2e (`e2e/gamepad.mjs`, now 23 checks): old save migrates; clutch bound to a key and a pedal
+   axis, survives a reload; manual survives a reload with `auto_clutch` false; pedal half travel →
+   0.47 (5 % deadzone); clutch held + full throttle from standstill → `clt` 1, engine 6 680 rpm,
+   car 1.39 → 1.23 m/s (coasting: drive decoupled); clutch released → 13.7 m/s; automatic restores
+   `auto_clutch`.
+
+**Request to A (vehicle, `docs/integration/vehicle.md`), not edited by me:** the testbed now sends
+`DriverInput.clutch` with `auto_clutch: false` when the player picks manual. Today manual has
+anti-stall slip and no stalling: in 1st gear with the clutch out the car idle-creeps
+(~1.4 m/s), which e2e tolerates. When stall + restart lands, please say how restart is triggered
+(input bit or key), and I will bind it as an action. The testbed needs no other change for
+stalling.
+
+Gates: fmt, clippy `-D warnings`, wasm build, `tsc`, `just web-e2e` (117 PASS incl. weather,
+gamepad, race) all green. `cargo test --workspace --no-fail-fast`: 936 pass, **6 fail, all in Rust
+identical to `origin/lead/round12`** (this round changes no Rust): simcli `goldens_match`,
+wp_race `grid_highway_sprint`, wp_sim `vesper_v2_cars_drive_up_the_kerb_and_along_the_sidewalk`,
+wp_vehicle `front_drive_cars_understeer_mildly`, and the lead's race glue tests in wp_wasm
+`race_tests::{short_sprint_with_ai_runs_to_results…, a_capture_mid_race_is_a_dnf…}` (player
+DNF `FinishWindow`; "never captured"). The vehicle handling test failing too suggests a round-12
+physics change behind most of them. Lead: please take these at the gate; I have not touched them.
