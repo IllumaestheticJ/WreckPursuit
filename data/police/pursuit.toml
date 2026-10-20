@@ -82,7 +82,7 @@ speed_margin = 0.25
 cap_scale = [1.0, 1.1, 1.2, 1.25, 1.3]
 shadow_min_m = [10.0, 6.0, 4.0, 4.0, 4.0]
 shadow_max_m = [18.0, 12.0, 8.0, 8.0, 8.0]
-civilian_clear_m = [25.0, 15.0, 8.0, 4.0, 0.0]
+civilian_clear_m = [25.0, 10.0, 6.0, 3.0, 0.0]
 risk_budget_scale = [1.5, 2.5, 4.0, 6.0, 10.0]
 tactic_contact_cost = 1.0
 pit_max_kmh = [0.0, 100.0, 130.0, 150.0, 170.0]
@@ -145,7 +145,7 @@ chase_red_mps = 13.0
 chase_turn_mps = 9.0
 chase_yield_max_s = 0.6
 chase_decel_mps2 = 7.5
-chase_lateral_margin_m = -0.3
+chase_lateral_margin_m = 0.0
 chase_pass_wait_s = 0.5
 # Push-through (owner playtest row 61): blocked by a stopped civilian or parked car for
 # push_after_s with lights on and no way past, shove it aside below 15 km/h; if that does not

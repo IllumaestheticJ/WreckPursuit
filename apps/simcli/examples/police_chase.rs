@@ -14,8 +14,9 @@
 //!   minute, PIT attempts (a contact while the unit's tactic is `Pit`) and successes (the racer
 //!   turns > 60° or drops below 4 m/s within 3 s), captures within the run;
 //! - **push-through (row 61)**: shoves of blocking civilians / parked cars;
-//! - **buildings (row 66)**: police contacts with walls / buildings / rails and with parked
-//!   props per pursuit minute (`PoliceStats::static_hits`).
+//! - **buildings (row 66)**: police contacts with building footprints and tunnel walls (within
+//!   1.5 m of one; "fast" = at 3 m/s or more) and with parked props per pursuit minute
+//!   (`PoliceStats::static_hits`).
 //!
 //! ```sh
 //! cargo run --release -p simcli --example police_chase -- [vesper|grid] [hour] [runs] [secs] [speed] [levels] [-v]
@@ -37,6 +38,9 @@ const SAMPLE_EVERY_S: f32 = 10.0;
 /// Verbose unit listing every this many seconds (`WP_UNITS`).
 const LIST_EVERY_S: f32 = 2.0;
 const NEAR_M: f32 = 300.0;
+/// A wall contact at this speed or more is driving into it (below: scuffing while turning or
+/// backing out), m/s.
+const FAST_HIT_MPS: f32 = 3.0;
 
 fn scenario(city: &str, hour: f32, seed: u64, secs: f32) -> Scenario {
     let city = match city {
@@ -78,6 +82,7 @@ struct RunReport {
     escaped_s: Option<f32>,
     pushes: u32,
     wall_hits: u32,
+    wall_hits_fast: u32,
     prop_hits: u32,
     wall_hits_all: u32,
     unit_wrecks: u32,
@@ -117,6 +122,10 @@ fn run_once(
     let player = built.ids[0];
     let car = built.cars[&sc.entities[0].car].def.clone();
     let sim = &mut built.sim;
+    if std::env::var("WP_NO_FEELERS").is_ok() {
+        // Row 66 A/B: static feelers off.
+        sim.police_mut().set_feelers(false);
+    }
     let nodes: Vec<[f32; 2]> = sim
         .world()
         .road_graph()
@@ -185,7 +194,10 @@ fn run_once(
         return None;
     };
     if verbose {
-        println!("  pursuit by unit {} at ({:.0}, {:.0})", first_unit.0, p[0], p[1]);
+        println!(
+            "  pursuit by unit {} at ({:.0}, {:.0})",
+            first_unit.0, p[0], p[1]
+        );
     }
     let mut follower = PathFollower::for_vehicle(&car, FollowParams::PURSUIT, speed);
     let mut rep = RunReport {
@@ -225,14 +237,21 @@ fn run_once(
         if tick % 240 == 0 {
             let h = level_heat(level);
             let police = sim.police_mut();
-            if police.racer(player).is_some_and(|r| (r.heat - h).abs() > 1.0) {
+            if police
+                .racer(player)
+                .is_some_and(|r| (r.heat - h).abs() > 1.0)
+            {
                 police.set_heat(player, h);
             }
         }
         if verbose && tick % 240 == 0 && t < 15.0 {
             println!(
                 "  {t:6.1} s  racer at ({:.1}, {:.1}, {:.1}) {:.1} m/s, path {:.0} m",
-                st.pos[0], st.pos[1], st.pos[2], st.speed_mps, drive.length()
+                st.pos[0],
+                st.pos[1],
+                st.pos[2],
+                st.speed_mps,
+                drive.length()
             );
         }
         // A fleeing driver blocked by traffic or a wall backs out and goes again; after three
@@ -246,7 +265,11 @@ fn run_once(
             };
             let _ = sim.set_input(player, input);
         } else {
-            stuck_s = if st.speed_mps.abs() < 1.0 { stuck_s + PHYSICS_DT } else { 0.0 };
+            stuck_s = if st.speed_mps.abs() < 1.0 {
+                stuck_s + PHYSICS_DT
+            } else {
+                0.0
+            };
             if stuck_s > 1.5 {
                 stuck_s = 0.0;
                 tries.retain(|x| t - x < 15.0);
@@ -298,7 +321,9 @@ fn run_once(
         };
         for e in events {
             match e {
-                SimEvent::Contact { a, b, impulse_ns, .. } if a == player || b == player => {
+                SimEvent::Contact {
+                    a, b, impulse_ns, ..
+                } if a == player || b == player => {
                     let other = if a == player { b } else { a };
                     let Some((uid, tactic)) = unit_of(other) else {
                         if verbose && t < 30.0 && impulse_ns > 200.0 {
@@ -344,6 +369,33 @@ fn run_once(
                     }
                     ended = true;
                 }
+                SimEvent::Contact {
+                    a,
+                    b,
+                    point,
+                    normal,
+                    rel_speed,
+                    ..
+                } if verbose
+                    && std::env::var("WP_WALLS").is_ok()
+                    && (b == wp_contracts::WORLD_ENTITY || a == wp_contracts::WORLD_ENTITY)
+                    && rel_speed >= 3.0
+                    && normal[2].abs() < 0.6 =>
+                {
+                    let car = if a == wp_contracts::WORLD_ENTITY {
+                        b
+                    } else {
+                        a
+                    };
+                    if let Some(u) = sim.police().units().iter().find(|u| u.entity == Some(car)) {
+                        println!(
+                            "  {t:6.1} s  WALL unit {} {} {:?} at ({:.0},{:.0},{:.1}) {:.1} m/s rel {:.1}, cmd {:.1} planned {:.1} wall {:.1} shift {:.1} routed {} reversing {} swinging {}",
+                            u.id.0, u.assignment.name(), u.tactic, point[0], point[1], point[2] - u.body.alt_m,
+                            u.body.speed, rel_speed, u.cmd.speed_mps, u.planned_speed, u.avoid.wall.limit_mps, u.avoid.wall.shift_m,
+                            u.chase_route.is_some(), u.unstick.reversing(), u.unstick.swinging()
+                        );
+                    }
+                }
                 SimEvent::Police(PoliceEvent::UnitDisabled { .. }) => rep.unit_wrecks += 1,
                 _ => {}
             }
@@ -358,9 +410,16 @@ fn run_once(
             })
             .count() as u32;
         rep.max_units = rep.max_units.max(in_service);
-        if tick % (LIST_EVERY_S / PHYSICS_DT).round() as u64 == 0 && verbose && std::env::var("WP_UNITS").is_ok() {
-                    for u in police.units().iter().filter(|u| u.assignment.target() == Some(player)) {
-                        println!(
+        if tick % (LIST_EVERY_S / PHYSICS_DT).round() as u64 == 0
+            && verbose
+            && std::env::var("WP_UNITS").is_ok()
+        {
+            for u in police
+                .units()
+                .iter()
+                .filter(|u| u.assignment.target() == Some(player))
+            {
+                println!(
                             "      {t:5.1} unit {} {} {:?} {:.0} m, {:.1} m/s (cmd {:.1}, planned {:.1}, avoid {:.1} {:?}, wall {:.1}), risk {:.1}, track {:.0}/{:.0} routed {}, pos ({:.0},{:.0}) hd ({:.2},{:.2})",
                             u.id.0,
                             u.assignment.name(),
@@ -378,25 +437,34 @@ fn run_once(
                             u.chase_route.is_some(),
                             u.body.pos[0], u.body.pos[1], u.body.heading[0], u.body.heading[1]
                         );
-                        if std::env::var("WP_WHY").is_ok()
-                            && matches!(u.avoid.blocked_by, Some(wp_police::avoid::BlockedBy::Traffic))
-                        {
-                            let q = u.body.pos;
-                            for a in sim.world().agents() {
-                                let d = (a.pos[0] - q[0]).hypot(a.pos[1] - q[1]);
-                                if d < 15.0 {
-                                    println!("          agent at {d:.1} m lod {:?} speed {:.1}", a.lod, a.speed_mps);
-                                }
-                            }
-                            for pr in sim.world().static_props() {
-                                let d = (pr.pos[0] - q[0]).hypot(pr.pos[1] - q[1]);
-                                if d < 10.0 {
-                                    println!("          prop at {d:.1} m ({:.1}, {:.1}) half {:?}", pr.pos[0], pr.pos[1], pr.half_extents);
-                                }
-                            }
+                if std::env::var("WP_WHY").is_ok()
+                    && matches!(
+                        u.avoid.blocked_by,
+                        Some(wp_police::avoid::BlockedBy::Traffic)
+                    )
+                {
+                    let q = u.body.pos;
+                    for a in sim.world().agents() {
+                        let d = (a.pos[0] - q[0]).hypot(a.pos[1] - q[1]);
+                        if d < 15.0 {
+                            println!(
+                                "          agent at {d:.1} m lod {:?} speed {:.1}",
+                                a.lod, a.speed_mps
+                            );
+                        }
+                    }
+                    for pr in sim.world().static_props() {
+                        let d = (pr.pos[0] - q[0]).hypot(pr.pos[1] - q[1]);
+                        if d < 10.0 {
+                            println!(
+                                "          prop at {d:.1} m ({:.1}, {:.1}) half {:?}",
+                                pr.pos[0], pr.pos[1], pr.half_extents
+                            );
                         }
                     }
                 }
+            }
+        }
         if tick % (SAMPLE_EVERY_S / PHYSICS_DT).round() as u64 == 0 {
             let k = (t / SAMPLE_EVERY_S).round() as usize;
             if k < SAMPLES {
@@ -432,20 +500,27 @@ fn run_once(
             break;
         }
     }
+    let walls = wall_segments(sim.world());
     let police = sim.police();
     for h in &police.stats().static_hits[hits_before..] {
-        if h.kind == StuckCause::Wall {
+        let on_building = walls
+            .iter()
+            .any(|w| seg_dist(w[0], w[1], h.pos) <= BUILDING_HIT_M);
+        if on_building {
             rep.wall_hits_all += 1;
         }
         if !h.pursuing {
             continue;
         }
         match h.kind {
-            StuckCause::Wall => rep.wall_hits += 1,
+            StuckCause::Wall | StuckCause::Kerb | StuckCause::JunctionStep if on_building => {
+                rep.wall_hits += 1;
+                rep.wall_hits_fast += (h.speed_mps >= FAST_HIT_MPS) as u32;
+            }
             StuckCause::ParkedProp => rep.prop_hits += 1,
             _ => {}
         }
-        if verbose && matches!(h.kind, StuckCause::Wall | StuckCause::ParkedProp) {
+        if verbose && (on_building || h.kind == StuckCause::ParkedProp) {
             println!(
                 "  {:6.1} s  unit {} hit {:?} at ({:.0}, {:.0}) at {:.1} m/s",
                 h.at.secs(),
@@ -459,6 +534,48 @@ fn run_once(
     }
     rep.pushes = push_count(police) - pushes_before;
     Some(rep)
+}
+
+/// A static contact this close to a building footprint or tunnel wall is a building hit, m.
+const BUILDING_HIT_M: f32 = 1.5;
+
+/// Building footprint edges and tunnel walls of the city (row 66's "buildings").
+fn wall_segments(world: &wp_world::World) -> Vec<[[f32; 2]; 2]> {
+    let net = world.network();
+    let mut v = Vec::new();
+    for b in &net.buildings {
+        let o = &b.footprint;
+        for k in 0..o.len() {
+            v.push([o[k], o[(k + 1) % o.len()]]);
+        }
+    }
+    for c in &net.covered {
+        for w in c.centre.windows(2) {
+            let (a, b) = ([w[0][0], w[0][1]], [w[1][0], w[1][1]]);
+            let d = [b[0] - a[0], b[1] - a[1]];
+            let l = (d[0] * d[0] + d[1] * d[1]).sqrt().max(1e-6);
+            let n = [-d[1] / l * c.half_width_m, d[0] / l * c.half_width_m];
+            for sgn in [1.0, -1.0] {
+                v.push([
+                    [a[0] + sgn * n[0], a[1] + sgn * n[1]],
+                    [b[0] + sgn * n[0], b[1] + sgn * n[1]],
+                ]);
+            }
+        }
+    }
+    v
+}
+
+/// Distance from `p` to the segment `a`-`b`, m.
+fn seg_dist(a: [f32; 2], b: [f32; 2], p: [f32; 2]) -> f32 {
+    let d = [b[0] - a[0], b[1] - a[1]];
+    let l2 = d[0] * d[0] + d[1] * d[1];
+    let t = if l2 > 0.0 {
+        (((p[0] - a[0]) * d[0] + (p[1] - a[1]) * d[1]) / l2).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    ((a[0] + t * d[0] - p[0]).powi(2) + (a[1] + t * d[1] - p[1]).powi(2)).sqrt()
 }
 
 /// Push-through shoves so far (row 61).
@@ -490,7 +607,7 @@ fn main() {
             println!("run seed {seed}");
             if let Some(r) = run_once(&city, hour, seed, secs, speed, level, verbose) {
                 println!(
-                    "  first contact {:?}, contacts {}, PIT {}/{}, rams {}, captured {:?}, escaped {:?}, walls {} (all units {}), props {}, pushes {}, wrecks {}, racer re-placed {}, near {:?}",
+                    "  first contact {:?}, contacts {}, PIT {}/{}, rams {}, captured {:?}, escaped {:?}, walls {} (fast {}, all units {}), props {}, pushes {}, wrecks {}, racer re-placed {}, near {:?}",
                     r.first_contact_s.map(|v| (v * 10.0).round() / 10.0),
                     r.contacts,
                     r.pit_success,
@@ -499,6 +616,7 @@ fn main() {
                     r.captured_s.map(|v| v.round()),
                     r.escaped_s.map(|v| v.round()),
                     r.wall_hits,
+                    r.wall_hits_fast,
                     r.wall_hits_all,
                     r.prop_hits,
                     r.pushes,
@@ -512,7 +630,9 @@ fn main() {
         table.push((level, reps));
     }
     println!();
-    println!("Units within {NEAR_M} m of the racer (mean over runs still going), t = 0, 10, … 120 s:");
+    println!(
+        "Units within {NEAR_M} m of the racer (mean over runs still going), t = 0, 10, … 120 s:"
+    );
     for (level, reps) in &table {
         let row: Vec<String> = (0..SAMPLES)
             .map(|k| {

@@ -3,10 +3,11 @@
 //! Heat/bounty, dispatch, day/night presence, patrol & pursuit AI, police tools and the captain
 //! interface (owned by workstream 06).
 //!
-//! Design pillars: chases are slow, calculated and lethal to both sides. Police win by
-//! containment and attrition (shadowing, box-ins, rolling blocks, spikes and roadblocks ahead of
-//! the predicted path, a helicopter keeping visual), racers win by breaking line of sight,
-//! reaching a safehouse or disabling pursuers. Day vs night differences are **tables**
+//! Design pillars: chases are lethal to both sides. Police drive at the car's limit and
+//! escalate by wanted level (box-ins, PIT, rams, rolling blocks, junction blocks, spikes and
+//! roadblocks ahead of the predicted path, backup converging on the predicted position, a
+//! helicopter keeping visual); racers win by breaking line of sight, reaching a safehouse or
+//! disabling pursuers. Day vs night differences are **tables**
 //! (`data/police/*.toml`, keyed by `DayPhase`), never code branches.
 //!
 //! Entry point: [`PoliceSystem::step`], called once per physics tick by `wp_sim`.
@@ -18,6 +19,7 @@
 //! - [`dispatch`]: patrol pool, incidents, reinforcements, helicopter, AI captain.
 //! - [`pursuit`]: tactics (shadow, box-in, PIT, rolling block, intercept, disengage) and driving.
 //! - [`unit`]: unit state and the built-in kinematic driver.
+//! - [`walls`]: static feelers against building footprints and tunnel walls.
 //! - [`tools`]: roadblocks, spike strips, radar detector and scanner queries.
 //! - [`captain`]: captain commands, validation and the captain view.
 //! - [`events`]: re-exports of the contract `PoliceEvent` (`SimEvent::Police`).
@@ -228,6 +230,10 @@ pub struct StaticHit {
     pub speed_mps: f32,
     /// The unit was pursuing or intercepting a racer.
     pub pursuing: bool,
+    /// The contact is on a building footprint or tunnel wall ([`walls::WallIndex`], within
+    /// 1.5 m): what row 66 counts. Other `Wall` contacts are steps, kerbs and rails.
+    #[serde(default)]
+    pub building: bool,
 }
 
 /// Counters for tests, tuning and the README perf/behaviour tables.

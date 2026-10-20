@@ -84,6 +84,26 @@ impl WallIndex {
         self.segs.is_empty()
     }
 
+    /// Distance from `p` to the nearest wall segment within one grid cell, m (`None`: no wall
+    /// that close).
+    pub fn nearest(&self, p: [f32; 2]) -> Option<f32> {
+        let (cx, cy) = cell(p);
+        let mut best: Option<f32> = None;
+        for x in cx - 1..=cx + 1 {
+            for y in cy - 1..=cy + 1 {
+                for &k in self.grid.get(&(x, y)).map_or(&[][..], |v| v.as_slice()) {
+                    let [a, b] = self.segs[k as usize];
+                    let (_, q) = crate::graph::closest_on_segment(a, b, p);
+                    let d = crate::graph::dist(q, p);
+                    if best.is_none_or(|bd| d < bd) {
+                        best = Some(d);
+                    }
+                }
+            }
+        }
+        best
+    }
+
     /// Distance along the ray from `from` in unit direction `dir` to the first wall within
     /// `max_m`, m.
     pub fn ray(&self, from: [f32; 2], dir: [f32; 2], max_m: f32) -> Option<f32> {
@@ -210,6 +230,8 @@ mod tests {
         let w = square_building();
         let d = w.ray([0.0, 0.0], [0.0, 1.0], 100.0).unwrap();
         assert!((d - 25.0).abs() < 1e-3);
+        assert!((w.nearest([0.0, 24.0]).unwrap() - 1.0).abs() < 1e-3);
+        assert!(w.nearest([0.0, -40.0]).is_none());
         assert!(w.ray([0.0, 0.0], [0.0, 1.0], 20.0).is_none());
         assert!(w.ray([20.0, 0.0], [0.0, 1.0], 100.0).is_none());
     }

@@ -684,6 +684,7 @@ impl PoliceSystem {
             u.assignment,
             Assignment::Pursue { .. } | Assignment::Intercept { .. }
         );
+        let building = self.walls.nearest(p).is_some_and(|d| d <= 1.5);
         self.stats.static_hits.push(crate::StaticHit {
             unit: u.id,
             at: now,
@@ -691,6 +692,7 @@ impl PoliceSystem {
             kind,
             speed_mps: u.body.speed,
             pursuing,
+            building,
         });
     }
 

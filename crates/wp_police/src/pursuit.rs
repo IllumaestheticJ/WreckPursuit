@@ -4,20 +4,17 @@
 //! camera or helicopter sees the racer) extended by the racer's predicted path. Units therefore
 //! lose the scent when line of sight is lost, which is what makes escapes possible.
 //!
-//! Speed: pursuers drive at `min(target_speed × (1 + margin), pursuit_cap[phase])` and plan
-//! corners with `pursuit_cornering_g`; time spent above `risk.lateral_g`, near misses and
-//! collisions drain a **risk budget**; once it is spent the unit only shadows, at a gentler
-//! cornering g.
-//!
+//! Speed and tactics escalate by wanted level (`[chase]` in `data/police/pursuit.toml`, owner
+//! playtest row 63): corners at the car's limit, late braking, junctions and reds taken fast.
 //! Tactics per pursued racer (re-evaluated at think rate, closest pursuer first):
-//! - `BoxIn` — racer below `boxin_max_kmh`, ≥ 2 pursuers with budget within 60 m: rear,
-//!   front-left, front-right slots.
-//! - `Pit` — racer below `pit_max_kmh`, ≥ `pit_min_straight_m` of straight road ahead,
-//!   lead unit has budget and is off cooldown.
-//! - `RollingBlock` — a unit that got ahead of the racer slows in front of it.
-//! - `Shadow` — everyone else: hold 25–40 m back (further for each extra unit).
+//! - `BoxIn` — racer below `boxin_max_kmh`, ≥ 2 pursuers with budget within 60 m.
+//! - `Pit` (L2+) — lead unit, racer below `chase.pit_max_kmh[level]`, straight-ish road ahead.
+//! - `Ram` — rear quarter (L2+), hard and side slam (L3+); the second unit flanks alongside.
+//! - `RollingBlock` (L3+) — a unit that got ahead of the racer slows in front of it.
+//! - `Shadow` — everyone else: tail `chase.shadow_*_m[level]` back.
 //! - `Intercept` (assignment) — units off the trail or far behind route over the road graph to
-//!   the racer's predicted position 10–20 s out (lane-legal shortest path).
+//!   the racer's predicted position 10–20 s out; at L3+ they park across the junction ahead.
+//! - Search — racer out of sight: units spread over the junctions around its last known spot.
 //! - Disengage — health below `disengage_health[mode]` or a bent wheel / flat: pull over
 //!   (handled in `dispatch`).
 
@@ -61,6 +58,9 @@ const INTERCEPT_LIMIT_FACTOR: f32 = 2.2;
 /// An interceptor faster than this keeps its route rather than switch to one that starts with
 /// a turn-around, m/s.
 const INTERCEPT_KEEP_MPS: f32 = 6.0;
+
+/// PIT needs the racer's path ahead to stay within ≈ 15° of its line now (cosine).
+const PIT_STRAIGHT_COS: f32 = 0.966;
 
 /// A searching unit moves on to the next junction around the last known position this often, s.
 const SEARCH_SWEEP_S: f32 = 10.0;
@@ -1212,17 +1212,13 @@ impl PoliceSystem {
                     active.push((gap, i));
                 }
             }
+            // Straight road ahead of the racer: its line now and `pit_min_straight_m` on point
+            // the same way (the breadcrumb trail is too noisy for a curvature test).
             let straight_ahead = {
-                let mut ok = true;
-                let mut d = 0.0;
-                while d <= ch.pit_min_straight_m {
-                    if track.radius_at(racer_s + d, 10.0) < 300.0 {
-                        ok = false;
-                        break;
-                    }
-                    d += 10.0;
-                }
-                ok
+                let dir = |s0: f32| normalize(sub(track.point_at(s0 + 5.0), track.point_at(s0)));
+                let (d0, d1) = (dir(racer_s), dir(racer_s + ch.pit_min_straight_m));
+                let mid = dir(racer_s + 0.5 * ch.pit_min_straight_m);
+                dot(d0, d1) > PIT_STRAIGHT_COS && dot(d0, mid) > PIT_STRAIGHT_COS
             };
             // Civilians close to the racer hold back deliberate contact (less so at higher
             // levels). Parked props (no entity, not moving) are not people.
@@ -1259,7 +1255,7 @@ impl PoliceSystem {
                 let has_budget = u.risk > budget_floor;
                 let ready = now >= u.pit_ready;
                 // Left (+) or right (-) of the racer's line, fixed per unit.
-                let side = if u.id.0 % 2 == 0 { 1.0 } else { -1.0 };
+                let side = if u.id.0.is_multiple_of(2) { 1.0 } else { -1.0 };
                 // Close and in sight: chase the racer's own line. Otherwise drive the roads
                 // (row 66: following the trail round a corner cuts it through the building).
                 let close = dist(u.body.pos, rp) < CLOSE_LOS_M
@@ -1342,15 +1338,19 @@ impl PoliceSystem {
                         let (lat, sp) = if lined_up {
                             (side * 0.3, v_r + 2.0)
                         } else {
-                            let closing = (0.9 * (gap - ch.pit_turn_in_gap_m)).clamp(0.0, 6.0);
+                            let closing = (0.9 * (gap - ch.pit_turn_in_gap_m)).clamp(0.0, 10.0);
                             (side * ch.pit_side_offset_m, v_r + closing)
                         };
                         (offset_track(&track, lat), sp.min(cap_abs + 6.0))
                     }
                     Tactic::Ram(kind) => {
+                        // Close fast from farther back, at the ram's closing speed at the end.
+                        let approach = (0.5 * gap).max(0.0);
                         let (lat, sp) = match kind {
-                            RamKind::RearQuarter => (side * 0.9, v_r + ch.ram_closing_mps[0]),
-                            RamKind::Hard => (0.0, v_r + ch.ram_closing_mps[2]),
+                            RamKind::RearQuarter => {
+                                (side * 0.9, v_r + ch.ram_closing_mps[0].max(approach))
+                            }
+                            RamKind::Hard => (0.0, v_r + ch.ram_closing_mps[2].max(approach)),
                             RamKind::Side => {
                                 // Flank: alongside the racer; from the hard-ram level slam
                                 // into it once level with it.
