@@ -349,11 +349,31 @@ fn junction(c: V3, ends: &[End], paths: &[V2]) -> Option<Patch> {
     for (k, e) in sorted.iter().enumerate() {
         let next = sorted[(k + 1) % n];
         ring.push(e.cw);
-        ring.extend(envelopes[k].iter().map(|p| [p[0], p[1], z_at(*p)]));
+        let (rc, rd) = (
+            e.cw[2] - z_at(geom::xy(e.cw)),
+            e.ccw[2] - z_at(geom::xy(e.ccw)),
+        );
+        let m = envelopes[k].len();
+        ring.extend(envelopes[k].iter().enumerate().map(|(i, p)| {
+            let f = (i + 1) as f32 / (m + 1) as f32;
+            [p[0], p[1], z_at(*p) + rc + (rd - rc) * f]
+        }));
         ring.push(e.ccw);
+        // Kerb heights: the plane, plus the corners' own offsets from it blended along the
+        // curve, so the rim meets both corners exactly.
+        let (pa, pb) = (geom::xy(e.ccw), geom::xy(next.cw));
+        let (ra, rb) = (e.ccw[2] - z_at(pa), next.cw[2] - z_at(pb));
+        let mut along = vec![0.0f32];
+        let mut prev = pa;
+        for p in curves[k].iter().chain(std::iter::once(&pb)) {
+            along.push(along[along.len() - 1] + geom::dist(prev, *p));
+            prev = *p;
+        }
+        let total = along[along.len() - 1].max(1e-6);
         let mut rim = vec![e.ccw];
-        for p in &curves[k] {
-            let q = [p[0], p[1], z_at(*p)];
+        for (i, p) in curves[k].iter().enumerate() {
+            let f = along[i + 1] / total;
+            let q = [p[0], p[1], z_at(*p) + ra + (rb - ra) * f];
             ring.push(q);
             rim.push(q);
         }
@@ -415,6 +435,7 @@ fn kerb_curve(c: V2, a: &End, b: &End) -> Vec<V2> {
         if s < -0.05 && u < -0.05 && cos_beta > -0.966 && gap < std::f32::consts::PI {
             let k = geom::add(p, geom::scale(a.out, s));
             if a.highway || b.highway {
+                // No kerb on a highway edge: pave up to where the edges meet.
                 return vec![k];
             }
             // Interior angle β at k; the fillet's deepest point lies t·(1 − sin β/2)/cos β/2
@@ -456,10 +477,15 @@ fn kerb_curve(c: V2, a: &End, b: &End) -> Vec<V2> {
     if steady {
         return pts[1..pts.len() - 1].to_vec();
     }
-    // An arc around the centre, radius going from |p| to |q|.
+    centre_arc(c, p, q, gap)
+}
+
+/// Interior points of an arc around `c` from `p` to `q` (counter-clockwise, `gap` radians),
+/// its radius going from |p| to |q|, in steps of at most 7.5°.
+fn centre_arc(c: V2, p: V2, q: V2, gap: f32) -> Vec<V2> {
     let (rp, rq) = (geom::dist(p, c), geom::dist(q, c));
     let a0 = angle_around(c, p);
-    let steps = ((gap / (std::f32::consts::PI / 8.0)).ceil() as usize).max(2);
+    let steps = ((gap / (std::f32::consts::PI / 24.0)).ceil() as usize).max(2);
     (1..steps)
         .map(|i| {
             let t = i as f32 / steps as f32;
