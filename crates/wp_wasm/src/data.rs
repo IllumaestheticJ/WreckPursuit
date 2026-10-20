@@ -42,21 +42,30 @@ pub fn load_car(car_id: &str) -> Result<LoadedCar, String> {
         .find(|(id, _)| *id == car_id)
         .ok_or_else(|| format!("unknown car {car_id:?} (known: {:?})", car_ids()))?;
     let def = wp_contracts::parse_vehicle_def(car_id, text).map_err(|e| e.to_string())?;
+    let lattices = files("lattices")
+        .filter(|(id, _)| *id == def.lattice_id)
+        .map(|(id, text)| wp_contracts::parse_lattice_def(id, text).map_err(|e| e.to_string()))
+        .collect::<Result<Vec<_>, _>>()?;
+    resolve_with(def, &lattices)
+}
+
+/// Resolve a (possibly modified) definition and lattice against every embedded tire and
+/// material, e.g. a car with mods applied (mods may switch to tires the stock car doesn't use).
+pub fn resolve_with(
+    def: wp_contracts::VehicleDef,
+    lattices: &[wp_contracts::LatticeDef],
+) -> Result<LoadedCar, String> {
     let mut tires: BTreeMap<String, TireDef> = BTreeMap::new();
     for (id, text) in files("tires") {
         let t = wp_contracts::parse_tire_def(id, text).map_err(|e| e.to_string())?;
         tires.insert(t.id.clone(), t);
     }
-    let lattices = files("lattices")
-        .filter(|(id, _)| *id == def.lattice_id)
-        .map(|(id, text)| wp_contracts::parse_lattice_def(id, text).map_err(|e| e.to_string()))
-        .collect::<Result<Vec<_>, _>>()?;
     let mut materials: BTreeMap<String, MaterialDef> = BTreeMap::new();
     for (id, text) in files("materials") {
         let m = wp_contracts::parse_material_def(id, text).map_err(|e| e.to_string())?;
         materials.insert(m.id.clone(), m);
     }
-    wp_contracts::resolve_car(def, &tires, &lattices, &materials).map_err(|e| e.to_string())
+    wp_contracts::resolve_car(def, &tires, lattices, &materials).map_err(|e| e.to_string())
 }
 
 /// Menu stat bars for every embedded car: the embedded `data/stats/cars.json`, with any car
