@@ -85,7 +85,11 @@ profile was needed; the AI keeps `ai()`.
 7. Recovery: head-on reverse (3 s, opposing lanes or facing a standing car), reverse capped
    at 3 m/s and aborted when anything is close behind, reversing racers flagged unstable,
    finished cars park before the corridor ends, done racing past `RaceConfig::finish_m`.
-8. `wp_race`: `AiEntrants` sets `finish_m` (judged finish on the run-off) and
+8. Parked police: a sim vehicle standing within 2.5 m of where it stopped (below 1 m/s) for
+   8 s counts as parked and is squeezed past at a crawl with 0.2 m clearance (normal by
+   15 m/s), 0.15 m nearer the road edge (Hollins: a responding unit stopped on the hairpin
+   held three racers for the rest of the race; follow-up after the round-12 tip merge).
+9. `wp_race`: `AiEntrants` sets `finish_m` (judged finish on the run-off) and
    `max_half_width_m` (judged corridor + rule margin − 0.5 m: a risk-taker passing on the far
    side of Loop 9 was DQ'd `LeftCorridor`).
 
@@ -211,8 +215,9 @@ unknown to it); goldens blessed (`[bless]` commit 0cd5995f).
 
 - Traffic still dominates open-road race times: two civilians side by side on both lanes of
   the grid highway (≈ 20 s of every grid-sprint run) cannot be passed legally; world stand-offs
-  (the Lantern 4-way junction, a responding police unit across a Hollins hairpin) hold racers
-  until they clear. Reported to D / E in `opponent.md`.
+  (the Lantern 4-way junction, a responding police unit angled across a Hollins hairpin with no
+  room either side — seeds 3–5 on the round-12 tip, ~40 s) hold racers until they clear.
+  Reported to D / E in `opponent.md`.
 - The ideal's acceleration model (mean 0–100 km/h acceleration up to 22 m/s, power-limited
   above) is optimistic for launches and climbs; a measured acceleration curve per car in the
   capability table would make `track` losses honest.

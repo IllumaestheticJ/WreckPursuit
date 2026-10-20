@@ -13,7 +13,7 @@
  */
 import { decodeMapDynamic, EMPTY_FRAME, type MapFrame, type MapStatic, type MapUnit } from "./data";
 import { CITY_NAMES, districtName, zoneAt } from "./districts";
-import { drawPlayer, drawPoi, drawTool, drawUnit, readPalette, ROAD_COLOR, DECK_CASING } from "./draw";
+import { drawPlayer, drawPoi, drawRacer, drawTool, drawUnit, readPalette, ROAD_COLOR, DECK_CASING } from "./draw";
 import { FullMapRenderer, type FullMapStats } from "./FullMap";
 import { MinimapRenderer, type MinimapStats } from "./Minimap";
 import { speedIn, unitLabel, type SpeedUnits } from "../menu/settings";
@@ -322,6 +322,9 @@ export class MapHud {
     };
     const now = 0;
     row("You", (c, s) => drawPlayer(c, s / 2, s / 2, 0, s * 0.36, pal));
+    row("Race opponent (position; leader ringed)", (c, s) =>
+      drawRacer(c, { id: 0, x: 0, y: 0, yaw: 0, position: 2, finished: false, dnf: false, captured: false, dq: false, player: false }, s * 0.38, s * 0.58, 0, s * 0.26, pal),
+    );
     row("Police, pursuing / responding (blinks)", (c, s) => {
       drawUnit(c, FAKE_UNIT({ id: 0, lights: true, state: "pursue" }), s * 0.3, s / 2, 0, s * 0.18, now, pal);
       drawUnit(c, FAKE_UNIT({ id: 1, lights: true, state: "pursue" }), s * 0.72, s / 2, 0, s * 0.18, 140, pal);
