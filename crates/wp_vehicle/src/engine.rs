@@ -89,9 +89,15 @@ impl Engine {
             };
             self.boost += (target - self.boost) * k;
         }
+        // Below idle combustion falters: torque fades to nothing at half the idle speed, so
+        // a clutch that drags the engine down stalls it (owner row 59; the automatic clutch's
+        // anti-stall keeps it above idle).
+        let half_idle = 0.5 * self.def.idle_rpm;
+        let lug = ((rpm - half_idle) / half_idle.max(1.0)).clamp(0.0, 1.0);
         let full = self.curve_torque(rpm)
             * (1.0 + self.extras.boost_torque_scale * self.boost)
-            * power_scale.max(0.0);
+            * power_scale.max(0.0)
+            * lug;
         let braking = self.def.engine_brake_nm * (rpm / self.def.redline_rpm).clamp(0.1, 1.2);
         thr * full - (1.0 - thr) * braking
     }

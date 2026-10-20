@@ -882,9 +882,71 @@ except the two below), goldens after the `[bless]` (hashes all match).
 - `world_traffic_soak_observer` (`traffic_agents_min` 313, want ≥ 350) fails on
   `lead/round12` too (310); it is a `slow` scenario, so only `simcli run` shows it.
 
-**Received after the round-12b work (lead messages, 2026-10-20), not started here:** rows 56
-(handbrake opens the clutch in semi-auto/automatic so the rears lock), 57 (countersteer help as
-a 0–100 % slider with `wp_wasm` set/get and a testbed slider) and 59 (manual clutch: pedal slip,
-stall + re-crank, `set_clutch_mode` in `wp_wasm`). They are new owner requests beyond round 12b
-and 57/59 need `wp_wasm` and `apps/testbed-web` changes; waiting for them to be assigned
-through this doc (a "Lead feedback" section) before starting.
+## Owner rows 56 / 57 / 59 / 72 (A, 2026-10-20) — handbrake turns, countersteer slider, clutch
+From the lead's messages (owner requests), started after the round-12b push on the owner's /
+user's go-ahead. Same in Arcade and Simulation (nothing reads `DamageMode`).
+
+**Row 72 — handbrake turns.** Measured first (`--example handbrake`: 60 km/h, 50 % steer, 0.6 s
+pull, heading change after 1.5 s): keyboard **36–46°** (no more than without the handbrake),
+gamepad 53–72°, wheel 53–111°. Causes: (a) the handbrake could not lock the rears on most cars
+(rear wheels still at 14–25 rad/s after the pull; `handbrake_rear_nm` below the static lock
+torque) → car data raised to ≥ 1.5 × it (`cars.md` → "Rows 56 / 72"); (b) the keyboard's slide
+gyro and countersteer blend fought the rotation → removed (row 57 below); (c) keyboard ESC
+braked against it → ESC stands down while the handbrake is held and 0.5 s after. Locked rear
+tyres' lateral force: not changed — once the rears actually locked, the unassisted wheel
+preset rotated 91–113°, so a locked tyre does give up its side grip in the model. AWD: the handbrake
+declutch (row 56) decouples the whole driveline, so the fronts no longer pull the rears.
+After: **94–120°** on keyboard, gamepad and wheel for RWD / FWD / AWD (rampart_50, hakone_gt,
+kestrel_ts, vireo_xs, lindwurm_4t, sentinel_wolfhound); without the handbrake 42–51° with
+≤ 8° body slip (planted). Tests: `tests/handbrake.rs`.
+
+**Row 57 — countersteer slider, rebuilt Wreckfest-style** (lead's design message). Slider =
+`AssistProfile::countersteer_help` × 100 (no contract change). Released keys / stick in its
+deadzone: the front wheels go to `1 − (1 − h)²` of the front axle's direction of travel
+(0 % plain centring, 50 % 0.75, 100 % full) with the rack up to `1 + 4h` × faster. Never while
+the driver steers, never during the handbrake hold; no yaw torque from any assist (the slide
+gyro is deleted). The speed-sensitive lock still applies, but opens toward the needed
+countersteer when the driver steers toward the side the rear slides to (grip cornering
+unchanged). Wheel preset (help 0, sensitivity 0): bit-identical (pinned hashes unchanged).
+Release-the-keys power exits recovered of 6 (rampart / lucciola / hakone / sperber), slider
+0 → 50 → 100: keyboard TCS/ESC off 0/1/1/3 → 1/0/4/3 → 6/4/5/6; gamepad 2/2/2/3 → 3/3/4/5 →
+6/6/6/6; keyboard with TCS on 6/6 everywhere. Countersteering yourself at 110/130 km/h: caught
+4/4 at 50 % and 100 % on keyboard and gamepad. A tapped key on a 40 m circle wobbles no more
+with the help on (yaw-rate spread 0.18–0.25 rad/s vs 0.21–0.25 off). Trade-off to note: the old
+gyro recovered gamepad power exits at its 30 % default; the pure alignment needs ~100 % to
+recover all of them with full throttle held.
+- Exposed: `wp_wasm::set_countersteer(entity, percent)` / `countersteer(entity)`; testbed: a
+  "countersteer" slider in the assist row (0–100, step 5), saved in `wp.assistOverrides` as
+  `countersteer_help` (0..1), HUD help text updated. Testbed files touched (C's): `index.html`,
+  `src/main.ts`, `src/hud.ts`, `src/wasm/sim.ts` (checkbox handlers now select
+  `input[type=checkbox]` so the slider is not treated as one).
+- **Lead (contracts), request #12:** the presets' `countersteer_help` (keyboard 0.6, gamepad
+  0.3) and its doc comment ("fraction of the estimated countersteer angle…") predate the
+  redesign. Suggest documenting it as "self-aligning countersteer slider 0..=1" and, if the
+  owner wants Wreckfest's default, gamepad 0.5.
+
+**Row 56 — handbrake declutch.** With an automatic clutch (any semi-auto or automatic preset)
+or a converter box, `handbrake > 0.1` decouples the driveline (as if the clutch pedal were
+down): the rears lock, the engine idles, the automatic gearbox holds its gear, and on release
+the clutch re-engages through the normal automatic-clutch logic once the driven wheels have
+spun back up. A manual clutch pedal is never overridden. Measured (`metrics::handbrake_pull`,
+60 km/h in 3rd, 1 s pull, release with half throttle; 7 cars × automatic / semi-auto / manual
+pedal): rears stop in **0.12–0.15 s**, engine ≥ 1150 rpm throughout (idles 600–800), 3rd kept,
++0.3–1.7 m/s in the second after release. Test: `tests/handbrake.rs`.
+
+**Row 59 — manual clutch.** `auto_clutch: false` = the clutch input is the pedal: engagement
+`1 − pedal`, slip below full lock, **no anti-stall**, engine torque fades below idle (to 0 at
+half idle), and the engine **stalls** below 0.5 × idle with the clutch engaged in gear; a
+stalled engine makes no torque; pressing the pedal ≥ 0.9 re-cranks it to idle (bump start when
+rolled up to idle with the clutch in). The automatic clutch keeps its anti-stall and never
+stalls. Tests: `tests/clutch.rs` (stop in 2nd → stall; throttle does nothing; pedal → idle;
+3rd-gear pull-away → stall; pedal ramp launch never stalls; automatic never stalls);
+`tests/behaviour.rs::manual_gearbox_and_clutch` now launches with a pedal ramp (it relied on
+anti-stall). Letting the clutch up in 1st at idle on the flat creeps away without stalling.
+- **For C (testbed clutch binding):** `wp_wasm::set_clutch_mode(entity, "auto" | "manual")` /
+  `clutch_mode(entity)` (sets `AssistProfile::auto_clutch`; a replay op), and
+  `engine_stalled(entity)` for a HUD "STALLED — press clutch" hint. The clutch value already
+  rides in `set_input` (packed slot 4, 0 = up, 1 = pressed).
+
+**Snapshot** format 7 (handbrake hold + stall flag). **Perf:** unchanged (no new per-tick
+queries). **Goldens:** see the `[bless]` commit.

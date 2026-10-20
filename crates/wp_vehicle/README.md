@@ -20,12 +20,12 @@ with assists and unfiltered on a wheel. Deterministic, 240 Hz with 2 sub-steps.
 | `drivetrain.rs` | gearbox (manual/auto: load-based schedule, kickdown, corner hold, rev-matched clutch shifts, auto-reverse), automatic clutch / launch control, torque converter |
 | `diff.rs` | differentials, axle + AWD centre: open, clutch-pack LSD (1 / 1.5 / 2-way), viscous, helical (torque-sensing), active e-diff, locked; per-car setups from `data/cars/differentials.toml` |
 | `brakes.rs` | bias, ABS (~15 Hz release cycle) |
-| `steering.rs` | slip-targeted lock + rack rate (keyboard/gamepad), countersteer help, Ackermann, toe, damage pull, FWD torque steer |
+| `steering.rs` | slip-targeted lock + rack rate (keyboard/gamepad), self-aligning countersteer help (0–100 % slider), countersteer lock, Ackermann, toe, damage pull, FWD torque steer |
 | `assists.rs` | pedal filters, TCS (throttle cut + brake-based traction control), ESC (lagged ~1°/g reference) |
 | `aero.rs` | drag, axle lift/downforce |
 | `ffb.rs` | rack torque (aligning torque + caster trail), road rumble, damper |
 | `rig.rs` | single-car Rapier test rig (same per-tick sequence as `wp_sim`) |
-| `slide.rs` | slide-control assists for keyboard/gamepad: car slide class, gyro yaw damper, slide throttle |
+| `slide.rs` | slide throttle for keyboard/gamepad (and the car slide class it uses) |
 | `metrics.rs` | 0–100, 100–0, skidpad + understeer gradient, step steer, lift-off, power-on, power-oversteer onset, power-oversteer exit, split-µ launch, corner exit, top speed |
 | `ride.rs` | ride / launch tests: axle ride frequency + damping, heave/pitch kick, kerb strike, slide into kerb, crest, side impact |
 | `handling.rs` | driver-facing handling tests through a real `AssistProfile`: ramp steer, constant radius, step steer, slalom, city corner; keyboard tapping / analog drivers |
@@ -55,8 +55,15 @@ load transfer comes from geometry (CG height, track, wheelbase), not from script
 inertia is reflected onto the driven wheels (`I_e·G²`); slipping, it transmits ±capacity. The
 automatic clutch is a launch controller (engagement rises with engine rpm toward a
 throttle-dependent launch rpm; TCS trims *clutch* torque while slipping, engine torque once
-locked). An anti-stall term stops the clutch dragging the engine below 60% of idle (no stall
-model).
+locked). For the automatic clutch an anti-stall term stops the clutch dragging the engine
+below 60% of idle. With a **manual clutch** (`auto_clutch: false`, owner row 59) the pedal is the
+engagement (`1 − pedal`; it slips below full engagement), there is no anti-stall, engine torque
+fades below idle to nothing at half idle, and the engine **stalls** under `STALL_FRAC` (0.5) ×
+idle with the clutch engaged in gear (stopping in gear, pulling away in too high a gear;
+letting the clutch up in 1st at idle on the flat creeps away, as most cars do). A stalled
+engine makes no torque; pressing the pedal past `RECRANK_PEDAL` (0.9) re-cranks it to idle, and
+rolling with the clutch in until it turns at idle bump-starts it (`Telemetry::stalled`,
+`wp_wasm::engine_stalled`).
 
 **Torque converter** (`DrivetrainDef::torque_converter`, contract v0.2.0): replaces the launch
 clutch on automatics. The impeller absorbs `C·ω_e²·f(SR)` with `C` set so the engine absorbs its
@@ -128,50 +135,43 @@ the rear by `engage_slip` (fully at 2×) and pre-loads at launch (60% of throttl
 it closes at 10/s and opens at 2/s (hydraulic clutch pack), so it does not chatter. Part of the
 snapshot. (Reworked from the lead's stateless first cut, which toggled every tick.)
 
-**Slide control** (`slide.rs`, `steering.rs`; owner playtest 2026-10-19): sim-cade help so power
-slides stay catchable on keyboard/gamepad. Everything scales with
-`AssistProfile::countersteer_help` and is skipped entirely at 0, so the wheel, AI and "sim
-purist" presets are bit-identical to the plain model (tested against hashes from before).
-- *Car class* (`slide_class`, 0.25..1): rear-drive share × power to weight, rising from 120 to
-  250 W/kg. Powerful RWD ≈ 0.75–0.85, FWD and slow cars 0.25. Override per car id in
-  `SLIDE_CLASS_OVERRIDES` (the car schema rejects unknown fields; see contract request 7).
-- *Countersteer*: while the rear-axle slip angle is past 0.06 rad (full at 0.16), the rack
-  target blends toward that angle (front wheels pointed where the rear is going), the driver's
-  input trims ±35% around it, the rack runs up to 3.5× faster, and full steer into the slide
-  fades the help to 40% (no fighting a deliberate flick). Help grows with class:
-  `help + (1 − help)·help·class`. With help on, the rack also *unwinds* toward centre at the
-  fast rate (like self-aligning torque spinning the wheel back), which stops the tank-slapper a
-  slow unwind caused at 130 km/h.
-- *Save-the-car lock*: while sliding, the slip-targeted lock (see "Keyboard/gamepad steering") opens
-  toward 1.3 × the rear-axle slip angle, scaled by how much the rear slides; grip driving is
-  unchanged.
-- *Gyro*: a yaw torque `−gain·I_zz·(yaw rate − path rate − k·β)` while the rear slides, gain up
-  to 9/s (`min(2·help, 1) × class × slide`), capped at 0.35·m·g·wheelbase/2. Path rate =
-  rotation of the velocity vector, so a held drift is not resisted; `k` = 1.2/s with the
-  steering centred (straightens up), 0 steering into the turn (holds), 2.4/s countersteering.
-  Straightening faster than wanted is damped at 40%. Shown as `Telemetry::slide_gyro_nm`.
-- *Slide throttle* (TCS off, throttle filter on, i.e. keyboard): while sliding, the pedal filter
-  is up to 2.5× slower and the throttle target is feathered by up to 35% unless the driver
-  steers into the turn.
-- *Car data* (playtest item 6b): tighter turning circles → more lock on the drift-capable RWD
-  cars: shiro_turbo 34.4° → 39.8°, sperber_32 35.1° → 38.1°, rampart_50 33.0° → 37.9°,
-  hakone_gt 32.7° → 35.9°, lucciola_350 28.6° → 33.1°. Skidpad / step steer / lift-off are
-  unchanged to 3 decimals.
+**Countersteer help and handbrake turns** (`steering.rs`, `slide.rs`; owner rows 57 / 72,
+2026-10-20; replaces the 2026-10-19 slide gyro). `AssistProfile::countersteer_help` is a 0–100 %
+slider (`wp_wasm::set_countersteer`). Everything is skipped at 0, so the wheel, AI and "sim
+purist" presets are bit-identical to the plain model (tested against pinned hashes).
+- *Self-aligning steering* (Wreckfest-style): while the driver is **not** steering (input 0:
+  keys released, stick in its deadzone) above 3 m/s, the rack goes to `align_strength(h)` ×
+  the front axle's direction of travel (`front_axle_angle`, within the car's lock) instead of
+  the centre, at up to `1 + 4h` × the rack speed. `align_strength(h) = 1 − (1 − h)²`: 0 % =
+  plain return to centre, 25 % = 0.44, 50 % = 0.75 with a 3× rack, 100 % = full alignment
+  with a 5× rack. Driving straight the target is ~0; in a slide it is the countersteer that
+  cancels the front slip angle. It **never** acts while the driver steers, nor while the
+  handbrake is held and for 0.5 s after (`HANDBRAKE_GRACE_S`), and no assist adds yaw torque
+  (the gyro is gone).
+- *Countersteer lock* (part of the speed-sensitive lock, any preset with sensitivity > 0):
+  when the driver steers toward the side the rear slides to, the slip-targeted lock opens to
+  the front axle's travel angle + the slip margin, blended by how much the rear slides (0.06 →
+  0.16 rad). Grip cornering is untouched (handling-balance tests unchanged).
+- *ESC* stands down during the handbrake hold too.
+- *Slide throttle* (TCS off, throttle filter on, i.e. keyboard): unchanged — while sliding, the
+  pedal filter is up to 2.5× slower and the throttle target feathered by up to 35 % unless the
+  driver steers into the turn.
+- *Handbrake declutch* (row 56): with the automatic clutch or a converter box a pulled
+  handbrake decouples the driveline (rears lock, engine idles, AWD fronts do not drag the
+  rears, gear kept); after release the clutch re-engages once the driven wheels spin back up.
+  A manual clutch pedal is never overridden (`handbrake_disconnects_rear` still frees the rear
+  axle). Car data: `handbrake_rear_nm` ≥ 1.5 × the static rear lock torque, so the rears lock
+  on every car.
+- *Car class* (`slide_class`) now only scales the slide throttle.
 
-Measured with `cargo run --release -p wp_vehicle --example slide` (scripted naive drivers, see
-`metrics::power_oversteer_exit` / `high_speed_catch`; worst body slip, cases recovered):
-
-| Car | power exit, keyboard TCS/ESC off: main → now | power exit, gamepad: main → now | catch at 110/130 km/h, keyboard TCS/ESC off: main → now |
-|---|---|---|---|
-| rampart_50 (319 kW RWD) | 180° 0/4 → 29° 6/6 | 71° 2/4 → 13° 6/6 | 180° 2/4 → 7° 4/4 |
-| lucciola_350 (207 W/kg RWD) | 180° 0/4 → 29° 6/6 | 180° 1/4 → 15° 4/6 | 180° 3/4 → 6° 4/4 |
-| shiro_turbo (drift car) | — → 15° 6/6 | — → 19° 4/6 | 173° 2/4 → 7° 4/4 |
-| hakone_gt (151 W/kg RWD) | 180° 0/4 → 17° 6/6 | 71° 2/4 → 17° 3/6 | — → 7° 4/4 |
-
-("main" power-exit columns = 4 cases; now 6 incl. a 2 s held drift.) Keyboard with TCS on
-recovered already and still does (worst 6–13°). Gamepad's help is light (0.3): with TCS off,
-full throttle and a centred stick hold a 25–46° power drift instead of straightening, but
-nothing spins. FWD/AWD cars are unchanged in practice (worst slip ≤ 4° before and after).
+Measured (`--example handbrake`, `--example slide`; tests in `tests/handbrake.rs`,
+`tests/slide_control.rs`): handbrake turn at 60 km/h, 50 % steer, 0.6 s pull → 94–120° in 1.5 s
+on keyboard / gamepad / wheel (keyboard 36–46° before), without the handbrake 42–51° and ≤ 8°
+slip. Release-the-keys power-oversteer exits recovered (of 6, rampart / lucciola / hakone /
+sperber): keyboard TCS/ESC off at slider 0 / 50 / 100: 0/1/1/3 → 1/0/4/3 → 6/4/5/6; gamepad
+2/2/2/3 → 3/3/4/5 → 6/6/6/6. Keyboard with TCS on recovers 6/6 at every setting. The old
+gyro recovered gamepad power exits at its 30 % default; the self-aligning steering needs about
+100 % for the same with full throttle held (by design it adds no yaw torque).
 
 **Low-speed guards:** slip ratio and slip angle use `max(|vx|, 3 m/s)` denominators, slip
 angle has a relaxation-length lag, and below 1 m/s the lateral force blends into a viscous
@@ -280,7 +280,7 @@ torque each diff moved (front, rear, centre).
   braking moves to the same-side front wheel.
 - *Slide assists:* the car's slide class is scaled by its rear diff's steady lock (open 0.85 …
   locked 1.15 of the power term): a locking rear sustains power slides, so it gets more help.
-  The gyro and countersteer logic themselves are unchanged and stay off with help 0.
+  (Since rows 57 / 72 the class only scales the slide throttle.)
 - *Gearbox / lift-off:* the ramp follows the sign of the torque entering the diff, so engine
   braking (lift-off, downshifts) selects the decel ramp; in a clutch shift's neutral phase
   only the preload acts.
@@ -356,6 +356,12 @@ cargo run --release -p wp_vehicle --example diff_demo      # differential number
 kerbs, rounded and sharp crests, side impact and kerb trip; playtest row
 54). `cargo run --release -p wp_vehicle --example ride [all | car_id ...]` prints the table,
 `--example ride_trace -- <car> <kmh> <kerb_m>` (or `CREST=1`) a per-tick wheel trace.
+
+`tests/handbrake.rs` (rows 56 / 72: handbrake turns ≥ 70° on RWD / FWD / AWD, keyboard and
+gamepad; declutch, gear kept, no stall, drive resumes), `tests/clutch.rs` (row 59: manual
+clutch slip, stall, re-crank; the automatic clutch never stalls); `cargo run --release -p
+wp_vehicle --example handbrake` prints the turn table, `--example slide` the slider 0/50/100
+recovery table.
 
 `tests/handling_balance.rs` holds the per-class understeer-gradient ranges and the "held key
 reaches the grip limit" / "ESC adds no understeer" checks (playtest row 28).
@@ -436,7 +442,8 @@ Browser not measured yet (expect ~2×; budget 0.30 ms).
   tyre sweep sees only the static world, so wheels do not climb other cars or debris.
 - A sharp grade change at speed still flies the softest car (ironside_440 rides at 1.06 Hz):
   that is its setup, not a launch; rounded crests keep every car down.
-- No engine stall model (anti-stall slip instead); no tire temperature or wear yet
+- Stall model only for the manual clutch (no hill-start roll-back modelling beyond physics); no
+  starter motor time (re-crank is instant); no tire temperature or wear yet
   (`wear_rate` unused); no camber change with suspension travel.
 - AWD on-demand is front-biased only (couples the rear when the front slips).
 - Differentials: the helical diff's reaction excludes the spinning wheel's own inertia
@@ -447,13 +454,12 @@ Browser not measured yet (expect ~2×; budget 0.30 ms).
 - Tread depth is not modelled (treaded / slick only). `wp_weather` has its own grip model
   (`grip.rs`) with slightly different constants; the vehicle uses `surface.rs`. Automatic shifts are a ratio blend, not a two-clutch
   torque/inertia-phase model; no shift-time torque reduction.
-- Slide control: on gamepad presets (help 0.3) a centred stick with full throttle holds a power
-  drift rather than straightening; the per-car slide class has no data field yet (request 7).
+- Countersteer help: with full throttle held, releasing the stick at the gamepad's 30 %
+  default recovers about half the scripted power exits (100 % recovers all); the per-car slide
+  class has no data field yet (request 7).
   inferred from the tire's wet ratio). Converter shifts are a ratio blend, not a two-clutch
   torque/inertia-phase model. Clutch-automatic rev-matching is kinematic (the engine speed is
   driven to the target, not through torque), and full-load shift points are a fixed fraction
   of the redline (for every roster car the next gear never beats the current one before the
   redline, so this is the fastest schedule; a peaky engine would want per-gear points).
-  drift rather than straightening (gamepad with TCS off recovers only 2–3 of 6 power-exit
-  cases in `examples/slide`); with help on, the rack always unwinds ~2.5× faster (also on grip:
-  keyboard flicks are quicker); the per-car slide class has no data field yet (request 7).
+

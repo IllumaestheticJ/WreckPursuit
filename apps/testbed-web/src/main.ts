@@ -436,11 +436,13 @@ async function main(): Promise<void> {
 
   // Owner default (playtest row 29): TCS, ESC and automatic gears start OFF; any assist box the
   // viewer ticks or unticks is remembered (localStorage) and wins over the preset.
+  // The countersteer slider (owner row 57) is stored there too, as a number 0..1
+  // (`countersteer_help`).
   const ASSIST_KEY = "wp.assistOverrides";
-  const assistOverrides = (): Record<string, boolean> => {
-    const base: Record<string, boolean> = { tcs: false, esc: false, auto_gears: false };
+  const assistOverrides = (): Record<string, boolean | number> => {
+    const base: Record<string, boolean | number> = { tcs: false, esc: false, auto_gears: false };
     try {
-      return { ...base, ...(JSON.parse(store.get(ASSIST_KEY) ?? "{}") as Record<string, boolean>) };
+      return { ...base, ...(JSON.parse(store.get(ASSIST_KEY) ?? "{}") as Record<string, boolean | number>) };
     } catch {
       return base;
     }
@@ -460,9 +462,12 @@ async function main(): Promise<void> {
   const syncAssistBoxes = () => {
     if (isReplay()) return;
     const a = sim.assists(app.player) as unknown as Record<string, unknown>;
-    document.querySelectorAll<HTMLInputElement>("#assist-row input").forEach((cb) => {
+    document.querySelectorAll<HTMLInputElement>("#assist-row input[type=checkbox]").forEach((cb) => {
       cb.checked = Boolean(a[cb.dataset.a!]);
     });
+    const pct = Math.round(Number(a.countersteer_help ?? 0) * 100);
+    ($("cstr") as HTMLInputElement).value = String(pct);
+    $("cstr-val").textContent = `${pct}%`;
   };
 
   // ----- replay ---------------------------------------------------------------------------
@@ -545,7 +550,17 @@ async function main(): Promise<void> {
     else if (name === "city_chase_rainy_night") startCityChase(undefined, undefined, true);
     else if (($("city") as HTMLInputElement).checked) startFreeDrive();
   };
-  document.querySelectorAll<HTMLInputElement>("#assist-row input").forEach((cb) => {
+  const cstr = $("cstr") as HTMLInputElement;
+  cstr.oninput = () => {
+    if (isReplay()) return;
+    const pct = Number(cstr.value);
+    $("cstr-val").textContent = `${pct}%`;
+    sim.setCountersteer(app.player, pct);
+    const o = assistOverrides();
+    o.countersteer_help = pct / 100;
+    store.set(ASSIST_KEY, JSON.stringify(o));
+  };
+  document.querySelectorAll<HTMLInputElement>("#assist-row input[type=checkbox]").forEach((cb) => {
     cb.onchange = () => {
       if (isReplay()) return;
       const a = sim.assists(app.player) as unknown as Record<string, unknown>;

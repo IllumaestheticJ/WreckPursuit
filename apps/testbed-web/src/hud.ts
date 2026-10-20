@@ -120,9 +120,9 @@ export class Hud {
       `M or Tab city map (drag / wheel / arrows / + − / 0 whole city / F follow inside it; driving input is paused while it is open)<br>` +
       `<b>Cameras</b> ${CAMERA_HELP}<br>` +
       `F1 or ? this help · P pause · . frame step (replay) · [ / ] replay speed · F repair bill<br><br>` +
-      `<b>Slide control</b> (keyboard/gamepad assists): the car catches power slides itself — ` +
-      `centre the steering and it straightens up; steer into the turn to hold a drift, ` +
-      `countersteer to straighten faster. Strongest on powerful RWD cars; off on wheel.<br><br>` +
+      `<b>Countersteer help</b> (slider, keyboard/gamepad): let go of the steering and the front ` +
+      `wheels follow the car's travel, which catches a slide by itself (0 % off, 50 % default, ` +
+      `100 % fast). It never fights your input, and the handbrake turns the car freely.<br><br>` +
       LAYERS.map((l) => `${l.key.replace(/^(Key|Digit)/, "")} — ${l.label}`).join("<br>") +
       `<br><br>${AUDIO_CREDITS}`;
   }

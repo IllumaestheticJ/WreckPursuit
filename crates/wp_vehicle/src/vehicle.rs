@@ -45,6 +45,10 @@ const HUB_FRICTION: f32 = 0.8;
 const CAMBER_THRUST: f32 = 0.15;
 /// Handbrake input above which the handbrake counts as pulled (declutch, steering assists).
 pub const HANDBRAKE_ON: f32 = 0.1;
+/// Manual clutch: the engine stalls below this fraction of its idle speed (row 59).
+pub const STALL_FRAC: f32 = 0.5;
+/// Manual clutch: pressing the pedal at least this far re-cranks a stalled engine.
+pub const RECRANK_PEDAL: f32 = 0.9;
 /// The tyre sweep starts this far above the top of the travel, m (see `probe_wheel`).
 const PROBE_LIFT_M: f32 = 0.3;
 /// Fraction of the tyre's half width used by the sweep (the shoulder is rounded).
@@ -209,6 +213,8 @@ pub struct Telemetry {
     pub tcs_brake_nm: [f32; 4],
     /// Upward speed the contact launch limiter took back this tick, m/s ([`crate::launch`]).
     pub contact_lift_cut_mps: f32,
+    /// Engine stalled (manual clutch; press the clutch to re-crank).
+    pub stalled: bool,
 }
 
 /// One simulated vehicle. See the crate docs for the integration contract with Rapier.
@@ -252,6 +258,8 @@ pub struct Vehicle {
     /// Handbrake hold for the steering assists: [`crate::steering::HANDBRAKE_GRACE_S`] while
     /// the handbrake is pulled, then counting down to 0 after release, s.
     pub(crate) hb_grace: f32,
+    /// Engine stalled (manual clutch only, see [`STALL_FRAC`]).
+    pub(crate) stalled: bool,
 }
 
 impl Vehicle {
@@ -365,6 +373,7 @@ impl Vehicle {
             conditions_source: ConditionsSource::World,
             launch: LaunchGuard::default(),
             hb_grace: 0.0,
+            stalled: false,
             corners,
         };
         v.converter = def
@@ -497,6 +506,7 @@ impl Vehicle {
         self.torque = V3::ZERO;
         self.launch.forget();
         self.hb_grace = 0.0;
+        self.stalled = false;
     }
 
     /// Forget the chassis's previous motion for the contact launch limiter
@@ -517,6 +527,8 @@ impl Vehicle {
     /// workstream F; extended by 02.)
     pub fn set_state(&mut self, s: &wp_contracts::VehicleState) {
         self.launch.forget();
+        // A stalled engine reports 0 rpm; anything turning is running.
+        self.stalled = s.engine_rpm < STALL_FRAC * self.def.engine.idle_rpm;
         let rot = Quat::from_xyzw(s.rot[0], s.rot[1], s.rot[2], s.rot[3]);
         let pos = v3(s.pos);
         self.chassis = Chassis {
@@ -588,6 +600,7 @@ impl Vehicle {
     /// Spin wheels and engine to match a forward `speed` (m/s) in a sensible gear, clutch
     /// locked. Used for rolling starts in tests and when teleporting a moving car.
     pub fn set_rolling(&mut self, speed: f32) {
+        self.stalled = false;
         for (w, c) in self.wheels.iter_mut().zip(&self.corners) {
             w.omega = speed / c.radius;
         }
@@ -957,6 +970,30 @@ impl Vehicle {
             self.clutch = 0.0;
         }
 
+        // Manual clutch: stall and re-crank (owner row 59). With the clutch pedal the
+        // player's, the anti-stall is off (see `substep`), so letting the clutch up without
+        // enough revs drags the engine below `STALL_FRAC` × idle and it dies. Pressing the
+        // pedal past `RECRANK_PEDAL` re-cranks it to idle; rolling with the clutch engaged
+        // until the engine turns at idle bump-starts it. The automatic clutch never stalls.
+        let idle_rpm = self.def.engine.idle_rpm;
+        let manual_clutch = !assists.auto_clutch && self.converter.is_none();
+        if self.stalled {
+            let recrank = input.clutch >= RECRANK_PEDAL;
+            if !manual_clutch || recrank || self.engine.rpm() >= idle_rpm {
+                self.stalled = false;
+                if self.engine.rpm() < idle_rpm {
+                    self.engine.omega = idle_rpm / RPM_PER_RADPS;
+                }
+            }
+        } else if manual_clutch
+            && self.gearbox.gear != 0
+            && self.clutch > 0.3
+            && self.engine.rpm() < STALL_FRAC * idle_rpm
+        {
+            self.stalled = true;
+        }
+        let power_scale = if self.stalled { 0.0 } else { power_scale };
+
         // --- Assists ----------------------------------------------------------------------
         let peak_slip = (0..4)
             .find(|i| base_split[*i] > 0.0)
@@ -1310,6 +1347,7 @@ impl Vehicle {
             diff_transfer_nm: acc_x.map(|x| x * inv),
             tcs_brake_nm: tc_brake,
             contact_lift_cut_mps: launch_cut,
+            stalled: self.stalled,
         };
     }
 
@@ -1412,7 +1450,12 @@ impl Vehicle {
         let axle = self.axle_omega(split);
         let omega_in = ratio * axle;
         let idle_w = self.def.engine.idle_rpm / RPM_PER_RADPS;
-        let anti_stall = ((self.engine.omega - 0.6 * idle_w) / (0.4 * idle_w)).clamp(0.0, 1.0);
+        // Anti-stall slip: only for the automatic clutch (a manual clutch can stall).
+        let anti_stall = if self.auto_clutch {
+            ((self.engine.omega - 0.6 * idle_w) / (0.4 * idle_w)).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
         let converter = self.converter;
         let cap = if converter.is_some() {
             self.def.drivetrain.clutch_max_nm * self.clutch

@@ -235,6 +235,7 @@ impl Vehicle {
         w.f(self.launch.prev_vz.unwrap_or(0.0));
         w.f(self.launch.lift);
         w.f(self.hb_grace);
+        w.b(self.stalled);
         VehicleSnapshot { bytes: w.0 }
     }
 
@@ -338,6 +339,7 @@ impl Vehicle {
         let prev_vz = r.f()?;
         let lift = r.f()?;
         let hb_grace = r.f()?;
+        let stalled = r.b()?;
         if !r.0.is_empty() {
             return Err(SnapshotError::Malformed);
         }
@@ -378,6 +380,7 @@ impl Vehicle {
             lift,
         };
         self.hb_grace = hb_grace;
+        self.stalled = stalled;
         Ok(())
     }
 }

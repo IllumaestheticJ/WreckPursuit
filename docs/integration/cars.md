@@ -451,3 +451,16 @@ Please mirror these in the `*.spec.md` sheets and `VALIDATION.md` (handling numb
 slightly: understeer gradient −0.37 to +0.04 deg/g, held-key g −0.01 to +0.03; table in
 `vehicle.md`). Rule of thumb for new cars: rebound ≈ 2× bump, bump ≈ 0.35 of critical, ≥ 45 %
 of the travel left to the bump stop at rest; `tests/ride.rs` checks all three for the roster.
+
+## Rows 56 / 72 (A, 2026-10-20) — handbrake torque
+`brakes.handbrake_rear_nm` raised on 18 of 19 cars to ≥ 1.5 × the static rear lock torque
+(rear corner load × rolling radius), so a pulled handbrake locks the rears on every car (owner
+row 72: "I do see the rear wheels lock" — on most cars they did not: 14–25 rad/s left after a
+0.6 s pull at 60 km/h). Before → after, N·m per wheel: debug_coupe 1500 → 1750, debug_sedan
+1200 → 1310, drayman_cargo 1540 → 2980, furrow_24 870 → 1340, hauler_1500 1620 → 2970,
+ironside_440 600 → 1890, junkyard_beater 600 → 830, kestrel_ts 830 → 1280, lindwurm_4t 1100 →
+1410, lucciola_350 1330 → 1860, rampart_50 1430 → 2020, sentinel_bastion 1620 → 3280,
+sentinel_cruiser 1440 → 2390, sentinel_wolfhound 1440 → 2330, shiro_turbo 1010 → 1330,
+sperber_32 1230 → 1850, tansy_13 600 → 840, vireo_xs 600 → 900 (hakone_gt unchanged, 1780).
+Rule of thumb for new cars: `handbrake_rear_nm ≥ 1.5 × m × (1 − front_weight_frac) / 2 × g ×
+rear radius`. Please mirror in the spec sheets.
