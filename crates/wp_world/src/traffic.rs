@@ -2589,31 +2589,35 @@ impl Traffic {
     ///
     /// Each zone keeps the share of its target that lies outside every sightline. The share
     /// in view can only fill as cars drive into it, so whatever the cars in view fall short of
-    /// it is added to the spawnable shares in proportion (at most [`MAX_SPAWNABLE_BOOST`]×).
-    /// The total therefore still adds up to the density target: with the 320 m sightline a
-    /// whole downtown can be in view, and without this the city settled about a quarter below
-    /// target (`world_traffic_soak_observer`). With no player in the inputs nothing is in view
-    /// and the targets are returned unchanged.
+    /// it is added to the spawnable shares *around the players* (within the active radius of a
+    /// player, not of a race route's focus points) in proportion, at most
+    /// [`MAX_SPAWNABLE_BOOST`]×. The total therefore still adds up to the density target: with
+    /// the 320 m sightline a whole downtown can be in view, and without this the city settled
+    /// about a quarter below target (`world_traffic_soak_observer`). With no player in the
+    /// inputs nothing is in view and the targets are returned unchanged.
     fn spawnable_targets(&self, inp: &TrafficInputs, full: &[f32], seen_agents: u32) -> Vec<f32> {
         if !inp.tracked.iter().any(|t| t.player) {
             return full.to_vec();
         }
-        let mut focus: Vec<V2> = inp
+        let players: Vec<V2> = inp
             .tracked
             .iter()
             .filter(|t| t.player)
             .map(|t| geom::xy(t.pos))
             .collect();
+        let mut focus = players.clone();
         focus.extend_from_slice(inp.route_focus);
         let ar = self.config.active_radius_m;
         let mut out = vec![0.0f32; full.len()];
+        // Spawnable share of each zone's target that lies around a player.
+        let mut near = vec![0.0f32; full.len()];
         let mut in_view_target = 0.0f32;
         for (z, samples) in self.zone_samples.iter().enumerate() {
             if full[z] <= 0.0 {
                 continue;
             }
             // Same sample weighting as `zone_targets`, split by visibility.
-            let (mut w_all, mut w_open) = (0.0f32, 0.0f32);
+            let (mut w_all, mut w_open, mut w_near) = (0.0f32, 0.0f32, 0.0f32);
             for smp in samples {
                 if inp.closed.get(smp.seg as usize).copied().unwrap_or(false) {
                     continue;
@@ -2624,20 +2628,27 @@ impl Traffic {
                 w_all += smp.weight_km;
                 if !self.visible(smp.pos, inp.tracked) {
                     w_open += smp.weight_km;
+                    if players.iter().any(|f| geom::dist(*f, smp.pos) < ar) {
+                        w_near += smp.weight_km;
+                    }
                 }
             }
-            let open_frac = if w_all > 0.0 { w_open / w_all } else { 1.0 };
-            out[z] = full[z] * open_frac;
+            if w_all <= 0.0 {
+                out[z] = full[z];
+                continue;
+            }
+            out[z] = full[z] * w_open / w_all;
+            near[z] = full[z] * w_near / w_all;
             in_view_target += full[z] - out[z];
         }
         let shortfall = (in_view_target - seen_agents as f32).max(0.0);
-        let open_total: f32 = out.iter().sum();
-        if shortfall > 0.0 && open_total > 0.0 {
+        let near_total: f32 = near.iter().sum();
+        if shortfall > 0.0 && near_total > 0.0 {
             // At most double the density where cars can appear, so a thin spawnable strip
             // (player near the map edge, most of the area in view) does not clump.
-            let k = (1.0 + shortfall / open_total).min(MAX_SPAWNABLE_BOOST);
-            for t in &mut out {
-                *t *= k;
+            let k = (1.0 + shortfall / near_total).min(MAX_SPAWNABLE_BOOST);
+            for (t, n) in out.iter_mut().zip(&near) {
+                *t += n * (k - 1.0);
             }
         }
         out
