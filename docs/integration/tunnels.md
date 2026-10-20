@@ -90,25 +90,32 @@ and `tunnel_light` (glow like the lamp heads) to `CITY_MATERIAL_COLOURS` when yo
 | Greybox has the tunnels; two framed shots | `just web-e2e` (`SHOTS=dir` writes `tunnels/founders_cut_north_portal.png`, `tunnels/hollins_tunnel_inside.png`) |
 
 New simcli pieces (documented in `apps/simcli/SCENARIOS.md`): top-level `covered_los: bool`
-(default `true`) and the expectation `first_pursuit_end(entity, outcome, min_s, max_s)`.
+(default `true`), the expectation `first_pursuit_end(entity, outcome, min_s, max_s)` and the
+per-entity metric `max_los_lost_s`.
 
 ## Numbers
 
-**Escape scenario** (`police/tunnel_escape_founders_cut.ron`, midday, racer L3, route
-`Lantern Run -> Founders Cut lay-by` at 25 m/s): pursuit starts at 5.2 s, the helicopter
-launches at 50.2 s and is over the racer (≈ 2 m) from ≈ 56 s while ground units fall 300+ m
-behind. The racer enters the Cut at ≈ 97 s and parks mid-tunnel:
+**Escape scenario** (`police/tunnel_escape_founders_cut.ron`, midday, racer at heat 50 (L3),
+route `Lantern Run -> Founders Cut lay-by` at 25 m/s; re-tuned in lead round 12b after the
+junction-surface fix): pursuit starts at 5.2 s, the helicopter launches at 57.8 s and is over
+the racer from ≈ 65 s while ground units fall 300-500 m behind. The racer enters the Cut at
+≈ 100 s and parks mid-tunnel:
 
-| Run | First pursuit end |
-|---|---|
-| tunnels block LOS | **Escaped at 126.9 s** (the L4 day escape time, 30 s, after entering), nearest unit ≈ 180 m |
-| control, `covered_los: false` | **Captured at 142.0 s** (the helicopter never loses him; ground units arrive) |
+| Run | Longest unseen (`max_los_lost_s`) | First pursuit end |
+|---|---|---|
+| tunnels block LOS | **21.9 s** | **Escaped at 122.4 s** (L3 day escape time, 22 s), nearest unit ≈ 400 m |
+| control, `covered_los: false` | 9.3 s (downtown corners, before the helicopter) | **Captured at 157.4 s** |
 
-Sweep of the racer's target speed (22 / 24 / 25 / 27 m/s): escape at 134.2 / 128.9 / 126.9 /
-123.5 s with cover; capture at 167.7 / 149.5 / 142.0 / 141.2 s without — the contrast holds
-across the sweep. (With cover, a unit that later drives into the Cut sees him inside the same
-tunnel, starts a new pursuit and captures him at 144.7 s: the "units inside the same tunnel
-still see each other" rule at work.)
+Sweep of the racer's target speed (22 / 25 / 28 m/s): escape at 129.5 / 122.4 / 117.6 s with
+cover (21.4-21.6 s unseen); capture at 168.9 / 157.4 / 150.7 s without (9.3-11.7 s unseen).
+Why heat 50, not 55 as first written: pursuit heat (0.25/s while seen) took a heat-55 racer to
+L4 (30 s escape time) just before the Cut, and after round 12b's junction change (≈ 3 s later
+arrival) the first unit drove into the Cut 0.5 s before that timer ran out ("no pursuit
+ended"). At heat 50 the racer stays L3 and the escape has an ≈ 8 s+ margin over the first
+unit's arrival. The new per-entity metric `max_los_lost_s` checks the mechanism directly
+(≥ 18 s with cover, ≤ 16 s without), independent of who wins the race to the timer. (With
+cover, a unit that later drives into the Cut sees him inside the same tunnel and starts a new
+pursuit: the "units inside the same tunnel still see each other" rule.)
 
 **Drive-throughs** (`debug_sedan`, AI assists, at the limit): Hollins Tunnel 24.7 m/s max,
 752 m, Founders Cut 18.2 m/s max, 447 m; both 0 off-road s, 0 airborne s, 0 crush.
