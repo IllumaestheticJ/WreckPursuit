@@ -147,3 +147,102 @@ The owner's difficulty for this lap: Custom, Manual, ABS Full, **Traction contro
 
 - **Launch:** the player feathers the throttle key at the start (0.8–2.8 s: six taps of 0.1–0.4 s), then holds. With TCS Half there is still **visible wheelspin and smoke** in 1st and into 2nd (28–45 mph), and a little tail movement. That matches our planned **TCS Low** (row 105). Wreckfest's levels are **Off / Half / Full**, so we should use the same names.
 - **Racing:** like clip 2, short taps and frequent quick corrections. Throttle stays on through most corners.
+
+## Run 5 setup (screenshots, 2026-10-20)
+
+**Difficulty:** Custom, Manual shifting, **ABS Half**, TCS Off, Stability Off. So Wreckfest's ABS also has Off / Half / Full levels.
+
+**Car tune** (the same #49 muscle car, on 5-step sliders):
+
+| tune | setting |
+|---|---|
+| Suspension | **Stiff** (5/5) |
+| Gear ratio | **Long** (5/5) |
+| Differential | 4/5 (between Limited and **Locked**) |
+| Brake balance | 2/5 (toward **Rear**) |
+
+The car's stat bars show Acceleration 10.0, Top speed 10.0, Cornering 6.7.
+
+**Gaps this shows for WreckPursuit**
+- ABS levels Off / Half / Full (we have on/off).
+- A **per-car tune screen** with 5-step suspension, gear ratio, differential and brake balance. This is separate from the mod tree, is free, and is set per event/garage.
+- Car stat bars (acceleration / top speed / cornering).
+
+## Clip 5 analysis (2026-10-20, #49 muscle car, tuned, **ABS Half**, TCS Off)
+
+The lap: 69 s, same street circuit and car as clip 4, but with the tune from "Run 5 setup" (stiff, long gears, diff 4/5, rear brake bias) and ABS Half.
+
+**Inputs**
+
+| | |
+|---|---|
+| Throttle | 71 % |
+| Brake | 3 % (median 0.5 s) |
+| Left / Right | 24 % / 20 %, median 0.18 / 0.28 s taps |
+| Handbrake | 7 uses, median 0.23 s, often **with the throttle held** |
+
+**Brake → handbrake-stab → power-drift corner (41.0–45.0 s), step by step**
+
+1. 41.0–42.1 s: two brake presses (0.2 s + 0.5 s) with a Left tap in between, 82 → 57 mph (3rd → 2nd). With ABS Half and rear brake bias the car stays straight and settles.
+2. 42.2 s: **throttle + Left**, then **throttle + Left + handbrake stabs** of 0.2–0.3 s and 0.1 s while staying on the throttle. Each stab adds rotation; the rear doesn't lock the car dead.
+3. 44.0 s: **Right (opposite lock) + throttle**: a held ~20–30° power drift at 52–55 mph in 2nd through the corner exit.
+
+**New targets**
+1. **Handbrake stabs on the throttle** (0.1–0.3 s, throttle and steer key held) must add rotation without killing the drive. Check our row-56 handbrake declutch (auto clutch opens with the handbrake) against this. For short stabs with the throttle held, the reference keeps power, or recovers it instantly.
+2. **ABS Half + rear brake bias:** braking at 80+ mph with a steering tap stays controllable and settles the car. A tap while braking gives a mild rotation, not a spin.
+3. With the tune (stiff, locked diff, long gears) a 2nd-gear power drift at ~50–55 mph holds steadily with opposite lock and throttle.
+
+## Keyboard input is raw in the reference (owner test, 2026-10-20)
+
+The reference game's "Test steering" bar on the keyboard jumps straight between **−100 % and +100 %**, with no ramp or smoothing at the input layer. All the keyboard smoothing must therefore happen **inside the car's steering model** (the rack's slew rate, speed-sensitive lock and self-alignment), not in the input filter.
+
+What this means for WreckPursuit:
+- Keyboard steering input should reach `DriverInput.steer` as a plain −1 / 0 / +1. Our testbed key ramp (`apps/testbed-web/src/input.ts`: 4/s in, 12/s out; drift-twitch's 6/s in and out) should go, or become ~instant. Rate limiting belongs in `wp_vehicle` steering, where it can behave differently for turn-in, return to centre, countersteer and slides.
+- Measuring the reference's actual front-wheel rate needs a camera that shows the front wheels, or the full cockpit steering wheel (owner asked).
+
+## Reference car specs (owner screenshots)
+
+The reference game's car names are kept out of this repo (rule 9); cars are labelled by role.
+
+| ref | role | power | torque | weight | gears | drive | class |
+|---|---|---|---|---|---|---|---|
+| **REF-RWD-A** (#49, clips 4–5) | full-size RWD muscle | 462 hp (345 kW) @ 4800 rpm | 585 lb-ft (793 N·m) @ 3200 rpm | 3018 lb (1369 kg) | 5 | RWD | A, rating 337 |
+| **REF-RWD-B** (#44, clip 2) | midsize RWD sports | 340 hp (254 kW) @ 6400 rpm | 299 lb-ft (405 N·m) @ 4200 rpm | 2308 lb (1047 kg) | 6 | RWD | A, rating 324 |
+| **REF-RWD-D** (clip 1 arena car, same livery as the clip 1 frames) | full-size RWD muscle | 523 hp (390 kW) @ 5800 rpm | 595 lb-ft (807 N·m) @ 3800 rpm | 3600 lb (1633 kg) | 4 | RWD | A, rating 320 |
+| **REF-FWD-C** (#96, clip 3) | compact FWD touring | 162 hp (121 kW) @ 7900 rpm | 132 lb-ft (179 N·m) @ 5800 rpm | 2164 lb (982 kg) | 5 | FWD | C, rating 164 |
+
+The reference RWD cars sit at about **239–252 W/kg** (REF-RWD-D: 239), and both are light for their class. Our nearest analogues are heavier and less torquey:
+
+| ours | mass | power | torque | W/kg |
+|---|---|---|---|---|
+| rampart_50 (vs REF-RWD-A) | 1753 kg | 319 kW | 529 N·m | ~182 |
+| lucciola_350 (vs REF-RWD-B) | 1345 kg | 278 kW | 363 N·m | ~207 |
+| kestrel_ts (vs REF-FWD-C, ~123 W/kg) | 1453 kg | 181 kW | 335 N·m | ~125 (similar ratio, but ~470 kg heavier) |
+
+That is a likely part of the feel gap: the reference cars have more torque per kg, so they light up the rears and power-oversteer far more readily. The parity suite should measure the reference specs directly. One way is a parity-only test car JSON with the reference numbers, kept out of the player roster or given analogue names, so physics behaviour can be compared like for like.
+
+## Steering-wheel timing (clip 7, cockpit view, standing still, 2026-10-20)
+
+The owner recorded the cockpit steering wheel at a standstill with the key overlay. A spoke on the wheel shows its rotation frame by frame (60 fps).
+
+| test | key | wheel response |
+|---|---|---|
+| hold Left 1.23 s (5.27–6.50 s) | raw, on | the spoke starts moving ~1 frame after the key; it sweeps at a near-constant fast rate and reaches the final lock ≈ **0.25–0.30 s** after the press, with a small settle; it holds steady after that |
+| release (6.50 s) | raw, off | returns to centre over ≈ **0.30–0.35 s**, again near-constant rate |
+| tap Left 0.23 s (3.50–3.73 s) | raw | reaches **near-full lock** by the time of release, then returns in ~0.3 s |
+
+**Conclusion.** The reference keyboard steering at standstill is a **simple constant-rate slew**: full lock in ~0.28 s, back in ~0.33 s. There is no input smoothing (row "keyboard input is raw"), and no visible easing or intent logic. So a 0.2 s tap is most of a full-lock flick at low speed. At speed, "steering speed sensitivity 75 %" scales the lock down (not yet measured at speed).
+
+This contrasts with our Drift Labs, which layer intent modes (hold / angle-up / transition / catch). Those may be the reason the owner says Drift Lab C "is nothing like" the reference: the reference likely gets its feel from **the car (tyres, weight, torque) plus a plain steering rate**, not from a smart assist.
+
+## Clip 8 (cockpit race lap, #49 car) — steering at speed
+
+The key overlay sits at a new position in this clip (arrows at x≈444–508, y≈1034–1066). Holding Right at ~96 mph (3rd gear, braking from 98 to 84 mph, 19.25 s onward): the wheel spoke reaches its final position **≈0.23 s** after the key press. That is the same constant-rate slew as at a standstill. The visible steering-wheel angle at 96 mph looks similar to the standstill lock, so "steering speed sensitivity" may act on the road wheels / tyre forces rather than on the cockpit wheel animation. **Unconfirmed**: a view of the front road wheels is still needed to measure the lock at speed.
+
+## Owner feedback: our suspension "feels far too switchy" (2026-10-20)
+
+In the reference footage the cars' body roll and pitch build and settle **smoothly and relatively slowly**, with heavy-feeling weight transfer and no quick back-and-forth rocking on direction changes. Our cars swap weight too quickly and too nervously. Targets: lower roll/pitch natural frequency, or more damping on transients, measured as roll angle vs time in a 60 mph lane change and an S-bend. Owners: Drift Lab W (lab feel / A-B) and machine A (ride model).
+
+## Clip 5 note: ABS levels
+
+The owner's clip 5 uses **ABS Half**. WreckPursuit should offer ABS **Off / Half / Full**, alongside TCS Off / Half / Full (assigned to machine A).
