@@ -38,6 +38,11 @@
       .comps .bar { width: 80px; }
       .inputs { }
       .telemetry { position: absolute; bottom: 8px; left: 552px; padding: 0; }
+      .controls-panel { max-width: 720px; z-index: 6; }
+      .bind-table { border-collapse: collapse; margin: 6px 0; }
+      .bind-table td, .bind-table th { padding: 1px 4px; text-align: left; font-weight: normal; }
+      .bind-table button.bind { min-width: 72px; }
+      .bind-table button.waiting { background: #a60; color: #fff; }
       .help { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); max-width: 640px; max-height: calc(100vh - 16px); overflow: auto; z-index: 5; background: rgba(0, 0, 0, 0.92); }
       #controls { position: absolute; bottom: 8px; left: 8px; max-width: 520px; max-height: 45vh; overflow: auto; }
       #controls .row { margin: 3px 0; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
@@ -48,6 +53,18 @@
       #sc-result .pass { color: #2ecc40; }
       #sc-result .fail { color: #ff4136; }
       #sc-result .pending { color: #aaa; }
+      /* Races (workstream 15): picker, HUD, countdown, results (src/ui/race.tsx). */
+      .wp-race-picker { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(560px, calc(100vw - 32px)); max-height: 80vh; overflow: auto; pointer-events: auto; z-index: 80; }
+      .wp-race-cards { display: grid; gap: 0.6em; }
+      .wp-race-card { border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 4px; padding: 0.5em 0.6em; }
+      .wp-race-hud { position: absolute; left: 8px; top: 312px; width: min(420px, calc(100vw - 32px)); pointer-events: none; z-index: 60; }
+      .wp-race-hud-grid { display: grid; grid-template-columns: 1fr auto; gap: 0.6em; align-items: start; }
+      .wp-race-standings { width: 100%; font-size: 0.8em; margin-top: 0.4em; }
+      .wp-race-standings .num, .wp-race-results .num { text-align: right; }
+      .wp-race-standings .is-local, .wp-race-results .is-local { color: var(--scan, #7cf); font-weight: bold; }
+      .wp-race-countdown { position: absolute; left: 50%; top: 30%; transform: translate(-50%, -50%); font: 900 96px/1 system-ui, sans-serif; color: #ffd23f; text-shadow: 0 4px 12px #000; pointer-events: none; }
+      .wp-race-go { color: #2ee59d; }
+      .wp-race-results { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(520px, calc(100vw - 32px)); max-height: 85vh; overflow: auto; pointer-events: auto; z-index: 75; }
       #error { position: absolute; top: 40%; left: 50%; transform: translateX(-50%); color: #f66; white-space: pre; }
     </style>
   </head>
@@ -62,7 +79,9 @@
           <button id="sc-chase" title="city at night (map below), police, traffic, you start speeding">city chase</button>
           <button id="sc-chase-rain" title="the city chase in a night downpour on a soaked road">rainy night</button>
           <label title="free drive / city chase use your career car, its damage and mods, and the result goes into the career"><input type="checkbox" id="career" checked />career</label>
+          <button id="controls-open" title="rebind keyboard and gamepad controls (F9)">controls</button>
           <button id="sc-garage" title="your career: cars, repairs, mods, dealer, impound (ends a career run)">garage</button>
+          <button id="sc-races" title="street races with AI racers (Port Vesper and the grid city)">races</button>
         </div>
         <div class="row">
           mode <select id="mode"><option>Arcade</option><option>Simulation</option></select>

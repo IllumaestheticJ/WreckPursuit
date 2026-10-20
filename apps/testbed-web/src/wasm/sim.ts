@@ -25,6 +25,20 @@ export interface WheelInfo {
   tire_id: string;
 }
 
+/** session_car_models() JSON (crates/wp_wasm/src/lod.rs `SessionModels`). */
+export interface SessionModels {
+  cars: string[];
+  traffic: string | null;
+  police: string | null;
+}
+
+/** car_model_info(car_id) JSON. */
+export interface CarModelInfo {
+  car_id: string;
+  body_size_m: [number, number, number];
+  wheels: VehicleInfo["wheels"];
+}
+
 /** vehicle_info(entity) JSON. */
 export interface VehicleInfo {
   entity: number;
@@ -133,6 +147,8 @@ export function packInput(i: DriverInput): Float32Array {
   return new Float32Array([i.steer, i.throttle, i.brake, i.handbrake, i.clutch, flags, 0]);
 }
 
+let lastEventsJson = "";
+
 export const sim = {
   /** Start a live session from scenario JSON; `scripted` = drive entities by their drivers. */
   init: (seed: number, scenarioJson: string, scripted: boolean): number[] =>
@@ -187,6 +203,14 @@ export const sim = {
   /** Wanted level / heat for a racer, or null when the session has no police. */
   /** Police units that are not sim vehicles: [x, y, z, yaw, speed, flags] each. */
   policeUnits: (): Float32Array => wasm.police_units(),
+  /** Every traffic agent at any LOD (layout.ts DRAW_STRIDE / D): id, entity, ground-seated pose, flags. */
+  trafficDraw: (): Float32Array => wasm.traffic_draw(),
+  /** Every police unit, bound or not (layout.ts DRAW_STRIDE / D). */
+  policeDraw: (): Float32Array => wasm.police_draw(),
+  /** Car models this session can show: every id, plus the traffic and police models (or null). */
+  sessionCarModels: (): SessionModels => JSON.parse(wasm.session_car_models()),
+  /** Body size and wheels of a car model (no vehicle needed). */
+  carModelInfo: (carId: string): CarModelInfo => JSON.parse(wasm.car_model_info(carId)),
   policeStatus: (entity: number): PoliceStatus | null => JSON.parse(wasm.police_status(entity)),
   /** Static city map for the UI kit's minimap / full map (`wp_wasm::map`); `null` on the flat world. Once per city. */
   mapStaticJson: (): string => wasm.map_static_json(),
@@ -204,8 +228,14 @@ export const sim = {
   eventsDrain: (): SimEvent[] => {
     const bytes = wasm.events_drain();
     // Empty Vec<SimEvent> encodes as a single 0 byte; skip the decode round trip.
-    return bytes.length <= 1 ? [] : JSON.parse(wasm.events_decode(bytes));
+    lastEventsJson = bytes.length <= 1 ? "" : wasm.events_decode(bytes);
+    return lastEventsJson ? JSON.parse(lastEventsJson) : [];
   },
+  /** JSON text of the last `eventsDrain()` ("" when it had no events): the audio director takes
+   * the same JSON, so the frame loop passes this instead of re-stringifying the events. */
+  lastEventsJson: (): string => lastEventsJson,
+  /** Panel states of an entity, PANEL_STRIDE floats per panel (render/panels.ts). */
+  panelStates: (entity: number): Float32Array => wasm.panel_states(entity),
   telemetry: (entity: number): Float32Array => wasm.telemetry(entity),
   telemetryNames: (): string[] => JSON.parse(wasm.telemetry_names()),
   ffb: (entity: number): Float32Array => wasm.ffb(entity),
@@ -232,6 +262,19 @@ export const sim = {
   runAccount: (): { cash: number; rep: number; bounty: number; debt: number } | null => JSON.parse(wasm.run_account_json()),
   /** "Repair & continue": pays impound + repair, repairs the car, releases the brakes. Throws if refused. */
   runRepairContinue: (): ContinueReport => JSON.parse(wasm.run_repair_continue()),
+  /** Race picker for a player in `car` (`wp_wasm::race::RaceCard[]`). */
+  raceList: (car: string, mode: string): RaceCard[] => JSON.parse(wasm.race_list(car, mode)),
+  /** Start a picker race (new session; the account carries over). Returns entity ids, player first. */
+  raceStart: (id: string, car: string, mode: string, autopilot: boolean): number[] =>
+    Array.from(wasm.race_start(id, car, mode, autopilot)),
+  /** `[phase, countdown_s, elapsed_s, laps, gates, player, racers, closed, length_m, autopilot, kind, player_done]`; empty without a race. */
+  raceInfo: (): Float32Array => wasm.race_info(),
+  /** Standings, position order, RACE_STRIDE floats each (see layout.ts RS). */
+  raceStandings: (): Float32Array => wasm.race_standings(),
+  /** Gates + route of the race (race_marker.ts parseCourse). */
+  raceCourse: (): Float32Array => wasm.race_course(),
+  /** Results once the player is done (`wp_wasm::race::RaceReport`), else null. */
+  raceResult: (): RaceReport | null => JSON.parse(wasm.race_result_json()),
   /** Debug / e2e: set a racer's police heat (not recorded in replays). */
   debugSetHeat: (entity: number, heat: number): void => wasm.debug_set_heat(entity, heat),
   /** Debug / e2e: park `entity` stopped `aheadM` in front of the first police car (throws if none yet). */
@@ -249,6 +292,8 @@ export const sim = {
   careerStartRun: (scenarioJson: string): number[] => Array.from(wasm.career_start_run(scenarioJson)),
   /** End the career run (back to the garage; one night passes). */
   careerEndRun: (): RunClose | null => JSON.parse(wasm.career_end_run()),
+  /** The bust settled on load because the game was closed during a pursuit (B05), once. */
+  careerTakeAbandoned: (): RunClose | null => JSON.parse(wasm.career_take_abandoned_json()),
   careerBuy: (defId: string, condition: string): CareerView => JSON.parse(wasm.career_buy_car(defId, condition)),
   careerFloorCar: (): CareerView => JSON.parse(wasm.career_floor_car()),
   careerSell: (uid: number): CareerView => JSON.parse(wasm.career_sell_car(uid)),
@@ -265,6 +310,8 @@ export const sim = {
 import type { CareerView, ModTreeView, RepairQuote, RunClose, ShopRequest } from "../../../ui-kit/src/garage/types";
 
 export type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
+export type { RaceCard, RaceReport } from "../ui/race";
+import type { RaceCard, RaceReport } from "../ui/race";
 import type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
 
 /** `wp_wasm::garage::LiveBill` (typed in apps/ui-kit/src/live/bill.ts as LiveBillJson). */

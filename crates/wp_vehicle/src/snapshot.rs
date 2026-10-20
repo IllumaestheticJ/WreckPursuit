@@ -3,7 +3,7 @@
 //!
 //! [`VehicleSnapshot`] is an opaque little-endian byte blob (~0.9 kB): every field that carries
 //! over from one tick to the next (chassis, wheels, engine, gearbox timers, clutch, input
-//! filters, TCS (throttle cut + brake-TC)/ABS state, AWD coupling, damage-derived heat/fuel and the applied `HandlingEffects`).
+//! filters, TCS (throttle cut + brake-TC)/ESC/ABS state, AWD coupling, damage-derived heat/fuel and the applied `HandlingEffects`).
 //! Restoring a snapshot and stepping with the same inputs reproduces the original run exactly.
 //! The static definition is not included; a fingerprint guards against restoring into a
 //! different car.
@@ -14,7 +14,9 @@ use wp_contracts::{HandlingEffects, SurfaceType};
 use crate::math::{Quat, V3};
 use crate::vehicle::{Chassis, Vehicle, Wheel};
 
-const FORMAT: u8 = 4;
+/// Format 5: format 4 (brake-TC state, differential rework) plus the ESC reference yaw rate
+/// after the TCS cut (playtest row 28).
+const FORMAT: u8 = 5;
 
 /// Opaque full-state snapshot of one [`Vehicle`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -201,6 +203,7 @@ impl Vehicle {
             self.brake_f,
             self.tcs.cut,
         ]);
+        w.f(self.esc.reference);
         w.fs(&self.abs.release);
         w.fs(&self.tcs.brake);
         w.fs(&[self.heat, self.heat_reported, self.fuel, self.awd_coupling]);
@@ -295,6 +298,7 @@ impl Vehicle {
         let clutch = r.f()?;
         let auto_clutch = r.b()?;
         let misc = r.f4()?;
+        let esc_reference = r.f()?;
         let abs = r.f4()?;
         let tcs_brake = r.f4()?;
         let heat = r.f4()?;
@@ -350,6 +354,7 @@ impl Vehicle {
             self.brake_f,
             self.tcs.cut,
         ] = misc;
+        self.esc.reference = esc_reference;
         self.abs.release = abs;
         self.tcs.brake = tcs_brake;
         [self.heat, self.heat_reported, self.fuel, self.awd_coupling] = heat;

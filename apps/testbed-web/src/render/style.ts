@@ -69,10 +69,9 @@ export interface StyledScene {
   readonly hemi: THREE.HemisphereLight;
   readonly sun: THREE.DirectionalLight;
   readonly groundMaterial: THREE.MeshStandardMaterial;
-  readonly agentMaterial: THREE.MeshStandardMaterial;
-  /** Agent colour override (flags, agent index) → hex; null = the debug colours. */
-  agentColour: ((flags: number, index: number) => number) | null;
-  /** Light-bar glow multiplier for the non-vehicle police units. */
+  /** Graphics quality (render/quality.ts): the post target uses MSAA only when it allows. */
+  readonly quality: { readonly antialias: boolean };
+  /** Light-bar glow multiplier for the police helicopters. */
   policeGlow: number;
   /** Render override (post stack); null = plain renderer.render. */
   renderOverride: ((camera: THREE.Camera) => void) | null;
@@ -410,7 +409,10 @@ export class ArtStyle {
   }
 
   constructor(private readonly view: StyledScene, initial: StyleId) {
-    this.post = new LowPolyPost(new URLSearchParams(location.search).get("msaa") === "0" ? 0 : 4);
+    // The post target's MSAA replaces the canvas MSAA (scene.ts `postAA`), so it follows the
+    // graphics quality (none in the low profile); `?msaa=0` drops it in any profile.
+    const msaa = view.quality.antialias && new URLSearchParams(location.search).get("msaa") !== "0";
+    this.post = new LowPolyPost(msaa ? 4 : 0);
     this.greyLights = {
       hemiSky: view.hemi.color.clone(),
       hemiGround: view.hemi.groundColor.clone(),
@@ -439,7 +441,6 @@ export class ArtStyle {
     this.sky.visible = false;
     view.scene.add(this.sky);
     this.track(view.groundMaterial, PALETTE.flatGround);
-    this.track(view.agentMaterial, 0xffffff);
     view.renderOverride = (camera) => this.render(camera);
     this.set(initial);
   }
@@ -482,7 +483,6 @@ export class ArtStyle {
     buildingUniforms.uStyleOn.value = on ? 1 : 0;
     for (const c of this.cities.values()) if (c.lamps) c.lamps.visible = on;
     this.sky.visible = on;
-    this.view.agentColour = on ? lowpolyAgentColour : null;
     this.view.policeGlow = on ? PALETTE.policeRedGlow : 1;
     this.view.signals.setLampBoost(on ? PALETTE.signalGlow : 1);
     if (!on) {
@@ -548,10 +548,12 @@ export class ArtStyle {
   private buildLamps(root: THREE.Object3D, map: MapStaticJson, district: DistrictMap | null): THREE.Group {
     const group = new THREE.Group();
     group.name = "style-street-lamps";
-    let kerb: THREE.Mesh | null = null;
+    // The city is tiled by now (render/city_tiles.ts): every tile of the kerb mesh shares its
+    // material, so collect them all by material name.
+    const kerbs: THREE.Mesh[] = [];
     root.traverse((o) => {
       const mesh = o as THREE.Mesh;
-      if (mesh.isMesh && !Array.isArray(mesh.material) && (mesh.material as THREE.Material).name === "kerb") kerb = mesh;
+      if (mesh.isMesh && !Array.isArray(mesh.material) && (mesh.material as THREE.Material).name === "kerb") kerbs.push(mesh);
     });
     // Road segments (sim XY) bucketed on a 50 m grid for the nearest-centreline lookup.
     const BUCKET = 50;
@@ -597,8 +599,8 @@ export class ArtStyle {
     // Candidates: kerb triangles facing sideways (the kerb's road face), one per cell.
     type Lamp = { base: THREE.Vector3; toRoad: THREE.Vector3; along: THREE.Vector3; led: boolean };
     const lamps: Lamp[] = [];
-    const k = kerb as THREE.Mesh | null;
-    if (k) {
+    const taken = new Set<string>();
+    for (const k of kerbs) {
       k.updateWorldMatrix(true, false);
       const g = k.geometry;
       const pos = g.attributes.position;
@@ -606,7 +608,6 @@ export class ArtStyle {
       const tris = idx ? idx.count / 3 : pos.count / 3;
       const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
       const n = new THREE.Vector3(), e1 = new THREE.Vector3(), e2 = new THREE.Vector3();
-      const taken = new Set<string>();
       for (let t = 0; t < tris; t++) {
         const i0 = idx ? idx.getX(t * 3) : t * 3;
         const i1 = idx ? idx.getX(t * 3 + 1) : t * 3 + 1;
@@ -765,12 +766,6 @@ export class ArtStyle {
 function smooth(e0: number, e1: number, x: number): number {
   const t = Math.min(Math.max((x - e0) / (e1 - e0), 0), 1);
   return t * t * (3 - 2 * t);
-}
-
-/** Traffic agent box colour in low-poly dark: a muted paint per agent slot and variant. */
-function lowpolyAgentColour(flags: number, index: number): number {
-  const p = PALETTE.trafficPaints;
-  return col(p[(index * 7 + (flags >> 8)) % p.length]).getHex();
 }
 
 /** Paint for a vehicle view: player/scenario cars by id, traffic by id, police white. */

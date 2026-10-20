@@ -8,8 +8,10 @@
 //! (`wp_damage::FullDamageSnapshot` JSON in the browser), keyed by car uid.
 //!
 //! The JSON is versioned ([`PROFILE_FORMAT`], [`PROFILE_VERSION`]). [`CareerProfile::from_json`]
-//! migrates older versions step by step ([`migrate`]; no step exists yet because version 1 is
-//! the first) and refuses saves from a newer build. Fields added later must be
+//! migrates older versions step by step ([`migrate`]) and refuses saves from a newer build.
+//! Version 2 added [`crate::OwnedCar::purchase_price`] (resale is valued from the price paid);
+//! the 1 → 2 step marks every car of an old save as "price unknown", valued at the cheapest
+//! price the player could have paid. Fields added later must be
 //! `#[serde(default)]` so older saves of the same version still load.
 //!
 //! Carry-over rules (tables in `consequences.toml [career]`, [`Economy::carry_heat`]):
@@ -33,7 +35,7 @@ pub const PROFILE_FORMAT: &str = "wreckpursuit-career";
 
 /// Current profile version (bump it, and add a [`migrate`] step, when the shape changes in a
 /// way `#[serde(default)]` cannot absorb).
-pub const PROFILE_VERSION: u32 = 1;
+pub const PROFILE_VERSION: u32 = 2;
 
 /// What one run leaves for the next.
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
@@ -56,6 +58,23 @@ pub struct CareerStats {
     /// Largest single escape bounty.
     pub best_escape_bounty: Money,
     /// Sim time driven over the whole career, physics ticks (`PHYSICS_DT` each).
+    pub driven_ticks: u64,
+}
+
+/// A career run that was in progress during a pursuit when the profile was saved (B05). A
+/// save carries it only while a run is being driven with the police on the player; ending the
+/// run normally saves a profile without it. A save that still has it when it is loaded means
+/// the game was closed mid-pursuit: the loader settles it as a capture
+/// ([`Economy::settle_abandoned_run`]), so closing the tab is never an escape.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct AbandonedRun {
+    /// The career car being driven.
+    pub car: crate::ledger::CarUid,
+    /// Wanted level at the save.
+    pub level: wp_contracts::WantedLevel,
+    /// Police heat at the save.
+    pub heat: f32,
+    /// Sim time driven in the run up to the save, physics ticks.
     pub driven_ticks: u64,
 }
 
@@ -115,6 +134,10 @@ pub struct CareerProfile {
     /// pristine.
     #[serde(default)]
     pub lattices: BTreeMap<u32, String>,
+    /// Set only in saves written during a run while the player was pursued (see
+    /// [`AbandonedRun`]); `None` between runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_in_pursuit: Option<AbandonedRun>,
 }
 
 impl Economy {
@@ -131,7 +154,38 @@ impl Economy {
             carry: CarryOver::default(),
             stats: CareerStats::default(),
             lattices: BTreeMap::new(),
+            run_in_pursuit: None,
         }
+    }
+
+    /// Settle a run the game was closed in during a pursuit ([`AbandonedRun`]) as a capture:
+    /// [`Economy::handle_capture`] at the saved wanted level (fine, bail, rep loss, impound /
+    /// seizure by mode), then the run closes as [`RunEnd::Captured`] (no heat carried, one
+    /// night passes). Clears the marker. Returns the capture's and the night's ledger lines,
+    /// or `None` when the profile has no marker. A marker whose car is no longer in the
+    /// account (or not wanted) is dropped with only the run closed as captured.
+    pub fn settle_abandoned_run(
+        &self,
+        p: &mut CareerProfile,
+        rng: &mut wp_math::Rng,
+    ) -> Option<Vec<EconomyEvent>> {
+        let run = p.run_in_pursuit.take()?;
+        let mut events = Vec::new();
+        if p.account.car(run.car).is_some() {
+            let ctx = crate::capture::CaptureContext {
+                mode: p.mode,
+                wanted: run.level.max(wp_contracts::WantedLevel::L1),
+                car: run.car,
+                total_loss: false,
+                session_violations: Default::default(),
+            };
+            if let Ok((_, ev)) = self.handle_capture(&mut p.account, &ctx, rng) {
+                p.ledger.extend(ev.iter().cloned());
+                events.extend(ev);
+            }
+        }
+        events.extend(self.close_run(p, RunEnd::Captured, 0.0, 0, run.driven_ticks));
+        Some(events)
     }
 
     /// Heat the next run starts with, given the heat when this one ended (module docs).
@@ -219,9 +273,9 @@ impl CareerProfile {
 
 /// Bring a save of any supported version up to [`PROFILE_VERSION`].
 ///
-/// Migration stub: version 1 is the first, so there is no step yet. When the shape changes,
-/// bump [`PROFILE_VERSION`] and add `n => step_n_to_n_plus_1(value)` below; each step edits
-/// the JSON and sets `version` to `n + 1`.
+/// Steps, oldest first; each edits the JSON and sets `version` to `n + 1`. When the shape
+/// changes again, bump [`PROFILE_VERSION`] and add the next step.
+/// - 1 → 2: every owned car gets `"purchase_price": null` (price paid unknown).
 pub fn migrate(mut value: serde_json::Value) -> Result<serde_json::Value, ProfileError> {
     let obj = value
         .as_object()
@@ -231,19 +285,38 @@ pub fn migrate(mut value: serde_json::Value) -> Result<serde_json::Value, Profil
             "missing \"format\": \"{PROFILE_FORMAT}\""
         )));
     }
-    let version =
+    let mut version =
         obj.get("version")
             .and_then(|v| v.as_u64())
             .ok_or_else(|| ProfileError::Invalid("missing \"version\"".into()))? as u32;
     if version > PROFILE_VERSION {
         return Err(ProfileError::TooNew { found: version });
     }
-    // Steps go here, oldest first, each one ending with `version = n + 1`:
-    // if version == 1 { value = step_1_to_2(value); version = 2; }
+    if version == 1 {
+        value = step_1_to_2(value)?;
+        version = 2;
+    }
     if version < PROFILE_VERSION {
         return Err(ProfileError::NoMigration { found: version });
     }
     value["version"] = serde_json::Value::from(version);
+    Ok(value)
+}
+
+/// 1 → 2: cars carry the price paid; old cars get `null` (see [`Economy::resale_basis`]).
+fn step_1_to_2(mut value: serde_json::Value) -> Result<serde_json::Value, ProfileError> {
+    let garage = value
+        .pointer_mut("/account/garage")
+        .and_then(|g| g.as_array_mut())
+        .ok_or_else(|| ProfileError::Invalid("missing \"account.garage\"".into()))?;
+    for car in garage.iter_mut() {
+        let car = car
+            .as_object_mut()
+            .ok_or_else(|| ProfileError::Invalid("a garage car is not an object".into()))?;
+        car.entry("purchase_price")
+            .or_insert(serde_json::Value::Null);
+    }
+    value["version"] = serde_json::Value::from(2);
     Ok(value)
 }
 
@@ -278,21 +351,42 @@ mod tests {
     }
 
     #[test]
+    fn version_1_saves_migrate_with_unknown_purchase_price() {
+        let e = econ();
+        let mut p = e.new_career(PlayerId(1), DamageMode::Arcade);
+        e.issue_floor_car(&mut p.account).unwrap();
+        let mut v: serde_json::Value = serde_json::from_str(&p.to_json()).unwrap();
+        v["version"] = 1.into();
+        v["account"]["garage"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("purchase_price");
+        let back = CareerProfile::from_json(&v.to_string()).unwrap();
+        assert_eq!(back.version, PROFILE_VERSION);
+        let car = &back.account.garage[0];
+        assert_eq!(car.purchase_price, None);
+        assert!(e.sale_price(car) <= e.market.floor_car.price);
+        // Written again, it is a version-2 save that keeps its (unknown) price.
+        let again = CareerProfile::from_json(&back.to_json()).unwrap();
+        assert_eq!(again, back);
+    }
+
+    #[test]
     fn versions_are_checked() {
         let e = econ();
         let p = e.new_career(PlayerId(1), DamageMode::Simulation);
         let mut v: serde_json::Value = serde_json::from_str(&p.to_json()).unwrap();
-        v["version"] = 2.into();
+        v["version"] = 3.into();
         assert_eq!(
             CareerProfile::from_json(&v.to_string()),
-            Err(ProfileError::TooNew { found: 2 })
+            Err(ProfileError::TooNew { found: 3 })
         );
         v["version"] = 0.into();
         assert_eq!(
             CareerProfile::from_json(&v.to_string()),
             Err(ProfileError::NoMigration { found: 0 })
         );
-        v["version"] = 1.into();
+        v["version"] = 2.into();
         v["format"] = "something-else".into();
         assert!(matches!(
             CareerProfile::from_json(&v.to_string()),

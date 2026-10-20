@@ -47,7 +47,7 @@
           ]
         }
       },
-      "gain": 0.8,
+      "gain": 4.933,
       "looped": true
     },
     "engine/high_on": {
@@ -58,7 +58,7 @@
           ]
         }
       },
-      "gain": 1.0,
+      "gain": 6.166,
       "looped": true
     },
     "engine/idle": {
@@ -69,7 +69,7 @@
           ]
         }
       },
-      "gain": 1.0,
+      "gain": 6.166,
       "looped": true
     },
     "engine/limiter": {
@@ -100,7 +100,7 @@
           ]
         }
       },
-      "gain": 0.8,
+      "gain": 4.933,
       "looped": true
     },
     "engine/mid_on": {
@@ -111,7 +111,7 @@
           ]
         }
       },
-      "gain": 1.0,
+      "gain": 6.166,
       "looped": true
     },
     "exhaust/pop": {

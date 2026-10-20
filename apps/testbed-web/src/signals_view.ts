@@ -2,7 +2,8 @@
 // far-side pedestal head across the junction, and a white stop line. Static geometry comes from
 // signal_heads() once per session; per-frame states from signal_states() (one byte per head)
 // only recolour lamps whose state changed. One InstancedMesh per part keeps it to a handful of
-// draw calls for the whole city.
+// draw calls for the whole city. Only heads within SIGNAL_DRAW_M of the camera are packed into
+// the instanced meshes (browser perf pass: the whole city's lamps were ~110k triangles a frame).
 // Everything is placed from the exported road z, so hills work the same as the flat grid.
 import * as THREE from "three";
 import { SIGNAL, SIGNAL_HEAD_STRIDE, SH } from "./wasm/layout";
@@ -14,6 +15,10 @@ const NEAR_POLE_H = 6.2;
 const FAR_POLE_H = 3.6;
 const POLE_CURB_GAP = 0.8;
 const LAMP_SPACING = 0.34;
+/** Heads farther than this from the camera (m, horizontal) are not drawn (a lamp is < 2 px). */
+export const SIGNAL_DRAW_M = 450;
+/** Re-pick the near heads when the camera has moved this far (m). */
+const RESELECT_M = 20;
 
 const LAMP_COLOURS = [new THREE.Color(1.0, 0.08, 0.04), new THREE.Color(1.0, 0.62, 0.0), new THREE.Color(0.15, 1.0, 0.45)];
 /** Lamp index (0 red, 1 amber, 2 green) lit for a state code, or -1. */
@@ -46,6 +51,22 @@ export class SignalView {
   private lampBoost = 1;
   /** Head count of the current city (0 without one). */
   count = 0;
+  /** Every instance matrix of every part as built (full city), for re-packing near heads. */
+  private fullPerInstance: Float32Array[] = [];
+  private fullPerHead: Float32Array[] = [];
+  /** Head stop-line positions (sim x, y). */
+  private headXY = new Float32Array(0);
+  /** Packed slot of each head (-1 = not drawn) and the heads in slot order. */
+  private slotOf = new Int32Array(0);
+  private near: number[] = [];
+  private readonly lastPick = new THREE.Vector2(Infinity, Infinity);
+  private readonly tmpC = new THREE.Color();
+  private readonly tmpM = new THREE.Matrix4();
+  private readonly zero = new THREE.Matrix4().makeScale(0, 0, 0);
+  /** Heads drawn at the last update (automation). */
+  get drawnCount(): number {
+    return this.near.length;
+  }
 
   /** Rebuild from signal_heads(); an empty array clears the view. */
   setHeads(heads: Float32Array): void {
@@ -61,6 +82,12 @@ export class SignalView {
     this.count = n;
     this.shown = new Uint8Array(n).fill(255);
     this.lastNight = -1;
+    this.near = [];
+    this.slotOf = new Int32Array(n).fill(-1);
+    this.headXY = new Float32Array(n * 2);
+    this.lastPick.set(Infinity, Infinity);
+    this.fullPerInstance = [];
+    this.fullPerHead = [];
     if (n === 0) return;
     const inst = n * HEADS_PER_APPROACH;
 
@@ -99,6 +126,8 @@ export class SignalView {
     for (let h = 0; h < n; h++) {
       const o = h * SIGNAL_HEAD_STRIDE;
       const [x, y, z, yaw] = [heads[o + SH.x], heads[o + SH.y], heads[o + SH.z], heads[o + SH.yaw]];
+      this.headXY[h * 2] = x;
+      this.headXY[h * 2 + 1] = y;
       const left = heads[o + SH.left];
       const right = heads[o + SH.right];
       const radius = heads[o + SH.radius];
@@ -135,6 +164,44 @@ export class SignalView {
     }
     this.parts = [poles, arms, housings, stops];
     this.group.add(...this.parts, ...this.lamps, this.glow);
+    this.fullPerInstance = [poles, housings, ...this.lamps].map((m) => (m.instanceMatrix.array as Float32Array).slice());
+    this.fullPerHead = [arms, stops].map((m) => (m.instanceMatrix.array as Float32Array).slice());
+    // Nothing is drawn until the first update() picks the heads near the camera.
+    for (const m of [...this.parts, ...this.lamps, this.glow]) m.count = 0;
+  }
+
+  /** Pack the heads within `radius` m of (x, y) (sim space) into the instanced meshes. */
+  private pick(x: number, y: number, radius: number): void {
+    this.lastPick.set(x, y);
+    const near: number[] = [];
+    const r2 = radius * radius;
+    for (let h = 0; h < this.count; h++) {
+      const dx = this.headXY[h * 2] - x;
+      const dy = this.headXY[h * 2 + 1] - y;
+      if (dx * dx + dy * dy < r2) near.push(h);
+    }
+    if (near.length === this.near.length && near.every((h, i) => h === this.near[i])) return;
+    this.slotOf.fill(-1);
+    near.forEach((h, s) => (this.slotOf[h] = s));
+    this.near = near;
+    const [poles, arms, housings, stops] = this.parts;
+    [poles, housings, ...this.lamps].forEach((m, k) => {
+      const src = this.fullPerInstance[k];
+      const dst = m.instanceMatrix.array as Float32Array;
+      near.forEach((h, s) => dst.set(src.subarray(h * HEADS_PER_APPROACH * 16, (h + 1) * HEADS_PER_APPROACH * 16), s * HEADS_PER_APPROACH * 16));
+      m.count = near.length * HEADS_PER_APPROACH;
+      m.instanceMatrix.needsUpdate = true;
+    });
+    [arms, stops].forEach((m, k) => {
+      const src = this.fullPerHead[k];
+      const dst = m.instanceMatrix.array as Float32Array;
+      near.forEach((h, s) => dst.set(src.subarray(h * 16, (h + 1) * 16), s * 16));
+      m.count = near.length;
+      m.instanceMatrix.needsUpdate = true;
+    });
+    this.glow!.count = near.length * HEADS_PER_APPROACH;
+    // Re-colour every packed head on this update.
+    this.shown.fill(255);
   }
 
   /** Housing matrix plus the three lamp centres, on the face toward approaching drivers (-f). */
@@ -165,28 +232,36 @@ export class SignalView {
    * Apply signal_states() (one code byte per head). Only heads whose state changed are
    * recoloured; `night` (0 noon … 1 midnight) dims unlit lamps and strengthens the glow.
    */
-  update(states: Uint8Array, night: number): void {
+  update(states: Uint8Array, night: number, camera?: THREE.Vector3): void {
     this.group.visible = layers.on("signals") && this.count > 0;
     if (!this.group.visible || !this.glow) return;
+    // Camera in sim space: Three (x, y, z) = sim (x, z, -y). Without a camera: every head.
+    if (!camera) {
+      if (this.lastPick.x === Infinity) this.pick(0, 0, Infinity);
+    } else if (this.lastPick.distanceTo({ x: camera.x, y: -camera.z }) > RESELECT_M) {
+      this.pick(camera.x, -camera.z, SIGNAL_DRAW_M);
+    }
     const nightChanged = Math.abs(night - this.lastNight) > 0.02;
     if (nightChanged) {
       this.lastNight = night;
       this.glowMat.opacity = 0.18 + 0.6 * night;
     }
     const dim = 0.16 * (1 - 0.7 * night);
-    const c = new THREE.Color();
-    const m = new THREE.Matrix4();
-    const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+    const c = this.tmpC;
+    const m = this.tmpM;
+    const zero = this.zero;
     let dirty = false;
-    const n = Math.min(states.length, this.count);
-    for (let h = 0; h < n; h++) {
+    for (let s = 0; s < this.near.length; s++) {
+      const h = this.near[s];
+      if (h >= states.length) continue;
       const code = states[h];
       if (code === this.shown[h] && !nightChanged) continue;
       this.shown[h] = code;
       dirty = true;
       const lit = litLamp(code);
       for (let k = 0; k < HEADS_PER_APPROACH; k++) {
-        const i = h * HEADS_PER_APPROACH + k;
+        const i = s * HEADS_PER_APPROACH + k;
+        const src = h * HEADS_PER_APPROACH + k;
         for (let l = 0; l < 3; l++) {
           c.copy(LAMP_COLOURS[l]);
           if (l !== lit) c.multiplyScalar(dim);
@@ -195,7 +270,7 @@ export class SignalView {
         if (lit < 0) {
           this.glow.setMatrixAt(i, zero);
         } else {
-          const p = i * 9 + lit * 3;
+          const p = src * 9 + lit * 3;
           m.makeTranslation(this.lampPos[p], this.lampPos[p + 1], this.lampPos[p + 2]);
           this.glow.setMatrixAt(i, m);
           this.glow.setColorAt(i, LAMP_COLOURS[lit]);
@@ -217,8 +292,8 @@ export class SignalView {
     for (const l of this.lamps) (l.material as THREE.MeshBasicMaterial).color.setScalar(k);
   }
 
-  /** Current per-head state codes as last drawn (for automation). */
+  /** Current per-head state codes as last drawn (for automation; 255 = not drawn yet). */
   drawnStates(): number[] {
-    return Array.from(this.shown.subarray(0, this.count));
+    return Array.from(this.shown.subarray(0, this.count), (c, h) => (this.slotOf[h] >= 0 ? c : 255));
   }
 }

@@ -12,7 +12,7 @@
           ]
         }
       },
-      "gain": 1.0,
+      "gain": 1.995,
       "looped": true
     },
     "siren/yelp": {
@@ -23,7 +23,7 @@
           ]
         }
       },
-      "gain": 1.0,
+      "gain": 1.995,
       "looped": true
     },
     "siren/phaser": {
@@ -34,7 +34,7 @@
           ]
         }
       },
-      "gain": 1.0,
+      "gain": 1.995,
       "looped": true
     },
     "siren/hilo": {
@@ -45,7 +45,7 @@
           ]
         }
       },
-      "gain": 1.0,
+      "gain": 1.995,
       "looped": true
     }
   }

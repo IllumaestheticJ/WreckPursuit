@@ -13,8 +13,11 @@ clock. Implements `wp_contracts::WorldQuery`. No renderer dependency; compiles f
 | `procgen` | Procedural fallback city (grid + ring + highway spine + 2 diagonals), flat |
 | `vesper` | Port Vesper v2 (`vesper_v2`): curved streets, hills, terrain, banked highway loop, grade separations |
 | `terrain` | `Heightfield` (stored with the network), value noise, bumps |
-| `surface` | Road trimesh for physics/greybox, deck rails, `MapGround` wheel probe |
+| `surface` | Road trimesh, raised sidewalks + kerbs (`sidewalk_mesh`), junction discs, deck rails — one geometry for physics and the greybox; `MapGround` wheel probe |
 | `map` | Runtime map: connector curves, conflict sets, uniform-grid index, `WorldQuery` (incl. building line of sight) |
+| `surface` | Road trimesh for physics/greybox, deck rails, `MapGround` wheel probe |
+| `map` | Runtime map: connector curves, conflict sets, uniform-grid index, `WorldQuery` (incl. building, terrain and tunnel line of sight) |
+| `covered` | Tunnels / covered roads: `CoverShape` (inside test, sightline rules, wall lines, light points), `CoverIndex`; shell dimensions shared with `wp_sim` colliders and the greybox |
 | `signals` | Fixed-time controller evaluation |
 | `traffic` | Civilian agents: IDM, MOBIL, junction permits, hazards, spawning, LOD |
 | `density` | Density model (`f_time`, `f_distance`, district bases) |
@@ -75,7 +78,7 @@ ignored perf run with 12 blockers. `tests/drive.rs` drives the real car (Rapier 
 
 ## Road format (`data/city/<city>.road.bin` + `.road.json`)
 
-Binary: `b"WPRD"`, little-endian `u32` format version (`ROAD_FORMAT_VERSION` = 2), then the
+Binary: `b"WPRD"`, little-endian `u32` format version (`ROAD_FORMAT_VERSION` = 3; v3 added `covered`), then the
 [postcard](https://docs.rs/postcard) encoding of `RoadNetwork`. The `.road.json` debug dump is
 the `serde_json` encoding of the same struct and loads identically (`RoadNetwork::load` picks by
 extension). All coordinates are metres, +X east, +Y north, +Z up. Ids are `u32` indices.
@@ -194,10 +197,45 @@ After `docs/design/CITY.md`, scaled to ≈ 3.3 × 2.9 km (`MAP_LO..MAP_HI`), 5 m
   `Loop 9 north`, `Loop 9 west`; 3 precincts + helipad, 3 garages, 4 safehouses (incl.
   `Knob Observatory Lot`).
 
-950 lanes, 133 junctions (27 signalised), 3346 buildings, 2 grade separations, terrain
+- **Covered roads** (backlog B04, `RoadNetwork::covered`): the **Hollins Tunnel** — Loop 9
+  through the northern shoulder of Hollins Heights, 391 m, road profile unchanged (it already
+  ran in a cut), ground backfilled over the roof on the hill side — and **Founders Cut** — the
+  Uptown Connector dropped 7 m below the lowest natural ground into a 250 m covered trench
+  (an internal profile anchor; ramps ≈ 5 %), ground backfilled level with the plaza deck.
+  Inner half width = paved half width + 3.5 m (sidewalk roads) / 1.5 m; ceiling 6.5 m
+  (highway) / 6 m; 0.6 m walls; 0.8 m deck reaching 8.5 m past each wall over the carved
+  shoulder. No buildings on the decks. Route POIs `"<name> entry"`, `"<name> lay-by"`
+  (mid-tunnel kerb lane), `"<name> exit"`.
+- **Line of sight** (`CityMap::line_of_sight`): blocked from outside a span into it and back;
+  two points inside the same span see each other along a line that stays inside; outside
+  lines are blocked through the shell (walls + deck) and clear above it.
+  `CityMap::covered_los = false` / `World::set_covered_los(false)` switches only the
+  sightline effect off (A/B controls). `World::covered_at(p)` names the span at a point.
+
+950 lanes, 133 junctions (27 signalised), 3312 buildings, 2 grade separations, 2 covered roads, terrain
 681 × 611 vertices (−3 … 111 m); generation ≈ 0.12 s release (0.4 s debug), `CityMap::new`
 ≈ 10 ms. `cargo run --release -p wp_world --example vesper_stats` prints grades, crest/sag g
 at the limit and banks per road.
+
+### Sidewalks, kerbs and junction discs (`surface`, playtest #20)
+Physics (`wp_sim`) and the greybox (`tools/city-import`) build these from the same functions,
+so what you see is what you drive on (`tools/city-import/tests/surface_match.rs` checks it):
+- **Sidewalks** (`sidewalk_mesh`): along every edge lane that is not a highway
+  (`lane_sidewalks`), from the kerb line out to `SIDEWALK_W_M` = 3 m, `KERB_H_M` = 0.15 m above
+  the road edge, continuing the road's bank; vertical kerb faces from the road edge up,
+  facing the road. Where a strip would run onto pavement (the crossing road or junction disc
+  at a tight/skewed corner) it is trimmed in `TRIM_CELL_M` = 0.5 m cells.
+- **Corner and bend fills:** the gaps between sidewalk ends at a node — junction corners, the
+  top of a T, the outside of a bend — are filled at kerb height (the area between the two
+  strips' kerb and outer lines, extended to where they meet; a least-squares plane through
+  the four end points), minus pavement and what the strips cover, with kerb faces towards
+  the pavement. Corner kerbs follow the junction disc in 0.5 m steps.
+- **Junction discs** (`junction_polygon`, `junction_paved_radii`): a 16-gon whose edges touch
+  the circle (not its corners), with a paved radius large enough to reach the corners of
+  every road ribbon trimmed at the junction (`sqrt(d² + w²)`). `Intersection::radius_m`
+  (lane trimming, junction logic) is unchanged.
+- Sizes: Port Vesper 28 k top + 28 k kerb triangles (≈ 46 ms to build, release), the grid
+  9.5 k + 11 k.
 
 ## Traffic AI
 
@@ -281,11 +319,13 @@ scaled down so the active area never exceeds `max_agents` (400). `f_distance =
 max(0.2, 1 / (1 + (d/600 m)²))`; `f_time` = hourly piecewise-linear curves with commute
 bumps (07–09, 16–18) for Residential/Commercial/Suburb, shift peaks for Industrial, a deep
 01:00–05:00 trough, and Core nightlife until ~02:00 (noon/03:00 = 10×). The active area is
-400 m around each player and around active route samples; with no players and no routes the
+440 m around each player and around active route samples; with no players and no routes the
 whole map is active (headless tests). Every 0.25 s: despawn out-of-area, closed-lane, stuck
 (> 120 s) and surplus agents (district total > target + 4 % or zone > 1.5× target), spawn into
 zones with deficits on free lane spots (≥ 12 m gaps). **Sightline rule (prototype)**: nothing
-spawns or despawns within 150 m of a player's current position or of where it will be in 1 s.
+spawns or despawns within 320 m of a player's current position or of where it will be in 1 s
+(was 150 m / 400 m active until the LOD pop-in fix, playtest row 25: cars popped in and out
+in plain view on Port Vesper's highway and hill sightlines; `tests/lod_draw.rs` measures it).
 
 **Violations** (tracked vehicles, 60 Hz): speeding = over the limit by more than
 max(2.24 m/s, 10 %) for > 1 s (re-emitted every 5 s); red light = crossing the stop line of the
@@ -341,8 +381,10 @@ and it has stood behind it ≥ 1 s:
   it has an entry in that lane's list, so oncoming traffic stops for it like for any car.
 - **Turn around** otherwise (two-way road, ≥ 6 m from the junction ends): `plan_turn` finds a
   U-turn or k-point turn within the paved driving lanes (parking lanes excluded) clear of every
-  nearby car / tracked vehicle / debris; it starts when oncoming traffic can stop for it
-  (`v² / 6 + 25 m` clear) and the lanes crossed have nobody arriving. Kinematic agents follow the
+  nearby car / tracked vehicle / debris; it starts when every oncoming car can stop for it
+  (`(v + 2)² / 6 + 25 m` from its own speed `v`), followers in its own lane can stop at
+  2 m/s² at least 10 m short of its rear (room for the reversing legs), and the lanes crossed
+  have nobody arriving within 40 m. Kinematic agents follow the
   planned legs at ≤ 1.2 m/s (0.7 s between legs, re-checking each leg's sweep); physical agents
   run `TurnDriver` (re-plans before every leg from the measured pose, engages reverse through the
   automatic box). The car holds entries in its own lane (3 m behind it) and the oncoming lane
@@ -427,3 +469,7 @@ aggressive: 0 civilian–civilian collisions (`tests/city_v2.rs`, ignored).
   slopes; the testbed draws kinematic cars level).
 - City v2: `WorldQuery::surface_at` and `CityMap::ground_height` project onto whole lane
   polylines (≈ 0.5 µs on the curved city); terrain LOS samples every 8 m.
+- `CityMap::ground_height` / `MapGround` do not know the raised sidewalks (roads, junctions,
+  terrain only); `wp_sim` lifts spawns onto a sidewalk top under them. Corner fills and trims
+  follow pavement in 0.5 m steps (a sidewalk edge can overhang the outer rim of a junction
+  disc by up to ~0.35 m; never a lane or turning path — tested).

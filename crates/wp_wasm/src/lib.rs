@@ -18,6 +18,7 @@
 //! | io | `events_drain() -> postcard`, `events_decode(bytes)`, `telemetry(entity)`, `telemetry_names()`, `ffb(entity)`, `intents()` |
 //! | replay | `record_start()`, `record_stop()`, `recording()`, `replay_load(bytes)`, `replay_seek(tick)`, `replay_play(speed)`, `replay_status()`, `replay_export_csv(bytes, entity, every)` |
 //! | scenario | `scenario_json()`, `scenario_result()` |
+//! | race (15) | `race_list(car, mode)`, `race_start(id, car, mode, autopilot)`, `race_info()`, `race_standings()`, `race_course()`, `race_result_json()` — see [`race`] |
 //! | run (lead) | `run_result_json()`, `run_ledger_json()`, `run_account_json()`, `run_repair_continue()`, `debug_set_heat(entity, heat)`, `debug_park_near_police(entity, ahead_m)` — see [`run`] |
 //! | map (16) | `map_static_json()` once per city, `map_dynamic(player)` per frame — see [`map`] |
 //! | weather (lead) | `weather_choices()`, `scenario_with_weather(json, choice)`, `scenario_weather_choice(json)`, `city_chase_rain_json(car, mode, city_id)`, `weather_info()`, `weather_grid_meta()`, `weather_grid()`, `weather_spray()` — see [`weather`] |
@@ -33,9 +34,11 @@ pub mod audio;
 pub mod career;
 pub mod data;
 pub mod garage;
+pub mod lod;
 pub mod map;
 pub mod pack;
 pub mod police;
+pub mod race;
 pub mod run;
 pub mod scenario;
 pub mod session;
@@ -44,6 +47,8 @@ pub mod weather;
 
 #[cfg(test)]
 mod career_tests;
+#[cfg(test)]
+mod race_tests;
 #[cfg(test)]
 mod run_tests;
 
@@ -353,6 +358,39 @@ struct VehicleInfo {
     spawn_pos: [f32; 3],
 }
 
+#[derive(Serialize)]
+struct CarModelInfo {
+    car_id: String,
+    body_size_m: [f32; 3],
+    wheels: Vec<WheelInfo>,
+}
+
+/// Static info JSON for a car model without a vehicle (`{ car_id, body_size_m, wheels }`, wheels
+/// as in `vehicle_info`): the browser builds a model's instanced far-LOD mesh before any car
+/// of that model exists.
+#[wasm_bindgen]
+pub fn car_model_info(car_id: &str) -> Result<String, JsValue> {
+    let car = data::load_car(car_id).map_err(err)?;
+    let d = &car.def;
+    Ok(json(&CarModelInfo {
+        car_id: d.id.clone(),
+        body_size_m: d.body_size_m,
+        wheels: d
+            .wheels
+            .iter()
+            .zip(d.suspension.iter())
+            .map(|(w, su)| WheelInfo {
+                position_m: w.position_m,
+                radius_m: w.radius_m,
+                width_m: w.width_m,
+                steerable: w.steerable,
+                travel_m: su.travel_m,
+                tire_id: w.tire_id.clone(),
+            })
+            .collect(),
+    }))
+}
+
 /// Static info JSON for a vehicle: scenario name, dimensions, wheels, CG (chassis space),
 /// lattice sizes and the name tables for region / component / surface indices.
 #[wasm_bindgen]
@@ -648,6 +686,82 @@ pub fn run_repair_continue() -> Result<String, JsValue> {
     with(|s| s.repair_and_continue().map(|r| json(&r)))
 }
 
+// ----- races (workstream 15) ----------------------------------------------------------------
+
+fn parse_mode(mode: &str) -> Result<DamageMode, String> {
+    match mode {
+        "Simulation" => Ok(DamageMode::Simulation),
+        "Arcade" | "" => Ok(DamageMode::Arcade),
+        other => Err(format!("unknown damage mode {other:?}")),
+    }
+}
+
+/// The race picker as JSON ([`race::RaceCard`] array): every race with its city, kind, laps,
+/// legality, hour, length, police presence, AI drivers (name, personality, car) and the
+/// advertised purse / buy-in for a player in `car` in `mode`.
+#[wasm_bindgen]
+pub fn race_list(car: &str, mode: &str) -> Result<String, JsValue> {
+    let mode = parse_mode(mode).map_err(err)?;
+    let car = simcli::data::load_car(data::mem_data(), car).ok();
+    Ok(json(&race::race_cards(car.as_ref(), mode)))
+}
+
+/// Start race `id` with the player in `car` (`mode` `"Arcade"` | `"Simulation"`): a new live
+/// session on the race's grid, countdown running, AI field on the slots ahead. `autopilot`
+/// hands the player's car to the AI (tests / e2e). The account carries over like a restart.
+/// Returns the entity ids (player first).
+#[wasm_bindgen]
+pub fn race_start(id: &str, car: &str, mode: &str, autopilot: bool) -> Result<Vec<u32>, JsValue> {
+    let def = wp_race::catalog::race(id).ok_or_else(|| err(format!("unknown race {id:?}")))?;
+    let sc =
+        race::race_scenario(&def, car, parse_mode(mode).map_err(err)?, autopilot).map_err(err)?;
+    Ok(install(Session::new(sc, false).map_err(err)?))
+}
+
+/// Live race state, or an empty array without a race: see [`race::RaceRun::info`]
+/// (`[phase, countdown_s, elapsed_s, laps, gates, player, racers, closed_loop, length_m,
+/// autopilot, kind, player_done]`).
+#[wasm_bindgen]
+pub fn race_info() -> Result<Vec<f32>, JsValue> {
+    get(|s| s.race().map(|r| r.info(s.tick())).unwrap_or_default())
+}
+
+/// Live standings, position order, [`race::STANDING_STRIDE`] floats per racer (see
+/// [`race::RaceRun::standings_packed`]); empty without a race.
+#[wasm_bindgen]
+pub fn race_standings() -> Result<Vec<f32>, JsValue> {
+    get(|s| {
+        s.race()
+            .map(race::RaceRun::standings_packed)
+            .unwrap_or_default()
+    })
+}
+
+/// Floats per racer in `race_standings()`.
+#[wasm_bindgen]
+pub fn race_standing_stride() -> u32 {
+    race::STANDING_STRIDE as u32
+}
+
+/// Gates and route of the current race (static; see [`race::RaceRun::course_packed`]).
+#[wasm_bindgen]
+pub fn race_course() -> Result<Vec<f32>, JsValue> {
+    get(|s| {
+        s.race()
+            .map(race::RaceRun::course_packed)
+            .unwrap_or_default()
+    })
+}
+
+/// Results panel JSON ([`race::RaceReport`]) once the player is no longer racing (finished,
+/// DNF or DQ), `null` before or without a race. `final_results` turns true when the whole
+/// field is done; `payout` (G's settlement) arrives then. `handoff_run_end`: the police caught
+/// the player, the end-of-run panel owns the screen.
+#[wasm_bindgen]
+pub fn race_result_json() -> Result<String, JsValue> {
+    get(|s| json(&s.race_report()))
+}
+
 /// Debug / e2e: set a racer's police heat (`PoliceSystem::set_heat`). Changes the run and is
 /// **not** recorded in replays.
 #[wasm_bindgen]
@@ -694,6 +808,36 @@ pub fn traffic_agents() -> Result<Vec<f32>, JsValue> {
         }
         out
     })
+}
+
+/// Floats per record in `traffic_draw()` / `police_draw()` ([`lod::DRAW_STRIDE`]).
+#[wasm_bindgen]
+pub fn lod_draw_stride() -> u32 {
+    lod::DRAW_STRIDE as u32
+}
+
+/// Draw records for every civilian agent at any LOD (see [`lod::traffic_draw`]), 10 floats each:
+/// `[agent id, entity (0 = none), x, y, z, qx, qy, qz, qw, flags]`; flags as in
+/// `traffic_agents()`. Kinematic agents are seated on the ground the way the sim places a
+/// promoted car, so the browser can swap instanced and full meshes without a jump.
+#[wasm_bindgen]
+pub fn traffic_draw() -> Result<Vec<f32>, JsValue> {
+    get(|s| lod::traffic_draw(s.sim()))
+}
+
+/// Draw records for every police unit, bound or not (see [`lod::police_draw`]), 10 floats each:
+/// `[unit id, entity (0 = none), x, y, z, qx, qy, qz, qw, flags]`, flags 1 helicopter,
+/// 2 pursuing.
+#[wasm_bindgen]
+pub fn police_draw() -> Result<Vec<f32>, JsValue> {
+    get(|s| lod::police_draw(s.sim()))
+}
+
+/// Car models the current session can show, as JSON `{ cars, traffic, police }`
+/// ([`lod::SessionModels`]), for the browser to preload their meshes before they appear.
+#[wasm_bindgen]
+pub fn session_car_models() -> Result<String, JsValue> {
+    get(|s| json(&lod::session_car_models(s.scenario(), s.has_city())))
 }
 
 /// Floats per head in `signal_heads()`.

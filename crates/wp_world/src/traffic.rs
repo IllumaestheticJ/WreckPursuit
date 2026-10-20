@@ -56,6 +56,11 @@ pub const TICKS_PER_TRAFFIC_STEP: u64 = 4;
 /// A discretionary lane change is indicated at least this long before it starts, s.
 pub const LANE_CHANGE_SIGNAL_S: f32 = 0.5;
 
+/// Sightline radius while filling the area before the first tick ([`Traffic::populate`]), m.
+/// Nobody has seen the city yet, so the start state keeps cars this close (the live rule,
+/// `TrafficConfig::sight_radius_m`, is wider so cars never pop in or out in plain view).
+pub const POPULATE_SIGHT_RADIUS_M: f32 = 150.0;
+
 /// Siren reaction radius, m.
 pub const SIREN_RADIUS_M: f32 = 60.0;
 
@@ -360,6 +365,8 @@ pub struct TrafficConfig {
     /// Radius around players / route focus points that is populated, m.
     pub active_radius_m: f32,
     /// Agents never spawn or despawn within this distance of a player (now or 1 s ahead), m.
+    /// This is the distance at which traffic pops in, so it is kept beyond the draw distance
+    /// a player needs at highway speed (default 320 m).
     pub sight_radius_m: f32,
     /// Agents within this distance of a player or race route become physical, m.
     pub physical_radius_m: f32,
@@ -383,8 +390,12 @@ impl Default for TrafficConfig {
             enabled: true,
             max_agents: 400,
             max_physical: 16,
-            active_radius_m: 400.0,
-            sight_radius_m: 150.0,
+            // Lead helper, playtest row 25 (LOD pop-in): cars appeared / vanished 150 m from
+            // the player, in plain view on Port Vesper's highway and hill sightlines. Spawns and
+            // despawns now stay >= 320 m away (tests/lod_draw.rs); the populated radius grew
+            // with it so the density around the player stays about the same.
+            active_radius_m: 440.0,
+            sight_radius_m: 320.0,
             physical_radius_m: 80.0,
             casual_fraction: 0.25,
             aggressive_fraction: 0.05,
@@ -653,6 +664,8 @@ pub struct Traffic {
     blocked_lanes: std::collections::BTreeMap<SegId, u64>,
     /// How long each tracked vehicle has been stationary, s (by entity id).
     tracked_still: std::collections::BTreeMap<u32, f32>,
+    /// Inside [`Traffic::populate`]: the sightline rule uses [`POPULATE_SIGHT_RADIUS_M`].
+    populating: bool,
 }
 
 /// Desired-speed factor of driver `p` on segment `seg` ([`DriverParams::factor_on`]).
@@ -787,6 +800,7 @@ impl Traffic {
             road_lanes,
             blocked_lanes: Default::default(),
             tracked_still: Default::default(),
+            populating: false,
         }
     }
 
@@ -1013,6 +1027,7 @@ impl Traffic {
         if !self.config.enabled {
             return;
         }
+        self.populating = true;
         for _ in 0..40 {
             self.rebuild_lists(map);
             self.compute_poses(map);
@@ -1023,6 +1038,7 @@ impl Traffic {
                 break;
             }
         }
+        self.populating = false;
     }
 
     fn rebuild_lists(&mut self, map: &CityMap) {
@@ -2473,7 +2489,11 @@ impl Traffic {
     // ------------------------------------------------------------------------------------
 
     fn visible(&self, q: V2, tracked: &[TrackedVehicle]) -> bool {
-        let r = self.config.sight_radius_m;
+        let r = if self.populating {
+            self.config.sight_radius_m.min(POPULATE_SIGHT_RADIUS_M)
+        } else {
+            self.config.sight_radius_m
+        };
         tracked.iter().filter(|t| t.player).any(|t| {
             let p = geom::xy(t.pos);
             let ahead = [p[0] + t.vel[0], p[1] + t.vel[1]];

@@ -34,7 +34,7 @@ export const CAMERA_MODES: CameraMode[] = CAMERAS.map((c) => c.mode);
 
 /** Key help line for the F1 overlay. */
 export const CAMERA_HELP =
-  `C next camera · V (hold) look back · drag mouse / right stick: look around (springs back)<br>` +
+  `drag mouse / right stick: look around (springs back)<br>` +
   CAMERAS.map((c, i) => `${i + 1} ${c.label}`).join(" · ");
 
 /** Human label for a mode (HUD readout). */
@@ -168,10 +168,6 @@ export class CameraRig {
   private tvCount = 0;
   private readonly rng = new ShotRng();
   private fovNow = 60;
-  // Gamepad edges (View/Back = next camera, R3 = look back).
-  private padPrev: boolean[] = [];
-  /** Called when the gamepad asks for the next camera. */
-  onPadNext: (() => void) | null = null;
 
   constructor(dom: HTMLElement) {
     this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 3000);
@@ -558,15 +554,12 @@ export class CameraRig {
     this.lookPitch -= this.lookPitch * k;
   }
 
-  /** Gamepad: right stick looks around, View/Back cycles, R3 held looks back. */
+  /** Gamepad: the right stick looks around. (Camera cycle and look-back are rebindable
+   * actions read in input.ts.) */
   private pollPad(dt: number): void {
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
     const pad = Array.from(pads).find((p) => p && p.connected);
     if (!pad) return;
-    const pressed = pad.buttons.map((b) => b.pressed);
-    if (pressed[8] && !this.padPrev[8]) this.onPadNext?.();
-    this.padPrev = pressed;
-    if (pressed[11]) this.lookBack = true;
     const dz = (a: number) => (Math.abs(a) < 0.15 ? 0 : a);
     const x = dz(pad.axes[2] ?? 0);
     const y = dz(pad.axes[3] ?? 0);

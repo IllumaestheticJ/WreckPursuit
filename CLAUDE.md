@@ -40,4 +40,5 @@ A physics-driven street-racing game with Wreckfest-style sim-cade handling, semi
 - `DamageMode::Arcade` — punishing but survivable; one hard hit degrades, several end the car.
 - `DamageMode::Simulation` — real-world-ish; one hard hit at speed is a total loss.
 - Both come from `data/modes/*.toml` tables consumed by `wp_damage::ModeTable`. Same code path.
+- **Owner rule (2026-10-20): the only difference between Arcade and Simulation is car damage.** Physics (vehicle, suspension, tyres, contacts, AI, police, traffic) is identical in both modes; nothing outside `wp_damage` tables may branch on `DamageMode`. Physics changes always apply to both modes.
 - `AssistProfile` (ABS/TCS/ESC/steer-help/throttle-filter) is independent of damage mode and lives in `wp_vehicle`.

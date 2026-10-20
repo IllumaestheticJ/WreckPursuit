@@ -165,6 +165,10 @@ cargo run --release -p wp_race --example judge_bench
 - `tests/race_vesper.rs` — `apps/simcli/scenarios/race/vesper_hollins_sprint.ron`: four AI
   entrants race the Port Vesper v2 hill route up Hollins Drive (~1 km, hairpins, summit crest)
   to the Knob Observatory Lot; at least three finish, nobody is wrecked; deterministic.
+- `tests/race_picker.rs` — every race of the browser's picker (`catalog`), raced to the finish
+  from `apps/simcli/scenarios/race/pick_<id>.ron` with AI in every seat and the browser's glue
+  (`live::LiveRace`, meet report, stake heat); expectation ranges per race (winner time,
+  finishers, no wrecks, patrol + heat for the illegal daytime run); deterministic.
 - `tests/cargo_physics.rs` — Delivery cargo slows the car in the real `wp_sim` loop.
 - `tests/determinism_lint.rs` — runs `tools/lint-determinism` over `wp_race/src`.
 
@@ -174,6 +178,7 @@ cargo run --release -p wp_race --example judge_bench
 |---|---|---|
 | Judge, 12 cars, every physics tick | 0.195 µs/car/tick (≈ 0.0008 ms/car per 60 Hz frame) | includes the scripted driver |
 | Calendar generation | 2.0 µs/day (24 venues) | |
+| Picker race glue (`live::LiveRace`: AI field + judge + standings), per physics tick | 4.7–17.1 µs (0.02–0.07 ms per 60 Hz frame), 4–6 racers | `WP_RACE_TIME=1 cargo test --release -p wp_race --test race_picker -- --nocapture` |
 
 No budget is set for race logic in `CLAUDE.md`; this is three orders of magnitude below the
 police budget (0.5 ms/frame).
@@ -197,6 +202,9 @@ police budget (0.5 ms/frame).
   schedules (tested); off-calendar combinations (e.g. a street race at noon) can differ ~2×.
 - Signals are crate-local until the contract carries a typed race event (request R1).
 - Crews/territory are in-memory; persistence belongs to the server's account store.
-- AI entrants (`entrants`) are wired in tests only; `wp_net`'s server must spawn them at
+- Picker races (`catalog` + `live`) run in the browser session (`wp_wasm::race`); see
+  `docs/integration/race.md` → Step 2 for the browser-side gaps (reset to the grid slot, no
+  closures for street races, simcli replay of a race replay drifts).
+- AI entrants (`entrants`) are wired in tests and the browser; `wp_net`'s server must spawn them at
   `ScheduledEvent::spawn_s` and call `AiEntrants::tick` / `report_to` (request to F).
   simcli cannot drive them in a standalone scenario run yet (requests to I and N).

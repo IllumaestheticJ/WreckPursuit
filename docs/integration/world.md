@@ -755,3 +755,182 @@ run the full gate there, push your `ws/*` branch, and the lead merges it.
    behaviour is still right and the expectation was too tight; explain which). Don't loosen the
    range to hide a real regression. Re-bless only the goldens your fix changes, in a `[bless]`
    commit with the reason.
+
+### Response from D (round 12)
+**Item 1 — `city_blocked_parked_player_vesper` 0 turn-arounds: fixed in `wp_world`** (`935cfe7`),
+goldens in `[bless]` `8595256`. Scenario file and its ranges unchanged.
+
+*What changed for the scenario.* Traced the queue on lane 446 before/after A's differential
+rework. In both runs the first civilian passes the parked car in the oncoming lane (t ≈ 21 s),
+and the next one (id 483, at t ≈ 75 s) waits its 21.5 s pass budget for an oncoming gap that
+never comes (steady ~5 s stream at ~11 m/s; a pass needs ≈ 150 m clear). Then:
+- *main + ws/world:* turn refused for ~4 s (cars rolling up behind), then a gap and the
+  turn-around starts at **100.7 s**, finishing at 118 s of 120 — it passed by a few seconds.
+- *round 12:* the shifted launch/creep timing of the physical queue cars (real diffs) means
+  four cars roll up behind one after another for **13 s** (any car within 40 m behind moving
+  > 1 m/s refused the turn), after which the oncoming stream (needs `(1.25 × limit)² / 6 + 25`
+  ≈ 81 m) stays closed until the end. 0 turn-arounds.
+So it is not a new bug in the diffs: the turn checks were overly conservative and the scenario
+was riding on a lucky gap. Both checks were treating *every* car as worst-case:
+- **Followers (own lane):** now refuse the turn only if they cannot stop at 2 m/s² short of the
+  turner's rear − 10 m (≈ the room a reversing leg uses; followers already stop ≥ 6 m + 3 m
+  back because of the obstruction gap and the turn's own-lane entry). A car creeping up at
+  3 m/s 30 m back no longer blocks it; a fast one 60 m back now does (the old 40 m window
+  missed it). Lanes crossed keep the 40 m rule.
+- **Oncoming:** each car must be able to stop from its own speed + 2 m/s at 3 m/s² with 25 m to
+  spare (`turn_oncoming_room`), instead of a fixed distance for 1.25 × the limit.
+Pure helpers `turn_follower_stops_short` / `turn_oncoming_room` with unit tests.
+
+*Measured (120 s, round 12 + fix), go-arounds / turn-arounds:* seed 3: 0/2, 5: 0/1, **7: 1/1**,
+9: 0/2, 11: 0/2, 13: 0/2, 15: 0/2, 17: 0/2; 0 collisions, 0 stuck, parked car untouched in
+all. Seed 19 (not in the measured set) resolves with passes only (3 started, 0 turn-arounds) —
+the preferred outcome, so the `turnarounds ≥ 1` row would fail on it; I left the row as is
+because it pins the turn-around path for seed 7. Before the fix, seeds 7 and 19 failed.
+Runs of 150–180 s show `stuck_recycled` 4–5 on some seeds (far end of the queue, kinematic,
+out of sight); unchanged by the fix, so the scenario stays at 120 s.
+
+*Goldens.* Hashes compared scenario by scenario, `lead/round12` vs `lead/round12` + fix:
+exactly 5 move — `city_blocked_parked_player_{vesper,grid}`, `world_traffic_soak_observer`,
+`world_traffic_soak_vesper`, `world_traffic_soak_vesper_observer`; the other 50 are
+bit-identical. Only those 5 re-blessed. **Heads-up:** `lead/round12` itself (before my change)
+already mismatches many goldens in `simcli goldens` — `weather_*` (aquaplane, fog_pursuit,
+wet_brake), `panels_frontal_56_hood`, `golden_city_chase`, `golden_night_pursuit_escape`,
+`opponent_{flee_police,open_roads_traffic}`, `police_sideswipe_patrol_day`,
+`race_city_sprint_police`, `world_traffic_soak` — and `police_sideswipe_patrol_night` fails its
+expectations (0 racer contacts, no pursuit before 13.1 s). Not mine and untouched; they need
+the lead's post-merge bless / an owner's look. (The grid and soak goldens I re-blessed were
+in that stale set too, so blessing them also absorbs that merge drift.)
+
+*Gate.* fmt, `clippy --workspace -D warnings`, wasm32 build of `wp_wasm`: pass.
+`cargo test --workspace --no-fail-fast`: everything passes except three tests that fail
+identically on `lead/round12` without my change — simcli `goldens_match` and
+`all_scenarios_pass_and_are_deterministic_in_process` (the stale goldens /
+`police_sideswipe_patrol_night` above), and `wp_net` `four_clients_three_minutes_in_port_vesper`
+(p0 pursuit ends `Escaped`, expected `Captured`; checked on `aee4916`).
+
+Determinism: both `city_blocked_parked_player_*` pass `simcli determinism`. No new RNG draws,
+f32 only. **Contract change requests:** none.
+
+## Lead helper: sidewalk fix (branch `lead/fix-sidewalk-fall`, 2026-10-19)
+Playtest #20 ("I can fall into the sidewalk"). Built on `main`. D: the changes in your crate
+are confined to `surface.rs` (listed below); please merge `lead/fix-sidewalk-fall` into
+`ws/world` when convenient.
+**What was wrong** (reproduced with `tools/city-import/tests/surface_match.rs`: greybox vs
+`wp_sim` colliders, ≈ 550 k / 615 k downward rays)
+1. **No sidewalk or kerb colliders at all.** The greybox draws 3 m sidewalks 0.15 m above
+   the road edge; physics had only the road ribbon, then the terrain (Port Vesper: carved
+   12 cm *below* the road → a wheel sank 0.27 m into every sidewalk) or the slab (grid:
+   0.15 m). On fills and deck approaches, where the terrain is natural, the visual sidewalk
+   floated over ground up to 21 m below: driving onto it was a fall through the world.
+   294 k (Vesper) / 246 k (grid) samples disagreed.
+2. **Holes at every junction mouth.** The paved junction disc had the junction's
+   `radius_m` (e.g. 9 m) while the trimmed road ribbons' corners sit at `sqrt(d² + w²)`
+   (11.4 m): an unpaved crescent up to ~1.7 m deep at each corner of each mouth (Vesper:
+   wheels dropped 12–22 cm onto terrain while turning; grid: grass drawn there). The disc
+   16-gon also had its corners (not edges) on the circle.
+3. **Pits at junction corners and bends.** No sidewalk between the sidewalk ends of two
+   streets (a 15 / 27 cm deep notch whose far side is the next sidewalk's edge, which stopped
+   cars cutting the corner dead) and gaps up to 14 m on the outside of Vesper's bends.
+4. Sidewalks ran onto the crossing road at tight / skewed corners (3.7 k junction-area
+   samples): a 15 cm step inside the junction.
+**Fix**
+- `wp_world::surface` (one geometry for physics and greybox): `sidewalk_mesh` (strips +
+  kerb faces along every non-highway edge lane, trimmed off pavement in 0.5 m cells; corner,
+  T and bend fills at kerb height with kerb faces), `lane_bank` / `lane_sidewalks` (moved from
+  the greybox), `junction_polygon` (edges touch the circle), `junction_paved_radii` (reach
+  every ribbon corner; `radius_m` and junction logic untouched), `SIDEWALK_W_M` = 3.0,
+  `KERB_H_M` = 0.15, `TriMesh::{quad, strip_vertical, append}`, unit tests
+  `sidewalks_stay_off_the_roadway` (every lane and turning path, both cities) and
+  `kerb_faces_and_tops_meet_and_face_out`.
+- `wp_sim`: `set_city_ground` runs for every city and adds the sidewalk mesh (256 m tiles,
+  `SIDEWALK_GROUP`); a car upright on its wheels has its chassis ignore that group (the box
+  floor is at kerb height and snagged on internal triangle edges while straddling a kerb;
+  wheels do the climbing); `place_on_ground` lifts onto a sidewalk top; `static_ground_z`.
+- `tools/city-import`: the greybox draws `sidewalk_mesh` and `junction_polygon` (vertices
+  deduplicated); `data/city/*.greybox.{glb,b64.txt}` regenerated (grid 0.47 → 0.85 MB, Vesper
+  6.81 → 7.04 MB).
+**Checks (this branch)**
+| Check | Before | After |
+| Sweep, visual vs physics (`surface_match`, 3 cm; kerb line 16 cm) | 294 k / 246 k of 555 k / 616 k off | 0 / 0 |
+| 96 kerb mounts, 15 / 40 km/h × 2 angles, every Vesper district + fill/deck approaches + grid (`wp_sim/tests/sidewalk.rs`) — lowest tire vs visual surface | −0.34 m (Vesper), −0.15 m (grid) | −0.023 m, −0.006 m; never airborne; all end on the sidewalk |
+| simcli `city/sidewalk_mount_15kmh`, `_40kmh` (mount + drive along; `min_z_m`, `max_airborne_s`) | FAIL: walkers at 2.38 / 2.38 (top 2.65) | PASS: 2.65, never airborne |
+| Roadway points under a sidewalk (lanes + turning paths) | — | 0 (both cities) |
+| All 47 scenarios' expectations | pass | pass (same pending set) |
+| `cargo test --workspace` | — | 791 passed, 0 failed |
+| fmt, clippy `-D warnings`, wasm32 build of `wp_wasm`, `lint-determinism` | — | clean (0 errors) |
+| Native vs wasm (`tools/wasm-determinism/compare.sh`, all 47 scenarios) | — | identical |
+| `tsc --noEmit` | — | clean |
+| `web-e2e` | `main`: 2 of 4 runs pass | 0 of 4 pass: the same 3 checks fail on `main` (below) |
+**Goldens:** re-blessed in a `[bless]` commit — 17 city scenarios (grid and Vesper: new
+sidewalk colliders, bigger junction discs, chassis filter) + the 2 new ones; all non-city
+goldens unchanged.
+**Perf (release, cloud container)**: city chase frame (`city_frame_cost`, all systems)
+1.01–1.25 ms vs 1.03–1.12 ms on `main` (noise); city build 280–310 ms vs 215–230 ms
+(`sidewalk_mesh` ≈ 46 ms + the extra trimesh BVH).
+**Known gaps / follow-ups (D)**
+- The render terrain is the 10 m min-filtered mesh: on steep cuts and hillsides physics
+  terrain is up to 10.6 m *above* what is drawn (an invisible slope, never a hole; sweep
+  `Terrain` range). Drawing the fine heightfield near roads would fix it.
+- `CityMap::ground_height` / `MapGround` (un-embodied physical traffic) don't know the
+  sidewalks.
+- Corner fills/trims follow pavement in 0.5 m steps (jagged kerb at corners; a sidewalk edge
+  can overhang the outer rim of a junction disc by ≤ 0.35 m, never a lane).
+- An upright car's chassis passes through kerbs (no kerb tripping); the wheels see them.
+- A Parry heightfield ray exactly on certain grid lines (e.g. y = 45.000) misses the terrain
+  (measure zero; the sweep jitters its grid).
+- **`web-e2e` flake, also on `main` (lead / C / J):** "capture ends the run", "Repair &
+  continue" and "no page errors" (`NotSupportedError: setValueCurveAtTime … overlaps`,
+  `apps/testbed-web/src/audio/synth.ts` siren scheduler) fail together in about half the
+  runs on `main` and in all 4 runs on this branch. Instrumented runs of both show the same
+  scene tick for tick: the patrol car stops ≈ 7 m short of the parked player (headless
+  Chromium runs the sim at ≈ 60 ticks/s), no arrest within the 240 s wait, and the siren keeps
+  scheduling until the audio error. Natively (`Session`, Port Vesper chase) the same setup
+  arrests in 9.6 s on this branch. Not fixed here (outside this change).
+## Lead helper: LOD pop-in (branch `lead/fix-lod-popin`, 2026-10-19, playtest row 25)
+Owner report: "some cars load LOD too slow": cars pop in late or look wrong for a while. Two
+causes were D's tuning (the rest was browser-side, see `docs/integration/testbed.md`):
+- **Spawn ring in plain view.** Agents spawned and despawned 150 m from the player. The browser
+  draws every agent, so that ring *was* the draw distance: on Loop 9, Ridge Road and the downtown
+  avenues cars materialised / vanished 150–230 m ahead (measured in the browser: closest
+  appearance 226 m in a 5 s window of the city chase; `wp_world` itself allows 150 m).
+- **Promotion swap.** Fine on the sim side (promote/demote keep the pose, < 0.2 m); the pop was
+  the browser drawing kinematic agents as grey boxes and promoted ones as a different car.
+### What changed in `wp_world` (kept small)
+| Change | Why |
+| `TrafficConfig::default()`: `sight_radius_m` 150 → **320**, `active_radius_m` 400 → **440** | nothing spawns or despawns within 320 m of a player (now or 1 s ahead), i.e. cars are visible ≥ 300 m ahead at highway speed; 440 m keeps the density near the player at today's level |
+| `traffic::POPULATE_SIGHT_RADIUS_M = 150` + `Traffic::populating` | `populate()` (before the first tick, nobody has seen anything) keeps the old 150 m clearance, so sessions start as busy as before |
+| `tests/lod_draw.rs` (new) | a player riding Loop-9-style traffic for 60 s on Port Vesper never sees a car appear or vanish within 300 m; cars within 150 m stay ≥ 0.6× the old radii (5 seeds; measured 97 vs 83). `--ignored compare_radii` prints the radius comparison |
+| `tests/world.rs` | `spawns_respect_sightline_and_active_area` reads the radii from the config and checks live spawns too; `lod_promotion_and_demotion_are_seamless` lets its player cruise the row (the parked player depended on one queue stopping inside 80 m; it now sees 25 promotions, max jump 0.17 m) |
+| `README.md` | sightline rule numbers |
+Radius comparison (`cargo test -p wp_world --release --test lod_draw -- --ignored --nocapture`,
+5 seeds, 60 s each, player riding the fastest traffic at ≈ 17–21 m/s):
+| sight / active | agents | cars < 150 m | cars < 300 m | spawns / min |
+|---|---|---|---|---|
+| 150 / 400 (old) | 145 | 16.7 | 71 | 751 |
+| **320 / 440 (new)** | 190 | 17.2 | 60 | 978 |
+| 320 / 480 | 176 | 14.8 | 54 | 763 |
+| 340 / 600 | 181 | 9.3 | 34 | 528 |
+Agents stay capped at `max_agents` (400), so the 2 ms / 400 agents budget is unchanged; the
+typical count near a player grows ≈ 30 % (145 → 190).
+Physical (promotion) radius stays **80 m** (`max_physical` 16): with the browser hand-over now
+seamless (same model, livery and pose on the swap frame) promotion distance is invisible, and a
+larger radius would only cost physics. Not changed: `wp_police` spawning (E): reinforcements
+already spawn ≥ 350 m away out of sight (`data/police/presence.toml`).
+### Changes outside `wp_world`
+| File | Change | Why |
+| `crates/wp_net/src/netsim.rs` (test only) | `damage_steps_match_the_models` populates the world around the spawn before the first tick, as simcli does | it needs a promoted traffic car within 5 s; live spawns now start 320 m out |
+### Goldens (blessed in the `[bless]` commit)
+Every city scenario with a player or race route changes from tick 1 (different spawn ring):
+`golden_city_chase`, `golden_night_pursuit_escape`, `opponent_flee_police`,
+`opponent_open_roads_traffic`, `race_city_sprint_police`, `world_traffic_soak_observer`,
+`world_traffic_soak_vesper_observer`. Player-less soaks are unchanged; every scenario
+expectation still passes; `wp_race`'s tuning-sensitive meet-report pair still passes (it did not
+at 480 m, which is why the active radius is 440 m).
+### For D (please own from here)
+- **Joining a running server**: `wp_net` servers never call `populate()`; a player who joins
+  where nobody else is sees the street fill from 320 m out instead of 150 m. If that reads empty
+  in multiplayer playtests, a per-player warm start (populate around a newly tracked player,
+  outside any other player's sight) would fix it.
+- Kinematic agents move in 60 Hz traffic steps; `wp_wasm::lod::traffic_draw` carries them
+  forward along their heading between steps (read-only), so the browser no longer judders.
+  A `World` accessor for "time since the last traffic step" would let it stop recomputing that.

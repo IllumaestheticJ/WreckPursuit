@@ -87,6 +87,8 @@ export const PALETTE = {
   /** Headlight lens glow when the headlights are on. */
   headlightGlow: 2.4,
   taillight: 0xe04848,
+  /** Hazard / indicator amber. */
+  hazard: 0xffa030,
   /** Brake-light glow (running tail lights are a quarter of this). */
   brakeGlow: 3,
   brokenLight: 0x202227,
@@ -98,7 +100,19 @@ export const PALETTE = {
   /** Light-bar glow: the brightest thing in the frame at night (≥ 3× any other light). */
   policeRedGlow: 13,
   policeBlueGlow: 15,
+  /** The scene's one siren point light (scene.ts setSiren): intensity per unit of bar glow. */
+  sirenLightPerGlow: 2,
+
+  // ---- props (parked cars use trafficPaints through render/fleet.ts styledPaint) ----
+  /** Traffic cone body (muted orange; a faint self-glow keeps it readable at night). */
+  propCone: 0xd0682c,
+  propConeGlow: 0x1a0800,
 } as const;
+
+/** Siren point-light intensity for a lit light-bar side of glow `glow` (palette units). */
+export function sirenLightIntensity(glow: number): number {
+  return glow * PALETTE.sirenLightPerGlow;
+}
 
 /** Per-district looks (`DISTRICTS` order). */
 export const DISTRICT_LOOKS: Record<District, DistrictLook> = {

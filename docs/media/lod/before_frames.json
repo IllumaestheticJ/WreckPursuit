@@ -1,0 +1,378 @@
+{
+ "label": "before",
+ "promotionStep": 149,
+ "popIn": {
+  "minAppearM": 226.5,
+  "minVanishM": 225.6,
+  "appeared": 36,
+  "vanished": 3
+ },
+ "followedCar": [
+  {
+   "step": 136,
+   "simS": 4.533,
+   "distToPlayer": 86.7,
+   "agentPos": [
+    -355.55,
+    180.859,
+    9.896
+   ],
+   "physical": false,
+   "drawer": "box #b8bcc4",
+   "boxCentreZ": 10.596217346191406,
+   "viewPos": null,
+   "colour": null
+  },
+  {
+   "step": 137,
+   "simS": 4.55,
+   "distToPlayer": 85.8,
+   "agentPos": [
+    -355.774,
+    180.971,
+    9.896
+   ],
+   "physical": false,
+   "drawer": "box #b8bcc4",
+   "boxCentreZ": 10.596167755126952,
+   "viewPos": null,
+   "colour": null
+  },
+  {
+   "step": 138,
+   "simS": 4.567,
+   "distToPlayer": 84.9,
+   "agentPos": [
+    -355.998,
+    181.083,
+    9.896
+   ],
+   "physical": false,
+   "drawer": "box #b8bcc4",
+   "boxCentreZ": 10.596117210388183,
+   "viewPos": null,
+   "colour": null
+  },
+  {
+   "step": 139,
+   "simS": 4.583,
+   "distToPlayer": 84,
+   "agentPos": [
+    -356.222,
+    181.195,
+    9.896
+   ],
+   "physical": false,
+   "drawer": "box #b8bcc4",
+   "boxCentreZ": 10.59606761932373,
+   "viewPos": null,
+   "colour": null
+  },
+  {
+   "step": 140,
+   "simS": 4.6,
+   "distToPlayer": 83.1,
+   "agentPos": [
+    -356.446,
+    181.307,
+    9.896
+   ],
+   "physical": false,
+   "drawer": "box #b8bcc4",
+   "boxCentreZ": 10.596018028259277,
+   "viewPos": null,
+   "colour": null
+  },
+  {
+   "step": 141,
+   "simS": 4.617,
+   "distToPlayer": 82.2,
+   "agentPos": [
+    -356.67,
+    181.419,
+    9.896
+   ],
+   "physical": false,
+   "drawer": "box #b8bcc4",
+   "boxCentreZ": 10.595967483520507,
+   "viewPos": null,
+   "colour": null
+  },
+  {
+   "step": 142,
+   "simS": 4.633,
+   "distToPlayer": 81.3,
+   "agentPos": [
+    -356.895,
+    181.531,
+    9.896
+   ],
+   "physical": false,
+   "drawer": "box #b8bcc4",
+   "boxCentreZ": 10.595917892456054,
+   "viewPos": null,
+   "colour": null
+  },
+  {
+   "step": 143,
+   "simS": 4.65,
+   "distToPlayer": 80.3,
+   "agentPos": [
+    -357.119,
+    181.643,
+    9.896
+   ],
+   "physical": false,
+   "drawer": "box #b8bcc4",
+   "boxCentreZ": 10.5958683013916,
+   "viewPos": null,
+   "colour": null
+  },
+  {
+   "step": 144,
+   "simS": 4.667,
+   "distToPlayer": 79.4,
+   "agentPos": [
+    -357.342,
+    181.755,
+    9.896
+   ],
+   "physical": false,
+   "drawer": "box #ff5040 (braking)",
+   "boxCentreZ": 10.595817756652831,
+   "viewPos": null,
+   "colour": null
+  },
+  {
+   "step": 145,
+   "simS": 4.683,
+   "distToPlayer": 78.5,
+   "agentPos": [
+    -357.564,
+    181.866,
+    9.896
+   ],
+   "physical": false,
+   "drawer": "box #ff5040 (braking)",
+   "boxCentreZ": 10.595769119262695,
+   "viewPos": null,
+   "colour": null
+  },
+  {
+   "step": 146,
+   "simS": 4.7,
+   "distToPlayer": 77.6,
+   "agentPos": [
+    -357.783,
+    181.975,
+    9.896
+   ],
+   "physical": false,
+   "drawer": "box #ff5040 (braking)",
+   "boxCentreZ": 10.595773887634277,
+   "viewPos": null,
+   "colour": null
+  },
+  {
+   "step": 147,
+   "simS": 4.717,
+   "distToPlayer": 76.7,
+   "agentPos": [
+    -358.001,
+    182.084,
+    9.896
+   ],
+   "physical": false,
+   "drawer": "box #ff5040 (braking)",
+   "boxCentreZ": 10.595900726318359,
+   "viewPos": null,
+   "colour": null
+  },
+  {
+   "step": 148,
+   "simS": 4.733,
+   "distToPlayer": 75.8,
+   "agentPos": [
+    -358.217,
+    182.191,
+    9.896
+   ],
+   "physical": false,
+   "drawer": "box #ff5040 (braking)",
+   "boxCentreZ": 10.596026611328124,
+   "viewPos": null,
+   "colour": null
+  },
+  {
+   "step": 149,
+   "simS": 4.75,
+   "distToPlayer": 74.9,
+   "agentPos": [
+    -358.484,
+    182.323,
+    9.896
+   ],
+   "physical": true,
+   "drawer": "VehicleView (panel mesh)",
+   "boxCentreZ": null,
+   "viewPos": [
+    -358.4841003417969,
+    182.3233642578125,
+    9.8961763381958
+   ],
+   "colour": "#7a8a99"
+  },
+  {
+   "step": 150,
+   "simS": 4.767,
+   "distToPlayer": 74,
+   "agentPos": [
+    -358.697,
+    182.429,
+    9.896
+   ],
+   "physical": true,
+   "drawer": "VehicleView (panel mesh)",
+   "boxCentreZ": null,
+   "viewPos": [
+    -358.6437447600165,
+    182.4027897243925,
+    9.896238330029405
+   ],
+   "colour": "#7a8a99"
+  },
+  {
+   "step": 151,
+   "simS": 4.783,
+   "distToPlayer": 73.1,
+   "agentPos": [
+    -358.908,
+    182.535,
+    9.896
+   ],
+   "physical": true,
+   "drawer": "VehicleView (panel mesh)",
+   "boxCentreZ": null,
+   "viewPos": [
+    -358.85553669214323,
+    182.50833474431352,
+    9.896374709836081
+   ],
+   "colour": "#7a8a99"
+  },
+  {
+   "step": 152,
+   "simS": 4.8,
+   "distToPlayer": 72.2,
+   "agentPos": [
+    -359.117,
+    182.639,
+    9.897
+   ],
+   "physical": true,
+   "drawer": "VehicleView (panel mesh)",
+   "boxCentreZ": null,
+   "viewPos": [
+    -359.0651313346207,
+    182.6129184465094,
+    9.896652233316459
+   ],
+   "colour": "#7a8a99"
+  },
+  {
+   "step": 153,
+   "simS": 4.817,
+   "distToPlayer": 71.3,
+   "agentPos": [
+    -359.324,
+    182.742,
+    9.897
+   ],
+   "physical": true,
+   "drawer": "VehicleView (panel mesh)",
+   "boxCentreZ": null,
+   "viewPos": [
+    -359.2722845788562,
+    182.71632721794344,
+    9.89704324253897
+   ],
+   "colour": "#7a8a99"
+  },
+  {
+   "step": 154,
+   "simS": 4.833,
+   "distToPlayer": 70.4,
+   "agentPos": [
+    -359.528,
+    182.844,
+    9.898
+   ],
+   "physical": true,
+   "drawer": "VehicleView (panel mesh)",
+   "boxCentreZ": null,
+   "viewPos": [
+    -359.4769964128377,
+    182.81850002946544,
+    9.897493377441947
+   ],
+   "colour": "#7a8a99"
+  },
+  {
+   "step": 155,
+   "simS": 4.85,
+   "distToPlayer": 69.5,
+   "agentPos": [
+    -359.73,
+    182.945,
+    9.898
+   ],
+   "physical": true,
+   "drawer": "VehicleView (panel mesh)",
+   "boxCentreZ": null,
+   "viewPos": [
+    -359.67951100121445,
+    182.91943688307742,
+    9.897925388904241
+   ],
+   "colour": "#7a8a99"
+  },
+  {
+   "step": 156,
+   "simS": 4.867,
+   "distToPlayer": 68.6,
+   "agentPos": [
+    -359.93,
+    183.044,
+    9.898
+   ],
+   "physical": true,
+   "drawer": "VehicleView (panel mesh)",
+   "boxCentreZ": null,
+   "viewPos": [
+    -359.8804386835368,
+    183.01939717819346,
+    9.898233420703377
+   ],
+   "colour": "#7a8a99"
+  }
+ ],
+ "meshFetches": [
+  {
+   "car": "lindwurm_4t",
+   "startMs": 641,
+   "durationMs": 7
+  },
+  {
+   "car": "sentinel_cruiser",
+   "startMs": 1575,
+   "durationMs": 7
+  },
+  {
+   "car": "debug_sedan",
+   "startMs": 460894,
+   "durationMs": 16
+  }
+ ],
+ "lodLog": null,
+ "errors": []
+}

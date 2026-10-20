@@ -18,7 +18,7 @@ use std::collections::BTreeMap;
 use wp_contracts::{
     AssistProfile, CaptainCommand, CaptainError, ContactImpulse, DamageMode, DamageSim, EntityId,
     LoadedCar, PlayerId, SimEvent, TimeOfDay, TrafficAgentSnapshot, UnitId, VehicleInput,
-    VehicleState, WeatherKind, WeatherSnapshot, WorldQuery, PHYSICS_DT,
+    VehicleState, WantedLevel, WeatherKind, WeatherSnapshot, WorldQuery, PHYSICS_DT,
 };
 use wp_sim::{Sim, SimConfig, VehicleKind};
 
@@ -119,6 +119,33 @@ pub trait NetSim {
     /// `wp_police` unit embodied by an AI police vehicle. Default: none.
     fn police_unit(&self, _id: EntityId) -> Option<UnitId> {
         None
+    }
+    /// True when a racer is wanted or in an active pursuit: its player disconnecting gets the
+    /// capture grace ([`crate::server::WANTED_DISCONNECT_GRACE_TICKS`]). Default: wanted
+    /// level above 0.
+    fn wanted_or_pursued(&self, id: EntityId) -> bool {
+        self.wanted_level(id) > 0
+    }
+    /// Freeze (`true`) or release a racer's heat and pursuit while its player is
+    /// disconnected (`wp_police::PoliceSystem::set_racer_held`). Default: ignored.
+    fn hold_racer(&mut self, _id: EntityId, _held: bool) {}
+    /// End an abandoned racer's pursuit as `Captured` (disconnect grace ran out, or the
+    /// player quit while wanted): returns the wanted level at the capture and the capturing
+    /// unit (nearest pursuing unit, or none). The `PursuitEnded` event follows in the next
+    /// step's events. `None` when the racer was not wanted. Default: `None`.
+    fn capture_abandoned(&mut self, _id: EntityId) -> Option<(WantedLevel, Option<UnitId>)> {
+        None
+    }
+    /// Economy spec (class, base price) of a car id, for the server's capture settlement.
+    /// Default: none (the server uses the economy's floor car class and price).
+    fn car_spec(&self, _car_id: &str) -> Option<wp_economy::CarSpec> {
+        None
+    }
+
+    /// Whether `p` is inside a tunnel / covered road (`wp_world::World::covered_at`): the
+    /// captain map stops updating a racer there. Default: never.
+    fn covered_at(&self, _p: [f32; 3]) -> bool {
+        false
     }
 }
 
@@ -532,6 +559,28 @@ impl NetSim for WpSim {
     fn police_unit(&self, id: EntityId) -> Option<UnitId> {
         self.slot(id).and_then(|v| v.police_unit)
     }
+
+    fn wanted_or_pursued(&self, id: EntityId) -> bool {
+        self.sim.police().is_wanted_or_pursued(id)
+    }
+
+    fn hold_racer(&mut self, id: EntityId, held: bool) {
+        self.sim.police_mut().set_racer_held(id, held);
+    }
+
+    fn capture_abandoned(&mut self, id: EntityId) -> Option<(WantedLevel, Option<UnitId>)> {
+        self.sim.police_mut().capture_abandoned(id)
+    }
+
+    fn car_spec(&self, car_id: &str) -> Option<wp_economy::CarSpec> {
+        self.cars
+            .get(car_id)
+            .map(|c| wp_economy::CarSpec::from(&c.def))
+    }
+
+    fn covered_at(&self, p: [f32; 3]) -> bool {
+        self.sim.world().covered_at(p).is_some()
+    }
 }
 
 #[cfg(test)]
@@ -561,7 +610,7 @@ mod tests {
             seed: 1,
             ..Default::default()
         };
-        sim.set_world(wp_world::World::procedural(
+        let mut world = wp_world::World::procedural(
             &pg,
             wp_world::WorldConfig {
                 seed: 3,
@@ -573,12 +622,26 @@ mod tests {
                 },
                 parked_cars: false,
             },
-        ));
+        );
+        // Fill the streets around the spawn point before the first tick, as simcli does (live
+        // spawns keep wp_world's sightline radius, 320 m, so traffic would take a while to
+        // drive into promotion range).
+        let spawn = [53.25, 300.0, 0.0];
+        world.set_tracked_vehicles(&[wp_world::TrackedVehicle {
+            entity: wp_contracts::EntityId(1),
+            pos: spawn,
+            vel: [0.0; 3],
+            forward: [0.0, -1.0],
+            siren: false,
+            player: true,
+        }]);
+        world.populate();
+        sim.set_world(world);
         sim.set_police_car(police);
         sim.set_traffic_car(cars["debug_sedan"].clone());
         let mut net = WpSim::from_sim(sim, cars.clone());
         let me = net
-            .spawn("debug_coupe", [53.25, 300.0, 0.0], std::f32::consts::PI)
+            .spawn("debug_coupe", spawn, std::f32::consts::PI)
             .unwrap();
         for _ in 0..3 {
             net.step();

@@ -6,8 +6,10 @@
 // recorded replay survives a page reload and re-simulates to the same hash with no drift,
 // crash scenarios run and report, the city (Port Vesper v2 by default, the old grid via the
 // selector) loads with traffic, signals (day/night, lamps change over time) and the city chase,
-// weather (e2e/weather.mjs: selector, rain, wet roads, spray, fog, wipers, rainy-night chase)
-// and (optionally) perf at 1/8/24 cars.
+// weather (e2e/weather.mjs: selector, rain, wet roads, spray, fog, wipers, rainy-night chase),
+// traffic / police LOD hand-overs are seamless (no missing mesh, < 0.5 m swap jump, no pop-in
+// within 300 m), gamepad + rebindable controls (e2e/gamepad.mjs), browser perf budgets
+// (e2e/perf_check.mjs, PERF=0 skips) and (optionally) perf at 1/8/24 cars.
 import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -20,7 +22,7 @@ const root = join(here, "..");
 const PORT = 5199;
 const URL = `http://localhost:${PORT}/`;
 const shots = process.env.SHOTS;
-if (shots) mkdirSync(shots, { recursive: true });
+if (shots) for (const d of ["", "signals", "tunnels"]) mkdirSync(join(shots, d), { recursive: true });
 
 const server = spawn("npx", ["vite", "--port", String(PORT), "--strictPort"], { cwd: root, stdio: "pipe" });
 const stopServer = () => server.kill("SIGTERM");
@@ -254,10 +256,12 @@ for (const [hour, label] of [
     drawn: window.__wp.scene.signals.drawnStates(),
     visible: window.__wp.scene.signals.group.visible,
   }));
+  // Only heads near the camera are drawn (SIGNAL_DRAW_M, browser perf pass); 255 = not drawn.
+  const shown = drawn.drawn.filter((c) => c !== 255).length;
   const lit = drawn.drawn.filter((c) => c >= 1 && c <= 3).length;
   check(
-    framed.n > 8 && drawn.visible && lit === framed.n,
-    `signals (${label}, ${drawn.hour.toFixed(1)} h): ${framed.n} heads drawn, ${lit} lit, framed head ${framed.head}`,
+    shown > 8 && drawn.visible && lit === shown && drawn.drawn[framed.head] !== 255,
+    `signals (${label}, ${drawn.hour.toFixed(1)} h): ${shown} of ${framed.n} heads drawn (near the camera), ${lit} lit, framed head ${framed.head}`,
   );
 }
 {
@@ -267,7 +271,10 @@ for (const [hour, label] of [
       (b) => {
         const now = window.__wp.scene.signals.drawnStates();
         const sim = Array.from(window.__wp.sim.signalStates());
-        return now.some((c, i) => c !== b[i]) && now.every((c, i) => c === sim[i]) ? now.filter((c, i) => c !== b[i]).length : false;
+        const drawn = (c, i) => c !== 255 && b[i] !== 255;
+        return now.some((c, i) => drawn(c, i) && c !== b[i]) && now.every((c, i) => c === 255 || c === sim[i])
+          ? now.filter((c, i) => drawn(c, i) && c !== b[i]).length
+          : false;
       },
       before,
       // Port Vesper under SwiftShader runs well below real time; a full signal cycle needs
@@ -303,6 +310,35 @@ check(
   v2.id === "vesper_v2" && v2.z > 4 && v2.z < 30,
   `city free drive in ${v2.id}: greybox loaded, car at (${v2.x.toFixed(0)}, ${v2.y.toFixed(0)}, ${v2.z.toFixed(1)}) m`,
 );
+// Tunnels (backlog B04): the Hollins Tunnel and Founders Cut are in the greybox — walls, roof
+// deck and emissive ceiling lights — and draw from the portal and inside the tube.
+{
+  const tunnel = await page.evaluate(() => {
+    const out = { tunnel_wall: 0, tunnel_roof: 0, tunnel_light: 0, emissive: 0 };
+    window.__wp.scene.cities.get("vesper_v2").traverse((o) => {
+      const name = o.material?.name;
+      if (name in out) {
+        out[name] += o.geometry.attributes.position.count;
+        if (name === "tunnel_light") out.emissive = Math.max(out.emissive, o.material.emissive?.r ?? 0);
+      }
+    });
+    return out;
+  });
+  check(
+    tunnel.tunnel_wall > 100 && tunnel.tunnel_roof > 100 && tunnel.tunnel_light > 100 && tunnel.emissive > 0.5,
+    `tunnels in the greybox: ${tunnel.tunnel_wall} wall, ${tunnel.tunnel_roof} roof, ${tunnel.tunnel_light} light vertices (lights emissive ${tunnel.emissive.toFixed(2)})`,
+  );
+  await page.evaluate(() => (document.getElementById("overlay").style.visibility = "hidden"));
+  for (const [name, from, to] of [
+    ["tunnels/founders_cut_north_portal.png", [409, 1335, 27], [416, 1245, 18]],
+    ["tunnels/hollins_tunnel_inside.png", [-850, 1388, 51.5], [-1000, 1396, 56]],
+  ]) {
+    await page.evaluate(([f, t]) => window.__wp.lookFrom(f, t), [from, to]);
+    await page.waitForTimeout(1500);
+    await shot(name);
+  }
+  await page.evaluate(() => (document.getElementById("overlay").style.visibility = ""));
+}
 // City chase preset: night city, police + traffic, speeding player; heat panel from the UI kit.
 // Waits for the state the check needs (no fixed sleep): under SwiftShader the city runs well below
 // real time, so a wall-clock wait is either too short (flaky) or wastes minutes. Violations are
@@ -358,13 +394,24 @@ const art = await page.evaluate(async () => {
   sel.value = "lowpoly";
   sel.dispatchEvent(new Event("change"));
   await frame();
+  await frame();
   const others = [PALETTE.lampGlow, PALETTE.signalGlow, PALETTE.headlightGlow, PALETTE.brakeGlow, PALETTE.windowGlow];
   const brightest = Math.min(PALETTE.policeRedGlow, PALETTE.policeBlueGlow) >= 3 * Math.max(...others);
-  return { low, grey, back: w.style.id, brightest };
+  // Instanced fleet (render/fleet.ts): palette liveries and HDR light bars in low-poly dark.
+  const { styledPaint, styledLamp, TRAFFIC_PALETTE, BAR } = await import("/src/render/fleet.ts");
+  const fleetPaint = styledPaint(TRAFFIC_PALETTE[2]) === PALETTE.trafficPaints[2];
+  const bar = styledLamp(w.scene.hemi.color.clone(), BAR.blue);
+  const fleetBar = Math.max(bar.r, bar.g, bar.b) > 3;
+  const fleetRough = w.lod.fleet.mats.paint.roughness;
+  return { low, grey, back: w.style.id, brightest, fleetPaint, fleetBar, fleetRough };
 });
 check(
   art.low.id === "lowpoly" && art.low.override && art.low.fog > 0.001 && art.low.lamps > 100 && art.grey.id === "greybox" && art.grey.fog === 0 && art.back === "lowpoly" && art.brightest,
   `art style: low-poly dark in the chase (fog ${art.low.fog.toFixed(4)}, ${art.low.lamps} street lamps), greybox on the selector (fog ${art.grey.fog}), back to ${art.back}; police bars ≥ 3× every other glow: ${art.brightest}`,
+);
+check(
+  art.fleetPaint && art.fleetBar && art.fleetRough === 0.85,
+  `art style on the instanced fleet: palette livery ${art.fleetPaint}, HDR light bar ${art.fleetBar}, panel-matched paint roughness ${art.fleetRough}`,
 );
 await shot("city_chase_greybox_toggle.png");
 
@@ -421,6 +468,49 @@ await shot("city_chase_greybox_toggle.png");
   check(
     opened.open && opened.shown && opened.player && opened.units >= 1 && opened.districts >= 6 && !closedM.open && !closedM.shown && openedTab.open && !closedEsc.open,
     `full map: M opens (${opened.units} units, ${opened.districts} districts, ${opened.pois} POIs), M closes, Tab opens, Esc closes`,
+  );
+}
+// LOD hand-over (playtest row 25): in a fresh chase, every traffic agent / police unit / sim
+// vehicle is drawn with its real mesh on every frame after the first second (no placeholder,
+// no gap); promotions and demotions (instanced fleet <-> full VehicleView) keep the pose: the
+// drawn car moves < 0.5 m relative to its sim pose at the swap (frame-rate independent; the sim
+// pose's own tick-by-tick continuity is wp_wasm's lod::tests); traffic never appears or vanishes
+// within 300 m of the player.
+{
+  await page.evaluate(() => {
+    window.__wp.startCityChase("debug_sedan", "Arcade");
+    window.__wp.lod.log.start(0);
+  });
+  await page.keyboard.down("KeyW");
+  const lodWait = await page
+    .waitForFunction(
+      () => {
+        const s = window.__wp.lod.log.summary();
+        return window.__wp.sim.worldInfo()[0] / 240 > 12 && s.swaps >= 2;
+      },
+      null,
+      { timeout: 240000, polling: 500 },
+    )
+    .then(() => "ready")
+    .catch(() => "timed out");
+  await page.keyboard.up("KeyW");
+  const lod = await page.evaluate(() => ({ ...window.__wp.lod.log.summary(), simS: window.__wp.sim.worldInfo()[0] / 240 }));
+  await shot("lod_chase.png");
+  const worst = lod.worstSwaps[0];
+  check(
+    lod.missing === 0,
+    `LOD: no car drawn without its mesh after the first second (${lod.frames} frames, ${lod.cars} cars, ${lod.missing} missing` +
+      `${lod.missing ? ": " + JSON.stringify(lod.missingSamples.slice(0, 3)) : ""}; longest placeholder ${lod.maxPlaceholderS.toFixed(2)} s)`,
+  );
+  check(
+    lodWait === "ready" && lod.swaps >= 2 && lod.maxSwapJump < 0.5,
+    `LOD: ${lod.swaps} promotion/demotion swaps in ${lod.simS.toFixed(1)} s sim, max hand-over jump (drawn vs sim pose) ${lod.maxSwapJump.toFixed(3)} m` +
+      (worst ? ` (${worst.key} ${worst.from}→${worst.to})` : "") + `; wait ${lodWait}`,
+  );
+  check(
+    lod.minAppearTraffic >= 300 && lod.minVanishTraffic >= 300,
+    `LOD: traffic appears ≥ ${lod.minAppearTraffic.toFixed(0)} m and vanishes ≥ ${lod.minVanishTraffic.toFixed(0)} m from the player` +
+      ` (police: appear ${lod.minAppearPolice.toFixed(0)} m, vanish ${lod.minVanishPolice.toFixed(0)} m)`,
   );
 }
 // Pursuit banner + capture → repair bill, driven by a stubbed police_status() (a real capture
@@ -591,7 +681,7 @@ await shot("city_chase_greybox_toggle.png");
   });
   await shot("career_garage_after_bust.png");
   check(
-    parked && busted && stored.version === 1 && stored.captures === 1 && stored.location && typeof stored.location === "object" && "Impound" in stored.location,
+    parked && busted && stored.version === 2 && stored.captures === 1 && stored.location && typeof stored.location === "object" && "Impound" in stored.location,
     `career: busted → garage, saved (v${stored.version}): captures ${stored.captures}, car ${JSON.stringify(stored.location)}`,
   );
 
@@ -694,5 +784,24 @@ const wx = spawnSync("node", [join(here, "weather.mjs")], {
 });
 process.stdout.write(wx.stdout);
 check(wx.status === 0, `weather checks (e2e/weather.mjs)${wx.status === 0 ? "" : ": " + (wx.stderr || "").trim().split("\n").pop()}`);
+
+// 7. Browser perf (browser perf pass): city chase + rainy-night chase at 1280×720 must keep
+// near real time and stay within generous draw-call / triangle / allocation budgets
+// (e2e/perf_check.mjs; PERF=0 skips it).
+if (process.env.PERF !== "0") {
+  const perf = spawnSync("node", [join(here, "perf_check.mjs")], { cwd: root, encoding: "utf8", env: process.env });
+  process.stdout.write(perf.stdout);
+  check(perf.status === 0, `perf checks (e2e/perf_check.mjs)${perf.status === 0 ? "" : ": " + (perf.stderr || "").trim().split("\n").pop()}`);
+}
+// 8. Gamepad + rebindable controls (e2e/gamepad.mjs, its own server and browser): fake pad
+// drives and steers, assists follow the device, disconnect releases, rebind survives a reload,
+// input latency one frame.
+const gp = spawnSync("node", [join(here, "gamepad.mjs")], {
+  cwd: root,
+  encoding: "utf8",
+  env: { ...process.env, GAMEPAD_SHOTS: shots ?? "" },
+});
+process.stdout.write(gp.stdout);
+check(gp.status === 0, `gamepad + controls checks (e2e/gamepad.mjs)${gp.status === 0 ? "" : ": " + (gp.stderr || "").trim().split("\n").pop()}`);
 console.log(failures ? `${failures} check(s) failed` : "all checks passed");
 process.exit(failures ? 1 : 0);

@@ -496,6 +496,7 @@ dependencies = [
  "osmpbf",
  "serde_json",
  "wp_math",
+ "wp_sim",
  "wp_world",
 ]
 
@@ -4431,7 +4432,9 @@ dependencies = [
  "wp_economy",
  "wp_math",
  "wp_net",
+ "wp_opponent",
  "wp_police",
+ "wp_race",
  "wp_sim",
  "wp_weather",
  "wp_world",

@@ -114,3 +114,11 @@ with a player cop (F). Real sounds (J2) were already running.
 ## Next (toward the single-player greybox demo)
 C draws police/traffic + city-chase preset; M wires the heat HUD and repair bill; E/D share
 roads and controller; G + lead wire capture/escape → economy.
+
+## Step 2b (2026-10-19, owner said yes)
+Five more sessions: gamepad + rebindable controls (C, `ws/testbed`), junkyard beater car (H,
+`ws/cars`), tunnels / covered roads that break line of sight (`lead/tunnels-los`), quitting while
+wanted = capture after 60 s (`lead/disconnect-capture`), browser performance pass
+(`lead/browser-perf`). Art: low-poly dark chosen (`docs/art/STYLE_DECISION.md`), machine S on
+`ws/art`.
+

@@ -234,6 +234,38 @@ unchanged); wasm build passes (no tokio / tungstenite / rusqlite / wp_meta in `w
 tree); testbed `tsc --noEmit` clean; `just web-e2e` all checks passed; `just web-e2e-net`
 all checks passed; `vesper_e2e` passes in debug (42 s) and release (30 s).
 
+## Response to lead feedback (round 12)
+
+Base: `ws/net` + `origin/lead/round12` (clean merge).
+
+1. **`vesper_e2e` Captured: fixed in the test's cop driver, not a police bug.** Traced with
+   `WP_VESPER_DEBUG`: the pursuit starts at step 185 (unit 6, as before) and the cop follows racer 0
+   until racer 0 turns right off Lantern Row at about (916, -790), step ~1770. The cop arrives at
+   about 14 m/s, runs wide to the east and wedges at (928.8, -791.0): throttle 0.8, full right lock,
+   speed 0, **for the rest of the run**. Racer 0 drives away, gives up at step 3185 about 200 m
+   away, and with no unit within `capture.unit_radius_m` (15 m) or in sight the escape timer runs
+   out: `Escaped`. `wp_police` is doing the right thing. The car that used to make this corner now
+   doesn't, which points at A's differential rework (`ws/vehicle`); it matches D's and E's
+   round-12 failures. I didn't bisect it.
+   Test changes (`crates/wp_net/tests/vesper_e2e.rs` only; the `Captured` assertion is unchanged):
+   - `Unstick`: if the cop presses the throttle at under 0.5 m/s for 1.5 s, it backs out with
+     opposite lock for 2.5 s. The brake is held at a standstill, which is wp_vehicle's
+     auto-reverse, and the brake then drives backwards. After that it resumes the chase.
+   - When the cop drops from close chase (> 70 m) back to following the loop, its loop follower
+     is re-synced to the nearest loop point. Racer 0 drives the same loop. Before this, the
+     follower's waypoint index was stale from the spawn, so it would head back to the start.
+   - Removed a duplicated `WP_VESPER_DEBUG` print block.
+   Result (180 s): the cop backs out at step ~2300, catches racer 0 on the loop and stops about
+   10 m behind it. All four clients see `PursuitEnded { Captured, capturer: unit 6 }`. Agreement:
+   0/15,660 states differ, near vehicles 3,699/3,699, kinematic traffic 0/3,205 differ, captain
+   map 0/4,248 differ, lattice hashes 0 mismatched. Prediction RMS 0.110 / 0.028 / 0.241 m
+   (p0/p1/p2). Roadblock and spikes both placed. Server net tick averages 3.2 ms (p99 6.4 ms).
+   Test time is 57 s.
+   **Gate on `ws/net` + `lead/round12`:** fmt, clippy `-D warnings` (all targets) and the wasm
+   build are clean. `cargo test --workspace --no-fail-fast` fails only in
+   `simcli --test scenarios`: `city/blocked_parked_player_{grid,vesper}` (D's round-12 item) and
+   `police/sideswipe_patrol_night` (E's round-12 item). Neither touches `wp_net`.
+
 ## Response to lead feedback (round 8)
 Merged `origin/main` (contract v0.3.0, clean). Item 1 — the v0.3.0 net items, all in
 `wp_net::protocol`, now `PROTOCOL_VERSION = 4` (tables in `crates/wp_net/README.md`):

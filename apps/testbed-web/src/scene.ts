@@ -1,56 +1,68 @@
 // Scene: renderer, lights, sky colour from TimeOfDay, ground + 10 m grid, the city greybox
-// (data/city/<id>.greybox.glb, prompt 05) and its traffic agents, barriers, fading contact
-// markers and intent arrows.
+// (data/city/<id>.greybox.glb, prompt 05), police helicopters, barriers, fading contact
+// markers and intent arrows. Traffic and police cars are drawn by render/lod.ts.
 // Sim space is +Z up / +Y forward; Three.js is +Y up, so `world` is rotated -90° about X and
 // every sim-space object is parented under it.
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { Barrier, SimEvent } from "./wasm/sim";
-import { AGENT_FLAG, AGENT_STRIDE, INTENT_STRIDE } from "./wasm/layout";
+import { D, DRAW_STRIDE, INTENT_STRIDE, POLICE_DRAW_FLAG } from "./wasm/layout";
 import { layers } from "./settings";
 import { SignalView } from "./signals_view";
+import { CityTiles } from "./render/city_tiles";
+import { Quality } from "./render/quality";
 
 const DAY_SKY = new THREE.Color(0x8fb8de);
 const NIGHT_SKY = new THREE.Color(0x070a14);
 
 interface ContactMarker {
   obj: THREE.Group;
+  dot: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>;
+  arrow: THREE.ArrowHelper;
   age: number;
+  active: boolean;
 }
 
 const CONTACT_LIFETIME_S = 1.5;
-/** Instanced traffic capacity. */
-const MAX_AGENTS = 1024;
-/** Traffic car box size [w, l, h], m. */
-const AGENT_SCALE = new THREE.Vector3(1.8, 4.4, 1.4);
-const tmpAgentColour = new THREE.Color();
-/** Floats per unit in police_units(). */
-const POLICE_UNIT_STRIDE = 6;
+/** Contact markers are pooled (a crash emits dozens of contacts per frame): oldest reused. */
+const MAX_CONTACT_MARKERS = 64;
+const CONTACT_DOT = new THREE.SphereGeometry(0.08, 8, 6);
+const tmpNormal = new THREE.Vector3();
 
 export class SceneView {
   readonly renderer: THREE.WebGLRenderer;
+  /** Graphics quality: MSAA, resolution scale (adaptive in auto mode), draw distance. */
+  readonly quality = new Quality();
   readonly scene = new THREE.Scene();
   readonly world = new THREE.Group();
   readonly hemi: THREE.HemisphereLight;
   readonly sun: THREE.DirectionalLight;
   private readonly barriers = new THREE.Group();
   private readonly contacts: ContactMarker[] = [];
+  private nextContact = 0;
   /** Contact markers created since the page loaded (for automation). */
   contactsSeen = 0;
   private readonly intentGroup = new THREE.Group();
   private readonly cities = new Map<string, THREE.Object3D>();
+  /** Tiled meshes of each loaded city (render/city_tiles.ts). */
+  private readonly cityTiles = new Map<string, CityTiles>();
+  private cityShown: string | null = null;
+  /** City tiles past this distance (m) are not drawn; fog can only shorten it. From the
+   * graphics quality (high: the camera's far plane, no visible change); `?draw=<m>` overrides. */
+  drawDistanceM = Infinity;
+  private readonly camPos = new THREE.Vector3();
   private readonly policeUnits: { obj: THREE.Group; red: THREE.MeshStandardMaterial; blue: THREE.MeshStandardMaterial }[] = [];
-  /** Traffic agent boxes' material (render/style.ts recolours it). */
-  readonly agentMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff });
-  private readonly agentMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), this.agentMaterial, MAX_AGENTS);
-  /** Agent colour override (flags, agent index) → hex (art style); null = debug colours. */
-  agentColour: ((flags: number, index: number) => number) | null = null;
-  /** Light-bar glow multiplier for the non-vehicle police units (art style). */
+  /** Light-bar glow multiplier for the police helicopters (art style). */
   policeGlow = 1;
-  /** Replaces renderer.render in render() (art style post stack); null = plain render. */
+  /** Replaces renderer.render in render() (art style post stack); null = plain render. The
+   * city-tile update runs before it either way. */
   renderOverride: ((camera: THREE.Camera) => void) | null = null;
 
   private debugGrid!: THREE.GridHelper;
+  /** The one siren point light (browser perf pass): every point light costs every lit pixel,
+   * even at intensity 0, and a changing light count recompiles the lit shaders. It follows
+   * the nearest police car with its siren on and is hidden when no siren is on. */
+  private readonly sirenLight = new THREE.PointLight(0xff2244, 0, 18, 2);
   /** Traffic signal heads and stop lines (signals_view.ts). */
   readonly signals = new SignalView();
   /** The flat world's ground material (the weather view makes it wet-capable). */
@@ -58,11 +70,17 @@ export class SceneView {
   /** Called once with each city's glTF scene when it has loaded (wet road materials). */
   onCityLoaded: ((root: THREE.Object3D, cityId: string) => void) | null = null;
 
-  /** `antialias: false` when the art style's post stack does the antialiasing (its own MSAA
-   * target), which saves resolving a second multisampled canvas every frame. */
-  constructor(parent: HTMLElement, opts: { antialias?: boolean } = {}) {
-    this.renderer = new THREE.WebGLRenderer({ antialias: opts.antialias ?? true, preserveDrawingBuffer: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  /**
+   * `postAA: true` when the art style's post stack does the antialiasing (its own MSAA target,
+   * only if the graphics quality allows MSAA): the canvas is then created without MSAA, which
+   * saves resolving a second multisampled buffer every frame.
+   */
+  constructor(parent: HTMLElement, opts: { postAA?: boolean } = {}) {
+    // MSAA, resolution and draw distance come from the graphics quality (render/quality.ts).
+    this.renderer = new THREE.WebGLRenderer({ antialias: this.quality.antialias && !opts.postAA, preserveDrawingBuffer: true });
+    this.quality.attach(this.renderer);
+    const draw = Number(new URLSearchParams(location.search).get("draw"));
+    this.drawDistanceM = draw > 0 ? draw : this.quality.drawDistanceM;
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     parent.appendChild(this.renderer.domElement);
     window.addEventListener("resize", () => this.renderer.setSize(window.innerWidth, window.innerHeight));
@@ -87,9 +105,8 @@ export class SceneView {
     // Axis hint at the origin: +X red, +Y (forward) green.
     const axes = new THREE.AxesHelper(3);
     axes.position.z = 0.02;
-    this.agentMesh.count = 0;
-    this.agentMesh.frustumCulled = false;
-    this.world.add(axes, this.barriers, this.intentGroup, this.agentMesh, this.signals.group);
+    this.sirenLight.visible = false;
+    this.world.add(axes, this.barriers, this.intentGroup, this.signals.group, this.sirenLight);
   }
 
   /**
@@ -99,6 +116,7 @@ export class SceneView {
    */
   async setCity(cityId: string | null): Promise<void> {
     for (const [id, obj] of this.cities) obj.visible = id === cityId;
+    this.cityShown = cityId;
     // The debug grid sits on the road surface and flickers through it; hide it in the city.
     this.debugGrid.visible = !cityId;
     if (!cityId || this.cities.has(cityId)) return;
@@ -135,6 +153,7 @@ export class SceneView {
         }
       });
       holder.add(gltf.scene);
+      this.cityTiles.set(cityId, new CityTiles(gltf.scene));
       this.onCityLoaded?.(gltf.scene, cityId);
     } catch (e) {
       console.warn("city greybox not available", cityId, e);
@@ -142,73 +161,50 @@ export class SceneView {
   }
 
   /**
-   * Draw police units that are not sim vehicles (police_units(): [x, y, z, yaw, speed, flags],
-   * flags 1 helicopter, 2 pursuing). Cars get a flashing light bar while pursuing.
+   * Draw police helicopters from police_draw() records (layout.ts D; flags 1 helicopter,
+   * 2 pursuing): a box at altitude with a flashing light bar while pursuing. Police cars, bound
+   * or not, are drawn by render/lod.ts.
    */
-  updatePoliceUnits(units: Float32Array, timeS: number): void {
-    const n = units.length / POLICE_UNIT_STRIDE;
-    while (this.policeUnits.length < n) {
-      const g = new THREE.Group();
-      const body = new THREE.Mesh(new THREE.BoxGeometry(1.9, 4.8, 1.4), new THREE.MeshStandardMaterial({ color: 0xe9ebf0 }));
-      body.position.z = 0.7;
-      const red = new THREE.MeshStandardMaterial({ color: 0x661018 });
-      const blue = new THREE.MeshStandardMaterial({ color: 0x102266 });
-      const barR = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.25, 0.12), red);
-      barR.position.set(-0.32, -0.1, 1.48);
-      const barB = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.25, 0.12), blue);
-      barB.position.set(0.32, -0.1, 1.48);
-      g.add(body, barR, barB);
-      this.world.add(g);
-      this.policeUnits.push({ obj: g, red, blue });
-    }
-    this.policeUnits.forEach((u, i) => {
-      u.obj.visible = i < n;
-      if (i >= n) return;
-      const o = i * POLICE_UNIT_STRIDE;
-      u.obj.position.set(units[o], units[o + 1], units[o + 2]);
-      u.obj.rotation.z = units[o + 3];
-      const flags = units[o + 5];
-      u.obj.scale.setScalar(flags & 1 ? 1.4 : 1); // helicopters: bigger box at altitude
-      const chasing = (flags & 2) !== 0;
-      const phase = (timeS * 2.5 + i * 0.17) % 1;
+  updateHelicopters(units: Float32Array, timeS: number): void {
+    let n = 0;
+    for (let o = 0; o < units.length; o += DRAW_STRIDE) {
+      const flags = units[o + D.flags];
+      if (!(flags & POLICE_DRAW_FLAG.helicopter)) continue;
+      if (n >= this.policeUnits.length) {
+        const g = new THREE.Group();
+        const body = new THREE.Mesh(new THREE.BoxGeometry(1.9, 4.8, 1.4), new THREE.MeshStandardMaterial({ color: 0xe9ebf0 }));
+        body.position.z = 0.7;
+        const red = new THREE.MeshStandardMaterial({ color: 0x661018 });
+        const blue = new THREE.MeshStandardMaterial({ color: 0x102266 });
+        const barR = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.25, 0.12), red);
+        barR.position.set(-0.32, -0.1, 1.48);
+        const barB = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.25, 0.12), blue);
+        barB.position.set(0.32, -0.1, 1.48);
+        g.add(body, barR, barB);
+        g.scale.setScalar(1.4);
+        this.world.add(g);
+        this.policeUnits.push({ obj: g, red, blue });
+      }
+      const u = this.policeUnits[n];
+      u.obj.position.set(units[o + D.pos], units[o + D.pos + 1], units[o + D.pos + 2]);
+      u.obj.quaternion.set(units[o + D.rot], units[o + D.rot + 1], units[o + D.rot + 2], units[o + D.rot + 3]);
+      const chasing = (flags & POLICE_DRAW_FLAG.chasing) !== 0;
+      const phase = (timeS * 2.5 + n * 0.17) % 1;
       u.red.emissive.setHex(chasing && phase < 0.5 ? 0xff2040 : 0x000000);
       u.blue.emissive.setHex(chasing && phase >= 0.5 ? 0x2060ff : 0x000000);
       u.red.emissiveIntensity = u.blue.emissiveIntensity = this.policeGlow;
-    });
+      n++;
+    }
+    this.policeUnits.forEach((u, i) => (u.obj.visible = i < n));
   }
 
-  /** Draw civilian traffic from traffic_agents() ([x, y, z, yaw, flags] per agent). */
-  updateAgents(agents: Float32Array, skipPhysical = false): void {
-    const total = agents.length / AGENT_STRIDE;
-    const show = layers.on("traffic");
-    this.agentMesh.visible = show && total > 0;
-    if (!this.agentMesh.visible) return;
-    const m = new THREE.Matrix4();
-    const q = new THREE.Quaternion();
-    const zAxis = new THREE.Vector3(0, 0, 1);
-    let n = 0;
-    for (let a = 0; a < total && n < MAX_AGENTS; a++) {
-      const o = a * AGENT_STRIDE;
-      if (skipPhysical && agents[o + 4] & AGENT_FLAG.physical) continue;
-      const i = n++;
-      q.setFromAxisAngle(zAxis, agents[o + 3]);
-      m.compose(new THREE.Vector3(agents[o], agents[o + 1], agents[o + 2] + 0.7), q, AGENT_SCALE);
-      this.agentMesh.setMatrixAt(i, m);
-      const flags = agents[o + 4];
-      const c = this.agentColour
-        ? this.agentColour(flags, a)
-        : flags & AGENT_FLAG.yielding
-          ? 0x3399ff
-          : flags & AGENT_FLAG.brake
-            ? 0xff5040
-            : flags & AGENT_FLAG.physical
-              ? 0xffd040
-              : 0xb8bcc4;
-      this.agentMesh.setColorAt(i, tmpAgentColour.setHex(c));
-    }
-    this.agentMesh.count = n;
-    this.agentMesh.instanceMatrix.needsUpdate = true;
-    if (this.agentMesh.instanceColor) this.agentMesh.instanceColor.needsUpdate = true;
+  /** Siren light at `pos` (sim space) with this colour / intensity; `null` = no siren on. */
+  setSiren(pos: THREE.Vector3 | null, colour = 0, intensity = 0): void {
+    this.sirenLight.visible = pos !== null;
+    if (!pos) return;
+    this.sirenLight.position.copy(pos);
+    this.sirenLight.color.setHex(colour);
+    this.sirenLight.intensity = intensity;
   }
 
   /** Sky + light colour from the night factor (0 noon … 1 midnight); `sunDimming` (weather
@@ -244,40 +240,42 @@ export class SceneView {
         | { point: [number, number, number]; normal: [number, number, number]; impulse_ns: number }
         | undefined;
       if (!c) continue;
-      const g = new THREE.Group();
-      g.position.set(...c.point);
-      const dot = new THREE.Mesh(
-        new THREE.SphereGeometry(0.08, 8, 6),
-        new THREE.MeshBasicMaterial({ color: 0xff00ff, transparent: true, depthTest: false }),
-      );
       const len = Math.min(Math.max(c.impulse_ns / 2000, 0.2), 5);
-      const arrow = new THREE.ArrowHelper(new THREE.Vector3(...c.normal).normalize(), new THREE.Vector3(), len, 0xff00ff);
-      g.add(dot, arrow);
-      g.renderOrder = 6;
-      this.world.add(g);
-      this.contacts.push({ obj: g, age: 0 });
+      tmpNormal.set(...c.normal).normalize();
+      let m = this.contacts[this.nextContact];
+      if (!m) {
+        const g = new THREE.Group();
+        const dot = new THREE.Mesh(CONTACT_DOT, new THREE.MeshBasicMaterial({ color: 0xff00ff, transparent: true, depthTest: false }));
+        const arrow = new THREE.ArrowHelper(tmpNormal, new THREE.Vector3(), len, 0xff00ff);
+        for (const mat of [arrow.line.material, arrow.cone.material] as THREE.Material[]) mat.transparent = true;
+        g.add(dot, arrow);
+        g.renderOrder = 6;
+        this.world.add(g);
+        m = { obj: g, dot, arrow, age: 0, active: true };
+        this.contacts[this.nextContact] = m;
+      }
+      this.nextContact = (this.nextContact + 1) % MAX_CONTACT_MARKERS;
+      m.obj.position.set(...c.point);
+      m.arrow.setDirection(tmpNormal);
+      m.arrow.setLength(len);
+      m.age = 0;
+      m.active = true;
       this.contactsSeen++;
     }
   }
 
   update(dt: number, intents: Float32Array): void {
     const show = layers.on("contacts");
-    for (let i = this.contacts.length - 1; i >= 0; i--) {
-      const c = this.contacts[i];
+    for (const c of this.contacts) {
+      if (!c.active) continue;
       c.age += dt;
-      c.obj.visible = show;
       const fade = 1 - c.age / CONTACT_LIFETIME_S;
-      c.obj.traverse((o) => {
-        const m = (o as THREE.Mesh).material as THREE.Material | undefined;
-        if (m) {
-          m.transparent = true;
-          m.opacity = Math.max(fade, 0);
-        }
-      });
-      if (fade <= 0) {
-        c.obj.removeFromParent();
-        this.contacts.splice(i, 1);
-      }
+      if (fade <= 0) c.active = false;
+      c.obj.visible = show && c.active;
+      const o = Math.max(fade, 0);
+      c.dot.material.opacity = o;
+      (c.arrow.line.material as THREE.Material).opacity = o;
+      (c.arrow.cone.material as THREE.Material).opacity = o;
     }
     // Intent arrows: [entity, kind, from xyz, to xyz] (placeholder hook, empty for now).
     this.intentGroup.clear();
@@ -295,11 +293,34 @@ export class SceneView {
   }
 
   clearContacts(): void {
-    for (const c of this.contacts) c.obj.removeFromParent();
-    this.contacts.length = 0;
+    for (const c of this.contacts) {
+      c.active = false;
+      c.obj.visible = false;
+    }
   }
 
-  render(camera: THREE.Camera): void {
+  /** Contact markers currently shown (automation). */
+  activeContacts(): number {
+    return this.contacts.filter((c) => c.active).length;
+  }
+
+  /** City tiles: total, hidden by the draw distance, drawn (frustum too; needs the camera). */
+  cityStats(camera?: THREE.Camera): { tiles: number; hidden: number; drawn: number } {
+    const t = this.cityShown ? this.cityTiles.get(this.cityShown) : undefined;
+    return { tiles: t?.meshes.length ?? 0, hidden: t?.hidden ?? 0, drawn: t && camera ? t.drawn(camera) : 0 };
+  }
+
+  render(camera: THREE.PerspectiveCamera): void {
+    const tiles = this.cityShown ? this.cityTiles.get(this.cityShown) : undefined;
+    if (tiles) {
+      camera.getWorldPosition(this.camPos);
+      let far = Math.min(this.drawDistanceM, camera.far);
+      // Fully fogged geometry (FogExp2 factor > 0.999) looks like the fog-coloured sky.
+      const fog = this.scene.fog;
+      if (fog instanceof THREE.FogExp2 && fog.density > 0) far = Math.min(far, 2.7 / fog.density);
+      else if (fog instanceof THREE.Fog) far = Math.min(far, fog.far);
+      tiles.update(this.camPos, far);
+    }
     if (this.renderOverride) this.renderOverride(camera);
     else this.renderer.render(this.scene, camera);
   }

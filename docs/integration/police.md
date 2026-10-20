@@ -228,11 +228,44 @@ Tests:
   `parking_bump.ron` (new `hit_unit_at_s` / `hit_kmh` racer script; metrics `hits`, `assaults`,
   `hit_to_pursuit_max_s`): pursuit in 0.01 s every run; the bump does nothing.
 - simcli `police/sideswipe_patrol_day.ron` (glancing swipe of a patrol car waiting at a junction)
-  and `police/sideswipe_patrol_night.ron` (mirror-to-mirror with an oncoming patrol car): wanted
+  and `police/sideswipe_patrol_night.ron` (flank swipe of an oncoming patrol car; re-timed in round 12): wanted
   change and pursuit in the contact's tick. Both fail with the rule off (day: pursuit only at
   9.2 s from L1 reports; night: never).
 
 ## Response to lead feedback
+**Round 12 (on `lead/round12`), done:**
+1. **`police/sideswipe_patrol_night.ron` passes again.** Cause: a near miss, not a police change.
+   `probe_police` on `lead/round12` shows unit 3 on the same path and timing as before (south down
+   x = -276.8, 5-8 m/s after y = 165); the racer, with A's diffs, passes it 2.8 m apart at 12 s
+   instead of touching. The old steer (-0.3 at 11.4 s) was at the edge of the hit window. I swept
+   the steer: 11.2 / 11.3 / 11.4 s × -0.3 / -0.35 / -0.4 / -0.5 all hit except the old one, so the
+   scenario now steers -0.4 at 11.3 s (the centre). Contact at 12.0 s, 2,500 N·s, normal sideways
+   (a flank swipe), and wanted L2 + pursuit + "Unit 3: I've been hit!" in that tick. I re-timed
+   rather than adding a target-seeking driver because the simcli drivers are I's code (request
+   below if I wants one). Assault → pursuit behaviour is unchanged (no `wp_police` code changed).
+   The day variant passes unchanged (its hashes don't move). `[bless]` commit: only
+   `golden/police_sideswipe_patrol_night` moves.
+   *Request to I (optional):* a `seek` driver (steer at an entity) would make police contact
+   scenarios independent of vehicle tuning.
+
+**Round 12 gate** (`ws/police` = `lead/round12` + the scenario re-time + its `[bless]`):
+fmt and clippy `-D warnings` clean, wasm build OK. `cargo test --workspace --no-fail-fast`: 873
+passed, 3 failed, 16 ignored. None of the 3 are police code, and all 3 fail the same way on
+`lead/round12` (my diff only touches the night scenario, its golden and this doc):
+- `simcli --test scenarios` / `all_scenarios_pass…`: `city/blocked_parked_player_vesper`
+  `traffic_turnarounds` = 0 (D's round-12 item). `simcli run apps/simcli/scenarios` (release):
+  54 pass, that one fails.
+- `simcli --test scenarios` / `goldens_match`: 18 goldens drift on `lead/round12` itself
+  (`simcli goldens`, release): city/blocked_parked_player_{grid,vesper}, golden_city_chase,
+  golden_night_pursuit_escape, opponent_{flee_police,open_roads_traffic}, panels_frontal_56_hood,
+  police_sideswipe_patrol_day, race_city_sprint_police, the four traffic soaks and five weather
+  scenarios. Their expectations pass; the hashes look like A's diff rework and D's traffic merge
+  landing without a re-bless. I did not re-bless them (not moved by my change), including my
+  own `police_sideswipe_patrol_day` (first mismatch at tick 360, still passes). The lead can
+  bless them with the merge.
+- `wp_net --test vesper_e2e` (`Escaped` instead of `Captured`, F's round-12 item). If F traces
+  it to a police rule (assault heat or capture/search), I'll take it.
+
 **Round 8, all done:**
 1. **`RoadNetworkQuery`:** `RoadGraph::from_network(&dyn RoadNetworkQuery, signalised)` builds the
    police routing index from the v0.3.0 trait (D's `RoadNetworkIndex`); `from_view(&RoadGraphView)`
@@ -450,3 +483,22 @@ run the full gate there, push your `ws/*` branch, and the lead merges it.
    rather than a fixed script) or re-time it, and check the day variant still passes. Keep the
    assault → pursuit behaviour itself unchanged. Re-bless only what your change moves, in a
    `[bless]` commit with the reason.
+
+## Lead feedback (round 12b, 2026-10-20) — owner playtest: police spawn too far away
+Base: `origin/lead/round12` (not main). Owner: "the police spawn too far — we should spawn them in
+when there's public safety calls for reckless driving."
+1. Dispatch-driven spawning: when a 911-style call / traffic violation / reckless-driving report
+   raises heat (the "Dispatch: caller reports reckless driver" line already exists), dispatch
+   assigns a responding unit and, if no idle unit is within a response radius, **spawns** one
+   just out of the player's sight (behind a corner / over a crest, never in view, never closer
+   than ~120 m, typically 150–350 m away along the road graph) heading toward the call. Use
+   `line_of_sight` and the road network; no pop-in in view.
+2. Response time should feel like seconds, not minutes: first unit on scene within ~10–25 s of
+   a reckless-driving call in the core districts (district-dependent), backup on escalation.
+3. Keep the patrol population (wandering units) but cap total units by heat level; despawn
+   units far out of sight when they are not needed (same never-in-view rule).
+4. Scenario(s) with expected ranges: time from first reckless-driving call to first unit within
+   100 m; no spawn inside the player's view cone or < 120 m. Goldens in a [bless] commit.
+5. Coordinate with the 4-player test (`crates/wp_net/tests/vesper_e2e.rs` must still pass) and
+   the LOD hand-over (spawned police use the fleet → full view hand-over in render/lod.ts).
+

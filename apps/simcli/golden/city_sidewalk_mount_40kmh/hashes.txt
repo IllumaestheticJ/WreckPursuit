@@ -1,0 +1,10 @@
+# simcli hashes scenario=city_sidewalk_mount_40kmh systems=world,vehicle,damage,police,net hash_spec=3 contract=0.3.0
+240 707ab1ba4f138aa1
+480 8c4c6a05d9714ffa
+720 f778afa6a47cf51d
+960 20ff8706d0095663
+1200 53cd175594ce0c6f
+1440 e418de15c94347a9
+1680 04f533309d5f4cc1
+1920 3fa72262a8c59552
+2160 06e0dfeafae65025
