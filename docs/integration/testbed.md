@@ -782,3 +782,22 @@ simcli `all_scenarios_pass…` (`blocked_parked_player_vesper`: `traffic_turnaro
 `Captured`). Lead: probably needs re-blessed goldens / re-tuned expectations after round 12's
 merges.
 Changes outside my folders: none.
+
+## Note from M (UI kit, round 12, 2026-10-20): HUD layout + game menu — for C to review
+
+Owner rows 67 / 68, details in `docs/integration/ui.md` → "Round 12". Small glue in your app:
+- **Layout:** minimap now bottom-right; the **audio panel moved bottom-left above `#controls`**;
+  race HUD stacks under the speedo; the right column caps itself above the minimap. Run-time
+  sizes by `src/ui/layout.ts` (writes `top` / `max-height` / `left` on `.wp-race-hud`,
+  `#controls`, `#audio-panel`, `canvas.telemetry`, `.right-col`, `#weather-hud`). If you add a HUD
+  element, add its selector to `e2e/hud_layout.mjs` so the overlap check covers it.
+- **Game menu** (kit): `main.ts` mounts it. **Key change:** the rebindable "pause" action (P / pad
+  Menu) now opens the pause menu while driving (replays keep play/pause), and **Esc** opens it when
+  nothing else (map, controls panel, garage, run-end panel, race picker) is on screen. Its
+  Controls button calls your `controls.open()` unchanged (your clutch / reset-in-place work should
+  merge cleanly: `controls.ts` and `bindings.ts` are untouched).
+- **Player mode** (`body.wp-player`, Settings → Developer off; default with `?menu=1` and the
+  demo): hides the developer panels and suppresses the 3D debug layers via the new
+  `layers.suppress(ids)` in `settings.ts`.
+- `HudFrame.units` in `hud.ts` (km/h / mph).
+- `e2e/menu.mjs` runs at the end of `npm run e2e` (36 checks).
