@@ -48,8 +48,8 @@ pub fn det_exp2(y: f32) -> f32 {
     let y = y.clamp(-125.0, 127.0);
     let i = if y >= 0.0 { y as i32 } else { y as i32 - 1 };
     let i = if (i as f32) > y { i - 1 } else { i };
-    let f = (y - i as f32) * LN_2; // ln 2 · frac
-                                          // e^f, f ∈ [0, ln 2): Taylor to f⁷.
+    // ln 2 · frac; then e^f, f ∈ [0, ln 2), by Taylor to f⁷.
+    let f = (y - i as f32) * LN_2;
     let ef = 1.0
         + f * (1.0
             + f * (0.5
