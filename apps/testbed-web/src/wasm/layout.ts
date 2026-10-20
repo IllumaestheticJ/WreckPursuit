@@ -156,3 +156,13 @@ export const P = { kind: 0, pos: 1, rot: 4, half: 8 } as const;
 export const PROP_KIND = { parkedCar: 0, cone: 1 } as const;
 /** Floats per record in props_moved(): [prop index, x, y, z, qx, qy, qz, qw]. */
 export const PROP_MOVED_STRIDE = 8;
+
+/** Wheel-centre height in chassis space for a reported compression (matches wp_vehicle: the
+ * hub sits at `position_m` at the static compression; playtest row 92 — drawing it at half
+ * the travel left wheels 1–3 cm off the road). */
+export function wheelCentreZ(
+  wi: { position_m: [number, number, number]; travel_m: number; static_compression_m?: number },
+  compression: number,
+): number {
+  return wi.position_m[2] + compression - (wi.static_compression_m ?? wi.travel_m * 0.5);
+}
