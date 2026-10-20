@@ -301,8 +301,10 @@ panel: **engines: modelled / layers** (persisted). The impact / horn work on
   crank rpm, applied throttle, pedal, gear, road speed, boost, engine component health and a
   blow-off counter every frame; `load` is the existing smoothed load (shift dips / blips).
 - Browser: `apps/testbed-web/src/audio/engine_worklet.ts` — **one AudioWorklet node for all
-  modelled engines** (8 mono outputs = slots), parameters posted once per frame
-  (`engine_host.ts`, `Float32Array` of 8 × 12 fields; no SharedArrayBuffer so no COOP/COEP
+  modelled engines** (16 mono outputs = slots: 7 live at most, the rest for voices still fading
+  when a reset re-plays everything; a fading slot is taken over if none is free), parameters
+  posted once per frame (`engine_host.ts`, `Float32Array` of 16 × 12 fields; no
+  SharedArrayBuffer so no COOP/COEP
   headers are needed), the rpm ramped linearly per sample over one frame interval. Per engine,
   per sample: crank angle → each event starts an exhaust blowdown pulse (strength from load;
   weak pumping pulses on overrun; a pulse right after a short same-bank gap is weaker —
@@ -342,7 +344,8 @@ lift drops ≥ 4 dB, shift dips ≥ 3 dB (exhaust band); crackle on every sporty
 4 lifts); blow-off on the turbo lift; limiter cuts; misfires when damaged; no clicks (the
 2nd-difference detector of `engine_render.mjs`), no subnormal samples, no NaN; level within
 6 dB of the procedural layers; interior darker than exterior (> 1 kHz share −19.9 vs −8.8 dB);
-in the game page: the synthesizer loads, the player's engine is modelled, layers ↔ modelled
+seven engines re-played at once three times (reset / source switch) keep their slots; in the
+game page: the synthesizer loads, the player's engine is modelled, layers ↔ modelled
 switches leave no stale voices, no page errors. Rust: `tests/engine_physical.rs` (one voice
 per modelled car with its events and per-frame state; blow-off / shift cut / health reach the
 synth; mods change it; focus + 6 nearest with hysteresis; back to layers; deterministic) and
