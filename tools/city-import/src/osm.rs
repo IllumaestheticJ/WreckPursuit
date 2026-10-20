@@ -449,11 +449,7 @@ pub fn to_network(data: &OsmData, opt: &ImportOptions) -> Result<RoadNetwork, St
                 };
                 (lo + rng.below(hi - lo + 1)) as f32 * 3.2
             });
-        buildings.push(Building {
-            footprint: fp,
-            height_m: height.clamp(2.5, 300.0),
-            base_z_m: 0.0,
-        });
+        buildings.push(Building::block(fp, height.clamp(2.5, 300.0), 0.0));
     }
 
     // Zones: 200 m tiles; district from landuse polygons, else from distance to the core.
