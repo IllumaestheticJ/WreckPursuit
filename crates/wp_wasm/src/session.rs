@@ -695,9 +695,9 @@ impl Session {
     }
 
     /// Debug / e2e: aim vehicle `id` at a parked car so it knocks it: placed 5.5 m off the
-    /// car's flank (a side with a drivable lane and no other prop), facing it, rolling at `speed_mps`.
-    /// `prop` = index into [`crate::props::static_list`], or `None` for the parked car nearest
-    /// the vehicle. Returns the prop index. Not in the replay log.
+    /// car's flank (on a drivable lane, no other prop there), facing it, rolling at `speed_mps`.
+    /// `prop` = index into [`crate::props::static_list`], or `None` for the nearest parked car
+    /// that has such a spot. Returns the prop index. Not in the replay log.
     pub fn debug_knock_prop(
         &mut self,
         id: EntityId,
@@ -709,45 +709,55 @@ impl Session {
             .vehicle(id)
             .map(|v| v.vehicle.state().pos)
             .ok_or_else(|| format!("unknown vehicle {id:?}"))?;
-        let target = match prop {
-            Some(i) if i < self.sim.prop_count() => i,
+        // With no prop given, the nearest parked car that has a usable approach.
+        let candidates: Vec<usize> = match prop {
+            Some(i) if i < self.sim.prop_count() => vec![i],
             Some(i) => return Err(format!("no prop {i}")),
-            None => crate::props::nearest_parked_car(&self.sim, [here[0], here[1]])
-                .ok_or("no parked cars in this session")?,
+            None => crate::props::parked_cars_by_distance(&self.sim, [here[0], here[1]])
+                .into_iter()
+                .take(64)
+                .collect(),
         };
-        let (p, q) = self.sim.prop_pose(target).ok_or("no prop pose")?;
-        let r = crate::props::prop_right_xy(q);
-        // Come from a flank with a drivable lane next to it (the other is the kerb), from a
-        // spot no other prop is on (streets have parking on both sides).
-        const OFFSET_M: f32 = 5.5;
-        let map = self.sim.world().map();
-        let lane_at = |side: f32| {
-            let probe = [p[0] + r[0] * side * 3.5, p[1] + r[1] * side * 3.5, p[2]];
-            map.locate(probe, None, 0.0, true, false).is_some()
-        };
-        let spot = |side: f32| [p[0] + r[0] * side * OFFSET_M, p[1] + r[1] * side * OFFSET_M];
-        let clear = |side: f32| {
-            let xy = spot(side);
-            (0..self.sim.prop_count()).all(|i| {
-                i == target
-                    || self.sim.prop_pose(i).is_none_or(|(o, _)| {
-                        (o[0] - xy[0]).powi(2) + (o[1] - xy[1]).powi(2) > 4.5 * 4.5
-                    })
-            })
-        };
-        let side = [-1.0, 1.0]
+        let (target, xy, yaw, z) = candidates
             .into_iter()
-            .find(|s| lane_at(*s) && clear(*s))
-            .or_else(|| [-1.0, 1.0].into_iter().find(|s| clear(*s)))
-            .ok_or("no clear spot next to that prop")?;
-        let xy = spot(side);
-        // Facing the prop: forward at yaw ψ is (−sin ψ, cos ψ) = −side · r.
-        let yaw = wp_math::atan2(side * r[0], -side * r[1]);
+            .find_map(|i| self.knock_approach(i).map(|(xy, yaw, z)| (i, xy, yaw, z)))
+            .ok_or("no parked car with a clear lane beside it")?;
         self.sim
-            .place_on_ground(id, xy, yaw, speed_mps, Some(p[2]))
+            .place_on_ground(id, xy, yaw, speed_mps, Some(z))
             .map_err(|e| e.to_string())?;
         self.relocate_racer(id);
         Ok(target)
+    }
+
+    /// Where to put a car to knock prop `target`: 5.5 m off one of its flanks, on a drivable
+    /// lane (so never on a sidewalk or inside a building), with no other prop within 4.5 m;
+    /// facing the prop. `(xy, yaw, z hint)`, or `None` when neither flank qualifies.
+    fn knock_approach(&self, target: usize) -> Option<([f32; 2], f32, f32)> {
+        const OFFSET_M: f32 = 5.5;
+        let (p, q) = self.sim.prop_pose(target)?;
+        let r = crate::props::prop_right_xy(q);
+        let map = self.sim.world().map();
+        let spot = |side: f32| [p[0] + r[0] * side * OFFSET_M, p[1] + r[1] * side * OFFSET_M];
+        let usable = |side: f32| {
+            let xy = spot(side);
+            // The whole run-up (car centre, and its far end 2.5 m further out) is road.
+            let on_lane = [0.0, 2.5].iter().all(|back| {
+                let d = OFFSET_M + back;
+                let pt = [p[0] + r[0] * side * d, p[1] + r[1] * side * d, p[2]];
+                map.locate(pt, None, 0.0, true, false).is_some()
+            });
+            on_lane
+                && (0..self.sim.prop_count()).all(|i| {
+                    i == target
+                        || self.sim.prop_pose(i).is_none_or(|(o, _)| {
+                            (o[0] - xy[0]).powi(2) + (o[1] - xy[1]).powi(2) > 4.5 * 4.5
+                        })
+                })
+        };
+        let side = [-1.0f32, 1.0].into_iter().find(|s| usable(*s))?;
+        // Facing the prop: forward at yaw ψ is (−sin ψ, cos ψ) = −side · r.
+        let yaw = wp_math::atan2(side * r[0], -side * r[1]);
+        Some((spot(side), yaw, p[2]))
     }
 
     /// The vehicle is held on the brakes because its run is over (capture or wreck).

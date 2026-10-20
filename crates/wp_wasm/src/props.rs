@@ -117,21 +117,22 @@ pub fn prop_right_xy(q: [f32; 4]) -> [f32; 2] {
     [rx / l, ry / l]
 }
 
-/// The parked car nearest to `xy` (index into [`static_list`]), if any.
-pub fn nearest_parked_car(sim: &Sim, xy: [f32; 2]) -> Option<usize> {
+/// Parked cars (indices into [`static_list`]) nearest to `xy` first.
+pub fn parked_cars_by_distance(sim: &Sim, xy: [f32; 2]) -> Vec<usize> {
     let n = sim.prop_count();
-    let mut best: Option<(usize, f32)> = None;
-    for (i, prop) in sim.world().static_props().take(n).enumerate() {
-        if prop.kind != PropKind::ParkedCar {
-            continue;
-        }
-        let p = pose7(sim, i);
-        let d = (p[0] - xy[0]).powi(2) + (p[1] - xy[1]).powi(2);
-        if best.is_none_or(|(_, b)| d < b) {
-            best = Some((i, d));
-        }
-    }
-    best.map(|(i, _)| i)
+    let mut out: Vec<(f32, usize)> = sim
+        .world()
+        .static_props()
+        .take(n)
+        .enumerate()
+        .filter(|(_, p)| p.kind == PropKind::ParkedCar)
+        .map(|(i, _)| {
+            let p = pose7(sim, i);
+            ((p[0] - xy[0]).powi(2) + (p[1] - xy[1]).powi(2), i)
+        })
+        .collect();
+    out.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+    out.into_iter().map(|(_, i)| i).collect()
 }
 
 #[cfg(test)]

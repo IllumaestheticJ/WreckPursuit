@@ -3,28 +3,38 @@
 // Every prop is a Rapier body in the sim (fixed until a car comes near, then dynamic), so every
 // prop must be drawn wherever the player can reach it. wp_wasm hands us the full list once per
 // session (`props_static()`) and, per frame, only the props whose pose changed
-// (`props_moved()`, usually empty). Nothing is rebuilt per frame:
-//   * parked cars are instanced traffic cars (the session's traffic model, palette and fleet
-//     materials, so they look like the cars driving past), scaled so the model's bounding box is
-//     exactly the collider box. Every parked car always has a low-poly proxy instance; the ones
-//     within FULL_LOD_M of the camera (the traffic fleet's full-mesh distance, nearest
-//     MAX_FULL first) swap to the full panel mesh. The near set is re-picked only after the
-//     camera moved REPICK_M, and only the instances that change drawer are rewritten;
-//   * cones are one InstancedMesh of small orange cones;
-//   * a moved prop rewrites only its own instance matrix.
-// So a prop is never undrawn at any distance: no invisible collisions.
-// Coordinates: sim space (+Z up), parented under SceneView.world.
+// (`props_moved()`, usually empty). Nothing is rebuilt per frame.
+//
+// Parked cars look like the traffic driving past (the session's traffic model, palette and
+// fleet materials), each model's bounding box scaled exactly onto the collider box. There are
+// 3,000+ of them, so they are drawn in three tiers, and every car always has exactly one drawn
+// instance (no distance hides a prop: no invisible collisions):
+//   * full: the nearest MAX_FULL parked cars within FULL_LOD_M (the fleet's full-mesh distance)
+//     use the full panel mesh. Re-picked after the camera moves REPICK_M; only the cars that
+//     change drawer are rewritten;
+//   * proxy / box: the city is cut into CHUNK_M chunks, each with its own instanced meshes and
+//     a bounding sphere, so Three frustum-culls whole chunks. A chunk within PROXY_M of the
+//     camera shows the fleet's low-poly proxy; farther chunks show a two-box car (24 triangles).
+//     Switching a chunk's tier only toggles visibility: both instance sets are always current.
+// Cones are one InstancedMesh of small orange cones. A moved prop rewrites only its own
+// instances. Coordinates: sim space (+Z up), parented under SceneView.world.
 import * as THREE from "three";
 import { P, PROP_KIND, PROP_MOVED_STRIDE, PROP_STRIDE } from "../wasm/layout";
 import type { CarModelInfo, SessionModels } from "../wasm/sim";
 import { sim } from "../wasm/sim";
 import { carMeshNow, loadCarMesh } from "./panels";
-import { FULL_LOD_M, InstancedCar, TAIL, TRAFFIC_PALETTE, fullGeoms, proxyGeoms, type FleetMaterials } from "./fleet";
+import { FULL_LOD_M, InstancedCar, TAIL, TRAFFIC_PALETTE, fullGeoms, proxyGeoms, styledPaint, type FleetMaterials } from "./fleet";
 
-/** Full-mesh parked cars at most (nearest first; the rest keep their proxy). */
-const MAX_FULL = 256;
+/** Full-mesh parked cars at most (nearest first; the rest keep their proxy / box). */
+const MAX_FULL = 24;
 /** Re-pick the full-mesh set after the camera moved this far, m. */
 const REPICK_M = 12;
+/** Chunk edge, m. */
+const CHUNK_M = 96;
+/** Chunks nearer than this (camera to chunk sphere) draw proxies, farther ones boxes, m. */
+const PROXY_M = 300;
+/** Bounding-sphere slack for knocked props and the car's own extent, m. */
+const SPHERE_PAD_M = 6;
 /** Cone colour (traffic orange) and its faint glow so cones read at night. */
 const CONE_RGB = 0xff6a14;
 const CONE_GLOW = 0x2a0e00;
@@ -40,9 +50,9 @@ interface Fit {
   size: THREE.Vector3;
 }
 
-function fitOf(geoms: { paint: THREE.BufferGeometry; detail: THREE.BufferGeometry }): Fit {
+function fitOf(geos: THREE.BufferGeometry[]): Fit {
   const box = new THREE.Box3();
-  for (const g of [geoms.paint, geoms.detail]) {
+  for (const g of geos) {
     g.computeBoundingBox();
     if (g.boundingBox) box.union(g.boundingBox);
   }
@@ -59,20 +69,52 @@ function boxCarInfo(half: [number, number, number]): CarModelInfo {
   return { car_id: "parked", body_size_m: [w, l, h], wheels: [wheel(-wx, wy), wheel(wx, wy), wheel(-wx, -wy), wheel(wx, -wy)] };
 }
 
-/** One set of instanced cars plus how its model fits a collider box. */
-interface Bucket {
-  car: InstancedCar;
-  fit: Fit;
+/** Far tier: a unit-cube car (lower body + cabin, white vertex colour = instance livery). */
+function farCarGeometry(): THREE.BufferGeometry {
+  const box = (sx: number, sy: number, sz: number, z: number) => {
+    const g = new THREE.BoxGeometry(sx, sy, sz).toNonIndexed();
+    g.translate(0, 0, z);
+    g.deleteAttribute("uv");
+    return g;
+  };
+  const parts = [box(1, 1, 0.6, -0.2), box(0.86, 0.5, 0.4, 0.3)];
+  const n = parts.reduce((s, g) => s + g.getAttribute("position").count * 3, 0);
+  const pos = new Float32Array(n);
+  let o = 0;
+  for (const g of parts) {
+    const a = g.getAttribute("position").array as Float32Array;
+    pos.set(a, o);
+    o += a.length;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  g.setAttribute("color", new THREE.BufferAttribute(new Float32Array(n).fill(1), 3));
+  g.computeVertexNormals();
+  return g;
+}
+
+const UNIT_FIT: Fit = { centre: new THREE.Vector3(0, 0, 0), size: new THREE.Vector3(1, 1, 1) };
+
+/** One chunk of parked cars: proxy and box instance sets over the same cars. */
+interface Chunk {
+  props: number[];
+  proxy: InstancedCar;
+  box: THREE.InstancedMesh;
+  sphere: THREE.Sphere;
+  near: boolean;
+  dirty: boolean;
 }
 
 export interface PropStats {
   parked: number;
   cones: number;
-  /** Instances currently drawn (non-hidden): full + proxy + cones. */
+  chunks: number;
+  /** Parked cars drawn by each tier right now (sum = parked when every car is drawn once). */
   drawnFull: number;
   drawnProxy: number;
+  drawnBox: number;
   drawnCones: number;
-  /** Props within `rangeM` of the camera, and how many of them have exactly one drawn instance. */
+  /** Props within `rangeM` of the camera, and how many of them have a drawn instance. */
   inRange: number;
   drawnInRange: number;
   /** Parked cars within `rangeM`, and how many of those use the full mesh. */
@@ -81,7 +123,7 @@ export interface PropStats {
   /** Parked cars within FULL_LOD_M of the camera, and how many of those use the full mesh. */
   inFullRange: number;
   fullInFullRange: number;
-  /** Times the full-mesh set was re-picked, and instance matrices written by moves / re-picks. */
+  /** Times the full-mesh set was re-picked, and instance writes by moves / re-picks. */
   repicks: number;
   movedWrites: number;
   repickWrites: number;
@@ -98,17 +140,21 @@ export class PropView {
   /** Current pose per prop: x y z qx qy qz qw. */
   private pose = new Float32Array(0);
   private half = new Float32Array(0);
-  /** Per prop: proxy instance (parked cars) or cone instance. */
+  /** Per prop: chunk index (parked cars) and slot inside it, or cone instance. */
+  private chunkOf = new Int32Array(0);
   private slot = new Int32Array(0);
   /** Per parked car: full-mesh slot, or -1. */
   private fullSlot = new Int32Array(0);
   /** Full-mesh slot → prop. */
   private fullProps: number[] = [];
+  private chunks: Chunk[] = [];
   private parkedCount = 0;
   private coneCount = 0;
-  private proxy: Bucket | null = null;
-  private full: Bucket | null = null;
+  private proxyFit: Fit | null = null;
+  private full: { car: InstancedCar; fit: Fit } | null = null;
   private cones: THREE.InstancedMesh | null = null;
+  private farGeo: THREE.BufferGeometry | null = null;
+  private proxyGeo: ReturnType<typeof proxyGeoms> | null = null;
   private mats: FleetMaterials | null = null;
   private trafficModel: string | null = null;
   private generation = 0;
@@ -126,6 +172,9 @@ export class PropView {
   private repicks = 0;
   private movedWrites = 0;
   private repickWrites = 0;
+  private updates = 0;
+  private updateMsSum = 0;
+  private updateMaxMs = 0;
 
   /** New session: `list` from `props_static()`, the session's models, the fleet's materials. */
   set(list: Float32Array, models: SessionModels, mats: FleetMaterials): void {
@@ -137,26 +186,34 @@ export class PropView {
     this.kind = new Uint8Array(n);
     this.pose = new Float32Array(n * 7);
     this.half = new Float32Array(n * 3);
+    this.chunkOf = new Int32Array(n).fill(-1);
     this.slot = new Int32Array(n);
     this.fullSlot = new Int32Array(n).fill(-1);
+    const byCell = new Map<string, number[]>();
     let firstCar = -1;
     for (let i = 0, o = 0; i < n; i++, o += PROP_STRIDE) {
       this.kind[i] = list[o + P.kind];
       this.pose.set(list.subarray(o + P.pos, o + P.pos + 7), i * 7);
       this.half.set(list.subarray(o + P.half, o + P.half + 3), i * 3);
-      if (this.kind[i] === PROP_KIND.cone) this.slot[i] = this.coneCount++;
-      else {
-        this.slot[i] = this.parkedCount++;
-        if (firstCar < 0) firstCar = i;
+      if (this.kind[i] === PROP_KIND.cone) {
+        this.slot[i] = this.coneCount++;
+        continue;
       }
+      this.parkedCount++;
+      if (firstCar < 0) firstCar = i;
+      const key = `${Math.floor(this.pose[i * 7] / CHUNK_M)},${Math.floor(this.pose[i * 7 + 1] / CHUNK_M)}`;
+      let cell = byCell.get(key);
+      if (!cell) byCell.set(key, (cell = []));
+      cell.push(i);
     }
     if (this.parkedCount > 0) {
       const h = this.half.subarray(firstCar * 3, firstCar * 3 + 3);
       this.trafficModel = models.traffic;
       const info = models.traffic ? sim.carModelInfo(models.traffic) : boxCarInfo([h[0], h[1], h[2]]);
-      const g = proxyGeoms(info);
-      this.proxy = { car: new InstancedCar(g, this.parkedCount, mats, null), fit: fitOf(g) };
-      this.group.add(...this.proxy.car.meshes);
+      this.proxyGeo = proxyGeoms(info);
+      this.proxyFit = fitOf([this.proxyGeo.paint, this.proxyGeo.detail]);
+      this.farGeo = farCarGeometry();
+      for (const props of byCell.values()) this.addChunk(props, mats);
       if (models.traffic) {
         const carId = models.traffic;
         const now = carMeshNow(carId);
@@ -174,37 +231,64 @@ export class PropView {
       this.cones.frustumCulled = false;
       this.group.add(this.cones);
     }
-    // Everything starts as a proxy / cone at its static pose.
     for (let i = 0; i < n; i++) this.writeInstance(i);
     this.flush();
     this.lastPick.set(Infinity, Infinity, Infinity);
   }
 
+  private addChunk(props: number[], mats: FleetMaterials): void {
+    const c = this.chunks.length;
+    // Instances share one geometry set per tier; each chunk's meshes only own their instances.
+    const proxy = new InstancedCar(this.proxyGeo!, props.length, mats, null);
+    const box = new THREE.InstancedMesh(this.farGeo!, mats.paint, props.length);
+    const pts = props.map((i) => new THREE.Vector3(this.pose[i * 7], this.pose[i * 7 + 1], this.pose[i * 7 + 2]));
+    const sphere = new THREE.Sphere().setFromPoints(pts);
+    sphere.radius += SPHERE_PAD_M;
+    for (const mesh of [...proxy.meshes, box]) {
+      mesh.frustumCulled = true; // the whole chunk is skipped when its sphere is off screen
+      mesh.boundingSphere = sphere;
+      mesh.count = props.length;
+      this.group.add(mesh);
+    }
+    proxy.count = props.length;
+    props.forEach((i, k) => {
+      this.chunkOf[i] = c;
+      this.slot[i] = k;
+      box.setColorAt(k, this.paint.setHex(styledPaint(parkedPaint(i))));
+    });
+    const chunk: Chunk = { props, proxy, box, sphere, near: false, dirty: true };
+    this.chunks.push(chunk);
+    this.showTier(chunk, false);
+  }
+
+  private showTier(ch: Chunk, near: boolean): void {
+    ch.near = near;
+    for (const mesh of ch.proxy.meshes) mesh.visible = near;
+    ch.box.visible = !near;
+  }
+
   private setFullMesh(mesh: Parameters<typeof fullGeoms>[0], info: CarModelInfo): void {
     if (this.full || !this.mats) return;
     const g = fullGeoms(mesh, info);
-    this.full = { car: new InstancedCar(g, Math.min(MAX_FULL, this.parkedCount), this.mats, null), fit: fitOf(g) };
+    this.full = { car: new InstancedCar(g, Math.min(MAX_FULL, this.parkedCount), this.mats, null), fit: fitOf([g.paint, g.detail]) };
     this.full.car.count = 0;
     this.group.add(...this.full.car.meshes);
     this.lastPick.set(Infinity, Infinity, Infinity); // pick on the next frame
   }
 
-  /** Matrix of prop `i` drawn by `b` (model bounding box → collider box). */
-  private carMatrix(i: number, b: Bucket): THREE.Matrix4 {
+  /** Matrix of prop `i` for a model with bounding box `fit` (model box → collider box). */
+  private carMatrix(i: number, fit: Fit): THREE.Matrix4 {
     const o = i * 7;
-    const hx = this.half[i * 3];
-    const hy = this.half[i * 3 + 1];
-    const hz = this.half[i * 3 + 2];
-    this.s.set((2 * hx) / b.fit.size.x, (2 * hy) / b.fit.size.y, (2 * hz) / b.fit.size.z);
+    this.s.set((2 * this.half[i * 3]) / fit.size.x, (2 * this.half[i * 3 + 1]) / fit.size.y, (2 * this.half[i * 3 + 2]) / fit.size.z);
     // local = T(−centre ∘ scale) · S(scale): the model's box centre lands on the prop's centre.
-    this.p.copy(b.fit.centre).multiply(this.s).negate();
+    this.p.copy(fit.centre).multiply(this.s).negate();
     this.local.compose(this.p, this.q.identity(), this.s);
     this.p.set(this.pose[o], this.pose[o + 1], this.pose[o + 2]);
     this.q.set(this.pose[o + 3], this.pose[o + 4], this.pose[o + 5], this.pose[o + 6]);
     return this.m.compose(this.p, this.q, this.one).multiply(this.local);
   }
 
-  /** Write prop `i`'s instance(s) from its current pose and drawer. */
+  /** Write prop `i`'s instances from its current pose and drawer. */
   private writeInstance(i: number): void {
     if (this.kind[i] === PROP_KIND.cone) {
       if (!this.cones) return;
@@ -217,31 +301,38 @@ export class PropView {
       this.cones.instanceMatrix.needsUpdate = true;
       return;
     }
-    const proxy = this.proxy;
-    if (!proxy) return;
+    const ch = this.chunks[this.chunkOf[i]];
+    if (!ch || !this.proxyFit) return;
+    const k = this.slot[i];
     const fs = this.fullSlot[i];
     this.paint.setHex(parkedPaint(i));
     if (fs >= 0 && this.full) {
-      this.full.car.put(fs, this.carMatrix(i, this.full), this.paint, this.tail, null);
+      this.full.car.put(fs, this.carMatrix(i, this.full.fit), this.paint, this.tail, null);
       this.full.car.end();
-      proxy.car.put(this.slot[i], ZERO, this.paint, this.tail, null);
+      ch.proxy.put(k, ZERO, this.paint, this.tail, null);
+      ch.box.setMatrixAt(k, ZERO);
     } else {
-      proxy.car.put(this.slot[i], this.carMatrix(i, proxy), this.paint, this.tail, null);
+      ch.proxy.put(k, this.carMatrix(i, this.proxyFit), this.paint, this.tail, null);
+      ch.box.setMatrixAt(k, this.carMatrix(i, UNIT_FIT));
     }
-    this.dirtyProxy = true;
+    // A knocked car may leave its chunk's sphere: grow it (culling must never drop it).
+    const o = i * 7;
+    this.p.set(this.pose[o], this.pose[o + 1], this.pose[o + 2]);
+    if (ch.sphere.distanceToPoint(this.p) > -SPHERE_PAD_M) ch.sphere.expandByPoint(this.p).radius += SPHERE_PAD_M;
+    ch.dirty = true;
   }
-
-  private dirtyProxy = false;
 
   private flush(): void {
-    if (this.proxy && this.dirtyProxy) {
-      this.proxy.car.count = this.parkedCount;
-      this.proxy.car.end();
+    for (const ch of this.chunks) {
+      if (!ch.dirty) continue;
+      ch.dirty = false;
+      ch.proxy.end();
+      ch.box.instanceMatrix.needsUpdate = true;
+      if (ch.box.instanceColor) ch.box.instanceColor.needsUpdate = true;
     }
-    this.dirtyProxy = false;
   }
 
-  /** Per frame: apply `props_moved()` records, then re-pick the full-mesh set if the camera moved. */
+  /** Per frame: apply `props_moved()` records, pick chunk tiers, re-pick the full-mesh set. */
   update(moved: Float32Array, camera: THREE.Camera): void {
     if (this.n === 0) return;
     const t0 = performance.now();
@@ -255,6 +346,10 @@ export class PropView {
       this.writeInstance(i);
       this.movedWrites++;
     }
+    for (const ch of this.chunks) {
+      const near = ch.sphere.distanceToPoint(this.cam) < PROXY_M;
+      if (near !== ch.near) this.showTier(ch, near);
+    }
     if (this.full && this.cam.distanceTo(this.lastPick) > REPICK_M) this.repick();
     this.flush();
     const ms = performance.now() - t0;
@@ -262,10 +357,6 @@ export class PropView {
     this.updateMsSum += ms;
     this.updateMaxMs = Math.max(this.updateMaxMs, ms);
   }
-
-  private updates = 0;
-  private updateMsSum = 0;
-  private updateMaxMs = 0;
 
   /** Re-pick the nearest parked cars for the full mesh; rewrite only the ones that change drawer. */
   private repick(): void {
@@ -293,7 +384,7 @@ export class PropView {
         this.writeInstance(last);
         this.repickWrites++;
       }
-      this.writeInstance(i); // back to its proxy
+      this.writeInstance(i); // back to its chunk
       this.repickWrites++;
     }
     for (const i of want) {
@@ -318,32 +409,27 @@ export class PropView {
     return this.n;
   }
 
+  /** The mesh, slot and model fit currently drawing prop `i` (null: none). */
+  private drawer(i: number): { mesh: THREE.InstancedMesh; slot: number; fit: Fit | null } | null {
+    if (i < 0 || i >= this.n) return null;
+    if (this.kind[i] === PROP_KIND.cone) return this.cones ? { mesh: this.cones, slot: this.slot[i], fit: null } : null;
+    if (this.fullSlot[i] >= 0 && this.full) return { mesh: this.full.car.paint, slot: this.fullSlot[i], fit: this.full.fit };
+    const ch = this.chunks[this.chunkOf[i]];
+    if (!ch) return null;
+    return ch.near ? { mesh: ch.proxy.paint, slot: this.slot[i], fit: this.proxyFit } : { mesh: ch.box, slot: this.slot[i], fit: UNIT_FIT };
+  }
+
   /**
    * The pose prop `i` is drawn with, read back from its instance matrix: box centre (sim space,
    * m) and rotation `[x, y, z, w]`, or null when it has no drawn instance. Automation (e2e).
    */
   drawnPose(i: number): number[] | null {
-    if (i < 0 || i >= this.n) return null;
-    let mesh: THREE.InstancedMesh | null;
-    let slot: number;
-    let fit: Fit | null = null;
-    if (this.kind[i] === PROP_KIND.cone) {
-      mesh = this.cones;
-      slot = this.slot[i];
-    } else if (this.fullSlot[i] >= 0 && this.full) {
-      mesh = this.full.car.paint;
-      slot = this.fullSlot[i];
-      fit = this.full.fit;
-    } else {
-      mesh = this.proxy?.car.paint ?? null;
-      slot = this.slot[i];
-      fit = this.proxy?.fit ?? null;
-    }
-    if (!mesh || slot >= mesh.count) return null;
+    const d = this.drawer(i);
+    if (!d || d.slot >= d.mesh.count || !d.mesh.visible) return null;
     const m = new THREE.Matrix4();
-    mesh.getMatrixAt(slot, m);
+    d.mesh.getMatrixAt(d.slot, m);
     if (m.determinant() === 0) return null;
-    const centre = (fit?.centre.clone() ?? new THREE.Vector3()).applyMatrix4(m);
+    const centre = (d.fit?.centre.clone() ?? new THREE.Vector3()).applyMatrix4(m);
     const q = new THREE.Quaternion();
     m.decompose(new THREE.Vector3(), q, new THREE.Vector3());
     return [centre.x, centre.y, centre.z, q.x, q.y, q.z, q.w];
@@ -359,34 +445,35 @@ export class PropView {
     let fullInFullRange = 0;
     let parkedInRange = 0;
     let fullInRange = 0;
+    let drawnProxy = 0;
+    let drawnBox = 0;
     for (let i = 0; i < this.n; i++) {
       const d = this.distTo(i);
       const car = this.kind[i] !== PROP_KIND.cone;
+      const drawn = this.drawnPose(i) !== null;
+      if (car && drawn && this.fullSlot[i] < 0) {
+        if (this.chunks[this.chunkOf[i]]?.near) drawnProxy++;
+        else drawnBox++;
+      }
       if (car && d < FULL_LOD_M) {
         inFullRange++;
         if (this.fullSlot[i] >= 0) fullInFullRange++;
       }
       if (d >= rangeM) continue;
       inRange++;
+      if (drawn) drawnInRange++;
       if (car) {
         parkedInRange++;
         if (this.fullSlot[i] >= 0) fullInRange++;
-      }
-      if (this.drawnPose(i) !== null) drawnInRange++;
-    }
-    let hidden = 0;
-    if (this.proxy) {
-      const m = new THREE.Matrix4();
-      for (let s = 0; s < this.proxy.car.paint.count; s++) {
-        this.proxy.car.paint.getMatrixAt(s, m);
-        if (m.determinant() === 0) hidden++;
       }
     }
     return {
       parked: this.parkedCount,
       cones: this.coneCount,
+      chunks: this.chunks.length,
       drawnFull: this.full?.car.paint.count ?? 0,
-      drawnProxy: (this.proxy?.car.paint.count ?? 0) - hidden,
+      drawnProxy,
+      drawnBox,
       drawnCones: this.cones?.count ?? 0,
       inRange,
       drawnInRange,
@@ -409,8 +496,15 @@ export class PropView {
 
   /** Drop every instance (new session). */
   clear(): void {
-    for (const b of [this.proxy, this.full]) b?.car.dispose();
-    this.proxy = null;
+    // Chunks share geometry: remove their meshes, dispose the shared geometry once.
+    for (const ch of this.chunks) for (const mesh of [...ch.proxy.meshes, ch.box]) mesh.removeFromParent();
+    this.chunks = [];
+    if (this.proxyGeo) for (const g of [this.proxyGeo.paint, this.proxyGeo.detail, this.proxyGeo.tail, this.proxyGeo.head]) g.dispose();
+    this.proxyGeo = null;
+    this.farGeo?.dispose();
+    this.farGeo = null;
+    this.proxyFit = null;
+    this.full?.car.dispose();
     this.full = null;
     if (this.cones) {
       this.cones.removeFromParent();

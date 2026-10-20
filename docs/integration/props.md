@@ -34,10 +34,18 @@ Testbed: `render/props.ts` `PropView` (exposed as `window.__wp.props`: `stats(ca
   `TRAFFIC_PALETTE` liveries (stable per prop) and the fleet's materials, so they look like the
   cars driving past. Each model's bounding box is scaled onto the collider box (1.9 × 4.5 × 1.5 m),
   so what you see is exactly what you hit. Without a traffic model a box-sized proxy car is used.
-- **LOD** (traffic's distances): every parked car always has a low-poly proxy instance; the nearest
-  ≤ 256 within `FULL_LOD_M` (250 m, same as the traffic fleet) swap to the full panel mesh. The near
-  set is re-picked after the camera moves 12 m, and only instances that change drawer are
-  rewritten. Nothing is ever hidden by distance: a prop is drawn at any range.
+- **LOD**, three tiers; every parked car has exactly one drawn instance at any distance:
+  - *full*: the nearest 24 parked cars within `FULL_LOD_M` (250 m, the traffic fleet's distance)
+    use the full panel mesh (3,706 triangles each). Re-picked after the camera moves 12 m; only
+    the cars that change drawer are rewritten;
+  - *proxy* / *box*: parked cars are grouped in 96 m chunks, each with its own instanced meshes
+    and a bounding sphere, so Three frustum-culls whole chunks. Chunks within 300 m show the
+    fleet's low-poly proxy; farther ones a two-box car (24 triangles). A tier switch only toggles
+    visibility (both instance sets are always current); a knocked car grows its chunk's sphere.
+  - Round-12b's `perf_check.mjs` caught the first version (every car a proxy, 256 full meshes,
+    nothing culled): ~1.15 M extra triangles per frame (1.49 M total vs a 700 k limit). Now:
+    chase 419 k triangles / 599 draw calls / real-time factor 0.97, rain 426 k / 640 / 0.94
+    (10 frames over 250 ms, limit 12).
 - **Cones**: one `InstancedMesh` of 8-sided orange cones with a faint glow (night), sized to the
   0.3 × 0.3 × 0.7 m collider.
 - **Moves**: a `props_moved()` record rewrites only that prop's instance. Props are drawn at the
@@ -67,6 +75,26 @@ Results (2026-10-20):
 | city chase 120 s | 68 | 50 prop, 7 sidewalk/kerb, 5 road, 4 building, 2 terrain | 43,043 | 0 |
 | free drive 60 s | 54 | 42 prop, 11 road, 1 building | 39,374 | 0 |
 | static coverage | 3,346 buildings, 362 deck rails | — | — | 0 (worst rail corner 0.70 m from the parapet) |
+
+Re-run on `lead/round12` after the round-12b merges (junction surfaces, tunnels, art, regenerated
+greyboxes):
+
+| Sweep | Hard static contacts | Hit | Max N·s | Undrawn |
+|---|---|---|---|---|
+| city chase 120 s | 123 | 56 prop, 37 road, 13 sidewalk/kerb, 10 terrain, 7 building | 28,234 | 0 |
+| free drive 60 s | 59 | 39 prop, 15 road, 3 building, 1 sidewalk/kerb, 1 terrain | 20,320 | 0 |
+| static coverage | 3,312 buildings, 611 deck rails | — | — | 0 (worst rail corner 0.70 m) |
+
+**Lead follow-up (31 "undrawn" building contacts at (-650.7, 260.2)).** The building collider and
+the greybox matched there; the test helper was at fault. `debug_knock_prop` fell back to any spot
+clear of props when neither flank of the chosen parked car had a lane next to it, and on round-12b
+data it put the car *inside* that building (car origin (-650.0, 260.7, 12.5)). Rapier then pushed
+it out with 66,000–194,000 N·s per tick, and the impulse-weighted contact point lay inside the
+hull, more than 1 m from every wall. Fixed at the cause: the helper now needs the car's position
+and the 2.5 m behind it to be a drivable lane (no fallback) and otherwise tries the next-nearest
+parked car; the sweep asserts every knock places the car outside every building. The measure
+also changed: a contact point inside a collider is now compared via that collider's nearest face
+(the surface that was hit), not the interior point.
 
 So the props were the only undrawn colliders, and they are by far the most-hit static thing in the
 city (≈ 3/4 of the hard contacts, partly because the sweep aims at them). Before this branch every
@@ -113,7 +141,7 @@ a knocked parked car moved 0.74 m with drawn vs sim pose ≤ 0.000 m on every fr
 |---|---|---|---|---|
 | `props_moved()` per frame, nothing moving | cloud container, headless Chromium | — | 0.025 ms | — |
 | `PropView.update()` mean / worst frame (a re-pick) | cloud container, headless Chromium | — | 0.038 ms / 0.50 ms | — |
-| Draw calls added | — | — | 4 proxy + 4 full + 1 cone | — |
+| Draw calls added | — | — | 4 per near chunk on screen, 1 per far chunk on screen, 4 full, 1 cone | — |
 
 ## Known gaps
 - Multiplayer (`net.html`, `wp_net`) runs with `parked_cars: false`, so it has no props today. If
