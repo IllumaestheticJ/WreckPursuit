@@ -618,6 +618,40 @@ impl Session {
         Ok(())
     }
 
+    /// Debug / e2e: aim vehicle `id` at a parked car so it knocks it: placed `9 m` off the
+    /// car's left flank (the road side of a parking lane), facing it, rolling at `speed_mps`.
+    /// `prop` = index into [`crate::props::static_list`], or `None` for the parked car nearest
+    /// the vehicle. Returns the prop index. Not in the replay log.
+    pub fn debug_knock_prop(
+        &mut self,
+        id: EntityId,
+        prop: Option<usize>,
+        speed_mps: f32,
+    ) -> Result<usize, String> {
+        self.live_check()?;
+        let here = self
+            .vehicle(id)
+            .map(|v| v.vehicle.state().pos)
+            .ok_or_else(|| format!("unknown vehicle {id:?}"))?;
+        let target = match prop {
+            Some(i) if i < self.sim.prop_count() => i,
+            Some(i) => return Err(format!("no prop {i}")),
+            None => crate::props::nearest_parked_car(&self.sim, [here[0], here[1]])
+                .ok_or("no parked cars in this session")?,
+        };
+        let (p, q) = self.sim.prop_pose(target).ok_or("no prop pose")?;
+        let r = crate::props::prop_right_xy(q);
+        const OFFSET_M: f32 = 9.0;
+        let xy = [p[0] - r[0] * OFFSET_M, p[1] - r[1] * OFFSET_M];
+        // Facing the prop's +X (towards it): forward at yaw ψ is (−sin ψ, cos ψ).
+        let yaw = wp_math::atan2(-r[0], r[1]);
+        self.sim
+            .place_on_ground(id, xy, yaw, speed_mps, Some(p[2]))
+            .map_err(|e| e.to_string())?;
+        self.relocate_racer(id);
+        Ok(target)
+    }
+
     /// The vehicle is held on the brakes because its run is over (capture or wreck).
     pub fn held(&self, id: EntityId) -> bool {
         self.run
