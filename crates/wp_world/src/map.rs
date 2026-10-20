@@ -733,10 +733,11 @@ impl WorldQuery for CityMap {
             }
             let half = s.width * 0.5;
             if pr.dist <= half {
+                let highway = |l: LaneId| self.net.lanes[l as usize].kind == LaneKind::Highway;
                 return match s.kind {
-                    SegKind::Lane { lane }
-                        if self.net.lanes[lane as usize].kind == LaneKind::Highway =>
-                    {
+                    SegKind::Lane { lane } if highway(lane) => SurfaceType::Concrete,
+                    // Through a freeway merge / diverge or a bend of the highway.
+                    SegKind::Connector { from, to, .. } if highway(from) && highway(to) => {
                         SurfaceType::Concrete
                     }
                     _ => SurfaceType::Asphalt,

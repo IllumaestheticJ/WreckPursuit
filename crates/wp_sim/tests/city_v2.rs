@@ -86,8 +86,8 @@ fn spots() -> Vec<(&'static str, [f32; 2], Option<f32>)> {
     vec![
         ("hill road", [hollins[0], hollins[1]], Some(hollins[2])),
         ("loop", [loop_grid[0], loop_grid[1]], Some(loop_grid[2])),
-        ("deck", [-1517.0, 91.0], Some(1000.0)),
-        ("under the deck", [-1517.0, 91.0], Some(-1000.0)),
+        ("deck", [-1510.0, 92.0], Some(1000.0)),
+        ("under the deck", [-1510.0, 92.0], Some(-1000.0)),
         ("junction", [junction[0], junction[1]], None),
         ("hillside", [-1000.0, 900.0], None),
     ]
@@ -101,6 +101,7 @@ fn city_ground_colliders_are_built() {
     assert!(c.road_triangles > 10_000, "{c:?}");
     assert!(c.buildings > 2000, "{c:?}");
     assert!(c.rails > 10, "{c:?}");
+    assert!(c.barriers > 900, "{c:?}");
     assert!(s.has_terrain());
     // A flat city keeps the slab.
     assert_eq!(
@@ -151,6 +152,56 @@ fn cars_settle_on_the_surface_everywhere() {
             st.speed_mps
         );
     }
+}
+
+#[test]
+fn the_median_barrier_keeps_a_car_on_its_carriageway() {
+    let car = load_car(data("cars/debug_sedan.json")).unwrap();
+    let mut s = sim(true);
+    let grid = net()
+        .pois
+        .iter()
+        .find(|p| p.name == "Loop 9 sprint")
+        .unwrap()
+        .clone();
+    // From the left lane, swerve 25° towards the barrier at 90 km/h.
+    let f = wp_world::geom::dir_of_yaw(grid.heading_rad);
+    let left = [-f[1], f[0]];
+    let start = [
+        grid.pos[0] + left[0] * 7.4 + f[0] * 30.0,
+        grid.pos[1] + left[1] * 7.4 + f[1] * 30.0,
+    ];
+    let yaw = grid.heading_rad + 25f32.to_radians();
+    let id = s
+        .spawn_vehicle(&car, [start[0], start[1], 0.0], yaw)
+        .unwrap();
+    s.place_on_ground(id, start, yaw, 25.0, Some(grid.pos[2]))
+        .unwrap();
+    let lines = wp_world::surface::median_barriers(net());
+    let side = |p: [f32; 3]| {
+        let q = [p[0], p[1]];
+        lines
+            .iter()
+            .map(|l| {
+                let cum = wp_world::geom::cumulative(l);
+                wp_world::geom::project(l, &cum, q)
+            })
+            .min_by(|a, b| a.dist.total_cmp(&b.dist))
+            .unwrap()
+    };
+    let before = side(s.vehicle_states()[0].1.pos);
+    assert!(before.lateral > 2.0 && before.dist < 10.0, "{before:?}");
+    let mut hit = false;
+    for _ in 0..(3.0 * 240.0) as usize {
+        s.step_fixed();
+        hit |= s
+            .drain_events()
+            .iter()
+            .any(|e| matches!(e, wp_contracts::SimEvent::Contact { .. }));
+        let pr = side(s.vehicle_states()[0].1.pos);
+        assert!(pr.lateral > 0.0, "crossed the median: {pr:?}");
+    }
+    assert!(hit, "no contact with the barrier");
 }
 
 #[test]

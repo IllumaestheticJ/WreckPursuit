@@ -83,7 +83,18 @@ pub enum ControlHint {
     Priority,
     /// Force no control.
     Uncontrolled,
+    /// Freeway merge or diverge between one-way roads (a carriageway and a ramp): every lane
+    /// is set back [`FREEWAY_SETBACK_M`] so the ramp lane tapers in or out along a connector,
+    /// the main road's paving runs through the node (no junction disc), the main road keeps
+    /// its lanes and the ramp lanes join or leave its rightmost lanes. Control is
+    /// [`IntersectionControl::Priority`] with the main road major; traffic on a merging ramp
+    /// yields without stopping. Only applies to a node with three one-way roads (one in and
+    /// two out, or two in and one out); anything else is built as [`ControlHint::Priority`].
+    Freeway,
 }
+
+/// Lane setback at a [`ControlHint::Freeway`] node: half the length of the taper connector, m.
+pub const FREEWAY_SETBACK_M: f32 = 30.0;
 
 /// A graph node to build.
 #[derive(Debug, Clone, PartialEq)]
@@ -140,6 +151,13 @@ pub struct RoadSpec {
     pub turn_lanes_fwd: Vec<TurnSet>,
     /// Explicit `turn:lanes` for b → a, left to right (empty = defaults).
     pub turn_lanes_bwd: Vec<TurnSet>,
+    /// Extra paving (shoulder) beyond the lanes on the left of a → b, m. Paving only: lanes
+    /// and markings are unchanged.
+    pub shoulder_left_m: f32,
+    /// Extra paving (shoulder) beyond the lanes on the right of a → b, m.
+    pub shoulder_right_m: f32,
+    /// A median barrier runs along the left paved edge (see [`RoadSurface::median_barrier`]).
+    pub median_barrier: bool,
 }
 
 impl RoadSpec {
@@ -159,6 +177,9 @@ impl RoadSpec {
             bus_lane: false,
             turn_lanes_fwd: Vec::new(),
             turn_lanes_bwd: Vec::new(),
+            shoulder_left_m: 0.0,
+            shoulder_right_m: 0.0,
+            median_barrier: false,
         }
     }
 }
@@ -277,6 +298,78 @@ impl Built {
             surfaces: self.surfaces,
             terrain: None,
         }
+    }
+}
+
+/// Roles at a [`ControlHint::Freeway`] node (indices into the node's incidence list).
+#[derive(Debug, Clone, Copy)]
+struct FreewayNode {
+    /// Main road arriving.
+    in_main: usize,
+    /// Main road leaving.
+    out_main: usize,
+    /// The ramp (arriving at a merge, leaving at a diverge).
+    ramp: usize,
+    /// The ramp arrives (merge) rather than leaves (diverge).
+    merge: bool,
+}
+
+/// Lanes arriving at the node along incidence `x` and lanes leaving along it.
+fn in_out_counts(r: &RoadSpec, x: &Incidence) -> (u8, u8) {
+    if x.at_a {
+        (r.lanes_bwd, r.lanes_fwd)
+    } else {
+        (r.lanes_fwd, r.lanes_bwd)
+    }
+}
+
+/// Freeway roles at a node, if it is a valid [`ControlHint::Freeway`] node.
+fn freeway_node(node: &NodeSpec, list: &[Incidence], roads: &[RoadSpec]) -> Option<FreewayNode> {
+    if node.control != Some(ControlHint::Freeway) || list.len() != 3 {
+        return None;
+    }
+    if list.iter().any(|x| roads[x.road].lanes_bwd != 0) {
+        return None;
+    }
+    let lanes = |k: usize| {
+        let (i, o) = in_out_counts(&roads[list[k].road], &list[k]);
+        i.max(o)
+    };
+    let ins: Vec<usize> = (0..3)
+        .filter(|k| in_out_counts(&roads[list[*k].road], &list[*k]).0 > 0)
+        .collect();
+    let outs: Vec<usize> = (0..3).filter(|k| !ins.contains(k)).collect();
+    // The main road has more lanes; on a tie, the straighter continuation.
+    let pick = |pair: &[usize], other: usize| -> (usize, usize) {
+        let straight = |k: usize| -geom::dot(list[k].dir_out, list[other].dir_out);
+        let (a, b) = (pair[0], pair[1]);
+        let a_main = lanes(a) > lanes(b) || (lanes(a) == lanes(b) && straight(a) >= straight(b));
+        if a_main {
+            (a, b)
+        } else {
+            (b, a)
+        }
+    };
+    match (ins.len(), outs.len()) {
+        (1, 2) => {
+            let (out_main, ramp) = pick(&outs, ins[0]);
+            Some(FreewayNode {
+                in_main: ins[0],
+                out_main,
+                ramp,
+                merge: false,
+            })
+        }
+        (2, 1) => {
+            let (in_main, ramp) = pick(&ins, outs[0]);
+            Some(FreewayNode {
+                in_main,
+                out_main: outs[0],
+                ramp,
+                merge: true,
+            })
+        }
+        _ => None,
     }
 }
 
@@ -401,14 +494,43 @@ pub fn build(nodes: &[NodeSpec], roads: &[RoadSpec], opt: &BuildOptions) -> Buil
         });
     }
 
-    // B. Setbacks per (road, end).
+    let freeway: Vec<Option<FreewayNode>> = inc
+        .iter()
+        .enumerate()
+        .map(|(ni, list)| freeway_node(&nodes[ni], list, roads))
+        .collect();
+
+    // B. Setbacks per (road, end). Paving is trimmed like the lanes except where a freeway
+    // main road runs through a merge or diverge.
     let hw: Vec<f32> = roads.iter().map(|r| half_width(r, opt)).collect();
     let mut setback_a = vec![0.0f32; roads.len()];
     let mut setback_b = vec![0.0f32; roads.len()];
+    let mut paving_a = vec![f32::INFINITY; roads.len()];
+    let mut paving_b = vec![f32::INFINITY; roads.len()];
     let mut node_radius = vec![0.0f32; nodes.len()];
     for (ni, list) in inc.iter().enumerate() {
         let deg = list.len();
         let mut sb = vec![0.0f32; deg];
+        if let Some(fw) = freeway[ni] {
+            for (k, x) in list.iter().enumerate() {
+                sb[k] = FREEWAY_SETBACK_M;
+                if k == fw.in_main || k == fw.out_main {
+                    if x.at_a {
+                        paving_a[x.road] = 0.0;
+                    } else {
+                        paving_b[x.road] = 0.0;
+                    }
+                }
+            }
+            for (k, x) in list.iter().enumerate() {
+                if x.at_a {
+                    setback_a[x.road] = sb[k];
+                } else {
+                    setback_b[x.road] = sb[k];
+                }
+            }
+            continue;
+        }
         if deg >= 3 {
             for i in 0..deg {
                 sb[i] = hw[list[i].road] + opt.crosswalk_m;
@@ -459,6 +581,8 @@ pub fn build(nodes: &[NodeSpec], roads: &[RoadSpec], opt: &BuildOptions) -> Buil
             setback_a[ri] *= k.min(1.0);
             setback_b[ri] *= k.min(1.0);
         }
+        paving_a[ri] = paving_a[ri].min(setback_a[ri]);
+        paving_b[ri] = paving_b[ri].min(setback_b[ri]);
     }
 
     // C. Lanes.
@@ -474,6 +598,12 @@ pub fn build(nodes: &[NodeSpec], roads: &[RoadSpec], opt: &BuildOptions) -> Buil
             total * 0.5 - 0.25
         };
         let bank_fwd = trimmed_bank(r, &pts[ri], &trimmed, s0);
+        let paved = if paving_a[ri] == setback_a[ri] && paving_b[ri] == setback_b[ri] {
+            trimmed.clone()
+        } else {
+            geom::trim_polyline(&pts[ri], paving_a[ri], paving_b[ri])
+        };
+        let paved_bank = trimmed_bank(r, &pts[ri], &paved, paving_a[ri].min(s0));
         let mut bank_rev = bank_fwd.clone();
         bank_rev.reverse();
         let mut rev = trimmed.clone();
@@ -489,12 +619,13 @@ pub fn build(nodes: &[NodeSpec], roads: &[RoadSpec], opt: &BuildOptions) -> Buil
         };
         surfaces.push(RoadSurface {
             road: ri as u32,
-            centre: trimmed.clone(),
-            bank: bank_fwd.clone(),
-            left_m,
-            right_m,
+            centre: paved,
+            bank: paved_bank,
+            left_m: left_m + r.shoulder_left_m,
+            right_m: right_m + r.shoulder_right_m,
             highway: r.class == RoadClass::Highway,
             sidewalk: [r.class != RoadClass::Highway, r.class != RoadClass::Highway],
+            median_barrier: r.median_barrier,
         });
         let base_kind = match r.class {
             RoadClass::Highway => LaneKind::Highway,
@@ -604,7 +735,40 @@ pub fn build(nodes: &[NodeSpec], roads: &[RoadSpec], opt: &BuildOptions) -> Buil
         }
     };
     let mut new_conns: Vec<(LaneId, LaneConnection)> = Vec::new();
-    for list in inc.iter() {
+    for (ni, list) in inc.iter().enumerate() {
+        if let Some(fw) = freeway[ni] {
+            // Main lanes keep going left-aligned; the ramp's lanes join (merge) or leave
+            // (diverge) the main road's rightmost lanes.
+            let main_in = incoming_of(&list[fw.in_main]);
+            let main_out = outgoing_of(&list[fw.out_main]);
+            for (k, l) in main_in.iter().enumerate() {
+                let to = main_out[k.min(main_out.len() - 1)];
+                new_conns.push((
+                    *l,
+                    LaneConnection {
+                        to,
+                        turn: TurnKind::Straight,
+                    },
+                ));
+            }
+            let (from, to, turn) = if fw.merge {
+                (incoming_of(&list[fw.ramp]), main_out, TurnKind::Straight)
+            } else {
+                (main_in, outgoing_of(&list[fw.ramp]), TurnKind::Right)
+            };
+            // Right-align the smaller side against the larger.
+            let n = from.len().min(to.len());
+            for j in 0..n {
+                new_conns.push((
+                    from[from.len() - n + j],
+                    LaneConnection {
+                        to: to[to.len() - n + j],
+                        turn,
+                    },
+                ));
+            }
+            continue;
+        }
         let deg = list.len();
         for (ai, app) in list.iter().enumerate() {
             let in_lanes = incoming_of(app);
@@ -748,12 +912,14 @@ pub fn build(nodes: &[NodeSpec], roads: &[RoadSpec], opt: &BuildOptions) -> Buil
         if list.len() < 3 {
             continue;
         }
+        let fw = freeway[ni];
         let ranks: Vec<u8> = list.iter().map(|x| roads[x.road].class.rank()).collect();
         let max_rank = *ranks.iter().max().unwrap();
         let min_rank = *ranks.iter().min().unwrap();
         // Signals where every road is collector or above, or at complex (5+ way) junctions;
         // priority (major road keeps going) where classes differ; all-way stop otherwise.
         let control_kind = match nodes[ni].control {
+            Some(ControlHint::Freeway) => ControlHint::Priority,
             Some(h) => h,
             None if nodes[ni].signal => ControlHint::Signal,
             None if min_rank >= 2 || list.len() >= 5 => ControlHint::Signal,
@@ -763,7 +929,7 @@ pub fn build(nodes: &[NodeSpec], roads: &[RoadSpec], opt: &BuildOptions) -> Buil
         let ix_id = intersections.len() as IntersectionId;
         let mut incoming = Vec::new();
         let mut approaches: Vec<(u8, V2, RoadClass, f32)> = Vec::new(); // group, dir_out, class, speed
-        for x in list {
+        for (k, x) in list.iter().enumerate() {
             let in_lanes: Vec<LaneId> = if x.at_a {
                 road_lanes[x.road].bwd.clone()
             } else {
@@ -779,7 +945,10 @@ pub fn build(nodes: &[NodeSpec], roads: &[RoadSpec], opt: &BuildOptions) -> Buil
                 incoming.push(IncomingLane {
                     lane: l,
                     signal_group: g,
-                    major: r.class.rank() == max_rank,
+                    major: match fw {
+                        Some(f) => k == f.in_main,
+                        None => r.class.rank() == max_rank,
+                    },
                 });
             }
         }
@@ -792,6 +961,7 @@ pub fn build(nodes: &[NodeSpec], roads: &[RoadSpec], opt: &BuildOptions) -> Buil
             ControlHint::AllWayStop => IntersectionControl::AllWayStop,
             ControlHint::Priority => IntersectionControl::Priority,
             ControlHint::Uncontrolled => IntersectionControl::Uncontrolled,
+            ControlHint::Freeway => unreachable!("mapped to Priority above"),
         };
         out_nodes[ni].intersection = Some(ix_id);
         intersections.push(Intersection {

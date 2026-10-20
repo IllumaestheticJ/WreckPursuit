@@ -207,12 +207,15 @@ fn zebra(x: f32) -> bool {
     ((x / ZEBRA_BAR_M).floor() as i32).rem_euclid(2) == 0
 }
 
-/// Lane `id` must stop at its end (signal, all-way stop, minor approach at a priority junction).
-fn must_stop(map: &CityMap, id: LaneId) -> bool {
+/// Lane `id` must stop at its end (signal, all-way stop, minor approach at a priority
+/// junction other than a freeway on-ramp, which merges).
+pub fn must_stop(map: &CityMap, id: LaneId) -> bool {
     match map.lane_control(id) {
         Some((IntersectionControl::Signal { .. }, _, _))
         | Some((IntersectionControl::AllWayStop, _, _)) => true,
-        Some((IntersectionControl::Priority, ap, _)) => !ap.major,
+        Some((IntersectionControl::Priority, ap, _)) => {
+            !ap.major && map.net.lanes[id as usize].kind != LaneKind::Highway
+        }
         _ => false,
     }
 }

@@ -1287,7 +1287,10 @@ impl Traffic {
                 if ap.major {
                     2
                 } else {
-                    if !(at_line && self.stopped_for(i) >= 0.3) {
+                    // A freeway on-ramp (a minor highway lane) merges on the move: it yields
+                    // to the main line below but needs no stop first.
+                    let merging = map.net.lanes[a.seg as usize].kind == LaneKind::Highway;
+                    if !merging && !(at_line && self.stopped_for(i) >= 0.3) {
                         return false;
                     }
                     0

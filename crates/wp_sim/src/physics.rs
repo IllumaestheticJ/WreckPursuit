@@ -35,6 +35,8 @@ pub struct CityColliders {
     pub buildings: usize,
     /// Guard-rail boxes along bridge decks.
     pub rails: usize,
+    /// Median barrier boxes between divided-highway carriageways.
+    pub barriers: usize,
 }
 
 /// The flat ground slab is parked this far below the city when terrain replaces it (a safety
@@ -197,8 +199,19 @@ impl PhysicsWorld {
             }
         }
 
-        // Guard rails along decks: 0.3 m wide, 0.9 m tall boxes on each paved edge.
-        for (a, b) in wp_world::surface::deck_rails(net) {
+        // Guard rails along decks: 0.3 m wide, 0.9 m tall boxes on each paved edge. Median
+        // barriers: 0.5 m wide, 0.81 m tall concrete boxes on the barrier line.
+        let rails: Vec<([f32; 3], [f32; 3], f32, f32, bool)> = wp_world::surface::deck_rails(net)
+            .into_iter()
+            .map(|(a, b)| (a, b, 0.15, 0.45, false))
+            .chain(
+                wp_world::surface::median_barriers(net)
+                    .iter()
+                    .flat_map(|l| l.windows(2).map(|w| (w[0], w[1], 0.25, 0.405, true)))
+                    .collect::<Vec<_>>(),
+            )
+            .collect();
+        for (a, b, half_w, half_h, barrier) in rails {
             let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
             let len = (d[0] * d[0] + d[1] * d[1]).sqrt();
             if len < 0.05 {
@@ -209,9 +222,9 @@ impl PhysicsWorld {
             let mid = Vector::new(
                 (a[0] + b[0]) * 0.5,
                 (a[1] + b[1]) * 0.5,
-                (a[2] + b[2]) * 0.5 + 0.45,
+                (a[2] + b[2]) * 0.5 + half_h,
             );
-            let col = ColliderBuilder::cuboid(0.15, len * 0.5 + 0.05, 0.45 + d[2].abs() * 0.5)
+            let col = ColliderBuilder::cuboid(half_w, len * 0.5 + 0.05, half_h + d[2].abs() * 0.5)
                 .position(Pose::from_parts(
                     mid,
                     rapier3d::math::Rotation::from_xyzw(0.0, 0.0, s, c),
@@ -219,7 +232,11 @@ impl PhysicsWorld {
                 .friction(0.4)
                 .build();
             added.push(self.colliders.insert(col));
-            out.rails += 1;
+            if barrier {
+                out.barriers += 1;
+            } else {
+                out.rails += 1;
+            }
         }
 
         for h in added {

@@ -3,6 +3,7 @@
 //! - [`road_mesh`]: one triangle mesh of every paved surface — road ribbons (banked), junction
 //!   discs and the connector ribbons through bends;
 //! - [`deck_rails`]: guard-rail lines along bridge decks;
+//! - [`median_barriers`]: concrete barrier lines between divided-highway carriageways;
 //! - [`MapGround`]: a wheel ground probe over roads and terrain without a physics engine.
 
 use wp_vehicle::{GroundHit, WheelCaster};
@@ -58,7 +59,9 @@ pub fn surface_edges(s: &RoadSurface) -> (Vec<V3>, Vec<V3>) {
 }
 
 /// Every paved surface of a city as one mesh: road ribbons, junction discs (16-gons) and the
-/// connector ribbons through bend nodes (degree-2 nodes have no junction disc).
+/// connector ribbons through bend nodes (degree-2 nodes have no junction disc) and through
+/// freeway merges and diverges (radius-0 junctions: the main road's paving runs through,
+/// only the ramp's taper connectors are added).
 pub fn road_mesh(map: &CityMap) -> TriMesh {
     let net = &map.net;
     let mut m = TriMesh::default();
@@ -66,7 +69,16 @@ pub fn road_mesh(map: &CityMap) -> TriMesh {
         let (l, r) = surface_edges(s);
         m.strip(&l, &r);
     }
+    let mut lanes_per_road = vec![0u32; net.surfaces.len()];
+    for l in &net.lanes {
+        if let Some(n) = lanes_per_road.get_mut(l.road as usize) {
+            *n += 1;
+        }
+    }
     for ix in &net.intersections {
+        if ix.radius_m <= 0.0 {
+            continue;
+        }
         let c = net.nodes[ix.node as usize].pos;
         let poly: Vec<V3> = (0..16)
             .map(|k| {
@@ -77,8 +89,16 @@ pub fn road_mesh(map: &CityMap) -> TriMesh {
         m.fan(&poly);
     }
     for s in &map.segs {
-        if let SegKind::Connector { node, .. } = s.kind {
-            if net.nodes[node as usize].intersection.is_none() {
+        if let SegKind::Connector { node, from, to, .. } = s.kind {
+            let draw = match net.nodes[node as usize].intersection {
+                None => true,
+                Some(ix) if net.intersections[ix as usize].radius_m <= 0.0 => {
+                    let n = |l: u32| lanes_per_road.get(net.lanes[l as usize].road as usize);
+                    n(from) != n(to)
+                }
+                Some(_) => false,
+            };
+            if draw {
                 let half = s.width * 0.5;
                 let l = geom::offset_polyline(&s.pts, -half);
                 let r = geom::offset_polyline(&s.pts, half);
@@ -125,6 +145,16 @@ pub fn deck_rails(net: &RoadNetwork) -> Vec<(V3, V3)> {
         }
     }
     out
+}
+
+/// Median barrier polylines (at road height, along the left paved edge of every surface
+/// flagged [`RoadSurface::median_barrier`]).
+pub fn median_barriers(net: &RoadNetwork) -> Vec<Vec<V3>> {
+    net.surfaces
+        .iter()
+        .filter(|s| s.median_barrier && s.centre.len() >= 2)
+        .map(|s| surface_edges(s).0)
+        .collect()
 }
 
 /// Wheel probes against the city's roads and terrain (no physics engine): the drivable
