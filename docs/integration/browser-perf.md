@@ -168,6 +168,33 @@ crash effects ≤ 1.0 ms (mean without the worst frame: one GC pause in that lap
 the two machine-speed limits (e.g. `PERF_MIN_RTF=0.75 PERF_MAX_SLOW=26` on this container,
 where the pre-12b build itself sits at 0.85–0.95 / 16–22).
 
+## Merge with the touch-controls perf pass (`origin/lead/round12` @ 9ad97d0)
+
+The touch-controls session fixed the same regression in parallel (`touch.md` → "Desktop perf
+regression after round 12b"); the lead merged it into round 12 and this branch merged that.
+Where the two overlapped, **round 12's design was kept**: its low / touch LOD distances, far
+promoted cars via the fleet only on those profiles (`viewDrawM`, not on a real GPU), **every
+parked car drawn with 24 full meshes** (props rule; this branch's parked-car distance cull, the
+8-car cap, the lamp-pole distance and the 100 m full-mesh distance were dropped), software GL
+starting at 0.35× (floor 0.25×), its siren warm render and crash-FX precompile. Kept from this
+branch on top: batched panel parts, shared view geometry / materials and lazy debug overlays,
+per-model panel caches + `skinVertices`, pooled LOD states, hex fleet path, 192 m prop chunks
+(every car still drawn), incremental prewarm for materials that appear later (car models,
+headlight pools, contact markers), sky after the opaque scene, signal / city-detail distances
+on the low profiles, software rain 20 %, HUD canvases at half rate below 8 fps, the profiler,
+`perf_check` and the e2e robustness fixes.
+
+After the merge (same container, `perf_check`): chase RTF 0.758, rain 0.706, phone 0.776;
+316 / 279 / 262 draw calls; 0 material bumps; steady allocation 738 / 921 / 688 KB/frame.
+Lower than before the merge because **the wasm sim step doubled with the merged Rust** (round
+12b / 13 vehicle merge): 120–145 ms per frame vs 65–76, self time now led by Rapier shape casts
+with cylinders (`gjk::directional_distance`, `Cylinder::support_point`, `cast_shapes`,
+tetrahedron point queries) — a wheel / ground cast, sim-side and out of scope here (request to
+the vehicle owner). Parked cars are ~125–140 k triangles again under the 24-full-mesh rule (52 k
+with 8). `e2e/menu.mjs` now fails "countersteer slider disabled until the wasm setter exists":
+round 12's `main.ts` always enables the slider (`countersteer: true`), the menu e2e was not
+updated — a base mismatch, not from this branch.
+
 ## Changes outside my area (round 12b)
 
 All in `apps/testbed-web`:
