@@ -171,6 +171,10 @@ export const sim = {
   /** Wanted level / heat for a racer, or null when the session has no police. */
   /** Police units that are not sim vehicles: [x, y, z, yaw, speed, flags] each. */
   policeUnits: (): Float32Array => wasm.police_units(),
+  /** Roadblock barriers and spike strips as oriented boxes (layout.ts TOOL_STRIDE, TL, TOOL_KIND). */
+  policeTools: (): Float32Array => wasm.police_tools(),
+  /** Tyre deflation per vehicle, 4 floats each (FL, FR, RL, RR), same order as states(). */
+  tirePunctures: (): Float32Array => wasm.tire_punctures(),
   policeStatus: (entity: number): PoliceStatus | null => JSON.parse(wasm.police_status(entity)),
   stateHash: (): string => wasm.state_hash(),
   latticeNodes: (entity: number): Float32Array => wasm.lattice_nodes(entity),

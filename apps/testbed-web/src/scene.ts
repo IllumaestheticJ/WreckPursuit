@@ -6,7 +6,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { Barrier, SimEvent } from "./wasm/sim";
-import { AGENT_FLAG, AGENT_STRIDE, INTENT_STRIDE } from "./wasm/layout";
+import { AGENT_FLAG, AGENT_STRIDE, INTENT_STRIDE, TL, TOOL_KIND, TOOL_STRIDE } from "./wasm/layout";
 import { layers } from "./settings";
 import { SignalView } from "./signals_view";
 
@@ -40,6 +40,9 @@ export class SceneView {
   private readonly intentGroup = new THREE.Group();
   private readonly cities = new Map<string, THREE.Object3D>();
   private readonly policeUnits: { obj: THREE.Group; red: THREE.MeshStandardMaterial; blue: THREE.MeshStandardMaterial }[] = [];
+  /** Roadblock barriers and spike strips (police_tools()), pooled; see updatePoliceTools(). */
+  private readonly tools = new THREE.Group();
+  private readonly toolPool: { barrier: THREE.Group; lamp: THREE.MeshStandardMaterial; spikes: THREE.Group }[] = [];
   private readonly agentMesh = new THREE.InstancedMesh(
     new THREE.BoxGeometry(1, 1, 1),
     new THREE.MeshStandardMaterial({ color: 0xffffff }),
@@ -82,7 +85,7 @@ export class SceneView {
     axes.position.z = 0.02;
     this.agentMesh.count = 0;
     this.agentMesh.frustumCulled = false;
-    this.world.add(axes, this.barriers, this.intentGroup, this.agentMesh, this.signals.group);
+    this.world.add(axes, this.barriers, this.tools, this.intentGroup, this.agentMesh, this.signals.group);
   }
 
   /**
@@ -165,6 +168,79 @@ export class SceneView {
       const phase = (timeS * 2.5 + i * 0.17) % 1;
       u.red.emissive.setHex(chasing && phase < 0.5 ? 0xff2040 : 0x000000);
       u.blue.emissive.setHex(chasing && phase >= 0.5 ? 0x2060ff : 0x000000);
+    });
+  }
+
+  /**
+   * Draw police tools from police_tools(): roadblock barriers as red/white striped boxes with a
+   * flashing amber lamp (their pose follows the physics body, so they visibly move when hit) and
+   * spike strips as a dark strip with rows of steel studs, lying on the road.
+   */
+  updatePoliceTools(tools: Float32Array, timeS: number): void {
+    const n = tools.length / TOOL_STRIDE;
+    while (this.toolPool.length < n) {
+      const barrier = new THREE.Group();
+      const white = new THREE.MeshStandardMaterial({ color: 0xf2f2f2 });
+      const red = new THREE.MeshStandardMaterial({ color: 0xd01818 });
+      // Unit box scaled to the barrier size; the red bands are its children so they scale too.
+      const body = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), white);
+      for (let k = 0; k < 5; k += 2) {
+        const band = new THREE.Mesh(new THREE.BoxGeometry(0.2, 1.02, 0.5), red);
+        band.position.set(-0.4 + k * 0.2, 0, 0.1);
+        body.add(band);
+      }
+      barrier.add(body);
+      const lamp = new THREE.MeshStandardMaterial({ color: 0x664400, emissive: 0x000000 });
+      const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8), lamp);
+      barrier.add(bulb);
+
+      const spikes = new THREE.Group();
+      const strip = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0x1c1c1e }));
+      spikes.add(strip);
+      const studs = new THREE.InstancedMesh(
+        new THREE.ConeGeometry(0.03, 0.09, 6).rotateX(Math.PI / 2),
+        new THREE.MeshStandardMaterial({ color: 0xc8ccd2, metalness: 0.8, roughness: 0.3 }),
+        64,
+      );
+      spikes.add(studs);
+      this.tools.add(barrier, spikes);
+      this.toolPool.push({ barrier, lamp, spikes });
+    }
+    const flash = timeS % 1 < 0.5;
+    this.toolPool.forEach((t, i) => {
+      const on = i < n;
+      const o = i * TOOL_STRIDE;
+      const kind = on ? tools[o + TL.kind] : -1;
+      t.barrier.visible = kind === TOOL_KIND.barrier;
+      t.spikes.visible = kind === TOOL_KIND.spikes;
+      if (!on) return;
+      const obj = kind === TOOL_KIND.barrier ? t.barrier : t.spikes;
+      obj.position.set(tools[o + TL.x], tools[o + TL.y], tools[o + TL.z]);
+      obj.quaternion.set(tools[o + TL.qx], tools[o + TL.qy], tools[o + TL.qz], tools[o + TL.qw]);
+      const hx = tools[o + TL.hx], hy = tools[o + TL.hy], hz = tools[o + TL.hz];
+      if (kind === TOOL_KIND.barrier) {
+        // The body (with its bands) scales to the barrier; the lamp sits on top at fixed size.
+        const [body, bulb] = t.barrier.children;
+        body.scale.set(2 * hx, 2 * hy, 2 * hz);
+        bulb.position.set(0, 0, hz + 0.09);
+        t.lamp.emissive.setHex(flash ? 0xffaa00 : 0x000000);
+      } else {
+        const [strip, studs] = t.spikes.children as [THREE.Mesh, THREE.InstancedMesh];
+        strip.scale.set(2 * hx, 2 * hy, 2 * hz);
+        // Two rows of studs along the strip.
+        const per = Math.min(32, Math.max(2, Math.floor((2 * hx) / 0.25)));
+        const m = new THREE.Matrix4();
+        let k = 0;
+        for (let row = 0; row < 2; row++) {
+          for (let j = 0; j < per; j++) {
+            const x = -hx + ((j + 0.5) / per) * 2 * hx;
+            m.makeTranslation(x, (row - 0.5) * hy, hz + 0.045);
+            studs.setMatrixAt(k++, m);
+          }
+        }
+        studs.count = k;
+        studs.instanceMatrix.needsUpdate = true;
+      }
     });
   }
 

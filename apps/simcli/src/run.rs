@@ -726,6 +726,55 @@ impl WorldTracker {
     }
 }
 
+/// Issue the scenario's `police_orders` due at `tick` (before the tick is stepped; `ids` in
+/// scenario order). Shared by [`run`] and the browser testbed so both behave identically,
+/// including during replays: orders are scenario setup, not inputs.
+pub fn apply_police_orders(
+    sc: &Scenario,
+    sim: &mut Sim,
+    ids: &[EntityId],
+    tick: u64,
+) -> Result<Vec<OrderResult>, RunError> {
+    let mut out = Vec::new();
+    for o in sc.police_orders.iter().filter(|o| tick_of(o.t_s) == tick) {
+        let idx = sc
+            .entity_index(Some(o.order.target()))
+            .map_err(|e| RunError::Scenario(sc.name.clone(), e))?;
+        let target = ids[idx];
+        let result = match &o.order {
+            OrderKind::Roadblock { .. } => {
+                sim.captain_command(wp_contracts::CaptainCommand::RequestRoadblock {
+                    target,
+                    road: None,
+                })
+            }
+            OrderKind::Spikes { .. } => {
+                sim.captain_command(wp_contracts::CaptainCommand::RequestSpikes {
+                    target,
+                    road: None,
+                })
+            }
+            OrderKind::RoadblockAt { pos, dir, .. } => {
+                sim.police_mut().place_roadblock_at(target, *pos, *dir);
+                Ok(())
+            }
+            OrderKind::SpikesAt { pos, dir, .. } => {
+                sim.police_mut().place_spikes_at(target, *pos, *dir);
+                Ok(())
+            }
+        };
+        out.push(OrderResult {
+            t_s: o.t_s,
+            order: crate::scenario::to_ron_line(&o.order),
+            result: match result {
+                Ok(()) => "ok".into(),
+                Err(e) => format!("{e:?}"),
+            },
+        });
+    }
+    Ok(out)
+}
+
 /// One police order and its outcome.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct OrderResult {
@@ -1119,42 +1168,7 @@ pub fn run_with_hook(
             }
         }
         // Police captain orders.
-        for o in sc.police_orders.iter().filter(|o| tick_of(o.t_s) == tick) {
-            let idx = sc
-                .entity_index(Some(o.order.target()))
-                .map_err(|e| RunError::Scenario(sc.name.clone(), e))?;
-            let target = ids[idx];
-            let result = match &o.order {
-                OrderKind::Roadblock { .. } => {
-                    sim.captain_command(wp_contracts::CaptainCommand::RequestRoadblock {
-                        target,
-                        road: None,
-                    })
-                }
-                OrderKind::Spikes { .. } => {
-                    sim.captain_command(wp_contracts::CaptainCommand::RequestSpikes {
-                        target,
-                        road: None,
-                    })
-                }
-                OrderKind::RoadblockAt { pos, dir, .. } => {
-                    sim.police_mut().place_roadblock_at(target, *pos, *dir);
-                    Ok(())
-                }
-                OrderKind::SpikesAt { pos, dir, .. } => {
-                    sim.police_mut().place_spikes_at(target, *pos, *dir);
-                    Ok(())
-                }
-            };
-            order_results.push(OrderResult {
-                t_s: o.t_s,
-                order: crate::scenario::to_ron_line(&o.order),
-                result: match result {
-                    Ok(()) => "ok".into(),
-                    Err(e) => format!("{e:?}"),
-                },
-            });
-        }
+        order_results.extend(apply_police_orders(sc, &mut sim, &ids, tick)?);
 
         // Inputs.
         if let Some(track) = &opts.input_track {

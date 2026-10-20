@@ -105,3 +105,10 @@ export const META_STRIDE = 3;
 export const VEHICLE_KIND = { player: 0, aiRacer: 1, police: 2, traffic: 3 } as const;
 /** vehicle_meta() flag bits (from the input the vehicle drives with). */
 export const META_FLAG = { siren: 1, headlights: 2, brake: 4, horn: 8 } as const;
+
+/** Floats per record in police_tools(): [kind, x, y, z, qx, qy, qz, qw, hx, hy, hz]. */
+export const TOOL_STRIDE = 11;
+/** Offsets inside one police_tools() record (box centre, orientation, half extents). */
+export const TL = { kind: 0, x: 1, y: 2, z: 3, qx: 4, qy: 5, qz: 6, qw: 7, hx: 8, hy: 9, hz: 10 } as const;
+/** police_tools() kinds. */
+export const TOOL_KIND = { barrier: 0, spikes: 1 } as const;

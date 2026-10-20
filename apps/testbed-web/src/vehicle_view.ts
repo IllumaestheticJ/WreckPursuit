@@ -377,6 +377,18 @@ export class VehicleView {
   }
 
   /** Lights from `vehicle_meta()` flags; `timeS` drives the siren flash pattern. */
+  /**
+   * Flat tyres from tire_punctures() (`p[base + i]`, FL FR RL RR, 0 inflated … 1 flat): the
+   * tyre shrinks radially by 30 % × deflation, matching the physics' smaller rolling radius.
+   */
+  setPunctures(p: ArrayLike<number>, base: number): void {
+    this.wheels.forEach((w, i) => {
+      const r = 1 - 0.3 * Math.min(Math.max(p[base + i] ?? 0, 0), 1);
+      // Axle along X: the tyre's radius lies in its Y/Z plane.
+      w.tire.scale.set(1, r, r);
+    });
+  }
+
   setMeta(flags: number, timeS: number): void {
     const headlights = (flags & META_FLAG.headlights) !== 0;
     this.headMat.emissive.setHex(headlights ? 0xfff2c0 : 0x000000);

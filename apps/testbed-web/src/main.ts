@@ -487,6 +487,7 @@ async function main(): Promise<void> {
     }
     const cur = sim.states();
     const prev = sim.statesPrev();
+    const punctures = sim.tirePunctures();
     let focusTel: Float32Array | null = null;
     let focusRec = -1;
     for (let o = 0, i = 0; o < cur.length; o += STATE_STRIDE, i++) {
@@ -496,6 +497,8 @@ async function main(): Promise<void> {
       // vehicle_states_prev() lists the same entities in the same (ascending) order.
       const tel = sim.telemetry(id);
       view.update(cur, o, prev.length > o ? prev : cur, o, app.alpha, tel, app.paused && !replay ? 0 : dt);
+      // tire_punctures() lists vehicles in the same order as vehicle_states().
+      view.setPunctures(punctures, i * 4);
       if (id === app.focus) {
         focusTel = tel;
         focusRec = o;
@@ -519,6 +522,7 @@ async function main(): Promise<void> {
     // Promoted (physical) agents are drawn as sim vehicles once the sim spawns them.
     scene.updateAgents(sim.trafficAgents(), physicalTraffic);
     scene.updatePoliceUnits(sim.policeUnits(), tS);
+    scene.updatePoliceTools(sim.policeTools(), tS);
     const wi = sim.worldInfo();
     scene.setTimeOfDay(wi[W.night]);
     scene.signals.update(sim.signalStates(), wi[W.night]);
