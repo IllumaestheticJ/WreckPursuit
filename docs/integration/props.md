@@ -95,6 +95,11 @@ scenarios, the same first-mismatch ticks and hashes; city / police / race / weat
 stale on the base). This branch does not move the sim; the goldens need a `[bless]` on the base
 by whoever changed the city sim (not done here).
 
+e2e result (city chase, Port Vesper v2): 3,836 parked cars (debug_sedan model), 92 full + 3,744
+proxy instances (each car drawn exactly once); 36/36 props within 150 m drawn, all 36 with the full
+mesh (90/91 within 250 m: the one left is the 12 m re-pick lag at the edge, drawn as a proxy);
+a knocked parked car moved 0.74 m with drawn vs sim pose ≤ 0.000 m on every frame.
+
 ## Changes outside my crates
 - `crates/wp_sim/src/lib.rs`, `props.rs`: `Sim::prop_pose`, `Sim::active_props`, `Props::active`
   (read-only accessors; no sim behaviour, determinism or golden change).
@@ -106,8 +111,8 @@ by whoever changed the city sim (not done here).
 ## Perf numbers
 | Measurement | Machine | Native | Browser | Budget |
 |---|---|---|---|---|
-| `props_moved()` per frame, nothing moving | cloud container, SwiftShader e2e | — | see e2e line "props:" | — |
-| `PropView.update()` mean / worst (re-pick) | cloud container, SwiftShader e2e | — | see e2e line "props:" | — |
+| `props_moved()` per frame, nothing moving | cloud container, headless Chromium | — | 0.025 ms | — |
+| `PropView.update()` mean / worst frame (a re-pick) | cloud container, headless Chromium | — | 0.038 ms / 0.50 ms | — |
 | Draw calls added | — | — | 4 proxy + 4 full + 1 cone | — |
 
 ## Known gaps
