@@ -39,6 +39,21 @@ in `types::slot`.
 `max_voices` and each bus's limit play; one-shots still sounding hold their slot until their
 `duration_s` ends. The focused car's engine is `Critical` and never loses its slot.
 
+**Engine LOD** (playtest #47, a crowd silenced cars): every car but the focus keeps its two
+loudest engine layers within `engine.lod_two_layer_m` (40 m) and one beyond, with the dropped
+layers' energy moved into the kept ones (`engine::engine_lod`; loudness unchanged, sticky near a
+crossover); its second layer scores × `engine.second_layer_cull_scale` (`Desire::cull_scale`),
+so every car's main layer is kept before another car's second one.
+
+**Body-less vehicles:** `kinematic::cruise_state(def, pos, yaw, speed)` builds a plausible
+`VehicleState` (cruising gear and rpm from the car's gearing, rolling wheels) so kinematic
+traffic and police units on `wp_police`'s internal driving can be fed to the director.
+
+**Pack level:** the director folds each cue's `gain` into the gains it sends. Recorded engine
+packs carry a level boost on their layer cues (`tools/audio_packs/write_packs.py` `LEVEL_DB`,
+matched to the procedural fallback); a backend that plays a stand-in cue (the fallback) must
+use that cue's own gain (the Web Audio pool rescales by `fallback.gain / cue.gain`).
+
 **Determinism:** time comes from ticks only (`AudioFrame::tick`), every map is a `BTreeMap`,
 ordering is total and tie-broken by `VoiceId`, randomness (cosmetic pitch variation, overrun
 pops) is a seeded `wp_math::Rng`, trig goes through `wp_math::sin_cos`, no other transcendental
@@ -214,7 +229,13 @@ off-load; every layer audible and only leading near its root; turbo cars blow of
 `tests/wheelspin.rs` (playtest #27): a standstill burnout and full-throttle launches with TCS
 off (RWD V8, RWD turbo, FWD sedan) and a TCS launch — the spin loop is ≥ 0.2 after 0.1 s of
 hard spin (slip ratio ≥ 0.5, ≥ 3 m/s), silent after 0.5 s of grip, pitch rises with slip speed,
-and straight-line spin does not squeal. Same signals as a table/CSV (`--burnout` for the
+and straight-line spin does not squeal. `tests/roster.rs` (playtest #47): every car in `data/cars` as player, AI racer, police unit
+and traffic gets an audible engine, squeal, wheelspin and (police) siren; a 24-car crowd keeps
+every engine to 140 m with the LOD's layer counts; the LOD keeps loudness; kinematic cruise
+states are heard. The same scenarios rendered through the browser's voice pool, recorded and
+procedural: `cargo run -p wp_audio --example roster_trace -- r.json` +
+`node apps/testbed-web/e2e/audio_roster.mjs r.json --verbose` (or no argument: it builds the
+trace). Same signals as a table/CSV (`--burnout` for the
 wheelspin script) and the command stream for an offline browser render:
 
 ```
@@ -236,6 +257,8 @@ nodes) for material lookup.
   set by the caller. Until B emits `GlassShattered`, glass is inferred from contacts.
 - No occlusion (buildings) or interior/exterior filtering yet; no reverb zones (tunnels).
 - No music system; the Music bus exists so the scanner can duck it.
+- Kinematic traffic and body-less police units are heard only once the wasm bridge feeds
+  `kinematic::cruise_state` inputs (request R12b-1 in `docs/integration/audio.md`).
 - TTS (`speechSynthesis`) bypasses the Web Audio radio EQ (browser limitation); recorded line
   packs will go through it.
 - The applied throttle reaches audio through the wasm bridge (`Telemetry::throttle`); a

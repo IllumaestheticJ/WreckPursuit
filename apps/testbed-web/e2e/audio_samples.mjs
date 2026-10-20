@@ -81,6 +81,17 @@ await page.waitForTimeout(800);
 check((await page.evaluate(() => window.__wpAudio.soundSource())) === "recorded", "switched back to recorded samples");
 const st = await page.evaluate(() => window.__wpAudio.stats());
 check(st && st.looped > 0, `director re-played its loops after switching (${st?.looped})`);
+// Playtest #47: the reset's Stop commands were dropped, so a source switch left the old loops
+// playing next to the re-played ones. Toggle a few times while driving, then compare.
+await page.keyboard.down("KeyW");
+for (const src of ["procedural", "recorded", "procedural", "recorded"]) {
+  await page.evaluate((s) => window.__wpAudio.setSource(s), src);
+  await page.waitForTimeout(400);
+}
+await page.keyboard.up("KeyW");
+await page.waitForTimeout(300);
+const lc = await page.evaluate(() => window.__wpAudio.loopCounts());
+check(lc && lc.backend === lc.director, `no stale loops after source switches (backend ${lc?.backend}, director ${lc?.director})`);
 
 check(errors.length === 0, `no page errors${errors.length ? ": " + errors.slice(0, 5).join(" | ") : ""}`);
 await browser.close();

@@ -252,6 +252,12 @@ export class AudioSystem {
     }
   }
 
+  /** Looped voices the backend plays vs the director's count (e2e: no stale voices). */
+  loopCounts(): { backend: number; director: number } | null {
+    if (!this.pool || !this.lastStats) return null;
+    return { backend: this.pool.looping, director: this.lastStats.looped };
+  }
+
   /** Last director counters (e2e / HUD). */
   stats(): DirectorStats | null {
     return this.lastStats;

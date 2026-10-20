@@ -243,3 +243,55 @@ fn engine_lod_keeps_loudness() {
         "LOD changed loudness: {energies:?}"
     );
 }
+
+#[test]
+fn kinematic_traffic_and_police_are_heard() {
+    // What the wasm bridge would feed for body-less agents (request in docs/integration/audio.md).
+    for car in roster() {
+        for (kind, siren, dist) in [
+            (DriverKind::Traffic, false, 110.0),
+            (DriverKind::Police, true, 150.0),
+        ] {
+            let mut d = AudioDirector::new(AudioLibrary::embedded().unwrap(), 5);
+            d.register_car(&car);
+            let mut engine = false;
+            let mut siren_on = false;
+            for f in 0..20u64 {
+                let st = wp_audio::kinematic::cruise_state(&car.def, [dist, 0.0, 0.4], 0.0, 13.0);
+                let inp = [VehicleAudioInput {
+                    entity: EntityId(0x4000_0001),
+                    car_id: &car.def.id,
+                    state: &st,
+                    throttle: 0.3,
+                    throttle_applied: Some(0.3),
+                    horn: false,
+                    siren,
+                    road_rumble: 0.0,
+                    kind,
+                }];
+                for c in d.update(&AudioFrame {
+                    tick: 4 * (f + 1),
+                    listener: listener(),
+                    focus: None,
+                    vehicles: &inp,
+                    events: &[],
+                }) {
+                    if let AudioCommand::Play { voice, .. } = c {
+                        engine |= (slot::ENGINE_LAYER..slot::ENGINE_LIMITER).contains(&voice.slot);
+                        siren_on |= (slot::SIREN..slot::SIREN + 4).contains(&voice.slot);
+                    }
+                }
+            }
+            assert!(
+                engine,
+                "{} as kinematic {kind:?} at {dist} m: no engine",
+                car.def.id
+            );
+            assert_eq!(
+                siren_on, siren,
+                "{} as kinematic {kind:?}: siren",
+                car.def.id
+            );
+        }
+    }
+}
