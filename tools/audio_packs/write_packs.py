@@ -18,6 +18,14 @@ def save(p):
     out = {k: p[k] for k in order if k in p}
     open(os.path.join(A, "packs", p["id"] + ".json"), "w").write(json.dumps(out, indent=2, ensure_ascii=False) + "\n")
 
+# Engine layer level per recorded pack, dB (playtest #47): the loops are normalised to -20 LUFS,
+# which left recorded engines 10-17 dB under their procedural fallback and under the tyres /
+# ambience. Measured with `node apps/testbed-web/e2e/audio_roster.mjs --verbose` (engine RMS
+# over the idle -> 90 % redline sweep, player role, recorded vs procedural) and set so the
+# recorded engine sits ~1 dB under the procedural one.
+LEVEL_DB = {"engine_rec_i4": 15.8, "engine_rec_turbo": 15.8, "engine_rec_i6": 11.7, "engine_rec_v6": 13.0, "engine_rec_v8": 9.1}
+def level(id_, gain): return round(gain * 10 ** (LEVEL_DB.get(id_, 0.0) / 20), 3)
+
 def engine(id_, proc, files_pack, layers, desc, whistle_gain=None):
     p = copy.deepcopy(P(proc))
     p.update(id=id_, description=desc, fallback=proc)
@@ -26,7 +34,7 @@ def engine(id_, proc, files_pack, layers, desc, whistle_gain=None):
     p["engine_layers"] = []
     for cue, anchor, thr, gain in layers:
         name = cue.split("/")[1]
-        cues[cue] = samples(files_pack, name + ".ogg", id_, True, gain)
+        cues[cue] = samples(files_pack, name + ".ogg", id_, True, level(id_, gain))
         p["engine_layers"].append({"cue": cue, "anchor": anchor, "throttle": thr})
     cues["turbo/blowoff"] = samples("engine_rec_turbo", "blowoff_", id_, False, 0.8)
     if whistle_gain: cues["turbo/whistle"]["gain"] = whistle_gain
@@ -42,7 +50,7 @@ def i4(id_, desc, wg=None):
     p = copy.deepcopy(P("engine_proc_i4"))
     engine(id_, "engine_proc_i4", "engine_rec_i4", [l for l in i4_layers if l[0] != "engine/low_off"], desc, wg)
     q = json.load(open(os.path.join(A, "packs", id_ + ".json")))
-    q["cues"]["engine/low_off"] = samples("engine_rec_i4", "mid_off.ogg", id_, True, 0.8)
+    q["cues"]["engine/low_off"] = samples("engine_rec_i4", "mid_off.ogg", id_, True, level(id_, 0.8))
     q["engine_layers"].insert(3, {"cue": "engine/low_off", "anchor": {"Rpm": 2600.0}, "throttle": "Off"})
     q["cues"] = dict(sorted(q["cues"].items()))
     save(q)
@@ -86,7 +94,8 @@ save(w)
 
 s = copy.deepcopy(P("siren_proc"))
 s.update(id="siren_rec", fallback="siren_proc", description="Electronic siren loops cut from aquinn's 'Sirens and Alarm Noise' (CC0): wail (rise + fall), yelp, phaser, hi-lo. Play at their own cadence.")
-for k in s["cues"]: s["cues"][k] = samples("siren_rec", k.split("/")[1] + ".ogg", "siren_rec", True)
+# +6 dB: the recorded loops sat ~7 dB under siren_proc (measured as for LEVEL_DB, police role).
+for k in s["cues"]: s["cues"][k] = samples("siren_rec", k.split("/")[1] + ".ogg", "siren_rec", True, round(10 ** (6.0 / 20), 3))
 save(s)
 r = copy.deepcopy(P("radio_proc"))
 r.update(id="radio_rec", fallback="radio_proc", description="Scanner squelch bursts and static bed cut from a real scanner recording (Kresiek The Furry, Uniden SDS100, CC0).")

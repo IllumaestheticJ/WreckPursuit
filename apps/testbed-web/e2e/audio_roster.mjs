@@ -201,6 +201,8 @@ for (const source of ["recorded", "procedural"]) {
           engineDb: db(rms(eng)),
           worldMinDb: db(Math.min(...world)),
           policeMinDb: db(Math.min(...pol)),
+          policeDb: db(rms(pol)),
+          peakDb: db(Math.max(...eng)),
           samples: perCase[i].samples,
           synth: perCase[i].synth,
         };
@@ -241,27 +243,34 @@ for (const source of ["recorded", "procedural"]) {
   }
 }
 
-// Recorded vs procedural level per car (player role): a mode 20 dB quieter reads as "silent".
+// Recorded vs procedural level per car (player role): a mode much quieter reads as "silent".
 const rows = [];
 for (let i = 0; i < trace.cases.length; i++) {
   const a = results.recorded.cases[i];
   const b = results.procedural.cases[i];
-  rows.push({ ...a, procDb: b.engineDb, diff: a.engineDb - b.engineDb });
+  rows.push({ ...a, procDb: b.engineDb, diff: a.engineDb - b.engineDb, procSirenDb: b.policeDb });
 }
 const player = rows.filter((r) => r.role === "player");
-const lopsided = player.filter((r) => Math.abs(r.diff) > 15);
+// Before round 12b the recorded inline-4s sat 17 dB under their fallback (owner: "silent").
+const lopsided = player.filter((r) => Math.abs(r.diff) > 6);
+const sirens = rows.filter((r) => r.role === "police");
+const sirenOff = sirens.filter((r) => Math.abs(r.policeDb - r.procSirenDb) > 6);
+check(
+  sirenOff.length === 0,
+  `recorded and procedural sirens within 6 dB` + (sirenOff.length ? `; ${sirenOff.map((r) => `${r.car} ${(r.policeDb - r.procSirenDb).toFixed(1)} dB`).join(", ")}` : ""),
+);
 check(
   lopsided.length === 0,
-  `recorded and procedural engines within 15 dB for every car` +
+  `recorded and procedural engines within 6 dB for every car` +
     (lopsided.length ? `; ${lopsided.map((r) => `${r.car} ${r.diff.toFixed(1)} dB`).join(", ")}` : ""),
 );
 if (verbose) {
-  console.log("car                  role     pack              rec dB (min)    proc dB  world min  siren min");
+  console.log("car                  role     pack              rec dB (min)    proc dB  world min  siren rec/proc dB");
   for (const r of rows) {
     console.log(
       `${r.car.padEnd(20)} ${r.role.padEnd(8)} ${r.pack.padEnd(17)} ${r.engineDb.toFixed(1).padStart(6)} (${r.engineMinDb.toFixed(1).padStart(6)}) ${r.procDb
         .toFixed(1)
-        .padStart(8)} ${r.worldMinDb.toFixed(1).padStart(9)} ${r.policeMinDb.toFixed(1).padStart(9)}`,
+        .padStart(8)} ${r.worldMinDb.toFixed(1).padStart(9)} ${r.role === "police" ? `${r.policeDb.toFixed(1)} / ${r.procSirenDb.toFixed(1)}` : ""}`,
     );
   }
 }
