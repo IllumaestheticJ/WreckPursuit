@@ -174,7 +174,7 @@ fn building_on(
     rise: f32,
 ) -> Building {
     let fp = footprint(o);
-    let zs: Vec<f32> = fp.iter().copied().chain([o.c]).map(|q| ground(q)).collect();
+    let zs: Vec<f32> = fp.iter().copied().chain([o.c]).map(ground).collect();
     let zmin = zs.iter().copied().fold(f32::INFINITY, f32::min);
     let zmax = zs.iter().copied().fold(f32::NEG_INFINITY, f32::max);
     let base = zmin - 0.3;

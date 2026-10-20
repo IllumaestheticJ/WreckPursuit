@@ -78,7 +78,7 @@ ignored perf run with 12 blockers. `tests/drive.rs` drives the real car (Rapier 
 
 ## Road format (`data/city/<city>.road.bin` + `.road.json`)
 
-Binary: `b"WPRD"`, little-endian `u32` format version (`ROAD_FORMAT_VERSION` = 3; v3 added `covered`), then the
+Binary: `b"WPRD"`, little-endian `u32` format version (`ROAD_FORMAT_VERSION` = 4; v3 added `covered`, v4 building kind / roof and `decor`), then the
 [postcard](https://docs.rs/postcard) encoding of `RoadNetwork`. The `.road.json` debug dump is
 the `serde_json` encoding of the same struct and loads identically (`RoadNetwork::load` picks by
 extension). All coordinates are metres, +X east, +Y north, +Z up. Ids are `u32` indices.
@@ -138,6 +138,11 @@ query order. Lanes more than 3 m above or below the queried z are ignored (grade
 separation). About 4 % of road samples are paint on Port Vesper v2 (`painted_share_is_plausible` gates 2–15 % on the 6×6 city).
 
 ### Builder rules (procgen and OSM share them)
+- Cross-sections (`BuildOptions`, playtest row 94): lanes 3.5 m (highway 3.7 m, alley 3.0 m),
+  parking strip 2.5 m; highways get a 3 m paved median and 3 m outer shoulders, two-way
+  arterials with ≥ 2 lanes each way a 3 m painted median (`builder::half_width_of`,
+  `median_width`, `shoulder_width`). Lanes of a divided road sit half the median off the
+  centreline; `CityMap` lane segments know the paved strip beside them (`paved_side`).
 - Junction setback per road end from both road half-widths and the junction angle
   (`d = (h_j + h_i cos θ) / sin θ` + 2 m crosswalk), so skewed (diagonal) junctions get larger
   boxes; degree-2 nodes are continuations, degree-1 nodes get U-turns.
@@ -247,6 +252,16 @@ so what you see is what you drive on (`tools/city-import/tests/surface_match.rs`
   bases down to the lowest ground (plinths on slopes); buildings stand on lots, off other
   streets' sidewalks and junction areas. `tools/city-import/tests/sidewalk_lots.rs` checks the
   back edges and frontages; details `docs/integration/sidewalk-lots.md`.
+
+### Residential lots (`residential`, playtest row 95)
+- Residential / suburban frontages are houses on lots (both generators): detached (16–23 m
+  lots) and semi-detached pairs, 1–2 storeys, gable / hip roofs, 5–8 m front yards, garages
+  and driveways, front fences or hedges, side fences, yard trees, corner shops (≤ 2 per zone),
+  street trees on the 1.5 m grass verge (`surface::VERGE_W_M`, residential streets ≤ 30 mph).
+  Port Vesper adds curving courts (T-junction + cul-de-sac) off its residential grids.
+- `residential::driveway_cars` parks cars in 60 % of driveways; kerbside cars never stand in
+  front of a driveway mouth (`blocks_driveway`). Trunks, hedges and fences are `wp_sim`
+  colliders in cities with terrain. Details: `docs/integration/city-residential.md`.
 
 ## Traffic AI
 

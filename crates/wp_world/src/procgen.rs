@@ -728,98 +728,6 @@ fn apply_green_waves(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn default_city_shape() {
-        let net = generate(&ProcGenConfig::default());
-        net.validate().unwrap();
-        assert!(net.lanes.len() > 1000, "lanes {}", net.lanes.len());
-        assert!(net.intersections.len() > 150);
-        assert!(net.signals.len() > 30);
-        for k in [
-            LaneKind::Through,
-            LaneKind::Highway,
-            LaneKind::Bus,
-            LaneKind::Parking,
-            LaneKind::Alley,
-            LaneKind::TurnLeft,
-        ] {
-            assert!(net.lanes.iter().any(|l| l.kind == k), "no {k:?} lanes");
-        }
-        for k in [
-            PoiKind::PoliceStation,
-            PoiKind::Helipad,
-            PoiKind::Garage,
-            PoiKind::SafehouseCandidate,
-            PoiKind::RaceStartGrid,
-        ] {
-            assert!(net.pois.iter().any(|p| p.kind == k), "no {k:?}");
-        }
-        assert!(net.buildings.len() > 200);
-        for c in [
-            IntersectionControl::AllWayStop,
-            IntersectionControl::Priority,
-        ] {
-            assert!(net.intersections.iter().any(|i| i.control == c));
-        }
-        // No cramped junctions: every drivable lane holds at least two cars.
-        for (i, l) in net.lanes.iter().enumerate() {
-            let len = *geom::cumulative(&l.polyline).last().unwrap();
-            assert!(len > 12.0, "lane {i} only {len} m");
-        }
-        // Every drivable lane can be left (connections) — the city is closed.
-        for (i, l) in net.lanes.iter().enumerate() {
-            if l.kind.drivable() {
-                assert!(!l.connections.is_empty(), "lane {i} is a trap");
-            }
-        }
-    }
-
-    #[test]
-    fn deterministic_and_seed_sensitive() {
-        let a = generate(&ProcGenConfig::default());
-        let b = generate(&ProcGenConfig::default());
-        assert_eq!(a, b);
-        let c = generate(&ProcGenConfig {
-            seed: 2,
-            ..Default::default()
-        });
-        assert_ne!(a.buildings, c.buildings);
-        assert_eq!(a.lanes, c.lanes);
-    }
-
-    #[test]
-    fn small_city_has_every_feature() {
-        let net = generate(&ProcGenConfig::small());
-        net.validate().unwrap();
-        for k in [
-            LaneKind::Highway,
-            LaneKind::Bus,
-            LaneKind::Parking,
-            LaneKind::Alley,
-        ] {
-            assert!(net.lanes.iter().any(|l| l.kind == k), "no {k:?} lanes");
-        }
-        assert!(!net.signals.is_empty());
-        assert!(net.lanes.len() < 800, "{}", net.lanes.len());
-    }
-
-    #[test]
-    fn odd_and_rectangular_grids_build() {
-        for (nx, ny) in [(7, 7), (8, 5), (5, 9)] {
-            let net = generate(&ProcGenConfig {
-                nx,
-                ny,
-                ..Default::default()
-            });
-            net.validate().unwrap();
-        }
-    }
-}
-
 /// Houses on the residential grid blocks (playtest row 95): along each edge of every
 /// residential / suburban block, lots from 14 m past one corner to 14 m before the next
 /// ([`residential::plan_lot`]); street trees on the verge of local streets and collectors in
@@ -1004,4 +912,96 @@ fn residential_blocks(
         }
     }
     decor
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_city_shape() {
+        let net = generate(&ProcGenConfig::default());
+        net.validate().unwrap();
+        assert!(net.lanes.len() > 1000, "lanes {}", net.lanes.len());
+        assert!(net.intersections.len() > 150);
+        assert!(net.signals.len() > 30);
+        for k in [
+            LaneKind::Through,
+            LaneKind::Highway,
+            LaneKind::Bus,
+            LaneKind::Parking,
+            LaneKind::Alley,
+            LaneKind::TurnLeft,
+        ] {
+            assert!(net.lanes.iter().any(|l| l.kind == k), "no {k:?} lanes");
+        }
+        for k in [
+            PoiKind::PoliceStation,
+            PoiKind::Helipad,
+            PoiKind::Garage,
+            PoiKind::SafehouseCandidate,
+            PoiKind::RaceStartGrid,
+        ] {
+            assert!(net.pois.iter().any(|p| p.kind == k), "no {k:?}");
+        }
+        assert!(net.buildings.len() > 200);
+        for c in [
+            IntersectionControl::AllWayStop,
+            IntersectionControl::Priority,
+        ] {
+            assert!(net.intersections.iter().any(|i| i.control == c));
+        }
+        // No cramped junctions: every drivable lane holds at least two cars.
+        for (i, l) in net.lanes.iter().enumerate() {
+            let len = *geom::cumulative(&l.polyline).last().unwrap();
+            assert!(len > 12.0, "lane {i} only {len} m");
+        }
+        // Every drivable lane can be left (connections) — the city is closed.
+        for (i, l) in net.lanes.iter().enumerate() {
+            if l.kind.drivable() {
+                assert!(!l.connections.is_empty(), "lane {i} is a trap");
+            }
+        }
+    }
+
+    #[test]
+    fn deterministic_and_seed_sensitive() {
+        let a = generate(&ProcGenConfig::default());
+        let b = generate(&ProcGenConfig::default());
+        assert_eq!(a, b);
+        let c = generate(&ProcGenConfig {
+            seed: 2,
+            ..Default::default()
+        });
+        assert_ne!(a.buildings, c.buildings);
+        assert_eq!(a.lanes, c.lanes);
+    }
+
+    #[test]
+    fn small_city_has_every_feature() {
+        let net = generate(&ProcGenConfig::small());
+        net.validate().unwrap();
+        for k in [
+            LaneKind::Highway,
+            LaneKind::Bus,
+            LaneKind::Parking,
+            LaneKind::Alley,
+        ] {
+            assert!(net.lanes.iter().any(|l| l.kind == k), "no {k:?} lanes");
+        }
+        assert!(!net.signals.is_empty());
+        assert!(net.lanes.len() < 800, "{}", net.lanes.len());
+    }
+
+    #[test]
+    fn odd_and_rectangular_grids_build() {
+        for (nx, ny) in [(7, 7), (8, 5), (5, 9)] {
+            let net = generate(&ProcGenConfig {
+                nx,
+                ny,
+                ..Default::default()
+            });
+            net.validate().unwrap();
+        }
+    }
 }
