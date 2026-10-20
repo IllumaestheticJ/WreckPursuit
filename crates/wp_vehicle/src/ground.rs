@@ -3,7 +3,7 @@
 
 use rapier3d::parry::query::{ShapeCastOptions, ShapeCastStatus};
 use rapier3d::parry::shape::Cylinder;
-use rapier3d::prelude::{Pose, QueryPipeline, Ray};
+use rapier3d::prelude::{Pose, QueryFilter, QueryFilterFlags, QueryPipeline, Ray};
 
 use crate::math::{Quat, V3};
 use wp_contracts::GroundQuery;
@@ -142,15 +142,36 @@ impl WheelCaster for FlatGround {
 
 /// Rapier query-pipeline caster. Build the pipeline with a filter that excludes the vehicle's
 /// own body (`QueryFilter::default().exclude_rigid_body(handle)`).
+///
+/// Probes see only the **static** world (fixed bodies and parentless colliders: roads, kerbs,
+/// terrain, barriers, sleeping props); dynamic and kinematic bodies (other cars, debris, woken
+/// props) are left to the chassis collider. A probe that starts inside another car's crushed
+/// bodywork would otherwise read tens of centimetres of "ground" and launch the car
+/// (playtest row 54: a torn-off wheel's hub probe in the Simulation T-bone gave 53 kN).
 pub struct RapierGround<'a> {
     /// The query pipeline.
     pub query: QueryPipeline<'a>,
 }
 
+impl RapierGround<'_> {
+    /// The pipeline restricted to the static world.
+    fn static_only(&self) -> QueryPipeline<'_> {
+        QueryPipeline {
+            filter: QueryFilter {
+                flags: self.query.filter.flags
+                    | QueryFilterFlags::EXCLUDE_DYNAMIC
+                    | QueryFilterFlags::EXCLUDE_KINEMATIC,
+                ..self.query.filter
+            },
+            ..self.query
+        }
+    }
+}
+
 impl WheelCaster for RapierGround<'_> {
     fn cast(&self, origin: V3, dir: V3, max_dist: f32) -> Option<GroundHit> {
         let ray = Ray::new(origin, dir);
-        self.query
+        self.static_only()
             .cast_ray_and_get_normal(&ray, max_dist, true)
             .map(|(_, hit)| GroundHit {
                 distance: hit.time_of_impact,
@@ -168,19 +189,14 @@ impl WheelCaster for RapierGround<'_> {
             stop_at_penetration: true,
             compute_impact_geometry_on_penetration: false,
         };
-        let sweep =
-            match self
-                .query
-                .cast_shape(&Pose::from_parts(p.center, p.rot), p.dir, &shape, options)
-            {
-                // Already touching at the start (a wall beside the tyre, or ground into the bump
-                // stop): the sweep says nothing useful, keep the centre ray.
-                Some((_, hit)) if hit.status == ShapeCastStatus::PenetratingOrWithinTargetDist => {
-                    None
-                }
-                Some((_, hit)) => sweep_hit_on_tyre(p, hit.witness1, hit.normal1),
-                None => None,
-            };
+        let pose = Pose::from_parts(p.center, p.rot);
+        let sweep = match self.static_only().cast_shape(&pose, p.dir, &shape, options) {
+            // Already touching at the start (a wall beside the tyre, or ground into the bump
+            // stop): the sweep says nothing useful, keep the centre ray.
+            Some((_, hit)) if hit.status == ShapeCastStatus::PenetratingOrWithinTargetDist => None,
+            Some((_, hit)) => sweep_hit_on_tyre(p, hit.witness1, hit.normal1),
+            None => None,
+        };
         blend_envelope(ray, sweep)
     }
 }

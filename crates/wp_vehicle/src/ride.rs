@@ -196,15 +196,23 @@ pub struct Oscillation {
 }
 
 fn fit_oscillation(t: &[f32], e: &[f32]) -> Oscillation {
-    // Extrema: sign changes of the discrete derivative.
+    // Extrema: sign changes of the discrete derivative, ignoring ripples smaller than 5 % of
+    // the largest excursion.
+    let big = e.iter().fold(0.0f32, |m, v| m.max(v.abs()));
     let mut ext: Vec<(f32, f32)> = Vec::new();
     for k in 1..e.len().saturating_sub(1) {
         let d0 = e[k] - e[k - 1];
         let d1 = e[k + 1] - e[k];
-        if (d0 > 0.0 && d1 <= 0.0) || (d0 < 0.0 && d1 >= 0.0) {
-            // Ignore tiny ripples.
-            if ext.last().is_none_or(|(_, v)| (e[k] - v).abs() > 1e-5) {
-                ext.push((t[k], e[k]));
+        let turn = (d0 > 0.0 && d1 <= 0.0) || (d0 < 0.0 && d1 >= 0.0);
+        if turn && e[k].abs() > 0.05 * big {
+            match ext.last_mut() {
+                // Same-sign turning points in a row: keep the larger one.
+                Some(last) if last.1 * e[k] > 0.0 => {
+                    if e[k].abs() > last.1.abs() {
+                        *last = (t[k], e[k]);
+                    }
+                }
+                _ => ext.push((t[k], e[k])),
             }
         }
     }
@@ -372,7 +380,13 @@ fn past_edge(p: V3, yaw: f32) -> f32 {
 
 /// Drive straight at `speed_kmh` over a kerb `height_m` tall whose edge is turned `angle_deg`
 /// from square (0 = both front wheels at once).
-pub fn kerb(car: &LoadedCar, speed_kmh: f32, height_m: f32, angle_deg: f32) -> KerbRun {
+pub fn kerb(
+    car: &LoadedCar,
+    speed_kmh: f32,
+    height_m: f32,
+    angle_deg: f32,
+    assists: &AssistProfile,
+) -> KerbRun {
     let v = speed_kmh / 3.6;
     let yaw = angle_deg.to_radians();
     let start = (v * 4.0).max(20.0);
@@ -385,7 +399,7 @@ pub fn kerb(car: &LoadedCar, speed_kmh: f32, height_m: f32, angle_deg: f32) -> K
     );
     rig.set_city_ground([ground_collider(), kerb_collider(height_m, yaw)]);
     rig.teleport([0.0, -start, 0.0], 0.0, v, 0.0);
-    let a = ride_assists();
+    let a = *assists;
     let hubs: [V3; 4] = std::array::from_fn(|i| v3(car.def.wheels[i].position_m));
     let wheel_past = |rig: &Rig| {
         let ch = rig.vehicle.chassis();
@@ -490,7 +504,12 @@ fn side_run(samples: &[Sample]) -> SideRun {
 
 /// A car at rest, turned so it slides sideways (its right side first) at `speed_kmh` into a
 /// kerb `height_m` tall; the right wheels start 0.3 m from the kerb face.
-pub fn slide_into_kerb(car: &LoadedCar, speed_kmh: f32, height_m: f32) -> SideRun {
+pub fn slide_into_kerb(
+    car: &LoadedCar,
+    speed_kmh: f32,
+    height_m: f32,
+    assists: &AssistProfile,
+) -> SideRun {
     let mut rig = settled_rig(car);
     // Kerb edge along the car's length, 0.3 m right of the right wheels' outer face.
     let half = 0.5 * car.def.track_front_m.max(car.def.track_rear_m)
@@ -502,7 +521,7 @@ pub fn slide_into_kerb(car: &LoadedCar, speed_kmh: f32, height_m: f32) -> SideRu
     let col = kerb;
     rig.set_city_ground([ground_collider(), col]);
     rig.kick([speed_kmh / 3.6, 0.0, 0.0], [0.0; 3]);
-    let a = ride_assists();
+    let a = *assists;
     let input = VehicleInput::default();
     let mut samples = Vec::new();
     for _ in 0..4 * TICKS_PER_S {
@@ -514,9 +533,14 @@ pub fn slide_into_kerb(car: &LoadedCar, speed_kmh: f32, height_m: f32) -> SideRu
 
 /// A car at rest hit on its right side: `impulse_ns` (N·s, toward −X) spread over 0.1 s at
 /// `height_m` above the ground, at the centre of mass's fore-aft position.
-pub fn side_impact(car: &LoadedCar, impulse_ns: f32, height_m: f32) -> SideRun {
+pub fn side_impact(
+    car: &LoadedCar,
+    impulse_ns: f32,
+    height_m: f32,
+    assists: &AssistProfile,
+) -> SideRun {
     let mut rig = settled_rig(car);
-    let a = ride_assists();
+    let a = *assists;
     let input = VehicleInput::default();
     let n = TICKS_PER_S / 10;
     let mut samples = Vec::new();
@@ -560,6 +584,7 @@ pub fn crest(
     grade: f32,
     half_len_m: f32,
     curve_m: f32,
+    assists: &AssistProfile,
 ) -> CrestRun {
     let v = speed_kmh / 3.6;
     let start = (v * 3.0).max(30.0);
@@ -575,7 +600,7 @@ pub fn crest(
         crest_collider(grade, half_len_m, curve_m),
     ]);
     rig.teleport([0.0, -start, 0.0], 0.0, v, 0.0);
-    let a = ride_assists();
+    let a = *assists;
     let mut ride_h = None;
     let mut rise: Vec<f32> = Vec::new();
     let mut samples = Vec::new();

@@ -106,7 +106,7 @@
       "damper_bump_ns_per_m": 1100.0,
       "damper_rebound_ns_per_m": 2210.0,
       "travel_m": 0.15,
-      "preload_m": 0.01,
+      "preload_m": 0.071,
       "arb_n_per_m": 3700.0,
       "bump_stop_n_per_m": 120000.0
     },
@@ -115,7 +115,7 @@
       "damper_bump_ns_per_m": 1100.0,
       "damper_rebound_ns_per_m": 2210.0,
       "travel_m": 0.15,
-      "preload_m": 0.01,
+      "preload_m": 0.071,
       "arb_n_per_m": 3700.0,
       "bump_stop_n_per_m": 120000.0
     },
@@ -124,7 +124,7 @@
       "damper_bump_ns_per_m": 730.0,
       "damper_rebound_ns_per_m": 1470.0,
       "travel_m": 0.16,
-      "preload_m": 0.01,
+      "preload_m": 0.039,
       "arb_n_per_m": 1800.0,
       "bump_stop_n_per_m": 120000.0
     },
@@ -133,7 +133,7 @@
       "damper_bump_ns_per_m": 730.0,
       "damper_rebound_ns_per_m": 1470.0,
       "travel_m": 0.16,
-      "preload_m": 0.01,
+      "preload_m": 0.039,
       "arb_n_per_m": 1800.0,
       "bump_stop_n_per_m": 120000.0
     }

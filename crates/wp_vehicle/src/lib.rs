@@ -49,6 +49,7 @@ pub mod engine;
 pub mod ffb;
 pub mod ground;
 pub mod handling;
+pub mod launch;
 pub mod math;
 pub mod metrics;
 pub mod ride;

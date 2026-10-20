@@ -12,8 +12,8 @@ use wp_contracts::{
 
 use crate::aero::aero_forces;
 use crate::assists::{
-    btc_rear_authority, esc_reference, filter_pedal, BtcAxle, Esc, Tcs, BTC_MAX_FRAC,
-    TCS_BRAKE_ACTIVE_NM, TCS_BRAKE_HANDOFF,
+    anti_launch_force, anti_launch_strength, btc_rear_authority, esc_reference, filter_pedal,
+    BtcAxle, Esc, Tcs, BTC_MAX_FRAC, TCS_BRAKE_ACTIVE_NM, TCS_BRAKE_HANDOFF,
 };
 use crate::brakes::{service_torques, Abs};
 use crate::diff::{axle_transfer, centre_transfer, AxleDiff, CentreDiff, DiffInput, DiffSetup};
@@ -21,6 +21,7 @@ use crate::drivetrain::{auto_clutch_update, Converter, Gearbox, ShiftInputs};
 use crate::engine::{Engine, EngineExtras, RPM_PER_RADPS};
 use crate::ffb::{self, FfbWheel};
 use crate::ground::{WheelCaster, WheelProbe};
+use crate::launch::LaunchGuard;
 use crate::math::{arr, sin_cos, v3, yaw_quat, Quat, V3};
 use crate::slide::{gyro_yaw_torque, slide_class_with_rear_lock, slide_throttle, GyroInput};
 use crate::steering::{
@@ -201,6 +202,10 @@ pub struct Telemetry {
     pub diff_transfer_nm: [f32; 3],
     /// Brake-based traction control torque per wheel, N·m.
     pub tcs_brake_nm: [f32; 4],
+    /// Anti-launch assist force pulling the body down this tick, N (0 with the wheel preset).
+    pub anti_launch_n: f32,
+    /// Upward speed the contact launch limiter took back this tick, m/s ([`crate::launch`]).
+    pub contact_lift_cut_mps: f32,
 }
 
 /// One simulated vehicle. See the crate docs for the integration contract with Rapier.
@@ -240,6 +245,7 @@ pub struct Vehicle {
     pub(crate) entity: EntityId,
     pub(crate) conditions: [SurfaceConditions; 4],
     pub(crate) conditions_source: ConditionsSource,
+    pub(crate) launch: LaunchGuard,
 }
 
 impl Vehicle {
@@ -351,6 +357,7 @@ impl Vehicle {
             entity: EntityId(0),
             conditions: [SurfaceConditions::DRY; 4],
             conditions_source: ConditionsSource::World,
+            launch: LaunchGuard::default(),
             corners,
         };
         v.converter = def
@@ -480,6 +487,15 @@ impl Vehicle {
         self.fuel = 1.0;
         self.force = V3::ZERO;
         self.torque = V3::ZERO;
+        self.launch.forget();
+    }
+
+    /// Forget the chassis's previous motion for the contact launch limiter
+    /// ([`crate::launch`]): call after changing the body's velocity directly (outside
+    /// [`Vehicle::place_body`] / [`Vehicle::reset`] / [`Vehicle::set_state`]), so the change is
+    /// not mistaken for a contact.
+    pub fn forget_motion(&mut self) {
+        self.launch.forget();
     }
 
     /// Overwrite the dynamic state from a [`VehicleState`] (`VehicleSim::state` output):
@@ -491,6 +507,7 @@ impl Vehicle {
     /// [`Vehicle::write_chassis_to_body`] afterwards. (Added by the integration lead for
     /// workstream F; extended by 02.)
     pub fn set_state(&mut self, s: &wp_contracts::VehicleState) {
+        self.launch.forget();
         let rot = Quat::from_xyzw(s.rot[0], s.rot[1], s.rot[2], s.rot[3]);
         let pos = v3(s.pos);
         self.chassis = Chassis {
@@ -803,6 +820,10 @@ impl Vehicle {
 
         self.update_damage_state(dt, out);
         let power_scale = self.power_scale();
+        // Contact launch limiter: upward speed Rapier's contacts added since last step.
+        let launch_cut = self
+            .launch
+            .update(ch.lin_vel.z, self.force.z, self.def.mass_kg, dt);
 
         // --- Pedals (auto-reverse swaps them while in reverse) ---------------------------
         let raw_thr = input.throttle.clamp(0.0, 1.0);
@@ -1226,6 +1247,20 @@ impl Vehicle {
         if gyro != 0.0 {
             torque += up * gyro;
         }
+        // Anti-launch (arcade presets only; never with all four wheels down).
+        let wheels_off = self.wheels.iter().filter(|w| !w.contact).count();
+        let anti_launch = anti_launch_force(
+            anti_launch_strength(assists),
+            self.def.mass_kg,
+            ch.lin_vel.z,
+            wheels_off,
+        );
+        if anti_launch > 0.0 {
+            force -= V3::Z * anti_launch;
+        }
+        if launch_cut > 0.0 && dt > 0.0 {
+            force -= V3::Z * (self.def.mass_kg * launch_cut / dt);
+        }
         self.force = force;
         self.torque = torque;
 
@@ -1260,6 +1295,8 @@ impl Vehicle {
             slide_gyro_nm: gyro,
             diff_transfer_nm: acc_x.map(|x| x * inv),
             tcs_brake_nm: tc_brake,
+            anti_launch_n: anti_launch,
+            contact_lift_cut_mps: launch_cut,
         };
     }
 

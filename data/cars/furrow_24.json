@@ -105,7 +105,7 @@
       "damper_bump_ns_per_m": 1800.0,
       "damper_rebound_ns_per_m": 3600.0,
       "travel_m": 0.18,
-      "preload_m": 0.02,
+      "preload_m": 0.06,
       "arb_n_per_m": 15000.0,
       "bump_stop_n_per_m": 200000.0
     },
@@ -114,7 +114,7 @@
       "damper_bump_ns_per_m": 1800.0,
       "damper_rebound_ns_per_m": 3600.0,
       "travel_m": 0.18,
-      "preload_m": 0.02,
+      "preload_m": 0.06,
       "arb_n_per_m": 15000.0,
       "bump_stop_n_per_m": 200000.0
     },

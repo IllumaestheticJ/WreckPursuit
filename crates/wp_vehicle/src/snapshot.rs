@@ -14,9 +14,9 @@ use wp_contracts::{HandlingEffects, SurfaceType};
 use crate::math::{Quat, V3};
 use crate::vehicle::{Chassis, Vehicle, Wheel};
 
-/// Format 5: format 4 (brake-TC state, differential rework) plus the ESC reference yaw rate
-/// after the TCS cut (playtest row 28).
-const FORMAT: u8 = 5;
+/// Format 6: format 5 (format 4 brake-TC state and differential rework, plus the ESC
+/// reference yaw rate, playtest row 28) plus the contact launch limiter (playtest row 54).
+const FORMAT: u8 = 6;
 
 /// Opaque full-state snapshot of one [`Vehicle`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -228,6 +228,9 @@ impl Vehicle {
         w.fs(&[e.gearbox_health, e.fuel_leak_rate]);
         w.b(e.engine_dead);
         w.b(e.lights_broken);
+        w.b(self.launch.prev_vz.is_some());
+        w.f(self.launch.prev_vz.unwrap_or(0.0));
+        w.f(self.launch.lift);
         VehicleSnapshot { bytes: w.0 }
     }
 
@@ -326,6 +329,9 @@ impl Vehicle {
         e.fuel_leak_rate = r.f()?;
         e.engine_dead = r.b()?;
         e.lights_broken = r.b()?;
+        let has_prev = r.b()?;
+        let prev_vz = r.f()?;
+        let lift = r.f()?;
         if !r.0.is_empty() {
             return Err(SnapshotError::Malformed);
         }
@@ -361,6 +367,10 @@ impl Vehicle {
         self.force = force;
         self.torque = torque;
         self.effects = e;
+        self.launch = crate::launch::LaunchGuard {
+            prev_vz: has_prev.then_some(prev_vz),
+            lift,
+        };
         Ok(())
     }
 }
