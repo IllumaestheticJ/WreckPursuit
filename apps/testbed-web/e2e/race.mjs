@@ -4,7 +4,7 @@
 //
 // Checks: the "races" button opens the picker with every race; picking the grid highway
 // sprint starts a race session (countdown, HUD, player held on the grid, gate marker in the
-// world); after the green light the AI racers move; on autopilot the race runs to a results
+// world); after the green light the AI racers move and show on the city minimap; on autopilot the race runs to a results
 // table with a payout from the economy; no page errors.
 import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
@@ -102,6 +102,9 @@ check(aiMoved >= 2, `AI racers move after the green light (${aiMoved}/3 moved > 
 const st = await page.evaluate(() => Array.from(window.__wp.sim.raceStandings()));
 check(st.length === 4 * 10, `live standings for 4 racers (${st.length / 10})`);
 check((await page.$('[data-testid="race-minimap"]')) !== null, "race minimap (UI kit) shows the route");
+// The city minimap draws the AI racers (owner row 100): map_dynamic v2 racer block.
+const mapRacers = await page.evaluate(() => ({ n: window.__wp.sim.mapDynamic(window.__wp.app.player)[20], drawn: window.__wp.map.hud.stats().minimap.racers }));
+check(mapRacers.n === 4 && mapRacers.drawn === 3, `city minimap shows the 3 AI racers (map racers ${mapRacers.n}, drawn ${mapRacers.drawn})`);
 await shot("race_hud.png");
 
 // 4. A fresh page races the sprint on autopilot (the AI drives the player too), fast-forwarded

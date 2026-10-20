@@ -285,19 +285,57 @@ trig).
   allows the other racers to flee for heat of their own (at race pace past the live patrols
   they earn it), runs its full minute, and measures the distance racer 1 drives after the
   call (its flight re-plans near the route's end): ≥ 250 m, or ≥ 150 m when caught first.
+- `crates/wp_wasm` + `apps/ui-kit` + `apps/testbed-web/e2e/race.mjs`: AI racers on the
+  minimap and full map (lead addendum, owner row 100) — `map_dynamic` layout v2, see below.
 - Clippy fixes for warnings that arrived with the round-12 tip merge (not mine; `-D warnings`
   failed on the merged baseline too): `crates/wp_audio/src/siren.rs` (`12345.678_901` →
   `12_345.678_901`, inconsistent digit grouping) and `crates/wp_sim/src/lib.rs` test
   (`b` → `_b`, unused variable).
 
 ### Reports for other workstreams
-- **E (police)**: Hollins picker race, seed 16 (pre-merge physics): a unit `Respond`ing to an
-  incident (the leader's speeding) in `Shadow` stops across the hairpin road at (−662, 1013)
-  with its siren on for ~35 s; the three cars behind cannot pass (`NoRoom` either side) and
-  run out of the finish window. Gone after the round-12b merge, but the behaviour (a responding
-  unit parking across a two-lane road) can recur.
+- **E (police)**: Hollins picker race: a unit `Respond`ing to an incident (the leader's
+  speeding) in `Shadow` stops on the hairpin road, siren on, for 35–80 s. **Back on the
+  round-12 tip** (2026-10-20, after ws/cars + r13): `WP_RACE_SEED` 2–5 — unit 10 at
+  (−660, 1016) angled ~23° across the road (0.9 m / 1.7 m left either side of it for a
+  1.76 m car: nobody can pass) for ~40 s in seeds 3–5; unit 11 at (−855, 1131) in the
+  opposing lane for the rest of seed 2. P2–P4 finish 40–55 s behind the winner or run out of
+  the finish window. The AI now squeezes past where there is room (below); a responding unit
+  should not park across a two-lane road it is not closing.
 - **D (traffic)**: Lantern Row checkpoint, seed 31, skill-0.5 field: three civilians (east-,
   west- and southbound) stop at an unsignalised junction near (200, −150) by t≈56 s, before any
   racer arrives, and wait on each other for the rest of the run (a 4-way stand-off). Grid
   highway: two civilians driving side by side at 10–18 m/s over both lanes of the divided
   highway form a rolling road block nobody can pass legally (≈30 s of every grid-sprint run).
+
+### Lead follow-ups (2026-10-20, after merging `lead/round12` @ 83cc6484)
+- **Hollins with the new shift times (ws/cars, row 97)**: the stock shift re-base was
+  already in this branch's earlier merge, so the pace work above measured it. `WP_RACE_SEED`
+  1–5: **17 of 20 finish** (lead's report: 11 of 20 on `lead/round12` before this branch; 16
+  of 20 before row 97). The rest is the police unit above.
+- **Loop 9 racer 2 `LeftCorridor` at gate 34**: gone (fixed by `max_half_width_m`, Fixes #9
+  in `opponent-pace.md`). Merged tip: `loop9_circuit_pace_without_police` 6 of 6 finish,
+  racer 2 wins in 197.9 s; with police no DQ (all six caught or fled — the police design
+  test's outcome).
+- **`wanted_ai_racer_flees_police_through_the_city`, a second racer flees**: attribution is
+  correct. `EventHeat` keys wanted levels by entity; a trace of the sim's events shows racers
+  2 and 3 each running the red light at (141, −167) themselves (t = 25.0 s, 35.3 s) and the
+  sim's police raising *their own* wanted level (L1 → L3 for racer 3 by its own offences).
+  The test keeps allowing that (an AI at race pace past live patrols earns heat).
+- **New fix — squeeze past a parked police car** (`field.rs`): a unit standing in the road
+  nudges back and forth, so the 0.3 m/s standing timer never called it parked and racers
+  waited behind it for the rest of the race even with room beside it. Sim vehicles now count
+  as standing while within 2.5 m of where they stopped below 1 m/s; a parked sim vehicle is
+  passed with 0.2 m clearance at a crawl (normal clearance by 15 m/s) and 0.15 m nearer the
+  road edge. Civilians and pulled-over racers keep their rules (a queue creeping at a light
+  must not count as parked — tried, it jammed the grid-highway finish). Hollins seed 2: one
+  more finisher; open-road sweep 26.3 → 27.0 km, stuck 1 → 1, no DQ / hard contacts.
+- **Minimap / full map racers (row 100)**: `map_dynamic` v2 — header 21 (`[20]` racer count),
+  racer block after the tools `[entity, x, y, yaw, position, flags]` in position order (flags
+  1 finished, 2 DNF, 4 captured, 8 DQ, 16 player); `map::map_dynamic_for(session, player)`.
+  UI kit: violet arrows (`--racer`, colour-blind palettes override) with a position tag, the
+  leader larger with a light ring, rim markers on the minimap; finished / DNF / DQ cars and
+  the player's own car hidden; legend row. Tests: `map.rs` layout + `race_tests.rs` live race,
+  `data.test.ts` decode, `e2e/race.mjs` (3 AI racers drawn).
+- **Report to K / race (judge)**: police units spawned during the race are not in the judge's
+  police list, so a racer's low-speed bump with one (Hollins seed 5, unit 14 arriving at a
+  capture) counts as a civilian hit (`civilian_hits`).

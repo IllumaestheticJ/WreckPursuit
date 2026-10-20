@@ -6,9 +6,9 @@
  * blits that and draws the moving things on top.
  */
 import type { MapFrame, MapStatic, MapZone } from "./data";
-import { isWanted } from "./data";
+import { isWanted, racersToDraw } from "./data";
 import { districtLabels, type DistrictLabel } from "./districts";
-import { drawPoi, drawPlayer, drawRoads, drawSearch, drawSight, drawTool, drawUnit, makeCanvas, readPalette, ROAD_MIN_PX, type MapPalette } from "./draw";
+import { drawPoi, drawPlayer, drawRacer, drawRoads, drawSearch, drawSight, drawTool, drawUnit, makeCanvas, readPalette, ROAD_MIN_PX, type MapPalette } from "./draw";
 import { clampCentre, fitBounds, fullMatrix, glyphRotation, pan, worldToFull, zoomAt, type FullView } from "./projection";
 
 /** District tints by kind (low alpha fills). */
@@ -24,6 +24,8 @@ export const DISTRICT_TINT: Record<MapZone["kind"], string> = {
 /** What the full map drew last frame (e2e). */
 export interface FullMapStats {
   units: number;
+  /** Race opponents drawn. */
+  racers: number;
   player: boolean;
   districts: number;
   pois: number;
@@ -39,7 +41,7 @@ export class FullMapRenderer {
   private baseKey = "";
   private ctx: CanvasRenderingContext2D | null;
   view: FullView = { cx: 0, cy: 0, pxPerM: 0.2, w: 1, h: 1 };
-  stats: FullMapStats = { units: 0, player: false, districts: 0, pois: 0, pxPerM: 0 };
+  stats: FullMapStats = { units: 0, racers: 0, player: false, districts: 0, pois: 0, pxPerM: 0 };
 
   constructor(readonly canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext("2d");
@@ -206,6 +208,13 @@ export class FullMapRenderer {
       drawUnit(ctx, u, sx, sy, glyphRotation(u.yaw, 0), us, nowMs, pal);
       units++;
     }
+    let racers = 0;
+    for (const r of racersToDraw(f).reverse()) {
+      const [sx, sy] = worldToFull(v, r.x, r.y);
+      if (sx < -20 || sy < -20 || sx > w + 20 || sy > h + 20) continue;
+      drawRacer(ctx, r, sx, sy, glyphRotation(r.yaw, 0), 7 * dpr, pal);
+      racers++;
+    }
     if (f.player) {
       const [sx, sy] = worldToFull(v, f.player.x, f.player.y);
       // locator ring so the player is easy to find on the whole-city view
@@ -218,6 +227,6 @@ export class FullMapRenderer {
       ctx.globalAlpha = 1;
       drawPlayer(ctx, sx, sy, glyphRotation(f.player.yaw, 0), 8 * dpr, pal);
     }
-    this.stats = { units, player: !!f.player, districts: this.labels.length, pois: this.map?.pois.length ?? 0, pxPerM: k };
+    this.stats = { units, racers, player: !!f.player, districts: this.labels.length, pois: this.map?.pois.length ?? 0, pxPerM: k };
   }
 }

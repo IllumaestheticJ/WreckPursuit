@@ -3,9 +3,11 @@
 //! - [`map_static`]: once per city — road centrelines by class and layer (grade or bridge
 //!   deck), district polygons, POIs and signalised junctions. JSON (`map_static_json`).
 //! - [`map_dynamic`]: every frame — the player, every police unit (bound sim vehicles and
-//!   internal ones alike, read from `wp_police`'s unit bodies), roadblocks / spike strips and the
-//!   search zone. A flat `f32` array (`map_dynamic`); layout in the `HEADER_*` / `UNIT_*` /
-//!   `TOOL_*` constants and `docs/integration/ui.md`.
+//!   internal ones alike, read from `wp_police`'s unit bodies), roadblocks / spike strips, the
+//!   search zone and, during a race, every racer. A flat `f32` array (`map_dynamic`); layout in
+//!   the [`HEADER`] / [`UNIT_STRIDE`] / [`TOOL_STRIDE`] / [`RACER_STRIDE`] constants, [`h`],
+//!   [`flag`], [`racer_flag`] and `docs/integration/ui.md`. Keep
+//!   `apps/ui-kit/src/map/data.ts` in step.
 //!
 //! Read-only: nothing here changes the sim or its hash.
 
@@ -13,6 +15,8 @@ use serde::Serialize;
 use wp_contracts::{DistrictId, EntityId};
 use wp_police::unit::Assignment;
 use wp_police::{PoliceSystem, PursuitStatus, UnitKind};
+use wp_race::live::Standing;
+use wp_race::{DnfReason, RacerStatus};
 use wp_world::network::{LaneKind, PoiKind};
 use wp_world::{CityMap, RoadGraphView};
 
@@ -197,15 +201,18 @@ fn nearest_index(pts: &[[f32; 3]], p: [f32; 2]) -> usize {
 
 // ----- dynamic -----------------------------------------------------------------------------
 
-/// Layout version in `map_dynamic()[0]`.
-pub const VERSION: f32 = 1.0;
+/// Layout version in `map_dynamic()[0]` (2: racer block and `h::N_RACERS`, owner row 100).
+pub const VERSION: f32 = 2.0;
 /// Floats before the first unit.
-pub const HEADER: usize = 20;
+pub const HEADER: usize = 21;
 /// Floats per unit: `[id, x, y, yaw, speed_mps, flags, target_x, target_y]`.
 pub const UNIT_STRIDE: usize = 8;
 /// Floats per tool: `[kind (0 roadblock, 1 spike strip), x, y, dir_x, dir_y, half_len_m]`;
 /// the line is drawn from `(x, y) - dir * half_len` to `(x, y) + dir * half_len`.
 pub const TOOL_STRIDE: usize = 6;
+/// Floats per racer (after the tools): `[entity, x, y, yaw, position (1-based), flags]`
+/// ([`racer_flag`]), in race-position order.
+pub const RACER_STRIDE: usize = 6;
 
 /// Header indices.
 pub mod h {
@@ -249,6 +256,8 @@ pub mod h {
     pub const PLAYER_SPEED: usize = 18;
     /// 1 when the player vehicle exists.
     pub const HAS_PLAYER: usize = 19;
+    /// Number of racers (0 outside a race).
+    pub const N_RACERS: usize = 20;
 }
 
 /// Unit flag bits (`flags` = state code in bits 0–3 plus these).
@@ -268,6 +277,65 @@ pub mod flag {
     pub const HUMAN: u32 = 1 << 8;
     /// `target_x`, `target_y` are valid (intercept point, tracked racer's last known spot).
     pub const HAS_TARGET: u32 = 1 << 9;
+}
+
+/// Racer flag bits.
+pub mod racer_flag {
+    /// Crossed the finish line.
+    pub const FINISHED: u32 = 1;
+    /// Did not finish (any reason; [`CAPTURED`] says when it was the police).
+    pub const DNF: u32 = 1 << 1;
+    /// Captured by the police (with [`DNF`]).
+    pub const CAPTURED: u32 = 1 << 2;
+    /// Disqualified.
+    pub const DQ: u32 = 1 << 3;
+    /// The player's own car (drawn as the player arrow; the map skips it in the racer layer).
+    pub const PLAYER: u32 = 1 << 4;
+}
+
+/// One racer on the map: pose from the sim, place and status from the race standings.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MapRacer {
+    /// Racer entity.
+    pub entity: EntityId,
+    /// `[x, y, yaw, speed]` as [`pose_of`].
+    pub pose: [f32; 4],
+    /// Race position, 1-based.
+    pub position: u8,
+    /// [`racer_flag`] bits.
+    pub flags: u32,
+}
+
+/// [`racer_flag`] bits for a racer's status (`player` sets [`racer_flag::PLAYER`]).
+pub fn racer_flags(status: RacerStatus, player: bool) -> u32 {
+    let st = match status {
+        RacerStatus::Running => 0,
+        RacerStatus::Finished => racer_flag::FINISHED,
+        RacerStatus::Dnf(DnfReason::Captured) => racer_flag::DNF | racer_flag::CAPTURED,
+        RacerStatus::Dnf(_) => racer_flag::DNF,
+        RacerStatus::Dq(_) => racer_flag::DQ,
+    };
+    st | if player { racer_flag::PLAYER } else { 0 }
+}
+
+/// Map racers from live `standings` (position order) and each racer's vehicle `pose`
+/// (`None` = no vehicle: the racer is left out).
+pub fn racers_of(
+    standings: &[Standing],
+    player: EntityId,
+    pose: &dyn Fn(EntityId) -> Option<[f32; 4]>,
+) -> Vec<MapRacer> {
+    standings
+        .iter()
+        .filter_map(|s| {
+            Some(MapRacer {
+                entity: s.racer,
+                pose: pose(s.racer)?,
+                position: s.position,
+                flags: racer_flags(s.status, s.racer == player),
+            })
+        })
+        .collect()
 }
 
 /// Search zone radius when line of sight was just lost, m.
@@ -308,11 +376,13 @@ pub fn pose_of(st: &wp_contracts::VehicleState) -> [f32; 4] {
 }
 
 /// The per-frame map array for `player` (pose from the sim, `None` = no player vehicle;
-/// `police` `None` = the session runs without police: header and player pose only).
+/// `police` `None` = the session runs without police: no units or tools; `racers` empty
+/// outside a race).
 pub fn map_dynamic(
     police: Option<&PoliceSystem>,
     player: EntityId,
     pose: Option<[f32; 4]>,
+    racers: &[MapRacer],
 ) -> Vec<f32> {
     let mut out = vec![0.0; HEADER];
     out[h::VERSION] = VERSION;
@@ -326,7 +396,36 @@ pub fn map_dynamic(
     if let Some(p) = police {
         police_part(p, player, &mut out);
     }
+    for r in racers {
+        out.extend_from_slice(&[
+            r.entity.0 as f32,
+            r.pose[0],
+            r.pose[1],
+            r.pose[2],
+            r.position as f32,
+            r.flags as f32,
+        ]);
+    }
+    out[h::N_RACERS] = racers.len() as f32;
     out
+}
+
+/// [`map_dynamic`] for `player` in a live session: its police (when the session runs them),
+/// the player's pose and, during a picker race, every racer.
+pub fn map_dynamic_for(s: &crate::session::Session, player: EntityId) -> Vec<f32> {
+    let states = s.sim().vehicle_states();
+    let pose = |e: EntityId| {
+        states
+            .iter()
+            .find(|(id, _)| *id == e)
+            .map(|(_, st)| pose_of(st))
+    };
+    let police = s.sim().systems().police.then(|| s.sim().police());
+    let racers = s
+        .race()
+        .map(|r| racers_of(&r.standings(), player, &pose))
+        .unwrap_or_default();
+    map_dynamic(police, player, pose(player), &racers)
 }
 
 fn police_part(p: &PoliceSystem, player: EntityId, out: &mut Vec<f32>) {
@@ -505,13 +604,14 @@ mod tests {
             .unwrap()
             .1;
         let pose = pose_of(&st);
-        let d = map_dynamic(Some(s.sim().police()), p, Some(pose));
+        let d = map_dynamic(Some(s.sim().police()), p, Some(pose), &[]);
         assert_eq!(d[h::VERSION], VERSION);
         let n = d[h::N_UNITS] as usize;
         let t = d[h::N_TOOLS] as usize;
         assert_eq!(n, s.sim().police().units().len());
         assert!(n > 0, "city chase has police");
         assert_eq!(d.len(), HEADER + n * UNIT_STRIDE + t * TOOL_STRIDE);
+        assert_eq!(d[h::N_RACERS], 0.0, "no race");
         assert_eq!(d[h::HAS_PLAYER], 1.0);
         assert!((d[h::PLAYER_X] - st.pos[0]).abs() < 1e-3);
         assert!(d[h::CAR_SIGHT_M] > 50.0);
@@ -531,14 +631,91 @@ mod tests {
     }
 
     #[test]
+    fn racer_block_follows_the_tools_in_position_order() {
+        use wp_race::DqReason;
+        let st = |e: u32, pos: u8, status: RacerStatus| Standing {
+            racer: EntityId(e),
+            position: pos,
+            status,
+            lap: 1,
+            next_gate: 0,
+            gates_passed: 0,
+            progress_m: 0.0,
+            gap_ahead_s: None,
+            gap_behind_s: None,
+            elapsed_s: 0.0,
+        };
+        let standings = [
+            st(3, 1, RacerStatus::Running),
+            st(1, 2, RacerStatus::Running),
+            st(2, 3, RacerStatus::Finished),
+            st(4, 4, RacerStatus::Dnf(DnfReason::Captured)),
+            st(5, 5, RacerStatus::Dq(DqReason::LeftCorridor)),
+            st(6, 6, RacerStatus::Running),
+        ];
+        // Racer 6 has no vehicle (left out).
+        let pose = |e: EntityId| (e.0 != 6).then(|| [e.0 as f32 * 10.0, -(e.0 as f32), 0.5, 20.0]);
+        let racers = racers_of(&standings, EntityId(1), &pose);
+        assert_eq!(racers.len(), 5);
+        let d = map_dynamic(None, EntityId(1), pose(EntityId(1)), &racers);
+        assert_eq!(d[h::VERSION], 2.0);
+        assert_eq!(d[h::N_RACERS], 5.0);
+        assert_eq!((d[h::N_UNITS], d[h::N_TOOLS]), (0.0, 0.0));
+        assert_eq!(d.len(), HEADER + 5 * RACER_STRIDE);
+        let r: Vec<&[f32]> = d[HEADER..].chunks(RACER_STRIDE).collect();
+        assert_eq!(r[0], &[3.0, 30.0, -3.0, 0.5, 1.0, 0.0]);
+        assert_eq!(r[1][0], 1.0);
+        assert_eq!(r[1][5] as u32, racer_flag::PLAYER);
+        assert_eq!(r[2][5] as u32, racer_flag::FINISHED);
+        assert_eq!(r[3][5] as u32, racer_flag::DNF | racer_flag::CAPTURED);
+        assert_eq!(r[4][5] as u32, racer_flag::DQ);
+        assert_eq!(
+            racer_flags(RacerStatus::Dnf(DnfReason::TotalLoss), false),
+            racer_flag::DNF
+        );
+    }
+
+    #[test]
+    fn racers_come_after_police_units_and_tools() {
+        let mut s = chase("vesper_v2");
+        s.run_ticks(60);
+        let p = EntityId(1);
+        let pose = |_: EntityId| Some([1.0, 2.0, 0.0, 0.0]);
+        let one = racers_of(
+            &[Standing {
+                racer: EntityId(9),
+                position: 1,
+                status: RacerStatus::Running,
+                lap: 1,
+                next_gate: 0,
+                gates_passed: 0,
+                progress_m: 0.0,
+                gap_ahead_s: None,
+                gap_behind_s: None,
+                elapsed_s: 0.0,
+            }],
+            p,
+            &pose,
+        );
+        let d = map_dynamic(Some(s.sim().police()), p, None, &one);
+        let n = d[h::N_UNITS] as usize;
+        let t = d[h::N_TOOLS] as usize;
+        assert!(n > 0);
+        let o = HEADER + n * UNIT_STRIDE + t * TOOL_STRIDE;
+        assert_eq!(d.len(), o + RACER_STRIDE);
+        assert_eq!(d[o], 9.0);
+        assert_eq!(d[o + 4], 1.0);
+    }
+
+    #[test]
     fn search_zone_grows_then_caps() {
         assert_eq!(search_radius(0.0), SEARCH_R0_M);
         assert!(search_radius(10.0) > search_radius(5.0));
         assert_eq!(search_radius(1e4), SEARCH_MAX_M);
         let p = PoliceSystem::new();
-        let d = map_dynamic(Some(&p), EntityId(1), None);
+        let d = map_dynamic(Some(&p), EntityId(1), None, &[]);
         assert_eq!(d.len(), HEADER);
-        let none = map_dynamic(None, EntityId(1), Some([1.0, 2.0, 0.5, 3.0]));
+        let none = map_dynamic(None, EntityId(1), Some([1.0, 2.0, 0.5, 3.0]), &[]);
         assert_eq!(none.len(), HEADER);
         assert_eq!(none[h::PLAYER_Y], 2.0);
         assert_eq!(d[h::HAS_PLAYER], 0.0);
