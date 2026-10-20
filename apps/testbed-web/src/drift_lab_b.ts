@@ -31,13 +31,21 @@ export function driftLabScenario(freeDriveJson: string): string {
   });
 }
 
+/** `deg` > 0: a right-hand (clockwise) arc; < 0: left-hand. */
 type Seg = { kind: "straight"; len: number } | { kind: "arc"; r: number; deg: number };
 
 /** Clockwise loop from the spawn (0, 0) heading +Y; closes on itself (see drift-lab-b.md). */
 const COURSE: Seg[] = [
   { kind: "straight", len: 160 },
   { kind: "arc", r: 22, deg: 90 },
-  { kind: "straight", len: 130 },
+  // S-bend (row 107, lift-off transitions): two linked 40 m corners, left 40° → right 80° →
+  // left 40°, in place of the 130 m straight (13.6 + 4 · 40 · sin 40° + 13.6 = 130 m, no
+  // lateral offset, so the loop still closes).
+  { kind: "straight", len: 13.6 },
+  { kind: "arc", r: 40, deg: -40 },
+  { kind: "arc", r: 40, deg: 80 },
+  { kind: "arc", r: 40, deg: -40 },
+  { kind: "straight", len: 13.6 },
   { kind: "arc", r: 22, deg: 90 },
   { kind: "straight", len: 160 },
   { kind: "arc", r: 70, deg: 90 }, // the long sweeper
@@ -63,19 +71,20 @@ function centreLine(step = 2): [number, number, number][] {
         pts.push([x, y, h]);
       }
     } else {
-      // Right-hand (clockwise) arc.
-      const a = (s.deg * Math.PI) / 180;
+      // Right-hand (clockwise) arc for deg > 0, left-hand for deg < 0.
+      const dir = Math.sign(s.deg);
+      const a = (Math.abs(s.deg) * Math.PI) / 180;
       const n = Math.max(4, Math.round((s.r * a) / step));
-      const cx = x + Math.cos(h - Math.PI / 2) * s.r;
-      const cy = y + Math.sin(h - Math.PI / 2) * s.r;
+      const cx = x + Math.cos(h - (dir * Math.PI) / 2) * s.r;
+      const cy = y + Math.sin(h - (dir * Math.PI) / 2) * s.r;
       const a0 = Math.atan2(y - cy, x - cx);
       for (let i = 1; i <= n; i++) {
-        const t = a0 - (a * i) / n;
+        const t = a0 - (dir * a * i) / n;
         x = cx + Math.cos(t) * s.r;
         y = cy + Math.sin(t) * s.r;
-        pts.push([x, y, h - (a * i) / n]);
+        pts.push([x, y, h - (dir * a * i) / n]);
       }
-      h -= a;
+      h -= dir * a;
     }
   }
   return pts;
@@ -121,12 +130,15 @@ export function buildCourse(): THREE.Group {
   cone.rotateX(Math.PI / 2);
   cone.translate(0, 0, 0.35);
   for (let i = 1; i < pts.length - 1; i += 3) {
-    const turning = Math.abs(pts[i + 1][2] - pts[i - 1][2]) > 1e-4;
-    if (!turning) continue;
+    const turn = pts[i + 1][2] - pts[i - 1][2];
+    if (Math.abs(turn) <= 1e-4) continue;
+    // Inside of the corner: right of travel in a right-hander (heading decreasing), left in a
+    // left-hander.
+    const side = turn < 0 ? 1 : -1;
     const [x, y, h] = pts[i];
-    // Clockwise loop: the inside is to the right of travel.
+    const off = side * (TRACK_W / 2 + 0.6);
     const m = new THREE.Mesh(cone, kerb);
-    m.position.set(x + Math.sin(h) * (TRACK_W / 2 + 0.6), y - Math.cos(h) * (TRACK_W / 2 + 0.6), 0);
+    m.position.set(x + Math.sin(h) * off, y - Math.cos(h) * off, 0);
     g.add(m);
   }
   // Start line.
@@ -161,7 +173,7 @@ const FIELDS: Record<string, { label: string; min: number; max: number; step: nu
   lift_soften: { label: "lift soften", min: 0, max: 1, step: 0.05, hint: "only with throttle shaping on: how much an abrupt lift is softened (0 = raw, 1 = a full lift takes 0.5 s)" },
 };
 
-const MODES = ["off", "grip", "straighten", "hold", "angle-up", "exceeded"];
+const MODES = ["off", "grip", "straighten", "hold", "angle-up", "exceeded", "transition"];
 // New key for C: a remembered B override would bring back B's throttle shaping (now opt-in).
 const STORE = "wp.driftLabC.tuning";
 
@@ -271,7 +283,14 @@ export class DriftLabPanel {
         input.checked = value;
         const val = document.createElement("span");
         input.onchange = () => this.save({ ...this.sim.driftTuning(), [key]: input.checked });
-        row(key === "intent" ? "intent modes" : key.replace(/_/g, " "), key === "intent" ? "off = Drift Lab B step 1 only (fast countersteer, earlier onset)" : "on / off", input, val);
+        const label = key === "intent" ? "intent modes" : key === "transition" ? "lift-off transitions" : key.replace(/_/g, " ");
+        const hint =
+          key === "intent"
+            ? "off = Drift Lab B step 1 only (fast countersteer, earlier onset)"
+            : key === "transition"
+              ? "row 107: off the gas with the slide swinging through, or the countersteer key pressed off the gas, the hold lets go (flicks / S-bends)"
+              : "on / off";
+        row(label, hint, input, val);
         continue;
       }
       if (typeof value !== "number") continue;
@@ -325,7 +344,7 @@ export class DriftLabPanel {
     }
     const mode = MODES[r[0] | 0] ?? "?";
     const env = r[3] > 0 ? `${r[3].toFixed(0)}°` : "–";
-    const sliding = mode === "hold" || mode === "angle-up" || mode === "straighten" || mode === "exceeded";
+    const sliding = mode === "hold" || mode === "angle-up" || mode === "straighten" || mode === "exceeded" || mode === "transition";
     const held = mode === "hold" || mode === "angle-up" || mode === "exceeded" ? `${(r[8] ?? 0).toFixed(1)}°` : "–";
     const pct = (x: number) => `${Math.round((x ?? 0) * 100)}%`;
     this.readout.textContent =
@@ -335,6 +354,6 @@ export class DriftLabPanel {
       (r[5] < 0.999 ? ` (trim ×${r[5].toFixed(2)})` : "") +
       `\nauthority ${pct(r[4])} · onset ${r[2].toFixed(2)}`;
     this.readout.style.whiteSpace = "pre";
-    this.readout.style.borderLeft = `4px solid ${mode === "exceeded" ? "#e04040" : mode === "hold" ? "#40c070" : mode === "angle-up" ? "#e0a030" : mode === "straighten" ? "#4090e0" : "#666"}`;
+    this.readout.style.borderLeft = `4px solid ${mode === "exceeded" ? "#e04040" : mode === "hold" ? "#40c070" : mode === "angle-up" ? "#e0a030" : mode === "straighten" ? "#4090e0" : mode === "transition" ? "#b070e0" : "#666"}`;
   }
 }

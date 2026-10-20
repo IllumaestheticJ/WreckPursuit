@@ -56,6 +56,9 @@ pub struct DriftTuning {
     pub catch_lock_s: f32,
     /// Intent modes on (hold, angle-up, envelope, opt-in throttle shaping). Off = step 1 only.
     pub intent: bool,
+    /// Lift-off transitions (row 107): off the throttle with the slide swinging through the
+    /// centre, the hold lets go ([`DriftMode::Transition`]). Off = Drift Lab C step 1.
+    pub transition: bool,
     /// Hold: front slip angle (× the tyres' peak slip) given up per 0.1 rad (5.7°) the slide
     /// angle is past the held angle.
     pub hold_gain: f32,
@@ -116,6 +119,7 @@ impl Default for DriftTuning {
             onset_rate_rps: 0.3,
             catch_lock_s: 0.10,
             intent: true,
+            transition: true,
             hold_gain: 0.3,
             hold_damp: 0.2,
             hold_base: 1.0,
@@ -178,6 +182,18 @@ pub const HOLD_FOLLOW_UP_S: f32 = 0.6;
 /// … and down with this one, s.
 pub const HOLD_FOLLOW_DOWN_S: f32 = 1.5;
 
+/// Slide angle that counts as a side for the lift-off transition, rad (2°).
+pub const TRANSITION_SIDE_RAD: f32 = 0.035;
+/// Closing rate of the slide angle that, off the throttle, counts as heading through zero
+/// (with [`TRANSITION_LOOKAHEAD_S`]), rad/s.
+pub const TRANSITION_RATE_RPS: f32 = 0.3;
+/// After a transition the new drift's envelope ignores the look-ahead, and key swaps are
+/// not erratic, for this long, s.
+pub const TRANSITION_GRACE_S: f32 = 0.6;
+/// Off the throttle, a slide that at its closing rate reaches zero within this is a lift-off
+/// transition, s.
+pub const TRANSITION_LOOKAHEAD_S: f32 = 0.4;
+
 /// Device weight of the intent modes from the speed sensitivity: keyboard (1.0) → 1,
 /// gamepad (0.7) → 0.5, wheel (0) → 0.
 pub fn device_weight(steer_speed_sensitivity: f32) -> f32 {
@@ -216,6 +232,12 @@ pub struct DriftState {
     pub exceeded: f32,
     /// Mode code last tick ([`DriftMode::code`]).
     pub mode: f32,
+    /// Side of the current drift: the sign of the body slip (+ = sliding toward the left of
+    /// the heading), 0 = none.
+    pub side: f32,
+    /// 1 = in a lift-off transition ([`DriftMode::Transition`]); < 0 = the new drift's grace
+    /// after one, seconds left (negated, counting up to 0); 0 = neither.
+    pub transition: f32,
 }
 
 /// What the drift assist reads each tick.
@@ -273,7 +295,7 @@ pub struct DriftCommand {
 
 impl DriftState {
     /// Number of f32 values in [`DriftState::to_array`].
-    pub const LEN: usize = 10;
+    pub const LEN: usize = 12;
 
     /// Advance the slip-rate filter with this tick's rear-axle slip (rad).
     pub fn update_slip(&mut self, rear_axle_slip: f32, dt: f32) {
@@ -302,7 +324,10 @@ impl DriftState {
         } else {
             0.0
         };
-        if sign != 0.0 && self.last_sign != 0.0 && sign != self.last_sign {
+        // The key swap of a lift-off transition (and of the new drift's first moments) is not
+        // erratic.
+        let swapping = self.transition != 0.0;
+        if sign != 0.0 && self.last_sign != 0.0 && sign != self.last_sign && !swapping {
             self.erratic = (self.erratic + ERRATIC_PER_REVERSAL).min(1.0);
         }
         if sign != 0.0 {
@@ -342,6 +367,72 @@ impl DriftState {
         }
         cmd.weight = device_weight(inp.sensitivity);
 
+        // Lift-off transition (row 107): off the throttle with the slide crossing to the
+        // other side, heading through zero within the look-ahead, or the countersteer key
+        // pressed (not already held) — the key toward the next corner — the hold lets go at once
+        // and the car rotates freely through the centre: released keys straighten (fast
+        // rack), a held key steers plainly (no hold, no envelope) so the car can swing. It ends when
+        // the new drift starts — slide on a side and the countersteer key or the throttle —
+        // or when the car settles straight. The new drift gets a fresh held angle and its own
+        // envelope (no stale "exceeded").
+        let slide_side = if a > TRANSITION_SIDE_RAD {
+            inp.body_slip.signum()
+        } else {
+            0.0
+        };
+        if self.transition > 0.0 {
+            let settled = a < TRANSITION_SIDE_RAD && self.slide_rate.abs() < 0.3;
+            // Back on the throttle (either side), or the countersteer key once the slide has
+            // swung to the new side.
+            let new_drift = slide_side != 0.0
+                && (inp.throttle > 0.1 || (raw_mode == DriftMode::Hold && slide_side != self.side));
+            if settled || raw_mode == DriftMode::Grip || new_drift {
+                self.transition = if new_drift { -TRANSITION_GRACE_S } else { 0.0 };
+                self.side = if new_drift { slide_side } else { 0.0 };
+                self.exceeded = 0.0;
+                self.stable_s = 0.0;
+            }
+        } else if t.transition
+            && self.side != 0.0
+            && inp.throttle < 0.1
+            && matches!(
+                DriftMode::from_code(self.mode),
+                DriftMode::Hold | DriftMode::AngleUp | DriftMode::Straighten
+            )
+        {
+            let crossed = slide_side != 0.0 && slide_side != self.side;
+            let through = self.slide_rate < -TRANSITION_RATE_RPS
+                && a + self.slide_rate * TRANSITION_LOOKAHEAD_S < TRANSITION_SIDE_RAD;
+            // The countersteer key pressed off the throttle (it was not already holding): the
+            // key toward the next corner of a flick, not a hold — a hold needs the throttle.
+            let flick =
+                raw_mode == DriftMode::Hold && DriftMode::from_code(self.mode) != DriftMode::Hold;
+            if crossed || through || flick {
+                self.transition = 1.0;
+                self.exceeded = 0.0;
+                self.stable_s = 0.0;
+            }
+        }
+        if self.transition > 0.0 {
+            self.hold_angle = a;
+            cmd.mode = DriftMode::Transition;
+            cmd.hold_angle = a;
+            cmd.envelope = base_envelope(t, help);
+            self.mode = cmd.mode.code() as f32;
+            return cmd;
+        }
+        if raw_mode == DriftMode::Grip {
+            self.side = 0.0;
+        } else if slide_side != 0.0 {
+            self.side = slide_side;
+        }
+        // The new drift's grace after a transition: no look-ahead on the envelope (the swing
+        // builds the new slide fast; the hold's damping catches it).
+        let grace = self.transition < 0.0;
+        if grace {
+            self.transition = (self.transition + dt).min(0.0);
+        }
+
         // Envelope: wider after a stable hold, narrower with erratic input.
         let stable =
             DriftMode::from_code(self.mode) == DriftMode::Hold && self.slide_rate.abs() < 0.2;
@@ -352,7 +443,11 @@ impl DriftState {
         };
         let bonus = ENVELOPE_BONUS_RAD * ((self.stable_s - 0.8) / 1.0).clamp(0.0, 1.0);
         let env = (base_envelope(t, help) + bonus - ENVELOPE_ERRATIC_RAD * self.erratic).max(0.14);
-        let ahead = a + self.slide_rate.max(0.0) * ENVELOPE_LOOKAHEAD_S;
+        let ahead = if grace {
+            a
+        } else {
+            a + self.slide_rate.max(0.0) * ENVELOPE_LOOKAHEAD_S
+        };
         if ahead >= env + ENVELOPE_FADE_RAD {
             self.exceeded = 1.0;
         } else if a < env - ENVELOPE_REARM_RAD {
@@ -452,6 +547,8 @@ impl DriftState {
         self.exceeded = 0.0;
         self.hold_angle = self.prev_slide;
         self.mode = 0.0;
+        self.side = 0.0;
+        self.transition = 0.0;
     }
 
     /// The state as plain values (snapshots).
@@ -467,6 +564,8 @@ impl DriftState {
             self.last_sign,
             self.exceeded,
             self.mode,
+            self.side,
+            self.transition,
         ]
     }
 
@@ -483,6 +582,8 @@ impl DriftState {
             last_sign: a[7],
             exceeded: a[8],
             mode: a[9],
+            side: a[10],
+            transition: a[11],
         }
     }
 }
@@ -504,10 +605,14 @@ pub enum DriftMode {
     AngleUp,
     /// Past the assist's envelope: it backs off and the car can spin.
     Exceeded,
+    /// Lift-off transition (row 107): off the throttle with the slide swinging through the
+    /// centre; no hold: released keys straighten, a held key steers plainly, until the new
+    /// drift starts.
+    Transition,
 }
 
 impl DriftMode {
-    /// Stable small number for packed telemetry (0 = Off … 5 = Exceeded).
+    /// Stable small number for packed telemetry (0 = Off … 5 = Exceeded, 6 = Transition).
     pub fn code(self) -> u8 {
         match self {
             DriftMode::Off => 0,
@@ -516,6 +621,7 @@ impl DriftMode {
             DriftMode::Hold => 3,
             DriftMode::AngleUp => 4,
             DriftMode::Exceeded => 5,
+            DriftMode::Transition => 6,
         }
     }
 
@@ -527,6 +633,7 @@ impl DriftMode {
             3 => DriftMode::Hold,
             4 => DriftMode::AngleUp,
             5 => DriftMode::Exceeded,
+            6 => DriftMode::Transition,
             _ => DriftMode::Off,
         }
     }
@@ -758,6 +865,42 @@ mod tests {
         let c = run(&mut st, &inputs(-1.0, 20.0), 120);
         let held = c.hold_angle.to_degrees();
         assert!(held > 24.0 && held <= 30.0 + 1e-3, "{held}");
+    }
+
+    #[test]
+    fn lift_with_the_flick_key_is_a_transition_and_the_new_drift_is_fresh() {
+        // Left-hand drift (body slip −, countersteer key = right, +1) at 25°, keys released.
+        let lifted = |driver: f32, slip_deg: f32| DriftInputs {
+            throttle: 0.0,
+            ..inputs(driver, slip_deg)
+        };
+        let mut st = DriftState {
+            prev_slide: 25f32.to_radians(),
+            ..DriftState::default()
+        };
+        run(&mut st, &inputs(0.0, 25.0), 30);
+        assert_eq!(st.side, -1.0);
+        // Off the throttle, the countersteer key goes down: the flick, not a hold.
+        let c = run(&mut st, &lifted(1.0, 25.0), 1);
+        assert_eq!(c.mode, DriftMode::Transition, "{c:?}");
+        // The slide swings to the other side (body slip +); back on the throttle: a new drift
+        // (rear now sliding left: countersteer side +), with no stale envelope state.
+        let new = DriftInputs {
+            side: 1.0,
+            ..inputs(-1.0, -12.0)
+        };
+        st.prev_slide = 12f32.to_radians();
+        let c = run(&mut st, &new, 1);
+        assert_eq!(c.mode, DriftMode::Hold, "{c:?}");
+        assert_eq!(st.side, 1.0);
+        assert!(st.transition < 0.0 && c.authority > 0.99, "{st:?} {c:?}");
+        // A lift while holding (no flick) keeps the hold.
+        let mut st = DriftState {
+            prev_slide: 25f32.to_radians(),
+            ..DriftState::default()
+        };
+        run(&mut st, &inputs(1.0, 25.0), 30);
+        assert_eq!(run(&mut st, &lifted(1.0, 25.0), 5).mode, DriftMode::Hold);
     }
 
     #[test]

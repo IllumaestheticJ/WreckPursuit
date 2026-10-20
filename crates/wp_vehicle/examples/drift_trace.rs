@@ -1,6 +1,6 @@
 //! Tick traces for Drift Lab B tuning.
 //! `cargo run --release -p wp_vehicle --example drift_trace -- drift <car> <driver> [help] [seed]`
-//! (driver: good | naive | into | sloppy | lift | flood) or `-- kick <car> <kmh> <kick> [help] [counter]`.
+//! (driver: good | naive | into | sloppy | lift | flood), `-- transition <car> [help]` (row 107) or `-- kick <car> <kmh> <kick> [help] [counter]`.
 
 use wp_contracts::{AssistProfile, VehicleInput};
 use wp_vehicle::drift_lab::{drift_run_with, slide_state, DriftDriver};
@@ -41,6 +41,24 @@ fn main() {
     let id = arg(1, "rampart_50");
     let p = format!("{}/../../data/cars/{id}.json", env!("CARGO_MANIFEST_DIR"));
     let car = wp_contracts::load_car(p).unwrap();
+    if arg(0, "drift") == "transition" {
+        let help: f32 = arg(2, "0.6").parse().unwrap();
+        let asst = AssistProfile {
+            countersteer_help: help,
+            tcs: false,
+            esc: false,
+            ..AssistProfile::keyboard_default()
+        };
+        let mut t = 0;
+        let r = wp_vehicle::drift_lab::transition_run_with(&car, &asst, 40.0, 0.6, |rig, s, th| {
+            if t % 12 == 0 {
+                line(rig, s, th, t);
+            }
+            t += 1;
+        });
+        println!("{r:?}");
+        return;
+    }
     if arg(0, "drift") == "drift" {
         let driver = match arg(2, "good").as_str() {
             "naive" => DriftDriver::Naive,

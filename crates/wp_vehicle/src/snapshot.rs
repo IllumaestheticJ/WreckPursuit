@@ -17,8 +17,9 @@ use crate::vehicle::{Chassis, Vehicle, Wheel};
 /// Format 6: format 5 (format 4 brake-TC state and differential rework, plus the ESC
 /// reference yaw rate, playtest row 28) plus the contact launch limiter and the wheel-centre
 /// compression (playtest row 54). Format 7: plus the handbrake hold of the steering assist
-/// (owner rows 57 / 72).
-const FORMAT: u8 = 8;
+/// (owner rows 57 / 72). Format 8: plus the drift-assist state (Drift Lab B). Format 9: plus
+/// the drift side and lift-off transition flag (Drift Lab C, row 107).
+const FORMAT: u8 = 9;
 
 /// Opaque full-state snapshot of one [`Vehicle`].
 #[derive(Debug, Clone, PartialEq, Eq)]

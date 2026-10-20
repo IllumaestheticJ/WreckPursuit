@@ -3,7 +3,7 @@
 //! Env: `GAMEPAD=1` (gamepad preset), `DRIFT_TUNING='{...}'` (constants override).
 
 use wp_contracts::{AssistProfile, LoadedCar};
-use wp_vehicle::drift_lab::{drift_run, kick_catch, CatchDriver, DriftDriver};
+use wp_vehicle::drift_lab::{drift_run, kick_catch, transition_run, CatchDriver, DriftDriver};
 
 fn car(id: &str) -> LoadedCar {
     let p = format!("{}/../../data/cars/{id}.json", env!("CARGO_MANIFEST_DIR"));
@@ -33,7 +33,10 @@ fn main() {
         ));
     }
     let mut args: Vec<String> = std::env::args().skip(1).collect();
-    let what = if args.first().is_some_and(|a| a == "catch" || a == "drift") {
+    let what = if args
+        .first()
+        .is_some_and(|a| a == "catch" || a == "drift" || a == "transition")
+    {
         args.remove(0)
     } else {
         "all".into()
@@ -48,6 +51,12 @@ fn main() {
         ]
         .map(String::from)
         .to_vec();
+    }
+    if what == "all" || what == "transition" {
+        transition_table(&args);
+    }
+    if what == "transition" {
+        return;
     }
     if what != "drift" {
         println!("## Catch (keyboard, TCS/ESC off, countersteer 60 %)");
@@ -189,6 +198,41 @@ fn drift_tables(args: &[String]) {
             r.5,
             r.6,
             r.7
+        );
+    }
+}
+
+fn transition_table(args: &[String]) {
+    println!("\n## Lift-off transition (row 107): left drift 2.5 s, lift + release, right drift (S-bend, 40 m at 0.6 g)");
+    println!("| car | help | transition s | peak new-side slide ° | peak yaw rad/s | wobbles | new drift s | spun |");
+    println!("|---|---|---|---|---|---|---|---|");
+    let mut tot = [(0usize, 0usize, 0u32, 0.0f32); 3];
+    for id in args {
+        let c = car(id);
+        for (i, help) in [0.3f32, 0.6, 1.0].into_iter().enumerate() {
+            let r = transition_run(&c, &kb(help), 40.0, 0.6);
+            println!(
+                "| {id} | {:.0} % | {} | {:.0} | {:.2} | {} | {:.2} | {} |",
+                help * 100.0,
+                r.transition_s
+                    .map_or("never".to_string(), |t| format!("{t:.2}")),
+                r.peak_new_deg,
+                r.peak_yaw_rps,
+                r.wobbles,
+                r.new_drift_s,
+                if r.spun { "spun" } else { "no" }
+            );
+            tot[i].0 += 1;
+            tot[i].1 += r.spun as usize;
+            tot[i].2 += r.wobbles;
+            tot[i].3 += r.new_drift_s;
+        }
+    }
+    for (i, help) in [30, 60, 100].into_iter().enumerate() {
+        let (n, sp, w, d) = tot[i];
+        println!(
+            "\n{help} %: spins {sp}/{n}, wobbles {w}, new drift {:.2} s mean",
+            d / n as f32
         );
     }
 }

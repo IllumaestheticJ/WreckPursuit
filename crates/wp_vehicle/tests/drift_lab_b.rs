@@ -5,7 +5,7 @@
 //! for the full tables).
 
 use wp_contracts::{AssistProfile, LoadedCar};
-use wp_vehicle::drift_lab::{drift_run, kick_catch, CatchDriver, DriftDriver};
+use wp_vehicle::drift_lab::{drift_run, kick_catch, transition_run, CatchDriver, DriftDriver};
 
 fn car(id: &str) -> LoadedCar {
     let p = format!("{}/../../data/cars/{id}.json", env!("CARGO_MANIFEST_DIR"));
@@ -134,4 +134,17 @@ fn drift_runs_are_deterministic() {
     let a = drift_run(&c, &kb(0.6), DriftDriver::Sloppy, 40.0, 0.6, 3);
     let b = drift_run(&c, &kb(0.6), DriftDriver::Sloppy, 40.0, 0.6, 3);
     assert_eq!(a.hash, b.hash);
+}
+
+#[test]
+fn lift_off_transition_swaps_smoothly() {
+    // Row 107: left drift, lift + flick, right drift. At 60 % a smooth swap: no spin, no
+    // tank-slapper, the new drift within ~1 s of the lift and held after. (Before: the hold
+    // kept the old drift for ~1 s and the swap mostly never happened.)
+    for id in RWD {
+        let r = transition_run(&car(id), &kb(0.6), 40.0, 0.6);
+        assert!(!r.spun && r.wobbles == 0, "{id}: {r:?}");
+        assert!(r.transition_s.is_some_and(|t| t < 1.2), "{id}: {r:?}");
+        assert!(r.new_drift_s > 2.5 && r.peak_new_deg < 40.0, "{id}: {r:?}");
+    }
 }

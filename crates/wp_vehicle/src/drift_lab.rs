@@ -6,6 +6,7 @@
 //! |---|---|
 //! | [`kick_catch`] | straight at speed, a yaw-rate kick; the driver releases the keys, or holds the countersteer key after a reaction time: countersteer slew, onset-to-aligned time, caught or spun |
 //! | [`drift_run`] | a power-oversteer drift on a circle held by a scripted driver ([`DriftDriver`]): drift time inside the window, spun or not |
+//! | [`transition_run`] | a left drift, a lift-off swing into a right drift (S-bend, row 107): transition time, overshoot, wobbles, spun or not |
 //!
 //! Definitions (fixed here, independent of the assist's own tuning):
 //! - *slide onset*: the first tick the rear axle's kinematic slip exceeds
@@ -296,17 +297,9 @@ pub fn drift_run(
     drift_run_with(car, assists, driver, radius, lat_g, seed, |_, _, _| {})
 }
 
-/// [`drift_run`] calling `on_tick(rig, steer, throttle)` after every tick of the drift phase
-/// (traces).
-pub fn drift_run_with(
-    car: &LoadedCar,
-    assists: &AssistProfile,
-    driver: DriftDriver,
-    radius: f32,
-    lat_g: f32,
-    seed: u64,
-    mut on_tick: impl FnMut(&Rig, f32, f32),
-) -> DriftRun {
+/// A rig settled on a counter-clockwise circle of `radius` at `lat_g` (2 s of a 1:1
+/// pure-pursuit follower with analog steering).
+fn settle_on_circle(car: &LoadedCar, assists: &AssistProfile, radius: f32, lat_g: f32) -> Rig {
     let mut rig = Rig::new(car);
     let v = (lat_g * GRAVITY_MPS2 * radius).sqrt();
     rig.teleport([0.0; 3], 0.0, v, v / radius);
@@ -339,6 +332,21 @@ pub fn drift_run_with(
             &settle,
         );
     }
+    rig
+}
+
+/// [`drift_run`] calling `on_tick(rig, steer, throttle)` after every tick of the drift phase
+/// (traces).
+pub fn drift_run_with(
+    car: &LoadedCar,
+    assists: &AssistProfile,
+    driver: DriftDriver,
+    radius: f32,
+    lat_g: f32,
+    seed: u64,
+    mut on_tick: impl FnMut(&Rig, f32, f32),
+) -> DriftRun {
+    let mut rig = settle_on_circle(car, assists, radius, lat_g);
     if matches!(driver, DriftDriver::Flood | DriftDriver::FlickLift) {
         let s = rig.state();
         let fwd = rig.vehicle.chassis().rot * V3::Y;
@@ -355,7 +363,7 @@ pub fn drift_run_with(
     let mut max_slip = 0.0f32;
     let mut flip = 0.0f32;
     let mut spun = false;
-    let (mut sum, mut sum2) = (0.0f64, 0.0f64);
+    let (mut sum, mut sum2) = (0.0f32, 0.0f32);
     let mut thr_key = 1.0f32;
     let mut entered = false;
     let mut regain = false;
@@ -429,8 +437,8 @@ pub fn drift_run_with(
         }
         if !spun && (10.0..=50.0).contains(&a) {
             drift += 1;
-            sum += a as f64;
-            sum2 += (a * a) as f64;
+            sum += a;
+            sum2 += a * a;
             run += 1;
             longest = longest.max(run);
         } else {
@@ -438,11 +446,8 @@ pub fn drift_run_with(
         }
     }
     let (mean, sd) = if drift > 0 {
-        let m = sum / drift as f64;
-        (
-            m as f32,
-            (sum2 / drift as f64 - m * m).max(0.0).sqrt() as f32,
-        )
+        let m = sum / drift as f32;
+        (m, (sum2 / drift as f32 - m * m).max(0.0).sqrt())
     } else {
         (0.0, 0.0)
     };
@@ -453,6 +458,166 @@ pub fn drift_run_with(
         longest_s: longest as f32 * PHYSICS_DT,
         max_slip_deg: max_slip,
         flip_deg: flip,
+        spun,
+        hash: rig.state_hash(),
+    }
+}
+
+/// Result of [`transition_run`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TransitionRun {
+    /// Time from the lift until the slide is past 10° on the new side, s (`None`: it never
+    /// got there).
+    pub transition_s: Option<f32>,
+    /// Largest slide angle on the new side in the 1.5 s after the swap, degrees (overshoot).
+    pub peak_new_deg: f32,
+    /// Largest yaw rate toward the new side during the swap (lift + 1.5 s), rad/s.
+    pub peak_yaw_rps: f32,
+    /// Slide-direction reversals after the swap (past 5° each way): 0 = a clean swap, more
+    /// = a tank-slapper.
+    pub wobbles: u32,
+    /// Time drifting (10–50°) on the new side after the swap, s.
+    pub new_drift_s: f32,
+    /// Spun: past 90° of body slip, or travelling backwards.
+    pub spun: bool,
+    /// Rig state hash at the end.
+    pub hash: u64,
+}
+
+/// Lift-off transition (owner row 107) on an S-bend: a left-hand drift on a 40 m-style circle
+/// (`radius`, `lat_g`) held 2.5 s by the good driver (entry key into the turn, then the
+/// countersteer key + modulated throttle), then the flick: a lift with the keys released for
+/// 0.15 s, then still off the throttle the key toward the new (right-hand) turn until the slide
+/// has swung past 2° the other way (at most 1 s), then that key + throttle until 12°, then the
+/// new countersteer key + modulated throttle, for 4 s.
+pub fn transition_run(
+    car: &LoadedCar,
+    assists: &AssistProfile,
+    radius: f32,
+    lat_g: f32,
+) -> TransitionRun {
+    transition_run_with(car, assists, radius, lat_g, |_, _, _| {})
+}
+
+/// [`transition_run`] calling `on_tick(rig, steer, throttle)` after every tick (traces).
+pub fn transition_run_with(
+    car: &LoadedCar,
+    assists: &AssistProfile,
+    radius: f32,
+    lat_g: f32,
+    mut on_tick: impl FnMut(&Rig, f32, f32),
+) -> TransitionRun {
+    let mut rig = settle_on_circle(car, assists, radius, lat_g);
+    let lift_tick = TICKS_PER_S * 5 / 2;
+    // Phases: 0 left drift, 1 lift + released, 2 into the new turn, 3 new countersteer.
+    let mut phase = 0;
+    let mut phase_ticks = 0usize;
+    let (mut entered, mut regain, mut thr_key) = (false, false, 1.0f32);
+    let mut swap_tick: Option<usize> = None;
+    let mut peak_new = 0.0f32;
+    let mut peak_yaw = 0.0f32;
+    let mut wobbles = 0u32;
+    let mut last_side = 0.0f32;
+    let mut new_drift = 0usize;
+    let mut spun = false;
+    for tick in 0..(lift_tick + 4 * TICKS_PER_S) {
+        let s = slide_state(&rig);
+        // Left drift: slide angle = −body slip; the new (right-hand) drift: +body slip.
+        let left = (-s.body_slip).to_degrees();
+        let right = s.body_slip.to_degrees();
+        let angle = if phase == 0 { left } else { right };
+        if angle > 32.0 {
+            thr_key = 0.0;
+        } else if angle < 25.0 {
+            thr_key = 1.0;
+        }
+        if angle < 10.0 {
+            regain = true;
+        } else if angle > 15.0 {
+            regain = false;
+        }
+        phase_ticks += 1;
+        if phase == 0 && tick >= lift_tick {
+            phase = 1;
+            phase_ticks = 0;
+        } else if phase == 1 && (right > 2.0 || phase_ticks >= TICKS_PER_S) {
+            phase = 2;
+            phase_ticks = 0;
+        } else if phase == 2 && right > ENTRY_DEG {
+            phase = 3;
+            phase_ticks = 0;
+            regain = false;
+        }
+        // Keys: left = −1, right = +1. Left drift: into = −1, counter = +1; right drift:
+        // into = +1, counter = −1.
+        let (steer, throttle) = match phase {
+            0 => {
+                entered |= left > ENTRY_DEG;
+                if !entered {
+                    (-1.0, 1.0)
+                } else if regain {
+                    (-1.0, thr_key)
+                } else {
+                    (1.0, thr_key)
+                }
+            }
+            1 if phase_ticks < TICKS_PER_S * 15 / 100 => (0.0, 0.0),
+            1 => (1.0, 0.0),
+            2 => (1.0, 1.0),
+            _ => (if regain { 1.0 } else { -1.0 }, thr_key),
+        };
+        rig.step(
+            &VehicleInput {
+                steer,
+                throttle,
+                ..Default::default()
+            },
+            assists,
+        );
+        on_tick(&rig, steer, throttle);
+        let n = slide_state(&rig);
+        let deg = n.body_slip.to_degrees();
+        if n.body_slip.abs().to_degrees() > 90.0 || n.v_fwd < 0.0 {
+            spun = true;
+        }
+        if tick >= lift_tick {
+            if swap_tick.is_none() && deg > 10.0 {
+                swap_tick = Some(tick);
+            }
+            let within = swap_tick.is_none_or(|t0| tick < t0 + TICKS_PER_S * 3 / 2);
+            if within {
+                // Yaw toward the new (right-hand) side is negative.
+                peak_yaw = peak_yaw.max(-n.yaw_rate);
+            }
+            if let Some(t0) = swap_tick {
+                if tick < t0 + TICKS_PER_S * 3 / 2 {
+                    peak_new = peak_new.max(deg);
+                }
+                let side = if deg > 5.0 {
+                    1.0
+                } else if deg < -5.0 {
+                    -1.0
+                } else {
+                    0.0
+                };
+                if side != 0.0 {
+                    if last_side != 0.0 && side != last_side {
+                        wobbles += 1;
+                    }
+                    last_side = side;
+                }
+                if !spun && (10.0..=50.0).contains(&deg) {
+                    new_drift += 1;
+                }
+            }
+        }
+    }
+    TransitionRun {
+        transition_s: swap_tick.map(|t| (t - lift_tick) as f32 * PHYSICS_DT),
+        peak_new_deg: peak_new,
+        peak_yaw_rps: peak_yaw,
+        wobbles,
+        new_drift_s: new_drift as f32 * PHYSICS_DT,
         spun,
         hash: rig.state_hash(),
     }
