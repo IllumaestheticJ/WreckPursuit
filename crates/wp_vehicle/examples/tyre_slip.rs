@@ -1232,6 +1232,77 @@ fn release_table() {
     car_lab::set_override(None);
 }
 
+/// `bleed [car]`: where the held drift's speed goes. Counter key at 6° + full throttle on the
+/// lab circle (active `TYRE` / `PLAIN`); over 1.5–6 s (or until a spin) the mean along-path
+/// force (+ = pushes the car along its travel) of the front tyres, the rear drive force
+/// (wheel-x) and the rear side force (wheel-y), kN; plus mean speed change, slide, rear κ,
+/// rear slip angle and engine rpm.
+fn bleed(id: &str) {
+    let c = car(id);
+    let a = reference_assists();
+    if let Ok(j) = std::env::var("TYRE") {
+        car_lab::set_override(Some(serde_json::from_str(&j).expect("TYRE json")));
+    }
+    let mut tick = 0usize;
+    let (mut n, mut ff, mut rx, mut ry) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+    let (mut sl, mut kap, mut al, mut rpm) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+    let (mut v0, mut v1, mut done) = (None, 0.0f32, false);
+    plain_drift_run_with(&c, &a, COUNTER6, 40.0, 0.6, |rig, _, _| {
+        tick += 1;
+        if done || tick < 360 {
+            return;
+        }
+        let s = slide_state(rig);
+        if s.body_slip.abs().to_degrees() > 80.0 || s.v_fwd < 1.0 {
+            done = true;
+            return;
+        }
+        let (sb, cb) = wp_vehicle::math::sin_cos(s.body_slip);
+        let st = rig.state();
+        let along = |i: usize| {
+            let w = &st.wheel_states[i];
+            let (sd, cd) = wp_vehicle::math::sin_cos(w.steer_rad);
+            let x = (w.fx_n * cd - w.fy_n * sd, w.fx_n * sd + w.fy_n * cd);
+            let xr = (w.fx_n * cd, w.fx_n * sd);
+            let yr = (-w.fy_n * sd, w.fy_n * cd);
+            (
+                x.0 * cb + x.1 * sb,
+                xr.0 * cb + xr.1 * sb,
+                yr.0 * cb + yr.1 * sb,
+            )
+        };
+        ff += along(0).0 + along(1).0;
+        rx += along(2).1 + along(3).1;
+        ry += along(2).2 + along(3).2;
+        sl += (-s.body_slip).to_degrees();
+        kap += 0.5 * (st.wheel_states[2].slip_ratio + st.wheel_states[3].slip_ratio);
+        al += (0.5 * (st.wheel_states[2].slip_angle + st.wheel_states[3].slip_angle))
+            .to_degrees()
+            .abs();
+        rpm += st.engine_rpm;
+        let v = s.v_fwd.hypot(s.v_fwd * wp_vehicle::math::tan(s.body_slip)) * 3.6;
+        v0.get_or_insert(v);
+        v1 = v;
+        n += 1.0;
+    });
+    car_lab::set_override(None);
+    let n = n.max(1.0);
+    println!(
+        "| {id} | {:.1} s | {:.0} → {:.0} km/h | {:+.2} | {:+.2} | {:+.2} | {:+.2} | {:.0}° | {:.2} | {:.0}° | {:.0} |",
+        n / 240.0,
+        v0.unwrap_or(0.0),
+        v1,
+        ff / n / 1000.0,
+        rx / n / 1000.0,
+        ry / n / 1000.0,
+        (ff + rx + ry) / n / 1000.0,
+        sl / n,
+        kap / n,
+        al / n,
+        rpm / n
+    );
+}
+
 fn trace(id: &str) {
     let c = car(id);
     let a = reference_assists();
@@ -1284,7 +1355,7 @@ fn main() {
     let what = if args.first().is_some_and(|a| {
         [
             "table", "grid", "trace", "search", "refine", "phase", "matrix", "launch", "roster",
-            "vrsearch", "release", "joint",
+            "vrsearch", "release", "joint", "bleed",
         ]
         .contains(&a.as_str())
     }) {
@@ -1310,6 +1381,7 @@ fn main() {
         "launch" => launch_table(),
         "roster" => roster(),
         "release" => release_table(),
+        "bleed" => bleed(&args[0]),
         "joint" => joint(args[0].parse().unwrap_or(300)),
         "vrsearch" => vrsearch(args[0].parse().unwrap_or(200)),
         _ => table(&args),

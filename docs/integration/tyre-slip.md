@@ -36,6 +36,31 @@ power-on straightening or the handbrake pivot.
    counter-lock angle. Rack compliance does not widen it; robustness target (27 cases) not
    met: 2 / 27 held (data 0 / 27).
 
+## Speed bleed in the hold (lead: "57 → 37 km/h; drive floor or rear drag?")
+
+`tyre_slip -- bleed parity_rwd_d` (counter key at 6° + full throttle, lab circle; means over
+1.5–6 s of the along-path force of each group, + = pushes the car along its travel; speed =
+total speed, not forward speed — the earlier "57 → 37" was forward speed at a growing slide):
+
+| tyres | steering | speed (total) | front | rear drive (wheel-x) | rear side (wheel-y) | total tyres | slide | rear κ | rear α | rpm |
+|---|---|---|---|---|---|---|---|---|---|---|
+| spin model | plain | 71 → 72 km/h | −1.12 kN | +6.54 | **−5.44** | −0.02 | 43° | 1.31 | 45° | 5814 |
+| spin model | VR tuned | 72 → 61 | −1.57 | +6.14 | **−5.91** | −1.33 | 49° | 1.94 | 51° | 5534 |
+| spin model, drive floor 0.8 | plain / VR | 65 → 55 / 66 → 58 | −2.4 / −1.5 | +5.5 / +5.4 | −4.7 / −4.9 | −1.6 / −1.0 | 26 / 47° | 2.3 / 3.1 | 44 / 49° | ~6200 |
+| spin model, drive floor 0 | plain / VR | 60 → 30 / 61 → 22 (spins) | −3.0 | +3.4 | −4.8 | −4.4 | 28° | 4–6 | 48–50° | 6367 (limiter) |
+| spin + drift lock | plain | 74 → 69 | −2.57 | +6.91 | −5.14 | −0.80 | 41° | 1.31 | 43° | 5689 |
+
+**It is rear drag, not the drive floor.** The floor is what keeps the drift going: without it the
+rears run to the limiter (κ 4–6), the drive force halves and the car slows to a stop. The loss is
+the rear **side force** pointing backwards along the path at a 45–51° rear slip angle
+(Fy·sin α ≈ −5…−6 kN), plus the fronts' drag (−1…−3 kN). The plain-steering hold is already
+speed-neutral (71 → 72 km/h total); VR's larger slide (49° vs 43°) makes it bleed. To gain speed
+like the reference (43 → 75 km/h in 2nd), the hold has to sit at a **smaller rear slip angle**
+(sin α drops from 0.71 at 45° to 0.5 at 30°) or the rear needs more drive force while spinning
+(it is at ~0.96 of the longitudinal peak already). Both point the same way as the
+release / hold trade-off above: the reference's steady state is a smaller-angle drift than
+ours (30–45° body slip with fronts near zero slip).
+
 ## Keys released mid-drift (lead: reference = a slow spin over ~1–2 s)
 
 `tyre_slip -- release` (counter key at 6° + full throttle on the lab circle until 1.5 / 2.5 s,
