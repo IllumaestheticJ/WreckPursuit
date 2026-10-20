@@ -428,3 +428,26 @@ Base: `origin/lead/round12` (round 12's merges; `main` catches up when its gate 
    via `docs/integration/panels.md` if a new mesh is needed; a placeholder generated mesh is fine).
 3. Validation band in `data/cars/VALIDATION.md` (0–100 km/h ~14–16 s, top speed ~150 km/h),
    tests, price consistent with the economy floor. Add it to the testbed car list.
+
+## Round 12b (A, 2026-10-20) — ride data changes for "too bouncy / launched too easily"
+Made by A in coordination (lead round 12b feedback to 02, playtest row 54); H owns the files
+and is welcome to retune within the targets. Measured with
+`cargo run --release -p wp_vehicle --example ride all` (see `docs/integration/vehicle.md` →
+"Round 12b response").
+1. **Dampers, all 19 cars:** `damper_bump_ns_per_m` × 1.2, `damper_rebound_ns_per_m` × 1.6
+   (rounded to 10 N·s/m). Damping ratio was 0.17–0.31 bump / 0.26–0.47 rebound; now
+   0.21–0.38 / 0.42–0.75 (rebound ≈ 2× bump, real-car practice). Each car keeps its
+   character relative to the others (the beater and ironside_440 stay the softest). The data
+   values are now the dampers' **low-speed** rates: the model blows off above 0.5 m/s.
+2. **Preload** where a car sat on its bump stops at rest (static bump travel < 35 % of the
+   travel → 45 %): drayman_cargo F 0.03 → 0.059; furrow_24 F 0.02 → 0.06; ironside_440 F 0.03
+   → 0.11, R 0.03 → 0.076; junkyard_beater F 0.01 → 0.071, R 0.01 → 0.039; tansy_13 F 0.01 →
+   0.061, R 0.01 → 0.031. Spring rates and ride height are unchanged (the model places the
+   static point by the hub position); only where the car rests within its travel moves. Bump
+   travel left at rest was 6 mm (beater front), 10 mm (ironside front), 17 mm (tansy front).
+3. No other fields changed. Ride frequencies were already car-like (1.06–2.08 Hz) and the
+   inertia tensors are fine (75–97 % of a solid box of the body size).
+Please mirror these in the `*.spec.md` sheets and `VALIDATION.md` (handling numbers moved
+slightly: understeer gradient −0.37 to +0.04 deg/g, held-key g −0.01 to +0.03; table in
+`vehicle.md`). Rule of thumb for new cars: rebound ≈ 2× bump, bump ≈ 0.35 of critical, ≥ 45 %
+of the travel left to the bump stop at rest; `tests/ride.rs` checks all three for the roster.
