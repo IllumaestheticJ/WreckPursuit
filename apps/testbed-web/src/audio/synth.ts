@@ -232,12 +232,16 @@ function engine(ctx: BaseAudioContext, s: Params, p: VoiceParams): SynthVoice {
   });
 }
 
-/** Filtered noise loop: rolling surfaces, scrub, scrapes. */
+/** Filtered noise loop: rolling surfaces, scrub, scrapes. `track` > 0 makes the low-pass
+ * follow the voice pitch (speed / root for rolling surfaces): `lowpass_hz × pitch^track`, so a
+ * surface darkens as the car slows instead of only getting quieter. (Playback rate alone does
+ * nothing audible to white noise.) */
 function noiseLoop(ctx: BaseAudioContext, s: Params, p: VoiceParams): SynthVoice {
   const out = gain(ctx, 1);
   const src = noise(ctx);
   const hp = filter(ctx, "highpass", s.highpass_hz ?? 60);
-  const lp = filter(ctx, "lowpass", s.lowpass_hz ?? 2000);
+  const lpBase = s.lowpass_hz ?? 2000;
+  const lp = filter(ctx, "lowpass", lpBase);
   src.connect(hp).connect(lp);
   let tail: AudioNode = lp;
   if (s.bandpass_hz) {
@@ -272,6 +276,7 @@ function noiseLoop(ctx: BaseAudioContext, s: Params, p: VoiceParams): SynthVoice
     update(p2, t) {
       const rate = Math.min(3, Math.max(0.3, p2.pitch));
       smooth(src.playbackRate, rate, t);
+      if (s.track) smooth(lp.frequency, clampF(lpBase * Math.pow(rate, s.track)), t, 0.05);
       if (ripple && s.ripple_hz) smooth(ripple.frequency, s.ripple_hz * rate, t);
     },
     stop: (t) => stopAll(sources, t),

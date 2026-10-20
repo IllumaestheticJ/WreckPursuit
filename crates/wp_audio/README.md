@@ -116,11 +116,20 @@ functions. Same frames in → byte-identical commands out (tested on real physic
   when `Component::Engine` health is 0; radiator damage adds a hiss.
 - **Tires** (`tires.rs`): combined slip `sqrt((κ/κ_peak)² + (α/α_peak)²)`; squeal above
   `squeal_threshold`, scaled by `sqrt(Fz / static Fz)` (loudest wheel + 25 % of the others),
-  quieter on wet asphalt; gravel/dirt/grass scrub instead. Rolling noise per dominant
-  `SurfaceType` (one loop per surface so changes crossfade), plus `FfbOutput::road_rumble`.
+  quieter on wet asphalt; loose surfaces scrub instead: gravel/dirt on `tire/scrub_loose`
+  (stone crackle, plus a little rattle while rolling straight), grass on its own soft
+  `tire/scrub_grass` loop (slot `SCRUB_GRASS`) only while a tire actually slides or spins.
+  Scrub levels follow the target with a 30 ms attack / 150 ms release (`SCRUB_ATTACK_S` /
+  `SCRUB_RELEASE_S`, `engine::smooth_k`), so slip flickering around the limit holds one loop
+  instead of stopping and restarting it. Rolling noise per dominant `SurfaceType` (one loop per
+  surface so changes crossfade; a tie keeps the loop already playing, so a car straddling a
+  road edge does not swap loops as a wheel's contact flickers), plus `FfbOutput::road_rumble`.
+  `surface/grass` is a low rustle/rumble (lp 650 Hz, hp 45 Hz, rumble 1.5) whose low-pass
+  tracks speed (`track`). Grass used to share the gravel scrub (crackle, 0.4-3 kHz) at full
+  gain whenever a tire slid, ~9 dB over the rolling loop.
   Suspension thump on compression rate > `thump_rate_mps`; landing after `land_airtime_s`.
   **Wheelspin** (playtest #27) is its own loop, `tire/spin` (paved) / `tire/spin_loose`
-  (gravel roost): per wheel the driving slip ratio above `spin_ratio_onset` times the slip speed
+  (gravel / dirt roost; spin on grass plays the soft `tire/scrub_grass` instead): per wheel the driving slip ratio above `spin_ratio_onset` times the slip speed
   `ω·r − vx` (inverted exactly from `wp_vehicle`'s slip ratio with the car's wheel radii) above
   `spin_speed_onset_mps`; intensity and pitch rise with slip speed, weighted by
   `sqrt(Fz / static)` and surface (`wet_spin_scale` on wet asphalt); loudest wheel + 35 % of the
@@ -252,7 +261,7 @@ one-shots peak −1 dBFS; balance between cues with `gain`, overall mix lives in
 | kind | cues |
 |---|---|
 | Engine | the layers above, `engine/limiter`, `turbo/whistle`, `turbo/blowoff`, `supercharger/whine`, `exhaust/pop` |
-| World | `tire/squeal`, `tire/spin`, `tire/spin_loose`, `tire/burst`, `body/rattle`, `tire/scrub_loose`, `surface/{asphalt,wet_asphalt,concrete,gravel,grass,dirt,curb,metal}`, `suspension/{thump,land}`, `impact/{thud,plastic_crack,panel_dent,structural_crunch,glass_shatter,cast_clank}`, `scrape/{metal,plastic}`, `debris/{part_tear,wheel_off}`, `mech/{engine_fail,steam_hiss}`, `horn/{standard,truck}`; optional `impact/{body,crunch}`, `horn/police` |
+| World | `tire/squeal`, `tire/spin`, `tire/spin_loose`, `tire/burst`, `body/rattle`, `tire/scrub_loose`, `tire/scrub_grass`, `surface/{asphalt,wet_asphalt,concrete,gravel,grass,dirt,curb,metal}`, `suspension/{thump,land}`, `impact/{thud,plastic_crack,panel_dent,structural_crunch,glass_shatter,cast_clank}`, `scrape/{metal,plastic}`, `debris/{part_tear,wheel_off}`, `mech/{engine_fail,steam_hiss}`, `horn/{standard,truck}`; optional `impact/{body,crunch}`, `horn/police` |
 | Siren | `siren/{wail,yelp,phaser,hilo}` — seamless loops of one cadence cycle (or several), started in phase with the director's `phase`; optional one-shots `siren/whoop`, `siren/airhorn` (siren v2) |
 | Radio | `radio/squelch_on`, `radio/squelch_off`, `radio/static` |
 
@@ -262,7 +271,7 @@ one-shots peak −1 dBFS; balance between cues with `gain`, overall mix lives in
 `root_rpm`; the backend plays all `engine`-synth layers and the limiter of one car as **one**
 instrument — gain `sqrt(Σ gain²)`, timbre blended by energy — because separate synths at the
 same firing frequency interfere; sample layers stay separate voices), `noise` (`lowpass_hz`, `highpass_hz`, `bandpass_hz`, `rumble`, `crackle`,
-`ripple_hz`), `spin` (`freq_hz`, `chirp_hz`, `hiss`; `pitch` = slip speed, `load` =
+`ripple_hz`, `track`: low-pass follows `lowpass_hz × pitch^track`), `spin` (`freq_hz`, `chirp_hz`, `hiss`; `pitch` = slip speed, `load` =
 intensity), `whine`/`tone` (`freq_hz`, `noise`), `squeal` (`freq_hz`, `wobble_hz`), `horn`
 (`f1`, `f2`), `hiss`, `siren` (`wave`; cadence comes from the director; `driver: 1` = the siren
 v2 horn-speaker synth in `siren.ts`, `kind` 0 loop / 1 whoop / 2 air horn, `bright`), `impact` (`freq_hz`,
