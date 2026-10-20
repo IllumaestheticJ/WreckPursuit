@@ -546,6 +546,35 @@ known `city_siren_traffic_no_siren` fails on the lead tip too); the only golden 
 `golden_city_chase` (+ replay, `[bless]`); `damage_arcade_*` and `city_siren_traffic_no_siren` fail
 on the lead tip with the same hashes.
 
+*Lead bug (opponent-pace): responders standing across the Hollins hairpins.* A responding
+unit stopped angled across the hill road (pulled over for the oncoming racer mid-bend, or
+turning round just after the leader passed), nose to nose with the next racer, each waiting for
+the other, for 18–40 s. Fix:
+- Look before turning: a unit not chasing anyone doesn't start a U-turn or reverse swing while
+  another car would reach it within 4 s. Pursuers still turn at once, as `wp_sim` `police_passby`
+  requires.
+- A responder yielding to the oncoming racer stops only once lined up with its lane (within 15°);
+  until then it creeps on at 2 m/s.
+- Give way: standing still for 2 s with a slow (< 3 m/s) racer it isn't after in its way (or with
+  one within 15 m while blocked by anything), the unit backs straight out 6 m. Then it waits up to
+  8 s while that racer is still in front of it within 25 m (`PoliceStats::give_ways`). Each one
+  counts toward the turn-round cap (4 per spot). Backing out with steering swung units across the
+  road; driving on straight after backing out put them back nose to nose.
+
+| Hollins hill sprint | seed 1 | 2 | 3 | 4 | 5 | default |
+|---|---|---|---|---|---|---|
+| longest stand next to a racer (≤ 20 m), lead tip 174a0dfb | — | 18 s | 21 s | 0 s | 3 s | — |
+| … after | — | 3 s | 5 s | 4 s | 4 s | — |
+| P2 finish, lead tip | 117 s | DNF | 118 s | 82 s | 89 s | 83 s |
+| … after | 85 s | 89 s | 81 s | 77 s | 93 s | 92 s |
+
+P3 and P4 are DNF in every run, with or without police: on the lead tip, racers 1 and 3 never leave
+the grid even at police presence 0 (for N / opponent-pace). `grid_highway_sprint` now passes
+(winner 43.8 s, 4 of 4). Scenarios: 99 of 101 pass; `city_siren_traffic_yields_arcade/_sim` fail
+with the same hash on the lead tip. Goldens moved and re-blessed: golden_city_chase (+replay),
+opponent_circuit_8x5, opponent_flee_police, opponent_open_roads_traffic,
+police_tunnel_escape_founders_cut_control, world_traffic_soak_observer.
+
 *Lead requests received during the gate, not started (round 12c addenda).* Rows 75 (upside-down
 spawn / safe spawns), 78 (un-wrecked units reset themselves), 80 (a witnessed violation starts the
 pursuit; blatant at +20 km/h within 90 m), 84 (search reinforcements and sweep), 86 (no active unit
