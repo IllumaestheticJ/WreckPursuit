@@ -886,6 +886,26 @@ goldens unchanged.
   Chromium runs the sim at ≈ 60 ticks/s), no arrest within the 240 s wait, and the siren keeps
   scheduling until the audio error. Natively (`Session`, Port Vesper chase) the same setup
   arrests in 9.6 s on this branch. Not fixed here (outside this change).
+**Follow-up after `lead/round12` (2026-10-20).** The lead's gate failed
+`vesper_v2_cars_drive_up_the_kerb_and_along_the_sidewalk` (3 drives, all 40 km/h 15°, at
+(1246, −945) Port, (−1240, 301), (−923, 1059)). Cause, checked one candidate at a time:
+- *Collider port* (`city_ground_colliders` / `city_sidewalk_colliders`): fine — same
+  colliders, groups (`SIDEWALK_GROUP`, terrain group) and insertion order as before (terrain,
+  roads, sidewalks + kerbs, buildings, rails; tunnel boxes appended), chassis-group switching
+  unchanged. Tires never sank: lowest tire −0.025 m (limit −0.03).
+- *Parked props*: not involved (the test runs with `parked_cars: false`; none within 8 m).
+- *Tunnels / terrain cuts*: terrain is below the sidewalk at all three spots; buildings
+  near them were not moved (round 12 only drops buildings in cover corridors).
+- *A's steering retune* (slip-target lock + `STEER_RAMP_S`): **the cause.** The test's own
+  lane-keeping controller turns the car parallel more slowly now: it peaked 0.3–0.4 m further
+  out (lat 4.07 / 4.29 / 4.31 m vs 3.79 / 4.18 / 4.41 on the old branch) while still angled
+  in, and its nose hit the building wall ~1 m past the sidewalk's outer edge (11 → 1 m/s in
+  0.1 s; the end check then saw a car crushed against a wall, 16 cm below the sidewalk top).
+Fix (test only, `crates/wp_sim/tests/sidewalk.rs`): heading damping of the test controller
+1.2 → 2.5 (peaks back to 3.8 / 4.35 / 4.6 m, no stops); `Drive` also records
+`min_speed_mps` so a wall hit is visible in the failure message. No physics or collider code
+changed. Result: Vesper 68 drives, lowest tire −0.023 m; grid 28 drives, −0.005 m; all end on
+the sidewalk.
 ## Lead helper: LOD pop-in (branch `lead/fix-lod-popin`, 2026-10-19, playtest row 25)
 Owner report: "some cars load LOD too slow": cars pop in late or look wrong for a while. Two
 causes were D's tuning (the rest was browser-side, see `docs/integration/testbed.md`):
