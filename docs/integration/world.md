@@ -1049,3 +1049,13 @@ roads a car leaves the unit's lane only where the next lane has a safe gap; no c
 junction at a red.
 
 **Contract change requests:** none.
+
+*Gate (ws/world @ round 12b, on lead/round12 900261e).* fmt, `clippy --workspace --all-targets
+-D warnings`, wasm32 build of `wp_wasm`: pass. `simcli run apps/simcli/scenarios`: 75 pass, 2 fail
+— the same 2 as on lead/round12 (`police_tunnel_escape_founders_cut`,
+`world_traffic_soak_observer`). `cargo test --workspace --no-fail-fast`: all pass except 4 tests
+that fail identically on a clean lead/round12 checkout (checked one by one): simcli
+`goldens_match` (stale goldens on the base), `wp_race` `grid_highway_sprint`, `wp_sim`
+`vesper_v2_cars_drive_up_the_kerb_and_along_the_sidewalk`, `wp_wasm`
+`race_tests::short_sprint_with_ai_runs_to_results_and_pays_through_the_economy`. The new siren
+scenarios pass `simcli determinism`.
