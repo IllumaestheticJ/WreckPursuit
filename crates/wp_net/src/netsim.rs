@@ -141,6 +141,12 @@ pub trait NetSim {
     fn car_spec(&self, _car_id: &str) -> Option<wp_economy::CarSpec> {
         None
     }
+
+    /// Whether `p` is inside a tunnel / covered road (`wp_world::World::covered_at`): the
+    /// captain map stops updating a racer there. Default: never.
+    fn covered_at(&self, _p: [f32; 3]) -> bool {
+        false
+    }
 }
 
 /// [`NetSim`] over the real `wp_sim::Sim`.
@@ -570,6 +576,10 @@ impl NetSim for WpSim {
         self.cars
             .get(car_id)
             .map(|c| wp_economy::CarSpec::from(&c.def))
+    }
+
+    fn covered_at(&self, p: [f32; 3]) -> bool {
+        self.sim.world().covered_at(p).is_some()
     }
 }
 

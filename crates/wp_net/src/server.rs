@@ -1353,6 +1353,8 @@ impl<S: NetSim> ServerInstance<S> {
                     damage: DamageSnapshot::pristine(),
                     location: CarLocation::Garage,
                     insurance: None,
+                    // A stand-in car for the capture settlement: valued like an old save.
+                    purchase_price: None,
                 });
                 uid
             }
@@ -2027,6 +2029,16 @@ impl<S: NetSim> ServerInstance<S> {
         for (e, s) in states {
             let kind = self.kind_of(*e);
             if kind == EntityKind::Traffic {
+                continue;
+            }
+            // A racer in a tunnel / covered road is out of sight of every police eye, the map
+            // included (backlog B04): keep showing where it went in (its last map entry), or
+            // nothing if the captain never saw it.
+            if kind.is_racer() && self.sim.covered_at(s.pos) {
+                let v = &self.players.get(&pid).expect("p").view;
+                if let Some(last) = v.captain_known.get(&e.0) {
+                    units.insert(e.0, *last);
+                }
                 continue;
             }
             // Heading for display only (not simulation), so std atan2 is fine here.
