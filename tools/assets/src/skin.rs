@@ -519,7 +519,7 @@ pub fn deform_detail(
     });
     let mut out = Vec::with_capacity(part.vertex_count());
     let mut detail = vec![[0.0f32; 2]; part.vertex_count()];
-    for v in 0..part.vertex_count() {
+    for (v, dv) in detail.iter_mut().enumerate() {
         let r = part.vertex(v);
         let mut p = r;
         if part.skin_nodes.len() == part.vertex_count() * 4 {
@@ -538,10 +538,10 @@ pub fn deform_detail(
             let lead = f.weights[v * 3 + 2] as f32 / 255.0;
             let rear = if free { FOLD_REAR_LIFT * lift } else { 0.0 };
             let rise = c.height * (crease + rear) + c.pop * lead * lead;
-            for k in 0..3 {
-                p[k] += f.dir[k] * rise - c.u[k] * c.extra * lead;
+            for (k, pk) in p.iter_mut().enumerate() {
+                *pk += f.dir[k] * rise - c.u[k] * c.extra * lead;
             }
-            detail[v] = [rise, c.extra * lead];
+            *dv = [rise, c.extra * lead];
         }
         out.push(p);
     }

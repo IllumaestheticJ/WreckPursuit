@@ -2,7 +2,8 @@
 //   node tools/assets/panels_shots.mjs [outDir=docs/media/panels]
 // Needs the testbed's node_modules and wasm pkg (`just wasm`). Starts Vite itself.
 // Checks: panel meshes load for every car, the side-swipe scenario swings a door open on its
-// hinge, the frontal hit leaves the bumper hanging; saves screenshots of each.
+// hinge, the frontal hit leaves the bumper hanging, the 56 km/h barrier and 50 km/h car hits
+// crumple the hood and fenders; saves screenshots of each.
 import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -103,6 +104,22 @@ check(!!hood.hood && hood.hood.disp >= 0.1 && hood.hood.fold >= 0.08, `frontal 5
 const heads = hood.lights.filter((l) => l.name.startsWith("headlight"));
 check(heads.length === 2 && heads.every((l) => l.broken), `frontal 56 km/h: both headlights broken (${JSON.stringify(hood.lights)})`);
 await page.screenshot({ path: join(out, "frontal_56_hood_buckled.png") });
+await page.keyboard.press("KeyP");
+
+// Lead feedback round 12b: a 50 km/h head-on into a parked car in Arcade. The bumper crushes
+// and lets go while the frame barely moves; the hood still buckles (two ridges, ≥ 12 cm), its
+// nose comes back with the crushed bumper and both front fenders buckle.
+st = await scenarioAt("panels/frontal_50_car_arcade.ron", 2.2, "orbit", [-5.6, 2.2, 5.0]);
+const front = await page.evaluate(() => {
+  const v = [...window.__wp.app.views.values()][0];
+  const m = (n) => v.panels.partMotion?.(n) ?? null;
+  return { hood: m("hood"), fl: m("fender_fl"), fr: m("fender_fr") };
+});
+check(
+  !!front.hood && front.hood.fold >= 0.12 && front.hood.pull >= 0.05 && front.fl?.fold >= 0.04 && front.fr?.fold >= 0.04,
+  `frontal 50 km/h into a car: hood buckles and follows the crushed nose, fenders buckle (${JSON.stringify(front)})`,
+);
+await page.screenshot({ path: join(out, "frontal_50_car_hood_crumpled.png") });
 await page.keyboard.press("KeyP");
 
 // Brake lights: the taillight lenses use the shared tail material, glow red while braking, and

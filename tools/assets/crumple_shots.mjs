@@ -1,12 +1,14 @@
 // Hood / front crumple shots for workstream R (lead feedback round 12b), headless Chromium.
 //   node tools/assets/crumple_shots.mjs [prefix=after] [outDir=docs/media/panels]
+// writes crumple_<prefix>_<scenario>_<8|30>m.png. The "before" set was shot from a worktree
+// of the commit before round 12b (old renderer + format-2 meshes) with prefix "before".
 // Runs the 50 km/h Arcade frontals (barrier, parked car) and a 70 km/h barrier hit, pauses
 // after the hit and shoots each from the front-left, high (over the barrier, onto the hood) at
 // 8 m and 30 m, cropped to the car. Prints the
 // hood / fender / bumper motion the renderer reports (`PanelBody.partMotion`) as JSON.
 // Needs the testbed's node_modules and wasm pkg (`just wasm`). Starts Vite itself.
 import { spawn } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -70,11 +72,10 @@ for (const [name, file, tS, speed] of [
     await page.evaluate((o) => window.__wp.setCamera("orbit", o), viewAt(d));
     await sleep(600);
     // Crop to the middle of the frame (the car), away from the HUD panels.
-    await page.screenshot({ path: join(out, `${prefix}_${name}_${d}m.png`), clip: { x: 340, y: 150, width: 600, height: 420 } });
+    await page.screenshot({ path: join(out, `crumple_${prefix}_${name}_${d}m.png`), clip: { x: 340, y: 150, width: 600, height: 420 } });
   }
   await page.keyboard.press("KeyP");
 }
-writeFileSync(join(out, `${prefix}_crumple.json`), JSON.stringify(results, null, 1) + "\n");
 console.log(JSON.stringify(results, (k, v) => (k === "states" ? undefined : typeof v === "number" ? Math.round(v * 1000) / 1000 : v)));
 if (errors.length) console.log(`page errors: ${errors.slice(0, 3).join(" | ")}`);
 await browser.close();
