@@ -978,9 +978,11 @@ Base: `origin/lead/round12` @ 900261e merged into `ws/world`. New module `wp_wor
   out of the unit's lane where the next lane has a safe gap (MOBIL safety unchanged).
   A unit standing still behind for 15 s is given up on (not yielded to again until it moves).
 - *Oncoming* (or a unit stopped facing the car < 30 m ahead): to the kerb, slow to 4 m/s.
-- *Stopped unit* within 40 m otherwise: slow to 5 m/s past it.
-- *Junction*: a driver within 60 m of its stop line does not enter a junction a unit heads for
-  (unit within 70–120 m by speed, or within 20 m), and gives up a permit it can still stop for;
+- *Stopped unit* within 30 m otherwise: slow to 8 m/s past it (5 m/s within 40 m made a slow
+  stream past a bust scene that kept an AI racer waiting for a gap for 130 s:
+  `wp_opponent` `live_police_chase_ends_in_escape_or_capture_without_stuck_cars`).
+- *Junction*: a driver within 60 m of its stop line does not enter a junction a moving unit heads
+  for (unit within 70–120 m by speed, or within 20 m; a unit parked at a scene does not close it), and gives up a permit it can still stop for;
   cars already in the box keep going. Nobody creeps into a junction to make room (never block
   the box wins over "creep at a red"; the unit passes the queue on the centre line).
 - Same code in both damage modes (no `DamageMode` branch anywhere).
@@ -1026,7 +1028,7 @@ without sirens, same run). Budget 2 ms.
 **Goldens.** Ran every scenario on `origin/lead/round12` (900261e) and on this branch: hashes
 differ only for `city_blocked_parked_player_grid` (police on), `golden_city_chase` (+ replay),
 `weather_fog_pursuit`, `weather_fog_pursuit_clear` — all have siren units. Only those + the 3 new
-scenarios re-blessed (`[bless]` c7479bd). Every other hash is bit-identical to lead/round12. The
+scenarios re-blessed (`[bless]` commits). Every other hash is bit-identical to lead/round12. The
 same 2 scenarios fail on both trees (not mine): `police_tunnel_escape_founders_cut` (no pursuit
 ended) and `world_traffic_soak_observer` (`traffic_agents_min` 310 < 350). Many other goldens are
 stale on lead/round12 itself (same list on both trees) — they need the lead's post-merge bless.
