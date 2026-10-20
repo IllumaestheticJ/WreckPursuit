@@ -338,7 +338,7 @@ scaled down so the active area never exceeds `max_agents` (400). `f_distance =
 max(0.2, 1 / (1 + (d/600 m)²))`; `f_time` comes from the data table
 `data/city/traffic_time.json` (`density::TimeCurve`, embedded at build time; owner row 76):
 one hourly curve relative to the daytime peak (07–09 and 16–19 = 100 %, midday 75 %, 19–22
-≈ 60 %, 23:00 35 %, 01–05 15–20 %) × an hourly multiplier per district (Core nightlife until
+≈ 50–60 %, 23:00 ≈ 33 %, 01–05 15–20 %) × an hourly multiplier per district (Core nightlife until
 ~02:00, then the same trough, noon/03:00 ≈ 6×; Industrial/Suburb ×0.6 and Port ×0.75 at night,
 Residential ×0.85; every district equal by day). Kinematic (LOD) and physical agents share these
 targets. The active area is

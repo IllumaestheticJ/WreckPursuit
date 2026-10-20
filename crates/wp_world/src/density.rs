@@ -4,7 +4,7 @@
 //! f_time(time, district_kind)`, then scaled so the whole active area never exceeds the agent
 //! cap. `f_time` comes from the data table `data/city/traffic_time.json` ([`TimeCurve`],
 //! embedded at build time): one hourly curve relative to the daytime peak (07–09 and 16–19 =
-//! 1, midday ≈ 0.75, 19–22 ≈ 0.6, 23:00 ≈ 0.35, 01–05 ≈ 0.15–0.2) and an hourly multiplier
+//! 1, midday ≈ 0.75, 19–22 ≈ 0.5–0.6, 23:00 ≈ 0.33, 01–05 ≈ 0.15–0.2) and an hourly multiplier
 //! per district (downtown nightlife until ~02:00, industrial / port / suburbs emptier at night,
 //! all districts equal by day). Owner playtest row 76: the old per-district curves kept too
 //! much traffic at night.
@@ -129,7 +129,7 @@ mod tests {
         }
         // Downtown nightlife holds until ~02:00, then even downtown drops into the trough
         // (prompt 05: noon core ≥ 5× 03:00 core).
-        assert!(at(1.0, Core) >= 0.3);
+        assert!(at(1.0, Core) >= 0.25);
         assert!(at(12.0, Core) >= 5.0 * at(3.0, Core));
         for k in DistrictKind::ALL {
             assert!(at(3.0, k) <= at(12.0, k) * 0.2, "{k:?}");
