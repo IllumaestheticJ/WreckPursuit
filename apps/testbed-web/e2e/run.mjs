@@ -654,7 +654,7 @@ check(
   await page.click("#sc-garage");
   await page.waitForSelector(G, { timeout: 10000 }).catch(() => {});
   const reloaded = await page.evaluate(() => window.__wp.careerApi.view());
-  await page.click(`${G} button[role="tab"]:has-text("Pound")`);
+  await page.click(`${G} button[role="tab"]:has-text("Impound")`);
   await page.click(`${G} button:has-text("Pay & release")`);
   await page.click(`${G} button[role="tab"]:has-text("Cars")`);
   const released = await page.evaluate(() => window.__wp.careerApi.view());

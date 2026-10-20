@@ -4,7 +4,7 @@
  * state of its own: every action returns the new `CareerView` and the screen redraws.
  *
  * Tabs: Cars (condition, value, repair per item at a district shop, insurance, sell, mods),
- * Dealer (roster cars by class band, the economy-floor beater), Pound (release or let the
+* Dealer (roster cars by class band, the economy-floor beater), Impound (release or let the
  * auction countdown run), Ledger. The head has cash / debt / rep / bounty / carried heat and
  * starts the next run (free drive or city chase) with the active car.
  */
@@ -487,7 +487,7 @@ function PoundTab(props: { view: CareerView; api: CareerApi; run: (f: () => Care
   const inPound = view.cars.filter((c) => c.impound);
   return (
     <Panel title="Impound lot" tag={`${inPound.length} cars`}>
-      {inPound.length === 0 && <p class="wp-dim">Nothing in the pound.</p>}
+      {inPound.length === 0 && <p class="wp-dim">Nothing in the impound.</p>}
       {inPound.map((c) => {
         const i = c.impound!;
         return (
@@ -654,7 +654,7 @@ function GarageScreen(props: { api: CareerApi; initial: CareerView; message: str
         tabs={[
           { id: "cars", label: `Cars (${view.cars.length})` },
           { id: "dealer", label: "Dealer" },
-          { id: "pound", label: pound ? `Pound (${pound})` : "Pound" },
+          { id: "pound", label: pound ? `Impound (${pound})` : "Impound" },
           { id: "ledger", label: "Ledger" },
         ]}
         value={tab}
