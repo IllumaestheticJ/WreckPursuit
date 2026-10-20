@@ -167,3 +167,27 @@ The car's stat bars show Acceleration 10.0, Top speed 10.0, Cornering 6.7.
 - ABS levels Off / Half / Full (we have on/off).
 - A **per-car tune screen** with 5-step suspension, gear ratio, differential and brake balance. This is separate from the mod tree, is free, and is set per event/garage.
 - Car stat bars (acceleration / top speed / cornering).
+
+## Clip 5 analysis (2026-10-20, #49 muscle car, tuned, **ABS Half**, TCS Off)
+
+The lap: 69 s, same street circuit and car as clip 4, but with the tune from "Run 5 setup" (stiff, long gears, diff 4/5, rear brake bias) and ABS Half.
+
+**Inputs**
+
+| | |
+|---|---|
+| Throttle | 71 % |
+| Brake | 3 % (median 0.5 s) |
+| Left / Right | 24 % / 20 %, median 0.18 / 0.28 s taps |
+| Handbrake | 7 uses, median 0.23 s, often **with the throttle held** |
+
+**Brake → handbrake-stab → power-drift corner (41.0–45.0 s), step by step**
+
+1. 41.0–42.1 s: two brake presses (0.2 s + 0.5 s) with a Left tap in between, 82 → 57 mph (3rd → 2nd). With ABS Half and rear brake bias the car stays straight and settles.
+2. 42.2 s: **throttle + Left**, then **throttle + Left + handbrake stabs** of 0.2–0.3 s and 0.1 s while staying on the throttle. Each stab adds rotation; the rear doesn't lock the car dead.
+3. 44.0 s: **Right (opposite lock) + throttle**: a held ~20–30° power drift at 52–55 mph in 2nd through the corner exit.
+
+**New targets**
+1. **Handbrake stabs on the throttle** (0.1–0.3 s, throttle and steer key held) must add rotation without killing the drive. Check our row-56 handbrake declutch (auto clutch opens with the handbrake) against this. For short stabs with the throttle held, the reference keeps power, or recovers it instantly.
+2. **ABS Half + rear brake bias:** braking at 80+ mph with a steering tap stays controllable and settles the car. A tap while braking gives a mild rotation, not a spin.
+3. With the tune (stiff, locked diff, long gears) a 2nd-gear power drift at ~50–55 mph holds steadily with opposite lock and throttle.
