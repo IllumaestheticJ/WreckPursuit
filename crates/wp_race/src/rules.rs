@@ -22,10 +22,6 @@ pub struct CommonRules {
     pub gate_tolerance_base_m: f32,
     /// Extra gate tolerance per m/s of speed, s (≈ the sample interval the server judges at).
     pub gate_tolerance_per_mps_s: f32,
-    /// Extra corridor width beyond the course's half-width before the corridor clock runs, m.
-    pub corridor_margin_m: f32,
-    /// Time outside the corridor before a DQ, s.
-    pub corridor_grace_s: f32,
     /// Displacement between two samples faster than this is implausible (teleport) → DQ, m/s.
     pub max_plausible_speed_mps: f32,
     /// Countdown from `start()` to green, s.
