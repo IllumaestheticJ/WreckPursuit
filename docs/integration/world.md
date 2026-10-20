@@ -906,6 +906,15 @@ Fix (test only, `crates/wp_sim/tests/sidewalk.rs`): heading damping of the test 
 `min_speed_mps` so a wall hit is visible in the failure message. No physics or collider code
 changed. Result: Vesper 68 drives, lowest tire −0.023 m; grid 28 drives, −0.005 m; all end on
 the sidewalk.
+Gate on this branch (= `lead/round12` + this test/doc change): fmt, clippy `-D warnings`,
+wasm32 build, `tools/wasm-determinism/compare.sh` (native == wasm, all scenarios), `web-e2e`
+and the `surface_match` sweep (both cities) pass. `cargo test --workspace --no-fail-fast`:
+937 passed, 5 failed — all also failing on `lead/round12` itself (nothing here touches them),
+for the lead: `simcli goldens_match` (21 scenario hash goldens not re-blessed after the round 12
+merges), `wp_race race_picker::grid_highway_sprint` (2 of 4 finished),
+`wp_vehicle handling_balance::front_drive_cars_understeer_mildly` (junkyard_beater 1.71 deg/g,
+limit 1.6), `wp_wasm race_tests::{short_sprint_with_ai_…, a_capture_mid_race_…}` (player DNF
+on the finish window / never captured).
 ## Lead helper: LOD pop-in (branch `lead/fix-lod-popin`, 2026-10-19, playtest row 25)
 Owner report: "some cars load LOD too slow": cars pop in late or look wrong for a while. Two
 causes were D's tuning (the rest was browser-side, see `docs/integration/testbed.md`):
