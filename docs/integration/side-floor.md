@@ -49,4 +49,20 @@ Pinned in-crate hashes re-recorded: `tests/slide_control.rs::wheel_profile_is_bi
 
 round12 @ 687f8af2 `cargo test --workspace --no-fail-fast` reds: `simcli goldens_match`,
 `wanted_ai_racer_flees_police_through_the_city`, `slide_control::keyboard_power_oversteer_exit_is_recoverable`.
-This branch: see the end of this section (filled after the run).
+This branch (`cargo test --workspace --no-fail-fast`, fmt, clippy -D warnings, lint-determinism
+0 errors, wasm build: clean):
+
+- fixed: `simcli goldens_match` (re-blessed);
+- still red, as on round12: `wanted_ai_racer_flees_police_through_the_city`,
+  `slide_control::keyboard_power_oversteer_exit_is_recoverable`;
+- **new**, both scenario tests of AI races with police (chaotic, tuning-sensitive):
+  - `wp_race race_picker::loop9_circuit`: 2 DQs (`LeftCorridor`) where ≤ 1 is allowed; the
+    other 4 racers were captured / fled. With police pursuits in the race the outcome is the
+    police's call (the test's own comment), and the AI cars now launch / power out of corners
+    without the rear stepping out, so the chase plays out differently.
+  - `wp_race race_police::without_the_meet_report_nobody_is_chased`: one pursuit at tick 7200
+    (entity 4) in the control run. The test notes it is "tuning-sensitive by design: if police
+    or traffic tuning changes, re-check both runs": the racers pick up heat by speeding, and
+    with the floor they run a little faster out of the line / corners.
+  Lead's call: re-tune these thresholds / seeds, or accept. `wp_wasm` golden replays pass
+  (replay files re-blessed).
