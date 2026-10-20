@@ -24,6 +24,8 @@ import type { CarModelInfo, SessionModels } from "../wasm/sim";
 import { sim } from "../wasm/sim";
 import { carMeshNow, loadCarMesh } from "./panels";
 import { FULL_LOD_M, InstancedCar, TAIL, TRAFFIC_PALETTE, fullGeoms, proxyGeoms, styledPaint, type FleetMaterials } from "./fleet";
+import { PALETTE } from "./palette";
+import { artStyle } from "./style";
 
 /** Full-mesh parked cars at most (nearest first; the rest keep their proxy / box). */
 const MAX_FULL = 24;
@@ -35,7 +37,8 @@ const CHUNK_M = 96;
 const PROXY_M = 300;
 /** Bounding-sphere slack for knocked props and the car's own extent, m. */
 const SPHERE_PAD_M = 6;
-/** Cone colour (traffic orange) and its faint glow so cones read at night. */
+/** Cone colour (traffic orange) and its faint glow so cones read at night (greybox; low-poly
+ * dark uses PALETTE.propCone / propConeGlow). */
 const CONE_RGB = 0xff6a14;
 const CONE_GLOW = 0x2a0e00;
 
@@ -169,6 +172,9 @@ export class PropView {
   private readonly paint = new THREE.Color();
   private readonly tail = new THREE.Color(TAIL.off);
   private readonly coneMat = new THREE.MeshStandardMaterial({ color: CONE_RGB, emissive: CONE_GLOW, flatShading: true, roughness: 0.7 });
+  /** Art-style version the props were built for, and the session inputs to rebuild them. */
+  private styleVersion = -1;
+  private lastSet: { list: Float32Array; models: SessionModels; mats: FleetMaterials } | null = null;
   private repicks = 0;
   private movedWrites = 0;
   private repickWrites = 0;
@@ -180,6 +186,8 @@ export class PropView {
   set(list: Float32Array, models: SessionModels, mats: FleetMaterials): void {
     this.clear();
     this.generation++;
+    this.lastSet = { list, models, mats };
+    this.applyConeStyle();
     this.mats = mats;
     const n = list.length / PROP_STRIDE;
     this.n = n;
@@ -240,6 +248,7 @@ export class PropView {
     const c = this.chunks.length;
     // Instances share one geometry set per tier; each chunk's meshes only own their instances.
     const proxy = new InstancedCar(this.proxyGeo!, props.length, mats, null);
+    proxy.lightsOff = true;
     const box = new THREE.InstancedMesh(this.farGeo!, mats.paint, props.length);
     const pts = props.map((i) => new THREE.Vector3(this.pose[i * 7], this.pose[i * 7 + 1], this.pose[i * 7 + 2]));
     const sphere = new THREE.Sphere().setFromPoints(pts);
@@ -271,6 +280,7 @@ export class PropView {
     if (this.full || !this.mats) return;
     const g = fullGeoms(mesh, info);
     this.full = { car: new InstancedCar(g, Math.min(MAX_FULL, this.parkedCount), this.mats, null), fit: fitOf([g.paint, g.detail]) };
+    this.full.car.lightsOff = true;
     this.full.car.count = 0;
     this.group.add(...this.full.car.meshes);
     this.lastPick.set(Infinity, Infinity, Infinity); // pick on the next frame
@@ -335,6 +345,9 @@ export class PropView {
   /** Per frame: apply `props_moved()` records, pick chunk tiers, re-pick the full-mesh set. */
   update(moved: Float32Array, camera: THREE.Camera): void {
     if (this.n === 0) return;
+    if (this.styleVersion !== artStyle.version) this.restyle();
+    // Low-poly dark: cones glow a little more as night falls so they read outside lamp light.
+    this.coneMat.emissiveIntensity = artStyle.lowpoly ? 1 + PALETTE.propConeNightGlow * artStyle.night : 1;
     const t0 = performance.now();
     // Three (x, y, z) → sim (x, -z, y): `world` is rotated -90° about X.
     const c = camera.getWorldPosition(this.p);
@@ -356,6 +369,32 @@ export class PropView {
     this.updates++;
     this.updateMsSum += ms;
     this.updateMaxMs = Math.max(this.updateMaxMs, ms);
+  }
+
+  /** Cone material for the current art style (flat-shaded either way). */
+  private applyConeStyle(): void {
+    this.styleVersion = artStyle.version;
+    const low = artStyle.lowpoly;
+    this.coneMat.color.setHex(low ? PALETTE.propCone : CONE_RGB);
+    this.coneMat.emissive.setHex(low ? PALETTE.propConeGlow : CONE_GLOW);
+    this.coneMat.roughness = low ? 1 : 0.7;
+  }
+
+  /**
+   * The art style changed mid-session: parked-car colours are baked into instance colours and
+   * the shared proxy / full geometry (detail vertex colours), so rebuild from the session's
+   * list and put every prop back at its current (possibly knocked) pose. A debug switch, not a
+   * per-frame cost.
+   */
+  private restyle(): void {
+    const last = this.lastSet;
+    if (!last) return this.applyConeStyle();
+    const pose = this.pose.slice();
+    this.set(last.list, last.models, last.mats);
+    if (pose.length !== this.pose.length) return;
+    this.pose.set(pose);
+    for (let i = 0; i < this.n; i++) this.writeInstance(i);
+    this.flush();
   }
 
   /** Re-pick the nearest parked cars for the full mesh; rewrite only the ones that change drawer. */

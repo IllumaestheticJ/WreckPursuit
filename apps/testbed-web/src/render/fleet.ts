@@ -33,6 +33,11 @@ export const HEAD = 0xfff2c0;
 /** Light bar colours (unlit). */
 export const BAR = { off: 0x1a1a24, red: 0xff2040, blue: 0x2060ff } as const;
 
+/** Unlit tail-lamp lens in low-poly dark (as VehicleView's tail material). */
+const UNLIT_TAIL = 0x5a1414;
+/** Unlit head-lamp lens: the headlight colour at this share (MeshBasic: no light falls on it). */
+const UNLIT_HEAD = 0.3;
+
 /**
  * Livery in the current art style. Low-poly dark maps the greybox traffic liveries one to one
  * onto `PALETTE.trafficPaints` (same variant → same slot) and police white onto
@@ -57,7 +62,7 @@ export function styledLamp(out: THREE.Color, hex: Hex): THREE.Color {
   switch (hex) {
     case TAIL.off:
       // Unlit lens by day; running lights (a quarter of the brake glow) at night.
-      out.setHex(night > 0.2 ? PALETTE.taillight : 0x5a1414);
+      out.setHex(night > 0.2 ? PALETTE.taillight : UNLIT_TAIL);
       return night > 0.2 ? out.multiplyScalar(PALETTE.brakeGlow * 0.25) : out;
     case TAIL.brake:
       return out.setHex(PALETTE.taillight).multiplyScalar(PALETTE.brakeGlow);
@@ -279,6 +284,9 @@ export class InstancedCar {
     return [this.paint, this.detail, this.tail, this.head, ...(this.bar ? [this.bar] : [])];
   }
 
+  /** Parked cars (render/props.ts): lamps stay unlit lenses in low-poly dark, day and night. */
+  lightsOff = false;
+
   add(m: THREE.Matrix4, paint: THREE.Color, tail: THREE.Color, bar: THREE.Color | null): void {
     this.put(this.count++, m, paint, tail, bar);
   }
@@ -292,8 +300,13 @@ export class InstancedCar {
     for (const mesh of this.meshes) mesh.setMatrixAt(i, m);
     if (artStyle.lowpoly) {
       this.paint.setColorAt(i, tmpPaint.setHex(styledPaint(paint.getHex())));
-      this.tail.setColorAt(i, styledLamp(tmpTail, tail.getHex()));
-      this.head.setColorAt(i, styledLamp(tmpHeadStyled, HEAD));
+      if (this.lightsOff) {
+        this.tail.setColorAt(i, tmpTail.setHex(UNLIT_TAIL));
+        this.head.setColorAt(i, tmpHeadStyled.setHex(PALETTE.headlight).multiplyScalar(UNLIT_HEAD));
+      } else {
+        this.tail.setColorAt(i, styledLamp(tmpTail, tail.getHex()));
+        this.head.setColorAt(i, styledLamp(tmpHeadStyled, HEAD));
+      }
       if (this.bar) this.bar.setColorAt(i, styledLamp(tmpBar, bar ? bar.getHex() : BAR.off));
       return;
     }
