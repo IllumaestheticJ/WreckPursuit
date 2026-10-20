@@ -3,8 +3,35 @@
 Branch `lead/drift-lab-w` (from `lead/drift-lab-c`, with `lead/round12` merged for
 `docs/reference/wreckfest-keyboard.md`). Owner verdict on Drift Lab C: "nothing like" the
 reference — steering response, the artificial-feeling drift hold, throttle/power. Drift Lab W
-is deliberately **plain**: no intent modes, nothing smart. Measurements and "what to try" follow
-below (step 2).
+is deliberately **plain**: no intent modes, nothing smart. The point is to find out what the
+car itself does when the steering is as simple as the reference's.
+
+## Headline (step 2 measurements)
+
+1. **With plain steering, the owner's core technique does not work in our physics.** Countersteer
+   key held + full throttle in 2nd spins every RWD car (the four parity cars, shiro_turbo and
+   rampart_50) within ~0.5–1.3 s. This happens with the reference rack timing, with a 0.15 s rack,
+   and **even with a near-instant rack (0.02 s)**, and at 30–70 % throttle as well as full. So
+   the rack speed is not what stops a held drift. Once a slide starts, our cars run away from a
+   full countersteer. In the reference (clip 1) the same input holds a steady 30–45° drift for
+   4+ s. Drift Labs B / C hid this with an assist that computed the countersteer.
+2. **Steering response matches the reference mechanically.** A 0.25 s tap at 60 km/h is most of
+   a full-lock flick (≈28° of 38° in the muscle cars), as clip 7 describes. At 140 km/h the speed
+   sensitivity cuts it to ≈16°. The tap tables are in the plausible range for clip 2's racing
+   taps (0.1 s ≈ 5–6° of heading).
+3. **Handbrake pivots are slow while the lever is held**, and the catch then fails (as in 1).
+   While held: ≈6° of rotation in 0.3 s, 25° in 0.6 s, 62° in 1.0 s (RWD-B: 10 / 39 / 93°).
+   The reference turns ~150–180° in a 1 s hairpin. Afterwards counter + throttle spins the RWD
+   cars. The FWD car (parity_fwd_c) pivots and is pulled straight by the throttle in 0.3–0.6 s,
+   which matches clip 3's recovery.
+4. **Next gap is the car, not the steering.** Candidates, in the order I'd check them: rear
+   lateral grip under wheelspin (combined slip: how much side force a spinning rear keeps), the
+   cars' max steering lock (≈38°; clip 1 holds 30–45° of slide, so full counter lock barely
+   covers the slide angle), yaw inertia / damping, and the rear LSD lock. The pure lateral curve
+   is not it: `sport` keeps 88 % of peak at 30° and 86 % at 40°. Owner's picks map onto this:
+   "drift hold feels artificial" (B / C's assist) → plain has none, but the car can't hold;
+   "throttle / power" → the parity cars give the reference's W/kg, and the runaway happens at
+   every throttle.
 
 **How to try it:** `?drift=w` (default car `parity_rwd_d`, the clip-1 drift car), or
 `?drift=w&car=parity_rwd_a`, or the start menu's *Drift Lab W*. The *tune* panel has the car
@@ -52,6 +79,128 @@ Tests: `crates/wp_vehicle/src/plain.rs` (slew timing, reversal, curve, self-alig
 `crates/wp_vehicle/tests/drift_lab_w.rs` (on a real car: full lock in ~0.28 s, centre in
 ~0.33 s, 160 km/h lock 35–47 %, raw throttle, parity specs), `crates/wp_wasm/src/data.rs`
 (parity cars load, not in the roster).
+
+## Step 2 — measurements
+
+`cargo run --release -p wp_vehicle --example drift_lab_w` (all tables), `… -- plain`,
+`… -- sweep [cars]` (constants A/B + throttle diagnostic), `… -- trace parity_rwd_d
+[naive|good|into]` (tick trace). `PLAIN='{"t_full_s":0.2}'` to try constants, `PLAIN=off` for
+the normal steering model with the same assists. All runs: TCS off, ESC off, ABS on, manual
+gears (2nd for drifts), countersteer help 0. Drift runs: 40 m circle at 0.6 g, enter with the key
+into the turn + throttle, then 6 s. "drift s" = time at 10–50° of body slip.
+
+### Drift hold: owner technique (counter key held + full throttle)
+
+| car | counter key at 3° | at 6° | at 12° (C's drivers) | tapper (aim 30°) |
+|---|---|---|---|---|
+| parity_rwd_a | 0.53 s, spun | 0.52, spun | 0.53, spun | 0.52, spun |
+| parity_rwd_b | 0.49, spun | 0.50, spun | 0.51, spun | 0.50, spun |
+| parity_rwd_d | 0.52, spun | 0.52, spun | 0.53, spun | 0.52, spun |
+| parity_fwd_c | no slide (understeer) | – | – | – |
+| shiro_turbo | 0.91, spun | 1.30, spun | 0.75, spun | 2.01, spun |
+| rampart_50 | 0.63, spun | 0.56, spun | 0.58, spun | 0.57, spun |
+
+The C-era drivers (Naive / Good / AbruptLift / IntoTurn / Sloppy × 5 seeds) give the same
+result: every RWD car spins within 0.5–0.8 s. Trace (parity_rwd_d, counter key at 12°): the key
+goes down at 0.45 s with 13° of slide and yaw at 72°/s. The rack takes until 0.75 s to cross the
+centre, when the slide is already 34°. It reaches full counter lock (−37°) at 1.1 s, with the
+front axle's travel at −65° and yaw still rising, then spins. Lifting at 0.75 s does not stop it.
+
+### Sweep: rack constants (drift s / spun)
+
+| car | constants | counter 3° | counter 6° | counter 12° | tapper |
+|---|---|---|---|---|---|
+| parity_rwd_d | default 0.28 / 0.33 s | 0.5 spun | 0.5 spun | 0.5 spun | 0.5 spun |
+| parity_rwd_d | self-align 50 % / 100 % | 0.5 spun | 0.5 spun | 0.5 spun | 0.5 spun |
+| parity_rwd_d | rack 0.15 / 0.15 s | 1.1 spun | 1.6 spun | 0.6 spun | **4.4 held** |
+| parity_rwd_d | instant rack 0.02 s | 0.8 spun | 1.0 spun | 1.3 spun | **5.6 held** |
+| parity_rwd_b | rack 0.15 / 0.15 s | 0.9 spun | 1.2 spun | 0.6 spun | 1.2 spun |
+| parity_rwd_b | instant rack 0.02 s | 0.6 spun | 0.8 spun | 1.0 spun | 3.0 spun |
+| shiro_turbo | default | 0.9 spun | 1.3 spun | 0.8 spun | 2.0 spun |
+| shiro_turbo | self-align 50 % | 0.9 spun | 1.3 spun | 0.8 spun | **2.8 held** |
+| shiro_turbo | rack 0.15 / 0.15 s | 0.6 spun | 0.8 spun | 1.3 spun | **4.8 held** |
+
+Only a busy tapper (counter key on slide growth, lift past 40°) holds a drift, and only with a
+faster rack than the reference. Self-align changes nothing in held-key driving (it only acts on
+released keys); it helps the tapper a little in shiro_turbo.
+
+Throttle diagnostic (counter key at 6° held, throttle fixed after the entry): with the default
+rack, every RWD car spins at 100 / 70 / 50 %. At 30 %, rampart_50 holds 4.7 s with an instant
+rack; the others still spin. shiro_turbo stops sliding at ≤ 50 % with an instant rack. Full
+table: `… -- sweep`.
+
+### Tap response (one steering-key tap, holding speed)
+
+| car | km/h | tap 0.10 s: wheel ° / heading ° | 0.15 s | 0.25 s |
+|---|---|---|---|---|
+| parity_rwd_d | 60 | 11.1 / 4.6 | 16.6 / 8.2 | 27.8 / 14.6 |
+| parity_rwd_d | 100 | 8.5 / 5.5 | 12.7 / 10.1 | 21.3 / 14.9 |
+| parity_rwd_d | 140 | 6.3 / 6.2 | 9.4 / 14.2 | 15.7 / 20.7 |
+| parity_rwd_b | 100 | 7.4 / 6.0 | 11.1 / 12.7 | 18.5 / 18.4 |
+| parity_rwd_b | 140 | 5.5 / 6.7 | 8.3 / 25.1 (slip 5.6°) | 13.8 / 31.0 (slip 8.9°) |
+| parity_fwd_c | 140 | 5.5 / 5.5 | 8.3 / 14.8 | 13.9 / 29.4 (slip 8.5°) |
+| shiro_turbo | 100 | 8.9 / 6.2 | 13.4 / 11.5 | 22.4 / 16.4 |
+| rampart_50 | 100 | 8.5 / 5.9 | 12.8 / 11.1 | 21.4 / 16.2 |
+
+At 140 km/h a 0.15–0.25 s tap already gives 4–9° of body slip in the lighter cars. Clip 3 says a
+0.15 s tap at 100+ mph is a "small lane-change-sized correction", so the reference is probably
+calmer here (owner A/B: sensitivity 75 % vs 90–100 %, or a higher exponent).
+
+### Handbrake pivot (key into the turn + handbrake, throttle off; then 0.3 s throttle, then counter key + full throttle)
+
+| car | km/h | rotation while held 0.3 / 0.6 / 1.0 s | after |
+|---|---|---|---|
+| parity_rwd_a | 40 | 7 / 26 / 64° | spins (catch fails) |
+| parity_rwd_b | 40 | 10 / 39 / 93° | spins |
+| parity_rwd_d | 40 | 6 / 25 / 62° | spins |
+| parity_rwd_d | 70 | 6 / 26 / 63° | spins |
+| parity_fwd_c | 40 | 6 / 25 / 64° | caught 0.31 / 0.48 / 2.33 s, no spin |
+| shiro_turbo | 40 | 7 / 29 / 69° | 1.0 s: caught 2.15 s; shorter: spins |
+| rampart_50 | 40 | 6 / 25 / 62° | spins |
+
+Clip 2's hairpin script (feint, 1 s handbrake, throttle, counter + throttle): every RWD car
+spins (300–500° total); parity_fwd_c gets round 53–74° and is caught in 0.3–0.6 s.
+
+## What to try (owner)
+
+1. `?drift=w` (parity_rwd_d). Drive clip 1's move: get it sideways, then hold the countersteer
+   key with full throttle in 2nd. Expect a spin; that is the finding. Compare how *early* it
+   goes wrong: does the reference car's slide grow more slowly after the counter key?
+2. Tap steering on the straight at 60 / 100 / 140 km/h. Does the wheel and car response
+   (readout: rack %, lock %, wheel °) feel like the reference's? Try speed sensitivity 75 → 90 %
+   if 140 km/h taps feel too big.
+3. Rack timing: try `full lock time` / `return time` 0.15 s and 0.40 s. Which is closer to the
+   reference's feel in a slide? (Standstill timing was measured at 0.28 / 0.33 s.)
+4. Self-align 0 vs 50 %: release the keys mid-slide. Does the reference's car straighten its
+   wheels on its own (50 %) or keep them where they were (0 %)?
+5. Cars: parity_rwd_a / b / d / fwd_c vs shiro_turbo / rampart_50 (selector in the panel). Does
+   the extra torque per kg feel like the reference's power?
+6. Handbrake: 0.3–1.0 s pulls at 40 km/h. How far does the reference car rotate while the lever
+   is held?
+
+## Files
+
+`crates/wp_vehicle/src/plain.rs` (profile), `vehicle.rs` (plain branch in the throttle and
+steering blocks, `Vehicle::plain_readout`), `drift_lab_w.rs` (parity-car loader, reference
+assists, `handbrake_pivot`, `PlainDriver` / `plain_drift_run`), `drift_lab.rs`
+(`settle_on_circle` made public), `examples/drift_lab_w.rs`, `tests/drift_lab_w.rs`;
+`crates/wp_wasm/build.rs`, `src/data.rs`, `src/drift_lab.rs`; `data/cars/parity/*.json`,
+`tools/parity/build_parity_cars.py`; `apps/testbed-web/src/drift_lab_w.ts`, `input.ts`
+(`setRawKeyboard`), `main.ts`, `wasm/sim.ts`; `apps/ui-kit/src/menu/GameMenu.tsx` (menu entry).
+`steering.rs`: doc-comment wording only (a clippy `doc list item` error inherited from C).
+
+## Known issues on the base branch (not from this work)
+
+Checked on the merge commit before any Drift Lab W change (`8074782b`, C + round12):
+`wp_wasm` tests `crash_replay_tests::race_crash_replays_with_the_judge_and_no_crash_on_the_grid`,
+`race_tests::short_sprint_with_ai_runs_to_results_and_pays_through_the_economy` and
+`tests::simcli_golden_replays_play_back_in_the_browser_core` fail there too (goldens, as in
+drift-lab-c.md). `cargo clippy --workspace --all-targets` fails in test code of `wp_audio`
+(`siren.rs:437`, digit grouping) and `wp_sim` (`lib.rs:1277`, unused variable), both from
+round12. `lint-determinism` reports 3 errors, all in `wp_vehicle/src/twitch_lab.rs` (the
+drift-twitch merge), none in this work. Clean here: `cargo fmt --check`, `cargo clippy
+--workspace -- -D warnings`, `cargo clippy -p wp_vehicle -p wp_wasm --all-targets -- -D
+warnings`, `cargo test -p wp_vehicle`, wasm build + wasm-bindgen, `tsc --noEmit`.
 
 ## Contract change requests
 

@@ -316,7 +316,7 @@ pub fn drift_run(
 
 /// A rig settled on a counter-clockwise circle of `radius` at `lat_g` (2 s of a 1:1
 /// pure-pursuit follower with analog steering).
-fn settle_on_circle(car: &LoadedCar, assists: &AssistProfile, radius: f32, lat_g: f32) -> Rig {
+pub fn settle_on_circle(car: &LoadedCar, assists: &AssistProfile, radius: f32, lat_g: f32) -> Rig {
     let mut rig = Rig::new(car);
     let v = (lat_g * GRAVITY_MPS2 * radius).sqrt();
     rig.teleport([0.0; 3], 0.0, v, v / radius);

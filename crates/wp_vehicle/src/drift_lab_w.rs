@@ -199,3 +199,126 @@ pub fn handbrake_pivot(
         spun,
     }
 }
+
+/// Scripted keyboard drivers for the plain lab ([`plain_drift_run`]). All enter the same way:
+/// the key into the turn + full throttle until the slide passes `entry_deg`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PlainDriver {
+    /// The owner's clip-1 technique: from `entry_deg` on, the countersteer key held + the
+    /// throttle at `throttle` (1 = the owner's full throttle) for the rest of the run.
+    HoldCounter {
+        /// Slide angle where the countersteer key goes down, degrees.
+        entry_deg: f32,
+        /// Throttle after the entry, 0..=1 (a diagnostic; the keyboard has only 0 / 1).
+        throttle: f32,
+    },
+    /// A keyboard drifter steering with taps (clips 1–2): the countersteer key while the slide
+    /// is past `target_deg` or growing faster than 15°/s, released otherwise, and the key into
+    /// the turn below `target_deg − 15°`; full throttle, lifted while past `target_deg + 10°`.
+    Tapper {
+        /// Slide angle where the countersteer key goes down, degrees.
+        entry_deg: f32,
+        /// Slide angle the driver aims for, degrees.
+        target_deg: f32,
+    },
+}
+
+/// Like [`crate::drift_lab::drift_run`] (40 m circle at `lat_g`, left-hand, 6 s) with a
+/// [`PlainDriver`]; also reports key changes per second (how busy the driver's hands are).
+pub fn plain_drift_run(
+    car: &LoadedCar,
+    assists: &AssistProfile,
+    driver: PlainDriver,
+    radius: f32,
+    lat_g: f32,
+) -> (crate::drift_lab::DriftRun, f32) {
+    use crate::drift_lab::{settle_on_circle, slide_state, DriftRun, DRIFT_GEAR};
+    use wp_contracts::{VehicleInput, PHYSICS_DT};
+    const TPS: usize = 240;
+    let mut rig = settle_on_circle(car, assists, radius, lat_g);
+    let (mut drift, mut run, mut longest) = (0usize, 0usize, 0usize);
+    let (mut max_slip, mut flip, mut sum, mut sum2) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+    let mut spun = false;
+    let mut entered = false;
+    let mut prev_angle = (-slide_state(&rig).body_slip).to_degrees();
+    let mut prev_key = 0.0f32;
+    let mut changes = 0usize;
+    for _ in 0..6 * TPS {
+        let s = slide_state(&rig);
+        // Left-hand corner: slide angle = −body slip; into the turn = −1, countersteer = +1.
+        let angle = (-s.body_slip).to_degrees();
+        let rate = (angle - prev_angle) / PHYSICS_DT;
+        prev_angle = angle;
+        let entry = match driver {
+            PlainDriver::HoldCounter { entry_deg, .. } | PlainDriver::Tapper { entry_deg, .. } => {
+                entry_deg
+            }
+        };
+        entered |= angle > entry;
+        let (steer, throttle) = if !entered {
+            (-1.0, 1.0)
+        } else {
+            match driver {
+                PlainDriver::HoldCounter { throttle, .. } => (1.0, throttle),
+                PlainDriver::Tapper { target_deg, .. } => {
+                    let steer = if angle > target_deg || rate > 15.0 {
+                        1.0
+                    } else if angle < target_deg - 15.0 {
+                        -1.0
+                    } else {
+                        0.0
+                    };
+                    (steer, if angle > target_deg + 10.0 { 0.0 } else { 1.0 })
+                }
+            }
+        };
+        if steer != prev_key {
+            changes += 1;
+            prev_key = steer;
+        }
+        rig.step(
+            &VehicleInput {
+                steer,
+                throttle,
+                gear_down: !assists.auto_gears && rig.vehicle.gear() > DRIFT_GEAR,
+                ..Default::default()
+            },
+            assists,
+        );
+        let n = slide_state(&rig);
+        let a = n.body_slip.to_degrees().abs();
+        max_slip = max_slip.max(a);
+        flip = flip.max(n.body_slip.to_degrees());
+        if a > 90.0 || n.v_fwd < 0.0 {
+            spun = true;
+        }
+        if !spun && (10.0..=50.0).contains(&a) {
+            drift += 1;
+            sum += a;
+            sum2 += a * a;
+            run += 1;
+            longest = longest.max(run);
+        } else {
+            run = 0;
+        }
+    }
+    let (mean, sd) = if drift > 0 {
+        let m = sum / drift as f32;
+        (m, (sum2 / drift as f32 - m * m).max(0.0).sqrt())
+    } else {
+        (0.0, 0.0)
+    };
+    (
+        DriftRun {
+            drift_s: drift as f32 * PHYSICS_DT,
+            longest_s: longest as f32 * PHYSICS_DT,
+            max_slip_deg: max_slip,
+            flip_deg: flip,
+            mean_deg: mean,
+            sd_deg: sd,
+            spun,
+            hash: rig.state_hash(),
+        },
+        changes as f32 / 6.0,
+    )
+}
