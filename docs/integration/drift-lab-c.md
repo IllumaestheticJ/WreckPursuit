@@ -1121,9 +1121,149 @@ shows *sliding: yes / no*.
 - The twitch table (`--example drift_twitch`) on the merge reproduces drift-twitch.md's "gate
   only" row (lane change 80: 8.24 reversals/s, 65 °/s peak rack; the example drives the old
   4/6 key ramp; the testbed's 6/6 ramp is twitch's 5.60).
-- The 6/s release ramp is the testbed's keyboard input, not the sim: the scripted drivers
-  here press raw keys, so it adds up to ~0.17 s to a real key's countersteer / release (see
-  the lead's raw-input request, next step).
+- The 6/s release ramp was the testbed's keyboard input, not the sim: the scripted drivers
+  here press raw keys (moved into the sim in step 6).
+
+### Step 6 — raw keyboard steer, the key ramp in the sim (owner reference)
+
+Lead's reference finding: in Wreckfest the keyboard steer input is **raw** (the settings test
+bar jumps −100 % → +100 %); all smoothing is the car's steering model. Same structure here:
+- `apps/testbed-web/src/input.ts`: the steer keys go to the sim as −1 / 0 / +1 (the 6/s
+  ramp from drift-twitch is removed there).
+- `wp_vehicle::steering::key_steer` (state `Vehicle::key_steer`, snapshot format 11): the
+  keyboard key ramp, now per situation —
+  - grip, turn-in: `KEY_STEER_IN_RATE` 6/s (0.17 s to full); grip, back to centre:
+    `KEY_STEER_OUT_RATE` 6/s (drift-twitch's values, its row-102 measurements hold);
+  - **in a confirmed slide, a lift-off transition or under the handbrake: at once** — the
+    drift assist reads the key there (hold / straighten / flick) and the rack has its own fast
+    countersteer rate; a ramped key had made the 0.15 s release of a flick never reach
+    centre (no transition) and cost 2–4 late-key catches.
+  - Analog devices (gamepad 0.7, wheel 0, AI 0 speed sensitivity) pass through: the ramp is
+    keyboard-only (`steer_speed_sensitivity` ≥ 0.99 — the device flag is still a contract
+    request). Replays and the AI see the same steering path as the player.
+- `twitch_lab::KeyRamp::RAW` is the "as shipped" ramp of `--example drift_twitch` now
+  (`RAMP=main` etc. still emulate a testbed ramp on top).
+
+**Front-drive cars and Hold** (found while re-measuring): with the twitch gate merged, C's Hold
+grabbed junkyard_beater's 11° lane-change slide at 130 km/h and lost it (4.8 m path error,
+also on the merge before this step). Following the owner's clip 3 (*a front-drive car recovers
+by straightening under power, not a long countersteer hold*), the Hold / AngleUp steering is
+now weighted by the **rear-drive share** of the driveline (`DriftCommand::hold_weight`): RWD
+unchanged, FWD gets the plain fast countersteer and the self-aligning straighten, AWD in
+between. Beater lane change 130: 4.8 → 0.16 m.
+
+**Twitch table on this build** (`--example drift_twitch`, raw keys, the sim's ramp; compare
+drift-twitch.md's shipped *twitch* column: 5.60·65·0.23 / 3.48·55·0.14 / 6.00·204·0.43 /
+8.57·202·0.45 / 0.80·59·0.07 for reversals/s · peak rack °/s · rms m):
+
+**Mean of cars**
+
+| case | reversals/s | peak rack °/s | fast slew not sliding % | yaw overshoot °/s | settle s (mean, n settled) | rms err m |
+|---|---|---|---|---|---|---|
+| lane change 80 | 5.64 | 63 | 0.0 | 12.4 | 1.56 (4/5) | 0.23 |
+| lane change 130 | 3.48 | 53 | 0.0 | 8.5 | 0.05 (1/5) | 0.14 |
+| slalom 60 | 6.88 | 312 | 0.5 | 51.7 | — | 0.42 |
+| sweeper 70 % grip | 8.91 | 117 | 0.0 | 18.1 | — | 0.38 |
+| kerb hit 100 | 0.80 | 57 | 0.0 | 11.2 | 1.12 (5/5) | 0.07 |
+
+Same as twitch's shipped numbers in the lane changes and the kerb hit, better in the sweeper;
+the slalom has more reversals and a faster peak rack (6.9 vs 6.0 / s, 312 vs 204 °/s): at 60 km/h
+its rear briefly slides and the key there acts at once (0.5 % of ticks above 150 °/s while not
+sliding by twitch's own definition).
+
+Drift / catch / transition / handbrake tables on this build: unchanged within noise (Naive
+5.33 s at 29°, 0 spins; Sloppy 14/60; late key 88/90; transitions 0 spins; handbrake 30/30 and
+27/30 at 60 %).
+
+Gate fixes in merged twitch code: `twitch_lab.rs` path shapes use `wp_math::sin_cos` (the
+determinism lint rejects `f32::sin/cos`), and a `steering.rs` doc line that clippy read as a
+list item was reworded; the twitch numbers are unchanged.
+
+### Step 7 — owner clips 3 and 5 (front-drive corner, handbrake stabs, braking tap)
+
+New scripted measurements (`drift_lab::fwd_corner`, `handbrake_stab`, `brake_tap`;
+`cargo run --release -p wp_vehicle --example drift_lab_c clips`), reference settings:
+
+**Front-drive corner (clip 3)** — 160 km/h, brake 1.3 s, key into the turn + handbrake 0.3 s
+off the throttle, then full throttle + a 0.35 s opposite tap, keys released:
+
+| car | help | turn-in km/h | peak slip ° | throttle → straight s | turned ° | spun |
+|---|---|---|---|---|---|---|
+| kestrel_ts | 30 % | 112 | 13 | 0.65 | 0 | no |
+| kestrel_ts | 60 % | 112 | 11 | 0.59 | -1 | no |
+| kestrel_ts | 100 % | 112 | 11 | 0.57 | -1 | no |
+| debug_sedan | 30 % | 114 | 12 | 0.69 | 1 | no |
+| debug_sedan | 60 % | 114 | 10 | 0.63 | 1 | no |
+| debug_sedan | 100 % | 114 | 10 | 0.61 | 1 | no |
+| junkyard_beater | 30 % | 116 | 13 | 0.70 | -2 | no |
+| junkyard_beater | 60 % | 116 | 11 | 0.66 | 1 | no |
+| junkyard_beater | 100 % | 116 | 11 | 0.64 | 2 | no |
+
+The power-on straightening works and nothing fights it: straight **0.6–0.7 s** after the
+throttle (clip: ~1.3 s), no spins, at every slider (Hold is weighted out in front-drive cars,
+step 6). But the 0.3 s handbrake at ~112 km/h only steps the tail out **10–13°** (clip:
+30–40°) — like the hairpin, the handbrake's rotation at speed is vehicle physics (rear lock /
+tyre model, ws/vehicle), not the assist.
+
+**Handbrake stabs on the throttle (clip 5)** — 80 km/h corner (R84 at 0.6 g), throttle +
+the key into the turn, three 0.2 s handbrake stabs 0.4 s apart with the throttle held (the
+driver switches to the countersteer key once the slide is past 20°), then countersteer +
+modulated throttle for 3 s, manual 2nd:
+
+| car | help | slide before ° | max slide in stabs ° | drive back after a stab s (worst) | drift s after (of 3) | spun |
+|---|---|---|---|---|---|---|
+| shiro_turbo | 30 % | 0 | 87 | 0.09 | 0.00 | SPUN |
+| shiro_turbo | 60 % | 0 | 43 | 0.05 | 3.00 | no |
+| shiro_turbo | 100 % | 0 | 41 | 0.05 | 3.00 | no |
+| sperber_32 | 30 % | 1 | 87 | 0.06 | 0.00 | SPUN |
+| sperber_32 | 60 % | 1 | 43 | 0.04 | 3.00 | no |
+| sperber_32 | 100 % | 1 | 41 | 0.04 | 3.00 | no |
+| rampart_50 | 30 % | 1 | 87 | 0.04 | 0.00 | SPUN |
+| rampart_50 | 60 % | 1 | 43 | 0.03 | 3.00 | no |
+| rampart_50 | 100 % | 1 | 41 | 0.03 | 3.00 | no |
+
+At 60 % / 100 %: the stabs add rotation (0 → 41–43°), **drive is back 0.03–0.05 s after each
+stab** (the clutch re-engaged), and the power drift then holds the full 3 s without a spin.
+30 % spins (its envelope is 40.5°). With the automatic box (`AUTO_GEARS=1`) the handbrake's
+auto-declutch (machine A's row 56) brings drive back only after **~0.21–0.24 s**:
+
+| car | help | slide before ° | max slide in stabs ° | drive back after a stab s (worst) | drift s after (of 3) | spun |
+|---|---|---|---|---|---|---|
+| shiro_turbo | 30 % | 0 | 41 | 0.21 | 3.00 | no |
+| shiro_turbo | 60 % | 0 | 38 | 0.21 | 2.73 | no |
+| shiro_turbo | 100 % | 0 | 36 | 0.21 | 2.77 | no |
+| sperber_32 | 30 % | 1 | 42 | 0.21 | 3.00 | no |
+| sperber_32 | 60 % | 1 | 37 | 0.21 | 2.70 | no |
+| sperber_32 | 100 % | 1 | 35 | 0.21 | 0.00 | no |
+| rampart_50 | 30 % | 1 | 41 | 0.24 | 0.07 | no |
+| rampart_50 | 60 % | 1 | 34 | 0.24 | 0.00 | no |
+| rampart_50 | 100 % | 1 | 31 | 0.24 | 0.00 | no |
+
+— for A: a 0.2 s stab with the throttle held should probably not declutch at all (or
+re-engage at once), so drive does not drop out.
+
+**Braking with a steering tap (clip 5)** — full brake from 130 km/h, a left-key tap 0.2 s in,
+60 %:
+
+| car | tap s | peak yaw °/s | max slip ° | heading after 2 s ° | spun |
+|---|---|---|---|---|---|
+| shiro_turbo | 0.15 | 22.0 | 7.0 | 8.0 | no |
+| shiro_turbo | 0.30 | 22.6 | 7.4 | 12.2 | no |
+| rampart_50 | 0.15 | 15.7 | 4.4 | 17.1 | no |
+| rampart_50 | 0.30 | 18.9 | 4.2 | 2.4 | no |
+| kestrel_ts | 0.15 | 15.0 | 3.2 | 10.8 | no |
+| kestrel_ts | 0.30 | 20.4 | 4.7 | 18.8 | no |
+| debug_sedan | 0.15 | 11.3 | 2.5 | 5.6 | no |
+| debug_sedan | 0.30 | 20.5 | 4.5 | 9.7 | no |
+
+Mild and controllable: 11–23 °/s peak yaw, ≤ 7.4° slip, no spins.
+
+**Owner, try:**
+1. Front-drive car (kestrel_ts): brake hard, key into the turn + a short handbrake, then full
+   throttle with a quick opposite tap: it pulls straight in well under a second.
+2. RWD in 2nd (manual), 80 km/h corner on the throttle: stab the handbrake two or three times
+   to add angle, then countersteer + throttle: the drift carries on, no drop in drive.
+3. Hard braking at speed with a steering tap: a small, controllable rotation.
 
 ## Known issues seen on the base branch (not from this work)
 

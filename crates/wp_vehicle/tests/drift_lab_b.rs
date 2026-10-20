@@ -6,7 +6,8 @@
 
 use wp_contracts::{AssistProfile, LoadedCar};
 use wp_vehicle::drift_lab::{
-    drift_run, handbrake_entry, kick_catch, transition_run, CatchDriver, DriftDriver,
+    drift_run, handbrake_entry, handbrake_stab, kick_catch, transition_run, CatchDriver,
+    DriftDriver,
 };
 
 fn car(id: &str) -> LoadedCar {
@@ -188,5 +189,16 @@ fn released_keys_catch_a_handbrake_entry() {
         assert!(t < 0.2, "{id}: aligned {t} s after the release");
         let c = handbrake_entry(&car(id), &kb(0.6), 80.0 / 3.6, 0.45, true);
         assert!(c.caught, "{id} counter key: {c:?}");
+    }
+}
+
+#[test]
+fn handbrake_stabs_add_rotation_and_drive_comes_back() {
+    // Owner clip 5 (reference settings, 2nd gear): three 0.2 s stabs on the throttle add
+    // rotation, drive is back within 0.1 s of each, and the power drift goes on.
+    for id in RWD {
+        let r = handbrake_stab(&car(id), &reference(0.6), 84.0, 0.6);
+        assert!(!r.spun && r.slide_after_deg > 25.0, "{id}: {r:?}");
+        assert!(r.drive_back_s < 0.1 && r.drift_s > 2.0, "{id}: {r:?}");
     }
 }
