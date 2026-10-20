@@ -118,14 +118,14 @@ All minimal, no behaviour change (hashes identical; goldens give the same result
 ## Perf numbers
 | Measurement | Machine | Native | Browser | Budget |
 |---|---|---|---|---|
-| Snapshot (Sim clone) city chase, 6 cars + traffic + props | sandbox x86 (dev profile, deps opt 2–3) | ~6 ms (Rapier sets ~4 ms) every 2 s | see e2e below | — (≈3 ms/s amortised) |
-| Replay build (clone + ≤ 2 s fast-forward) | same | 4–7 ms + fast-forward | see e2e below | one-off at "Replay" |
-| Memory | | ≤ 6 snapshots | | |
+| Snapshot (Sim clone), city chase: 6 cars + traffic + props | sandbox x86 | ~6 ms (dev profile; Rapier sets ~4 ms) every 2 s | spike ≈ 3.5 ms every 2 s (wasm release, `e2e/crash_replay.mjs`: 60 Hz frame p50 3.2 ms, max 6.7 ms on vs 7.1 ms off); +0.01 ms/frame mean | — |
+| Replay build (clone + ≤ 2 s fast-forward) | same | 4–7 ms + fast-forward | one-off at "Replay" | — |
+| Memory | | ≤ 6 snapshots (static city / lattice / police data shared) | | |
 
 Rapier's own `RigidBodySet` / `ColliderSet` / broad phase clone (~4 ms with the city's
 thousands of static colliders) is the floor: sharing those would need a Rapier change. If the
-2 s spike shows in browser frame times, the next step is snapshotting only while the player is
-above the closing-speed threshold.
+spike ever shows in browser frame times, the next step is snapshotting only while the player
+is above the closing-speed threshold.
 
 ## Known gaps
 - The last ~1.5 s of a replay accepted early is an extrapolation (last logged inputs), not what
@@ -142,4 +142,17 @@ above the closing-speed threshold.
   length.
 - `npm run e2e:crash-replay` (also step 9 of `npm run e2e`): scripted barrier crash → offer →
   Enter → letterbox, UI hidden, 0.25× at impact, back to live with the same tick/hash, scenario
-  still ends on simcli's hash; city free drive with auto mode + skip; benches never offer.
+  still ends on simcli's hash; city free drive with auto mode + skip; browser snapshot cost
+  (PERF line); benches never offer.
+
+### Gate results on this branch (2026-10-20)
+fmt ✓ · clippy `--workspace --all-targets -D warnings` ✓ · wasm32 build ✓ · tsc ✓ ·
+`npm run e2e:crash-replay` 14/14 ✓ · `e2e/race.mjs` ✓ · `just web-e2e`: everything passes except
+`perf_check.mjs` (software GL at ~2 fps: real-time factor 0.58, 1.49 M triangles/frame), which
+fails the same way on `origin/lead/round12` without this branch (0.56, 1.49 M). `cargo test
+--workspace`: all pass except four tests that fail identically on `origin/lead/round12`:
+`simcli goldens_match` (6 city / police goldens: grid + vesper blocked-parked, two tunnel
+drive-throughs, city_chase, night_pursuit_escape — same mismatching hashes with and without this
+branch), `wp_race race_picker::grid_highway_sprint`, `wp_sim sidewalk::vesper_v2_cars_drive_up_
+the_kerb_and_along_the_sidewalk`, `wp_wasm race_tests::short_sprint_with_ai_runs_to_results_and_
+pays_through_the_economy`.

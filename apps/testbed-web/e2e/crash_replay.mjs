@@ -141,6 +141,37 @@ check(
 );
 await page.evaluate(() => window.__wp.setAutoCrashReplay(false));
 
+// 4. Snapshot cost in the browser: step a city chase by hand (game paused) with the buffer on
+// and off; the frames that take a snapshot (every 2 s) show as the spike.
+await page.evaluate(() => window.__wp.startCityChase("debug_sedan", "Arcade"));
+await page.waitForFunction(() => window.__wp.sim.worldInfo()[0] > 240, null, { timeout: 60000 });
+const cost = await page.evaluate(() => {
+  const w = window.__wp;
+  w.app.paused = true;
+  const run = (on) => {
+    w.sim.crashDetectEnable(on);
+    const t = [];
+    for (let i = 0; i < 360; i++) {
+      const t0 = performance.now();
+      w.sim.step(1 / 60);
+      t.push(performance.now() - t0);
+    }
+    t.sort((a, b) => a - b);
+    return { p50: t[180], max: t[t.length - 1], mean: t.reduce((a, b) => a + b, 0) / t.length };
+  };
+  run(false); // warm up
+  const off = run(false);
+  const on = run(true);
+  w.app.paused = false;
+  return { off, on, buffer: w.sim.crashBufferTicks().length };
+});
+console.log(
+  `PERF crash replay buffer (wasm, city chase, 60 Hz frames): off p50 ${cost.off.p50.toFixed(2)} / max ${cost.off.max.toFixed(2)} ms, ` +
+    `on p50 ${cost.on.p50.toFixed(2)} / max ${cost.on.max.toFixed(2)} ms (snapshot spike ≈ ${(cost.on.max - cost.off.p50).toFixed(1)} ms every 2 s), ` +
+    `mean +${(cost.on.mean - cost.off.mean).toFixed(2)} ms/frame`,
+);
+check(cost.buffer >= 3, `buffer keeps snapshots in a city chase (${cost.buffer} after 6 s)`);
+
 // 4. Benches never offer.
 await page.evaluate(() => window.__wp.startBench(8));
 await page.waitForTimeout(4000);
