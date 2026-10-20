@@ -11,6 +11,7 @@
 
 #![warn(missing_docs)]
 
+pub mod crumple;
 pub mod mesh;
 pub mod profile;
 pub mod skin;

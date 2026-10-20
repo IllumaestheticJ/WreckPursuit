@@ -85,6 +85,7 @@ pub enum VehicleKind {
 pub type ContactFilter = fn(&mut wp_contracts::ContactImpulse);
 
 /// One vehicle slot in the simulation.
+#[derive(Clone)]
 pub struct SimVehicle {
     /// Entity id.
     pub id: EntityId,
@@ -119,7 +120,14 @@ pub struct SimVehicle {
     /// Whether the chassis collider currently ignores sidewalks (upright on its wheels; see
     /// [`physics::SIDEWALK_GROUP`]).
     chassis_skips_sidewalks: bool,
+    /// Ticks left as a ghost ([`Sim::set_ghost`]): 0 = solid.
+    ghost_ticks: u32,
+    /// Ticks the ghost was extended because the car still overlapped another car.
+    ghost_overstay: u32,
 }
+
+/// Longest a ghost is extended past its window while it still overlaps another car (3 s).
+pub const GHOST_MAX_OVERSTAY_TICKS: u32 = 3 * 240;
 
 /// Gap left under a new prop in hilly cities, m.
 const PROP_HOVER_M: f32 = 0.04;
@@ -155,6 +163,11 @@ fn ground_pose(
 }
 
 /// A complete simulation instance. Deterministic given the same config, spawns and inputs.
+///
+/// `Clone` is a full snapshot (Rapier sets, lattices, world, police): stepping a clone with
+/// the same inputs gives the same tick hashes as the original (in-memory crash replays,
+/// `wp_wasm::crash_replay`).
+#[derive(Clone)]
 pub struct Sim {
     config: SimConfig,
     tick: u64,
@@ -280,6 +293,8 @@ impl Sim {
             hull_version,
             collider_floor_z,
             chassis_skips_sidewalks: false,
+            ghost_ticks: 0,
+            ghost_overstay: 0,
         });
         Ok(id)
     }
@@ -327,6 +342,7 @@ impl Sim {
             let mut col = ColliderBuilder::cuboid(hx, hy, hz)
                 .mass(prop.mass_kg.max(1.0))
                 .friction(0.6)
+                .user_data(physics::PROP_USER_BIT)
                 .build();
             if hilly {
                 // Resting on the road mesh: no pairs with the terrain tiles under it (thousands
@@ -495,6 +511,23 @@ impl Sim {
     /// settling after a hit); the rest are fixed until something comes near.
     pub fn active_prop_count(&self) -> usize {
         self.props.active_count()
+    }
+
+    /// World pose of city prop `i` (index into `world().static_props()`, the order
+    /// [`Sim::set_world`] created them in): box centre, m, and rotation `[x, y, z, w]`. On
+    /// hilly cities this is the body as seated on the ground, not the raw prop position.
+    /// Read-only (renderers).
+    pub fn prop_pose(&self, i: usize) -> Option<([f32; 3], [f32; 4])> {
+        let rb = self.physics.bodies.get(*self.props.bodies.get(i)?)?;
+        let r = *rb.rotation();
+        Some((rb.translation().to_array(), [r.x, r.y, r.z, r.w]))
+    }
+
+    /// Indices of the props currently dynamic (near a mover, or knocked and not yet asleep),
+    /// ascending. Every other prop is fixed and has not moved since it last was in this list.
+    /// Read-only (renderers).
+    pub fn active_props(&self) -> impl Iterator<Item = usize> + '_ {
+        self.props.active()
     }
 
     /// Number of detached-part debris bodies in the world.
@@ -694,6 +727,79 @@ impl Sim {
         Ok(())
     }
 
+    /// Make a vehicle a ghost for `ticks` physics ticks (0 = solid again now): its chassis
+    /// passes through other cars, props and debris (no contacts, so no damage either way) but
+    /// still rests on and collides with static world geometry; its wheels drive as usual. Used
+    /// after a reset in place so the car cannot land stuck in traffic (playtest row 65). When
+    /// the window ends while the chassis still overlaps another car, it stays a ghost until it
+    /// is clear, at most [`GHOST_MAX_OVERSTAY_TICKS`] longer. An input as far as replays are
+    /// concerned (simcli op `Ghost`).
+    pub fn set_ghost(&mut self, id: EntityId, ticks: u32) -> Result<(), SimError> {
+        let slot = self
+            .vehicles
+            .iter_mut()
+            .find(|v| v.id == id)
+            .ok_or(SimError::UnknownEntity(id))?;
+        slot.ghost_ticks = ticks;
+        slot.ghost_overstay = 0;
+        if let Some(col) = self.physics.colliders.get_mut(slot.body.collider) {
+            physics::set_ghost_flags(col, ticks > 0);
+        }
+        Ok(())
+    }
+
+    /// Ticks a vehicle stays a ghost ([`Sim::set_ghost`]); 0 = solid.
+    pub fn ghost_ticks(&self, id: EntityId) -> Option<u32> {
+        self.vehicles
+            .iter()
+            .find(|v| v.id == id)
+            .map(|v| v.ghost_ticks)
+    }
+
+    /// Count ghost windows down (before the physics step). A ghost whose window ends while its
+    /// chassis box still overlaps another car's stays a ghost one more tick, up to the cap.
+    /// Vehicle order: deterministic.
+    fn update_ghosts(&mut self) {
+        use rapier3d::parry::bounding_volume::BoundingVolume;
+        if self.vehicles.iter().all(|v| v.ghost_ticks == 0) {
+            return;
+        }
+        let aabbs: Vec<_> = self
+            .vehicles
+            .iter()
+            .map(|v| {
+                self.physics
+                    .colliders
+                    .get(v.body.collider)
+                    .map(|c| c.compute_aabb())
+            })
+            .collect();
+        for (i, slot) in self.vehicles.iter_mut().enumerate() {
+            if slot.ghost_ticks == 0 {
+                continue;
+            }
+            slot.ghost_ticks -= 1;
+            if slot.ghost_ticks > 0 {
+                continue;
+            }
+            let overlaps = aabbs[i].is_some_and(|me| {
+                aabbs
+                    .iter()
+                    .enumerate()
+                    .any(|(j, o)| j != i && o.is_some_and(|o| me.intersects(&o)))
+            });
+            if overlaps && slot.ghost_overstay < GHOST_MAX_OVERSTAY_TICKS {
+                slot.ghost_overstay += 1;
+                slot.ghost_ticks = 1;
+                continue;
+            }
+            slot.ghost_overstay = 0;
+            if let Some(col) = self.physics.colliders.get_mut(slot.body.collider) {
+                physics::set_ghost_flags(col, false);
+            }
+        }
+    }
+
     /// Repair a vehicle in place: its damage model goes back to pristine (dents, broken parts,
     /// mechanical damage and handling effects), its pose and velocity are kept. The "Repair &
     /// continue" step after a paid repair bill (replay op `Repair`).
@@ -744,8 +850,26 @@ impl Sim {
                 Some(q) => q,
                 None => &self.world,
             };
+            // Wheel rays never land on a ghost's chassis; a ghost's own wheels only see static
+            // world geometry (not other cars, debris or props), like its chassis.
+            let not_ghost = |_: rapier3d::prelude::ColliderHandle,
+                             c: &rapier3d::prelude::Collider| {
+                c.user_data & physics::GHOST_USER_BIT == 0
+            };
+            let ghost_sees = |_: rapier3d::prelude::ColliderHandle,
+                              c: &rapier3d::prelude::Collider| {
+                c.user_data & (physics::GHOST_USER_BIT | physics::PROP_USER_BIT) == 0
+            };
             for slot in &mut self.vehicles {
-                let filter = QueryFilter::default().exclude_rigid_body(slot.body.body);
+                let filter = if slot.ghost_ticks > 0 {
+                    QueryFilter::exclude_dynamic()
+                        .exclude_rigid_body(slot.body.body)
+                        .predicate(&ghost_sees)
+                } else {
+                    QueryFilter::default()
+                        .exclude_rigid_body(slot.body.body)
+                        .predicate(&not_ghost)
+                };
                 let ground = RapierGround {
                     query: self.physics.query_pipeline(filter),
                 };
@@ -781,6 +905,7 @@ impl Sim {
             .collect();
         self.wake_props();
         self.wake_resting_props();
+        self.update_ghosts();
         self.physics.step();
         let mut tick_contacts = contacts::collect(
             self.physics.narrow_phase(),
@@ -1138,6 +1263,126 @@ mod tests {
             events,
             head_on_events(),
             "contact events must be deterministic"
+        );
+    }
+
+    fn two_sedan_sim(seed: u64) -> (Sim, EntityId, EntityId) {
+        let car = wp_contracts::load_car(data("cars/debug_sedan.json")).unwrap();
+        let mode = wp_contracts::load_mode_table(data("modes/sim.toml")).unwrap();
+        let mut sim = Sim::new(SimConfig {
+            seed,
+            mode,
+            time_of_day: TimeOfDay::from_hours(12.0),
+            time_ratio: 10.0,
+        });
+        let a = sim.spawn_vehicle(&car, [0.0; 3], 0.0).unwrap();
+        let b = sim.spawn_vehicle(&car, [0.0, 12.0, 0.0], 0.0).unwrap();
+        (sim, a, b)
+    }
+
+    /// A ghost drives through a parked car (no contact, no damage, the parked car does not
+    /// move) while still resting on the ground; static geometry stays solid for it; once the
+    /// window is over it is solid again and the same run crashes.
+    #[test]
+    fn ghost_passes_through_cars_but_not_the_world() {
+        let run = |ghost: bool| {
+            let (mut sim, a, _b) = two_sedan_sim(7);
+            sim.place_vehicle(a, [0.0; 3], 0.0, 10.0).unwrap();
+            let hold = VehicleInput {
+                throttle: 0.3,
+                ..Default::default()
+            };
+            sim.set_input(a, hold).unwrap();
+            if ghost {
+                sim.set_ghost(a, 480).unwrap();
+            }
+            for _ in 0..480 {
+                sim.step_fixed();
+            }
+            // Car-to-car contacts only (ground contacts are reported against WORLD_ENTITY).
+            let contacts = sim
+                .drain_events()
+                .iter()
+                .filter(|e| matches!(e, SimEvent::Contact { b, .. } if *b != wp_contracts::WORLD_ENTITY))
+                .count();
+            let st = sim.vehicle_states();
+            (
+                contacts,
+                st[0].1.clone(),
+                st[1].1.clone(),
+                sim.ghost_ticks(a),
+                sim.state_hash(),
+            )
+        };
+        let (contacts, a, b, left, h1) = run(true);
+        assert_eq!(contacts, 0, "a ghost makes no contacts with the other car");
+        assert!(a.pos[1] > 20.0, "the ghost drove through: y = {}", a.pos[1]);
+        assert!(
+            a.pos[2].abs() < 1.0,
+            "the ghost still rests on the ground: z = {}",
+            a.pos[2]
+        );
+        assert!(
+            a.health > 0.999 && b.health > 0.999,
+            "no damage ({}, {})",
+            a.health,
+            b.health
+        );
+        assert!(
+            b.pos[1] > 11.9 && b.pos[1] < 12.1 && b.speed_mps.abs() < 0.1,
+            "parked car untouched"
+        );
+        assert_eq!(left, Some(0), "window over, solid again");
+        assert_eq!(h1, run(true).4, "ghost runs are deterministic");
+        let (contacts, _, b, _, _) = run(false);
+        assert!(
+            contacts > 0 && (b.pos[1] - 12.0).abs() > 0.2,
+            "without the ghost the same run crashes ({contacts} contacts, parked car at y = {})",
+            b.pos[1]
+        );
+
+        // Static world geometry stays solid for a ghost.
+        let (mut sim, a, _) = two_sedan_sim(8);
+        sim.add_static_box([5.0, 20.0, 0.75], [4.0, 1.0, 1.5], 0.0);
+        sim.place_vehicle(a, [5.0, 0.0, 0.0], 0.0, 15.0).unwrap();
+        sim.set_ghost(a, 720).unwrap();
+        for _ in 0..720 {
+            sim.step_fixed();
+        }
+        let y = sim.vehicle_states()[0].1.pos[1];
+        assert!(y < 20.0, "a ghost still hits a barrier: y = {y}");
+    }
+
+    /// A ghost whose window ends inside another car stays a ghost until it is clear (capped).
+    #[test]
+    fn ghost_overstays_while_overlapping() {
+        let (mut sim, a, b) = two_sedan_sim(9);
+        sim.place_vehicle(a, [0.0, 11.0, 0.0], 0.0, 0.0).unwrap();
+        sim.set_ghost(a, 10).unwrap();
+        for _ in 0..60 {
+            sim.step_fixed();
+        }
+        assert!(
+            sim.ghost_ticks(a).unwrap() > 0,
+            "still overlapping: still a ghost"
+        );
+        assert!(sim.ghost_ticks(b) == Some(0));
+        // Drive clear: it turns solid once out.
+        sim.set_input(
+            a,
+            VehicleInput {
+                throttle: 0.5,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        for _ in 0..(GHOST_MAX_OVERSTAY_TICKS + 240) {
+            sim.step_fixed();
+        }
+        assert_eq!(
+            sim.ghost_ticks(a),
+            Some(0),
+            "solid again after leaving (or at the cap)"
         );
     }
 

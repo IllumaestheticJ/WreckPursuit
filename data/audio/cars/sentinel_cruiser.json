@@ -11,9 +11,9 @@
   },
   "engine_pack": "engine_rec_v8",
   "world_pack": "world_rec",
-  "horn_cue": "horn/standard",
+  "horn_cue": "horn/police",
   "siren": {
-    "pack": "siren_rec",
+    "pack": "siren_v2",
     "default_mode": "Auto"
   }
 }

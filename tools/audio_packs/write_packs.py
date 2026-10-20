@@ -18,6 +18,16 @@ def save(p):
     out = {k: p[k] for k in order if k in p}
     open(os.path.join(A, "packs", p["id"] + ".json"), "w").write(json.dumps(out, indent=2, ensure_ascii=False) + "\n")
 
+# Engine layer level per recorded pack, dB (playtest #47): the loops are normalised to -20 LUFS,
+# which left recorded engines 10-17 dB under their procedural fallback and under the tyres /
+# ambience. Measured with `node apps/testbed-web/e2e/audio_roster.mjs --verbose` (engine RMS
+# over the idle -> 90 % redline sweep, player role, recorded vs procedural) and set so the
+# recorded engine sits ~1 dB under the procedural one.
+LEVEL_DB = {"engine_rec_i4": 15.8, "engine_rec_turbo": 15.8, "engine_rec_i6": 11.7, "engine_rec_v6": 13.0, "engine_rec_v8": 9.1}
+# Recorded horn loops vs the procedural horn (measured as LEVEL_DB, e2e/audio_roster.mjs horn checks).
+HORN_GAIN = round(10 ** (7.0 / 20), 3)  # +7 dB
+def level(id_, gain): return round(gain * 10 ** (LEVEL_DB.get(id_, 0.0) / 20), 3)
+
 def engine(id_, proc, files_pack, layers, desc, whistle_gain=None):
     p = copy.deepcopy(P(proc))
     p.update(id=id_, description=desc, fallback=proc)
@@ -26,7 +36,7 @@ def engine(id_, proc, files_pack, layers, desc, whistle_gain=None):
     p["engine_layers"] = []
     for cue, anchor, thr, gain in layers:
         name = cue.split("/")[1]
-        cues[cue] = samples(files_pack, name + ".ogg", id_, True, gain)
+        cues[cue] = samples(files_pack, name + ".ogg", id_, True, level(id_, gain))
         p["engine_layers"].append({"cue": cue, "anchor": anchor, "throttle": thr})
     cues["turbo/blowoff"] = samples("engine_rec_turbo", "blowoff_", id_, False, 0.8)
     if whistle_gain: cues["turbo/whistle"]["gain"] = whistle_gain
@@ -42,7 +52,7 @@ def i4(id_, desc, wg=None):
     p = copy.deepcopy(P("engine_proc_i4"))
     engine(id_, "engine_proc_i4", "engine_rec_i4", [l for l in i4_layers if l[0] != "engine/low_off"], desc, wg)
     q = json.load(open(os.path.join(A, "packs", id_ + ".json")))
-    q["cues"]["engine/low_off"] = samples("engine_rec_i4", "mid_off.ogg", id_, True, 0.8)
+    q["cues"]["engine/low_off"] = samples("engine_rec_i4", "mid_off.ogg", id_, True, level(id_, 0.8))
     q["engine_layers"].insert(3, {"cue": "engine/low_off", "anchor": {"Rpm": 2600.0}, "throttle": "Off"})
     q["cues"] = dict(sorted(q["cues"].items()))
     save(q)
@@ -77,8 +87,11 @@ c["debris/part_tear"] = samples(H, "part_tear_", H, False)
 c["debris/wheel_off"] = samples(H, "wheel_off_", H, False)
 c["mech/engine_fail"] = samples(H, "engine_fail", H, False)
 c["mech/steam_hiss"] = samples(H, "steam_hiss", H, True, 0.6)
-c["horn/standard"] = samples(H, "horn.ogg", H, True)
-c["horn/truck"] = samples(H, "horn_truck", H, True)
+# Horn: steady sustain loops (horn_sustain.py) that stop with the button (release_s, owner #58).
+c["horn/standard"] = dict(samples(H, "horn.ogg", H, True, HORN_GAIN), release_s=0.03)
+c["horn/truck"] = dict(samples(H, "horn_truck", H, True, HORN_GAIN), release_s=0.03)
+# Police air horn (owner row 74): modelled by default; the recorded fallback reuses the truck horn.
+c["horn/police"] = dict(samples(H, "horn_truck", H, True, HORN_GAIN), release_s=0.03)
 c["drivetrain/shift"] = samples(H, "shift_", H, False, 0.7)
 c["ambient/city_night"] = samples(H, "city_night", H, True, 1.0)
 w["cues"] = dict(sorted(c.items()))
@@ -86,7 +99,8 @@ save(w)
 
 s = copy.deepcopy(P("siren_proc"))
 s.update(id="siren_rec", fallback="siren_proc", description="Electronic siren loops cut from aquinn's 'Sirens and Alarm Noise' (CC0): wail (rise + fall), yelp, phaser, hi-lo. Play at their own cadence.")
-for k in s["cues"]: s["cues"][k] = samples("siren_rec", k.split("/")[1] + ".ogg", "siren_rec", True)
+# +6 dB: the recorded loops sat ~7 dB under siren_proc (measured as for LEVEL_DB, police role).
+for k in s["cues"]: s["cues"][k] = samples("siren_rec", k.split("/")[1] + ".ogg", "siren_rec", True, round(10 ** (6.0 / 20), 3))
 save(s)
 r = copy.deepcopy(P("radio_proc"))
 r.update(id="radio_rec", fallback="radio_proc", description="Scanner squelch bursts and static bed cut from a real scanner recording (Kresiek The Furry, Uniden SDS100, CC0).")
@@ -94,12 +108,19 @@ for k in r["cues"]:
     r["cues"][k] = samples("radio_rec", k.split("/")[1] + ".ogg", "radio_rec", k == "radio/static", 1.0 if k != "radio/static" else 0.5)
 save(r)
 
-# cars
+# cars: procedural engine pack -> its recorded pack. Idempotent (re-runs leave *_rec packs and
+# cars added since alone): only engine_proc_* is remapped, anything else is kept as is.
 m = {"engine_proc_i4": "engine_rec_i4", "engine_proc_i6": "engine_rec_i6", "engine_proc_v6": "engine_rec_v6", "engine_proc_v8": "engine_rec_v8"}
 for f in sorted(os.listdir(os.path.join(A, "cars"))):
+    if not f.endswith(".json"): continue
     p = os.path.join(A, "cars", f); d = json.load(open(p))
-    d["engine_pack"] = "engine_rec_turbo" if d["engine_pack"] == "engine_proc_i4" and d["engine"]["turbo"] else m[d["engine_pack"]]
+    ep = d["engine_pack"]
+    if ep == "engine_proc_i4" and d["engine"]["turbo"]: ep = "engine_rec_turbo"
+    d["engine_pack"] = m.get(ep, ep)
+    if d["engine_pack"] not in m.values() and d["engine_pack"] != "engine_rec_turbo":
+        print(f"warning: cars/{f}: engine_pack {d['engine_pack']} is not a recorded pack")
     d["world_pack"] = "world_rec"
-    if d.get("siren"): d["siren"]["pack"] = "siren_rec"
+    # Police cars use the synthesized siren v2 (playtest row 82); siren_rec stays available.
+    if d.get("siren"): d["siren"]["pack"] = "siren_v2"
     open(p, "w").write(json.dumps(d, indent=2, ensure_ascii=False) + "\n")
 print("ok")

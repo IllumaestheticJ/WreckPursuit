@@ -477,3 +477,101 @@ fn career_runs_lock_the_mode_and_a_new_session_ends_the_run() {
         "plain session again"
     );
 }
+
+/// B05: the game closed during a pursuit. The autosave written mid-chase carries the
+/// "run in pursuit" marker; loading it settles the run as a bust (fine, car impounded, a
+/// captured night) exactly once.
+#[test]
+fn closing_the_game_mid_pursuit_is_a_bust_on_the_next_load() {
+    let (mut c, uid) = career_with("kestrel_ts", 25_000, DamageMode::Arcade);
+    let mut s = career_chase_parked(&mut c, 30.0);
+    let id = player(&s);
+    let mut pursued = false;
+    for _ in 0..240 * 10 {
+        s.run_ticks(1);
+        if s.sim().police().racer(id).is_some_and(|r| r.pursued()) {
+            pursued = true;
+            break;
+        }
+    }
+    assert!(pursued, "the parked patrol car starts a pursuit");
+    assert!(
+        s.run().and_then(|r| r.report()).is_none(),
+        "not settled yet"
+    );
+
+    // The tab closes: `pagehide` saved the live profile, the run never finished.
+    let save = c.live_profile(Some(&s)).to_json();
+    let live = wp_economy::CareerProfile::from_json(&save).unwrap();
+    let marker = live.run_in_pursuit.expect("marker in the mid-pursuit save");
+    assert_eq!(marker.car, uid);
+    assert!(marker.level > wp_economy::WantedLevel::None);
+    let (cash, day, captures) = (
+        live.account.cash,
+        live.account.day,
+        live.account.heat_history.captures,
+    );
+
+    let mut c2 = Career::load_json(econ(), &save).unwrap();
+    let close = c2.take_abandoned().expect("settled on load");
+    assert_eq!(close.end, RunEnd::Captured);
+    assert_eq!(close.carried_heat, 0.0);
+    assert!(close.ledger.iter().any(|l| l.reason == "Fine"), "{close:?}");
+    assert!(c2.take_abandoned().is_none(), "reported once");
+    let p = c2.profile();
+    assert!(p.run_in_pursuit.is_none(), "marker cleared");
+    assert!(p.account.cash < cash, "fine charged");
+    assert_eq!(p.account.heat_history.captures, captures + 1);
+    assert_eq!(p.account.day, day + 1, "the run closes as a night");
+    assert_eq!(p.stats.runs_captured, live.stats.runs_captured + 1);
+    assert!(matches!(
+        p.account.car(uid).unwrap().location,
+        CarLocation::Impound { .. }
+    ));
+    // Saving and loading again does not bust twice.
+    let again = Career::load_json(econ(), &c2.save_json()).unwrap();
+    assert_eq!(again.profile().account.cash, p.account.cash);
+    assert_eq!(again.profile().account.heat_history.captures, captures + 1);
+}
+
+/// B05 fairness: closing the game when the police are not on the player costs nothing; merely
+/// wanted (no pursuit) it carries the heat a free end would.
+#[test]
+fn closing_the_game_when_not_pursued_is_free() {
+    let (mut c, uid) = career_with("kestrel_ts", 20_000, DamageMode::Arcade);
+    let mut s = c
+        .start_run(free_drive("x", DamageMode::Arcade, false))
+        .unwrap();
+    s.run_ticks(10);
+    let save = c.live_profile(Some(&s)).to_json();
+    assert!(!save.contains("run_in_pursuit"));
+    let mut c2 = Career::load_json(econ(), &save).unwrap();
+    assert!(c2.take_abandoned().is_none());
+    assert_eq!(
+        c2.profile().account.cash,
+        c.live_profile(Some(&s)).account.cash
+    );
+    assert_eq!(c2.profile().account.heat_history.captures, 0);
+    assert_eq!(
+        c2.profile().account.car(uid).unwrap().location,
+        CarLocation::Garage
+    );
+    c.finish_run(&mut s).unwrap();
+
+    // Wanted, nobody chasing: no bust, the heat carries like a free end (40 → 20).
+    let mut sc = city_chase_in("ignored", DamageMode::Arcade, procedural_city());
+    sc.entities[0].speed_mps = 0.0;
+    let mut s = c.start_run(sc).unwrap();
+    let id = player(&s);
+    s.run_ticks(1);
+    s.debug_sim_mut().unwrap().police_mut().set_heat(id, 40.0);
+    s.run_ticks(1);
+    assert!(!s.sim().police().racer(id).unwrap().pursued());
+    let live = c.live_profile(Some(&s));
+    assert!(live.run_in_pursuit.is_none());
+    assert!((live.carry.heat - 20.0).abs() < 0.5, "{}", live.carry.heat);
+    let mut c3 = Career::load_json(econ(), &live.to_json()).unwrap();
+    assert!(c3.take_abandoned().is_none());
+    assert_eq!(c3.profile().account.heat_history.captures, 0);
+    c.finish_run(&mut s).unwrap();
+}

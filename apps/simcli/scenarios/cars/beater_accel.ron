@@ -1,0 +1,20 @@
+// Junkyard beater (economy floor car), full throttle from rest: 0-100 km/h must take
+// 14-16 s (lead brief round 12b, data/cars/VALIDATION.md). Not at 100 km/h (27.78 m/s) at
+// 14 s, past it by 16 s.
+(
+    name: "cars_beater_accel",
+    mode: Arcade,
+    seed: 1,
+    duration_s: 16.5,
+    entities: [
+        (
+            id: "car",
+            car: "junkyard_beater",
+            inputs: [(t_s: 0.0, input: (throttle: 1.0))],
+        ),
+    ],
+    expect: [
+        speed_at(entity: "car", t_s: 14.0, min: 20.0, max: 27.77),
+        speed_at(entity: "car", t_s: 16.0, min: 27.78, max: 33.0),
+    ],
+)

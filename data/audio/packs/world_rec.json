@@ -71,6 +71,18 @@
       "looped": false,
       "duration_s": 0.57
     },
+    "horn/police": {
+      "source": {
+        "Samples": {
+          "files": [
+            "horn_truck.ogg"
+          ]
+        }
+      },
+      "gain": 2.239,
+      "looped": true,
+      "release_s": 0.03
+    },
     "horn/standard": {
       "source": {
         "Samples": {
@@ -79,8 +91,9 @@
           ]
         }
       },
-      "gain": 1.0,
-      "looped": true
+      "gain": 2.239,
+      "looped": true,
+      "release_s": 0.03
     },
     "horn/truck": {
       "source": {
@@ -90,8 +103,20 @@
           ]
         }
       },
+      "gain": 2.239,
+      "looped": true,
+      "release_s": 0.03
+    },
+    "impact/body": {
+      "source": {
+        "Synth": {
+          "synth": "impact_body",
+          "params": {}
+        }
+      },
       "gain": 1.0,
-      "looped": true
+      "looped": false,
+      "duration_s": 1.8
     },
     "impact/cast_clank": {
       "source": {
@@ -107,6 +132,17 @@
       "gain": 1.0,
       "looped": false,
       "duration_s": 0.53
+    },
+    "impact/crunch": {
+      "source": {
+        "Synth": {
+          "synth": "crunch",
+          "params": {}
+        }
+      },
+      "gain": 0.9,
+      "looped": true,
+      "release_s": 0.06
     },
     "impact/glass_shatter": {
       "source": {

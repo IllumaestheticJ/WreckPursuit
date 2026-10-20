@@ -37,6 +37,8 @@ pub struct CityColliders {
     pub buildings: usize,
     /// Guard-rail boxes along bridge decks.
     pub rails: usize,
+    /// Wall and roof boxes of covered roads (tunnels).
+    pub tunnel_boxes: usize,
 }
 
 /// The flat ground slab is parked this far below the city when terrain replaces it (a safety
@@ -66,6 +68,56 @@ pub fn chassis_on_wheels_groups() -> InteractionGroups {
     )
 }
 
+/// Collider `user_data` bit of a ghosted vehicle chassis (see [`GhostHooks`]).
+pub const GHOST_USER_BIT: u128 = 1;
+
+/// Collider `user_data` bit of a city prop (parked car, cone, bin): never solid for a ghost,
+/// even while it rests as a fixed body.
+pub const PROP_USER_BIT: u128 = 2;
+
+/// Contact filter for ghosted vehicles (a car reset in place, playtest row 65). A ghost chassis
+/// keeps its contacts with static world geometry (ground slab, roads, terrain, sidewalks,
+/// buildings, rails, tunnel boxes, scenario barriers: colliders without a body or on a fixed
+/// body) and passes through everything that moves: other cars, props and debris. Only pairs
+/// with a ghost reach this hook (ghost chassis carry `ActiveHooks::FILTER_CONTACT_PAIRS`), so
+/// every other pair keeps Rapier's default handling. Stateless: deterministic.
+pub struct GhostHooks;
+
+impl PhysicsHooks for GhostHooks {
+    fn filter_contact_pair(&self, ctx: &PairFilterContext) -> Option<SolverFlags> {
+        let c1 = &ctx.colliders[ctx.collider1];
+        let c2 = &ctx.colliders[ctx.collider2];
+        let g1 = c1.user_data & GHOST_USER_BIT != 0;
+        let g2 = c2.user_data & GHOST_USER_BIT != 0;
+        if !g1 && !g2 {
+            return Some(SolverFlags::default());
+        }
+        if g1 && g2 {
+            return None;
+        }
+        let (other, other_body) = if g1 {
+            (c2, ctx.rigid_body2)
+        } else {
+            (c1, ctx.rigid_body1)
+        };
+        let static_world = other.user_data & PROP_USER_BIT == 0
+            && other_body.is_none_or(|h| ctx.bodies.get(h).is_some_and(|b| b.is_fixed()));
+        static_world.then(SolverFlags::default)
+    }
+}
+
+/// Mark (or unmark) a chassis collider as a ghost for [`GhostHooks`].
+pub fn set_ghost_flags(col: &mut Collider, ghost: bool) {
+    let hooks = col.active_hooks();
+    if ghost {
+        col.user_data |= GHOST_USER_BIT;
+        col.set_active_hooks(hooks | ActiveHooks::FILTER_CONTACT_PAIRS);
+    } else {
+        col.user_data &= !GHOST_USER_BIT;
+        col.set_active_hooks(hooks.difference(ActiveHooks::FILTER_CONTACT_PAIRS));
+    }
+}
+
 /// Interaction groups of terrain colliders.
 pub fn terrain_groups() -> InteractionGroups {
     InteractionGroups::new(TERRAIN_GROUP, Group::ALL, InteractionTestMode::And)
@@ -78,6 +130,28 @@ pub fn resting_prop_groups() -> InteractionGroups {
         Group::ALL.difference(TERRAIN_GROUP),
         InteractionTestMode::And,
     )
+}
+
+/// A full copy of the Rapier state. `PhysicsPipeline` only holds per-step scratch buffers and
+/// counters, so the copy gets a fresh one (stepping it gives the same results).
+impl Clone for PhysicsWorld {
+    fn clone(&self) -> Self {
+        Self {
+            gravity: self.gravity,
+            params: self.params,
+            bodies: self.bodies.clone(),
+            colliders: self.colliders.clone(),
+            pipeline: PhysicsPipeline::new(),
+            islands: self.islands.clone(),
+            broad_phase: self.broad_phase.clone(),
+            narrow_phase: self.narrow_phase.clone(),
+            impulse_joints: self.impulse_joints.clone(),
+            multibody_joints: self.multibody_joints.clone(),
+            soft_bodies: self.soft_bodies.clone(),
+            ccd: self.ccd.clone(),
+            ground: self.ground,
+        }
+    }
 }
 
 impl PhysicsWorld {
@@ -216,7 +290,7 @@ impl PhysicsWorld {
             &mut self.multibody_joints,
             &mut self.soft_bodies,
             &mut self.ccd,
-            &(),
+            &GhostHooks,
             &(),
         );
     }
@@ -230,7 +304,7 @@ impl Default for PhysicsWorld {
 
 /// The static colliders of a city with terrain (Port Vesper v2), in the order
 /// [`PhysicsWorld::set_city_ground`] inserts them: terrain heightfield tiles, road triangle
-/// meshes, buildings, deck guard rails. `None` for flat cities (they keep the slab). Shared
+/// meshes, buildings, deck guard rails, tunnel walls and roofs. `None` for flat cities (they keep the slab). Shared
 /// with the client prediction stepper (`wp_vehicle::rig::Rig::set_city_ground`, used by
 /// `wp_net`) so a predicted car drives on exactly the server's ground.
 pub fn city_ground_colliders(map: &wp_world::CityMap) -> Option<(Vec<Collider>, CityColliders)> {
@@ -279,9 +353,10 @@ pub fn city_ground_colliders(map: &wp_world::CityMap) -> Option<(Vec<Collider>, 
     let mesh = wp_world::surface::road_mesh(map);
     out.road_triangles = mesh.indices.len();
     added.extend(mesh_tile_colliders(&mesh, InteractionGroups::all()));
-    let (walks, sidewalk_triangles) = city_sidewalk_colliders(map);
+    let walks = wp_world::surface::sidewalk_mesh(map);
+    let (walk_colliders, sidewalk_triangles) = sidewalk_mesh_colliders(&walks);
     out.sidewalk_triangles = sidewalk_triangles;
-    added.extend(walks);
+    added.extend(walk_colliders);
 
     // Buildings: extruded footprints as convex hulls (footprints are convex lots).
     for b in &net.buildings {
@@ -298,40 +373,113 @@ pub fn city_ground_colliders(map: &wp_world::CityMap) -> Option<(Vec<Collider>, 
 
     // Guard rails along decks: 0.3 m wide, 0.9 m tall boxes on each paved edge.
     for (a, b) in wp_world::surface::deck_rails(net) {
-        let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
-        let len = (d[0] * d[0] + d[1] * d[1]).sqrt();
-        if len < 0.05 {
-            continue;
+        if let Some(col) = rail_collider(a, b, 0.0) {
+            added.push(col);
+            out.rails += 1;
         }
-        let yaw = wp_math::atan2(-d[0], d[1]);
-        let (s, c) = wp_math::sin_cos(yaw * 0.5);
-        let mid = Vector::new(
-            (a[0] + b[0]) * 0.5,
-            (a[1] + b[1]) * 0.5,
-            (a[2] + b[2]) * 0.5 + 0.45,
-        );
-        let col = ColliderBuilder::cuboid(0.15, len * 0.5 + 0.05, 0.45 + d[2].abs() * 0.5)
-            .position(Pose::from_parts(
-                mid,
-                rapier3d::math::Rotation::from_xyzw(0.0, 0.0, s, c),
-            ))
-            .friction(0.4)
-            .build();
-        added.push(col);
-        out.rails += 1;
+    }
+    // And just outside the back edge of every sidewalk without a lot behind it (decks and
+    // their approaches: the ground falls away there).
+    for &(a, b) in &walks.bare_backs {
+        if let Some(col) = rail_collider(a, b, 0.15) {
+            added.push(col);
+            out.rails += 1;
+        }
+    }
+
+    // Covered roads: a wall box along each side (inner face at the span's half width, from
+    // below the banked road edge up to the ceiling) and the roof deck, per centreline segment.
+    for span in &net.covered {
+        let shape = wp_world::covered::CoverShape::new(span);
+        let c = &span.centre;
+        let deck_half = shape.deck_half_width();
+        let wall = wp_world::covered::WALL_M;
+        let roof = wp_world::covered::ROOF_M;
+        for k in 0..c.len().saturating_sub(1) {
+            let (a, b) = (c[k], c[k + 1]);
+            let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+            let len = (d[0] * d[0] + d[1] * d[1]).sqrt();
+            if len < 0.05 {
+                continue;
+            }
+            let yaw = wp_math::atan2(-d[0], d[1]);
+            let (s, co) = wp_math::sin_cos(yaw * 0.5);
+            let rot = rapier3d::math::Rotation::from_xyzw(0.0, 0.0, s, co);
+            let right = [d[1] / len, -d[0] / len];
+            let mid = [
+                (a[0] + b[0]) * 0.5,
+                (a[1] + b[1]) * 0.5,
+                (a[2] + b[2]) * 0.5,
+            ];
+            let slope = d[2].abs() * 0.5;
+            // Walls: 1 m below the centreline (banked edges) up to the ceiling.
+            let (z0, z1) = (mid[2] - 1.0, mid[2] + span.clearance_m);
+            for side in [-1.0f32, 1.0] {
+                let off = side * (span.half_width_m + wall * 0.5);
+                let centre = Vector::new(
+                    mid[0] + right[0] * off,
+                    mid[1] + right[1] * off,
+                    (z0 + z1) * 0.5,
+                );
+                let col =
+                    ColliderBuilder::cuboid(wall * 0.5, len * 0.5 + 0.05, (z1 - z0) * 0.5 + slope)
+                        .position(Pose::from_parts(centre, rot))
+                        .friction(0.5)
+                        .build();
+                added.push(col);
+                out.tunnel_boxes += 1;
+            }
+            let roof_mid = Vector::new(mid[0], mid[1], mid[2] + span.clearance_m + roof * 0.5);
+            let col = ColliderBuilder::cuboid(deck_half, len * 0.5 + 0.05, roof * 0.5 + slope)
+                .position(Pose::from_parts(roof_mid, rot))
+                .friction(0.6)
+                .build();
+            added.push(col);
+            out.tunnel_boxes += 1;
+        }
     }
 
     Some((added, out))
 }
 
-/// Sidewalk top and kerb face colliders of `map` ([`wp_world::surface::sidewalk_mesh`], the
-/// triangles the greybox draws) in [`sidewalk_groups`], and their triangle count. Every city
+/// A guard rail along `a → b` (at its foot height): a 0.3 m wide, 0.9 m tall box, its centre
+/// line `right` metres to the right of the line. `None` for a degenerate segment.
+fn rail_collider(a: [f32; 3], b: [f32; 3], right: f32) -> Option<Collider> {
+    let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    let len = (d[0] * d[0] + d[1] * d[1]).sqrt();
+    if len < 0.05 {
+        return None;
+    }
+    let yaw = wp_math::atan2(-d[0], d[1]);
+    let (s, c) = wp_math::sin_cos(yaw * 0.5);
+    let (rx, ry) = (d[1] / len * right, -d[0] / len * right);
+    let mid = Vector::new(
+        (a[0] + b[0]) * 0.5 + rx,
+        (a[1] + b[1]) * 0.5 + ry,
+        (a[2] + b[2]) * 0.5 + 0.45,
+    );
+    Some(
+        ColliderBuilder::cuboid(0.15, len * 0.5 + 0.05, 0.45 + d[2].abs() * 0.5)
+            .position(Pose::from_parts(
+                mid,
+                rapier3d::math::Rotation::from_xyzw(0.0, 0.0, s, c),
+            ))
+            .friction(0.4)
+            .build(),
+    )
+}
+
+/// Sidewalk top, lot, skirt and kerb face colliders of `map`
+/// ([`wp_world::surface::sidewalk_mesh`], the triangles the greybox draws) in [`sidewalk_groups`], and their triangle count. Every city
 /// with sidewalks has them, flat ones too.
 pub fn city_sidewalk_colliders(map: &wp_world::CityMap) -> (Vec<Collider>, usize) {
-    let walks = wp_world::surface::sidewalk_mesh(map);
-    let n = walks.tops.indices.len() + walks.kerbs.indices.len();
-    let mut mesh = walks.tops;
-    mesh.append(&walks.kerbs);
+    sidewalk_mesh_colliders(&wp_world::surface::sidewalk_mesh(map))
+}
+
+/// [`city_sidewalk_colliders`] from an already built sidewalk mesh.
+fn sidewalk_mesh_colliders(walks: &wp_world::surface::SidewalkMesh) -> (Vec<Collider>, usize) {
+    let mesh = walks.all();
+    let n = mesh.indices.len();
     (mesh_tile_colliders(&mesh, sidewalk_groups()), n)
 }
 

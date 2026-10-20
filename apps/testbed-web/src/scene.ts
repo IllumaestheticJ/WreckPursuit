@@ -4,47 +4,100 @@
 // Sim space is +Z up / +Y forward; Three.js is +Y up, so `world` is rotated -90° about X and
 // every sim-space object is parented under it.
 import * as THREE from "three";
+import { tagFeature } from "./perf";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { Barrier, SimEvent } from "./wasm/sim";
 import { D, DRAW_STRIDE, INTENT_STRIDE, POLICE_DRAW_FLAG } from "./wasm/layout";
 import { layers } from "./settings";
 import { SignalView } from "./signals_view";
+import { CityTiles } from "./render/city_tiles";
+import { Quality } from "./render/quality";
 
 const DAY_SKY = new THREE.Color(0x8fb8de);
 const NIGHT_SKY = new THREE.Color(0x070a14);
 
 interface ContactMarker {
   obj: THREE.Group;
+  dot: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>;
+  arrow: THREE.ArrowHelper;
   age: number;
+  active: boolean;
 }
 
 const CONTACT_LIFETIME_S = 1.5;
+/** Contact markers are pooled (a crash emits dozens of contacts per frame): oldest reused. */
+const MAX_CONTACT_MARKERS = 64;
+const CONTACT_DOT = new THREE.SphereGeometry(0.08, 8, 6);
+const tmpNormal = new THREE.Vector3();
+const groundRay = new THREE.Raycaster();
+const groundFrom = new THREE.Vector3();
+const groundDown = new THREE.Vector3(0, -1, 0);
 
 export class SceneView {
   readonly renderer: THREE.WebGLRenderer;
+  /** Graphics quality: MSAA, resolution scale (adaptive in auto mode), draw distance. */
+  readonly quality = new Quality();
   readonly scene = new THREE.Scene();
   readonly world = new THREE.Group();
-  private readonly hemi: THREE.HemisphereLight;
-  private readonly sun: THREE.DirectionalLight;
+  readonly hemi: THREE.HemisphereLight;
+  readonly sun: THREE.DirectionalLight;
   private readonly barriers = new THREE.Group();
   private readonly contacts: ContactMarker[] = [];
+  private nextContact = 0;
   /** Contact markers created since the page loaded (for automation). */
   contactsSeen = 0;
   private readonly intentGroup = new THREE.Group();
   private readonly cities = new Map<string, THREE.Object3D>();
+  /** Tiled meshes of each loaded city (render/city_tiles.ts). */
+  private readonly cityTiles = new Map<string, CityTiles>();
+  private cityShown: string | null = null;
+  /** City tiles past this distance (m) are not drawn; fog can only shorten it. From the
+   * graphics quality (high: the camera's far plane, no visible change); `?draw=<m>` overrides. */
+  drawDistanceM = Infinity;
+  /** Small city detail (city_tiles.ts CITY_DETAIL) past this distance is not drawn, m. */
+  detailDistanceM = Infinity;
+  private readonly camPos = new THREE.Vector3();
   private readonly policeUnits: { obj: THREE.Group; red: THREE.MeshStandardMaterial; blue: THREE.MeshStandardMaterial }[] = [];
+  /** Light-bar glow multiplier for the police helicopters (art style). */
+  policeGlow = 1;
+  /** Replaces renderer.render in render() (art style post stack); null = plain render. The
+   * city-tile update runs before it either way. */
+  renderOverride: ((camera: THREE.Camera) => void) | null = null;
+  /** Replaces renderer.compile in prewarm() (the art style compiles for its HDR target). */
+  compileOverride: ((camera: THREE.Camera, objects: THREE.Scene) => void) | null = null;
+  /** Draw kinds (PREWARM_* bits) each material was prewarmed for. */
+  private readonly prewarmed = new WeakMap<THREE.Material, number>();
+  /** Stand-ins of the materials being prewarmed (lights come from the main scene). */
+  private readonly prewarmScene = new THREE.Scene();
+  private lastPrewarm = -Infinity;
+  /** Material / draw-kind pairs prewarmed so far (automation). */
+  prewarmCount = 0;
+  /** Subtrees prewarmed even while hidden (crash effects: hidden until the first spark). */
+  readonly prewarmRoots: THREE.Object3D[] = [];
 
   private debugGrid!: THREE.GridHelper;
+  /** The one siren point light (browser perf pass): every point light costs every lit pixel,
+   * even at intensity 0, and a changing light count recompiles the lit shaders. It follows
+   * the nearest police car with its siren on and is hidden when no siren is on. */
+  private readonly sirenLight = new THREE.PointLight(0xff2244, 0, 18, 2);
   /** Traffic signal heads and stop lines (signals_view.ts). */
   readonly signals = new SignalView();
   /** The flat world's ground material (the weather view makes it wet-capable). */
   readonly groundMaterial = new THREE.MeshStandardMaterial({ color: 0x3a3f44 });
   /** Called once with each city's glTF scene when it has loaded (wet road materials). */
-  onCityLoaded: ((root: THREE.Object3D) => void) | null = null;
+  onCityLoaded: ((root: THREE.Object3D, cityId: string) => void) | null = null;
 
-  constructor(parent: HTMLElement) {
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  /**
+   * `postAA: true` when the art style's post stack does the antialiasing (its own MSAA target,
+   * only if the graphics quality allows MSAA): the canvas is then created without MSAA, which
+   * saves resolving a second multisampled buffer every frame.
+   */
+  constructor(parent: HTMLElement, opts: { postAA?: boolean } = {}) {
+    // MSAA, resolution and draw distance come from the graphics quality (render/quality.ts).
+    this.renderer = new THREE.WebGLRenderer({ antialias: this.quality.antialias && !opts.postAA, preserveDrawingBuffer: true });
+    this.quality.attach(this.renderer);
+    const draw = Number(new URLSearchParams(location.search).get("draw"));
+    this.drawDistanceM = draw > 0 ? draw : this.quality.drawDistanceM;
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     parent.appendChild(this.renderer.domElement);
     window.addEventListener("resize", () => this.renderer.setSize(window.innerWidth, window.innerHeight));
@@ -69,7 +122,16 @@ export class SceneView {
     // Axis hint at the origin: +X red, +Y (forward) green.
     const axes = new THREE.AxesHelper(3);
     axes.position.z = 0.02;
-    this.world.add(axes, this.barriers, this.intentGroup, this.signals.group);
+    this.sirenLight.visible = false;
+    tagFeature(this.signals.group, "signals");
+    this.world.add(axes, this.barriers, this.intentGroup, this.signals.group, this.sirenLight);
+    // The first contact marker exists from the start (hidden), so its shader programs are
+    // prewarmed instead of compiled in the frame of the first contact (browser-perf.md 12b).
+    const first = this.newContactMarker();
+    first.active = false;
+    first.obj.visible = false;
+    this.contacts[0] = first;
+    this.prewarmRoots.push(first.obj);
   }
 
   /**
@@ -79,11 +141,13 @@ export class SceneView {
    */
   async setCity(cityId: string | null): Promise<void> {
     for (const [id, obj] of this.cities) obj.visible = id === cityId;
+    this.cityShown = cityId;
     // The debug grid sits on the road surface and flickers through it; hide it in the city.
     this.debugGrid.visible = !cityId;
     if (!cityId || this.cities.has(cityId)) return;
     const holder = new THREE.Group();
     this.cities.set(cityId, holder);
+    tagFeature(holder, "city");
     this.scene.add(holder);
     try {
       // The published (artifact) build cannot serve binary files, so it ships the same bytes
@@ -98,11 +162,21 @@ export class SceneView {
       }
       // glTF is +Y up, same as Three: add to the scene, not the Z-up world group.
       // Layers that share a plane in the greybox (bus lanes and parking painted on asphalt,
-      // sidewalks on zone ground) draw over the layer below instead of flickering.
+      // sidewalks, their corner fills and the level lots behind them on zone ground) draw over
+      // the layer below instead of flickering.
       // City v2 adds terrain (ground_* / rock / seabed, smooth-shaded) and a sea plane 0.25 m
       // above sea level (no polygon offset: at long range it would win against the land);
       // walls, kerbs and decks come without normals and are flat-shaded.
-      const layer: Record<string, number> = { bus_lane: 2, parking: 2, sidewalk: 1, asphalt: 1, highway_concrete: 1 };
+      const layer: Record<string, number> = {
+        bus_lane: 2,
+        parking: 2,
+        sidewalk: 1,
+        sidewalk_corner: 1,
+        lot: 1,
+        lot_skirt: 1,
+        asphalt: 1,
+        highway_concrete: 1,
+      };
       gltf.scene.traverse((o) => {
         const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
         for (const mat of m ? (Array.isArray(m) ? m : [m]) : []) {
@@ -115,10 +189,27 @@ export class SceneView {
         }
       });
       holder.add(gltf.scene);
-      this.onCityLoaded?.(gltf.scene);
+      this.cityTiles.set(cityId, new CityTiles(gltf.scene));
+      this.onCityLoaded?.(gltf.scene, cityId);
+      this.warmLightVariants();
     } catch (e) {
       console.warn("city greybox not available", cityId, e);
     }
+  }
+
+  /**
+   * Height of the shown city's surface under sim-space `(x, y)` (m), by a downward ray against
+   * the greybox; null without a city or a hit. For rarely placed objects (spike strips), not per
+   * frame per car.
+   */
+  groundZ(x: number, y: number): number | null {
+    const city = this.cityShown ? this.cities.get(this.cityShown) : null;
+    if (!city) return null;
+    // Sim (x, y, z) is Three (x, z, -y) (world rotated -90 deg about X).
+    groundRay.set(groundFrom.set(x, 2000, -y), groundDown);
+    groundRay.far = 4000;
+    const hit = groundRay.intersectObject(city, true)[0];
+    return hit ? hit.point.y : null;
   }
 
   /**
@@ -153,9 +244,19 @@ export class SceneView {
       const phase = (timeS * 2.5 + n * 0.17) % 1;
       u.red.emissive.setHex(chasing && phase < 0.5 ? 0xff2040 : 0x000000);
       u.blue.emissive.setHex(chasing && phase >= 0.5 ? 0x2060ff : 0x000000);
+      u.red.emissiveIntensity = u.blue.emissiveIntensity = this.policeGlow;
       n++;
     }
     this.policeUnits.forEach((u, i) => (u.obj.visible = i < n));
+  }
+
+  /** Siren light at `pos` (sim space) with this colour / intensity; `null` = no siren on. */
+  setSiren(pos: THREE.Vector3 | null, colour = 0, intensity = 0): void {
+    this.sirenLight.visible = pos !== null;
+    if (!pos) return;
+    this.sirenLight.position.copy(pos);
+    this.sirenLight.color.setHex(colour);
+    this.sirenLight.intensity = intensity;
   }
 
   /** Sky + light colour from the night factor (0 noon … 1 midnight); `sunDimming` (weather
@@ -184,6 +285,17 @@ export class SceneView {
     }
   }
 
+  private newContactMarker(): ContactMarker {
+    const g = new THREE.Group();
+    const dot = new THREE.Mesh(CONTACT_DOT, new THREE.MeshBasicMaterial({ color: 0xff00ff, transparent: true, depthTest: false }));
+    const arrow = new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), new THREE.Vector3(), 1, 0xff00ff);
+    for (const mat of [arrow.line.material, arrow.cone.material] as THREE.Material[]) mat.transparent = true;
+    g.add(dot, arrow);
+    g.renderOrder = 6;
+    this.world.add(g);
+    return { obj: g, dot, arrow, age: 0, active: true };
+  }
+
   /** Feed drained events: Contact events become fading point + impulse arrows. */
   addEvents(events: SimEvent[]): void {
     for (const ev of events) {
@@ -191,40 +303,35 @@ export class SceneView {
         | { point: [number, number, number]; normal: [number, number, number]; impulse_ns: number }
         | undefined;
       if (!c) continue;
-      const g = new THREE.Group();
-      g.position.set(...c.point);
-      const dot = new THREE.Mesh(
-        new THREE.SphereGeometry(0.08, 8, 6),
-        new THREE.MeshBasicMaterial({ color: 0xff00ff, transparent: true, depthTest: false }),
-      );
       const len = Math.min(Math.max(c.impulse_ns / 2000, 0.2), 5);
-      const arrow = new THREE.ArrowHelper(new THREE.Vector3(...c.normal).normalize(), new THREE.Vector3(), len, 0xff00ff);
-      g.add(dot, arrow);
-      g.renderOrder = 6;
-      this.world.add(g);
-      this.contacts.push({ obj: g, age: 0 });
+      tmpNormal.set(...c.normal).normalize();
+      let m = this.contacts[this.nextContact];
+      if (!m) {
+        m = this.newContactMarker();
+        this.contacts[this.nextContact] = m;
+      }
+      this.nextContact = (this.nextContact + 1) % MAX_CONTACT_MARKERS;
+      m.obj.position.set(...c.point);
+      m.arrow.setDirection(tmpNormal);
+      m.arrow.setLength(len);
+      m.age = 0;
+      m.active = true;
       this.contactsSeen++;
     }
   }
 
   update(dt: number, intents: Float32Array): void {
     const show = layers.on("contacts");
-    for (let i = this.contacts.length - 1; i >= 0; i--) {
-      const c = this.contacts[i];
+    for (const c of this.contacts) {
+      if (!c.active) continue;
       c.age += dt;
-      c.obj.visible = show;
       const fade = 1 - c.age / CONTACT_LIFETIME_S;
-      c.obj.traverse((o) => {
-        const m = (o as THREE.Mesh).material as THREE.Material | undefined;
-        if (m) {
-          m.transparent = true;
-          m.opacity = Math.max(fade, 0);
-        }
-      });
-      if (fade <= 0) {
-        c.obj.removeFromParent();
-        this.contacts.splice(i, 1);
-      }
+      if (fade <= 0) c.active = false;
+      c.obj.visible = show && c.active;
+      const o = Math.max(fade, 0);
+      c.dot.material.opacity = o;
+      (c.arrow.line.material as THREE.Material).opacity = o;
+      (c.arrow.cone.material as THREE.Material).opacity = o;
     }
     // Intent arrows: [entity, kind, from xyz, to xyz] (placeholder hook, empty for now).
     this.intentGroup.clear();
@@ -242,11 +349,206 @@ export class SceneView {
   }
 
   clearContacts(): void {
-    for (const c of this.contacts) c.obj.removeFromParent();
-    this.contacts.length = 0;
+    for (const c of this.contacts) {
+      c.active = false;
+      c.obj.visible = false;
+    }
   }
 
-  render(camera: THREE.Camera): void {
-    this.renderer.render(this.scene, camera);
+  /** Contact markers currently shown (automation). */
+  activeContacts(): number {
+    return this.contacts.filter((c) => c.active).length;
   }
+
+  /** City tiles: total, hidden by the draw distance, drawn (frustum too; needs the camera). */
+  cityStats(camera?: THREE.Camera): { tiles: number; hidden: number; drawn: number } {
+    const t = this.cityShown ? this.cityTiles.get(this.cityShown) : undefined;
+    return { tiles: t?.meshes.length ?? 0, hidden: t?.hidden ?? 0, drawn: t && camera ? t.drawn(camera) : 0 };
+  }
+
+  /**
+   * Compile shader programs for every visible material in the scene (and `prewarmRoots`, hidden
+   * or not: effect pools) for both states of the shared siren light. The light toggling changes the
+   * point-light count, so each lit material needs two programs; compiling them on demand
+   * recompiled ~15 programs in the frame the first siren came on (a 0.5–1 s hitch under
+   * SwiftShader, browser-perf.md round 12b).
+   *
+   * Incremental: only (material, draw kind) pairs not compiled before are compiled, through a
+   * small scene of stand-in objects sharing their geometry and material (renderer.compile
+   * calls getProgram per object, and the city alone has thousands). Returns how many were new.
+   */
+  prewarm(camera: THREE.Camera): number {
+    const fresh: THREE.Object3D[] = [];
+    const visit = (o: THREE.Object3D) => {
+      const kind = prewarmKind(o);
+      if (!kind) return;
+      const mats = (o as THREE.Mesh).material as THREE.Material | THREE.Material[];
+      for (const m of Array.isArray(mats) ? mats : [mats]) {
+        if (!m) continue;
+        const done = this.prewarmed.get(m) ?? 0;
+        if (done & kind) continue;
+        this.prewarmed.set(m, done | kind);
+        const stand = prewarmStandIn(o, m, kind);
+        if (stand) fresh.push(stand);
+      }
+    };
+    // Visible objects (hidden debug layers compile when switched on), plus roots that start
+    // hidden but appear mid-game (effect pools).
+    this.scene.traverseVisible(visit);
+    for (const r of this.prewarmRoots) r.traverse(visit);
+    if (fresh.length === 0) return 0;
+    const holder = this.prewarmScene;
+    holder.fog = this.scene.fog;
+    holder.add(...fresh);
+    const on = this.sirenLight.visible;
+    for (const vis of [!on, on]) {
+      this.sirenLight.visible = vis;
+      if (this.compileOverride) this.compileOverride(camera, holder);
+      else this.renderer.compile(holder, camera, this.scene);
+    }
+    this.sirenLight.visible = on;
+    holder.clear();
+    // renderer.compile only creates the GL programs; the driver (SwiftShader especially)
+    // compiles and links when the program is first queried, which Three does on its first
+    // draw. Query them now so that cost lands here, not in the frame that first draws them.
+    for (const p of this.renderer.info.programs ?? []) (p as unknown as { getUniforms(): unknown }).getUniforms();
+    return fresh.length;
+  }
+
+  /** prewarm() at most every `everyMs` (call each frame). */
+  prewarmEvery(camera: THREE.Camera, nowMs: number, everyMs = 1000): void {
+    if (nowMs - this.lastPrewarm < everyMs) return;
+    this.lastPrewarm = nowMs;
+    this.prewarmCount += this.prewarm(camera);
+  }
+
+  /** How far city geometry is drawn this frame, m: the draw distance, the camera's far plane
+   * and the fully fogged distance (FogExp2 factor > 0.999 looks like the fog-coloured sky).
+   * Other world layers (parked cars) cull at the same distance. */
+  cullDistanceM(camera: THREE.PerspectiveCamera): number {
+    let far = Math.min(this.drawDistanceM, camera.far);
+    const fog = this.scene.fog;
+    if (fog instanceof THREE.FogExp2 && fog.density > 0) far = Math.min(far, 2.7 / fog.density);
+    else if (fog instanceof THREE.Fog) far = Math.min(far, fog.far);
+    return far;
+  }
+
+  render(camera: THREE.PerspectiveCamera): void {
+    const tiles = this.cityShown ? this.cityTiles.get(this.cityShown) : undefined;
+    if (tiles) {
+      camera.getWorldPosition(this.camPos);
+      tiles.update(this.camPos, this.cullDistanceM(camera), this.detailDistanceM);
+    }
+    // Three bakes the number of visible point lights into every lit shader, so the shared siren
+    // light turning on (first police lights) used to recompile every lit material mid-chase
+    // (~13 programs, seconds under a software rasterizer). A few frames after a session or city
+    // starts, one hidden render with the siren in the other state builds those variants up
+    // front (a real render: only what is visible, exactly the programs the frame will use).
+    if (this.sirenWarmIn > 0 && --this.sirenWarmIn === 0) {
+      const siren = this.sirenLight;
+      const visible = siren.visible;
+      const intensity = siren.intensity;
+      siren.visible = !visible;
+      if (!visible) siren.intensity = 0;
+      this.draw(camera);
+      siren.visible = visible;
+      siren.intensity = intensity;
+      this.lightWarmups++;
+    }
+    this.draw(camera);
+  }
+
+  /** Frames until the siren-variant warm-up render (0 = none pending). */
+  private sirenWarmIn = 0;
+  /** Warm-up renders done (automation). */
+  lightWarmups = 0;
+
+  /** Schedule the siren-variant warm-up render a few frames from now (new session or city:
+   * new materials and meshes). */
+  warmLightVariants(): void {
+    this.sirenWarmIn = 4;
+  }
+
+  private draw(camera: THREE.PerspectiveCamera): void {
+    if (this.renderOverride) this.renderOverride(camera);
+    else this.renderer.render(this.scene, camera);
+  }
+
+  /**
+   * Build the shader programs of `root` (a subtree of this scene) now, hidden meshes included,
+   * for both siren-light states: e.g. the crash effects, whose meshes stay hidden until the
+   * first crash and otherwise compiled ~11 programs mid-chase (a long hitch under a software
+   * rasterizer). Uses the real draw path (post target, fog, lights, shader hooks) with every
+   * other object hidden, so the programs match the ones the frame loop will ask for; empty
+   * instanced meshes build their program without drawing anything.
+   */
+  precompile(root: THREE.Object3D, camera: THREE.PerspectiveCamera): void {
+    const changed: [THREE.Object3D, boolean][] = [];
+    const set = (o: THREE.Object3D, v: boolean) => {
+      if (o.visible !== v) {
+        changed.push([o, o.visible]);
+        o.visible = v;
+      }
+    };
+    // Hide everything that is not a light, an ancestor of `root`, or inside `root`.
+    const keep = new Set<THREE.Object3D>();
+    for (let o: THREE.Object3D | null = root; o; o = o.parent) keep.add(o);
+    this.scene.traverse((o) => {
+      if (keep.has(o) || (o as THREE.Light).isLight) return;
+      let inside = false;
+      for (let p: THREE.Object3D | null = o; p; p = p.parent) if (p === root) inside = true;
+      if (inside) set(o, true);
+      else if (!keep.has(o.parent!)) return;
+      else set(o, false);
+    });
+    const siren = this.sirenLight;
+    const visible = siren.visible;
+    const intensity = siren.intensity;
+    for (const on of [!visible, visible]) {
+      siren.visible = on;
+      if (on && !visible) siren.intensity = 0;
+      this.draw(camera);
+    }
+    siren.visible = visible;
+    siren.intensity = intensity;
+    for (let i = changed.length - 1; i >= 0; i--) changed[i][0].visible = changed[i][1];
+  }
+
+
+}
+
+/** Draw kinds that need their own shader program variant (prewarm bookkeeping). */
+const PREWARM_MESH = 1;
+const PREWARM_INSTANCED = 2;
+const PREWARM_INSTANCED_COLOUR = 4;
+const PREWARM_LINE = 8;
+const PREWARM_POINTS = 16;
+
+function prewarmKind(o: THREE.Object3D): number {
+  if ((o as THREE.InstancedMesh).isInstancedMesh) return (o as THREE.InstancedMesh).instanceColor ? PREWARM_INSTANCED_COLOUR : PREWARM_INSTANCED;
+  if ((o as THREE.SkinnedMesh).isSkinnedMesh || (o as THREE.Sprite).isSprite) return 0;
+  if ((o as THREE.Mesh).isMesh) return PREWARM_MESH;
+  if ((o as THREE.Line).isLine) return PREWARM_LINE;
+  if ((o as THREE.Points).isPoints) return PREWARM_POINTS;
+  return 0;
+}
+
+/** An object that compiles to the same program as `o` with material `m`. */
+function prewarmStandIn(o: THREE.Object3D, m: THREE.Material, kind: number): THREE.Object3D | null {
+  const geo = (o as THREE.Mesh).geometry as THREE.BufferGeometry;
+  switch (kind) {
+    case PREWARM_INSTANCED:
+    case PREWARM_INSTANCED_COLOUR: {
+      const im = new THREE.InstancedMesh(geo, m, 1);
+      im.instanceColor = (o as THREE.InstancedMesh).instanceColor;
+      return im;
+    }
+    case PREWARM_MESH:
+      return new THREE.Mesh(geo, m);
+    case PREWARM_LINE:
+      return (o as THREE.LineSegments).isLineSegments ? new THREE.LineSegments(geo, m) : new THREE.Line(geo, m);
+    case PREWARM_POINTS:
+      return new THREE.Points(geo, m);
+  }
+  return null;
 }

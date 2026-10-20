@@ -142,6 +142,7 @@ fn tactic_name(t: Tactic) -> &'static str {
         Tactic::BoxIn(_) => "box-in",
         Tactic::Pit => "pit",
         Tactic::RollingBlock => "rolling-block",
+        Tactic::Ram(_) => "ram",
     }
 }
 
@@ -179,14 +180,18 @@ impl PoliceSystem {
                     }
                 }
                 self.captain.priority = target;
-                self.radio(RadioCue::new(
-                    RadioTier::Critical,
-                    None,
-                    match target {
-                        Some(t) => format!("Captain: all units, priority is racer #{}.", t.0),
-                        None => "Captain: priority cleared.".to_string(),
-                    },
-                ));
+                self.radio(
+                    RadioCue::new(
+                        RadioTier::Critical,
+                        None,
+                        match target {
+                            Some(t) => format!("Captain: all units, priority is racer #{}.", t.0),
+                            None => "Captain: priority cleared.".to_string(),
+                        },
+                    )
+                    .breaks_in()
+                    .supersedes("captain:priority".into()),
+                );
                 Ok(())
             }
             CaptainCommand::CallOff { target } => {

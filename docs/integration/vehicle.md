@@ -712,8 +712,9 @@ vehicle side from the road side.
    makes cars flip/spin light), collision restitution of chassis vs static world (should be
    ~0), contact softness for kerbs, and clamping of contact impulses' vertical component
    from thin kerb/step edges (no "launch ramps" from a 10–15 cm kerb).
-3. Keep the arcade feel lively but planted: Arcade can add extra downforce/anti-launch
-   assistance (part of `AssistProfile`, not damage mode), Simulation stays physical.
+3. ~~Arcade-only anti-launch assist~~ — withdrawn (owner rule 2026-10-20, CLAUDE.md): physics is
+   identical in Arcade and Simulation; only damage differs. Every fix applies to both. Also audit
+   wp_vehicle / wp_sim for anything keyed on DamageMode that changes physics and remove it.
 4. Scenarios with expected ranges (kerb strike, crest jump, settle time); goldens in a
    [bless] commit with the reason. Coordinate with the handling-balance numbers so understeer
    doesn't regress.

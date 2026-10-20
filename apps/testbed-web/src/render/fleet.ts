@@ -12,9 +12,11 @@ import * as THREE from "three";
 import type { CarMeshJson } from "./panels";
 import { carMeshNow, loadCarMesh } from "./panels";
 import { sim, type CarModelInfo } from "../wasm/sim";
+import { PALETTE, type Hex } from "./palette";
+import { artStyle } from "./style";
 
 /** Cars nearer than this (to the camera) get the full instanced mesh, m. */
-export const FULL_LOD_M = 250;
+export const FULL_LOD_M = 150;
 /** Full-mesh instances per model per frame (the nearest get them; the rest use the proxy). */
 const MAX_FULL = 192;
 /** Proxy instances per model per frame. */
@@ -30,6 +32,49 @@ export const TAIL = { off: 0x4a0808, brake: 0xff2a1a, hazard: 0xff9a10 } as cons
 export const HEAD = 0xfff2c0;
 /** Light bar colours (unlit). */
 export const BAR = { off: 0x1a1a24, red: 0xff2040, blue: 0x2060ff } as const;
+
+
+/**
+ * Livery in the current art style. Low-poly dark maps the greybox traffic liveries one to one
+ * onto `PALETTE.trafficPaints` (same variant → same slot) and police white onto
+ * `PALETTE.policePaint`, so the fleet, promoted VehicleViews and parked props agree.
+ * Any other colour passes through.
+ */
+export function styledPaint(hex: Hex, police = false): Hex {
+  if (!artStyle.lowpoly) return hex;
+  if (police || hex === POLICE_PAINT) return PALETTE.policePaint;
+  const i = TRAFFIC_PALETTE.indexOf(hex);
+  return i < 0 ? hex : PALETTE.trafficPaints[i % PALETTE.trafficPaints.length];
+}
+
+/**
+ * Lamp colour in the current art style, into `out` (linear, may exceed 1 so lit lamps reach
+ * the bloom pass). Takes the greybox TAIL / BAR / HEAD hexes; other colours pass through.
+ */
+export function styledLamp(out: THREE.Color, hex: Hex): THREE.Color {
+  out.setHex(hex);
+  if (!artStyle.lowpoly) return out;
+  const night = artStyle.night;
+  switch (hex) {
+    case TAIL.off:
+      // Unlit lens by day; running lights (a quarter of the brake glow) at night.
+      out.setHex(night > 0.2 ? PALETTE.taillight : UNLIT_TAIL);
+      return night > 0.2 ? out.multiplyScalar(PALETTE.brakeGlow * 0.25) : out;
+    case TAIL.brake:
+      return out.setHex(PALETTE.taillight).multiplyScalar(PALETTE.brakeGlow);
+    case TAIL.hazard:
+      return out.setHex(PALETTE.hazard).multiplyScalar(PALETTE.brakeGlow);
+    case HEAD:
+      return out.setHex(PALETTE.headlight).multiplyScalar(night > 0.2 ? PALETTE.headlightGlow : 1);
+    case BAR.off:
+      return out.setHex(PALETTE.lightbarBase);
+    case BAR.red:
+      return out.setHex(PALETTE.policeRed).multiplyScalar(PALETTE.policeRedGlow);
+    case BAR.blue:
+      return out.setHex(PALETTE.policeBlue).multiplyScalar(PALETTE.policeBlueGlow);
+  }
+  return out;
+}
 
 /** How a car was drawn this frame. */
 export type DrawMode = "full" | "proxy";
@@ -54,6 +99,19 @@ const MATERIAL_RGB: Record<string, number> = {
   headlight: 0xf2ecd2,
   interior: 0x2b2724,
 };
+/** The same in low-poly dark (render/palette.ts; as R's panel meshes are recoloured). */
+const MATERIAL_RGB_LOWPOLY: Record<string, number> = {
+  glass: PALETTE.glass,
+  trim: PALETTE.trim,
+  rubber: PALETTE.tire,
+  metal: PALETTE.rim,
+  headlight: PALETTE.headlight,
+  interior: PALETTE.interior,
+};
+/** Detail colour of a mesh material in the current art style (read when geometry is built). */
+function detailRgb(material: string): number {
+  return (artStyle.lowpoly ? MATERIAL_RGB_LOWPOLY : MATERIAL_RGB)[material] ?? 0x808080;
+}
 
 /** Merge parts into one non-indexed geometry with a flat vertex colour per part. */
 function merge(chunks: { pos: Float32Array; idx: ArrayLike<number>; rgb: number }[]): THREE.BufferGeometry {
@@ -160,7 +218,7 @@ export function fullGeoms(mesh: CarMeshJson, info: CarModelInfo): Geoms {
     const chunk = { pos, idx: p.indices, rgb: 0xffffff };
     if (p.material === "paint") paint.push(chunk);
     else if (p.material === "taillight") tail.push(chunk);
-    else detail.push({ ...chunk, rgb: MATERIAL_RGB[p.material] ?? 0x808080 });
+    else detail.push({ ...chunk, rgb: detailRgb(p.material) });
   }
   const l = info.body_size_m[1];
   const lamps = lampMarkers(info, Number.isFinite(front) ? front : l / 2, Number.isFinite(rear) ? rear : -l / 2);
@@ -180,9 +238,9 @@ export function proxyGeoms(info: CarModelInfo): Geoms {
     colourBox(w * 0.86, l * 0.42, roof, 0, -l * 0.04, h - roof / 2, 0xffffff),
   ]);
   const detail = join([
-    colourBox(w * 0.88, l * 0.5, (h - bodyHi) * 0.75, 0, -l * 0.04, bodyHi + (h - bodyHi) * 0.375, MATERIAL_RGB.glass),
+    colourBox(w * 0.88, l * 0.5, (h - bodyHi) * 0.75, 0, -l * 0.04, bodyHi + (h - bodyHi) * 0.375, detailRgb("glass")),
     ...info.wheels.map((wh) =>
-      colourBox(wh.width_m, wh.radius_m * 1.9, wh.radius_m * 1.9, wh.position_m[0], wh.position_m[1], wh.position_m[2], 0x141414),
+      colourBox(wh.width_m, wh.radius_m * 1.9, wh.radius_m * 1.9, wh.position_m[0], wh.position_m[1], wh.position_m[2], detailRgb("rubber")),
     ),
   ]);
   const lamps = lampMarkers(info, l / 2, -l / 2);
@@ -190,12 +248,14 @@ export function proxyGeoms(info: CarModelInfo): Geoms {
 }
 
 /** One set of instanced meshes (paint / detail / tail, optional light bar). */
-class InstancedCar {
+export class InstancedCar {
   readonly paint: THREE.InstancedMesh;
   readonly detail: THREE.InstancedMesh;
   readonly tail: THREE.InstancedMesh;
   readonly head: THREE.InstancedMesh;
   readonly bar: THREE.InstancedMesh | null;
+  /** Every instanced mesh of the car (built once: `put` runs per instance per frame). */
+  readonly meshes: readonly THREE.InstancedMesh[];
   count = 0;
 
   constructor(g: Geoms, capacity: number, mats: FleetMaterials, barAt: [number, number] | null) {
@@ -216,19 +276,51 @@ class InstancedCar {
     } else {
       this.bar = null;
     }
-  }
-
-  get meshes(): THREE.InstancedMesh[] {
-    return [this.paint, this.detail, this.tail, this.head, ...(this.bar ? [this.bar] : [])];
+    this.meshes = [this.paint, this.detail, this.tail, this.head, ...(this.bar ? [this.bar] : [])];
   }
 
   add(m: THREE.Matrix4, paint: THREE.Color, tail: THREE.Color, bar: THREE.Color | null): void {
-    const i = this.count++;
-    for (const mesh of this.meshes) mesh.setMatrixAt(i, m);
-    this.paint.setColorAt(i, paint);
-    this.tail.setColorAt(i, tail);
+    this.put(this.count++, m, paint, tail, bar);
+  }
+
+  /** `add` with greybox hex colours (no Color round trip; the fleet's per-frame path). */
+  addHex(m: THREE.Matrix4, paint: Hex, tail: Hex, bar: Hex | null): void {
+    this.putHex(this.count++, m, paint, tail, bar);
+  }
+
+  /**
+   * Write instance `i` (matrix and colours) without touching the others. Colours are the
+   * greybox livery / TAIL / BAR values; the art style maps them here (styledPaint, styledLamp),
+   * so every user of InstancedCar (fleet, parked props) gets the palette. `lit = false` draws
+   * dark, unlit lenses (parked cars: no head or tail lights, playtest row 83).
+   */
+  put(i: number, m: THREE.Matrix4, paint: THREE.Color, tail: THREE.Color, bar: THREE.Color | null, lit = true): void {
+    this.putHex(i, m, paint.getHex(), tail.getHex(), bar ? bar.getHex() : null, lit);
+  }
+
+  /** `put` with greybox hex colours (runs per car per frame: no allocation, no iterator). */
+  putHex(i: number, m: THREE.Matrix4, paint: Hex, tail: Hex, bar: Hex | null, lit = true): void {
+    const meshes = this.meshes;
+    for (let k = 0; k < meshes.length; k++) meshes[k].setMatrixAt(i, m);
+    if (!lit) {
+      const low = artStyle.lowpoly;
+      this.paint.setColorAt(i, tmpPaint.setHex(low ? styledPaint(paint) : paint));
+      this.tail.setColorAt(i, tmpTail.setHex(UNLIT_TAIL));
+      this.head.setColorAt(i, tmpHeadStyled.setHex(UNLIT_HEAD));
+      if (this.bar) this.bar.setColorAt(i, low ? styledLamp(tmpBar, BAR.off) : tmpBar.setHex(BAR.off));
+      return;
+    }
+    if (artStyle.lowpoly) {
+      this.paint.setColorAt(i, tmpPaint.setHex(styledPaint(paint)));
+      this.tail.setColorAt(i, styledLamp(tmpTail, tail));
+      this.head.setColorAt(i, styledLamp(tmpHeadStyled, HEAD));
+      if (this.bar) this.bar.setColorAt(i, styledLamp(tmpBar, bar ?? BAR.off));
+      return;
+    }
+    this.paint.setColorAt(i, tmpPaint.setHex(paint));
+    this.tail.setColorAt(i, tmpTail.setHex(tail));
     this.head.setColorAt(i, tmpHead);
-    if (this.bar) this.bar.setColorAt(i, bar ?? tmpBar.setHex(BAR.off));
+    if (this.bar) this.bar.setColorAt(i, tmpBar.setHex(bar ?? BAR.off));
   }
 
   end(): void {
@@ -247,14 +339,21 @@ class InstancedCar {
   }
 }
 
-interface FleetMaterials {
+/** Materials shared by every instanced car (fleet and parked props look the same). */
+export interface FleetMaterials {
   paint: THREE.Material;
   detail: THREE.Material;
   lamp: THREE.Material;
 }
 
+/** Lens colours of a car with its lights off (below 1, so they never reach the bloom pass). */
+const UNLIT_TAIL = 0x3a0c0c;
+const UNLIT_HEAD = 0x3c3b36;
 const tmpBar = new THREE.Color();
 const tmpHead = new THREE.Color(HEAD);
+const tmpPaint = new THREE.Color();
+const tmpTail = new THREE.Color();
+const tmpHeadStyled = new THREE.Color();
 
 /** One car model: full and proxy instance sets. */
 class FleetModel {
@@ -301,19 +400,20 @@ class FleetModel {
 /** Every instanced car of a frame. Call begin(), add() per car, end(). */
 export class Fleet {
   readonly group = new THREE.Group();
+  /** Full meshes within this distance from the camera (m); graphics quality lowers it on phones. */
+  fullLodM = FULL_LOD_M;
   private readonly models = new Map<string, FleetModel>();
-  private readonly mats: FleetMaterials = {
+  readonly mats: FleetMaterials = {
     paint: new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, metalness: 0.25, roughness: 0.55 }),
     detail: new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.6 }),
     lamp: new THREE.MeshBasicMaterial({ color: 0xffffff }),
   };
+  /** Art-style version the materials and model geometry were built for. */
+  private styleVersion = -1;
   private readonly m = new THREE.Matrix4();
   private readonly p = new THREE.Vector3();
   private readonly q = new THREE.Quaternion();
   private readonly one = new THREE.Vector3(1, 1, 1);
-  private readonly paint = new THREE.Color();
-  private readonly tail = new THREE.Color();
-  private readonly bar = new THREE.Color();
 
   /** Model for `carId` (built on first use; `police` adds a light bar). */
   model(carId: string, police = false): FleetModel {
@@ -332,7 +432,24 @@ export class Fleet {
   }
 
   begin(): void {
+    if (this.styleVersion !== artStyle.version) this.applyStyle();
     for (const m of this.models.values()) m.begin();
+  }
+
+  /**
+   * Match the art style: paint / detail surfaces as R's panel meshes in that style (so a
+   * promotion does not change the sheen), and rebuild the models (detail vertex colours are
+   * baked into their geometry; car meshes are cached, so this is immediate).
+   */
+  private applyStyle(): void {
+    this.styleVersion = artStyle.version;
+    const lowpoly = artStyle.lowpoly;
+    const paint = this.mats.paint as THREE.MeshStandardMaterial;
+    const detail = this.mats.detail as THREE.MeshStandardMaterial;
+    paint.roughness = lowpoly ? 0.85 : 0.55;
+    paint.metalness = lowpoly ? 0.15 : 0.25;
+    detail.roughness = lowpoly ? 0.85 : 0.6;
+    if (this.models.size > 0) this.clear();
   }
 
   /**
@@ -351,15 +468,12 @@ export class Fleet {
     this.p.set(rec[o], rec[o + 1], rec[o + 2]);
     this.q.set(rec[o + 3], rec[o + 4], rec[o + 5], rec[o + 6]);
     this.m.compose(this.p, this.q, this.one);
-    this.paint.setHex(paint);
-    this.tail.setHex(tail);
-    const b = bar === null ? null : this.bar.setHex(bar);
     const full = model.full;
-    if (full && dist < FULL_LOD_M && full.count < MAX_FULL) {
-      full.add(this.m, this.paint, this.tail, b);
+    if (full && dist < this.fullLodM && full.count < MAX_FULL) {
+      full.addHex(this.m, paint, tail, bar);
       return "full";
     }
-    if (model.proxy.count < MAX_PROXY) model.proxy.add(this.m, this.paint, this.tail, b);
+    if (model.proxy.count < MAX_PROXY) model.proxy.addHex(this.m, paint, tail, bar);
     return "proxy";
   }
 

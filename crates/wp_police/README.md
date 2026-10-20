@@ -7,14 +7,18 @@ spike strips, helicopter), racer gadgets (radar detector, scanner) and the capta
 Pure Rust, no renderer, builds for `wasm32-unknown-unknown`.
 
 ## Design pillars
-- Chases are **slow, calculated and lethal to both sides**. Pursuers are speed-capped, plan
-  corners conservatively and spend a **risk budget**; a cop that drives like an arcade cop wrecks.
-- Police win by **containment and attrition**: shadowing, box-ins, PIT at low speed, rolling
-  blocks, spikes/roadblocks ahead of the predicted path, a helicopter keeping visual.
+- Chases are **lethal to both sides**. Nobody is invincible: units use the same damage model and
+  spend a **risk budget**, which grows with the wanted level.
+- Since round 13 (owner playtest rows 63 / 64, "not aggressive enough", "backup doesn't
+  converge") the police **drive at the car's limit and escalate by wanted level**: L1 tail close
+  and box in, L2 PIT as soon as the road allows and ram the rear quarter, L3+ hard rams, side
+  slams, rolling blocks and junctions blocked ahead. Backup converges on the racer's predicted
+  position at once. This departs from the PVPD doctrine's "contain, don't race" on purpose
+  (see `docs/integration/police.md`).
 - Racers win by **breaking line of sight** for the escape time, reaching a **safehouse**, or
   disabling pursuers (which raises heat and bounty).
 - **Day vs night is tables, not code**: every phase-dependent number is a `[x.dawn/day/dusk/night]`
-  table in `data/police/`.
+  table in `data/police/`. Damage mode changes only what contact does to the cars.
 
 ## How it works (one tick)
 `PoliceSystem::step(world, racers, events, dt, out)` is called once per physics tick by `wp_sim`.
@@ -43,7 +47,7 @@ Pure Rust, no renderer, builds for `wasm32-unknown-unknown`.
   speed `min_racer_speed_mps`. Speeds are the racer's just before the episode's first
   contact (by the time a contact is reported, a head-on hit has stopped the racer, and a patrol
   car nudging a parked racer has shoved it). Then heat rises by `heat`, to at
-  least `min_level` (L2), the radio says "Unit N: I've been hit! … assault on an officer.", and
+  least `min_level` (L2), the radio says "Unit N, I've been hit! … assault on an officer.", and
   the pursuit starts in the same tick with the hit unit (or the closest unit within
   `nearby_units_m` that sees the racer, if the hit unit is out of action), day or night: no
   recognition window. A new assault on the same unit needs `repeat_cooldown_s`; ramming another
@@ -61,39 +65,143 @@ Pure Rust, no renderer, builds for `wasm32-unknown-unknown`.
   `BountyRecord` is persisted by prompt 08 (`bounty_record` / `set_bounty_record`). It sets
   reinforcement priority (up to `priority_max_reduction` faster response). Night stakes: `payout_scale()`.
 
+- **Blatant speeding** (`heat.blatant`, owner playtest row 60): speeding ≥ 40 km/h over within
+  60 m of an in-service unit with line of sight is recognised at once (L1 at least, pursuit by
+  that unit), day or night. Otherwise a night pursuit needs 40 m for 4 s, which a fast pass-by
+  never gives.
+
 ### Presence & dispatch (`dispatch.rs`)
-- Pool units per district per phase from `presence.toml [patrols.*]`. Shortfalls are spawned;
-  surplus idle units retire when no racer is within 300 m.
-- **Incidents**: civilian reports (dispatched after `report_dispatch_delay_s[phase]`) and crash
-  scenes (`report_crash_scene`, or automatically from contacts), which hold a unit for `crash_scene_s[phase]`.
+- Pool units per district per phase from `presence.toml [patrols.*]`. Shortfalls are spawned
+  (after the session start, out of every racer's sight); surplus idle units retire once out of
+  sight and ≥ `response.despawn_min_m` away.
+- **Reckless-driving calls** (round 12b, `presence.toml [response]`): a violation no unit saw
+  opens a report (civilian call or traffic camera; later calls move it to the racer's latest
+  position; a report within 200 m of an open call joins it, so a racing pack is one call).
+  After `call_delay_s[phase] + district_delay_s[district]` (Core: 2 s by day, 3 s at night)
+  dispatch sends an available unit within `radius_m[district]` by road that can reach a
+  junction on the racer's predicted path before it. If there is none, a **responder spawns**:
+  `spawn_min_m..spawn_max_m` (150–350 m, + `spawn_lead_s` of a fast racer's travel) of legal
+  driving from the racer, never closer than `never_closer_m` (120 m), out of every racer's sight,
+  clear of other vehicles and parked cars, facing the racer. Spots that meet the racer on its
+  predicted path come first. "Out of sight": no line of sight from the driver's eye or a chase
+  camera (behind along the velocity and on every side, since police don't know which way a car
+  faces), now or 1 s on, to a car body there.
+- **Responders** drive with lights at `respond_speed_factor` (1.6) × limit to the meeting
+  junction (re-planned every 3 s) and **hold short of it** while the racer is coming. With the
+  racer in sight within 150 m they **follow** it (so it can be recognised, which starts a
+  pursuit); with the racer coming head-on within 70 m they pull right and stop, and nose to
+  nose with it stopped (a narrow road) they back out 8 m. A unit still > `redispatch_far_m`
+  (150 m) away `redispatch_s` (6 s) after taking the call is released and the call goes out
+  again. One radio line per call: "Dispatch: caller reports reckless driver, Core. Unit 6
+  responding." No responders in a city whose patrol table is empty for the phase.
+- **Unit cap**: responders and reinforcements only spawn while ground units <
+  `max_units_by_level[highest wanted level]` (and `max_ground_units`).
+- **Despawns**: idle responders and reinforcements drive on and vanish once out of every racer's
+  sight and ≥ `despawn_min_m` away; out-of-service units the same after 20 s (60 s wrecked).
+- **Parked cars and cones** (`PoliceSystem::set_props`, set by `for_world`) are obstacles for
+  every ground unit (follow, wait behind, pass), like a stopped car.
+- **Crash scenes** (`report_crash_scene`, or automatically from contacts) hold the nearest unit
+  for `crash_scene_s[phase]`.
 - **Reinforcements**: each pursued racer wants `units_per_level[level]` ground units. A deficit
   creates a request due after `response_s[phase]` (Day 20–40 s, Night 60–150 s). When it comes due,
-  an idle unit within 700 m is committed, or a new unit spawns ≥ `spawn_min_distance_m` away, out of sight.
+  an idle unit within 700 m is committed, or a new unit spawns like a responder (fallback: the
+  nearest node ≥ `spawn_min_distance_m` away, out of sight).
 - **Helicopter**: `count`, `launch_s`, `unavailable_chance` per phase. It requests from `min_level`.
   It is kinematic, gives line of sight to every unit, and is **not** a weapon.
 - Every assignment change raises a radio line; `radio::RadioDirector` paces what is spoken as
   `PoliceEvent::Radio` (tiers, sim-time cooldowns, duplicate collapse, earshot;
   `data/police/radio.toml`). Budget: <= 4 lines/min with nobody wanted, <= 10/min in a pursuit
   (`scenarios/radio_*.ron`).
+- **One transmission at a time** (playtest row 79): a spoken line holds the channel for its
+  length (`words / words_per_s + line_pad_s`, the audio scanner's numbers) plus `min_gap_s`
+  (2.5 s); waiting lines are a priority queue (tier, cue `prio`, age), lose their slot when a
+  newer line supersedes them ("now level 4" replaces a queued "now level 3") and expire
+  (`stale_s`, `stale_critical_s`, or the cue's own life). Gaps shrink with the wanted level
+  (`global_gap_s` / `unit_gap_s` per L1..L5; L1 keeps the row-6 8 s / 30 s).
+- **Unit-to-unit callouts** (`chatter`, row 79): units call what they see with their call sign
+  and a place on the map — "Unit 6, lost visual. Last seen eastbound on Harbor Boulevard at
+  Lantern Way.", "eyes on him again", "requesting backup", "I'm on his bumper", "going for the
+  PIT" / "he's spun" / "he got away", "boxing him in", "spikes hit", "I'm out of the chase",
+  "he's gone into the Hollins Tunnel"; dispatch summarises level rises (place, units on him, air
+  unit) and closes pursuits with the place. Places: street (+ cross street at junctions) from
+  `World::edge_names` (Port Vesper), tunnel names, district otherwise
+  (`PoliceSystem::place_phrase`). The lost-visual call reads the racer record's `last_known`,
+  the same position search and interception steer to. Observer only: not hashed, no RNG.
+  `chatter_stats()` counts raised callouts. Tests: `tests/radio_chatter.rs`.
 
 Assignments: `Patrol`, `Respond(incident)`, `Pursue(target)`, `Intercept(point)`, `RoadblockAt`,
 `SpikeAt`, `HeloTrack`, `OutOfService`.
 
+### Turning round (physical units, lights on)
+A unit whose steering target is more than ~107° off its nose (the racer went past it) turns
+round: a forward U-turn at full lock from above 3 m/s (handbrake pulled for 0.6 s when fast,
+held near 6 m/s) or a reverse swing from a standstill (brake held engages reverse, lock that
+swings the nose toward the target), until it faces within 60°; 3 s cooldown. Shadowing units far
+behind the racer close at the phase's pursuit cap and brake (4 m/s²) to arrive at their gap.
+Tested with real cars in `crates/wp_sim/tests/police_passby.rs`.
+
+### Un-sticking (`stuck.rs`, physical units)
+A unit that wants to move (planned > 1.5 m/s, not holding for a light or traffic) but stays
+< 1 m/s for 2 s is stuck; so is one that has waited 20 s behind a stopped racer or police car
+(not a red-light queue; a civilian jam clears itself). Each event is logged in `stats().stuck`
+with a cause from the unit's last contacts: `Damage`, `Vehicle`, `ParkedProp` (the contact point
+on a prop footprint), `JunctionStep` / `Kerb` (a low, horizontal contact, near a junction or
+not), `Wall`, `Terrain` (vertical normal), `NoContact`. Recovery: back out 4 m with opposite lock
+(brake held at a standstill engages reverse) if there is room behind; on a repeat within 15 m
+(or held behind a dead car with room behind) re-route with that segment blocked for 30 s, which
+turns the unit around; 8 s after the first event, despawn once out of every racer's sight (a
+call it had goes out again; a patrol is refilled out of sight). `set_unstick_recovery(false)`
+keeps detection and logging only, for measurements. `stats().responses` logs every trip to a
+call: spawned or not, start and road distance, stuck events, outcome (`Arrived`, `FellBehind`,
+`Stuck(cause)`, `Wrecked`, `CallEnded`).
+
 ### Pursuit (`pursuit.rs`, `unit.rs`)
-- Pursuers follow the racer's **breadcrumb trail**, which is recorded only while the racer is
-  seen, extended by its predicted path. Losing sight means losing the scent.
-- Speed = `min(max(target × (1 + target_speed_margin), 10), pursuit_cap_mps[phase])`. Corners are
-  planned at `pursuit_cornering_g`, or `shadow_cornering_g` once the budget is spent.
-- **Risk budget**: time above `risk.lateral_g`, near misses and collisions cost budget. A unit
-  with no budget only shadows, at ≤ 1.3× the limit.
-- **Tactics**, picked closest pursuer first:
-  - `BoxIn`: racer < `boxin_max_kmh` and ≥ 2 budgeted units within 60 m; rear, front-left and front-right slots.
-  - `Pit`: racer < `pit_max_kmh[mode]` (55 Sim / 70 Arcade), ≥ `pit_min_straight_m` of straight
-    road ahead, unit has budget and is off cooldown.
-  - `RollingBlock`: a unit ahead of the racer slows in front of it.
-  - `Shadow`: hold 25–40 m back, 12 m more per extra unit; close to 8 m when the racer stops.
-  - `Intercept`: units off the trail or far behind take the lane-legal fastest route to the
-    racer's predicted position 10–20 s out.
+- Pursuers within `CLOSE_LOS_M` (70 m) of the racer **with line of sight** drive the racer's
+  own line: its **breadcrumb trail** (recorded only while seen) plus its predicted path. Farther
+  away or out of sight they **drive the roads** (`chase_route`: the legal route to the junction
+  the racer heads for, then its predicted path), so a unit never follows the trail through a
+  corner it would cut into a building (row 66).
+- **Chase driving** (`[chase]` in `pursuit.toml`, row 63): corners planned at `cornering_g`
+  (0.82 g), braking at `brake_mps2` (8.5), closing at up to the racer's speed × (1 +
+  `speed_margin`) and `pursuit_cap_mps[phase]` × `cap_scale[level]`; through junctions at
+  `chase_junction_mps`, reds at `chase_red_mps`, a 0.6 s look for cross traffic, passes after
+  0.5 s; interceptors at up to 2.2 × the limit.
+- **Risk budget**: collisions and near misses cost budget (a deliberate PIT/ram/box contact only
+  `tactic_contact_cost`); a unit may spend `risk.budget × risk_budget_scale[level]`, then it
+  only shadows at ≤ 1.3× the limit.
+- **Tactics by wanted level**, closest pursuer first (civilians within
+  `civilian_clear_m[level]` of the racer hold back all deliberate contact):
+  - `BoxIn` (L1+): racer < `boxin_max_kmh`, ≥ 2 budgeted units within 60 m.
+  - `Pit` (L2+): lead unit, racer < `pit_max_kmh[level]`, ≥ `pit_min_straight_m` of
+    straight-ish road ahead; lines up `pit_side_offset_m` beside the racer, turns in at
+    `pit_turn_in_gap_m`.
+  - `Ram(RearQuarter)` (L2+, lead unit when no PIT is possible), `Ram(Hard)` (L3+);
+    `Ram(Side)`: the second unit flanks alongside (L2+) and slams into the racer's flank when
+    level with it (L3+). After any deliberate contact a unit re-engages after `reengage_s`.
+  - `RollingBlock` (L3+): units ahead of the racer slow in front of it; interceptors that get
+    ahead of it on its line join as rolling blocks; at L3+ an interceptor that reaches a junction
+    on the racer's path first parks across it (`junction_block_level`).
+  - `Shadow`: tail `shadow_min_m..shadow_max_m[level]` back (L1 10–18 m, L2 6–12, L3+ 4–8);
+    close to 6 m when the racer stops, ignoring other stopped units (no stand-off short of the
+    capture radius).
+  - `Intercept`: units off the trail or far behind route to the racer's predicted position
+    10–20 s out; interceptors on the same racer try different horizons and keep a route at
+    speed rather than flip to one that starts with a U-turn.
+- **Backup** (row 64): when a pursuit is on, idle and patrolling units within
+  `backup_radius_m[level]` by road (only the racer's district below
+  `backup_all_districts_level`) intercept at once, up to `units_per_level` (L1 2, L2 4, L3 6,
+  L4+ 8); the rest spawn out of sight ahead of / around the racer after `response_s[phase]`
+  (day 4–10 s, night 12–30 s). Units farther than the radius + `far_margin_m` don't count and are
+  stood down after `far_release_s`.
+- **Search** (row 64): with the racer out of sight, units that reach the last known position
+  and interceptors spread over the junctions around it (nearest, the next ones on the path it was
+  taking, the roads out of the first), moving on every 10 s. A racer lost inside a covered road
+  (tunnel) is searched for at its portals, 30 m outside, each unit at the nearer one (PVPD doctrine §5: nobody chases
+  inside), so hiding in a tunnel still breaks contact. Prediction while unseen uses the
+  velocity at the last sighting, not the racer's real one.
+- **Capture**: stopped (< 2 m/s for 4 s) with a unit within 15 m, a total loss while wanted, or
+  **pinned**: never more than `pinned_radius_m` from one spot for `pinned_time_s` with a unit
+  within 15 m (a boxed-in racer rocking back and forth).
 - **Disengage**: health < `disengage_health` (per mode: Arcade 0.15, Simulation 0.4), a bent wheel (`|toe| > bent_wheel_toe_rad`), a flat
   or a lost wheel, or a dead engine → pull over. Total loss at `total_loss_health[mode]`.
 
@@ -149,6 +257,22 @@ Every tick each ground unit (physical or headless) looks ahead on its own track:
 Obstacles: `wp_sim` reports every vehicle (players, racers, physical and kinematic traffic,
 police cars) with `set_obstacles` each tick. Headless, units see the racers and each other.
 
+- **Push-through** (row 61, physical units): with lights on, blocked by a stopped civilian or
+  parked car (not the racer, not a unit) for `push_after_s` (1.5 s) with no way past, a unit
+  shoves it at `push_mps` (3.5 m/s ≈ 13 km/h) aiming a little left, for up to `push_max_s`. A
+  push that moved it less than `push_min_progress_m` falls back to the un-sticking steps
+  (back out, re-route, respawn). Push contacts are plain low-speed contacts: no heat for the
+  racer, no crash scene below 8 m/s. `PoliceStats::pushes` counts them.
+- Chasing units squeeze past a car that only clips the lane edge (`chase_lateral_margin_m`) and,
+  farther than 150 m from every racer, drive through kinematic traffic (it has no collider there;
+  near a player it turns physical).
+- **Static feelers** (`walls.rs`, row 66, physical units): three rays from the front bumper
+  (ahead and ±`wall_feeler_rad`) against building footprints and tunnel walls, as long as the
+  stopping distance + `wall_margin_m`. A wall ahead caps the speed to stop 2.5 m short of it
+  (`wall_decel_mps2`); a wall closing in on one side shifts the line `wall_shift_m` away from it.
+  `PoliceStats::static_hits` logs every contact episode with static geometry (walls, parked
+  props, kerbs) for the measurements.
+
 ### Tools & gadgets (`tools.rs`)
 - `plan_site` puts a tool on the predicted path between `min_ahead_m` and `max_ahead_m`, never
   within 15 m of an intersection, and with approach sight distance ≥ `min_sight_m` (120 m).
@@ -174,7 +298,7 @@ Player chase units get `unit_order()` **suggestions** only.
 | File | Contents |
 |---|---|
 | `heat.toml` | Level thresholds; violation weights; witness, recognition, decay and escape tables per phase; capture, safehouse and bounty rules |
-| `presence.toml` | Patrols per district × phase, reinforcement response times, report delays, helicopter availability, tool/tactic unlock levels, crash scenes |
+| `presence.toml` | Patrols per district × phase, reinforcement response times, reckless-driving response (`[response]`: call delays, radius, spawn window, unit cap by heat, despawn distance), helicopter availability, tool/tactic unlock levels, crash scenes |
 | `pursuit.toml` | Think rate, speed factors and caps, cornering g, LOS range, unit dynamics and crash severity per mode, risk budget, traffic hazards, tactic parameters |
 | `tools.toml` | Roadblock, spike strip and helicopter parameters, radar/scanner tiers, captain hold time |
 
@@ -201,19 +325,22 @@ distance and nearest road. Tests, scenarios and tools use `city::procedural(&Pro
 |---|---|
 | Patrol presence (4 phases) | Exact table counts after warm-up |
 | Day speeder, Core, 2× limit (5 runs) | Pursuit at 8.8 s mean (≤ 12.8 s every run); reinforcement 29 s |
-| Night speeder, 03:00 (8 runs) | Pursuit at 126 s mean; reinforcement 115 s |
-| Cop self-wreck, Simulation (20 pursuits) | 0% of engaged units; a reckless config (no budget, high caps) has more risk events (run-wide crashes, near misses, wrecks, traffic hits) |
+| Night speeder, 03:00 (8 runs) | Pursuit at 51 s mean (126 s before round 12b's responders); reinforcement 102 s |
+| Reckless-driving call → first unit within 100 m, racer at 2× limit (`response_*.ron`, 8 runs each) | Core noon 3.2 s mean / 7.6 s worst; Suburb noon 9.3 / 16.8 s; Core 23:00 7.1 / 17.6 s; Suburb 23:00 19.3 s mean, 6 of 8 within 25 s (one run: the racer loops the city edge and U-turns) |
+| Pop-in audit, every scenario | 0 of 105 mid-session spawns and 0 of 333 despawns in a racer's view cone / sight or within 120 m |
+| Cop self-wreck, Simulation (20 pursuits) | 0% of engaged units; careful units spend their risk budget (809 unit-seconds held to shadowing), an unlimited budget never does |
 | Tool placement (5 runs, L4) | 35 tools, minimum sight 120.1 m |
 | Escape (dusk, below helicopter level) | 2 of 3 runs escape |
 | Capture / safehouse (12×12 city) / total loss | Each rule fires in its scripted case |
 | Sideswipe a paused patrol car at 30 / 50 km/h, noon / 23:00 / 03:00 (3 runs each) | Assault every run, pursuit in the same tick (0.01 s), wanted L2 |
 | 5 km/h parking bump (3 runs) | No assault, no heat, no pursuit |
 
+| Response in the full sim, physical cars (`cargo run --release -p simcli --example police_response -- vesper\|grid <hour> 4 60`) | Port Vesper noon 13.3 s mean / 17.2 s worst, 23:00 28.2 / 34.0 s; grid noon 16.2 s, 23:00 12.8 s; 0 of 15 spawns and 0 of 6 despawns visible to the player (eye or chase camera) |
 | City traffic, physical cars (`cargo run --release -p simcli --example police_traffic_contacts -- patrol\|pursuit 300`) | Patrol 300 s: 0 police↔traffic contacts, 1 overlap with kinematic traffic caused by a moving unit. Hot pursuit 362 s: 0 contacts, 0 overlaps with lights on, 3 caused by moving units in total |
 
 ## Perf
 `cargo run --release -p wp_police --example police_bench`: 13 patrols + reinforcements, 4 wanted
-racers on D's small city, with exact building line of sight and obstacle awareness → **0.074 ms per 60 Hz frame** (0.055 before round 6)
+racers on D's small city, with exact building line of sight and obstacle awareness → **0.097 ms per 60 Hz frame** (round 13: up to 8 units per racer, backup and search; 0.055 ms in round 12b, 0.074 ms in round 6)
 (native, release, cloud Xeon 2.1 GHz). Budget 0.5 ms native / 1.0 ms browser. Browser not
 measured yet.
 
@@ -236,12 +363,19 @@ cargo run --release -p wp_police --example police_scenario -- <file.ron> [--tabl
   places one at every third signalised junction). `RoadNetworkQuery` has no signalised-junction
   flag yet, so `from_network` takes the list separately (contract request #7).
 - The headless kinematic body and its traffic-hazard model stand in for physical cars and real traffic.
-- Obstacle awareness sees vehicles only: parked cars and cones (`wp_world` static props) are not
-  in the list, so a unit off its lane can still clip one. Passing assumes the other lane exists.
+- Passing assumes the other lane exists. Feelers see buildings and tunnel walls, not rails,
+  barriers or terrain steps (not in the road network data).
 - `PoliceSystem::new()` (used by `wp_sim` today) has no road network, so it tracks heat but spawns no units.
-- Scripted racers don't react to PIT or box-ins; physics resolves those in the real game.
+- Scripted racers don't react to PIT or box-ins; physics resolves those in the real game. PITs
+  and rams need the lead unit within 35 m of a racer it can see on a fairly straight road; a
+  racer at 90 km/h on Port Vesper's curvy roads rarely gives that (see the integration doc).
 - Assault is not judged by fault: a moving racer that a patrol car drives into (rare with
   obstacle awareness) also counts. Overflow kinematic units in `wp_sim` (beyond the physical
   slots) can't be hit at all.
 - Captain-command events are emitted on the next `step`.
+- Never-in-view covers patrol refills, responders, reinforcements and despawns. Roadblock and
+  spike units appear where the tool rules put them (≥ 300 m ahead with ≥ 120 m approach sight),
+  so the racer can see them appear; a helicopter vanishes 15 s after going out of service.
+- Racers' sight is checked at their own height for both ends: on a steep hill a spot below a
+  crest may count as visible (conservative) or a spot above as hidden.
 - No JSON Schema for `data/police/*.toml`; validation lives in `PoliceConfig::validate` plus serde `deny_unknown_fields`.

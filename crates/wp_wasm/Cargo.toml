@@ -13,6 +13,8 @@ crate-type = ["cdylib", "rlib"]
 wp_contracts.workspace = true
 wp_math.workspace = true
 wp_sim.workspace = true
+# One-click assist presets (`wp_vehicle::AssistPreset`).
+wp_vehicle.workspace = true
 wp_police.workspace = true
 wp_world.workspace = true
 # Career garage (machine G): repairs the stored lattice of a car between runs
@@ -26,8 +28,6 @@ wp_net.workspace = true
 # Audio director (workstream J); pure logic, wasm32-clean. Used only by src/audio.rs.
 wp_audio.workspace = true
 wp_weather.workspace = true
-# DriftTuning / AssistMode for the drift lab tuning panel (owner rows 90 / 91 / 98).
-wp_vehicle.workspace = true
 # Race picker (workstream 15): judge, AI entrants (wp_opponent), stakes; pure logic, wasm32-clean.
 wp_race.workspace = true
 wp_opponent.workspace = true
@@ -39,6 +39,11 @@ serde_json.workspace = true
 wasm-bindgen.workspace = true
 # Pure-Rust, no_std-capable binary codec for events and replays (wasm32-clean).
 postcard = { version = "1", default-features = false, features = ["alloc"] }
+
+[dev-dependencies]
+# tests/drawn_colliders.rs: classify which static collider a contact hit (already in the tree
+# via wp_sim; dev-only, so never part of the wasm build).
+rapier3d.workspace = true
 
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = false

@@ -7,29 +7,40 @@ import { layers } from "../settings";
 import { W } from "../wasm/layout";
 import { sim } from "../wasm/sim";
 
+/** Minimap redraw interval while the full map is closed (ms): 30 Hz is smooth for a heading-up
+ * map and halves its canvas + map_dynamic cost at 60 fps (browser perf pass). */
+const MINIMAP_EVERY_MS = 33;
+
 export class MapOverlay {
   readonly hud: MapHud;
   private city = "";
+  private lastFrame = -Infinity;
 
   constructor(parent: HTMLElement, onOpenChange?: (open: boolean) => void) {
-    // Left column, under the input panel: the testbed's bottom-right corner holds the event feed
-    // and the audio panel.
-    this.hud = mountMapHud(parent, { onOpenChange, minimapPlacement: { left: "8px", top: "312px", right: "auto", bottom: "auto" } });
+    // Bottom-right corner (playtest row 67): clear of the developer panel (bottom-left), the race
+    // HUD (top-left), the pursuit banner (centre) and the damage silhouette (top-right).
+    this.hud = mountMapHud(parent, { onOpenChange, minimapPlacement: { right: "8px", bottom: "8px", left: "auto", top: "auto" } });
   }
 
   /** New session: fetch the static map when the city changed. */
   reset(): void {
+    this.lastFrame = -Infinity;
     const id = sim.worldInfo()[W.city] > 0.5 ? sim.cityId() : "";
     if (id === this.city) return;
     this.city = id;
     this.hud.setStatic(id ? sim.mapStaticJson() : null);
   }
 
-  /** One frame (after the sim step). */
-  frame(player: number, nowMs: number): void {
+  /** One frame (after the sim step). `mayRest`: the frame loop is slow (software GL, < 8 fps)
+   * and this frame may skip the minimap redraw (its canvas upload + composite cost ~10 ms there). */
+  frame(player: number, nowMs: number, mayRest = false): void {
     if (!this.city) return;
-    this.hud.setMinimapVisible(layers.on("minimap"));
+    const minimap = layers.on("minimap");
+    this.hud.setMinimapVisible(minimap);
     this.hud.setSignals(layers.on("mapSignals"));
+    // Full map open: every frame (pan / zoom); minimap only: throttled; neither: nothing to draw.
+    if (!this.hud.isOpen && (!minimap || mayRest || nowMs - this.lastFrame < MINIMAP_EVERY_MS)) return;
+    this.lastFrame = nowMs;
     this.hud.frame(sim.mapDynamic(player), nowMs);
   }
 

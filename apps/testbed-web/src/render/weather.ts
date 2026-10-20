@@ -9,6 +9,7 @@
 // instructions on the road materials. Without weather everything here is hidden and the road
 // materials render exactly as before (uWetOn = 0, envMapIntensity = 0).
 import * as THREE from "three";
+import { tagFeature } from "../perf";
 import { S, STATE_STRIDE } from "../wasm/layout";
 
 /** Offsets inside weather_info() (crates/wp_wasm/src/weather.rs `info`). */
@@ -33,6 +34,9 @@ export const WX = {
   aquaplane: 17,
 } as const;
 
+const FOG_DAY = new THREE.Color(0xa7afb6);
+const FOG_NIGHT = new THREE.Color(0x0b0e14);
+
 /** Regime names by `WeatherKind::code`. */
 export const WEATHER_NAMES = ["clear", "overcast", "light rain", "heavy rain", "fog"];
 
@@ -45,7 +49,16 @@ const RAIN_BOX = new THREE.Vector3(70, 36, 70);
 /** Spray particle pool (all cars together). */
 const SPRAY_MAX = 1500;
 /** Road materials that get wet (data/city/*.greybox.glb material names). */
-const WET_MATERIALS = new Set(["asphalt", "highway_concrete", "parking", "sidewalk", "kerb", "bridge"]);
+const WET_MATERIALS = new Set([
+  "asphalt",
+  "highway_concrete",
+  "parking",
+  "sidewalk",
+  "sidewalk_corner",
+  "lot",
+  "kerb",
+  "bridge",
+]);
 
 const RAIN_VERT = /* glsl */ `
   attribute vec3 offset;
@@ -104,12 +117,17 @@ export class WeatherView {
   private readonly rainMat: THREE.ShaderMaterial;
   private readonly sprayGeo = new THREE.BufferGeometry();
   private readonly spray: THREE.Points;
+  private readonly sprayMat: THREE.ShaderMaterial;
   private readonly sprayPos = new Float32Array(SPRAY_MAX * 3);
   private readonly sprayVel = new Float32Array(SPRAY_MAX * 3);
   private readonly sprayAlpha = new Float32Array(SPRAY_MAX);
   private readonly particles: Particle[] = Array.from({ length: SPRAY_MAX }, () => ({ life: 0, max: 1 }));
   private sprayNext = 0;
   private readonly fog = new THREE.FogExp2(0x9aa3ab, 0);
+  private readonly fogGrey = new THREE.Color();
+  /** Last weather HUD text (only rewritten when it changes) and wiper angle. */
+  private hudHtml = "";
+  private hudShown: boolean | null = null;
   private readonly wetUniforms = {
     uWetGrid: { value: new THREE.DataTexture(new Uint8Array(2), 1, 1, THREE.RGFormat) as THREE.Texture },
     uWetRect: { value: new THREE.Vector4(0, 0, 1, 1) },
@@ -124,12 +142,14 @@ export class WeatherView {
   private readonly hud: HTMLElement;
   private readonly wipers: HTMLElement;
   private readonly blades: HTMLElement[];
+  /** Fraction of the rain streak pool drawn (graphics quality; 1 = all). */
+  rainFraction = 1;
   /** Last weather_info(), for automation and the HUD. */
   info: Float32Array = new Float32Array(18);
 
   constructor(
     private readonly scene: THREE.Scene,
-    renderer: THREE.WebGLRenderer,
+    private readonly renderer: THREE.WebGLRenderer,
     overlay: HTMLElement,
   ) {
     // Rain: 2-vertex streak, instanced; all motion in the vertex shader.
@@ -161,7 +181,7 @@ export class WeatherView {
     this.rain.frustumCulled = false;
     this.rain.visible = false;
     this.rain.renderOrder = 5;
-    scene.add(this.rain);
+    scene.add(tagFeature(this.rain, "weather"));
 
     // Spray: one Points cloud in Three's world space (sim positions converted on spawn).
     this.sprayGeo.setAttribute("position", new THREE.BufferAttribute(this.sprayPos, 3));
@@ -190,9 +210,10 @@ export class WeatherView {
         }`,
     });
     this.spray = new THREE.Points(this.sprayGeo, sprayMat);
+    this.sprayMat = sprayMat;
     this.spray.frustumCulled = false;
     this.spray.renderOrder = 4;
-    scene.add(this.spray);
+    scene.add(tagFeature(this.spray, "weather"));
 
     // Reflections for wet roads (intensity 0 when dry, so dry roads look as before): an
     // overcast sky dome, light grey above the horizon, dark below, so wet asphalt reads darker
@@ -301,6 +322,8 @@ export class WeatherView {
     this.updateFog(on, info, night);
     this.updateRain(on, info, camera, night);
     this.updateRoads(on, info, night, dt, grid);
+    // Point size follows the resolution scale (graphics quality can change it at run time).
+    this.sprayMat.uniforms.uScale.value = this.renderer.getPixelRatio() * 420;
     this.updateSpray(on, dt, states, spray);
     this.updateWipers(on && mounted, info, dt);
     this.updateHud(on, info);
@@ -315,7 +338,7 @@ export class WeatherView {
     // Koschmieder: visibility = 3.912 / extinction. Clear air (800 m) keeps only a light haze.
     const vis = Math.max(info[WX.visibilityM], 30);
     this.fog.density = vis >= 799 ? 0.0012 * info[WX.cloud] : 3.0 / vis;
-    const grey = new THREE.Color(0xa7afb6).lerp(new THREE.Color(0x0b0e14), Math.min(1, night * 1.1));
+    const grey = this.fogGrey.copy(FOG_DAY).lerp(FOG_NIGHT, Math.min(1, night * 1.1));
     this.fog.color.copy(grey);
     // Sky follows the fog colour as the weather closes in.
     const bg = this.scene.background;
@@ -327,7 +350,7 @@ export class WeatherView {
     this.rain.visible = rate > 0.05;
     if (!this.rain.visible) return;
     // Light drizzle ~15 % of the pool, a 16 mm/h downpour all of it.
-    this.rainGeo.instanceCount = Math.round(RAIN_MAX * Math.min(1, 0.12 + rate / 14));
+    this.rainGeo.instanceCount = Math.round(RAIN_MAX * this.rainFraction * Math.min(1, 0.12 + rate / 14));
     const u = this.rainMat.uniforms;
     u.uTime.value = this.time;
     (u.uCam.value as THREE.Vector3).copy(camera.position);
@@ -444,7 +467,10 @@ export class WeatherView {
   }
 
   private updateHud(on: boolean, info: Float32Array): void {
-    this.hud.style.display = on ? "" : "none";
+    if (on !== this.hudShown) {
+      this.hudShown = on;
+      this.hud.style.display = on ? "" : "none";
+    }
     if (!on) return;
     const name = WEATHER_NAMES[info[WX.kind]] ?? "?";
     const water = info[WX.waterMm];
@@ -454,10 +480,15 @@ export class WeatherView {
       info[WX.wetness] > 0.8 ? "wet" :
       info[WX.wetness] > 0.15 ? "damp" : "dry";
     const plane = info[WX.aquaplane];
-    this.hud.innerHTML =
+    const html =
       `${name}${info[WX.locked] > 0.5 ? "" : " (dynamic)"} · ` +
       (info[WX.rainMmH] > 0.05 ? `${info[WX.rainMmH].toFixed(1)} mm/h · ` : "") +
       `vis ${Math.round(info[WX.visibilityM])} m · ${info[WX.airC].toFixed(0)} °C · road <b>${road}</b>` +
       (plane > 0.25 ? ` · <b style="color:#ff5040">AQUAPLANING ${Math.round(plane * 100)}%</b>` : "");
+    // DOM writes only on change (it was re-parsed every frame).
+    if (html !== this.hudHtml) {
+      this.hudHtml = html;
+      this.hud.innerHTML = html;
+    }
   }
 }

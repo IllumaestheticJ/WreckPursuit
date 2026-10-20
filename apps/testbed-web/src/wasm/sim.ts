@@ -4,6 +4,18 @@ import initWasm, * as wasm from "./pkg/wp_wasm.js";
 import type { PoliceStatus } from "../police";
 
 /** Driver input in the testbed (packed to Float32Array for set_input). */
+/** Result of `resetInPlace`. */
+export interface ResetInPlace {
+  x: number;
+  y: number;
+  yaw: number;
+  /** Landed on a lane (false: set upright where it was, no lane within 15 m). */
+  on_lane: boolean;
+  repaired: boolean;
+  /** Ghost window, physics ticks: the car passes through other cars, props and debris. */
+  ghost_ticks: number;
+}
+
 export interface DriverInput {
   steer: number;
   throttle: number;
@@ -135,6 +147,42 @@ export interface ReplayStatus {
   hash_spec: number;
 }
 
+/** A detected big crash (crates/wp_wasm/src/crash_replay.rs `CrashMark`). */
+export interface CrashMark {
+  seq: number;
+  /** Impact tick (strongest contact). */
+  tick: number;
+  player: number;
+  /** Other entity, null = static world. */
+  other: number | null;
+  closing_mps: number;
+  delta_v_mps: number;
+  health_drop: number;
+  /** World contact point (sim space). */
+  point: [number, number, number];
+  /** Unit vector car centre → contact point, chassis space. */
+  dir_local: [number, number, number];
+  side: "front" | "rear" | "left" | "right" | "top";
+}
+
+/** crash_replay_start() JSON (`CrashReplayInfo`). */
+export interface CrashReplayInfo {
+  crash: CrashMark;
+  start_tick: number;
+  end_tick: number;
+  live_tick: number;
+  live_hash: string;
+}
+
+/** Big-crash thresholds (`CrashTuning`). */
+export interface CrashTuning {
+  min_closing_mps: number;
+  min_delta_v_mps: number;
+  min_health_drop: number;
+  window_ticks: number;
+  cooldown_ticks: number;
+}
+
 /** SimEvent as decoded by events_decode (serde externally tagged). */
 export type SimEvent = Record<string, Record<string, unknown>>;
 
@@ -146,6 +194,8 @@ export function packInput(i: DriverInput): Float32Array {
   const flags = (i.gearUp ? 1 : 0) | (i.gearDown ? 2 : 0) | (i.horn ? 4 : 0) | (i.headlights ? 8 : 0);
   return new Float32Array([i.steer, i.throttle, i.brake, i.handbrake, i.clutch, flags, 0]);
 }
+
+let lastEventsJson = "";
 
 export const sim = {
   /** Start a live session from scenario JSON; `scripted` = drive entities by their drivers. */
@@ -192,12 +242,28 @@ export const sim = {
   setClutchMode: (entity: number, mode: "auto" | "manual"): void => wasm.set_clutch_mode(entity, mode),
   clutchMode: (entity: number): string => wasm.clutch_mode(entity),
   engineStalled: (entity: number): boolean => wasm.engine_stalled(entity),
-  /** Drift-assist tuning (drift lab dev override; 8 values, see wp_wasm DRIFT_TUNING_FIELDS). */
+  /** Drift-assist tuning (drift lab dev override; 9 values, see wp_wasm DRIFT_TUNING_FIELDS). */
   setDriftTuning: (entity: number, values: Float32Array): void => wasm.set_drift_tuning(entity, values),
   driftTuning: (entity: number): number[] => Array.from(wasm.drift_tuning(entity)),
-  /** [body slip °, assist mode (0 off, 1 straighten, 2 catch, 3 hold, 4 exceeded), envelope °]. */
+  /** [body slip °, assist mode (0 off, 1 straighten, 2 catch, 3 hold, 4 exceeded), envelope °, throttle smoothing in effect]. */
   driftState: (entity: number): number[] => Array.from(wasm.drift_state(entity)),
+  /** One-click presets in menu order: ["Rookie", "Street", "Sim"]. */
+  assistPresets: (): string[] => JSON.parse(wasm.assist_presets()),
+  /** Damage mode + assists of a one-click preset for a driver on `source`. */
+  assistPresetNamed: (
+    name: string,
+    source: "Keyboard" | "Gamepad" | "Wheel",
+  ): { mode: "Arcade" | "Simulation"; assists: AssistProfile } => JSON.parse(wasm.assist_preset_named(name, source)),
+  /** The preset a vehicle's assists + the session's damage mode match ("" = customised). */
+  assistPresetOf: (entity: number, source: "Keyboard" | "Gamepad" | "Wheel"): string =>
+    wasm.assist_preset_of(entity, source),
+  /** Back to the spawn pose, pristine (scenario restart). */
   reset: (entity: number): void => wasm.reset_vehicle(entity),
+  /** Reset in place (R): upright at rest on the nearest clear lane within 15 m, heading its own
+   * way; repaired unless a career run is active. Heat, pursuit and race progress carry on. */
+  resetInPlace: (entity: number): ResetInPlace => JSON.parse(wasm.reset_in_place(entity)),
+  /** Physics ticks the vehicle stays a ghost after a reset in place (0 = solid). */
+  ghostTicks: (entity: number): number => wasm.ghost_ticks(entity),
   entities: (): number[] => Array.from(wasm.entities()),
   states: (): Float32Array => wasm.vehicle_states(),
   statesPrev: (): Float32Array => wasm.vehicle_states_prev(),
@@ -217,6 +283,12 @@ export const sim = {
   trafficDraw: (): Float32Array => wasm.traffic_draw(),
   /** Every police unit, bound or not (layout.ts DRAW_STRIDE / D). */
   policeDraw: (): Float32Array => wasm.police_draw(),
+  /** Every city prop once per session (layout.ts PROP_STRIDE / P): kind, box-centre pose, half extents. */
+  propsStatic: (): Float32Array => wasm.props_static(),
+  /** Props whose pose changed since the last call (layout.ts PROP_MOVED_STRIDE / PM). Once per frame. */
+  propsMoved: (): Float32Array => wasm.props_moved(),
+  /** The sim's pose of one prop `[x, y, z, qx, qy, qz, qw]` (automation). */
+  propPose: (index: number): Float32Array => wasm.prop_pose(index),
   /** Car models this session can show: every id, plus the traffic and police models (or null). */
   sessionCarModels: (): SessionModels => JSON.parse(wasm.session_car_models()),
   /** Body size and wheels of a car model (no vehicle needed). */
@@ -238,8 +310,14 @@ export const sim = {
   eventsDrain: (): SimEvent[] => {
     const bytes = wasm.events_drain();
     // Empty Vec<SimEvent> encodes as a single 0 byte; skip the decode round trip.
-    return bytes.length <= 1 ? [] : JSON.parse(wasm.events_decode(bytes));
+    lastEventsJson = bytes.length <= 1 ? "" : wasm.events_decode(bytes);
+    return lastEventsJson ? JSON.parse(lastEventsJson) : [];
   },
+  /** JSON text of the last `eventsDrain()` ("" when it had no events): the audio director takes
+   * the same JSON, so the frame loop passes this instead of re-stringifying the events. */
+  lastEventsJson: (): string => lastEventsJson,
+  /** Panel states of an entity, PANEL_STRIDE floats per panel (render/panels.ts). */
+  panelStates: (entity: number): Float32Array => wasm.panel_states(entity),
   telemetry: (entity: number): Float32Array => wasm.telemetry(entity),
   telemetryNames: (): string[] => JSON.parse(wasm.telemetry_names()),
   ffb: (entity: number): Float32Array => wasm.ffb(entity),
@@ -251,6 +329,18 @@ export const sim = {
   replaySeek: (tick: number): void => wasm.replay_seek(tick),
   replayPlay: (speed: number): void => wasm.replay_play(speed),
   replayStatus: (): ReplayStatus | null => JSON.parse(wasm.replay_status()),
+  /** Big crash detected since the last call (live sessions), or null. */
+  crashTake: (): CrashMark | null => JSON.parse(wasm.crash_take()),
+  crashTuning: (): CrashTuning => JSON.parse(wasm.crash_tuning_json()),
+  crashTuningSet: (t: Partial<CrashTuning>): void => wasm.crash_tuning_set(JSON.stringify(t)),
+  /** Replay buffer + crash detection on/off for this session (off for benches). */
+  crashDetectEnable: (on: boolean): void => wasm.crash_detect_enable(on),
+  crashBufferTicks: (): number[] => Array.from(wasm.crash_buffer_ticks()),
+  /** Park the live session and play crash `seq` (impact − 3 s … + 2 s) as a replay. */
+  crashReplayStart: (seq: number): CrashReplayInfo => JSON.parse(wasm.crash_replay_start(seq)),
+  crashReplayActive: (): boolean => wasm.crash_replay_active(),
+  /** Back to the parked live session, exactly as it was: its tick and state hash. */
+  crashReplayStop: (): { tick: number; hash: string } | null => JSON.parse(wasm.crash_replay_stop()),
   replayCsv: (bytes: Uint8Array, entity: number, everyNTicks: number): string =>
     wasm.replay_export_csv(bytes, entity, everyNTicks),
   scenario: (): Scenario => JSON.parse(wasm.scenario_json()),
@@ -283,6 +373,8 @@ export const sim = {
   debugSetHeat: (entity: number, heat: number): void => wasm.debug_set_heat(entity, heat),
   /** Debug / e2e: park `entity` stopped `aheadM` in front of the first police car (throws if none yet). */
   debugParkNearPolice: (entity: number, aheadM: number): number => wasm.debug_park_near_police(entity, aheadM),
+  /** Aim `entity` at a parked car (`prop` < 0: the nearest) at `speed` m/s; returns the prop index. */
+  debugKnockProp: (entity: number, prop: number, speed: number): number => wasm.debug_knock_prop(entity, prop, speed),
 
   // ----- career (machine G; crates/wp_wasm/src/career.rs). Every call throws on refusal. ---
   careerNew: (mode: string): CareerView => JSON.parse(wasm.career_new(mode)),
@@ -296,6 +388,8 @@ export const sim = {
   careerStartRun: (scenarioJson: string): number[] => Array.from(wasm.career_start_run(scenarioJson)),
   /** End the career run (back to the garage; one night passes). */
   careerEndRun: (): RunClose | null => JSON.parse(wasm.career_end_run()),
+  /** The bust settled on load because the game was closed during a pursuit (B05), once. */
+  careerTakeAbandoned: (): RunClose | null => JSON.parse(wasm.career_take_abandoned_json()),
   careerBuy: (defId: string, condition: string): CareerView => JSON.parse(wasm.career_buy_car(defId, condition)),
   careerFloorCar: (): CareerView => JSON.parse(wasm.career_floor_car()),
   careerSell: (uid: number): CareerView => JSON.parse(wasm.career_sell_car(uid)),

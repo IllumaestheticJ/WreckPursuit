@@ -77,6 +77,8 @@ export interface HudFrame {
   viewsMs: number;
   /** Real-time factor: sim seconds per wall second (1 = real time). */
   rtf: number;
+  /** Graphics quality label (render/quality.ts). */
+  gfx?: string;
   tick: number;
   hours: number;
   hash: string;
@@ -87,6 +89,8 @@ export interface HudFrame {
   regionsOfNodes: Uint8Array | null;
   rest: Float32Array | null;
   camera: string;
+  /** Speed units (game menu setting; default km/h). */
+  units?: "kmh" | "mph";
 }
 
 export class Hud {
@@ -113,18 +117,22 @@ export class Hud {
     this.feed = el("div", "panel feed", right);
     this.inputs = el("div", "panel inputs", left);
     this.help = el("div", "panel help hidden", root);
+    this.setControlsHelp([]);
+  }
+
+  /** Rebuild the help overlay with the current bindings (one line per action). */
+  setControlsHelp(bindingLines: string[]): void {
     this.help.innerHTML =
-      `<b>WreckPursuit testbed — keys</b><br>` +
-      `W/S or ↑/↓ throttle/brake · A/D or ←/→ steer · Space handbrake · Shift/Ctrl gear up/down<br>` +
-      `R reset · O headlights · Q horn · V mute · \` (backquote) follow the next car<br>` +
-      `M or Tab city map (drag / wheel / arrows / + − / 0 whole city / F follow inside it; driving input is paused while it is open)<br>` +
+      `<b>WreckPursuit testbed — controls</b> <span class="dim">(change them in the controls panel: F9 by default, or the “controls” button)</span><br>` +
+      `<div class="help-binds">${bindingLines.join("<br>")}</div>` +
+      `<br>Inside the city map: drag / wheel / arrows / + − / 0 whole city / F follow (driving input is paused while it is open)<br>` +
       `<b>Cameras</b> ${CAMERA_HELP}<br>` +
-      `F1 or ? this help · P pause · . frame step (replay) · [ / ] replay speed · F repair bill<br><br>` +
+      `. frame step (replay) · [ / ] replay speed<br><br>` +
       `<b>Countersteer help</b> (slider, keyboard/gamepad): in a slide, <i>let go</i> of the steering ` +
       `and the front wheels follow the car's travel (straighten); press <i>against</i> the slide for a ` +
-      `fast catch; hold the key <i>into</i> the turn with throttle on to hold the drift angle (tap ` +
-      `the throttle: more grows it, lifting shrinks it). Past the slide envelope it lets go and you ` +
-      `can spin. 0 % off, 60 % keyboard default, 100 % fast and widest. Drift lab + tuning: F8.<br><br>` +
+      `fast catch (0 % off, 100 % fastest). It never fights your input, and the handbrake turns the ` +
+      `car freely. Drift lab + tuning: F8.<br><br>` +
+      `<b>Debug layers</b><br>` +
       LAYERS.map((l) => `${l.key.replace(/^(Key|Digit)/, "")} — ${l.label}`).join("<br>") +
       `<br><br>${AUDIO_CREDITS}`;
   }
@@ -141,6 +149,12 @@ export class Hud {
     this.feedLines.length = Math.min(this.feedLines.length, 12);
   }
 
+  /** Add one line of text to the top of the event feed. */
+  note(text: string): void {
+    this.feedLines.unshift(text);
+    this.feedLines.length = Math.min(this.feedLines.length, 12);
+  }
+
   clearEvents(): void {
     this.feedLines.length = 0;
   }
@@ -151,7 +165,8 @@ export class Hud {
 
   update(f: HudFrame): void {
     const t = f.tel;
-    const speed = t ? t[T.speed] * 3.6 : 0;
+    const mph = f.units === "mph";
+    const speed = t ? t[T.speed] * (mph ? 2.236936 : 3.6) : 0;
     const rpm = t ? t[T.rpm] : 0;
     const gear = t ? t[T.gear] : 0;
     const redline = f.info?.redline_rpm ?? 7000;
@@ -162,17 +177,18 @@ export class Hud {
     const hh = Math.floor(f.hours);
     const mm = Math.floor((f.hours - hh) * 60);
     this.main.innerHTML =
-      `<div class="speed">${speed.toFixed(0)}<small> km/h</small> <span class="gear">${gearTxt}</span></div>` +
+      `<div class="speed">${Math.abs(speed).toFixed(0)}<small> ${mph ? "mph" : "km/h"}</small> <span class="gear">${gearTxt}</span></div>` +
       `<div>rpm ${rpm.toFixed(0)} ${bar(rpm / limit, rpm > redline ? "#ff4040" : "#40c0ff")}</div>` +
       `<div>${badge(true, f.mode)}${f.replay ? badge(true, "REPLAY") : ""}${f.recording ? '<span class="badge rec">● REC</span>' : ""}</div>` +
       (a
         ? `<div>${badge(a.abs, "ABS")}${badge(a.tcs, "TCS")}${badge(a.esc, "ESC")}${badge(a.steer_speed_sensitivity > 0, "STEER")}` +
-          `${badge(a.countersteer_help > 0, "CSTR")}${badge(a.throttle_filter > 0, "THR-F")}${badge(a.auto_gears, "AUTO")}</div>`
+          `${badge(a.countersteer_help > 0, "CSTR")}${badge(a.throttle_filter > 0, "THR-F")}${badge(a.auto_gears, "AUTO")}${badge(a.auto_clutch, a.auto_clutch ? "A-CLU" : "M-CLU")}</div>`
         : "") +
       `<div class="dim">${f.fps.toFixed(0)} fps · sim ${f.simMs.toFixed(2)} ms · views ${f.viewsMs.toFixed(1)} ms · render ${f.renderMs.toFixed(2)} ms · ${f.vehicles} car(s)</div>` +
       (f.rtf < RTF_WARN
         ? `<div class="rtf-warn">⚠ slow motion: ${f.rtf.toFixed(2)}× real time (browser can't keep up)</div>`
         : `<div class="dim">real time ${f.rtf.toFixed(2)}×</div>`) +
+      (f.gfx ? `<div class="dim">gfx ${f.gfx}</div>` : "") +
       `<div class="dim">tick ${f.tick} · ${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")} · cam ${f.camera} · hash ${f.hash}</div>` +
       `<div class="dim">health ${t ? (t[T.health] * 100).toFixed(0) : "–"}% · ${f.info?.display_name ?? ""} · F1 help</div>`;
 

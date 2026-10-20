@@ -308,3 +308,140 @@ fn vesper_free_drive_stays_on_the_ground_with_traffic() {
     }
     assert!(s.sim().world().agent_count() > 10, "traffic spawned");
 }
+
+#[test]
+fn one_click_assist_presets_set_mode_and_assists_together() {
+    use wp_contracts::InputSource;
+    use wp_vehicle::AssistPreset;
+    let mut s = Session::new(free_drive("debug_sedan", DamageMode::Arcade, false), false).unwrap();
+    let p = EntityId(1);
+    for preset in AssistPreset::ALL {
+        // What the testbed's preset button does: damage mode + assists in one click.
+        s.set_mode(preset.damage_mode()).unwrap();
+        s.set_assists(p, preset.assists(InputSource::Keyboard))
+            .unwrap();
+        s.step(1.0 / 60.0);
+        assert_eq!(s.mode(), preset.damage_mode());
+        let a = s.assists(p).unwrap();
+        assert_eq!(
+            AssistPreset::matching(&a, s.mode(), InputSource::Keyboard),
+            Some(preset)
+        );
+    }
+    // Ticking one box afterwards makes it a custom setup.
+    let mut a = s.assists(p).unwrap();
+    a.abs = true;
+    s.set_assists(p, a).unwrap();
+    assert_eq!(
+        AssistPreset::matching(&s.assists(p).unwrap(), s.mode(), InputSource::Keyboard),
+        None
+    );
+}
+
+/// Reset in place (playtest row 65): after the barrier crash the car is put back upright near
+/// the crash, clear of the barrier, at rest and repaired; without repair (career) the damage
+/// stays. The `ResetAt` op replays bit-exactly in simcli and in the browser core.
+#[test]
+fn reset_in_place_repairs_near_the_crash_and_replays() {
+    let sc = scenario_file("crash/barrier_frontal.ron");
+    let barrier = sc.barriers[0];
+    for repair in [true, false] {
+        let mut s = Session::new(sc.clone(), true).unwrap();
+        let p = EntityId(1);
+        // Scripted crash (7 s), then live.
+        s.run_ticks(7 * 240 + 1);
+        s.record_start();
+        let before = s.sim().vehicle_states()[0].1.clone();
+        assert!(
+            before.health < 0.99,
+            "the crash damaged the car ({})",
+            before.health
+        );
+        let pose = s.reset_in_place(p, repair).unwrap();
+        assert_eq!(
+            s.sim().ghost_ticks(p),
+            Some(u32::from(crate::reset::GHOST_TICKS)),
+            "a reset car is a ghost for 1 s"
+        );
+        let d =
+            ((pose.xy[0] - before.pos[0]).powi(2) + (pose.xy[1] - before.pos[1]).powi(2)).sqrt();
+        assert!(d <= crate::reset::SNAP_RADIUS_M, "moved {d} m");
+        assert!(
+            crate::reset::is_clear(
+                pose.xy,
+                pose.yaw,
+                &[crate::reset::Obstacle {
+                    pos: barrier.pos,
+                    yaw: barrier.yaw,
+                    half: [barrier.size[0] * 0.5, barrier.size[1] * 0.5],
+                }]
+            ),
+            "reset pose overlaps the barrier: {pose:?}"
+        );
+        // The scripted cruise input is still applied: hold the car still.
+        s.set_input(p, VehicleInput::default()).unwrap();
+        s.run_ticks(240);
+        let after = s.sim().vehicle_states()[0].1.clone();
+        // Upright: chassis up axis (from the quaternion) points up.
+        let q = after.rot;
+        let up_z = 1.0 - 2.0 * (q[0] * q[0] + q[1] * q[1]);
+        assert!(up_z > 0.95, "upright after reset (up·z {up_z})");
+        assert!(
+            after.speed_mps.abs() < 1.0,
+            "at rest ({} m/s)",
+            after.speed_mps
+        );
+        if repair {
+            assert!(after.health > 0.999, "repaired ({})", after.health);
+        } else {
+            assert!(
+                (after.health - before.health).abs() < 1e-3,
+                "career reset keeps the damage ({} → {})",
+                before.health,
+                after.health
+            );
+        }
+        let bytes = s.record_stop().unwrap().encode();
+        let rp = Replay::decode(&bytes).unwrap();
+        assert!(rp.ops.iter().any(
+            |o| matches!(o.op, simcli::replay::OpKind::ResetAt { repair: r, .. } if r == repair)
+        ));
+        assert!(rp.ops.iter().any(|o| matches!(
+            o.op,
+            simcli::replay::OpKind::Ghost { ticks } if ticks == crate::reset::GHOST_TICKS
+        )));
+        // 240 ticks ran since the reset: the window is over (the car is clear of the barrier).
+        assert_eq!(
+            s.sim().ghost_ticks(p),
+            Some(0),
+            "solid again after the window"
+        );
+        let report = replay::verify(&rp, mem_data()).unwrap();
+        assert!(report.matched, "{}", report.to_text());
+    }
+}
+
+/// In a city chase, reset in place lands on a lane near the car, heading its way, and keeps
+/// the police heat.
+#[test]
+fn reset_in_place_in_the_city_snaps_to_a_lane_and_keeps_heat() {
+    let sc = crate::scenario::city_chase("debug_sedan", DamageMode::Arcade);
+    let mut s = Session::new(sc, false).unwrap();
+    let p = EntityId(1);
+    s.set_input(p, drive(0.6, 0.15)).unwrap();
+    s.run_ticks(240 * 3);
+    s.debug_sim_mut().unwrap().police_mut().set_heat(p, 0.6);
+    let heat0 = crate::police::status(s.sim().police(), p).heat;
+    let before = s.sim().vehicle_states()[0].1.clone();
+    let pose = s.reset_in_place(p, true).unwrap();
+    let heat1 = crate::police::status(s.sim().police(), p).heat;
+    assert!(pose.on_lane, "city reset lands on a lane: {pose:?}");
+    let d = ((pose.xy[0] - before.pos[0]).powi(2) + (pose.xy[1] - before.pos[1]).powi(2)).sqrt();
+    assert!(d <= crate::reset::SNAP_RADIUS_M, "moved {d} m");
+    assert!(
+        (heat1 - heat0).abs() < 1e-6,
+        "heat kept ({heat0} → {heat1})"
+    );
+    let st = s.sim().vehicle_states()[0].1.clone();
+    assert!(st.speed_mps.abs() < 0.01 && st.health > 0.999);
+}

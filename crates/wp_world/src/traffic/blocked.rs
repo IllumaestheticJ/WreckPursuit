@@ -38,6 +38,13 @@ pub const OBSTACLE_GAP_M: f32 = 6.0;
 /// While pulling out to pass, aim this much further left than the oncoming lane's centre (a
 /// physical car then turns out more sharply and clears the obstruction sooner), m.
 pub const PASS_PULL_OUT_EXTRA_M: f32 = 0.6;
+/// A car outside any manoeuvre whose centre is this far left of its lane, towards the oncoming
+/// lane, also occupies that lane (same threshold as a passing car's entry), m.
+pub const STRAY_INTRUSION_LAT_M: f32 = 0.8;
+/// A car left over the centre line ([`STRAY_INTRUSION_LAT_M`]) also holds oncoming traffic this
+/// far up the oncoming lane, so cars arriving later stop clear of the room
+/// [`turn_oncoming_room`] asks for and it can still turn around out of the spot, m.
+pub const STRAY_HOLD_BACK_M: f32 = 22.0;
 /// A pass held behind the obstruction (body not clear) for this long is abandoned, s.
 pub const PASS_STALL_S: f32 = 4.0;
 /// Time a driver stands behind an obstruction before acting (on top of its patience for how
@@ -279,7 +286,7 @@ impl Agent {
     pub(super) fn intrusions(&self) -> impl Iterator<Item = (SegId, f32, f32)> {
         let mut out: [Option<(SegId, f32, f32)>; 2] = [None, None];
         match self.manoeuvre.as_deref() {
-            Some(Manoeuvre::Pass(p)) if self.lat.abs() > 0.8 => {
+            Some(Manoeuvre::Pass(p)) if self.lat.abs() > STRAY_INTRUSION_LAT_M => {
                 out[0] = Some((p.opp, p.opp_s, -self.v));
             }
             Some(Manoeuvre::Turn(t)) => {
@@ -495,6 +502,28 @@ impl Traffic {
             }
         }
         Wait::Obstructed
+    }
+
+    /// Agents not in a manoeuvre that still stand over the centre line, more than
+    /// [`STRAY_INTRUSION_LAT_M`] towards the oncoming lane: `(agent, oncoming lane, s there)`.
+    ///
+    /// A pass that is given up while the car is beside the obstruction leaves it there (a
+    /// physical car at a standstill cannot steer back), nose out in the oncoming lane. It still
+    /// takes up that lane, so oncoming traffic must stop for it as for a passing car.
+    pub(super) fn stray_intrusions(&self, map: &CityMap) -> Vec<(usize, SegId, f32)> {
+        let mut out = Vec::new();
+        for (i, a) in self.agents.iter().enumerate() {
+            if a.manoeuvre.is_some() || a.lat > -STRAY_INTRUSION_LAT_M {
+                continue;
+            }
+            let opp = self.opposite[a.seg as usize];
+            if opp == NONE {
+                continue;
+            }
+            let (pos, _) = self.pose_of(map, a);
+            out.push((i, opp, map.seg(opp).project(geom::xy(pos)).s));
+        }
+        out
     }
 
     /// Refresh where passing / turning agents sit on the lane they intrude into.

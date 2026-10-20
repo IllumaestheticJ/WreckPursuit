@@ -109,6 +109,20 @@ pub struct DamageTuning {
     pub arcade_settle_fraction: f32,
     /// Arcade only: time for the limp-mode settle to complete, s.
     pub arcade_settle_s: f32,
+    /// Arcade only: multiplier on the toe/camber change reported in `HandlingEffects` (the
+    /// stored suspension geometry stays physical, so switching modes or saving is unaffected).
+    /// The raw change is up to 0.2 rad; ×0.09 keeps a bent corner a felt pull (≤ ~1°) instead of
+    /// an undrivable one, and below `wp_police`'s 0.02 rad pull-over limit. Stop-gap until
+    /// `ModeTable::alignment_scale` exists (contract request #10).
+    pub arcade_alignment_scale: f32,
+    /// Arcade only: multiplier on the region-weighted plastic energy that lowers structural
+    /// health (the visible deformation is unchanged; it takes more crumpling to wreck a car).
+    /// Stop-gap until `ModeTable::structural_health_scale` exists (contract request #10).
+    pub arcade_structural_health_scale: f32,
+    /// Arcade only: `steer_ratio_scale` of a failed steering rack (Simulation: 0.3, about a
+    /// third of the lock, which makes city corners impossible). 0.5 = what a rack at zero
+    /// health gives anyway: badly degraded, still drivable.
+    pub arcade_failed_steer_ratio: f32,
 }
 
 impl Default for DamageTuning {
@@ -158,6 +172,9 @@ impl Default for DamageTuning {
             arcade_cosmetic_health_share: 0.25,
             arcade_settle_fraction: 0.3,
             arcade_settle_s: 20.0,
+            arcade_alignment_scale: 0.09,
+            arcade_structural_health_scale: 0.42,
+            arcade_failed_steer_ratio: 0.5,
         }
     }
 }

@@ -1,7 +1,7 @@
 // Audio debug panel: master + per-bus sliders, mute (M), scanner tier, siren mode for the
 // focused car, test radio lines, voice/culling counters and the radio log.
 
-import { BUSES, type Bus, type DirectorStats, type RadioPriority, type SampleStatus, type SoundSource } from "./types";
+import { BUSES, type Bus, type DirectorStats, type EngineVoicing, type RadioPriority, type SampleStatus, type SoundSource } from "./types";
 import type { RadioLog } from "./scanner";
 
 const STORE_KEY = "wp.testbed.audio.v1";
@@ -16,6 +16,10 @@ export interface PanelSettings {
   source: SoundSource;
   /** City ambience bed gain (0 = off). */
   ambience: number;
+  /** Modelled engine synthesizer (default) or layers for every car. */
+  engine: EngineVoicing;
+  /** Impacts & horns: modelled synthesis layered on the recordings (default) or recordings only. */
+  impacts: "synth" | "recorded";
 }
 
 function loadSettings(): PanelSettings {
@@ -27,6 +31,8 @@ function loadSettings(): PanelSettings {
     open: false,
     source: "recorded",
     ambience: 0.5,
+    engine: "modelled",
+    impacts: "synth",
   };
   try {
     const s = JSON.parse(localStorage.getItem(STORE_KEY) ?? "{}");
@@ -46,6 +52,8 @@ export interface PanelHandlers {
   testRadio(priority: RadioPriority): void;
   setSource(source: SoundSource): void;
   setAmbience(gain: number): void;
+  setEngineVoicing(v: EngineVoicing): void;
+  setImpacts(mode: "synth" | "recorded"): void;
 }
 
 export class AudioPanel {
@@ -55,6 +63,7 @@ export class AudioPanel {
   private stats: HTMLDivElement;
   private log: HTMLDivElement;
   private body: HTMLDivElement;
+  private ttsBox: HTMLInputElement | null = null;
 
   constructor(parent: HTMLElement, private h: PanelHandlers) {
     this.root = document.createElement("div");
@@ -71,7 +80,7 @@ export class AudioPanel {
     });
     const head = document.createElement("div");
     head.style.cursor = "pointer";
-    head.innerHTML = "<b>audio</b> <span class='dim'>(V mute, click to fold)</span>";
+    head.innerHTML = "<b>audio</b> <span class='dim'>(F8 mute — rebindable, click to fold)</span>";
     this.status = document.createElement("div");
     this.status.className = "dim";
     this.body = document.createElement("div");
@@ -106,6 +115,18 @@ export class AudioPanel {
     });
     src.id = "audio-source";
     row("sounds", src).append(" ", Object.assign(document.createElement("span"), { className: "dim", textContent: "(procedural = fallback)" }));
+    const eng = this.select(["modelled", "layers"], this.settings.engine, (v) => {
+      this.settings.engine = v as EngineVoicing;
+      h.setEngineVoicing(this.settings.engine);
+    });
+    eng.id = "audio-engine";
+    row("engines", eng).append(" ", Object.assign(document.createElement("span"), { className: "dim", textContent: "(modelled: player + 6 nearest)" }));
+    const imp = this.select(["synth", "recorded"], this.settings.impacts, (v) => {
+      this.settings.impacts = v === "recorded" ? "recorded" : "synth";
+      h.setImpacts(this.settings.impacts);
+    });
+    imp.id = "audio-impacts";
+    row("impacts & horns", imp);
     this.slider("ambience", this.settings.ambience, (v) => {
       this.settings.ambience = v;
       h.setAmbience(v);
@@ -114,7 +135,7 @@ export class AudioPanel {
       this.settings.tier = v;
       h.setTier(v);
     });
-    const tts = document.createElement("input");
+    const tts = (this.ttsBox = document.createElement("input"));
     tts.type = "checkbox";
     tts.checked = this.settings.tts;
     tts.addEventListener("change", () => {
@@ -147,8 +168,23 @@ export class AudioPanel {
     this.setStatus("click or press a key to start audio");
   }
 
+  /** Append a titled section to the panel body (siren lab). */
+  addSection(title: string, el: HTMLElement): void {
+    const h = document.createElement("div");
+    h.style.marginTop = "6px";
+    h.innerHTML = `<b>${title}</b>`;
+    this.body.append(h, el);
+  }
+
   private applyOpen(): void {
     this.body.style.display = this.settings.open ? "" : "none";
+  }
+
+  /** Spoken radio lines on / off from outside (game menu "Police radio voice"); saved. */
+  setTts(on: boolean): void {
+    this.settings.tts = on;
+    if (this.ttsBox) this.ttsBox.checked = on;
+    this.save();
   }
 
   save(): void {
@@ -195,7 +231,7 @@ export class AudioPanel {
     this.status.textContent = text;
   }
 
-  update(st: DirectorStats, backendVoices: number, radio: RadioLog[], samples: SampleStatus): void {
+  update(st: DirectorStats, backendVoices: number, radio: RadioLog[], samples: SampleStatus, engines = ""): void {
     if (!this.settings.open) return;
     const smp = `samples ${samples.loaded}/${samples.total}` + (samples.failed.length ? ` (${samples.failed.length} failed)` : "");
     const bus = BUSES.map((b) => `${b.toLowerCase()} ${st.per_bus[b] ?? 0}`).join("  ");
@@ -203,7 +239,7 @@ export class AudioPanel {
       `voices ${st.looped} loop + ${st.one_shots} shot (culled ${st.culled})  backend ${backendVoices}\n` +
       `${bus}\n` +
       `vehicles ${st.vehicles}  contact pairs ${st.contact_pairs}  radio q ${st.radio_queued} dropped ${st.radio_dropped}\n` +
-      `${smp}  source ${this.settings.source}`;
+      `${smp}  source ${this.settings.source}${engines ? `\n${engines}` : ""}`;
     this.log.textContent = radio
       .map((l) => `[${l.priority}] unit ${l.unit}: ${l.text}${l.interrupted ? " (cut)" : ""}`)
       .join("\n");
