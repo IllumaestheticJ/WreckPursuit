@@ -138,6 +138,9 @@ pub struct Desire {
     /// Culling score multiplier (1 = normal). Below 1 the voice loses ties against other
     /// entities' voices of the same priority and loudness (a car's second engine layer).
     pub cull_scale: f32,
+    /// Extra low-pass cap, Hz (0 = none): the listener's cabin muffling outside sounds
+    /// (interior camera). The voice's air-absorption low-pass is limited to it.
+    pub lowpass_cap_hz: f32,
 }
 
 impl Desire {
@@ -164,6 +167,7 @@ impl Desire {
             vel,
             synth: None,
             cull_scale: 1.0,
+            lowpass_cap_hz: 0.0,
         }
     }
 }
@@ -236,7 +240,11 @@ impl VoiceMixer {
                 freq_hz: d.freq_hz * sp.doppler,
                 load: d.load,
                 phase: d.phase,
-                lowpass_hz: sp.lowpass_hz,
+                lowpass_hz: if d.lowpass_cap_hz > 0.0 {
+                    sp.lowpass_hz.min(d.lowpass_cap_hz)
+                } else {
+                    sp.lowpass_hz
+                },
                 doppler: sp.doppler,
                 pos: d.pos,
             };
