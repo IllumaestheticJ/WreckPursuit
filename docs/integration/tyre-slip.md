@@ -36,6 +36,41 @@ power-on straightening or the handbrake pivot.
    counter-lock angle. Rack compliance does not widen it; robustness target (27 cases) not
    met: 2 / 27 held (data 0 / 27).
 
+## Grip-balance × spin model (grip-balance's ask, lead/grip-balance @ c7cf0209)
+
+`cargo run --release -p wp_vehicle --example grip_balance -- robust` on their branch (spin model
+tyres via `CarTune::spin_candidate()`, the 27-entry set). "VR" = the steering of the
+"drift: spin + VR (test)" preset (`CarTune::spin_vr_plain()`); "plain" = `PlainSteer::default()`.
+"lock" = smart lock (margin −0.3 / 0.3), "df" = rear downforce C·A 0.8 + probe tilt fix.
+
+| grip set | ride | plain | VR |
+|---|---|---|---|
+| none (data) | lab default | 2 / 27 | 13 / 27 |
+| `lab_default()` ("new") | lab default | 1 | 17 |
+| lock only | lab default | 2 | 12 |
+| lock + df | lab default | 3 | 13 |
+| lock + df + front k 0.6 | lab default | 2 | 18 |
+| **lock + df + rear k 0.45** | lab default | 0 | **20** |
+| lock + df + rear k 0.7 | lab default | 2 | 17 |
+| none | slow weight | 1 | 8 |
+| `for_slow_weight()` | slow weight | 6 | 16 |
+| new | slow weight | 0 | 16 |
+| lock + df + rear k 0.45 | slow weight | 0 | 15 |
+
+- **The softer rear cornering stiffness costs the drift only with the plain steering**, which
+  barely holds anything anyway (0–3 / 27). With the VR steering it **helps** (13 → 20 / 27): the
+  softer rear builds side force more slowly, so VR's catch over-rotates less. The 7 misses of the
+  best set are the deep 20° entries on rwd_d / rwd_a (swap at 29°) and rwd_b's 6° entry at 0.3 /
+  0.7 g (it never gets past 19°). Holds sit at 35–40° body slip, side swaps not spins.
+- Why the spin model hardly cares about B: its spin weighting (`b0`, `b2`, `c`, `p`) is on the
+  raw slip angle (b2·α), not α / peak slip, and the drift lives at 43–51° of rear slip, far past
+  either peak. B only changes (1) the pure side force `Fy0(α)` that the spin weight multiplies:
+  a softer curve falls off less past the peak, so a bit more rear side force deep in the slide,
+  and (2) the drive floor's share `sx / s` (s = √(sx² + sy²), sy = α / peak slip), which grows
+  slightly as the peak slip moves out. Neither needs a "below 10° only" split.
+- So: judge drift with the VR steering (the A/B preset), not the plain steering. Grip's
+  "new" set is drift-positive there.
+
 ## Speed bleed in the hold (lead: "57 → 37 km/h; drive floor or rear drag?")
 
 `tyre_slip -- bleed parity_rwd_d` (counter key at 6° + full throttle, lab circle; means over
