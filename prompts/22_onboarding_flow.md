@@ -54,7 +54,7 @@ minimal, list it under "Changes outside my crates" and tell the owning machine.
   - G is building a garage and career that persist between runs (STATUS step 2): use it rather
     than inventing your own save.
 - **Cars.** Intro car `rampart_50` ("Rampart 5.0", Muscle, RWD). Player car `junkyard_beater`.
-  Police `sentinel_cruiser`.
+  Parked patrol car for beat 4: `sentinel_cruiser`.
 - **Race (L) and opponents (N).**
   - The pieces exist: `wp_race::bridge::plan_city_race`, `RaceJudge`, `entrants::AiEntrants`,
     the economy bridge, and `wp_opponent::Field`.
@@ -168,8 +168,8 @@ budget and a skip.
      explained.
    - Then the Garage screen with the mod tree teaser.
    - Exit: the garage screen is closed. Mark onboarding complete in the player's profile.
-   - Hand-off: show one card offering what's next (another meet, free roam, or a cop shift
-     with `sentinel_cruiser`, per GDD §9 step 7). That card is the end of this workstream.
+     The flow ends there, with the player in their garage: no follow-up card or role offer
+     (the normal game takes over from the garage).
 
 **Cross-cutting rules:**
 - **Assists.** The default is the GDD "Street" preset (through your mapping).

@@ -345,9 +345,8 @@ the player does. Every outcome leads on to the next step. Built by prompt 22 (`w
    impound). A player who drives clean never gets chased, and is told so.
 5. **Garage:** the repair bill for everything that happened, legit vs crooked shop explained in
    one line (crooked is suggested only while wanted). Repair, repair some or drive damaged; debt
-   is possible and explained. Then the garage screen. Onboarding ends with one card offering
-   another meet, free roam, or a cop shift with a probationary cruiser (role choice is never
-   locked).
+   is possible and explained. Then the garage screen, where onboarding ends: the player is left
+   in their garage and the normal game takes over (no follow-up card).
 
 Every step is skippable from the pause menu, and returning players can skip the intro. Progress
 is saved after each step.
