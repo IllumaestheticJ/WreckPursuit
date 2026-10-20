@@ -401,6 +401,22 @@ fn run_once(
             }
         }
         prev_yaw = yaw;
+        if let Some(id) = std::env::var("WP_TRACE_UNIT")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+        {
+            if tick % 24 == 0 {
+                if let Some(u) = sim.police().units().iter().find(|u| u.id.0 == id) {
+                    let tp = u.cmd.track.point_at(u.track_s + 15.0);
+                    println!(
+                        "  {t:6.1} s  TRACE unit {id} {} pos ({:.1},{:.1}) hd ({:.2},{:.2}) v {:.1} want {:.1}/{:.1} wall {:.1} shift {:.1} jl {:.1} track+15 ({:.0},{:.0}) off {:?}",
+                        u.assignment.name(), u.body.pos[0], u.body.pos[1], u.body.heading[0], u.body.heading[1],
+                        u.body.speed, u.cmd.speed_mps, u.planned_speed, u.avoid.wall.limit_mps, u.avoid.wall.shift_m,
+                        u.avoid.junction_limit_mps, tp[0], tp[1], u.avoid.pass_offset_m
+                    );
+                }
+            }
+        }
         let police = sim.police();
         let in_service = police
             .units()
@@ -518,7 +534,7 @@ fn run_once(
         match h.kind {
             StuckCause::Wall if on_building => {
                 rep.wall_hits += 1;
-                rep.wall_hits_fast += (h.speed_mps >= FAST_HIT_MPS) as u32;
+                rep.wall_hits_fast += (h.speed_mps.abs() >= FAST_HIT_MPS) as u32;
             }
             StuckCause::ParkedProp => rep.prop_hits += 1,
             _ => {}

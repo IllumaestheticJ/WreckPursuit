@@ -1097,9 +1097,9 @@ fn contact_tactics_escalate_with_the_wanted_level() {
     let mut seen: Vec<std::collections::BTreeSet<String>> = Vec::new();
     for heat in [20.0, 40.0, 60.0] {
         let mut h = pursued_at(12.0, 5, heat);
-        h.speed = 16.0;
+        h.speed = 12.0;
         let mut tactics = std::collections::BTreeSet::new();
-        for _ in 0..(40.0 / 0.25) as usize {
+        for _ in 0..(60.0 / 0.25) as usize {
             h.police.set_heat(RACER, heat);
             h.run(0.25, &[]);
             for u in h.police.units() {
