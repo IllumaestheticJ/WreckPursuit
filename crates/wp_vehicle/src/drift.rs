@@ -19,9 +19,13 @@
 //!   narrowing with erratic input), or growing faster than it can cover → **Exceeded**: the
 //!   assist (step 1's fast countersteer included) backs off and the car can spin.
 //!
-//! Throttle shaping maps a 0/1 key to a partial throttle that tends to hold the angle;
-//! abrupt lifts are softened ([`DriftTuning::lift_soften`]), not cancelled. Both fade out
-//! past the envelope.
+//! Throttle shaping is **opt-in** ([`DriftTuning::throttle_shape`] defaults to 0: the driver
+//! gets exactly the throttle they press, owner row 104). When turned on it is meant to be
+//! invisible: the key passes through (full key = full
+//! throttle, the revs climb), the rise is rate-limited in a slide
+//! ([`DriftTuning::throttle_rise_s`]) and the throttle is trimmed only as the slide nears the
+//! envelope ([`DriftTuning::trim_margin_deg`]); abrupt lifts are softened
+//! ([`DriftTuning::lift_soften`]), not cancelled. All of it fades out past the envelope.
 //!
 //! How the steering uses it: [`crate::steering::slide_onset`] turns rear-axle slip and its
 //! growth rate into a 0..=1 onset; from the onset the countersteer lock opens, released keys
@@ -57,13 +61,19 @@ pub struct DriftTuning {
     /// Hold entered from grip (turning into a drift): the held angle starts at least here,
     /// degrees, so the drift can build. Re-entering Hold from a tap keeps the current angle.
     pub hold_entry_deg: f32,
-    /// Throttle shaping strength, 0 (raw key) ..= 1.
+    /// Throttle shaping strength, 0 (raw key, the default) ..= 1. Opt-in (owner rule, row
+    /// 104: TCS off = the driver gets exactly the throttle they press). Also gates the
+    /// lift softening.
     pub throttle_shape: f32,
-    /// Shaped throttle at the held angle (a held key), 0..=1.
-    pub throttle_hold: f32,
-    /// Shaped throttle change per rad the slide angle is short of (+) / past (−) the held
-    /// angle.
-    pub throttle_gain: f32,
+    /// While sliding, the throttle may rise from 0 to 1 no faster than this, s (× shaping
+    /// strength): a 0/1 key becomes a quick ramp, never a fixed partial throttle, so the
+    /// revs still follow the key.
+    pub throttle_rise_s: f32,
+    /// Trim zone below the envelope, degrees: the throttle is trimmed only as the slide (or
+    /// where it is heading in [`ENVELOPE_LOOKAHEAD_S`]) comes within this of the envelope.
+    pub trim_margin_deg: f32,
+    /// Deepest trim at the envelope edge, fraction of the throttle (× shaping strength).
+    pub trim_depth: f32,
     /// Slide-angle envelope at the 60 % slider, degrees (+25° per +100 % of slider).
     pub envelope_deg: f32,
     /// Straighten: extra countersteer past the travel while the slide angle still grows,
@@ -88,9 +98,10 @@ impl Default for DriftTuning {
             hold_damp: 0.2,
             hold_base: 1.0,
             hold_entry_deg: 18.0,
-            throttle_shape: 0.7,
-            throttle_hold: 0.7,
-            throttle_gain: 3.0,
+            throttle_shape: 0.0,
+            throttle_rise_s: 0.35,
+            trim_margin_deg: 8.0,
+            trim_depth: 0.6,
             envelope_deg: 35.0,
             straighten_gain: 1.0,
             catch_extra: 0.5,
@@ -234,6 +245,8 @@ pub struct DriftCommand {
     pub hold_throttle: f32,
     /// Shortest time a full lift may take, s (0 = raw).
     pub lift_time_s: f32,
+    /// Shortest time the throttle may take to rise 0 → 1, s (0 = raw).
+    pub rise_time_s: f32,
 }
 
 impl DriftState {
@@ -287,6 +300,7 @@ impl DriftState {
             throttle_scale: 1.0,
             hold_throttle: 1.0,
             lift_time_s: 0.0,
+            rise_time_s: 0.0,
         };
         if help <= 0.0 || inp.sensitivity <= 0.0 {
             self.reset_hold();
@@ -363,23 +377,29 @@ impl DriftState {
         cmd.hold_throttle =
             HOLD_LIFT_AUTHORITY + (1.0 - HOLD_LIFT_AUTHORITY) * inp.throttle.clamp(0.0, 1.0);
 
-        // Throttle shaping: the key becomes a partial throttle that tends to hold the angle
-        // (more when the slide closes, less when it opens). Faded out past the envelope, so
-        // full throttle at a big angle still spins a powerful car.
-        let shaped = match cmd.mode {
-            DriftMode::Hold => (t.throttle_hold + t.throttle_gain * (self.hold_angle - a)
-                - 0.5 * self.slide_rate.max(0.0))
-            .clamp(0.2, 1.0),
-            DriftMode::Catch => 0.6,
-            _ => 1.0,
-        };
-        let k = t.throttle_shape.clamp(0.0, 1.0) * cmd.authority * cmd.weight;
-        cmd.throttle_scale = 1.0 - (1.0 - shaped) * k;
-        // Abrupt lift: softened, not cancelled.
-        if matches!(
+        // Throttle shaping, meant to be invisible: the key is passed through (a held key is
+        // full throttle and the revs climb as the wheels spin up); in a slide the assist only
+        // limits how fast the throttle rises, and trims it as the slide nears the envelope.
+        // Both fade with the authority past the envelope, so flooring it at a big angle still
+        // spins a powerful car.
+        let sliding = matches!(
             cmd.mode,
             DriftMode::Hold | DriftMode::Straighten | DriftMode::Catch
-        ) {
+        );
+        let k = t.throttle_shape.clamp(0.0, 1.0) * cmd.authority * cmd.weight;
+        if sliding && k > 0.0 {
+            let margin = t.trim_margin_deg.max(0.1).to_radians();
+            let near = ((ahead - (env - margin)) / margin).clamp(0.0, 1.0);
+            cmd.throttle_scale = 1.0 - t.trim_depth.clamp(0.0, 1.0) * near * k;
+            cmd.rise_time_s = t.throttle_rise_s.max(0.0) * k;
+        }
+        // Abrupt lift: softened, not cancelled — only with throttle shaping turned on.
+        if t.throttle_shape > 0.0
+            && matches!(
+                cmd.mode,
+                DriftMode::Hold | DriftMode::Straighten | DriftMode::Catch
+            )
+        {
             cmd.lift_time_s =
                 LIFT_SOFT_S * t.lift_soften.clamp(0.0, 1.0) * cmd.authority * cmd.weight;
         }
@@ -521,10 +541,18 @@ mod tests {
     }
 
     fn run(st: &mut DriftState, inp: &DriftInputs, ticks: usize) -> DriftCommand {
-        let t = DriftTuning::default();
+        run_with(st, inp, ticks, &DriftTuning::default())
+    }
+
+    fn run_with(
+        st: &mut DriftState,
+        inp: &DriftInputs,
+        ticks: usize,
+        t: &DriftTuning,
+    ) -> DriftCommand {
         let mut c = DriftCommand::default();
         for _ in 0..ticks {
-            c = st.update(inp, &t, 1.0 / 240.0);
+            c = st.update(inp, t, 1.0 / 240.0);
         }
         c
     }
@@ -577,13 +605,42 @@ mod tests {
     }
 
     #[test]
-    fn throttle_is_shaped_in_hold_only_inside_the_envelope() {
-        let mut st = DriftState::default();
-        let hold = run(&mut st, &inputs(-1.0, 20.0), 120);
-        assert!(hold.throttle_scale < 0.95, "{hold:?}");
-        let mut st = DriftState::default();
-        let past = run(&mut st, &inputs(-1.0, 70.0), 120);
-        assert_eq!(past.throttle_scale, 1.0);
+    fn throttle_is_untouched_by_default() {
+        let mut st = DriftState {
+            prev_slide: 33f32.to_radians(),
+            ..DriftState::default()
+        };
+        let c = run(&mut st, &inputs(-1.0, 33.0), 120);
+        assert_eq!(
+            (c.throttle_scale, c.rise_time_s, c.lift_time_s),
+            (1.0, 0.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn throttle_is_rate_limited_and_trimmed_only_near_the_envelope() {
+        // Opt-in: with shaping turned on.
+        let on = DriftTuning {
+            throttle_shape: 0.7,
+            ..DriftTuning::default()
+        };
+        let settled = |deg: f32| DriftState {
+            prev_slide: deg.to_radians(),
+            ..DriftState::default()
+        };
+        // Well inside (20° of 35°): no trim, only a rise-rate limit (no plateau).
+        let mut st = settled(20.0);
+        let hold = run_with(&mut st, &inputs(-1.0, 20.0), 120, &on);
+        assert_eq!(hold.throttle_scale, 1.0, "{hold:?}");
+        assert!(hold.rise_time_s > 0.1, "{hold:?}");
+        // Near the edge (33°): trimmed.
+        let mut st = settled(33.0);
+        let near = run_with(&mut st, &inputs(-1.0, 33.0), 120, &on);
+        assert!(near.throttle_scale < 0.8, "{near:?}");
+        // Past it: raw throttle, no help at all.
+        let mut st = settled(70.0);
+        let past = run_with(&mut st, &inputs(-1.0, 70.0), 120, &on);
+        assert_eq!((past.throttle_scale, past.rise_time_s), (1.0, 0.0));
         assert_eq!(past.authority, 0.0);
     }
 

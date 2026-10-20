@@ -1051,14 +1051,24 @@ impl AudioDirector {
                         .filter(|v| self.cars.contains_key(v.car_id))
                         .copied();
                     // Material per vehicle side.
-                    let side = |v: Option<&VehicleAudioInput>| {
+                    // `out` = the contact normal pointing out of that vehicle (the event's
+                    // normal points from `a` toward `b`).
+                    let side = |v: Option<&VehicleAudioInput>, out: [f32; 3]| {
                         v.and_then(|v| {
                             let car = &self.cars[v.car_id];
                             let local = world_to_local(v.state.pos, v.state.rot, *point);
-                            car.materials.at(local).map(|(k, r)| (v.entity, k, r))
+                            let n_local = world_to_local([0.0; 3], v.state.rot, out);
+                            car.materials
+                                .at(local)
+                                .map(|(k, r)| struck_surface(&car.materials, local, n_local, k, r))
+                                .map(|(k, r)| (v.entity, k, r))
                         })
                     };
-                    let sides: Vec<_> = [side(va), side(vb)].into_iter().flatten().collect();
+                    let n = *normal;
+                    let sides: Vec<_> = [side(va, n), side(vb, [-n[0], -n[1], -n[2]])]
+                        .into_iter()
+                        .flatten()
+                        .collect();
                     let owner = va.or(vb);
                     let owner_id = owner.map(|v| v.entity.0).unwrap_or(u32::MAX);
                     let world = match owner {
@@ -1603,6 +1613,35 @@ fn cabin_box(lattice: &wp_contracts::LatticeDef) -> Option<([f32; 3], [f32; 3])>
         [lo[0] + m, lo[1] + m, lo[2]],
         [hi[0] - m, hi[1] - m, hi[2] + 0.05],
     ))
+}
+
+/// The surface a contact really strikes. The nearest lattice node can sit on a top panel's
+/// edge (hood, trunk lid, roof) while the hit is horizontal — a frontal into a wall at the
+/// bumper / hood seam, whose height moves with the car's pitch. A top panel only rings as a
+/// plate when struck from above; struck sideways, the hit lands on the structure in front of
+/// or below its edge: the bumper for the hood (front half) and trunk (rear half), the cabin
+/// pillars for the roof.
+fn struck_surface(
+    m: &MaterialMap,
+    local: [f32; 3],
+    n_local: [f32; 3],
+    kind: wp_contracts::MaterialKind,
+    region: BodyRegion,
+) -> (wp_contracts::MaterialKind, BodyRegion) {
+    let horizontal = n_local[2].abs() < 0.5;
+    let target = match region {
+        BodyRegion::Hood if horizontal && local[1] > 0.0 => Some(BodyRegion::FrontBumper),
+        BodyRegion::Trunk if horizontal && local[1] < 0.0 => Some(BodyRegion::RearBumper),
+        BodyRegion::Roof if horizontal => Some(BodyRegion::Cabin),
+        _ => None,
+    };
+    target
+        .and_then(|t| {
+            m.region_centroid(t)
+                .and_then(|c| m.at(c))
+                .filter(|x| x.1 == t)
+        })
+        .unwrap_or((kind, region))
 }
 
 /// Horn damage 0..1: the worst front-end region (the horn sits behind the grille) or a weak

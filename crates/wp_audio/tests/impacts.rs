@@ -528,3 +528,41 @@ fn impact_stream_is_deterministic() {
     let b = hit_once(18.0);
     assert_eq!(a, b);
 }
+
+#[test]
+fn a_horizontal_hit_on_the_hood_edge_strikes_the_bumper() {
+    // Round 13: a frontal into a wall at the bumper / hood seam (its height moves with pitch)
+    // resolved to the hood plate and rang it like a drum at 20 km/h.
+    let c = car("debug_sedan");
+    let at = |normal: [f32; 3]| {
+        let mut d = director(&[&c]);
+        let st = state([0.0, 0.0, 0.0], [0.0, 5.0, 0.0]);
+        let v = [input(1, "debug_sedan", &st, false, DriverKind::AiRacer)];
+        let l = listener([6.0, 0.0, 1.5]);
+        d.update(&AudioFrame {
+            tick: 4,
+            listener: l,
+            focus: None,
+            vehicles: &v,
+            events: &[],
+        });
+        let ev = [SimEvent::Contact {
+            a: EntityId(1),
+            b: WORLD_ENTITY,
+            point: [0.0, 2.2, 0.85],
+            normal,
+            impulse_ns: 400.0,
+            rel_speed: 5.0,
+        }];
+        let cmds = d.update(&AudioFrame {
+            tick: 8,
+            listener: l,
+            focus: None,
+            vehicles: &v,
+            events: &ev,
+        });
+        plays(&cmds, "impact/body")[0].0["region"]
+    };
+    assert_eq!(at([0.0, 1.0, 0.0]), 0.0, "wall ahead → bumper");
+    assert_eq!(at([0.0, 0.2, 1.0]), 1.0, "struck from above → hood plate");
+}

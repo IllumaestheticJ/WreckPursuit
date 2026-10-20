@@ -6,7 +6,7 @@
 //! | `drift_tuning_json()` | the constants in effect (override or defaults), JSON |
 //! | `drift_tuning_defaults_json()` | the shipped defaults, JSON |
 //! | `drift_tuning_set(json)` | set the runtime override (`""` clears it); unknown fields are ignored, missing ones take the default |
-//! | `drift_readout(entity)` | `[mode, slide_deg, onset, envelope_deg, authority, throttle_scale, sliding]`, mode 0 off · 1 grip · 2 straighten · 3 hold · 4 catch · 5 exceeded; sliding 1 = a slide is confirmed (the steering's slide help is on, row 102) |
+//! | `drift_readout(entity)` | `[mode, slide_deg, onset, envelope_deg, authority, throttle_scale, key_throttle, engine_throttle, sliding]`, mode 0 off · 1 grip · 2 straighten · 3 hold · 4 catch · 5 exceeded; `key_throttle` = the driver's throttle input, `engine_throttle` = what reaches the engine (after shaping, pedal filter, TCS / ESC); `sliding` 1 = a slide is confirmed (the steering's slide help is on, row 102) |
 //!
 //! The override is process-wide and not logged in recordings (a developer tool; see
 //! `wp_vehicle::drift`).
@@ -42,7 +42,7 @@ pub fn drift_tuning_set(tuning_json: &str) -> Result<(), JsValue> {
 }
 
 /// Drift readout of a vehicle this tick: `[mode, slide_deg, onset, envelope_deg, authority,
-/// throttle_scale, sliding]` (mode codes in the module docs; sliding 0 / 1).
+/// throttle_scale, key_throttle, engine_throttle, sliding]` (see the module docs).
 #[wasm_bindgen]
 pub fn drift_readout(entity: u32) -> Result<Vec<f32>, JsValue> {
     with(|s| {
@@ -58,6 +58,8 @@ pub fn drift_readout(entity: u32) -> Result<Vec<f32>, JsValue> {
             d.envelope.to_degrees(),
             d.authority,
             d.throttle_scale,
+            v.input.throttle.clamp(0.0, 1.0),
+            tel.throttle,
             if tel.sliding { 1.0 } else { 0.0 },
         ])
     })

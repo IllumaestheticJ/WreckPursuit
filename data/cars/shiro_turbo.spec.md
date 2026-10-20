@@ -128,7 +128,7 @@ ABS ceiling: caliper capacity 2863 / 1121 N·m exceeds 1.5 × the front lock tor
 
 Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 1417 N·m/wheel (capacity 1.80×), rear needs 526 N·m/wheel (capacity 1.90×).
 
-`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 946 N·m), never boosted above its caliper capacity. Rear capacity exceeds that, so `bias_front` = T_r/(T_r + ideal) = **0.514** → delivered 2550 N·m front / 946 N·m rear per wheel at full pedal. Handbrake 1010 N·m per rear wheel.
+`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 946 N·m), never boosted above its caliper capacity. Rear capacity exceeds that, so `bias_front` = T_r/(T_r + ideal) = **0.514** → delivered 2550 N·m front / 946 N·m rear per wheel at full pedal. Handbrake 1330 N·m per rear wheel.
 
 ## Steering
 
@@ -140,7 +140,7 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 6.4 s | 260 km/h | 37.1 m | 0.96 g | — |
+| sim | 6.4 s | 264 km/h | 37.6 m | 0.96 g | — |
 | estimate | 6.0 s | 271 km/h | 34.5 m | 1.01 g | 591 |
 
 ## Damage lattice (`data/lattices/shiro_turbo.json`)
