@@ -184,6 +184,14 @@ fn run_police_race(call_it_in: bool) -> PoliceRace {
                 let mut p = sim.police().clone();
                 let out = police::deliver(&mut p, sim.world(), &views, &reports);
                 sim.set_police(p);
+                // A patrol watching the grid engages on the report itself.
+                for e in &out {
+                    if let Some(PoliceEvent::PursuitStarted { racer, .. }) =
+                        PoliceEvent::from_sim_event(e)
+                    {
+                        pursuits.push((tick, racer));
+                    }
+                }
                 events.extend(out);
                 heat_after_report = ids
                     .iter()
@@ -346,10 +354,11 @@ fn city_sprint_pulls_in_police() {
 }
 
 #[test]
-fn without_the_meet_report_nobody_is_chased() {
+fn without_the_meet_report_the_chase_starts_later() {
     // Control run: same race, same seed, but nobody calls the hot meet in. The racers still
-    // speed and pick up some heat on top of their starting 3.75, but stay below wanted level 1,
-    // so no pursuit starts in the same window. The meet report is what tips it.
+    // speed, and since police engage on a violation they watch (playtest row 34, 2026-10-20)
+    // a patrol near the route may still give chase, but only once it sees someone break the
+    // law, never on the meet itself. The report is what brings the police in at the green.
     // (Tuning-sensitive by design: if police or traffic tuning changes, re-check both runs.)
     let r = run_police_race(false);
     assert!(r.finished_tick.is_some());
@@ -359,11 +368,15 @@ fn without_the_meet_report_nobody_is_chased() {
             .any(|s| matches!(s, RaceSignal::PatrolAttracted { .. })),
         "control run must not call the meet in"
     );
-    assert!(
-        r.pursuits.is_empty(),
-        "pursuits without a report: {:?}",
-        r.pursuits
-    );
+    let reported = run_police_race(true);
+    let first = |p: &[(u64, EntityId)]| p.iter().map(|x| x.0).min();
+    let with_report = first(&reported.pursuits).expect("report run has a pursuit");
+    if let Some(without) = first(&r.pursuits) {
+        assert!(
+            without > with_report,
+            "without a report the chase starts later: {without} vs {with_report}"
+        );
+    }
 }
 
 #[test]

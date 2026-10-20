@@ -28,6 +28,11 @@
 // the next junction, so the control run saw a pursuit with no meet report. Seed 15 → 5 (seeds
 // 4, 5, 6 and 8 replay the same race: same finish, same report-run pursuits at 9.4 s and 11.1 s)
 // and starting heat 3.0 → 3.75: at seed 5, heat 2.5-5.0 passes both runs, 3.75 is the middle.
+//
+// 2026-10-20 (playtest row 34): a patrol that watches a violation within recognition range now
+// engages at once. In the report run a patrol watching the grid engages on the report at the
+// green; the control run can now see a chase too (speeding past a patrol), but later. The test
+// asserts that order (`without_the_meet_report_the_chase_starts_later`).
 // Seed sweep 1-20 at heat 3.0: 15 of 20 seeds pass both runs.
 //
 // Run standalone, simcli has no race block and no AI driver for these entities (see
