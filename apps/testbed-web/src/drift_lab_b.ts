@@ -142,9 +142,10 @@ const FIELDS: Record<string, { label: string; min: number; max: number; step: nu
   hold_damp: { label: "hold damping (s)", min: 0, max: 0.6, step: 0.01, hint: "Hold: front slip given up per rad/s the slide angle grows" },
   hold_base: { label: "hold into-turn", min: 0, max: 2, step: 0.05, hint: "Hold: front slip angle into the turn at the held angle (× peak slip)" },
   hold_entry_deg: { label: "hold entry (°)", min: 0, max: 40, step: 1, hint: "turning into a drift: the held angle starts at least here" },
-  throttle_shape: { label: "throttle shaping", min: 0, max: 1, step: 0.05, hint: "0 = raw key, 1 = full shaping toward holding the angle" },
-  throttle_hold: { label: "throttle at hold", min: 0.2, max: 1, step: 0.05, hint: "shaped throttle of a held key at the held angle" },
-  throttle_gain: { label: "throttle gain", min: 0, max: 8, step: 0.25, hint: "shaped throttle change per rad short of / past the held angle" },
+  throttle_shape: { label: "throttle shaping (opt-in)", min: 0, max: 1, step: 0.05, hint: "opt-in, default 0 = exactly the throttle you press; >0 adds a rise limit in slides, a trim near the envelope and lift softening" },
+  throttle_rise_s: { label: "throttle rise (s)", min: 0, max: 1, step: 0.05, hint: "in a slide the throttle rises 0 → 100 % no faster than this (× shaping); never a fixed partial throttle" },
+  trim_margin_deg: { label: "trim zone (°)", min: 1, max: 20, step: 1, hint: "the throttle is trimmed only within this of the envelope" },
+  trim_depth: { label: "trim depth", min: 0, max: 1, step: 0.05, hint: "deepest trim at the envelope edge (× shaping)" },
   envelope_deg: { label: "envelope (° @60%)", min: 10, max: 70, step: 1, hint: "slide angle the assist helps up to at 60 % (±25° per 100 % of slider)" },
   straighten_gain: { label: "straighten extra", min: 0, max: 3, step: 0.05, hint: "released keys: extra countersteer past the travel while a slide grows (× peak slip)" },
   catch_extra: { label: "catch extra lock", min: 0, max: 2, step: 0.05, hint: "counter key: extra lock past the travel (× peak slip)" },
@@ -314,8 +315,11 @@ export class DriftLabPanel {
     }
     const mode = MODES[r[0] | 0] ?? "?";
     const env = r[3] > 0 ? `${r[3].toFixed(0)}°` : "–";
+    const pct = (x: number) => `${Math.round(x * 100)}%`;
     this.readout.textContent =
-      `slide ${r[1].toFixed(1)}° · ${mode}\n` + `envelope ${env} · authority ${(r[4] * 100).toFixed(0)}% · throttle ×${r[5].toFixed(2)} · onset ${r[2].toFixed(2)}`;
+      `slide ${r[1].toFixed(1)}° · ${mode}\n` +
+      `throttle key ${pct(r[6])} → engine ${pct(r[7])} (trim ×${r[5].toFixed(2)})\n` +
+      `envelope ${env} · authority ${pct(r[4])} · onset ${r[2].toFixed(2)}`;
     this.readout.style.whiteSpace = "pre";
     this.readout.style.borderLeft = `4px solid ${mode === "exceeded" ? "#e04040" : mode === "hold" ? "#40c070" : mode === "catch" ? "#e0a030" : mode === "straighten" ? "#4090e0" : "#666"}`;
   }

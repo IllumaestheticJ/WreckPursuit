@@ -921,6 +921,10 @@ impl Vehicle {
             // Abrupt lift in a slide: softened (a full lift takes `lift_time_s`), not cancelled.
             self.throttle_f = self.throttle_f.max(prev_thr - dt / dc.lift_time_s);
         }
+        if dc.rise_time_s > 0.0 && self.throttle_f > prev_thr {
+            // In a slide the throttle rises no faster than 0 → 1 in `rise_time_s`.
+            self.throttle_f = self.throttle_f.min(prev_thr + dt / dc.rise_time_s);
+        }
         self.brake_f = filter_pedal(self.brake_f, brk_in, assists.brake_filter, dt);
         let handbrake = input.handbrake.clamp(0.0, 1.0);
         // Handbrake hold for the assists (steering alignment, ESC): on while pulled and for
