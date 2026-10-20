@@ -83,7 +83,7 @@ Peak **278 kW @ 8250 rpm**, **363 N·m @ 6000 rpm**. Idle 1000 / redline 8500 / 
 
 ## Drivetrain
 
-6-speed manual (open gate), clutch-type rear LSD. Layout **RWD**; front diff: open; rear diff: clutch LSD, preload 60 N·m, power ramp 0.50, coast ramp 0.35. Clutch capacity 1.40 × peak torque = 510 N·m. Shift time 0.22 s.
+6-speed manual (open gate), clutch-type rear LSD. Layout **RWD**; front diff: open; rear diff: clutch LSD, preload 60 N·m, power ramp 0.50, coast ramp 0.35. Clutch capacity 1.40 × peak torque = 510 N·m. Shift time 0.45 s.
 
 | Gear | Ratio | Overall | km/h @ redline |
 |---|---|---|---|
@@ -141,8 +141,8 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 4.5 s | 290 km/h | 36.0 m | 0.99 g | — |
-| estimate | 4.4 s | 297 km/h | 33.9 m | 1.02 g | 713 |
+| sim | 4.7 s | 290 km/h | 36.2 m | 0.99 g | — |
+| estimate | 4.6 s | 297 km/h | 33.9 m | 1.02 g | 692 |
 
 ## Damage lattice (`data/lattices/lucciola_350.json`)
 
