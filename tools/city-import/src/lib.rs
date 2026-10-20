@@ -78,11 +78,20 @@ mod tests {
             "roof",
             "garage",
             "verge",
-            "driveway",
         ] {
             assert!(names.contains(&m), "greybox has no {m}");
         }
         assert!(names.iter().any(|n| n.starts_with("ground_")));
+        let instanced: Vec<String> = glb::build_instanced(&map)
+            .into_iter()
+            .map(|i| i.name)
+            .collect();
+        for m in ["trees", "driveway", "hedge", "fence"] {
+            assert!(
+                instanced.iter().any(|n| n == m),
+                "greybox has no instanced {m}"
+            );
+        }
         let fresh = glb::greybox_glb(&map);
         let shipped = std::fs::read(dir.join("vesper_v2.greybox.glb")).expect("run `just city-v2`");
         assert!(
