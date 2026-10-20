@@ -442,7 +442,7 @@ impl Building {
             return None;
         }
         let f = &self.footprint;
-        let d = |a: [f32; 2], b: [f32; 2]| ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt();
+        let d = crate::geom::dist;
         let mid = |a: [f32; 2], b: [f32; 2]| [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5];
         // Ridge between the midpoints of the two short sides.
         let (e0, e1, short) = if d(f[0], f[1]) <= d(f[1], f[2]) {

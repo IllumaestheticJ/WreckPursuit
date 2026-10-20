@@ -515,7 +515,7 @@ const OBB_CELL_M: f32 = 40.0;
 
 impl ObbIndex {
     fn cells_of(o: &Obb) -> Vec<(i32, i32)> {
-        let r = o.hl.hypot(o.hw);
+        let r = (o.hl * o.hl + o.hw * o.hw).sqrt();
         let lo = (
             ((o.c[0] - r) / OBB_CELL_M).floor() as i32,
             ((o.c[1] - r) / OBB_CELL_M).floor() as i32,
