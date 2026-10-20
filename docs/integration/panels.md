@@ -118,6 +118,19 @@ release; per car; ms/frame = 4 physics steps):
 Panels add ~0.03 ms/frame per crashing car on top of the lattice and ~0.01 ms/frame per car with
 swinging panels; both inside the 0.25 ms/car lattice budget.
 
+## Gate status (2026-10-20, round 12b, base `origin/lead/round12`)
+fmt, clippy `-D warnings`, wasm build (`cargo build --target wasm32-unknown-unknown -p wp_wasm`
+and `npm run wasm`), determinism lint (0 errors), `tsc --noEmit`, `npm run e2e` (= `just web-e2e`;
+all pass), panel scenarios (5/5 pass), `node tools/assets/panels_shots.mjs` (all pass),
+`cargo test -p car-assets` (13 pass). `cargo test --workspace`: everything passes except
+`simcli goldens_match`. Only my two new goldens (`panels_frontal_50_{barrier,car}_arcade`) were
+blessed. The remaining mismatches are pre-existing on `origin/lead/round12`; this branch changes
+no sim code (its diff vs the base outside docs/tools is `data/panels/` only, which the sim does
+not read). They are: city_blocked_parked_player_{grid,vesper}, city_hill_road_{ascent,descent},
+city_sidewalk_mount_{15,40}kmh, golden_city_chase, golden_night_pursuit_escape,
+panels_frontal_56_hood, weather_aquaplane_{control,puddle}, weather_fog_pursuit{,_clear},
+weather_wet_brake_100_0. Lead: please re-bless them on the round-12 base.
+
 ## Gate status (2026-10-19)
 fmt, clippy `-D warnings`, `cargo test --workspace` (incl. goldens; only my two new goldens were
 blessed), wasm build, determinism lint (0 errors), native == wasm on both panel scenarios + tbone,
