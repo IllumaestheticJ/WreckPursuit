@@ -22,7 +22,7 @@ use std::collections::BTreeMap;
 
 use rapier3d::prelude::{Collider, Group, ShapeType, Vector};
 use simcli::scenario::CitySpec;
-use wp_contracts::{DamageMode, EntityId, SimEvent, VehicleInput, WORLD_ENTITY};
+use wp_contracts::{DamageMode, EntityId, SimEvent, VehicleInput, VehicleSim, WORLD_ENTITY};
 use wp_math::Rng;
 use wp_wasm::props::{self, PROP_STRIDE};
 use wp_wasm::scenario;
@@ -299,6 +299,17 @@ impl CityColliders {
         Self { cols }
     }
 
+    /// Whether `p` is inside a building collider.
+    fn inside_building(&self, p: V3) -> bool {
+        self.cols.iter().any(|(c, k, lo, hi)| {
+            *k == Kind::Building
+                && (0..3).all(|i| p[i] >= lo[i] && p[i] <= hi[i])
+                && c.shape()
+                    .project_point(c.position(), Vector::from_array(p), true)
+                    .is_inside
+        })
+    }
+
     /// Nearest collider to `p` within `reach`: distance, kind, and the point on it.
     fn nearest(&self, p: V3, reach: f32) -> Option<(f32, Kind, V3)> {
         let mut best: Option<(f32, Kind, V3)> = None;
@@ -310,11 +321,13 @@ impl CityColliders {
             if out > reach || best.is_some_and(|b| out > b.0) {
                 continue;
             }
+            // Non-solid projection: a point inside (a car pressed into a wall) maps to the
+            // nearest face, the surface that was hit; it counts as touching (distance 0).
             let proj = c
                 .shape()
-                .project_point(c.position(), Vector::from_array(p), true);
+                .project_point(c.position(), Vector::from_array(p), false);
             let q = proj.point.to_array();
-            let d = len(sub(q, p));
+            let d = if proj.is_inside { 0.0 } else { len(sub(q, p)) };
             if d <= reach && best.is_none_or(|b| d < b.0) {
                 best = Some((d, *k, q));
             }
@@ -357,7 +370,15 @@ fn sweep(name: &str, sc: simcli::Scenario, seconds: f32, knock_s: f32, drawn: &D
         }
         if f > 0 && f % (knock_s * 60.0) as u32 == 0 {
             // A hard hit on a parked car (≈ 90 km/h into its flank).
-            let _ = s.debug_knock_prop(player, None, 25.0);
+            if s.debug_knock_prop(player, None, 25.0).is_ok() {
+                // The helper must put the car on the road, never inside a building.
+                let st = s.vehicle(player).unwrap().vehicle.state();
+                assert!(
+                    !city.inside_building(st.pos),
+                    "{name}: t={t:.1}s knock placed the car inside a building at {:?}",
+                    st.pos
+                );
+            }
             stuck_s = 0.0;
         }
         let speed = s
