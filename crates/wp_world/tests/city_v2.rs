@@ -5,7 +5,7 @@
 use std::sync::OnceLock;
 
 use wp_contracts::{SurfaceType, TimeOfDay, WorldQuery, PHYSICS_DT};
-use wp_world::network::RoadNetwork;
+use wp_world::network::{LaneKind, RoadNetwork};
 use wp_world::vesper::{generate, VesperConfig};
 use wp_world::{TrafficConfig, World, WorldConfig};
 
@@ -33,13 +33,30 @@ fn world(seed: u64, aggressive: f32) -> World {
     )
 }
 
-/// Soak: (collisions, collisions with an aggressive driver, min agents, worst z error).
-fn soak(seed: u64, minutes: f32, aggressive: f32) -> (u64, u64, usize, f32) {
+/// What a soak run saw.
+struct Soak {
+    /// Civilian-civilian collisions.
+    collisions: u64,
+    /// Of which involving an aggressive driver.
+    aggressive: u64,
+    /// Fewest agents after the first 10 s.
+    min_agents: usize,
+    /// Worst agent height error vs the road surface, m.
+    worst_z: f32,
+    /// Agents recycled because they were stuck.
+    stuck: u64,
+    /// Agent samples (once a second) on Loop 9's ramps / mainline.
+    on_ramps: usize,
+    on_mainline: usize,
+}
+
+fn soak(seed: u64, minutes: f32, aggressive: f32) -> Soak {
     let mut w = world(seed, aggressive);
     w.populate();
     let mut ev = Vec::new();
     let mut min_agents = usize::MAX;
     let mut worst_z = 0.0f32;
+    let (mut on_ramps, mut on_mainline) = (0usize, 0usize);
     let ticks = (minutes * 60.0 / PHYSICS_DT) as usize;
     for i in 0..ticks {
         w.step(PHYSICS_DT, &mut ev);
@@ -51,13 +68,25 @@ fn soak(seed: u64, minutes: f32, aggressive: f32) -> (u64, u64, usize, f32) {
             for a in w.agents() {
                 let g = w.map().ground_height([a.pos[0], a.pos[1]], Some(a.pos[2]));
                 worst_z = worst_z.max((g - a.pos[2]).abs());
+                // Loop 9: highway lanes; ramps are the ones below the 55 mph limit.
+                let heading = wp_world::geom::dir_of_yaw(a.yaw);
+                if let Some(l) = w.map().locate(a.pos, Some(heading), 1.0, true, false) {
+                    let lane = &w.network().lanes[l.seg as usize];
+                    if lane.kind == LaneKind::Highway {
+                        if lane.speed_limit_mps < 24.0 {
+                            on_ramps += 1;
+                        } else {
+                            on_mainline += 1;
+                        }
+                    }
+                }
             }
         }
     }
     let s = w.traffic_stats().clone();
     let moving = w.agents().filter(|a| a.speed_mps > 0.5).count();
     println!(
-        "vesper seed {seed}, {minutes} min, aggressive {aggressive}: collisions {} (aggr {}), spawned {}, stuck {}, min agents {min_agents}, moving {moving}/{}, worst z {worst_z:.2} m",
+        "vesper seed {seed}, {minutes} min, aggressive {aggressive}: collisions {} (aggr {}), spawned {}, stuck {}, min agents {min_agents}, moving {moving}/{}, worst z {worst_z:.2} m, Loop 9 samples: mainline {on_mainline}, ramps {on_ramps}",
         s.civilian_collisions,
         s.collisions_involving_aggressive,
         s.spawned,
@@ -68,33 +97,51 @@ fn soak(seed: u64, minutes: f32, aggressive: f32) -> (u64, u64, usize, f32) {
         moving * 2 > w.agent_count(),
         "traffic is jammed: only {moving} moving"
     );
-    (
-        s.civilian_collisions,
-        s.collisions_involving_aggressive,
+    Soak {
+        collisions: s.civilian_collisions,
+        aggressive: s.collisions_involving_aggressive,
         min_agents,
         worst_z,
-    )
+        stuck: s.stuck_recycled,
+        on_ramps,
+        on_mainline,
+    }
 }
 
 #[test]
 fn traffic_400_agents_one_minute_on_the_hills_without_collisions() {
-    let (c, _, n, z) = soak(1, 1.0, 0.0);
-    assert_eq!(c, 0, "civilian-civilian collisions");
-    assert!(n >= 380, "population collapsed to {n}");
-    assert!(z < 0.3, "an agent is {z} m off the road surface");
+    let r = soak(1, 1.0, 0.0);
+    assert_eq!(r.collisions, 0, "civilian-civilian collisions");
+    assert!(
+        r.min_agents >= 380,
+        "population collapsed to {}",
+        r.min_agents
+    );
+    assert!(
+        r.worst_z < 0.3,
+        "an agent is {} m off the road surface",
+        r.worst_z
+    );
+    assert_eq!(r.stuck, 0, "agents recycled as stuck");
+    // Traffic uses the freeway and its ramps.
+    assert!(r.on_mainline > 200, "{} mainline samples", r.on_mainline);
+    assert!(r.on_ramps > 20, "{} ramp samples", r.on_ramps);
 }
 
 #[test]
 #[ignore = "10 minutes of sim per seed; run with --release"]
 fn traffic_soak_ten_minutes_three_seeds() {
     for seed in [1, 2, 3] {
-        let (c, _, n, _) = soak(seed, 10.0, 0.0);
-        assert_eq!(c, 0, "seed {seed}: civilian-civilian collisions");
-        assert!(n >= 380);
-        let (c, ca, _, _) = soak(seed, 10.0, 0.05);
+        let r = soak(seed, 10.0, 0.0);
+        assert_eq!(r.collisions, 0, "seed {seed}: civilian-civilian collisions");
+        assert!(r.min_agents >= 380);
+        assert_eq!(r.stuck, 0, "seed {seed}: agents recycled as stuck");
+        let r = soak(seed, 10.0, 0.05);
         assert!(
-            c <= 4 && c == ca,
-            "seed {seed}: {c} collisions with aggressive drivers ({ca})"
+            r.collisions <= 4 && r.collisions == r.aggressive,
+            "seed {seed}: {} collisions with aggressive drivers ({})",
+            r.collisions,
+            r.aggressive
         );
     }
 }
@@ -116,8 +163,8 @@ fn terrain_blocks_line_of_sight_across_the_hill() {
 fn queries_respect_grade_separation_and_terrain() {
     let w = world(1, 0.0);
     let map = w.map();
-    // Route 40 West passes under the Loop near x = -1517, y = 91.
-    let p = [-1517.0, 91.0];
+    // Route 40 West passes under Loop 9's outer carriageway near x = -1524, y = 91.
+    let p = [-1524.0, 91.0];
     let low = map.ground_height(p, Some(-100.0));
     let high = map.ground_height(p, Some(1000.0));
     assert!(high - low > 6.5, "deck {high} over road {low}");

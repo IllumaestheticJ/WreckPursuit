@@ -12,8 +12,27 @@
 //!   switchbacks; **Ridge Road** comes back down over the crests; a lot at the knob.
 //! - **Bayview Bluffs** (north-east plateau): **Bluff Road** winds along the edge down to the
 //!   highway.
-//! - **Loop 9**: a 3+3 highway loop with banked sweepers. **Route 40 West** passes under it
-//!   (the loop rises on an overpass) and **Route 40 North** dips under it (underpass).
+//! - **Loop 9**: a fully access-controlled freeway ring (55 mph, banked sweepers) with six
+//!   diamond interchanges; **Route 40 North** dips under it (underpass).
+//!
+//! Loop 9 freeway design:
+//! - Two one-way carriageways, three 3.7 m lanes each, either side of a 4 m median
+//!   ([`CARRIAGEWAY_OFFSET_M`]): the outer one runs counter-clockwise, the inner one clockwise
+//!   (right-hand traffic). No junction, signal, stop sign or left turn anywhere on them.
+//! - Diamond interchanges at Harbor Boulevard (west and east), Route 40 West, the Port
+//!   Connector (it also serves Terminal Avenue, whose old junction was too close), Bluff Road
+//!   and the Uptown Connector. The crossroad runs from a signalised ramp terminal inside the
+//!   loop ([`TERMINAL_OFFSET_M`]) under both carriageways (each rises 7.5 m onto a deck,
+//!   `plan_crossings`) to a signalised terminal outside. Each carriageway has a one-lane
+//!   off-ramp (40 mph) leaving [`GORE_DIST_M`] before the crossroad and an on-ramp (45 mph)
+//!   joining as far after it; ramps peel away along smootherstep tapers (radius ≥ 120 m),
+//!   are banked like the mainline (≤ 6 %), grade-capped at 6 % and meet the crossroad square.
+//! - Lane balance: an on-ramp's lane continues as an auxiliary fourth lane to the next
+//!   interchange, where it becomes the off-ramp. Every gore is therefore a pure lane add or
+//!   lane drop, wired straight across by lateral position (`ControlHint::Merge` in the
+//!   builder, `RoadSpec::shift` to put the ramp's lane beside the carriageway), so nobody
+//!   ever yields or merges at a point: traffic moves between lanes with its ordinary
+//!   (MOBIL) lane changes, and the mainline never stops.
 //!
 //! Elevation: a smooth deterministic heightfield (authored hill, plateau, northward rise,
 //! seeded value noise, sea at the south and east edges). Every road gets a vertical profile
@@ -26,7 +45,7 @@ use std::collections::BTreeMap;
 
 use wp_math::Rng;
 
-use crate::builder::{self, BuildOptions, Built, NodeSpec, RoadClass, RoadSpec};
+use crate::builder::{self, BuildOptions, Built, ControlHint, NodeSpec, RoadClass, RoadSpec};
 use crate::density::default_density_base;
 use crate::geom::{self, Obb, V2, V3};
 use crate::network::*;
@@ -44,6 +63,22 @@ pub const CARVE_BELOW_M: f32 = 0.12;
 
 /// Full-strength carve corridor beyond the paved edge (sidewalk + verge), m.
 const SHOULDER_M: f32 = 7.5;
+
+/// Highway lane width, m (`BuildOptions::default().highway_lane_width_m`).
+const LANE_M: f32 = 3.7;
+/// Loop 9's carriageway centre lines sit this far either side of the loop's centre line, m
+/// (three lanes each side of a 4 m median).
+pub const CARRIAGEWAY_OFFSET_M: f32 = 2.0 + 1.5 * LANE_M;
+/// The auxiliary lane's centre, right of a carriageway's centre line, m.
+const AUX_LANE_M: f32 = 2.0 * LANE_M;
+/// Ramp terminals sit this far either side of the loop's centre line on the crossroad, m.
+pub const TERMINAL_OFFSET_M: f32 = 50.0;
+/// Gores (off-ramp diverge, on-ramp merge) sit this far along the loop from the crossroad, m.
+pub const GORE_DIST_M: f32 = 250.0;
+/// A ramp runs parallel to the loop for this long into its terminal, m.
+const RAMP_RUN_M: f32 = 40.0;
+/// Over this length from the gore a ramp's lane shift (auxiliary-lane position) fades out, m.
+const RAMP_SHIFT_FADE_M: f32 = 60.0;
 
 /// Generator parameters.
 #[derive(Debug, Clone, PartialEq)]
@@ -111,14 +146,33 @@ struct Style {
     bank_max: f32,
 }
 
-const HIGHWAY: Style = Style {
+/// One Loop 9 carriageway through an interchange: three lanes, one way.
+const FREEWAY: Style = Style {
     class: RoadClass::Highway,
     fwd: 3,
-    bwd: 3,
+    bwd: 0,
     speed: 24.586_72, // 55 mph
     parking: false,
     grade: 0.06,
     bank_max: 0.06,
+};
+/// A carriageway between interchanges: the three through lanes plus the auxiliary lane that
+/// starts at one interchange's on-ramp and leaves at the next one's off-ramp.
+const FREEWAY_AUX: Style = Style { fwd: 4, ..FREEWAY };
+/// Off-ramp: one lane from the auxiliary lane down to a signalised terminal.
+const OFF_RAMP: Style = Style {
+    class: RoadClass::Highway,
+    fwd: 1,
+    bwd: 0,
+    speed: 17.8816, // 40 mph
+    parking: false,
+    grade: 0.06,
+    bank_max: 0.06,
+};
+/// On-ramp: one lane from a terminal up to speed beside the carriageway.
+const ON_RAMP: Style = Style {
+    speed: 20.1168, // 45 mph
+    ..OFF_RAMP
 };
 const ARTERIAL: Style = Style {
     class: RoadClass::Arterial,
@@ -194,6 +248,43 @@ struct Draft {
     anchors: Vec<(f32, f32, f32)>,
     /// Arc ranges that are bridge decks (no terrain carving).
     decks: Vec<(f32, f32)>,
+    /// Lateral shift of the lanes from the path (freeway pieces).
+    shift: Shift,
+}
+
+/// Lateral shift of a draft's lanes from its path (becomes `RoadSpec::shift`): `base`
+/// everywhere, plus `at_a` / `at_b` fading out over `fade_m` from each end. Positive = right
+/// of the travel direction.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct Shift {
+    base: f32,
+    at_a: f32,
+    at_b: f32,
+    fade_m: f32,
+}
+
+impl Shift {
+    fn is_zero(&self) -> bool {
+        self.base == 0.0 && self.at_a == 0.0 && self.at_b == 0.0
+    }
+
+    /// Shift at arc length `s` of a `len` metre path.
+    fn at(&self, s: f32, len: f32) -> f32 {
+        let fade = |d: f32| {
+            if self.fade_m > 0.0 {
+                1.0 - smootherstep(d / self.fade_m)
+            } else {
+                0.0
+            }
+        };
+        self.base + self.at_a * fade(s) + self.at_b * fade(len - s)
+    }
+}
+
+/// `6x⁵ − 15x⁴ + 10x³` on `x` clamped to [0, 1]: zero slope and curvature at both ends.
+fn smootherstep(x: f32) -> f32 {
+    let x = x.clamp(0.0, 1.0);
+    x * x * x * (x * (6.0 * x - 15.0) + 10.0)
 }
 
 /// A planned grade separation.
@@ -209,6 +300,38 @@ pub struct Crossing {
     pub underpass: bool,
 }
 
+/// One Loop 9 diamond interchange: the crossroad passes under both carriageways between two
+/// signalised ramp terminals; each carriageway has an off-ramp before it and an on-ramp after
+/// it. Pairs are `[inner carriageway (clockwise), outer (counter-clockwise)]`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Interchange {
+    /// Crossroad name.
+    pub name: &'static str,
+    /// Where the crossroad passes under the loop's centre line, m.
+    pub pos: V2,
+    /// Ramp terminal nodes: `[inside the loop, outside]`.
+    pub terminals: [usize; 2],
+    /// Off-ramp roads (source road indices).
+    pub off_ramps: [usize; 2],
+    /// On-ramp roads.
+    pub on_ramps: [usize; 2],
+    /// The crossroad between the terminals (source road index).
+    pub crossroad: usize,
+    /// Gore nodes: `[inner off, inner on, outer off, outer on]`.
+    pub gores: [usize; 4],
+}
+
+/// Loop 9's roads.
+#[derive(Debug, Clone, PartialEq)]
+struct Freeway {
+    /// Outer (counter-clockwise) carriageway roads, in travel order.
+    outer: Vec<usize>,
+    /// Inner (clockwise) carriageway roads, in travel order.
+    inner: Vec<usize>,
+    /// Interchanges.
+    interchanges: Vec<Interchange>,
+}
+
 /// Generator diagnostics (tests and the README's numbers).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct VesperReport {
@@ -218,8 +341,13 @@ pub struct VesperReport {
     pub skipped_roads: usize,
     /// Road index of Hollins Drive.
     pub hollins_drive: usize,
-    /// Road indices of the highway loop.
+    /// Road indices of Loop 9's mainline: the outer (counter-clockwise) carriageway in travel
+    /// order, then the inner (clockwise) one. Ramps are not included.
     pub loop_roads: Vec<usize>,
+    /// Number of outer-carriageway roads at the start of `loop_roads`.
+    pub loop_outer: usize,
+    /// Loop 9's interchanges.
+    pub interchanges: Vec<Interchange>,
     /// Names per source road.
     pub road_names: Vec<&'static str>,
     /// Speed limit per source road, m/s.
@@ -452,6 +580,95 @@ fn path_crossings(a: &[V2], b: &[V2]) -> Vec<(f32, f32, V2)> {
 }
 
 // ------------------------------------------------------------------------------------------
+// Loop 9 geometry
+// ------------------------------------------------------------------------------------------
+
+/// Loop 9's centre line (closed, counter-clockwise) with an arc-length frame whose normal
+/// turns smoothly, so offsets tens of metres to the side stay smooth curves.
+struct LoopLine {
+    /// Points, closed (last = first).
+    pts: Vec<V2>,
+    /// Arc length per point.
+    cum: Vec<f32>,
+    /// Unit tangent per point (mean of the adjacent segment directions).
+    tan: Vec<V2>,
+}
+
+impl LoopLine {
+    fn new(path: &[V2]) -> Self {
+        let mut pts = path.to_vec();
+        pts.push(path[0]);
+        let cum = cum2(&pts);
+        let n = pts.len();
+        let seg: Vec<V2> = pts
+            .windows(2)
+            .map(|w| geom::normalize(geom::sub(w[1], w[0])))
+            .collect();
+        let tan = (0..n)
+            .map(|i| {
+                // Closed: point 0 and point n-1 coincide, between the last and first segments.
+                let before = if i == 0 { seg[n - 2] } else { seg[i - 1] };
+                let after = if i == n - 1 { seg[0] } else { seg[i] };
+                geom::normalize(geom::add(before, after))
+            })
+            .collect();
+        Self { pts, cum, tan }
+    }
+
+    fn total(&self) -> f32 {
+        self.cum[self.cum.len() - 1]
+    }
+
+    /// Point `lat` metres right of (outside) the centre line at arc length `s` (wrapped).
+    fn at(&self, s: f32, lat: f32) -> V2 {
+        let s = s.rem_euclid(self.total());
+        let n = self.pts.len();
+        let i = match self.cum.binary_search_by(|c| c.total_cmp(&s)) {
+            Ok(i) => i.min(n - 2),
+            Err(i) => i.saturating_sub(1).min(n - 2),
+        };
+        let t = ((s - self.cum[i]) / (self.cum[i + 1] - self.cum[i]).max(1e-6)).clamp(0.0, 1.0);
+        let p = geom::add(
+            self.pts[i],
+            geom::scale(geom::sub(self.pts[i + 1], self.pts[i]), t),
+        );
+        let d = geom::normalize(geom::add(
+            geom::scale(self.tan[i], 1.0 - t),
+            geom::scale(self.tan[i + 1], t),
+        ));
+        geom::add(p, geom::scale(geom::right_of(d), lat))
+    }
+
+    /// Arc length of the centre-line point closest to `q`.
+    fn project(&self, q: V2) -> f32 {
+        project2(&self.pts, &self.cum, q).0
+    }
+}
+
+/// Centreline of a ramp from its gore at loop arc length `s_gore` on the carriageway on `side`
+/// (+1 outer, −1 inner) to its terminal at `s_term`, listed from the gore (reverse it for an
+/// on-ramp). The ramp's lane — this path shifted right by `AUX_LANE_M` at the gore, fading
+/// over `RAMP_SHIFT_FADE_M` — starts in the auxiliary-lane position beside the carriageway,
+/// peels away along a smootherstep taper (no curvature jump at either end) and runs parallel
+/// to the loop at `TERMINAL_OFFSET_M` for the last `RAMP_RUN_M` into the terminal, meeting the
+/// crossroad square.
+fn ramp_path(line: &LoopLine, side: f32, s_gore: f32, s_term: f32) -> Vec<V2> {
+    let len = (s_term - s_gore).abs();
+    let dir = (s_term - s_gore).signum();
+    let lane0 = CARRIAGEWAY_OFFSET_M + AUX_LANE_M;
+    let taper = len - RAMP_RUN_M;
+    let n = (len / 5.0).ceil() as usize;
+    (0..=n)
+        .map(|k| {
+            let u = len * k as f32 / n as f32;
+            let lane = lane0 + (TERMINAL_OFFSET_M - lane0) * smootherstep(u / taper);
+            let shift = AUX_LANE_M * (1.0 - smootherstep(u / RAMP_SHIFT_FADE_M));
+            line.at(s_gore + dir * u, side * (lane - shift))
+        })
+        .collect()
+}
+
+// ------------------------------------------------------------------------------------------
 // Layout
 // ------------------------------------------------------------------------------------------
 
@@ -514,6 +731,7 @@ impl Gen {
             dips: false,
             anchors: Vec::new(),
             decks: Vec::new(),
+            shift: Shift::default(),
         });
         Some(self.drafts.len() - 1)
     }
@@ -558,30 +776,41 @@ impl Gen {
         (cut_nodes, nodes[0], nodes[nodes.len() - 1])
     }
 
-    /// Closed loop split at arc lengths `cuts` (≥ 2); returns the node per cut and the
-    /// road indices.
-    fn ring(
+    /// One Loop 9 carriageway: the closed `path` (travel order) split at its gores. `events`
+    /// are `(arc length along path, is a diverge)`; gores must alternate diverge, merge,
+    /// diverge, … along the path. A span from a diverge to the next merge is the three-lane
+    /// freeway through an interchange; a span from a merge to the next diverge also carries the
+    /// auxiliary lane (lane balance: the on-ramp's lane becomes the next off-ramp's lane, so no
+    /// lane ever has to merge). Returns the gore node per event (input order) and the roads in
+    /// travel order.
+    fn carriageway(
         &mut self,
         path: &[V2],
-        cuts: &[f32],
-        st: Style,
+        events: &[(f32, bool)],
         name: &'static str,
     ) -> (Vec<usize>, Vec<usize>) {
         let mut closed = path.to_vec();
         closed.push(path[0]);
         let cum = cum2(&closed);
         let total = cum[cum.len() - 1];
-        let mut order: Vec<(f32, usize)> = cuts.iter().copied().zip(0..).collect();
+        let mut order: Vec<(f32, usize)> = events.iter().map(|e| e.0).zip(0..).collect();
         order.sort_by(|x, y| x.0.total_cmp(&y.0));
         let nodes: Vec<usize> = order
             .iter()
             .map(|o| {
-                let p = point_on(&closed, &cum, o.0).0;
-                self.node(p)
+                let n = self.node(point_on(&closed, &cum, o.0).0);
+                self.nodes[n].control = Some(ControlHint::Merge);
+                n
             })
             .collect();
         let mut roads = Vec::new();
         for k in 0..order.len() {
+            let diverge = events[order[k].1].1;
+            let next = events[order[(k + 1) % order.len()].1].1;
+            assert!(
+                diverge != next,
+                "{name}: gores must alternate off-ramp, on-ramp (interchanges overlap)"
+            );
             let s0 = order[k].0;
             let (s1, wrap) = if k + 1 < order.len() {
                 (order[k + 1].0, false)
@@ -597,16 +826,146 @@ impl Gen {
             } else {
                 sub_path(&closed, &cum, s0, s1)
             };
+            // The auxiliary-lane section keeps its three left lanes in line with the three-lane
+            // carriageway: its lane layout is shifted half a lane to the right.
+            let (st, shift) = if diverge {
+                (FREEWAY, Shift::default())
+            } else {
+                (
+                    FREEWAY_AUX,
+                    Shift {
+                        base: 0.5 * LANE_M,
+                        ..Default::default()
+                    },
+                )
+            };
             let nb = nodes[(k + 1) % nodes.len()];
-            if let Some(r) = self.road(nodes[k], nb, sp, st, name) {
-                roads.push(r);
-            }
+            let r = self
+                .road(nodes[k], nb, sp, st, name)
+                .expect("highway-class roads are never dropped");
+            self.drafts[r].shift = shift;
+            roads.push(r);
         }
-        let mut cut_nodes = vec![0; cuts.len()];
+        let mut gore_nodes = vec![0; events.len()];
         for (k, o) in order.iter().enumerate() {
-            cut_nodes[o.1] = nodes[k];
+            gore_nodes[o.1] = nodes[k];
         }
-        (cut_nodes, roads)
+        (gore_nodes, roads)
+    }
+
+    /// One-way ramp between the gore node `gore` on the carriageway on `side` (+1 outer, −1
+    /// inner) at loop arc length `s_gore` and the terminal node `term` at `s_term`. An off-ramp
+    /// runs gore → terminal, an on-ramp terminal → gore (see [`ramp_path`] for the shape). At
+    /// the gore its lane sits in the auxiliary-lane position, so it lines up with the
+    /// auxiliary lane it leaves from or becomes.
+    #[allow(clippy::too_many_arguments)]
+    fn ramp(
+        &mut self,
+        line: &LoopLine,
+        side: f32,
+        gore: usize,
+        s_gore: f32,
+        term: usize,
+        s_term: f32,
+        off: bool,
+    ) -> usize {
+        let mut path = ramp_path(line, side, s_gore, s_term);
+        let (a, b, st, name, shift) = if off {
+            let sh = Shift {
+                at_a: AUX_LANE_M,
+                fade_m: RAMP_SHIFT_FADE_M,
+                ..Default::default()
+            };
+            (gore, term, OFF_RAMP, "Loop 9 off-ramp", sh)
+        } else {
+            path.reverse();
+            let sh = Shift {
+                at_b: AUX_LANE_M,
+                fade_m: RAMP_SHIFT_FADE_M,
+                ..Default::default()
+            };
+            (term, gore, ON_RAMP, "Loop 9 on-ramp", sh)
+        };
+        let r = self
+            .road(a, b, path, st, name)
+            .expect("highway-class roads are never dropped");
+        self.drafts[r].shift = shift;
+        r
+    }
+
+    /// Loop 9 as a freeway: two one-way carriageways either side of the loop's centre line
+    /// (outer = counter-clockwise, inner = clockwise; right-hand traffic) and a diamond
+    /// interchange at each site `(crossroad name, plan position near the loop, style)`. At an
+    /// interchange the crossroad runs from a signalised terminal inside the loop, under both
+    /// carriageways (they rise over it on decks: `plan_crossings`), to a terminal outside; each
+    /// carriageway's off-ramp leaves its auxiliary lane [`GORE_DIST_M`] before the crossroad
+    /// and its on-ramp adds the next auxiliary lane as far after it.
+    fn freeway(&mut self, line: &LoopLine, sites: &[(&'static str, V2, Style)]) -> Freeway {
+        let s_c: Vec<f32> = sites.iter().map(|x| line.project(x.1)).collect();
+        // Gores in loop arc length, (s, diverge): event 2k is site k's off-ramp, 2k + 1 its
+        // on-ramp. The outer carriageway runs towards +s, the inner one towards −s.
+        let mut outer_ev = Vec::new();
+        let mut inner_ev = Vec::new();
+        for s in &s_c {
+            outer_ev.push((s - GORE_DIST_M, true));
+            outer_ev.push((s + GORE_DIST_M, false));
+            inner_ev.push((s + GORE_DIST_M, true));
+            inner_ev.push((s - GORE_DIST_M, false));
+        }
+        let n = line.pts.len() - 1;
+        let outer: Vec<V2> = (0..n)
+            .map(|i| line.at(line.cum[i], CARRIAGEWAY_OFFSET_M))
+            .collect();
+        let mut inner: Vec<V2> = (0..n)
+            .map(|i| line.at(line.cum[i], -CARRIAGEWAY_OFFSET_M))
+            .collect();
+        inner.reverse();
+        // Gore positions as arc lengths along each carriageway's own path.
+        let on_path = |path: &[V2], side: f32, ev: &[(f32, bool)]| -> Vec<(f32, bool)> {
+            let mut closed = path.to_vec();
+            closed.push(path[0]);
+            let cum = cum2(&closed);
+            ev.iter()
+                .map(|(s, d)| {
+                    let q = line.at(*s, side * CARRIAGEWAY_OFFSET_M);
+                    (project2(&closed, &cum, q).0, *d)
+                })
+                .collect()
+        };
+        let outer_ev = on_path(&outer, 1.0, &outer_ev);
+        let inner_ev = on_path(&inner, -1.0, &inner_ev);
+        let (outer_gores, outer_roads) = self.carriageway(&outer, &outer_ev, "Loop 9");
+        let (inner_gores, inner_roads) = self.carriageway(&inner, &inner_ev, "Loop 9");
+        let mut interchanges = Vec::new();
+        for (k, site) in sites.iter().enumerate() {
+            let s = s_c[k];
+            let t_in = self.node(line.at(s, -TERMINAL_OFFSET_M));
+            let t_out = self.node(line.at(s, TERMINAL_OFFSET_M));
+            let (g_off_out, g_on_out) = (outer_gores[2 * k], outer_gores[2 * k + 1]);
+            let (g_off_in, g_on_in) = (inner_gores[2 * k], inner_gores[2 * k + 1]);
+            let d = GORE_DIST_M;
+            let off_out = self.ramp(line, 1.0, g_off_out, s - d, t_out, s, true);
+            let on_out = self.ramp(line, 1.0, g_on_out, s + d, t_out, s, false);
+            let off_in = self.ramp(line, -1.0, g_off_in, s + d, t_in, s, true);
+            let on_in = self.ramp(line, -1.0, g_on_in, s - d, t_in, s, false);
+            let crossroad = self
+                .road(t_in, t_out, Vec::new(), site.2, site.0)
+                .expect("a crossroad is laid before the streets around it");
+            interchanges.push(Interchange {
+                name: site.0,
+                pos: line.at(s, 0.0),
+                terminals: [t_in, t_out],
+                off_ramps: [off_in, off_out],
+                on_ramps: [on_in, on_out],
+                crossroad,
+                gores: [g_off_in, g_on_in, g_off_out, g_on_out],
+            });
+        }
+        Freeway {
+            outer: outer_roads,
+            inner: inner_roads,
+            interchanges,
+        }
     }
 
     /// Warped grid with curved edges. `drop` = chance of removing an optional edge (kept
@@ -688,11 +1047,10 @@ impl Gen {
         }
     }
 
-    /// Lay out every road; returns (loop roads, Hollins Drive, knob, lot, Route 40 W end,
-    /// Route 40 N end).
+    /// Lay out every road; returns Loop 9 and Hollins Drive.
     #[allow(clippy::needless_range_loop)]
-    fn layout(&mut self) -> (Vec<usize>, usize, usize, usize, usize, usize) {
-        // ---- Loop 9 -------------------------------------------------------------------
+    fn layout(&mut self) -> (Freeway, usize) {
+        // ---- Loop 9 freeway -----------------------------------------------------------
         let ctrl: Vec<V2> = vec![
             [-1460.0, -1000.0],
             [-400.0, -1075.0],
@@ -709,25 +1067,31 @@ impl Gen {
             420.0, 1500.0, 1500.0, 420.0, 1500.0, 420.0, 1500.0, 1500.0, 420.0, 1500.0,
         ];
         let loop_path = resample(&fillet(&ctrl, &radii, true, 6.0), 6.0);
-        let mut closed = loop_path.clone();
-        closed.push(loop_path[0]);
-        let lcum = cum2(&closed);
-        let targets: [V2; 7] = [
-            [-1490.0, -480.0], // Harbor Blvd west
-            [1505.0, -450.0],  // Harbor Blvd east
-            [-1515.0, 300.0],  // Lantern Way west
-            [920.0, -1050.0],  // port connector
-            [1300.0, -1030.0], // Terminal Ave east
-            [1510.0, 300.0],   // Bluff Road
-            [400.0, 1400.0],   // Uptown connector
+        let line = LoopLine::new(&loop_path);
+        // Interchange sites (crossroad, where it passes under the loop, crossroad style), at
+        // least 2 × GORE_DIST_M + ~150 m apart along the loop. Route 40 West keeps its old
+        // crossing; Harbor Boulevard's west end moved south to make room for it; Terminal
+        // Avenue's old east junction is served by the Port Connector interchange.
+        let sites: [(&'static str, V2, Style); 6] = [
+            ("Harbor Boulevard", [-1490.0, -600.0], BLVD),
+            ("Route 40 West", [-1517.0, 91.0], ROUTE),
+            ("Port Connector", [920.0, -1050.0], PORT),
+            ("Harbor Boulevard", [1505.0, -450.0], BLVD),
+            ("Bluff Road", [1510.0, 300.0], BLUFF_ROAD),
+            ("Uptown Connector", [400.0, 1400.0], ARTERIAL),
         ];
-        let cuts: Vec<f32> = targets
-            .iter()
-            .map(|t| project2(&closed, &lcum, *t).0)
-            .collect();
-        let (lj, loop_roads) = self.ring(&loop_path, &cuts, HIGHWAY, "Loop 9");
-        let [lj_bw, lj_be, lj_lw, lj_port, lj_quay, lj_bluff, lj_up] =
-            [lj[0], lj[1], lj[2], lj[3], lj[4], lj[5], lj[6]];
+        let fw = self.freeway(&line, &sites);
+        // Inside terminals: the surface streets end there.
+        let inside = |k: usize| fw.interchanges[k].terminals[0];
+        let (lj_bw, lj_r40w, lj_port, lj_be, lj_bluff, lj_up) = (
+            inside(0),
+            inside(1),
+            inside(2),
+            inside(3),
+            inside(4),
+            inside(5),
+        );
+        let r40w_out = fw.interchanges[1].terminals[1];
 
         // ---- Lantern Row downtown grid ------------------------------------------------
         let xs = [-300.0, -200.0, -100.0, 0.0, 100.0, 200.0, 300.0];
@@ -794,12 +1158,11 @@ impl Gen {
         // ---- Gantry Row port & Terminal Avenue ----------------------------------------
         let quay = [[380.0, -950.0], [1250.0, -950.0]];
         let qcuts = [450.0 - 380.0, 920.0 - 380.0];
-        let (qj, q_w, q_e) = self.chain(&quay, &qcuts, PORT, "Terminal Avenue");
+        let (qj, q_w, _q_e) = self.chain(&quay, &qcuts, PORT, "Terminal Avenue");
         self.link(bj[7], qj[0], 0.0, PORT, "Gantry Row");
         self.link(bj[9], qj[1], 0.0, PORT, "Gantry Row");
         self.link(bj[6], q_w, -10.0, SERVICE, "Gantry Row");
         self.link(qj[1], lj_port, 0.0, PORT, "Port Connector");
-        self.link(q_e, lj_quay, 0.0, PORT, "Terminal Avenue");
         let s1 = self.node([450.0, -780.0]);
         let s2 = self.node([920.0, -780.0]);
         // Service road across the yard (splitting the two port columns).
@@ -822,13 +1185,20 @@ impl Gen {
         self.link(sub[1][3], dt[2][0], 12.0, COLLECTOR, "Canal Street");
         self.link(sub[2][3], dt[4][0], -10.0, COLLECTOR, "Larkspur Avenue");
         self.link(sub[3][3], dt[5][0], 8.0, ARTERIAL, "Lantern Way");
-        self.link(sub[3][0], lj_lw, -6.0, ARTERIAL, "Lantern Way");
         self.link(sub[0][1], bj[0], 6.0, LOCAL, "Larkspur");
         self.link(sub[0][3], bj[1], -6.0, COLLECTOR, "Ferris Road");
+        // Route 40 West: from Larkspur's west edge through the Loop 9 interchange to the map
+        // edge. Lantern Way's west end joins it halfway to the interchange.
         let r40w = self.node([-1650.0, 100.0]);
         let r40w_start = sub[2][0];
-        let path = bent(self.pos(r40w_start), [-1650.0, 100.0], 5.0, 8.0);
-        self.road(r40w_start, r40w, path, ROUTE, "Route 40 West");
+        let lantern_jn = self.node(geom::scale(
+            geom::add(self.pos(r40w_start), self.pos(lj_r40w)),
+            0.5,
+        ));
+        self.link(r40w_start, lantern_jn, 3.0, ROUTE, "Route 40 West");
+        self.link(lantern_jn, lj_r40w, 0.0, ROUTE, "Route 40 West");
+        self.link(r40w_out, r40w, 0.0, ROUTE, "Route 40 West");
+        self.link(sub[3][0], lantern_jn, -6.0, ARTERIAL, "Lantern Way");
         for (j, i, dx, dy) in [
             (1, 1, 1.0, 1.0),
             (2, 2, -1.0, 1.0),
@@ -907,7 +1277,8 @@ impl Gen {
             [850.0, 1060.0],
             [1100.0, 1020.0],
             [1300.0, 840.0],
-            [1380.0, 600.0],
+            [1350.0, 580.0],
+            [1375.0, 360.0],
             self.pos(lj_bluff),
         ];
         let bluff = resample(&catmull_rom(&bluff_ctrl, 6.0), 6.0);
@@ -971,7 +1342,7 @@ impl Gen {
         let ridge = resample(&catmull_rom(&ridge_ctrl, 5.0), 5.0);
         self.road(knob, mer[3][1], ridge, HILL_ROAD, "Ridge Road");
 
-        (loop_roads, hollins, knob, lot, r40w, r40n)
+        (fw, hollins)
     }
 
     /// Replace the straight road `a`–`b` by two roads through `mid`.
@@ -1029,7 +1400,8 @@ fn half_width(st: &Style, opt: &BuildOptions) -> f32 {
     st.fwd.max(st.bwd) as f32 * w + if st.parking { opt.parking_width_m } else { 0.0 }
 }
 
-/// Pinned flat length at each node (junction box estimate), m.
+/// Pinned flat length at each node (junction box estimate), m. Freeway gores are not junctions
+/// and get the bend value.
 fn flat_lengths(g: &Gen, opt: &BuildOptions) -> Vec<f32> {
     let mut deg = vec![0usize; g.nodes.len()];
     let mut hw = vec![0.0f32; g.nodes.len()];
@@ -1040,7 +1412,13 @@ fn flat_lengths(g: &Gen, opt: &BuildOptions) -> Vec<f32> {
         }
     }
     (0..g.nodes.len())
-        .map(|n| if deg[n] >= 3 { hw[n] * 1.6 + 4.0 } else { 4.0 })
+        .map(|n| {
+            if deg[n] >= 3 && g.nodes[n].control != Some(ControlHint::Merge) {
+                hw[n] * 1.6 + 4.0
+            } else {
+                4.0
+            }
+        })
         .collect()
 }
 
@@ -1199,6 +1577,24 @@ fn profile_roads(g: &mut Gen, opt: &BuildOptions) -> Vec<RoadSpec> {
                 g.nodes[d.b].z += step * 0.5;
                 moved = true;
             }
+            // Grade separations hold fixed heights inside the road: pull each end node close
+            // enough to reach them within the grade cap (e.g. the gores either side of a Loop 9
+            // deck rise onto embankments).
+            for &(s0, s1, z) in &d.anchors {
+                let ends = [
+                    (d.a, s0 - flat[d.a] - 2.0 * spread),
+                    (d.b, len - s1 - flat[d.b] - 2.0 * spread),
+                ];
+                for (n, room) in ends {
+                    let allow = d.st.grade * room.max(len * 0.05) * 0.85;
+                    let gap = g.nodes[n].z - z;
+                    let excess = gap.abs() - allow;
+                    if excess > 0.01 {
+                        g.nodes[n].z -= 0.5 * excess * gap.signum();
+                        moved = true;
+                    }
+                }
+            }
         }
         if !moved {
             break;
@@ -1283,11 +1679,15 @@ fn profile_roads(g: &mut Gen, opt: &BuildOptions) -> Vec<RoadSpec> {
                 })
                 .collect();
         }
+        let mut all = vec![d.path[0]];
+        all.extend_from_slice(&r.via);
+        all.push(d.path[d.path.len() - 1]);
+        let ac = cum2(&all);
+        if !d.shift.is_zero() {
+            let total = ac[ac.len() - 1];
+            r.shift = ac.iter().map(|s| d.shift.at(*s, total)).collect();
+        }
         if d.st.bank_max > 0.0 {
-            let mut all = vec![d.path[0]];
-            all.extend_from_slice(&r.via);
-            all.push(d.path[d.path.len() - 1]);
-            let ac = cum2(&all);
             let kappa = curvature(&all);
             let v2 = d.st.speed * d.st.speed;
             let raw: Vec<f32> = kappa
@@ -1308,9 +1708,12 @@ fn profile_roads(g: &mut Gen, opt: &BuildOptions) -> Vec<RoadSpec> {
     out
 }
 
-/// Plan grade separations where the highway crosses another road.
+/// Plan grade separations where the highway crosses another road. Crossings of one lower road
+/// less than 40 m apart (a crossroad under both Loop 9 carriageways) form one structure: the
+/// lower road gets a single level there and both decks the same height above it.
 fn plan_crossings(g: &mut Gen) -> Vec<Crossing> {
-    let mut out = Vec::new();
+    // (lower road, s on lower, upper road, s on upper, point)
+    let mut hits: Vec<(usize, f32, usize, f32, V2)> = Vec::new();
     for hi in 0..g.drafts.len() {
         if g.drafts[hi].st.class != RoadClass::Highway {
             continue;
@@ -1320,27 +1723,43 @@ fn plan_crossings(g: &mut Gen) -> Vec<Crossing> {
                 continue;
             }
             for (s_hi, s_lo, p) in path_crossings(&g.drafts[hi].path, &g.drafts[lo].path) {
-                let ground = g.nat.z(p);
-                let underpass = g.drafts[lo].dips;
-                let (z_hi, z_lo) = if underpass {
-                    (ground + 0.5, ground + 0.5 - CROSSING_CLEARANCE_M)
-                } else {
-                    (ground + CROSSING_CLEARANCE_M, ground)
-                };
-                let deck = 30.0;
-                g.drafts[hi].anchors.push((s_hi - deck, s_hi + deck, z_hi));
-                g.drafts[hi]
-                    .decks
-                    .push((s_hi - deck - 4.0, s_hi + deck + 4.0));
-                g.drafts[lo].anchors.push((s_lo - 14.0, s_lo + 14.0, z_lo));
-                out.push(Crossing {
-                    upper: hi,
-                    lower: lo,
-                    pos: p,
-                    underpass,
-                });
+                hits.push((lo, s_lo, hi, s_hi, p));
             }
         }
+    }
+    hits.sort_by(|x, y| x.0.cmp(&y.0).then(x.1.total_cmp(&y.1)).then(x.2.cmp(&y.2)));
+    let mut out = Vec::new();
+    let mut k = 0;
+    while k < hits.len() {
+        let mut e = k + 1;
+        while e < hits.len() && hits[e].0 == hits[k].0 && hits[e].1 - hits[e - 1].1 < 40.0 {
+            e += 1;
+        }
+        let group = &hits[k..e];
+        let lo = group[0].0;
+        let ground = group.iter().map(|h| g.nat.z(h.4)).sum::<f32>() / group.len() as f32;
+        let underpass = g.drafts[lo].dips;
+        let (z_hi, z_lo) = if underpass {
+            (ground + 0.5, ground + 0.5 - CROSSING_CLEARANCE_M)
+        } else {
+            (ground + CROSSING_CLEARANCE_M, ground)
+        };
+        let deck = 30.0;
+        for &(_, _, hi, s_hi, p) in group {
+            g.drafts[hi].anchors.push((s_hi - deck, s_hi + deck, z_hi));
+            g.drafts[hi]
+                .decks
+                .push((s_hi - deck - 4.0, s_hi + deck + 4.0));
+            out.push(Crossing {
+                upper: hi,
+                lower: lo,
+                pos: p,
+                underpass,
+            });
+        }
+        let (s0, s1) = (group[0].1, group[group.len() - 1].1);
+        g.drafts[lo].anchors.push((s0 - 14.0, s1 + 14.0, z_lo));
+        k = e;
     }
     out
 }
@@ -1836,11 +2255,17 @@ fn signed_area(p: &[V2]) -> f32 {
     a * 0.5
 }
 
-/// Pose on the rightmost forward (or backward) lane of road `road`, `s` metres in (negative:
-/// from the end).
+/// Pose on the rightmost through lane, forward (or backward), of road `road`, `s` metres in
+/// (negative: from the end). On a Loop 9 auxiliary-lane section (four lanes one way) that is
+/// the third lane: the fourth leaves at the next off-ramp.
 fn lane_pose(built: &Built, road: usize, s: f32, fwd: bool) -> Option<(V3, f32, LaneId)> {
     let rl = &built.road_lanes[road];
-    let lane = *if fwd { rl.fwd.last() } else { rl.bwd.last() }?;
+    let lanes = if fwd { &rl.fwd } else { &rl.bwd };
+    let lane = *if lanes.len() == FREEWAY_AUX.fwd as usize {
+        lanes.get(FREEWAY.fwd as usize - 1)
+    } else {
+        lanes.last()
+    }?;
     let l = &built.lanes[lane as usize];
     let cum = geom::cumulative(&l.polyline);
     let total = cum[cum.len() - 1];
@@ -1891,7 +2316,9 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
         drafts: Vec::new(),
         skipped: 0,
     };
-    let (loop_roads, hollins, _knob, _lot, _r40w, _r40n) = g.layout();
+    let (fw, hollins) = g.layout();
+    let loop_outer = fw.outer.len();
+    let loop_roads: Vec<usize> = fw.outer.iter().chain(&fw.inner).copied().collect();
     let crossings = plan_crossings(&mut g);
     let opt = BuildOptions::default();
     let specs = profile_roads(&mut g, &opt);
@@ -1939,7 +2366,9 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
 
     // POIs. The first race grid is the city-chase / free-drive spawn.
     let mut pois = Vec::new();
-    let longest_loop = *loop_roads
+    // Loop race grids sit on the outer (counter-clockwise) carriageway.
+    let longest_loop = *fw
+        .outer
         .iter()
         .max_by(|a, b| {
             let la = cum2(&g.drafts[**a].path);
@@ -1960,7 +2389,8 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
     let named = |n: &str| g.drafts.iter().position(|d| d.name == n).unwrap_or(0);
     let (ridge, spur) = (named("Ridge Road"), named("Knob Observatory Lot"));
     // The loop road over Hollins Heights' northern shoulder (the highway's big crest).
-    let loop_north = *loop_roads
+    let loop_north = *fw
+        .outer
         .iter()
         .find(|r| {
             let p = &g.drafts[**r].path;
@@ -2099,6 +2529,8 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
         skipped_roads: g.skipped,
         hollins_drive: hollins,
         loop_roads,
+        loop_outer,
+        interchanges: fw.interchanges,
         road_names: g.drafts.iter().map(|d| d.name).collect(),
         road_speeds: g.drafts.iter().map(|d| d.st.speed).collect(),
         road_grades: g.drafts.iter().map(|d| d.st.grade).collect(),
@@ -2268,21 +2700,282 @@ mod tests {
     #[test]
     fn grade_separations_have_clearance() {
         let (net, rep) = city();
-        assert_eq!(rep.crossings.len(), 2, "{:?}", rep.crossings);
+        // Every interchange crossroad under both carriageways, and Route 40 North under both.
+        assert_eq!(
+            rep.crossings.len(),
+            2 * rep.interchanges.len() + 2,
+            "{:?}",
+            rep.crossings
+        );
         assert!(rep.crossings.iter().any(|c| c.underpass));
         assert!(rep.crossings.iter().any(|c| !c.underpass));
+        for c in &rep.crossings {
+            assert!(
+                rep.loop_roads.contains(&c.upper),
+                "{} crosses over {}",
+                rep.road_names[c.upper],
+                rep.road_names[c.lower]
+            );
+        }
+        for ix in &rep.interchanges {
+            let under: Vec<_> = rep
+                .crossings
+                .iter()
+                .filter(|c| c.lower == ix.crossroad)
+                .collect();
+            assert_eq!(under.len(), 2, "{}: {under:?}", ix.name);
+            let outer = &rep.loop_roads[..rep.loop_outer];
+            assert!(under.iter().any(|c| outer.contains(&c.upper)));
+            assert!(under.iter().any(|c| !outer.contains(&c.upper)));
+        }
         for c in &rep.crossings {
             let z_of = |road: usize| {
                 let s = &net.surfaces[road];
                 let pts: Vec<V2> = s.centre.iter().map(|p| geom::xy(*p)).collect();
                 let cum = cum2(&pts);
                 let (at, d) = project2(&pts, &cum, c.pos);
-                assert!(d < 1.0);
+                // An auxiliary-lane section's surface is shifted half a lane off its path.
+                assert!(
+                    d < 2.5,
+                    "{} is {d} m from {:?}",
+                    rep.road_names[road],
+                    c.pos
+                );
                 let f = geom::cumulative(&s.centre);
                 geom::point_at(&s.centre, &f, at).0[2]
             };
             let gap = z_of(c.upper) - z_of(c.lower);
             assert!(gap > 6.5 && gap < 9.0, "clearance {gap} m at {:?}", c.pos);
+        }
+    }
+
+    /// Lanes of the given source roads.
+    fn lanes_of(net: &RoadNetwork, roads: &[usize]) -> Vec<usize> {
+        (0..net.lanes.len())
+            .filter(|i| roads.contains(&(net.lanes[*i].road as usize)))
+            .collect()
+    }
+
+    fn mph(v: f32) -> f32 {
+        v * 0.447_04
+    }
+
+    #[test]
+    fn lane_width_matches_the_builder() {
+        assert_eq!(LANE_M, BuildOptions::default().highway_lane_width_m);
+    }
+
+    #[test]
+    fn loop_mainline_is_access_controlled_and_continuous() {
+        let (net, rep) = city();
+        let map = crate::CityMap::new(net.clone());
+        let ramps: Vec<usize> = rep
+            .interchanges
+            .iter()
+            .flat_map(|ix| ix.off_ramps.iter().chain(&ix.on_ramps).copied())
+            .collect();
+        let main = lanes_of(net, &rep.loop_roads);
+        let off: Vec<usize> = rep
+            .interchanges
+            .iter()
+            .flat_map(|ix| ix.off_ramps)
+            .collect();
+        let on: Vec<usize> = rep.interchanges.iter().flat_map(|ix| ix.on_ramps).collect();
+        let mut preds: Vec<Vec<usize>> = vec![Vec::new(); net.lanes.len()];
+        for (i, l) in net.lanes.iter().enumerate() {
+            for c in &l.connections {
+                preds[c.to as usize].push(i);
+            }
+        }
+        for &i in &main {
+            let l = &net.lanes[i];
+            assert_eq!(l.kind, LaneKind::Highway);
+            assert!((l.speed_limit_mps - mph(55.0)).abs() < 0.01);
+            // No junction, signal, stop or yield anywhere on the mainline: every lane flows
+            // straight on into the next mainline lane or (auxiliary lane) an off-ramp.
+            assert!(
+                net.nodes[l.to_node as usize].intersection.is_none(),
+                "mainline lane {i} ends at a junction"
+            );
+            assert!(map.lane_control(i as LaneId).is_none());
+            assert_eq!(l.connections.len(), 1, "lane {i}");
+            let c = &l.connections[0];
+            assert_eq!(c.turn, TurnKind::Straight);
+            let to_road = net.lanes[c.to as usize].road as usize;
+            assert!(
+                rep.loop_roads.contains(&to_road) || off.contains(&to_road),
+                "mainline lane {i} leads to {}",
+                rep.road_names[to_road]
+            );
+            // Lanes only come from the mainline or an on-ramp.
+            for &p in &preds[i] {
+                let pr = net.lanes[p].road as usize;
+                assert!(rep.loop_roads.contains(&pr) || on.contains(&pr));
+            }
+        }
+        // Each carriageway's left lane runs all the way round through every one of its roads.
+        for roads in [
+            &rep.loop_roads[..rep.loop_outer],
+            &rep.loop_roads[rep.loop_outer..],
+        ] {
+            let start = lanes_of(net, &roads[..1])
+                .into_iter()
+                .find(|i| net.lanes[*i].index_from_left == 0)
+                .unwrap();
+            let mut lane = start;
+            let mut seen = Vec::new();
+            loop {
+                seen.push(net.lanes[lane].road as usize);
+                lane = net.lanes[lane].connections[0].to as usize;
+                assert_eq!(net.lanes[lane].index_from_left, 0);
+                if lane == start {
+                    break;
+                }
+                assert!(
+                    seen.len() <= roads.len(),
+                    "left lane does not close the loop"
+                );
+            }
+            assert_eq!(seen, roads.to_vec());
+        }
+        // Ramp lanes only touch the mainline at gores, never at a junction.
+        for &r in &ramps {
+            for i in lanes_of(net, &[r]) {
+                let l = &net.lanes[i];
+                assert_eq!(l.kind, LaneKind::Highway);
+                let v = l.speed_limit_mps;
+                assert!(
+                    v >= mph(35.0) - 0.01 && v <= mph(45.0) + 0.01,
+                    "ramp at {v} m/s"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn every_interchange_has_off_and_on_ramps_both_ways() {
+        let (net, rep) = city();
+        let map = crate::CityMap::new(net.clone());
+        assert_eq!(rep.interchanges.len(), 6);
+        // Every surface street that used to meet the loop at grade reaches an interchange.
+        for name in [
+            "Harbor Boulevard",
+            "Route 40 West",
+            "Port Connector",
+            "Bluff Road",
+            "Uptown Connector",
+        ] {
+            assert!(rep.interchanges.iter().any(|ix| ix.name == name), "{name}");
+        }
+        let mut preds: Vec<Vec<usize>> = vec![Vec::new(); net.lanes.len()];
+        for (i, l) in net.lanes.iter().enumerate() {
+            for c in &l.connections {
+                preds[c.to as usize].push(i);
+            }
+        }
+        // The rightmost lane of an auxiliary-lane (four-lane) mainline road.
+        let aux_lane = |i: usize| {
+            let l = &net.lanes[i];
+            rep.loop_roads.contains(&(l.road as usize)) && l.index_from_left == 3
+        };
+        for ix in &rep.interchanges {
+            for (k, t) in ix.terminals.iter().enumerate() {
+                let x = net.nodes[*t].intersection.expect("terminal is a junction");
+                assert!(
+                    matches!(
+                        net.intersections[x as usize].control,
+                        IntersectionControl::Signal { .. }
+                    ),
+                    "{} terminal {k} is not signalised",
+                    ix.name
+                );
+            }
+            for side in 0..2 {
+                let off = lanes_of(net, &[ix.off_ramps[side]]);
+                let on = lanes_of(net, &[ix.on_ramps[side]]);
+                assert_eq!((off.len(), on.len()), (1, 1), "{}: one-lane ramps", ix.name);
+                let (off, on) = (off[0], on[0]);
+                // Diverge from the right (auxiliary) lane only, to the terminal.
+                assert_eq!(preds[off].len(), 1, "{}", ix.name);
+                assert!(
+                    aux_lane(preds[off][0]),
+                    "{}: off-ramp not from the right",
+                    ix.name
+                );
+                assert_eq!(net.lanes[off].to_node as usize, ix.terminals[side]);
+                assert!(map.lane_signal(off as LaneId).is_some());
+                // On-ramp from the terminal becomes the right (auxiliary) lane.
+                assert_eq!(net.lanes[on].from_node as usize, ix.terminals[side]);
+                let to = &net.lanes[on].connections;
+                assert_eq!(to.len(), 1);
+                assert!(
+                    aux_lane(to[0].to as usize),
+                    "{}: on-ramp not to the right",
+                    ix.name
+                );
+                assert!(
+                    map.lane_control(on as LaneId).is_none(),
+                    "merge has no control"
+                );
+                // Gentle ramp curves: radius ≥ 120 m everywhere (sampled over 10 m chords).
+                for lane in [off, on] {
+                    let pl = &net.lanes[lane].polyline;
+                    let pts: Vec<V2> = pl.iter().map(|p| geom::xy(*p)).collect();
+                    let even = resample(&pts, 10.0);
+                    let k = curvature(&even).iter().fold(0.0f32, |m, c| m.max(c.abs()));
+                    assert!(k < 1.0 / 120.0, "{}: ramp radius {} m", ix.name, 1.0 / k);
+                }
+            }
+            // Gores line the lanes up: the ramp's lane starts or ends beside the carriageway's
+            // outer lane (no sideways jump through the gore connector).
+            for &g in &ix.gores {
+                for l in net.lanes.iter().filter(|l| l.to_node as usize == g) {
+                    let end = l.polyline[l.polyline.len() - 1];
+                    let next = &net.lanes[l.connections[0].to as usize].polyline[0];
+                    let gap = geom::dist(geom::xy(end), geom::xy(*next));
+                    assert!(gap < 6.5, "{}: gore connector {gap} m", ix.name);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn lane_graph_is_strongly_connected() {
+        let (net, _) = city();
+        let n = net.lanes.len();
+        let drivable: Vec<bool> = net.lanes.iter().map(|l| l.kind.drivable()).collect();
+        let mut fwd: Vec<Vec<usize>> = vec![Vec::new(); n];
+        let mut bwd: Vec<Vec<usize>> = vec![Vec::new(); n];
+        // Edges: lane connections and lane changes into a same-direction neighbour.
+        for (i, l) in net.lanes.iter().enumerate() {
+            let changes = [l.left, l.right].into_iter().flatten();
+            for to in l.connections.iter().map(|c| c.to).chain(changes) {
+                if drivable[i] && drivable[to as usize] {
+                    fwd[i].push(to as usize);
+                    bwd[to as usize].push(i);
+                }
+            }
+        }
+        let start = (0..n).find(|i| drivable[*i]).unwrap();
+        for (dir, adj) in [("from", &fwd), ("to", &bwd)] {
+            let mut seen = vec![false; n];
+            seen[start] = true;
+            let mut stack = vec![start];
+            while let Some(i) = stack.pop() {
+                for &j in &adj[i] {
+                    if !seen[j] {
+                        seen[j] = true;
+                        stack.push(j);
+                    }
+                }
+            }
+            let missing: Vec<usize> = (0..n).filter(|i| drivable[*i] && !seen[*i]).collect();
+            assert!(
+                missing.is_empty(),
+                "{} lanes not reachable {dir} lane {start}: {:?}",
+                missing.len(),
+                &missing[..missing.len().min(10)]
+            );
         }
     }
 
