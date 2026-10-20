@@ -138,6 +138,8 @@ pub struct Desire {
     /// Culling score multiplier (1 = normal). Below 1 the voice loses ties against other
     /// entities' voices of the same priority and loudness (a car's second engine layer).
     pub cull_scale: f32,
+    /// Engine state for the physically modelled engine voice (passed through unchanged).
+    pub engine: Option<crate::engine_model::EngineFrame>,
 }
 
 impl Desire {
@@ -164,6 +166,7 @@ impl Desire {
             vel,
             synth: None,
             cull_scale: 1.0,
+            engine: None,
         }
     }
 }
@@ -239,6 +242,7 @@ impl VoiceMixer {
                 lowpass_hz: sp.lowpass_hz,
                 doppler: sp.doppler,
                 pos: d.pos,
+                engine: d.engine,
             };
             let keep = if self.active.contains_key(&d.id) {
                 cfg.keep_bonus

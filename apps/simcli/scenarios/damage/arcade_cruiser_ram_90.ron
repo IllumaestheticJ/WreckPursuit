@@ -1,0 +1,24 @@
+// Round 12b (owner playtest rows 48-49: Arcade cars and police too fragile), workstream 03.
+// Full sim, Arcade, R's panels on as in the browser game. Repeated hits are measured by
+// `cargo run --release -p simcli --example damage_toughness` (table in docs/integration/damage.md).
+// The cruiser rams a stopped 1400 kg sedan at 90 km/h: a cop's job; it stays in the chase.
+(
+    name: "damage_arcade_cruiser_ram_90",
+    seed: 504,
+    mode: Arcade,
+    assists: ai,
+    panels: true,
+    entities: [
+        (id: "car", car: "sentinel_cruiser", speed_mps: 25.0, driver: cruise(target_mps: 25.0, until_s: 0.5),
+            inputs: [(t_s: 0.5, input: (brake: 1.0))]),
+        (id: "sedan", car: "debug_sedan", pos: (0.0, 20.0, 0.0), inputs: [(t_s: 0.0, input: (brake: 1.0))]),
+    ],
+    duration_s: 3.0,
+    hash_every: 60,
+    expect: [
+        total_loss(entity: "car", expected: false),
+        metric(entity: "car", name: "final_health", min: 0.85, max: 1.0),
+        components_failed(entity: "car", min: 0, max: 0),
+        total_loss(entity: "sedan", expected: false),
+    ],
+)

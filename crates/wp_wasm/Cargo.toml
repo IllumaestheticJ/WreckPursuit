@@ -38,6 +38,11 @@ wasm-bindgen.workspace = true
 # Pure-Rust, no_std-capable binary codec for events and replays (wasm32-clean).
 postcard = { version = "1", default-features = false, features = ["alloc"] }
 
+[dev-dependencies]
+# tests/drawn_colliders.rs: classify which static collider a contact hit (already in the tree
+# via wp_sim; dev-only, so never part of the wasm build).
+rapier3d.workspace = true
+
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = false
 

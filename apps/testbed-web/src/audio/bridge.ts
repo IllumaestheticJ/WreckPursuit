@@ -11,4 +11,6 @@ export const audioBridge = {
   setScannerTier: (tier: string): void => wasm.audio_set_scanner_tier(tier),
   radio: (unit: number, priority: RadioPriority, text: string): void => wasm.audio_radio(unit, priority, text),
   reset: (): AudioCommand[] => JSON.parse(wasm.audio_reset()),
+  /** "Physical" once the engine synthesizer runs, "Layers" otherwise. */
+  setEngineModel: (mode: "Physical" | "Layers"): void => wasm.audio_set_engine_model(mode),
 };

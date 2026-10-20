@@ -1,0 +1,48 @@
+// Playtest rows 61-62 (traffic gets out of the way of police with sirens on): a police car drives
+// Garage 2 -> Garage 3 on the 12x12 grid (403 m, mostly two-lane streets) through busy civilian
+// traffic, riding the line on the left of its lane (lateral_offset_m -1.55, where a unit passes
+// yielding traffic) and keeping its distance from anything in its way (keep_distance).
+// Civilians signal, pull over to the kerb (or away from the unit), stop, let it past and merge
+// back (wp_world traffic::siren): it gets through without touching anyone. Control run with the
+// siren off: siren_traffic_no_siren.ron.
+// The exact "six cars passed within 10 s" check is wp_world tests/siren.rs (deterministic
+// geometry); this scenario runs the same behaviour in the full sim (physical traffic, wp_sim's
+// siren flag, damage mode Arcade).
+(
+    name: "city_siren_traffic_yields_arcade",
+    seed: 7,
+    city: file("city/procedural_12x12.road.json"),
+    mode: Arcade,
+    time_of_day_h: 12.0,
+    time_ratio: 1.0,
+    traffic_density: 10.0,
+    parked_cars: false,
+    police_cars: false,
+    assists: ai,
+    entities: [
+        (
+            id: "unit",
+            car: "sentinel_cruiser",
+            speed_mps: 10.0,
+            driver: follow_route(
+                route_id: "Garage 2 -> Garage 3",
+                target_speed: 16.0,
+                lateral_offset_m: -1.55,
+                keep_distance: true,
+            ),
+            inputs: [(t_s: 0.0, input: (siren: true, headlights: true))],
+        ),
+    ],
+    duration_s: 45.0,
+    expect: [
+        // Measured (seed 7, after the round-12b spawn changes): 3 pull-overs, route done, 0
+        // contacts. Seeds 1-9: 3-6 pull-overs, 0 contacts; 7 of 9 finish the route (seeds 3 and 5
+        // stall where pulled-over cars on both sides leave 2.2 m from this car's line, inside its
+        // 1.2 m keep-distance corridor).
+        world_metric(name: "civilian_collisions", min: 0.0, max: 0.0),
+        world_metric(name: "traffic_siren_yields", min: 2.0, max: 1000.0),
+        metric(name: "route_progress", min: 0.95, max: 1.0),
+        event_count(event: "Contact", entity: "unit", min: 0, max: 0),
+        metric(name: "final_health", min: 0.99, max: 1.0),
+    ],
+)

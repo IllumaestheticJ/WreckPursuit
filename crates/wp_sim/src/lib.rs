@@ -497,6 +497,23 @@ impl Sim {
         self.props.active_count()
     }
 
+    /// World pose of city prop `i` (index into `world().static_props()`, the order
+    /// [`Sim::set_world`] created them in): box centre, m, and rotation `[x, y, z, w]`. On
+    /// hilly cities this is the body as seated on the ground, not the raw prop position.
+    /// Read-only (renderers).
+    pub fn prop_pose(&self, i: usize) -> Option<([f32; 3], [f32; 4])> {
+        let rb = self.physics.bodies.get(*self.props.bodies.get(i)?)?;
+        let r = *rb.rotation();
+        Some((rb.translation().to_array(), [r.x, r.y, r.z, r.w]))
+    }
+
+    /// Indices of the props currently dynamic (near a mover, or knocked and not yet asleep),
+    /// ascending. Every other prop is fixed and has not moved since it last was in this list.
+    /// Read-only (renderers).
+    pub fn active_props(&self) -> impl Iterator<Item = usize> + '_ {
+        self.props.active()
+    }
+
     /// Number of detached-part debris bodies in the world.
     pub fn debris_count(&self) -> usize {
         self.debris.len()

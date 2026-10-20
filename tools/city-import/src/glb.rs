@@ -4,23 +4,24 @@
 //! parking / bus, banked like the road surface), junction boxes, raised sidewalks with kerb
 //! faces along ribbon edges, ground per district and extruded buildings. Cities with terrain
 //! (Port Vesper v2) also get the terrain mesh (decimated, never above a road), a sea plane,
-//! retaining walls where roads sit above the ground, and bridge decks with parapets and
-//! piers. World space is +Z up; glTF is +Y up, so positions are written as `(x, z, -y)` (a
+//! retaining walls where roads sit above the ground, bridge decks with parapets and
+//! piers, and tunnels / covered roads (walls, roof deck, emissive ceiling lights). World space is +Z up; glTF is +Y up, so positions are written as `(x, z, -y)` (a
 //! rotation, so triangle winding is preserved). Units are metres. Primitives with more than
 //! 65 535 vertices are split so every index buffer is 16-bit.
 
 use serde_json::json;
 use wp_world::geom::{self, V2, V3};
-use wp_world::map::{CityMap, SegKind};
+use wp_world::map::CityMap;
 use wp_world::network::{DistrictKind, LaneKind, RoadNetwork};
 use wp_world::surface::{
-    is_elevated, junction_paved_radii, junction_polygon, lane_bank, sidewalk_mesh, surface_edges,
-    TriMesh,
+    is_elevated, lane_bank, node_patches, sidewalk_mesh, surface_edges, surface_ribbon, TriMesh,
 };
 use wp_world::terrain::Heightfield;
 
 /// Sidewalk width and kerb height (shared with the physics colliders).
 use wp_world::surface::{KERB_H_M as CURB_M, SIDEWALK_W_M as SIDEWALK_M};
+/// Height of the parking / bus lane tint above the road surface, m.
+const LANE_TINT_DZ_M: f32 = 0.01;
 /// Render terrain vertex spacing (cities with terrain), m.
 const TERRAIN_RENDER_M: f32 = 10.0;
 /// Sea level drawn as water, m.
@@ -443,33 +444,42 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
             }
         }
     }
+    // Pavement: the road surface ribbons, the very triangles `wp_sim` collides with; parking
+    // and bus lanes are tinted 1 cm above them.
+    for s in &net.surfaces {
+        let prim = if s.highway {
+            &mut concrete
+        } else {
+            &mut asphalt
+        };
+        prim.mesh(&surface_ribbon(s));
+    }
     for l in &net.lanes {
-        let half = l.width_m * 0.5;
-        let bank = lane_bank(net, l);
         let prim = match l.kind {
-            LaneKind::Highway => &mut concrete,
             LaneKind::Parking => &mut parking,
             LaneKind::Bus => &mut bus,
-            _ => &mut asphalt,
+            _ => continue,
         };
-        prim.ribbon_banked(&l.polyline, half, half, 0.0, &bank);
+        let bank = lane_bank(net, l);
+        prim.ribbon_banked(
+            &l.polyline,
+            l.width_m * 0.5,
+            l.width_m * 0.5,
+            LANE_TINT_DZ_M,
+            &bank,
+        );
     }
     // Raised sidewalks and kerb faces: the very triangles `wp_sim` collides with.
     let walks = sidewalk_mesh(map);
     sidewalk.mesh(&walks.tops);
     kerb.mesh(&walks.kerbs);
-    // Junction boxes (16-gons) and bend connectors.
-    let radii = junction_paved_radii(net);
-    for (ix, r) in net.intersections.iter().zip(&radii) {
-        let c = net.nodes[ix.node as usize].pos;
-        let poly = junction_polygon(geom::xy(c), *r);
-        asphalt.polygon(&poly, c[2] - 0.01);
-    }
-    for s in &map.segs {
-        if let SegKind::Connector { node, .. } = s.kind {
-            if net.nodes[node as usize].intersection.is_none() {
-                asphalt.ribbon(&s.pts, s.width * 0.5, s.width * 0.5, -0.005);
-            }
+    // Pavement between the ribbon ends (junctions, bends, dead ends): the very triangles
+    // `wp_sim` collides with.
+    for p in node_patches(map) {
+        if p.highway {
+            concrete.mesh(&p.mesh);
+        } else {
+            asphalt.mesh(&p.mesh);
         }
     }
     // Hilly cities: retaining walls where a road edge stands above the (render) ground, and
@@ -551,13 +561,108 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
     for b in &net.buildings {
         buildings.prism(&b.footprint, b.base_z_m, b.roof_z());
     }
+    // Tunnels and covered roads (backlog B04): concrete walls, the roof deck, ceiling lights.
+    // Colours follow docs/art/STYLE_DECISION.md's palette (retaining wall / bridge greys,
+    // sodium lamps); the low-poly dark restyle maps these material names.
+    let mut tunnel_wall = Prim::new("tunnel_wall", [0.24, 0.25, 0.29, 1.0]);
+    let mut tunnel_roof = Prim::new("tunnel_roof", [0.28, 0.29, 0.34, 1.0]);
+    let mut tunnel_light = Prim::new("tunnel_light", [1.0, 0.76, 0.48, 1.0]);
+    for span in &net.covered {
+        render_cover(span, &mut tunnel_wall, &mut tunnel_roof, &mut tunnel_light);
+    }
     let mut out = vec![
-        asphalt, concrete, parking, bus, sidewalk, kerb, buildings, wall, bridge, rock, seabed,
+        asphalt,
+        concrete,
+        parking,
+        bus,
+        sidewalk,
+        kerb,
+        buildings,
+        wall,
+        bridge,
+        rock,
+        seabed,
         water,
+        tunnel_wall,
+        tunnel_roof,
+        tunnel_light,
     ];
     out.extend(ground);
     out.retain(|p| !p.indices.is_empty());
     out
+}
+
+/// One covered span: both walls (inner and outer faces, from below the road to the ceiling),
+/// the roof deck (ceiling underside, top, side edges, portal faces) and a ceiling light every
+/// [`wp_world::covered::LIGHT_SPACING_M`] (a 1.6 × 0.5 m emissive panel 0.12 m below the
+/// ceiling, two-sided).
+fn render_cover(
+    span: &wp_world::network::CoveredSpan,
+    wall: &mut Prim,
+    roof: &mut Prim,
+    light: &mut Prim,
+) {
+    use wp_world::covered::{CoverShape, ROOF_M, WALL_M};
+    let shape = CoverShape::new(span);
+    let c = &span.centre;
+    let h = span.clearance_m;
+    let deck = shape.deck_half_width();
+    for side in [-1.0f32, 1.0] {
+        for off in [span.half_width_m, span.half_width_m + WALL_M] {
+            let line = geom::offset_polyline(c, side * off);
+            let top: Vec<V3> = line.iter().map(|p| [p[0], p[1], p[2] + h]).collect();
+            let bottom: Vec<f32> = line.iter().map(|p| p[2] - 1.0).collect();
+            // Inner faces look into the tube, outer faces away from it.
+            let inner = off == span.half_width_m;
+            wall.curtain(&top, &bottom, (side < 0.0) == inner);
+        }
+    }
+    roof.ribbon(c, deck, deck, h);
+    roof.ribbon(c, deck, deck, h + ROOF_M);
+    for side in [-1.0f32, 1.0] {
+        let line = geom::offset_polyline(c, side * deck);
+        let top: Vec<V3> = line
+            .iter()
+            .map(|p| [p[0], p[1], p[2] + h + ROOF_M])
+            .collect();
+        let bottom: Vec<f32> = line.iter().map(|p| p[2] + h).collect();
+        roof.curtain(&top, &bottom, side > 0.0);
+    }
+    // Portal faces: the deck's end edges.
+    for k in [0usize, c.len() - 1] {
+        let j = if k == 0 { 1 } else { k - 1 };
+        let d = geom::normalize(geom::sub(geom::xy(c[k]), geom::xy(c[j])));
+        let d = if k == 0 { geom::scale(d, -1.0) } else { d };
+        let r = geom::right_of(d);
+        let p = geom::xy(c[k]);
+        let (z0, z1) = (c[k][2] + h, c[k][2] + h + ROOF_M);
+        let a = geom::add(p, geom::scale(r, -deck));
+        let b = geom::add(p, geom::scale(r, deck));
+        roof.quad(
+            [a[0], a[1], z0],
+            [b[0], b[1], z0],
+            [b[0], b[1], z1],
+            [a[0], a[1], z1],
+            [d[0], d[1], 0.0],
+        );
+    }
+    for q in shape.light_points() {
+        let loc = shape.locate(geom::xy(q));
+        let (_, d) = geom::point_at(c, &shape.cum, loc.s);
+        let r = geom::right_of(d);
+        let z = q[2] - 0.12;
+        let corner = |a: f32, b: f32| {
+            let p = geom::add(geom::xy(q), geom::add(geom::scale(d, a), geom::scale(r, b)));
+            [p[0], p[1], z]
+        };
+        light.quad(
+            corner(-0.8, -0.25),
+            corner(0.8, -0.25),
+            corner(0.8, 0.25),
+            corner(-0.8, 0.25),
+            [0.0, 0.0, -1.0],
+        );
+    }
 }
 
 /// Split a primitive into pieces of at most 65 535 vertices (16-bit indices), keeping
@@ -619,6 +724,12 @@ pub fn write_glb(prims: &[Prim], name: &str) -> Vec<u8> {
             "name": p.material,
             // Walls, kerbs and parapets are single quads: draw both faces.
             "doubleSided": true,
+            // Lamps (`*_light`, e.g. tunnel ceiling lights) glow in their own colour.
+            "emissiveFactor": if p.material.ends_with("_light") {
+                [p.color[0], p.color[1], p.color[2]]
+            } else {
+                [0.0, 0.0, 0.0]
+            },
             "pbrMetallicRoughness": {
                 "baseColorFactor": p.color,
                 "metallicFactor": 0.0,

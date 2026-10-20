@@ -1,0 +1,27 @@
+// Junkyard beater: hard steer at ~60 km/h on old tyres. It must slide and stay on its
+// wheels (soft, rolly, low grip, but readable): lateral g stays below what street tyres
+// give, it does not tip (no wheel-off-ground stretch longer than a hop) and keeps moving.
+(
+    name: "cars_beater_hard_turn",
+    mode: Arcade,
+    seed: 3,
+    duration_s: 10.0,
+    entities: [
+        (
+            id: "car",
+            car: "junkyard_beater",
+            speed_mps: 16.7,
+            inputs: [
+                (t_s: 0.0, input: (throttle: 0.5)),
+                (t_s: 2.0, input: (throttle: 0.5, steer: 1.0)),
+                (t_s: 7.0, input: (throttle: 0.3)),
+            ],
+        ),
+    ],
+    expect: [
+        max_lateral_g(entity: "car", min: 0.5, max: 0.85),
+        metric(name: "max_airborne_s", min: 0.0, max: 0.2),
+        metric(name: "final_speed_mps", min: 3.0, max: 25.0),
+        metric(name: "final_health", min: 0.99, max: 1.0),
+    ],
+)

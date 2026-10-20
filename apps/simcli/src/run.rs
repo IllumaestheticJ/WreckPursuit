@@ -116,16 +116,36 @@ pub struct RouteDriver {
     pub follower: wp_world::drive::PathFollower,
     /// Target speed, m/s.
     pub target_mps: f32,
+    /// Lateral offset from the route (+ right), m.
+    pub lateral_offset_m: f32,
+    /// Keep distance from vehicles ahead (`follow_route(keep_distance: true)`).
+    pub keep_distance: bool,
     /// Furthest arc length reached, m.
     pub progress_m: f32,
 }
 
 impl RouteDriver {
-    /// Input for this tick (advances the follower's PID by one physics tick).
-    pub fn input(&mut self, state: &wp_contracts::VehicleState) -> VehicleInput {
-        let out = self
-            .follower
-            .follow(state, &self.path, self.target_mps, 0.0, PHYSICS_DT);
+    /// Input for this tick (advances the follower's PID by one physics tick). `obstacles`: the
+    /// vehicles to keep distance from (only used with `keep_distance`).
+    pub fn input(
+        &mut self,
+        state: &wp_contracts::VehicleState,
+        obstacles: &[wp_world::leader::Obstacle],
+    ) -> VehicleInput {
+        let traffic = wp_world::drive::FollowTraffic {
+            obstacles,
+            skip: &[],
+            corridor: wp_world::leader::LeaderParams::CAR,
+            following: wp_world::leader::CarFollowing::PURSUIT,
+        };
+        let out = self.follower.follow_behind(
+            state,
+            &self.path,
+            self.target_mps,
+            self.lateral_offset_m,
+            PHYSICS_DT,
+            self.keep_distance.then_some(&traffic),
+        );
         self.progress_m = self.progress_m.max(out.s);
         // Stopped at the finish (or crawling to it): hold on the handbrake, as traffic does —
         // the follower releases the foot brake near standstill (auto-reverse).
@@ -305,6 +325,7 @@ pub fn build_sim(
             // `set_world` rebuilds police on the city, so the scenario's police (config,
             // starting heat) are installed after it. Police cars are real vehicles (lead run 5);
             // `police_cars: false` keeps heat and wanted levels with no patrols.
+            world.set_covered_los(sc.covered_los);
             sim.set_world(world);
             if sc.police_cars {
                 sim.set_police(police_for_city(sc, sim.world(), &ids));
@@ -350,6 +371,8 @@ pub fn build_sim(
         let Driver::FollowRoute {
             route_id,
             target_speed,
+            lateral_offset_m,
+            keep_distance,
         } = &spec.driver
         else {
             routes.push(None);
@@ -397,6 +420,8 @@ pub fn build_sim(
             path,
             follower,
             target_mps: *target_speed,
+            lateral_offset_m: *lateral_offset_m,
+            keep_distance: *keep_distance,
             progress_m: 0.0,
         }));
     }
@@ -426,8 +451,40 @@ pub fn apply_op(
         OpKind::Assists(p) => sim.set_assists(id, p)?,
         OpKind::Mode(m) => sim.set_mode_table(load_mode(data, m)?),
         OpKind::Repair => sim.repair_vehicle(id)?,
+        OpKind::ResetAt {
+            xy,
+            yaw,
+            near_z,
+            repair,
+        } => {
+            sim.place_on_ground(id, xy, yaw, 0.0, Some(near_z))?;
+            if repair {
+                sim.repair_vehicle(id)?;
+            }
+        }
     }
     Ok(())
+}
+
+/// Vehicles a `keep_distance` route driver (scenario entity `idx`) keeps its distance from:
+/// civilian traffic and the other scenario entities (ids offset by 1 << 24 so they never tie
+/// with agent ids).
+fn route_obstacles(
+    sim: &Sim,
+    states: &[(EntityId, wp_contracts::VehicleState)],
+    idx: usize,
+) -> Vec<wp_world::leader::Obstacle> {
+    let mut v: Vec<wp_world::leader::Obstacle> = sim
+        .world()
+        .agents()
+        .map(|a| wp_world::leader::Obstacle::from_agent(&a))
+        .collect();
+    for (k, (id, st)) in states.iter().enumerate() {
+        if k != idx {
+            v.push(wp_world::leader::Obstacle::from_state((1 << 24) + id.0, st));
+        }
+    }
+    v
 }
 
 /// Read-only view handed to [`run_with_hook`] after every tick.
@@ -492,6 +549,10 @@ pub struct EntitySummary {
     /// Fraction of its `follow_route` route the entity covered (0 without one).
     #[serde(default)]
     pub route_progress: f32,
+    /// Longest stretch of a pursuit with no police line of sight on the entity
+    /// (`wp_police` `RacerRecord::los_lost_s`), s. 0 without police or pursuit.
+    #[serde(default)]
+    pub max_los_lost_s: f32,
 }
 
 impl EntitySummary {
@@ -518,12 +579,13 @@ impl EntitySummary {
             "off_road_s" => self.off_road_s,
             "max_airborne_s" => self.max_airborne_s,
             "route_progress" => self.route_progress,
+            "max_los_lost_s" => self.max_los_lost_s,
             _ => return None,
         })
     }
 
     /// Every metric name [`EntitySummary::metric`] accepts.
-    pub const METRICS: [&'static str; 20] = [
+    pub const METRICS: [&'static str; 21] = [
         "final_speed_mps",
         "max_speed_mps",
         "distance_m",
@@ -544,6 +606,7 @@ impl EntitySummary {
         "off_road_s",
         "max_airborne_s",
         "route_progress",
+        "max_los_lost_s",
     ];
 }
 
@@ -597,6 +660,9 @@ pub struct WorldSummary {
     /// Civilians that turned around (U-turn / k-point turn, finished) or reversed back to the
     /// last junction because their lane was blocked.
     pub traffic_turnarounds: u64,
+    /// Civilians that pulled over for a siren unit coming up behind them
+    /// (`TrafficStats::siren_yields`, playtest row 62).
+    pub traffic_siren_yields: u64,
     /// City props turned into physics bodies (parked cars, cones).
     pub props: u32,
     /// Static boxes from `barriers`.
@@ -620,6 +686,7 @@ impl WorldSummary {
             "traffic_stuck_recycled" => self.traffic_stuck_recycled as f32,
             "traffic_go_arounds" => self.traffic_go_arounds as f32,
             "traffic_turnarounds" => self.traffic_turnarounds as f32,
+            "traffic_siren_yields" => self.traffic_siren_yields as f32,
             "props" => self.props as f32,
             "static_boxes" => self.static_boxes as f32,
             "police_units_max" => self.police_units_max as f32,
@@ -629,7 +696,7 @@ impl WorldSummary {
     }
 
     /// Every metric name [`WorldSummary::metric`] accepts.
-    pub const METRICS: [&'static str; 13] = [
+    pub const METRICS: [&'static str; 14] = [
         "traffic_agents_final",
         "traffic_agents_min",
         "traffic_moving_frac_final",
@@ -639,6 +706,7 @@ impl WorldSummary {
         "traffic_stuck_recycled",
         "traffic_go_arounds",
         "traffic_turnarounds",
+        "traffic_siren_yields",
         "props",
         "static_boxes",
         "police_units_max",
@@ -696,6 +764,7 @@ impl WorldTracker {
             traffic_stuck_recycled: stats.stuck_recycled,
             traffic_go_arounds: stats.oncoming_passes + stats.go_around_lane_changes,
             traffic_turnarounds: stats.turnarounds_completed + stats.reverses,
+            traffic_siren_yields: stats.siren_yields,
             props: sim.prop_count() as u32,
             static_boxes: sim.static_box_count() as u32,
             police_units_max: self.police_max,
@@ -1030,6 +1099,7 @@ pub fn run_with_hook(
                 off_road_s: 0.0,
                 max_airborne_s: 0.0,
                 route_progress: 0.0,
+                max_los_lost_s: 0.0,
             },
         });
     }
@@ -1080,6 +1150,8 @@ pub fn run_with_hook(
     let mut events_total = 0u64;
     let mut max_events_per_tick = 0u64;
     let mut police_first: BTreeMap<u16, u64> = BTreeMap::new();
+    // (tick, racer, outcome) of every PursuitEnded, in order.
+    let mut pursuit_ends: Vec<(u64, EntityId, wp_contracts::PursuitOutcome)> = Vec::new();
     let mut event_counts: Vec<(&'static str, Vec<EntityId>)> = Vec::new();
     let mut net_rt = crate::net::NetRoundTrip::default();
     let mut failures = Vec::new();
@@ -1116,7 +1188,20 @@ pub fn run_with_hook(
             let states = scenario_states(&sim, &ids);
             for (idx, id) in ids.iter().enumerate() {
                 let input = match routes[idx].as_mut() {
-                    Some(route) => route.input(&states[idx].1),
+                    Some(route) => {
+                        let obstacles = if route.keep_distance {
+                            route_obstacles(&sim, &states, idx)
+                        } else {
+                            Vec::new()
+                        };
+                        let mut input = route.input(&states[idx].1, &obstacles);
+                        // Lights, siren and horn still come from the keyframes.
+                        let key = driver_input(sc, idx, tick, &states[idx].1, &last_inputs[idx]);
+                        input.siren = key.siren;
+                        input.headlights = key.headlights;
+                        input.horn = key.horn;
+                        input
+                    }
                     None => driver_input(sc, idx, tick, &states[idx].1, &last_inputs[idx]),
                 };
                 if input != last_inputs[idx] {
@@ -1146,6 +1231,9 @@ pub fn run_with_hook(
             match e {
                 SimEvent::Police(p) => {
                     police_first.entry(p.kind()).or_insert(now);
+                    if let wp_contracts::PoliceEvent::PursuitEnded { racer, outcome, .. } = p {
+                        pursuit_ends.push((now, *racer, *outcome));
+                    }
                 }
                 SimEvent::ComponentFailed { vehicle, component } => {
                     if let Some(i) = index_of(*vehicle) {
@@ -1184,6 +1272,9 @@ pub fn run_with_hook(
         for (idx, (id, s)) in states.iter().enumerate() {
             let tr = &mut trackers[idx];
             tr.update(s);
+            if let Some(r) = sim.police().racer(*id) {
+                tr.summary.max_los_lost_s = tr.summary.max_los_lost_s.max(r.los_lost_s);
+            }
             if s.wheel_states.iter().all(|w| !w.contact) {
                 tr.airborne_s += PHYSICS_DT;
                 tr.summary.max_airborne_s = tr.summary.max_airborne_s.max(tr.airborne_s);
@@ -1340,6 +1431,7 @@ pub fn run_with_hook(
         probes: &probes,
         travel: &travel,
         police_first: &police_first,
+        pursuit_ends: &pursuit_ends,
         event_counts: &event_counts,
         ids: &ids,
     };
@@ -1375,6 +1467,7 @@ struct EvalCtx<'a> {
     probes: &'a BTreeMap<(usize, u64), f32>,
     travel: &'a BTreeMap<(usize, u64), f32>,
     police_first: &'a BTreeMap<u16, u64>,
+    pursuit_ends: &'a [(u64, EntityId, wp_contracts::PursuitOutcome)],
     event_counts: &'a [(&'static str, Vec<EntityId>)],
     ids: &'a [EntityId],
 }
@@ -1460,6 +1553,23 @@ impl EvalCtx<'_> {
             },
             Expect::PursuitStartedBefore { t_s } => self.police_before(PURSUIT_STARTED_KIND, *t_s),
             Expect::PoliceEventBefore { kind, t_s } => self.police_before(*kind, *t_s),
+            Expect::FirstPursuitEnd {
+                entity,
+                outcome,
+                min_s,
+                max_s,
+            } => {
+                let id = self.ids[self.ent(entity.as_ref()).0];
+                match self.pursuit_ends.iter().find(|(_, r, _)| *r == id) {
+                    Some((tick, _, o)) => {
+                        let t = *tick as f32 * PHYSICS_DT;
+                        let name = format!("{o:?}");
+                        let in_time = t >= *min_s && max_s.is_none_or(|m| t <= m);
+                        (format!("{name} at {t:.3} s"), name == *outcome && in_time)
+                    }
+                    None => ("no pursuit ended".into(), outcome == "None"),
+                }
+            }
             Expect::EventCount {
                 event,
                 entity,

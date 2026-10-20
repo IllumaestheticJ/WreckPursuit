@@ -20,6 +20,7 @@
 //! | scenario | `scenario_json()`, `scenario_result()` |
 //! | race (15) | `race_list(car, mode)`, `race_start(id, car, mode, autopilot)`, `race_info()`, `race_standings()`, `race_course()`, `race_result_json()` — see [`race`] |
 //! | run (lead) | `run_result_json()`, `run_ledger_json()`, `run_account_json()`, `run_repair_continue()`, `debug_set_heat(entity, heat)`, `debug_park_near_police(entity, ahead_m)` — see [`run`] |
+//! | props (lead) | `props_static()` once per session, `props_moved()` per frame, `prop_stride()`, `prop_moved_stride()`, `prop_pose(i)`, `debug_knock_prop(entity, prop, speed)` — see [`props`] |
 //! | map (16) | `map_static_json()` once per city, `map_dynamic(player)` per frame — see [`map`] |
 //! | weather (lead) | `weather_choices()`, `scenario_with_weather(json, choice)`, `scenario_weather_choice(json)`, `city_chase_rain_json(car, mode, city_id)`, `weather_info()`, `weather_grid_meta()`, `weather_grid()`, `weather_spray()` — see [`weather`] |
 //! | career (G) | `career_new(mode)`, `career_load_json`, `career_save_json`, `career_view_json`, `career_mods_json(uid)`, `career_start_run(scenario_json)`, `career_end_run`, `career_run_active`, `career_buy_car`, `career_floor_car`, `career_sell_car`, `career_set_active`, `career_install_mod`, `career_uninstall_mod`, `career_quote_json`, `career_repair`, `career_release`, `career_insure`, `career_next_night` — see [`career`] |
@@ -38,7 +39,9 @@ pub mod lod;
 pub mod map;
 pub mod pack;
 pub mod police;
+pub mod props;
 pub mod race;
+pub mod reset;
 pub mod run;
 pub mod scenario;
 pub mod session;
@@ -62,6 +65,8 @@ use crate::session::Session;
 
 thread_local! {
     static SESSION: RefCell<Option<Session>> = const { RefCell::new(None) };
+    /// What the browser was last told about the session's props (`props_moved`).
+    static PROP_SYNC: RefCell<props::PropSync> = RefCell::new(props::PropSync::default());
 }
 
 fn err(e: impl std::fmt::Display) -> JsValue {
@@ -99,6 +104,7 @@ fn install(mut session: Session) -> Vec<u32> {
                 }
             }
         }
+        PROP_SYNC.with(|p| p.borrow_mut().reset(session.sim()));
         *slot = Some(session);
     });
     ids
@@ -277,6 +283,20 @@ pub fn assist_profile(entity: u32) -> Result<String, JsValue> {
 #[wasm_bindgen]
 pub fn reset_vehicle(entity: u32) -> Result<(), JsValue> {
     with(|s| s.reset_vehicle(EntityId(entity)))
+}
+
+/// Reset in place (testbed R, playtest row 65): the car goes back on its wheels at rest on the
+/// nearest clear lane within 15 m, heading its own way, and is fully repaired — except in a
+/// career run, where repairs are bought in the garage. Heat, pursuit and race progress carry
+/// on. Logged as a replay op. Returns `{ x, y, yaw, on_lane, repaired }` as JSON.
+#[wasm_bindgen]
+pub fn reset_in_place(entity: u32) -> Result<String, JsValue> {
+    let repair = !career::career_run_active();
+    with(|s| s.reset_in_place(EntityId(entity), repair)).map(|p| {
+        json(&serde_json::json!({
+            "x": p.xy[0], "y": p.xy[1], "yaw": p.yaw, "on_lane": p.on_lane, "repaired": repair,
+        }))
+    })
 }
 
 // ----- state -------------------------------------------------------------------------------
@@ -781,6 +801,62 @@ pub fn debug_park_near_police(entity: u32, ahead_m: f32) -> Result<u32, JsValue>
     with(|s| {
         s.debug_park_near_police(EntityId(entity), ahead_m)
             .map(|e| e.0)
+    })
+}
+
+/// Debug / e2e: aim `entity` at a parked car so it knocks it at `speed_mps` (placed 5.5 m off
+/// the car's flank, facing it). `prop` < 0 picks the parked car nearest the vehicle. Returns
+/// the prop index (into `props_static()`). Not recorded in replays.
+#[wasm_bindgen]
+pub fn debug_knock_prop(entity: u32, prop: i32, speed_mps: f32) -> Result<u32, JsValue> {
+    with(|s| {
+        let pick = (prop >= 0).then_some(prop as usize);
+        s.debug_knock_prop(EntityId(entity), pick, speed_mps)
+            .map(|i| i as u32)
+    })
+}
+
+/// Floats per prop in `props_static()` ([`props::PROP_STRIDE`]).
+#[wasm_bindgen]
+pub fn prop_stride() -> u32 {
+    props::PROP_STRIDE as u32
+}
+
+/// Floats per record in `props_moved()` ([`props::MOVED_STRIDE`]).
+#[wasm_bindgen]
+pub fn prop_moved_stride() -> u32 {
+    props::MOVED_STRIDE as u32
+}
+
+/// Every city prop (parked cars, cones) as the sim placed it, 11 floats each:
+/// `[kind (0 parked car, 1 cone), x, y, z, qx, qy, qz, qw, half_x, half_y, half_z]` (box
+/// centre in world m; half extents in the prop frame). Fetch once per session; also restarts
+/// `props_moved()` from these poses.
+#[wasm_bindgen]
+pub fn props_static() -> Result<Vec<f32>, JsValue> {
+    get(|s| {
+        PROP_SYNC.with(|p| p.borrow_mut().reset(s.sim()));
+        props::static_list(s.sim())
+    })
+}
+
+/// Props whose pose changed since the last call, 8 floats each:
+/// `[prop index, x, y, z, qx, qy, qz, qw]`. Usually empty: only knocked (or nearby, woken)
+/// props move. Call once per frame after `step()`.
+#[wasm_bindgen]
+pub fn props_moved() -> Result<Vec<f32>, JsValue> {
+    get(|s| PROP_SYNC.with(|p| p.borrow_mut().moved(s.sim())))
+}
+
+/// The sim's current pose of prop `index`: `[x, y, z, qx, qy, qz, qw]` (empty if there is no
+/// such prop). Automation (e2e: drawn pose vs sim pose).
+#[wasm_bindgen]
+pub fn prop_pose(index: u32) -> Result<Vec<f32>, JsValue> {
+    get(|s| {
+        s.sim()
+            .prop_pose(index as usize)
+            .map(|(p, q)| vec![p[0], p[1], p[2], q[0], q[1], q[2], q[3]])
+            .unwrap_or_default()
     })
 }
 

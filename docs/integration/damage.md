@@ -473,3 +473,173 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
 Requests: contract #9 (lead); 08 — store `FullDamageSnapshot` for garage/impound until #9;
 H — optional move of the police package to the new flags; R — panel state in the extension if
 hanging/unlatched panels must survive a save.
+
+## Lead feedback (round 12b, 2026-10-20) — owner playtest: cars too fragile in Arcade, police too
+Base: `origin/lead/round12` (not main; it has R's panels, A's diffs and this round's merges).
+Owner, playing the round-12 preview in Arcade: "police cars are too fragile" and "cars in general
+are too fragile in arcade mode". Row 10 (permanent damage after one hit) was fixed earlier; this
+is about how fast cars become undrivable / wrecked and how much handling they lose.
+1. Measure first, on `lead/round12`, Arcade: hits to "wrecked"/undrivable and to noticeable
+   handling loss for (a) a player sports car and (b) `sentinel_cruiser`, at 30 / 50 / 70 / 90 km/h,
+   frontal, side-swipe, T-bone and police PIT. Put the table in this doc.
+2. Retune `data/modes/arcade.toml` (and the police package if needed, coordinate with H via
+   docs/integration/cars.md) to the CLAUDE.md semantics "punishing but survivable; one hard hit
+   degrades, several end the car": sideswipes and 30–50 km/h hits never end a car; a hard
+   70–90 km/h frontal degrades clearly but stays drivable; ~3–4 hard hits end it. Police cars
+   at least as tough as the player's sports car (they ram for a living). Simulation mode must
+   not change.
+3. Visual dents should still read strongly (R's panels) — tune mechanical/handling damage and
+   wreck thresholds, not the visible deformation.
+4. Scenarios with expected ranges for the above; goldens in a [bless] commit with the reason.
+
+**Owner rule (2026-10-20, CLAUDE.md):** Arcade and Simulation differ only in car damage; physics is identical. Your Arcade retune (rows 48–49) stays in the damage tables; police durability is a car property and applies in both modes.
+## Response to round 12b — machine B, 2026-10-20
+Base `origin/lead/round12` merged into `ws/damage`. Commits: `f103f31` (free-panel fix),
+`914fd1b` (Arcade retune + tests), `9f43fd1` (measurement example + scenarios), the `[bless]`
+commit (goldens) and this doc.
+### 1. Measurement (full sim, Arcade, R's panels on as in the browser game)
+`cargo run --release -p simcli --example damage_toughness -- [arcade|sim] [car …]` (new). The
+same crash is repeated on one car (damage kept, car put back at speed before every hit, the
+other car repaired between hits) and after each hit the damage state is read. Columns give the
+**hit on which** the car first shows:
+- **feel** — noticeable handling loss: toe > 0.01 rad, a wheel's grip < 0.9, power < 0.85, steering
+  ratio < 0.85, |steer pull| > 0.03, a brake < 0.8 or a puncture > 0.3;
+- **out** — a police unit would pull over (`data/police/pursuit.toml`): health < Arcade
+  `disengage_health` 0.15, toe > `bent_wheel_toe_rad` 0.02, puncture > 0.5, wheel lost, engine dead;
+- **wreck** — undrivable: total loss, engine dead, a wheel lost or power < 0.35.
+`>8` = not within 8 hits; `h1`/`h3` = health after hits 1 and 3. Crashes: **frontal** = full-width
+rigid wall; **ram** = into the rear of a stopped 1400 kg sedan (a cop ramming); **swipe** = a
+1400 kg sedan at the same speed converging 20° into the side; **tbone** = the car at rest, hit on
+the driver door by a 1400 kg sedan; **pit-ee** = PIT-ed on the left rear quarter by a cruiser at
+1.1× speed, 11° in; **pit-er** = the car does that PIT to a sedan. Sports car = `hakone_gt`
+(1599 kg RWD), cop = `sentinel_cruiser` (police package). Before (`lead/round12`) → **after**;
+rows that read `>8 >8 >8`, health ≥ 0.99 both before and after (swipe 30/50, every PIT row in
+both directions) are left out.
+| car | crash | km/h | feel | out | wreck | h1 | h3 |
+|---|---|---|---|---|---|---|---|
+| hakone | frontal | 30 | 3 → **>8** | 4 → **>8** | >8 | 0.98 → 0.99 | 0.95 → 0.97 |
+| hakone | frontal | 50 | 1 → **2** | 1 → **>8** | 5 → **>8** | 0.75 → 0.88 | 0.20 → 0.55 |
+| hakone | frontal | 70 | 1 | 1 → **>8** | 3 → **>8** | 0.44 → 0.72 | 0.13 → 0.19 |
+| hakone | frontal | 90 | 1 | 1 → **3** | 2 → **4** | 0.19 → 0.47 | 0.10 → 0.15 |
+| hakone | ram | 30 | >8 | >8 | >8 | 1.00 | 0.99 |
+| hakone | ram | 50 | 5 → **>8** | 7 → **>8** | >8 | 0.96 → 0.98 | 0.89 → 0.94 |
+| hakone | ram | 70 | 2 → **5** | 2 → **>8** | >8 | 0.88 → 0.94 | 0.70 → 0.85 |
+| hakone | ram | 90 | 1 → **3** | 1 → **>8** | 6 → **>8** | 0.79 → 0.90 | 0.28 → 0.64 |
+| hakone | swipe | 70 | >8 | >8 | >8 | 1.00 | 0.99 → 1.00 |
+| hakone | swipe | 90 | >8 | >8 | >8 | 0.99 → 1.00 | 0.98 → 0.99 |
+| hakone | tbone | 30 | >8 | >8 | >8 | 0.99 → 1.00 | 0.97 → 0.98 |
+| hakone | tbone | 50 | 1 | 1 → **>8** | >8 | 0.85 → 0.93 | 0.59 → 0.80 |
+| hakone | tbone | 70 | 1 | 1 → **>8** | >8 | 0.71 → 0.86 | 0.47 → 0.70 |
+| hakone | tbone | 90 | 1 | 1 → **>8** | >8 | 0.53 → 0.77 | 0.43 → 0.71 |
+| hakone | pit-ee | 30 | >8 | >8 | >8 | 1.00 | 0.99 → 1.00 |
+| cruiser | frontal | 30 | 4 → **>8** | 4 → **>8** | >8 | 0.98 → 0.99 | 0.94 → 0.97 |
+| cruiser | frontal | 50 | 2 → **4** | 2 → **>8** | >8 | 0.80 → 0.90 | 0.36 → 0.67 |
+| cruiser | frontal | 70 | 1 → **2** | 1 → **6** | 4 → **6** | 0.58 → 0.79 | 0.17 → 0.30 |
+| cruiser | frontal | 90 | 1 → **2** | 1 → **5** | 2 → **5** | 0.32 → 0.66 | 0.12 → 0.20 |
+| cruiser | ram | 50 | 5 → **>8** | 7 → **>8** | >8 | 0.98 → 0.99 | 0.91 → 0.95 |
+| cruiser | ram | 70 | 3 → **>8** | 3 → **>8** | >8 | 0.92 → 0.96 | 0.72 → 0.88 |
+| cruiser | ram | 90 | 2 → **8** | 2 → **>8** | >8 | 0.86 → 0.93 | 0.61 → 0.80 |
+| cruiser | swipe | 70 | >8 | >8 | >8 | 1.00 | 0.99 → 1.00 |
+| cruiser | swipe | 90 | 6 → **>8** | 6 → **>8** | >8 | 1.00 | 0.99 |
+| cruiser | tbone | 30 | >8 | >8 | >8 | 0.99 → 1.00 | 0.97 → 0.99 |
+| cruiser | tbone | 50 | 1 → **4** | 1 → **>8** | >8 | 0.89 → 0.95 | 0.69 → 0.84 |
+| cruiser | tbone | 70 | 1 | 1 → **>8** | >8 | 0.80 → 0.90 | 0.51 → 0.76 |
+| cruiser | tbone | 90 | 1 | 1 → **>8** | >8 | 0.68 → 0.84 | 0.44 → 0.75 |
+What made them fragile (before):
+- **Alignment was not softened in Arcade at all.** Toe comes from the suspension mount
+  displacement (1.5 rad per m inward, clamped at 0.2 rad); no `ModeTable` scale touched it. A
+  50 km/h T-bone gave 0.18 rad (≈ 10°) toe on the struck wheel; a 50 km/h wall hit 0.027 rad.
+  Police pull over above 0.02 rad, so **one** 50 km/h T-bone or wall hit took a cop out of the
+  chase (cruiser rows tbone/frontal 50: out = 1).
+- **Components failed early**: steering rack (→ steer ratio 0.3, about a third of the lock) on
+  the 3rd 50 km/h or 1st 90 km/h wall hit; engine on the 2nd 90 km/h hit.
+- **Health fell fast**: three 50 km/h wall hits → 0.20 (cop disengage 0.15).
+- **Bug: free panels leaked alignment.** The front fender carries the suspension strut-top
+  node; once R's fender panel unlatches or hangs, its swing moved that node outside any crash
+  episode, so even cosmetic 30 km/h taps built up toe (cruiser: out after six 30 km/h taps) and a
+  torn-off fender counted as a failed suspension. Without panels there was no leak.
+### 2. Changes (Arcade only; Simulation tuning untouched)
+| Knob | Before | After | Why |
+|---|---|---|---|
+| `arcade.toml` `component_damage_scale` | 0.6 | **0.3** | components (wheels → punctures, engine power, brakes) lose health slower |
+| `arcade.toml` `component_fail_threshold_scale` | 1.8 | **3.5** | engine / rack / suspension fail only after several hard hits |
+| `arcade.toml` `cabin_intrusion_total_loss_m` | 0.5 | **0.6** | five 50 km/h wall hits reached 0.5 m cabin intrusion on the sports car and totalled it |
+| `DamageTuning::arcade_alignment_scale` (new) | 1 | **0.09** | toe/camber in `HandlingEffects` × 0.09 in Arcade: a bent corner is a felt pull (≤ 0.018 rad ≈ 1°), not undrivable, and below the 0.02 rad pull-over limit. Stored geometry stays physical (saves, mode switch unaffected) |
+| `DamageTuning::arcade_structural_health_scale` (new) | 1 | **0.5** | structural health counts half the plastic energy: the dent is as big, it takes more of them to wreck the car |
+| `DamageTuning::arcade_failed_steer_ratio` (new) | 0.3 | **0.5** | a failed rack keeps half the lock (= a rack at zero health), still drivable |
+| free-panel nodes (`node_on_free_panel`) | counted | **ignored** for component intrusion, alignment and "part detached → failed" | the leak above (both modes, only with panels attached) |
+Not changed: `impulse_to_lattice_scale`, `plasticity_scale`, `beam_break_scale` (visible
+deformation and parts falling off read as before, item 3 — e.g. sports car 90 km/h wall:
+0.97 m structural crush before, 1.05 m after; the small difference comes from the car's own
+handling during the contact, not from the lattice), `total_loss_health` 0.10 (still blocked on `wp_economy`'s career proxy,
+see round 8), `arcade_mechanical_min_closing_mps` 11.5, settle. `sim.toml` untouched.
+### 3. Result vs the targets
+- **Sideswipes and 30–50 km/h hits never end a car**: met — no wreck within 8 hits for any
+  30–50 km/h row, either car (sports frontal 50 was wreck on hit 5, now > 8). A cop is no longer
+  taken out by one 50 km/h T-bone / wall hit (out > 8 for every 30–50 row).
+- **A hard 70–90 km/h frontal degrades clearly but stays drivable**: met — sports car after one
+  90 km/h wall: health 0.47, steering 0.5, power 0.8, grip 0.9 (was health 0.19, steering 0.3, toe
+  0.19 rad); cruiser 0.66. Feel = 1 at 70/90 for the sports car.
+- **About 3–4 hard hits end it**: sports car at 90 km/h → hit **4**. At 70 km/h the sports car
+  is limping after 3 (health 0.19, steering 0.5, grip 0.6, power 0.6) but not "ended" within 8:
+  health plateaus at ≈ 0.16 (structure spent, components keep it above 0.10). Ending it at 70
+  needs Arcade `total_loss_health` ≈ 0.17, which would also end it on the **2nd** 90 km/h hit and
+  is blocked on G anyway — left as is; my call is that a limping car is "ended" for a race.
+  In the damage-only unit test a mixed 80 km/h sequence (front, side, offset, rear) ends the
+  sedan on hit 3 (engine).
+- **Police at least as tough as the sports car**: met for everything a cop does in a chase
+  (ram, PIT, swipe, T-bone: no pull-over within 8 hits at any speed; ram 90 was out on hit 2)
+  and for the 90 km/h wall (wreck 5 vs 4). **Not** for repeated 70 km/h *walls*: cruiser ends on
+  hit 6 (cabin intrusion > 0.6 m after 2.2 m of crush through its long nose) where the sports
+  car limps on. Request to H below (cabin/firewall), not changed by me.
+- **Simulation unchanged**: no Sim number changed without panels (`damage_toughness sim
+  --` with `WP_NO_PANELS=1`, frontal/tbone/ram, both cars: identical tables before/after; Sim
+  goldens without panels keep their hashes). With panels the free-panel fix shifts a few Sim
+  rows by one hit (a hanging fender no longer reads as a failed suspension).
+### 4. Scenarios and tests
+- `apps/simcli/scenarios/damage/` (new, full sim, Arcade, panels on): `arcade_sports_frontal_50`,
+  `arcade_sports_frontal_90`, `arcade_cruiser_frontal_90`, `arcade_cruiser_ram_90`,
+  `arcade_cruiser_tbone_50`, `arcade_sports_swipe_90` — health / component-failure / crush
+  ranges. The three frontal ones fail on `lead/round12`.
+- `wp_damage` tests: `arcade_hard_hits_degrade_and_several_wreck_the_car` rewritten (one 80
+  km/h hit drivable, mixed 80 km/h hits end the car on hit 3–4; the old "proposed 0.23" part
+  dropped), new `arcade_50kmh_hits_never_end_the_car` (8 frontal / 8 side hits),
+  `arcade_alignment_is_scaled_and_sim_is_not`; `mode_tables_…` updated. Barrier scenarios
+  `frontal_arcade` / `offset_arcade` 80 km/h health ranges raised (0.71 / 0.67 now).
+- Goldens: `[bless]` commit `6378312` re-blesses only the 7 goldens that pass on
+  `lead/round12` and changed with this work (`audio_sideswipe_scrape`, `crash_barrier_frontal`,
+  `crash_head_on`, `golden_barrier_56kmh_arcade`, `golden_tbone`, `panels_frontal_bumper_hang`,
+  `panels_side_swipe_door`) plus the 6 new `damage/` ones. Expectations changed:
+  `crash/head_on` health 0.2–0.8 → 0.6–0.97 (now 0.88/0.89), `golden/tbone` victim
+  components_failed 1–20 → 0–1.
+- **Lead:** 29 goldens already mismatch on `lead/round12` itself, before my work (checked
+  with the base build: `city_*` ×6, `golden_city_chase`, `golden_night_pursuit_escape`,
+  `opponent_*` ×4, `panels_frontal_56_hood`, `police_sideswipe_patrol_*`, `race_*` ×5,
+  `weather_*` ×5, `world_traffic_soak*` ×4). I did not bless them (not my changes to vouch
+  for); `goldens_match` stays red until the lead re-blesses them after merging.
+- Checks (2026-10-20): fmt, clippy `-D warnings`, wasm build of `wp_wasm` clean; `wp_damage`
+  tests + barrier scenarios and simcli `all_scenarios_pass…` green. `cargo test --workspace
+  --no-fail-fast` red only on things that are equally red on `lead/round12` without my commits
+  (checked on a base build): `goldens_match` (the 29 above), `wp_race`
+  `grid_highway_sprint`, `wp_sim` `vesper_v2_cars_drive_up_the_kerb_and_along_the_sidewalk`,
+  `wp_wasm` `race_tests::{short_sprint_with_ai…, a_capture_mid_race…}`.
+
+### Contract change request #10 (new, lead)
+`ModeTable::{alignment_scale: f32, structural_health_scale: f32, failed_steer_ratio: f32}`
+(Sim 1.0 / 1.0 / 0.3, Arcade 0.09 / 0.5 / 0.5). Today `DamageTuning::arcade_*` gated on
+`ModeTable::mode`, like request #8. Same reason: mode tuning belongs in `data/modes/*.toml`.
+### Requests
+- **H (cars)**: optional — `sentinel_cruiser` cabin/firewall a little stiffer (or a shorter
+  crushable nose behind the push bar) so six 70 km/h wall hits do not reach 0.6 m cabin intrusion
+  before the sports car does. Everything a cop does in a chase is already tougher than the
+  sports car; this is only the repeated-wall case. Also in `docs/integration/cars.md`.
+- **E (police)**: nothing required. FYI: in Arcade, toe now stays ≤ 0.018 rad, so
+  `bent_wheel_toe_rad` 0.02 no longer pulls Arcade cops over; flats, lost wheels, a dead engine
+  and health < 0.15 still do. If you want bent wheels to matter in Arcade, make it a
+  `ModeValue` (e.g. Arcade 0.012).
+- **G (economy)**: unchanged request — let the career proxy follow `wp_damage` health so Arcade
+  `total_loss_health` can move (would let 70 km/h hits end a car on hit 3–4).
+### Changes outside my crates
+`apps/simcli/examples/damage_toughness.rs` (new example, measurement only) and
+`apps/simcli/scenarios/damage/*.ron` (new scenario group); `docs/integration/cars.md` (request
+row). No library code outside `wp_damage`.

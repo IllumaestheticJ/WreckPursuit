@@ -4,6 +4,16 @@ import initWasm, * as wasm from "./pkg/wp_wasm.js";
 import type { PoliceStatus } from "../police";
 
 /** Driver input in the testbed (packed to Float32Array for set_input). */
+/** Result of `resetInPlace`. */
+export interface ResetInPlace {
+  x: number;
+  y: number;
+  yaw: number;
+  /** Landed on a lane (false: set upright where it was, no lane within 15 m). */
+  on_lane: boolean;
+  repaired: boolean;
+}
+
 export interface DriverInput {
   steer: number;
   throttle: number;
@@ -147,6 +157,8 @@ export function packInput(i: DriverInput): Float32Array {
   return new Float32Array([i.steer, i.throttle, i.brake, i.handbrake, i.clutch, flags, 0]);
 }
 
+let lastEventsJson = "";
+
 export const sim = {
   /** Start a live session from scenario JSON; `scripted` = drive entities by their drivers. */
   init: (seed: number, scenarioJson: string, scripted: boolean): number[] =>
@@ -185,7 +197,11 @@ export const sim = {
   setAssists: (entity: number, p: AssistProfile): void => wasm.set_assist_profile(entity, JSON.stringify(p)),
   assistPreset: (source: "Keyboard" | "Gamepad" | "Wheel"): AssistProfile => JSON.parse(wasm.assist_preset(source)),
   assists: (entity: number): AssistProfile => JSON.parse(wasm.assist_profile(entity)),
+  /** Back to the spawn pose, pristine (scenario restart). */
   reset: (entity: number): void => wasm.reset_vehicle(entity),
+  /** Reset in place (R): upright at rest on the nearest clear lane within 15 m, heading its own
+   * way; repaired unless a career run is active. Heat, pursuit and race progress carry on. */
+  resetInPlace: (entity: number): ResetInPlace => JSON.parse(wasm.reset_in_place(entity)),
   entities: (): number[] => Array.from(wasm.entities()),
   states: (): Float32Array => wasm.vehicle_states(),
   statesPrev: (): Float32Array => wasm.vehicle_states_prev(),
@@ -205,6 +221,12 @@ export const sim = {
   trafficDraw: (): Float32Array => wasm.traffic_draw(),
   /** Every police unit, bound or not (layout.ts DRAW_STRIDE / D). */
   policeDraw: (): Float32Array => wasm.police_draw(),
+  /** Every city prop once per session (layout.ts PROP_STRIDE / P): kind, box-centre pose, half extents. */
+  propsStatic: (): Float32Array => wasm.props_static(),
+  /** Props whose pose changed since the last call (layout.ts PROP_MOVED_STRIDE / PM). Once per frame. */
+  propsMoved: (): Float32Array => wasm.props_moved(),
+  /** The sim's pose of one prop `[x, y, z, qx, qy, qz, qw]` (automation). */
+  propPose: (index: number): Float32Array => wasm.prop_pose(index),
   /** Car models this session can show: every id, plus the traffic and police models (or null). */
   sessionCarModels: (): SessionModels => JSON.parse(wasm.session_car_models()),
   /** Body size and wheels of a car model (no vehicle needed). */
@@ -226,8 +248,14 @@ export const sim = {
   eventsDrain: (): SimEvent[] => {
     const bytes = wasm.events_drain();
     // Empty Vec<SimEvent> encodes as a single 0 byte; skip the decode round trip.
-    return bytes.length <= 1 ? [] : JSON.parse(wasm.events_decode(bytes));
+    lastEventsJson = bytes.length <= 1 ? "" : wasm.events_decode(bytes);
+    return lastEventsJson ? JSON.parse(lastEventsJson) : [];
   },
+  /** JSON text of the last `eventsDrain()` ("" when it had no events): the audio director takes
+   * the same JSON, so the frame loop passes this instead of re-stringifying the events. */
+  lastEventsJson: (): string => lastEventsJson,
+  /** Panel states of an entity, PANEL_STRIDE floats per panel (render/panels.ts). */
+  panelStates: (entity: number): Float32Array => wasm.panel_states(entity),
   telemetry: (entity: number): Float32Array => wasm.telemetry(entity),
   telemetryNames: (): string[] => JSON.parse(wasm.telemetry_names()),
   ffb: (entity: number): Float32Array => wasm.ffb(entity),
@@ -271,6 +299,8 @@ export const sim = {
   debugSetHeat: (entity: number, heat: number): void => wasm.debug_set_heat(entity, heat),
   /** Debug / e2e: park `entity` stopped `aheadM` in front of the first police car (throws if none yet). */
   debugParkNearPolice: (entity: number, aheadM: number): number => wasm.debug_park_near_police(entity, aheadM),
+  /** Aim `entity` at a parked car (`prop` < 0: the nearest) at `speed` m/s; returns the prop index. */
+  debugKnockProp: (entity: number, prop: number, speed: number): number => wasm.debug_knock_prop(entity, prop, speed),
 
   // ----- career (machine G; crates/wp_wasm/src/career.rs). Every call throws on refusal. ---
   careerNew: (mode: string): CareerView => JSON.parse(wasm.career_new(mode)),
@@ -284,6 +314,8 @@ export const sim = {
   careerStartRun: (scenarioJson: string): number[] => Array.from(wasm.career_start_run(scenarioJson)),
   /** End the career run (back to the garage; one night passes). */
   careerEndRun: (): RunClose | null => JSON.parse(wasm.career_end_run()),
+  /** The bust settled on load because the game was closed during a pursuit (B05), once. */
+  careerTakeAbandoned: (): RunClose | null => JSON.parse(wasm.career_take_abandoned_json()),
   careerBuy: (defId: string, condition: string): CareerView => JSON.parse(wasm.career_buy_car(defId, condition)),
   careerFloorCar: (): CareerView => JSON.parse(wasm.career_floor_car()),
   careerSell: (uid: number): CareerView => JSON.parse(wasm.career_sell_car(uid)),

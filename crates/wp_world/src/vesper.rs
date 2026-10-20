@@ -15,6 +15,11 @@
 //! - **Loop 9**: a 3+3 highway loop with banked sweepers. **Route 40 West** passes under it
 //!   (the loop rises on an overpass) and **Route 40 North** dips under it (underpass).
 //!
+//! - **Covered roads** (backlog B04): the **Hollins Tunnel** carries Loop 9 through the
+//!   northern shoulder of Hollins Heights (ground backfilled over the roof), and **Founders
+//!   Cut** drops the Uptown Connector into a covered trench under a plaza deck. Both are
+//!   [`CoveredSpan`]s: police and the helicopter cannot see in or out.
+//!
 //! Elevation: a smooth deterministic heightfield (authored hill, plateau, northward rise,
 //! seeded value noise, sea at the south and east edges). Every road gets a vertical profile
 //! that follows the terrain, is grade-capped per class (highway 6 %, hill road 11.5 %), is
@@ -27,6 +32,7 @@ use std::collections::BTreeMap;
 use wp_math::Rng;
 
 use crate::builder::{self, BuildOptions, Built, NodeSpec, RoadClass, RoadSpec};
+use crate::covered::{CoverShape, DECK_OVERHANG_M, ROOF_M, WALL_M};
 use crate::density::default_density_base;
 use crate::geom::{self, Obb, V2, V3};
 use crate::network::*;
@@ -194,7 +200,24 @@ struct Draft {
     anchors: Vec<(f32, f32, f32)>,
     /// Arc ranges that are bridge decks (no terrain carving).
     decks: Vec<(f32, f32)>,
+    /// Covered stretches (tunnels) on this road.
+    covers: Vec<CoverPlan>,
 }
+
+/// A planned covered stretch of one draft road.
+#[derive(Debug, Clone, Copy)]
+struct CoverPlan {
+    /// Portal plan points (matched onto the built surface).
+    p0: V2,
+    p1: V2,
+    kind: CoverKind,
+    name: &'static str,
+}
+
+/// Ceiling height over a covered highway, m.
+pub const TUNNEL_CLEARANCE_HIGHWAY_M: f32 = 6.5;
+/// Ceiling height over other covered roads, m.
+pub const TUNNEL_CLEARANCE_M: f32 = 6.0;
 
 /// A planned grade separation.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -514,6 +537,7 @@ impl Gen {
             dips: false,
             anchors: Vec::new(),
             decks: Vec::new(),
+            covers: Vec::new(),
         });
         Some(self.drafts.len() - 1)
     }
@@ -1345,6 +1369,154 @@ fn plan_crossings(g: &mut Gen) -> Vec<Crossing> {
     out
 }
 
+/// Plan the covered roads: the Hollins Tunnel on Loop 9 and Founders Cut on the Uptown
+/// Connector. A dipped cover (`dip` m below the lowest natural ground over it) gets an internal
+/// height anchor, so the profile ramps down into it within the grade cap. The plans live on
+/// the drafts.
+fn plan_covers(g: &mut Gen) {
+    let plans: [(&str, V2, V2, V2, f32, CoverKind, &'static str); 2] = [
+        // Loop 9 through the Hollins Heights shoulder (it already runs in a cut there).
+        (
+            "Loop 9",
+            [-1000.0, 1390.0],
+            [-720.0, 1376.0],
+            [-1110.0, 1399.0],
+            0.0,
+            CoverKind::Tunnel,
+            "Hollins Tunnel",
+        ),
+        // The Uptown Connector under a plaza deck.
+        (
+            "Uptown Connector",
+            [416.0, 1100.0],
+            [418.0, 1005.0],
+            [414.0, 1255.0],
+            7.0,
+            CoverKind::CoveredTrench,
+            "Founders Cut",
+        ),
+    ];
+    for (road, probe, p0, p1, dip, kind, name) in plans {
+        let Some(ri) = (0..g.drafts.len()).find(|k| {
+            let d = &g.drafts[*k];
+            d.name == road && project2(&d.path, &cum2(&d.path), probe).1 < 40.0
+        }) else {
+            continue;
+        };
+        let d = &g.drafts[ri];
+        let cum = cum2(&d.path);
+        let (a, b) = (project2(&d.path, &cum, p0).0, project2(&d.path, &cum, p1).0);
+        let (s0, s1, p0, p1) = if a <= b {
+            (a, b, p0, p1)
+        } else {
+            (b, a, p1, p0)
+        };
+        if dip > 0.0 {
+            let mut lowest = f32::INFINITY;
+            let mut s = s0;
+            while s <= s1 {
+                lowest = lowest.min(g.nat.z(point_on(&d.path, &cum, s).0));
+                s += 4.0;
+            }
+            g.drafts[ri].anchors.push((s0, s1, lowest - dip));
+        }
+        g.drafts[ri].covers.push(CoverPlan { p0, p1, kind, name });
+    }
+}
+
+/// Covered spans on the built road surfaces (portal to portal), one per plan.
+fn covered_spans(g: &Gen, built: &Built) -> Vec<CoveredSpan> {
+    let mut out = Vec::new();
+    for (ri, d) in g.drafts.iter().enumerate() {
+        let s = &built.surfaces[ri];
+        let cum = geom::cumulative(&s.centre);
+        for c in &d.covers {
+            let u0 = geom::project(&s.centre, &cum, c.p0).s.max(0.0);
+            let u1 = geom::project(&s.centre, &cum, c.p1)
+                .s
+                .min(cum[cum.len() - 1]);
+            let (u0, u1) = (u0.min(u1), u0.max(u1));
+            let mut centre = vec![geom::point_at(&s.centre, &cum, u0).0];
+            for (k, p) in s.centre.iter().enumerate() {
+                if cum[k] > u0 + 0.5 && cum[k] < u1 - 0.5 {
+                    centre.push(*p);
+                }
+            }
+            centre.push(geom::point_at(&s.centre, &cum, u1).0);
+            let edge = s.left_m.max(s.right_m);
+            let walk = if s.sidewalk[0] || s.sidewalk[1] {
+                3.5
+            } else {
+                1.5
+            };
+            out.push(CoveredSpan {
+                name: c.name.into(),
+                kind: c.kind,
+                road: ri as u32,
+                centre,
+                half_width_m: edge + walk,
+                clearance_m: if s.highway {
+                    TUNNEL_CLEARANCE_HIGHWAY_M
+                } else {
+                    TUNNEL_CLEARANCE_M
+                },
+            });
+        }
+    }
+    out
+}
+
+/// Fill the ground back over a covered span: beyond the carved shoulder each side, up to the
+/// roof deck (or the natural ground, if lower). Inside the walls and under the deck overhang
+/// the carve stays, so the terrain never reaches into the tube.
+fn backfill_covers(hf: &mut Heightfield, nat: &Natural, spans: &[CoveredSpan]) {
+    for span in spans {
+        let shape = CoverShape::new(span);
+        let inner = span.half_width_m + WALL_M + DECK_OVERHANG_M - 1.0;
+        let reach = span.half_width_m + 45.0;
+        let (lo, hi) = (shape.bounds[0], shape.bounds[1]);
+        let cell = hf.cell_m;
+        let i0 = (((lo[0] - 45.0 - hf.origin[0]) / cell).floor().max(0.0)) as u32;
+        let j0 = (((lo[1] - 45.0 - hf.origin[1]) / cell).floor().max(0.0)) as u32;
+        let i1 = ((((hi[0] + 45.0 - hf.origin[0]) / cell).ceil()) as u32).min(hf.nx - 1);
+        let j1 = ((((hi[1] + 45.0 - hf.origin[1]) / cell).ceil()) as u32).min(hf.ny - 1);
+        for j in j0..=j1 {
+            for i in i0..=i1 {
+                let p = hf.vertex_pos(i, j);
+                let q = shape.locate(p);
+                if q.s < 0.0 || q.s > shape.length() {
+                    continue;
+                }
+                let lat = q.lateral.abs();
+                if lat < inner || lat > reach {
+                    continue;
+                }
+                let roof_top = q.road_z + span.clearance_m + ROOF_M;
+                let v = (j * hf.nx + i) as usize;
+                let fill = nat.z(p).min(roof_top);
+                if fill > hf.z[v] {
+                    hf.z[v] = (fill * 1000.0).round() / 1000.0;
+                }
+            }
+        }
+    }
+}
+
+/// Whether a building footprint would stand in a covered span's trench (inside the deck).
+fn in_cover_corridor(shapes: &[CoverShape], fp: &[V2]) -> bool {
+    shapes.iter().any(|sh| {
+        let r = sh.span.half_width_m + WALL_M + DECK_OVERHANG_M + 1.0;
+        let mut c = [0.0f32; 2];
+        for q in fp {
+            c = [c[0] + q[0] / fp.len() as f32, c[1] + q[1] / fp.len() as f32];
+        }
+        fp.iter().chain(std::iter::once(&c)).any(|q| {
+            let l = sh.locate(*q);
+            l.s >= -2.0 && l.s <= sh.length() + 2.0 && l.lateral.abs() <= r
+        })
+    })
+}
+
 // ------------------------------------------------------------------------------------------
 // Terrain carving
 // ------------------------------------------------------------------------------------------
@@ -1893,6 +2065,7 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
     };
     let (loop_roads, hollins, _knob, _lot, _r40w, _r40n) = g.layout();
     let crossings = plan_crossings(&mut g);
+    plan_covers(&mut g);
     let opt = BuildOptions::default();
     let specs = profile_roads(&mut g, &opt);
     // Unused nodes (dropped optional roads) stay in the list without lanes; harmless.
@@ -1924,6 +2097,8 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
         d.decks.iter().any(|(a, b)| s >= *a && s <= *b)
     };
     carve(&mut hf, &built, &g.nodes, &deck);
+    let covered = covered_spans(&g, &built);
+    backfill_covers(&mut hf, &g.nat, &covered);
 
     let zones = zones();
     let mut degree = vec![0usize; g.nodes.len()];
@@ -1935,7 +2110,9 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
         .filter(|n| degree[*n] == 1)
         .map(|n| g.nodes[n].pos)
         .collect();
-    let buildings = buildings(&mut g.rng, &built, &zones, &hf, &dead_ends);
+    let mut buildings = buildings(&mut g.rng, &built, &zones, &hf, &dead_ends);
+    let cover_shapes: Vec<CoverShape> = covered.iter().map(CoverShape::new).collect();
+    buildings.retain(|b| !in_cover_corridor(&cover_shapes, &b.footprint));
 
     // POIs. The first race grid is the city-chase / free-drive spawn.
     let mut pois = Vec::new();
@@ -2038,6 +2215,43 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
             });
         }
     }
+    // Route ends either side of each covered road (drive-through and pursuit scenarios):
+    // "<name> entry" sits before the first portal in the forward direction, "<name> exit"
+    // after the second.
+    let tunnel_ends: [(&str, f32, f32); 2] = [
+        ("Hollins Tunnel", 950.0, -1100.0),
+        ("Founders Cut", 40.0, -40.0),
+    ];
+    for (name, s0, s1) in tunnel_ends {
+        let Some(c) = covered.iter().find(|c| c.name == name) else {
+            continue;
+        };
+        // "<name> lay-by": the forward kerb lane in the middle of the covered stretch (a
+        // place to hide from the helicopter).
+        let mid = {
+            let sh = CoverShape::new(c);
+            geom::xy(geom::point_at(&c.centre, &sh.cum, sh.length() * 0.5).0)
+        };
+        let lay_by = built.road_lanes[c.road as usize].fwd.last().map(|l| {
+            let pl = &built.lanes[*l as usize].polyline;
+            geom::project(pl, &geom::cumulative(pl), mid).s
+        });
+        for (suffix, s) in [
+            ("entry", s0),
+            ("lay-by", lay_by.unwrap_or(s0)),
+            ("exit", s1),
+        ] {
+            if let Some((p, yaw, lane)) = lane_pose(&built, c.road as usize, s, true) {
+                pois.push(Poi {
+                    kind: PoiKind::RaceStartGrid,
+                    name: format!("{name} {suffix}"),
+                    pos: p,
+                    heading_rad: yaw,
+                    lane: Some(lane),
+                });
+            }
+        }
+    }
     let mut block_poi = |kind: PoiKind, name: &str, p: V2| {
         if let Some((lane, q, yaw)) = nearest_lane(&built, p) {
             pois.push(Poi {
@@ -2094,6 +2308,7 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
         net.bounds_max[1].max(MAP_HI[1]),
     ];
     net.terrain = Some(hf);
+    net.covered = covered;
     let report = VesperReport {
         crossings,
         skipped_roads: g.skipped,
@@ -2319,5 +2534,50 @@ mod tests {
             }
             assert!(b.roof_z() > b.base_z_m + 3.0);
         }
+    }
+    #[test]
+    fn covered_roads_block_sight_in_and_out() {
+        let (net, _) = city();
+        let names: Vec<&str> = net.covered.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["Hollins Tunnel", "Founders Cut"]);
+        let mut map = crate::CityMap::new(net.clone());
+        let eye = |p: V3| [p[0], p[1], p[2] + 1.3];
+        for (i, c) in net.covered.iter().enumerate() {
+            let sh = CoverShape::new(c);
+            let len = sh.length();
+            assert!(len > 200.0, "{} only {len} m", c.name);
+            let at = |s: f32| eye(geom::point_at(&c.centre, &sh.cum, s).0);
+            let (a, b) = (at(30.0), at(len * 0.5));
+            assert_eq!(map.covered_at(a), Some(i));
+            // Inside the same tunnel: clear. From the road 50 m before the portal: blocked.
+            assert!(map.line_of_sight(a, b), "{}: inside", c.name);
+            let (p0, d0) = geom::point_at(&c.centre, &sh.cum, 0.0);
+            let out = eye([p0[0] - d0[0] * 50.0, p0[1] - d0[1] * 50.0, p0[2]]);
+            assert_eq!(map.covered_at(out), None);
+            assert!(!map.line_of_sight(out, a), "{}: portal", c.name);
+            assert!(!map.line_of_sight(a, out), "{}: portal back", c.name);
+            // The helicopter overhead loses the car inside, unless cover is switched off.
+            let heli = [b[0], b[1], b[2] + 120.0];
+            assert!(!map.line_of_sight(heli, b), "{}: helicopter", c.name);
+            map.covered_los = false;
+            assert!(map.line_of_sight(heli, b));
+            map.covered_los = true;
+            // The deck (or backfill) is above the ceiling and terrain never enters the tube.
+            let t = net.terrain.as_ref().unwrap();
+            for k in 0..c.centre.len() {
+                let p = c.centre[k];
+                assert!(
+                    t.height_at(geom::xy(p)) <= p[2] + 0.05,
+                    "{}: ground in the tube",
+                    c.name
+                );
+            }
+        }
+        // No building stands on a deck or in a trench.
+        let shapes: Vec<CoverShape> = net.covered.iter().map(CoverShape::new).collect();
+        assert!(net
+            .buildings
+            .iter()
+            .all(|b| !in_cover_corridor(&shapes, &b.footprint)));
     }
 }

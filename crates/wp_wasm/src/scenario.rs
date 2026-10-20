@@ -60,6 +60,7 @@ pub fn free_drive_in(car: &str, mode: DamageMode, city: CitySpec) -> Scenario {
         traffic_cars: true,
         parked_cars: true,
         police_cars: true,
+        covered_los: true,
         police_presence: None,
         slow: false,
         // Hinged panels + per-panel meshes in the browser (workstream R).

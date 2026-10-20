@@ -75,6 +75,8 @@ export interface CarView {
   drivable: boolean;
   value: number;
   sale_price: number;
+  /** What the car body cost (price paid, mods excluded). */
+  paid: number;
   scrap_value: number;
   mods: { id: string; name: string; slot: string }[];
   insurance: string | null;

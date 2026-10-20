@@ -15,6 +15,9 @@ cargo run -p car-assets --bin validate-car-asset [car ...]
 cargo run --release -p car-assets --bin panels-bench # perf, 24 cars
 cargo run --release -p car-assets --example panel_probe -- apps/simcli/scenarios/panels/side_swipe_door.ron
 cargo test -p car-assets                             # every car valid + meshes up to date
+cargo run --release -p car-assets --example crumple_matrix -- Arcade [frame ticks]  # hood/fender/bumper crumple, 30/50/70 km/h
+node tools/assets/panels_shots.mjs                   # browser checks + screenshots (docs/media/panels)
+node tools/assets/crumple_shots.mjs after            # hood crumple shots at 8 m / 30 m
 ```
 
 ## Mesh generator (`src/profile.rs`, `src/mesh.rs`)
@@ -41,10 +44,11 @@ cargo test -p car-assets                             # every car valid + meshes 
 to 255. Region-aware: a hood vertex never follows a fender node. Regions with fewer than four
 nodes (glass, 2-door side strips) borrow from their fallback regions (roof/cabin, quarter).
 Light lenses bind to the 4 nearest nodes of their end of the car (bumper, hood/trunk, same-side
-fender/quarter, frame), so they crush and move with the bumper and hood. Hood and trunk lids also
-get a fold binding (`bind_fold`): hinge-row → latch-row node chords and per-vertex crease and
-rear-lift weights (see `data/panels/README.md`). `skin::deform` is the Rust reference of the
-browser skinning (tests use it).
+fender/quarter, frame), so they crush and move with the bumper and hood. Hood and trunk lids and
+the front fenders also get a crumple binding (`bind_fold`, mesh format 3): fixed-row → leading-row
+node chords, front-structure lead nodes per chord, a visual gain and per-vertex crease, lift and
+follow weights (see `data/panels/README.md`). `skin::deform` / `skin::deform_detail` and
+`crumple::render_part` are the Rust reference of the browser skinning (tests use them).
 Writes into the mesh file (not `LatticeDef::skin_binding`, which would bloat the lattices; the
 contract field stays available for hand-made meshes).
 

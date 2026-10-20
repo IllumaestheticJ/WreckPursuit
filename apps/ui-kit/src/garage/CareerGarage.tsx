@@ -4,11 +4,11 @@
  * state of its own: every action returns the new `CareerView` and the screen redraws.
  *
  * Tabs: Cars (condition, value, repair per item at a district shop, insurance, sell, mods),
- * Dealer (roster cars by class band, the economy-floor beater), Pound (release or let the
+ * Dealer (roster cars by class band, the economy-floor beater), Impound (release or let the
  * auction countdown run), Ledger. The head has cash / debt / rep / bounty / carried heat and
  * starts the next run (free drive or city chase) with the active car.
  */
-import { render } from "preact";
+import { render, type ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { Badge, Button, Delta, Meter, Money, Panel, severityColor, Stat, Tabs } from "../ui/kit";
 import { pct, words } from "../ui/format";
@@ -118,6 +118,7 @@ function RepairPanel(props: { car: CarView; view: CareerView; api: CareerApi; ru
   const [district, setDistrict] = useState("Residential");
   const [shop, setShop] = useState<ShopKind>("Legit");
   const [picked, setPicked] = useState<string[]>([]);
+  const [scrapAsk, setScrapAsk] = useState(false);
   if (car.location !== "Garage") return null;
   const items = car.repair_lines.filter((l) => picked.includes(itemKey(l.item))).map((l) => l.item);
   const req = (option: ShopRequest["option"]): ShopRequest => ({ option, district, shop });
@@ -194,10 +195,22 @@ function RepairPanel(props: { car: CarView; view: CareerView; api: CareerApi; ru
             <Button disabled={!some || some.player_pays > view.cash} onClick={() => (props.run(() => api.repair(car.uid, req({ RepairSelected: items }))), setPicked([]))}>
               Repair selected {some && <Money value={some.player_pays} />}
             </Button>
-            <Button variant="danger" onClick={() => props.run(() => api.repair(car.uid, req("Scrap")))} title="sell the car for salvage">
-              Scrap (+<Money value={car.scrap_value} />)
+            <Button variant="danger" pressed={scrapAsk} onClick={() => setScrapAsk(!scrapAsk)} title="sell the car for salvage">
+              Scrap…
             </Button>
           </div>
+          {scrapAsk && (
+            <Confirm
+              text={
+                <>
+                  Scrap it for <Money value={car.scrap_value} /> (bought for <Money value={car.paid} />)? The car is gone for good.
+                </>
+              }
+              yes="Scrap"
+              onYes={() => (setScrapAsk(false), props.run(() => api.repair(car.uid, req("Scrap"))))}
+              onNo={() => setScrapAsk(false)}
+            />
+          )}
           {all && all.insurance_covers > 0 && (
             <p class="wp-dim">
               Insurance pays <Money value={all.insurance_covers} /> of <Money value={all.gross} />.
@@ -207,6 +220,30 @@ function RepairPanel(props: { car: CarView; view: CareerView; api: CareerApi; ru
       )}
     </Panel>
   );
+}
+
+/** Inline "are you sure" row for a destructive action (sell, scrap). */
+function Confirm(props: { text: ComponentChildren; yes: string; onYes: () => void; onNo: () => void }) {
+  return (
+    <div class="wp-row wp-cg-confirm" data-testid="career-confirm" style={{ gap: "0.5em", marginTop: "0.5em", flexWrap: "wrap", alignItems: "center" }}>
+      <span>{props.text}</span>
+      <Button size="sm" variant="danger" onClick={props.onYes}>
+        {props.yes}
+      </Button>
+      <Button size="sm" onClick={props.onNo}>
+        Cancel
+      </Button>
+    </div>
+  );
+}
+
+/** One line per tier, from the data: "Basic: 50 % of the repair bill above $500, $X/night." */
+function insuranceNote(view: CareerView, car: CarView): string {
+  const tiers = view.insurance.map((t) => {
+    const premium = Math.max(1, Math.round(t.premium_per_day_frac * car.value));
+    return `${words(t.id)}: pays ${pct(t.coverage)} of the repair bill above $${t.deductible}, $${premium}/night`;
+  });
+  return `${tiers.join(". ")}. Nothing for damage taken while wanted.`;
 }
 
 function InsurancePanel(props: { car: CarView; view: CareerView; api: CareerApi; run: (f: () => CareerView) => void }) {
@@ -231,6 +268,9 @@ function InsurancePanel(props: { car: CarView; view: CareerView; api: CareerApi;
           </Button>
         ))}
       </div>
+      <p class="wp-dim" data-testid="insurance-note" style={{ fontSize: "0.85em", margin: "0.4em 0 0" }}>
+        {insuranceNote(view, car)}
+      </p>
     </Panel>
   );
 }
@@ -314,6 +354,7 @@ function CarsTab(props: { view: CareerView; api: CareerApi; run: (f: () => Caree
   const { view, api } = props;
   const [sel, setSel] = useState<number | null>(view.active_car);
   const [mods, setMods] = useState(false);
+  const [sellAsk, setSellAsk] = useState(false);
   const car = view.cars.find((c) => c.uid === sel) ?? view.cars.find((c) => c.active) ?? view.cars[0];
   if (!car) {
     return (
@@ -332,7 +373,7 @@ function CarsTab(props: { view: CareerView; api: CareerApi; run: (f: () => Caree
     <div class="wp-cg-cars">
       <div class="wp-cg-list" role="listbox" aria-label="Your cars">
         {view.cars.map((c) => (
-          <CarCard key={c.uid} car={c} selected={c.uid === car.uid} onSelect={() => setSel(c.uid)} />
+          <CarCard key={c.uid} car={c} selected={c.uid === car.uid} onSelect={() => (setSel(c.uid), setSellAsk(false))} />
         ))}
       </div>
       <div class="wp-cg-detail">
@@ -353,10 +394,23 @@ function CarsTab(props: { view: CareerView; api: CareerApi; run: (f: () => Caree
             <Button disabled={car.location !== "Garage"} onClick={() => setMods(true)}>
               Mods
             </Button>
-            <Button variant="danger" disabled={car.location !== "Garage"} onClick={() => props.run(() => api.sell(car.uid))}>
+            <Button variant="danger" disabled={car.location !== "Garage"} pressed={sellAsk} onClick={() => setSellAsk(!sellAsk)}>
               Sell (+<Money value={car.sale_price} />)
             </Button>
           </div>
+          {sellAsk && car.location === "Garage" && (
+            <Confirm
+              text={
+                <>
+                  Sell it to the dealer for <Money value={car.sale_price} />? You paid <Money value={car.paid} /> for the car
+                  {car.mods.length ? " (mods return 40 % of their price)" : ""}.
+                </>
+              }
+              yes="Sell"
+              onYes={() => (setSellAsk(false), props.run(() => api.sell(car.uid)))}
+              onNo={() => setSellAsk(false)}
+            />
+          )}
           {car.impound && (
             <p class="wp-warn">
               In the pound: <Money value={car.impound.fee} /> today, +<Money value={car.impound.fee_per_day} /> a night, auctioned in{" "}
@@ -433,7 +487,7 @@ function PoundTab(props: { view: CareerView; api: CareerApi; run: (f: () => Care
   const inPound = view.cars.filter((c) => c.impound);
   return (
     <Panel title="Impound lot" tag={`${inPound.length} cars`}>
-      {inPound.length === 0 && <p class="wp-dim">Nothing in the pound.</p>}
+      {inPound.length === 0 && <p class="wp-dim">Nothing in the impound.</p>}
       {inPound.map((c) => {
         const i = c.impound!;
         return (
@@ -600,7 +654,7 @@ function GarageScreen(props: { api: CareerApi; initial: CareerView; message: str
         tabs={[
           { id: "cars", label: `Cars (${view.cars.length})` },
           { id: "dealer", label: "Dealer" },
-          { id: "pound", label: pound ? `Pound (${pound})` : "Pound" },
+          { id: "pound", label: pound ? `Impound (${pound})` : "Impound" },
           { id: "ledger", label: "Ledger" },
         ]}
         value={tab}

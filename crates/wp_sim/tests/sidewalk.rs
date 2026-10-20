@@ -311,6 +311,9 @@ struct Drive {
     on_sidewalk: bool,
     /// Where the lowest hub was (time s, wheel, hub position).
     min_at: (f32, usize, V3),
+    /// Lowest speed after the spawn settled, m/s (far below the drive speed: the car hit
+    /// something beside the sidewalk, e.g. a building wall).
+    min_speed_mps: f32,
 }
 
 /// Drive onto the sidewalk of `c` at `speed` m/s, approaching at `angle` rad, then along it
@@ -339,6 +342,7 @@ fn drive(sim: &mut Sim, map: &CityMap, walks: &Walks, c: &Case, speed: f32, angl
         end_clearance: 0.0,
         on_sidewalk: false,
         min_at: (0.0, 0, [0.0; 3]),
+        min_speed_mps: f32::INFINITY,
     };
     let ticks = (seconds * 240.0) as usize;
     for t in 0..ticks {
@@ -358,7 +362,10 @@ fn drive(sim: &mut Sim, map: &CityMap, walks: &Walks, c: &Case, speed: f32, angl
         }
         let steer = if steering {
             // +1 steers right: steer towards the target line, damped by the lateral speed.
-            (-0.25 * (lat - target_lat) - 1.2 * v_lat / st.speed_mps.max(2.0)).clamp(-0.5, 0.5)
+            // The damping must straighten a 15° / 40 km/h approach within the sidewalk's 3 m:
+            // buildings stand ~1 m past its outer edge, and a car still angled in noses into
+            // them (round 12's slip-target steering turns in more gently than the old lock).
+            (-0.25 * (lat - target_lat) - 2.5 * v_lat / st.speed_mps.max(2.0)).clamp(-0.5, 0.5)
         } else {
             0.0
         };
@@ -383,6 +390,7 @@ fn drive(sim: &mut Sim, map: &CityMap, walks: &Walks, c: &Case, speed: f32, angl
         let p = [st.pos[0], st.pos[1]];
         // Skip the settling of the spawn drop.
         if t > 60 {
+            out.min_speed_mps = out.min_speed_mps.min(st.speed_mps);
             for (wi, h) in hubs(&st).into_iter().enumerate() {
                 if !st.wheel_states[wi].contact {
                     continue;

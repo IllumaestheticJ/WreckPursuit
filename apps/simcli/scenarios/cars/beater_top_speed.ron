@@ -1,0 +1,16 @@
+// Junkyard beater flat out: tops out at about 150 km/h (140-160 km/h = 38.9-44.4 m/s; the
+// 4-speed runs into the limiter / its power at ~146 km/h). 90 s is enough to converge.
+(
+    name: "cars_beater_top_speed",
+    mode: Arcade,
+    seed: 1,
+    duration_s: 90.0,
+    entities: [
+        (
+            id: "car",
+            car: "junkyard_beater",
+            inputs: [(t_s: 0.0, input: (throttle: 1.0))],
+        ),
+    ],
+    expect: [metric(name: "max_speed_mps", min: 38.9, max: 44.4)],
+)

@@ -40,6 +40,15 @@ heat = 20.0
 min_level = 2
 nearby_units_m = 60.0
 
+# Blatant speeding right past a unit (owner playtest row 60): a speeding violation this far
+# over the limit within range_m of an in-service unit that can see it is recognised at once
+# (no recognition_time_s wait): wanted >= min_level and a pursuit by that unit. At night a
+# pursuit otherwise needs 40 m for 4 s, which a car passing at 150 km/h never gives.
+[heat.blatant]
+over_mps = 11.1
+range_m = 60.0
+min_level = 1
+
 [heat.violation]
 speeding_base = 2.0
 speeding_per_mps = 0.4

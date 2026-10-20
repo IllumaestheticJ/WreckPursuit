@@ -490,6 +490,8 @@ mod tests {
             blip_load: 0.8,
             lod_two_layer_m: 40.0,
             second_layer_cull_scale: 0.25,
+            physical_max_others: 6,
+            physical_radius_m: 60.0,
         }
     }
 

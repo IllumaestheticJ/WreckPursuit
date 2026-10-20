@@ -13,8 +13,11 @@ clock. Implements `wp_contracts::WorldQuery`. No renderer dependency; compiles f
 | `procgen` | Procedural fallback city (grid + ring + highway spine + 2 diagonals), flat |
 | `vesper` | Port Vesper v2 (`vesper_v2`): curved streets, hills, terrain, banked highway loop, grade separations |
 | `terrain` | `Heightfield` (stored with the network), value noise, bumps |
-| `surface` | Road trimesh, raised sidewalks + kerbs (`sidewalk_mesh`), junction discs, deck rails — one geometry for physics and the greybox; `MapGround` wheel probe |
+| `surface` | Road trimesh (`road_mesh`: banked surface ribbons + `node_patches` — junction surfaces, bend strips, dead-end turnarounds sharing the ribbons' end edges), raised sidewalks + kerbs (`sidewalk_mesh`, exact corner fills along the kerb curves), deck rails — one geometry for physics and the greybox; `MapGround` wheel probe |
 | `map` | Runtime map: connector curves, conflict sets, uniform-grid index, `WorldQuery` (incl. building line of sight) |
+| `surface` | Road trimesh for physics/greybox, deck rails, `MapGround` wheel probe |
+| `map` | Runtime map: connector curves, conflict sets, uniform-grid index, `WorldQuery` (incl. building, terrain and tunnel line of sight) |
+| `covered` | Tunnels / covered roads: `CoverShape` (inside test, sightline rules, wall lines, light points), `CoverIndex`; shell dimensions shared with `wp_sim` colliders and the greybox |
 | `signals` | Fixed-time controller evaluation |
 | `traffic` | Civilian agents: IDM, MOBIL, junction permits, hazards, spawning, LOD |
 | `density` | Density model (`f_time`, `f_distance`, district bases) |
@@ -75,7 +78,7 @@ ignored perf run with 12 blockers. `tests/drive.rs` drives the real car (Rapier 
 
 ## Road format (`data/city/<city>.road.bin` + `.road.json`)
 
-Binary: `b"WPRD"`, little-endian `u32` format version (`ROAD_FORMAT_VERSION` = 2), then the
+Binary: `b"WPRD"`, little-endian `u32` format version (`ROAD_FORMAT_VERSION` = 3; v3 added `covered`), then the
 [postcard](https://docs.rs/postcard) encoding of `RoadNetwork`. The `.road.json` debug dump is
 the `serde_json` encoding of the same struct and loads identically (`RoadNetwork::load` picks by
 extension). All coordinates are metres, +X east, +Y north, +Z up. Ids are `u32` indices.
@@ -194,7 +197,22 @@ After `docs/design/CITY.md`, scaled to ≈ 3.3 × 2.9 km (`MAP_LO..MAP_HI`), 5 m
   `Loop 9 north`, `Loop 9 west`; 3 precincts + helipad, 3 garages, 4 safehouses (incl.
   `Knob Observatory Lot`).
 
-950 lanes, 133 junctions (27 signalised), 3346 buildings, 2 grade separations, terrain
+- **Covered roads** (backlog B04, `RoadNetwork::covered`): the **Hollins Tunnel** — Loop 9
+  through the northern shoulder of Hollins Heights, 391 m, road profile unchanged (it already
+  ran in a cut), ground backfilled over the roof on the hill side — and **Founders Cut** — the
+  Uptown Connector dropped 7 m below the lowest natural ground into a 250 m covered trench
+  (an internal profile anchor; ramps ≈ 5 %), ground backfilled level with the plaza deck.
+  Inner half width = paved half width + 3.5 m (sidewalk roads) / 1.5 m; ceiling 6.5 m
+  (highway) / 6 m; 0.6 m walls; 0.8 m deck reaching 8.5 m past each wall over the carved
+  shoulder. No buildings on the decks. Route POIs `"<name> entry"`, `"<name> lay-by"`
+  (mid-tunnel kerb lane), `"<name> exit"`.
+- **Line of sight** (`CityMap::line_of_sight`): blocked from outside a span into it and back;
+  two points inside the same span see each other along a line that stays inside; outside
+  lines are blocked through the shell (walls + deck) and clear above it.
+  `CityMap::covered_los = false` / `World::set_covered_los(false)` switches only the
+  sightline effect off (A/B controls). `World::covered_at(p)` names the span at a point.
+
+950 lanes, 133 junctions (27 signalised), 3312 buildings, 2 grade separations, 2 covered roads, terrain
 681 × 611 vertices (−3 … 111 m); generation ≈ 0.12 s release (0.4 s debug), `CityMap::new`
 ≈ 10 ms. `cargo run --release -p wp_world --example vesper_stats` prints grades, crest/sag g
 at the limit and banks per road.
@@ -279,8 +297,7 @@ lane it is in. `TrafficStats::{lane_changes, lane_changes_left}`.
 
 **Hazards**: emergency braking (−8 m/s², hazard lights) when a tracked vehicle in front or
 alongside has time-to-closest-approach < 3 s with miss distance < 3 m at > 5 m/s relative
-speed (head-on or crossing); sirens within 60 m → pull 1 m right, slow to 3 m/s at up to
-4 m/s², stop if the siren is within 25 m behind, never enter a junction; debris ahead (`Hazard`,
+speed (head-on or crossing); siren units → see **Yielding to sirens** below; debris ahead (`Hazard`,
 extrapolated along its velocity up to 2 s) → swerve within the lane by up to 1.5 m (planned in
 the lane frame, held until the rear bumper is past) at 60 % of the limit; debris that blocks the
 lane → change to a free neighbour lane (forced MOBIL change, safety still checked) or stop;
@@ -307,7 +324,13 @@ whole map is active (headless tests). Every 0.25 s: despawn out-of-area, closed-
 zones with deficits on free lane spots (≥ 12 m gaps). **Sightline rule (prototype)**: nothing
 spawns or despawns within 320 m of a player's current position or of where it will be in 1 s
 (was 150 m / 400 m active until the LOD pop-in fix, playtest row 25: cars popped in and out
-in plain view on Port Vesper's highway and hill sightlines; `tests/lod_draw.rs` measures it).
+in plain view on Port Vesper's highway and hill sightlines; `tests/lod_draw.rs` measures it). Agents in
+view are left out of the per-zone counts; the part of the target that lies in view and is not
+yet filled by cars in view is added to the spawnable zones around the players (≤ 2×,
+`MAX_SPAWNABLE_BOOST`), so the active area still reaches its density target when a whole
+district is in view. A car left over the centre line outside a manoeuvre (a pass given up
+beside the obstruction) occupies the oncoming lane and holds oncoming traffic 22 m back
+(`traffic::blocked::STRAY_HOLD_BACK_M`).
 
 **Violations** (tracked vehicles, 60 Hz): speeding = over the limit by more than
 max(2.24 m/s, 10 %) for > 1 s (re-emitted every 5 s); red light = crossing the stop line of the
@@ -402,6 +425,33 @@ integer ticks: the world counts physics ticks (`World::tick`, signals use it via
 (`TICKS_PER_TRAFFIC_STEP` = 4). `World::state_hash` covers clock, tick and every agent (pinned
 by `determinism_hash`).
 
+### Yielding to sirens (`traffic::siren`, playtest rows 61–62)
+Any tracked vehicle with `siren` on (AI police units via `VehicleInput::siren`, a player cop).
+Per driver, per siren unit within 120 m (one distance test; nothing runs while no siren is on):
+- **Behind**, same direction, moving (or < 30 m back even if slow — a unit stuck behind it):
+  notice after a reaction time (law-abiding 0.5–1.2 s, casual 0.7–1.6, aggressive 1.0–2.0;
+  hash of id + seed), signal, slow (≥ 1 m/s², ≤ comfort decel), move to the kerb inside the lane
+  (body 0.15 m from the lane edge: 0.65 m on a 3.5 m lane; crawl at 2 m/s while still moving
+  sideways), stop. Away from the unit: to the left only if the unit is < 35 m back and > 0.5 m
+  to the right. Multi-lane roads: a forced lane change (safety check unchanged) out of the
+  unit's lane where the next lane has a gap. Wait until the unit has gone past + 2 s, then
+  signal back and merge once nobody is closing in behind. A unit standing still behind for 15 s
+  is given up on (not yielded to again until it moves). Notice range 60 m (slow unit) to 120 m
+  (≥ 15 m/s).
+- **Oncoming** (or a unit stopped facing it < 30 m ahead): to the kerb, slow to 4 m/s.
+- **Stopped** unit within 30 m otherwise: slow to 8 m/s past it (gently: a slow stream past a
+  bust scene would block cars waiting to get round it).
+- **Junction**: within 60 m of its stop line, a driver does not enter a junction a moving unit
+  heads for (within 70–120 m by its speed, or 20 m of the line; a parked unit does not close it) and gives up a permit it can still
+  stop for; cars already inside keep going. Nobody creeps into a junction to make room.
+- Kinematic (far LOD) agents run the same code, so promoted cars are already on the kerb.
+- `TrafficStats::{siren_yields, siren_lane_changes}`; `AgentView::yielding` (snapshot flag
+  `YIELDING`), turn signal towards the kerb / back.
+A unit passes yielding traffic hugging the centre line (≥ 2.6 m corridor between the pulled-over
+cars of both directions). Tests: `tests/siren.rs` (stand-in unit: 6 queued cars passed in
+5.7–6.9 s, moving traffic passed without slowing, siren-off control, multi-lane, stuck/parked
+unit), simcli `city/siren_traffic_*`.
+
 ## Perf
 Release, cloud container (4 vCPU), procedural 12×12, 400 agents at saturation
 (`density_scale` 4), noon, aggressive 5 %:
@@ -427,6 +477,11 @@ reverses running (`perf_400_agents_with_blockers_under_budget`, ignored). Per de
 added work is the binding-constraint bookkeeping; manoeuvre checks run only for obstructed cars
 (once per second) and for the few cars in a manoeuvre.
 
+Sirens (round 12b, `SIRENS=8 NO_COLLISIONS=1 cargo run --release -p wp_world --example
+traffic_bench -- 1 400`): 8 siren units at 15 m/s, each 30 m behind a civilian (traffic
+yielding all the time): avg **0.12 ms**, p99 0.32 ms per 60 Hz frame vs 0.054 / 0.12 ms without
+(same run; includes the bench building the units from the agent list every step). Budget 2 ms.
+
 Port Vesper v2, same settings (`CITY=vesper_v2 just traffic-bench`): avg 0.061 ms, p99 0.16 ms
 per 60 Hz frame (0.27 ms avg with collision diagnostics); 10-min soaks × 3 seeds × {0 %, 5 %}
 aggressive: 0 civilian–civilian collisions (`tests/city_v2.rs`, ignored).
@@ -439,6 +494,9 @@ aggressive: 0 civilian–civilian collisions (`tests/city_v2.rs`, ignored).
   recycled when unseen. No protected-left phases yet.
 - Spawning uses one traffic car definition (no per-district vehicle mix yet).
 - Agents do not react to other civilians' hazards (only tracked vehicles and debris).
+- Sirens: pull-overs stay inside the lane (no kerb mounting, no parking-lane use); on
+  multi-lane roads a car leaves the unit's lane only where the next lane has a safe gap, so a
+  unit should ride the lane line; nobody creeps into a junction to make room at a red.
 - Blocked vehicles: no use of shoulders / parking lanes (parked cars live there); passes are
   one car at a time (followers queue up and pass in turn); a k-point turn assumes the road is
   locally straight (it plans in a straight corridor; the physical driver stops a leg early if
@@ -452,6 +510,13 @@ aggressive: 0 civilian–civilian collisions (`tests/city_v2.rs`, ignored).
 - City v2: `WorldQuery::surface_at` and `CityMap::ground_height` project onto whole lane
   polylines (≈ 0.5 µs on the curved city); terrain LOS samples every 8 m.
 - `CityMap::ground_height` / `MapGround` do not know the raised sidewalks (roads, junctions,
-  terrain only); `wp_sim` lifts spawns onto a sidewalk top under them. Corner fills and trims
-  follow pavement in 0.5 m steps (a sidewalk edge can overhang the outer rim of a junction
-  disc by up to ~0.35 m; never a lane or turning path — tested).
+  terrain only); `wp_sim` lifts spawns onto a sidewalk top under them. Corner fills follow
+  the kerb curve exactly (`docs/integration/junctions.md`); only where a sidewalk end lies
+  along the kerb curve or between overlapping roads (one corner of Port Vesper, node 81,
+  reported in `SidewalkMesh::cell_corners`)
+  and where a strip runs onto pavement mid-strip does the edge follow pavement in 0.5 m steps.
+  A sidewalk ending next to a road without one (highways) leaves a tapering wedge of ground
+  ≤ 30 cm wide at the corner (counted in `surface::tests`).
+- Junction surfaces lie on a plane through the arriving ribbon corners: turning paths (linear
+  between their lane ends) are within 0.15 m of it (0.17 m at the one junction whose ribbon
+  ends overlap, Port Vesper node 81, where the ribbons lie on the patch at their own heights).
