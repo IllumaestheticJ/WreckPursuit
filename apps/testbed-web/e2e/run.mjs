@@ -390,6 +390,11 @@ const art = await page.evaluate(async () => {
   const low = { id: w.style.id, fog: w.scene.scene.fog?.density ?? 0, lamps: w.style.lampCount("vesper_v2"), override: !!w.scene.renderOverride };
   const sel = document.getElementById("style");
   // Props (render/props.ts): palette cones; a live switch rebuilds them in place.
+  // Sim paused: props must come back exactly where they were (the frame loop still runs
+  // props.update, which rebuilds them for the new style).
+  const wasPaused = w.app.paused;
+  w.app.paused = true;
+  await frame();
   const coneLow = w.props.coneMat.color.getHex();
   const propsBefore = { n: w.props.count, pose: Array.from(w.props.pose) };
   sel.value = "greybox";
@@ -411,6 +416,7 @@ const art = await page.evaluate(async () => {
   const fleetRough = w.lod.fleet.mats.paint.roughness;
   const pose = Array.from(w.props.pose);
   const propsKept = w.props.count === propsBefore.n && pose.length === propsBefore.pose.length && pose.every((v, i) => v === propsBefore.pose[i]);
+  w.app.paused = wasPaused;
   const cones = { low: coneLow === PALETTE.propCone, grey: coneGrey !== PALETTE.propCone, back: w.props.coneMat.color.getHex() === PALETTE.propCone, n: w.props.stats(w.rig.camera).cones, propsKept, props: w.props.count };
   return { low, grey, back: w.style.id, brightest, fleetPaint, fleetBar, fleetRough, cones };
 });
@@ -424,7 +430,7 @@ check(
 );
 check(
   art.cones.low && art.cones.grey && art.cones.back && art.cones.propsKept && art.cones.props > 0,
-  `art style on props: ${art.cones.n} cones in PALETTE.propCone (greybox orange when switched, palette again after), ${art.cones.props} props rebuilt in place across the switch: ${art.cones.propsKept}`,
+  `art style on props: cone material = PALETTE.propCone (${art.cones.n} cones in this session) (greybox orange when switched, palette again after), ${art.cones.props} props rebuilt in place across the switch: ${art.cones.propsKept}`,
 );
 await shot("city_chase_greybox_toggle.png");
 
