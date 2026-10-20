@@ -1472,7 +1472,9 @@ impl Vehicle {
         // stiff grip would couple heave into the links.
         let brake = w.brake.max(service) / c.radius.max(0.05);
         let moving = ((w.vx.abs() - ANTI_PITCH_FADE_MPS) / ANTI_PITCH_FADE_MPS).clamp(0.0, 1.0);
-        let fx_geom = moving * w.fx.clamp(-brake, brake);
+        // Only a rearward (braking) tyre force, up to what the brake can hold: a TCS / ESC
+        // brake on a driven wheel that still pushes forward jacks nothing.
+        let fx_geom = moving * w.fx.clamp(-brake, 0.0);
         w.fz = if st.fz > 0.0 {
             (st.fz + c.anti_pitch * fx_geom).max(0.0)
         } else {
