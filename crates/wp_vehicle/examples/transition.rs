@@ -422,7 +422,133 @@ fn trace_hold(cars: &[(&str, LoadedCar)]) {
     }
 }
 
+/// One v2 candidate's score under one configuration.
+#[derive(Debug, Clone, Copy, Default)]
+struct V2Score {
+    held: usize,
+    caught: usize,
+    flicks: usize,
+    spun: usize,
+    back: usize,
+}
+
+/// Held-drift robust set (grip_balance `robust`: rwd_d / a / b × counter key at 6 / 12 / 20° ×
+/// 0.3 / 0.5 / 0.7 g, full throttle) + lift flicks at the reference gaps (0.05 / 0.15 s ×
+/// lifts 0.15 / 0.25 / 0.4 s × 3 cars), under whatever overrides are active.
+fn v2_score(cars: &[(&str, LoadedCar)]) -> V2Score {
+    use wp_vehicle::drift_lab_w::{plain_hold, PlainDriver};
+    let a = reference_assists();
+    let mut sc = V2Score::default();
+    for (_, c) in cars {
+        for e in [6.0f32, 12.0, 20.0] {
+            for g in [0.3f32, 0.5, 0.7] {
+                let d = PlainDriver::HoldCounter {
+                    entry_deg: e,
+                    throttle: 1.0,
+                };
+                if plain_hold(c, &a, d, 40.0, g).held {
+                    sc.held += 1;
+                }
+            }
+        }
+        for gap in [0.05f32, 0.15] {
+            for l in [0.15f32, 0.25, 0.4] {
+                sc.flicks += 1;
+                if let Some(t) = flick(c, gap, Init::LiftFlick(l)) {
+                    sc.caught += t.caught as usize;
+                    sc.spun += t.spun as usize;
+                    sc.back += t.swung_back as usize;
+                }
+            }
+        }
+    }
+    sc
+}
+
+/// Small deterministic generator for the search (xorshift).
+struct Xs(u64);
+impl Xs {
+    fn f(&mut self) -> f32 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        (self.0 >> 40) as f32 / (1u64 << 24) as f32
+    }
+    fn range(&mut self, lo: f32, hi: f32) -> f32 {
+        lo + (hi - lo) * self.f()
+    }
+}
+
+/// `v2search`: random search for "spin model v2 (ellipse)" (the spin model with the friction
+/// ellipse on). `N` candidates (default 60), `SEED`, `V2CONFIGS` (config name substrings, comma
+/// separated; default the three below). Prints every candidate's score per config as JSON
+/// lines: `{"config", "held", "caught", "flicks", "spun", "back", "tune"}`; `V2BASE='{…}'`
+/// sets fields every candidate starts from (refine around a winner with `V2SPREAD`, 0..1).
+fn v2search(cars: &[(&str, LoadedCar)]) {
+    let n: usize = std::env::var("N").ok().map_or(60, |v| v.parse().unwrap());
+    let mut rng = Xs(std::env::var("SEED")
+        .ok()
+        .map_or(0x9E37_79B9_7F4A_7C15, |v| v.parse().unwrap()));
+    let names: Vec<String> = std::env::var("V2CONFIGS")
+        .unwrap_or_else(|_| "W defaults · plain,W defaults · VR,drift best · VR".into())
+        .split(',')
+        .map(String::from)
+        .collect();
+    let cfgs: Vec<Config> = configs()
+        .into_iter()
+        .filter(|c| names.iter().any(|n| c.name == n.as_str()))
+        .collect();
+    let base = match std::env::var("V2BASE") {
+        Ok(j) => merged(&CarTune::spin_candidate(), &j),
+        Err(_) => CarTune {
+            spin_ellipse: 1.0,
+            ..CarTune::spin_candidate()
+        },
+    };
+    let spread: f32 = std::env::var("V2SPREAD")
+        .ok()
+        .map_or(1.0, |v| v.parse().unwrap());
+    for i in 0..=n {
+        // Candidate 0 = the base itself.
+        let t = if i == 0 {
+            base
+        } else {
+            let mut pick = |cur: f32, lo: f32, hi: f32| {
+                let r = rng.range(lo, hi);
+                (cur + (r - cur) * spread).clamp(lo, hi)
+            };
+            CarTune {
+                spin_ellipse: pick(base.spin_ellipse, 0.5, 1.0),
+                spin_fx_slide: pick(base.spin_fx_slide, 0.2, 1.0),
+                spin_b0: pick(base.spin_b0, 1.0, 12.0),
+                spin_b2: pick(base.spin_b2, 0.6, 2.5),
+                spin_c: pick(base.spin_c, 0.5, 1.0),
+                spin_p: pick(base.spin_p, 1.0, 8.0).round(),
+                rear_relax: pick(base.rear_relax, 0.6, 2.5),
+                ..base
+            }
+        };
+        for cfg in &cfgs {
+            apply(cfg);
+            car_lab::set_override(Some(t));
+            let sc = v2_score(cars);
+            println!(
+                "{}",
+                serde_json::json!({
+                    "config": cfg.name, "held": sc.held, "caught": sc.caught,
+                    "flicks": sc.flicks, "spun": sc.spun, "back": sc.back, "tune": t,
+                })
+            );
+        }
+    }
+}
+
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("v2search") {
+        let cars: Vec<(&str, LoadedCar)> = CARS.iter().map(|id| (*id, car(id))).collect();
+        v2search(&cars);
+        return;
+    }
     if std::env::args().nth(1).as_deref() == Some("trace") {
         let cars: Vec<(&str, LoadedCar)> = CARS.iter().map(|id| (*id, car(id))).collect();
         trace_hold(&cars);
