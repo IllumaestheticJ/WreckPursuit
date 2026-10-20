@@ -11,7 +11,7 @@
 //! collider corners on the road.
 
 use wp_contracts::{AssistProfile, LoadedCar};
-use wp_vehicle::brake_dive::{brake_dive, clearance_on_front_bump_stops};
+use wp_vehicle::brake_dive::{brake_dive, clearance_on_front_bump_stops, owner_default_assists};
 
 fn car(id: &str) -> LoadedCar {
     let p = format!("{}/../../data/cars/{id}.json", env!("CARGO_MANIFEST_DIR"));
@@ -43,6 +43,7 @@ fn hard_stops_dive_like_a_road_car_and_never_touch_the_road() {
     let presets = [
         ("wheel", AssistProfile::wheel_default()),
         ("keyboard", AssistProfile::keyboard_default()),
+        ("owner default (manual gears)", owner_default_assists()),
     ];
     for id in ROSTER {
         let c = car(id);

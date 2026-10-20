@@ -6,7 +6,7 @@
 
 use wp_contracts::AssistProfile;
 use wp_contracts::LoadedCar;
-use wp_vehicle::brake_dive::{brake_dive, clearance_on_front_bump_stops};
+use wp_vehicle::brake_dive::{brake_dive, clearance_on_front_bump_stops, owner_default_assists};
 
 const ROSTER: [&str; 17] = [
     "vireo_xs",
@@ -51,12 +51,14 @@ fn main() {
         let presets = [
             ("wheel", AssistProfile::wheel_default()),
             ("keyboard", AssistProfile::keyboard_default()),
+            ("owner default", owner_default_assists()),
         ];
         for (kmh, rev, (name, a)) in [
             (100.0, false, &presets[0]),
             (60.0, false, &presets[0]),
             (100.0, false, &presets[1]),
             (100.0, true, &presets[1]),
+            (100.0, false, &presets[2]),
         ] {
             let r = brake_dive(&car, kmh, rev, a);
             let tag = if rev { " + hold into reverse" } else { "" };

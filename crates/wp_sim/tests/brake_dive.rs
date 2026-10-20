@@ -84,7 +84,8 @@ fn hard_stop(car_id: &str, mode_file: &str) -> Stop {
         .filter(|(_, n)| n.pos_m[1] > axle)
         .map(|(i, _)| i)
         .collect();
-    // Settle at rest (a light pedal: a full one at a standstill engages reverse).
+    // Settle at rest for 3 s and cruise 3 s before braking (as `wp_vehicle::brake_dive`); a
+    // light pedal at rest: a full one at a standstill engages reverse.
     sim.set_input(
         id,
         VehicleInput {
@@ -93,12 +94,12 @@ fn hard_stop(car_id: &str, mode_file: &str) -> Stop {
         },
     )
     .unwrap();
-    for _ in 0..240 * 2 {
+    for _ in 0..240 * 3 {
         sim.step_fixed();
     }
     let rest = pitch(sim.vehicle_states()[0].1.rot);
     sim.place_vehicle(id, [0.0; 3], 0.0, 100.0 / 3.6).unwrap();
-    for _ in 0..240 {
+    for _ in 0..240 * 3 {
         let v = sim.vehicle_states()[0].1.speed_mps;
         let throttle = (0.3 + 0.4 * (100.0 / 3.6 - v)).clamp(0.0, 1.0);
         sim.set_input(

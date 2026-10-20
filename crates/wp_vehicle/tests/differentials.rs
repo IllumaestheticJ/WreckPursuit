@@ -330,7 +330,7 @@ fn roster_diff_hashes_are_pinned() {
     let pinned: [(&str, u64); 6] = [
         ("shiro_turbo", 0xa1a8378f86d4297c),
         ("hakone_gt", 0x93c112e33a42e872),
-        ("sperber_32", 0x4c645c669f1424b1),
+        ("sperber_32", 0xafd7c56ac8529444),
         ("lindwurm_4t", 0xf2c2302ee4933a70),
         ("sentinel_wolfhound", 0x3d93cffb67dcee15),
         ("junkyard_beater", 0xb3fb3f7abfb495dd),

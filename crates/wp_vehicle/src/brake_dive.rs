@@ -96,10 +96,9 @@ pub fn brake_dive(
     into_reverse: bool,
     assists: &AssistProfile,
 ) -> BrakeDive {
-    let a = AssistProfile {
-        auto_gears: true,
-        ..*assists
-    };
+    // The preset as given: the wheel preset and the testbed's owner default use manual gears,
+    // so engine braking in the cruising gear adds to the stop.
+    let a = *assists;
     let body = front_body_points(car);
     let corners = collider_front_corners(car);
     let mut rig = Rig::new(car);
@@ -208,4 +207,15 @@ pub fn clearance_on_front_bump_stops(car: &LoadedCar) -> f32 {
         .iter()
         .map(|p| p.z - drop * (p.y - y_r) / (y_f - y_r))
         .fold(f32::INFINITY, f32::min)
+}
+
+/// The testbed's owner default (playtest row 29): keyboard preset with TCS, ESC and automatic
+/// gears off — the setup row 92 was reported with.
+pub fn owner_default_assists() -> AssistProfile {
+    AssistProfile {
+        tcs: false,
+        esc: false,
+        auto_gears: false,
+        ..AssistProfile::keyboard_default()
+    }
 }
