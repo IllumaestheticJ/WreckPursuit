@@ -597,3 +597,33 @@ Not done: body-less police units (no siren / engine until a unit gets a car body
 `cargo test -p wp_wasm` all pass (74 + 3, incl. both audio bridge tests); the two `race_tests`
 that failed on the older base (hidden in the workspace run by the simcli golden failure) are
 fixed upstream.
+
+### J response (round 13 merge, 2026-10-20) — `rev_matched_downshifts_blip` red on `lead/round12`
+Merged `origin/lead/round12` (ws/audio + lead/audio-impacts + A's round-13 vehicle work) and the
+newer `origin/ws/audio` (kinematic traffic, R12b-1) into `ws/audio`.
+
+**Cause:** A's drivetrain, not the impacts mixer. With the round-13 vehicle the `debug_sedan`
+reaches 190 km/h in the 30 s WOT segment and shifts into 6th, so the braking segment's
+downshifts are now 6 → 5 and 5 → 4 at ~2300 rpm. The gearbox still rev-matches (clutch open,
+rpm 2311 → 2695 in ~0.1 s), but that is only ~3800 rpm/s, low in the blip cue's absolute
+3000–7000 rpm/s band → 1.1 dB. (`lowpass_cap_hz` does not touch layer gains, which the test
+measures.) **Fix (`wp_audio::engine`):** a rev-match's rpm step is the ratio step × rpm, so the
+rising side of the shift cue counts `blip_ref_rpm / rpm` times (clamped 1–2.5×,
+`engine.blip_ref_rpm` = 4000 in `audio_config.json`, serde default); unchanged at and above
+4000 rpm and on the falling (upshift dip) side. New unit test
+`low_rpm_rev_match_still_blips_and_high_rpm_is_unchanged` (fails with the old rule: +0.09 load).
+`engine_shift` 8/8 again.
+
+**Merge review:** `director.rs`, `mixer.rs`, `data.rs`, `voices.ts`, `panel.ts` keep both sides
+correctly. `cabin_muffle` (impacts' interior detection) caps other cars, the horn and impact
+one-shots but not the car's own engine, so the modelled engine's cockpit filtering is not
+applied twice. (Two interior signals now exist: the director's cabin box and the backend's
+camera mode for the engine worklet; they agree for the cockpit camera.)
+
+**Checks:** fmt, clippy `--all-targets -D warnings`, `npm run wasm`, `tsc`: clean. `cargo test -p
+wp_audio`: all pass (incl. `impacts`). `e2e/audio.mjs`, `audio_samples.mjs`, `audio_roster.mjs`,
+`audio_engine.mjs`: pass. **`e2e/audio_impacts.mjs`: 4 FAIL — identical on a clean
+`origin/lead/round12` worktree** (louder / heavier with speed: hit RMS −14.1 / −12.2 / −9.5 dB,
+bass −17.5 / −14.7 / −12.4 dB; crunch 20 vs 90 km/h −20.5 / −18.2 dB; wall-scrape sparks
+> 5 kHz −60.8 dB vs body −30.5 dB). Not touched here (impacts files belong to
+`lead/audio-impacts`); likely the real-crash traces changed with the round-13 vehicle.
