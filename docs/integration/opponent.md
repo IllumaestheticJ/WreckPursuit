@@ -351,4 +351,14 @@ trig).
   of the 250 m bar; 5, 8 flight goal away from every known patrol, not only the injected
   unit; 6 caught after 112 m). Seeds 3, 5, 7, 8 have racers 2 and 3 fleeing with 8–13
   violations each and their own wanted level — all pass the new check.
+- **Pace lock-in red on the round-12 tip (release only)** — causes, fixes and re-measured
+  ranges in `opponent-pace.md` ("Round-12 tip re-measure"). Outside my crates:
+  `crates/wp_race/tests/race_picker.rs` new `hollins_hill_sprint_pace_without_police`
+  (like Loop 9's split); `opponent_pace.rs` lock-in honours `WP_PACE_TRACE`.
+- **Report to E (police), Hollins with police on the round-12 tip**: across `WP_RACE_SEED`
+  1–8 only 15–19 of 32 racers finish and 2 of 8 races never end. Pattern: the leader touches
+  a unit stopped on the hairpin near (−840, 1139), is chased and captured there; the unit then
+  stands (Patrol, v = 0) beside the busted car while the field queues behind both. The AI now
+  pulls a busted car to the kerb, but a unit giving way to cars that are waiting for it
+  remains a stand-off.
 

@@ -224,3 +224,27 @@ unknown to it); goldens blessed (`[bless]` commit 0cd5995f).
 - Late-braking / trail-braking passes are not modelled; overtakes still need a run or patience.
 - No casual-player reference: record a few owner laps of the picker races (testbed replay) to
   calibrate the skill scale against people.
+
+## Round-12 tip re-measure (2026-10-20, after the police give-way / grid fit / residential merges)
+
+The release-only lock-in (`opponent_pace::pace_scenarios_hold_their_ranges`) was red on
+`lead/round12` before this branch's follow-up (identical failures with and without it; a
+debug `cargo test` skips it). Causes and what was done:
+
+| Race | Symptom on the tip | Cause | Done |
+|---|---|---|---|
+| all but Lantern | cars started off today's grid | pace `.ron` files copied the picker grids before the grid fit (Hollins) / median shift (city, grid sprints) / Loop 9 −1.5 m | entity poses copied from today's `race/pick_*.ron` / `city_sprint_police.ron`; 8 goldens `[bless]` |
+| Hollins s50/s95 | 2 of 4 finish | right-column car started on the verge, hit it at s ≈ 5 m, field stuck behind | (grid) 4 of 4, 59.8–68.7 s |
+| Lantern s50 | 1 of 4 finish | a racer braking behind a junction queue aimed round the corner, drifted into the oncoming lane nose to nose with a stopped civilian; cars behind blocked the reverse | lookahead capped at the stopping distance while slowing for a car / light: 4 of 4 |
+| Grid highway | 2.4–3.2 × ideal | a red light at y ≈ −75 on the new grid layout (both lanes held by civilians) | ranges re-measured |
+| Hollins picker (police) | default seed never finished | a racer busted on the hairpin stood in the lane (the standing timer skipped racers; busted cars stopped mid-lane; 0.25 throttle could not pull away uphill) | busted / fleeing / retired racers are ordinary cars, pull over to the kerb, creep from rest at 0.45 throttle: `WP_RACE_SEED` 1–8 15 → 19 of 32 finish; new police-free test (4/4) |
+| (table) | 3 cars > 2 % | brake-dive merge | only those rows updated; a full regeneration moves every row < 2 % and that alone flips race outcomes |
+
+Re-measured ranges (best_ratio cap = today + 0.05): city 1.13 / 1.10, grid highway 2.41 / 2.52,
+Hollins 1.19 / 1.12, Lantern 2.15 / 1.55, Loop 9 1.23 / 1.18 (s50 / s95). Grid highway and
+Lantern are dominated by the world (a red light, junction queues); the solo pace numbers
+above are unchanged in method. Remaining gaps: Hollins with police still loses ~40 % of the
+field to police stand-offs (reported to E); a racer that ends up in the opposing lane facing
+a standing civilian with racers queued behind it cannot reverse out (Hollins police-free seed
+3, 8 m from the flag).
+
