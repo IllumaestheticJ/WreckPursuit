@@ -1,0 +1,203 @@
+{
+  "id": "engine_rec_i4",
+  "kind": "Engine",
+  "description": "Recorded inline four (CC0): engine-bay pulls and coast-down, plus a low-rpm interior pull and a closed-throttle fall; layers flattened to constant rpm. Turbo, supercharger and blow-off stay procedural.",
+  "engine_layers": [
+    {
+      "cue": "engine/idle",
+      "anchor": "Idle",
+      "throttle": "Both"
+    },
+    {
+      "cue": "engine/on_2000",
+      "anchor": {
+        "RedlineFrac": 0.308
+      },
+      "throttle": "On"
+    },
+    {
+      "cue": "engine/on_3000",
+      "anchor": {
+        "RedlineFrac": 0.462
+      },
+      "throttle": "On"
+    },
+    {
+      "cue": "engine/on_4500",
+      "anchor": {
+        "RedlineFrac": 0.692
+      },
+      "throttle": "On"
+    },
+    {
+      "cue": "engine/on_5700",
+      "anchor": {
+        "RedlineFrac": 0.877
+      },
+      "throttle": "On"
+    },
+    {
+      "cue": "engine/off_3750",
+      "anchor": {
+        "RedlineFrac": 0.577
+      },
+      "throttle": "Off"
+    },
+    {
+      "cue": "engine/off_4800",
+      "anchor": {
+        "RedlineFrac": 0.738
+      },
+      "throttle": "Off"
+    }
+  ],
+  "cues": {
+    "engine/limiter": {
+      "source": {
+        "Samples": {
+          "files": [
+            "engine_limiter_01.ogg"
+          ]
+        }
+      },
+      "gain": 0.9,
+      "looped": true
+    },
+    "turbo/whistle": {
+      "source": {
+        "Synth": {
+          "synth": "whine",
+          "params": {
+            "freq_hz": 2800.0,
+            "noise": 0.15
+          }
+        }
+      },
+      "gain": 0.6,
+      "looped": true
+    },
+    "supercharger/whine": {
+      "source": {
+        "Synth": {
+          "synth": "whine",
+          "params": {
+            "freq_hz": 1400.0,
+            "noise": 0.05
+          }
+        }
+      },
+      "gain": 0.6,
+      "looped": true
+    },
+    "turbo/blowoff": {
+      "source": {
+        "Synth": {
+          "synth": "blowoff",
+          "params": {
+            "decay_s": 0.45,
+            "lowpass_hz": 4000.0
+          }
+        }
+      },
+      "gain": 1.0,
+      "looped": false,
+      "duration_s": 0.6
+    },
+    "exhaust/pop": {
+      "source": {
+        "Samples": {
+          "files": [
+            "exhaust_pop_01.ogg",
+            "exhaust_pop_02.ogg",
+            "exhaust_pop_03.ogg",
+            "exhaust_pop_04.ogg",
+            "exhaust_pop_05.ogg",
+            "exhaust_pop_06.ogg",
+            "exhaust_pop_07.ogg"
+          ]
+        }
+      },
+      "gain": 0.8,
+      "looped": false,
+      "duration_s": 0.5
+    },
+    "engine/idle": {
+      "source": {
+        "Samples": {
+          "files": [
+            "engine_idle_01.ogg"
+          ]
+        }
+      },
+      "gain": 0.7,
+      "looped": true
+    },
+    "engine/on_2000": {
+      "source": {
+        "Samples": {
+          "files": [
+            "engine_on_2000_01.ogg"
+          ]
+        }
+      },
+      "gain": 0.8,
+      "looped": true
+    },
+    "engine/on_3000": {
+      "source": {
+        "Samples": {
+          "files": [
+            "engine_on_3000_01.ogg"
+          ]
+        }
+      },
+      "gain": 0.85,
+      "looped": true
+    },
+    "engine/on_4500": {
+      "source": {
+        "Samples": {
+          "files": [
+            "engine_on_4500_01.ogg"
+          ]
+        }
+      },
+      "gain": 0.95,
+      "looped": true
+    },
+    "engine/on_5700": {
+      "source": {
+        "Samples": {
+          "files": [
+            "engine_on_5700_01.ogg"
+          ]
+        }
+      },
+      "gain": 1.0,
+      "looped": true
+    },
+    "engine/off_3750": {
+      "source": {
+        "Samples": {
+          "files": [
+            "engine_off_3750_01.ogg"
+          ]
+        }
+      },
+      "gain": 0.6,
+      "looped": true
+    },
+    "engine/off_4800": {
+      "source": {
+        "Samples": {
+          "files": [
+            "engine_off_4800_01.ogg"
+          ]
+        }
+      },
+      "gain": 0.65,
+      "looped": true
+    }
+  },
+  "fallback_pack": "engine_proc_i4"
+}

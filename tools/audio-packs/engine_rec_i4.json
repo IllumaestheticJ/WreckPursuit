@@ -1,0 +1,202 @@
+{
+  "pack": "engine_rec_i4",
+  "base": "engine_proc_i4",
+  "description": "Recorded inline four (CC0): engine-bay pulls and coast-down, plus a low-rpm interior pull and a closed-throttle fall; layers flattened to constant rpm. Turbo, supercharger and blow-off stay procedural.",
+  "engine": {
+    "cylinders": 4,
+    "redline_rpm": 6500
+  },
+  "sources": {
+    "fs141240": {
+      "kind": "freesound",
+      "id": 141240,
+      "uid": 581937,
+      "author": "lovretta",
+      "what": "four-cylinder car, engine-bay mic, acceleration and idle"
+    },
+    "fs181460": {
+      "kind": "freesound",
+      "id": 181460,
+      "uid": 3366310,
+      "author": "erik90",
+      "what": "four-cylinder car revving, interior"
+    },
+    "fs18620": {
+      "kind": "freesound",
+      "id": 18620,
+      "uid": 48671,
+      "author": "Walter_Odington",
+      "what": "four-cylinder car revving"
+    },
+    "fs105351": {
+      "kind": "freesound",
+      "id": 105351,
+      "uid": 1553758,
+      "author": "CeebFrack",
+      "what": "backfire"
+    },
+    "fs385935": {
+      "kind": "freesound",
+      "id": 385935,
+      "uid": 7097737,
+      "author": "Pól",
+      "what": "engine backfire"
+    },
+    "fs675723": {
+      "kind": "freesound",
+      "id": 675723,
+      "uid": 2524442,
+      "author": "craigsmith",
+      "what": "car backfires, reverberant"
+    }
+  },
+  "layers": [
+    {
+      "cue": "engine/idle",
+      "idle": true,
+      "rpm": 1230,
+      "throttle": "Both",
+      "gain": 0.7,
+      "variants": [
+        {
+          "src": "fs141240",
+          "start": 57.5,
+          "end": 63.5
+        }
+      ]
+    },
+    {
+      "cue": "engine/on_2000",
+      "rpm": 2000,
+      "throttle": "On",
+      "gain": 0.8,
+      "variants": [
+        {
+          "src": "fs181460",
+          "start": 14.0,
+          "end": 17.0
+        }
+      ]
+    },
+    {
+      "cue": "engine/on_3000",
+      "rpm": 3000,
+      "throttle": "On",
+      "gain": 0.85,
+      "variants": [
+        {
+          "src": "fs141240",
+          "start": 33.4,
+          "end": 35.3
+        }
+      ]
+    },
+    {
+      "cue": "engine/on_4500",
+      "rpm": 4500,
+      "throttle": "On",
+      "gain": 0.95,
+      "variants": [
+        {
+          "src": "fs141240",
+          "start": 45.2,
+          "end": 47.4
+        }
+      ]
+    },
+    {
+      "cue": "engine/on_5700",
+      "rpm": 5700,
+      "throttle": "On",
+      "gain": 1.0,
+      "variants": [
+        {
+          "src": "fs141240",
+          "start": 47.4,
+          "end": 49.4
+        }
+      ]
+    },
+    {
+      "cue": "engine/off_3750",
+      "rpm": 3750,
+      "throttle": "Off",
+      "gain": 0.6,
+      "variants": [
+        {
+          "src": "fs141240",
+          "start": 50.5,
+          "end": 55.4
+        }
+      ]
+    },
+    {
+      "cue": "engine/off_4800",
+      "rpm": 4800,
+      "throttle": "Off",
+      "gain": 0.65,
+      "variants": [
+        {
+          "src": "fs18620",
+          "start": 29.6,
+          "end": 31.0
+        }
+      ]
+    }
+  ],
+  "cues": {
+    "engine/limiter": {
+      "gain": 0.9,
+      "loop": true,
+      "variants": [
+        {
+          "src": "fs141240",
+          "start": 47.4,
+          "end": 49.4,
+          "rpm": 6500,
+          "chop_hz": 14
+        }
+      ]
+    },
+    "exhaust/pop": {
+      "gain": 0.8,
+      "variants": [
+        {
+          "src": "fs105351",
+          "start": 0.03,
+          "end": 0.2
+        },
+        {
+          "src": "fs105351",
+          "start": 0.19,
+          "end": 0.6
+        },
+        {
+          "src": "fs385935",
+          "start": 0.19,
+          "end": 0.5
+        },
+        {
+          "src": "fs675723",
+          "start": 0.03,
+          "end": 0.5
+        },
+        {
+          "src": "fs675723",
+          "start": 1.8,
+          "end": 2.3
+        },
+        {
+          "src": "fs675723",
+          "start": 3.98,
+          "end": 4.45
+        },
+        {
+          "src": "fs675723",
+          "start": 5.8,
+          "end": 6.3
+        }
+      ]
+    }
+  }
+}

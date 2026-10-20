@@ -9,3 +9,4 @@ meta-dev.sqlite*
 # City v2 road data is generated in memory (World::vesper); `just city-v2` writes it locally.
 data/city/vesper_v2.road.bin
 data/city/vesper_v2.road.json
+__pycache__/

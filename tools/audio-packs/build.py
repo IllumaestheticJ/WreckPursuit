@@ -4,11 +4,16 @@
     python3 tools/audio-packs/build.py tools/audio-packs/world_rec.json
 
 Downloads every source (cached in out/audio-cache/), cuts the variants listed in the manifest,
-cleans them up (DC/rumble high-pass, pre-roll trimmed, short fade-in, tail fade, one-shots peak-normalised to
--1 dBFS, loops crossfaded seamless and RMS-normalised to about -20 dBFS), encodes 48 kHz mono
-Ogg Vorbis q6 into data/audio/packs/<pack>/, and writes data/audio/packs/<pack>.json (a copy of
-the manifest's base pack with the recorded cues swapped in and `fallback_pack` set to the base)
-plus data/audio/packs/<pack>/CREDITS.md.
+cleans them up (DC/rumble high-pass, pre-roll trimmed, short fade-in, tail fade, one-shots
+peak-normalised to -1 dBFS, loops crossfaded seamless and RMS-normalised to about -20 dBFS),
+encodes 48 kHz mono Ogg Vorbis q6 into data/audio/packs/<pack>/, and writes
+data/audio/packs/<pack>.json (a copy of the manifest's base pack with the recorded cues swapped
+in and `fallback_pack` set to the base) plus data/audio/packs/<pack>/CREDITS.md.
+
+Engine packs: each layer is cut where the recording is near the layer's rpm, its firing
+frequency is tracked (pitch.py) and the cut is resampled to a constant rpm, then looped with a
+length that is a whole number of engine cycles so the seam is in phase. Siren loops are cut at
+phase 0 of the cadence for a whole number of cycles. See README.md for the manifest fields.
 
 Needs ffmpeg (with libvorbis) and numpy. Output is deterministic for the same downloads.
 """
@@ -22,6 +27,9 @@ import zipfile
 from pathlib import Path
 
 import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import pitch  # noqa: E402
 
 SR = 48000
 REPO = Path(__file__).resolve().parents[2]
@@ -97,19 +105,55 @@ def one_shot(x: np.ndarray) -> np.ndarray:
     return x * (10 ** (-1 / 20) / max(np.abs(x).max(), 1e-9))
 
 
-def seamless_loop(x: np.ndarray) -> np.ndarray:
-    """Equal-power crossfade of the tail into the head, RMS to -20 dBFS, peak capped at -1 dBFS."""
-    xf = min(int(0.25 * SR), len(x) // 4)
-    body = len(x) - xf
+def seamless_loop(x: np.ndarray, xfade_s: float = 0.25, body: int | None = None) -> np.ndarray:
+    """Equal-power crossfade of the tail into the head, RMS to -20 dBFS, peak capped at -1 dBFS.
+
+    `body` is the output length in samples (default: input minus the crossfade); the input must
+    hold `body` + crossfade samples, the crossfade being the material right after the body.
+    """
+    if body is None:
+        xf = min(int(xfade_s * SR), len(x) // 4)
+        body = len(x) - xf
+    else:
+        xf = min(int(xfade_s * SR), len(x) - body, body // 4)
     out = x[:body].copy()
     t = np.linspace(0.0, np.pi / 2, xf)
-    out[:xf] = x[:xf] * np.sin(t) + x[body:] * np.cos(t)
-    rms = np.sqrt(np.mean(out**2)) + 1e-9
-    out *= 10 ** (-20 / 20) / rms
-    peak = np.abs(out).max()
+    out[:xf] = x[:xf] * np.sin(t) + x[body : body + xf] * np.cos(t)
+    return level(out)
+
+
+def level(x: np.ndarray) -> np.ndarray:
+    """RMS to -20 dBFS, peak capped at -1 dBFS."""
+    rms = np.sqrt(np.mean(x**2)) + 1e-9
+    x = x * (10 ** (-20 / 20) / rms)
+    peak = np.abs(x).max()
     if peak > 10 ** (-1 / 20):
-        out *= 10 ** (-1 / 20) / peak
-    return out
+        x *= 10 ** (-1 / 20) / peak
+    return x
+
+
+def engine_loop(seg: np.ndarray, rpm: float, cylinders: int, xfade_s: float = 0.12) -> np.ndarray:
+    """Flatten a cut to constant `rpm` and loop it over a whole number of engine cycles."""
+    target_hz = rpm / 60.0 * cylinders / 2.0
+    times, f0, _ = pitch.track(seg, SR, target_hz / 1.8, target_hz * 1.8)
+    flat = pitch.flatten(seg, SR, times, f0, target_hz)
+    cycle = SR * cylinders / target_hz  # samples per 720 degrees
+    cycles = int((len(flat) - xfade_s * SR) // cycle)
+    if cycles < 1:
+        raise SystemExit(f"cut too short for one engine cycle at {rpm} rpm")
+    return seamless_loop(flat, xfade_s, int(round(cycles * cycle)))
+
+
+def chop(x: np.ndarray, hz: float, duty: float = 0.55) -> np.ndarray:
+    """Rev-limiter fuel cut: square amplitude gate at `hz` with 4 ms ramps, whole periods only."""
+    period = SR / hz
+    n = int(round(int(len(x) // period) * period))
+    x = x[:n]
+    ph = (np.arange(n) % period) / period
+    ramp = 0.004 * hz
+    gate = np.clip(np.minimum(ph, duty - ph) / ramp, 0.0, 1.0)
+    gate = np.maximum(gate, 0.08)
+    return level(x * gate)
 
 
 def encode(x: np.ndarray, dest: Path) -> None:
@@ -121,6 +165,35 @@ def encode(x: np.ndarray, dest: Path) -> None:
         input=x.astype("<f4").tobytes(),
         check=True,
     )
+
+
+def render(v: dict, spec: dict, m: dict, decoded: dict, used: dict, name: str) -> np.ndarray:
+    """Cut and process one variant."""
+    src = m["sources"][v["src"]]
+    path = source_file(v["src"], src, v)
+    if path not in decoded:
+        decoded[path] = decode(path)
+    x = decoded[path]
+    a = int(v.get("start", 0) * SR)
+    if "cycles" in v:  # siren: whole cadence cycles from phase 0, plus the crossfade tail
+        xf = v.get("xfade_s", 0.02)
+        body = int(round(v["cycles"] * v["cycle_s"] * SR))
+        seg = highpass(x[a : a + body + int(xf * SR) + 1].copy())
+        out = seamless_loop(seg, xf, body)
+    else:
+        b = int(v["end"] * SR) if "end" in v else len(x)
+        seg = highpass(x[a:b].copy())
+        rpm = v.get("rpm", spec.get("rpm"))
+        if rpm is not None:
+            out = engine_loop(seg, rpm, m["engine"]["cylinders"])
+            if "chop_hz" in v:
+                out = chop(out, v["chop_hz"])
+        elif spec.get("loop", False):
+            out = seamless_loop(seg)
+        else:
+            out = one_shot(seg)
+    used.setdefault(v["src"], []).append(name)
+    return out
 
 
 def main() -> None:
@@ -135,27 +208,29 @@ def main() -> None:
     pack["id"] = pack_id
     pack["description"] = m["description"]
     pack["fallback_pack"] = base_id
+    cues = dict(m["cues"])
+    if "layers" in m:  # engine packs: the manifest's layers replace the base pack's
+        for c in {layer["cue"] for layer in pack["engine_layers"]}:
+            del pack["cues"][c]
+        pack["engine_layers"] = []
+        redline = m["engine"]["redline_rpm"]
+        for layer in m["layers"]:
+            anchor = "Idle" if layer.get("idle") else {"RedlineFrac": round(layer["rpm"] / redline, 3)}
+            pack["engine_layers"].append({"cue": layer["cue"], "anchor": anchor, "throttle": layer["throttle"]})
+            pack["cues"][layer["cue"]] = {"source": None, "gain": 1.0, "looped": True}
+            cues[layer["cue"]] = {"gain": layer.get("gain", 1.0), "loop": True, "rpm": layer["rpm"], "variants": layer["variants"]}
     used: dict[str, list[str]] = {}
     decoded: dict[Path, np.ndarray] = {}
-    for cue, spec in m["cues"].items():
+    for cue, spec in cues.items():
         if cue not in pack["cues"]:
             raise SystemExit(f"{cue} is not a cue of {base_id}")
         looped = spec.get("loop", False)
         files, longest = [], 0.0
         for n, v in enumerate(spec["variants"], 1):
-            src = m["sources"][v["src"]]
-            path = source_file(v["src"], src, v)
-            if path not in decoded:
-                decoded[path] = decode(path)
-            x = decoded[path]
-            a = int(v.get("start", 0) * SR)
-            b = int(v["end"] * SR) if "end" in v else len(x)
-            seg = highpass(x[a:b].copy())
-            seg = seamless_loop(seg) if looped else one_shot(seg)
             name = f"{cue.replace('/', '_')}_{n:02}.ogg"
+            seg = render(v, spec, m, decoded, used, name)
             encode(seg, out_dir / name)
             files.append(name)
-            used.setdefault(v["src"], []).append(name)
             longest = max(longest, len(seg) / SR)
             print(f"{cue:26} {name:34} {len(seg) / SR:5.2f}s  <- {v['src']}")
         c = pack["cues"][cue]
@@ -189,7 +264,7 @@ def main() -> None:
             what = src["what"]
         else:
             link = f"[{key}]({src['page']})"
-            what = "Impact Sounds pack"
+            what = src.get("what", "sound pack")
         lines.append(f"| {link} | {src['author']} | {what} | CC0 1.0 | {', '.join(used[key])} |")
     (out_dir / "CREDITS.md").write_text("\n".join(lines) + "\n")
 

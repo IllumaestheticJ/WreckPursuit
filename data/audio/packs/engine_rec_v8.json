@@ -1,0 +1,203 @@
+{
+  "id": "engine_rec_v8",
+  "kind": "Engine",
+  "description": "Recorded cross-plane V8 (CC0): muscle-car idle, held revs and throttle drops plus a hot-rod hold at 1600 rpm; layers flattened to constant rpm. Turbo, supercharger and blow-off stay procedural.",
+  "engine_layers": [
+    {
+      "cue": "engine/idle",
+      "anchor": "Idle",
+      "throttle": "Both"
+    },
+    {
+      "cue": "engine/on_1600",
+      "anchor": {
+        "RedlineFrac": 0.308
+      },
+      "throttle": "On"
+    },
+    {
+      "cue": "engine/on_2250",
+      "anchor": {
+        "RedlineFrac": 0.433
+      },
+      "throttle": "On"
+    },
+    {
+      "cue": "engine/on_2800",
+      "anchor": {
+        "RedlineFrac": 0.538
+      },
+      "throttle": "On"
+    },
+    {
+      "cue": "engine/on_3350",
+      "anchor": {
+        "RedlineFrac": 0.644
+      },
+      "throttle": "On"
+    },
+    {
+      "cue": "engine/off_1600",
+      "anchor": {
+        "RedlineFrac": 0.308
+      },
+      "throttle": "Off"
+    },
+    {
+      "cue": "engine/off_2400",
+      "anchor": {
+        "RedlineFrac": 0.462
+      },
+      "throttle": "Off"
+    }
+  ],
+  "cues": {
+    "engine/limiter": {
+      "source": {
+        "Samples": {
+          "files": [
+            "engine_limiter_01.ogg"
+          ]
+        }
+      },
+      "gain": 0.9,
+      "looped": true
+    },
+    "turbo/whistle": {
+      "source": {
+        "Synth": {
+          "synth": "whine",
+          "params": {
+            "freq_hz": 2800.0,
+            "noise": 0.15
+          }
+        }
+      },
+      "gain": 0.6,
+      "looped": true
+    },
+    "supercharger/whine": {
+      "source": {
+        "Synth": {
+          "synth": "whine",
+          "params": {
+            "freq_hz": 1400.0,
+            "noise": 0.05
+          }
+        }
+      },
+      "gain": 0.6,
+      "looped": true
+    },
+    "turbo/blowoff": {
+      "source": {
+        "Synth": {
+          "synth": "blowoff",
+          "params": {
+            "decay_s": 0.45,
+            "lowpass_hz": 4000.0
+          }
+        }
+      },
+      "gain": 1.0,
+      "looped": false,
+      "duration_s": 0.6
+    },
+    "exhaust/pop": {
+      "source": {
+        "Samples": {
+          "files": [
+            "exhaust_pop_01.ogg",
+            "exhaust_pop_02.ogg",
+            "exhaust_pop_03.ogg",
+            "exhaust_pop_04.ogg",
+            "exhaust_pop_05.ogg",
+            "exhaust_pop_06.ogg",
+            "exhaust_pop_07.ogg"
+          ]
+        }
+      },
+      "gain": 0.8,
+      "looped": false,
+      "duration_s": 0.5
+    },
+    "engine/idle": {
+      "source": {
+        "Samples": {
+          "files": [
+            "engine_idle_01.ogg"
+          ]
+        }
+      },
+      "gain": 0.75,
+      "looped": true
+    },
+    "engine/on_1600": {
+      "source": {
+        "Samples": {
+          "files": [
+            "engine_on_1600_01.ogg"
+          ]
+        }
+      },
+      "gain": 0.85,
+      "looped": true
+    },
+    "engine/on_2250": {
+      "source": {
+        "Samples": {
+          "files": [
+            "engine_on_2250_01.ogg"
+          ]
+        }
+      },
+      "gain": 0.9,
+      "looped": true
+    },
+    "engine/on_2800": {
+      "source": {
+        "Samples": {
+          "files": [
+            "engine_on_2800_01.ogg"
+          ]
+        }
+      },
+      "gain": 0.95,
+      "looped": true
+    },
+    "engine/on_3350": {
+      "source": {
+        "Samples": {
+          "files": [
+            "engine_on_3350_01.ogg"
+          ]
+        }
+      },
+      "gain": 1.0,
+      "looped": true
+    },
+    "engine/off_1600": {
+      "source": {
+        "Samples": {
+          "files": [
+            "engine_off_1600_01.ogg"
+          ]
+        }
+      },
+      "gain": 0.6,
+      "looped": true
+    },
+    "engine/off_2400": {
+      "source": {
+        "Samples": {
+          "files": [
+            "engine_off_2400_01.ogg"
+          ]
+        }
+      },
+      "gain": 0.65,
+      "looped": true
+    }
+  },
+  "fallback_pack": "engine_proc_v8"
+}

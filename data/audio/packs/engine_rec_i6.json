@@ -1,0 +1,221 @@
+{
+  "id": "engine_rec_i6",
+  "kind": "Engine",
+  "description": "Recorded turbo six (CC0) from a chassis-dyno pull: load ramp, full sweep to the limiter, coast-down and idle; layers flattened to constant rpm. Turbo whistle, supercharger and blow-off stay procedural.",
+  "engine_layers": [
+    {
+      "cue": "engine/idle",
+      "anchor": "Idle",
+      "throttle": "Both"
+    },
+    {
+      "cue": "engine/on_2000",
+      "anchor": {
+        "RedlineFrac": 0.256
+      },
+      "throttle": "On"
+    },
+    {
+      "cue": "engine/on_3300",
+      "anchor": {
+        "RedlineFrac": 0.412
+      },
+      "throttle": "On"
+    },
+    {
+      "cue": "engine/on_4600",
+      "anchor": {
+        "RedlineFrac": 0.575
+      },
+      "throttle": "On"
+    },
+    {
+      "cue": "engine/on_6000",
+      "anchor": {
+        "RedlineFrac": 0.75
+      },
+      "throttle": "On"
+    },
+    {
+      "cue": "engine/on_7600",
+      "anchor": {
+        "RedlineFrac": 0.95
+      },
+      "throttle": "On"
+    },
+    {
+      "cue": "engine/off_2800",
+      "anchor": {
+        "RedlineFrac": 0.35
+      },
+      "throttle": "Off"
+    },
+    {
+      "cue": "engine/off_5600",
+      "anchor": {
+        "RedlineFrac": 0.7
+      },
+      "throttle": "Off"
+    }
+  ],
+  "cues": {
+    "engine/limiter": {
+      "source": {
+        "Samples": {
+          "files": [
+            "engine_limiter_01.ogg"
+          ]
+        }
+      },
+      "gain": 0.9,
+      "looped": true
+    },
+    "turbo/whistle": {
+      "source": {
+        "Synth": {
+          "synth": "whine",
+          "params": {
+            "freq_hz": 2800.0,
+            "noise": 0.15
+          }
+        }
+      },
+      "gain": 0.6,
+      "looped": true
+    },
+    "supercharger/whine": {
+      "source": {
+        "Synth": {
+          "synth": "whine",
+          "params": {
+            "freq_hz": 1400.0,
+            "noise": 0.05
+          }
+        }
+      },
+      "gain": 0.6,
+      "looped": true
+    },
+    "turbo/blowoff": {
+      "source": {
+        "Synth": {
+          "synth": "blowoff",
+          "params": {
+            "decay_s": 0.45,
+            "lowpass_hz": 4000.0
+          }
+        }
+      },
+      "gain": 1.0,
+      "looped": false,
+      "duration_s": 0.6
+    },
+    "exhaust/pop": {
+      "source": {
+        "Samples": {
+          "files": [
+            "exhaust_pop_01.ogg",
+            "exhaust_pop_02.ogg",
+            "exhaust_pop_03.ogg",
+            "exhaust_pop_04.ogg",
+            "exhaust_pop_05.ogg",
+            "exhaust_pop_06.ogg",
+            "exhaust_pop_07.ogg"
+          ]
+        }
+      },
+      "gain": 0.8,
+      "looped": false,
+      "duration_s": 0.5
+    },
+    "engine/idle": {
+      "source": {
+        "Samples": {
+          "files": [
+            "engine_idle_01.ogg"
+          ]
+        }
+      },
+      "gain": 0.7,
+      "looped": true
+    },
+    "engine/on_2000": {
+      "source": {
+        "Samples": {
+          "files": [
+            "engine_on_2000_01.ogg"
+          ]
+        }
+      },
+      "gain": 0.8,
+      "looped": true
+    },
+    "engine/on_3300": {
+      "source": {
+        "Samples": {
+          "files": [
+            "engine_on_3300_01.ogg"
+          ]
+        }
+      },
+      "gain": 0.85,
+      "looped": true
+    },
+    "engine/on_4600": {
+      "source": {
+        "Samples": {
+          "files": [
+            "engine_on_4600_01.ogg"
+          ]
+        }
+      },
+      "gain": 0.9,
+      "looped": true
+    },
+    "engine/on_6000": {
+      "source": {
+        "Samples": {
+          "files": [
+            "engine_on_6000_01.ogg"
+          ]
+        }
+      },
+      "gain": 0.95,
+      "looped": true
+    },
+    "engine/on_7600": {
+      "source": {
+        "Samples": {
+          "files": [
+            "engine_on_7600_01.ogg"
+          ]
+        }
+      },
+      "gain": 1.0,
+      "looped": true
+    },
+    "engine/off_2800": {
+      "source": {
+        "Samples": {
+          "files": [
+            "engine_off_2800_01.ogg"
+          ]
+        }
+      },
+      "gain": 0.6,
+      "looped": true
+    },
+    "engine/off_5600": {
+      "source": {
+        "Samples": {
+          "files": [
+            "engine_off_5600_01.ogg"
+          ]
+        }
+      },
+      "gain": 0.65,
+      "looped": true
+    }
+  },
+  "fallback_pack": "engine_proc_i6"
+}

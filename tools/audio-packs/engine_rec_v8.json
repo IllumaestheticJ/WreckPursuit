@@ -1,0 +1,195 @@
+{
+  "pack": "engine_rec_v8",
+  "base": "engine_proc_v8",
+  "description": "Recorded cross-plane V8 (CC0): muscle-car idle, held revs and throttle drops plus a hot-rod hold at 1600 rpm; layers flattened to constant rpm. Turbo, supercharger and blow-off stay procedural.",
+  "engine": {
+    "cylinders": 8,
+    "redline_rpm": 5200
+  },
+  "sources": {
+    "fs332636": {
+      "kind": "freesound",
+      "id": 332636,
+      "uid": 3459679,
+      "author": "Superhollyward",
+      "what": "muscle car V8 idle and revs"
+    },
+    "fs213976": {
+      "kind": "freesound",
+      "id": 213976,
+      "uid": 2214631,
+      "author": "Ears68",
+      "what": "hot rod V8 rough idle and held revs"
+    },
+    "fs105351": {
+      "kind": "freesound",
+      "id": 105351,
+      "uid": 1553758,
+      "author": "CeebFrack",
+      "what": "backfire"
+    },
+    "fs385935": {
+      "kind": "freesound",
+      "id": 385935,
+      "uid": 7097737,
+      "author": "Pól",
+      "what": "engine backfire"
+    },
+    "fs675723": {
+      "kind": "freesound",
+      "id": 675723,
+      "uid": 2524442,
+      "author": "craigsmith",
+      "what": "car backfires, reverberant"
+    }
+  },
+  "layers": [
+    {
+      "cue": "engine/idle",
+      "idle": true,
+      "rpm": 930,
+      "throttle": "Both",
+      "gain": 0.75,
+      "variants": [
+        {
+          "src": "fs332636",
+          "start": 1.6,
+          "end": 3.6
+        }
+      ]
+    },
+    {
+      "cue": "engine/on_1600",
+      "rpm": 1600,
+      "throttle": "On",
+      "gain": 0.85,
+      "variants": [
+        {
+          "src": "fs213976",
+          "start": 35.5,
+          "end": 40.5
+        }
+      ]
+    },
+    {
+      "cue": "engine/on_2250",
+      "rpm": 2250,
+      "throttle": "On",
+      "gain": 0.9,
+      "variants": [
+        {
+          "src": "fs332636",
+          "start": 30.8,
+          "end": 33.4
+        }
+      ]
+    },
+    {
+      "cue": "engine/on_2800",
+      "rpm": 2800,
+      "throttle": "On",
+      "gain": 0.95,
+      "variants": [
+        {
+          "src": "fs332636",
+          "start": 109.0,
+          "end": 114.5
+        }
+      ]
+    },
+    {
+      "cue": "engine/on_3350",
+      "rpm": 3350,
+      "throttle": "On",
+      "gain": 1.0,
+      "variants": [
+        {
+          "src": "fs332636",
+          "start": 86.4,
+          "end": 89.0
+        }
+      ]
+    },
+    {
+      "cue": "engine/off_1600",
+      "rpm": 1600,
+      "throttle": "Off",
+      "gain": 0.6,
+      "variants": [
+        {
+          "src": "fs213976",
+          "start": 44.4,
+          "end": 46.4
+        }
+      ]
+    },
+    {
+      "cue": "engine/off_2400",
+      "rpm": 2400,
+      "throttle": "Off",
+      "gain": 0.65,
+      "variants": [
+        {
+          "src": "fs332636",
+          "start": 37.7,
+          "end": 39.9
+        }
+      ]
+    }
+  ],
+  "cues": {
+    "engine/limiter": {
+      "gain": 0.9,
+      "loop": true,
+      "variants": [
+        {
+          "src": "fs332636",
+          "start": 86.4,
+          "end": 89.0,
+          "rpm": 5200,
+          "chop_hz": 12
+        }
+      ]
+    },
+    "exhaust/pop": {
+      "gain": 0.8,
+      "variants": [
+        {
+          "src": "fs105351",
+          "start": 0.03,
+          "end": 0.2
+        },
+        {
+          "src": "fs105351",
+          "start": 0.19,
+          "end": 0.6
+        },
+        {
+          "src": "fs385935",
+          "start": 0.19,
+          "end": 0.5
+        },
+        {
+          "src": "fs675723",
+          "start": 0.03,
+          "end": 0.5
+        },
+        {
+          "src": "fs675723",
+          "start": 1.8,
+          "end": 2.3
+        },
+        {
+          "src": "fs675723",
+          "start": 3.98,
+          "end": 4.45
+        },
+        {
+          "src": "fs675723",
+          "start": 5.8,
+          "end": 6.3
+        }
+      ]
+    }
+  }
+}

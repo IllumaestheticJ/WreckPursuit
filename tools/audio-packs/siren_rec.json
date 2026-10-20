@@ -1,0 +1,86 @@
+{
+  "pack": "siren_rec",
+  "base": "siren_proc",
+  "description": "Recorded electronic police siren (CC0): wail, yelp and high-speed sweep from one studio-recorded siren, hi-lo from a second; each loop is whole cadence cycles starting at phase 0 (cadences in audio_config.json are measured from these files).",
+  "sources": {
+    "fs157867": {
+      "kind": "freesound",
+      "id": 157867,
+      "uid": 2859370,
+      "author": "Jefflix",
+      "what": "electronic police siren, wail, static studio recording"
+    },
+    "fs157866": {
+      "kind": "freesound",
+      "id": 157866,
+      "uid": 2859370,
+      "author": "Jefflix",
+      "what": "electronic police siren, yelp, static studio recording"
+    },
+    "fs157868": {
+      "kind": "freesound",
+      "id": 157868,
+      "uid": 2859370,
+      "author": "Jefflix",
+      "what": "electronic police siren, high-speed sweep, static studio recording"
+    },
+    "fs58018": {
+      "kind": "freesound",
+      "id": 58018,
+      "uid": 533680,
+      "author": "guitarguy1985",
+      "what": "two-tone hi-lo siren"
+    }
+  },
+  "cues": {
+    "siren/wail": {
+      "gain": 1.0,
+      "loop": true,
+      "variants": [
+        {
+          "src": "fs157867",
+          "start": 10.035,
+          "cycles": 2,
+          "cycle_s": 5.0471
+        }
+      ]
+    },
+    "siren/yelp": {
+      "gain": 1.0,
+      "loop": true,
+      "variants": [
+        {
+          "src": "fs157866",
+          "start": 3.386,
+          "cycles": 8,
+          "cycle_s": 0.3793
+        }
+      ]
+    },
+    "siren/phaser": {
+      "gain": 0.9,
+      "loop": true,
+      "variants": [
+        {
+          "src": "fs157868",
+          "start": 2.0255,
+          "cycles": 40,
+          "cycle_s": 0.0751,
+          "xfade_s": 0.01
+        }
+      ]
+    },
+    "siren/hilo": {
+      "gain": 1.0,
+      "loop": true,
+      "variants": [
+        {
+          "src": "fs58018",
+          "start": 0.995,
+          "cycles": 3,
+          "cycle_s": 0.9966
+        }
+      ]
+    }
+  }
+}

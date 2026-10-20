@@ -1,0 +1,52 @@
+{
+  "id": "siren_rec",
+  "kind": "Siren",
+  "description": "Recorded electronic police siren (CC0): wail, yelp and high-speed sweep from one studio-recorded siren, hi-lo from a second; each loop is whole cadence cycles starting at phase 0 (cadences in audio_config.json are measured from these files).",
+  "cues": {
+    "siren/wail": {
+      "source": {
+        "Samples": {
+          "files": [
+            "siren_wail_01.ogg"
+          ]
+        }
+      },
+      "gain": 1.0,
+      "looped": true
+    },
+    "siren/yelp": {
+      "source": {
+        "Samples": {
+          "files": [
+            "siren_yelp_01.ogg"
+          ]
+        }
+      },
+      "gain": 1.0,
+      "looped": true
+    },
+    "siren/phaser": {
+      "source": {
+        "Samples": {
+          "files": [
+            "siren_phaser_01.ogg"
+          ]
+        }
+      },
+      "gain": 0.9,
+      "looped": true
+    },
+    "siren/hilo": {
+      "source": {
+        "Samples": {
+          "files": [
+            "siren_hilo_01.ogg"
+          ]
+        }
+      },
+      "gain": 1.0,
+      "looped": true
+    }
+  },
+  "fallback_pack": "siren_proc"
+}
