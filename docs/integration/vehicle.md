@@ -857,3 +857,18 @@ sweeps cost ≈ 2.5 µs each against the 10 km slab.
 preload on 5, coordinated in `cars.md`); `apps/simcli/scenarios/vehicle/kerb_strike_*.ron`
 (new); `apps/simcli/golden/*` + pinned hashes in `tests/{differentials,slide_control}.rs`
 (`[bless]`).
+
+**Checks (ws/vehicle after merging `origin/lead/round12`, 2026-10-20):** `cargo fmt --check`,
+`cargo clippy --workspace --all-targets -D warnings`, wasm build of `wp_wasm`, determinism lint
+(0 errors), `simcli determinism` (vehicle, crash, T-bone Sim, frontal, sidewalk 40 km/h: all
+deterministic), `tools/wasm-determinism/compare.sh` on vehicle/, crash/, golden/ and the two
+sidewalk scenarios (25/25 native == wasm), `simcli run apps/simcli/scenarios` (89; all pass
+except the two below), goldens after the `[bless]` (hashes all match).
+`cargo test --workspace --no-fail-fast` (debug): 131 binaries ok, failures (all analysed above):
+- `simcli` `goldens_match` / `all_scenarios_pass_…`: only `city_blocked_parked_player_grid`'s
+  `civilian_collisions` (D / E; traffic crash also present on `lead/round12`).
+- `wp_audio` `rev_matched_downshifts_blip` (J; marginal threshold, see above).
+- `wp_race` `grid_highway_sprint` and `wp_wasm` `race_tests::short_sprint_…` (L / N; both fail
+  on `lead/round12` too).
+- `world_traffic_soak_observer` (`traffic_agents_min` 313, want ≥ 350) fails on
+  `lead/round12` too (310); it is a `slow` scenario, so only `simcli run` shows it.
