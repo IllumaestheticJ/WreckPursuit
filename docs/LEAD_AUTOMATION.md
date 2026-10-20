@@ -87,3 +87,14 @@ hidden (`body.demo`), a start menu (city chase / rainy night / races / free driv
 quick play runs outside the career, first-time assists auto gears + TCS. Reference page:
 `tools/demo/index.demo.html` (re-point its `assets/main-*.js` / `*.css` tags to the new build's
 names when refreshing). Refresh the demo only from a green `main`, not from round previews.
+
+## Two tracks (owner decision 2026-10-20: faster feedback)
+- **Preview track (fast):** whenever a branch is ready (its own session ran the full gate on it),
+  merge it into the round branch, run `tools/quick_gate.sh` (compile, changed crates' tests and
+  their scenarios, wasm + tsc) plus the browser smoke drive, and republish the **preview** link.
+  Target: minutes, not hours. Failures found here go straight back to the owning session.
+- **Main track (safe):** the full gate (fmt, clippy -D warnings, cargo test --workspace, all
+  scenarios, goldens + [bless], native-vs-wasm, web-e2e, tsc) on a batch, at most a couple of
+  times a day; only a green full gate moves `main`, the main testbed link and the public demo.
+- Scheduled rounds: do the preview track every time something is ready; run the main track when
+  the round branch has been quiet (no new merges) for ~1 h or once a day.
