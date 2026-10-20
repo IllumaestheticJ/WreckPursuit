@@ -1144,3 +1144,20 @@ Built on `lead/fix-junction-holes`. D: changes in your crate are in `surface.rs`
 behind every sidewalk, skirts, corner fills out to the lots, wedge pull-back, rails on lot-less
 edges) and `vesper.rs` (carve up to the lots, building bases / placement, cul-de-sac direction:
 node 81). Details, numbers and known gaps for you: `docs/integration/sidewalk-lots.md`.
+
+## Lead feedback (round 13, 2026-10-20) — owner playtest rows 76–77 (owner-requested)
+Base: `origin/lead/round12`. Both are direct owner requests from playing preview v0.12.11.
+1. **Row 76 — "traffic is too high for night-time."** Replace/extend `density.rs` `f_time()` with a
+   data-driven time-of-day curve (target civilian density vs daytime peak): 01–05 ≈ 15–20 %,
+   23:00 ≈ 35 %, 19–22 ≈ 60 %, 07–09 and 16–19 = 100 %, midday ≈ 75 %; district modifiers
+   (downtown/nightlife busier at night, industrial/suburb emptier). Cap the out-of-sight
+   `MAX_SPAWNABLE_BOOST` at the curve so the boost never lifts night traffic above it. Same curve for
+   the LOD/kinematic fleet. Despawns stay out of sight. Add a ~02:00 scenario with the night band;
+   adjust soak ranges only where the hour changes them (say why).
+2. **Row 77 — "too many parked cars."** Port Vesper v2 has ~3,300 parked-car props. Reduce to roughly
+   35–50 %: kerbside parking only where plausible (none on arterials/highways/bridges/tunnel
+   approaches, none within ~15 m of junctions, crossings, bus stops, driveways/lot entrances),
+   occupancy by district (downtown/residential medium, commercial/industrial lots clustered, keep the
+   main racing arterials clear), random 0–3 car-length gaps, data-driven table. Deterministic; the
+   drawn-props system stays as is. Re-check scenarios that park near props.
+Re-bless only goldens your change moves; gate as usual; push ws/world.
