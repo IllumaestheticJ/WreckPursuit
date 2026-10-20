@@ -84,6 +84,17 @@ await spinBox.check();
 check((await page.evaluate(() => window.__wp.sim.carTune().spin_model)) === true, "spin model checkbox → on");
 await spinBox.uncheck();
 check((await page.evaluate(() => window.__wp.sim.carTune().spin_model)) === false, "spin model checkbox → off");
+// Handbrake pivot aid (owner row 109): the shipped aid, adjustable in the lab.
+const pv = await page.evaluate(() => window.__wp.sim.pivotTune());
+check(Math.abs(pv.accel - 7) < 1e-6 && Math.abs(pv.cap - 3) < 1e-6, `pivot aid shipped values ${JSON.stringify(pv)}`);
+await page.evaluate(() => {
+  const inputs = [...document.querySelectorAll("#drift-lab-w input[type=range]")];
+  const s = inputs.find((i) => i.parentElement.textContent.includes("pivot strength"));
+  s.value = "10";
+  s.dispatchEvent(new Event("input"));
+});
+check(Math.abs((await page.evaluate(() => window.__wp.sim.pivotTune().accel)) - 10) < 1e-6, "pivot strength slider sets the aid");
+await page.evaluate(() => window.__wp.sim.pivotTuneSet(JSON.stringify({ accel: 7, cap: 3 })));
 // Grip balance (wp_vehicle::grip_lab): starts at "new" (smart lock); the A/B button flips it.
 check((await page.evaluate(() => window.__wp.sim.gripBalance()?.lock_mode)) === "smart", "grip balance starts at new (smart lock)");
 const abText = async () => (await page.locator("#drift-w-balance-ab").innerText()).trim();

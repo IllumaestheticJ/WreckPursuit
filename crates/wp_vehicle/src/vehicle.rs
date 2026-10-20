@@ -1727,7 +1727,7 @@ impl Vehicle {
             0.0
         };
         let pivot = crate::pivot::pivot_yaw_accel(
-            &crate::pivot::PivotTuning::default(),
+            &crate::pivot::active(),
             assists,
             handbrake,
             self.hb_held_s,

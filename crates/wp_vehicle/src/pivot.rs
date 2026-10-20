@@ -26,8 +26,10 @@ pub const HB_PIVOT_ACCEL: f32 = 7.0;
 /// Default yaw-rate cap of the pivot aid, rad/s (round 12's `HB_PIVOT_CAP`).
 pub const HB_PIVOT_CAP: f32 = 3.0;
 
-/// Pivot aid strength and cap. [`Default`] = the shipped aid.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// Pivot aid strength and cap. [`Default`] = the shipped aid. Drift Lab W can override it
+/// process-wide ([`set_override`]; lab only, like `crate::plain`).
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct PivotTuning {
     /// Yaw acceleration at full key + handbrake, rad/s². 0 = off.
     pub accel: f32,
@@ -56,6 +58,21 @@ const ON: f32 = 0.1;
 /// The aid builds up over this long a handbrake pull, s: a short tap (0.3 s) gets little of it,
 /// a 1 s hairpin pull nearly all.
 pub const BUILD_UP_S: f32 = 0.4;
+
+static OVERRIDE: std::sync::RwLock<Option<PivotTuning>> = std::sync::RwLock::new(None);
+
+/// Set (`Some`) or clear (`None`) the pivot-aid lab override for every vehicle in this process
+/// (Drift Lab W's sliders; never set by the server, not in replays).
+pub fn set_override(t: Option<PivotTuning>) {
+    if let Ok(mut o) = OVERRIDE.write() {
+        *o = t;
+    }
+}
+
+/// The pivot aid in effect: the lab override, else the shipped [`PivotTuning::default`].
+pub fn active() -> PivotTuning {
+    OVERRIDE.read().ok().and_then(|o| *o).unwrap_or_default()
+}
 
 /// Yaw acceleration the aid adds this tick, rad/s² (+ = left, about the car's up axis).
 /// `steer` = driver steer (−1 left … +1 right), `handbrake` 0..=1, `held_s` = how long the

@@ -68,6 +68,14 @@ Step 3 details (parity_rwd_d unless named):
   `DriftTuning`. Now `crate::pivot` has its own `PivotTuning` (round12's defaults: 7 rad/s²,
   cap 3 rad/s), `Vehicle::hb_held_s` is back, and snapshot format 12 stores it.
   `tests/handbrake.rs::the_clip_2_hairpin_pivots_with_the_aid_and_is_caught` passes again.
+- Pivot aid knobs in the W lab: panel section *handbrake pivot aid (row 109)*, sliders
+  *pivot strength* (rad/s², shipped 7) and *pivot yaw cap* (rad/s, shipped 3). Process-wide
+  lab override `wp_vehicle::pivot::set_override` (wasm `pivot_tune_json` / `_defaults_json` /
+  `_set`). Keyboard / gamepad only, as A built it (`steer_speed_sensitivity > 0`). Tests: the
+  three `pivot.rs` unit tests and `tests/handbrake.rs`.
+- The legacy Drift Lab B tests (superseded by W): the lead suggested deleting or ignoring them
+  in the W lineage. Left in place and failing here; that's for Drift Lab W / the lead to decide,
+  not for this workstream to silence.
 - **Still failing** (`cargo test -p wp_vehicle`), all near-threshold or lineage-dependent, for
   their owners:
 

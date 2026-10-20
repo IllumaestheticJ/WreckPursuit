@@ -97,6 +97,7 @@ const CAR_STORE = "wp.driftLabW.car.v2";
 const TCS_STORE = "wp.driftLabW.tcs";
 const RIDE_STORE = "wp.driftLabW.ride";
 const GRIP_STORE = "wp.driftLabW.grip";
+const PIVOT_STORE = "wp.driftLabW.pivot";
 /** Tyre-slip's tuned velocity-relative steering ("drift: spin + VR (test)",
  * CarTune::spin_vr_plain() on lead/tyre-slip), used by the "drift: best (test)" preset. */
 const DRIFT_BEST_STEER = { velocity_relative: true, align_gain: 0.5, align_from_deg: 7.0, align_full_deg: 17.0, t_align_s: 0.26, slide_key_gain: 0.31 };
@@ -235,6 +236,17 @@ export class DriftLabWPanel {
       } catch {
         this.sim.carTuneSet(JSON.stringify(this.sim.carTuneDefaults().spin));
       }
+      let pivot = "";
+      try {
+        pivot = localStorage.getItem(PIVOT_STORE) ?? "";
+      } catch {
+        /* storage blocked: shipped */
+      }
+      try {
+        this.sim.pivotTuneSet(pivot);
+      } catch {
+        this.sim.pivotTuneSet("");
+      }
       let grip = "";
       try {
         grip = localStorage.getItem(GRIP_STORE) ?? "";
@@ -252,6 +264,7 @@ export class DriftLabWPanel {
       this.sim.rideTuneSet("");
       this.sim.carTuneSet("");
       this.sim.gripBalanceSet("");
+      this.sim.pivotTuneSet("");
     }
   }
 
@@ -567,6 +580,43 @@ export class DriftLabWPanel {
         btns.appendChild(b);
       }
       this.body.appendChild(btns);
+    }
+    // Handbrake pivot aid (owner row 109, wp_vehicle::pivot): keyboard / gamepad only.
+    {
+      const h = document.createElement("div");
+      h.textContent = "handbrake pivot aid (row 109)";
+      h.style.cssText = "margin:8px 0 2px;color:#9cf";
+      this.body.appendChild(h);
+      const pd = this.sim.pivotTuneDefaults();
+      const pt = this.sim.pivotTune();
+      for (const [key, label, max, step, unit, hint] of [
+        ["accel", "pivot strength", 20, 0.5, "rad/s²", "yaw acceleration at full key + handbrake (0 = off); keyboard / gamepad only, while the handbrake and a key are held, built up over 0.4 s, faded 55 → 75 km/h"],
+        ["cap", "pivot yaw cap", 6, 0.1, "rad/s", "yaw rate toward the key at which the aid has faded out"],
+      ] as const) {
+        const input = document.createElement("input");
+        input.type = "range";
+        input.min = "0";
+        input.max = String(max);
+        input.step = String(step);
+        input.value = String(pt[key] ?? pd[key]);
+        const val = document.createElement("span");
+        const show = () => {
+          val.textContent = `${Number(input.value).toFixed(1)} ${unit}`;
+          val.style.color = Math.abs(Number(input.value) - pd[key]) > 1e-6 ? "#ffd27a" : "";
+        };
+        show();
+        input.oninput = () => {
+          show();
+          const text = JSON.stringify({ ...this.sim.pivotTune(), [key]: Number(input.value) });
+          this.sim.pivotTuneSet(text);
+          try {
+            localStorage.setItem(PIVOT_STORE, text);
+          } catch {
+            /* ignore */
+          }
+        };
+        row(label, hint, input, val);
+      }
     }
     // Grip-driving balance (wp_vehicle::grip_lab; docs/integration/grip-balance.md).
     {
