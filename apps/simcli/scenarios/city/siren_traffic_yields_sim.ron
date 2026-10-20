@@ -35,9 +35,12 @@
     ],
     duration_s: 45.0,
     expect: [
-        // Measured (seed 7): 6 pull-overs, route done at 16 m/s, 0 contacts.
+        // Measured (seed 7, after the round-12b spawn changes): 3 pull-overs, route done, 0
+        // contacts. Seeds 1-9: 3-6 pull-overs, 0 contacts; 7 of 9 finish the route (seeds 3 and 5
+        // stall where pulled-over cars on both sides leave 2.2 m from this car's line, inside its
+        // 1.2 m keep-distance corridor).
         world_metric(name: "civilian_collisions", min: 0.0, max: 0.0),
-        world_metric(name: "traffic_siren_yields", min: 4.0, max: 1000.0),
+        world_metric(name: "traffic_siren_yields", min: 2.0, max: 1000.0),
         metric(name: "route_progress", min: 0.95, max: 1.0),
         event_count(event: "Contact", entity: "unit", min: 0, max: 0),
         metric(name: "final_health", min: 0.99, max: 1.0),
