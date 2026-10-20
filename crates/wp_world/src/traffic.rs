@@ -1625,6 +1625,8 @@ impl Traffic {
             let mut oncoming = false;
             let mut near = false;
             let mut jsiren = false;
+            // The unit this driver yields to has stopped behind it (waiting for room).
+            let mut unit_waiting = false;
             let mut siren_lc = None;
             let mut yield_started = false;
             if any_siren || sy.phase != YieldPhase::None {
@@ -1681,6 +1683,7 @@ impl Traffic {
                 let half_w = lane.map_or(1.75, |l| l.width_m * 0.5);
                 let can_pull = !seg.is_connector() && pass.is_none();
                 let kerb = siren::kerb_offset_m(half_w * 2.0);
+                unit_waiting = behind.is_some_and(|b| b.2 < siren::MOVING_MPS);
                 match behind {
                     Some((back_u, lat_u, speed_u)) => {
                         // Away from the unit: to the kerb unless it comes up on the right.
@@ -1706,6 +1709,18 @@ impl Traffic {
                             YieldPhase::PullingOver => {
                                 sy.side = side;
                                 sy.timer_s = 0.0;
+                                // Stopped half-way to the kerb (something ahead holds it, and
+                                // a physical car only moves sideways while rolling) with the
+                                // unit standing behind: each waits for the other, so give up
+                                // after a while, as a car waiting at the kerb does.
+                                sy.stall_s = if speed_u < 0.5 && v < 0.3 {
+                                    sy.stall_s + TRAFFIC_DT
+                                } else {
+                                    0.0
+                                };
+                                if sy.stall_s > siren::STALL_S {
+                                    sy.phase = YieldPhase::MergingBack;
+                                }
                             }
                             // The unit turned out to come up on the other side: move over.
                             YieldPhase::Waiting if side != sy.side => {
@@ -2054,13 +2069,23 @@ impl Traffic {
                     };
                     // `limit > 0`: at a green (or no signal) a stopped car keeps its permit
                     // (need = 0 would otherwise revoke it every step).
+                    // A yielding driver keeps out of the junction while the unit is coming,
+                    // but once the unit has stopped behind it (waiting for room: a car at the
+                    // stop line cannot pull over) it goes when it may, to clear the way.
+                    let hold = jsiren || (sy.active() && !unit_waiting);
                     if (limit > 0.0 && need <= limit)
-                        || ((jsiren || sy.active()) && need <= 5.0)
+                        || (hold && need <= 5.0)
                         || (self.tv_block[next as usize] && need <= 8.0)
                     {
                         revoke = true;
                     }
-                } else if self.may_enter(map, i, next, d_line, jsiren || sy.active()) {
+                } else if self.may_enter(
+                    map,
+                    i,
+                    next,
+                    d_line,
+                    jsiren || (sy.active() && !unit_waiting),
+                ) {
                     grant = Some(next);
                 }
                 let has = (a.permit == next && !revoke) || grant.is_some();
