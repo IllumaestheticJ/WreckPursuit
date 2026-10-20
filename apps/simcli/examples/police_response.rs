@@ -13,7 +13,7 @@
 //! - every despawn: same check at the unit's last position.
 //!
 //! ```sh
-//! cargo run --release -p simcli --example police_response -- [vesper|grid] [hour] [runs] [secs] [speed] [-v]
+//! cargo run --release -p simcli --example police_response -- [vesper|grid] [hour] [runs] [secs] [speed] [-v] [--no-unstick]
 //! ```
 
 use std::collections::BTreeMap;
@@ -62,15 +62,28 @@ struct RunReport {
     spawn_min_m: f32,
     despawns: u32,
     despawns_in_sight: u32,
+    /// Trips to calls: (spawned, start m, road m, seconds en route, outcome).
+    trips: Vec<(bool, f32, f32, f32, String, u32)>,
+    /// Stuck events by cause.
+    stuck: BTreeMap<String, u32>,
 }
 
-fn run_once(city: &str, hour: f32, seed: u64, secs: f32, speed: f32, verbose: bool) -> RunReport {
+fn run_once(
+    city: &str,
+    hour: f32,
+    seed: u64,
+    secs: f32,
+    speed: f32,
+    verbose: bool,
+    unstick: bool,
+) -> RunReport {
     let sc = scenario(city, hour, seed, secs);
     let data = FsData::new("data");
     let mut built = build_sim(&sc, &data, &RunOptions::default()).expect("builds");
     let player = built.ids[0];
     let car = built.cars[&sc.entities[0].car].def.clone();
     let sim = &mut built.sim;
+    sim.police_mut().set_unstick_recovery(unstick);
     let nodes: Vec<[f32; 2]> = sim
         .world()
         .road_graph()
@@ -253,6 +266,37 @@ fn run_once(city: &str, hour: f32, seed: u64, secs: f32, speed: f32, verbose: bo
             }
         }
     }
+    let st = sim.police().stats();
+    let end_s = secs;
+    for r in &st.responses {
+        let (t_end, outcome) = match r.end {
+            Some((t, o)) => (t.secs(), format!("{o:?}")),
+            None => (end_s, "EnRoute".to_string()),
+        };
+        rep.trips.push((
+            r.spawned,
+            r.start_m,
+            r.route_m,
+            t_end - r.at.secs(),
+            outcome,
+            r.stuck_events,
+        ));
+    }
+    for e in &st.stuck {
+        *rep.stuck.entry(format!("{:?}", e.cause)).or_default() += 1;
+        if verbose {
+            println!(
+                "  {:6.1} s  stuck unit {} at ({:.0}, {:.0}): {:?}, {:?}, contact h {:?}",
+                e.at.secs(),
+                e.unit.0,
+                e.pos[0],
+                e.pos[1],
+                e.cause,
+                e.step,
+                e.contact_h_m
+            );
+        }
+    }
     rep
 }
 
@@ -264,7 +308,13 @@ fn main() {
     let secs: f32 = args.get(4).and_then(|s| s.parse().ok()).unwrap_or(60.0);
     let speed: f32 = args.get(5).and_then(|s| s.parse().ok()).unwrap_or(22.0);
     let verbose = args.iter().any(|a| a == "-v");
-    println!("{city} at {hour:.0}:00, {runs} runs × {secs} s, player at {speed} m/s");
+    let unstick = !args.iter().any(|a| a == "--no-unstick");
+    let mut trips: Vec<(bool, f32, f32, f32, String, u32)> = Vec::new();
+    let mut stuck: BTreeMap<String, u32> = BTreeMap::new();
+    println!(
+        "{city} at {hour:.0}:00, {runs} runs × {secs} s, player at {speed} m/s, un-sticking {}",
+        if unstick { "on" } else { "off" }
+    );
     let mut responses = Vec::new();
     let mut total = RunReport {
         spawn_min_m: f32::MAX,
@@ -273,7 +323,13 @@ fn main() {
     let mut censored = 0;
     for seed in 1..=runs {
         println!("run seed {seed}");
-        let r = run_once(&city, hour, seed, secs, speed, verbose);
+        let r = run_once(&city, hour, seed, secs, speed, verbose, unstick);
+        for t in &r.trips {
+            trips.push(t.clone());
+        }
+        for (k, v) in &r.stuck {
+            *stuck.entry(k.clone()).or_default() += v;
+        }
         match (r.call_s, r.on_scene_s) {
             (Some(c), Some(o)) => responses.push(o - c),
             // A call in the last 30 s that nobody reached yet says nothing.
@@ -318,4 +374,34 @@ fn main() {
         "despawns: {} (in sight or < 120 m: {})",
         total.despawns, total.despawns_in_sight
     );
+    let within = responses.iter().filter(|v| **v <= 25.0).count();
+    println!(
+        "calls reached within 25 s: {within} of {} ({:.0} %)",
+        responses.len(),
+        100.0 * within as f32 / responses.len().max(1) as f32
+    );
+    println!("trips to calls: {}", trips.len());
+    let mut by_outcome: BTreeMap<String, (u32, f32, f32, f32, u32)> = BTreeMap::new();
+    for (spawned, start, road, secs, outcome, st) in &trips {
+        println!(
+            "  {} start {start:4.0} m, road {road:5.0} m, {secs:5.1} s en route, {outcome}, {st} stuck",
+            if *spawned { "spawned " } else { "existing" }
+        );
+        let e = by_outcome.entry(outcome.clone()).or_default();
+        e.0 += 1;
+        e.1 += start;
+        e.2 += road;
+        e.3 += secs;
+        e.4 += st;
+    }
+    for (o, (n, start, road, secs, st)) in &by_outcome {
+        let n_f = *n as f32;
+        println!(
+            "  {o}: {n} trips, mean start {:.0} m, road {:.0} m, {:.1} s en route, {st} stuck events",
+            start / n_f,
+            road / n_f,
+            secs / n_f
+        );
+    }
+    println!("stuck events by cause: {stuck:?}");
 }

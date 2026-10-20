@@ -336,6 +336,8 @@ pub struct PoliceSystem {
     pub(crate) obstacles: Vec<avoid::Obstacle>,
     /// The city's parked cars and cones (stuck classification).
     pub(crate) props: stuck::PropIndex,
+    /// Stuck units back out, re-route and respawn (off: only logged, for measurements).
+    pub(crate) unstick_recovery: bool,
 }
 
 impl Default for PoliceSystem {
@@ -375,6 +377,12 @@ impl PoliceSystem {
                 .collect(),
         );
         p
+    }
+
+    /// Switch stuck recovery (reverse, re-route, respawn) on (default) or off. Off, stuck units
+    /// are still detected and logged in `stats().stuck`: for before/after measurements.
+    pub fn set_unstick_recovery(&mut self, on: bool) {
+        self.unstick_recovery = on;
     }
 
     /// The city's parked cars and cones (footprints), so stuck units can tell a prop from a
@@ -428,6 +436,7 @@ impl PoliceSystem {
             ext_obstacles_set: false,
             obstacles: Vec::new(),
             props: stuck::PropIndex::default(),
+            unstick_recovery: true,
         }
     }
 
@@ -814,6 +823,31 @@ impl PoliceSystem {
                 u.body.heading,
             ));
         }
+        // Parked cars and cones around ground units (solid in `wp_sim`; police drove into
+        // them): stopped obstacles to follow, wait behind or pass.
+        if !self.props.is_empty() {
+            let mut near: Vec<u32> = Vec::new();
+            for u in &self.units {
+                if u.kind == UnitKind::Car && u.player.is_none() && !u.wrecked {
+                    self.props.around(u.body.pos, &mut near);
+                }
+            }
+            near.sort_unstable();
+            near.dedup();
+            for k in near {
+                let b = self.props.get(k);
+                self.obstacles.push(avoid::Obstacle {
+                    entity: None,
+                    unit: None,
+                    pos: b.pos,
+                    vel: [0.0, 0.0],
+                    // Local +Y forward, rotated by the prop's yaw.
+                    fwd: [-b.rot[0], b.rot[1]],
+                    half_len: b.half[1],
+                    half_wid: b.half[0],
+                });
+            }
+        }
     }
 
     /// Run obstacle awareness for unit `i` for one tick; returns the lane offset to steer for.
@@ -962,8 +996,14 @@ impl PoliceSystem {
         let siren = u.cmd.siren;
         // Un-sticking ([`stuck`]): back out first; otherwise watch for no progress.
         let now = self.now;
-        if let stuck::Phase::Reverse { from, until, steer } = u.unstick.phase {
-            if graph::dist(pos, from) < stuck::REVERSE_M && now < until && !disabled {
+        if let stuck::Phase::Reverse {
+            from,
+            dist_m,
+            until,
+            steer,
+        } = u.unstick.phase
+        {
+            if graph::dist(pos, from) < dist_m && now < until && !disabled {
                 // Brake held at a standstill engages reverse; in reverse the pedals swap, so
                 // the brake pedal drives backwards.
                 return Some(VehicleInput {
@@ -983,6 +1023,21 @@ impl PoliceSystem {
         } else if v.abs() > 2.0 * stuck::SLOW_MPS {
             u.unstick.slow_s = 0.0;
         }
+        // Waiting behind a stopped vehicle, not in a red-light queue.
+        let red_ahead = u
+            .avoid
+            .junction
+            .is_some_and(|j| j.light == Some(avoid::Light::Stop) && j.s - u.track_s < 80.0);
+        if hold
+            && !disabled
+            && u.avoid.blocked_by.is_some()
+            && !red_ahead
+            && v.abs() < stuck::SLOW_MPS
+        {
+            u.unstick.held_s += dt;
+        } else {
+            u.unstick.held_s = 0.0;
+        }
         u.unstick.progress(pos);
         let ctl = u.controller();
         let steer = ctl.steer(pos, heading, [target[0], target[1], 0.0]);
@@ -992,7 +1047,9 @@ impl PoliceSystem {
             u.unstick.last_steer = steer;
         }
         if u.unstick.slow_s >= stuck::STUCK_AFTER_S {
-            self.on_stuck(i);
+            self.on_stuck(i, false);
+        } else if u.unstick.held_s >= stuck::HELD_AFTER_S {
+            self.on_stuck(i, true);
         }
         let mut handbrake = 0.0;
         if hold {

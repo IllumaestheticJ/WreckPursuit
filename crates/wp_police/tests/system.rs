@@ -948,3 +948,88 @@ fn unit_cap_holds_responders_back() {
         h.events
     );
 }
+
+/// Un-sticking (lead round 12b): a physical unit that wants to drive but doesn't move is
+/// logged as stuck with the cause of its last contact (here a wall ahead), backs out with the
+/// brake (auto-reverse), re-routes around the segment on a repeat, and is despawned once it
+/// has been stuck for `stuck::GIVE_UP_S` out of every racer's sight.
+#[test]
+fn stuck_unit_backs_out_reroutes_and_respawns_out_of_sight() {
+    use wp_police::stuck::{StuckCause, UnstickStep};
+    let mut h = Harness::new(12.0, 7);
+    h.run(1.0, &[]);
+    let racer = h.racer_view();
+    let rp = [racer.pos[0], racer.pos[1]];
+    let unit = h
+        .police
+        .units()
+        .iter()
+        .filter(|u| u.kind == UnitKind::Car && dist(u.body.pos, rp) > 400.0)
+        .max_by(|a, b| dist(a.body.pos, rp).total_cmp(&dist(b.body.pos, rp)))
+        .expect("a patrol far from the racer");
+    let (id, pos, heading) = (unit.id, unit.body.pos, unit.body.heading);
+    let entity = EntityId(950);
+    h.police
+        .bind_unit_entity(id, entity, SteerGeometry::default());
+    let wall = SimEvent::Contact {
+        a: entity,
+        b: wp_contracts::WORLD_ENTITY,
+        point: [pos[0] + heading[0] * 2.3, pos[1] + heading[1] * 2.3, 1.2],
+        normal: [heading[0], heading[1], 0.0],
+        impulse_ns: 900.0,
+        rel_speed: 3.0,
+    };
+    let mut reversed = false;
+    let mut gone_at = None;
+    for tick in 0..(16.0 / PHYSICS_DT) as u32 {
+        let t = tick as f32 * PHYSICS_DT;
+        if h.police.units().iter().all(|u| u.id != id) {
+            gone_at = Some(t);
+            break;
+        }
+        // Pinned: the body never moves, whatever the input.
+        h.police.sync_unit(
+            id,
+            UnitSync {
+                pos: [pos[0], pos[1], 0.5],
+                vel: [0.0; 3],
+                heading,
+                health: 1.0,
+                effects: HandlingEffects::NEUTRAL,
+            },
+        );
+        if let Some(inp) = h.police.unit_input(id, PHYSICS_DT) {
+            reversed |= inp.brake > 0.5 && inp.throttle == 0.0 && t > 2.0;
+        }
+        let ev = if tick % 120 == 0 {
+            vec![wall.clone()]
+        } else {
+            Vec::new()
+        };
+        let mut out = Vec::new();
+        h.police
+            .step(&h.world, &[h.racer_view()], &ev, PHYSICS_DT, &mut out);
+    }
+    let log: Vec<_> = h
+        .police
+        .stats()
+        .stuck
+        .iter()
+        .filter(|s| s.unit == id)
+        .copied()
+        .collect();
+    assert!(!log.is_empty(), "never detected as stuck");
+    assert_eq!(log[0].cause, StuckCause::Wall, "{log:?}");
+    assert_eq!(log[0].step, UnstickStep::Reverse, "{log:?}");
+    assert!(
+        log.iter().any(|s| s.step == UnstickStep::Reroute),
+        "{log:?}"
+    );
+    assert!(
+        log.iter().any(|s| s.step == UnstickStep::Respawn),
+        "{log:?}"
+    );
+    assert!(reversed, "never backed out");
+    let gone = gone_at.expect("stuck unit never despawned");
+    assert!(gone < 12.0, "despawned at {gone} s");
+}

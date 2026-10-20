@@ -26,6 +26,10 @@ use crate::PoliceSystem;
 /// Road half width used for tool layout, m.
 pub const ROAD_HALF_WIDTH_M: f32 = 5.0;
 
+/// A reckless-driving report this close to an open call about another racer joins that call
+/// (a pack of street racers is one call), m.
+const CALL_MERGE_M: f32 = 200.0;
+
 /// Spots tried per pool spawn before giving up until the next think step.
 const SPAWN_TRIES: usize = 8;
 
@@ -179,6 +183,10 @@ impl PoliceSystem {
             {
                 inc.pos = at;
                 inc.district = district;
+            } else if self.incidents.iter().any(|i| {
+                matches!(i.kind, IncidentKind::Report { .. }) && dist(i.pos, at) < CALL_MERGE_M
+            }) {
+                // Part of a call already out (a pack of racers): one call, one responder.
             } else {
                 let id = IncidentId(self.next_incident);
                 self.next_incident += 1;
@@ -250,7 +258,7 @@ impl PoliceSystem {
 
     /// Physical unit `i` has made no progress for `stuck::STUCK_AFTER_S` while wanting to move:
     /// log why, back out, re-route on a repeat, give up after `stuck::GIVE_UP_S`.
-    pub(crate) fn on_stuck(&mut self, i: usize) {
+    pub(crate) fn on_stuck(&mut self, i: usize, held: bool) {
         use crate::stuck::{self, ClassifyInput, Phase, UnstickStep};
         let now = self.now;
         let u = &self.units[i];
@@ -269,19 +277,32 @@ impl PoliceSystem {
             pos,
             alt_m: u.body.alt_m,
             damaged,
-            vehicle_ahead: u.avoid.blocked_by.is_some(),
+            vehicle_ahead: held || u.avoid.blocked_by.is_some(),
             state: &u.unstick,
             props: &self.props,
             junction_m,
         });
         let segment = self.graph.nearest_on_road(pos).map(|r| r.segment);
         let (id, heading) = (u.id, u.body.heading);
+        let recovery = self.unstick_recovery;
         let st = &mut self.units[i].unstick;
         st.slow_s = 0.0;
+        st.held_s = 0.0;
+        if !recovery {
+            self.stats.stuck.push(stuck::StuckRecord {
+                unit: id,
+                at: now,
+                pos,
+                cause,
+                step: UnstickStep::Logged,
+                contact_h_m,
+            });
+            return;
+        }
         st.attempts += 1;
         let (first_at, first_pos) = *st.first.get_or_insert((now, pos));
         let mut step = UnstickStep::Reverse;
-        if st.attempts >= 2 && dist(first_pos, pos) <= stuck::SAME_SPOT_M {
+        if held || st.attempts >= 2 && dist(first_pos, pos) <= stuck::SAME_SPOT_M {
             if let Some(s) = segment {
                 st.blocked.retain(|(b, until)| *b != s && now < *until);
                 st.blocked.push((s, now.plus(stuck::BLOCK_SEGMENT_S)));
@@ -311,6 +332,7 @@ impl PoliceSystem {
         };
         st.phase = Phase::Reverse {
             from: pos,
+            dist_m: stuck::REVERSE_M,
             until: now.plus(stuck::REVERSE_MAX_S),
             steer,
         };
@@ -349,6 +371,27 @@ impl PoliceSystem {
                 u.unstick.reroute = false;
                 u.cmd.track = crate::unit::Track::default();
                 u.track_s = 0.0;
+            }
+            // No progress GIVE_UP_S after the first event (even between events): give up.
+            let now = self.now;
+            let st = &mut self.units[i].unstick;
+            if !st.give_up
+                && st
+                    .first
+                    .is_some_and(|(t, _)| now.since(t) >= crate::stuck::GIVE_UP_S)
+            {
+                st.give_up = true;
+                let u = &self.units[i];
+                let (id, pos) = (u.id, u.body.pos);
+                if let Some(last) = self.stats.stuck.iter().rev().find(|s| s.unit == id) {
+                    let rec = crate::stuck::StuckRecord {
+                        at: now,
+                        pos,
+                        step: crate::stuck::UnstickStep::Respawn,
+                        ..*last
+                    };
+                    self.stats.stuck.push(rec);
+                }
             }
             if self.units[i].unstick.give_up {
                 if self.may_vanish(world, i) {

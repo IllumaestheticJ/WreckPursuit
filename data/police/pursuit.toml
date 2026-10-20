@@ -3,7 +3,7 @@
 
 think_hz = 10.0
 patrol_speed_factor = 1.0
-respond_speed_factor = 1.35
+respond_speed_factor = 1.6
 # Pursuit speed = min(target speed * (1 + target_speed_margin), pursuit_cap_mps[phase]).
 target_speed_margin = 0.10
 patrol_cornering_g = 0.35

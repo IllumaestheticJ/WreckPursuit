@@ -3,11 +3,12 @@
 //!
 //! A physical unit that wants to move (planned speed above [`WANT_MPS`], not holding for traffic
 //! or a light, in service) but has been slower than [`SLOW_MPS`] for [`STUCK_AFTER_S`] is
-//! **stuck**. Each stuck event is classified by what the car touched last ([`StuckCause`]) and
+//! **stuck**; so is one that has waited [`HELD_AFTER_S`] behind a stopped vehicle it can't
+//! pass (not queued at a red light). Each stuck event is classified by what the car touched last ([`StuckCause`]) and
 //! logged in `PoliceStats::stuck`. Recovery, in order:
 //! 1. reverse with opposite lock for [`REVERSE_M`] (at most [`REVERSE_MAX_S`]) and drive on;
-//! 2. stuck again within [`SAME_SPOT_M`] of the first event: re-route with the road segment it is
-//!    on blocked for this unit ([`BLOCK_SEGMENT_S`]);
+//! 2. stuck again within [`SAME_SPOT_M`] of the first event (or held behind a vehicle at once):
+//!    re-route with the road segment it is on blocked for this unit ([`BLOCK_SEGMENT_S`]);
 //! 3. still stuck [`GIVE_UP_S`] after the first event and out of every racer's sight: despawn.
 //!    A call it was answering is dispatched again (usually to a fresh responder out of sight
 //!    nearer the racer); patrols are refilled the same way.
@@ -29,8 +30,16 @@ pub const WANT_MPS: f32 = 1.5;
 pub const SLOW_MPS: f32 = 1.0;
 /// Seconds slow before a stuck event.
 pub const STUCK_AFTER_S: f32 = 2.0;
+/// Seconds waiting behind a stopped vehicle (not a red-light queue) before a stuck event: a
+/// dead or abandoned car the unit can't pass, m.
+pub const HELD_AFTER_S: f32 = 20.0;
 /// Reverse this far before driving on, m.
 pub const REVERSE_M: f32 = 4.0;
+/// A responder yielding to the racer it was sent for, nose to nose with it stopped this long,
+/// backs out [`YIELD_REVERSE_M`] to clear a narrow road, s.
+pub const YIELD_DEADLOCK_S: f32 = 2.0;
+/// See [`YIELD_DEADLOCK_S`], m.
+pub const YIELD_REVERSE_M: f32 = 8.0;
 /// Give up reversing after this long, s.
 pub const REVERSE_MAX_S: f32 = 3.0;
 /// A second event this close to the first one re-routes around the segment, m.
@@ -96,6 +105,8 @@ pub enum UnstickStep {
     Respawn,
     /// Gave up time reached but a racer could see it: kept trying.
     InSight,
+    /// Recovery switched off ([`crate::PoliceSystem::set_unstick_recovery`]): logged only.
+    Logged,
 }
 
 /// One stuck event (`PoliceStats::stuck`).
@@ -130,9 +141,10 @@ pub(crate) enum Phase {
     /// Normal driving.
     #[default]
     Drive,
-    /// Backing out: from where, until when, with which steer.
+    /// Backing out: from where, how far, until when, with which steer.
     Reverse {
         from: [f32; 2],
+        dist_m: f32,
         until: SimTime,
         steer: f32,
     },
@@ -142,6 +154,10 @@ pub(crate) enum Phase {
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct UnstickState {
     pub(crate) slow_s: f32,
+    /// Seconds yielding nose to nose with a stopped racer.
+    pub(crate) yield_s: f32,
+    /// Seconds holding behind a stopped vehicle outside a red-light queue.
+    pub(crate) held_s: f32,
     pub(crate) phase: Phase,
     /// Stuck events in this episode.
     pub(crate) attempts: u32,
@@ -244,6 +260,24 @@ impl PropIndex {
     /// No props.
     pub fn is_empty(&self) -> bool {
         self.boxes.is_empty()
+    }
+
+    /// Indices of props in the grid cells around `p` (everything within one cell, ≥ 25 m),
+    /// ascending.
+    pub fn around(&self, p: [f32; 2], out: &mut Vec<u32>) {
+        let (cx, cy) = cell(p);
+        for x in cx - 1..=cx + 1 {
+            for y in cy - 1..=cy + 1 {
+                if let Some(v) = self.grid.get(&(x, y)) {
+                    out.extend_from_slice(v);
+                }
+            }
+        }
+    }
+
+    /// Prop by index.
+    pub fn get(&self, i: u32) -> &PropBox {
+        &self.boxes[i as usize]
     }
 
     /// Distance from `p` to the nearest prop outline within one grid cell, m.

@@ -47,6 +47,12 @@ const RESPOND_REROUTE_M: f32 = 40.0;
 /// A responder this close to the reported racer, with it in sight, follows it, m.
 const RESPOND_FOLLOW_M: f32 = 150.0;
 
+/// A responder with the reported racer coming head-on this close pulls over and stops, m.
+const RESPOND_YIELD_M: f32 = 70.0;
+
+/// How far further right a yielding responder pulls over, m.
+const RESPOND_YIELD_SHIFT_M: f32 = 1.2;
+
 /// How far ahead a responder looks for a junction to meet a reported racer at, s.
 const RESPOND_HORIZON_S: f32 = 12.0;
 
@@ -680,6 +686,38 @@ impl PoliceSystem {
                         crate::dispatch::IncidentKind::Crash => None,
                     };
                     if let Some((rp, rv)) = follow {
+                        let u = &self.units[i];
+                        // The racer coming straight at it: pull over to the right and stop,
+                        // let it pass, then follow (no head-on meeting on a narrow road).
+                        let to = sub(rp, u.body.pos);
+                        let d = dist(rp, u.body.pos);
+                        let ahead = dot(to, u.body.heading) > 0.0;
+                        let v_r = (rv[0] * rv[0] + rv[1] * rv[1]).sqrt();
+                        // Nose to nose with the racer stopped in front (it waits for us on a
+                        // narrow road): back out of its way.
+                        if ahead && d < 20.0 && v_r < 1.0 && !u.internal {
+                            let u = &mut self.units[i];
+                            u.unstick.yield_s += tdt;
+                            if u.unstick.yield_s >= crate::stuck::YIELD_DEADLOCK_S {
+                                u.unstick.yield_s = 0.0;
+                                let steer = -u.unstick.last_steer.signum();
+                                u.unstick.phase = crate::stuck::Phase::Reverse {
+                                    from: u.body.pos,
+                                    dist_m: crate::stuck::YIELD_REVERSE_M,
+                                    until: now.plus(2.0 * crate::stuck::REVERSE_MAX_S),
+                                    steer,
+                                };
+                            }
+                            self.units[i].cmd.speed_mps = 0.0;
+                            continue;
+                        }
+                        let head_on = dot(rv, u.body.heading) < -3.0;
+                        self.units[i].unstick.yield_s = 0.0;
+                        if d < RESPOND_YIELD_M && ahead && head_on {
+                            self.units[i].cmd.speed_mps = 0.0;
+                            self.units[i].cmd.lane_offset_m = LANE_OFFSET_M + RESPOND_YIELD_SHIFT_M;
+                            continue;
+                        }
                         let u = &self.units[i];
                         let t = &u.cmd.track;
                         let stale = !t.is_drivable()

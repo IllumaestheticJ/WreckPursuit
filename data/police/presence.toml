@@ -79,10 +79,10 @@ redispatch_far_m = 150.0
 
 # Call taken -> unit assigned, s.
 [response.call_delay_s]
-dawn = 4.0
+dawn = 3.0
 day = 2.0
 dusk = 3.0
-night = 5.0
+night = 3.0
 
 # Added per district (stations are downtown), s.
 [response.district_delay_s]
