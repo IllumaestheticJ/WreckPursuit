@@ -67,6 +67,9 @@ export function toggleHeadlights(): void {
 }
 
 function ramp(cur: number, target: number, up: number, down: number, dt: number): number {
+  // A reversal (countersteering against a slide) starts from centre at once instead of first
+  // ramping back through it (owner row 90); the sim's rack still moves the wheels smoothly.
+  if (target !== 0 && cur !== 0 && Math.sign(target) !== Math.sign(cur)) cur = 0;
   const rate = Math.abs(target) > Math.abs(cur) || Math.sign(target) !== Math.sign(cur) ? up : down;
   const d = target - cur;
   const step = rate * dt;
@@ -104,7 +107,9 @@ export function readInput(dt: number): { input: DriverInput; source: InputSource
   const left = any("ArrowLeft", "KeyA") ? 1 : 0;
   const right = any("ArrowRight", "KeyD") ? 1 : 0;
   const keyActive = left || right || any("ArrowUp", "KeyW", "ArrowDown", "KeyS", "Space");
-  kb.steer = ramp(kb.steer, right - left, 4.0, 6.0, dt);
+  // Release at 12/s (83 ms; was 6/s): until the key value reaches 0 the sim's self-aligning
+  // countersteer cannot start (owner row 90).
+  kb.steer = ramp(kb.steer, right - left, 4.0, 12.0, dt);
   // Fast key ramp: the sim's keyboard assist preset filters the pedal again (~0.23 s).
   kb.throttle = ramp(kb.throttle, any("ArrowUp", "KeyW") ? 1 : 0, 12.0, 12.0, dt);
   kb.brake = ramp(kb.brake, any("ArrowDown", "KeyS") ? 1 : 0, 6.0, 10.0, dt);

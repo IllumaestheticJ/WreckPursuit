@@ -1066,3 +1066,246 @@ pub fn keyboard_corner_wobble(
     let var = rates.iter().map(|r| (r - mean) * (r - mean)).sum::<f32>() / rates.len() as f32;
     (var.sqrt(), worst)
 }
+
+/// How a [`slide_catch`] slide is provoked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SlideCase {
+    /// Mid-corner (30 m circle, 0.7 g), full throttle while still steering in, then the
+    /// throttle stays down.
+    PowerOversteer,
+    /// Near the limit (30 m circle, 0.85 g), off the throttle onto 30 % brake while still
+    /// steering in (lift-off / trail-brake oversteer), then off the brake too.
+    LiftOff,
+    /// Straight at 100 km/h, a sudden 1 rad/s yaw-rate kick (a nudge from traffic); throttle
+    /// held at 30 %. The hold phase steers straight.
+    YawKick,
+}
+
+/// What the driver does once the slide is under way in [`slide_catch`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Catcher {
+    /// Lets go of the steering and leaves it there.
+    Released,
+    /// Lets go, then countersteers `delay_s` after the slide starts (key toward the side the
+    /// rear slides to, or a proportional stick) while the rear slides more than 0.05 rad, and
+    /// lets go again once it is under that.
+    LateCountersteer {
+        /// Reaction time after slide onset, s.
+        delay_s: f32,
+    },
+}
+
+/// A keyboard ramp in front of the sim, as the testbed's input layer applies it
+/// (`apps/testbed-web/src/input.ts`): the key value moves toward its target at `up` /s when
+/// the target is larger or on the other side, else at `down` /s; `through_zero` = a reversal
+/// jumps to 0 first.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct KeyRamp {
+    /// Rate toward a larger (or opposite) target, 1/s.
+    pub up: f32,
+    /// Rate back toward 0, 1/s.
+    pub down: f32,
+    /// A reversal snaps to 0 before ramping up the other way.
+    pub through_zero: bool,
+}
+
+impl KeyRamp {
+    /// Advance `cur` toward `target` over `dt`.
+    pub fn step(&self, cur: f32, target: f32, dt: f32) -> f32 {
+        let reversal = target != 0.0 && cur != 0.0 && target.signum() != cur.signum();
+        let cur = if reversal && self.through_zero {
+            0.0
+        } else {
+            cur
+        };
+        let rate = if target.abs() > cur.abs() || reversal {
+            self.up
+        } else {
+            self.down
+        };
+        let d = target - cur;
+        let step = rate * dt;
+        if d.abs() <= step {
+            target
+        } else {
+            cur + d.signum() * step
+        }
+    }
+}
+
+/// Result of [`slide_catch`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SlideCatch {
+    /// Longest stretch, s, after the driver lets go during which the front wheels point more
+    /// than 3° away from the front axle's travel (|centre steer − front-axle travel angle|):
+    /// how long the steering lags the slide. 0 = always within 3°.
+    pub lag_s: f32,
+    /// Largest |centre steer − front-axle travel angle| after the driver lets go, degrees.
+    pub peak_err_deg: f32,
+    /// [`Catcher::LateCountersteer`] only: seconds from the first countersteer input until
+    /// the front wheels are within 3° of the front axle's travel (`None` = no countersteer
+    /// was needed, or never).
+    pub counter_s: Option<f32>,
+    /// Largest body slip angle, degrees (≥ 90 = spun).
+    pub max_slip_deg: f32,
+    /// Caught: never past 90° of slip, and at the end < 15° slip, |yaw rate| < 0.5 rad/s and
+    /// moving forward faster than 5 m/s.
+    pub caught: bool,
+}
+
+/// Slide-catch timing (owner row 90): provoke a [`SlideCase`] while steering into a 30 m
+/// circle for `hold_s`, then let [`Catcher`] drive for 3 s. `style` quantises the scripted
+/// steering to keys or keeps it analog.
+pub fn slide_catch(
+    car: &LoadedCar,
+    assists: &AssistProfile,
+    style: DriverStyle,
+    case: SlideCase,
+    catcher: Catcher,
+    hold_s: f32,
+    key_ramp: Option<KeyRamp>,
+) -> SlideCatch {
+    use crate::steering::{front_axle_angle, rear_axle_slip};
+    let radius = 30.0;
+    let lat_g = match case {
+        SlideCase::PowerOversteer => 0.7,
+        SlideCase::LiftOff => 0.85,
+        SlideCase::YawKick => 0.0,
+    };
+    let kick = case == SlideCase::YawKick;
+    let mut rig = Rig::new(car);
+    let mut follow = CircleFollower::new(radius);
+    let v = if kick {
+        100.0 / 3.6
+    } else {
+        (lat_g * GRAVITY_MPS2 * radius).sqrt()
+    };
+    rig.teleport([0.0; 3], 0.0, v, if kick { 0.0 } else { v / radius });
+    let quantise = |s: f32| match style {
+        DriverStyle::Analog => s,
+        DriverStyle::Keyboard if s > 0.15 => 1.0,
+        DriverStyle::Keyboard if s < -0.15 => -1.0,
+        DriverStyle::Keyboard => 0.0,
+    };
+    for _ in 0..3 * TICKS_PER_S {
+        let steer = if kick { 0.0 } else { follow.steer(&rig).0 };
+        let (throttle, brake) = hold_speed(&rig, v);
+        rig.step(
+            &VehicleInput {
+                steer: quantise(steer),
+                throttle,
+                brake,
+                ..Default::default()
+            },
+            assists,
+        );
+    }
+    if kick {
+        let (pos, ch) = (rig.state().pos, *rig.vehicle.chassis());
+        let fwd = ch.rot * V3::Y;
+        let sp = speed(&rig);
+        rig.teleport(pos, atan2(-fwd.x, fwd.y), sp, 1.0);
+    }
+    let def = rig.vehicle.def().clone();
+    let com = rig.vehicle.com_local();
+    let cg_front = def.wheels[0].position_m[1] - com.y;
+    let cg_rear = com.y - def.wheels[2].position_m[1];
+    let axles = |rig: &Rig| {
+        let ch = rig.vehicle.chassis();
+        let vel = V3::from(rig.state().lin_vel);
+        let (vf, vl) = (vel.dot(ch.rot * V3::Y), vel.dot(ch.rot * -V3::X));
+        let r = yaw_rate(rig);
+        (
+            rear_axle_slip(vf, vl, r, cg_rear),
+            front_axle_angle(vf, vl, r, cg_front),
+        )
+    };
+    let hold_ticks = (hold_s * TICKS_PER_S as f32) as usize;
+    let mut onset: Option<usize> = None;
+    let (mut run, mut lag, mut peak) = (0usize, 0usize, 0.0f32);
+    let mut key = 0.0f32;
+    let mut counter_start: Option<usize> = None;
+    let mut counter_s = None;
+    let mut max_slip = 0.0f32;
+    let total = hold_ticks + 3 * TICKS_PER_S;
+    for tick in 0..total {
+        let (ras, faa) = axles(&rig);
+        if onset.is_none() && ras.abs() > 0.035 {
+            onset = Some(tick);
+        }
+        let held = tick < hold_ticks;
+        let steer = if held {
+            if kick {
+                0.0
+            } else {
+                quantise(follow.steer(&rig).0)
+            }
+        } else {
+            match catcher {
+                Catcher::Released => 0.0,
+                Catcher::LateCountersteer { delay_s } => {
+                    let start = onset.map_or(usize::MAX, |o| o.max(hold_ticks))
+                        + (delay_s * TICKS_PER_S as f32) as usize;
+                    if tick >= start && ras.abs() > 0.05 {
+                        // + steer = right; the rear sliding right (ras < 0) wants right lock.
+                        match style {
+                            DriverStyle::Keyboard => -ras.signum(),
+                            DriverStyle::Analog => (-3.0 * ras).clamp(-1.0, 1.0),
+                        }
+                    } else {
+                        0.0
+                    }
+                }
+            }
+        };
+        if steer != 0.0 && !held && counter_start.is_none() {
+            counter_start = Some(tick);
+        }
+        let steer = match key_ramp {
+            Some(r) => {
+                key = r.step(key, steer, PHYSICS_DT);
+                key
+            }
+            None => steer,
+        };
+        let (throttle, brake) = match case {
+            SlideCase::PowerOversteer => (1.0, 0.0),
+            SlideCase::LiftOff if held => (0.0, 0.3),
+            SlideCase::LiftOff => (0.0, 0.0),
+            SlideCase::YawKick => (0.3, 0.0),
+        };
+        rig.step(
+            &VehicleInput {
+                steer,
+                throttle,
+                brake,
+                ..Default::default()
+            },
+            assists,
+        );
+        max_slip = max_slip.max(body_slip_deg(&rig).abs());
+        if !held {
+            let (_, faa) = axles(&rig);
+            let err = (rig.vehicle.telemetry().steer_rad - faa).abs().to_degrees();
+            peak = peak.max(err);
+            if let (Some(c), None) = (counter_start, counter_s) {
+                if err < 3.0 {
+                    counter_s = Some((tick + 1 - c) as f32 / TICKS_PER_S as f32);
+                }
+            }
+            run = if err >= 3.0 { run + 1 } else { 0 };
+            lag = lag.max(run);
+        }
+        let _ = faa;
+    }
+    SlideCatch {
+        lag_s: lag as f32 / TICKS_PER_S as f32,
+        peak_err_deg: peak,
+        counter_s,
+        max_slip_deg: max_slip,
+        caught: max_slip < 90.0
+            && body_slip_deg(&rig).abs() < 15.0
+            && yaw_rate(&rig).abs() < 0.5
+            && speed(&rig) > 5.0,
+    }
+}

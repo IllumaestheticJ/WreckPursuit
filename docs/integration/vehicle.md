@@ -996,3 +996,86 @@ scenarios pass except `city_blocked_parked_player_grid` and `world_traffic_soak_
 and the already-known `rev_matched_downshifts_blip` (J), `grid_highway_sprint` and
 `wp_wasm` `short_sprint_with_ai…` (L/N), plus `simcli` `goldens_match` /
 `all_scenarios…`, which fail only on the two scenario expectations above.
+
+
+## Owner row 90 (A, 2026-10-20) — the countersteer catch starts too slowly
+
+"The countersteering backwards initiates too slow, making it hard to catch slides" (v0.12.12).
+Same in Arcade and Simulation.
+
+**Where the delay was.** (1) *Countersteer key:* the keyboard / gamepad rack rate was tied to
+the slip-targeted lock, which shrinks with speed: swinging from 3° into the corner to an 8.6°
+countersteer took **129 ms** at any help value. (2) *Testbed key ramp*
+(`apps/testbed-web/src/input.ts`): a released key took 167 ms (6/s) to reach 0, and until it
+does the self-aligning countersteer cannot start; a reversal took 250 ms to cross centre.
+(3) *Released keys in the sim* were already quick: 90 % of the aligned angle in 33–50 ms.
+
+**Changes.** (a) The self-aligning rack and a driver steering toward the side the rear slides
+to never move slower than the car's own rack (`rack_speed_rad_per_s`), × `1 + 4 × help`. (b) The
+save-the-car (countersteer) lock opens from 0.03 → 0.10 rad rear-axle slip (was 0.06 → 0.16).
+(c) Testbed keys: a reversal starts from centre at once, release at 12/s (83 ms). Testbed file
+touched (C's): `src/input.ts`, two lines, listed here.
+
+**Rack response** (debug_sedan, 3° into the corner → 90 % of an 8.6° countersteer, ms; the
+same at 50 and 100 km/h after the change):
+
+| help | released keys before → after | countersteer key before → after |
+|---|---|---|
+| 30 % | 38–50 → 38 | 129 → 62 |
+| 60 % | 33–46 → 33 | 129 → **42** |
+| 100 % | 29–38 → 29 | 129 → 29 |
+
+**Slides** (`cargo run --release -p wp_vehicle --example catch`, `metrics::slide_catch`): TCS /
+ESC off, power oversteer (30 m, 0.7 g, full throttle held), lift-off (0.85 g, 30 % brake) and a
+100 km/h 1 rad/s yaw kick, steering held in 0.1 / 0.3 / 0.6 s: 9 runs per row. Lag = longest
+stretch with the front wheels > 3° off the front axle's travel after the driver lets go
+(median / worst, s; the multi-second worsts are runs that spin). "keys + testbed ramp" puts the
+testbed's key ramp in front of the sim (before: 4/6 per s; after: the new ramp).
+
+| car | preset | help | lag median / worst s | released caught | countersteer 150 ms late caught |
+|---|---|---|---|---|---|
+| shiro_turbo | keys | 30 % |  0.000 / 0.038  →  0.000 / 0.038  |  9/9  →  9/9  |  9/9  →  9/9  |
+| shiro_turbo | keys | 60 % |  0.000 / 0.038  →  0.000 / 0.033  |  9/9  →  9/9  |  9/9  →  9/9  |
+| shiro_turbo | keys | 100 % |  0.000 / 0.042  →  0.000 / 0.038  |  9/9  →  9/9  |  9/9  →  9/9  |
+| shiro_turbo | keys + testbed ramp | 30 % |  0.000 / 0.062  →  0.000 / 0.050  |  9/9  →  9/9  |  9/9  →  9/9  |
+| shiro_turbo | keys + testbed ramp | 60 % |  0.000 / 0.096  →  0.000 / 0.079  |  9/9  →  9/9  |  9/9  →  9/9  |
+| shiro_turbo | keys + testbed ramp | 100 % |  0.000 / 0.104  →  0.000 / 0.079  |  9/9  →  9/9  |  9/9  →  9/9  |
+| shiro_turbo | gamepad | 30 % |  0.000 / 0.021  →  0.000 / 0.021  |  9/9  →  9/9  |  9/9  →  9/9  |
+| shiro_turbo | gamepad | 60 % |  0.000 / 0.013  →  0.000 / 0.013  |  9/9  →  9/9  |  9/9  →  9/9  |
+| shiro_turbo | gamepad | 100 % |  0.000 / 0.008  →  0.000 / 0.008  |  9/9  →  9/9  |  9/9  →  9/9  |
+| sperber_32 | keys | 30 % |  0.000 / 0.042  →  0.000 / 0.042  |  9/9  →  9/9  |  9/9  →  9/9  |
+| sperber_32 | keys | 60 % |  0.000 / 0.029  →  0.000 / 0.029  |  9/9  →  9/9  |  9/9  →  9/9  |
+| sperber_32 | keys | 100 % |  0.000 / 0.021  →  0.000 / 0.021  |  9/9  →  9/9  |  9/9  →  9/9  |
+| sperber_32 | keys + testbed ramp | 30 % |  0.000 / 0.100  →  0.000 / 0.087  |  9/9  →  9/9  |  9/9  →  9/9  |
+| sperber_32 | keys + testbed ramp | 60 % |  0.000 / 0.104  →  0.000 / 0.083  |  9/9  →  9/9  |  9/9  →  9/9  |
+| sperber_32 | keys + testbed ramp | 100 % |  0.000 / 0.104  →  0.000 / 0.083  |  9/9  →  9/9  |  9/9  →  9/9  |
+| sperber_32 | gamepad | 30 % |  0.000 / 1.242  →  0.000 / 1.242  |  8/9  →  8/9  |  9/9  →  9/9  |
+| sperber_32 | gamepad | 60 % |  0.000 / 1.992  →  0.000 / 1.992  |  8/9  →  8/9  |  9/9  →  9/9  |
+| sperber_32 | gamepad | 100 % |  0.000 / 0.075  →  0.000 / 0.075  |  9/9  →  9/9  |  9/9  →  9/9  |
+| rampart_50 | keys | 30 % |  0.046 / 1.475  →  0.046 / 1.475  |  6/9  →  6/9  |  9/9  →  9/9  |
+| rampart_50 | keys | 60 % |  0.000 / 0.033  →  0.000 / 0.033  |  9/9  →  9/9  |  9/9  →  9/9  |
+| rampart_50 | keys | 100 % |  0.000 / 0.038  →  0.000 / 0.038  |  9/9  →  9/9  |  9/9  →  9/9  |
+| rampart_50 | keys + testbed ramp | 30 % |  0.100 / 1.525  →  0.000 / 1.558  |  6/9  →  7/9  |  8/9  →  9/9  |
+| rampart_50 | keys + testbed ramp | 60 % |  0.000 / 2.033  →  0.000 / 2.025  |  8/9  →  8/9  |  9/9  →  9/9  |
+| rampart_50 | keys + testbed ramp | 100 % |  0.000 / 0.112  →  0.000 / 0.083  |  9/9  →  9/9  |  9/9  →  9/9  |
+| rampart_50 | gamepad | 30 % |  0.000 / 1.333  →  0.000 / 1.333  |  8/9  →  8/9  |  9/9  →  9/9  |
+| rampart_50 | gamepad | 60 % |  0.000 / 1.671  →  0.000 / 1.671  |  8/9  →  8/9  |  9/9  →  9/9  |
+| rampart_50 | gamepad | 100 % |  0.000 / 0.042  →  0.000 / 0.042  |  9/9  →  9/9  |  9/9  →  9/9  |
+| debug_sedan | keys | 30 % |  0.054 / 0.667  →  0.054 / 0.671  |  9/9  →  9/9  |  9/9  →  9/9  |
+| debug_sedan | keys | 60 % |  0.017 / 0.038  →  0.017 / 0.038  |  9/9  →  9/9  |  9/9  →  9/9  |
+| debug_sedan | keys | 100 % |  0.021 / 0.042  →  0.021 / 0.042  |  9/9  →  9/9  |  9/9  →  9/9  |
+| debug_sedan | keys + testbed ramp | 30 % |  0.112 / 0.667  →  0.092 / 0.671  |  9/9  →  9/9  |  6/9  →  9/9  |
+| debug_sedan | keys + testbed ramp | 60 % |  0.017 / 0.117  →  0.017 / 0.087  |  9/9  →  9/9  |  8/9  →  9/9  |
+| debug_sedan | keys + testbed ramp | 100 % |  0.042 / 0.117  →  0.042 / 0.083  |  9/9  →  9/9  |  9/9  →  9/9  |
+| debug_sedan | gamepad | 30 % |  0.033 / 0.663  →  0.033 / 0.663  |  9/9  →  9/9  |  9/9  →  9/9  |
+| debug_sedan | gamepad | 60 % |  0.017 / 0.029  →  0.017 / 0.029  |  9/9  →  9/9  |  9/9  →  9/9  |
+| debug_sedan | gamepad | 100 % |  0.013 / 0.042  →  0.013 / 0.042  |  9/9  →  9/9  |  9/9  →  9/9  |
+
+Through the testbed ramp the worst lag drops from 0.10–0.12 s to 0.05–0.09 s, and late
+countersteering catches more (debug_sedan 30 % 6/9 → 9/9, 60 % 8/9 → 9/9; rampart 30 % 8/9 →
+9/9). **Tried and rejected:** starting the alignment earlier (rear-axle slip 0.015 → 0.05 / 0.06,
+as suggested). It turns the wheels along the travel while full throttle is still driving the
+slide: release-the-keys power exits with TCS off (4 cars × 44, lat 0.5–0.8 g × reaction
+0.2–1.2 s) fell from 132 to 109 (rampart 27 → 18), and with 0.015 → 0.05 a test case spun. Kept
+0.03 → 0.08. Not tried yet: an onset on yaw-rate error.
+

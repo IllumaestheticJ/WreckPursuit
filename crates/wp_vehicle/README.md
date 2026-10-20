@@ -147,7 +147,10 @@ purist" presets are bit-identical to the plain model (tested against pinned hash
   with a 5× rack. The front axle's travel is used only as the rear slides (rear-axle slip
   0.03 → 0.08 rad blend); while the tyres grip the target is the centre (aligning to the
   front axle's travel there would hold any yaw, e.g. after a kerb kick). In a slide it is
-  the countersteer that cancels the front slip angle. It **never** acts while the driver steers, nor while the
+  the countersteer that cancels the front slip angle. The aligning rack, and a driver
+  steering toward the side the rear slides to, never move slower than the car's own rack
+  speed, × `1 + 4h` (owner row 90; the speed-sensitive rate alone took ~130 ms at speed).
+  Timing table: `cargo run --release -p wp_vehicle --example catch`. It **never** acts while the driver steers, nor while the
   handbrake is held and for 0.5 s after (`HANDBRAKE_GRACE_S`), and no assist adds yaw torque
   (the gyro is gone).
 - *Countersteer lock* (part of the speed-sensitive lock, any preset with sensitivity > 0):
