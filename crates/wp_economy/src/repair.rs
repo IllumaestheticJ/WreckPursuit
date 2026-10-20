@@ -317,7 +317,12 @@ impl Economy {
         }
         .clamp(0.0, 1.0);
         let mods = self.catalog.price_of(&car.mods) as f32;
-        money(car.base_price as f32 * (s.min_frac + s.health_frac * health) + s.mods_frac * mods)
+        // The body's salvage never exceeds what the dealer would pay for it, so buying a cheap
+        // car (or the floor car) and scrapping it is never a profit.
+        let body = money(car.base_price as f32 * (s.min_frac + s.health_frac * health)).min(money(
+            self.market.dealer_buy_frac * self.resale_basis(car) as f32,
+        ));
+        body + money(s.mods_frac * mods)
     }
 
     /// Price an arbitrary set of estimate lines for a car at a shop.
