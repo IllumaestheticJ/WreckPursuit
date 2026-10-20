@@ -6,6 +6,14 @@ use serde::{Deserialize, Serialize};
 
 /// 2D vector helpers (world XY).
 pub(crate) mod v2 {
+    /// `a + b`.
+    pub fn add(a: [f32; 2], b: [f32; 2]) -> [f32; 2] {
+        [a[0] + b[0], a[1] + b[1]]
+    }
+    /// `a * k`.
+    pub fn scale(a: [f32; 2], k: f32) -> [f32; 2] {
+        [a[0] * k, a[1] * k]
+    }
     /// `a - b`.
     pub fn sub(a: [f32; 2], b: [f32; 2]) -> [f32; 2] {
         [a[0] - b[0], a[1] - b[1]]
@@ -141,6 +149,12 @@ pub struct Course {
     pub closed_loop: bool,
     /// Half-width of the legal corridor around the centreline, m.
     pub corridor_half_width_m: f32,
+    /// Start-grid layout for this course instead of the race kind's (`None` = the rules'
+    /// layout). Set by the course planner when the start street cannot take the kind's grid,
+    /// e.g. a two-wide grid on a one-lane street whose outer column would start in the parking
+    /// lane (see `catalog::plan_course`).
+    #[serde(default)]
+    pub grid_layout: Option<GridLayout>,
 }
 
 impl Course {
@@ -168,6 +182,7 @@ impl Course {
             cum_m,
             closed_loop,
             corridor_half_width_m,
+            grid_layout: None,
         }
     }
 
