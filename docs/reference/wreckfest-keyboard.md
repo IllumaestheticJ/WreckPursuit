@@ -242,3 +242,7 @@ The key overlay sits at a new position in this clip (arrows at x≈444–508, y�
 ## Owner feedback: our suspension "feels far too switchy" (2026-10-20)
 
 In the reference footage the cars' body roll and pitch build and settle **smoothly and relatively slowly**, with heavy-feeling weight transfer and no quick back-and-forth rocking on direction changes. Our cars swap weight too quickly and too nervously. Targets: lower roll/pitch natural frequency, or more damping on transients, measured as roll angle vs time in a 60 mph lane change and an S-bend. Owners: Drift Lab W (lab feel / A-B) and machine A (ride model).
+
+## Clip 5 note: ABS levels
+
+The owner's clip 5 uses **ABS Half**. WreckPursuit should offer ABS **Off / Half / Full**, alongside TCS Off / Half / Full (assigned to machine A).
