@@ -2,7 +2,7 @@
 //! snapshot with the logged inputs and matches every live tick hash, and the live session is
 //! unchanged by snapshots and replays.
 
-use wp_contracts::{DamageMode, EntityId, VehicleInput};
+use wp_contracts::{DamageMode, EntityId, VehicleInput, VehicleSim};
 
 use crate::crash_replay::{
     CrashMark, BUFFER_TICKS, POST_IMPACT_TICKS, PRE_IMPACT_TICKS, SNAPSHOT_EVERY_TICKS,
@@ -146,7 +146,19 @@ fn race_crash_replays_with_the_judge_and_no_crash_on_the_grid() {
             "no crash on the grid or the straight"
         );
     }
-    let ai = live.entities()[1];
+    // Park the AI racer nearest the player: since the round-13 ride / steering changes the
+    // player's no-steer launch ends up nose to tail with one AI racer on the straight, and
+    // parking another racer ahead left that car between them (a 0 m/s shunt, no crash).
+    let pos = |e: EntityId| live.vehicle(e).unwrap().vehicle.state().pos;
+    let me = pos(p);
+    let dist = |e: &EntityId| {
+        let q = pos(*e);
+        (q[0] - me[0]).hypot(q[1] - me[1])
+    };
+    let ai = *live.entities()[1..]
+        .iter()
+        .min_by(|a, b| dist(a).total_cmp(&dist(b)))
+        .unwrap();
     live.debug_park_in_front_of(ai, p, 18.0).unwrap();
     let crash = until_crash(&mut live, 240).expect("rear-ending a stopped racer is a big crash");
     assert_eq!(crash.other, Some(ai.0));

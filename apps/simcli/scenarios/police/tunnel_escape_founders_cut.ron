@@ -20,11 +20,17 @@
 //
 // Round 13 (rows 63 / 64, faster police that converge and search): pursuit heat now takes him
 // to L4 (30 s escape time) at ≈ 97 s, just before the Cut, and searching units used to drive
-// into the Cut and find him at ≈ 127 s (captured 138.6 s). Searching units now hold both
-// portals of a covered road the racer was lost in (PVPD doctrine §5: nobody chases inside), so
-// he escapes at 130.4 s after 30 s unseen, units ≈ 145 m away at the portals. Measured
-// (round 13, racer target 25 m/s): lost at ≈ 100 s, Escaped 130.4 s; control Captured 134.9 s,
-// never unseen long. Re-aim with `examples/probe_tunnel_chase.rs`.
+// into the Cut and find him at ≈ 127 s (captured 138.6 s). Searching units now hold the portal
+// nearer to them when the racer is lost inside a covered road (PVPD doctrine §5: nobody chases
+// inside), so he escapes after 30 s unseen with the nearest unit ≈ 130 m away at a portal.
+// Measured (round 13, racer target 25 m/s): lost at ≈ 101 s, Escaped 131.2 s; control Captured
+// 129.3 s, never unseen long. Re-aim with `examples/probe_tunnel_chase.rs`.
+//
+// After the lead/round12 car-data retune (stiffer dampers on every car, 2026-10-20) the units
+// catch him on the Uptown Connector (PIT at ≈ 71 s), which takes him to L5 (40 s escape time) at
+// ≈ 77 s. He still reaches the Cut first and is lost inside at ≈ 112.5 s with the units holding
+// the portals (nearest ≈ 135 m), so the escape lands at ≈ 152.5 s: the run is 170 s long and the
+// escape window ends at 170 s.
 (
     name: "police_tunnel_escape_founders_cut",
     seed: 51,
@@ -46,7 +52,7 @@
             driver: follow_route(route_id: "Lantern Run -> Founders Cut lay-by", target_speed: 25.0),
         ),
     ],
-    duration_s: 150.0,
+    duration_s: 170.0,
     hash_every: 240,
     expect: [
         pursuit_started_before(t_s: 15.0),
@@ -55,7 +61,7 @@
         metric(entity: "racer", name: "route_progress", min: 0.97, max: 1.0),
         // The tunnel hides him long enough for the escape timer (22 s at L3 by day).
         metric(entity: "racer", name: "max_los_lost_s", min: 18.0, max: 60.0),
-        first_pursuit_end(entity: "racer", outcome: "Escaped", min_s: 105.0, max_s: 150.0),
+        first_pursuit_end(entity: "racer", outcome: "Escaped", min_s: 105.0, max_s: 170.0),
         total_loss(entity: "racer", expected: false),
     ],
 )

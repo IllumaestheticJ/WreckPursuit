@@ -46,7 +46,7 @@
     "diff_front": "Open",
     "diff_rear": "Open",
     "clutch_max_nm": 210.0,
-    "shift_time_s": 0.25
+    "shift_time_s": 0.45
   },
   "wheels": [
     {

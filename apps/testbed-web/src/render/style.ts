@@ -17,6 +17,7 @@
 // Weather (render/weather.ts) keeps working on top: its wet-road patch sits on the same road
 // materials (only their colours change) and its fog wins whenever it is thicker.
 import * as THREE from "three";
+import { tagFeature } from "../perf";
 import {
   CITY_MATERIAL_COLOURS,
   DISTRICTS,
@@ -71,13 +72,16 @@ export interface StyledScene {
   readonly sun: THREE.DirectionalLight;
   readonly groundMaterial: THREE.MeshStandardMaterial;
   /** Graphics quality (render/quality.ts): the post target uses MSAA only when it allows. */
-  readonly quality: { readonly antialias: boolean; readonly lite: boolean };
+  readonly quality: { readonly antialias: boolean; readonly lite: boolean; readonly lampDrawM?: number };
   /** Light-bar glow multiplier for the police helicopters. */
   policeGlow: number;
   /** City draw distance, m (scene.ts; lamp tiles past it are hidden like city tiles). */
   readonly drawDistanceM: number;
   /** Render override (post stack); null = plain renderer.render. */
   renderOverride: ((camera: THREE.Camera) => void) | null;
+  /** Compile override (shader prewarm of `objects`, lit by the scene, for the post stack's HDR
+   * target); null = renderer.compile. */
+  compileOverride: ((camera: THREE.Camera, objects: THREE.Scene) => void) | null;
   readonly signals: { setLampBoost(k: number): void };
 }
 
@@ -314,12 +318,18 @@ const POOL_FS = /* glsl */ `
     gl_FragColor = vec4(vCol * a * a * uStrength, 1.0);
   }`;
 
+/** Headlight pool geometry per size. */
+const poolGeos = new Map<string, THREE.BufferGeometry>();
+
 /**
  * Headlight pool for one car (chassis space, +Y forward): an additive quad on the road ahead,
  * brightest near the car. Caller positions it and sets `uniforms.uStrength`.
  */
 export function makeHeadlightPool(width: number, length: number): THREE.Mesh {
-  const geo = new THREE.PlaneGeometry(width, length, 1, 1).translate(0, length / 2, 0);
+  // One geometry per size (a car view is built on every traffic / police promotion).
+  const gk = `${width} ${length}`;
+  let geo = poolGeos.get(gk);
+  if (!geo) poolGeos.set(gk, (geo = new THREE.PlaneGeometry(width, length, 1, 1).translate(0, length / 2, 0)));
   const mat = new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
@@ -433,10 +443,12 @@ export class ArtStyle {
     const skyMat = new THREE.ShaderMaterial({
       side: THREE.BackSide,
       depthWrite: false,
-      depthTest: false,
       fog: false,
       uniforms: this.skyUniforms,
-      vertexShader: /* glsl */ `varying vec3 vDir; void main() { vDir = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      // On the far plane (z = w): drawn after the opaque scene with the depth test, so only the
+      // pixels nothing covers are shaded (it was drawn first over the whole screen), and it
+      // never hides geometry past its radius.
+      vertexShader: /* glsl */ `varying vec3 vDir; void main() { vDir = position; vec4 p = projectionMatrix * modelViewMatrix * vec4(position, 1.0); gl_Position = p.xyww; }`,
       fragmentShader: /* glsl */ `
         uniform vec3 uTop, uHorizon, uBottom; varying vec3 vDir;
         void main() {
@@ -446,12 +458,16 @@ export class ArtStyle {
         }`,
     });
     this.sky = new THREE.Mesh(new THREE.SphereGeometry(1500, 24, 12), skyMat);
-    this.sky.renderOrder = -10;
+    this.sky.renderOrder = 1; // after the opaque scene (renderOrder 0), see the vertex shader
     this.sky.frustumCulled = false;
     this.sky.visible = false;
-    view.scene.add(this.sky);
+    view.scene.add(tagFeature(this.sky, "sky"));
     this.track(view.groundMaterial, PALETTE.flatGround);
     view.renderOverride = (camera) => this.render(camera);
+    view.compileOverride = (camera, objects) => {
+      if (artStyle.lowpoly) this.post.compile(view.renderer, objects, camera, view.scene);
+      else view.renderer.compile(objects, camera, view.scene);
+    };
     this.set(initial);
   }
 
@@ -542,7 +558,7 @@ export class ArtStyle {
     if (map) {
       c.lamps = this.buildLamps(c.root, map, district);
       c.lamps.visible = artStyle.lowpoly && c.root.visible !== false;
-      this.view.scene.add(c.lamps);
+      this.view.scene.add(tagFeature(c.lamps, "lamps"));
     }
   }
 
@@ -800,6 +816,7 @@ export class ArtStyle {
     if (!c || !c.lamps?.visible) return;
     let far = this.view.drawDistanceM;
     if (camera instanceof THREE.PerspectiveCamera) far = Math.min(far, camera.far);
+    far = Math.min(far, this.view.quality.lampDrawM ?? Infinity);
     const fog = this.view.scene.fog;
     if (fog instanceof THREE.FogExp2 && fog.density > 0) far = Math.min(far, 2.7 / fog.density);
     camera.getWorldPosition(this.camPos);

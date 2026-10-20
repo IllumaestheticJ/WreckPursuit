@@ -81,7 +81,7 @@ Peak **66 kW @ 6000 rpm**, **121 N·m @ 4000 rpm**. Idle 750 / redline 6200 / li
 
 ## Drivetrain
 
-5-speed manual, open front differential. Layout **FWD**; front diff: open; rear diff: open. Clutch capacity 1.35 × peak torque = 160 N·m. Shift time 0.25 s.
+5-speed manual, open front differential. Layout **FWD**; front diff: open; rear diff: open. Clutch capacity 1.35 × peak torque = 160 N·m. Shift time 0.50 s.
 
 | Gear | Ratio | Overall | km/h @ redline |
 |---|---|---|---|
@@ -124,7 +124,7 @@ Full-pedal line pressure 100 bar.
 
 Lock check at 1 g on μ = 1 (load transfer m·a·h/L): front needs 1220 N·m/wheel (capacity 1.47×), rear needs 248 N·m/wheel (capacity 1.78×).
 
-`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 363 N·m), never boosted above its caliper capacity. Rear capacity exceeds that, so `bias_front` = T_r/(T_r + ideal) = **0.548** → delivered 1790 N·m front / 363 N·m rear per wheel at full pedal. Handbrake 600 N·m per rear wheel.
+`wp_vehicle` gives the axle `bias_front` favours its full `max_torque_*` and scales the other by (1 − b)/b, so `max_torque_*` holds the caliper capacity per wheel and `bias_front` acts as the proportioning valve: the rear is trimmed to the same lock margin as the front (ideal rear = T_f · lock_r/lock_f = 363 N·m), never boosted above its caliper capacity. Rear capacity exceeds that, so `bias_front` = T_r/(T_r + ideal) = **0.548** → delivered 1790 N·m front / 363 N·m rear per wheel at full pedal. Handbrake 840 N·m per rear wheel.
 
 ## Steering
 
@@ -136,8 +136,8 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 13.3 s | 168 km/h | 38.9 m | 0.80 g | — |
-| estimate | 11.6 s | 176 km/h | 37.4 m | 0.90 g | 388 |
+| sim | 13.8 s | 162 km/h | 40.7 m | 0.81 g | — |
+| estimate | 12.1 s | 176 km/h | 37.4 m | 0.90 g | 381 |
 
 ## Damage lattice (`data/lattices/tansy_13.json`)
 

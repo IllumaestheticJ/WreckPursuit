@@ -18,6 +18,9 @@ import type { VehicleView } from "../vehicle_view";
 import { layers } from "../settings";
 import { BAR, Fleet, POLICE_PAINT, TAIL, TRAFFIC_PALETTE, type DrawMode } from "./fleet";
 
+/** Hysteresis around the full-mesh distance for handing a far view to the fleet, m. */
+const VIEW_LOD_BAND_M = 15;
+
 /** How a car was drawn: by its view, by the fleet (full / proxy mesh), or not at all. */
 export type LodMode = "view" | DrawMode | "none";
 
@@ -57,16 +60,35 @@ export class LodDirector {
   readonly fleet = new Fleet();
   readonly log = new LodLog();
   models: SessionModels = { cars: [], traffic: null, police: null };
-  /** Draw states of the last frame. */
-  states: DrawState[] = [];
+  /** Draw states of the last frame (pooled: valid until the next update). */
+  readonly states: DrawState[] = [];
+  private readonly pool: DrawState[] = [];
+  private used = 0;
+  private readonly claimed = new Set<number>();
+  private readonly paints = new Map<number, number>();
+  private readonly tKeys = new Map<number, string>();
+  private readonly pKeys = new Map<number, string>();
+  private readonly vKeys = new Map<number, string>();
+  private cx = 0;
+  private cy = 0;
+  private cz = 0;
   /** Instanced traffic past this distance from the camera (m) is not drawn (phones). Police and
    * sim vehicles are always drawn. */
   trafficDrawM = Infinity;
+  /** Promoted traffic / police sim vehicles farther than this from the camera (m) are drawn by
+   * the fleet (one instanced draw for all of them) instead of their own view (~40 draw calls
+   * each, per panel). Low / touch graphics profiles only; the player and AI racers always use
+   * their view. 10 m of hysteresis so a car on the boundary does not flip drawers every frame. */
+  viewDrawM = Infinity;
+  /** Entities currently handed to the fleet by `viewDrawM`. */
+  private readonly farViews = new Set<number>();
   private readonly cam = new THREE.Vector3();
 
-  /** Traffic livery per sim entity (for colouring a promoted car's VehicleView). */
+  /** Traffic livery per sim entity (for colouring a promoted car's VehicleView). The map is
+   * reused: valid until the next call. */
   paintOfEntity(records: Float32Array): Map<number, number> {
-    const out = new Map<number, number>();
+    const out = this.paints;
+    out.clear();
     for (let o = 0; o < records.length; o += DRAW_STRIDE) {
       const e = records[o + D.entity];
       if (e > 0) out.set(e, trafficPaint(records[o + D.flags]));
@@ -88,12 +110,15 @@ export class LodDirector {
   ): void {
     // Three (x, y, z) → sim (x, -z, y): `world` is rotated -90° about X.
     const c = camera.getWorldPosition(this.cam);
-    const cx = c.x;
-    const cy = -c.z;
-    const cz = c.y;
-    const dist = (x: number, y: number, z: number) => Math.hypot(x - cx, y - cy, z - cz);
-    const states: DrawState[] = [];
-    const claimed = new Set<number>();
+    this.cx = c.x;
+    this.cy = -c.z;
+    this.cz = c.y;
+    // Per frame for every car: pooled states, cached keys, no closures (browser perf, 12b).
+    this.used = 0;
+    const states = this.states;
+    states.length = 0;
+    const claimed = this.claimed;
+    claimed.clear();
     this.fleet.begin();
 
     const showTraffic = layers.on("traffic");
@@ -101,11 +126,11 @@ export class LodDirector {
     for (let o = 0; o < traffic.length; o += DRAW_STRIDE) {
       const entity = traffic[o + D.entity];
       const flags = traffic[o + D.flags];
-      const key = `t${traffic[o + D.id]}`;
+      const key = keyOf(this.tKeys, "t", traffic[o + D.id]);
       const view = entity > 0 ? views.get(entity) : undefined;
       if (view) claimed.add(entity);
-      const far = !view && dist(traffic[o + D.pos], traffic[o + D.pos + 1], traffic[o + D.pos + 2]) > this.trafficDrawM;
-      states.push(this.draw(key, entity, view, traffic, o, dist, showTraffic && !far ? tModel : null, () => [trafficPaint(flags), tailOf(flags, timeS), null]));
+      const far = !view && this.dist(traffic[o + D.pos], traffic[o + D.pos + 1], traffic[o + D.pos + 2]) > this.trafficDrawM;
+      states.push(this.draw(key, entity, view, traffic, o, showTraffic && !far ? tModel : null, trafficPaint(flags), tailOf(flags, timeS), null));
     }
 
     const pModel = this.models.police ? this.fleet.model(this.models.police, true) : null;
@@ -116,19 +141,41 @@ export class LodDirector {
       const entity = police[o + D.entity];
       const view = entity > 0 ? views.get(entity) : undefined;
       if (view) claimed.add(entity);
-      const i = unit;
-      states.push(this.draw(`p${police[o + D.id]}`, entity, view, police, o, dist, pModel, () => [POLICE_PAINT, TAIL.off, barOf(flags, timeS, i)]));
+      states.push(this.draw(keyOf(this.pKeys, "p", police[o + D.id]), entity, view, police, o, pModel, POLICE_PAINT, TAIL.off, barOf(flags, timeS, unit)));
     }
 
     // Player, AI racers and scenario cars: always their own view.
     for (const [id, v] of views) {
       if (claimed.has(id)) continue;
       const p = v.root.position;
-      states.push({ key: `v${id}`, mode: "view", fallback: !v.panels.ready && layers.on("panels") && layers.on("body"), entity: id, pos: [p.x, p.y, p.z], truth: [p.x, p.y, p.z], dist: dist(p.x, p.y, p.z) });
+      const s = this.next(keyOf(this.vKeys, "v", id), "view", !v.panels.ready && layers.on("panels") && layers.on("body"), id, this.dist(p.x, p.y, p.z));
+      setXYZ(s.pos, p.x, p.y, p.z);
+      setXYZ(s.truth, p.x, p.y, p.z);
+      states.push(s);
     }
     this.fleet.end();
-    this.states = states;
     this.log.push(timeS, states, focus);
+  }
+
+  /** Distance from the camera (sim space), m. */
+  private dist(x: number, y: number, z: number): number {
+    const dx = x - this.cx;
+    const dy = y - this.cy;
+    const dz = z - this.cz;
+    return Math.sqrt(dx * dx + dy * dy + dz * dz);
+  }
+
+  /** The next pooled state of this frame, filled in. */
+  private next(key: string, mode: LodMode, fallback: boolean, entity: number, dist: number): DrawState {
+    let s = this.pool[this.used];
+    if (!s) this.pool.push((s = { key, mode, fallback, entity, pos: [0, 0, 0], truth: [0, 0, 0], dist }));
+    this.used++;
+    s.key = key;
+    s.mode = mode;
+    s.fallback = fallback;
+    s.entity = entity;
+    s.dist = dist;
+    return s;
   }
 
   private draw(
@@ -137,28 +184,59 @@ export class LodDirector {
     view: VehicleView | undefined,
     rec: Float32Array,
     o: number,
-    dist: (x: number, y: number, z: number) => number,
     model: ReturnType<Fleet["model"]> | null,
-    look: () => [number, number, number | null],
+    paint: number,
+    tail: number,
+    bar: number | null,
   ): DrawState {
     // A sim vehicle's view draws it once its mesh is ready; until then it stays hidden and the
     // fleet draws the car (no placeholder box, no empty frame).
-    const ready = view?.drawable ?? false;
-    if (view) view.root.visible = ready;
+    let ready = view?.drawable ?? false;
     const x = rec[o + D.pos];
     const y = rec[o + D.pos + 1];
     const z = rec[o + D.pos + 2];
-    const truth: [number, number, number] = [x, y, z];
+    // Low / touch profiles (`viewDrawM`): a promoted traffic / police car farther than that is
+    // drawn by the fleet (one instanced draw for all) instead of its own view; 10 m of
+    // hysteresis. `lodFar` also lets the view skip its lattice fetch and re-skin meanwhile.
+    if (view && ready && model && Number.isFinite(this.viewDrawM)) {
+      const p = view.root.position;
+      const dv = this.dist(p.x, p.y, p.z);
+      view.lodFar = view.lodFar ? dv > this.viewDrawM : dv > this.viewDrawM + 10;
+      if (view.lodFar) ready = false;
+    } else if (view) view.lodFar = false;
+    if (view) view.root.visible = ready;
     if (view && ready) {
       const p = view.root.position;
-      return { key, mode: "view", fallback: false, entity, pos: [p.x, p.y, p.z], truth, dist: dist(p.x, p.y, p.z) };
+      const s = this.next(key, "view", false, entity, this.dist(p.x, p.y, p.z));
+      setXYZ(s.pos, p.x, p.y, p.z);
+      setXYZ(s.truth, x, y, z);
+      return s;
     }
-    const d = dist(x, y, z);
-    if (!model) return { key, mode: "none", fallback: false, entity, pos: truth, truth, dist: d };
-    const [paint, tail, bar] = look();
-    const mode = this.fleet.add(model, rec, o + D.pos, d, paint, tail, bar);
-    return { key, mode, fallback: mode === "proxy" && d < this.fleet.fullLodM && !model.full, entity, pos: truth, truth, dist: d };
+    const d = this.dist(x, y, z);
+    let mode: LodMode = "none";
+    let fallback = false;
+    if (model) {
+      mode = this.fleet.add(model, rec, o + D.pos, d, paint, tail, bar);
+      fallback = mode === "proxy" && d < this.fleet.fullLodM && !model.full;
+    }
+    const s = this.next(key, mode, fallback, entity, d);
+    setXYZ(s.pos, x, y, z);
+    setXYZ(s.truth, x, y, z);
+    return s;
   }
+}
+
+function setXYZ(a: [number, number, number], x: number, y: number, z: number): void {
+  a[0] = x;
+  a[1] = y;
+  a[2] = z;
+}
+
+/** `prefix + id`, cached (ids are small integers that repeat every frame). */
+function keyOf(cache: Map<number, string>, prefix: string, id: number): string {
+  let k = cache.get(id);
+  if (k === undefined) cache.set(id, (k = prefix + id));
+  return k;
 }
 
 /** One frame of one car in the swap windows of the log. */
@@ -245,7 +323,8 @@ export class LodLog {
     const settled = t - this.t0 > 1;
     for (const s of states) {
       seen.add(s.key);
-      const row: LogRow = { frame: this.frame, t, mode: s.mode, fallback: s.fallback, entity: s.entity, pos: s.pos, truth: s.truth };
+      // Copies: the director's states are pooled and rewritten every frame.
+      const row: LogRow = { frame: this.frame, t, mode: s.mode, fallback: s.fallback, entity: s.entity, pos: [s.pos[0], s.pos[1], s.pos[2]], truth: [s.truth[0], s.truth[1], s.truth[2]] };
       const tr = this.tracks.get(s.key);
       if (settled && (s.mode === "none" || s.fallback)) {
         this.missing++;

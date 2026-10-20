@@ -14,6 +14,10 @@ use wp_math::{clamp01, sin_cos, smoothstep, Rng};
 use crate::data::{EngineAudioDef, EngineMix, RpmAnchor, SamplePack, ThrottleSide};
 
 const HALF_PI: f32 = 1.570_796_4;
+/// How long a throttle lift may take (from above half to below 0.2) and still count as one
+/// blow-off: the clutch shift's ignition cut ramps the throttle out over 40 % of the shift
+/// time, ≈ 0.13-0.18 s for the stock turbo cars' 0.42-0.45 s shifts (owner row 97). Was 0.15.
+const BLOWOFF_LIFT_WINDOW_S: f32 = 0.35;
 
 /// An engine layer with its root rpm resolved for one car.
 #[derive(Debug, Clone, PartialEq)]
@@ -250,11 +254,19 @@ pub fn update_engine(
     }
     st.prev_rpm = rpm;
     st.primed = true;
+    // A rev-match's rpm jump is the ratio step times the rpm, so a low-rpm downshift rises
+    // slower in rpm/s for the same shift: the rising (blip) side is judged as if at
+    // `blip_ref_rpm` (never weaker than the plain rate, at most 2.5× stronger).
+    let rate = if st.rpm_rate > 0.0 {
+        st.rpm_rate * (mix.blip_ref_rpm / rpm.max(1.0)).clamp(1.0, 2.5)
+    } else {
+        -st.rpm_rate
+    };
     let cue = smoothstep(
         mix.shift_rate_onset_rpm_s,
         mix.shift_rate_full_rpm_s
             .max(mix.shift_rate_onset_rpm_s + 1.0),
-        st.rpm_rate.abs(),
+        rate,
     );
     let (target, shift) = if st.rpm_rate < 0.0 {
         let dip = cue * applied;
@@ -331,7 +343,7 @@ pub fn update_engine(
             out.pop = Some(gain * rng.range_f32(0.4, 1.0));
         }
     }
-    st.prev_throttle = applied.max(st.prev_throttle - dt / 0.15);
+    st.prev_throttle = applied.max(st.prev_throttle - dt / BLOWOFF_LIFT_WINDOW_S);
     out
 }
 
@@ -488,6 +500,7 @@ mod tests {
             shift_rate_full_rpm_s: 7000.0,
             shift_dip_depth: 0.6,
             blip_load: 0.8,
+            blip_ref_rpm: 4000.0,
             lod_two_layer_m: 40.0,
             second_layer_cull_scale: 0.25,
             physical_max_others: 6,
@@ -522,14 +535,25 @@ mod tests {
         rpm: impl Fn(usize) -> f32,
         applied: impl Fn(usize) -> f32,
     ) -> Vec<EngineOutput> {
-        let (mix, def, limits) = (test_mix(), test_def(false), test_limits());
+        drive_with(&test_mix(), st, frames, rpm, applied)
+    }
+
+    /// [`drive`] with a given mix.
+    fn drive_with(
+        mix: &EngineMix,
+        st: &mut EngineAudioState,
+        frames: usize,
+        rpm: impl Fn(usize) -> f32,
+        applied: impl Fn(usize) -> f32,
+    ) -> Vec<EngineOutput> {
+        let (def, limits) = (test_def(false), test_limits());
         let layers = EngineLayers::resolve(&pack(), 800.0, 7000.0);
         let mut rng = Rng::new(3);
         (0..frames)
             .map(|i| {
                 update_engine(
                     st,
-                    &mix,
+                    mix,
                     &def,
                     limits,
                     &layers,
@@ -581,6 +605,39 @@ mod tests {
             .iter()
             .any(|o| o.shift > 0.5 && o.on_share > 0.5));
         assert!((out[119].load - idle_load).abs() < 0.02);
+    }
+
+    #[test]
+    fn low_rpm_rev_match_still_blips_and_high_rpm_is_unchanged() {
+        // Round-13 drivetrain: 6 -> 5 while braking at ~2300 rpm, rpm 2310 -> 2700 over
+        // 0.1 s (≈ 3900 rpm/s, under the plain onset-to-full band).
+        let ramp = |lo: f32, hi: f32| {
+            move |i: usize| match i {
+                0..=59 => lo,
+                60..=65 => lo + (i - 59) as f32 * (hi - lo) / 6.0,
+                _ => hi,
+            }
+        };
+        let mut st = EngineAudioState::default();
+        let out = drive(&mut st, 120, ramp(2310.0, 2700.0), |_| 0.0);
+        let idle_load = out[59].load;
+        let peak = out[60..75].iter().map(|o| o.load).fold(0.0, f32::max);
+        assert!(
+            peak > idle_load + 0.15,
+            "low-rpm blip {idle_load} -> {peak}"
+        );
+        // Above blip_ref_rpm the plain rate is used: the same 390 rpm rise at 5000 rpm is
+        // judged exactly as before (scale 1).
+        let mix = test_mix();
+        let mut a = EngineAudioState::default();
+        let hi = drive(&mut a, 120, ramp(5000.0, 5390.0), |_| 0.0);
+        let mut plain = mix.clone();
+        plain.blip_ref_rpm = 0.0;
+        let mut b = EngineAudioState::default();
+        let hi_plain = drive_with(&plain, &mut b, 120, ramp(5000.0, 5390.0), |_| 0.0);
+        for (x, y) in hi.iter().zip(&hi_plain) {
+            assert_eq!(x.load, y.load);
+        }
     }
 
     #[test]

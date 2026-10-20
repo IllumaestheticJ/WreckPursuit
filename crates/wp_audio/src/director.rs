@@ -22,7 +22,11 @@ use crate::impact::{
 };
 use crate::mixer::{CueRef, CueTable, Desire, MixerStats, VoiceMixer};
 use crate::scanner::{RadioLine, RadioPriority, Scanner, ScannerTier};
-use crate::siren::{update_siren, SirenMode, SirenPattern, SirenState};
+use crate::siren::{SirenMode, SirenPattern};
+use crate::siren_space::{AcousticQuery, SirenSpaceFrame};
+use crate::siren_unit::{
+    unit_desires, SirenCue, SirenRack, SirenUnitInput, SirenUnitState, AIRHORN_CUE, WHOOP_CUE,
+};
 use crate::spatial::{dot, len, rotate, sub, world_to_local};
 use crate::tires::{update_tires, TireAudioState};
 use crate::types::{slot, AudioCommand, Bus, Listener, Priority, VoiceId};
@@ -110,6 +114,9 @@ struct CarAudio {
     /// Police air horn (`horn/police`), used for police units whose car has a standard horn.
     horn_police: CueRef,
     siren: [CueRef; 4],
+    /// Siren v2 one-shots (whoop chirp, air-horn blast) from the siren pack.
+    siren_whoop: CueRef,
+    siren_horn: CueRef,
     world: WorldCues,
     materials: MaterialMap,
     static_load_n: f32,
@@ -199,7 +206,7 @@ struct VehicleRuntime {
     last_gear: Option<i8>,
     engine: EngineAudioState,
     tires: TireAudioState,
-    siren: SirenState,
+    siren: SirenUnitState,
     broken_glass: BTreeSet<BodyRegion>,
     /// Worst `RegionDamaged` severity among body panels (drives the rattle loop).
     panel_damage: f32,
@@ -278,6 +285,8 @@ pub struct AudioDirector {
     vehicles: BTreeMap<EntityId, VehicleRuntime>,
     pairs: BTreeMap<(u32, u32), PairState>,
     siren_overrides: BTreeMap<EntityId, SirenOverride>,
+    /// Siren v2: police-state cues, the siren limit and the acoustic space.
+    sirens: SirenRack,
     mixer: VoiceMixer,
     scanner: Scanner,
     rng: Rng,
@@ -308,7 +317,7 @@ pub struct AudioDirector {
 pub const PHYSICAL_ENGINE_PACK: &str = "engine_physical";
 
 const DEFAULT_WORLD_PACK: &str = "world_proc";
-const DEFAULT_SIREN_PACK: &str = "siren_proc";
+const DEFAULT_SIREN_PACK: &str = "siren_v2";
 
 impl AudioDirector {
     /// New director over `lib` with a seed for the (purely cosmetic) pitch variation.
@@ -324,6 +333,7 @@ impl AudioDirector {
             vehicles: BTreeMap::new(),
             pairs: BTreeMap::new(),
             siren_overrides: BTreeMap::new(),
+            sirens: SirenRack::default(),
             mixer: VoiceMixer::default(),
             scanner: Scanner::default(),
             rng: Rng::new(seed),
@@ -418,6 +428,7 @@ impl AudioDirector {
             .map(|l| t.get(ep, &l.cue, true))
             .collect();
         let siren_pack = def.siren.as_ref().map(|s| s.pack.clone());
+        let sp = siren_pack.as_deref().unwrap_or(DEFAULT_SIREN_PACK);
         let car_audio = CarAudio {
             limits,
             layer_cues,
@@ -432,13 +443,9 @@ impl AudioDirector {
             } else {
                 t.get(&def.world_pack, &def.horn_cue, true)
             },
-            siren: SirenPattern::ALL.map(|p| {
-                t.get(
-                    siren_pack.as_deref().unwrap_or(DEFAULT_SIREN_PACK),
-                    p.cue(),
-                    true,
-                )
-            }),
+            siren: SirenPattern::ALL.map(|p| t.get(sp, p.cue(), true)),
+            siren_whoop: t.get(sp, WHOOP_CUE, false),
+            siren_horn: t.get(sp, AIRHORN_CUE, false),
             world: WorldCues::new(t, &def.world_pack),
             materials: MaterialMap::from_lattice(&car.lattice, &car.materials),
             static_load_n: car.def.mass_kg * GRAVITY_MPS2 * 0.25,
@@ -467,6 +474,34 @@ impl AudioDirector {
                 self.siren_overrides.remove(&entity);
             }
         }
+    }
+
+    /// Siren v2: what a police car's AI is doing (`None` = no AI cue; its input and the car's
+    /// mode decide, as before). Set every frame by the bridge, read only by audio. Cues of
+    /// vehicles that leave are dropped.
+    pub fn set_siren_cue(&mut self, entity: EntityId, cue: Option<SirenCue>) {
+        self.sirens.set_cue(entity, cue);
+    }
+
+    /// Siren v2 acoustics for the sirens of the last [`AudioDirector::update`]: occlusion,
+    /// interior muffle, street slap echo, tunnel reverb, engine duck. Call once after each
+    /// update with the world's line-of-sight / covered-road answers.
+    pub fn siren_space(
+        &mut self,
+        listener: &Listener,
+        query: &dyn AcousticQuery,
+    ) -> SirenSpaceFrame {
+        self.sirens.space(
+            &self.lib.config.sirens.v2,
+            listener,
+            self.interior.map(|e| e.0),
+            query,
+        )
+    }
+
+    /// Entities whose siren loop is playing (after the `max_sirens` limit).
+    pub fn sirens_playing(&self) -> Vec<u32> {
+        self.sirens.playing().iter().copied().collect()
     }
 
     /// Scanner tier of the listener.
@@ -506,6 +541,7 @@ impl AudioDirector {
         self.vehicles.clear();
         self.pairs.clear();
         self.pursuits.clear();
+        self.sirens.clear();
         self.last_tick = None;
         self.one_shot_seq = 0;
         self.rng = Rng::new(self.seed);
@@ -537,6 +573,8 @@ impl AudioDirector {
 
         // Drop state of vehicles that left (their voices stop in the mixer diff).
         self.vehicles.retain(|id, _| by_id.contains_key(id));
+        self.sirens
+            .retain(&by_id.keys().copied().collect::<BTreeSet<_>>());
         self.interior = frame.focus.and_then(|f| {
             let v = by_id.get(&f)?;
             let (lo, hi) = self.cars.get(v.car_id)?.cabin?;
@@ -577,6 +615,14 @@ impl AudioDirector {
         }
 
         let cfg = &self.lib.config;
+        self.sirens.limit(
+            &cfg.sirens.v2,
+            &cfg.spatial,
+            frame.listener.pos,
+            frame.focus,
+            tick,
+            &mut desires,
+        );
         let ms: MixerStats =
             self.mixer
                 .mix(cfg, &self.cues, &frame.listener, tick, desires, &mut out);
@@ -991,25 +1037,25 @@ impl AudioDirector {
             (None, None) => SirenMode::Off,
         };
         if fitted {
-            if let Some(so) = update_siren(&mut rt.siren, &cfg.sirens, mode, on, s.speed_mps, tick)
-            {
-                {
-                    let sc = car.siren;
-                    let mut d = Desire::new(
-                        VoiceId::new(e, slot::SIREN + so.pattern.index()),
-                        Bus::Police,
-                        sc[so.pattern.index() as usize],
-                        Priority::High,
-                        pos,
-                        vel,
-                    );
-                    d.gain = cfg.sirens.gain;
-                    d.freq_hz = so.freq_hz;
-                    d.phase = so.phase;
-                    d.synth = Some(so.cadence.synth_params());
-                    out.push(d);
-                }
-            }
+            unit_desires(
+                &mut rt.siren,
+                &cfg.sirens,
+                &SirenUnitInput {
+                    entity: e,
+                    cue: self.sirens.cues.get(&v.entity).copied(),
+                    ov,
+                    mode,
+                    on,
+                    speed_mps: s.speed_mps,
+                    tick,
+                    pos,
+                    vel,
+                    loops: car.siren,
+                    whoop: car.siren_whoop,
+                    airhorn: car.siren_horn,
+                },
+                out,
+            );
         }
         let world_thump = car.world.thump;
         let world_land = car.world.land;
@@ -1051,14 +1097,24 @@ impl AudioDirector {
                         .filter(|v| self.cars.contains_key(v.car_id))
                         .copied();
                     // Material per vehicle side.
-                    let side = |v: Option<&VehicleAudioInput>| {
+                    // `out` = the contact normal pointing out of that vehicle (the event's
+                    // normal points from `a` toward `b`).
+                    let side = |v: Option<&VehicleAudioInput>, out: [f32; 3]| {
                         v.and_then(|v| {
                             let car = &self.cars[v.car_id];
                             let local = world_to_local(v.state.pos, v.state.rot, *point);
-                            car.materials.at(local).map(|(k, r)| (v.entity, k, r))
+                            let n_local = world_to_local([0.0; 3], v.state.rot, out);
+                            car.materials
+                                .at(local)
+                                .map(|(k, r)| struck_surface(&car.materials, local, n_local, k, r))
+                                .map(|(k, r)| (v.entity, k, r))
                         })
                     };
-                    let sides: Vec<_> = [side(va), side(vb)].into_iter().flatten().collect();
+                    let n = *normal;
+                    let sides: Vec<_> = [side(va, n), side(vb, [-n[0], -n[1], -n[2]])]
+                        .into_iter()
+                        .flatten()
+                        .collect();
                     let owner = va.or(vb);
                     let owner_id = owner.map(|v| v.entity.0).unwrap_or(u32::MAX);
                     let world = match owner {
@@ -1603,6 +1659,35 @@ fn cabin_box(lattice: &wp_contracts::LatticeDef) -> Option<([f32; 3], [f32; 3])>
         [lo[0] + m, lo[1] + m, lo[2]],
         [hi[0] - m, hi[1] - m, hi[2] + 0.05],
     ))
+}
+
+/// The surface a contact really strikes. The nearest lattice node can sit on a top panel's
+/// edge (hood, trunk lid, roof) while the hit is horizontal — a frontal into a wall at the
+/// bumper / hood seam, whose height moves with the car's pitch. A top panel only rings as a
+/// plate when struck from above; struck sideways, the hit lands on the structure in front of
+/// or below its edge: the bumper for the hood (front half) and trunk (rear half), the cabin
+/// pillars for the roof.
+fn struck_surface(
+    m: &MaterialMap,
+    local: [f32; 3],
+    n_local: [f32; 3],
+    kind: wp_contracts::MaterialKind,
+    region: BodyRegion,
+) -> (wp_contracts::MaterialKind, BodyRegion) {
+    let horizontal = n_local[2].abs() < 0.5;
+    let target = match region {
+        BodyRegion::Hood if horizontal && local[1] > 0.0 => Some(BodyRegion::FrontBumper),
+        BodyRegion::Trunk if horizontal && local[1] < 0.0 => Some(BodyRegion::RearBumper),
+        BodyRegion::Roof if horizontal => Some(BodyRegion::Cabin),
+        _ => None,
+    };
+    target
+        .and_then(|t| {
+            m.region_centroid(t)
+                .and_then(|c| m.at(c))
+                .filter(|x| x.1 == t)
+        })
+        .unwrap_or((kind, region))
 }
 
 /// Horn damage 0..1: the worst front-end region (the horn sits behind the grille) or a weak

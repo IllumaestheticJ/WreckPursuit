@@ -68,6 +68,21 @@ pub const POPULATE_SIGHT_RADIUS_M: f32 = 150.0;
 /// the active area, to make up for the part in a player's view that cannot be spawned into.
 pub const MAX_SPAWNABLE_BOOST: f32 = 2.0;
 
+/// At or below this time-of-day density factor ([`crate::density::f_time`]) the out-of-sight
+/// boost is off, so night traffic never rises above the curve (owner playtest row 76).
+pub const BOOST_OFF_AT_F_TIME: f32 = 0.2;
+
+/// At or above this time-of-day density factor the full [`MAX_SPAWNABLE_BOOST`] applies
+/// (all daytime hours); in between it is interpolated linearly.
+pub const BOOST_FULL_AT_F_TIME: f32 = 0.6;
+
+/// Largest out-of-sight boost for a zone whose time-of-day factor is `f`.
+pub fn max_spawnable_boost(f: f32) -> f32 {
+    let s =
+        ((f - BOOST_OFF_AT_F_TIME) / (BOOST_FULL_AT_F_TIME - BOOST_OFF_AT_F_TIME)).clamp(0.0, 1.0);
+    1.0 + (MAX_SPAWNABLE_BOOST - 1.0) * s
+}
+
 /// A car turning around or reversing (it cannot pull over) counts as yielding while a siren unit
 /// is this close, m. Everyone else follows [`siren`].
 pub const SIREN_RADIUS_M: f32 = 60.0;
@@ -1610,6 +1625,8 @@ impl Traffic {
             let mut oncoming = false;
             let mut near = false;
             let mut jsiren = false;
+            // The unit this driver yields to has stopped behind it (waiting for room).
+            let mut unit_waiting = false;
             let mut siren_lc = None;
             let mut yield_started = false;
             if any_siren || sy.phase != YieldPhase::None {
@@ -1666,6 +1683,7 @@ impl Traffic {
                 let half_w = lane.map_or(1.75, |l| l.width_m * 0.5);
                 let can_pull = !seg.is_connector() && pass.is_none();
                 let kerb = siren::kerb_offset_m(half_w * 2.0);
+                unit_waiting = behind.is_some_and(|b| b.2 < siren::MOVING_MPS);
                 match behind {
                     Some((back_u, lat_u, speed_u)) => {
                         // Away from the unit: to the kerb unless it comes up on the right.
@@ -1691,6 +1709,18 @@ impl Traffic {
                             YieldPhase::PullingOver => {
                                 sy.side = side;
                                 sy.timer_s = 0.0;
+                                // Stopped half-way to the kerb (something ahead holds it, and
+                                // a physical car only moves sideways while rolling) with the
+                                // unit standing behind: each waits for the other, so give up
+                                // after a while, as a car waiting at the kerb does.
+                                sy.stall_s = if speed_u < 0.5 && v < 0.3 {
+                                    sy.stall_s + TRAFFIC_DT
+                                } else {
+                                    0.0
+                                };
+                                if sy.stall_s > siren::STALL_S {
+                                    sy.phase = YieldPhase::MergingBack;
+                                }
                             }
                             // The unit turned out to come up on the other side: move over.
                             YieldPhase::Waiting if side != sy.side => {
@@ -2039,13 +2069,23 @@ impl Traffic {
                     };
                     // `limit > 0`: at a green (or no signal) a stopped car keeps its permit
                     // (need = 0 would otherwise revoke it every step).
+                    // A yielding driver keeps out of the junction while the unit is coming,
+                    // but once the unit has stopped behind it (waiting for room: a car at the
+                    // stop line cannot pull over) it goes when it may, to clear the way.
+                    let hold = jsiren || (sy.active() && !unit_waiting);
                     if (limit > 0.0 && need <= limit)
-                        || ((jsiren || sy.active()) && need <= 5.0)
+                        || (hold && need <= 5.0)
                         || (self.tv_block[next as usize] && need <= 8.0)
                     {
                         revoke = true;
                     }
-                } else if self.may_enter(map, i, next, d_line, jsiren || sy.active()) {
+                } else if self.may_enter(
+                    map,
+                    i,
+                    next,
+                    d_line,
+                    jsiren || (sy.active() && !unit_waiting),
+                ) {
                     grant = Some(next);
                 }
                 let has = (a.permit == next && !revoke) || grant.is_some();
@@ -2261,7 +2301,11 @@ impl Traffic {
             {
                 continue;
             }
-            if blocked && (d_end < 15.0 || (a.yielding && a.siren_lc.is_none())) {
+            // Not before the whole body has left the junction box: a change started at the lane
+            // start sweeps the tail across cars still turning through the junction.
+            if blocked
+                && (a.s < CAR_LENGTH_M || d_end < 15.0 || (a.yielding && a.siren_lc.is_none()))
+            {
                 continue;
             }
             let p = a.params;
@@ -2838,11 +2882,18 @@ impl Traffic {
     /// in view can only fill as cars drive into it, so whatever the cars in view fall short of
     /// it is added to the spawnable shares *around the players* (within the active radius of a
     /// player, not of a race route's focus points) in proportion, at most
-    /// [`MAX_SPAWNABLE_BOOST`]×. The total therefore still adds up to the density target: with
+    /// [`MAX_SPAWNABLE_BOOST`]× — less at night ([`max_spawnable_boost`] of the zone's
+    /// time-of-day factor, none in the small hours). The total therefore still adds up to the density target: with
     /// the 320 m sightline a whole downtown can be in view, and without this the city settled
     /// about a quarter below target (`world_traffic_soak_observer`). With no player in the
     /// inputs nothing is in view and the targets are returned unchanged.
-    fn spawnable_targets(&self, inp: &TrafficInputs, full: &[f32], seen_agents: u32) -> Vec<f32> {
+    fn spawnable_targets(
+        &self,
+        map: &CityMap,
+        inp: &TrafficInputs,
+        full: &[f32],
+        seen_agents: u32,
+    ) -> Vec<f32> {
         if !inp.tracked.iter().any(|t| t.player) {
             return full.to_vec();
         }
@@ -2894,8 +2945,9 @@ impl Traffic {
             // At most double the density where cars can appear, so a thin spawnable strip
             // (player near the map edge, most of the area in view) does not clump.
             let k = (1.0 + shortfall / near_total).min(MAX_SPAWNABLE_BOOST);
-            for (t, n) in out.iter_mut().zip(&near) {
-                *t += n * (k - 1.0);
+            for (z, (t, n)) in out.iter_mut().zip(&near).enumerate() {
+                let kz = k.min(max_spawnable_boost(f_time(map.time, map.net.zones[z].kind)));
+                *t += n * (kz - 1.0);
             }
         }
         out
@@ -2935,7 +2987,7 @@ impl Traffic {
             agent_zone.push(z);
             agent_seen.push(seen);
         }
-        let targets = self.spawnable_targets(inp, &full_targets, seen_in_zones);
+        let targets = self.spawnable_targets(map, inp, &full_targets, seen_in_zones);
         // District-level totals: zones are small, so control is per district kind with a
         // looser per-zone clamp against local clumps.
         let kind_of = |z: usize| map.net.zones[z].kind as usize;

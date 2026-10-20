@@ -53,6 +53,25 @@ pub fn frontal(
     run(&ron, lattice, mesh, frame_ticks)
 }
 
+/// `car` stands parked and a sedan drives into its rear (full overlap) at `kmh`, in `mode`.
+pub fn rear_ended(
+    car: &str,
+    lattice: &LatticeDef,
+    mesh: &CarMesh,
+    kmh: f32,
+    mode: &str,
+    frame_ticks: u64,
+) -> Crash {
+    let v = kmh / 3.6;
+    let ron = format!(
+        "(name: \"crumple_rear\", seed: 7, mode: {mode}, assists: ai, panels: true,
+          entities: [(id: \"car\", car: \"{car}\"),
+                     (id: \"striker\", car: \"debug_sedan\", pos: (0.0, -12.0, 0.0), speed_mps: {v}, driver: cruise(target_mps: {v}, until_s: 0.9))],
+          duration_s: 2.0, hash_every: 240)"
+    );
+    run(&ron, lattice, mesh, frame_ticks)
+}
+
 /// Run scenario `ron` (RON text) and collect the first entity's [`Crash`].
 pub fn run(ron: &str, lattice: &LatticeDef, mesh: &CarMesh, frame_ticks: u64) -> Crash {
     let sc = simcli::Scenario::from_ron("crumple.ron", ron).unwrap();

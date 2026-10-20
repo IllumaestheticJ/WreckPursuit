@@ -44,8 +44,8 @@ node tools/assets/crumple_shots.mjs after            # hood crumple shots at 8 m
 to 255. Region-aware: a hood vertex never follows a fender node. Regions with fewer than four
 nodes (glass, 2-door side strips) borrow from their fallback regions (roof/cabin, quarter).
 Light lenses bind to the 4 nearest nodes of their end of the car (bumper, hood/trunk, same-side
-fender/quarter, frame), so they crush and move with the bumper and hood. Hood and trunk lids and
-the front fenders also get a crumple binding (`bind_fold`, mesh format 3): fixed-row → leading-row
+fender/quarter, frame), so they crush and move with the bumper and hood. Hood and trunk lids, the
+front fenders and the rear quarters also get a crumple binding (`bind_fold`, mesh format 3): fixed-row → leading-row
 node chords, front-structure lead nodes per chord, a visual gain and per-vertex crease, lift and
 follow weights (see `data/panels/README.md`). `skin::deform` / `skin::deform_detail` and
 `crumple::render_part` are the Rust reference of the browser skinning (tests use them).

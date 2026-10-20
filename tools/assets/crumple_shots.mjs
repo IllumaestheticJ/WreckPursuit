@@ -2,10 +2,10 @@
 //   node tools/assets/crumple_shots.mjs [prefix=after] [outDir=docs/media/panels]
 // writes crumple_<prefix>_<scenario>_<8|30>m.png. The "before" set was shot from a worktree
 // of the commit before round 12b (old renderer + format-2 meshes) with prefix "before".
-// Runs the 50 km/h Arcade frontals (barrier, parked car) and a 70 km/h barrier hit, pauses
-// after the hit and shoots each from the front-left, high (over the barrier, onto the hood) at
-// 8 m and 30 m, cropped to the car. Prints the
-// hood / fender / bumper motion the renderer reports (`PanelBody.partMotion`) as JSON.
+// Runs the 50 km/h Arcade frontals (barrier, parked car), a 70 km/h barrier hit and a 50 km/h
+// rear-end, pauses after the hit and shoots each from the left, high (front-left for frontals,
+// rear-left for the rear-end) at 8 m and 30 m, cropped to the car. Prints the hood / fender /
+// bumper / trunk / quarter motion the renderer reports (`PanelBody.partMotion`) as JSON.
 // Needs the testbed's node_modules and wasm pkg (`just wasm`). Starts Vite itself.
 import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
@@ -46,8 +46,8 @@ await page.evaluate(() => {
 
 // Left of the car, a little ahead and high (so the hood shows over the fender and the barrier
 // does not hide it), at `d` metres.
-const viewAt = (d) => {
-  const v = [-0.72, 0.28, 0.64];
+const viewAt = (d, rear) => {
+  const v = [-0.72, rear ? -0.28 : 0.28, 0.64];
   const l = Math.hypot(...v);
   return v.map((x) => (x / l) * d);
 };
@@ -56,7 +56,11 @@ for (const [name, file, tS, speed] of [
   ["frontal_50_barrier", "panels/frontal_50_barrier_arcade.ron", 2.2, 0],
   ["frontal_50_car", "panels/frontal_50_car_arcade.ron", 2.2, 0],
   ["frontal_70_barrier", "panels/frontal_50_barrier_arcade.ron", 2.0, 70],
+  ["rear_50_car", "panels/rear_50_car_arcade.ron", 2.2, 0],
 ]) {
+  // ONLY=rear_50_car (comma list) shoots a subset.
+  if (process.env.ONLY && !process.env.ONLY.split(",").includes(name)) continue;
+  const rear = name.startsWith("rear");
   await page.evaluate(([f, s]) => window.__wp.runScenario(f, s), [file, speed]);
   await page.waitForFunction(() => [...window.__wp.app.views.values()].every((v) => v.panels.ready), null, { timeout: 20000 });
   await page.evaluate(() => window.__wp.setCamera("orbit", [-2, -7, 3]));
@@ -66,10 +70,10 @@ for (const [name, file, tS, speed] of [
   results[name] = await page.evaluate(() => {
     const v = [...window.__wp.app.views.values()][0];
     const m = (n) => v.panels.partMotion?.(n) ?? null;
-    return { hood: m("hood"), fender_fl: m("fender_fl"), fender_fr: m("fender_fr"), bumper_front: m("bumper_front"), states: Array.from(v.panels.states) };
+    return { hood: m("hood"), fender_fl: m("fender_fl"), fender_fr: m("fender_fr"), bumper_front: m("bumper_front"), trunk: m("trunk"), quarter_rl: m("quarter_rl"), quarter_rr: m("quarter_rr"), states: Array.from(v.panels.states) };
   });
   for (const d of [8, 30]) {
-    await page.evaluate((o) => window.__wp.setCamera("orbit", o), viewAt(d));
+    await page.evaluate((o) => window.__wp.setCamera("orbit", o), viewAt(d, rear));
     await sleep(600);
     // Crop to the middle of the frame (the car), away from the HUD panels.
     await page.screenshot({ path: join(out, `crumple_${prefix}_${name}_${d}m.png`), clip: { x: 340, y: 150, width: 600, height: 420 } });

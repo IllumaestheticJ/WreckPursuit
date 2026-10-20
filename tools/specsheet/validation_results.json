@@ -10,12 +10,14 @@
       "rear 40 km/h": "PASS: crush 0.41 m, cabin 0.00 m, health 0.59",
       "side (T-bone) 40 km/h": "PASS: crush 0.20 m, cabin 0.19 m, health 0.74"
     },
-    "brake_100_0_m": 43.267014,
-    "skidpad_g": 0.6571164,
-    "t0100_s": 10.854167,
-    "understeer_deg_per_g": 0.6722703,
+    "brake_100_0_m": 43.505497,
+    "qm_kmh": 133.3,
+    "qm_s": 17.68,
+    "skidpad_g": 0.6729518,
+    "t0100_s": 10.8625,
+    "understeer_deg_per_g": 0.54309124,
     "vmax_converged": false,
-    "vmax_kmh": 200.9
+    "vmax_kmh": 201.6
   },
   "furrow_24": {
     "barrier": {
@@ -28,12 +30,14 @@
       "rear 40 km/h": "PASS: crush 0.62 m, cabin 0.00 m, health 0.59; failed Exhaust",
       "side (T-bone) 40 km/h": "PASS: crush 0.17 m, cabin 0.17 m, health 0.75"
     },
-    "brake_100_0_m": 41.823933,
-    "skidpad_g": 0.72860277,
-    "t0100_s": 10.775001,
-    "understeer_deg_per_g": 0.42913422,
+    "brake_100_0_m": 42.69389,
+    "qm_kmh": 124.5,
+    "qm_s": 18.05,
+    "skidpad_g": 0.74741656,
+    "t0100_s": 11.258334,
+    "understeer_deg_per_g": 0.34450057,
     "vmax_converged": true,
-    "vmax_kmh": 178.5
+    "vmax_kmh": 179.1
   },
   "hakone_gt": {
     "barrier": {
@@ -46,12 +50,14 @@
       "rear 40 km/h": "PASS: crush 0.49 m, cabin 0.12 m, health 0.53",
       "side (T-bone) 40 km/h": "PASS: crush 0.19 m, cabin 0.19 m, health 0.73; failed SuspensionFL, WheelFL, BrakeFL"
     },
-    "brake_100_0_m": 38.36603,
-    "skidpad_g": 0.9142047,
-    "t0100_s": 5.8625,
-    "understeer_deg_per_g": 0.27732748,
+    "brake_100_0_m": 38.884155,
+    "qm_kmh": 168.9,
+    "qm_s": 14.28,
+    "skidpad_g": 0.9295041,
+    "t0100_s": 6.004167,
+    "understeer_deg_per_g": 0.22183822,
     "vmax_converged": false,
-    "vmax_kmh": 281.8
+    "vmax_kmh": 281.5
   },
   "hauler_1500": {
     "barrier": {
@@ -64,12 +70,14 @@
       "rear 40 km/h": "PASS: crush 0.67 m, cabin 0.00 m, health 0.61; failed Exhaust",
       "side (T-bone) 40 km/h": "PASS: crush 0.16 m, cabin 0.15 m, health 0.74"
     },
-    "brake_100_0_m": 44.743614,
-    "skidpad_g": 0.63367903,
-    "t0100_s": 8.091667,
-    "understeer_deg_per_g": 1.484507,
+    "brake_100_0_m": 44.903812,
+    "qm_kmh": 146.5,
+    "qm_s": 16.24,
+    "skidpad_g": 0.6509853,
+    "t0100_s": 8.104167,
+    "understeer_deg_per_g": 1.1806188,
     "vmax_converged": true,
-    "vmax_kmh": 205.7
+    "vmax_kmh": 206.5
   },
   "ironside_440": {
     "barrier": {
@@ -82,10 +90,12 @@
       "rear 40 km/h": "PASS: crush 0.41 m, cabin 0.11 m, health 0.61; failed FuelTank, Exhaust, SuspensionRL, SuspensionRR",
       "side (T-bone) 40 km/h": "PASS: crush 0.19 m, cabin 0.19 m, health 0.75; failed SuspensionRL"
     },
-    "brake_100_0_m": 51.634598,
-    "skidpad_g": 0.6069998,
-    "t0100_s": 8.141667,
-    "understeer_deg_per_g": 1.7396102,
+    "brake_100_0_m": 52.973766,
+    "qm_kmh": 155.3,
+    "qm_s": 16.2,
+    "skidpad_g": 0.6386744,
+    "t0100_s": 8.175,
+    "understeer_deg_per_g": 1.1466925,
     "vmax_converged": true,
     "vmax_kmh": 210.5
   },
@@ -100,12 +110,14 @@
       "rear 40 km/h": "PASS: crush 0.46 m, cabin 0.00 m, health 0.53; failed Exhaust",
       "side (T-bone) 40 km/h": "PASS: crush 0.21 m, cabin 0.20 m, health 0.74; failed SuspensionFL, WheelFL, BrakeFL"
     },
-    "brake_100_0_m": 44.98339,
-    "skidpad_g": 0.71733314,
-    "t0100_s": 14.725,
-    "understeer_deg_per_g": 0.025128385,
+    "brake_100_0_m": 46.574543,
+    "qm_kmh": 111.7,
+    "qm_s": 20.32,
+    "skidpad_g": 0.6894493,
+    "t0100_s": 15.695834,
+    "understeer_deg_per_g": 0.087339275,
     "vmax_converged": true,
-    "vmax_kmh": 146.0
+    "vmax_kmh": 145.8
   },
   "kestrel_ts": {
     "barrier": {
@@ -118,10 +130,12 @@
       "rear 40 km/h": "PASS: crush 0.54 m, cabin 0.00 m, health 0.55",
       "side (T-bone) 40 km/h": "PASS: crush 0.21 m, cabin 0.21 m, health 0.73; failed SuspensionFL, WheelFL, BrakeFL"
     },
-    "brake_100_0_m": 38.111656,
-    "skidpad_g": 0.9300986,
-    "t0100_s": 7.095834,
-    "understeer_deg_per_g": 0.4706519,
+    "brake_100_0_m": 38.99476,
+    "qm_kmh": 156.4,
+    "qm_s": 15.36,
+    "skidpad_g": 0.93753475,
+    "t0100_s": 7.370834,
+    "understeer_deg_per_g": 0.37742049,
     "vmax_converged": false,
     "vmax_kmh": 247.8
   },
@@ -136,12 +150,14 @@
       "rear 40 km/h": "PASS: crush 0.51 m, cabin 0.00 m, health 0.57",
       "side (T-bone) 40 km/h": "PASS: crush 0.19 m, cabin 0.19 m, health 0.73; failed SuspensionFL, WheelFL, BrakeFL"
     },
-    "brake_100_0_m": 36.500843,
-    "skidpad_g": 0.93111604,
-    "t0100_s": 5.441667,
-    "understeer_deg_per_g": 0.3639625,
+    "brake_100_0_m": 37.063038,
+    "qm_kmh": 166.2,
+    "qm_s": 13.78,
+    "skidpad_g": 0.94328904,
+    "t0100_s": 5.579167,
+    "understeer_deg_per_g": 0.3475442,
     "vmax_converged": false,
-    "vmax_kmh": 259.5
+    "vmax_kmh": 259.3
   },
   "lucciola_350": {
     "barrier": {
@@ -154,10 +170,12 @@
       "rear 40 km/h": "PASS: crush 0.65 m, cabin 0.01 m, health 0.47; failed Engine, Gearbox, Exhaust",
       "side (T-bone) 40 km/h": "PASS: crush 0.21 m, cabin 0.21 m, health 0.70; failed FuelTank, SuspensionFL, WheelFL, BrakeFL"
     },
-    "brake_100_0_m": 35.629246,
-    "skidpad_g": 0.97841954,
-    "t0100_s": 4.554167,
-    "understeer_deg_per_g": 0.15382956,
+    "brake_100_0_m": 36.224327,
+    "qm_kmh": 182.4,
+    "qm_s": 12.9,
+    "skidpad_g": 0.98854834,
+    "t0100_s": 4.6875005,
+    "understeer_deg_per_g": 0.15704434,
     "vmax_converged": true,
     "vmax_kmh": 290.5
   },
@@ -172,12 +190,14 @@
       "rear 40 km/h": "PASS: crush 0.44 m, cabin 0.13 m, health 0.53; failed Exhaust",
       "side (T-bone) 40 km/h": "PASS: crush 0.20 m, cabin 0.19 m, health 0.73; failed SuspensionFL, WheelFL, BrakeFL"
     },
-    "brake_100_0_m": 38.376602,
-    "skidpad_g": 0.8774307,
-    "t0100_s": 5.8375,
-    "understeer_deg_per_g": 0.36426985,
+    "brake_100_0_m": 38.86852,
+    "qm_kmh": 176.1,
+    "qm_s": 14.04,
+    "skidpad_g": 0.89523494,
+    "t0100_s": 6.179167,
+    "understeer_deg_per_g": 0.27091664,
     "vmax_converged": false,
-    "vmax_kmh": 268.5
+    "vmax_kmh": 268.4
   },
   "sentinel_bastion": {
     "barrier": {
@@ -190,10 +210,12 @@
       "rear 40 km/h": "PASS: crush 0.40 m, cabin 0.10 m, health 0.61",
       "side (T-bone) 40 km/h": "PASS: crush 0.19 m, cabin 0.18 m, health 0.73; failed SuspensionFL, WheelFL, BrakeFL"
     },
-    "brake_100_0_m": 42.708393,
-    "skidpad_g": 0.7174228,
-    "t0100_s": 7.966667,
-    "understeer_deg_per_g": 0.46238545,
+    "brake_100_0_m": 43.45048,
+    "qm_kmh": 143.9,
+    "qm_s": 16.04,
+    "skidpad_g": 0.7477636,
+    "t0100_s": 7.970834,
+    "understeer_deg_per_g": 0.32806373,
     "vmax_converged": true,
     "vmax_kmh": 214.5
   },
@@ -208,12 +230,14 @@
       "rear 40 km/h": "PASS: crush 0.45 m, cabin 0.00 m, health 0.60",
       "side (T-bone) 40 km/h": "PASS: crush 0.16 m, cabin 0.16 m, health 0.78; failed SuspensionFL, BrakeFL"
     },
-    "brake_100_0_m": 40.008476,
-    "skidpad_g": 0.85132474,
-    "t0100_s": 6.3833337,
-    "understeer_deg_per_g": 0.37091193,
+    "brake_100_0_m": 40.240917,
+    "qm_kmh": 163.9,
+    "qm_s": 14.69,
+    "skidpad_g": 0.86023337,
+    "t0100_s": 6.4000006,
+    "understeer_deg_per_g": 0.29898158,
     "vmax_converged": false,
-    "vmax_kmh": 260.2
+    "vmax_kmh": 260.3
   },
   "sentinel_wolfhound": {
     "barrier": {
@@ -226,10 +250,12 @@
       "rear 40 km/h": "PASS: crush 0.49 m, cabin 0.01 m, health 0.63; failed Exhaust",
       "side (T-bone) 40 km/h": "PASS: crush 0.18 m, cabin 0.17 m, health 0.74; failed SuspensionFL, WheelFL, BrakeFL"
     },
-    "brake_100_0_m": 39.024406,
-    "skidpad_g": 0.85125065,
-    "t0100_s": 5.9,
-    "understeer_deg_per_g": 0.3416663,
+    "brake_100_0_m": 39.534554,
+    "qm_kmh": 164.2,
+    "qm_s": 14.21,
+    "skidpad_g": 0.8699877,
+    "t0100_s": 5.916667,
+    "understeer_deg_per_g": 0.2659516,
     "vmax_converged": true,
     "vmax_kmh": 244.2
   },
@@ -244,12 +270,14 @@
       "rear 40 km/h": "PASS: crush 0.50 m, cabin 0.12 m, health 0.55",
       "side (T-bone) 40 km/h": "PASS: crush 0.20 m, cabin 0.19 m, health 0.74; failed SuspensionFL, WheelFL, BrakeFL"
     },
-    "brake_100_0_m": 37.093594,
-    "skidpad_g": 0.9551032,
-    "t0100_s": 6.4208336,
-    "understeer_deg_per_g": 0.3183777,
+    "brake_100_0_m": 37.66143,
+    "qm_kmh": 159.9,
+    "qm_s": 14.81,
+    "skidpad_g": 0.9620236,
+    "t0100_s": 6.558334,
+    "understeer_deg_per_g": 0.3122537,
     "vmax_converged": true,
-    "vmax_kmh": 259.9
+    "vmax_kmh": 259.8
   },
   "sperber_32": {
     "barrier": {
@@ -262,12 +290,14 @@
       "rear 40 km/h": "PASS: crush 0.69 m, cabin 0.00 m, health 0.56; failed Exhaust",
       "side (T-bone) 40 km/h": "PASS: crush 0.21 m, cabin 0.21 m, health 0.73; failed SuspensionFL, WheelFL, BrakeFL"
     },
-    "brake_100_0_m": 37.114136,
-    "skidpad_g": 0.93525463,
-    "t0100_s": 6.0375004,
-    "understeer_deg_per_g": 0.24127467,
+    "brake_100_0_m": 37.61038,
+    "qm_kmh": 166.1,
+    "qm_s": 14.33,
+    "skidpad_g": 0.9486727,
+    "t0100_s": 6.3250003,
+    "understeer_deg_per_g": 0.19641775,
     "vmax_converged": false,
-    "vmax_kmh": 272.5
+    "vmax_kmh": 272.2
   },
   "tansy_13": {
     "barrier": {
@@ -280,12 +310,14 @@
       "rear 40 km/h": "PASS: crush 0.51 m, cabin 0.00 m, health 0.57",
       "side (T-bone) 40 km/h": "PASS: crush 0.20 m, cabin 0.20 m, health 0.73; failed SuspensionFL, WheelFL, BrakeFL"
     },
-    "brake_100_0_m": 38.931793,
-    "skidpad_g": 0.80263704,
-    "t0100_s": 13.295834,
-    "understeer_deg_per_g": 0.5128734,
+    "brake_100_0_m": 40.66144,
+    "qm_kmh": 120.0,
+    "qm_s": 19.28,
+    "skidpad_g": 0.8091069,
+    "t0100_s": 13.791667,
+    "understeer_deg_per_g": 0.38269806,
     "vmax_converged": true,
-    "vmax_kmh": 167.9
+    "vmax_kmh": 162.5
   },
   "vireo_xs": {
     "barrier": {
@@ -298,10 +330,12 @@
       "rear 40 km/h": "PASS: crush 0.49 m, cabin 0.00 m, health 0.59",
       "side (T-bone) 40 km/h": "PASS: crush 0.20 m, cabin 0.20 m, health 0.73; failed SuspensionFL, WheelFL, BrakeFL"
     },
-    "brake_100_0_m": 37.900986,
-    "skidpad_g": 0.86500317,
-    "t0100_s": 9.445834,
-    "understeer_deg_per_g": 0.36156267,
+    "brake_100_0_m": 38.54039,
+    "qm_kmh": 138.7,
+    "qm_s": 17.05,
+    "skidpad_g": 0.87033683,
+    "t0100_s": 9.779167,
+    "understeer_deg_per_g": 0.32597992,
     "vmax_converged": true,
     "vmax_kmh": 206.5
   }

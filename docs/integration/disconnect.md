@@ -16,6 +16,7 @@ Quitting is never the best escape:
 |---|---|---|
 | Server (`wp_net`) | wanted (level > 0) or in a pursuit, transport drops | The car stays in the world, AI-held: full brake to a stop, then a light pedal + handbrake (a full pedal at a standstill engages reverse in the automatic gearbox). Heat, wanted level, bounty and pursuit are **frozen** (`wp_police` hold). **Reconnect within 60 s** → same player, car, heat and pursuit, control resumes. **No reconnect** → the pursuit ends `Captured` (capturer = nearest unit assigned to the racer, or none) and the bust is settled on the account like any capture (fine, bail, rep loss, car impounded / seized by mode), then the player and car are removed. |
 | Server | wanted, sends `Bye` (clean quit) | Captured and settled immediately (no grace: the player chose to leave). |
+| Server | wanted, asks for another role (cop, captain, spectator) | **Refused** (owner decision, 2026-10-20): the player stays a racer in the same car and gets the notice `WANTED_ROLE_SWITCH_REFUSED` ("you are wanted: lose the police or get caught before switching role"). Switching would drop the racer car, i.e. an escape. Only the player's own request is blocked; reassignments the role manager makes by itself are unchanged. |
 | Server | not wanted, transport drops | Unchanged: 30 s reconnect window (`ServerConfig::reconnect_window_ticks`), no penalty. |
 | Server | any racer busted normally while connected | **New:** the bust is settled on the server account too (it used to be forwarded to clients only), so multiplayer careers reflect busts. |
 | Browser career | in a pursuit, tab closed / reloaded | The in-run autosave (every 20 s, after each settlement, and on `pagehide`) carries a `run_in_pursuit` marker. The next load settles it as a bust (fine, impound, the run closes as a captured night) and the garage opens with a "Busted: the game was closed during a pursuit…" message. |
@@ -34,7 +35,7 @@ still be wrecked by contact; a total loss while held is a normal `CapturedTotalL
 
 ### `wp_net`
 - `server::WANTED_DISCONNECT_GRACE_TICKS` (60 s) and `ServerConfig::wanted_grace_ticks`.
-- `ServerStats::{abandoned_captures, busts_settled}`.
+- `ServerStats::{abandoned_captures, busts_settled, role_switches_refused}`; `server::WANTED_ROLE_SWITCH_REFUSED` (the notice text).
 - `NetSim` (all with defaults, so other sims compile unchanged):
   `wanted_or_pursued(id) -> bool`, `hold_racer(id, held)`,
   `capture_abandoned(id) -> Option<(WantedLevel, Option<UnitId>)>`,
@@ -108,9 +109,9 @@ All of this branch is outside a lead-owned crate; listed for the owners:
 - A normal multiplayer bust settles the ledger (car impounded on the account) but the server
   does not yet act on it physically: the racer keeps driving the same car. What a bust does to
   a live player (respawn, spectate, garage) is F's / the design's call.
-- Switching role (racer → cop / spectator) while wanted still drops the racer car without a
-  capture; the role manager can also reassign a player itself, so this needs a design decision
-  (proposed: refuse a voluntary switch away from racer while wanted).
+- A role switch the role manager makes by itself (not requested by the player) still drops a
+  wanted racer's car without a capture; today no such path moves a seated racer, but a new one
+  should check `wanted_racer_seat` first.
 - `kick` never counts as a capture (an admin action, not the player's choice).
 - The browser marker is only as fresh as the last save: `pagehide` normally fires on a tab
   close or reload; if the browser is killed without it, the last autosave (≤ 20 s old) decides.

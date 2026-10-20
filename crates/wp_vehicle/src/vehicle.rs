@@ -50,6 +50,10 @@ pub const HANDBRAKE_ON: f32 = 0.1;
 /// Above this forward speed (m/s) a handbrake declutch keeps the selected gear (no automatic
 /// shifts); below it the automatic box selects gears as usual.
 pub const HB_KEEP_GEAR_MPS: f32 = 1.0;
+/// The automatic clutch opens during a shift, off the throttle, when the driven wheels turn
+/// the clutch slower than this fraction of idle (the same threshold as
+/// `drivetrain::auto_clutch_update`'s "rolling").
+const AUTO_CLUTCH_OPEN_FRAC: f32 = 1.2;
 /// Manual clutch: the engine stalls below this fraction of its idle speed (row 59).
 pub const STALL_FRAC: f32 = 0.5;
 /// Manual clutch: pressing the pedal at least this far re-cranks a stalled engine.
@@ -956,6 +960,19 @@ impl Vehicle {
         let driven_corner = (0..4).find(|i| base_split[*i] > 0.0).unwrap_or(0);
         let ratio_now = self.gearbox.total_ratio(&self.def.drivetrain);
         self.auto_clutch = assists.auto_clutch;
+        // Clutch-input speed the automatic clutch judges "rolling" by, rpm.
+        let rolling_rpm = if hb_was_held {
+            // Just after a handbrake declutch the driven wheels may still be stopped (locked
+            // rears): re-engage only once they have spun back up, so the engine is not dragged
+            // below idle.
+            (ratio_now * axle_omega).abs() * RPM_PER_RADPS
+        } else {
+            // The slower of ground speed and the driven wheels: wheelspin does not count, and
+            // driven wheels slowed under the car (scrubbed in a big slide, braked) open the
+            // clutch before they drag the engine below idle.
+            let ground = (ratio_now * v_fwd / self.corners[driven_corner].radius).abs();
+            ground.min((ratio_now * axle_omega).abs()) * RPM_PER_RADPS
+        };
         self.clutch = if self.converter.is_some() {
             // Torque-converter automatic: the converter replaces the launch clutch; the clutch
             // value is the lock-up clutch's availability. Shifts happen under power (the
@@ -966,22 +983,25 @@ impl Vehicle {
             // rev-matched in `substep`) and re-engages already in sync.
             let phase = self.gearbox.shift_engagement();
             if assists.auto_clutch {
-                phase
+                // Anti-stall during a shift too: off the throttle with the driven wheels too
+                // slow to keep the engine at idle (a coasting downshift while they are
+                // scrubbed down in a slide), the clutch opens at once instead of following
+                // the shift's release.
+                let stalling = thr_in <= 0.02
+                    && ratio_now != 0.0
+                    && rolling_rpm < AUTO_CLUTCH_OPEN_FRAC * self.def.engine.idle_rpm;
+                if stalling {
+                    0.0
+                } else {
+                    phase
+                }
             } else {
                 phase.min(1.0 - input.clutch.clamp(0.0, 1.0))
             }
         } else if assists.auto_clutch {
             auto_clutch_update(
                 self.clutch,
-                if hb_was_held {
-                    // Just after a handbrake declutch the driven wheels may still be stopped
-                    // (locked rears): re-engage only once they have spun back up, so the
-                    // engine is not dragged below idle.
-                    (ratio_now * axle_omega).abs() * RPM_PER_RADPS
-                } else {
-                    // Judge "rolling" from ground speed so wheelspin does not count.
-                    (ratio_now * v_fwd / self.corners[driven_corner].radius).abs() * RPM_PER_RADPS
-                },
+                rolling_rpm,
                 self.engine.rpm(),
                 self.def.engine.idle_rpm,
                 self.def.engine.redline_rpm,
