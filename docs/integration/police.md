@@ -515,6 +515,37 @@ doc differs). fmt / clippy clean, `wp_police` tests pass, 85 of 86 scenarios pas
 police, tunnel); none of them is moved by this branch, so none is re-blessed here — they need a
 bless on `lead/round12`.
 
+*Lead bug (r13-test-fixes §4): a responder's turn-round loop stalled the grid highway sprint.*
+In `wp_race` `grid_highway_sprint` and `wp_wasm` `short_sprint_with_ai_…` (seed 7) unit 7 was
+answering a reckless-driving call and following the reported racer at the finish junction. It
+turned round toward him for about 80 s (U-turn, back out, back out, …) with its siren on, and the
+civilians ahead of the racers stopped for the siren, so the race never ended. Fix:
+- Turn-round tries (U-turn, reverse swing, backing out from a stopped racer) are counted per spot
+  (`stuck::MAX_TURNS` 4 within 20 m). The 4th holds turning for 30 s (`TURN_HOLD_S`). A unit on a
+  call hands it back (Idle, siren off) and then, like any unit that gave up, despawns out of sight
+  (`PoliceStats::turn_loops`). A unit that gave up is no longer `available()` for new calls.
+- A responder following the reported racer in sight keeps its siren quiet (`Unit::quiet`). Its
+  driving doesn't change (a first version also dropped the lights-and-siren driving, and in
+  `golden_city_chase` the follower lost the racer and no pursuit started).
+
+| seed 7, `grid_highway_sprint` | winner | finishers | race over |
+|---|---|---|---|
+| before (lead/round12 1b53f4e4) | — (never judged; 125.9 s on the helper's run) | 3–4 | never |
+| after | 62.0 s | 4 of 4 (62.0 / 62.6 / 99.9 / 109.2 s) | yes |
+| police presence 0 (same tip) | 59.5 s | 4 of 4 | yes |
+
+Both tests still fail their 15–60 s winner check, by about 2 s. The race is close to that limit even
+without police (59.5 s), and police on the road cost a little time. P3 and P4 are held about 30 s
+longer: unit 7, on another call with the siren on, turns in the finish junction from 72 to 88 s,
+and after it has gone two civilians stay stopped at the stop line until about 100 s with no police
+near (the traffic junction deadlock the helper sent to D). Other seeds, winner with / without
+police: 3: 56.7 / 52.9 s, 11: 59.5 / 51.3 s, 23: 48.0 / 64.4 s; seed 19 never ends either way (a
+captured racer parks in the lane, the helper's N(1) / E pinned-capture item). Whether to widen the
+winner window or keep police off race routes is for L and the lead. Scenarios: 85 of 86 pass (the
+known `city_siren_traffic_no_siren` fails on the lead tip too); the only golden moved is
+`golden_city_chase` (+ replay, `[bless]`); `damage_arcade_*` and `city_siren_traffic_no_siren` fail
+on the lead tip with the same hashes.
+
 *Lead requests received during the gate, not started (round 12c addenda).* Rows 75 (upside-down
 spawn / safe spawns), 78 (un-wrecked units reset themselves), 80 (a witnessed violation starts the
 pursuit; blatant at +20 km/h within 90 m), 84 (search reinforcements and sweep), 86 (no active unit
