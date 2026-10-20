@@ -1256,7 +1256,7 @@ impl PoliceSystem {
         if let stuck::Phase::Swing { until, steer } = u.unstick.phase {
             if facing < stuck::SWING_DONE_COS && now < until && !disabled {
                 // In reverse the pedals swap: brake drives backwards, throttle brakes.
-                let (throttle, brake) = reverse_pedals(v, 1.0);
+                let (throttle, brake) = reverse_pedals(v, 1.0, SWING_REVERSE_MAX_MPS);
                 return Some(VehicleInput {
                     steer,
                     throttle,
@@ -1363,7 +1363,7 @@ impl PoliceSystem {
             if graph::dist(pos, from) < dist_m && now < until && !disabled {
                 // Brake held at a standstill engages reverse; in reverse the pedals swap, so
                 // the brake pedal drives backwards.
-                let (throttle, brake) = reverse_pedals(v, 0.6);
+                let (throttle, brake) = reverse_pedals(v, 0.6, REVERSE_MAX_MPS);
                 return Some(VehicleInput {
                     steer,
                     throttle,
@@ -1633,15 +1633,19 @@ const PUSH_SIDE_M: f32 = 0.8;
 /// magnitude, so settling and creeping at a standstill behave as before), m/s.
 const BACKWARDS_MPS: f32 = 1.0;
 
-/// Fastest a unit backs up in a manoeuvre (three-point turn, backing out), m/s.
+/// Fastest a unit backs out of a jam (un-sticking), m/s.
 const REVERSE_MAX_MPS: f32 = 3.0;
 
+/// Fastest a unit reverses in a three-point turn (slower and the turn doesn't come round in
+/// its time), m/s.
+const SWING_REVERSE_MAX_MPS: f32 = 5.0;
+
 /// Pedals for backing up with `pedal` on the brake (which drives backwards in reverse), easing
-/// off and braking (throttle, in reverse) past [`REVERSE_MAX_MPS`]. `v` is signed.
-fn reverse_pedals(v: f32, pedal: f32) -> (f32, f32) {
-    if v < -REVERSE_MAX_MPS {
+/// off and braking (throttle, in reverse) past `max_mps`. `v` is negative going backwards.
+fn reverse_pedals(v: f32, pedal: f32, max_mps: f32) -> (f32, f32) {
+    if v < -max_mps {
         (0.5, 0.0)
-    } else if v < -0.8 * REVERSE_MAX_MPS {
+    } else if v < -0.8 * max_mps {
         (0.0, 0.0)
     } else {
         (0.0, pedal)
