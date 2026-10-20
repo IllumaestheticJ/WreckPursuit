@@ -34,6 +34,9 @@ export interface WheelInfo {
   width_m: number;
   steerable: boolean;
   travel_m: number;
+  /** Strut compression at rest, m (the wheel centre sits at position_m there). Optional for
+   * stand-in models (props); fall back to half the travel. */
+  static_compression_m?: number;
   tire_id: string;
 }
 

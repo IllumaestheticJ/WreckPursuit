@@ -42,6 +42,7 @@
 pub mod aero;
 pub mod assists;
 pub mod body;
+pub mod brake_dive;
 pub mod brakes;
 pub mod diff;
 pub mod drift;

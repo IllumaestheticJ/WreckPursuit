@@ -570,7 +570,21 @@ struct WheelInfo {
     width_m: f32,
     steerable: bool,
     travel_m: f32,
+    /// Strut compression at rest (the car data's hub position is the wheel centre there), m:
+    /// the renderer draws the wheel at `position_m.z + compression − static_compression_m`.
+    static_compression_m: f32,
     tire_id: String,
+}
+
+/// Static strut compression of wheel `i` at the car's rest load (as `wp_vehicle` computes it).
+fn static_compression_of(d: &wp_contracts::VehicleDef, i: usize) -> f32 {
+    let axle_frac = if i < 2 {
+        d.front_weight_frac
+    } else {
+        1.0 - d.front_weight_frac
+    };
+    let load = d.mass_kg * wp_contracts::GRAVITY_MPS2 * axle_frac * 0.5;
+    wp_vehicle::suspension::static_compression(&d.suspension[i], load)
 }
 
 #[derive(Serialize)]
@@ -619,12 +633,14 @@ pub fn car_model_info(car_id: &str) -> Result<String, JsValue> {
             .wheels
             .iter()
             .zip(d.suspension.iter())
-            .map(|(w, su)| WheelInfo {
+            .enumerate()
+            .map(|(i, (w, su))| WheelInfo {
                 position_m: w.position_m,
                 radius_m: w.radius_m,
                 width_m: w.width_m,
                 steerable: w.steerable,
                 travel_m: su.travel_m,
+                static_compression_m: static_compression_of(d, i),
                 tire_id: w.tire_id.clone(),
             })
             .collect(),
@@ -671,12 +687,14 @@ pub fn vehicle_info(entity: u32) -> Result<String, JsValue> {
                 .wheels
                 .iter()
                 .zip(d.suspension.iter())
-                .map(|(w, su)| WheelInfo {
+                .enumerate()
+                .map(|(i, (w, su))| WheelInfo {
                     position_m: w.position_m,
                     radius_m: w.radius_m,
                     width_m: w.width_m,
                     steerable: w.steerable,
                     travel_m: su.travel_m,
+                    static_compression_m: static_compression_of(d, i),
                     tire_id: w.tire_id.clone(),
                 })
                 .collect(),

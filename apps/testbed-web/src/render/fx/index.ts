@@ -11,7 +11,7 @@
 import * as THREE from "three";
 import type { FxLevel } from "../quality";
 import type { VehicleView } from "../../vehicle_view";
-import { S, STATE_STRIDE, SW } from "../../wasm/layout";
+import { S, STATE_STRIDE, SW, wheelCentreZ } from "../../wasm/layout";
 import { BitArgs, Bits, chipGeometry, shardGeometry } from "./bits";
 import { FxRng, P, STRIDE } from "./pool";
 import { SkidArgs, Skids, TRACK } from "./skids";
@@ -306,7 +306,7 @@ export class CrashFx {
           c.tracks[t] = 0;
           continue;
         }
-        const lz = wi.position_m[2] + (cur[wb + SW.compression] - wi.travel_m * 0.5) - wi.radius_m;
+        const lz = wheelCentreZ(wi, cur[wb + SW.compression]) - wi.radius_m;
         const lx = wi.position_m[0];
         const ly = wi.position_m[1];
         const cx = pos.x + right.x * lx + fwd.x * ly + up.x * lz;
