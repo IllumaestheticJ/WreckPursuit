@@ -277,7 +277,8 @@ Police / net consumers: `InformantTip`, `ShopReported`, `BountyCleared` change h
   garage.css}`; they use `ui/kit.tsx`, `ui/format.ts` and `ui/theme.css`, nothing else.
 
 
-Round 12b (minimal compile fixes for the new `OwnedCar::purchase_price` field):
+Round 12b (minimal fixes for the new `OwnedCar::purchase_price` field / save v2):
+- `apps/testbed-web/e2e/run.mjs` (C, my career block): the bust check expects save `version === 2`.
 - `crates/wp_wasm/src/run.rs` (lead): the demo's handed-out car gets `purchase_price: Some(0)`
   (it was free, so it resells for its mods only — no money from nothing).
 - `crates/wp_wasm/src/garage.rs` (C): the throwaway quote car gets `purchase_price: None`
