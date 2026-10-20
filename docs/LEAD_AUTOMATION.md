@@ -102,3 +102,6 @@ names when refreshing). Refresh the demo only from a green `main`, not from roun
   no-op, and the preview went out without its code (parked cars). Always `git fetch` right
   before merging, check `git merge-base --is-ancestor origin/<branch> HEAD` after, and verify the
   feature in the browser smoke (count it), not just "page loads".
+- Versions: every preview publish bumps `0.ROUND.PREVIEW` — add a row to docs/VERSIONS.md, set
+  the badge in the staged index.html (`<div id="wp-version">`), and state the version in the
+  owner report. A green main gets `0.ROUND.0`.
