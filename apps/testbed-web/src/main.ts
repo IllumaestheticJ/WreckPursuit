@@ -580,6 +580,8 @@ async function main(): Promise<void> {
   // chosen preset is remembered per viewer and replaces the per-box overrides; ticking a box
   // afterwards turns it into a custom setup (the preset is forgotten, the box is remembered).
   const PRESET_KEY = "wp.assistPreset";
+  /** Presets are defined for keyboard / gamepad / wheel; touch uses the gamepad ones. */
+  const presetSource = (src: InputSource): "Keyboard" | "Gamepad" | "Wheel" => (src === "Touch" ? "Gamepad" : src);
   const storedPreset = (): string | null => {
     const p = store.get(PRESET_KEY);
     return p && sim.assistPresets().includes(p) ? p : null;
@@ -616,7 +618,7 @@ async function main(): Promise<void> {
   };
   const choosePreset = (name: string) => {
     if (isReplay()) return;
-    const p = sim.assistPresetNamed(name, app.source);
+    const p = sim.assistPresetNamed(name, presetSource(app.source));
     ($("mode") as HTMLSelectElement).value = p.mode;
     sim.setDamageMode(p.mode);
     sim.setAssists(app.player, p.assists);
@@ -625,7 +627,7 @@ async function main(): Promise<void> {
     syncAssistBoxes();
   };
   const syncPresetButtons = () => {
-    const active = isReplay() ? "" : sim.assistPresetOf(app.player, app.source);
+    const active = isReplay() ? "" : sim.assistPresetOf(app.player, presetSource(app.source));
     document.querySelectorAll<HTMLButtonElement>("button.preset").forEach((b) => {
       b.setAttribute("aria-pressed", String(b.dataset.p === active));
     });
@@ -1044,7 +1046,7 @@ async function main(): Promise<void> {
 
   // A remembered preset also picks the damage mode new sessions start in.
   const remembered = storedPreset();
-  if (remembered) ($("mode") as HTMLSelectElement).value = sim.assistPresetNamed(remembered, app.source).mode;
+  if (remembered) ($("mode") as HTMLSelectElement).value = sim.assistPresetNamed(remembered, presetSource(app.source)).mode;
 
   const camParam = params.get("cam") as CameraMode | null;
   if (camParam && CAMERA_MODES.includes(camParam)) rig.mode = camParam;
