@@ -138,12 +138,17 @@ const FIELDS: Record<string, { label: string; min: number; max: number; step: nu
   onset_full_rad: { label: "onset full (rad)", min: 0.02, max: 0.2, step: 0.005, hint: "rear-axle slip where the onset is full" },
   onset_rate_rps: { label: "onset rate (rad/s)", min: 0.05, max: 1.5, step: 0.05, hint: "rear slip growth that starts the onset on its own" },
   catch_lock_s: { label: "slew: full lock (s @60%)", min: 0.04, max: 0.4, step: 0.01, hint: "time for full lock toward the countersteer side at 60 %" },
-  hold_gain: { label: "hold gain", min: 0, max: 3, step: 0.05, hint: "how hard Hold steers to keep the captured slide angle" },
-  hold_damp: { label: "hold damping", min: 0, max: 0.4, step: 0.01, hint: "how hard Hold resists a fast-changing slide angle (s)" },
+  hold_gain: { label: "hold gain", min: 0, max: 2, step: 0.05, hint: "Hold: front slip given up per 5.7° past the held angle (× peak slip)" },
+  hold_damp: { label: "hold damping (s)", min: 0, max: 0.6, step: 0.01, hint: "Hold: front slip given up per rad/s the slide angle grows" },
+  hold_base: { label: "hold into-turn", min: 0, max: 2, step: 0.05, hint: "Hold: front slip angle into the turn at the held angle (× peak slip)" },
+  hold_entry_deg: { label: "hold entry (°)", min: 0, max: 40, step: 1, hint: "turning into a drift: the held angle starts at least here" },
   throttle_shape: { label: "throttle shaping", min: 0, max: 1, step: 0.05, hint: "0 = raw key, 1 = full shaping toward holding the angle" },
-  envelope_deg: { label: "envelope (° @60%)", min: 10, max: 70, step: 1, hint: "slide angle the assist helps up to at 60 % (100 %: +10°)" },
-  straighten_gain: { label: "straighten extra", min: 0, max: 2, step: 0.05, hint: "extra countersteer past the travel while a slide grows (× peak slip)" },
-  lift_soften: { label: "lift soften", min: 0, max: 1, step: 0.05, hint: "how much an abrupt lift is softened (0 = raw)" },
+  throttle_hold: { label: "throttle at hold", min: 0.2, max: 1, step: 0.05, hint: "shaped throttle of a held key at the held angle" },
+  throttle_gain: { label: "throttle gain", min: 0, max: 8, step: 0.25, hint: "shaped throttle change per rad short of / past the held angle" },
+  envelope_deg: { label: "envelope (° @60%)", min: 10, max: 70, step: 1, hint: "slide angle the assist helps up to at 60 % (±25° per 100 % of slider)" },
+  straighten_gain: { label: "straighten extra", min: 0, max: 3, step: 0.05, hint: "released keys: extra countersteer past the travel while a slide grows (× peak slip)" },
+  catch_extra: { label: "catch extra lock", min: 0, max: 2, step: 0.05, hint: "counter key: extra lock past the travel (× peak slip)" },
+  lift_soften: { label: "lift soften", min: 0, max: 1, step: 0.05, hint: "how much an abrupt lift is softened (0 = raw, 1 = a full lift takes 0.5 s)" },
 };
 
 const MODES = ["off", "grip", "straighten", "hold", "catch", "exceeded"];
@@ -255,7 +260,7 @@ export class DriftLabPanel {
         input.checked = value;
         const val = document.createElement("span");
         input.onchange = () => this.save({ ...this.sim.driftTuning(), [key]: input.checked });
-        row(key.replace(/_/g, " "), "on / off", input, val);
+        row(key === "intent" ? "intent modes (step 3)" : key.replace(/_/g, " "), key === "intent" ? "off = step 1 only (fast countersteer, earlier onset)" : "on / off", input, val);
         continue;
       }
       if (typeof value !== "number") continue;
