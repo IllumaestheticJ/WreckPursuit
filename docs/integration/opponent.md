@@ -252,3 +252,45 @@ apps/simcli/scenarios/opponent` (4 PASS), `simcli goldens` (all ok) — green.
   `yielding = true` for > 110 s and blocked both lanes of an arterial; cross traffic inside the
   box also stopped. Suggest: yield only to sirens that are moving, or approaching, or closer
   than ~25 m; or time out after ~10 s once the siren is not getting closer.
+
+## Lead helper `lead/opponent-pace` (playtest row 99, 2026-10-20)
+Owner: "the AI in the AI races are quite dumb and slow". Measured and fixed in `wp_opponent`
+(details, before/after tables per race × skill: `docs/integration/opponent-pace.md`). No
+rubber-banding (pace still reads nothing about positions or the player); physics identical in
+both damage modes; deterministic (all new state in `BTreeMap`s / per-racer fields, polynomial
+trig).
+
+### Exposes (new)
+- `CarCapability::for_car(&LoadedCar)` + `capability_table` (generated: every car in
+  `data/cars`, fingerprinted; `WP_WRITE_CAPS=1 cargo test --release -p wp_opponent --test
+  capability_table`). **Use `for_car` in race glue**: `geometry_only` drove every car like a
+  generic 55 m/s / 0.85 g / 4 m/s² street car, which was the single biggest pace loss.
+- `line::drive_accel` (the profile's full-throttle acceleration model).
+- `RaceConfig::finish_m`: judged finish along a point-to-point corridor with run-off.
+- `DriverParams::early_brake_s` (skill).
+
+### Changes outside my crates
+- `crates/wp_race`: `entrants.rs` (sets `finish_m`; doc), `live.rs` (`LiveRace::ai()`
+  accessor; `LiveEntrant` doc), tests: `race_picker.rs` / `race_police.rs` /
+  `race_vesper.rs` use `CarCapability::for_car` (the picker test mirrors the browser);
+  `race_picker.rs` failure messages list every racer's status / violations and
+  `WP_RACE_TRACE` prints each AI car's speed limit, tactic and blocker; `race_police.rs`
+  `WP_RP_TRACE`; new `tests/opponent_pace.rs` (measurement sweep + pace lock-in).
+- `crates/wp_wasm/src/race.rs`: picker AI cars use `CarCapability::for_car` (one line).
+- `apps/simcli/scenarios/opponent/pace_*.ron` (10) + their goldens (`[bless]`).
+- `crates/wp_opponent/tests/race.rs`: `wanted_ai_racer_flees_police_through_the_city`
+  allows the other racers to flee for heat of their own (at race pace past the live patrols
+  they earn it), runs its full minute, and accepts a flight that ends early (caught, or at its
+  route's end) after ≥ 150 m.
+
+### Reports for other workstreams
+- **E (police)**: Hollins picker race, seed 16 (pre-merge physics): a unit `Respond`ing to an
+  incident (the leader's speeding) in `Shadow` stops across the hairpin road at (−662, 1013)
+  with its siren on for ~35 s; the three cars behind cannot pass (`NoRoom` either side) and
+  run out of the finish window. Gone after the round-12b merge, but the behaviour (a responding
+  unit parking across a two-lane road) can recur.
+- **D (traffic)**: Lantern Row checkpoint, seed 31, skill-0.5 field: three civilians (east-,
+  west- and southbound) stop at an unsignalised junction near (200, −150) by t≈56 s, before any
+  racer arrives, and wait on each other for the rest of the run (a 4-way stand-off). Grid
+  highway: two civilians driving side by side at 10–18 m/s over both lanes of the divided
+  highway form a rolling road block nobody can pass legally (≈30 s of every grid-sprint run).
