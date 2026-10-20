@@ -610,7 +610,7 @@ check(
   });
   await shot("career_garage_after_bust.png");
   check(
-    parked && busted && stored.version === 1 && stored.captures === 1 && stored.location && typeof stored.location === "object" && "Impound" in stored.location,
+    parked && busted && stored.version === 2 && stored.captures === 1 && stored.location && typeof stored.location === "object" && "Impound" in stored.location,
     `career: busted → garage, saved (v${stored.version}): captures ${stored.captures}, car ${JSON.stringify(stored.location)}`,
   );
 

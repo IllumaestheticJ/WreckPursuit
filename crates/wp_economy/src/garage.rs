@@ -119,11 +119,38 @@ impl Economy {
         money(spec.base_price as f32 * self.market.condition[&condition]).clamp(lo, hi)
     }
 
-    /// What the dealer pays for an owned car.
+    /// Body price the resale value starts from: what was paid for the car
+    /// ([`OwnedCar::purchase_price`]). Cars from old saves (no recorded price) use the lowest
+    /// price the player could have paid: the floor car's price for the floor model, else the
+    /// cheapest dealer condition.
+    pub fn resale_basis(&self, car: &OwnedCar) -> Money {
+        if let Some(paid) = car.purchase_price {
+            return paid.max(0);
+        }
+        let spec = CarSpec {
+            def_id: car.def_id.clone(),
+            class: car.class,
+            base_price: car.base_price,
+        };
+        let dealer = Condition::ALL
+            .iter()
+            .map(|c| self.market_price(&spec, *c))
+            .min()
+            .unwrap_or(0);
+        if car.def_id == self.market.floor_car.def_id {
+            dealer.min(self.market.floor_car.price)
+        } else {
+            dealer
+        }
+    }
+
+    /// What the dealer pays for an owned car: `dealer_buy_frac ×` the price paid for the body
+    /// ([`Economy::resale_basis`]) plus `mod_resale_frac ×` the installed mods' price, scaled
+    /// down by outstanding damage. Always below what the car cost (body + mods).
     pub fn sale_price(&self, car: &OwnedCar) -> Money {
         let mods_back =
             money(self.market.mod_resale_frac * self.catalog.price_of(&car.mods) as f32);
-        let body = money(self.market.dealer_buy_frac * car.base_price as f32);
+        let body = money(self.market.dealer_buy_frac * self.resale_basis(car) as f32);
         let pristine = body + mods_back;
         let ratio = self.current_value(car) as f32 / self.car_value(car).max(1) as f32;
         money(pristine as f32 * ratio.clamp(0.0, 1.0))
@@ -166,7 +193,7 @@ impl Economy {
                 },
                 None,
             )?;
-            let uid = tx.add_car(new_car(spec, condition));
+            let uid = tx.add_car(new_car(spec, condition, price));
             if let Some(ev) = tx.events.last_mut() {
                 ev.car = Some(uid);
             }
@@ -213,7 +240,7 @@ impl Economy {
             base_price: f.base_price,
         };
         transact(acct, |tx| {
-            let uid = tx.add_car(new_car(&spec, Condition::Worn));
+            let uid = tx.add_car(new_car(&spec, Condition::Worn, price));
             tx.acct.active_car = Some(uid);
             tx.spend(
                 price,
@@ -400,7 +427,7 @@ impl Economy {
     }
 }
 
-fn new_car(spec: &CarSpec, condition: Condition) -> OwnedCar {
+fn new_car(spec: &CarSpec, condition: Condition, paid: Money) -> OwnedCar {
     OwnedCar {
         uid: CarUid(0),
         def_id: spec.def_id.clone(),
@@ -413,5 +440,6 @@ fn new_car(spec: &CarSpec, condition: Condition) -> OwnedCar {
         },
         location: CarLocation::Garage,
         insurance: None,
+        purchase_price: Some(paid),
     }
 }

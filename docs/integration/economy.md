@@ -277,6 +277,13 @@ Police / net consumers: `InformantTip`, `ShopReported`, `BountyCleared` change h
   garage.css}`; they use `ui/kit.tsx`, `ui/format.ts` and `ui/theme.css`, nothing else.
 
 
+Round 12b (minimal fixes for the new `OwnedCar::purchase_price` field / save v2):
+- `apps/testbed-web/e2e/run.mjs` (C, my career block): the bust check expects save `version === 2`.
+- `crates/wp_wasm/src/run.rs` (lead): the demo's handed-out car gets `purchase_price: Some(0)`
+  (it was free, so it resells for its mods only — no money from nothing).
+- `crates/wp_wasm/src/garage.rs` (C): the throwaway quote car gets `purchase_price: None`
+  (only quoted, never sold).
+
 **By the lead in `wp_economy` (`lead/demo-endrun`, 2026-10-19):** `EconomySession::set_mode(mode)` (the testbed switches damage mode mid-run; `finish` and quotes use it). Additive, no behaviour change. The demo calls the session from `crates/wp_wasm/src/run.rs` with `RepairPolicy::QuoteOnly`, then `retrieve_from_impound` + `repair(RepairAll)` on "Repair & continue".
 
 Round 8 (minimal compile fixes for new fields, nothing else):
@@ -499,4 +506,39 @@ returns 0.7 → +17 % profit. The floor car is worse: price 1 500, base 3 000 �
    works" note next to the insurance buttons (basic: 50 % of the repair bill above $500, $X/day;
    full: 80 % above $250; nothing if the damage happened while wanted).
 4. Keep career saves loading (version bump + migration for old saves without the new field).
+
+### Round 12b response (economy, 2026-10-20)
+Base: `origin/lead/round12` merged into `ws/economy` (clean).
+1. **Resale from the price paid.** New `wp_economy::OwnedCar::purchase_price: Option<Money>`
+   (local field; `OwnedCar` lives in `wp_economy`, so no contract change) set by `buy_car`
+   (dealer price in the bought condition) and `issue_floor_car` (what was actually paid,
+   `min(1 500, cash)`). `sale_price = 0.7 × resale_basis + 0.4 × mods`, scaled by damage, where
+   `Economy::resale_basis` is the price paid (old-save cars: cheapest condition, floor price for
+   the floor model). Scrap salvage of the body is capped at `0.7 × resale_basis` too (a free
+   floor car could otherwise be scrapped for 960). Numbers: Worn 0.6 × base → sells 0.42 × base;
+   floor car 1 500 → 1 050 (was 2 100); a floor car given to a broke player for 300 → 210.
+2. **Tests:** `crates/wp_economy/tests/resale.rs` — three proptests (192 cases each: every
+   roster car × New/Used/Worn × random mod sets × Arcade/Sim): buy → sell / scrap < spent; buy →
+   (no / basic / full insurance) → random crash → repair at a legit or crooked shop → sell <
+   everything spent, and `insurance_covers < gross`, `player_pays > 0`; floor car for any cash
+   0–20 000 sells / scraps ≤ paid. Plus the owner's repro cases, v1-save valuation, and every
+   insurance tier paying < any bill (coverage < 1, deductible > 0). Damage while wanted stays
+   excluded (`garage_repair::insurance_pays_unless_damage_was_wanted`).
+3. **Garage screen:** Sell and Scrap now ask first — "Sell it to the dealer for $X? You paid $Y
+   for the car (mods return 40 %)." / "Scrap it for $X (bought for $Y)?" with Sell / Cancel
+   (`data-testid="career-confirm"`). The insurance panel has a one-line note built from the data
+   (`data-testid="insurance-note"`): "Basic: pays 50 % of the repair bill above $500, $X/night.
+   Full: pays 80 % of the repair bill above $250, $Y/night. Nothing for damage taken while
+   wanted." `CareerView.cars[].paid` added (= `resale_basis`).
+4. **Saves:** `PROFILE_VERSION` 1 → 2 with a real migration step (`step_1_to_2` adds
+   `purchase_price: null` to every car); unit test loads a v1 save, values its floor car ≤ 1 500
+   and re-saves as v2. The localStorage key (`wp.career.v1`) is unchanged — the JSON version
+   inside it carries the migration.
+
+Requests (outside my folders):
+- **UI mock (M):** `apps/ui-kit/src/data/economy.ts::salePrice` still ports the old rule
+  (`0.7 × basePrice`); the mock Market / Garage screens will show resale above the price paid
+  for used cars. Port: body = `0.7 × pricePaid` (and cap scrap body at the same).
+- **Testbed e2e (C / lead):** optional extra check in `e2e/run.mjs` career block: after buying
+  the beater, `view().cars[0].sale_price < fresh.cash - bought.cash`.
 

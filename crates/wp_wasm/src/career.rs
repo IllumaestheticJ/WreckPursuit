@@ -153,8 +153,11 @@ pub struct CarView {
     pub drivable: bool,
     /// Current value (pristine value minus outstanding repairs).
     pub value: Money,
-    /// What the dealer pays for it now.
+    /// What the dealer pays for it now (never more than was paid for it).
     pub sale_price: Money,
+    /// What the car body cost (`Economy::resale_basis`: price paid, mods excluded), shown next
+    /// to the sale price.
+    pub paid: Money,
     /// Salvage if scrapped.
     pub scrap_value: Money,
     /// Installed mods.
@@ -723,6 +726,7 @@ impl Career {
             drivable: c.is_usable(),
             value: self.econ.current_value(c),
             sale_price: self.econ.sale_price(c),
+            paid: self.econ.resale_basis(c),
             scrap_value: self.econ.scrap_value(c),
             mods,
             insurance: c.insurance.as_ref().map(|i| i.tier.clone()),

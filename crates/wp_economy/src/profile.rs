@@ -8,8 +8,10 @@
 //! (`wp_damage::FullDamageSnapshot` JSON in the browser), keyed by car uid.
 //!
 //! The JSON is versioned ([`PROFILE_FORMAT`], [`PROFILE_VERSION`]). [`CareerProfile::from_json`]
-//! migrates older versions step by step ([`migrate`]; no step exists yet because version 1 is
-//! the first) and refuses saves from a newer build. Fields added later must be
+//! migrates older versions step by step ([`migrate`]) and refuses saves from a newer build.
+//! Version 2 added [`crate::OwnedCar::purchase_price`] (resale is valued from the price paid);
+//! the 1 → 2 step marks every car of an old save as "price unknown", valued at the cheapest
+//! price the player could have paid. Fields added later must be
 //! `#[serde(default)]` so older saves of the same version still load.
 //!
 //! Carry-over rules (tables in `consequences.toml [career]`, [`Economy::carry_heat`]):
@@ -33,7 +35,7 @@ pub const PROFILE_FORMAT: &str = "wreckpursuit-career";
 
 /// Current profile version (bump it, and add a [`migrate`] step, when the shape changes in a
 /// way `#[serde(default)]` cannot absorb).
-pub const PROFILE_VERSION: u32 = 1;
+pub const PROFILE_VERSION: u32 = 2;
 
 /// What one run leaves for the next.
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
@@ -219,9 +221,9 @@ impl CareerProfile {
 
 /// Bring a save of any supported version up to [`PROFILE_VERSION`].
 ///
-/// Migration stub: version 1 is the first, so there is no step yet. When the shape changes,
-/// bump [`PROFILE_VERSION`] and add `n => step_n_to_n_plus_1(value)` below; each step edits
-/// the JSON and sets `version` to `n + 1`.
+/// Steps, oldest first; each edits the JSON and sets `version` to `n + 1`. When the shape
+/// changes again, bump [`PROFILE_VERSION`] and add the next step.
+/// - 1 → 2: every owned car gets `"purchase_price": null` (price paid unknown).
 pub fn migrate(mut value: serde_json::Value) -> Result<serde_json::Value, ProfileError> {
     let obj = value
         .as_object()
@@ -231,19 +233,38 @@ pub fn migrate(mut value: serde_json::Value) -> Result<serde_json::Value, Profil
             "missing \"format\": \"{PROFILE_FORMAT}\""
         )));
     }
-    let version =
+    let mut version =
         obj.get("version")
             .and_then(|v| v.as_u64())
             .ok_or_else(|| ProfileError::Invalid("missing \"version\"".into()))? as u32;
     if version > PROFILE_VERSION {
         return Err(ProfileError::TooNew { found: version });
     }
-    // Steps go here, oldest first, each one ending with `version = n + 1`:
-    // if version == 1 { value = step_1_to_2(value); version = 2; }
+    if version == 1 {
+        value = step_1_to_2(value)?;
+        version = 2;
+    }
     if version < PROFILE_VERSION {
         return Err(ProfileError::NoMigration { found: version });
     }
     value["version"] = serde_json::Value::from(version);
+    Ok(value)
+}
+
+/// 1 → 2: cars carry the price paid; old cars get `null` (see [`Economy::resale_basis`]).
+fn step_1_to_2(mut value: serde_json::Value) -> Result<serde_json::Value, ProfileError> {
+    let garage = value
+        .pointer_mut("/account/garage")
+        .and_then(|g| g.as_array_mut())
+        .ok_or_else(|| ProfileError::Invalid("missing \"account.garage\"".into()))?;
+    for car in garage.iter_mut() {
+        let car = car
+            .as_object_mut()
+            .ok_or_else(|| ProfileError::Invalid("a garage car is not an object".into()))?;
+        car.entry("purchase_price")
+            .or_insert(serde_json::Value::Null);
+    }
+    value["version"] = serde_json::Value::from(2);
     Ok(value)
 }
 
@@ -278,21 +299,42 @@ mod tests {
     }
 
     #[test]
+    fn version_1_saves_migrate_with_unknown_purchase_price() {
+        let e = econ();
+        let mut p = e.new_career(PlayerId(1), DamageMode::Arcade);
+        e.issue_floor_car(&mut p.account).unwrap();
+        let mut v: serde_json::Value = serde_json::from_str(&p.to_json()).unwrap();
+        v["version"] = 1.into();
+        v["account"]["garage"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("purchase_price");
+        let back = CareerProfile::from_json(&v.to_string()).unwrap();
+        assert_eq!(back.version, PROFILE_VERSION);
+        let car = &back.account.garage[0];
+        assert_eq!(car.purchase_price, None);
+        assert!(e.sale_price(car) <= e.market.floor_car.price);
+        // Written again, it is a version-2 save that keeps its (unknown) price.
+        let again = CareerProfile::from_json(&back.to_json()).unwrap();
+        assert_eq!(again, back);
+    }
+
+    #[test]
     fn versions_are_checked() {
         let e = econ();
         let p = e.new_career(PlayerId(1), DamageMode::Simulation);
         let mut v: serde_json::Value = serde_json::from_str(&p.to_json()).unwrap();
-        v["version"] = 2.into();
+        v["version"] = 3.into();
         assert_eq!(
             CareerProfile::from_json(&v.to_string()),
-            Err(ProfileError::TooNew { found: 2 })
+            Err(ProfileError::TooNew { found: 3 })
         );
         v["version"] = 0.into();
         assert_eq!(
             CareerProfile::from_json(&v.to_string()),
             Err(ProfileError::NoMigration { found: 0 })
         );
-        v["version"] = 1.into();
+        v["version"] = 2.into();
         v["format"] = "something-else".into();
         assert!(matches!(
             CareerProfile::from_json(&v.to_string()),

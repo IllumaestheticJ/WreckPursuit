@@ -94,6 +94,14 @@ Data: `data/economy/{prices,stakes,consequences,market}.toml`, `data/mods/*.json
   winnings pay the debt down. Pink slips are blocked too.
 - **Economy floor:** a player with no usable car can always get the junkyard beater for
   `min(price, cash)`. It never creates debt.
+- **Resale never beats what you paid** (round 12b): each `OwnedCar` records
+  `purchase_price` (the dealer price in the bought condition, or what the floor car cost; mods
+  excluded). The dealer pays `dealer_buy_frac (0.7) × purchase_price + mod_resale_frac (0.4) ×
+  mods`, scaled down by outstanding damage; scrap salvage of the body is capped at the same
+  `0.7 × purchase_price`. Cars from v1 saves (no price) use the cheapest price the player could
+  have paid (`Economy::resale_basis`: cheapest condition, or the floor price for the floor
+  model). Insurance pays `coverage < 1` of the bill above a deductible > 0, so it always pays
+  less than the repair.
 
 ### Repairs ("you pay for what you break")
 - `wp_damage` prices damage with the `PriceTable` from `Economy::price_table(class, value)`:
@@ -138,7 +146,7 @@ Data: `data/economy/{prices,stakes,consequences,market}.toml`, `data/mods/*.json
 - `CareerProfile` is the browser save: account, ledger tail (`career.ledger_keep` = 200 lines),
   carried heat, career counters and each car's lattice damage (opaque text from the damage
   system). JSON with `format: "wreckpursuit-career"` and `version`; `migrate` refuses newer
-  saves and is the place for future steps (none yet).
+  saves and steps older ones up (v1 → v2 adds `purchase_price: null` to every car).
 - Each finished run is one in-game night (`close_run` → `end_of_day`: premiums, pound storage,
   auctions); `next_night` lets a night pass without driving.
 - Heat: a capture or a wreck clears it; a run that ends free carries `heat × 0.5`, capped at
@@ -318,6 +326,11 @@ cargo test -p wp_economy --test career -- --nocapture   # print the tuning numbe
 - `tests/race_kinds.rs`: every contract `RaceKind` maps onto `wp_race`'s race type and stays
   within 15 % of `wp_race`'s relative purse; legality order; outrun recorded as touge.
 - `tests/roster_prices.rs`: feel targets on every roster car (table above).
+- `tests/resale.rs` (proptest): every roster car × condition × random mods × mode: buy → sell
+  or scrap at once returns less than was spent; buy → (insure) → crash → repair (legit or
+  crooked) → sell returns less than everything spent, and insurance pays less than the bill;
+  the floor car never sells or scraps above what was paid (any cash); v1-save cars use the
+  cheapest price; the owner's two repro cases.
 - `tests/career.rs`: the 20-night scenario + determinism + the roster sweep.
 
 ## Performance
