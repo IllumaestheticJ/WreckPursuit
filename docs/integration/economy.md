@@ -553,3 +553,8 @@ data file they read): `simcli` `goldens_match` (5 city scenarios: hashes diverge
 `wp_wasm` `race_tests::{short_sprint_with_ai_runs_to_results_and_pays_through_the_economy
 (player DNF FinishWindow), a_capture_mid_race_is_a_dnf_and_hands_off_to_the_end_of_run_panel
 (never captured)}`. For the lead / owners of those crates.
+**Confirmed on a clean checkout** of the pre-change base `7c5f760` (lead/round12 as merged,
+none of my round 12b commits): the same tests fail there — `simcli goldens_match` (20 scenarios
+diverge: city, golden chase/escape, panels, police sideswipe, race picks, weather),
+`wp_race race_picker::grid_highway_sprint`, `wp_sim sidewalk::vesper_v2_cars_drive_up_the_kerb_and_along_the_sidewalk`,
+and both `wp_wasm` race tests. They are not caused by the economy changes.
