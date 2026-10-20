@@ -91,49 +91,30 @@ fn brake_based_tc_lets_an_open_diff_pull_away_on_split_mu() {
 }
 
 #[test]
-fn clutch_lsd_cuts_inside_wheelspin_and_adds_controllable_oversteer_on_corner_exit() {
-    // Hairpin exit: steady 0.6 g on a 20 m circle, then full throttle for 2 s following the
-    // line, keyboard-level slide help with TCS off.
-    let help = AssistProfile {
-        countersteer_help: 0.6,
-        ..no_tcs()
-    };
+fn clutch_lsd_adds_controllable_oversteer_on_corner_exit() {
+    // Hairpin exit: steady 0.6 g on a 20 m circle, then 60 % throttle for 2 s following the
+    // line, TCS off. Until rows 57 / 72 this ran at full throttle with the keyboard slide gyro
+    // holding the car; the gyro is gone (no assist adds yaw torque any more) and a full-
+    // throttle TCS-off exit now spins with either diff, which is the driver's job. At part
+    // throttle the diff still shows: the clutch LSD adds power oversteer (measured +3° shiro,
+    // +8° rampart, +3° lucciola), stays controllable and costs little exit speed. Its traction
+    // gain is covered by `split_mu_open_spins_the_ice_wheel_lsd_drives_off`.
     for id in ["shiro_turbo", "rampart_50", "lucciola_350"] {
         let c = car(id);
-        let open = exit_on_circle_with(
-            &c,
-            with_axle(&c, true, AxleDiff::Open),
-            20.0,
-            0.6,
-            1.0,
-            2.0,
-            &help,
-        );
-        let lsd = exit_on_circle_with(
-            &c,
-            with_axle(&c, true, CLUTCH_15),
-            20.0,
-            0.6,
-            1.0,
-            2.0,
-            &help,
-        );
+        let run =
+            |d| exit_on_circle_with(&c, with_axle(&c, true, d), 20.0, 0.6, 0.6, 2.0, &no_tcs());
+        let open = run(AxleDiff::Open);
+        let lsd = run(CLUTCH_15);
         assert!(
-            lsd.inside_slip < 0.6 * open.inside_slip,
-            "{id} inside-wheel spin: open {open:?} lsd {lsd:?}"
-        );
-        // Margin 1.0° (was 2.0°): the firmer row-54 dampers slow the load transfer on exit,
-        // shiro_turbo measured +1.5° (open 11.1°, 1.5-way 12.6°).
-        assert!(
-            lsd.peak_body_slip_deg > open.peak_body_slip_deg + 1.0,
+            lsd.peak_body_slip_deg > open.peak_body_slip_deg + 2.0,
             "{id} LSD should add power oversteer: open {open:?} lsd {lsd:?}"
         );
         assert!(
-            lsd.peak_body_slip_deg < 30.0,
+            lsd.peak_body_slip_deg < 45.0,
             "{id} the oversteer stays controllable: {lsd:?}"
         );
         assert!(
-            lsd.exit_speed_mps > open.exit_speed_mps,
+            lsd.exit_speed_mps > open.exit_speed_mps - 1.5,
             "{id} exit speed: open {open:?} lsd {lsd:?}"
         );
     }

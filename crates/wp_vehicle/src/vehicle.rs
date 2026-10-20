@@ -23,10 +23,10 @@ use crate::ffb::{self, FfbWheel};
 use crate::ground::{WheelCaster, WheelProbe};
 use crate::launch::LaunchGuard;
 use crate::math::{arr, sin_cos, v3, yaw_quat, Quat, V3};
-use crate::slide::{gyro_yaw_torque, slide_class_with_rear_lock, slide_throttle, GyroInput};
+use crate::slide::{slide_class_with_rear_lock, slide_throttle};
 use crate::steering::{
-    ackermann, body_slip, rear_axle_slip, steer_target, torque_steer, update_center_angle,
-    SteerInput,
+    ackermann, body_slip, front_axle_angle, rear_axle_slip, steer_target, torque_steer,
+    update_center_angle, SteerInput, HANDBRAKE_GRACE_S,
 };
 use crate::surface::{conditions_grip, ConditionsSource, SurfaceConditions, TireWetProfile};
 use crate::suspension::{arb_force, static_compression, step_strut, TYRE_STATIC_DEFLECTION_M};
@@ -43,6 +43,8 @@ const HUB_DAMPING: f32 = 6_000.0;
 const HUB_FRICTION: f32 = 0.8;
 /// Lateral camber thrust per radian of camber, as a fraction of load.
 const CAMBER_THRUST: f32 = 0.15;
+/// Handbrake input above which the handbrake counts as pulled (declutch, steering assists).
+pub const HANDBRAKE_ON: f32 = 0.1;
 /// The tyre sweep starts this far above the top of the travel, m (see `probe_wheel`).
 const PROBE_LIFT_M: f32 = 0.3;
 /// Fraction of the tyre's half width used by the sweep (the shoulder is rounded).
@@ -200,8 +202,6 @@ pub struct Telemetry {
     /// Per-wheel aquaplaning 0 (full contact) … 1 (riding on water), from
     /// [`Vehicle::set_surface_conditions`].
     pub aquaplane: [f32; 4],
-    /// Slide-gyro yaw torque applied this tick, N·m (+ = left; 0 with countersteer help off).
-    pub slide_gyro_nm: f32,
     /// Torque each differential moved this tick (front, rear, centre), N·m: half the
     /// left-right (or front-rear) wheel-torque difference, + = toward the right (rear) side.
     pub diff_transfer_nm: [f32; 3],
@@ -249,6 +249,9 @@ pub struct Vehicle {
     pub(crate) conditions: [SurfaceConditions; 4],
     pub(crate) conditions_source: ConditionsSource,
     pub(crate) launch: LaunchGuard,
+    /// Handbrake hold for the steering assists: [`crate::steering::HANDBRAKE_GRACE_S`] while
+    /// the handbrake is pulled, then counting down to 0 after release, s.
+    pub(crate) hb_grace: f32,
 }
 
 impl Vehicle {
@@ -361,6 +364,7 @@ impl Vehicle {
             conditions: [SurfaceConditions::DRY; 4],
             conditions_source: ConditionsSource::World,
             launch: LaunchGuard::default(),
+            hb_grace: 0.0,
             corners,
         };
         v.converter = def
@@ -492,6 +496,7 @@ impl Vehicle {
         self.force = V3::ZERO;
         self.torque = V3::ZERO;
         self.launch.forget();
+        self.hb_grace = 0.0;
     }
 
     /// Forget the chassis's previous motion for the contact launch limiter
@@ -700,6 +705,13 @@ impl Vehicle {
             wheelbase: self.def.wheelbase_m,
             front_mu: self.front_mu(),
             front_peak_slip: self.corners[0].tire.peak_slip_angle_rad,
+            front_axle_angle: front_axle_angle(
+                v_fwd,
+                v_left,
+                self.chassis.ang_vel.dot(self.chassis.rot * V3::Z),
+                self.def.wheels[0].position_m[1] - self.com_local.y,
+            ),
+            handbrake_hold: self.hb_grace > 0.0,
         }
     }
 
@@ -851,13 +863,29 @@ impl Vehicle {
         self.throttle_f = filter_pedal(self.throttle_f, thr_target, st.filter, dt);
         self.brake_f = filter_pedal(self.brake_f, brk_in, assists.brake_filter, dt);
         let handbrake = input.handbrake.clamp(0.0, 1.0);
+        // Handbrake hold for the assists (steering alignment, ESC): on while pulled and for
+        // `HANDBRAKE_GRACE_S` after release, so a handbrake turn is not fought.
+        let hb_was_held = self.hb_grace > 0.0;
+        self.hb_grace = if handbrake > HANDBRAKE_ON {
+            HANDBRAKE_GRACE_S
+        } else {
+            (self.hb_grace - dt).max(0.0)
+        };
+        let hb_hold = self.hb_grace > 0.0;
 
         // --- Gearbox ------------------------------------------------------------------------
         self.update_awd_coupling(thr_in, v_fwd, dt);
         let base_split = self.drive_split(0.0);
         let axle_omega = self.axle_omega(&base_split);
         let max_gear = self.max_gear();
-        if assists.auto_gears {
+        // Handbrake declutch (owner rows 56/72): with an automatic clutch or a converter box,
+        // a pulled handbrake decouples the whole driveline (as if the clutch pedal were down),
+        // so the rears lock, the engine neither drags them nor stalls, AWD fronts do not pull
+        // the rears round, and the selected gear is kept. A manual clutch pedal is never
+        // overridden (`handbrake_disconnects_rear` still frees the rear axle there).
+        let hb_declutch =
+            handbrake > HANDBRAKE_ON && (assists.auto_clutch || self.converter.is_some());
+        if assists.auto_gears && !hb_declutch {
             let inputs = ShiftInputs {
                 redline_rpm: self.def.engine.redline_rpm,
                 axle_omega,
@@ -868,7 +896,7 @@ impl Vehicle {
                 lateral_usage: self.lateral_usage(),
             };
             self.gearbox.auto_shift(&self.def.drivetrain, &inputs, dt);
-        } else {
+        } else if !assists.auto_gears {
             let g = self.gearbox.gear;
             // A destroyed gearbox (max_gear 0) has no reverse either.
             let lowest = if max_gear >= 1 { -1 } else { 0 };
@@ -904,8 +932,15 @@ impl Vehicle {
         } else if assists.auto_clutch {
             auto_clutch_update(
                 self.clutch,
-                // Judge "rolling" from ground speed so wheelspin does not count.
-                (ratio_now * v_fwd / self.corners[driven_corner].radius).abs() * RPM_PER_RADPS,
+                if hb_was_held {
+                    // Just after a handbrake declutch the driven wheels may still be stopped
+                    // (locked rears): re-engage only once they have spun back up, so the
+                    // engine is not dragged below idle.
+                    (ratio_now * axle_omega).abs() * RPM_PER_RADPS
+                } else {
+                    // Judge "rolling" from ground speed so wheelspin does not count.
+                    (ratio_now * v_fwd / self.corners[driven_corner].radius).abs() * RPM_PER_RADPS
+                },
                 self.engine.rpm(),
                 self.def.engine.idle_rpm,
                 self.def.engine.redline_rpm,
@@ -916,6 +951,11 @@ impl Vehicle {
         } else {
             1.0 - input.clutch.clamp(0.0, 1.0)
         };
+
+        if hb_declutch && self.converter.is_none() {
+            // Re-engages through the automatic clutch's normal launch / rolling logic.
+            self.clutch = 0.0;
+        }
 
         // --- Assists ----------------------------------------------------------------------
         let peak_slip = (0..4)
@@ -957,7 +997,7 @@ impl Vehicle {
         let yaw_rate = ch.ang_vel.dot(up);
         let front_mu = self.front_mu();
         let mut esc_out = self.esc.update(
-            assists.esc,
+            assists.esc && !hb_hold,
             yaw_rate,
             self.center_steer,
             v_fwd,
@@ -1162,7 +1202,11 @@ impl Vehicle {
         // --- Sub-stepped drivetrain, wheel spin and tire forces ----------------------------
         let n_sub = VEHICLE_SUBSTEPS.max(1);
         let h = dt / n_sub as f32;
-        let split = self.drive_split(handbrake);
+        let split = if hb_declutch {
+            [0.0; 4]
+        } else {
+            self.drive_split(handbrake)
+        };
         // Wheel-speed difference (left − right, rad/s) the cornering geometry asks for, per
         // axle: the inside wheel turns slower (active diffs lock only beyond it).
         let kin = [
@@ -1229,29 +1273,6 @@ impl Vehicle {
             force += f;
             torque += (p - ch.com).cross(f);
         }
-        // Slide gyro (keyboard/gamepad help only; 0 with countersteer help off). The path rate
-        // needs the net force: Rapier adds gravity later, so add it here (else the tires'
-        // uphill force on a side slope, or body roll, reads as the path curving).
-        let net = force - V3::Z * (self.def.mass_kg * GRAVITY_MPS2);
-        let gyro = gyro_yaw_torque(
-            &GyroInput {
-                v_fwd,
-                v_left,
-                yaw_rate,
-                force_left: -net.dot(right),
-                force_fwd: net.dot(fwd),
-                rear_axle_slip: rear_axle,
-                mass: self.def.mass_kg,
-                yaw_inertia: self.def.inertia_kgm2[2],
-                wheelbase,
-                driver_steer: input.steer,
-            },
-            assists.countersteer_help,
-            self.slide_class,
-        );
-        if gyro != 0.0 {
-            torque += up * gyro;
-        }
         if launch_cut > 0.0 && dt > 0.0 {
             force -= V3::Z * (self.def.mass_kg * launch_cut / dt);
         }
@@ -1286,7 +1307,6 @@ impl Vehicle {
             engine_heat: self.heat,
             fuel: self.fuel,
             aquaplane,
-            slide_gyro_nm: gyro,
             diff_transfer_nm: acc_x.map(|x| x * inv),
             tcs_brake_nm: tc_brake,
             contact_lift_cut_mps: launch_cut,

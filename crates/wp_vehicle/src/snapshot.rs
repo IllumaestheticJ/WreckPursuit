@@ -16,8 +16,9 @@ use crate::vehicle::{Chassis, Vehicle, Wheel};
 
 /// Format 6: format 5 (format 4 brake-TC state and differential rework, plus the ESC
 /// reference yaw rate, playtest row 28) plus the contact launch limiter and the wheel-centre
-/// compression (playtest row 54).
-const FORMAT: u8 = 6;
+/// compression (playtest row 54). Format 7: plus the handbrake hold of the steering assist
+/// (owner rows 57 / 72).
+const FORMAT: u8 = 7;
 
 /// Opaque full-state snapshot of one [`Vehicle`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -233,6 +234,7 @@ impl Vehicle {
         w.b(self.launch.prev_vz.is_some());
         w.f(self.launch.prev_vz.unwrap_or(0.0));
         w.f(self.launch.lift);
+        w.f(self.hb_grace);
         VehicleSnapshot { bytes: w.0 }
     }
 
@@ -335,6 +337,7 @@ impl Vehicle {
         let has_prev = r.b()?;
         let prev_vz = r.f()?;
         let lift = r.f()?;
+        let hb_grace = r.f()?;
         if !r.0.is_empty() {
             return Err(SnapshotError::Malformed);
         }
@@ -374,6 +377,7 @@ impl Vehicle {
             prev_vz: has_prev.then_some(prev_vz),
             lift,
         };
+        self.hb_grace = hb_grace;
         Ok(())
     }
 }

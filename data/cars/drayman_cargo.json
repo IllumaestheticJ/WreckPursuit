@@ -147,7 +147,7 @@
     "max_torque_front_nm": 5610.0,
     "max_torque_rear_nm": 2570.0,
     "bias_front": 0.629,
-    "handbrake_rear_nm": 1540.0
+    "handbrake_rear_nm": 2980.0
   },
   "steering": {
     "ratio": 18.0,

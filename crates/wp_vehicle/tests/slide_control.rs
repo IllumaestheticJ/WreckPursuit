@@ -1,12 +1,17 @@
-//! Slide-control assists (owner playtest 2026-10-19: "more steering assist / gyro for the
-//! higher-power RWD cars"). Scripted power-oversteer exits ([`power_oversteer_exit`]) on the
+//! Slide-control assists. Since owner rows 57 / 72 (2026-10-20) the countersteer help is the
+//! Wreckfest-style self-aligning steering (0–100 % slider = `countersteer_help`): released
+//! keys point the front wheels along the front axle's travel; it never fights an input or a
+//! handbrake turn and adds no yaw torque (the earlier slide "gyro" is gone). Scripted
+//! power-oversteer exits ([`power_oversteer_exit`]) on the
 //! most powerful RWD roster car (rampart_50, 319 kW) and the best power-to-weight one
 //! (lucciola_350, 207 W/kg). The scripted driver is naive: it floors the throttle mid-corner,
 //! keeps steering into the corner for a reaction time, then lets go of the steering with the
 //! throttle still down. It never countersteers by itself.
 
 use wp_contracts::{AssistProfile, LoadedCar};
-use wp_vehicle::metrics::{high_speed_catch, power_oversteer_exit, DriverStyle, SlideExit};
+use wp_vehicle::metrics::{
+    high_speed_catch, keyboard_corner_wobble, power_oversteer_exit, DriverStyle, SlideExit,
+};
 
 fn car(id: &str) -> LoadedCar {
     let p = format!("{}/../../data/cars/{id}.json", env!("CARGO_MANIFEST_DIR"));
@@ -45,31 +50,87 @@ fn keyboard_power_oversteer_exit_is_recoverable() {
     }
 }
 
-#[test]
-fn keyboard_drift_can_be_held_then_exited() {
-    // 2 s of full throttle while steering into the corner: a real drift (> 10°) that does
-    // not spin, then straightens once the steering is released.
-    for id in ["rampart_50", "lucciola_350"] {
-        let r = exit(id, &keyboard_no_tcs(), DriverStyle::Keyboard, 0.7, 2.0);
-        assert!(
-            r.max_slip_deg > 10.0 && r.max_slip_deg < 60.0 && r.recovered,
-            "{id}: {r:?}"
-        );
+/// Recovered power-oversteer exits over the grid lat 0.5 / 0.7 g × reaction 0.3 / 0.8 / 2 s.
+fn recovered(id: &str, a: &AssistProfile, style: DriverStyle) -> usize {
+    let mut n = 0;
+    for lat_g in [0.5, 0.7] {
+        for react in [0.3, 0.8, 2.0] {
+            if exit(id, a, style, lat_g, react).recovered {
+                n += 1;
+            }
+        }
     }
+    n
 }
 
 #[test]
-fn gamepad_power_slides_never_spin() {
-    let gamepad_no_tcs = AssistProfile {
-        tcs: false,
+fn release_the_keys_recovery_grows_with_the_slider() {
+    // The slider at 0 / 50 / 100 %: keyboard with TCS/ESC off (the slide help's own case) and
+    // the gamepad preset. Measured (recovered of 6 per car, rampart / lucciola / hakone /
+    // sperber): keyboard 0/1/1/3 → 1/0/4/3 → 6/4/5/6, gamepad 2/2/2/3 → 3/3/4/5 → 6/6/6/6.
+    let cars = ["rampart_50", "lucciola_350", "hakone_gt", "sperber_32"];
+    let kb = |h: f32| AssistProfile {
+        countersteer_help: h,
+        ..keyboard_no_tcs()
+    };
+    let gp = |h: f32| AssistProfile {
+        countersteer_help: h,
         ..AssistProfile::gamepad_default()
     };
-    for a in [AssistProfile::gamepad_default(), gamepad_no_tcs] {
-        for id in ["rampart_50", "lucciola_350"] {
-            for react in [0.3, 0.8] {
-                let r = exit(id, &a, DriverStyle::Analog, 0.7, react);
-                assert!(r.max_slip_deg < 70.0, "{id} tcs={}: {r:?}", a.tcs);
-            }
+    for (name, make, style) in [
+        (
+            "keyboard",
+            &kb as &dyn Fn(f32) -> AssistProfile,
+            DriverStyle::Keyboard,
+        ),
+        ("gamepad", &gp, DriverStyle::Analog),
+    ] {
+        let total =
+            |h: f32| -> usize { cars.iter().map(|id| recovered(id, &make(h), style)).sum() };
+        let (off, mid, full) = (total(0.0), total(0.5), total(1.0));
+        assert!(
+            off < mid && mid < full,
+            "{name}: {off} / {mid} / {full} of 24"
+        );
+        assert!(full >= 20, "{name}: 100 % recovers {full} of 24");
+        for id in cars {
+            assert!(
+                recovered(id, &make(1.0), style) >= recovered(id, &make(0.0), style),
+                "{name} {id}"
+            );
+        }
+    }
+    // 0 % spins like no assist at all: the keyboard car with the slider at 0 loses most
+    // exits, as the unassisted wheel preset does.
+    let none: usize = cars
+        .iter()
+        .map(|id| recovered(id, &kb(0.0), DriverStyle::Keyboard))
+        .sum();
+    assert!(none <= 8, "slider 0: {none} of 24 recovered");
+}
+
+#[test]
+fn self_aligning_steering_does_not_wobble_a_keyboard_corner() {
+    // A tapped key on a 40 m circle at 0.6 g: the yaw-rate spread with the help on is no
+    // larger than with it off (measured 0.18–0.25 rad/s on, 0.21–0.25 off), and the car
+    // stays on the line.
+    for id in [
+        "rampart_50",
+        "hakone_gt",
+        "kestrel_ts",
+        "lindwurm_4t",
+        "sentinel_cruiser",
+    ] {
+        let c = car(id);
+        let a = |h: f32| AssistProfile {
+            countersteer_help: h,
+            ..AssistProfile::keyboard_default()
+        };
+        let (off, _) = keyboard_corner_wobble(&c, &a(0.0), 40.0, 0.6);
+        for h in [0.6, 1.0] {
+            let (on, err) = keyboard_corner_wobble(&c, &a(h), 40.0, 0.6);
+            assert!(on <= off + 0.01, "{id} {h}: {on} vs {off}");
+            assert!(err < 1.0, "{id} {h}: {err} m off the line");
         }
     }
 }
@@ -112,7 +173,8 @@ fn wheel_profile_is_bit_identical_to_the_plain_model() {
 #[test]
 fn keyboard_catches_a_slide_above_100_kmh() {
     // A sudden yaw kick at 110 / 130 km/h (a nudge from traffic), the driver countersteers
-    // with keys. Main spun 7 of 12 such cases with TCS/ESC off; now all are caught.
+    // with keys. Main spun 7 of 12 such cases with TCS/ESC off; now all are caught (the
+    // speed-sensitive lock opens toward the countersteer a slide needs).
     for a in [AssistProfile::keyboard_default(), keyboard_no_tcs()] {
         for id in ["rampart_50", "shiro_turbo", "lucciola_350"] {
             for kmh in [110.0, 130.0] {
