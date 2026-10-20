@@ -312,8 +312,8 @@ the first capture or escape. "Before" = `lead/round12` + only the measurement ho
   interceptors spread over the junctions around it (nearest, the next ones on the path it was
   taking, the roads out of the first), moving on every 10 s. Prediction while unseen uses the
   velocity at the last sighting (it used the racer's real velocity). A racer lost **inside a
-  tunnel** is searched for at the tunnel's two portals (doctrine §5), so tunnels still break
-  contact (Founders Cut below).
+  tunnel** is searched for at its portals, each unit at the one nearer to it (doctrine §5), so
+  tunnels still break contact (Founders Cut below).
 
 Units in service within 300 m of the racer (mean over runs still going), 24 m/s racer:
 
@@ -443,9 +443,10 @@ is the push-through and the closer squeeze past parked cars at the kerb.
 *Founders Cut tunnel scenarios (re-aimed, lead request).* With faster, converging police the
 racer reaches L4 (30 s escape time) just before the Cut and searching units drove into the Cut
 and found him (captured 138.6 s). With units now holding a tunnel's portals when the racer is
-lost inside, both scenarios pass **unchanged**: `tunnel_escape_founders_cut` lost at ≈ 100 s,
-**Escaped 130.4 s** (units ≈ 145 m away at the portals); the control (`covered_los: false`) is
-**Captured 134.9 s** with the helicopter overhead the whole time. The control's window now starts
+lost inside (each unit the portal nearer to it: sent to the far one, a unit drove through the
+tunnel and found him), both scenarios pass: `tunnel_escape_founders_cut` lost at ≈ 101 s,
+**Escaped 131.2 s** (nearest unit ≈ 130 m away at a portal); the control (`covered_los: false`)
+is **Captured 129.3 s** with the helicopter overhead the whole time. The control's window now starts
 at 115 s (was 130 s; police arrive sooner). Comments updated in both files.
 
 *Notes for other workstreams.*
