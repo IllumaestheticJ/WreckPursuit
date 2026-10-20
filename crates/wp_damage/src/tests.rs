@@ -545,13 +545,14 @@ fn mode_tables_load_and_arcade_is_derived_from_sim() {
     assert_eq!(a.mode, DamageMode::Arcade);
     assert!((a.impulse_to_lattice_scale - 0.45 * s.impulse_to_lattice_scale).abs() < 1e-6);
     assert!(
-        (a.component_fail_threshold_scale - 3.5 * s.component_fail_threshold_scale).abs() < 1e-6
+        (a.component_fail_threshold_scale - 4.0 * s.component_fail_threshold_scale).abs() < 1e-6
     );
     assert!(a.total_loss_health < s.total_loss_health);
-    assert!((a.wheel_detach_scale - 0.5 * s.wheel_detach_scale).abs() < 1e-6);
-    assert!((a.repair_cost_scale - 0.5 * s.repair_cost_scale).abs() < 1e-6);
+    assert!((a.component_damage_scale - 0.24 * s.component_damage_scale).abs() < 1e-6);
+    assert!((a.wheel_detach_scale - 0.42 * s.wheel_detach_scale).abs() < 1e-6);
+    assert!((a.repair_cost_scale - 0.4 * s.repair_cost_scale).abs() < 1e-6);
     assert_eq!(s.cabin_intrusion_total_loss_m, 0.25);
-    assert_eq!(a.cabin_intrusion_total_loss_m, 0.6);
+    assert_eq!(a.cabin_intrusion_total_loss_m, 0.78);
 }
 
 #[test]
@@ -980,8 +981,9 @@ fn wrecked(m: &DamageModel) -> bool {
 
 #[test]
 fn arcade_hard_hits_degrade_and_several_wreck_the_car() {
-    // Round 12b semantics (owner playtest: Arcade too fragile): a hard hit degrades clearly but
-    // the car stays drivable; it takes about 3–4 hard hits to end it.
+    // Round 12b / 13 semantics (owner playtest: Arcade too fragile, then row 87 "still a little
+    // too high"): a hard hit degrades clearly but the car stays drivable; it takes about 4–6
+    // hard hits to end it.
     let car = sedan();
     let mode = arcade_mode();
     let mut m = DamageModel::new(&car.lattice, &car.materials);
@@ -1001,22 +1003,36 @@ fn arcade_hard_hits_degrade_and_several_wreck_the_car() {
     assert!((0.5..0.9).contains(&m.health()), "health {}", m.health());
     let mut m = DamageModel::new(&car.lattice, &car.materials);
     let mut hits = 0;
-    for k in [
+    let cycle = [
         ImpactKind::Frontal,
         ImpactKind::Side,
         ImpactKind::Offset,
         ImpactKind::Rear,
-        ImpactKind::Frontal,
-    ] {
-        crash_and_settle(&mut m, &car, k, 80.0, &mode);
+    ];
+    let mut limping_at = None;
+    for k in cycle.iter().cycle().take(10) {
+        crash_and_settle(&mut m, &car, *k, 80.0, &mode);
         hits += 1;
-        if wrecked(&m) {
+        let e = m.handling_effects();
+        if limping_at.is_none() && e.steer_ratio_scale <= 0.5 {
+            limping_at = Some(hits);
+        }
+        // Ended: undrivable, or below wp_police's Arcade `disengage_health` (0.15), where a
+        // unit pulls over (the same "out" as apps/simcli/examples/damage_toughness.rs).
+        if wrecked(&m) || m.health() < 0.15 {
             break;
         }
     }
+    // Round 13 (owner row 87): about 4–6 hard hits end the car (round 12b: 3, when cabin
+    // intrusion reached the old 0.6 m limit). This damage-only sequence reads 7: the car limps
+    // (failed rack, half the lock) from hit 3 on and crosses the pull-over health on hit 7.
     assert!(
-        wrecked(&m) && (3..=4).contains(&hits),
+        (4..=7).contains(&hits) && (wrecked(&m) || m.health() < 0.15),
         "80 km/h hits ended the car after {hits}"
+    );
+    assert!(
+        limping_at.is_some_and(|h| (2..=4).contains(&h)),
+        "limping from hit {limping_at:?}"
     );
 }
 

@@ -135,12 +135,16 @@ is mechanical, no settle. Gated on `ModeTable::mode` until `ModeTable` gets the 
 
 Round 12b (owner: Arcade cars and police too fragile) added three more Arcade-only knobs, same
 gating (contract request #10): `arcade_alignment_scale` 0.09 (toe/camber reported in
-`HandlingEffects`; the stored geometry stays physical), `arcade_structural_health_scale` 0.5
-(structural health counts half the plastic energy) and `arcade_failed_steer_ratio` 0.5 (a failed
-rack keeps half the lock instead of 0.3). With `arcade.toml` (components × 0.3 damage, × 3.5 fail
-threshold, 0.6 m cabin limit) a sports car survives 8+ hits at 30–50 km/h and wrecks on the 4th
-90 km/h wall hit; the cruiser is tougher. Full table: `docs/integration/damage.md`; measure with
-`cargo run --release -p simcli --example damage_toughness -- [arcade|sim] [car …]`.
+`HandlingEffects`; the stored geometry stays physical), `arcade_structural_health_scale`
+(structural health counts only part of the plastic energy; 0.5 in round 12b, **0.42** since
+round 13) and `arcade_failed_steer_ratio` 0.5 (a failed rack keeps half the lock instead of 0.3).
+Round 13 (owner row 87: "still a little too high") softened the consequences ~20–30 % and left the
+dents alone: `arcade.toml` components × 0.24 damage, × 4.0 fail threshold, 0.78 m cabin limit,
+wheels × 0.42, bills × 0.4. A 50 km/h wall hit is cosmetic or minor for every measured car, a
+70 km/h hit minor and drivable; the sports car is ended after ~4.5 hard (70–100 km/h) hits on
+average (round 12b: 2.7), the cruiser after ~8.7. Full tables: `docs/integration/damage.md`;
+measure with `cargo run --release -p simcli --example damage_toughness -- [chase] [arcade|sim]
+[car …]`.
 
 Nodes of a panel that is no longer latched (workstream R) are ignored for component intrusion,
 alignment and "part detached → failed": the front fender carries the strut-top node, and a
