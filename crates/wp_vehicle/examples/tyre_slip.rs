@@ -272,91 +272,131 @@ fn grid(ids: &[String]) {
     }
 }
 
-/// Robust score over several entries: the worst case counts most.
-fn robust(c: &LoadedCar) -> (f32, Vec<Hold>) {
-    let mut v = Vec::new();
-    for g in [0.5f32, 0.6, 0.7] {
-        v.push(hold_at(c, COUNTER6, g));
-        v.push(hold_at(c, COUNTER12, g));
+/// One held-countersteer run's score: held → time in band minus unsteadiness; spun or
+/// swapped → negative; never slid → worse.
+fn run_score(h: &Hold) -> f32 {
+    if h.spun {
+        -5.0 + 0.5 * h.drift_s
+    } else if h.drift_s < 1.0 {
+        -6.0
+    } else {
+        let off = if (28.0..=47.0).contains(&h.late_mean) {
+            0.0
+        } else {
+            2.0
+        };
+        h.band_s - 0.15 * (h.late_sd - 3.0).max(0.0) - off
     }
-    let sc: Vec<f32> = v
-        .iter()
-        .map(|h| {
-            if h.spun {
-                -5.0 + 0.5 * h.drift_s
-            } else if h.drift_s < 1.0 {
-                -6.0
-            } else {
-                let off = if (28.0..=47.0).contains(&h.late_mean) {
-                    0.0
-                } else {
-                    2.0
-                };
-                h.band_s - 0.15 * (h.late_sd - 3.0).max(0.0) - off
-            }
-        })
-        .collect();
-    let min = sc.iter().copied().fold(f32::INFINITY, f32::min);
-    let mean = sc.iter().sum::<f32>() / sc.len() as f32;
-    (min + 0.5 * mean, v)
 }
 
-/// `search [n]`: seeded random search over the spin model's knobs, ranked by [`robust`].
-fn search(n: usize) {
-    let c = car("parity_rwd_d");
-    // SEARCH_DAMP=1: also sample the diagnostic yaw damper (penalised), to find how much
-    // non-physical damping each tyre set still needs. SEARCH_W=1: sample the ellipse model with
-    // `lat_under_spin` instead of the spin model.
-    let damp = std::env::var("SEARCH_DAMP").is_ok();
+/// The robustness set: `ROBUST=full` = parity_rwd_d / a / b × counter key at 6 / 12 / 20° ×
+/// 0.3 / 0.5 / 0.7 g; default = parity_rwd_d × 6 / 12° × 0.5 / 0.6 / 0.7 g.
+fn robust_set() -> Vec<(LoadedCar, PlainDriver, f32)> {
+    let full = std::env::var("ROBUST").as_deref() == Ok("full");
+    let ids: &[&str] = if full {
+        &["parity_rwd_d", "parity_rwd_a", "parity_rwd_b"]
+    } else {
+        &["parity_rwd_d"]
+    };
+    let entries: &[f32] = if full {
+        &[6.0, 12.0, 20.0]
+    } else {
+        &[6.0, 12.0]
+    };
+    let gs: &[f32] = if full {
+        &[0.3, 0.5, 0.7]
+    } else {
+        &[0.5, 0.6, 0.7]
+    };
+    let mut v = Vec::new();
+    for id in ids {
+        let c = car(id);
+        for &e in entries {
+            for &g in gs {
+                let d = PlainDriver::HoldCounter {
+                    entry_deg: e,
+                    throttle: 1.0,
+                };
+                v.push((c.clone(), d, g));
+            }
+        }
+    }
+    v
+}
+
+/// Robust score over [`robust_set`]: the worst case counts most.
+fn robust(set: &[(LoadedCar, PlainDriver, f32)]) -> (f32, Vec<Hold>) {
+    let v: Vec<Hold> = set.iter().map(|(c, d, g)| hold_at(c, *d, *g)).collect();
+    let sc: Vec<f32> = v.iter().map(run_score).collect();
+    let min = sc.iter().copied().fold(f32::INFINITY, f32::min);
+    let mean = sc.iter().sum::<f32>() / sc.len() as f32;
+    (
+        min + 0.5 * mean + 0.2 * v.iter().filter(|h| h.m.held).count() as f32,
+        v,
+    )
+}
+
+/// Random spin-model + rack-compliance set (`SEARCH_W=1`: ellipse + `lat_under_spin`).
+fn sample(u: &mut impl FnMut(f32, f32) -> f32) -> CarTune {
     let w_model = std::env::var("SEARCH_W").is_ok();
+    let comply = std::env::var("NO_RACK").is_err();
+    let from = u(3.0, 10.0);
+    CarTune {
+        spin_model: !w_model,
+        lat_under_spin: if w_model { u(0.05, 0.6) } else { 1.0 },
+        spin_b0: u(2.0, 16.0),
+        spin_b2: u(1.2, 4.0),
+        spin_p: u(2.0, 8.0).round(),
+        spin_c: u(0.6, 1.0),
+        spin_fx_slide: u(0.0, 1.0),
+        spin_fx_slide_from_deg: from,
+        spin_fx_slide_full_deg: from + u(2.0, 15.0),
+        spin_fx_yield: if u(0.0, 1.0) < 0.5 { 0.0 } else { u(0.0, 1.0) },
+        rack_compliance: if comply { u(0.0, 60.0) } else { 0.0 },
+        rack_compliance_tau_s: u(0.02, 0.2),
+        ..CarTune::default()
+    }
+}
+
+/// `search [n]`: seeded random search, ranked by [`robust`].
+fn search(n: usize) {
+    let set = robust_set();
     let mut rng = wp_math::Rng::new(7);
     let mut u = |lo: f32, hi: f32| lo + (hi - lo) * rng.next_f32();
     let mut rows = Vec::new();
     for _ in 0..n {
-        let k_damp = if damp {
-            (u(0.0, 0.3) * 20.0).round() / 20.0
-        } else {
-            0.0
-        };
-        let w = u(0.05, 0.6);
-        let t = CarTune {
-            spin_model: !w_model,
-            lat_under_spin: if w_model { w } else { 1.0 },
-            yaw_damping: k_damp,
-            spin_b0: u(2.0, 16.0),
-            spin_b2: u(1.2, 4.0),
-            spin_p: u(2.0, 8.0).round(),
-            spin_c: u(0.6, 1.0),
-            spin_fx_slide: u(0.0, 1.0),
-            spin_fx_yield: if u(0.0, 1.0) < 0.5 { 0.0 } else { u(0.0, 1.0) },
-            ..CarTune::default()
-        };
+        let t = sample(&mut u);
         car_lab::set_override(Some(t));
-        let (s, v) = robust(&c);
-        rows.push((s - 4.0 * k_damp, t, v));
+        let (s, v) = robust(&set);
+        rows.push((s, t, v));
     }
     car_lab::set_override(None);
     rows.sort_by(|a, b| b.0.total_cmp(&a.0));
-    for (s, t, v) in rows.iter().take(12) {
-        println!("score {s:.2}  TYRE='{}'", serde_json::to_string(t).unwrap());
+    for (s, t, v) in rows.iter().take(8) {
+        let held = v.iter().filter(|h| h.m.held).count();
+        println!(
+            "score {s:.2} held {held}/{}  TYRE='{}'",
+            v.len(),
+            serde_json::to_string(t).unwrap()
+        );
         for h in v {
             println!("    {}", fmt_hold(h));
         }
     }
 }
 
-/// `refine [n]`: seeded hill-climb from `TYRE` (spin model knobs ±15 %), ranked by [`robust`].
+/// `refine [n]`: seeded hill-climb from `TYRE` (knobs ±15 %), ranked by [`robust`].
 fn refine(n: usize) {
-    let c = car("parity_rwd_d");
+    let set = robust_set();
     let mut best: CarTune =
         serde_json::from_str(&std::env::var("TYRE").expect("TYRE start")).expect("TYRE json");
     car_lab::set_override(Some(best));
-    let (mut best_s, _) = robust(&c);
+    let (mut best_s, _) = robust(&set);
     let mut rng = wp_math::Rng::new(11);
     for i in 0..n {
         let mut t = best;
         let mut j = |x: &mut f32, lo: f32, hi: f32| {
-            if rng.next_f32() < 0.5 {
+            if rng.next_f32() < 0.4 {
                 *x = (*x * (0.85 + 0.3 * rng.next_f32())).clamp(lo, hi);
             }
         };
@@ -365,11 +405,17 @@ fn refine(n: usize) {
         j(&mut t.spin_c, 0.3, 1.0);
         j(&mut t.spin_fx_slide, 0.0, 1.0);
         j(&mut t.spin_fx_yield, 0.0, 1.0);
+        j(&mut t.spin_fx_slide_from_deg, 3.0, 30.0);
+        j(&mut t.spin_fx_slide_full_deg, 3.0, 45.0);
+        if t.rack_compliance > 0.0 {
+            j(&mut t.rack_compliance, 0.5, 120.0);
+            j(&mut t.rack_compliance_tau_s, 0.01, 0.5);
+        }
         if rng.next_f32() < 0.15 {
             t.spin_p = (t.spin_p + if rng.next_f32() < 0.5 { -1.0 } else { 1.0 }).clamp(1.0, 8.0);
         }
         car_lab::set_override(Some(t));
-        let (s, _) = robust(&c);
+        let (s, _) = robust(&set);
         if s > best_s {
             best_s = s;
             best = t;
@@ -377,15 +423,119 @@ fn refine(n: usize) {
         }
     }
     car_lab::set_override(Some(best));
-    let (s, v) = robust(&c);
+    let (s, v) = robust(&set);
     car_lab::set_override(None);
+    let held = v.iter().filter(|h| h.m.held).count();
     println!(
-        "best {s:.2} TYRE='{}'",
+        "best {s:.2} held {held}/{} TYRE='{}'",
+        v.len(),
         serde_json::to_string(&best).unwrap()
     );
     for h in v {
         println!("    {}", fmt_hold(&h));
     }
+}
+
+/// `phase [car]`: phase plane of the held counter key + full throttle. A state from inside a
+/// held drift (spin model, 3 s into the lab run: full counter-lock reached, rears spinning in
+/// 2nd) is restored, set to slide angle β and yaw rate r at the same speed, then stepped 0.05 s
+/// with the counter key + full throttle. Cells: `dβ/dt °/s , dr/dt °/s²` (measured over the
+/// second half, after the tyre lag has settled). `TYRE='{...}'` = the model probed (default:
+/// data and the spin model).
+fn phase(id: &str) {
+    use wp_contracts::VehicleInput;
+    use wp_vehicle::math::V3;
+    use wp_vehicle::rig::Rig;
+    let c = car(id);
+    let a = reference_assists();
+    car_lab::set_override(Some(spin()));
+    let mut snap = None;
+    let mut tick = 0usize;
+    plain_drift_run_with(&c, &a, COUNTER6, 40.0, 0.6, |rig, _, _| {
+        if tick == 3 * 240 {
+            snap = Some(rig.snapshot());
+        }
+        tick += 1;
+    });
+    let snap = snap.expect("3 s state");
+    let mut models: Vec<(String, CarTune)> = vec![
+        ("data (friction ellipse)".into(), CarTune::default()),
+        ("spin model".into(), spin()),
+    ];
+    if let Ok(j) = std::env::var("TYRE") {
+        models.push((
+            format!("TYRE {j}"),
+            serde_json::from_str(&j).expect("TYRE json"),
+        ));
+    }
+    let betas: Vec<f32> = (0..=12).map(|i| i as f32 * 5.0).collect();
+    let rates: Vec<f32> = (0..=7).map(|i| -20.0 + i as f32 * 20.0).collect();
+    let input = VehicleInput {
+        steer: 1.0,
+        throttle: 1.0,
+        ..Default::default()
+    };
+    let probe = |b: f32, r: f32| -> (f32, f32, f32, f32, f32) {
+        let mut rig = Rig::new(&c);
+        rig.restore(&snap).expect("restore");
+        let ch = *rig.vehicle.chassis();
+        let up = ch.rot * V3::Z;
+        let (fwd, right) = (ch.rot * V3::Y, ch.rot * V3::X);
+        let v = ch.lin_vel.dot(fwd).hypot(ch.lin_vel.dot(right));
+        let (sb, cb) = wp_vehicle::math::sin_cos(b.to_radians());
+        let want = fwd * (v * cb) + right * (v * sb);
+        let dv = want - ch.lin_vel;
+        let dw = up * (r.to_radians() - ch.ang_vel.dot(up));
+        rig.kick([dv.x, dv.y, 0.0], [dw.x, dw.y, dw.z]);
+        let st = |rig: &Rig| {
+            let s = slide_state(rig);
+            ((-s.body_slip).to_degrees(), s.yaw_rate.to_degrees())
+        };
+        for _ in 0..6 {
+            rig.step(&input, &a);
+        }
+        let (b0, r0) = st(&rig);
+        for _ in 0..6 {
+            rig.step(&input, &a);
+        }
+        let (b1, r1) = st(&rig);
+        let w = &rig.state().wheel_states;
+        let dt = 6.0 / 240.0;
+        (
+            (b1 - b0) / dt,
+            (r1 - r0) / dt,
+            (w[0].fy_n + w[1].fy_n) / 1000.0,
+            (w[2].fy_n + w[3].fy_n) / 1000.0,
+            0.5 * (w[2].slip_ratio + w[3].slip_ratio),
+        )
+    };
+    for (name, t) in models {
+        car_lab::set_override(Some(t));
+        println!("\n### {id}, {name}: dβ/dt °/s , dr/dt °/s² (β = slide angle, + = intended side)");
+        print!("| β \\ r °/s |");
+        for r in &rates {
+            print!(" {r:+.0} |");
+        }
+        println!(" Fy front / rear kN, rear κ at r = +20 |");
+        print!("|---|");
+        for _ in &rates {
+            print!("---|");
+        }
+        println!("---|");
+        for &b in &betas {
+            print!("| {b:.0}° |");
+            let mut at20 = (0.0, 0.0, 0.0);
+            for &r in &rates {
+                let (db, dr, ff, fr, k) = probe(b, r);
+                if r == 20.0 {
+                    at20 = (ff, fr, k);
+                }
+                print!(" {db:+.0}, {dr:+.0} |");
+            }
+            println!(" {:+.1} / {:+.1}, {:.2} |", at20.0, at20.1, at20.2);
+        }
+    }
+    car_lab::set_override(None);
 }
 
 fn trace(id: &str) {
@@ -432,10 +582,9 @@ fn main() {
         ride_lab::set_override(Some(RideTune::lab_default()));
     }
     let mut args: Vec<String> = std::env::args().skip(1).collect();
-    let what = if args
-        .first()
-        .is_some_and(|a| ["table", "grid", "trace", "search", "refine"].contains(&a.as_str()))
-    {
+    let what = if args.first().is_some_and(|a| {
+        ["table", "grid", "trace", "search", "refine", "phase"].contains(&a.as_str())
+    }) {
         args.remove(0)
     } else {
         "table".into()
@@ -453,6 +602,7 @@ fn main() {
         "search" => search(args[0].parse().unwrap_or(300)),
         "refine" => refine(args[0].parse().unwrap_or(150)),
         "trace" => trace(&args[0]),
+        "phase" => phase(&args[0]),
         _ => table(&args),
     }
 }

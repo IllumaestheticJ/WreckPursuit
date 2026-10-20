@@ -60,11 +60,25 @@ pub struct CarTune {
     pub spin_on_braking: bool,
     /// [`crate::tire::SpinGrip::fx_slide`].
     pub spin_fx_slide: f32,
+    /// [`crate::tire::SpinGrip::fx_slide_from_deg`].
+    pub spin_fx_slide_from_deg: f32,
+    /// [`crate::tire::SpinGrip::fx_slide_full_deg`].
+    pub spin_fx_slide_full_deg: f32,
     /// Rear tyres' relaxation length scale (slip-angle lag; 1 = data).
     pub rear_relax: f32,
     /// Apply each tyre's self-aligning moment (pneumatic trail × side force) to the body as a
     /// yaw torque (the data path only feeds it to force feedback).
     pub aligning_on_body: bool,
+    /// Compliant rack / column (tyre-slip step 2), degrees of road-wheel angle per kN·m of the
+    /// front tyres' steering-axis moment (aligning moment + caster trail × side force). The
+    /// wheels yield toward the travel, like a real car's column and the driver's hands. 0 =
+    /// rigid (the data).
+    pub rack_compliance: f32,
+    /// Lag of the rack compliance, s (column / hands inertia).
+    pub rack_compliance_tau_s: f32,
+    /// The compliant rack only yields toward the centre (never past the key's position, as
+    /// at a lock stop / the driver holding the key's angle).
+    pub rack_yield_to_centre_only: bool,
 }
 
 impl Default for CarTune {
@@ -88,8 +102,13 @@ impl Default for CarTune {
             spin_fx_yield: d.fx_yield,
             spin_on_braking: d.on_braking,
             spin_fx_slide: d.fx_slide,
+            spin_fx_slide_from_deg: d.fx_slide_from_deg,
+            spin_fx_slide_full_deg: d.fx_slide_full_deg,
             rear_relax: 1.0,
             aligning_on_body: false,
+            rack_compliance: 0.0,
+            rack_compliance_tau_s: 0.05,
+            rack_yield_to_centre_only: false,
         }
     }
 }
@@ -134,6 +153,8 @@ impl CarTune {
             fx_yield: self.spin_fx_yield,
             on_braking: self.spin_on_braking,
             fx_slide: self.spin_fx_slide,
+            fx_slide_from_deg: self.spin_fx_slide_from_deg,
+            fx_slide_full_deg: self.spin_fx_slide_full_deg,
         })
     }
 
