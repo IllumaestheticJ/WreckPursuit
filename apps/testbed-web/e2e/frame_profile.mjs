@@ -2,7 +2,9 @@
 // Usage: node e2e/frame_profile.mjs [chase|rain] [seconds]   (needs `npm run wasm`; own Vite)
 // Env: VIEWPORT=WxH (default 1280x720), CITY=<id> (default the app's default, vesper_v2),
 // QUERY=<url params> (e.g. gfx=high), EVAL=<js> run before measuring, STACKS=<fn> allocation paths,
-// JSON=1 prints only the JSON line.
+// JSON=1 prints only the JSON line. Phone: TOUCH=1 emulates a touch device (hasTouch, isMobile,
+// DPR 3: the touch graphics profile), CPU_THROTTLE=<n> slows the CPU n× (CDP), e.g.
+// `VIEWPORT=740x360 TOUCH=1 CPU_THROTTLE=4 node e2e/frame_profile.mjs chase` (docs/integration/touch.md).
 //
 // Per frame it reports: the frame-loop sections (src/perf.ts), the wall frame time and what is
 // left of it (SwiftShader raster / compositor wait), one GPU-synced render (render + 1-pixel
@@ -48,7 +50,10 @@ const browser = await chromium.launch({
   ],
 });
 const [vw, vh] = (process.env.VIEWPORT ?? "1280x720").split("x").map(Number);
-const page = await (await browser.newContext({ viewport: { width: vw, height: vh } })).newPage();
+const touchDevice = process.env.TOUCH === "1";
+const page = await (
+  await browser.newContext({ viewport: { width: vw, height: vh }, ...(touchDevice ? { hasTouch: true, isMobile: true, deviceScaleFactor: 3 } : {}) })
+).newPage();
 const errors = [];
 page.on("pageerror", (e) => errors.push(String(e)));
 page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
@@ -85,6 +90,7 @@ await page.evaluate(async () => {
 });
 
 const cdp = await page.context().newCDPSession(page);
+if (Number(process.env.CPU_THROTTLE) > 1) await cdp.send("Emulation.setCPUThrottlingRate", { rate: Number(process.env.CPU_THROTTLE) });
 await cdp.send("HeapProfiler.enable");
 await cdp.send("HeapProfiler.collectGarbage");
 await page.evaluate(() => {

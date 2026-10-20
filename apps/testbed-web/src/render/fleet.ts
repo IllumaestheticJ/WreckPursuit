@@ -306,6 +306,8 @@ class FleetModel {
 /** Every instanced car of a frame. Call begin(), add() per car, end(). */
 export class Fleet {
   readonly group = new THREE.Group();
+  /** Full meshes within this distance from the camera (m); graphics quality lowers it on phones. */
+  fullLodM = FULL_LOD_M;
   private readonly models = new Map<string, FleetModel>();
   readonly mats: FleetMaterials = {
     paint: new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, metalness: 0.25, roughness: 0.55 }),
@@ -360,7 +362,7 @@ export class Fleet {
     this.tail.setHex(tail);
     const b = bar === null ? null : this.bar.setHex(bar);
     const full = model.full;
-    if (full && dist < FULL_LOD_M && full.count < MAX_FULL) {
+    if (full && dist < this.fullLodM && full.count < MAX_FULL) {
       full.add(this.m, this.paint, this.tail, b);
       return "full";
     }

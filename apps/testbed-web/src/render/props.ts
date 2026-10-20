@@ -8,7 +8,7 @@
 //     materials, so they look like the cars driving past), scaled so the model's bounding box is
 //     exactly the collider box. Every parked car always has a low-poly proxy instance; the ones
 //     within FULL_LOD_M of the camera (the traffic fleet's full-mesh distance, nearest
-//     MAX_FULL first) swap to the full panel mesh. The near set is re-picked only after the
+//     MAX_FULL first; both lower on phones: `fullLodM` / `maxFull`) swap to the full panel mesh. The near set is re-picked only after the
 //     camera moved REPICK_M, and only the instances that change drawer are rewritten;
 //   * cones are one InstancedMesh of small orange cones;
 //   * a moved prop rewrites only its own instance matrix.
@@ -91,6 +91,20 @@ export interface PropStats {
 }
 
 export class PropView {
+  /** Parked cars within this distance (m) use the full mesh (graphics quality lowers it on phones). */
+  fullLodM = FULL_LOD_M;
+  /** Full-mesh parked cars at most (nearest first). */
+  maxFull = MAX_FULL;
+  /** Parked cars farther than this from the camera (m) are not drawn (phones; default: all
+   * drawn). Keep it well past where the player can reach before the next re-pick. With a finite
+   * distance the proxy instances are compacted to the near cars (a zero-scaled instance still
+   * costs vertex work on a weak GPU). */
+  drawM = Infinity;
+  /** Per prop: 1 = hidden by `drawM`. */
+  private far = new Uint8Array(0);
+  /** Proxy instances in use when `drawM` is finite (the near parked cars). */
+  private nearProxies = -1;
+  private readonly farPick = new THREE.Vector3(Infinity, Infinity, Infinity);
   /** Parent in sim space (+Z up); add to SceneView.world. */
   readonly group = new THREE.Group();
   private n = 0;
@@ -139,6 +153,9 @@ export class PropView {
     this.half = new Float32Array(n * 3);
     this.slot = new Int32Array(n);
     this.fullSlot = new Int32Array(n).fill(-1);
+    this.far = new Uint8Array(n);
+    this.nearProxies = -1;
+    this.farPick.set(Infinity, Infinity, Infinity);
     let firstCar = -1;
     for (let i = 0, o = 0; i < n; i++, o += PROP_STRIDE) {
       this.kind[i] = list[o + P.kind];
@@ -183,7 +200,7 @@ export class PropView {
   private setFullMesh(mesh: Parameters<typeof fullGeoms>[0], info: CarModelInfo): void {
     if (this.full || !this.mats) return;
     const g = fullGeoms(mesh, info);
-    this.full = { car: new InstancedCar(g, Math.min(MAX_FULL, this.parkedCount), this.mats, null), fit: fitOf(g) };
+    this.full = { car: new InstancedCar(g, Math.min(this.maxFull, this.parkedCount), this.mats, null), fit: fitOf(g) };
     this.full.car.count = 0;
     this.group.add(...this.full.car.meshes);
     this.lastPick.set(Infinity, Infinity, Infinity); // pick on the next frame
@@ -224,8 +241,8 @@ export class PropView {
     if (fs >= 0 && this.full) {
       this.full.car.put(fs, this.carMatrix(i, this.full), this.paint, this.tail, null);
       this.full.car.end();
-      proxy.car.put(this.slot[i], ZERO, this.paint, this.tail, null);
-    } else {
+      if (this.slot[i] >= 0) proxy.car.put(this.slot[i], ZERO, this.paint, this.tail, null);
+    } else if (this.slot[i] >= 0) {
       proxy.car.put(this.slot[i], this.carMatrix(i, proxy), this.paint, this.tail, null);
     }
     this.dirtyProxy = true;
@@ -235,7 +252,7 @@ export class PropView {
 
   private flush(): void {
     if (this.proxy && this.dirtyProxy) {
-      this.proxy.car.count = this.parkedCount;
+      this.proxy.car.count = this.nearProxies >= 0 ? this.nearProxies : this.parkedCount;
       this.proxy.car.end();
     }
     this.dirtyProxy = false;
@@ -256,6 +273,7 @@ export class PropView {
       this.movedWrites++;
     }
     if (this.full && this.cam.distanceTo(this.lastPick) > REPICK_M) this.repick();
+    if (Number.isFinite(this.drawM) && this.cam.distanceTo(this.farPick) > REPICK_M) this.refar();
     this.flush();
     const ms = performance.now() - t0;
     this.updates++;
@@ -267,6 +285,24 @@ export class PropView {
   private updateMsSum = 0;
   private updateMaxMs = 0;
 
+  /** Re-pick the parked cars within `drawM`: they get the first proxy slots (in prop order),
+   * the rest none. Rewrites only the cars whose slot changed. */
+  private refar(): void {
+    this.farPick.copy(this.cam);
+    let k = 0;
+    for (let i = 0; i < this.n; i++) {
+      if (this.kind[i] === PROP_KIND.cone) continue;
+      const far = this.distTo(i) > this.drawM;
+      this.far[i] = far ? 1 : 0;
+      const slot = far ? -1 : k++;
+      if (slot === this.slot[i] && this.nearProxies >= 0) continue;
+      this.slot[i] = slot;
+      if (slot >= 0) this.writeInstance(i);
+    }
+    this.nearProxies = k;
+    this.dirtyProxy = true;
+  }
+
   /** Re-pick the nearest parked cars for the full mesh; rewrite only the ones that change drawer. */
   private repick(): void {
     const full = this.full;
@@ -277,10 +313,10 @@ export class PropView {
     for (let i = 0; i < this.n; i++) {
       if (this.kind[i] === PROP_KIND.cone) continue;
       const d = this.distTo(i);
-      if (d < FULL_LOD_M) near.push({ i, d });
+      if (d < this.fullLodM) near.push({ i, d });
     }
     near.sort((a, b) => a.d - b.d);
-    const want = new Set(near.slice(0, MAX_FULL).map((x) => x.i));
+    const want = new Set(near.slice(0, this.maxFull).map((x) => x.i));
     // Release full slots no longer wanted (swap-remove keeps the slots dense).
     for (let s = this.fullProps.length - 1; s >= 0; s--) {
       const i = this.fullProps[s];
@@ -339,7 +375,7 @@ export class PropView {
       slot = this.slot[i];
       fit = this.proxy?.fit ?? null;
     }
-    if (!mesh || slot >= mesh.count) return null;
+    if (!mesh || slot < 0 || slot >= mesh.count) return null;
     const m = new THREE.Matrix4();
     mesh.getMatrixAt(slot, m);
     if (m.determinant() === 0) return null;
@@ -362,7 +398,7 @@ export class PropView {
     for (let i = 0; i < this.n; i++) {
       const d = this.distTo(i);
       const car = this.kind[i] !== PROP_KIND.cone;
-      if (car && d < FULL_LOD_M) {
+      if (car && d < this.fullLodM) {
         inFullRange++;
         if (this.fullSlot[i] >= 0) fullInFullRange++;
       }

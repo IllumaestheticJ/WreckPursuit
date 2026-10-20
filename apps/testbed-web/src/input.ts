@@ -10,7 +10,7 @@
 import type { DriverInput } from "./wasm/sim";
 import { ACTIONS, loadBindings, type ActionId, type Bindings, type PadControl } from "./bindings";
 
-export type InputSource = "Keyboard" | "Gamepad";
+export type InputSource = "Keyboard" | "Gamepad" | "Touch";
 
 const held = new Set<string>();
 const pressedEdges = new Set<string>();
@@ -161,11 +161,21 @@ export const actionHeld = (id: ActionId): boolean => !blocked && (keyAction(id) 
 
 const NEUTRAL: DriverInput = { steer: 0, throttle: 0, brake: 0, handbrake: 0, clutch: 0, gearUp: false, gearDown: false, horn: false, headlights: false };
 
-interface PadRead {
+/** One frame of an analogue device (gamepad, touch controls). */
+export interface AnalogRead {
   input: DriverInput;
   active: boolean;
   /** Edge actions pressed this frame (other than gears, which go into the input). */
   edges: ActionId[];
+}
+type PadRead = AnalogRead;
+
+/** Touch controls (src/touch.ts) register here; read every frame like the gamepad. */
+let touchReader: ((dt: number) => AnalogRead | null) | null = null;
+
+/** Hook an extra analogue device into `readInput` (touch controls). */
+export function setTouchReader(fn: ((dt: number) => AnalogRead | null) | null): void {
+  touchReader = fn;
 }
 
 function readGamepad(): PadRead | null {
@@ -207,6 +217,7 @@ function readGamepad(): PadRead | null {
  * arrive through `installKeyboard`'s callback). */
 export function readInput(dt: number): { input: DriverInput; source: InputSource; edges: ActionId[] } {
   const pad = readGamepad();
+  const touch = touchReader?.(dt) ?? null;
   if (blocked) {
     pressedEdges.clear();
     kb.steer = kb.throttle = kb.brake = 0;
@@ -232,8 +243,17 @@ export function readInput(dt: number): { input: DriverInput; source: InputSource
   };
   pressedEdges.clear();
   if (pad?.active) source = "Gamepad";
+  else if (touch?.active) source = "Touch";
   else if (keyActive) source = "Keyboard";
-  const edges = pad?.edges ?? [];
+  const edges = touch?.edges.length ? [...(pad?.edges ?? []), ...touch.edges] : (pad?.edges ?? []);
+  if (source === "Touch" && touch) {
+    // Touch values go to the sim as read, like the pad's; keyboard gears / horn still work.
+    const input = { ...touch.input, headlights };
+    input.gearUp ||= keyboard.gearUp;
+    input.gearDown ||= keyboard.gearDown;
+    input.horn ||= keyboard.horn;
+    return { input, source, edges };
+  }
   if (source === "Gamepad" && pad) {
     const input = pad.input;
     // Keyboard gear edges and horn still work alongside a pad.
