@@ -131,7 +131,7 @@ the schedule could hunt (1→2→1). New automatic (`crates/wp_vehicle/README.md
 | 54 | Cars are too bouncy / light and get launched too easily | A (vehicle): damping, bump stops, inertia, restitution, kerb-strike impulses; arcade anti-launch assist | dispatched |
 | 55 | Police don't respond / spawn close enough, or get lost / damaged on the way | E (police): per-unit response log (spawn distance, route, failure cause), re-route / respawn out of sight; durability = B row 48 | dispatched (with row 44) |
 | 56 | Semi-auto (and auto): holding the handbrake also opens the clutch so the rear wheels lock | A (vehicle): auto-clutch decouples while the handbrake is held, smooth re-engage, no stall; both modes | dispatched |
-| 57 | Countersteer assist as a slider with variable aggression | A (vehicle): 0–100 % slide-catch gain (driver override kept), wasm + testbed slider | dispatched |
+| 57 | Countersteer assist as a slider with variable aggression | A (vehicle): rebuilt Wreckfest-style (owner decision 2026-10-20) — velocity-aligned self-centring when not steering, never fights input or the handbrake; slider = centring strength; wasm + testbed slider | dispatched |
 | 58 | Horn should sound for as long as the button is held | J (audio): looped horn sustain (recorded + procedural), release ≤ 50 ms | dispatched |
 | 59 | No option to map a clutch | C (testbed): `clutch` binding (key / pad / wheel pedal) + automatic/manual clutch setting; A: manual clutch + stall/restart in wp_vehicle | dispatched |
 | 60 | Sped right past a cop and no chase started; the cop doesn't reverse or turn around to chase | E (police): fast pass-by detection (sight rate, LOS with tunnels/terrain, heat threshold for blatant speeding), scenarios | dispatched |
