@@ -147,3 +147,23 @@ The owner's difficulty for this lap: Custom, Manual, ABS Full, **Traction contro
 
 - **Launch:** the player feathers the throttle key at the start (0.8–2.8 s: six taps of 0.1–0.4 s), then holds. With TCS Half there is still **visible wheelspin and smoke** in 1st and into 2nd (28–45 mph), and a little tail movement. That matches our planned **TCS Low** (row 105). Wreckfest's levels are **Off / Half / Full**, so we should use the same names.
 - **Racing:** like clip 2, short taps and frequent quick corrections. Throttle stays on through most corners.
+
+## Run 5 setup (screenshots, 2026-10-20)
+
+**Difficulty:** Custom, Manual shifting, **ABS Half**, TCS Off, Stability Off. So Wreckfest's ABS also has Off / Half / Full levels.
+
+**Car tune** (the same #49 muscle car, on 5-step sliders):
+
+| tune | setting |
+|---|---|
+| Suspension | **Stiff** (5/5) |
+| Gear ratio | **Long** (5/5) |
+| Differential | 4/5 (between Limited and **Locked**) |
+| Brake balance | 2/5 (toward **Rear**) |
+
+The car's stat bars show Acceleration 10.0, Top speed 10.0, Cornering 6.7.
+
+**Gaps this shows for WreckPursuit**
+- ABS levels Off / Half / Full (we have on/off).
+- A **per-car tune screen** with 5-step suspension, gear ratio, differential and brake balance. This is separate from the mod tree, is free, and is set per event/garage.
+- Car stat bars (acceleration / top speed / cornering).
