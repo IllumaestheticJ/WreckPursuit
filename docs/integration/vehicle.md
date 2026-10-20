@@ -425,6 +425,9 @@ no contract or car-data change. Model and before/after table: README → "High-s
   `keyboard_catch_at_speed_does_not_snap_back` (fails on the old code).
 - `tests/snapshot.rs::set_state_is_a_close_approximation` tolerance 0.5 → 0.75 m: the coupe
   now carries more speed through that window and sits at the slide threshold (0.27 → 0.60 m).
+- Goldens re-blessed in a `[bless]` commit: regression_grid_24, smoke_coupe_circle,
+  smoke_subset_systems, vehicle_coupe_slalom (keyboard/gamepad-driven; their range checks pass).
+- Outside my crates: `apps/simcli/golden/*` (bless), `docs/PLAYTEST_LOG.md` row 33.
 
 
 ## Lead feedback (round 8, 2026-10-19)
