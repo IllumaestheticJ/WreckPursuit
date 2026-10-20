@@ -343,6 +343,129 @@ default and the round12 changes do not touch these runs).
 **Owner, try:** as step 1; in the tune panel *throttle shaping (opt-in)* now brings back B
 step 3b's light help (rise limit + trim near the envelope), not B step 3's partial throttle.
 
+### Step 2 — lift-off transitions (row 107)
+
+Owner, on step 1: *"works better, but now letting the gas go for transitions is awkward."*
+
+**Measured cause.** In a flick (left drift → lift → swing → right drift) the player presses the
+key toward the next corner while off the gas. In a left drift that key is the *countersteer*
+key, so step 1 read it as **Hold** and kept the old drift: the trace shows the old 27° slide
+held and closing at only ~10°/s for a full second, and the swap mostly never happened
+(table below, *transition* off).
+
+**Changed (`drift.rs`; `steering.rs` untouched).** New mode **Transition** (readout
+*TRANSITION*, purple):
+- *starts* off the throttle (< 10 %) in a drift when the slide crosses to the other side, or
+  heads through zero within 0.4 s at its closing rate, or **the countersteer key is pressed
+  while off the gas** (it was not already holding — a hold needs the throttle);
+- *during* it the hold lets go: released keys straighten (fast rack, as before), a held key
+  steers plainly (no hold, no envelope) so the car can swing through the centre;
+- *ends* when the new drift starts — back on the throttle, or the countersteer key once the
+  slide is on the new side — with a fresh held angle and its own envelope; for its first
+  0.6 s the envelope ignores the look-ahead (the swing builds the new slide fast and the hold's
+  damping catches it) and the key swap is not counted as erratic input. Or it ends when the
+  car settles straight.
+- A lift while already holding the countersteer key (shortening the drift) is unchanged: the
+  hold keeps 70 % authority and the slide closes gently (AbruptLift / Good numbers unchanged).
+- Tune panel: *lift-off transitions* checkbox (off = step 1) for A/B. Snapshot format 9 (drift
+  side + transition state in `DriftState`).
+
+**Measured.** `transition_run` (S-bend, 40 m at 0.6 g, keyboard, TCS/ESC off): the good
+driver holds a left drift 2.5 s, lifts with the keys released for 0.15 s, presses the key
+toward the right-hand corner still off the gas until the slide has swung 2° the other way,
+then that key + throttle to 12°, then the new countersteer key + modulated throttle for the
+rest of the 4 s. *transition s* = lift → 10° on the new side; *wobbles* = slide-direction
+reversals after the swap (0 = clean, more = tank-slapper); *new drift s* = time at 10–50° on
+the new side. `cargo run --release -p wp_vehicle --example drift_lab_c transition`.
+
+Step 2 (transitions on):
+
+| car | help | transition s | peak new-side slide ° | peak yaw rad/s | wobbles | new drift s | spun |
+|---|---|---|---|---|---|---|---|
+| shiro_turbo | 30 % | 0.73 | 27 | 2.05 | 0 | 3.27 | no |
+| shiro_turbo | 60 % | 0.71 | 28 | 2.36 | 0 | 3.29 | no |
+| shiro_turbo | 100 % | 0.62 | 25 | 2.33 | 0 | 3.38 | no |
+| sperber_32 | 30 % | 0.75 | 27 | 2.13 | 0 | 3.25 | no |
+| sperber_32 | 60 % | 0.65 | 21 | 1.96 | 0 | 3.35 | no |
+| sperber_32 | 100 % | 0.58 | 20 | 1.98 | 0 | 3.43 | no |
+| rampart_50 | 30 % | 0.89 | 33 | 2.20 | 0 | 2.04 | no |
+| rampart_50 | 60 % | 0.81 | 27 | 2.20 | 0 | 3.19 | no |
+| rampart_50 | 100 % | 0.71 | 24 | 2.14 | 0 | 3.29 | no |
+| debug_sedan | 30 % | never | 0 | 0.61 | 0 | 0.00 | no |
+| debug_sedan | 60 % | never | 0 | 0.61 | 0 | 0.00 | no |
+| debug_sedan | 100 % | never | 0 | 0.60 | 0 | 0.00 | no |
+| junkyard_beater | 30 % | never | 0 | 0.79 | 0 | 0.00 | no |
+| junkyard_beater | 60 % | never | 0 | 0.78 | 0 | 0.00 | no |
+| junkyard_beater | 100 % | never | 0 | 0.79 | 0 | 0.00 | no |
+
+30 %: spins 0/5, wobbles 0, new drift 1.71 s mean
+
+60 %: spins 0/5, wobbles 0, new drift 1.97 s mean
+
+100 %: spins 0/5, wobbles 0, new drift 2.02 s mean
+
+Step 1 behaviour (`DRIFT_TUNING='{"transition":false}'`):
+
+| car | help | transition s | peak new-side slide ° | peak yaw rad/s | wobbles | new drift s | spun |
+|---|---|---|---|---|---|---|---|
+| shiro_turbo | 30 % | never | 0 | 0.00 | 0 | 0.00 | no |
+| shiro_turbo | 60 % | never | 0 | 0.00 | 0 | 0.00 | no |
+| shiro_turbo | 100 % | never | 0 | 0.60 | 0 | 0.00 | no |
+| sperber_32 | 30 % | never | 0 | 0.00 | 0 | 0.00 | no |
+| sperber_32 | 60 % | 2.05 | 21 | 0.94 | 0 | 1.95 | no |
+| sperber_32 | 100 % | never | 0 | 0.62 | 0 | 0.00 | no |
+| rampart_50 | 30 % | 2.10 | 24 | 1.02 | 0 | 1.90 | no |
+| rampart_50 | 60 % | never | 0 | 0.00 | 0 | 0.00 | no |
+| rampart_50 | 100 % | 1.63 | 25 | 0.95 | 0 | 2.37 | no |
+
+30 %: spins 0/3, wobbles 0, new drift 0.63 s mean
+
+60 %: spins 0/3, wobbles 0, new drift 0.65 s mean
+
+100 %: spins 0/3, wobbles 0, new drift 0.79 s mean
+
+Reading it: at **60 % the swap takes 0.65–0.81 s, no spin, no wobble, and the new drift is
+held 3.2–3.4 s of the remaining ~3.3 s** (all three RWD cars, also at 30 % and 100 %); peak
+new-side slide 21–28° (no overshoot past the envelope), peak yaw ~2.0–2.4 rad/s in the swing.
+Before, the same inputs swapped in 3 of 9 runs, 1.6–2.1 s after the lift. The front-heavy cars do not get the
+first drift going in this corner, so there is nothing to transition (as in step 1).
+
+Gamepad preset (half-weight intent modes), same key-style script (RWD): the key-style driver
+already struggles to hold the first drift on a gamepad (step 1 table), so these mostly spin
+before the swap — an analog driver is still the missing measurement:
+
+| shiro_turbo | 60 % | 2.83 | 32 | 0.28 | 1 | 0.00 | spun |
+| shiro_turbo | 100 % | 0.65 | 32 | 2.28 | 0 | 1.55 | no |
+| sperber_32 | 30 % | 0.56 | 26 | 0.62 | 1 | 0.00 | spun |
+| sperber_32 | 60 % | 0.63 | 22 | 1.52 | 0 | 1.38 | no |
+| sperber_32 | 100 % | 0.62 | 24 | 1.84 | 0 | 1.65 | no |
+| rampart_50 | 30 % | 0.95 | 35 | 0.43 | 1 | 0.00 | spun |
+| rampart_50 | 60 % | 2.29 | 81 | 2.38 | 1 | 0.40 | spun |
+| rampart_50 | 100 % | 0.65 | 24 | 1.45 | 0 | 1.55 | spun |
+
+30 %: spins 3/3, wobbles 3, new drift 0.00 s mean
+
+60 %: spins 2/3, wobbles 2, new drift 0.59 s mean
+
+100 %: spins 1/3, wobbles 0, new drift 1.58 s mean
+
+Drift and catch tables: re-run, unchanged within noise (Sloppy at 60 % 22/60 vs 23/60,
+AbruptLift ±0.2 s).
+
+**Course.** The 130 m straight after the second hairpin is now an **S-bend**: two linked
+40 m corners (left 40° → right 80° → left 40°, R40, 13.6 m lead-in/out), the loop still closes.
+Cones mark the inside of each corner (left-handers included).
+
+**Owner, try (Drift Lab C, shiro_turbo / rampart_50, TCS/ESC off, 60 %):**
+1. Into the S-bend in a drift: hold the first corner with the countersteer key + throttle.
+2. Lift and press the key toward the next corner (the readout flips to *TRANSITION*): the
+   car should swing through the centre freely, no assist holding the old angle.
+3. As it swings over, get back on the throttle and/or press the new countersteer key: the
+   readout goes to *HOLD* with a fresh *held* angle; no *EXCEEDED* flash on the new side.
+4. Lift without pressing anything new while holding: the drift just shortens gently (no
+   transition), as in step 1.
+5. Untick *lift-off transitions* in the tune panel to feel step 1 again.
+
 ## Known issues seen on the base branch (not from this work)
 
 None in `cargo test -p wp_vehicle` after the step 1b merge (the two round12 failures B listed
