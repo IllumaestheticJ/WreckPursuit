@@ -71,7 +71,7 @@ export interface StyledScene {
   readonly sun: THREE.DirectionalLight;
   readonly groundMaterial: THREE.MeshStandardMaterial;
   /** Graphics quality (render/quality.ts): the post target uses MSAA only when it allows. */
-  readonly quality: { readonly antialias: boolean; readonly lite: boolean };
+  readonly quality: { readonly antialias: boolean; readonly lite: boolean; readonly lampDrawM?: number };
   /** Light-bar glow multiplier for the police helicopters. */
   policeGlow: number;
   /** City draw distance, m (scene.ts; lamp tiles past it are hidden like city tiles). */
@@ -800,6 +800,7 @@ export class ArtStyle {
     if (!c || !c.lamps?.visible) return;
     let far = this.view.drawDistanceM;
     if (camera instanceof THREE.PerspectiveCamera) far = Math.min(far, camera.far);
+    far = Math.min(far, this.view.quality.lampDrawM ?? Infinity);
     const fog = this.view.scene.fog;
     if (fog instanceof THREE.FogExp2 && fog.density > 0) far = Math.min(far, 2.7 / fog.density);
     camera.getWorldPosition(this.camPos);

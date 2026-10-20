@@ -12,7 +12,8 @@
 //         so the game keeps real time (no slow motion) on weak machines.
 //         On a touch device (phone / tablet, src/touch.ts `prefersTouch`) auto = the touch
 //         profile: low, pixel ratio capped at 1, 600 m city / 300 m traffic draw distance, full
-//         car meshes only within 120 m (at most 24 parked cars), parked cars drawn within 350 m, 20 % rain, governor down to 0.6 px ratio (target 30 fps).
+//         car meshes within 120 m, parked-car proxies within 120 m, lamps within 300 m, promoted
+//         cars past 60 m drawn by the fleet, 20 % rain, governor down to 0.3× (target 30 fps).
 // MSAA is a WebGL context attribute: changing it needs a reload.
 //
 // Effects quality (`?fx=low|med|high`, else the stored choice `wp.fx`, else low on the low
@@ -96,16 +97,44 @@ interface Profile {
   propFullMax: number;
   /** Parked cars past this distance (m) are not drawn (render/props.ts). */
   propDrawM: number;
+  /** Parked-car chunks nearer than this (m) draw the low-poly proxy, farther ones a box. */
+  propProxyM: number;
+  /** Street lamps (art style) past this distance (m) are not drawn. */
+  lampDrawM: number;
+  /** Promoted traffic / police cars past this distance (m) are drawn by the fleet, not their
+   * own per-panel view (render/lod.ts). */
+  viewDrawM: number;
 }
 
 function profileFor(mode: GfxMode, software: boolean, touch: boolean): Profile {
-  const common = { maxPixelRatio: 2, trafficM: Infinity, fullLodM: 250, propFullMax: 24, propDrawM: Infinity };
+  const common = { maxPixelRatio: 2, trafficM: Infinity, fullLodM: 250, propFullMax: 24, propDrawM: Infinity, propProxyM: 300, lampDrawM: Infinity, viewDrawM: Infinity };
   const high = { ...common, antialias: true, backdropBlur: true, rain: 1, scale: 1, minScale: 1, drawM: Infinity, adaptive: false };
-  const low = { ...common, antialias: false, backdropBlur: false, rain: 0.3, scale: 0.5, minScale: 0.5, drawM: 900, adaptive: false };
+  // Low: a weak or no GPU (software rasterizers are vertex / draw-call bound: fewer, cheaper
+  // car meshes and lamps matter more than pixels). Full car meshes within 150 m, traffic and
+  // parked-car proxies within 150 m (two-box cars beyond; every prop stays drawn: no invisible
+  // collisions), street lamps within 450 m, promoted traffic / police past 80 m drawn by the
+  // fleet.
+  const low = {
+    ...common,
+    antialias: false,
+    backdropBlur: false,
+    rain: 0.3,
+    scale: 0.5,
+    minScale: 0.5,
+    drawM: 900,
+    adaptive: false,
+    trafficM: 600,
+    fullLodM: 150,
+    propProxyM: 150,
+    lampDrawM: 450,
+    viewDrawM: 80,
+  };
   if (mode === "high") return high;
   if (mode === "low") return low;
-  if (touch) return { ...low, rain: 0.2, minScale: 0.3, drawM: 600, adaptive: true, maxPixelRatio: 1, trafficM: 300, fullLodM: 120, propFullMax: 24, propDrawM: 350 };
-  return software ? { ...low, minScale: 0.35, adaptive: true } : { ...high, minScale: 0.6, adaptive: true };
+  if (touch) return { ...low, rain: 0.2, minScale: 0.3, drawM: 600, adaptive: true, maxPixelRatio: 1, trafficM: 300, fullLodM: 120, propProxyM: 120, lampDrawM: 300, viewDrawM: 60 };
+  // Software GL starts at 0.35× (where the governor always ended up): every governor step
+  // resizes the canvas and the post targets, a long hitch under a software rasterizer.
+  return software ? { ...low, scale: 0.35, minScale: 0.25, adaptive: true } : { ...high, minScale: 0.6, adaptive: true };
 }
 
 /** Frame-time thresholds of the governor (ms, smoothed wall frame time). */
@@ -122,13 +151,21 @@ export class Quality {
   /** Touch device (phone / tablet): the touch profile in auto mode. */
   readonly touch: boolean;
   /** Instanced traffic draw distance, m (LodDirector.trafficDrawM). */
-  readonly trafficDrawM: number;
+  trafficDrawM: number;
   /** Full car mesh distance, m (Fleet.fullLodM, PropView.fullLodM). */
-  readonly fullLodM: number;
+  fullLodM: number;
   /** Full-mesh parked cars at most (PropView.maxFull). */
-  readonly propFullMax: number;
+  propFullMax: number;
   /** Parked car draw distance, m (PropView.drawM). */
-  readonly propDrawM: number;
+  propDrawM: number;
+  /** Parked-car proxy distance, m (PropView.proxyM). */
+  propProxyM: number;
+  /** Street-lamp draw distance, m (render/style.ts). */
+  lampDrawM: number;
+  /** Promoted car view distance, m (LodDirector.viewDrawM). */
+  viewDrawM: number;
+  /** Called after `setMode` changed the profile (main re-applies the LOD distances). */
+  onChange: (() => void) | null = null;
   readonly rendererName: string;
   readonly antialias: boolean;
   /** The low profile (no MSAA, reduced resolution): optional art-style effects are skipped
@@ -156,16 +193,25 @@ export class Quality {
     this.software = SOFTWARE_GL.test(this.rendererName);
     this.touch = prefersTouch();
     this.profile = profileFor(this.mode, this.software, this.touch);
-    this.trafficDrawM = this.profile.trafficM;
-    this.fullLodM = this.profile.fullLodM;
-    this.propFullMax = this.profile.propFullMax;
-    this.propDrawM = this.profile.propDrawM;
+    this.trafficDrawM = this.fullLodM = this.propFullMax = this.propDrawM = this.propProxyM = this.lampDrawM = this.viewDrawM = 0;
+    this.applyLod();
     this.antialias = this.profile.antialias;
     this.lite = !this.profile.backdropBlur;
     this.drawDistanceM = this.profile.drawM;
     this.rainFraction = this.profile.rain;
     this.scale = this.profile.scale;
     this.fx = fxLevel(this.profile.antialias ? "high" : "low");
+  }
+
+  /** Copy the profile's LOD distances to the public fields. */
+  private applyLod(): void {
+    this.trafficDrawM = this.profile.trafficM;
+    this.fullLodM = this.profile.fullLodM;
+    this.propFullMax = this.profile.propFullMax;
+    this.propDrawM = this.profile.propDrawM;
+    this.propProxyM = this.profile.propProxyM;
+    this.lampDrawM = this.profile.lampDrawM;
+    this.viewDrawM = this.profile.viewDrawM;
   }
 
   /** Native pixel ratio cap. */
@@ -208,9 +254,11 @@ export class Quality {
     this.drawDistanceM = this.profile.drawM;
     this.rainFraction = this.profile.rain;
     this.scale = this.profile.scale;
+    this.applyLod();
     this.slowS = this.fastS = 0;
+    this.onChange?.();
     if (this.renderer) {
-      this.renderer.setPixelRatio(Quality.native() * this.scale);
+      this.renderer.setPixelRatio(this.ratio(this.scale));
       document.documentElement.dataset.gfx = mode;
       this.applyBackdrop();
     }
