@@ -362,6 +362,17 @@ impl RoadGraph {
     /// Fastest legal route `from → to` by free-flow travel time (length / limit). Returns the
     /// node sequence including both ends. Deterministic: ties break on node id.
     pub fn shortest_path(&self, from: NodeId, to: NodeId) -> Option<Vec<NodeId>> {
+        self.shortest_path_avoiding(from, to, &[])
+    }
+
+    /// [`RoadGraph::shortest_path`] that never uses the segments in `blocked` (a unit
+    /// re-routing around where it got stuck).
+    pub fn shortest_path_avoiding(
+        &self,
+        from: NodeId,
+        to: NodeId,
+        blocked: &[SegmentId],
+    ) -> Option<Vec<NodeId>> {
         let n = self.nodes.len();
         let mut best = vec![u64::MAX; n];
         let mut prev: Vec<Option<NodeId>> = vec![None; n];
@@ -376,6 +387,9 @@ impl RoadGraph {
                 continue;
             }
             for &(s, next) in self.outgoing(NodeId(node)) {
+                if blocked.contains(&s) {
+                    continue;
+                }
                 let seg = self.segment(s);
                 // Travel time in milliseconds keeps the heap keys integral (deterministic).
                 let ms = (seg.length_m / seg.speed_limit_mps.max(1.0) * 1000.0) as u64 + 1;

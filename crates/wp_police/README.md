@@ -106,7 +106,7 @@ Assignments: `Patrol`, `Respond(incident)`, `Pursue(target)`, `Intercept(point)`
   with no budget only shadows, at ≤ 1.3× the limit.
 - **Tactics**, picked closest pursuer first:
   - `BoxIn`: racer < `boxin_max_kmh` and ≥ 2 budgeted units within 60 m; rear, front-left and front-right slots.
-  - `Pit`: racer < `pit_max_kmh[mode]` (55 Sim / 70 Arcade), ≥ `pit_min_straight_m` of straight
+  - `Pit`: racer < `pit_max_kmh` (60 km/h, both modes), ≥ `pit_min_straight_m` of straight
     road ahead, unit has budget and is off cooldown.
   - `RollingBlock`: a unit ahead of the racer slows in front of it.
   - `Shadow`: hold 25–40 m back, 12 m more per extra unit; close to 8 m when the racer stops.

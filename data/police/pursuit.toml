@@ -57,7 +57,9 @@ night = 0.3
 shadow_m = { min = 25.0, max = 40.0 }
 boxin_max_kmh = 60.0
 boxin_offset_m = [2.6, 6.0]
-pit_max_kmh = { arcade = 70.0, simulation = 55.0 }
+# One value for both damage modes (owner rule 2026-10-20: modes differ only in car damage).
+# 60 km/h sits between the old Arcade 70 / Simulation 55 and near real-world PIT policy limits.
+pit_max_kmh = 60.0
 pit_min_straight_m = 60.0
 pit_engage_m = 12.0
 pit_cooldown_s = 8.0

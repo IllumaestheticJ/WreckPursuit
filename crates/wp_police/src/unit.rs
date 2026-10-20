@@ -381,6 +381,9 @@ pub struct Unit {
     pub controller: Option<DriveController>,
     /// Obstacle awareness: speed cap behind the vehicle ahead, passing state.
     pub avoid: AvoidState,
+    /// Stuck detection and recovery (physical units, [`crate::stuck`]).
+    #[serde(default)]
+    pub unstick: crate::stuck::UnstickState,
 }
 
 impl Unit {
@@ -426,6 +429,7 @@ impl Unit {
             geometry: SteerGeometry::default(),
             controller: None,
             avoid: AvoidState::default(),
+            unstick: crate::stuck::UnstickState::default(),
         }
     }
 

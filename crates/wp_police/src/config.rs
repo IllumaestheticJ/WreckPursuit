@@ -422,8 +422,9 @@ pub struct TacticConfig {
     pub boxin_max_kmh: f32,
     /// Lateral/longitudinal offset of box-in slots, m.
     pub boxin_offset_m: [f32; 2],
-    /// PIT only below this racer speed, km/h, per mode.
-    pub pit_max_kmh: ModeValue<f32>,
+    /// PIT only below this racer speed, km/h (both damage modes: behaviour never depends on
+    /// the mode).
+    pub pit_max_kmh: f32,
     /// PIT only with at least this much straight road ahead of the racer, m.
     pub pit_min_straight_m: f32,
     /// PIT starts from within this distance behind the racer, m.

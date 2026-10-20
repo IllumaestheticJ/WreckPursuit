@@ -36,6 +36,7 @@ pub mod heat;
 pub mod pursuit;
 pub mod radio;
 pub mod scenario;
+pub mod stuck;
 pub mod time;
 pub mod tools;
 pub mod unit;
@@ -167,6 +168,44 @@ pub struct SpawnRecord {
     pub in_sight: bool,
 }
 
+/// How a unit's trip to a reckless-driving call ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ResponseOutcome {
+    /// Got within 100 m of the racer.
+    Arrived,
+    /// Fell behind the racer (it turned away); the call went to another unit.
+    FellBehind,
+    /// Stuck for good and despawned out of sight; the call went to another unit.
+    Stuck(stuck::StuckCause),
+    /// Wrecked or out of service on the way.
+    Wrecked,
+    /// The call ended first (a pursuit started, or it went stale).
+    CallEnded,
+}
+
+/// One unit's trip to a reckless-driving call (`PoliceStats::responses`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ResponseRecord {
+    /// Unit.
+    pub unit: UnitId,
+    /// Call.
+    pub incident: IncidentId,
+    /// Reported racer.
+    pub racer: EntityId,
+    /// Spawned for this call (else an existing unit).
+    pub spawned: bool,
+    /// When it took the call.
+    pub at: SimTime,
+    /// Straight-line distance to the racer then, m.
+    pub start_m: f32,
+    /// Legal driving distance to the racer then, m.
+    pub route_m: f32,
+    /// Stuck events on the way.
+    pub stuck_events: u32,
+    /// When it ended, and how (`None`: still on its way).
+    pub end: Option<(SimTime, ResponseOutcome)>,
+}
+
 /// Counters for tests, tuning and the README perf/behaviour tables.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct PoliceStats {
@@ -222,6 +261,10 @@ pub struct PoliceStats {
     /// Ground units spawned after the session start (pool refills, responders,
     /// reinforcements, tool units).
     pub spawns: Vec<SpawnRecord>,
+    /// Physical units that got stuck, why, and what was done ([`stuck`]).
+    pub stuck: Vec<stuck::StuckRecord>,
+    /// Every unit sent to a reckless-driving call: how far, how long, how it ended.
+    pub responses: Vec<ResponseRecord>,
 }
 
 /// Captain bookkeeping (human or AI).
@@ -291,6 +334,8 @@ pub struct PoliceSystem {
     pub(crate) ext_obstacles_set: bool,
     /// Everything units avoid this tick (rebuilt by `rebuild_obstacles`).
     pub(crate) obstacles: Vec<avoid::Obstacle>,
+    /// The city's parked cars and cones (stuck classification).
+    pub(crate) props: stuck::PropIndex,
 }
 
 impl Default for PoliceSystem {
@@ -315,7 +360,27 @@ impl PoliceSystem {
     /// [`RoadGraph::from_city`]. Pass the same `World` as `world` to [`PoliceSystem::step`] so
     /// line of sight uses its buildings.
     pub fn for_world(cfg: PoliceConfig, world: &wp_world::World, setup: PoliceSetup) -> Self {
-        Self::with_city(cfg, RoadGraph::from_city(world.map()), setup)
+        let mut p = Self::with_city(cfg, RoadGraph::from_city(world.map()), setup);
+        p.set_props(
+            world
+                .static_props()
+                .map(|s| {
+                    let (sn, cs) = wp_math::sin_cos(s.yaw);
+                    stuck::PropBox {
+                        pos: [s.pos[0], s.pos[1]],
+                        half: [s.half_extents[0], s.half_extents[1]],
+                        rot: [sn, cs],
+                    }
+                })
+                .collect(),
+        );
+        p
+    }
+
+    /// The city's parked cars and cones (footprints), so stuck units can tell a prop from a
+    /// wall ([`stuck`]). [`PoliceSystem::for_world`] sets them.
+    pub fn set_props(&mut self, props: Vec<stuck::PropBox>) {
+        self.props = stuck::PropIndex::new(props);
     }
 
     /// Police on a road network.
@@ -362,6 +427,7 @@ impl PoliceSystem {
             ext_obstacles: Vec::new(),
             ext_obstacles_set: false,
             obstacles: Vec::new(),
+            props: stuck::PropIndex::default(),
         }
     }
 
@@ -445,10 +511,13 @@ impl PoliceSystem {
                     a,
                     b,
                     point,
+                    normal,
                     rel_speed,
                     impulse_ns,
-                    ..
-                } => self.on_contact(world, *a, *b, *point, *rel_speed, *impulse_ns),
+                } => {
+                    self.note_unit_contact(*a, *b, *point, *normal);
+                    self.on_contact(world, *a, *b, *point, *rel_speed, *impulse_ns)
+                }
                 _ => {}
             }
         }
@@ -891,9 +960,40 @@ impl PoliceSystem {
         let acc = (want - v).clamp(-brake, accel);
         let disabled = u.wrecked || u.assignment == Assignment::OutOfService;
         let siren = u.cmd.siren;
+        // Un-sticking ([`stuck`]): back out first; otherwise watch for no progress.
+        let now = self.now;
+        if let stuck::Phase::Reverse { from, until, steer } = u.unstick.phase {
+            if graph::dist(pos, from) < stuck::REVERSE_M && now < until && !disabled {
+                // Brake held at a standstill engages reverse; in reverse the pedals swap, so
+                // the brake pedal drives backwards.
+                return Some(VehicleInput {
+                    steer,
+                    brake: 0.6,
+                    siren,
+                    headlights: true,
+                    ..Default::default()
+                });
+            }
+            u.unstick.phase = stuck::Phase::Drive;
+            u.unstick.slow_s = 0.0;
+        }
+        let wants = want > stuck::WANT_MPS && !hold && !disabled;
+        if wants && v.abs() < stuck::SLOW_MPS {
+            u.unstick.slow_s += dt;
+        } else if v.abs() > 2.0 * stuck::SLOW_MPS {
+            u.unstick.slow_s = 0.0;
+        }
+        u.unstick.progress(pos);
         let ctl = u.controller();
         let steer = ctl.steer(pos, heading, [target[0], target[1], 0.0]);
         let (mut throttle, mut brake) = ctl.pedals(v, acc, dt, disabled);
+        let u = &mut self.units[i];
+        if steer.abs() > 0.1 {
+            u.unstick.last_steer = steer;
+        }
+        if u.unstick.slow_s >= stuck::STUCK_AFTER_S {
+            self.on_stuck(i);
+        }
         let mut handbrake = 0.0;
         if hold {
             // The shared controller releases the brake below its hold speed; right behind

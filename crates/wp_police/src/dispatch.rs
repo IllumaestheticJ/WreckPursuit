@@ -248,6 +248,256 @@ impl PoliceSystem {
         }
     }
 
+    /// Physical unit `i` has made no progress for `stuck::STUCK_AFTER_S` while wanting to move:
+    /// log why, back out, re-route on a repeat, give up after `stuck::GIVE_UP_S`.
+    pub(crate) fn on_stuck(&mut self, i: usize) {
+        use crate::stuck::{self, ClassifyInput, Phase, UnstickStep};
+        let now = self.now;
+        let u = &self.units[i];
+        let pos = u.body.pos;
+        let junction_m = self
+            .graph
+            .nodes
+            .iter()
+            .filter(|n| n.junction)
+            .map(|n| dist(n.pos, pos))
+            .fold(f32::MAX, f32::min);
+        let damaged =
+            u.effects.engine_dead || u.must_pull_over(&self.cfg.pursuit) || u.health < 0.25;
+        let (cause, contact_h_m) = stuck::classify(&ClassifyInput {
+            now,
+            pos,
+            alt_m: u.body.alt_m,
+            damaged,
+            vehicle_ahead: u.avoid.blocked_by.is_some(),
+            state: &u.unstick,
+            props: &self.props,
+            junction_m,
+        });
+        let segment = self.graph.nearest_on_road(pos).map(|r| r.segment);
+        let (id, heading) = (u.id, u.body.heading);
+        let st = &mut self.units[i].unstick;
+        st.slow_s = 0.0;
+        st.attempts += 1;
+        let (first_at, first_pos) = *st.first.get_or_insert((now, pos));
+        let mut step = UnstickStep::Reverse;
+        if st.attempts >= 2 && dist(first_pos, pos) <= stuck::SAME_SPOT_M {
+            if let Some(s) = segment {
+                st.blocked.retain(|(b, until)| *b != s && now < *until);
+                st.blocked.push((s, now.plus(stuck::BLOCK_SEGMENT_S)));
+                st.reroute = true;
+                step = UnstickStep::Reroute;
+            }
+        }
+        if now.since(first_at) >= stuck::GIVE_UP_S {
+            st.give_up = true;
+            step = UnstickStep::Respawn;
+        }
+        // Opposite lock to what it was steering; going straight, swing the nose away from
+        // the obstacle it touched (backing with lock toward it).
+        let steer = if st.last_steer.abs() > 0.1 {
+            -st.last_steer.signum()
+        } else {
+            st.world_contact
+                .map(|w| {
+                    let side = heading[0] * w.normal[1] - heading[1] * w.normal[0];
+                    if side > 0.0 {
+                        -1.0
+                    } else {
+                        1.0
+                    }
+                })
+                .unwrap_or(0.0)
+        };
+        st.phase = Phase::Reverse {
+            from: pos,
+            until: now.plus(stuck::REVERSE_MAX_S),
+            steer,
+        };
+        self.stats.stuck.push(stuck::StuckRecord {
+            unit: id,
+            at: now,
+            pos,
+            cause,
+            step,
+            contact_h_m,
+        });
+        if let Some(r) = self
+            .stats
+            .responses
+            .iter_mut()
+            .rev()
+            .find(|r| r.unit == id && r.end.is_none())
+        {
+            r.stuck_events += 1;
+        }
+    }
+
+    /// Think-rate part of un-sticking: re-plan routes around blocked segments, and despawn
+    /// units that gave up once nobody can see them (their call is dispatched again; a patrol
+    /// is refilled out of sight by `maintain_pool`).
+    pub(crate) fn maintain_stuck(&mut self, world: &dyn WorldQuery) {
+        let mut i = 0;
+        while i < self.units.len() {
+            let u = &self.units[i];
+            if u.unstick.reversing() {
+                i += 1;
+                continue;
+            }
+            if u.unstick.reroute {
+                let u = &mut self.units[i];
+                u.unstick.reroute = false;
+                u.cmd.track = crate::unit::Track::default();
+                u.track_s = 0.0;
+            }
+            if self.units[i].unstick.give_up {
+                if self.may_vanish(world, i) {
+                    let id = self.units[i].id;
+                    let cause = self
+                        .stats
+                        .stuck
+                        .iter()
+                        .rev()
+                        .find(|s| s.unit == id)
+                        .map(|s| s.cause)
+                        .unwrap_or(crate::stuck::StuckCause::NoContact);
+                    self.end_response(id, crate::ResponseOutcome::Stuck(cause));
+                    for inc in self.incidents.iter_mut() {
+                        if inc.unit == Some(id) {
+                            inc.unit = None;
+                        }
+                    }
+                    self.despawn(i);
+                    continue;
+                }
+                if let Some(s) = self
+                    .stats
+                    .stuck
+                    .iter_mut()
+                    .rev()
+                    .find(|s| s.unit == self.units[i].id)
+                {
+                    if s.step == crate::stuck::UnstickStep::Respawn {
+                        s.step = crate::stuck::UnstickStep::InSight;
+                    }
+                }
+            }
+            i += 1;
+        }
+    }
+
+    /// Start logging unit `i`'s trip to call `incident` about `racer`.
+    fn open_response(&mut self, i: usize, incident: IncidentId, racer: EntityId) {
+        let Some(rp) = self.racers.get(&racer).map(|r| xy(r.pos)) else {
+            return;
+        };
+        let u = &self.units[i];
+        let route_m = self
+            .graph
+            .nearest_node(u.body.pos)
+            .map(|n| {
+                self.graph.distances_to(rp)[n.0 as usize] + dist(u.body.pos, self.graph.node(n).pos)
+            })
+            .unwrap_or(f32::INFINITY);
+        let spawned = self
+            .stats
+            .spawns
+            .last()
+            .is_some_and(|s| s.unit == u.id && s.at == self.now);
+        let rec = crate::ResponseRecord {
+            unit: u.id,
+            incident,
+            racer,
+            spawned,
+            at: self.now,
+            start_m: dist(u.body.pos, rp),
+            route_m,
+            stuck_events: 0,
+            end: None,
+        };
+        // A unit takes one call at a time.
+        let id = u.id;
+        self.end_response(id, crate::ResponseOutcome::CallEnded);
+        self.stats.responses.push(rec);
+    }
+
+    /// Close unit `id`'s open trip to a call with `outcome`.
+    pub(crate) fn end_response(&mut self, id: crate::UnitId, outcome: crate::ResponseOutcome) {
+        let now = self.now;
+        if let Some(r) = self
+            .stats
+            .responses
+            .iter_mut()
+            .rev()
+            .find(|r| r.unit == id && r.end.is_none())
+        {
+            r.end = Some((now, outcome));
+        }
+    }
+
+    /// Follow every open trip to a call: arrived within 100 m of the racer, wrecked, or the
+    /// call left it (ended, or given to another unit).
+    fn update_responses(&mut self) {
+        const ON_SCENE_M: f32 = 100.0;
+        let now = self.now;
+        for k in 0..self.stats.responses.len() {
+            let r = self.stats.responses[k];
+            if r.end.is_some() {
+                continue;
+            }
+            let outcome = match self.unit_index(r.unit) {
+                None => Some(crate::ResponseOutcome::CallEnded),
+                Some(i) => {
+                    let u = &self.units[i];
+                    let racer = self.racers.get(&r.racer);
+                    if u.wrecked || u.assignment == Assignment::OutOfService {
+                        Some(crate::ResponseOutcome::Wrecked)
+                    } else if racer.is_some_and(|rr| dist(xy(rr.pos), u.body.pos) <= ON_SCENE_M) {
+                        Some(crate::ResponseOutcome::Arrived)
+                    } else if u.assignment
+                        != (Assignment::Respond {
+                            incident: r.incident,
+                        })
+                    {
+                        Some(crate::ResponseOutcome::CallEnded)
+                    } else {
+                        None
+                    }
+                }
+            };
+            if let Some(o) = outcome {
+                self.stats.responses[k].end = Some((now, o));
+            }
+        }
+    }
+
+    /// Remember a bound unit's latest static-world / vehicle contact (stuck classification,
+    /// [`crate::stuck`]). `normal` points from `a` toward `b`.
+    pub(crate) fn note_unit_contact(
+        &mut self,
+        a: EntityId,
+        b: EntityId,
+        point: [f32; 3],
+        normal: [f32; 3],
+    ) {
+        let now = self.now;
+        for (me, other, sign) in [(a, b, 1.0f32), (b, a, -1.0)] {
+            let Some(i) = self.unit_index_by_entity(me) else {
+                continue;
+            };
+            let st = &mut self.units[i].unstick;
+            if other == wp_contracts::WORLD_ENTITY {
+                st.world_contact = Some(crate::stuck::WorldContact {
+                    at: now,
+                    point,
+                    normal: [normal[0] * sign, normal[1] * sign, normal[2] * sign],
+                });
+            } else {
+                st.car_contact = Some(now);
+            }
+        }
+    }
+
     /// Record a racer contact on unit `i`. `apply_damage` is used by the built-in driver
     /// (physical units get damage from `wp_damage` via `sync_unit`).
     ///
@@ -492,8 +742,10 @@ impl PoliceSystem {
         self.update_observations(world);
         self.update_racer_rules(tdt);
         self.check_unit_health();
+        self.maintain_stuck(world);
         self.maintain_pool(world);
         self.dispatch_incidents(world);
+        self.update_responses();
         self.maintain_reinforcements(world);
         self.maintain_helicopters();
         if !self.captain.human {
@@ -895,6 +1147,7 @@ impl PoliceSystem {
             };
             let u = &self.units[i];
             if now.since(u.assigned) > wait && dist(u.body.pos, xy(r.pos)) > far {
+                self.end_response(id, crate::ResponseOutcome::FellBehind);
                 self.incidents[k].unit = None;
                 self.assign(i, Assignment::Idle);
                 self.stats.redispatches += 1;
@@ -912,6 +1165,9 @@ impl PoliceSystem {
             if let Some(i) = unit {
                 self.incidents[k].unit = Some(self.units[i].id);
                 self.assign(i, Assignment::Respond { incident: inc.id });
+                if let IncidentKind::Report { racer } = inc.kind {
+                    self.open_response(i, inc.id, racer);
+                }
             } else if !inc.announced {
                 // Nobody to send: the call still goes out.
                 let text = format!("Dispatch: {}, {:?}.", call_text(&inc), inc.district);
