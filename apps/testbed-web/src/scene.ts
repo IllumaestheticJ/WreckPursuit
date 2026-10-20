@@ -98,11 +98,21 @@ export class SceneView {
       }
       // glTF is +Y up, same as Three: add to the scene, not the Z-up world group.
       // Layers that share a plane in the greybox (bus lanes and parking painted on asphalt,
-      // sidewalks on zone ground) draw over the layer below instead of flickering.
+      // sidewalks, their corner fills and the level lots behind them on zone ground) draw over
+      // the layer below instead of flickering.
       // City v2 adds terrain (ground_* / rock / seabed, smooth-shaded) and a sea plane 0.25 m
       // above sea level (no polygon offset: at long range it would win against the land);
       // walls, kerbs and decks come without normals and are flat-shaded.
-      const layer: Record<string, number> = { bus_lane: 2, parking: 2, sidewalk: 1, asphalt: 1, highway_concrete: 1 };
+      const layer: Record<string, number> = {
+        bus_lane: 2,
+        parking: 2,
+        sidewalk: 1,
+        sidewalk_corner: 1,
+        lot: 1,
+        lot_skirt: 1,
+        asphalt: 1,
+        highway_concrete: 1,
+      };
       gltf.scene.traverse((o) => {
         const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
         for (const mat of m ? (Array.isArray(m) ? m : [m]) : []) {

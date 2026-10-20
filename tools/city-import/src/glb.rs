@@ -573,11 +573,12 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
     // physics terrain the skirts end on.
     if let Some(t) = terrain {
         let ground_z = |q: V2| t.height_at(q);
-        for (a, b) in walks.skirt_feet.iter().chain(&walks.bare_backs) {
-            let bottom = [a, b].map(|p| (ground_z(geom::xy(*p)) - 1.5).min(p[2]));
-            if bottom[0] < a[2] - 0.01 || bottom[1] < b[2] - 0.01 {
-                wall.curtain(&[*a, *b], &bottom, true);
-            }
+        for line in chain_segments(walks.skirt_feet.iter().chain(&walks.bare_backs)) {
+            let bottom: Vec<f32> = line
+                .iter()
+                .map(|p| (ground_z(geom::xy(*p)) - 1.5).min(p[2]))
+                .collect();
+            wall.curtain(&line, &bottom, true);
         }
         // The guard rail `wp_sim` puts just outside a lot-less sidewalk edge: 0.3 m wide,
         // 0.9 m tall (both faces and the top).
@@ -604,6 +605,19 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
     ];
     out.extend(ground);
     out.retain(|p| !p.indices.is_empty());
+    out
+}
+
+/// Consecutive segments `(a, b)` (the next starting exactly where one ends) joined into
+/// polylines, in order.
+fn chain_segments<'a>(segs: impl Iterator<Item = &'a (V3, V3)>) -> Vec<Vec<V3>> {
+    let mut out: Vec<Vec<V3>> = Vec::new();
+    for (a, b) in segs {
+        match out.last_mut() {
+            Some(line) if line.last() == Some(a) => line.push(*b),
+            _ => out.push(vec![*a, *b]),
+        }
+    }
     out
 }
 

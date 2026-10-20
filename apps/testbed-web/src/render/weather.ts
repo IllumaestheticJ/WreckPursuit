@@ -45,7 +45,16 @@ const RAIN_BOX = new THREE.Vector3(70, 36, 70);
 /** Spray particle pool (all cars together). */
 const SPRAY_MAX = 1500;
 /** Road materials that get wet (data/city/*.greybox.glb material names). */
-const WET_MATERIALS = new Set(["asphalt", "highway_concrete", "parking", "sidewalk", "kerb", "bridge"]);
+const WET_MATERIALS = new Set([
+  "asphalt",
+  "highway_concrete",
+  "parking",
+  "sidewalk",
+  "sidewalk_corner",
+  "lot",
+  "kerb",
+  "bridge",
+]);
 
 const RAIN_VERT = /* glsl */ `
   attribute vec3 offset;
