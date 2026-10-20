@@ -53,7 +53,7 @@ tests. Check: `node apps/testbed-web/e2e/audio.mjs` (after the wasm build).
 | Lead (run 5) / E (06) | police units as sim vehicles with `VehicleKind::Police` and `VehicleInput::siren` from the unit's command (pattern: A-6) | sirens on AI units | **done** (run 5 merged): verified by `wp_wasm` test `audio::tests::city_police_sirens_and_traffic_engines_are_heard`; pattern still Auto (A-6 open) |
 | Lead (`wp_sim`) | contacts while sliding (A-4) | scrape loops | scrapes play from the few events above 50 N·s; the sideswipe scenario keeps the expectation pending |
 | B (03) | start emitting `GlassShattered` / `RegionDamaged` (v0.2.0) | exact glass timing, panel rattle | both handled; until B emits, glass is inferred from contacts and nothing rattles |
-| Lead (`wp_wasm/src/audio.rs`) | feed kinematic traffic agents and body-less police units to the director (round 12b request R12b-1 below) | far traffic / unbound police were silent (playtest #47) | `wp_audio::kinematic::cruise_state` is ready and tested; until wired, only physical (≤ 80 m) traffic and bound police units are heard |
+| Lead (`wp_wasm/src/audio.rs`) | feed body-less police units to the director (rest of R12b-1) | an unbound police unit's engine and siren are silent | **kinematic traffic is wired** (owner asked, see "R12b-1 wired" below); police units still need it |
 | I (10) | add `wp_audio` to `lint-determinism::SIM_CRATES` | CI determinism lint | `tests/director.rs::passes_determinism_lint` runs the lint on this crate |
 | C (04) | keep the 3-line hook in `main.ts` when refactoring; maybe a layer toggle for the audio panel | — | — |
 | A (02, `wp_vehicle`) | `Telemetry::throttle` to show the clutch box's rev-match blip in the neutral phase of a downshift (today the rev-match is kinematic and the telemetry throttle stays 0) | the downshift blip would come from the vehicle instead of being inferred | audio infers the blip from the rpm rate (`blip_load`, `shift_rate_*` in `audio_config.json`) |
@@ -86,6 +86,9 @@ tests. Check: `node apps/testbed-web/e2e/audio.mjs` (after the wasm build).
   request A-4 (gating: approach speed + ≥ 1 contact; pending: sustained contacts — 7 events on
   v0.2.0 `main`), golden `apps/simcli/golden/audio_sideswipe_scrape/` (new, `[bless]` commit).
 - `wp_audio` now depends on `wp_police` (pure, wasm-clean) to decode `PoliceEvent` payloads.
+- `crates/wp_wasm/src/audio.rs` (my bridge file, owner request 2026-10-20): kinematic traffic
+  fed to the director (`kinematic_traffic`, `KINEMATIC_TRAFFIC_BASE`, `MAX_KINEMATIC_TRAFFIC`)
+  + test `kinematic_traffic_engines_are_heard`. Nothing outside the file changed.
 
 ## v0.2.0 update (lead run 3)
 - Merged `main` (contract 0.2.0). New `SimEvent::GlassShattered` → glass one-shot at the region
@@ -413,8 +416,8 @@ listen are not in the repo (the checks are against physics, not recordings).
 - Wheelspin on a networked client depends on replicated `WheelState` slip (snapshots carry it).
 - No occlusion by buildings, no tunnel/underpass reverb; interior camera filtering only for
   the modelled engine (row 73).
-- Kinematic traffic (beyond the 80 m physical radius) and police units without a body are
-  silent until the bridge feeds them (request R12b-1; `wp_audio::kinematic` is ready).
+- Kinematic traffic is heard (nearest 16 within 450 m, R12b-1); police units without a body
+  are still silent (rest of R12b-1).
 - TTS via `speechSynthesis` bypasses the Web Audio radio EQ (browser limitation); squelch and
   static go through it. Recorded line packs will use the EQ.
 - No music player; the Music bus exists and is ducked by the scanner.
@@ -570,3 +573,27 @@ kind, horn voice on exactly the held frames, one Play.
 **Seen while checking (for C / lead, not audio):** the horn key differs by page — testbed `Q`
 (`input.ts`, gamepad button 3), net page `H` (and `Q` toggles the siren there), and the UI kit's
 bindings model says horn `H` / gamepad button 10 and puts `Q` on gear-down.
+
+### R12b-1 wired for kinematic traffic (owner request, 2026-10-20)
+`crates/wp_wasm/src/audio.rs::frame_commands` now also feeds kinematic traffic agents
+(`AgentView` with `Lod::Kinematic`): the nearest `MAX_KINEMATIC_TRAFFIC` = 16 within
+`spatial.max_distance_m` (450 m) of the listener, sorted by (distance, agent id), each as
+`DriverKind::Traffic` with `wp_audio::kinematic::cruise_state(def, pos, yaw, speed)`, throttle
+0.3 (0 with brake lights), entity `KINEMATIC_TRAFFIC_BASE | agent id` (0x4000_0000; sim entities
+count up from 1). Model: the car of any physical traffic vehicle, else `simcli::run::TRAFFIC_CAR`
+(loaded once, cached). When an agent is promoted to physical its kinematic id leaves the frame
+(engine fades, 80 ms) and the sim entity's engine starts — a short crossfade at the 80 m edge.
+The director's engine LOD (one layer beyond 40 m) and voice limits keep the cost bounded.
+
+Test: `wp_wasm` `audio::tests::kinematic_traffic_engines_are_heard` (city free drive, 3 s:
+kinematic engines play on their id range, ≤ 16 fed per frame, no unregistered cars, identical
+command stream on two runs). Browser `?bench=24` director time 0.64 → 0.71 ms per frame (two
+runs; a first run read 1.35 ms at a lower frame rate, noise). Checks: clippy, wasm build, tsc,
+`e2e/audio.mjs`, `e2e/audio_samples.mjs` pass.
+
+Not done: body-less police units (no siren / engine until a unit gets a car body).
+
+**After merging the updated `ws/audio`** (lead round-12b merges + the row-73 engine worklet):
+`cargo test -p wp_wasm` all pass (74 + 3, incl. both audio bridge tests); the two `race_tests`
+that failed on the older base (hidden in the workspace run by the simcli golden failure) are
+fixed upstream.
