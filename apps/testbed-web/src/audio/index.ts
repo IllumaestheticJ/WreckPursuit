@@ -107,7 +107,7 @@ export class AudioSystem {
     this.scanner.tts = s.tts;
     this.safe(() => audioBridge.setScannerTier(s.tier));
     // Forget anything the director thinks is playing: it re-plays every loop next frame.
-    this.safe(() => void audioBridge.reset());
+    this.resetDirector();
     this.restartAmbience();
     this.panel.setStatus(`${this.ctx.sampleRate} Hz · max ${this.lib.config.max_voices} voices`);
   }
@@ -117,8 +117,16 @@ export class AudioSystem {
     this.panel.settings.source = source;
     if (!this.pool) return;
     this.pool.source = source;
-    this.safe(() => void audioBridge.reset());
+    this.resetDirector();
     this.restartAmbience();
+  }
+
+  /**
+   * Reset the director and apply the Stop commands it returns (it re-plays every loop on the
+   * next frame). Dropping them left the old loops playing next to the new ones.
+   */
+  private resetDirector(): void {
+    this.safe(() => this.apply(audioBridge.reset()));
   }
 
   /** Current sound source. */
