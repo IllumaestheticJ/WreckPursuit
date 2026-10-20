@@ -12,6 +12,10 @@
 use wp_world::geom::{V2, V3};
 use wp_world::map::CityMap;
 
+/// Ghost window after a reset in place, physics ticks (1 s): the car passes through other
+/// cars, props and debris (`Sim::set_ghost`; extended while it still overlaps a car).
+pub const GHOST_TICKS: u16 = 240;
+
 /// Farthest a reset may move the car to reach a lane, m.
 pub const SNAP_RADIUS_M: f32 = 15.0;
 

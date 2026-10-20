@@ -1259,6 +1259,11 @@ async function main(): Promise<void> {
     scene.signals.update(sim.signalStates(), wi[W.night], rig.camera.position);
     prof.lap("traffic");
 
+    // A car reset in place is a ghost for ~1 s (passes through traffic): it blinks meanwhile.
+    {
+      const pv = app.views.get(app.player);
+      if (pv) pv.root.visible = sim.ghostTicks(app.player) === 0 || Math.floor(now / 125) % 2 === 0;
+    }
     const focusView = app.views.get(app.focus) ?? null;
     if (focusTel) {
       plots.push(wi[W.tick] / 240, focusTel);

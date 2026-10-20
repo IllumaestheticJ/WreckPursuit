@@ -68,6 +68,56 @@ pub fn chassis_on_wheels_groups() -> InteractionGroups {
     )
 }
 
+/// Collider `user_data` bit of a ghosted vehicle chassis (see [`GhostHooks`]).
+pub const GHOST_USER_BIT: u128 = 1;
+
+/// Collider `user_data` bit of a city prop (parked car, cone, bin): never solid for a ghost,
+/// even while it rests as a fixed body.
+pub const PROP_USER_BIT: u128 = 2;
+
+/// Contact filter for ghosted vehicles (a car reset in place, playtest row 65). A ghost chassis
+/// keeps its contacts with static world geometry (ground slab, roads, terrain, sidewalks,
+/// buildings, rails, tunnel boxes, scenario barriers: colliders without a body or on a fixed
+/// body) and passes through everything that moves: other cars, props and debris. Only pairs
+/// with a ghost reach this hook (ghost chassis carry `ActiveHooks::FILTER_CONTACT_PAIRS`), so
+/// every other pair keeps Rapier's default handling. Stateless: deterministic.
+pub struct GhostHooks;
+
+impl PhysicsHooks for GhostHooks {
+    fn filter_contact_pair(&self, ctx: &PairFilterContext) -> Option<SolverFlags> {
+        let c1 = &ctx.colliders[ctx.collider1];
+        let c2 = &ctx.colliders[ctx.collider2];
+        let g1 = c1.user_data & GHOST_USER_BIT != 0;
+        let g2 = c2.user_data & GHOST_USER_BIT != 0;
+        if !g1 && !g2 {
+            return Some(SolverFlags::default());
+        }
+        if g1 && g2 {
+            return None;
+        }
+        let (other, other_body) = if g1 {
+            (c2, ctx.rigid_body2)
+        } else {
+            (c1, ctx.rigid_body1)
+        };
+        let static_world = other.user_data & PROP_USER_BIT == 0
+            && other_body.is_none_or(|h| ctx.bodies.get(h).is_some_and(|b| b.is_fixed()));
+        static_world.then(SolverFlags::default)
+    }
+}
+
+/// Mark (or unmark) a chassis collider as a ghost for [`GhostHooks`].
+pub fn set_ghost_flags(col: &mut Collider, ghost: bool) {
+    let hooks = col.active_hooks();
+    if ghost {
+        col.user_data |= GHOST_USER_BIT;
+        col.set_active_hooks(hooks | ActiveHooks::FILTER_CONTACT_PAIRS);
+    } else {
+        col.user_data &= !GHOST_USER_BIT;
+        col.set_active_hooks(hooks.difference(ActiveHooks::FILTER_CONTACT_PAIRS));
+    }
+}
+
 /// Interaction groups of terrain colliders.
 pub fn terrain_groups() -> InteractionGroups {
     InteractionGroups::new(TERRAIN_GROUP, Group::ALL, InteractionTestMode::And)
@@ -240,7 +290,7 @@ impl PhysicsWorld {
             &mut self.multibody_joints,
             &mut self.soft_bodies,
             &mut self.ccd,
-            &(),
+            &GhostHooks,
             &(),
         );
     }

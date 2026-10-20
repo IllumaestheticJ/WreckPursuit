@@ -416,15 +416,24 @@ pub fn reset_vehicle(entity: u32) -> Result<(), JsValue> {
 /// Reset in place (testbed R, playtest row 65): the car goes back on its wheels at rest on the
 /// nearest clear lane within 15 m, heading its own way, and is fully repaired — except in a
 /// career run, where repairs are bought in the garage. Heat, pursuit and race progress carry
-/// on. Logged as a replay op. Returns `{ x, y, yaw, on_lane, repaired }` as JSON.
+/// on. The car is a ghost for 1 s (passes through other cars, props and debris). Logged as
+/// replay ops. Returns `{ x, y, yaw, on_lane, repaired, ghost_ticks }` as JSON.
 #[wasm_bindgen]
 pub fn reset_in_place(entity: u32) -> Result<String, JsValue> {
     let repair = !career::career_run_active();
     with(|s| s.reset_in_place(EntityId(entity), repair)).map(|p| {
         json(&serde_json::json!({
             "x": p.xy[0], "y": p.xy[1], "yaw": p.yaw, "on_lane": p.on_lane, "repaired": repair,
+            "ghost_ticks": reset::GHOST_TICKS,
         }))
     })
+}
+
+/// Physics ticks a vehicle stays a ghost after a reset in place (0 = solid; see
+/// `wp_sim::Sim::set_ghost`). The testbed draws ghost cars translucent.
+#[wasm_bindgen]
+pub fn ghost_ticks(entity: u32) -> Result<u32, JsValue> {
+    get(|s| s.sim().ghost_ticks(EntityId(entity)).unwrap_or(0))
 }
 
 // ----- state -------------------------------------------------------------------------------
