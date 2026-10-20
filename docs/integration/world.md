@@ -961,3 +961,89 @@ now draws the surface ribbons. Full write-up, numbers and the items left for you
 overlapping roads, turning paths through building lots at nodes 78 / 97, junction heights on
 saddles): `docs/integration/junctions.md`. Please merge `lead/fix-junction-holes` into
 `ws/world` once the lead has merged it.
+
+### Response from D (round 12b) — traffic yields to sirens
+Base: `origin/lead/round12` @ 900261e merged into `ws/world`. New module `wp_world::traffic::siren`
+(replaces the old "slow to 3 m/s near any siren within 60 m" rule); README § *Yielding to sirens*.
+
+**1. Civilians yield to any vehicle with its siren on.** Per driver, per siren unit:
+- *Behind*, same direction (noticed 60–120 m back by the unit's speed; also a slow unit < 30 m
+  back, i.e. one stuck behind the car as in E's row-61 push-through): reaction time by
+  personality (law-abiding 0.5–1.2 s, casual 0.7–1.6, aggressive 1.0–2.0; hash of id + seed, no
+  RNG draws) → signal → slow (≥ 1 m/s², ≤ comfort decel) → move to the kerb inside the lane
+  (body 0.15 m from the lane edge = 0.65 m right of a 3.5 m lane's centre; crawl at 2 m/s while
+  still moving sideways) → stop → wait until the unit is past + 2 s → signal → merge back once
+  nobody is closing in behind. Away from the unit: left only if the unit is < 35 m back and
+  > 0.5 m to the right (e.g. riding the line to the right lane). Multi-lane: forced lane change
+  out of the unit's lane where the next lane has a safe gap (MOBIL safety unchanged).
+  A unit standing still behind for 15 s is given up on (not yielded to again until it moves).
+- *Oncoming* (or a unit stopped facing the car < 30 m ahead): to the kerb, slow to 4 m/s.
+- *Stopped unit* within 40 m otherwise: slow to 5 m/s past it.
+- *Junction*: a driver within 60 m of its stop line does not enter a junction a unit heads for
+  (unit within 70–120 m by speed, or within 20 m), and gives up a permit it can still stop for;
+  cars already in the box keep going. Nobody creeps into a junction to make room (never block
+  the box wins over "creep at a red"; the unit passes the queue on the centre line).
+- Same code in both damage modes (no `DamageMode` branch anywhere).
+- Snapshot: `AgentView::yielding` → existing `traffic_flags::YIELDING`; turn signal towards the
+  kerb while pulling over / waiting, back while merging.
+
+**2. Siren state:** no contract change needed. `wp_police::unit_input` already sets
+`VehicleInput::siren`, `wp_sim::step_fixed` passes `v.input.siren` into
+`TrackedVehicle::siren` for every vehicle, so AI units and a player cop's siren both reach
+traffic. **For E:** a unit passes yielding traffic best hugging the centre line (offset ≈
+−(lane_w/2 − 0.2) from its lane centre): pulled-over cars of both directions leave a 2.6 m
+corridor there. A unit at its lane centre is still blocked by a car pulled over in that lane
+(0.65 m is all the lane allows); your existing pass-in-the-other-lane logic works too.
+
+**3. LOD fleet:** kinematic agents run the same decision code (lateral offset kept on
+promotion), so far cars are already on the kerb when promoted. Cost: one distance test per
+siren unit per agent per traffic step; nothing runs while no siren is on.
+
+**4. Tests / scenarios.**
+- `crates/wp_world/tests/siren.rs` (stand-in unit, police-car-sized, hugging the centre line at
+  ≤ 16 m/s, braking for anything in its swept path):
+  | case | result (seeds 1/2/3) |
+  |---|---|
+  | 6 cars queued at a red (3×3 grid, signalised crossroads), unit 30 m behind the 6th | all 6 passed in **6.8 / 6.9 / 5.7 s**, 0 contacts |
+  | 6 cars moving at ~9 m/s on a 1 km 1+1 street | all passed, unit never below 13.8 m/s, 0 contacts, all 6 back in lane and driving |
+  | same, siren **off** | 0 yields, 0 of 6 passed, 0 contacts |
+  | 2+2 arterial, unit on the lane line | 4 of 4 passed, unit ≥ 15.3 m/s, 0 contacts |
+  | 2+2, unit in the middle of the left lane | 0 contacts; 2 lane changes out of its lane (only where a gap exists) |
+  | unit crawling 12 m behind a car / then parked | car pulls over and stops; gives up after 15 s, merges, drives off, does not re-yield |
+- simcli (new metric `traffic_siren_yields`; `follow_route` gained optional
+  `lateral_offset_m` / `keep_distance`, and route drivers take `siren`/`headlights`/`horn` from
+  keyframes): `city/siren_traffic_yields_arcade.ron`, `_sim.ron` (identical hashes: damage mode
+  does not change traffic), control `city/siren_traffic_no_siren.ron`. Grid "Garage 2 → Garage 3",
+  density 10: siren on 6 pull-overs, route done at 16 m/s, 0 contacts; siren off 0 pull-overs,
+  52 % of the route (held up behind traffic). Port Vesper's 1+1 streets carry ≤ 8 cars/km
+  even at density 6, so the exact "6 cars within ~10 s" check lives in the wp_world test.
+  Deterministic (`simcli determinism`).
+
+**5. Perf** (release, `SIRENS=8 traffic_bench -- 1 400`): 8 units each 30 m behind a civilian
+(traffic yielding all the time): avg 0.12 ms, p99 0.32 ms per 60 Hz frame (0.054 / 0.12 ms
+without sirens, same run). Budget 2 ms.
+
+**Goldens.** Ran every scenario on `origin/lead/round12` (900261e) and on this branch: hashes
+differ only for `city_blocked_parked_player_grid` (police on), `golden_city_chase` (+ replay),
+`weather_fog_pursuit`, `weather_fog_pursuit_clear` — all have siren units. Only those + the 3 new
+scenarios re-blessed (`[bless]` c7479bd). Every other hash is bit-identical to lead/round12. The
+same 2 scenarios fail on both trees (not mine): `police_tunnel_escape_founders_cut` (no pursuit
+ended) and `world_traffic_soak_observer` (`traffic_agents_min` 310 < 350). Many other goldens are
+stale on lead/round12 itself (same list on both trees) — they need the lead's post-merge bless.
+
+**Lead note (blocked_parked_player_vesper after the 12b merges):** on 900261e it **passes** for me
+in both release and debug simcli, same hash 44b5e478… on `lead/round12` alone and on this branch
+(the siren code does not run without sirens). Seeds 3–19: turn-arounds 1–2 each, passes on all
+but seed 3, which has 1 civilian–civilian collision — identical on lead/round12 (pre-existing,
+not the scenario's seed). If it still fails for you, please send the commit / build profile.
+
+**Changes outside wp_world:** `apps/simcli` (`scenario.rs`: `FollowRoute { lateral_offset_m,
+keep_distance }`, serde-defaulted and skipped when default so existing scenarios/replays are
+unchanged; `run.rs`: `follow_behind` for route drivers, keyframe siren/lights/horn, metric
+`traffic_siren_yields`; `SCENARIOS.md`), scenarios + goldens above.
+
+**Known gaps.** Pull-overs stay inside the lane (no kerb mounting / parking lanes); on multi-lane
+roads a car leaves the unit's lane only where the next lane has a safe gap; no creeping into a
+junction at a red.
+
+**Contract change requests:** none.
