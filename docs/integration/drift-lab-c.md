@@ -48,7 +48,7 @@ merge in step 1b: Drift Lab B step 3b's opt-in shaping is the one kept.)* The ol
 the keyboard throttle filter are machine A's (ws/vehicle); left as they are here (the readout
 still shows ~89–91 % applied for a held key in a slide: that is A's feathering, not this).
 
-**Readout.** `Drift Lab C · HOLD` (mode: straighten / hold / angle-up / exceeded), *slide* vs
+*held* angle, envelope, *throttle key %* → *engine %* (what reached the engine; *trim ×* is
 *held* angle, envelope, *throttle key %* → *applied %* (what reached the engine; *shaping ×* is
 shown only when the opt-in shaping is on), authority, onset.
 
@@ -317,7 +317,7 @@ measurement:
    *slide*; the car keeps the angle (it slowly closes if you only hold the counter key).
 2. Mid-drift, tap the key into the turn: *ANGLE-UP*, *held* climbs, the line tightens. Release it
    and press the counter key again to hold the new angle.
-3. Feather the throttle key: on grows the angle, off shrinks it. *throttle key* vs *applied*
+3. Feather the throttle key: on grows the angle, off shrinks it. *throttle key* vs *engine*
    in the readout should match (any small gap is the old slide feathering on A's side).
 4. Release all steering: *STRAIGHTEN*, the car comes straight.
 5. Floor it at a big angle in shiro_turbo: still spins (*EXCEEDED*). Saw at the keys: the
