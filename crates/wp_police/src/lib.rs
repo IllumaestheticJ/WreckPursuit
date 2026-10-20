@@ -402,8 +402,9 @@ pub struct PoliceSystem {
     pub(crate) props: stuck::PropIndex,
     /// Stuck units back out, re-route and respawn (off: only logged, for measurements).
     pub(crate) unstick_recovery: bool,
-    /// Building footprints and tunnel walls (static feelers, [`walls`]).
-    pub(crate) walls: walls::WallIndex,
+    /// Building footprints and tunnel walls (static feelers, [`walls`]). Never changes after
+    /// construction; shared so clones stay cheap.
+    pub(crate) walls: std::sync::Arc<walls::WallIndex>,
     /// Static feelers on (default); off only for before/after measurements.
     pub(crate) feelers: bool,
     /// Covered roads (tunnels): a racer lost inside one is searched for at its portals.
@@ -470,7 +471,7 @@ impl PoliceSystem {
     /// The city's solid outlines (building footprints, tunnel walls) that physical units feel
     /// for ([`walls`]). [`PoliceSystem::for_world`] sets them.
     pub fn set_walls(&mut self, walls: walls::WallIndex) {
-        self.walls = walls;
+        self.walls = std::sync::Arc::new(walls);
     }
 
     /// Covered road (tunnel) containing `p`, if any (index into `covers`).
@@ -543,7 +544,7 @@ impl PoliceSystem {
             obstacles: Vec::new(),
             props: stuck::PropIndex::default(),
             unstick_recovery: true,
-            walls: walls::WallIndex::default(),
+            walls: std::sync::Arc::new(walls::WallIndex::default()),
             feelers: true,
             covers: Vec::new(),
         }
@@ -1171,11 +1172,16 @@ impl PoliceSystem {
     pub fn sync_unit(&mut self, unit: UnitId, s: UnitSync) {
         if let Some(i) = self.unit_index(unit) {
             let u = &mut self.units[i];
-            // Signed: negative while rolling backwards. With an unsigned speed a unit going
+            // Negative while clearly rolling backwards. With an unsigned speed a unit going
             // backwards "too fast" braked, and in reverse gear the brake pedal drives backwards
             // (`wp_vehicle` swaps the pedals): a runaway reverse into buildings (row 66).
             let heading = graph::normalize(s.heading);
-            let speed = s.vel[0] * heading[0] + s.vel[1] * heading[1];
+            let along = s.vel[0] * heading[0] + s.vel[1] * heading[1];
+            let speed = if along < -BACKWARDS_MPS {
+                along
+            } else {
+                (s.vel[0] * s.vel[0] + s.vel[1] * s.vel[1]).sqrt()
+            };
             u.body = UnitBody {
                 pos: xy(s.pos),
                 heading,
@@ -1270,7 +1276,7 @@ impl PoliceSystem {
         if let stuck::Phase::Swing { until, steer } = u.unstick.phase {
             if facing < stuck::SWING_DONE_COS && now < until && !disabled {
                 // In reverse the pedals swap: brake drives backwards, throttle brakes.
-                let (throttle, brake) = reverse_pedals(v, 1.0);
+                let (throttle, brake) = reverse_pedals(v, 1.0, SWING_REVERSE_MAX_MPS);
                 return Some(VehicleInput {
                     steer,
                     throttle,
@@ -1377,7 +1383,7 @@ impl PoliceSystem {
             if graph::dist(pos, from) < dist_m && now < until && !disabled {
                 // Brake held at a standstill engages reverse; in reverse the pedals swap, so
                 // the brake pedal drives backwards.
-                let (throttle, brake) = reverse_pedals(v, 0.6);
+                let (throttle, brake) = reverse_pedals(v, 0.6, REVERSE_MAX_MPS);
                 return Some(VehicleInput {
                     steer,
                     throttle,
@@ -1396,7 +1402,12 @@ impl PoliceSystem {
         if let stuck::Phase::Push { from, until } = u.unstick.phase {
             let moved = graph::dist(pos, from);
             if moved < PUSH_DONE_M && now < until && !disabled {
-                let tgt = unit::lane_point(&u.cmd.track, s + look.min(8.0), offset - PUSH_SIDE_M);
+                // Straight ahead, a little left (nudging the blocker to the kerb): a shove,
+                // not a turn (steering for the track swung units across the road).
+                let tgt = graph::add(
+                    graph::add(pos, graph::scale(heading, PUSH_AHEAD_M)),
+                    graph::scale(graph::perp_left(heading), PUSH_SIDE_M),
+                );
                 let ctl = u.controller();
                 let steer = ctl.steer(pos, heading, [tgt[0], tgt[1], 0.0]);
                 let acc = (av.push_mps - v).clamp(-brake, accel);
@@ -1632,18 +1643,29 @@ const GHOST_PASS_M: f32 = 150.0;
 /// A push-through ends once the unit has moved this far, m.
 const PUSH_DONE_M: f32 = 8.0;
 
+/// A pushing unit aims at a point this far ahead of it, m.
+const PUSH_AHEAD_M: f32 = 8.0;
+
 /// A pushing unit aims this far left of its line (nudging the blocker toward the kerb), m.
 const PUSH_SIDE_M: f32 = 0.8;
 
-/// Fastest a unit backs up in a manoeuvre (three-point turn, backing out), m/s.
+/// A unit moving backwards faster than this reports a negative speed (below it, the speed
+/// magnitude, so settling and creeping at a standstill behave as before), m/s.
+const BACKWARDS_MPS: f32 = 1.0;
+
+/// Fastest a unit backs out of a jam (un-sticking), m/s.
 const REVERSE_MAX_MPS: f32 = 3.0;
 
+/// Fastest a unit reverses in a three-point turn (slower and the turn doesn't come round in
+/// its time), m/s.
+const SWING_REVERSE_MAX_MPS: f32 = 5.0;
+
 /// Pedals for backing up with `pedal` on the brake (which drives backwards in reverse), easing
-/// off and braking (throttle, in reverse) past [`REVERSE_MAX_MPS`]. `v` is signed.
-fn reverse_pedals(v: f32, pedal: f32) -> (f32, f32) {
-    if v < -REVERSE_MAX_MPS {
+/// off and braking (throttle, in reverse) past `max_mps`. `v` is negative going backwards.
+fn reverse_pedals(v: f32, pedal: f32, max_mps: f32) -> (f32, f32) {
+    if v < -max_mps {
         (0.5, 0.0)
-    } else if v < -0.8 * REVERSE_MAX_MPS {
+    } else if v < -0.8 * max_mps {
         (0.0, 0.0)
     } else {
         (0.0, pedal)
