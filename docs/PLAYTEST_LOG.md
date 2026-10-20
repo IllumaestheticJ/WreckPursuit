@@ -129,6 +129,7 @@ the schedule could hunt (1→2→1). New automatic (`crates/wp_vehicle/README.md
 | 52 | The sidewalk should be at the same height as the base of the buildings | helper `lead/fix-junction-holes` (building base meets the sidewalk top along frontages; plinths on slopes) | dispatched |
 | 53 | Hood doesn't crumple enough | R (panels): stronger visual buckling (fold lines, tenting, latch kink), visual only | dispatched |
 | 54 | Cars are too bouncy / light and get launched too easily | A (vehicle): damping, bump stops, inertia, restitution, kerb-strike impulses; arcade anti-launch assist | dispatched |
+| 55 | Police don't respond / spawn close enough, or get lost / damaged on the way | E (police): per-unit response log (spawn distance, route, failure cause), re-route / respawn out of sight; durability = B row 48 | dispatched (with row 44) |
 
 ## 2026-10-19 — step 2: 4-player test on Port Vesper v2 (F, `ws/net`)
 Found by the new 3-minute 4-client test (`crates/wp_net/tests/vesper_e2e.rs`) and the
