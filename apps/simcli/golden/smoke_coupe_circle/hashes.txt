@@ -1,9 +1,9 @@
 # simcli hashes scenario=smoke_coupe_circle systems=world,vehicle,damage,police,net hash_spec=3 contract=0.3.0
 240 a83d48f4bb13aa63
-480 5f8a2a390dc49ef5
-720 9154974f01ebf83d
-960 3ae7d29f4a3178eb
-1200 aed949e6ab2766dd
-1440 2620b88c51b449b4
-1680 12b7f278df86caa8
-1920 f66fc8262091b1a0
+480 b07ff74aff75bb57
+720 3b76bacc91d3f59c
+960 5fe5ca0dbb10491a
+1200 07876b704cc14a08
+1440 3729f5b250eb0799
+1680 28a635309241cd1b
+1920 b35ca04c31b2749a
