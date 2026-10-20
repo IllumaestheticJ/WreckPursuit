@@ -1122,12 +1122,7 @@ fn connected(edges: &[(usize, usize, bool, usize, f32)], keep: &[bool]) -> bool 
 
 /// Half paved width of a style (widest side), m.
 fn half_width(st: &Style, opt: &BuildOptions) -> f32 {
-    let w = match st.class {
-        RoadClass::Highway => opt.highway_lane_width_m,
-        RoadClass::Alley => opt.alley_lane_width_m,
-        _ => opt.lane_width_m,
-    };
-    st.fwd.max(st.bwd) as f32 * w + if st.parking { opt.parking_width_m } else { 0.0 }
+    builder::half_width_of(st.class, st.fwd, st.bwd, st.parking, opt)
 }
 
 /// Pinned flat length at each node (junction box estimate), m.
