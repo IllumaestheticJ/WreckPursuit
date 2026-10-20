@@ -2226,7 +2226,21 @@ pub fn generate_with_report(cfg: &VesperConfig) -> (RoadNetwork, VesperReport) {
         let Some(c) = covered.iter().find(|c| c.name == name) else {
             continue;
         };
-        for (suffix, s) in [("entry", s0), ("exit", s1)] {
+        // "<name> lay-by": the forward kerb lane in the middle of the covered stretch (a
+        // place to hide from the helicopter).
+        let mid = {
+            let sh = CoverShape::new(c);
+            geom::xy(geom::point_at(&c.centre, &sh.cum, sh.length() * 0.5).0)
+        };
+        let lay_by = built.road_lanes[c.road as usize].fwd.last().map(|l| {
+            let pl = &built.lanes[*l as usize].polyline;
+            geom::project(pl, &geom::cumulative(pl), mid).s
+        });
+        for (suffix, s) in [
+            ("entry", s0),
+            ("lay-by", lay_by.unwrap_or(s0)),
+            ("exit", s1),
+        ] {
             if let Some((p, yaw, lane)) = lane_pose(&built, c.road as usize, s, true) {
                 pois.push(Poi {
                     kind: PoiKind::RaceStartGrid,

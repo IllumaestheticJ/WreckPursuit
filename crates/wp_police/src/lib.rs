@@ -72,6 +72,12 @@ use unit::{UnitBody, UnitRole};
 /// Height of a driver's eyes / a car's roof for line-of-sight queries, m.
 pub const EYE_HEIGHT_M: f32 = 1.3;
 
+/// Eye (or sightline target) height for a vehicle whose chassis is at height `z`, m:
+/// [`EYE_HEIGHT_M`] on flat ground, following the car up on terrain.
+pub(crate) fn eye_height_at(z: f32) -> f32 {
+    EYE_HEIGHT_M + (z - 1.0).max(0.0)
+}
+
 /// What the police system sees of a racer each tick.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RacerView {
@@ -426,9 +432,11 @@ impl PoliceSystem {
         b: [f32; 2],
         bz: f32,
     ) -> bool {
-        let eye = |z: f32| EYE_HEIGHT_M + (z - 1.0).max(0.0);
         self.graph.line_of_sight(a, b)
-            && world.line_of_sight([a[0], a[1], eye(az)], [b[0], b[1], eye(bz)])
+            && world.line_of_sight(
+                [a[0], a[1], eye_height_at(az)],
+                [b[0], b[1], eye_height_at(bz)],
+            )
     }
 
     pub(crate) fn unit_index(&self, id: UnitId) -> Option<usize> {

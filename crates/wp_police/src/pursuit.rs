@@ -107,10 +107,13 @@ impl PoliceSystem {
                     UnitKind::Helicopter => {
                         if matches!(u.assignment, Assignment::HeloTrack { target } if target == id)
                             && d <= helo_range
-                            // Looking down from altitude: only tall buildings block.
+                            // Looking down from altitude: only tall buildings, high ground
+                            // and covered roads (tunnels) block. The target point follows the
+                            // car up on terrain like the ground units' eyes do (a fixed
+                            // 1.3 m point sits underground on Port Vesper v2's hills).
                             && world.line_of_sight(
                                 [u.body.pos[0], u.body.pos[1], u.body.alt_m],
-                                [p[0], p[1], crate::EYE_HEIGHT_M],
+                                [p[0], p[1], crate::eye_height_at(pz)],
                             )
                         {
                             o.seen = true;
