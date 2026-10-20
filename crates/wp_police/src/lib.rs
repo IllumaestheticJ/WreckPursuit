@@ -298,6 +298,10 @@ pub struct PoliceStats {
     pub blatant: u32,
     /// Turn-round reverse swings by physical units (target behind them).
     pub swings: u32,
+    /// Units that gave up turning round after [`stuck::MAX_TURNS`] tries on one spot: their
+    /// call was handed back (siren off) and they despawn out of sight.
+    #[serde(default)]
+    pub turn_loops: u32,
     /// Ground units spawned after the session start (pool refills, responders,
     /// reinforcements, tool units).
     pub spawns: Vec<SpawnRecord>,
@@ -1240,7 +1244,9 @@ impl PoliceSystem {
         let hold = u.avoid.limit_mps <= 0.0;
         let acc = (want - v).clamp(-brake, accel);
         let disabled = u.wrecked || u.assignment == Assignment::OutOfService;
+        // Drive as with the siren; sound it unless quiet (`Unit::quiet`).
         let siren = u.cmd.siren;
+        let siren_out = siren && !u.quiet;
         // Turning round toward a target behind (row 60): a reverse swing, not a wide forward
         // U-turn or a drive round the block.
         let now = self.now;
@@ -1264,7 +1270,7 @@ impl PoliceSystem {
                     throttle: if fast { 0.0 } else { 0.5 },
                     brake: if fast { 0.5 } else { 0.0 },
                     handbrake,
-                    siren,
+                    siren: siren_out,
                     headlights: true,
                     ..Default::default()
                 });
@@ -1281,7 +1287,7 @@ impl PoliceSystem {
                     steer,
                     throttle,
                     brake,
-                    siren,
+                    siren: siren_out,
                     headlights: true,
                     ..Default::default()
                 });
@@ -1298,6 +1304,7 @@ impl PoliceSystem {
             && facing < stuck::SWING_BEHIND_COS
             && v < stuck::SWING_MAX_MPS
             && now >= u.unstick.swing_ready
+            && u.unstick.may_turn(now)
             && graph::dist(pos, [target[0], target[1]]) > 6.0;
         // Room for the turning circle (row 66: full-lock turns on narrow streets hit buildings):
         // forward round a centre on the target's side, backwards round one on the other side.
@@ -1328,7 +1335,7 @@ impl PoliceSystem {
             });
             return Some(VehicleInput {
                 brake: 0.8,
-                siren,
+                siren: siren_out,
                 headlights: true,
                 ..Default::default()
             });
@@ -1343,12 +1350,13 @@ impl PoliceSystem {
                 until: now.plus(stuck::UTURN_MAX_S),
                 steer,
             };
+            u.unstick.note_turn(pos, now);
             self.stats.swings += 1;
             return Some(VehicleInput {
                 steer,
                 brake: 0.5,
                 handbrake: 1.0,
-                siren,
+                siren: siren_out,
                 headlights: true,
                 ..Default::default()
             });
@@ -1362,11 +1370,12 @@ impl PoliceSystem {
                 until: now.plus(stuck::SWING_MAX_S),
                 steer,
             };
+            u.unstick.note_turn(pos, now);
             self.stats.swings += 1;
             return Some(VehicleInput {
                 steer,
                 brake: 1.0,
-                siren,
+                siren: siren_out,
                 headlights: true,
                 ..Default::default()
             });
@@ -1388,7 +1397,7 @@ impl PoliceSystem {
                     steer,
                     throttle,
                     brake,
-                    siren,
+                    siren: siren_out,
                     headlights: true,
                     ..Default::default()
                 });
@@ -1416,7 +1425,7 @@ impl PoliceSystem {
                     steer,
                     throttle,
                     brake,
-                    siren,
+                    siren: siren_out,
                     headlights: true,
                     ..Default::default()
                 });
@@ -1513,7 +1522,7 @@ impl PoliceSystem {
             throttle,
             brake,
             handbrake,
-            siren,
+            siren: siren_out,
             headlights: true,
             ..Default::default()
         })

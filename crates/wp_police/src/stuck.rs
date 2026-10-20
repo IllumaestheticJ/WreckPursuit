@@ -72,6 +72,12 @@ pub const BLOCK_SEGMENT_S: f32 = 30.0;
 pub const GIVE_UP_S: f32 = 8.0;
 /// Driving this far from the first event ends the stuck episode, m.
 pub const PROGRESS_M: f32 = 20.0;
+/// Turn-round tries (U-turn, reverse swing, back-out from a stopped racer) within
+/// [`PROGRESS_M`] of the first before the unit stops trying (lead r13-test-fixes §4: a unit
+/// three-pointed for 85 s at a finish line, its siren freezing the traffic round it).
+pub const MAX_TURNS: u32 = 4;
+/// After [`MAX_TURNS`]: no new turn-round for this long; the unit carries on along its road.
+pub const TURN_HOLD_S: f32 = 30.0;
 /// Contacts this recent explain a stuck event, s.
 const CONTACT_WINDOW_S: f32 = 2.0;
 /// A world contact point this close to a parked-car / cone footprint is that prop, m.
@@ -212,9 +218,46 @@ pub struct UnstickState {
     pub(crate) reroute: bool,
     /// Despawn when out of sight.
     pub(crate) give_up: bool,
+    /// Turn-round tries since `turn_first` (see [`MAX_TURNS`]).
+    #[serde(default)]
+    pub(crate) turns: u32,
+    /// Where the current run of turn-round tries started.
+    #[serde(default)]
+    pub(crate) turn_first: Option<[f32; 2]>,
+    /// No new turn-round before this (set after [`MAX_TURNS`]).
+    #[serde(default)]
+    pub(crate) turn_hold: SimTime,
+    /// Gave up turning round here: the think step hands back its call (siren off) and lets
+    /// it despawn out of sight.
+    #[serde(default)]
+    pub(crate) turn_loop: bool,
 }
 
 impl UnstickState {
+    /// Whether a new turn-round may start now (not held after [`MAX_TURNS`]).
+    pub(crate) fn may_turn(&self, now: SimTime) -> bool {
+        now >= self.turn_hold
+    }
+
+    /// Count one turn-round try at `pos`. The [`MAX_TURNS`]th within [`PROGRESS_M`] of the
+    /// first holds turning for [`TURN_HOLD_S`] and flags `turn_loop`.
+    pub(crate) fn note_turn(&mut self, pos: [f32; 2], now: SimTime) {
+        match self.turn_first {
+            Some(p) if dist(p, pos) <= PROGRESS_M => {}
+            _ => {
+                self.turn_first = Some(pos);
+                self.turns = 0;
+            }
+        }
+        self.turns += 1;
+        if self.turns >= MAX_TURNS {
+            self.turns = 0;
+            self.turn_first = None;
+            self.turn_hold = now.plus(TURN_HOLD_S);
+            self.turn_loop = true;
+        }
+    }
+
     /// Whether the unit is turning round (reverse swing or U-turn) right now.
     pub fn swinging(&self) -> bool {
         matches!(self.phase, Phase::Swing { .. } | Phase::UTurn { .. })
@@ -241,6 +284,10 @@ impl UnstickState {
 
     /// Note forward progress: far enough from the first event ends the episode.
     pub(crate) fn progress(&mut self, pos: [f32; 2]) {
+        if self.turn_first.is_some_and(|p| dist(p, pos) > PROGRESS_M) {
+            self.turn_first = None;
+            self.turns = 0;
+        }
         if let Some((_, p)) = self.first {
             if dist(p, pos) > PROGRESS_M {
                 self.first = None;
@@ -404,6 +451,31 @@ pub(crate) fn classify(c: &ClassifyInput) -> (StuckCause, Option<f32>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn turn_round_tries_are_capped_on_one_spot() {
+        let mut st = UnstickState::default();
+        let t0 = SimTime::from_secs(10.0);
+        for k in 0..MAX_TURNS - 1 {
+            st.note_turn([k as f32, 0.0], t0);
+            assert!(!st.turn_loop && st.may_turn(t0));
+        }
+        st.note_turn([2.0, 3.0], t0);
+        assert!(st.turn_loop, "the last try on the same spot gives up");
+        assert!(!st.may_turn(t0.plus(TURN_HOLD_S - 1.0)));
+        assert!(st.may_turn(t0.plus(TURN_HOLD_S)));
+        // Tries spread along the road (it got somewhere in between) never add up.
+        let mut st = UnstickState::default();
+        for k in 0..2 * MAX_TURNS {
+            st.note_turn([0.0, k as f32 * (PROGRESS_M + 1.0)], t0);
+        }
+        assert!(!st.turn_loop);
+        // Driving away clears the count.
+        let mut st = UnstickState::default();
+        st.note_turn([0.0, 0.0], t0);
+        st.progress([0.0, PROGRESS_M + 1.0]);
+        assert_eq!(st.turns, 0);
+    }
 
     #[test]
     fn prop_distance_and_index() {
