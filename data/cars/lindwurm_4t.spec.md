@@ -81,7 +81,7 @@ Peak **220 kW @ 5925 rpm**, **380 N·m @ 1800 rpm**. Idle 750 / redline 6500 / l
 
 ## Drivetrain
 
-6-speed dual-clutch, on-demand clutch-pack rear coupling (95 % front until the fronts slip 5 %, then up to 50 % rear), open diffs with brake-based torque vectoring (assist). Layout **on-demand AWD, 95 % front with the coupling open, up to 50 % rear once the fronts out-spin the rears by 5 %**; front diff: open; rear diff: open. Clutch capacity 1.40 × peak torque = 530 N·m. Shift time 0.08 s.
+6-speed dual-clutch, on-demand clutch-pack rear coupling (95 % front until the fronts slip 5 %, then up to 50 % rear), open diffs with brake-based torque vectoring (assist). Layout **on-demand AWD, 95 % front with the coupling open, up to 50 % rear once the fronts out-spin the rears by 5 %**; front diff: open; rear diff: open. Clutch capacity 1.40 × peak torque = 530 N·m. Shift time 0.18 s.
 
 | Gear | Ratio | Overall | km/h @ redline |
 |---|---|---|---|
@@ -139,8 +139,8 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 5.4 s | 259 km/h | 36.8 m | 0.94 g | — |
-| estimate | 5.3 s | 259 km/h | 36.1 m | 0.97 g | 620 |
+| sim | 5.6 s | 259 km/h | 37.1 m | 0.94 g | — |
+| estimate | 5.5 s | 259 km/h | 36.1 m | 0.97 g | 608 |
 
 ## Damage lattice (`data/lattices/lindwurm_4t.json`)
 

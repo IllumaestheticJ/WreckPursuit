@@ -63,6 +63,7 @@ export class AudioPanel {
   private stats: HTMLDivElement;
   private log: HTMLDivElement;
   private body: HTMLDivElement;
+  private ttsBox: HTMLInputElement | null = null;
 
   constructor(parent: HTMLElement, private h: PanelHandlers) {
     this.root = document.createElement("div");
@@ -134,7 +135,7 @@ export class AudioPanel {
       this.settings.tier = v;
       h.setTier(v);
     });
-    const tts = document.createElement("input");
+    const tts = (this.ttsBox = document.createElement("input"));
     tts.type = "checkbox";
     tts.checked = this.settings.tts;
     tts.addEventListener("change", () => {
@@ -167,8 +168,23 @@ export class AudioPanel {
     this.setStatus("click or press a key to start audio");
   }
 
+  /** Append a titled section to the panel body (siren lab). */
+  addSection(title: string, el: HTMLElement): void {
+    const h = document.createElement("div");
+    h.style.marginTop = "6px";
+    h.innerHTML = `<b>${title}</b>`;
+    this.body.append(h, el);
+  }
+
   private applyOpen(): void {
     this.body.style.display = this.settings.open ? "" : "none";
+  }
+
+  /** Spoken radio lines on / off from outside (game menu "Police radio voice"); saved. */
+  setTts(on: boolean): void {
+    this.settings.tts = on;
+    if (this.ttsBox) this.ttsBox.checked = on;
+    this.save();
   }
 
   save(): void {

@@ -12,6 +12,8 @@ export interface ResetInPlace {
   /** Landed on a lane (false: set upright where it was, no lane within 15 m). */
   on_lane: boolean;
   repaired: boolean;
+  /** Ghost window, physics ticks: the car passes through other cars, props and debris. */
+  ghost_ticks: number;
 }
 
 export interface DriverInput {
@@ -262,6 +264,8 @@ export const sim = {
   /** Reset in place (R): upright at rest on the nearest clear lane within 15 m, heading its own
    * way; repaired unless a career run is active. Heat, pursuit and race progress carry on. */
   resetInPlace: (entity: number): ResetInPlace => JSON.parse(wasm.reset_in_place(entity)),
+  /** Physics ticks the vehicle stays a ghost after a reset in place (0 = solid). */
+  ghostTicks: (entity: number): number => wasm.ghost_ticks(entity),
   entities: (): number[] => Array.from(wasm.entities()),
   states: (): Float32Array => wasm.vehicle_states(),
   statesPrev: (): Float32Array => wasm.vehicle_states_prev(),

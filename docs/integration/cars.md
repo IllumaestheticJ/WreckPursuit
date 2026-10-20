@@ -22,6 +22,119 @@ record, so H can judge setup changes against measurements (`cargo run --release 
   knob for "RWD rotates at the limit", not bars.
 - VALIDATION skidpad / 0-100 / 100-0 are not changed by this branch (metric runs are
   bit-identical), so not re-collected here.
+## Lead request (2026-10-20) — stock shift times + shift mods (owner playtest row 97)
+
+Merged `origin/lead/round12` at `517621f`. "The shifting is a little too fast for unmodified cars —
+modifications should make shift speeds faster."
+
+**1. Stock shift times, clutch gearboxes** (`roster_inputs.py` → car JSON; guide in
+`tools/specsheet/README.md`): manual sports 0.42-0.45 s, economy / hot hatch 0.45-0.50, muscle
+0.50, light-truck manual 0.65, beater 0.70, dual-clutch 0.18. Sports manuals sit at the top of
+the lead's 0.35-0.45 guide so that fully modded (×0.28) lands at ≈ 0.12 s. The lead's
+`debug_coupe` / `debug_sedan` are unchanged (lead-owned, pinned by base vehicle scenarios).
+
+**Torque-converter automatics are deliberately NOT re-based yet** (ironside_440, hauler_1500,
+drayman_cargo and the three police units keep 0.30-0.40 s; my proposed values are in the table).
+Reason: a vehicle-model bug, below. With today's converter shift, a longer `shift_time_s` makes an
+automatic *faster* and its shift *inaudible* — the opposite of row 97 on both counts. I measured
+it, tried the proposed values (police 0.40-0.50 s: the cruiser's WOT shift dip falls to 0.8-1.0
+dB, below J's 1.2 dB "audible" floor in `engine_shift.rs`), and reverted those six cars to their
+exact previous data. They get the proposed values as soon as A's fix lands (one line each).
+
+| car | box | stock s | fully modded s | sim 0-100 s before → now | ¼ mile s @ km/h |
+|---|---|---|---|---|---|
+| `vireo_xs` | manual | 0.25 → **0.45** | 0.13 | 9.47 → 9.78 | 17.1 @ 139 |
+| `kestrel_ts` | manual | 0.25 → **0.42** | 0.12 | 7.13 → 7.37 | 15.4 @ 156 |
+| `shiro_turbo` | manual | 0.22 → **0.42** | 0.12 | 6.45 → 6.56 | 14.8 @ 160 |
+| `hakone_gt` | manual | 0.25 → **0.45** | 0.13 | 5.88 → 6.00 | 14.3 @ 169 |
+| `rampart_50` | manual | 0.25 → **0.50** | 0.14 | 5.83 → 6.18 | 14.0 @ 176 |
+| `ironside_440` | auto (converter) | 0.40 (kept; proposed **0.65**) | 0.11 | 8.18 → 8.18 | 16.2 @ 155 |
+| `sperber_32` | manual | 0.22 → **0.42** | 0.12 | 6.05 → 6.33 | 14.3 @ 166 |
+| `lindwurm_4t` | dual-clutch | 0.08 → **0.18** | 0.05 | 5.44 → 5.58 | 13.8 @ 166 |
+| `lucciola_350` | manual | 0.22 → **0.45** | 0.13 | 4.53 → 4.69 | 12.9 @ 182 |
+| `hauler_1500` | auto (converter) | 0.30 (kept; proposed **0.60**) | 0.08 | 8.10 → 8.10 | 16.2 @ 146 |
+| `sentinel_cruiser` | auto (converter) | 0.30 (kept; proposed **0.50**) | 0.08 | 6.40 → 6.40 | 14.7 @ 164 |
+| `sentinel_wolfhound` | auto (converter) | 0.30 (kept; proposed **0.45**) | 0.08 | 5.92 → 5.92 | 14.2 @ 164 |
+| `sentinel_bastion` | auto (converter) | 0.30 (kept; proposed **0.55**) | 0.08 | 7.97 → 7.97 | 16.0 @ 144 |
+| `junkyard_beater` | manual | 0.55 → **0.70** | 0.20 | 15.46 → 15.70 | 20.3 @ 112 |
+| `tansy_13` | manual | 0.25 → **0.50** | 0.14 | 13.40 → 13.79 | 19.3 @ 120 |
+| `drayman_cargo` | auto (converter) | 0.35 (kept; proposed **0.70**) | 0.10 | 10.86 → 10.86 | 17.7 @ 133 |
+| `furrow_24` | manual | 0.35 → **0.65** | 0.18 | 10.82 → 11.26 | 18.1 @ 124 |
+
+**Bug (→ A, 02 vehicle): on torque-converter automatics a longer shift is *faster*.**
+`sentinel_cruiser` 0-100 at shift_time_s 0.1 / 0.3 / 0.5 / 0.8 / 1.2 s = 6.54 / 6.40 / 6.33 /
+6.27 / 6.21 s (manual `vireo_xs`: 9.26 / 9.55 / 9.85 / 10.33 / 10.95 s, correct). Cause: during a
+converter shift there is no torque cut, the lock-up clutch opens and `Gearbox::total_ratio`
+blends the old and new ratios over the whole shift, so the box acts like a CVT holding the
+engine near peak power for longer, and the rpm falls so gently that `wp_audio`'s rate-based
+shift dip barely registers. A real automatic changes ratio in a short inertia phase (≈ 0.15-0.25
+s) with a torque dip. Suggested fix (A's call): blend the ratio only over the last ≈ 30-40 % of
+the shift and reduce engine torque during it, so shift time costs acceleration as it does for
+clutch boxes. Until then the shift mods also make automatics slightly *slower*; G may want shift
+mods to require a clutch gearbox (no such condition in the mod schema yet; `wp_economy` only).
+
+**Where `shift_time_s` applies:** every shift path in `wp_vehicle` — manual paddles, the
+`auto_gears` assist (player automatic and every AI driver: opponents, police, traffic) and the
+converter boxes (`Gearbox::shift(target, def.drivetrain.shift_time_s)` in `vehicle.rs` /
+`drivetrain.rs`); `wp_economy::estimate` uses it; mods scale it (`mods.rs`). **Audio:** J's
+upshift dip and rev-match blip come from the engine's rpm rate and load each frame, and the gear
+clunk fires when the gear actually changes, so they follow the shift time. One exception, fixed
+(J, see below): the turbo **blow-off** stopped firing on WOT upshifts with the slower shifts.
+
+**2. Mods** (`data/mods/drivetrain.json`, G's folder; data-only, the schema already supports
+it). New line `shifter`: tier 1 **Short-shift Kit** (×0.85, 400) and tier 3 **Sequential
+Shifter** (×0.5, 9 500, requires `drivetrain_gears_race`; "expensive and harsh"). Existing
+×0.9 / ×0.8 (clutch line) and ×0.85 / ×0.7 (gearset line) unchanged. Lines multiply, tiers within
+a line replace each other: ×0.85 (kit alone) … ×0.28 (stage-2 clutch + dog-box + sequential); a
+0.42-0.45 s sports manual ends at 0.12-0.13 s, the 0.18 s dual-clutch at 0.05 s. `VALIDATION.md`
+lists stock → fully modded per car (`specsheet.py` reads the factor from the mod file).
+
+**3. Re-measured.** `collect_results.py` now also records the **quarter mile** (402.336 m,
+elapsed time + trap speed, full sim via `simcli`, auto gears, TCS on;
+`pursuit_probe.quarter_mile`), shown in `VALIDATION.md`. Clutch-gearbox cars lost 0.1-0.45 s to
+100 km/h; two moved out of their bands — `vireo_xs` 9.78 s (8.5-9.5) and `tansy_13` 13.79 s
+(11.5-13.5). Bands not widened and cars not tuned back (the owner asked for slower stock
+shifts; the miss notes give before / after; the bands are road tests with real shifts, so the
+remainder is A's conservative TCS launch). Barriers unchanged. Pursuit: the cruiser still
+reaches the day cap before every cheap and traffic car (beater 5.0 s, Tansy 5.3 s, Furrow 5.6 s,
+Vireo 6.1 s, Drayman 6.3 s at the cap).
+
+**Tests and fixes outside my folders** (intent of each test unchanged):
+- `wp_vehicle/tests/gearbox.rs` (A): `street_cars_shift_crisply` →
+  `street_cars_shift_at_believable_stock_speeds` (clutch boxes 0.35-0.55 s, dual-clutch
+  0.12-0.25 s, debug cars exempt; was "≤ 0.25 s", which row 97 overturns);
+  `kickdown_on_full_throttle` waits shift time + 0.15 s (was a fixed 0.4 s);
+  `shifts_are_rev_matched_and_the_torque_gap_is_short` allows 40 % of the shift + 0.04 s
+  re-engagement (measured 0.208 s at 0.45 s; was 45 % flat).
+- `wp_vehicle/tests/differentials.rs` (A): `clutch_lsd_adds_controllable_oversteer_on_corner_exit`
+  pins `shift_time_s` 0.22 for its cars — an upshift inside the 2 s exit masked the diff
+  (Lucciola +1.7° vs the +2° threshold; passes at 0.22 and 0.30).
+- `wp_audio/src/engine.rs` (J): the blow-off detector's lift window 0.15 → **0.35 s**
+  (`BLOWOFF_LIFT_WINDOW_S`). It fires when the throttle falls from above 0.5 to below 0.2 under
+  boost within the window; a clutch shift ramps the throttle out over 40 % of the shift (≈ 0.13 s
+  to below 0.2 at the Shiro's 0.42 s), longer than the old 75 ms, so the Shiro blew off on 0 of 4
+  WOT upshifts. Now on every one; a slow driver lift (> 0.35 s) still does not blow off.
+- `wp_audio/tests/engine_shift.rs` (J): `every_wot_upshift_dips_and_re_rises` skips the re-rise
+  check when the scripted drive lifts the pedal inside its window (the Rampart's 5→6 now ends
+  0.25 s before the script's fixed lift at 31.05 s; the audio is back at full level on
+  re-engagement).
+- No pinned hash changed. Goldens: standalone debug `simcli goldens`, old vs new data — only
+  `cars_beater_accel` and `cars_beater_top_speed` newly fail; re-blessed (`[bless]`). The base's 49
+  golden failures are unchanged with identical range-expectation failures.
+
+**Open (→ L / lead): `wp_race race_picker::hollins_hill_sprint` now fails** ("only 2 of 4
+finished": two AI racers captured at gate 2). Over `WP_RACE_SEED` 1-5: 11 of 20 racers finish
+with the new shift times vs 16 of 20 before, mostly `Dnf(FinishWindow)` — the field spreads out
+more (each car loses a different amount to its slower shifts) and stragglers miss the window
+after the winner. Not tuned away in car data; the finish window or `min_finish` 3 is L's call.
+
+### Changes outside my folders (row 97)
+- `data/mods/drivetrain.json` (G): two new mods in a new `shifter` line (data only).
+- `crates/wp_vehicle/tests/gearbox.rs`, `crates/wp_vehicle/tests/differentials.rs` (A): test
+  adjustments above.
+- `crates/wp_audio/src/engine.rs`, `crates/wp_audio/tests/engine_shift.rs` (J): blow-off lift
+  window constant and the pedal-held guard above.
+
 ## Lead follow-up 2 (2026-10-20) — beater after A's ride + countersteer work
 
 Merged `origin/lead/round12` at `7a2f19b`. Lead: `front_drive_cars_understeer_mildly` failed
@@ -623,3 +736,12 @@ sentinel_cruiser 1440 → 2390, sentinel_wolfhound 1440 → 2330, shiro_turbo 10
 sperber_32 1230 → 1850, tansy_13 600 → 840, vireo_xs 600 → 900 (hakone_gt unchanged, 1780).
 Rule of thumb for new cars: `handbrake_rear_nm ≥ 1.5 × m × (1 − front_weight_frac) / 2 × g ×
 rear radius`. Please mirror in the spec sheets.
+## Request from B (damage, round 13, 2026-10-20) — cruiser driveshaft (playtest row 87)
+B softened Arcade damage consequences ~20–30 % (`docs/integration/damage.md` "Round 13"). The
+cruiser now outlasts `hakone_gt` in every measured row except three 100 km/h hits in a row
+(wall, offset wall, angled wall), where it ends on hit 3 and the sports car on hit 7: its
+**driveshaft** fails (`intrusion_fail_m` 0.10, the civilian value; the police package already
+has radiator / rack thresholds ×1.5). **Request (optional, H's call):** `sentinel_cruiser`
+driveshaft `intrusion_fail_m` 0.10 → ~0.14 (and `intrusion_total_m` to match). The 0.6 m cabin
+case from round 12b is covered: Arcade's limit is now 0.78 m. Measure with
+`WP_KINDS=mixed,wall-angle WP_SPEEDS=100 cargo run --release -p simcli --example damage_toughness -- arcade sentinel_cruiser hakone_gt`.

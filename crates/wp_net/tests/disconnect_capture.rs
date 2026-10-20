@@ -21,7 +21,7 @@ use wp_contracts::{
 use wp_economy::{AccountStore, CarLocation};
 use wp_net::client::default_damage_factory;
 use wp_net::netsim::{server_world_config, CitySetup, NetSim, WpSim};
-use wp_net::server::{ServerConfig, WANTED_DISCONNECT_GRACE_TICKS};
+use wp_net::server::{ServerConfig, WANTED_DISCONNECT_GRACE_TICKS, WANTED_ROLE_SWITCH_REFUSED};
 use wp_net::sim_link::LinkConfig;
 use wp_net::TICK_HZ;
 use wp_sim::SimConfig;
@@ -255,4 +255,34 @@ fn disconnect_while_not_wanted_is_free() {
     assert_eq!(h.server.stats().abandoned_captures, 0);
     assert_eq!(h.server.stats().busts_settled, 0);
     assert!(pursuit_ends(&mut h, car).is_empty());
+}
+
+/// A wanted racer cannot switch to another role (dropping the racer car would be an
+/// escape): the request is refused with a notice and the same car; once the heat is gone the
+/// switch works.
+#[test]
+fn wanted_racer_cannot_switch_role() {
+    let (mut h, car) = wanted_racer();
+    for role in [Role::PoliceChase, Role::Spectator, Role::PoliceCaptain] {
+        h.request_role(0, role);
+        h.run_secs(0.5);
+        let c = &h.peers[0].client;
+        assert_eq!(c.role(), Role::Racer, "{role:?} refused");
+        assert_eq!(c.own_vehicle(), Some(car), "same car");
+        assert_eq!(
+            c.notices.back().map(String::as_str),
+            Some(WANTED_ROLE_SWITCH_REFUSED)
+        );
+    }
+    assert_eq!(h.server.stats().role_switches_refused, 3);
+    assert!(h.server.sim().wanted_or_pursued(car), "still wanted");
+    assert_eq!(h.server.stats().abandoned_captures, 0);
+
+    // Not wanted: the switch goes through.
+    let (mut h, car) = racer();
+    h.request_role(0, Role::Spectator);
+    h.run_secs(0.5);
+    assert_eq!(h.peers[0].client.role(), Role::Spectator);
+    assert!(!h.server.sim().vehicles().iter().any(|(e, _)| *e == car));
+    assert_eq!(h.server.stats().role_switches_refused, 0);
 }

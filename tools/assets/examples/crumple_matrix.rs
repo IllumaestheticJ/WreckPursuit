@@ -112,4 +112,64 @@ fn main() {
             }
         }
     }
+    // Rear: the car stands parked and a sedan runs into its tail.
+    println!();
+    println!("rear-ended by a sedan, mode {mode}; gap = quarter tail edge behind the rear structure it follows (m, + = floats behind)");
+    println!("| car | km/h | trunk, rear bumper state | trunk fold / pull | quarter disp (L; R) | quarter fold / pull (L; R) | quarter lines | quarter gap (L; R) | rear bumper disp |");
+    println!("|---|---|---|---|---|---|---|---|---|");
+    for car in ["shiro_turbo", "debug_sedan", "sentinel_cruiser"] {
+        let def = load_car(&root, car).unwrap();
+        let mesh = load_mesh(&mesh_path(&root, car)).unwrap();
+        let idx = |name: &str| mesh.parts.iter().position(|p| p.name == name);
+        for kmh in [30.0, 50.0, 70.0] {
+            let mut c = crash::rear_ended(car, &def.lattice, &mesh, kmh, &mode, frame_ticks);
+            let pose = Pose {
+                lattice: &def.lattice,
+                rest: &c.rest,
+                nodes: &c.now,
+                states: &c.states,
+            };
+            let mut m = |name: &str| -> PartCrumple {
+                let Some(i) = idx(name) else {
+                    return PartCrumple::default();
+                };
+                let p = &mesh.parts[i];
+                let (moved, detail) = render_detail(p, &pose, Some(&mut c.memory[i]));
+                measure(p, &moved, &detail, &pose)
+            };
+            let (tr, ql, qr, rb) = (
+                m("trunk"),
+                m("quarter_rl"),
+                m("quarter_rr"),
+                m("bumper_rear"),
+            );
+            let st = |r: BodyRegion| {
+                c.states
+                    .iter()
+                    .find(|s| s.region == r)
+                    .map_or("-".into(), |s| format!("{:?}", s.state))
+            };
+            println!(
+                "| {car} | {kmh:.0} | {}, {} | {:.2} / {:.2} | {:.2} / {:.2}; {:.2} / {:.2} | {:.2} / {:.2}; {:.2} / {:.2} | {}; {} | {:+.2}; {:+.2} | {:.2} / {:.2} |",
+                st(BodyRegion::Trunk),
+                st(BodyRegion::RearBumper),
+                tr.max_fold_m,
+                tr.max_pull_m,
+                ql.max_disp_m,
+                ql.mean_disp_m,
+                qr.max_disp_m,
+                qr.mean_disp_m,
+                ql.max_fold_m,
+                ql.max_pull_m,
+                qr.max_fold_m,
+                qr.max_pull_m,
+                ql.fold_lines,
+                qr.fold_lines,
+                ql.lead_gap_m,
+                qr.lead_gap_m,
+                rb.max_disp_m,
+                rb.mean_disp_m,
+            );
+        }
+    }
 }

@@ -14,7 +14,7 @@
 //     change drawer are rewritten;
 //   * proxy / box: the city is cut into CHUNK_M chunks, each with its own instanced meshes and
 //     a bounding sphere, so Three frustum-culls whole chunks. A chunk within PROXY_M of the
-//     camera shows the fleet's low-poly proxy; farther chunks show a two-box car (24 triangles).
+//     camera shows the fleet's low-poly proxy; farther chunks show a two-box car (20 triangles).
 //     Switching a chunk's tier only toggles visibility: both instance sets are always current.
 // Cones are one InstancedMesh of small orange cones. A moved prop rewrites only its own
 // instances. Coordinates: sim space (+Z up), parented under SceneView.world.
@@ -24,19 +24,23 @@ import type { CarModelInfo, SessionModels } from "../wasm/sim";
 import { sim } from "../wasm/sim";
 import { carMeshNow, loadCarMesh } from "./panels";
 import { FULL_LOD_M, InstancedCar, TAIL, TRAFFIC_PALETTE, fullGeoms, proxyGeoms, styledPaint, type FleetMaterials } from "./fleet";
+import { PALETTE } from "./palette";
+import { artStyle } from "./style";
 
 /** Full-mesh parked cars at most (nearest first; the rest keep their proxy / box). */
 const MAX_FULL = 24;
 /** Re-pick the full-mesh set after the camera moved this far, m. */
 const REPICK_M = 12;
-/** Chunk edge, m. */
-const CHUNK_M = 96;
+/** Chunk edge, m. 192 m (was 96): each chunk costs 4 draw calls in the proxy tier and 1 in the
+ * box tier, and 96 m chunks were ~190 draw calls a frame in the chase (browser-perf.md 12b). */
+const CHUNK_M = 192;
 /** Chunks nearer than this (camera to chunk sphere) draw proxies, farther ones boxes, m
  * (default; `PropView.proxyM`, lower in the low graphics profile). */
 const PROXY_M = 300;
 /** Bounding-sphere slack for knocked props and the car's own extent, m. */
 const SPHERE_PAD_M = 6;
-/** Cone colour (traffic orange) and its faint glow so cones read at night. */
+/** Cone colour (traffic orange) and its faint glow so cones read at night (greybox; low-poly
+ * dark uses PALETTE.propCone / propConeGlow). */
 const CONE_RGB = 0xff6a14;
 const CONE_GLOW = 0x2a0e00;
 
@@ -73,9 +77,12 @@ function boxCarInfo(half: [number, number, number]): CarModelInfo {
 /** Far tier: a unit-cube car (lower body + cabin, white vertex colour = instance livery). */
 function farCarGeometry(): THREE.BufferGeometry {
   const box = (sx: number, sy: number, sz: number, z: number) => {
-    const g = new THREE.BoxGeometry(sx, sy, sz).toNonIndexed();
-    g.translate(0, 0, z);
-    g.deleteAttribute("uv");
+    // Without the -Z face (BoxGeometry's last 6 vertices once non-indexed): it sits on the road
+    // or on the lower box, never seen. 10 triangles a box instead of 12.
+    const full = new THREE.BoxGeometry(sx, sy, sz).toNonIndexed();
+    full.translate(0, 0, z);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute((full.getAttribute("position").array as Float32Array).slice(0, 30 * 3), 3));
     return g;
   };
   const parts = [box(1, 1, 0.6, -0.2), box(0.86, 0.5, 0.4, 0.3)];
@@ -115,6 +122,8 @@ export interface PropStats {
   drawnProxy: number;
   drawnBox: number;
   drawnCones: number;
+  /** Most full-mesh parked cars at once (graphics quality). */
+  maxFull: number;
   /** Props within `rangeM` of the camera, and how many of them have a drawn instance. */
   inRange: number;
   drawnInRange: number;
@@ -179,7 +188,16 @@ export class PropView {
   private readonly paint = new THREE.Color();
   private readonly tail = new THREE.Color(TAIL.off);
   private readonly coneMat = new THREE.MeshStandardMaterial({ color: CONE_RGB, emissive: CONE_GLOW, flatShading: true, roughness: 0.7 });
+  /** Art-style version the props were built for, and the session inputs to rebuild them. */
+  private styleVersion = -1;
+  private lastSet: { list: Float32Array; models: SessionModels; mats: FleetMaterials } | null = null;
   private repicks = 0;
+  /** Re-pick scratch: candidate props, their distances (by prop) and the wanted flags. */
+  private readonly pickIdx: number[] = [];
+  private pickDist = new Float32Array(0);
+  private pickWant = new Uint8Array(0);
+  private readonly byPickDist = (a: number, b: number) => this.pickDist[a] - this.pickDist[b];
+
   private movedWrites = 0;
   private repickWrites = 0;
   private updates = 0;
@@ -190,6 +208,8 @@ export class PropView {
   set(list: Float32Array, models: SessionModels, mats: FleetMaterials): void {
     this.clear();
     this.generation++;
+    this.lastSet = { list, models, mats };
+    this.applyConeStyle();
     this.mats = mats;
     const n = list.length / PROP_STRIDE;
     this.n = n;
@@ -199,6 +219,8 @@ export class PropView {
     this.chunkOf = new Int32Array(n).fill(-1);
     this.slot = new Int32Array(n);
     this.fullSlot = new Int32Array(n).fill(-1);
+    this.pickDist = new Float32Array(n);
+    this.pickWant = new Uint8Array(n);
     const byCell = new Map<string, number[]>();
     let firstCar = -1;
     for (let i = 0, o = 0; i < n; i++, o += PROP_STRIDE) {
@@ -345,6 +367,9 @@ export class PropView {
   /** Per frame: apply `props_moved()` records, pick chunk tiers, re-pick the full-mesh set. */
   update(moved: Float32Array, camera: THREE.Camera): void {
     if (this.n === 0) return;
+    if (this.styleVersion !== artStyle.version) this.restyle();
+    // Low-poly dark: cones glow a little more as night falls so they read outside lamp light.
+    this.coneMat.emissiveIntensity = artStyle.lowpoly ? 1 + PALETTE.propConeNightGlow * artStyle.night : 1;
     const t0 = performance.now();
     // Three (x, y, z) → sim (x, -z, y): `world` is rotated -90° about X.
     const c = camera.getWorldPosition(this.p);
@@ -370,24 +395,58 @@ export class PropView {
     this.updateMaxMs = Math.max(this.updateMaxMs, ms);
   }
 
+  /** Cone material for the current art style (flat-shaded either way). */
+  private applyConeStyle(): void {
+    this.styleVersion = artStyle.version;
+    const low = artStyle.lowpoly;
+    this.coneMat.color.setHex(low ? PALETTE.propCone : CONE_RGB);
+    this.coneMat.emissive.setHex(low ? PALETTE.propConeGlow : CONE_GLOW);
+    this.coneMat.roughness = low ? 1 : 0.7;
+  }
+
+  /**
+   * The art style changed mid-session: parked-car colours are baked into instance colours and
+   * the shared proxy / full geometry (detail vertex colours), so rebuild from the session's
+   * list and put every prop back at its current (possibly knocked) pose. A debug switch, not a
+   * per-frame cost.
+   */
+  private restyle(): void {
+    const last = this.lastSet;
+    if (!last) return this.applyConeStyle();
+    const pose = this.pose.slice();
+    this.set(last.list, last.models, last.mats);
+    if (pose.length !== this.pose.length) return;
+    this.pose.set(pose);
+    for (let i = 0; i < this.n; i++) this.writeInstance(i);
+    this.flush();
+  }
+
   /** Re-pick the nearest parked cars for the full mesh; rewrite only the ones that change drawer. */
   private repick(): void {
     const full = this.full;
     if (!full) return;
     this.lastPick.copy(this.cam);
     this.repicks++;
-    const near: { i: number; d: number }[] = [];
+    // Candidates within the full-mesh distance, nearest first (scratch arrays, no garbage).
+    const near = this.pickIdx;
+    const dist = this.pickDist;
+    near.length = 0;
     for (let i = 0; i < this.n; i++) {
       if (this.kind[i] === PROP_KIND.cone) continue;
       const d = this.distTo(i);
-      if (d < this.fullLodM) near.push({ i, d });
+      if (d < this.fullLodM) {
+        dist[i] = d;
+        near.push(i);
+      }
     }
-    near.sort((a, b) => a.d - b.d);
-    const want = new Set(near.slice(0, this.maxFull).map((x) => x.i));
+    near.sort(this.byPickDist);
+    if (near.length > this.maxFull) near.length = this.maxFull;
+    const want = this.pickWant;
+    for (const i of near) want[i] = 1;
     // Release full slots no longer wanted (swap-remove keeps the slots dense).
     for (let s = this.fullProps.length - 1; s >= 0; s--) {
       const i = this.fullProps[s];
-      if (want.has(i)) continue;
+      if (want[i]) continue;
       const last = this.fullProps.pop()!;
       this.fullSlot[i] = -1;
       if (last !== i) {
@@ -399,7 +458,8 @@ export class PropView {
       this.writeInstance(i); // back to its chunk
       this.repickWrites++;
     }
-    for (const i of want) {
+    for (const i of near) {
+      want[i] = 0;
       if (this.fullSlot[i] >= 0) continue;
       this.fullSlot[i] = this.fullProps.length;
       this.fullProps.push(i);
@@ -413,7 +473,11 @@ export class PropView {
 
   private distTo(i: number): number {
     const o = i * 7;
-    return Math.hypot(this.pose[o] - this.cam.x, this.pose[o + 1] - this.cam.y, this.pose[o + 2] - this.cam.z);
+    // Not Math.hypot: it allocates its argument list (runs for every prop on each re-pick).
+    const dx = this.pose[o] - this.cam.x;
+    const dy = this.pose[o + 1] - this.cam.y;
+    const dz = this.pose[o + 2] - this.cam.z;
+    return Math.sqrt(dx * dx + dy * dy + dz * dz);
   }
 
   /** Number of props of the session (parked cars + cones). */
@@ -487,6 +551,7 @@ export class PropView {
       drawnProxy,
       drawnBox,
       drawnCones: this.cones?.count ?? 0,
+      maxFull: this.maxFull,
       inRange,
       drawnInRange,
       parkedInRange,

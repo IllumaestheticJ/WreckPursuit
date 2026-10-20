@@ -325,8 +325,8 @@ for R. `sim_link` already tests the protocol under that model.
   `RaceResults` messages; contract `RaceEvent`s are forwarded when the sim emits them
   (`wp_race` is not in `wp_sim` yet). `RaceCommand::Ready` from a non-host is acknowledged
   by a notice only.
-- Meta link (`apps/server`): join tokens, presence, kicks and pursuit reports are wired;
-  economy write-through (accounts stay in memory per instance) and race reports are not.
+- Meta link (`apps/server`): join tokens, presence, kicks, economy write-through, race and
+  pursuit reports are wired; territory reports are not (no district-control source).
 - Player police seats are `wp_police` player units and `VehicleKind::Police` in the sim;
   that takes them out of the traffic spawn ring (NET-N9: a lone player cop sees no new
   traffic spawn around it).

@@ -13,6 +13,9 @@ import { audioBridge } from "./bridge";
 import { AudioPanel } from "./panel";
 import { ScannerPlayer } from "./scanner";
 import { EngineSynthHost } from "./engine_host";
+import { CurvePlan, renderSiren, sirenStats } from "./siren";
+import { SirenLab } from "./siren_lab";
+import { SirenRack } from "./siren_rack";
 import { AudioMixer, setListener, VoicePool } from "./voices";
 import type { AudioCommand, AudioLibrary, Bus, DirectorStats, EngineVoicing, RadioPriority, SampleStatus, SoundSource } from "./types";
 
@@ -37,6 +40,14 @@ export class AudioSystem {
   private mixer: AudioMixer | null = null;
   private pool: VoicePool | null = null;
   private scanner: ScannerPlayer | null = null;
+  /** Siren v2 sub-bus and acoustics (null before the AudioContext starts). */
+  sirens: SirenRack | null = null;
+  /** Siren lab in the audio panel. */
+  readonly sirenLab: SirenLab;
+  /** Siren synth counters (`curveErrors` must stay 0) and an offline renderer (e2e). */
+  readonly sirenStats = sirenStats;
+  readonly renderSiren = renderSiren;
+  readonly SirenCurvePlan = CurvePlan;
   private lib: AudioLibrary | null = null;
   private panel: AudioPanel;
   private lastPos: THREE.Vector3 | null = null;
@@ -46,6 +57,10 @@ export class AudioSystem {
   private focus = 0;
   private lineNo = 0;
   private lastStats: DirectorStats | null = null;
+  /** Scanner tier the director was given last ("None" hears nothing). */
+  private tier = "Pro";
+  /** Shows every line the scanner says (the radio strip, main.ts). */
+  onRadioSay: ((unit: number, text: string) => void) | null = null;
   private stopAmbience: (() => void) | null = null;
   /** Engine synthesizer (AudioWorklet), once loaded; null if unavailable. */
   private engineHost: EngineSynthHost | null = null;
@@ -70,7 +85,7 @@ export class AudioSystem {
       start: () => this.start(),
       setMaster: (v) => this.mixer?.master.gain.setTargetAtTime(this.muted ? 0 : v, this.ctx!.currentTime, 0.02),
       setBus: (b, v) => this.mixer?.setUserGain(b, v),
-      setTier: (t) => this.safe(() => audioBridge.setScannerTier(t)),
+      setTier: (t) => this.setTier(t),
       setTts: (on) => {
         if (this.scanner) this.scanner.tts = on;
       },
@@ -81,6 +96,10 @@ export class AudioSystem {
       setEngineVoicing: (v) => this.setEngineVoicing(v),
       setImpacts: (m) => this.setImpacts(m),
     });
+    this.sirenLab = new SirenLab(() =>
+      this.ctx && this.sirens && this.lib && this.ctx.state === "running" ? { ctx: this.ctx, rack: this.sirens, lib: this.lib } : null,
+    );
+    this.panel.addSection("siren lab", this.sirenLab.root);
     (window as unknown as { __wpAudio?: AudioSystem }).__wpAudio = this;
     const kick = () => this.start();
     window.addEventListener("pointerdown", kick);
@@ -114,13 +133,17 @@ export class AudioSystem {
     this.mixer = new AudioMixer(this.ctx);
     this.pool = new VoicePool(this.ctx, this.mixer, this.lib);
     this.pool.source = this.panel.settings.source;
+    this.sirens = new SirenRack(this.ctx, this.mixer, this.lib);
+    this.pool.router = this.sirens;
     this.pool.impacts.enabled = this.panel.settings.impacts !== "recorded";
     this.scanner = new ScannerPlayer(this.pool);
+    this.scanner.onSay = (unit, text) => this.onRadioSay?.(unit, text);
     const s = this.panel.settings;
     this.mixer.master.gain.value = s.master;
     for (const [b, v] of Object.entries(s.buses)) this.mixer.setUserGain(b as Bus, v);
     this.scanner.tts = s.tts;
-    this.safe(() => audioBridge.setScannerTier(s.tier));
+    this.updateVoiceVolume();
+    this.setTier(s.tier);
     // Forget anything the director thinks is playing: it re-plays every loop next frame.
     this.resetDirector();
     this.restartAmbience();
@@ -246,7 +269,38 @@ export class AudioSystem {
       this.mixer.setUserGain("World", v.effects);
       this.mixer.setUserGain("Police", v.police);
     }
+    this.updateVoiceVolume();
     if (ambienceChanged) this.restartAmbience();
+  }
+
+  /** Spoken radio lines follow master × Police bus (speechSynthesis bypasses the mixer). */
+  private updateVoiceVolume(): void {
+    if (!this.scanner) return;
+    const s = this.panel.settings;
+    this.scanner.volume = this.muted ? 0 : s.master * s.buses.Police;
+  }
+
+  /** "Police radio voice" setting: speak radio lines (on) or squelch + text only (off). */
+  setRadioVoice(on: boolean): void {
+    this.panel.setTts(on);
+    if (this.scanner) this.scanner.tts = on;
+  }
+
+  /** Whether radio lines are spoken. */
+  radioVoice(): boolean {
+    return this.panel.settings.tts;
+  }
+
+  /** The scanner hears the police radio now (audio running, a scanner tier): lines reach the
+   * radio strip through RadioSay, in sync with the voice. Otherwise the strip shows police
+   * events directly. */
+  hearsRadio(): boolean {
+    return !this.failed && this.ctx?.state === "running" && !!this.scanner && this.tier !== "None";
+  }
+
+  /** speechSynthesis.speak calls so far (e2e) and whether speech exists in this browser. */
+  speech(): { supported: boolean; attempts: number; voice: boolean } {
+    return { supported: ScannerPlayer.speechSupported(), attempts: this.scanner?.speechAttempts ?? 0, voice: this.radioVoice() };
   }
 
   /** Current player volumes (audio panel settings). */
@@ -257,6 +311,7 @@ export class AudioSystem {
 
   toggleMute(): void {
     this.muted = !this.muted;
+    this.updateVoiceVolume();
     if (this.mixer && this.ctx) {
       this.mixer.master.gain.setTargetAtTime(this.muted ? 0 : this.panel.settings.master, this.ctx.currentTime, 0.02);
     }
@@ -268,8 +323,18 @@ export class AudioSystem {
     this.safe(() => audioBridge.setSiren(this.focus, mode === "Default" ? "" : mode));
   }
 
+  /** Siren mode for any entity (siren lab / e2e): same values as `setSiren`. */
+  setSirenFor(entity: number, mode: string): void {
+    this.safe(() => audioBridge.setSiren(entity, mode === "Default" ? "" : mode));
+  }
+
   /** Scanner tier: "None" | "Basic" | "Pro" | "Elite" (wp_police tiers 0/1/2). */
   setTier(tier: string): void {
+    this.tier = tier;
+    if (this.panel.settings.tier !== tier) {
+      this.panel.settings.tier = tier;
+      this.panel.save();
+    }
     this.safe(() => audioBridge.setScannerTier(tier));
   }
 
@@ -334,6 +399,7 @@ export class AudioSystem {
     }
     const t1 = performance.now();
     this.directorMs += (t1 - t0 - this.directorMs) * 0.1;
+    this.sirens?.frame(out.siren);
     this.apply(out.commands);
     const t2 = performance.now();
     this.applyMs += (t2 - t1 - this.applyMs) * 0.1;
@@ -352,18 +418,23 @@ export class AudioSystem {
       if ("Play" in c) {
         const p = c.Play;
         this.cueCounts[p.cue] = (this.cueCounts[p.cue] ?? 0) + 1;
-        pool.play(p.voice, p.bus, p.pack, p.cue, p.looped, p.params, p.synth);
+        const sr = this.sirens;
+        sr?.noteVoice(p.voice, p.pack);
+        pool.play(p.voice, p.bus, p.pack, p.cue, p.looped, sr ? sr.adjust(p.voice, p.params) : p.params, p.synth);
       } else if ("Set" in c) {
-        pool.set(c.Set.voice, c.Set.params);
+        pool.set(c.Set.voice, this.sirens ? this.sirens.adjust(c.Set.voice, c.Set.params) : c.Set.params);
       } else if ("Stop" in c) {
+        this.sirens?.forget(c.Stop.voice);
         pool.stop(c.Stop.voice, c.Stop.fade_s);
       } else if ("Duck" in c) {
         this.mixer!.duck(c.Duck.bus, c.Duck.gain, c.Duck.fade_s);
       } else if ("RadioSay" in c) {
         const r = c.RadioSay;
         this.scanner!.say(r.line, r.unit, r.text, r.priority, r.voice_pitch);
+        this.sirens?.setRadio(true);
       } else if ("RadioEnd" in c) {
         this.scanner!.end(c.RadioEnd.line, c.RadioEnd.interrupted);
+        this.sirens?.setRadio(false);
       }
     }
   }

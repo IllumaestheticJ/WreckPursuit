@@ -82,7 +82,7 @@ Peak **65 kW @ 5500 rpm**, **124 N·m @ 4000 rpm**. Idle 850 / redline 5800 / li
 
 ## Drivetrain
 
-4-speed manual with a tired second-gear synchro (slow shifts), open front differential. Layout **FWD**; front diff: open; rear diff: open. Drivetrain efficiency 0.78 (default 0.85): worn CV joints, tired wheel bearings and dragging front calipers; class-typical 0.85 minus ≈ 8 % for high mileage. Clutch capacity 1.30 × peak torque = 160 N·m. Shift time 0.55 s.
+4-speed manual with a tired second-gear synchro (slow shifts), open front differential. Layout **FWD**; front diff: open; rear diff: open. Drivetrain efficiency 0.78 (default 0.85): worn CV joints, tired wheel bearings and dragging front calipers; class-typical 0.85 minus ≈ 8 % for high mileage. Clutch capacity 1.30 × peak torque = 160 N·m. Shift time 0.70 s.
 
 | Gear | Ratio | Overall | km/h @ redline |
 |---|---|---|---|
@@ -136,8 +136,8 @@ Sim = `wp_vehicle` metrics on the integrated build (`collect_results.py`, as of 
 
 |  | 0-100 km/h | Top speed | 100-0 km/h | Skidpad | Class index (est.) |
 |---|---|---|---|---|---|
-| sim | 15.5 s | 146 km/h | 46.5 m | 0.69 g | — |
-| estimate | 14.0 s | 150 km/h | 43.6 m | 0.77 g | 326 |
+| sim | 15.7 s | 146 km/h | 46.6 m | 0.69 g | — |
+| estimate | 14.3 s | 150 km/h | 43.6 m | 0.77 g | 324 |
 
 ## Damage lattice (`data/lattices/junkyard_beater.json`)
 

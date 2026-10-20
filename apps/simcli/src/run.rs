@@ -462,6 +462,7 @@ pub fn apply_op(
                 sim.repair_vehicle(id)?;
             }
         }
+        OpKind::Ghost { ticks } => sim.set_ghost(id, u32::from(ticks))?,
     }
     Ok(())
 }

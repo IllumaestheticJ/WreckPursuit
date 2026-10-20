@@ -120,6 +120,7 @@ for f in sorted(os.listdir(os.path.join(A, "cars"))):
     if d["engine_pack"] not in m.values() and d["engine_pack"] != "engine_rec_turbo":
         print(f"warning: cars/{f}: engine_pack {d['engine_pack']} is not a recorded pack")
     d["world_pack"] = "world_rec"
-    if d.get("siren"): d["siren"]["pack"] = "siren_rec"
+    # Police cars use the synthesized siren v2 (playtest row 82); siren_rec stays available.
+    if d.get("siren"): d["siren"]["pack"] = "siren_v2"
     open(p, "w").write(json.dumps(d, indent=2, ensure_ascii=False) + "\n")
 print("ok")

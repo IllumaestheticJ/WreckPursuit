@@ -42,6 +42,13 @@
       #pursuit-banner[data-kind="captured"] b { color: #3b82ff; }
       @keyframes wp-strobe { 50% { color: #3b82ff; } }
       @media (prefers-reduced-motion: reduce) { #pursuit-banner b { animation: none !important; } }
+      /* Police radio strip (row 79, src/radio_strip.ts); the chase readout's own radio lines are
+         hidden in favour of it (they would show the same transmissions, before they are heard). */
+      #radio-strip { position: absolute; top: 120px; left: 50%; width: 480px; overflow: hidden; pointer-events: none; display: flex; flex-direction: column; gap: 2px; font: 13px/1.35 system-ui, sans-serif; z-index: 2; }
+      #radio-strip.empty { visibility: hidden; }
+      #radio-strip .radio-line { background: rgba(8, 12, 18, 0.72); border-left: 3px solid currentColor; padding: 2px 8px; color: #eef2f6; text-shadow: 0 1px 2px #000; border-radius: 2px; transition: opacity 0.3s; }
+      #radio-strip .radio-cs { font: 700 11px/1 ui-monospace, monospace; letter-spacing: 0.06em; margin-right: 6px; }
+      #ui-chase .wp-hud-alerts li[data-ch="dispatch"], #ui-chase .wp-hud-alerts li[data-ch="unit"] { display: none; }
       .feed { max-width: 360px; max-height: 22vh; overflow: auto; font-size: 11px; }
       .comps, .regions { white-space: pre; max-height: 30vh; overflow: auto; }
       .comps .bar { width: 80px; }

@@ -8,6 +8,30 @@ palette and post.
 - **Folders owned:** `docs/art/`, `docs/media/art/`, `tools/assets/`, `apps/testbed-web/src/render/{palette,style,post}.ts`
 - **Contract version built against:** 0.3.0 (no contract or Rust changes)
 
+## Drawn props (`lead/draw-props`, 2026-10-20)
+
+`ws/art` now contains `lead/draw-props` (the lead had already merged `ws/art` into it and
+`ws/art` was fast-forwarded to it, so there was nothing left to resolve). On top:
+
+- **Parked cars** use the fleet's `InstancedCar`, so liveries come from `styledPaint` (the
+  far two-box tier too, already wired by the lead). New `InstancedCar.lightsOff` (set by
+  `props.ts`): parked cars keep **unlit** lenses in low-poly dark: no running tail lights or
+  glowing headlights on parked cars at night.
+- **Cones:** `coneMat` = `PALETTE.propCone` (muted traffic orange) + `propConeGlow`, matte
+  (roughness 1), flat-shaded; the glow rises at night (`emissiveIntensity` = 1 +
+  `propConeNightGlow` (3) × night) so cones read outside lamp light without blooming.
+  Greybox keeps the lead's orange / glow / roughness.
+- **Live style switch:** parked-car colours are baked into instance colours and the shared
+  proxy / full geometry, so `PropView` rebuilds from the session's `props_static()` list on an
+  `artStyle.version` change and puts every prop back at its current (possibly knocked) pose.
+- **e2e:** new check "art style on props" (cone material per style, all props rebuilt in place
+  across greybox → low-poly, sim paused). `e2e/art_shots.mjs` writes
+  `docs/media/art/props_{day,night}.png`.
+- **No shipped session has cones yet:** `props_static()` returns only parked cars in the city
+  chase (3,836) and in all four races (props.md expects cones from race closures). The props
+  shots therefore add six **render-only** cones around a parked car (`PropView.set` with an
+  extended list; the sim never sees them) — labelled as such in the script.
+
 ## Merge of `lead/round12` (round 12b, 2026-10-20)
 
 `origin/lead/round12` merged into `ws/art` (commit 2421dc0 + follow-ups). The style was
@@ -168,10 +192,8 @@ page starts in low-poly dark), so AA costs about what it did before, at twice th
 - New: `e2e/art_shots.mjs`, `e2e/art_perf.mjs`.
 
 ## Requests
-- **Lead (draw-props merge):** in `fleet.ts` keep this branch's `InstancedCar.put` body (it
-  applies the style); in `props.ts` set `coneMat` to `PALETTE.propCone` / `propConeGlow` when
-  `artStyle.lowpoly` (a 4-line change I can do once props are on my base), and re-`put` props
-  on `artStyle.version` change if live switching should recolour parked cars.
+- **World / lead (props):** no session spawns cones yet (`props_static()` has parked cars
+  only). Once race closures place them, `props_{day,night}.png` can frame real ones.
 - **Lead / perf owner:** `perf_check` thresholds were set on a faster container; here greybox
   fails `framesOver250` (21–29) and sits at the RTF floor. Either a per-machine baseline
   (greybox run as reference) or a looser floor would make the gate meaningful on slow boxes.
@@ -184,13 +206,17 @@ page starts in low-poly dark), so AA costs about what it did before, at twice th
   boxes; a light-bar mesh for them is a small follow-up on my side once they are drawn properly.
 
 ## Known gaps
-- Parked props drawn before a live style switch keep their old colours until they move.
 - The low profile has no light pools and no bloom (by design, see above).
 - Windows ignore real floor heights on hills (grid from absolute height).
 - No scrape decals, skid marks or sparks yet (decal pool: prompt 11 later items).
 - Light pools are flat discs at kerb height − 13 cm; on steep grades they can clip slightly.
 - Switching to greybox after starting in low-poly dark draws greybox without canvas AA (reload
   with `?style=greybox` for the old look exactly).
+
+## Published build
+Low-poly dark testbed (ws/art @ 200102b, private, owner): https://claude.ai/artifact/8js9e6J6bjWNFP3Lz6PmTa
+— separate from the main testbed link. Built with `vite build --base=./`; the wasm went through
+`wasm-opt -Oz` (15.9 → 12.2 MB) to fit the 15 MB per-file limit.
 
 ## Lead feedback (round 12, 2026-10-19) — first assignment
 The owner picked **stylised low-poly dark** (`docs/art/STYLE_DECISION.md`). Base this round on

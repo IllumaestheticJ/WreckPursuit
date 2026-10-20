@@ -267,6 +267,8 @@ export class VoicePool {
   /** Recorded samples (default) or each pack's procedural `fallback`. */
   source: SoundSource = "recorded";
 
+  /** Optional per-pack routing (siren v2: siren packs go through the siren rack, HRTF-panned). */
+  router: { dest(pack: string): AudioNode | null; panning(pack: string): PanningModelType } | null = null;
   /** Engine synthesizer (engine_worklet.ts) for `engine_physical` cues, once loaded. */
   engineHost: EngineSynthHost | null = null;
 
@@ -397,8 +399,10 @@ export class VoicePool {
     const t = this.ctx.currentTime;
     const ext = this.impacts.build(voice, pack, cue, def, buf, params, synth, t);
     if (ext === "skip") return;
-    const dest = this.lib.packs[played]?.kind === "Radio" ? this.mixer.radioIn : this.mixer.input(bus);
+    const dest =
+      this.router?.dest(played) ?? (this.lib.packs[played]?.kind === "Radio" ? this.mixer.radioIn : this.mixer.input(bus));
     const { gain, lp, panner } = this.takeStrip(voice.entity !== LOCAL_ENTITY, t);
+    if (panner) panner.panningModel = this.router?.panning(played) ?? "equalpower";
     gain.gain.setValueAtTime(looped ? 0 : params.gain, t);
     if (looped) gain.gain.setTargetAtTime(params.gain, t, 0.02);
     lp.frequency.setValueAtTime(Math.min(params.lowpass_hz || 18000, 18000), t);

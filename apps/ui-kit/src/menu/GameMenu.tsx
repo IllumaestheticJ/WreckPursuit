@@ -577,6 +577,9 @@ function SettingsScreen(props: {
             <Slider id={`gm-vol-${v.id}`} label={`${v.label} volume`} value={s.volumes[v.id]} onChange={(x) => change({ ...s, volumes: { ...s.volumes, [v.id]: x } })} />
           </Row>
         ))}
+        <Row label="Police radio voice" hint={s.radioVoice ? "Units and dispatch speak their lines" : "Squelch and text only"}>
+          <Toggle id="gm-radio-voice" label="Police radio voice" value={s.radioVoice} onChange={(radioVoice) => change({ ...s, radioVoice })} />
+        </Row>
         <h3>Assists</h3>
         <Row label="ABS" hint="Anti-lock brakes">
           <Toggle id="gm-abs" label="ABS" value={s.assists.abs} onChange={(v) => assist("abs", v)} />
