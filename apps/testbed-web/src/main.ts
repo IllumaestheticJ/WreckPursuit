@@ -935,7 +935,7 @@ async function main(): Promise<void> {
       rig.mode === "cinematic" ? nearestPolice(focusView) : null,
     );
     prof.lap("camera");
-    audio.update(rig.camera, sim.lastEventsJson(), app.paused && !replay ? 0 : dt, app.focus);
+    audio.update(rig.camera, sim.lastEventsJson(), app.paused && !replay ? 0 : dt, app.focus, rig.mode);
     prof.lap("audio");
     // Traffic and police after the camera moved: the fleet picks mesh detail by camera distance.
     lod.update(trafficDraw, policeDraw, app.views, rig.camera, app.views.get(app.player)?.root.position ?? null, tS);

@@ -3,6 +3,7 @@
 // their entity); distance attenuation and Doppler are already folded into the parameters by
 // the Rust director, so panners only pan (rolloff 0).
 
+import type { EngineSynthHost } from "./engine_host";
 import { engineInstrument, makeSynth, type EngineMix, type EngineSynth, type SynthVoice } from "./synth";
 import {
   BUSES,
@@ -211,6 +212,9 @@ export class VoicePool {
   /** Recorded samples (default) or each pack's procedural `fallback`. */
   source: SoundSource = "recorded";
 
+  /** Engine synthesizer (engine_worklet.ts) for `engine_physical` cues, once loaded. */
+  engineHost: EngineSynthHost | null = null;
+
   private cue(pack: string, cue: string): CueDef | undefined {
     return this.lib.packs[pack]?.cues[cue];
   }
@@ -322,6 +326,14 @@ export class VoicePool {
     this.free(voice, 0.02);
     if (looped && loading) this.waiting.set(key, { voice, bus, pack, cue, synth, params: { ...commanded } });
     if (!def) return;
+    // The physically modelled engine plays in the engine worklet; its slot output feeds the
+    // usual strip below. No host or no free slot: silent (the director only asks for it once
+    // the host runs).
+    let modelled: SynthVoice | null = null;
+    if ("Synth" in def.source && def.source.Synth.synth === "engine_physical") {
+      modelled = this.engineHost?.acquire(voice.entity, { ...def.source.Synth.params, ...synth }, params) ?? null;
+      if (!modelled) return;
+    }
     if (this.isEngineSynth(voice, bus, def)) {
       this.played.synth++;
       this.enginePlay(voice, def, params, synth, scale);
@@ -351,7 +363,7 @@ export class VoicePool {
       this.played.synth++;
       const name = source && "Synth" in source ? source.Synth.synth : "noise";
       const sp = { ...(source && "Synth" in source ? source.Synth.params : {}), ...synth };
-      syn = makeSynth(this.ctx, name, sp, params, t);
+      syn = modelled ?? makeSynth(this.ctx, name, sp, params, t);
       syn.output.connect(gain);
     }
     // A recorded one-shot can outlast the director's estimate: keep the voice until it ends.
@@ -400,7 +412,8 @@ export class VoicePool {
     // Sirens follow their own clock and must see every phase; others only on change.
     const synthChanged =
       changed(params.freq_hz, l.freq_hz) || pitchMoved || changed(params.load, l.load) || params.phase !== l.phase;
-    if (v.synth && synthChanged) v.synth.update(params, t);
+    // The modelled engine reads every frame (throttle, gear, speed… change without the pitch).
+    if (v.synth && (synthChanged || params.engine)) v.synth.update(params, t);
     if (synthChanged) {
       l.freq_hz = params.freq_hz;
       l.pitch = params.pitch;
@@ -608,6 +621,7 @@ export class VoicePool {
       (v.panner ?? v.lp).disconnect();
       return false;
     });
+    this.engineHost?.flush();
   }
 
   stopAll(): void {
