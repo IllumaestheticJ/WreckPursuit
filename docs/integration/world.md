@@ -1239,3 +1239,26 @@ so those clearances are not applied (crosswalks at junctions are covered by the 
 rule); race routes are planned at run time, so "keep the racing arterials clear" is the
 no-parking rule on arterials plus half occupancy on collectors.
 **Contract change requests:** none.
+**Tests in other crates that this round's traffic moves (requests to their owners, not
+edited):** each passes on a clean `lead/round12` checkout and fails here; all are emergent race
+outcomes tuned on the old traffic. Restoring only the old `density.rs` makes the first two pass
+again, so they are the hour's traffic, not a bug I can see:
+- `wp_opponent` `tests/race.rs::wanted_ai_racer_flees_police_through_the_city` (noon, traffic
+  0.25): a racer other than the wanted one ends `Fled` (the test allows Racing/Busted).
+- `wp_wasm` `crash_replay_tests::race_crash_replays_with_the_judge_and_no_crash_on_the_grid`
+  (`grid_highway_sprint`, 23:00): `debug_park_in_front_of` + 14 m/s no longer produces the
+  "big crash" within 240 ticks.
+- `wp_wasm` `race_tests::short_sprint_with_ai_runs_to_results_and_pays_through_the_economy`
+  (same race): the player wins but the purse is 1,377 vs 5,031 advertised (outside the R5
+  0.75–1.34 band), i.e. the player is wanted at the finish (wanted purse multiplier); with only
+  the old curve restored it fails earlier (finishers / winner time) — so it moves with the
+  parked cars and with the hour.
+Suggested for A/G/F: re-measure against round 13 traffic (night races now run with ~half the
+cars) or pin these tests' traffic/parking (`parked_cars: false`, explicit `traffic_density`).
+*Gate (ws/world @ round 13, on lead/round12 363004c).* fmt, `clippy --workspace --all-targets
+-D warnings`, wasm32 build of `wp_wasm`: pass. `simcli run apps/simcli/scenarios` (release): 78
+pass, 2 fail — the same 2 as on lead/round12 with identical hashes
+(`police_tunnel_escape_founders_cut`, `…_control`). `simcli determinism` on the new/changed
+scenarios: ok. `cargo test --workspace --no-fail-fast`: all wp_world tests pass; failures:
+simcli `goldens_match` (33 goldens stale on the base too) and `wp_race`
+`race_picker::loop9_circuit` (fails on the base too), plus the three above.
