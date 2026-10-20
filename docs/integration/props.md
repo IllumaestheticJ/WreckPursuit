@@ -68,6 +68,26 @@ Results (2026-10-20):
 | free drive 60 s | 54 | 42 prop, 11 road, 1 building | 39,374 | 0 |
 | static coverage | 3,346 buildings, 362 deck rails | — | — | 0 (worst rail corner 0.70 m from the parapet) |
 
+Re-run on `lead/round12` after the round-12b merges (junction surfaces, tunnels, art, regenerated
+greyboxes):
+
+| Sweep | Hard static contacts | Hit | Max N·s | Undrawn |
+|---|---|---|---|---|
+| city chase 120 s | 123 | 56 prop, 37 road, 13 sidewalk/kerb, 10 terrain, 7 building | 28,234 | 0 |
+| free drive 60 s | 59 | 39 prop, 15 road, 3 building, 1 sidewalk/kerb, 1 terrain | 20,320 | 0 |
+| static coverage | 3,312 buildings, 611 deck rails | — | — | 0 (worst rail corner 0.70 m) |
+
+**Lead follow-up (31 "undrawn" building contacts at (-650.7, 260.2)).** The building collider and
+the greybox matched there; the test helper was at fault. `debug_knock_prop` fell back to any spot
+clear of props when neither flank of the chosen parked car had a lane next to it, and on round-12b
+data it put the car *inside* that building (car origin (-650.0, 260.7, 12.5)). Rapier then pushed
+it out with 66,000–194,000 N·s per tick, and the impulse-weighted contact point lay inside the
+hull, more than 1 m from every wall. Fixed at the cause: the helper now needs the car's position
+and the 2.5 m behind it to be a drivable lane (no fallback) and otherwise tries the next-nearest
+parked car; the sweep asserts every knock places the car outside every building. The measure
+also changed: a contact point inside a collider is now compared via that collider's nearest face
+(the surface that was hit), not the interior point.
+
 So the props were the only undrawn colliders, and they are by far the most-hit static thing in the
 city (≈ 3/4 of the hard contacts, partly because the sweep aims at them). Before this branch every
 one of those prop contacts was invisible.
