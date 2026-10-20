@@ -1,8 +1,9 @@
 //! Ride and launch behaviour (owner playtest row 54: "too bouncy / light, launched too
-//! easily"). Ranges, not exact numbers. Measured with `wp_vehicle::ride` (full table:
+//! easily"). Ranges, not exact numbers. Physics is the same in Arcade and Simulation (owner
+//! rule, CLAUDE.md), so nothing here depends on the damage mode. Measured with `wp_vehicle::ride` (full table:
 //! `cargo run --release -p wp_vehicle --example ride all`).
 
-use wp_contracts::{AssistProfile, LoadedCar};
+use wp_contracts::LoadedCar;
 use wp_vehicle::ride::{
     axle_ride, crest, heave_kick, kerb, ride_assists, side_impact, slide_into_kerb,
 };
@@ -116,18 +117,11 @@ fn crests_follow_physics_not_springs() {
         let c = crest(&car(id), 120.0, 0.03, 30.0, 20.0, &a);
         assert_eq!(c.airborne_s, 0.0, "{id} rounded: {c:?}");
     }
-    let kb = AssistProfile::keyboard_default();
     for id in REFERENCE {
         let c = car(id);
         let sharp = crest(&c, 120.0, 0.03, 30.0, 0.0, &a);
         assert!(sharp.airborne_s < 0.36, "{id} sharp: {sharp:?}");
         assert!(sharp.peak_rise_m < 0.25, "{id} sharp: {sharp:?}");
-        // Arcade anti-launch (keyboard preset) brings it down sooner.
-        let arcade = crest(&c, 120.0, 0.03, 30.0, 0.0, &kb);
-        assert!(
-            arcade.airborne_s < sharp.airborne_s && arcade.peak_rise_m < sharp.peak_rise_m,
-            "{id}: wheel {sharp:?} keyboard {arcade:?}"
-        );
     }
 }
 

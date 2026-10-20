@@ -203,12 +203,9 @@ Checked and **not** a cause: the inertia tensor (radii of gyration 0.55–0.77 m
 1.1–1.7 m pitch/yaw, 75–97 % of a solid box of the body size: not too small), CG heights
 (0.27–0.45 × track), Rapier mass properties (collider density 0, mass from the data).
 
-**Arcade anti-launch** (`assists::anti_launch_force`): while the body rises faster than 0.3 m/s
-with wheels off the ground, an extra pull of up to 0.8 g × (wheels off / 4). Never acts with
-all four wheels down, so grip and handling are untouched. Strength per preset
-(`assists::anti_launch_strength`): keyboard 1, gamepad 0.5, wheel and AI 0 (Simulation stays
-physical). `AssistProfile` has no field for it yet (contract request A-10); it follows
-`countersteer_help` until then.
+**No mode-dependent physics** (owner rule 2026-10-20): every fix above applies identically in
+Arcade and Simulation; `wp_vehicle` never reads `DamageMode`. (An arcade-only anti-launch
+assist was tried this round and withdrawn.)
 
 ## Keyboard/gamepad steering and ESC (playtest row 28)
 
@@ -356,7 +353,7 @@ cargo run --release -p wp_vehicle --example diff_demo      # differential number
 ```
 
 `tests/ride.rs` holds the ride / launch ranges (ride frequency and damping, 10 cm and 15 cm
-kerbs, rounded and sharp crests, arcade anti-launch, side impact and kerb trip; playtest row
+kerbs, rounded and sharp crests, side impact and kerb trip; playtest row
 54). `cargo run --release -p wp_vehicle --example ride [all | car_id ...]` prints the table,
 `--example ride_trace -- <car> <kmh> <kerb_m>` (or `CREST=1`) a per-tick wheel trace.
 

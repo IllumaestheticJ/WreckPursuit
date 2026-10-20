@@ -6,7 +6,7 @@
 
 use std::thread;
 
-use wp_contracts::{AssistProfile, LoadedCar};
+use wp_contracts::LoadedCar;
 use wp_vehicle::ride::{
     axle_ride, crest, heave_kick, kerb, pitch_kick, ride_assists, side_impact, slide_into_kerb,
     Oscillation,
@@ -53,7 +53,6 @@ fn osc(o: &Oscillation) -> String {
 fn row(id: &str) -> Vec<String> {
     let car = load(id);
     let wheel = ride_assists();
-    let kb = AssistProfile::keyboard_default();
     let ax = axle_ride(&car);
     let hv = heave_kick(&car, 0.3);
     let pt = pitch_kick(&car, 0.3);
@@ -119,15 +118,6 @@ fn row(id: &str) -> Vec<String> {
         s.wheel_lift_s,
         s.airborne_s,
         s.rolled
-    ));
-    // Keyboard preset (arcade anti-launch on) on the hardest cases.
-    let k = kerb(&car, 60.0, 0.15, 0.0, &kb);
-    let c = crest(&car, 120.0, 0.03, 30.0, 0.0, &kb);
-    let s = slide_into_kerb(&car, 35.0, 0.15, &kb);
-    out.push(format!(
-        "| {id} | keyboard: kerb 15 cm 60 km/h / sharp crest 120 / slide 35 | kerb vz {:.2} rise {:.3} air {:.3} s wheel {:.3} s | crest air {:.3} s rise {:.3} | slide roll {:.1}° wheel {:.3} s |",
-        k.peak_vz_mps, k.peak_rise_m, k.airborne_s, k.wheel_lift_s, c.airborne_s, c.peak_rise_m,
-        s.peak_roll.to_degrees(), s.wheel_lift_s
     ));
     out
 }

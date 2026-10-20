@@ -12,8 +12,8 @@ use wp_contracts::{
 
 use crate::aero::aero_forces;
 use crate::assists::{
-    anti_launch_force, anti_launch_strength, btc_rear_authority, esc_reference, filter_pedal,
-    BtcAxle, Esc, Tcs, BTC_MAX_FRAC, TCS_BRAKE_ACTIVE_NM, TCS_BRAKE_HANDOFF,
+    btc_rear_authority, esc_reference, filter_pedal, BtcAxle, Esc, Tcs, BTC_MAX_FRAC,
+    TCS_BRAKE_ACTIVE_NM, TCS_BRAKE_HANDOFF,
 };
 use crate::brakes::{service_torques, Abs};
 use crate::diff::{axle_transfer, centre_transfer, AxleDiff, CentreDiff, DiffInput, DiffSetup};
@@ -207,8 +207,6 @@ pub struct Telemetry {
     pub diff_transfer_nm: [f32; 3],
     /// Brake-based traction control torque per wheel, N·m.
     pub tcs_brake_nm: [f32; 4],
-    /// Anti-launch assist force pulling the body down this tick, N (0 with the wheel preset).
-    pub anti_launch_n: f32,
     /// Upward speed the contact launch limiter took back this tick, m/s ([`crate::launch`]).
     pub contact_lift_cut_mps: f32,
 }
@@ -1254,17 +1252,6 @@ impl Vehicle {
         if gyro != 0.0 {
             torque += up * gyro;
         }
-        // Anti-launch (arcade presets only; never with all four wheels down).
-        let wheels_off = self.wheels.iter().filter(|w| !w.contact).count();
-        let anti_launch = anti_launch_force(
-            anti_launch_strength(assists),
-            self.def.mass_kg,
-            ch.lin_vel.z,
-            wheels_off,
-        );
-        if anti_launch > 0.0 {
-            force -= V3::Z * anti_launch;
-        }
         if launch_cut > 0.0 && dt > 0.0 {
             force -= V3::Z * (self.def.mass_kg * launch_cut / dt);
         }
@@ -1302,7 +1289,6 @@ impl Vehicle {
             slide_gyro_nm: gyro,
             diff_transfer_nm: acc_x.map(|x| x * inv),
             tcs_brake_nm: tc_brake,
-            anti_launch_n: anti_launch,
             contact_lift_cut_mps: launch_cut,
         };
     }
