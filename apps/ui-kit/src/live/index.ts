@@ -6,3 +6,5 @@ export { ChaseEndDetector, chaseEndOf, isChased, type ChaseEnd, type ChaseEndInf
 export { createLiveModel, type LiveFrame, type LiveModel, type LiveOptions, type LiveVehicle, type PoliceReadout } from "./LiveModel";
 export { mountOverlay, type OverlayScreen } from "./mount";
 export { billFromWasm, billRequestJson, DEFAULT_BILL_REQUEST, type LiveBillJson } from "./bill";
+export { mountMapHud, MapHud, decodeMapDynamic, type MapHudOptions, type MapHudStats, type MapStatic, type MapFrame } from "../map";
+export * from "../menu";

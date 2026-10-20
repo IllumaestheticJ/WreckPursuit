@@ -560,3 +560,56 @@ Contract **v0.3.0 is on `main`** (typed police/race/economy events, damage snaps
 1. `crush_depth` → `DamageModel::structural_crush_m()` (B's request).
 2. Promote the observer soak civilian-collision gate (D says it passes; E may flip police back on).
 3. Run the slow city scenarios in the release CI jobs, per `lead/test-speed`.
+
+## Lead helper: debug vs release hashes (2026-10-20, branch `lead/det-debug-release`)
+Report (machine H, and `docs/integration/cars.md` "Lead follow-up round 12b"): on `lead/round12`
+every scenario with steering (`vehicle/coupe_slalom`, `smoke/coupe_circle`,
+`cars/beater_hard_turn`, …) hashed differently in a debug simcli than in the release simcli; the
+goldens matched debug; scenarios without steering (`cars/beater_accel`, `beater_top_speed`) matched
+both.
+
+**Root cause: a stale release binary, not a profile difference.** `cargo test` / `cargo run`
+rebuild simcli; `./target/release/simcli …` runs whatever was last built. A release simcli built
+from `05f92f8` (`lead/round12` before the handling-balance merge `f6e9ecb`, i.e. before
+`caa4797` slip-targeted keyboard/gamepad steering + ESC reference) and run against today's data and
+goldens reproduces the report exactly: `coupe_slalom` / `coupe_circle` differ from tick 960,
+`beater_hard_turn` from tick 720, while `beater_accel`, `beater_top_speed`, `sedan_brake`,
+`sedan_reverse` match. That steering change only moves scenarios with steering input, which is
+the whole pattern. (`tools/wasm-determinism/compare.sh` rebuilds simcli first, which is why
+native == wasm still held.)
+
+Fresh builds of `900261e` agree everywhere (4-core cloud container, AVX-512 + FMA, rustc 1.97.0):
+- `simcli goldens` output (every scenario, incl. slow/soak; the "now" hashes of the pre-existing
+  failures too) is byte-identical from the dev-profile and the release binary; `cargo test`'s
+  `goldens_match` reports the same failures (minus the slow scenarios it skips).
+- `simcli hashes` / `run --no-write` on the steering scenarios is identical across: dev profile
+  (the opt-level 2/3 overrides), dev with incremental + full debuginfo, dev with **every** crate at
+  opt-level 0, release, release with `-C target-cpu=native`, release with fat LTO +
+  `codegen-units=1`.
+- Not address- or memory-dependent: same hashes with ASLR off (`setarch -R`), `MALLOC_PERTURB_`,
+  tcache off / low mmap threshold.
+- Not CPU-dispatch dependent: `matrixmultiply` (runtime FMA/AVX dispatch) is not linked into
+  simcli; forcing glibc onto its non-FMA/AVX variants (`GLIBC_TUNABLES=glibc.cpu.hwcaps=-AVX2,-FMA,…`)
+  leaves the hashes unchanged.
+- Our sim crates have no `mul_add`, `cfg(debug_assertions)`, `HashMap`/`HashSet`, env reads or
+  std transcendental calls in sim code. Rapier/parry use deterministic hashers (`IndexMap` + Fx)
+  under `enhanced-determinism`; their `cfg(debug_assertions)` blocks are assertion-only.
+
+So the Cargo.toml claim holds (rustc does not reorder or contract float ops at any opt-level)
+and nothing was changed in the simulation; **no goldens move** (no `[bless]` commit).
+`cars_beater_hard_turn`, blessed "with the debug binary" in `dba4862`, is identical in release.
+
+**Guard:** `tools/profile-determinism/compare.sh [scenario.ron|dir …]` (`just det-profiles`, also
+part of `just determinism` and a step in CI's determinism job) **rebuilds** simcli in both
+profiles, then requires byte-identical `simcli hashes` output. Default set: `vehicle/`, `smoke/`,
+`cars/` and `opponent/flee_police` (keyboard/gamepad steering, AI steering + ESC, traffic,
+police; 15 scenarios, ~15 s after the build). Rule of thumb for everyone: never compare or bless
+with a `target/*/simcli` you did not just build — use `cargo run [--release] -p simcli -- …` or
+run `cargo build [--release] -p simcli` first.
+
+Cross-machine note (not a profile issue, not changed here): rapier's joint-constraint builder,
+soft-constraint plasticity and parry's `TriMesh::compute_pseudo_normals` call the platform libm
+(`sincosf`, `powf`, `expf`, `acosf`) despite `enhanced-determinism`; glibc chooses the FMA or
+non-FMA variant per CPU. The vehicle scenarios above don't depend on it (the forced non-FMA run
+matched), and native == wasm holds, but if a future cross-machine mismatch involves joints or
+trimesh setup, look there first.

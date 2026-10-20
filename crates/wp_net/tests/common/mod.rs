@@ -40,6 +40,8 @@ pub struct Harness<S: NetSim = ArenaSim> {
     pub factory: DamageFactory,
     /// Wall time of each `server.net_tick()` in `step`, ms (test measurement only).
     pub server_ms: Vec<f64>,
+    /// City ground for client prediction (cities with terrain).
+    pub city_ground: Option<wp_net::predict::CityGround>,
 }
 
 pub fn data() -> (BTreeMap<String, LoadedCar>, BTreeMap<DamageMode, ModeTable>) {
@@ -65,6 +67,7 @@ impl Harness<ArenaSim> {
             modes,
             factory: ToyLattice::factory,
             server_ms: Vec::new(),
+            city_ground: None,
         }
     }
 }
@@ -87,6 +90,7 @@ impl<S: NetSim> Harness<S> {
             modes,
             factory,
             server_ms: Vec::new(),
+            city_ground: None,
         }
     }
 
@@ -98,6 +102,7 @@ impl<S: NetSim> Harness<S> {
             cars: self.cars.clone(),
             modes: self.modes.clone(),
             damage_factory: self.factory,
+            city_ground: self.city_ground.clone(),
         });
         self.peers.push(Peer {
             client,

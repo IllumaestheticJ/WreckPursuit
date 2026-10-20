@@ -4,22 +4,22 @@
 //! parking / bus, banked like the road surface), junction boxes, raised sidewalks with kerb
 //! faces along ribbon edges, ground per district and extruded buildings. Cities with terrain
 //! (Port Vesper v2) also get the terrain mesh (decimated, never above a road), a sea plane,
-//! retaining walls where roads sit above the ground, and bridge decks with parapets and
-//! piers. World space is +Z up; glTF is +Y up, so positions are written as `(x, z, -y)` (a
+//! retaining walls where roads sit above the ground, bridge decks with parapets and
+//! piers, and tunnels / covered roads (walls, roof deck, emissive ceiling lights). World space is +Z up; glTF is +Y up, so positions are written as `(x, z, -y)` (a
 //! rotation, so triangle winding is preserved). Units are metres. Primitives with more than
 //! 65 535 vertices are split so every index buffer is 16-bit.
 
 use serde_json::json;
 use wp_world::geom::{self, V2, V3};
-use wp_world::map::{CityMap, SegKind};
-use wp_world::network::{DistrictKind, Lane, LaneKind, RoadNetwork};
-use wp_world::surface::{is_elevated, surface_edges};
+use wp_world::map::CityMap;
+use wp_world::network::{DistrictKind, LaneKind, RoadNetwork};
+use wp_world::surface::{
+    is_elevated, lane_bank, node_patches, sidewalk_mesh, surface_edges, surface_ribbon, TriMesh,
+};
 use wp_world::terrain::Heightfield;
 
-/// Sidewalk width, m.
-const SIDEWALK_M: f32 = 3.0;
-/// Sidewalk (curb) height, m.
-const CURB_M: f32 = 0.15;
+/// Height of the parking / bus lane tint above the road surface, m.
+const LANE_TINT_DZ_M: f32 = 0.01;
 /// Render terrain vertex spacing (cities with terrain), m.
 const TERRAIN_RENDER_M: f32 = 10.0;
 /// Sea level drawn as water, m.
@@ -65,6 +65,29 @@ impl Prim {
             self.normals.push(n);
         }
         (self.positions.len() - 1) as u32
+    }
+
+    /// Append an indexed mesh: the same triangles and winding, vertices at identical
+    /// positions shared.
+    fn mesh(&mut self, m: &TriMesh) {
+        let mut seen: std::collections::BTreeMap<[u32; 3], u32> = std::collections::BTreeMap::new();
+        let ids: Vec<u32> = m
+            .positions
+            .iter()
+            .map(|p| {
+                let key = p.map(f32::to_bits);
+                *seen
+                    .entry(key)
+                    .or_insert_with(|| self.vert(*p, [0.0, 0.0, 1.0]))
+            })
+            .collect();
+        for t in &m.indices {
+            self.indices.extend_from_slice(&[
+                ids[t[0] as usize],
+                ids[t[1] as usize],
+                ids[t[2] as usize],
+            ]);
+        }
     }
 
     /// Up-facing strip between two edge polylines, sharing vertices between quads.
@@ -293,24 +316,6 @@ fn district_color(k: DistrictKind) -> [f32; 4] {
     }
 }
 
-/// Cross slope of `lane` per polyline point, in its own direction (from its road surface).
-fn lane_bank(net: &RoadNetwork, lane: &Lane) -> Vec<f32> {
-    let Some(s) = net.surfaces.get(lane.road as usize) else {
-        return Vec::new();
-    };
-    let n = s.centre.len();
-    if s.road != lane.road || n != lane.polyline.len() {
-        return Vec::new();
-    }
-    let p0 = geom::xy(lane.polyline[0]);
-    let fwd = geom::dist(p0, geom::xy(s.centre[0])) <= geom::dist(p0, geom::xy(s.centre[n - 1]));
-    if fwd {
-        s.bank.clone()
-    } else {
-        s.bank.iter().rev().map(|b| -b).collect()
-    }
-}
-
 /// Render terrain: every `k`-th vertex, each lowered to the minimum of the fine heights around
 /// it, so the coarse surface never rises above the fine one (and so never above a road).
 fn render_terrain(
@@ -405,6 +410,11 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
     let mut parking = Prim::new("parking", [0.26, 0.26, 0.27, 1.0]);
     let mut bus = Prim::new("bus_lane", [0.35, 0.16, 0.14, 1.0]);
     let mut sidewalk = Prim::new("sidewalk", [0.62, 0.61, 0.58, 1.0]);
+    let mut corner = Prim::new("sidewalk_corner", [0.62, 0.61, 0.58, 1.0]);
+    // Level lots behind the sidewalks and the skirts beyond them (same colour; separate
+    // materials so tools can tell the flush lot from the slope down to the ground).
+    let mut lot = Prim::new("lot", [0.50, 0.52, 0.44, 1.0]);
+    let mut lot_skirt = Prim::new("lot_skirt", [0.50, 0.52, 0.44, 1.0]);
     let mut kerb = Prim::new("kerb", [0.70, 0.69, 0.66, 1.0]);
     let mut buildings = Prim::new("building", [0.75, 0.74, 0.72, 1.0]);
     let mut wall = Prim::new("retaining_wall", [0.52, 0.50, 0.46, 1.0]);
@@ -437,60 +447,46 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
             }
         }
     }
+    // Pavement: the road surface ribbons, the very triangles `wp_sim` collides with; parking
+    // and bus lanes are tinted 1 cm above them.
+    for s in &net.surfaces {
+        let prim = if s.highway {
+            &mut concrete
+        } else {
+            &mut asphalt
+        };
+        prim.mesh(&surface_ribbon(s));
+    }
     for l in &net.lanes {
-        let half = l.width_m * 0.5;
-        let bank = lane_bank(net, l);
         let prim = match l.kind {
-            LaneKind::Highway => &mut concrete,
             LaneKind::Parking => &mut parking,
             LaneKind::Bus => &mut bus,
-            _ => &mut asphalt,
+            _ => continue,
         };
-        prim.ribbon_banked(&l.polyline, half, half, 0.0, &bank);
-        if l.kind != LaneKind::Highway {
-            let edge = |side: f32| -> Vec<V3> {
-                let mut e = geom::offset_polyline(&l.polyline, side * half);
-                for (k, p) in e.iter_mut().enumerate() {
-                    p[2] += bank.get(k).copied().unwrap_or(0.0) * side * half;
-                }
-                e
-            };
-            if l.edge_right {
-                sidewalk.ribbon_banked(&l.polyline, -half, half + SIDEWALK_M, CURB_M, &bank);
-                let top: Vec<V3> = edge(1.0)
-                    .iter()
-                    .map(|p| [p[0], p[1], p[2] + CURB_M])
-                    .collect();
-                let bottom: Vec<f32> = edge(1.0).iter().map(|p| p[2]).collect();
-                kerb.curtain(&top, &bottom, false);
-            }
-            if l.edge_left {
-                sidewalk.ribbon_banked(&l.polyline, half + SIDEWALK_M, -half, CURB_M, &bank);
-                let top: Vec<V3> = edge(-1.0)
-                    .iter()
-                    .map(|p| [p[0], p[1], p[2] + CURB_M])
-                    .collect();
-                let bottom: Vec<f32> = edge(-1.0).iter().map(|p| p[2]).collect();
-                kerb.curtain(&top, &bottom, true);
-            }
-        }
+        let bank = lane_bank(net, l);
+        prim.ribbon_banked(
+            &l.polyline,
+            l.width_m * 0.5,
+            l.width_m * 0.5,
+            LANE_TINT_DZ_M,
+            &bank,
+        );
     }
-    // Junction boxes (16-gons) and bend connectors.
-    for ix in &net.intersections {
-        let c = net.nodes[ix.node as usize].pos;
-        let poly: Vec<V2> = (0..16)
-            .map(|k| {
-                let (s, co) = wp_math::sin_cos(k as f32 / 16.0 * std::f32::consts::TAU);
-                [c[0] + co * ix.radius_m, c[1] + s * ix.radius_m]
-            })
-            .collect();
-        asphalt.polygon(&poly, c[2] - 0.01);
-    }
-    for s in &map.segs {
-        if let SegKind::Connector { node, .. } = s.kind {
-            if net.nodes[node as usize].intersection.is_none() {
-                asphalt.ribbon(&s.pts, s.width * 0.5, s.width * 0.5, -0.005);
-            }
+    // Raised sidewalks, their lots and skirts and the kerb faces: the very triangles `wp_sim`
+    // collides with.
+    let walks = sidewalk_mesh(map);
+    sidewalk.mesh(&walks.tops);
+    corner.mesh(&walks.corners);
+    lot.mesh(&walks.lots);
+    lot_skirt.mesh(&walks.skirts);
+    kerb.mesh(&walks.kerbs);
+    // Pavement between the ribbon ends (junctions, bends, dead ends): the very triangles
+    // `wp_sim` collides with.
+    for p in node_patches(map) {
+        if p.highway {
+            concrete.mesh(&p.mesh);
+        } else {
+            asphalt.mesh(&p.mesh);
         }
     }
     // Hilly cities: retaining walls where a road edge stands above the (render) ground, and
@@ -501,14 +497,17 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
             let (l, r) = surface_edges(s);
             let n = s.centre.len();
             let deck: Vec<bool> = (0..n).map(|k| is_elevated(s, k, &ground_z, 1.5)).collect();
-            // Retaining walls on the outer kerb line (sidewalk roads) or the paved edge.
-            let out = if s.highway { 0.3 } else { SIDEWALK_M };
+            // Retaining walls 0.3 m outside a highway's paved edge (sidewalk roads: under the
+            // skirt feet and bare sidewalk edges, below).
             for (side, edge) in [(-1.0f32, &l), (1.0, &r)] {
-                let line = geom::offset_polyline(edge, side * out);
+                if !s.highway {
+                    continue;
+                }
+                let line = geom::offset_polyline(edge, side * 0.3);
                 let top: Vec<V3> = line
                     .iter()
                     .zip(edge.iter())
-                    .map(|(p, e)| [p[0], p[1], e[2] + if s.highway { 0.0 } else { CURB_M }])
+                    .map(|(p, e)| [p[0], p[1], e[2]])
                     .collect();
                 let bottom: Vec<f32> = top
                     .iter()
@@ -569,15 +568,154 @@ pub fn build_greybox(map: &CityMap) -> Vec<Prim> {
             }
         }
     }
+    // Sidewalk roads: walls from the skirt feet (and the back edges of sidewalks without a
+    // lot, e.g. on decks) down past the drawn ground, which is coarser and lower than the
+    // physics terrain the skirts end on.
+    if let Some(t) = terrain {
+        let ground_z = |q: V2| t.height_at(q);
+        for line in chain_segments(walks.skirt_feet.iter().chain(&walks.bare_backs)) {
+            let bottom: Vec<f32> = line
+                .iter()
+                .map(|p| (ground_z(geom::xy(*p)) - 1.5).min(p[2]))
+                .collect();
+            wall.curtain(&line, &bottom, true);
+        }
+        // The guard rail `wp_sim` puts just outside a lot-less sidewalk edge: 0.3 m wide,
+        // 0.9 m tall (both faces and the top).
+        for (a, b) in &walks.bare_backs {
+            let d = geom::normalize(geom::sub(geom::xy(*b), geom::xy(*a)));
+            let r = geom::right_of(d);
+            let at = |p: &V3, off: f32, dz: f32| {
+                let q = geom::add(geom::xy(*p), geom::scale(r, off));
+                [q[0], q[1], p[2] + dz]
+            };
+            let (i0, i1) = (at(a, 0.0, 0.9), at(b, 0.0, 0.9));
+            let (o0, o1) = (at(a, 0.3, 0.9), at(b, 0.3, 0.9));
+            bridge.curtain(&[i1, i0], &[b[2], a[2]], true);
+            bridge.curtain(&[o0, o1], &[a[2] - 0.2, b[2] - 0.2], true);
+            bridge.quad(i0, o0, o1, i1, [0.0, 0.0, 1.0]);
+        }
+    }
     for b in &net.buildings {
         buildings.prism(&b.footprint, b.base_z_m, b.roof_z());
     }
+    // Tunnels and covered roads (backlog B04): concrete walls, the roof deck, ceiling lights.
+    // Colours follow docs/art/STYLE_DECISION.md's palette (retaining wall / bridge greys,
+    // sodium lamps); the low-poly dark restyle maps these material names.
+    let mut tunnel_wall = Prim::new("tunnel_wall", [0.24, 0.25, 0.29, 1.0]);
+    let mut tunnel_roof = Prim::new("tunnel_roof", [0.28, 0.29, 0.34, 1.0]);
+    let mut tunnel_light = Prim::new("tunnel_light", [1.0, 0.76, 0.48, 1.0]);
+    for span in &net.covered {
+        render_cover(span, &mut tunnel_wall, &mut tunnel_roof, &mut tunnel_light);
+    }
     let mut out = vec![
-        asphalt, concrete, parking, bus, sidewalk, kerb, buildings, wall, bridge, rock, seabed,
+        asphalt,
+        concrete,
+        parking,
+        bus,
+        sidewalk,
+        corner,
+        lot,
+        lot_skirt,
+        kerb,
+        buildings,
+        wall,
+        bridge,
+        rock,
+        seabed,
         water,
+        tunnel_wall,
+        tunnel_roof,
+        tunnel_light,
     ];
     out.extend(ground);
     out.retain(|p| !p.indices.is_empty());
+    out
+}
+
+/// One covered span: both walls (inner and outer faces, from below the road to the ceiling),
+/// the roof deck (ceiling underside, top, side edges, portal faces) and a ceiling light every
+/// [`wp_world::covered::LIGHT_SPACING_M`] (a 1.6 × 0.5 m emissive panel 0.12 m below the
+/// ceiling, two-sided).
+fn render_cover(
+    span: &wp_world::network::CoveredSpan,
+    wall: &mut Prim,
+    roof: &mut Prim,
+    light: &mut Prim,
+) {
+    use wp_world::covered::{CoverShape, ROOF_M, WALL_M};
+    let shape = CoverShape::new(span);
+    let c = &span.centre;
+    let h = span.clearance_m;
+    let deck = shape.deck_half_width();
+    for side in [-1.0f32, 1.0] {
+        for off in [span.half_width_m, span.half_width_m + WALL_M] {
+            let line = geom::offset_polyline(c, side * off);
+            let top: Vec<V3> = line.iter().map(|p| [p[0], p[1], p[2] + h]).collect();
+            let bottom: Vec<f32> = line.iter().map(|p| p[2] - 1.0).collect();
+            // Inner faces look into the tube, outer faces away from it.
+            let inner = off == span.half_width_m;
+            wall.curtain(&top, &bottom, (side < 0.0) == inner);
+        }
+    }
+    roof.ribbon(c, deck, deck, h);
+    roof.ribbon(c, deck, deck, h + ROOF_M);
+    for side in [-1.0f32, 1.0] {
+        let line = geom::offset_polyline(c, side * deck);
+        let top: Vec<V3> = line
+            .iter()
+            .map(|p| [p[0], p[1], p[2] + h + ROOF_M])
+            .collect();
+        let bottom: Vec<f32> = line.iter().map(|p| p[2] + h).collect();
+        roof.curtain(&top, &bottom, side > 0.0);
+    }
+    // Portal faces: the deck's end edges.
+    for k in [0usize, c.len() - 1] {
+        let j = if k == 0 { 1 } else { k - 1 };
+        let d = geom::normalize(geom::sub(geom::xy(c[k]), geom::xy(c[j])));
+        let d = if k == 0 { geom::scale(d, -1.0) } else { d };
+        let r = geom::right_of(d);
+        let p = geom::xy(c[k]);
+        let (z0, z1) = (c[k][2] + h, c[k][2] + h + ROOF_M);
+        let a = geom::add(p, geom::scale(r, -deck));
+        let b = geom::add(p, geom::scale(r, deck));
+        roof.quad(
+            [a[0], a[1], z0],
+            [b[0], b[1], z0],
+            [b[0], b[1], z1],
+            [a[0], a[1], z1],
+            [d[0], d[1], 0.0],
+        );
+    }
+    for q in shape.light_points() {
+        let loc = shape.locate(geom::xy(q));
+        let (_, d) = geom::point_at(c, &shape.cum, loc.s);
+        let r = geom::right_of(d);
+        let z = q[2] - 0.12;
+        let corner = |a: f32, b: f32| {
+            let p = geom::add(geom::xy(q), geom::add(geom::scale(d, a), geom::scale(r, b)));
+            [p[0], p[1], z]
+        };
+        light.quad(
+            corner(-0.8, -0.25),
+            corner(0.8, -0.25),
+            corner(0.8, 0.25),
+            corner(-0.8, 0.25),
+            [0.0, 0.0, -1.0],
+        );
+    }
+}
+
+/// Consecutive segments `(a, b)` (the next starting exactly where one ends) joined into
+/// polylines, in order.
+fn chain_segments<'a>(segs: impl Iterator<Item = &'a (V3, V3)>) -> Vec<Vec<V3>> {
+    let mut out: Vec<Vec<V3>> = Vec::new();
+    for (a, b) in segs {
+        match out.last_mut() {
+            Some(line) if line.last() == Some(a) => line.push(*b),
+            _ => out.push(vec![*a, *b]),
+        }
+    }
     out
 }
 
@@ -640,6 +778,12 @@ pub fn write_glb(prims: &[Prim], name: &str) -> Vec<u8> {
             "name": p.material,
             // Walls, kerbs and parapets are single quads: draw both faces.
             "doubleSided": true,
+            // Lamps (`*_light`, e.g. tunnel ceiling lights) glow in their own colour.
+            "emissiveFactor": if p.material.ends_with("_light") {
+                [p.color[0], p.color[1], p.color[2]]
+            } else {
+                [0.0, 0.0, 0.0]
+            },
             "pbrMetallicRoughness": {
                 "baseColorFactor": p.color,
                 "metallicFactor": 0.0,

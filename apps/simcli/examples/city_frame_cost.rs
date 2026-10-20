@@ -46,10 +46,12 @@ fn main() {
         traffic_cars: true,
         parked_cars: true,
         police_cars: true,
+        covered_los: true,
         police_presence: Some(1.0),
         systems: None,
         barriers: Vec::new(),
         police_orders: Vec::new(),
+        weather: None,
         entities: vec![EntitySpec {
             id: "player".into(),
             car: "debug_sedan".into(),

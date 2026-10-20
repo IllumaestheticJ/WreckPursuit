@@ -35,11 +35,18 @@ pub mod cues {
     pub const SUPERCHARGER_WHINE: &str = "supercharger/whine";
     /// Overrun exhaust pop one-shot.
     pub const EXHAUST_POP: &str = "exhaust/pop";
+    /// The physically modelled engine (one looped voice per car, `Model` pack): firing
+    /// pulses, exhaust waveguides, intake, mechanical noise, turbo, crackle.
+    pub const ENGINE_PHYSICAL: &str = "engine/physical";
 
     /// Tire squeal loop on paved surfaces.
     pub const SQUEAL: &str = "tire/squeal";
     /// Loose-surface scrub loop.
     pub const SCRUB: &str = "tire/scrub_loose";
+    /// Driven-wheel spin loop on paved surfaces (launch, burnout, power-on exit).
+    pub const SPIN: &str = "tire/spin";
+    /// Driven-wheel spin loop on loose surfaces (gravel roost, dirt / grass churn).
+    pub const SPIN_LOOSE: &str = "tire/spin_loose";
     /// Surface rolling loops, indexed like `wp_contracts::SurfaceType` declaration order.
     pub const SURFACES: [&str; 8] = [
         "surface/asphalt",
@@ -87,12 +94,25 @@ pub mod cues {
     pub const HORN_STANDARD: &str = "horn/standard";
     /// Truck / SUV horn loop.
     pub const HORN_TRUCK: &str = "horn/truck";
+    /// Optional gear-shift clunk one-shot (World packs; played when `VehicleState::gear` changes).
+    pub const SHIFT: &str = "drivetrain/shift";
+    /// Optional city ambience loop (World packs; played by the backend, not the director).
+    pub const AMBIENT_CITY_NIGHT: &str = "ambient/city_night";
+    /// Optional synthesised body-panel impact (modal bank, thump, transient, glass tail); one
+    /// per hit on top of the recorded layers (`wp_audio::impact`).
+    pub const IMPACT_BODY: &str = "impact/body";
+    /// Optional granular crunch loop that follows the lattice's deformation power.
+    pub const IMPACT_CRUNCH: &str = "impact/crunch";
+    /// Optional police air horn (police units on cars whose horn is `horn/standard`).
+    pub const HORN_POLICE: &str = "horn/police";
 
     /// Every cue a `World` pack must define.
     pub fn world() -> Vec<&'static str> {
         let mut v = vec![
             SQUEAL,
             SCRUB,
+            SPIN,
+            SPIN_LOOSE,
             THUMP,
             LAND,
             THUD,
@@ -124,9 +144,30 @@ pub mod cues {
 }
 
 /// Synth names the procedural backend implements (`apps/testbed-web/src/audio/synth.ts`).
-pub const KNOWN_SYNTHS: [&str; 15] = [
-    "engine", "noise", "tone", "siren", "horn", "impact", "glass", "thump", "squeal", "whine",
-    "blowoff", "pop", "squelch", "clatter", "hiss",
+pub const KNOWN_SYNTHS: [&str; 22] = [
+    "engine",
+    "noise",
+    "tone",
+    "siren",
+    "horn",
+    "impact",
+    "glass",
+    "thump",
+    "squeal",
+    "whine",
+    "blowoff",
+    "pop",
+    "squelch",
+    "clatter",
+    "hiss",
+    "spin",
+    "engine_physical",
+    // Owner row 74 (`src/audio/impacts/`, `src/audio/horn.ts`).
+    "impact_body",
+    "crunch",
+    "friction",
+    "disc_horn",
+    "air_horn",
 ];
 
 // ----- config ------------------------------------------------------------------------------
@@ -183,6 +224,51 @@ pub struct EngineMix {
     pub forced_induction_gain: f32,
     /// Engine gain multiplier for physical traffic (`DriverKind::Traffic`).
     pub traffic_gain: f32,
+    /// Load (0..1, above `min_load`) at which the on-throttle layers fully take over from the
+    /// off-throttle ones (smoothstep from 0). Part throttle above this sounds "on", not overrun.
+    pub on_full_load: f32,
+    /// Smoothing time constant of the rpm rate used for shift cues, s.
+    pub rpm_rate_tau_s: f32,
+    /// |rpm rate| where a shift cue starts, rpm/s (WOT pulls in 1st reach ~3,500 rpm/s).
+    pub shift_rate_onset_rpm_s: f32,
+    /// |rpm rate| where a shift cue is full, rpm/s.
+    pub shift_rate_full_rpm_s: f32,
+    /// Upshift note: rpm falling fast under throttle cuts the load by up to this fraction.
+    pub shift_dip_depth: f32,
+    /// Downshift blip: rpm rising fast with the throttle closed raises the load to this.
+    pub blip_load: f32,
+    /// The blip's rpm-rate thresholds hold at this rpm; below it a rising rate counts
+    /// `blip_ref_rpm / rpm` times (≤ 2.5×), since a rev-match's rpm step scales with rpm.
+    #[serde(default = "default_blip_ref_rpm")]
+    pub blip_ref_rpm: f32,
+    /// Engine LOD for every car except the focus: closer than this it keeps its two loudest
+    /// layers (the crossfade pair), farther only the loudest one; the dropped layers' energy
+    /// moves into the kept ones, so loudness is unchanged. Saves Engine-bus voices so a crowd
+    /// of cars is not starved by the voice limit (playtest #47), m.
+    pub lod_two_layer_m: f32,
+    /// Culling score multiplier of a non-focus car's second engine layer: every car's main
+    /// layer is kept before another car's second layer.
+    pub second_layer_cull_scale: f32,
+    /// Physically modelled engine (when the backend enables it): besides the focus car, this
+    /// many of the nearest cars get the model; every other car keeps the layers.
+    #[serde(default = "default_physical_max_others")]
+    pub physical_max_others: usize,
+    /// Physically modelled engine: only cars closer than this get it (others keep the
+    /// layers), m. A car keeps the model out to 1.25 × this.
+    #[serde(default = "default_physical_radius_m")]
+    pub physical_radius_m: f32,
+}
+
+fn default_blip_ref_rpm() -> f32 {
+    4000.0
+}
+
+fn default_physical_max_others() -> usize {
+    6
+}
+
+fn default_physical_radius_m() -> f32 {
+    60.0
 }
 
 /// Tire, surface and suspension tuning.
@@ -217,6 +303,26 @@ pub struct TireMix {
     pub land_airtime_s: f32,
     /// Minimum time between thumps on one wheel, s.
     pub thump_debounce_s: f32,
+    /// Wheelspin: positive (driving) slip ratio where spin starts / is full. Squeal and loose
+    /// scrub only hear the braking (negative) part of the slip ratio plus slip angle, so a
+    /// spinning driven wheel has its own sound.
+    pub spin_ratio_onset: f32,
+    /// See `spin_ratio_onset`.
+    pub spin_ratio_full: f32,
+    /// Slip speed `ω·r − vx` (m/s) where spin starts (gripping hard at speed stays silent).
+    pub spin_speed_onset_mps: f32,
+    /// Slip speed where pitch and intensity reach full, m/s.
+    pub spin_speed_ref_mps: f32,
+    /// Paved spin gain.
+    pub spin_gain: f32,
+    /// Spin multiplier on wet asphalt (hiss, less howl).
+    pub wet_spin_scale: f32,
+    /// Loose-surface spin (roost) gain.
+    pub loose_spin_gain: f32,
+    /// Spin level rise time constant, s.
+    pub spin_attack_s: f32,
+    /// Spin level release time constant, s.
+    pub spin_release_s: f32,
 }
 
 /// Collision tuning. Speeds are the contact's closing speed (`rel_speed`).
@@ -265,6 +371,10 @@ pub struct SirenConfig {
     pub gain: f32,
     /// Horn gain.
     pub horn_gain: f32,
+    /// Siren v2: police-state cues, whoop / air horn, per-unit spread, siren limit and the
+    /// acoustic space (`crate::siren_unit`, `crate::siren_space`). Optional in the file.
+    #[serde(default)]
+    pub v2: crate::siren_unit::SirenV2Config,
 }
 
 /// Global audio tuning (`data/audio/audio_config.json`).
@@ -297,6 +407,9 @@ pub struct AudioConfig {
     pub sirens: SirenConfig,
     /// Radio scanner.
     pub scanner: ScannerConfig,
+    /// Physically driven impact / crunch / scrape synthesis (optional, defaults in code).
+    #[serde(default)]
+    pub impact_synth: crate::impact::ImpactSynthConfig,
 }
 
 // ----- cars --------------------------------------------------------------------------------
@@ -463,7 +576,7 @@ impl CarAudioDef {
             }
             .to_string(),
             siren: police.then(|| SirenDef {
-                pack: "siren_proc".to_string(),
+                pack: "siren_v2".to_string(),
                 default_mode: SirenMode::Auto,
             }),
         }
@@ -483,6 +596,9 @@ pub enum PackKind {
     Siren,
     /// Scanner squelch and static.
     Radio,
+    /// Procedural models driven by per-frame state instead of layers or samples (the
+    /// physically modelled engine, `engine/physical`).
+    Model,
 }
 
 /// The rpm a layer was recorded / tuned at.
@@ -555,6 +671,10 @@ pub struct CueDef {
     /// Speed the loop was recorded at (surface loops), m/s; pitch = speed / root.
     #[serde(default)]
     pub root_speed_mps: Option<f32>,
+    /// Fade when the voice stops, s (default: `audio_config.stop_fade_s`). Short for sounds
+    /// that must end with their button, e.g. the horn (owner report #58).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_s: Option<f32>,
 }
 
 /// A sample pack (`data/audio/packs/<id>.json`).
@@ -568,6 +688,11 @@ pub struct SamplePack {
     /// Free text for humans.
     #[serde(default)]
     pub description: String,
+    /// Procedural pack of the same kind the backend plays instead of this one when the
+    /// player picks the procedural fallback (recorded `*_rec` packs point at their `*_proc` twin).
+    /// Cues are matched by name; the fallback must define every cue this pack's layers use.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback: Option<String>,
     /// Engine layers (Engine packs only), any order.
     #[serde(default)]
     pub engine_layers: Vec<EngineLayerDef>,
@@ -749,6 +874,7 @@ impl AudioLibrary {
                 PackKind::World => cues::world(),
                 PackKind::Siren => cues::SIREN.to_vec(),
                 PackKind::Radio => cues::RADIO.to_vec(),
+                PackKind::Model => vec![cues::ENGINE_PHYSICAL],
             };
             for c in required {
                 if !p.cues.contains_key(c) {
@@ -790,6 +916,24 @@ impl AudioLibrary {
                     "packs/{}: engine_layers only allowed in Engine packs",
                     p.id
                 ));
+            }
+            if let Some(fb) = &p.fallback {
+                match self.packs.get(fb) {
+                    Some(f) if f.kind == p.kind => {
+                        for l in &p.engine_layers {
+                            if !f.cues.contains_key(&l.cue) {
+                                errs.push(format!(
+                                    "packs/{}: fallback {fb} lacks engine layer cue {}",
+                                    p.id, l.cue
+                                ));
+                            }
+                        }
+                    }
+                    Some(_) => {
+                        errs.push(format!("packs/{}: fallback {fb} is a different kind", p.id))
+                    }
+                    None => errs.push(format!("packs/{}: unknown fallback {fb}", p.id)),
+                }
             }
             for (name, c) in &p.cues {
                 if !c.looped && c.duration_s.is_none() {

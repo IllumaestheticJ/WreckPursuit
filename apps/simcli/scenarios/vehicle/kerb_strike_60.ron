@@ -1,0 +1,38 @@
+// Playtest row 54 ("launched too easily"): four reference cars (sports, sedan, muscle, police
+// cruiser), wheel preset (no arcade anti-launch), at 60 km/h over a 10 cm square kerb.
+// The kerb is a static box the chassis clears (10 cm < the 15 cm body clearance), so only the
+// tyres meet it, as with city sidewalks. Expect: never all four wheels off the ground, no
+// spin, speed kept, no damage. Measured on ws/vehicle (wp_vehicle::ride): body vertical speed
+// 0.4–0.6 m/s, 0–2 overshoots, settled in < 0.8 s; before the fix one wheel lifted for up
+// to 0.09 s and a 15 cm kerb threw three of the four cars off the ground.
+(
+    name: "vehicle_kerb_strike_60",
+    seed: 54,
+    mode: Arcade,
+    barriers: [(pos: (-0.000, 30.000, 0.05), size: (40.0, 60.0, 0.1), yaw: 0.0000)],
+    entities: [
+        (id: "hakone_gt", car: "hakone_gt", pos: (-9.0, -40.0, 0.0), speed_mps: 16.67, assists: wheel, driver: cruise(target_mps: 16.67)),
+        (id: "kestrel_ts", car: "kestrel_ts", pos: (-3.0, -40.0, 0.0), speed_mps: 16.67, assists: wheel, driver: cruise(target_mps: 16.67)),
+        (id: "rampart_50", car: "rampart_50", pos: (3.0, -40.0, 0.0), speed_mps: 16.67, assists: wheel, driver: cruise(target_mps: 16.67)),
+        (id: "sentinel_cruiser", car: "sentinel_cruiser", pos: (9.0, -40.0, 0.0), speed_mps: 16.67, assists: wheel, driver: cruise(target_mps: 16.67)),
+    ],
+    duration_s: 8.0,
+    expect: [
+        metric(name: "max_airborne_s", entity: "hakone_gt", min: 0.0, max: 0.0),
+        metric(name: "max_yaw_rate_rps", entity: "hakone_gt", min: 0.0, max: 0.15),
+        speed_at(entity: "hakone_gt", t_s: 5.0, min: 14.7, max: 18.2),
+        metric(name: "crush_depth_m", entity: "hakone_gt", min: 0.0, max: 0.01),
+        metric(name: "max_airborne_s", entity: "kestrel_ts", min: 0.0, max: 0.0),
+        metric(name: "max_yaw_rate_rps", entity: "kestrel_ts", min: 0.0, max: 0.15),
+        speed_at(entity: "kestrel_ts", t_s: 5.0, min: 14.7, max: 18.2),
+        metric(name: "crush_depth_m", entity: "kestrel_ts", min: 0.0, max: 0.01),
+        metric(name: "max_airborne_s", entity: "rampart_50", min: 0.0, max: 0.0),
+        metric(name: "max_yaw_rate_rps", entity: "rampart_50", min: 0.0, max: 0.15),
+        speed_at(entity: "rampart_50", t_s: 5.0, min: 14.7, max: 18.2),
+        metric(name: "crush_depth_m", entity: "rampart_50", min: 0.0, max: 0.01),
+        metric(name: "max_airborne_s", entity: "sentinel_cruiser", min: 0.0, max: 0.0),
+        metric(name: "max_yaw_rate_rps", entity: "sentinel_cruiser", min: 0.0, max: 0.15),
+        speed_at(entity: "sentinel_cruiser", t_s: 5.0, min: 14.7, max: 18.2),
+        metric(name: "crush_depth_m", entity: "sentinel_cruiser", min: 0.0, max: 0.01),
+    ],
+)

@@ -277,6 +277,30 @@ impl WetnessGrid {
         }
     }
 
+    /// Flood every cell whose centre lies in the XY box `min..max` with `water_mm` of water
+    /// (scenario setup: a puddle or a flooded underpass). The cells' capacity is raised to hold
+    /// it (up to `max_water_mm`), so the water stays until it drains or dries like any puddle.
+    /// Returns the number of cells flooded.
+    pub fn flood_rect(
+        &mut self,
+        min: [f32; 2],
+        max: [f32; 2],
+        water_mm: f32,
+        table: &SurfaceTable,
+    ) -> usize {
+        let w = water_mm.clamp(0.0, table.max_water_mm);
+        let mut n = 0;
+        for i in 0..self.spec.len() {
+            let c = self.spec.cell_center(i);
+            if c[0] >= min[0] && c[0] <= max[0] && c[1] >= min[1] && c[1] <= max[1] {
+                self.cap_mm[i] = self.cap_mm[i].max(w);
+                self.water_mm[i] = w;
+                n += 1;
+            }
+        }
+        n
+    }
+
     /// Set one cell's traffic occupancy directly (tests, tools).
     pub fn set_occupancy(&mut self, i: usize, vehicles: f32) {
         self.occupancy[i] = vehicles.max(0.0);

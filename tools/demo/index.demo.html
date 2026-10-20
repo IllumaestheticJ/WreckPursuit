@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WreckPursuit Demo</title>
+    <link rel="icon" href="data:," />
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #111; color: #ddd; font: 12px/1.35 monospace; }
+      #overlay { position: fixed; inset: 0; pointer-events: none; }
+      .panel { background: rgba(0, 0, 0, 0.6); padding: 6px 8px; border-radius: 4px; pointer-events: auto; }
+      .hidden { display: none !important; }
+      .left-col { position: absolute; top: 8px; left: 8px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+      .hud-main { min-width: 300px; }
+      .hud-main .speed { font-size: 28px; color: #fff; }
+      .hud-main .gear { font-size: 28px; color: #ffdc00; margin-left: 12px; }
+      .dim { color: #999; }
+      .rtf-warn { color: #ffb020; font-weight: bold; }
+      .badge { display: inline-block; padding: 0 4px; margin: 2px 3px 0 0; border-radius: 3px; font-size: 11px; }
+      .badge.on { background: #2a6; color: #fff; }
+      .badge.off { background: #333; color: #777; }
+      .badge.rec { background: #c22; color: #fff; }
+      .bar { display: inline-block; position: relative; width: 140px; height: 9px; background: #222; margin-left: 6px; vertical-align: middle; }
+      .bar i { position: absolute; top: 0; bottom: 0; left: 0; }
+      .bar b { position: absolute; top: -2px; bottom: -2px; left: 50%; width: 1px; background: #888; }
+      .right-col { position: absolute; top: 8px; right: 8px; display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+      #pursuit-banner { position: absolute; top: 34%; left: 50%; transform: translate(-50%, -50%); text-align: center; pointer-events: none; text-shadow: 0 2px 6px #000; }
+      #pursuit-banner b { display: block; font: 900 44px/1 system-ui, sans-serif; letter-spacing: 0.12em; }
+      #pursuit-banner span { display: block; margin-top: 4px; font-size: 13px; color: #ddd; }
+      #pursuit-banner[data-kind="pursuit"] b { color: #ff3b30; animation: wp-strobe 0.8s steps(1) infinite; }
+      #pursuit-banner[data-kind="searching"] b { color: #ffcc00; }
+      #pursuit-banner[data-kind="escaped"] b { color: #2ecc40; }
+      #pursuit-banner[data-kind="captured"] b { color: #3b82ff; }
+      @keyframes wp-strobe { 50% { color: #3b82ff; } }
+      @media (prefers-reduced-motion: reduce) { #pursuit-banner b { animation: none !important; } }
+      .feed { max-width: 360px; max-height: 22vh; overflow: auto; font-size: 11px; }
+      .comps, .regions { white-space: pre; max-height: 30vh; overflow: auto; }
+      .comps .bar { width: 80px; }
+      .inputs { }
+      .telemetry { position: absolute; bottom: 8px; left: 552px; padding: 0; }
+      .controls-panel { max-width: 720px; z-index: 6; }
+      .bind-table { border-collapse: collapse; margin: 6px 0; }
+      .bind-table td, .bind-table th { padding: 1px 4px; text-align: left; font-weight: normal; }
+      .bind-table button.bind { min-width: 72px; }
+      .bind-table button.waiting { background: #a60; color: #fff; }
+      .help { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); max-width: 640px; max-height: calc(100vh - 16px); overflow: auto; z-index: 5; background: rgba(0, 0, 0, 0.92); }
+      #controls { position: absolute; bottom: 8px; left: 8px; max-width: 520px; max-height: 45vh; overflow: auto; }
+      #controls .row { margin: 3px 0; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+      #controls button, #controls select, #controls input { font: 11px monospace; background: #222; color: #ddd; border: 1px solid #555; border-radius: 3px; padding: 1px 5px; }
+      #controls button:hover { background: #333; }
+      #controls input[type="number"] { width: 50px; }
+      #rp-scrub { flex: 1; min-width: 160px; }
+      #sc-result .pass { color: #2ecc40; }
+      #sc-result .fail { color: #ff4136; }
+      #sc-result .pending { color: #aaa; }
+      /* Races (workstream 15): picker, HUD, countdown, results (src/ui/race.tsx). */
+      .wp-race-picker { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(560px, calc(100vw - 32px)); max-height: 80vh; overflow: auto; pointer-events: auto; z-index: 80; }
+      .wp-race-cards { display: grid; gap: 0.6em; }
+      .wp-race-card { border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 4px; padding: 0.5em 0.6em; }
+      .wp-race-hud { position: absolute; left: 8px; top: 312px; width: min(420px, calc(100vw - 32px)); pointer-events: none; z-index: 60; }
+      .wp-race-hud-grid { display: grid; grid-template-columns: 1fr auto; gap: 0.6em; align-items: start; }
+      .wp-race-standings { width: 100%; font-size: 0.8em; margin-top: 0.4em; }
+      .wp-race-standings .num, .wp-race-results .num { text-align: right; }
+      .wp-race-standings .is-local, .wp-race-results .is-local { color: var(--scan, #7cf); font-weight: bold; }
+      .wp-race-countdown { position: absolute; left: 50%; top: 30%; transform: translate(-50%, -50%); font: 900 96px/1 system-ui, sans-serif; color: #ffd23f; text-shadow: 0 4px 12px #000; pointer-events: none; }
+      .wp-race-go { color: #2ee59d; }
+      .wp-race-results { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(520px, calc(100vw - 32px)); max-height: 85vh; overflow: auto; pointer-events: auto; z-index: 75; }
+      #error { position: absolute; top: 40%; left: 50%; transform: translateX(-50%); color: #f66; white-space: pre; }
+    </style>
+    <script type="module" crossorigin src="./assets/main-BmlVMKr-.js"></script>
+    <link rel="modulepreload" crossorigin href="./assets/three.module-DjDOn_6Y.js">
+    <link rel="stylesheet" crossorigin href="./assets/main-C4Uc4hmm.css">
+  <script>
+  // Demo: friendlier assists for first-time players (auto gears + traction control), unless
+  // this browser already chose its own.
+  try { if (!localStorage.getItem("wp.assistOverrides")) localStorage.setItem("wp.assistOverrides", JSON.stringify({ tcs: true, esc: false, auto_gears: true })); } catch (e) {}
+</script>
+<style>
+  body.demo #controls, body.demo .telemetry, body.demo .comps, body.demo .regions,
+  body.demo .feed, body.demo .inputs, body.demo #error { display: none !important; }
+  #demo-menu { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(ellipse at 50% 30%, rgba(30,36,52,0.82), rgba(6,8,12,0.94)); font: 15px/1.45 system-ui, sans-serif; color: #e6e8ee; }
+  #demo-menu[hidden] { display: none; }
+  #demo-menu .card { width: min(560px, calc(100vw - 32px)); padding: 28px 28px 22px; }
+  #demo-menu h1 { margin: 0; font: 900 44px/1 system-ui, sans-serif; letter-spacing: 0.06em; color: #fff; }
+  #demo-menu h1 span { color: #ff3b30; }
+  #demo-menu .tag { margin: 8px 0 22px; color: #9aa3b5; }
+  #demo-menu .btns { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  #demo-menu button { padding: 14px 12px; border-radius: 8px; border: 1px solid #3a4152; background: #1a1f2b; color: #fff;
+    font: 600 15px system-ui, sans-serif; cursor: pointer; text-align: left; }
+  #demo-menu button small { display: block; font-weight: 400; color: #9aa3b5; margin-top: 3px; font-size: 12px; }
+  #demo-menu button.primary { grid-column: 1 / -1; background: #b3261e; border-color: #e0463d; }
+  #demo-menu button:hover { filter: brightness(1.2); }
+  #demo-menu .keys { margin-top: 18px; display: grid; grid-template-columns: auto 1fr; gap: 3px 14px; font-size: 13px; color: #c3c8d4; }
+  #demo-menu .keys b { color: #fff; font-family: ui-monospace, monospace; font-weight: 600; }
+  #demo-menu .note { margin-top: 14px; font-size: 12px; color: #7d8597; }
+  #demo-open { position: fixed; bottom: max(8px, env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%); z-index: 40;
+    padding: 6px 14px; border-radius: 6px; border: 1px solid #3a4152; background: rgba(15,18,26,0.85); color: #fff; font: 600 13px system-ui, sans-serif; cursor: pointer; }
+</style>
+  </head>
+  <body>
+    <div id="overlay">
+      <div id="controls" class="panel">
+        <div class="row">
+          scenario <select id="sc-select"></select>
+          speed <input id="sc-speed" type="number" min="5" max="250" step="5" value="56" /> km/h
+          <button id="sc-run">run</button>
+          <button id="sc-free">free drive</button>
+          <button id="sc-chase" title="city at night (map below), police, traffic, you start speeding">city chase</button>
+          <button id="sc-chase-rain" title="the city chase in a night downpour on a soaked road">rainy night</button>
+          <label title="free drive / city chase use your career car, its damage and mods, and the result goes into the career"><input type="checkbox" id="career" checked />career</label>
+          <button id="controls-open" title="rebind keyboard and gamepad controls (F9)">controls</button>
+          <button id="sc-garage" title="your career: cars, repairs, mods, dealer, impound (ends a career run)">garage</button>
+          <button id="sc-races" title="street races with AI racers (Port Vesper and the grid city)">races</button>
+        </div>
+        <div class="row">
+          mode <select id="mode"><option>Arcade</option><option>Simulation</option></select>
+          car <select id="car"></select>
+          <label title="free drive in the selected city with traffic"><input type="checkbox" id="city" />city</label>
+          <select id="city-map" title="city for free drive and city chase">
+            <option value="vesper_v2">Port Vesper v2 (hills, curves)</option>
+            <option value="procedural_12x12">grid 12×12 (flat)</option>
+          </select>
+          weather <select id="weather" title="restarts the session with this weather (the scenario's own weather on 'scenario')"><option value="auto">scenario</option></select>
+          bench <button class="bench" data-n="1">1</button><button class="bench" data-n="8">8</button><button class="bench" data-n="24">24</button>
+          <span id="bench-out" class="dim"></span>
+        </div>
+        <div class="row" id="assist-row">
+          assists
+          <label><input type="checkbox" data-a="abs" />ABS</label>
+          <label><input type="checkbox" data-a="tcs" />TCS</label>
+          <label><input type="checkbox" data-a="esc" />ESC</label>
+          <label><input type="checkbox" data-a="auto_gears" />auto gears</label>
+        </div>
+        <div class="row">
+          replay
+          <button id="rec">● record</button>
+          <button id="rec-stop">■ stop</button>
+          <button id="rp-last">load last</button>
+          <label class="dim">file <input id="rp-file" type="file" accept=".bin" style="width: 90px" /></label>
+          <button id="rp-dl">download</button>
+          <button id="rp-csv">csv</button>
+          <button id="rp-exit">exit</button>
+        </div>
+        <div class="row" id="rp-bar">
+          <button id="rp-play">⏯</button>
+          <button id="rp-back">⏮</button>
+          <button id="rp-step">⏭</button>
+          <select id="rp-speed"><option>0.1</option><option>0.25</option><option>0.5</option><option selected>1</option><option>2</option><option>4</option></select>
+          <input id="rp-scrub" type="range" min="0" max="0" value="0" />
+        </div>
+        <div class="row dim" id="rp-status">no replay loaded</div>
+        <div id="sc-result"></div>
+      </div>
+      <div id="error"></div>
+    </div>
+    <button id="demo-open" hidden>Menu</button>
+    <div id="demo-menu">
+      <div class="card">
+        <h1>WRECK<span>PURSUIT</span></h1>
+        <div class="tag">Early prototype. Street racing, soft-body crashes and police chases in a living city, running in your browser.</div>
+        <div class="btns">
+          <button class="primary" data-go="sc-chase">City chase<small>Night in Port Vesper. You're speeding, the police will come.</small></button>
+          <button data-go="sc-chase-rain">Rainy night<small>Same chase on a soaked road</small></button>
+          <button data-go="sc-races">Street races<small>Four races against AI drivers</small></button>
+          <button data-go="sc-free">Free drive<small>Explore the city with traffic</small></button>
+          <button data-go="sc-garage">Garage<small>Your career: cars, repairs, mods</small></button>
+        </div>
+        <div class="keys">
+          <b>W / S</b><span>throttle / brake (arrow keys work too)</span>
+          <b>A / D</b><span>steer</span>
+          <b>Space</b><span>handbrake</span>
+          <b>C</b><span>change camera</span>
+          <b>R</b><span>reset the car</span>
+          <b>M</b><span>city map</span>
+          <b>F1</b><span>all controls · gamepads work too</span>
+        </div>
+        <div class="note">Prototype graphics. Works best in Chrome or Edge on a laptop or desktop. Sound starts after your first click.</div>
+      </div>
+    </div>
+    <script>
+      (function () {
+        document.body.classList.add("demo");
+        const menu = document.getElementById("demo-menu");
+        const open = document.getElementById("demo-open");
+        const show = (on) => { menu.hidden = !on; open.hidden = on; };
+        menu.querySelectorAll("button[data-go]").forEach((b) => b.addEventListener("click", () => {
+          const go = () => {
+            const t = document.getElementById(b.dataset.go);
+            if (!(t && window.__wp && window.__wp.ready)) return void setTimeout(go, 200);
+            // Quick play uses a ready car; the career (own cars, money) lives behind Garage.
+            const career = document.getElementById("career");
+            if (career && career.checked && b.dataset.go !== "sc-garage") career.click();
+            t.click();
+            show(false);
+          };
+          go();
+        }));
+        open.addEventListener("click", () => show(true));
+      })();
+    </script>
+  </body>
+</html>

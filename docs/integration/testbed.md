@@ -82,6 +82,11 @@ Car data (`data/{cars,lattices,tires,materials,modes}`) is embedded at build tim
 | `signal_heads` | – | `Float32Array` 10 × heads | Static, fetch once per session. One head per signalised junction approach (signal group): `[x, y, z, yaw, left_m, right_m, radius_m, centre_z, intersection, group]` — stop-line centre (z from the lane polyline, so heads follow elevation), travel yaw (lamps face `yaw + π`), stop-line lateral extent along travel-right, junction radius and node height (far-side heads). Empty on the flat world. `signal_head_stride()` = 10. |
 | `signal_states` | – | `Uint8Array` 1 × heads | Per frame, `signal_heads` order: 0 off, 1 red, 2 yellow, 3 green, from the world's signal clock (`wp_world::signals::group_state`), so pauses/replays show the simulated state. No turn arrows: the city has no protected turn phases. |
 | `traffic_agents` | – | `Float32Array` 5 × agents | `[x, y, z, yaw, flags]`; flags 1 physical LOD, 2 brake lights, 4 hazards, 8 yielding to siren, 16 / 32 turn signal L / R, 64 aggressive, `variant << 8`. Empty on the flat world. |
+| `props_static` / `props_moved` | – | `Float32Array` 11 × props / 8 × moved | City props (parked cars, cones; `props.rs`, lead helper `lead/draw-props`): static list once per session `[kind, x, y, z, qx, qy, qz, qw, hx, hy, hz]`, then per frame only props whose pose changed `[index, x, y, z, qx, qy, qz, qw]`. Drawn by `render/props.ts`. See `docs/integration/props.md`. |
+| `traffic_draw` | – | `Float32Array` 10 × agents | Every agent at any LOD (`lod.rs`): `[agent id, entity (0 = none), x, y, z, qx, qy, qz, qw, flags]`, flags as `traffic_agents`. Embodied agents report their vehicle's state; kinematic ones are seated on the ground exactly as the sim places a promoted car (`ground_pose`) and carried forward between 60 Hz traffic steps. `lod_draw_stride()` = 10. |
+| `police_draw` | – | `Float32Array` 10 × units | Every police unit, bound or not: `[unit id, entity (0 = none), x, y, z, qx, qy, qz, qw, flags]`, flags 1 helicopter, 2 pursuing. |
+| `session_car_models` | – | JSON | `{ cars, traffic, police }`: every car model the session can show (scenario cars, physical traffic, police) for preloading. |
+| `car_model_info` | `car_id` | JSON | `{ car_id, body_size_m, wheels }` of a model without a vehicle (builds the instanced far-LOD mesh). |
 | `lattice_nodes` | `entity` | `Float32Array` xyz × nodes | Current, chassis space (`Sim::node_positions`). |
 | `lattice_rest` | `entity` | `Float32Array` xyz × nodes | Rest pose. |
 | `lattice_beams` | `entity` | `Uint32Array` `[a, b]` × beams | |
@@ -103,6 +108,7 @@ Car data (`data/{cars,lattices,tires,materials,modes}`) is embedded at build tim
 | `replay_play` | `speed` | – | 0 = pause, max 16. |
 | `replay_status` | – | JSON or `null` | `{tick, end_tick, speed, verified_ticks, drift_count, drift_ticks[≤64], state_hash, recorded_final_hash, scenario, mode, contract_version, hash_spec}`. |
 | `replay_export_csv` | bytes, `entity`, `every_n_ticks` | CSV | Headless re-simulation; header `tick,t_s,<telemetry_names>`. |
+| `crash_take`, `crash_replay_start(seq)`, `crash_replay_stop`, `crash_replay_active`, `crash_tuning_json` / `_set`, `crash_detect_enable`, `crash_buffer_ticks` | | | Instant crash replay (lead): see `docs/integration/crash-replay.md`. |
 | `scenario_json` | – | JSON | The session's v2 scenario (entities incl. tick-0 spawns, barriers). |
 | `scenario_result` | – | JSON or `null` | Scripted sessions: `{name, done, tick, end_tick, pass, live_hash, matches_simcli, summary}`; `summary` is simcli's `RunSummary` (`expectations` / `pending`: `{expect, actual, passed}`). |
 
@@ -154,23 +160,39 @@ hash per tick dominate). `simcli replay file.replay.bin` verifies a browser reco
 
 ### Hotkeys (layer toggles persist in `localStorage`)
 
+**Player actions are rebindable** (round 12b): the **controls** button or F9 opens a panel with
+two keyboard and two gamepad slots per action; saved in `localStorage` `wp.bindings.v1`; the F1
+help lists the live bindings. Defaults (`src/bindings.ts`):
+
+| Action | Keyboard | Gamepad (standard mapping) |
+|---|---|---|
+| steer left / right | A / D, ← / → (ramped) | left stick X (analogue; deadzone 12 %, curve 1.0, both adjustable) |
+| throttle / brake | W / S, ↑ / ↓ (ramped) | RT / LT (analogue, 5 % deadzone) |
+| clutch (used with **clutch: manual**) | unbound — bind any key (ramped in 0.1 s / out 0.3 s) | unbound — bind a button, trigger, stick direction or a **wheel pedal axis** (full range) |
+| handbrake | Space | A or X |
+| shift up / down | Shift / Ctrl | RB / LB |
+| horn | Q | L3 |
+| look back (hold) | V | R3 |
+| next camera | C (remembered in `wp.testbed.camera.v1`) | View |
+| reset car | R | Y |
+| headlights | O | d-pad ↓ |
+| follow the next car | ` | – |
+| city map | M or Tab | d-pad → |
+| pause (replay: play/pause) | P | Menu |
+| help | F1 or ? | – |
+| controls panel | F9 | – |
+| audio mute | **F8** (was V, which also held look-back) | – |
+| repair bill | F | – |
+| crash replay: play / skip (lead, `docs/integration/crash-replay.md`) | Enter | d-pad ↑ (R2 / RT is the throttle) |
+
+Fixed keys:
+
 | Key | Action |
 |---|---|
-| W/S, ↑/↓ | throttle / brake (ramped) |
-| A/D, ←/→ | steer (ramped) |
-| Space | handbrake |
-| Shift / Ctrl | gear up / down |
-| R | reset player car |
-| O / Q | headlights / horn |
-| C | next camera (remembered per viewer in localStorage `wp.testbed.camera.v1`) |
 | 1–8 | camera: near chase (default), far chase, hood, bumper, cockpit, side tracking, TV / cinematic, orbit / free (debug) |
-| V (hold) | look back |
-| mouse drag | look around (springs back on release; right stick on a pad) |
-| Tab | cycle focused vehicle (camera, HUD, telemetry) |
-| P | pause (replay: play/pause) |
+| mouse drag | look around (springs back on release; right stick on a pad, not rebindable) |
 | . / , | replay frame step forward / back (4 ticks) |
 | [ / ] | replay speed down / up |
-| F1 or ? | help overlay |
 | B | body box / skinned body |
 | L | lattice wireframe |
 | H | lattice stress heat-map |
@@ -181,7 +203,6 @@ hash per tick dominate). `simcli replay file.replay.bin` verifies a browser reco
 | G | CG + velocity vector |
 | X | civilian traffic agents (grey; red = braking, yellow = physical LOD, blue = yielding); promoted agents are drawn as sim vehicles instead |
 | Z | chase readout (UI kit `ChaseHud`: wanted / heat / bounty / radio) + pursuit banner |
-| F | repair bill (UI kit `RepairBill`, priced by `wp_economy`); opens by itself on capture or scenario end |
 | 9 | traffic signals (was 6 until round 8: 6 is the side camera): mast-arm head at each stop line + far-side pedestal head, white stop line; lit lamp unlit-bright with an additive glow that strengthens at night (`signals_view.ts`, 6 InstancedMeshes for the whole city) |
 | 0 | panel meshes (machine R, `src/render/panels.ts`; on by default) — off shows the lattice view |
 | I | traffic / police intent arrows |
@@ -191,9 +212,12 @@ hash per tick dominate). `simcli replay file.replay.bin` verifies a browser reco
 | J | telemetry plots |
 | N | input display + rack-torque bar |
 
-Gamepad (standard mapping): left stick steer, RT/LT throttle/brake, A or X handbrake, RB/LB
-gears, Y horn, View/Back next camera, right stick look around, R3 (hold) look back; deadzones 0.12 stick / 0.05 trigger. Switching device logs an assists op with
-`AssistProfile::gamepad_default` / `keyboard_default`.
+Gamepad: the first connected pad, read every frame. Its values go to the sim as read (deadzone +
+steering curve, no keyboard-style ramps), so the sim's gamepad `AssistProfile` preset is the only
+filter. The source switches to the device used last and main applies
+`AssistProfile::for_source` (+ the owner's assist-box overrides) on every switch, logged as an
+assists op. A pad disconnect mid-drive releases everything and falls back to the keyboard preset
+(like keyboard blur). Bound actions win over debug-layer keys.
 
 Controls panel: scenario menu + speed box, **city chase** preset, damage mode (live switch), car, **city** (free drive
 in the procedural 12×12 city: greybox `data/city/procedural_12x12.greybox.glb` + traffic),
@@ -236,15 +260,33 @@ traffic; signals: the junction nearest the player framed at 12:00 and 22:00
 **city chase** (button, `__wp.startCityChase()`): the procedural 12×12 city at 23:00 with
 traffic and full police presence; the player starts on the race grid already doing ~110 km/h,
 so speeding violations (event feed) start the heat. Police cars (`VehicleKind::Police` sim
-vehicles, or `police_units()` for internally driven units) are white with a red/blue light bar
-that strobes while their siren is on (plus a point light); physical traffic
-(`VehicleKind::Traffic`) is grey; every car has head/tail lights (headlights: O). The wanted
+vehicles, or instanced from `police_draw()` for internally driven units) are white with a
+red/blue light bar that strobes while their siren is on (plus a point light); traffic keeps one
+of 8 liveries (`variant`) at every LOD (instanced far / kinematic, full view once physical, see
+"LOD pop-in" below); every car has head/tail lights (headlights: O). The wanted
 level / heat readout is M's UI-kit chase HUD (`apps/ui-kit/src/live`, mounted by
 `src/ui/overlay.ts`), fed by `police_status()` mapped onto the kit's `PoliceReadout`
 (`src/police.ts`). A centre banner shows **PURSUIT** / **SEARCHING** (escape %) while chased and
 **ESCAPED** / **CAPTURED** for 6 s after a pursuit ends (`last_outcome`, `outcome_age_s`). A
 capture, or the end of a scripted scenario, pops up the repair bill; a bill that popped up
 closes on the next session, one the user opened (F) stays.
+
+### Weather (lead, `lead/weather-in-game`)
+**weather** selector (`scenario` = the scenario's own weather, off, clear, overcast, rain, heavy
+rain, fog, dynamic) restarts the running session with that weather written into its scenario
+(`scenario_with_weather`), so replays and `simcli replay` carry it; **rainy night** = the city
+chase in a downpour on a soaked road (`city_chase_rain_json`; `?chase=rain`, `?weather=<id>`).
+`src/render/weather.ts`: instanced rain streaks animated in the vertex shader (one draw, ≤ 5000
+lines), wet road materials (`asphalt`, `highway_concrete`, `parking`, `sidewalk`, `kerb`, `bridge`
+and the flat ground: darker, glossier, sky-dome reflections, puddle sheen) driven by the 8 m
+water grid (`weather_grid()`, RG8 texture refreshed at 1 Hz), spray points behind cars
+(`weather_spray()`), `FogExp2` density 3 / visibility, cloud-dimmed sun, wipers in hood /
+bumper / cockpit cameras, and a HUD line (`#weather-hud`) with regime, rain rate, visibility,
+temperature, road state and an aquaplaning warning (player car's `Telemetry::aquaplane`).
+Exports (`crates/wp_wasm/src/weather.rs`): `weather_choices`, `scenario_with_weather`,
+`scenario_weather_choice`, `city_chase_rain_json`, `weather_info` (18 floats, `WX` in
+`render/weather.ts`), `weather_grid_meta`, `weather_grid`, `weather_spray`. Check:
+`npm run e2e:weather` (also run by `npm run e2e`); screenshots in `docs/media/weather/`.
 
 ## Native testbed stub (`apps/testbed-native`)
 Default build = headless smoke run printing FFB (the only thing CI builds); it now runs the
@@ -621,3 +663,292 @@ Testbed: `src/ui/runEnd.tsx` (`RunEndView`, kit `Panel` / `Button` / `Money` / `
 `restartRun()`, both on `window.__wp`. `e2e/run.mjs`: a real capture (player parked in front of a
 patrol car at heat 30) → panel + bill → click **Repair & continue** → health 1.0, cash = after −
 cost, panel closed. C: the stubbed banner check and `ChaseEndDetector` are untouched.
+
+## Note from M (UI kit, round 9, 2026-10-19): city map HUD
+
+Owner request "we need a game map HUD with police". Small glue in your crate/app, please review
+(details in `docs/integration/ui.md` → "City map HUD"): `crates/wp_wasm/src/map.rs`
+(`map_static_json()`, `map_dynamic(player)`, read-only), `src/ui/map.ts` mounting the kit's
+`mountMapHud`, `main.ts` wiring (M / Tab toggle the full map, neutral input while it is open),
+two layers (`'` minimap, `;` minimap signals), `e2e/run.mjs` map checks, `e2e/map_shots.mjs`.
+**Key change:** audio mute is now **V** (was M) and "follow the next car" is **backquote** (was
+Tab). The minimap sits in the left column under the input panel (top 312 px) because your
+bottom-right holds the event feed and the audio panel; move it with `minimapPlacement`.
+
+## Lead feedback (round 12b, 2026-10-19) — gamepad + rebindable controls (owner request)
+Base: `origin/lead/round12` (round 12's merges; `main` catches up when its gate is green), not main.
+1. **Gamepad** via the browser Gamepad API in `apps/testbed-web/src/input.ts`: analogue steer
+   (left stick, with a small deadzone + optional curve), throttle/brake on the triggers (RT/LT),
+   handbrake, shift up/down, camera cycle/look-back, horn, reset. Standard mapping first; handle
+   connect/disconnect mid-drive (release everything on disconnect, as keyboard does on blur).
+   Feed the real analogue values to the sim (no keyboard-style ramps) so the existing gamepad
+   assist profile applies; check `AssistProfile` selection follows the active device.
+2. **Rebindable controls**: a small settings panel (keyboard + gamepad) that lists every action,
+   lets the player press a key/button to rebind, resets to defaults, and saves to localStorage
+   (`wp.bindings.v1`, try/catch). Show the current bindings in the F1 help.
+3. e2e: a fake gamepad (override `navigator.getGamepads`) drives forward and steers; a rebind
+   survives a reload. Measure input latency stays one frame.
+## Lead helper note (`lead/fix-lod-popin`, 2026-10-19) — LOD pop-in (playtest row 25)
+Owner: "some cars load LOD too slow": cars pop in late or look wrong for a while. Reproduced on
+`main` in headless Chromium (`e2e/lod_shots.mjs`, `docs/media/lod/before_*`); all four suspects
+applied:
+1. **Panel meshes loaded late.** `PanelBody` fetched `data/panels/meshes/<car>.json` the first
+   time a model appeared: the traffic model at the first promotion, the police cruiser at the
+   first police spawn. Until the file arrived (and always for one frame, since the build ran in a
+   promise callback even when cached) the car was the lattice hull / debug box. Locally that is
+   5–25 ms; on the published link it is a 180–230 KB fetch per model.
+2. **Promotion swap.** Kinematic agents were 1.8 × 4.4 × 1.4 m boxes (grey; red when braking,
+   blue when yielding, yellow when physical without a vehicle); a promoted agent became the
+   `debug_sedan` panel mesh in `#7a8a99` with tire-force arrows and a CG marker on the same frame
+   (`before_promotion_strip.png`). Physical agents were hidden whenever *any* physical traffic car
+   existed, so one whose sim vehicle could not be spawned (vehicle limit) vanished.
+3. **Draw distance.** The instanced boxes were never culled, but `wp_world` spawned / despawned
+   agents 150 m from the player: cars materialised in plain view (closest measured 226 m in a 5 s
+   window of the chase; the rule allows 150 m). Fixed in `wp_world` (see
+   `docs/integration/world.md`, "Lead helper: LOD pop-in"): 320 m.
+4. **Police.** Same mesh-on-first-spawn delay for the cruiser; unbound units were boxes.
+### What changed
+| File | Change |
+|---|---|
+| `crates/wp_wasm/src/lod.rs` (new), `lib.rs` | `traffic_draw()`, `police_draw()`, `lod_draw_stride()`, `session_car_models()`, `car_model_info()` (table above). Read-only: hashes and goldens unchanged by these. Native tests: quaternion maths, model list, and **draw poses stay continuous through 15 real promotions/demotions in 12 s of city chase (worst swap 0.06 m, worst tick 0.08 m)**. |
+| `src/render/fleet.ts` (new) | Instanced cars: per model a full mesh (the model's real panel mesh merged at rest: paint with per-instance livery, detail, head/tail lamp markers where `VehicleView` puts them, police light bar) for cars < 150 m from the camera (192 per model; promotions happen at 80 m, so the swap is always full mesh → full mesh), a ~130-triangle proxy beyond (and while a mesh is loading). Shared 8-colour `TRAFFIC_PALETTE` by `variant`. |
+| `src/render/lod.ts` (new) | `LodDirector`: per frame, each traffic agent / police unit is drawn by exactly one of its `VehicleView` (once the sim spawned it **and** its mesh is ready) or the fleet, same model / livery / pose — so promotions and demotions swap the drawer on one frame with no gap. `LodLog` records per-frame draw states (missing-mesh frames, swap pose jumps with ±3 frames, appear / vanish distances, placeholder time). |
+| `src/render/panels.ts` | `preloadCarMeshes()`, `carMeshNow()`, `meshTimings`; a preloaded mesh builds in the `PanelBody` constructor (no placeholder frame). |
+| `src/vehicle_view.ts` | `drawable` (mesh ready or panels layer off); while loading, a proxy in the car's livery instead of the debug box / lattice hull; sim-spawned traffic / police (`background`) show per-car debug overlays (tire forces, slip colours, suspension, CG / velocity) only when focused (Tab), so a promotion does not sprout arrows. |
+| `src/main.ts` | Session start: `session_car_models()` → preload (first frame of the page waits ≤ 5 s for them); promoted traffic views get their agent's livery; `lod.update()` after the camera moves; `__wp.lod`, `__wp.meshTimings`. |
+| `src/scene.ts` | Agent boxes removed; `updateHelicopters(police_draw())` keeps the helicopter boxes. |
+| `e2e/run.mjs` | LOD check (fresh city chase, ≥ 12 s sim, ≥ 2 swaps): no car without its mesh after the first second; swap pose jump < 0.5 m; traffic appears / vanishes ≥ 300 m from the player. |
+| `e2e/lod_shots.mjs` (new) | Before/after strips + frame logs into `docs/media/lod/` (runs against an older testbed too: `node e2e/lod_shots.mjs <out> before <main-worktree>/apps/testbed-web`). |
+### Measurements (headless Chromium, SwiftShader, cloud 4 vCPU)
+| | `main` | this branch |
+|---|---|---|
+| Closest traffic pop-in / pop-out from the player (`lod_shots.mjs`, chase) | 226 m / 226 m | 359 m / 462 m |
+| Promotion: drawer change | grey/red box → `#7a8a99` debug_sedan + debug arrows | same model, livery and lamps (`*_promotion_strip.png`) |
+| Frames with a car drawn without its mesh (after 1 s) | n/a (placeholder until fetched) | 0 |
+| Car mesh fetch (local) | on first appearance of a model (5–25 ms + 1 frame) | at session start, before the first frame |
+| Swap jump: drawn vs sim pose (e2e) / sim pose tick by tick (wasm test) | — | 0.000 m over 7 swaps / 0.06 m over 15 swaps |
+| City chase frame (`chase_perf.mjs`, 20 s) | 899 ms, render 13.8 ms, 541k tris, 622 calls | 920 ms, render 26.6 ms, 627k tris, 470 calls |
+SwiftShader frame time is dominated by rasterising the city and is unchanged; renderer CPU time
+roughly doubles (instance buffers of the full-mesh fleet: up to 192 instances × ~4k triangles per
+model within 250 m). `FULL_LOD_M` was then lowered to 150 m (owner's call, 2026-10-20); see the
+follow-up measurement below.
+Follow-up 2026-10-20: with the 320 m sightline the city no longer reached its traffic target
+(`world_traffic_soak_observer`); fixed in `wp_world` without moving the spawn ring (see
+`docs/integration/world.md`, "Follow-up"). `npm run e2e` LOD checks on that build: 0 frames
+without a mesh, swap jump 0.000 m, traffic appears ≥ 322 m / vanishes ≥ 342 m from the player.
+### Known gaps
+- Proxy → full instanced mesh switches at 150 m from the camera (a small far-LOD change, by design;
+  a 4.5 m car is ~20 px tall there at 1280×720).
+- Damage done while physical is lost on demotion (the instanced mesh is undented); traffic
+  demotes 100 m+ away, so it is rarely visible.
+- Kinematic poses are carried forward between traffic steps, not interpolated by the frame's
+  alpha (≤ 1 physics tick, 0.125 m at 30 m/s).
+- Bench / car-selector cars outside the session list still load on demand (with the proxy).
+### Gate (2026-10-19)
+fmt, clippy `-D warnings`, `cargo test --workspace` (goldens blessed in the `[bless]` commit), wasm
+build, tsc, `just web-e2e`: all checks pass (LOD: 0 frames without a mesh, 7 swaps with 0.000 m
+hand-over jump, traffic appears ≥ 327 m / vanishes ≥ 353 m). One earlier run failed the capture /
+"Repair & continue" checks and logged an audio `setValueCurveAtTime` overlap page error; `main`
+fails the same three checks in this container, so they are pre-existing and flaky here (J / lead).
+### Response — round 12b (2026-10-20, workstream 04, base `origin/lead/round12` @ `05f92f8`)
+1. **Gamepad** (`src/input.ts`): the first connected pad is read every frame through the
+   bindings. Left-stick steer (deadzone 12 %, optional response curve `sign·|v|^k`, k 1.0–2.5),
+   RT/LT throttle/brake (5 % deadzone), A/X handbrake, RB/LB shifts, View camera cycle, R3 look
+   back, L3 horn, Y reset, Menu pause, d-pad ↓ headlights, d-pad → map; right stick still looks
+   around (`cameras.ts`, not rebindable; its old hard-coded View/R3 handling moved to the
+   bindings). Values reach the sim **as read** (no ramps), so the sim's gamepad assist preset is
+   the only filter. Source = device used last; main applies `AssistProfile::for_source` (+ owner
+   overrides) on every switch — e2e checks the sim's profile matches the gamepad preset on the
+   fields that differ (`steer_speed_sensitivity`, `countersteer_help`, `throttle_filter`,
+   `brake_filter`) and returns to the keyboard preset. `gamepaddisconnected` (or the pad
+   vanishing from `getGamepads()`) releases everything and falls back to the keyboard.
+2. **Rebindable controls**: `src/bindings.ts` (19 actions, two keyboard + two pad slots each,
+   defaults, `wp.bindings.v1` load/save with try/catch, validation of saved data) and
+   `src/ui/controls.ts` (panel: **controls** button or F9; click a slot then press a key / pad
+   button / move a stick or trigger; Esc cancels, Delete clears; a key taken from another action
+   is moved, not duplicated; deadzone + curve sliders; reset to defaults). Driving input is
+   neutral while the panel is open, and keys go only to the panel. The F1 help lists the live
+   bindings (`hud.setControlsHelp`). A bound action wins over a debug-layer key.
+   **Key change:** audio mute **V → F8** — since round 9 V both muted and held look-back.
+   Look-back stays on V (e2e/cameras.mjs relies on it). Screenshot: `docs/media/controls_panel.png`.
+3. **e2e** `e2e/gamepad.mjs` (run by `npm run e2e` at its end; alone `npm run e2e:gamepad`),
+   16 checks, all pass: fake standard pad (`navigator.getGamepads` override) drives
+   (9.3 m/s after 2.5 s) and steers (applied steer 0.55); analogue pass-through exact
+   (stick 0.5 → 0.432, RT 0.4 → 0.368); **latency: pad change → `app.input` 1 frame,
+   → the sim's applied throttle (telemetry `in_throttle`) 1 frame**; View cycles the camera,
+   R3 holds look-back; disconnect with throttle + full lock + handbrake held → all 0, keyboard
+   preset; panel blocks input; key + pad rebind saved, survives a reload, rebound key drives and
+   the old one does not, F1 shows it; reset to defaults clears `wp.bindings.v1`.
+Gates: `cargo fmt --check`, `cargo clippy --workspace -D warnings`, wasm build, `tsc`,
+`just web-e2e` (64 PASS incl. weather + gamepad) and `e2e/cameras.mjs` all green.
+`cargo test --workspace --no-fail-fast`: 873 pass, **3 fail on the round-12 base** (no Rust
+changed in this round): simcli `goldens_match` (city_blocked_parked_player_{grid,vesper},
+golden_city_chase, golden_night_pursuit_escape, panels_frontal_56_hood,
+police_sideswipe_patrol_day, weather_aquaplane_{control,puddle}, … hash mismatches),
+simcli `all_scenarios_pass…` (`blocked_parked_player_vesper`: `traffic_turnarounds` 0, want
+1–30), and wp_net `four_clients_three_minutes_in_port_vesper` (p0 `Escaped`, expected
+`Captured`). Lead: probably needs re-blessed goldens / re-tuned expectations after round 12's
+merges.
+Changes outside my folders: none.
+
+### Response — round 12c clutch (2026-10-20, lead follow-up, playtest row 59)
+Base: merged `origin/lead/round12` @ `6b9fa40`.
+1. **`clutch` action** (`src/bindings.ts`, analogue): shown in the F9 panel and the F1 help,
+   saved in `wp.bindings.v1`. Default **unbound** on keyboard and pad: every letter key is already
+   a game or debug-layer key (E is the region-energy layer) and the pad's triggers / shoulders
+   are taken. Older saves migrate in place (missing actions take their defaults; e2e checks an
+   old save keeps its other bindings). Wheels: the reader now takes **every connected
+   pad/wheel** (pedals can be a separate device), and the panel binds an axis that rests at one
+   end as a **full-range pedal axis** (`{ axis, dir, full: true }`, 0 at rest → 1 at full press).
+2. `DriverInput.clutch` gets it (keyboard ramp 10/s in, 3.5/s out; pad/pedal raw, 5 % deadzone);
+   the HUD's `clt` bar shows it.
+3. **clutch: automatic / manual** select next to the assist boxes = `AssistProfile.auto_clutch`.
+   Default automatic (today's auto-clutch). Manual uses the player's clutch directly. The choice is
+   remembered with the other assist overrides (`wp.assistOverrides`), applied over every device
+   preset. A HUD badge shows `A-CLU` / `M-CLU`.
+4. e2e (`e2e/gamepad.mjs`, now 23 checks): old save migrates; clutch bound to a key and a pedal
+   axis, survives a reload; manual survives a reload with `auto_clutch` false; pedal half travel →
+   0.47 (5 % deadzone); clutch held + full throttle from standstill → `clt` 1, engine 6 680 rpm,
+   car 1.39 → 1.23 m/s (coasting: drive decoupled); clutch released → 13.7 m/s; automatic restores
+   `auto_clutch`.
+
+**Request to A (vehicle, `docs/integration/vehicle.md`), not edited by me:** the testbed now sends
+`DriverInput.clutch` with `auto_clutch: false` when the player picks manual. Today manual has
+anti-stall slip and no stalling: in 1st gear with the clutch out the car idle-creeps
+(~1.4 m/s), which e2e tolerates. When stall + restart lands, please say how restart is triggered
+(input bit or key), and I will bind it as an action. The testbed needs no other change for
+stalling.
+
+Gates: fmt, clippy `-D warnings`, wasm build, `tsc`, `just web-e2e` (117 PASS incl. weather,
+gamepad, race) all green. `cargo test --workspace --no-fail-fast`: 936 pass, **6 fail, all in Rust
+identical to `origin/lead/round12`** (this round changes no Rust): simcli `goldens_match`,
+wp_race `grid_highway_sprint`, wp_sim `vesper_v2_cars_drive_up_the_kerb_and_along_the_sidewalk`,
+wp_vehicle `front_drive_cars_understeer_mildly`, and the lead's race glue tests in wp_wasm
+`race_tests::{short_sprint_with_ai_runs_to_results…, a_capture_mid_race_is_a_dnf…}` (player
+DNF `FinishWindow`; "never captured"). The vehicle handling test failing too suggests a round-12
+physics change behind most of them. Lead: please take these at the gate; I have not touched them.
+
+### Response — round 12c reset in place (2026-10-20, lead follow-up, playtest row 65)
+**R (and its pad binding, default Y) now resets in place** instead of sending the car to its
+spawn:
+- `crates/wp_wasm/src/reset.rs` (pure, deterministic) picks the pose: the nearest drivable
+  lane within **15 m**, heading along it in the car's direction of travel (velocity when moving,
+  else chassis forward; lanes running against it cost +4 m and the car still faces its own
+  way). It uses the first spot along that lane (0, ±6, ±12, ±18 m) whose footprint (2.4 × 5.6 m)
+  is clear of other sim vehicles, kinematic traffic agents, static props (parked cars, cones)
+  and scenario barriers (oriented-box separating-axis test). With no clear lane spot (open
+  ground, no city), the car is set upright where it is, or up to 8 m along its heading if that
+  spot is blocked.
+- `Session::reset_in_place(id, repair)` / wasm `reset_in_place(entity)` → JSON
+  `{ x, y, yaw, on_lane, repaired }`. Upright at rest via `Sim::place_on_ground` (pitched to the
+  road on hilly cities; `place_body` zeroes velocity and resets the vehicle). The car is repaired
+  in free drive, city chase, races and scenarios, **but not in a career run**
+  (`career_run_active()`; repairs are bought in the garage). Police heat, pursuit and the
+  economy run are untouched. A race is told the car moved on purpose (`relocate_racer`, as for
+  the old reset), so position and lap carry on. The event feed notes
+  "reset in place — repaired / career: …".
+- `reset_vehicle` (back to spawn, pristine) stays for scenario restarts.
+
+**Change outside my crates (minimal, for replays): `apps/simcli`** — new replay op
+`OpKind::ResetAt { xy, yaw, near_z, repair }` (byte tag 4: f32 x, y, yaw, near_z, u8 repair) →
+`Sim::place_on_ground(id, xy, yaw, 0, Some(near_z))` then `repair_vehicle` if `repair`. It is in
+`apply_op` and the encode/decode round-trip test, with the format notes updated. The op carries
+the chosen pose, so playback (browser and `simcli replay`) needs no lane search. Old replays
+decode unchanged; goldens unchanged. Owner of simcli (I) / lead: please review.
+
+~~Request to the lead (wp_sim): ghost window~~ — **done, see "Ghost window" below** (the owner
+asked for it directly). Note also:
+`place_on_ground` on terrain cities overwrites the slot's `spawn`, so a later spawn reset goes
+to the last in-place reset spot.
+
+Tests: native `reset::tests` (box overlap, travel direction, open-ground fallback);
+`tests::reset_in_place_repairs_near_the_crash_and_replays` (barrier crash → R → within 15 m,
+clear of the barrier, upright, at rest, health 1.0; with `repair = false` the damage stays;
+`ResetAt` in the replay, `simcli` verify matches); `tests::reset_in_place_in_the_city_snaps_to_
+a_lane_and_keeps_heat`. e2e `e2e/reset.mjs` (run by `npm run e2e`, alone `npm run e2e:reset`):
+barrier crash (health 85 %) → R → upright, 4.0 m from the crash, 0 m/s, health 100 %, the feed
+notes it; the recording with the reset plays back with 0 drift; city chase → lane 0.2 m away,
+heat 0.6 → 0.6; career run → `repaired: false`.
+## Note from M (UI kit, round 12, 2026-10-20): HUD layout + game menu — for C to review
+Owner rows 67 / 68, details in `docs/integration/ui.md` → "Round 12". Small glue in your app:
+- **Layout:** minimap now bottom-right; the **audio panel moved bottom-left above `#controls`**;
+  race HUD stacks under the speedo; the right column caps itself above the minimap. Run-time
+  sizes by `src/ui/layout.ts` (writes `top` / `max-height` / `left` on `.wp-race-hud`,
+  `#controls`, `#audio-panel`, `canvas.telemetry`, `.right-col`, `#weather-hud`). If you add a HUD
+  element, add its selector to `e2e/hud_layout.mjs` so the overlap check covers it.
+- **Game menu** (kit): `main.ts` mounts it. **Key change:** the rebindable "pause" action (P / pad
+  Menu) now opens the pause menu while driving (replays keep play/pause), and **Esc** opens it when
+  nothing else (map, controls panel, garage, run-end panel, race picker) is on screen. Its
+  Controls button calls your `controls.open()` unchanged (your clutch / reset-in-place work should
+  merge cleanly: `controls.ts` and `bindings.ts` are untouched).
+- **Player mode** (`body.wp-player`, Settings → Developer off; default with `?menu=1` and the
+  demo): hides the developer panels and suppresses the 3D debug layers via the new
+  `layers.suppress(ids)` in `settings.ts`.
+- `HudFrame.units` in `hud.ts` (km/h / mph).
+- `e2e/menu.mjs` runs at the end of `npm run e2e` (36 checks).
+
+### Ghost window after a reset in place (2026-10-20, owner request, playtest row 65)
+The owner asked for the ghost window directly, so I added it in wp_sim (lead-owned crate; small
+and additive, **lead please review**). Base: merged `origin/lead/round12` @ `608a50a`.
+- **`wp_sim::physics::GhostHooks`** (Rapier `PhysicsHooks::filter_contact_pair`, now passed to
+  `PhysicsWorld::step` instead of `&()`). A ghost chassis keeps contacts with static world
+  geometry: colliders without a body or on a fixed body, i.e. ground slab, roads, terrain,
+  sidewalks, buildings, rails, tunnel boxes and scenario barriers. It passes through everything
+  that moves (other cars, debris) and through props even while they rest as fixed bodies (props
+  now carry `user_data` `PROP_USER_BIT`). Ghosts are flagged with `user_data` `GHOST_USER_BIT`
+  plus `ActiveHooks::FILTER_CONTACT_PAIRS`, so only pairs involving a ghost reach the hook. Every
+  other pair keeps Rapier's default handling. No contact means no damage either way.
+- **Wheel rays:** a ghost's suspension rays use `QueryFilter::exclude_dynamic()` plus a predicate
+  skipping props (else its wheels "drive up" onto the car it overlaps), and every other car's
+  rays skip ghost chassis.
+- **`Sim::set_ghost(id, ticks)`** / **`Sim::ghost_ticks(id)`**: countdown in `step_fixed`
+  (`update_ghosts`, before the physics step, vehicle order). If the window ends while the chassis
+  AABB still overlaps another car's, the ghost is extended tick by tick until clear, capped at
+  `GHOST_MAX_OVERSTAY_TICKS` (3 s).
+- **simcli:** new replay op `OpKind::Ghost { ticks: u16 }` (byte tag 5) → `Sim::set_ghost`,
+  in the round-trip test. `ResetAt` (tag 4) is unchanged, since it is already merged on several
+  branches; the session logs `Ghost { 240 }` right after it.
+- **wp_wasm:** `reset_in_place` ghosts the car for `reset::GHOST_TICKS` = 240 (1 s); its JSON
+  gains `ghost_ticks`; new wasm `ghost_ticks(entity)`. **Testbed:** the player's car blinks at
+  8 Hz while it is a ghost (`root.visible`, so no shared materials are touched).
+- **Determinism / goldens:** with no ghosts the hook is never called and the wheel-ray
+  predicate accepts every collider. The simcli golden report (every FAIL line and every first
+  mismatch hash) is **bit-identical with and without this change** on the merged base (20
+  goldens fail on the base itself, see below).
+
+Tests: wp_sim `ghost_passes_through_cars_but_not_the_world` (a ghost at 10 m/s drives through a
+parked sedan: no car–car contact, no damage, the parked car does not move, the ghost stays on
+the ground, deterministic hash; without the ghost the same run crashes; a ghost still stops at a
+static barrier) and `ghost_overstays_while_overlapping`. wp_wasm reset test checks the 240-tick
+window, the `Ghost` op in the recording, solid afterwards, `simcli` verify. `e2e/reset.mjs`:
+city-chase reset → `ghost_ticks` 240, the car blinks, then solid and drawn again; a recording
+with the reset plays back with 0 drift.
+
+Known gaps: traffic and police AI react to car positions, not physics rays, so they still
+brake or steer around a ghost (no physics query besides wheel rays and the ground-height probe
+exists in wp_sim/wp_world/wp_police). The overlap check at the end of the window looks at other
+cars only, not props or debris.
+
+Gates (ghost window): fmt, clippy `-D warnings`, wasm build, `tsc` green. `cargo test
+--workspace --no-fail-fast`: 1003 pass, 5 fail, **all failing identically on the pre-ghost
+code** (same panic text / race results / golden hashes): simcli `goldens_match` (20 scenarios),
+wp_opponent `live_police_chase_ends_in_escape_or_capture_without_stuck_cars`, wp_race
+`hollins_hill_sprint`, `loop9_circuit`, `lantern_checkpoint_draws_the_police`. (wp_wasm's
+race tests and wp_vehicle's handling test now pass on the merged base.) `just web-e2e`: new
+suites pass (gamepad, reset incl. ghost), 3 top-level failures that also fail on the pre-ghost
+code: `e2e/perf_check.mjs` (software-GL frame-time / allocation / material-version budgets),
+`e2e/touch.mjs` (layout 640×360: chase × banner overlap), and `e2e/crash_fx.mjs` (effects
+1.18 KB/frame allocation — passes when run alone, so load-sensitive).
+### Follow-up (2026-10-20): `FULL_LOD_M` 250 → 150 m
+Owner's call after the render-cost note above. A/B on the same container (`chase_perf.mjs`, 20 s
+city chase, two runs each; absolute numbers ran higher than the day before, compare within the
+table only):
+| `FULL_LOD_M` | triangles | render ms | frame ms |
+|---|---|---|---|
+| 250 m | 667k / 667k | 195 / 179 | 875 / 860 |
+| 150 m | 591k / 603k | 170 / 141 | 828 / 787 |
+≈ 10 % fewer triangles, ≈ 5 % faster frames headless. Promotions happen 80 m from the player, so
+the hand-over is still full instanced mesh → full VehicleView.
+Gate at 150 m (rebased on the lead's density follow-up): wasm build, tsc, `npm run e2e` all pass
+(LOD: 0 frames without a mesh, 3 swaps with 0.000 m hand-over jump, traffic appears ≥ 321 m /
+vanishes ≥ 373 m from the player; weather and race e2e also pass).

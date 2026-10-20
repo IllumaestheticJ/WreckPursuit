@@ -142,6 +142,24 @@ Since contract v0.3.0 police, economy and race events are typed (`SimEvent::Poli
 them directly from the generated types. `src/model/police.ts` re-exports those and keeps a hand
 mirror only of `wp_police`'s captain view (`CaptainView`, not in the contract — UI-3).
 
+### Live hosts: city map HUD (`src/map/`)
+
+Corner minimap (heading up, zoom by speed, police blinking red/blue when responding or pursuing,
+sight areas and search zone while wanted, roadblocks / spikes, helicopter, garages / safehouses,
+escape ring) and a full city map with districts, POIs, pan / zoom and a legend. Canvas 2D; the
+minimap's roads come from one offscreen canvas per city. Data from `wp_wasm`:
+
+```ts
+import { mountMapHud } from "../../ui-kit/src/live";
+const map = mountMapHud(overlayEl, { onOpenChange: (open) => (inputPaused = open) });
+map.setStatic(wasm.map_static_json());               // once per city
+map.frame(wasm.map_dynamic(player), performance.now()); // every frame
+// host keys: M / Tab → map.toggle(); the map handles Esc, arrows, + / −, 0, F itself while open
+```
+
+Layouts: `src/map/data.ts` (mirrors `crates/wp_wasm/src/map.rs`). Tests: `src/map/*.test.ts`.
+Screenshots: `docs/media/map/`.
+
 ### Live hosts: chase end
 
 `src/live/chaseEnd.ts` `ChaseEndDetector.update(racer, status, level, events, freshOutcome?)`
@@ -149,6 +167,38 @@ reports `{ how: "escaped" | "captured" | "wrecked" | "calledOff", outcome, level
 chase: from the typed `PursuitEnded` (outcome + level before the reset) when the host forwards
 events, else from the status turning clear (with the host's fresh `last_outcome`, if any) or a
 `TotalLoss` mid-chase. The testbed uses it to open the repair bill on a capture or wreck.
+
+### Live hosts: game menu (`src/menu/`)
+
+Main menu, pause menu and settings for players (owner request 2026-10-20). Host-agnostic: the
+host starts sessions, pauses its sim and applies the settings.
+
+```ts
+import { defaultGameSettings, loadGameSettings, mountGameMenu } from "../../ui-kit/src/live";
+const menu = mountGameMenu(overlayEl, {
+  settings: loadGameSettings(defaultGameSettings(/* developer panels by default */ true)),
+  cameras: [{ id: "chase", label: "near chase" }, ...],
+  countersteer: false, // slider disabled until the host can set it
+  host: { play, restart, garage, quitToMain, openControls, controlsOpen, apply, onOpenChange },
+});
+menu.openMain();   // title screen (City chase, Rainy night, Street races, Free drive, Garage, Settings, Controls)
+menu.openPause();  // Resume, Restart, Garage, Settings, Controls, Quit to main menu
+```
+
+- `host.apply(next, prev)` gets every change (and the initial settings with `prev = null`);
+  settings persist in `localStorage` `wp.gameSettings.v1` (all access in try/catch; bad fields
+  fall back field by field, `normalizeSettings`).
+- Settings: quality (auto / high / low) + draw distance, volumes (master, engine, effects,
+  police radio, ambience), assists (ABS, TCS, ESC, auto gears, steering help, countersteer
+  0–100 %), damage mode, km/h or mph, default camera, developer panels.
+- Navigation: ↑ ↓ (or W S, Tab) move, ← → change a value, Enter / Space select, Esc / Backspace
+  back. Gamepad (standard mapping, first pad, polled by the menu): d-pad or left stick, A select,
+  B back, Start resume; directions repeat while held. A button held when the menu opens does not
+  fire. While open the menu takes every keydown (capture phase), so no game key leaks through.
+- `controlsOpen()` lets the host's rebinding panel sit on top: the menu hides and comes back when
+  the panel closes.
+- Pure parts are unit tested (`src/menu/menu.test.ts`: storage round trip, validation, blocked
+  storage, units, key map, pad edges / repeat).
 
 ## Accessibility
 
@@ -183,6 +233,8 @@ src/
   data/               real data loaders (catalog), economy + estimator ports
   mock/               simcli run parsing, event reducer, mock provider, toy police, mock content
   screens/            one folder per area (hud, menu, settings, garage, race, impound, crew, police, captain, replay)
+  menu/               live game menu for hosts (main / pause / settings, settings storage, nav)
+  map/, live/, garage/  live host surfaces (city map HUD, overlays, career garage)
   ui/                 theme.css, primitives (kit.tsx), formatting, map geometry
 demo/                 the demo page (npm run demo)
 e2e/smoke.mjs         headless smoke test + perf probe
@@ -207,4 +259,9 @@ tools/record-police         Rust: records a real wp_police run as a fixture
 - The binding flow is tested with the keyboard in CI; gamepad/wheel capture uses the Gamepad API
   and was not exercised headless (no device).
 - Display font falls back to system condensed sans (no web fonts are bundled).
-- The kit is not wired into `apps/testbed-web` (owned by 04): it provides the mount API and demo.
+- The demo page has no map screen (no static map fixture); the testbed is the map's surface.
+- District names for Port Vesper v2 are a UI-side table until zones carry names (CITY.md C2).
+- Game menu: the countersteer slider is disabled until `wp_wasm` exports a countersteer setter
+  (machine A); MSAA follows a quality change only after a reload; the audio panel's own sliders
+  (developer view) show menu volume changes after a reload. Styled with the kit theme; machine S's
+  palette (`apps/testbed-web/src/render/palette.ts`) is not on this branch yet.

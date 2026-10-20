@@ -60,6 +60,7 @@ pub fn free_drive_in(car: &str, mode: DamageMode, city: CitySpec) -> Scenario {
         traffic_cars: true,
         parked_cars: true,
         police_cars: true,
+        covered_los: true,
         police_presence: None,
         slow: false,
         // Hinged panels + per-panel meshes in the browser (workstream R).
@@ -67,6 +68,7 @@ pub fn free_drive_in(car: &str, mode: DamageMode, city: CitySpec) -> Scenario {
         systems: None,
         barriers: Vec::new(),
         police_orders: Vec::new(),
+        weather: None,
         entities: vec![entity("player", car, [0.0; 3], 0.0)],
         duration_s: FREE_DRIVE_DURATION_S,
         sample_hz: 60.0,

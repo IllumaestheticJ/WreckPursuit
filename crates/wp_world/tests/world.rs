@@ -439,18 +439,34 @@ fn density_noon_core_at_least_five_times_3am() {
 
 #[test]
 fn spawns_respect_sightline_and_active_area() {
-    let mut w = world(TrafficConfig::default(), 12.0, 1.0);
+    let cfg = TrafficConfig::default();
+    let (sight, active) = (cfg.sight_radius_m, cfg.active_radius_m);
+    let mut w = world(cfg, 12.0, 1.0);
     let me = player([0.0, -330.0, 0.0], [1.0, 0.0], 0.0);
     w.set_tracked_vehicles(&[me]);
     w.populate();
     assert!(w.agent_count() > 20);
+    // Before the first tick nobody has seen the city: the start clearance is the smaller
+    // POPULATE_SIGHT_RADIUS_M.
+    let start_clear = wp_world::traffic::POPULATE_SIGHT_RADIUS_M.min(sight);
     for a in w.agents() {
         let d = geom::dist(geom::xy(a.pos), [0.0, -330.0]);
-        assert!(d >= 150.0, "agent spawned in sight at {d} m");
-        assert!(d <= 400.0 + 60.0, "agent outside the active area at {d} m");
+        assert!(d >= start_clear, "agent spawned in sight at {d} m");
+        assert!(d <= active + 60.0, "agent outside the active area at {d} m");
+    }
+    // Live spawns keep the full sightline radius.
+    let mut ev = Vec::new();
+    let mut seen: std::collections::BTreeSet<u32> = w.agents().map(|a| a.id).collect();
+    for _ in 0..(10.0 / PHYSICS_DT) as usize {
+        w.step(PHYSICS_DT, &mut ev);
+        for a in w.agents() {
+            if seen.insert(a.id) {
+                let d = geom::dist(geom::xy(a.pos), [0.0, -330.0]);
+                assert!(d >= sight, "agent spawned in sight at {d} m (live)");
+            }
+        }
     }
     // Teleport far away: the old area empties (nobody sees it), the new one fills.
-    let mut ev = Vec::new();
     let far = player([0.0, 650.0, 0.0], [1.0, 0.0], 0.0);
     w.set_tracked_vehicles(&[far]);
     run(&mut w, 10.0, &mut ev);
@@ -461,7 +477,7 @@ fn spawns_respect_sightline_and_active_area() {
     assert_eq!(near_old, 0);
     assert!(w
         .agents()
-        .any(|a| geom::dist(geom::xy(a.pos), [0.0, 650.0]) < 460.0));
+        .any(|a| geom::dist(geom::xy(a.pos), [0.0, 650.0]) < active + 60.0));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -581,8 +597,23 @@ fn civilians_stop_behind_a_stationary_player_and_yield_to_sirens() {
     run(&mut w, 12.0, &mut ev);
     let after = w.agents().find(|x| x.id == a.id);
     if let Some(after) = after {
+        // Bodies must not overlap (it may be passing alongside it now: playtest row 32).
+        let car = geom::Obb {
+            c: geom::xy(after.pos),
+            f: geom::dir_of_yaw(after.yaw),
+            hl: 2.25,
+            hw: 0.95,
+        };
+        let stopped = geom::Obb {
+            c: geom::xy(obstacle.pos),
+            f,
+            ..car
+        };
         let d = geom::dist(geom::xy(after.pos), geom::xy(obstacle.pos));
-        assert!(d > 4.4, "civilian drove into the stopped car ({d} m)");
+        assert!(
+            !geom::obb_overlap(&car, &stopped),
+            "civilian drove into the stopped car ({d} m)"
+        );
     }
     // Siren: nearby agents start yielding and slow down.
     let mut cop = obstacle;
@@ -807,8 +838,10 @@ fn slow_red_light_crossing_is_reported_once() {
 #[test]
 fn lod_promotion_and_demotion_are_seamless() {
     let mut w = scripted_world(3);
-    let me = player([110.0, -332.0, 0.0], [1.0, 0.0], 0.0);
-    w.set_tracked_vehicles(&[me]);
+    // A player cruising east along the row past queues and junctions (a parked player
+    // depended on one queue stopping inside the promotion radius).
+    let cruise = |t: f32| player([-200.0 + 12.0 * t, -332.0, 0.0], [1.0, 0.0], 12.0);
+    w.set_tracked_vehicles(&[cruise(0.0)]);
     w.populate();
     let mut ev = Vec::new();
     let mut promoted = 0;
@@ -817,7 +850,9 @@ fn lod_promotion_and_demotion_are_seamless() {
     for i in 0..(40.0 / PHYSICS_DT) as usize {
         let before: Vec<_> = w.agents().collect();
         // Leave after 25 s so physical agents demote.
-        if i == (25.0 / PHYSICS_DT) as usize {
+        if i < (25.0 / PHYSICS_DT) as usize {
+            w.set_tracked_vehicles(&[cruise(i as f32 * PHYSICS_DT)]);
+        } else if i == (25.0 / PHYSICS_DT) as usize {
             w.set_tracked_vehicles(&[player([5000.0, 5000.0, 0.0], [1.0, 0.0], 0.0)]);
         }
         w.step(PHYSICS_DT, &mut ev);
@@ -1128,4 +1163,34 @@ fn driver_parameters_vary_between_drivers() {
     assert!((5.0..12.0).contains(&frac(hesitant)));
     assert!((20.0..40.0).contains(&frac(amber_go)));
     assert!(frac(eager) > 10.0);
+}
+
+/// Owner row 76: with a player in town at 02:00, traffic around them stays at the night curve
+/// (the out-of-sight boost is off in the small hours) and well below the noon level.
+#[test]
+fn night_traffic_around_a_player_stays_at_the_curve() {
+    use wp_world::traffic::{max_spawnable_boost, MAX_SPAWNABLE_BOOST};
+    assert_eq!(max_spawnable_boost(0.15), 1.0);
+    assert_eq!(max_spawnable_boost(0.75), MAX_SPAWNABLE_BOOST);
+    let total = |hour: f32| -> (f32, u32) {
+        let mut w = world(TrafficConfig::default(), hour, 1.0);
+        let me = player([0.0, 0.0, 0.0], [1.0, 0.0], 0.0);
+        w.set_tracked_vehicles(&[me]);
+        w.populate();
+        let mut ev = Vec::new();
+        run(&mut w, 30.0, &mut ev);
+        let (t, c) = w.zone_density();
+        (t.iter().sum(), c.iter().sum())
+    };
+    let (t_night, c_night) = total(2.0);
+    let (t_noon, c_noon) = total(12.0);
+    println!("02:00 target {t_night:.1} count {c_night}; noon target {t_noon:.1} count {c_noon}");
+    assert!(
+        c_night as f32 <= t_night * 1.1 + 2.0,
+        "{c_night} vs {t_night}"
+    );
+    assert!(
+        c_night as f32 <= 0.35 * c_noon as f32,
+        "{c_night} vs {c_noon}"
+    );
 }

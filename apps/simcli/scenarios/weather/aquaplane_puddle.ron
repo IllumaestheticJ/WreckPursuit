@@ -1,0 +1,32 @@
+// Aquaplaning: debug_sedan at 33 m/s (119 km/h) on a wet road (light rain, 0.6 mm film) hits a
+// 60 m flooded stretch (6 mm of water, y = 20..80) and steers left while in it. Above the
+// planing onset (~18 m/s for its tires in 6 mm) the front tires ride on the water, so the car
+// barely turns. Its twin weather/aquaplane_control.ron makes the same steer on the same wet road
+// without the flood and turns properly.
+(
+    name: "weather_aquaplane_puddle",
+    seed: 1,
+    assists: ai,
+    weather: (
+        kind: LightRain,
+        intensity: 0.5,
+        water_mm: 0.6,
+        puddles: [(min: (-20.0, 20.0), max: (20.0, 80.0), water_mm: 6.0)],
+    ),
+    entities: [(
+        id: "car",
+        car: "debug_sedan",
+        speed_mps: 33.0,
+        inputs: [
+            (t_s: 0.0, input: (throttle: 0.35)),
+            (t_s: 0.9, input: (throttle: 0.35, steer: -0.35)),
+            (t_s: 1.9, input: (throttle: 0.35)),
+        ],
+    )],
+    duration_s: 3.0,
+    expect: [
+        // Measured 2026-10-19: 0.21 rad/s (control 0.37); final lateral offset 2.4 m (control 11.6 m).
+        metric(name: "max_yaw_rate_rps", min: 0.05, max: 0.28),
+        speed_at(t_s: 2.9, min: 28.0, max: 34.0),
+    ],
+)

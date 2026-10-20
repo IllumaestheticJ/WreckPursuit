@@ -77,8 +77,9 @@ debug = 1
 # that took over an hour. Optimise every dependency and the simulation crates in the dev/test
 # profile. Debug assertions and overflow checks stay on (opt-level does not change them), and
 # no hash changes: rustc never reorders or fuses (FMA) float operations at any opt-level, and
-# the goldens + native-vs-wasm compare check that. Everything else in the workspace keeps
-# opt-level 0 so edit-compile cycles stay quick.
+# tools/profile-determinism/compare.sh (debug vs release), the goldens and the native-vs-wasm
+# compare check that. Everything else in the workspace keeps opt-level 0 so edit-compile cycles
+# stay quick.
 [profile.dev.package."*"]
 opt-level = 3
 

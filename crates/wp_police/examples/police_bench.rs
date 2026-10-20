@@ -18,6 +18,8 @@ fn main() {
         stop_at_s: None,
         safehouse_at_s: None,
         total_loss_at_s: None,
+        hit_unit_at_s: None,
+        hit_kmh: 30.0,
     };
     let sc = PoliceScenario {
         name: "bench".into(),

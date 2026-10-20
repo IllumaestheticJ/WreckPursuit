@@ -23,6 +23,8 @@
 | `tools/gen-runtime-schemas` | standalone Rust crate: JSON Schemas for runtime contract types → `apps/ui-kit/schemas/runtime/` | lead may want to fold this into `gen-schemas` |
 | `tools/record-police` | standalone Rust crate: drives E's real `PoliceSystem` with a scripted racer and records `events.jsonl` + `metrics.csv` + `captain.jsonl` (`CaptainView` at 0.5 Hz) + E's road graph as `map.json` (`npm run gen:police`) | E (a reproducible pursuit trace), anyone needing real police output before `wp_sim` wires police |
 | `model/police.ts` | re-exports the generated `PoliceEvent`, `CaptainCommand`, `UnitOrder`, `CaptainError`, …; hand mirror of `wp_police::{CaptainView, UnitView, RacerSighting, ToolReadiness, Incident}` (not in the contract, UI-3); `decodePoliceEvent`, `captainMessage` (→ `ClientToServer::CaptainCommand`), `captainErrorText` | client code talking to police |
+| City map HUD (`src/map/`, exported from `src/live`) | `mountMapHud(parent, { onOpenChange?, minimapPlacement? }) → MapHud` with `setStatic(json)` once per city, `frame(map_dynamic, nowMs)` each frame, `toggle()` / `open()` / `close()` / `isOpen`, `setSignals`, `setMinimapVisible`, `stats()`; pure helpers `decodeMapDynamic`, `worldToMinimap`, `minimapMatrix`, `radiusForSpeed`, `fitBounds`, `zoomAt`, `pan`, `districtLabels` | testbed (mounted), later the game client |
+| Game menu (`src/menu/`, exported from `src/live`) | `mountGameMenu(parent, { host, settings, cameras?, countersteer?, developerDefault? }) → GameMenu` with `openMain()` / `openPause()` / `openSettings()` / `close()`, `screen`, `isOpen`, `settings`, `update(patch)`, `setCountersteerAvailable(on)`; host: `play(choice)`, `restart`, `garage`, `quitToMain`, `openControls`, `controlsOpen`, `apply(next, prev)`, `onOpenChange(open, screen)`; settings `GameSettings` (`defaultGameSettings`, `loadGameSettings`, `saveGameSettings`, `normalizeSettings`; `localStorage` `wp.gameSettings.v1`) | testbed (mounted), the demo build, later the game client |
 | `ChaseEndDetector` (`src/live/chaseEnd.ts`) | `update(racer, status, level, events, freshOutcome?) → { how, outcome, level } \| null`, once per chase | testbed (bill on capture / wreck), any live host |
 | Demo | `npm run demo` → http://localhost:5180 | everyone |
 
@@ -32,6 +34,135 @@ Wiring into the testbed (04 owns it; nothing edited there):
 import { mountUi, createMockModel } from "../../ui-kit/src";
 const hud = mountUi(document.getElementById("hud-overlay")!, { model: createMockModel({ screen: "hud" }), screen: "hud", globalKeys: false });
 ```
+
+## City map HUD (round 9, owner request "we need a game map HUD with police")
+
+Screenshots: `docs/media/map/` (`node apps/testbed-web/e2e/map_shots.mjs`).
+
+- **Minimap** (always on; testbed layer `'` "minimap", bottom-right corner since round 12; see
+  "Round 12" for the HUD layout): heading up,
+  radius 160 m standing → 480 m at 45 m/s (smoothed), roads blitted from one offscreen canvas per
+  city (0.76 px/m for Port Vesper, ≈ 2600 × 2400 px), bridge decks drawn over a dark casing so
+  Loop 9's overpass reads as on top. Police: lights on (respond / pursue / intercept / roadblock /
+  spikes) = alternating red/blue dot with a halo; patrol / idle = steady dim blue; helicopter =
+  diamond with a rotor ring. Units outside the disc that are chasing you (or the helicopter) sit
+  on the rim. While wanted: every ground unit's sight radius (one union fill; the police see all
+  round, buildings permitting, so this is a circle, not a cone), the helicopter's range ring and
+  spotlight disc, intercepting units' target point; while SEARCHING: the search zone (last known
+  position, dashed amber) and the escape ring around the rim with `ESCAPE nn%`. Roadblocks
+  (red/white bar) and spike strips (yellow teeth). Garages and safehouses as icons. Traffic
+  signals optional (testbed layer `;`). Rim: red/blue blinking in pursuit, amber searching.
+  Caption: district + speed.
+- **Full map** (testbed **M** or **Tab**; **M** / **Tab** / **Esc** close): whole city fitted,
+  districts tinted by kind and named, roads by class, decks cased, POIs with names (garages,
+  safehouses, police stations, helipads, race starts), player with a locator ring, police and
+  sight / search as on the minimap. Drag / arrows / WASD pan, wheel / + / − zoom at the cursor,
+  0 whole city, F follow. Legend panel (swatches drawn by the same code as the map). While open,
+  the testbed sends the player's car neutral input with brake 0.35 (input paused, sim running).
+- **District names:** the city data has no zone names (CITY.md C2, still open), so Port Vesper
+  v2's names live in `src/map/districts.ts` by zone index (Lantern Row, Midtown, Harbor Blvd,
+  Gantry Row, Canal Flats, Mercer, Eastgate, Hollins Heights, Bayview Bluffs, Larkspur); other
+  cities show the district kind. A ring zone (Midtown around Lantern Row) is labelled on the ring.
+- **Style:** scanner-green monospace for titles / labels / player; roads muted grey-green so the
+  police lights are the brightest thing; grime + scanlines on the full-map chrome only (off with
+  the high-contrast palette); colours come from the kit's CSS variables, so the colour-blind
+  palettes apply.
+- **Search radius** is presentation only: `wp_police` has no explicit search area, so the zone is
+  `min(60 m + 10 m/s × time since line of sight was lost, 600 m)` around `last_known`
+  (`wp_wasm::map::search_radius`). **For E:** if police get a real search area, put it in the
+  record and I'll draw that instead.
+
+### wasm surface (`crates/wp_wasm/src/map.rs`, C's crate; minimal, read-only)
+
+| Function | Returns |
+|---|---|
+| `map_static_json()` | `null` on the flat world, else `{ city, bounds: [x0,y0,x1,y1], roads: [{ class 0 highway…4 alley, layer 0 grade / 1 deck, pts: [x,y,…] }], zones: [{ id, kind, poly }], pois: [{ kind, name, pos }], signals: [[x,y]] }` from `RoadGraphView` (classes) + each road's own `RoadSurface` vs the terrain (deck = > 1.5 m above, as `deck_rails`). Port Vesper: 103 kB JSON. |
+| `map_dynamic(player)` | `f32` array: header 20 (`[version 1, n_units, n_tools, status 0 clear/1 wanted/2 pursuit/3 searching, level, search_x, search_y, search_r, escape 0..1, car_sight_m, heli_sight_m, heli_spot_m, last_x, last_y, has_last, player_x, player_y, player_yaw, player_speed, has_player]`), then per unit 8 (`[id, x, y, yaw, speed, flags, target_x, target_y]`; flags = state code 0–8 in bits 0–3 + 16 heli, 32 lights, 64 on player, 128 wrecked, 256 human, 512 has target), then per tool 6 (`[kind 0 roadblock / 1 spikes, x, y, dir_x, dir_y, half_len_m]`). Every unit, bound or internal, from `wp_police` unit bodies. `police_units()` / `police_status()` stay as they are (C's 3D view and the chase readout use them). |
+
+Tests: `wp_wasm` `map::tests` (Vesper: classes, decks, zones, POIs, size; grid flat; dynamic
+layout vs the police unit count and the player pose/yaw convention; search radius); ui-kit
+`src/map/*.test.ts` (23: heading-up projection and rotation for any yaw, inverse, canvas matrix,
+composition with the road cache, glyph rotation, speed zoom, rim clamp, full-map fit / zoom at
+cursor / pan, decoder, district labels); testbed e2e (minimap shows the player + police dots in
+the city chase; M opens, M closes, Tab opens, Esc closes).
+
+## Round 12 — HUD layout + game menu (owner requests 2026-10-20, playtest rows 67, 68)
+
+Base: `origin/lead/round12` merged into `ws/ui`.
+
+**Row 67 — no HUD overlaps.** The minimap moved to the **bottom-right** corner (was left column,
+top 312 px, on top of the input panel and the developer panel). Corners now: top-left speedo
+(+ input panel) with the race HUD stacked under it; top-centre chase readout, the weather line
+under it, pursuit banner; top-right damage silhouette + components / regions / event feed,
+capped to end above the minimap; bottom-right minimap; bottom-left developer panel with the audio
+panel stacked above it (it used to sit bottom-right); telemetry between them. The sizes that change
+at run time (race HUD appears, panels fold, the feed grows, the window resizes) are handled by a
+small layout pass, `apps/testbed-web/src/ui/layout.ts` (≤ 10 Hz, writes `top` / `max-height` /
+`left` only). The developer panel and audio panel shrink and scroll when a race HUD needs the
+room at 720p. Verified by bounding boxes of every HUD element (`e2e/hud_layout.mjs`): 0 overlaps
+at 1280×720, 1366×768 and 1920×1080, developer panels on and off, in a rainy city chase (banner,
+weather line and a full event feed forced on) and in a street race.
+
+**Row 68 — game menu** (`apps/ui-kit/src/menu/`, Preact, kit theme):
+- **Pause** (Esc or gamepad Start / the rebindable "pause" action, P by default; pauses the sim.
+  Not in replays: there P / Menu stay play/pause): Resume, Restart, Garage (career),
+  Settings, Controls, Quit to main menu. Esc still closes the city map, the controls panel and
+  the garage first (the menu only opens when nothing else is on screen).
+- **Main menu** (like the demo's start page: City chase, Rainy night, Street races, Free drive,
+  Garage, Settings, Controls): shown on load with `?menu=1` or on the demo page (`body.demo`); the
+  testbed then removes the demo's own `#demo-menu` / `#demo-open`. Quick play runs outside the
+  career, as the demo did; Free drive is the city with traffic.
+- **Settings** (persist in `localStorage` `wp.gameSettings.v1`, try/catch, applied live):
+  quality auto / high / low (`Quality.setMode`: resolution scale, governor, rain density, panel
+  blur and draw distance at once; MSAA after a reload) + draw distance (from quality / 300 m …
+  3000 m); volumes master / engine / effects (World bus) / police radio (Police bus) / ambience
+  (`AudioSystem.setMix`); assists ABS / TCS / ESC / auto gears / steering help (through the same
+  `wp.assistOverrides` as the developer panel's boxes; steering help off zeroes
+  `steer_speed_sensitivity`) and **countersteer 0–100 %, disabled until machine A's wasm setter
+  lands** (the testbed enables it when `wp_wasm` exports a function whose name contains
+  `countersteer`, called as `(entity, strength 0..1)` after every assist preset — **A: please
+  confirm or tell me the name / signature**); damage mode Arcade / Simulation (live switch, not
+  during a career run); km/h or mph (speedo + minimap caption); default camera; developer panels.
+  First run seeds the settings from what the browser already chose (assist boxes, audio panel,
+  `wp.gfx`).
+- **Controls** opens C's rebinding panel (`src/ui/controls.ts`, reused as is — not forked, not
+  edited); the menu hides while it is open and comes back when it closes.
+- **Developer toggle** (Settings → Developer): on by default in the testbed preview, off with
+  `?menu=1` and in the demo build; `?dev=0|1` forces it for one page. Off = `body.wp-player`
+  hides the scenario/replay panel, telemetry, components, regions, event feed, input display,
+  audio mixer and the perf lines of the speedo, and suppresses the 3D debug layers (tyre force
+  arrows, slip colours, CG / velocity, contacts, lattice, intents).
+- Keyboard + gamepad navigable (↑↓ / W S / Tab, ← → change, Enter / Space, Esc / Backspace;
+  d-pad / left stick, A, B, Start). Unit tests `src/menu/menu.test.ts` (7).
+- Style: low-poly dark per `docs/art/STYLE_DECISION.md` with the kit's theme variables; machine S's
+  `render/palette.ts` is not on this branch yet — when it lands, its UI tokens map onto the theme
+  variables (one place).
+
+Screenshots (headless, `MENU_SHOTS=dir npm run e2e:menu`): main menu, pause, settings and every
+layout case.
+
+**e2e** `apps/testbed-web/e2e/menu.mjs` (`npm run e2e:menu`; also run at the end of `npm run e2e`),
+36 checks: 12 layout cases (3 sizes × dev on/off × chase/race) with 0 overlaps; Esc pauses (tick
+frozen) and Esc resumes; a game key pressed in the menu does not reach the game; ↑ / ↓ / Enter /
+→ / ← navigation into settings; units and master volume change and reach the HUD / audio mix; a
+setting survives a reload; countersteer slider disabled; gamepad Start opens, d-pad moves, B
+resumes; Controls opens C's panel and returns; `?menu=1` title screen with dev panels off, Enter
+starts the city chase; no page errors.
+
+**Checks (round 12, this container, `CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0
+CARGO_PROFILE_TEST_DEBUG=0`):** `cargo fmt --check` ✓, `cargo clippy --workspace -D warnings` ✓,
+wasm32 release build of `wp_wasm` ✓ (packaged with `wasm-bindgen` 0.2.129; no `wasm-pack` here,
+so `npm run e2e` was run directly instead of `just web-e2e`), testbed `tsc` ✓, ui-kit `tsc` +
+vitest 88 / 88 ✓, ui-kit e2e ✓, testbed `npm run e2e`: 126 PASS incl. all 36 menu checks;
+**fails only `perf_check`** (chase / rain real-time factor 0.25, 1.32 M / 1.25 M triangles per
+frame vs the 700 k limit). **Same numbers on the round-12 base** without this branch
+(`frame_profile.mjs chase 12`: base 1,318,895 triangles, RTF 0.270; this branch 1,318,895, RTF
+0.269), so it comes from round 12's merges (parked cars / props or LOD?), not the menu.
+`cargo test --workspace --no-fail-fast`: 141 suites, 952 pass, **4 fail on the base** (this branch
+changes no Rust, data or scenario file): simcli `goldens_match`, wp_race `grid_highway_sprint`,
+wp_sim `vesper_v2_cars_drive_up_the_kerb_and_along_the_sidewalk`, wp_wasm
+`race_tests::short_sprint_with_ai_runs_to_results_and_pays_through_the_economy` (player DNF
+`FinishWindow`). **For the lead.**
 
 ## Needs — data per screen, owner, status
 
@@ -161,9 +292,22 @@ are removed. C's `src/police.ts` maps the status onto the kit's readout.)
 
 | File | Owner | Change |
 |---|---|---|
+| `apps/testbed-web/src/main.ts` (round 12) | C | Mount the kit's game menu (host callbacks, settings applied live, Esc capture listener, "pause" action opens the pause menu outside replays, `?menu=1` / `?dev=`, demo start page replaced); `HudLayout.frame()` each frame; `steer_help` override; HUD units; `menu`, `layout` on `window.__wp`. |
+| `apps/testbed-web/src/ui/layout.ts` (new, round 12) | C | HUD layout pass (row 67). |
+| `apps/testbed-web/src/ui/map.ts` (round 12) | C | Minimap bottom-right. |
+| `apps/testbed-web/index.html` (round 12) | C | Right column shrinks to fit; `body.wp-player` hides the developer panels. |
+| `apps/testbed-web/src/settings.ts` (round 12) | C | `layers.suppress(ids)` (player mode forces debug layers off; toggles keep their state). |
+| `apps/testbed-web/src/hud.ts` (round 12) | C | `HudFrame.units` (km/h / mph); speedo never shows "-0". |
+| `apps/testbed-web/src/render/quality.ts` (round 12) | lead (browser perf) | `Quality.setMode(mode)`: live switch (stored); `mode`, `drawDistanceM`, `rainFraction` no longer readonly. |
+| `apps/testbed-web/src/audio/index.ts` (round 12) | J / C | `AudioSystem.setMix(volumes)` / `mix()` (master + Engine / World / Police buses + ambience, saved with the audio panel's settings). |
+| `apps/testbed-web/e2e/menu.mjs`, `e2e/hud_layout.mjs` (new), `e2e/run.mjs`, `package.json` (round 12) | C | Menu + layout e2e, run at the end of `npm run e2e`; `e2e:menu` script. |
 | `crates/wp_wasm/src/garage.rs` (new) | C | `repair_quote_json(entity, request_json)`: the running car's `DamageSim::repair_estimate` (economy `PriceTable` for its class/value) priced by `wp_economy::Economy::quote_repair` (shop, district, mode, wanted markup, insurance, salvage). Read-only. |
 | `crates/wp_wasm/src/lib.rs` | C | `pub mod garage;` |
 | `crates/wp_wasm/Cargo.toml` | C | `wp_economy` dependency (default features; `cargo tree --target wasm32-unknown-unknown` shows no rusqlite). |
+| `crates/wp_wasm/src/map.rs` (new), `lib.rs` (`pub mod map`, `map_static_json`, `map_dynamic`) | C | City map HUD data (round 9), read-only. |
+| `apps/testbed-web/src/ui/map.ts` (new), `main.ts`, `wasm/sim.ts`, `settings.ts` | C | Mount the kit's map HUD; `map.reset()` on rebuild, `map.frame()` after `ui.frame`; **M** / **Tab** toggle the full map; neutral input + brake 0.35 while it is open; layers `'` minimap, `;` minimap signals; `map` on `window.__wp`. |
+| `apps/testbed-web/src/audio/index.ts`, `audio/panel.ts`, `hud.ts` | C / J | **Mute moved M → V; "follow the next car" moved Tab → backquote** (the owner asked for M / Tab on the map); help text updated. |
+| `apps/testbed-web/e2e/run.mjs`, `e2e/map_shots.mjs` (new) | C | Map checks after the city chase; screenshot script for `docs/media/map/`. |
 | `apps/testbed-web/src/ui/overlay.ts` (round 8) | C | Chase end via the kit's `ChaseEndDetector` (typed `PursuitEnded`, else status + fresh `last_outcome`) instead of back-computing the end tick from `outcome_age_s`; bill still opens on capture / wreck only (C's choice: not on escape); `ui.lastChaseEnd` = `{ how, outcome, level, tick }`. |
 | `apps/testbed-web/e2e/run.mjs` (round 8) | C | Stubbed banner flow: a pursuit frame before the capture (a capture always follows a chase), and checks `ui.lastChaseEnd` (escaped, then captured at L3). |
 | `apps/testbed-web/src/ui/overlay.ts` (new; all testbed-side UI-kit glue lives in `src/ui/`) | C | Mounts the kit's `chaseHud` and `repairBill` overlays on a `createLiveModel()` fed each frame with the drained events + `police_status`. Opens the bill by itself when a chase ends (kit's `ChaseEndDetector`); `ui.lastChaseEnd` records how. |
@@ -208,9 +352,27 @@ police event for it reaches the client; when E adds one, `ChaseEndDetector` shou
 | HUD frame pacing, mock playing (3 s) | 4-core cloud container, headless Chromium 141 | — | 181 frames, p50 16.7 ms, p95 16.7 ms, 0 long tasks | 60 fps |
 | Captain map (canvas redraw/frame, heat map 4 Hz) | same | — | 181 frames, p50 16.7 ms, p95 16.8 ms, 0 long tasks | 60 fps |
 | Captain map on the recorded wp_police run (12 units, CaptainView interpolation) | same | — | 60 fps, 0 long tasks (e2e screenshot run) | 60 fps |
+| City map HUD, Port Vesper city chase (5 units), testbed, sim paused (`map_shots`-style script) | same | — | `map_static_json` 4.9 ms + parse 1.7 ms + road cache 24 ms, once per city; `map_dynamic` 0.007 ms; minimap draw 0.07 ms/frame; full map open (+ minimap) 0.27 ms/frame (CPU time of the canvas calls; headless GPU raster not included) | 60 fps |
 | Demo bundle (incl. fixtures + data) | — | — | 1.42 MB JS / 256 kB gzip (incl. the 410 kB `captain.jsonl` fixture), 30 kB CSS | — |
 
+## Checks (round 9, this container, after merging `main`)
+
+`cargo fmt --check`, `cargo clippy --workspace -D warnings`, `cargo test --workspace` (120 suites,
+0 failures), wasm32 release build of `wp_wasm` (packaged with `wasm-bindgen` 0.2.129; no
+wasm-pack here), testbed `tsc`, ui-kit `tsc` + vitest 81 / 81, ui-kit e2e (60 fps, 0 long tasks),
+testbed `npm run e2e`: all checks pass, including the two new map checks. The first e2e run of
+the session failed both `debugParkNearPolice`-based checks (the map one and the lead's capture
+check: the park never succeeded within its timeout) and logged an audio
+`setValueCurveAtTime overlaps` page error; the rerun passed everything. Looks like a flake in the
+park helper / audio scheduling under load, not in the map code (it only reads); **for C / J** if
+it shows up again.
+
 ## Known gaps
+
+- Map: zone names are a UI-side table for Port Vesper v2 (CITY.md C2 asks for `Zone.name`); the
+  search zone radius is UI-defined (no police search area); the minimap's signals are junction
+  markers, not live colours; the kit's demo page has no map screen (the testbed is its surface);
+  no water polygons in the city data, so the sea is just background.
 
 - Race progress, crews, lobby and results are mock-only (see Needs). Police has a recorded real
   run (`police_pursuit`, E's city, not D's: E has not switched to D's road network yet).

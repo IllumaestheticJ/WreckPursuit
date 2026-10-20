@@ -1,0 +1,42 @@
+// Owner playtest row 24 at night: 23:00, 12x12 grid city, no traffic or parked cars. Patrol
+// unit 3 drives south down x = -276.8 (slowing to 5-8 m/s after the junction at y = 165). The
+// racer (no heat) cruises north in its own lane at 30 km/h from 1 s and steers left (-0.4) at
+// 11.3 s: a side-to-side swipe at 12.0 s (about 2,500 N·s, contact normal sideways). The steer is
+// centred in a window that hits the cruiser (11.2-11.4 s x steer 0.3-0.5 all pass; the old
+// 11.4 s x 0.3 sat on the edge and missed by 1 m after the round-12 vehicle/diff changes). At
+// night a pursuit otherwise needs a wanted racer within 40 m for 4 s; the hit unit recognises
+// the racer at once instead, so wanted L2 and the pursuit start in the contact's tick. Without
+// the fix this run has no police event for the racer at all. Re-aim with
+// `examples/probe_police.rs` if police spawning changes.
+(
+    name: "police_sideswipe_patrol_night",
+    seed: 24,
+    city: procedural(seed: 1, blocks_x: 12, blocks_y: 12, block_m: 110.0),
+    time_of_day_h: 23.0,
+    time_ratio: 1.0,
+    mode: Arcade,
+    parked_cars: false,
+    traffic_density: 0.0,
+    assists: keyboard,
+    entities: [
+        (
+            id: "racer",
+            car: "debug_sedan",
+            pos: (-273.25, 70.0, 0.0),
+            driver: cruise(target_mps: 8.33, from_s: 1.0),
+            inputs: [
+                (t_s: 11.3, input: (steer: -0.4)),
+                (t_s: 12.1, input: ()),
+            ],
+        ),
+    ],
+    duration_s: 14.0,
+    hash_every: 24,
+    expect: [
+        speed_at(entity: "racer", t_s: 11.0, min: 7.5, max: 9.0),
+        event_count(event: "Contact", entity: "racer", min: 1, max: 40),
+        // Wanted-level change and pursuit within 1.1 s of the 12.0 s contact.
+        police_event_before(kind: 2, t_s: 13.1),
+        pursuit_started_before(t_s: 13.1),
+    ],
+)

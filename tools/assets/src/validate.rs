@@ -6,7 +6,7 @@ use wp_contracts::{BodyRegion, LoadedCar};
 use wp_damage::PanelSpec;
 
 use crate::mesh::{CarMesh, PartKind, MESH_FORMAT, TRI_BUDGET};
-use crate::skin::candidates;
+use crate::skin::part_candidates;
 
 /// Exterior regions that must have a mesh part whenever the lattice has nodes in them.
 pub const EXTERIOR_REGIONS: [BodyRegion; 17] = [
@@ -93,7 +93,7 @@ pub fn validate(car: &LoadedCar, mesh: &CarMesh, panels: Option<&PanelSpec>) -> 
                     errs.push(format!("{tag}: not skinned (run bind-skin)"));
                     continue;
                 }
-                let allowed: BTreeSet<u16> = candidates(lattice, region).into_iter().collect();
+                let allowed: BTreeSet<u16> = part_candidates(lattice, p).into_iter().collect();
                 if p.skin_nodes.iter().any(|i| !allowed.contains(i)) {
                     errs.push(format!(
                         "{tag}: bound to a node outside {region:?} and its fallbacks"
@@ -104,6 +104,38 @@ pub fn validate(car: &LoadedCar, mesh: &CarMesh, panels: Option<&PanelSpec>) -> 
                     .any(|w| w.iter().map(|&x| x as u32).sum::<u32>() != 255)
                 {
                     errs.push(format!("{tag}: weights must sum to 255"));
+                }
+                if let Some(f) = &p.fold {
+                    if f.weights.len() != n * 3 {
+                        errs.push(format!("{tag}: fold weights need 3 per vertex"));
+                    }
+                    if f.chords.is_empty() || f.leads.len() != f.chords.len() {
+                        errs.push(format!("{tag}: fold needs chords and one lead triple each"));
+                    }
+                    if f.chords
+                        .iter()
+                        .flatten()
+                        .any(|&i| lattice.nodes.get(i as usize).map(|nd| nd.region) != Some(region))
+                    {
+                        errs.push(format!("{tag}: fold chord node outside {region:?}"));
+                    }
+                    if f.leads.iter().flatten().any(|&i| {
+                        lattice
+                            .nodes
+                            .get(i as usize)
+                            .is_none_or(|nd| nd.region == region)
+                    }) {
+                        errs.push(format!(
+                            "{tag}: fold lead node missing or inside {region:?}"
+                        ));
+                    }
+                    let dl = f.dir.iter().map(|x| x * x).sum::<f32>().sqrt();
+                    if f.across != 0 && f.across != 2 || (dl - 1.0).abs() > 0.01 {
+                        errs.push(format!("{tag}: fold axis / direction"));
+                    }
+                    if !(1.0..=3.0).contains(&f.gain) || !(0.0..=0.4).contains(&f.max_m) {
+                        errs.push(format!("{tag}: fold gain / max out of range"));
+                    }
                 }
                 for v in 0..n {
                     let q = p.vertex(v);

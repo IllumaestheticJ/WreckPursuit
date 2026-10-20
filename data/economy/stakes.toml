@@ -187,6 +187,17 @@ L3 = 80
 L4 = 150
 L5 = 300
 
+# Cash for losing the cops (× day-phase bounty: night 1.3). A career's fast, risky money until
+# races run in the browser: an L2 night escape (≈ 1 040) beats an Arcade L1 bust in a beater
+# (≈ 700 fine + impound) but not an L2 bust in a Sport car (fine + 700 impound + repairs).
+[bounty.escape_cash]
+None = 0
+L1 = 350
+L2 = 800
+L3 = 1600
+L4 = 3000
+L5 = 6000
+
 [bounty.cop_base_reward]
 None = 0
 L1 = 200

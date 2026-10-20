@@ -1,0 +1,24 @@
+// Round 12b (owner playtest rows 48-49: Arcade cars and police too fragile), workstream 03.
+// Full sim, Arcade, R's panels on as in the browser game. Repeated hits are measured by
+// `cargo run --release -p simcli --example damage_toughness` (table in docs/integration/damage.md).
+// A 1400 kg sedan T-bones the cruiser's driver door at 50 km/h: no pull-over.
+(
+    name: "damage_arcade_cruiser_tbone_50",
+    seed: 505,
+    mode: Arcade,
+    assists: ai,
+    panels: true,
+    entities: [
+        (id: "car", car: "sentinel_cruiser", inputs: [(t_s: 0.0, input: (brake: 1.0))]),
+        (id: "striker", car: "debug_sedan", pos: (-12.0, 0.3, 0.0), yaw: -1.5708, speed_mps: 13.9, driver: cruise(target_mps: 13.9, until_s: 0.5),
+            inputs: [(t_s: 0.5, input: (brake: 1.0))]),
+    ],
+    duration_s: 3.0,
+    hash_every: 60,
+    expect: [
+        total_loss(entity: "car", expected: false),
+        metric(entity: "car", name: "final_health", min: 0.88, max: 1.0),
+        components_failed(entity: "car", min: 0, max: 0),
+        event_count(event: "Contact", entity: "car", min: 1, max: 100000),
+    ],
+)

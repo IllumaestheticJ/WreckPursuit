@@ -467,7 +467,11 @@ fn recorded_escape_pays_bounty_then_repair_bill() {
     assert!(q.player_pays > 0);
     assert!(cr.repair_order.as_ref().unwrap().full_reset);
     assert_eq!(r.repairs_paid, q.player_pays);
-    assert_eq!(r.cash_after, 20_000 - q.player_pays);
+    // The escape pays cash too (`stakes.toml [bounty.escape_cash]` × the night multiplier).
+    let night = e.stakes.day_phase[&DayPhase::Night].bounty;
+    let escape_cash = (e.stakes.bounty.escape_cash[&WantedLevel::L2] as f32 * night).round() as i64;
+    assert!(escape_cash > 0);
+    assert_eq!(r.cash_after, 20_000 + escape_cash - q.player_pays);
     assert!(a.car(car).unwrap().damage.is_pristine());
 }
 
