@@ -63,6 +63,13 @@ impl KeyRamp {
         down: 6.0,
         reverse_from_centre: false,
     };
+    /// Drift Lab C step 6 (as shipped): the testbed sends the key raw and the sim ramps it
+    /// (`steering::key_steer`, 6/s in and out in grip, at once in a slide).
+    pub const RAW: KeyRamp = KeyRamp {
+        up: f32::INFINITY,
+        down: f32::INFINITY,
+        reverse_from_centre: false,
+    };
     /// Machine A's row 90 (`lead/round12`): reversal from centre, 12/s release.
     pub const ROW90: KeyRamp = KeyRamp {
         up: 4.0,
@@ -87,7 +94,7 @@ impl KeyRamp {
         };
         let d = target - cur;
         let step = rate * dt;
-        if d.abs() <= step {
+        if !step.is_finite() || d.abs() <= step {
             target
         } else {
             cur + d.signum() * step

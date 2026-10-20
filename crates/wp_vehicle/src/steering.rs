@@ -111,6 +111,47 @@ pub fn driver_lock(inp: &SteerInput, assists: &AssistProfile, max_steer: f32) ->
     full.min(target * inp.ratio_scale)
 }
 
+/// Keyboard key → steer input, turn-in rate (away from centre or through it), 1/s: a held key
+/// reaches full input in 1 / this (0.17 s). Owner reference (Wreckfest's keyboard input is
+/// raw −1 / 0 / +1; the smoothing is the car's steering): the testbed sends the key raw and
+/// this ramp, which was the testbed's (6/s in and out, row 102), lives here, so replays and
+/// every client see the same steering path.
+pub const KEY_STEER_IN_RATE: f32 = 6.0;
+/// Keyboard key → steer input, return-toward-centre rate, 1/s.
+pub const KEY_STEER_OUT_RATE: f32 = 6.0;
+/// Keyboard steer input this tick (`cur` = last tick's, `raw` = the key, −1 / 0 / +1):
+/// ramped at [`KEY_STEER_IN_RATE`] / [`KEY_STEER_OUT_RATE`] in grip; at once when `instant`
+/// (a confirmed slide, a lift-off transition or the handbrake: the drift assist reads the key
+/// — hold, straighten, flick — and the rack has its own fast countersteer rate there).
+/// Analog devices (`sensitivity` below the keyboard's 1.0: gamepad, wheel, AI) always pass
+/// through.
+pub fn key_steer(cur: f32, raw: f32, sensitivity: f32, instant: bool, dt: f32) -> f32 {
+    if sensitivity < 0.99 || instant {
+        return raw;
+    }
+    let sign = |x: f32| {
+        if x > 0.0 {
+            1.0
+        } else if x < 0.0 {
+            -1.0
+        } else {
+            0.0
+        }
+    };
+    let rate = if raw.abs() > cur.abs() || sign(raw) != sign(cur) {
+        KEY_STEER_IN_RATE
+    } else {
+        KEY_STEER_OUT_RATE
+    };
+    let d = raw - cur;
+    let step = rate * dt;
+    if d.abs() <= step {
+        raw
+    } else {
+        cur + d.signum() * step
+    }
+}
+
 /// Driver steer inputs within this of 0 count as "not steering": released keys and a stick
 /// inside its deadzone (the input layer applies the stick deadzone and sends 0). Kept tiny so
 /// a slowly growing analog input steers from the first degree.

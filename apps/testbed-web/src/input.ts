@@ -234,12 +234,11 @@ export function readInput(dt: number): { input: DriverInput; source: InputSource
   const left = keyAction("steerLeft") ? 1 : 0;
   const right = keyAction("steerRight") ? 1 : 0;
   const keyActive = left || right || keyAction("throttle") || keyAction("brake") || keyAction("handbrake") || keyAction("clutch");
-  // Steer keys: 6/s in and out (0.17 s to full). Row 102 measured the old 4/s in: stacked on
-  // the sim's own speed-sensitive rack ramp it lagged, so a key was held too long and then
-  // corrected (lane change at 80 km/h: 8.2 → 5.6 steering reversals/s, path error 0.50 →
-  // 0.23 m; docs/integration/drift-twitch.md). Row 90's reversal-from-centre and 12/s
-  // release measured no better (more reversals in a slalom), so they are not used.
-  kb.steer = ramp(kb.steer, right - left, 6.0, 6.0, dt);
+  // Steer keys go to the sim raw (−1 / 0 / +1), as in the owner's reference game: the key
+  // ramp (6/s in and out, row 102) is the car's steering model now
+  // (wp_vehicle::steering::key_steer), so replays, the AI and every client see the same
+  // steering path, and in a slide or under the handbrake the key acts at once.
+  kb.steer = right - left;
   // Fast key ramp: the sim's keyboard assist preset filters the pedal again (~0.23 s).
   kb.throttle = ramp(kb.throttle, keyAction("throttle") ? 1 : 0, 12.0, 12.0, dt);
   kb.brake = ramp(kb.brake, keyAction("brake") ? 1 : 0, 6.0, 10.0, dt);

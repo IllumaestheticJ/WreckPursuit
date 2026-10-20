@@ -19,8 +19,9 @@ use crate::vehicle::{Chassis, Vehicle, Wheel};
 /// compression (playtest row 54). Format 7: plus the handbrake hold of the steering assist
 /// (owner rows 57 / 72). Format 8: plus the drift-assist state (Drift Lab B). Format 9: plus
 /// the drift side and lift-off transition flag (Drift Lab C, row 107). Format 10: plus the
-/// confirmed-slide gate of the steering (row 102).
-const FORMAT: u8 = 10;
+/// confirmed-slide gate of the steering (row 102). Format 11: plus the keyboard key ramp
+/// (keys arrive raw, Drift Lab C step 6).
+const FORMAT: u8 = 11;
 
 /// Opaque full-state snapshot of one [`Vehicle`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -240,6 +241,7 @@ impl Vehicle {
         w.b(self.stalled);
         w.fs(&self.drift.to_array());
         w.fs(&self.slide_gate.to_array());
+        w.f(self.key_steer);
         VehicleSnapshot { bytes: w.0 }
     }
 
@@ -352,6 +354,7 @@ impl Vehicle {
         for g in &mut gate {
             *g = r.f()?;
         }
+        let key_steer = r.f()?;
         if !r.0.is_empty() {
             return Err(SnapshotError::Malformed);
         }
@@ -395,6 +398,7 @@ impl Vehicle {
         self.stalled = stalled;
         self.drift = crate::drift::DriftState::from_array(drift);
         self.slide_gate = crate::steering::SlideGate::from_array(gate);
+        self.key_steer = key_steer;
         Ok(())
     }
 }

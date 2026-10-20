@@ -14,7 +14,7 @@ fn main() {
     let r = twitch_run_with(
         &car,
         &AssistProfile::keyboard_default(),
-        KeyRamp::MAIN,
+        KeyRamp::RAW,
         case,
         |rig| {
             let tel = rig.vehicle.telemetry();

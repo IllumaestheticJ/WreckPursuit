@@ -294,6 +294,8 @@ pub struct DriftInputs {
     pub sensitivity: f32,
     /// Handbrake held or just released.
     pub handbrake_hold: bool,
+    /// Share of the drive going to the rear axle, 0 (front drive) ..= 1 (rear drive).
+    pub rear_drive: f32,
 }
 
 /// What the drift assist asks of the steering and the throttle this tick.
@@ -323,6 +325,10 @@ pub struct DriftCommand {
     pub lift_time_s: f32,
     /// Shortest time the throttle may take to rise 0 → 1, s (0 = raw).
     pub rise_time_s: f32,
+    /// Weight of the Hold / AngleUp steering, 0..=1: the rear-drive share
+    /// ([`DriftInputs::rear_drive`]). A front-drive car recovers by straightening under power
+    /// (owner clip 3): its counter key is the plain fast countersteer, not a hold.
+    pub hold_weight: f32,
 }
 
 impl DriftState {
@@ -380,6 +386,7 @@ impl DriftState {
             hold_throttle: 1.0,
             lift_time_s: 0.0,
             rise_time_s: 0.0,
+            hold_weight: inp.rear_drive.clamp(0.0, 1.0),
         };
         if help <= 0.0 || inp.sensitivity <= 0.0 {
             self.reset_hold();
@@ -721,8 +728,8 @@ pub fn intent(driver: f32, side: f32, onset: f32) -> DriftMode {
 /// front axle's travel ([`DriftTuning::lift_authority`]). Below 3–7° of slide it leans toward
 /// the entry fallback: the travel for Hold (a held counter key never asks for the key's full
 /// lock), the key's own target for AngleUp (so the entry still turns in). `weight`
-/// (authority × device weight) blends it with the key's own target `driver_target`; 0 = the
-/// plain key.
+/// (authority × device weight × [`DriftCommand::hold_weight`]) blends it with the key's own
+/// target `driver_target`; 0 = the plain key.
 pub fn hold_steer(
     inp: &crate::steering::SteerInput,
     driver_target: f32,
@@ -756,7 +763,7 @@ pub fn hold_steer(
     };
     let k = ((cmd.slide - 0.05) / 0.07).clamp(0.0, 1.0);
     let target = entry + (assisted - entry) * k;
-    (target, cmd.authority * cmd.weight)
+    (target, cmd.authority * cmd.weight * cmd.hold_weight)
 }
 
 #[cfg(test)]
@@ -774,6 +781,7 @@ mod tests {
             help: 0.6,
             sensitivity: 1.0,
             handbrake_hold: false,
+            rear_drive: 1.0,
         }
     }
 
