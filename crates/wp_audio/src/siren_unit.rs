@@ -561,14 +561,16 @@ impl SirenRack {
     }
 
     /// The acoustic pass for this frame's sirens: occlusion, interior muffle, street slap echo,
-    /// tunnel reverb and the engine duck. `query` answers line-of-sight and "covered" questions
+    /// tunnel reverb and the engine duck. `cabin` = the vehicle whose cabin the listener is in. `query` answers line-of-sight and "covered" questions
     /// about the world (use [`crate::siren_space::OpenAir`] without a city).
     pub fn space(
         &mut self,
         cfg: &SirenV2Config,
         listener: &crate::types::Listener,
+        cabin: Option<u32>,
         query: &dyn AcousticQuery,
     ) -> SirenSpaceFrame {
+        self.space.set_cabin(cabin);
         self.space.update(
             &cfg.space,
             listener,

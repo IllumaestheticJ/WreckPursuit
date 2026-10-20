@@ -23,6 +23,7 @@ import { SceneView } from "./scene";
 import { VehicleView } from "./vehicle_view";
 import { clearDebris, meshTimings, panelEvents, preloadCarMeshes, stepDebris } from "./render/panels";
 import { LodDirector } from "./render/lod";
+import { PoliceToolsView } from "./render/police_tools";
 import { PropView } from "./render/props";
 import { CameraRig, CAMERAS, CAMERA_MODES, cameraLabel, type CameraMode } from "./cameras";
 import { Hud } from "./hud";
@@ -31,7 +32,6 @@ import { AudioSystem } from "./audio";
 import { UiOverlay } from "./ui/overlay";
 import { MapOverlay } from "./ui/map";
 import { HudLayout } from "./ui/layout";
-import * as wasmExports from "./wasm/pkg/wp_wasm.js";
 import { defaultGameSettings, hasStoredSettings, loadGameSettings, mountGameMenu, type GameSettings, type PlayChoice } from "../../ui-kit/src/live";
 import { gfxMode } from "./render/quality";
 import { RunEndView } from "./ui/runEnd";
@@ -42,8 +42,8 @@ import { RaceView, type RaceFrame } from "./ui/race";
 import { RaceMarker, parseCourse } from "./race_marker";
 import { RealTimeMeter } from "./rtf";
 import { WeatherView } from "./render/weather";
-import { ArtStyle, STYLE_LABELS, type StyleId } from "./render/style";
-import { FrameProfiler } from "./perf";
+import { ArtStyle, STYLE_LABELS, makeHeadlightPool, type StyleId } from "./render/style";
+import { FrameProfiler, tagFeature } from "./perf";
 import { CrashFx } from "./render/fx";
 import * as THREE from "three";
 
@@ -125,16 +125,14 @@ async function main(): Promise<void> {
   // Game menu (built below, once everything it drives exists) and its current settings.
   let menu: ReturnType<typeof mountGameMenu> | null = null;
   let gameSettings: GameSettings | null = null;
-  // Countersteer strength setter (machine A, wp_wasm); the menu slider is disabled until it lands.
-  const countersteerSetter = Object.entries(wasmExports).find(([k, v]) => /countersteer/i.test(k) && typeof v === "function")?.[1] as
-    | ((entity: number, strength: number) => void)
-    | undefined;
+  // Countersteer strength (owner row 57): the menu slider (0..1) and the developer panel slider
+  // (0..100 %) both drive wp_wasm's set_countersteer. The menu value is applied only when the
+  // viewer moves it (so the input preset / panel slider keep their value otherwise).
+  let lastMenuCountersteer: number | null = null;
   // Traffic / police at every LOD: instanced fleet + hand-over to full views (render/lod.ts).
   const lod = new LodDirector();
-  scene.world.add(lod.fleet.group);
-  // Phones / tablets draw less traffic (render/quality.ts touch profile).
-  lod.trafficDrawM = scene.quality.trafficDrawM;
-  lod.fleet.fullLodM = scene.quality.fullLodM;
+  scene.world.add(tagFeature(lod.fleet.group, "fleet"));
+
   // On-screen touch controls (src/touch.ts): shown on touch devices, read through readInput.
   const touch = installTouch();
   const controls = new ControlsPanel(overlay);
@@ -144,13 +142,32 @@ async function main(): Promise<void> {
   $("controls-open").onclick = () => controls.toggle();
   // Parked cars and cones (playtest row 50): every physical prop is drawn (render/props.ts).
   const props = new PropView();
-  props.fullLodM = scene.quality.fullLodM;
-  props.maxFull = scene.quality.propFullMax;
-  props.drawM = scene.quality.propDrawM;
-  scene.world.add(props.group);
+  // LOD distances from the graphics quality (render/quality.ts: shorter in the low and touch
+  // profiles); re-applied when the menu changes the level.
+  const applyLod = () => {
+    const q = scene.quality;
+    lod.trafficDrawM = q.trafficDrawM;
+    lod.viewDrawM = q.viewDrawM;
+    lod.fleet.fullLodM = q.fullLodM;
+    props.fullLodM = q.fullLodM;
+    props.maxFull = q.propFullMax;
+    props.drawM = q.propDrawM;
+    props.proxyM = q.propProxyM;
+    scene.signals.drawM = q.signalDrawM;
+    scene.detailDistanceM = q.cityDetailM;
+  };
+  applyLod();
+  scene.quality.onChange = applyLod;
+  scene.world.add(tagFeature(props.group, "props"));
+  // Spike strips on the road (playtest row 88).
+  const policeTools = new PoliceToolsView();
+  scene.world.add(policeTools.group);
   // Crash effects (owner row 69): sparks, smoke, glass, skid marks, debris (render/fx/).
   const fx = new CrashFx(scene.quality.fx);
-  scene.world.add(fx.group);
+  scene.world.add(tagFeature(fx.group, "fx"));
+  // Car headlight pools only show at night with the lights on (often first on a promoted car
+  // mid-chase): compile their program up front (SceneView.prewarm; not added to the scene).
+  scene.prewarmRoots.push(makeHeadlightPool(1, 1));
   // End-of-run panel (lead): capture / wreck → result + "Repair & continue" / "Restart".
   const runEndEl = document.createElement("div");
   runEndEl.id = "ui-run-end";
@@ -328,6 +345,7 @@ async function main(): Promise<void> {
   };
 
   const rebuildViews = () => {
+    scene.warmLightVariants();
     crash.reset();
     for (const v of app.views.values()) v.dispose();
     app.views.clear();
@@ -436,8 +454,10 @@ async function main(): Promise<void> {
   /** One view per sim vehicle — scenario cars plus whatever the sim spawns itself (police
    * units, promoted traffic) — created and disposed as vehicles come and go. Promoted traffic
    * keeps the livery it had as an instanced agent (`trafficPaint`: entity → colour). */
+  const liveViews = new Set<number>();
   const syncViews = (meta: Float32Array = sim.vehicleMeta(), trafficPaint: Map<number, number> = new Map()) => {
-    const live = new Set<number>();
+    const live = liveViews;
+    live.clear();
     for (let o = 0; o < meta.length; o += META_STRIDE) {
       const id = meta[o];
       live.add(id);
@@ -450,7 +470,7 @@ async function main(): Promise<void> {
             ? (trafficPaint.get(id) ?? TRAFFIC_PALETTE[0])
             : COLOURS[(id - 1) % COLOURS.length];
       const v = new VehicleView(id, colour);
-      scene.world.add(v.root);
+      scene.world.add(tagFeature(v.root, "cars"));
       scene.world.add(v.velocity);
       app.views.set(id, v);
     }
@@ -559,33 +579,76 @@ async function main(): Promise<void> {
 
   // Owner default (playtest row 29): TCS, ESC and automatic gears start OFF; any assist box the
   // viewer ticks or unticks is remembered (localStorage) and wins over the preset.
+  // The countersteer slider (owner row 57) is stored there too, as a number 0..1
+  // (`countersteer_help`).
   const ASSIST_KEY = "wp.assistOverrides";
-  const savedAssistOverrides = (): Record<string, boolean> => {
+  const savedAssistOverrides = (): Record<string, boolean | number> => {
     try {
-      return JSON.parse(store.get(ASSIST_KEY) ?? "{}") as Record<string, boolean>;
+      return JSON.parse(store.get(ASSIST_KEY) ?? "{}") as Record<string, boolean | number>;
     } catch {
       return {};
     }
   };
-  const assistOverrides = (): Record<string, boolean> => ({ tcs: false, esc: false, auto_gears: false, ...savedAssistOverrides() });
+  const assistOverrides = (): Record<string, boolean | number> => ({ tcs: false, esc: false, auto_gears: false, ...savedAssistOverrides() });
   /** Touch play (owner request row 71): the gamepad (analogue) preset plus automatic gears,
    * traction control and stronger steer help; boxes the viewer ticked still win. */
   const TOUCH_ASSISTS: Record<string, unknown> = { tcs: true, auto_gears: true, auto_clutch: true, steer_speed_sensitivity: 1.0, countersteer_help: 0.6 };
+  // One-click presets (Rookie / Street / Sim, GDD §6): damage mode + assists together. The
+  // chosen preset is remembered per viewer and replaces the per-box overrides; ticking a box
+  // afterwards turns it into a custom setup (the preset is forgotten, the box is remembered).
+  const PRESET_KEY = "wp.assistPreset";
+  /** Presets are defined for keyboard / gamepad / wheel; touch uses the gamepad ones. */
+  const presetSource = (src: InputSource): "Keyboard" | "Gamepad" | "Wheel" => (src === "Touch" ? "Gamepad" : src);
+  const storedPreset = (): string | null => {
+    const p = store.get(PRESET_KEY);
+    return p && sim.assistPresets().includes(p) ? p : null;
+  };
   const applyAssistPreset = (source: InputSource) => {
     if (isReplay()) return;
     try {
-      const preset = sim.assistPreset(source === "Touch" ? "Gamepad" : source) as unknown as Record<string, unknown>;
-      // `steer_help` (game menu) is not a profile field: off zeroes the speed-sensitive steering.
-      const chosen = (source === "Touch" ? { ...TOUCH_ASSISTS, ...savedAssistOverrides() } : assistOverrides()) as Record<string, unknown>;
-      const { steer_help: steerHelp, ...overrides } = chosen;
-      Object.assign(preset, overrides);
-      if (steerHelp === false) preset.steer_speed_sensitivity = 0;
-      sim.setAssists(app.player, preset as never);
-      if (countersteerSetter && gameSettings) countersteerSetter(app.player, gameSettings.assists.countersteer);
+      const named = source === "Touch" ? null : storedPreset();
+      if (named) {
+        sim.setAssists(app.player, sim.assistPresetNamed(named, source as "Keyboard" | "Gamepad" | "Wheel").assists);
+      } else {
+        const preset = sim.assistPreset(source === "Touch" ? "Gamepad" : source) as unknown as Record<string, unknown>;
+        // `steer_help` (game menu) is not a profile field: off zeroes the speed-sensitive steering.
+        const chosen = (source === "Touch" ? { ...TOUCH_ASSISTS, ...savedAssistOverrides() } : assistOverrides()) as Record<string, unknown>;
+        const { steer_help: steerHelp, ...overrides } = chosen;
+        Object.assign(preset, overrides);
+        if (steerHelp === false) preset.steer_speed_sensitivity = 0;
+        sim.setAssists(app.player, preset as never);
+      }
+      if (gameSettings) {
+        const menuCs = gameSettings.assists.countersteer;
+        if (lastMenuCountersteer !== null && menuCs !== lastMenuCountersteer) {
+          sim.setCountersteer(app.player, menuCs * 100);
+          const o = assistOverrides();
+          o.countersteer_help = menuCs;
+          store.set(ASSIST_KEY, JSON.stringify(o));
+        }
+        lastMenuCountersteer = menuCs;
+      }
       syncAssistBoxes();
     } catch (e) {
       console.warn(e);
     }
+  };
+  const choosePreset = (name: string) => {
+    if (isReplay()) return;
+    const p = sim.assistPresetNamed(name, presetSource(app.source));
+    ($("mode") as HTMLSelectElement).value = p.mode;
+    sim.setDamageMode(p.mode);
+    sim.setAssists(app.player, p.assists);
+    store.set(PRESET_KEY, name);
+    store.set(ASSIST_KEY, "{}");
+    syncAssistBoxes();
+  };
+  const syncPresetButtons = () => {
+    const active = isReplay() ? "" : sim.assistPresetOf(app.player, presetSource(app.source));
+    document.querySelectorAll<HTMLButtonElement>("button.preset").forEach((b) => {
+      b.setAttribute("aria-pressed", String(b.dataset.p === active));
+    });
+    $("preset-state").textContent = isReplay() ? "" : active ? "" : "custom";
   };
 
   // Clutch automatic / manual (playtest row 59): the AssistProfile's `auto_clutch`. Manual uses
@@ -595,10 +658,14 @@ async function main(): Promise<void> {
   const syncAssistBoxes = () => {
     if (isReplay()) return;
     const a = sim.assists(app.player) as unknown as Record<string, unknown>;
-    document.querySelectorAll<HTMLInputElement>("#assist-row input").forEach((cb) => {
+    document.querySelectorAll<HTMLInputElement>("#assist-row input[type=checkbox]").forEach((cb) => {
       cb.checked = Boolean(a[cb.dataset.a!]);
     });
     clutchSel.value = a.auto_clutch === false ? "manual" : "auto";
+    const pct = Math.round(Number(a.countersteer_help ?? 0) * 100);
+    ($("cstr") as HTMLInputElement).value = String(pct);
+    $("cstr-val").textContent = `${pct}%`;
+    syncPresetButtons();
   };
 
   // ----- replay ---------------------------------------------------------------------------
@@ -669,6 +736,7 @@ async function main(): Promise<void> {
     if (isReplay() || sim.careerRunActive()) return void (($("mode") as HTMLSelectElement).value = modeName());
     sim.setDamageMode((e.target as HTMLSelectElement).value);
     menu?.update({ damageMode: (e.target as HTMLSelectElement).value as GameSettings["damageMode"] });
+    syncPresetButtons();
   };
   ($("city") as HTMLInputElement).onchange = () => startFreeDrive();
   citySel.onchange = () => {
@@ -682,17 +750,31 @@ async function main(): Promise<void> {
     else if (name === "city_chase_rainy_night") startCityChase(undefined, undefined, true);
     else if (($("city") as HTMLInputElement).checked) startFreeDrive();
   };
-  document.querySelectorAll<HTMLInputElement>("#assist-row input").forEach((cb) => {
+  const cstr = $("cstr") as HTMLInputElement;
+  cstr.oninput = () => {
+    if (isReplay()) return;
+    const pct = Number(cstr.value);
+    $("cstr-val").textContent = `${pct}%`;
+    sim.setCountersteer(app.player, pct);
+    const o = assistOverrides();
+    o.countersteer_help = pct / 100;
+    store.set(ASSIST_KEY, JSON.stringify(o));
+  };
+  document.querySelectorAll<HTMLInputElement>("#assist-row input[type=checkbox]").forEach((cb) => {
     cb.onchange = () => {
       if (isReplay()) return;
       const a = sim.assists(app.player) as unknown as Record<string, unknown>;
       a[cb.dataset.a!] = cb.checked;
       sim.setAssists(app.player, a as never);
+      // A hand-picked box turns the preset into a custom setup: remember the current boxes.
       const o = assistOverrides();
+      if (storedPreset()) for (const k of ["abs", "tcs", "esc", "auto_gears"]) o[k] = Boolean(a[k]);
       o[cb.dataset.a!] = cb.checked;
       store.set(ASSIST_KEY, JSON.stringify(o));
       const key = ({ abs: "abs", tcs: "tcs", esc: "esc", auto_gears: "autoGears" } as const)[cb.dataset.a as "abs" | "tcs" | "esc" | "auto_gears"];
       if (menu && key) menu.update({ assists: { ...menu.settings.assists, [key]: cb.checked } });
+      store.set(PRESET_KEY, "");
+      syncPresetButtons();
     };
   });
   clutchSel.onchange = () => {
@@ -705,7 +787,12 @@ async function main(): Promise<void> {
     const o = assistOverrides();
     o.auto_clutch = !manual;
     store.set(ASSIST_KEY, JSON.stringify(o));
+    store.set(PRESET_KEY, "");
+    syncPresetButtons();
   };
+  document.querySelectorAll<HTMLButtonElement>("button.preset").forEach((b) => {
+    b.onclick = () => choosePreset(b.dataset.p!);
+  });
   document.querySelectorAll<HTMLButtonElement>(".bench").forEach((b) => {
     b.onclick = () => startBench(Number(b.dataset.n));
   });
@@ -918,7 +1005,7 @@ async function main(): Promise<void> {
   menu = mountGameMenu(overlay, {
     settings: loadGameSettings(seed()),
     developerDefault: devDefault,
-    countersteer: !!countersteerSetter,
+    countersteer: true,
     cameras: CAMERAS.filter((c) => c.mode !== "orbit").map((c) => ({ id: c.mode, label: c.label })),
     host: {
       play: (choice: PlayChoice) => {
@@ -974,6 +1061,10 @@ async function main(): Promise<void> {
 
   // ----- start ----------------------------------------------------------------------------
 
+  // A remembered preset also picks the damage mode new sessions start in.
+  const remembered = storedPreset();
+  if (remembered) ($("mode") as HTMLSelectElement).value = sim.assistPresetNamed(remembered, presetSource(app.source)).mode;
+
   const camParam = params.get("cam") as CameraMode | null;
   if (camParam && CAMERA_MODES.includes(camParam)) rig.mode = camParam;
   const scParam = params.get("scenario");
@@ -1001,6 +1092,7 @@ async function main(): Promise<void> {
   let simMs = 0;
   let renderMs = 0;
   let frameNo = 0;
+  let fxCompiled = false;
   const rtf = new RealTimeMeter();
   const sirenPos = new THREE.Vector3();
   const NO_TEL = new Float32Array(0);
@@ -1016,6 +1108,9 @@ async function main(): Promise<void> {
     const prof = app.prof;
     prof.begin();
     let replay = isReplay();
+    // Below ~8 fps (software rendering) the 2D HUD canvases (minimap, telemetry plots) redraw
+    // every other frame: each redraw is a canvas upload + composite of ~10 ms there.
+    const hudRest = fps < 8 && frameNo % 2 === 1;
 
     // Touch controls: hidden under menus / full-screen panels (they sit above #overlay), only
     // map + pause while paused or with the full map open.
@@ -1032,11 +1127,13 @@ async function main(): Promise<void> {
     if (!replay && !app.bench) sim.setInput(app.player, map.isOpen ? { ...input, throttle: 0, steer: 0, brake: 0.35, handbrake: 0, gearUp: false, gearDown: false } : input);
 
     prof.lap("input");
-    const t0 = performance.now();
     crash.beforeStep(app.paused);
+    prof.lap("crash");
+    const t0 = performance.now();
     if (!app.paused || replay) app.alpha = sim.step(app.paused && !replay ? 0 : dt);
     const t1 = performance.now();
     simMs += (t1 - t0 - simMs) * 0.1;
+    prof.lap("sim");
     // Crash replay: leave at the end of its window; live: a new crash, the offer, auto play.
     crash.afterStep();
     if (!sim.crashReplayActive() && !isReplay()) {
@@ -1044,6 +1141,7 @@ async function main(): Promise<void> {
       if (c) crash.onCrash(c);
       crash.liveFrame(sim.worldInfo()[W.tick]);
     }
+    prof.lap("crash");
     replay = isReplay();
     // One world_info() per frame after the step (it was fetched ~7 times a frame).
     const wi = sim.worldInfo();
@@ -1110,7 +1208,9 @@ async function main(): Promise<void> {
     // The game UI is hidden during a crash replay (and must not count its events twice).
     if (!crash.playing) {
       ui.frame(wi[W.tick], app.player, events, wi[W.hours], wi[W.mode] > 0.5 ? "Simulation" : "Arcade");
-      map.frame(app.player, now);
+      prof.lap("ui");
+      map.frame(app.player, now, hudRest);
+      prof.lap("map");
       if (!replay) runEnd.update(sim.runResult(), now);
       // Career autosave: after each settlement (bust, escape, wreck) and every 20 s of a run.
       if (!replay && sim.careerRunActive()) {
@@ -1146,7 +1246,7 @@ async function main(): Promise<void> {
     const focusView = app.views.get(app.focus) ?? null;
     if (focusTel) {
       plots.push(wi[W.tick] / 240, focusTel);
-      if (layers.on("telemetry")) plots.draw();
+      if (layers.on("telemetry") && !hudRest) plots.draw();
     }
     plots.canvas.style.display = layers.on("telemetry") ? "" : "none";
     prof.lap("ui");
@@ -1161,19 +1261,33 @@ async function main(): Promise<void> {
         rig.mode === "cinematic" ? nearestPolice(focusView) : null,
       );
     prof.lap("camera");
-    audio.update(rig.camera, sim.lastEventsJson(), app.paused && !replay ? 0 : dt, app.focus);
+    audio.update(rig.camera, sim.lastEventsJson(), app.paused && !replay ? 0 : dt, app.focus, rig.mode);
     prof.lap("audio");
     // Traffic and police after the camera moved: the fleet picks mesh detail by camera distance.
     lod.update(trafficDraw, policeDraw, app.views, rig.camera, app.views.get(app.player)?.root.position ?? null, tS);
+    prof.lap("fleet");
     props.update(sim.propsMoved(), rig.camera);
-    prof.lap("traffic");
+    policeTools.update(() => sim.mapDynamic(app.player), (x, y) => scene.groundZ(x, y), now);
+    prof.lap("props");
 
     const inCity = wi[W.city] > 0.5;
     const cityId = inCity ? sim.cityId() : null;
     if (cityId) style.ensureCity(cityId, () => sim.mapStaticJson());
     style.update(dt, wi[W.hours], wi[W.night], wx[0] > 0.5 ? wx[7] : 1, { on: wx[0] > 0.5, cloud: wx[6] }, rig.camera, cityId);
+    prof.lap("render");
+    // Compile both siren-light variants of any new shader program now, not in the frame the
+    // first siren comes on (SceneView.prewarm). At most once a second; only new materials.
+    scene.prewarmEvery(rig.camera, now);
+    prof.lap("shaders");
     const r0 = performance.now();
     scene.render(rig.camera);
+    // Crash effects stay hidden until the first crash: compile their shaders now (after a few
+    // frames, once the art style has set the fog and lights they will be drawn with), not
+    // mid-chase.
+    if (!fxCompiled && frameNo > 2) {
+      fxCompiled = true;
+      scene.precompile(fx.group, rig.camera);
+    }
     const r1 = performance.now();
     prof.lap("render");
     renderMs += (r1 - r0 - renderMs) * 0.1;
@@ -1216,8 +1330,9 @@ async function main(): Promise<void> {
       });
       updatePanels(replay);
     }
-    layout.frame(now);
     prof.lap("ui");
+    layout.frame(now);
+    prof.lap("layout");
     prof.end();
     if (app.bench) benchTick(t1 - t0, r1 - r0);
     requestAnimationFrame(frame);

@@ -10,7 +10,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "e2e": "node e2e/run.mjs && node e2e/race.mjs && node e2e/siren.mjs",
+    "e2e": "node e2e/run.mjs && node e2e/race.mjs && node e2e/countersteer.mjs && node e2e/siren.mjs",
     "e2e:siren": "node e2e/siren.mjs",
     "e2e:cameras": "node e2e/cameras.mjs",
     "e2e:audio-samples": "node e2e/audio_samples.mjs",
@@ -24,7 +24,8 @@
     "e2e:reset": "node e2e/reset.mjs",
     "e2e:touch": "node e2e/touch.mjs",
     "e2e:menu": "node e2e/menu.mjs",
-    "profile": "node e2e/frame_profile.mjs"
+    "profile": "node e2e/frame_profile.mjs",
+    "e2e:presets": "node e2e/presets.mjs"
   },
   "dependencies": {
     "three": "0.180.0",

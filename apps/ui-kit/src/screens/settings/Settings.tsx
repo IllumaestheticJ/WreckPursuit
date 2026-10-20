@@ -284,10 +284,9 @@ const ASSIST_ROWS: { key: keyof AssistProfile; label: string; hint: string; kind
 ];
 
 const PRESET_COLS: { id: Exclude<AssistPreset, "custom">; label: string; note: string }[] = [
-  { id: "off", label: "Off", note: "nothing" },
-  { id: "sim", label: "Sim", note: "wheel default" },
-  { id: "standard", label: "Standard", note: "gamepad default" },
-  { id: "full", label: "Full", note: "keyboard default" },
+  { id: "rookie", label: "Rookie", note: "Arcade, all on" },
+  { id: "street", label: "Street", note: "Arcade, ABS + TCS" },
+  { id: "sim", label: "Sim", note: "Simulation, off" },
 ];
 
 function Assists() {
@@ -299,7 +298,7 @@ function Assists() {
   return (
     <Panel title="Assist matrix" tag={preset === "custom" ? "CUSTOM" : preset.toUpperCase()}>
       <p class="wp-dim" style={{ marginTop: 0 }}>
-        Assists are independent of the damage mode. Pick a preset column, then fine-tune your own column.
+        A preset sets the damage mode and the assists in one click; they stay independent afterwards. Pick a preset column, then fine-tune your own column.
       </p>
       <table class="wp-table wp-assist-table">
         <thead>

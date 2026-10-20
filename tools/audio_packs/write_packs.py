@@ -90,6 +90,8 @@ c["mech/steam_hiss"] = samples(H, "steam_hiss", H, True, 0.6)
 # Horn: steady sustain loops (horn_sustain.py) that stop with the button (release_s, owner #58).
 c["horn/standard"] = dict(samples(H, "horn.ogg", H, True, HORN_GAIN), release_s=0.03)
 c["horn/truck"] = dict(samples(H, "horn_truck", H, True, HORN_GAIN), release_s=0.03)
+# Police air horn (owner row 74): modelled by default; the recorded fallback reuses the truck horn.
+c["horn/police"] = dict(samples(H, "horn_truck", H, True, HORN_GAIN), release_s=0.03)
 c["drivetrain/shift"] = samples(H, "shift_", H, False, 0.7)
 c["ambient/city_night"] = samples(H, "city_night", H, True, 1.0)
 w["cues"] = dict(sorted(c.items()))

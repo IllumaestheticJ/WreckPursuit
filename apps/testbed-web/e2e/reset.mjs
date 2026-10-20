@@ -102,9 +102,15 @@ await page.evaluate(() => window.__wp.startCityChase());
 await page.waitForTimeout(1500);
 await page.evaluate(() => window.__wp.sim.debugSetHeat(window.__wp.app.player, 0.6));
 const c0 = await player();
-const heat0 = await page.evaluate(() => window.__wp.sim.policeStatus(window.__wp.app.player)?.heat ?? null);
-const r = await page.evaluate(() => window.__wp.sim.resetInPlace(window.__wp.app.player));
-const heat1 = await page.evaluate(() => window.__wp.sim.policeStatus(window.__wp.app.player)?.heat ?? null);
+// Heat before / after in one evaluate: separate calls let frames (and the police) run in
+// between, and the heat moves on its own early in a chase.
+const { heat0, r, heat1 } = await page.evaluate(() => {
+  const wp = window.__wp;
+  const heat0 = wp.sim.policeStatus(wp.app.player)?.heat ?? null;
+  const r = wp.sim.resetInPlace(wp.app.player);
+  const heat1 = wp.sim.policeStatus(wp.app.player)?.heat ?? null;
+  return { heat0, r, heat1 };
+});
 await page.waitForTimeout(300);
 const c1 = await player();
 check(

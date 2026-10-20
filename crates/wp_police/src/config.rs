@@ -218,6 +218,11 @@ pub struct CaptureConfig {
     pub stop_time_s: f32,
     /// A unit must be within this distance, m.
     pub unit_radius_m: f32,
+    /// Also captured: boxed in or pinned, never getting farther than this from one spot
+    /// (rocking back and forth) for `pinned_time_s` with a unit within `unit_radius_m`, m.
+    pub pinned_radius_m: f32,
+    /// See `pinned_radius_m`, s.
+    pub pinned_time_s: f32,
 }
 
 /// Safehouse rule.
@@ -276,8 +281,20 @@ pub struct ReinforcementConfig {
     pub response_s: PhaseTable<Range>,
     /// Max fractional reduction of response time for a max-priority (high bounty) racer.
     pub priority_max_reduction: f32,
-    /// Ground units wanted on a racer per wanted level L1..L5.
+    /// Ground units wanted on a racer per wanted level L1..L5 (the level's cap: idle units
+    /// nearby join at once, the rest spawn out of sight after `response_s`).
     pub units_per_level: [u32; 5],
+    /// Idle and patrolling units within this legal driving distance of a pursued racer join
+    /// the pursuit at once (intercepting its predicted position), per level L1..L5, m.
+    pub backup_radius_m: [f32; 5],
+    /// From this wanted level, backup comes from every district; below it only from the
+    /// racer's own district.
+    pub backup_all_districts_level: u8,
+    /// Units on a racer farther than `backup_radius_m` + this from it (straight line) don't
+    /// count toward `units_per_level`, m.
+    pub far_margin_m: f32,
+    /// ... and are stood down when still that far this long after joining, s.
+    pub far_release_s: f32,
     /// Fallback spawn for a reinforcement when [`ResponseConfig`] finds no hidden spot in its
     /// window: the nearest node at least this far from the racer, out of its sight, m.
     pub spawn_min_distance_m: f32,
@@ -439,15 +456,6 @@ pub struct TacticConfig {
     pub boxin_max_kmh: f32,
     /// Lateral/longitudinal offset of box-in slots, m.
     pub boxin_offset_m: [f32; 2],
-    /// PIT only below this racer speed, km/h (both damage modes: behaviour never depends on
-    /// the mode).
-    pub pit_max_kmh: f32,
-    /// PIT only with at least this much straight road ahead of the racer, m.
-    pub pit_min_straight_m: f32,
-    /// PIT starts from within this distance behind the racer, m.
-    pub pit_engage_m: f32,
-    /// Seconds between PIT attempts per unit.
-    pub pit_cooldown_s: f32,
     /// Rolling block sits this far in front of the racer, m.
     pub rolling_block_lead_m: f32,
     /// Rolling block speed as a fraction of the racer's speed.
@@ -463,6 +471,56 @@ pub struct TacticConfig {
     pub bent_wheel_toe_rad: f32,
     /// Pull over when any tire puncture exceeds this.
     pub puncture_pull_over: f32,
+}
+
+/// Pursuit aggression by wanted level (owner playtest row 63: "police are not aggressive
+/// enough"). Arrays are indexed by wanted level L1..L5. Same values in both damage modes: the
+/// modes differ only in what the contact does to the cars.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChaseConfig {
+    /// Lateral acceleration pursuing / intercepting units plan corners with (budget left), g.
+    pub cornering_g: f32,
+    /// Braking pursuing / intercepting units plan corners and junctions with, m/s².
+    pub brake_mps2: f32,
+    /// Closing on the racer: up to its speed × (1 + this).
+    pub speed_margin: f32,
+    /// `pursuit_cap_mps` × this per level.
+    pub cap_scale: [f32; 5],
+    /// Shadow (tail) gap band behind the racer per level, m: nearest.
+    pub shadow_min_m: [f32; 5],
+    /// ... farthest.
+    pub shadow_max_m: [f32; 5],
+    /// No deliberate contact (PIT, ram, box-in) with a civilian vehicle this close to the
+    /// racer, per level, m (more risk tolerance at higher levels).
+    pub civilian_clear_m: [f32; 5],
+    /// Risk a unit may spend before it only shadows: `risk.budget` × this, per level.
+    pub risk_budget_scale: [f32; 5],
+    /// Risk cost of a contact the unit meant (PIT, ram, box-in), instead of
+    /// `risk.cost_collision`.
+    pub tactic_contact_cost: f32,
+    /// PIT allowed below this racer speed per level, km/h (0 = no PIT at that level).
+    pub pit_max_kmh: [f32; 5],
+    /// PIT needs this much straight road ahead of the racer, m.
+    pub pit_min_straight_m: f32,
+    /// PIT line: this far beside the racer's line while lining up, m.
+    pub pit_side_offset_m: f32,
+    /// PIT: turn in once the unit's centre is this far behind the racer's, m.
+    pub pit_turn_in_gap_m: f32,
+    /// Seconds before a unit tries another PIT or ram after a contact (re-engage).
+    pub reengage_s: f32,
+    /// Rear-quarter rams from this level.
+    pub rear_ram_level: u8,
+    /// Hard rams and side slams from this level.
+    pub hard_ram_level: u8,
+    /// Second pursuer drives alongside the racer (flank) from this level.
+    pub flank_level: u8,
+    /// Flank line: this far beside the racer's line, m.
+    pub flank_offset_m: f32,
+    /// Closing speed of a ram over the racer's speed: rear quarter, side slam, hard, m/s.
+    pub ram_closing_mps: [f32; 3],
+    /// Interceptors park across the junction ahead of the racer from this level.
+    pub junction_block_level: u8,
 }
 
 /// Contents of `data/police/pursuit.toml`.
@@ -495,6 +553,8 @@ pub struct PursuitFile {
     pub hazard: HazardConfig,
     /// Tactics.
     pub tactics: TacticConfig,
+    /// Pursuit aggression by wanted level.
+    pub chase: ChaseConfig,
     /// Obstacle awareness (following, passing, spawn clearance).
     pub avoid: AvoidConfig,
 }
@@ -571,6 +631,41 @@ pub struct AvoidConfig {
     pub no_pass_near_junction_m: f32,
     /// Stopped behind another police unit this long, the lower id creeps on, s.
     pub gridlock_s: f32,
+    /// Pursuing / intercepting units: crossing speed through a junction, m/s.
+    pub chase_junction_mps: f32,
+    /// ... against a red light, m/s.
+    pub chase_red_mps: f32,
+    /// ... turning, m/s.
+    pub chase_turn_mps: f32,
+    /// ... longest wait for cross traffic, s.
+    pub chase_yield_max_s: f32,
+    /// ... braking planned for a junction, m/s².
+    pub chase_decel_mps2: f32,
+    /// ... lateral clearance for the lane corridor (negative: squeeze past a car that only
+    /// clips the lane edge), m.
+    pub chase_lateral_margin_m: f32,
+    /// ... wait behind a stopped vehicle before passing it, s.
+    pub chase_pass_wait_s: f32,
+    /// Push-through (owner playtest row 61): a unit with lights blocked this long by a stopped
+    /// civilian or parked car it can't pass shoves it aside, s.
+    pub push_after_s: f32,
+    /// Push speed (below 15 km/h), m/s.
+    pub push_mps: f32,
+    /// A push lasts at most this long, s.
+    pub push_max_s: f32,
+    /// A push that moved the unit less than this is a failure (reverse / re-route next), m.
+    pub push_min_progress_m: f32,
+    /// No new push for this long after one, s.
+    pub push_cooldown_s: f32,
+    /// Static feelers (owner playtest row 66): look this far ahead beyond the stopping
+    /// distance for walls and buildings, m.
+    pub wall_margin_m: f32,
+    /// Feeler angle either side of the heading, rad.
+    pub wall_feeler_rad: f32,
+    /// Braking planned for a wall ahead, m/s².
+    pub wall_decel_mps2: f32,
+    /// Steer away from a wall on one side by this much, m.
+    pub wall_shift_m: f32,
     /// Units spawn at least this far from any vehicle, m.
     pub spawn_clear_m: f32,
     /// ... and not where a moving vehicle will be within this time, s.

@@ -188,7 +188,7 @@ await press("ArrowLeft", 2);
 const v1 = await page.evaluate(() => [window.__wp.menu.settings.volumes.master, window.__wpAudio.mix().master]);
 check(Math.abs(v1[0] - (v0 - 0.1)) < 1e-6 && v1[1] === v1[0], `← lowers the master volume and it reaches the audio mix (${v0} → ${v1.join(" / ")})`);
 const cstr = await page.evaluate(() => document.getElementById("gm-cstr")?.disabled);
-check(cstr === true, "countersteer slider disabled until the wasm setter exists");
+check(cstr === false, "countersteer slider enabled (wasm set_countersteer, owner row 57)");
 await shot("menu_settings.png");
 await press("Escape");
 m = await menu();

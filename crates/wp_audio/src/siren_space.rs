@@ -194,6 +194,8 @@ pub struct SpaceState {
     tunnel: f32,
     frames: u64,
     last_tick: Option<u64>,
+    /// Vehicle whose cabin the listener is in (the director's cabin-box test), if known.
+    cabin: Option<u32>,
 }
 
 /// `1 - exp(-dt / tau)` without transcendental functions (rational approximation, exact
@@ -229,6 +231,13 @@ fn probe(q: &dyn AcousticQuery, p: [f32; 3], dir: [f32; 3], max_m: f32, steps: u
 }
 
 impl SpaceState {
+    /// The vehicle whose cabin the listener is in this frame (from the director's cabin box).
+    /// Its siren gets the interior muffle; the radius test stays as the fallback for cars
+    /// without a cabin box.
+    pub fn set_cabin(&mut self, cabin: Option<u32>) {
+        self.cabin = cabin;
+    }
+
     /// One frame: occlusion of every source, the street probe (every few frames), the tunnel.
     pub fn update(
         &mut self,
@@ -338,12 +347,13 @@ impl SpaceState {
             seen.push(s.entity);
             let to = sub(s.pos, lp);
             let d = len(to);
-            let interior = focus == Some(s.entity) && {
-                // Speaker sits `speaker_height_m` above the origin; compare horizontally and
-                // allow the light bar's height.
-                let h = [to[0], to[1], 0.0];
-                len(h) < cfg.interior_radius_m && to[2].abs() < cfg.interior_radius_m + 1.0
-            };
+            let interior = self.cabin == Some(s.entity)
+                || focus == Some(s.entity) && {
+                    // Speaker sits `speaker_height_m` above the origin; compare horizontally and
+                    // allow the light bar's height.
+                    let h = [to[0], to[1], 0.0];
+                    len(h) < cfg.interior_radius_m && to[2].abs() < cfg.interior_radius_m + 1.0
+                };
             let target = if interior || d < 1.0 {
                 0.0
             } else {
@@ -574,6 +584,11 @@ mod tests {
         // Hood camera (≈ 0.9 m ahead of the origin, above the hood): outside, not muffled.
         let f = st.update(&cfg, &listener([0.0, 0.9, 1.6]), &s, Some(7), 2, &q);
         assert!(!f.voices[0].interior);
+        // The director's cabin box says the camera is inside car 7: muffled even off-centre.
+        st.set_cabin(Some(7));
+        let f = st.update(&cfg, &listener([0.9, -0.6, 1.0]), &s, Some(7), 3, &q);
+        assert!(f.voices[0].interior);
+        st.set_cabin(None);
         // Same position but not the focus car: not interior.
         let f = st.update(&cfg, &listener([0.0, 0.0, 0.9]), &s, Some(8), 4, &q);
         assert!(!f.voices[0].interior);

@@ -12,11 +12,12 @@ import * as THREE from "three";
 import { audioBridge } from "./bridge";
 import { AudioPanel } from "./panel";
 import { ScannerPlayer } from "./scanner";
+import { EngineSynthHost } from "./engine_host";
 import { CurvePlan, renderSiren, sirenStats } from "./siren";
 import { SirenLab } from "./siren_lab";
 import { SirenRack } from "./siren_rack";
 import { AudioMixer, setListener, VoicePool } from "./voices";
-import type { AudioCommand, AudioLibrary, Bus, DirectorStats, RadioPriority, SampleStatus, SoundSource } from "./types";
+import type { AudioCommand, AudioLibrary, Bus, DirectorStats, EngineVoicing, RadioPriority, SampleStatus, SoundSource } from "./types";
 
 const TEST_LINES: Record<string, string[]> = {
   Routine: ["Unit fourteen, respond to a fender bender on Harbor and Fifth.", "Copy dispatch, fourteen en route."],
@@ -26,6 +27,13 @@ const TEST_LINES: Record<string, string[]> = {
 
 /** City ambience loop (optional World-pack cue, played by the backend, not the director). */
 const AMBIENCE_CUE = "ambient/city_night";
+
+/**
+ * How much of the focus car's engine is heard from inside, by camera mode (cameras.ts): the
+ * cockpit is inside; hood and bumper cameras sit on the body, outside the cabin but close to
+ * the engine bay; every other camera is outside.
+ */
+const INTERIOR_BY_CAMERA: Record<string, number> = { cockpit: 1, hood: 0.35, bumper: 0.15 };
 
 export class AudioSystem {
   private ctx: AudioContext | null = null;
@@ -50,6 +58,10 @@ export class AudioSystem {
   private lineNo = 0;
   private lastStats: DirectorStats | null = null;
   private stopAmbience: (() => void) | null = null;
+  /** Engine synthesizer (AudioWorklet), once loaded; null if unavailable. */
+  private engineHost: EngineSynthHost | null = null;
+  private engineHostState: "loading" | "ready" | "failed" | "off" = "off";
+  private cameraMode = "chase";
   private readonly listenerArr = new Float32Array(12);
   private readonly scratch = Array.from({ length: 7 }, () => new THREE.Vector3());
   private readonly scratchQ = new THREE.Quaternion();
@@ -77,6 +89,8 @@ export class AudioSystem {
       testRadio: (p) => this.testRadio(p),
       setSource: (src) => this.setSource(src),
       setAmbience: () => this.restartAmbience(),
+      setEngineVoicing: (v) => this.setEngineVoicing(v),
+      setImpacts: (m) => this.setImpacts(m),
     });
     this.sirenLab = new SirenLab(() =>
       this.ctx && this.sirens && this.lib && this.ctx.state === "running" ? { ctx: this.ctx, rack: this.sirens, lib: this.lib } : null,
@@ -117,6 +131,7 @@ export class AudioSystem {
     this.pool.source = this.panel.settings.source;
     this.sirens = new SirenRack(this.ctx, this.mixer, this.lib);
     this.pool.router = this.sirens;
+    this.pool.impacts.enabled = this.panel.settings.impacts !== "recorded";
     this.scanner = new ScannerPlayer(this.pool);
     const s = this.panel.settings;
     this.mixer.master.gain.value = s.master;
@@ -126,7 +141,52 @@ export class AudioSystem {
     // Forget anything the director thinks is playing: it re-plays every loop next frame.
     this.resetDirector();
     this.restartAmbience();
+    this.startEngineSynth();
     this.panel.setStatus(`${this.ctx.sampleRate} Hz · max ${this.lib.config.max_voices} voices`);
+  }
+
+  /**
+   * Load the engine synthesizer worklet; once it runs, the director voices the focus car and
+   * the nearest cars with the modelled engine (if the panel says "modelled"). On failure every
+   * car stays on layers.
+   */
+  private startEngineSynth(): void {
+    const ctx = this.ctx;
+    if (!ctx || this.engineHostState !== "off") return;
+    this.engineHostState = "loading";
+    EngineSynthHost.create(ctx)
+      .then((host) => {
+        this.engineHost = host;
+        this.engineHostState = "ready";
+        if (this.pool) this.pool.engineHost = host;
+        this.applyEngineVoicing();
+      })
+      .catch((e) => {
+        console.warn("engine synthesizer unavailable, using layers:", e);
+        this.engineHostState = "failed";
+        this.applyEngineVoicing();
+      });
+  }
+
+  /** Modelled engines (default) or layers for every car. */
+  setEngineVoicing(v: EngineVoicing): void {
+    this.panel.settings.engine = v;
+    this.applyEngineVoicing();
+  }
+
+  /** Current engine voicing actually in use. */
+  engineVoicing(): EngineVoicing {
+    return this.engineHost && this.panel.settings.engine === "modelled" ? "modelled" : "layers";
+  }
+
+  private applyEngineVoicing(): void {
+    this.safe(() => audioBridge.setEngineModel(this.engineVoicing() === "modelled" ? "Physical" : "Layers"));
+  }
+
+  /** Engine synthesizer state (e2e / panel). */
+  engineSynth(): { state: string; playing: number; acquired: number; refused: number } {
+    const h = this.engineHost;
+    return { state: this.engineHostState, playing: h?.playing ?? 0, acquired: h?.stats.acquired ?? 0, refused: h?.stats.refused ?? 0 };
   }
 
   /** Recorded samples (default) or the procedural fallback packs; loops restart with the new source. */
@@ -145,6 +205,23 @@ export class AudioSystem {
   private resetDirector(): void {
     this.safe(() => this.apply(audioBridge.reset()));
   }
+
+  /** Impacts & horns: modelled synthesis on the recordings ("synth", default) or recordings only. */
+  setImpacts(mode: "synth" | "recorded"): void {
+    this.panel.settings.impacts = mode;
+    if (!this.pool) return;
+    this.pool.impacts.enabled = mode !== "recorded";
+    // Held loops (horn, scrapes) restart on their new path.
+    this.resetDirector();
+  }
+
+  /** Impact voices built recently (`wall` = performance.now()), for latency checks. */
+  impactLog(): unknown[] {
+    return this.pool?.impacts.log ?? [];
+  }
+
+  /** `performance.now()` of recent frames whose events held a `Contact` (latency checks). */
+  readonly contactFrames: number[] = [];
 
   /** Current sound source. */
   soundSource(): SoundSource {
@@ -237,8 +314,9 @@ export class AudioSystem {
 
   /** Per-frame update. `events` = this frame's drained SimEvents: decoded, or the JSON text the
    * sim produced (`sim.lastEventsJson()`, passed through without a re-stringify). */
-  update(camera: THREE.Camera, events: unknown[] | string, dt: number, focus: number): void {
+  update(camera: THREE.Camera, events: unknown[] | string, dt: number, focus: number, cameraMode?: string): void {
     this.focus = focus;
+    if (cameraMode !== undefined) this.cameraMode = cameraMode;
     const ctx = this.ctx;
     if (!ctx || ctx.state !== "running" || !this.pool || !this.mixer || !this.scanner) return;
     // Camera → sim world space (the scene's world group is rotated Z-up → Y-up).
@@ -265,6 +343,10 @@ export class AudioSystem {
     let out;
     try {
       const json = typeof events === "string" ? events : events.length ? JSON.stringify(events) : "";
+      if (json.includes('"Contact"')) {
+        this.contactFrames.push(t0);
+        if (this.contactFrames.length > 64) this.contactFrames.shift();
+      }
       out = audioBridge.frame(a, json, focus);
     } catch (e) {
       this.failed = true;
@@ -278,11 +360,13 @@ export class AudioSystem {
     this.apply(out.commands);
     const t2 = performance.now();
     this.applyMs += (t2 - t1 - this.applyMs) * 0.1;
+    this.engineHost?.setInterior(focus, INTERIOR_BY_CAMERA[this.cameraMode] ?? 0);
     this.pool.collect();
     this.frameMs += (performance.now() - t0 - this.frameMs) * 0.1;
     this.frames++;
     this.lastStats = out.stats;
-    this.panel.update(out.stats, this.pool.size, this.scanner.log, this.pool.sampleStatus());
+    const eng = this.engineHost ? `engines modelled ${this.engineHost.playing}` : `engine synth ${this.engineHostState}`;
+    this.panel.update(out.stats, this.pool.size, this.scanner.log, this.pool.sampleStatus(), eng);
   }
 
   private apply(cmds: AudioCommand[]): void {

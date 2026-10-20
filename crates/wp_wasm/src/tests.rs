@@ -309,6 +309,35 @@ fn vesper_free_drive_stays_on_the_ground_with_traffic() {
     assert!(s.sim().world().agent_count() > 10, "traffic spawned");
 }
 
+#[test]
+fn one_click_assist_presets_set_mode_and_assists_together() {
+    use wp_contracts::InputSource;
+    use wp_vehicle::AssistPreset;
+    let mut s = Session::new(free_drive("debug_sedan", DamageMode::Arcade, false), false).unwrap();
+    let p = EntityId(1);
+    for preset in AssistPreset::ALL {
+        // What the testbed's preset button does: damage mode + assists in one click.
+        s.set_mode(preset.damage_mode()).unwrap();
+        s.set_assists(p, preset.assists(InputSource::Keyboard))
+            .unwrap();
+        s.step(1.0 / 60.0);
+        assert_eq!(s.mode(), preset.damage_mode());
+        let a = s.assists(p).unwrap();
+        assert_eq!(
+            AssistPreset::matching(&a, s.mode(), InputSource::Keyboard),
+            Some(preset)
+        );
+    }
+    // Ticking one box afterwards makes it a custom setup.
+    let mut a = s.assists(p).unwrap();
+    a.abs = true;
+    s.set_assists(p, a).unwrap();
+    assert_eq!(
+        AssistPreset::matching(&s.assists(p).unwrap(), s.mode(), InputSource::Keyboard),
+        None
+    );
+}
+
 /// Reset in place (playtest row 65): after the barrier crash the car is put back upright near
 /// the crash, clear of the barrier, at rest and repaired; without repair (career) the damage
 /// stays. The `ResetAt` op replays bit-exactly in simcli and in the browser core.
