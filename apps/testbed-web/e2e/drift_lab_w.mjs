@@ -51,7 +51,7 @@ check(plain && Math.abs(plain.t_full_s - 0.28) < 1e-6 && Math.abs(plain.t_return
 const ride = await page.evaluate(() => window.__wp.sim.rideTune());
 check(ride && Math.abs(ride.arb - 0.25) < 1e-6, `ride lab default ${JSON.stringify(ride)}`);
 const a = await page.evaluate(() => window.__wp.sim.assists(window.__wp.app?.player ?? window.__wp.sim.entities()[0]));
-check(!a.tcs && !a.esc && !a.auto_gears, `assists TCS ${a.tcs} ESC ${a.esc} auto gears ${a.auto_gears}`);
+check((a.tcs === "Off" || a.tcs === false) && !a.esc && !a.auto_gears && a.auto_clutch === true, `assists TCS ${a.tcs} ESC ${a.esc} auto gears ${a.auto_gears} auto clutch ${a.auto_clutch}`);
 check(await page.locator("#drift-w-tune").isVisible(), "tune button shown");
 const sliders = await page.locator("#drift-lab-w input[type=range]").count();
 check(sliders >= 18, `${sliders} sliders (steering + suspension + car / tyre)`);
@@ -143,11 +143,11 @@ check((await page.evaluate(() => window.__wp.sim.plainSteer().velocity_relative)
 await page.locator("#drift-lab-w-vr").uncheck();
 check((await page.evaluate(() => window.__wp.sim.plainSteer().velocity_relative)) === false, "VR checkbox → off");
 const player = () => page.evaluate(() => window.__wp.app.player);
-check(!(await page.locator("#drift-lab-w-tcs").isChecked()) && !(await page.evaluate((id) => window.__wp.sim.assists(id).tcs, await player())), "TCS off by default");
+check(!(await page.locator("#drift-lab-w-tcs").isChecked()) && ["Off", false].includes(await page.evaluate((id) => window.__wp.sim.assists(id).tcs, await player())), "TCS off by default");
 await page.locator("#drift-lab-w-tcs").check();
-check(await page.evaluate((id) => window.__wp.sim.assists(id).tcs, await player()), "TCS checkbox → assists.tcs on");
+check(["Full", true].includes(await page.evaluate((id) => window.__wp.sim.assists(id).tcs, await player())), "TCS checkbox → assists.tcs on");
 await page.locator("#drift-lab-w-tcs").uncheck();
-check(!(await page.evaluate((id) => window.__wp.sim.assists(id).tcs, await player())), "TCS checkbox → off");
+check(["Off", false].includes(await page.evaluate((id) => window.__wp.sim.assists(id).tcs, await player())), "TCS checkbox → off");
 // Owner bug: floored from rest, TCS off, no steering, on the lab map → straight (< 3° of yaw),
 // as the reference (clip 5). Restart the lab with the default car, then hold the throttle.
 await page.selectOption("#drift-lab-w select", "parity_rwd_a");
@@ -172,6 +172,55 @@ const launch = async () => {
   return { maxYaw, kmh: last[7], gear: last[6] };
 };
 const l = await launch();
+// Owner bug (2026-10-20): "rpm stuck / flat" in 3rd with the clutch set to manual — the lab
+// forced the automatic clutch. The testbed's clutch select must win (also after the lab
+// restarts), show in the readout, and a 3rd-gear pull must rev with road speed.
+{
+  await page.evaluate(() => {
+    const sel = document.getElementById("clutch-mode");
+    sel.value = "manual";
+    sel.dispatchEvent(new Event("change"));
+  });
+  check((await page.evaluate((id) => window.__wp.sim.assists(id).auto_clutch, await player())) === false, "clutch select manual → assists.auto_clutch off");
+  // The owner's flow: the choice is saved, then the lab starts (it used to force auto here).
+  await page.reload();
+  await page.waitForFunction(() => window.__wp?.ready === true, null, { timeout: 90000 });
+  const pid = await player();
+  check((await page.evaluate((id) => window.__wp.sim.assists(id).auto_clutch, pid)) === false, "lab start keeps the manual clutch");
+  const pullRead = () => page.evaluate((id) => Array.from(window.__wp.sim.plainReadout(id)), pid);
+  await page.waitForTimeout(300);
+  check((await pullRead())[10] === 0, "readout: clutch manual");
+  check(/clutch manual/.test(await page.locator("#drift-lab-w").innerText()), "readout text shows clutch manual");
+  // Get rolling in 3rd on the automatic clutch (from rest the manual clutch with the pedal up
+  // stalls, as it should), then the manual clutch for 3 s of full throttle in 3rd.
+  const setClutch = (v) =>
+    page.evaluate((v) => {
+      const sel = document.getElementById("clutch-mode");
+      sel.value = v;
+      sel.dispatchEvent(new Event("change"));
+    }, v);
+  await setClutch("auto");
+  await page.keyboard.down("KeyW");
+  for (let i = 0; i < 60 && (await pullRead())[6] < 3; i++) {
+    await page.waitForTimeout(400);
+    const r = await pullRead();
+    if (r[6] >= 1 && r[13] > 4500) await page.keyboard.press("ShiftLeft");
+  }
+  await page.keyboard.up("KeyW");
+  await setClutch("manual");
+  await page.keyboard.down("KeyW");
+  await page.waitForTimeout(500);
+  const s0 = await pullRead();
+  await page.waitForTimeout(3000);
+  const s1 = await pullRead();
+  await page.keyboard.up("KeyW");
+  check(s0[10] === 0 && s0[6] === 3 && s1[6] === 3 && s1[13] > s0[13] + 400 && s1[7] > s0[7] + 8, `3rd-gear pull, manual clutch: ${s0[13].toFixed(0)} → ${s1[13].toFixed(0)} rpm, ${s0[7].toFixed(0)} → ${s1[7].toFixed(0)} km/h, wheels ${s0[14].toFixed(0)} → ${s1[14].toFixed(0)} rpm (gear ${s0[6]} → ${s1[6]})`);
+  await page.evaluate(() => {
+    const sel = document.getElementById("clutch-mode");
+    sel.value = "auto";
+    sel.dispatchEvent(new Event("change"));
+  });
+}
 check(l.maxYaw < 3 && l.kmh > 20, `launch, floored from rest (spin model): yaw ${l.maxYaw.toFixed(2)}° at ${l.kmh.toFixed(0)} km/h, gear ${l.gear}`);
 // For the record (not a check): the same launch on the tyre data — the owner's bug.
 await page.locator("#drift-lab-w button", { hasText: "tyre data" }).click();

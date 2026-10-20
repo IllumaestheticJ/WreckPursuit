@@ -1,19 +1,20 @@
 //! Slide-control assists for keyboard / gamepad drivers (owner playtest, 2026-10-19: "give the
 //! higher-power RWD cars a little more steering assist / gyro so we can control the slides").
 //!
-//! Two pieces, both scaled by [`AssistProfile::countersteer_help`] and doing nothing at all
-//! when it is 0 (wheel / AI / sim purist stay bit-identical to the plain model):
-//! - self-aligning countersteer (released keys point the front wheels along the front axle's
-//!   travel): see [`crate::steering::steer_target`]. It replaced the yaw "gyro" (owner rows
-//!   57 / 72, 2026-10-20): no assist adds yaw torque any more, so handbrake turns rotate.
-//! - [`slide_throttle`]: with TCS off, a keyboard 0/1 throttle ramps in more gently while the
-//!   rear is already loose, and is feathered a little unless the driver steers into the turn
-//!   (a key cannot feather by itself).
+//! What is left here is the car classification and slide geometry the steering assists use:
+//! self-aligning countersteer (released keys point the front wheels along the front axle's
+//! travel, see [`crate::steering::steer_target`]), scaled by
+//! [`wp_contracts::AssistProfile::countersteer_help`]. It replaced the yaw "gyro" (owner rows
+//! 57 / 72): no assist adds yaw torque, so handbrake turns rotate.
+//!
+//! The slide-throttle feathering that used to live here (a keyboard throttle ramped in gently
+//! and cut by up to 35 % while the rear was loose, TCS off only) was removed for owner row 104:
+//! TCS Off means the driver gets the throttle they press.
 //!
 //! How strongly a car gets helped comes from [`slide_class`]: rear-drive share × power to
 //! weight, so a 200+ W/kg RWD coupe gets the full effect and a FWD hatch a light touch.
 
-use wp_contracts::{AssistProfile, DriveLayout, VehicleDef};
+use wp_contracts::{DriveLayout, VehicleDef};
 
 /// Power-to-weight (W/kg) where the car-class scaling starts to rise.
 pub const CLASS_PW_LOW: f32 = 120.0;
@@ -91,53 +92,6 @@ pub fn slide_amount(rear_axle_slip: f32) -> f32 {
     ((rear_axle_slip.abs() - SLIDE_START) / (SLIDE_FULL - SLIDE_START)).clamp(0.0, 1.0)
 }
 
-/// Driver intent while sliding, from steer input (+ = right) and rear-axle slip (+ = rear
-/// moving left): `(hold, counter)`, each 0..=1. `hold` = steering into the turn (asking for
-/// slide angle), `counter` = steering against it.
-pub fn slide_intent(driver_steer: f32, rear_axle_slip: f32) -> (f32, f32) {
-    let side = driver_steer.clamp(-1.0, 1.0) * rear_axle_slip.signum();
-    (side.clamp(0.0, 1.0), (-side).clamp(0.0, 1.0))
-}
-
-/// Slide-throttle assist output for one tick.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct SlideThrottle {
-    /// Pedal filter strength to use (see [`crate::assists::filter_pedal`]).
-    pub filter: f32,
-    /// Multiplier on the throttle target, 0.65..=1.
-    pub scale: f32,
-}
-
-/// Largest throttle-target cut of the feathering, at full filter/class/slide.
-const FEATHER_MAX: f32 = 0.35;
-
-/// Slide throttle (keyboard help, TCS off): while the rear slides, the pedal filter is up to
-/// `1 + 1.5 × class` times stronger, and the target is feathered by up to [`FEATHER_MAX`] ×
-/// `throttle_filter` × class unless the driver steers into the turn. Only with TCS off,
-/// countersteer help on and a throttle filter (with TCS on, the TCS does this job; an
-/// unfiltered pedal is never touched), so the wheel/AI/sim presets are unaffected.
-pub fn slide_throttle(
-    assists: &AssistProfile,
-    class: f32,
-    rear_axle_slip: f32,
-    driver_steer: f32,
-) -> SlideThrottle {
-    let base = assists.throttle_filter;
-    if assists.tcs || assists.countersteer_help <= 0.0 || base <= 0.0 {
-        return SlideThrottle {
-            filter: base,
-            scale: 1.0,
-        };
-    }
-    let help = (2.0 * assists.countersteer_help).min(1.0);
-    let slide = slide_amount(rear_axle_slip);
-    let (hold, _) = slide_intent(driver_steer, rear_axle_slip);
-    SlideThrottle {
-        filter: base * (1.0 + 1.5 * class * help * slide),
-        scale: 1.0 - FEATHER_MAX * base.min(1.0) * class * help * slide * (1.0 - hold),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -157,24 +111,5 @@ mod tests {
         assert!(mid > fwd && mid < rwd, "{mid}");
         assert_eq!(fwd, CLASS_FLOOR);
         assert_eq!(slow_rwd, CLASS_FLOOR);
-    }
-
-    #[test]
-    fn slide_throttle_only_without_tcs() {
-        let kb = AssistProfile::keyboard_default();
-        let plain = SlideThrottle {
-            filter: kb.throttle_filter,
-            scale: 1.0,
-        };
-        assert_eq!(slide_throttle(&kb, 1.0, -0.3, 0.0), plain);
-        let off = AssistProfile { tcs: false, ..kb };
-        let st = slide_throttle(&off, 1.0, -0.3, 0.0);
-        assert!(st.filter > kb.throttle_filter && st.scale < 0.8, "{st:?}");
-        // Steering into the turn (left, rear sliding right): no feathering.
-        assert_eq!(slide_throttle(&off, 1.0, -0.3, -1.0).scale, 1.0);
-        assert_eq!(slide_throttle(&off, 1.0, 0.0, 0.0), plain);
-        let wheel = AssistProfile::wheel_default();
-        let w = slide_throttle(&wheel, 1.0, -0.3, 0.0);
-        assert_eq!((w.filter, w.scale), (0.0, 1.0));
     }
 }

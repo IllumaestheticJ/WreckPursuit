@@ -389,7 +389,7 @@ fn main() {
     let what = if args.first().is_some_and(|a| {
         [
             "all", "circle", "ug", "tap", "lift", "power", "regress", "sweep", "trace", "dtrace",
-            "robust", "ltrace", "chatter",
+            "robust", "ltrace", "chatter", "pull",
         ]
         .contains(&a.as_str())
     }) {
@@ -405,6 +405,14 @@ fn main() {
     }
     if what == "sweep" {
         sweep(&args);
+        return;
+    }
+    if what == "pull" {
+        for (name, g) in configs() {
+            set_grip(g);
+            println!("\n# {name}");
+            pull(&args);
+        }
         return;
     }
     if what == "chatter" {
@@ -859,5 +867,79 @@ fn chatter(ids: &[String]) {
         let straight = run(&mut rig, 0.0, TPS, 0);
         let held = run(&mut rig, -1.0, 4 * TPS, 2 * TPS);
         println!("| {id} | {straight} | {held} |");
+    }
+}
+
+/// Owner bug "rpm stuck / flat in 3rd": full throttle in 3rd from 40 km/h, steer 0, TCS off, with
+/// the automatic clutch and with the manual clutch (pedal released). Every 0.5 s: km/h, engine
+/// rpm, driven-wheel slip ratio, clutch engagement / locked.
+fn pull(ids: &[String]) {
+    for id in ids {
+        let c = car(id);
+        for auto_clutch in [true, false] {
+            let a = wp_contracts::AssistProfile {
+                auto_clutch,
+                ..reference_assists()
+            };
+            let mut rig = rolling(&c, 40.0 / 3.6);
+            // Into 3rd (manual gears).
+            for _ in 0..240 {
+                let g = rig.vehicle.gear();
+                let (throttle, brake) = hold_speed(&rig, 40.0 / 3.6);
+                rig.step(
+                    &VehicleInput {
+                        throttle,
+                        brake,
+                        gear_up: g < 3,
+                        gear_down: g > 3,
+                        ..Default::default()
+                    },
+                    &a,
+                );
+            }
+            let driven: Vec<usize> = match c.def.drivetrain.layout {
+                wp_contracts::DriveLayout::Fwd => vec![0, 1],
+                wp_contracts::DriveLayout::Rwd => vec![2, 3],
+                _ => vec![0, 1, 2, 3],
+            };
+            let mut line = Vec::new();
+            for tick in 0..5 * TPS {
+                rig.step(
+                    &VehicleInput {
+                        throttle: 1.0,
+                        ..Default::default()
+                    },
+                    &a,
+                );
+                if tick % (TPS / 2) == TPS / 2 - 1 {
+                    let st = rig.state();
+                    let t = rig.vehicle.telemetry();
+                    let v = st.speed_mps.max(0.5);
+                    let slip = driven
+                        .iter()
+                        .map(|&i| st.wheel_states[i].omega * c.def.wheels[i].radius_m / v - 1.0)
+                        .sum::<f32>()
+                        / driven.len() as f32;
+                    line.push(format!(
+                        "{:.0} km/h {:.0} rpm g{} κ{:.2} c{:.2}{}",
+                        st.speed_mps * 3.6,
+                        st.engine_rpm,
+                        rig.vehicle.gear(),
+                        slip,
+                        t.clutch,
+                        if t.clutch_locked { "L" } else { "" }
+                    ));
+                }
+            }
+            println!(
+                "{id} {}: {}",
+                if auto_clutch {
+                    "auto clutch"
+                } else {
+                    "manual clutch"
+                },
+                line.join(" | ")
+            );
+        }
     }
 }

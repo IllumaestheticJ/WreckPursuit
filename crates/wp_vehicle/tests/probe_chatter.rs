@@ -1,19 +1,17 @@
 //! Tyre load must not chatter tick to tick in a steady corner (docs/integration/grip-balance.md):
 //! the wheel probe cylinder rolls with the body, and on smooth ground its tilt alone used to
 //! hand the contact to the cylinder sweep, whose rim witness point jittered (0.6–1 kN RMS
-//! tick-to-tick load changes at 0.9 g, none when straight). The fix
-//! (`wp_vehicle::ground::discount_tilt`) is behind the grip-balance lab's `probe_tilt_fix` until
-//! the vehicle owner makes it the default; this binary only ever sets that one switch.
+//! tick-to-tick load changes at 0.9 g, none when straight; fixed by
+//! `wp_vehicle::ground::discount_tilt`).
 
 use std::path::PathBuf;
 
 use wp_contracts::{AssistProfile, LoadedCar, VehicleInput};
-use wp_vehicle::grip_lab::{self, GripBalance};
 use wp_vehicle::rig::Rig;
 
 fn car(id: &str) -> LoadedCar {
     let data = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data");
-    wp_vehicle::drift_lab_w::load_any_car(&data, id).unwrap()
+    wp_contracts::load_car(data.join("cars").join(format!("{id}.json"))).unwrap()
 }
 
 /// RMS of the per-tick change of each wheel's load (N) and the mean body roll proxy
@@ -57,19 +55,7 @@ fn chatter(id: &str, steer: f32) -> ([f32; 4], f32) {
 
 #[test]
 fn tyre_load_is_smooth_in_a_steady_corner() {
-    // Without the fix the bug is there (documents it; the probe as shipped).
-    grip_lab::set_override(None);
-    let (corner, _) = chatter("rampart_50", -0.6);
-    assert!(
-        corner.iter().any(|c| *c > 300.0),
-        "chatter without the fix: {corner:?}"
-    );
-    // With the fix.
-    grip_lab::set_override(Some(GripBalance {
-        probe_tilt_fix: true,
-        ..GripBalance::default()
-    }));
-    for id in ["rampart_50", "parity_rwd_d", "parity_fwd_c"] {
+    for id in ["rampart_50", "shiro_turbo", "kestrel_ts"] {
         let (straight, _) = chatter(id, 0.0);
         let (corner, transfer) = chatter(id, -0.6);
         // The corner really loads the outside wheels (so the body rolls).

@@ -81,9 +81,24 @@ export interface VehicleInfo {
   spawn_pos: [number, number, number];
 }
 
+/** TCS / ABS level (contract `TcsLevel` / `AbsLevel`). The sim also accepts a legacy bool
+ * (true = Full, false = Off) but always returns a level. */
+export type AssistLevel = "Off" | "Half" | "Full";
+
+/** A level from anything stored or typed (legacy bool, any case); `d` otherwise. */
+export function assistLevel(v: unknown, d: AssistLevel = "Off"): AssistLevel {
+  if (v === true) return "Full";
+  if (v === false) return "Off";
+  if (typeof v === "string") {
+    const l = v.trim().toLowerCase();
+    if (l === "off" || l === "half" || l === "full") return (l[0].toUpperCase() + l.slice(1)) as AssistLevel;
+  }
+  return d;
+}
+
 export interface AssistProfile {
-  abs: boolean;
-  tcs: boolean;
+  abs: AssistLevel;
+  tcs: AssistLevel;
   esc: boolean;
   steer_speed_sensitivity: number;
   countersteer_help: number;
@@ -253,7 +268,8 @@ export const sim = {
   plainSteerDefaults: (): Record<string, number> => JSON.parse(wasm.plain_steer_defaults_json()),
   /** Turn plain steering on with these constants ("" = off). */
   plainSteerSet: (json: string): void => wasm.plain_steer_set(json),
-  /** [steer_key, rack, lock_frac, slide_deg, throttle_key, engine_throttle, gear, speed_kmh, wheel_deg, heading_deg]. */
+  /** [steer_key, rack, lock_frac, slide_deg, throttle_key, engine_throttle, gear, speed_kmh, wheel_deg, heading_deg,
+   * auto_clutch (1/0), clutch engagement 0..1, clutch_locked (1/0), engine_rpm, driven_wheel_rpm, clutch_pedal]. */
   plainReadout: (entity: number): Float32Array => wasm.plain_readout(entity),
   /** Drift Lab W ride tuning in effect (null = car data) / {data, lab} defaults (wp_vehicle::ride_lab::RideTune). */
   rideTune: (): Record<string, number> | null => JSON.parse(wasm.ride_tune_json()),

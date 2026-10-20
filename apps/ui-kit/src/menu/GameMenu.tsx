@@ -17,7 +17,7 @@
 import type { ComponentChildren } from "preact";
 import { Fragment, render } from "preact";
 import { keyAction, PadNav, stepIndex, type NavAction } from "./nav";
-import { DRAW_DISTANCES, defaultGameSettings, saveGameSettings, type GameSettings, type SettingsStorage, type Volumes } from "./settings";
+import { ASSIST_LEVELS, DRAW_DISTANCES, defaultGameSettings, saveGameSettings, type AssistLevel, type GameSettings, type SettingsStorage, type Volumes } from "./settings";
 import { CONTROL_DEVICES, CONTROL_RANGES, defaultDeviceControls, type ControlDevice, type DeviceControls, type InputProbe } from "./controls";
 import { paintInputBars } from "./bars";
 import "../ui/theme.css";
@@ -538,6 +538,19 @@ function Row(props: { label: string; hint?: string; children: ComponentChildren 
   );
 }
 
+/** Off / Half / Full choices for the TCS and ABS rows (reference game levels). */
+const LEVEL_OPTIONS = ASSIST_LEVELS.map((l) => ({ id: l, label: l }));
+const TCS_HINT: Record<AssistLevel, string> = {
+  Off: "The throttle you press: wheelspin is yours",
+  Half: "Lets the wheels spin a little (slides, smoke)",
+  Full: "Barely any wheelspin",
+};
+const ABS_HINT: Record<AssistLevel, string> = {
+  Off: "Wheels lock under hard braking",
+  Half: "Short lock-ups, still steers",
+  Full: "No lock-ups, shortest stops",
+};
+
 /** A value picked from a list: click / Enter / Right = next, Left = previous. */
 function Cycle<T extends string | number>(props: { id: string; label: string; value: T; options: { id: T; label: string }[]; onChange: (v: T) => void }) {
   const i = Math.max(
@@ -627,7 +640,7 @@ function SettingsScreen(props: {
   setTestInput: (on: boolean) => void;
 }) {
   const { s, change } = props;
-  const assist = (k: keyof GameSettings["assists"], v: boolean | number) => change({ ...s, assists: { ...s.assists, [k]: v } });
+  const assist = (k: keyof GameSettings["assists"], v: boolean | number | AssistLevel) => change({ ...s, assists: { ...s.assists, [k]: v } });
   const cams = [{ id: "", label: "Default" }, ...props.cameras];
   return (
     <div class="wp-gm-card wp-gm-settings" role="dialog" aria-label="Settings">
@@ -669,11 +682,11 @@ function SettingsScreen(props: {
           <Toggle id="gm-radio-voice" label="Police radio voice" value={s.radioVoice} onChange={(radioVoice) => change({ ...s, radioVoice })} />
         </Row>
         <h3>Assists</h3>
-        <Row label="ABS" hint="Anti-lock brakes">
-          <Toggle id="gm-abs" label="ABS" value={s.assists.abs} onChange={(v) => assist("abs", v)} />
+        <Row label="ABS" hint={ABS_HINT[s.assists.abs]}>
+          <Cycle id="gm-abs" label="ABS" value={s.assists.abs} options={LEVEL_OPTIONS} onChange={(v) => assist("abs", v)} />
         </Row>
-        <Row label="Traction control">
-          <Toggle id="gm-tcs" label="Traction control" value={s.assists.tcs} onChange={(v) => assist("tcs", v)} />
+        <Row label="Traction control" hint={TCS_HINT[s.assists.tcs]}>
+          <Cycle id="gm-tcs" label="Traction control" value={s.assists.tcs} options={LEVEL_OPTIONS} onChange={(v) => assist("tcs", v)} />
         </Row>
         <Row label="Stability control">
           <Toggle id="gm-esc" label="Stability control" value={s.assists.esc} onChange={(v) => assist("esc", v)} />

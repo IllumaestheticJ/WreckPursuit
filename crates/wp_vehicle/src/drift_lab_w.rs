@@ -19,7 +19,7 @@ use wp_contracts::{AssistProfile, LoadedCar};
 /// manual gears (automatic clutch), no pedal filters, no countersteer help.
 pub fn reference_assists() -> AssistProfile {
     AssistProfile {
-        tcs: false,
+        tcs: wp_contracts::TcsLevel::Off,
         esc: false,
         countersteer_help: 0.0,
         throttle_filter: 0.0,

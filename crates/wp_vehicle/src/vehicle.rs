@@ -12,8 +12,8 @@ use wp_contracts::{
 
 use crate::aero::aero_forces;
 use crate::assists::{
-    btc_rear_authority, esc_reference, filter_pedal, BtcAxle, Esc, Tcs, BTC_MAX_FRAC,
-    TCS_BRAKE_ACTIVE_NM, TCS_BRAKE_HANDOFF,
+    btc_rear_authority, esc_reference, filter_pedal, throttle_filter_strength, BtcAxle, Esc, Tcs,
+    BTC_MAX_FRAC, TCS_BRAKE_ACTIVE_NM, TCS_BRAKE_HANDOFF,
 };
 use crate::brakes::{service_torques, Abs};
 use crate::diff::{axle_transfer, centre_transfer, AxleDiff, CentreDiff, DiffInput, DiffSetup};
@@ -23,7 +23,7 @@ use crate::ffb::{self, FfbWheel};
 use crate::ground::{WheelCaster, WheelProbe};
 use crate::launch::LaunchGuard;
 use crate::math::{arr, sin_cos, v3, yaw_quat, Quat, V3};
-use crate::slide::{slide_class_with_rear_lock, slide_throttle};
+use crate::slide::slide_class_with_rear_lock;
 use crate::steering::{
     ackermann, body_slip, front_axle_angle, rear_axle_slip, steer_target, torque_steer,
     update_center_angle, SteerInput, HANDBRAKE_GRACE_S,
@@ -34,7 +34,8 @@ use crate::suspension::{
 };
 use crate::tire::{
     combined_forces_spin, combined_forces_weighted, load_sensitive_mu, low_speed_lateral,
-    pneumatic_trail, relax, slip_angle, slip_ratio, surface_grip, SLIP_RATIO_V_MIN,
+    pneumatic_trail, relax, slip_angle, slip_ratio, spin_side_floor, surface_grip,
+    SLIP_RATIO_V_MIN, SPIN_SIDE_FLOOR,
 };
 use crate::TireDb;
 
@@ -52,8 +53,8 @@ pub const HANDBRAKE_ON: f32 = 0.1;
 pub const HB_KEEP_GEAR_MPS: f32 = 1.0;
 /// The automatic clutch opens during a shift, off the throttle, when the driven wheels turn
 /// the clutch slower than this fraction of idle (the same threshold as
-/// `drivetrain::auto_clutch_update`'s "rolling").
-const AUTO_CLUTCH_OPEN_FRAC: f32 = 1.2;
+/// `drivetrain::auto_clutch_update`'s anti-stall line).
+const AUTO_CLUTCH_OPEN_FRAC: f32 = crate::drivetrain::AUTO_CLUTCH_HOLD_IDLE_FRAC;
 /// Manual clutch: the engine stalls below this fraction of its idle speed (row 59).
 pub const STALL_FRAC: f32 = 0.5;
 /// Manual clutch: pressing the pedal at least this far re-cranks a stalled engine.
@@ -845,7 +846,7 @@ impl Vehicle {
         p
     }
 
-    /// Vertical tyre loads (FL, FR, RL, RR), N, from the last step (lab traces).
+    /// Vertical tyre loads (FL, FR, RL, RR), N, from the last step (tests and traces).
     pub fn wheel_loads(&self) -> [f32; 4] {
         std::array::from_fn(|i| self.wheels[i].fz)
     }
@@ -1061,14 +1062,9 @@ impl Vehicle {
         if plain.is_some() {
             self.throttle_f = thr_in;
         } else {
-            let st = slide_throttle(assists, self.slide_class, rear_axle, steer_cmd);
-            // `scale` is exactly 1.0 unless the slide throttle is active (bit-identical
-            // otherwise).
-            let thr_target = if st.scale < 1.0 {
-                thr_in * st.scale
-            } else {
-                thr_in
-            };
+            // Round 12: slide-throttle feathering removed; TCS Off = no pedal filter (row 104).
+            let thr_filter = throttle_filter_strength(assists);
+            let thr_target = thr_in;
             // Drift assist throttle shaping (exactly 1.0 when inactive: bit-identical otherwise).
             let thr_target = if dc.throttle_scale < 1.0 {
                 thr_target * dc.throttle_scale
@@ -1076,7 +1072,7 @@ impl Vehicle {
                 thr_target
             };
             let prev_thr = self.throttle_f;
-            self.throttle_f = filter_pedal(self.throttle_f, thr_target, st.filter, dt);
+            self.throttle_f = filter_pedal(self.throttle_f, thr_target, thr_filter, dt);
             if dc.lift_time_s > 0.0 && self.throttle_f < prev_thr {
                 // Abrupt lift in a slide: softened (a full lift takes `lift_time_s`), not
                 // cancelled.
@@ -1150,14 +1146,17 @@ impl Vehicle {
             // Just after a handbrake declutch the driven wheels may still be stopped (locked
             // rears): re-engage only once they have spun back up, so the engine is not dragged
             // below idle.
-            (ratio_now * axle_omega).abs() * RPM_PER_RADPS
+            (ratio_now * axle_omega).max(0.0) * RPM_PER_RADPS
         } else {
             // The slower of ground speed and the driven wheels: wheelspin does not count, and
             // driven wheels slowed under the car (scrubbed in a big slide, braked) open the
             // clutch before they drag the engine below idle.
-            let ground = (ratio_now * v_fwd / self.corners[driven_corner].radius).abs();
-            ground.min((ratio_now * axle_omega).abs()) * RPM_PER_RADPS
+            let ground = ratio_now * v_fwd / self.corners[driven_corner].radius;
+            ground.min(ratio_now * axle_omega).max(0.0) * RPM_PER_RADPS
         };
+        // (Signed: wheels turning against the selected gear, e.g. a car rolling backwards in a
+        // forward gear after a spin, are not "rolling" — the clutch must not drag the engine
+        // backwards. Reverse has a negative ratio, so reversing counts as rolling.)
         self.clutch = if self.converter.is_some() {
             // Torque-converter automatic: the converter replaces the launch clutch; the clutch
             // value is the lock-up clutch's availability. Shifts happen under power (the
@@ -1192,6 +1191,7 @@ impl Vehicle {
                 self.def.engine.redline_rpm,
                 thr_in,
                 self.launch_torque_ratio,
+                self.gearbox.gear,
                 dt,
             )
         } else {
@@ -1249,7 +1249,7 @@ impl Vehicle {
                     let fast = if a >= b { l } else { r };
                     let held = self.tcs.brake[fast];
                     // 0 = brakes holding the spin … 1 = brakes saturated / not acting.
-                    let w = if assists.tcs && held > TCS_BRAKE_ACTIVE_NM {
+                    let w = if assists.tcs.is_on() && held > TCS_BRAKE_ACTIVE_NM {
                         let use_frac = held / (BTC_MAX_FRAC * max_brake).max(1.0);
                         ((use_frac - TCS_BRAKE_HANDOFF) / (1.0 - TCS_BRAKE_HANDOFF)).clamp(0.0, 1.0)
                     } else {
@@ -1529,11 +1529,12 @@ impl Vehicle {
         for (b, s) in brake.iter_mut().zip(eff.brake_scale) {
             *b *= s.max(0.0);
         }
-        if assists.abs {
+        {
             let kappas = std::array::from_fn(|i| self.wheels[i].kappa);
             let vxs = std::array::from_fn(|i| self.wheels[i].vx);
             let peaks = std::array::from_fn(|i| self.corners[i].tire.peak_slip_ratio);
-            self.abs.apply(&mut brake, kappas, vxs, peaks, dt);
+            self.abs
+                .apply(assists.abs, &mut brake, kappas, vxs, peaks, dt);
         }
         brake[2] += handbrake * self.def.brakes.handbrake_rear_nm;
         brake[3] += handbrake * self.def.brakes.handbrake_rear_nm;
@@ -1589,9 +1590,13 @@ impl Vehicle {
             }
         }
         let tc_driving = self.throttle_f > 0.05 && self.brake_f < 0.05 && handbrake < 0.1;
-        let tc_brake =
-            self.tcs
-                .update_brakes(assists.tcs, tc_driving, &tc_axles[..n_tc], v_fwd, dt);
+        let tc_brake = self.tcs.update_brakes(
+            assists.tcs.is_on(),
+            tc_driving,
+            &tc_axles[..n_tc],
+            v_fwd,
+            dt,
+        );
         for (i, b) in brake.iter_mut().enumerate() {
             *b += esc_out.brake[i] + tc_brake[i];
             self.wheels[i].brake = *b;
@@ -2040,6 +2045,14 @@ impl Vehicle {
             w.omega = om;
             w.kappa = slip_ratio(om, r, vx);
             let (fx, fy) = forces(w.kappa, alpha, fz, grip);
+            // Round 12: side-force floor under heavy drive wheelspin (straight launches on
+            // cambered roads). The lab's spin model has its own combined slip, so it is skipped
+            // there.
+            let fy = if spin.is_none() {
+                spin_side_floor(tire, w.kappa, alpha, fz, grip, fy, &SPIN_SIDE_FLOOR)
+            } else {
+                fy
+            };
             let fy = fy * side_scale;
             let mu_y = load_sensitive_mu(
                 tire.lateral.d,

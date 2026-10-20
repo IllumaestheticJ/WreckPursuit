@@ -107,7 +107,7 @@ await page.waitForTimeout(2500);
 const v = await speed();
 const st = await page.evaluate(() => ({ source: window.__wp.app.source, a: window.__wp.sim.assists(window.__wp.app.player) }));
 check(v > 1.5, `swipe on the throttle accelerates (${v.toFixed(2)} m/s)`);
-check(st.source === "Touch" && st.a.auto_gears && st.a.tcs && st.a.countersteer_help >= 0.5 && st.a.steer_speed_sensitivity >= 0.9, `source → Touch with auto gears + TCS + steer help (${JSON.stringify({ auto: st.a.auto_gears, tcs: st.a.tcs, cs: st.a.countersteer_help, ss: st.a.steer_speed_sensitivity })})`);
+check(st.source === "Touch" && st.a.auto_gears && st.a.tcs === "Full" && st.a.countersteer_help >= 0.5 && st.a.steer_speed_sensitivity >= 0.9, `source → Touch with auto gears + TCS + steer help (${JSON.stringify({ auto: st.a.auto_gears, tcs: st.a.tcs, cs: st.a.countersteer_help, ss: st.a.steer_speed_sensitivity })})`);
 
 // 3. Steering (second finger while the throttle is held): outer right = full, analogue drag.
 const steer = await rect("#wp-touch .steer");

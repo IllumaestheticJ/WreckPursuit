@@ -150,6 +150,15 @@ function releasePad(): void {
   if (!firstPad()) source = "Keyboard";
 }
 
+/** TCS Off = the throttle you press (owner row 104): no key ramp on the throttle. Set by main
+ * whenever the player's assists change. */
+let rawThrottle = false;
+
+/** Make the keyboard throttle raw (TCS Off) or ramped (TCS Half / Full). */
+export function setRawThrottle(on: boolean): void {
+  rawThrottle = on;
+}
+
 /** Toggle headlights. */
 export function toggleHeadlights(): void {
   headlights = !headlights;
@@ -183,9 +192,9 @@ function stepKeyRamps(k: KeyRamps, on: (id: ActionId) => boolean, dt: number): v
   // Drift Lab W), so replays, the AI and every client see the same steering path.
   k.steer = right - left;
   // Fast key ramp: the sim's keyboard assist preset filters the pedal again (~0.23 s).
-  // Drift Lab W: raw throttle key (0 / 1).
+  // Raw throttle key (0 / 1) in Drift Lab W, and with TCS Off (row 104).
   const thrKey = on("throttle") ? 1 : 0;
-  k.throttle = rawKeys ? thrKey : ramp(k.throttle, thrKey, 12.0, 12.0, dt);
+  k.throttle = rawKeys || rawThrottle ? thrKey : ramp(k.throttle, thrKey, 12.0, 12.0, dt);
   k.brake = ramp(k.brake, on("brake") ? 1 : 0, 6.0, 10.0, dt);
   // Clutch key: in fast (0.1 s), out over ~0.3 s so a key release can still launch the car.
   k.clutch = ramp(k.clutch, on("clutch") ? 1 : 0, 10.0, 3.5, dt);

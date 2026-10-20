@@ -284,7 +284,7 @@ pub fn burnout_script() -> Vec<Segment> {
 /// The metric assists with TCS off (wheelspin traces).
 pub fn burnout_assists() -> wp_contracts::AssistProfile {
     wp_contracts::AssistProfile {
-        tcs: false,
+        tcs: wp_contracts::TcsLevel::Off,
         ..metric_assists()
     }
 }

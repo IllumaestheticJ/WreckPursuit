@@ -123,14 +123,18 @@
         <div class="row" id="preset-row" title="one click: damage mode + assists together (GDD §6); any box below can still be changed">
           preset
           <button class="preset" data-p="Rookie" aria-pressed="false" title="Arcade damage, every assist on">Rookie</button>
-          <button class="preset" data-p="Street" aria-pressed="false" title="Arcade damage, ABS + TCS">Street</button>
-          <button class="preset" data-p="Sim" aria-pressed="false" title="Simulation damage, assists off, manual gears">Sim</button>
+          <button class="preset" data-p="Street" aria-pressed="false" title="Arcade damage, ABS Full + TCS Half">Street</button>
+          <button class="preset" data-p="Sim" aria-pressed="false" title="Simulation damage, ABS Half, TCS off, ESC off, manual gears">Sim</button>
           <span id="preset-state" class="dim"></span>
         </div>
         <div class="row" id="assist-row">
           assists
-          <label><input type="checkbox" data-a="abs" />ABS</label>
-          <label><input type="checkbox" data-a="tcs" />TCS</label>
+          <label title="anti-lock brakes. Off: wheels lock. Half: short lock-ups, still steers. Full: no lock-ups"
+            >ABS <select data-a="abs" class="assist-level"><option>Off</option><option>Half</option><option>Full</option></select></label
+          >
+          <label title="traction control. Off: the throttle you press (raw). Half: some wheelspin and smoke to slide with. Full: barely any wheelspin"
+            >TCS <select data-a="tcs" class="assist-level"><option>Off</option><option>Half</option><option>Full</option></select></label
+          >
           <label><input type="checkbox" data-a="esc" />ESC</label>
           <label><input type="checkbox" data-a="auto_gears" />auto gears</label>
           <label title="automatic: the car works the clutch (launch, stall prevention, shifts). manual: your clutch control is used directly; bind it in the controls panel (F9)">clutch <select id="clutch-mode"><option value="auto">automatic</option><option value="manual">manual</option></select></label>

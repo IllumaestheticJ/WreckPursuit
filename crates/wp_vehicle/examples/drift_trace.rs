@@ -49,7 +49,7 @@ fn main() {
         let counter = arg(5, "counter") == "counter";
         let asst = AssistProfile {
             countersteer_help: help,
-            tcs: false,
+            tcs: wp_contracts::TcsLevel::Off,
             esc: false,
             auto_gears: false,
             ..AssistProfile::keyboard_default()
@@ -75,7 +75,7 @@ fn main() {
         let help: f32 = arg(2, "0.6").parse().unwrap();
         let asst = AssistProfile {
             countersteer_help: help,
-            tcs: false,
+            tcs: wp_contracts::TcsLevel::Off,
             esc: false,
             ..AssistProfile::keyboard_default()
         };
@@ -102,7 +102,7 @@ fn main() {
         let seed: u64 = arg(4, "1").parse().unwrap();
         let asst = AssistProfile {
             countersteer_help: help,
-            tcs: false,
+            tcs: wp_contracts::TcsLevel::Off,
             esc: false,
             ..AssistProfile::keyboard_default()
         };
@@ -122,7 +122,7 @@ fn main() {
     let counter = a.get(5).is_some();
     let asst = AssistProfile {
         countersteer_help: help,
-        tcs: false,
+        tcs: wp_contracts::TcsLevel::Off,
         esc: false,
         ..AssistProfile::keyboard_default()
     };

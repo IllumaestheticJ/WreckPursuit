@@ -259,24 +259,42 @@ export class DriftLabWPanel {
     }
   }
 
+  /** The testbed's saved assist choices (the clutch / gears / TCS / ABS selectors the viewer
+   * set); set by main.ts. Only these explicit choices override the lab's reference settings. */
+  userAssists: () => Record<string, unknown> = () => ({});
+
+  /** Whether the lab's own TCS checkbox has been used (then it wins over the testbed's TCS). */
+  private tcsChosen(): boolean {
+    try {
+      return localStorage.getItem(TCS_STORE) !== null;
+    } catch {
+      return false;
+    }
+  }
+
   /** The lab's assists (call after any assist preset is applied): the owner's reference
-   * settings — TCS off (panel checkbox), ESC off, ABS on, manual gears (automatic clutch), no pedal filters, no
-   * countersteer help (it is bypassed by plain steering anyway). */
+   * settings — TCS off, ESC off, ABS on, manual gears with the automatic clutch, no pedal
+   * filters, no countersteer help (bypassed by plain steering anyway) — **except** where the
+   * viewer chose otherwise in the testbed's selectors (clutch auto / manual, gears, TCS / ABS
+   * levels; owner bug 2026-10-20: "manual clutch" was overridden back to automatic). The lab's
+   * TCS checkbox, once used, decides TCS. */
   applyAssists(): void {
     if (!this.active) return;
     const id = this.player();
     const a = this.sim.assists(id);
+    const u = this.userAssists();
+    const pick = <T,>(k: string, lab: T): T => (u[k] !== undefined ? (u[k] as T) : lab);
     this.sim.setAssists(id, {
       ...a,
-      abs: true,
-      tcs: this.tcs(),
+      abs: pick("abs", "Full"),
+      tcs: this.tcsChosen() ? (this.tcs() ? "Full" : "Off") : pick("tcs", "Off"),
       esc: false,
       countersteer_help: 0,
       throttle_filter: 0,
       brake_filter: 0,
-      auto_gears: false,
-      auto_clutch: true,
-    });
+      auto_gears: pick("auto_gears", false),
+      auto_clutch: pick("auto_clutch", true),
+    } as never);
   }
 
   private save(p: Record<string, number>): void {
@@ -684,10 +702,11 @@ export class DriftLabWPanel {
       /* readout unavailable */
     }
     this.readout.textContent =
-      `${DRIFT_LAB_W_TITLE} · plain steering · TCS off · ESC off · manual\n` +
+      `${DRIFT_LAB_W_TITLE} · plain steering · ESC off\n` +
       `key ${key.padEnd(5)} rack ${rack.padEnd(7)} lock ${Number.isNaN(r[2]) ? "–" : pct(r[2])} · wheel ${r[8].toFixed(1)}°\n` +
       `slide ${slide.toFixed(1)}° · throttle key ${pct(r[4])} → engine ${pct(r[5])}\n` +
-      `gear ${gear} · ${r[7].toFixed(0)} km/h` +
+      `gear ${gear} · ${r[7].toFixed(0)} km/h · clutch ${r[10] > 0.5 ? "auto" : "manual"} ${pct(r[11])}${r[12] > 0.5 ? " locked" : ""}\n` +
+      `engine ${r[13].toFixed(0)} rpm · driven wheels ${r[14].toFixed(0)} rpm · clutch pedal ${pct(r[15])}` +
       ride;
     this.readout.style.borderLeftColor = slide > 50 ? "#e04040" : slide > 10 ? "#40c070" : "#40a0e0";
   }

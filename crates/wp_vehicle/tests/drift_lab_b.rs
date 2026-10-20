@@ -19,7 +19,7 @@ fn car(id: &str) -> LoadedCar {
 fn kb(help: f32) -> AssistProfile {
     AssistProfile {
         countersteer_help: help,
-        tcs: false,
+        tcs: wp_contracts::TcsLevel::Off,
         esc: false,
         ..AssistProfile::keyboard_default()
     }

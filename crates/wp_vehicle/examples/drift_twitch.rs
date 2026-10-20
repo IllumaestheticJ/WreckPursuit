@@ -34,7 +34,7 @@ fn main() {
     };
     let mut assists = AssistProfile::keyboard_default();
     if std::env::var("ASSISTS").is_ok_and(|a| a == "off") {
-        assists.tcs = false;
+        assists.tcs = wp_contracts::TcsLevel::Off;
         assists.esc = false;
     }
     let mut args: Vec<String> = std::env::args().skip(1).collect();

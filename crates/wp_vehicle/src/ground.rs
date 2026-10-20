@@ -94,9 +94,9 @@ pub fn sweep_hit_on_tyre(p: &WheelProbe, w: V3, normal: V3) -> Option<GroundHit>
 /// reaches the road `half_width · |axle·n| / |dir·n|` before the tread centre does. Without
 /// this the sweep took over from the exact centre ray on flat ground in every corner, and its
 /// rim witness point (GJK against the large ground slab) made the tyre load jump 0.6–1 kN from
-/// tick to tick (docs/integration/grip-balance.md). Edges ahead of / behind the contact still
-/// lift the sweep far more than this, so kerbs keep working. Applied by [`RapierGround`] when
-/// the grip-balance lab's `probe_tilt_fix` is on (to become the default with the vehicle owner).
+/// tick to tick (found on `lead/grip-balance`, docs/integration/grip-balance.md there). Edges ahead of / behind the contact still
+/// lift the sweep far more than this, so kerbs keep working. Applied by
+/// [`RapierGround::cast_wheel`].
 pub fn discount_tilt(
     p: &WheelProbe,
     ray: Option<GroundHit>,
@@ -206,14 +206,7 @@ impl WheelCaster for RapierGround<'_> {
 
     fn cast_wheel(&self, p: &WheelProbe) -> Option<GroundHit> {
         let (ray, sweep) = self.probe(p);
-        // Tilt fix: lab switch for now (crate::grip_lab::GripBalance::probe_tilt_fix); off =
-        // bit-identical to before.
-        let sweep = if crate::grip_lab::active().is_some_and(|g| g.probe_tilt_fix) {
-            discount_tilt(p, ray, sweep)
-        } else {
-            sweep
-        };
-        blend_envelope(ray, sweep)
+        blend_envelope(ray, discount_tilt(p, ray, sweep))
     }
 }
 

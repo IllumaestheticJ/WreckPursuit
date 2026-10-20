@@ -13,8 +13,8 @@ import type { AssistPreset, Settings, UiState } from "./types";
 export const ASSIST_PRESETS: Record<Exclude<AssistPreset, "custom">, AssistProfile> = {
   // Arcade damage, every assist on.
   rookie: {
-    abs: true,
-    tcs: true,
+    abs: "Full",
+    tcs: "Full",
     esc: true,
     steer_speed_sensitivity: 1,
     countersteer_help: 0.6,
@@ -23,10 +23,10 @@ export const ASSIST_PRESETS: Record<Exclude<AssistPreset, "custom">, AssistProfi
     auto_gears: true,
     auto_clutch: true,
   },
-  // Arcade damage, ABS + TCS (the default).
+  // Arcade damage, ABS Full + TCS Half (the default; a little wheelspin to slide with).
   street: {
-    abs: true,
-    tcs: true,
+    abs: "Full",
+    tcs: "Half",
     esc: false,
     steer_speed_sensitivity: 1,
     countersteer_help: 0,
@@ -35,10 +35,10 @@ export const ASSIST_PRESETS: Record<Exclude<AssistPreset, "custom">, AssistProfi
     auto_gears: true,
     auto_clutch: true,
   },
-  // Simulation damage, assists off, manual gears.
+  // Simulation damage, ABS Half, TCS Off (the owner's reference setup), manual gears.
   sim: {
-    abs: false,
-    tcs: false,
+    abs: "Half",
+    tcs: "Off",
     esc: false,
     steer_speed_sensitivity: 1,
     countersteer_help: 0,
