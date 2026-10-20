@@ -1713,7 +1713,12 @@ impl Vehicle {
             }
             return;
         }
-        let travel = c.susp.travel_m;
+        // Drift Lab W ride tuning: travel scale (the static compression is kept, see
+        // `ride_lab::RideTune::scaled_at`).
+        let travel = match crate::ride_lab::active() {
+            Some(t) => c.susp.travel_m * t.travel.clamp(0.5, 3.0),
+            None => c.susp.travel_m,
+        };
         let top = c.hub + V3::Z * (travel - c.x_static);
         let origin = ch.to_world(top);
         // The tyre sweep starts PROBE_LIFT_M higher so a kerb edge ahead never overlaps the
@@ -1731,7 +1736,14 @@ impl Vehicle {
         let reach = hit.map(|h| travel - (h.distance - PROBE_LIFT_M) + TYRE_STATIC_DEFLECTION_M);
         // Drift Lab W ride tuning (lab override): scaled springs / dampers.
         let st = match crate::ride_lab::active() {
-            Some(t) => step_strut(&t.scaled(&c.susp), c.tyre_rate, w.x, w.vcomp, reach, dt),
+            Some(t) => step_strut(
+                &t.scaled_at(&c.susp, crate::ride_lab::corner_load(&self.def, i)),
+                c.tyre_rate,
+                w.x,
+                w.vcomp,
+                reach,
+                dt,
+            ),
             None => step_strut(&c.susp, c.tyre_rate, w.x, w.vcomp, reach, dt),
         };
         w.x = st.x;

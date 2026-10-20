@@ -62,6 +62,7 @@ fn main() {
             "sweep",
             "ride",
             "carlab",
+            "weight",
             "vr",
             "sens",
             "ptrace",
@@ -98,6 +99,10 @@ fn main() {
     }
     if what == "vr" {
         vr_table(&args);
+        return;
+    }
+    if what == "weight" {
+        weight_table(&args);
         return;
     }
     if what == "carlab" {
@@ -761,7 +766,7 @@ fn vr_table(args: &[String]) {
         ("**VR**, spin model", true, CarTune::spin_candidate()),
     ];
     println!("\n## Velocity-relative steering (VR) vs plain, data tyres vs spin model (40 m circle, 2nd, 6 s; intended side: drift s / band s / mean ° sd ° / outcome)");
-    println!("| car | setup | counter key + full thr (clip 1) | into-turn key held (clip 8) | keys released (end °) | tap 100 0.15 / 0.25 s: heading ° (slip °) | lane change slip ° | launch yaw ° flat / 1° slope | handbrake 40 km/h 0.6 s: pivot ° / caught |");
+    println!("| car | setup | counter key + full thr (clip 1) | into-turn key held (clip 8) | keys released mid-drift, throttle held | tap 100 0.15 / 0.25 s: heading ° (slip °) | lane change slip ° | launch yaw ° flat / 1° slope | handbrake 40 km/h 0.6 s: pivot ° / caught |");
     println!("|---|---|---|---|---|---|---|---|---|");
     let a = reference_assists();
     for id in &ids {
@@ -779,6 +784,39 @@ fn vr_table(args: &[String]) {
             });
             let into = hold(PlainDriver::IntoTurnHeld { entry_deg: 12.0 });
             let rel = hold(PlainDriver::Released { entry_deg: 12.0 });
+            // Release → spin / swap time (owner: the reference keeps rotating slowly and spins
+            // after ~1–2 s).
+            let mut tick = 0usize;
+            let (mut released, mut failed): (Option<usize>, Option<usize>) = (None, None);
+            let mut on_side = false;
+            wp_vehicle::drift_lab_w::plain_drift_run_with(
+                &c,
+                &a,
+                PlainDriver::Released { entry_deg: 12.0 },
+                40.0,
+                0.6,
+                |rig, steer, _| {
+                    let ss = slide_state(rig);
+                    let ang = (-ss.body_slip).to_degrees();
+                    if released.is_none() && steer == 0.0 {
+                        released = Some(tick);
+                    }
+                    if ang >= 10.0 {
+                        on_side = true;
+                    }
+                    if released.is_some()
+                        && failed.is_none()
+                        && (ang.abs() >= 90.0 || ss.v_fwd < 0.0 || (on_side && ang <= -10.0))
+                    {
+                        failed = Some(tick);
+                    }
+                    tick += 1;
+                },
+            );
+            let rel_t = match (released, failed) {
+                (Some(r), Some(f)) => format!("{:.1} s", (f - r) as f32 / 240.0),
+                _ => "none".to_string(),
+            };
             let t15 = tap_response(&c, &a, 100.0 / 3.6, 0.15);
             let t25 = tap_response(&c, &a, 100.0 / 3.6, 0.25);
             let lc = wp_vehicle::drift_lab_w::lane_change_slip(&c, &a);
@@ -786,11 +824,10 @@ fn vr_table(args: &[String]) {
             let l1 = launch_yaw(&c, &a, 1.0);
             let hb = handbrake_pivot(&c, &a, 40.0 / 3.6, 0.6);
             println!(
-                "| {id} | {name} | {} | {} | {} (end {:.0}°) | {:.1} ({:.1}) / {:.1} ({:.1}) | {lc:.1} | {l0:.1} / {l1:.1} | {:.0} / {} |",
+                "| {id} | {name} | {} | {} | {} (release → spin/swap {rel_t}) | {:.1} ({:.1}) / {:.1} ({:.1}) | {lc:.1} | {l0:.1} / {l1:.1} | {:.0} / {} |",
                 ctr.cell(),
                 into.cell(),
                 rel.cell(),
-                rel.end_deg,
                 t15.heading_deg,
                 t15.max_slip_deg,
                 t25.heading_deg,
@@ -802,4 +839,74 @@ fn vr_table(args: &[String]) {
     }
     car_lab::set_override(None);
     plain::set_override(Some(base));
+}
+
+/// Weight transfer speed (owner / reference clip 4): ride tunings compared on the clip-4 step
+/// (one key held 1.5 s at 80 km/h), the 100 km/h lane change, taps and the drift drivers.
+/// `RIDE='{...}'` adds a row.
+fn weight_table(args: &[String]) {
+    use wp_vehicle::drift_lab_w::{plain_hold, roll_run, step_steer_roll, LANE_CHANGE_KEYS};
+    let ids: Vec<String> = if args.is_empty() {
+        [
+            "parity_rwd_a",
+            "parity_rwd_d",
+            "rampart_50",
+            "parity_rwd_b",
+            "shiro_turbo",
+            "parity_fwd_c",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+    } else {
+        args.to_vec()
+    };
+    let mut configs: Vec<(String, RideTune)> = vec![
+        ("data".into(), RideTune::default()),
+        ("lab default (step 3)".into(), RideTune::lab_default()),
+        ("**slow weight (step 8)**".into(), RideTune::slow_weight()),
+    ];
+    if let Ok(j) = std::env::var("RIDE") {
+        configs.push((
+            format!("RIDE {j}"),
+            serde_json::from_str(&j).expect("RIDE json"),
+        ));
+    }
+    println!("\n## Weight transfer (clip 4): step = right key held 1.5 s at 80 km/h");
+    println!("| car | ride | model roll Hz / ζ / °/g · pitch Hz / ζ | step: roll delay s / 10→90 % rise s / peak roll ° / overshoot % / lat g / heading starts s / max travel | lane change 100: peak roll ° / rate °/s / rocks | tap 100 0.15 s heading ° | counter hold (spin model) |");
+    println!("|---|---|---|---|---|---|---|");
+    let a = reference_assists();
+    let saved_car = car_lab::active();
+    car_lab::set_override(Some(CarTune::spin_candidate()));
+    for id in &ids {
+        for (name, t) in &configs {
+            ride_lab::set_override(Some(*t));
+            // The body inertia is set when the car's body is built: load after the override.
+            let c = car(id);
+            let m = ride_lab::ride_model(&c.def, t);
+            let st = step_steer_roll(&c, &a, 80.0 / 3.6, 1.5);
+            let lc = roll_run(&c, &a, 100.0 / 3.6, &LANE_CHANGE_KEYS);
+            let tap = tap_response(&c, &a, 100.0 / 3.6, 0.15);
+            let h = plain_hold(
+                &c,
+                &a,
+                PlainDriver::HoldCounter {
+                    entry_deg: 6.0,
+                    throttle: 1.0,
+                },
+                40.0,
+                0.6,
+            );
+            println!(
+                "| {id} | {name} | {:.2} / {:.2} / {:.1} · {:.2} / {:.2} | {:.2} / {:.2} / {:.1} / {:.0} / {:.2} / {:.2} / {:.2} | {:.1} / {:.0} / {} | {:.1} | {} |",
+                m.roll_hz, m.roll_zeta, m.roll_deg_per_g, m.pitch_hz, m.pitch_zeta,
+                st.roll_delay_s, st.rise_s, st.peak_roll_deg, st.overshoot_pct, st.peak_lat_g, st.heading_start_s, st.max_travel_frac,
+                lc.peak_roll_deg, lc.peak_roll_rate_dps, lc.rocks_after,
+                tap.heading_deg,
+                h.cell()
+            );
+        }
+    }
+    car_lab::set_override(saved_car);
+    ride_lab::set_override(None);
 }

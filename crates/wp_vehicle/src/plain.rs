@@ -50,8 +50,11 @@ pub struct PlainSteer {
     /// as far at 150 km/h as at a standstill).
     pub sens_applies: SensApplies,
     /// Velocity-relative steering (reference clip 8 "the steering wheel during a drift"): in a
-    /// slide the wheels are pulled toward the front axle's direction of travel and the key
-    /// adds `key × lock(speed)` on top, so the key steers relative to where the car is going.
+    /// slide, **while a steer key is held**, the wheels are pulled toward the front axle's
+    /// direction of travel and the key adds `key × lock(speed)` on top, so the key steers
+    /// relative to where the car is going. With no key the wheels return to the body's centre
+    /// at `t_return` (no automatic countersteer: a powered slide slowly spins, as the reference
+    /// does when the keys are let go mid-drift).
     /// The wheel target is `align_gain × fade × front-axle travel − key × lock`, clamped to the
     /// car's full lock, where `fade` comes in with body slip from [`PlainSteer::align_from_deg`]
     /// to [`PlainSteer::align_full_deg`] (grip driving and standstill are the plain profile).
@@ -275,7 +278,15 @@ pub fn update_center_angle(current: f32, inp: &PlainInput, p: &PlainSteer, dt: f
 fn velocity_relative_angle(current: f32, inp: &PlainInput, p: &PlainSteer, dt: f32) -> f32 {
     let lock = inp.full_lock * p.lock_frac(inp.speed);
     let key = inp.driver.clamp(-1.0, 1.0);
-    let fade = align_fade(p, inp.body_slip, inp.speed);
+    // Owner / clip 1 ("letting go of the steering mid-drift"): the pull toward the travel acts
+    // only while a steer key is held; released keys return the wheels to the body's centre at
+    // the plain return rate, with no automatic countersteer (a powered slide slowly spins).
+    let key_held = key.abs() > crate::steering::STEER_DEADZONE;
+    let fade = if key_held {
+        align_fade(p, inp.body_slip, inp.speed)
+    } else {
+        0.0
+    };
     let full = inp.full_lock.max(1e-6);
     let key_gain = 1.0 + fade * (p.slide_key_gain.max(0.0) - 1.0);
     let target = (p.align_gain.max(0.0) * fade * inp.front_axle_angle
@@ -441,13 +452,28 @@ mod tests {
             body_slip: 1f32.to_radians(),
         };
         assert!((run(&grip) + 0.6 * p.lock_frac(15.0)).abs() < 1e-5);
-        // Slide (20°), keys released: the wheels point along the travel.
+        // Slide (20°), keys released: the wheels go back to the body's centre (no automatic
+        // countersteer).
         let slide = PlainInput {
             driver: 0.0,
             body_slip: 20f32.to_radians(),
             ..grip
         };
-        assert!((run(&slide) - 0.3).abs() < 1e-5, "{}", run(&slide));
+        assert_eq!(run(&slide), 0.0);
+        // Slide, a key held with its offset at 0: the wheels follow the travel.
+        let along = PlainSteer {
+            slide_key_gain: 0.0,
+            ..p
+        };
+        let held = PlainInput {
+            driver: 1.0,
+            ..slide
+        };
+        let mut a = 0.0;
+        for _ in 0..480 {
+            a = update_center_angle(a, &held, &along, DT);
+        }
+        assert!((a - 0.3).abs() < 1e-5, "{a}");
         // Slide, key into the travel side (left = −1) adds lock on top, clamped to full lock.
         let into = PlainInput {
             driver: -1.0,
