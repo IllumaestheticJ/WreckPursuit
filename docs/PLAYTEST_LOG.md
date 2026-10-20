@@ -121,6 +121,7 @@ the schedule could hunt (1→2→1). New automatic (`crates/wp_vehicle/README.md
 | 44 | Police spawn too far away; spawn them in response to reckless-driving calls | E (police): dispatch-driven spawning out of sight, 10–25 s response | dispatched |
 | 45 | Still falling into sidewalks (on the round-12 preview) | helper `lead/fix-sidewalk-fall` (merged into `lead/round12` 2026-10-20, after the preview was built) | fixed on `lead/round12`; next preview / link |
 | 46 | Intersections still have holes in them (Port Vesper v2) | helper `lead/fix-junction-holes` (wp_world surface junction discs / bend connectors, greybox + colliders) | dispatched |
+| 47 | Some cars are missing sounds (round-12 preview) | J (audio): find which cars/voices are silent; suspect the lead's J + J2 merge of `voices.ts` (resolve() now runs before the engine-instrument check) and per-car pack mapping | dispatched |
 
 ## 2026-10-19 — step 2: 4-player test on Port Vesper v2 (F, `ws/net`)
 Found by the new 3-minute 4-client test (`crates/wp_net/tests/vesper_e2e.rs`) and the
