@@ -68,6 +68,21 @@ pub const POPULATE_SIGHT_RADIUS_M: f32 = 150.0;
 /// the active area, to make up for the part in a player's view that cannot be spawned into.
 pub const MAX_SPAWNABLE_BOOST: f32 = 2.0;
 
+/// At or below this time-of-day density factor ([`crate::density::f_time`]) the out-of-sight
+/// boost is off, so night traffic never rises above the curve (owner playtest row 76).
+pub const BOOST_OFF_AT_F_TIME: f32 = 0.2;
+
+/// At or above this time-of-day density factor the full [`MAX_SPAWNABLE_BOOST`] applies
+/// (all daytime hours); in between it is interpolated linearly.
+pub const BOOST_FULL_AT_F_TIME: f32 = 0.6;
+
+/// Largest out-of-sight boost for a zone whose time-of-day factor is `f`.
+pub fn max_spawnable_boost(f: f32) -> f32 {
+    let s =
+        ((f - BOOST_OFF_AT_F_TIME) / (BOOST_FULL_AT_F_TIME - BOOST_OFF_AT_F_TIME)).clamp(0.0, 1.0);
+    1.0 + (MAX_SPAWNABLE_BOOST - 1.0) * s
+}
+
 /// A car turning around or reversing (it cannot pull over) counts as yielding while a siren unit
 /// is this close, m. Everyone else follows [`siren`].
 pub const SIREN_RADIUS_M: f32 = 60.0;
@@ -2838,11 +2853,18 @@ impl Traffic {
     /// in view can only fill as cars drive into it, so whatever the cars in view fall short of
     /// it is added to the spawnable shares *around the players* (within the active radius of a
     /// player, not of a race route's focus points) in proportion, at most
-    /// [`MAX_SPAWNABLE_BOOST`]×. The total therefore still adds up to the density target: with
+    /// [`MAX_SPAWNABLE_BOOST`]× — less at night ([`max_spawnable_boost`] of the zone's
+    /// time-of-day factor, none in the small hours). The total therefore still adds up to the density target: with
     /// the 320 m sightline a whole downtown can be in view, and without this the city settled
     /// about a quarter below target (`world_traffic_soak_observer`). With no player in the
     /// inputs nothing is in view and the targets are returned unchanged.
-    fn spawnable_targets(&self, inp: &TrafficInputs, full: &[f32], seen_agents: u32) -> Vec<f32> {
+    fn spawnable_targets(
+        &self,
+        map: &CityMap,
+        inp: &TrafficInputs,
+        full: &[f32],
+        seen_agents: u32,
+    ) -> Vec<f32> {
         if !inp.tracked.iter().any(|t| t.player) {
             return full.to_vec();
         }
@@ -2894,8 +2916,9 @@ impl Traffic {
             // At most double the density where cars can appear, so a thin spawnable strip
             // (player near the map edge, most of the area in view) does not clump.
             let k = (1.0 + shortfall / near_total).min(MAX_SPAWNABLE_BOOST);
-            for (t, n) in out.iter_mut().zip(&near) {
-                *t += n * (k - 1.0);
+            for (z, (t, n)) in out.iter_mut().zip(&near).enumerate() {
+                let kz = k.min(max_spawnable_boost(f_time(map.time, map.net.zones[z].kind)));
+                *t += n * (kz - 1.0);
             }
         }
         out
@@ -2935,7 +2958,7 @@ impl Traffic {
             agent_zone.push(z);
             agent_seen.push(seen);
         }
-        let targets = self.spawnable_targets(inp, &full_targets, seen_in_zones);
+        let targets = self.spawnable_targets(map, inp, &full_targets, seen_in_zones);
         // District-level totals: zones are small, so control is per district kind with a
         // looser per-zone clamp against local clumps.
         let kind_of = |z: usize| map.net.zones[z].kind as usize;

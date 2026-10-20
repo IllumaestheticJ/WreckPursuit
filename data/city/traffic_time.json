@@ -1,0 +1,33 @@
+{
+  "_doc": "Civilian traffic density vs time of day, relative to the daytime peak (1.0). Read by wp_world::density (embedded at build time). hourly[i] is the value at i:00, linear in between; each district multiplies it by its own district_mul row (same interpolation; 1.0 = follows the curve). Downtown (Core) keeps nightlife until ~02:00 and then drops into the same trough (noon >= 5x 03:00); industrial, port and suburbs are emptier at night; by day every district follows the curve. Results are clamped to 0..1. Owner playtest row 76 (target bands: 01-05 ~15-20 %, 23:00 ~35 %, 19-22 ~60 %, 07-09 and 16-19 100 %, midday ~75 %).",
+  "hourly": [
+    0.25, 0.20, 0.17, 0.15, 0.15, 0.20, 0.55, 1.00, 1.00, 1.00, 0.82, 0.75,
+    0.75, 0.75, 0.75, 0.85, 1.00, 1.00, 1.00, 0.65, 0.60, 0.60, 0.55, 0.35
+  ],
+  "district_mul": {
+    "Core": [
+      1.60, 1.50, 1.30, 0.80, 0.80, 0.85, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00,
+      1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.15, 1.25, 1.35, 1.45, 1.55
+    ],
+    "Commercial": [
+      1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00,
+      1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00
+    ],
+    "Residential": [
+      0.85, 0.85, 0.85, 0.85, 0.85, 0.85, 0.95, 1.00, 1.00, 1.00, 1.00, 1.00,
+      1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 0.95, 0.90, 0.90, 0.85, 0.85
+    ],
+    "Industrial": [
+      0.60, 0.60, 0.60, 0.60, 0.60, 0.60, 0.85, 1.00, 1.00, 1.00, 1.00, 1.00,
+      1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 0.80, 0.70, 0.65, 0.60, 0.60
+    ],
+    "Port": [
+      0.75, 0.75, 0.75, 0.75, 0.75, 0.75, 0.90, 1.00, 1.00, 1.00, 1.00, 1.00,
+      1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 0.90, 0.85, 0.80, 0.75, 0.75
+    ],
+    "Suburb": [
+      0.60, 0.60, 0.60, 0.60, 0.60, 0.60, 0.85, 1.00, 1.00, 1.00, 1.00, 1.00,
+      1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 0.80, 0.70, 0.65, 0.60, 0.60
+    ]
+  }
+}
