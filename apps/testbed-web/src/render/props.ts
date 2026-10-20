@@ -133,6 +133,13 @@ export interface PropStats {
 }
 
 export class PropView {
+  /** Full panel-mesh distance, m (graphics quality; lower on phones). */
+  fullLodM = FULL_LOD_M;
+  /** Most parked cars drawn with the full mesh at once (graphics quality). */
+  maxFull = MAX_FULL;
+  /** Chunks farther than this are not drawn at all (phones only; Infinity = draw every prop,
+   * which the desktop keeps so nothing that can be hit is ever invisible). */
+  drawM = Infinity;
   /** Parent in sim space (+Z up); add to SceneView.world. */
   readonly group = new THREE.Group();
   private n = 0;
@@ -270,7 +277,7 @@ export class PropView {
   private setFullMesh(mesh: Parameters<typeof fullGeoms>[0], info: CarModelInfo): void {
     if (this.full || !this.mats) return;
     const g = fullGeoms(mesh, info);
-    this.full = { car: new InstancedCar(g, Math.min(MAX_FULL, this.parkedCount), this.mats, null), fit: fitOf([g.paint, g.detail]) };
+    this.full = { car: new InstancedCar(g, Math.min(this.maxFull, this.parkedCount), this.mats, null), fit: fitOf([g.paint, g.detail]) };
     this.full.car.count = 0;
     this.group.add(...this.full.car.meshes);
     this.lastPick.set(Infinity, Infinity, Infinity); // pick on the next frame
@@ -347,8 +354,10 @@ export class PropView {
       this.movedWrites++;
     }
     for (const ch of this.chunks) {
-      const near = ch.sphere.distanceToPoint(this.cam) < PROXY_M;
+      const d = ch.sphere.distanceToPoint(this.cam);
+      const near = d < PROXY_M;
       if (near !== ch.near) this.showTier(ch, near);
+      if (!near) ch.box.visible = d <= this.drawM;
     }
     if (this.full && this.cam.distanceTo(this.lastPick) > REPICK_M) this.repick();
     this.flush();
@@ -368,10 +377,10 @@ export class PropView {
     for (let i = 0; i < this.n; i++) {
       if (this.kind[i] === PROP_KIND.cone) continue;
       const d = this.distTo(i);
-      if (d < FULL_LOD_M) near.push({ i, d });
+      if (d < this.fullLodM) near.push({ i, d });
     }
     near.sort((a, b) => a.d - b.d);
-    const want = new Set(near.slice(0, MAX_FULL).map((x) => x.i));
+    const want = new Set(near.slice(0, this.maxFull).map((x) => x.i));
     // Release full slots no longer wanted (swap-remove keeps the slots dense).
     for (let s = this.fullProps.length - 1; s >= 0; s--) {
       const i = this.fullProps[s];
@@ -455,7 +464,7 @@ export class PropView {
         if (this.chunks[this.chunkOf[i]]?.near) drawnProxy++;
         else drawnBox++;
       }
-      if (car && d < FULL_LOD_M) {
+      if (car && d < this.fullLodM) {
         inFullRange++;
         if (this.fullSlot[i] >= 0) fullInFullRange++;
       }

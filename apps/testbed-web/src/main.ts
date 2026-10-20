@@ -14,6 +14,7 @@ import { POLICE_PAINT, TRAFFIC_PALETTE } from "./render/fleet";
 import { actionHeld, getBindings, installKeyboard, readInput, toggleHeadlights, type InputSource } from "./input";
 import { actionsForKey, bindingsHelp, keyName, padName, type ActionId } from "./bindings";
 import { CrashReplayDirector, autoCrashReplay, onAutoCrashReplayChange, setAutoCrashReplay } from "./crash_replay";
+import { installTouch, setTouchSteerMode, touchSteerMode } from "./touch";
 import { ControlsPanel } from "./ui/controls";
 import { layers, store, bytesToBase64, base64ToBytes } from "./settings";
 import { SceneView } from "./scene";
@@ -117,6 +118,11 @@ async function main(): Promise<void> {
   // Traffic / police at every LOD: instanced fleet + hand-over to full views (render/lod.ts).
   const lod = new LodDirector();
   scene.world.add(lod.fleet.group);
+  // Phones / tablets draw less traffic (render/quality.ts touch profile).
+  lod.trafficDrawM = scene.quality.trafficDrawM;
+  lod.fleet.fullLodM = scene.quality.fullLodM;
+  // On-screen touch controls (src/touch.ts): shown on touch devices, read through readInput.
+  const touch = installTouch();
   const controls = new ControlsPanel(overlay);
   const refreshHelp = () => hud.setControlsHelp(bindingsHelp(getBindings()));
   controls.onChange = refreshHelp;
@@ -124,6 +130,9 @@ async function main(): Promise<void> {
   $("controls-open").onclick = () => controls.toggle();
   // Parked cars and cones (playtest row 50): every physical prop is drawn (render/props.ts).
   const props = new PropView();
+  props.fullLodM = scene.quality.fullLodM;
+  props.maxFull = scene.quality.propFullMax;
+  props.drawM = scene.quality.propDrawM;
   scene.world.add(props.group);
   // Crash effects (owner row 69): sparks, smoke, glass, skid marks, debris (render/fx/).
   const fx = new CrashFx(scene.quality.fx);
@@ -537,19 +546,23 @@ async function main(): Promise<void> {
   // Owner default (playtest row 29): TCS, ESC and automatic gears start OFF; any assist box the
   // viewer ticks or unticks is remembered (localStorage) and wins over the preset.
   const ASSIST_KEY = "wp.assistOverrides";
-  const assistOverrides = (): Record<string, boolean> => {
-    const base: Record<string, boolean> = { tcs: false, esc: false, auto_gears: false };
+  const savedAssistOverrides = (): Record<string, boolean> => {
     try {
-      return { ...base, ...(JSON.parse(store.get(ASSIST_KEY) ?? "{}") as Record<string, boolean>) };
+      return JSON.parse(store.get(ASSIST_KEY) ?? "{}") as Record<string, boolean>;
     } catch {
-      return base;
+      return {};
     }
   };
+  const assistOverrides = (): Record<string, boolean> => ({ tcs: false, esc: false, auto_gears: false, ...savedAssistOverrides() });
+  /** Touch play (owner request row 71): the gamepad (analogue) preset plus automatic gears,
+   * traction control and stronger steer help; boxes the viewer ticked still win. */
+  const TOUCH_ASSISTS: Record<string, unknown> = { tcs: true, auto_gears: true, auto_clutch: true, steer_speed_sensitivity: 1.0, countersteer_help: 0.6 };
   const applyAssistPreset = (source: InputSource) => {
     if (isReplay()) return;
     try {
-      const preset = sim.assistPreset(source) as unknown as Record<string, unknown>;
-      Object.assign(preset, assistOverrides());
+      const preset = sim.assistPreset(source === "Touch" ? "Gamepad" : source) as unknown as Record<string, unknown>;
+      if (source === "Touch") Object.assign(preset, TOUCH_ASSISTS, savedAssistOverrides());
+      else Object.assign(preset, assistOverrides());
       sim.setAssists(app.player, preset as never);
       syncAssistBoxes();
     } catch (e) {
@@ -867,6 +880,7 @@ async function main(): Promise<void> {
     prof.begin();
     let replay = isReplay();
 
+    touch?.setDriving(!replay && !app.paused && !map.isOpen && !app.bench);
     const { input, source, edges } = readInput(dt);
     for (const a of edges) doAction(a);
     app.input = input;
@@ -1173,6 +1187,11 @@ async function main(): Promise<void> {
     bindings: getBindings,
     /** City map HUD (UI kit): `map.hud.stats()`, `map.toggle()`. */
     map,
+    /** Touch controls (src/touch.ts; null with `?touch=0`) and the steering-mode switch the
+     * pause menu / settings use. */
+    touch,
+    setTouchSteerMode,
+    touchSteerMode,
     ready: true,
     stopRecording,
     loadReplay,

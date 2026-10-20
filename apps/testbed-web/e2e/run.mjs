@@ -8,7 +8,8 @@
 // selector) loads with traffic, signals (day/night, lamps change over time) and the city chase,
 // weather (e2e/weather.mjs: selector, rain, wet roads, spray, fog, wipers, rainy-night chase),
 // traffic / police LOD hand-overs are seamless (no missing mesh, < 0.5 m swap jump, no pop-in
-// within 300 m), gamepad + rebindable controls (e2e/gamepad.mjs), browser perf budgets
+// within 300 m), gamepad + rebindable controls (e2e/gamepad.mjs), touch controls
+// (e2e/touch.mjs), browser perf budgets
 // (e2e/perf_check.mjs, PERF=0 skips), parked cars and cones are drawn (every prop within 150 m
 // has exactly one drawn instance, near parked cars use the full mesh, a knocked parked car's drawn
 // pose follows the sim within 0.2 m), crash effects (e2e/crash_fx.mjs: sparks, glass, debris,
@@ -890,5 +891,15 @@ const cr = spawnSync("node", [join(here, "crash_replay.mjs")], {
 });
 process.stdout.write(cr.stdout);
 check(cr.status === 0, `crash replay checks (e2e/crash_replay.mjs)${cr.status === 0 ? "" : ": " + (cr.stderr || "").trim().split("\n").pop()}`);
+// 11. Touch controls (e2e/touch.mjs, its own server and browser): an emulated phone shows the
+// controls, a swipe on the throttle accelerates, steering (buttons + tilt), edge buttons, no
+// HUD overlaps at phone sizes, rotate hint in portrait; a desktop shows no touch UI.
+const tc = spawnSync("node", [join(here, "touch.mjs")], {
+  cwd: root,
+  encoding: "utf8",
+  env: { ...process.env, TOUCH_SHOTS: shots ? join(shots, "touch") : "" },
+});
+process.stdout.write(tc.stdout);
+check(tc.status === 0, `touch controls checks (e2e/touch.mjs)${tc.status === 0 ? "" : ": " + (tc.stderr || "").trim().split("\n").pop()}`);
 console.log(failures ? `${failures} check(s) failed` : "all checks passed");
 process.exit(failures ? 1 : 0);
