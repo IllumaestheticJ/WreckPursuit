@@ -2301,7 +2301,11 @@ impl Traffic {
             {
                 continue;
             }
-            if blocked && (d_end < 15.0 || (a.yielding && a.siren_lc.is_none())) {
+            // Not before the whole body has left the junction box: a change started at the lane
+            // start sweeps the tail across cars still turning through the junction.
+            if blocked
+                && (a.s < CAR_LENGTH_M || d_end < 15.0 || (a.yielding && a.siren_lc.is_none()))
+            {
                 continue;
             }
             let p = a.params;
