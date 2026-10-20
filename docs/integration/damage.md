@@ -643,3 +643,236 @@ see round 8), `arcade_mechanical_min_closing_mps` 11.5, settle. `sim.toml` untou
 `apps/simcli/examples/damage_toughness.rs` (new example, measurement only) and
 `apps/simcli/scenarios/damage/*.ron` (new scenario group); `docs/integration/cars.md` (request
 row). No library code outside `wp_damage`.
+
+## Round 13 — owner playtest row 87 (v0.12.11): "the damage in arcade mode is still a little too high" — machine B, 2026-10-20
+Base: `origin/lead/round12` merged into `ws/damage`. Task: Arcade about 20–30 % more forgiving in
+*consequences*, the visible crumple kept (rows 31/53 asked for a stronger hood crumple); targets
+(Arcade): a 50 km/h wall hit is cosmetic plus minor mechanical, 70 km/h degraded but drivable,
+wrecked after ~4–6 hard hits (was ~3–4), police at least as tough as the sports car; Simulation
+unchanged. Commits: `c3fade0` (data), `823b9fe` (wp_damage), `248d043` (harness),
+`54aa388` (scenarios), `320b2d7` (`[bless]`), `515f53e` (repair scale kept at 0.5) and this doc.
+
+### 1. Harness (extended)
+`cargo run --release -p simcli --example damage_toughness -- [chase] [arcade|sim] [car …]`.
+Cars: `hakone_gt` (player sports car), `debug_sedan` (sedan), `junkyard_beater`,
+`sentinel_cruiser`. Speeds 30 / 50 / 70 / 100 km/h, up to 10 hits per row, damage kept, the other
+car repaired between hits. Crash kinds: **wall-front** (full-width rigid wall), **wall-offset**
+(wall over the left 40 % of the width), **wall-angle** (wall 30° off square, right front corner
+first, then a glance), **car-front** (into the rear of a 1400 kg sedan at rest), **car-offset**
+(same, 50 % overlap), **car-side** (T-bone: the car at rest, struck on the driver door by the
+sedan); `Sim::place_vehicle` cannot start a car sliding sideways, so side-into-wall is not
+measured. **mixed** = hit n is the n-th of those six, cycling (the "several hard hits" case).
+Repeated identical hits are sensitive to the exact impact point, so every row runs three times
+(impact point −0.15 / 0 / +0.15 m) and prints medians.
+Columns: **hit 1** = state after the first hit (cosmetic / minor / degraded / wreck); the hit on
+which the car first is **degraded** (power or steering ratio < 0.75, grip < 0.8, a brake < 0.6,
+puncture > 0.5, health < 0.5, or a mechanical component failed), **out** (a police unit would pull
+over: health < Arcade `disengage_health` 0.15, toe > 0.02 rad, puncture > 0.5, wheel lost,
+engine dead — I use this as "ended") and **wreck** (total loss, engine dead, wheel lost or power
+< 0.35); health after hits 1 and 3; repair bill after hit 1 (default price table, mode scale).
+`>10` = not within 10 hits.
+
+### 2. Before (round 12b values, measured on this base)
+The v0.12.11 base is harsher than the round-12b table above suggested (that table used one
+impact point and 8 hits): the sports car into a wall wrecks on hit 5 at 50 km/h (cabin intrusion
+past 0.6 m), hit 6 at 70, hit 3 at 100. What ends cars, in order: cabin intrusion past the 0.6 m
+limit (instant total loss), the steering rack failing (half the lock) and the radiator on the
+first 100 km/h or second 70 km/h hit, the driveshaft / engine failing on the 3rd–5th hard hit, a
+wheel tearing off at 100 km/h, and health (70 % structural) reaching the police pull-over level
+0.15 by hit 2–3. The cruiser was *weaker* than the sports car in two rows: wall-front 100 and
+mixed 100 ended on hit 2 (cabin intrusion through its long nose).
+
+### 3. Changes (Arcade only)
+| Knob | Round 12b | Round 13 | Change |
+|---|---|---|---|
+| `arcade.toml` `component_damage_scale` | 0.3 | **0.24** | −20 % health lost per m of intrusion |
+| `arcade.toml` `component_fail_threshold_scale` | 3.5 | **4.0** | +14 % intrusion before engine / rack / driveshaft … fail |
+| `arcade.toml` `cabin_intrusion_total_loss_m` | 0.6 | **0.78** | +30 %; the intrusion itself (the dent) is unchanged |
+| `arcade.toml` `wheel_detach_scale` | 0.5 | **0.42** | wheels stay on 19 % longer |
+| `arcade.toml` `repair_cost_scale` | 0.5 | 0.5 | kept: 0.4 broke `wp_economy`'s balance tests (Arcade = ½ Sim bill; a full wreck ≥ 60 % of the car's value, `lucciola_350` read 59 %) — request to G |
+| `DamageTuning::arcade_structural_health_scale` | 0.5 | **0.42** | −16 % health per J of plastic work (still a stop-gap for contract request #10) |
+| `arcade.toml` `total_loss_health` | 0.10 | 0.10 | still pinned by `wp_economy`'s career proxy (`career.rs` compares its own health to it; raising it fails the Arcade solvency test) |
+Not changed: `impulse_to_lattice_scale` 0.45, `plasticity_scale` 0.8, `beam_break_scale` 1.5 —
+the lattice deformation of a first hit is unchanged (wall-front / wall-offset / car-side at 50 and
+100 km/h, both cars, three impact points: identical crush in 23 of 24 runs, e.g. sports car
+100 km/h wall 1.15 m; one cruiser side hit 0.39 → 0.36 m from the car's own motion during the
+contact; R's panels follow the lattice), `arcade_mechanical_min_closing_mps`, settle,
+alignment, failed-rack ratio. `sim.toml` untouched.
+How I got there: the first try (−27 % component damage, +29 % fail threshold, structural 0.38)
+roughly doubled hits-to-end (3 → 6) and stopped 70–100 km/h hits from ever ending a car — the
+components saturate on hard hits, so once the structure is spent health parks just above 0.15
+and only a component failure can end the car. The fail threshold is the lever that decides
+whether hard hits eventually end a car; +14 % keeps that at ~4–6.
+
+### 4. Before → after (Arcade, panels on)
+All 30 km/h rows, both before and after: cosmetic, nothing within 10 hits (left out).
+| car | crash | km/h | hit 1 | degraded | out | wreck | h1 | h3 | bill 1 |
+|---|---|---|---|---|---|---|---|---|---|
+| hakone | wall-front | 50 | cosmetic | 4 | 5 → **>10** | 5 → **>10** | 0.88 → 0.90 | 0.56 → 0.63 | 3644 → 3603 |
+| hakone | wall-front | 70 | minor | 2 | 6 → **>10** | 6 → **>10** | 0.72 → 0.77 | 0.18 → 0.24 | 4593 → 4547 |
+| hakone | wall-front | 100 | degraded | 1 | 2 → **4** | 3 → **4** | 0.33 → 0.44 | 0.14 → 0.16 | 6484 → 6327 |
+| hakone | wall-offset | 50 | minor | 3 | 5 → **>10** | 9 → **>10** | 0.87 → 0.89 | 0.50 → 0.58 | 3970 → 3916 |
+| hakone | wall-offset | 70 | minor | 2 | 3 → **4** | 4 → **7** | 0.69 → 0.74 | 0.21 → 0.23 | 7594 → 7454 |
+| hakone | wall-offset | 100 | degraded | 1 | 3 → **5** | 4 → **5** | 0.32 → 0.42 | 0.16 → 0.17 | 11154 → 10816 |
+| hakone | wall-angle | 50 | cosmetic | 3 | 9 → **>10** | 10 → **>10** | 0.89 → 0.90 | 0.59 → 0.66 | 3825 → 3783 |
+| hakone | wall-angle | 70 | minor | 2 | 3 → **4** | 6 → **8** | 0.74 → 0.79 | 0.25 → 0.38 | 8373 → 8222 |
+| hakone | wall-angle | 100 | degraded | 1 | 2 → **3** | 3 → **>10** | 0.48 → 0.57 | 0.13 → 0.17 | 11345 → 10643 |
+| hakone | car-front | 50 | cosmetic | >10 | >10 | >10 | 0.98 → 0.98 | 0.92 → 0.93 | 794 → 789 |
+| hakone | car-front | 70 | cosmetic | 8 → **9** | >10 | >10 | 0.94 → 0.95 | 0.84 → 0.86 | 1131 → 1124 |
+| hakone | car-front | 100 | cosmetic | 3 → **4** | >10 | >10 | 0.88 → 0.90 | 0.55 → 0.63 | 3333 → 3315 |
+| hakone | car-offset | 50 | cosmetic | >10 | >10 | >10 | 0.97 → 0.98 | 0.93 → 0.94 | 1392 → 1387 |
+| hakone | car-offset | 70 | cosmetic | 6 | >10 | >10 | 0.94 → 0.95 | 0.81 → 0.84 | 2902 → 2879 |
+| hakone | car-offset | 100 | cosmetic | 3 | 9 → **>10** | >10 | 0.87 → 0.89 | 0.52 → 0.59 | 3921 → 3873 |
+| hakone | car-side | 50 | minor | 4 → **>10** | >10 | >10 | 0.93 → 0.94 | 0.80 → 0.83 | 3575 → 3606 |
+| hakone | car-side | 70 | minor | 2 → **>10** | >10 | >10 | 0.86 → 0.88 | 0.72 → 0.78 | 8625 → 8533 |
+| hakone | car-side | 100 | degraded → **minor** | 1 → **3** | >10 | >10 | 0.72 → 0.77 | 0.68 → 0.71 | 9885 → 9519 |
+| hakone | mixed | 50 | cosmetic | 6 → **7** | >10 | >10 | 0.88 → 0.90 | 0.58 → 0.65 | 3644 → 3603 |
+| hakone | mixed | 70 | minor | 2 | 3 → **>10** | >10 | 0.72 → 0.77 | 0.18 → 0.29 | 4593 → 4547 |
+| hakone | mixed | 100 | degraded | 1 | 3 → **7** | 5 → **>10** | 0.33 → 0.44 | 0.15 → 0.16 | 6484 → 6327 |
+| sedan | wall-front | 50 | cosmetic | 4 → **5** | 9 → **>10** | 9 → **>10** | 0.89 → 0.91 | 0.60 → 0.66 | 2928 → 2922 |
+| sedan | wall-front | 70 | cosmetic | 2 → **3** | >10 | >10 | 0.76 → 0.80 | 0.19 → 0.29 | 3998 → 3968 |
+| sedan | wall-front | 100 | degraded → **minor** | 1 → **2** | 8 → **>10** | >10 | 0.43 → 0.53 | 0.17 → 0.18 | 7494 → 7107 |
+| sedan | wall-offset | 50 | cosmetic | 3 | >10 | >10 | 0.88 → 0.90 | 0.57 → 0.65 | 3357 → 3338 |
+| sedan | wall-offset | 70 | minor | 2 | 10 → **>10** | 10 → **>10** | 0.73 → 0.77 | 0.22 → 0.35 | 4467 → 4479 |
+| sedan | wall-offset | 100 | degraded | 1 | 10 | 10 → **>10** | 0.39 → 0.48 | 0.17 → 0.19 | 10139 → 9771 |
+| sedan | wall-angle | 50 | cosmetic | 3 → **4** | >10 | >10 | 0.90 → 0.91 | 0.66 → 0.72 | 3519 → 3459 |
+| sedan | wall-angle | 70 | minor | 2 | 4 → **9** | >10 | 0.78 → 0.82 | 0.36 → 0.44 | 7676 → 7557 |
+| sedan | wall-angle | 100 | degraded | 1 | 2 → **3** | 4 → **5** | 0.55 → 0.64 | 0.17 → 0.18 | 10839 → 9907 |
+| sedan | car-front | 50 | cosmetic | >10 | >10 | >10 | 0.98 → 0.98 | 0.92 → 0.93 | 552 → 546 |
+| sedan | car-front | 70 | cosmetic | 8 → **9** | >10 | >10 | 0.95 → 0.95 | 0.83 → 0.87 | 883 → 875 |
+| sedan | car-front | 100 | cosmetic | 4 | >10 | >10 | 0.88 → 0.90 | 0.57 → 0.65 | 2896 → 2876 |
+| sedan | car-offset | 50 | cosmetic | >10 | >10 | >10 | 0.97 → 0.98 | 0.93 → 0.94 | 739 → 722 |
+| sedan | car-offset | 70 | cosmetic | 7 | >10 | >10 | 0.94 → 0.95 | 0.80 → 0.83 | 1820 → 1788 |
+| sedan | car-offset | 100 | cosmetic | 3 | >10 | >10 | 0.88 → 0.90 | 0.54 → 0.63 | 3346 → 3315 |
+| sedan | car-side | 50 | minor | 4 → **>10** | >10 | >10 | 0.93 → 0.94 | 0.81 → 0.82 | 4269 → 4248 |
+| sedan | car-side | 70 | minor | 2 → **7** | >10 | >10 | 0.86 → 0.88 | 0.78 → 0.83 | 8283 → 8187 |
+| sedan | car-side | 100 | degraded → **minor** | 1 → **2** | 6 → **>10** | 6 → **>10** | 0.75 → 0.80 | 0.72 → 0.72 | 9423 → 8930 |
+| sedan | mixed | 50 | cosmetic | 6 → **7** | >10 | >10 | 0.89 → 0.91 | 0.63 → 0.69 | 2928 → 2922 |
+| sedan | mixed | 70 | cosmetic | 2 | 7 → **>10** | 7 → **>10** | 0.76 → 0.80 | 0.21 → 0.35 | 3998 → 3968 |
+| sedan | mixed | 100 | degraded → **minor** | 1 → **2** | 3 | 3 | 0.43 → 0.53 | 0.12 → 0.15 | 7494 → 7107 |
+| beater | wall-front | 50 | cosmetic | 3 → **4** | 7 → **>10** | >10 | 0.86 → 0.88 | 0.50 → 0.60 | 3252 → 3190 |
+| beater | wall-front | 70 | minor | 2 | >10 → **7** | >10 | 0.70 → 0.75 | 0.16 → 0.24 | 4442 → 4368 |
+| beater | wall-front | 100 | degraded | 1 | 3 → **5** | >10 → **7** | 0.33 → 0.46 | 0.14 → 0.15 | 9015 → 7832 |
+| beater | wall-offset | 50 | minor | 3 | 9 → **>10** | >10 | 0.85 → 0.87 | 0.55 → 0.65 | 4164 → 4110 |
+| beater | wall-offset | 70 | degraded → **minor** | 1 → **2** | >10 | >10 | 0.66 → 0.72 | 0.16 → 0.27 | 7818 → 7326 |
+| beater | wall-offset | 100 | degraded | 1 | 2 → **3** | >10 | 0.28 → 0.39 | 0.14 → 0.15 | 12510 → 11918 |
+| beater | wall-angle | 50 | minor | 3 → **4** | 9 → **>10** | >10 | 0.88 → 0.90 | 0.63 → 0.70 | 3608 → 3572 |
+| beater | wall-angle | 70 | minor | 2 | 3 → **5** | 6 → **>10** | 0.74 → 0.79 | 0.29 → 0.39 | 8027 → 7910 |
+| beater | wall-angle | 100 | degraded | 1 | 3 → **6** | 4 → **6** | 0.49 → 0.57 | 0.16 → 0.16 | 10605 → 10488 |
+| beater | car-front | 50 | cosmetic | >10 | >10 | >10 | 0.97 → 0.98 | 0.90 → 0.91 | 551 → 535 |
+| beater | car-front | 70 | cosmetic | 6 | >10 | >10 | 0.93 → 0.94 | 0.74 → 0.78 | 1227 → 1181 |
+| beater | car-front | 100 | cosmetic | 3 | 6 → **10** | >10 | 0.84 → 0.87 | 0.38 → 0.48 | 3354 → 3314 |
+| beater | car-offset | 50 | cosmetic | 9 → **10** | >10 | >10 | 0.97 → 0.97 | 0.90 → 0.91 | 1310 → 1249 |
+| beater | car-offset | 70 | cosmetic | 4 → **5** | >10 | >10 | 0.92 → 0.93 | 0.71 → 0.75 | 2319 → 2261 |
+| beater | car-offset | 100 | minor | 2 | >10 | >10 | 0.81 → 0.84 | 0.40 → 0.49 | 6742 → 6656 |
+| beater | car-side | 50 | minor | 3 → **>10** | >10 | >10 | 0.91 → 0.92 | 0.80 → 0.84 | 6763 → 6676 |
+| beater | car-side | 70 | minor | 2 → **>10** | >10 | >10 | 0.82 → 0.85 | 0.78 → 0.82 | 8720 → 8613 |
+| beater | car-side | 100 | degraded → **minor** | 1 → **8** | >10 | >10 | 0.75 → 0.80 | 0.72 → 0.77 | 9453 → 9100 |
+| beater | mixed | 50 | cosmetic | 2 → **5** | 8 → **>10** | >10 | 0.86 → 0.88 | 0.52 → 0.60 | 3252 → 3190 |
+| beater | mixed | 70 | minor | 2 | 3 → **6** | 10 → **>10** | 0.70 → 0.75 | 0.15 → 0.20 | 4442 → 4368 |
+| beater | mixed | 100 | degraded | 1 | 2 → **3** | 6 → **>10** | 0.33 → 0.46 | 0.13 → 0.14 | 9015 → 7832 |
+| cruiser | wall-front | 50 | cosmetic | 5 → **6** | >10 | >10 | 0.90 → 0.92 | 0.68 → 0.73 | 1970 → 1966 |
+| cruiser | wall-front | 70 | cosmetic | 3 | >10 | >10 | 0.79 → 0.83 | 0.30 → 0.41 | 3461 → 3442 |
+| cruiser | wall-front | 100 | minor | 2 | 2 → **>10** | 2 → **>10** | 0.52 → 0.60 | 0.18 → 0.20 | 7638 → 7585 |
+| cruiser | wall-offset | 50 | cosmetic | 5 | >10 | >10 | 0.90 → 0.91 | 0.64 → 0.71 | 3211 → 3167 |
+| cruiser | wall-offset | 70 | cosmetic | 3 | 5 → **>10** | 5 → **>10** | 0.79 → 0.83 | 0.26 → 0.37 | 3643 → 3617 |
+| cruiser | wall-offset | 100 | minor | 2 | >10 | >10 | 0.51 → 0.59 | 0.19 → 0.20 | 7200 → 7068 |
+| cruiser | wall-angle | 50 | cosmetic | 5 → **6** | >10 | >10 | 0.93 → 0.94 | 0.73 → 0.77 | 3204 → 3182 |
+| cruiser | wall-angle | 70 | minor | 4 | 7 → **>10** | >10 | 0.85 → 0.87 | 0.52 → 0.60 | 3860 → 3823 |
+| cruiser | wall-angle | 100 | minor | 2 | 3 → **5** | 5 | 0.66 → 0.71 | 0.18 → 0.20 | 9951 → 9791 |
+| cruiser | car-front | 50 | cosmetic | >10 | >10 | >10 | 0.98 → 0.99 | 0.95 → 0.95 | 228 → 217 |
+| cruiser | car-front | 70 | cosmetic | >10 | >10 | >10 | 0.96 → 0.96 | 0.88 → 0.90 | 814 → 803 |
+| cruiser | car-front | 100 | cosmetic | 8 | >10 | >10 | 0.92 → 0.93 | 0.76 → 0.80 | 1881 → 1867 |
+| cruiser | car-offset | 50 | cosmetic | >10 | >10 | >10 | 0.98 → 0.98 | 0.95 → 0.95 | 495 → 495 |
+| cruiser | car-offset | 70 | cosmetic | >10 | >10 | >10 | 0.96 → 0.97 | 0.90 → 0.92 | 1637 → 1626 |
+| cruiser | car-offset | 100 | cosmetic | 6 → **7** | >10 | >10 | 0.91 → 0.93 | 0.71 → 0.77 | 2268 → 2225 |
+| cruiser | car-side | 50 | cosmetic | 8 → **>10** | 8 → **>10** | 8 → **>10** | 0.95 → 0.96 | 0.85 → 0.88 | 2713 → 2853 |
+| cruiser | car-side | 70 | minor | >10 | >10 | >10 | 0.90 → 0.92 | 0.76 → 0.80 | 4372 → 4330 |
+| cruiser | car-side | 100 | minor | >10 | >10 | >10 | 0.80 → 0.84 | 0.71 → 0.75 | 8494 → 8446 |
+| cruiser | mixed | 50 | cosmetic | 8 | >10 | >10 | 0.90 → 0.92 | 0.71 → 0.75 | 1970 → 1966 |
+| cruiser | mixed | 70 | cosmetic | 3 | >10 | >10 | 0.79 → 0.83 | 0.30 → 0.42 | 3461 → 3442 |
+| cruiser | mixed | 100 | minor | 2 | 2 → **3** | 2 → **3** | 0.52 → 0.60 | 0.15 → 0.17 | 7638 → 7585 |
+
+Summary (mean over the 100 km/h rows plus wall-offset/wall-angle 70, `>10` counted as 11) of
+hits until **out**: sports car **2.7 → 4.5**, sedan 6.2 → 7.8, beater 4.0 → 5.5, cruiser **5.0 →
+8.7**. First-hit health loss at 70–100 km/h is ~20 % smaller (e.g. sports car wall 100: 0.67 →
+0.56 lost), bills -13 to +5 % (less component damage; the price scale is unchanged).
+
+**Scripted chase** (`damage_toughness chase`): one car takes, 12 s apart, a 70 km/h swipe, a PIT
+at 80, a 60 km/h ram, a 60 km/h angled wall, a 50 km/h T-bone, a 70 km/h offset wall, a 90 km/h
+swipe and an 80 km/h ram. Component health at the end, the time the engine (power < 0.85) and
+the steering (ratio < 0.85) are first impaired, and the bill:
+| car | health | engine | radiator | steering | worst susp. | worst wheel | power | steer ratio | engine impaired | steering impaired | wrecked | bill |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| hakone_gt | 0.23 → **0.37** | 0.74 → **0.76** | 0.00 | 0.00 | 0.52 → **0.63** | 0.64 → **0.73** | 0.79 → **0.82** | 0.50 | 60 s | 60 s | never | 12456 → **11754** |
+| debug_sedan | 0.34 → **0.47** | 0.75 → **0.84** | 0.00 → **0.62** | 0.00 → **0.78** | 0.52 → **0.74** | 0.65 → **0.81** | 0.81 → **0.89** | 0.50 → **0.91** | 60 s → **never** | 60 s → **never** | never | 11925 → **9516** |
+| junkyard_beater | 0.17 → **0.25** | 0.66 → **0.74** | 0.00 | 0.00 | 0.00 | 0.45 → **0.53** | 0.74 → **0.80** | 0.50 | 60 s | 60 s | never | 14834 → **15740** |
+| sentinel_cruiser | 0.51 → **0.56** | 0.81 | 0.71 → **0.68** | 0.79 → **0.86** | 0.61 | 0.70 | 0.88 → **0.87** | 0.91 → **0.94** | never → **84 s** | never | never | 10212 → **9330** |
+The sports car and the beater still lose the rack (half lock) on the 70 km/h offset wall at
+60 s: `degraded` stays on hit 2 at 70 km/h and hit 1 at 100 for most rows (the rack fails at
+4 × 6 cm of intrusion). That matches "degraded but drivable"; making it later needs a bigger
+fail threshold, which is what made hard hits never end the car. The cruiser's "engine impaired
+84 s" is power 0.85 → 0.84 on the 8th contact (0.88 before at the same point but crossed late).
+
+### 5. Result vs the targets
+- **50 km/h wall = cosmetic + minor mechanical**: met for all four cars, all wall kinds (hit 1
+  cosmetic or minor, health 0.87–0.92). New scenario `damage/arcade_beater_frontal_50`.
+- **70 km/h = degraded but drivable**: met — hit 1 at 70 is "minor" or less for every car and
+  kind (the beater's offset 70 was "degraded"), nothing wrecks within 2 hits. New scenario
+  `damage/arcade_sports_frontal_70` (health 0.74–0.9, measured 0.78; old table 0.72).
+- **Wrecked after ~4–6 hard hits**: sports car out after 4 / 5 / 3 hits at 100 km/h (front /
+  offset / angle; was 2 / 3 / 2), 4 / 4 at 70 offset / angle (was 3 / 3), mixed 100 on hit 7
+  (was 3). Square 70 km/h wall hits and mixed 70 leave every car limping (health ≈ 0.16–0.2, half
+  steering lock) but not ended within 10 — the same was already true for the sedan, beater and
+  cruiser before. The damage-only unit test (mixed 80 km/h, sedan) now limps from hit 3 and is
+  ended on hit 7 (was 3, the 0.6 m cabin limit).
+- **Police ≥ sports car**: met for degraded / out in every row but one — mixed 100 ends the
+  cruiser on hit 3 (its **driveshaft**: `intrusion_fail_m` 0.10, the same as the civilian cars,
+  not part of the police package), where the sports car goes to 7. On the wreck column alone
+  wall-angle 100 also reads cruiser 5 vs sports car >10 (the sports car is out — health below
+  0.15 — on hit 3, the cruiser on hit 5; it then loses power on the driveshaft too). Request to H
+  below. Everywhere else the cruiser is at least as tough (capped mean out 8.7 vs 4.5).
+- **Simulation unchanged**: `damage_toughness sim` table and chase are byte-identical before /
+  after; `sim.toml` and every Sim code path untouched.
+
+### 6. Tests, scenarios, goldens
+- `wp_damage`: `arcade_hard_hits_degrade_and_several_wreck_the_car` now cycles front / side /
+  offset / rear at 80 km/h for up to 10 hits and expects the car limping (rack failed) by hit 2–4
+  and ended (wrecked or health < 0.15) on hit 4–7 (measured 3 / 7); `mode_tables_…` asserts the
+  new multipliers; barrier scenario `frontal_arcade` 56 km/h health max 0.9 → 0.93 (now 0.90).
+- simcli: new `damage/arcade_sports_frontal_70`, `damage/arcade_beater_frontal_50`; existing
+  `damage/*` ranges still hold. All simcli scenarios: 77 pass, 2 fail —
+  `police_tunnel_escape_founders_cut` and `…_control` — which fail identically on the base build
+  (same outcomes and times with the round-12b values), not caused by this work.
+- Goldens: `[bless]` `320b2d7` re-blesses only the 13 that pass on the base build and changed
+  here (`audio_sideswipe_scrape`, `crash_barrier_frontal`, `crash_head_on`, the 6 existing
+  `damage_arcade_*`, `golden_barrier_56kmh_arcade`, `golden_tbone`, `panels_side_swipe_door`,
+  `police_sideswipe_patrol_night`) plus the 2 new ones. **Lead:** 33 goldens already mismatch on
+  the base build (lead/round12 merged into ws/damage) and are left for you: city_* ×7,
+  golden_city_chase, golden_night_pursuit_escape, opponent_* ×4, panels_frontal_50_barrier_arcade,
+  panels_frontal_50_car_arcade, panels_frontal_56_hood, police_sideswipe_patrol_day,
+  police_tunnel_escape_founders_cut(_control), race_* ×5, weather_* ×5, world_traffic_soak* ×4.
+- Checks (2026-10-20, `CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0`):
+  `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings` and
+  `cargo build --target wasm32-unknown-unknown -p wp_wasm` clean; `wp_damage` and `wp_economy`
+  tests green. `cargo test --workspace --no-fail-fast` red only on tests that fail the same way
+  on the base build (round-12b values, checked): `simcli goldens_match` (the 33 above),
+  `wp_opponent live_police_chase_ends_in_escape_or_capture_without_stuck_cars`, `wp_race`
+  `hollins_hill_sprint`, `loop9_circuit`, `lantern_checkpoint_draws_the_police`.
+
+### Requests
+- **H (cars)**: `sentinel_cruiser` driveshaft `intrusion_fail_m` 0.10 → ~0.14 with the rest of
+  the police package (HD cooling / steering already scaled ×1.5): it is the one row where the
+  cruiser ends before the sports car (three 100 km/h hits; also the driveshaft wreck in
+  wall-angle 100). Also in `docs/integration/cars.md`.
+- **G (economy)**: (1) unchanged — let the career proxy follow `wp_damage` health so Arcade
+  `total_loss_health` can move. (2) New: the task asked for cheaper Arcade repairs; I tried
+  `repair_cost_scale` 0.4 and it fails `garage_repair::arcade_repairs_cost_half_of_simulation`,
+  `roster_prices::roster_table_and_feel_targets` (lucciola_350 full wreck 59 % < 60 % of value)
+  and `session::recorded_capture_arcade_impounds_bills_and_keeps_damage` (rounding). Your call:
+  if you want Arcade bills at 0.4 × Sim, adjust those targets and I flip the table value.
+- **Lead**: contract request #10 (move `arcade_structural_health_scale` etc. into `ModeTable`)
+  stands; value now 0.42.
+### Changes outside my crates
+`apps/simcli/examples/damage_toughness.rs` (measurement only), two new
+`apps/simcli/scenarios/damage/*.ron` + goldens, `docs/integration/cars.md` (request row).
