@@ -130,6 +130,9 @@ async function main(): Promise<void> {
       console.warn("career not saved", e);
     }
   };
+  /** B05: the save was written mid-pursuit (the tab was closed during a chase); loading it
+   * settled the run as a bust. Shown in the garage once the testbed is up. */
+  let abandonedBust: string | null = null;
   {
     const text = loadCareerText();
     let loaded = false;
@@ -137,6 +140,16 @@ async function main(): Promise<void> {
       try {
         sim.careerLoad(text);
         loaded = true;
+        const bust = sim.careerTakeAbandoned();
+        if (bust) {
+          const fines = bust.ledger.filter((l) => l.cash_delta < 0).reduce((t, l) => t - l.cash_delta, 0);
+          const has = (r: string) => bust.ledger.some((l) => l.reason === r);
+          const car = has("CarSeized") ? "your car was seized" : has("CarImpounded") ? "your car is in the pound" : "";
+          abandonedBust =
+            `Busted: the game was closed during a pursuit, so the police caught you. ` +
+            `Fines and fees $${fines.toLocaleString()}${car ? `; ${car}` : ""}.`;
+          persistCareer();
+        }
       } catch (e) {
         console.warn("career save unreadable; kept aside, starting a new career", e);
         keepUnreadable(text);
@@ -1001,6 +1014,7 @@ async function main(): Promise<void> {
     meshTimings,
   };
   requestAnimationFrame(frame);
+  if (abandonedBust) openGarage(abandonedBust);
 }
 
 main().catch((e) => {

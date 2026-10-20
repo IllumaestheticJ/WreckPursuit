@@ -50,6 +50,9 @@ use crate::session::Session;
 /// each night rolls differently.
 const CAREER_SEED_SALT: u64 = 0xCA4E_E400;
 
+/// Extra RNG salt for settling a run abandoned mid-pursuit (`Career::load_json`).
+const ABANDONED_SEED_SALT: u64 = 0xAB_A4D0;
+
 /// Ledger lines in the garage view.
 const VIEW_LEDGER_LINES: usize = 25;
 
@@ -379,6 +382,9 @@ pub struct Career {
     profile: CareerProfile,
     run: Option<ActiveRun>,
     dealer: Option<Vec<DealerCar>>,
+    /// A run the game was closed in during a pursuit, settled as a bust when the save was
+    /// loaded (B05); taken once by the UI ([`Career::take_abandoned`]).
+    abandoned: Option<RunClose>,
 }
 
 fn e2s(e: EconomyError) -> String {
@@ -478,17 +484,44 @@ impl Career {
             profile,
             run: None,
             dealer: None,
+            abandoned: None,
         }
     }
 
-    /// Load a save (see `wp_economy::profile` for versions and migration).
+    /// Load a save (see `wp_economy::profile` for versions and migration). A save written
+    /// during a pursuit (the game was closed mid-chase) is settled as a bust here
+    /// ([`Economy::settle_abandoned_run`]); the result waits in [`Career::take_abandoned`].
     pub fn load_json(econ: Economy, text: &str) -> Result<Self, String> {
-        let p = CareerProfile::from_json(text).map_err(|e| e.to_string())?;
+        let mut p = CareerProfile::from_json(text).map_err(|e| e.to_string())?;
         for (uid, v) in &p.lattices {
             serde_json::from_str::<FullDamageSnapshot>(v)
                 .map_err(|e| format!("car {uid}: bad lattice damage: {e}"))?;
         }
-        Ok(Self::from_profile(econ, p))
+        let first_seq = p.account.next_event_seq;
+        let mut rng = wp_math::Rng::new(
+            CAREER_SEED_SALT ^ ABANDONED_SEED_SALT ^ ((p.account.day as u64) << 32),
+        );
+        let settled = econ
+            .settle_abandoned_run(&mut p, &mut rng)
+            .map(|_| RunClose {
+                end: RunEnd::Captured,
+                carried_heat: p.carry.heat,
+                cash: p.account.cash,
+                ledger: p
+                    .ledger
+                    .iter()
+                    .filter(|e| e.seq >= first_seq)
+                    .map(LedgerLine::of)
+                    .collect(),
+            });
+        let mut career = Self::from_profile(econ, p);
+        career.abandoned = settled;
+        Ok(career)
+    }
+
+    /// The bust settled on load for a run the game was closed in during a pursuit, once.
+    pub fn take_abandoned(&mut self) -> Option<RunClose> {
+        self.abandoned.take()
     }
 
     /// The profile (between runs; during a run the account lives in the session, see
@@ -1351,6 +1384,22 @@ impl Career {
                 p.lattices.insert(start.car.0, value);
             }
         }
+        // B05: closing the game is never an escape. Saved in a pursuit, the save carries a
+        // marker the next load settles as a bust; merely wanted, it carries the heat a free
+        // end of the run would (no penalty when the police are not on the player).
+        let over = s.run().is_some_and(|r| r.is_over());
+        if let Some(r) = player.and_then(|id| s.sim().police().racer(id)) {
+            if r.pursued() && !over && p.account.car(start.car).is_some() {
+                p.run_in_pursuit = Some(wp_economy::AbandonedRun {
+                    car: start.car,
+                    level: r.level,
+                    heat: r.heat,
+                    driven_ticks: s.tick(),
+                });
+            } else if !over {
+                p.carry.heat = self.econ.carry_heat(r.heat, RunEnd::Free);
+            }
+        }
         self.econ.tidy_profile(&mut p);
         p
     }
@@ -1454,6 +1503,13 @@ fn detach_session() {
         }
         Ok::<_, String>(())
     });
+}
+
+/// The bust settled when the save was loaded because the game had been closed during a
+/// pursuit (B05): [`RunClose`] JSON once, then `null`.
+#[wasm_bindgen]
+pub fn career_take_abandoned_json() -> Result<String, JsValue> {
+    with_career(|c| Ok(json(&c.take_abandoned())))
 }
 
 /// A career exists.

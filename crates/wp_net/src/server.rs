@@ -22,10 +22,13 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use wp_contracts::{
     AccountId, AssistProfile, CaptainCommand, CaptainError, EconomyReason, EntityId, PlayerId,
-    PoliceEvent, RaceCommand, RaceType, Role, SimEvent, TrafficAgentSnapshot, UnitId, UnitOrder,
-    VehicleInput, VehicleState, WeatherSnapshot, CONTRACT_VERSION,
+    PoliceEvent, PursuitOutcome, RaceCommand, RaceType, Role, SimEvent, TrafficAgentSnapshot,
+    UnitId, UnitOrder, VehicleInput, VehicleState, WantedLevel, WeatherSnapshot, CONTRACT_VERSION,
 };
-use wp_economy::{AccountStore, EventReason, InMemoryStore, PlayerAccount};
+use wp_economy::{
+    AccountStore, CarLocation, CarUid, DamageSnapshot, EventReason, InMemoryStore, OwnedCar,
+    PlayerAccount,
+};
 use wp_math::Rng;
 
 use crate::interest::{classify, InterestState, Subject, Viewer};
@@ -42,8 +45,43 @@ use crate::snapshot::{DeltaVehicle, OwnState};
 use crate::wire::ByteWriter;
 use crate::{Channel, DOWNLINK_BUDGET_BPS, TICKS_PER_NET_TICK, TICK_HZ};
 
+/// How long a **wanted or pursued** racer's car is held after its player disconnects before
+/// the pursuit ends as `Captured` and the bust is settled (60 s; B05). The one place this
+/// number lives. Players who are not wanted keep [`ServerConfig::reconnect_window_ticks`].
+pub const WANTED_DISCONNECT_GRACE_TICKS: u64 = 60 * TICK_HZ;
+
 /// Net ticks between bit-exact own-vehicle snapshots (12 → 5 Hz).
 pub const OWN_FULL_EVERY_NET_TICKS: u64 = 12;
+
+/// Input of a disconnected player's car while it is moving: full brake.
+const HOLD_BRAKE: VehicleInput = VehicleInput {
+    steer: 0.0,
+    throttle: 0.0,
+    brake: 1.0,
+    handbrake: 0.0,
+    clutch: 0.0,
+    gear_up: false,
+    gear_down: false,
+    horn: false,
+    headlights: false,
+    siren: false,
+    tool_use: 0,
+};
+
+/// Input of a disconnected player's car at a standstill: light pedal + handbrake.
+const HOLD_STILL: VehicleInput = VehicleInput {
+    steer: 0.0,
+    throttle: 0.0,
+    brake: 0.4,
+    handbrake: 1.0,
+    clutch: 0.0,
+    gear_up: false,
+    gear_down: false,
+    horn: false,
+    headlights: false,
+    siren: false,
+    tool_use: 0,
+};
 
 /// Transport-level connection handle chosen by the instance.
 pub type ConnId = u32;
@@ -61,6 +99,10 @@ pub struct ServerConfig {
     pub police_car: String,
     /// How long a disconnected player's car stays in the world, ticks (default 30 s).
     pub reconnect_window_ticks: u64,
+    /// Grace for a disconnected racer who is wanted or pursued, ticks (default
+    /// [`WANTED_DISCONNECT_GRACE_TICKS`]): the car is held (braking to a stop, heat and
+    /// pursuit frozen); a reconnect resumes it, expiry counts as a capture.
+    pub wanted_grace_ticks: u64,
     /// Down-link budget per client, bytes/s (default 40 000).
     pub downlink_budget_bps: usize,
     /// Interval between lattice hashes per vehicle, ticks (default 2 s).
@@ -98,6 +140,7 @@ impl Default for ServerConfig {
             racer_car: "debug_sedan".into(),
             police_car: "debug_coupe".into(),
             reconnect_window_ticks: 30 * TICK_HZ,
+            wanted_grace_ticks: WANTED_DISCONNECT_GRACE_TICKS,
             downlink_budget_bps: DOWNLINK_BUDGET_BPS,
             lattice_hash_interval_ticks: 2 * TICK_HZ,
             spawn_points: grid_spawn_points(64, 8.0),
@@ -160,6 +203,10 @@ pub struct ServerStats {
     pub inputs_rejected: u64,
     /// Undecodable frames received.
     pub decode_errors: u64,
+    /// Wanted racers captured because their player left (grace expired or quit, B05).
+    pub abandoned_captures: u64,
+    /// Busts settled on player accounts (fine / impound), abandoned ones included.
+    pub busts_settled: u64,
     /// Lattice snapshots sent in response to hash mismatches.
     pub lattice_resyncs: u64,
     /// Final lattice snapshots sent after a provisional one (model settled since).
@@ -251,6 +298,11 @@ struct Player {
     last_input: VehicleInput,
     ever_sent_input: bool,
     disconnected_at: Option<u64>,
+    /// Disconnected while wanted / pursued: the car and its pursuit are held for
+    /// [`ServerConfig::wanted_grace_ticks`] and expiry is a capture.
+    wanted_hold: bool,
+    /// Input for the held car while disconnected (brake to a stop, then hold it there).
+    hold_input: VehicleInput,
     view: View,
     input_rate: RateWindow,
     lattice_rate: RateWindow,
@@ -301,6 +353,8 @@ pub struct ServerInstance<S: NetSim> {
     /// Last weather broadcast and its tick.
     last_weather: Option<(u64, WeatherSnapshot)>,
     human_captain: bool,
+    /// Economy tables for settling busts (loaded on the first one).
+    econ: Option<Box<wp_economy::Economy>>,
     outgoing: Vec<Outgoing>,
     net_ticks: u64,
     stats: ServerStats,
@@ -330,6 +384,7 @@ impl<S: NetSim> ServerInstance<S> {
             traffic_now: None,
             last_weather: None,
             human_captain: false,
+            econ: None,
             outgoing: Vec::new(),
             net_ticks: 0,
             stats: ServerStats::default(),
@@ -401,19 +456,36 @@ impl<S: NetSim> ServerInstance<S> {
         c
     }
 
-    /// Transport closed. A joined player keeps their car for the reconnect window.
+    /// Transport closed. A joined player keeps their car for the reconnect window; a racer
+    /// who is wanted or pursued gets [`ServerConfig::wanted_grace_ticks`] instead, with the
+    /// car held and its heat / pursuit frozen, and expiry counts as a capture (B05).
     pub fn disconnect(&mut self, conn: ConnId) {
         self.pending_joins.remove(&conn);
         if let Some(Some(pid)) = self.conns.remove(&conn) {
             let tick = self.sim.tick();
+            let mut hold = None;
             if let Some(p) = self.players.get_mut(&pid) {
                 if p.conn == Some(conn) {
                     p.conn = None;
                     p.disconnected_at = Some(tick);
                     p.inputs.clear();
+                    p.hold_input = HOLD_BRAKE;
+                    hold = p.vehicle;
                 }
             }
+            if let Some(v) = hold.filter(|v| self.is_wanted_racer(*v)) {
+                self.sim.hold_racer(v, true);
+                self.players.get_mut(&pid).expect("player").wanted_hold = true;
+            }
         }
+    }
+
+    /// Whether `v` is a racer seat whose driver is wanted or in a pursuit.
+    fn is_wanted_racer(&self, v: EntityId) -> bool {
+        self.owned
+            .get(&v)
+            .is_some_and(|(_, k)| *k == EntityKind::Racer)
+            && self.sim.wanted_or_pursued(v)
     }
 
     /// Frames to send since the last call.
@@ -673,6 +745,8 @@ impl<S: NetSim> ServerInstance<S> {
                 last_input: VehicleInput::default(),
                 ever_sent_input: false,
                 disconnected_at: None,
+                wanted_hold: false,
+                hold_input: HOLD_BRAKE,
                 view: View::default(),
                 input_rate: RateWindow::default(),
                 lattice_rate: RateWindow::default(),
@@ -695,6 +769,12 @@ impl<S: NetSim> ServerInstance<S> {
         p.view = View::default();
         p.inputs.clear();
         p.last_input = VehicleInput::default();
+        if std::mem::take(&mut p.wanted_hold) {
+            // Back within the grace: the same pursuit and heat resume.
+            if let Some(v) = p.vehicle {
+                self.sim.hold_racer(v, false);
+            }
+        }
         let role = self.roles.role(pid).unwrap_or(Role::Spectator);
         self.welcome(pid);
         self.send_role(pid, role);
@@ -814,7 +894,11 @@ impl<S: NetSim> ServerInstance<S> {
                 }
             }
             ClientMsg::RaceCommand(cmd) => self.race_command(pid, cmd, tick),
-            ClientMsg::Bye => self.remove_player(pid),
+            ClientMsg::Bye => {
+                // Quitting while wanted is a bust, not an escape (B05).
+                self.capture_abandoned(pid);
+                self.remove_player(pid);
+            }
         }
     }
 
@@ -1211,6 +1295,114 @@ impl<S: NetSim> ServerInstance<S> {
         self.send_account(pid);
     }
 
+    /// End a wanted racer's pursuit as `Captured` because its player left (grace expired or
+    /// `Bye`) and settle the bust. No-op for players who are not wanted racers.
+    fn capture_abandoned(&mut self, pid: PlayerId) {
+        let Some(v) = self.players.get(&pid).and_then(|p| p.vehicle) else {
+            return;
+        };
+        if !self.is_wanted_racer(v) {
+            return;
+        }
+        if let Some((level, _capturer)) = self.sim.capture_abandoned(v) {
+            self.stats.abandoned_captures += 1;
+            self.settle_capture(pid, level, false);
+        }
+    }
+
+    /// Settle a bust on the player's account like any capture (`wp_economy::handle_capture`:
+    /// fine, bail, rep loss, car impounded / seized / destroyed by mode). Each ledger event is
+    /// committed and sent to the owner as a typed `SimEvent::Economy`.
+    ///
+    /// Server accounts do not own cars yet (everyone drives `racer_car`), so the car being
+    /// driven is registered in the account's garage first if it is not there.
+    fn settle_capture(&mut self, pid: PlayerId, level: WantedLevel, total_loss: bool) {
+        let tick = self.sim.tick();
+        let car_id = self
+            .players
+            .get(&pid)
+            .map(|p| p.car_id.clone())
+            .unwrap_or_default();
+        let spec = self.sim.car_spec(&car_id);
+        let mode = self.sim.damage_mode();
+        let mut a = self.account(pid);
+        let econ = self
+            .econ
+            .get_or_insert_with(|| Box::new(wp_economy::Economy::embedded()));
+        let car = match a
+            .garage
+            .iter()
+            .find(|c| c.def_id == car_id && c.location == CarLocation::Garage)
+        {
+            Some(c) => c.uid,
+            None => {
+                let f = &econ.market.floor_car;
+                let spec = spec.unwrap_or_else(|| wp_economy::CarSpec {
+                    def_id: car_id.clone(),
+                    class: f.class,
+                    base_price: f.base_price,
+                });
+                let uid = CarUid(a.next_car_uid);
+                a.next_car_uid += 1;
+                a.garage.push(OwnedCar {
+                    uid,
+                    def_id: spec.def_id,
+                    class: spec.class,
+                    base_price: spec.base_price,
+                    mods: Vec::new(),
+                    damage: DamageSnapshot::pristine(),
+                    location: CarLocation::Garage,
+                    insurance: None,
+                });
+                uid
+            }
+        };
+        let ctx = wp_economy::CaptureContext {
+            mode,
+            wanted: level,
+            car,
+            total_loss,
+            session_violations: Default::default(),
+        };
+        // Own stream per bust so reconnect tokens stay independent of captures.
+        let mut rng = Rng::new(self.cfg.seed ^ tick.rotate_left(17) ^ u64::from(pid.0));
+        match econ.handle_capture(&mut a, &ctx, &mut rng) {
+            Ok((_outcome, events)) => {
+                if self.accounts.commit(&a, &events).is_ok() {
+                    self.stats.busts_settled += 1;
+                    for ev in &events {
+                        self.pending_events
+                            .push((tick, SimEvent::Economy(ev.to_contract())));
+                    }
+                }
+            }
+            Err(e) => {
+                // Should not happen (the car was just made sure of); keep the account as is.
+                let _ = e;
+            }
+        }
+        if self.players.contains_key(&pid) {
+            self.send_account(pid);
+        }
+    }
+
+    /// Held cars of disconnected players: brake to a stop, then hold it with a light pedal
+    /// and the handbrake (a full pedal at a standstill engages reverse in `wp_vehicle`'s
+    /// automatic gearbox).
+    fn update_hold_inputs(&mut self) {
+        if self.players.values().all(|p| p.conn.is_some()) {
+            return;
+        }
+        let states: BTreeMap<EntityId, VehicleState> = self.sim.vehicles().into_iter().collect();
+        for p in self.players.values_mut().filter(|p| p.conn.is_none()) {
+            let Some(s) = p.vehicle.and_then(|v| states.get(&v)) else {
+                continue;
+            };
+            let speed = (s.lin_vel[0] * s.lin_vel[0] + s.lin_vel[1] * s.lin_vel[1]).sqrt();
+            p.hold_input = if speed > 1.0 { HOLD_BRAKE } else { HOLD_STILL };
+        }
+    }
+
     // -----------------------------------------------------------------------------------------
     // Ticking
     // -----------------------------------------------------------------------------------------
@@ -1230,14 +1422,22 @@ impl<S: NetSim> ServerInstance<S> {
             .players
             .values()
             .filter(|p| {
-                p.disconnected_at
-                    .is_some_and(|t| tick >= t + self.cfg.reconnect_window_ticks)
+                let window = if p.wanted_hold {
+                    self.cfg.wanted_grace_ticks
+                } else {
+                    self.cfg.reconnect_window_ticks
+                };
+                p.disconnected_at.is_some_and(|t| tick >= t + window)
             })
             .map(|p| p.id)
             .collect();
         for pid in expired {
+            if self.players[&pid].wanted_hold {
+                self.capture_abandoned(pid);
+            }
             self.remove_player(pid);
         }
+        self.update_hold_inputs();
 
         let states: BTreeMap<EntityId, VehicleState> = self.sim.vehicles().into_iter().collect();
         let positions: BTreeMap<PlayerId, [f32; 2]> = self
@@ -1322,10 +1522,7 @@ impl<S: NetSim> ServerInstance<S> {
                     p.last_input = i;
                     i
                 }
-                None if p.conn.is_none() => VehicleInput {
-                    brake: 1.0,
-                    ..Default::default()
-                },
+                None if p.conn.is_none() => p.hold_input,
                 None => {
                     if p.ever_sent_input {
                         missing += 1;
@@ -1367,6 +1564,22 @@ impl<S: NetSim> ServerInstance<S> {
                 | SimEvent::Race(_)
                 | SimEvent::Economy(_)
                 | SimEvent::WeatherChanged { .. }) => {
+                    if let SimEvent::Police(PoliceEvent::PursuitEnded {
+                        racer,
+                        outcome,
+                        level,
+                        ..
+                    }) = &e
+                    {
+                        // A bust of a player's racer (an abandoned car's was settled when
+                        // it was captured and its owner is gone by now).
+                        if outcome.is_capture() {
+                            if let Some((pid, EntityKind::Racer)) = self.owned.get(racer).copied() {
+                                let total_loss = *outcome == PursuitOutcome::CapturedTotalLoss;
+                                self.settle_capture(pid, *level, total_loss);
+                            }
+                        }
+                    }
                     self.pending_events.push((t, e));
                     continue;
                 }
