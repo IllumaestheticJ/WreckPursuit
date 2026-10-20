@@ -454,7 +454,8 @@ aggressive: 0 civilian–civilian collisions (`tests/city_v2.rs`, ignored).
 - `CityMap::ground_height` / `MapGround` do not know the raised sidewalks (roads, junctions,
   terrain only); `wp_sim` lifts spawns onto a sidewalk top under them. Corner fills follow
   the kerb curve exactly (`docs/integration/junctions.md`); only where a sidewalk end lies
-  along the kerb curve (one corner of Port Vesper, reported in `SidewalkMesh::cell_corners`)
+  along the kerb curve or between overlapping roads (one corner of Port Vesper, node 81,
+  reported in `SidewalkMesh::cell_corners`)
   and where a strip runs onto pavement mid-strip does the edge follow pavement in 0.5 m steps.
   A sidewalk ending next to a road without one (highways) leaves a tapering wedge of ground
   ≤ 30 cm wide at the corner (counted in `surface::tests`).

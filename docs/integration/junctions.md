@@ -83,7 +83,7 @@ built), close-ups (top, holes, street level) of Vesper bends 145 / 138, dead end
 - Junction height is a plane through the corners (+ rim blending): on saddle-shaped junctions
   the lane connectors (linear between lane ends) are up to 0.15 m off the surface; kinematic
   traffic drawn on the connectors can float / sink that much in the middle of a junction.
-- One cell-filled corner (Port Vesper node 70, a strip end lying along the kerb) and node 81's
+- One cell-filled corner (Port Vesper node 81, between two of its overlapping roads) and node 81's
   overlapping ribbons (ribbons lie on the patch: small steps between them).
 - Sidewalk ends next to highways leave a tapering wedge of ground (≤ 30 cm) at the corner.
 - Highway corners pushed out by turning paths have a slightly toothed edge (2° steps).
