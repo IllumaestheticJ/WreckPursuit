@@ -290,16 +290,25 @@ export class InstancedCar {
   /**
    * Write instance `i` (matrix and colours) without touching the others. Colours are the
    * greybox livery / TAIL / BAR values; the art style maps them here (styledPaint, styledLamp),
-   * so every user of InstancedCar (fleet, parked props) gets the palette.
+   * so every user of InstancedCar (fleet, parked props) gets the palette. `lit = false` draws
+   * dark, unlit lenses (parked cars: no head or tail lights, playtest row 83).
    */
-  put(i: number, m: THREE.Matrix4, paint: THREE.Color, tail: THREE.Color, bar: THREE.Color | null): void {
-    this.putHex(i, m, paint.getHex(), tail.getHex(), bar ? bar.getHex() : null);
+  put(i: number, m: THREE.Matrix4, paint: THREE.Color, tail: THREE.Color, bar: THREE.Color | null, lit = true): void {
+    this.putHex(i, m, paint.getHex(), tail.getHex(), bar ? bar.getHex() : null, lit);
   }
 
   /** `put` with greybox hex colours (runs per car per frame: no allocation, no iterator). */
-  putHex(i: number, m: THREE.Matrix4, paint: Hex, tail: Hex, bar: Hex | null): void {
+  putHex(i: number, m: THREE.Matrix4, paint: Hex, tail: Hex, bar: Hex | null, lit = true): void {
     const meshes = this.meshes;
     for (let k = 0; k < meshes.length; k++) meshes[k].setMatrixAt(i, m);
+    if (!lit) {
+      const low = artStyle.lowpoly;
+      this.paint.setColorAt(i, tmpPaint.setHex(low ? styledPaint(paint) : paint));
+      this.tail.setColorAt(i, tmpTail.setHex(UNLIT_TAIL));
+      this.head.setColorAt(i, tmpHeadStyled.setHex(UNLIT_HEAD));
+      if (this.bar) this.bar.setColorAt(i, low ? styledLamp(tmpBar, BAR.off) : tmpBar.setHex(BAR.off));
+      return;
+    }
     if (artStyle.lowpoly) {
       this.paint.setColorAt(i, tmpPaint.setHex(styledPaint(paint)));
       this.tail.setColorAt(i, styledLamp(tmpTail, tail));
@@ -336,6 +345,9 @@ export interface FleetMaterials {
   lamp: THREE.Material;
 }
 
+/** Lens colours of a car with its lights off (below 1, so they never reach the bloom pass). */
+const UNLIT_TAIL = 0x3a0c0c;
+const UNLIT_HEAD = 0x3c3b36;
 const tmpBar = new THREE.Color();
 const tmpHead = new THREE.Color(HEAD);
 const tmpPaint = new THREE.Color();

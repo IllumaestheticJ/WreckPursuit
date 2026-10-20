@@ -30,6 +30,9 @@ pub const ROAD_HALF_WIDTH_M: f32 = 5.0;
 /// (a pack of street racers is one call), m.
 const CALL_MERGE_M: f32 = 200.0;
 
+/// World contacts closer together than this are one static-geometry episode, s.
+const STATIC_EPISODE_S: f32 = 1.0;
+
 /// Spots tried per pool spawn before giving up until the next think step.
 const SPAWN_TRIES: usize = 8;
 
@@ -626,6 +629,10 @@ impl PoliceSystem {
             let Some(i) = self.unit_index_by_entity(me) else {
                 continue;
             };
+            if other == wp_contracts::WORLD_ENTITY {
+                let n = [normal[0] * sign, normal[1] * sign, normal[2] * sign];
+                self.note_static_hit(i, point, n);
+            }
             let st = &mut self.units[i].unstick;
             if other == wp_contracts::WORLD_ENTITY {
                 st.world_contact = Some(crate::stuck::WorldContact {
@@ -637,6 +644,57 @@ impl PoliceSystem {
                 st.car_contact = Some(now);
             }
         }
+    }
+
+    /// Log a new static-geometry contact episode of unit `i` (`PoliceStats::static_hits`):
+    /// the first world contact after [`STATIC_EPISODE_S`] without one. Ground contacts
+    /// (normal mostly vertical) are not hits.
+    fn note_static_hit(&mut self, i: usize, point: [f32; 3], normal: [f32; 3]) {
+        let now = self.now;
+        let u = &self.units[i];
+        if normal[2].abs() >= 0.6 {
+            return;
+        }
+        let fresh = u
+            .unstick
+            .world_contact
+            .is_none_or(|w| now.since(w.at) > STATIC_EPISODE_S || w.normal[2].abs() >= 0.6);
+        if !fresh {
+            return;
+        }
+        let p = [point[0], point[1]];
+        let h = point[2] - u.body.alt_m;
+        let kind = if self.props.nearest(p).is_some_and(|d| d <= 0.6) {
+            crate::stuck::StuckCause::ParkedProp
+        } else if h < 0.35 {
+            let near_junction = self
+                .graph
+                .nodes
+                .iter()
+                .any(|n| n.junction && dist(n.pos, p) <= 22.0);
+            if near_junction {
+                crate::stuck::StuckCause::JunctionStep
+            } else {
+                crate::stuck::StuckCause::Kerb
+            }
+        } else {
+            crate::stuck::StuckCause::Wall
+        };
+        let pursuing = matches!(
+            u.assignment,
+            Assignment::Pursue { .. } | Assignment::Intercept { .. }
+        );
+        let building = self.walls.nearest(p).is_some_and(|d| d <= 1.5);
+        self.stats.static_hits.push(crate::StaticHit {
+            unit: u.id,
+            at: now,
+            pos: p,
+            kind,
+            speed_mps: u.body.speed,
+            pursuing,
+            building,
+            turning: u.unstick.swinging() || u.unstick.reversing(),
+        });
     }
 
     /// Record a racer contact on unit `i`. `apply_damage` is used by the built-in driver
@@ -666,8 +724,32 @@ impl PoliceSystem {
         self.stats.racer_contacts += 1;
         let mode = self.setup.mode;
         let coef = self.cfg.pursuit.unit.contact_health_per_kmps2.get(mode);
-        let cost = self.cfg.pursuit.risk.cost_collision;
+        // A contact the unit meant (PIT, ram, box-in on its target) costs less risk, and the
+        // unit re-engages after `chase.reengage_s`.
+        let u = &self.units[i];
+        let meant = u.assignment.target() == Some(racer)
+            && matches!(u.tactic, Tactic::Pit | Tactic::Ram(_) | Tactic::BoxIn(_));
+        let cost = if meant {
+            self.cfg.pursuit.chase.tactic_contact_cost
+        } else {
+            self.cfg.pursuit.risk.cost_collision
+        };
+        match u.tactic {
+            Tactic::Pit if meant => {
+                self.stats.pit_attempts += 1;
+                self.pending.push(PoliceEvent::PitAttempt {
+                    unit: u.id,
+                    target: racer,
+                });
+            }
+            Tactic::Ram(_) if meant => self.stats.rams += 1,
+            _ => {}
+        }
+        let reengage = self.cfg.pursuit.chase.reengage_s;
         let u = &mut self.units[i];
+        if meant {
+            u.pit_ready = now.plus(reengage);
+        }
         u.racer_contact = true;
         u.risk -= cost;
         if apply_damage {
@@ -690,13 +772,27 @@ impl PoliceSystem {
         if u.assignment.target() == Some(racer)
             && matches!(
                 u.tactic,
-                Tactic::Pit | Tactic::BoxIn(_) | Tactic::RollingBlock
+                Tactic::Pit | Tactic::BoxIn(_) | Tactic::RollingBlock | Tactic::Ram(_)
             )
         {
             return;
         }
         let key = (u.id, racer);
         let uv = u.body.vel();
+        // A unit chasing this racer that drives into it (closing from behind or the side) hit
+        // the racer, not the other way round.
+        if u.assignment.target() == Some(racer) {
+            let rv = self
+                .prev_vel
+                .get(&racer)
+                .copied()
+                .unwrap_or(self.racers[&racer].vel);
+            let to_racer = crate::graph::sub(xy(self.racers[&racer].pos), u.body.pos);
+            let closing = crate::graph::dot(crate::graph::sub(uv, [rv[0], rv[1]]), to_racer);
+            if closing > 0.0 {
+                return;
+            }
+        }
         // The racer's velocity on the previous step, i.e. just before this tick's contact (by the
         // time a contact is reported, a head-on hit has stopped the racer and a unit driving
         // into a parked racer has shoved it).
@@ -895,6 +991,7 @@ impl PoliceSystem {
         self.expire_tools();
         self.plan_units(world, tdt);
         self.refresh_junctions(world);
+        self.refresh_walls();
         self.cleanup_units(world);
     }
 
@@ -940,6 +1037,23 @@ impl PoliceSystem {
                 crate::avoid::JunctionAhead { s, light, turn }
             });
             self.units[i].avoid.junction = junction;
+        }
+    }
+
+    /// Static feelers for every physical ground unit (row 66, [`crate::walls`]).
+    pub(crate) fn refresh_walls(&mut self) {
+        let cfg = &self.cfg.pursuit.avoid;
+        for u in &mut self.units {
+            u.avoid.wall = if self.feelers
+                && u.kind == UnitKind::Car
+                && !u.internal
+                && u.player.is_none()
+                && !u.wrecked
+            {
+                crate::walls::feel(&self.walls, u.body.pos, u.body.heading, u.body.speed, cfg)
+            } else {
+                crate::walls::WallFeel::default()
+            };
         }
     }
 
@@ -1670,6 +1784,55 @@ impl PoliceSystem {
         v.into_iter().map(|x| x.2).collect()
     }
 
+    /// Beyond this straight-line distance from `racer` a unit on it is "far" (row 64), m.
+    fn far_m(&self, racer: EntityId) -> f32 {
+        let rc = &self.cfg.presence.reinforcement;
+        let level = self.racers.get(&racer).map_or(1, |r| r.level.table_index());
+        rc.backup_radius_m[level] + rc.far_margin_m
+    }
+
+    /// Units on `racer` within [`PoliceSystem::far_m`] of it (what counts toward the level's
+    /// units: a unit far across town doesn't stop a closer one being sent).
+    pub(crate) fn units_near(&self, racer: EntityId) -> u32 {
+        let Some(p) = self.racers.get(&racer).map(|r| xy(r.pos)) else {
+            return 0;
+        };
+        let far = self.far_m(racer);
+        self.units
+            .iter()
+            .filter(|u| {
+                u.kind == UnitKind::Car
+                    && !u.wrecked
+                    && dist(u.body.pos, p) <= far
+                    && matches!(u.assignment, Assignment::Pursue { target } | Assignment::Intercept { target, .. } if target == racer)
+            })
+            .count() as u32
+    }
+
+    /// Stand down AI units that have been on `racer` for `far_release_s` and are still farther
+    /// than `far_m` from it (they despawn once out of sight).
+    fn release_far_units(&mut self, racer: EntityId) {
+        let Some(p) = self.racers.get(&racer).map(|r| xy(r.pos)) else {
+            return;
+        };
+        let (far, wait) = (
+            self.far_m(racer),
+            self.cfg.presence.reinforcement.far_release_s,
+        );
+        let now = self.now;
+        for i in 0..self.units.len() {
+            let u = &self.units[i];
+            if u.kind == UnitKind::Car
+                && u.player.is_none()
+                && matches!(u.assignment, Assignment::Intercept { target, .. } if target == racer)
+                && now.since(u.assigned) > wait
+                && dist(u.body.pos, p) > far
+            {
+                self.assign(i, Assignment::Idle);
+            }
+        }
+    }
+
     pub(crate) fn units_on(&self, racer: EntityId) -> u32 {
         self.units
             .iter()
@@ -1689,7 +1852,12 @@ impl PoliceSystem {
         for racer in self.pursued_by_priority() {
             let rec = &self.racers[&racer];
             let want = self.cfg.presence.reinforcement.units_per_level[rec.level.table_index()];
-            let have = self.units_on(racer);
+            self.release_far_units(racer);
+            let mut have = self.units_near(racer);
+            if have < want {
+                have += self.call_backup(racer, want - have);
+            }
+            let rec = &self.racers[&racer];
             let pending = self
                 .reinforcements
                 .iter()
@@ -1743,6 +1911,12 @@ impl PoliceSystem {
             let Some(target) = self.racers.get(&req.racer).and_then(|r| r.last_known) else {
                 continue;
             };
+            // Backup already got there first (units joined from nearby): not needed.
+            let want = self.cfg.presence.reinforcement.units_per_level
+                [self.racers[&req.racer].level.table_index()];
+            if self.units_near(req.racer) >= want {
+                continue;
+            }
             let i = match self.nearest_available(target, 700.0) {
                 Some(i) => i,
                 None => {
@@ -1772,6 +1946,69 @@ impl PoliceSystem {
                 },
             );
         }
+    }
+
+    /// Backup for a pursuit (owner playtest row 64): up to `n` idle or patrolling units within
+    /// the level's `backup_radius_m` of legal driving from the racer (only from the racer's
+    /// own district below `backup_all_districts_level`) join at once, nearest first, and drive
+    /// to its predicted position (`Intercept`). Returns how many joined.
+    fn call_backup(&mut self, racer: EntityId, n: u32) -> u32 {
+        let rc = &self.cfg.presence.reinforcement;
+        let rec = &self.racers[&racer];
+        let Some(target) = rec.last_known else {
+            return 0;
+        };
+        let level = rec.level;
+        let radius = rc.backup_radius_m[level.table_index()];
+        let all = level.number() >= rc.backup_all_districts_level;
+        let district = self.graph.district_at(target);
+        // Cheap pre-filter by straight-line distance before the road distances.
+        let cands: Vec<usize> = (0..self.units.len())
+            .filter(|&i| {
+                let u = &self.units[i];
+                u.available()
+                    && u.player.is_none()
+                    && matches!(
+                        u.role,
+                        UnitRole::Pool(_) | UnitRole::Reinforcement | UnitRole::Responder
+                    )
+                    && dist(u.body.pos, target) <= radius
+                    && (all || self.graph.district_at(u.body.pos) == district)
+            })
+            .collect();
+        if cands.is_empty() {
+            return 0;
+        }
+        let to_racer = self.graph.distances_to(target);
+        let mut ranked: Vec<(f32, usize)> = cands
+            .into_iter()
+            .filter_map(|i| {
+                let u = &self.units[i];
+                let node = self.graph.nearest_node(u.body.pos)?;
+                let d = to_racer[node.0 as usize] + dist(u.body.pos, self.graph.node(node).pos);
+                (d <= radius).then_some((d, i))
+            })
+            .collect();
+        ranked.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+        let mut joined = 0;
+        for &(_, i) in ranked.iter().take(n as usize) {
+            // A unit answering a call about this racer is already on its way.
+            self.assign(
+                i,
+                Assignment::Intercept {
+                    target: racer,
+                    point: target,
+                },
+            );
+            self.stats.backup_joins += 1;
+            // Reinforcement delay for backup: pursuit start → unit committed.
+            let since = self.racers[&racer]
+                .pursuit_started
+                .map_or(0.0, |t| self.now.since(t));
+            self.stats.reinforcement_delays_s.push(since);
+            joined += 1;
+        }
+        joined
     }
 
     /// The closest node at least `spawn_min_distance_m` from `target` without line of sight.

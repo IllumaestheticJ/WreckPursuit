@@ -233,6 +233,23 @@ export const sim = {
   setAssists: (entity: number, p: AssistProfile): void => wasm.set_assist_profile(entity, JSON.stringify(p)),
   assistPreset: (source: "Keyboard" | "Gamepad" | "Wheel"): AssistProfile => JSON.parse(wasm.assist_preset(source)),
   assists: (entity: number): AssistProfile => JSON.parse(wasm.assist_profile(entity)),
+  /** Countersteer help slider, 0..100 % (owner row 57). */
+  setCountersteer: (entity: number, percent: number): void => wasm.set_countersteer(entity, percent),
+  countersteer: (entity: number): number => wasm.countersteer(entity),
+  /** Clutch mode "auto" | "manual" (owner row 59). */
+  setClutchMode: (entity: number, mode: "auto" | "manual"): void => wasm.set_clutch_mode(entity, mode),
+  clutchMode: (entity: number): string => wasm.clutch_mode(entity),
+  engineStalled: (entity: number): boolean => wasm.engine_stalled(entity),
+  /** One-click presets in menu order: ["Rookie", "Street", "Sim"]. */
+  assistPresets: (): string[] => JSON.parse(wasm.assist_presets()),
+  /** Damage mode + assists of a one-click preset for a driver on `source`. */
+  assistPresetNamed: (
+    name: string,
+    source: "Keyboard" | "Gamepad" | "Wheel",
+  ): { mode: "Arcade" | "Simulation"; assists: AssistProfile } => JSON.parse(wasm.assist_preset_named(name, source)),
+  /** The preset a vehicle's assists + the session's damage mode match ("" = customised). */
+  assistPresetOf: (entity: number, source: "Keyboard" | "Gamepad" | "Wheel"): string =>
+    wasm.assist_preset_of(entity, source),
   /** Back to the spawn pose, pristine (scenario restart). */
   reset: (entity: number): void => wasm.reset_vehicle(entity),
   /** Reset in place (R): upright at rest on the nearest clear lane within 15 m, heading its own

@@ -155,6 +155,7 @@ export class VehicleView {
     this.greyPaint = new THREE.Color(colour);
     this.background = police || this.info.kind === "Traffic";
 
+    // forceSinglePass: transparent + DoubleSide would re-resolve the program twice per frame.
     const bodyMat = new THREE.MeshStandardMaterial({ color: colour, transparent: true, opacity: 1, side: THREE.DoubleSide, forceSinglePass: true });
     this.box = new THREE.Mesh(box(w, l, h * 0.9), bodyMat);
     this.box.position.z = h * 0.55;

@@ -146,8 +146,9 @@ export interface HudState {
 /** Colour palettes. The non-default ones remap danger/ok/warn hues (see theme.css). */
 export type Palette = "default" | "deuteranopia" | "protanopia" | "tritanopia" | "highContrast";
 
-/** Named assist presets; `custom` once any toggle differs from a preset. */
-export type AssistPreset = "off" | "sim" | "standard" | "full" | "custom";
+/** One-click presets (GDD §6, `wp_vehicle::AssistPreset`): damage mode + assists together;
+ * `custom` once any toggle or the damage mode differs from a preset. */
+export type AssistPreset = "rookie" | "street" | "sim" | "custom";
 
 /** Player settings (local only; persisted by the host app). */
 export interface Settings {

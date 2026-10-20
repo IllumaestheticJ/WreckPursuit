@@ -75,6 +75,13 @@ export class LodDirector {
   /** Instanced traffic past this distance from the camera (m) is not drawn (phones). Police and
    * sim vehicles are always drawn. */
   trafficDrawM = Infinity;
+  /** Promoted traffic / police sim vehicles farther than this from the camera (m) are drawn by
+   * the fleet (one instanced draw for all of them) instead of their own view (~40 draw calls
+   * each, per panel). Low / touch graphics profiles only; the player and AI racers always use
+   * their view. 10 m of hysteresis so a car on the boundary does not flip drawers every frame. */
+  viewDrawM = Infinity;
+  /** Entities currently handed to the fleet by `viewDrawM`. */
+  private readonly farViews = new Set<number>();
   private readonly cam = new THREE.Vector3();
 
   /** Traffic livery per sim entity (for colouring a promoted car's VehicleView). The map is
@@ -185,21 +192,19 @@ export class LodDirector {
     // A sim vehicle's view draws it once its mesh is ready; until then it stays hidden and the
     // fleet draws the car (no placeholder box, no empty frame).
     let ready = view?.drawable ?? false;
-    // Distance LOD for views too (browser perf, round 12b): a promoted traffic / police car
-    // beyond the fleet's full-mesh distance (± a hysteresis band) is drawn by the fleet like any
-    // far car (same model, livery and pose) instead of its panel meshes. Not the camera's focus
-    // car, and only when the fleet can draw it.
-    if (view && ready && model) {
-      const p = view.root.position;
-      const d = this.dist(p.x, p.y, p.z);
-      const lim = this.fleet.fullLodM;
-      view.lodFar = !view.focused && (view.lodFar ? d > lim - VIEW_LOD_BAND_M : d > lim + VIEW_LOD_BAND_M);
-      if (view.lodFar) ready = false;
-    } else if (view) view.lodFar = false;
-    if (view) view.root.visible = ready;
     const x = rec[o + D.pos];
     const y = rec[o + D.pos + 1];
     const z = rec[o + D.pos + 2];
+    // Low / touch profiles (`viewDrawM`): a promoted traffic / police car farther than that is
+    // drawn by the fleet (one instanced draw for all) instead of its own view; 10 m of
+    // hysteresis. `lodFar` also lets the view skip its lattice fetch and re-skin meanwhile.
+    if (view && ready && model && Number.isFinite(this.viewDrawM)) {
+      const p = view.root.position;
+      const dv = this.dist(p.x, p.y, p.z);
+      view.lodFar = view.lodFar ? dv > this.viewDrawM : dv > this.viewDrawM + 10;
+      if (view.lodFar) ready = false;
+    } else if (view) view.lodFar = false;
+    if (view) view.root.visible = ready;
     if (view && ready) {
       const p = view.root.position;
       const s = this.next(key, "view", false, entity, this.dist(p.x, p.y, p.z));

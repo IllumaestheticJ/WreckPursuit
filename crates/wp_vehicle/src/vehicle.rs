@@ -20,15 +20,16 @@ use crate::diff::{axle_transfer, centre_transfer, AxleDiff, CentreDiff, DiffInpu
 use crate::drivetrain::{auto_clutch_update, Converter, Gearbox, ShiftInputs};
 use crate::engine::{Engine, EngineExtras, RPM_PER_RADPS};
 use crate::ffb::{self, FfbWheel};
-use crate::ground::WheelCaster;
+use crate::ground::{WheelCaster, WheelProbe};
+use crate::launch::LaunchGuard;
 use crate::math::{arr, sin_cos, v3, yaw_quat, Quat, V3};
-use crate::slide::{gyro_yaw_torque, slide_class_with_rear_lock, slide_throttle, GyroInput};
+use crate::slide::{slide_class_with_rear_lock, slide_throttle};
 use crate::steering::{
-    ackermann, body_slip, rear_axle_slip, steer_target, torque_steer, update_center_angle,
-    SteerInput,
+    ackermann, body_slip, front_axle_angle, rear_axle_slip, steer_target, torque_steer,
+    update_center_angle, SteerInput, HANDBRAKE_GRACE_S,
 };
 use crate::surface::{conditions_grip, ConditionsSource, SurfaceConditions, TireWetProfile};
-use crate::suspension::{arb_force, static_compression, strut_force};
+use crate::suspension::{arb_force, static_compression, step_strut, TYRE_STATIC_DEFLECTION_M};
 use crate::tire::{
     combined_forces, load_sensitive_mu, low_speed_lateral, pneumatic_trail, relax, slip_angle,
     slip_ratio, surface_grip, SLIP_RATIO_V_MIN,
@@ -42,6 +43,35 @@ const HUB_DAMPING: f32 = 6_000.0;
 const HUB_FRICTION: f32 = 0.8;
 /// Lateral camber thrust per radian of camber, as a fraction of load.
 const CAMBER_THRUST: f32 = 0.15;
+/// Handbrake input above which the handbrake counts as pulled (declutch, steering assists).
+pub const HANDBRAKE_ON: f32 = 0.1;
+/// Above this forward speed (m/s) a handbrake declutch keeps the selected gear (no automatic
+/// shifts); below it the automatic box selects gears as usual.
+pub const HB_KEEP_GEAR_MPS: f32 = 1.0;
+/// The automatic clutch opens during a shift, off the throttle, when the driven wheels turn
+/// the clutch slower than this fraction of idle (the same threshold as
+/// `drivetrain::auto_clutch_update`'s "rolling").
+const AUTO_CLUTCH_OPEN_FRAC: f32 = 1.2;
+/// Manual clutch: the engine stalls below this fraction of its idle speed (row 59).
+pub const STALL_FRAC: f32 = 0.5;
+/// Manual clutch: pressing the pedal at least this far re-cranks a stalled engine.
+pub const RECRANK_PEDAL: f32 = 0.9;
+/// The tyre sweep starts this far above the top of the travel, m (see `probe_wheel`).
+const PROBE_LIFT_M: f32 = 0.3;
+/// Fraction of the tyre's half width used by the sweep (the shoulder is rounded).
+const PROBE_WIDTH_FRAC: f32 = 0.8;
+/// Normal used for the tyre's force frame: the ground normal, leaned back toward the strut
+/// axis `up` when the contact is a steep edge (a kerb corner reports a normal pointing back
+/// at the wheel; driving and braking forces along it would turn the kerb into a ramp).
+fn tyre_normal(n: V3, up: V3) -> V3 {
+    let w = ((n.dot(up) - 0.6) / 0.25).clamp(0.0, 1.0);
+    let t = (up + (n - up) * w).normalize_or_zero();
+    if t == V3::ZERO {
+        up
+    } else {
+        t
+    }
+}
 /// Mechanical efficiency of gearbox + final drive for driving torque (engine braking passes
 /// through unchanged).
 pub const DRIVETRAIN_EFFICIENCY: f32 = 0.85;
@@ -104,6 +134,9 @@ pub(crate) struct Corner {
     pub x_static: f32,
     pub susp: SuspensionDef,
     pub radius: f32,
+    pub half_width: f32,
+    /// Vertical tyre rate, N/m (from the static corner load).
+    pub tyre_rate: f32,
     pub inertia: f32,
     pub steerable: bool,
     pub max_steer: f32,
@@ -124,6 +157,11 @@ pub(crate) struct Wheel {
     pub alpha: f32,
     pub alpha_lag: f32,
     pub x: f32,
+    /// Where the wheel centre sits relative to the ground contact, as a compression (m): the
+    /// strut compression plus how much more than statically the tyre is squashed. This is
+    /// what `VehicleState::compression_m` reports (a rigid-tyre renderer then never draws the
+    /// wheel into the road); `x` itself is the strut's.
+    pub x_wheel: f32,
     pub vcomp: f32,
     pub contact: bool,
     pub fz: f32,
@@ -175,13 +213,15 @@ pub struct Telemetry {
     /// Per-wheel aquaplaning 0 (full contact) … 1 (riding on water), from
     /// [`Vehicle::set_surface_conditions`].
     pub aquaplane: [f32; 4],
-    /// Slide-gyro yaw torque applied this tick, N·m (+ = left; 0 with countersteer help off).
-    pub slide_gyro_nm: f32,
     /// Torque each differential moved this tick (front, rear, centre), N·m: half the
     /// left-right (or front-rear) wheel-torque difference, + = toward the right (rear) side.
     pub diff_transfer_nm: [f32; 3],
     /// Brake-based traction control torque per wheel, N·m.
     pub tcs_brake_nm: [f32; 4],
+    /// Upward speed the contact launch limiter took back this tick, m/s ([`crate::launch`]).
+    pub contact_lift_cut_mps: f32,
+    /// Engine stalled (manual clutch; press the clutch to re-crank).
+    pub stalled: bool,
 }
 
 /// One simulated vehicle. See the crate docs for the integration contract with Rapier.
@@ -221,6 +261,12 @@ pub struct Vehicle {
     pub(crate) entity: EntityId,
     pub(crate) conditions: [SurfaceConditions; 4],
     pub(crate) conditions_source: ConditionsSource,
+    pub(crate) launch: LaunchGuard,
+    /// Handbrake hold for the steering assists: [`crate::steering::HANDBRAKE_GRACE_S`] while
+    /// the handbrake is pulled, then counting down to 0 after release, s.
+    pub(crate) hb_grace: f32,
+    /// Engine stalled (manual clutch only, see [`STALL_FRAC`]).
+    pub(crate) stalled: bool,
 }
 
 impl Vehicle {
@@ -256,6 +302,8 @@ impl Vehicle {
                 x_static: static_compression(&def.suspension[i], load),
                 susp: def.suspension[i].clone(),
                 radius: w.radius_m,
+                half_width: 0.5 * w.width_m,
+                tyre_rate: load.max(500.0) / TYRE_STATIC_DEFLECTION_M,
                 inertia: w
                     .inertia_kgm2
                     .unwrap_or(0.7 * w.mass_kg * w.radius_m * w.radius_m),
@@ -330,6 +378,9 @@ impl Vehicle {
             entity: EntityId(0),
             conditions: [SurfaceConditions::DRY; 4],
             conditions_source: ConditionsSource::World,
+            launch: LaunchGuard::default(),
+            hb_grace: 0.0,
+            stalled: false,
             corners,
         };
         v.converter = def
@@ -344,6 +395,7 @@ impl Vehicle {
         for (w, c) in self.wheels.iter_mut().zip(&self.corners) {
             *w = Wheel {
                 x: c.x_static,
+                x_wheel: c.x_static,
                 r_eff: c.radius,
                 grip: 1.0,
                 ..Wheel::default()
@@ -459,6 +511,17 @@ impl Vehicle {
         self.fuel = 1.0;
         self.force = V3::ZERO;
         self.torque = V3::ZERO;
+        self.launch.forget();
+        self.hb_grace = 0.0;
+        self.stalled = false;
+    }
+
+    /// Forget the chassis's previous motion for the contact launch limiter
+    /// ([`crate::launch`]): call after changing the body's velocity directly (outside
+    /// [`Vehicle::place_body`] / [`Vehicle::reset`] / [`Vehicle::set_state`]), so the change is
+    /// not mistaken for a contact.
+    pub fn forget_motion(&mut self) {
+        self.launch.forget();
     }
 
     /// Overwrite the dynamic state from a [`VehicleState`] (`VehicleSim::state` output):
@@ -470,6 +533,9 @@ impl Vehicle {
     /// [`Vehicle::write_chassis_to_body`] afterwards. (Added by the integration lead for
     /// workstream F; extended by 02.)
     pub fn set_state(&mut self, s: &wp_contracts::VehicleState) {
+        self.launch.forget();
+        // A stalled engine reports 0 rpm; anything turning is running.
+        self.stalled = s.engine_rpm < STALL_FRAC * self.def.engine.idle_rpm;
         let rot = Quat::from_xyzw(s.rot[0], s.rot[1], s.rot[2], s.rot[3]);
         let pos = v3(s.pos);
         self.chassis = Chassis {
@@ -485,6 +551,7 @@ impl Vehicle {
             w.alpha_lag = ws.slip_angle;
             w.kappa = ws.slip_ratio;
             w.x = ws.compression_m;
+            w.x_wheel = ws.compression_m;
             w.fz = ws.fz_n;
             w.contact = ws.contact;
             w.surface = ws.surface;
@@ -540,6 +607,7 @@ impl Vehicle {
     /// Spin wheels and engine to match a forward `speed` (m/s) in a sensible gear, clutch
     /// locked. Used for rolling starts in tests and when teleporting a moving car.
     pub fn set_rolling(&mut self, speed: f32) {
+        self.stalled = false;
         for (w, c) in self.wheels.iter_mut().zip(&self.corners) {
             w.omega = speed / c.radius;
         }
@@ -657,6 +725,13 @@ impl Vehicle {
             wheelbase: self.def.wheelbase_m,
             front_mu: self.front_mu(),
             front_peak_slip: self.corners[0].tire.peak_slip_angle_rad,
+            front_axle_angle: front_axle_angle(
+                v_fwd,
+                v_left,
+                self.chassis.ang_vel.dot(self.chassis.rot * V3::Z),
+                self.def.wheels[0].position_m[1] - self.com_local.y,
+            ),
+            handbrake_hold: self.hb_grace > 0.0,
         }
     }
 
@@ -782,6 +857,10 @@ impl Vehicle {
 
         self.update_damage_state(dt, out);
         let power_scale = self.power_scale();
+        // Contact launch limiter: upward speed Rapier's contacts added since last step.
+        let launch_cut = self
+            .launch
+            .update(ch.lin_vel.z, self.force.z, self.def.mass_kg, dt);
 
         // --- Pedals (auto-reverse swaps them while in reverse) ---------------------------
         let raw_thr = input.throttle.clamp(0.0, 1.0);
@@ -804,13 +883,33 @@ impl Vehicle {
         self.throttle_f = filter_pedal(self.throttle_f, thr_target, st.filter, dt);
         self.brake_f = filter_pedal(self.brake_f, brk_in, assists.brake_filter, dt);
         let handbrake = input.handbrake.clamp(0.0, 1.0);
+        // Handbrake hold for the assists (steering alignment, ESC): on while pulled and for
+        // `HANDBRAKE_GRACE_S` after release, so a handbrake turn is not fought.
+        let hb_was_held = self.hb_grace > 0.0;
+        self.hb_grace = if handbrake > HANDBRAKE_ON {
+            HANDBRAKE_GRACE_S
+        } else {
+            (self.hb_grace - dt).max(0.0)
+        };
+        let hb_hold = self.hb_grace > 0.0;
 
         // --- Gearbox ------------------------------------------------------------------------
         self.update_awd_coupling(thr_in, v_fwd, dt);
         let base_split = self.drive_split(0.0);
         let axle_omega = self.axle_omega(&base_split);
         let max_gear = self.max_gear();
-        if assists.auto_gears {
+        // Handbrake declutch (owner rows 56/72): with an automatic clutch or a converter box,
+        // a pulled handbrake decouples the whole driveline (as if the clutch pedal were down),
+        // so the rears lock, the engine neither drags them nor stalls, AWD fronts do not pull
+        // the rears round, and the selected gear is kept. A manual clutch pedal is never
+        // overridden (`handbrake_disconnects_rear` still frees the rear axle there).
+        let hb_declutch =
+            handbrake > HANDBRAKE_ON && (assists.auto_clutch || self.converter.is_some());
+        // The gear is kept only while moving: at a standstill on the handbrake the automatic
+        // box still selects first / reverse (the AI's crawl holds the handbrake and touches the
+        // throttle to engage first, `wp_world::manoeuvre::Crawl`).
+        let hb_keep_gear = hb_declutch && v_fwd.abs() > HB_KEEP_GEAR_MPS;
+        if assists.auto_gears && !hb_keep_gear {
             let inputs = ShiftInputs {
                 redline_rpm: self.def.engine.redline_rpm,
                 axle_omega,
@@ -821,7 +920,7 @@ impl Vehicle {
                 lateral_usage: self.lateral_usage(),
             };
             self.gearbox.auto_shift(&self.def.drivetrain, &inputs, dt);
-        } else {
+        } else if !assists.auto_gears {
             let g = self.gearbox.gear;
             // A destroyed gearbox (max_gear 0) has no reverse either.
             let lowest = if max_gear >= 1 { -1 } else { 0 };
@@ -840,6 +939,19 @@ impl Vehicle {
         let driven_corner = (0..4).find(|i| base_split[*i] > 0.0).unwrap_or(0);
         let ratio_now = self.gearbox.total_ratio(&self.def.drivetrain);
         self.auto_clutch = assists.auto_clutch;
+        // Clutch-input speed the automatic clutch judges "rolling" by, rpm.
+        let rolling_rpm = if hb_was_held {
+            // Just after a handbrake declutch the driven wheels may still be stopped (locked
+            // rears): re-engage only once they have spun back up, so the engine is not dragged
+            // below idle.
+            (ratio_now * axle_omega).abs() * RPM_PER_RADPS
+        } else {
+            // The slower of ground speed and the driven wheels: wheelspin does not count, and
+            // driven wheels slowed under the car (scrubbed in a big slide, braked) open the
+            // clutch before they drag the engine below idle.
+            let ground = (ratio_now * v_fwd / self.corners[driven_corner].radius).abs();
+            ground.min((ratio_now * axle_omega).abs()) * RPM_PER_RADPS
+        };
         self.clutch = if self.converter.is_some() {
             // Torque-converter automatic: the converter replaces the launch clutch; the clutch
             // value is the lock-up clutch's availability. Shifts happen under power (the
@@ -850,15 +962,25 @@ impl Vehicle {
             // rev-matched in `substep`) and re-engages already in sync.
             let phase = self.gearbox.shift_engagement();
             if assists.auto_clutch {
-                phase
+                // Anti-stall during a shift too: off the throttle with the driven wheels too
+                // slow to keep the engine at idle (a coasting downshift while they are
+                // scrubbed down in a slide), the clutch opens at once instead of following
+                // the shift's release.
+                let stalling = thr_in <= 0.02
+                    && ratio_now != 0.0
+                    && rolling_rpm < AUTO_CLUTCH_OPEN_FRAC * self.def.engine.idle_rpm;
+                if stalling {
+                    0.0
+                } else {
+                    phase
+                }
             } else {
                 phase.min(1.0 - input.clutch.clamp(0.0, 1.0))
             }
         } else if assists.auto_clutch {
             auto_clutch_update(
                 self.clutch,
-                // Judge "rolling" from ground speed so wheelspin does not count.
-                (ratio_now * v_fwd / self.corners[driven_corner].radius).abs() * RPM_PER_RADPS,
+                rolling_rpm,
                 self.engine.rpm(),
                 self.def.engine.idle_rpm,
                 self.def.engine.redline_rpm,
@@ -869,6 +991,35 @@ impl Vehicle {
         } else {
             1.0 - input.clutch.clamp(0.0, 1.0)
         };
+
+        if hb_declutch && self.converter.is_none() {
+            // Re-engages through the automatic clutch's normal launch / rolling logic.
+            self.clutch = 0.0;
+        }
+
+        // Manual clutch: stall and re-crank (owner row 59). With the clutch pedal the
+        // player's, the anti-stall is off (see `substep`), so letting the clutch up without
+        // enough revs drags the engine below `STALL_FRAC` × idle and it dies. Pressing the
+        // pedal past `RECRANK_PEDAL` re-cranks it to idle; rolling with the clutch engaged
+        // until the engine turns at idle bump-starts it. The automatic clutch never stalls.
+        let idle_rpm = self.def.engine.idle_rpm;
+        let manual_clutch = !assists.auto_clutch && self.converter.is_none();
+        if self.stalled {
+            let recrank = input.clutch >= RECRANK_PEDAL;
+            if !manual_clutch || recrank || self.engine.rpm() >= idle_rpm {
+                self.stalled = false;
+                if self.engine.rpm() < idle_rpm {
+                    self.engine.omega = idle_rpm / RPM_PER_RADPS;
+                }
+            }
+        } else if manual_clutch
+            && self.gearbox.gear != 0
+            && self.clutch > 0.3
+            && self.engine.rpm() < STALL_FRAC * idle_rpm
+        {
+            self.stalled = true;
+        }
+        let power_scale = if self.stalled { 0.0 } else { power_scale };
 
         // --- Assists ----------------------------------------------------------------------
         let peak_slip = (0..4)
@@ -910,7 +1061,7 @@ impl Vehicle {
         let yaw_rate = ch.ang_vel.dot(up);
         let front_mu = self.front_mu();
         let mut esc_out = self.esc.update(
-            assists.esc,
+            assists.esc && !hb_hold,
             yaw_rate,
             self.center_steer,
             v_fwd,
@@ -986,7 +1137,7 @@ impl Vehicle {
 
         // --- Ground probe + suspension ------------------------------------------------------
         for i in 0..4 {
-            self.probe_wheel(i, &ch, up, ground, world);
+            self.probe_wheel(i, &ch, up, ground, world, dt);
             // Weather under the contact patch (W-1). Off the ground the last value stays; it
             // has no effect there (no grip, planing reported as 0).
             if self.conditions_source == ConditionsSource::World && self.wheels[i].contact {
@@ -1115,7 +1266,11 @@ impl Vehicle {
         // --- Sub-stepped drivetrain, wheel spin and tire forces ----------------------------
         let n_sub = VEHICLE_SUBSTEPS.max(1);
         let h = dt / n_sub as f32;
-        let split = self.drive_split(handbrake);
+        let split = if hb_declutch {
+            [0.0; 4]
+        } else {
+            self.drive_split(handbrake)
+        };
         // Wheel-speed difference (left − right, rad/s) the cornering geometry asks for, per
         // axle: the inside wheel turns slower (active diffs lock only beyond it).
         let kin = [
@@ -1182,28 +1337,8 @@ impl Vehicle {
             force += f;
             torque += (p - ch.com).cross(f);
         }
-        // Slide gyro (keyboard/gamepad help only; 0 with countersteer help off). The path rate
-        // needs the net force: Rapier adds gravity later, so add it here (else the tires'
-        // uphill force on a side slope, or body roll, reads as the path curving).
-        let net = force - V3::Z * (self.def.mass_kg * GRAVITY_MPS2);
-        let gyro = gyro_yaw_torque(
-            &GyroInput {
-                v_fwd,
-                v_left,
-                yaw_rate,
-                force_left: -net.dot(right),
-                force_fwd: net.dot(fwd),
-                rear_axle_slip: rear_axle,
-                mass: self.def.mass_kg,
-                yaw_inertia: self.def.inertia_kgm2[2],
-                wheelbase,
-                driver_steer: input.steer,
-            },
-            assists.countersteer_help,
-            self.slide_class,
-        );
-        if gyro != 0.0 {
-            torque += up * gyro;
+        if launch_cut > 0.0 && dt > 0.0 {
+            force -= V3::Z * (self.def.mass_kg * launch_cut / dt);
         }
         self.force = force;
         self.torque = torque;
@@ -1236,9 +1371,10 @@ impl Vehicle {
             engine_heat: self.heat,
             fuel: self.fuel,
             aquaplane,
-            slide_gyro_nm: gyro,
             diff_transfer_nm: acc_x.map(|x| x * inv),
             tcs_brake_nm: tc_brake,
+            contact_lift_cut_mps: launch_cut,
+            stalled: self.stalled,
         };
     }
 
@@ -1250,6 +1386,7 @@ impl Vehicle {
         up: V3,
         ground: &dyn WheelCaster,
         world: &dyn WorldQuery,
+        dt: f32,
     ) {
         let c = &self.corners[i];
         let lost = self.effects.wheel_lost[i];
@@ -1261,6 +1398,7 @@ impl Vehicle {
             let max = 0.3 + HUB_RADIUS_M;
             w.omega = 0.0;
             w.x = 0.0;
+            w.x_wheel = 0.0;
             match ground.cast(origin, down, max) {
                 Some(hit) => {
                     let vel = ch.velocity_at(hit.point);
@@ -1286,24 +1424,36 @@ impl Vehicle {
         let travel = c.susp.travel_m;
         let top = c.hub + V3::Z * (travel - c.x_static);
         let origin = ch.to_world(top);
-        let max = travel + c.radius;
-        match ground.cast(origin, down, max) {
-            Some(hit) => {
-                let x = max - hit.distance;
-                let hub_world = origin + down * (hit.distance - c.radius);
-                w.vcomp = -ch.velocity_at(hub_world).dot(up);
-                w.x = x;
+        // The tyre sweep starts PROBE_LIFT_M higher so a kerb edge ahead never overlaps the
+        // starting cylinder (which would void the sweep mid-climb).
+        let probe = WheelProbe {
+            center: origin - down * PROBE_LIFT_M,
+            dir: down,
+            max_dist: travel + PROBE_LIFT_M,
+            radius: c.radius,
+            half_width: c.half_width * PROBE_WIDTH_FRAC,
+            rot: ch.rot * yaw_quat(w.steer - std::f32::consts::FRAC_PI_2),
+        };
+        // Rigid-tyre compression plus the tyre's static deflection (data radius = loaded).
+        let hit = ground.cast_wheel(&probe);
+        let reach = hit.map(|h| travel - (h.distance - PROBE_LIFT_M) + TYRE_STATIC_DEFLECTION_M);
+        let st = step_strut(&c.susp, c.tyre_rate, w.x, w.vcomp, reach, dt);
+        w.x = st.x;
+        w.vcomp = st.v;
+        w.fz = st.fz;
+        w.x_wheel = match reach {
+            Some(r) if st.fz > 0.0 => r - TYRE_STATIC_DEFLECTION_M,
+            _ => st.x,
+        };
+        match hit {
+            Some(hit) if st.fz > 0.0 => {
                 w.contact = true;
                 w.point = hit.point;
-                w.normal = hit.normal;
+                w.normal = tyre_normal(hit.normal, up);
                 w.surface = world.surface_at(arr(hit.point));
-                w.fz = strut_force(&c.susp, x, w.vcomp);
             }
-            None => {
+            _ => {
                 w.contact = false;
-                w.x = 0.0;
-                w.vcomp = 0.0;
-                w.fz = 0.0;
                 w.surface = SurfaceType::default();
             }
         }
@@ -1327,7 +1477,12 @@ impl Vehicle {
         let axle = self.axle_omega(split);
         let omega_in = ratio * axle;
         let idle_w = self.def.engine.idle_rpm / RPM_PER_RADPS;
-        let anti_stall = ((self.engine.omega - 0.6 * idle_w) / (0.4 * idle_w)).clamp(0.0, 1.0);
+        // Anti-stall slip: only for the automatic clutch (a manual clutch can stall).
+        let anti_stall = if self.auto_clutch {
+            ((self.engine.omega - 0.6 * idle_w) / (0.4 * idle_w)).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
         let converter = self.converter;
         let cap = if converter.is_some() {
             self.def.drivetrain.clutch_max_nm * self.clutch
@@ -1622,7 +1777,7 @@ impl VehicleSim for Vehicle {
             WheelState {
                 omega: w.omega,
                 steer_rad: w.steer,
-                compression_m: w.x,
+                compression_m: w.x_wheel,
                 slip_angle: w.alpha_lag,
                 slip_ratio: w.kappa,
                 fz_n: w.fz,

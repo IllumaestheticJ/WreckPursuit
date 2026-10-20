@@ -64,9 +64,15 @@ check(
 );
 check((await page.evaluate(() => window.__wpAudio.soundSource())) === "recorded", "recorded samples are the default source");
 
-// Drive: recorded engine layers and the ambience play.
+// Drive: recorded engine layers and the ambience play. The player's engine is the modelled
+// synthesizer by default (row 73); layers are selected here so the recordings are exercised.
+await page.evaluate(() => window.__wpAudio.setEngineVoicing("layers"));
 const engineRecPlays = () =>
-  page.evaluate(() => Object.entries(window.__wpAudio.cueCounts).filter(([k]) => k.startsWith("engine/")).reduce((a, [, v]) => a + v, 0));
+  page.evaluate(() =>
+    Object.entries(window.__wpAudio.cueCounts)
+      .filter(([k]) => k.startsWith("engine/") && k !== "engine/physical")
+      .reduce((a, [, v]) => a + v, 0),
+  );
 await page.keyboard.down("KeyW");
 await page.waitForTimeout(2500);
 await page.keyboard.up("KeyW");
@@ -92,6 +98,7 @@ await page.keyboard.up("KeyW");
 await page.waitForTimeout(300);
 const lc = await page.evaluate(() => window.__wpAudio.loopCounts());
 check(lc && lc.backend === lc.director, `no stale loops after source switches (backend ${lc?.backend}, director ${lc?.director})`);
+await page.evaluate(() => window.__wpAudio.setEngineVoicing("modelled"));
 
 check(errors.length === 0, `no page errors${errors.length ? ": " + errors.slice(0, 5).join(" | ") : ""}`);
 await browser.close();

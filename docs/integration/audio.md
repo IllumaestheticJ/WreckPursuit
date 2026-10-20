@@ -32,7 +32,8 @@ today.
 
 **wasm surface** (`crates/wp_wasm/src/audio.rs`, additive): `audio_library()`,
 `audio_frame(listener[12], events_json, focus) -> {commands, stats}`, `audio_set_siren(entity, mode)`,
-`audio_set_scanner_tier(tier)`, `audio_radio(unit, priority, text)`, `audio_reset()`.
+`audio_set_scanner_tier(tier)`, `audio_radio(unit, priority, text)`, `audio_reset()`,
+`audio_set_engine_model("Physical" | "Layers")` (row 73).
 
 **Browser backend** (`apps/testbed-web/src/audio/`): `AudioSystem(worldFrame, overlay)` +
 `update(camera, events, dt, focus)`. Voice pool with one panner per voice, listener from the
@@ -52,7 +53,7 @@ tests. Check: `node apps/testbed-web/e2e/audio.mjs` (after the wasm build).
 | Lead (run 5) / E (06) | police units as sim vehicles with `VehicleKind::Police` and `VehicleInput::siren` from the unit's command (pattern: A-6) | sirens on AI units | **done** (run 5 merged): verified by `wp_wasm` test `audio::tests::city_police_sirens_and_traffic_engines_are_heard`; pattern still Auto (A-6 open) |
 | Lead (`wp_sim`) | contacts while sliding (A-4) | scrape loops | scrapes play from the few events above 50 N·s; the sideswipe scenario keeps the expectation pending |
 | B (03) | start emitting `GlassShattered` / `RegionDamaged` (v0.2.0) | exact glass timing, panel rattle | both handled; until B emits, glass is inferred from contacts and nothing rattles |
-| Lead (`wp_wasm/src/audio.rs`) | feed kinematic traffic agents and body-less police units to the director (round 12b request R12b-1 below) | far traffic / unbound police were silent (playtest #47) | `wp_audio::kinematic::cruise_state` is ready and tested; until wired, only physical (≤ 80 m) traffic and bound police units are heard |
+| Lead (`wp_wasm/src/audio.rs`) | feed body-less police units to the director (rest of R12b-1) | an unbound police unit's engine and siren are silent | **kinematic traffic is wired** (owner asked, see "R12b-1 wired" below); police units still need it |
 | I (10) | add `wp_audio` to `lint-determinism::SIM_CRATES` | CI determinism lint | `tests/director.rs::passes_determinism_lint` runs the lint on this crate |
 | C (04) | keep the 3-line hook in `main.ts` when refactoring; maybe a layer toggle for the audio panel | — | — |
 | A (02, `wp_vehicle`) | `Telemetry::throttle` to show the clutch box's rev-match blip in the neutral phase of a downshift (today the rev-match is kinematic and the telemetry throttle stays 0) | the downshift blip would come from the vehicle instead of being inferred | audio infers the blip from the rpm rate (`blip_load`, `shift_rate_*` in `audio_config.json`) |
@@ -85,6 +86,9 @@ tests. Check: `node apps/testbed-web/e2e/audio.mjs` (after the wasm build).
   request A-4 (gating: approach speed + ≥ 1 contact; pending: sustained contacts — 7 events on
   v0.2.0 `main`), golden `apps/simcli/golden/audio_sideswipe_scrape/` (new, `[bless]` commit).
 - `wp_audio` now depends on `wp_police` (pure, wasm-clean) to decode `PoliceEvent` payloads.
+- `crates/wp_wasm/src/audio.rs` (my bridge file, owner request 2026-10-20): kinematic traffic
+  fed to the director (`kinematic_traffic`, `KINEMATIC_TRAFFIC_BASE`, `MAX_KINEMATIC_TRAFFIC`)
+  + test `kinematic_traffic_engines_are_heard`. Nothing outside the file changed.
 
 ## v0.2.0 update (lead run 3)
 - Merged `main` (contract 0.2.0). New `SimEvent::GlassShattered` → glass one-shot at the region
@@ -269,6 +273,133 @@ speed and two-vs-one wheel, wet / gravel).
 gearbox hunts 1 ↔ 2 several times during a burnout and a wheelspin launch (limiter-forced
 upshift, then a downshift as the wheels hook up), e.g. `rampart_50` from 0 to 50 km/h.
 
+## Row 73 — "simulate accurate engine sounds": modelled engine synthesizer (2026-10-20)
+
+Base `origin/lead/round12` merged into `ws/audio`. **The player car (and the 6 nearest cars
+within 60 m) now play a physically informed engine synthesizer by default**; every other car,
+and every car when the synthesizer cannot load, keeps the recorded / procedural layers. Audio
+panel: **engines: modelled / layers** (persisted). The impact / horn work on
+`lead/audio-impacts` was not touched (no collision, impact or horn file changed).
+
+**How it works**
+- `wp_audio::engine_model` (new): `EngineVoiceSpec` per car (+ installed mods) = every
+  combustion event of the 720° four-stroke cycle (crank angle, exhaust bank, header length, a
+  fixed per-cylinder trim) derived from the car's audio def (cylinders, layout, firing feel —
+  already in `data/audio/cars/*.json`, so **no contract change was needed**): I4 even 180°, I6
+  even 120°, cross-plane V8 1-8-4-3-6-5-7-2 (each bank 90-180-270-180°: the burble), flat-plane
+  V8 (each bank an even 180°: two I4s), 60° V6, odd-fire V6 (90/150°), boxer rumble (unequal
+  headers), rotary (one event per rotor per output revolution). Exhaust geometry by class
+  (header / tailpipe length, muffler damping and chamber resonance, dual pipes for V8+ outside
+  trucks / compacts), intake, valvetrain, gear / diff whine, crackle tendency. Mods
+  (`EngineTune::from_mods`, the wasm bridge reads a career run's car): `engine_exhaust_1/2` louder
+  (+3 / +5 dB), less muffler, more crackle, equal-length headers; `engine_intake_*` more
+  induction; `fi_turbo_*` / `fi_supercharger_*` whistle / whine (+ the director's boost model);
+  `engine_v8_swap` → cross-plane V8.
+- Director: `set_engine_model(EngineModelMode::Physical)` (the backend calls it once the
+  worklet runs). Focus + `engine.physical_max_others` (6) nearest within `physical_radius_m`
+  (60 m, sticky ×1.25 / 20 % rank bonus) get **one** voice `engine_physical` / `engine/physical`
+  (slot `ENGINE_PHYSICAL` 0x1B0, new pack kind `Model`) instead of layers + limiter + turbo +
+  supercharger + blow-off + pop voices. The spec goes in the `Play`'s `synth` map;
+  `VoiceParams::engine: Option<EngineFrame>` (absent from the JSON for every other voice) carries
+  crank rpm, applied throttle, pedal, gear, road speed, boost, engine component health and a
+  blow-off counter every frame; `load` is the existing smoothed load (shift dips / blips).
+- Browser: `apps/testbed-web/src/audio/engine_worklet.ts` — **one AudioWorklet node for all
+  modelled engines** (16 mono outputs = slots: 7 live at most, the rest for voices still fading
+  when a reset re-plays everything; a fading slot is taken over if none is free), parameters
+  posted once per frame (`engine_host.ts`, `Float32Array` of 16 × 12 fields; no
+  SharedArrayBuffer so no COOP/COEP
+  headers are needed), the rpm ramped linearly per sample over one frame interval. Per engine,
+  per sample: crank angle → each event starts an exhaust blowdown pulse (strength from load;
+  weak pumping pulses on overrun; a pulse right after a short same-bank gap is weaker —
+  residual collector pressure — which is what gives the cross-plane lope) → per-bank header
+  waveguide → collector or dual pipes → muffler (low-pass + chamber resonance + straight-through
+  leak) → tailpipe waveguide (quarter-wave resonances) → open-end radiation (d/dt). Intake:
+  airbox resonance excited by the pulses, throttle hiss. Mechanical: valvetrain tick per event,
+  broadband rattle, gearbox whine by gear, differential whine by road speed. Turbo whistle by
+  boost + blow-off burst (director counter), supercharger whine. Crackle: overrun after a lift
+  (sporty classes / exhaust mods), rev-limiter fuel cut (13 Hz cut pattern while the pedal holds
+  the limiter), misfires below 70 % engine health (`misfire_probability`, same curve both
+  sides). Interior (camera `cockpit` 1, `hood` 0.35, `bumper` 0.15; `AudioSystem.update` takes
+  the camera mode): exhaust through the body (low-pass + cabin boom), intake and mechanical
+  noise forward; exterior: exhaust dominant. Distance, air absorption, panning and Doppler
+  (the engine's time base is scaled) come from the director as for every voice. The worklet is
+  shipped as a Blob from `engineWorkletMain.toString()` (no bundler config; works in dev, the
+  build and the e2e bundles); called with `null` it returns the DSP class for Node / tests.
+  Randomness is the synthesizer's own (seeded per car); audio never feeds the sim.
+
+**Validation** (`node apps/testbed-web/e2e/audio_engine.mjs`; it builds the sweeps with
+`cargo run -p wp_audio --example engine_sweeps`). Renders through the real `VoicePool` + worklet
+in an `OfflineAudioContext`, 48 kHz, chase camera. WAVs + spectrograms + report:
+`docs/media/audio/` (`README.md` there has the table).
+
+| Car (engine) | Pitch: worst of 8 rpm plateaus / WOT sweep median | Half orders vs firing order | Level vs layers (WOT) | Lift drop / shift dip | Other |
+|---|---|---|---|---|---|
+| debug_sedan (I4) | 0.14 % / 0.41 % | −32.9 dB | −5.3 dB | 20.1 / 6.8 dB | 87 limiter cuts |
+| sperber_32 (I6) | 0.05 % / 0.43 % | −29.5 dB | +0.5 dB | 17.0 / 11.5 dB | 5 pops on the lift |
+| rampart_50 (cross-plane V8) | 0.04 % / 0.74 % | **−10.4 dB** (burble) | −0.6 dB | 20.4 / 10.1 dB | 4 pops; damaged: 123 / 1069 misfires |
+| lucciola_350 (flat-plane V8) | 0.06 % / 0.58 % | −27.9 dB | +0.9 dB | 20.7 / 11.8 dB | 6 pops |
+| shiro_turbo (turbo I4) | 0.07 % / 0.39 % | −16.3 dB | −2.8 dB | 20.8 / 9.7 dB | 1 blow-off on the lift, 5 pops |
+
+Checks (all pass): firing harmonic `rpm / 60 × cylinders / 2` within 1 % on every plateau and
+≥ 10 dB out of its band; WOT sweep median within 1 %; even-firing engines' half orders
+≤ −15 dB, the cross-plane V8 ≥ −12 dB; the firing order leads every lower order for I4 / I6;
+lift drops ≥ 4 dB, shift dips ≥ 3 dB (exhaust band); crackle on every sporty lift (20 pops over
+4 lifts); blow-off on the turbo lift; limiter cuts; misfires when damaged; no clicks (the
+2nd-difference detector of `engine_render.mjs`), no subnormal samples, no NaN; level within
+6 dB of the procedural layers; interior darker than exterior (> 1 kHz share −19.9 vs −8.8 dB);
+seven engines re-played at once three times (reset / source switch) keep their slots; in the
+game page: the synthesizer loads, the player's engine is modelled, layers ↔ modelled
+switches leave no stale voices, no page errors. Rust: `tests/engine_physical.rs` (one voice
+per modelled car with its events and per-frame state; blow-off / shift cut / health reach the
+synth; mods change it; focus + 6 nearest with hysteresis; back to layers; deterministic) and
+`engine_model` unit tests.
+
+Renders differ slightly run to run (the per-frame parameters reach the audio thread by message,
+so a frame can land one 128-frame block later; the synthesizer's own noise is seeded): e.g.
+the WOT p90 pitch error moves by ~0.05 %, a pop more or less. The checks have margins for it.
+
+**Budget:** player + 6 nearby (7 engines, mixed cars) in one worklet: **0.68 ms of render time
+per 128-frame block** (offline render minus an empty render, median of 3; budget 1.5 ms),
+headless Chromium in this container. Main thread: one `postMessage` per frame (the 24-car
+`?bench=24` audio frame stayed at ~3.1 ms in software GL, as before).
+
+**Shared-code changes (minimal, for the impacts session to merge against):**
+`wp_audio`: `types.rs` (`VoiceParams::engine`, `slot::ENGINE_PHYSICAL`), `mixer.rs` (`Desire::engine`
+passed through), `data.rs` (`PackKind::Model`, `cues::ENGINE_PHYSICAL`, `"engine_physical"` in
+`KNOWN_SYNTHS`, `EngineMix::{physical_max_others, physical_radius_m}` with serde defaults),
+`director.rs` (engine-model mode, selection, tunes, the physical desire; layer block wrapped in
+`if !voiced_physically`), `engine.rs` (test config literal only). Backend: `voices.ts` (`engineHost`
+field; `play()` routes `engine_physical` cues to a worklet slot; `applyParams` updates a voice
+that carries `engine` every frame; `collect()` flushes the host), `types.ts` (`EngineFrame`,
+`VoiceParams.engine`, pack kind `Model`, `EngineVoicing`), `index.ts` (load the worklet, voicing
+setting, camera mode → interior), `panel.ts` (engines selector), `bridge.ts`
+(`setEngineModel`). Outside my folders: `apps/testbed-web/src/main.ts` (passes `rig.mode` to
+`audio.update`, one argument), `crates/wp_wasm/src/audio.rs` (`audio_set_engine_model`, career
+mods → `set_engine_tune`), `e2e/audio_samples.mjs` (selects layers for its recorded-engine check).
+
+**Checks run (on `ws/audio` = `lead/round12` + this work):** `cargo fmt --check`, `cargo clippy
+--workspace --all-targets -D warnings`, `cargo build --target wasm32-unknown-unknown -p wp_wasm`,
+`npm run wasm`, `tsc`: clean. `e2e/audio.mjs`, `audio_samples.mjs`, `audio_roster.mjs`,
+`audio_engine.mjs`: all pass. `just web-e2e`: everything passes except `perf_check.mjs`'s
+software-GL thresholds, which swing run to run on this 4-core container (chase 10 → 13 frames
+over 250 ms against ≤ 12, rain 20–27) and never start audio (no input → no AudioContext;
+`audio.update` returns at its first line), so they measure the same code as the base;
+`PERF=0 just web-e2e` (run, weather, gamepad, reset, race): all pass. `cargo test --workspace
+--no-fail-fast`: 141 test binaries pass; 3 fail, all outside audio's reach (`cargo tree -i
+wp_audio` = `wp_wasm`, `testbed-native` only; this branch changes only audio files vs
+`origin/lead/round12`): simcli `goldens_match` (18 scenarios: city ×3, golden city_chase /
+night_pursuit_escape, panels ×3, police sideswipe, race ×4, weather ×5 — the base mismatch
+reported in round 12b, now 18), `wp_race --test race_picker` (`loop9_circuit` winner fled,
+`lantern_checkpoint` never finished) and `wp_opponent --test race`
+(`live_police_chase_ends_in_escape_or_capture_without_stuck_cars`: racer 3 waited 102 s) — the
+same race / chase scenarios whose goldens moved.
+
+**Known gaps:** browser-only (a native backend would port the worklet); far cars keep the
+layers; the boost is still the audio estimate (A-5); interior filtering covers the modelled
+engine only (tyres, wind, impacts are not muffled in the cockpit); the exhaust has no
+geometry-accurate X/H-pipe model (dual vs merged only); recorded WAV references for an A/B
+listen are not in the repo (the checks are against physics, not recordings).
+
 ## Perf numbers
 | Measurement | Machine | Native | Browser | Budget |
 |---|---|---|---|---|
@@ -276,15 +407,17 @@ upshift, then a downshift as the wheels hook up), e.g. `rampart_50` from 0 to 50
 | `audio_frame` in wasm incl. JSON, `?bench=24` | cloud container, headless Chromium, software GL at ~5 fps (≈ 45 ticks per frame) | — | 0.4–0.7 ms per frame | proposed 1 ms |
 | Web Audio command application, `?bench=24` | same | — | ≈ 12 ms of main-thread time per second (≈ 0.2 ms per 60 Hz frame equivalent; ~0.01 ms per `Set`, ~0.4 ms per engine `Play`) | — |
 | Voices, `?bench=24` | same | — | 24–30 looped + 5–10 one-shots of 40, ~110 desires culled per frame (before round 12b's engine LOD) | `max_voices` 48 since round 12b (Engine bus 24) |
+| Engine worklet, 7 modelled engines (`e2e/audio_engine.mjs`) | cloud container, headless Chromium, offline render | — | 0.68 ms per 128-frame block (2.67 ms of audio) | 1.5 ms |
 
 ## Known gaps
 - Contact material comes from the lattice (A-1); glass shatters on inferred glass contacts, not
   from a damage event (B #1 pending).
 - Scrapes are thin until A-4: sliding contacts under 50 N·s per tick emit no events.
 - Wheelspin on a networked client depends on replicated `WheelState` slip (snapshots carry it).
-- No occlusion by buildings, no tunnel/underpass reverb, no interior camera filtering.
-- Kinematic traffic (beyond the 80 m physical radius) and police units without a body are
-  silent until the bridge feeds them (request R12b-1; `wp_audio::kinematic` is ready).
+- No occlusion by buildings, no tunnel/underpass reverb; interior camera filtering only for
+  the modelled engine (row 73).
+- Kinematic traffic is heard (nearest 16 within 450 m, R12b-1); police units without a body
+  are still silent (rest of R12b-1).
 - TTS via `speechSynthesis` bypasses the Web Audio radio EQ (browser limitation); squelch and
   static go through it. Recorded line packs will use the EQ.
 - No music player; the Music bus exists and is ducked by the scanner.
@@ -440,3 +573,67 @@ kind, horn voice on exactly the held frames, one Play.
 **Seen while checking (for C / lead, not audio):** the horn key differs by page — testbed `Q`
 (`input.ts`, gamepad button 3), net page `H` (and `Q` toggles the siren there), and the UI kit's
 bindings model says horn `H` / gamepad button 10 and puts `Q` on gear-down.
+
+### R12b-1 wired for kinematic traffic (owner request, 2026-10-20)
+`crates/wp_wasm/src/audio.rs::frame_commands` now also feeds kinematic traffic agents
+(`AgentView` with `Lod::Kinematic`): the nearest `MAX_KINEMATIC_TRAFFIC` = 16 within
+`spatial.max_distance_m` (450 m) of the listener, sorted by (distance, agent id), each as
+`DriverKind::Traffic` with `wp_audio::kinematic::cruise_state(def, pos, yaw, speed)`, throttle
+0.3 (0 with brake lights), entity `KINEMATIC_TRAFFIC_BASE | agent id` (0x4000_0000; sim entities
+count up from 1). Model: the car of any physical traffic vehicle, else `simcli::run::TRAFFIC_CAR`
+(loaded once, cached). When an agent is promoted to physical its kinematic id leaves the frame
+(engine fades, 80 ms) and the sim entity's engine starts — a short crossfade at the 80 m edge.
+The director's engine LOD (one layer beyond 40 m) and voice limits keep the cost bounded.
+
+Test: `wp_wasm` `audio::tests::kinematic_traffic_engines_are_heard` (city free drive, 3 s:
+kinematic engines play on their id range, ≤ 16 fed per frame, no unregistered cars, identical
+command stream on two runs). Browser `?bench=24` director time 0.64 → 0.71 ms per frame (two
+runs; a first run read 1.35 ms at a lower frame rate, noise). Checks: clippy, wasm build, tsc,
+`e2e/audio.mjs`, `e2e/audio_samples.mjs` pass.
+
+Not done: body-less police units (no siren / engine until a unit gets a car body).
+
+**After merging the updated `ws/audio`** (lead round-12b merges + the row-73 engine worklet):
+`cargo test -p wp_wasm` all pass (74 + 3, incl. both audio bridge tests); the two `race_tests`
+that failed on the older base (hidden in the workspace run by the simcli golden failure) are
+fixed upstream.
+
+### J response (round 13 merge, 2026-10-20) — `rev_matched_downshifts_blip` red on `lead/round12`
+Merged `origin/lead/round12` (ws/audio + lead/audio-impacts + A's round-13 vehicle work) and the
+newer `origin/ws/audio` (kinematic traffic, R12b-1) into `ws/audio`.
+
+**Cause:** A's drivetrain, not the impacts mixer. With the round-13 vehicle the `debug_sedan`
+reaches 190 km/h in the 30 s WOT segment and shifts into 6th, so the braking segment's
+downshifts are now 6 → 5 and 5 → 4 at ~2300 rpm. The gearbox still rev-matches (clutch open,
+rpm 2311 → 2695 in ~0.1 s), but that is only ~3800 rpm/s, low in the blip cue's absolute
+3000–7000 rpm/s band → 1.1 dB. (`lowpass_cap_hz` does not touch layer gains, which the test
+measures.) **Fix (`wp_audio::engine`):** a rev-match's rpm step is the ratio step × rpm, so the
+rising side of the shift cue counts `blip_ref_rpm / rpm` times (clamped 1–2.5×,
+`engine.blip_ref_rpm` = 4000 in `audio_config.json`, serde default); unchanged at and above
+4000 rpm and on the falling (upshift dip) side. New unit test
+`low_rpm_rev_match_still_blips_and_high_rpm_is_unchanged` (fails with the old rule: +0.09 load).
+`engine_shift` 8/8 again.
+
+**Merge review:** `director.rs`, `mixer.rs`, `data.rs`, `voices.ts`, `panel.ts` keep both sides
+correctly. `cabin_muffle` (impacts' interior detection) caps other cars, the horn and impact
+one-shots but not the car's own engine, so the modelled engine's cockpit filtering is not
+applied twice. (Two interior signals now exist: the director's cabin box and the backend's
+camera mode for the engine worklet; they agree for the cockpit camera.)
+
+**Checks:** fmt, clippy `--all-targets -D warnings`, `npm run wasm`, `tsc`: clean. `cargo test -p
+wp_audio`: all pass (incl. `impacts`). `e2e/audio.mjs`, `audio_samples.mjs`, `audio_roster.mjs`,
+`audio_engine.mjs`: pass. **`e2e/audio_impacts.mjs`: 4 FAIL — identical on a clean
+`origin/lead/round12` worktree** (louder / heavier with speed: hit RMS −14.1 / −12.2 / −9.5 dB,
+bass −17.5 / −14.7 / −12.4 dB; crunch 20 vs 90 km/h −20.5 / −18.2 dB; wall-scrape sparks
+> 5 kHz −60.8 dB vs body −30.5 dB). Not touched here (impacts files belong to
+`lead/audio-impacts`); likely the real-crash traces changed with the round-13 vehicle.
+
+`cargo test --workspace --no-fail-fast` on this merge: 144 test binaries pass; failing, none in
+audio's reach (this branch vs `origin/lead/round12` = `wp_audio` engine.rs / data.rs / config,
+docs, and the kinematic-traffic bridge which reads `&Session` only): simcli `goldens_match`
+(39 scenarios now), `wp_race` race_picker (`loop9_circuit`, `lantern_checkpoint_draws_the_police`),
+`wp_vehicle` `differentials::roster_diff_hashes_are_pinned` and
+`handling_balance::front_drive_cars_understeer_mildly` (junkyard_beater 1.60 deg/g vs ≤ 1.6),
+`wp_wasm` `crash_replay_tests::race_crash_replays_with_the_judge_and_no_crash_on_the_grid` and
+`tests::simcli_golden_replays_play_back_in_the_browser_core` (golden_tbone drift) — neither
+`wp_wasm` test touches audio. These look like round-13 vehicle changes waiting for a `[bless]`.

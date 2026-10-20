@@ -29,6 +29,9 @@ const CONTACT_LIFETIME_S = 1.5;
 const MAX_CONTACT_MARKERS = 64;
 const CONTACT_DOT = new THREE.SphereGeometry(0.08, 8, 6);
 const tmpNormal = new THREE.Vector3();
+const groundRay = new THREE.Raycaster();
+const groundFrom = new THREE.Vector3();
+const groundDown = new THREE.Vector3(0, -1, 0);
 
 export class SceneView {
   readonly renderer: THREE.WebGLRenderer;
@@ -95,7 +98,6 @@ export class SceneView {
     this.quality.attach(this.renderer);
     const draw = Number(new URLSearchParams(location.search).get("draw"));
     this.drawDistanceM = draw > 0 ? draw : this.quality.drawDistanceM;
-    this.detailDistanceM = this.quality.cityDetailM;
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     parent.appendChild(this.renderer.domElement);
     window.addEventListener("resize", () => this.renderer.setSize(window.innerWidth, window.innerHeight));
@@ -189,9 +191,25 @@ export class SceneView {
       holder.add(gltf.scene);
       this.cityTiles.set(cityId, new CityTiles(gltf.scene));
       this.onCityLoaded?.(gltf.scene, cityId);
+      this.warmLightVariants();
     } catch (e) {
       console.warn("city greybox not available", cityId, e);
     }
+  }
+
+  /**
+   * Height of the shown city's surface under sim-space `(x, y)` (m), by a downward ray against
+   * the greybox; null without a city or a hit. For rarely placed objects (spike strips), not per
+   * frame per car.
+   */
+  groundZ(x: number, y: number): number | null {
+    const city = this.cityShown ? this.cities.get(this.cityShown) : null;
+    if (!city) return null;
+    // Sim (x, y, z) is Three (x, z, -y) (world rotated -90 deg about X).
+    groundRay.set(groundFrom.set(x, 2000, -y), groundDown);
+    groundRay.far = 4000;
+    const hit = groundRay.intersectObject(city, true)[0];
+    return hit ? hit.point.y : null;
   }
 
   /**
@@ -421,9 +439,82 @@ export class SceneView {
       camera.getWorldPosition(this.camPos);
       tiles.update(this.camPos, this.cullDistanceM(camera), this.detailDistanceM);
     }
+    // Three bakes the number of visible point lights into every lit shader, so the shared siren
+    // light turning on (first police lights) used to recompile every lit material mid-chase
+    // (~13 programs, seconds under a software rasterizer). A few frames after a session or city
+    // starts, one hidden render with the siren in the other state builds those variants up
+    // front (a real render: only what is visible, exactly the programs the frame will use).
+    if (this.sirenWarmIn > 0 && --this.sirenWarmIn === 0) {
+      const siren = this.sirenLight;
+      const visible = siren.visible;
+      const intensity = siren.intensity;
+      siren.visible = !visible;
+      if (!visible) siren.intensity = 0;
+      this.draw(camera);
+      siren.visible = visible;
+      siren.intensity = intensity;
+      this.lightWarmups++;
+    }
+    this.draw(camera);
+  }
+
+  /** Frames until the siren-variant warm-up render (0 = none pending). */
+  private sirenWarmIn = 0;
+  /** Warm-up renders done (automation). */
+  lightWarmups = 0;
+
+  /** Schedule the siren-variant warm-up render a few frames from now (new session or city:
+   * new materials and meshes). */
+  warmLightVariants(): void {
+    this.sirenWarmIn = 4;
+  }
+
+  private draw(camera: THREE.PerspectiveCamera): void {
     if (this.renderOverride) this.renderOverride(camera);
     else this.renderer.render(this.scene, camera);
   }
+
+  /**
+   * Build the shader programs of `root` (a subtree of this scene) now, hidden meshes included,
+   * for both siren-light states: e.g. the crash effects, whose meshes stay hidden until the
+   * first crash and otherwise compiled ~11 programs mid-chase (a long hitch under a software
+   * rasterizer). Uses the real draw path (post target, fog, lights, shader hooks) with every
+   * other object hidden, so the programs match the ones the frame loop will ask for; empty
+   * instanced meshes build their program without drawing anything.
+   */
+  precompile(root: THREE.Object3D, camera: THREE.PerspectiveCamera): void {
+    const changed: [THREE.Object3D, boolean][] = [];
+    const set = (o: THREE.Object3D, v: boolean) => {
+      if (o.visible !== v) {
+        changed.push([o, o.visible]);
+        o.visible = v;
+      }
+    };
+    // Hide everything that is not a light, an ancestor of `root`, or inside `root`.
+    const keep = new Set<THREE.Object3D>();
+    for (let o: THREE.Object3D | null = root; o; o = o.parent) keep.add(o);
+    this.scene.traverse((o) => {
+      if (keep.has(o) || (o as THREE.Light).isLight) return;
+      let inside = false;
+      for (let p: THREE.Object3D | null = o; p; p = p.parent) if (p === root) inside = true;
+      if (inside) set(o, true);
+      else if (!keep.has(o.parent!)) return;
+      else set(o, false);
+    });
+    const siren = this.sirenLight;
+    const visible = siren.visible;
+    const intensity = siren.intensity;
+    for (const on of [!visible, visible]) {
+      siren.visible = on;
+      if (on && !visible) siren.intensity = 0;
+      this.draw(camera);
+    }
+    siren.visible = visible;
+    siren.intensity = intensity;
+    for (let i = changed.length - 1; i >= 0; i--) changed[i][0].visible = changed[i][1];
+  }
+
+
 }
 
 /** Draw kinds that need their own shader program variant (prewarm bookkeeping). */

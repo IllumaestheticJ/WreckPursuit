@@ -87,9 +87,8 @@ export class Skids {
       polygonOffsetFactor: -4,
       polygonOffsetUnits: -8,
       side: THREE.DoubleSide,
-      // Transparent + DoubleSide: without this Three draws back then front faces and flips
-      // `side`, bumping `material.version` twice a render (re-resolves the shader program and
-      // allocates its parameters every frame; browser-perf.md round 12b).
+      // Transparent + DoubleSide is otherwise drawn back then front, flipping `side` and
+      // re-resolving (and re-patching, onBeforeCompile) the program twice every frame.
       forceSinglePass: true,
     });
     const u = this.uniforms;

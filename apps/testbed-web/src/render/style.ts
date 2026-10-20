@@ -72,7 +72,7 @@ export interface StyledScene {
   readonly sun: THREE.DirectionalLight;
   readonly groundMaterial: THREE.MeshStandardMaterial;
   /** Graphics quality (render/quality.ts): the post target uses MSAA only when it allows. */
-  readonly quality: { readonly antialias: boolean; readonly lite: boolean; readonly lampPoleDrawM: number };
+  readonly quality: { readonly antialias: boolean; readonly lite: boolean; readonly lampDrawM?: number };
   /** Light-bar glow multiplier for the police helicopters. */
   policeGlow: number;
   /** City draw distance, m (scene.ts; lamp tiles past it are hidden like city tiles). */
@@ -360,7 +360,7 @@ interface CityStyle {
   building: THREE.MeshStandardMaterial | null;
   lamps: THREE.Group | null;
   /** Lamp tiles (one group per CITY_TILE_M cell) with their world bounding spheres. */
-  lampTiles: { group: THREE.Group; poles: THREE.InstancedMesh; sphere: THREE.Sphere }[];
+  lampTiles: { group: THREE.Group; sphere: THREE.Sphere }[];
   /** Lamp count (tests, docs). */
   lampCount: number;
   built: boolean;
@@ -745,7 +745,7 @@ export class ArtStyle {
         tile.add(im);
       }
       group.add(tile);
-      tiles.push({ group: tile, poles, sphere });
+      tiles.push({ group: tile, sphere });
     }
     const c = [...this.cities.values()].find((x) => x.root === root);
     if (c) {
@@ -816,17 +816,13 @@ export class ArtStyle {
     if (!c || !c.lamps?.visible) return;
     let far = this.view.drawDistanceM;
     if (camera instanceof THREE.PerspectiveCamera) far = Math.min(far, camera.far);
+    far = Math.min(far, this.view.quality.lampDrawM ?? Infinity);
     const fog = this.view.scene.fog;
     if (fog instanceof THREE.FogExp2 && fog.density > 0) far = Math.min(far, 2.7 / fog.density);
     camera.getWorldPosition(this.camPos);
-    // Poles end sooner on the lean profiles (graphics quality): far away only the glowing
-    // heads read, and the poles are two thirds of a lamp's triangles.
-    const poleFar = Math.min(far, this.view.quality.lampPoleDrawM);
     let shown = 0;
     for (const t of c.lampTiles) {
-      const d = t.sphere.center.distanceTo(this.camPos) - t.sphere.radius;
-      t.group.visible = d < far;
-      t.poles.visible = d < poleFar;
+      t.group.visible = t.sphere.center.distanceTo(this.camPos) - t.sphere.radius < far;
       if (t.group.visible) shown++;
     }
     this.lampTilesShown = shown;
