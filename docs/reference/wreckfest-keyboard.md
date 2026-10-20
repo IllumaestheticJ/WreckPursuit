@@ -269,3 +269,21 @@ So in a slide the reference's front wheels do **not** follow the key: they are p
 That explains why counter key + full throttle holds a steady drift in clip 1, and why holding the into-turn key mid-slide doesn't spin the car.
 
 Throttle: no visible limiting. Clip 5 floors it from rest (TCS off) and goes straight, and keyboard Test Throttle is raw 0/100 %.
+
+## Weight transfer speed (owner: "the car weight transitions way too fast", 2026-10-20)
+
+Reference, clip 4 (#49 muscle car, chase cam, 8.1–9.6 s): a Right key press at 8.3 s at ~50 mph with a brake dab. Read from the rear bumper and tail-light line in 10 fps frames:
+- **No visible body roll for ~0.2–0.3 s** after the key.
+- Roll builds **smoothly over ~0.8–0.9 s** to its peak, about 1.1 s after the press.
+- **Large peak roll, roughly 5–7°**, and the car leans visibly onto its outside wheels.
+- **No overshoot or rocking.** The body holds the lean and the tail slides out on top of it.
+- Heading change starts ~0.3–0.4 s after the key and builds over about a second.
+
+Targets for WreckPursuit (lab first, then car data):
+- roll natural frequency ~0.9–1.1 Hz (ours: 1.5 Hz lab default, 1.76 Hz data)
+- near-critical damping (ζ ≈ 0.9–1.1)
+- 10→90 % roll rise time ~0.6–0.8 s in a 100 km/h lane change
+- peak roll ~5–7° at about 0.8 g
+- the same slower build for pitch under braking and throttle
+
+This needs softer roll stiffness (springs + bars) **with** enough travel or ride height to stay off the bump stops, more roll inertia if the body inertia is low, and a slower yaw build.
