@@ -116,7 +116,7 @@ function makeBeam(parent: THREE.Object3D): HeloBeam {
     new THREE.MeshBasicMaterial({
       color: 0xfff6d8,
       transparent: true,
-      opacity: 0.22,
+      opacity: 0.12,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     }),
@@ -323,7 +323,7 @@ export class SceneView {
       b.light.target.position.copy(to);
       b.light.target.updateMatrixWorld();
       b.light.angle = half;
-      b.light.intensity = 6 * k;
+      b.light.intensity = 2.5 * k;
       const len = from.distanceTo(to);
       const r = Math.tan(half) * len;
       b.cone.position.copy(from);
@@ -332,7 +332,7 @@ export class SceneView {
       (b.cone.material as THREE.MeshBasicMaterial).opacity = 0.07 * k;
       b.pool.position.set(to.x, to.y, to.z + 0.08);
       b.pool.scale.setScalar(r);
-      (b.pool.material as THREE.MeshBasicMaterial).opacity = 0.22 * k;
+      (b.pool.material as THREE.MeshBasicMaterial).opacity = 0.12 * k;
     });
     this.spotlightsLit = lit;
   }
