@@ -131,15 +131,18 @@ pub struct SpinGrip {
 }
 
 impl Default for SpinGrip {
+    /// The tyre-slip workstream's tuned set (docs/integration/tyre-slip.md; parity_rwd_d,
+    /// "sport" tyres): side force under spin fades in around 35° of slip angle, drive grip under
+    /// spin kept at ~96 % of the peak.
     fn default() -> Self {
         Self {
-            b0: 4.3,
-            b2: 5.6,
-            c: 1.0,
-            p: 2.0,
+            b0: 6.99,
+            b2: 1.627,
+            c: 0.85,
+            p: 8.0,
             fx_yield: 0.0,
             on_braking: false,
-            fx_slide: 0.0,
+            fx_slide: 0.958,
         }
     }
 }
@@ -287,6 +290,64 @@ mod tests {
         let (fx0, fy0) = combined_forces_weighted(&t, 1.0, 0.35, t.fz0_n, 1.0, 0.2);
         assert_eq!(fx0, fx1);
         assert!(fy0.abs() > 1.5 * fy1.abs(), "{fy0} vs {fy1}");
+    }
+
+    #[test]
+    fn spin_model_is_the_ellipse_without_drive_spin() {
+        let t = street();
+        let m = SpinGrip::default();
+        for (k, a) in [(0.0f32, 0.05f32), (0.0, 0.6), (-0.4, -0.1), (-1.0, 0.5)] {
+            assert_eq!(
+                combined_forces_spin(&t, k, a, t.fz0_n, 1.0, Some(&m)),
+                combined_forces(&t, k, a, t.fz0_n, 1.0)
+            );
+        }
+        assert_eq!(
+            combined_forces_spin(&t, 1.2, 0.5, t.fz0_n, 1.0, None),
+            combined_forces(&t, 1.2, 0.5, t.fz0_n, 1.0)
+        );
+    }
+
+    #[test]
+    fn spin_model_side_force_rises_with_slip_angle_under_spin() {
+        let t = street();
+        let m = SpinGrip::default();
+        let fy = |a: f32| -combined_forces_spin(&t, 1.5, a, t.fz0_n, 1.0, Some(&m)).1;
+        let ell = |a: f32| -combined_forces(&t, 1.5, a, t.fz0_n, 1.0).1;
+        // Never below the ellipse; well above it in a deep slide; rising across 20–45°.
+        for a in [0.05f32, 0.2, 0.4, 0.6, 0.8] {
+            assert!(fy(a) >= ell(a) - 1e-3, "a {a}");
+        }
+        assert!(fy(0.7) > 2.0 * ell(0.7), "{} vs {}", fy(0.7), ell(0.7));
+        assert!(fy(0.35) < fy(0.6) && fy(0.6) < fy(0.8));
+        // Weight: 0..=1, 1 at no spin, falls with spin at small angles.
+        assert_eq!(spin_side_weight(&m, 0.0, 0.1), 1.0);
+        assert!(spin_side_weight(&m, 1.0, 0.05) < 0.6);
+        assert!(spin_side_weight(&m, 1.0, 0.8) > 0.9);
+    }
+
+    #[test]
+    fn spin_model_drive_floor_and_yield() {
+        let t = street();
+        let floor = SpinGrip::default();
+        let none = SpinGrip {
+            fx_slide: 0.0,
+            ..floor
+        };
+        let (fx_f, _) = combined_forces_spin(&t, 2.0, 0.0, t.fz0_n, 1.0, Some(&floor));
+        let (fx_0, _) = combined_forces_spin(&t, 2.0, 0.0, t.fz0_n, 1.0, Some(&none));
+        assert!(fx_f > 1.3 * fx_0, "{fx_f} vs {fx_0}");
+        let mu_x = load_sensitive_mu(t.longitudinal.d, t.load_sensitivity, t.fz0_n, t.fz0_n);
+        assert!(fx_f <= mu_x * t.fz0_n * 1.0001);
+        // Full yield keeps (Fx, Fy) inside the ellipse.
+        let capped = SpinGrip {
+            fx_yield: 1.0,
+            ..floor
+        };
+        let (fx, fy) = combined_forces_spin(&t, 1.5, 0.7, t.fz0_n, 1.0, Some(&capped));
+        let e =
+            (fx / (t.longitudinal.d * t.fz0_n)).powi(2) + (fy / (t.lateral.d * t.fz0_n)).powi(2);
+        assert!(e <= 1.0001, "e {e}");
     }
 
     #[test]

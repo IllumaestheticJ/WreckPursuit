@@ -259,9 +259,13 @@ export const sim = {
   rideTuneSet: (json: string): void => wasm.ride_tune_set(json),
   /** [roll_hz, roll_zeta, roll_deg_per_g, pitch_hz, pitch_zeta, body_roll_deg]. */
   rideReadout: (entity: number): Float32Array => wasm.ride_readout(entity),
-  /** Drift Lab W car / tyre experiments in effect (null = data) / {data, candidate} (wp_vehicle::car_lab::CarTune). */
+  /** Drift Lab W car / tyre experiments in effect (null = data) / {data, candidate, spin} (wp_vehicle::car_lab::CarTune). */
   carTune: (): Record<string, number | boolean> | null => JSON.parse(wasm.car_tune_json()),
-  carTuneDefaults: (): { data: Record<string, number | boolean>; candidate: Record<string, number | boolean> } =>
+  carTuneDefaults: (): {
+    data: Record<string, number | boolean>;
+    candidate: Record<string, number | boolean>;
+    spin: Record<string, number | boolean>;
+  } =>
     JSON.parse(wasm.car_tune_defaults_json()),
   /** Set the car / tyre experiments ("" = the data). */
   carTuneSet: (json: string): void => wasm.car_tune_set(json),

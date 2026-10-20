@@ -60,6 +60,13 @@ const CAR_FIELDS: Record<string, { label: string; min: number; max: number; step
   front_peak_slip: { label: "front peak slip ×", min: 0.5, max: 3, step: 0.05, hint: "front tyres' lateral peak slip angle" },
   lock: { label: "steering lock ×", min: 0.6, max: 1.6, step: 0.05, hint: "× the car's max steer angle" },
   torque: { label: "engine torque ×", min: 0.3, max: 1.5, step: 0.05, hint: "engine torque scale" },
+  spin_b0: { label: "spin model: B0", min: 0.5, max: 20, step: 0.05, hint: "tyre-slip spin model (tick 'spin model'): how fast wheelspin removes side force at small slip angles (higher = power oversteer starts sooner)" },
+  spin_b2: { label: "spin model: B2", min: 0.5, max: 8, step: 0.01, unit: "/rad", hint: "1 / slip angle where a spinning tyre gets its side force back (1.63 ≈ 35°; lower = later)" },
+  spin_p: { label: "spin model: sharpness p", min: 1, max: 8, step: 1, hint: "how sharply the side force comes back with slip angle" },
+  spin_c: { label: "spin model: C", min: 0.3, max: 1, step: 0.01, hint: "weighting shape; below 1 a spinning tyre always keeps some side force" },
+  spin_fx_slide: { label: "spin model: drive grip spinning", min: 0, max: 1, step: 0.01, hint: "fraction of peak drive force a spinning tyre keeps (0 = the tyre data's curve, ~0.55)" },
+  spin_fx_yield: { label: "spin model: ellipse cap", min: 0, max: 1, step: 0.05, hint: "how much drive force yields to stay inside the friction ellipse (0 = MF-style, no cap; 1 = hard cap)" },
+  rear_relax: { label: "rear relaxation ×", min: 0.1, max: 5, step: 0.05, hint: "rear tyres' relaxation length (slip-angle lag)" },
   yaw_damping: { label: "yaw damping (diag)", min: 0, max: 2, step: 0.05, unit: "/s", hint: "NOT physical: a yaw damping torque −k·m·L²·r, to see how much damping a held drift needs" },
 };
 
@@ -341,7 +348,11 @@ export class DriftLabWPanel {
       }
       for (const [key, label, hint] of [
         ["rear_locked", "rear diff locked", "lock the rear differential (else the car's own)"],
-        ["combined_rear_only", "side grip: rear only", "side grip under spin applies to the rear tyres only (else all four)"],
+        ["rear_open", "rear diff open", "open rear differential (else the car's own)"],
+        ["combined_rear_only", "side grip: rear only", "side grip under spin / the spin model apply to the rear tyres only (else all four)"],
+        ["spin_model", "spin model (tyre-slip)", "combined slip where a spinning tyre's side force comes back as the slip angle grows (off = the data's friction ellipse)"],
+        ["spin_on_braking", "spin model: braking too", "also apply the spin model to braking / locked wheels"],
+        ["aligning_on_body", "aligning moment on body", "apply the tyres' self-aligning moment to the body as yaw torque (data: force feedback only)"],
       ] as const) {
         const input = document.createElement("input");
         input.type = "checkbox";
@@ -353,7 +364,8 @@ export class DriftLabWPanel {
       btns.style.cssText = "display:flex;gap:6px;margin-top:4px";
       for (const [label, which, hint] of [
         ["tyre data", "data", "no change: the car and tyre files as they are"],
-        ["drift candidate", "candidate", "best held-countersteer set so far (side grip 0.15, lock 0.9, yaw damping 0.2 — the damper is not physical)"],
+        ["drift candidate", "candidate", "Drift Lab W step 4's set (side grip 0.15, lock 0.9, yaw damping 0.2 — the damper is not physical; re-measured: swings through to the other side)"],
+        ["spin model", "spin", "tyre-slip spin model on the rears, no damper (holds ~41–44° on the lab's standard entry; tuned to a knife edge)"],
       ] as const) {
         const b = document.createElement("button");
         b.textContent = label;

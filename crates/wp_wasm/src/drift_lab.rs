@@ -208,12 +208,13 @@ pub fn car_tune_json() -> String {
     json(&wp_vehicle::car_lab::active())
 }
 
-/// `{ "data": <no change>, "candidate": <best drift-hold set so far> }`, JSON.
+/// `{ "data": <no change>, "candidate": <step 4's set>, "spin": <tyre-slip spin model> }`, JSON.
 #[wasm_bindgen]
 pub fn car_tune_defaults_json() -> String {
     json(&serde_json::json!({
         "data": wp_vehicle::car_lab::CarTune::default(),
         "candidate": wp_vehicle::car_lab::CarTune::drift_candidate(),
+        "spin": wp_vehicle::car_lab::CarTune::spin_candidate(),
     }))
 }
 

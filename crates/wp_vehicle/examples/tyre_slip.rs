@@ -136,7 +136,18 @@ fn configs() -> Vec<(String, CarTune)> {
     let d = CarTune::default();
     let mut v: Vec<(String, CarTune)> = vec![
         ("data (friction ellipse)".into(), d),
-        ("spin model (defaults)".into(), spin()),
+        ("spin model (`CarTune::spin_candidate`)".into(), spin()),
+        (
+            "step-4 drift candidate (side grip 0.15, lock 0.9, damper 0.2)".into(),
+            CarTune::drift_candidate(),
+        ),
+        (
+            "rear diff open only".into(),
+            CarTune {
+                rear_open: true,
+                ..d
+            },
+        ),
         (
             "aligning moment on body only".into(),
             CarTune {
@@ -343,6 +354,49 @@ fn search(n: usize) {
     }
 }
 
+/// `refine [n]`: seeded hill-climb from `TYRE` (spin model knobs ±15 %), ranked by [`robust`].
+fn refine(n: usize) {
+    let c = car("parity_rwd_d");
+    let mut best: CarTune =
+        serde_json::from_str(&std::env::var("TYRE").expect("TYRE start")).expect("TYRE json");
+    car_lab::set_override(Some(best));
+    let (mut best_s, _) = robust(&c);
+    let mut rng = wp_math::Rng::new(11);
+    for i in 0..n {
+        let mut t = best;
+        let mut j = |x: &mut f32, lo: f32, hi: f32| {
+            if rng.next_f32() < 0.5 {
+                *x = (*x * (0.85 + 0.3 * rng.next_f32())).clamp(lo, hi);
+            }
+        };
+        j(&mut t.spin_b0, 0.5, 30.0);
+        j(&mut t.spin_b2, 0.5, 8.0);
+        j(&mut t.spin_c, 0.3, 1.0);
+        j(&mut t.spin_fx_slide, 0.0, 1.0);
+        j(&mut t.spin_fx_yield, 0.0, 1.0);
+        if rng.next_f32() < 0.15 {
+            t.spin_p = (t.spin_p + if rng.next_f32() < 0.5 { -1.0 } else { 1.0 }).clamp(1.0, 8.0);
+        }
+        car_lab::set_override(Some(t));
+        let (s, _) = robust(&c);
+        if s > best_s {
+            best_s = s;
+            best = t;
+            eprintln!("{i}: {s:.2} {}", serde_json::to_string(&t).unwrap());
+        }
+    }
+    car_lab::set_override(Some(best));
+    let (s, v) = robust(&c);
+    car_lab::set_override(None);
+    println!(
+        "best {s:.2} TYRE='{}'",
+        serde_json::to_string(&best).unwrap()
+    );
+    for h in v {
+        println!("    {}", fmt_hold(&h));
+    }
+}
+
 fn trace(id: &str) {
     let c = car(id);
     let a = reference_assists();
@@ -351,7 +405,12 @@ fn trace(id: &str) {
     }
     let mut tick = 0usize;
     println!("t | key | wheel ° | front trav ° | slide ° | yaw °/s | km/h | Fy F kN | Fy R kN | Fx R kN | kappa RL/RR | alpha R °");
-    plain_drift_run_with(&c, &a, COUNTER6, 40.0, 0.6, |rig, steer, _| {
+    let d = if std::env::var("ENTRY12").is_ok() {
+        COUNTER12
+    } else {
+        COUNTER6
+    };
+    plain_drift_run_with(&c, &a, d, 40.0, 0.6, |rig, steer, _| {
         if tick.is_multiple_of(12) {
             let s = slide_state(rig);
             let w = &rig.state().wheel_states;
@@ -384,7 +443,7 @@ fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let what = if args
         .first()
-        .is_some_and(|a| ["table", "grid", "trace", "search"].contains(&a.as_str()))
+        .is_some_and(|a| ["table", "grid", "trace", "search", "refine"].contains(&a.as_str()))
     {
         args.remove(0)
     } else {
@@ -401,6 +460,7 @@ fn main() {
     match what.as_str() {
         "grid" => grid(&args),
         "search" => search(args[0].parse().unwrap_or(300)),
+        "refine" => refine(args[0].parse().unwrap_or(150)),
         "trace" => trace(&args[0]),
         _ => table(&args),
     }

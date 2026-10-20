@@ -21,7 +21,8 @@ pub struct CarTune {
     /// of its side force; 0 = side force ignores wheelspin). Longitudinal force is unchanged.
     /// Applies to the driven-and-rear tyres selected by [`CarTune::combined_rear_only`].
     pub lat_under_spin: f32,
-    /// Apply [`CarTune::lat_under_spin`] to the rear tyres only (else all four).
+    /// Apply [`CarTune::lat_under_spin`] / [`CarTune::spin_model`] to the rear tyres only (else
+    /// all four).
     pub combined_rear_only: bool,
     /// Rear tyres' lateral peak slip angle scale (bigger = the peak comes later and the force
     /// curve is wider: a more forgiving slide).
@@ -42,7 +43,8 @@ pub struct CarTune {
     pub yaw_damping: f32,
     /// Tyre model A/B (tyre-slip workstream): `true` = the combined-slip model with side force
     /// that keeps rising with slip angle under drive wheelspin ([`crate::tire::SpinGrip`]);
-    /// `false` = the data's friction ellipse. Applies to all four tyres.
+    /// `false` = the data's friction ellipse. Applies to the tyres chosen by
+    /// [`CarTune::combined_rear_only`] (default: the rears).
     pub spin_model: bool,
     /// [`crate::tire::SpinGrip::b0`].
     pub spin_b0: f32,
@@ -95,13 +97,25 @@ impl Default for CarTune {
 impl CarTune {
     /// Best "countersteer key held + full throttle" set found so far on parity_rwd_d
     /// (docs/integration/drift-lab-w.md, step 4): rear side grip under spin 0.15, lock × 0.9,
-    /// diagnostic yaw damping 0.2 /s. Holds ~4.7 s of the 6 s run at 25–28° without a spin, but
-    /// not steadily (sd ≈ 10°), and it needs the non-physical yaw damper.
+    /// diagnostic yaw damping 0.2 /s. Step 4 reported ~4.7 s held at 25–28°; the tyre-slip
+    /// re-measure (direction-aware) shows it holds the intended side only ~0.5 s, then swings
+    /// through and circles the other way on the held key.
     pub fn drift_candidate() -> Self {
         Self {
             lat_under_spin: 0.15,
             lock: 0.9,
             yaw_damping: 0.2,
+            ..Self::default()
+        }
+    }
+
+    /// Tyre-slip workstream's spin-model set (docs/integration/tyre-slip.md): the spin-weighted
+    /// combined slip on the rears, no yaw damper, steering / ride as they are. On parity_rwd_d
+    /// with the lab driver (counter key at 6° + full throttle, 0.6 g entry) it holds ~41–44° for
+    /// 5 s; it is **tuned to a knife edge** (other entries and nearby values still spin).
+    pub fn spin_candidate() -> Self {
+        Self {
+            spin_model: true,
             ..Self::default()
         }
     }
@@ -112,8 +126,8 @@ impl CarTune {
     }
 
     /// The combined-slip model of corner `i` (`None` = the data's friction ellipse).
-    pub fn spin_grip(&self, _i: usize) -> Option<SpinGrip> {
-        self.spin_model.then_some(SpinGrip {
+    pub fn spin_grip(&self, i: usize) -> Option<SpinGrip> {
+        (self.spin_model && self.combined_applies(i)).then_some(SpinGrip {
             b0: self.spin_b0,
             b2: self.spin_b2,
             c: self.spin_c,
