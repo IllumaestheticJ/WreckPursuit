@@ -306,6 +306,10 @@ pub struct PoliceStats {
     /// ([`stuck::GIVE_WAY_S`]).
     #[serde(default)]
     pub give_ways: u32,
+    /// Units that gave up, stood still [`stuck::DEADLOCK_VANISH_S`] next to a racer and were
+    /// despawned in view to break the deadlock.
+    #[serde(default)]
+    pub deadlock_despawns: u32,
     /// Ground units spawned after the session start (pool refills, responders,
     /// reinforcements, tool units).
     pub spawns: Vec<SpawnRecord>,
@@ -1203,14 +1207,20 @@ impl PoliceSystem {
     }
 
     /// Whether another car is closing on unit `i` and would reach it within
-    /// [`TURN_LOOK_S`]: a unit not chasing anyone doesn't start turning across the road then (opponent-pace: units
+    /// [`TURN_LOOK_S`] (with `racers_only`, a racer: a pursuer turns round for its racer at once
+    /// past other traffic, but not across a racer's path — Loop 9: a pursuer U-turned in front of
+    /// the oncoming racer it had just been given, which hit it and left the corridor; DQ). A unit
+    /// doesn't start turning across the road then (opponent-pace: units
     /// turning round on the Hollins hairpin, just after the race leader passed, ended up across
     /// both lanes in front of the next racer).
-    fn traffic_closing(&self, i: usize) -> bool {
+    fn traffic_closing(&self, i: usize, racers_only: bool) -> bool {
         let u = &self.units[i];
         let (id, entity, pos) = (u.id, u.entity, u.body.pos);
         self.obstacles.iter().any(|o| {
             if o.ghost || o.unit == Some(id) || (o.entity.is_some() && o.entity == entity) {
+                return false;
+            }
+            if racers_only && !o.entity.is_some_and(|e| self.racers.contains_key(&e)) {
                 return false;
             }
             let r = graph::sub(o.pos, pos);
@@ -1254,6 +1264,13 @@ impl PoliceSystem {
         }
         let (s, _) = u.cmd.track.project_ahead(u.body.pos, u.track_s, 3.0, 40.0);
         u.track_s = s;
+        match u.unstick.stand_at {
+            Some(p) if graph::dist(p, u.body.pos) < stuck::STAND_M => u.unstick.stand_s += dt,
+            _ => {
+                u.unstick.stand_at = Some(u.body.pos);
+                u.unstick.stand_s = 0.0;
+            }
+        }
         let offset = self.update_avoid(i, dt);
         let u = &mut self.units[i];
         let look = u.controller().lookahead(v);
@@ -1322,6 +1339,29 @@ impl PoliceSystem {
             u.unstick.swing_ready = now.plus(stuck::SWING_COOLDOWN_S);
             u.unstick.slow_s = 0.0;
         }
+        let chasing = matches!(
+            u.assignment,
+            Assignment::Pursue { .. } | Assignment::Intercept { .. }
+        );
+        // Its way lies behind it and a car is closing: don't arc across the road in front of
+        // it (Loop 9: a unit given a racer to chase turned across the road at walking pace into
+        // the oncoming field). Hold straight in its lane until they have passed.
+        if facing < stuck::SWING_BEHIND_COS
+            && !disabled
+            && matches!(u.unstick.phase, stuck::Phase::Drive)
+            && self.traffic_closing(i, chasing)
+        {
+            let (_, b) = self.units[i].controller().pedals(v, -brake, dt, true);
+            let (brake, handbrake) = standstill_hold(v, b);
+            return Some(VehicleInput {
+                brake,
+                handbrake,
+                siren: siren_out,
+                headlights: true,
+                ..Default::default()
+            });
+        }
+        let u = &mut self.units[i];
         // Lights on only (pursuit, intercept, response): a patrol turns round like traffic.
         let swing_wanted = matches!(u.unstick.phase, stuck::Phase::Drive)
             && siren
@@ -1332,10 +1372,7 @@ impl PoliceSystem {
             && now >= u.unstick.swing_ready
             && u.unstick.may_turn(now)
             && graph::dist(pos, [target[0], target[1]]) > 6.0
-            && (matches!(
-                u.assignment,
-                Assignment::Pursue { .. } | Assignment::Intercept { .. }
-            ) || !self.traffic_closing(i));
+            && !self.traffic_closing(i, chasing);
         // Room for the turning circle (row 66: full-lock turns on narrow streets hit buildings):
         // forward round a centre on the target's side, backwards round one on the other side.
         let left_t = graph::cross(heading, to_t) > 0.0;

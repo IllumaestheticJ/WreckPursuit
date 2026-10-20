@@ -89,6 +89,16 @@ pub const GIVE_WAY_RACER_MPS: f32 = 3.0;
 pub const GIVE_WAY_NEAR_M: f32 = 15.0;
 /// How far it backs out to give way, m.
 pub const GIVE_WAY_M: f32 = 6.0;
+/// A unit that gave up and has stood still this long with a racer within
+/// [`DEADLOCK_NEAR_M`] despawns even in view: the cars round it are waiting for it and nobody
+/// can move (Hollins: a parked fled racer, the field queued nose to nose with the police car, a
+/// wall behind it). Owner row 78 allows a quick visible reset for police; spawns still never
+/// happen in view, s.
+pub const DEADLOCK_VANISH_S: f32 = 30.0;
+/// See [`DEADLOCK_VANISH_S`], m.
+pub const DEADLOCK_NEAR_M: f32 = 20.0;
+/// Moving less than this from where it stopped still counts as standing, m.
+pub const STAND_M: f32 = 3.0;
 /// After backing out it waits up to this long for the racer to get past, s.
 pub const GIVE_WAY_HOLD_S: f32 = 8.0;
 /// ... while that racer is still in front of it and this close, m.
@@ -252,6 +262,12 @@ pub struct UnstickState {
     /// Gave way to this racer: wait for it to get past, until then.
     #[serde(default)]
     pub(crate) give_way_to: Option<(EntityId, SimTime)>,
+    /// Seconds within [`STAND_M`] of `stand_at` (rocking back and forth on the spot counts).
+    #[serde(default)]
+    pub(crate) stand_s: f32,
+    /// Where it stopped.
+    #[serde(default)]
+    pub(crate) stand_at: Option<[f32; 2]>,
 }
 
 impl UnstickState {
