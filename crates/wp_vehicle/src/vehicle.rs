@@ -20,7 +20,7 @@ use crate::diff::{axle_transfer, centre_transfer, AxleDiff, CentreDiff, DiffInpu
 use crate::drivetrain::{auto_clutch_update, Converter, Gearbox, ShiftInputs};
 use crate::engine::{Engine, EngineExtras, RPM_PER_RADPS};
 use crate::ffb::{self, FfbWheel};
-use crate::ground::WheelCaster;
+use crate::ground::{WheelCaster, WheelProbe};
 use crate::math::{arr, sin_cos, v3, yaw_quat, Quat, V3};
 use crate::slide::{gyro_yaw_torque, slide_class_with_rear_lock, slide_throttle, GyroInput};
 use crate::steering::{
@@ -28,7 +28,7 @@ use crate::steering::{
     SteerInput,
 };
 use crate::surface::{conditions_grip, ConditionsSource, SurfaceConditions, TireWetProfile};
-use crate::suspension::{arb_force, static_compression, strut_force};
+use crate::suspension::{arb_force, static_compression, step_strut, TYRE_STATIC_DEFLECTION_M};
 use crate::tire::{
     combined_forces, load_sensitive_mu, low_speed_lateral, pneumatic_trail, relax, slip_angle,
     slip_ratio, surface_grip, SLIP_RATIO_V_MIN,
@@ -42,6 +42,22 @@ const HUB_DAMPING: f32 = 6_000.0;
 const HUB_FRICTION: f32 = 0.8;
 /// Lateral camber thrust per radian of camber, as a fraction of load.
 const CAMBER_THRUST: f32 = 0.15;
+/// The tyre sweep starts this far above the top of the travel, m (see `probe_wheel`).
+const PROBE_LIFT_M: f32 = 0.3;
+/// Fraction of the tyre's half width used by the sweep (the shoulder is rounded).
+const PROBE_WIDTH_FRAC: f32 = 0.8;
+/// Normal used for the tyre's force frame: the ground normal, leaned back toward the strut
+/// axis `up` when the contact is a steep edge (a kerb corner reports a normal pointing back
+/// at the wheel; driving and braking forces along it would turn the kerb into a ramp).
+fn tyre_normal(n: V3, up: V3) -> V3 {
+    let w = ((n.dot(up) - 0.6) / 0.25).clamp(0.0, 1.0);
+    let t = (up + (n - up) * w).normalize_or_zero();
+    if t == V3::ZERO {
+        up
+    } else {
+        t
+    }
+}
 /// Mechanical efficiency of gearbox + final drive for driving torque (engine braking passes
 /// through unchanged).
 pub const DRIVETRAIN_EFFICIENCY: f32 = 0.85;
@@ -104,6 +120,9 @@ pub(crate) struct Corner {
     pub x_static: f32,
     pub susp: SuspensionDef,
     pub radius: f32,
+    pub half_width: f32,
+    /// Vertical tyre rate, N/m (from the static corner load).
+    pub tyre_rate: f32,
     pub inertia: f32,
     pub steerable: bool,
     pub max_steer: f32,
@@ -256,6 +275,8 @@ impl Vehicle {
                 x_static: static_compression(&def.suspension[i], load),
                 susp: def.suspension[i].clone(),
                 radius: w.radius_m,
+                half_width: 0.5 * w.width_m,
+                tyre_rate: load.max(500.0) / TYRE_STATIC_DEFLECTION_M,
                 inertia: w
                     .inertia_kgm2
                     .unwrap_or(0.7 * w.mass_kg * w.radius_m * w.radius_m),
@@ -986,7 +1007,7 @@ impl Vehicle {
 
         // --- Ground probe + suspension ------------------------------------------------------
         for i in 0..4 {
-            self.probe_wheel(i, &ch, up, ground, world);
+            self.probe_wheel(i, &ch, up, ground, world, dt);
             // Weather under the contact patch (W-1). Off the ground the last value stays; it
             // has no effect there (no grip, planing reported as 0).
             if self.conditions_source == ConditionsSource::World && self.wheels[i].contact {
@@ -1250,6 +1271,7 @@ impl Vehicle {
         up: V3,
         ground: &dyn WheelCaster,
         world: &dyn WorldQuery,
+        dt: f32,
     ) {
         let c = &self.corners[i];
         let lost = self.effects.wheel_lost[i];
@@ -1286,24 +1308,32 @@ impl Vehicle {
         let travel = c.susp.travel_m;
         let top = c.hub + V3::Z * (travel - c.x_static);
         let origin = ch.to_world(top);
-        let max = travel + c.radius;
-        match ground.cast(origin, down, max) {
-            Some(hit) => {
-                let x = max - hit.distance;
-                let hub_world = origin + down * (hit.distance - c.radius);
-                w.vcomp = -ch.velocity_at(hub_world).dot(up);
-                w.x = x;
+        // The tyre sweep starts PROBE_LIFT_M higher so a kerb edge ahead never overlaps the
+        // starting cylinder (which would void the sweep mid-climb).
+        let probe = WheelProbe {
+            center: origin - down * PROBE_LIFT_M,
+            dir: down,
+            max_dist: travel + PROBE_LIFT_M,
+            radius: c.radius,
+            half_width: c.half_width * PROBE_WIDTH_FRAC,
+            rot: ch.rot * yaw_quat(w.steer - std::f32::consts::FRAC_PI_2),
+        };
+        // Rigid-tyre compression plus the tyre's static deflection (data radius = loaded).
+        let hit = ground.cast_wheel(&probe);
+        let reach = hit.map(|h| travel - (h.distance - PROBE_LIFT_M) + TYRE_STATIC_DEFLECTION_M);
+        let st = step_strut(&c.susp, c.tyre_rate, w.x, w.vcomp, reach, dt);
+        w.x = st.x;
+        w.vcomp = st.v;
+        w.fz = st.fz;
+        match hit {
+            Some(hit) if st.fz > 0.0 => {
                 w.contact = true;
                 w.point = hit.point;
-                w.normal = hit.normal;
+                w.normal = tyre_normal(hit.normal, up);
                 w.surface = world.surface_at(arr(hit.point));
-                w.fz = strut_force(&c.susp, x, w.vcomp);
             }
-            None => {
+            _ => {
                 w.contact = false;
-                w.x = 0.0;
-                w.vcomp = 0.0;
-                w.fz = 0.0;
                 w.surface = SurfaceType::default();
             }
         }
