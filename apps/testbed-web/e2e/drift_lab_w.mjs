@@ -69,6 +69,13 @@ const sl = await page.evaluate(() => window.__wp.sim.carTune());
 check(sl.spin_model === true && Math.abs(sl.drift_lock_extra + 0.5) < 1e-4 && Math.abs(sl.front_deep_falloff - 0.13) < 1e-4, `spin + drift lock preset ${JSON.stringify(sl)}`);
 await page.locator("#drift-lab-w button", { hasText: "tyre data" }).click();
 check((await page.evaluate(() => window.__wp.sim.carTune().spin_model)) === false, "tyre data turns the spin model off");
+// The spin model checkbox alone (default off) turns it on and off.
+const spinBox = page.locator("#drift-lab-w label", { hasText: "spin model (tyre-slip)" }).locator("input[type=checkbox]");
+check(!(await spinBox.isChecked()), "spin model checkbox off by default");
+await spinBox.check();
+check((await page.evaluate(() => window.__wp.sim.carTune().spin_model)) === true, "spin model checkbox → on");
+await spinBox.uncheck();
+check((await page.evaluate(() => window.__wp.sim.carTune().spin_model)) === false, "spin model checkbox → off");
 // Steering slider → override.
 await page.evaluate(() => {
   const inputs = [...document.querySelectorAll("#drift-lab-w input[type=range]")];

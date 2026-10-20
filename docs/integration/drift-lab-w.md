@@ -180,6 +180,13 @@ spins (300–500° total); parity_fwd_c gets round 53–74° and is caught in 0.
    the extra torque per kg feel like the reference's power?
 6. Handbrake: 0.3–1.0 s pulls at 40 km/h. How far does the reference car rotate while the lever
    is held?
+7. **Try: spin model** (tyre-slip's physical drift hold; `lead/tyre-slip` be8b7790, merged
+   here). Tune panel → car / tyre experiments → *spin model* button (or tick *spin model
+   (tyre-slip)*; off by default = the tyre data). With parity_rwd_d in 2nd, get sideways and
+   hold the countersteer key with full throttle. On the lab's standard entry it holds ~41–44°
+   with no damper. It is tuned to a **knife edge**, so a different entry speed or angle can still
+   spin or swing through. Does the held drift feel like clip 1? Untick it / *tyre data* for the
+   comparison. (The *spin grip + damper (test)* button is step 4's set: it does not hold.)
 
 ## Files
 
@@ -503,6 +510,16 @@ What changed: step 4's headline set and two step-2 rows (rampart_50 at 30 % thro
 instant rack, shiro_turbo self-align 50 % tapper) were not holds. The panel button is relabelled
 *spin grip + damper (test)* (`CarTune::spin_grip_damper()`), with a hint that it does not hold.
 Step 2's and step 5's conclusions are unchanged (everything there spun anyway).
+
+## Merge of lead/tyre-slip be8b7790 (spin model)
+
+Merged tyre-slip's spin model (rear-only combined slip in which a spinning tyre's side force
+comes back as the slip angle grows; `CarTune::spin_model` and its `spin_*` knobs,
+`CarTune::spin_candidate()`). Conflicts were naming only: W's `spin_grip_damper()` / JSON
+`spin_damper` (step 6 rename) are kept, plus tyre-slip's `spin`. `examples/tyre_slip.rs`
+now calls `spin_grip_damper()`. Panel: *spin model (tyre-slip)* checkbox (off by default) and
+*spin model* preset button (tyre-slip's). e2e covers the button, *tyre data* turning it off, and
+the checkbox on / off. `tire.rs` / the tyre model are tyre-slip's from here on.
 
 ## Contract change requests
 
