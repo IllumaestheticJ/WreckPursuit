@@ -134,18 +134,79 @@ impl Drawn {
             grid: BTreeMap::new(),
             big: Vec::new(),
         };
-        for mesh in doc["meshes"].as_array().unwrap() {
-            for prim in mesh["primitives"].as_array().unwrap() {
+        // Per node: its mesh and its instance transforms (glTF space: translation, rotation
+        // quaternion, scale; EXT_mesh_gpu_instancing for trees, driveways, hedges, fences),
+        // or one identity instance.
+        type Inst = ([f32; 3], [f32; 4], [f32; 3]);
+        let mut nodes: Vec<(usize, Vec<Inst>)> = Vec::new();
+        for node in doc["nodes"].as_array().unwrap() {
+            let Some(m) = node["mesh"].as_u64() else {
+                continue;
+            };
+            let ext = &node["extensions"]["EXT_mesh_gpu_instancing"]["attributes"];
+            if ext.is_null() {
+                nodes.push((m as usize, vec![([0.0; 3], [0.0, 0.0, 0.0, 1.0], [1.0; 3])]));
+                continue;
+            }
+            let read = |key: &str, n: usize| -> Vec<Vec<f32>> {
+                let a = ext[key].as_u64().unwrap() as usize;
+                let cnt = accs[a]["count"].as_u64().unwrap() as usize;
+                let o = view_off(a);
+                (0..cnt)
+                    .map(|i| (0..n).map(|k| f32_at(o + (i * n + k) * 4)).collect())
+                    .collect()
+            };
+            let (t, r, sc) = (
+                read("TRANSLATION", 3),
+                read("ROTATION", 4),
+                read("SCALE", 3),
+            );
+            let inst = (0..t.len())
+                .map(|i| {
+                    (
+                        [t[i][0], t[i][1], t[i][2]],
+                        [r[i][0], r[i][1], r[i][2], r[i][3]],
+                        [sc[i][0], sc[i][1], sc[i][2]],
+                    )
+                })
+                .collect();
+            nodes.push((m as usize, inst));
+        }
+        // glTF point through an instance transform, then to sim space.
+        let place = |p: V3, (t, q, sc): &Inst| -> V3 {
+            let v = [p[0] * sc[0], p[1] * sc[1], p[2] * sc[2]];
+            let u = [q[0], q[1], q[2]];
+            let c1 = [
+                u[1] * v[2] - u[2] * v[1],
+                u[2] * v[0] - u[0] * v[2],
+                u[0] * v[1] - u[1] * v[0],
+            ];
+            let tt = [c1[0] * 2.0, c1[1] * 2.0, c1[2] * 2.0];
+            let c2 = [
+                u[1] * tt[2] - u[2] * tt[1],
+                u[2] * tt[0] - u[0] * tt[2],
+                u[0] * tt[1] - u[1] * tt[0],
+            ];
+            let g = [
+                v[0] + q[3] * tt[0] + c2[0] + t[0],
+                v[1] + q[3] * tt[1] + c2[1] + t[1],
+                v[2] + q[3] * tt[2] + c2[2] + t[2],
+            ];
+            // glTF (x, y, z) = sim (x, z, −y).
+            [g[0], -g[2], g[1]]
+        };
+        let meshes = doc["meshes"].as_array().unwrap();
+        for (mi, insts) in &nodes {
+            for prim in meshes[*mi]["primitives"].as_array().unwrap() {
                 let pa = prim["attributes"]["POSITION"].as_u64().unwrap() as usize;
                 let ia = prim["indices"].as_u64().unwrap() as usize;
                 let mat = prim["material"].as_u64().unwrap_or(0) as u16;
                 let n = accs[pa]["count"].as_u64().unwrap() as usize;
                 let po = view_off(pa);
-                let pos: Vec<V3> = (0..n)
+                let raw: Vec<V3> = (0..n)
                     .map(|i| {
                         let o = po + i * 12;
-                        // glTF (x, y, z) = sim (x, z, −y).
-                        [f32_at(o), -f32_at(o + 8), f32_at(o + 4)]
+                        [f32_at(o), f32_at(o + 4), f32_at(o + 8)]
                     })
                     .collect();
                 assert_eq!(
@@ -159,11 +220,14 @@ impl Drawn {
                     u16::from_le_bytes(bytes[io + k * 2..io + k * 2 + 2].try_into().unwrap())
                         as usize
                 };
-                for t in 0..ni / 3 {
-                    d.push(
-                        [pos[idx(t * 3)], pos[idx(t * 3 + 1)], pos[idx(t * 3 + 2)]],
-                        mat,
-                    );
+                for inst in insts {
+                    let pos: Vec<V3> = raw.iter().map(|p| place(*p, inst)).collect();
+                    for t in 0..ni / 3 {
+                        d.push(
+                            [pos[idx(t * 3)], pos[idx(t * 3 + 1)], pos[idx(t * 3 + 2)]],
+                            mat,
+                        );
+                    }
                 }
             }
         }
@@ -265,6 +329,7 @@ enum Kind {
     SidewalkKerb,
     Building,
     DeckRail,
+    Trunk,
     Other,
 }
 
@@ -275,7 +340,10 @@ fn kind_of(c: &Collider) -> Kind {
         ShapeType::TriMesh if c.collision_groups().memberships == Group::ALL => Kind::Road,
         ShapeType::TriMesh => Kind::SidewalkKerb,
         ShapeType::ConvexPolyhedron => Kind::Building,
+        // Deck / sidewalk guard rails, tunnel boxes, hedges and fences.
         ShapeType::Cuboid => Kind::DeckRail,
+        // Tree trunks (residential streets and yards).
+        ShapeType::Cylinder => Kind::Trunk,
         _ => Kind::Other,
     }
 }
@@ -523,6 +591,13 @@ fn sample_points(c: &Collider) -> Vec<V3> {
         }
         return out;
     }
+    if let Some(cy) = c.shape().as_cylinder() {
+        // Trunk: its axis at mid height and at the top (local Y is the axis).
+        return [0.0, cy.half_height]
+            .iter()
+            .map(|y| (*pose * Vector::new(0.0, *y, 0.0)).to_array())
+            .collect();
+    }
     Vec::new()
 }
 
@@ -538,7 +613,7 @@ fn every_building_and_rail_collider_is_drawn() {
     let city = CityColliders::new(s.sim().world().map());
     let mut checked: BTreeMap<Kind, (usize, usize, f32)> = BTreeMap::new();
     for (c, k, _, _) in &city.cols {
-        if !matches!(k, Kind::Building | Kind::DeckRail) {
+        if !matches!(k, Kind::Building | Kind::DeckRail | Kind::Trunk) {
             continue;
         }
         let e = checked.entry(*k).or_insert((0, 0, 0.0));

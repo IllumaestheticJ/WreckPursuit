@@ -33,6 +33,9 @@ pub struct CorridorOptions {
     pub opposing: OpposingLanes,
     /// Extra width kept clear of every kerb, m.
     pub kerb_margin_m: f32,
+    /// Widest the corridor may be either side of the route's lane line, m (a judged race's
+    /// corridor: leaving it disqualifies). `None`: the road decides.
+    pub max_half_width_m: Option<f32>,
 }
 
 impl Default for CorridorOptions {
@@ -40,6 +43,7 @@ impl Default for CorridorOptions {
         Self {
             opposing: OpposingLanes::Never,
             kerb_margin_m: 0.3,
+            max_half_width_m: None,
         }
     }
 }
@@ -288,14 +292,15 @@ impl Corridor {
                 p.4 = eb.2 + (ea.2 - eb.2) * t;
             }
         }
+        let cap = |w: f32| opts.max_half_width_m.map_or(w, |m| w.min(m.max(0.5)));
         let samples: Vec<CorridorSample> = pts
             .into_iter()
             .map(|(pos, tangent, l, lp, r, j)| CorridorSample {
                 pos,
                 tangent,
-                left_m: l,
-                left_pass_m: lp,
-                right_m: r,
+                left_m: cap(l),
+                left_pass_m: cap(lp),
+                right_m: cap(r),
                 junction: j,
             })
             .collect();

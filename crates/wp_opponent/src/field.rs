@@ -281,6 +281,9 @@ struct Obstacle {
     /// for a siren or with its hazards on): a fixed obstacle anyone may pass, using the
     /// opposing lanes where the corridor allows overtaking there.
     parked: bool,
+    /// Its heading along the corridor (cosine to the corridor direction; −1 = facing me
+    /// head on).
+    facing: f32,
 }
 
 /// An obstacle relative to one racer: arc distance ahead (`ds` < 0 = behind) and the
@@ -450,9 +453,10 @@ pub struct Field {
     outputs: Vec<(EntityId, VehicleInput)>,
     finishers: u32,
     contacts: BTreeMap<(EntityId, EntityId), u32>,
-    /// How long each non-racer has been standing still, s (civilian agents by agent id,
-    /// other sim vehicles by entity id + [`STILL_VEHICLE_KEY`]). Kept only near racers.
-    still: BTreeMap<u64, f32>,
+    /// Where each non-racer came to a stand and for how long it has stayed within
+    /// [`STILL_DRIFT_M`] of that spot, s (civilian agents by agent id, other sim vehicles by
+    /// entity id + [`STILL_VEHICLE_KEY`]). Kept only near racers.
+    still: BTreeMap<u64, (V2, f32)>,
 }
 
 impl Racer {
@@ -475,6 +479,36 @@ const STILL_VEHICLE_KEY: u64 = 1 << 40;
 /// on the opposing lanes where the corridor has them, s. (A red light is shorter; a car
 /// stuck in a traffic deadlock stays put for minutes.)
 const STILL_PARKED_S: f32 = 8.0;
+
+/// A sim vehicle (police, another player) still counts as standing while it stays this
+/// close to where it stopped, m, and moves slower than [`STILL_MAX_MPS`]: a stopped police
+/// unit nudges back and forth on the spot.
+const STILL_DRIFT_M: f32 = 2.5;
+/// Fastest a standing sim vehicle may move while it shuffles on the spot, m/s.
+const STILL_MAX_MPS: f32 = 1.0;
+/// Civilians stand only below this speed (a queue at a light creeps forward and must not
+/// count as parked), m/s.
+const CIV_STILL_MPS: f32 = 0.3;
+
+/// Side clearance kept to a parked sim vehicle while creeping past it, m. It grows to the
+/// normal clearance by 15 m/s.
+const PARKED_GAP_M: f32 = 0.2;
+/// How much nearer the road edge a racer may squeeze round a parked car than it drives
+/// otherwise, m (0.25 m edge reserve → 0.10 m).
+const PARKED_EDGE_SLACK_M: f32 = 0.15;
+
+/// Side clearance to a parked sim vehicle at speed `v`: `PARKED_GAP_M` at a crawl, `full`
+/// from 15 m/s.
+fn parked_gap(v: f32, full: f32) -> f32 {
+    PARKED_GAP_M + (full - PARKED_GAP_M).max(0.0) * (v / 15.0).clamp(0.0, 1.0)
+}
+
+/// Whether `o` is a parked sim vehicle that is not a racer (a police unit standing in the
+/// road): squeezed past slowly with little clearance. Racers pulled over and civilians keep
+/// their normal clearance.
+fn parked_non_racer(o: &Obstacle) -> bool {
+    o.parked && matches!(o.who, Who::Vehicle(_))
+}
 
 /// Approximate standard normal from four uniforms (Irwin–Hall; no transcendental functions).
 fn gauss(rng: &mut Rng) -> f32 {
@@ -857,26 +891,34 @@ impl Field {
     }
 
     fn is_still(&self, key: u64) -> bool {
-        self.still.get(&key).is_some_and(|t| *t >= STILL_PARKED_S)
+        self.still.get(&key).is_some_and(|e| e.1 >= STILL_PARKED_S)
     }
 
     /// Standing-still timers of the civilians and other vehicles near any racer.
     fn update_still(&mut self, world: &World, vehicles: &[VehicleObs], dt: f32) {
         let near = |p: V2| self.racers.iter().any(|r| geom::dist(r.pos, p) < 200.0);
         let mut next = BTreeMap::new();
+        let still = &self.still;
+        let mut stand = |key: u64, p: V2, drift: f32| {
+            let e = match still.get(&key) {
+                Some(&(at, t)) if geom::dist(at, p) < drift => (at, t + dt),
+                _ => (p, dt),
+            };
+            next.insert(key, e);
+        };
         for a in world.agents() {
-            if a.speed_mps.abs() < 0.3 && near(geom::xy(a.pos)) {
-                let key = a.id as u64;
-                next.insert(key, self.still.get(&key).copied().unwrap_or(0.0) + dt);
+            let p = geom::xy(a.pos);
+            if a.speed_mps.abs() < CIV_STILL_MPS && near(p) {
+                stand(a.id as u64, p, f32::INFINITY);
             }
         }
         for v in vehicles {
             if self.racer_index(v.entity).is_some() {
                 continue;
             }
-            if v.state.speed_mps.abs() < 0.3 && near(geom::xy(v.state.pos)) {
-                let key = STILL_VEHICLE_KEY + v.entity.0 as u64;
-                next.insert(key, self.still.get(&key).copied().unwrap_or(0.0) + dt);
+            let p = geom::xy(v.state.pos);
+            if v.state.speed_mps.abs() < STILL_MAX_MPS && near(p) {
+                stand(STILL_VEHICLE_KEY + v.entity.0 as u64, p, STILL_DRIFT_M);
             }
         }
         self.still = next;
@@ -1325,6 +1367,7 @@ impl Field {
                             unstable,
                             passing: r.tactic == Tactic::Overtake,
                             parked: matches!(r.tactic, Tactic::Park | Tactic::Yield),
+                            facing: 1.0,
                         });
                         continue;
                     }
@@ -1557,9 +1600,20 @@ fn decide_racer(
             r.status,
             RacerStatus::Finished { .. } | RacerStatus::Disqualified
         ) || (!corridor.closed && finish_m.is_some_and(|f| r.progress >= f));
+        // A non-racer crawling along ahead (under 70 % of my own pace here, or 6 m/s: a car
+        // that just turned round, a slow climber) that has held me up for 4 s: even a careful
+        // driver goes round it on the opposing lanes when the pass checks find them clear.
+        let crawl_mps = (0.7 * corridor.interp(&profile.v, r.s + 30.0)).max(6.0);
+        let crawler_ahead = r.blocked_s > 4.0
+            && obstacles.iter().any(|o| {
+                !matches!(o.who, Who::Racer(_)) && o.v_s > 0.5 && o.v_s < crawl_mps && {
+                    let ds = corridor.delta_s(r.s, o.s);
+                    ds > 0.0 && ds < 40.0
+                }
+            });
         let may_use_opposing = corridor.opposing == OpposingLanes::ForOvertaking
             && !done_racing
-            && (r.profile.risk >= 0.5 || parked_ahead);
+            && (r.profile.risk >= 0.5 || parked_ahead || crawler_ahead);
         let pass_limits = |s: f32| {
             if may_use_opposing {
                 to_limits(corridor.pass_bounds(s))
@@ -1665,13 +1719,15 @@ fn decide_racer(
                 .any(|x| x.ds > 0.0 && x.gap < 4.0 && x.o.v_s.abs() < 1.0);
             // Nose to nose in the opposing lanes (passed into a lane a car then stopped in,
             // facing me): nobody can move until I back out into my own lane.
-            let head_on = r.n < lim_lo - 1.0
-                && r.debug.v_target < 0.5
+            // Or in my own lane facing a standing car that faces me (a civilian waiting to
+            // turn across a hairpin, waiting in turn for me to move).
+            let head_on = r.debug.v_target < 0.5
                 && rel.iter().any(|x| {
                     x.ds > 0.0
                         && x.gap < 8.0
                         && x.o.v_s.abs() < 1.0
                         && !matches!(x.o.who, Who::Racer(_))
+                        && (r.n < lim_lo - 1.0 || x.o.facing < -0.3)
                 });
             if r.tactic != Tactic::Reverse
                 && v.abs() < 0.8
@@ -1792,6 +1848,9 @@ fn decide_racer(
             } else {
                 LAT_MARGIN_M
             };
+            if parked_non_racer(o) {
+                return parked_gap(v, base);
+            }
             base + if o.unstable { 1.5 } else { 0.0 }
         };
 
@@ -1904,7 +1963,7 @@ fn decide_racer(
                 let side = (r.n_goal - x.o.n).signum();
                 let need = hw + x.o.half_w + margin_for(&x.o) + pass_margin(&x.o, &p);
                 let want = x.o.n + side * need;
-                let (lo, hi) = pass_limits(r.s + x.ds.max(0.0));
+                let (lo, hi) = squeeze_limits(pass_limits(r.s + x.ds.max(0.0)), &x.o);
                 if want < lo - 0.05 || want > hi + 0.05 {
                     if x.ds > 0.0 && x.gap > 0.0 {
                         r.tactic = Tactic::Follow;
@@ -1967,7 +2026,10 @@ fn decide_racer(
             r.n_cmd = r.n;
         }
         let (act_lo, act_hi) = if r.tactic == Tactic::Overtake {
-            (pass_lo, pass_hi)
+            match r.pass_target.and_then(target_rel) {
+                Some(x) => squeeze_limits((pass_lo, pass_hi), &x.o),
+                None => (pass_lo, pass_hi),
+            }
         } else {
             (lim_lo, lim_hi)
         };
@@ -1987,7 +2049,12 @@ fn decide_racer(
                 continue;
             }
             let civ_extra = if is_civ(&x.o) { civ_margin } else { 0.0 };
-            let need = hw + x.o.half_w + SIDE_GAP_M + civ_extra;
+            let side_gap = if parked_non_racer(&x.o) {
+                parked_gap(v, SIDE_GAP_M + civ_extra)
+            } else {
+                SIDE_GAP_M + civ_extra
+            };
+            let need = hw + x.o.half_w + side_gap;
             // Lateral closing speed (either car drifting toward the other) eats clearance.
             if x.o.n >= r.n {
                 let closing = (r.v_n - x.o.v_n).max(0.0);
@@ -2442,9 +2509,12 @@ fn decide_racer(
 /// Extra lateral room beside a car being passed beyond the normal clearance, m: the
 /// driver's overtake margin for racers (contact is a race incident), a little for anyone
 /// else (civilians, physical traffic, police: passed in the next lane like any driver
-/// does; their clearance is already in the margin).
+/// does; their clearance is already in the margin), least for a parked sim vehicle
+/// (squeezed past at walking pace).
 fn pass_margin(o: &Obstacle, p: &DriverParams) -> f32 {
-    if !matches!(o.who, Who::Racer(_)) {
+    if parked_non_racer(o) {
+        0.1
+    } else if !matches!(o.who, Who::Racer(_)) {
         0.3
     } else {
         p.overtake_margin_m
@@ -2495,6 +2565,7 @@ fn vehicle_obstacle(
         unstable: v_long > 8.0 && v_lat.abs() > 0.2 * v_long,
         passing: false,
         parked: false,
+        facing: geom::dot(fwd, t),
     })
 }
 
@@ -2544,6 +2615,7 @@ fn civilians_on(
             // Pulled over for a siren (or broken down) and stopped: it stays put while a
             // police car is near, possibly for minutes, so treat it like a parked car.
             parked: a.speed_mps.abs() < 0.5 && (a.yielding || a.hazard_lights),
+            facing: geom::dot(f, t),
         });
     }
     out
@@ -2571,6 +2643,16 @@ struct PassCtx<'a> {
     margin: f32,
     /// The sim applies slipstream.
     draft: bool,
+}
+
+/// Lateral limits `(lo, hi)` for passing `o`: a little nearer the road edges when it is a
+/// parked sim vehicle (squeezed past slowly).
+fn squeeze_limits((lo, hi): (f32, f32), o: &Obstacle) -> (f32, f32) {
+    if parked_non_racer(o) {
+        (lo - PARKED_EDGE_SLACK_M, hi + PARKED_EDGE_SLACK_M)
+    } else {
+        (lo, hi)
+    }
 }
 
 /// Choose a passing lateral position beside `target`, or None if no side is clear far
@@ -2645,7 +2727,7 @@ fn plan_pass(
         // Room for the whole pass.
         let mut x = 0.0;
         while x <= pass_dist.max(10.0) {
-            let (lo, hi) = limits(r.s + x);
+            let (lo, hi) = squeeze_limits(limits(r.s + x), &o);
             if n_pass < lo || n_pass > hi {
                 why = PassReject::NoRoom;
                 continue 'side;
@@ -2751,6 +2833,45 @@ mod tests {
     use crate::corridor::{CorridorSample, OpposingLanes};
     use crate::pursuit::NoPolice;
     use wp_contracts::TimeOfDay;
+
+    fn standing(who: Who) -> Obstacle {
+        Obstacle {
+            who,
+            s: 100.0,
+            n: -2.0,
+            v_s: 0.0,
+            v_n: 0.0,
+            half_len: 2.3,
+            half_w: 1.0,
+            unstable: false,
+            passing: false,
+            parked: true,
+            facing: -1.0,
+        }
+    }
+
+    #[test]
+    fn parked_police_car_is_squeezed_past_slowly_civilians_and_racers_are_not() {
+        let police = standing(Who::Vehicle(EntityId(11)));
+        let civ = standing(Who::Civilian(7));
+        let racer = standing(Who::Racer(2));
+        assert!(parked_non_racer(&police));
+        assert!(!parked_non_racer(&civ));
+        assert!(!parked_non_racer(&racer));
+        assert_eq!(squeeze_limits((-1.0, 1.0), &police), (-1.15, 1.15));
+        assert_eq!(squeeze_limits((-1.0, 1.0), &civ), (-1.0, 1.0));
+        assert_eq!(squeeze_limits((-1.0, 1.0), &racer), (-1.0, 1.0));
+        // A moving police car keeps the normal limits.
+        let moving = Obstacle {
+            parked: false,
+            ..police
+        };
+        assert_eq!(squeeze_limits((-1.0, 1.0), &moving), (-1.0, 1.0));
+        // Clearance: tight at a crawl, the normal one from 15 m/s.
+        assert!((parked_gap(0.0, 0.6) - PARKED_GAP_M).abs() < 1e-6);
+        assert!((parked_gap(7.5, 0.6) - 0.4).abs() < 1e-6);
+        assert!((parked_gap(30.0, 0.6) - 0.6).abs() < 1e-6);
+    }
 
     /// A straight 400 m corridor along +Y, 5 m each side.
     fn straight() -> Corridor {

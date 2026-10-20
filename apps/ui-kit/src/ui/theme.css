@@ -29,6 +29,8 @@
   --cash: #c9f45f;
   --police-a: #ff2e55;
   --police-b: #3b7dff;
+  /* race opponents on the map: distinct from police red/blue and the player's scanner green */
+  --racer: #c77dff;
   --heat-0: rgba(255, 178, 30, 0);
   --heat-1: rgba(255, 61, 61, 0.55);
 
@@ -70,6 +72,7 @@
   --warn: #ff6fa8;
   --danger: #ff2626;
   --info: #b0b0ff;
+  --racer: #ff9d3d;
   --cash: #8ff0d0;
 }
 .wp-ui[data-palette="highContrast"] {
@@ -83,6 +86,7 @@
   --ink-3: #d0d0d0;
   --scan: #00ff66;
   --ok: #00ff66;
+  --racer: #ff00ff;
   --warn: #ffe600;
   --danger: #ff1f1f;
 }

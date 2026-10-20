@@ -42,6 +42,7 @@
 pub mod aero;
 pub mod assists;
 pub mod body;
+pub mod brake_dive;
 pub mod brakes;
 pub mod car_lab;
 pub mod diff;
@@ -78,6 +79,7 @@ pub use engine::EngineExtras;
 pub use ground::{ContractGround, FlatGround, GroundHit, RapierGround, WheelCaster, WheelProbe};
 pub use presets::AssistPreset;
 pub use snapshot::{SnapshotError, VehicleSnapshot};
+
 pub use surface::{ConditionsSource, SurfaceConditions, TireWetProfile};
 pub use tire::TireForces;
 pub use vehicle::{Chassis, Telemetry, Vehicle, VehicleExtras};

@@ -469,7 +469,123 @@ at 115 s (was 130 s; police arrive sooner). Comments updated in both files.
   is negative only when the unit is really reversing (below −1 m/s along its heading); otherwise
   it is the speed magnitude, as before (a fully signed speed broke `wp_race` `grid_highway_sprint`).
 
-ROUND13_GATE
+*Driving controller vs `lead/police-driver` (lead heads-up, round 12c).* Round 13 touched the
+low-level path→controls driving only where the tactics needed it, all in `unit_input` /
+`avoid.rs` and tuned from `[chase]` / `[avoid]` in `data/police/pursuit.toml`: chase cornering
+speed (`cornering_g`, `brake_mps2`, `speed_margin`, `cap_scale`), chase speeds at junctions / reds /
+turns (`chase_*_mps`), wall feelers (`wall_*`, `walls.rs`), the push-through phase
+(`push_*`, `stuck.rs` `Phase::Push`) and reverse caps (`REVERSE_MAX_MPS` 3, `SWING_REVERSE_MAX_MPS`
+5). The DriveController itself (pure pursuit + PID) is unchanged. The driver session can replace
+the speed planning and feelers; the tactic layer only needs `unit_input` to keep honouring the
+`Tactic` target, `AvoidState`, the shove phase and `PoliceStats::static_hits`.
+
+*Merged and re-checked on `lead/round12` 9409249 (2026-10-20).* The tables above were measured on
+the earlier base (commit `e4f8b56`); later commits: three-point turns reverse at up to 5 m/s
+(`67f6de5`), the wall index shared in an `Arc` (`e6b4ab4`), and the merges of the lead's car-data
+retune, testbed presets, audio impacts and touch perf pass. After the car-data retune (stiffer
+dampers on every car) the Founders Cut racer is caught and PIT'd on the Uptown Connector (≈ 71 s,
+L5 at ≈ 77 s, 40 s escape time); he is still lost inside the Cut (≈ 112.5 s) with the units
+holding the portals, so `tunnel_escape_founders_cut` now runs 170 s (escape window to 170 s) and
+escapes at ≈ 152 s. The control is still captured.
+
+*Gate (merged branch, `3ed3415` + this doc).*
+- `cargo fmt --check`, `cargo clippy --workspace -- -D warnings`, `cargo build --target
+  wasm32-unknown-unknown -p wp_wasm`, `lint-determinism` (0 errors): clean.
+- `cargo test --workspace`: everything passes except failures that also fail on
+  `lead/round12` 9409249 without this branch: `wp_wasm`
+  `crash_replay_tests::race_crash_replays_with_the_judge_and_no_crash_on_the_grid` and
+  `tests::simcli_golden_replays_play_back_in_the_browser_core` (`golden_tbone` replay drift);
+  `wp_race --test race_picker` `loop9_circuit` / `lantern_checkpoint_draws_the_police` (note for L
+  above); and `simcli --test scenarios goldens_match`, only for goldens that drift on the base too
+  (identical hashes with and without this branch: audio_sideswipe_scrape, the city hill / sidewalk
+  / siren / blocked-parked-vesper scenes and the other car-data-retune drift; for the lead to
+  bless), plus the two Founders Cut scenarios, which have no golden on the base either.
+- All 82 scenarios in `apps/simcli/scenarios` pass their expectations (including both Founders
+  Cut ones and the `city_siren_traffic_yields_*` ones that failed in round 12b).
+- `crates/wp_net/tests/vesper_e2e.rs`: pass (104 s).
+- Goldens: generated on `lead/round12` 9409249 and on this branch; the 21 hash files and 2 replays
+  that differ were blessed in `3ed3415` (all have physical police in them).
+- `just web-e2e`: 198 checks pass. Failing: `perf_check` on software GL (chase 18 frames over 250 ms, rain 21 frames and 2738 KB/frame; the perf check also failed on the base in the earlier round-13 run, and this container has no GPU — not re-run on 9409249 alone), and `menu.mjs` "countersteer slider disabled until the wasm setter exists": the lead's menu now enables the slider (the setter exists), this branch's testbed diff against the lead does not touch it, so the e2e check needs updating on `lead/round12`. (`just` is not installed here; ran `npm run wasm` + `npm run e2e`.)
+
+*Re-check after the lead's round-12b rollup (`lead/round12` 2e40a9d0, which already merged this
+branch at `3ed3415`).* After merging it, this branch's code is identical to the lead tip (only this
+doc differs). fmt / clippy clean, `wp_police` tests pass, 85 of 86 scenarios pass; the one failure,
+`city_siren_traffic_no_siren` (1 civilian collision, expected 0), comes with the lead tip itself.
+`simcli goldens` reports 44 stale goldens on that tip (damage, panels, crash, siren, soak, race,
+police, tunnel); none of them is moved by this branch, so none is re-blessed here — they need a
+bless on `lead/round12`.
+
+*Lead bug (r13-test-fixes §4): a responder's turn-round loop stalled the grid highway sprint.*
+In `wp_race` `grid_highway_sprint` and `wp_wasm` `short_sprint_with_ai_…` (seed 7) unit 7 was
+answering a reckless-driving call and following the reported racer at the finish junction. It
+turned round toward him for about 80 s (U-turn, back out, back out, …) with its siren on, and the
+civilians ahead of the racers stopped for the siren, so the race never ended. Fix:
+- Turn-round tries (U-turn, reverse swing, backing out from a stopped racer) are counted per spot
+  (`stuck::MAX_TURNS` 4 within 20 m). The 4th holds turning for 30 s (`TURN_HOLD_S`). A unit on a
+  call hands it back (Idle, siren off) and then, like any unit that gave up, despawns out of sight
+  (`PoliceStats::turn_loops`). A unit that gave up is no longer `available()` for new calls.
+- A responder following the reported racer in sight keeps its siren quiet (`Unit::quiet`). Its
+  driving doesn't change (a first version also dropped the lights-and-siren driving, and in
+  `golden_city_chase` the follower lost the racer and no pursuit started).
+
+| seed 7, `grid_highway_sprint` | winner | finishers | race over |
+|---|---|---|---|
+| before (lead/round12 1b53f4e4) | — (never judged; 125.9 s on the helper's run) | 3–4 | never |
+| after | 62.0 s | 4 of 4 (62.0 / 62.6 / 99.9 / 109.2 s) | yes |
+| police presence 0 (same tip) | 59.5 s | 4 of 4 | yes |
+
+Both tests still fail their 15–60 s winner check, by about 2 s. The race is close to that limit even
+without police (59.5 s), and police on the road cost a little time. P3 and P4 are held about 30 s
+longer: unit 7, on another call with the siren on, turns in the finish junction from 72 to 88 s,
+and after it has gone two civilians stay stopped at the stop line until about 100 s with no police
+near (the traffic junction deadlock the helper sent to D). Other seeds, winner with / without
+police: 3: 56.7 / 52.9 s, 11: 59.5 / 51.3 s, 23: 48.0 / 64.4 s; seed 19 never ends either way (a
+captured racer parks in the lane, the helper's N(1) / E pinned-capture item). Whether to widen the
+winner window or keep police off race routes is for L and the lead. Scenarios: 85 of 86 pass (the
+known `city_siren_traffic_no_siren` fails on the lead tip too); the only golden moved is
+`golden_city_chase` (+ replay, `[bless]`); `damage_arcade_*` and `city_siren_traffic_no_siren` fail
+on the lead tip with the same hashes.
+
+*Lead bug (opponent-pace): responders standing across the Hollins hairpins.* A responding
+unit stopped angled across the hill road (pulled over for the oncoming racer mid-bend, or
+turning round just after the leader passed), nose to nose with the next racer, each waiting for
+the other, for 18–40 s. Fix:
+- Look before turning: a unit not chasing anyone doesn't start a U-turn or reverse swing while
+  another car would reach it within 4 s. Pursuers still turn at once, as `wp_sim` `police_passby`
+  requires.
+- A responder yielding to the oncoming racer stops only once lined up with its lane (within 15°);
+  until then it creeps on at 2 m/s.
+- Give way: standing still for 2 s with a slow (< 3 m/s) racer it isn't after in its way (or with
+  one within 15 m while blocked by anything), the unit backs straight out 6 m. Then it waits up to
+  8 s while that racer is still in front of it within 25 m (`PoliceStats::give_ways`). Each one
+  counts toward the turn-round cap (4 per spot). Backing out with steering swung units across the
+  road; driving on straight after backing out put them back nose to nose.
+
+| Hollins hill sprint | seed 1 | 2 | 3 | 4 | 5 | default |
+|---|---|---|---|---|---|---|
+| longest stand next to a racer (≤ 20 m), lead tip 174a0dfb | — | 18 s | 21 s | 0 s | 3 s | — |
+| … after | — | 3 s | 5 s | 4 s | 4 s | — |
+| P2 finish, lead tip | 117 s | DNF | 118 s | 82 s | 89 s | 83 s |
+| … after | 85 s | 89 s | 81 s | 77 s | 93 s | 92 s |
+
+P3 and P4 are DNF in every run, with or without police: on the lead tip, racers 1 and 3 never leave
+the grid even at police presence 0 (for N / opponent-pace). `grid_highway_sprint` now passes
+(winner 43.8 s, 4 of 4). `wp_wasm --lib`: 86 of 86. **New red:** `race_picker::loop9_circuit`
+(green on the lead tip): racer 4 is `Dnf(Retired)` (too damaged) at ≈ 113 s after one hard
+contact, at speed, with no police unit within 60 m in the 3 s samples before. The test accepts
+only the flag, the police or a racing incident. That looks like a knock-on effect in this long
+police race, not a police stall, but it is red on this branch: for L / the lead to decide
+whether a wrecked racer counts as a racing incident there. I didn't change L's test. Scenarios: 99 of 101 pass; `city_siren_traffic_yields_arcade/_sim` fail
+with the same hash on the lead tip. Goldens moved and re-blessed: golden_city_chase (+replay),
+opponent_circuit_8x5, opponent_flee_police, opponent_open_roads_traffic,
+police_tunnel_escape_founders_cut_control, world_traffic_soak_observer.
+
+*Lead requests received during the gate, not started (round 12c addenda).* Rows 75 (upside-down
+spawn / safe spawns), 78 (un-wrecked units reset themselves), 80 (a witnessed violation starts the
+pursuit; blatant at +20 km/h within 90 m), 84 (search reinforcements and sweep), 86 (no active unit
+parked in a jam; stopped-while-active watchdog), 89 (symmetric line-of-sight range, 350–400 m by
+day, ≥ 250 m at night) and 96 (oncoming units block the road). They arrived after the round-13
+scope was set; they are listed here so the next police session picks them up.
 
 **Round 12b (on `lead/round12`): owner playtest rows 44 / 55 / 60, plus the lead addenda on
 un-sticking and mode-keyed behaviour.**

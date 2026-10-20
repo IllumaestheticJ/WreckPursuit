@@ -1,0 +1,125 @@
+# Reference-game values for the parity suite (crates/wp_vehicle/examples/parity.rs).
+#
+# One [[ref]] per (metric, car). `metric` is the id in backticks in the parity table,
+# `car` a car id, several ids separated by commas, or "*" (every car). `value` is a number ("1.3"), a range ("30–45"),
+# a bound ("≥ 47", "≤ 3.5"), an approximation ("≈2.2"), "yes"/"no", or free text (no delta).
+# `source` says where it comes from. The lead adds rows as the owner's clips arrive;
+# re-run `just parity` afterwards.
+#
+# Car stand-ins: rampart_50 = heavy RWD muscle (clips 1, 4), shiro_turbo = light RWD sports
+# (clip 2), kestrel_ts = FWD touring (clip 3). Parity-only cars built to the reference specs
+# (examples/parity_cars.toml): parity_rwd_d = clip 1 car, parity_rwd_b = clip 2, parity_fwd_c =
+# clip 3, parity_rwd_a = clips 4/5 (parity_rwd_a_tuned = with the clip-5 tune). Clip analyses: docs/reference/wreckfest-keyboard.md.
+
+# --- clip 1: heavy RWD muscle, countersteer key + full throttle holds the drift -----------
+[[ref]]
+metric = "drift_counter_mean_deg"
+car = "rampart_50, parity_rwd_d"
+value = "30–45"
+source = "clip 1, 2nd gear 27–47 mph"
+
+[[ref]]
+metric = "drift_counter_s"
+car = "rampart_50, parity_rwd_d"
+value = "≥ 4"
+source = "clip 1: held 4.3 s, steady"
+
+[[ref]]
+metric = "drift_counter_spun"
+car = "rampart_50, parity_rwd_d"
+value = "no"
+source = "clip 1"
+
+[[ref]]
+metric = "gear_2_top_mph"
+car = "rampart_50, parity_rwd_d"
+value = "≥ 47"
+source = "clip 1: drifting in 2nd up to 47 mph"
+
+# --- clip 4: heavy RWD muscle, TCS Half ---------------------------------------------------
+[[ref]]
+metric = "launch_feather_spin_half_s"
+car = "rampart_50, parity_rwd_a"
+value = "visible wheelspin + smoke in 1st and into 2nd"
+source = "clip 4, feathered launch"
+
+# --- clip 2: light RWD sports, handbrake hairpin ------------------------------------------
+[[ref]]
+metric = "hb_1.0_10_release_deg"
+car = "shiro_turbo, parity_rwd_b"
+value = "150–180"
+source = "clip 2: Right + handbrake 1.0 s at ~5–10 mph"
+
+[[ref]]
+metric = "top_speed_mph"
+car = "shiro_turbo, parity_rwd_b"
+value = "≥ 110"
+source = "clip 2: ~110 mph in 6th"
+
+# --- clip 3: FWD touring ------------------------------------------------------------------
+[[ref]]
+metric = "hb_0.3_65_slip_deg"
+car = "kestrel_ts, parity_fwd_c"
+value = "30–40"
+source = "clip 3: Right + handbrake 0.3 s after braking from 101 to ~65 mph"
+
+[[ref]]
+metric = "hb_power_straight_s"
+car = "kestrel_ts, parity_fwd_c"
+value = "≈1.3"
+source = "clip 3: full throttle + 0.35 s counter tap at 43.2 s, tidy by ~44.5 s"
+
+[[ref]]
+metric = "brake_60_0_s"
+car = "kestrel_ts, parity_fwd_c"
+value = "≈2.2"
+source = "derived: clip 3 brakes 101 → 65 mph in 1.3 s (≈1.26 g, with downshifts; rough)"
+
+[[ref]]
+metric = "brake_60_0_m"
+car = "kestrel_ts, parity_fwd_c"
+value = "≈29"
+source = "derived from the same 1.26 g (rough)"
+
+[[ref]]
+metric = "tap_0.1_100_offset_m"
+car = "kestrel_ts, parity_fwd_c"
+value = "≤ 3.5"
+source = "clip 3: a 0.15 s tap at 100+ mph ≈ a lane change (qualitative)"
+
+[[ref]]
+metric = "tap_0.2_100_offset_m"
+car = "kestrel_ts, parity_fwd_c"
+value = "≤ 3.5"
+source = "clip 3: a 0.15 s tap at 100+ mph ≈ a lane change (qualitative)"
+
+[[ref]]
+metric = "liftoff_60_spun"
+car = "kestrel_ts, parity_fwd_c"
+value = "no"
+source = "clip 3: lift-off rotates a little, no snap"
+
+[[ref]]
+metric = "gear_5_top_mph"
+car = "kestrel_ts, parity_fwd_c"
+value = "≥ 105"
+source = "clip 3: ~105 mph in 5th"
+
+# --- clip 5: REF-RWD-A tuned (stiff 5, long 5, diff 4, brakes 2/5 rear), ABS Half -----------
+[[ref]]
+metric = "brake_tap_80_full_spun"
+car = "parity_rwd_a, parity_rwd_a_tuned"
+value = "no"
+source = "clip 5 (ABS Half): braking from 82 mph with a tap stays straight and settles"
+
+[[ref]]
+metric = "hb_stab_drive_gap_s"
+car = "parity_rwd_a, parity_rwd_a_tuned"
+value = "≤ 0.1"
+source = "clip 5: handbrake stabs on the throttle keep the drive (or recover it at once)"
+
+[[ref]]
+metric = "hb_stab_extra_deg"
+car = "parity_rwd_a, parity_rwd_a_tuned"
+value = "≥ 5"
+source = "clip 5: each stab adds rotation (amount not measured)"

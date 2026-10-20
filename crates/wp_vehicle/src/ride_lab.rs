@@ -37,6 +37,19 @@ pub struct RideTune {
     /// Height above the ground where the tyres' longitudinal force acts on the body, m
     /// (anti-dive / anti-squat feel); clamped to the CG height.
     pub pitch_centre_m: f32,
+    /// Keep the data's static ride height when the springs are scaled: the spring preload is
+    /// raised so the static compression (and so the bump-stop gap at rest) stays as in the
+    /// data. Without it, softer springs sag onto the bump stops (springs below × 0.85).
+    pub keep_ride_height: bool,
+    /// Suspension travel scale (more travel = more room before the bump stops in roll).
+    pub travel: f32,
+    /// Body roll inertia scale (Ixx; applied when the car's body is built — the lab restarts
+    /// the car).
+    pub roll_inertia: f32,
+    /// Body pitch inertia scale (Iyy; at body build).
+    pub pitch_inertia: f32,
+    /// Body yaw inertia scale (Izz; at body build).
+    pub yaw_inertia: f32,
 }
 
 impl Default for RideTune {
@@ -48,15 +61,42 @@ impl Default for RideTune {
             damper_rebound: 1.0,
             roll_centre_m: 0.0,
             pitch_centre_m: 0.0,
+            keep_ride_height: false,
+            travel: 1.0,
+            roll_inertia: 1.0,
+            pitch_inertia: 1.0,
+            yaw_inertia: 1.0,
         }
     }
 }
 
 impl RideTune {
-    /// Drift Lab W's default (owner: calmer, slower weight transfer): springs × 0.9 (keeps
-    /// ≥ 50 mm of bump travel at rest), anti-roll bars × 0.25, dampers × 1.4 bump / × 1.8
-    /// rebound. Muscle cars: roll 1.76 → 1.50 Hz, ζ 0.48 → 0.94 (model); no rocking after a
-    /// keyboard lane change (docs/integration/drift-lab-w.md, step 3).
+    /// Slow weight transfer (owner: "the car weight transitions way too fast"; reference clip 4):
+    /// springs × 0.5 and no anti-roll bars with the static ride height kept (preload raised),
+    /// 1.7 × the travel so the bigger roll stays off the bump stops, dampers × 1.8 / 2.4, roll /
+    /// pitch / yaw inertia × 2.4 / 2.0 / 1.5. parity_rwd_d / rampart_50, right key held at
+    /// 80 km/h: 10→90 % roll rise 0.60 s, peak roll 6.2° at ~1 g, ≤ 5 % overshoot, ≤ 81 % of the
+    /// travel (docs/integration/drift-lab-w.md, step 8). Not the lab default: it breaks the
+    /// spin model's knife-edge held drift.
+    pub fn slow_weight() -> Self {
+        Self {
+            spring: 0.5,
+            arb: 0.0,
+            damper_bump: 1.8,
+            damper_rebound: 2.4,
+            keep_ride_height: true,
+            travel: 1.7,
+            roll_inertia: 2.4,
+            pitch_inertia: 2.0,
+            yaw_inertia: 1.5,
+            ..Self::default()
+        }
+    }
+
+    /// Drift Lab W's default (owner: calmer, slower weight transfer, step 3): springs × 0.9
+    /// (keeps ≥ 50 mm of bump travel at rest), anti-roll bars × 0.25, dampers × 1.4 bump /
+    /// × 1.8 rebound. Muscle cars: roll 1.76 → 1.50 Hz, ζ 0.48 → 0.94 (model); no rocking after
+    /// a keyboard lane change (docs/integration/drift-lab-w.md, step 3).
     pub fn lab_default() -> Self {
         Self {
             spring: 0.9,
@@ -65,6 +105,29 @@ impl RideTune {
             damper_rebound: 1.8,
             ..Self::default()
         }
+    }
+
+    /// `def` scaled ([`RideTune::scaled`]) for a corner carrying `corner_load_n` at rest:
+    /// travel × [`RideTune::travel`] and, with [`RideTune::keep_ride_height`], the preload
+    /// raised so the static compression stays as in the data.
+    pub fn scaled_at(&self, def: &SuspensionDef, corner_load_n: f32) -> SuspensionDef {
+        let mut s = self.scaled(def);
+        s.travel_m = def.travel_m * self.travel.clamp(0.5, 3.0);
+        if self.keep_ride_height {
+            // Static: k (x + preload) = load → x = load / k − preload; keep x.
+            let x0 = corner_load_n / def.spring_n_per_m - def.preload_m;
+            s.preload_m = corner_load_n / s.spring_n_per_m - x0;
+        }
+        s
+    }
+
+    /// Body inertia `[roll, pitch, yaw]` (contract order) with the inertia scales.
+    pub fn inertia(&self, i: [f32; 3]) -> [f32; 3] {
+        [
+            i[0] * self.roll_inertia.clamp(0.2, 5.0),
+            i[1] * self.pitch_inertia.clamp(0.2, 5.0),
+            i[2] * self.yaw_inertia.clamp(0.2, 5.0),
+        ]
     }
 
     /// `def` with this tuning's scales applied.
@@ -130,7 +193,8 @@ pub fn ride_model(def: &VehicleDef, tune: &RideTune) -> RideModel {
     let c = |d: &SuspensionDef| 0.5 * (d.damper_bump_ns_per_m + d.damper_rebound_ns_per_m);
     let c_roll = c(&s[0]) * tf * tf / 2.0 + c(&s[2]) * tr * tr / 2.0;
     let k_eff = (k_roll - m * GRAVITY_MPS2 * h_roll).max(1.0);
-    let i_roll = def.inertia_kgm2[0] + m * h_roll * h_roll;
+    let inertia = tune.inertia(def.inertia_kgm2);
+    let i_roll = inertia[0] + m * h_roll * h_roll;
     let roll_w = (k_eff / i_roll).sqrt();
     // Pitch: axle distances from the CG along the wheelbase.
     let a = def.wheelbase_m * (1.0 - def.front_weight_frac);
@@ -138,7 +202,7 @@ pub fn ride_model(def: &VehicleDef, tune: &RideTune) -> RideModel {
     let k_pitch = 2.0 * (s[0].spring_n_per_m * a * a + s[2].spring_n_per_m * b * b);
     let c_pitch = 2.0 * (c(&s[0]) * a * a + c(&s[2]) * b * b);
     let k_pitch_eff = (k_pitch - m * GRAVITY_MPS2 * h_pitch).max(1.0);
-    let i_pitch = def.inertia_kgm2[1] + m * h_pitch * h_pitch;
+    let i_pitch = inertia[1] + m * h_pitch * h_pitch;
     let pitch_w = (k_pitch_eff / i_pitch).sqrt();
     RideModel {
         roll_stiffness: k_eff,
@@ -148,6 +212,13 @@ pub fn ride_model(def: &VehicleDef, tune: &RideTune) -> RideModel {
         pitch_hz: pitch_w / std::f32::consts::TAU,
         pitch_zeta: c_pitch / (2.0 * (k_pitch_eff * i_pitch).sqrt()),
     }
+}
+
+/// Static load of corner `i` (0 FL, 1 FR, 2 RL, 3 RR) from the car's mass and weight split, N.
+pub fn corner_load(def: &VehicleDef, i: usize) -> f32 {
+    let w = def.mass_kg * GRAVITY_MPS2;
+    let f = def.front_weight_frac.clamp(0.0, 1.0);
+    0.5 * w * if i < 2 { f } else { 1.0 - f }
 }
 
 #[cfg(test)]
@@ -169,6 +240,32 @@ mod tests {
         for s in &d.suspension {
             assert_eq!(&t.scaled(s), s);
         }
+    }
+
+    #[test]
+    fn keep_ride_height_keeps_the_static_compression() {
+        let d = car();
+        let t = RideTune {
+            spring: 0.5,
+            keep_ride_height: true,
+            ..RideTune::default()
+        };
+        for (i, s) in d.suspension.iter().enumerate() {
+            let load = corner_load(&d, i);
+            let x0 = crate::suspension::static_compression(s, load);
+            let x1 = crate::suspension::static_compression(&t.scaled_at(s, load), load);
+            assert!((x0 - x1).abs() < 1e-4, "{i}: {x0} vs {x1}");
+        }
+    }
+
+    #[test]
+    fn slow_weight_preset_rolls_slowly_and_near_critically() {
+        let d = car();
+        let m = ride_model(&d, &RideTune::slow_weight());
+        assert!((0.65..1.1).contains(&m.roll_hz), "{m:?}");
+        assert!(m.roll_zeta > 0.9, "{m:?}");
+        let base = ride_model(&d, &RideTune::default());
+        assert!(m.pitch_hz < base.pitch_hz, "{m:?}");
     }
 
     #[test]

@@ -277,6 +277,60 @@
   gap: 0.6em;
   margin-top: 0.8em;
 }
+/* Controls: live test bars (processed input; GameMenu polls the host's inputProbe). */
+.wp-gm-bars {
+  display: grid;
+  grid-template-columns: 5.5em 1fr 3.5em;
+  align-items: center;
+  gap: 0.35em 0.6em;
+  margin: 0.4em 0 0.2em;
+  padding: 0.5em 0.6em;
+  border: 1px solid var(--edge);
+  border-radius: var(--r);
+  background: var(--bg-2);
+}
+.wp-gm-bars.is-testing {
+  border-color: var(--scan);
+}
+.wp-gm-bars > span {
+  color: var(--ink-2);
+  font-size: 0.8em;
+}
+.wp-gm-bars > b {
+  text-align: right;
+  font-size: 0.8em;
+  font-weight: 600;
+  color: var(--ink);
+}
+.wp-gm-bar {
+  position: relative;
+  height: 0.7em;
+  border-radius: 0.35em;
+  background: var(--edge);
+  overflow: hidden;
+}
+.wp-gm-bar i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 0;
+  background: var(--scan);
+}
+.wp-gm-bar.is-bipolar::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: var(--ink-3);
+}
+.wp-gm-bars-note {
+  grid-column: 1 / -1;
+  color: var(--ink-3);
+  font-size: 0.75em;
+}
 @media (max-height: 640px) {
   .wp-gm-brand h1 {
     font-size: 2.2em;

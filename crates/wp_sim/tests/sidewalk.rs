@@ -23,14 +23,26 @@ fn data(path: &str) -> String {
     format!("{}/../../data/{path}", env!("CARGO_MANIFEST_DIR"))
 }
 
+/// Port Vesper without its street / yard furniture: these drives check the ground (kerbs,
+/// sidewalks, lots), and residential sidewalks and lots carry solid street trees, hedges and
+/// fences every few metres (playtest row 95) that a car driven along them would hit.
 fn vesper() -> &'static RoadNetwork {
     static NET: OnceLock<RoadNetwork> = OnceLock::new();
-    NET.get_or_init(|| wp_world::vesper::generate(&wp_world::vesper::VesperConfig::default()))
+    NET.get_or_init(|| {
+        let mut net = wp_world::vesper::generate(&wp_world::vesper::VesperConfig::default());
+        net.decor.clear();
+        net
+    })
 }
 
+/// The grid, without its street / yard furniture (see [`vesper`]).
 fn grid() -> &'static RoadNetwork {
     static NET: OnceLock<RoadNetwork> = OnceLock::new();
-    NET.get_or_init(|| wp_world::procgen::generate(&wp_world::procgen::ProcGenConfig::default()))
+    NET.get_or_init(|| {
+        let mut net = wp_world::procgen::generate(&wp_world::procgen::ProcGenConfig::default());
+        net.decor.clear();
+        net
+    })
 }
 
 fn car() -> &'static LoadedCar {
@@ -530,9 +542,27 @@ fn run_cases(name: &str, net: &RoadNetwork, cases: &[Case]) {
     );
 }
 
-/// Stretches of `cases` whose lot is clear of buildings for `len` m (a car can drive along it).
+/// Stretches of `cases` whose lot is clear of buildings for `len` m (a car can drive along it)
+/// and continuous: the lot is there all along (not a deck approach, where it ends at a rail,
+/// nor Bluff Road's last metres beside the Loop 9 shoulder, where it ends in a skirt).
 fn clear_lots(net: &RoadNetwork, cases: Vec<Case>, len: f32) -> Vec<Case> {
     let lot = lot_width_m(net);
+    let map = CityMap::new(net.clone());
+    let walks = Walks::new(&sidewalk_mesh(&map).flush());
+    let has_lot = |q: V2| walks.top(q, map.ground_height(q, None)).is_some();
+    let cases: Vec<Case> = cases
+        .into_iter()
+        .filter(|c| {
+            let r = geom::right_of(c.dir);
+            (0..=(len as usize)).all(|k| {
+                let along = geom::add(geom::xy(c.start), geom::scale(c.dir, k as f32));
+                (1..=3).all(|j| {
+                    let lat = c.half + SIDEWALK_W_M + lot * j as f32 / 4.0;
+                    has_lot(geom::add(along, geom::scale(r, c.side * lat)))
+                })
+            })
+        })
+        .collect();
     cases
         .into_iter()
         .filter(|c| {

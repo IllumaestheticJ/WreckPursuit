@@ -20,7 +20,7 @@
 | `Sim::entity_hashes() -> Vec<(EntityId, u64)>` | per-entity hash, ascending entity order (names the entity that diverged) |
 | `Sim::state_hash()` (changed) + `wp_sim::HASH_SPEC_VERSION = 1` | hash spec below |
 
-### Hash function spec (v3)
+### Hash function spec (v4)
 
 All hashing is FNV-1a 64 (`wp_math::StateHasher`, little-endian integer encoding). Floats are
 **quantised** before hashing: `round(v as f64 × scale) as i64` (`wp_math::quantize`; NaN →
@@ -33,6 +33,8 @@ state_hash = FNV( u32 HASH_SPEC_VERSION, u64 tick,
                   u64 World::state_hash()        // v2: signals + traffic (wp_world's own spec)
                   u64 PoliceSystem::state_hash() // v3: units, heat, pursuits (wp_police's own spec)
                   u32 debris_count, q(debris body translation, 1e-3 m) in spawn order,   // v2
+                  u32 barrier_count, for each roadblock barrier body in sync order:     // v4
+                      u32 tool id, q(body translation, 1e-3 m)
                   u32 vehicle_count,
                   u64 entity_hash(v) for v in vehicles ascending by EntityId )
 
@@ -47,8 +49,9 @@ entity_hash(v) = FNV( u32 entity id,
 ```
 
 v1 → v2 (run 3): added the world/traffic hash and debris bodies. v2 → v3 (run 5): added the
-police hash, because police units are not vehicles and would otherwise drift unnoticed. Every
-golden was re-blessed both times.
+police hash, because police units are not vehicles and would otherwise drift unnoticed. v3 → v4
+(run 9): added roadblock barrier bodies, which cars can now shove. Every golden was re-blessed
+each time.
 City props (parked cars, cones) are physics bodies but are not hashed yet (the sim keeps only
 their count); a prop knocked differently shows up through the vehicles it touches.
 
@@ -133,6 +136,100 @@ Cloud container, Intel Xeon @ 2.10 GHz, 4 cores, release, real vehicle + damage 
   `wasm-determinism` module could host one).
 - The lint is line-based: it can miss a transcendental called through a function pointer or a
   macro, and it stops at the first `#[cfg(test)]` in a file.
+
+## Run 9b — lead/round12 merged (2026-10-20, lead helper)
+
+Merged `origin/lead/round12` into `ws/harness` (merge commit). Conflict choices:
+- `Sim::state_hash` keeps v4 (roadblock barrier bodies) **and** round12's weather hash
+  (barriers first, then weather, then debris).
+- `wp_wasm::Session::run_tick`: the crash-replay snapshot at tick 0 is taken first, then the
+  scenario's police orders are applied (crash replays rerun `run_tick`, so orders reapply).
+- simcli: `police_orders` and `weather` scenario fields both kept; summary metrics
+  `max_spike_puncture`, `spiked_wheels`, `max_los_lost_s` (23 total); world metrics 17.
+- Testbed: round12 already draws spike strips (`render/police_tools.ts`, from
+  `map_dynamic()`), so `Scene.updatePoliceTools` now draws only the physical roadblock
+  barriers. Flat tyres scale the wheel `spin` group, so the panel-mesh wheels deflate too.
+- Goldens re-blessed `[bless]`. Before blessing, hashing as v3 (no barrier section) matched
+  every round12 golden bit-for-bit: the merge changes no round12 behaviour.
+  `golden_roadblock` / `golden_spike_strip` changed with round12's police and still pass.
+
+Gate: fmt ✓, `clippy --workspace -D warnings` ✓, wasm32 build ✓, lint-determinism 0 errors,
+`tsc` ✓, `npm run e2e:police` 7/7 (police are sim vehicles now; barriers still get shoved,
+tyres still go flat). `cargo test --workspace`: 1115 passed, 5 failed, all also failing on
+clean `origin/lead/round12` (not caused by this merge):
+`wp_opponent race::wanted_ai_racer_flees_police_through_the_city`,
+`wp_race race_picker::grid_highway_sprint` (never finishes),
+`wp_wasm race_tests::short_sprint_with_ai_…` (race not over in 120 s), and simcli
+`all_scenarios_pass…` / `goldens_match` through `city/siren_traffic_no_siren`
+(`civilian_collisions` 1, want 0). `clippy --all-targets` also flags
+`wp_audio/src/siren.rs:437` (`inconsistent_digit_grouping`, test code from round12).
+
+## Run 9 — roadblocks and spike strips you can see and hit (2026-10-20)
+
+Request: "police barricades you can actually see and hit, and spikes that burst your tyres".
+wp_police already planned roadblocks and spike strips and punctured tyres; the barriers had no
+body (cars drove through them) and the testbed drew neither tool.
+
+1. **Solid barriers** (`crates/wp_sim/src/police_tools.rs`, new). Each barrier of an active
+   roadblock is a dynamic Rapier box (size and 400 kg mass from `data/police/tools.toml`,
+   friction 0.7, restitution 0.05) yawed across the road. It is synced every tick after
+   police units and removed when the roadblock expires. Contacts reach damage like debris.
+   `Sim::roadblock_barriers()` / `spike_strips()` / `spike_puncture(id)` are the read side.
+   Barrier translations are in the state hash (**spec v4**). Every golden was re-blessed in
+   `7c22ed8 [bless]`; nothing but the version word changed in goldens without police tools.
+2. **Scenario `police_orders`**: `roadblock` / `spikes` captain orders (checked by wp_police
+   rules) and `roadblock_at` / `spikes_at` direct placement (flat world, no pursuit needed)
+   via new `PoliceSystem::place_roadblock_at` / `place_spikes_at`. Results go to
+   `summary.json` → `police_orders`. `simcli::run::apply_police_orders` is shared with the
+   WASM runner, so browser runs of these scenarios match simcli.
+3. **Metrics**: `max_spike_puncture` and `spiked_wheels` (per entity), plus
+   `roadblock_barriers_max`, `spike_strips_max` and `barrier_displaced_max_m` (world; these
+   work on the flat world too).
+4. **Goldens**:
+   - `golden_roadblock`: a sedan at 56 km/h hits a 3-barrier roadblock. It shoves a barrier
+     about 7.6 m, gets about 0.3 m of front crush and loses health.
+   - `golden_spike_strip`: a sedan at 90 km/h crosses a strip and all four tyres deflate.
+     A hard brake at 3 s leaves it at about 8.2 m/s at 5 s, against 6.0 m/s for an unspiked
+     control.
+5. **Testbed**:
+   - `police_tools()` returns 11 floats per tool (`[kind, x, y, z, qx, qy, qz, qw, hx, hy, hz]`).
+   - `tire_punctures()` returns 4 floats per vehicle: the max of spike and crash puncture.
+   - Barriers are drawn as white boxes with red bands and a flashing amber lamp. Spike strips
+     are a dark strip with two rows of steel studs.
+   - Punctured tyres are drawn squashed, at radius × (1 − 0.3p), which is the sim's
+     effective rolling radius.
+   - `npm run e2e:police` runs both goldens in the browser and checks:
+     - barriers are drawn;
+     - a barrier was shoved more than 0.3 m;
+     - the strip is drawn;
+     - all four tyres read above 0.5 deflated;
+     - both runs pass and match simcli;
+     - there are no page errors.
+     It passes. Screenshots are written to `$SHOTS`.
+
+Changes outside my crates (minimal, listed for the owners):
+- **wp_sim (lead):** the `police_tools` module, the `tool_bodies` field, the
+  `sync_police_tools()` call in the step, and `set_police` clearing the old bodies. Hash spec v4.
+- **wp_police (E):** `place_roadblock_at` / `place_spikes_at`. These bypass the dispatch rules
+  and are meant for scenarios and tests.
+- **wp_wasm / testbed (04):**
+  - wasm exports `police_tools`, `tire_punctures` and `police_tool_stride`;
+  - `Session` applies `police_orders`;
+  - testbed: `scene.ts` tool meshes, `vehicle_view.ts` `setPunctures`, the `main.ts` calls,
+    `layout.ts` / `sim.ts` bindings, and `e2e/police_tools.mjs`.
+
+Known gaps:
+- Spike strips have no body. The police hash counts strips, and punctures show up in the hash
+  through the wheel state of the vehicle.
+- Barriers never break apart.
+- The AI dispatcher places roadblocks on real roads only in a city. Captain orders on the
+  flat world are refused (`NotPursued`) because there are no units to start a pursuit.
+
+Checks: `cargo fmt`, `cargo clippy --workspace --all-targets -D warnings`, `cargo test
+--workspace --no-fail-fast` (784 passed, 0 failed, 15 ignored), wasm build (`npm run wasm`),
+`npm run typecheck`, `npm run e2e:police` (7/7), `simcli run apps/simcli/scenarios` (all pass),
+`simcli goldens` (all match), `simcli determinism apps/simcli/scenarios` (all deterministic),
+`tools/wasm-determinism/compare.sh` (native == wasm).
 
 ## Run 8 — response to lead feedback round 8 (2026-10-19)
 

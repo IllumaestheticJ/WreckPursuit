@@ -55,6 +55,10 @@ const RIDE_FIELDS: Record<string, { label: string; min: number; max: number; ste
   damper_rebound: { label: "dampers rebound ×", min: 0.5, max: 3, step: 0.05, hint: "damper scale, extension" },
   roll_centre_m: { label: "roll centre", min: 0, max: 0.3, step: 0.01, unit: "m", hint: "height where the tyres' side force acts on the body (0 = contact patch, the data); higher = less roll" },
   pitch_centre_m: { label: "pitch centre", min: 0, max: 0.3, step: 0.01, unit: "m", hint: "height where drive / brake forces act on the body (anti-dive / anti-squat feel)" },
+  travel: { label: "suspension travel ×", min: 0.8, max: 2.5, step: 0.05, hint: "more travel = more room before the bump stops when the body rolls further" },
+  roll_inertia: { label: "roll inertia × (restarts)", min: 0.5, max: 4, step: 0.1, hint: "body roll inertia (Ixx): slower, heavier roll; applied when the car is built — the lab restarts the car" },
+  pitch_inertia: { label: "pitch inertia × (restarts)", min: 0.5, max: 4, step: 0.1, hint: "body pitch inertia (Iyy): slower dive / squat; restarts the car" },
+  yaw_inertia: { label: "yaw inertia × (restarts)", min: 0.5, max: 4, step: 0.1, hint: "body yaw inertia (Izz): slower heading build; restarts the car" },
 };
 
 const CAR_FIELDS: Record<string, { label: string; min: number; max: number; step: number; unit?: string; hint: string }> = {
@@ -365,14 +369,37 @@ export class DriftLabWPanel {
             /* ignore */
           }
         };
+        // Body inertia is set when the car's body is built: restart the lab on release.
+        if (key.endsWith("_inertia")) input.onchange = () => this.restart(this.car);
         row(f.label, f.hint, input, val);
       }
       const rideBtns = document.createElement("div");
       rideBtns.style.cssText = "display:flex;gap:6px;margin-top:4px";
-      for (const [label, which] of [["lab default", "lab"], ["suspension data", "data"]] as const) {
+      {
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.id = "drift-lab-w-keep-height";
+        input.checked = Boolean((rt as Record<string, unknown>).keep_ride_height);
+        input.onchange = () => {
+          const text = JSON.stringify({ ...(this.sim.rideTune() ?? rd.data), keep_ride_height: input.checked });
+          this.sim.rideTuneSet(text);
+          try {
+            localStorage.setItem(RIDE_STORE, text);
+          } catch {
+            /* ignore */
+          }
+        };
+        row("keep ride height", "raise the spring preload so softer springs keep the data's static ride height (off the bump stops)", input, document.createElement("span"));
+      }
+      for (const [label, which] of [["lab default", "lab"], ["slow weight (clip 4)", "slow_weight"], ["suspension data", "data"]] as const) {
         const b = document.createElement("button");
         b.textContent = label;
-        b.title = which === "lab" ? "calmer, slower weight transfer (springs 0.9, bars 0.25, dampers 1.4 / 1.8)" : "no scaling: the car files as they are";
+        b.title =
+          which === "lab"
+            ? "calmer, slower weight transfer (springs 0.9, bars 0.25, dampers 1.4 / 1.8)"
+            : which === "slow_weight"
+              ? "reference clip 4: roll builds over ~0.6 s to ~6°, no overshoot (soft springs, ride height kept, more travel and inertia). Breaks the spin model's knife-edge held drift. Restarts the car"
+              : "no scaling: the car files as they are";
         b.onclick = () => {
           const text = JSON.stringify(this.sim.rideTuneDefaults()[which]);
           this.sim.rideTuneSet(text);
@@ -381,7 +408,8 @@ export class DriftLabWPanel {
           } catch {
             /* ignore */
           }
-          this.build();
+          // The inertia scales apply when the car's body is built.
+          this.restart(this.car);
         };
         rideBtns.appendChild(b);
       }

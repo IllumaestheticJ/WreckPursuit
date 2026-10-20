@@ -15,4 +15,5 @@ toml.workspace = true
 rapier3d.workspace = true
 
 [dev-dependencies]
+# Examples only (body_damping reads another branch's car data).
 serde_json.workspace = true

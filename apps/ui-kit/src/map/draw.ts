@@ -4,7 +4,7 @@
  * road cache, police glyphs, tools, POI icons. Everything here draws in screen pixels unless a
  * function says it takes a world matrix.
  */
-import type { MapFrame, MapPoi, MapStatic, MapTool, MapUnit } from "./data";
+import type { MapFrame, MapPoi, MapRacer, MapStatic, MapTool, MapUnit } from "./data";
 import { unitBlinks } from "./data";
 import { apply, type Mat } from "./projection";
 
@@ -20,6 +20,8 @@ export interface MapPalette {
   danger: string;
   policeA: string;
   policeB: string;
+  /** Race opponents (not police red / blue, not the player's scanner green). */
+  racer: string;
   edge: string;
   edgeHot: string;
 }
@@ -35,6 +37,7 @@ const FALLBACK: MapPalette = {
   danger: "#ff3d3d",
   policeA: "#ff2e55",
   policeB: "#3b7dff",
+  racer: "#c77dff",
   edge: "#233029",
   edgeHot: "#3a5246",
 };
@@ -55,6 +58,7 @@ export function readPalette(el: Element | null): MapPalette {
     danger: v("--danger", FALLBACK.danger),
     policeA: v("--police-a", FALLBACK.policeA),
     policeB: v("--police-b", FALLBACK.policeB),
+    racer: v("--racer", FALLBACK.racer),
     edge: v("--edge", FALLBACK.edge),
     edgeHot: v("--edge-hot", FALLBACK.edgeHot),
   };
@@ -227,6 +231,55 @@ export function drawPlayer(ctx: Ctx, x: number, y: number, rot: number, s: numbe
   ctx.lineWidth = Math.max(1.5, s * 0.16);
   ctx.stroke();
   ctx.fill();
+  ctx.restore();
+}
+
+/**
+ * A race opponent at `(x, y)` screen px, rotated by `rot`, size `s` px: a violet arrow (the
+ * player's shape, smaller) with its race position in a tag beside it. The leader is drawn
+ * larger with a light ring so the race front is easy to find.
+ */
+export function drawRacer(ctx: Ctx, r: MapRacer, x: number, y: number, rot: number, s: number, pal: MapPalette): void {
+  const leader = r.position === 1;
+  const size = leader ? s * 1.2 : s;
+  ctx.save();
+  ctx.translate(x, y);
+  if (leader) {
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 1.45, 0, Math.PI * 2);
+    ctx.strokeStyle = pal.ink;
+    ctx.globalAlpha = 0.85;
+    ctx.lineWidth = Math.max(1.2, size * 0.16);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+  ctx.save();
+  ctx.rotate(rot);
+  ctx.beginPath();
+  ctx.moveTo(0, -size);
+  ctx.lineTo(size * 0.72, size * 0.72);
+  ctx.lineTo(0, size * 0.36);
+  ctx.lineTo(-size * 0.72, size * 0.72);
+  ctx.closePath();
+  ctx.fillStyle = pal.racer;
+  ctx.strokeStyle = "#000";
+  ctx.lineWidth = Math.max(1.2, size * 0.16);
+  ctx.stroke();
+  ctx.fill();
+  ctx.restore();
+  // Position tag up-right of the arrow (screen-aligned, never rotated).
+  const fs = Math.max(9, Math.round(size * 1.45));
+  ctx.font = `bold ${fs}px ui-monospace, Menlo, Consolas, monospace`;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  const label = String(r.position);
+  const tx = size * 0.95;
+  const ty = -size * 0.95;
+  const tw = ctx.measureText(label).width;
+  ctx.fillStyle = "rgba(0,0,0,0.75)";
+  ctx.fillRect(tx - 2, ty - fs * 0.6, tw + 4, fs * 1.2);
+  ctx.fillStyle = leader ? pal.ink : pal.racer;
+  ctx.fillText(label, tx, ty);
   ctx.restore();
 }
 

@@ -18,3 +18,18 @@ export {
   type Volumes,
 } from "./settings";
 export { keyAction, PadNav, stepIndex, type NavAction } from "./nav";
+export { BAR_CHANNELS, paintInputBars, type BarChannel } from "./bars";
+export {
+  CONTROL_DEVICES,
+  CONTROL_RANGES,
+  defaultControls,
+  defaultDeviceControls,
+  normalizeControls,
+  normalizeDeviceControls,
+  shapePedal,
+  shapePedals,
+  shapeSteer,
+  type ControlDevice,
+  type DeviceControls,
+  type InputProbe,
+} from "./controls";

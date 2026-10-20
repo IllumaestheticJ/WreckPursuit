@@ -41,6 +41,11 @@
         // is a few cm short of its kerb offset and slightly angled, so its body reaches ~0.1 m
         // into this car's 1.2 m keep-distance corridor (simcli route driver), or meet a
         // physical car cutting a turn (seed 7). See docs/integration/world.md, round 13.
+        // Round 12b merge (row-94 road layout; pull-overs now finish within 3 cm of the kerb
+        // offset): seeds 1-9: 4 of 9 finish (2, 4, 8, 9). The rest wait behind cars queued at
+        // a red light in the turn bay ahead (6, 7) or behind slower traffic (3, 5); seed 1
+        // also has a physical car cutting a left turn into a right-turner (unrelated junction).
+        // See docs/integration/city-residential.md, "Post-merge fixes".
         world_metric(name: "civilian_collisions", min: 0.0, max: 0.0),
         world_metric(name: "traffic_siren_yields", min: 2.0, max: 1000.0),
         metric(name: "route_progress", min: 0.95, max: 1.0),

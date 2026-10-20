@@ -100,6 +100,15 @@ check(held[0] === 1 && held[1] > 0.95, `key right → rack ${held[1]?.toFixed(2)
 const text = await page.locator("#drift-lab-w").innerText();
 check(/Drift Lab W · plain steering/.test(text) && /rack/.test(text) && /roll .* Hz/.test(text), `readout: ${text.split("\n").slice(0, 5).join(" | ")}`);
 if (process.env.SHOT) await page.screenshot({ path: process.env.SHOT });
+// Slow weight transfer preset (clip 4): sets the ride tuning (inertia too) and restarts the car.
+await page.locator("#drift-lab-w button", { hasText: "slow weight (clip 4)" }).click();
+await page.waitForTimeout(1500);
+const sw = await page.evaluate(() => window.__wp.sim.rideTune());
+check(sw.keep_ride_height === true && Math.abs(sw.roll_inertia - 2.4) < 1e-6 && (await sim()).name === "drift_lab_w", `slow weight preset ${JSON.stringify(sw)}`);
+check(await page.locator("#drift-lab-w-keep-height").isChecked(), "keep ride height ticked by the preset");
+await page.locator("#drift-lab-w button", { hasText: "lab default" }).click();
+await page.waitForTimeout(1500);
+check(Math.abs((await page.evaluate(() => window.__wp.sim.rideTune().arb)) - 0.25) < 1e-6, "lab default ride restored");
 // Velocity-relative steering checkbox (default off) and TCS checkbox (default off).
 check(!(await page.locator("#drift-lab-w-vr").isChecked()), "velocity-relative steering off by default");
 await page.locator("#drift-lab-w-vr").check();
