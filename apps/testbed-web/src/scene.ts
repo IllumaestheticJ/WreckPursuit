@@ -293,6 +293,15 @@ export class SceneView {
     });
   }
 
+  /** Siren light at `pos` (sim space) with this colour / intensity; `null` = no siren on. */
+  setSiren(pos: THREE.Vector3 | null, colour = 0, intensity = 0): void {
+    this.sirenLight.visible = pos !== null;
+    if (!pos) return;
+    this.sirenLight.position.copy(pos);
+    this.sirenLight.color.setHex(colour);
+    this.sirenLight.intensity = intensity;
+  }
+
   /** Sky + light colour from the night factor (0 noon … 1 midnight); `sunDimming` (weather
    * clouds, 0..1, default 1) dims the sun and part of the sky light. */
   setTimeOfDay(night: number, sunDimming = 1): void {
