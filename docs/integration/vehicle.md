@@ -1025,6 +1025,16 @@ same at 50 and 100 km/h after the change):
 | 60 % | 33–46 → 33 | 129 → **42** |
 | 100 % | 29–38 → 29 | 129 → 29 |
 
+Countersteer-key slew at the road wheels (debug_sedan, keyboard, full slide): **80 °/s
+before at 60 / 100 / 140 km/h** (the keyboard rate capped at the rack speed, no slider boost),
+**after 273 °/s at 60 % and 401 °/s at 100 %**, the same at every speed.
+
+**No-TCS keyboard corner exits with only this fix (row 98, step 2).** Released-keys power exits
+after holding the key into the corner (30 m, lat 0.5–0.8 g, reaction 0.2–1.2 s, full throttle
+held, TCS/ESC off): rampart / lucciola / hakone / sperber recovered 27 / 31 / 39 / 34 of 44,
+**unchanged** by the row-90 fix (with TCS on: 44/44 each). So the faster countersteer alone
+does not make "hold W out of a 2nd-gear corner" survivable with TCS off on powerful RWD cars.
+
 **Slides** (`cargo run --release -p wp_vehicle --example catch`, `metrics::slide_catch`): TCS /
 ESC off, power oversteer (30 m, 0.7 g, full throttle held), lift-off (0.85 g, 30 % brake) and a
 100 km/h 1 rad/s yaw kick, steering held in 0.1 / 0.3 / 0.6 s: 9 runs per row. Lag = longest
