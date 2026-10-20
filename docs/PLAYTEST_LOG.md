@@ -127,6 +127,7 @@ the schedule could hunt (1→2→1). New automatic (`crates/wp_vehicle/README.md
 | 50 | Hitting invisible objects (wrecks on an empty road) | lead: parked-car and cone props are physical but never drawn → helper `lead/draw-props` | dispatched |
 | 51 | The painted stop lines at traffic lights make the car jump and crash into the light | helper `lead/fix-junction-holes` (step in the collision surface where the lane meets the junction disc) | dispatched |
 | 52 | The sidewalk should be at the same height as the base of the buildings | helper `lead/fix-junction-holes` (building base meets the sidewalk top along frontages; plinths on slopes) | dispatched |
+| 53 | Hood doesn't crumple enough | R (panels): stronger visual buckling (fold lines, tenting, latch kink), visual only | dispatched |
 
 ## 2026-10-19 — step 2: 4-player test on Port Vesper v2 (F, `ws/net`)
 Found by the new 3-minute 4-client test (`crates/wp_net/tests/vesper_e2e.rs`) and the
