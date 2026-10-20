@@ -18,7 +18,7 @@ use crate::vehicle::{Chassis, Vehicle, Wheel};
 /// reference yaw rate, playtest row 28) plus the contact launch limiter and the wheel-centre
 /// compression (playtest row 54). Format 7: plus the handbrake hold of the steering assist
 /// (owner rows 57 / 72).
-const FORMAT: u8 = 7;
+const FORMAT: u8 = 8;
 
 /// Opaque full-state snapshot of one [`Vehicle`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -236,6 +236,7 @@ impl Vehicle {
         w.f(self.launch.lift);
         w.f(self.hb_grace);
         w.b(self.stalled);
+        w.fs(&self.drift.to_array());
         VehicleSnapshot { bytes: w.0 }
     }
 
@@ -340,6 +341,10 @@ impl Vehicle {
         let lift = r.f()?;
         let hb_grace = r.f()?;
         let stalled = r.b()?;
+        let mut drift = [0.0f32; crate::drift::DriftState::LEN];
+        for d in &mut drift {
+            *d = r.f()?;
+        }
         if !r.0.is_empty() {
             return Err(SnapshotError::Malformed);
         }
@@ -381,6 +386,7 @@ impl Vehicle {
         };
         self.hb_grace = hb_grace;
         self.stalled = stalled;
+        self.drift = crate::drift::DriftState::from_array(drift);
         Ok(())
     }
 }

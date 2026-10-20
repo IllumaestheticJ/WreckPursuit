@@ -218,6 +218,8 @@ pub struct Telemetry {
     pub contact_lift_cut_mps: f32,
     /// Engine stalled (manual clutch; press the clutch to re-crank).
     pub stalled: bool,
+    /// Drift assist (Drift Lab B): mode, slide angle, envelope.
+    pub drift: crate::drift::DriftTelemetry,
 }
 
 /// One simulated vehicle. See the crate docs for the integration contract with Rapier.
@@ -263,6 +265,8 @@ pub struct Vehicle {
     pub(crate) hb_grace: f32,
     /// Engine stalled (manual clutch only, see [`STALL_FRAC`]).
     pub(crate) stalled: bool,
+    /// Drift-assist state ([`crate::drift`]).
+    pub(crate) drift: crate::drift::DriftState,
 }
 
 impl Vehicle {
@@ -376,6 +380,7 @@ impl Vehicle {
             conditions_source: ConditionsSource::World,
             launch: LaunchGuard::default(),
             hb_grace: 0.0,
+            drift: crate::drift::DriftState::default(),
             stalled: false,
             corners,
         };
@@ -509,6 +514,7 @@ impl Vehicle {
         self.torque = V3::ZERO;
         self.launch.forget();
         self.hb_grace = 0.0;
+        self.drift = crate::drift::DriftState::default();
         self.stalled = false;
     }
 
@@ -728,6 +734,8 @@ impl Vehicle {
                 self.def.wheels[0].position_m[1] - self.com_local.y,
             ),
             handbrake_hold: self.hb_grace > 0.0,
+            rear_slip_rate: self.drift.rear_slip_rate,
+            tuning: crate::drift::tuning(),
         }
     }
 
@@ -869,6 +877,7 @@ impl Vehicle {
         // Rear-axle slip angle (slide assists): CG-to-rear-axle distance from the car data.
         let cg_to_rear = self.com_local.y - self.def.wheels[2].position_m[1];
         let rear_axle = rear_axle_slip(v_fwd, v_left, ch.ang_vel.dot(up), cg_to_rear);
+        self.drift.update_slip(rear_axle, dt);
         let st = slide_throttle(assists, self.slide_class, rear_axle, input.steer);
         // `scale` is exactly 1.0 unless the slide throttle is active (bit-identical otherwise).
         let thr_target = if st.scale < 1.0 {
@@ -1087,6 +1096,24 @@ impl Vehicle {
             self.def.steering.rack_speed_rad_per_s,
             dt,
         );
+        let drift_tel = {
+            let (side, onset) = crate::steering::slide_onset(&steer_in);
+            let on = assists.countersteer_help > 0.0
+                && assists.steer_speed_sensitivity > 0.0
+                && v_fwd > 3.0;
+            crate::drift::DriftTelemetry {
+                mode: if on {
+                    crate::drift::intent(input.steer, side, onset)
+                } else {
+                    crate::drift::DriftMode::Off
+                },
+                slide_angle: steer_in.body_slip.abs(),
+                onset,
+                envelope: 0.0,
+                authority: if on { 1.0 } else { 0.0 },
+                throttle_scale: 1.0,
+            }
+        };
         let ts = if base_split[0] > 0.0 && self.corners[0].steerable {
             torque_steer(self.wheels[0].drive, self.wheels[1].drive)
         } else {
@@ -1355,6 +1382,7 @@ impl Vehicle {
             tcs_brake_nm: tc_brake,
             contact_lift_cut_mps: launch_cut,
             stalled: self.stalled,
+            drift: drift_tel,
         };
     }
 
