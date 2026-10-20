@@ -226,6 +226,12 @@ and `race_crash_replays_with_the_judge_and_no_crash_on_the_grid`, `wp_race::race
 the owner picks which drift branch merges (`cargo run -p simcli -- goldens --bless`, `[bless]`
 commit).
 
+After the step 4 merge (`lead/drift-lab-b` ae313e2), `cargo test --workspace` fails exactly
+what untouched ae313e2 fails: `simcli` `goldens_match`, `wp_race::race_picker`
+`hollins_hill_sprint` / `loop9_circuit` / `lantern_checkpoint_draws_the_police`, and `wp_wasm`
+`race_crash_replays_with_the_judge_and_no_crash_on_the_grid` (the `wp_vehicle`, `wp_audio` and
+browser-replay failures above are gone with the round12 merge).
+
 ## Contract change requests
 
 None. (The two from drift-lab-b.md still stand: an explicit `AssistProfile.device`, and
