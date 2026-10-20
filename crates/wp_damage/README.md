@@ -140,7 +140,7 @@ gating (contract request #10): `arcade_alignment_scale` 0.09 (toe/camber reporte
 round 13) and `arcade_failed_steer_ratio` 0.5 (a failed rack keeps half the lock instead of 0.3).
 Round 13 (owner row 87: "still a little too high") softened the consequences ~20–30 % and left the
 dents alone: `arcade.toml` components × 0.24 damage, × 4.0 fail threshold, 0.78 m cabin limit,
-wheels × 0.42, bills × 0.4. A 50 km/h wall hit is cosmetic or minor for every measured car, a
+wheels × 0.42 (bills stay × 0.5, wp_economy balance). A 50 km/h wall hit is cosmetic or minor for every measured car, a
 70 km/h hit minor and drivable; the sports car is ended after ~4.5 hard (70–100 km/h) hits on
 average (round 12b: 2.7), the cruiser after ~8.7. Full tables: `docs/integration/damage.md`;
 measure with `cargo run --release -p simcli --example damage_toughness -- [chase] [arcade|sim]
