@@ -191,3 +191,11 @@ The lap: 69 s, same street circuit and car as clip 4, but with the tune from "Ru
 1. **Handbrake stabs on the throttle** (0.1–0.3 s, throttle and steer key held) must add rotation without killing the drive. Check our row-56 handbrake declutch (auto clutch opens with the handbrake) against this. For short stabs with the throttle held, the reference keeps power, or recovers it instantly.
 2. **ABS Half + rear brake bias:** braking at 80+ mph with a steering tap stays controllable and settles the car. A tap while braking gives a mild rotation, not a spin.
 3. With the tune (stiff, locked diff, long gears) a 2nd-gear power drift at ~50–55 mph holds steadily with opposite lock and throttle.
+
+## Keyboard input is raw in the reference (owner test, 2026-10-20)
+
+The reference game's "Test steering" bar on the keyboard jumps straight between **−100 % and +100 %**, with no ramp or smoothing at the input layer. All the keyboard smoothing must therefore happen **inside the car's steering model** (the rack's slew rate, speed-sensitive lock and self-alignment), not in the input filter.
+
+What this means for WreckPursuit:
+- Keyboard steering input should reach `DriverInput.steer` as a plain −1 / 0 / +1. Our testbed key ramp (`apps/testbed-web/src/input.ts`: 4/s in, 12/s out; drift-twitch's 6/s in and out) should go, or become ~instant. Rate limiting belongs in `wp_vehicle` steering, where it can behave differently for turn-in, return to centre, countersteer and slides.
+- Measuring the reference's actual front-wheel rate needs a camera that shows the front wheels, or the full cockpit steering wheel (owner asked).
