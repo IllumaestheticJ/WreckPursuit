@@ -366,8 +366,8 @@ export const sim = {
   /** Race picker for a player in `car` (`wp_wasm::race::RaceCard[]`). */
   raceList: (car: string, mode: string): RaceCard[] => JSON.parse(wasm.race_list(car, mode)),
   /** Start a picker race (new session; the account carries over). Returns entity ids, player first. */
-  raceStart: (id: string, car: string, mode: string, autopilot: boolean): number[] =>
-    Array.from(wasm.race_start(id, car, mode, autopilot)),
+  raceStart: (id: string, car: string, mode: string, autopilot: boolean, tune?: CarTune): number[] =>
+    Array.from(wasm.race_start_tuned(id, car, mode, autopilot, tune ? JSON.stringify(tune) : "")),
   /** `[phase, countdown_s, elapsed_s, laps, gates, player, racers, closed, length_m, autopilot, kind, player_done]`; empty without a race. */
   raceInfo: (): Float32Array => wasm.race_info(),
   /** Standings, position order, RACE_STRIDE floats each (see layout.ts RS). */
@@ -403,6 +403,8 @@ export const sim = {
   careerSetActive: (uid: number): CareerView => JSON.parse(wasm.career_set_active(uid)),
   careerInstall: (uid: number, modId: string): CareerView => JSON.parse(wasm.career_install_mod(uid, modId)),
   careerUninstall: (uid: number, modId: string): CareerView => JSON.parse(wasm.career_uninstall_mod(uid, modId)),
+  /** Set a career car's free tune (no money). */
+  careerSetTune: (uid: number, tune: CarTune): CareerView => JSON.parse(wasm.career_set_tune(uid, JSON.stringify(tune))),
   careerQuote: (uid: number, req: ShopRequest): RepairQuote => JSON.parse(wasm.career_quote_json(uid, JSON.stringify(req))),
   careerRepair: (uid: number, req: ShopRequest): CareerView => JSON.parse(wasm.career_repair(uid, JSON.stringify(req))),
   careerRelease: (uid: number): CareerView => JSON.parse(wasm.career_release(uid)),
@@ -410,7 +412,7 @@ export const sim = {
   careerNextNight: (): CareerView => JSON.parse(wasm.career_next_night()),
 };
 
-import type { CareerView, ModTreeView, RepairQuote, RunClose, ShopRequest } from "../../../ui-kit/src/garage/types";
+import type { CarTune, CareerView, ModTreeView, RepairQuote, RunClose, ShopRequest } from "../../../ui-kit/src/garage/types";
 
 export type { ContinueReport, LedgerLine, RunReport } from "../ui/runEnd";
 export type { RaceCard, RaceReport } from "../ui/race";
