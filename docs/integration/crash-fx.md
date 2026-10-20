@@ -76,13 +76,13 @@ scale, the whole testbed frame allocates 1000–1600 KB in the chase.
 
 | Measurement (headless Chromium, SwiftShader, 4 cores) | Value |
 |---|---|
-| `fx` section, city chase, auto → fx **low** (`e2e/perf_check.mjs`, 12 s windows, ~2 fps so each frame covers ~0.5 s of sim) | 0.30–0.43 ms/frame (chase), 0.23–0.44 (rain); ≤ 5 draw calls |
-| One effects frame at **high**, 41–44 puffs + 28–30 skid segments live (`e2e/crash_fx.mjs`, warmed JIT) | 0.011–0.018 ms |
+| `fx` section, city chase, auto → fx **low** (`e2e/perf_check.mjs`, 12 s windows, ~2 fps so each frame covers ~0.5 s of sim; 4 runs) | 0.30–0.43 ms/frame (chase), 0.23–0.44 (rain); ≤ 5 draw calls. Most of it is the per-car wheel pass over ~18 cars under a CPU shared with SwiftShader's raster threads |
+| One effects frame at **high**, 41–50 puffs + 22–30 skid segments live, one car (`e2e/crash_fx.mjs`, warmed JIT) | 0.010–0.018 ms |
 | Added draw calls | 0 idle, ≤ 5 with every effect live |
 | Added triangles | ≤ 12 per spark, 20 per puff, 1 per shard, 4 per chip, 2 per skid segment (only live instances drawn): < 40k at high with everything full |
 | Material version bumps / shader churn | 0 (checked in the chase with 4 effect meshes live) |
 
-`e2e/perf_check.mjs` now also fails if the `fx` section exceeds **0.5 ms/frame** or the effects
+`e2e/perf_check.mjs` now also fails if the `fx` section exceeds **1.0 ms/frame** (≈ 2× measured) or the effects
 draw more than 5 calls, and prints the effect counts of the window; `e2e/frame_profile.mjs`
 reports `structure.fx` and the names of materials that churned (`structure.churned`).
 
@@ -145,6 +145,13 @@ All in `apps/testbed-web`: `main.ts` (hooks above, `__wp.fx`, `?fx=` in the head
 - Headlight / taillight shards key off `RegionDamaged` severity, not the panel renderer's own
   "lens broken" state, so they can burst slightly before / after the lens goes dark.
 
-## Gates (2026-10-20, cloud container)
+## Gates (2026-10-20, cloud container, `CARGO_INCREMENTAL=0`, debug info off)
 
-See the final commit message for the run.
+| Gate | Result |
+|---|---|
+| `cargo fmt --all -- --check` | pass |
+| `cargo clippy --workspace -- -D warnings` | pass |
+| `cargo test --workspace` | **1 failure, pre-existing:** `simcli` `goldens_match` — `city_blocked_parked_player_grid` (tick 19920), `city_blocked_parked_player_vesper` (tick 240), `golden_city_chase` (tick 24), `golden_night_pursuit_escape` (tick 24) no longer match their goldens. This branch changes no Rust, `data/` or golden file (`git diff origin/lead/round12 -- . ':!apps/testbed-web' ':!docs'` is empty), so the base `091cd34` fails the same; it looks like the round-12b city / props merges landed without a re-bless. Not re-blessed here (lead decision, `[bless]` commit). Everything else passes. |
+| `cargo build --target wasm32-unknown-unknown -p wp_wasm` | pass |
+| `npm run typecheck` (tsc) | pass |
+| `just web-e2e` | 103 checks pass, incl. **crash effects (e2e/crash_fx.mjs)** and every effects line of the perf check; **fails only the perf check's pre-existing lines** (real-time factor 0.46 / 0.46, 21 frames > 250 ms, 1.39–1.43 M triangles: same as the base, see Perf). `e2e/race.mjs` (not reached because `run.mjs` exits 1) run separately: all race checks pass. |

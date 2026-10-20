@@ -30,8 +30,9 @@ const LIMITS = {
   // Every frame over 250 ms loses sim time (slow motion); measured 0–3 in 12 s.
   maxFramesOver250: 12,
   // Crash effects (render/fx, "low" on this profile): CPU per frame incl. emitters and upload
-  // prep; measured ~0.05–0.1 ms (docs/integration/crash-fx.md). Draw calls: one per effect kind.
-  maxFxMsPerFrame: 0.5,
+  // prep; measured 0.23–0.44 ms at ~2 fps (docs/integration/crash-fx.md). One draw call per
+  // effect kind.
+  maxFxMsPerFrame: 1.0,
   maxFxDrawCalls: 5,
 };
 
