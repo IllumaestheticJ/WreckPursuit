@@ -1,11 +1,11 @@
-# simcli hashes scenario=race_loop9_circuit systems=world,vehicle,damage,police,net hash_spec=3 contract=0.3.0
-240 8de1d3207c5569d9
-480 88fd33e7b915519d
-720 c04ee82ed9bbd9e8
-960 f6e7f329fc7b8691
-1200 d5362292092a5712
-1440 458d6aed1a520d2d
-1680 eae94e05bb98b6b1
-1920 b5ef75aee7cb5a35
-2160 5bec19c7384c6f32
-2400 365883a52bbb7720
+# simcli hashes scenario=race_loop9_circuit systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
+240 bccb2061404c786e
+480 ef734e16486cf5a2
+720 62f7447a27930537
+960 c1cea5b931243dae
+1200 518ff7879d5dc9bd
+1440 51fa56ffa42de73a
+1680 5cbacc57c55dc7c2
+1920 e377241691a383de
+2160 6315f3a4a59c706d
+2400 fa6f0ef9bfed05eb

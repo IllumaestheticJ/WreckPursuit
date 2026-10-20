@@ -1,13 +1,13 @@
-# simcli hashes scenario=opponent_flee_police systems=world,vehicle,damage,police,net hash_spec=3 contract=0.3.0
-2400 87ccde3a8fd24ae6
-4800 045902976c6e81fd
-7200 398252966c43f496
-9600 bdd000fb44287c59
-12000 8c2565ab19e8be5d
-14400 2340b823c002e611
-16800 ee20993aa0191b0c
-19200 28fe370218abcb83
-21600 b4d7413252d29ad9
-24000 76c0d69c901217f8
-26400 57d188c80e949c1c
-28800 c031cbd5e7db6af9
+# simcli hashes scenario=opponent_flee_police systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
+2400 15bd2fb19bf1eec1
+4800 48dc4feb2766c6da
+7200 03a3103a3859eddd
+9600 c6b8b1f23bdfc152
+12000 ff17c4402ea0aef2
+14400 576bd65de89486e2
+16800 ecae28f62f22be7b
+19200 45709a047b11ca60
+21600 fc9dbb5ae074ba2a
+24000 ac15e898f064547b
+26400 907e0290b8c96abf
+28800 99f872291ffd663e

@@ -1,10 +1,10 @@
-# simcli hashes scenario=opponent_open_roads_traffic systems=world,vehicle,damage,police,net hash_spec=3 contract=0.3.0
-2400 e8dff32c7af9517a
-4800 d1837f13f2258a60
-7200 ac963c7bf3ff796b
-9600 78fcb2a481a77f0d
-12000 82f714974e047ae4
-14400 bbda05e7811fec29
-16800 6ba36047d47860be
-19200 eff69a5d17392a2c
-21600 5ec570cb05cec3dd
+# simcli hashes scenario=opponent_open_roads_traffic systems=world,vehicle,damage,police,net hash_spec=4 contract=0.3.0
+2400 d86db6fbfc3fcf01
+4800 42f48e03ddce970b
+7200 947f0c34ac9bf8e4
+9600 d034627635f79b4a
+12000 9ee657888d462393
+14400 ad61f5afe984a652
+16800 e5aff9e25e70e2b5
+19200 f2fc2c3ff28f8683
+21600 2958f1d5c8c9f6ea
