@@ -132,7 +132,11 @@ fmt, `clippy --workspace --all-targets -D warnings`, wasm build, ui-kit vitest +
 already red on `origin/lead/round12` with identical results — 20 goldens (same new hashes on
 both: this branch does not change the simulation), `wp_race` race_picker (hollins / loop9 /
 lantern), `wp_opponent` live police chase, and simcli `police/tunnel_escape_founders_cut{,_control}`
-(capture/escape timing; E re-aims them on `ws/police`).
+(capture/escape timing, same hashes on both; E re-aims them on `ws/police`).
+`just web-e2e`: `race.mjs` and `radio.mjs` pass; in `run.mjs` only the software-GL perf budgets
+(`perf_check.mjs`: real-time factor, long frames, KB/frame, material bumps) fail, and they fail
+the same way on the base in this container. One `crash_fx.mjs` skid-mark count (6 < 8) failed
+once under build load and passed on two re-runs.
 
 ## Known gaps
 - Speech is not band-passed (browser limitation, see above); recorded line packs would fix it.
