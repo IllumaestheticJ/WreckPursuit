@@ -59,6 +59,31 @@ pub fn load_car(car_id: &str) -> Result<LoadedCar, String> {
     wp_contracts::resolve_car(def, &tires, &lattices, &materials).map_err(|e| e.to_string())
 }
 
+/// Menu stat bars for every embedded car: the embedded `data/stats/cars.json`, with any car
+/// missing from it measured here on the `wp_vehicle` rig (slow, once; `simcli car-stats --check`
+/// keeps the table complete).
+pub fn car_stats() -> Result<&'static simcli::car_stats::CarStatsTable, String> {
+    static TABLE: std::sync::OnceLock<Result<simcli::car_stats::CarStatsTable, String>> =
+        std::sync::OnceLock::new();
+    TABLE
+        .get_or_init(|| {
+            let mut table = match files("stats").find(|(id, _)| *id == "cars") {
+                Some((_, text)) => simcli::car_stats::parse(text)?,
+                None => simcli::car_stats::table(BTreeMap::new()),
+            };
+            for id in car_ids() {
+                if !table.cars.contains_key(&id) {
+                    let row = simcli::car_stats::measure_car(mem_data(), &id)
+                        .map_err(|e| e.to_string())?;
+                    table.cars.insert(id, row);
+                }
+            }
+            Ok(table)
+        })
+        .as_ref()
+        .map_err(Clone::clone)
+}
+
 /// Parse the embedded mode table for `mode` (`data/modes/arcade.toml` or `sim.toml`).
 pub fn mode_table(mode: DamageMode) -> Result<ModeTable, String> {
     let stem = match mode {
@@ -92,6 +117,18 @@ mod tests {
         assert!(ids.contains(&"debug_sedan".to_string()));
         for id in ids {
             load_car(&id).unwrap_or_else(|e| panic!("{id}: {e}"));
+        }
+    }
+
+    #[test]
+    fn car_stats_cover_every_embedded_car() {
+        let table = car_stats().unwrap();
+        assert_eq!(table.cars.keys().cloned().collect::<Vec<_>>(), car_ids());
+        for (id, s) in &table.cars {
+            let b = s.bars;
+            for v in [b.acceleration, b.top_speed, b.cornering] {
+                assert!((0.0..=1.0).contains(&v), "{id}: {b:?}");
+            }
         }
     }
 
