@@ -1,0 +1,636 @@
+{
+  "pack": "world_rec",
+  "base": "world_proc",
+  "description": "Recorded CC0 impacts, glass, crunches, debris, scrapes, tire bursts/squeal, horns and steam (Freesound + Kenney); everything else falls back to world_proc synths.",
+  "sources": {
+    "kenney_impact": {
+      "kind": "zip",
+      "url": "https://kenney.nl/media/pages/assets/impact-sounds/87b4ddecda-1677589768/kenney_impact-sounds.zip",
+      "author": "Kenney",
+      "page": "https://kenney.nl/assets/impact-sounds"
+    },
+    "fs208695": {
+      "kind": "freesound",
+      "id": 208695,
+      "uid": 1756543,
+      "author": "monotraum",
+      "what": "car door close"
+    },
+    "fs9876": {
+      "kind": "freesound",
+      "id": 9876,
+      "uid": 21830,
+      "author": "Heigh-hoo",
+      "what": "car door closed"
+    },
+    "fs332668": {
+      "kind": "freesound",
+      "id": 332668,
+      "uid": 950925,
+      "author": "Reitanna",
+      "what": "big thud"
+    },
+    "fs504585": {
+      "kind": "freesound",
+      "id": 504585,
+      "uid": 1035118,
+      "author": "knoptop",
+      "what": "small plastic breaks"
+    },
+    "fs260004": {
+      "kind": "freesound",
+      "id": 260004,
+      "uid": 2079872,
+      "author": "simonjsounds",
+      "what": "impact"
+    },
+    "fs161719": {
+      "kind": "freesound",
+      "id": 161719,
+      "uid": 823769,
+      "author": "EchoCinematics",
+      "what": "fiberglass item drop"
+    },
+    "fs329516": {
+      "kind": "freesound",
+      "id": 329516,
+      "uid": 424694,
+      "author": "LPA134",
+      "what": "car hood impact"
+    },
+    "fs321482": {
+      "kind": "freesound",
+      "id": 321482,
+      "uid": 5485024,
+      "author": "dslrguide",
+      "what": "metal hit"
+    },
+    "fs530486": {
+      "kind": "freesound",
+      "id": 530486,
+      "uid": 2532248,
+      "author": "Rickplayer",
+      "what": "metal impact"
+    },
+    "fs263620": {
+      "kind": "freesound",
+      "id": 263620,
+      "uid": 2492210,
+      "author": "zaneclampett",
+      "what": "metal thud"
+    },
+    "fs151624": {
+      "kind": "freesound",
+      "id": 151624,
+      "uid": 71257,
+      "author": "qubodup",
+      "what": "clank car crash collision"
+    },
+    "fs237375": {
+      "kind": "freesound",
+      "id": 237375,
+      "uid": 1502374,
+      "author": "squareal",
+      "what": "car crash"
+    },
+    "fs420356": {
+      "kind": "freesound",
+      "id": 420356,
+      "uid": 7614679,
+      "author": "CogFireStudios",
+      "what": "crash"
+    },
+    "fs346299": {
+      "kind": "freesound",
+      "id": 346299,
+      "uid": 3038712,
+      "author": "PauliusI",
+      "what": "car crash, exterior"
+    },
+    "fs675466": {
+      "kind": "freesound",
+      "id": 675466,
+      "uid": 2524442,
+      "author": "craigsmith",
+      "what": "two cars crash foley, metallic bump"
+    },
+    "fs426021": {
+      "kind": "freesound",
+      "id": 426021,
+      "uid": 6842851,
+      "author": "HoBoTrails",
+      "what": "car accident with squeal and crash"
+    },
+    "fs592388": {
+      "kind": "freesound",
+      "id": 592388,
+      "uid": 11537497,
+      "author": "magnuswaker",
+      "what": "car crash with glass"
+    },
+    "fs221528": {
+      "kind": "freesound",
+      "id": 221528,
+      "uid": 1038806,
+      "author": "unfa",
+      "what": "glass break"
+    },
+    "fs244238": {
+      "kind": "freesound",
+      "id": 244238,
+      "uid": 3156517,
+      "author": "chewiesmissus",
+      "what": "glass smash"
+    },
+    "fs587928": {
+      "kind": "freesound",
+      "id": 587928,
+      "uid": 8805852,
+      "author": "thecommondanger",
+      "what": "broken car window"
+    },
+    "fs448004": {
+      "kind": "freesound",
+      "id": 448004,
+      "uid": 7811934,
+      "author": "Kneeling",
+      "what": "window break"
+    },
+    "fs336425": {
+      "kind": "freesound",
+      "id": 336425,
+      "uid": 4663534,
+      "author": "221Beimesche",
+      "what": "glass shattering and falling"
+    },
+    "fs70887": {
+      "kind": "freesound",
+      "id": 70887,
+      "uid": 869241,
+      "author": "spukkin",
+      "what": "metal clunk"
+    },
+    "fs378670": {
+      "kind": "freesound",
+      "id": 378670,
+      "uid": 7023873,
+      "author": "13FPanská_Tolar_David",
+      "what": "falling scrap metal"
+    },
+    "fs587443": {
+      "kind": "freesound",
+      "id": 587443,
+      "uid": 5487341,
+      "author": "SamsterBirdies",
+      "what": "scrap metal dropping"
+    },
+    "fs73198": {
+      "kind": "freesound",
+      "id": 73198,
+      "uid": 515803,
+      "author": "snardin42",
+      "what": "hubcap rolling"
+    },
+    "fs73199": {
+      "kind": "freesound",
+      "id": 73199,
+      "uid": 515803,
+      "author": "snardin42",
+      "what": "hubcap rolling"
+    },
+    "fs243375": {
+      "kind": "freesound",
+      "id": 243375,
+      "uid": 3229685,
+      "author": "JohnsonBrandEditing",
+      "what": "tire puncture pops"
+    },
+    "fs244394": {
+      "kind": "freesound",
+      "id": 244394,
+      "uid": 525427,
+      "author": "Werra",
+      "what": "metallic bang"
+    },
+    "fs483285": {
+      "kind": "freesound",
+      "id": 483285,
+      "uid": 2524442,
+      "author": "craigsmith",
+      "what": "steam engine explodes"
+    },
+    "fs365071": {
+      "kind": "freesound",
+      "id": 365071,
+      "uid": 6639672,
+      "author": "sniperous",
+      "what": "steam"
+    },
+    "fs385939": {
+      "kind": "freesound",
+      "id": 385939,
+      "uid": 7097737,
+      "author": "Pól",
+      "what": "metal rail scrape"
+    },
+    "fs641048": {
+      "kind": "freesound",
+      "id": 641048,
+      "uid": 11537497,
+      "author": "magnuswaker",
+      "what": "metallic scrape"
+    },
+    "fs182474": {
+      "kind": "freesound",
+      "id": 182474,
+      "uid": 3153523,
+      "author": "keweldog",
+      "what": "car horn"
+    },
+    "fs131930": {
+      "kind": "freesound",
+      "id": 131930,
+      "uid": 1542102,
+      "author": "mcpable",
+      "what": "industrial air horn"
+    },
+    "fs546528": {
+      "kind": "freesound",
+      "id": 546528,
+      "uid": 5637404,
+      "author": "trezz77",
+      "what": "powerful horn"
+    },
+    "fs71739": {
+      "kind": "freesound",
+      "id": 71739,
+      "uid": 995351,
+      "author": "audible-edge",
+      "what": "sedan tire squeal"
+    },
+    "fs104026": {
+      "kind": "freesound",
+      "id": 104026,
+      "uid": 179538,
+      "author": "RutgerMuller",
+      "what": "tires squeaking"
+    }
+  },
+  "cues": {
+    "impact/thud": {
+      "gain": 1.0,
+      "variants": [
+        {
+          "src": "fs208695",
+          "start": 0.1,
+          "end": 0.55
+        },
+        {
+          "src": "fs9876",
+          "start": 0.0,
+          "end": 0.5
+        },
+        {
+          "src": "fs332668",
+          "start": 0.0,
+          "end": 0.45
+        },
+        {
+          "src": "kenney_impact",
+          "file": "Audio/impactSoft_heavy_000.ogg",
+          "start": 0
+        },
+        {
+          "src": "kenney_impact",
+          "file": "Audio/impactSoft_heavy_001.ogg",
+          "start": 0
+        },
+        {
+          "src": "kenney_impact",
+          "file": "Audio/impactSoft_heavy_002.ogg",
+          "start": 0
+        }
+      ]
+    },
+    "impact/plastic_crack": {
+      "gain": 0.9,
+      "variants": [
+        {
+          "src": "fs504585",
+          "start": 3.88,
+          "end": 4.3
+        },
+        {
+          "src": "fs504585",
+          "start": 4.12,
+          "end": 4.65
+        },
+        {
+          "src": "fs260004",
+          "start": 0.08,
+          "end": 0.7
+        },
+        {
+          "src": "fs161719",
+          "start": 0.48,
+          "end": 0.95
+        },
+        {
+          "src": "fs161719",
+          "start": 1.74,
+          "end": 2.2
+        }
+      ]
+    },
+    "impact/panel_dent": {
+      "gain": 1.0,
+      "variants": [
+        {
+          "src": "fs329516",
+          "start": 0.12,
+          "end": 1.3
+        },
+        {
+          "src": "fs321482",
+          "start": 0.15,
+          "end": 0.85
+        },
+        {
+          "src": "fs530486",
+          "start": 0.03,
+          "end": 1.1
+        },
+        {
+          "src": "fs263620",
+          "start": 1.56,
+          "end": 2.05
+        },
+        {
+          "src": "fs263620",
+          "start": 0.35,
+          "end": 0.85
+        },
+        {
+          "src": "fs151624",
+          "start": 0.0,
+          "end": 0.54
+        },
+        {
+          "src": "kenney_impact",
+          "file": "Audio/impactPlate_heavy_000.ogg",
+          "start": 0
+        },
+        {
+          "src": "kenney_impact",
+          "file": "Audio/impactPlate_heavy_002.ogg",
+          "start": 0
+        }
+      ]
+    },
+    "impact/structural_crunch": {
+      "gain": 1.0,
+      "variants": [
+        {
+          "src": "fs237375",
+          "start": 0.38,
+          "end": 1.9
+        },
+        {
+          "src": "fs420356",
+          "start": 0.0,
+          "end": 1.8
+        },
+        {
+          "src": "fs346299",
+          "start": 3.6,
+          "end": 5.1
+        },
+        {
+          "src": "fs675466",
+          "start": 0.03,
+          "end": 1.45
+        },
+        {
+          "src": "fs426021",
+          "start": 1.36,
+          "end": 2.7
+        }
+      ]
+    },
+    "impact/glass_shatter": {
+      "gain": 0.9,
+      "variants": [
+        {
+          "src": "fs221528",
+          "start": 0.3,
+          "end": 1.8
+        },
+        {
+          "src": "fs244238",
+          "start": 0.32,
+          "end": 1.6
+        },
+        {
+          "src": "fs587928",
+          "start": 0.04,
+          "end": 1.28
+        },
+        {
+          "src": "fs448004",
+          "start": 0.3,
+          "end": 1.9
+        },
+        {
+          "src": "fs336425",
+          "start": 0.72,
+          "end": 2.6
+        },
+        {
+          "src": "fs592388",
+          "start": 1.7,
+          "end": 2.4
+        }
+      ]
+    },
+    "impact/cast_clank": {
+      "gain": 0.9,
+      "variants": [
+        {
+          "src": "fs70887",
+          "start": 0.15,
+          "end": 1.2
+        },
+        {
+          "src": "kenney_impact",
+          "file": "Audio/impactMetal_heavy_000.ogg",
+          "start": 0
+        },
+        {
+          "src": "kenney_impact",
+          "file": "Audio/impactMetal_heavy_001.ogg",
+          "start": 0
+        },
+        {
+          "src": "kenney_impact",
+          "file": "Audio/impactMetal_heavy_002.ogg",
+          "start": 0
+        },
+        {
+          "src": "kenney_impact",
+          "file": "Audio/impactMetal_heavy_003.ogg",
+          "start": 0
+        }
+      ]
+    },
+    "debris/part_tear": {
+      "gain": 0.9,
+      "variants": [
+        {
+          "src": "fs378670",
+          "start": 0.12,
+          "end": 1.3
+        },
+        {
+          "src": "fs378670",
+          "start": 1.72,
+          "end": 2.6
+        },
+        {
+          "src": "fs587443",
+          "start": 0.03,
+          "end": 1.2
+        },
+        {
+          "src": "fs587443",
+          "start": 3.3,
+          "end": 4.3
+        }
+      ]
+    },
+    "debris/wheel_off": {
+      "gain": 0.9,
+      "variants": [
+        {
+          "src": "fs73199",
+          "start": 0.24,
+          "end": 2.2
+        },
+        {
+          "src": "fs73198",
+          "start": 1.45,
+          "end": 3.4
+        }
+      ]
+    },
+    "tire/burst": {
+      "gain": 1.0,
+      "variants": [
+        {
+          "src": "fs243375",
+          "start": 0.16,
+          "end": 0.5
+        },
+        {
+          "src": "fs243375",
+          "start": 0.91,
+          "end": 1.25
+        },
+        {
+          "src": "fs243375",
+          "start": 4.03,
+          "end": 4.4
+        },
+        {
+          "src": "fs243375",
+          "start": 5.0,
+          "end": 5.4
+        }
+      ]
+    },
+    "mech/engine_fail": {
+      "gain": 1.0,
+      "variants": [
+        {
+          "src": "fs244394",
+          "start": 0.03,
+          "end": 1.6
+        },
+        {
+          "src": "fs483285",
+          "start": 0.05,
+          "end": 2.0
+        }
+      ]
+    },
+    "mech/steam_hiss": {
+      "gain": 0.6,
+      "loop": true,
+      "variants": [
+        {
+          "src": "fs365071",
+          "start": 1.5,
+          "end": 6.0
+        }
+      ]
+    },
+    "scrape/metal": {
+      "gain": 0.9,
+      "loop": true,
+      "variants": [
+        {
+          "src": "fs385939",
+          "start": 0.5,
+          "end": 3.8
+        },
+        {
+          "src": "fs641048",
+          "start": 0.15,
+          "end": 1.9
+        }
+      ]
+    },
+    "horn/standard": {
+      "gain": 0.8,
+      "loop": true,
+      "variants": [
+        {
+          "src": "fs182474",
+          "start": 1.45,
+          "end": 3.3
+        }
+      ]
+    },
+    "horn/truck": {
+      "gain": 0.9,
+      "loop": true,
+      "variants": [
+        {
+          "src": "fs131930",
+          "start": 0.55,
+          "end": 1.95
+        },
+        {
+          "src": "fs546528",
+          "start": 0.25,
+          "end": 1.8
+        }
+      ]
+    },
+    "tire/squeal": {
+      "gain": 0.8,
+      "loop": true,
+      "variants": [
+        {
+          "src": "fs71739",
+          "start": 6.0,
+          "end": 9.5
+        },
+        {
+          "src": "fs104026",
+          "start": 0.32,
+          "end": 1.3
+        }
+      ]
+    }
+  }
+}

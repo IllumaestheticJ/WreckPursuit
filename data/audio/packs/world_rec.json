@@ -1,0 +1,412 @@
+{
+  "id": "world_rec",
+  "kind": "World",
+  "description": "Recorded CC0 impacts, glass, crunches, debris, scrapes, tire bursts/squeal, horns and steam (Freesound + Kenney); everything else falls back to world_proc synths.",
+  "cues": {
+    "tire/squeal": {
+      "source": {
+        "Samples": {
+          "files": [
+            "tire_squeal_01.ogg",
+            "tire_squeal_02.ogg"
+          ]
+        }
+      },
+      "gain": 0.8,
+      "looped": true
+    },
+    "tire/scrub_loose": {
+      "source": {
+        "Synth": {
+          "synth": "noise",
+          "params": {
+            "lowpass_hz": 3000.0,
+            "highpass_hz": 400.0,
+            "crackle": 1.0
+          }
+        }
+      },
+      "gain": 0.8,
+      "looped": true
+    },
+    "suspension/thump": {
+      "source": {
+        "Synth": {
+          "synth": "thump",
+          "params": {
+            "freq_hz": 55.0,
+            "decay_s": 0.16
+          }
+        }
+      },
+      "gain": 1.0,
+      "looped": false,
+      "duration_s": 0.3
+    },
+    "suspension/land": {
+      "source": {
+        "Synth": {
+          "synth": "thump",
+          "params": {
+            "freq_hz": 40.0,
+            "decay_s": 0.35,
+            "noise": 0.4
+          }
+        }
+      },
+      "gain": 1.0,
+      "looped": false,
+      "duration_s": 0.6
+    },
+    "impact/thud": {
+      "source": {
+        "Samples": {
+          "files": [
+            "impact_thud_01.ogg",
+            "impact_thud_02.ogg",
+            "impact_thud_03.ogg",
+            "impact_thud_04.ogg",
+            "impact_thud_05.ogg",
+            "impact_thud_06.ogg"
+          ]
+        }
+      },
+      "gain": 1.0,
+      "looped": false,
+      "duration_s": 0.6
+    },
+    "impact/plastic_crack": {
+      "source": {
+        "Samples": {
+          "files": [
+            "impact_plastic_crack_01.ogg",
+            "impact_plastic_crack_02.ogg",
+            "impact_plastic_crack_03.ogg",
+            "impact_plastic_crack_04.ogg",
+            "impact_plastic_crack_05.ogg"
+          ]
+        }
+      },
+      "gain": 0.9,
+      "looped": false,
+      "duration_s": 0.65
+    },
+    "impact/panel_dent": {
+      "source": {
+        "Samples": {
+          "files": [
+            "impact_panel_dent_01.ogg",
+            "impact_panel_dent_02.ogg",
+            "impact_panel_dent_03.ogg",
+            "impact_panel_dent_04.ogg",
+            "impact_panel_dent_05.ogg",
+            "impact_panel_dent_06.ogg",
+            "impact_panel_dent_07.ogg",
+            "impact_panel_dent_08.ogg"
+          ]
+        }
+      },
+      "gain": 1.0,
+      "looped": false,
+      "duration_s": 1.15
+    },
+    "impact/structural_crunch": {
+      "source": {
+        "Samples": {
+          "files": [
+            "impact_structural_crunch_01.ogg",
+            "impact_structural_crunch_02.ogg",
+            "impact_structural_crunch_03.ogg",
+            "impact_structural_crunch_04.ogg",
+            "impact_structural_crunch_05.ogg"
+          ]
+        }
+      },
+      "gain": 1.0,
+      "looped": false,
+      "duration_s": 1.8
+    },
+    "impact/glass_shatter": {
+      "source": {
+        "Samples": {
+          "files": [
+            "impact_glass_shatter_01.ogg",
+            "impact_glass_shatter_02.ogg",
+            "impact_glass_shatter_03.ogg",
+            "impact_glass_shatter_04.ogg",
+            "impact_glass_shatter_05.ogg",
+            "impact_glass_shatter_06.ogg"
+          ]
+        }
+      },
+      "gain": 0.9,
+      "looped": false,
+      "duration_s": 1.85
+    },
+    "impact/cast_clank": {
+      "source": {
+        "Samples": {
+          "files": [
+            "impact_cast_clank_01.ogg",
+            "impact_cast_clank_02.ogg",
+            "impact_cast_clank_03.ogg",
+            "impact_cast_clank_04.ogg",
+            "impact_cast_clank_05.ogg"
+          ]
+        }
+      },
+      "gain": 0.9,
+      "looped": false,
+      "duration_s": 1.05
+    },
+    "scrape/metal": {
+      "source": {
+        "Samples": {
+          "files": [
+            "scrape_metal_01.ogg",
+            "scrape_metal_02.ogg"
+          ]
+        }
+      },
+      "gain": 0.9,
+      "looped": true
+    },
+    "scrape/plastic": {
+      "source": {
+        "Synth": {
+          "synth": "noise",
+          "params": {
+            "lowpass_hz": 2000.0,
+            "highpass_hz": 250.0,
+            "bandpass_hz": 800.0,
+            "crackle": 0.6
+          }
+        }
+      },
+      "gain": 0.7,
+      "looped": true
+    },
+    "debris/part_tear": {
+      "source": {
+        "Samples": {
+          "files": [
+            "debris_part_tear_01.ogg",
+            "debris_part_tear_02.ogg",
+            "debris_part_tear_03.ogg",
+            "debris_part_tear_04.ogg"
+          ]
+        }
+      },
+      "gain": 0.9,
+      "looped": false,
+      "duration_s": 1.2
+    },
+    "debris/wheel_off": {
+      "source": {
+        "Samples": {
+          "files": [
+            "debris_wheel_off_01.ogg",
+            "debris_wheel_off_02.ogg"
+          ]
+        }
+      },
+      "gain": 0.9,
+      "looped": false,
+      "duration_s": 2.0
+    },
+    "mech/engine_fail": {
+      "source": {
+        "Samples": {
+          "files": [
+            "mech_engine_fail_01.ogg",
+            "mech_engine_fail_02.ogg"
+          ]
+        }
+      },
+      "gain": 1.0,
+      "looped": false,
+      "duration_s": 1.95
+    },
+    "mech/steam_hiss": {
+      "source": {
+        "Samples": {
+          "files": [
+            "mech_steam_hiss_01.ogg"
+          ]
+        }
+      },
+      "gain": 0.6,
+      "looped": true
+    },
+    "horn/standard": {
+      "source": {
+        "Samples": {
+          "files": [
+            "horn_standard_01.ogg"
+          ]
+        }
+      },
+      "gain": 0.8,
+      "looped": true
+    },
+    "horn/truck": {
+      "source": {
+        "Samples": {
+          "files": [
+            "horn_truck_01.ogg",
+            "horn_truck_02.ogg"
+          ]
+        }
+      },
+      "gain": 0.9,
+      "looped": true
+    },
+    "surface/asphalt": {
+      "source": {
+        "Synth": {
+          "synth": "noise",
+          "params": {
+            "lowpass_hz": 900.0,
+            "highpass_hz": 60.0,
+            "rumble": 0.2
+          }
+        }
+      },
+      "gain": 0.8,
+      "looped": true
+    },
+    "surface/wet_asphalt": {
+      "source": {
+        "Synth": {
+          "synth": "noise",
+          "params": {
+            "lowpass_hz": 4500.0,
+            "highpass_hz": 800.0,
+            "rumble": 0.1
+          }
+        }
+      },
+      "gain": 0.8,
+      "looped": true
+    },
+    "surface/concrete": {
+      "source": {
+        "Synth": {
+          "synth": "noise",
+          "params": {
+            "lowpass_hz": 1300.0,
+            "highpass_hz": 80.0,
+            "rumble": 0.35
+          }
+        }
+      },
+      "gain": 0.8,
+      "looped": true
+    },
+    "surface/gravel": {
+      "source": {
+        "Synth": {
+          "synth": "noise",
+          "params": {
+            "lowpass_hz": 3500.0,
+            "highpass_hz": 300.0,
+            "rumble": 0.6,
+            "crackle": 0.8
+          }
+        }
+      },
+      "gain": 0.8,
+      "looped": true
+    },
+    "surface/grass": {
+      "source": {
+        "Synth": {
+          "synth": "noise",
+          "params": {
+            "lowpass_hz": 1600.0,
+            "highpass_hz": 200.0,
+            "rumble": 0.3
+          }
+        }
+      },
+      "gain": 0.8,
+      "looped": true
+    },
+    "surface/dirt": {
+      "source": {
+        "Synth": {
+          "synth": "noise",
+          "params": {
+            "lowpass_hz": 1100.0,
+            "highpass_hz": 90.0,
+            "rumble": 0.5,
+            "crackle": 0.3
+          }
+        }
+      },
+      "gain": 0.8,
+      "looped": true
+    },
+    "surface/curb": {
+      "source": {
+        "Synth": {
+          "synth": "noise",
+          "params": {
+            "lowpass_hz": 700.0,
+            "highpass_hz": 40.0,
+            "rumble": 1.0,
+            "ripple_hz": 18.0
+          }
+        }
+      },
+      "gain": 0.8,
+      "looped": true
+    },
+    "surface/metal": {
+      "source": {
+        "Synth": {
+          "synth": "noise",
+          "params": {
+            "lowpass_hz": 2600.0,
+            "highpass_hz": 150.0,
+            "rumble": 0.5,
+            "ripple_hz": 9.0
+          }
+        }
+      },
+      "gain": 0.8,
+      "looped": true
+    },
+    "tire/burst": {
+      "source": {
+        "Samples": {
+          "files": [
+            "tire_burst_01.ogg",
+            "tire_burst_02.ogg",
+            "tire_burst_03.ogg",
+            "tire_burst_04.ogg"
+          ]
+        }
+      },
+      "gain": 1.0,
+      "looped": false,
+      "duration_s": 0.4
+    },
+    "body/rattle": {
+      "source": {
+        "Synth": {
+          "synth": "noise",
+          "params": {
+            "lowpass_hz": 2500.0,
+            "highpass_hz": 300.0,
+            "crackle": 1.5,
+            "ripple_hz": 11.0
+          }
+        }
+      },
+      "gain": 0.7,
+      "looped": true
+    }
+  },
+  "fallback_pack": "world_proc"
+}
