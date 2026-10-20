@@ -31,7 +31,7 @@ fn kind_of(material: &str) -> Kind {
     match material {
         "asphalt" | "highway_concrete" | "parking" | "bus_lane" => Kind::Paved,
         // Sidewalks, corner fills and the level lots behind them: walkable, must agree.
-        "sidewalk" | "sidewalk_corner" | "lot" => Kind::Sidewalk,
+        "sidewalk" | "verge" | "sidewalk_corner" | "lot" => Kind::Sidewalk,
         // The skirt from a lot down into the ground is ground: physics may not be lower.
         "lot_skirt" => Kind::Terrain,
         m if m.starts_with("ground_") || m == "rock" || m == "seabed" => Kind::Terrain,
@@ -243,7 +243,10 @@ impl Lines {
     }
 }
 
-fn sweep(map: &CityMap) -> Vec<Sample> {
+/// The samples, and how many of them missed exactly on a seam / terrain vertex line (the
+/// rays 1 cm across it land; their value is used).
+fn sweep(map: &CityMap) -> (Vec<Sample>, usize) {
+    let mut seams = 0usize;
     let visual = Visual::new(&build_greybox(map));
     // Guard rails (the visible parapets: physics hits the rail top there, the greybox draws
     // it as walls): along deck edges, and just outside lot-less sidewalk edges.
@@ -263,17 +266,41 @@ fn sweep(map: &CityMap) -> Vec<Sample> {
             walls.add(b.footprint[k], b.footprint[(k + 1) % n]);
         }
     }
+    // Hedges, fences and tree trunks (residential lots): solid, drawn as instances.
+    let decor = wp_world::residential::SolidDecorIndex::new(&map.net, 0.1);
     let mut phys = wp_sim::PhysicsWorld::new();
     phys.set_city_ground(map);
-    sample_points(map)
+    let samples = sample_points(map)
         .into_iter()
         .filter_map(|(p, from, at_kerb)| {
-            if rails.near(p, 0.35) || walls.near(p, 0.1) {
+            if rails.near(p, 0.35) || walls.near(p, 0.1) || decor.contains(p) {
                 return None;
             }
             let (z, kind) = visual.top(p, from)?;
             let touching = visual.top_touching(p, from).map_or(z, |t| t.0);
-            let physics = phys.static_ground_z(p, from, 80.0);
+            let mut physics = phys.static_ground_z(p, from, 80.0);
+            // A ray exactly on a collider seam or a terrain vertex line can miss (parry;
+            // confirmed on the base for whole heightfield columns, e.g. x = -135 in Port
+            // Vesper): when the rays 1 cm across it land, that is a measure-zero line,
+            // not a hole a wheel could drop into; take their lowest.
+            if physics.is_none_or(|h| h < z - 0.5) {
+                let around: Vec<Option<f32>> =
+                    [[0.01, 0.0], [-0.01, 0.0], [0.0, 0.01], [0.0, -0.01]]
+                        .iter()
+                        .map(|o| phys.static_ground_z([p[0] + o[0], p[1] + o[1]], from, 80.0))
+                        .collect();
+                // Zero width: both rays across the line (±x or ±y) land.
+                let ok = |h: &Option<f32>| h.is_some_and(|h| h >= z - 0.5);
+                if (ok(&around[0]) && ok(&around[1])) || (ok(&around[2]) && ok(&around[3])) {
+                    physics = around
+                        .iter()
+                        .flatten()
+                        .copied()
+                        .filter(|h| *h >= z - 0.5)
+                        .reduce(f32::min);
+                    seams += 1;
+                }
+            }
             // Ray starting inside a building (junction-corner grid): nothing to compare.
             if physics.is_some_and(|h| h >= from - 1e-3) {
                 return None;
@@ -287,11 +314,12 @@ fn sweep(map: &CityMap) -> Vec<Sample> {
                 at_kerb,
             })
         })
-        .collect()
+        .collect();
+    (samples, seams)
 }
 
 /// Report per kind and return the failures.
-fn check(name: &str, samples: &[Sample]) -> Vec<String> {
+fn check(name: &str, samples: &[Sample], seams: usize) -> Vec<String> {
     let mut fails = Vec::new();
     let mut stats: BTreeMap<Kind, (usize, f32, f32)> = BTreeMap::new();
     for s in samples {
@@ -318,18 +346,23 @@ fn check(name: &str, samples: &[Sample]) -> Vec<String> {
     for (k, (n, lo, hi)) in &stats {
         println!("{name}: {k:?}: {n} samples, physics − visual in [{lo:+.3}, {hi:+.3}] m");
     }
-    println!("{name}: {} of {} samples off", fails.len(), samples.len());
+    println!(
+        "{name}: {} of {} samples off ({seams} rays exactly on a seam or terrain vertex \
+         line: the rays 1 cm across it land)",
+        fails.len(),
+        samples.len(),
+    );
     fails
 }
 
 fn assert_clean(name: &str, map: &CityMap) {
-    let samples = sweep(map);
+    let (samples, seams) = sweep(map);
     assert!(
         samples.len() > 5000,
         "{name}: only {} samples",
         samples.len()
     );
-    let fails = check(name, &samples);
+    let fails = check(name, &samples, seams);
     for f in fails.iter().take(40) {
         println!("{f}");
     }

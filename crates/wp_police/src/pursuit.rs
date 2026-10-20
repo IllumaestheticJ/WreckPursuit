@@ -644,15 +644,20 @@ impl PoliceSystem {
             .position(|u| u.id == me)
             .unwrap_or(0);
         // Lost inside a tunnel / covered road: hold its portals (PVPD doctrine §5: units go to
-        // the portals, nobody chases inside), each unit the portal nearer to it (sent to the far
-        // one, a unit drives through the tunnel).
+        // both portals, nobody chases inside). Each unit takes the portal on its side (a unit
+        // sent to the far one drove through the tunnel to get there and found him inside:
+        // Founders Cut after the residential courts changed the road graph, lead/city-
+        // residential); equally near: alternate by unit.
         if let Some(k) = self.cover_at(p) {
-            let [a, b] = self.covers[k].outside_portals(PORTAL_HOLD_M);
-            let me_pos = self.units[i].body.pos;
-            let q = if dist(me_pos, a) <= dist(me_pos, b) {
-                a
+            let portals = self.covers[k].outside_portals(PORTAL_HOLD_M);
+            let here = self.units[i].body.pos;
+            let (d0, d1) = (dist(here, portals[0]), dist(here, portals[1]));
+            let q = if (d0 - d1).abs() < 1.0 {
+                portals[ordinal % 2]
+            } else if d0 < d1 {
+                portals[0]
             } else {
-                b
+                portals[1]
             };
             let n = self.graph.nearest_node(q)?;
             return Some((n, self.graph.node(n).pos));
