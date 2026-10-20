@@ -23,6 +23,7 @@ with assists and unfiltered on a wheel. Deterministic, 240 Hz with 2 sub-steps.
 | `steering.rs` | slip-targeted lock + rack rate (keyboard/gamepad), self-aligning countersteer help (0–100 % slider), countersteer lock, Ackermann, toe, damage pull, FWD torque steer |
 | `drift.rs` | Drift Lab B / C (rows 90 / 91 / 104 / 106): slide onset tuning + runtime override, intent modes (straighten / hold = countersteer key / angle-up = key into the turn / exceeded), opt-in throttle shaping and lift softening (default off), slide-angle envelope; steering angle (and opt-in throttle) only |
 | `drift_lab.rs` | scripted slide drivers for Drift Lab B / C (`kick_catch`, `drift_run`); tables via `--example drift_lab_c` |
+| `twitch_lab.rs` | keyboard twitch measurement (row 102): closed-loop key-tapping driver through lane changes, slalom, sweeper, kerb hit; tables via `--example drift_twitch` |
 | `assists.rs` | pedal filters, TCS (throttle cut + brake-based traction control), ESC (lagged ~1°/g reference) |
 | `presets.rs` | one-click `AssistPreset` Rookie / Street / Sim (GDD §6): damage mode + `AssistProfile` per input device; `matching` detects a customised setup |
 | `aero.rs` | drag, axle lift/downforce |
@@ -198,6 +199,15 @@ constants, measurements and what to try: `docs/integration/drift-lab-b.md`, then
 `docs/integration/drift-lab-c.md` (C: the countersteer key holds the slide, the key into the
 turn adds angle, the throttle is raw by default). Tests: `tests/drift_lab_b.rs`; tables:
 `cargo run --release -p wp_vehicle --example drift_lab_c`.
+
+**Twitch fix (row 102):** the slide onset only acts once a slide is confirmed
+(`steering::SlideGate`: rear slip past the onset *and* the car yawing more than the wheels ask
+for 70 ms, at once for a big snap, 120 ms exit hysteresis), so lane changes, kerbs and limit
+cornering no longer trigger the fast countersteer; the fast slew stops at the front axle's
+travel; in grip the return to centre is no faster than turn-in. Measured with
+`twitch_lab.rs` (`cargo run --release -p wp_vehicle --example drift_twitch`): kerb hit peak
+rack 376 → 59 °/s, lane change 80 km/h 219 → 65 °/s, catch numbers unchanged. Tables and
+what to try: `docs/integration/drift-twitch.md`.
 
 ## Ride, kerbs and launches (playtest row 54)
 

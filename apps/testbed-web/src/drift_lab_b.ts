@@ -348,7 +348,7 @@ export class DriftLabPanel {
     const held = mode === "hold" || mode === "angle-up" || mode === "exceeded" ? `${(r[8] ?? 0).toFixed(1)}°` : "–";
     const pct = (x: number) => `${Math.round((x ?? 0) * 100)}%`;
     this.readout.textContent =
-      `${DRIFT_LAB_TITLE} · ${sliding ? mode.toUpperCase() : mode}\n` +
+      `${DRIFT_LAB_TITLE} · ${sliding ? mode.toUpperCase() : mode} · sliding: ${(r[9] ?? 0) > 0.5 ? "yes" : "no"}\n` +
       `slide ${r[1].toFixed(1)}° · held ${held} · envelope ${env}\n` +
       `throttle key ${pct(r[6])} → engine ${pct(r[7])}` +
       (r[5] < 0.999 ? ` (trim ×${r[5].toFixed(2)})` : "") +

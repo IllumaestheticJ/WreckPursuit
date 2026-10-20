@@ -57,6 +57,12 @@ pub struct SteerInput {
     /// This tick's drift-assist command ([`crate::drift::DriftState::update`]); the default
     /// (mode Off) leaves the steering as in step 1.
     pub drift: DriftCommand,
+    /// Confirmed-slide gate 0..=1 ([`SlideGate::amount`]): the slide onset only acts once a
+    /// slide is confirmed (owner row 102). 1 = ungated (the step 1 behaviour).
+    pub slide_gate: f32,
+    /// Low-passed front-axle travel, rad ([`SlideGate::travel`]): the self-aligning target
+    /// follows this instead of the raw travel, so a one-tick wobble does not move the rack.
+    pub align_travel: f32,
 }
 
 /// Fraction of the target slip angle a keyboard (sensitivity 1) asks for at full input: a
@@ -133,8 +139,13 @@ pub fn align_strength(help: f32) -> f32 {
 /// self-aligning target and the fast countersteer rate all start from this, so a slide is
 /// met as it starts instead of once it has built (it was 0.03 → 0.08 rad for the alignment
 /// and 0.06 → 0.16 rad for the lock).
+///
+/// Row 102: the amount is multiplied by the confirmed-slide gate ([`SteerInput::slide_gate`],
+/// see [`SlideGate`]), so ordinary yaw wobbles (lane changes, kerbs, small corrections) and
+/// grip cornering at the limit do not fire it.
 pub fn slide_onset(inp: &SteerInput) -> (f32, f32) {
-    onset_of(inp.rear_axle_slip, inp.rear_slip_rate, &inp.tuning)
+    let (side, amount) = onset_of(inp.rear_axle_slip, inp.rear_slip_rate, &inp.tuning);
+    (side, amount * inp.slide_gate.clamp(0.0, 1.0))
 }
 
 /// [`slide_onset`] from rear-axle slip (rad), its filtered rate (rad/s) and the tuning.
@@ -149,6 +160,131 @@ pub fn onset_of(rear_axle_slip: f32, rear_slip_rate: f32, t: &DriftTuning) -> (f
         0.0
     };
     (s.signum(), by_angle.max(by_rate))
+}
+
+/// Confirmed-slide gate (owner row 102, "the car still feels horridly twitchy"): the slide
+/// onset ([`onset_of`]) reacts within a tick to rear-axle slip of 1.4° or a slip-rate spike,
+/// which ordinary driving produces too — a lane change, a kerb, a small correction, and
+/// limit cornering, where the rear axle runs 4–8° of slip with the tyres still gripping. With
+/// the onset ungated the rack snapped to the fast countersteer and back on those wobbles.
+///
+/// A slide is **confirmed** when the rear axle slips past the onset angle *and* the car yaws
+/// more than the front wheels ask ([`oversteer_balance`] past [`BALANCE_ON_RAD`]) for
+/// [`CONFIRM_S`] in a row, or at once when both are large ([`onset_full_rad`] and
+/// 2 × [`BALANCE_ON_RAD`]: a kick, a snap). It stays confirmed until the balance and the slip
+/// have been back under half their thresholds for [`EXIT_S`] (exit hysteresis). The gate
+/// amount ramps in over [`GATE_IN_S`] and out over [`GATE_OUT_S`], so it never steps.
+///
+/// [`onset_full_rad`]: DriftTuning::onset_full_rad
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct SlideGate {
+    /// Time the slide condition has held in a row, s.
+    pub above_s: f32,
+    /// Time the exit condition has held in a row, s.
+    pub below_s: f32,
+    /// Confirmed slide: 1 = yes, 0 = no.
+    pub confirmed: f32,
+    /// Gate amount 0..=1 (ramps toward [`SlideGate::confirmed`]).
+    pub amount: f32,
+    /// Front-axle travel for the self-aligning target, rad: the raw travel in a confirmed
+    /// slide, low-passed ([`ALIGN_TRAVEL_TAU_S`]) outside one.
+    pub travel: f32,
+}
+
+/// Rear slip past the front slip (oversteer balance) that counts toward a slide, rad (1.7°).
+pub const BALANCE_ON_RAD: f32 = 0.03;
+/// Time the slide condition must hold before the slide is confirmed, s.
+pub const CONFIRM_S: f32 = 0.07;
+/// Time the exit condition must hold before the slide ends, s.
+pub const EXIT_S: f32 = 0.12;
+/// Gate ramp-in time, s.
+pub const GATE_IN_S: f32 = 0.03;
+/// Gate ramp-out time, s.
+pub const GATE_OUT_S: f32 = 0.15;
+/// Time constant of the self-aligning target's travel filter outside a confirmed slide, s.
+pub const ALIGN_TRAVEL_TAU_S: f32 = 0.06;
+
+/// Oversteer balance, rad: how much more the rear axle slips than the front tyres, signed so
+/// + = oversteer (the car yawing more than the wheels ask: `r·L/v − δ` toward the slide).
+/// `rear_axle_slip` and `front_axle_angle` as in [`SteerInput`], `steer` the centre road-wheel
+/// angle (all rad, + = left). Grip cornering is ≈ 0 (neutral) or negative (understeer); a
+/// slide, also while countersteered along the travel, is about the rear-axle slip.
+pub fn oversteer_balance(rear_axle_slip: f32, front_axle_angle: f32, steer: f32) -> f32 {
+    let side = rear_axle_slip.signum();
+    -side * (front_axle_angle - steer - rear_axle_slip)
+}
+
+impl SlideGate {
+    /// Number of f32 values in [`SlideGate::to_array`].
+    pub const LEN: usize = 5;
+
+    /// Advance one tick: rear-axle slip, front-axle travel and the centre road-wheel angle now
+    /// (rad), forward speed (m/s). Returns the gate amount.
+    pub fn update(
+        &mut self,
+        rear_axle_slip: f32,
+        front_axle_angle: f32,
+        steer: f32,
+        speed: f32,
+        t: &DriftTuning,
+        dt: f32,
+    ) -> f32 {
+        let slip = rear_axle_slip.abs();
+        let balance = oversteer_balance(rear_axle_slip, front_axle_angle, steer);
+        let cond = speed > 3.0 && slip > t.onset_slip_rad && balance > BALANCE_ON_RAD;
+        let instant = cond && slip > t.onset_full_rad && balance > 2.0 * BALANCE_ON_RAD;
+        self.above_s = if cond { self.above_s + dt } else { 0.0 };
+        let exit = speed <= 3.0 || slip < 0.5 * t.onset_slip_rad || balance < 0.5 * BALANCE_ON_RAD;
+        self.below_s = if exit { self.below_s + dt } else { 0.0 };
+        if instant || self.above_s >= CONFIRM_S {
+            self.confirmed = 1.0;
+        } else if self.below_s >= EXIT_S {
+            self.confirmed = 0.0;
+        }
+        let rate = if self.confirmed > self.amount {
+            1.0 / GATE_IN_S
+        } else {
+            1.0 / GATE_OUT_S
+        };
+        self.amount += (self.confirmed - self.amount).clamp(-rate * dt, rate * dt);
+        // In a confirmed slide the target tracks the travel at once (a lagged target costs
+        // the catch: 60 ms of lag doubled the released-key straighten time); outside one —
+        // while the gate fades in or out — it is low-passed, so a one-tick wobble does not
+        // move the rack.
+        if self.confirmed > 0.0 {
+            self.travel = front_axle_angle;
+        } else {
+            self.travel += (front_axle_angle - self.travel) * (dt / ALIGN_TRAVEL_TAU_S).min(1.0);
+        }
+        self.amount
+    }
+
+    /// Is a slide confirmed (the Drift Lab readout's "sliding: yes")?
+    pub fn sliding(&self) -> bool {
+        self.confirmed > 0.0
+    }
+
+    /// The state as plain values (snapshots).
+    pub fn to_array(&self) -> [f32; Self::LEN] {
+        [
+            self.above_s,
+            self.below_s,
+            self.confirmed,
+            self.amount,
+            self.travel,
+        ]
+    }
+
+    /// Inverse of [`SlideGate::to_array`].
+    pub fn from_array(a: [f32; Self::LEN]) -> Self {
+        Self {
+            above_s: a[0],
+            below_s: a[1],
+            confirmed: a[2],
+            amount: a[3],
+            travel: a[4],
+        }
+    }
 }
 
 /// Speed-sensitive lock while countersteering a slide: when the driver steers toward the side
@@ -194,6 +330,11 @@ pub struct SteerTarget {
     /// (the sign of the rear-axle slip) while the driver steers; toward the target itself
     /// while the self-aligning steering has the wheels.
     pub cs_side: f32,
+    /// The fast rate stops here (rad, + = left): past this angle on the [`SteerTarget::cs_side`]
+    /// the rack goes on at its normal rate. The correction the slide needs — the front axle's
+    /// travel, plus up to the tyres' peak slip for a big slide ([`fast_slew_limit`]) — so a
+    /// small slide's counter key does not snap the wheels past the travel (row 102).
+    pub cs_limit: f32,
 }
 
 /// The steering target for the current state (`current` = centre angle now, rad).
@@ -237,8 +378,9 @@ pub fn steer_target(
         return SteerTarget {
             angle,
             rate_boost: 1.0,
-            cs_rate: cs_rate.max(fast * w),
+            cs_rate: cs_rate.max(fast * w * inp.slide_gate.clamp(0.0, 1.0)),
             cs_side: angle - current,
+            cs_limit: angle,
         };
     }
     if !aligning {
@@ -247,6 +389,7 @@ pub fn steer_target(
             rate_boost: 1.0,
             cs_rate,
             cs_side,
+            cs_limit: fast_slew_limit(inp, max_steer),
         };
     }
     let full = max_steer * inp.ratio_scale;
@@ -263,11 +406,25 @@ pub fn steer_target(
     let angle = (align - inp.pull * lock).clamp(-max_steer, max_steer);
     SteerTarget {
         angle,
-        rate_boost: 1.0 + ALIGN_RATE_BOOST * help,
+        // Row 102: the faster self-aligning rack only while a confirmed slide's onset is on
+        // (`onset` is gated); in grip the return to centre is no faster than the turn-in.
+        rate_boost: 1.0 + ALIGN_RATE_BOOST * help * onset,
         cs_rate,
         // Released keys: the align target is the travel, so every move toward it is fast.
         cs_side: angle - current,
+        cs_limit: angle,
     }
+}
+
+/// Where the driver's fast countersteer stops, rad (+ = left; see [`SteerTarget::cs_limit`]):
+/// the front axle's travel plus, toward the countersteer side, the tyres' peak slip × how
+/// big the slide is (0 at [`DriftTuning::onset_full_rad`] of rear-axle slip, full at 0.2 rad).
+pub fn fast_slew_limit(inp: &SteerInput, max_steer: f32) -> f32 {
+    let side = inp.rear_axle_slip.signum();
+    let a = inp.tuning.onset_full_rad;
+    let size = ((inp.rear_axle_slip.abs() - a) / (0.2 - a).max(1e-3)).clamp(0.0, 1.0);
+    let full = max_steer * inp.ratio_scale;
+    (inp.front_axle_angle + side * inp.front_peak_slip * size).clamp(-full, full)
 }
 
 /// Countersteer slider value the [`DriftTuning::catch_lock_s`] time is quoted at.
@@ -313,9 +470,11 @@ pub fn assist_gate(inp: &SteerInput) -> f32 {
 /// of a car cornering with no front slip), so aligning to it would hold whatever turn the car
 /// is in: a kerb or a bump that yaws the car would keep turning it (the sidewalk drives in
 /// `wp_sim` were turned back onto the road that way).
+///
+/// Row 102: the travel is low-passed ([`SteerInput::align_travel`], [`ALIGN_TRAVEL_TAU_S`]).
 fn aligning_angle(inp: &SteerInput) -> f32 {
     let (_, slide) = slide_onset(inp);
-    inp.front_axle_angle * slide
+    inp.align_travel * slide
 }
 
 /// Direction of travel of the front axle relative to the heading, rad (+ = left), from forward
@@ -347,6 +506,7 @@ pub fn update_center_angle(
         rate_boost,
         cs_rate,
         cs_side,
+        cs_limit,
     } = steer_target(current, inp, assists, max_steer);
     if assists.steer_speed_sensitivity <= 0.0 && assists.countersteer_help <= 0.0 {
         // Wheel profile: 1:1, unfiltered.
@@ -365,9 +525,16 @@ pub fn update_center_angle(
     } else {
         rack_speed * inp.ratio_scale
     };
-    let mut rate = base * rate_boost;
-    if cs_rate > rate && (target - current) * cs_side > 0.0 {
-        rate = cs_rate;
+    let rate = base * rate_boost;
+    if cs_rate > rate && (target - current) * cs_side > 0.0 && (cs_limit - current) * cs_side > 0.0
+    {
+        // Fast countersteer, up to the correction the slide needs (row 102): at most to
+        // `cs_limit` this tick, then on at the normal rate.
+        let fast_end = (cs_limit - current).abs();
+        let step =
+            (cs_rate * dt).min(fast_end) + (rate * dt).min((cs_rate * dt - fast_end).max(0.0));
+        let step = step.min((target - current).abs());
+        return current + (target - current).signum() * step;
     }
     current + (target - current).clamp(-rate * dt, rate * dt)
 }
@@ -440,6 +607,8 @@ mod tests {
             rear_slip_rate: 0.0,
             tuning: DriftTuning::default(),
             drift: DriftCommand::default(),
+            slide_gate: 1.0,
+            align_travel: 0.0,
         }
     }
 
@@ -517,6 +686,7 @@ mod tests {
             rear_slip: -0.2,
             rear_axle_slip: -0.3,
             front_axle_angle: -0.25,
+            align_travel: -0.25,
             ..straight(driver, 15.0)
         }
     }
@@ -587,8 +757,9 @@ mod tests {
     fn countersteer_is_fast_turn_in_is_not() {
         // 100 km/h, rear stepping out to the right (countersteer = wheels right, −).
         let slide = |driver: f32| SteerInput {
-            rear_axle_slip: -0.08,
+            rear_axle_slip: -0.15,
             front_axle_angle: -0.2,
+            align_travel: -0.2,
             ..straight(driver, 100.0 / 3.6)
         };
         let kb = help(0.6);
@@ -633,5 +804,85 @@ mod tests {
             ..sliding(0.0)
         };
         assert_eq!(settle(&hb, &a), 0.0);
+    }
+
+    /// Gate state after `ticks` of constant rear slip / travel / steer at 100 km/h.
+    fn gate_after(g: &mut SlideGate, rear: f32, travel: f32, steer: f32, ticks: usize) -> f32 {
+        let t = DriftTuning::default();
+        let mut a = 0.0;
+        for _ in 0..ticks {
+            a = g.update(rear, travel, steer, 100.0 / 3.6, &t, 1.0 / 240.0);
+        }
+        a
+    }
+
+    #[test]
+    fn slide_gate_ignores_spikes_and_confirms_slides() {
+        // Oversteer: rear sliding right 0.04 rad (above the onset, below the full angle),
+        // wheels straight, the front axle travelling 0.035 rad left of the rear.
+        let (rear, travel) = (-0.04, -0.005);
+        // A short spike (40 ms) is ignored.
+        let mut g = SlideGate::default();
+        assert_eq!(gate_after(&mut g, rear, travel, 0.0, 10), 0.0);
+        assert_eq!(gate_after(&mut g, 0.0, 0.0, 0.0, 1), 0.0);
+        assert!(!g.sliding());
+        // Held for 70 ms it is confirmed, and the gate ramps in over ~30 ms.
+        let mut g = SlideGate::default();
+        gate_after(&mut g, rear, travel, 0.0, 18);
+        assert!(g.sliding());
+        assert!(gate_after(&mut g, rear, travel, 0.0, 8) > 0.99);
+        // Exit hysteresis: back to grip for 100 ms keeps it, 120 ms ends it.
+        gate_after(&mut g, 0.0, 0.0, 0.0, 24);
+        assert!(g.sliding());
+        gate_after(&mut g, 0.0, 0.0, 0.0, 6);
+        assert!(!g.sliding());
+        // A big slide (a kick) is confirmed at once.
+        let mut g = SlideGate::default();
+        gate_after(&mut g, -0.1, 0.02, 0.0, 1);
+        assert!(g.sliding());
+        // Limit cornering (rear and front slipping alike, 5° each) is not a slide.
+        let mut g = SlideGate::default();
+        assert_eq!(gate_after(&mut g, -0.09, 0.05, 0.14, 480), 0.0);
+    }
+
+    #[test]
+    fn small_slide_fast_slew_stops_at_the_travel() {
+        // Rear just past the full onset angle (0.07 rad), front axle travelling 0.05 rad
+        // right: the counter key's fast slew stops at the travel, the rest at the plain rate.
+        let inp = SteerInput {
+            rear_axle_slip: -0.07,
+            front_axle_angle: -0.05,
+            align_travel: -0.05,
+            ..straight(1.0, 100.0 / 3.6)
+        };
+        let kb = help(0.6);
+        let lim = fast_slew_limit(&inp, 0.6);
+        assert!((lim + 0.05).abs() < 0.01, "{lim}");
+        let mut c = 0.0f32;
+        let mut prev = 0.0f32;
+        for _ in 0..60 {
+            c = update_center_angle(c, &inp, &kb, 0.6, 1.4, 1.0 / 240.0);
+            if prev < lim - 1e-4 {
+                // Past the travel: no faster than the car's rack speed.
+                assert!((prev - c) * 240.0 <= 1.4 + 1e-3, "{prev} -> {c}");
+            }
+            prev = c;
+        }
+    }
+
+    #[test]
+    fn grip_return_to_centre_is_no_faster_than_turn_in() {
+        // Not sliding (gate 0): released keys return the wheels at the turn-in rate even with
+        // the countersteer slider on.
+        let kb = help(0.6);
+        let v = 100.0 / 3.6;
+        let turn_in = -update_center_angle(0.0, &straight(-1.0, v), &kb, 0.6, 1.4, 1.0 / 240.0);
+        let release = SteerInput {
+            slide_gate: 0.0,
+            rear_axle_slip: 0.03,
+            ..straight(0.0, v)
+        };
+        let back = 0.1 - update_center_angle(0.1, &release, &kb, 0.6, 1.4, 1.0 / 240.0);
+        assert!(back <= turn_in.abs() + 1e-6, "{back} vs {turn_in}");
     }
 }

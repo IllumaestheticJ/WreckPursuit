@@ -1101,6 +1101,30 @@ so this is a finding to hand over, not tuned here.
 4. On the straight: short taps at 100 km/h should give small, calm heading changes.
 5. Hairpins with the handbrake: known not to pivot as far as Wreckfest yet (see above).
 
+### Step 5 — merged `origin/lead/drift-twitch` (row 102)
+
+Merged the twitch fix (52c0b210): the confirmed-slide gate on the steering's slide help
+(`steering::SlideGate`), the fast-slew limit at the travel for small slides, the low-passed
+align target, the testbed key ramp 6/s in and out, and `twitch_lab` / `--example
+drift_twitch`. Both sides kept: snapshot format **10** (drift side + transition state, and the
+slide gate); `drift_readout` keeps C's layout with `sliding` appended at index 9; the readout
+shows *sliding: yes / no*.
+
+**Checked against rows 107 / 108:**
+- Drift, catch, transition and tap tables: unchanged within noise (Naive 5.34 s, 0 spins at
+  every slider; transitions 0 spins / 0 wobbles; kicks 90/90 released, 88/90 late key).
+- **Handbrake catch was delayed** by the gate's confirmation (70 ms + 30 ms ramp): wheels at
+  the travel 127 ms after the release instead of 45 (counter key) / 69 ms (released), same
+  catch counts. Fixed in `vehicle.rs`: while the handbrake is held and the rear slides, the
+  slide counts as confirmed at once and stays confirmed through the release (a handbrake slide
+  is deliberate). Back to 45 / 69 ms at 60 %, 30/30 and 27/30 caught.
+- The twitch table (`--example drift_twitch`) on the merge reproduces drift-twitch.md's "gate
+  only" row (lane change 80: 8.24 reversals/s, 65 °/s peak rack; the example drives the old
+  4/6 key ramp; the testbed's 6/6 ramp is twitch's 5.60).
+- The 6/s release ramp is the testbed's keyboard input, not the sim: the scripted drivers
+  here press raw keys, so it adds up to ~0.17 s to a real key's countersteer / release (see
+  the lead's raw-input request, next step).
+
 ## Known issues seen on the base branch (not from this work)
 
 On `origin/lead/drift-lab-b` (ae313e2, checked in a clean worktree): `cargo test -p simcli

@@ -11,7 +11,7 @@ fn line(rig: &Rig, steer: f32, thr: f32, t: usize) {
     let n = slide_state(rig);
     let tel = rig.vehicle.telemetry();
     println!(
-        "t={:5.0}ms beta={:6.1} rear={:6.1} faa={:6.1} steer={:6.1} yaw={:5.2} v={:5.1} in=({steer:+.0},{thr:.0}) thr={:.2} rpm={:4.0} g={} mode={:?} env={:4.1} auth={:.2} held={:4.1}",
+        "t={:5.0}ms beta={:6.1} rear={:6.1} faa={:6.1} steer={:6.1} yaw={:5.2} v={:5.1} in=({steer:+.0},{thr:.0}) thr={:.2} rpm={:4.0} g={} mode={:?} env={:4.1} auth={:.2} held={:4.1} slide={}",
         t as f32 / 0.24,
         n.body_slip.to_degrees(),
         n.rear_axle_slip.to_degrees(),
@@ -26,6 +26,7 @@ fn line(rig: &Rig, steer: f32, thr: f32, t: usize) {
         tel.drift.envelope.to_degrees(),
         tel.drift.authority,
         tel.drift.hold_angle.to_degrees(),
+        if tel.sliding { "yes" } else { "no" },
     );
 }
 

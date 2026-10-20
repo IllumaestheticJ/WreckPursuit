@@ -7,7 +7,7 @@
 //! | `drift_tuning_json()` | the constants in effect (override or defaults), JSON |
 //! | `drift_tuning_defaults_json()` | the shipped defaults, JSON |
 //! | `drift_tuning_set(json)` | set the runtime override (`""` clears it); unknown fields are ignored, missing ones take the default |
-//! | `drift_readout(entity)` | `[mode, slide_deg, onset, envelope_deg, authority, throttle_scale, key_throttle, engine_throttle, held_deg]`, mode 0 off · 1 grip · 2 straighten · 3 hold (countersteer key) · 4 angle-up (key into the turn) · 5 exceeded; `key_throttle` = the driver's throttle input, `engine_throttle` = what reaches the engine (after shaping, pedal filter, TCS / ESC), `held_deg` = the slide angle Hold / AngleUp keeps |
+//! | `drift_readout(entity)` | `[mode, slide_deg, onset, envelope_deg, authority, throttle_scale, key_throttle, engine_throttle, held_deg, sliding]`, mode 0 off · 1 grip · 2 straighten · 3 hold (countersteer key) · 4 angle-up (key into the turn) · 5 exceeded · 6 transition; `key_throttle` = the driver's throttle input, `engine_throttle` = what reaches the engine (after shaping, pedal filter, TCS / ESC), `held_deg` = the slide angle Hold / AngleUp keeps, `sliding` 1 = a slide is confirmed (the steering's slide help is on, row 102) |
 //!
 //! The override is process-wide and not logged in recordings (a developer tool; see
 //! `wp_vehicle::drift`).
@@ -43,7 +43,7 @@ pub fn drift_tuning_set(tuning_json: &str) -> Result<(), JsValue> {
 }
 
 /// Drift readout of a vehicle this tick: `[mode, slide_deg, onset, envelope_deg, authority,
-/// throttle_scale, key_throttle, engine_throttle, held_deg]` (see the module docs).
+/// throttle_scale, key_throttle, engine_throttle, held_deg, sliding]` (see the module docs).
 #[wasm_bindgen]
 pub fn drift_readout(entity: u32) -> Result<Vec<f32>, JsValue> {
     with(|s| {
@@ -62,6 +62,7 @@ pub fn drift_readout(entity: u32) -> Result<Vec<f32>, JsValue> {
             v.input.throttle.clamp(0.0, 1.0),
             tel.throttle,
             d.hold_angle.to_degrees(),
+            if tel.sliding { 1.0 } else { 0.0 },
         ])
     })
 }
