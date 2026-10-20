@@ -50,6 +50,10 @@ use crate::{Channel, DOWNLINK_BUDGET_BPS, TICKS_PER_NET_TICK, TICK_HZ};
 /// number lives. Players who are not wanted keep [`ServerConfig::reconnect_window_ticks`].
 pub const WANTED_DISCONNECT_GRACE_TICKS: u64 = 60 * TICK_HZ;
 
+/// Notice sent when a wanted racer asks for another role (B05).
+pub const WANTED_ROLE_SWITCH_REFUSED: &str =
+    "you are wanted: lose the police or get caught before switching role";
+
 /// Net ticks between bit-exact own-vehicle snapshots (12 → 5 Hz).
 pub const OWN_FULL_EVERY_NET_TICKS: u64 = 12;
 
@@ -207,6 +211,8 @@ pub struct ServerStats {
     pub abandoned_captures: u64,
     /// Busts settled on player accounts (fine / impound), abandoned ones included.
     pub busts_settled: u64,
+    /// Role requests refused because the racer was wanted or pursued (B05).
+    pub role_switches_refused: u64,
     /// Lattice snapshots sent in response to hash mismatches.
     pub lattice_resyncs: u64,
     /// Final lattice snapshots sent after a provisional one (model settled since).
@@ -275,6 +281,34 @@ pub struct JoinRequest {
     pub name: String,
     /// The `join_token` presented (may be empty: the host decides).
     pub join_token: String,
+}
+
+/// One committed money change of an externally stored account ([`ServerInstance::take_economy_commits`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct EconomyCommit {
+    /// Instance player.
+    pub player: PlayerId,
+    /// The account after the change (`account.player` = durable account id).
+    pub account: PlayerAccount,
+    /// The ledger events of the change (continue the account's sequence).
+    pub events: Vec<wp_economy::EconomyEvent>,
+}
+
+/// A finished lobby race ([`ServerInstance::take_finished_races`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FinishedRace {
+    /// Lobby race id.
+    pub race: u32,
+    /// Economy race type (one lap = sprint, more = circuit).
+    pub race_type: RaceType,
+    /// Laps.
+    pub laps: u8,
+    /// Checkpoints, world XY dm (the route).
+    pub checkpoints: Vec<[i32; 2]>,
+    /// Results by place (DNF last), payouts filled in.
+    pub results: Vec<crate::protocol::RaceResultEntry>,
+    /// Racers with no damaging contact and no violation beyond speeding during the race.
+    pub clean: Vec<PlayerId>,
 }
 
 #[derive(Debug, Clone)]
@@ -346,6 +380,18 @@ pub struct ServerInstance<S: NetSim> {
     pending_events: Vec<(u64, SimEvent)>,
     /// Copy of every forwarded game event for the host (`set_event_tap`), until taken.
     tapped_events: Option<Vec<SimEvent>>,
+    /// Accounts owned by an external store (meta): instance player → its account (whose
+    /// `player` is the durable account id). Money for these players changes here and every
+    /// change goes to `economy_outbox` for the host to write through.
+    external_accounts: BTreeMap<PlayerId, PlayerAccount>,
+    /// Players whose external account is being loaded: credits wait here meanwhile.
+    awaiting_account: BTreeMap<PlayerId, Vec<(i64, i64, EconomyReason)>>,
+    /// Committed external-account changes not yet taken by the host.
+    economy_outbox: Vec<EconomyCommit>,
+    /// Finished lobby races not yet taken by the host (only while the event tap is on).
+    race_outbox: Vec<FinishedRace>,
+    /// Racers in a running race who had a damaging contact or a non-speeding violation.
+    race_unclean: std::collections::BTreeSet<PlayerId>,
     /// Hellos parked for join-token verification.
     pending_joins: BTreeMap<ConnId, PendingJoin>,
     /// Kinematic traffic of this net tick (`Some` on traffic ticks).
@@ -380,6 +426,11 @@ impl<S: NetSim> ServerInstance<S> {
             pending_damage: Vec::new(),
             pending_events: Vec::new(),
             tapped_events: None,
+            external_accounts: BTreeMap::new(),
+            awaiting_account: BTreeMap::new(),
+            economy_outbox: Vec::new(),
+            race_outbox: Vec::new(),
+            race_unclean: Default::default(),
             pending_joins: BTreeMap::new(),
             traffic_now: None,
             last_weather: None,
@@ -478,6 +529,16 @@ impl<S: NetSim> ServerInstance<S> {
                 self.players.get_mut(&pid).expect("player").wanted_hold = true;
             }
         }
+    }
+
+    /// Whether the player is seated as a racer and their car is wanted or pursued.
+    fn wanted_racer_seat(&self, pid: PlayerId) -> bool {
+        self.roles.role(pid) == Some(Role::Racer)
+            && self
+                .players
+                .get(&pid)
+                .and_then(|p| p.vehicle)
+                .is_some_and(|v| self.is_wanted_racer(v))
     }
 
     /// Whether `v` is a racer seat whose driver is wanted or in a pursuit.
@@ -806,6 +867,9 @@ impl<S: NetSim> ServerInstance<S> {
     /// The player's account, or an empty one if none is stored yet (lead adapter to
     /// `wp_economy::AccountStore`; replace with `Economy::open_account` + `settle_race`, NET-N7).
     fn account(&self, pid: PlayerId) -> PlayerAccount {
+        if let Some(a) = self.external_accounts.get(&pid) {
+            return a.clone();
+        }
         self.accounts
             .load(pid)
             .ok()
@@ -845,6 +909,15 @@ impl<S: NetSim> ServerInstance<S> {
                 self.accept_inputs(pid, first_tick, &ClientMsg::inputs_dequantised(&inputs));
             }
             ClientMsg::RoleRequest { role } => {
+                if role != Role::Racer && self.wanted_racer_seat(pid) {
+                    // Switching away drops the racer car: while wanted that would be an
+                    // escape (B05). Refused like other role refusals: the current role again,
+                    // with the reason as a notice.
+                    self.send_role(pid, Role::Racer);
+                    self.notice(pid, WANTED_ROLE_SWITCH_REFUSED);
+                    self.stats.role_switches_refused += 1;
+                    return;
+                }
                 let events = self.roles.request(pid, role, tick);
                 self.apply_role_events(events);
             }
@@ -1190,6 +1263,9 @@ impl<S: NetSim> ServerInstance<S> {
         let Some(p) = self.players.remove(&pid) else {
             return;
         };
+        self.external_accounts.remove(&pid);
+        self.awaiting_account.remove(&pid);
+        self.race_unclean.remove(&pid);
         if let Some(v) = p.vehicle {
             self.release_vehicle(v);
         }
@@ -1220,6 +1296,10 @@ impl<S: NetSim> ServerInstance<S> {
                     }
                 }
                 RaceEvent::StakesCharged { race, charges } => {
+                    // The race starts: everyone starts clean.
+                    for (p, _) in &charges {
+                        self.race_unclean.remove(p);
+                    }
                     let race = self.race_type(race);
                     for (p, amount) in charges {
                         self.credit(p, -amount, 0, EconomyReason::StakeCharged { race });
@@ -1240,6 +1320,24 @@ impl<S: NetSim> ServerInstance<S> {
                             let reason = EconomyReason::RaceRep { placement: r.place };
                             self.credit(p, 0, 10, reason);
                         }
+                    }
+                    if self.tapped_events.is_some() {
+                        let info = self.races.info(race);
+                        self.race_outbox.push(FinishedRace {
+                            race,
+                            race_type: kind,
+                            laps: info.map_or(1, |i| i.laps),
+                            checkpoints: info.map(|i| i.checkpoints.clone()).unwrap_or_default(),
+                            clean: results
+                                .iter()
+                                .map(|r| PlayerId(r.player))
+                                .filter(|p| !self.race_unclean.contains(p))
+                                .collect(),
+                            results: results.clone(),
+                        });
+                    }
+                    for r in &results {
+                        self.race_unclean.remove(&PlayerId(r.player));
                     }
                     let msg = ServerMsg::RaceResults {
                         race,
@@ -1266,12 +1364,18 @@ impl<S: NetSim> ServerInstance<S> {
     /// sent to its owner as a typed `SimEvent::Economy`. Until `wp_economy`'s settlement
     /// takes over (NET-N7) the amounts come from the lobby's stake table.
     fn credit(&mut self, pid: PlayerId, cash: i64, rep: i64, reason: EconomyReason) {
+        if let Some(waiting) = self.awaiting_account.get_mut(&pid) {
+            // The external account is still loading: apply once it is in.
+            waiting.push((cash, rep, reason));
+            return;
+        }
+        let external = self.external_accounts.contains_key(&pid);
         let mut a = self.account(pid);
         let rep_before = a.rep;
         a.cash += cash;
         a.rep = (a.rep + rep).max(0);
         let event = wp_economy::EconomyEvent {
-            player: pid,
+            player: a.player,
             seq: a.next_event_seq,
             day: a.day,
             reason: EventReason::from_contract(&reason),
@@ -1283,11 +1387,21 @@ impl<S: NetSim> ServerInstance<S> {
             cash_after: a.cash,
         };
         a.next_event_seq += 1;
-        if self
-            .accounts
-            .commit(&a, std::slice::from_ref(&event))
-            .is_ok()
-        {
+        let committed = if external {
+            // The host writes it through to the external store (meta) from the outbox.
+            self.external_accounts.insert(pid, a.clone());
+            self.economy_outbox.push(EconomyCommit {
+                player: pid,
+                account: a,
+                events: vec![event.clone()],
+            });
+            true
+        } else {
+            self.accounts
+                .commit(&a, std::slice::from_ref(&event))
+                .is_ok()
+        };
+        if committed {
             let tick = self.sim.tick();
             self.pending_events
                 .push((tick, SimEvent::Economy(event.to_contract())));
@@ -1403,6 +1517,61 @@ impl<S: NetSim> ServerInstance<S> {
             let speed = (s.lin_vel[0] * s.lin_vel[0] + s.lin_vel[1] * s.lin_vel[1]).sqrt();
             p.hold_input = if speed > 1.0 { HOLD_BRAKE } else { HOLD_STILL };
         }
+    }
+
+    /// Change a player's money and rep as one ledger event (`reason`), exactly like the lobby
+    /// does; e.g. a host re-applying changes after reloading an external account.
+    pub fn credit_player(&mut self, pid: PlayerId, cash: i64, rep: i64, reason: EconomyReason) {
+        self.credit(pid, cash, rep, reason);
+    }
+
+    /// The player's account lives in an external store (meta): money changes for it wait
+    /// until [`ServerInstance::set_external_account`] provides the stored account.
+    pub fn expect_external_account(&mut self, pid: PlayerId) {
+        if !self.external_accounts.contains_key(&pid) {
+            self.awaiting_account.entry(pid).or_default();
+        }
+    }
+
+    /// Install (or replace, after a reload) the player's externally stored account. From now
+    /// on every money change of this player is a commit in
+    /// [`ServerInstance::take_economy_commits`]; changes made while it was loading are applied
+    /// now. Economy events for this player carry the account's durable id.
+    pub fn set_external_account(&mut self, pid: PlayerId, account: PlayerAccount) {
+        if !self.players.contains_key(&pid) {
+            return;
+        }
+        self.external_accounts.insert(pid, account);
+        for (cash, rep, reason) in self.awaiting_account.remove(&pid).unwrap_or_default() {
+            self.credit(pid, cash, rep, reason);
+        }
+        self.send_account(pid);
+    }
+
+    /// The player's account as the server holds it now.
+    pub fn player_account(&self, pid: PlayerId) -> PlayerAccount {
+        self.account(pid)
+    }
+
+    /// Money changes of externally stored accounts since the last call, in commit order.
+    pub fn take_economy_commits(&mut self) -> Vec<EconomyCommit> {
+        std::mem::take(&mut self.economy_outbox)
+    }
+
+    /// Lobby races that finished since the last call (collected while the event tap is on,
+    /// see [`ServerInstance::set_event_tap`]).
+    pub fn take_finished_races(&mut self) -> Vec<FinishedRace> {
+        std::mem::take(&mut self.race_outbox)
+    }
+
+    /// Durable account key of a player for economy events (external account id, else the
+    /// instance id).
+    fn economy_key(&self, pid: PlayerId) -> AccountId {
+        AccountId(
+            self.external_accounts
+                .get(&pid)
+                .map_or(pid.0, |a| a.player.0),
+        )
     }
 
     // -----------------------------------------------------------------------------------------
@@ -1538,7 +1707,11 @@ impl<S: NetSim> ServerInstance<S> {
         self.sim.step();
 
         let mut damage: BTreeMap<EntityId, TickDamage> = BTreeMap::new();
-        for (e, contacts) in self.sim.drain_applied_contacts() {
+        let applied = self.sim.drain_applied_contacts();
+        for (e, _) in &applied {
+            self.mark_unclean(*e);
+        }
+        for (e, contacts) in applied {
             damage
                 .entry(e)
                 .or_default()
@@ -1562,6 +1735,12 @@ impl<S: NetSim> ServerInstance<S> {
                     (vehicle, DamageEvent::WheelDetached { wheel })
                 }
                 SimEvent::TotalLoss { vehicle } => (vehicle, DamageEvent::TotalLoss),
+                SimEvent::TrafficViolation { vehicle, kind, .. } => {
+                    if !matches!(kind, wp_contracts::ViolationKind::Speeding { .. }) {
+                        self.mark_unclean(vehicle);
+                    }
+                    continue;
+                }
                 e @ (SimEvent::Police(_)
                 | SimEvent::Race(_)
                 | SimEvent::Economy(_)
@@ -1607,6 +1786,16 @@ impl<S: NetSim> ServerInstance<S> {
                 }
             }
             self.pending_damage.push((t, damage));
+        }
+    }
+
+    /// A racer's car had a damaging contact or a non-speeding violation: its current race is
+    /// not clean (meta's clean-race rating).
+    fn mark_unclean(&mut self, e: EntityId) {
+        if let Some((p, _)) = self.owned.get(&e) {
+            if self.races.race_of(*p).is_some() {
+                self.race_unclean.insert(*p);
+            }
         }
     }
 
@@ -1715,7 +1904,7 @@ impl<S: NetSim> ServerInstance<S> {
             .iter()
             .filter(|(_, e)| match e {
                 SimEvent::Police(PoliceEvent::Radio { .. }) => police_role,
-                SimEvent::Economy(ev) => ev.account == AccountId(pid.0),
+                SimEvent::Economy(ev) => ev.account == self.economy_key(pid),
                 _ => true,
             })
             .map(|(_, e)| e.clone())

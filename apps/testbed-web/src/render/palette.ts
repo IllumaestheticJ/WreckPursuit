@@ -106,7 +106,9 @@ export const PALETTE = {
   // ---- props (parked cars use trafficPaints through render/fleet.ts styledPaint) ----
   /** Traffic cone body (muted orange; a faint self-glow keeps it readable at night). */
   propCone: 0xd0682c,
-  propConeGlow: 0x1a0800,
+  propConeGlow: 0x2a0e00,
+  /** Extra cone glow at full night (multiplies propConeGlow: 1 + this × night). */
+  propConeNightGlow: 3,
 } as const;
 
 /** Siren point-light intensity for a lit light-bar side of glow `glow` (palette units). */

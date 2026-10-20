@@ -33,6 +33,9 @@ function instanced(geo: THREE.BufferGeometry, mat: THREE.Material, count: number
 }
 
 export class SignalView {
+  /** Heads within this distance of the camera are drawn, m (graphics quality: lower on the
+   * software / touch profiles). */
+  drawM = SIGNAL_DRAW_M;
   /** Parent in sim space (+Z up); add to SceneView.world. */
   readonly group = new THREE.Group();
   private parts: THREE.InstancedMesh[] = [];
@@ -239,7 +242,7 @@ export class SignalView {
     if (!camera) {
       if (this.lastPick.x === Infinity) this.pick(0, 0, Infinity);
     } else if (this.lastPick.distanceTo({ x: camera.x, y: -camera.z }) > RESELECT_M) {
-      this.pick(camera.x, -camera.z, SIGNAL_DRAW_M);
+      this.pick(camera.x, -camera.z, this.drawM);
     }
     const nightChanged = Math.abs(night - this.lastNight) > 0.02;
     if (nightChanged) {

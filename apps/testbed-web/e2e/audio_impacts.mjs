@@ -367,7 +367,7 @@ console.log(`      offline render: ${(renderMs / 1000).toFixed(2)} s for ${audio
 
 // Recordings only (the fallback setting) for comparison.
 const rec = {};
-for (const n of ["frontal_20kmh", "frontal_50kmh", "frontal_90kmh", "horn_disc_pair", "horn_air_truck", "horn_air_police"]) rec[n] = await analyse(n, { synth: false });
+for (const n of ["frontal_20kmh", "frontal_50kmh", "frontal_90kmh", "wall_scrape", "horn_disc_pair", "horn_air_truck", "horn_air_police"]) rec[n] = await analyse(n, { synth: false });
 const proc = {};
 for (const n of ["frontal_90kmh", "horn_disc_pair", "horn_air_truck"]) proc[n] = await analyse(n, { source: "procedural" });
 
@@ -417,7 +417,10 @@ check(res.frontal_90kmh.glass?.[0]?.tailS >= 0.3, `90 km/h crash broke the winds
 const ws = res.wall_scrape.scrape;
 console.log(`      wall scrape ${ws.t0.toFixed(2)}–${ws.t1.toFixed(2)} s: median ${fmt(ws.med)} dB, worst 50 ms ${fmt(ws.worst)} dB, sparks ${fmt(ws.sparksDb)} dB`);
 check(ws.t1 - ws.t0 > 1.5 && ws.worst > -20, "wall scrape: continuous while sliding (no 50 ms window 20 dB under the median)");
-check(ws.sparksDb > ws.bodyDb - 30, `wall scrape: sparks / grit above 5 kHz (${fmt(ws.sparksDb)} dB vs body ${fmt(ws.bodyDb)} dB)`);
+// The friction synth adds the spark / grit band over the recorded scrape loop (an absolute level
+// vs the body depended on how far the car slides from the ear; re-based after round 13).
+const wsr = rec.wall_scrape.scrape;
+check(ws.sparksDb >= wsr.sparksDb + 3, `wall scrape: synthesis adds sparks / grit above 5 kHz (${fmt(ws.sparksDb)} dB vs ${fmt(wsr.sparksDb)} dB recordings only; body ${fmt(ws.bodyDb)} dB)`);
 check((res.wall_scrape.built.friction ?? 0) > 0, "friction synthesis built for the scrape");
 
 // --- horns ---------------------------------------------------------------------------------

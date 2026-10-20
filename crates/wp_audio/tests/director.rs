@@ -450,6 +450,25 @@ fn scanner_delays_match_police_tools_toml() {
     assert_eq!(police, lib().config.scanner.tier_delay_s.to_vec(), "audio_config scanner.tier_delay_s must equal data/police/tools.toml gadgets.scanner_delay_s");
 }
 
+/// Police pacing (`data/police/radio.toml`) keeps the channel busy for a line's estimated length
+/// with the scanner's own speaking rate, so the scanner never has two lines to play at once
+/// (owner playtest row 79).
+#[test]
+fn radio_pacing_matches_the_scanner_speaking_rate() {
+    let radio = wp_police::PoliceConfig::builtin().radio;
+    let sc = &lib().config.scanner;
+    assert_eq!(
+        radio.words_per_s, sc.words_per_s,
+        "radio.toml words_per_s vs audio_config scanner.words_per_s"
+    );
+    assert_eq!(
+        radio.line_pad_s, sc.line_pad_s,
+        "radio.toml line_pad_s vs audio_config scanner.line_pad_s"
+    );
+    let text = "Unit 12, I've got eyes on him again, northbound on Harbor Boulevard.";
+    assert!((radio.line_s(text) - wp_audio::scanner::line_duration_s(sc, text)).abs() < 1e-5);
+}
+
 fn one_car_dir() -> (AudioDirector, VehicleState) {
     let mut dir = AudioDirector::new(lib(), 5);
     dir.register_car(&car("sentinel_cruiser"));

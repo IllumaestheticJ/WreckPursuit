@@ -23,6 +23,7 @@
 //!                2 mode: u8 (0 Arcade, 1 Simulation)
 //!                3 repair: –
 //!                4 reset at: f32 x, y, yaw, near_z, u8 repair (0/1)
+//!                5 ghost: u16 ticks (0 = solid again)
 //!              Ops apply before the inputs of the same tick, in file order.
 //! tick hashes  u64 count, then per tick (state after tick i+1): u64 state hash
 //! checkpoints  u32 count, then per checkpoint: u64 tick,
@@ -77,6 +78,12 @@ pub enum OpKind {
         near_z: f32,
         /// Also repair the car fully (not in a career run).
         repair: bool,
+    },
+    /// `Sim::set_ghost` (pass through other cars, props and debris for `ticks`; logged right
+    /// after `ResetAt` by the testbed).
+    Ghost {
+        /// Ghost window, physics ticks.
+        ticks: u16,
     },
 }
 
@@ -226,6 +233,10 @@ impl Replay {
                     }
                     w.push(repair as u8);
                 }
+                OpKind::Ghost { ticks } => {
+                    w.push(5);
+                    w.extend_from_slice(&ticks.to_le_bytes());
+                }
             }
         }
         put_u64(&mut w, self.tick_hashes.len() as u64);
@@ -327,6 +338,9 @@ impl Replay {
                         yaw: r.f32()?,
                         near_z: r.f32()?,
                         repair: r.take(1)?[0] != 0,
+                    },
+                    5 => OpKind::Ghost {
+                        ticks: u16::from_le_bytes(r.take(2)?.try_into().expect("2 bytes")),
                     },
                     k => return Err(RunError::Replay(format!("bad op kind {k}"))),
                 };
@@ -661,6 +675,11 @@ mod tests {
                         near_z: 4.0,
                         repair: true,
                     },
+                },
+                OpEvent {
+                    tick: 2,
+                    entity: 0,
+                    op: OpKind::Ghost { ticks: 240 },
                 },
             ],
             tick_hashes: vec![1, 3],

@@ -711,7 +711,7 @@ applied:
 | File | Change |
 |---|---|
 | `crates/wp_wasm/src/lod.rs` (new), `lib.rs` | `traffic_draw()`, `police_draw()`, `lod_draw_stride()`, `session_car_models()`, `car_model_info()` (table above). Read-only: hashes and goldens unchanged by these. Native tests: quaternion maths, model list, and **draw poses stay continuous through 15 real promotions/demotions in 12 s of city chase (worst swap 0.06 m, worst tick 0.08 m)**. |
-| `src/render/fleet.ts` (new) | Instanced cars: per model a full mesh (the model's real panel mesh merged at rest: paint with per-instance livery, detail, head/tail lamp markers where `VehicleView` puts them, police light bar) for cars < 250 m from the camera (192 per model), a ~130-triangle proxy beyond (and while a mesh is loading). Shared 8-colour `TRAFFIC_PALETTE` by `variant`. |
+| `src/render/fleet.ts` (new) | Instanced cars: per model a full mesh (the model's real panel mesh merged at rest: paint with per-instance livery, detail, head/tail lamp markers where `VehicleView` puts them, police light bar) for cars < 150 m from the camera (192 per model; promotions happen at 80 m, so the swap is always full mesh → full mesh), a ~130-triangle proxy beyond (and while a mesh is loading). Shared 8-colour `TRAFFIC_PALETTE` by `variant`. |
 | `src/render/lod.ts` (new) | `LodDirector`: per frame, each traffic agent / police unit is drawn by exactly one of its `VehicleView` (once the sim spawned it **and** its mesh is ready) or the fleet, same model / livery / pose — so promotions and demotions swap the drawer on one frame with no gap. `LodLog` records per-frame draw states (missing-mesh frames, swap pose jumps with ±3 frames, appear / vanish distances, placeholder time). |
 | `src/render/panels.ts` | `preloadCarMeshes()`, `carMeshNow()`, `meshTimings`; a preloaded mesh builds in the `PanelBody` constructor (no placeholder frame). |
 | `src/vehicle_view.ts` | `drawable` (mesh ready or panels layer off); while loading, a proxy in the car's livery instead of the debug box / lattice hull; sim-spawned traffic / police (`background`) show per-car debug overlays (tire forces, slip colours, suspension, CG / velocity) only when focused (Tab), so a promotion does not sprout arrows. |
@@ -730,14 +730,15 @@ applied:
 | City chase frame (`chase_perf.mjs`, 20 s) | 899 ms, render 13.8 ms, 541k tris, 622 calls | 920 ms, render 26.6 ms, 627k tris, 470 calls |
 SwiftShader frame time is dominated by rasterising the city and is unchanged; renderer CPU time
 roughly doubles (instance buffers of the full-mesh fleet: up to 192 instances × ~4k triangles per
-model within 250 m). On a real GPU this is a handful of instanced draws; if it shows up in a
-browser profile, lower `FULL_LOD_M` (render/fleet.ts) to ~150 m.
+model within 250 m). `FULL_LOD_M` was then lowered to 150 m (owner's call, 2026-10-20); see the
+follow-up measurement below.
 Follow-up 2026-10-20: with the 320 m sightline the city no longer reached its traffic target
 (`world_traffic_soak_observer`); fixed in `wp_world` without moving the spawn ring (see
 `docs/integration/world.md`, "Follow-up"). `npm run e2e` LOD checks on that build: 0 frames
 without a mesh, swap jump 0.000 m, traffic appears ≥ 322 m / vanishes ≥ 342 m from the player.
 ### Known gaps
-- Proxy → full instanced mesh switches at 250 m from the camera (a small far-LOD change, by design).
+- Proxy → full instanced mesh switches at 150 m from the camera (a small far-LOD change, by design;
+  a 4.5 m car is ~20 px tall there at 1280×720).
 - Damage done while physical is lost on demotion (the instanced mesh is undented); traffic
   demotes 100 m+ away, so it is rarely visible.
 - Kinematic poses are carried forward between traffic steps, not interpolated by the frame's
@@ -855,12 +856,8 @@ spawn:
 the chosen pose, so playback (browser and `simcli replay`) needs no lane search. Old replays
 decode unchanged; goldens unchanged. Owner of simcli (I) / lead: please review.
 
-**Request to the lead (wp_sim): the ~1 s ghost / no-collision window is not done.** `Sim`
-has no public way to change a vehicle's collision groups for a while (`set_contact_filter`
-only filters damage, not physics). Proposal: `Sim::set_ghost(id, ticks)`: the chassis collider
-interacts only with the ground/terrain groups until the countdown ends, counted in
-`step_fixed` (deterministic). Then `ResetAt` gains a `ghost_ticks` byte (240). Until then the
-clearance check keeps the reset out of other cars, agents, props and barriers. Note also:
+~~Request to the lead (wp_sim): ghost window~~ — **done, see "Ghost window" below** (the owner
+asked for it directly). Note also:
 `place_on_ground` on terrain cities overwrites the slot's `spawn`, so a later spawn reset goes
 to the last in-place reset spot.
 
@@ -889,3 +886,69 @@ Owner rows 67 / 68, details in `docs/integration/ui.md` → "Round 12". Small gl
   `layers.suppress(ids)` in `settings.ts`.
 - `HudFrame.units` in `hud.ts` (km/h / mph).
 - `e2e/menu.mjs` runs at the end of `npm run e2e` (36 checks).
+
+### Ghost window after a reset in place (2026-10-20, owner request, playtest row 65)
+The owner asked for the ghost window directly, so I added it in wp_sim (lead-owned crate; small
+and additive, **lead please review**). Base: merged `origin/lead/round12` @ `608a50a`.
+- **`wp_sim::physics::GhostHooks`** (Rapier `PhysicsHooks::filter_contact_pair`, now passed to
+  `PhysicsWorld::step` instead of `&()`). A ghost chassis keeps contacts with static world
+  geometry: colliders without a body or on a fixed body, i.e. ground slab, roads, terrain,
+  sidewalks, buildings, rails, tunnel boxes and scenario barriers. It passes through everything
+  that moves (other cars, debris) and through props even while they rest as fixed bodies (props
+  now carry `user_data` `PROP_USER_BIT`). Ghosts are flagged with `user_data` `GHOST_USER_BIT`
+  plus `ActiveHooks::FILTER_CONTACT_PAIRS`, so only pairs involving a ghost reach the hook. Every
+  other pair keeps Rapier's default handling. No contact means no damage either way.
+- **Wheel rays:** a ghost's suspension rays use `QueryFilter::exclude_dynamic()` plus a predicate
+  skipping props (else its wheels "drive up" onto the car it overlaps), and every other car's
+  rays skip ghost chassis.
+- **`Sim::set_ghost(id, ticks)`** / **`Sim::ghost_ticks(id)`**: countdown in `step_fixed`
+  (`update_ghosts`, before the physics step, vehicle order). If the window ends while the chassis
+  AABB still overlaps another car's, the ghost is extended tick by tick until clear, capped at
+  `GHOST_MAX_OVERSTAY_TICKS` (3 s).
+- **simcli:** new replay op `OpKind::Ghost { ticks: u16 }` (byte tag 5) → `Sim::set_ghost`,
+  in the round-trip test. `ResetAt` (tag 4) is unchanged, since it is already merged on several
+  branches; the session logs `Ghost { 240 }` right after it.
+- **wp_wasm:** `reset_in_place` ghosts the car for `reset::GHOST_TICKS` = 240 (1 s); its JSON
+  gains `ghost_ticks`; new wasm `ghost_ticks(entity)`. **Testbed:** the player's car blinks at
+  8 Hz while it is a ghost (`root.visible`, so no shared materials are touched).
+- **Determinism / goldens:** with no ghosts the hook is never called and the wheel-ray
+  predicate accepts every collider. The simcli golden report (every FAIL line and every first
+  mismatch hash) is **bit-identical with and without this change** on the merged base (20
+  goldens fail on the base itself, see below).
+
+Tests: wp_sim `ghost_passes_through_cars_but_not_the_world` (a ghost at 10 m/s drives through a
+parked sedan: no car–car contact, no damage, the parked car does not move, the ghost stays on
+the ground, deterministic hash; without the ghost the same run crashes; a ghost still stops at a
+static barrier) and `ghost_overstays_while_overlapping`. wp_wasm reset test checks the 240-tick
+window, the `Ghost` op in the recording, solid afterwards, `simcli` verify. `e2e/reset.mjs`:
+city-chase reset → `ghost_ticks` 240, the car blinks, then solid and drawn again; a recording
+with the reset plays back with 0 drift.
+
+Known gaps: traffic and police AI react to car positions, not physics rays, so they still
+brake or steer around a ghost (no physics query besides wheel rays and the ground-height probe
+exists in wp_sim/wp_world/wp_police). The overlap check at the end of the window looks at other
+cars only, not props or debris.
+
+Gates (ghost window): fmt, clippy `-D warnings`, wasm build, `tsc` green. `cargo test
+--workspace --no-fail-fast`: 1003 pass, 5 fail, **all failing identically on the pre-ghost
+code** (same panic text / race results / golden hashes): simcli `goldens_match` (20 scenarios),
+wp_opponent `live_police_chase_ends_in_escape_or_capture_without_stuck_cars`, wp_race
+`hollins_hill_sprint`, `loop9_circuit`, `lantern_checkpoint_draws_the_police`. (wp_wasm's
+race tests and wp_vehicle's handling test now pass on the merged base.) `just web-e2e`: new
+suites pass (gamepad, reset incl. ghost), 3 top-level failures that also fail on the pre-ghost
+code: `e2e/perf_check.mjs` (software-GL frame-time / allocation / material-version budgets),
+`e2e/touch.mjs` (layout 640×360: chase × banner overlap), and `e2e/crash_fx.mjs` (effects
+1.18 KB/frame allocation — passes when run alone, so load-sensitive).
+### Follow-up (2026-10-20): `FULL_LOD_M` 250 → 150 m
+Owner's call after the render-cost note above. A/B on the same container (`chase_perf.mjs`, 20 s
+city chase, two runs each; absolute numbers ran higher than the day before, compare within the
+table only):
+| `FULL_LOD_M` | triangles | render ms | frame ms |
+|---|---|---|---|
+| 250 m | 667k / 667k | 195 / 179 | 875 / 860 |
+| 150 m | 591k / 603k | 170 / 141 | 828 / 787 |
+≈ 10 % fewer triangles, ≈ 5 % faster frames headless. Promotions happen 80 m from the player, so
+the hand-over is still full instanced mesh → full VehicleView.
+Gate at 150 m (rebased on the lead's density follow-up): wasm build, tsc, `npm run e2e` all pass
+(LOD: 0 frames without a mesh, 3 swaps with 0.000 m hand-over jump, traffic appears ≥ 321 m /
+vanishes ≥ 373 m from the player; weather and race e2e also pass).

@@ -392,10 +392,19 @@ const art = await page.evaluate(async () => {
   const { PALETTE } = await import("/src/render/palette.ts");
   const low = { id: w.style.id, fog: w.scene.scene.fog?.density ?? 0, lamps: w.style.lampCount("vesper_v2"), override: !!w.scene.renderOverride };
   const sel = document.getElementById("style");
+  // Props (render/props.ts): palette cones; a live switch rebuilds them in place.
+  // Sim paused: props must come back exactly where they were (the frame loop still runs
+  // props.update, which rebuilds them for the new style).
+  const wasPaused = w.app.paused;
+  w.app.paused = true;
+  await frame();
+  const coneLow = w.props.coneMat.color.getHex();
+  const propsBefore = { n: w.props.count, pose: Array.from(w.props.pose) };
   sel.value = "greybox";
   sel.dispatchEvent(new Event("change"));
   await frame();
   const grey = { id: w.style.id, fog: w.scene.scene.fog?.density ?? 0 };
+  const coneGrey = w.props.coneMat.color.getHex();
   sel.value = "lowpoly";
   sel.dispatchEvent(new Event("change"));
   await frame();
@@ -408,7 +417,11 @@ const art = await page.evaluate(async () => {
   const bar = styledLamp(w.scene.hemi.color.clone(), BAR.blue);
   const fleetBar = Math.max(bar.r, bar.g, bar.b) > 3;
   const fleetRough = w.lod.fleet.mats.paint.roughness;
-  return { low, grey, back: w.style.id, brightest, fleetPaint, fleetBar, fleetRough };
+  const pose = Array.from(w.props.pose);
+  const propsKept = w.props.count === propsBefore.n && pose.length === propsBefore.pose.length && pose.every((v, i) => v === propsBefore.pose[i]);
+  w.app.paused = wasPaused;
+  const cones = { low: coneLow === PALETTE.propCone, grey: coneGrey !== PALETTE.propCone, back: w.props.coneMat.color.getHex() === PALETTE.propCone, n: w.props.stats(w.rig.camera).cones, propsKept, props: w.props.count };
+  return { low, grey, back: w.style.id, brightest, fleetPaint, fleetBar, fleetRough, cones };
 });
 check(
   art.low.id === "lowpoly" && art.low.override && art.low.fog > 0.001 && art.low.lamps > 100 && art.grey.id === "greybox" && art.grey.fog === 0 && art.back === "lowpoly" && art.brightest,
@@ -417,6 +430,10 @@ check(
 check(
   art.fleetPaint && art.fleetBar && art.fleetRough === 0.85,
   `art style on the instanced fleet: palette livery ${art.fleetPaint}, HDR light bar ${art.fleetBar}, panel-matched paint roughness ${art.fleetRough}`,
+);
+check(
+  art.cones.low && art.cones.grey && art.cones.back && art.cones.propsKept && art.cones.props > 0,
+  `art style on props: cone material = PALETTE.propCone (${art.cones.n} cones in this session) (greybox orange when switched, palette again after), ${art.cones.props} props rebuilt in place across the switch: ${art.cones.propsKept}`,
 );
 await shot("city_chase_greybox_toggle.png");
 
@@ -563,7 +580,7 @@ await shot("city_chase_greybox_toggle.png");
   const st = knock.stats;
   check(
     st.parked > 1000 && st.drawnFull + st.drawnProxy + st.drawnBox === st.parked && st.inRange > 0 && st.drawnInRange === st.inRange &&
-      (st.fullInRange === st.parkedInRange || st.fullInRange === 24),
+      (st.fullInRange === st.parkedInRange || st.fullInRange === st.maxFull || (st.parkedInRange > st.fullInRange && st.fullInRange === st.drawnFull)),
     `props: ${st.parked} parked cars (${knock.model ?? "box stand-in"}) in ${st.chunks} chunks + ${st.cones} cones; drawn ${st.drawnFull} full + ${st.drawnProxy} proxy + ${st.drawnBox} box; ` +
       `${st.drawnInRange}/${st.inRange} props within 150 m drawn, ${st.fullInRange}/${st.parkedInRange} parked cars there with the full mesh ` +
       `(${st.fullInFullRange}/${st.inFullRange} within ${250} m); ${st.repicks} re-picks, ${st.repickWrites} + ${st.movedWrites} matrix writes; ` +

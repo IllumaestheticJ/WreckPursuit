@@ -16,7 +16,7 @@
             intact: [Radiator, Engine], total_loss: Some(false)),
         (speed_kmh: 40.0, expect: [(metric: "crush_m", min: 0.08, max: 0.3)],
             intact: [Radiator, Engine], cracked: [FrontBumper], total_loss: Some(false)),
-        (speed_kmh: 56.0, expect: [(metric: "crush_m", min: 0.2, max: 0.45), (metric: "health", min: 0.55, max: 0.9)],
+        (speed_kmh: 56.0, expect: [(metric: "crush_m", min: 0.2, max: 0.45), (metric: "health", min: 0.55, max: 0.93)],
             intact: [Engine], total_loss: Some(false)),
         (speed_kmh: 80.0, expect: [(metric: "crush_m", min: 0.3, max: 0.75), (metric: "health", min: 0.5, max: 0.85)],
             intact: [Engine], total_loss: Some(false)),

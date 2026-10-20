@@ -78,6 +78,61 @@ for (const [name, hour] of shots) {
   console.log("wrote", `${name}_chase.png`);
 }
 
+// Props (render/props.ts): parked cars in the traffic palette and cones in PALETTE.propCone.
+// No shipped session has cones yet (props_static(): parked cars only; cones are meant to come
+// from race closures), so for this shot a few cones are added to the *drawn* list around the
+// parked car nearest the player (PropView.set; render only, the sim never sees them).
+for (const [label, hour] of [
+  ["day", 12],
+  ["night", 23], // last: the greybox comparison below reuses the night session
+]) {
+  await chase(hour);
+  await page.waitForFunction(() => window.__wp.props.count > 0, null, { timeout: 90000 });
+  const aimed = await page.evaluate(async () => {
+    const w = window.__wp;
+    const pr = w.props;
+    const me = w.app.views.get(w.app.player).root.position;
+    const list = w.sim.propsStatic();
+    const S = 11;
+    let best = -1;
+    let bestD = Infinity;
+    for (let o = 0; o < list.length; o += S) {
+      if (list[o] !== 0) continue;
+      const d = Math.hypot(list[o + 1] - me.x, list[o + 2] - me.y);
+      if (d > 12 && d < bestD) [best, bestD] = [o, d];
+    }
+    if (best < 0) return null;
+    const [x, y, z, qx, qy, qz, qw, hx, hy, hz] = Array.from(list.subarray(best + 1, best + 11));
+    // Car axes from its quaternion (sim space): lateral = X, forward = Y.
+    const rot = (vx, vy) => {
+      const ix = qw * vx + qy * 0 - qz * vy, iy = qw * vy + qz * vx - qx * 0, iz = qx * vy - qy * vx, iw = -qx * vx - qy * vy;
+      return [ix * qw + iw * -qx + iy * -qz - iz * -qy, iy * qw + iw * -qy + iz * -qx - ix * -qz];
+    };
+    const ground = z - hz;
+    const cones = [];
+    for (const side of [-1, 1])
+      for (const along of [-2.2, 0, 2.2]) {
+        const [dx, dy] = rot(side * (hx + 0.9), along);
+        cones.push(1, x + dx, y + dy, ground + 0.36, 0, 0, 0, 1, 0.18, 0.18, 0.36);
+      }
+    const ext = new Float32Array(list.length + cones.length);
+    ext.set(list);
+    ext.set(cones, list.length);
+    pr.set(ext, w.lod.models, w.lod.fleet.mats);
+    w.app.paused = true;
+    w.lookFrom([x - 7, y - 7, z + 3.5], [x, y, z]);
+    await new Promise((r) => setTimeout(r, 2500));
+    return { car: best / S, dist: bestD };
+  });
+  if (!aimed) {
+    console.log(`no parked car near the player: props_${label}.png skipped`);
+    continue;
+  }
+  await page.screenshot({ path: join(out, `props_${label}.png`) });
+  await page.evaluate(() => (window.__wp.app.paused = false));
+  console.log(`wrote props_${label}.png (parked car ${aimed.car} at ${aimed.dist.toFixed(0)} m, 6 render-only cones)`);
+}
+
 // Night in greybox for comparison (same session, style switched).
 await page.evaluate(() => window.__wp.setStyle("greybox"));
 await page.waitForTimeout(800);

@@ -9,6 +9,7 @@
 // instructions on the road materials. Without weather everything here is hidden and the road
 // materials render exactly as before (uWetOn = 0, envMapIntensity = 0).
 import * as THREE from "three";
+import { tagFeature } from "../perf";
 import { S, STATE_STRIDE } from "../wasm/layout";
 
 /** Offsets inside weather_info() (crates/wp_wasm/src/weather.rs `info`). */
@@ -180,7 +181,7 @@ export class WeatherView {
     this.rain.frustumCulled = false;
     this.rain.visible = false;
     this.rain.renderOrder = 5;
-    scene.add(this.rain);
+    scene.add(tagFeature(this.rain, "weather"));
 
     // Spray: one Points cloud in Three's world space (sim positions converted on spawn).
     this.sprayGeo.setAttribute("position", new THREE.BufferAttribute(this.sprayPos, 3));
@@ -212,7 +213,7 @@ export class WeatherView {
     this.sprayMat = sprayMat;
     this.spray.frustumCulled = false;
     this.spray.renderOrder = 4;
-    scene.add(this.spray);
+    scene.add(tagFeature(this.spray, "weather"));
 
     // Reflections for wet roads (intensity 0 when dry, so dry roads look as before): an
     // overcast sky dome, light grey above the horizon, dark below, so wet asphalt reads darker

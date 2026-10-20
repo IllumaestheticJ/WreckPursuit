@@ -16,7 +16,7 @@ import { PALETTE, type Hex } from "./palette";
 import { artStyle } from "./style";
 
 /** Cars nearer than this (to the camera) get the full instanced mesh, m. */
-export const FULL_LOD_M = 250;
+export const FULL_LOD_M = 150;
 /** Full-mesh instances per model per frame (the nearest get them; the rest use the proxy). */
 const MAX_FULL = 192;
 /** Proxy instances per model per frame. */
@@ -32,6 +32,7 @@ export const TAIL = { off: 0x4a0808, brake: 0xff2a1a, hazard: 0xff9a10 } as cons
 export const HEAD = 0xfff2c0;
 /** Light bar colours (unlit). */
 export const BAR = { off: 0x1a1a24, red: 0xff2040, blue: 0x2060ff } as const;
+
 
 /**
  * Livery in the current art style. Low-poly dark maps the greybox traffic liveries one to one
@@ -57,7 +58,7 @@ export function styledLamp(out: THREE.Color, hex: Hex): THREE.Color {
   switch (hex) {
     case TAIL.off:
       // Unlit lens by day; running lights (a quarter of the brake glow) at night.
-      out.setHex(night > 0.2 ? PALETTE.taillight : 0x5a1414);
+      out.setHex(night > 0.2 ? PALETTE.taillight : UNLIT_TAIL);
       return night > 0.2 ? out.multiplyScalar(PALETTE.brakeGlow * 0.25) : out;
     case TAIL.brake:
       return out.setHex(PALETTE.taillight).multiplyScalar(PALETTE.brakeGlow);
@@ -253,6 +254,8 @@ export class InstancedCar {
   readonly tail: THREE.InstancedMesh;
   readonly head: THREE.InstancedMesh;
   readonly bar: THREE.InstancedMesh | null;
+  /** Every instanced mesh of the car (built once: `put` runs per instance per frame). */
+  readonly meshes: readonly THREE.InstancedMesh[];
   count = 0;
 
   constructor(g: Geoms, capacity: number, mats: FleetMaterials, barAt: [number, number] | null) {
@@ -273,14 +276,16 @@ export class InstancedCar {
     } else {
       this.bar = null;
     }
-  }
-
-  get meshes(): THREE.InstancedMesh[] {
-    return [this.paint, this.detail, this.tail, this.head, ...(this.bar ? [this.bar] : [])];
+    this.meshes = [this.paint, this.detail, this.tail, this.head, ...(this.bar ? [this.bar] : [])];
   }
 
   add(m: THREE.Matrix4, paint: THREE.Color, tail: THREE.Color, bar: THREE.Color | null): void {
     this.put(this.count++, m, paint, tail, bar);
+  }
+
+  /** `add` with greybox hex colours (no Color round trip; the fleet's per-frame path). */
+  addHex(m: THREE.Matrix4, paint: Hex, tail: Hex, bar: Hex | null): void {
+    this.putHex(this.count++, m, paint, tail, bar);
   }
 
   /**
@@ -290,26 +295,32 @@ export class InstancedCar {
    * dark, unlit lenses (parked cars: no head or tail lights, playtest row 83).
    */
   put(i: number, m: THREE.Matrix4, paint: THREE.Color, tail: THREE.Color, bar: THREE.Color | null, lit = true): void {
-    for (const mesh of this.meshes) mesh.setMatrixAt(i, m);
+    this.putHex(i, m, paint.getHex(), tail.getHex(), bar ? bar.getHex() : null, lit);
+  }
+
+  /** `put` with greybox hex colours (runs per car per frame: no allocation, no iterator). */
+  putHex(i: number, m: THREE.Matrix4, paint: Hex, tail: Hex, bar: Hex | null, lit = true): void {
+    const meshes = this.meshes;
+    for (let k = 0; k < meshes.length; k++) meshes[k].setMatrixAt(i, m);
     if (!lit) {
       const low = artStyle.lowpoly;
-      this.paint.setColorAt(i, low ? tmpPaint.setHex(styledPaint(paint.getHex())) : paint);
+      this.paint.setColorAt(i, tmpPaint.setHex(low ? styledPaint(paint) : paint));
       this.tail.setColorAt(i, tmpTail.setHex(UNLIT_TAIL));
       this.head.setColorAt(i, tmpHeadStyled.setHex(UNLIT_HEAD));
       if (this.bar) this.bar.setColorAt(i, low ? styledLamp(tmpBar, BAR.off) : tmpBar.setHex(BAR.off));
       return;
     }
     if (artStyle.lowpoly) {
-      this.paint.setColorAt(i, tmpPaint.setHex(styledPaint(paint.getHex())));
-      this.tail.setColorAt(i, styledLamp(tmpTail, tail.getHex()));
+      this.paint.setColorAt(i, tmpPaint.setHex(styledPaint(paint)));
+      this.tail.setColorAt(i, styledLamp(tmpTail, tail));
       this.head.setColorAt(i, styledLamp(tmpHeadStyled, HEAD));
-      if (this.bar) this.bar.setColorAt(i, styledLamp(tmpBar, bar ? bar.getHex() : BAR.off));
+      if (this.bar) this.bar.setColorAt(i, styledLamp(tmpBar, bar ?? BAR.off));
       return;
     }
-    this.paint.setColorAt(i, paint);
-    this.tail.setColorAt(i, tail);
+    this.paint.setColorAt(i, tmpPaint.setHex(paint));
+    this.tail.setColorAt(i, tmpTail.setHex(tail));
     this.head.setColorAt(i, tmpHead);
-    if (this.bar) this.bar.setColorAt(i, bar ?? tmpBar.setHex(BAR.off));
+    if (this.bar) this.bar.setColorAt(i, tmpBar.setHex(bar ?? BAR.off));
   }
 
   end(): void {
@@ -403,9 +414,6 @@ export class Fleet {
   private readonly p = new THREE.Vector3();
   private readonly q = new THREE.Quaternion();
   private readonly one = new THREE.Vector3(1, 1, 1);
-  private readonly paint = new THREE.Color();
-  private readonly tail = new THREE.Color();
-  private readonly bar = new THREE.Color();
 
   /** Model for `carId` (built on first use; `police` adds a light bar). */
   model(carId: string, police = false): FleetModel {
@@ -460,15 +468,12 @@ export class Fleet {
     this.p.set(rec[o], rec[o + 1], rec[o + 2]);
     this.q.set(rec[o + 3], rec[o + 4], rec[o + 5], rec[o + 6]);
     this.m.compose(this.p, this.q, this.one);
-    this.paint.setHex(paint);
-    this.tail.setHex(tail);
-    const b = bar === null ? null : this.bar.setHex(bar);
     const full = model.full;
     if (full && dist < this.fullLodM && full.count < MAX_FULL) {
-      full.add(this.m, this.paint, this.tail, b);
+      full.addHex(this.m, paint, tail, bar);
       return "full";
     }
-    if (model.proxy.count < MAX_PROXY) model.proxy.add(this.m, this.paint, this.tail, b);
+    if (model.proxy.count < MAX_PROXY) model.proxy.addHex(this.m, paint, tail, bar);
     return "proxy";
   }
 
