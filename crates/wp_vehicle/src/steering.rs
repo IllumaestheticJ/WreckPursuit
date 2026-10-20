@@ -74,12 +74,16 @@ pub struct DriftTuning {
     pub counter_lock_full_rad: f32,
     /// (row 91) Gain of the "hold" mode that keeps the body slip angle steady.
     pub hold_gain: f32,
-    /// Keyboard throttle smoothing with TCS off, 0..=1 (row 98, [`crate::throttle`]); negative
-    /// = the preset's default (keyboard 0.6, gamepad 0.2, wheel 0).
+    /// Keyboard throttle smoothing with TCS off, 0..=1 (row 98, [`crate::throttle`]). Default
+    /// 0 (owner row 104: TCS off means the driver gets the throttle they press); a lab-only
+    /// option.
     pub throttle_shaping: f32,
     /// (row 91) Slide-angle envelope at countersteer help 100 %, degrees (scaled down with the
     /// slider).
     pub envelope_deg: f32,
+    /// Drift "hold" mode (row 91, [`crate::drift`]) on. Default off (the owner rejected the
+    /// key-into-the-turn hold, rows 106 / 111): a lab-only option.
+    pub hold_enabled: bool,
 }
 
 impl Default for DriftTuning {
@@ -91,8 +95,9 @@ impl Default for DriftTuning {
             counter_lock_onset_rad: SLIDE_START,
             counter_lock_full_rad: SLIDE_FULL,
             hold_gain: 1.0,
-            throttle_shaping: -1.0,
+            throttle_shaping: 0.0,
             envelope_deg: 45.0,
+            hold_enabled: false,
         }
     }
 }

@@ -31,7 +31,7 @@ fn main() {
     for id in &ids {
         let p = format!("{}/../../data/cars/{id}.json", env!("CARGO_MANIFEST_DIR"));
         let car = wp_contracts::load_car(p).unwrap();
-        for (name, shaping) in [("0 (before)", 0.0f32), ("default 60 %", -1.0)] {
+        for (name, shaping) in [("0 (default)", 0.0f32), ("60 % (lab)", 0.6)] {
             let t = DriftTuning {
                 throttle_shaping: shaping,
                 ..DriftTuning::default()

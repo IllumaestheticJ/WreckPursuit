@@ -1234,3 +1234,15 @@ the four quick cars. Wheelspin time is not lower everywhere (rampart 1.45 → 1.
   assist row can show it next to countersteer (the brief asks for that slider there too; it is
   only in the drift lab panel for now, since the assist-row overrides are AssistProfile
   fields). Until then the code derives the default from `steer_speed_sensitivity`.
+
+## Lead decisions after rows 91 / 98 (A, 2026-10-20) — both default off
+
+The owner rejected the key-into-the-turn hold (rows 106 / 111) and asked for raw throttle with
+TCS off (row 104); contract request #13 is declined. So:
+- **Drift hold (row 91):** `DriftTuning::hold_enabled`, **default false** in every preset; the
+  drift lab panel has a "hold mode" toggle. With it off, `regression_grid_24` hashes are
+  byte-identical to before row 91 (golden restored in a `[bless]` commit).
+- **Throttle smoothing (row 98):** `DriftTuning::throttle_shaping` **default 0** in every
+  preset (no preset default any more); a lab-only slider. The row 98 table above compares 0
+  (now the default) with 60 % (lab).
+- Drift lab storage key `wp.driftTuning.v3` (older saved values are not reused).

@@ -1,4 +1,6 @@
-//! Keyboard / gamepad drift "hold" (owner row 91): steering *into* the turn with the throttle
+//! Keyboard / gamepad drift "hold" (owner row 91), **off by default** (`DriftTuning::
+//! hold_enabled`; the owner rejected it, rows 106 / 111 — a drift-lab-only option): steering
+//! *into* the turn with the throttle
 //! on while the rear slides asks the assist to hold the slide angle. It works only through the
 //! steering angle and a bounded throttle trim: it never adds grip and never applies a yaw
 //! torque, and it lets go past a slide-angle envelope, so mistakes still cost.
@@ -93,7 +95,8 @@ pub fn hold_update(
 ) -> HoldOut {
     let help = assists.countersteer_help.clamp(0.0, 1.0);
     let into_turn = inp.driver * inp.rear_axle_slip > 0.0 && inp.driver.abs() > STEER_DEADZONE;
-    let wants = assists.steer_speed_sensitivity > 0.0
+    let wants = inp.tuning.hold_enabled
+        && assists.steer_speed_sensitivity > 0.0
         && help > 0.0
         && inp.speed > 3.0
         && !handbrake_pulled
@@ -185,9 +188,24 @@ mod tests {
             front_peak_slip: 0.11,
             front_axle_angle: -0.2,
             handbrake_hold: false,
-            tuning: DriftTuning::default(),
+            tuning: DriftTuning {
+                hold_enabled: true,
+                ..DriftTuning::default()
+            },
             hold_angle: None,
         }
+    }
+
+    #[test]
+    fn off_unless_enabled() {
+        let kb = AssistProfile::keyboard_default();
+        let mut s = DriftHold::default();
+        let inp = SteerInput {
+            tuning: DriftTuning::default(),
+            ..drifting(-1.0)
+        };
+        let out = hold_update(&mut s, &inp, &kb, 1.0, false, 0.6, 1.0 / 240.0);
+        assert_eq!(out.mode, AssistMode::Off);
     }
 
     #[test]

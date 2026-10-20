@@ -1372,7 +1372,7 @@ pub struct DriftRun {
 
 /// Drift run (owner row 91): settle on a 30 m counter-clockwise circle at 0.6 g, kick the
 /// slide off with a handbrake flick and full throttle while steering in (0.6 s), then let
-/// `driver` drive for 6 s.
+/// `driver` drive for 6 s. The drift hold is switched on for the run (it is off by default).
 /// `style` = keys (steering ±1 / 0, throttle on / off) or analog (the same targets, smooth).
 pub fn drift_run(
     car: &LoadedCar,
@@ -1382,6 +1382,11 @@ pub fn drift_run(
 ) -> DriftRun {
     let radius = 30.0;
     let mut rig = Rig::new(car);
+    // This metric measures the (default-off, lab-only) drift hold: switch it on.
+    rig.vehicle.set_drift_tuning(crate::DriftTuning {
+        hold_enabled: true,
+        ..crate::DriftTuning::default()
+    });
     let mut follow = CircleFollower::new(radius);
     let v = (0.6 * GRAVITY_MPS2 * radius).sqrt();
     rig.teleport([0.0; 3], 0.0, v, v / radius);

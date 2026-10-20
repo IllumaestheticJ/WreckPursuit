@@ -10,9 +10,9 @@
 //!   ignition cut. It stands down during a drift hold (row 91 has its own throttle shaping), so
 //!   full throttle held in a slide can still spin a powerful car.
 //!
-//! The smoothing amount is `DriftTuning::throttle_shaping` (drift lab slider); a negative value
-//! means the preset's default ([`default_smoothing`]: keyboard 60 %, gamepad 20 %, wheel 0).
-//! Same in Arcade and Simulation.
+//! The smoothing amount is `DriftTuning::throttle_shaping` (drift lab slider), **default 0 in
+//! every preset** (owner row 104: TCS off means the driver gets the throttle they press; the
+//! lead declined a preset field). Same in Arcade and Simulation.
 
 use wp_contracts::AssistProfile;
 
@@ -25,29 +25,13 @@ const RAMP_FADE_MPS: f32 = 20.0;
 /// Largest pedal-target cut of the traction trim, at full smoothing.
 pub const TRIM_MAX: f32 = 0.35;
 
-/// Smoothing for a preset when the tuning asks for its default: keyboard (steering speed
-/// sensitivity ≥ 0.95) 0.6, gamepad (other sensitivities) 0.2, wheel (0) 0.
-pub fn default_smoothing(assists: &AssistProfile) -> f32 {
-    if assists.steer_speed_sensitivity >= 0.95 {
-        0.6
-    } else if assists.steer_speed_sensitivity > 0.0 {
-        0.2
-    } else {
-        0.0
-    }
-}
-
-/// Smoothing in effect, 0..=1: `tuning` (≥ 0) or the preset default, and 0 with TCS on.
+/// Smoothing in effect, 0..=1: `tuning`, and 0 with TCS on or on the wheel preset (no
+/// steering speed sensitivity).
 pub fn effective_smoothing(assists: &AssistProfile, tuning: f32) -> f32 {
-    if assists.tcs {
+    if assists.tcs || assists.steer_speed_sensitivity <= 0.0 {
         return 0.0;
     }
-    let s = if tuning < 0.0 {
-        default_smoothing(assists)
-    } else {
-        tuning
-    };
-    s.clamp(0.0, 1.0)
+    tuning.clamp(0.0, 1.0)
 }
 
 /// Rise time 0 → full pedal, s, for smoothing `s`, the car's slide class (power × RWD,
@@ -78,22 +62,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn presets_and_tcs() {
+    fn off_by_default_and_with_tcs() {
         let kb = AssistProfile::keyboard_default();
         let off = AssistProfile { tcs: false, ..kb };
-        assert_eq!(effective_smoothing(&kb, -1.0), 0.0, "TCS on does the job");
-        assert_eq!(effective_smoothing(&off, -1.0), 0.6);
-        let gp = AssistProfile {
-            tcs: false,
-            ..AssistProfile::gamepad_default()
-        };
-        assert_eq!(effective_smoothing(&gp, -1.0), 0.2);
+        let d = crate::DriftTuning::default().throttle_shaping;
+        assert_eq!(effective_smoothing(&off, d), 0.0, "raw throttle by default");
+        assert_eq!(effective_smoothing(&kb, 0.6), 0.0, "TCS on does the job");
+        assert_eq!(effective_smoothing(&off, 0.6), 0.6);
         let wheel = AssistProfile {
             tcs: false,
             ..AssistProfile::wheel_default()
         };
-        assert_eq!(effective_smoothing(&wheel, -1.0), 0.0);
-        assert_eq!(effective_smoothing(&off, 0.3), 0.3);
+        assert_eq!(effective_smoothing(&wheel, 0.6), 0.0);
     }
 
     #[test]
