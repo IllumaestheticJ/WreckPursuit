@@ -1,21 +1,29 @@
 # Round-13 test fixes (lead helper) integration notes
 
 - **Workstream / prompt:** lead helper, red tests after round 13 landed on `lead/round12`
-- **Branch:** `lead/r13-test-fixes` (from `origin/lead/round12` @ 53f801c)
+- **Branch:** `lead/r13-test-fixes` (from `origin/lead/round12` @ 53f801c, then merged
+  `origin/lead/round12` @ ecf4d7b as the lead asked)
 - **Crates / folders touched:** `crates/wp_race/tests`, `crates/wp_wasm/src` (test only),
-  `apps/simcli/golden` (`[bless]`)
+  `apps/simcli/golden` (`[bless]` ×2). No sim code: versus `origin/lead/round12` this branch
+  differs only in two test files, the goldens and this doc.
 - **Contract version built against:** 0.3.0 (no contract change)
 
-## Summary
+## Summary (on the merged tip, lead/round12 @ ecf4d7b + this branch)
 
-| Test | Before | After | What was wrong |
-|---|---|---|---|
-| `wp_race` `race_picker::loop9_circuit` | red: 1 of 6 finish (DNF FinishWindow, 2× Captured, 2× Fled) | **green** | The test's assumption (≥ 4 finishers in a race with police). Not an AI pace regression. |
-| `wp_race` `race_picker::lantern_checkpoint_draws_the_police` | red: never finished (2 racers queued forever, 0 gates) | **still red** | A real bug: a deadlock between racers and traffic at a junction. It happens on the pre-round-13 base too, with and without police. Not fixed here (see below). |
-| `wp_wasm` `crash_replay_tests::race_crash_replays_with_the_judge_and_no_crash_on_the_grid` | red: no big crash found | **green** | The test setup: it parked a racer that was not the one in front of the player. |
-| `wp_wasm` `tests::simcli_golden_replays_play_back_in_the_browser_core` | red: `golden_tbone` drift | **green** | Stale goldens: the ws/vehicle merge dropped A's round-13 `[bless]`. Re-blessed. |
+| Test | Status | What was wrong / what changed |
+|---|---|---|
+| `wp_race` `race_picker::loop9_circuit` | **green** | The test's assumption (≥ 4 finishers in a race with police). Split into a police-free pace test (old expectations) and a police-design test. Not an AI pace regression. |
+| `wp_race` `race_picker::loop9_circuit_pace_without_police` | **green** (new) | 5 of 6 + 1 DQ, winner 209.4 s. |
+| `wp_race` `race_picker::lantern_checkpoint_draws_the_police` | **green** (no test change) | Red on 53f801c because of a racer↔traffic junction deadlock (section 1). After the merge of ecf4d7b (ws/world, ws/police, police-radio-v2) all 4 racers end by the police, each after ≥ 2 gates. The deadlock analysis below is still worth D's and N's time: it only stopped showing in this seed. |
+| `wp_race` `race_picker::grid_highway_sprint` (+ `_is_deterministic`) | **red**, police (E) | New with ecf4d7b: a police unit with its siren on, not in any pursuit, stuck in a three-point-turn loop just past the finish for about 80 s. Civilians yield to its siren in the racers' lane. Section 4. Not AI pace. |
+| `wp_wasm` `race_tests::short_sprint_with_ai_runs_to_results_and_pays_through_the_economy` | **red**, police (E) | The same race and the same cause: all 4 autopilot racers held at y ≈ 345–360, 40 m before the finish, from about 60 s to the 120 s limit. |
+| `wp_wasm` `crash_replay_tests::race_crash_replays_with_the_judge_and_no_crash_on_the_grid` | **green** | The test setup: it parked a racer that wasn't the one in front of the player (section 2). |
+| `wp_wasm` `tests::simcli_golden_replays_play_back_in_the_browser_core` | **green** | Stale goldens. Re-blessed (section 3). |
 
-No `wp_vehicle` change was needed. Steering, ride and assists are untouched.
+No `wp_vehicle` change was needed. Steering, ride and assists are untouched. For
+`lead/opponent-pace`: the only AI-only finding is loop9's racer 2 (entity 2) being DQ'd
+(LeftCorridor) at gate 34, progress ≈ 6,920 m, with and without police on the merged tip.
+The loop9 tests allow one racing incident, as the original `check()` did.
 
 ## 1. `wp_race` race picker: AI pace did not regress
 
@@ -64,9 +72,14 @@ test is split. Its pace check is kept at full strength:
 - `run_race_with(id, max_s, presence)` overrides the scenario's police presence.
   `run_race(id, max_s)` is unchanged. The `WP_RACE_*` environment knobs still apply on top.
 
-### `lantern_checkpoint_draws_the_police` (still red: a real deadlock)
+### `lantern_checkpoint_draws_the_police` (red on 53f801c: a real deadlock; green after merging ecf4d7b)
 
-I didn't loosen this test. It fails because the race really does deadlock: two racers sit at
+*Status after merging ecf4d7b: passes unchanged (seed 31). With police: 4 pursuits, all four
+racers end Captured or Fled after 2–5 gates, race judged at 103.9 s. The analysis below is
+from 53f801c. The deadlock pattern is a code problem the new police and traffic only route
+around in this seed, so the requests stand.*
+
+I didn't loosen this test. On 53f801c it fails because the race really does deadlock: two racers sit at
 0 m/s for the remaining ~4.5 minutes. Tracing seed 31 in release (`WP_RACE_TRACE`, plus a
 temporary per-racer tactic/limit dump and traffic-agent dump, removed again):
 
@@ -123,8 +136,7 @@ and flees. Then:
 - **E (`wp_police`):** the pinned-capture rule (4 m for 6 s with a unit within 15 m) captures
   racers who are only stuck in a civilian gridlock. That is fine as a rule (owner: captures by
   design), but combined with N(1) above the captured car blocks the road for good.
-- **L (race):** once the above lands, `lantern_checkpoint_draws_the_police` should pass
-  unchanged. If D's fix is far off, the race catalog could move the Lantern course off the
+- **L (race):** the test passes unchanged on ecf4d7b. If D's fix is far off, the race catalog could move the Lantern course off the
   Central Precinct turn (catalog comment). I didn't do that here because it would hide the
   deadlock rather than fix it.
 
@@ -144,7 +156,9 @@ and flees. Then:
   it is actually behind. Result: square front hits, closing 19.7 / 22.2 / 23.4 m/s and
   Δv 10.3 / 11.3 / 12.0 m/s at 12 / 18 / 24 m. The test keeps 18 m.
 
-## 3. Goldens (`[bless]` e612750)
+## 3. Goldens (`[bless]` e612750, then bb87490)
+
+### First `[bless]` on 53f801c (e612750)
 
 `simcli_golden_replays_play_back_in_the_browser_core` failed on `golden_tbone`. The cause is
 more than one stale golden: merge 5849df0 (ws/vehicle into lead/round12) kept lead's golden
@@ -161,15 +175,68 @@ at tick 1–2, which is the vehicle model.
 - After the bless: `simcli goldens` mismatches only on the unblessed scenario below, and the
   browser-core golden replay test passes.
 
-**Not blessed (scenario fails):** `police/tunnel_escape_founders_cut.ron`. The racer is
+**Not blessed in e612750 (scenario failed on 53f801c; fixed upstream since, see below):**
+`police/tunnel_escape_founders_cut.ron`. The racer is
 `Captured` at 133.8 s; it expects `first_pursuit_end(outcome: Escaped, 105–150 s)`. Owner:
 E/lead. police.md (round 12b gate) lists it as failing on `lead/round12`, "ground units now
 reach the racer parked in the Cut sooner". It has no golden, and I didn't add one.
 
+### Second `[bless]` after merging `origin/lead/round12` @ ecf4d7b (bb87490)
+
+lead/round12's own `[bless]` 3c238cc was followed by merges that change the sim:
+- 9daf91b ws/damage (Arcade tuning);
+- 80c07fc ws/panels (meshes);
+- 7834577 ws/testbed (`wp_sim` physics);
+- 0bd1457 ws/world (traffic, density, parking);
+- 93ffe3c police-radio-v2 and c79c9fe ws/police (dispatch, pursuit, unit).
+
+So 45 goldens mismatched on the tip. I resolved the golden merge conflicts by taking
+upstream's files, then ran `simcli run apps/simcli/scenarios`: **85 of 86 pass**. Then
+`goldens --bless`. Each merge's effect is in the commit message.
+
+**Not blessed:** `city/siren_traffic_no_siren.ron`, `civilian_collisions` 1 (want 0). It fails
+on `origin/lead/round12` itself (this branch has no sim changes), and its golden stays at
+lead/round12's version. Owner: D. `police_tunnel_escape_founders_cut` passes again after
+b2b8845 re-stated it, so it is blessed now.
+
+## 4. Grid highway sprint: a police unit in a turn-round loop blocks the finish (E)
+
+Merged tip, release, seed 7, `race_picker::grid_highway_sprint`:
+- **With police:** winner 125.9 s and one racer never finishes, so the race is never judged.
+  On 53f801c the winner took 54.0 s and the test passed.
+- **Police presence 0:** winner 60.0 s, 3 finish plus 1 DQ, test passes.
+
+Trace (temporary dumps of vehicles and agents around (6, 370), removed again):
+- From about 50 s, police **entity 40** (siren **on**, no racer in pursuit: `pursuits 0`) is at
+  the junction just past the finish, ≈ (0, 380).
+- For about 85 s it alternates forward and reverse with full lock (`steer ±1`, speed
+  −2.7 … +5 m/s), position wandering between x −8.8 and +7.7, y 374 and 389. A three-point
+  turn that never completes.
+- The two civilians directly ahead of the racers (agents 2 and 34, physical, at y 369 in both
+  southbound lanes) stop with `yielding: true` to its siren for the whole time.
+- The racers queue behind them, limited by `Obstacle(civilian)`, 40 m short of the finish.
+- At about 125 s the unit gets out, the civilians move, three racers finish within 2 s, and
+  the fourth is left `Running` at gate 3. That last part is the test failure.
+
+`wp_wasm` `race_tests::short_sprint_with_ai_…` (all-autopilot session of the same race) shows
+the same hold at y ≈ 345–360 from about 60 s to its 120 s limit, so it panics "race not over".
+
+**For E (`wp_police`):**
+1. A unit's turn-round (round 13: "stop and three-point, or carry on to a junction") must
+   finish or give up. This one alternated for 85 s. A cap of a few tries, then carry on to the
+   next junction or re-route, would do.
+2. Why does an idle or responding unit run its siren here with no pursuit? Most likely a
+   reckless-driving response to the race (round-12b dispatch). Civilians yield to any siren
+   (D's `siren` module), so a stuck unit with its siren on freezes traffic around it.
+
+I didn't change the race tests for this. Winner 15–60 s and ≥ 3 finishers is still the right
+expectation once the unit stops looping.
+
 ## Needs
-- D, N, E: the lantern deadlock items above.
-- E / lead: re-aim `police/tunnel_escape_founders_cut.ron` for round-13 police, or confirm the
-  capture is now correct and change the expectation.
+- E: the turn-round loop and siren in section 4 (grid_highway_sprint, wasm short_sprint).
+- D: `city_siren_traffic_no_siren` civilian collision (red on lead/round12).
+- D, N, E: the lantern deadlock items in section 1 (currently masked in seed 31).
+- lead/opponent-pace: loop9 racer 2 LeftCorridor DQ at gate 34.
 
 ## Contract change requests
 None.
@@ -178,11 +245,12 @@ None.
 - `crates/wp_race/tests/race_picker.rs` (L's test): `run_race_with`, `loop9_circuit` split
   into a police-free pace test plus a police-design test.
 - `crates/wp_wasm/src/crash_replay_tests.rs` (test only): park the nearest AI racer.
-- `apps/simcli/golden/*`: `[bless]` (lead-owned goldens).
+- `apps/simcli/golden/*`: `[bless]` e612750 and bb87490 (lead-owned goldens).
 
 ## Known gaps
-- `lantern_checkpoint_draws_the_police` stays red until the deadlock is fixed (above).
-- `police_tunnel_escape_founders_cut` scenario stays red (E / lead).
+- `grid_highway_sprint` (+ `_is_deterministic`) and `wp_wasm` `short_sprint_with_ai_…` stay
+  red until E's fix (section 4).
+- `city_siren_traffic_no_siren` scenario stays red (D).
 - `loop9_circuit` accepts `FinishWindow` for racers the police held up. It does not tell that
   apart from a slow AI; the police-free pace test covers that.
 
