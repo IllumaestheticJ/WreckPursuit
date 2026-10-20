@@ -232,6 +232,16 @@ what untouched ae313e2 fails: `simcli` `goldens_match`, `wp_race::race_picker`
 `race_crash_replays_with_the_judge_and_no_crash_on_the_grid` (the `wp_vehicle`, `wp_audio` and
 browser-replay failures above are gone with the round12 merge).
 
+## Reusing the measurement (Drift Lab W and later models)
+
+`wp_vehicle::twitch_lab` only uses the public rig / chassis / telemetry API, so it measures any
+steering model: `twitch_run(car, assists, ramp, case)` → `Twitch` (reversals/s, peak rack °/s,
+snap % while not sliding, yaw overshoot, settle, path error). Raw keyboard input (no input
+ramp) is `KeyRamp { up: 1000.0, down: 1000.0, reverse_from_centre: false }`, or
+`RAMP=1000,1000 cargo run --release -p wp_vehicle --example drift_twitch`. To compare with an
+older branch, copy `twitch_lab.rs` into its `src/` (plus `pub mod twitch_lab;`) and the
+example; that is how the main / round12 columns above were made.
+
 ## Contract change requests
 
 None. (The two from drift-lab-b.md still stand: an explicit `AssistProfile.device`, and
