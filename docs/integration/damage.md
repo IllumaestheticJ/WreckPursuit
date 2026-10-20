@@ -617,6 +617,13 @@ see round 8), `arcade_mechanical_min_closing_mps` 11.5, settle. `sim.toml` untou
   `opponent_*` ×4, `panels_frontal_56_hood`, `police_sideswipe_patrol_*`, `race_*` ×5,
   `weather_*` ×5, `world_traffic_soak*` ×4). I did not bless them (not my changes to vouch
   for); `goldens_match` stays red until the lead re-blesses them after merging.
+- Checks (2026-10-20): fmt, clippy `-D warnings`, wasm build of `wp_wasm` clean; `wp_damage`
+  tests + barrier scenarios and simcli `all_scenarios_pass…` green. `cargo test --workspace
+  --no-fail-fast` red only on things that are equally red on `lead/round12` without my commits
+  (checked on a base build): `goldens_match` (the 29 above), `wp_race`
+  `grid_highway_sprint`, `wp_sim` `vesper_v2_cars_drive_up_the_kerb_and_along_the_sidewalk`,
+  `wp_wasm` `race_tests::{short_sprint_with_ai…, a_capture_mid_race…}`.
+
 ### Contract change request #10 (new, lead)
 `ModeTable::{alignment_scale: f32, structural_health_scale: f32, failed_steer_ratio: f32}`
 (Sim 1.0 / 1.0 / 0.3, Arcade 0.09 / 0.5 / 0.5). Today `DamageTuning::arcade_*` gated on
