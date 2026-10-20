@@ -201,6 +201,8 @@ await page.click("#gm-tcs");
 await page.click("#gm-tcs");
 const back = await page.evaluate(() => [window.__wp.menu.settings.assists.abs, window.__wp.menu.settings.assists.tcs]);
 check(back[0] === "Half" && back[1] === "Off", `cycles step through every level (${back})`);
+// Park the mouse: a pointer left over the menu would take the focus of whatever renders there.
+await page.mouse.move(0, 0);
 const cstr = await page.evaluate(() => document.getElementById("gm-cstr")?.disabled);
 check(cstr === false, "countersteer slider enabled (wasm set_countersteer, owner row 57)");
 await shot("menu_settings.png");
