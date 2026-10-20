@@ -1,0 +1,7 @@
+# simcli hashes scenario=parity_rampart_launch_tcs_off systems=world,vehicle,damage,police,net hash_spec=3 contract=0.3.0
+240 973e99fd1fe1eb70
+480 29aa200106406227
+720 79c1cd1b9646a239
+960 a9c2785c84209ec7
+1200 feda3a3485ec521b
+1440 7bc91b3964081935
