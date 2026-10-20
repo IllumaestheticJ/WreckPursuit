@@ -22,6 +22,55 @@ record, so H can judge setup changes against measurements (`cargo run --release 
   knob for "RWD rotates at the limit", not bars.
 - VALIDATION skidpad / 0-100 / 100-0 are not changed by this branch (metric runs are
   bit-identical), so not re-collected here.
+## Lead follow-up 2 (2026-10-20) — beater after A's ride + countersteer work
+
+Merged `origin/lead/round12` at `7a2f19b`. Lead: `front_drive_cars_understeer_mildly` failed
+(beater 1.602 °/g) on the combined tree. Band unchanged.
+
+**What the merge did to the beater:** A's ride commit edited all 19 car JSONs directly from
+an older checkout. The beater's suspension block came in with its *pre-retune* springs and travel
+(20 900 / 15 500 N/m, 0.15 / 0.16 m) and a preload computed for those, so the soft worn setup
+from my round-12b retune was gone. Running `build_roster.py` would have wiped A's work on
+every car the other way round.
+
+**Fix in the source of truth (`tools/specsheet/`):** `build_roster.py` now applies A's
+round-12b rules (section "Round 12b (A)" below): derived dampers × 1.2 bump / × 1.6 rebound,
+handbrake ≥ 1.5 × the static rear lock torque (`handbrake_nm`), and preload may be a
+`(front, rear)` pair in `roster_inputs.py` (A's measured values on drayman_cargo, furrow_24,
+ironside_440, tansy_13). Regenerating now reproduces A's data **byte-for-byte on all 18 other
+cars**. A's rules are mirrored in the spec sheets and `VALIDATION.md`, as A asked.
+
+**Beater** (`roster_inputs.py`), checked with `cargo run --release -p wp_vehicle --example ride all`:
+
+| Change | Why |
+|---|---|
+| ζ 0.14 → **0.18** (→ 0.21 bump / 0.42 rebound after A's scale) | `tests/ride.rs` floor ζ_bump ≥ 0.2; at 0.14 it flew 0.49 s and rose 0.60 m off the 15 cm kerb at 60 km/h. Still the softest dampers in the roster. |
+| preload 0.01 → **0.11 F / 0.08 R** | it sat on its front bump stops (0 mm free); now 72 / 80 mm = 45 % / 47 % of travel |
+| camber −1.0 / −0.5 → **−1.3 / 0°**, rear toe +0 → **−0.15°** (toe-out), roll split 0.60 → **0.70** (rear bar 0: many 80s economy front-drivers had none) | understeer back to ~1.5 °/g; camber alone moved < 0.05, toe-out −0.08, roll split −0.06 |
+
+Result: **1.52 °/g** (band 0.25–1.6; still the most understeery front-driver), skidpad 0.69 g
+(skidpad gradient +0.08 °/g: no limit oversteer), 0-100 **15.5 s**, Vmax 146 km/h, 100-0 46.5 m,
+roll 6.3 °/g, barriers 8/8. Ride: never airborne on the 10 or 15 cm kerb at 60 km/h (rise 0.088 m),
+no lift on the rounded crest. `wp_vehicle` `ride`, `handling_balance`, `slide_control`,
+`differentials` pass; nameplate, `smoke_sim`, `pursuit_probe` (cruiser catches it in 5.0 s),
+3 `cars/` scenarios pass. `[bless]`: `roster_diff_hashes_are_pinned` junkyard_beater
+`0x72a8eef4cb8c2001 → 0xbe54b8910b0c86e8` (others unchanged) and the three `cars_beater_*` goldens.
+
+**Gate (ws/cars `1af33b4` + this doc):** clippy `-D warnings` ✓, wasm build ✓. `cargo fmt --check`
+fails only on `crates/wp_vehicle/src/lib.rs` (`pub mod ride;` sorted after `presets`), identical
+on `7a2f19b` (A / lead; not touched here). `cargo test --workspace --no-fail-fast`: 145 binaries
+ok; every failure also fails with the base's own beater file (`7a2f19b`) swapped in:
+`wp_audio rev_matched_downshifts_blip` (J), `wp_race race_picker::{loop9_circuit,
+lantern_checkpoint_draws_the_police}` (L / N), `wp_wasm crash_replay_tests::race_crash_replays_…`
+and `tests::simcli_golden_replays_play_back_in_the_browser_core`, and `simcli goldens_match`:
+standalone debug `simcli goldens` lists the **same 49 failures** with either beater, none of
+them `cars_*` (crash, damage, panels, golden, city, race, police, weather: the round-12b ride
+work needs a lead re-bless).
+
+**For A:** the ride rules now live in `build_roster.py`. Next time, change `roster_inputs.py`
+or the constants there (`RIDE_BUMP_SCALE`, `RIDE_REBOUND_SCALE`, `HANDBRAKE_LOCK_MARGIN`)
+instead of the JSON, or tell me and I regenerate.
+
 ## Lead follow-up round 12b (2026-10-20) — beater understeer gradient
 
 Gate on `lead/round12`: `wp_vehicle/tests/handling_balance.rs::front_drive_cars_understeer_mildly`
@@ -47,14 +96,14 @@ Re-recorded in a `[bless]` commit: the beater's pinned hash in
 goldens. Note for the helper: the comment in `front_drive_cars_understeer_mildly` still says
 "the junkyard beater 1.42"; it is 1.50 now.
 
-**Debug ≠ release hashes on this base (→ lead / A).** Any scenario with steering now hashes
-differently in debug and release builds: base `vehicle/coupe_slalom` and `smoke/coupe_circle` too
-(their goldens match **debug**), and my `cars_beater_hard_turn` (it matched both builds in
-my first 12b run, before the round-12 handling-balance merge). Following the base, that golden is
-blessed with the **debug** binary (`cargo test`'s `goldens_match`); `beater_accel` and
-`beater_top_speed` are identical in both builds. CI's release `simcli goldens` job will
-therefore flag `cars_beater_hard_turn` together with the base steering scenarios until the
-split is fixed or everything is re-blessed from one build.
+**Correction (2026-10-20): there is no debug/release hash split.** An earlier version of this
+section reported that steering scenarios hash differently in debug and release builds. That was
+my measuring error: the release `simcli` binary was stale, built before the `c982c82` merge,
+while the debug one was current. After `cargo build --release -p simcli` on the same commit,
+`vehicle/coupe_slalom`, `smoke/coupe_circle` and all three `cars_beater_*` scenarios hash
+identically in both builds, and release `simcli goldens` fails on exactly the same 33 base
+scenarios as debug (none of them `cars_*`). The `cars_beater_hard_turn` golden is valid for
+both builds and CI's release goldens job.
 *Lead (2026-10-20, `lead/det-debug-release`): resolved — there is no split; the release
 binary was stale (built before the handling-balance merge). Fresh debug and release builds hash
 identically and `cars_beater_hard_turn` passes in both. See harness.md "Lead helper: debug vs
