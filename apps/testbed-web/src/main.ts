@@ -133,9 +133,7 @@ async function main(): Promise<void> {
   // Traffic / police at every LOD: instanced fleet + hand-over to full views (render/lod.ts).
   const lod = new LodDirector();
   scene.world.add(lod.fleet.group);
-  // Phones / tablets draw less traffic (render/quality.ts touch profile).
-  lod.trafficDrawM = scene.quality.trafficDrawM;
-  lod.fleet.fullLodM = scene.quality.fullLodM;
+
   // On-screen touch controls (src/touch.ts): shown on touch devices, read through readInput.
   const touch = installTouch();
   const controls = new ControlsPanel(overlay);
@@ -145,9 +143,20 @@ async function main(): Promise<void> {
   $("controls-open").onclick = () => controls.toggle();
   // Parked cars and cones (playtest row 50): every physical prop is drawn (render/props.ts).
   const props = new PropView();
-  props.fullLodM = scene.quality.fullLodM;
-  props.maxFull = scene.quality.propFullMax;
-  props.drawM = scene.quality.propDrawM;
+  // LOD distances from the graphics quality (render/quality.ts: shorter in the low and touch
+  // profiles); re-applied when the menu changes the level.
+  const applyLod = () => {
+    const q = scene.quality;
+    lod.trafficDrawM = q.trafficDrawM;
+    lod.viewDrawM = q.viewDrawM;
+    lod.fleet.fullLodM = q.fullLodM;
+    props.fullLodM = q.fullLodM;
+    props.maxFull = q.propFullMax;
+    props.drawM = q.propDrawM;
+    props.proxyM = q.propProxyM;
+  };
+  applyLod();
+  scene.quality.onChange = applyLod;
   scene.world.add(props.group);
   // Spike strips on the road (playtest row 88).
   const policeTools = new PoliceToolsView();
@@ -332,6 +341,7 @@ async function main(): Promise<void> {
   };
 
   const rebuildViews = () => {
+    scene.warmLightVariants();
     crash.reset();
     for (const v of app.views.values()) v.dispose();
     app.views.clear();
@@ -1005,6 +1015,7 @@ async function main(): Promise<void> {
   let simMs = 0;
   let renderMs = 0;
   let frameNo = 0;
+  let fxCompiled = false;
   const rtf = new RealTimeMeter();
   const sirenPos = new THREE.Vector3();
   const NO_TEL = new Float32Array(0);
@@ -1179,6 +1190,13 @@ async function main(): Promise<void> {
     style.update(dt, wi[W.hours], wi[W.night], wx[0] > 0.5 ? wx[7] : 1, { on: wx[0] > 0.5, cloud: wx[6] }, rig.camera, cityId);
     const r0 = performance.now();
     scene.render(rig.camera);
+    // Crash effects stay hidden until the first crash: compile their shaders now (after a few
+    // frames, once the art style has set the fog and lights they will be drawn with), not
+    // mid-chase.
+    if (!fxCompiled && frameNo > 2) {
+      fxCompiled = true;
+      scene.precompile(fx.group, rig.camera);
+    }
     const r1 = performance.now();
     prof.lap("render");
     renderMs += (r1 - r0 - renderMs) * 0.1;
