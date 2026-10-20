@@ -953,3 +953,11 @@ on" (rows 61–62; E is adding siren units pushing through stuck traffic on ws/p
    them within ~10 s; with sirens off they don't yield. Same in both damage modes.
 5. Keep the 400-agent traffic budget (≤ 2 ms native).
 
+## Lead helper: junction holes (branch `lead/fix-junction-holes`, 2026-10-20, playtest rows 46, 51)
+Changes in your crate are confined to `surface.rs` and the new `surface/nodes.rs`:
+`node_patches` (junction surfaces, bend strips, dead-end turnarounds sharing the ribbons' end
+edges), `surface_ribbon`, exact sidewalk corner fills, strip pull-back, and tests. The greybox
+now draws the surface ribbons. Full write-up, numbers and the items left for you (node 81's
+overlapping roads, turning paths through building lots at nodes 78 / 97, junction heights on
+saddles): `docs/integration/junctions.md`. Please merge `lead/fix-junction-holes` into
+`ws/world` once the lead has merged it.

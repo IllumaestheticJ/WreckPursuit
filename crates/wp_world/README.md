@@ -13,7 +13,7 @@ clock. Implements `wp_contracts::WorldQuery`. No renderer dependency; compiles f
 | `procgen` | Procedural fallback city (grid + ring + highway spine + 2 diagonals), flat |
 | `vesper` | Port Vesper v2 (`vesper_v2`): curved streets, hills, terrain, banked highway loop, grade separations |
 | `terrain` | `Heightfield` (stored with the network), value noise, bumps |
-| `surface` | Road trimesh, raised sidewalks + kerbs (`sidewalk_mesh`), junction discs, deck rails — one geometry for physics and the greybox; `MapGround` wheel probe |
+| `surface` | Road trimesh (`road_mesh`: banked surface ribbons + `node_patches` — junction surfaces, bend strips, dead-end turnarounds sharing the ribbons' end edges), raised sidewalks + kerbs (`sidewalk_mesh`, exact corner fills along the kerb curves), deck rails — one geometry for physics and the greybox; `MapGround` wheel probe |
 | `map` | Runtime map: connector curves, conflict sets, uniform-grid index, `WorldQuery` (incl. building line of sight) |
 | `surface` | Road trimesh for physics/greybox, deck rails, `MapGround` wheel probe |
 | `map` | Runtime map: connector curves, conflict sets, uniform-grid index, `WorldQuery` (incl. building, terrain and tunnel line of sight) |
@@ -470,6 +470,13 @@ aggressive: 0 civilian–civilian collisions (`tests/city_v2.rs`, ignored).
 - City v2: `WorldQuery::surface_at` and `CityMap::ground_height` project onto whole lane
   polylines (≈ 0.5 µs on the curved city); terrain LOS samples every 8 m.
 - `CityMap::ground_height` / `MapGround` do not know the raised sidewalks (roads, junctions,
-  terrain only); `wp_sim` lifts spawns onto a sidewalk top under them. Corner fills and trims
-  follow pavement in 0.5 m steps (a sidewalk edge can overhang the outer rim of a junction
-  disc by up to ~0.35 m; never a lane or turning path — tested).
+  terrain only); `wp_sim` lifts spawns onto a sidewalk top under them. Corner fills follow
+  the kerb curve exactly (`docs/integration/junctions.md`); only where a sidewalk end lies
+  along the kerb curve or between overlapping roads (one corner of Port Vesper, node 81,
+  reported in `SidewalkMesh::cell_corners`)
+  and where a strip runs onto pavement mid-strip does the edge follow pavement in 0.5 m steps.
+  A sidewalk ending next to a road without one (highways) leaves a tapering wedge of ground
+  ≤ 30 cm wide at the corner (counted in `surface::tests`).
+- Junction surfaces lie on a plane through the arriving ribbon corners: turning paths (linear
+  between their lane ends) are within 0.15 m of it (0.17 m at the one junction whose ribbon
+  ends overlap, Port Vesper node 81, where the ribbons lie on the patch at their own heights).
